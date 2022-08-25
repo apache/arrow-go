@@ -19,5 +19,8 @@ package arrow
 import "errors"
 
 var (
-	ErrInvalid = errors.New("invalid")
+	ErrInvalid        = errors.New("invalid")
+	ErrNotImplemented = errors.New("not implemented")
+	ErrType           = errors.New("type error")
+	ErrKey            = errors.New("key error")
 )
