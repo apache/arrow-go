@@ -14,11 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package exec
-
-// ADAPTED FROM HASH UTILITIES FOR BOOST
-
-func HashCombine(seed, value uint64) uint64 {
-	seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2)
-	return seed
-}
+// Package kernels defines all of the computation kernels for the compute
+// library. This requires >= go1.18 since it utilizes Go generics.
+package kernels
