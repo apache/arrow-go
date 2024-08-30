@@ -29,9 +29,11 @@ github:
     squash: true
   features:
     issues: true
-  protected_branches:
-    main:
-      required_linear_history: true
+  # GH-1: Enable force push temporary
+  protected_branches: ~
+  # protected_branches:
+  #   main:
+  #     required_linear_history: true
 
 notifications:
   commits: commits@arrow.apache.org
