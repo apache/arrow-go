@@ -23,6 +23,7 @@ github:
   labels:
     - apache-arrow
     - go
+  del_branch_on_merge: true
   enabled_merge_buttons:
     merge: false
     rebase: false
