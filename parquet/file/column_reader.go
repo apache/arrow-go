@@ -21,13 +21,13 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/apache/arrow/go/v18/arrow/memory"
-	"github.com/apache/arrow/go/v18/internal/utils"
-	"github.com/apache/arrow/go/v18/parquet"
-	"github.com/apache/arrow/go/v18/parquet/internal/encoding"
-	"github.com/apache/arrow/go/v18/parquet/internal/encryption"
-	format "github.com/apache/arrow/go/v18/parquet/internal/gen-go/parquet"
-	"github.com/apache/arrow/go/v18/parquet/schema"
+	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/internal/utils"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
+	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
+	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
+	"github.com/apache/arrow-go/v18/parquet/schema"
 	"golang.org/x/xerrors"
 )
 

@@ -21,10 +21,10 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
-	"github.com/apache/arrow/go/v18/internal/json"
-	"github.com/apache/arrow/go/v18/parquet/schema"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/internal/json"
+	"github.com/apache/arrow-go/v18/parquet/schema"
 )
 
 var jsonSupportedStorageTypes = []arrow.DataType{

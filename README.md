@@ -20,7 +20,7 @@
 Apache Arrow for Go
 ===================
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/apache/arrow/go/v18.svg)](https://pkg.go.dev/github.com/apache/arrow/go/v18)
+[![Go Reference](https://pkg.go.dev/badge/github.com/apache/arrow-go/v18.svg)](https://pkg.go.dev/github.com/apache/arrow-go/v18)
 
 [Apache Arrow][arrow] is a cross-language development platform for in-memory
 data. It specifies a standardized language-independent columnar memory format
@@ -101,12 +101,12 @@ Disable no architecture optimizations (thus using AVX2):
 $ INTEL_DISABLE_EXT=NONE go test -bench=8192 -run=. ./math
 goos: darwin
 goarch: amd64
-pkg: github.com/apache/arrow/go/arrow/math
+pkg: github.com/apache/arrow-go/arrow/math
 BenchmarkFloat64Funcs_Sum_8192-8   	 2000000	       687 ns/op	95375.41 MB/s
 BenchmarkInt64Funcs_Sum_8192-8     	 2000000	       719 ns/op	91061.06 MB/s
 BenchmarkUint64Funcs_Sum_8192-8    	 2000000	       691 ns/op	94797.29 MB/s
 PASS
-ok  	github.com/apache/arrow/go/arrow/math	6.444s
+ok  	github.com/apache/arrow-go/arrow/math	6.444s
 ```
 
 **NOTE:** `NONE` is simply ignored, thus enabling optimizations for AVX2 and SSE4
@@ -119,12 +119,12 @@ Disable AVX2 architecture optimizations:
 $ INTEL_DISABLE_EXT=AVX2 go test -bench=8192 -run=. ./math
 goos: darwin
 goarch: amd64
-pkg: github.com/apache/arrow/go/arrow/math
+pkg: github.com/apache/arrow-go/arrow/math
 BenchmarkFloat64Funcs_Sum_8192-8   	 1000000	      1912 ns/op	34263.63 MB/s
 BenchmarkInt64Funcs_Sum_8192-8     	 1000000	      1392 ns/op	47065.57 MB/s
 BenchmarkUint64Funcs_Sum_8192-8    	 1000000	      1405 ns/op	46636.41 MB/s
 PASS
-ok  	github.com/apache/arrow/go/arrow/math	4.786s
+ok  	github.com/apache/arrow-go/arrow/math	4.786s
 ```
 
 ----
@@ -135,12 +135,12 @@ Disable ALL architecture optimizations, thus using pure Go implementation:
 $ INTEL_DISABLE_EXT=ALL go test -bench=8192 -run=. ./math
 goos: darwin
 goarch: amd64
-pkg: github.com/apache/arrow/go/arrow/math
+pkg: github.com/apache/arrow-go/arrow/math
 BenchmarkFloat64Funcs_Sum_8192-8   	  200000	     10285 ns/op	6371.41 MB/s
 BenchmarkInt64Funcs_Sum_8192-8     	  500000	      3892 ns/op	16837.37 MB/s
 BenchmarkUint64Funcs_Sum_8192-8    	  500000	      3929 ns/op	16680.00 MB/s
 PASS
-ok  	github.com/apache/arrow/go/arrow/math	6.179s
+ok  	github.com/apache/arrow-go/arrow/math	6.179s
 ```
 
 [arrow]:    https://arrow.apache.org
