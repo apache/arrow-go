@@ -28,3 +28,17 @@ repos:
           # The default args is "--write --simplify" but we don't use
           # "--simplify". Because it's conflicted will ShellCheck.
           - "--write"
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v1.60.3
+    hooks:
+      # no built-in support for multiple go.mod
+      # https://github.com/golangci/golangci-lint/issues/828
+      - id: golangci-lint-full
+        name: golangci-lint-full-arrow
+        entry: bash -c 'cd arrow && golangci-lint run --timeout=5m'
+      - id: golangci-lint-full
+        name: golangci-lint-full-parquet
+        entry: bash -c 'cd parquet && golangci-lint run'
+      - id: golangci-lint-full
+        name: golangci-lint-full-internal
+        entry: bash -c 'cd internal && golangci-lint run'
