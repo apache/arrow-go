@@ -19,6 +19,8 @@ name: Test
 
 on:
   push:
+    branches-ignore:
+      - 'dependabot/**'
   pull_request:
 
 concurrency:
