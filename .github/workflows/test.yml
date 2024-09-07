@@ -53,10 +53,6 @@ jobs:
       - name: Install bash via Homebrew
         run: |
           brew install bash
-      - name: Install staticcheck
-        run: |
-          . .env
-          go install honnef.co/go/tools/cmd/staticcheck@${STATICCHECK}
       - name: Build
         run: |
           $(brew --prefix)/bin/bash ci/scripts/build.sh $(pwd)

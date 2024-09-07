@@ -2412,7 +2412,7 @@ func (m *flightSqlExtensionScenarioTester) ValidateStatementExecution(client *fl
 		return err
 	}
 
-	//lint:ignore SA1019 for backward compatibility
+	//nolint:staticcheck,SA1019 for backward compatibility
 	cancelResult, err := client.CancelQuery(ctx, info)
 	if err != nil {
 		return err

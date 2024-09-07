@@ -47,13 +47,6 @@ MINGW*)
   ;;
 esac
 
-# Go static check (skipped in MinGW)
-if [[ -z "${MINGW_LINT:-}" ]]; then
-  pushd "${source_dir}"
-  "$(go env GOPATH)"/bin/staticcheck ./...
-  popd
-fi
-
 pushd "${source_dir}/arrow"
 
 : "${ARROW_GO_TESTCGO:=}"
