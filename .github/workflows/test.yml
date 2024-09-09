@@ -16,25 +16,83 @@
 # under the License.
 
 name: Test
-
 on:
   push:
     branches-ignore:
       - 'dependabot/**'
   pull_request:
-
 concurrency:
   group: ${{ github.repository }}-${{ github.head_ref || github.sha }}-${{ github.workflow }}
   cancel-in-progress: true
-
 permissions:
   contents: read
-
 jobs:
+  docker-targets:
+    name: Docker targets
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.detect-targets.outputs.targets }}
+    steps:
+      - name: Detect targets
+        id: detect-targets
+        run: |
+          echo "targets<<JSON" >> "$GITHUB_OUTPUT"
+          echo "[" >> "$GITHUB_OUTPUT"
+          cat <<JSON >> "$GITHUB_OUTPUT"
+          {
+            "arch-label": "AMD64",
+            "arch": "amd64",
+            "go": "1.22",
+            "runs-on": "ubuntu-latest"
+          },
+          {
+            "arch-label": "AMD64",
+            "arch": "amd64",
+            "go": "1.23",
+            "runs-on": "ubuntu-latest"
+          }
+          JSON
+          echo "]" >> "$GITHUB_OUTPUT"
+          echo "JSON" >> "$GITHUB_OUTPUT"
+  docker:
+    name: ${{ matrix.arch-label }} Debian 12 Go ${{ matrix.go }}
+    needs: docker-targets
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.docker-targets.outputs.targets) }}
+    env:
+      ARCH: ${{ matrix.arch }}
+      GO: ${{ matrix.go }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          submodules: recursive
+      - name: Login to GitHub Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull
+        run: |
+          docker compose pull debian-go || :
+      - name: Test
+        run: |
+          docker compose run debian-go
+      - name: Push
+        if: >-
+          success() && github.event_name == 'push' && github.repository == 'apache/arrow-go' && github.ref_name == 'main'
+        continue-on-error: true
+        run: |
+          docker compose push debian-go
   macos:
     name: AMD64 macOS 12 Go ${{ matrix.go }}
     runs-on: macos-12
-    timeout-minutes: 30
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -61,11 +119,10 @@ jobs:
       - name: Test
         run: |
           $(brew --prefix)/bin/bash ci/scripts/test.sh $(pwd)
-
   windows:
     name: AMD64 Windows 2019 Go ${{ matrix.go }}
     runs-on: windows-2019
-    timeout-minutes: 25
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
