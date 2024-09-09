@@ -25,6 +25,5 @@ linters:
     - gofmt
     - goimports
     - staticcheck
-
 issues:
   fix: true

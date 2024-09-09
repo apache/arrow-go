@@ -19,13 +19,6 @@
 
 set -eux
 
-# simplistic semver comparison
-verlte() {
-  [ "$1" = "$(echo -e "$1\n$2" | sort -V | head -n1)" ]
-}
-
-ver=$(go env GOVERSION)
-
 source_dir=${1}
 
 case "$(uname)" in
@@ -34,14 +27,15 @@ MINGW*)
   test_args=()
   ;;
 *)
-  if [[ "$(go env GOHOSTARCH)" == "s390x" ]]; then
+  if [[ "$(go env GOHOSTARCH)" = "s390x" ]]; then
     # -race and -asan not supported on s390x
     test_args=()
   else
-    test_args=("-race")
-    if verlte "1.18" "${ver#go}" && [ "$(go env GOOS)" != "darwin" ]; then
-      # asan not supported on darwin/amd64
-      test_args+=("-asan")
+    if [[ "$(go env GOOS)" = "darwin" ]]; then
+      # -asan not supported on darwin/amd64
+      test_args=("-race")
+    else
+      test_args=("-asan")
     fi
   fi
   ;;

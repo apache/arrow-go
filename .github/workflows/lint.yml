@@ -16,20 +16,16 @@
 # under the License.
 
 name: Lint
-
 on:
   push:
     branches-ignore:
       - 'dependabot/**'
   pull_request:
-
 concurrency:
   group: ${{ github.repository }}-${{ github.head_ref || github.sha }}-${{ github.workflow }}
   cancel-in-progress: true
-
 permissions:
   contents: read
-
 jobs:
   lint:
     name: Lint

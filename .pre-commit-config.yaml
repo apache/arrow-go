@@ -16,18 +16,6 @@
 # under the License.
 
 repos:
-  - repo: https://github.com/koalaman/shellcheck-precommit
-    rev: v0.10.0
-    hooks:
-      - id: shellcheck
-  - repo: https://github.com/scop/pre-commit-shfmt
-    rev: v3.9.0-1
-    hooks:
-      - id: shfmt
-        args:
-          # The default args is "--write --simplify" but we don't use
-          # "--simplify". Because it's conflicted will ShellCheck.
-          - "--write"
   - repo: https://github.com/golangci/golangci-lint
     rev: v1.60.3
     hooks:
@@ -42,3 +30,19 @@ repos:
       - id: golangci-lint-full
         name: golangci-lint-full-internal
         entry: bash -c 'cd internal && golangci-lint run'
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.10.0
+    hooks:
+      - id: shellcheck
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.9.0-1
+    hooks:
+      - id: shfmt
+        args:
+          # The default args is "--write --simplify" but we don't use
+          # "--simplify". Because it's conflicted will ShellCheck.
+          - "--write"
+  - repo: https://github.com/google/yamlfmt
+    rev: v0.13.0
+    hooks:
+      - id: yamlfmt

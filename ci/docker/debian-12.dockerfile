@@ -15,26 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# https://cwiki.apache.org/confluence/display/INFRA/Git+-+.asf.yaml+features
+ARG arch=amd64
+ARG go=1.22.6
+FROM ${arch}/golang:${go}-bookworm
 
-github:
-  description: "Official Go implementation of Apache Arrow"
-  homepage: https://arrow.apache.org/
-  labels:
-    - apache-arrow
-    - go
-  del_branch_on_merge: true
-  enabled_merge_buttons:
-    merge: false
-    rebase: false
-    squash: true
-  features:
-    issues: true
-  protected_branches:
-    main:
-      required_linear_history: true
-notifications:
-  commits: commits@arrow.apache.org
-  issues_status: issues@arrow.apache.org
-  issues_comment: github@arrow.apache.org
-  pullrequests: github@arrow.apache.org
+# Copy the go.mod and go.sum over and pre-download all the dependencies
+COPY . /arrow-go
+RUN cd /arrow-go && go mod download
