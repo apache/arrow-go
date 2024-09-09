@@ -166,8 +166,6 @@ jobs:
           cache-dependency-path: go.sum
       - name: Build
         run: GOARCH=386 go build ./...
-        working-directory: ./go
       - name: Test
         # WIP refactor, only tests in the specified dirs have been fixed
         run: GOARCH=386 go test ./parquet/file/...
-        working-directory: ./go
