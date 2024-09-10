@@ -22,30 +22,31 @@ set -ex
 source_dir=${1}
 
 if [ -n "${ARROW_PYTHON_VENV:-}" ]; then
+  # shellcheck disable=SC1091
   . "${ARROW_PYTHON_VENV}/bin/activate"
 fi
 
 export GOFLAGS="${GOFLAGS} -gcflags=all=-d=checkptr"
 
-pushd ${source_dir}/arrow/cdata/test
+pushd "${source_dir}/arrow/cdata/test"
 
 case "$(uname)" in
-    Linux)
-        testlib="cgotest.so"
-        ;;
-    Darwin)
-        testlib="cgotest.so"
-        ;;
-    MINGW*)
-        testlib="cgotest.dll"
-        ;;
+Linux)
+  testlib="cgotest.so"
+  ;;
+Darwin)
+  testlib="cgotest.so"
+  ;;
+MINGW*)
+  testlib="cgotest.dll"
+  ;;
 esac
 
-go build -tags cdata_test,assert -buildmode=c-shared -buildvcs=false -o $testlib .
+go build -tags cdata_test,assert -buildmode=c-shared -buildvcs=false -o "${testlib}" .
 
 python test_export_to_cgo.py
 
-rm $testlib
+rm "${testlib}"
 rm "${testlib%.*}.h"
 
 popd

@@ -78,7 +78,7 @@ services:
         base: ${REPO}:${ARCH}-debian-${DEBIAN}-${GO}
     shm_size: *shm-size
     volumes: *debian-volumes
-    command: &cgo-python-command >
-      /bin/bash -c "
-        git config --global --add safe.directory /arrow &&
+    command: &cgo-python-command |
+      /bin/bash -c " \
+        git config --global --add safe.directory /arrow-go && \
         /arrow-go/ci/scripts/go_cgo_python_test.sh /arrow-go"
