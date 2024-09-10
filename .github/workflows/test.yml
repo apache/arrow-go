@@ -129,7 +129,7 @@ jobs:
         continue-on-error: true
         run: |
           docker compose push debian-cgo
-  docker_cgo_python:
+  docker-cgo-python:
     name: AMD64 Debian 12 Go ${{ matrix.go }} - CGO Python
     runs-on: ubuntu-latest
     timeout-minutes: 15
