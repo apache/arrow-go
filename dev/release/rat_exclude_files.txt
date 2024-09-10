@@ -15,9 +15,20 @@
 # specific language governing permissions and limitations
 # under the License.
 
-[submodule "arrow-testing"]
-	path = arrow-testing
-	url = https://github.com/apache/arrow-testing.git
-[submodule "parquet-testing"]
-	path = parquet-testing
-	url = https://github.com/apache/parquet-testing.git
+*.s
+*.tmpldata
+go.sum
+
+arrow/flight/gen/flight/*.pb.go
+arrow/type_string.go
+arrow/unionmode_string.go
+arrow/compute/datumkind_string.go
+arrow/compute/funckind_string.go
+arrow/compute/internal/kernels/compareoperator_string.go
+arrow/compute/internal/kernels/roundmode_string.go
+arrow/compute/internal/kernels/_lib/vendored/*
+
+parquet/internal/gen-go/parquet/GoUnusedProtection__.go
+parquet/internal/gen-go/parquet/parquet-consts.go
+parquet/internal/gen-go/parquet/parquet.go
+parquet/version_string.go

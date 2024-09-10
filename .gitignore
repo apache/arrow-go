@@ -15,9 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-[submodule "arrow-testing"]
-	path = arrow-testing
-	url = https://github.com/apache/arrow-testing.git
-[submodule "parquet-testing"]
-	path = parquet-testing
-	url = https://github.com/apache/parquet-testing.git
+/apache-arrow-go.tar.gz
+/dev/release/apache-rat-*.jar
+/dev/release/filtered_rat.txt
+/dev/release/rat.xml
