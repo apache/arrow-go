@@ -222,6 +222,60 @@ jobs:
       - name: Test
         shell: bash
         run: ci/scripts/test.sh $(pwd)
+  windows-mingw:
+    name: AMD64 Windows MinGW ${{ matrix.mingw-n-bits }} CGO
+    runs-on: windows-2019
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        mingw-n-bits:
+          #- 32 runtime handling for CGO needs 64-bit currently
+          - 64
+    env:
+      ARROW_GO_TESTCGO: "1"
+      MINGW_LINT: "1"
+    steps:
+      - name: Disable Crash Dialogs
+        run: |
+          reg add `
+            "HKCU\SOFTWARE\Microsoft\Windows\Windows Error Reporting" `
+            /v DontShowUI `
+            /t REG_DWORD `
+            /d 1 `
+            /f
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          submodules: recursive
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW${{ matrix.mingw-n-bits }}
+          update: true
+      - name: Setup MSYS2
+        shell: msys2 {0}
+        run: |
+          ci/scripts/msys2_setup.sh
+      - name: Get required Go version
+        run: "(. .env && echo \"GO_VERSION=${GO}\") >> $GITHUB_ENV"
+      - name: Update CGO Env vars
+        shell: msys2 {0}
+        run: |
+          echo "CGO_CPPFLAGS=-I$(cygpath --windows ${MINGW_PREFIX}/include)" >> $GITHUB_ENV
+          echo "CGO_LDFLAGS=-g -O2 -L$(cygpath --windows ${MINGW_PREFIX}/lib) -L$(cygpath --windows ${MINGW_PREFIX}/bin)" >> $GITHUB_ENV
+          echo "MINGW_PREFIX=$(cygpath --windows ${MINGW_PREFIX})" >> $GITHUB_ENV
+      - name: Setup Go
+        uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5.0.2
+        with:
+          go-version: "${{ env.GO_VERSION }}"
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Build
+        shell: bash
+        run: ci/scripts/go_build.sh $(pwd)
+      - name: Test
+        shell: bash
+        run: ci/scripts/go_test.sh $(pwd)
   build_test_386:
     name: Cross-build and test for 386
     runs-on: ubuntu-latest
