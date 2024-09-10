@@ -79,16 +79,56 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull
         run: |
-          docker compose pull debian-go || :
+          docker compose pull debian || :
       - name: Test
         run: |
-          docker compose run debian-go
+          docker compose run debian
       - name: Push
         if: >-
           success() && github.event_name == 'push' && github.repository == 'apache/arrow-go' && github.ref_name == 'main'
         continue-on-error: true
         run: |
-          docker compose push debian-go
+          docker compose push debian
+  docker-cgo:
+    name: AMD64 Debian 12 Go ${{ matrix.go }} - CGO
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        go:
+          - '1.22'
+          - '1.23'
+    env:
+      GO: ${{ matrix.go }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          submodules: recursive
+      - name: Login to GitHub Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull
+        run: |
+          docker compose pull debian || :
+          docker compose pull debian-cgo || :
+      - name: Build
+        run: |
+          docker compose build debian
+          docker compose build debian-cgo
+      - name: Test
+        run: |
+          docker compose run debian-cgo
+      - name: Push
+        if: >-
+          success() && github.event_name == 'push' && github.repository == 'apache/arrow-go' && github.ref_name == 'main'
+        continue-on-error: true
+        run: |
+          docker compose push debian-cgo
   macos:
     name: AMD64 macOS 12 Go ${{ matrix.go }}
     runs-on: macos-12
