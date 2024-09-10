@@ -66,6 +66,7 @@ services:
     command: *go-command
   debian-cgo-python:
     # Usage:
+    #   docker compose build debian
     #   docker compose build debian-cgo-python
     #   docker compose run debian-cgo-python
     image: ${REPO}:${ARCH}-debian-${DEBIAN}-${GO}-cgo-python
@@ -81,4 +82,4 @@ services:
     command: &cgo-python-command |
       /bin/bash -c " \
         git config --global --add safe.directory /arrow-go && \
-        /arrow-go/ci/scripts/go_cgo_python_test.sh /arrow-go"
+        /arrow-go/ci/scripts/cgo_python_test.sh /arrow-go"

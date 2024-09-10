@@ -17,7 +17,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-set -ex
+set -eux
 
 source_dir=${1}
 
@@ -31,14 +31,11 @@ export GOFLAGS="${GOFLAGS} -gcflags=all=-d=checkptr"
 pushd "${source_dir}/arrow/cdata/test"
 
 case "$(uname)" in
-Linux)
-  testlib="cgotest.so"
-  ;;
-Darwin)
-  testlib="cgotest.so"
-  ;;
 MINGW*)
   testlib="cgotest.dll"
+  ;;
+*)
+  testlib="cgotest.so"
   ;;
 esac
 
