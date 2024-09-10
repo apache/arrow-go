@@ -64,3 +64,22 @@ services:
     environment:
       ARROW_GO_TESTCGO: "1"
     command: *go-command
+  debian-cgo-python:
+    # Usage:
+    #   docker compose build debian
+    #   docker compose build debian-cgo-python
+    #   docker compose run debian-cgo-python
+    image: ${REPO}:${ARCH}-debian-${GO}-cgo-python
+    build:
+      context: .
+      dockerfile: ci/docker/debian-cgo-python.dockerfile
+      cache_from:
+        - ${REPO}:${ARCH}-debian-${GO}-cgo-python
+      args:
+        base: ${REPO}:${ARCH}-debian-${DEBIAN}-${GO}
+    shm_size: *shm-size
+    volumes: *debian-volumes
+    command: &cgo-python-command |
+      /bin/bash -c " \
+        git config --global --add safe.directory /arrow-go && \
+        /arrow-go/ci/scripts/cgo_python_test.sh /arrow-go"
