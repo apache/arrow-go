@@ -137,8 +137,8 @@ jobs:
       fail-fast: false
       matrix:
         go:
-          - '1.21'
           - '1.22'
+          - '1.23'
     steps:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
@@ -153,6 +153,42 @@ jobs:
       - name: Install bash via Homebrew
         run: |
           brew install bash
+      - name: Build
+        run: |
+          $(brew --prefix)/bin/bash ci/scripts/build.sh $(pwd)
+      - name: Test
+        run: |
+          $(brew --prefix)/bin/bash ci/scripts/test.sh $(pwd)
+  macos-cgo:
+    name: AMD64 macOS 12 Go ${{ matrix.go }} - CGO
+    runs-on: macos-12
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        go:
+          - '1.22'
+          - '1.23'
+    env:
+      ARROW_GO_TESTCGO: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          submodules: recursive
+      - name: Setup Go
+        uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5.0.2
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Brew Install Arrow and pkg-config
+        shell: bash
+        run: brew install apache-arrow pkg-config bash
+      - name: Add To pkg config path
+        shell: bash
+        run: |
+          echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - name: Build
         run: |
           $(brew --prefix)/bin/bash ci/scripts/build.sh $(pwd)
