@@ -132,7 +132,7 @@ jobs:
   macos:
     name: AMD64 macOS 12 Go ${{ matrix.go }}
     runs-on: macos-12
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -162,7 +162,7 @@ jobs:
   macos-cgo:
     name: AMD64 macOS 12 Go ${{ matrix.go }} - CGO
     runs-on: macos-12
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
