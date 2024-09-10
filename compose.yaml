@@ -69,12 +69,12 @@ services:
     #   docker compose build debian
     #   docker compose build debian-cgo-python
     #   docker compose run debian-cgo-python
-    image: ${REPO}:${ARCH}-debian-${DEBIAN}-${GO}-cgo-python
+    image: ${REPO}:${ARCH}-debian-${GO}-cgo-python
     build:
       context: .
-      dockerfile: ci/docker/debian-${DEBIAN}-cgo-python.dockerfile
+      dockerfile: ci/docker/debian-cgo-python.dockerfile
       cache_from:
-        - ${REPO}:${ARCH}-debian-${DEBIAN}-${GO}-cgo-python
+        - ${REPO}:${ARCH}-debian-${GO}-cgo-python
       args:
         base: ${REPO}:${ARCH}-debian-${DEBIAN}-${GO}
     shm_size: *shm-size
