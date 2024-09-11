@@ -536,6 +536,35 @@ type DecimalType interface {
 	BitWidth() int
 }
 
+// NarrowestDecimalType constructs the smallest decimal type that can represent
+// the requested precision. An error is returned if the requested precision
+// cannot be represented (prec <= 0 || prec > 76).
+//
+// For reference:
+//
+//	prec in [ 1,  9] => Decimal32Type
+//	prec in [10, 18] => Decimal64Type
+//	prec in [19, 38] => Decimal128Type
+//	prec in [39, 76] => Decimal256Type
+func NarrowestDecimalType(prec, scale int32) (DecimalType, error) {
+	switch {
+	case prec <= 0:
+		return nil, fmt.Errorf("%w: precision must be > 0 for decimal types, got %d",
+			ErrInvalid, prec)
+	case prec <= int32(decimal.MaxPrecision[decimal.Decimal32]()):
+		return &Decimal32Type{Precision: prec, Scale: scale}, nil
+	case prec <= int32(decimal.MaxPrecision[decimal.Decimal64]()):
+		return &Decimal64Type{Precision: prec, Scale: scale}, nil
+	case prec <= int32(decimal.MaxPrecision[decimal.Decimal128]()):
+		return &Decimal128Type{Precision: prec, Scale: scale}, nil
+	case prec <= int32(decimal.MaxPrecision[decimal.Decimal256]()):
+		return &Decimal256Type{Precision: prec, Scale: scale}, nil
+	default:
+		return nil, fmt.Errorf("%w: invalid precision for decimal types, %d",
+			ErrInvalid, prec)
+	}
+}
+
 func NewDecimalType(id Type, prec, scale int32) (DecimalType, error) {
 	switch id {
 	case DECIMAL32:
@@ -551,7 +580,7 @@ func NewDecimalType(id Type, prec, scale int32) (DecimalType, error) {
 		debug.Assert(prec <= int32(decimal.MaxPrecision[decimal.Decimal256]()), "invalid precision for decimal256")
 		return &Decimal256Type{Precision: prec, Scale: scale}, nil
 	default:
-		return nil, fmt.Errorf("%w: must use DECIMAL128 or DECIMAL256 to create a DecimalType", ErrInvalid)
+		return nil, fmt.Errorf("%w: must use one of the DECIMAL IDs to create a DecimalType", ErrInvalid)
 	}
 }
 

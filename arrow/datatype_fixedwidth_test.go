@@ -23,6 +23,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestTimeUnit_String verifies each time unit matches its string representation.
@@ -491,4 +492,37 @@ func TestDateFromTime(t *testing.T) {
 	wantD64 := time.Date(2024, time.January, 17, 0, 0, 0, 0, time.UTC).UnixMilli()
 	assert.EqualValues(t, wantD64, arrow.Date64FromTime(tm))
 	assert.EqualValues(t, wantD32, arrow.Date32FromTime(tm))
+}
+
+func TestNarrowestDecimalType(t *testing.T) {
+	tests := []struct {
+		min, max int32
+		expected arrow.Type
+	}{
+		{1, 9, arrow.DECIMAL32},
+		{10, 18, arrow.DECIMAL64},
+		{19, 38, arrow.DECIMAL128},
+		{39, 76, arrow.DECIMAL256},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected.String(), func(t *testing.T) {
+			for i := tt.min; i <= tt.max; i++ {
+				typ, err := arrow.NarrowestDecimalType(i, 5)
+				require.NoError(t, err)
+
+				assert.Equal(t, i, typ.GetPrecision())
+				assert.Equal(t, int32(5), typ.GetScale())
+				assert.Equal(t, tt.expected, typ.ID())
+			}
+		})
+	}
+
+	_, err := arrow.NarrowestDecimalType(-1, 5)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
+
+	_, err = arrow.NarrowestDecimalType(78, 5)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
 }
