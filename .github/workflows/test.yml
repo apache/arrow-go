@@ -276,7 +276,7 @@ jobs:
       - name: Test
         shell: bash
         run: ci/scripts/test.sh $(pwd)
-  build_test_386:
+  build-test-386:
     name: Cross-build and test for 386
     runs-on: ubuntu-latest
     timeout-minutes: 15
