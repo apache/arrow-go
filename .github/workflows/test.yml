@@ -18,8 +18,11 @@
 name: Test
 on:
   push:
-    branches-ignore:
-      - 'dependabot/**'
+    branches:
+      - '**'
+      - '!dependabot/**'
+    tags:
+      - '*'
   pull_request:
 concurrency:
   group: ${{ github.repository }}-${{ github.head_ref || github.sha }}-${{ github.workflow }}
@@ -202,15 +205,12 @@ jobs:
           go-version: ${{ matrix.go }}
           cache: true
           cache-dependency-path: go.sum
-      - name: Install bash via Homebrew
-        run: |
-          brew install bash
       - name: Build
         run: |
-          $(brew --prefix)/bin/bash ci/scripts/build.sh $(pwd)
+          ci/scripts/build.sh $(pwd)
       - name: Test
         run: |
-          $(brew --prefix)/bin/bash ci/scripts/test.sh $(pwd)
+          ci/scripts/test.sh $(pwd)
   macos-cgo:
     name: AMD64 macOS 12 Go ${{ matrix.go }} - CGO
     runs-on: macos-12
@@ -235,18 +235,16 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
       - name: Brew Install Arrow and pkg-config
-        shell: bash
-        run: brew install apache-arrow pkg-config bash
-      - name: Add To pkg config path
-        shell: bash
+        run: brew install apache-arrow pkg-config
+      - name: Setup PKG_CONFIG_PATH
         run: |
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - name: Build
         run: |
-          $(brew --prefix)/bin/bash ci/scripts/build.sh $(pwd)
+          ci/scripts/build.sh $(pwd)
       - name: Test
         run: |
-          $(brew --prefix)/bin/bash ci/scripts/test.sh $(pwd)
+          ci/scripts/test.sh $(pwd)
   windows:
     name: AMD64 Windows 2019 Go ${{ matrix.go }}
     runs-on: windows-2019

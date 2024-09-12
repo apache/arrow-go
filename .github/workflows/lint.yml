@@ -18,8 +18,11 @@
 name: Lint
 on:
   push:
-    branches-ignore:
-      - 'dependabot/**'
+    branches:
+      - '**'
+      - '!dependabot/**'
+    tags:
+      - '*'
   pull_request:
 concurrency:
   group: ${{ github.repository }}-${{ github.head_ref || github.sha }}-${{ github.workflow }}

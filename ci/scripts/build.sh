@@ -28,7 +28,7 @@ pushd "${source_dir}/arrow"
 
 : "${ARROW_GO_TESTCGO:=}"
 
-go_install_arrow_options=()
+go_install_arrow_options=(-v)
 if [[ -n "${ARROW_GO_TESTCGO}" ]]; then
   if [[ "${MSYSTEM:-}" = "MINGW64" ]]; then
     export PATH=${MINGW_PREFIX}/bin:${PATH}
@@ -38,7 +38,7 @@ if [[ -n "${ARROW_GO_TESTCGO}" ]]; then
   go_install_arrow_options+=("-tags" "assert,test,ccalloc")
 fi
 
-go install "${go_install_arrow_options[@]}" -v ./...
+go install "${go_install_arrow_options[@]}" ./...
 
 popd
 
