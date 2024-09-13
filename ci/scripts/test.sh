@@ -65,6 +65,7 @@ go test "${test_args[@]}" -tags ${tags},noasm ./...
 popd
 
 export PARQUET_TEST_DATA=${1}/parquet-testing/data
+export PARQUET_TEST_BAD_DATA=${1}/parquet-testing/bad_data
 export ARROW_TEST_DATA=${1}/arrow-testing/data
 pushd "${source_dir}/parquet"
 
