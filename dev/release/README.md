@@ -28,7 +28,7 @@
 
 ### Prepare RC and vote
 
-Run `dev/release/release_rc.sh` on working copy of `git@github.com:apache/arrow-go` not your fork:
+Run `dev/release/release_rc.sh` on a working copy of `git@github.com:apache/arrow-go` not your fork:
 
 ```console
 $ git clone git@github.com:apache/arrow-go.git
@@ -83,7 +83,7 @@ $ GH_TOKEN=${YOUR_GITHUB_TOKEN} dev/release/release.sh ${VERSION} ${RC}
 Here is an example to release 18.0.0 RC1:
 
 ```console
-$ GH_TOKEN=${YOUR_GITHUB_TOKEN}dev/release/release.sh 18.0.0 1
+$ GH_TOKEN=${YOUR_GITHUB_TOKEN} dev/release/release.sh 18.0.0 1
 ```
 
 Add the release to ASF's report database via [Apache Committee Report Helper](https://reporter.apache.org/addrelease.html?arrow).
@@ -107,10 +107,10 @@ To verify a RC, run the following command line:
 $ dev/release/verify_rc.sh ${VERSION} ${RC}
 ```
 
-Here is an example to release 18.0.0 RC1:
+Here is an example to verify the release 18.0.0 RC1:
 
 ```console
 $ dev/release/verify_rc.sh 18.0.0 1
 ```
 
-If the verification is succeeded, `RC looks good!` is shown.
+If the verification is successful, the message `RC looks good!` is shown.
