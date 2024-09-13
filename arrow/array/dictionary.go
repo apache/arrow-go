@@ -27,6 +27,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/float16"
@@ -392,7 +393,8 @@ func createMemoTable(mem memory.Allocator, dt arrow.DataType) (ret hashing.MemoT
 		ret = hashing.NewFloat32MemoTable(0)
 	case arrow.FLOAT64:
 		ret = hashing.NewFloat64MemoTable(0)
-	case arrow.BINARY, arrow.FIXED_SIZE_BINARY, arrow.DECIMAL128, arrow.DECIMAL256, arrow.INTERVAL_DAY_TIME, arrow.INTERVAL_MONTH_DAY_NANO:
+	case arrow.BINARY, arrow.FIXED_SIZE_BINARY, arrow.DECIMAL32, arrow.DECIMAL64,
+		arrow.DECIMAL128, arrow.DECIMAL256, arrow.INTERVAL_DAY_TIME, arrow.INTERVAL_MONTH_DAY_NANO:
 		ret = hashing.NewBinaryMemoTable(0, 0, NewBinaryBuilder(mem, arrow.BinaryTypes.Binary))
 	case arrow.STRING:
 		ret = hashing.NewBinaryMemoTable(0, 0, NewBinaryBuilder(mem, arrow.BinaryTypes.String))
@@ -619,6 +621,22 @@ func NewDictionaryBuilderWithDict(mem memory.Allocator, dt *arrow.DictionaryType
 		ret := &DayTimeDictionaryBuilder{bldr}
 		if init != nil {
 			if err = ret.InsertDictValues(init.(*DayTimeInterval)); err != nil {
+				panic(err)
+			}
+		}
+		return ret
+	case arrow.DECIMAL32:
+		ret := &Decimal32DictionaryBuilder{bldr}
+		if init != nil {
+			if err = ret.InsertDictValues(init.(*Decimal32)); err != nil {
+				panic(err)
+			}
+		}
+		return ret
+	case arrow.DECIMAL64:
+		ret := &Decimal64DictionaryBuilder{bldr}
+		if init != nil {
+			if err = ret.InsertDictValues(init.(*Decimal64)); err != nil {
 				panic(err)
 			}
 		}
@@ -906,6 +924,16 @@ func getvalFn(arr arrow.Array) func(i int) interface{} {
 		return func(i int) interface{} { return typedarr.Value(i) }
 	case *String:
 		return func(i int) interface{} { return typedarr.Value(i) }
+	case *Decimal32:
+		return func(i int) interface{} {
+			val := typedarr.Value(i)
+			return (*(*[arrow.Decimal32SizeBytes]byte)(unsafe.Pointer(&val)))[:]
+		}
+	case *Decimal64:
+		return func(i int) interface{} {
+			val := typedarr.Value(i)
+			return (*(*[arrow.Decimal64SizeBytes]byte)(unsafe.Pointer(&val)))[:]
+		}
 	case *Decimal128:
 		return func(i int) interface{} {
 			val := typedarr.Value(i)
@@ -1390,6 +1418,42 @@ func (b *FixedSizeBinaryDictionaryBuilder) InsertDictValues(arr *FixedSizeBinary
 			break
 		}
 		data = data[b.byteWidth:]
+	}
+	return
+}
+
+type Decimal32DictionaryBuilder struct {
+	dictionaryBuilder
+}
+
+func (b *Decimal32DictionaryBuilder) Append(v decimal.Decimal32) error {
+	return b.appendValue((*(*[arrow.Decimal32SizeBytes]byte)(unsafe.Pointer(&v)))[:])
+}
+func (b *Decimal32DictionaryBuilder) InsertDictValues(arr *Decimal32) (err error) {
+	data := arrow.Decimal32Traits.CastToBytes(arr.values)
+	for len(data) > 0 {
+		if err = b.insertDictValue(data[:arrow.Decimal32SizeBytes]); err != nil {
+			break
+		}
+		data = data[arrow.Decimal32SizeBytes:]
+	}
+	return
+}
+
+type Decimal64DictionaryBuilder struct {
+	dictionaryBuilder
+}
+
+func (b *Decimal64DictionaryBuilder) Append(v decimal.Decimal64) error {
+	return b.appendValue((*(*[arrow.Decimal64SizeBytes]byte)(unsafe.Pointer(&v)))[:])
+}
+func (b *Decimal64DictionaryBuilder) InsertDictValues(arr *Decimal64) (err error) {
+	data := arrow.Decimal64Traits.CastToBytes(arr.values)
+	for len(data) > 0 {
+		if err = b.insertDictValue(data[:arrow.Decimal64SizeBytes]); err != nil {
+			break
+		}
+		data = data[arrow.Decimal64SizeBytes:]
 	}
 	return
 }

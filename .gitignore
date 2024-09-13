@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+.vscode
 /apache-arrow-go.tar.gz
 /dev/release/apache-rat-*.jar
 /dev/release/filtered_rat.txt

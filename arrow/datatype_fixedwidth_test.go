@@ -23,6 +23,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestTimeUnit_String verifies each time unit matches its string representation.
@@ -39,6 +40,60 @@ func TestTimeUnit_String(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.exp, func(t *testing.T) {
 			assert.Equal(t, test.exp, test.u.String())
+		})
+	}
+}
+
+func TestDecimal32Type(t *testing.T) {
+	for _, tc := range []struct {
+		precision int32
+		scale     int32
+		want      string
+	}{
+		{1, 9, "decimal32(1, 9)"},
+		{9, 9, "decimal32(9, 9)"},
+		{9, 1, "decimal32(9, 1)"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			dt := arrow.Decimal32Type{Precision: tc.precision, Scale: tc.scale}
+			if got, want := dt.BitWidth(), 32; got != want {
+				t.Fatalf("invalid bitwidth: got=%d, want=%d", got, want)
+			}
+
+			if got, want := dt.ID(), arrow.DECIMAL32; got != want {
+				t.Fatalf("invalid type ID: got=%v, want=%v", got, want)
+			}
+
+			if got, want := dt.String(), tc.want; got != want {
+				t.Fatalf("invalid stringer: got=%q, want=%q", got, want)
+			}
+		})
+	}
+}
+
+func TestDecimal64Type(t *testing.T) {
+	for _, tc := range []struct {
+		precision int32
+		scale     int32
+		want      string
+	}{
+		{1, 10, "decimal64(1, 10)"},
+		{10, 10, "decimal64(10, 10)"},
+		{10, 1, "decimal64(10, 1)"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			dt := arrow.Decimal64Type{Precision: tc.precision, Scale: tc.scale}
+			if got, want := dt.BitWidth(), 64; got != want {
+				t.Fatalf("invalid bitwidth: got=%d, want=%d", got, want)
+			}
+
+			if got, want := dt.ID(), arrow.DECIMAL64; got != want {
+				t.Fatalf("invalid type ID: got=%v, want=%v", got, want)
+			}
+
+			if got, want := dt.String(), tc.want; got != want {
+				t.Fatalf("invalid stringer: got=%q, want=%q", got, want)
+			}
 		})
 	}
 }
@@ -437,4 +492,37 @@ func TestDateFromTime(t *testing.T) {
 	wantD64 := time.Date(2024, time.January, 17, 0, 0, 0, 0, time.UTC).UnixMilli()
 	assert.EqualValues(t, wantD64, arrow.Date64FromTime(tm))
 	assert.EqualValues(t, wantD32, arrow.Date32FromTime(tm))
+}
+
+func TestNarrowestDecimalType(t *testing.T) {
+	tests := []struct {
+		min, max int32
+		expected arrow.Type
+	}{
+		{1, 9, arrow.DECIMAL32},
+		{10, 18, arrow.DECIMAL64},
+		{19, 38, arrow.DECIMAL128},
+		{39, 76, arrow.DECIMAL256},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected.String(), func(t *testing.T) {
+			for i := tt.min; i <= tt.max; i++ {
+				typ, err := arrow.NarrowestDecimalType(i, 5)
+				require.NoError(t, err)
+
+				assert.Equal(t, i, typ.GetPrecision())
+				assert.Equal(t, int32(5), typ.GetScale())
+				assert.Equal(t, tt.expected, typ.ID())
+			}
+		})
+	}
+
+	_, err := arrow.NarrowestDecimalType(-1, 5)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
+
+	_, err = arrow.NarrowestDecimalType(78, 5)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
 }
