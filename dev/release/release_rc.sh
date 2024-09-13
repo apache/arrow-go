@@ -54,7 +54,8 @@ if [ "${RELEASE_PULL}" -gt 0 ]; then
 fi
 
 version=$(grep -o '^const PkgVersion = ".*"' "arrow/doc.go" |
-  sed -e 's/^const PkgVersion = "//' \
+  sed \
+    -e 's/^const PkgVersion = "//' \
     -e 's/"$//')
 
 rc_tag="v${version}-rc${rc}"

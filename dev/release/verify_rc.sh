@@ -148,7 +148,8 @@ latest_go_version() {
     https://api.github.com/repos/golang/go/git/matching-refs/tags/go |
     grep -o '"ref": "refs/tags/go.*"' |
     tail -n 1 |
-    sed -e 's,^"ref": "refs/tags/go,,g' \
+    sed \
+      -e 's,^"ref": "refs/tags/go,,g' \
       -e 's/"$//g'
 }
 
