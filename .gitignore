@@ -16,6 +16,8 @@
 # under the License.
 
 .vscode
+/apache-arrow-go-*.tar.gz
+/apache-arrow-go-*.tar.gz.asc
 /apache-arrow-go.tar.gz
 /dev/release/apache-rat-*.jar
 /dev/release/filtered_rat.txt
