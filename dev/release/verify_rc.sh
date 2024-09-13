@@ -130,6 +130,8 @@ ensure_source_directory() {
   export ARROW_TEST_DATA
   PARQUET_TEST_DATA="${ARCHIVE_BASE_NAME}/parquet-testing/data"
   export PARQUET_TEST_DATA
+  PARQUET_TEST_BAD_DATA="${ARCHIVE_BASE_NAME}/parquet-testing/bad_data"
+  export PARQUET_TEST_BAD_DATA
 }
 
 latest_go_version() {
