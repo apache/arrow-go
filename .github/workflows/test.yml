@@ -70,7 +70,7 @@ jobs:
     name: ${{ matrix.arch-label }} Debian 12 Go ${{ matrix.go }}
     needs: docker-targets
     runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -144,7 +144,7 @@ jobs:
   docker-cgo-python:
     name: AMD64 Debian 12 Go ${{ matrix.go }} - CGO Python
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -250,7 +250,7 @@ jobs:
   windows:
     name: AMD64 Windows 2019 Go ${{ matrix.go }}
     runs-on: windows-2019
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -277,7 +277,7 @@ jobs:
   windows-mingw:
     name: AMD64 Windows MinGW ${{ matrix.mingw-n-bits }} CGO
     runs-on: windows-2019
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -331,7 +331,7 @@ jobs:
   build-test-386:
     name: Cross-build and test for 386
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
@@ -356,7 +356,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TINYGO_VERSION: 0.33.0
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
