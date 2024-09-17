@@ -53,7 +53,11 @@ jobs:
             "arch": "amd64",
             "go": "1.23",
             "runs-on": "ubuntu-latest"
-          },
+          }
+          JSON
+          if [ "$GITHUB_REPOSITORY_OWNER" = "apache" ]; then
+            echo "," >> "$GITHUB_OUTPUT"
+            cat <<JSON >> "$GITHUB_OUTPUT"
           {
             "arch-label": "ARM64",
             "arch": "arm64v8",
@@ -67,6 +71,7 @@ jobs:
             "runs-on": ["self-hosted", "arm", "linux"]
           }
           JSON
+          fi
           echo "]" >> "$GITHUB_OUTPUT"
           echo "JSON" >> "$GITHUB_OUTPUT"
   docker:
