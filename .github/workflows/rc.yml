@@ -54,7 +54,7 @@ jobs:
             sed \
               -e 's/^const PkgVersion = "//' \
               -e 's/"$//')
-          rc=100
+          rc=$(date +%Y%m%d)
           echo "VERSION=${version}" >> ${GITHUB_ENV}
           echo "RC=${rc}" >> ${GITHUB_ENV}
       - name: Archive
@@ -97,10 +97,11 @@ jobs:
           tar_gz=$(echo apache-arrow-go-*.tar.gz)
           version=${tar_gz#apache-arrow-go-}
           version=${version%.tar.gz}
+          # rc isn't used with VERIFY_DOWNLOAD=0
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             rc="${GITHUB_REF_NAME#*-rc}"
           else
-            rc=100
+            rc=$(date +%Y%m%d)
           fi
           VERIFY_DEFAULT=0 dev/release/verify_rc.sh "${version}" "${rc}"
         env:
