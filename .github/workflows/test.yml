@@ -373,3 +373,53 @@ jobs:
             -v $(pwd)/ci/scripts:/ci-scripts \
             "tinygo/tinygo:$TINYGO_VERSION" \
             /ci-scripts/tinygo_example.sh
+  integration:
+    name: AMD64 Conda Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Arrow
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          fetch-depth: 0
+          repository: apache/arrow
+          submodules: recursive
+      - name: Checkout Arrow Rust
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          repository: apache/arrow-rs
+          path: rust
+      - name: Checkout Arrow nanoarrow
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          repository: apache/arrow-nanoarrow
+          path: nanoarrow
+      - name: Checkout Arrow Go
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          path: go
+      - name: Free up disk space
+        run: |
+          ci/scripts/util_free_space.sh
+      - name: Cache Docker Volumes
+        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+        with:
+          path: .docker
+          key: integration-conda-${{ hashFiles('cpp/**') }}
+          restore-keys: conda-
+      - name: Setup Python
+        uses: actions/setup-python@f677139bbe7f9c59b41e40162b753c062f5d49a3 # v5.2.0
+        with:
+          python-version: 3.12
+      - name: Setup Archery
+        run: pip install -e dev/archery[docker]
+      - name: Execute Docker Build
+        run: |
+          source ci/scripts/util_enable_core_dumps.sh
+          archery docker run \
+            -e ARCHERY_DEFAULT_BRANCH=${{ github.event.repository.default_branch }} \
+            -e ARCHERY_INTEGRATION_TARGET_IMPLEMENTATIONS=go \
+            -e ARCHERY_INTEGRATION_WITH_GO=1 \
+            -e ARCHERY_INTEGRATION_WITH_NANOARROW=1 \
+            -e ARCHERY_INTEGRATION_WITH_RUST=1 \
+            conda-integration
