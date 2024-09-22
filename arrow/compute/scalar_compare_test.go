@@ -1421,6 +1421,96 @@ func benchArrayScalar(b *testing.B, sz int, nullprob float64, op string, dt arro
 	})
 }
 
+type ScalarValiditySuite struct {
+	suite.Suite
+
+	mem *memory.CheckedAllocator
+	ctx context.Context
+}
+
+func (sv *ScalarValiditySuite) SetupTest() {
+	sv.mem = memory.NewCheckedAllocator(memory.DefaultAllocator)
+	sv.ctx = compute.WithAllocator(context.TODO(), sv.mem)
+}
+
+func (sv *ScalarValiditySuite) TearDownTest() {
+	sv.mem.AssertSize(sv.T(), 0)
+}
+
+func (sv *ScalarValiditySuite) getArr(dt arrow.DataType, str string) arrow.Array {
+	arr, _, err := array.FromJSON(sv.mem, dt, strings.NewReader(str), array.WithUseNumber())
+	sv.Require().NoError(err)
+	return arr
+}
+
+func (sv *ScalarValiditySuite) checkScalarUnary(funcName string, input arrow.Array, expected arrow.Array) {
+	defer input.Release()
+	defer expected.Release()
+
+	checkScalarUnary(sv.T(), funcName, compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected), nil)
+}
+
+func (sv *ScalarValiditySuite) TestIsNull() {
+	tests := []struct {
+		in       string
+		expected string
+	}{
+		{`[]`, `[]`},
+		{`[1]`, `[false]`},
+		{`[null]`, `[true]`},
+		{`[null, 1, 0, null]`, `[true, false, false, true]`},
+	}
+
+	for _, typ := range numericTypes {
+		for _, tt := range tests {
+			sv.checkScalarUnary("is_null", sv.getArr(typ, tt.in),
+				sv.getArr(arrow.FixedWidthTypes.Boolean, tt.expected))
+		}
+	}
+}
+
+func (sv *ScalarValiditySuite) TestNotNull() {
+	tests := []struct {
+		in       string
+		expected string
+	}{
+		{`[]`, `[]`},
+		{`[1]`, `[true]`},
+		{`[null]`, `[false]`},
+		{`[null, 1, 0, null]`, `[false, true, true, false]`},
+	}
+
+	for _, typ := range numericTypes {
+		for _, tt := range tests {
+			sv.checkScalarUnary("is_not_null", sv.getArr(typ, tt.in),
+				sv.getArr(arrow.FixedWidthTypes.Boolean, tt.expected))
+		}
+	}
+}
+
+func (sv *ScalarValiditySuite) TestIsNaN() {
+	tests := []struct {
+		in       string
+		expected string
+	}{
+		{`[]`, `[]`},
+		{`[1]`, `[false]`},
+		{`[null]`, `[null]`},
+		{`["NaN", 1, 0, null]`, `[true, false, false, null]`},
+	}
+
+	for _, typ := range floatingTypes {
+		for _, tt := range tests {
+			sv.checkScalarUnary("is_nan", sv.getArr(typ, tt.in),
+				sv.getArr(arrow.FixedWidthTypes.Boolean, tt.expected))
+		}
+	}
+}
+
+func TestScalarValidity(t *testing.T) {
+	suite.Run(t, &ScalarValiditySuite{})
+}
+
 func benchArrayArray(b *testing.B, sz int, nullprob float64, op string, dt arrow.DataType) {
 	b.Run(dt.String(), func(b *testing.B) {
 		rng := gen.NewRandomArrayGenerator(benchSeed, memory.DefaultAllocator)

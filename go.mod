@@ -16,8 +16,9 @@
 
 module github.com/apache/arrow-go/v18
 
-go 1.22
-toolchain go1.22.5
+go 1.22.0
+
+toolchain go1.23.1
 
 require (
 	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c
@@ -35,13 +36,13 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.21
 	github.com/stretchr/testify v1.9.0
 	github.com/zeebo/xxh3 v1.0.2
-	golang.org/x/exp v0.0.0-20240222234643-814bf88cf225
+	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0
 	golang.org/x/sync v0.8.0
 	golang.org/x/sys v0.25.0
 	golang.org/x/tools v0.25.0
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028
 	gonum.org/v1/gonum v0.15.1
-	google.golang.org/grpc v1.63.2
+	google.golang.org/grpc v1.67.0
 	google.golang.org/protobuf v1.34.2
 	modernc.org/sqlite v1.29.6
 )
@@ -49,13 +50,14 @@ require (
 require (
 	github.com/google/uuid v1.6.0
 	github.com/hamba/avro/v2 v2.25.1
-	github.com/huandu/xstrings v1.4.0
-	github.com/substrait-io/substrait-go v0.8.0
+	github.com/huandu/xstrings v1.5.0
+	github.com/substrait-io/substrait-go v1.0.1
 	github.com/tidwall/sjson v1.2.5
 )
 
 require (
 	github.com/alecthomas/participle/v2 v2.1.0 // indirect
+	github.com/creasty/defaults v1.8.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fatih/color v1.15.0 // indirect
@@ -79,7 +81,7 @@ require (
 	golang.org/x/mod v0.21.0 // indirect
 	golang.org/x/net v0.29.0 // indirect
 	golang.org/x/text v0.18.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240227224415-6ceb2ff114de // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/gc/v3 v3.0.0-20240107210532-573471604cb6 // indirect
 	modernc.org/libc v1.41.0 // indirect

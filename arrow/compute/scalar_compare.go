@@ -20,10 +20,12 @@ package compute
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/compute/internal/kernels"
+	"github.com/apache/arrow-go/v18/arrow/scalar"
 )
 
 type compareFunction struct {
@@ -134,4 +136,50 @@ func RegisterScalarComparisons(reg FunctionRegistry) {
 	reg.AddFunction(ltFn, false)
 	lteFn := makeFlippedCompare("less_equal", gteFn, EmptyFuncDoc)
 	reg.AddFunction(lteFn, false)
+
+	isOrNotNullKns := kernels.IsNullKernels()
+	isNullFn := &compareFunction{*NewScalarFunction("is_null", Unary(), EmptyFuncDoc)}
+	if err := isNullFn.AddKernel(isOrNotNullKns[0]); err != nil {
+		panic(err)
+	}
+
+	isNotNullFn := &compareFunction{*NewScalarFunction("is_not_null", Unary(), EmptyFuncDoc)}
+	if err := isNotNullFn.AddKernel(isOrNotNullKns[1]); err != nil {
+		panic(err)
+	}
+
+	reg.AddFunction(isNullFn, false)
+	reg.AddFunction(isNotNullFn, false)
+
+	reg.AddFunction(NewMetaFunction("is_nan", Unary(), EmptyFuncDoc,
+		func(ctx context.Context, opts FunctionOptions, args ...Datum) (Datum, error) {
+			switch args[0].Kind() {
+			case KindScalar:
+				arg := args[0].(*ScalarDatum)
+				switch arg.Type() {
+				case arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Float64:
+					// IEEE 754 says that only NAN satisfies f != f
+					return CallFunction(ctx, "not_equal", nil, arg, arg)
+				default:
+					return NewDatum(true), nil
+				}
+			case KindArray, KindChunked:
+				arg := args[0].(ArrayLikeDatum)
+				switch arg.Type() {
+				case arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Float64:
+					// IEEE 754 says that only NAN satisfies f != f
+					return CallFunction(ctx, "not_equal", nil, arg, arg)
+				default:
+					result, err := scalar.MakeArrayFromScalar(scalar.NewBooleanScalar(false),
+						int(arg.Len()), GetAllocator(ctx))
+					if err != nil {
+						return nil, err
+					}
+					return NewDatumWithoutOwning(result), nil
+				}
+			default:
+				return nil, fmt.Errorf("%w: unsupported type for is_nan %s",
+					arrow.ErrNotImplemented, args[0])
+			}
+		}), false)
 }

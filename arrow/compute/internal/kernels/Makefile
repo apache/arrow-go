@@ -21,14 +21,15 @@ C2GOASM=c2goasm
 CC=clang-11
 CXX=clang++-11
 C_FLAGS=-target x86_64-unknown-none -masm=intel -mno-red-zone -mstackrealign -mllvm -inline-threshold=5000 \
-				-fno-asynchronous-unwind-tables -fno-exceptions -fno-rtti -O3 -fno-builtin -ffast-math -fno-jump-tables -I_lib -I../../../../internal/utils/_lib
+				-fno-asynchronous-unwind-tables -fno-exceptions -fno-rtti -O3 -fno-builtin -fno-jump-tables \
+				-fno-math-errno -funsafe-math-optimizations -fno-rounding-math -fno-trapping-math -I_lib -I../../../../internal/utils/_lib
 ASM_FLAGS_AVX2=-mavx2 -mfma
 ASM_FLAGS_SSE4=-msse4
 ASM_FLAGS_BMI2=-mbmi2
 ASM_FLAGS_POPCNT=-mpopcnt
 
 C_FLAGS_NEON=-O3 -fvectorize -mllvm -force-vector-width=16 -fno-asynchronous-unwind-tables -mno-red-zone -mstackrealign -fno-exceptions \
-	-fno-rtti -fno-builtin -ffast-math -fno-jump-tables -I_lib -I../../../../internal/utils/_lib
+	-fno-rtti -fno-builtin -fno-math-errno -funsafe-math-optimizations -fno-rounding-math -fno-trapping-math -fno-jump-tables -I_lib -I../../../../internal/utils/_lib
 
 GO_SOURCES  := $(shell find . -path ./_lib -prune -o -name '*.go' -not -name '*_test.go')
 ALL_SOURCES := $(shell find . -path ./_lib -prune -o -name '*.go' -name '*.s' -not -name '*_test.go')

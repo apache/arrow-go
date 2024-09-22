@@ -29,6 +29,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
 )
@@ -698,4 +699,49 @@ func CompareKernels(op CompareOperator) []exec.ScalarKernel {
 		ScalarBinaryBinaryArgsBoolOut(exec.NewFSBIter, getBinaryCmp(op)), nil))
 
 	return kns
+}
+
+func isNullExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+	out.Release()
+	input := batch.Values[0].Array
+
+	validityBuf := input.GetBuffer(0)
+	out.Buffers[1].WrapBuffer(ctx.AllocateBitmap(input.Len))
+	if validityBuf != nil {
+		bitutil.InvertBitmap(validityBuf.Bytes(), int(input.Offset), int(input.Len),
+			out.Buffers[1].Buf, 0)
+	}
+
+	return nil
+}
+
+func isNotNullExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+	out.Release()
+	input := batch.Values[0].Array
+
+	validityBuf := input.GetBuffer(0)
+	if validityBuf == nil {
+		out.Buffers[1].WrapBuffer(ctx.AllocateBitmap(input.Len))
+		memory.Set(out.Buffers[1].Buf, 0xFF)
+	} else {
+		out.Buffers[1].SetBuffer(validityBuf)
+	}
+
+	return nil
+}
+
+func IsNullKernels() []exec.ScalarKernel {
+	in := exec.InputType{Kind: exec.InputAny}
+	out := exec.NewOutputType(arrow.FixedWidthTypes.Boolean)
+
+	results := make([]exec.ScalarKernel, 2)
+	results[0] = exec.NewScalarKernel([]exec.InputType{in}, out, isNullExec, nil)
+	results[0].NullHandling = exec.NullComputedNoPrealloc
+	results[0].MemAlloc = exec.MemNoPrealloc
+
+	results[1] = exec.NewScalarKernel([]exec.InputType{in}, out, isNotNullExec, nil)
+	results[1].NullHandling = exec.NullComputedNoPrealloc
+	results[1].MemAlloc = exec.MemNoPrealloc
+
+	return results
 }
