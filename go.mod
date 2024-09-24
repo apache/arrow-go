@@ -30,13 +30,13 @@ require (
 	github.com/google/flatbuffers v24.3.25+incompatible
 	github.com/google/uuid v1.6.0
 	github.com/hamba/avro/v2 v2.25.1
-	github.com/huandu/xstrings v1.4.0
 	github.com/klauspost/asmfmt v1.3.2
 	github.com/klauspost/compress v1.17.9
 	github.com/klauspost/cpuid/v2 v2.2.8
 	github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8
 	github.com/minio/c2goasm v0.0.0-20190812172519-36a3d3bbc4f3
 	github.com/pierrec/lz4/v4 v4.1.21
+	github.com/stoewer/go-strcase v1.3.0
 	github.com/stretchr/testify v1.9.0
 	github.com/substrait-io/substrait-go v1.0.1
 	github.com/tidwall/sjson v1.2.5

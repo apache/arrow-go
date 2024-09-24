@@ -25,7 +25,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/util/util_message"
-	"github.com/huandu/xstrings"
+	"github.com/stoewer/go-strcase"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -291,7 +291,7 @@ func TestGetSchema(t *testing.T) {
 	pmr = NewProtobufMessageReflection(
 		f.msg,
 		WithExclusionPolicy(excludeComplex),
-		WithFieldNameFormatter(xstrings.ToCamelCase),
+		WithFieldNameFormatter(strcase.UpperCamelCase),
 	)
 	want = `schema:
   fields: 15
