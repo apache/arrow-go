@@ -60,6 +60,15 @@ func NewStructArrayWithFields(cols []arrow.Array, fields []arrow.Field) (*Struct
 		if length != c.Len() {
 			return nil, fmt.Errorf("%w: mismatching child array lengths", arrow.ErrInvalid)
 		}
+		if !arrow.TypeEqual(fields[i].Type, c.DataType()) {
+			return nil, fmt.Errorf("%w: mismatching data type for child #%d, field says '%s', got '%s'",
+				arrow.ErrInvalid, i, fields[i].Type, c.DataType())
+		}
+		if !fields[i].Nullable && c.NullN() > 0 {
+			return nil, fmt.Errorf("%w: field says not-nullable, child #%d has nulls",
+				arrow.ErrInvalid, i)
+		}
+
 		children[i] = c.Data()
 	}
 

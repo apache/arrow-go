@@ -730,7 +730,7 @@ func isNotNullExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResu
 	return nil
 }
 
-func IsNullKernels() []exec.ScalarKernel {
+func IsNullNotNullKernels() []exec.ScalarKernel {
 	in := exec.InputType{Kind: exec.InputAny}
 	out := exec.NewOutputType(arrow.FixedWidthTypes.Boolean)
 

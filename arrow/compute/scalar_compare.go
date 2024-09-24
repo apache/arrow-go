@@ -137,7 +137,7 @@ func RegisterScalarComparisons(reg FunctionRegistry) {
 	lteFn := makeFlippedCompare("less_equal", gteFn, EmptyFuncDoc)
 	reg.AddFunction(lteFn, false)
 
-	isOrNotNullKns := kernels.IsNullKernels()
+	isOrNotNullKns := kernels.IsNullNotNullKernels()
 	isNullFn := &compareFunction{*NewScalarFunction("is_null", Unary(), EmptyFuncDoc)}
 	if err := isNullFn.AddKernel(isOrNotNullKns[0]); err != nil {
 		panic(err)
@@ -153,23 +153,23 @@ func RegisterScalarComparisons(reg FunctionRegistry) {
 
 	reg.AddFunction(NewMetaFunction("is_nan", Unary(), EmptyFuncDoc,
 		func(ctx context.Context, opts FunctionOptions, args ...Datum) (Datum, error) {
-			switch args[0].Kind() {
-			case KindScalar:
-				arg := args[0].(*ScalarDatum)
-				switch arg.Type() {
-				case arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Float64:
-					// IEEE 754 says that only NAN satisfies f != f
-					return CallFunction(ctx, "not_equal", nil, arg, arg)
-				default:
-					return NewDatum(true), nil
-				}
-			case KindArray, KindChunked:
-				arg := args[0].(ArrayLikeDatum)
-				switch arg.Type() {
-				case arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Float64:
-					// IEEE 754 says that only NAN satisfies f != f
-					return CallFunction(ctx, "not_equal", nil, arg, arg)
-				default:
+			type hasType interface {
+				Type() arrow.DataType
+			}
+
+			// only Scalar, Array and ChunkedArray have a Type method
+			arg, ok := args[0].(hasType)
+			if !ok {
+				// don't support Table/Record/None kinds
+				return nil, fmt.Errorf("%w: unsupported type for is_nan %s",
+					arrow.ErrNotImplemented, args[0])
+			}
+
+			switch arg.Type() {
+			case arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Float64:
+				return CallFunction(ctx, "not_equal", nil, args[0], args[0])
+			default:
+				if arg, ok := args[0].(ArrayLikeDatum); ok {
 					result, err := scalar.MakeArrayFromScalar(scalar.NewBooleanScalar(false),
 						int(arg.Len()), GetAllocator(ctx))
 					if err != nil {
@@ -177,9 +177,8 @@ func RegisterScalarComparisons(reg FunctionRegistry) {
 					}
 					return NewDatumWithoutOwning(result), nil
 				}
-			default:
-				return nil, fmt.Errorf("%w: unsupported type for is_nan %s",
-					arrow.ErrNotImplemented, args[0])
+
+				return NewDatum(false), nil
 			}
 		}), false)
 }
