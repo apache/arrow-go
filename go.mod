@@ -28,6 +28,9 @@ require (
 	github.com/goccy/go-json v0.10.3
 	github.com/golang/snappy v0.0.4
 	github.com/google/flatbuffers v24.3.25+incompatible
+	github.com/google/uuid v1.6.0
+	github.com/hamba/avro/v2 v2.25.1
+	github.com/huandu/xstrings v1.4.0
 	github.com/klauspost/asmfmt v1.3.2
 	github.com/klauspost/compress v1.17.9
 	github.com/klauspost/cpuid/v2 v2.2.8
@@ -35,6 +38,8 @@ require (
 	github.com/minio/c2goasm v0.0.0-20190812172519-36a3d3bbc4f3
 	github.com/pierrec/lz4/v4 v4.1.21
 	github.com/stretchr/testify v1.9.0
+	github.com/substrait-io/substrait-go v1.0.1
+	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.0.2
 	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0
 	golang.org/x/sync v0.8.0
@@ -42,17 +47,9 @@ require (
 	golang.org/x/tools v0.25.0
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028
 	gonum.org/v1/gonum v0.15.1
-	google.golang.org/grpc v1.67.0
+	google.golang.org/grpc v1.65.0
 	google.golang.org/protobuf v1.34.2
 	modernc.org/sqlite v1.29.6
-)
-
-require (
-	github.com/google/uuid v1.6.0
-	github.com/hamba/avro/v2 v2.25.1
-	github.com/huandu/xstrings v1.5.0
-	github.com/substrait-io/substrait-go v1.0.1
-	github.com/tidwall/sjson v1.2.5
 )
 
 require (
