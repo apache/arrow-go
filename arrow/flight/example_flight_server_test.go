@@ -66,7 +66,7 @@ func Example_server() {
 	go server.Serve()
 	defer server.Shutdown()
 
-	conn, err := grpc.Dial(server.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(server.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatal(err)
 	}
