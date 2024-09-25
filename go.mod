@@ -29,7 +29,7 @@ require (
 	github.com/golang/snappy v0.0.4
 	github.com/google/flatbuffers v24.3.25+incompatible
 	github.com/google/uuid v1.6.0
-	github.com/hamba/avro/v2 v2.25.1
+	github.com/hamba/avro/v2 v2.26.0
 	github.com/klauspost/asmfmt v1.3.2
 	github.com/klauspost/compress v1.17.9
 	github.com/klauspost/cpuid/v2 v2.2.8
