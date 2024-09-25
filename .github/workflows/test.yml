@@ -190,8 +190,8 @@ jobs:
         run: |
           docker compose push debian-cgo-python
   macos:
-    name: AMD64 macOS 12 Go ${{ matrix.go }}
-    runs-on: macos-12
+    name: AMD64 macOS 14 Go ${{ matrix.go }}
+    runs-on: macos-14
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -217,8 +217,8 @@ jobs:
         run: |
           ci/scripts/test.sh $(pwd)
   macos-cgo:
-    name: AMD64 macOS 12 Go ${{ matrix.go }} - CGO
-    runs-on: macos-12
+    name: AMD64 macOS 14 Go ${{ matrix.go }} - CGO
+    runs-on: macos-14
     timeout-minutes: 25
     strategy:
       fail-fast: false
