@@ -49,7 +49,7 @@ func ExampleRegisterFlightServiceServer() {
 	go s.Serve(lis)
 	defer s.Stop()
 
-	conn, err := grpc.DialContext(context.Background(), lis.Addr().String(),
+	conn, err := grpc.NewClient(lis.Addr().String(),
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		panic(err)

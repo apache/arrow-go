@@ -398,7 +398,7 @@ func (c *Connector) Configure(config *DriverConfig) error {
 	// Set the driver properties
 	c.addr = config.Address
 	c.timeout = config.Timeout
-	c.options = []grpc.DialOption{grpc.WithBlock()}
+	c.options = []grpc.DialOption{}
 
 	// Create GRPC options necessary for the backend
 	var transportCreds credentials.TransportCredentials

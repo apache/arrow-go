@@ -23,7 +23,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	"github.com/huandu/xstrings"
+	"github.com/stoewer/go-strcase"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -515,7 +515,7 @@ func (psr ProtobufMessageReflection) getDataType() arrow.DataType {
 }
 
 func (psr ProtobufMessageReflection) getFieldByName(n string) *ProtobufFieldReflection {
-	fd := psr.descriptor.Fields().ByTextName(xstrings.ToSnakeCase(n))
+	fd := psr.descriptor.Fields().ByTextName(strcase.SnakeCase(n))
 	fv := psr.rValue
 	if fv.IsValid() {
 		if !fv.IsZero() {
@@ -525,7 +525,7 @@ func (psr ProtobufMessageReflection) getFieldByName(n string) *ProtobufFieldRefl
 			if fd.ContainingOneof() != nil {
 				n = string(fd.ContainingOneof().Name())
 			}
-			fv = fv.FieldByName(xstrings.ToCamelCase(n))
+			fv = fv.FieldByName(strcase.UpperCamelCase(n))
 			for fv.Kind() == reflect.Ptr {
 				fv = fv.Elem()
 			}

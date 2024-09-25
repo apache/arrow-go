@@ -39,6 +39,7 @@ const (
 	SubstraitArithmeticFuncsURI = SubstraitDefaultURIPrefix + "functions_arithmetic.yaml"
 	// URI for official Substrait Comparison funcs extensions
 	SubstraitComparisonFuncsURI = SubstraitDefaultURIPrefix + "functions_comparison.yaml"
+	SubstraitBooleanFuncsURI    = SubstraitDefaultURIPrefix + "functions_boolean.yaml"
 
 	TimestampTzTimezone = "UTC"
 )
@@ -93,7 +94,7 @@ func init() {
 		}
 	}
 
-	for _, fn := range []string{"equal", "not_equal", "lt", "lte", "gt", "gte"} {
+	for _, fn := range []string{"equal", "not_equal", "lt", "lte", "gt", "gte", "is_null", "is_not_null", "is_nan"} {
 		err := DefaultExtensionIDRegistry.AddSubstraitScalarToArrow(
 			extensions.ID{URI: SubstraitComparisonFuncsURI, Name: fn},
 			simpleMapSubstraitToArrowFunc)
@@ -102,9 +103,26 @@ func init() {
 		}
 	}
 
-	for _, fn := range []string{"equal", "not_equal", "less", "less_equal", "greater", "greater_equal"} {
+	for _, fn := range []string{"equal", "not_equal", "less", "less_equal", "greater", "greater_equal", "is_null", "is_not_null", "is_nan"} {
 		err := DefaultExtensionIDRegistry.AddArrowToSubstrait(fn,
 			simpleMapArrowToSubstraitFunc(SubstraitComparisonFuncsURI))
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	for _, fn := range []string{"and", "or"} {
+		err := DefaultExtensionIDRegistry.AddSubstraitScalarToArrow(
+			extensions.ID{URI: SubstraitBooleanFuncsURI, Name: fn},
+			simpleMapSubstraitToArrowFunc)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	for _, fn := range []string{"and_kleene", "or_kleene"} {
+		err := DefaultExtensionIDRegistry.AddArrowToSubstrait(fn,
+			simpleMapArrowToSubstraitFunc(SubstraitBooleanFuncsURI))
 		if err != nil {
 			panic(err)
 		}
@@ -168,6 +186,8 @@ var substraitToArrowFuncMap = map[string]string{
 	"gt":  "greater",
 	"lte": "less_equal",
 	"gte": "greater_equal",
+	"or":  "or_kleene",
+	"and": "and_kleene",
 }
 
 var arrowToSubstraitFuncMap = map[string]string{
@@ -175,6 +195,8 @@ var arrowToSubstraitFuncMap = map[string]string{
 	"greater":       "gt",
 	"less_equal":    "lte",
 	"greater_equal": "gte",
+	"and_kleene":    "and",
+	"or_kleene":     "or",
 }
 
 func simpleMapSubstraitToArrowFunc(sf *expr.ScalarFunction) (fname string, opts compute.FunctionOptions, err error) {
@@ -553,9 +575,9 @@ func ToSubstraitType(dt arrow.DataType, nullable bool, ext ExtensionIDSet) (type
 		return &types.Float32Type{Nullability: nullability}, nil
 	case arrow.FLOAT64:
 		return &types.Float64Type{Nullability: nullability}, nil
-	case arrow.STRING:
+	case arrow.STRING, arrow.LARGE_STRING:
 		return &types.StringType{Nullability: nullability}, nil
-	case arrow.BINARY:
+	case arrow.BINARY, arrow.LARGE_BINARY:
 		return &types.BinaryType{Nullability: nullability}, nil
 	case arrow.DATE32:
 		return &types.DateType{Nullability: nullability}, nil

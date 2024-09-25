@@ -294,7 +294,7 @@ func NewClientWithMiddlewareCtx(ctx context.Context, addr string, auth ClientAut
 		}
 	}
 	opts = append(opts, grpc.WithChainUnaryInterceptor(unary...), grpc.WithChainStreamInterceptor(stream...))
-	conn, err := grpc.DialContext(ctx, addr, opts...)
+	conn, err := grpc.NewClient(addr, opts...)
 	if err != nil {
 		return nil, err
 	}

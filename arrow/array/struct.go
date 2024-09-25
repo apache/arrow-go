@@ -43,6 +43,40 @@ func NewStructArray(cols []arrow.Array, names []string) (*Struct, error) {
 	return NewStructArrayWithNulls(cols, names, nil, 0, 0)
 }
 
+// NewStructArrayWithFields builds a new Struct Array using the passed columns
+// and provided fields. As opposed to NewStructArray, this allows you to provide
+// the full fields to utilize for the struct column instead of just the names.
+func NewStructArrayWithFields(cols []arrow.Array, fields []arrow.Field) (*Struct, error) {
+	if len(cols) != len(fields) {
+		return nil, fmt.Errorf("%w: mismatching number of fields and child arrays", arrow.ErrInvalid)
+	}
+	if len(cols) == 0 {
+		return nil, fmt.Errorf("%w: can't infer struct array length with 0 child arrays", arrow.ErrInvalid)
+	}
+
+	length := cols[0].Len()
+	children := make([]arrow.ArrayData, len(cols))
+	for i, c := range cols {
+		if length != c.Len() {
+			return nil, fmt.Errorf("%w: mismatching child array lengths", arrow.ErrInvalid)
+		}
+		if !arrow.TypeEqual(fields[i].Type, c.DataType()) {
+			return nil, fmt.Errorf("%w: mismatching data type for child #%d, field says '%s', got '%s'",
+				arrow.ErrInvalid, i, fields[i].Type, c.DataType())
+		}
+		if !fields[i].Nullable && c.NullN() > 0 {
+			return nil, fmt.Errorf("%w: field says not-nullable, child #%d has nulls",
+				arrow.ErrInvalid, i)
+		}
+
+		children[i] = c.Data()
+	}
+
+	data := NewData(arrow.StructOf(fields...), length, []*memory.Buffer{nil}, children, 0, 0)
+	defer data.Release()
+	return NewStructData(data), nil
+}
+
 // NewStructArrayWithNulls is like NewStructArray as a convenience function,
 // but also takes in a null bitmap, the number of nulls, and an optional offset
 // to use for creating the Struct Array.

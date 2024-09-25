@@ -341,7 +341,7 @@ func TestServerWithAdditionalServices(t *testing.T) {
 	defer flightClient.Close()
 
 	// Make sure health check is working.
-	conn, err := grpc.Dial(s.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(s.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Error(err)
 	}
