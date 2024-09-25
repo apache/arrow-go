@@ -23,7 +23,7 @@ repos:
       # https://github.com/golangci/golangci-lint/issues/828
       - id: golangci-lint-full
         name: golangci-lint-full-arrow
-        entry: bash -c 'cd arrow && golangci-lint run --timeout=10m'
+        entry: bash -c 'cd arrow && golangci-lint run --timeout=5m'
       - id: golangci-lint-full
         name: golangci-lint-full-parquet
         entry: bash -c 'cd parquet && golangci-lint run'
