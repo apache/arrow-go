@@ -17,7 +17,7 @@
 
 repos:
   - repo: https://github.com/golangci/golangci-lint
-    rev: v1.60.3
+    rev: v1.61.0
     hooks:
       # no built-in support for multiple go.mod
       # https://github.com/golangci/golangci-lint/issues/828
