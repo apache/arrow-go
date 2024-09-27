@@ -32,17 +32,24 @@ type RowGroupMetaData struct {
 	Schema        *schema.Schema
 	version       *AppVersion
 	fileDecryptor encryption.FileDecryptor
+	sortCols      []parquet.SortingColumn
 }
 
 // NewRowGroupMetaData constructs an object from the underlying thrift objects and schema,
 // decrypting if provided and necessary. This is primarily used internally and consumers
 // should use the RowGroupMetaDataBuilder rather than this directly.
 func NewRowGroupMetaData(rg *format.RowGroup, sc *schema.Schema, version *AppVersion, decryptor encryption.FileDecryptor) *RowGroupMetaData {
+	sortCols := make([]parquet.SortingColumn, len(rg.SortingColumns))
+	for i, sc := range rg.SortingColumns {
+		sortCols[i] = *sc
+	}
+
 	return &RowGroupMetaData{
 		rowGroup:      rg,
 		Schema:        sc,
 		version:       version,
 		fileDecryptor: decryptor,
+		sortCols:      sortCols,
 	}
 }
 
@@ -59,7 +66,7 @@ func (r *RowGroupMetaData) Equals(other *RowGroupMetaData) bool {
 // number of rows for a row group regardless of repetition and definition levels.
 func (r *RowGroupMetaData) NumRows() int64 { return r.rowGroup.NumRows }
 
-// TotalByteSize is the total size of this rowgroup on disk
+// TotalByteSize is the total size of all uncompressed column data in this row group
 func (r *RowGroupMetaData) TotalByteSize() int64 { return r.rowGroup.GetTotalByteSize() }
 
 // FileOffset is the location in the file where the data for this rowgroup begins
@@ -77,6 +84,11 @@ func (r *RowGroupMetaData) ColumnChunk(i int) (*ColumnChunkMetaData, error) {
 	}
 
 	return NewColumnChunkMetaData(r.rowGroup.Columns[i], r.Schema.Column(i), r.version, r.rowGroup.GetOrdinal(), int16(i), r.fileDecryptor)
+}
+
+// SortingColumns returns the current metadata for how columns are sorted in this row group
+func (r *RowGroupMetaData) SortingColumns() []parquet.SortingColumn {
+	return r.sortCols
 }
 
 // RowGroupMetaDataBuilder is a convenience object for constructing row group
@@ -143,14 +155,15 @@ func (r *RowGroupMetaDataBuilder) NextColumnChunk() *ColumnChunkMetaDataBuilder 
 // file offset, and total compressed sizes. totalBytesWritten gets written as the
 // TotalByteSize for the row group and Ordinal should be the index of the row group
 // being written. e.g. first row group should be 0, second is 1, and so on...
-func (r *RowGroupMetaDataBuilder) Finish(totalBytesWritten int64, ordinal int16) error {
+func (r *RowGroupMetaDataBuilder) Finish(_ int64, ordinal int16) error {
 	if r.nextCol != r.NumColumns() {
 		return fmt.Errorf("parquet: only %d out of %d columns are initialized", r.nextCol-1, r.schema.NumColumns())
 	}
 
 	var (
-		fileOffset      int64 = 0
-		totalCompressed int64 = 0
+		fileOffset        int64
+		totalCompressed   int64
+		totalUncompressed int64
 	)
 
 	for idx, col := range r.rg.Columns {
@@ -167,11 +180,20 @@ func (r *RowGroupMetaDataBuilder) Finish(totalBytesWritten int64, ordinal int16)
 		// sometimes column metadata is encrypted and not available to read
 		// so we must get total compressed size from column builder
 		totalCompressed += r.colBuilders[idx].TotalCompressedSize()
+		totalUncompressed += r.colBuilders[idx].TotalUncompressedSize()
+	}
+
+	if len(r.props.SortingColumns()) > 0 {
+		sortCols := r.props.SortingColumns()
+		r.rg.SortingColumns = make([]*format.SortingColumn, len(sortCols))
+		for i := range sortCols {
+			r.rg.SortingColumns[i] = &sortCols[i]
+		}
 	}
 
 	r.rg.FileOffset = &fileOffset
 	r.rg.TotalCompressedSize = &totalCompressed
-	r.rg.TotalByteSize = totalBytesWritten
+	r.rg.TotalByteSize = totalUncompressed
 	r.rg.Ordinal = &ordinal
 	return nil
 }

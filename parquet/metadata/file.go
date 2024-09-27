@@ -282,9 +282,8 @@ func (f *FileMetaData) NumSchemaElements() int {
 
 // RowGroup provides the metadata for the (0-based) index of the row group
 func (f *FileMetaData) RowGroup(i int) *RowGroupMetaData {
-	return &RowGroupMetaData{
-		f.RowGroups[i], f.Schema, f.version, f.FileDecryptor,
-	}
+	return NewRowGroupMetaData(f.RowGroups[i], f.Schema,
+		f.version, f.FileDecryptor)
 }
 
 func (f *FileMetaData) Serialize(ctx context.Context) ([]byte, error) {

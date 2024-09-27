@@ -129,7 +129,7 @@ func TestBuildAccess(t *testing.T) {
 		rg1Access := accessor.RowGroup(0)
 		assert.Equal(t, 2, rg1Access.NumColumns())
 		assert.Equal(t, nrows/2, rg1Access.NumRows())
-		assert.Equal(t, int64(1024), rg1Access.TotalByteSize())
+		assert.Equal(t, int64(1200), rg1Access.TotalByteSize())
 		assert.Equal(t, int64(1024), rg1Access.TotalCompressedSize())
 
 		rg1Col1, err := rg1Access.ColumnChunk(0)
@@ -169,7 +169,7 @@ func TestBuildAccess(t *testing.T) {
 		rg2Access := accessor.RowGroup(1)
 		assert.Equal(t, 2, rg2Access.NumColumns())
 		assert.Equal(t, nrows/2, rg2Access.NumRows())
-		assert.EqualValues(t, 1024, rg2Access.TotalByteSize())
+		assert.EqualValues(t, 1200, rg2Access.TotalByteSize())
 		assert.EqualValues(t, 1024, rg2Access.TotalCompressedSize())
 
 		rg2Col1, err := rg2Access.ColumnChunk(0)
