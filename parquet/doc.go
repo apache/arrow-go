@@ -78,4 +78,4 @@
 package parquet
 
 //go:generate go run golang.org/x/tools/cmd/stringer -type=Version -linecomment
-//go:generate thrift -o internal -r --gen go ../../cpp/src/parquet/parquet.thrift
+//go:generate thrift -o internal -r --gen go ../parquet.thrift
