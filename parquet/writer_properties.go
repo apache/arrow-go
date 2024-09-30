@@ -19,6 +19,7 @@ package parquet
 import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet/compress"
+	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 )
 
 // Constants for default property values used for the default reader, writer and column props.
@@ -80,6 +81,9 @@ func DefaultColumnProperties() ColumnProperties {
 		CompressionLevel:  compress.DefaultCompressionLevel,
 	}
 }
+
+// SortingColumn specifies a sort order within a rowgroup of a specific leaf column.
+type SortingColumn = format.SortingColumn
 
 type writerPropConfig struct {
 	wr            *WriterProperties
@@ -299,6 +303,15 @@ func WithStoreDecimalAsInteger(enabled bool) WriterProperty {
 	}
 }
 
+// WithSortingColumns allow specifying the sorting columns in the written metadata.
+// If this is set, the user should ensure that records are sorted by these columns,
+// otherwise the sorting data will be inconsistent with the sorting_columns metadata.
+func WithSortingColumns(cols []SortingColumn) WriterProperty {
+	return func(cfg *writerPropConfig) {
+		cfg.wr.sortingCols = cols
+	}
+}
+
 // WriterProperties is the collection of properties to use for writing a parquet file. The values are
 // read only once it has been constructed.
 type WriterProperties struct {
@@ -317,6 +330,7 @@ type WriterProperties struct {
 	defColumnProps  ColumnProperties
 	columnProps     map[string]*ColumnProperties
 	encryptionProps *FileEncryptionProperties
+	sortingCols     []SortingColumn
 }
 
 func defaultWriterProperties() *WriterProperties {
@@ -332,6 +346,7 @@ func defaultWriterProperties() *WriterProperties {
 		rootName:        DefaultRootName,
 		rootRepetition:  Repetitions.Repeated,
 		defColumnProps:  DefaultColumnProperties(),
+		sortingCols:     []SortingColumn{},
 	}
 }
 
@@ -410,6 +425,7 @@ func (w *WriterProperties) DictionaryPageSizeLimit() int64   { return w.dictPage
 func (w *WriterProperties) Version() Version                 { return w.parquetVersion }
 func (w *WriterProperties) DataPageVersion() DataPageVersion { return w.dataPageVersion }
 func (w *WriterProperties) MaxRowGroupLength() int64         { return w.maxRowGroupLen }
+func (w *WriterProperties) SortingColumns() []SortingColumn  { return w.sortingCols }
 
 // Compression returns the default compression type that will be used for any columns that don't
 // have a specific compression defined.

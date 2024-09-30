@@ -238,7 +238,8 @@ type ColumnChunkMetaDataBuilder struct {
 	props  *parquet.WriterProperties
 	column *schema.Column
 
-	compressedSize int64
+	compressedSize   int64
+	uncompressedSize int64
 }
 
 func NewColumnChunkMetaDataBuilder(props *parquet.WriterProperties, column *schema.Column) *ColumnChunkMetaDataBuilder {
@@ -285,6 +286,15 @@ func (c *ColumnChunkMetaDataBuilder) TotalCompressedSize() int64 {
 		return c.compressedSize
 	}
 	return c.chunk.MetaData.GetTotalCompressedSize()
+}
+
+func (c *ColumnChunkMetaDataBuilder) TotalUncompressedSize() int64 {
+	// if this column is encrypted, after Finish is called, the MetaData
+	// field is set to nil and we store the compressed size so return that
+	if c.chunk.MetaData == nil {
+		return c.uncompressedSize
+	}
+	return c.chunk.MetaData.GetTotalUncompressedSize()
 }
 
 func (c *ColumnChunkMetaDataBuilder) SetStats(val EncodedStatistics) {
@@ -404,6 +414,7 @@ func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFal
 
 			if encryptedFooter {
 				c.compressedSize = c.chunk.MetaData.GetTotalCompressedSize()
+				c.uncompressedSize = c.chunk.MetaData.GetTotalUncompressedSize()
 				c.chunk.MetaData = nil
 			} else {
 				// Keep redacted metadata version for old readers
