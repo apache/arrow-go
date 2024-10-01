@@ -88,7 +88,7 @@ jobs:
       GO: ${{ matrix.go }}
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
           submodules: recursive
       - name: Login to GitHub Container registry
@@ -123,7 +123,7 @@ jobs:
       GO: ${{ matrix.go }}
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
           submodules: recursive
       - name: Login to GitHub Container registry
@@ -163,7 +163,7 @@ jobs:
       GO: ${{ matrix.go }}
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
           submodules: recursive
       - name: Login to GitHub Container registry
@@ -201,7 +201,7 @@ jobs:
           - '1.23'
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
           submodules: recursive
       - name: Setup Go
@@ -230,7 +230,7 @@ jobs:
       ARROW_GO_TESTCGO: "1"
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
           submodules: recursive
       - name: Setup Go
@@ -262,7 +262,7 @@ jobs:
           - '1.23'
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
           submodules: recursive
       - name: Setup Go
@@ -300,7 +300,7 @@ jobs:
             /d 1 `
             /f
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
           submodules: recursive
       - uses: msys2/setup-msys2@v2
@@ -337,7 +337,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
           submodules: recursive
       - name: Get required Go version
@@ -362,7 +362,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
           submodules: recursive
       - name: Build and Run Example
@@ -379,23 +379,23 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout Arrow
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
           fetch-depth: 0
           repository: apache/arrow
           submodules: recursive
       - name: Checkout Arrow Rust
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
           repository: apache/arrow-rs
           path: rust
       - name: Checkout Arrow nanoarrow
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
           repository: apache/arrow-nanoarrow
           path: nanoarrow
       - name: Checkout Arrow Go
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
           path: go
       - name: Free up disk space
