@@ -38,3 +38,6 @@ notifications:
   issues_status: issues@arrow.apache.org
   issues_comment: github@arrow.apache.org
   pullrequests: github@arrow.apache.org
+publish:
+  whoami: asf-site
+  subdir: go
