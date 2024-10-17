@@ -23,31 +23,26 @@ body:
   - type: markdown
     attributes:
       value: >
-        While we enable issues as a mechanism for new contributors and passers-by who
-        are unfamiliar with Apache Software Foundation projects to ask questions and
-        interact with the project, we encourage users to ask such questions on public
-        mailing lists:
+        While we enable issues as a mechanism for new contributors and passers-by who are unfamiliar with Apache Software Foundation projects to ask questions and interact with the project, we encourage users to ask such questions on public mailing lists:
 
-        * Development discussions: dev@arrow.apache.org (first subscribe by sending an
-        e-mail to dev-subscribe@arrow.apache.org).
+        * Development discussions: dev@arrow.apache.org (first subscribe by sending an e-mail to dev-subscribe@arrow.apache.org).
 
-        * User discussions: user@arrow.apache.org (first subscribe by sending an e-mail
-        to user-subscribe@arrow.apache.org).
+        * User discussions: user@arrow.apache.org (first subscribe by sending an e-mail to user-subscribe@arrow.apache.org).
 
         * Mailing list archives: https://arrow.apache.org/community/
 
 
-        Do not be surprised by responses to issues raised here directing you to those
-        mailing lists, or to report a bug or feature request here.
+        Do not be surprised by responses to issues raised here directing you to those mailing lists, or to report a bug or feature request here.
 
 
         Thank you!
+
   - type: textarea
     id: description
     attributes:
       label: >
-        Describe the usage question you have. Please include as many useful details as
-        possible.
+        Describe the usage question you have. Please include as many useful details as possible.
+
     validations:
       required: true
   - type: dropdown
