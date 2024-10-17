@@ -19,6 +19,8 @@
 *.tmpldata
 go.sum
 
+.github/pull_request_template.md
+
 arrow/flight/gen/flight/*.pb.go
 arrow/type_string.go
 arrow/unionmode_string.go
