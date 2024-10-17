@@ -69,7 +69,7 @@ func (a *String) ValueStr(i int) string {
 
 // ValueOffset returns the offset of the value at index i.
 func (a *String) ValueOffset(i int) int {
-	if i < 0 || i > a.array.data.length {
+	if i < 0 || i >= a.array.data.length {
 		panic("arrow/array: index out of range")
 	}
 	return int(a.offsets[i+a.array.data.offset])
