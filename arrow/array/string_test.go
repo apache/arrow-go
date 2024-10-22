@@ -90,9 +90,6 @@ func TestStringArray(t *testing.T) {
 		if got, want := arr.ValueOffset(i), int(offsets[i]); got != want {
 			t.Fatalf("arr-offset-beg[%d]: got=%d, want=%d", i, got, want)
 		}
-		if got, want := arr.ValueOffset(i+1), int(offsets[i+1]); got != want {
-			t.Fatalf("arr-offset-end[%d]: got=%d, want=%d", i+1, got, want)
-		}
 	}
 
 	if !reflect.DeepEqual(offsets, arr.ValueOffsets()) {
@@ -371,9 +368,6 @@ func TestLargeStringArray(t *testing.T) {
 
 		if got, want := arr.ValueOffset(i), offsets[i]; got != want {
 			t.Fatalf("arr-offset-beg[%d]: got=%d, want=%d", i, got, want)
-		}
-		if got, want := arr.ValueOffset(i+1), offsets[i+1]; got != want {
-			t.Fatalf("arr-offset-end[%d]: got=%d, want=%d", i+1, got, want)
 		}
 	}
 

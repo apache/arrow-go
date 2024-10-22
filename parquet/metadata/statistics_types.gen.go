@@ -1980,12 +1980,12 @@ func (s *ByteArrayStatistics) UpdateFromArrow(values arrow.Array, updateCounts b
 		min       = s.defaultMin()
 		max       = s.defaultMax()
 		arr       = values.(array.BinaryLike)
-		data      = arr.ValueBytes()
+		data      = arr.ValueBytes()		
 		curOffset = int64(0)
 	)
 
 	for i := 0; i < arr.Len(); i++ {
-		nextOffset := arr.ValueOffset64(i + 1)
+		nextOffset := curOffset + int64(arr.ValueLen(i))
 		v := data[curOffset:nextOffset]
 		curOffset = nextOffset
 
