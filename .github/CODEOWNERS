@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 #
-# Any committer can add themselves to any  of the path patterns
+# Any committer can add themselves to any of the path patterns
 # and will subsequently get requested as a reviewer for any PRs
 # that change matching files.
 #
