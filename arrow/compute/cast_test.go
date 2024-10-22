@@ -1622,6 +1622,13 @@ func (c *CastSuite) checkCastZeroCopy(from arrow.DataType, json string, to arrow
 	checkCastZeroCopy(c.T(), arr, to, compute.NewCastOptions(to, true))
 }
 
+func (c *CastSuite) TestTimestampToTimestampSimpleTimezone() {
+	c.checkCast(&arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "Etc/UTC"},
+		arrow.FixedWidthTypes.Timestamp_us,
+		`["2023-01-01T19:25:00.123456+00:00", null, "2023-01-01T19:25:00.123456+00:00"]`,
+		`["2023-01-01T19:25:00.123456+00:00", null, "2023-01-01T19:25:00.123456+00:00"]`)
+}
+
 func (c *CastSuite) TestTimestampToTimestamp() {
 	tests := []struct {
 		coarse, fine arrow.DataType
