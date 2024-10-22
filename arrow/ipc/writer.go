@@ -627,9 +627,13 @@ func (w *recordEncoder) visit(p *Payload, arr arrow.Array) error {
 		case needTruncate(int64(data.Offset()), values, totalDataBytes):
 			// slice data buffer to include the range we need now.
 			var (
-				beg = arr.ValueOffset64(0)
-				len = minI64(paddedLength(totalDataBytes, kArrowAlignment), int64(totalDataBytes))
+				beg int64 = 0
+				len       = minI64(paddedLength(totalDataBytes, kArrowAlignment), int64(totalDataBytes))
 			)
+			if arr.Len() > 0 {
+				beg = arr.ValueOffset64(0)
+			}
+
 			values = memory.NewBufferBytes(data.Buffers()[2].Bytes()[beg : beg+len])
 		default:
 			if values != nil {
