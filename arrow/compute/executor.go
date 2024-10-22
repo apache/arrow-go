@@ -587,8 +587,7 @@ func (s *scalarExecutor) executeSpans(data chan<- Datum) (err error) {
 
 	if s.preallocContiguous {
 		// make one big output alloc
-		prealloc := s.prepareOutput(int(s.iterLen))
-		output = *prealloc
+		output := s.prepareOutput(int(s.iterLen))
 
 		output.Offset = 0
 		var resultOffset int64
@@ -598,15 +597,19 @@ func (s *scalarExecutor) executeSpans(data chan<- Datum) (err error) {
 				break
 			}
 			output.SetSlice(resultOffset, input.Len)
-			err = s.executeSingleSpan(&input, &output)
+			err = s.executeSingleSpan(&input, output)
 			resultOffset = nextOffset
 		}
 		if err != nil {
-			prealloc.Release()
+			output.Release()
 			return
 		}
 
-		return s.emitResult(prealloc, data)
+		if output.Offset != 0 {
+			output.SetSlice(0, s.iterLen)
+		}
+
+		return s.emitResult(output, data)
 	}
 
 	// fully preallocating, but not contiguously
