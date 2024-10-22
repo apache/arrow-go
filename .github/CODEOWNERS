@@ -39,5 +39,5 @@ compose.yaml @zeroshade @assignUser @kou @raulcd
 # PR CI and repository files
 /.github/ @zeroshade @kou @assignUser @raulcd
 .asf.yaml @zeroshade @kou @assignUser @raulcd
-.pre-commit-config.yaml
+.pre-commit-config.yaml @kou @zeroshade
 .golangci.yaml @kou @zeroshade
