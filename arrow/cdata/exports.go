@@ -373,6 +373,7 @@ func exportAsyncProducer(schema *arrow.Schema, stream <-chan RecordMessage, hand
 			return err
 		case req := <-reqChan:
 			pending += req
+		default:
 		}
 
 		if pending > 0 {
