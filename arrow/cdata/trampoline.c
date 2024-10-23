@@ -20,6 +20,7 @@
 
 int streamGetSchema(struct ArrowArrayStream*, struct ArrowSchema*);
 int streamGetNext(struct ArrowArrayStream*, struct ArrowArray*);
+int asyncTaskExtract(struct ArrowAsyncTask*, struct ArrowDeviceArray*);
 
 int streamGetSchemaTrampoline(struct ArrowArrayStream* stream, struct ArrowSchema* out) {
   // XXX(https://github.com/apache/arrow-adbc/issues/729)
@@ -31,4 +32,9 @@ int streamGetNextTrampoline(struct ArrowArrayStream* stream, struct ArrowArray* 
   // XXX(https://github.com/apache/arrow-adbc/issues/729)
   memset(out, 0, sizeof(*out));
   return streamGetNext(stream, out);
+}
+
+int asyncTaskExtractTrampoline(struct ArrowAsyncTask* task, struct ArrowDeviceArray* out) {
+  memset(out, 0, sizeof(*out));
+  return asyncTaskExtract(task, out);
 }

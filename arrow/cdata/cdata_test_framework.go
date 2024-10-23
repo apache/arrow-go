@@ -37,6 +37,13 @@ package cdata
 //	return out;
 // }
 //
+// static struct ArrowAsyncDeviceStreamHandler* get_test_async_handler() {
+//   struct ArrowAsyncDeviceStreamHandler* handler =
+//		(struct ArrowAsyncDeviceStreamHandler*)malloc(sizeof(struct ArrowAsyncDeviceStreamHandler));
+//	 memset(handler, 0, sizeof(*handler));
+//	 return handler;
+// }
+//
 // void release_test_arr(struct ArrowArray* arr);
 //
 // static int32_t* get_data() {
@@ -130,6 +137,14 @@ func testPrimitive(fmtstr string) CArrowSchema {
 
 func freeMallocedSchemas(schemas **CArrowSchema) {
 	C.free_malloced_schemas(schemas)
+}
+
+func testAsyncHandler() *CArrowAsyncDeviceStreamHandler {
+	return C.get_test_async_handler()
+}
+
+func freeAsyncHandler(h *CArrowAsyncDeviceStreamHandler) {
+	C.free(unsafe.Pointer(h))
 }
 
 func testNested(fmts, names []string, isnull []bool) **CArrowSchema {

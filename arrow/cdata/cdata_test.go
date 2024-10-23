@@ -24,6 +24,7 @@
 package cdata
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,6 +43,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/memory/mallocator"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSchemaExport(t *testing.T) {
@@ -1024,4 +1026,110 @@ func TestConfuseGoGc(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestAsyncInterfacesSimple(t *testing.T) {
+	reclist := arrdata.Records["primitives"]
+
+	handler := testAsyncHandler()
+	defer freeAsyncHandler(handler)
+
+	ctx := context.Background()
+	ch := CreateAsyncDeviceStreamHandler(ctx, 1, handler)
+
+	stream := make(chan RecordMessage, 1)
+	go func() {
+		defer close(stream)
+		for _, r := range reclist {
+			r.Retain()
+			stream <- RecordMessage{Record: r}
+		}
+	}()
+
+	wait := make(chan struct{})
+	go func() {
+		defer close(wait)
+		assert.NoError(t, ExportAsyncRecordBatchStream(reclist[0].Schema(), stream, handler))
+	}()
+
+	asyncStream := <-ch
+	require.NoError(t, asyncStream.Err)
+
+	assert.True(t, reclist[0].Schema().Equal(asyncStream.Schema))
+	var idx int
+	for r := range asyncStream.Stream {
+		require.NoError(t, r.Err)
+		assert.True(t, array.RecordEqual(reclist[idx], r.Record))
+		idx++
+		r.Record.Release()
+	}
+
+	<-wait
+}
+
+func TestAsyncSchemaError(t *testing.T) {
+	handler := testAsyncHandler()
+	defer freeAsyncHandler(handler)
+
+	ctx := context.Background()
+	ch := CreateAsyncDeviceStreamHandler(ctx, 1, handler)
+
+	wait := make(chan struct{})
+	go func() {
+		defer close(wait)
+		err := ExportAsyncRecordBatchStream(nil, nil, handler)
+		assert.ErrorIs(t, err, arrow.ErrInvalid)
+		assert.ErrorContains(t, err, "must have non-nil schema")
+	}()
+
+	asyncStream := <-ch
+	require.Error(t, asyncStream.Err)
+
+	var asyncErr AsyncStreamError
+	assert.ErrorAs(t, asyncStream.Err, &asyncErr)
+	assert.Equal(t, 22, int(asyncErr.Code))
+
+	<-wait
+}
+
+func TestAsyncPropagateError(t *testing.T) {
+	reclist := arrdata.Records["primitives"]
+
+	handler := testAsyncHandler()
+	defer freeAsyncHandler(handler)
+
+	ctx := context.Background()
+	ch := CreateAsyncDeviceStreamHandler(ctx, 1, handler)
+
+	stream := make(chan RecordMessage, 1)
+	go func() {
+		defer close(stream)
+		reclist[0].Retain()
+		stream <- RecordMessage{Record: reclist[0]}
+		stream <- RecordMessage{Err: assert.AnError}
+	}()
+
+	wait := make(chan struct{})
+	go func() {
+		defer close(wait)
+		err := ExportAsyncRecordBatchStream(reclist[0].Schema(), stream, handler)
+		assert.ErrorIs(t, err, assert.AnError)
+	}()
+
+	asyncStream := <-ch
+	require.NoError(t, asyncStream.Err)
+
+	assert.True(t, reclist[0].Schema().Equal(asyncStream.Schema))
+	rec1 := <-asyncStream.Stream
+	require.NoError(t, rec1.Err)
+	assert.True(t, array.RecordEqual(reclist[0], rec1.Record))
+	rec1.Record.Release()
+
+	rec2 := <-asyncStream.Stream
+	var err AsyncStreamError
+	assert.ErrorContains(t, rec2.Err, assert.AnError.Error())
+	assert.ErrorAs(t, rec2.Err, &err)
+	assert.Equal(t, 22, int(err.Code))
+
+	<-wait
 }
