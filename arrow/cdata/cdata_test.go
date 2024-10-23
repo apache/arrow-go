@@ -1037,7 +1037,7 @@ func TestAsyncInterfacesSimple(t *testing.T) {
 	ctx := context.Background()
 	ch := CreateAsyncDeviceStreamHandler(ctx, 1, handler)
 
-	stream := make(chan RecordMessage, 1)
+	stream := make(chan RecordMessage, len(reclist))
 	go func() {
 		defer close(stream)
 		for _, r := range reclist {
@@ -1101,7 +1101,7 @@ func TestAsyncPropagateError(t *testing.T) {
 	ctx := context.Background()
 	ch := CreateAsyncDeviceStreamHandler(ctx, 1, handler)
 
-	stream := make(chan RecordMessage, 1)
+	stream := make(chan RecordMessage, 2)
 	go func() {
 		defer close(stream)
 		reclist[0].Retain()
