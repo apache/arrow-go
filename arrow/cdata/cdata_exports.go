@@ -33,10 +33,23 @@ package cdata
 // void goReleaseSchema(struct ArrowSchema* schema) {
 //	 releaseExportedSchema(schema);
 // }
+//
+// void goCallCancel(struct ArrowAsyncProducer* producer) {
+//  producer->cancel(producer);
+// }
+//
+// int goExtractTaskData(struct ArrowAsyncTask* task, struct ArrowDeviceArray* out) {
+//   return task->extract_data(task, out);
+// }
+//
+// static void goCallRequest(struct ArrowAsyncProducer* producer, int64_t n) {
+// 	producer->request(producer, n);
+// }
 import "C"
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"runtime/cgo"
@@ -481,4 +494,71 @@ func (rr cRecordReader) release() {
 		C.free(unsafe.Pointer(rr.err))
 	}
 	rr.rdr.Release()
+}
+
+type cAsyncStreamHandler struct {
+	producer  *CArrowAsyncProducer
+	taskQueue chan taskState
+	ctx       context.Context
+}
+
+func asyncTaskQueue(ctx context.Context, schema *arrow.Schema, recordStream chan<- RecordMessage, taskQueue <-chan taskState, producer *CArrowAsyncProducer) {
+	defer close(recordStream)
+	for {
+		select {
+		case <-ctx.Done():
+			C.goCallCancel(producer)
+			return
+		case task, ok := <-taskQueue:
+			// if the queue closes or we receive a nil task, we're done
+			if !ok || (task.err == nil && task.task.extract_data == nil) {
+				return
+			}
+
+			if task.err != nil {
+				recordStream <- RecordMessage{Err: task.err}
+				continue
+			}
+
+			// request another batch now that we've processed this one
+			C.goCallRequest(producer, C.int64_t(1))
+
+			var out CArrowDeviceArray
+			if C.goExtractTaskData(&task.task, &out) != C.int(0) {
+				continue
+			}
+
+			rec, err := ImportCRecordBatchWithSchema(&out.array, schema)
+			if err != nil {
+				recordStream <- RecordMessage{Err: err}
+			} else {
+				recordStream <- RecordMessage{Record: rec, AdditionalMetadata: task.meta}
+			}
+		}
+	}
+}
+
+func (h *cAsyncStreamHandler) onNextTask(task *CArrowAsyncTask, metadata *C.char) C.int {
+	if task == nil {
+		h.taskQueue <- taskState{}
+		return 0
+	}
+
+	ts := taskState{task: *task}
+	if metadata != nil {
+		ts.meta = decodeCMetadata(metadata)
+	}
+	h.taskQueue <- ts
+	return 0
+}
+
+func (h *cAsyncStreamHandler) onError(code C.int, message, metadata *C.char) {
+	h.taskQueue <- taskState{err: AsyncStreamError{
+		Code: int(code), Msg: C.GoString(message), Metadata: C.GoString(metadata)}}
+}
+
+func (h *cAsyncStreamHandler) release() {
+	close(h.taskQueue)
+	h.taskQueue, h.producer = nil, nil
+	h.producer = nil
 }
