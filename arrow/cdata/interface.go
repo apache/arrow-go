@@ -284,12 +284,19 @@ func ReleaseCArrowArray(arr *CArrowArray) { releaseArr(arr) }
 // ReleaseCArrowSchema calls ArrowSchemaRelease on the passed in cdata schema
 func ReleaseCArrowSchema(schema *CArrowSchema) { releaseSchema(schema) }
 
+// RecordMessage is a simple container for a record batch channel to stream for
+// using the Async C Data Interface via ExportAsyncRecordBatchStream.
 type RecordMessage struct {
 	Record             arrow.Record
 	AdditionalMetadata arrow.Metadata
 	Err                error
 }
 
+// AsyncRecordBatchStream represents a stream of record batches being read in
+// from an ArrowAsyncDeviceStreamHandler's callbacks. If an error was encountered
+// before the call to on_schema, then this will contain the error as Err. Otherwise
+// the Schema will be valid and the Stream is a channel of RecordMessages being
+// propagated via on_next_task and extract_data.
 type AsyncRecordBatchStream struct {
 	Schema             *arrow.Schema
 	AdditionalMetadata arrow.Metadata
@@ -297,6 +304,9 @@ type AsyncRecordBatchStream struct {
 	Stream             <-chan RecordMessage
 }
 
+// AsyncStreamError represents an error encountered via a call to the on_error
+// callback of an ArrowAsyncDeviceStreamHandler. The Code is the error code that
+// should be errno compatible.
 type AsyncStreamError struct {
 	Code     int
 	Msg      string
