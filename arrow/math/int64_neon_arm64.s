@@ -11,6 +11,10 @@ TEXT ·_sum_int64_neon(SB), $0-24
 	MOVD	len+8(FP), R1
 	MOVD	res+16(FP), R2
     
+	// The Go ABI saves the frame pointer register one word below the 
+	// caller's frame. Make room so we don't overwrite it. Needs to stay 
+	// 16-byte aligned 
+	SUB $16, RSP
 	WORD $0xa9bf7bfd // stp x29, x30, [sp, #-16]!
 	WORD $0x910003fd // mov x29, sp
 	CBZ R1, LBB0_3
@@ -23,6 +27,8 @@ LBB0_3:
 	WORD $0xaa1f03e9 // mov     x9, xzr
 	WORD $0xf9000049 // str     x9, [x2]
 	WORD $0xa8c17bfd // ldp     x29, x30, [sp], #16
+	// Put the stack pointer back where it was 
+	ADD $16, RSP
 	RET
 LBB0_4:
 	WORD $0x927ef428 // and     x8, x1, #0xfffffffffffffffc
@@ -54,5 +60,7 @@ LBB0_8:
 LBB0_9:
 	WORD $0xf9000049 // str     x9, [x2]
 	WORD $0xa8c17bfd // ldp     x29, x30, [sp], #16
+	// Put the stack pointer back where it was 
+	ADD $16, RSP
 	RET
 

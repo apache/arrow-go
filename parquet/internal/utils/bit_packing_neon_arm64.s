@@ -281,6 +281,10 @@ TEXT ·_unpack32_neon(SB), $0-40
 	// LEAQ LCDATA1<>(SB), BP
 
 	// %bb.0:
+	// The Go ABI saves the frame pointer register one word below the 
+	// caller's frame. Make room so we don't overwrite it. Needs to stay 
+	// 16-byte aligned 
+	SUB $16, RSP
 	WORD $0xa9ba7bfd // stp    x29, x30, [sp, #-96]!
 	WORD $0xd10643e9 // sub    x9, sp, #400
 	WORD $0xa9016ffc // stp    x28, x27, [sp, #16]
@@ -6922,5 +6926,7 @@ LBB0_156:
 	WORD $0xa94267fa    // ldp    x26, x25, [sp, #32]
 	WORD $0xa9416ffc    // ldp    x28, x27, [sp, #16]
 	WORD $0xa8c67bfd    // ldp    x29, x30, [sp], #96
+	// Put the stack pointer back where it was 
+	ADD $16, RSP
 	MOVD R0, num+32(FP)
 	RET
