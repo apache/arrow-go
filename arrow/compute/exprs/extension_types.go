@@ -75,7 +75,7 @@ func (ef *simpleExtensionTypeFactory[P]) ExtensionEquals(other arrow.ExtensionTy
 	return ef.params == rhs.params
 }
 func (ef *simpleExtensionTypeFactory[P]) ArrayType() reflect.Type {
-	return reflect.TypeOf(array.ExtensionArrayBase{})
+	return reflect.TypeOf(simpleExtensionArrayFactory[P]{})
 }
 
 func (ef *simpleExtensionTypeFactory[P]) CreateType(params P) arrow.DataType {
@@ -91,10 +91,14 @@ func (ef *simpleExtensionTypeFactory[P]) CreateType(params P) arrow.DataType {
 	}
 }
 
+type simpleExtensionArrayFactory[P comparable] struct {
+	array.ExtensionArrayBase
+}
+
 type uuidExtParams struct{}
 
 var uuidType = simpleExtensionTypeFactory[uuidExtParams]{
-	name: "uuid", getStorage: func(uuidExtParams) arrow.DataType {
+	name: "arrow.uuid", getStorage: func(uuidExtParams) arrow.DataType {
 		return &arrow.FixedSizeBinaryType{ByteWidth: 16}
 	}}
 

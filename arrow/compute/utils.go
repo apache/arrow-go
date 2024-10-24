@@ -105,6 +105,14 @@ func ensureDictionaryDecoded(vals ...arrow.DataType) {
 	}
 }
 
+func ensureNotExtensionType(vals ...arrow.DataType) {
+	for i, v := range vals {
+		if v.ID() == arrow.EXTENSION {
+			vals[i] = v.(arrow.ExtensionType).StorageType()
+		}
+	}
+}
+
 func replaceNullWithOtherType(vals ...arrow.DataType) {
 	debug.Assert(len(vals) == 2, "should be length 2")
 

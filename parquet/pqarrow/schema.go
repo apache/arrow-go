@@ -24,6 +24,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/flight"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -514,8 +515,10 @@ func arrowFromFLBA(logical schema.LogicalType, length int) (arrow.DataType, erro
 	switch logtype := logical.(type) {
 	case schema.DecimalLogicalType:
 		return arrowDecimal(logtype), nil
-	case schema.NoLogicalType, schema.IntervalLogicalType, schema.UUIDLogicalType:
+	case schema.NoLogicalType, schema.IntervalLogicalType:
 		return &arrow.FixedSizeBinaryType{ByteWidth: int(length)}, nil
+	case schema.UUIDLogicalType:
+		return extensions.NewUUIDType(), nil
 	case schema.Float16LogicalType:
 		return &arrow.Float16Type{}, nil
 	default:

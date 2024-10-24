@@ -228,6 +228,10 @@ func (*UUIDType) ExtensionName() string {
 	return "arrow.uuid"
 }
 
+func (*UUIDType) Bytes() int { return 16 }
+
+func (*UUIDType) BitWidth() int { return 128 }
+
 func (e *UUIDType) String() string {
 	return fmt.Sprintf("extension<%s>", e.ExtensionName())
 }
