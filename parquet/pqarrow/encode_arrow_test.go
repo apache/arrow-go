@@ -2057,6 +2057,7 @@ func (ps *ParquetIOTestSuite) TestArrowExtensionTypeRoundTrip() {
 	defer tbl.Release()
 
 	ps.roundTripTable(mem, tbl, true)
+	ps.roundTripTable(mem, tbl, false)
 }
 
 func (ps *ParquetIOTestSuite) TestArrowUnknownExtensionTypeRoundTrip() {

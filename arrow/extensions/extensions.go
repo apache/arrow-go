@@ -21,8 +21,8 @@ import (
 )
 
 var canonicalExtensionTypes = []arrow.ExtensionType{
-	&Bool8Type{},
-	&UUIDType{},
+	NewBool8Type(),
+	NewUUIDType(),
 	&OpaqueType{},
 	&JSONType{},
 }
