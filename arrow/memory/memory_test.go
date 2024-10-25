@@ -19,6 +19,7 @@ package memory_test
 import (
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow/internal/testing/tools"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
 )
@@ -122,4 +123,13 @@ func BenchmarkSet_8000(b *testing.B) {
 
 func BenchmarkSet_8192(b *testing.B) {
 	benchmarkSet(b, 8192)
+}
+
+func TestSetNoClobberFramePointer(t *testing.T) {
+	var b [8]byte
+	memory.Set(b[:], 0xff)
+	// We should be able to safely frame pointer unwind after calling this
+	// function. The arm64 assembly implementation used to clobber the
+	// frame pointer. See GH-150
+	tools.FPUnwind()
 }

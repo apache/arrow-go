@@ -8,6 +8,10 @@ TEXT ·_levels_to_bitmap_neon(SB), $0-32
     MOVD numLevels+8(FP), R1
     MOVD rhs+16(FP), R2
 
+    // The Go ABI saves the frame pointer register one word below the 
+    // caller's frame. Make room so we don't overwrite it. Needs to stay 
+    // 16-byte aligned 
+    SUB $16, RSP
     WORD $0xa9bf7bfd // stp    x29, x30, [sp, #-16]!
     WORD $0x7100043f // cmp    w1, #1
     WORD $0x910003fd // mov    x29, sp
@@ -79,6 +83,8 @@ LBB1_7:
     BNE LBB1_7
 LBB1_8:
     WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
+    // Put the stack pointer back where it was 
+    ADD $16, RSP
     MOVD R8, res+24(FP)
     RET
 

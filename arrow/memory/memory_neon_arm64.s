@@ -11,6 +11,10 @@ TEXT ·_memset_neon(SB), $0-24
 	MOVD	len+8(FP), R1
 	MOVD	c+16(FP), R2
 
+	// The Go ABI saves the frame pointer register one word below the 
+	// caller's frame. Make room so we don't overwrite it. Needs to stay 
+	// 16-byte aligned 
+	SUB $16, RSP
 	WORD $0xa9bf7bfd // stp    x29, x30, [sp, #-16]!
 	WORD $0x8b010008 // add    x8, x0, x1
 	WORD $0xeb00011f // cmp    x8, x0
@@ -40,4 +44,6 @@ LBB0_6:
 	BNE	LBB0_6
 LBB0_7:
 	WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
+	// Put the stack pointer back where it was 
+	ADD $16, RSP
 	RET
