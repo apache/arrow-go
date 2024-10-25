@@ -19,45 +19,46 @@
 
 # How to contribute to Apache Arrow Go
 
+We utilize [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) for our commit messages. This helps maintain the semantic 
+versioning of this module. 
+
+Please use the following commit types: `build`, `chore`, `ci`, `docs`, 
+`feat`, `fix`, `perf`, `refactor`, `revert`, `style`, `test`.
+
+For PRs with changes entirely within a single sub-package, please use
+a scope that references that package such as `arrow/flight` or 
+`parquet/pqarrow`. For more general PRs, a top level scope should be
+sufficient.
+
+For example:
+
+```
+fix(arrow/cdata): handle empty structs in C data interface
+
+ci: update CI environment
+
+feat(parquet): support new encoding type
+```
+
 ## Did you find a bug?
 
-The Arrow project uses GitHub as a bug tracker.  To report a bug, sign in to
-your GitHub account, navigate to [GitHub issues](https://github.com/apache/arrow-go/issues)
-and click on **New issue** .
+The Arrow project uses GitHub as a bug tracker.  To report a bug, sign in 
+to your GitHub account, navigate to [GitHub issues](https://github.com/apache/arrow-go/issues) and click on **New issue** .
 
 To be assigned to an issue, add a comment "take" to that issue.
 
-Before you create a new bug entry, we recommend you first search among existing
-Arrow issues in [GitHub](https://github.com/apache/arrow-go/issues).
-
-We conventionally prefix the issue title with the component
-name in brackets, such as "[Parquet] Fix panic in record read", 
-so as to make lists more easy to navigate, and
-we'd be grateful if you did the same.
+Before you create a new bug entry, we recommend you first search among 
+existing Arrow issues in [GitHub](https://github.com/apache/arrow-go/issues).
 
 ## Did you write a patch that fixes a bug or brings an improvement?
 
-First create a GitHub issue as described above, selecting **Bug Report** or
-**Enhancement Request**. Then, submit your changes as a GitHub Pull Request.
-We'll ask you to prefix the pull request title with the GitHub issue number
-and the component name in brackets. (for example: "GH-100: [Parquet]
-fix panic in record read"). Respecting this convention
-makes it easier for us to process the backlog of submitted Pull Requests.
-
-### Minor Fixes
-
-Any functionality change should have a GitHub issue opened. For minor changes that
-affect documentation, you do not need to open up a GitHub issue. Instead you can
-prefix the title of your PR with "MINOR: " if meets one of the following:
-
-*  Grammar, usage and spelling fixes that affect no more than 2 files
-*  Documentation updates affecting no more than 2 files and not more
-   than 500 words.
+If there is a corresponding issue for your patch, please make sure to 
+[reference the issue](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue#linking-a-pull-request-to-an-issue-using-a-keyword) in your PR description.
 
 ## Do you want to propose a significant new feature or an important refactoring?
 
 We ask that all discussions about major changes in the codebase happen
-publicly on the [arrow-dev mailing-list](https://mail-archives.apache.org/mod_mbox/arrow-dev/).
+publicly on the [arrow-dev mailing-list](https://arrow.apache.org/community/#mailing-lists).
 
 ## Do you have questions about the source code, the build procedure or the development process?
 
