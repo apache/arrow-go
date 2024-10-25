@@ -401,6 +401,9 @@ func exportArray(arr arrow.Array, out *CArrowArray, outSchema *CArrowSchema) {
 		out.children = (**CArrowArray)(unsafe.Pointer(&childPtrs[0]))
 	case *array.Struct:
 		out.n_children = C.int64_t(arr.NumField())
+		if arr.NumField() == 0 {
+			return
+		}
 		childPtrs := allocateArrowArrayPtrArr(arr.NumField())
 		children := allocateArrowArrayArr(arr.NumField())
 		for i := 0; i < arr.NumField(); i++ {

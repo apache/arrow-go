@@ -309,6 +309,9 @@ func createCArr(arr arrow.Array, alloc *mallocator.Mallocator) *CArrowArray {
 		children = (**CArrowArray)(unsafe.Pointer(&clist[0]))
 		nchildren += 1
 	case *array.Struct:
+		if arr.NumField() == 0 {
+			break
+		}
 		clist := allocateChildrenPtrArr(alloc, arr.NumField())
 		for i := 0; i < arr.NumField(); i++ {
 			clist[i] = createCArr(arr.Field(i), alloc)
