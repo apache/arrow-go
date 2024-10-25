@@ -137,12 +137,12 @@ func TestComparisons(t *testing.T) {
 		one  = scalar.MakeScalar(int32(1))
 		two  = scalar.MakeScalar(int32(2))
 
-		str           = scalar.MakeScalar("hello")
-		bin           = scalar.MakeScalar([]byte("hello"))
-		exampleUUID   = uuid.MustParse("102cb62f-e6f8-4eb0-9973-d9b012ff0967")
-		uidStorage, _ = scalar.MakeScalarParam(exampleUUID[:],
+		str            = scalar.MakeScalar("hello")
+		bin            = scalar.MakeScalar([]byte("hello"))
+		exampleUUID    = uuid.MustParse("102cb62f-e6f8-4eb0-9973-d9b012ff0967")
+		uuidStorage, _ = scalar.MakeScalarParam(exampleUUID[:],
 			&arrow.FixedSizeBinaryType{ByteWidth: 16})
-		uid = scalar.NewExtensionScalar(uidStorage, extensions.NewUUIDType())
+		uuidScalar = scalar.NewExtensionScalar(uuidStorage, extensions.NewUUIDType())
 	)
 
 	getArgType := func(dt arrow.DataType) types.Type {
@@ -191,7 +191,7 @@ func TestComparisons(t *testing.T) {
 
 	expect(t, "equal", one, one, true)
 	expect(t, "equal", one, two, false)
-	expect(t, "equal", uid, uid, true)
+	expect(t, "equal", uuidScalar, uuidScalar, true)
 	expect(t, "less", one, two, true)
 	expect(t, "less", one, zero, false)
 	expect(t, "greater", one, zero, true)

@@ -630,6 +630,7 @@ func executeScalarBatch(ctx context.Context, input compute.ExecBatch, exp expr.E
 
 		if ctx.Err() == context.Canceled && result != nil {
 			result.Release()
+			result = nil
 		}
 
 		return result, err
