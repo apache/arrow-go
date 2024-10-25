@@ -130,4 +130,6 @@ func RegisterScalarBoolean(reg FunctionRegistry) {
 		andNotKleeneDoc, exec.NullComputedPrealloc)
 	makeFunction(reg, "or_kleene", 2, kernels.SimpleBinary[kernels.KleeneOrOpKernel],
 		orKleeneDoc, exec.NullComputedPrealloc)
+	makeFunction(reg, "not", 1, kernels.NotExecKernel, EmptyFuncDoc,
+		exec.NullComputedNoPrealloc)
 }
