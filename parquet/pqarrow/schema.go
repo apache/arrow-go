@@ -24,6 +24,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/flight"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -514,8 +515,10 @@ func arrowFromFLBA(logical schema.LogicalType, length int) (arrow.DataType, erro
 	switch logtype := logical.(type) {
 	case schema.DecimalLogicalType:
 		return arrowDecimal(logtype), nil
-	case schema.NoLogicalType, schema.IntervalLogicalType, schema.UUIDLogicalType:
+	case schema.NoLogicalType, schema.IntervalLogicalType:
 		return &arrow.FixedSizeBinaryType{ByteWidth: int(length)}, nil
+	case schema.UUIDLogicalType:
+		return extensions.NewUUIDType(), nil
 	case schema.Float16LogicalType:
 		return &arrow.Float16Type{}, nil
 	default:
@@ -984,13 +987,15 @@ func applyOriginalStorageMetadata(origin arrow.Field, inferred *SchemaField) (mo
 			return
 		}
 
-		if !arrow.TypeEqual(extType.StorageType(), inferred.Field.Type) {
-			return modified, fmt.Errorf("%w: mismatch storage type '%s' for extension type '%s'",
-				arrow.ErrInvalid, inferred.Field.Type, extType)
-		}
+		if modified || !arrow.TypeEqual(extType, inferred.Field.Type) {
+			if !arrow.TypeEqual(extType.StorageType(), inferred.Field.Type) {
+				return modified, fmt.Errorf("%w: mismatch storage type '%s' for extension type '%s'",
+					arrow.ErrInvalid, inferred.Field.Type, extType)
+			}
 
-		inferred.Field.Type = extType
-		modified = true
+			inferred.Field.Type = extType
+			modified = true
+		}
 	case arrow.SPARSE_UNION, arrow.DENSE_UNION:
 		err = xerrors.New("unimplemented type")
 	case arrow.STRUCT:

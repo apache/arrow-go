@@ -52,6 +52,7 @@ func (fn *compareFunction) DispatchBest(vals ...arrow.DataType) (exec.Kernel, er
 	}
 
 	ensureDictionaryDecoded(vals...)
+	ensureNotExtensionType(vals...)
 	replaceNullWithOtherType(vals...)
 
 	if dt := commonNumeric(vals...); dt != nil {
