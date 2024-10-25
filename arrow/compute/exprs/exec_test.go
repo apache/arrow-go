@@ -27,8 +27,10 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/compute"
 	"github.com/apache/arrow-go/v18/arrow/compute/exprs"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/substrait-io/substrait-go/expr"
@@ -135,8 +137,12 @@ func TestComparisons(t *testing.T) {
 		one  = scalar.MakeScalar(int32(1))
 		two  = scalar.MakeScalar(int32(2))
 
-		str = scalar.MakeScalar("hello")
-		bin = scalar.MakeScalar([]byte("hello"))
+		str           = scalar.MakeScalar("hello")
+		bin           = scalar.MakeScalar([]byte("hello"))
+		exampleUUID   = uuid.MustParse("102cb62f-e6f8-4eb0-9973-d9b012ff0967")
+		uidStorage, _ = scalar.MakeScalarParam(exampleUUID[:],
+			&arrow.FixedSizeBinaryType{ByteWidth: 16})
+		uid = scalar.NewExtensionScalar(uidStorage, extensions.NewUUIDType())
 	)
 
 	getArgType := func(dt arrow.DataType) types.Type {
@@ -147,6 +153,8 @@ func TestComparisons(t *testing.T) {
 			return &types.StringType{}
 		case arrow.BINARY:
 			return &types.BinaryType{}
+		case arrow.EXTENSION:
+			return &types.UUIDType{}
 		}
 		panic("wtf")
 	}
@@ -183,6 +191,7 @@ func TestComparisons(t *testing.T) {
 
 	expect(t, "equal", one, one, true)
 	expect(t, "equal", one, two, false)
+	expect(t, "equal", uid, uid, true)
 	expect(t, "less", one, two, true)
 	expect(t, "less", one, zero, false)
 	expect(t, "greater", one, zero, true)

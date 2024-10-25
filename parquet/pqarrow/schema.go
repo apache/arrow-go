@@ -987,13 +987,15 @@ func applyOriginalStorageMetadata(origin arrow.Field, inferred *SchemaField) (mo
 			return
 		}
 
-		if !arrow.TypeEqual(extType.StorageType(), inferred.Field.Type) {
-			return modified, fmt.Errorf("%w: mismatch storage type '%s' for extension type '%s'",
-				arrow.ErrInvalid, inferred.Field.Type, extType)
-		}
+		if modified || !arrow.TypeEqual(extType, inferred.Field.Type) {
+			if !arrow.TypeEqual(extType.StorageType(), inferred.Field.Type) {
+				return modified, fmt.Errorf("%w: mismatch storage type '%s' for extension type '%s'",
+					arrow.ErrInvalid, inferred.Field.Type, extType)
+			}
 
-		inferred.Field.Type = extType
-		modified = true
+			inferred.Field.Type = extType
+			modified = true
+		}
 	case arrow.SPARSE_UNION, arrow.DENSE_UNION:
 		err = xerrors.New("unimplemented type")
 	case arrow.STRUCT:
