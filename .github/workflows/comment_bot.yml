@@ -16,17 +16,14 @@
 # under the License.
 
 name: Comment Bot
-
 on:
   issue_comment:
     types:
       - created
       - edited
-
 permissions:
   contents: read
   pull-requests: write
-
 jobs:
   issue_assign:
     name: "Assign issue"
@@ -38,7 +35,7 @@ jobs:
       - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
+          script: |-
             github.rest.issues.addAssignees({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
