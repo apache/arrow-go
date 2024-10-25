@@ -129,6 +129,7 @@ func TestSetNoClobberFramePointer(t *testing.T) {
 	var b [8]byte
 	memory.Set(b[:], 0xff)
 	// We should be able to safely frame pointer unwind after calling this
-	// function
+	// function. The arm64 assembly implementation used to clobber the
+	// frame pointer. See #150
 	tools.FPUnwind()
 }
