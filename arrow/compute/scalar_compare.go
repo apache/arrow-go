@@ -20,12 +20,10 @@ package compute
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/compute/internal/kernels"
-	"github.com/apache/arrow-go/v18/arrow/scalar"
 )
 
 type compareFunction struct {
@@ -151,34 +149,11 @@ func RegisterScalarComparisons(reg FunctionRegistry) {
 	reg.AddFunction(isNullFn, false)
 	reg.AddFunction(isNotNullFn, false)
 
-	reg.AddFunction(NewMetaFunction("is_nan", Unary(), EmptyFuncDoc,
-		func(ctx context.Context, opts FunctionOptions, args ...Datum) (Datum, error) {
-			type hasType interface {
-				Type() arrow.DataType
-			}
-
-			// only Scalar, Array and ChunkedArray have a Type method
-			arg, ok := args[0].(hasType)
-			if !ok {
-				// don't support Table/Record/None kinds
-				return nil, fmt.Errorf("%w: unsupported type for is_nan %s",
-					arrow.ErrNotImplemented, args[0])
-			}
-
-			switch arg.Type() {
-			case arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Float64:
-				return CallFunction(ctx, "not_equal", nil, args[0], args[0])
-			default:
-				if arg, ok := args[0].(ArrayLikeDatum); ok {
-					result, err := scalar.MakeArrayFromScalar(scalar.NewBooleanScalar(false),
-						int(arg.Len()), GetAllocator(ctx))
-					if err != nil {
-						return nil, err
-					}
-					return NewDatumWithoutOwning(result), nil
-				}
-
-				return NewDatum(false), nil
-			}
-		}), false)
+	isNaNFn := &compareFunction{*NewScalarFunction("is_nan", Unary(), EmptyFuncDoc)}
+	for _, k := range kernels.IsNaNKernels() {
+		if err := isNaNFn.AddKernel(k); err != nil {
+			panic(err)
+		}
+	}
+	reg.AddFunction(isNaNFn, false)
 }
