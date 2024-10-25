@@ -571,6 +571,25 @@ func executeScalarBatch(ctx context.Context, input compute.ExecBatch, exp expr.E
 			return nil, err
 		}
 
+		var newArgs []compute.Datum
+		// cast arguments if necessary
+		for i, arg := range args {
+			if !arrow.TypeEqual(argTypes[i], arg.(compute.ArrayLikeDatum).Type()) {
+				if newArgs == nil {
+					newArgs = make([]compute.Datum, len(args))
+					copy(newArgs, args)
+				}
+				newArgs[i], err = compute.CastDatum(ctx, arg, compute.SafeCastOptions(argTypes[i]))
+				if err != nil {
+					return nil, err
+				}
+				defer newArgs[i].Release()
+			}
+		}
+		if newArgs != nil {
+			args = newArgs
+		}
+
 		kctx := &exec.KernelCtx{Ctx: ctx, Kernel: k}
 		init := k.GetInitFn()
 		kinitArgs := exec.KernelInitArgs{Kernel: k, Inputs: argTypes, Options: opts}
@@ -611,9 +630,10 @@ func executeScalarBatch(ctx context.Context, input compute.ExecBatch, exp expr.E
 
 		if ctx.Err() == context.Canceled && result != nil {
 			result.Release()
+			result = nil
 		}
 
-		return result, nil
+		return result, err
 	}
 
 	return nil, arrow.ErrNotImplemented
