@@ -21,9 +21,6 @@ on:
     types:
       - created
       - edited
-permissions:
-  contents: read
-  pull-requests: write
 jobs:
   issue_assign:
     name: "Assign issue"
