@@ -28,6 +28,7 @@ jobs:
   issue_assign:
     name: "Assign issue"
     permissions:
+      content: read
       issues: write
     if: github.event.comment.body == 'take'
     runs-on: ubuntu-latest
