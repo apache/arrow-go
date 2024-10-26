@@ -997,7 +997,6 @@ func applyOriginalStorageMetadata(origin arrow.Field, inferred *SchemaField) (mo
 			}
 
 			inferred.Field.Type = extType
-			modified = true
 		}
 	case arrow.SPARSE_UNION, arrow.DENSE_UNION:
 		err = xerrors.New("unimplemented type")
