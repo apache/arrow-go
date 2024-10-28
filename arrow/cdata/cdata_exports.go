@@ -424,6 +424,10 @@ func exportArray(arr arrow.Array, out *CArrowArray, outSchema *CArrowSchema) {
 		exportArray(arr.Dictionary(), out.dictionary, nil)
 	case array.Union:
 		out.n_children = C.int64_t(arr.NumFields())
+		if arr.NumFields() == 0 {
+			return
+		}
+
 		childPtrs := allocateArrowArrayPtrArr(arr.NumFields())
 		children := allocateArrowArrayArr(arr.NumFields())
 		for i := 0; i < arr.NumFields(); i++ {

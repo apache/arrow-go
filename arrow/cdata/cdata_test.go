@@ -606,6 +606,20 @@ func createTestEmptyStructArr() arrow.Array {
 	return bld.NewArray()
 }
 
+func createTestEmptyDenseUnionArr() arrow.Array {
+	bld := array.NewEmptyDenseUnionBuilder(memory.DefaultAllocator)
+	defer bld.Release()
+
+	return bld.NewArray()
+}
+
+func createTestEmptySparseUnionArr() arrow.Array {
+	bld := array.NewEmptySparseUnionBuilder(memory.DefaultAllocator)
+	defer bld.Release()
+
+	return bld.NewArray()
+}
+
 func createTestRunEndsArr() arrow.Array {
 	bld := array.NewRunEndEncodedBuilder(memory.DefaultAllocator,
 		arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int8)
@@ -696,6 +710,8 @@ func TestNestedArrays(t *testing.T) {
 		{"dense union", createTestDenseUnion},
 		{"run-end encoded", createTestRunEndsArr},
 		{"empty struct", createTestEmptyStructArr},
+		{"empty dense union", createTestEmptyDenseUnionArr},
+		{"empty sparse union", createTestEmptySparseUnionArr},
 	}
 
 	for _, tt := range tests {
