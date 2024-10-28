@@ -152,3 +152,31 @@ func TestBooleanKleeneKernels(t *testing.T) {
 		})
 	}
 }
+
+func TestBooleanNot(t *testing.T) {
+	tests := []struct {
+		inputJSON, expectedJSON string
+	}{
+		{"[true, true, false, false]", "[false, false, true, true]"},
+		{"[null, true, null, false]", "[null, false, null, true]"},
+		{"[null, null, null, null]", "[null, null, null, null]"},
+	}
+
+	for _, tt := range tests {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		input, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean,
+			strings.NewReader(tt.inputJSON))
+		require.NoError(t, err)
+		defer input.Release()
+
+		expected, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean,
+			strings.NewReader(tt.expectedJSON))
+		require.NoError(t, err)
+		defer expected.Release()
+
+		checkScalarUnary(t, "not", compute.NewDatumWithoutOwning(input),
+			compute.NewDatumWithoutOwning(expected), nil)
+	}
+}
