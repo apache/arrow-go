@@ -309,6 +309,9 @@ func createCArr(arr arrow.Array, alloc *mallocator.Mallocator) *CArrowArray {
 		children = (**CArrowArray)(unsafe.Pointer(&clist[0]))
 		nchildren += 1
 	case *array.Struct:
+		if arr.NumField() == 0 {
+			break
+		}
 		clist := allocateChildrenPtrArr(alloc, arr.NumField())
 		for i := 0; i < arr.NumField(); i++ {
 			clist[i] = createCArr(arr.Field(i), alloc)
@@ -322,6 +325,9 @@ func createCArr(arr arrow.Array, alloc *mallocator.Mallocator) *CArrowArray {
 		children = (**CArrowArray)(unsafe.Pointer(&clist[0]))
 		nchildren += 2
 	case array.Union:
+		if arr.NumFields() == 0 {
+			break
+		}
 		clist := allocateChildrenPtrArr(alloc, arr.NumFields())
 		for i := 0; i < arr.NumFields(); i++ {
 			clist[i] = createCArr(arr.Field(i), alloc)
@@ -356,7 +362,7 @@ func createCArr(arr arrow.Array, alloc *mallocator.Mallocator) *CArrowArray {
 	tr.bufs = make([][]byte, 0, nbuffers)
 	cbufs := allocateBufferMallocatorPtrArr(alloc, nbuffers)
 	for i, b := range buffers[bufOffset:] {
-		if b != nil {
+		if b != nil && b.Len() > 0 {
 			raw := alloc.Allocate(b.Len())
 			copy(raw, b.Bytes())
 			tr.bufs = append(tr.bufs, raw)
