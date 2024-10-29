@@ -38,10 +38,10 @@ package cdata
 // }
 //
 // static struct ArrowAsyncDeviceStreamHandler* get_test_async_handler() {
-//   struct ArrowAsyncDeviceStreamHandler* handler =
-//		(struct ArrowAsyncDeviceStreamHandler*)malloc(sizeof(struct ArrowAsyncDeviceStreamHandler));
-//	 memset(handler, 0, sizeof(*handler));
-//	 return handler;
+// 	struct ArrowAsyncDeviceStreamHandler* handler =
+// 		(struct ArrowAsyncDeviceStreamHandler*)malloc(sizeof(struct ArrowAsyncDeviceStreamHandler));
+// 	memset(handler, 0, sizeof(*handler));
+// 	return handler;
 // }
 //
 // void release_test_arr(struct ArrowArray* arr);
