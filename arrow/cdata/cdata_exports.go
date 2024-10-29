@@ -39,7 +39,7 @@ package cdata
 // }
 //
 // int goExtractTaskData(struct ArrowAsyncTask* task, struct ArrowDeviceArray* out) {
-//   return task->extract_data(task, out);
+// 	return task->extract_data(task, out);
 // }
 //
 // static void goCallRequest(struct ArrowAsyncProducer* producer, int64_t n) {
