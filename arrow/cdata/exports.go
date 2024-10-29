@@ -68,7 +68,7 @@ import (
 // }
 //
 // static void goReleaseAsyncHandler(struct ArrowAsyncDeviceStreamHandler* handler) {
-//	 handler->release(handler);
+// 	handler->release(handler);
 // }
 //
 import "C"
