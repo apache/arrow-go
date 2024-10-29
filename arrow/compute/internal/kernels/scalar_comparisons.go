@@ -745,3 +745,55 @@ func IsNullNotNullKernels() []exec.ScalarKernel {
 
 	return results
 }
+
+func ConstBoolExec(val bool) func(*exec.KernelCtx, *exec.ExecSpan, *exec.ExecResult) error {
+	return func(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+		bitutil.SetBitsTo(out.Buffers[1].Buf, out.Offset, batch.Len, val)
+		return nil
+	}
+}
+
+func isNanKernelExec[T float32 | float64](ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+	kn := ctx.Kernel.(*exec.ScalarKernel)
+	knData := kn.Data.(CompareFuncData).Funcs()
+
+	outPrefix := int(out.Offset % 8)
+	outBuf := out.Buffers[1].Buf[out.Offset/8:]
+
+	inputBytes := getOffsetSpanBytes(&batch.Values[0].Array)
+	knData.funcAA(inputBytes, inputBytes, outBuf, outPrefix)
+	return nil
+}
+
+func IsNaNKernels() []exec.ScalarKernel {
+	outputType := exec.NewOutputType(arrow.FixedWidthTypes.Boolean)
+
+	knFloat32 := exec.NewScalarKernel([]exec.InputType{exec.NewExactInput(arrow.PrimitiveTypes.Float32)},
+		outputType, isNanKernelExec[float32], nil)
+	knFloat32.Data = genCompareKernel[float32](CmpNE)
+	knFloat32.NullHandling = exec.NullNoOutput
+	knFloat64 := exec.NewScalarKernel([]exec.InputType{exec.NewExactInput(arrow.PrimitiveTypes.Float64)},
+		outputType, isNanKernelExec[float64], nil)
+	knFloat64.Data = genCompareKernel[float64](CmpNE)
+	knFloat64.NullHandling = exec.NullNoOutput
+
+	kernels := []exec.ScalarKernel{knFloat32, knFloat64}
+
+	for _, dt := range intTypes {
+		kn := exec.NewScalarKernel(
+			[]exec.InputType{exec.NewExactInput(dt)},
+			outputType, ConstBoolExec(false), nil)
+		kn.NullHandling = exec.NullNoOutput
+		kernels = append(kernels, kn)
+	}
+
+	for _, id := range []arrow.Type{arrow.NULL, arrow.DURATION, arrow.DECIMAL32, arrow.DECIMAL64, arrow.DECIMAL128, arrow.DECIMAL256} {
+		kn := exec.NewScalarKernel(
+			[]exec.InputType{exec.NewIDInput(id)},
+			outputType, ConstBoolExec(false), nil)
+		kn.NullHandling = exec.NullNoOutput
+		kernels = append(kernels, kn)
+	}
+
+	return kernels
+}

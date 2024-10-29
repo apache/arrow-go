@@ -1497,8 +1497,8 @@ func (sv *ScalarValiditySuite) TestIsNaN() {
 	}{
 		{`[]`, `[]`},
 		{`[1]`, `[false]`},
-		{`[null]`, `[null]`},
-		{`["NaN", 1, 0, null]`, `[true, false, false, null]`},
+		{`[null]`, `[false]`},
+		{`["NaN", 1, 0, null]`, `[true, false, false, false]`},
 	}
 
 	for _, typ := range floatingTypes {
