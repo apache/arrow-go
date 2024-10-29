@@ -62,9 +62,9 @@ import (
 // }
 //
 // static struct ArrowAsyncProducer* get_producer() {
-//   struct ArrowAsyncProducer* out = (struct ArrowAsyncProducer*)malloc(sizeof(struct ArrowAsyncProducer));
-//   memset(out, 0, sizeof(struct ArrowAsyncProducer));
-//   return out;
+//   	struct ArrowAsyncProducer* out = (struct ArrowAsyncProducer*)malloc(sizeof(struct ArrowAsyncProducer));
+//   	memset(out, 0, sizeof(struct ArrowAsyncProducer));
+//   	return out;
 // }
 //
 // static void goReleaseAsyncHandler(struct ArrowAsyncDeviceStreamHandler* handler) {
