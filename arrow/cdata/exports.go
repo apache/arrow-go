@@ -58,7 +58,7 @@ import (
 //   handler->on_error(handler, code, message, metadata);
 // }
 // static int goCallOnNextTask(struct ArrowAsyncDeviceStreamHandler* handler, struct ArrowAsyncTask* task, char* metadata) {
-//   return handler->on_next_task(handler, task, metadata);
+//   	return handler->on_next_task(handler, task, metadata);
 // }
 //
 // static struct ArrowAsyncProducer* get_producer() {
