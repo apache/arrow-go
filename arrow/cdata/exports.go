@@ -49,7 +49,7 @@ import (
 // int asyncTaskExtractTrampoline(struct ArrowAsyncTask* task, struct ArrowDeviceArray* out);
 //
 // static void goCallRequest(struct ArrowAsyncProducer* producer, int64_t n) {
-// 	producer->request(producer, n);
+//  	producer->request(producer, n);
 // }
 // static int goCallOnSchema(struct ArrowAsyncDeviceStreamHandler* handler, struct ArrowSchema* schema, char* metadata) {
 //   return handler->on_schema(handler, schema, metadata);
