@@ -35,7 +35,7 @@ package cdata
 // }
 //
 // void goCallCancel(struct ArrowAsyncProducer* producer) {
-//  producer->cancel(producer);
+// 	producer->cancel(producer);
 // }
 //
 // int goExtractTaskData(struct ArrowAsyncTask* task, struct ArrowDeviceArray* out) {
