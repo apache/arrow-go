@@ -55,7 +55,7 @@ import (
 //   	return handler->on_schema(handler, schema, metadata);
 // }
 // static void goCallOnError(struct ArrowAsyncDeviceStreamHandler* handler, int code, char* message, char* metadata) {
-//   handler->on_error(handler, code, message, metadata);
+//   	handler->on_error(handler, code, message, metadata);
 // }
 // static int goCallOnNextTask(struct ArrowAsyncDeviceStreamHandler* handler, struct ArrowAsyncTask* task, char* metadata) {
 //   	return handler->on_next_task(handler, task, metadata);
