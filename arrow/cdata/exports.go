@@ -52,7 +52,7 @@ import (
 //  	producer->request(producer, n);
 // }
 // static int goCallOnSchema(struct ArrowAsyncDeviceStreamHandler* handler, struct ArrowSchema* schema, char* metadata) {
-//   return handler->on_schema(handler, schema, metadata);
+//   	return handler->on_schema(handler, schema, metadata);
 // }
 // static void goCallOnError(struct ArrowAsyncDeviceStreamHandler* handler, int code, char* message, char* metadata) {
 //   handler->on_error(handler, code, message, metadata);
