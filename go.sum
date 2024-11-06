@@ -104,8 +104,10 @@ github.com/stretchr/testify v1.8.0/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO
 github.com/stretchr/testify v1.8.1/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=
 github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsTg=
 github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
-github.com/substrait-io/substrait-go v1.1.0 h1:wUXoXV/ESMXgaOWu/05kvMI/UBUyhtaTRfkT5p1b5Ck=
-github.com/substrait-io/substrait-go v1.1.0/go.mod h1:LHzL5E0VL620yw4kBQCP+sQPmxhepPTQMDJQRbOe/T4=
+github.com/substrait-io/substrait v0.57.1 h1:GW8nnYfSowMseHR8Os82/X6lNtQGIK7p4p+lr6r+auw=
+github.com/substrait-io/substrait v0.57.1/go.mod h1:q9s+tjo+gK0lsA+SqYB0lhojNuxvdPdfYlGUP0hjbrA=
+github.com/substrait-io/substrait-go v1.2.0 h1:3ZNRkc8FYD7ifCagKEOZQtUcgMceMQfwo2N1NGaK4Q4=
+github.com/substrait-io/substrait-go v1.2.0/go.mod h1:IPsy24rdjp/buXR+T8ENl6QCnSCS6h+uM8P+GaZez7c=
 github.com/tidwall/gjson v1.14.2 h1:6BBkirS0rAHjumnjHF6qgy5d2YAJ1TLIaFE2lzfOLqo=
 github.com/tidwall/gjson v1.14.2/go.mod h1:/wbyibRr2FHMks5tjHJ5F8dMZh3AcwJEMf5vlfC0lxk=
 github.com/tidwall/match v1.1.1 h1:+Ho715JplO36QYgwN9PGYNhgZvoUSc9X2c80KVTi+GA=
