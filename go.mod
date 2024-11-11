@@ -17,7 +17,6 @@
 module github.com/apache/arrow-go/v18
 
 go 1.22.0
-
 toolchain go1.23.1
 
 require (
@@ -47,7 +46,7 @@ require (
 	golang.org/x/tools v0.27.0
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028
 	gonum.org/v1/gonum v0.15.1
-	google.golang.org/grpc v1.67.1
+	google.golang.org/grpc v1.68.0
 	google.golang.org/protobuf v1.35.1
 	modernc.org/sqlite v1.29.6
 )
