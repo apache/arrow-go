@@ -36,7 +36,7 @@ import (
 // extern int streamGetNext(struct ArrowArrayStream*, struct ArrowArray*);
 // extern const char* streamGetError(struct ArrowArrayStream*);
 // extern void streamRelease(struct ArrowArrayStream*);
-// extern int asyncStreamOnSchema(struct ArrowAsyncDeviceStreamHandler*, struct ArrowSchema*, char*);
+// extern int asyncStreamOnSchema(struct ArrowAsyncDeviceStreamHandler*, struct ArrowSchema*);
 // extern int asyncStreamOnNextTask(struct ArrowAsyncDeviceStreamHandler*, struct ArrowAsyncTask*, char*);
 // extern void asyncStreamOnError(struct ArrowAsyncDeviceStreamHandler*, int, char*, char*);
 // extern void asyncStreamRelease(struct ArrowAsyncDeviceStreamHandler*);
@@ -51,8 +51,8 @@ import (
 // static void goCallRequest(struct ArrowAsyncProducer* producer, int64_t n) {
 //  	producer->request(producer, n);
 // }
-// static int goCallOnSchema(struct ArrowAsyncDeviceStreamHandler* handler, struct ArrowSchema* schema, char* metadata) {
-//   	return handler->on_schema(handler, schema, metadata);
+// static int goCallOnSchema(struct ArrowAsyncDeviceStreamHandler* handler, struct ArrowSchema* schema) {
+//   	return handler->on_schema(handler, schema);
 // }
 // static void goCallOnError(struct ArrowAsyncDeviceStreamHandler* handler, int code, char* message, char* metadata) {
 //   	handler->on_error(handler, code, message, metadata);
@@ -204,7 +204,7 @@ type taskState struct {
 }
 
 //export asyncStreamOnSchema
-func asyncStreamOnSchema(self *CArrowAsyncDeviceStreamHandler, schema *CArrowSchema, addlMetadata *C.char) C.int {
+func asyncStreamOnSchema(self *CArrowAsyncDeviceStreamHandler, schema *CArrowSchema) C.int {
 	h := getHandle(self.private_data)
 	handler := h.Value().(cAsyncState)
 	defer close(handler.ch)
@@ -221,8 +221,8 @@ func asyncStreamOnSchema(self *CArrowAsyncDeviceStreamHandler, schema *CArrowSch
 	}
 
 	var meta arrow.Metadata
-	if addlMetadata != nil {
-		meta = decodeCMetadata(addlMetadata)
+	if self.producer.additional_metadata != nil {
+		meta = decodeCMetadata(self.producer.additional_metadata)
 	}
 
 	recordStream := make(chan RecordMessage, handler.queueSize)
@@ -353,11 +353,12 @@ func exportAsyncProducer(schema *arrow.Schema, stream <-chan RecordMessage, hand
 	producer.request = (*[0]byte)(C.asyncProducerRequest)
 	producer.cancel = (*[0]byte)(C.asyncProducerCancel)
 	producer.private_data = createHandle(prodHandle)
+	producer.additional_metadata = nil
 	handler.producer = producer
 
 	var s CArrowSchema
 	ExportArrowSchema(schema, &s)
-	if status := C.goCallOnSchema(handler, &s, nil); status != C.int(0) {
+	if status := C.goCallOnSchema(handler, &s); status != C.int(0) {
 		releaseExportedSchema(&s)
 		return fmt.Errorf("on_schema failed with status %d", status)
 	}

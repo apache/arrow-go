@@ -231,8 +231,8 @@ struct ArrowDeviceArrayStream {
 #ifndef ARROW_C_ASYNC_STREAM_INTERFACE
 #  define ARROW_C_ASYNC_STREAM_INTERFACE
 
-// ArrowAsyncTask represents available data from a producer that was passed to
-// an invocation of `on_next_task` on the ArrowAsyncDeviceStreamHandler.
+// EXPERIMENTAL: ArrowAsyncTask represents available data from a producer that was passed
+// to an invocation of `on_next_task` on the ArrowAsyncDeviceStreamHandler.
 //
 // The reason for this Task approach instead of the Async interface returning
 // the Array directly is to allow for more complex thread handling and reducing
@@ -275,8 +275,8 @@ struct ArrowAsyncTask {
   void* private_data;
 };
 
-// ArrowAsyncProducer represents a 1-to-1 relationship between an async producer
-// and consumer. This object allows the consumer to perform backpressure and flow
+// EXPERIMENTAL: ArrowAsyncProducer represents a 1-to-1 relationship between an async
+// producer and consumer. This object allows the consumer to perform backpressure and flow
 // control on the asynchronous stream processing. This object must be owned by the
 // producer who creates it, and thus is responsible for cleaning it up.
 struct ArrowAsyncProducer {
@@ -322,11 +322,18 @@ struct ArrowAsyncProducer {
   // on_error callback on the async stream handler.
   void (*cancel)(struct ArrowAsyncProducer* self);
 
+  // Any additional metadata tied to a specific stream of data. This must either be NULL
+  // or a valid pointer to metadata which is encoded in the same way schema metadata
+  // would be. Non-null metadata must be valid for the lifetime of this object. As an
+  // example a producer could use this to provide the total number of rows and/or batches
+  // in the stream if known.
+  const char* additional_metadata;
+
   // producer-specific opaque data.
   void* private_data;
 };
 
-// Similar to ArrowDeviceArrayStream, except designed for an asynchronous
+// EXPERIMENTAL: Similar to ArrowDeviceArrayStream, except designed for an asynchronous
 // style of interaction. While ArrowDeviceArrayStream provides producer
 // defined callbacks, this is intended to be created by the consumer instead.
 // The consumer passes this handler to the producer, which in turn uses the
@@ -344,22 +351,16 @@ struct ArrowAsyncDeviceStreamHandler {
   // function and thus the producer is responsible for cleaning it up when calling
   // the release callback of this handler.
   //
-  // The addl_metadata argument can be null or can be used by a producer
-  // to pass arbitrary extra information to the consumer beyond the metadata in the schema
-  // itself (such as total number of rows, context info, or otherwise). The data should
-  // be passed using the same encoding as the metadata within the ArrowSchema struct
-  // itself (defined in the spec at
-  // https://arrow.apache.org/docs/format/CDataInterface.html#c.ArrowSchema.metadata)
-  //
-  // If addl_metadata is non-null then it only needs to exist for the lifetime of this
-  // call, a consumer who wants it to live after that must copy it to ensure lifetime.
+  // If there is any additional metadata tied to this stream, it will be provided as
+  // a non-null value for the `additional_metadata` field of the ArrowAsyncProducer
+  // which will be valid at least until the release callback is called.
   //
   // Return value: 0 if successful, `errno`-compatible error otherwise
   //
   // A producer that receives a non-zero return here should stop producing and eventually
   // call release instead.
   int (*on_schema)(struct ArrowAsyncDeviceStreamHandler* self,
-                   struct ArrowSchema* stream_schema, const char* addl_metadata);
+                   struct ArrowSchema* stream_schema);
 
   // Handler for receiving data. This is called when data is available providing an
   // ArrowAsyncTask struct to signify it. The producer indicates the end of the stream
