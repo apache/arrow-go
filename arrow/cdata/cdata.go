@@ -64,6 +64,11 @@ type (
 	CArrowArray = C.struct_ArrowArray
 	// CArrowArrayStream is the C Stream Interface object for handling streams of record batches.
 	CArrowArrayStream = C.struct_ArrowArrayStream
+
+	CArrowAsyncDeviceStreamHandler = C.struct_ArrowAsyncDeviceStreamHandler
+	CArrowAsyncProducer            = C.struct_ArrowAsyncProducer
+	CArrowAsyncTask                = C.struct_ArrowAsyncTask
+	CArrowDeviceArray              = C.struct_ArrowDeviceArray
 )
 
 // Map from the defined strings to their corresponding arrow.DataType interface
