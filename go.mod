@@ -48,7 +48,7 @@ require (
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028
 	gonum.org/v1/gonum v0.15.1
 	google.golang.org/grpc v1.68.0
-	google.golang.org/protobuf v1.35.1
+	google.golang.org/protobuf v1.35.2
 	modernc.org/sqlite v1.29.6
 )
 
