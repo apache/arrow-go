@@ -371,3 +371,7 @@ func (t Type) ByteSize() int {
 	}
 	panic("no bytesize info for type")
 }
+
+type ColumnTypes interface {
+	bool | int32 | int64 | float32 | float64 | Int96 | ByteArray | FixedLenByteArray
+}

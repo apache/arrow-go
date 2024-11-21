@@ -59,6 +59,13 @@ func makeColumnStats(metadata *format.ColumnMetaData, descr *schema.Column, mem 
 		metadata.Statistics)
 }
 
+type IndexLocation struct {
+	// file offset of the given index, in bytes
+	Offset int64
+	// length of the given index, in bytes
+	Length int32
+}
+
 // ColumnChunkMetaData is a proxy around format.ColumnChunkMetaData
 // containing all of the information and metadata for a given column chunk
 // and it's associated Column
@@ -173,6 +180,26 @@ func (c *ColumnChunkMetaData) HasIndexPage() bool { return c.columnMeta.IsSetInd
 
 // IndexPageOffset is the location in the file where the index page starts.
 func (c *ColumnChunkMetaData) IndexPageOffset() int64 { return c.columnMeta.GetIndexPageOffset() }
+
+func (c *ColumnChunkMetaData) GetColumnIndexLocation() *IndexLocation {
+	if c.column.IsSetColumnIndexOffset() {
+		return &IndexLocation{
+			Offset: c.column.GetColumnIndexOffset(),
+			Length: c.column.GetColumnIndexLength(),
+		}
+	}
+	return nil
+}
+
+func (c *ColumnChunkMetaData) GetOffsetIndexLocation() *IndexLocation {
+	if c.column.IsSetOffsetIndexOffset() {
+		return &IndexLocation{
+			Offset: c.column.GetOffsetIndexOffset(),
+			Length: c.column.GetOffsetIndexLength(),
+		}
+	}
+	return nil
+}
 
 // TotalCompressedSize will be equal to TotalUncompressedSize if the data is not compressed.
 // Otherwise this will be the size of the actual data in the file.
@@ -431,4 +458,8 @@ func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFal
 // of (int64, error) in order to match the standard WriteTo interfaces.
 func (c *ColumnChunkMetaDataBuilder) WriteTo(w io.Writer) (int64, error) {
 	return 0, thrift.SerializeThriftStream(c.chunk, w)
+}
+
+type PageIndexLocation struct {
+	ColIndexLocation, OffsetIndexLocation map[uint64][]*IndexLocation
 }

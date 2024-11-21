@@ -17,10 +17,14 @@
 package encryption
 
 import (
+	"fmt"
 	"io"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/internal/debug"
+	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 )
 
 // FileDecryptor is an interface used by the filereader for decrypting an
@@ -265,4 +269,38 @@ func (d *decryptor) Decrypt(src []byte) []byte {
 }
 func (d *decryptor) DecryptFrom(r io.Reader) []byte {
 	return d.decryptor.DecryptFrom(r, d.key, d.aad)
+}
+
+func getColumnDecryptor(cryptoMetadata *format.ColumnCryptoMetaData, fileDecryptor FileDecryptor, metadata bool) (Decryptor, error) {
+	if cryptoMetadata == nil {
+		return nil, nil
+	}
+
+	if fileDecryptor == nil {
+		return nil, fmt.Errorf("%w: row group is noted as encrypted but no file decryptor", arrow.ErrNotFound)
+	}
+
+	if cryptoMetadata.IsSetENCRYPTION_WITH_FOOTER_KEY() {
+		if metadata {
+			return fileDecryptor.GetFooterDecryptorForColumnMeta(fileDecryptor.FileAad()), nil
+		}
+		return fileDecryptor.GetFooterDecryptorForColumnData(fileDecryptor.FileAad()), nil
+	}
+
+	// column is encrypted with its own key
+	columnKeyMetadata := cryptoMetadata.ENCRYPTION_WITH_COLUMN_KEY.KeyMetadata
+	colPath := parquet.ColumnPath(cryptoMetadata.ENCRYPTION_WITH_COLUMN_KEY.PathInSchema).String()
+	return fileDecryptor.GetColumnMetaDecryptor(colPath, string(columnKeyMetadata), ""), nil
+}
+
+func GetColumnMetaDecryptor(cryptoMetadata *format.ColumnCryptoMetaData, fileDecryptor FileDecryptor) (Decryptor, error) {
+	return getColumnDecryptor(cryptoMetadata, fileDecryptor, true)
+}
+
+const NonPageOrdinal int16 = -1
+
+func UpdateDecryptor(decryptor Decryptor, rgOrdinal, colOrdinal int16, moduleType int8) {
+	debug.Assert(decryptor.FileAad() != "", "file decryptor has no file aad")
+	aad := CreateModuleAad(decryptor.FileAad(), moduleType, rgOrdinal, colOrdinal, NonPageOrdinal)
+	decryptor.UpdateAad(aad)
 }

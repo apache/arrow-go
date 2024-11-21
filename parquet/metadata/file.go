@@ -500,6 +500,8 @@ func (f *FileMetaData) Version() parquet.Version {
 	}
 }
 
+func (f *FileMetaData) NumRowGroups() int { return len(f.RowGroups) }
+
 // FileCryptoMetadata is a proxy for the thrift fileCryptoMetadata object
 type FileCryptoMetadata struct {
 	metadata          *format.FileCryptoMetaData
