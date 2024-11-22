@@ -239,8 +239,8 @@ jobs:
           go-version: ${{ matrix.go }}
           cache: true
           cache-dependency-path: go.sum
-      - name: Brew Install Arrow and pkg-config
-        run: brew install apache-arrow pkg-config
+      - name: Brew Install Arrow and pkgconf
+        run: brew install apache-arrow pkgconf
       - name: Setup PKG_CONFIG_PATH
         run: |
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
