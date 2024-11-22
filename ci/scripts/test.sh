@@ -50,6 +50,11 @@ if [[ -n "${ARROW_GO_TESTCGO}" ]]; then
   if [[ "${MSYSTEM:-}" = "MINGW64" ]]; then
     export PATH=${MINGW_PREFIX}\\bin:${MINGW_PREFIX}\\lib:$PATH
   fi
+
+  if [[ "$(go env GOOS)" = "darwin" ]]; then  
+    # see https://github.com/golang/go/issues/61229#issuecomment-1988965927
+    test_args+=("-ldflags=-extldflags=-Wl,-ld_classic")
+  fi
   tags+=",ccalloc"
 fi
 
