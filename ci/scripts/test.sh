@@ -51,7 +51,7 @@ if [[ -n "${ARROW_GO_TESTCGO}" ]]; then
     export PATH=${MINGW_PREFIX}\\bin:${MINGW_PREFIX}\\lib:$PATH
   fi
 
-  if [[ "$(go env GOOS)" = "darwin" ]]; then  
+  if [[ "$(go env GOOS)" = "darwin" ]]; then
     # see https://github.com/golang/go/issues/61229#issuecomment-1988965927
     test_args+=("-ldflags=-extldflags=-Wl,-ld_classic")
   fi
