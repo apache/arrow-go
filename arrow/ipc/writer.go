@@ -603,7 +603,7 @@ func (w *recordEncoder) visit(p *Payload, arr arrow.Array) error {
 			// non-zero offset: slice the buffer
 			offset := int64(data.Offset()) * typeWidth
 			// send padding if available
-			len := minI64(bitutil.CeilByte64(arrLen*typeWidth), int64(values.Len())-offset)
+			len := min(bitutil.CeilByte64(arrLen*typeWidth), int64(values.Len())-offset)
 			values = memory.NewBufferBytes(values.Bytes()[offset : offset+len])
 		default:
 			if values != nil {
@@ -628,7 +628,7 @@ func (w *recordEncoder) visit(p *Payload, arr arrow.Array) error {
 			// slice data buffer to include the range we need now.
 			var (
 				beg int64 = 0
-				len       = minI64(paddedLength(totalDataBytes, kArrowAlignment), int64(totalDataBytes))
+				len       = min(paddedLength(totalDataBytes, kArrowAlignment), int64(totalDataBytes))
 			)
 			if arr.Len() > 0 {
 				beg = arr.ValueOffset64(0)
@@ -655,7 +655,7 @@ func (w *recordEncoder) visit(p *Payload, arr arrow.Array) error {
 			// non-zero offset: slice the buffer
 			offset := data.Offset() * int(typeWidth)
 			// send padding if available
-			len := int(minI64(bitutil.CeilByte64(arrLen*typeWidth), int64(values.Len()-offset)))
+			len := int(min(bitutil.CeilByte64(arrLen*typeWidth), int64(values.Len()-offset)))
 			values = memory.SliceBuffer(values, offset, len)
 		default:
 			if values != nil {
@@ -1028,7 +1028,7 @@ func (w *recordEncoder) rebaseDenseUnionValueOffsets(arr *array.DenseUnion, offs
 		} else {
 			shiftedOffsets[i] = unshiftedOffsets[i] - offsets[c]
 		}
-		lengths[c] = maxI32(lengths[c], shiftedOffsets[i]+1)
+		lengths[c] = max(lengths[c], shiftedOffsets[i]+1)
 	}
 	return shiftedOffsetsBuf
 }
@@ -1071,7 +1071,7 @@ func getTruncatedBuffer(offset, length int64, byteWidth int32, buf *memory.Buffe
 
 	paddedLen := paddedLength(length*int64(byteWidth), kArrowAlignment)
 	if offset != 0 || paddedLen < int64(buf.Len()) {
-		return memory.SliceBuffer(buf, int(offset*int64(byteWidth)), int(minI64(paddedLen, int64(buf.Len()))))
+		return memory.SliceBuffer(buf, int(offset*int64(byteWidth)), int(min(paddedLen, int64(buf.Len()))))
 	}
 	buf.Retain()
 	return buf
@@ -1084,16 +1084,37 @@ func needTruncate(offset int64, buf *memory.Buffer, minLength int64) bool {
 	return offset != 0 || minLength < int64(buf.Len())
 }
 
-func minI64(a, b int64) int64 {
-	if a < b {
-		return a
+// GetRecordBatchPayload produces the ipc payload for a given record batch.
+// The resulting payload itself must be released by the caller via the Release
+// method after it is no longer needed.
+func GetRecordBatchPayload(batch arrow.Record, opts ...Option) (Payload, error) {
+	cfg := newConfig(opts...)
+	var (
+		data = Payload{msg: MessageRecordBatch}
+		enc  = newRecordEncoder(
+			cfg.alloc,
+			0,
+			kMaxNestingDepth,
+			true,
+			cfg.codec,
+			cfg.compressNP,
+			cfg.minSpaceSavings,
+			make([]compressor, cfg.compressNP),
+		)
+	)
+
+	err := enc.Encode(&data, batch)
+	if err != nil {
+		return Payload{}, err
 	}
-	return b
+
+	return data, nil
 }
 
-func maxI32(a, b int32) int32 {
-	if a > b {
-		return a
-	}
-	return b
+// GetSchemaPayload produces the ipc payload for a given schema.
+func GetSchemaPayload(schema *arrow.Schema, mem memory.Allocator) Payload {
+	var mapper dictutils.Mapper
+	mapper.ImportSchema(schema)
+	ps := payloadFromSchema(schema, mem, &mapper)
+	return ps[0]
 }
