@@ -1945,6 +1945,51 @@ func TestParquetArrowIO(t *testing.T) {
 	suite.Run(t, new(ParquetIOTestSuite))
 }
 
+func TestForceLargeTypes(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "str", Type: arrow.BinaryTypes.LargeString},
+		{Name: "bin", Type: arrow.BinaryTypes.LargeBinary},
+	}, nil)
+
+	bldr := array.NewRecordBuilder(mem, sc)
+	defer bldr.Release()
+
+	bldr.Field(0).(*array.LargeStringBuilder).AppendValues([]string{"hello", "foo", "bar"}, nil)
+	bldr.Field(1).(*array.BinaryBuilder).AppendValues([][]byte{[]byte("hello"), []byte("foo"), []byte("bar")}, nil)
+
+	rec := bldr.NewRecord()
+	defer rec.Release()
+
+	var buf bytes.Buffer
+	wr, err := pqarrow.NewFileWriter(sc, &buf,
+		parquet.NewWriterProperties(),
+		pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem)))
+	require.NoError(t, err)
+
+	require.NoError(t, wr.Write(rec))
+	require.NoError(t, wr.Close())
+
+	rdr, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	pqrdr, err := pqarrow.NewFileReader(rdr, pqarrow.ArrowReadProperties{
+		ForceLarge: true}, mem)
+	require.NoError(t, err)
+
+	recrdr, err := pqrdr.GetRecordReader(context.Background(), nil, nil)
+	require.NoError(t, err)
+	defer recrdr.Release()
+
+	got, err := recrdr.Read()
+	require.NoError(t, err)
+
+	assert.Truef(t, array.RecordEqual(rec, got), "expected: %s\ngot: %s", rec, got)
+}
+
 func TestBufferedRecWrite(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

@@ -165,6 +165,11 @@ type ArrowReadProperties struct {
 	Parallel bool
 	// BatchSize is the size used for calls to NextBatch when reading whole columns
 	BatchSize int64
+	// Setting ForceLarge to true will force the reader to use LargeString/LargeBinary
+	// for string and binary columns respectively, instead of the default variants. This
+	// can be necessary if you know that there are columns which contain more than 2GB of
+	// data, which would prevent use of int32 offsets.
+	ForceLarge bool
 
 	readDictIndices map[int]struct{}
 }

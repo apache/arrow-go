@@ -494,9 +494,12 @@ func arrowFromInt64(logical schema.LogicalType) (arrow.DataType, error) {
 	}
 }
 
-func arrowFromByteArray(logical schema.LogicalType) (arrow.DataType, error) {
+func arrowFromByteArray(ctx *schemaTree, logical schema.LogicalType) (arrow.DataType, error) {
 	switch logtype := logical.(type) {
 	case schema.StringLogicalType:
+		if ctx.props.ForceLarge {
+			return arrow.BinaryTypes.LargeString, nil
+		}
 		return arrow.BinaryTypes.String, nil
 	case schema.DecimalLogicalType:
 		return arrowDecimal(logtype), nil
@@ -504,6 +507,9 @@ func arrowFromByteArray(logical schema.LogicalType) (arrow.DataType, error) {
 		schema.EnumLogicalType,
 		schema.JSONLogicalType,
 		schema.BSONLogicalType:
+		if ctx.props.ForceLarge {
+			return arrow.BinaryTypes.LargeBinary, nil
+		}
 		return arrow.BinaryTypes.Binary, nil
 	default:
 		return nil, xerrors.New("unhandled logicaltype " + logical.String() + " for byte_array")
@@ -607,7 +613,7 @@ func getParquetType(typ arrow.DataType, props *parquet.WriterProperties, arrprop
 	}
 }
 
-func getArrowType(physical parquet.Type, logical schema.LogicalType, typeLen int) (arrow.DataType, error) {
+func getArrowType(ctx *schemaTree, physical parquet.Type, logical schema.LogicalType, typeLen int) (arrow.DataType, error) {
 	if !logical.IsValid() || logical.Equals(schema.NullLogicalType{}) {
 		return arrow.Null, nil
 	}
@@ -626,7 +632,7 @@ func getArrowType(physical parquet.Type, logical schema.LogicalType, typeLen int
 	case parquet.Types.Double:
 		return arrow.PrimitiveTypes.Float64, nil
 	case parquet.Types.ByteArray:
-		return arrowFromByteArray(logical)
+		return arrowFromByteArray(ctx, logical)
 	case parquet.Types.FixedLenByteArray:
 		return arrowFromFLBA(logical, typeLen)
 	default:
@@ -708,7 +714,7 @@ func listToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *s
 		// }
 		primitiveNode := listNode.(*schema.PrimitiveNode)
 		colIndex := ctx.schema.ColumnIndexByNode(primitiveNode)
-		arrowType, err := getArrowType(primitiveNode.PhysicalType(), primitiveNode.LogicalType(), primitiveNode.TypeLength())
+		arrowType, err := getArrowType(ctx, primitiveNode.PhysicalType(), primitiveNode.LogicalType(), primitiveNode.TypeLength())
 		if err != nil {
 			return err
 		}
@@ -882,7 +888,7 @@ func nodeToSchemaField(n schema.Node, currentLevels file.LevelInfo, ctx *schemaT
 
 	primitive := n.(*schema.PrimitiveNode)
 	colIndex := ctx.schema.ColumnIndexByNode(primitive)
-	arrowType, err := getArrowType(primitive.PhysicalType(), primitive.LogicalType(), primitive.TypeLength())
+	arrowType, err := getArrowType(ctx, primitive.PhysicalType(), primitive.LogicalType(), primitive.TypeLength())
 	if err != nil {
 		return err
 	}
