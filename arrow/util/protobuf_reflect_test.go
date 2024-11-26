@@ -19,6 +19,7 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"google.golang.org/protobuf/types/known/structpb"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -42,6 +43,8 @@ type J map[string]any
 
 func AllTheTypesFixture() Fixture {
 	e := J{"field1": "Example"}
+
+	s, _ := structpb.NewStruct(e)
 
 	m := J{
 		"str":          "Hello",
@@ -97,10 +100,11 @@ func AllTheTypesFixture() Fixture {
 		Any:      anyMsg,
 		//Breaks the test as the Golang maps have a non-deterministic order
 		//SimpleMap:   map[int32]string{99: "Hello", 100: "World", 98: "How", 101: "Are", 1: "You"},
-		SimpleMap:   map[int32]string{99: "Hello"},
-		ComplexMap:  map[string]*util_message.ExampleMessage{"complex": &exampleMsg},
-		SimpleList:  []string{"Hello", "World"},
-		ComplexList: []*util_message.ExampleMessage{&exampleMsg},
+		SimpleMap:     map[int32]string{99: "Hello"},
+		ComplexMap:    map[string]*util_message.ExampleMessage{"complex": &exampleMsg},
+		SimpleList:    []string{"Hello", "World"},
+		ComplexList:   []*util_message.ExampleMessage{&exampleMsg},
+		JsonlikeField: s,
 	}
 
 	schema := `schema:

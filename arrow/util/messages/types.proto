@@ -16,6 +16,7 @@
 
 syntax = "proto3";
 import "google/protobuf/any.proto";
+import "google/protobuf/struct.proto";
 
 option go_package = "../util_message";
 
@@ -48,6 +49,7 @@ message AllTheTypes {
   map<string, ExampleMessage> complex_map = 20;
   repeated string simple_list = 21;
   repeated ExampleMessage complex_list = 22;
+  google.protobuf.Struct jsonlike_field = 23;
 
   enum ExampleEnum {
     OPTION_0 = 0;
