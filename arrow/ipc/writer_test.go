@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
 	"strings"
 	"testing"
@@ -253,4 +254,81 @@ func TestWriterInferSchema(t *testing.T) {
 	defer r.Release()
 
 	require.True(t, r.Schema().Equal(rec.Schema()))
+}
+
+type testMsgReader struct {
+	messages []*Message
+
+	curmsg *Message
+}
+
+func (r *testMsgReader) Message() (*Message, error) {
+	if r.curmsg != nil {
+		r.curmsg.Release()
+		r.curmsg = nil
+	}
+
+	if len(r.messages) == 0 {
+		return nil, io.EOF
+	}
+
+	r.curmsg = r.messages[0]
+	r.messages = r.messages[1:]
+	return r.curmsg, nil
+}
+
+func (r *testMsgReader) Release() {
+	if r.curmsg != nil {
+		r.curmsg.Release()
+		r.curmsg = nil
+	}
+	for _, m := range r.messages {
+		m.Release()
+	}
+	r.messages = nil
+}
+
+func (r *testMsgReader) Retain() {}
+
+func TestGetPayloads(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "s", Type: arrow.BinaryTypes.String},
+	}, nil)
+
+	b := array.NewRecordBuilder(mem, schema)
+	defer b.Release()
+
+	b.Field(0).(*array.StringBuilder).AppendValues([]string{"foo", "bar", "baz"}, nil)
+	rec := b.NewRecord()
+	defer rec.Release()
+
+	schemaPayload := GetSchemaPayload(rec.Schema(), mem)
+	defer schemaPayload.Release()
+	dataPayload, err := GetRecordBatchPayload(rec, WithAllocator(mem))
+	require.NoError(t, err)
+	defer dataPayload.Release()
+
+	var schemaBuf, dataBuf bytes.Buffer
+	schemaPayload.SerializeBody(&schemaBuf)
+	dataPayload.SerializeBody(&dataBuf)
+
+	msgrdr := &testMsgReader{
+		messages: []*Message{
+			NewMessage(schemaPayload.meta, memory.NewBufferBytes(schemaBuf.Bytes())),
+			NewMessage(dataPayload.meta, memory.NewBufferBytes(dataBuf.Bytes())),
+		},
+	}
+
+	rdr, err := NewReaderFromMessageReader(msgrdr, WithAllocator(mem))
+	require.NoError(t, err)
+	defer rdr.Release()
+
+	assert.Truef(t, rdr.Schema().Equal(rec.Schema()), "expected: %s\ngot: %s", rec.Schema(), rdr.Schema())
+	got, err := rdr.Read()
+	require.NoError(t, err)
+
+	assert.Truef(t, array.RecordEqual(rec, got), "expected: %s\ngot: %s", rec, got)
 }
