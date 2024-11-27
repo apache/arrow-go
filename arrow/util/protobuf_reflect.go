@@ -48,11 +48,10 @@ const (
 )
 
 type schemaOptions struct {
-	exclusionPolicy      func(pfr *ProtobufFieldReflection) bool
-	fieldNameFormatter   func(str string) string
-	oneOfHandler         ProtobufTypeHandler
-	enumHandler          ProtobufTypeHandler
-	structRecursionDepth int
+	exclusionPolicy    func(pfr *ProtobufFieldReflection) bool
+	fieldNameFormatter func(str string) string
+	oneOfHandler       ProtobufTypeHandler
+	enumHandler        ProtobufTypeHandler
 }
 
 // ProtobufFieldReflection represents the metadata and values of a protobuf field
@@ -751,15 +750,6 @@ func WithOneOfHandler(oneOfHandler ProtobufTypeHandler) option {
 func WithEnumHandler(enumHandler ProtobufTypeHandler) option {
 	return func(psr *ProtobufMessageReflection) {
 		psr.enumHandler = enumHandler
-	}
-}
-
-// WithStructRecursionDepth is an option for a ProtobufMessageReflection
-// WithStructRecursionDepth enables customisation of the protobuf Struct type in the arrow schema
-// By default, the recursive structs are ignored
-func WithStructRecursionDepth(structRecursionDepth int) option {
-	return func(psr *ProtobufMessageReflection) {
-		psr.structRecursionDepth = structRecursionDepth
 	}
 }
 
