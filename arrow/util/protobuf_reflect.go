@@ -18,6 +18,8 @@ package util
 
 import (
 	"fmt"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
 	"reflect"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -46,10 +48,11 @@ const (
 )
 
 type schemaOptions struct {
-	exclusionPolicy    func(pfr *ProtobufFieldReflection) bool
-	fieldNameFormatter func(str string) string
-	oneOfHandler       ProtobufTypeHandler
-	enumHandler        ProtobufTypeHandler
+	exclusionPolicy      func(pfr *ProtobufFieldReflection) bool
+	fieldNameFormatter   func(str string) string
+	oneOfHandler         ProtobufTypeHandler
+	enumHandler          ProtobufTypeHandler
+	structRecursionDepth int
 }
 
 // ProtobufFieldReflection represents the metadata and values of a protobuf field
@@ -118,6 +121,9 @@ func (pfr *ProtobufFieldReflection) arrowType() arrow.Type {
 			return arrow.DICTIONARY
 		}
 	}
+	if pfr.isJson() {
+		return arrow.STRING
+	}
 	if pfr.isStruct() {
 		return arrow.STRUCT
 	}
@@ -168,6 +174,13 @@ func (pfr *ProtobufFieldReflection) isOneOf() bool {
 
 func (pfr *ProtobufFieldReflection) isEnum() bool {
 	return pfr.descriptor.Kind() == protoreflect.EnumKind
+}
+
+func (pfr *ProtobufFieldReflection) isJson() bool {
+	if pfr.descriptor.Kind() != protoreflect.MessageKind {
+		return false
+	}
+	return pfr.descriptor.Message().FullName() == "google.protobuf.Struct"
 }
 
 func (pfr *ProtobufFieldReflection) isStruct() bool {
@@ -603,6 +616,7 @@ type protobufReflection interface {
 	GetDescriptor() protoreflect.FieldDescriptor
 	isNull() bool
 	isEnum() bool
+	isJson() bool
 	asDictionary() protobufDictReflection
 	isList() bool
 	asList() protobufListReflection
@@ -740,6 +754,15 @@ func WithEnumHandler(enumHandler ProtobufTypeHandler) option {
 	}
 }
 
+// WithStructRecursionDepth is an option for a ProtobufMessageReflection
+// WithStructRecursionDepth enables customisation of the protobuf Struct type in the arrow schema
+// By default, the recursive structs are ignored
+func WithStructRecursionDepth(structRecursionDepth int) option {
+	return func(psr *ProtobufMessageReflection) {
+		psr.structRecursionDepth = structRecursionDepth
+	}
+}
+
 // AppendValueOrNull add the value of a protobuf field to an arrow array builder
 func (f ProtobufMessageFieldReflection) AppendValueOrNull(b array.Builder, mem memory.Allocator) error {
 	pv := f.protoreflectValue()
@@ -754,6 +777,11 @@ func (f ProtobufMessageFieldReflection) AppendValueOrNull(b array.Builder, mem m
 	case arrow.STRING:
 		if f.protobufReflection.isEnum() {
 			b.(*array.StringBuilder).Append(string(fd.Enum().Values().ByNumber(pv.Enum()).Name()))
+		} else if f.protobufReflection.isJson() {
+			valueAsStructPb := f.reflectValue().Interface().(structpb.Struct)
+			jsonData, _ := protojson.Marshal(&valueAsStructPb)
+
+			b.(*array.StringBuilder).Append(string(jsonData))
 		} else {
 			b.(*array.StringBuilder).Append(pv.String())
 		}
