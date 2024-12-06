@@ -1976,8 +1976,10 @@ func TestForceLargeTypes(t *testing.T) {
 	require.NoError(t, err)
 	defer rdr.Close()
 
-	pqrdr, err := pqarrow.NewFileReader(rdr, pqarrow.ArrowReadProperties{
-		ForceLarge: true}, mem)
+	props := pqarrow.ArrowReadProperties{}
+	props.SetForceLarge(0, true)
+	props.SetForceLarge(1, true)
+	pqrdr, err := pqarrow.NewFileReader(rdr, props, mem)
 	require.NoError(t, err)
 
 	recrdr, err := pqrdr.GetRecordReader(context.Background(), nil, nil)
