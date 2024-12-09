@@ -265,14 +265,28 @@ func TestBooleanStatisticsEncoding(t *testing.T) {
 func TestUnsignedDefaultStats(t *testing.T) {
 	// testing issue github.com/apache/arrow-go/issues/209
 	// stats for unsigned columns should not have invalid min values
-	n, err := schema.NewPrimitiveNodeLogical("uint16", parquet.Repetitions.Optional,
-		schema.NewIntLogicalType(16, false), parquet.Types.Int32, 4, -1)
-	require.NoError(t, err)
-	descr := schema.NewColumn(n, 1, 0)
-	s := metadata.NewStatistics(descr, nil).(*metadata.Int32Statistics)
-	s.UpdateSpaced([]int32{0}, []byte{1}, 0, 0)
+	{
+		n, err := schema.NewPrimitiveNodeLogical("uint16", parquet.Repetitions.Optional,
+			schema.NewIntLogicalType(16, false), parquet.Types.Int32, 4, -1)
+		require.NoError(t, err)
+		descr := schema.NewColumn(n, 1, 0)
+		s := metadata.NewStatistics(descr, nil).(*metadata.Int32Statistics)
+		s.UpdateSpaced([]int32{0}, []byte{1}, 0, 0)
 
-	minv, maxv := s.Min(), s.Max()
-	assert.Zero(t, minv)
-	assert.Zero(t, maxv)
+		minv, maxv := s.Min(), s.Max()
+		assert.Zero(t, minv)
+		assert.Zero(t, maxv)
+	}
+	{
+		n, err := schema.NewPrimitiveNodeLogical("uint64", parquet.Repetitions.Optional,
+			schema.NewIntLogicalType(64, false), parquet.Types.Int64, 4, -1)
+		require.NoError(t, err)
+		descr := schema.NewColumn(n, 1, 0)
+		s := metadata.NewStatistics(descr, nil).(*metadata.Int64Statistics)
+		s.UpdateSpaced([]int64{0}, []byte{1}, 0, 0)
+
+		minv, maxv := s.Min(), s.Max()
+		assert.Zero(t, minv)
+		assert.Zero(t, maxv)
+	}
 }
