@@ -248,13 +248,26 @@ func (s *{{.Name}}Statistics) getMinMaxSpaced(values []{{.name}}, validBits []by
   max = s.defaultMax()
 
 {{- if or (eq .name "int32") (eq .name "int64")}}
-  var fn func([]{{.name}}) ({{.name}}, {{.name}})
+  var fn func([]{{.name}})
   if s.order == schema.SortSIGNED {
-    fn = shared_utils.GetMinMax{{.Name}}
+    fn = func(v []{{.name}}) {
+      localMin, localMax := shared_utils.GetMinMax{{.Name}}(v)
+      if min > localMin { 
+        min = localMin
+      }
+      if max < localMax {
+        max = localMax
+      }
+    }
   } else {
-    fn = func(v []{{.name}}) ({{.name}}, {{.name}}) {
-      umin, umax := shared_utils.GetMinMaxU{{.name}}(arrow.U{{.name}}Traits.CastFromBytes(arrow.{{.Name}}Traits.CastToBytes(values)))
-      return {{.name}}(umin), {{.name}}(umax)
+    fn = func(v []{{.name}}) {
+      umin, umax := shared_utils.GetMinMaxU{{.name}}(arrow.U{{.name}}Traits.CastFromBytes(arrow.{{.Name}}Traits.CastToBytes(v)))
+      if u{{.name}}(min) > umin {
+        min = {{.name}}(umin)
+      }
+      if u{{.name}}(max) < umax {
+        max = {{.name}}(umax)
+      }      
     }
   }
 {{- end}}
@@ -271,13 +284,7 @@ func (s *{{.Name}}Statistics) getMinMaxSpaced(values []{{.name}}, validBits []by
       break
     }
 {{- if or (eq .name "int32") (eq .name "int64")}}
-    localMin, localMax := fn(values[int(run.Pos):int(run.Pos+run.Length)])
-    if min > localMin {
-      min = localMin
-    }
-    if max < localMax {
-      max = localMax
-    }
+    fn(values[int(run.Pos):int(run.Pos+run.Length)])    
 {{- else}}
     for _, v := range values[int(run.Pos):int(run.Pos+run.Length)] {
 {{- if or (eq .name "float32") (eq .name "float64") (eq .Name "Float16") }}

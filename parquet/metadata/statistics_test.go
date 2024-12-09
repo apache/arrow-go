@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // NOTE(zeroshade): tests will be added and updated after merging the "file" package
@@ -259,4 +260,19 @@ func TestBooleanStatisticsEncoding(t *testing.T) {
 	minEnc := bs.EncodeMin()
 	assert.Equal(t, []byte{1}, maxEnc)
 	assert.Equal(t, []byte{0}, minEnc)
+}
+
+func TestUnsignedDefaultStats(t *testing.T) {
+	// testing issue github.com/apache/arrow-go/issues/209
+	// stats for unsigned columns should not have invalid min values
+	n, err := schema.NewPrimitiveNodeLogical("uint16", parquet.Repetitions.Optional,
+		schema.NewIntLogicalType(16, false), parquet.Types.Int32, 4, -1)
+	require.NoError(t, err)
+	descr := schema.NewColumn(n, 1, 0)
+	s := metadata.NewStatistics(descr, nil).(*metadata.Int32Statistics)
+	s.UpdateSpaced([]int32{0}, []byte{1}, 0, 0)
+
+	minv, maxv := s.Min(), s.Max()
+	assert.Zero(t, minv)
+	assert.Zero(t, maxv)
 }
