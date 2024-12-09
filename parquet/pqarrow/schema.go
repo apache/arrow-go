@@ -717,6 +717,15 @@ func listToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *s
 			arrowType = &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrowType}
 		}
 
+		if arrow.IsBinaryLike(arrowType.ID()) && ctx.props.ForceLarge(colIndex) {
+			switch arrowType.ID() {
+			case arrow.STRING:
+				arrowType = arrow.BinaryTypes.LargeString
+			case arrow.BINARY:
+				arrowType = arrow.BinaryTypes.LargeBinary
+			}
+		}
+
 		itemField := arrow.Field{Name: listNode.Name(), Type: arrowType, Nullable: false, Metadata: createFieldMeta(int(listNode.FieldID()))}
 		populateLeaf(colIndex, &itemField, currentLevels, ctx, out, &out.Children[0])
 	}
@@ -889,6 +898,15 @@ func nodeToSchemaField(n schema.Node, currentLevels file.LevelInfo, ctx *schemaT
 
 	if ctx.props.ReadDict(colIndex) && isDictionaryReadSupported(arrowType) {
 		arrowType = &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrowType}
+	}
+
+	if arrow.IsBinaryLike(arrowType.ID()) && ctx.props.ForceLarge(colIndex) {
+		switch arrowType.ID() {
+		case arrow.STRING:
+			arrowType = arrow.BinaryTypes.LargeString
+		case arrow.BINARY:
+			arrowType = arrow.BinaryTypes.LargeBinary
+		}
 	}
 
 	if primitive.RepetitionType() == parquet.Repetitions.Repeated {

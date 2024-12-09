@@ -471,9 +471,13 @@ func (fr *FileReader) GetRecordReader(ctx context.Context, colIndices, rowGroups
 		nrows += fr.rdr.MetaData().RowGroup(rg).NumRows()
 	}
 
+	batchSize := fr.Props.BatchSize
+	if fr.Props.BatchSize <= 0 {
+		batchSize = nrows
+	}
 	return &recordReader{
 		numRows:      nrows,
-		batchSize:    fr.Props.BatchSize,
+		batchSize:    batchSize,
 		parallel:     fr.Props.Parallel,
 		sc:           sc,
 		fieldReaders: readers,

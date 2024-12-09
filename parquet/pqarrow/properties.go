@@ -166,7 +166,37 @@ type ArrowReadProperties struct {
 	// BatchSize is the size used for calls to NextBatch when reading whole columns
 	BatchSize int64
 
-	readDictIndices map[int]struct{}
+	readDictIndices   map[int]struct{}
+	forceLargeIndices map[int]struct{}
+}
+
+// SetForceLarge determines whether a particular column, if it is String or Binary,
+// will use the LargeString/LargeBinary variants (with int64 offsets) instead of int32
+// offsets. This is specifically useful if you know that particular columns contain more
+// than 2GB worth of byte data which would prevent use of int32 offsets.
+//
+// Passing false will use the default variants while passing true will use the large
+// variant. If the passed column index is not a string or binary column, then this will
+// have no effect.
+func (props *ArrowReadProperties) SetForceLarge(colIdx int, forceLarge bool) {
+	if props.forceLargeIndices == nil {
+		props.forceLargeIndices = make(map[int]struct{})
+	}
+
+	if forceLarge {
+		props.forceLargeIndices[colIdx] = struct{}{}
+	} else {
+		delete(props.forceLargeIndices, colIdx)
+	}
+}
+
+func (props *ArrowReadProperties) ForceLarge(colIdx int) bool {
+	if props.forceLargeIndices == nil {
+		return false
+	}
+
+	_, ok := props.forceLargeIndices[colIdx]
+	return ok
 }
 
 // SetReadDict determines whether to read a particular column as dictionary
