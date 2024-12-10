@@ -63,19 +63,23 @@ type bufferMetadata struct {
 }
 
 type fileBlock struct {
-	Offset int64
-	Meta   int32
-	Body   int64
+	offset int64
+	meta   int32
+	body   int64
 
 	r   io.ReaderAt
 	mem memory.Allocator
 }
 
-func fileBlocksToFB(b *flatbuffers.Builder, blocks []fileBlock, start startVecFunc) flatbuffers.UOffsetT {
+func (blk fileBlock) Offset() int64 { return blk.offset }
+func (blk fileBlock) Meta() int32   { return blk.meta }
+func (blk fileBlock) Body() int64   { return blk.body }
+
+func fileBlocksToFB(b *flatbuffers.Builder, blocks []dataBlock, start startVecFunc) flatbuffers.UOffsetT {
 	start(b, len(blocks))
 	for i := len(blocks) - 1; i >= 0; i-- {
 		blk := blocks[i]
-		flatbuf.CreateBlock(b, blk.Offset, blk.Meta, blk.Body)
+		flatbuf.CreateBlock(b, blk.Offset(), blk.Meta(), blk.Body())
 	}
 
 	return b.EndVector(len(blocks))
@@ -91,7 +95,7 @@ func (blk fileBlock) NewMessage() (*Message, error) {
 	)
 
 	meta = memory.NewResizableBuffer(blk.mem)
-	meta.Resize(int(blk.Meta))
+	meta.Resize(int(blk.meta))
 	defer meta.Release()
 
 	buf = meta.Bytes()
@@ -112,12 +116,12 @@ func (blk fileBlock) NewMessage() (*Message, error) {
 	}
 
 	// drop buf-size already known from blk.Meta
-	meta = memory.SliceBuffer(meta, prefix, int(blk.Meta)-prefix)
+	meta = memory.SliceBuffer(meta, prefix, int(blk.meta)-prefix)
 	defer meta.Release()
 
 	body = memory.NewResizableBuffer(blk.mem)
 	defer body.Release()
-	body.Resize(int(blk.Body))
+	body.Resize(int(blk.body))
 	buf = body.Bytes()
 	_, err = io.ReadFull(r, buf)
 	if err != nil {
@@ -128,7 +132,7 @@ func (blk fileBlock) NewMessage() (*Message, error) {
 }
 
 func (blk fileBlock) section() io.Reader {
-	return io.NewSectionReader(blk.r, blk.Offset, int64(blk.Meta)+blk.Body)
+	return io.NewSectionReader(blk.r, blk.offset, int64(blk.meta)+blk.body)
 }
 
 func unitFromFB(unit flatbuf.TimeUnit) arrow.TimeUnit {
@@ -1156,7 +1160,7 @@ func writeSchemaMessage(schema *arrow.Schema, mem memory.Allocator, dict *dictut
 	return writeMessageFB(b, mem, flatbuf.MessageHeaderSchema, schemaFB, 0)
 }
 
-func writeFileFooter(schema *arrow.Schema, dicts, recs []fileBlock, w io.Writer) error {
+func writeFileFooter(schema *arrow.Schema, dicts, recs []dataBlock, w io.Writer) error {
 	var (
 		b    = flatbuffers.NewBuilder(1024)
 		memo dictutils.Mapper

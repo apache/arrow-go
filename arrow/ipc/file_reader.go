@@ -33,15 +33,165 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
+type readerImpl interface {
+	getFooterEnd() (int64, error)
+	readFooter(*footerBlock) error
+	dict(memory.Allocator, *footerBlock, int) (dataBlock, error)
+	block(memory.Allocator, *footerBlock, int) (dataBlock, error)
+}
+
+type footerBlock struct {
+	offset int64
+	buffer *memory.Buffer
+	data   *flatbuf.Footer
+}
+
+type dataBlock interface {
+	Offset() int64
+	Meta() int32
+	Body() int64
+	NewMessage() (*Message, error)
+}
+
+type basicReaderImpl struct {
+	r ReadAtSeeker
+}
+
+func (r *basicReaderImpl) getFooterEnd() (int64, error) {
+	return r.r.Seek(0, io.SeekEnd)
+}
+
+func (r *basicReaderImpl) readFooter(f *footerBlock) error {
+	var err error
+
+	if f.offset <= int64(len(Magic)*2+4) {
+		return fmt.Errorf("arrow/ipc: file too small (size=%d)", f.offset)
+	}
+
+	eof := int64(len(Magic) + 4)
+	buf := make([]byte, eof)
+	n, err := r.r.ReadAt(buf, f.offset-eof)
+	if err != nil {
+		return fmt.Errorf("arrow/ipc: could not read footer: %w", err)
+	}
+	if n != len(buf) {
+		return fmt.Errorf("arrow/ipc: could not read %d bytes from end of file", len(buf))
+	}
+
+	if !bytes.Equal(buf[4:], Magic) {
+		return errNotArrowFile
+	}
+
+	size := int64(binary.LittleEndian.Uint32(buf[:4]))
+	if size <= 0 || size+int64(len(Magic)*2+4) > f.offset {
+		return errInconsistentFileMetadata
+	}
+
+	buf = make([]byte, size)
+	n, err = r.r.ReadAt(buf, f.offset-size-eof)
+	if err != nil {
+		return fmt.Errorf("arrow/ipc: could not read footer data: %w", err)
+	}
+	if n != len(buf) {
+		return fmt.Errorf("arrow/ipc: could not read %d bytes from footer data", len(buf))
+	}
+
+	f.buffer = memory.NewBufferBytes(buf)
+	f.data = flatbuf.GetRootAsFooter(buf, 0)
+	return err
+}
+
+func (r *basicReaderImpl) block(mem memory.Allocator, f *footerBlock, i int) (dataBlock, error) {
+	var blk flatbuf.Block
+	if !f.data.RecordBatches(&blk, i) {
+		return fileBlock{}, fmt.Errorf("arrow/ipc: could not extract file block %d", i)
+	}
+
+	return fileBlock{
+		offset: blk.Offset(),
+		meta:   blk.MetaDataLength(),
+		body:   blk.BodyLength(),
+		r:      r.r,
+		mem:    mem,
+	}, nil
+}
+
+func (r *basicReaderImpl) dict(mem memory.Allocator, f *footerBlock, i int) (dataBlock, error) {
+	var blk flatbuf.Block
+	if !f.data.Dictionaries(&blk, i) {
+		return fileBlock{}, fmt.Errorf("arrow/ipc: could not extract dictionary block %d", i)
+	}
+
+	return fileBlock{
+		offset: blk.Offset(),
+		meta:   blk.MetaDataLength(),
+		body:   blk.BodyLength(),
+		r:      r.r,
+		mem:    mem,
+	}, nil
+}
+
+type mappedReaderImpl struct {
+	data []byte
+}
+
+func (r *mappedReaderImpl) getFooterEnd() (int64, error) { return int64(len(r.data)), nil }
+
+func (r *mappedReaderImpl) readFooter(f *footerBlock) error {
+	if f.offset <= int64(len(Magic)*2+4) {
+		return fmt.Errorf("arrow/ipc: file too small (size=%d)", f.offset)
+	}
+
+	eof := int64((len(Magic) + 4))
+	buf := r.data[f.offset-eof:]
+	if !bytes.Equal(buf[4:], Magic) {
+		return errNotArrowFile
+	}
+
+	size := int64(binary.LittleEndian.Uint32(buf[:4]))
+	if size <= 0 || size+int64(len(Magic)*2+4) > f.offset {
+		return errInconsistentFileMetadata
+	}
+
+	buf = r.data[f.offset-size-eof : f.offset-eof]
+	f.buffer = memory.NewBufferBytes(buf)
+	f.data = flatbuf.GetRootAsFooter(buf, 0)
+	return nil
+}
+
+func (r *mappedReaderImpl) block(_ memory.Allocator, f *footerBlock, i int) (dataBlock, error) {
+	var blk flatbuf.Block
+	if !f.data.RecordBatches(&blk, i) {
+		return mappedFileBlock{}, fmt.Errorf("arrow/ipc: could not extract file block %d", i)
+	}
+
+	return mappedFileBlock{
+		offset: blk.Offset(),
+		meta:   blk.MetaDataLength(),
+		body:   blk.BodyLength(),
+		data:   r.data,
+	}, nil
+}
+
+func (r *mappedReaderImpl) dict(_ memory.Allocator, f *footerBlock, i int) (dataBlock, error) {
+	var blk flatbuf.Block
+	if !f.data.Dictionaries(&blk, i) {
+		return mappedFileBlock{}, fmt.Errorf("arrow/ipc: could not extract dictionary block %d", i)
+	}
+
+	return mappedFileBlock{
+		offset: blk.Offset(),
+		meta:   blk.MetaDataLength(),
+		body:   blk.BodyLength(),
+		data:   r.data,
+	}, nil
+}
+
 // FileReader is an Arrow file reader.
 type FileReader struct {
-	r ReadAtSeeker
+	r readerImpl
 
-	footer struct {
-		offset int64
-		buffer *memory.Buffer
-		data   *flatbuf.Footer
-	}
+	footer footerBlock
 
 	// fields dictTypeMap
 	memo dictutils.Memo
@@ -56,81 +206,71 @@ type FileReader struct {
 	swapEndianness bool
 }
 
+// NewMappedFileReader is like NewFileReader but instead of using a ReadAtSeeker,
+// which will force copies through the Read/ReadAt methods, it uses a byte slice
+// and pulls slices directly from the data. This is useful specifically when
+// dealing with mmapped data so that you can lazily load the buffers and avoid
+// extraneous copies. The slices used for the record column buffers will simply
+// reference the existing data instead of performing copies via ReadAt/Read.
+//
+// For example, syscall.Mmap returns a byte slice which could be referencing
+// a shared memory region or otherwise a memory-mapped file.
+func NewMappedFileReader(data []byte, opts ...Option) (*FileReader, error) {
+	var (
+		cfg = newConfig(opts...)
+		f   = FileReader{
+			r:   &mappedReaderImpl{data: data},
+			mem: cfg.alloc,
+		}
+	)
+
+	if err := f.init(cfg); err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
 // NewFileReader opens an Arrow file using the provided reader r.
 func NewFileReader(r ReadAtSeeker, opts ...Option) (*FileReader, error) {
 	var (
 		cfg = newConfig(opts...)
-		err error
-
-		f = FileReader{
-			r:    r,
+		f   = FileReader{
+			r:    &basicReaderImpl{r: r},
 			memo: dictutils.NewMemo(),
 			mem:  cfg.alloc,
 		}
 	)
 
+	if err := f.init(cfg); err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
+func (f *FileReader) init(cfg *config) error {
+	var err error
 	if cfg.footer.offset <= 0 {
-		cfg.footer.offset, err = f.r.Seek(0, io.SeekEnd)
+		cfg.footer.offset, err = f.r.getFooterEnd()
 		if err != nil {
-			return nil, fmt.Errorf("arrow/ipc: could retrieve footer offset: %w", err)
+			return fmt.Errorf("arrow/ipc: could retrieve footer offset: %w", err)
 		}
 	}
 	f.footer.offset = cfg.footer.offset
 
-	err = f.readFooter()
+	err = f.r.readFooter(&f.footer)
 	if err != nil {
-		return nil, fmt.Errorf("arrow/ipc: could not decode footer: %w", err)
+		return fmt.Errorf("arrow/ipc: could not decode footer: %w", err)
 	}
 
 	err = f.readSchema(cfg.ensureNativeEndian)
 	if err != nil {
-		return nil, fmt.Errorf("arrow/ipc: could not decode schema: %w", err)
+		return fmt.Errorf("arrow/ipc: could not decode schema: %w", err)
 	}
 
 	if cfg.schema != nil && !cfg.schema.Equal(f.schema) {
-		return nil, fmt.Errorf("arrow/ipc: inconsistent schema for reading (got: %v, want: %v)", f.schema, cfg.schema)
+		return fmt.Errorf("arrow/ipc: inconsistent schema for reading (got: %v, want: %v)", f.schema, cfg.schema)
 	}
 
-	return &f, err
-}
-
-func (f *FileReader) readFooter() error {
-	var err error
-
-	if f.footer.offset <= int64(len(Magic)*2+4) {
-		return fmt.Errorf("arrow/ipc: file too small (size=%d)", f.footer.offset)
-	}
-
-	eof := int64(len(Magic) + 4)
-	buf := make([]byte, eof)
-	n, err := f.r.ReadAt(buf, f.footer.offset-eof)
-	if err != nil {
-		return fmt.Errorf("arrow/ipc: could not read footer: %w", err)
-	}
-	if n != len(buf) {
-		return fmt.Errorf("arrow/ipc: could not read %d bytes from end of file", len(buf))
-	}
-
-	if !bytes.Equal(buf[4:], Magic) {
-		return errNotArrowFile
-	}
-
-	size := int64(binary.LittleEndian.Uint32(buf[:4]))
-	if size <= 0 || size+int64(len(Magic)*2+4) > f.footer.offset {
-		return errInconsistentFileMetadata
-	}
-
-	buf = make([]byte, size)
-	n, err = f.r.ReadAt(buf, f.footer.offset-size-eof)
-	if err != nil {
-		return fmt.Errorf("arrow/ipc: could not read footer data: %w", err)
-	}
-	if n != len(buf) {
-		return fmt.Errorf("arrow/ipc: could not read %d bytes from footer data", len(buf))
-	}
-
-	f.footer.buffer = memory.NewBufferBytes(buf)
-	f.footer.data = flatbuf.GetRootAsFooter(buf, 0)
 	return err
 }
 
@@ -155,17 +295,17 @@ func (f *FileReader) readSchema(ensureNativeEndian bool) error {
 	}
 
 	for i := 0; i < f.NumDictionaries(); i++ {
-		blk, err := f.dict(i)
+		blk, err := f.r.dict(f.mem, &f.footer, i)
 		if err != nil {
 			return fmt.Errorf("arrow/ipc: could not read dictionary[%d]: %w", i, err)
 		}
 		switch {
-		case !bitutil.IsMultipleOf8(blk.Offset):
-			return fmt.Errorf("arrow/ipc: invalid file offset=%d for dictionary %d", blk.Offset, i)
-		case !bitutil.IsMultipleOf8(int64(blk.Meta)):
-			return fmt.Errorf("arrow/ipc: invalid file metadata=%d position for dictionary %d", blk.Meta, i)
-		case !bitutil.IsMultipleOf8(blk.Body):
-			return fmt.Errorf("arrow/ipc: invalid file body=%d position for dictionary %d", blk.Body, i)
+		case !bitutil.IsMultipleOf8(blk.Offset()):
+			return fmt.Errorf("arrow/ipc: invalid file offset=%d for dictionary %d", blk.Offset(), i)
+		case !bitutil.IsMultipleOf8(int64(blk.Meta())):
+			return fmt.Errorf("arrow/ipc: invalid file metadata=%d position for dictionary %d", blk.Meta(), i)
+		case !bitutil.IsMultipleOf8(blk.Body()):
+			return fmt.Errorf("arrow/ipc: invalid file body=%d position for dictionary %d", blk.Body(), i)
 		}
 
 		msg, err := blk.NewMessage()
@@ -173,7 +313,7 @@ func (f *FileReader) readSchema(ensureNativeEndian bool) error {
 			return err
 		}
 
-		kind, err = readDictionary(&f.memo, msg.meta, bytes.NewReader(msg.body.Bytes()), f.swapEndianness, f.mem)
+		kind, err = readDictionary(&f.memo, msg.meta, msg.body, f.swapEndianness, f.mem)
 		if err != nil {
 			return err
 		}
@@ -183,36 +323,6 @@ func (f *FileReader) readSchema(ensureNativeEndian bool) error {
 	}
 
 	return err
-}
-
-func (f *FileReader) block(i int) (fileBlock, error) {
-	var blk flatbuf.Block
-	if !f.footer.data.RecordBatches(&blk, i) {
-		return fileBlock{}, fmt.Errorf("arrow/ipc: could not extract file block %d", i)
-	}
-
-	return fileBlock{
-		Offset: blk.Offset(),
-		Meta:   blk.MetaDataLength(),
-		Body:   blk.BodyLength(),
-		r:      f.r,
-		mem:    f.mem,
-	}, nil
-}
-
-func (f *FileReader) dict(i int) (fileBlock, error) {
-	var blk flatbuf.Block
-	if !f.footer.data.Dictionaries(&blk, i) {
-		return fileBlock{}, fmt.Errorf("arrow/ipc: could not extract dictionary block %d", i)
-	}
-
-	return fileBlock{
-		Offset: blk.Offset(),
-		Meta:   blk.MetaDataLength(),
-		Body:   blk.BodyLength(),
-		r:      f.r,
-		mem:    f.mem,
-	}, nil
 }
 
 func (f *FileReader) Schema() *arrow.Schema {
@@ -278,17 +388,17 @@ func (f *FileReader) RecordAt(i int) (arrow.Record, error) {
 		panic("arrow/ipc: record index out of bounds")
 	}
 
-	blk, err := f.block(i)
+	blk, err := f.r.block(f.mem, &f.footer, i)
 	if err != nil {
 		return nil, err
 	}
 	switch {
-	case !bitutil.IsMultipleOf8(blk.Offset):
-		return nil, fmt.Errorf("arrow/ipc: invalid file offset=%d for record %d", blk.Offset, i)
-	case !bitutil.IsMultipleOf8(int64(blk.Meta)):
-		return nil, fmt.Errorf("arrow/ipc: invalid file metadata=%d position for record %d", blk.Meta, i)
-	case !bitutil.IsMultipleOf8(blk.Body):
-		return nil, fmt.Errorf("arrow/ipc: invalid file body=%d position for record %d", blk.Body, i)
+	case !bitutil.IsMultipleOf8(blk.Offset()):
+		return nil, fmt.Errorf("arrow/ipc: invalid file offset=%d for record %d", blk.Offset(), i)
+	case !bitutil.IsMultipleOf8(int64(blk.Meta())):
+		return nil, fmt.Errorf("arrow/ipc: invalid file metadata=%d position for record %d", blk.Meta(), i)
+	case !bitutil.IsMultipleOf8(blk.Body()):
+		return nil, fmt.Errorf("arrow/ipc: invalid file body=%d position for record %d", blk.Body(), i)
 	}
 
 	msg, err := blk.NewMessage()
@@ -301,7 +411,7 @@ func (f *FileReader) RecordAt(i int) (arrow.Record, error) {
 		return nil, fmt.Errorf("arrow/ipc: message %d is not a Record", i)
 	}
 
-	return newRecord(f.schema, &f.memo, msg.meta, bytes.NewReader(msg.body.Bytes()), f.swapEndianness, f.mem), nil
+	return newRecord(f.schema, &f.memo, msg.meta, msg.body, f.swapEndianness, f.mem), nil
 }
 
 // Read reads the current record from the underlying stream and an error, if any.
@@ -323,7 +433,7 @@ func (f *FileReader) ReadAt(i int64) (arrow.Record, error) {
 	return f.Record(int(i))
 }
 
-func newRecord(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buffer, body ReadAtSeeker, swapEndianness bool, mem memory.Allocator) arrow.Record {
+func newRecord(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buffer, swapEndianness bool, mem memory.Allocator) arrow.Record {
 	var (
 		msg   = flatbuf.GetRootAsMessage(meta.Bytes(), 0)
 		md    flatbuf.RecordBatch
@@ -340,10 +450,10 @@ func newRecord(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buffer, 
 
 	ctx := &arrayLoaderContext{
 		src: ipcSource{
-			meta:  &md,
-			r:     body,
-			codec: codec,
-			mem:   mem,
+			meta:     &md,
+			rawBytes: body,
+			codec:    codec,
+			mem:      mem,
 		},
 		memo:    memo,
 		max:     kMaxNestingDepth,
@@ -372,10 +482,10 @@ func newRecord(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buffer, 
 }
 
 type ipcSource struct {
-	meta  *flatbuf.RecordBatch
-	r     ReadAtSeeker
-	codec decompressor
-	mem   memory.Allocator
+	meta     *flatbuf.RecordBatch
+	rawBytes *memory.Buffer
+	codec    decompressor
+	mem      memory.Allocator
 }
 
 func (src *ipcSource) buffer(i int) *memory.Buffer {
@@ -388,34 +498,23 @@ func (src *ipcSource) buffer(i int) *memory.Buffer {
 		return memory.NewBufferBytes(nil)
 	}
 
-	raw := memory.NewResizableBuffer(src.mem)
+	var raw *memory.Buffer
 	if src.codec == nil {
-		raw.Resize(int(buf.Length()))
-		_, err := src.r.ReadAt(raw.Bytes(), buf.Offset())
-		if err != nil {
-			panic(err)
-		}
+		raw = memory.SliceBuffer(src.rawBytes, int(buf.Offset()), int(buf.Length()))
 	} else {
-		sr := io.NewSectionReader(src.r, buf.Offset(), buf.Length())
-		var uncompressedSize uint64
+		body := src.rawBytes.Bytes()[buf.Offset() : buf.Offset()+buf.Length()]
+		uncompressedSize := binary.LittleEndian.Uint64(body[:8])
 
-		err := binary.Read(sr, binary.LittleEndian, &uncompressedSize)
-		if err != nil {
-			panic(err)
-		}
-
-		var r io.Reader = sr
 		// check for an uncompressed buffer
 		if int64(uncompressedSize) != -1 {
+			raw = memory.NewResizableBuffer(src.mem)
 			raw.Resize(int(uncompressedSize))
-			src.codec.Reset(sr)
-			r = src.codec
+			src.codec.Reset(bytes.NewReader(body[8:]))
+			if _, err := io.ReadFull(src.codec, raw.Bytes()); err != nil {
+				panic(err)
+			}
 		} else {
-			raw.Resize(int(buf.Length() - 8))
-		}
-
-		if _, err = io.ReadFull(r, raw.Bytes()); err != nil {
-			panic(err)
+			raw = memory.SliceBuffer(src.rawBytes, int(buf.Offset())+8, int(buf.Length())-8)
 		}
 	}
 
@@ -717,7 +816,7 @@ func (ctx *arrayLoaderContext) loadUnion(dt arrow.UnionType) arrow.ArrayData {
 	return array.NewData(dt, int(field.Length()), buffers, subs, 0, 0)
 }
 
-func readDictionary(memo *dictutils.Memo, meta *memory.Buffer, body ReadAtSeeker, swapEndianness bool, mem memory.Allocator) (dictutils.Kind, error) {
+func readDictionary(memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buffer, swapEndianness bool, mem memory.Allocator) (dictutils.Kind, error) {
 	var (
 		msg   = flatbuf.GetRootAsMessage(meta.Bytes(), 0)
 		md    flatbuf.DictionaryBatch
@@ -743,10 +842,10 @@ func readDictionary(memo *dictutils.Memo, meta *memory.Buffer, body ReadAtSeeker
 
 	ctx := &arrayLoaderContext{
 		src: ipcSource{
-			meta:  &data,
-			codec: codec,
-			r:     body,
-			mem:   mem,
+			meta:     &data,
+			codec:    codec,
+			rawBytes: body,
+			mem:      mem,
 		},
 		memo: memo,
 		max:  kMaxNestingDepth,
@@ -767,4 +866,45 @@ func readDictionary(memo *dictutils.Memo, meta *memory.Buffer, body ReadAtSeeker
 		return dictutils.KindNew, nil
 	}
 	return dictutils.KindReplacement, nil
+}
+
+type mappedFileBlock struct {
+	offset int64
+	meta   int32
+	body   int64
+
+	data []byte
+}
+
+func (blk mappedFileBlock) Offset() int64 { return blk.offset }
+func (blk mappedFileBlock) Meta() int32   { return blk.meta }
+func (blk mappedFileBlock) Body() int64   { return blk.body }
+
+func (blk mappedFileBlock) section() []byte {
+	return blk.data[blk.offset : blk.offset+int64(blk.meta)+blk.body]
+}
+
+func (blk mappedFileBlock) NewMessage() (*Message, error) {
+	var (
+		body *memory.Buffer
+		meta *memory.Buffer
+		buf  = blk.section()
+	)
+
+	metaBytes := buf[:blk.meta]
+
+	prefix := 0
+	switch binary.LittleEndian.Uint32(metaBytes) {
+	case 0:
+	case kIPCContToken:
+		prefix = 8
+	default:
+		// ARROW-6314: backwards compatibility for reading old IPC
+		// messages produced prior to version 0.15.0
+		prefix = 4
+	}
+
+	meta = memory.NewBufferBytes(metaBytes[prefix:])
+	body = memory.NewBufferBytes(buf[blk.meta : int64(blk.meta)+blk.body])
+	return NewMessage(meta, body), nil
 }
