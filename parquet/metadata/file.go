@@ -243,6 +243,8 @@ type FileMetaData struct {
 	// size of the raw bytes of the metadata in the file which were
 	// decoded by thrift, Size() getter returns the value.
 	metadataLen int
+
+	FooterOffset int64
 }
 
 // NewFileMetaData takes in the raw bytes of the serialized metadata to deserialize
@@ -388,6 +390,7 @@ func (f *FileMetaData) Subset(rowGroups []int) (*FileMetaData, error) {
 		f.FileDecryptor,
 		f.version,
 		0,
+		f.FooterOffset,
 	}
 
 	out.RowGroups = make([]*format.RowGroup, 0, len(rowGroups))
