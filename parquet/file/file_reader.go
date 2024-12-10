@@ -99,7 +99,6 @@ func OpenParquetFile(filename string, memoryMap bool, opts ...ReadOption) (*Read
 // If no read properties are provided then the default ReaderProperties will be used. The WithMetadata
 // option can be used to provide a FileMetaData object rather than reading the file metadata from the file.
 func NewParquetReader(r parquet.ReaderAtSeeker, opts ...ReadOption) (*Reader, error) {
-	var err error
 	f := &Reader{r: r}
 	for _, o := range opts {
 		o(f)
@@ -181,11 +180,10 @@ func (f *Reader) parseMetaData() error {
 			return fmt.Errorf("parquet: could not read footer: %w", err)
 		}
 
-		f.metadata, err = metadata.NewFileMetaData(buf, nil)
+		f.metadata, err = metadata.NewFileMetaData(buf, footerOffset, nil)
 		if err != nil {
 			return fmt.Errorf("parquet: could not read footer: %w", err)
 		}
-		f.metadata.FooterOffset = footerOffset
 
 		if !f.metadata.IsSetEncryptionAlgorithm() {
 			if fileDecryptProps != nil && !fileDecryptProps.PlaintextFilesAllowed() {
@@ -217,11 +215,10 @@ func (f *Reader) parseMetaData() error {
 		}
 		f.fileDecryptor = encryption.NewFileDecryptor(fileDecryptProps, fileAad, algo.Algo, string(fileCryptoMetadata.KeyMetadata()), f.props.Allocator())
 
-		f.metadata, err = metadata.NewFileMetaData(buf[fileCryptoMetadata.Len():], f.fileDecryptor)
+		f.metadata, err = metadata.NewFileMetaData(buf[fileCryptoMetadata.Len():], footerOffset, f.fileDecryptor)
 		if err != nil {
 			return fmt.Errorf("parquet: could not read footer: %w", err)
 		}
-		f.metadata.FooterOffset = footerOffset
 	default:
 		return fmt.Errorf("parquet: magic bytes not found in footer. Either the file is corrupted or this isn't a parquet file")
 	}
@@ -309,7 +306,6 @@ func (f *Reader) RowGroup(i int) *RowGroupReader {
 		rgMetadata:    metadata.NewRowGroupMetaData(rg, f.metadata.Schema, f.WriterVersion(), f.fileDecryptor),
 		props:         f.props,
 		r:             f.r,
-		sourceSz:      f.metadata.FooterOffset,
 		fileDecryptor: f.fileDecryptor,
 		bufferPool:    &f.bufferPool,
 	}

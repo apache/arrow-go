@@ -244,12 +244,12 @@ type FileMetaData struct {
 	// decoded by thrift, Size() getter returns the value.
 	metadataLen int
 
-	FooterOffset int64
+	footerOffset int64
 }
 
 // NewFileMetaData takes in the raw bytes of the serialized metadata to deserialize
 // and will attempt to decrypt the footer if a decryptor is provided.
-func NewFileMetaData(data []byte, fileDecryptor encryption.FileDecryptor) (*FileMetaData, error) {
+func NewFileMetaData(data []byte, footerOffset int64, fileDecryptor encryption.FileDecryptor) (*FileMetaData, error) {
 	meta := format.NewFileMetaData()
 	if fileDecryptor != nil {
 		footerDecryptor := fileDecryptor.GetFooterDecryptor()
@@ -266,6 +266,7 @@ func NewFileMetaData(data []byte, fileDecryptor encryption.FileDecryptor) (*File
 		version:       NewAppVersion(meta.GetCreatedBy()),
 		metadataLen:   len(data) - int(remain),
 		FileDecryptor: fileDecryptor,
+		footerOffset:  footerOffset,
 	}
 
 	f.initSchema()
@@ -276,6 +277,9 @@ func NewFileMetaData(data []byte, fileDecryptor encryption.FileDecryptor) (*File
 
 // Size is the length of the raw serialized metadata bytes in the footer
 func (f *FileMetaData) Size() int { return f.metadataLen }
+
+// SourceSz is the total size of the source file
+func (f *FileMetaData) SourceSz() int64 { return f.footerOffset }
 
 // NumSchemaElements is the length of the flattened schema list in the thrift
 func (f *FileMetaData) NumSchemaElements() int {
@@ -390,7 +394,7 @@ func (f *FileMetaData) Subset(rowGroups []int) (*FileMetaData, error) {
 		f.FileDecryptor,
 		f.version,
 		0,
-		f.FooterOffset,
+		f.footerOffset,
 	}
 
 	out.RowGroups = make([]*format.RowGroup, 0, len(rowGroups))
