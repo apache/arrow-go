@@ -164,13 +164,26 @@ func (s *Int32Statistics) getMinMax(values []int32) (min, max int32) {
 func (s *Int32Statistics) getMinMaxSpaced(values []int32, validBits []byte, validBitsOffset int64) (min, max int32) {
 	min = s.defaultMin()
 	max = s.defaultMax()
-	var fn func([]int32) (int32, int32)
+	var fn func([]int32)
 	if s.order == schema.SortSIGNED {
-		fn = shared_utils.GetMinMaxInt32
+		fn = func(v []int32) {
+			localMin, localMax := shared_utils.GetMinMaxInt32(v)
+			if min > localMin {
+				min = localMin
+			}
+			if max < localMax {
+				max = localMax
+			}
+		}
 	} else {
-		fn = func(v []int32) (int32, int32) {
-			umin, umax := shared_utils.GetMinMaxUint32(arrow.Uint32Traits.CastFromBytes(arrow.Int32Traits.CastToBytes(values)))
-			return int32(umin), int32(umax)
+		fn = func(v []int32) {
+			umin, umax := shared_utils.GetMinMaxUint32(arrow.Uint32Traits.CastFromBytes(arrow.Int32Traits.CastToBytes(v)))
+			if uint32(min) > umin {
+				min = int32(umin)
+			}
+			if uint32(max) < umax {
+				max = int32(umax)
+			}
 		}
 	}
 
@@ -185,13 +198,7 @@ func (s *Int32Statistics) getMinMaxSpaced(values []int32, validBits []byte, vali
 		if run.Length == 0 {
 			break
 		}
-		localMin, localMax := fn(values[int(run.Pos):int(run.Pos+run.Length)])
-		if min > localMin {
-			min = localMin
-		}
-		if max < localMax {
-			max = localMax
-		}
+		fn(values[int(run.Pos):int(run.Pos+run.Length)])
 	}
 	return
 }
@@ -457,13 +464,26 @@ func (s *Int64Statistics) getMinMax(values []int64) (min, max int64) {
 func (s *Int64Statistics) getMinMaxSpaced(values []int64, validBits []byte, validBitsOffset int64) (min, max int64) {
 	min = s.defaultMin()
 	max = s.defaultMax()
-	var fn func([]int64) (int64, int64)
+	var fn func([]int64)
 	if s.order == schema.SortSIGNED {
-		fn = shared_utils.GetMinMaxInt64
+		fn = func(v []int64) {
+			localMin, localMax := shared_utils.GetMinMaxInt64(v)
+			if min > localMin {
+				min = localMin
+			}
+			if max < localMax {
+				max = localMax
+			}
+		}
 	} else {
-		fn = func(v []int64) (int64, int64) {
-			umin, umax := shared_utils.GetMinMaxUint64(arrow.Uint64Traits.CastFromBytes(arrow.Int64Traits.CastToBytes(values)))
-			return int64(umin), int64(umax)
+		fn = func(v []int64) {
+			umin, umax := shared_utils.GetMinMaxUint64(arrow.Uint64Traits.CastFromBytes(arrow.Int64Traits.CastToBytes(v)))
+			if uint64(min) > umin {
+				min = int64(umin)
+			}
+			if uint64(max) < umax {
+				max = int64(umax)
+			}
 		}
 	}
 
@@ -478,13 +498,7 @@ func (s *Int64Statistics) getMinMaxSpaced(values []int64, validBits []byte, vali
 		if run.Length == 0 {
 			break
 		}
-		localMin, localMax := fn(values[int(run.Pos):int(run.Pos+run.Length)])
-		if min > localMin {
-			min = localMin
-		}
-		if max < localMax {
-			max = localMax
-		}
+		fn(values[int(run.Pos):int(run.Pos+run.Length)])
 	}
 	return
 }
@@ -1980,12 +1994,12 @@ func (s *ByteArrayStatistics) UpdateFromArrow(values arrow.Array, updateCounts b
 		min       = s.defaultMin()
 		max       = s.defaultMax()
 		arr       = values.(array.BinaryLike)
-		data      = arr.ValueBytes()		
+		data      = arr.ValueBytes()
 		curOffset = int64(0)
 	)
 
 	for i := 0; i < arr.Len(); i++ {
-		nextOffset := curOffset + int64(arr.ValueLen(i))
+		nextOffset := curOffset + int64(arr.ValueLen(i))		
 		v := data[curOffset:nextOffset]
 		curOffset = nextOffset
 
