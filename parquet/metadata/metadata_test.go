@@ -114,7 +114,7 @@ func TestBuildAccess(t *testing.T) {
 	require.NoError(t, err)
 	serialized, err := faccessor.SerializeString(context.Background())
 	assert.NoError(t, err)
-	faccessorCopy, err := metadata.NewFileMetaData([]byte(serialized), 0, nil)
+	faccessorCopy, err := metadata.NewFileMetaData([]byte(serialized), nil)
 	assert.NoError(t, err)
 
 	for _, accessor := range []*metadata.FileMetaData{faccessor, faccessorCopy} {

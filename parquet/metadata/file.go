@@ -244,12 +244,14 @@ type FileMetaData struct {
 	// decoded by thrift, Size() getter returns the value.
 	metadataLen int
 
-	footerOffset int64
+	// sourceFileSize is not a part of FileMetaData, but it is mainly used to parse meta data.
+	// Users can manually set this value and they are responsible for the validity of it.
+	sourceFileSize int64
 }
 
 // NewFileMetaData takes in the raw bytes of the serialized metadata to deserialize
 // and will attempt to decrypt the footer if a decryptor is provided.
-func NewFileMetaData(data []byte, footerOffset int64, fileDecryptor encryption.FileDecryptor) (*FileMetaData, error) {
+func NewFileMetaData(data []byte, fileDecryptor encryption.FileDecryptor) (*FileMetaData, error) {
 	meta := format.NewFileMetaData()
 	if fileDecryptor != nil {
 		footerDecryptor := fileDecryptor.GetFooterDecryptor()
@@ -266,7 +268,6 @@ func NewFileMetaData(data []byte, footerOffset int64, fileDecryptor encryption.F
 		version:       NewAppVersion(meta.GetCreatedBy()),
 		metadataLen:   len(data) - int(remain),
 		FileDecryptor: fileDecryptor,
-		footerOffset:  footerOffset,
 	}
 
 	f.initSchema()
@@ -278,8 +279,11 @@ func NewFileMetaData(data []byte, footerOffset int64, fileDecryptor encryption.F
 // Size is the length of the raw serialized metadata bytes in the footer
 func (f *FileMetaData) Size() int { return f.metadataLen }
 
-// SourceSz is the total size of the source file
-func (f *FileMetaData) SourceSz() int64 { return f.footerOffset }
+// SetSourceFileSize get the total size of the source file from meta data.
+func (f *FileMetaData) GetSourceFileSize() int64 { return f.sourceFileSize }
+
+// GetSourceFileSize set the total size of the source file in meta data.
+func (f *FileMetaData) SetSourceFileSize(sourceFileSize int64) { f.sourceFileSize = sourceFileSize }
 
 // NumSchemaElements is the length of the flattened schema list in the thrift
 func (f *FileMetaData) NumSchemaElements() int {

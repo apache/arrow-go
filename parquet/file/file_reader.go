@@ -180,10 +180,11 @@ func (f *Reader) parseMetaData() error {
 			return fmt.Errorf("parquet: could not read footer: %w", err)
 		}
 
-		f.metadata, err = metadata.NewFileMetaData(buf, footerOffset, nil)
+		f.metadata, err = metadata.NewFileMetaData(buf, nil)
 		if err != nil {
 			return fmt.Errorf("parquet: could not read footer: %w", err)
 		}
+		f.metadata.SetSourceFileSize(footerOffset)
 
 		if !f.metadata.IsSetEncryptionAlgorithm() {
 			if fileDecryptProps != nil && !fileDecryptProps.PlaintextFilesAllowed() {
@@ -215,10 +216,11 @@ func (f *Reader) parseMetaData() error {
 		}
 		f.fileDecryptor = encryption.NewFileDecryptor(fileDecryptProps, fileAad, algo.Algo, string(fileCryptoMetadata.KeyMetadata()), f.props.Allocator())
 
-		f.metadata, err = metadata.NewFileMetaData(buf[fileCryptoMetadata.Len():], footerOffset, f.fileDecryptor)
+		f.metadata, err = metadata.NewFileMetaData(buf[fileCryptoMetadata.Len():], f.fileDecryptor)
 		if err != nil {
 			return fmt.Errorf("parquet: could not read footer: %w", err)
 		}
+		f.metadata.SetSourceFileSize(footerOffset)
 	default:
 		return fmt.Errorf("parquet: magic bytes not found in footer. Either the file is corrupted or this isn't a parquet file")
 	}

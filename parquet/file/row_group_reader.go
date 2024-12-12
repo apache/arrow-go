@@ -84,7 +84,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 	colLen := col.TotalCompressedSize()
 	// PARQUET-816 workaround for old files created by older parquet-mr
 	if r.fileMetadata.WriterVersion().LessThan(metadata.Parquet816FixedVersion) {
-		sourceSz := r.fileMetadata.SourceSz()
+		sourceSz := r.fileMetadata.GetSourceFileSize()
 		// The Parquet MR writer had a bug in 1.2.8 and below where it didn't include the
 		// dictionary page header size in total_compressed_size and total_uncompressed_size
 		// (see IMPALA-694). We add padding to compensate.
