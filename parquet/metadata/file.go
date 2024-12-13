@@ -243,6 +243,10 @@ type FileMetaData struct {
 	// size of the raw bytes of the metadata in the file which were
 	// decoded by thrift, Size() getter returns the value.
 	metadataLen int
+
+	// sourceFileSize is not a part of FileMetaData, but it is mainly used to parse meta data.
+	// Users can manually set this value and they are responsible for the validity of it.
+	sourceFileSize int64
 }
 
 // NewFileMetaData takes in the raw bytes of the serialized metadata to deserialize
@@ -274,6 +278,12 @@ func NewFileMetaData(data []byte, fileDecryptor encryption.FileDecryptor) (*File
 
 // Size is the length of the raw serialized metadata bytes in the footer
 func (f *FileMetaData) Size() int { return f.metadataLen }
+
+// GetSourceFileSize get the total size of the source file from meta data.
+func (f *FileMetaData) GetSourceFileSize() int64 { return f.sourceFileSize }
+
+// SetSourceFileSize set the total size of the source file in meta data.
+func (f *FileMetaData) SetSourceFileSize(sourceFileSize int64) { f.sourceFileSize = sourceFileSize }
 
 // NumSchemaElements is the length of the flattened schema list in the thrift
 func (f *FileMetaData) NumSchemaElements() int {
@@ -388,6 +398,7 @@ func (f *FileMetaData) Subset(rowGroups []int) (*FileMetaData, error) {
 		f.FileDecryptor,
 		f.version,
 		0,
+		f.sourceFileSize,
 	}
 
 	out.RowGroups = make([]*format.RowGroup, 0, len(rowGroups))

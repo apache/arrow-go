@@ -47,7 +47,6 @@ type Reader struct {
 	r             parquet.ReaderAtSeeker
 	props         *parquet.ReaderProperties
 	metadata      *metadata.FileMetaData
-	footerOffset  int64
 	fileDecryptor encryption.FileDecryptor
 
 	bufferPool sync.Pool
@@ -100,17 +99,9 @@ func OpenParquetFile(filename string, memoryMap bool, opts ...ReadOption) (*Read
 // If no read properties are provided then the default ReaderProperties will be used. The WithMetadata
 // option can be used to provide a FileMetaData object rather than reading the file metadata from the file.
 func NewParquetReader(r parquet.ReaderAtSeeker, opts ...ReadOption) (*Reader, error) {
-	var err error
 	f := &Reader{r: r}
 	for _, o := range opts {
 		o(f)
-	}
-
-	if f.footerOffset <= 0 {
-		f.footerOffset, err = r.Seek(0, io.SeekEnd)
-		if err != nil {
-			return nil, fmt.Errorf("parquet: could not retrieve footer offset: %w", err)
-		}
 	}
 
 	if f.props == nil {
@@ -156,13 +147,18 @@ func (f *Reader) MetaData() *metadata.FileMetaData { return f.metadata }
 
 // parseMetaData handles parsing the metadata from the opened file.
 func (f *Reader) parseMetaData() error {
-	if f.footerOffset <= int64(footerSize) {
-		return fmt.Errorf("parquet: file too small (size=%d)", f.footerOffset)
+	footerOffset, err := f.r.Seek(0, io.SeekEnd)
+	if err != nil {
+		return fmt.Errorf("parquet: could not retrieve footer offset: %w", err)
+	}
+
+	if footerOffset <= int64(footerSize) {
+		return fmt.Errorf("parquet: file too small (size=%d)", footerOffset)
 	}
 
 	buf := make([]byte, footerSize)
 	// backup 8 bytes to read the footer size (first four bytes) and the magic bytes (last 4 bytes)
-	n, err := f.r.ReadAt(buf, f.footerOffset-int64(footerSize))
+	n, err := f.r.ReadAt(buf, footerOffset-int64(footerSize))
 	if err != nil && err != io.EOF {
 		return fmt.Errorf("parquet: could not read footer: %w", err)
 	}
@@ -171,7 +167,7 @@ func (f *Reader) parseMetaData() error {
 	}
 
 	size := int64(binary.LittleEndian.Uint32(buf[:4]))
-	if size < 0 || size+int64(footerSize) > f.footerOffset {
+	if size < 0 || size+int64(footerSize) > footerOffset {
 		return errInconsistentFileMetadata
 	}
 
@@ -180,7 +176,7 @@ func (f *Reader) parseMetaData() error {
 	switch {
 	case bytes.Equal(buf[4:], magicBytes): // non-encrypted metadata
 		buf = make([]byte, size)
-		if _, err := f.r.ReadAt(buf, f.footerOffset-int64(footerSize)-size); err != nil {
+		if _, err := f.r.ReadAt(buf, footerOffset-int64(footerSize)-size); err != nil {
 			return fmt.Errorf("parquet: could not read footer: %w", err)
 		}
 
@@ -188,6 +184,7 @@ func (f *Reader) parseMetaData() error {
 		if err != nil {
 			return fmt.Errorf("parquet: could not read footer: %w", err)
 		}
+		f.metadata.SetSourceFileSize(footerOffset)
 
 		if !f.metadata.IsSetEncryptionAlgorithm() {
 			if fileDecryptProps != nil && !fileDecryptProps.PlaintextFilesAllowed() {
@@ -200,7 +197,7 @@ func (f *Reader) parseMetaData() error {
 		}
 	case bytes.Equal(buf[4:], magicEBytes): // encrypted metadata
 		buf = make([]byte, size)
-		if _, err := f.r.ReadAt(buf, f.footerOffset-int64(footerSize)-size); err != nil {
+		if _, err := f.r.ReadAt(buf, footerOffset-int64(footerSize)-size); err != nil {
 			return fmt.Errorf("parquet: could not read footer: %w", err)
 		}
 
@@ -223,6 +220,7 @@ func (f *Reader) parseMetaData() error {
 		if err != nil {
 			return fmt.Errorf("parquet: could not read footer: %w", err)
 		}
+		f.metadata.SetSourceFileSize(footerOffset)
 	default:
 		return fmt.Errorf("parquet: magic bytes not found in footer. Either the file is corrupted or this isn't a parquet file")
 	}
@@ -310,7 +308,6 @@ func (f *Reader) RowGroup(i int) *RowGroupReader {
 		rgMetadata:    metadata.NewRowGroupMetaData(rg, f.metadata.Schema, f.WriterVersion(), f.fileDecryptor),
 		props:         f.props,
 		r:             f.r,
-		sourceSz:      f.footerOffset,
 		fileDecryptor: f.fileDecryptor,
 		bufferPool:    &f.bufferPool,
 	}

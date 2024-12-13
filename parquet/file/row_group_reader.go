@@ -34,7 +34,6 @@ const (
 // RowGroupReader is the primary interface for reading a single row group
 type RowGroupReader struct {
 	r             parquet.ReaderAtSeeker
-	sourceSz      int64
 	fileMetadata  *metadata.FileMetaData
 	rgMetadata    *metadata.RowGroupMetaData
 	props         *parquet.ReaderProperties
@@ -85,16 +84,17 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 	colLen := col.TotalCompressedSize()
 	// PARQUET-816 workaround for old files created by older parquet-mr
 	if r.fileMetadata.WriterVersion().LessThan(metadata.Parquet816FixedVersion) {
+		sourceSz := r.fileMetadata.GetSourceFileSize()
 		// The Parquet MR writer had a bug in 1.2.8 and below where it didn't include the
 		// dictionary page header size in total_compressed_size and total_uncompressed_size
 		// (see IMPALA-694). We add padding to compensate.
 		if colStart < 0 || colLen < 0 {
 			return nil, fmt.Errorf("invalid column chunk metadata, offset (%d) and length (%d) should both be positive", colStart, colLen)
 		}
-		if colStart > r.sourceSz || colLen > r.sourceSz {
-			return nil, fmt.Errorf("invalid column chunk metadata, offset (%d) and length (%d) must both be less than total source size (%d)", colStart, colLen, r.sourceSz)
+		if colStart > sourceSz || colLen > sourceSz {
+			return nil, fmt.Errorf("invalid column chunk metadata, offset (%d) and length (%d) must both be less than total source size (%d)", colStart, colLen, sourceSz)
 		}
-		bytesRemain := r.sourceSz - (colStart + colLen)
+		bytesRemain := sourceSz - (colStart + colLen)
 		padding := utils.Min(maxDictHeaderSize, bytesRemain)
 		colLen += padding
 	}
