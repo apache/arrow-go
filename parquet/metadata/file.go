@@ -279,10 +279,10 @@ func NewFileMetaData(data []byte, fileDecryptor encryption.FileDecryptor) (*File
 // Size is the length of the raw serialized metadata bytes in the footer
 func (f *FileMetaData) Size() int { return f.metadataLen }
 
-// SetSourceFileSize get the total size of the source file from meta data.
+// GetSourceFileSize get the total size of the source file from meta data.
 func (f *FileMetaData) GetSourceFileSize() int64 { return f.sourceFileSize }
 
-// GetSourceFileSize set the total size of the source file in meta data.
+// SetSourceFileSize set the total size of the source file in meta data.
 func (f *FileMetaData) SetSourceFileSize(sourceFileSize int64) { f.sourceFileSize = sourceFileSize }
 
 // NumSchemaElements is the length of the flattened schema list in the thrift
@@ -398,7 +398,7 @@ func (f *FileMetaData) Subset(rowGroups []int) (*FileMetaData, error) {
 		f.FileDecryptor,
 		f.version,
 		0,
-		f.footerOffset,
+		f.sourceFileSize,
 	}
 
 	out.RowGroups = make([]*format.RowGroup, 0, len(rowGroups))
