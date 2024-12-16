@@ -35,7 +35,7 @@ import (
 
 type readerImpl interface {
 	getFooterEnd() (int64, error)
-	readFooter(*footerBlock) error
+	getBytes(offset, length int64) ([]byte, error)
 	dict(memory.Allocator, *footerBlock, int) (dataBlock, error)
 	block(memory.Allocator, *footerBlock, int) (dataBlock, error)
 }
@@ -53,52 +53,28 @@ type dataBlock interface {
 	NewMessage() (*Message, error)
 }
 
+const footerSizeLen = 4
+
+var minimumOffsetSize = int64(len(Magic)*2 + footerSizeLen)
+
 type basicReaderImpl struct {
 	r ReadAtSeeker
 }
 
-func (r *basicReaderImpl) getFooterEnd() (int64, error) {
-	return r.r.Seek(0, io.SeekEnd)
+func (r *basicReaderImpl) getBytes(offset, len int64) ([]byte, error) {
+	buf := make([]byte, len)
+	n, err := r.r.ReadAt(buf, offset)
+	if err != nil {
+		return nil, fmt.Errorf("arrow/ipc: could not read %d bytes at offset %d: %w", len, offset, err)
+	}
+	if int64(n) != len {
+		return nil, fmt.Errorf("arrow/ipc: could not read %d bytes at offset %d", len, offset)
+	}
+	return buf, nil
 }
 
-func (r *basicReaderImpl) readFooter(f *footerBlock) error {
-	var err error
-
-	if f.offset <= int64(len(Magic)*2+4) {
-		return fmt.Errorf("arrow/ipc: file too small (size=%d)", f.offset)
-	}
-
-	eof := int64(len(Magic) + 4)
-	buf := make([]byte, eof)
-	n, err := r.r.ReadAt(buf, f.offset-eof)
-	if err != nil {
-		return fmt.Errorf("arrow/ipc: could not read footer: %w", err)
-	}
-	if n != len(buf) {
-		return fmt.Errorf("arrow/ipc: could not read %d bytes from end of file", len(buf))
-	}
-
-	if !bytes.Equal(buf[4:], Magic) {
-		return errNotArrowFile
-	}
-
-	size := int64(binary.LittleEndian.Uint32(buf[:4]))
-	if size <= 0 || size+int64(len(Magic)*2+4) > f.offset {
-		return errInconsistentFileMetadata
-	}
-
-	buf = make([]byte, size)
-	n, err = r.r.ReadAt(buf, f.offset-size-eof)
-	if err != nil {
-		return fmt.Errorf("arrow/ipc: could not read footer data: %w", err)
-	}
-	if n != len(buf) {
-		return fmt.Errorf("arrow/ipc: could not read %d bytes from footer data", len(buf))
-	}
-
-	f.buffer = memory.NewBufferBytes(buf)
-	f.data = flatbuf.GetRootAsFooter(buf, 0)
-	return err
+func (r *basicReaderImpl) getFooterEnd() (int64, error) {
+	return r.r.Seek(0, io.SeekEnd)
 }
 
 func (r *basicReaderImpl) block(mem memory.Allocator, f *footerBlock, i int) (dataBlock, error) {
@@ -135,29 +111,15 @@ type mappedReaderImpl struct {
 	data []byte
 }
 
-func (r *mappedReaderImpl) getFooterEnd() (int64, error) { return int64(len(r.data)), nil }
-
-func (r *mappedReaderImpl) readFooter(f *footerBlock) error {
-	if f.offset <= int64(len(Magic)*2+4) {
-		return fmt.Errorf("arrow/ipc: file too small (size=%d)", f.offset)
+func (r *mappedReaderImpl) getBytes(offset, length int64) ([]byte, error) {
+	if offset < 0 || offset+int64(length) > int64(len(r.data)) {
+		return nil, fmt.Errorf("arrow/ipc: invalid offset=%d or length=%d", offset, length)
 	}
 
-	eof := int64((len(Magic) + 4))
-	buf := r.data[f.offset-eof:]
-	if !bytes.Equal(buf[4:], Magic) {
-		return errNotArrowFile
-	}
-
-	size := int64(binary.LittleEndian.Uint32(buf[:4]))
-	if size <= 0 || size+int64(len(Magic)*2+4) > f.offset {
-		return errInconsistentFileMetadata
-	}
-
-	buf = r.data[f.offset-size-eof : f.offset-eof]
-	f.buffer = memory.NewBufferBytes(buf)
-	f.data = flatbuf.GetRootAsFooter(buf, 0)
-	return nil
+	return r.data[offset : offset+length], nil
 }
+
+func (r *mappedReaderImpl) getFooterEnd() (int64, error) { return int64(len(r.data)), nil }
 
 func (r *mappedReaderImpl) block(_ memory.Allocator, f *footerBlock, i int) (dataBlock, error) {
 	var blk flatbuf.Block
@@ -257,7 +219,7 @@ func (f *FileReader) init(cfg *config) error {
 	}
 	f.footer.offset = cfg.footer.offset
 
-	err = f.r.readFooter(&f.footer)
+	err = f.readFooter()
 	if err != nil {
 		return fmt.Errorf("arrow/ipc: could not decode footer: %w", err)
 	}
@@ -323,6 +285,36 @@ func (f *FileReader) readSchema(ensureNativeEndian bool) error {
 	}
 
 	return err
+}
+
+func (f *FileReader) readFooter() error {
+	if f.footer.offset <= minimumOffsetSize {
+		return fmt.Errorf("arrow/ipc: file too small (size=%d)", f.footer.offset)
+	}
+
+	eof := int64(len(Magic) + footerSizeLen)
+	buf, err := f.r.getBytes(f.footer.offset-eof, eof)
+	if err != nil {
+		return err
+	}
+
+	if !bytes.Equal(buf[4:], Magic) {
+		return errNotArrowFile
+	}
+
+	size := int64(binary.LittleEndian.Uint32(buf[:footerSizeLen]))
+	if size <= 0 || size+minimumOffsetSize > f.footer.offset {
+		return errInconsistentFileMetadata
+	}
+
+	buf, err = f.r.getBytes(f.footer.offset-size-eof, size)
+	if err != nil {
+		return err
+	}
+
+	f.footer.buffer = memory.NewBufferBytes(buf)
+	f.footer.data = flatbuf.GetRootAsFooter(buf, 0)
+	return nil
 }
 
 func (f *FileReader) Schema() *arrow.Schema {
@@ -503,10 +495,10 @@ func (src *ipcSource) buffer(i int) *memory.Buffer {
 		raw = memory.SliceBuffer(src.rawBytes, int(buf.Offset()), int(buf.Length()))
 	} else {
 		body := src.rawBytes.Bytes()[buf.Offset() : buf.Offset()+buf.Length()]
-		uncompressedSize := binary.LittleEndian.Uint64(body[:8])
+		uncompressedSize := int64(binary.LittleEndian.Uint64(body[:8]))
 
 		// check for an uncompressed buffer
-		if int64(uncompressedSize) != -1 {
+		if uncompressedSize != -1 {
 			raw = memory.NewResizableBuffer(src.mem)
 			raw.Resize(int(uncompressedSize))
 			src.codec.Reset(bytes.NewReader(body[8:]))
