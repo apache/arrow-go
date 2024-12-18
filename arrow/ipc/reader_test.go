@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"testing"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -94,6 +95,79 @@ func TestReaderCheckedAllocator(t *testing.T) {
 
 	_, err = reader.Read()
 	require.NoError(t, err)
+}
+
+func TestMappedReader(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer pool.AssertSize(t, 0)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "f1", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	b := array.NewRecordBuilder(pool, schema)
+	defer b.Release()
+	b.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2, 3, 4}, []bool{true, true, false, true})
+
+	rec1 := b.NewRecord()
+	defer rec1.Release()
+
+	tbl := array.NewTableFromRecords(schema, []arrow.Record{rec1})
+	defer tbl.Release()
+
+	var buf bytes.Buffer
+	ipcWriter, err := NewFileWriter(&buf, WithAllocator(pool), WithSchema(schema))
+	require.NoError(t, err)
+
+	t.Log("Reading data before")
+	tr := array.NewTableReader(tbl, 2)
+	defer tr.Release()
+
+	n := 0
+	for tr.Next() {
+		rec := tr.Record()
+		for i, col := range rec.Columns() {
+			t.Logf("rec[%d][%q]: %v nulls:%v\n", n,
+				rec.ColumnName(i), col, col.NullBitmapBytes())
+		}
+		n++
+		err := ipcWriter.Write(rec)
+		if err != nil {
+			panic(err)
+		}
+	}
+	require.NoError(t, ipcWriter.Close())
+
+	t.Log("Reading data after")
+	rdr, err := NewMappedFileReader(buf.Bytes(), WithAllocator(pool))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	rec, err := rdr.RecordAt(0)
+	require.NoError(t, err)
+	defer rec.Release()
+
+	// get offset and block info into the buffer bytes
+	blk, err := rdr.r.block(nil, &rdr.footer, 0)
+	require.NoError(t, err)
+
+	// determine pointer location of bytes for the first buffer
+	// no nulls, so only one buffer
+	start := unsafe.Pointer(unsafe.SliceData(buf.Bytes()))
+	loc := unsafe.Add(unsafe.Add(start, blk.Offset()), blk.Meta())
+	// ensure our buffer pointer matches the calculated pointer
+	assert.Equal(t, (*byte)(loc), unsafe.SliceData(rec.Column(0).Data().Buffers()[1].Bytes()))
+
+	rec, err = rdr.RecordAt(1)
+	require.NoError(t, err)
+	defer rec.Release()
+
+	blk, err = rdr.r.block(nil, &rdr.footer, 1)
+	require.NoError(t, err)
+
+	start = unsafe.Pointer(unsafe.SliceData(buf.Bytes()))
+	loc = unsafe.Add(unsafe.Add(start, blk.Offset()), blk.Meta())
+	// check pointer of validity bitmap location
+	assert.Equal(t, (*byte)(loc), unsafe.SliceData(rec.Column(0).Data().Buffers()[0].Bytes()))
+	// calculate and check pointer of data buffer
+	loc = unsafe.Add(loc, rec.Column(0).Data().Buffers()[0].Len())
+	assert.Equal(t, (*byte)(loc), unsafe.SliceData(rec.Column(0).Data().Buffers()[1].Bytes()))
 }
 
 func BenchmarkIPC(b *testing.B) {

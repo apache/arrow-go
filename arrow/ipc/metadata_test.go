@@ -89,8 +89,8 @@ func TestRWSchema(t *testing.T) {
 func TestRWFooter(t *testing.T) {
 	for _, tc := range []struct {
 		schema *arrow.Schema
-		dicts  []fileBlock
-		recs   []fileBlock
+		dicts  []dataBlock
+		recs   []dataBlock
 	}{
 		{
 			schema: arrow.NewSchema([]arrow.Field{
@@ -98,15 +98,15 @@ func TestRWFooter(t *testing.T) {
 				{Name: "f2", Type: arrow.PrimitiveTypes.Uint16},
 				{Name: "f3", Type: arrow.PrimitiveTypes.Float64},
 			}, nil),
-			dicts: []fileBlock{
-				{Offset: 1, Meta: 2, Body: 3},
-				{Offset: 4, Meta: 5, Body: 6},
-				{Offset: 7, Meta: 8, Body: 9},
+			dicts: []dataBlock{
+				fileBlock{offset: 1, meta: 2, body: 3},
+				fileBlock{offset: 4, meta: 5, body: 6},
+				fileBlock{offset: 7, meta: 8, body: 9},
 			},
-			recs: []fileBlock{
-				{Offset: 0, Meta: 10, Body: 30},
-				{Offset: 10, Meta: 30, Body: 60},
-				{Offset: 20, Meta: 30, Body: 40},
+			recs: []dataBlock{
+				fileBlock{offset: 0, meta: 10, body: 30},
+				fileBlock{offset: 10, meta: 30, body: 60},
+				fileBlock{offset: 20, meta: 30, body: 40},
 			},
 		},
 	} {
@@ -142,7 +142,7 @@ func TestRWFooter(t *testing.T) {
 				if !footer.Dictionaries(&blk, i) {
 					t.Fatalf("could not get dictionary %d", i)
 				}
-				got := fileBlock{Offset: blk.Offset(), Meta: blk.MetaDataLength(), Body: blk.BodyLength()}
+				got := fileBlock{offset: blk.Offset(), meta: blk.MetaDataLength(), body: blk.BodyLength()}
 				want := dict
 				if got != want {
 					t.Errorf("dict[%d] differ:\ngot= %v\nwant=%v", i, got, want)
@@ -158,7 +158,7 @@ func TestRWFooter(t *testing.T) {
 				if !footer.RecordBatches(&blk, i) {
 					t.Fatalf("could not get record %d", i)
 				}
-				got := fileBlock{Offset: blk.Offset(), Meta: blk.MetaDataLength(), Body: blk.BodyLength()}
+				got := fileBlock{offset: blk.Offset(), meta: blk.MetaDataLength(), body: blk.BodyLength()}
 				want := rec
 				if got != want {
 					t.Errorf("record[%d] differ:\ngot= %v\nwant=%v", i, got, want)
