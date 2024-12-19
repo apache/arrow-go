@@ -19,15 +19,22 @@ package file_test
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"reflect"
+	"slices"
 	"testing"
+	"unsafe"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
 	"github.com/apache/arrow-go/v18/parquet/internal/testutils"
+	"github.com/apache/arrow-go/v18/parquet/metadata"
+	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -595,4 +602,468 @@ func TestLZ4RawFileRoundtrip(t *testing.T) {
 	require.Equal(t, input, output)
 
 	require.NoError(t, rdr.Close())
+}
+
+type ColumnIndexObject struct {
+	nullPages     []bool
+	minValues     [][]byte
+	maxValues     [][]byte
+	boundaryOrder metadata.BoundaryOrder
+	nullCounts    []int64
+}
+
+func NewColumnIndexObject(colIdx metadata.ColumnIndex) (ret ColumnIndexObject) {
+	if colIdx == nil {
+		return
+	}
+
+	ret.nullPages = colIdx.GetNullPages()
+	ret.minValues = colIdx.GetMinValues()
+	ret.maxValues = colIdx.GetMaxValues()
+	ret.boundaryOrder = colIdx.GetBoundaryOrder()
+	if colIdx.IsSetNullCounts() {
+		ret.nullCounts = colIdx.GetNullCounts()
+	}
+	return
+}
+
+func simpleEncode[T int32 | int64 | float32 | float64](val T) []byte {
+	return unsafe.Slice((*byte)(unsafe.Pointer(&val)), unsafe.Sizeof(val))
+}
+
+type PageIndexRoundTripSuite struct {
+	suite.Suite
+
+	mem           *memory.CheckedAllocator
+	buf           bytes.Buffer
+	columnIndexes []ColumnIndexObject
+	pageVersion   parquet.DataPageVersion
+}
+
+func (t *PageIndexRoundTripSuite) SetupTest() {
+	t.mem = memory.NewCheckedAllocator(memory.NewGoAllocator())
+
+	t.buf.Reset()
+	t.columnIndexes = make([]ColumnIndexObject, 0)
+}
+
+func (t *PageIndexRoundTripSuite) TearDownTest() {
+	t.mem.AssertSize(t.T(), 0)
+}
+
+func (t *PageIndexRoundTripSuite) writeFile(props *parquet.WriterProperties, tbl arrow.Table) {
+	schema := tbl.Schema()
+	arrWriterProps := pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(t.mem))
+
+	wr, err := pqarrow.NewFileWriter(schema, &t.buf, props, arrWriterProps)
+	t.Require().NoError(err)
+
+	t.Require().NoError(wr.WriteTable(tbl, tbl.NumRows()))
+	t.Require().NoError(wr.Close())
+}
+
+func (t *PageIndexRoundTripSuite) readPageIndexes(expectNumRG, expectNumPages int, expectColsWithoutIdx []int) {
+	rdr, err := file.NewParquetReader(bytes.NewReader(t.buf.Bytes()),
+		file.WithReadProps(parquet.NewReaderProperties(t.mem)))
+	t.Require().NoError(err)
+	defer rdr.Close()
+
+	fileMeta := rdr.MetaData()
+	t.Equal(expectNumRG, fileMeta.NumRowGroups())
+
+	pageIdxReader := rdr.GetPageIndexReader()
+	t.Require().NotNil(pageIdxReader)
+
+	offsetLowerBound := int64(0)
+	for rg := range fileMeta.NumRowGroups() {
+		rgIdxRdr, err := pageIdxReader.RowGroup(rg)
+		t.Require().NoError(err)
+		t.Require().NotNil(rgIdxRdr)
+
+		rgReader := rdr.RowGroup(rg)
+		t.Require().NotNil(rgReader)
+
+		for col := range fileMeta.Schema.NumColumns() {
+			colIdx, err := rgIdxRdr.GetColumnIndex(col)
+			t.Require().NoError(err)
+
+			t.columnIndexes = append(t.columnIndexes, NewColumnIndexObject(colIdx))
+			expectNoPageIndex := slices.Contains(expectColsWithoutIdx, col)
+
+			offsetIdx, err := rgIdxRdr.GetOffsetIndex(col)
+			t.Require().NoError(err)
+			if expectNoPageIndex {
+				t.Nil(offsetIdx)
+			} else {
+				t.checkOffsetIndex(offsetIdx, expectNumPages, &offsetLowerBound)
+			}
+
+			// verify page stats are not written to page header if page index
+			// is enabled
+			pgRdr, err := rgReader.GetColumnPageReader(col)
+			t.Require().NoError(err)
+			t.Require().NotNil(pgRdr)
+
+			for pgRdr.Next() {
+				page := pgRdr.Page()
+				t.Require().NotNil(page)
+
+				if page.Type() == file.PageTypeDataPage || page.Type() == file.PageTypeDataPageV2 {
+					stats := page.(file.DataPage).Statistics()
+					t.Equalf(expectNoPageIndex, stats.IsSet(), "rg: %d, col: %d", rg, col)
+				}
+			}
+
+			t.Require().NoError(pgRdr.Err())
+		}
+	}
+}
+
+func (t *PageIndexRoundTripSuite) checkOffsetIndex(offsetIdx metadata.OffsetIndex, expectNumPages int, offsetLowerBoundInOut *int64) {
+	t.Require().NotNil(offsetIdx)
+	locations := offsetIdx.GetPageLocations()
+	t.Len(locations, expectNumPages)
+
+	prevFirstRowIdx := int64(-1)
+	for _, loc := range locations {
+		// make sure first row index is ascending within a row group
+		t.Greater(loc.FirstRowIndex, prevFirstRowIdx)
+		// make sure page offset is ascending across the file
+		t.GreaterOrEqual(loc.Offset, *offsetLowerBoundInOut)
+		// make sure page size is positive
+		t.Greater(loc.CompressedPageSize, int32(0))
+		prevFirstRowIdx = loc.FirstRowIndex
+		*offsetLowerBoundInOut = loc.Offset + int64(loc.CompressedPageSize)
+	}
+}
+
+func (t *PageIndexRoundTripSuite) TestSimpleRoundTrip() {
+	props := parquet.NewWriterProperties(parquet.WithAllocator(t.mem),
+		parquet.WithDataPageVersion(t.pageVersion),
+		parquet.WithPageIndexEnabled(true), parquet.WithMaxRowGroupLength(4))
+
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "c0", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+		{Name: "c1", Type: arrow.BinaryTypes.String, Nullable: true},
+		{Name: "c2", Type: arrow.ListOf(arrow.PrimitiveTypes.Int64), Nullable: true},
+	}, nil)
+
+	tbl, err := array.TableFromJSON(t.mem, sc, []string{`[
+		{"c0": 1,    "c1": "a",  "c2": [1]},
+		{"c0": 2,    "c1": "b",  "c2": [1, 2]},
+		{"c0": 3,    "c1": "c",  "c2": [null]},
+		{"c0": null, "c1": "d",  "c2": []},
+		{"c0": 5,    "c1": null, "c2": [3, 3, 3]},
+		{"c0": 6,    "c1": "f",  "c2": null}
+	]`})
+	t.Require().NoError(err)
+	defer tbl.Release()
+
+	t.writeFile(props, tbl)
+	t.readPageIndexes(2, 1, []int{})
+
+	t.Equal(t.columnIndexes, []ColumnIndexObject{
+		{
+			nullPages:     []bool{false},
+			minValues:     [][]byte{simpleEncode(int64(1))},
+			maxValues:     [][]byte{simpleEncode(int64(3))},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{1},
+		},
+		{
+			nullPages:     []bool{false},
+			minValues:     [][]byte{[]byte("a")},
+			maxValues:     [][]byte{[]byte("d")},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{0},
+		},
+		{
+			nullPages:     []bool{false},
+			minValues:     [][]byte{simpleEncode(int64(1))},
+			maxValues:     [][]byte{simpleEncode(int64(2))},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{2},
+		},
+		{
+			nullPages:     []bool{false},
+			minValues:     [][]byte{simpleEncode(int64(5))},
+			maxValues:     [][]byte{simpleEncode(int64(6))},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{0},
+		},
+		{
+			nullPages:     []bool{false},
+			minValues:     [][]byte{[]byte("f")},
+			maxValues:     [][]byte{[]byte("f")},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{1},
+		},
+		{
+			nullPages:     []bool{false},
+			minValues:     [][]byte{simpleEncode(int64(3))},
+			maxValues:     [][]byte{simpleEncode(int64(3))},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{1},
+		},
+	})
+}
+
+func (t *PageIndexRoundTripSuite) TestRoundTripWithStatsDisabled() {
+	props := parquet.NewWriterProperties(parquet.WithAllocator(t.mem),
+		parquet.WithDataPageVersion(t.pageVersion),
+		parquet.WithPageIndexEnabled(true), parquet.WithStats(false))
+
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "c0", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+		{Name: "c1", Type: arrow.BinaryTypes.String, Nullable: true},
+		{Name: "c2", Type: arrow.ListOf(arrow.PrimitiveTypes.Int64), Nullable: true},
+	}, nil)
+
+	tbl, err := array.TableFromJSON(t.mem, sc, []string{`[
+		{"c0": 1,    "c1": "a",  "c2": [1]},
+		{"c0": 2,    "c1": "b",  "c2": [1, 2]},
+		{"c0": 3,    "c1": "c",  "c2": [null]},
+		{"c0": null, "c1": "d",  "c2": []},
+		{"c0": 5,    "c1": null, "c2": [3, 3, 3]},
+		{"c0": 6,    "c1": "f",  "c2": null}
+	]`})
+	t.Require().NoError(err)
+	defer tbl.Release()
+
+	t.writeFile(props, tbl)
+	t.readPageIndexes(1, 1, []int{})
+
+	for _, colidx := range t.columnIndexes {
+		t.Zero(colidx)
+	}
+}
+
+func (t *PageIndexRoundTripSuite) TestRoundTripWithColumnStatsDisabled() {
+	props := parquet.NewWriterProperties(parquet.WithAllocator(t.mem),
+		parquet.WithDataPageVersion(t.pageVersion),
+		parquet.WithPageIndexEnabled(true), parquet.WithStatsFor("c0", false),
+		parquet.WithMaxRowGroupLength(4))
+
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "c0", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+		{Name: "c1", Type: arrow.BinaryTypes.String, Nullable: true},
+		{Name: "c2", Type: arrow.ListOf(arrow.PrimitiveTypes.Int64), Nullable: true},
+	}, nil)
+
+	tbl, err := array.TableFromJSON(t.mem, sc, []string{`[
+		{"c0": 1,    "c1": "a",  "c2": [1]},
+		{"c0": 2,    "c1": "b",  "c2": [1, 2]},
+		{"c0": 3,    "c1": "c",  "c2": [null]},
+		{"c0": null, "c1": "d",  "c2": []},
+		{"c0": 5,    "c1": null, "c2": [3, 3, 3]},
+		{"c0": 6,    "c1": "f",  "c2": null}
+	]`})
+	t.Require().NoError(err)
+	defer tbl.Release()
+
+	t.writeFile(props, tbl)
+	t.readPageIndexes(2, 1, []int{})
+
+	var emptyColIndex ColumnIndexObject
+	t.Equal(t.columnIndexes, []ColumnIndexObject{
+		emptyColIndex,
+		{
+			nullPages:     []bool{false},
+			minValues:     [][]byte{[]byte("a")},
+			maxValues:     [][]byte{[]byte("d")},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{0},
+		},
+		{
+			nullPages:     []bool{false},
+			minValues:     [][]byte{simpleEncode(int64(1))},
+			maxValues:     [][]byte{simpleEncode(int64(2))},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{2},
+		},
+		emptyColIndex,
+		{
+			nullPages:     []bool{false},
+			minValues:     [][]byte{[]byte("f")},
+			maxValues:     [][]byte{[]byte("f")},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{1},
+		},
+		{
+			nullPages:     []bool{false},
+			minValues:     [][]byte{simpleEncode(int64(3))},
+			maxValues:     [][]byte{simpleEncode(int64(3))},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{1},
+		},
+	})
+}
+
+func (t *PageIndexRoundTripSuite) TestDropLargeStats() {
+	props := parquet.NewWriterProperties(parquet.WithAllocator(t.mem),
+		parquet.WithDataPageVersion(t.pageVersion),
+		parquet.WithPageIndexEnabled(true), parquet.WithMaxRowGroupLength(1),
+		parquet.WithMaxStatsSize(20))
+
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "c0", Type: arrow.BinaryTypes.String, Nullable: true},
+	}, nil)
+
+	tbl, err := array.TableFromJSON(t.mem, sc, []string{`[
+		{"c0": "short_string"},
+		{"c0": "very_large_string_to_drop_stats"}
+	]`})
+	t.Require().NoError(err)
+	defer tbl.Release()
+
+	t.writeFile(props, tbl)
+	t.readPageIndexes(2, 1, []int{})
+
+	t.Equal(t.columnIndexes, []ColumnIndexObject{
+		{
+			nullPages:     []bool{false},
+			minValues:     [][]byte{[]byte("short_string")},
+			maxValues:     [][]byte{[]byte("short_string")},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{0},
+		},
+		{},
+	})
+}
+
+func (t *PageIndexRoundTripSuite) TestMultiplePages() {
+	props := parquet.NewWriterProperties(parquet.WithAllocator(t.mem),
+		parquet.WithDataPageVersion(t.pageVersion),
+		parquet.WithPageIndexEnabled(true), parquet.WithDataPageSize(1))
+
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "c0", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+		{Name: "c1", Type: arrow.BinaryTypes.String, Nullable: true},
+	}, nil)
+
+	tbl, err := array.TableFromJSON(t.mem, sc, []string{
+		`[{"c0": 1, "c1": "a"},{"c0": 2, "c1": "b"}]`,
+		`[{"c0": 3, "c1": "c"}, {"c0": 4, "c1": "d"}]`,
+		`[{"c0": null, "c1": null}, {"c0": 6, "c1": "f"}]`,
+		`[{"c0": null, "c1": null}, {"c0": null, "c1": null}]`,
+	})
+	t.Require().NoError(err)
+	defer tbl.Release()
+
+	t.writeFile(props, tbl)
+	t.readPageIndexes(1, 4, []int{})
+
+	t.Equal(t.columnIndexes, []ColumnIndexObject{
+		{
+			nullPages: []bool{false, false, false, true},
+			minValues: [][]byte{simpleEncode(int64(1)), simpleEncode(int64(3)),
+				simpleEncode(int64(6)), {}},
+			maxValues: [][]byte{simpleEncode(int64(2)), simpleEncode(int64(4)),
+				simpleEncode(int64(6)), {}},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{0, 0, 1, 2},
+		},
+		{
+			nullPages:     []bool{false, false, false, true},
+			minValues:     [][]byte{[]byte("a"), []byte("c"), []byte("f"), {}},
+			maxValues:     [][]byte{[]byte("b"), []byte("d"), []byte("f"), {}},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{0, 0, 1, 2},
+		},
+	})
+}
+
+func (t *PageIndexRoundTripSuite) TestDoubleWithNaNs() {
+	props := parquet.NewWriterProperties(parquet.WithAllocator(t.mem),
+		parquet.WithDataPageVersion(t.pageVersion),
+		parquet.WithPageIndexEnabled(true), parquet.WithMaxRowGroupLength(3))
+
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "c0", Type: arrow.PrimitiveTypes.Float64, Nullable: true},
+	}, nil)
+
+	bldr := array.NewFloat64Builder(t.mem)
+	defer bldr.Release()
+
+	chunks := make([]arrow.Array, 4)
+	defer func() {
+		for _, c := range chunks {
+			if c != nil {
+				c.Release()
+			}
+		}
+	}()
+
+	nan := math.NaN()
+	bldr.AppendValues([]float64{1, nan, 0.1}, nil)
+	chunks[0] = bldr.NewArray()
+	bldr.AppendValues([]float64{0, nan, 0}, nil)
+	chunks[1] = bldr.NewArray()
+	bldr.AppendValues([]float64{math.Copysign(0, -1), nan, math.Copysign(0, -1)}, nil)
+	chunks[2] = bldr.NewArray()
+	bldr.AppendValues([]float64{nan, nan, nan}, nil)
+	chunks[3] = bldr.NewArray()
+
+	tbl := array.NewTableFromSlice(sc, [][]arrow.Array{chunks})
+	defer tbl.Release()
+
+	t.writeFile(props, tbl)
+	t.readPageIndexes(4, 1, []int{})
+
+	t.Equal(t.columnIndexes, []ColumnIndexObject{
+		{
+			nullPages:     []bool{false},
+			minValues:     [][]byte{simpleEncode(float64(0.1))},
+			maxValues:     [][]byte{simpleEncode(float64(1))},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{0},
+		},
+		{
+			nullPages:     []bool{false},
+			minValues:     [][]byte{simpleEncode(math.Copysign(0, -1))},
+			maxValues:     [][]byte{simpleEncode(float64(0))},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{0},
+		},
+		{
+			nullPages:     []bool{false},
+			minValues:     [][]byte{simpleEncode(math.Copysign(0, -1))},
+			maxValues:     [][]byte{simpleEncode(float64(0))},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{0},
+		},
+		{}, // page with only NaN values does not have column index built
+	})
+}
+
+func (t *PageIndexRoundTripSuite) TestEnablePerColumn() {
+	props := parquet.NewWriterProperties(parquet.WithAllocator(t.mem),
+		parquet.WithDataPageVersion(t.pageVersion),
+		parquet.WithPageIndexEnabled(true),
+		parquet.WithPageIndexEnabledFor("c0", true),
+		parquet.WithPageIndexEnabledFor("c1", false))
+
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "c0", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+		{Name: "c1", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+		{Name: "c2", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+	}, nil)
+
+	tbl, err := array.TableFromJSON(t.mem, sc, []string{
+		`[{"c0": 0, "c1": 1, "c2": 2}]`,
+	})
+	t.Require().NoError(err)
+	defer tbl.Release()
+
+	t.writeFile(props, tbl)
+	t.readPageIndexes(1, 1, []int{1})
+
+	t.Equal(t.columnIndexes, []ColumnIndexObject{
+		{
+			nullPages:     []bool{false},
+			minValues:     [][]byte{simpleEncode(int64(0))},
+			maxValues:     [][]byte{simpleEncode(int64(0))},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{0},
+		},
+		{}, // page index of c1 is disabled
+		{
+			nullPages:     []bool{false},
+			minValues:     [][]byte{simpleEncode(int64(2))},
+			maxValues:     [][]byte{simpleEncode(int64(2))},
+			boundaryOrder: metadata.Ascending, nullCounts: []int64{0},
+		},
+	})
+}
+
+func TestPageIndexRoundTripSuite(t *testing.T) {
+	t.Run("datapagev1", func(t *testing.T) {
+		suite.Run(t, &PageIndexRoundTripSuite{pageVersion: parquet.DataPageV1})
+	})
+	t.Run("datapagev2", func(t *testing.T) {
+		suite.Run(t, &PageIndexRoundTripSuite{pageVersion: parquet.DataPageV2})
+	})
 }

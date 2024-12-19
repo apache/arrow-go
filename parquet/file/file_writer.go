@@ -30,15 +30,16 @@ import (
 
 // Writer is the primary interface for writing a parquet file
 type Writer struct {
-	sink           utils.WriteCloserTell
-	open           bool
-	footerFlushed  bool
-	props          *parquet.WriterProperties
-	rowGroups      int
-	nrows          int
-	metadata       metadata.FileMetaDataBuilder
-	fileEncryptor  encryption.FileEncryptor
-	rowGroupWriter *rowGroupWriter
+	sink             utils.WriteCloserTell
+	open             bool
+	footerFlushed    bool
+	props            *parquet.WriterProperties
+	rowGroups        int
+	nrows            int
+	metadata         metadata.FileMetaDataBuilder
+	fileEncryptor    encryption.FileEncryptor
+	rowGroupWriter   *rowGroupWriter
+	pageIndexBuilder *metadata.PageIndexBuilder
 
 	// The Schema of this writer
 	Schema *schema.Schema
@@ -128,7 +129,12 @@ func (fw *Writer) appendRowGroup(buffered bool) *rowGroupWriter {
 	fw.rowGroups++
 	fw.footerFlushed = false
 	rgMeta := fw.metadata.AppendRowGroup()
-	fw.rowGroupWriter = newRowGroupWriter(fw.sink, rgMeta, int16(fw.rowGroups)-1, fw.props, buffered, fw.fileEncryptor)
+	if fw.pageIndexBuilder != nil {
+		fw.pageIndexBuilder.AppendRowGroup()
+	}
+
+	fw.rowGroupWriter = newRowGroupWriter(fw.sink, rgMeta, int16(fw.rowGroups)-1,
+		fw.props, buffered, fw.fileEncryptor, fw.pageIndexBuilder)
 	return fw.rowGroupWriter
 }
 
@@ -159,6 +165,24 @@ func (fw *Writer) startFile() {
 	n, err := fw.sink.Write(magic)
 	if n != 4 || err != nil {
 		panic("failed to write magic number")
+	}
+
+	if fw.props.PageIndexEnabled() {
+		fw.pageIndexBuilder = &metadata.PageIndexBuilder{
+			Schema:    fw.Schema,
+			Encryptor: fw.fileEncryptor,
+		}
+	}
+}
+
+func (fw *Writer) writePageIndex() {
+	if fw.pageIndexBuilder != nil {
+		// serialize page index after all row groups have been written and report
+		// location to the file metadata
+		fw.pageIndexBuilder.Finish()
+		var pageIndexLocation metadata.PageIndexLocation
+		fw.pageIndexBuilder.WriteTo(fw.sink, &pageIndexLocation)
+		fw.metadata.SetPageIndexLocation(pageIndexLocation)
 	}
 }
 
@@ -205,6 +229,8 @@ func (fw *Writer) FlushWithFooter() error {
 			fw.rowGroupWriter.Close()
 		}
 		fw.rowGroupWriter = nil
+
+		fw.writePageIndex()
 
 		fileMetadata, err := fw.metadata.Snapshot()
 		if err != nil {

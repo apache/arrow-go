@@ -18,10 +18,13 @@ package metadata_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
@@ -378,4 +381,50 @@ func TestCheckBadDecimalStats(t *testing.T) {
 	assert.False(t, version1.HasCorrectStatistics(parquet.Types.FixedLenByteArray, schema.NewDecimalLogicalType(5, 0), stats, schema.SortSIGNED))
 	assert.False(t, version2.HasCorrectStatistics(parquet.Types.FixedLenByteArray, schema.NewDecimalLogicalType(5, 0), stats, schema.SortSIGNED))
 	assert.True(t, version3.HasCorrectStatistics(parquet.Types.FixedLenByteArray, schema.NewDecimalLogicalType(5, 0), stats, schema.SortSIGNED))
+}
+
+func TestReadPageIndex(t *testing.T) {
+	dir := os.Getenv("PARQUET_TEST_DATA")
+	if dir == "" {
+		t.Skip("PARQUET_TEST_DATA not set")
+	}
+	require.DirExists(t, dir)
+
+	path := filepath.Join(dir, "alltypes_tiny_pages.parquet")
+	rdr, err := file.OpenParquetFile(path, false)
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	fileMetadata := rdr.MetaData()
+	assert.Equal(t, 1, fileMetadata.NumRowGroups())
+	rgMeta := fileMetadata.RowGroup(0)
+	assert.Equal(t, 13, rgMeta.NumColumns())
+
+	ciOffsets := []int64{323583, 327502, 328009, 331928, 335847,
+		339766, 350345, 354264, 364843, 384342, -1, 386473, 390392}
+	ciLengths := []int64{3919, 507, 3919, 3919, 3919, 10579, 3919,
+		10579, 19499, 2131, -1, 3919, 3919}
+	oiOffsets := []int64{394311, 397814, 398637, 401888, 405139,
+		408390, 413670, 416921, 422201, 431936, 435457, 446002, 449253}
+	oiLengths := []int64{3503, 823, 3251, 3251, 3251, 5280, 3251, 5280,
+		9735, 3521, 10545, 3251, 3251}
+
+	for i := 0; i < rgMeta.NumColumns(); i++ {
+		colMeta, err := rgMeta.ColumnChunk(i)
+		require.NoError(t, err)
+
+		ciLoc := colMeta.GetColumnIndexLocation()
+		if i == 10 {
+			assert.Nil(t, ciLoc)
+		} else {
+			assert.NotNil(t, ciLoc)
+			assert.EqualValues(t, ciOffsets[i], ciLoc.Offset)
+			assert.EqualValues(t, ciLengths[i], ciLoc.Length)
+		}
+
+		oiLoc := colMeta.GetOffsetIndexLocation()
+		assert.NotNil(t, oiLoc)
+		assert.EqualValues(t, oiOffsets[i], oiLoc.Offset)
+		assert.EqualValues(t, oiLengths[i], oiLoc.Length)
+	}
 }

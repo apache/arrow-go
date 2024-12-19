@@ -29,6 +29,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/thrift"
+	"github.com/apache/arrow-go/v18/parquet/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 )
 
@@ -106,6 +107,29 @@ func NewColumnIndex(descr *schema.Column, serializedIndex []byte, props *parquet
 	panic("unreachable: cannot make columnindex of unknown type")
 }
 
+func getDecoder[T parquet.ColumnTypes](descr *schema.Column) func([]byte) T {
+	switch descr.PhysicalType() {
+	case parquet.Types.ByteArray:
+		var f any = func(data []byte) parquet.ByteArray {
+			return parquet.ByteArray(data)
+		}
+		return f.(func([]byte) T)
+	case parquet.Types.FixedLenByteArray:
+		var f any = func(data []byte) parquet.FixedLenByteArray {
+			return parquet.FixedLenByteArray(data)
+		}
+		return f.(func([]byte) T)
+	default:
+		decoder := encoding.NewDecoder(descr.PhysicalType(), parquet.Encodings.Plain, descr, nil).(typedDecoder[T])
+		var buf [1]T
+		return func(data []byte) T {
+			must(decoder.SetData(1, data))
+			mustArg(decoder.Decode(buf[:]))
+			return buf[0]
+		}
+	}
+}
+
 func NewTypedColumnIndex[T parquet.ColumnTypes](descr *schema.Column, colIdx *format.ColumnIndex) *TypedColumnIndex[T] {
 	numPages := len(colIdx.NullPages)
 	if numPages >= math.MaxInt32 ||
@@ -117,7 +141,7 @@ func NewTypedColumnIndex[T parquet.ColumnTypes](descr *schema.Column, colIdx *fo
 
 	numNonNullPages := 0
 	for _, page := range colIdx.NullPages {
-		if page {
+		if !page {
 			numNonNullPages++
 		}
 	}
@@ -125,17 +149,13 @@ func NewTypedColumnIndex[T parquet.ColumnTypes](descr *schema.Column, colIdx *fo
 
 	minvals, maxvals := make([]T, numPages), make([]T, numPages)
 	nonNullPageIndices := make([]int32, 0, numNonNullPages)
-	decoder := encoding.NewDecoder(descr.PhysicalType(), parquet.Encodings.Plain,
-		descr, nil).(typedDecoder[T])
 
+	dec := getDecoder[T](descr)
 	for i := 0; i < numPages; i++ {
 		if !colIdx.NullPages[i] {
 			nonNullPageIndices = append(nonNullPageIndices, int32(i))
-
-			must(decoder.SetData(1, colIdx.MinValues[i]))
-			mustArg(decoder.Decode(minvals[i : i+1]))
-			must(decoder.SetData(1, colIdx.MaxValues[i]))
-			mustArg(decoder.Decode(maxvals[i : i+1]))
+			minvals[i] = dec(colIdx.MinValues[i])
+			maxvals[i] = dec(colIdx.MaxValues[i])
 		}
 	}
 	debug.Assert(len(nonNullPageIndices) == numNonNullPages, "invalid column index")
@@ -319,10 +339,10 @@ func (r *RowGroupPageIndexReader) GetOffsetIndex(i int) (OffsetIndex, error) {
 
 	if decryptor != nil {
 		encryption.UpdateDecryptor(decryptor, int16(r.rgOrdinal),
-			int16(i), encryption.ColumnIndexModule)
+			int16(i), encryption.OffsetIndexModule)
 	}
 
-	return NewOffsetIndex(r.colIndexBuffer[bufferOffset:], r.props, decryptor), nil
+	return NewOffsetIndex(r.offsetIndexBuffer[bufferOffset:], r.props, decryptor), nil
 }
 
 type PageIndexReader struct {
@@ -346,7 +366,7 @@ func determinePageIndexRangesInRowGroup(rgMeta *RowGroupMetaData, cols []int32) 
 		}
 
 		indexEnd, ok := overflow.Add64(idxLocation.Offset, int64(idxLocation.Length))
-		if idxLocation.Offset < 0 || idxLocation.Length <= 0 || ok {
+		if idxLocation.Offset < 0 || idxLocation.Length <= 0 || !ok {
 			return fmt.Errorf("%w: invalid page index location: offset %d length %d",
 				arrow.ErrIndex, idxLocation.Offset, idxLocation.Length)
 		}
@@ -540,8 +560,11 @@ func (b *columnIndexBuilder[T]) AddPage(stats *EncodedStatistics) error {
 	switch {
 	case stats.AllNullValue:
 		b.colIndex.NullPages = append(b.colIndex.NullPages, true)
-		b.colIndex.MinValues = append(b.colIndex.MinValues, nil)
-		b.colIndex.MaxValues = append(b.colIndex.MaxValues, nil)
+		// thrift deserializes nil byte slice or empty byte slice both as
+		// an empty byte slice. So we should append an empty byte slice
+		// instead of nil so that round trip comparisons are consistent.
+		b.colIndex.MinValues = append(b.colIndex.MinValues, []byte{})
+		b.colIndex.MaxValues = append(b.colIndex.MaxValues, []byte{})
 	case stats.HasMin && stats.HasMax:
 		pageOrdinal := len(b.colIndex.NullPages)
 		b.nonNullPageIndices = append(b.nonNullPageIndices, int64(pageOrdinal))
@@ -587,12 +610,10 @@ func (b *columnIndexBuilder[T]) Finish() error {
 	// decode min/max values according to data type
 	nonNullPageCnt := len(b.nonNullPageIndices)
 	minVals, maxVals := make([]T, nonNullPageCnt), make([]T, nonNullPageCnt)
-	decoder := encoding.NewDecoder(b.descr.PhysicalType(), parquet.Encodings.Plain, b.descr, nil).(typedDecoder[T])
+	dec := getDecoder[T](b.descr)
 	for i, pageOrdinal := range b.nonNullPageIndices {
-		must(decoder.SetData(1, b.colIndex.MinValues[pageOrdinal]))
-		mustArg(decoder.Decode(minVals[i : i+1]))
-		must(decoder.SetData(1, b.colIndex.MaxValues[pageOrdinal]))
-		mustArg(decoder.Decode(maxVals[i : i+1]))
+		minVals[i] = dec(b.colIndex.MinValues[pageOrdinal])
+		maxVals[i] = dec(b.colIndex.MaxValues[pageOrdinal])
 	}
 
 	// decode the boundary order from decoded min/max vals
@@ -740,33 +761,33 @@ func (b *PageIndexBuilder) AppendRowGroup() error {
 	return nil
 }
 
-func (b *PageIndexBuilder) GetColumnIndexBuilder(i int) ColumnIndexBuilder {
+func (b *PageIndexBuilder) GetColumnIndexBuilder(i int) (ColumnIndexBuilder, error) {
 	if err := b.checkState(i); err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	bldr := &b.colIndexBuilders[len(b.colIndexBuilders)-1][i]
 	if *bldr == nil {
 		*bldr = NewColumnIndexBuilder(b.Schema.Column(i))
 	}
-	return *bldr
+	return *bldr, nil
 }
 
-func (b *PageIndexBuilder) GetOffsetIndexBuilder(i int) *OffsetIndexBuilder {
+func (b *PageIndexBuilder) GetOffsetIndexBuilder(i int) (*OffsetIndexBuilder, error) {
 	if err := b.checkState(i); err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	bldr := &b.offsetIndexBuilders[len(b.offsetIndexBuilders)-1][i]
 	if *bldr == nil {
 		*bldr = &OffsetIndexBuilder{}
 	}
-	return *bldr
+	return *bldr, nil
 }
 
 func (b *PageIndexBuilder) Finish() { b.finished = true }
 
-func (b *PageIndexBuilder) WriteTo(w io.WriteSeeker, location *PageIndexLocation) error {
+func (b *PageIndexBuilder) WriteTo(w utils.WriterTell, location *PageIndexLocation) error {
 	if !b.finished {
 		return fmt.Errorf("%w: PageIndexBuilder is not finished", arrow.ErrInvalid)
 	}
@@ -775,12 +796,12 @@ func (b *PageIndexBuilder) WriteTo(w io.WriteSeeker, location *PageIndexLocation
 	location.OffsetIndexLocation = make(map[uint64][]*IndexLocation)
 
 	// serialize column index
-	if err := serializeIndex(b.Schema, b.colIndexBuilders, w, location.ColIndexLocation, b.getColumnMetaEncryptor); err != nil {
+	if err := serializeIndex(b.Schema, b.colIndexBuilders, w, location.ColIndexLocation, encryption.ColumnIndexModule, b.getColumnMetaEncryptor); err != nil {
 		return err
 	}
 
 	// serialize offset index
-	if err := serializeIndex(b.Schema, b.offsetIndexBuilders, w, location.OffsetIndexLocation, b.getColumnMetaEncryptor); err != nil {
+	if err := serializeIndex(b.Schema, b.offsetIndexBuilders, w, location.OffsetIndexLocation, encryption.OffsetIndexModule, b.getColumnMetaEncryptor); err != nil {
 		return err
 	}
 
@@ -818,17 +839,13 @@ func (b *PageIndexBuilder) getColumnMetaEncryptor(rgOrdinal, colOrdinal int, mod
 }
 
 func serializeIndex[T interface {
+	comparable
 	WriteTo(io.Writer, encryption.Encryptor) (int, error)
-}](s *schema.Schema, bldrs [][]T, w io.WriteSeeker, location map[uint64][]*IndexLocation, encFn func(int, int, int8) encryption.Encryptor) error {
+}](s *schema.Schema, bldrs [][]T, w utils.WriterTell, location map[uint64][]*IndexLocation, moduleType int8, encFn func(int, int, int8) encryption.Encryptor) error {
 	var (
-		z          T
-		numCols    = s.NumColumns()
-		moduleType = encryption.ColumnIndexModule
+		z       T
+		numCols = s.NumColumns()
 	)
-
-	if _, ok := any(z).(ColumnIndexBuilder); !ok {
-		moduleType = encryption.OffsetIndexModule
-	}
 
 	// serialize the same kind of page index, row group by row group
 	for rg, idxBldrs := range bldrs {
@@ -839,11 +856,12 @@ func serializeIndex[T interface {
 
 		// in the same row group, serialize the same kind of page index column by column
 		for col, bldr := range idxBldrs {
-			encryptor := encFn(rg, col, moduleType)
-			posBefore, err := w.Seek(0, io.SeekCurrent)
-			if err != nil {
-				return err
+			if bldr == z {
+				continue
 			}
+
+			encryptor := encFn(rg, col, moduleType)
+			posBefore := w.Tell()
 
 			n, err := bldr.WriteTo(w, encryptor)
 			if err != nil {

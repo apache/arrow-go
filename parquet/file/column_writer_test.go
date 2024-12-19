@@ -79,6 +79,9 @@ func (m *mockpagewriter) Compress(buf *bytes.Buffer, src []byte) []byte {
 func (m *mockpagewriter) Reset(sink utils.WriterTell, codec compress.Compression, compressionLevel int, metadata *metadata.ColumnChunkMetaDataBuilder, rgOrdinal, columnOrdinal int16, metaEncryptor, dataEncryptor encryption.Encryptor) error {
 	return m.Called().Error(0)
 }
+func (m *mockpagewriter) SetIndexBuilders(colidx metadata.ColumnIndexBuilder, offsetidx *metadata.OffsetIndexBuilder) {
+	m.Called(colidx, offsetidx)
+}
 
 func TestWriteDataPageV1NumValues(t *testing.T) {
 	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{

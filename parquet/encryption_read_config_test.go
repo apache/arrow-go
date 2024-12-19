@@ -17,6 +17,7 @@
 package parquet_test
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"os"
@@ -27,6 +28,9 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
+	"github.com/apache/arrow-go/v18/parquet/metadata"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -402,8 +406,121 @@ func (d *TestDecryptionSuite) decryptFile(filename string, decryptConfigNum int)
 	}
 }
 
+func assertColumnIndex[T parquet.ColumnTypes](t *testing.T, colIndex metadata.ColumnIndex, expectedNullCounts []int64, expectedMinVals, expectedMaxVals []T) {
+	typedColIndex, ok := colIndex.(*metadata.TypedColumnIndex[T])
+	require.True(t, ok)
+	assert.Equal(t, typedColIndex.GetNullCounts(), expectedNullCounts)
+
+	assert.Equal(t, expectedMinVals, typedColIndex.MinValues())
+	assert.Equal(t, expectedMaxVals, typedColIndex.MaxValues())
+}
+
+func (d *TestDecryptionSuite) decryptPageIndex(fileName string, decryptConfigNum int) {
+	// if we get decryption_config_num = x then it means the actual number is x+1
+	// and since we want decryption_config_num=4 we set the condition to 3
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	if decryptConfigNum != 3 {
+		props.FileDecryptProps = d.decryptionConfigs[decryptConfigNum].Clone("")
+	}
+
+	fileReader, err := file.OpenParquetFile(fileName, false, file.WithReadProps(props))
+	if err != nil {
+		panic(err)
+	}
+	defer fileReader.Close()
+
+	pageIndexReader := fileReader.GetPageIndexReader()
+	d.Require().NotNil(pageIndexReader)
+
+	fileMetadata := fileReader.MetaData()
+	numRowGroups := fileMetadata.NumRowGroups()
+	numCols := fileMetadata.NumColumns()
+	d.Equal(8, numCols)
+
+	// we cannot read page index of encrypted columns in the plaintext mode
+	needRowGroups := make([]int32, numRowGroups)
+	for i := range needRowGroups {
+		needRowGroups[i] = int32(i)
+	}
+	var needColumns []int32
+	if props.FileDecryptProps == nil {
+		needColumns = []int32{0, 1, 2, 3, 6, 7}
+	} else {
+		needColumns = []int32{0, 1, 2, 3, 4, 5, 6, 7}
+	}
+
+	// provide hint of requested columns to avoid accessing encrypted columns
+	// without decryption properties
+	d.Require().NoError(pageIndexReader.WillNeed(needRowGroups, needColumns,
+		metadata.PageIndexSelection{ColumnIndex: true, OffsetIndex: true}))
+
+	// iterate over all row groups in the file
+	for r := range numRowGroups {
+		rowGrpPageIndexRdr, err := pageIndexReader.RowGroup(r)
+		d.Require().NoError(err)
+		d.Require().NotNil(rowGrpPageIndexRdr)
+
+		for c := range numCols {
+			// skip reading encrypted columns without decryption props
+			if props.FileDecryptProps == nil && (c == 4 || c == 5) {
+				continue
+			}
+
+			const expectedNumPages = 1
+
+			// check offset index
+			offsetIndex, err := rowGrpPageIndexRdr.GetOffsetIndex(c)
+			d.Require().NoError(err)
+			d.Require().NotNil(offsetIndex)
+			d.Len(offsetIndex.GetPageLocations(), expectedNumPages)
+			firstPage := offsetIndex.GetPageLocations()[0]
+			d.EqualValues(0, firstPage.FirstRowIndex)
+			d.Greater(firstPage.CompressedPageSize, int32(0))
+
+			// int96 column does not have column index
+			if c == 3 {
+				continue
+			}
+
+			// check column index
+			colIndex, err := rowGrpPageIndexRdr.GetColumnIndex(c)
+			d.Require().NoError(err)
+			d.Require().NotNil(colIndex)
+			nullPages := colIndex.GetNullPages()
+			d.Len(nullPages, expectedNumPages)
+			d.False(nullPages[0])
+			d.Len(colIndex.GetMinValues(), expectedNumPages)
+			d.Len(colIndex.GetMaxValues(), expectedNumPages)
+			d.True(colIndex.IsSetNullCounts())
+
+			switch c {
+			case 0:
+				assertColumnIndex(d.T(), colIndex, []int64{0}, []bool{false}, []bool{true})
+			case 1:
+				assertColumnIndex(d.T(), colIndex, []int64{0}, []int32{0}, []int32{49})
+			case 2:
+				assertColumnIndex(d.T(), colIndex, []int64{0}, []int64{0}, []int64{99000000000000})
+			case 4:
+				assertColumnIndex(d.T(), colIndex, []int64{0}, []float32{0}, []float32{53.9})
+			case 5:
+				assertColumnIndex(d.T(), colIndex, []int64{0}, []float64{0}, []float64{54.4444439})
+			case 6:
+				assertColumnIndex(d.T(), colIndex, []int64{25},
+					[]parquet.ByteArray{[]byte("parquet000")}, []parquet.ByteArray{[]byte("parquet048")})
+			case 7:
+				assertColumnIndex(d.T(), colIndex, []int64{0},
+					[]parquet.FixedLenByteArray{make(parquet.FixedLenByteArray, 10)},
+					[]parquet.FixedLenByteArray{bytes.Repeat([]byte{49}, 10)})
+			}
+		}
+	}
+}
+
 func (d *TestDecryptionSuite) checkResults(fileName string, decryptionConfig, encryptionConfig uint) {
-	decFn := func() { d.decryptFile(fileName, int(decryptionConfig-1)) }
+	decFn := func() {
+		d.decryptFile(fileName, int(decryptionConfig-1))
+		d.decryptPageIndex(fileName, int(decryptionConfig-1))
+	}
 
 	// Encryption configuration number 5 contains aad_prefix and disable_aad_prefix_storage
 	// an exception is expected to be thrown if the file is not decrypted with aad_prefix

@@ -173,6 +173,42 @@ func (f *FileMetaDataBuilder) Snapshot() (*FileMetaData, error) {
 	return out, nil
 }
 
+func (f *FileMetaDataBuilder) SetPageIndexLocation(loc PageIndexLocation) error {
+	setIndexLoc := func(rgOrdinal int64, fileIdxLoc map[uint64][]*IndexLocation, colIndex bool) error {
+		rgMeta := f.rowGroups[rgOrdinal]
+		iter, ok := fileIdxLoc[uint64(rgOrdinal)]
+		if ok {
+			for i, idxLoc := range iter {
+				if i >= len(rgMeta.Columns) {
+					return fmt.Errorf("cannot find metadata for column ordinal %d", i)
+				}
+				colMeta := rgMeta.Columns[i]
+				if idxLoc != nil {
+					if colIndex {
+						colMeta.ColumnIndexOffset = &idxLoc.Offset
+						colMeta.ColumnIndexLength = &idxLoc.Length
+					} else {
+						colMeta.OffsetIndexOffset = &idxLoc.Offset
+						colMeta.OffsetIndexLength = &idxLoc.Length
+					}
+				}
+			}
+		}
+		return nil
+	}
+
+	for rgOrdinal := range f.rowGroups {
+		if err := setIndexLoc(int64(rgOrdinal), loc.ColIndexLocation, true); err != nil {
+			return err
+		}
+		if err := setIndexLoc(int64(rgOrdinal), loc.OffsetIndexLocation, false); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // Clears out this filemetadatabuilder so it can be re-used
 func (f *FileMetaDataBuilder) Clear() {
 	f.metadata = format.NewFileMetaData()
@@ -332,7 +368,7 @@ func (f *FileMetaData) initColumnOrders() {
 				orders = append(orders, parquet.ColumnOrders.Undefined)
 			}
 		}
-	} else {
+	} else if f.Schema.NumColumns() > 0 {
 		orders = orders[:f.Schema.NumColumns()]
 		orders[0] = parquet.ColumnOrders.Undefined
 		for i := 1; i < len(orders); i *= 2 {
@@ -501,6 +537,7 @@ func (f *FileMetaData) Version() parquet.Version {
 }
 
 func (f *FileMetaData) NumRowGroups() int { return len(f.RowGroups) }
+func (f *FileMetaData) NumColumns() int   { return f.Schema.NumColumns() }
 
 // FileCryptoMetadata is a proxy for the thrift fileCryptoMetadata object
 type FileCryptoMetadata struct {
