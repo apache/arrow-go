@@ -47,7 +47,6 @@ type Reader struct {
 	r               parquet.ReaderAtSeeker
 	props           *parquet.ReaderProperties
 	metadata        *metadata.FileMetaData
-	footerOffset    int64
 	fileDecryptor   encryption.FileDecryptor
 	pageIndexReader *metadata.PageIndexReader
 
