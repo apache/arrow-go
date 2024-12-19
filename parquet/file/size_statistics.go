@@ -26,5 +26,3 @@ func (s *SizeStatistics) IsSet() bool {
 	return len(s.RepetitionLevelHistogram) > 0 || len(s.DefinitionLevelHistogram) > 0 ||
 		s.UnencodedByteArrayDataBytes != nil
 }
-
-
