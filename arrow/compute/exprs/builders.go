@@ -27,9 +27,9 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute"
-	"github.com/substrait-io/substrait-go/expr"
-	"github.com/substrait-io/substrait-go/extensions"
-	"github.com/substrait-io/substrait-go/types"
+	"github.com/substrait-io/substrait-go/v3/expr"
+	"github.com/substrait-io/substrait-go/v3/extensions"
+	"github.com/substrait-io/substrait-go/v3/types"
 )
 
 // NewDefaultExtensionSet constructs an empty extension set using the default
@@ -261,7 +261,8 @@ func NewFieldRef(ref compute.FieldRef, schema *arrow.Schema, ext ExtensionIDSet)
 		return nil, err
 	}
 
-	return expr.NewRootFieldRef(RefFromFieldPath(path), st.(*types.StructType))
+	return expr.NewRootFieldRef(RefFromFieldPath(path),
+		types.NewRecordTypeFromStruct(*st.(*types.StructType)))
 }
 
 // Builder wraps the substrait-go expression Builder and FuncArgBuilder
@@ -311,7 +312,7 @@ func (e *ExprBuilder) SetInputSchema(s *arrow.Schema) error {
 	}
 
 	e.inputSchema = s
-	e.b.BaseSchema = st.(*types.StructType)
+	e.b.BaseSchema = types.NewRecordTypeFromStruct(*st.(*types.StructType))
 	return nil
 }
 
