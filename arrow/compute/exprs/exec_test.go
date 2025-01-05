@@ -33,8 +33,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/substrait-io/substrait-go/expr"
-	"github.com/substrait-io/substrait-go/types"
+	"github.com/substrait-io/substrait-go/v3/expr"
+	"github.com/substrait-io/substrait-go/v3/types"
 )
 
 var (
@@ -172,8 +172,8 @@ func TestComparisons(t *testing.T) {
 		}
 
 		ex, err := exprs.NewScalarCall(extSet, fn, nil,
-			expr.MustExpr(expr.NewRootFieldRef(expr.NewStructFieldRef(0), &baseStruct.Struct)),
-			expr.MustExpr(expr.NewRootFieldRef(expr.NewStructFieldRef(1), &baseStruct.Struct)))
+			expr.MustExpr(expr.NewRootFieldRef(expr.NewStructFieldRef(0), types.NewRecordTypeFromStruct(baseStruct.Struct))),
+			expr.MustExpr(expr.NewRootFieldRef(expr.NewStructFieldRef(1), types.NewRecordTypeFromStruct(baseStruct.Struct))))
 		require.NoError(t, err)
 
 		expression := &expr.Extended{

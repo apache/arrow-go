@@ -25,7 +25,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/compute/exprs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/substrait-io/substrait-go/expr"
+	"github.com/substrait-io/substrait-go/v3/expr"
 )
 
 func TestNewScalarFunc(t *testing.T) {
