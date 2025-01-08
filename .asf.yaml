@@ -19,7 +19,7 @@
 
 github:
   description: "Official Go implementation of Apache Arrow"
-  homepage: https://arrow.apache.org/
+  homepage: https://arrow.apache.org/go/
   labels:
     - apache-arrow
     - go
