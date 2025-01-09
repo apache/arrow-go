@@ -85,6 +85,17 @@ func (p *page) Data() []byte              { return p.buf.Bytes() }
 func (p *page) NumValues() int32          { return p.nvals }
 func (p *page) Encoding() format.Encoding { return p.encoding }
 
+// DataPageConfig is a struct for passing configuration params to data page creation
+// which can be expanded in the future without causing any breaking changes.
+type DataPageConfig struct {
+	Num              int32
+	Encoding         parquet.Encoding
+	UncompressedSize int32
+	Stats            metadata.EncodedStatistics
+	FirstRowIndex    int64
+	SizeStats        SizeStatistics
+}
+
 // DataPage is the base interface for both DataPageV1 and DataPageV2 of the
 // parquet spec.
 type DataPage interface {
@@ -161,10 +172,11 @@ func NewDataPageV1WithStats(buffer *memory.Buffer, num int32, encoding, defEncod
 	return ret
 }
 
-// NewDataPageV1WithExtras is like WithStats but adds the first row index and size statistics
-func NewDataPageV1WithExtras(buffer *memory.Buffer, num int32, encoding, defEncoding, repEncoding parquet.Encoding, uncompressedSize int32, stats metadata.EncodedStatistics, firstRowIdx int64, szStats SizeStatistics) *DataPageV1 {
-	ret := NewDataPageV1WithStats(buffer, num, encoding, defEncoding, repEncoding, uncompressedSize, stats)
-	ret.firstRowIndex, ret.sizeStatistics = firstRowIdx, szStats
+// NewDataPageV1WithConfig uses a DataPageConfig object to encapsulate some parameters for future expansion
+// rather than continuing to add new functions to the API to avoid breaking changes.
+func NewDataPageV1WithConfig(buffer *memory.Buffer, defEncoding, repEncoding parquet.Encoding, cfg DataPageConfig) *DataPageV1 {
+	ret := NewDataPageV1WithStats(buffer, cfg.Num, cfg.Encoding, defEncoding, repEncoding, cfg.UncompressedSize, cfg.Stats)
+	ret.firstRowIndex, ret.sizeStatistics = cfg.FirstRowIndex, cfg.SizeStats
 	return ret
 }
 
@@ -246,11 +258,11 @@ func NewDataPageV2WithStats(buffer *memory.Buffer, numValues, numNulls, numRows 
 	return ret
 }
 
-// NewDataPageV2WithExtras is like WithStats but adds the first row index and size statistics
-func NewDataPageV2WithExtras(buffer *memory.Buffer, numValues, numNulls, numRows int32, encoding parquet.Encoding, defLvlsByteLen, repLvlsByteLen, uncompressed int32, isCompressed bool, stats metadata.EncodedStatistics, firstRowIndex int64, szStatistics SizeStatistics) *DataPageV2 {
-	ret := NewDataPageV2WithStats(buffer, numValues, numNulls, numRows, encoding, defLvlsByteLen, repLvlsByteLen, uncompressed, isCompressed, stats)
-	ret.firstRowIndex = firstRowIndex
-	ret.sizeStatistics = szStatistics
+// NewDataPageV2WithConfig uses a DataPageConfig object to encapsulate some parameters for future expansion
+// rather than continuing to add new functions to the API to avoid breaking changes.
+func NewDataPageV2WithConfig(buffer *memory.Buffer, numNulls, numRows int32, defLvlsByteLen, repLvlsByteLen int32, isCompressed bool, cfg DataPageConfig) *DataPageV2 {
+	ret := NewDataPageV2WithStats(buffer, cfg.Num, numNulls, numRows, cfg.Encoding, defLvlsByteLen, repLvlsByteLen, cfg.UncompressedSize, isCompressed, cfg.Stats)
+	ret.firstRowIndex, ret.sizeStatistics = cfg.FirstRowIndex, cfg.SizeStats
 	return ret
 }
 

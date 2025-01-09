@@ -27,7 +27,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
-	"github.com/apache/arrow-go/v18/internal/utils"
 	shared_utils "github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/debug"
@@ -471,8 +470,8 @@ func (s *Int96Statistics) less(a, b parquet.Int96) bool {
 	i96a := arrow.Uint32Traits.CastFromBytes(a[:])
 	i96b := arrow.Uint32Traits.CastFromBytes(b[:])
 
-	a0, a1, a2 := utils.ToLEUint32(i96a[0]), utils.ToLEUint32(i96a[1]), utils.ToLEUint32(i96a[2])
-	b0, b1, b2 := utils.ToLEUint32(i96b[0]), utils.ToLEUint32(i96b[1]), utils.ToLEUint32(i96b[2])
+	a0, a1, a2 := shared_utils.ToLEUint32(i96a[0]), shared_utils.ToLEUint32(i96a[1]), shared_utils.ToLEUint32(i96a[2])
+	b0, b1, b2 := shared_utils.ToLEUint32(i96b[0]), shared_utils.ToLEUint32(i96b[1]), shared_utils.ToLEUint32(i96b[2])
 
 	if a2 != b2 {
 		// only the msb bit is by signed comparison
@@ -958,8 +957,8 @@ func (c *int96Comparator) Compare(a, b parquet.Int96) bool {
 	i96a := arrow.Uint32Traits.CastFromBytes(a[:])
 	i96b := arrow.Uint32Traits.CastFromBytes(b[:])
 
-	a0, a1, a2 := utils.ToLEUint32(i96a[0]), utils.ToLEUint32(i96a[1]), utils.ToLEUint32(i96a[2])
-	b0, b1, b2 := utils.ToLEUint32(i96b[0]), utils.ToLEUint32(i96b[1]), utils.ToLEUint32(i96b[2])
+	a0, a1, a2 := shared_utils.ToLEUint32(i96a[0]), shared_utils.ToLEUint32(i96a[1]), shared_utils.ToLEUint32(i96a[2])
+	b0, b1, b2 := shared_utils.ToLEUint32(i96b[0]), shared_utils.ToLEUint32(i96b[1]), shared_utils.ToLEUint32(i96b[2])
 
 	if a2 != b2 {
 		// only the msb bit is by signed comparison

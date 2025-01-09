@@ -337,14 +337,24 @@ func (w *columnWriter) buildDataPageV1(defLevelsRLESize, repLevelsRLESize, uncom
 	if w.hasDict && !w.fallbackToNonDict {
 		pageSlice := make([]byte, len(data))
 		copy(pageSlice, data)
-		page := NewDataPageV1WithExtras(memory.NewBufferBytes(pageSlice), int32(w.numBufferedValues), w.encoding, parquet.Encodings.RLE, parquet.Encodings.RLE, uncompressed,
-			pageStats, firstRowIndex, SizeStatistics{})
+		page := NewDataPageV1WithConfig(memory.NewBufferBytes(pageSlice), parquet.Encodings.RLE, parquet.Encodings.RLE, DataPageConfig{
+			Num:              int32(w.numBufferedValues),
+			Encoding:         w.encoding,
+			UncompressedSize: uncompressed,
+			Stats:            pageStats,
+			FirstRowIndex:    firstRowIndex,
+		})
 		w.totalCompressedBytes += int64(page.buf.Len()) // + size of Pageheader
 		w.pages = append(w.pages, page)
 	} else {
 		w.totalCompressedBytes += int64(len(data))
-		dp := NewDataPageV1WithExtras(memory.NewBufferBytes(data), int32(w.numBufferedValues), w.encoding, parquet.Encodings.RLE, parquet.Encodings.RLE, uncompressed,
-			pageStats, firstRowIndex, SizeStatistics{})
+		dp := NewDataPageV1WithConfig(memory.NewBufferBytes(data), parquet.Encodings.RLE, parquet.Encodings.RLE, DataPageConfig{
+			Num:              int32(w.numBufferedValues),
+			Encoding:         w.encoding,
+			UncompressedSize: uncompressed,
+			Stats:            pageStats,
+			FirstRowIndex:    firstRowIndex,
+		})
 		defer dp.Release()
 		return w.WriteDataPage(dp)
 	}
@@ -380,8 +390,14 @@ func (w *columnWriter) buildDataPageV2(defLevelsRLESize, repLevelsRLESize, uncom
 	repLevelsByteLen := int32(repLevelsRLESize)
 	firstRowIndex := int64(w.rowsWritten)
 
-	page := NewDataPageV2WithExtras(memory.NewBufferBytes(combined.Bytes()), numValues, nullCount, numRows, w.encoding,
-		defLevelsByteLen, repLevelsByteLen, uncompressed, w.pager.HasCompressor(), pageStats, firstRowIndex, SizeStatistics{})
+	page := NewDataPageV2WithConfig(memory.NewBufferBytes(combined.Bytes()), nullCount, numRows, defLevelsByteLen, repLevelsByteLen,
+		w.pager.HasCompressor(), DataPageConfig{
+			Num:              numValues,
+			Encoding:         w.encoding,
+			UncompressedSize: uncompressed,
+			Stats:            pageStats,
+			FirstRowIndex:    firstRowIndex,
+		})
 	if w.hasDict && !w.fallbackToNonDict {
 		w.totalCompressedBytes += int64(page.buf.Len()) // + sizeof pageheader
 		w.pages = append(w.pages, page)
