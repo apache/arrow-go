@@ -33,6 +33,8 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/schema"
 )
 
+// BoundaryOrder identifies whether the min and max values are ordered and
+// if so, which direction it is stored in.
 type BoundaryOrder = format.BoundaryOrder
 
 const (
@@ -41,15 +43,30 @@ const (
 	Descending BoundaryOrder = format.BoundaryOrder_DESCENDING
 )
 
+// ColumnIndex is an interface for reading optional statistics for
+// each data page of a column chunk. Along with the OffsetIndex this
+// forms the PageIndex for a column chunk.
 type ColumnIndex interface {
+	// GetNullPages returns a list of bools to determine the validity of the
+	// corresponding min/max values. If the value is true, then that page
+	// contains only null values.
 	GetNullPages() []bool
+	// IsSetNullCounts returns true if the null counts are set.
 	IsSetNullCounts() bool
+	// GetNullCounts returns the number of null values in each page. This is
+	// only valid if IsSetNullCounts returns true.
 	GetNullCounts() []int64
+	// GetBoundaryOrder returns if the min/max values are ordered and if so,
+	// what direction.
 	GetBoundaryOrder() BoundaryOrder
+	// GetMinValues returns the encoded minimum value for each page
 	GetMinValues() [][]byte
+	// GetMaxValues returns the encoded max value for each page
 	GetMaxValues() [][]byte
 }
 
+// TypedColumnIndex expands the ColumnIndex interface to provide a
+// type-safe accessor for the min/max values.
 type TypedColumnIndex[T parquet.ColumnTypes] struct {
 	ColumnIndex
 
@@ -75,6 +92,10 @@ func mustArg[T any](val T, err error) T {
 	return val
 }
 
+// NewColumnIndex uses the thrift serialized bytes to deserialize a column index, optionally decrypting it.
+//
+// The column descriptor is used to determine the physical type of the column to create a proper
+// TypedColumnIndex.
 func NewColumnIndex(descr *schema.Column, serializedIndex []byte, props *parquet.ReaderProperties, decryptor encryption.Decryptor) ColumnIndex {
 	if decryptor != nil {
 		serializedIndex = decryptor.Decrypt(serializedIndex)
@@ -87,21 +108,21 @@ func NewColumnIndex(descr *schema.Column, serializedIndex []byte, props *parquet
 
 	switch descr.PhysicalType() {
 	case parquet.Types.Boolean:
-		return NewTypedColumnIndex[bool](descr, &colidx)
+		return newTypedColumnIndex[bool](descr, &colidx)
 	case parquet.Types.Int32:
-		return NewTypedColumnIndex[int32](descr, &colidx)
+		return newTypedColumnIndex[int32](descr, &colidx)
 	case parquet.Types.Int64:
-		return NewTypedColumnIndex[int64](descr, &colidx)
+		return newTypedColumnIndex[int64](descr, &colidx)
 	case parquet.Types.Int96:
-		return NewTypedColumnIndex[parquet.Int96](descr, &colidx)
+		return newTypedColumnIndex[parquet.Int96](descr, &colidx)
 	case parquet.Types.Float:
-		return NewTypedColumnIndex[float32](descr, &colidx)
+		return newTypedColumnIndex[float32](descr, &colidx)
 	case parquet.Types.Double:
-		return NewTypedColumnIndex[float64](descr, &colidx)
+		return newTypedColumnIndex[float64](descr, &colidx)
 	case parquet.Types.ByteArray:
-		return NewTypedColumnIndex[parquet.ByteArray](descr, &colidx)
+		return newTypedColumnIndex[parquet.ByteArray](descr, &colidx)
 	case parquet.Types.FixedLenByteArray:
-		return NewTypedColumnIndex[parquet.FixedLenByteArray](descr, &colidx)
+		return newTypedColumnIndex[parquet.FixedLenByteArray](descr, &colidx)
 	}
 
 	panic("unreachable: cannot make columnindex of unknown type")
@@ -130,7 +151,7 @@ func getDecoder[T parquet.ColumnTypes](descr *schema.Column) func([]byte) T {
 	}
 }
 
-func NewTypedColumnIndex[T parquet.ColumnTypes](descr *schema.Column, colIdx *format.ColumnIndex) *TypedColumnIndex[T] {
+func newTypedColumnIndex[T parquet.ColumnTypes](descr *schema.Column, colIdx *format.ColumnIndex) *TypedColumnIndex[T] {
 	numPages := len(colIdx.NullPages)
 	if numPages >= math.MaxInt32 ||
 		len(colIdx.MinValues) != numPages ||
@@ -181,6 +202,8 @@ func (idx *TypedColumnIndex[T]) NonNullPageIndices() []int32 {
 }
 
 type (
+	// PageLocation describes where in a file a particular page can be found,
+	// along with the index within the rowgroup of the first row in the page
 	PageLocation       = format.PageLocation
 	PageIndexSelection struct {
 		// specifies whether to read the column index
@@ -190,6 +213,8 @@ type (
 	}
 )
 
+// OffsetIndex forms the page index alongside a ColumnIndex,
+// the OffsetIndex may be present even if a ColumnIndex is not.
 type OffsetIndex interface {
 	GetPageLocations() []*PageLocation
 }
@@ -199,6 +224,8 @@ func (p PageIndexSelection) String() string {
 		p.ColumnIndex, p.OffsetIndex)
 }
 
+// NewOffsetIndex constructs an OffsetIndex object from the thrift serialized bytes,
+// optionally decrypting it if it was encrypted.
 func NewOffsetIndex(serializedIndex []byte, _ *parquet.ReaderProperties, decryptor encryption.Decryptor) OffsetIndex {
 	if decryptor != nil {
 		serializedIndex = decryptor.Decrypt(serializedIndex)
@@ -249,6 +276,8 @@ type rgIndexReadRange struct {
 	ColIndex, OffsetIndex *readRange
 }
 
+// RowGroupPageIndexReader is a read-only object for retrieving column and offset
+// indexes for a given row group.
 type RowGroupPageIndexReader struct {
 	input            parquet.ReaderAtSeeker
 	rowGroupMetadata *RowGroupMetaData
@@ -345,6 +374,8 @@ func (r *RowGroupPageIndexReader) GetOffsetIndex(i int) (OffsetIndex, error) {
 	return NewOffsetIndex(r.offsetIndexBuffer[bufferOffset:], r.props, decryptor), nil
 }
 
+// PageIndexReader is a read-only object for retrieving the Column and Offset indexes
+// for a particular parquet file.
 type PageIndexReader struct {
 	Input        parquet.ReaderAtSeeker
 	FileMetadata *FileMetaData
@@ -498,6 +529,8 @@ const (
 	stateDiscarded
 )
 
+// ColumnIndexBuilder is an interface for constructing column indexes,
+// with the concrete implementations being fully typed.
 type ColumnIndexBuilder interface {
 	AddPage(stats *EncodedStatistics) error
 	Finish() error
@@ -512,6 +545,7 @@ type columnIndexBuilder[T parquet.ColumnTypes] struct {
 	state              builderState
 }
 
+// NewColumnIndexBuilder creates a new typed ColumnIndexBuilder for the given column descriptor.
 func NewColumnIndexBuilder(descr *schema.Column) ColumnIndexBuilder {
 	switch descr.PhysicalType() {
 	case parquet.Types.Boolean:
@@ -625,7 +659,7 @@ func (b *columnIndexBuilder[T]) Build() ColumnIndex {
 	if b.state != stateFinished {
 		return nil
 	}
-	return NewTypedColumnIndex[T](b.descr, &b.colIndex)
+	return newTypedColumnIndex[T](b.descr, &b.colIndex)
 }
 
 func (b *columnIndexBuilder[T]) WriteTo(w io.Writer, encryptor encryption.Encryptor) (int, error) {
@@ -676,6 +710,8 @@ func (b *columnIndexBuilder[T]) determineBoundaryOrder(minVals, maxVals []T) Bou
 	return Unordered
 }
 
+// OffsetIndexBuilder provides a way to construct new OffsetIndexes while writing
+// a parquet file.
 type OffsetIndexBuilder struct {
 	offsetIndex format.OffsetIndex
 	state       builderState
@@ -735,6 +771,9 @@ func (o *OffsetIndexBuilder) Build() OffsetIndex {
 	return &o.offsetIndex
 }
 
+// PageIndexBuilder manages the creation of the entire PageIndex for a parquet file,
+// managing the builders for each row group as they are added and providing getters
+// to retrieve the particular builders for specific columns and row groups.
 type PageIndexBuilder struct {
 	Schema    *schema.Schema
 	Encryptor encryption.FileEncryptor
