@@ -82,7 +82,10 @@ type EncryptionConfigTestSuite struct {
 func (en *EncryptionConfigTestSuite) encryptFile(configs *parquet.FileEncryptionProperties, filename string) {
 	filename = filepath.Join(tempdir, filename)
 
-	props := parquet.NewWriterProperties(parquet.WithCompression(compress.Codecs.Snappy), parquet.WithEncryptionProperties(configs))
+	props := parquet.NewWriterProperties(
+		parquet.WithPageIndexEnabled(true),
+		parquet.WithCompression(compress.Codecs.Snappy),
+		parquet.WithEncryptionProperties(configs))
 	outFile, err := os.Create(filename)
 	en.Require().NoError(err)
 	en.Require().NotNil(outFile)

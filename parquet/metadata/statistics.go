@@ -19,13 +19,15 @@ package metadata
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	"github.com/apache/arrow-go/v18/internal/utils"
+	"github.com/apache/arrow-go/v18/internal/bitutils"
+	shared_utils "github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/debug"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
@@ -58,6 +60,8 @@ type EncodedStatistics struct {
 	NullCount        int64
 	HasDistinctCount bool
 	DistinctCount    int64
+
+	AllNullValue bool
 }
 
 // ApplyStatSizeLimits sets the maximum size of the min/max values.
@@ -466,8 +470,8 @@ func (s *Int96Statistics) less(a, b parquet.Int96) bool {
 	i96a := arrow.Uint32Traits.CastFromBytes(a[:])
 	i96b := arrow.Uint32Traits.CastFromBytes(b[:])
 
-	a0, a1, a2 := utils.ToLEUint32(i96a[0]), utils.ToLEUint32(i96a[1]), utils.ToLEUint32(i96a[2])
-	b0, b1, b2 := utils.ToLEUint32(i96b[0]), utils.ToLEUint32(i96b[1]), utils.ToLEUint32(i96b[2])
+	a0, a1, a2 := shared_utils.ToLEUint32(i96a[0]), shared_utils.ToLEUint32(i96a[1]), shared_utils.ToLEUint32(i96a[2])
+	b0, b1, b2 := shared_utils.ToLEUint32(i96b[0]), shared_utils.ToLEUint32(i96b[1]), shared_utils.ToLEUint32(i96b[2])
 
 	if a2 != b2 {
 		// only the msb bit is by signed comparison
@@ -614,4 +618,448 @@ func GetStatValue(typ parquet.Type, val []byte) interface{} {
 		return val
 	}
 	return nil
+}
+
+type Comparator[T parquet.ColumnTypes] interface {
+	// return true if a is strictly less than b
+	Compare(a, b T) bool
+	GetMinMax(vals []T) (min, max T)
+	GetMinMaxSpaced(vals []T, validBits []byte, validBitsOffset int64) (min, max T)
+}
+
+func NewComparator(descr *schema.Column) (any, error) {
+	if descr.SortOrder() == schema.SortSIGNED {
+		switch descr.PhysicalType() {
+		case parquet.Types.Boolean:
+			return &booleanComparator{}, nil
+		case parquet.Types.Int32:
+			return &intComparator[int32]{sortOrder: schema.SortSIGNED}, nil
+		case parquet.Types.Int64:
+			return &intComparator[int64]{sortOrder: schema.SortSIGNED}, nil
+		case parquet.Types.Int96:
+			return &int96Comparator{sortOrder: schema.SortSIGNED}, nil
+		case parquet.Types.Float:
+			return &floatComparator[float32]{}, nil
+		case parquet.Types.Double:
+			return &floatComparator[float64]{}, nil
+		case parquet.Types.ByteArray:
+			return &byteArrayComparator[parquet.ByteArray]{sortOrder: schema.SortSIGNED}, nil
+		case parquet.Types.FixedLenByteArray:
+			if descr.LogicalType().Equals(schema.Float16LogicalType{}) {
+				return &float16Comparator{}, nil
+			}
+			return &byteArrayComparator[parquet.FixedLenByteArray]{sortOrder: schema.SortSIGNED}, nil
+		default:
+			return nil, fmt.Errorf("%w: signed compare not implemented for %s",
+				arrow.ErrNotImplemented, descr.PhysicalType())
+		}
+	} else if descr.SortOrder() == schema.SortUNKNOWN {
+		return nil, fmt.Errorf("%w: sort order is unknown", arrow.ErrNotImplemented)
+	}
+
+	switch descr.PhysicalType() {
+	case parquet.Types.Int32:
+		return &intComparator[int32]{sortOrder: schema.SortUNSIGNED}, nil
+	case parquet.Types.Int64:
+		return &intComparator[int64]{sortOrder: schema.SortUNSIGNED}, nil
+	case parquet.Types.Int96:
+		return &int96Comparator{sortOrder: schema.SortUNSIGNED}, nil
+	case parquet.Types.ByteArray:
+		return &byteArrayComparator[parquet.ByteArray]{sortOrder: schema.SortUNSIGNED}, nil
+	case parquet.Types.FixedLenByteArray:
+		return &byteArrayComparator[parquet.FixedLenByteArray]{sortOrder: schema.SortUNSIGNED}, nil
+	default:
+		return nil, fmt.Errorf("%w: unsigned compare not implemented for %s", arrow.ErrNotImplemented, descr.PhysicalType())
+	}
+}
+
+func NewTypedComparator[T parquet.ColumnTypes](descr *schema.Column) (Comparator[T], error) {
+	comp, err := NewComparator(descr)
+	if err != nil {
+		return nil, err
+	}
+
+	c, ok := comp.(Comparator[T])
+	if !ok {
+		return nil, fmt.Errorf("unexpected comparator type %T", comp)
+	}
+	return c, nil
+}
+
+type intComparator[T int32 | int64] struct {
+	sortOrder    schema.SortOrder
+	bitSetReader bitutils.SetBitRunReader
+}
+
+func (c *intComparator[T]) defaultMin() T {
+	var z T
+	switch any(z).(type) {
+	case int32:
+		if c.sortOrder == schema.SortUNSIGNED {
+			val := uint32(math.MaxUint32)
+			return T(val)
+		}
+		return math.MaxInt32
+	case int64:
+		if c.sortOrder == schema.SortUNSIGNED {
+			val := uint64(math.MaxUint64)
+			return T(val)
+		}
+		var v int64 = math.MaxInt64
+		return T(v)
+	}
+	panic("unreachable")
+}
+
+func (c *intComparator[T]) defaultMax() T {
+	if c.sortOrder == schema.SortUNSIGNED {
+		return T(0)
+	}
+
+	var z T
+	switch any(z).(type) {
+	case int32:
+		return math.MinInt32
+	case int64:
+		var v int64 = math.MinInt64
+		return T(v)
+	}
+	panic("unreachable")
+}
+
+func (c *intComparator[T]) Compare(a, b T) bool {
+	if c.sortOrder == schema.SortUNSIGNED {
+		return uint64(a) < uint64(b)
+	}
+	return a < b
+}
+
+func (c *intComparator[T]) GetMinMax(vals []T) (min, max T) {
+	if c.sortOrder == schema.SortSIGNED {
+		switch v := any(vals).(type) {
+		case []int32:
+			minv, maxv := shared_utils.GetMinMaxInt32(v)
+			return T(minv), T(maxv)
+		case []int64:
+			minv, maxv := shared_utils.GetMinMaxInt64(v)
+			return T(minv), T(maxv)
+		}
+		panic("unreachable")
+	}
+
+	switch v := any(vals).(type) {
+	case []int32:
+		minv, maxv := shared_utils.GetMinMaxUint32(arrow.GetData[uint32](arrow.GetBytes(v)))
+		return T(minv), T(maxv)
+	case []int64:
+		minv, maxv := shared_utils.GetMinMaxUint64(arrow.GetData[uint64](arrow.GetBytes(v)))
+		return T(minv), T(maxv)
+	}
+	panic("unreachable")
+}
+
+func (c *intComparator[T]) GetMinMaxSpaced(vals []T, validBits []byte, validBitsOffset int64) (minv, maxv T) {
+	minv, maxv = c.defaultMin(), c.defaultMax()
+	var fn func([]T) (T, T)
+	switch any(vals).(type) {
+	case []int32:
+		if c.sortOrder == schema.SortSIGNED {
+			fn = func(t []T) (T, T) {
+				minv, maxv := shared_utils.GetMinMaxInt32(any(t).([]int32))
+				return T(minv), T(maxv)
+			}
+		} else {
+			fn = func(t []T) (T, T) {
+				minv, maxv := shared_utils.GetMinMaxUint32(arrow.GetData[uint32](arrow.GetBytes(any(t).([]int32))))
+				return T(minv), T(maxv)
+			}
+		}
+	case []int64:
+		if c.sortOrder == schema.SortSIGNED {
+			fn = func(t []T) (T, T) {
+				minv, maxv := shared_utils.GetMinMaxInt64(any(t).([]int64))
+				return T(minv), T(maxv)
+			}
+		} else {
+			fn = func(t []T) (T, T) {
+				minv, maxv := shared_utils.GetMinMaxUint64(arrow.GetData[uint64](arrow.GetBytes(any(t).([]int64))))
+				return T(minv), T(maxv)
+			}
+		}
+	}
+
+	if c.bitSetReader == nil {
+		c.bitSetReader = bitutils.NewSetBitRunReader(validBits, validBitsOffset, int64(len(vals)))
+	} else {
+		c.bitSetReader.Reset(validBits, validBitsOffset, int64(len(vals)))
+	}
+
+	for {
+		run := c.bitSetReader.NextRun()
+		if run.Length == 0 {
+			break
+		}
+
+		localMin, localMax := fn(vals[int(run.Pos):int(run.Pos+run.Length)])
+		minv, maxv = min(minv, localMin), max(maxv, localMax)
+	}
+	return
+}
+
+func basicMinMax[T any](vals []T, defMin, defMax T, coalesce, min, max func(T, T) T) (minv, maxv T) {
+	minv, maxv = defMin, defMax
+
+	for _, v := range vals {
+		minv = min(minv, coalesce(v, defMin))
+		maxv = max(maxv, coalesce(v, defMax))
+	}
+	return
+}
+
+func basicMinMaxSpaced[T any](vals []T, validBits []byte, validOffset int64, bitSetReader *bitutils.SetBitRunReader,
+	defMin, defMax T, coalesce, min, max func(T, T) T) (minv, maxv T) {
+
+	minv, maxv = defMin, defMax
+	if *bitSetReader == nil {
+		*bitSetReader = bitutils.NewSetBitRunReader(validBits, validOffset, int64(len(vals)))
+	} else {
+		(*bitSetReader).Reset(validBits, validOffset, int64(len(vals)))
+	}
+
+	for {
+		run := (*bitSetReader).NextRun()
+		if run.Length == 0 {
+			break
+		}
+
+		for _, v := range vals[int(run.Pos):int(run.Pos+run.Length)] {
+			minv = min(minv, coalesce(v, defMin))
+			maxv = max(maxv, coalesce(v, defMax))
+		}
+	}
+	return
+}
+
+type floatComparator[T float32 | float64] struct {
+	bitSetReader bitutils.SetBitRunReader
+}
+
+func (floatComparator[T]) coalesce(val, fallback T) T {
+	if math.IsNaN(float64(val)) {
+		return fallback
+	}
+	return val
+}
+
+func (c *floatComparator[T]) defaultMin() T {
+	var z T
+	switch any(z).(type) {
+	case float32:
+		return math.MaxFloat32
+	case float64:
+		v := math.MaxFloat64
+		return T(v)
+	}
+	panic("unreachable")
+}
+
+func (c *floatComparator[T]) defaultMax() T {
+	return -c.defaultMin()
+}
+
+func (c *floatComparator[T]) Compare(a, b T) bool {
+	return a < b
+}
+
+func (c *floatComparator[T]) GetMinMax(vals []T) (minv, maxv T) {
+	return basicMinMax(vals, c.defaultMin(), c.defaultMax(), c.coalesce,
+		func(a, b T) T { return min(a, b) }, func(a, b T) T { return max(a, b) })
+}
+
+func (c *floatComparator[T]) GetMinMaxSpaced(vals []T, validBits []byte, validBitsOffset int64) (minv, maxv T) {
+	return basicMinMaxSpaced(vals, validBits, validBitsOffset, &c.bitSetReader, c.defaultMin(), c.defaultMax(), c.coalesce,
+		func(a, b T) T { return min(a, b) }, func(a, b T) T { return max(a, b) })
+}
+
+func byteArrMinVal[T parquet.ByteArray | parquet.FixedLenByteArray](cmpFn func(T, T) bool) func(a, b T) T {
+	return func(a, b T) T {
+		switch {
+		case a == nil:
+			return b
+		case b == nil:
+			return a
+		case cmpFn(a, b):
+			return a
+		default:
+			return b
+		}
+	}
+}
+
+func byteArrMaxVal[T parquet.ByteArray | parquet.FixedLenByteArray](cmpFn func(T, T) bool) func(a, b T) T {
+	return func(a, b T) T {
+		switch {
+		case a == nil:
+			return b
+		case b == nil:
+			return a
+		case cmpFn(a, b):
+			return b
+		default:
+			return a
+		}
+	}
+}
+
+type float16Comparator struct {
+	bitSetReader bitutils.SetBitRunReader
+}
+
+func (*float16Comparator) coalesce(v, fallback parquet.FixedLenByteArray) parquet.FixedLenByteArray {
+	if float16.FromLEBytes(v).IsNaN() {
+		return fallback
+	}
+	return v
+}
+
+func (*float16Comparator) Compare(a, b parquet.FixedLenByteArray) bool {
+	return float16.FromLEBytes(a).Less(float16.FromLEBytes(b))
+}
+
+func (c *float16Comparator) GetMinMax(vals []parquet.FixedLenByteArray) (minv, maxv parquet.FixedLenByteArray) {
+	return basicMinMax(vals, defaultMinFloat16, defaultMaxFloat16, c.coalesce, byteArrMinVal(c.Compare), byteArrMaxVal(c.Compare))
+}
+
+func (c *float16Comparator) GetMinMaxSpaced(vals []parquet.FixedLenByteArray, validBits []byte, validBitsOffset int64) (minv, maxv parquet.FixedLenByteArray) {
+	return basicMinMaxSpaced(vals, validBits, validBitsOffset, &c.bitSetReader, defaultMinFloat16, defaultMaxFloat16, c.coalesce, byteArrMinVal(c.Compare), byteArrMaxVal(c.Compare))
+}
+
+type int96Comparator struct {
+	sortOrder    schema.SortOrder
+	bitSetReader bitutils.SetBitRunReader
+}
+
+func (c *int96Comparator) defaultMin() parquet.Int96 {
+	if c.sortOrder == schema.SortUNSIGNED {
+		return defaultMinUInt96
+	}
+	return defaultMinInt96
+}
+
+func (c *int96Comparator) defaultMax() parquet.Int96 {
+	if c.sortOrder == schema.SortUNSIGNED {
+		return defaultMaxUInt96
+	}
+	return defaultMaxInt96
+}
+
+func (c *int96Comparator) Compare(a, b parquet.Int96) bool {
+	i96a := arrow.Uint32Traits.CastFromBytes(a[:])
+	i96b := arrow.Uint32Traits.CastFromBytes(b[:])
+
+	a0, a1, a2 := shared_utils.ToLEUint32(i96a[0]), shared_utils.ToLEUint32(i96a[1]), shared_utils.ToLEUint32(i96a[2])
+	b0, b1, b2 := shared_utils.ToLEUint32(i96b[0]), shared_utils.ToLEUint32(i96b[1]), shared_utils.ToLEUint32(i96b[2])
+
+	if a2 != b2 {
+		// only the msb bit is by signed comparison
+		if c.sortOrder == schema.SortSIGNED {
+			return int32(a2) < int32(b2)
+		}
+		return a2 < b2
+	} else if a1 != b1 {
+		return a1 < b1
+	}
+	return a0 < b0
+}
+
+func (c *int96Comparator) GetMinMax(vals []parquet.Int96) (minv, maxv parquet.Int96) {
+	return basicMinMax(vals, c.defaultMin(), c.defaultMax(), func(v, _ parquet.Int96) parquet.Int96 { return v },
+		func(a, b parquet.Int96) parquet.Int96 {
+			if c.Compare(a, b) {
+				return a
+			}
+			return b
+		}, func(a, b parquet.Int96) parquet.Int96 {
+			if c.Compare(a, b) {
+				return b
+			}
+			return a
+		})
+}
+
+func (c *int96Comparator) GetMinMaxSpaced(vals []parquet.Int96, validBits []byte, validBitsOffset int64) (minv, maxv parquet.Int96) {
+	return basicMinMaxSpaced(vals, validBits, validBitsOffset, &c.bitSetReader, c.defaultMin(), c.defaultMax(),
+		func(v, _ parquet.Int96) parquet.Int96 { return v },
+		func(a, b parquet.Int96) parquet.Int96 {
+			if c.Compare(a, b) {
+				return a
+			}
+			return b
+		}, func(a, b parquet.Int96) parquet.Int96 {
+			if c.Compare(a, b) {
+				return b
+			}
+			return a
+		})
+}
+
+type byteArrayComparator[T parquet.ByteArray | parquet.FixedLenByteArray] struct {
+	sortOrder    schema.SortOrder
+	bitSetReader bitutils.SetBitRunReader
+}
+
+func (c *byteArrayComparator[T]) Compare(a, b T) bool {
+	if c.sortOrder == schema.SortUNSIGNED {
+		return bytes.Compare(a, b) == -1
+	}
+
+	return signedByteLess(a, b)
+}
+
+func (c *byteArrayComparator[T]) GetMinMax(vals []T) (minv, maxv T) {
+	return basicMinMax(vals, nil, nil, func(v, _ T) T { return v },
+		byteArrMinVal(c.Compare), byteArrMaxVal(c.Compare))
+}
+
+func (c *byteArrayComparator[T]) GetMinMaxSpaced(vals []T, validBits []byte, validBitsOffset int64) (minv, maxv T) {
+	return basicMinMaxSpaced(vals, validBits, validBitsOffset, &c.bitSetReader, nil, nil,
+		func(v, _ T) T { return v }, byteArrMinVal(c.Compare), byteArrMaxVal(c.Compare))
+}
+
+type booleanComparator struct {
+	bitSetReader bitutils.SetBitRunReader
+}
+
+func (*booleanComparator) Compare(a, b bool) bool {
+	return !a && b
+}
+
+func (c *booleanComparator) GetMinMax(vals []bool) (minv, maxv bool) {
+	return basicMinMax(vals, true, false, func(v, _ bool) bool { return v },
+		func(a, b bool) bool {
+			if c.Compare(a, b) {
+				return a
+			}
+			return b
+		}, func(a, b bool) bool {
+			if c.Compare(a, b) {
+				return b
+			}
+			return a
+		})
+}
+
+func (c *booleanComparator) GetMinMaxSpaced(vals []bool, validBits []byte, validBitsOffset int64) (minv, maxv bool) {
+	return basicMinMaxSpaced(vals, validBits, validBitsOffset, &c.bitSetReader, true, false, func(v, _ bool) bool { return v },
+		func(a, b bool) bool {
+			if c.Compare(a, b) {
+				return a
+			}
+			return b
+		}, func(a, b bool) bool {
+			if c.Compare(a, b) {
+				return b
+			}
+			return a
+		})
 }

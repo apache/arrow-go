@@ -63,7 +63,7 @@ type ColumnMetadata struct {
 }
 
 func (c *ColumnMetadata) findStrVal(key string) (string, bool) {
-	idx := c.Data.FindKey(CatalogNameKey)
+	idx := c.Data.FindKey(key)
 	if idx == -1 {
 		return "", false
 	}
@@ -71,7 +71,7 @@ func (c *ColumnMetadata) findStrVal(key string) (string, bool) {
 }
 
 func (c *ColumnMetadata) findBoolVal(key string) (bool, bool) {
-	idx := c.Data.FindKey(CatalogNameKey)
+	idx := c.Data.FindKey(key)
 	if idx == -1 {
 		return false, false
 	}
@@ -79,7 +79,7 @@ func (c *ColumnMetadata) findBoolVal(key string) (bool, bool) {
 }
 
 func (c *ColumnMetadata) findInt32Val(key string) (int32, bool) {
-	idx := c.Data.FindKey(CatalogNameKey)
+	idx := c.Data.FindKey(key)
 	if idx == -1 {
 		return 0, false
 	}

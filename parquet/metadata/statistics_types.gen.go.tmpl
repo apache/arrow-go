@@ -480,6 +480,7 @@ func (s *{{.Name}}Statistics) Encode() (enc EncodedStatistics, err error) {
   }
   if s.HasNullCount() {
     enc.SetNullCount(s.NullCount())
+    enc.AllNullValue = s.NumValues() == 0
   }
   if s.HasDistinctCount() {
     enc.SetDistinctCount(s.DistinctCount())

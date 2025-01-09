@@ -696,7 +696,7 @@ func listToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *s
 				return err
 			}
 		} else {
-			if err := groupToStructField(listGroup, currentLevels, ctx, out, &out.Children[0]); err != nil {
+			if err := groupToStructField(listGroup, currentLevels, ctx, &out.Children[0]); err != nil {
 				return err
 			}
 		}
@@ -741,7 +741,7 @@ func listToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *s
 	return nil
 }
 
-func groupToStructField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *schemaTree, parent, out *SchemaField) error {
+func groupToStructField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *schemaTree, out *SchemaField) error {
 	arrowFields := make([]arrow.Field, 0, n.NumFields())
 	out.Children = make([]SchemaField, n.NumFields())
 
@@ -852,7 +852,7 @@ func groupToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *
 		// }
 		out.Children = make([]SchemaField, 1)
 		repeatedAncestorDef := currentLevels.IncrementRepeated()
-		if err := groupToStructField(n, currentLevels, ctx, out, &out.Children[0]); err != nil {
+		if err := groupToStructField(n, currentLevels, ctx, &out.Children[0]); err != nil {
 			return err
 		}
 
@@ -865,7 +865,7 @@ func groupToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *
 	}
 
 	currentLevels.Increment(n)
-	return groupToStructField(n, currentLevels, ctx, parent, out)
+	return groupToStructField(n, currentLevels, ctx, out)
 }
 
 func createFieldMeta(fieldID int) arrow.Metadata {

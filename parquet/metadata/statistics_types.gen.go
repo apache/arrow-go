@@ -326,6 +326,7 @@ func (s *Int32Statistics) Encode() (enc EncodedStatistics, err error) {
 	}
 	if s.HasNullCount() {
 		enc.SetNullCount(s.NullCount())
+		enc.AllNullValue = s.NumValues() == 0
 	}
 	if s.HasDistinctCount() {
 		enc.SetDistinctCount(s.DistinctCount())
@@ -626,6 +627,7 @@ func (s *Int64Statistics) Encode() (enc EncodedStatistics, err error) {
 	}
 	if s.HasNullCount() {
 		enc.SetNullCount(s.NullCount())
+		enc.AllNullValue = s.NumValues() == 0
 	}
 	if s.HasDistinctCount() {
 		enc.SetDistinctCount(s.DistinctCount())
@@ -904,6 +906,7 @@ func (s *Int96Statistics) Encode() (enc EncodedStatistics, err error) {
 	}
 	if s.HasNullCount() {
 		enc.SetNullCount(s.NullCount())
+		enc.AllNullValue = s.NumValues() == 0
 	}
 	if s.HasDistinctCount() {
 		enc.SetDistinctCount(s.DistinctCount())
@@ -1196,6 +1199,7 @@ func (s *Float32Statistics) Encode() (enc EncodedStatistics, err error) {
 	}
 	if s.HasNullCount() {
 		enc.SetNullCount(s.NullCount())
+		enc.AllNullValue = s.NumValues() == 0
 	}
 	if s.HasDistinctCount() {
 		enc.SetDistinctCount(s.DistinctCount())
@@ -1488,6 +1492,7 @@ func (s *Float64Statistics) Encode() (enc EncodedStatistics, err error) {
 	}
 	if s.HasNullCount() {
 		enc.SetNullCount(s.NullCount())
+		enc.AllNullValue = s.NumValues() == 0
 	}
 	if s.HasDistinctCount() {
 		enc.SetDistinctCount(s.DistinctCount())
@@ -1766,6 +1771,7 @@ func (s *BooleanStatistics) Encode() (enc EncodedStatistics, err error) {
 	}
 	if s.HasNullCount() {
 		enc.SetNullCount(s.NullCount())
+		enc.AllNullValue = s.NumValues() == 0
 	}
 	if s.HasDistinctCount() {
 		enc.SetDistinctCount(s.DistinctCount())
@@ -2073,6 +2079,7 @@ func (s *ByteArrayStatistics) Encode() (enc EncodedStatistics, err error) {
 	}
 	if s.HasNullCount() {
 		enc.SetNullCount(s.NullCount())
+		enc.AllNullValue = s.NumValues() == 0
 	}
 	if s.HasDistinctCount() {
 		enc.SetDistinctCount(s.DistinctCount())
@@ -2383,6 +2390,7 @@ func (s *FixedLenByteArrayStatistics) Encode() (enc EncodedStatistics, err error
 	}
 	if s.HasNullCount() {
 		enc.SetNullCount(s.NullCount())
+		enc.AllNullValue = s.NumValues() == 0
 	}
 	if s.HasDistinctCount() {
 		enc.SetDistinctCount(s.DistinctCount())
@@ -2684,6 +2692,7 @@ func (s *Float16Statistics) Encode() (enc EncodedStatistics, err error) {
 	}
 	if s.HasNullCount() {
 		enc.SetNullCount(s.NullCount())
+		enc.AllNullValue = s.NumValues() == 0
 	}
 	if s.HasDistinctCount() {
 		enc.SetDistinctCount(s.DistinctCount())

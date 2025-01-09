@@ -49,10 +49,19 @@ type PageReader interface {
 	Reset(r parquet.BufferedReader, nrows int64, compressType compress.Compression, ctx *CryptoContext)
 }
 
+type PageType = format.PageType
+
+const (
+	PageTypeDataPage       PageType = format.PageType_DATA_PAGE
+	PageTypeDataPageV2     PageType = format.PageType_DATA_PAGE_V2
+	PageTypeDictionaryPage PageType = format.PageType_DICTIONARY_PAGE
+	PageTypeIndexPage      PageType = format.PageType_INDEX_PAGE
+)
+
 // Page is an interface for handling DataPages or Dictionary Pages
 type Page interface {
 	// Returns which kind of page this is
-	Type() format.PageType
+	Type() PageType
 	// Get the raw bytes of this page
 	Data() []byte
 	// return the encoding used for this page, Plain/RLE, etc.
@@ -71,10 +80,21 @@ type page struct {
 	encoding format.Encoding
 }
 
-func (p *page) Type() format.PageType     { return p.typ }
+func (p *page) Type() PageType            { return p.typ }
 func (p *page) Data() []byte              { return p.buf.Bytes() }
 func (p *page) NumValues() int32          { return p.nvals }
 func (p *page) Encoding() format.Encoding { return p.encoding }
+
+// DataPageConfig is a struct for passing configuration params to data page creation
+// which can be expanded in the future without causing any breaking changes.
+type DataPageConfig struct {
+	Num              int32
+	Encoding         parquet.Encoding
+	UncompressedSize int32
+	Stats            metadata.EncodedStatistics
+	FirstRowIndex    int64
+	SizeStats        SizeStatistics
+}
 
 // DataPage is the base interface for both DataPageV1 and DataPageV2 of the
 // parquet spec.
@@ -82,6 +102,9 @@ type DataPage interface {
 	Page
 	UncompressedSize() int32
 	Statistics() metadata.EncodedStatistics
+	// FirstRowIndex returns the row ordinal within the row group
+	// to the first row in the data page, or -1 if not set.
+	FirstRowIndex() int64
 }
 
 // Create some pools to use for reusing the data page objects themselves so that
@@ -110,6 +133,8 @@ type DataPageV1 struct {
 	repLvlEncoding   format.Encoding
 	uncompressedSize int32
 	statistics       metadata.EncodedStatistics
+	firstRowIndex    int64
+	sizeStatistics   SizeStatistics
 }
 
 // NewDataPageV1 returns a V1 data page with the given buffer as its data and the specified encoding information
@@ -125,6 +150,7 @@ func NewDataPageV1(buffer *memory.Buffer, num int32, encoding, defEncoding, repE
 			defLvlEncoding:   format.Encoding(defEncoding),
 			repLvlEncoding:   format.Encoding(repEncoding),
 			uncompressedSize: uncompressedSize,
+			firstRowIndex:    -1,
 		}
 	}
 
@@ -134,6 +160,8 @@ func NewDataPageV1(buffer *memory.Buffer, num int32, encoding, defEncoding, repE
 	dp.statistics.HasMax, dp.statistics.HasMin = false, false
 	dp.statistics.HasNullCount, dp.statistics.HasDistinctCount = false, false
 	dp.uncompressedSize = uncompressedSize
+	dp.firstRowIndex = -1
+	dp.sizeStatistics = SizeStatistics{}
 	return dp
 }
 
@@ -141,6 +169,14 @@ func NewDataPageV1(buffer *memory.Buffer, num int32, encoding, defEncoding, repE
 func NewDataPageV1WithStats(buffer *memory.Buffer, num int32, encoding, defEncoding, repEncoding parquet.Encoding, uncompressedSize int32, stats metadata.EncodedStatistics) *DataPageV1 {
 	ret := NewDataPageV1(buffer, num, encoding, defEncoding, repEncoding, uncompressedSize)
 	ret.statistics = stats
+	return ret
+}
+
+// NewDataPageV1WithConfig uses a DataPageConfig object to encapsulate some parameters for future expansion
+// rather than continuing to add new functions to the API to avoid breaking changes.
+func NewDataPageV1WithConfig(buffer *memory.Buffer, defEncoding, repEncoding parquet.Encoding, cfg DataPageConfig) *DataPageV1 {
+	ret := NewDataPageV1WithStats(buffer, cfg.Num, cfg.Encoding, defEncoding, repEncoding, cfg.UncompressedSize, cfg.Stats)
+	ret.firstRowIndex, ret.sizeStatistics = cfg.FirstRowIndex, cfg.SizeStats
 	return ret
 }
 
@@ -153,6 +189,8 @@ func (d *DataPageV1) Release() {
 	d.buf = nil
 	dataPageV1Pool.Put(d)
 }
+
+func (d *DataPageV1) FirstRowIndex() int64 { return d.firstRowIndex }
 
 // UncompressedSize returns the size of the data in this data page when uncompressed
 func (d *DataPageV1) UncompressedSize() int32 { return d.uncompressedSize }
@@ -181,6 +219,8 @@ type DataPageV2 struct {
 	compressed       bool
 	uncompressedSize int32
 	statistics       metadata.EncodedStatistics
+	firstRowIndex    int64
+	sizeStatistics   SizeStatistics
 }
 
 // NewDataPageV2 constructs a new V2 data page with the provided information and a buffer of the raw data.
@@ -195,6 +235,7 @@ func NewDataPageV2(buffer *memory.Buffer, numValues, numNulls, numRows int32, en
 			repLvlByteLen:    repLvlsByteLen,
 			compressed:       isCompressed,
 			uncompressedSize: uncompressed,
+			firstRowIndex:    -1,
 		}
 	}
 
@@ -205,6 +246,8 @@ func NewDataPageV2(buffer *memory.Buffer, numValues, numNulls, numRows int32, en
 	dp.compressed, dp.uncompressedSize = isCompressed, uncompressed
 	dp.statistics.HasMax, dp.statistics.HasMin = false, false
 	dp.statistics.HasNullCount, dp.statistics.HasDistinctCount = false, false
+	dp.firstRowIndex = -1
+	dp.sizeStatistics = SizeStatistics{}
 	return dp
 }
 
@@ -212,6 +255,14 @@ func NewDataPageV2(buffer *memory.Buffer, numValues, numNulls, numRows int32, en
 func NewDataPageV2WithStats(buffer *memory.Buffer, numValues, numNulls, numRows int32, encoding parquet.Encoding, defLvlsByteLen, repLvlsByteLen, uncompressed int32, isCompressed bool, stats metadata.EncodedStatistics) *DataPageV2 {
 	ret := NewDataPageV2(buffer, numValues, numNulls, numRows, encoding, defLvlsByteLen, repLvlsByteLen, uncompressed, isCompressed)
 	ret.statistics = stats
+	return ret
+}
+
+// NewDataPageV2WithConfig uses a DataPageConfig object to encapsulate some parameters for future expansion
+// rather than continuing to add new functions to the API to avoid breaking changes.
+func NewDataPageV2WithConfig(buffer *memory.Buffer, numNulls, numRows int32, defLvlsByteLen, repLvlsByteLen int32, isCompressed bool, cfg DataPageConfig) *DataPageV2 {
+	ret := NewDataPageV2WithStats(buffer, cfg.Num, numNulls, numRows, cfg.Encoding, defLvlsByteLen, repLvlsByteLen, cfg.UncompressedSize, isCompressed, cfg.Stats)
+	ret.firstRowIndex, ret.sizeStatistics = cfg.FirstRowIndex, cfg.SizeStats
 	return ret
 }
 
@@ -224,6 +275,8 @@ func (d *DataPageV2) Release() {
 	d.buf = nil
 	dataPageV2Pool.Put(d)
 }
+
+func (d *DataPageV2) FirstRowIndex() int64 { return d.firstRowIndex }
 
 // UncompressedSize is the size of the raw page when uncompressed. If `IsCompressed` is true, then
 // the raw data in the buffer is expected to be compressed.

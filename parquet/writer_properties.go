@@ -47,8 +47,10 @@ const (
 	DefaultStatsEnabled = true
 	// If the stats are larger than 4K the writer will skip writing them out anyways.
 	DefaultMaxStatsSize int64 = 4096
-	DefaultCreatedBy          = "parquet-go version 18.0.0-SNAPSHOT"
-	DefaultRootName           = "schema"
+	// Default is to not write page indexes for columns
+	DefaultPageIndexEnabled = false
+	DefaultCreatedBy        = "parquet-go version 18.0.0-SNAPSHOT"
+	DefaultRootName         = "schema"
 )
 
 // ColumnProperties defines the encoding, codec, and so on for a given column.
@@ -57,6 +59,7 @@ type ColumnProperties struct {
 	Codec             compress.Compression
 	DictionaryEnabled bool
 	StatsEnabled      bool
+	PageIndexEnabled  bool
 	MaxStatsSize      int64
 	CompressionLevel  int
 }
@@ -65,18 +68,20 @@ type ColumnProperties struct {
 //
 // The default column properties are the following constants:
 //
-//	Encoding:						Encodings.Plain
-//	Codec:							compress.Codecs.Uncompressed
-//	DictionaryEnabled:	DefaultDictionaryEnabled
-//	StatsEnabled:				DefaultStatsEnabled
-//	MaxStatsSize:				DefaultMaxStatsSize
-//	CompressionLevel:		compress.DefaultCompressionLevel
+// Encoding:           Encodings.Plain
+// Codec:              compress.Codecs.Uncompressed
+// DictionaryEnabled:	DefaultDictionaryEnabled
+// StatsEnabled:       DefaultStatsEnabled
+// PageIndexEnabled:   DefaultPageIndexEnabled
+// MaxStatsSize:       DefaultMaxStatsSize
+// CompressionLevel:   compress.DefaultCompressionLevel
 func DefaultColumnProperties() ColumnProperties {
 	return ColumnProperties{
 		Encoding:          Encodings.Plain,
 		Codec:             compress.Codecs.Uncompressed,
 		DictionaryEnabled: DefaultDictionaryEnabled,
 		StatsEnabled:      DefaultStatsEnabled,
+		PageIndexEnabled:  DefaultPageIndexEnabled,
 		MaxStatsSize:      DefaultMaxStatsSize,
 		CompressionLevel:  compress.DefaultCompressionLevel,
 	}
@@ -92,6 +97,7 @@ type writerPropConfig struct {
 	compressLevel map[string]int
 	dictEnabled   map[string]bool
 	statsEnabled  map[string]bool
+	indexEnabled  map[string]bool
 }
 
 // WriterProperty is used as the options for building a writer properties instance
@@ -312,6 +318,25 @@ func WithSortingColumns(cols []SortingColumn) WriterProperty {
 	}
 }
 
+// WithPageIndexEnabled specifies the default value for whether or not to write page indexes for columns
+func WithPageIndexEnabled(enabled bool) WriterProperty {
+	return func(cfg *writerPropConfig) {
+		cfg.wr.defColumnProps.PageIndexEnabled = enabled
+	}
+}
+
+// WithPageIndexEnabled specifies a per column value as to enable or disable writing page indexes for the column
+func WithPageIndexEnabledFor(path string, enabled bool) WriterProperty {
+	return func(cfg *writerPropConfig) {
+		cfg.indexEnabled[path] = enabled
+	}
+}
+
+// WithPageIndexEnabledPath is like WithPageIndexEnabledFor, but takes a ColumnPath
+func WithPageIndexEnabledPath(path ColumnPath, enabled bool) WriterProperty {
+	return WithPageIndexEnabledFor(path.String(), enabled)
+}
+
 // WriterProperties is the collection of properties to use for writing a parquet file. The values are
 // read only once it has been constructed.
 type WriterProperties struct {
@@ -372,6 +397,7 @@ func NewWriterProperties(opts ...WriterProperty) *WriterProperties {
 		compressLevel: make(map[string]int),
 		dictEnabled:   make(map[string]bool),
 		statsEnabled:  make(map[string]bool),
+		indexEnabled:  make(map[string]bool),
 	}
 	for _, o := range opts {
 		o(&cfg)
@@ -405,6 +431,10 @@ func NewWriterProperties(opts ...WriterProperty) *WriterProperties {
 
 	for key, value := range cfg.statsEnabled {
 		get(key).StatsEnabled = value
+	}
+
+	for key, value := range cfg.indexEnabled {
+		get(key).PageIndexEnabled = value
 	}
 	return cfg.wr
 }
@@ -533,6 +563,23 @@ func (w *WriterProperties) StatisticsEnabledFor(path string) bool {
 // StatisticsEnabledPath is the same as StatisticsEnabledFor but takes a ColumnPath object.
 func (w *WriterProperties) StatisticsEnabledPath(path ColumnPath) bool {
 	return w.StatisticsEnabledFor(path.String())
+}
+
+// PageIndexEnabled returns the default value for whether or not page indexes will be written
+func (w *WriterProperties) PageIndexEnabled() bool { return w.defColumnProps.PageIndexEnabled }
+
+// PageIndexEnabledFor returns whether page index writing is enabled for the given column path, or
+// the default value if it wasn't specified separately.
+func (w *WriterProperties) PageIndexEnabledFor(path string) bool {
+	if p, ok := w.columnProps[path]; ok {
+		return p.PageIndexEnabled
+	}
+	return w.defColumnProps.PageIndexEnabled
+}
+
+// PageIndexEnabledPath is the same as PageIndexEnabledFor but takes a ColumnPath object
+func (w *WriterProperties) PageIndexEnabledPath(path ColumnPath) bool {
+	return w.PageIndexEnabledFor(path.String())
 }
 
 // MaxStatsSize returns the default maximum size for stats

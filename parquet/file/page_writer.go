@@ -18,6 +18,8 @@ package file
 
 import (
 	"bytes"
+	"fmt"
+	"math"
 	"sync"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -51,6 +53,8 @@ type PageWriter interface {
 	// Allow reuse of the pagewriter object by resetting it using these values instead
 	// of having to create a new object.
 	Reset(sink utils.WriterTell, codec compress.Compression, compressionLevel int, metadata *metadata.ColumnChunkMetaDataBuilder, rgOrdinal, columnOrdinal int16, metaEncryptor, dataEncryptor encryption.Encryptor) error
+
+	SetIndexBuilders(metadata.ColumnIndexBuilder, *metadata.OffsetIndexBuilder)
 }
 
 type serializedPageWriter struct {
@@ -79,7 +83,9 @@ type serializedPageWriter struct {
 	dictEncodingStats map[parquet.Encoding]int32
 	dataEncodingStats map[parquet.Encoding]int32
 
-	thriftSerializer *thrift.Serializer
+	columnIndexBuilder metadata.ColumnIndexBuilder
+	offsetIndexBuilder *metadata.OffsetIndexBuilder
+	thriftSerializer   *thrift.Serializer
 }
 
 func createSerializedPageWriter(sink utils.WriterTell, codec compress.Compression, compressionLevel int, metadata *metadata.ColumnChunkMetaDataBuilder, rowGroupOrdinal, columnChunkOrdinal int16, mem memory.Allocator, metaEncryptor, dataEncryptor encryption.Encryptor) (PageWriter, error) {
@@ -122,6 +128,11 @@ func NewPageWriter(sink utils.WriterTell, codec compress.Compression, compressio
 	return createSerializedPageWriter(sink, codec, compressionLevel, metadata, rowGroupOrdinal, columnChunkOrdinal, mem, metaEncryptor, dataEncryptor)
 }
 
+func (pw *serializedPageWriter) SetIndexBuilders(colIdxBldr metadata.ColumnIndexBuilder, offsetIdxBldr *metadata.OffsetIndexBuilder) {
+	pw.columnIndexBuilder = colIdxBldr
+	pw.offsetIndexBuilder = offsetIdxBldr
+}
+
 // Reset allows reusing the pagewriter object instead of creating a new one.
 func (pw *serializedPageWriter) Reset(sink utils.WriterTell, codec compress.Compression, compressionLevel int, metadata *metadata.ColumnChunkMetaDataBuilder, rowGroupOrdinal, columnChunkOrdinal int16, metaEncryptor, dataEncryptor encryption.Encryptor) error {
 	var (
@@ -156,6 +167,9 @@ func (pw *serializedPageWriter) Reset(sink utils.WriterTell, codec compress.Comp
 	if metaEncryptor != nil || dataEncryptor != nil {
 		pw.initEncryption()
 	}
+
+	pw.columnIndexBuilder, pw.offsetIndexBuilder = nil, nil
+
 	return nil
 }
 
@@ -205,6 +219,7 @@ func (pw *serializedPageWriter) Close(hasDict, fallback bool) error {
 		DictEncodingStats: pw.dictEncodingStats,
 		DataEncodingStats: pw.dataEncodingStats,
 	}
+	pw.FinishPageIndexes(0)
 	pw.metaData.Finish(chunkInfo, hasDict, fallback, encodingStats, pw.metaEncryptor)
 	_, err := pw.metaData.WriteTo(pw.sink)
 	return err
@@ -227,7 +242,11 @@ func (pw *serializedPageWriter) setDataPageHeader(pageHdr *format.PageHeader, pa
 	hdr.Encoding = page.encoding
 	hdr.DefinitionLevelEncoding = page.defLvlEncoding
 	hdr.RepetitionLevelEncoding = page.repLvlEncoding
-	hdr.Statistics = page.statistics.ToThrift()
+	if pw.columnIndexBuilder == nil {
+		hdr.Statistics = page.statistics.ToThrift()
+	} else {
+		hdr.Statistics = nil
+	}
 	pageHdr.DataPageHeader = hdr
 	pageHdr.DataPageHeaderV2 = nil
 	pageHdr.DictionaryPageHeader = nil
@@ -247,7 +266,11 @@ func (pw *serializedPageWriter) setDataPageV2Header(pageHdr *format.PageHeader, 
 	hdr.DefinitionLevelsByteLength = page.defLvlByteLen
 	hdr.RepetitionLevelsByteLength = page.repLvlByteLen
 	hdr.IsCompressed = page.compressed
-	hdr.Statistics = page.statistics.ToThrift()
+	if pw.columnIndexBuilder == nil {
+		hdr.Statistics = page.statistics.ToThrift()
+	} else {
+		hdr.Statistics = nil
+	}
 	pageHdr.DataPageHeaderV2 = hdr
 	pageHdr.DataPageHeader = nil
 	pageHdr.DictionaryPageHeader = nil
@@ -378,12 +401,44 @@ func (pw *serializedPageWriter) WriteDataPage(page DataPage) (int64, error) {
 	}
 	written += headerSize
 
+	// collect page index
+	if pw.columnIndexBuilder != nil {
+		stats := page.Statistics()
+		pw.columnIndexBuilder.AddPage(&stats)
+	}
+
+	if pw.offsetIndexBuilder != nil {
+		if written > math.MaxInt32 {
+			return int64(written), fmt.Errorf("parquet: compressed page size %d overflows INT32_MAX", written)
+		}
+
+		if page.FirstRowIndex() == -1 {
+			return int64(written), fmt.Errorf("parquet: first row index is not set in data page for offset index")
+		}
+
+		// startPos is a relative offset in the buffered mode, it should be
+		// adjusted via OffsetIndexBuilder.Finish after BufferedPageWriter
+		// has flushed all data pages
+		if err = pw.offsetIndexBuilder.AddPage(startPos, page.FirstRowIndex(), int32(written)); err != nil {
+			return int64(written), err
+		}
+	}
+
 	pw.totalUncompressed += int64(uncompressed) + int64(headerSize)
 	pw.totalCompressed += int64(written)
 	pw.nvalues += int64(page.NumValues())
 	pw.dataEncodingStats[parquet.Encoding(page.Encoding())]++
 	pw.pageOrdinal++
 	return int64(written), nil
+}
+
+func (pw *serializedPageWriter) FinishPageIndexes(finalPos int64) {
+	if pw.columnIndexBuilder != nil {
+		pw.columnIndexBuilder.Finish()
+	}
+	if pw.offsetIndexBuilder != nil {
+		pw.offsetIndexBuilder.Finish(finalPos)
+	}
 }
 
 type bufferedPageWriter struct {
@@ -407,6 +462,10 @@ func newBufferedPageWriter(sink utils.WriterTell, codec compress.Compression, co
 	}
 	wr.pager = pager.(*serializedPageWriter)
 	return wr, nil
+}
+
+func (bw *bufferedPageWriter) SetIndexBuilders(colIdxBldr metadata.ColumnIndexBuilder, offsetIdxBldr *metadata.OffsetIndexBuilder) {
+	bw.pager.SetIndexBuilders(colIdxBldr, offsetIdxBldr)
 }
 
 func (bw *bufferedPageWriter) Reset(sink utils.WriterTell, codec compress.Compression, compressionLevel int, metadata *metadata.ColumnChunkMetaDataBuilder, rgOrdinal, columnOrdinal int16, metaEncryptor, dataEncryptor encryption.Encryptor) error {
@@ -447,6 +506,8 @@ func (bw *bufferedPageWriter) Close(hasDict, fallback bool) error {
 		DataEncodingStats: bw.pager.dataEncodingStats,
 	}
 	bw.metadata.Finish(chunkInfo, hasDict, fallback, encodingStats, bw.pager.metaEncryptor)
+	bw.pager.FinishPageIndexes(position)
+
 	bw.metadata.WriteTo(bw.inMemSink)
 
 	buf := bw.inMemSink.Finish()
