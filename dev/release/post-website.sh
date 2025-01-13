@@ -60,9 +60,8 @@ release_date_iso8601=$(LC_TIME=C date "+%Y-%m-%d")
 previous_tag_date=$(git log -n 1 --pretty=%aI v${previous_version})
 rough_previous_release_date=$(date --date "${previous_tag_date}" +%s)
 rough_release_date=$(date +%s)
-rough_n_development_months=$((
-  (${rough_release_date} - ${rough_previous_release_date}) / (60 * 60 * 24 * 30)
-))
+rough_n_development_months=$(((\
+  ${rough_release_date} - ${rough_previous_release_date}) / (60 * 60 * 24 * 30)))
 
 git_tag=v${version}
 git_range=v${previous_version}..v${version}
@@ -79,7 +78,7 @@ popd
 
 pushd "${ARROW_SITE_DIR}"
 
-cat <<ANNOUNCE >> "${announce_file}"
+cat <<ANNOUNCE >>"${announce_file}"
 ---
 layout: post
 title: "Apache Arrow Go ${version} Release"
@@ -114,9 +113,9 @@ This ${release_type} release covers ${n_commits} commits from ${n_contributors} 
 $ ${contributors_command_line}
 ANNOUNCE
 
-echo "${contributors}" >> "${announce_file}"
+echo "${contributors}" >>"${announce_file}"
 
-cat <<ANNOUNCE >> "${announce_file}"
+cat <<ANNOUNCE >>"${announce_file}"
 \`\`\`
 
 ## Changelog
@@ -128,10 +127,10 @@ git add "${announce_file}"
 git commit -m "[Release] Add release notes for Arrow Go ${version}"
 git push -u origin ${branch_name}
 
-github_url=$(git remote get-url origin | \
-               sed \
-                 -e 's,^git@github.com:,https://github.com/,' \
-                 -e 's,\.git$,,')
+github_url=$(git remote get-url origin |
+  sed \
+    -e 's,^git@github.com:,https://github.com/,' \
+    -e 's,\.git$,,')
 
 echo "Success!"
 echo "Create a pull request:"
