@@ -57,7 +57,7 @@ gh release download "${rc_tag}" \
 
 echo "Uploading to release/"
 pushd "${dist_base_dir}"
-svn add .
+svn add "${release_id}"
 svn ci -m "Apache Arrow Go ${version}"
 popd
 rm -rf "${dist_base_dir}"
