@@ -44,10 +44,10 @@ if [ "${git_origin_url}" = "git@github.com:apache/arrow-site.git" ]; then
 fi
 
 DEFAULT_BRANCH="$(git rev-parse --abbrev-ref origin/HEAD | sed s@origin/@@)"
-git fetch --all --prune --tags --force -j$(nproc)
-git switch ${DEFAULT_BRANCH}
-git branch -D ${branch_name} || :
-git switch -c ${branch_name}
+git fetch --all --prune --tags --force "-j$(nproc)"
+git switch "${DEFAULT_BRANCH}"
+git branch -D "${branch_name}" || :
+git switch -c "${branch_name}"
 popd
 
 pushd "${ARROW_DIR}"
@@ -56,24 +56,18 @@ previous_major_version="$(echo ${previous_version} | cut -d. -f1)"
 previous_minor_version="$(echo ${previous_version} | cut -d. -f2)"
 major_version="$(echo ${version} | cut -d. -f1)"
 minor_version="$(echo ${version} | cut -d. -f2)"
-if [ ${previous_major_version} -eq ${major_version} ]; then
-  if [ ${previous_minor_version} -eq ${minor_version} ]; then
-    release_type=patch
+if [ "${previous_major_version}" -eq "${major_version}" ]; then
+  if [ "${previous_minor_version}" -eq "${minor_version}" ]; then
+    release_type="patch"
   else
-    release_type=minor
+    release_type="minor"
   fi
 else
-  release_type=major
+  release_type="major"
 fi
 
 export TZ=UTC
-release_date=$(LC_TIME=C date "+%-d %B %Y")
 release_date_iso8601=$(LC_TIME=C date "+%Y-%m-%d")
-previous_tag_date=$(git log -n 1 --pretty=%aI v${previous_version})
-rough_previous_release_date=$(date --date "${previous_tag_date}" +%s)
-rough_release_date=$(date +%s)
-rough_n_development_months=$(((\
-  ${rough_release_date} - ${rough_previous_release_date}) / (60 * 60 * 24 * 30)))
 
 git_tag=v${version}
 git_range=v${previous_version}..v${version}
@@ -81,10 +75,9 @@ git_range=v${previous_version}..v${version}
 contributors_command_line="git shortlog -sn ${git_range}"
 contributors=$(${contributors_command_line} | grep -v dependabot)
 
-n_commits=$(git log --pretty=oneline ${git_range} | grep -i -v "chore: Bump" | wc -l)
-n_contributors=$(${contributors_command_line} | grep -v dependabot | wc -l)
+n_commits=$(git log --pretty=oneline ${git_range} | grep -c -i -v "chore: Bump")
+n_contributors=$(${contributors_command_line} | grep -c -v dependabot)
 
-git_tag_hash=$(git log -n 1 --pretty=%H ${git_tag})
 git_changelog="$(gh release view --json body --jq .body | grep -v '@dependabot' | sed -e 's/^#/##/g')"
 popd
 
@@ -137,7 +130,7 @@ ANNOUNCE
 
 git add "${announce_file}"
 git commit -m "[Release] Add release notes for Arrow Go ${version}"
-git push -u origin ${branch_name}
+git push -u origin "${branch_name}"
 
 github_url=$(git remote get-url origin |
   sed \
