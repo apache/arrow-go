@@ -22,7 +22,7 @@ set -u
 
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ARROW_DIR="${SOURCE_DIR}/../../"
-: ${ARROW_SITE_DIR:="${ARROW_DIR}/../arrow-site"}
+: "${ARROW_SITE_DIR:="${ARROW_DIR}/../arrow-site"}"
 
 if [ "$#" -ne 2 ]; then
   echo "Usage: $0 <previous-version> <version>"
@@ -32,7 +32,7 @@ fi
 previous_version=$1
 version=$2
 
-branch_name=release-note-arrow-go-${version}
+branch_name="release-note-arrow-go-${version}"
 release_dir="${ARROW_SITE_DIR}/_posts"
 announce_file="${release_dir}/$(date +%Y-%m-%d)-arrow-go-${version}.md"
 
@@ -52,10 +52,10 @@ popd
 
 pushd "${ARROW_DIR}"
 
-previous_major_version="$(echo ${previous_version} | cut -d. -f1)"
-previous_minor_version="$(echo ${previous_version} | cut -d. -f2)"
-major_version="$(echo ${version} | cut -d. -f1)"
-minor_version="$(echo ${version} | cut -d. -f2)"
+previous_major_version="$(echo "${previous_version}" | cut -d. -f1)"
+previous_minor_version="$(echo "${previous_version}" | cut -d. -f2)"
+major_version="$(echo "${version}" | cut -d. -f1)"
+minor_version="$(echo "${version}" | cut -d. -f2)"
 if [ "${previous_major_version}" -eq "${major_version}" ]; then
   if [ "${previous_minor_version}" -eq "${minor_version}" ]; then
     release_type="patch"
@@ -74,7 +74,7 @@ git_range=v${previous_version}..v${version}
 contributors_command_line="git shortlog -sn ${git_range}"
 contributors=$(${contributors_command_line} | grep -v dependabot)
 
-n_commits=$(git log --pretty=oneline ${git_range} | grep -c -i -v "chore: Bump")
+n_commits=$(git log --pretty=oneline "${git_range}" | grep -c -i -v "chore: Bump")
 n_contributors=$(${contributors_command_line} | grep -c -v dependabot)
 
 git_changelog="$(gh release view --json body --jq .body | grep -v '@dependabot' | sed -e 's/^#/##/g')"
@@ -82,7 +82,8 @@ popd
 
 pushd "${ARROW_SITE_DIR}"
 
-cat <<ANNOUNCE >>"${announce_file}"
+{
+  cat <<ANNOUNCE
 ---
 layout: post
 title: "Apache Arrow Go ${version} Release"
@@ -117,15 +118,16 @@ This ${release_type} release covers ${n_commits} commits from ${n_contributors} 
 $ ${contributors_command_line}
 ANNOUNCE
 
-echo "${contributors}" >>"${announce_file}"
+  echo "${contributors}"
 
-cat <<ANNOUNCE >>"${announce_file}"
+  cat <<ANNOUNCE
 \`\`\`
 
 ## Changelog
 
 ${git_changelog}
 ANNOUNCE
+} >>"${announce_file}"
 
 git add "${announce_file}"
 git commit -m "[Release] Add release notes for Arrow Go ${version}"
