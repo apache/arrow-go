@@ -46,8 +46,8 @@ popd
 
 pushd "${ARROW_DIR}"
 
-previous_major_version="$(echo v${previous_version} | grep -o '^[0-9]*')"
-major_version="$(echo v${version} | grep -o '^[0-9]*')"
+previous_major_version="$(echo ${previous_version} | grep -o '^[0-9]*')"
+major_version="$(echo ${version} | grep -o '^[0-9]*')"
 if [ ${previous_major_version} -eq ${major_version} ]; then
   release_type=patch
 else
