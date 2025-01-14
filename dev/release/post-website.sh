@@ -37,6 +37,12 @@ release_dir="${ARROW_SITE_DIR}/_posts"
 announce_file="${release_dir}/$(date +%Y-%m-%d)-arrow-go-${version}.md"
 
 pushd "${ARROW_SITE_DIR}"
+git_origin_url="$(git remote get-url origin)"
+if [ "${git_origin_url}" = "git@github.com:apache/arrow-site.git" ]; then
+  echo "This script should be run with a fork of apache/arrow-site."
+  exit 1
+fi
+
 DEFAULT_BRANCH="$(git rev-parse --abbrev-ref origin/HEAD | sed s@origin/@@)"
 git fetch --all --prune --tags --force -j$(nproc)
 git switch ${DEFAULT_BRANCH}
@@ -46,10 +52,16 @@ popd
 
 pushd "${ARROW_DIR}"
 
-previous_major_version="$(echo ${previous_version} | grep -o '^[0-9]*')"
-major_version="$(echo ${version} | grep -o '^[0-9]*')"
+previous_major_version="$(echo ${previous_version} | cut -d. -f1)"
+previous_minor_version="$(echo ${previous_version} | cut -d. -f2)"
+major_version="$(echo ${version} | cut -d. -f1)"
+minor_version="$(echo ${version} | cut -d. -f2)"
 if [ ${previous_major_version} -eq ${major_version} ]; then
-  release_type=patch
+  if [ ${previous_minor_version} -eq ${minor_version} ]; then
+    release_type=patch
+  else
+    release_type=minor
+  fi  
 else
   release_type=major
 fi
