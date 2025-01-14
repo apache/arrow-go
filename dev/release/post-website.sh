@@ -41,7 +41,7 @@ DEFAULT_BRANCH="$(git rev-parse --abbrev-ref origin/HEAD | sed s@origin/@@)"
 git fetch --all --prune --tags --force -j$(nproc)
 git checkout ${DEFAULT_BRANCH}
 git branch -D ${branch_name} || :
-git checkout -b ${branch_name}
+git switch -c ${branch_name}
 popd
 
 pushd "${ARROW_DIR}"
