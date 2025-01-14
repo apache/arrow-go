@@ -105,7 +105,7 @@ limitations under the License.
 {% endcomment %}
 -->
 
-The Apache Arrow team is pleased to announce the v${version} release ofApache Arrow Go. 
+The Apache Arrow team is pleased to announce the v${version} release of Apache Arrow Go. 
 This ${release_type} release covers ${n_commits} commits from ${n_contributors} distinct contributors.
 
 ## Contributors
