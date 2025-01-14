@@ -73,7 +73,7 @@ n_commits=$(git log --pretty=oneline ${git_range} | grep -i -v "chore: Bump" | w
 n_contributors=$(${contributors_command_line} | grep -v dependabot | wc -l)
 
 git_tag_hash=$(git log -n 1 --pretty=%H ${git_tag})
-git_changelog="$(gh release view --json body --jq .body | grep -v '@dependabot')"
+git_changelog="$(gh release view --json body --jq .body | grep -v '@dependabot' | sed -e 's/^#/##/g')"
 popd
 
 pushd "${ARROW_SITE_DIR}"
