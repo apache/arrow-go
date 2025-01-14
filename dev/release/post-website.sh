@@ -69,7 +69,6 @@ fi
 export TZ=UTC
 release_date_iso8601=$(LC_TIME=C date "+%Y-%m-%d")
 
-git_tag=v${version}
 git_range=v${previous_version}..v${version}
 
 contributors_command_line="git shortlog -sn ${git_range}"
