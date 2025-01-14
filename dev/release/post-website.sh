@@ -61,7 +61,7 @@ if [ ${previous_major_version} -eq ${major_version} ]; then
     release_type=patch
   else
     release_type=minor
-  fi  
+  fi
 else
   release_type=major
 fi
