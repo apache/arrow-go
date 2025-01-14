@@ -39,7 +39,7 @@ announce_file="${release_dir}/$(date +%Y-%m-%d)-arrow-go-${version}.md"
 pushd "${ARROW_SITE_DIR}"
 DEFAULT_BRANCH="$(git rev-parse --abbrev-ref origin/HEAD | sed s@origin/@@)"
 git fetch --all --prune --tags --force -j$(nproc)
-git checkout ${DEFAULT_BRANCH}
+git switch ${DEFAULT_BRANCH}
 git branch -D ${branch_name} || :
 git switch -c ${branch_name}
 popd
