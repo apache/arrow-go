@@ -28,8 +28,8 @@ import (
 
 // #include <stdlib.h>
 // #include <errno.h>
-// #include "arrow/c/abi.h"
-// #include "arrow/c/helpers.h"
+// #include "abi.h"
+// #include "helpers.h"
 //
 // typedef const char cchar_t;
 // extern int streamGetSchema(struct ArrowArrayStream*, struct ArrowSchema*);

@@ -19,7 +19,7 @@
 package cdata
 
 // #include <stdlib.h>
-// #include "arrow/c/abi.h"
+// #include "abi.h"
 import "C"
 
 import (

@@ -21,8 +21,8 @@ package cdata
 
 // implement handling of the Arrow C Data Interface. At least from a consuming side.
 
-// #include "arrow/c/abi.h"
-// #include "arrow/c/helpers.h"
+// #include "abi.h"
+// #include "helpers.h"
 // #include <stdlib.h>
 // int stream_get_schema(struct ArrowArrayStream* st, struct ArrowSchema* out) { return st->get_schema(st, out); }
 // int stream_get_next(struct ArrowArrayStream* st, struct ArrowArray* out) { return st->get_next(st, out); }

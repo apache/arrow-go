@@ -16,7 +16,7 @@
 
 #include <string.h>
 
-#include "arrow/c/abi.h"
+#include "abi.h"
 
 int streamGetSchema(struct ArrowArrayStream*, struct ArrowSchema*);
 int streamGetNext(struct ArrowArrayStream*, struct ArrowArray*);
