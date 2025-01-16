@@ -23,16 +23,6 @@
 
 set -ex
 
-# simplistic semver comparison
-verlte() {
-    [ "$1" = "`echo -e "$1\n$2" | sort -V | head -n1`" ]
-}
-verlt() {
-    [ "$1" = "$2" ] && return 1 || verlte $1 $2
-}
-
-ver=`go env GOVERSION`
-
 source_dir=${1}
 
 export PARQUET_TEST_DATA=${1}/cpp/submodules/parquet-testing/data

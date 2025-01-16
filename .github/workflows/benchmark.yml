@@ -21,7 +21,12 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+    paths:
+      - ".github/workflows/benchmark.yml"
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   benchmark:
@@ -30,7 +35,7 @@ jobs:
     
     strategy:
       matrix:
-        go: ['1.21']
+        go: ['1.22.7']
         arch: ['amd64']
         
     steps:
@@ -47,12 +52,6 @@ jobs:
           apt-get install -y build-essential git python3-pip
           
       - name: Install Go ${{ matrix.go }} for Benchmarks
-        if: >-
-          success() &&
-          matrix.arch == 'amd64' &&
-          github.event_name == 'push' &&
-          github.repository == 'apache/arrow-go' &&
-          github.ref_name == 'main'
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go }}
@@ -62,7 +61,6 @@ jobs:
       - name: Run Benchmarks
         if: >-
           success() &&
-          matrix.arch == 'amd64' &&
           github.event_name == 'push' &&
           github.repository == 'apache/arrow-go' &&
           github.ref_name == 'main'

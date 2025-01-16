@@ -125,3 +125,4 @@ class GoAdapter(BenchmarkAdapter):
 if __name__ == "__main__":
     go_adapter = GoAdapter(result_fields_override={"info": {}})
     go_adapter()
+    
