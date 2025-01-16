@@ -23,7 +23,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 )
 
-// #include "arrow/c/helpers.h"
+// #include "helpers.h"
 // #include <stdlib.h>
 import "C"
 
