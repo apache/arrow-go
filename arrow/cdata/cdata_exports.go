@@ -19,8 +19,8 @@ package cdata
 // #include <errno.h>
 // #include <stdint.h>
 // #include <stdlib.h>
-// #include "arrow/c/abi.h"
-// #include "arrow/c/helpers.h"
+// #include "abi.h"
+// #include "helpers.h"
 //
 // extern void releaseExportedSchema(struct ArrowSchema* schema);
 // extern void releaseExportedArray(struct ArrowArray* array);

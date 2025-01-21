@@ -22,8 +22,8 @@ package cdata
 // #include <stdlib.h>
 // #include <stdint.h>
 // #include <string.h>
-// #include "arrow/c/abi.h"
-// #include "arrow/c/helpers.h"
+// #include "abi.h"
+// #include "helpers.h"
 //
 // void setup_array_stream_test(const int n_batches, struct ArrowArrayStream* out);
 // static struct ArrowArray* get_test_arr() {

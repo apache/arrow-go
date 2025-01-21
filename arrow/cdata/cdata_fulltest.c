@@ -23,8 +23,8 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include "arrow/c/abi.h"
-#include "arrow/c/helpers.h"
+#include "abi.h"
+#include "helpers.h"
 #include "utils.h"
 
 int is_little_endian()
