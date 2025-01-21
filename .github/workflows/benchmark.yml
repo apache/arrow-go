@@ -18,52 +18,41 @@
 name: Benchmarks
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths:
       - ".github/workflows/benchmark.yml"
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   benchmark:
     runs-on: ubuntu-latest
     container: debian:12
-    
     strategy:
       matrix:
         go: ['1.22.7']
         arch: ['amd64']
-        
     steps:
       - uses: actions/checkout@v4
-      
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-          
       - name: Install dependencies
         run: |
           apt-get update
           apt-get install -y build-essential git python3-pip
-          
       - name: Install Go ${{ matrix.go }} for Benchmarks
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go }}
           cache: true
           cache-dependency-path: go.sum
-          
       - name: Run Benchmarks
         if: >-
-          success() &&
-          github.event_name == 'push' &&
-          github.repository == 'apache/arrow-go' &&
-          github.ref_name == 'main'
+          success() && github.event_name == 'push' && github.repository == 'apache/arrow-go' && github.ref_name == 'main'
         env:
           CONBENCH_URL: https://conbench.ursa.dev
           CONBENCH_EMAIL: ${{ secrets.CONBENCH_EMAIL }}
@@ -73,4 +62,3 @@ jobs:
         run: |
           python3 -m pip install benchadapt@git+https://github.com/conbench/conbench.git@main#subdirectory=benchadapt/python
           python3 ci/scripts/go_bench_adapt.py
-          

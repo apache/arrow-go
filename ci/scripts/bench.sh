@@ -26,7 +26,7 @@ set -ex
 source_dir=${1}
 
 export PARQUET_TEST_DATA=${1}/cpp/submodules/parquet-testing/data
-pushd ${source_dir}
+pushd "${source_dir}"
 
 # lots of benchmarks, they can take a while
 # the timeout is for *ALL* benchmarks together,
@@ -36,9 +36,10 @@ go test -bench=. -benchmem -timeout 40m -run=^$ ./... | tee bench_stat.dat
 popd
 
 if [[ "$2" = "-json" ]]; then
-    go install go.bobheadxi.dev/gobenchdata@latest
-    export PATH=`go env GOPATH`/bin:$PATH
-    cat ${source_dir}/bench_*.dat | gobenchdata --json bench_stats.json
-fi    
+  go install go.bobheadxi.dev/gobenchdata@latest
+  PATH=$(go env GOPATH)/bin:$PATH
+  export PATH
+  cat "${source_dir}"/bench_*.dat | gobenchdata --json bench_stats.json
+fi
 
-rm ${source_dir}/bench_*.dat
+rm "${source_dir}"/bench_*.dat
