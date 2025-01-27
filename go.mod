@@ -38,7 +38,7 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.22
 	github.com/stoewer/go-strcase v1.3.0
 	github.com/stretchr/testify v1.10.0
-	github.com/substrait-io/substrait-go/v3 v3.4.0
+	github.com/substrait-io/substrait-go/v3 v3.5.0
 	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.0.2
 	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0
