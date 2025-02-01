@@ -27,7 +27,7 @@ require (
 	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815
 	github.com/goccy/go-json v0.10.4
 	github.com/golang/snappy v0.0.4
-	github.com/google/flatbuffers v24.12.23+incompatible
+	github.com/google/flatbuffers v25.1.24+incompatible
 	github.com/google/uuid v1.6.0
 	github.com/hamba/avro/v2 v2.27.0
 	github.com/klauspost/asmfmt v1.3.2
@@ -38,7 +38,7 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.22
 	github.com/stoewer/go-strcase v1.3.0
 	github.com/stretchr/testify v1.10.0
-	github.com/substrait-io/substrait-go/v3 v3.4.0
+	github.com/substrait-io/substrait-go/v3 v3.5.0
 	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.0.2
 	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0
@@ -47,8 +47,8 @@ require (
 	golang.org/x/tools v0.29.0
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da
 	gonum.org/v1/gonum v0.15.1
-	google.golang.org/grpc v1.69.2
-	google.golang.org/protobuf v1.36.3
+	google.golang.org/grpc v1.70.0
+	google.golang.org/protobuf v1.36.4
 	modernc.org/sqlite v1.29.6
 )
 
