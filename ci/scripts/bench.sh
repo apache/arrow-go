@@ -23,9 +23,17 @@
 
 set -ex
 
-source_dir=${1}
+# Validate input arguments
+if [ -z "$1" ]; then
+  echo "Error: Missing source directory argument"
+  exit 1
+fi
 
-export PARQUET_TEST_DATA=${1}/cpp/submodules/parquet-testing/data
+source_dir="$1"
+
+PARQUET_TEST_DATA="${source_dir}/parquet-testing/data"
+export PARQUET_TEST_DATA
+
 pushd "${source_dir}"
 
 # lots of benchmarks, they can take a while

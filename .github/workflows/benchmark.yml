@@ -19,6 +19,8 @@ name: Benchmarks
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
     paths:
       - ".github/workflows/benchmark.yml"
       - "ci/scripts/bench_adapt.py"
@@ -34,7 +36,14 @@ jobs:
         go: ['1.22.7']
         arch: ['amd64']
     steps:
-      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y git ca-certificates
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -45,9 +54,10 @@ jobs:
           go-version: ${{ matrix.go }}
           cache: true
           cache-dependency-path: go.sum
+          check-latest: false
       - name: Run Benchmarks
-        run: |
-          ci/scripts/bench.sh --json
+        if: github.event_name != 'push'
+        run: bash ci/scripts/bench.sh $(pwd) --json
       - name: Upload results
         if: github.event_name == 'push' && github.repository == 'apache/arrow-go' && github.ref_name == 'main'
         env:
