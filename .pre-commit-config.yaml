@@ -59,3 +59,10 @@ repos:
     rev: v0.13.0
     hooks:
       - id: yamlfmt
+  - repo: local
+    hooks:
+      - id: go-fmt
+        name: go fmt
+        language: system
+        entry: bash -c "go get golang.org/x/tools/cmd/goimports@latest && go fmt ./..."
+        pass_filenames: false

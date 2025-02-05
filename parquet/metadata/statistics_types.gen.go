@@ -2005,7 +2005,7 @@ func (s *ByteArrayStatistics) UpdateFromArrow(values arrow.Array, updateCounts b
 	)
 
 	for i := 0; i < arr.Len(); i++ {
-		nextOffset := curOffset + int64(arr.ValueLen(i))		
+		nextOffset := curOffset + int64(arr.ValueLen(i))
 		v := data[curOffset:nextOffset]
 		curOffset = nextOffset
 

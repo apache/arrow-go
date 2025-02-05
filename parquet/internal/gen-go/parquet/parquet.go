@@ -8,11 +8,11 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
-	"log/slog"
-	"time"
 	thrift "github.com/apache/thrift/lib/go/thrift"
-	"strings"
+	"log/slog"
 	"regexp"
+	"strings"
+	"time"
 )
 
 // (needed to ensure safety because of naive import list construction.)
@@ -23,54 +23,71 @@ var _ = fmt.Printf
 var _ = slog.Log
 var _ = time.Now
 var _ = thrift.ZERO
+
 // (needed by validator.)
 var _ = strings.Contains
 var _ = regexp.MatchString
 
-//Types supported by Parquet.  These types are intended to be used in combination
-//with the encodings to control the on disk storage format.
-//For example INT16 is not included as a type since a good encoding of INT32
-//would handle this.
+// Types supported by Parquet.  These types are intended to be used in combination
+// with the encodings to control the on disk storage format.
+// For example INT16 is not included as a type since a good encoding of INT32
+// would handle this.
 type Type int64
+
 const (
-	Type_BOOLEAN Type = 0
-	Type_INT32 Type = 1
-	Type_INT64 Type = 2
-	Type_INT96 Type = 3
-	Type_FLOAT Type = 4
-	Type_DOUBLE Type = 5
-	Type_BYTE_ARRAY Type = 6
+	Type_BOOLEAN              Type = 0
+	Type_INT32                Type = 1
+	Type_INT64                Type = 2
+	Type_INT96                Type = 3
+	Type_FLOAT                Type = 4
+	Type_DOUBLE               Type = 5
+	Type_BYTE_ARRAY           Type = 6
 	Type_FIXED_LEN_BYTE_ARRAY Type = 7
 )
 
 func (p Type) String() string {
 	switch p {
-	case Type_BOOLEAN: return "BOOLEAN"
-	case Type_INT32: return "INT32"
-	case Type_INT64: return "INT64"
-	case Type_INT96: return "INT96"
-	case Type_FLOAT: return "FLOAT"
-	case Type_DOUBLE: return "DOUBLE"
-	case Type_BYTE_ARRAY: return "BYTE_ARRAY"
-	case Type_FIXED_LEN_BYTE_ARRAY: return "FIXED_LEN_BYTE_ARRAY"
+	case Type_BOOLEAN:
+		return "BOOLEAN"
+	case Type_INT32:
+		return "INT32"
+	case Type_INT64:
+		return "INT64"
+	case Type_INT96:
+		return "INT96"
+	case Type_FLOAT:
+		return "FLOAT"
+	case Type_DOUBLE:
+		return "DOUBLE"
+	case Type_BYTE_ARRAY:
+		return "BYTE_ARRAY"
+	case Type_FIXED_LEN_BYTE_ARRAY:
+		return "FIXED_LEN_BYTE_ARRAY"
 	}
 	return "<UNSET>"
 }
 
 func TypeFromString(s string) (Type, error) {
 	switch s {
-	case "BOOLEAN": return Type_BOOLEAN, nil
-	case "INT32": return Type_INT32, nil
-	case "INT64": return Type_INT64, nil
-	case "INT96": return Type_INT96, nil
-	case "FLOAT": return Type_FLOAT, nil
-	case "DOUBLE": return Type_DOUBLE, nil
-	case "BYTE_ARRAY": return Type_BYTE_ARRAY, nil
-	case "FIXED_LEN_BYTE_ARRAY": return Type_FIXED_LEN_BYTE_ARRAY, nil
+	case "BOOLEAN":
+		return Type_BOOLEAN, nil
+	case "INT32":
+		return Type_INT32, nil
+	case "INT64":
+		return Type_INT64, nil
+	case "INT96":
+		return Type_INT96, nil
+	case "FLOAT":
+		return Type_FLOAT, nil
+	case "DOUBLE":
+		return Type_DOUBLE, nil
+	case "BYTE_ARRAY":
+		return Type_BYTE_ARRAY, nil
+	case "FIXED_LEN_BYTE_ARRAY":
+		return Type_FIXED_LEN_BYTE_ARRAY, nil
 	}
 	return Type(0), fmt.Errorf("not a valid Type string")
 }
-
 
 func TypePtr(v Type) *Type { return &v }
 
@@ -103,92 +120,136 @@ func (p *Type) Value() (driver.Value, error) {
 	return int64(*p), nil
 }
 
-//DEPRECATED: Common types used by frameworks(e.g. hive, pig) using parquet.
-//ConvertedType is superseded by LogicalType.  This enum should not be extended.
+// DEPRECATED: Common types used by frameworks(e.g. hive, pig) using parquet.
+// ConvertedType is superseded by LogicalType.  This enum should not be extended.
 //
-//See LogicalTypes.md for conversion between ConvertedType and LogicalType.
+// See LogicalTypes.md for conversion between ConvertedType and LogicalType.
 type ConvertedType int64
+
 const (
-	ConvertedType_UTF8 ConvertedType = 0
-	ConvertedType_MAP ConvertedType = 1
-	ConvertedType_MAP_KEY_VALUE ConvertedType = 2
-	ConvertedType_LIST ConvertedType = 3
-	ConvertedType_ENUM ConvertedType = 4
-	ConvertedType_DECIMAL ConvertedType = 5
-	ConvertedType_DATE ConvertedType = 6
-	ConvertedType_TIME_MILLIS ConvertedType = 7
-	ConvertedType_TIME_MICROS ConvertedType = 8
+	ConvertedType_UTF8             ConvertedType = 0
+	ConvertedType_MAP              ConvertedType = 1
+	ConvertedType_MAP_KEY_VALUE    ConvertedType = 2
+	ConvertedType_LIST             ConvertedType = 3
+	ConvertedType_ENUM             ConvertedType = 4
+	ConvertedType_DECIMAL          ConvertedType = 5
+	ConvertedType_DATE             ConvertedType = 6
+	ConvertedType_TIME_MILLIS      ConvertedType = 7
+	ConvertedType_TIME_MICROS      ConvertedType = 8
 	ConvertedType_TIMESTAMP_MILLIS ConvertedType = 9
 	ConvertedType_TIMESTAMP_MICROS ConvertedType = 10
-	ConvertedType_UINT_8 ConvertedType = 11
-	ConvertedType_UINT_16 ConvertedType = 12
-	ConvertedType_UINT_32 ConvertedType = 13
-	ConvertedType_UINT_64 ConvertedType = 14
-	ConvertedType_INT_8 ConvertedType = 15
-	ConvertedType_INT_16 ConvertedType = 16
-	ConvertedType_INT_32 ConvertedType = 17
-	ConvertedType_INT_64 ConvertedType = 18
-	ConvertedType_JSON ConvertedType = 19
-	ConvertedType_BSON ConvertedType = 20
-	ConvertedType_INTERVAL ConvertedType = 21
+	ConvertedType_UINT_8           ConvertedType = 11
+	ConvertedType_UINT_16          ConvertedType = 12
+	ConvertedType_UINT_32          ConvertedType = 13
+	ConvertedType_UINT_64          ConvertedType = 14
+	ConvertedType_INT_8            ConvertedType = 15
+	ConvertedType_INT_16           ConvertedType = 16
+	ConvertedType_INT_32           ConvertedType = 17
+	ConvertedType_INT_64           ConvertedType = 18
+	ConvertedType_JSON             ConvertedType = 19
+	ConvertedType_BSON             ConvertedType = 20
+	ConvertedType_INTERVAL         ConvertedType = 21
 )
 
 func (p ConvertedType) String() string {
 	switch p {
-	case ConvertedType_UTF8: return "UTF8"
-	case ConvertedType_MAP: return "MAP"
-	case ConvertedType_MAP_KEY_VALUE: return "MAP_KEY_VALUE"
-	case ConvertedType_LIST: return "LIST"
-	case ConvertedType_ENUM: return "ENUM"
-	case ConvertedType_DECIMAL: return "DECIMAL"
-	case ConvertedType_DATE: return "DATE"
-	case ConvertedType_TIME_MILLIS: return "TIME_MILLIS"
-	case ConvertedType_TIME_MICROS: return "TIME_MICROS"
-	case ConvertedType_TIMESTAMP_MILLIS: return "TIMESTAMP_MILLIS"
-	case ConvertedType_TIMESTAMP_MICROS: return "TIMESTAMP_MICROS"
-	case ConvertedType_UINT_8: return "UINT_8"
-	case ConvertedType_UINT_16: return "UINT_16"
-	case ConvertedType_UINT_32: return "UINT_32"
-	case ConvertedType_UINT_64: return "UINT_64"
-	case ConvertedType_INT_8: return "INT_8"
-	case ConvertedType_INT_16: return "INT_16"
-	case ConvertedType_INT_32: return "INT_32"
-	case ConvertedType_INT_64: return "INT_64"
-	case ConvertedType_JSON: return "JSON"
-	case ConvertedType_BSON: return "BSON"
-	case ConvertedType_INTERVAL: return "INTERVAL"
+	case ConvertedType_UTF8:
+		return "UTF8"
+	case ConvertedType_MAP:
+		return "MAP"
+	case ConvertedType_MAP_KEY_VALUE:
+		return "MAP_KEY_VALUE"
+	case ConvertedType_LIST:
+		return "LIST"
+	case ConvertedType_ENUM:
+		return "ENUM"
+	case ConvertedType_DECIMAL:
+		return "DECIMAL"
+	case ConvertedType_DATE:
+		return "DATE"
+	case ConvertedType_TIME_MILLIS:
+		return "TIME_MILLIS"
+	case ConvertedType_TIME_MICROS:
+		return "TIME_MICROS"
+	case ConvertedType_TIMESTAMP_MILLIS:
+		return "TIMESTAMP_MILLIS"
+	case ConvertedType_TIMESTAMP_MICROS:
+		return "TIMESTAMP_MICROS"
+	case ConvertedType_UINT_8:
+		return "UINT_8"
+	case ConvertedType_UINT_16:
+		return "UINT_16"
+	case ConvertedType_UINT_32:
+		return "UINT_32"
+	case ConvertedType_UINT_64:
+		return "UINT_64"
+	case ConvertedType_INT_8:
+		return "INT_8"
+	case ConvertedType_INT_16:
+		return "INT_16"
+	case ConvertedType_INT_32:
+		return "INT_32"
+	case ConvertedType_INT_64:
+		return "INT_64"
+	case ConvertedType_JSON:
+		return "JSON"
+	case ConvertedType_BSON:
+		return "BSON"
+	case ConvertedType_INTERVAL:
+		return "INTERVAL"
 	}
 	return "<UNSET>"
 }
 
 func ConvertedTypeFromString(s string) (ConvertedType, error) {
 	switch s {
-	case "UTF8": return ConvertedType_UTF8, nil
-	case "MAP": return ConvertedType_MAP, nil
-	case "MAP_KEY_VALUE": return ConvertedType_MAP_KEY_VALUE, nil
-	case "LIST": return ConvertedType_LIST, nil
-	case "ENUM": return ConvertedType_ENUM, nil
-	case "DECIMAL": return ConvertedType_DECIMAL, nil
-	case "DATE": return ConvertedType_DATE, nil
-	case "TIME_MILLIS": return ConvertedType_TIME_MILLIS, nil
-	case "TIME_MICROS": return ConvertedType_TIME_MICROS, nil
-	case "TIMESTAMP_MILLIS": return ConvertedType_TIMESTAMP_MILLIS, nil
-	case "TIMESTAMP_MICROS": return ConvertedType_TIMESTAMP_MICROS, nil
-	case "UINT_8": return ConvertedType_UINT_8, nil
-	case "UINT_16": return ConvertedType_UINT_16, nil
-	case "UINT_32": return ConvertedType_UINT_32, nil
-	case "UINT_64": return ConvertedType_UINT_64, nil
-	case "INT_8": return ConvertedType_INT_8, nil
-	case "INT_16": return ConvertedType_INT_16, nil
-	case "INT_32": return ConvertedType_INT_32, nil
-	case "INT_64": return ConvertedType_INT_64, nil
-	case "JSON": return ConvertedType_JSON, nil
-	case "BSON": return ConvertedType_BSON, nil
-	case "INTERVAL": return ConvertedType_INTERVAL, nil
+	case "UTF8":
+		return ConvertedType_UTF8, nil
+	case "MAP":
+		return ConvertedType_MAP, nil
+	case "MAP_KEY_VALUE":
+		return ConvertedType_MAP_KEY_VALUE, nil
+	case "LIST":
+		return ConvertedType_LIST, nil
+	case "ENUM":
+		return ConvertedType_ENUM, nil
+	case "DECIMAL":
+		return ConvertedType_DECIMAL, nil
+	case "DATE":
+		return ConvertedType_DATE, nil
+	case "TIME_MILLIS":
+		return ConvertedType_TIME_MILLIS, nil
+	case "TIME_MICROS":
+		return ConvertedType_TIME_MICROS, nil
+	case "TIMESTAMP_MILLIS":
+		return ConvertedType_TIMESTAMP_MILLIS, nil
+	case "TIMESTAMP_MICROS":
+		return ConvertedType_TIMESTAMP_MICROS, nil
+	case "UINT_8":
+		return ConvertedType_UINT_8, nil
+	case "UINT_16":
+		return ConvertedType_UINT_16, nil
+	case "UINT_32":
+		return ConvertedType_UINT_32, nil
+	case "UINT_64":
+		return ConvertedType_UINT_64, nil
+	case "INT_8":
+		return ConvertedType_INT_8, nil
+	case "INT_16":
+		return ConvertedType_INT_16, nil
+	case "INT_32":
+		return ConvertedType_INT_32, nil
+	case "INT_64":
+		return ConvertedType_INT_64, nil
+	case "JSON":
+		return ConvertedType_JSON, nil
+	case "BSON":
+		return ConvertedType_BSON, nil
+	case "INTERVAL":
+		return ConvertedType_INTERVAL, nil
 	}
 	return ConvertedType(0), fmt.Errorf("not a valid ConvertedType string")
 }
-
 
 func ConvertedTypePtr(v ConvertedType) *ConvertedType { return &v }
 
@@ -221,8 +282,9 @@ func (p *ConvertedType) Value() (driver.Value, error) {
 	return int64(*p), nil
 }
 
-//Representation of Schemas
+// Representation of Schemas
 type FieldRepetitionType int64
+
 const (
 	FieldRepetitionType_REQUIRED FieldRepetitionType = 0
 	FieldRepetitionType_OPTIONAL FieldRepetitionType = 1
@@ -231,22 +293,27 @@ const (
 
 func (p FieldRepetitionType) String() string {
 	switch p {
-	case FieldRepetitionType_REQUIRED: return "REQUIRED"
-	case FieldRepetitionType_OPTIONAL: return "OPTIONAL"
-	case FieldRepetitionType_REPEATED: return "REPEATED"
+	case FieldRepetitionType_REQUIRED:
+		return "REQUIRED"
+	case FieldRepetitionType_OPTIONAL:
+		return "OPTIONAL"
+	case FieldRepetitionType_REPEATED:
+		return "REPEATED"
 	}
 	return "<UNSET>"
 }
 
 func FieldRepetitionTypeFromString(s string) (FieldRepetitionType, error) {
 	switch s {
-	case "REQUIRED": return FieldRepetitionType_REQUIRED, nil
-	case "OPTIONAL": return FieldRepetitionType_OPTIONAL, nil
-	case "REPEATED": return FieldRepetitionType_REPEATED, nil
+	case "REQUIRED":
+		return FieldRepetitionType_REQUIRED, nil
+	case "OPTIONAL":
+		return FieldRepetitionType_OPTIONAL, nil
+	case "REPEATED":
+		return FieldRepetitionType_REPEATED, nil
 	}
 	return FieldRepetitionType(0), fmt.Errorf("not a valid FieldRepetitionType string")
 }
-
 
 func FieldRepetitionTypePtr(v FieldRepetitionType) *FieldRepetitionType { return &v }
 
@@ -279,52 +346,70 @@ func (p *FieldRepetitionType) Value() (driver.Value, error) {
 	return int64(*p), nil
 }
 
-//Encodings supported by Parquet.  Not all encodings are valid for all types.  These
-//enums are also used to specify the encoding of definition and repetition levels.
-//See the accompanying doc for the details of the more complicated encodings.
+// Encodings supported by Parquet.  Not all encodings are valid for all types.  These
+// enums are also used to specify the encoding of definition and repetition levels.
+// See the accompanying doc for the details of the more complicated encodings.
 type Encoding int64
+
 const (
-	Encoding_PLAIN Encoding = 0
-	Encoding_PLAIN_DICTIONARY Encoding = 2
-	Encoding_RLE Encoding = 3
-	Encoding_BIT_PACKED Encoding = 4
-	Encoding_DELTA_BINARY_PACKED Encoding = 5
+	Encoding_PLAIN                   Encoding = 0
+	Encoding_PLAIN_DICTIONARY        Encoding = 2
+	Encoding_RLE                     Encoding = 3
+	Encoding_BIT_PACKED              Encoding = 4
+	Encoding_DELTA_BINARY_PACKED     Encoding = 5
 	Encoding_DELTA_LENGTH_BYTE_ARRAY Encoding = 6
-	Encoding_DELTA_BYTE_ARRAY Encoding = 7
-	Encoding_RLE_DICTIONARY Encoding = 8
-	Encoding_BYTE_STREAM_SPLIT Encoding = 9
+	Encoding_DELTA_BYTE_ARRAY        Encoding = 7
+	Encoding_RLE_DICTIONARY          Encoding = 8
+	Encoding_BYTE_STREAM_SPLIT       Encoding = 9
 )
 
 func (p Encoding) String() string {
 	switch p {
-	case Encoding_PLAIN: return "PLAIN"
-	case Encoding_PLAIN_DICTIONARY: return "PLAIN_DICTIONARY"
-	case Encoding_RLE: return "RLE"
-	case Encoding_BIT_PACKED: return "BIT_PACKED"
-	case Encoding_DELTA_BINARY_PACKED: return "DELTA_BINARY_PACKED"
-	case Encoding_DELTA_LENGTH_BYTE_ARRAY: return "DELTA_LENGTH_BYTE_ARRAY"
-	case Encoding_DELTA_BYTE_ARRAY: return "DELTA_BYTE_ARRAY"
-	case Encoding_RLE_DICTIONARY: return "RLE_DICTIONARY"
-	case Encoding_BYTE_STREAM_SPLIT: return "BYTE_STREAM_SPLIT"
+	case Encoding_PLAIN:
+		return "PLAIN"
+	case Encoding_PLAIN_DICTIONARY:
+		return "PLAIN_DICTIONARY"
+	case Encoding_RLE:
+		return "RLE"
+	case Encoding_BIT_PACKED:
+		return "BIT_PACKED"
+	case Encoding_DELTA_BINARY_PACKED:
+		return "DELTA_BINARY_PACKED"
+	case Encoding_DELTA_LENGTH_BYTE_ARRAY:
+		return "DELTA_LENGTH_BYTE_ARRAY"
+	case Encoding_DELTA_BYTE_ARRAY:
+		return "DELTA_BYTE_ARRAY"
+	case Encoding_RLE_DICTIONARY:
+		return "RLE_DICTIONARY"
+	case Encoding_BYTE_STREAM_SPLIT:
+		return "BYTE_STREAM_SPLIT"
 	}
 	return "<UNSET>"
 }
 
 func EncodingFromString(s string) (Encoding, error) {
 	switch s {
-	case "PLAIN": return Encoding_PLAIN, nil
-	case "PLAIN_DICTIONARY": return Encoding_PLAIN_DICTIONARY, nil
-	case "RLE": return Encoding_RLE, nil
-	case "BIT_PACKED": return Encoding_BIT_PACKED, nil
-	case "DELTA_BINARY_PACKED": return Encoding_DELTA_BINARY_PACKED, nil
-	case "DELTA_LENGTH_BYTE_ARRAY": return Encoding_DELTA_LENGTH_BYTE_ARRAY, nil
-	case "DELTA_BYTE_ARRAY": return Encoding_DELTA_BYTE_ARRAY, nil
-	case "RLE_DICTIONARY": return Encoding_RLE_DICTIONARY, nil
-	case "BYTE_STREAM_SPLIT": return Encoding_BYTE_STREAM_SPLIT, nil
+	case "PLAIN":
+		return Encoding_PLAIN, nil
+	case "PLAIN_DICTIONARY":
+		return Encoding_PLAIN_DICTIONARY, nil
+	case "RLE":
+		return Encoding_RLE, nil
+	case "BIT_PACKED":
+		return Encoding_BIT_PACKED, nil
+	case "DELTA_BINARY_PACKED":
+		return Encoding_DELTA_BINARY_PACKED, nil
+	case "DELTA_LENGTH_BYTE_ARRAY":
+		return Encoding_DELTA_LENGTH_BYTE_ARRAY, nil
+	case "DELTA_BYTE_ARRAY":
+		return Encoding_DELTA_BYTE_ARRAY, nil
+	case "RLE_DICTIONARY":
+		return Encoding_RLE_DICTIONARY, nil
+	case "BYTE_STREAM_SPLIT":
+		return Encoding_BYTE_STREAM_SPLIT, nil
 	}
 	return Encoding(0), fmt.Errorf("not a valid Encoding string")
 }
-
 
 func EncodingPtr(v Encoding) *Encoding { return &v }
 
@@ -357,53 +442,69 @@ func (p *Encoding) Value() (driver.Value, error) {
 	return int64(*p), nil
 }
 
-//Supported compression algorithms.
+// Supported compression algorithms.
 //
-//Codecs added in format version X.Y can be read by readers based on X.Y and later.
-//Codec support may vary between readers based on the format version and
-//libraries available at runtime.
+// Codecs added in format version X.Y can be read by readers based on X.Y and later.
+// Codec support may vary between readers based on the format version and
+// libraries available at runtime.
 //
-//See Compression.md for a detailed specification of these algorithms.
+// See Compression.md for a detailed specification of these algorithms.
 type CompressionCodec int64
+
 const (
 	CompressionCodec_UNCOMPRESSED CompressionCodec = 0
-	CompressionCodec_SNAPPY CompressionCodec = 1
-	CompressionCodec_GZIP CompressionCodec = 2
-	CompressionCodec_LZO CompressionCodec = 3
-	CompressionCodec_BROTLI CompressionCodec = 4
-	CompressionCodec_LZ4 CompressionCodec = 5
-	CompressionCodec_ZSTD CompressionCodec = 6
-	CompressionCodec_LZ4_RAW CompressionCodec = 7
+	CompressionCodec_SNAPPY       CompressionCodec = 1
+	CompressionCodec_GZIP         CompressionCodec = 2
+	CompressionCodec_LZO          CompressionCodec = 3
+	CompressionCodec_BROTLI       CompressionCodec = 4
+	CompressionCodec_LZ4          CompressionCodec = 5
+	CompressionCodec_ZSTD         CompressionCodec = 6
+	CompressionCodec_LZ4_RAW      CompressionCodec = 7
 )
 
 func (p CompressionCodec) String() string {
 	switch p {
-	case CompressionCodec_UNCOMPRESSED: return "UNCOMPRESSED"
-	case CompressionCodec_SNAPPY: return "SNAPPY"
-	case CompressionCodec_GZIP: return "GZIP"
-	case CompressionCodec_LZO: return "LZO"
-	case CompressionCodec_BROTLI: return "BROTLI"
-	case CompressionCodec_LZ4: return "LZ4"
-	case CompressionCodec_ZSTD: return "ZSTD"
-	case CompressionCodec_LZ4_RAW: return "LZ4_RAW"
+	case CompressionCodec_UNCOMPRESSED:
+		return "UNCOMPRESSED"
+	case CompressionCodec_SNAPPY:
+		return "SNAPPY"
+	case CompressionCodec_GZIP:
+		return "GZIP"
+	case CompressionCodec_LZO:
+		return "LZO"
+	case CompressionCodec_BROTLI:
+		return "BROTLI"
+	case CompressionCodec_LZ4:
+		return "LZ4"
+	case CompressionCodec_ZSTD:
+		return "ZSTD"
+	case CompressionCodec_LZ4_RAW:
+		return "LZ4_RAW"
 	}
 	return "<UNSET>"
 }
 
 func CompressionCodecFromString(s string) (CompressionCodec, error) {
 	switch s {
-	case "UNCOMPRESSED": return CompressionCodec_UNCOMPRESSED, nil
-	case "SNAPPY": return CompressionCodec_SNAPPY, nil
-	case "GZIP": return CompressionCodec_GZIP, nil
-	case "LZO": return CompressionCodec_LZO, nil
-	case "BROTLI": return CompressionCodec_BROTLI, nil
-	case "LZ4": return CompressionCodec_LZ4, nil
-	case "ZSTD": return CompressionCodec_ZSTD, nil
-	case "LZ4_RAW": return CompressionCodec_LZ4_RAW, nil
+	case "UNCOMPRESSED":
+		return CompressionCodec_UNCOMPRESSED, nil
+	case "SNAPPY":
+		return CompressionCodec_SNAPPY, nil
+	case "GZIP":
+		return CompressionCodec_GZIP, nil
+	case "LZO":
+		return CompressionCodec_LZO, nil
+	case "BROTLI":
+		return CompressionCodec_BROTLI, nil
+	case "LZ4":
+		return CompressionCodec_LZ4, nil
+	case "ZSTD":
+		return CompressionCodec_ZSTD, nil
+	case "LZ4_RAW":
+		return CompressionCodec_LZ4_RAW, nil
 	}
 	return CompressionCodec(0), fmt.Errorf("not a valid CompressionCodec string")
 }
-
 
 func CompressionCodecPtr(v CompressionCodec) *CompressionCodec { return &v }
 
@@ -437,33 +538,41 @@ func (p *CompressionCodec) Value() (driver.Value, error) {
 }
 
 type PageType int64
+
 const (
-	PageType_DATA_PAGE PageType = 0
-	PageType_INDEX_PAGE PageType = 1
+	PageType_DATA_PAGE       PageType = 0
+	PageType_INDEX_PAGE      PageType = 1
 	PageType_DICTIONARY_PAGE PageType = 2
-	PageType_DATA_PAGE_V2 PageType = 3
+	PageType_DATA_PAGE_V2    PageType = 3
 )
 
 func (p PageType) String() string {
 	switch p {
-	case PageType_DATA_PAGE: return "DATA_PAGE"
-	case PageType_INDEX_PAGE: return "INDEX_PAGE"
-	case PageType_DICTIONARY_PAGE: return "DICTIONARY_PAGE"
-	case PageType_DATA_PAGE_V2: return "DATA_PAGE_V2"
+	case PageType_DATA_PAGE:
+		return "DATA_PAGE"
+	case PageType_INDEX_PAGE:
+		return "INDEX_PAGE"
+	case PageType_DICTIONARY_PAGE:
+		return "DICTIONARY_PAGE"
+	case PageType_DATA_PAGE_V2:
+		return "DATA_PAGE_V2"
 	}
 	return "<UNSET>"
 }
 
 func PageTypeFromString(s string) (PageType, error) {
 	switch s {
-	case "DATA_PAGE": return PageType_DATA_PAGE, nil
-	case "INDEX_PAGE": return PageType_INDEX_PAGE, nil
-	case "DICTIONARY_PAGE": return PageType_DICTIONARY_PAGE, nil
-	case "DATA_PAGE_V2": return PageType_DATA_PAGE_V2, nil
+	case "DATA_PAGE":
+		return PageType_DATA_PAGE, nil
+	case "INDEX_PAGE":
+		return PageType_INDEX_PAGE, nil
+	case "DICTIONARY_PAGE":
+		return PageType_DICTIONARY_PAGE, nil
+	case "DATA_PAGE_V2":
+		return PageType_DATA_PAGE_V2, nil
 	}
 	return PageType(0), fmt.Errorf("not a valid PageType string")
 }
-
 
 func PageTypePtr(v PageType) *PageType { return &v }
 
@@ -496,33 +605,39 @@ func (p *PageType) Value() (driver.Value, error) {
 	return int64(*p), nil
 }
 
-//Enum to annotate whether lists of min/max elements inside ColumnIndex
-//are ordered and if so, in which direction.
+// Enum to annotate whether lists of min/max elements inside ColumnIndex
+// are ordered and if so, in which direction.
 type BoundaryOrder int64
+
 const (
-	BoundaryOrder_UNORDERED BoundaryOrder = 0
-	BoundaryOrder_ASCENDING BoundaryOrder = 1
+	BoundaryOrder_UNORDERED  BoundaryOrder = 0
+	BoundaryOrder_ASCENDING  BoundaryOrder = 1
 	BoundaryOrder_DESCENDING BoundaryOrder = 2
 )
 
 func (p BoundaryOrder) String() string {
 	switch p {
-	case BoundaryOrder_UNORDERED: return "UNORDERED"
-	case BoundaryOrder_ASCENDING: return "ASCENDING"
-	case BoundaryOrder_DESCENDING: return "DESCENDING"
+	case BoundaryOrder_UNORDERED:
+		return "UNORDERED"
+	case BoundaryOrder_ASCENDING:
+		return "ASCENDING"
+	case BoundaryOrder_DESCENDING:
+		return "DESCENDING"
 	}
 	return "<UNSET>"
 }
 
 func BoundaryOrderFromString(s string) (BoundaryOrder, error) {
 	switch s {
-	case "UNORDERED": return BoundaryOrder_UNORDERED, nil
-	case "ASCENDING": return BoundaryOrder_ASCENDING, nil
-	case "DESCENDING": return BoundaryOrder_DESCENDING, nil
+	case "UNORDERED":
+		return BoundaryOrder_UNORDERED, nil
+	case "ASCENDING":
+		return BoundaryOrder_ASCENDING, nil
+	case "DESCENDING":
+		return BoundaryOrder_DESCENDING, nil
 	}
 	return BoundaryOrder(0), fmt.Errorf("not a valid BoundaryOrder string")
 }
-
 
 func BoundaryOrderPtr(v BoundaryOrder) *BoundaryOrder { return &v }
 
@@ -561,9 +676,10 @@ func (p *BoundaryOrder) Value() (driver.Value, error) {
 // fine grained filter pushdown on nested structures (the histograms contained
 // in this structure can help determine the number of nulls at a particular
 // nesting level and maximum length of lists).
-// 
+//
 // Attributes:
-//  - UnencodedByteArrayDataBytes: The number of physical bytes stored for BYTE_ARRAY data values assuming
+//   - UnencodedByteArrayDataBytes: The number of physical bytes stored for BYTE_ARRAY data values assuming
+//
 // no encoding. This is exclusive of the bytes needed to store the length of
 // each byte array. In other words, this field is equivalent to the `(size
 // of PLAIN-ENCODING the byte array values) - (4 bytes * number of values
@@ -571,31 +687,30 @@ func (p *BoundaryOrder) Value() (driver.Value, error) {
 // schema information multiplied by the number of non-null and null values.
 // The number of null/non-null values can be inferred from the histograms
 // below.
-// 
+//
 // For example, if a column chunk is dictionary-encoded with dictionary
 // ["a", "bc", "cde"], and a data page contains the indices [0, 0, 1, 2],
 // then this value for that data page should be 7 (1 + 1 + 2 + 3).
-// 
+//
 // This field should only be set for types that use BYTE_ARRAY as their
 // physical type.
-//  - RepetitionLevelHistogram: When present, there is expected to be one element corresponding to each
+//   - RepetitionLevelHistogram: When present, there is expected to be one element corresponding to each
+//
 // repetition (i.e. size=max repetition_level+1) where each element
 // represents the number of times the repetition level was observed in the
 // data.
-// 
+//
 // This field may be omitted if max_repetition_level is 0 without loss
 // of information.
-// 
-//  - DefinitionLevelHistogram: Same as repetition_level_histogram except for definition levels.
-// 
+//
+//   - DefinitionLevelHistogram: Same as repetition_level_histogram except for definition levels.
+//
 // This field may be omitted if max_definition_level is 0 or 1 without
 // loss of information.
-// 
-// 
 type SizeStatistics struct {
-	UnencodedByteArrayDataBytes *int64 `thrift:"unencoded_byte_array_data_bytes,1" db:"unencoded_byte_array_data_bytes" json:"unencoded_byte_array_data_bytes,omitempty"`
-	RepetitionLevelHistogram []int64 `thrift:"repetition_level_histogram,2" db:"repetition_level_histogram" json:"repetition_level_histogram,omitempty"`
-	DefinitionLevelHistogram []int64 `thrift:"definition_level_histogram,3" db:"definition_level_histogram" json:"definition_level_histogram,omitempty"`
+	UnencodedByteArrayDataBytes *int64  `thrift:"unencoded_byte_array_data_bytes,1" db:"unencoded_byte_array_data_bytes" json:"unencoded_byte_array_data_bytes,omitempty"`
+	RepetitionLevelHistogram    []int64 `thrift:"repetition_level_histogram,2" db:"repetition_level_histogram" json:"repetition_level_histogram,omitempty"`
+	DefinitionLevelHistogram    []int64 `thrift:"definition_level_histogram,3" db:"definition_level_histogram" json:"definition_level_histogram,omitempty"`
 }
 
 func NewSizeStatistics() *SizeStatistics {
@@ -613,13 +728,11 @@ func (p *SizeStatistics) GetUnencodedByteArrayDataBytes() int64 {
 
 var SizeStatistics_RepetitionLevelHistogram_DEFAULT []int64
 
-
 func (p *SizeStatistics) GetRepetitionLevelHistogram() []int64 {
 	return p.RepetitionLevelHistogram
 }
 
 var SizeStatistics_DefinitionLevelHistogram_DEFAULT []int64
-
 
 func (p *SizeStatistics) GetDefinitionLevelHistogram() []int64 {
 	return p.DefinitionLevelHistogram
@@ -641,7 +754,6 @@ func (p *SizeStatistics) Read(ctx context.Context, iprot thrift.TProtocol) error
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -755,9 +867,15 @@ func (p *SizeStatistics) Write(ctx context.Context, oprot thrift.TProtocol) erro
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -839,17 +957,27 @@ func (p *SizeStatistics) Equals(other *SizeStatistics) bool {
 		if p.UnencodedByteArrayDataBytes == nil || other.UnencodedByteArrayDataBytes == nil {
 			return false
 		}
-		if (*p.UnencodedByteArrayDataBytes) != (*other.UnencodedByteArrayDataBytes) { return false }
+		if (*p.UnencodedByteArrayDataBytes) != (*other.UnencodedByteArrayDataBytes) {
+			return false
+		}
 	}
-	if len(p.RepetitionLevelHistogram) != len(other.RepetitionLevelHistogram) { return false }
+	if len(p.RepetitionLevelHistogram) != len(other.RepetitionLevelHistogram) {
+		return false
+	}
 	for i, _tgt := range p.RepetitionLevelHistogram {
 		_src2 := other.RepetitionLevelHistogram[i]
-		if _tgt != _src2 { return false }
+		if _tgt != _src2 {
+			return false
+		}
 	}
-	if len(p.DefinitionLevelHistogram) != len(other.DefinitionLevelHistogram) { return false }
+	if len(p.DefinitionLevelHistogram) != len(other.DefinitionLevelHistogram) {
+		return false
+	}
 	for i, _tgt := range p.DefinitionLevelHistogram {
 		_src3 := other.DefinitionLevelHistogram[i]
-		if _tgt != _src3 { return false }
+		if _tgt != _src3 {
+			return false
+		}
 	}
 	return true
 }
@@ -866,7 +994,7 @@ func (p *SizeStatistics) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.SizeStatistics",
+		Type:  "*parquet.SizeStatistics",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -880,50 +1008,49 @@ func (p *SizeStatistics) Validate() error {
 
 // Statistics per row group and per page
 // All fields are optional.
-// 
+//
 // Attributes:
-//  - Max: DEPRECATED: min and max value of the column. Use min_value and max_value.
-// 
+//   - Max: DEPRECATED: min and max value of the column. Use min_value and max_value.
+//
 // Values are encoded using PLAIN encoding, except that variable-length byte
 // arrays do not include a length prefix.
-// 
+//
 // These fields encode min and max values determined by signed comparison
 // only. New files should use the correct order for a column's logical type
 // and store the values in the min_value and max_value fields.
-// 
+//
 // To support older readers, these may be set when the column order is
 // signed.
-//  - Min
-//  - NullCount: Count of null values in the column.
-// 
+//   - Min
+//   - NullCount: Count of null values in the column.
+//
 // Writers SHOULD always write this field even if it is zero (i.e. no null value)
 // or the column is not nullable.
 // Readers MUST distinguish between null_count not being present and null_count == 0.
 // If null_count is not present, readers MUST NOT assume null_count == 0.
-//  - DistinctCount: count of distinct values occurring
-//  - MaxValue: Lower and upper bound values for the column, determined by its ColumnOrder.
-// 
+//   - DistinctCount: count of distinct values occurring
+//   - MaxValue: Lower and upper bound values for the column, determined by its ColumnOrder.
+//
 // These may be the actual minimum and maximum values found on a page or column
 // chunk, but can also be (more compact) values that do not exist on a page or
 // column chunk. For example, instead of storing "Blart Versenwald III", a writer
 // may set min_value="B", max_value="C". Such more compact values must still be
 // valid values within the column's logical type.
-// 
+//
 // Values are encoded using PLAIN encoding, except that variable-length byte
 // arrays do not include a length prefix.
-//  - MinValue
-//  - IsMaxValueExact: If true, max_value is the actual maximum value for a column
-//  - IsMinValueExact: If true, min_value is the actual minimum value for a column
-// 
+//   - MinValue
+//   - IsMaxValueExact: If true, max_value is the actual maximum value for a column
+//   - IsMinValueExact: If true, min_value is the actual minimum value for a column
 type Statistics struct {
-	Max []byte `thrift:"max,1" db:"max" json:"max,omitempty"`
-	Min []byte `thrift:"min,2" db:"min" json:"min,omitempty"`
-	NullCount *int64 `thrift:"null_count,3" db:"null_count" json:"null_count,omitempty"`
-	DistinctCount *int64 `thrift:"distinct_count,4" db:"distinct_count" json:"distinct_count,omitempty"`
-	MaxValue []byte `thrift:"max_value,5" db:"max_value" json:"max_value,omitempty"`
-	MinValue []byte `thrift:"min_value,6" db:"min_value" json:"min_value,omitempty"`
-	IsMaxValueExact *bool `thrift:"is_max_value_exact,7" db:"is_max_value_exact" json:"is_max_value_exact,omitempty"`
-	IsMinValueExact *bool `thrift:"is_min_value_exact,8" db:"is_min_value_exact" json:"is_min_value_exact,omitempty"`
+	Max             []byte `thrift:"max,1" db:"max" json:"max,omitempty"`
+	Min             []byte `thrift:"min,2" db:"min" json:"min,omitempty"`
+	NullCount       *int64 `thrift:"null_count,3" db:"null_count" json:"null_count,omitempty"`
+	DistinctCount   *int64 `thrift:"distinct_count,4" db:"distinct_count" json:"distinct_count,omitempty"`
+	MaxValue        []byte `thrift:"max_value,5" db:"max_value" json:"max_value,omitempty"`
+	MinValue        []byte `thrift:"min_value,6" db:"min_value" json:"min_value,omitempty"`
+	IsMaxValueExact *bool  `thrift:"is_max_value_exact,7" db:"is_max_value_exact" json:"is_max_value_exact,omitempty"`
+	IsMinValueExact *bool  `thrift:"is_min_value_exact,8" db:"is_min_value_exact" json:"is_min_value_exact,omitempty"`
 }
 
 func NewStatistics() *Statistics {
@@ -932,13 +1059,11 @@ func NewStatistics() *Statistics {
 
 var Statistics_Max_DEFAULT []byte
 
-
 func (p *Statistics) GetMax() []byte {
 	return p.Max
 }
 
 var Statistics_Min_DEFAULT []byte
-
 
 func (p *Statistics) GetMin() []byte {
 	return p.Min
@@ -964,13 +1089,11 @@ func (p *Statistics) GetDistinctCount() int64 {
 
 var Statistics_MaxValue_DEFAULT []byte
 
-
 func (p *Statistics) GetMaxValue() []byte {
 	return p.MaxValue
 }
 
 var Statistics_MinValue_DEFAULT []byte
-
 
 func (p *Statistics) GetMinValue() []byte {
 	return p.MinValue
@@ -1030,7 +1153,6 @@ func (p *Statistics) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -1213,14 +1335,30 @@ func (p *Statistics) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
-		if err := p.writeField4(ctx, oprot); err != nil { return err }
-		if err := p.writeField5(ctx, oprot); err != nil { return err }
-		if err := p.writeField6(ctx, oprot); err != nil { return err }
-		if err := p.writeField7(ctx, oprot); err != nil { return err }
-		if err := p.writeField8(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField4(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField5(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField6(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField7(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField8(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -1357,33 +1495,49 @@ func (p *Statistics) Equals(other *Statistics) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if bytes.Compare(p.Max, other.Max) != 0 { return false }
-	if bytes.Compare(p.Min, other.Min) != 0 { return false }
+	if bytes.Compare(p.Max, other.Max) != 0 {
+		return false
+	}
+	if bytes.Compare(p.Min, other.Min) != 0 {
+		return false
+	}
 	if p.NullCount != other.NullCount {
 		if p.NullCount == nil || other.NullCount == nil {
 			return false
 		}
-		if (*p.NullCount) != (*other.NullCount) { return false }
+		if (*p.NullCount) != (*other.NullCount) {
+			return false
+		}
 	}
 	if p.DistinctCount != other.DistinctCount {
 		if p.DistinctCount == nil || other.DistinctCount == nil {
 			return false
 		}
-		if (*p.DistinctCount) != (*other.DistinctCount) { return false }
+		if (*p.DistinctCount) != (*other.DistinctCount) {
+			return false
+		}
 	}
-	if bytes.Compare(p.MaxValue, other.MaxValue) != 0 { return false }
-	if bytes.Compare(p.MinValue, other.MinValue) != 0 { return false }
+	if bytes.Compare(p.MaxValue, other.MaxValue) != 0 {
+		return false
+	}
+	if bytes.Compare(p.MinValue, other.MinValue) != 0 {
+		return false
+	}
 	if p.IsMaxValueExact != other.IsMaxValueExact {
 		if p.IsMaxValueExact == nil || other.IsMaxValueExact == nil {
 			return false
 		}
-		if (*p.IsMaxValueExact) != (*other.IsMaxValueExact) { return false }
+		if (*p.IsMaxValueExact) != (*other.IsMaxValueExact) {
+			return false
+		}
 	}
 	if p.IsMinValueExact != other.IsMinValueExact {
 		if p.IsMinValueExact == nil || other.IsMinValueExact == nil {
 			return false
 		}
-		if (*p.IsMinValueExact) != (*other.IsMinValueExact) { return false }
+		if (*p.IsMinValueExact) != (*other.IsMinValueExact) {
+			return false
+		}
 	}
 	return true
 }
@@ -1400,7 +1554,7 @@ func (p *Statistics) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.Statistics",
+		Type:  "*parquet.Statistics",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -1424,7 +1578,6 @@ func (p *StringType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -1483,7 +1636,7 @@ func (p *StringType) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.StringType",
+		Type:  "*parquet.StringType",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -1506,7 +1659,6 @@ func (p *UUIDType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -1565,7 +1717,7 @@ func (p *UUIDType) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.UUIDType",
+		Type:  "*parquet.UUIDType",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -1588,7 +1740,6 @@ func (p *MapType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -1647,7 +1798,7 @@ func (p *MapType) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.MapType",
+		Type:  "*parquet.MapType",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -1670,7 +1821,6 @@ func (p *ListType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -1729,7 +1879,7 @@ func (p *ListType) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.ListType",
+		Type:  "*parquet.ListType",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -1752,7 +1902,6 @@ func (p *EnumType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -1811,7 +1960,7 @@ func (p *EnumType) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.EnumType",
+		Type:  "*parquet.EnumType",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -1834,7 +1983,6 @@ func (p *DateType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -1893,7 +2041,7 @@ func (p *DateType) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.DateType",
+		Type:  "*parquet.DateType",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -1916,7 +2064,6 @@ func (p *Float16Type) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -1975,7 +2122,7 @@ func (p *Float16Type) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.Float16Type",
+		Type:  "*parquet.Float16Type",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -1988,7 +2135,7 @@ func (p *Float16Type) Validate() error {
 }
 
 // Logical type to annotate a column that is always null.
-// 
+//
 // Sometimes when discovering the schema of existing data, values are always
 // null and the physical type can't be determined. This annotation signals
 // the case where the physical type was guessed from all null values.
@@ -2003,7 +2150,6 @@ func (p *NullType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -2062,7 +2208,7 @@ func (p *NullType) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.NullType",
+		Type:  "*parquet.NullType",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -2075,21 +2221,20 @@ func (p *NullType) Validate() error {
 }
 
 // Decimal logical type annotation
-// 
+//
 // Scale must be zero or a positive integer less than or equal to the precision.
 // Precision must be a non-zero positive integer.
-// 
+//
 // To maintain forward-compatibility in v1, implementations using this logical
 // type must also set scale and precision on the annotated SchemaElement.
-// 
+//
 // Allowed for physical types: INT32, INT64, FIXED_LEN_BYTE_ARRAY, and BYTE_ARRAY.
-// 
+//
 // Attributes:
-//  - Scale
-//  - Precision
-// 
+//   - Scale
+//   - Precision
 type DecimalType struct {
-	Scale int32 `thrift:"scale,1,required" db:"scale" json:"scale"`
+	Scale     int32 `thrift:"scale,1,required" db:"scale" json:"scale"`
 	Precision int32 `thrift:"precision,2,required" db:"precision" json:"precision"`
 }
 
@@ -2097,13 +2242,9 @@ func NewDecimalType() *DecimalType {
 	return &DecimalType{}
 }
 
-
-
 func (p *DecimalType) GetScale() int32 {
 	return p.Scale
 }
-
-
 
 func (p *DecimalType) GetPrecision() int32 {
 	return p.Precision
@@ -2114,8 +2255,8 @@ func (p *DecimalType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetScale bool = false;
-	var issetPrecision bool = false;
+	var issetScale bool = false
+	var issetPrecision bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -2160,11 +2301,11 @@ func (p *DecimalType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetScale{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Scale is not set"));
+	if !issetScale {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Scale is not set"))
 	}
-	if !issetPrecision{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Precision is not set"));
+	if !issetPrecision {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Precision is not set"))
 	}
 	return nil
 }
@@ -2192,8 +2333,12 @@ func (p *DecimalType) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -2236,8 +2381,12 @@ func (p *DecimalType) Equals(other *DecimalType) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if p.Scale != other.Scale { return false }
-	if p.Precision != other.Precision { return false }
+	if p.Scale != other.Scale {
+		return false
+	}
+	if p.Precision != other.Precision {
+		return false
+	}
 	return true
 }
 
@@ -2253,7 +2402,7 @@ func (p *DecimalType) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.DecimalType",
+		Type:  "*parquet.DecimalType",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -2277,7 +2426,6 @@ func (p *MilliSeconds) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -2336,7 +2484,7 @@ func (p *MilliSeconds) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.MilliSeconds",
+		Type:  "*parquet.MilliSeconds",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -2359,7 +2507,6 @@ func (p *MicroSeconds) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -2418,7 +2565,7 @@ func (p *MicroSeconds) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.MicroSeconds",
+		Type:  "*parquet.MicroSeconds",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -2441,7 +2588,6 @@ func (p *NanoSeconds) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -2500,7 +2646,7 @@ func (p *NanoSeconds) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.NanoSeconds",
+		Type:  "*parquet.NanoSeconds",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -2513,14 +2659,13 @@ func (p *NanoSeconds) Validate() error {
 }
 
 // Attributes:
-//  - MILLIS
-//  - MICROS
-//  - NANOS
-// 
+//   - MILLIS
+//   - MICROS
+//   - NANOS
 type TimeUnit struct {
 	MILLIS *MilliSeconds `thrift:"MILLIS,1" db:"MILLIS" json:"MILLIS,omitempty"`
 	MICROS *MicroSeconds `thrift:"MICROS,2" db:"MICROS" json:"MICROS,omitempty"`
-	NANOS *NanoSeconds `thrift:"NANOS,3" db:"NANOS" json:"NANOS,omitempty"`
+	NANOS  *NanoSeconds  `thrift:"NANOS,3" db:"NANOS" json:"NANOS,omitempty"`
 }
 
 func NewTimeUnit() *TimeUnit {
@@ -2556,13 +2701,13 @@ func (p *TimeUnit) GetNANOS() *NanoSeconds {
 
 func (p *TimeUnit) CountSetFieldsTimeUnit() int {
 	count := 0
-	if (p.IsSetMILLIS()) {
+	if p.IsSetMILLIS() {
 		count++
 	}
-	if (p.IsSetMICROS()) {
+	if p.IsSetMICROS() {
 		count++
 	}
-	if (p.IsSetNANOS()) {
+	if p.IsSetNANOS() {
 		count++
 	}
 	return count
@@ -2585,7 +2730,6 @@ func (p *TimeUnit) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -2673,9 +2817,15 @@ func (p *TimeUnit) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -2737,9 +2887,15 @@ func (p *TimeUnit) Equals(other *TimeUnit) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if !p.MILLIS.Equals(other.MILLIS) { return false }
-	if !p.MICROS.Equals(other.MICROS) { return false }
-	if !p.NANOS.Equals(other.NANOS) { return false }
+	if !p.MILLIS.Equals(other.MILLIS) {
+		return false
+	}
+	if !p.MICROS.Equals(other.MICROS) {
+		return false
+	}
+	if !p.NANOS.Equals(other.NANOS) {
+		return false
+	}
 	return true
 }
 
@@ -2755,7 +2911,7 @@ func (p *TimeUnit) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.TimeUnit",
+		Type:  "*parquet.TimeUnit",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -2768,23 +2924,20 @@ func (p *TimeUnit) Validate() error {
 }
 
 // Timestamp logical type annotation
-// 
+//
 // Allowed for physical types: INT64
-// 
+//
 // Attributes:
-//  - IsAdjustedToUTC
-//  - Unit
-// 
+//   - IsAdjustedToUTC
+//   - Unit
 type TimestampType struct {
-	IsAdjustedToUTC bool `thrift:"isAdjustedToUTC,1,required" db:"isAdjustedToUTC" json:"isAdjustedToUTC"`
-	Unit *TimeUnit `thrift:"unit,2,required" db:"unit" json:"unit"`
+	IsAdjustedToUTC bool      `thrift:"isAdjustedToUTC,1,required" db:"isAdjustedToUTC" json:"isAdjustedToUTC"`
+	Unit            *TimeUnit `thrift:"unit,2,required" db:"unit" json:"unit"`
 }
 
 func NewTimestampType() *TimestampType {
 	return &TimestampType{}
 }
-
-
 
 func (p *TimestampType) GetIsAdjustedToUTC() bool {
 	return p.IsAdjustedToUTC
@@ -2808,8 +2961,8 @@ func (p *TimestampType) Read(ctx context.Context, iprot thrift.TProtocol) error 
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetIsAdjustedToUTC bool = false;
-	var issetUnit bool = false;
+	var issetIsAdjustedToUTC bool = false
+	var issetUnit bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -2854,11 +3007,11 @@ func (p *TimestampType) Read(ctx context.Context, iprot thrift.TProtocol) error 
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetIsAdjustedToUTC{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field IsAdjustedToUTC is not set"));
+	if !issetIsAdjustedToUTC {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field IsAdjustedToUTC is not set"))
 	}
-	if !issetUnit{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Unit is not set"));
+	if !issetUnit {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Unit is not set"))
 	}
 	return nil
 }
@@ -2885,8 +3038,12 @@ func (p *TimestampType) Write(ctx context.Context, oprot thrift.TProtocol) error
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -2929,8 +3086,12 @@ func (p *TimestampType) Equals(other *TimestampType) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if p.IsAdjustedToUTC != other.IsAdjustedToUTC { return false }
-	if !p.Unit.Equals(other.Unit) { return false }
+	if p.IsAdjustedToUTC != other.IsAdjustedToUTC {
+		return false
+	}
+	if !p.Unit.Equals(other.Unit) {
+		return false
+	}
 	return true
 }
 
@@ -2946,7 +3107,7 @@ func (p *TimestampType) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.TimestampType",
+		Type:  "*parquet.TimestampType",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -2959,23 +3120,20 @@ func (p *TimestampType) Validate() error {
 }
 
 // Time logical type annotation
-// 
+//
 // Allowed for physical types: INT32 (millis), INT64 (micros, nanos)
-// 
+//
 // Attributes:
-//  - IsAdjustedToUTC
-//  - Unit
-// 
+//   - IsAdjustedToUTC
+//   - Unit
 type TimeType struct {
-	IsAdjustedToUTC bool `thrift:"isAdjustedToUTC,1,required" db:"isAdjustedToUTC" json:"isAdjustedToUTC"`
-	Unit *TimeUnit `thrift:"unit,2,required" db:"unit" json:"unit"`
+	IsAdjustedToUTC bool      `thrift:"isAdjustedToUTC,1,required" db:"isAdjustedToUTC" json:"isAdjustedToUTC"`
+	Unit            *TimeUnit `thrift:"unit,2,required" db:"unit" json:"unit"`
 }
 
 func NewTimeType() *TimeType {
 	return &TimeType{}
 }
-
-
 
 func (p *TimeType) GetIsAdjustedToUTC() bool {
 	return p.IsAdjustedToUTC
@@ -2999,8 +3157,8 @@ func (p *TimeType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetIsAdjustedToUTC bool = false;
-	var issetUnit bool = false;
+	var issetIsAdjustedToUTC bool = false
+	var issetUnit bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -3045,11 +3203,11 @@ func (p *TimeType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetIsAdjustedToUTC{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field IsAdjustedToUTC is not set"));
+	if !issetIsAdjustedToUTC {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field IsAdjustedToUTC is not set"))
 	}
-	if !issetUnit{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Unit is not set"));
+	if !issetUnit {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Unit is not set"))
 	}
 	return nil
 }
@@ -3076,8 +3234,12 @@ func (p *TimeType) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -3120,8 +3282,12 @@ func (p *TimeType) Equals(other *TimeType) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if p.IsAdjustedToUTC != other.IsAdjustedToUTC { return false }
-	if !p.Unit.Equals(other.Unit) { return false }
+	if p.IsAdjustedToUTC != other.IsAdjustedToUTC {
+		return false
+	}
+	if !p.Unit.Equals(other.Unit) {
+		return false
+	}
 	return true
 }
 
@@ -3137,7 +3303,7 @@ func (p *TimeType) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.TimeType",
+		Type:  "*parquet.TimeType",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -3150,15 +3316,14 @@ func (p *TimeType) Validate() error {
 }
 
 // Integer logical type annotation
-// 
+//
 // bitWidth must be 8, 16, 32, or 64.
-// 
+//
 // Allowed for physical types: INT32, INT64
-// 
+//
 // Attributes:
-//  - BitWidth
-//  - IsSigned
-// 
+//   - BitWidth
+//   - IsSigned
 type IntType struct {
 	BitWidth int8 `thrift:"bitWidth,1,required" db:"bitWidth" json:"bitWidth"`
 	IsSigned bool `thrift:"isSigned,2,required" db:"isSigned" json:"isSigned"`
@@ -3168,13 +3333,9 @@ func NewIntType() *IntType {
 	return &IntType{}
 }
 
-
-
 func (p *IntType) GetBitWidth() int8 {
 	return p.BitWidth
 }
-
-
 
 func (p *IntType) GetIsSigned() bool {
 	return p.IsSigned
@@ -3185,8 +3346,8 @@ func (p *IntType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetBitWidth bool = false;
-	var issetIsSigned bool = false;
+	var issetBitWidth bool = false
+	var issetIsSigned bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -3231,11 +3392,11 @@ func (p *IntType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetBitWidth{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field BitWidth is not set"));
+	if !issetBitWidth {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field BitWidth is not set"))
 	}
-	if !issetIsSigned{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field IsSigned is not set"));
+	if !issetIsSigned {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field IsSigned is not set"))
 	}
 	return nil
 }
@@ -3264,8 +3425,12 @@ func (p *IntType) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -3308,8 +3473,12 @@ func (p *IntType) Equals(other *IntType) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if p.BitWidth != other.BitWidth { return false }
-	if p.IsSigned != other.IsSigned { return false }
+	if p.BitWidth != other.BitWidth {
+		return false
+	}
+	if p.IsSigned != other.IsSigned {
+		return false
+	}
 	return true
 }
 
@@ -3325,7 +3494,7 @@ func (p *IntType) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.IntType",
+		Type:  "*parquet.IntType",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -3338,7 +3507,7 @@ func (p *IntType) Validate() error {
 }
 
 // Embedded JSON logical type annotation
-// 
+//
 // Allowed for physical types: BYTE_ARRAY
 type JsonType struct {
 }
@@ -3351,7 +3520,6 @@ func (p *JsonType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -3410,7 +3578,7 @@ func (p *JsonType) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.JsonType",
+		Type:  "*parquet.JsonType",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -3423,7 +3591,7 @@ func (p *JsonType) Validate() error {
 }
 
 // Embedded BSON logical type annotation
-// 
+//
 // Allowed for physical types: BYTE_ARRAY
 type BsonType struct {
 }
@@ -3436,7 +3604,6 @@ func (p *BsonType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -3495,7 +3662,7 @@ func (p *BsonType) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.BsonType",
+		Type:  "*parquet.BsonType",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -3508,42 +3675,41 @@ func (p *BsonType) Validate() error {
 }
 
 // LogicalType annotations to replace ConvertedType.
-// 
+//
 // To maintain compatibility, implementations using LogicalType for a
 // SchemaElement must also set the corresponding ConvertedType (if any)
 // from the following table.
-// 
+//
 // Attributes:
-//  - STRING
-//  - MAP
-//  - LIST
-//  - ENUM
-//  - DECIMAL
-//  - DATE
-//  - TIME
-//  - TIMESTAMP
-//  - INTEGER
-//  - UNKNOWN
-//  - JSON
-//  - BSON
-//  - UUID
-//  - FLOAT16
-// 
+//   - STRING
+//   - MAP
+//   - LIST
+//   - ENUM
+//   - DECIMAL
+//   - DATE
+//   - TIME
+//   - TIMESTAMP
+//   - INTEGER
+//   - UNKNOWN
+//   - JSON
+//   - BSON
+//   - UUID
+//   - FLOAT16
 type LogicalType struct {
-	STRING *StringType `thrift:"STRING,1" db:"STRING" json:"STRING,omitempty"`
-	MAP *MapType `thrift:"MAP,2" db:"MAP" json:"MAP,omitempty"`
-	LIST *ListType `thrift:"LIST,3" db:"LIST" json:"LIST,omitempty"`
-	ENUM *EnumType `thrift:"ENUM,4" db:"ENUM" json:"ENUM,omitempty"`
-	DECIMAL *DecimalType `thrift:"DECIMAL,5" db:"DECIMAL" json:"DECIMAL,omitempty"`
-	DATE *DateType `thrift:"DATE,6" db:"DATE" json:"DATE,omitempty"`
-	TIME *TimeType `thrift:"TIME,7" db:"TIME" json:"TIME,omitempty"`
+	STRING    *StringType    `thrift:"STRING,1" db:"STRING" json:"STRING,omitempty"`
+	MAP       *MapType       `thrift:"MAP,2" db:"MAP" json:"MAP,omitempty"`
+	LIST      *ListType      `thrift:"LIST,3" db:"LIST" json:"LIST,omitempty"`
+	ENUM      *EnumType      `thrift:"ENUM,4" db:"ENUM" json:"ENUM,omitempty"`
+	DECIMAL   *DecimalType   `thrift:"DECIMAL,5" db:"DECIMAL" json:"DECIMAL,omitempty"`
+	DATE      *DateType      `thrift:"DATE,6" db:"DATE" json:"DATE,omitempty"`
+	TIME      *TimeType      `thrift:"TIME,7" db:"TIME" json:"TIME,omitempty"`
 	TIMESTAMP *TimestampType `thrift:"TIMESTAMP,8" db:"TIMESTAMP" json:"TIMESTAMP,omitempty"`
 	// unused field # 9
-	INTEGER *IntType `thrift:"INTEGER,10" db:"INTEGER" json:"INTEGER,omitempty"`
-	UNKNOWN *NullType `thrift:"UNKNOWN,11" db:"UNKNOWN" json:"UNKNOWN,omitempty"`
-	JSON *JsonType `thrift:"JSON,12" db:"JSON" json:"JSON,omitempty"`
-	BSON *BsonType `thrift:"BSON,13" db:"BSON" json:"BSON,omitempty"`
-	UUID *UUIDType `thrift:"UUID,14" db:"UUID" json:"UUID,omitempty"`
+	INTEGER *IntType     `thrift:"INTEGER,10" db:"INTEGER" json:"INTEGER,omitempty"`
+	UNKNOWN *NullType    `thrift:"UNKNOWN,11" db:"UNKNOWN" json:"UNKNOWN,omitempty"`
+	JSON    *JsonType    `thrift:"JSON,12" db:"JSON" json:"JSON,omitempty"`
+	BSON    *BsonType    `thrift:"BSON,13" db:"BSON" json:"BSON,omitempty"`
+	UUID    *UUIDType    `thrift:"UUID,14" db:"UUID" json:"UUID,omitempty"`
 	FLOAT16 *Float16Type `thrift:"FLOAT16,15" db:"FLOAT16" json:"FLOAT16,omitempty"`
 }
 
@@ -3679,46 +3845,46 @@ func (p *LogicalType) GetFLOAT16() *Float16Type {
 
 func (p *LogicalType) CountSetFieldsLogicalType() int {
 	count := 0
-	if (p.IsSetSTRING()) {
+	if p.IsSetSTRING() {
 		count++
 	}
-	if (p.IsSetMAP()) {
+	if p.IsSetMAP() {
 		count++
 	}
-	if (p.IsSetLIST()) {
+	if p.IsSetLIST() {
 		count++
 	}
-	if (p.IsSetENUM()) {
+	if p.IsSetENUM() {
 		count++
 	}
-	if (p.IsSetDECIMAL()) {
+	if p.IsSetDECIMAL() {
 		count++
 	}
-	if (p.IsSetDATE()) {
+	if p.IsSetDATE() {
 		count++
 	}
-	if (p.IsSetTIME()) {
+	if p.IsSetTIME() {
 		count++
 	}
-	if (p.IsSetTIMESTAMP()) {
+	if p.IsSetTIMESTAMP() {
 		count++
 	}
-	if (p.IsSetINTEGER()) {
+	if p.IsSetINTEGER() {
 		count++
 	}
-	if (p.IsSetUNKNOWN()) {
+	if p.IsSetUNKNOWN() {
 		count++
 	}
-	if (p.IsSetJSON()) {
+	if p.IsSetJSON() {
 		count++
 	}
-	if (p.IsSetBSON()) {
+	if p.IsSetBSON() {
 		count++
 	}
-	if (p.IsSetUUID()) {
+	if p.IsSetUUID() {
 		count++
 	}
-	if (p.IsSetFLOAT16()) {
+	if p.IsSetFLOAT16() {
 		count++
 	}
 	return count
@@ -3785,7 +3951,6 @@ func (p *LogicalType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -4071,20 +4236,48 @@ func (p *LogicalType) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
-		if err := p.writeField4(ctx, oprot); err != nil { return err }
-		if err := p.writeField5(ctx, oprot); err != nil { return err }
-		if err := p.writeField6(ctx, oprot); err != nil { return err }
-		if err := p.writeField7(ctx, oprot); err != nil { return err }
-		if err := p.writeField8(ctx, oprot); err != nil { return err }
-		if err := p.writeField10(ctx, oprot); err != nil { return err }
-		if err := p.writeField11(ctx, oprot); err != nil { return err }
-		if err := p.writeField12(ctx, oprot); err != nil { return err }
-		if err := p.writeField13(ctx, oprot); err != nil { return err }
-		if err := p.writeField14(ctx, oprot); err != nil { return err }
-		if err := p.writeField15(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField4(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField5(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField6(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField7(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField8(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField10(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField11(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField12(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField13(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField14(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField15(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -4311,20 +4504,48 @@ func (p *LogicalType) Equals(other *LogicalType) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if !p.STRING.Equals(other.STRING) { return false }
-	if !p.MAP.Equals(other.MAP) { return false }
-	if !p.LIST.Equals(other.LIST) { return false }
-	if !p.ENUM.Equals(other.ENUM) { return false }
-	if !p.DECIMAL.Equals(other.DECIMAL) { return false }
-	if !p.DATE.Equals(other.DATE) { return false }
-	if !p.TIME.Equals(other.TIME) { return false }
-	if !p.TIMESTAMP.Equals(other.TIMESTAMP) { return false }
-	if !p.INTEGER.Equals(other.INTEGER) { return false }
-	if !p.UNKNOWN.Equals(other.UNKNOWN) { return false }
-	if !p.JSON.Equals(other.JSON) { return false }
-	if !p.BSON.Equals(other.BSON) { return false }
-	if !p.UUID.Equals(other.UUID) { return false }
-	if !p.FLOAT16.Equals(other.FLOAT16) { return false }
+	if !p.STRING.Equals(other.STRING) {
+		return false
+	}
+	if !p.MAP.Equals(other.MAP) {
+		return false
+	}
+	if !p.LIST.Equals(other.LIST) {
+		return false
+	}
+	if !p.ENUM.Equals(other.ENUM) {
+		return false
+	}
+	if !p.DECIMAL.Equals(other.DECIMAL) {
+		return false
+	}
+	if !p.DATE.Equals(other.DATE) {
+		return false
+	}
+	if !p.TIME.Equals(other.TIME) {
+		return false
+	}
+	if !p.TIMESTAMP.Equals(other.TIMESTAMP) {
+		return false
+	}
+	if !p.INTEGER.Equals(other.INTEGER) {
+		return false
+	}
+	if !p.UNKNOWN.Equals(other.UNKNOWN) {
+		return false
+	}
+	if !p.JSON.Equals(other.JSON) {
+		return false
+	}
+	if !p.BSON.Equals(other.BSON) {
+		return false
+	}
+	if !p.UUID.Equals(other.UUID) {
+		return false
+	}
+	if !p.FLOAT16.Equals(other.FLOAT16) {
+		return false
+	}
 	return true
 }
 
@@ -4340,7 +4561,7 @@ func (p *LogicalType) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.LogicalType",
+		Type:  "*parquet.LogicalType",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -4353,50 +4574,56 @@ func (p *LogicalType) Validate() error {
 }
 
 // Represents a element inside a schema definition.
-//  - if it is a group (inner node) then type is undefined and num_children is defined
-//  - if it is a primitive type (leaf) then type is defined and num_children is undefined
+//   - if it is a group (inner node) then type is undefined and num_children is defined
+//   - if it is a primitive type (leaf) then type is defined and num_children is undefined
+//
 // the nodes are listed in depth first traversal order.
-// 
+//
 // Attributes:
-//  - Type: Data type for this field. Not set if the current element is a non-leaf node
-//  - TypeLength: If type is FIXED_LEN_BYTE_ARRAY, this is the byte length of the values.
+//   - Type: Data type for this field. Not set if the current element is a non-leaf node
+//   - TypeLength: If type is FIXED_LEN_BYTE_ARRAY, this is the byte length of the values.
+//
 // Otherwise, if specified, this is the maximum bit length to store any of the values.
 // (e.g. a low cardinality INT col could have this set to 3).  Note that this is
 // in the schema, and therefore fixed for the entire file.
-//  - RepetitionType: repetition of the field. The root of the schema does not have a repetition_type.
+//   - RepetitionType: repetition of the field. The root of the schema does not have a repetition_type.
+//
 // All other nodes must have one
-//  - Name: Name of the field in the schema
-//  - NumChildren: Nested fields.  Since thrift does not support nested fields,
+//   - Name: Name of the field in the schema
+//   - NumChildren: Nested fields.  Since thrift does not support nested fields,
+//
 // the nesting is flattened to a single list by a depth-first traversal.
 // The children count is used to construct the nested relationship.
 // This field is not set when the element is a primitive type
-//  - ConvertedType: DEPRECATED: When the schema is the result of a conversion from another model.
+//   - ConvertedType: DEPRECATED: When the schema is the result of a conversion from another model.
+//
 // Used to record the original type to help with cross conversion.
-// 
+//
 // This is superseded by logicalType.
-//  - Scale: DEPRECATED: Used when this column contains decimal data.
+//   - Scale: DEPRECATED: Used when this column contains decimal data.
+//
 // See the DECIMAL converted type for more details.
-// 
+//
 // This is superseded by using the DecimalType annotation in logicalType.
-//  - Precision
-//  - FieldID: When the original schema supports field ids, this will save the
+//   - Precision
+//   - FieldID: When the original schema supports field ids, this will save the
+//
 // original field id in the parquet schema
-//  - LogicalType: The logical type of this SchemaElement
-// 
+//   - LogicalType: The logical type of this SchemaElement
+//
 // LogicalType replaces ConvertedType, but ConvertedType is still required
 // for some logical types to ensure forward-compatibility in format v1.
-// 
 type SchemaElement struct {
-	Type *Type `thrift:"type,1" db:"type" json:"type,omitempty"`
-	TypeLength *int32 `thrift:"type_length,2" db:"type_length" json:"type_length,omitempty"`
+	Type           *Type                `thrift:"type,1" db:"type" json:"type,omitempty"`
+	TypeLength     *int32               `thrift:"type_length,2" db:"type_length" json:"type_length,omitempty"`
 	RepetitionType *FieldRepetitionType `thrift:"repetition_type,3" db:"repetition_type" json:"repetition_type,omitempty"`
-	Name string `thrift:"name,4,required" db:"name" json:"name"`
-	NumChildren *int32 `thrift:"num_children,5" db:"num_children" json:"num_children,omitempty"`
-	ConvertedType *ConvertedType `thrift:"converted_type,6" db:"converted_type" json:"converted_type,omitempty"`
-	Scale *int32 `thrift:"scale,7" db:"scale" json:"scale,omitempty"`
-	Precision *int32 `thrift:"precision,8" db:"precision" json:"precision,omitempty"`
-	FieldID *int32 `thrift:"field_id,9" db:"field_id" json:"field_id,omitempty"`
-	LogicalType *LogicalType `thrift:"logicalType,10" db:"logicalType" json:"logicalType,omitempty"`
+	Name           string               `thrift:"name,4,required" db:"name" json:"name"`
+	NumChildren    *int32               `thrift:"num_children,5" db:"num_children" json:"num_children,omitempty"`
+	ConvertedType  *ConvertedType       `thrift:"converted_type,6" db:"converted_type" json:"converted_type,omitempty"`
+	Scale          *int32               `thrift:"scale,7" db:"scale" json:"scale,omitempty"`
+	Precision      *int32               `thrift:"precision,8" db:"precision" json:"precision,omitempty"`
+	FieldID        *int32               `thrift:"field_id,9" db:"field_id" json:"field_id,omitempty"`
+	LogicalType    *LogicalType         `thrift:"logicalType,10" db:"logicalType" json:"logicalType,omitempty"`
 }
 
 func NewSchemaElement() *SchemaElement {
@@ -4429,8 +4656,6 @@ func (p *SchemaElement) GetRepetitionType() FieldRepetitionType {
 	}
 	return *p.RepetitionType
 }
-
-
 
 func (p *SchemaElement) GetName() string {
 	return p.Name
@@ -4531,7 +4756,7 @@ func (p *SchemaElement) Read(ctx context.Context, iprot thrift.TProtocol) error 
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetName bool = false;
+	var issetName bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -4655,8 +4880,8 @@ func (p *SchemaElement) Read(ctx context.Context, iprot thrift.TProtocol) error 
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetName{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Name is not set"));
+	if !issetName {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Name is not set"))
 	}
 	return nil
 }
@@ -4758,16 +4983,36 @@ func (p *SchemaElement) Write(ctx context.Context, oprot thrift.TProtocol) error
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
-		if err := p.writeField4(ctx, oprot); err != nil { return err }
-		if err := p.writeField5(ctx, oprot); err != nil { return err }
-		if err := p.writeField6(ctx, oprot); err != nil { return err }
-		if err := p.writeField7(ctx, oprot); err != nil { return err }
-		if err := p.writeField8(ctx, oprot); err != nil { return err }
-		if err := p.writeField9(ctx, oprot); err != nil { return err }
-		if err := p.writeField10(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField4(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField5(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField6(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField7(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField8(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField9(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField10(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -4936,52 +5181,72 @@ func (p *SchemaElement) Equals(other *SchemaElement) bool {
 		if p.Type == nil || other.Type == nil {
 			return false
 		}
-		if (*p.Type) != (*other.Type) { return false }
+		if (*p.Type) != (*other.Type) {
+			return false
+		}
 	}
 	if p.TypeLength != other.TypeLength {
 		if p.TypeLength == nil || other.TypeLength == nil {
 			return false
 		}
-		if (*p.TypeLength) != (*other.TypeLength) { return false }
+		if (*p.TypeLength) != (*other.TypeLength) {
+			return false
+		}
 	}
 	if p.RepetitionType != other.RepetitionType {
 		if p.RepetitionType == nil || other.RepetitionType == nil {
 			return false
 		}
-		if (*p.RepetitionType) != (*other.RepetitionType) { return false }
+		if (*p.RepetitionType) != (*other.RepetitionType) {
+			return false
+		}
 	}
-	if p.Name != other.Name { return false }
+	if p.Name != other.Name {
+		return false
+	}
 	if p.NumChildren != other.NumChildren {
 		if p.NumChildren == nil || other.NumChildren == nil {
 			return false
 		}
-		if (*p.NumChildren) != (*other.NumChildren) { return false }
+		if (*p.NumChildren) != (*other.NumChildren) {
+			return false
+		}
 	}
 	if p.ConvertedType != other.ConvertedType {
 		if p.ConvertedType == nil || other.ConvertedType == nil {
 			return false
 		}
-		if (*p.ConvertedType) != (*other.ConvertedType) { return false }
+		if (*p.ConvertedType) != (*other.ConvertedType) {
+			return false
+		}
 	}
 	if p.Scale != other.Scale {
 		if p.Scale == nil || other.Scale == nil {
 			return false
 		}
-		if (*p.Scale) != (*other.Scale) { return false }
+		if (*p.Scale) != (*other.Scale) {
+			return false
+		}
 	}
 	if p.Precision != other.Precision {
 		if p.Precision == nil || other.Precision == nil {
 			return false
 		}
-		if (*p.Precision) != (*other.Precision) { return false }
+		if (*p.Precision) != (*other.Precision) {
+			return false
+		}
 	}
 	if p.FieldID != other.FieldID {
 		if p.FieldID == nil || other.FieldID == nil {
 			return false
 		}
-		if (*p.FieldID) != (*other.FieldID) { return false }
+		if (*p.FieldID) != (*other.FieldID) {
+			return false
+		}
 	}
-	if !p.LogicalType.Equals(other.LogicalType) { return false }
+	if !p.LogicalType.Equals(other.LogicalType) {
+		return false
+	}
 	return true
 }
 
@@ -4997,7 +5262,7 @@ func (p *SchemaElement) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.SchemaElement",
+		Type:  "*parquet.SchemaElement",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -5010,50 +5275,41 @@ func (p *SchemaElement) Validate() error {
 }
 
 // Data page header
-// 
+//
 // Attributes:
-//  - NumValues: Number of values, including NULLs, in this data page.
-// 
+//   - NumValues: Number of values, including NULLs, in this data page.
+//
 // If a OffsetIndex is present, a page must begin at a row
 // boundary (repetition_level = 0). Otherwise, pages may begin
 // within a row (repetition_level > 0).
-// 
-//  - Encoding: Encoding used for this data page *
-//  - DefinitionLevelEncoding: Encoding used for definition levels *
-//  - RepetitionLevelEncoding: Encoding used for repetition levels *
-//  - Statistics: Optional statistics for the data in this page *
-// 
+//
+//   - Encoding: Encoding used for this data page *
+//   - DefinitionLevelEncoding: Encoding used for definition levels *
+//   - RepetitionLevelEncoding: Encoding used for repetition levels *
+//   - Statistics: Optional statistics for the data in this page *
 type DataPageHeader struct {
-	NumValues int32 `thrift:"num_values,1,required" db:"num_values" json:"num_values"`
-	Encoding Encoding `thrift:"encoding,2,required" db:"encoding" json:"encoding"`
-	DefinitionLevelEncoding Encoding `thrift:"definition_level_encoding,3,required" db:"definition_level_encoding" json:"definition_level_encoding"`
-	RepetitionLevelEncoding Encoding `thrift:"repetition_level_encoding,4,required" db:"repetition_level_encoding" json:"repetition_level_encoding"`
-	Statistics *Statistics `thrift:"statistics,5" db:"statistics" json:"statistics,omitempty"`
+	NumValues               int32       `thrift:"num_values,1,required" db:"num_values" json:"num_values"`
+	Encoding                Encoding    `thrift:"encoding,2,required" db:"encoding" json:"encoding"`
+	DefinitionLevelEncoding Encoding    `thrift:"definition_level_encoding,3,required" db:"definition_level_encoding" json:"definition_level_encoding"`
+	RepetitionLevelEncoding Encoding    `thrift:"repetition_level_encoding,4,required" db:"repetition_level_encoding" json:"repetition_level_encoding"`
+	Statistics              *Statistics `thrift:"statistics,5" db:"statistics" json:"statistics,omitempty"`
 }
 
 func NewDataPageHeader() *DataPageHeader {
 	return &DataPageHeader{}
 }
 
-
-
 func (p *DataPageHeader) GetNumValues() int32 {
 	return p.NumValues
 }
-
-
 
 func (p *DataPageHeader) GetEncoding() Encoding {
 	return p.Encoding
 }
 
-
-
 func (p *DataPageHeader) GetDefinitionLevelEncoding() Encoding {
 	return p.DefinitionLevelEncoding
 }
-
-
 
 func (p *DataPageHeader) GetRepetitionLevelEncoding() Encoding {
 	return p.RepetitionLevelEncoding
@@ -5077,10 +5333,10 @@ func (p *DataPageHeader) Read(ctx context.Context, iprot thrift.TProtocol) error
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetNumValues bool = false;
-	var issetEncoding bool = false;
-	var issetDefinitionLevelEncoding bool = false;
-	var issetRepetitionLevelEncoding bool = false;
+	var issetNumValues bool = false
+	var issetEncoding bool = false
+	var issetDefinitionLevelEncoding bool = false
+	var issetRepetitionLevelEncoding bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -5157,17 +5413,17 @@ func (p *DataPageHeader) Read(ctx context.Context, iprot thrift.TProtocol) error
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetNumValues{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumValues is not set"));
+	if !issetNumValues {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumValues is not set"))
 	}
-	if !issetEncoding{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Encoding is not set"));
+	if !issetEncoding {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Encoding is not set"))
 	}
-	if !issetDefinitionLevelEncoding{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field DefinitionLevelEncoding is not set"));
+	if !issetDefinitionLevelEncoding {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field DefinitionLevelEncoding is not set"))
 	}
-	if !issetRepetitionLevelEncoding{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field RepetitionLevelEncoding is not set"));
+	if !issetRepetitionLevelEncoding {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field RepetitionLevelEncoding is not set"))
 	}
 	return nil
 }
@@ -5224,11 +5480,21 @@ func (p *DataPageHeader) Write(ctx context.Context, oprot thrift.TProtocol) erro
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
-		if err := p.writeField4(ctx, oprot); err != nil { return err }
-		if err := p.writeField5(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField4(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField5(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -5312,11 +5578,21 @@ func (p *DataPageHeader) Equals(other *DataPageHeader) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if p.NumValues != other.NumValues { return false }
-	if p.Encoding != other.Encoding { return false }
-	if p.DefinitionLevelEncoding != other.DefinitionLevelEncoding { return false }
-	if p.RepetitionLevelEncoding != other.RepetitionLevelEncoding { return false }
-	if !p.Statistics.Equals(other.Statistics) { return false }
+	if p.NumValues != other.NumValues {
+		return false
+	}
+	if p.Encoding != other.Encoding {
+		return false
+	}
+	if p.DefinitionLevelEncoding != other.DefinitionLevelEncoding {
+		return false
+	}
+	if p.RepetitionLevelEncoding != other.RepetitionLevelEncoding {
+		return false
+	}
+	if !p.Statistics.Equals(other.Statistics) {
+		return false
+	}
 	return true
 }
 
@@ -5332,7 +5608,7 @@ func (p *DataPageHeader) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.DataPageHeader",
+		Type:  "*parquet.DataPageHeader",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -5355,7 +5631,6 @@ func (p *IndexPageHeader) Read(ctx context.Context, iprot thrift.TProtocol) erro
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -5414,7 +5689,7 @@ func (p *IndexPageHeader) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.IndexPageHeader",
+		Type:  "*parquet.IndexPageHeader",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -5429,30 +5704,24 @@ func (p *IndexPageHeader) Validate() error {
 // The dictionary page must be placed at the first position of the column chunk
 // if it is partly or completely dictionary encoded. At most one dictionary page
 // can be placed in a column chunk.
-// 
-// 
+//
 // Attributes:
-//  - NumValues: Number of values in the dictionary *
-//  - Encoding: Encoding using this dictionary page *
-//  - IsSorted: If true, the entries in the dictionary are sorted in ascending order *
-// 
+//   - NumValues: Number of values in the dictionary *
+//   - Encoding: Encoding using this dictionary page *
+//   - IsSorted: If true, the entries in the dictionary are sorted in ascending order *
 type DictionaryPageHeader struct {
-	NumValues int32 `thrift:"num_values,1,required" db:"num_values" json:"num_values"`
-	Encoding Encoding `thrift:"encoding,2,required" db:"encoding" json:"encoding"`
-	IsSorted *bool `thrift:"is_sorted,3" db:"is_sorted" json:"is_sorted,omitempty"`
+	NumValues int32    `thrift:"num_values,1,required" db:"num_values" json:"num_values"`
+	Encoding  Encoding `thrift:"encoding,2,required" db:"encoding" json:"encoding"`
+	IsSorted  *bool    `thrift:"is_sorted,3" db:"is_sorted" json:"is_sorted,omitempty"`
 }
 
 func NewDictionaryPageHeader() *DictionaryPageHeader {
 	return &DictionaryPageHeader{}
 }
 
-
-
 func (p *DictionaryPageHeader) GetNumValues() int32 {
 	return p.NumValues
 }
-
-
 
 func (p *DictionaryPageHeader) GetEncoding() Encoding {
 	return p.Encoding
@@ -5476,8 +5745,8 @@ func (p *DictionaryPageHeader) Read(ctx context.Context, iprot thrift.TProtocol)
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetNumValues bool = false;
-	var issetEncoding bool = false;
+	var issetNumValues bool = false
+	var issetEncoding bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -5532,11 +5801,11 @@ func (p *DictionaryPageHeader) Read(ctx context.Context, iprot thrift.TProtocol)
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetNumValues{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumValues is not set"));
+	if !issetNumValues {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumValues is not set"))
 	}
-	if !issetEncoding{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Encoding is not set"));
+	if !issetEncoding {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Encoding is not set"))
 	}
 	return nil
 }
@@ -5574,9 +5843,15 @@ func (p *DictionaryPageHeader) Write(ctx context.Context, oprot thrift.TProtocol
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -5634,13 +5909,19 @@ func (p *DictionaryPageHeader) Equals(other *DictionaryPageHeader) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if p.NumValues != other.NumValues { return false }
-	if p.Encoding != other.Encoding { return false }
+	if p.NumValues != other.NumValues {
+		return false
+	}
+	if p.Encoding != other.Encoding {
+		return false
+	}
 	if p.IsSorted != other.IsSorted {
 		if p.IsSorted == nil || other.IsSorted == nil {
 			return false
 		}
-		if (*p.IsSorted) != (*other.IsSorted) { return false }
+		if (*p.IsSorted) != (*other.IsSorted) {
+			return false
+		}
 	}
 	return true
 }
@@ -5657,7 +5938,7 @@ func (p *DictionaryPageHeader) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.DictionaryPageHeader",
+		Type:  "*parquet.DictionaryPageHeader",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -5672,35 +5953,36 @@ func (p *DictionaryPageHeader) Validate() error {
 // New page format allowing reading levels without decompressing the data
 // Repetition and definition levels are uncompressed
 // The remaining section containing the data is compressed if is_compressed is true
-// 
-// 
+//
 // Attributes:
-//  - NumValues: Number of values, including NULLs, in this data page. *
-//  - NumNulls: Number of NULL values, in this data page.
+//   - NumValues: Number of values, including NULLs, in this data page. *
+//   - NumNulls: Number of NULL values, in this data page.
+//
 // Number of non-null = num_values - num_nulls which is also the number of values in the data section *
-//  - NumRows: Number of rows in this data page. Every page must begin at a
+//   - NumRows: Number of rows in this data page. Every page must begin at a
+//
 // row boundary (repetition_level = 0): rows must **not** be
 // split across page boundaries when using V2 data pages.
-// 
-//  - Encoding: Encoding used for data in this page *
-//  - DefinitionLevelsByteLength: Length of the definition levels
-//  - RepetitionLevelsByteLength: Length of the repetition levels
-//  - IsCompressed: Whether the values are compressed.
+//
+//   - Encoding: Encoding used for data in this page *
+//   - DefinitionLevelsByteLength: Length of the definition levels
+//   - RepetitionLevelsByteLength: Length of the repetition levels
+//   - IsCompressed: Whether the values are compressed.
+//
 // Which means the section of the page between
 // definition_levels_byte_length + repetition_levels_byte_length + 1 and compressed_page_size (included)
 // is compressed with the compression_codec.
 // If missing it is considered compressed
-//  - Statistics: Optional statistics for the data in this page *
-// 
+//   - Statistics: Optional statistics for the data in this page *
 type DataPageHeaderV2 struct {
-	NumValues int32 `thrift:"num_values,1,required" db:"num_values" json:"num_values"`
-	NumNulls int32 `thrift:"num_nulls,2,required" db:"num_nulls" json:"num_nulls"`
-	NumRows int32 `thrift:"num_rows,3,required" db:"num_rows" json:"num_rows"`
-	Encoding Encoding `thrift:"encoding,4,required" db:"encoding" json:"encoding"`
-	DefinitionLevelsByteLength int32 `thrift:"definition_levels_byte_length,5,required" db:"definition_levels_byte_length" json:"definition_levels_byte_length"`
-	RepetitionLevelsByteLength int32 `thrift:"repetition_levels_byte_length,6,required" db:"repetition_levels_byte_length" json:"repetition_levels_byte_length"`
-	IsCompressed bool `thrift:"is_compressed,7" db:"is_compressed" json:"is_compressed"`
-	Statistics *Statistics `thrift:"statistics,8" db:"statistics" json:"statistics,omitempty"`
+	NumValues                  int32       `thrift:"num_values,1,required" db:"num_values" json:"num_values"`
+	NumNulls                   int32       `thrift:"num_nulls,2,required" db:"num_nulls" json:"num_nulls"`
+	NumRows                    int32       `thrift:"num_rows,3,required" db:"num_rows" json:"num_rows"`
+	Encoding                   Encoding    `thrift:"encoding,4,required" db:"encoding" json:"encoding"`
+	DefinitionLevelsByteLength int32       `thrift:"definition_levels_byte_length,5,required" db:"definition_levels_byte_length" json:"definition_levels_byte_length"`
+	RepetitionLevelsByteLength int32       `thrift:"repetition_levels_byte_length,6,required" db:"repetition_levels_byte_length" json:"repetition_levels_byte_length"`
+	IsCompressed               bool        `thrift:"is_compressed,7" db:"is_compressed" json:"is_compressed"`
+	Statistics                 *Statistics `thrift:"statistics,8" db:"statistics" json:"statistics,omitempty"`
 }
 
 func NewDataPageHeaderV2() *DataPageHeaderV2 {
@@ -5709,44 +5991,31 @@ func NewDataPageHeaderV2() *DataPageHeaderV2 {
 	}
 }
 
-
-
 func (p *DataPageHeaderV2) GetNumValues() int32 {
 	return p.NumValues
 }
-
-
 
 func (p *DataPageHeaderV2) GetNumNulls() int32 {
 	return p.NumNulls
 }
 
-
-
 func (p *DataPageHeaderV2) GetNumRows() int32 {
 	return p.NumRows
 }
-
-
 
 func (p *DataPageHeaderV2) GetEncoding() Encoding {
 	return p.Encoding
 }
 
-
-
 func (p *DataPageHeaderV2) GetDefinitionLevelsByteLength() int32 {
 	return p.DefinitionLevelsByteLength
 }
-
-
 
 func (p *DataPageHeaderV2) GetRepetitionLevelsByteLength() int32 {
 	return p.RepetitionLevelsByteLength
 }
 
 var DataPageHeaderV2_IsCompressed_DEFAULT bool = true
-
 
 func (p *DataPageHeaderV2) GetIsCompressed() bool {
 	return p.IsCompressed
@@ -5774,12 +6043,12 @@ func (p *DataPageHeaderV2) Read(ctx context.Context, iprot thrift.TProtocol) err
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetNumValues bool = false;
-	var issetNumNulls bool = false;
-	var issetNumRows bool = false;
-	var issetEncoding bool = false;
-	var issetDefinitionLevelsByteLength bool = false;
-	var issetRepetitionLevelsByteLength bool = false;
+	var issetNumValues bool = false
+	var issetNumNulls bool = false
+	var issetNumRows bool = false
+	var issetEncoding bool = false
+	var issetDefinitionLevelsByteLength bool = false
+	var issetRepetitionLevelsByteLength bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -5888,23 +6157,23 @@ func (p *DataPageHeaderV2) Read(ctx context.Context, iprot thrift.TProtocol) err
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetNumValues{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumValues is not set"));
+	if !issetNumValues {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumValues is not set"))
 	}
-	if !issetNumNulls{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumNulls is not set"));
+	if !issetNumNulls {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumNulls is not set"))
 	}
-	if !issetNumRows{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumRows is not set"));
+	if !issetNumRows {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumRows is not set"))
 	}
-	if !issetEncoding{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Encoding is not set"));
+	if !issetEncoding {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Encoding is not set"))
 	}
-	if !issetDefinitionLevelsByteLength{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field DefinitionLevelsByteLength is not set"));
+	if !issetDefinitionLevelsByteLength {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field DefinitionLevelsByteLength is not set"))
 	}
-	if !issetRepetitionLevelsByteLength{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field RepetitionLevelsByteLength is not set"));
+	if !issetRepetitionLevelsByteLength {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field RepetitionLevelsByteLength is not set"))
 	}
 	return nil
 }
@@ -5986,14 +6255,30 @@ func (p *DataPageHeaderV2) Write(ctx context.Context, oprot thrift.TProtocol) er
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
-		if err := p.writeField4(ctx, oprot); err != nil { return err }
-		if err := p.writeField5(ctx, oprot); err != nil { return err }
-		if err := p.writeField6(ctx, oprot); err != nil { return err }
-		if err := p.writeField7(ctx, oprot); err != nil { return err }
-		if err := p.writeField8(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField4(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField5(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField6(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField7(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField8(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -6118,14 +6403,30 @@ func (p *DataPageHeaderV2) Equals(other *DataPageHeaderV2) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if p.NumValues != other.NumValues { return false }
-	if p.NumNulls != other.NumNulls { return false }
-	if p.NumRows != other.NumRows { return false }
-	if p.Encoding != other.Encoding { return false }
-	if p.DefinitionLevelsByteLength != other.DefinitionLevelsByteLength { return false }
-	if p.RepetitionLevelsByteLength != other.RepetitionLevelsByteLength { return false }
-	if p.IsCompressed != other.IsCompressed { return false }
-	if !p.Statistics.Equals(other.Statistics) { return false }
+	if p.NumValues != other.NumValues {
+		return false
+	}
+	if p.NumNulls != other.NumNulls {
+		return false
+	}
+	if p.NumRows != other.NumRows {
+		return false
+	}
+	if p.Encoding != other.Encoding {
+		return false
+	}
+	if p.DefinitionLevelsByteLength != other.DefinitionLevelsByteLength {
+		return false
+	}
+	if p.RepetitionLevelsByteLength != other.RepetitionLevelsByteLength {
+		return false
+	}
+	if p.IsCompressed != other.IsCompressed {
+		return false
+	}
+	if !p.Statistics.Equals(other.Statistics) {
+		return false
+	}
 	return true
 }
 
@@ -6141,7 +6442,7 @@ func (p *DataPageHeaderV2) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.DataPageHeaderV2",
+		Type:  "*parquet.DataPageHeaderV2",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -6165,7 +6466,6 @@ func (p *SplitBlockAlgorithm) Read(ctx context.Context, iprot thrift.TProtocol) 
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -6224,7 +6524,7 @@ func (p *SplitBlockAlgorithm) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.SplitBlockAlgorithm",
+		Type:  "*parquet.SplitBlockAlgorithm",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -6237,10 +6537,9 @@ func (p *SplitBlockAlgorithm) Validate() error {
 }
 
 // The algorithm used in Bloom filter. *
-// 
+//
 // Attributes:
-//  - BLOCK: Block-based Bloom filter. *
-// 
+//   - BLOCK: Block-based Bloom filter. *
 type BloomFilterAlgorithm struct {
 	BLOCK *SplitBlockAlgorithm `thrift:"BLOCK,1" db:"BLOCK" json:"BLOCK,omitempty"`
 }
@@ -6260,7 +6559,7 @@ func (p *BloomFilterAlgorithm) GetBLOCK() *SplitBlockAlgorithm {
 
 func (p *BloomFilterAlgorithm) CountSetFieldsBloomFilterAlgorithm() int {
 	count := 0
-	if (p.IsSetBLOCK()) {
+	if p.IsSetBLOCK() {
 		count++
 	}
 	return count
@@ -6275,7 +6574,6 @@ func (p *BloomFilterAlgorithm) Read(ctx context.Context, iprot thrift.TProtocol)
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -6327,7 +6625,9 @@ func (p *BloomFilterAlgorithm) Write(ctx context.Context, oprot thrift.TProtocol
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -6359,7 +6659,9 @@ func (p *BloomFilterAlgorithm) Equals(other *BloomFilterAlgorithm) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if !p.BLOCK.Equals(other.BLOCK) { return false }
+	if !p.BLOCK.Equals(other.BLOCK) {
+		return false
+	}
 	return true
 }
 
@@ -6375,7 +6677,7 @@ func (p *BloomFilterAlgorithm) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.BloomFilterAlgorithm",
+		Type:  "*parquet.BloomFilterAlgorithm",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -6389,7 +6691,6 @@ func (p *BloomFilterAlgorithm) Validate() error {
 
 // Hash strategy type annotation. xxHash is an extremely fast non-cryptographic hash
 // algorithm. It uses 64 bits version of xxHash.
-// 
 type XxHash struct {
 }
 
@@ -6401,7 +6702,6 @@ func (p *XxHash) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -6460,7 +6760,7 @@ func (p *XxHash) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.XxHash",
+		Type:  "*parquet.XxHash",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -6474,11 +6774,9 @@ func (p *XxHash) Validate() error {
 
 // The hash function used in Bloom filter. This function takes the hash of a column value
 // using plain encoding.
-// 
-// 
+//
 // Attributes:
-//  - XXHASH: xxHash Strategy. *
-// 
+//   - XXHASH: xxHash Strategy. *
 type BloomFilterHash struct {
 	XXHASH *XxHash `thrift:"XXHASH,1" db:"XXHASH" json:"XXHASH,omitempty"`
 }
@@ -6498,7 +6796,7 @@ func (p *BloomFilterHash) GetXXHASH() *XxHash {
 
 func (p *BloomFilterHash) CountSetFieldsBloomFilterHash() int {
 	count := 0
-	if (p.IsSetXXHASH()) {
+	if p.IsSetXXHASH() {
 		count++
 	}
 	return count
@@ -6513,7 +6811,6 @@ func (p *BloomFilterHash) Read(ctx context.Context, iprot thrift.TProtocol) erro
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -6565,7 +6862,9 @@ func (p *BloomFilterHash) Write(ctx context.Context, oprot thrift.TProtocol) err
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -6597,7 +6896,9 @@ func (p *BloomFilterHash) Equals(other *BloomFilterHash) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if !p.XXHASH.Equals(other.XXHASH) { return false }
+	if !p.XXHASH.Equals(other.XXHASH) {
+		return false
+	}
 	return true
 }
 
@@ -6613,7 +6914,7 @@ func (p *BloomFilterHash) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.BloomFilterHash",
+		Type:  "*parquet.BloomFilterHash",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -6626,7 +6927,6 @@ func (p *BloomFilterHash) Validate() error {
 }
 
 // The compression used in the Bloom filter.
-// 
 type Uncompressed struct {
 }
 
@@ -6638,7 +6938,6 @@ func (p *Uncompressed) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -6697,7 +6996,7 @@ func (p *Uncompressed) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.Uncompressed",
+		Type:  "*parquet.Uncompressed",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -6710,8 +7009,7 @@ func (p *Uncompressed) Validate() error {
 }
 
 // Attributes:
-//  - UNCOMPRESSED
-// 
+//   - UNCOMPRESSED
 type BloomFilterCompression struct {
 	UNCOMPRESSED *Uncompressed `thrift:"UNCOMPRESSED,1" db:"UNCOMPRESSED" json:"UNCOMPRESSED,omitempty"`
 }
@@ -6731,7 +7029,7 @@ func (p *BloomFilterCompression) GetUNCOMPRESSED() *Uncompressed {
 
 func (p *BloomFilterCompression) CountSetFieldsBloomFilterCompression() int {
 	count := 0
-	if (p.IsSetUNCOMPRESSED()) {
+	if p.IsSetUNCOMPRESSED() {
 		count++
 	}
 	return count
@@ -6746,7 +7044,6 @@ func (p *BloomFilterCompression) Read(ctx context.Context, iprot thrift.TProtoco
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -6798,7 +7095,9 @@ func (p *BloomFilterCompression) Write(ctx context.Context, oprot thrift.TProtoc
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -6830,7 +7129,9 @@ func (p *BloomFilterCompression) Equals(other *BloomFilterCompression) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if !p.UNCOMPRESSED.Equals(other.UNCOMPRESSED) { return false }
+	if !p.UNCOMPRESSED.Equals(other.UNCOMPRESSED) {
+		return false
+	}
 	return true
 }
 
@@ -6846,7 +7147,7 @@ func (p *BloomFilterCompression) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.BloomFilterCompression",
+		Type:  "*parquet.BloomFilterCompression",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -6860,26 +7161,22 @@ func (p *BloomFilterCompression) Validate() error {
 
 // Bloom filter header is stored at beginning of Bloom filter data of each column
 // and followed by its bitset.
-// 
-// 
+//
 // Attributes:
-//  - NumBytes: The size of bitset in bytes *
-//  - Algorithm: The algorithm for setting bits. *
-//  - Hash: The hash function used for Bloom filter. *
-//  - Compression: The compression used in the Bloom filter *
-// 
+//   - NumBytes: The size of bitset in bytes *
+//   - Algorithm: The algorithm for setting bits. *
+//   - Hash: The hash function used for Bloom filter. *
+//   - Compression: The compression used in the Bloom filter *
 type BloomFilterHeader struct {
-	NumBytes int32 `thrift:"numBytes,1,required" db:"numBytes" json:"numBytes"`
-	Algorithm *BloomFilterAlgorithm `thrift:"algorithm,2,required" db:"algorithm" json:"algorithm"`
-	Hash *BloomFilterHash `thrift:"hash,3,required" db:"hash" json:"hash"`
+	NumBytes    int32                   `thrift:"numBytes,1,required" db:"numBytes" json:"numBytes"`
+	Algorithm   *BloomFilterAlgorithm   `thrift:"algorithm,2,required" db:"algorithm" json:"algorithm"`
+	Hash        *BloomFilterHash        `thrift:"hash,3,required" db:"hash" json:"hash"`
 	Compression *BloomFilterCompression `thrift:"compression,4,required" db:"compression" json:"compression"`
 }
 
 func NewBloomFilterHeader() *BloomFilterHeader {
 	return &BloomFilterHeader{}
 }
-
-
 
 func (p *BloomFilterHeader) GetNumBytes() int32 {
 	return p.NumBytes
@@ -6929,10 +7226,10 @@ func (p *BloomFilterHeader) Read(ctx context.Context, iprot thrift.TProtocol) er
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetNumBytes bool = false;
-	var issetAlgorithm bool = false;
-	var issetHash bool = false;
-	var issetCompression bool = false;
+	var issetNumBytes bool = false
+	var issetAlgorithm bool = false
+	var issetHash bool = false
+	var issetCompression bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -6999,17 +7296,17 @@ func (p *BloomFilterHeader) Read(ctx context.Context, iprot thrift.TProtocol) er
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetNumBytes{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumBytes is not set"));
+	if !issetNumBytes {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumBytes is not set"))
 	}
-	if !issetAlgorithm{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Algorithm is not set"));
+	if !issetAlgorithm {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Algorithm is not set"))
 	}
-	if !issetHash{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Hash is not set"));
+	if !issetHash {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Hash is not set"))
 	}
-	if !issetCompression{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Compression is not set"));
+	if !issetCompression {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Compression is not set"))
 	}
 	return nil
 }
@@ -7052,10 +7349,18 @@ func (p *BloomFilterHeader) Write(ctx context.Context, oprot thrift.TProtocol) e
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
-		if err := p.writeField4(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField4(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -7124,10 +7429,18 @@ func (p *BloomFilterHeader) Equals(other *BloomFilterHeader) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if p.NumBytes != other.NumBytes { return false }
-	if !p.Algorithm.Equals(other.Algorithm) { return false }
-	if !p.Hash.Equals(other.Hash) { return false }
-	if !p.Compression.Equals(other.Compression) { return false }
+	if p.NumBytes != other.NumBytes {
+		return false
+	}
+	if !p.Algorithm.Equals(other.Algorithm) {
+		return false
+	}
+	if !p.Hash.Equals(other.Hash) {
+		return false
+	}
+	if !p.Compression.Equals(other.Compression) {
+		return false
+	}
 	return true
 }
 
@@ -7143,7 +7456,7 @@ func (p *BloomFilterHeader) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.BloomFilterHeader",
+		Type:  "*parquet.BloomFilterHeader",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -7156,58 +7469,58 @@ func (p *BloomFilterHeader) Validate() error {
 }
 
 // Attributes:
-//  - Type: the type of the page: indicates which of the *_header fields is set *
-//  - UncompressedPageSize: Uncompressed page size in bytes (not including this header) *
-//  - CompressedPageSize: Compressed (and potentially encrypted) page size in bytes, not including this header *
-//  - Crc: The 32-bit CRC checksum for the page, to be be calculated as follows:
-// 
-// - The standard CRC32 algorithm is used (with polynomial 0x04C11DB7,
-//   the same as in e.g. GZip).
-// - All page types can have a CRC (v1 and v2 data pages, dictionary pages,
-//   etc.).
-// - The CRC is computed on the serialization binary representation of the page
-//   (as written to disk), excluding the page header. For example, for v1
-//   data pages, the CRC is computed on the concatenation of repetition levels,
-//   definition levels and column values (optionally compressed, optionally
-//   encrypted).
-// - The CRC computation therefore takes place after any compression
-//   and encryption steps, if any.
-// 
+//
+//   - Type: the type of the page: indicates which of the *_header fields is set *
+//
+//   - UncompressedPageSize: Uncompressed page size in bytes (not including this header) *
+//
+//   - CompressedPageSize: Compressed (and potentially encrypted) page size in bytes, not including this header *
+//
+//   - Crc: The 32-bit CRC checksum for the page, to be be calculated as follows:
+//
+//   - The standard CRC32 algorithm is used (with polynomial 0x04C11DB7,
+//     the same as in e.g. GZip).
+//
+//   - All page types can have a CRC (v1 and v2 data pages, dictionary pages,
+//     etc.).
+//
+//   - The CRC is computed on the serialization binary representation of the page
+//     (as written to disk), excluding the page header. For example, for v1
+//     data pages, the CRC is computed on the concatenation of repetition levels,
+//     definition levels and column values (optionally compressed, optionally
+//     encrypted).
+//
+//   - The CRC computation therefore takes place after any compression
+//     and encryption steps, if any.
+//
 // If enabled, this allows for disabling checksumming in HDFS if only a few
 // pages need to be read.
-//  - DataPageHeader
-//  - IndexPageHeader
-//  - DictionaryPageHeader
-//  - DataPageHeaderV2
-// 
+//   - DataPageHeader
+//   - IndexPageHeader
+//   - DictionaryPageHeader
+//   - DataPageHeaderV2
 type PageHeader struct {
-	Type PageType `thrift:"type,1,required" db:"type" json:"type"`
-	UncompressedPageSize int32 `thrift:"uncompressed_page_size,2,required" db:"uncompressed_page_size" json:"uncompressed_page_size"`
-	CompressedPageSize int32 `thrift:"compressed_page_size,3,required" db:"compressed_page_size" json:"compressed_page_size"`
-	Crc *int32 `thrift:"crc,4" db:"crc" json:"crc,omitempty"`
-	DataPageHeader *DataPageHeader `thrift:"data_page_header,5" db:"data_page_header" json:"data_page_header,omitempty"`
-	IndexPageHeader *IndexPageHeader `thrift:"index_page_header,6" db:"index_page_header" json:"index_page_header,omitempty"`
+	Type                 PageType              `thrift:"type,1,required" db:"type" json:"type"`
+	UncompressedPageSize int32                 `thrift:"uncompressed_page_size,2,required" db:"uncompressed_page_size" json:"uncompressed_page_size"`
+	CompressedPageSize   int32                 `thrift:"compressed_page_size,3,required" db:"compressed_page_size" json:"compressed_page_size"`
+	Crc                  *int32                `thrift:"crc,4" db:"crc" json:"crc,omitempty"`
+	DataPageHeader       *DataPageHeader       `thrift:"data_page_header,5" db:"data_page_header" json:"data_page_header,omitempty"`
+	IndexPageHeader      *IndexPageHeader      `thrift:"index_page_header,6" db:"index_page_header" json:"index_page_header,omitempty"`
 	DictionaryPageHeader *DictionaryPageHeader `thrift:"dictionary_page_header,7" db:"dictionary_page_header" json:"dictionary_page_header,omitempty"`
-	DataPageHeaderV2 *DataPageHeaderV2 `thrift:"data_page_header_v2,8" db:"data_page_header_v2" json:"data_page_header_v2,omitempty"`
+	DataPageHeaderV2     *DataPageHeaderV2     `thrift:"data_page_header_v2,8" db:"data_page_header_v2" json:"data_page_header_v2,omitempty"`
 }
 
 func NewPageHeader() *PageHeader {
 	return &PageHeader{}
 }
 
-
-
 func (p *PageHeader) GetType() PageType {
 	return p.Type
 }
 
-
-
 func (p *PageHeader) GetUncompressedPageSize() int32 {
 	return p.UncompressedPageSize
 }
-
-
 
 func (p *PageHeader) GetCompressedPageSize() int32 {
 	return p.CompressedPageSize
@@ -7283,9 +7596,9 @@ func (p *PageHeader) Read(ctx context.Context, iprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetType bool = false;
-	var issetUncompressedPageSize bool = false;
-	var issetCompressedPageSize bool = false;
+	var issetType bool = false
+	var issetUncompressedPageSize bool = false
+	var issetCompressedPageSize bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -7391,14 +7704,14 @@ func (p *PageHeader) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetType{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Type is not set"));
+	if !issetType {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Type is not set"))
 	}
-	if !issetUncompressedPageSize{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field UncompressedPageSize is not set"));
+	if !issetUncompressedPageSize {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field UncompressedPageSize is not set"))
 	}
-	if !issetCompressedPageSize{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field CompressedPageSize is not set"));
+	if !issetCompressedPageSize {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field CompressedPageSize is not set"))
 	}
 	return nil
 }
@@ -7479,14 +7792,30 @@ func (p *PageHeader) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
-		if err := p.writeField4(ctx, oprot); err != nil { return err }
-		if err := p.writeField5(ctx, oprot); err != nil { return err }
-		if err := p.writeField6(ctx, oprot); err != nil { return err }
-		if err := p.writeField7(ctx, oprot); err != nil { return err }
-		if err := p.writeField8(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField4(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField5(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField6(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField7(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField8(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -7617,19 +7946,35 @@ func (p *PageHeader) Equals(other *PageHeader) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if p.Type != other.Type { return false }
-	if p.UncompressedPageSize != other.UncompressedPageSize { return false }
-	if p.CompressedPageSize != other.CompressedPageSize { return false }
+	if p.Type != other.Type {
+		return false
+	}
+	if p.UncompressedPageSize != other.UncompressedPageSize {
+		return false
+	}
+	if p.CompressedPageSize != other.CompressedPageSize {
+		return false
+	}
 	if p.Crc != other.Crc {
 		if p.Crc == nil || other.Crc == nil {
 			return false
 		}
-		if (*p.Crc) != (*other.Crc) { return false }
+		if (*p.Crc) != (*other.Crc) {
+			return false
+		}
 	}
-	if !p.DataPageHeader.Equals(other.DataPageHeader) { return false }
-	if !p.IndexPageHeader.Equals(other.IndexPageHeader) { return false }
-	if !p.DictionaryPageHeader.Equals(other.DictionaryPageHeader) { return false }
-	if !p.DataPageHeaderV2.Equals(other.DataPageHeaderV2) { return false }
+	if !p.DataPageHeader.Equals(other.DataPageHeader) {
+		return false
+	}
+	if !p.IndexPageHeader.Equals(other.IndexPageHeader) {
+		return false
+	}
+	if !p.DictionaryPageHeader.Equals(other.DictionaryPageHeader) {
+		return false
+	}
+	if !p.DataPageHeaderV2.Equals(other.DataPageHeaderV2) {
+		return false
+	}
 	return true
 }
 
@@ -7645,7 +7990,7 @@ func (p *PageHeader) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.PageHeader",
+		Type:  "*parquet.PageHeader",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -7658,21 +8003,18 @@ func (p *PageHeader) Validate() error {
 }
 
 // Wrapper struct to store key values
-// 
+//
 // Attributes:
-//  - Key
-//  - Value
-// 
+//   - Key
+//   - Value
 type KeyValue struct {
-	Key string `thrift:"key,1,required" db:"key" json:"key"`
+	Key   string  `thrift:"key,1,required" db:"key" json:"key"`
 	Value *string `thrift:"value,2" db:"value" json:"value,omitempty"`
 }
 
 func NewKeyValue() *KeyValue {
 	return &KeyValue{}
 }
-
-
 
 func (p *KeyValue) GetKey() string {
 	return p.Key
@@ -7696,7 +8038,7 @@ func (p *KeyValue) Read(ctx context.Context, iprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetKey bool = false;
+	var issetKey bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -7740,8 +8082,8 @@ func (p *KeyValue) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetKey{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Key is not set"));
+	if !issetKey {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Key is not set"))
 	}
 	return nil
 }
@@ -7769,8 +8111,12 @@ func (p *KeyValue) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -7815,12 +8161,16 @@ func (p *KeyValue) Equals(other *KeyValue) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if p.Key != other.Key { return false }
+	if p.Key != other.Key {
+		return false
+	}
 	if p.Value != other.Value {
 		if p.Value == nil || other.Value == nil {
 			return false
 		}
-		if (*p.Value) != (*other.Value) { return false }
+		if (*p.Value) != (*other.Value) {
+			return false
+		}
 	}
 	return true
 }
@@ -7837,7 +8187,7 @@ func (p *KeyValue) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.KeyValue",
+		Type:  "*parquet.KeyValue",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -7850,36 +8200,30 @@ func (p *KeyValue) Validate() error {
 }
 
 // Sort order within a RowGroup of a leaf column
-// 
+//
 // Attributes:
-//  - ColumnIdx: The ordinal position of the column (in this row group) *
-//  - Descending: If true, indicates this column is sorted in descending order. *
-//  - NullsFirst: If true, nulls will come before non-null values, otherwise,
+//   - ColumnIdx: The ordinal position of the column (in this row group) *
+//   - Descending: If true, indicates this column is sorted in descending order. *
+//   - NullsFirst: If true, nulls will come before non-null values, otherwise,
+//
 // nulls go at the end.
-// 
 type SortingColumn struct {
-	ColumnIdx int32 `thrift:"column_idx,1,required" db:"column_idx" json:"column_idx"`
-	Descending bool `thrift:"descending,2,required" db:"descending" json:"descending"`
-	NullsFirst bool `thrift:"nulls_first,3,required" db:"nulls_first" json:"nulls_first"`
+	ColumnIdx  int32 `thrift:"column_idx,1,required" db:"column_idx" json:"column_idx"`
+	Descending bool  `thrift:"descending,2,required" db:"descending" json:"descending"`
+	NullsFirst bool  `thrift:"nulls_first,3,required" db:"nulls_first" json:"nulls_first"`
 }
 
 func NewSortingColumn() *SortingColumn {
 	return &SortingColumn{}
 }
 
-
-
 func (p *SortingColumn) GetColumnIdx() int32 {
 	return p.ColumnIdx
 }
 
-
-
 func (p *SortingColumn) GetDescending() bool {
 	return p.Descending
 }
-
-
 
 func (p *SortingColumn) GetNullsFirst() bool {
 	return p.NullsFirst
@@ -7890,9 +8234,9 @@ func (p *SortingColumn) Read(ctx context.Context, iprot thrift.TProtocol) error 
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetColumnIdx bool = false;
-	var issetDescending bool = false;
-	var issetNullsFirst bool = false;
+	var issetColumnIdx bool = false
+	var issetDescending bool = false
+	var issetNullsFirst bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -7948,14 +8292,14 @@ func (p *SortingColumn) Read(ctx context.Context, iprot thrift.TProtocol) error 
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetColumnIdx{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field ColumnIdx is not set"));
+	if !issetColumnIdx {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field ColumnIdx is not set"))
 	}
-	if !issetDescending{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Descending is not set"));
+	if !issetDescending {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Descending is not set"))
 	}
-	if !issetNullsFirst{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NullsFirst is not set"));
+	if !issetNullsFirst {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NullsFirst is not set"))
 	}
 	return nil
 }
@@ -7992,9 +8336,15 @@ func (p *SortingColumn) Write(ctx context.Context, oprot thrift.TProtocol) error
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -8050,9 +8400,15 @@ func (p *SortingColumn) Equals(other *SortingColumn) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if p.ColumnIdx != other.ColumnIdx { return false }
-	if p.Descending != other.Descending { return false }
-	if p.NullsFirst != other.NullsFirst { return false }
+	if p.ColumnIdx != other.ColumnIdx {
+		return false
+	}
+	if p.Descending != other.Descending {
+		return false
+	}
+	if p.NullsFirst != other.NullsFirst {
+		return false
+	}
 	return true
 }
 
@@ -8068,7 +8424,7 @@ func (p *SortingColumn) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.SortingColumn",
+		Type:  "*parquet.SortingColumn",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -8081,35 +8437,28 @@ func (p *SortingColumn) Validate() error {
 }
 
 // statistics of a given page type and encoding
-// 
+//
 // Attributes:
-//  - PageType: the page type (data/dic/...) *
-//  - Encoding: encoding of the page *
-//  - Count: number of pages of this type with this encoding *
-// 
+//   - PageType: the page type (data/dic/...) *
+//   - Encoding: encoding of the page *
+//   - Count: number of pages of this type with this encoding *
 type PageEncodingStats struct {
 	PageType PageType `thrift:"page_type,1,required" db:"page_type" json:"page_type"`
 	Encoding Encoding `thrift:"encoding,2,required" db:"encoding" json:"encoding"`
-	Count int32 `thrift:"count,3,required" db:"count" json:"count"`
+	Count    int32    `thrift:"count,3,required" db:"count" json:"count"`
 }
 
 func NewPageEncodingStats() *PageEncodingStats {
 	return &PageEncodingStats{}
 }
 
-
-
 func (p *PageEncodingStats) GetPageType() PageType {
 	return p.PageType
 }
 
-
-
 func (p *PageEncodingStats) GetEncoding() Encoding {
 	return p.Encoding
 }
-
-
 
 func (p *PageEncodingStats) GetCount() int32 {
 	return p.Count
@@ -8120,9 +8469,9 @@ func (p *PageEncodingStats) Read(ctx context.Context, iprot thrift.TProtocol) er
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetPageType bool = false;
-	var issetEncoding bool = false;
-	var issetCount bool = false;
+	var issetPageType bool = false
+	var issetEncoding bool = false
+	var issetCount bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -8178,14 +8527,14 @@ func (p *PageEncodingStats) Read(ctx context.Context, iprot thrift.TProtocol) er
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetPageType{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field PageType is not set"));
+	if !issetPageType {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field PageType is not set"))
 	}
-	if !issetEncoding{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Encoding is not set"));
+	if !issetEncoding {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Encoding is not set"))
 	}
-	if !issetCount{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Count is not set"));
+	if !issetCount {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Count is not set"))
 	}
 	return nil
 }
@@ -8224,9 +8573,15 @@ func (p *PageEncodingStats) Write(ctx context.Context, oprot thrift.TProtocol) e
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -8282,9 +8637,15 @@ func (p *PageEncodingStats) Equals(other *PageEncodingStats) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if p.PageType != other.PageType { return false }
-	if p.Encoding != other.Encoding { return false }
-	if p.Count != other.Count { return false }
+	if p.PageType != other.PageType {
+		return false
+	}
+	if p.Encoding != other.Encoding {
+		return false
+	}
+	if p.Count != other.Count {
+		return false
+	}
 	return true
 }
 
@@ -8300,7 +8661,7 @@ func (p *PageEncodingStats) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.PageEncodingStats",
+		Type:  "*parquet.PageEncodingStats",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -8313,96 +8674,86 @@ func (p *PageEncodingStats) Validate() error {
 }
 
 // Description for column metadata
-// 
+//
 // Attributes:
-//  - Type: Type of this column *
-//  - Encodings: Set of all encodings used for this column. The purpose is to validate
+//   - Type: Type of this column *
+//   - Encodings: Set of all encodings used for this column. The purpose is to validate
+//
 // whether we can decode those pages. *
-//  - PathInSchema: Path in schema *
-//  - Codec: Compression codec *
-//  - NumValues: Number of values in this column *
-//  - TotalUncompressedSize: total byte size of all uncompressed pages in this column chunk (including the headers) *
-//  - TotalCompressedSize: total byte size of all compressed, and potentially encrypted, pages
+//   - PathInSchema: Path in schema *
+//   - Codec: Compression codec *
+//   - NumValues: Number of values in this column *
+//   - TotalUncompressedSize: total byte size of all uncompressed pages in this column chunk (including the headers) *
+//   - TotalCompressedSize: total byte size of all compressed, and potentially encrypted, pages
+//
 // in this column chunk (including the headers) *
-//  - KeyValueMetadata: Optional key/value metadata *
-//  - DataPageOffset: Byte offset from beginning of file to first data page *
-//  - IndexPageOffset: Byte offset from beginning of file to root index page *
-//  - DictionaryPageOffset: Byte offset from the beginning of file to first (only) dictionary page *
-//  - Statistics: optional statistics for this column chunk
-//  - EncodingStats: Set of all encodings used for pages in this column chunk.
+//   - KeyValueMetadata: Optional key/value metadata *
+//   - DataPageOffset: Byte offset from beginning of file to first data page *
+//   - IndexPageOffset: Byte offset from beginning of file to root index page *
+//   - DictionaryPageOffset: Byte offset from the beginning of file to first (only) dictionary page *
+//   - Statistics: optional statistics for this column chunk
+//   - EncodingStats: Set of all encodings used for pages in this column chunk.
+//
 // This information can be used to determine if all data pages are
 // dictionary encoded for example *
-//  - BloomFilterOffset: Byte offset from beginning of file to Bloom filter data. *
-//  - BloomFilterLength: Size of Bloom filter data including the serialized header, in bytes.
+//   - BloomFilterOffset: Byte offset from beginning of file to Bloom filter data. *
+//   - BloomFilterLength: Size of Bloom filter data including the serialized header, in bytes.
+//
 // Added in 2.10 so readers may not read this field from old files and
 // it can be obtained after the BloomFilterHeader has been deserialized.
 // Writers should write this field so readers can read the bloom filter
 // in a single I/O.
-//  - SizeStatistics: Optional statistics to help estimate total memory when converted to in-memory
+//   - SizeStatistics: Optional statistics to help estimate total memory when converted to in-memory
+//
 // representations. The histograms contained in these statistics can
 // also be useful in some cases for more fine-grained nullability/list length
 // filter pushdown.
-// 
 type ColumnMetaData struct {
-	Type Type `thrift:"type,1,required" db:"type" json:"type"`
-	Encodings []Encoding `thrift:"encodings,2,required" db:"encodings" json:"encodings"`
-	PathInSchema []string `thrift:"path_in_schema,3,required" db:"path_in_schema" json:"path_in_schema"`
-	Codec CompressionCodec `thrift:"codec,4,required" db:"codec" json:"codec"`
-	NumValues int64 `thrift:"num_values,5,required" db:"num_values" json:"num_values"`
-	TotalUncompressedSize int64 `thrift:"total_uncompressed_size,6,required" db:"total_uncompressed_size" json:"total_uncompressed_size"`
-	TotalCompressedSize int64 `thrift:"total_compressed_size,7,required" db:"total_compressed_size" json:"total_compressed_size"`
-	KeyValueMetadata []*KeyValue `thrift:"key_value_metadata,8" db:"key_value_metadata" json:"key_value_metadata,omitempty"`
-	DataPageOffset int64 `thrift:"data_page_offset,9,required" db:"data_page_offset" json:"data_page_offset"`
-	IndexPageOffset *int64 `thrift:"index_page_offset,10" db:"index_page_offset" json:"index_page_offset,omitempty"`
-	DictionaryPageOffset *int64 `thrift:"dictionary_page_offset,11" db:"dictionary_page_offset" json:"dictionary_page_offset,omitempty"`
-	Statistics *Statistics `thrift:"statistics,12" db:"statistics" json:"statistics,omitempty"`
-	EncodingStats []*PageEncodingStats `thrift:"encoding_stats,13" db:"encoding_stats" json:"encoding_stats,omitempty"`
-	BloomFilterOffset *int64 `thrift:"bloom_filter_offset,14" db:"bloom_filter_offset" json:"bloom_filter_offset,omitempty"`
-	BloomFilterLength *int32 `thrift:"bloom_filter_length,15" db:"bloom_filter_length" json:"bloom_filter_length,omitempty"`
-	SizeStatistics *SizeStatistics `thrift:"size_statistics,16" db:"size_statistics" json:"size_statistics,omitempty"`
+	Type                  Type                 `thrift:"type,1,required" db:"type" json:"type"`
+	Encodings             []Encoding           `thrift:"encodings,2,required" db:"encodings" json:"encodings"`
+	PathInSchema          []string             `thrift:"path_in_schema,3,required" db:"path_in_schema" json:"path_in_schema"`
+	Codec                 CompressionCodec     `thrift:"codec,4,required" db:"codec" json:"codec"`
+	NumValues             int64                `thrift:"num_values,5,required" db:"num_values" json:"num_values"`
+	TotalUncompressedSize int64                `thrift:"total_uncompressed_size,6,required" db:"total_uncompressed_size" json:"total_uncompressed_size"`
+	TotalCompressedSize   int64                `thrift:"total_compressed_size,7,required" db:"total_compressed_size" json:"total_compressed_size"`
+	KeyValueMetadata      []*KeyValue          `thrift:"key_value_metadata,8" db:"key_value_metadata" json:"key_value_metadata,omitempty"`
+	DataPageOffset        int64                `thrift:"data_page_offset,9,required" db:"data_page_offset" json:"data_page_offset"`
+	IndexPageOffset       *int64               `thrift:"index_page_offset,10" db:"index_page_offset" json:"index_page_offset,omitempty"`
+	DictionaryPageOffset  *int64               `thrift:"dictionary_page_offset,11" db:"dictionary_page_offset" json:"dictionary_page_offset,omitempty"`
+	Statistics            *Statistics          `thrift:"statistics,12" db:"statistics" json:"statistics,omitempty"`
+	EncodingStats         []*PageEncodingStats `thrift:"encoding_stats,13" db:"encoding_stats" json:"encoding_stats,omitempty"`
+	BloomFilterOffset     *int64               `thrift:"bloom_filter_offset,14" db:"bloom_filter_offset" json:"bloom_filter_offset,omitempty"`
+	BloomFilterLength     *int32               `thrift:"bloom_filter_length,15" db:"bloom_filter_length" json:"bloom_filter_length,omitempty"`
+	SizeStatistics        *SizeStatistics      `thrift:"size_statistics,16" db:"size_statistics" json:"size_statistics,omitempty"`
 }
 
 func NewColumnMetaData() *ColumnMetaData {
 	return &ColumnMetaData{}
 }
 
-
-
 func (p *ColumnMetaData) GetType() Type {
 	return p.Type
 }
-
-
 
 func (p *ColumnMetaData) GetEncodings() []Encoding {
 	return p.Encodings
 }
 
-
-
 func (p *ColumnMetaData) GetPathInSchema() []string {
 	return p.PathInSchema
 }
-
-
 
 func (p *ColumnMetaData) GetCodec() CompressionCodec {
 	return p.Codec
 }
 
-
-
 func (p *ColumnMetaData) GetNumValues() int64 {
 	return p.NumValues
 }
 
-
-
 func (p *ColumnMetaData) GetTotalUncompressedSize() int64 {
 	return p.TotalUncompressedSize
 }
-
-
 
 func (p *ColumnMetaData) GetTotalCompressedSize() int64 {
 	return p.TotalCompressedSize
@@ -8410,12 +8761,9 @@ func (p *ColumnMetaData) GetTotalCompressedSize() int64 {
 
 var ColumnMetaData_KeyValueMetadata_DEFAULT []*KeyValue
 
-
 func (p *ColumnMetaData) GetKeyValueMetadata() []*KeyValue {
 	return p.KeyValueMetadata
 }
-
-
 
 func (p *ColumnMetaData) GetDataPageOffset() int64 {
 	return p.DataPageOffset
@@ -8449,7 +8797,6 @@ func (p *ColumnMetaData) GetStatistics() *Statistics {
 }
 
 var ColumnMetaData_EncodingStats_DEFAULT []*PageEncodingStats
-
 
 func (p *ColumnMetaData) GetEncodingStats() []*PageEncodingStats {
 	return p.EncodingStats
@@ -8519,14 +8866,14 @@ func (p *ColumnMetaData) Read(ctx context.Context, iprot thrift.TProtocol) error
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetType bool = false;
-	var issetEncodings bool = false;
-	var issetPathInSchema bool = false;
-	var issetCodec bool = false;
-	var issetNumValues bool = false;
-	var issetTotalUncompressedSize bool = false;
-	var issetTotalCompressedSize bool = false;
-	var issetDataPageOffset bool = false;
+	var issetType bool = false
+	var issetEncodings bool = false
+	var issetPathInSchema bool = false
+	var issetCodec bool = false
+	var issetNumValues bool = false
+	var issetTotalUncompressedSize bool = false
+	var issetTotalCompressedSize bool = false
+	var issetDataPageOffset bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -8717,29 +9064,29 @@ func (p *ColumnMetaData) Read(ctx context.Context, iprot thrift.TProtocol) error
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetType{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Type is not set"));
+	if !issetType {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Type is not set"))
 	}
-	if !issetEncodings{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Encodings is not set"));
+	if !issetEncodings {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Encodings is not set"))
 	}
-	if !issetPathInSchema{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field PathInSchema is not set"));
+	if !issetPathInSchema {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field PathInSchema is not set"))
 	}
-	if !issetCodec{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Codec is not set"));
+	if !issetCodec {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Codec is not set"))
 	}
-	if !issetNumValues{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumValues is not set"));
+	if !issetNumValues {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumValues is not set"))
 	}
-	if !issetTotalUncompressedSize{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field TotalUncompressedSize is not set"));
+	if !issetTotalUncompressedSize {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field TotalUncompressedSize is not set"))
 	}
-	if !issetTotalCompressedSize{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field TotalCompressedSize is not set"));
+	if !issetTotalCompressedSize {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field TotalCompressedSize is not set"))
 	}
-	if !issetDataPageOffset{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field DataPageOffset is not set"));
+	if !issetDataPageOffset {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field DataPageOffset is not set"))
 	}
 	return nil
 }
@@ -8942,22 +9289,54 @@ func (p *ColumnMetaData) Write(ctx context.Context, oprot thrift.TProtocol) erro
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
-		if err := p.writeField4(ctx, oprot); err != nil { return err }
-		if err := p.writeField5(ctx, oprot); err != nil { return err }
-		if err := p.writeField6(ctx, oprot); err != nil { return err }
-		if err := p.writeField7(ctx, oprot); err != nil { return err }
-		if err := p.writeField8(ctx, oprot); err != nil { return err }
-		if err := p.writeField9(ctx, oprot); err != nil { return err }
-		if err := p.writeField10(ctx, oprot); err != nil { return err }
-		if err := p.writeField11(ctx, oprot); err != nil { return err }
-		if err := p.writeField12(ctx, oprot); err != nil { return err }
-		if err := p.writeField13(ctx, oprot); err != nil { return err }
-		if err := p.writeField14(ctx, oprot); err != nil { return err }
-		if err := p.writeField15(ctx, oprot); err != nil { return err }
-		if err := p.writeField16(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField4(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField5(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField6(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField7(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField8(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField9(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField10(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField11(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField12(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField13(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField14(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField15(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField16(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -9230,58 +9609,98 @@ func (p *ColumnMetaData) Equals(other *ColumnMetaData) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if p.Type != other.Type { return false }
-	if len(p.Encodings) != len(other.Encodings) { return false }
+	if p.Type != other.Type {
+		return false
+	}
+	if len(p.Encodings) != len(other.Encodings) {
+		return false
+	}
 	for i, _tgt := range p.Encodings {
 		_src8 := other.Encodings[i]
-		if _tgt != _src8 { return false }
+		if _tgt != _src8 {
+			return false
+		}
 	}
-	if len(p.PathInSchema) != len(other.PathInSchema) { return false }
+	if len(p.PathInSchema) != len(other.PathInSchema) {
+		return false
+	}
 	for i, _tgt := range p.PathInSchema {
 		_src9 := other.PathInSchema[i]
-		if _tgt != _src9 { return false }
+		if _tgt != _src9 {
+			return false
+		}
 	}
-	if p.Codec != other.Codec { return false }
-	if p.NumValues != other.NumValues { return false }
-	if p.TotalUncompressedSize != other.TotalUncompressedSize { return false }
-	if p.TotalCompressedSize != other.TotalCompressedSize { return false }
-	if len(p.KeyValueMetadata) != len(other.KeyValueMetadata) { return false }
+	if p.Codec != other.Codec {
+		return false
+	}
+	if p.NumValues != other.NumValues {
+		return false
+	}
+	if p.TotalUncompressedSize != other.TotalUncompressedSize {
+		return false
+	}
+	if p.TotalCompressedSize != other.TotalCompressedSize {
+		return false
+	}
+	if len(p.KeyValueMetadata) != len(other.KeyValueMetadata) {
+		return false
+	}
 	for i, _tgt := range p.KeyValueMetadata {
 		_src10 := other.KeyValueMetadata[i]
-		if !_tgt.Equals(_src10) { return false }
+		if !_tgt.Equals(_src10) {
+			return false
+		}
 	}
-	if p.DataPageOffset != other.DataPageOffset { return false }
+	if p.DataPageOffset != other.DataPageOffset {
+		return false
+	}
 	if p.IndexPageOffset != other.IndexPageOffset {
 		if p.IndexPageOffset == nil || other.IndexPageOffset == nil {
 			return false
 		}
-		if (*p.IndexPageOffset) != (*other.IndexPageOffset) { return false }
+		if (*p.IndexPageOffset) != (*other.IndexPageOffset) {
+			return false
+		}
 	}
 	if p.DictionaryPageOffset != other.DictionaryPageOffset {
 		if p.DictionaryPageOffset == nil || other.DictionaryPageOffset == nil {
 			return false
 		}
-		if (*p.DictionaryPageOffset) != (*other.DictionaryPageOffset) { return false }
+		if (*p.DictionaryPageOffset) != (*other.DictionaryPageOffset) {
+			return false
+		}
 	}
-	if !p.Statistics.Equals(other.Statistics) { return false }
-	if len(p.EncodingStats) != len(other.EncodingStats) { return false }
+	if !p.Statistics.Equals(other.Statistics) {
+		return false
+	}
+	if len(p.EncodingStats) != len(other.EncodingStats) {
+		return false
+	}
 	for i, _tgt := range p.EncodingStats {
 		_src11 := other.EncodingStats[i]
-		if !_tgt.Equals(_src11) { return false }
+		if !_tgt.Equals(_src11) {
+			return false
+		}
 	}
 	if p.BloomFilterOffset != other.BloomFilterOffset {
 		if p.BloomFilterOffset == nil || other.BloomFilterOffset == nil {
 			return false
 		}
-		if (*p.BloomFilterOffset) != (*other.BloomFilterOffset) { return false }
+		if (*p.BloomFilterOffset) != (*other.BloomFilterOffset) {
+			return false
+		}
 	}
 	if p.BloomFilterLength != other.BloomFilterLength {
 		if p.BloomFilterLength == nil || other.BloomFilterLength == nil {
 			return false
 		}
-		if (*p.BloomFilterLength) != (*other.BloomFilterLength) { return false }
+		if (*p.BloomFilterLength) != (*other.BloomFilterLength) {
+			return false
+		}
 	}
-	if !p.SizeStatistics.Equals(other.SizeStatistics) { return false }
+	if !p.SizeStatistics.Equals(other.SizeStatistics) {
+		return false
+	}
 	return true
 }
 
@@ -9297,7 +9716,7 @@ func (p *ColumnMetaData) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.ColumnMetaData",
+		Type:  "*parquet.ColumnMetaData",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -9320,7 +9739,6 @@ func (p *EncryptionWithFooterKey) Read(ctx context.Context, iprot thrift.TProtoc
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -9379,7 +9797,7 @@ func (p *EncryptionWithFooterKey) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.EncryptionWithFooterKey",
+		Type:  "*parquet.EncryptionWithFooterKey",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -9392,26 +9810,22 @@ func (p *EncryptionWithFooterKey) Validate() error {
 }
 
 // Attributes:
-//  - PathInSchema: Column path in schema *
-//  - KeyMetadata: Retrieval metadata of column encryption key *
-// 
+//   - PathInSchema: Column path in schema *
+//   - KeyMetadata: Retrieval metadata of column encryption key *
 type EncryptionWithColumnKey struct {
 	PathInSchema []string `thrift:"path_in_schema,1,required" db:"path_in_schema" json:"path_in_schema"`
-	KeyMetadata []byte `thrift:"key_metadata,2" db:"key_metadata" json:"key_metadata,omitempty"`
+	KeyMetadata  []byte   `thrift:"key_metadata,2" db:"key_metadata" json:"key_metadata,omitempty"`
 }
 
 func NewEncryptionWithColumnKey() *EncryptionWithColumnKey {
 	return &EncryptionWithColumnKey{}
 }
 
-
-
 func (p *EncryptionWithColumnKey) GetPathInSchema() []string {
 	return p.PathInSchema
 }
 
 var EncryptionWithColumnKey_KeyMetadata_DEFAULT []byte
-
 
 func (p *EncryptionWithColumnKey) GetKeyMetadata() []byte {
 	return p.KeyMetadata
@@ -9426,7 +9840,7 @@ func (p *EncryptionWithColumnKey) Read(ctx context.Context, iprot thrift.TProtoc
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetPathInSchema bool = false;
+	var issetPathInSchema bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -9470,8 +9884,8 @@ func (p *EncryptionWithColumnKey) Read(ctx context.Context, iprot thrift.TProtoc
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetPathInSchema{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field PathInSchema is not set"));
+	if !issetPathInSchema {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field PathInSchema is not set"))
 	}
 	return nil
 }
@@ -9512,8 +9926,12 @@ func (p *EncryptionWithColumnKey) Write(ctx context.Context, oprot thrift.TProto
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -9566,12 +9984,18 @@ func (p *EncryptionWithColumnKey) Equals(other *EncryptionWithColumnKey) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if len(p.PathInSchema) != len(other.PathInSchema) { return false }
+	if len(p.PathInSchema) != len(other.PathInSchema) {
+		return false
+	}
 	for i, _tgt := range p.PathInSchema {
 		_src13 := other.PathInSchema[i]
-		if _tgt != _src13 { return false }
+		if _tgt != _src13 {
+			return false
+		}
 	}
-	if bytes.Compare(p.KeyMetadata, other.KeyMetadata) != 0 { return false }
+	if bytes.Compare(p.KeyMetadata, other.KeyMetadata) != 0 {
+		return false
+	}
 	return true
 }
 
@@ -9587,7 +10011,7 @@ func (p *EncryptionWithColumnKey) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.EncryptionWithColumnKey",
+		Type:  "*parquet.EncryptionWithColumnKey",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -9600,9 +10024,8 @@ func (p *EncryptionWithColumnKey) Validate() error {
 }
 
 // Attributes:
-//  - ENCRYPTION_WITH_FOOTER_KEY
-//  - ENCRYPTION_WITH_COLUMN_KEY
-// 
+//   - ENCRYPTION_WITH_FOOTER_KEY
+//   - ENCRYPTION_WITH_COLUMN_KEY
 type ColumnCryptoMetaData struct {
 	ENCRYPTION_WITH_FOOTER_KEY *EncryptionWithFooterKey `thrift:"ENCRYPTION_WITH_FOOTER_KEY,1" db:"ENCRYPTION_WITH_FOOTER_KEY" json:"ENCRYPTION_WITH_FOOTER_KEY,omitempty"`
 	ENCRYPTION_WITH_COLUMN_KEY *EncryptionWithColumnKey `thrift:"ENCRYPTION_WITH_COLUMN_KEY,2" db:"ENCRYPTION_WITH_COLUMN_KEY" json:"ENCRYPTION_WITH_COLUMN_KEY,omitempty"`
@@ -9632,10 +10055,10 @@ func (p *ColumnCryptoMetaData) GetENCRYPTION_WITH_COLUMN_KEY() *EncryptionWithCo
 
 func (p *ColumnCryptoMetaData) CountSetFieldsColumnCryptoMetaData() int {
 	count := 0
-	if (p.IsSetENCRYPTION_WITH_FOOTER_KEY()) {
+	if p.IsSetENCRYPTION_WITH_FOOTER_KEY() {
 		count++
 	}
-	if (p.IsSetENCRYPTION_WITH_COLUMN_KEY()) {
+	if p.IsSetENCRYPTION_WITH_COLUMN_KEY() {
 		count++
 	}
 	return count
@@ -9654,7 +10077,6 @@ func (p *ColumnCryptoMetaData) Read(ctx context.Context, iprot thrift.TProtocol)
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -9724,8 +10146,12 @@ func (p *ColumnCryptoMetaData) Write(ctx context.Context, oprot thrift.TProtocol
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -9772,8 +10198,12 @@ func (p *ColumnCryptoMetaData) Equals(other *ColumnCryptoMetaData) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if !p.ENCRYPTION_WITH_FOOTER_KEY.Equals(other.ENCRYPTION_WITH_FOOTER_KEY) { return false }
-	if !p.ENCRYPTION_WITH_COLUMN_KEY.Equals(other.ENCRYPTION_WITH_COLUMN_KEY) { return false }
+	if !p.ENCRYPTION_WITH_FOOTER_KEY.Equals(other.ENCRYPTION_WITH_FOOTER_KEY) {
+		return false
+	}
+	if !p.ENCRYPTION_WITH_COLUMN_KEY.Equals(other.ENCRYPTION_WITH_COLUMN_KEY) {
+		return false
+	}
 	return true
 }
 
@@ -9789,7 +10219,7 @@ func (p *ColumnCryptoMetaData) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.ColumnCryptoMetaData",
+		Type:  "*parquet.ColumnCryptoMetaData",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -9802,39 +10232,40 @@ func (p *ColumnCryptoMetaData) Validate() error {
 }
 
 // Attributes:
-//  - FilePath: File where column data is stored.  If not set, assumed to be same file as
+//   - FilePath: File where column data is stored.  If not set, assumed to be same file as
+//
 // metadata.  This path is relative to the current file.
-// 
-//  - FileOffset: Deprecated: Byte offset in file_path to the ColumnMetaData
-// 
+//
+//   - FileOffset: Deprecated: Byte offset in file_path to the ColumnMetaData
+//
 // Past use of this field has been inconsistent, with some implementations
 // using it to point to the ColumnMetaData and some using it to point to
 // the first page in the column chunk. In many cases, the ColumnMetaData at this
 // location is wrong. This field is now deprecated and should not be used.
 // Writers should set this field to 0 if no ColumnMetaData has been written outside
 // the footer.
-//  - MetaData: Column metadata for this chunk. Some writers may also replicate this at the
+//   - MetaData: Column metadata for this chunk. Some writers may also replicate this at the
+//
 // location pointed to by file_path/file_offset.
 // Note: while marked as optional, this field is in fact required by most major
 // Parquet implementations. As such, writers MUST populate this field.
-// 
-//  - OffsetIndexOffset: File offset of ColumnChunk's OffsetIndex *
-//  - OffsetIndexLength: Size of ColumnChunk's OffsetIndex, in bytes *
-//  - ColumnIndexOffset: File offset of ColumnChunk's ColumnIndex *
-//  - ColumnIndexLength: Size of ColumnChunk's ColumnIndex, in bytes *
-//  - CryptoMetadata: Crypto metadata of encrypted columns *
-//  - EncryptedColumnMetadata: Encrypted column metadata for this chunk *
-// 
+//
+//   - OffsetIndexOffset: File offset of ColumnChunk's OffsetIndex *
+//   - OffsetIndexLength: Size of ColumnChunk's OffsetIndex, in bytes *
+//   - ColumnIndexOffset: File offset of ColumnChunk's ColumnIndex *
+//   - ColumnIndexLength: Size of ColumnChunk's ColumnIndex, in bytes *
+//   - CryptoMetadata: Crypto metadata of encrypted columns *
+//   - EncryptedColumnMetadata: Encrypted column metadata for this chunk *
 type ColumnChunk struct {
-	FilePath *string `thrift:"file_path,1" db:"file_path" json:"file_path,omitempty"`
-	FileOffset int64 `thrift:"file_offset,2,required" db:"file_offset" json:"file_offset"`
-	MetaData *ColumnMetaData `thrift:"meta_data,3" db:"meta_data" json:"meta_data,omitempty"`
-	OffsetIndexOffset *int64 `thrift:"offset_index_offset,4" db:"offset_index_offset" json:"offset_index_offset,omitempty"`
-	OffsetIndexLength *int32 `thrift:"offset_index_length,5" db:"offset_index_length" json:"offset_index_length,omitempty"`
-	ColumnIndexOffset *int64 `thrift:"column_index_offset,6" db:"column_index_offset" json:"column_index_offset,omitempty"`
-	ColumnIndexLength *int32 `thrift:"column_index_length,7" db:"column_index_length" json:"column_index_length,omitempty"`
-	CryptoMetadata *ColumnCryptoMetaData `thrift:"crypto_metadata,8" db:"crypto_metadata" json:"crypto_metadata,omitempty"`
-	EncryptedColumnMetadata []byte `thrift:"encrypted_column_metadata,9" db:"encrypted_column_metadata" json:"encrypted_column_metadata,omitempty"`
+	FilePath                *string               `thrift:"file_path,1" db:"file_path" json:"file_path,omitempty"`
+	FileOffset              int64                 `thrift:"file_offset,2,required" db:"file_offset" json:"file_offset"`
+	MetaData                *ColumnMetaData       `thrift:"meta_data,3" db:"meta_data" json:"meta_data,omitempty"`
+	OffsetIndexOffset       *int64                `thrift:"offset_index_offset,4" db:"offset_index_offset" json:"offset_index_offset,omitempty"`
+	OffsetIndexLength       *int32                `thrift:"offset_index_length,5" db:"offset_index_length" json:"offset_index_length,omitempty"`
+	ColumnIndexOffset       *int64                `thrift:"column_index_offset,6" db:"column_index_offset" json:"column_index_offset,omitempty"`
+	ColumnIndexLength       *int32                `thrift:"column_index_length,7" db:"column_index_length" json:"column_index_length,omitempty"`
+	CryptoMetadata          *ColumnCryptoMetaData `thrift:"crypto_metadata,8" db:"crypto_metadata" json:"crypto_metadata,omitempty"`
+	EncryptedColumnMetadata []byte                `thrift:"encrypted_column_metadata,9" db:"encrypted_column_metadata" json:"encrypted_column_metadata,omitempty"`
 }
 
 func NewColumnChunk() *ColumnChunk {
@@ -9849,8 +10280,6 @@ func (p *ColumnChunk) GetFilePath() string {
 	}
 	return *p.FilePath
 }
-
-
 
 func (p *ColumnChunk) GetFileOffset() int64 {
 	return p.FileOffset
@@ -9912,7 +10341,6 @@ func (p *ColumnChunk) GetCryptoMetadata() *ColumnCryptoMetaData {
 
 var ColumnChunk_EncryptedColumnMetadata_DEFAULT []byte
 
-
 func (p *ColumnChunk) GetEncryptedColumnMetadata() []byte {
 	return p.EncryptedColumnMetadata
 }
@@ -9954,7 +10382,7 @@ func (p *ColumnChunk) Read(ctx context.Context, iprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetFileOffset bool = false;
+	var issetFileOffset bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -10068,8 +10496,8 @@ func (p *ColumnChunk) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetFileOffset{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field FileOffset is not set"));
+	if !issetFileOffset {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field FileOffset is not set"))
 	}
 	return nil
 }
@@ -10158,15 +10586,33 @@ func (p *ColumnChunk) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
-		if err := p.writeField4(ctx, oprot); err != nil { return err }
-		if err := p.writeField5(ctx, oprot); err != nil { return err }
-		if err := p.writeField6(ctx, oprot); err != nil { return err }
-		if err := p.writeField7(ctx, oprot); err != nil { return err }
-		if err := p.writeField8(ctx, oprot); err != nil { return err }
-		if err := p.writeField9(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField4(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField5(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField6(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField7(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField8(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField9(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -10320,36 +10766,54 @@ func (p *ColumnChunk) Equals(other *ColumnChunk) bool {
 		if p.FilePath == nil || other.FilePath == nil {
 			return false
 		}
-		if (*p.FilePath) != (*other.FilePath) { return false }
+		if (*p.FilePath) != (*other.FilePath) {
+			return false
+		}
 	}
-	if p.FileOffset != other.FileOffset { return false }
-	if !p.MetaData.Equals(other.MetaData) { return false }
+	if p.FileOffset != other.FileOffset {
+		return false
+	}
+	if !p.MetaData.Equals(other.MetaData) {
+		return false
+	}
 	if p.OffsetIndexOffset != other.OffsetIndexOffset {
 		if p.OffsetIndexOffset == nil || other.OffsetIndexOffset == nil {
 			return false
 		}
-		if (*p.OffsetIndexOffset) != (*other.OffsetIndexOffset) { return false }
+		if (*p.OffsetIndexOffset) != (*other.OffsetIndexOffset) {
+			return false
+		}
 	}
 	if p.OffsetIndexLength != other.OffsetIndexLength {
 		if p.OffsetIndexLength == nil || other.OffsetIndexLength == nil {
 			return false
 		}
-		if (*p.OffsetIndexLength) != (*other.OffsetIndexLength) { return false }
+		if (*p.OffsetIndexLength) != (*other.OffsetIndexLength) {
+			return false
+		}
 	}
 	if p.ColumnIndexOffset != other.ColumnIndexOffset {
 		if p.ColumnIndexOffset == nil || other.ColumnIndexOffset == nil {
 			return false
 		}
-		if (*p.ColumnIndexOffset) != (*other.ColumnIndexOffset) { return false }
+		if (*p.ColumnIndexOffset) != (*other.ColumnIndexOffset) {
+			return false
+		}
 	}
 	if p.ColumnIndexLength != other.ColumnIndexLength {
 		if p.ColumnIndexLength == nil || other.ColumnIndexLength == nil {
 			return false
 		}
-		if (*p.ColumnIndexLength) != (*other.ColumnIndexLength) { return false }
+		if (*p.ColumnIndexLength) != (*other.ColumnIndexLength) {
+			return false
+		}
 	}
-	if !p.CryptoMetadata.Equals(other.CryptoMetadata) { return false }
-	if bytes.Compare(p.EncryptedColumnMetadata, other.EncryptedColumnMetadata) != 0 { return false }
+	if !p.CryptoMetadata.Equals(other.CryptoMetadata) {
+		return false
+	}
+	if bytes.Compare(p.EncryptedColumnMetadata, other.EncryptedColumnMetadata) != 0 {
+		return false
+	}
 	return true
 }
 
@@ -10365,7 +10829,7 @@ func (p *ColumnChunk) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.ColumnChunk",
+		Type:  "*parquet.ColumnChunk",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -10378,53 +10842,49 @@ func (p *ColumnChunk) Validate() error {
 }
 
 // Attributes:
-//  - Columns: Metadata for each column chunk in this row group.
+//   - Columns: Metadata for each column chunk in this row group.
+//
 // This list must have the same order as the SchemaElement list in FileMetaData.
-// 
-//  - TotalByteSize: Total byte size of all the uncompressed column data in this row group *
-//  - NumRows: Number of rows in this row group *
-//  - SortingColumns: If set, specifies a sort ordering of the rows in this RowGroup.
+//
+//   - TotalByteSize: Total byte size of all the uncompressed column data in this row group *
+//   - NumRows: Number of rows in this row group *
+//   - SortingColumns: If set, specifies a sort ordering of the rows in this RowGroup.
+//
 // The sorting columns can be a subset of all the columns.
-//  - FileOffset: Byte offset from beginning of file to first page (data or dictionary)
+//   - FileOffset: Byte offset from beginning of file to first page (data or dictionary)
+//
 // in this row group *
-//  - TotalCompressedSize: Total byte size of all compressed (and potentially encrypted) column data
+//   - TotalCompressedSize: Total byte size of all compressed (and potentially encrypted) column data
+//
 // in this row group *
-//  - Ordinal: Row group ordinal in the file *
-// 
+//   - Ordinal: Row group ordinal in the file *
 type RowGroup struct {
-	Columns []*ColumnChunk `thrift:"columns,1,required" db:"columns" json:"columns"`
-	TotalByteSize int64 `thrift:"total_byte_size,2,required" db:"total_byte_size" json:"total_byte_size"`
-	NumRows int64 `thrift:"num_rows,3,required" db:"num_rows" json:"num_rows"`
-	SortingColumns []*SortingColumn `thrift:"sorting_columns,4" db:"sorting_columns" json:"sorting_columns,omitempty"`
-	FileOffset *int64 `thrift:"file_offset,5" db:"file_offset" json:"file_offset,omitempty"`
-	TotalCompressedSize *int64 `thrift:"total_compressed_size,6" db:"total_compressed_size" json:"total_compressed_size,omitempty"`
-	Ordinal *int16 `thrift:"ordinal,7" db:"ordinal" json:"ordinal,omitempty"`
+	Columns             []*ColumnChunk   `thrift:"columns,1,required" db:"columns" json:"columns"`
+	TotalByteSize       int64            `thrift:"total_byte_size,2,required" db:"total_byte_size" json:"total_byte_size"`
+	NumRows             int64            `thrift:"num_rows,3,required" db:"num_rows" json:"num_rows"`
+	SortingColumns      []*SortingColumn `thrift:"sorting_columns,4" db:"sorting_columns" json:"sorting_columns,omitempty"`
+	FileOffset          *int64           `thrift:"file_offset,5" db:"file_offset" json:"file_offset,omitempty"`
+	TotalCompressedSize *int64           `thrift:"total_compressed_size,6" db:"total_compressed_size" json:"total_compressed_size,omitempty"`
+	Ordinal             *int16           `thrift:"ordinal,7" db:"ordinal" json:"ordinal,omitempty"`
 }
 
 func NewRowGroup() *RowGroup {
 	return &RowGroup{}
 }
 
-
-
 func (p *RowGroup) GetColumns() []*ColumnChunk {
 	return p.Columns
 }
 
-
-
 func (p *RowGroup) GetTotalByteSize() int64 {
 	return p.TotalByteSize
 }
-
-
 
 func (p *RowGroup) GetNumRows() int64 {
 	return p.NumRows
 }
 
 var RowGroup_SortingColumns_DEFAULT []*SortingColumn
-
 
 func (p *RowGroup) GetSortingColumns() []*SortingColumn {
 	return p.SortingColumns
@@ -10478,9 +10938,9 @@ func (p *RowGroup) Read(ctx context.Context, iprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetColumns bool = false;
-	var issetTotalByteSize bool = false;
-	var issetNumRows bool = false;
+	var issetColumns bool = false
+	var issetTotalByteSize bool = false
+	var issetNumRows bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -10576,14 +11036,14 @@ func (p *RowGroup) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetColumns{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Columns is not set"));
+	if !issetColumns {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Columns is not set"))
 	}
-	if !issetTotalByteSize{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field TotalByteSize is not set"));
+	if !issetTotalByteSize {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field TotalByteSize is not set"))
 	}
-	if !issetNumRows{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumRows is not set"));
+	if !issetNumRows {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumRows is not set"))
 	}
 	return nil
 }
@@ -10678,13 +11138,27 @@ func (p *RowGroup) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
-		if err := p.writeField4(ctx, oprot); err != nil { return err }
-		if err := p.writeField5(ctx, oprot); err != nil { return err }
-		if err := p.writeField6(ctx, oprot); err != nil { return err }
-		if err := p.writeField7(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField4(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField5(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField6(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField7(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -10816,35 +11290,53 @@ func (p *RowGroup) Equals(other *RowGroup) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if len(p.Columns) != len(other.Columns) { return false }
+	if len(p.Columns) != len(other.Columns) {
+		return false
+	}
 	for i, _tgt := range p.Columns {
 		_src16 := other.Columns[i]
-		if !_tgt.Equals(_src16) { return false }
+		if !_tgt.Equals(_src16) {
+			return false
+		}
 	}
-	if p.TotalByteSize != other.TotalByteSize { return false }
-	if p.NumRows != other.NumRows { return false }
-	if len(p.SortingColumns) != len(other.SortingColumns) { return false }
+	if p.TotalByteSize != other.TotalByteSize {
+		return false
+	}
+	if p.NumRows != other.NumRows {
+		return false
+	}
+	if len(p.SortingColumns) != len(other.SortingColumns) {
+		return false
+	}
 	for i, _tgt := range p.SortingColumns {
 		_src17 := other.SortingColumns[i]
-		if !_tgt.Equals(_src17) { return false }
+		if !_tgt.Equals(_src17) {
+			return false
+		}
 	}
 	if p.FileOffset != other.FileOffset {
 		if p.FileOffset == nil || other.FileOffset == nil {
 			return false
 		}
-		if (*p.FileOffset) != (*other.FileOffset) { return false }
+		if (*p.FileOffset) != (*other.FileOffset) {
+			return false
+		}
 	}
 	if p.TotalCompressedSize != other.TotalCompressedSize {
 		if p.TotalCompressedSize == nil || other.TotalCompressedSize == nil {
 			return false
 		}
-		if (*p.TotalCompressedSize) != (*other.TotalCompressedSize) { return false }
+		if (*p.TotalCompressedSize) != (*other.TotalCompressedSize) {
+			return false
+		}
 	}
 	if p.Ordinal != other.Ordinal {
 		if p.Ordinal == nil || other.Ordinal == nil {
 			return false
 		}
-		if (*p.Ordinal) != (*other.Ordinal) { return false }
+		if (*p.Ordinal) != (*other.Ordinal) {
+			return false
+		}
 	}
 	return true
 }
@@ -10861,7 +11353,7 @@ func (p *RowGroup) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.RowGroup",
+		Type:  "*parquet.RowGroup",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -10885,7 +11377,6 @@ func (p *TypeDefinedOrder) Read(ctx context.Context, iprot thrift.TProtocol) err
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -10944,7 +11435,7 @@ func (p *TypeDefinedOrder) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.TypeDefinedOrder",
+		Type:  "*parquet.TypeDefinedOrder",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -10959,64 +11450,65 @@ func (p *TypeDefinedOrder) Validate() error {
 // Union to specify the order used for the min_value and max_value fields for a
 // column. This union takes the role of an enhanced enum that allows rich
 // elements (which will be needed for a collation-based ordering in the future).
-// 
+//
 // Possible values are:
-// * TypeDefinedOrder - the column uses the order defined by its logical or
-//                      physical type (if there is no logical type).
-// 
+//   - TypeDefinedOrder - the column uses the order defined by its logical or
+//     physical type (if there is no logical type).
+//
 // If the reader does not support the value of this union, min and max stats
 // for this column should be ignored.
-// 
+//
 // Attributes:
-//  - TYPE_ORDER: The sort orders for logical types are:
-//   UTF8 - unsigned byte-wise comparison
-//   INT8 - signed comparison
-//   INT16 - signed comparison
-//   INT32 - signed comparison
-//   INT64 - signed comparison
-//   UINT8 - unsigned comparison
-//   UINT16 - unsigned comparison
-//   UINT32 - unsigned comparison
-//   UINT64 - unsigned comparison
-//   DECIMAL - signed comparison of the represented value
-//   DATE - signed comparison
-//   TIME_MILLIS - signed comparison
-//   TIME_MICROS - signed comparison
-//   TIMESTAMP_MILLIS - signed comparison
-//   TIMESTAMP_MICROS - signed comparison
-//   INTERVAL - undefined
-//   JSON - unsigned byte-wise comparison
-//   BSON - unsigned byte-wise comparison
-//   ENUM - unsigned byte-wise comparison
-//   LIST - undefined
-//   MAP - undefined
-// 
+//   - TYPE_ORDER: The sort orders for logical types are:
+//     UTF8 - unsigned byte-wise comparison
+//     INT8 - signed comparison
+//     INT16 - signed comparison
+//     INT32 - signed comparison
+//     INT64 - signed comparison
+//     UINT8 - unsigned comparison
+//     UINT16 - unsigned comparison
+//     UINT32 - unsigned comparison
+//     UINT64 - unsigned comparison
+//     DECIMAL - signed comparison of the represented value
+//     DATE - signed comparison
+//     TIME_MILLIS - signed comparison
+//     TIME_MICROS - signed comparison
+//     TIMESTAMP_MILLIS - signed comparison
+//     TIMESTAMP_MICROS - signed comparison
+//     INTERVAL - undefined
+//     JSON - unsigned byte-wise comparison
+//     BSON - unsigned byte-wise comparison
+//     ENUM - unsigned byte-wise comparison
+//     LIST - undefined
+//     MAP - undefined
+//
 // In the absence of logical types, the sort order is determined by the physical type:
-//   BOOLEAN - false, true
-//   INT32 - signed comparison
-//   INT64 - signed comparison
-//   INT96 (only used for legacy timestamps) - undefined
-//   FLOAT - signed comparison of the represented value (*)
-//   DOUBLE - signed comparison of the represented value (*)
-//   BYTE_ARRAY - unsigned byte-wise comparison
-//   FIXED_LEN_BYTE_ARRAY - unsigned byte-wise comparison
-// 
+//
+//	BOOLEAN - false, true
+//	INT32 - signed comparison
+//	INT64 - signed comparison
+//	INT96 (only used for legacy timestamps) - undefined
+//	FLOAT - signed comparison of the represented value (*)
+//	DOUBLE - signed comparison of the represented value (*)
+//	BYTE_ARRAY - unsigned byte-wise comparison
+//	FIXED_LEN_BYTE_ARRAY - unsigned byte-wise comparison
+//
 // (*) Because the sorting order is not specified properly for floating
-//     point values (relations vs. total ordering) the following
-//     compatibility rules should be applied when reading statistics:
-//     - If the min is a NaN, it should be ignored.
-//     - If the max is a NaN, it should be ignored.
-//     - If the min is +0, the row group may contain -0 values as well.
-//     - If the max is -0, the row group may contain +0 values as well.
-//     - When looking for NaN values, min and max should be ignored.
-// 
-//     When writing statistics the following rules should be followed:
-//     - NaNs should not be written to min or max statistics fields.
-//     - If the computed max value is zero (whether negative or positive),
-//       `+0.0` should be written into the max statistics field.
-//     - If the computed min value is zero (whether negative or positive),
-//       `-0.0` should be written into the min statistics field.
-// 
+//
+//	point values (relations vs. total ordering) the following
+//	compatibility rules should be applied when reading statistics:
+//	- If the min is a NaN, it should be ignored.
+//	- If the max is a NaN, it should be ignored.
+//	- If the min is +0, the row group may contain -0 values as well.
+//	- If the max is -0, the row group may contain +0 values as well.
+//	- When looking for NaN values, min and max should be ignored.
+//
+//	When writing statistics the following rules should be followed:
+//	- NaNs should not be written to min or max statistics fields.
+//	- If the computed max value is zero (whether negative or positive),
+//	  `+0.0` should be written into the max statistics field.
+//	- If the computed min value is zero (whether negative or positive),
+//	  `-0.0` should be written into the min statistics field.
 type ColumnOrder struct {
 	TYPE_ORDER *TypeDefinedOrder `thrift:"TYPE_ORDER,1" db:"TYPE_ORDER" json:"TYPE_ORDER,omitempty"`
 }
@@ -11036,7 +11528,7 @@ func (p *ColumnOrder) GetTYPE_ORDER() *TypeDefinedOrder {
 
 func (p *ColumnOrder) CountSetFieldsColumnOrder() int {
 	count := 0
-	if (p.IsSetTYPE_ORDER()) {
+	if p.IsSetTYPE_ORDER() {
 		count++
 	}
 	return count
@@ -11051,7 +11543,6 @@ func (p *ColumnOrder) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -11103,7 +11594,9 @@ func (p *ColumnOrder) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -11135,7 +11628,9 @@ func (p *ColumnOrder) Equals(other *ColumnOrder) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if !p.TYPE_ORDER.Equals(other.TYPE_ORDER) { return false }
+	if !p.TYPE_ORDER.Equals(other.TYPE_ORDER) {
+		return false
+	}
 	return true
 }
 
@@ -11151,7 +11646,7 @@ func (p *ColumnOrder) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.ColumnOrder",
+		Type:  "*parquet.ColumnOrder",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -11164,36 +11659,31 @@ func (p *ColumnOrder) Validate() error {
 }
 
 // Attributes:
-//  - Offset: Offset of the page in the file *
-//  - CompressedPageSize: Size of the page, including header. Sum of compressed_page_size and header
+//   - Offset: Offset of the page in the file *
+//   - CompressedPageSize: Size of the page, including header. Sum of compressed_page_size and header
+//
 // length
-//  - FirstRowIndex: Index within the RowGroup of the first row of the page. When an
+//   - FirstRowIndex: Index within the RowGroup of the first row of the page. When an
+//
 // OffsetIndex is present, pages must begin on row boundaries
 // (repetition_level = 0).
-// 
 type PageLocation struct {
-	Offset int64 `thrift:"offset,1,required" db:"offset" json:"offset"`
+	Offset             int64 `thrift:"offset,1,required" db:"offset" json:"offset"`
 	CompressedPageSize int32 `thrift:"compressed_page_size,2,required" db:"compressed_page_size" json:"compressed_page_size"`
-	FirstRowIndex int64 `thrift:"first_row_index,3,required" db:"first_row_index" json:"first_row_index"`
+	FirstRowIndex      int64 `thrift:"first_row_index,3,required" db:"first_row_index" json:"first_row_index"`
 }
 
 func NewPageLocation() *PageLocation {
 	return &PageLocation{}
 }
 
-
-
 func (p *PageLocation) GetOffset() int64 {
 	return p.Offset
 }
 
-
-
 func (p *PageLocation) GetCompressedPageSize() int32 {
 	return p.CompressedPageSize
 }
-
-
 
 func (p *PageLocation) GetFirstRowIndex() int64 {
 	return p.FirstRowIndex
@@ -11204,9 +11694,9 @@ func (p *PageLocation) Read(ctx context.Context, iprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetOffset bool = false;
-	var issetCompressedPageSize bool = false;
-	var issetFirstRowIndex bool = false;
+	var issetOffset bool = false
+	var issetCompressedPageSize bool = false
+	var issetFirstRowIndex bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -11262,14 +11752,14 @@ func (p *PageLocation) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetOffset{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Offset is not set"));
+	if !issetOffset {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Offset is not set"))
 	}
-	if !issetCompressedPageSize{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field CompressedPageSize is not set"));
+	if !issetCompressedPageSize {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field CompressedPageSize is not set"))
 	}
-	if !issetFirstRowIndex{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field FirstRowIndex is not set"));
+	if !issetFirstRowIndex {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field FirstRowIndex is not set"))
 	}
 	return nil
 }
@@ -11306,9 +11796,15 @@ func (p *PageLocation) Write(ctx context.Context, oprot thrift.TProtocol) error 
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -11364,9 +11860,15 @@ func (p *PageLocation) Equals(other *PageLocation) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if p.Offset != other.Offset { return false }
-	if p.CompressedPageSize != other.CompressedPageSize { return false }
-	if p.FirstRowIndex != other.FirstRowIndex { return false }
+	if p.Offset != other.Offset {
+		return false
+	}
+	if p.CompressedPageSize != other.CompressedPageSize {
+		return false
+	}
+	if p.FirstRowIndex != other.FirstRowIndex {
+		return false
+	}
 	return true
 }
 
@@ -11382,7 +11884,7 @@ func (p *PageLocation) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.PageLocation",
+		Type:  "*parquet.PageLocation",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -11395,36 +11897,33 @@ func (p *PageLocation) Validate() error {
 }
 
 // Optional offsets for each data page in a ColumnChunk.
-// 
+//
 // Forms part of the page index, along with ColumnIndex.
-// 
+//
 // OffsetIndex may be present even if ColumnIndex is not.
-// 
+//
 // Attributes:
-//  - PageLocations: PageLocations, ordered by increasing PageLocation.offset. It is required
+//   - PageLocations: PageLocations, ordered by increasing PageLocation.offset. It is required
+//
 // that page_locations[i].first_row_index < page_locations[i+1].first_row_index.
-//  - UnencodedByteArrayDataBytes: Unencoded/uncompressed size for BYTE_ARRAY types.
-// 
+//   - UnencodedByteArrayDataBytes: Unencoded/uncompressed size for BYTE_ARRAY types.
+//
 // See documention for unencoded_byte_array_data_bytes in SizeStatistics for
 // more details on this field.
-// 
 type OffsetIndex struct {
-	PageLocations []*PageLocation `thrift:"page_locations,1,required" db:"page_locations" json:"page_locations"`
-	UnencodedByteArrayDataBytes []int64 `thrift:"unencoded_byte_array_data_bytes,2" db:"unencoded_byte_array_data_bytes" json:"unencoded_byte_array_data_bytes,omitempty"`
+	PageLocations               []*PageLocation `thrift:"page_locations,1,required" db:"page_locations" json:"page_locations"`
+	UnencodedByteArrayDataBytes []int64         `thrift:"unencoded_byte_array_data_bytes,2" db:"unencoded_byte_array_data_bytes" json:"unencoded_byte_array_data_bytes,omitempty"`
 }
 
 func NewOffsetIndex() *OffsetIndex {
 	return &OffsetIndex{}
 }
 
-
-
 func (p *OffsetIndex) GetPageLocations() []*PageLocation {
 	return p.PageLocations
 }
 
 var OffsetIndex_UnencodedByteArrayDataBytes_DEFAULT []int64
-
 
 func (p *OffsetIndex) GetUnencodedByteArrayDataBytes() []int64 {
 	return p.UnencodedByteArrayDataBytes
@@ -11439,7 +11938,7 @@ func (p *OffsetIndex) Read(ctx context.Context, iprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetPageLocations bool = false;
+	var issetPageLocations bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -11483,8 +11982,8 @@ func (p *OffsetIndex) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetPageLocations{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field PageLocations is not set"));
+	if !issetPageLocations {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field PageLocations is not set"))
 	}
 	return nil
 }
@@ -11536,8 +12035,12 @@ func (p *OffsetIndex) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -11598,15 +12101,23 @@ func (p *OffsetIndex) Equals(other *OffsetIndex) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if len(p.PageLocations) != len(other.PageLocations) { return false }
+	if len(p.PageLocations) != len(other.PageLocations) {
+		return false
+	}
 	for i, _tgt := range p.PageLocations {
 		_src20 := other.PageLocations[i]
-		if !_tgt.Equals(_src20) { return false }
+		if !_tgt.Equals(_src20) {
+			return false
+		}
 	}
-	if len(p.UnencodedByteArrayDataBytes) != len(other.UnencodedByteArrayDataBytes) { return false }
+	if len(p.UnencodedByteArrayDataBytes) != len(other.UnencodedByteArrayDataBytes) {
+		return false
+	}
 	for i, _tgt := range p.UnencodedByteArrayDataBytes {
 		_src21 := other.UnencodedByteArrayDataBytes[i]
-		if _tgt != _src21 { return false }
+		if _tgt != _src21 {
+			return false
+		}
 	}
 	return true
 }
@@ -11623,7 +12134,7 @@ func (p *OffsetIndex) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.OffsetIndex",
+		Type:  "*parquet.OffsetIndex",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -11636,21 +12147,23 @@ func (p *OffsetIndex) Validate() error {
 }
 
 // Optional statistics for each data page in a ColumnChunk.
-// 
+//
 // Forms part the page index, along with OffsetIndex.
-// 
+//
 // If this structure is present, OffsetIndex must also be present.
-// 
+//
 // For each field in this structure, <field>[i] refers to the page at
 // OffsetIndex.page_locations[i]
-// 
+//
 // Attributes:
-//  - NullPages: A list of Boolean values to determine the validity of the corresponding
+//   - NullPages: A list of Boolean values to determine the validity of the corresponding
+//
 // min and max values. If true, a page contains only null values, and writers
 // have to set the corresponding entries in min_values and max_values to
 // byte[0], so that all lists have the same length. If false, the
 // corresponding entries in min_values and max_values must be valid.
-//  - MinValues: Two lists containing lower and upper bounds for the values of each page
+//   - MinValues: Two lists containing lower and upper bounds for the values of each page
+//
 // determined by the ColumnOrder of the column. These may be the actual
 // minimum and maximum values found on a page, but can also be (more compact)
 // values that do not exist on a page. For example, instead of storing ""Blart
@@ -11658,66 +12171,58 @@ func (p *OffsetIndex) Validate() error {
 // Such more compact values must still be valid values within the column's
 // logical type. Readers must make sure that list entries are populated before
 // using them by inspecting null_pages.
-//  - MaxValues
-//  - BoundaryOrder: Stores whether both min_values and max_values are ordered and if so, in
+//   - MaxValues
+//   - BoundaryOrder: Stores whether both min_values and max_values are ordered and if so, in
+//
 // which direction. This allows readers to perform binary searches in both
 // lists. Readers cannot assume that max_values[i] <= min_values[i+1], even
 // if the lists are ordered.
-//  - NullCounts: A list containing the number of null values for each page
-// 
+//   - NullCounts: A list containing the number of null values for each page
+//
 // Writers SHOULD always write this field even if no null values
 // are present or the column is not nullable.
 // Readers MUST distinguish between null_counts not being present
 // and null_count being 0.
 // If null_counts are not present, readers MUST NOT assume all
 // null counts are 0.
-//  - RepetitionLevelHistograms: Contains repetition level histograms for each page
+//   - RepetitionLevelHistograms: Contains repetition level histograms for each page
+//
 // concatenated together.  The repetition_level_histogram field on
 // SizeStatistics contains more details.
-// 
+//
 // When present the length should always be (number of pages *
 // (max_repetition_level + 1)) elements.
-// 
+//
 // Element 0 is the first element of the histogram for the first page.
 // Element (max_repetition_level + 1) is the first element of the histogram
 // for the second page.
-// 
-//  - DefinitionLevelHistograms: Same as repetition_level_histograms except for definitions levels.
-// 
-// 
+//
+//   - DefinitionLevelHistograms: Same as repetition_level_histograms except for definitions levels.
 type ColumnIndex struct {
-	NullPages []bool `thrift:"null_pages,1,required" db:"null_pages" json:"null_pages"`
-	MinValues [][]byte `thrift:"min_values,2,required" db:"min_values" json:"min_values"`
-	MaxValues [][]byte `thrift:"max_values,3,required" db:"max_values" json:"max_values"`
-	BoundaryOrder BoundaryOrder `thrift:"boundary_order,4,required" db:"boundary_order" json:"boundary_order"`
-	NullCounts []int64 `thrift:"null_counts,5" db:"null_counts" json:"null_counts,omitempty"`
-	RepetitionLevelHistograms []int64 `thrift:"repetition_level_histograms,6" db:"repetition_level_histograms" json:"repetition_level_histograms,omitempty"`
-	DefinitionLevelHistograms []int64 `thrift:"definition_level_histograms,7" db:"definition_level_histograms" json:"definition_level_histograms,omitempty"`
+	NullPages                 []bool        `thrift:"null_pages,1,required" db:"null_pages" json:"null_pages"`
+	MinValues                 [][]byte      `thrift:"min_values,2,required" db:"min_values" json:"min_values"`
+	MaxValues                 [][]byte      `thrift:"max_values,3,required" db:"max_values" json:"max_values"`
+	BoundaryOrder             BoundaryOrder `thrift:"boundary_order,4,required" db:"boundary_order" json:"boundary_order"`
+	NullCounts                []int64       `thrift:"null_counts,5" db:"null_counts" json:"null_counts,omitempty"`
+	RepetitionLevelHistograms []int64       `thrift:"repetition_level_histograms,6" db:"repetition_level_histograms" json:"repetition_level_histograms,omitempty"`
+	DefinitionLevelHistograms []int64       `thrift:"definition_level_histograms,7" db:"definition_level_histograms" json:"definition_level_histograms,omitempty"`
 }
 
 func NewColumnIndex() *ColumnIndex {
 	return &ColumnIndex{}
 }
 
-
-
 func (p *ColumnIndex) GetNullPages() []bool {
 	return p.NullPages
 }
-
-
 
 func (p *ColumnIndex) GetMinValues() [][]byte {
 	return p.MinValues
 }
 
-
-
 func (p *ColumnIndex) GetMaxValues() [][]byte {
 	return p.MaxValues
 }
-
-
 
 func (p *ColumnIndex) GetBoundaryOrder() BoundaryOrder {
 	return p.BoundaryOrder
@@ -11725,20 +12230,17 @@ func (p *ColumnIndex) GetBoundaryOrder() BoundaryOrder {
 
 var ColumnIndex_NullCounts_DEFAULT []int64
 
-
 func (p *ColumnIndex) GetNullCounts() []int64 {
 	return p.NullCounts
 }
 
 var ColumnIndex_RepetitionLevelHistograms_DEFAULT []int64
 
-
 func (p *ColumnIndex) GetRepetitionLevelHistograms() []int64 {
 	return p.RepetitionLevelHistograms
 }
 
 var ColumnIndex_DefinitionLevelHistograms_DEFAULT []int64
-
 
 func (p *ColumnIndex) GetDefinitionLevelHistograms() []int64 {
 	return p.DefinitionLevelHistograms
@@ -11761,10 +12263,10 @@ func (p *ColumnIndex) Read(ctx context.Context, iprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetNullPages bool = false;
-	var issetMinValues bool = false;
-	var issetMaxValues bool = false;
-	var issetBoundaryOrder bool = false;
+	var issetNullPages bool = false
+	var issetMinValues bool = false
+	var issetMaxValues bool = false
+	var issetBoundaryOrder bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -11861,17 +12363,17 @@ func (p *ColumnIndex) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetNullPages{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NullPages is not set"));
+	if !issetNullPages {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NullPages is not set"))
 	}
-	if !issetMinValues{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field MinValues is not set"));
+	if !issetMinValues {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field MinValues is not set"))
 	}
-	if !issetMaxValues{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field MaxValues is not set"));
+	if !issetMaxValues {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field MaxValues is not set"))
 	}
-	if !issetBoundaryOrder{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field BoundaryOrder is not set"));
+	if !issetBoundaryOrder {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field BoundaryOrder is not set"))
 	}
 	return nil
 }
@@ -12023,13 +12525,27 @@ func (p *ColumnIndex) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
-		if err := p.writeField4(ctx, oprot); err != nil { return err }
-		if err := p.writeField5(ctx, oprot); err != nil { return err }
-		if err := p.writeField6(ctx, oprot); err != nil { return err }
-		if err := p.writeField7(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField4(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField5(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField6(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField7(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -12191,36 +12707,62 @@ func (p *ColumnIndex) Equals(other *ColumnIndex) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if len(p.NullPages) != len(other.NullPages) { return false }
+	if len(p.NullPages) != len(other.NullPages) {
+		return false
+	}
 	for i, _tgt := range p.NullPages {
 		_src28 := other.NullPages[i]
-		if _tgt != _src28 { return false }
+		if _tgt != _src28 {
+			return false
+		}
 	}
-	if len(p.MinValues) != len(other.MinValues) { return false }
+	if len(p.MinValues) != len(other.MinValues) {
+		return false
+	}
 	for i, _tgt := range p.MinValues {
 		_src29 := other.MinValues[i]
-		if bytes.Compare(_tgt, _src29) != 0 { return false }
+		if bytes.Compare(_tgt, _src29) != 0 {
+			return false
+		}
 	}
-	if len(p.MaxValues) != len(other.MaxValues) { return false }
+	if len(p.MaxValues) != len(other.MaxValues) {
+		return false
+	}
 	for i, _tgt := range p.MaxValues {
 		_src30 := other.MaxValues[i]
-		if bytes.Compare(_tgt, _src30) != 0 { return false }
+		if bytes.Compare(_tgt, _src30) != 0 {
+			return false
+		}
 	}
-	if p.BoundaryOrder != other.BoundaryOrder { return false }
-	if len(p.NullCounts) != len(other.NullCounts) { return false }
+	if p.BoundaryOrder != other.BoundaryOrder {
+		return false
+	}
+	if len(p.NullCounts) != len(other.NullCounts) {
+		return false
+	}
 	for i, _tgt := range p.NullCounts {
 		_src31 := other.NullCounts[i]
-		if _tgt != _src31 { return false }
+		if _tgt != _src31 {
+			return false
+		}
 	}
-	if len(p.RepetitionLevelHistograms) != len(other.RepetitionLevelHistograms) { return false }
+	if len(p.RepetitionLevelHistograms) != len(other.RepetitionLevelHistograms) {
+		return false
+	}
 	for i, _tgt := range p.RepetitionLevelHistograms {
 		_src32 := other.RepetitionLevelHistograms[i]
-		if _tgt != _src32 { return false }
+		if _tgt != _src32 {
+			return false
+		}
 	}
-	if len(p.DefinitionLevelHistograms) != len(other.DefinitionLevelHistograms) { return false }
+	if len(p.DefinitionLevelHistograms) != len(other.DefinitionLevelHistograms) {
+		return false
+	}
 	for i, _tgt := range p.DefinitionLevelHistograms {
 		_src33 := other.DefinitionLevelHistograms[i]
-		if _tgt != _src33 { return false }
+		if _tgt != _src33 {
+			return false
+		}
 	}
 	return true
 }
@@ -12237,7 +12779,7 @@ func (p *ColumnIndex) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.ColumnIndex",
+		Type:  "*parquet.ColumnIndex",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -12250,15 +12792,15 @@ func (p *ColumnIndex) Validate() error {
 }
 
 // Attributes:
-//  - AadPrefix: AAD prefix *
-//  - AadFileUnique: Unique file identifier part of AAD suffix *
-//  - SupplyAadPrefix: In files encrypted with AAD prefix without storing it,
+//   - AadPrefix: AAD prefix *
+//   - AadFileUnique: Unique file identifier part of AAD suffix *
+//   - SupplyAadPrefix: In files encrypted with AAD prefix without storing it,
+//
 // readers must supply the prefix *
-// 
 type AesGcmV1 struct {
-	AadPrefix []byte `thrift:"aad_prefix,1" db:"aad_prefix" json:"aad_prefix,omitempty"`
-	AadFileUnique []byte `thrift:"aad_file_unique,2" db:"aad_file_unique" json:"aad_file_unique,omitempty"`
-	SupplyAadPrefix *bool `thrift:"supply_aad_prefix,3" db:"supply_aad_prefix" json:"supply_aad_prefix,omitempty"`
+	AadPrefix       []byte `thrift:"aad_prefix,1" db:"aad_prefix" json:"aad_prefix,omitempty"`
+	AadFileUnique   []byte `thrift:"aad_file_unique,2" db:"aad_file_unique" json:"aad_file_unique,omitempty"`
+	SupplyAadPrefix *bool  `thrift:"supply_aad_prefix,3" db:"supply_aad_prefix" json:"supply_aad_prefix,omitempty"`
 }
 
 func NewAesGcmV1() *AesGcmV1 {
@@ -12267,13 +12809,11 @@ func NewAesGcmV1() *AesGcmV1 {
 
 var AesGcmV1_AadPrefix_DEFAULT []byte
 
-
 func (p *AesGcmV1) GetAadPrefix() []byte {
 	return p.AadPrefix
 }
 
 var AesGcmV1_AadFileUnique_DEFAULT []byte
-
 
 func (p *AesGcmV1) GetAadFileUnique() []byte {
 	return p.AadFileUnique
@@ -12304,7 +12844,6 @@ func (p *AesGcmV1) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -12392,9 +12931,15 @@ func (p *AesGcmV1) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -12456,13 +13001,19 @@ func (p *AesGcmV1) Equals(other *AesGcmV1) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if bytes.Compare(p.AadPrefix, other.AadPrefix) != 0 { return false }
-	if bytes.Compare(p.AadFileUnique, other.AadFileUnique) != 0 { return false }
+	if bytes.Compare(p.AadPrefix, other.AadPrefix) != 0 {
+		return false
+	}
+	if bytes.Compare(p.AadFileUnique, other.AadFileUnique) != 0 {
+		return false
+	}
 	if p.SupplyAadPrefix != other.SupplyAadPrefix {
 		if p.SupplyAadPrefix == nil || other.SupplyAadPrefix == nil {
 			return false
 		}
-		if (*p.SupplyAadPrefix) != (*other.SupplyAadPrefix) { return false }
+		if (*p.SupplyAadPrefix) != (*other.SupplyAadPrefix) {
+			return false
+		}
 	}
 	return true
 }
@@ -12479,7 +13030,7 @@ func (p *AesGcmV1) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.AesGcmV1",
+		Type:  "*parquet.AesGcmV1",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -12492,15 +13043,15 @@ func (p *AesGcmV1) Validate() error {
 }
 
 // Attributes:
-//  - AadPrefix: AAD prefix *
-//  - AadFileUnique: Unique file identifier part of AAD suffix *
-//  - SupplyAadPrefix: In files encrypted with AAD prefix without storing it,
+//   - AadPrefix: AAD prefix *
+//   - AadFileUnique: Unique file identifier part of AAD suffix *
+//   - SupplyAadPrefix: In files encrypted with AAD prefix without storing it,
+//
 // readers must supply the prefix *
-// 
 type AesGcmCtrV1 struct {
-	AadPrefix []byte `thrift:"aad_prefix,1" db:"aad_prefix" json:"aad_prefix,omitempty"`
-	AadFileUnique []byte `thrift:"aad_file_unique,2" db:"aad_file_unique" json:"aad_file_unique,omitempty"`
-	SupplyAadPrefix *bool `thrift:"supply_aad_prefix,3" db:"supply_aad_prefix" json:"supply_aad_prefix,omitempty"`
+	AadPrefix       []byte `thrift:"aad_prefix,1" db:"aad_prefix" json:"aad_prefix,omitempty"`
+	AadFileUnique   []byte `thrift:"aad_file_unique,2" db:"aad_file_unique" json:"aad_file_unique,omitempty"`
+	SupplyAadPrefix *bool  `thrift:"supply_aad_prefix,3" db:"supply_aad_prefix" json:"supply_aad_prefix,omitempty"`
 }
 
 func NewAesGcmCtrV1() *AesGcmCtrV1 {
@@ -12509,13 +13060,11 @@ func NewAesGcmCtrV1() *AesGcmCtrV1 {
 
 var AesGcmCtrV1_AadPrefix_DEFAULT []byte
 
-
 func (p *AesGcmCtrV1) GetAadPrefix() []byte {
 	return p.AadPrefix
 }
 
 var AesGcmCtrV1_AadFileUnique_DEFAULT []byte
-
 
 func (p *AesGcmCtrV1) GetAadFileUnique() []byte {
 	return p.AadFileUnique
@@ -12546,7 +13095,6 @@ func (p *AesGcmCtrV1) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -12634,9 +13182,15 @@ func (p *AesGcmCtrV1) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -12698,13 +13252,19 @@ func (p *AesGcmCtrV1) Equals(other *AesGcmCtrV1) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if bytes.Compare(p.AadPrefix, other.AadPrefix) != 0 { return false }
-	if bytes.Compare(p.AadFileUnique, other.AadFileUnique) != 0 { return false }
+	if bytes.Compare(p.AadPrefix, other.AadPrefix) != 0 {
+		return false
+	}
+	if bytes.Compare(p.AadFileUnique, other.AadFileUnique) != 0 {
+		return false
+	}
 	if p.SupplyAadPrefix != other.SupplyAadPrefix {
 		if p.SupplyAadPrefix == nil || other.SupplyAadPrefix == nil {
 			return false
 		}
-		if (*p.SupplyAadPrefix) != (*other.SupplyAadPrefix) { return false }
+		if (*p.SupplyAadPrefix) != (*other.SupplyAadPrefix) {
+			return false
+		}
 	}
 	return true
 }
@@ -12721,7 +13281,7 @@ func (p *AesGcmCtrV1) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.AesGcmCtrV1",
+		Type:  "*parquet.AesGcmCtrV1",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -12734,11 +13294,10 @@ func (p *AesGcmCtrV1) Validate() error {
 }
 
 // Attributes:
-//  - AES_GCM_V1
-//  - AES_GCM_CTR_V1
-// 
+//   - AES_GCM_V1
+//   - AES_GCM_CTR_V1
 type EncryptionAlgorithm struct {
-	AES_GCM_V1 *AesGcmV1 `thrift:"AES_GCM_V1,1" db:"AES_GCM_V1" json:"AES_GCM_V1,omitempty"`
+	AES_GCM_V1     *AesGcmV1    `thrift:"AES_GCM_V1,1" db:"AES_GCM_V1" json:"AES_GCM_V1,omitempty"`
 	AES_GCM_CTR_V1 *AesGcmCtrV1 `thrift:"AES_GCM_CTR_V1,2" db:"AES_GCM_CTR_V1" json:"AES_GCM_CTR_V1,omitempty"`
 }
 
@@ -12766,10 +13325,10 @@ func (p *EncryptionAlgorithm) GetAES_GCM_CTR_V1() *AesGcmCtrV1 {
 
 func (p *EncryptionAlgorithm) CountSetFieldsEncryptionAlgorithm() int {
 	count := 0
-	if (p.IsSetAES_GCM_V1()) {
+	if p.IsSetAES_GCM_V1() {
 		count++
 	}
-	if (p.IsSetAES_GCM_CTR_V1()) {
+	if p.IsSetAES_GCM_CTR_V1() {
 		count++
 	}
 	return count
@@ -12788,7 +13347,6 @@ func (p *EncryptionAlgorithm) Read(ctx context.Context, iprot thrift.TProtocol) 
 	if _, err := iprot.ReadStructBegin(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
-
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -12858,8 +13416,12 @@ func (p *EncryptionAlgorithm) Write(ctx context.Context, oprot thrift.TProtocol)
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -12906,8 +13468,12 @@ func (p *EncryptionAlgorithm) Equals(other *EncryptionAlgorithm) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if !p.AES_GCM_V1.Equals(other.AES_GCM_V1) { return false }
-	if !p.AES_GCM_CTR_V1.Equals(other.AES_GCM_CTR_V1) { return false }
+	if !p.AES_GCM_V1.Equals(other.AES_GCM_V1) {
+		return false
+	}
+	if !p.AES_GCM_CTR_V1.Equals(other.AES_GCM_CTR_V1) {
+		return false
+	}
 	return true
 }
 
@@ -12923,7 +13489,7 @@ func (p *EncryptionAlgorithm) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.EncryptionAlgorithm",
+		Type:  "*parquet.EncryptionAlgorithm",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -12936,84 +13502,79 @@ func (p *EncryptionAlgorithm) Validate() error {
 }
 
 // Description for file metadata
-// 
+//
 // Attributes:
-//  - Version: Version of this file *
-//  - Schema: Parquet schema for this file.  This schema contains metadata for all the columns.
+//   - Version: Version of this file *
+//   - Schema: Parquet schema for this file.  This schema contains metadata for all the columns.
+//
 // The schema is represented as a tree with a single root.  The nodes of the tree
 // are flattened to a list by doing a depth-first traversal.
 // The column metadata contains the path in the schema for that column which can be
 // used to map columns to nodes in the schema.
 // The first element is the root *
-//  - NumRows: Number of rows in this file *
-//  - RowGroups: Row groups in this file *
-//  - KeyValueMetadata: Optional key/value metadata *
-//  - CreatedBy: String for application that wrote this file.  This should be in the format
+//   - NumRows: Number of rows in this file *
+//   - RowGroups: Row groups in this file *
+//   - KeyValueMetadata: Optional key/value metadata *
+//   - CreatedBy: String for application that wrote this file.  This should be in the format
+//
 // <Application> version <App Version> (build <App Build Hash>).
 // e.g. impala version 1.0 (build 6cf94d29b2b7115df4de2c06e2ab4326d721eb55)
-// 
-//  - ColumnOrders: Sort order used for the min_value and max_value fields in the Statistics
+//
+//   - ColumnOrders: Sort order used for the min_value and max_value fields in the Statistics
+//
 // objects and the min_values and max_values fields in the ColumnIndex
 // objects of each column in this file. Sort orders are listed in the order
 // matching the columns in the schema. The indexes are not necessary the same
 // though, because only leaf nodes of the schema are represented in the list
 // of sort orders.
-// 
+//
 // Without column_orders, the meaning of the min_value and max_value fields
 // in the Statistics object and the ColumnIndex object is undefined. To ensure
 // well-defined behaviour, if these fields are written to a Parquet file,
 // column_orders must be written as well.
-// 
+//
 // The obsolete min and max fields in the Statistics object are always sorted
 // by signed comparison regardless of column_orders.
-//  - EncryptionAlgorithm: Encryption algorithm. This field is set only in encrypted files
+//   - EncryptionAlgorithm: Encryption algorithm. This field is set only in encrypted files
+//
 // with plaintext footer. Files with encrypted footer store algorithm id
 // in FileCryptoMetaData structure.
-//  - FooterSigningKeyMetadata: Retrieval metadata of key used for signing the footer.
+//   - FooterSigningKeyMetadata: Retrieval metadata of key used for signing the footer.
+//
 // Used only in encrypted files with plaintext footer.
-// 
 type FileMetaData struct {
-	Version int32 `thrift:"version,1,required" db:"version" json:"version"`
-	Schema []*SchemaElement `thrift:"schema,2,required" db:"schema" json:"schema"`
-	NumRows int64 `thrift:"num_rows,3,required" db:"num_rows" json:"num_rows"`
-	RowGroups []*RowGroup `thrift:"row_groups,4,required" db:"row_groups" json:"row_groups"`
-	KeyValueMetadata []*KeyValue `thrift:"key_value_metadata,5" db:"key_value_metadata" json:"key_value_metadata,omitempty"`
-	CreatedBy *string `thrift:"created_by,6" db:"created_by" json:"created_by,omitempty"`
-	ColumnOrders []*ColumnOrder `thrift:"column_orders,7" db:"column_orders" json:"column_orders,omitempty"`
-	EncryptionAlgorithm *EncryptionAlgorithm `thrift:"encryption_algorithm,8" db:"encryption_algorithm" json:"encryption_algorithm,omitempty"`
-	FooterSigningKeyMetadata []byte `thrift:"footer_signing_key_metadata,9" db:"footer_signing_key_metadata" json:"footer_signing_key_metadata,omitempty"`
+	Version                  int32                `thrift:"version,1,required" db:"version" json:"version"`
+	Schema                   []*SchemaElement     `thrift:"schema,2,required" db:"schema" json:"schema"`
+	NumRows                  int64                `thrift:"num_rows,3,required" db:"num_rows" json:"num_rows"`
+	RowGroups                []*RowGroup          `thrift:"row_groups,4,required" db:"row_groups" json:"row_groups"`
+	KeyValueMetadata         []*KeyValue          `thrift:"key_value_metadata,5" db:"key_value_metadata" json:"key_value_metadata,omitempty"`
+	CreatedBy                *string              `thrift:"created_by,6" db:"created_by" json:"created_by,omitempty"`
+	ColumnOrders             []*ColumnOrder       `thrift:"column_orders,7" db:"column_orders" json:"column_orders,omitempty"`
+	EncryptionAlgorithm      *EncryptionAlgorithm `thrift:"encryption_algorithm,8" db:"encryption_algorithm" json:"encryption_algorithm,omitempty"`
+	FooterSigningKeyMetadata []byte               `thrift:"footer_signing_key_metadata,9" db:"footer_signing_key_metadata" json:"footer_signing_key_metadata,omitempty"`
 }
 
 func NewFileMetaData() *FileMetaData {
 	return &FileMetaData{}
 }
 
-
-
 func (p *FileMetaData) GetVersion() int32 {
 	return p.Version
 }
-
-
 
 func (p *FileMetaData) GetSchema() []*SchemaElement {
 	return p.Schema
 }
 
-
-
 func (p *FileMetaData) GetNumRows() int64 {
 	return p.NumRows
 }
-
-
 
 func (p *FileMetaData) GetRowGroups() []*RowGroup {
 	return p.RowGroups
 }
 
 var FileMetaData_KeyValueMetadata_DEFAULT []*KeyValue
-
 
 func (p *FileMetaData) GetKeyValueMetadata() []*KeyValue {
 	return p.KeyValueMetadata
@@ -13030,7 +13591,6 @@ func (p *FileMetaData) GetCreatedBy() string {
 
 var FileMetaData_ColumnOrders_DEFAULT []*ColumnOrder
 
-
 func (p *FileMetaData) GetColumnOrders() []*ColumnOrder {
 	return p.ColumnOrders
 }
@@ -13045,7 +13605,6 @@ func (p *FileMetaData) GetEncryptionAlgorithm() *EncryptionAlgorithm {
 }
 
 var FileMetaData_FooterSigningKeyMetadata_DEFAULT []byte
-
 
 func (p *FileMetaData) GetFooterSigningKeyMetadata() []byte {
 	return p.FooterSigningKeyMetadata
@@ -13076,10 +13635,10 @@ func (p *FileMetaData) Read(ctx context.Context, iprot thrift.TProtocol) error {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetVersion bool = false;
-	var issetSchema bool = false;
-	var issetNumRows bool = false;
-	var issetRowGroups bool = false;
+	var issetVersion bool = false
+	var issetSchema bool = false
+	var issetNumRows bool = false
+	var issetRowGroups bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -13196,17 +13755,17 @@ func (p *FileMetaData) Read(ctx context.Context, iprot thrift.TProtocol) error {
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetVersion{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Version is not set"));
+	if !issetVersion {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Version is not set"))
 	}
-	if !issetSchema{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Schema is not set"));
+	if !issetSchema {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Schema is not set"))
 	}
-	if !issetNumRows{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumRows is not set"));
+	if !issetNumRows {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumRows is not set"))
 	}
-	if !issetRowGroups{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field RowGroups is not set"));
+	if !issetRowGroups {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field RowGroups is not set"))
 	}
 	return nil
 }
@@ -13340,15 +13899,33 @@ func (p *FileMetaData) Write(ctx context.Context, oprot thrift.TProtocol) error 
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
-		if err := p.writeField3(ctx, oprot); err != nil { return err }
-		if err := p.writeField4(ctx, oprot); err != nil { return err }
-		if err := p.writeField5(ctx, oprot); err != nil { return err }
-		if err := p.writeField6(ctx, oprot); err != nil { return err }
-		if err := p.writeField7(ctx, oprot); err != nil { return err }
-		if err := p.writeField8(ctx, oprot); err != nil { return err }
-		if err := p.writeField9(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField3(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField4(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField5(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField6(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField7(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField8(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField9(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -13524,36 +14101,62 @@ func (p *FileMetaData) Equals(other *FileMetaData) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if p.Version != other.Version { return false }
-	if len(p.Schema) != len(other.Schema) { return false }
+	if p.Version != other.Version {
+		return false
+	}
+	if len(p.Schema) != len(other.Schema) {
+		return false
+	}
 	for i, _tgt := range p.Schema {
 		_src38 := other.Schema[i]
-		if !_tgt.Equals(_src38) { return false }
+		if !_tgt.Equals(_src38) {
+			return false
+		}
 	}
-	if p.NumRows != other.NumRows { return false }
-	if len(p.RowGroups) != len(other.RowGroups) { return false }
+	if p.NumRows != other.NumRows {
+		return false
+	}
+	if len(p.RowGroups) != len(other.RowGroups) {
+		return false
+	}
 	for i, _tgt := range p.RowGroups {
 		_src39 := other.RowGroups[i]
-		if !_tgt.Equals(_src39) { return false }
+		if !_tgt.Equals(_src39) {
+			return false
+		}
 	}
-	if len(p.KeyValueMetadata) != len(other.KeyValueMetadata) { return false }
+	if len(p.KeyValueMetadata) != len(other.KeyValueMetadata) {
+		return false
+	}
 	for i, _tgt := range p.KeyValueMetadata {
 		_src40 := other.KeyValueMetadata[i]
-		if !_tgt.Equals(_src40) { return false }
+		if !_tgt.Equals(_src40) {
+			return false
+		}
 	}
 	if p.CreatedBy != other.CreatedBy {
 		if p.CreatedBy == nil || other.CreatedBy == nil {
 			return false
 		}
-		if (*p.CreatedBy) != (*other.CreatedBy) { return false }
+		if (*p.CreatedBy) != (*other.CreatedBy) {
+			return false
+		}
 	}
-	if len(p.ColumnOrders) != len(other.ColumnOrders) { return false }
+	if len(p.ColumnOrders) != len(other.ColumnOrders) {
+		return false
+	}
 	for i, _tgt := range p.ColumnOrders {
 		_src41 := other.ColumnOrders[i]
-		if !_tgt.Equals(_src41) { return false }
+		if !_tgt.Equals(_src41) {
+			return false
+		}
 	}
-	if !p.EncryptionAlgorithm.Equals(other.EncryptionAlgorithm) { return false }
-	if bytes.Compare(p.FooterSigningKeyMetadata, other.FooterSigningKeyMetadata) != 0 { return false }
+	if !p.EncryptionAlgorithm.Equals(other.EncryptionAlgorithm) {
+		return false
+	}
+	if bytes.Compare(p.FooterSigningKeyMetadata, other.FooterSigningKeyMetadata) != 0 {
+		return false
+	}
 	return true
 }
 
@@ -13569,7 +14172,7 @@ func (p *FileMetaData) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.FileMetaData",
+		Type:  "*parquet.FileMetaData",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -13582,17 +14185,18 @@ func (p *FileMetaData) Validate() error {
 }
 
 // Crypto metadata for files with encrypted footer *
-// 
+//
 // Attributes:
-//  - EncryptionAlgorithm: Encryption algorithm. This field is only used for files
+//   - EncryptionAlgorithm: Encryption algorithm. This field is only used for files
+//
 // with encrypted footer. Files with plaintext footer store algorithm id
 // inside footer (FileMetaData structure).
-//  - KeyMetadata: Retrieval metadata of key used for encryption of footer,
+//   - KeyMetadata: Retrieval metadata of key used for encryption of footer,
+//
 // and (possibly) columns *
-// 
 type FileCryptoMetaData struct {
 	EncryptionAlgorithm *EncryptionAlgorithm `thrift:"encryption_algorithm,1,required" db:"encryption_algorithm" json:"encryption_algorithm"`
-	KeyMetadata []byte `thrift:"key_metadata,2" db:"key_metadata" json:"key_metadata,omitempty"`
+	KeyMetadata         []byte               `thrift:"key_metadata,2" db:"key_metadata" json:"key_metadata,omitempty"`
 }
 
 func NewFileCryptoMetaData() *FileCryptoMetaData {
@@ -13609,7 +14213,6 @@ func (p *FileCryptoMetaData) GetEncryptionAlgorithm() *EncryptionAlgorithm {
 }
 
 var FileCryptoMetaData_KeyMetadata_DEFAULT []byte
-
 
 func (p *FileCryptoMetaData) GetKeyMetadata() []byte {
 	return p.KeyMetadata
@@ -13628,7 +14231,7 @@ func (p *FileCryptoMetaData) Read(ctx context.Context, iprot thrift.TProtocol) e
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
 
-	var issetEncryptionAlgorithm bool = false;
+	var issetEncryptionAlgorithm bool = false
 
 	for {
 		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
@@ -13672,8 +14275,8 @@ func (p *FileCryptoMetaData) Read(ctx context.Context, iprot thrift.TProtocol) e
 	if err := iprot.ReadStructEnd(ctx); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
 	}
-	if !issetEncryptionAlgorithm{
-		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field EncryptionAlgorithm is not set"));
+	if !issetEncryptionAlgorithm {
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field EncryptionAlgorithm is not set"))
 	}
 	return nil
 }
@@ -13700,8 +14303,12 @@ func (p *FileCryptoMetaData) Write(ctx context.Context, oprot thrift.TProtocol) 
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if p != nil {
-		if err := p.writeField1(ctx, oprot); err != nil { return err }
-		if err := p.writeField2(ctx, oprot); err != nil { return err }
+		if err := p.writeField1(ctx, oprot); err != nil {
+			return err
+		}
+		if err := p.writeField2(ctx, oprot); err != nil {
+			return err
+		}
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -13746,8 +14353,12 @@ func (p *FileCryptoMetaData) Equals(other *FileCryptoMetaData) bool {
 	} else if p == nil || other == nil {
 		return false
 	}
-	if !p.EncryptionAlgorithm.Equals(other.EncryptionAlgorithm) { return false }
-	if bytes.Compare(p.KeyMetadata, other.KeyMetadata) != 0 { return false }
+	if !p.EncryptionAlgorithm.Equals(other.EncryptionAlgorithm) {
+		return false
+	}
+	if bytes.Compare(p.KeyMetadata, other.KeyMetadata) != 0 {
+		return false
+	}
 	return true
 }
 
@@ -13763,7 +14374,7 @@ func (p *FileCryptoMetaData) LogValue() slog.Value {
 		return slog.AnyValue(nil)
 	}
 	v := thrift.SlogTStructWrapper{
-		Type: "*parquet.FileCryptoMetaData",
+		Type:  "*parquet.FileCryptoMetaData",
 		Value: p,
 	}
 	return slog.AnyValue(v)
@@ -13774,4 +14385,3 @@ var _ slog.LogValuer = (*FileCryptoMetaData)(nil)
 func (p *FileCryptoMetaData) Validate() error {
 	return nil
 }
-

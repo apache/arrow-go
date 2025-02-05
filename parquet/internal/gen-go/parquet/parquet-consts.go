@@ -7,11 +7,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
-	"time"
 	thrift "github.com/apache/thrift/lib/go/thrift"
-	"strings"
+	"log/slog"
 	"regexp"
+	"strings"
+	"time"
 )
 
 // (needed to ensure safety because of naive import list construction.)
@@ -22,11 +22,10 @@ var _ = fmt.Printf
 var _ = slog.Log
 var _ = time.Now
 var _ = thrift.ZERO
+
 // (needed by validator.)
 var _ = strings.Contains
 var _ = regexp.MatchString
 
-
 func init() {
 }
-
