@@ -465,20 +465,24 @@ type bitOp struct {
 
 var (
 	bitAndOp = bitOp{
-		opWord: func(l, r uint64) uint64 { return l & r },
-		opByte: func(l, r byte) byte { return l & r },
+		opWord:    func(l, r uint64) uint64 { return l & r },
+		opByte:    func(l, r byte) byte { return l & r },
+		opAligned: alignedBitAndGo,
 	}
 	bitOrOp = bitOp{
-		opWord: func(l, r uint64) uint64 { return l | r },
-		opByte: func(l, r byte) byte { return l | r },
+		opWord:    func(l, r uint64) uint64 { return l | r },
+		opByte:    func(l, r byte) byte { return l | r },
+		opAligned: alignedBitOrGo,
 	}
 	bitAndNotOp = bitOp{
-		opWord: func(l, r uint64) uint64 { return l &^ r },
-		opByte: func(l, r byte) byte { return l &^ r },
+		opWord:    func(l, r uint64) uint64 { return l &^ r },
+		opByte:    func(l, r byte) byte { return l &^ r },
+		opAligned: alignedBitAndNotGo,
 	}
 	bitXorOp = bitOp{
-		opWord: func(l, r uint64) uint64 { return l ^ r },
-		opByte: func(l, r byte) byte { return l ^ r },
+		opWord:    func(l, r uint64) uint64 { return l ^ r },
+		opByte:    func(l, r byte) byte { return l ^ r },
+		opAligned: alignedBitXorGo,
 	}
 )
 
