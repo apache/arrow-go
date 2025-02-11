@@ -378,7 +378,7 @@ jobs:
         run: |
           ci/scripts/util_free_space.sh
       - name: Cache Docker Volumes
-        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+        uses: actions/cache@b7a00a3203cfa62623760990f5171f9b4a2ab1a7 # v4.0.2
         with:
           path: .docker
           key: integration-conda-${{ hashFiles('cpp/**') }}
