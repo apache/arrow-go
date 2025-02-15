@@ -92,8 +92,8 @@ func encodeByteStreamSplitWidth8(data []byte, in []byte) {
 // into the output buffer 'out' using BYTE_STREAM_SPLIT encoding.
 // 'out' must have space for at least len(data) bytes.
 func decodeByteStreamSplitBatchWidth4(data []byte, nValues, stride int, out []byte) {
-	debug.Assert(len(out) >= len(data), fmt.Sprintf("not enough space in output buffer for decoding, out: %d bytes, data: %d bytes", len(out), len(data)))
 	const width = 4
+	debug.Assert(len(out) >= nValues*width, fmt.Sprintf("not enough space in output buffer for decoding, out: %d bytes, data: %d bytes", len(out), len(data)))
 	for element := 0; element < nValues; element++ {
 		out[width*element] = data[element]
 		out[width*element+1] = data[stride+element]
@@ -106,8 +106,8 @@ func decodeByteStreamSplitBatchWidth4(data []byte, nValues, stride int, out []by
 // into the output buffer 'out' using BYTE_STREAM_SPLIT encoding.
 // 'out' must have space for at least len(data) bytes.
 func decodeByteStreamSplitBatchWidth8(data []byte, nValues, stride int, out []byte) {
-	debug.Assert(len(out) >= len(data), fmt.Sprintf("not enough space in output buffer for decoding, out: %d bytes, data: %d bytes", len(out), len(data)))
 	const width = 8
+	debug.Assert(len(out) >= nValues*width, fmt.Sprintf("not enough space in output buffer for decoding, out: %d bytes, data: %d bytes", len(out), len(data)))
 	for element := 0; element < nValues; element++ {
 		out[width*element] = data[element]
 		out[width*element+1] = data[stride+element]
