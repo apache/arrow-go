@@ -289,6 +289,35 @@ func (b *BitReader) GetBatchBools(out []bool) (int, error) {
 	return i, nil
 }
 
+func (b *BitReader) Discard(bits uint, n int) (int, error) {
+	if bits > 64 {
+		return 0, errors.New("must be 64 bits or less per read")
+	}
+
+	i := 0
+	for ; i < n && b.bitoffset != 0; i++ {
+		if _, err := b.next(bits); err != nil {
+			return i, err
+		}
+	}
+
+	if n-i > 32 {
+		toSkip := (n - i) / 32 * 32
+
+		bytesToSkip := bitutil.BytesForBits(int64(toSkip * int(bits)))
+		b.byteoffset += int64(bytesToSkip)
+		i += toSkip
+	}
+
+	b.fillbuffer()
+	for ; i < n; i++ {
+		if _, err := b.next(bits); err != nil {
+			return i, err
+		}
+	}
+	return n, nil
+}
+
 // GetBatch fills out by decoding values repeated from the stream that are encoded
 // using bits as the number of bits per value. The values are expected to be bit packed
 // so we will unpack the values to populate.

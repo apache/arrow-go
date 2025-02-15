@@ -181,6 +181,45 @@ func (d *DeltaByteArrayDecoder) SetData(nvalues int, data []byte) error {
 	return d.DeltaLengthByteArrayDecoder.SetData(nvalues, data[int(prefixLenDec.bytesRead()):])
 }
 
+func (d *DeltaByteArrayDecoder) Discard(n int) (int, error) {
+	n = min(n, d.nvals)
+	if n == 0 {
+		return 0, nil
+	}
+
+	remaining := n
+	tmp := make([]parquet.ByteArray, 1)
+	if d.lastVal == nil {
+		if _, err := d.DeltaLengthByteArrayDecoder.Decode(tmp); err != nil {
+			return 0, err
+		}
+		d.lastVal = tmp[0]
+		d.prefixLengths = d.prefixLengths[1:]
+		remaining--
+	}
+
+	var prefixLen int32
+	for remaining > 0 {
+		prefixLen, d.prefixLengths = d.prefixLengths[0], d.prefixLengths[1:]
+		prefix := d.lastVal[:prefixLen:prefixLen]
+
+		if _, err := d.DeltaLengthByteArrayDecoder.Decode(tmp); err != nil {
+			return n - remaining, err
+		}
+
+		if len(tmp[0]) == 0 {
+			d.lastVal = prefix
+		} else {
+			d.lastVal = make([]byte, int(prefixLen)+len(tmp[0]))
+			copy(d.lastVal, prefix)
+			copy(d.lastVal[prefixLen:], tmp[0])
+		}
+		remaining--
+	}
+
+	return n, nil
+}
+
 // Decode decodes byte arrays into the slice provided and returns the number of values actually decoded
 func (d *DeltaByteArrayDecoder) Decode(out []parquet.ByteArray) (int, error) {
 	max := utils.Min(len(out), d.nvals)

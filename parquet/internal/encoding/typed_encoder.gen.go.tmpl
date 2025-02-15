@@ -276,6 +276,18 @@ func (Dict{{.Name}}Decoder) Type() parquet.Type {
   return parquet.Types.{{if .physical}}{{.physical}}{{else}}{{.Name}}{{end}}
 }
 
+func (d *Dict{{.Name}}Decoder) Discard(n int) (int, error) {
+  n = min(n, d.nvals)
+  discarded, err := d.discard(n)
+  if err != nil {
+    return discarded, err
+  }
+  if n != discarded {
+    return discarded, errors.New("parquet: dict eof exception")
+  }
+  return n, nil
+}
+
 // Decode populates the passed in slice with min(len(out), remaining values) values,
 // decoding using the dictionary to get the actual values. Returns the number of values
 // actually decoded and any error encountered.

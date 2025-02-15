@@ -17,6 +17,7 @@
 package encoding
 
 import (
+	"errors"
 	"fmt"
 	"math"
 
@@ -35,6 +36,18 @@ func (PlainFixedLenByteArrayDecoder) Type() parquet.Type {
 	return parquet.Types.FixedLenByteArray
 }
 
+func (pflba *PlainFixedLenByteArrayDecoder) Discard(n int) (int, error) {
+	n = min(n, pflba.nvals)
+	numBytesNeeded := n * pflba.typeLen
+	if numBytesNeeded > len(pflba.data) || numBytesNeeded > math.MaxInt32 {
+		return 0, errors.New("parquet: eof exception")
+	}
+
+	pflba.data = pflba.data[numBytesNeeded:]
+	pflba.nvals -= n
+	return n, nil
+}
+
 // Decode populates out with fixed length byte array values until either there are no more
 // values to decode or the length of out has been filled. Then returns the total number of values
 // that were decoded.
@@ -49,6 +62,8 @@ func (pflba *PlainFixedLenByteArrayDecoder) Decode(out []parquet.FixedLenByteArr
 		out[idx] = pflba.data[:pflba.typeLen]
 		pflba.data = pflba.data[pflba.typeLen:]
 	}
+
+	pflba.nvals -= max
 	return max, nil
 }
 
@@ -92,8 +107,20 @@ func (dec *ByteStreamSplitFixedLenByteArrayDecoder) SetData(nvals int, data []by
 	return dec.decoder.SetData(nvals, data)
 }
 
+func (dec *ByteStreamSplitFixedLenByteArrayDecoder) Discard(n int) (int, error) {
+	n = min(n, dec.nvals)
+	numBytesNeeded := n * dec.typeLen
+	if numBytesNeeded > len(dec.data) || numBytesNeeded > math.MaxInt32 {
+		return 0, errors.New("parquet: eof exception")
+	}
+
+	dec.nvals -= n
+	dec.data = dec.data[n:]
+	return n, nil
+}
+
 func (dec *ByteStreamSplitFixedLenByteArrayDecoder) Decode(out []parquet.FixedLenByteArray) (int, error) {
-	toRead := len(out)
+	toRead := min(len(out), dec.nvals)
 	numBytesNeeded := toRead * dec.typeLen
 	if numBytesNeeded > len(dec.data) || numBytesNeeded > math.MaxInt32 {
 		return 0, xerrors.New("parquet: eof exception")

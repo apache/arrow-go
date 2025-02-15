@@ -18,6 +18,7 @@ package encoding
 
 import (
 	"encoding/binary"
+	"errors"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -42,6 +43,31 @@ type PlainByteArrayDecoder struct {
 // Type returns parquet.Types.ByteArray for this decoder
 func (PlainByteArrayDecoder) Type() parquet.Type {
 	return parquet.Types.ByteArray
+}
+
+func (pbad *PlainByteArrayDecoder) Discard(n int) (int, error) {
+	n = min(n, pbad.nvals)
+	// we have to skip the length of each value by first checking
+	// the length of the value and then skipping that many bytes
+	for i := 0; i < n; i++ {
+		if len(pbad.data) < 4 {
+			return i, errors.New("parquet: eof skipping bytearray values")
+		}
+
+		valueLen := int32(binary.LittleEndian.Uint32(pbad.data[:4]))
+		if valueLen < 0 {
+			return i, errors.New("parquet: invalid BYTE_ARRAY value")
+		}
+
+		if int64(len(pbad.data)) < int64(valueLen)+4 {
+			return i, errors.New("parquet: eof skipping bytearray values")
+		}
+
+		pbad.data = pbad.data[valueLen+4:]
+	}
+
+	pbad.nvals -= n
+	return n, nil
 }
 
 // Decode will populate the slice of bytearrays in full or until the number

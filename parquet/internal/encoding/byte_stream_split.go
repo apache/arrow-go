@@ -351,9 +351,16 @@ func (dec *ByteStreamSplitDecoder[T]) SetData(nvals int, data []byte) error {
 	return dec.decoder.SetData(nvals, data)
 }
 
+func (dec *ByteStreamSplitDecoder[T]) Discard(n int) (int, error) {
+	n = min(n, dec.nvals)
+	dec.nvals -= n
+	dec.data = dec.data[n:]
+	return n, nil
+}
+
 func (dec *ByteStreamSplitDecoder[T]) Decode(out []T) (int, error) {
 	typeLen := dec.Type().ByteSize()
-	toRead := len(out)
+	toRead := min(len(out), dec.nvals)
 	numBytesNeeded := toRead * typeLen
 	if numBytesNeeded > len(dec.data) || numBytesNeeded > math.MaxInt32 {
 		return 0, xerrors.New("parquet: eof exception")

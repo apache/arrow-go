@@ -123,6 +123,16 @@ func (d *DeltaLengthByteArrayDecoder) SetData(nvalues int, data []byte) error {
 	return d.decoder.SetData(nvalues, data[int(dec.bytesRead()):])
 }
 
+func (d *DeltaLengthByteArrayDecoder) Discard(n int) (int, error) {
+	n = min(n, d.nvals)
+	for i := 0; i < n; i++ {
+		d.data = d.data[d.lengths[i]:]
+	}
+	d.nvals -= n
+	d.lengths = d.lengths[n:]
+	return n, nil
+}
+
 // Decode populates the passed in slice with data decoded until it hits the length of out
 // or runs out of values in the column to decode, then returns the number of values actually decoded.
 func (d *DeltaLengthByteArrayDecoder) Decode(out []parquet.ByteArray) (int, error) {

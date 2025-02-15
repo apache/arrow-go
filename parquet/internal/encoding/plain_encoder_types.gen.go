@@ -168,6 +168,18 @@ func (PlainInt32Decoder) Type() parquet.Type {
 	return parquet.Types.Int32
 }
 
+func (dec *PlainInt32Decoder) Discard(n int) (int, error) {
+	n = min(n, dec.nvals)
+	nbytes := int64(n) * int64(arrow.Int32SizeBytes)
+	if nbytes > int64(len(dec.data)) || nbytes > math.MaxInt32 {
+		return 0, fmt.Errorf("parquet: eof exception discard plain Int32, nvals: %d, nbytes: %d, datalen: %d", dec.nvals, nbytes, len(dec.data))
+	}
+
+	dec.data = dec.data[nbytes:]
+	dec.nvals -= n
+	return n, nil
+}
+
 // Decode populates the given slice with values from the data to be decoded,
 // decoding the min(len(out), remaining values).
 // It returns the number of values actually decoded and any error encountered.
@@ -271,6 +283,18 @@ type PlainInt64Decoder struct {
 // Type returns the physical type this decoder is able to decode for
 func (PlainInt64Decoder) Type() parquet.Type {
 	return parquet.Types.Int64
+}
+
+func (dec *PlainInt64Decoder) Discard(n int) (int, error) {
+	n = min(n, dec.nvals)
+	nbytes := int64(n) * int64(arrow.Int64SizeBytes)
+	if nbytes > int64(len(dec.data)) || nbytes > math.MaxInt32 {
+		return 0, fmt.Errorf("parquet: eof exception discard plain Int64, nvals: %d, nbytes: %d, datalen: %d", dec.nvals, nbytes, len(dec.data))
+	}
+
+	dec.data = dec.data[nbytes:]
+	dec.nvals -= n
+	return n, nil
 }
 
 // Decode populates the given slice with values from the data to be decoded,
@@ -378,6 +402,18 @@ func (PlainInt96Decoder) Type() parquet.Type {
 	return parquet.Types.Int96
 }
 
+func (dec *PlainInt96Decoder) Discard(n int) (int, error) {
+	n = min(n, dec.nvals)
+	nbytes := int64(n) * int64(parquet.Int96SizeBytes)
+	if nbytes > int64(len(dec.data)) || nbytes > math.MaxInt32 {
+		return 0, fmt.Errorf("parquet: eof exception discard plain Int96, nvals: %d, nbytes: %d, datalen: %d", dec.nvals, nbytes, len(dec.data))
+	}
+
+	dec.data = dec.data[nbytes:]
+	dec.nvals -= n
+	return n, nil
+}
+
 // Decode populates the given slice with values from the data to be decoded,
 // decoding the min(len(out), remaining values).
 // It returns the number of values actually decoded and any error encountered.
@@ -483,6 +519,18 @@ func (PlainFloat32Decoder) Type() parquet.Type {
 	return parquet.Types.Float
 }
 
+func (dec *PlainFloat32Decoder) Discard(n int) (int, error) {
+	n = min(n, dec.nvals)
+	nbytes := int64(n) * int64(arrow.Float32SizeBytes)
+	if nbytes > int64(len(dec.data)) || nbytes > math.MaxInt32 {
+		return 0, fmt.Errorf("parquet: eof exception discard plain Float32, nvals: %d, nbytes: %d, datalen: %d", dec.nvals, nbytes, len(dec.data))
+	}
+
+	dec.data = dec.data[nbytes:]
+	dec.nvals -= n
+	return n, nil
+}
+
 // Decode populates the given slice with values from the data to be decoded,
 // decoding the min(len(out), remaining values).
 // It returns the number of values actually decoded and any error encountered.
@@ -586,6 +634,18 @@ type PlainFloat64Decoder struct {
 // Type returns the physical type this decoder is able to decode for
 func (PlainFloat64Decoder) Type() parquet.Type {
 	return parquet.Types.Double
+}
+
+func (dec *PlainFloat64Decoder) Discard(n int) (int, error) {
+	n = min(n, dec.nvals)
+	nbytes := int64(n) * int64(arrow.Float64SizeBytes)
+	if nbytes > int64(len(dec.data)) || nbytes > math.MaxInt32 {
+		return 0, fmt.Errorf("parquet: eof exception discard plain Float64, nvals: %d, nbytes: %d, datalen: %d", dec.nvals, nbytes, len(dec.data))
+	}
+
+	dec.data = dec.data[nbytes:]
+	dec.nvals -= n
+	return n, nil
 }
 
 // Decode populates the given slice with values from the data to be decoded,
