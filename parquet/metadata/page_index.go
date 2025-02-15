@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sync"
 
 	"github.com/JohnCGriffin/overflow"
 	"github.com/apache/arrow-go/v18/arrow"
@@ -293,12 +294,29 @@ type RowGroupPageIndexReader struct {
 	// buffers to hold raw bytes of page index
 	// will be lazily set when the corresponding page index is accessed
 	colIndexBuffer, offsetIndexBuffer []byte
+
+	// cache of column indexes
+	colIndexes map[int]ColumnIndex
+	// cache of offset indices
+	offsetIndices map[int]OffsetIndex
+	mx            sync.Mutex
 }
 
 func (r *RowGroupPageIndexReader) GetColumnIndex(i int) (ColumnIndex, error) {
 	if i < 0 || i >= r.rowGroupMetadata.NumColumns() {
 		return nil, fmt.Errorf("%w: invalid column index at column ordinal %d",
 			arrow.ErrInvalid, i)
+	}
+
+	r.mx.Lock()
+	defer r.mx.Unlock()
+
+	if r.colIndexes == nil {
+		r.colIndexes = make(map[int]ColumnIndex)
+	} else {
+		if idx, ok := r.colIndexes[i]; ok {
+			return idx, nil
+		}
 	}
 
 	colChunk, err := r.rowGroupMetadata.ColumnChunk(i)
@@ -334,13 +352,26 @@ func (r *RowGroupPageIndexReader) GetColumnIndex(i int) (ColumnIndex, error) {
 			int16(i), encryption.ColumnIndexModule)
 	}
 
-	return NewColumnIndex(descr, r.colIndexBuffer[bufferOffset:], r.props, decryptor), nil
+	idx := NewColumnIndex(descr, r.colIndexBuffer[bufferOffset:], r.props, decryptor)
+	r.colIndexes[i] = idx
+	return idx, nil
 }
 
 func (r *RowGroupPageIndexReader) GetOffsetIndex(i int) (OffsetIndex, error) {
 	if i < 0 || i >= r.rowGroupMetadata.NumColumns() {
 		return nil, fmt.Errorf("%w: invalid column index at column ordinal %d",
 			arrow.ErrInvalid, i)
+	}
+
+	r.mx.Lock()
+	defer r.mx.Unlock()
+
+	if r.offsetIndices == nil {
+		r.offsetIndices = make(map[int]OffsetIndex)
+	} else {
+		if idx, ok := r.offsetIndices[i]; ok {
+			return idx, nil
+		}
 	}
 
 	colChunk, err := r.rowGroupMetadata.ColumnChunk(i)
@@ -375,7 +406,9 @@ func (r *RowGroupPageIndexReader) GetOffsetIndex(i int) (OffsetIndex, error) {
 			int16(i), encryption.OffsetIndexModule)
 	}
 
-	return NewOffsetIndex(r.offsetIndexBuffer[bufferOffset:], r.props, decryptor), nil
+	oidx := NewOffsetIndex(r.offsetIndexBuffer[bufferOffset:], r.props, decryptor)
+	r.offsetIndices[i] = oidx
+	return oidx, nil
 }
 
 // PageIndexReader is a read-only object for retrieving the Column and Offset indexes
@@ -412,36 +445,27 @@ func determinePageIndexRangesInRowGroup(rgMeta *RowGroupMetaData, cols []int32) 
 
 	var colChunk *ColumnChunkMetaData
 	if len(cols) == 0 {
+		cols = make([]int32, rgMeta.NumColumns())
 		for i := 0; i < rgMeta.NumColumns(); i++ {
-			if colChunk, err = rgMeta.ColumnChunk(i); err != nil {
-				return
-			}
-
-			if err = mergeRange(colChunk.GetColumnIndexLocation(), &ciStart, &ciEnd); err != nil {
-				return
-			}
-
-			if err = mergeRange(colChunk.GetOffsetIndexLocation(), &oiStart, &oiEnd); err != nil {
-				return
-			}
+			cols[i] = int32(i)
 		}
-	} else {
-		for _, i := range cols {
-			if i < 0 || i >= int32(rgMeta.NumColumns()) {
-				return rng, fmt.Errorf("%w: invalid column ordinal %d", arrow.ErrIndex, i)
-			}
+	}
 
-			if colChunk, err = rgMeta.ColumnChunk(int(i)); err != nil {
-				return
-			}
+	for _, i := range cols {
+		if i < 0 || i >= int32(rgMeta.NumColumns()) {
+			return rng, fmt.Errorf("%w: invalid column ordinal %d", arrow.ErrIndex, i)
+		}
 
-			if err = mergeRange(colChunk.GetColumnIndexLocation(), &ciStart, &ciEnd); err != nil {
-				return
-			}
+		if colChunk, err = rgMeta.ColumnChunk(int(i)); err != nil {
+			return
+		}
 
-			if err = mergeRange(colChunk.GetOffsetIndexLocation(), &oiStart, &oiEnd); err != nil {
-				return
-			}
+		if err = mergeRange(colChunk.GetColumnIndexLocation(), &ciStart, &ciEnd); err != nil {
+			return
+		}
+
+		if err = mergeRange(colChunk.GetOffsetIndexLocation(), &oiStart, &oiEnd); err != nil {
+			return
 		}
 	}
 

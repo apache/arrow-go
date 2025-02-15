@@ -305,12 +305,13 @@ func (f *Reader) RowGroup(i int) *RowGroupReader {
 	rg := f.metadata.RowGroups[i]
 
 	return &RowGroupReader{
-		fileMetadata:  f.metadata,
-		rgMetadata:    metadata.NewRowGroupMetaData(rg, f.metadata.Schema, f.WriterVersion(), f.fileDecryptor),
-		props:         f.props,
-		r:             f.r,
-		fileDecryptor: f.fileDecryptor,
-		bufferPool:    &f.bufferPool,
+		fileMetadata:    f.metadata,
+		rgMetadata:      metadata.NewRowGroupMetaData(rg, f.metadata.Schema, f.WriterVersion(), f.fileDecryptor),
+		props:           f.props,
+		r:               f.r,
+		fileDecryptor:   f.fileDecryptor,
+		pageIndexReader: f.GetPageIndexReader(),
+		bufferPool:      &f.bufferPool,
 	}
 }
 
