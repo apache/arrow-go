@@ -63,6 +63,9 @@ type ColumnIndex interface {
 	GetMinValues() [][]byte
 	// GetMaxValues returns the encoded max value for each page
 	GetMaxValues() [][]byte
+
+	GetRepetitionLevelHistograms() []int64
+	GetDefinitionLevelHistograms() []int64
 }
 
 // TypedColumnIndex expands the ColumnIndex interface to provide a
@@ -217,6 +220,7 @@ type (
 // the OffsetIndex may be present even if a ColumnIndex is not.
 type OffsetIndex interface {
 	GetPageLocations() []*PageLocation
+	GetUnencodedByteArrayDataBytes() []int64
 }
 
 func (p PageIndexSelection) String() string {
