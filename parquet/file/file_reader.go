@@ -120,7 +120,16 @@ func NewParquetReader(r parquet.ReaderAtSeeker, opts ...ReadOption) (*Reader, er
 	}
 
 	if f.metadata == nil {
-		return f, f.parseMetaData()
+		if err := f.parseMetaData(); err != nil {
+			return nil, err
+		}
+	}
+
+	f.pageIndexReader = &metadata.PageIndexReader{
+		Input:        f.r,
+		Props:        f.props,
+		FileMetadata: f.metadata,
+		Decryptor:    f.fileDecryptor,
 	}
 
 	return f, nil
@@ -305,24 +314,15 @@ func (f *Reader) RowGroup(i int) *RowGroupReader {
 	rg := f.metadata.RowGroups[i]
 
 	return &RowGroupReader{
-		fileMetadata:    f.metadata,
-		rgMetadata:      metadata.NewRowGroupMetaData(rg, f.metadata.Schema, f.WriterVersion(), f.fileDecryptor),
-		props:           f.props,
-		r:               f.r,
-		fileDecryptor:   f.fileDecryptor,
-		pageIndexReader: f.GetPageIndexReader(),
-		bufferPool:      &f.bufferPool,
+		fileMetadata:  f.metadata,
+		rgMetadata:    metadata.NewRowGroupMetaData(rg, f.metadata.Schema, f.WriterVersion(), f.fileDecryptor),
+		props:         f.props,
+		r:             f.r,
+		fileDecryptor: f.fileDecryptor,
+		bufferPool:    &f.bufferPool,
 	}
 }
 
 func (f *Reader) GetPageIndexReader() *metadata.PageIndexReader {
-	if f.pageIndexReader == nil {
-		f.pageIndexReader = &metadata.PageIndexReader{
-			Input:        f.r,
-			Props:        f.props,
-			FileMetadata: f.metadata,
-			Decryptor:    f.fileDecryptor,
-		}
-	}
 	return f.pageIndexReader
 }
