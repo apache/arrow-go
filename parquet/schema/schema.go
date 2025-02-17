@@ -163,7 +163,7 @@ func (s *Schema) Column(i int) *Column {
 	return s.leaves[i]
 }
 
-// Columns returns an iterator over the leave columns of the schema
+// Columns returns an iterator over the leaf columns of the schema
 func (s *Schema) Columns() iter.Seq2[int, *Column] {
 	return slices.All(s.leaves)
 }
