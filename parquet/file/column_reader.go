@@ -608,15 +608,15 @@ func (c *columnChunkReader) skipRows(nrows int64) error {
 				continue
 			}
 
-			var toSkip int64
+			var valuesToSkip int64
 			if c.descr.MaxDefinitionLevel() > 0 {
 				defLvls := c.getDefLvlBuffer(int64(levelsToSkip))
-				_, toSkip = c.readDefinitionLevels(defLvls)
+				_, valuesToSkip = c.readDefinitionLevels(defLvls)
 			} else {
-				toSkip = int64(levelsToSkip)
+				valuesToSkip = int64(levelsToSkip)
 			}
 
-			skipped, err := c.curDecoder.Discard(int(toSkip))
+			skipped, err := c.curDecoder.Discard(int(valuesToSkip))
 			if err != nil {
 				c.err = err
 				return err
