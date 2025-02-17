@@ -150,6 +150,50 @@ func (d *deltaBitPackDecoder[T]) unpackNextMini() error {
 	return nil
 }
 
+func (d *deltaBitPackDecoder[T]) Discard(n int) (int, error) {
+	n = min(n, int(d.nvals))
+	if n == 0 {
+		return 0, nil
+	}
+
+	var (
+		err       error
+		remaining = n
+	)
+
+	if !d.usedFirst {
+		d.usedFirst = true
+		remaining--
+	}
+
+	for remaining > 0 {
+		if d.currentBlockVals == 0 {
+			if err = d.initBlock(); err != nil {
+				return n - remaining, err
+			}
+		}
+
+		if d.currentMiniBlockVals == 0 {
+			if err = d.unpackNextMini(); err != nil {
+				return n - remaining, err
+			}
+		}
+
+		start := d.valsPerMini - d.currentMiniBlockVals
+		numToDiscard := len(d.miniBlockValues[start:])
+		if numToDiscard > remaining {
+			numToDiscard = remaining
+		}
+
+		d.currentBlockVals -= uint32(numToDiscard)
+		d.currentMiniBlockVals -= uint32(numToDiscard)
+		remaining -= numToDiscard
+	}
+
+	d.nvals -= n
+	return n, nil
+}
+
 // Decode retrieves min(remaining values, len(out)) values from the data and returns the number
 // of values actually decoded and any errors encountered.
 func (d *deltaBitPackDecoder[T]) Decode(out []T) (int, error) {

@@ -142,6 +142,12 @@ func (d *dictDecoder) SetData(nvals int, data []byte) error {
 	return nil
 }
 
+func (d *dictDecoder) discard(n int) (int, error) {
+	n = d.idxDecoder.Discard(n)
+	d.nvals -= n
+	return n, nil
+}
+
 func (d *dictDecoder) decode(out interface{}) (int, error) {
 	n, err := d.idxDecoder.GetBatchWithDict(d.dictValueDecoder, out)
 	d.nvals -= n

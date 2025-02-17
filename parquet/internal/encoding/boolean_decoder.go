@@ -50,6 +50,27 @@ func (dec *PlainBooleanDecoder) SetData(nvals int, data []byte) error {
 	return nil
 }
 
+func (dec *PlainBooleanDecoder) Discard(n int) (int, error) {
+	n = min(n, dec.nvals)
+	dec.nvals -= n
+
+	if dec.bitOffset+n < 8 {
+		dec.bitOffset += n
+		return n, nil
+	}
+
+	remaining := n - (8 - dec.bitOffset)
+	dec.bitOffset = 0
+	dec.data = dec.data[1:]
+
+	bytesToSkip := bitutil.BytesForBits(int64(remaining/8) * 8)
+	dec.data = dec.data[bytesToSkip:]
+	remaining -= int(bytesToSkip * 8)
+
+	dec.bitOffset += remaining
+	return n, nil
+}
+
 // Decode fills out with bools decoded from the data at the current point
 // or until we reach the end of the data.
 //
@@ -145,6 +166,14 @@ func (dec *RleBooleanDecoder) SetData(nvals int, data []byte) error {
 		dec.rleDec.Reset(bytes.NewReader(dec.data), 1)
 	}
 	return nil
+}
+
+func (dec *RleBooleanDecoder) Discard(n int) (int, error) {
+	n = min(n, dec.nvals)
+
+	n = dec.rleDec.Discard(n)
+	dec.nvals -= n
+	return n, nil
 }
 
 func (dec *RleBooleanDecoder) Decode(out []bool) (int, error) {
