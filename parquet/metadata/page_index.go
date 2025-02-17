@@ -456,8 +456,8 @@ func determinePageIndexRangesInRowGroup(rgMeta *RowGroupMetaData, cols []int32) 
 			return rng, fmt.Errorf("%w: invalid column ordinal %d", arrow.ErrIndex, i)
 		}
 
-		if colChunk, err = rgMeta.ColumnChunk(int(i)); err != nil {
-			return
+		if colChunk, _ = rgMeta.ColumnChunk(int(i)); colChunk == nil {
+			continue
 		}
 
 		if err = mergeRange(colChunk.GetColumnIndexLocation(), &ciStart, &ciEnd); err != nil {

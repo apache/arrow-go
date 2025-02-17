@@ -161,6 +161,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 			maxPageHeaderSize: defaultMaxPageHeaderSize,
 			nrows:             col.NumValues(),
 			mem:               r.props.Allocator(),
+			cryptoCtx:         ctx,
 		}
 		return pr, pr.init(col.Compression(), &ctx)
 	}
@@ -184,6 +185,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 		maxPageHeaderSize: defaultMaxPageHeaderSize,
 		nrows:             col.NumValues(),
 		mem:               r.props.Allocator(),
+		cryptoCtx:         ctx,
 	}
 	return pr, pr.init(col.Compression(), &ctx)
 }
