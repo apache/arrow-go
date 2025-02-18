@@ -163,6 +163,7 @@ func getAction(cmd proto.Message) *flight.Action {
 func (s *FlightSqlClientSuite) SetupTest() {
 	s.mockClient = FlightServiceClientMock{}
 	s.sqlClient.Client = &s.mockClient
+	s.sqlClient.Alloc = memory.DefaultAllocator
 	s.callOpts = []grpc.CallOption{grpc.EmptyCallOption{}}
 }
 
