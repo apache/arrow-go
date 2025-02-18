@@ -173,7 +173,7 @@ func GetExtensionIDSet(ctx context.Context) ExtensionIDSet {
 	v, ok := ctx.Value(extCtxKey{}).(ExtensionIDSet)
 	if !ok {
 		return NewExtensionSet(
-			expr.NewEmptyExtensionRegistry(&extensions.DefaultCollection),
+			expr.NewEmptyExtensionRegistry(extensions.GetDefaultCollectionWithNoError()),
 			GetExtensionRegistry(ctx))
 	}
 	return v
@@ -434,7 +434,8 @@ func ExecuteScalarSubstrait(ctx context.Context, expression *expr.Extended, part
 	}
 
 	reg := GetExtensionRegistry(ctx)
-	set := NewExtensionSet(expr.NewExtensionRegistry(expression.Extensions, &extensions.DefaultCollection), reg)
+	set := NewExtensionSet(expr.NewExtensionRegistry(expression.Extensions,
+		extensions.GetDefaultCollectionWithNoError()), reg)
 	sc, err := ToArrowSchema(expression.BaseSchema, set)
 	if err != nil {
 		return nil, err

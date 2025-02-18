@@ -36,7 +36,8 @@ import (
 // Arrow Extension registry and the default collection of substrait extensions
 // from the Substrait-go repo.
 func NewDefaultExtensionSet() ExtensionIDSet {
-	return NewExtensionSetDefault(expr.NewEmptyExtensionRegistry(&extensions.DefaultCollection))
+	return NewExtensionSetDefault(
+		expr.NewEmptyExtensionRegistry(extensions.GetDefaultCollectionWithNoError()))
 }
 
 // NewScalarCall constructs a substrait ScalarFunction expression with the provided
