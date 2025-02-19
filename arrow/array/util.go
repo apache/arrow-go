@@ -521,3 +521,7 @@ func MakeArrayOfNull(mem memory.Allocator, dt arrow.DataType, length int) arrow.
 	defer data.Release()
 	return MakeFromData(data)
 }
+
+func stripNulls(s string) string {
+	return strings.TrimRight(s, "\x00")
+}
