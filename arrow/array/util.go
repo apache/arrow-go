@@ -504,7 +504,7 @@ func (n *nullArrayFactory) create() *Data {
 	return out
 }
 
-func (n *nullArrayFactory) createChild(dt arrow.DataType, i, length int) *Data {
+func (n *nullArrayFactory) createChild(_ arrow.DataType, i, length int) *Data {
 	childFactory := &nullArrayFactory{
 		mem: n.mem, dt: n.dt.(arrow.NestedType).Fields()[i].Type,
 		len: length, buf: n.buf}
