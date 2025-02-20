@@ -132,12 +132,16 @@ type primitiveRecordReader struct {
 
 func createPrimitiveRecordReader(descr *schema.Column, mem memory.Allocator, bufferPool *sync.Pool) primitiveRecordReader {
 	return primitiveRecordReader{
-		ColumnChunkReader: NewColumnReader(descr, nil, mem, bufferPool),
-		values:            memory.NewResizableBuffer(mem),
-		validBits:         memory.NewResizableBuffer(mem),
-		mem:               mem,
-		refCount:          1,
-		useValues:         descr.PhysicalType() != parquet.Types.ByteArray && descr.PhysicalType() != parquet.Types.FixedLenByteArray,
+		ColumnChunkReader: newTypedColumnChunkReader(columnChunkReader{
+			descr:      descr,
+			mem:        mem,
+			bufferPool: bufferPool,
+		}),
+		values:    memory.NewResizableBuffer(mem),
+		validBits: memory.NewResizableBuffer(mem),
+		mem:       mem,
+		refCount:  1,
+		useValues: descr.PhysicalType() != parquet.Types.ByteArray && descr.PhysicalType() != parquet.Types.FixedLenByteArray,
 	}
 }
 

@@ -87,6 +87,9 @@ type ColumnChunkReader interface {
 	// it encountered. Otherwise this will be nil if it's just the end of the
 	// column
 	Err() error
+
+	SeekToRow(rowIdx int64) error
+
 	// Skip buffered values
 	consumeBufferedValues(int64)
 	// number of available buffered values that have not been decoded yet
@@ -113,7 +116,8 @@ type ColumnChunkReader interface {
 }
 
 type columnChunkReader struct {
-	descr             *schema.Column
+	descr *schema.Column
+
 	rdr               PageReader
 	repetitionDecoder encoding.LevelDecoder
 	definitionDecoder encoding.LevelDecoder
@@ -135,8 +139,39 @@ type columnChunkReader struct {
 	// is set when an error is encountered
 	err          error
 	defLvlBuffer []int16
+	repLvlBuffer []int16
 
 	newDictionary bool
+}
+
+func newTypedColumnChunkReader(base columnChunkReader) ColumnChunkReader {
+	switch base.descr.PhysicalType() {
+	case parquet.Types.FixedLenByteArray:
+		base.decoderTraits = &encoding.FixedLenByteArrayDecoderTraits
+		return &FixedLenByteArrayColumnChunkReader{base}
+	case parquet.Types.Float:
+		base.decoderTraits = &encoding.Float32DecoderTraits
+		return &Float32ColumnChunkReader{base}
+	case parquet.Types.Double:
+		base.decoderTraits = &encoding.Float64DecoderTraits
+		return &Float64ColumnChunkReader{base}
+	case parquet.Types.ByteArray:
+		base.decoderTraits = &encoding.ByteArrayDecoderTraits
+		return &ByteArrayColumnChunkReader{base}
+	case parquet.Types.Int32:
+		base.decoderTraits = &encoding.Int32DecoderTraits
+		return &Int32ColumnChunkReader{base}
+	case parquet.Types.Int64:
+		base.decoderTraits = &encoding.Int64DecoderTraits
+		return &Int64ColumnChunkReader{base}
+	case parquet.Types.Int96:
+		base.decoderTraits = &encoding.Int96DecoderTraits
+		return &Int96ColumnChunkReader{base}
+	case parquet.Types.Boolean:
+		base.decoderTraits = &encoding.BooleanDecoderTraits
+		return &BooleanColumnChunkReader{base}
+	}
+	return nil
 }
 
 // NewColumnReader returns a column reader for the provided column initialized with the given pagereader that will
@@ -145,6 +180,9 @@ type columnChunkReader struct {
 // In addition to the page reader and allocator, a pointer to a shared sync.Pool is expected to provide buffers for temporary
 // usage to minimize allocations. The bufferPool should provide *memory.Buffer objects that can be resized as necessary, buffers
 // should have `ResizeNoShrink(0)` called on them before being put back into the pool.
+//
+// Deprecated: This function will be removed from the public interface soon as it is currently unsafe to use
+// outside of this package.
 func NewColumnReader(descr *schema.Column, pageReader PageReader, mem memory.Allocator, bufferPool *sync.Pool) ColumnChunkReader {
 	base := columnChunkReader{descr: descr, rdr: pageReader, mem: mem, decoders: make(map[format.Encoding]encoding.TypedDecoder), bufferPool: bufferPool}
 	switch descr.PhysicalType() {
@@ -197,6 +235,15 @@ func (c *columnChunkReader) getDefLvlBuffer(sz int64) []int16 {
 	return c.defLvlBuffer[:sz]
 }
 
+func (c *columnChunkReader) getRepLvlBuffer(sz int64) []int16 {
+	if int64(cap(c.repLvlBuffer)) < sz {
+		c.repLvlBuffer = make([]int16, sz)
+		return c.repLvlBuffer
+	}
+
+	return c.repLvlBuffer[:sz]
+}
+
 // HasNext returns whether there is more data to be read in this column
 // and row group.
 func (c *columnChunkReader) HasNext() bool {
@@ -204,6 +251,23 @@ func (c *columnChunkReader) HasNext() bool {
 		return c.readNewPage() && c.numBuffered != 0
 	}
 	return true
+}
+
+func (c *columnChunkReader) readDictionary() error {
+	if c.newDictionary {
+		return nil
+	}
+
+	page, err := c.pager().GetDictionaryPage()
+	if err != nil {
+		return err
+	}
+
+	if page != nil {
+		return c.configureDict(page)
+	}
+
+	return nil
 }
 
 func (c *columnChunkReader) configureDict(page *DictionaryPage) error {
@@ -233,6 +297,30 @@ func (c *columnChunkReader) configureDict(page *DictionaryPage) error {
 	return nil
 }
 
+func (c *columnChunkReader) processPage() (bool, error) {
+	var (
+		err        error
+		lvlByteLen int64
+	)
+	switch p := c.curPage.(type) {
+	case *DictionaryPage:
+		return false, c.configureDict(p)
+	case *DataPageV1:
+		lvlByteLen, err = c.initLevelDecodersV1(p, p.repLvlEncoding, p.defLvlEncoding)
+	case *DataPageV2:
+		lvlByteLen, err = c.initLevelDecodersV2(p)
+	default:
+		// we can skip non-data pages
+		return false, nil
+	}
+
+	if err != nil {
+		return true, err
+	}
+
+	return true, c.initDataDecoder(c.curPage, lvlByteLen)
+}
+
 // read a new page from the page reader
 func (c *columnChunkReader) readNewPage() bool {
 	for c.rdr.Next() { // keep going until we get a data page
@@ -241,31 +329,15 @@ func (c *columnChunkReader) readNewPage() bool {
 			break
 		}
 
-		var lvlByteLen int64
-		switch p := c.curPage.(type) {
-		case *DictionaryPage:
-			if err := c.configureDict(p); err != nil {
-				c.err = err
-				return false
-			}
-			continue
-		case *DataPageV1:
-			lvlByteLen, c.err = c.initLevelDecodersV1(p, p.repLvlEncoding, p.defLvlEncoding)
-			if c.err != nil {
-				return false
-			}
-		case *DataPageV2:
-			lvlByteLen, c.err = c.initLevelDecodersV2(p)
-			if c.err != nil {
-				return false
-			}
-		default:
-			// we can skip non-data pages
-			continue
+		gotDataPage, err := c.processPage()
+		if err != nil {
+			c.err = err
+			return false
 		}
 
-		c.err = c.initDataDecoder(c.curPage, lvlByteLen)
-		return c.err == nil
+		if gotDataPage {
+			return true
+		}
 	}
 	c.err = c.rdr.Err()
 	return false
@@ -283,6 +355,9 @@ func (c *columnChunkReader) initLevelDecodersV2(page *DataPageV2) (int64, error)
 
 	if c.descr.MaxRepetitionLevel() > 0 {
 		c.repetitionDecoder.SetDataV2(page.repLvlByteLen, c.descr.MaxRepetitionLevel(), int(c.numBuffered), buf)
+		if c.repLvlBuffer != nil {
+			c.repLvlBuffer = c.repLvlBuffer[:0]
+		}
 	}
 	// ARROW-17453: Some writers will write repetition levels even when
 	// the max repetition level is 0, so we should respect the value
@@ -339,6 +414,11 @@ func (c *columnChunkReader) initDataDecoder(page Page, lvlByteLen int64) error {
 	encoding := page.Encoding()
 
 	if isDictIndexEncoding(encoding) {
+		// if we're seeking or otherwise skipping pages, we may not have read
+		// the dictionary page in yet, so let's ensure we got it if one exists
+		if err := c.readDictionary(); err != nil {
+			return err
+		}
 		encoding = format.Encoding_RLE_DICTIONARY
 	}
 
@@ -396,6 +476,9 @@ func (c *columnChunkReader) readRepetitionLevels(levels []int16) int {
 		return 0
 	}
 
+	if len(c.repLvlBuffer) > 0 {
+		return copy(levels, c.repLvlBuffer[c.numDecoded:])
+	}
 	nlevels, _ := c.repetitionDecoder.Decode(levels)
 	return nlevels
 }
@@ -436,49 +519,114 @@ func (c *columnChunkReader) determineNumToRead(batchLen int64, defLvls, repLvls 
 	return
 }
 
-// skipValues some number of rows using readFn as the function to read the data and throw it away.
-// If we can skipValues a whole page based on its metadata, then we do so, otherwise we read the
-// page until we have skipped the number of rows desired.
-func (c *columnChunkReader) skipValues(nvalues int64, readFn func(batch int64, buf []byte) (int64, error)) (int64, error) {
-	var err error
-	toskip := nvalues
-	for c.HasNext() && toskip > 0 {
-		// if number to skip is more than the number of undecoded values, skip the page
-		if toskip > (c.numBuffered - c.numDecoded) {
-			toskip -= c.numBuffered - c.numDecoded
-			c.numDecoded = c.numBuffered
-		} else {
-			var (
-				batchSize int64 = 1024
-				valsRead  int64 = 0
-			)
+// SeekToRow will seek to the row index provided in the column chunk. If
+// the metadata contains an OffsetIndex for skipping pages based on row indexes
+// then the pager will use that to skip to the correct page.
+//
+// If there is no OffsetIndex, then the pager will read each page until it
+// finds the page that contains the desired row index, and the Column Chunk
+// reader will discard values until it reaches the desired row index according
+// to the definition and repetition levels.
+func (c *columnChunkReader) SeekToRow(rowIdx int64) error {
+	if err := c.pager().SeekToPageWithRow(rowIdx); err != nil {
+		return err
+	}
 
-			scratch := c.bufferPool.Get().(*memory.Buffer)
-			defer func() {
-				scratch.ResizeNoShrink(0)
-				c.bufferPool.Put(scratch)
-			}()
-			bufMult := 1
-			if c.descr.PhysicalType() == parquet.Types.Boolean {
-				// for bools, BytesRequired returns 1 byte per 8 bool, but casting []byte to []bool requires 1 byte per 1 bool
-				bufMult = 8
+	c.numBuffered, c.numDecoded = 0, 0
+	c.curPage = c.rdr.Page()
+	if c.curPage == nil {
+		c.err = c.rdr.Err()
+		return c.err
+	}
+
+	gotDataPage, err := c.processPage()
+	if err != nil {
+		c.err = err
+		return err
+	}
+
+	if !gotDataPage {
+		c.readNewPage()
+	}
+
+	return c.skipRows(rowIdx - c.curPage.(DataPage).FirstRowIndex())
+}
+
+func (c *columnChunkReader) skipRows(nrows int64) error {
+	toSkip := nrows
+	for c.HasNext() && toSkip > 0 {
+		// if there are no repetition levels, then this is easy! each level
+		// is one row so we just use the definition levels to determine
+		// the number of physical values to discard!
+		if c.descr.MaxRepetitionLevel() == 0 {
+			if toSkip >= (c.numBuffered - c.numDecoded) {
+				toSkip -= c.numBuffered - c.numDecoded
+				c.numDecoded = c.numBuffered
+				continue
 			}
-			scratch.Reserve(c.decoderTraits.BytesRequired(int(batchSize) * bufMult))
 
-			for {
-				batchSize = utils.Min(batchSize, toskip)
-				valsRead, err = readFn(batchSize, scratch.Buf())
-				toskip -= valsRead
-				if valsRead <= 0 || toskip <= 0 || err != nil {
-					break
+			ndefs, nvals, err := c.determineNumToRead(toSkip, nil, nil)
+			if err != nil {
+				c.err = err
+				return err
+			}
+
+			skipped, err := c.curDecoder.Discard(int(nvals))
+			if err != nil {
+				c.err = err
+				return err
+			}
+
+			skipped = max(ndefs, skipped)
+
+			toSkip -= int64(skipped)
+			c.consumeBufferedValues(int64(skipped))
+		} else {
+			// with repetition levels, we have to check them to determine
+			// how many rows to skip. we can't just skip the number of values
+			// because there could be multiple values per row. So we read in
+			// the repetition levels for the entire page at once and then go
+			// through them to find the right row.
+			repLvls := c.getRepLvlBuffer(c.numBuffered)
+			nreps, _ := c.repetitionDecoder.Decode(repLvls)
+
+			rowsSkipped := int64(0)
+			levelsToSkip := -1
+			for i, def := range repLvls[:nreps] {
+				if def == 0 {
+					if rowsSkipped == toSkip {
+						levelsToSkip = i
+						break
+					}
+					rowsSkipped++
 				}
 			}
+
+			if levelsToSkip == -1 {
+				toSkip -= rowsSkipped
+				c.numBuffered, c.numDecoded = 0, 0
+				continue
+			}
+
+			var valuesToSkip int64
+			if c.descr.MaxDefinitionLevel() > 0 {
+				defLvls := c.getDefLvlBuffer(int64(levelsToSkip))
+				_, valuesToSkip = c.readDefinitionLevels(defLvls)
+			} else {
+				valuesToSkip = int64(levelsToSkip)
+			}
+
+			skipped, err := c.curDecoder.Discard(int(valuesToSkip))
+			if err != nil {
+				c.err = err
+				return err
+			}
+
+			toSkip -= int64(skipped)
+			c.consumeBufferedValues(int64(levelsToSkip))
 		}
 	}
-	if c.err != nil {
-		err = c.err
-	}
-	return nvalues - toskip, err
+	return nil
 }
 
 type readerFunc func(int64, int64) (int, error)
@@ -498,7 +646,7 @@ func (c *columnChunkReader) readBatch(batchSize int64, defLvls, repLvls []int16,
 		toRead int64
 	)
 
-	for c.HasNext() && totalLvls < batchSize && err == nil {
+	for totalLvls < batchSize && c.HasNext() && err == nil {
 		if defLvls != nil {
 			defs = defLvls[totalLvls:]
 		}

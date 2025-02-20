@@ -22,7 +22,9 @@ import (
 
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
+	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"golang.org/x/xerrors"
 )
@@ -39,7 +41,9 @@ type RowGroupReader struct {
 	props         *parquet.ReaderProperties
 	fileDecryptor encryption.FileDecryptor
 
-	bufferPool *sync.Pool
+	pageIndexReader   *metadata.PageIndexReader
+	rgPageIndexReader *metadata.RowGroupPageIndexReader
+	bufferPool        *sync.Pool
 }
 
 // MetaData returns the metadata of the current Row Group
@@ -67,13 +71,27 @@ func (r *RowGroupReader) Column(i int) (ColumnChunkReader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parquet: unable to initialize page reader: %w", err)
 	}
-	return NewColumnReader(descr, pageRdr, r.props.Allocator(), r.bufferPool), nil
+	return newTypedColumnChunkReader(columnChunkReader{
+		descr:      descr,
+		rdr:        pageRdr,
+		mem:        r.props.Allocator(),
+		bufferPool: r.bufferPool,
+		decoders:   make(map[format.Encoding]encoding.TypedDecoder),
+	}), nil
 }
 
 func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 	col, err := r.rgMetadata.ColumnChunk(i)
 	if err != nil {
 		return nil, err
+	}
+
+	if r.rgPageIndexReader == nil {
+		rgIdx, err := r.pageIndexReader.RowGroup(int(r.rgMetadata.Ordinal()))
+		if err != nil {
+			return nil, err
+		}
+		r.rgPageIndexReader = rgIdx
 	}
 
 	colStart := col.DataPageOffset()
@@ -106,7 +124,16 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 
 	cryptoMetadata := col.CryptoMetadata()
 	if cryptoMetadata == nil {
-		return NewPageReader(stream, col.NumValues(), col.Compression(), r.props.Allocator(), nil)
+		pr := &serializedPageReader{
+			r:                 stream,
+			chunk:             col,
+			colIdx:            i,
+			pgIndexReader:     r.rgPageIndexReader,
+			maxPageHeaderSize: defaultMaxPageHeaderSize,
+			nrows:             col.NumValues(),
+			mem:               r.props.Allocator(),
+		}
+		return pr, pr.init(col.Compression(), nil)
 	}
 
 	if r.fileDecryptor == nil {
@@ -126,7 +153,17 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 			MetaDecryptor:                  r.fileDecryptor.GetFooterDecryptorForColumnMeta(""),
 			DataDecryptor:                  r.fileDecryptor.GetFooterDecryptorForColumnData(""),
 		}
-		return NewPageReader(stream, col.NumValues(), col.Compression(), r.props.Allocator(), &ctx)
+		pr := &serializedPageReader{
+			r:                 stream,
+			chunk:             col,
+			colIdx:            i,
+			pgIndexReader:     r.rgPageIndexReader,
+			maxPageHeaderSize: defaultMaxPageHeaderSize,
+			nrows:             col.NumValues(),
+			mem:               r.props.Allocator(),
+			cryptoCtx:         ctx,
+		}
+		return pr, pr.init(col.Compression(), &ctx)
 	}
 
 	// column encrypted with it's own key
@@ -140,5 +177,15 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 		MetaDecryptor:                  r.fileDecryptor.GetColumnMetaDecryptor(parquet.ColumnPath(columnPath).String(), string(columnKeyMeta), ""),
 		DataDecryptor:                  r.fileDecryptor.GetColumnDataDecryptor(parquet.ColumnPath(columnPath).String(), string(columnKeyMeta), ""),
 	}
-	return NewPageReader(stream, col.NumValues(), col.Compression(), r.props.Allocator(), &ctx)
+	pr := &serializedPageReader{
+		r:                 stream,
+		chunk:             col,
+		colIdx:            i,
+		pgIndexReader:     r.rgPageIndexReader,
+		maxPageHeaderSize: defaultMaxPageHeaderSize,
+		nrows:             col.NumValues(),
+		mem:               r.props.Allocator(),
+		cryptoCtx:         ctx,
+	}
+	return pr, pr.init(col.Compression(), &ctx)
 }
