@@ -2278,7 +2278,9 @@ func TestWriteTableMemoryAllocation(t *testing.T) {
 
 func TestEmptyListDeltaBinaryPacked(t *testing.T) {
 	schema := arrow.NewSchema([]arrow.Field{
-		{Name: "ts", Type: arrow.ListOf(arrow.PrimitiveTypes.Uint64),
+		{Name: "ts", Type: arrow.ListOfField(
+			arrow.Field{Name: "list", Type: arrow.PrimitiveTypes.Uint64, Nullable: true,
+				Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"-1"})}),
 			Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"-1"})}}, nil)
 	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
 	defer builder.Release()
