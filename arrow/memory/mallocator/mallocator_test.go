@@ -22,6 +22,7 @@ package mallocator_test
 import (
 	"fmt"
 	"testing"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow/memory/mallocator"
 	"github.com/stretchr/testify/assert"
@@ -40,6 +41,32 @@ func TestMallocatorAllocate(t *testing.T) {
 			// check 0-initialized
 			for idx, c := range buf {
 				assert.Equal(t, uint8(0), c, fmt.Sprintf("Buf not zero-initialized at %d", idx))
+			}
+			// check aligned
+			if size > 0 {
+				assert.Equal(t, uintptr(0), uintptr(unsafe.Pointer(&buf[0]))%64)
+			}
+		})
+	}
+}
+
+func TestMallocatorAllocateAligned(t *testing.T) {
+	sizes := []int{0, 1, 4, 33, 65, 4095, 4096, 8193}
+	for _, size := range sizes {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			a := mallocator.NewMallocatorWithAlignment(16)
+			buf := a.Allocate(size)
+			defer a.Free(buf)
+
+			assert.Equal(t, size, len(buf))
+			assert.LessOrEqual(t, size, cap(buf))
+			// check 0-initialized
+			for idx, c := range buf {
+				assert.Equal(t, uint8(0), c, fmt.Sprintf("Buf not zero-initialized at %d", idx))
+			}
+			// check aligned
+			if size > 0 {
+				assert.Equal(t, uintptr(0), uintptr(unsafe.Pointer(&buf[0]))%16)
 			}
 		})
 	}
@@ -68,6 +95,7 @@ func TestMallocatorReallocate(t *testing.T) {
 			for idx, c := range buf {
 				assert.Equal(t, uint8(0), c, fmt.Sprintf("Buf not zero-initialized at %d", idx))
 			}
+			a.AssertSize(t, test.before)
 
 			buf = a.Reallocate(test.after, buf)
 			defer a.Free(buf)
@@ -77,8 +105,25 @@ func TestMallocatorReallocate(t *testing.T) {
 			for idx, c := range buf {
 				assert.Equal(t, uint8(0), c, fmt.Sprintf("Buf not zero-initialized at %d", idx))
 			}
+			a.AssertSize(t, test.after)
 		})
 	}
+}
+
+func TestMallocatorReallocateInPlace(t *testing.T) {
+	a := mallocator.NewMallocator()
+	buf := a.Allocate(80)
+	assert.Equal(t, 80, len(buf))
+	assert.LessOrEqual(t, 80, cap(buf))
+	a.AssertSize(t, 80)
+	addr := uintptr(unsafe.Pointer(&buf[0]))
+
+	buf2 := a.Reallocate(81, buf)
+	assert.Equal(t, 81, len(buf2))
+	assert.LessOrEqual(t, 81, cap(buf2))
+	a.AssertSize(t, 81)
+	addr2 := uintptr(unsafe.Pointer(&buf[0]))
+	assert.Equal(t, addr, addr2)
 }
 
 func TestMallocatorAssertSize(t *testing.T) {
