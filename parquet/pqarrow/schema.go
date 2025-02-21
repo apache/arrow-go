@@ -731,7 +731,10 @@ func listToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *s
 	}
 
 	out.Field = &arrow.Field{Name: n.Name(), Type: arrow.ListOfField(
-		arrow.Field{Name: listNode.Name(), Type: out.Children[0].Field.Type, Nullable: true}),
+		arrow.Field{Name: listNode.Name(),
+			Type:     out.Children[0].Field.Type,
+			Metadata: out.Children[0].Field.Metadata,
+			Nullable: true}),
 		Nullable: n.RepetitionType() == parquet.Repetitions.Optional, Metadata: createFieldMeta(int(n.FieldID()))}
 
 	out.LevelInfo = currentLevels
@@ -826,7 +829,7 @@ func mapToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *sc
 		Nullable: false, Metadata: createFieldMeta(int(kvgroup.FieldID()))}
 
 	kvfield.LevelInfo = currentLevels
-	out.Field = &arrow.Field{Name: n.Name(), Type: arrow.MapOf(keyField.Field.Type, valueField.Field.Type),
+	out.Field = &arrow.Field{Name: n.Name(), Type: arrow.MapOfFields(*keyField.Field, *valueField.Field),
 		Nullable: n.RepetitionType() == parquet.Repetitions.Optional,
 		Metadata: createFieldMeta(int(n.FieldID()))}
 	out.LevelInfo = currentLevels

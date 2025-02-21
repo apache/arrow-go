@@ -64,9 +64,6 @@ func ExampleRegisterFlightServiceServer() {
 
 	fmt.Println(rsp.Status)
 	fc := flight.NewClientFromConn(conn, nil)
-	if err != nil {
-		panic(err)
-	}
 
 	// we didn't implement GetFlightInfo so we should get an Unimplemented
 	// error, proving it did call into the base flight server. If we didn't
