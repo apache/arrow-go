@@ -23,6 +23,11 @@ import (
 	"io"
 )
 
+type Reader interface {
+	io.ReadSeeker
+	io.ReaderAt
+}
+
 // bufferedReader is similar to bufio.Reader except
 // it will expand the buffer if necessary when asked to Peek
 // more bytes than are in the buffer
@@ -30,26 +35,27 @@ type bufferedReader struct {
 	bufferSz int
 	buf      []byte
 	r, w     int
-	rd       io.Reader
+	rd       Reader
 	err      error
 }
 
 // NewBufferedReader returns a buffered reader with similar semantics to bufio.Reader
 // except Peek will expand the internal buffer if needed rather than return
 // an error.
-func NewBufferedReader(rd io.Reader, sz int) *bufferedReader {
-	// if rd is already a buffered reader whose buffer is >= the requested size
-	// then just return it as is. no need to make a new object.
-	b, ok := rd.(*bufferedReader)
-	if ok && len(b.buf) >= sz {
-		return b
-	}
-
+func NewBufferedReader(rd Reader, sz int) *bufferedReader {
 	r := &bufferedReader{
 		rd: rd,
 	}
 	r.resizeBuffer(sz)
 	return r
+}
+
+func (b *bufferedReader) Outer() Reader { return b.rd }
+
+func (b *bufferedReader) Reset(rd Reader) {
+	b.resetBuffer()
+	b.rd = rd
+	b.r, b.w = 0, 0
 }
 
 func (b *bufferedReader) resetBuffer() {
@@ -96,6 +102,8 @@ func (b *bufferedReader) readErr() error {
 	b.err = nil
 	return err
 }
+
+func (b *bufferedReader) BufferSize() int { return b.bufferSz }
 
 // Buffered returns the number of bytes currently buffered
 func (b *bufferedReader) Buffered() int { return b.w - b.r }

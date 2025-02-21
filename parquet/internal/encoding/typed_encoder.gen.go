@@ -19,6 +19,7 @@
 package encoding
 
 import (
+	"errors"
 	"fmt"
 	"unsafe"
 
@@ -193,6 +194,18 @@ type DictInt32Decoder struct {
 // Type returns the underlying physical type that can be decoded with this decoder
 func (DictInt32Decoder) Type() parquet.Type {
 	return parquet.Types.Int32
+}
+
+func (d *DictInt32Decoder) Discard(n int) (int, error) {
+	n = min(n, d.nvals)
+	discarded, err := d.discard(n)
+	if err != nil {
+		return discarded, err
+	}
+	if n != discarded {
+		return discarded, errors.New("parquet: dict eof exception")
+	}
+	return n, nil
 }
 
 // Decode populates the passed in slice with min(len(out), remaining values) values,
@@ -436,6 +449,18 @@ func (DictInt64Decoder) Type() parquet.Type {
 	return parquet.Types.Int64
 }
 
+func (d *DictInt64Decoder) Discard(n int) (int, error) {
+	n = min(n, d.nvals)
+	discarded, err := d.discard(n)
+	if err != nil {
+		return discarded, err
+	}
+	if n != discarded {
+		return discarded, errors.New("parquet: dict eof exception")
+	}
+	return n, nil
+}
+
 // Decode populates the passed in slice with min(len(out), remaining values) values,
 // decoding using the dictionary to get the actual values. Returns the number of values
 // actually decoded and any error encountered.
@@ -649,6 +674,18 @@ type DictInt96Decoder struct {
 // Type returns the underlying physical type that can be decoded with this decoder
 func (DictInt96Decoder) Type() parquet.Type {
 	return parquet.Types.Int96
+}
+
+func (d *DictInt96Decoder) Discard(n int) (int, error) {
+	n = min(n, d.nvals)
+	discarded, err := d.discard(n)
+	if err != nil {
+		return discarded, err
+	}
+	if n != discarded {
+		return discarded, errors.New("parquet: dict eof exception")
+	}
+	return n, nil
 }
 
 // Decode populates the passed in slice with min(len(out), remaining values) values,
@@ -880,6 +917,18 @@ func (DictFloat32Decoder) Type() parquet.Type {
 	return parquet.Types.Float
 }
 
+func (d *DictFloat32Decoder) Discard(n int) (int, error) {
+	n = min(n, d.nvals)
+	discarded, err := d.discard(n)
+	if err != nil {
+		return discarded, err
+	}
+	if n != discarded {
+		return discarded, errors.New("parquet: dict eof exception")
+	}
+	return n, nil
+}
+
 // Decode populates the passed in slice with min(len(out), remaining values) values,
 // decoding using the dictionary to get the actual values. Returns the number of values
 // actually decoded and any error encountered.
@@ -1107,6 +1156,18 @@ type DictFloat64Decoder struct {
 // Type returns the underlying physical type that can be decoded with this decoder
 func (DictFloat64Decoder) Type() parquet.Type {
 	return parquet.Types.Double
+}
+
+func (d *DictFloat64Decoder) Discard(n int) (int, error) {
+	n = min(n, d.nvals)
+	discarded, err := d.discard(n)
+	if err != nil {
+		return discarded, err
+	}
+	if n != discarded {
+		return discarded, errors.New("parquet: dict eof exception")
+	}
+	return n, nil
 }
 
 // Decode populates the passed in slice with min(len(out), remaining values) values,
@@ -1378,6 +1439,18 @@ func (DictByteArrayDecoder) Type() parquet.Type {
 	return parquet.Types.ByteArray
 }
 
+func (d *DictByteArrayDecoder) Discard(n int) (int, error) {
+	n = min(n, d.nvals)
+	discarded, err := d.discard(n)
+	if err != nil {
+		return discarded, err
+	}
+	if n != discarded {
+		return discarded, errors.New("parquet: dict eof exception")
+	}
+	return n, nil
+}
+
 // Decode populates the passed in slice with min(len(out), remaining values) values,
 // decoding using the dictionary to get the actual values. Returns the number of values
 // actually decoded and any error encountered.
@@ -1559,6 +1632,18 @@ type DictFixedLenByteArrayDecoder struct {
 // Type returns the underlying physical type that can be decoded with this decoder
 func (DictFixedLenByteArrayDecoder) Type() parquet.Type {
 	return parquet.Types.FixedLenByteArray
+}
+
+func (d *DictFixedLenByteArrayDecoder) Discard(n int) (int, error) {
+	n = min(n, d.nvals)
+	discarded, err := d.discard(n)
+	if err != nil {
+		return discarded, err
+	}
+	if n != discarded {
+		return discarded, errors.New("parquet: dict eof exception")
+	}
+	return n, nil
 }
 
 // Decode populates the passed in slice with min(len(out), remaining values) values,

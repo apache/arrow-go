@@ -19,7 +19,6 @@
 #include <stdint.h>
 #include <limits.h>
 #include "types.h"
-#include "vendored/safe-math.h"
 
 // Corresponds to equivalent ArithmeticOp enum in base_arithmetic.go
 // for passing across which operation to perform. This allows simpler

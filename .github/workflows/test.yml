@@ -40,19 +40,19 @@ jobs:
         include:
           - arch-label: AMD64
             arch: amd64
-            go: 1.22
+            go: 1.23
             runs-on: ubuntu-latest
           - arch-label: AMD64
             arch: amd64
-            go: 1.23
+            go: 1.24
             runs-on: ubuntu-latest
           - arch-label: ARM64
             arch: arm64v8
-            go: 1.22
+            go: 1.23
             runs-on: ubuntu-24.04-arm
           - arch-label: ARM64
             arch: arm64v8
-            go: 1.23
+            go: 1.24
             runs-on: ubuntu-24.04-arm
     env:
       ARCH: ${{ matrix.arch }}
@@ -88,8 +88,8 @@ jobs:
       fail-fast: false
       matrix:
         go:
-          - '1.22'
           - '1.23'
+          - '1.24'
     env:
       GO: ${{ matrix.go }}
     steps:
@@ -128,8 +128,8 @@ jobs:
       fail-fast: false
       matrix:
         go:
-          - '1.22'
           - '1.23'
+          - '1.24'
     env:
       GO: ${{ matrix.go }}
     steps:
@@ -168,8 +168,8 @@ jobs:
       fail-fast: false
       matrix:
         go:
-          - '1.22'
           - '1.23'
+          - '1.24'
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -195,8 +195,8 @@ jobs:
       fail-fast: false
       matrix:
         go:
-          - '1.22'
           - '1.23'
+          - '1.24'
     env:
       ARROW_GO_TESTCGO: "1"
     steps:
@@ -229,8 +229,8 @@ jobs:
       fail-fast: false
       matrix:
         go:
-          - '1.22'
           - '1.23'
+          - '1.24'
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -378,13 +378,13 @@ jobs:
         run: |
           ci/scripts/util_free_space.sh
       - name: Cache Docker Volumes
-        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
           path: .docker
           key: integration-conda-${{ hashFiles('cpp/**') }}
           restore-keys: conda-
       - name: Setup Python
-        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
         with:
           python-version: 3.12
       - name: Setup Archery

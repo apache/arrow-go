@@ -129,6 +129,18 @@ func (Plain{{.Name}}Decoder) Type() parquet.Type {
   return parquet.Types.{{if .physical}}{{.physical}}{{else}}{{.Name}}{{end}}
 }
 
+func (dec *Plain{{.Name}}Decoder) Discard(n int) (int, error) {
+  n = min(n, dec.nvals)
+  nbytes := int64(n) * int64({{.prefix}}.{{.Name}}SizeBytes)
+  if nbytes > int64(len(dec.data)) || nbytes > math.MaxInt32 {
+    return 0, fmt.Errorf("parquet: eof exception discard plain {{.Name}}, nvals: %d, nbytes: %d, datalen: %d", dec.nvals, nbytes, len(dec.data))
+  }
+
+  dec.data = dec.data[nbytes:]
+  dec.nvals -= n
+  return n, nil
+}
+
 // Decode populates the given slice with values from the data to be decoded,
 // decoding the min(len(out), remaining values).
 // It returns the number of values actually decoded and any error encountered.

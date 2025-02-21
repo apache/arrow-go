@@ -19,9 +19,6 @@
 package file
 
 import (
-	"unsafe"
-
-	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
 )
@@ -35,14 +32,8 @@ type Int32ColumnChunkReader struct {
 // Skip skips the next nvalues so that the next call to ReadBatch
 // will start reading *after* the skipped values.
 func (cr *Int32ColumnChunkReader) Skip(nvalues int64) (int64, error) {
-	return cr.columnChunkReader.skipValues(nvalues,
-		func(batch int64, buf []byte) (int64, error) {
-			vals, _, err := cr.ReadBatch(batch,
-				arrow.Int32Traits.CastFromBytes(buf),
-				arrow.Int16Traits.CastFromBytes(buf),
-				arrow.Int16Traits.CastFromBytes(buf))
-			return vals, err
-		})
+	err := cr.columnChunkReader.skipRows(nvalues)
+	return nvalues, err
 }
 
 // ReadBatch reads batchSize values from the column.
@@ -69,14 +60,8 @@ type Int64ColumnChunkReader struct {
 // Skip skips the next nvalues so that the next call to ReadBatch
 // will start reading *after* the skipped values.
 func (cr *Int64ColumnChunkReader) Skip(nvalues int64) (int64, error) {
-	return cr.columnChunkReader.skipValues(nvalues,
-		func(batch int64, buf []byte) (int64, error) {
-			vals, _, err := cr.ReadBatch(batch,
-				arrow.Int64Traits.CastFromBytes(buf),
-				arrow.Int16Traits.CastFromBytes(buf),
-				arrow.Int16Traits.CastFromBytes(buf))
-			return vals, err
-		})
+	err := cr.columnChunkReader.skipRows(nvalues)
+	return nvalues, err
 }
 
 // ReadBatch reads batchSize values from the column.
@@ -103,14 +88,8 @@ type Int96ColumnChunkReader struct {
 // Skip skips the next nvalues so that the next call to ReadBatch
 // will start reading *after* the skipped values.
 func (cr *Int96ColumnChunkReader) Skip(nvalues int64) (int64, error) {
-	return cr.columnChunkReader.skipValues(nvalues,
-		func(batch int64, buf []byte) (int64, error) {
-			vals, _, err := cr.ReadBatch(batch,
-				parquet.Int96Traits.CastFromBytes(buf),
-				arrow.Int16Traits.CastFromBytes(buf),
-				arrow.Int16Traits.CastFromBytes(buf))
-			return vals, err
-		})
+	err := cr.columnChunkReader.skipRows(nvalues)
+	return nvalues, err
 }
 
 // ReadBatch reads batchSize values from the column.
@@ -137,14 +116,8 @@ type Float32ColumnChunkReader struct {
 // Skip skips the next nvalues so that the next call to ReadBatch
 // will start reading *after* the skipped values.
 func (cr *Float32ColumnChunkReader) Skip(nvalues int64) (int64, error) {
-	return cr.columnChunkReader.skipValues(nvalues,
-		func(batch int64, buf []byte) (int64, error) {
-			vals, _, err := cr.ReadBatch(batch,
-				arrow.Float32Traits.CastFromBytes(buf),
-				arrow.Int16Traits.CastFromBytes(buf),
-				arrow.Int16Traits.CastFromBytes(buf))
-			return vals, err
-		})
+	err := cr.columnChunkReader.skipRows(nvalues)
+	return nvalues, err
 }
 
 // ReadBatch reads batchSize values from the column.
@@ -171,14 +144,8 @@ type Float64ColumnChunkReader struct {
 // Skip skips the next nvalues so that the next call to ReadBatch
 // will start reading *after* the skipped values.
 func (cr *Float64ColumnChunkReader) Skip(nvalues int64) (int64, error) {
-	return cr.columnChunkReader.skipValues(nvalues,
-		func(batch int64, buf []byte) (int64, error) {
-			vals, _, err := cr.ReadBatch(batch,
-				arrow.Float64Traits.CastFromBytes(buf),
-				arrow.Int16Traits.CastFromBytes(buf),
-				arrow.Int16Traits.CastFromBytes(buf))
-			return vals, err
-		})
+	err := cr.columnChunkReader.skipRows(nvalues)
+	return nvalues, err
 }
 
 // ReadBatch reads batchSize values from the column.
@@ -205,14 +172,8 @@ type BooleanColumnChunkReader struct {
 // Skip skips the next nvalues so that the next call to ReadBatch
 // will start reading *after* the skipped values.
 func (cr *BooleanColumnChunkReader) Skip(nvalues int64) (int64, error) {
-	return cr.columnChunkReader.skipValues(nvalues,
-		func(batch int64, buf []byte) (int64, error) {
-			vals, _, err := cr.ReadBatch(batch,
-				*(*[]bool)(unsafe.Pointer(&buf)),
-				nil,
-				nil)
-			return vals, err
-		})
+	err := cr.columnChunkReader.skipRows(nvalues)
+	return nvalues, err
 }
 
 // ReadBatch reads batchSize values from the column.
@@ -239,14 +200,8 @@ type ByteArrayColumnChunkReader struct {
 // Skip skips the next nvalues so that the next call to ReadBatch
 // will start reading *after* the skipped values.
 func (cr *ByteArrayColumnChunkReader) Skip(nvalues int64) (int64, error) {
-	return cr.columnChunkReader.skipValues(nvalues,
-		func(batch int64, buf []byte) (int64, error) {
-			vals, _, err := cr.ReadBatch(batch,
-				parquet.ByteArrayTraits.CastFromBytes(buf),
-				arrow.Int16Traits.CastFromBytes(buf),
-				arrow.Int16Traits.CastFromBytes(buf))
-			return vals, err
-		})
+	err := cr.columnChunkReader.skipRows(nvalues)
+	return nvalues, err
 }
 
 // ReadBatch reads batchSize values from the column.
@@ -273,14 +228,8 @@ type FixedLenByteArrayColumnChunkReader struct {
 // Skip skips the next nvalues so that the next call to ReadBatch
 // will start reading *after* the skipped values.
 func (cr *FixedLenByteArrayColumnChunkReader) Skip(nvalues int64) (int64, error) {
-	return cr.columnChunkReader.skipValues(nvalues,
-		func(batch int64, buf []byte) (int64, error) {
-			vals, _, err := cr.ReadBatch(batch,
-				parquet.FixedLenByteArrayTraits.CastFromBytes(buf),
-				arrow.Int16Traits.CastFromBytes(buf),
-				arrow.Int16Traits.CastFromBytes(buf))
-			return vals, err
-		})
+	err := cr.columnChunkReader.skipRows(nvalues)
+	return nvalues, err
 }
 
 // ReadBatch reads batchSize values from the column.

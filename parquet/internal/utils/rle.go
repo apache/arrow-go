@@ -178,6 +178,33 @@ func (r *RleDecoder) GetValue() (uint64, bool) {
 	return vals[0], n == 1
 }
 
+func (r *RleDecoder) Discard(n int) int {
+	read := 0
+	for read < n {
+		remain := n - read
+
+		if r.repCount > 0 {
+			repbatch := int(math.Min(float64(remain), float64(r.repCount)))
+			r.repCount -= int32(repbatch)
+			read += repbatch
+		} else if r.litCount > 0 {
+			litbatch := int(math.Min(float64(remain), float64(r.litCount)))
+			n, _ := r.r.Discard(uint(r.bitWidth), litbatch)
+			if n != litbatch {
+				return read
+			}
+
+			r.litCount -= int32(litbatch)
+			read += litbatch
+		} else {
+			if !r.Next() {
+				return read
+			}
+		}
+	}
+	return read
+}
+
 func (r *RleDecoder) GetBatch(values []uint64) int {
 	read := 0
 	size := len(values)

@@ -40,6 +40,10 @@ type TypedDecoder interface {
 	ValuesLeft() int
 	// Type returns the physical type this can decode.
 	Type() parquet.Type
+	// Discard the next n values from the decoder, returning the actual number
+	// of values that were able to be discarded (should be equal to n unless an
+	// error occurs).
+	Discard(n int) (int, error)
 }
 
 // DictDecoder is a special TypedDecoder which implements dictionary decoding

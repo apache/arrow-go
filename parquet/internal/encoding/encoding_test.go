@@ -307,6 +307,22 @@ func (b *BaseEncodingTestSuite) encodeTestData(e parquet.Encoding) (encoding.Buf
 	return enc.FlushValues()
 }
 
+func (b *BaseEncodingTestSuite) testDiscardDecodeData(e parquet.Encoding, buf []byte) {
+	dec := encoding.NewDecoder(testutils.TypeToParquetType(b.typ), e, b.descr, b.mem)
+	b.Equal(e, dec.Encoding())
+	b.Equal(b.descr.PhysicalType(), dec.Type())
+
+	dec.SetData(b.nvalues, buf)
+	discarded := b.nvalues / 2
+	n, err := dec.Discard(discarded)
+	b.Require().NoError(err)
+	b.Equal(discarded, n)
+
+	decoded, _ := decode(dec, b.decodeBuf)
+	b.Equal(b.nvalues-discarded, decoded)
+	b.Equal(reflect.ValueOf(b.draws).Slice(discarded, b.nvalues).Interface(), reflect.ValueOf(b.decodeBuf).Slice(0, b.nvalues-discarded).Interface())
+}
+
 func (b *BaseEncodingTestSuite) decodeTestData(e parquet.Encoding, buf []byte) {
 	dec := encoding.NewDecoder(testutils.TypeToParquetType(b.typ), e, b.descr, b.mem)
 	b.Equal(e, dec.Encoding())
@@ -314,6 +330,16 @@ func (b *BaseEncodingTestSuite) decodeTestData(e parquet.Encoding, buf []byte) {
 
 	dec.SetData(b.nvalues, buf)
 	decoded, _ := decode(dec, b.decodeBuf)
+	b.Equal(b.nvalues, decoded)
+	b.Equal(reflect.ValueOf(b.draws).Slice(0, b.nvalues).Interface(), reflect.ValueOf(b.decodeBuf).Slice(0, b.nvalues).Interface())
+
+	dec.SetData(b.nvalues, buf)
+	decoded = 0
+	for i := 0; i < b.nvalues; i += 500 {
+		n, err := decode(dec, reflect.ValueOf(b.decodeBuf).Slice(i, i+500).Interface())
+		b.Require().NoError(err)
+		decoded += n
+	}
 	b.Equal(b.nvalues, decoded)
 	b.Equal(reflect.ValueOf(b.draws).Slice(0, b.nvalues).Interface(), reflect.ValueOf(b.decodeBuf).Slice(0, b.nvalues).Interface())
 }
@@ -343,6 +369,7 @@ func (b *BaseEncodingTestSuite) checkRoundTrip(e parquet.Encoding) {
 	buf, _ := b.encodeTestData(e)
 	defer buf.Release()
 	b.decodeTestData(e, buf.Bytes())
+	b.testDiscardDecodeData(e, buf.Bytes())
 }
 
 func (b *BaseEncodingTestSuite) checkRoundTripSpaced(e parquet.Encoding, validBits []byte, validBitsOffset int64) {
@@ -541,6 +568,16 @@ func (d *DictionaryEncodingTestSuite) checkRoundTrip() {
 	decoded, _ = decodeSpaced(decoder, d.decodeBuf, 0, validBits, 0)
 	d.Equal(d.nvalues, decoded)
 	d.Equal(reflect.ValueOf(d.draws).Slice(0, d.nvalues).Interface(), reflect.ValueOf(d.decodeBuf).Slice(0, d.nvalues).Interface())
+
+	decoder.SetData(d.nvalues, indices.Bytes())
+	discarded := d.nvalues / 2
+	n, err := decoder.Discard(discarded)
+	d.Require().NoError(err)
+	d.Equal(discarded, n)
+
+	decoded, _ = decode(decoder, d.decodeBuf)
+	d.Equal(d.nvalues-discarded, decoded)
+	d.Equal(reflect.ValueOf(d.draws).Slice(discarded, d.nvalues).Interface(), reflect.ValueOf(d.decodeBuf).Slice(0, d.nvalues-discarded).Interface())
 }
 
 func (d *DictionaryEncodingTestSuite) TestBasicRoundTrip() {

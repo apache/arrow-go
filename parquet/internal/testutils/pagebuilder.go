@@ -173,7 +173,7 @@ func (d *DictionaryPageBuilder) NumValues() int32 {
 	return d.numDictValues
 }
 
-func MakeDataPage(dataPageVersion parquet.DataPageVersion, d *schema.Column, values interface{}, nvals int, e parquet.Encoding, indexBuffer encoding.Buffer, defLvls, repLvls []int16, maxDef, maxRep int16) file.Page {
+func MakeDataPage(dataPageVersion parquet.DataPageVersion, d *schema.Column, values interface{}, nvals int, e parquet.Encoding, indexBuffer encoding.Buffer, defLvls, repLvls []int16, maxDef, maxRep int16, firstRowIdx int64) file.Page {
 	num := 0
 
 	stream := encoding.NewBufferWriter(1024, mem)
@@ -196,9 +196,19 @@ func MakeDataPage(dataPageVersion parquet.DataPageVersion, d *schema.Column, val
 
 	buf := stream.Finish()
 	if dataPageVersion == parquet.DataPageV1 {
-		return file.NewDataPageV1(buf, int32(num), e, builder.defLvlEncoding, builder.repLvlEncoding, int32(buf.Len()))
+		return file.NewDataPageV1WithConfig(buf, builder.defLvlEncoding, builder.repLvlEncoding, file.DataPageConfig{
+			Num:              int32(num),
+			Encoding:         e,
+			UncompressedSize: int32(buf.Len()),
+			FirstRowIndex:    firstRowIdx,
+		})
 	}
-	return file.NewDataPageV2(buf, int32(num), 0, int32(num), e, int32(builder.defLvlBytesLen), int32(builder.repLvlBytesLen), int32(buf.Len()), false)
+	return file.NewDataPageV2WithConfig(buf, 0, int32(num), int32(builder.defLvlBytesLen), int32(builder.repLvlBytesLen), false, file.DataPageConfig{
+		Num:              int32(num),
+		Encoding:         e,
+		UncompressedSize: int32(buf.Len()),
+		FirstRowIndex:    firstRowIdx,
+	})
 }
 
 func MakeDictPage(d *schema.Column, values interface{}, valuesPerPage []int, e parquet.Encoding) (*file.DictionaryPage, []encoding.Buffer) {
@@ -237,6 +247,26 @@ func (m *MockPageReader) Page() file.Page {
 	return m.TestData().Get("pages").Data().([]file.Page)[m.curpage-1]
 }
 
+func (m *MockPageReader) SeekToPageWithRow(rowIdx int64) error {
+	pg1 := m.TestData().Get("pages").Data().([]file.Page)[0]
+	_, hasDict := pg1.(*file.DictionaryPage)
+	m.curpage = m.TestData().Get("row_map").Data().(func(int64) int)(rowIdx)
+	if hasDict {
+		m.curpage++
+	}
+
+	return nil
+}
+
+func (m *MockPageReader) GetDictionaryPage() (*file.DictionaryPage, error) {
+	pg1 := m.TestData().Get("pages").Data().([]file.Page)[0]
+	if dict, ok := pg1.(*file.DictionaryPage); ok {
+		return dict, nil
+	}
+
+	return nil, nil
+}
+
 func (m *MockPageReader) Next() bool {
 	pageList := m.TestData().Get("pages").Data().([]file.Page)
 	m.curpage++
@@ -269,7 +299,7 @@ func PaginatePlain(version parquet.DataPageVersion, d *schema.Column, values ref
 		page := MakeDataPage(version, d,
 			values.Slice(valueStart, valueStart+valuesPerPage[i]).Interface(),
 			valuesPerPage[i], enc, nil, defLevels[defLvlStart:defLvlEnd],
-			repLevels[repLvlStart:repLvlEnd], maxDef, maxRep)
+			repLevels[repLvlStart:repLvlEnd], maxDef, maxRep, int64(i*lvlsPerPage))
 		valueStart += valuesPerPage[i]
 		pageList = append(pageList, page)
 	}
@@ -298,7 +328,7 @@ func PaginateDict(version parquet.DataPageVersion, d *schema.Column, values refl
 			repEnd = (i + 1) * lvlsPerPage
 		}
 		page := MakeDataPage(version, d, nil, valuesPerPage[i], enc, rleIndices[i],
-			defLevels[defStart:defEnd], repLevels[repStart:repEnd], maxDef, maxRep)
+			defLevels[defStart:defEnd], repLevels[repStart:repEnd], maxDef, maxRep, int64(i*lvlsPerPage))
 		pages = append(pages, page)
 	}
 	return pages

@@ -33,6 +33,8 @@ package schema
 import (
 	"fmt"
 	"io"
+	"iter"
+	"slices"
 	"strings"
 
 	"github.com/apache/arrow-go/v18/parquet"
@@ -159,6 +161,11 @@ func (s *Schema) buildTree(n Node, maxDefLvl, maxRepLvl int16, base Node) {
 // Column returns the (0-indexed) column of the provided index.
 func (s *Schema) Column(i int) *Column {
 	return s.leaves[i]
+}
+
+// Columns returns an iterator over the leaf columns of the schema
+func (s *Schema) Columns() iter.Seq2[int, *Column] {
+	return slices.All(s.leaves)
 }
 
 // ColumnIndexByName looks up the column by it's full dot separated

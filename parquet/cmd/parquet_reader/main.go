@@ -40,6 +40,11 @@ Usage:
   parquet_reader -h | --help
   parquet_reader [--only-metadata] [--no-metadata] [--no-memory-map] [--json] [--csv] [--output=FILE]
                  [--print-key-value-metadata] [--int96-timestamp] [--columns=COLUMNS] <file>
+  parquet_reader column-indexes [--columns=COLUMNS] <file>
+
+Commands:
+  column-indexes                Print the column indexes for the file.
+
 Options:
   -h --help                     Show this screen.
   --print-key-value-metadata    Print out the key-value metadata. [default: false]
@@ -55,6 +60,7 @@ Options:
 func main() {
 	opts, _ := docopt.ParseDoc(usage)
 	var config struct {
+		ColumnIndexes         bool `docopt:"column-indexes"`
 		PrintKeyValueMetadata bool
 		OnlyMetadata          bool
 		NoMetadata            bool
@@ -111,6 +117,44 @@ func main() {
 	}
 
 	fileMetadata := rdr.MetaData()
+
+	if config.ColumnIndexes {
+		idxRdr := rdr.GetPageIndexReader()
+		for i := 0; i < fileMetadata.NumRowGroups(); i++ {
+			rgIdxRdr, err := idxRdr.RowGroup(i)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+
+			fmt.Printf("row-group %d:\n", i)
+			for idx, c := range fileMetadata.Schema.Columns() {
+				colIdx, err := rgIdxRdr.GetColumnIndex(idx)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+
+				if colIdx != nil {
+					fmt.Printf("\ncolumn index for column %s:\nBoundary order: %s\n",
+						c.ColumnPath(), colIdx.GetBoundaryOrder())
+					dumpColumnIndex(colIdx)
+				}
+
+				offsetIdx, err := rgIdxRdr.GetOffsetIndex(idx)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+
+				if offsetIdx != nil {
+					fmt.Printf("\noffset index for column %s:\n", c.ColumnPath())
+					dumpOffsetIndex(offsetIdx)
+				}
+			}
+		}
+		return
+	}
 
 	if !config.NoMetadata {
 		fmt.Println("File name:", config.File)

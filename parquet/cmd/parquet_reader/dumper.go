@@ -24,7 +24,9 @@ import (
 
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/schema"
+	"github.com/pterm/pterm"
 )
 
 const defaultBatchSize = 128
@@ -179,4 +181,88 @@ func (dump *Dumper) Next() (interface{}, bool) {
 	dump.valueOffset++
 
 	return v, true
+}
+
+func dumpColIdxImpl[T parquet.ColumnTypes](cidx *metadata.TypedColumnIndex[T]) {
+	data := pterm.TableData{
+		{"", "null count", "min", "max", "rep level histogram", "def level histogram"}}
+
+	nullCounts := cidx.GetNullCounts()
+	nullPages := cidx.GetNullPages()
+	minValues := cidx.MinValues()
+	maxValues := cidx.MaxValues()
+	repLevelHistograms := cidx.GetRepetitionLevelHistograms()
+	defLevelHistograms := cidx.GetDefinitionLevelHistograms()
+
+	npages := len(nullPages)
+
+	for i := 0; i < npages; i++ {
+		row := make([]string, 6)
+		row[0] = fmt.Sprintf("page-%d", i)
+		if cidx.IsSetNullCounts() {
+			row[1] = fmt.Sprint(nullCounts[i])
+		} else {
+			row[1] = ""
+		}
+
+		row[2] = fmt.Sprint(minValues[i])
+		row[3] = fmt.Sprint(maxValues[i])
+
+		if repLevelHistograms == nil {
+			row[4] = "<none>"
+		}
+
+		if defLevelHistograms == nil {
+			row[5] = "<none>"
+		}
+
+		data = append(data, row)
+	}
+
+	pterm.DefaultTable.WithRightAlignment(true).
+		WithHasHeader(true).WithData(data).Render()
+}
+
+func dumpColumnIndex(cidx metadata.ColumnIndex) {
+	switch tcidx := cidx.(type) {
+	case *metadata.TypedColumnIndex[bool]:
+		dumpColIdxImpl(tcidx)
+	case *metadata.TypedColumnIndex[int32]:
+		dumpColIdxImpl(tcidx)
+	case *metadata.TypedColumnIndex[int64]:
+		dumpColIdxImpl(tcidx)
+	case *metadata.TypedColumnIndex[float32]:
+		dumpColIdxImpl(tcidx)
+	case *metadata.TypedColumnIndex[float64]:
+		dumpColIdxImpl(tcidx)
+	case *metadata.TypedColumnIndex[parquet.Int96]:
+		dumpColIdxImpl(tcidx)
+	case *metadata.TypedColumnIndex[parquet.ByteArray]:
+		dumpColIdxImpl(tcidx)
+	case *metadata.TypedColumnIndex[parquet.FixedLenByteArray]:
+		dumpColIdxImpl(tcidx)
+	}
+}
+
+func dumpOffsetIndex(oidx metadata.OffsetIndex) {
+	data := pterm.TableData{
+		{"", "offset", "compressed size", "first row index", "unencoded bytes"}}
+
+	unencodedByteArrayDataBytes := oidx.GetUnencodedByteArrayDataBytes()
+	for i, pl := range oidx.GetPageLocations() {
+		unencoded := "-"
+		if unencodedByteArrayDataBytes != nil {
+			unencoded = fmt.Sprint(unencodedByteArrayDataBytes[i])
+		}
+
+		data = append(data, []string{
+			fmt.Sprintf("page-%d", i),
+			fmt.Sprint(pl.Offset),
+			fmt.Sprint(pl.CompressedPageSize),
+			fmt.Sprint(pl.FirstRowIndex),
+			unencoded})
+	}
+
+	pterm.DefaultTable.WithRightAlignment(true).
+		WithHasHeader(true).WithData(data).Render()
 }
