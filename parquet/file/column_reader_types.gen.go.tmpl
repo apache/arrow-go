@@ -31,20 +31,8 @@ type {{.Name}}ColumnChunkReader struct {
 // Skip skips the next nvalues so that the next call to ReadBatch
 // will start reading *after* the skipped values.
 func (cr *{{.Name}}ColumnChunkReader) Skip(nvalues int64) (int64, error) {
-  return cr.columnChunkReader.skipValues(nvalues,
-    func(batch int64, buf []byte) (int64, error) {
-      vals, _, err := cr.ReadBatch(batch,
-        {{- if ne .Name "Boolean"}}
-        {{.prefix}}.{{.Name}}Traits.CastFromBytes(buf),
-        arrow.Int16Traits.CastFromBytes(buf),
-        arrow.Int16Traits.CastFromBytes(buf))
-        {{- else}}
-        *(*[]bool)(unsafe.Pointer(&buf)),
-        nil,
-        nil)
-        {{- end}}
-      return vals, err
-    })
+  err := cr.columnChunkReader.skipRows(nvalues)
+  return nvalues, err
 }
 
 // ReadBatch reads batchSize values from the column.

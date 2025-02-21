@@ -17,6 +17,8 @@
 package file_test
 
 import (
+	"bytes"
+	"fmt"
 	"math"
 	"math/rand"
 	"reflect"
@@ -24,13 +26,17 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/internal/testutils"
+	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -574,7 +580,7 @@ func (p *PrimitiveReaderSuite) TestDictionaryEncodedPages() {
 
 	p.Run("Dict: Plain, Data: RLEDict", func() {
 		dictPage := file.NewDictionaryPage(dummy, 0, parquet.Encodings.Plain)
-		dataPage := testutils.MakeDataPage(p.dataPageVersion, descr, nil, 0, parquet.Encodings.RLEDict, dummy, nil, nil, 0, 0)
+		dataPage := testutils.MakeDataPage(p.dataPageVersion, descr, nil, 0, parquet.Encodings.RLEDict, dummy, nil, nil, 0, 0, 0)
 
 		p.pages = append(p.pages, dictPage, dataPage)
 		p.initReader(descr)
@@ -585,7 +591,7 @@ func (p *PrimitiveReaderSuite) TestDictionaryEncodedPages() {
 
 	p.Run("Dict: Plain Dictionary, Data: Plain Dictionary", func() {
 		dictPage := file.NewDictionaryPage(dummy, 0, parquet.Encodings.PlainDict)
-		dataPage := testutils.MakeDataPage(p.dataPageVersion, descr, nil, 0, parquet.Encodings.PlainDict, dummy, nil, nil, 0, 0)
+		dataPage := testutils.MakeDataPage(p.dataPageVersion, descr, nil, 0, parquet.Encodings.PlainDict, dummy, nil, nil, 0, 0, 0)
 		p.pages = append(p.pages, dictPage, dataPage)
 		p.initReader(descr)
 		p.NotPanics(func() { p.reader.HasNext() })
@@ -594,7 +600,7 @@ func (p *PrimitiveReaderSuite) TestDictionaryEncodedPages() {
 	})
 
 	p.Run("Panic if dict page not first", func() {
-		dataPage := testutils.MakeDataPage(p.dataPageVersion, descr, nil, 0, parquet.Encodings.RLEDict, dummy, nil, nil, 0, 0)
+		dataPage := testutils.MakeDataPage(p.dataPageVersion, descr, nil, 0, parquet.Encodings.RLEDict, dummy, nil, nil, 0, 0, 0)
 		p.pages = append(p.pages, dataPage)
 		p.initReader(descr)
 		p.NotPanics(func() { p.False(p.reader.HasNext()) })
@@ -622,7 +628,7 @@ func (p *PrimitiveReaderSuite) TestDictionaryEncodedPages() {
 	})
 
 	p.Run("Unsupported encoding", func() {
-		dataPage := testutils.MakeDataPage(p.dataPageVersion, descr, nil, 0, parquet.Encodings.DeltaByteArray, dummy, nil, nil, 0, 0)
+		dataPage := testutils.MakeDataPage(p.dataPageVersion, descr, nil, 0, parquet.Encodings.DeltaByteArray, dummy, nil, nil, 0, 0, 0)
 		p.pages = append(p.pages, dataPage)
 		p.initReader(descr)
 		p.Panics(func() { p.reader.HasNext() })
@@ -633,6 +639,82 @@ func (p *PrimitiveReaderSuite) TestDictionaryEncodedPages() {
 	p.pages = p.pages[:2]
 }
 
+func (p *PrimitiveReaderSuite) TestSeekToRowRequired() {
+	const (
+		levelsPerPage int = 100
+		npages        int = 50
+	)
+
+	for _, enc := range []parquet.Encoding{parquet.Encodings.Plain, parquet.Encodings.RLEDict} {
+		p.maxDefLvl, p.maxRepLvl = 0, 0
+		typ := schema.NewInt32Node("a", parquet.Repetitions.Required, -1)
+		d := schema.NewColumn(typ, p.maxDefLvl, p.maxRepLvl)
+
+		p.pages, p.nvalues, p.values, p.defLevels, p.repLevels = makePages(p.dataPageVersion,
+			d, npages, levelsPerPage, reflect.TypeOf(int32(0)), enc)
+		p.nlevels = npages * levelsPerPage
+		p.initReader(d)
+
+		p.pager.(*testutils.MockPageReader).TestData().Set("row_map", func(idx int64) int {
+			return (int(idx) / levelsPerPage) + 1
+		})
+
+		// check seek back to beginning
+		p.checkResults(reflect.TypeOf(int32(0)))
+		p.Require().NoError(p.reader.SeekToRow(0))
+		p.checkResults(reflect.TypeOf(int32(0)))
+
+		p.Require().NoError(p.reader.SeekToRow(550))
+		p.nvalues -= 550
+		p.nlevels -= 550
+		p.values = p.values.Slice(550, p.values.Len())
+		p.checkResults(reflect.TypeOf(int32(0)))
+		p.clear()
+	}
+}
+
+func (p *PrimitiveReaderSuite) TestSeekToRowOptional() {
+	const (
+		levelsPerPage int = 100
+		npages        int = 50
+	)
+
+	for _, enc := range []parquet.Encoding{parquet.Encodings.Plain, parquet.Encodings.RLEDict} {
+		p.maxDefLvl, p.maxRepLvl = 4, 0
+		typ := schema.NewInt32Node("a", parquet.Repetitions.Optional, -1)
+		d := schema.NewColumn(typ, p.maxDefLvl, p.maxRepLvl)
+
+		p.pages, p.nvalues, p.values, p.defLevels, p.repLevels = makePages(p.dataPageVersion,
+			d, npages, levelsPerPage, reflect.TypeOf(int32(0)), enc)
+		p.nlevels = npages * levelsPerPage
+		p.initReader(d)
+
+		p.pager.(*testutils.MockPageReader).TestData().Set("row_map", func(idx int64) int {
+			return (int(idx) / levelsPerPage) + 1
+		})
+
+		// check seek back to beginning
+		p.checkResults(reflect.TypeOf(int32(0)))
+		p.Require().NoError(p.reader.SeekToRow(0))
+		p.checkResults(reflect.TypeOf(int32(0)))
+
+		p.Require().NoError(p.reader.SeekToRow(550))
+		realValuesSkipped := 0
+		for i := 0; i < 550; i++ {
+			if p.defLevels[i] == p.maxDefLvl {
+				realValuesSkipped++
+			}
+		}
+
+		p.nvalues -= realValuesSkipped
+		p.values = p.values.Slice(realValuesSkipped, p.values.Len())
+		p.nlevels -= 550
+		p.defLevels = p.defLevels[550:]
+		p.checkResults(reflect.TypeOf(int32(0)))
+		p.clear()
+	}
+}
+
 func TestPrimitiveReader(t *testing.T) {
 	t.Parallel()
 	t.Run("datapage v1", func(t *testing.T) {
@@ -641,4 +723,89 @@ func TestPrimitiveReader(t *testing.T) {
 	t.Run("datapage v2", func(t *testing.T) {
 		suite.Run(t, &PrimitiveReaderSuite{dataPageVersion: parquet.DataPageV2})
 	})
+}
+
+func TestFullSeekRow(t *testing.T) {
+	mem := memory.DefaultAllocator
+
+	for _, dataPageVersion := range []parquet.DataPageVersion{parquet.DataPageV2, parquet.DataPageV1} {
+		t.Run(fmt.Sprintf("DataPageVersion=%v", dataPageVersion+1), func(t *testing.T) {
+
+			props := parquet.NewWriterProperties(parquet.WithAllocator(mem),
+				parquet.WithDataPageVersion(dataPageVersion), parquet.WithDataPageSize(1),
+				parquet.WithPageIndexEnabled(true))
+
+			sc := arrow.NewSchema([]arrow.Field{
+				{Name: "c0", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+				{Name: "c1", Type: arrow.BinaryTypes.String, Nullable: true},
+				{Name: "c2", Type: arrow.ListOf(arrow.PrimitiveTypes.Int64), Nullable: true},
+			}, nil)
+
+			tbl, err := array.TableFromJSON(mem, sc, []string{`[
+				{"c0": 1,    "c1": "a",  "c2": [1]},
+				{"c0": 2,    "c1": "b",  "c2": [1, 2]},
+				{"c0": 3,    "c1": "c",  "c2": [null]},
+				{"c0": null, "c1": "d",  "c2": []},
+				{"c0": 5,    "c1": null, "c2": [3, 3, 3]},
+				{"c0": 6,    "c1": "f",  "c2": null}
+			]`})
+			require.NoError(t, err)
+			defer tbl.Release()
+
+			schema := tbl.Schema()
+			arrWriterProps := pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem))
+
+			var buf bytes.Buffer
+			wr, err := pqarrow.NewFileWriter(schema, &buf, props, arrWriterProps)
+			require.NoError(t, err)
+
+			require.NoError(t, wr.WriteTable(tbl, tbl.NumRows()))
+			require.NoError(t, wr.Close())
+
+			rdr, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()),
+				file.WithReadProps(parquet.NewReaderProperties(mem)))
+			require.NoError(t, err)
+			defer rdr.Close()
+
+			rgr := rdr.RowGroup(0)
+			col, err := rgr.Column(0)
+			require.NoError(t, err)
+
+			icr := col.(*file.Int64ColumnChunkReader)
+			require.NoError(t, icr.SeekToRow(3))
+
+			vals := make([]int64, 5)
+			defLvls := make([]int16, 5)
+			repLvls := make([]int16, 5)
+
+			total, read, err := icr.ReadBatch(5, vals, defLvls, repLvls)
+			require.NoError(t, err)
+
+			assert.EqualValues(t, 3, total)
+			assert.EqualValues(t, 2, read)
+
+			assert.Equal(t, []int64{5, 6}, vals[:read])
+			assert.Equal(t, []int16{0, 1, 1}, defLvls[:total])
+			assert.Equal(t, []int16{0, 0, 0}, repLvls[:total])
+
+			col2, err := rgr.Column(2)
+			require.NoError(t, err)
+
+			icr = col2.(*file.Int64ColumnChunkReader)
+			require.NoError(t, icr.SeekToRow(3))
+
+			total, read, err = icr.ReadBatch(5, vals, defLvls, repLvls)
+			require.NoError(t, err)
+
+			// 5 definition levels are read for the last 3 rows
+			// because of the repetitions
+			assert.EqualValues(t, 5, total)
+			// only 3 physical values though
+			assert.EqualValues(t, 3, read)
+
+			assert.Equal(t, []int64{3, 3, 3}, vals[:read])
+			assert.Equal(t, []int16{1, 3, 3, 3, 0}, defLvls[:total])
+			assert.Equal(t, []int16{0, 0, 1, 1, 0}, repLvls[:total])
+		})
+	}
 }
