@@ -42,17 +42,6 @@ func (a *GoAllocator) Reallocate(size int, b []byte) []byte {
 
 func (a *GoAllocator) Free(b []byte) {}
 
-func (a *GoAllocator) AllocateAligned(size int) (buf []byte, alloc []byte) {
-	// Already aligned
-	buf = a.Allocate(size)
-	return
-}
-
-func (a *GoAllocator) ReallocateAligned(size int, b []byte, _ []byte) ([]byte, []byte) {
-	// Already aligned
-	return a.Reallocate(size, b), nil
-}
-
 var (
 	_ Allocator = (*GoAllocator)(nil)
 )

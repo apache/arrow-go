@@ -31,29 +31,14 @@ import (
 )
 
 type CheckedAllocator struct {
-	mem AlignedAllocator
+	mem Allocator
 	sz  int64
 
 	allocs sync.Map
 }
 
 func NewCheckedAllocator(mem Allocator) *CheckedAllocator {
-	return &CheckedAllocator{mem: MakeAlignedAllocator(mem)}
-}
-
-func (a *CheckedAllocator) recordCaller(size int, out []byte) {
-	ptr := uintptr(unsafe.Pointer(&out[0]))
-	pcs := make([]uintptr, maxRetainedFrames)
-
-	// For historical reasons the meaning of the skip argument
-	// differs between Caller and Callers. For Callers, 0 identifies
-	// the frame for the caller itself. We skip 3 additional frames
-	// here to get to the caller right before the call to (Re)Allocate.
-	runtime.Callers(allocFrames+3, pcs)
-	callersFrames := runtime.CallersFrames(pcs)
-	if pc, _, l, ok := runtime.Caller(allocFrames); ok {
-		a.allocs.Store(ptr, &dalloc{pc: pc, line: l, sz: size, callersFrames: callersFrames})
-	}
+	return &CheckedAllocator{mem: mem}
 }
 
 func (a *CheckedAllocator) CurrentAlloc() int { return int(atomic.LoadInt64(&a.sz)) }
@@ -65,7 +50,18 @@ func (a *CheckedAllocator) Allocate(size int) []byte {
 		return out
 	}
 
-	a.recordCaller(size, out)
+	ptr := uintptr(unsafe.Pointer(&out[0]))
+	pcs := make([]uintptr, maxRetainedFrames)
+
+	// For historical reasons the meaning of the skip argument
+	// differs between Caller and Callers. For Callers, 0 identifies
+	// the frame for the caller itself. We skip 2 additional frames
+	// here to get to the caller right before the call to Allocate.
+	runtime.Callers(allocFrames+2, pcs)
+	callersFrames := runtime.CallersFrames(pcs)
+	if pc, _, l, ok := runtime.Caller(allocFrames); ok {
+		a.allocs.Store(ptr, &dalloc{pc: pc, line: l, sz: size, callersFrames: callersFrames})
+	}
 	return out
 }
 
@@ -78,8 +74,20 @@ func (a *CheckedAllocator) Reallocate(size int, b []byte) []byte {
 		return out
 	}
 
+	newptr := uintptr(unsafe.Pointer(&out[0]))
 	a.allocs.Delete(oldptr)
-	a.recordCaller(size, out)
+	pcs := make([]uintptr, maxRetainedFrames)
+
+	// For historical reasons the meaning of the skip argument
+	// differs between Caller and Callers. For Callers, 0 identifies
+	// the frame for the caller itself. We skip 2 additional frames
+	// here to get to the caller right before the call to Reallocate.
+	runtime.Callers(reallocFrames+2, pcs)
+	callersFrames := runtime.CallersFrames(pcs)
+	if pc, _, l, ok := runtime.Caller(reallocFrames); ok {
+		a.allocs.Store(newptr, &dalloc{pc: pc, line: l, sz: size, callersFrames: callersFrames})
+	}
+
 	return out
 }
 
@@ -93,23 +101,6 @@ func (a *CheckedAllocator) Free(b []byte) {
 
 	ptr := uintptr(unsafe.Pointer(&b[0]))
 	a.allocs.Delete(ptr)
-}
-
-func (a *CheckedAllocator) AllocateAligned(size int) (buf []byte, alloc []byte) {
-	buf, alloc = a.mem.AllocateAligned(size)
-	atomic.AddInt64(&a.sz, int64(size))
-	a.recordCaller(size, buf)
-	return
-}
-
-func (a *CheckedAllocator) ReallocateAligned(size int, buf []byte, alloc []byte) (newBuf []byte, newAlloc []byte) {
-	atomic.AddInt64(&a.sz, int64(len(buf)*-1))
-	oldptr := uintptr(unsafe.Pointer(&buf[0]))
-	newBuf, newAlloc = a.mem.ReallocateAligned(size, buf, alloc)
-	a.allocs.Delete(oldptr)
-	atomic.AddInt64(&a.sz, int64(len(newBuf)))
-	a.recordCaller(size, newBuf)
-	return
 }
 
 // typically the allocations are happening in memory.Buffer, not by consumers calling

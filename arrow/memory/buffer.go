@@ -28,11 +28,9 @@ type Buffer struct {
 	buf      []byte
 	length   int
 	mutable  bool
-	mem      AlignedAllocator
+	mem      Allocator
 
 	parent *Buffer
-	// alloc is the "real" allocation to pass to Free, if applicable
-	alloc []byte
 }
 
 // NewBufferWithAllocator returns a buffer with the mutable flag set
@@ -44,7 +42,7 @@ type Buffer struct {
 // through the c data interface and tracking the lifetime of the
 // imported buffers.
 func NewBufferWithAllocator(data []byte, mem Allocator) *Buffer {
-	return &Buffer{refCount: 1, buf: data, length: len(data), mem: MakeAlignedAllocator(mem)}
+	return &Buffer{refCount: 1, buf: data, length: len(data), mem: mem}
 }
 
 // NewBufferBytes creates a fixed-size buffer from the specified data.
@@ -54,7 +52,7 @@ func NewBufferBytes(data []byte) *Buffer {
 
 // NewResizableBuffer creates a mutable, resizable buffer with an Allocator for managing memory.
 func NewResizableBuffer(mem Allocator) *Buffer {
-	return &Buffer{refCount: 1, mutable: true, mem: MakeAlignedAllocator(mem)}
+	return &Buffer{refCount: 1, mutable: true, mem: mem}
 }
 
 func SliceBuffer(buf *Buffer, offset, length int) *Buffer {
@@ -81,16 +79,12 @@ func (b *Buffer) Release() {
 
 		if atomic.AddInt64(&b.refCount, -1) == 0 {
 			if b.mem != nil {
-				if b.alloc != nil {
-					b.mem.Free(b.alloc)
-				} else {
-					b.mem.Free(b.buf)
-				}
+				b.mem.Free(b.buf)
 			} else {
 				b.parent.Release()
 				b.parent = nil
 			}
-			b.alloc, b.buf, b.length = nil, nil, 0
+			b.buf, b.length = nil, 0
 		}
 	}
 }
@@ -125,9 +119,9 @@ func (b *Buffer) Reserve(capacity int) {
 	if capacity > len(b.buf) {
 		newCap := roundUpToMultipleOf64(capacity)
 		if len(b.buf) == 0 {
-			b.buf, b.alloc = b.mem.AllocateAligned(newCap)
+			b.buf = b.mem.Allocate(newCap)
 		} else {
-			b.buf, b.alloc = b.mem.ReallocateAligned(newCap, b.buf, b.alloc)
+			b.buf = b.mem.Reallocate(newCap, b.buf)
 		}
 	}
 }
@@ -152,14 +146,10 @@ func (b *Buffer) resize(newSize int, shrink bool) {
 		newCap := roundUpToMultipleOf64(newSize)
 		if len(b.buf) != newCap {
 			if newSize == 0 {
-				if b.alloc != nil {
-					b.mem.Free(b.alloc)
-				} else {
-					b.mem.Free(b.buf)
-				}
-				b.buf, b.alloc = nil, nil
+				b.mem.Free(b.buf)
+				b.buf = nil
 			} else {
-				b.buf, b.alloc = b.mem.ReallocateAligned(newCap, b.buf, b.alloc)
+				b.buf = b.mem.Reallocate(newCap, b.buf)
 			}
 		}
 	}

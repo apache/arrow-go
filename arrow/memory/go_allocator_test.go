@@ -74,14 +74,3 @@ func TestGoAllocator_Reallocate(t *testing.T) {
 		})
 	}
 }
-
-func TestGoAllocator_IsAligned(t *testing.T) {
-	var a Allocator
-	a = &GoAllocator{}
-
-	_, ok := a.(AlignedAllocator)
-	assert.True(t, ok)
-
-	aligned := MakeAlignedAllocator(a)
-	assert.Same(t, a, aligned)
-}

@@ -22,9 +22,7 @@ package mallocator_test
 import (
 	"fmt"
 	"testing"
-	"unsafe"
 
-	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/memory/mallocator"
 	"github.com/stretchr/testify/assert"
 )
@@ -126,49 +124,4 @@ func TestMallocatorReallocateNegative(t *testing.T) {
 	assert.PanicsWithValue(t, "mallocator: negative size", func() {
 		a.Reallocate(-1, buf)
 	})
-}
-
-func TestMallocatorAligned(t *testing.T) {
-	a := mallocator.NewMallocator()
-
-	aligned := memory.MakeAlignedAllocator(a)
-	assert.NotSame(t, a, aligned)
-
-	assert.Equal(t, int64(0), a.AllocatedBytes())
-
-	buf, alloc := aligned.AllocateAligned(64)
-
-	assert.GreaterOrEqual(t, int64(128), a.AllocatedBytes())
-
-	assert.Equal(t, uintptr(0), uintptr(unsafe.Pointer(&buf[0]))%64)
-
-	buf, alloc = aligned.ReallocateAligned(96, buf, alloc)
-	assert.Equal(t, uintptr(0), uintptr(unsafe.Pointer(&buf[0]))%64)
-
-	aligned.Free(alloc)
-	assert.Equal(t, int64(0), a.AllocatedBytes())
-}
-
-func TestMallocatorAlignedBuffer(t *testing.T) {
-	a := mallocator.NewMallocator()
-
-	buf := memory.NewResizableBuffer(a)
-	defer buf.Release()
-	assert.Equal(t, int64(0), a.AllocatedBytes())
-
-	buf.Reserve(20)
-	// 20 -> round up to 64 -> add 64 bytes padding
-	assert.GreaterOrEqual(t, int64(128), a.AllocatedBytes())
-	addr := uintptr(unsafe.Pointer(&buf.Buf()[0]))
-	assert.Equal(t, uintptr(0), addr%64)
-
-	buf.Reserve(40)
-	// There should have been no reallocation
-	assert.Equal(t, addr, uintptr(unsafe.Pointer(&buf.Buf()[0])))
-
-	buf.Reserve(100)
-	// Now the buffer is reallocated, make sure the new address is also aligned
-	assert.NotEqual(t, addr, uintptr(unsafe.Pointer(&buf.Buf()[0])))
-	addr = uintptr(unsafe.Pointer(&buf.Buf()[0]))
-	assert.Equal(t, uintptr(0), addr%64)
 }

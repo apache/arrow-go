@@ -18,7 +18,6 @@ package memory_test
 
 import (
 	"testing"
-	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
@@ -36,7 +35,6 @@ func TestNewResizableBuffer(t *testing.T) {
 	assert.NotNil(t, buf.Bytes())
 	assert.Equal(t, exp, len(buf.Bytes()))
 	assert.Equal(t, exp, buf.Len())
-	assert.Equal(t, uintptr(0), uintptr(unsafe.Pointer(&buf.Buf()[0]))%64)
 
 	buf.Release() // refCount == 1
 	assert.NotNil(t, buf.Bytes())
@@ -44,7 +42,6 @@ func TestNewResizableBuffer(t *testing.T) {
 	buf.Release() // refCount == 0
 	assert.Nil(t, buf.Bytes())
 	assert.Zero(t, buf.Len())
-	assert.Equal(t, 0, mem.CurrentAlloc())
 }
 
 func TestBufferReset(t *testing.T) {
