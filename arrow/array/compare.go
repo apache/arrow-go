@@ -487,19 +487,19 @@ func arrayApproxEqual(left, right arrow.Array, opt equalOption) bool {
 		return arrayEqualBinary(l, r)
 	case *String:
 		r := right.(*String)
-		return arrayEqualString(l, r)
+		return arrayApproxEqualString(l, r)
 	case *LargeBinary:
 		r := right.(*LargeBinary)
 		return arrayEqualLargeBinary(l, r)
 	case *LargeString:
 		r := right.(*LargeString)
-		return arrayEqualLargeString(l, r)
+		return arrayApproxEqualLargeString(l, r)
 	case *BinaryView:
 		r := right.(*BinaryView)
 		return arrayEqualBinaryView(l, r)
 	case *StringView:
 		r := right.(*StringView)
-		return arrayEqualStringView(l, r)
+		return arrayApproxEqualStringView(l, r)
 	case *Int8:
 		r := right.(*Int8)
 		return arrayEqualInt8(l, r)
@@ -638,6 +638,42 @@ func validityBitmapEqual(left, right arrow.Array) bool {
 	}
 	for i := 0; i < n; i++ {
 		if left.IsNull(i) != right.IsNull(i) {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayApproxEqualString(left, right *String) bool {
+	for i := 0; i < left.Len(); i++ {
+		if left.IsNull(i) {
+			continue
+		}
+		if stripNulls(left.Value(i)) != stripNulls(right.Value(i)) {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayApproxEqualLargeString(left, right *LargeString) bool {
+	for i := 0; i < left.Len(); i++ {
+		if left.IsNull(i) {
+			continue
+		}
+		if stripNulls(left.Value(i)) != stripNulls(right.Value(i)) {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayApproxEqualStringView(left, right *StringView) bool {
+	for i := 0; i < left.Len(); i++ {
+		if left.IsNull(i) {
+			continue
+		}
+		if stripNulls(left.Value(i)) != stripNulls(right.Value(i)) {
 			return false
 		}
 	}
