@@ -70,7 +70,7 @@ func (alloc *Mallocator) Allocate(size int) []byte {
 	if size < 0 {
 		panic("mallocator: negative size")
 	}
-	paddedSize := C.size_t(size) + C.size_t(alloc.alignment)
+	paddedSize := C.size_t(size + alloc.alignment)
 	ptr, err := C.calloc(paddedSize, 1)
 	if err != nil {
 		// under some circumstances and allocation patterns, we can end up in a scenario
@@ -81,7 +81,7 @@ func (alloc *Mallocator) Allocate(size int) []byte {
 		if ptr = C.malloc(paddedSize); ptr == nil {
 			panic(err)
 		}
-		C.memset(ptr, 0, C.size_t(paddedSize))
+		C.memset(ptr, 0, paddedSize)
 	} else if ptr == nil {
 		panic("mallocator: out of memory")
 	}
