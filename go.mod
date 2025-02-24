@@ -16,7 +16,8 @@
 
 module github.com/apache/arrow-go/v18
 
-go 1.23
+go 1.23.0
+
 toolchain go1.23.2
 
 require (
