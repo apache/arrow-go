@@ -39,11 +39,11 @@ type ReaderProperties struct {
 	// just use the read stream when reading data. Otherwise we will buffer
 	// the data we're going to read into memory first and then read that buffer.
 	//
-	// If reading from higher latency IO, like S3, setting this to false might improve
-	// performance by reading the entire row group at once rather than making multiple
-	// smaller data requests. For low-latency IO streams, setting this to false can
-	// reduce the number of IO operations. Additionally, this can decrease the amount
-	// of data read when only reading small portions / subsets of the parquet file.
+	// When accessing data from IO sources with higher latency, like S3, setting this
+	// to false may improve performance by reading the entire row group at once rather
+	// than sending multiple smaller IO requests. For IO streams with low latency, setting
+	// this to true can optimize memory usage for the reader. Additionally, this can decrease
+	// the amount of data retrieved when only needs to access small portions of the parquet file.
 	BufferedStreamEnabled bool
 }
 
