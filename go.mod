@@ -16,7 +16,7 @@
 
 module github.com/apache/arrow-go/v18
 
-go 1.23
+go 1.23.0
 
 toolchain go1.23.2
 
@@ -29,7 +29,7 @@ require (
 	github.com/golang/snappy v0.0.4
 	github.com/google/flatbuffers v25.2.10+incompatible
 	github.com/google/uuid v1.6.0
-	github.com/hamba/avro/v2 v2.27.0
+	github.com/hamba/avro/v2 v2.28.0
 	github.com/klauspost/asmfmt v1.3.2
 	github.com/klauspost/compress v1.18.0
 	github.com/klauspost/cpuid/v2 v2.2.9
