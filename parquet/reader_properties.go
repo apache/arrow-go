@@ -17,7 +17,6 @@
 package parquet
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 
@@ -87,5 +86,5 @@ func (r *ReaderProperties) GetStream(source io.ReaderAt, start, nbytes int64) (B
 		return nil, fmt.Errorf("parquet: tried reading %d bytes starting at position %d from file but only got %d", nbytes, start, n)
 	}
 
-	return utils.NewBufferedReader(bytes.NewReader(data), int(nbytes)), nil
+	return utils.NewByteReader(data), nil
 }
