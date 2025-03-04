@@ -77,6 +77,10 @@ func (r *byteReader) Peek(n int) ([]byte, error) {
 }
 
 func (r *byteReader) Discard(n int) (int, error) {
+	if n < 0 {
+		return 0, fmt.Errorf("arrow/bytereader: %w", bufio.ErrNegativeCount)
+	}
+
 	var (
 		err    error
 		newPos = r.pos + n
@@ -88,7 +92,10 @@ func (r *byteReader) Discard(n int) (int, error) {
 		err = io.EOF
 	}
 
-	r.Seek(int64(n), io.SeekCurrent)
+	_, seekErr := r.Seek(int64(n), io.SeekCurrent)
+	if seekErr != nil {
+		return n, seekErr
+	}
 	return n, err
 }
 
