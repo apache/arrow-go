@@ -31,8 +31,7 @@ type Reader interface {
 
 // byteReader is a wrapper for bytes.NewReader
 type byteReader struct {
-	io.ReadSeeker
-	io.ReaderAt
+	r   *bytes.Reader
 	buf []byte
 	pos int
 }
@@ -43,45 +42,54 @@ func NewByteReader(buf []byte) *byteReader {
 	r := bytes.NewReader(buf)
 	return &byteReader{
 		r,
-		r,
 		buf,
 		0,
 	}
 }
 
 func (r *byteReader) Read(buf []byte) (n int, err error) {
-	n, err = r.ReadSeeker.Read(buf)
+	n, err = r.r.Read(buf)
 	r.pos += n
-	return n, err
+	return
 }
 
-func (r *byteReader) Seek(offset int64, whence int) (int64, error) {
-	pos, err := r.ReadSeeker.Seek(offset, whence)
+func (r *byteReader) Seek(offset int64, whence int) (pos int64, err error) {
+	pos, err = r.r.Seek(offset, whence)
 	r.pos = int(pos)
-	return pos, err
+	return
+}
+
+func (r *byteReader) ReadAt(buf []byte, off int64) (n int, err error) {
+	return r.r.ReadAt(buf, off)
 }
 
 func (r *byteReader) Peek(n int) ([]byte, error) {
 	if n < 0 {
 		return nil, fmt.Errorf("arrow/bytereader: %w", bufio.ErrNegativeCount)
 	}
-
-	read := min(n, len(r.buf)-r.pos)
+	available := len(r.buf) - r.pos
+	read := min(n, available)
 	var err error
-	if n > read {
+	if read < n {
 		err = io.EOF
 	}
-
 	return r.buf[r.pos : r.pos+read], err
 }
 
 func (r *byteReader) Discard(n int) (int, error) {
-	// It's safe to use this buffer to read
-	return r.Read(r.buf[r.pos : r.pos+n])
-}
+	var (
+		err    error
+		newPos = r.pos + n
+	)
 
-func (r *byteReader) BufferSize() int {
-	return len(r.buf)
+	if newPos >= len(r.buf) {
+		newPos = len(r.buf)
+		n = newPos - r.pos
+		err = io.EOF
+	}
+
+	r.Seek(int64(n), io.SeekCurrent)
+	return n, err
 }
 
 func (r *byteReader) Outer() Reader {
@@ -164,8 +172,6 @@ func (b *bufferedReader) readErr() error {
 	b.err = nil
 	return err
 }
-
-func (b *bufferedReader) BufferSize() int { return b.bufferSz }
 
 // Buffered returns the number of bytes currently buffered
 func (b *bufferedReader) Buffered() int { return b.w - b.r }

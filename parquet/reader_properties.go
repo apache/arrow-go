@@ -50,7 +50,6 @@ type BufferedReader interface {
 	Peek(int) ([]byte, error)
 	Discard(int) (int, error)
 	Outer() utils.Reader
-	BufferSize() int
 	Reset(utils.Reader)
 	io.Reader
 }

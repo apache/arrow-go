@@ -533,7 +533,7 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 		hdr := format.NewPageHeader()
 		rd := utils.NewBufferedReader(
 			io.NewSectionReader(p.r.Outer(), p.dictOffset-p.baseOffset, p.dataOffset-p.baseOffset),
-			p.r.BufferSize())
+			int(parquet.DefaultBufSize))
 		if err := p.readPageHeader(rd, hdr); err != nil {
 			return nil, err
 		}
