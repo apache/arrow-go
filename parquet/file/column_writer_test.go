@@ -258,7 +258,7 @@ func (p *PrimitiveWriterTestSuite) TearDownTest() {
 
 func (p *PrimitiveWriterTestSuite) buildReader(nrows int64, compression compress.Compression) file.ColumnChunkReader {
 	p.readbuffer = p.sink.Finish()
-	pagereader, _ := file.NewPageReader(arrutils.NewBufferedReader(bytes.NewReader(p.readbuffer.Bytes()), p.readbuffer.Len()), nrows, compression, mem, nil)
+	pagereader, _ := file.NewPageReader(arrutils.NewByteReader(p.readbuffer.Bytes()), nrows, compression, mem, nil)
 	return file.NewColumnReader(p.descr, pagereader, mem, &p.bufferPool)
 }
 
