@@ -99,11 +99,14 @@ func (r *byteReader) Discard(n int) (int, error) {
 	return n, err
 }
 
+// Outer returns the byteReader itself, since it has already implemented Reader interface.
 func (r *byteReader) Outer() Reader {
 	return r
 }
 
 func (r *byteReader) Reset(Reader) {}
+
+func (r *byteReader) BufferSize() int { return len(r.buf) }
 
 // bufferedReader is similar to bufio.Reader except
 // it will expand the buffer if necessary when asked to Peek
@@ -179,6 +182,8 @@ func (b *bufferedReader) readErr() error {
 	b.err = nil
 	return err
 }
+
+func (b *bufferedReader) BufferSize() int { return b.bufferSz }
 
 // Buffered returns the number of bytes currently buffered
 func (b *bufferedReader) Buffered() int { return b.w - b.r }
