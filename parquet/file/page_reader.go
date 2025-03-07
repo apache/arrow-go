@@ -24,7 +24,6 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/JohnCGriffin/overflow"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -787,7 +786,7 @@ func (p *serializedPageReader) Next() bool {
 			// extract stats
 			firstRowIdx := p.rowsSeen
 			p.rowsSeen += int64(dataHeader.GetNumRows())
-			levelsBytelen, ok := overflow.Add(int(dataHeader.GetDefinitionLevelsByteLength()), int(dataHeader.GetRepetitionLevelsByteLength()))
+			levelsBytelen, ok := utils.Add(int(dataHeader.GetDefinitionLevelsByteLength()), int(dataHeader.GetRepetitionLevelsByteLength()))
 			if !ok {
 				p.err = xerrors.New("parquet: levels size too large (corrupt file?)")
 				return false

@@ -26,7 +26,6 @@ import (
 	"math/bits"
 	"testing"
 
-	"github.com/JohnCGriffin/overflow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -60,7 +59,7 @@ func BenchmarkAdd(b *testing.B) {
 
 			b.Run(fmt.Sprintf("%s + %s", name(x), name(y)), func(b *testing.B) {
 				for b.Loop() {
-					overflow.Add(x, y)
+					Add(x, y)
 				}
 			})
 		}
@@ -131,7 +130,7 @@ func BenchmarkMul(b *testing.B) {
 
 			b.Run(fmt.Sprintf("%s × %s", name(x), name(y)), func(b *testing.B) {
 				for b.Loop() {
-					overflow.Mul(x, y)
+					Mul(x, y)
 				}
 			})
 		}
@@ -161,7 +160,7 @@ func BenchmarkMul64(b *testing.B) {
 
 			b.Run(fmt.Sprintf("%s × %s", name(x), name(y)), func(b *testing.B) {
 				for b.Loop() {
-					overflow.Mul64(x, y)
+					Mul64(x, y)
 				}
 			})
 		}
