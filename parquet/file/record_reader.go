@@ -22,7 +22,6 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/JohnCGriffin/overflow"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
@@ -208,7 +207,7 @@ func (pr *primitiveRecordReader) ResetValues() {
 func (pr *primitiveRecordReader) numBytesForValues(nitems int64) (num int64, err error) {
 	typeSize := int64(pr.Descriptor().PhysicalType().ByteSize())
 	var ok bool
-	if num, ok = overflow.Mul64(nitems, typeSize); !ok {
+	if num, ok = utils.Mul64(nitems, typeSize); !ok {
 		err = xerrors.New("total size of items too large")
 	}
 	return
@@ -392,7 +391,7 @@ func updateCapacity(cap, size, extra int64) (int64, error) {
 	if extra < 0 {
 		return 0, xerrors.New("negative size (corrupt file?)")
 	}
-	target, ok := overflow.Add64(size, extra)
+	target, ok := utils.Add(size, extra)
 	if !ok {
 		return 0, xerrors.New("allocation size too large (corrupt file?)")
 	}
@@ -423,7 +422,7 @@ func (rr *recordReader) reserveLevels(extra int64) error {
 		}
 
 		if newCap > rr.levelsCap {
-			capBytes, ok := overflow.Mul(int(newCap), arrow.Int16SizeBytes)
+			capBytes, ok := utils.Mul(int(newCap), arrow.Int16SizeBytes)
 			if !ok {
 				return fmt.Errorf("allocation size too large (corrupt file?)")
 			}

@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math/bits"
 
-	"github.com/JohnCGriffin/overflow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	shared_utils "github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -210,7 +209,7 @@ func (l *LevelDecoder) SetData(encoding parquet.Encoding, maxLvl int16, nbuffere
 		}
 		return int(nbytes) + 4, nil
 	case parquet.Encodings.BitPacked:
-		nbits, ok := overflow.Mul(nbuffered, l.bitWidth)
+		nbits, ok := shared_utils.Mul(nbuffered, l.bitWidth)
 		if !ok {
 			return 0, errors.New("parquet: number of buffered values too large (corrupt data page?)")
 		}
