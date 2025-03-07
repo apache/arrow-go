@@ -531,9 +531,10 @@ func extractStats(dataHeader dataheader) (pageStats metadata.EncodedStatistics) 
 func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 	if p.dictOffset > 0 {
 		hdr := format.NewPageHeader()
+		readBufSize := min(int(p.dataOffset-p.baseOffset), p.r.BufferSize())
 		rd := utils.NewBufferedReader(
 			io.NewSectionReader(p.r.Outer(), p.dictOffset-p.baseOffset, p.dataOffset-p.baseOffset),
-			p.r.BufferSize())
+			readBufSize)
 		if err := p.readPageHeader(rd, hdr); err != nil {
 			return nil, err
 		}
