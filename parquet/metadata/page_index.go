@@ -22,8 +22,8 @@ import (
 	"math"
 	"sync"
 
-	"github.com/JohnCGriffin/overflow"
 	"github.com/apache/arrow-go/v18/arrow"
+	shared_utils "github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/debug"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
@@ -433,7 +433,7 @@ func determinePageIndexRangesInRowGroup(rgMeta *RowGroupMetaData, cols []int32) 
 			return nil
 		}
 
-		indexEnd, ok := overflow.Add64(idxLocation.Offset, int64(idxLocation.Length))
+		indexEnd, ok := shared_utils.Add(idxLocation.Offset, int64(idxLocation.Length))
 		if idxLocation.Offset < 0 || idxLocation.Length <= 0 || !ok {
 			return fmt.Errorf("%w: invalid page index location: offset %d length %d",
 				arrow.ErrIndex, idxLocation.Offset, idxLocation.Length)
