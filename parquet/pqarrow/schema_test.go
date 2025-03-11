@@ -423,7 +423,7 @@ func TestListStructBackwardCompatible(t *testing.T) {
 
 	arrsc, err := pqarrow.FromParquet(pqSchema, nil, metadata.KeyValueMetadata{})
 	assert.NoError(t, err)
-	assert.True(t, arrowSchema.Equal(arrsc))
+	assert.True(t, arrowSchema.Equal(arrsc), arrowSchema.String(), arrsc.String())
 }
 
 // TestUnsupportedTypes tests the error message for unsupported types. This test should be updated
@@ -450,4 +450,25 @@ func TestUnsupportedTypes(t *testing.T) {
 			assert.ErrorContains(t, err, "support for "+tc.typ.ID().String())
 		})
 	}
+}
+
+func TestProperListElementNullability(t *testing.T) {
+	arrSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "qux", Type: arrow.ListOfField(
+			arrow.Field{
+				Name:     "element",
+				Type:     arrow.BinaryTypes.String,
+				Nullable: false,
+				Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"-1"})}),
+			Nullable: false, Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"-1"})},
+	}, nil)
+
+	pqSchema, err := pqarrow.ToParquet(arrSchema, nil, pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, pqSchema.Column(0).MaxDefinitionLevel())
+	assert.Equal(t, parquet.Repetitions.Required, pqSchema.Column(0).SchemaNode().RepetitionType())
+
+	outSchema, err := pqarrow.FromParquet(pqSchema, nil, metadata.KeyValueMetadata{})
+	require.NoError(t, err)
+	assert.True(t, arrSchema.Equal(outSchema), "expected: %s, got: %s", arrSchema, outSchema)
 }
