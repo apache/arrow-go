@@ -269,19 +269,14 @@ func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties
 	case arrow.STRUCT:
 		return structToNode(field.Type.(*arrow.StructType), field.Name, field.Nullable, props, arrprops)
 	case arrow.FIXED_SIZE_LIST, arrow.LIST:
-		var elem arrow.DataType
-		if lt, ok := field.Type.(*arrow.ListType); ok {
-			elem = lt.Elem()
-		} else {
-			elem = field.Type.(*arrow.FixedSizeListType).Elem()
-		}
+		elemField := field.Type.(arrow.ListLikeType).ElemField()
 
-		child, err := fieldToNode(name, arrow.Field{Name: name, Type: elem, Nullable: true}, props, arrprops)
+		child, err := fieldToNode(name, elemField, props, arrprops)
 		if err != nil {
 			return nil, err
 		}
 
-		return schema.ListOf(child, repFromNullable(field.Nullable), -1)
+		return schema.ListOfWithName(name, child, repFromNullable(field.Nullable), -1)
 	case arrow.DICTIONARY:
 		// parquet has no dictionary type, dictionary is encoding, not schema level
 		dictType := field.Type.(*arrow.DictionaryType)
@@ -730,11 +725,7 @@ func listToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *s
 		populateLeaf(colIndex, &itemField, currentLevels, ctx, out, &out.Children[0])
 	}
 
-	out.Field = &arrow.Field{Name: n.Name(), Type: arrow.ListOfField(
-		arrow.Field{Name: listNode.Name(),
-			Type:     out.Children[0].Field.Type,
-			Metadata: out.Children[0].Field.Metadata,
-			Nullable: true}),
+	out.Field = &arrow.Field{Name: n.Name(), Type: arrow.ListOfField(*out.Children[0].Field),
 		Nullable: n.RepetitionType() == parquet.Repetitions.Optional, Metadata: createFieldMeta(int(n.FieldID()))}
 
 	out.LevelInfo = currentLevels
@@ -756,7 +747,7 @@ func groupToStructField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *
 	}
 
 	out.Field = &arrow.Field{Name: n.Name(), Type: arrow.StructOf(arrowFields...),
-		Nullable: n.RepetitionType() == parquet.Repetitions.Optional, Metadata: createFieldMeta(int(n.FieldID()))}
+		Nullable: n.RepetitionType() != parquet.Repetitions.Required, Metadata: createFieldMeta(int(n.FieldID()))}
 	out.LevelInfo = currentLevels
 	return nil
 }
