@@ -142,6 +142,8 @@ func (en *EncryptionConfigTestSuite) encryptFile(configs *parquet.FileEncryption
 				value    int64 = int64(i) * 1000 * 1000 * 1000 * 1000
 			)
 			if i%2 == 0 {
+				repLevel[0] = 0
+			} else {
 				repLevel[0] = 1
 			}
 
