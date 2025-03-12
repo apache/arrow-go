@@ -276,9 +276,9 @@ func (d *TestDecryptionSuite) decryptFile(filename string, decryptConfigNum int)
 			expectedValue := int64(i) * 1000 * 1000 * 1000 * 1000
 			d.Equal(expectedValue, val[0])
 			if i%2 == 0 {
-				d.EqualValues(1, rep[0])
-			} else {
 				d.Zero(rep[0])
+			} else {
+				d.EqualValues(1, rep[0])
 			}
 			i++
 		}
