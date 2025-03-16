@@ -353,6 +353,11 @@ func TestRecordReader(t *testing.T) {
 		n := 0
 		for rdr.Next() {
 			n++
+			// facet of using the simple record reader with a slice
+			// by default it will release records when the reader is released
+			// leading to too many releases on the original record
+			// so we retain it to keep it from going away while the test runs
+			rdr.Record().Retain()
 			if got, want := rdr.Record(), recs[n-1]; !reflect.DeepEqual(got, want) {
 				t.Fatalf("itr[%d], invalid record. got=%#v, want=%#v", n-1, got, want)
 			}
