@@ -950,4 +950,8 @@ var (
 	_ Builder = (*MonthIntervalBuilder)(nil)
 	_ Builder = (*DayTimeIntervalBuilder)(nil)
 	_ Builder = (*MonthDayNanoIntervalBuilder)(nil)
+
+	_ arrow.TypedArray[arrow.MonthInterval]        = (*MonthInterval)(nil)
+	_ arrow.TypedArray[arrow.DayTimeInterval]      = (*DayTimeInterval)(nil)
+	_ arrow.TypedArray[arrow.MonthDayNanoInterval] = (*MonthDayNanoInterval)(nil)
 )

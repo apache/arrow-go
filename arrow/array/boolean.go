@@ -122,5 +122,6 @@ func arrayEqualBoolean(left, right *Boolean) bool {
 }
 
 var (
-	_ arrow.Array = (*Boolean)(nil)
+	_ arrow.Array            = (*Boolean)(nil)
+	_ arrow.TypedArray[bool] = (*Boolean)(nil)
 )
