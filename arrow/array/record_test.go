@@ -301,33 +301,92 @@ func TestRecordReader(t *testing.T) {
 	defer rec2.Release()
 
 	recs := []arrow.Record{rec1, rec2}
-	itr, err := array.NewRecordReader(schema, recs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer itr.Release()
-
-	itr.Retain()
-	itr.Release()
-
-	if got, want := itr.Schema(), schema; !got.Equal(want) {
-		t.Fatalf("invalid schema. got=%#v, want=%#v", got, want)
-	}
-
-	n := 0
-	for itr.Next() {
-		n++
-		if got, want := itr.Record(), recs[n-1]; !reflect.DeepEqual(got, want) {
-			t.Fatalf("itr[%d], invalid record. got=%#v, want=%#v", n-1, got, want)
+	t.Run("simple reader", func(t *testing.T) {
+		itr, err := array.NewRecordReader(schema, recs)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if err := itr.Err(); err != nil {
-		t.Fatalf("itr error: %#v", err)
-	}
+		defer itr.Release()
 
-	if n != len(recs) {
-		t.Fatalf("invalid number of iterations. got=%d, want=%d", n, len(recs))
-	}
+		itr.Retain()
+		itr.Release()
+
+		if got, want := itr.Schema(), schema; !got.Equal(want) {
+			t.Fatalf("invalid schema. got=%#v, want=%#v", got, want)
+		}
+
+		n := 0
+		for itr.Next() {
+			n++
+			if got, want := itr.Record(), recs[n-1]; !reflect.DeepEqual(got, want) {
+				t.Fatalf("itr[%d], invalid record. got=%#v, want=%#v", n-1, got, want)
+			}
+		}
+		if err := itr.Err(); err != nil {
+			t.Fatalf("itr error: %#v", err)
+		}
+
+		if n != len(recs) {
+			t.Fatalf("invalid number of iterations. got=%d, want=%d", n, len(recs))
+		}
+	})
+
+	t.Run("iter to reader", func(t *testing.T) {
+		itr := func(yield func(arrow.Record, error) bool) {
+			for _, r := range recs {
+				if !yield(r, nil) {
+					return
+				}
+			}
+		}
+
+		rdr := array.ReaderFromIter(schema, itr)
+		defer rdr.Release()
+
+		rdr.Retain()
+		rdr.Release()
+
+		if got, want := rdr.Schema(), schema; !got.Equal(want) {
+			t.Fatalf("invalid schema. got=%#v, want=%#v", got, want)
+		}
+
+		n := 0
+		for rdr.Next() {
+			n++
+			if got, want := rdr.Record(), recs[n-1]; !reflect.DeepEqual(got, want) {
+				t.Fatalf("itr[%d], invalid record. got=%#v, want=%#v", n-1, got, want)
+			}
+		}
+		if err := rdr.Err(); err != nil {
+			t.Fatalf("itr error: %#v", err)
+		}
+
+		if n != len(recs) {
+			t.Fatalf("invalid number of iterations. got=%d, want=%d", n, len(recs))
+		}
+	})
+
+	t.Run("reader to iter", func(t *testing.T) {
+		rdr, err := array.NewRecordReader(schema, recs)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		itr := array.IterFromReader(rdr)
+		rdr.Release()
+
+		n := 0
+		for rec, err := range itr {
+			if err != nil {
+				t.Fatalf("itr error: %#v", err)
+			}
+
+			n++
+			if got, want := rec, recs[n-1]; !reflect.DeepEqual(got, want) {
+				t.Fatalf("itr[%d], invalid record. got=%#v, want=%#v", n-1, got, want)
+			}
+		}
+	})
 
 	for _, tc := range []struct {
 		name   string
