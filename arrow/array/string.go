@@ -715,4 +715,8 @@ var (
 	_ StringLike        = (*String)(nil)
 	_ StringLike        = (*LargeString)(nil)
 	_ StringLike        = (*StringView)(nil)
+
+	_ arrow.TypedArray[string] = (*String)(nil)
+	_ arrow.TypedArray[string] = (*LargeString)(nil)
+	_ arrow.TypedArray[string] = (*StringView)(nil)
 )

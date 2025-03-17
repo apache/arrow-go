@@ -119,5 +119,6 @@ func arrayEqualFloat16(left, right *Float16) bool {
 }
 
 var (
-	_ arrow.Array = (*Float16)(nil)
+	_ arrow.Array                   = (*Float16)(nil)
+	_ arrow.TypedArray[float16.Num] = (*Float16)(nil)
 )

@@ -375,6 +375,7 @@ func (b *TimestampBuilder) UnmarshalJSON(data []byte) error {
 }
 
 var (
-	_ arrow.Array = (*Timestamp)(nil)
-	_ Builder     = (*TimestampBuilder)(nil)
+	_ arrow.Array                       = (*Timestamp)(nil)
+	_ Builder                           = (*TimestampBuilder)(nil)
+	_ arrow.TypedArray[arrow.Timestamp] = (*Timestamp)(nil)
 )

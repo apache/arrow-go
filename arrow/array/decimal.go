@@ -429,4 +429,9 @@ var (
 	_ Builder     = (*Decimal64Builder)(nil)
 	_ Builder     = (*Decimal128Builder)(nil)
 	_ Builder     = (*Decimal256Builder)(nil)
+
+	_ arrow.TypedArray[decimal.Decimal32]  = (*Decimal32)(nil)
+	_ arrow.TypedArray[decimal.Decimal64]  = (*Decimal64)(nil)
+	_ arrow.TypedArray[decimal.Decimal128] = (*Decimal128)(nil)
+	_ arrow.TypedArray[decimal.Decimal256] = (*Decimal256)(nil)
 )
