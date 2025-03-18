@@ -25,7 +25,7 @@ require (
 	github.com/apache/thrift v0.21.0
 	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815
 	github.com/goccy/go-json v0.10.5
-	github.com/golang/snappy v0.0.4
+	github.com/golang/snappy v1.0.0
 	github.com/google/flatbuffers v25.2.10+incompatible
 	github.com/google/uuid v1.6.0
 	github.com/hamba/avro/v2 v2.28.0
