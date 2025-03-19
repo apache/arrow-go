@@ -639,7 +639,6 @@ func (s *ScalarKernel) Cleanup() error {
 }
 
 func (s *ScalarKernel) Exec(ctx *KernelCtx, sp *ExecSpan, out *ExecResult) error {
-	s.Data = ctx.State
 	return s.ExecFn(ctx, sp, out)
 }
 
