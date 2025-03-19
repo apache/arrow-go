@@ -240,7 +240,7 @@ func repFromNullable(isnullable bool) parquet.Repetition {
 	return parquet.Repetitions.Required
 }
 
-func structToNode(typ *arrow.StructType, name string, nullable bool, props *parquet.WriterProperties, arrprops ArrowWriterProperties) (schema.Node, error) {
+func structToNode(typ *arrow.StructType, name string, nullable bool, fieldID int32, props *parquet.WriterProperties, arrprops ArrowWriterProperties) (schema.Node, error) {
 	if typ.NumFields() == 0 {
 		return nil, fmt.Errorf("cannot write struct type '%s' with no children field to parquet. Consider adding a dummy child", name)
 	}
@@ -254,7 +254,7 @@ func structToNode(typ *arrow.StructType, name string, nullable bool, props *parq
 		children = append(children, n)
 	}
 
-	return schema.NewGroupNode(name, repFromNullable(nullable), children, -1)
+	return schema.NewGroupNode(name, repFromNullable(nullable), children, fieldID)
 }
 
 func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties, arrprops ArrowWriterProperties) (schema.Node, error) {
@@ -267,7 +267,7 @@ func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties
 			return nil, xerrors.New("nulltype arrow field must be nullable")
 		}
 	case arrow.STRUCT:
-		return structToNode(field.Type.(*arrow.StructType), field.Name, field.Nullable, props, arrprops)
+		return structToNode(field.Type.(*arrow.StructType), field.Name, field.Nullable, fieldIDFromMeta(field.Metadata), props, arrprops)
 	case arrow.FIXED_SIZE_LIST, arrow.LIST:
 		elemField := field.Type.(arrow.ListLikeType).ElemField()
 
@@ -276,7 +276,7 @@ func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties
 			return nil, err
 		}
 
-		return schema.ListOfWithName(name, child, repFromNullable(field.Nullable), -1)
+		return schema.ListOfWithName(name, child, repFromNullable(field.Nullable), fieldIDFromMeta(field.Metadata))
 	case arrow.DICTIONARY:
 		// parquet has no dictionary type, dictionary is encoding, not schema level
 		dictType := field.Type.(*arrow.DictionaryType)
@@ -302,9 +302,9 @@ func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties
 			}
 			return schema.NewGroupNode(field.Name, repFromNullable(field.Nullable), schema.FieldList{
 				keyvalNode,
-			}, -1)
+			}, fieldIDFromMeta(field.Metadata))
 		}
-		return schema.MapOf(field.Name, keyNode, valueNode, repFromNullable(field.Nullable), -1)
+		return schema.MapOf(field.Name, keyNode, valueNode, repFromNullable(field.Nullable), fieldIDFromMeta(field.Metadata))
 	}
 
 	// Not a GroupNode
