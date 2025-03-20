@@ -454,9 +454,10 @@ func (rr *recordReader) SeekToRow(recordIdx int64) error {
 
 	rr.atRecStart = true
 	rr.recordsRead = 0
-	rr.levelsPos = recordIdx
-	// force re-reading the levels
-	rr.levelsWritten = 0
+	// force re-reading the definition/repetition levels
+	// calling SeekToRow on the underlying column reader will ensure that
+	// the next reads will pull from the correct row
+	rr.levelsPos, rr.levelsWritten = 0, 0
 
 	return nil
 }
