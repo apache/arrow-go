@@ -223,6 +223,7 @@ func (c *columnChunkReader) pager() PageReader             { return c.rdr }
 func (c *columnChunkReader) setPageReader(rdr PageReader) {
 	c.rdr, c.err = rdr, nil
 	c.decoders = make(map[format.Encoding]encoding.TypedDecoder)
+	c.newDictionary = false
 	c.numBuffered, c.numDecoded = 0, 0
 }
 

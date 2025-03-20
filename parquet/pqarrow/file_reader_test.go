@@ -285,6 +285,173 @@ func TestRecordReaderSerial(t *testing.T) {
 	assert.Nil(t, rec)
 }
 
+func TestRecordReaderSeekToRow(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	tbl := makeDateTimeTypesTable(mem, true, true)
+	defer tbl.Release()
+
+	var buf bytes.Buffer
+	require.NoError(t, pqarrow.WriteTable(tbl, &buf, tbl.NumRows(), nil, pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem))))
+
+	pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(parquet.NewReaderProperties(mem)))
+	require.NoError(t, err)
+
+	reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{BatchSize: 2}, mem)
+	require.NoError(t, err)
+
+	sc, err := reader.Schema()
+	assert.NoError(t, err)
+	assert.Truef(t, tbl.Schema().Equal(sc), "expected: %s\ngot: %s", tbl.Schema(), sc)
+
+	rr, err := reader.GetRecordReader(context.Background(), nil, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, rr)
+	defer rr.Release()
+
+	tr := array.NewTableReader(tbl, 2)
+	defer tr.Release()
+
+	rec, err := rr.Read()
+	assert.NoError(t, err)
+	tr.Next()
+	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+
+	require.NoError(t, rr.SeekToRow(0))
+	rec, err = rr.Read()
+	assert.NoError(t, err)
+	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+
+	rec, err = rr.Read()
+	assert.NoError(t, err)
+	tr.Next()
+	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+
+	require.NoError(t, rr.SeekToRow(2))
+	rec, err = rr.Read()
+	assert.NoError(t, err)
+	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+
+	require.NoError(t, rr.SeekToRow(4))
+	rec, err = rr.Read()
+	tr.Next()
+	assert.NoError(t, err)
+	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+}
+
+func TestRecordReaderMultiRowGroup(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	tbl := makeDateTimeTypesTable(mem, true, true)
+	defer tbl.Release()
+
+	var buf bytes.Buffer
+	require.NoError(t, pqarrow.WriteTable(tbl, &buf, 2, nil, pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem))))
+
+	pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(parquet.NewReaderProperties(mem)))
+	require.NoError(t, err)
+
+	reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{BatchSize: 2}, mem)
+	require.NoError(t, err)
+
+	sc, err := reader.Schema()
+	assert.NoError(t, err)
+	assert.Truef(t, tbl.Schema().Equal(sc), "expected: %s\ngot: %s", tbl.Schema(), sc)
+
+	rr, err := reader.GetRecordReader(context.Background(), nil, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, rr)
+	defer rr.Release()
+
+	tr := array.NewTableReader(tbl, 2)
+	defer tr.Release()
+
+	rec, err := rr.Read()
+	assert.NoError(t, err)
+	tr.Next()
+	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+
+	rec, err = rr.Read()
+	assert.NoError(t, err)
+	tr.Next()
+	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+
+	rec, err = rr.Read()
+	assert.NoError(t, err)
+	tr.Next()
+	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+
+	rec, err = rr.Read()
+	assert.Same(t, io.EOF, err)
+	assert.Nil(t, rec)
+}
+
+func TestRecordReaderSeekToRowMultiRowGroup(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	tbl := makeDateTimeTypesTable(mem, true, true)
+	defer tbl.Release()
+
+	var buf bytes.Buffer
+	require.NoError(t, pqarrow.WriteTable(tbl, &buf, 2, nil, pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem))))
+
+	pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(parquet.NewReaderProperties(mem)))
+	require.NoError(t, err)
+
+	reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{BatchSize: 2}, mem)
+	require.NoError(t, err)
+
+	sc, err := reader.Schema()
+	assert.NoError(t, err)
+	assert.Truef(t, tbl.Schema().Equal(sc), "expected: %s\ngot: %s", tbl.Schema(), sc)
+
+	rr, err := reader.GetRecordReader(context.Background(), nil, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, rr)
+	defer rr.Release()
+
+	tr := array.NewTableReader(tbl, 2)
+	defer tr.Release()
+
+	rec, err := rr.Read()
+	assert.NoError(t, err)
+	tr.Next()
+	first := tr.Record()
+	first.Retain()
+	defer first.Release()
+
+	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+
+	require.NoError(t, rr.SeekToRow(0))
+	rec, err = rr.Read()
+	assert.NoError(t, err)
+	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+
+	rec, err = rr.Read()
+	assert.NoError(t, err)
+	tr.Next()
+	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+
+	require.NoError(t, rr.SeekToRow(2))
+	rec, err = rr.Read()
+	assert.NoError(t, err)
+	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+
+	require.NoError(t, rr.SeekToRow(4))
+	rec, err = rr.Read()
+	tr.Next()
+	assert.NoError(t, err)
+	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+
+	require.NoError(t, rr.SeekToRow(0))
+	rec, err = rr.Read()
+	assert.NoError(t, err)
+	assert.Truef(t, array.RecordEqual(first, rec), "expected: %s\ngot: %s", first, rec)
+}
+
 func TestFileReaderWriterMetadata(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
