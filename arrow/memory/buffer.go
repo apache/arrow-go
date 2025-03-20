@@ -31,6 +31,8 @@ type Buffer struct {
 	mem      Allocator
 
 	parent *Buffer
+
+	cleanupHndl cleanup
 }
 
 // NewBufferWithAllocator returns a buffer with the mutable flag set
@@ -79,6 +81,7 @@ func (b *Buffer) Release() {
 
 		if atomic.AddInt64(&b.refCount, -1) == 0 {
 			if b.mem != nil {
+				b.cleanupHndl.Stop()
 				b.mem.Free(b.buf)
 			} else {
 				b.parent.Release()
@@ -118,11 +121,15 @@ func (b *Buffer) Cap() int { return len(b.buf) }
 func (b *Buffer) Reserve(capacity int) {
 	if capacity > len(b.buf) {
 		newCap := roundUpToMultipleOf64(capacity)
+		var buf []byte
 		if len(b.buf) == 0 {
-			b.buf = b.mem.Allocate(newCap)
+			buf = b.mem.Allocate(newCap)
 		} else {
-			b.buf = b.mem.Reallocate(newCap, b.buf)
+			b.cleanupHndl.Stop()
+			buf = b.mem.Reallocate(newCap, b.buf)
 		}
+		b.cleanupHndl = addCleanup(b, b.mem.Free, buf)
+		b.buf = buf
 	}
 }
 
@@ -145,11 +152,14 @@ func (b *Buffer) resize(newSize int, shrink bool) {
 		// excess space.
 		newCap := roundUpToMultipleOf64(newSize)
 		if len(b.buf) != newCap {
+			b.cleanupHndl.Stop()
 			if newSize == 0 {
 				b.mem.Free(b.buf)
 				b.buf = nil
 			} else {
-				b.buf = b.mem.Reallocate(newCap, b.buf)
+				buf := b.mem.Reallocate(newCap, b.buf)
+				b.cleanupHndl = addCleanup(b, b.mem.Free, buf)
+				b.buf = buf
 			}
 		}
 	}
