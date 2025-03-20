@@ -17,6 +17,7 @@
 package memory_test
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -27,45 +28,55 @@ func TestNewResizableBuffer(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
 
-	buf := memory.NewResizableBuffer(mem)
-	buf.Retain() // refCount == 2
+	{
+		buf := memory.NewResizableBuffer(mem)
+		buf.Retain() // refCount == 2
 
-	exp := 10
-	buf.Resize(exp)
-	assert.NotNil(t, buf.Bytes())
-	assert.Equal(t, exp, len(buf.Bytes()))
-	assert.Equal(t, exp, buf.Len())
+		exp := 10
+		buf.Resize(exp)
+		assert.NotNil(t, buf.Bytes())
+		assert.Equal(t, exp, len(buf.Bytes()))
+		assert.Equal(t, exp, buf.Len())
 
-	buf.Release() // refCount == 1
-	assert.NotNil(t, buf.Bytes())
+		buf.Release() // refCount == 1
+		assert.NotNil(t, buf.Bytes())
 
-	buf.Release() // refCount == 0
-	assert.Nil(t, buf.Bytes())
-	assert.Zero(t, buf.Len())
+		buf.Release() // refCount == 0
+		assert.Nil(t, buf.Bytes())
+		assert.Zero(t, buf.Len())
+	}
+	runtime.GC()
 }
 
 func TestBufferReset(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
 
-	buf := memory.NewResizableBuffer(mem)
+	{
+		buf := memory.NewResizableBuffer(mem)
 
-	newBytes := []byte("some-new-bytes")
-	buf.Reset(newBytes)
-	assert.Equal(t, newBytes, buf.Bytes())
-	assert.Equal(t, len(newBytes), buf.Len())
+		newBytes := []byte("some-new-bytes")
+		buf.Reset(newBytes)
+		assert.Equal(t, newBytes, buf.Bytes())
+		assert.Equal(t, len(newBytes), buf.Len())
+	}
+	runtime.GC()
 }
 
 func TestBufferSlice(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
 
-	buf := memory.NewResizableBuffer(mem)
-	buf.Resize(1024)
-	assert.Equal(t, 1024, mem.CurrentAlloc())
+	{
+		buf := memory.NewResizableBuffer(mem)
+		buf.Resize(1024)
+		assert.Equal(t, 1024, mem.CurrentAlloc())
 
-	slice := memory.SliceBuffer(buf, 512, 256)
-	buf.Release()
-	assert.Equal(t, 1024, mem.CurrentAlloc())
-	slice.Release()
+		slice := memory.SliceBuffer(buf, 512, 256)
+		buf.Release()
+		assert.Equal(t, 1024, mem.CurrentAlloc())
+		assert.Equal(t, 256, slice.Len())
+		slice.Release()
+	}
+	runtime.GC()
 }
