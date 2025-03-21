@@ -395,7 +395,7 @@ func (p *pathBuilder) Visit(arr arrow.Array) error {
 			repLevel:        p.info.maxRepLevel,
 			defLevelIfEmpty: p.info.maxDefLevel - 1,
 		})
-		p.nullableInParent = ok
+		p.nullableInParent = arr.DataType().(arrow.ListLikeType).ElemField().Nullable
 		return p.Visit(larr.ListValues())
 	case arrow.FIXED_SIZE_LIST:
 		p.maybeAddNullable(arr)

@@ -20,12 +20,14 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"strconv"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/internal/debug"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/schema"
@@ -428,10 +430,14 @@ func (w *columnWriter) FlushBufferedDataPages() (err error) {
 
 func (w *columnWriter) writeLevels(numValues int64, defLevels, repLevels []int16) int64 {
 	toWrite := int64(0)
+	maxDefLevel := w.descr.MaxDefinitionLevel()
+
 	// if the field is required and non-repeated, no definition levels
-	if defLevels != nil && w.descr.MaxDefinitionLevel() > 0 {
+	if defLevels != nil && maxDefLevel > 0 {
 		for _, v := range defLevels[:numValues] {
-			if v == w.descr.MaxDefinitionLevel() {
+			debug.Assert(v <= maxDefLevel, "columnwriter: invalid definition level "+
+				strconv.Itoa(int(v))+" for column "+w.descr.Path())
+			if v == maxDefLevel {
 				toWrite++
 			}
 		}

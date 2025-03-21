@@ -39,7 +39,8 @@ func TestNonNullableSingleList(t *testing.T) {
 	// So:
 	// def level 0: a null entry
 	// def level 1: a non-null entry
-	bldr := array.NewListBuilder(memory.DefaultAllocator, arrow.PrimitiveTypes.Int64)
+	bldr := array.NewBuilder(memory.DefaultAllocator,
+		arrow.ListOfNonNullable(arrow.PrimitiveTypes.Int64)).(*array.ListBuilder)
 	defer bldr.Release()
 
 	vb := bldr.ValueBuilder().(*array.Int64Builder)
@@ -67,7 +68,7 @@ func TestNonNullableSingleList(t *testing.T) {
 	result, err := mp.write(0, ctx)
 	require.NoError(t, err)
 
-	assert.Equal(t, []int16{2, 2, 2, 2, 2, 2}, result.defLevels)
+	assert.Equal(t, []int16{1, 1, 1, 1, 1, 1}, result.defLevels)
 	assert.Equal(t, []int16{0, 0, 1, 0, 1, 1}, result.repLevels)
 	assert.Len(t, result.postListVisitedElems, 1)
 	assert.EqualValues(t, 0, result.postListVisitedElems[0].start)
