@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -116,6 +117,7 @@ type colReaderImpl interface {
 	GetDefLevels() ([]int16, error)
 	GetRepLevels() ([]int16, error)
 	Field() *arrow.Field
+	SeekToRow(int64) error
 	IsOrHasRepeatedChild() bool
 	Retain()
 	Release()
@@ -427,6 +429,20 @@ func (fr *FileReader) getColumnReader(ctx context.Context, i int, colFactory itr
 type RecordReader interface {
 	array.RecordReader
 	arrio.Reader
+	// SeekToRow will shift the record reader so that subsequent calls to Read
+	// or Next will begin from the specified row.
+	//
+	// If the record reader was constructed with a request for a subset of row
+	// groups, then rows are counted across the requested row groups, not the
+	// entire file. This prevents reading row groups that were requested to be
+	// skipped, and allows treating the subset of row groups as a single collection
+	// of rows.
+	//
+	// If the file contains Offset indexes for a given column, then it will be
+	// utilized to skip pages as needed to find the requested row. Otherwise page
+	// headers will have to still be read to find the right page to being reading
+	// from.
+	SeekToRow(int64) error
 }
 
 // GetRecordReader returns a record reader that reads only the requested column indexes and row groups.
@@ -537,12 +553,8 @@ func (fr *FileReader) getReader(ctx context.Context, field *SchemaField, arrowFi
 		}
 
 		// because we performed getReader concurrently, we need to prune out any empty readers
-		for n := len(childReaders) - 1; n >= 0; n-- {
-			if childReaders[n] == nil {
-				childReaders = append(childReaders[:n], childReaders[n+1:]...)
-				childFields = append(childFields[:n], childFields[n+1:]...)
-			}
-		}
+		childReaders = slices.DeleteFunc(childReaders,
+			func(r *ColumnReader) bool { return r == nil })
 		if len(childFields) == 0 {
 			return nil, nil
 		}
@@ -615,15 +627,45 @@ type columnIterator struct {
 	rdr       *file.Reader
 	schema    *schema.Schema
 	rowGroups []int
+
+	rgIdx int
+}
+
+func (c *columnIterator) FindChunkForRow(rowIdx int64) (file.PageReader, int64, error) {
+	if len(c.rowGroups) == 0 {
+		return nil, 0, nil
+	}
+
+	if rowIdx < 0 || rowIdx > c.rdr.NumRows() {
+		return nil, 0, fmt.Errorf("invalid row index %d, file only has %d rows", rowIdx, c.rdr.NumRows())
+	}
+
+	idx := int64(0)
+	for i, rg := range c.rowGroups {
+		rgr := c.rdr.RowGroup(rg)
+		if idx+rgr.NumRows() > rowIdx {
+			c.rgIdx = i + 1
+			pr, err := rgr.GetColumnPageReader(c.index)
+			if err != nil {
+				return nil, 0, err
+			}
+
+			return pr, rowIdx - idx, nil
+		}
+		idx += rgr.NumRows()
+	}
+
+	return nil, 0, fmt.Errorf("%w: invalid row index %d, row group subset only has %d total rows",
+		arrow.ErrInvalid, rowIdx, idx)
 }
 
 func (c *columnIterator) NextChunk() (file.PageReader, error) {
-	if len(c.rowGroups) == 0 {
+	if len(c.rowGroups) == 0 || c.rgIdx >= len(c.rowGroups) {
 		return nil, nil
 	}
 
-	rgr := c.rdr.RowGroup(c.rowGroups[0])
-	c.rowGroups = c.rowGroups[1:]
+	rgr := c.rdr.RowGroup(c.rowGroups[c.rgIdx])
+	c.rgIdx++
 	return rgr.GetColumnPageReader(c.index)
 }
 
@@ -641,6 +683,25 @@ type recordReader struct {
 	err          error
 
 	refCount int64
+}
+
+func (r *recordReader) SeekToRow(row int64) error {
+	if r.cur != nil {
+		r.cur.Release()
+		r.cur = nil
+	}
+
+	if row < 0 || row >= r.numRows {
+		return fmt.Errorf("invalid row index %d, file only has %d rows", row, r.numRows)
+	}
+
+	for _, fr := range r.fieldReaders {
+		if err := fr.SeekToRow(row); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (r *recordReader) Retain() {
