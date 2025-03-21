@@ -36,12 +36,15 @@ import (
 // Reader expects a schema (plus any dictionaries) as the first messages
 // in the stream, followed by records.
 type Reader struct {
+	// refCount needs to be 64-bit aligned
+	// https://pkg.go.dev/sync/atomic#pkg-note-BUG
+	refCount int64
+
 	r      MessageReader
 	schema *arrow.Schema
 
-	refCount int64
-	rec      arrow.Record
-	err      error
+	rec arrow.Record
+	err error
 
 	// types dictTypeMap
 	memo               dictutils.Memo
@@ -280,6 +283,4 @@ func (r *Reader) Read() (arrow.Record, error) {
 	return r.rec, nil
 }
 
-var (
-	_ array.RecordReader = (*Reader)(nil)
-)
+var _ array.RecordReader = (*Reader)(nil)
