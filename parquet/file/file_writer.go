@@ -213,9 +213,15 @@ func (fw *Writer) Close() (err error) {
 		}()
 
 		err = fw.FlushWithFooter()
-		fw.metadata.Clear()
 	}
 	return nil
+}
+
+// FileMetadata returns the current state of the FileMetadata that would be written
+// if this file were to be closed. If the file has already been closed, then this
+// will return the FileMetaData which was written to the file.
+func (fw *Writer) FileMetadata() (*metadata.FileMetaData, error) {
+	return fw.metadata.Snapshot()
 }
 
 // FlushWithFooter closes any open row group writer and writes the file footer, leaving
