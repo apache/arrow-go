@@ -240,9 +240,10 @@ func repFromNullable(isnullable bool) parquet.Repetition {
 	return parquet.Repetitions.Required
 }
 
-func structToNode(typ *arrow.StructType, name string, nullable bool, fieldID int32, props *parquet.WriterProperties, arrprops ArrowWriterProperties) (schema.Node, error) {
+func structToNode(field arrow.Field, props *parquet.WriterProperties, arrprops ArrowWriterProperties) (schema.Node, error) {
+	typ := field.Type.(*arrow.StructType)
 	if typ.NumFields() == 0 {
-		return nil, fmt.Errorf("cannot write struct type '%s' with no children field to parquet. Consider adding a dummy child", name)
+		return nil, fmt.Errorf("cannot write struct type '%s' with no children field to parquet. Consider adding a dummy child", field.Name)
 	}
 
 	children := make(schema.FieldList, 0, typ.NumFields())
@@ -254,7 +255,7 @@ func structToNode(typ *arrow.StructType, name string, nullable bool, fieldID int
 		children = append(children, n)
 	}
 
-	return schema.NewGroupNode(name, repFromNullable(nullable), children, fieldID)
+	return schema.NewGroupNode(field.Name, repFromNullable(field.Nullable), children, fieldIDFromMeta(field.Metadata))
 }
 
 func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties, arrprops ArrowWriterProperties) (schema.Node, error) {
@@ -267,7 +268,7 @@ func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties
 			return nil, xerrors.New("nulltype arrow field must be nullable")
 		}
 	case arrow.STRUCT:
-		return structToNode(field.Type.(*arrow.StructType), field.Name, field.Nullable, fieldIDFromMeta(field.Metadata), props, arrprops)
+		return structToNode(field, props, arrprops)
 	case arrow.FIXED_SIZE_LIST, arrow.LIST:
 		elemField := field.Type.(arrow.ListLikeType).ElemField()
 
