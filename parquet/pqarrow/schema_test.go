@@ -292,7 +292,7 @@ func TestConvertArrowFloat16(t *testing.T) {
 	}
 }
 
-func TestCoerceTImestampV1(t *testing.T) {
+func TestCoerceTimestampV1(t *testing.T) {
 	parquetFields := make(schema.FieldList, 0)
 	arrowFields := make([]arrow.Field, 0)
 
@@ -311,7 +311,7 @@ func TestCoerceTImestampV1(t *testing.T) {
 	}
 }
 
-func TestAutoCoerceTImestampV1(t *testing.T) {
+func TestAutoCoerceTimestampV1(t *testing.T) {
 	parquetFields := make(schema.FieldList, 0)
 	arrowFields := make([]arrow.Field, 0)
 
@@ -402,7 +402,7 @@ func TestListStructBackwardCompatible(t *testing.T) {
 					schema.StringLogicalType{}, parquet.Types.ByteArray, -1, 3)),
 				schema.MustPrimitive(schema.NewPrimitiveNodeLogical("class", parquet.Repetitions.Optional,
 					schema.StringLogicalType{}, parquet.Types.ByteArray, -1, 4)),
-			}, -1)),
+			}, 5)),
 		}, schema.NewListLogicalType(), 1)),
 	}, -1)))
 
@@ -417,7 +417,7 @@ func TestListStructBackwardCompatible(t *testing.T) {
 						Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"3"})},
 					arrow.Field{Name: "class", Type: arrow.BinaryTypes.String, Nullable: true,
 						Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"4"})},
-				), Nullable: true, Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"-1"})}),
+				), Nullable: true, Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"5"})}),
 				Nullable: true, Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"1"})},
 		}, nil)
 
