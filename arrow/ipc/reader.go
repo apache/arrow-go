@@ -38,7 +38,7 @@ import (
 type Reader struct {
 	// refCount needs to be 64-bit aligned
 	// https://pkg.go.dev/sync/atomic#pkg-note-BUG
-	refCount int64
+	refCount atomic.Int64
 
 	r      MessageReader
 	schema *arrow.Schema
@@ -73,13 +73,14 @@ func NewReaderFromMessageReader(r MessageReader, opts ...Option) (reader *Reader
 
 	rr := &Reader{
 		r:        r,
-		refCount: 1,
+		refCount: atomic.Int64{},
 		// types:    make(dictTypeMap),
 		memo:               dictutils.NewMemo(),
 		mem:                cfg.alloc,
 		ensureNativeEndian: cfg.ensureNativeEndian,
 		expectedSchema:     cfg.schema,
 	}
+	rr.refCount.Add(1)
 
 	if !cfg.noAutoSchema {
 		if err := rr.readSchema(cfg.schema); err != nil {
@@ -144,16 +145,16 @@ func (r *Reader) readSchema(schema *arrow.Schema) error {
 // Retain increases the reference count by 1.
 // Retain may be called simultaneously from multiple goroutines.
 func (r *Reader) Retain() {
-	atomic.AddInt64(&r.refCount, 1)
+	r.refCount.Add(1)
 }
 
 // Release decreases the reference count by 1.
 // When the reference count goes to zero, the memory is freed.
 // Release may be called simultaneously from multiple goroutines.
 func (r *Reader) Release() {
-	debug.Assert(atomic.LoadInt64(&r.refCount) > 0, "too many releases")
+	debug.Assert(r.refCount.Load() > 0, "too many releases")
 
-	if atomic.AddInt64(&r.refCount, -1) == 0 {
+	if r.refCount.Add(-1) == 0 {
 		if r.rec != nil {
 			r.rec.Release()
 			r.rec = nil
