@@ -79,7 +79,9 @@ type RecordReader interface {
 	// Release decrements the ref count by one, releasing the internal buffers when
 	// the ref count is 0.
 	Release()
-
+	// SeekToRow will shift the record reader so that subsequent reads will
+	// start at the desired row. It will utilize Offset Indexes if they exist
+	// to skip pages and seek.
 	SeekToRow(int64) error
 }
 

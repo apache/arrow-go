@@ -429,6 +429,19 @@ func (fr *FileReader) getColumnReader(ctx context.Context, i int, colFactory itr
 type RecordReader interface {
 	array.RecordReader
 	arrio.Reader
+	// SeekToRow will shift the record reader so that subsequent calls to Read
+	// or Next will begin from the specified row.
+	//
+	// If the record reader was constructed with a request for a subset of row
+	// groups, then rows are counted across the requested row groups, not the
+	// entire file. This prevents reading row groups that were requested to be
+	// skipped, and allows treating the subset of row groups as a single collection
+	// of rows.
+	//
+	// If the file contains Offset indexes for a given column, then it will be
+	// utilized to skip pages as needed to find the requested row. Otherwise page
+	// headers will have to still be read to find the right page to being reading
+	// from.
 	SeekToRow(int64) error
 }
 
