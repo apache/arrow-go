@@ -19,14 +19,20 @@
 // BMI2.
 package bmi
 
-import "math/bits"
+import (
+	"math/bits"
+)
 
 type funcs struct {
 	extractBits func(uint64, uint64) uint64
 	gtbitmap    func([]int16, int16) uint64
 }
 
-var funclist funcs
+// fallback until arch specific init() is called:
+var funclist = funcs{
+	extractBits: extractBitsGo,
+	gtbitmap:    greaterThanBitmapGo,
+}
 
 // ExtractBits performs a Parallel Bit extract as per the PEXT instruction for
 // x86/x86-64 cpus to use the second parameter as a mask to extract the bits from
