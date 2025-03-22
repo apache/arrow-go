@@ -43,7 +43,7 @@ type RecordReader interface {
 
 // simpleRecords is a simple iterator over a collection of records.
 type simpleRecords struct {
-	refCount int64
+	refCount atomic.Int64
 
 	schema *arrow.Schema
 	recs   []arrow.Record
@@ -53,11 +53,11 @@ type simpleRecords struct {
 // NewRecordReader returns a simple iterator over the given slice of records.
 func NewRecordReader(schema *arrow.Schema, recs []arrow.Record) (RecordReader, error) {
 	rs := &simpleRecords{
-		refCount: 1,
-		schema:   schema,
-		recs:     recs,
-		cur:      nil,
+		schema: schema,
+		recs:   recs,
+		cur:    nil,
 	}
+	rs.refCount.Add(1)
 
 	for _, rec := range rs.recs {
 		rec.Retain()
@@ -76,16 +76,16 @@ func NewRecordReader(schema *arrow.Schema, recs []arrow.Record) (RecordReader, e
 // Retain increases the reference count by 1.
 // Retain may be called simultaneously from multiple goroutines.
 func (rs *simpleRecords) Retain() {
-	atomic.AddInt64(&rs.refCount, 1)
+	rs.refCount.Add(1)
 }
 
 // Release decreases the reference count by 1.
 // When the reference count goes to zero, the memory is freed.
 // Release may be called simultaneously from multiple goroutines.
 func (rs *simpleRecords) Release() {
-	debug.Assert(atomic.LoadInt64(&rs.refCount) > 0, "too many releases")
+	debug.Assert(rs.refCount.Load() > 0, "too many releases")
 
-	if atomic.AddInt64(&rs.refCount, -1) == 0 {
+	if rs.refCount.Add(-1) == 0 {
 		if rs.cur != nil {
 			rs.cur.Release()
 		}
@@ -113,7 +113,7 @@ func (rs *simpleRecords) Err() error { return nil }
 
 // simpleRecord is a basic, non-lazy in-memory record batch.
 type simpleRecord struct {
-	refCount int64
+	refCount atomic.Int64
 
 	schema *arrow.Schema
 
@@ -127,11 +127,12 @@ type simpleRecord struct {
 // NewRecord panics if rows is larger than the height of the columns.
 func NewRecord(schema *arrow.Schema, cols []arrow.Array, nrows int64) arrow.Record {
 	rec := &simpleRecord{
-		refCount: 1,
-		schema:   schema,
-		rows:     nrows,
-		arrs:     make([]arrow.Array, len(cols)),
+		schema: schema,
+		rows:   nrows,
+		arrs:   make([]arrow.Array, len(cols)),
 	}
+	rec.refCount.Add(1)
+
 	copy(rec.arrs, cols)
 	for _, arr := range rec.arrs {
 		arr.Retain()
@@ -211,16 +212,16 @@ func (rec *simpleRecord) validate() error {
 // Retain increases the reference count by 1.
 // Retain may be called simultaneously from multiple goroutines.
 func (rec *simpleRecord) Retain() {
-	atomic.AddInt64(&rec.refCount, 1)
+	rec.refCount.Add(1)
 }
 
 // Release decreases the reference count by 1.
 // When the reference count goes to zero, the memory is freed.
 // Release may be called simultaneously from multiple goroutines.
 func (rec *simpleRecord) Release() {
-	debug.Assert(atomic.LoadInt64(&rec.refCount) > 0, "too many releases")
+	debug.Assert(rec.refCount.Load() > 0, "too many releases")
 
-	if atomic.AddInt64(&rec.refCount, -1) == 0 {
+	if rec.refCount.Add(-1) == 0 {
 		for _, arr := range rec.arrs {
 			arr.Release()
 		}
@@ -274,7 +275,7 @@ func (rec *simpleRecord) MarshalJSON() ([]byte, error) {
 // RecordBuilder eases the process of building a Record, iteratively, from
 // a known Schema.
 type RecordBuilder struct {
-	refCount int64
+	refCount atomic.Int64
 	mem      memory.Allocator
 	schema   *arrow.Schema
 	fields   []Builder
@@ -283,11 +284,11 @@ type RecordBuilder struct {
 // NewRecordBuilder returns a builder, using the provided memory allocator and a schema.
 func NewRecordBuilder(mem memory.Allocator, schema *arrow.Schema) *RecordBuilder {
 	b := &RecordBuilder{
-		refCount: 1,
-		mem:      mem,
-		schema:   schema,
-		fields:   make([]Builder, schema.NumFields()),
+		mem:    mem,
+		schema: schema,
+		fields: make([]Builder, schema.NumFields()),
 	}
+	b.refCount.Add(1)
 
 	for i := 0; i < schema.NumFields(); i++ {
 		b.fields[i] = NewBuilder(b.mem, schema.Field(i).Type)
@@ -299,14 +300,14 @@ func NewRecordBuilder(mem memory.Allocator, schema *arrow.Schema) *RecordBuilder
 // Retain increases the reference count by 1.
 // Retain may be called simultaneously from multiple goroutines.
 func (b *RecordBuilder) Retain() {
-	atomic.AddInt64(&b.refCount, 1)
+	b.refCount.Add(1)
 }
 
 // Release decreases the reference count by 1.
 func (b *RecordBuilder) Release() {
-	debug.Assert(atomic.LoadInt64(&b.refCount) > 0, "too many releases")
+	debug.Assert(b.refCount.Load() > 0, "too many releases")
 
-	if atomic.AddInt64(&b.refCount, -1) == 0 {
+	if b.refCount.Add(-1) == 0 {
 		for _, f := range b.fields {
 			f.Release()
 		}

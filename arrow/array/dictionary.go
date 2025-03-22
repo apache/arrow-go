@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
-	"sync/atomic"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -66,7 +65,7 @@ type Dictionary struct {
 // and dictionary using the given type.
 func NewDictionaryArray(typ arrow.DataType, indices, dict arrow.Array) *Dictionary {
 	a := &Dictionary{}
-	a.array.refCount = 1
+	a.array.refCount.Add(1)
 	dictdata := NewData(typ, indices.Len(), indices.Data().Buffers(), indices.Data().Children(), indices.NullN(), indices.Data().Offset())
 	dictdata.dictionary = dict.Data().(*Data)
 	dict.Data().Retain()
@@ -188,19 +187,19 @@ func NewValidatedDictionaryArray(typ *arrow.DictionaryType, indices, dict arrow.
 // an ArrayData object with a datatype of arrow.Dictionary and a dictionary
 func NewDictionaryData(data arrow.ArrayData) *Dictionary {
 	a := &Dictionary{}
-	a.refCount = 1
+	a.refCount.Add(1)
 	a.setData(data.(*Data))
 	return a
 }
 
 func (d *Dictionary) Retain() {
-	atomic.AddInt64(&d.refCount, 1)
+	d.refCount.Add(1)
 }
 
 func (d *Dictionary) Release() {
-	debug.Assert(atomic.LoadInt64(&d.refCount) > 0, "too many releases")
+	debug.Assert(d.refCount.Load() > 0, "too many releases")
 
-	if atomic.AddInt64(&d.refCount, -1) == 0 {
+	if d.refCount.Add(-1) == 0 {
 		d.data.Release()
 		d.data, d.nullBitmapBytes = nil, nil
 		d.indices.Release()
@@ -444,11 +443,13 @@ func NewDictionaryBuilderWithDict(mem memory.Allocator, dt *arrow.DictionaryType
 	}
 
 	bldr := dictionaryBuilder{
-		builder:    builder{refCount: 1, mem: mem},
+		builder:    builder{mem: mem},
 		idxBuilder: idxbldr,
 		memoTable:  memo,
 		dt:         dt,
 	}
+
+	bldr.builder.refCount.Add(1)
 
 	switch dt.ValueType.ID() {
 	case arrow.NULL:
@@ -696,9 +697,9 @@ func NewDictionaryBuilder(mem memory.Allocator, dt *arrow.DictionaryType) Dictio
 func (b *dictionaryBuilder) Type() arrow.DataType { return b.dt }
 
 func (b *dictionaryBuilder) Release() {
-	debug.Assert(atomic.LoadInt64(&b.refCount) > 0, "too many releases")
+	debug.Assert(b.refCount.Load() > 0, "too many releases")
 
-	if atomic.AddInt64(&b.refCount, -1) == 0 {
+	if b.refCount.Add(-1) == 0 {
 		b.idxBuilder.Release()
 		b.idxBuilder.Builder = nil
 		if binmemo, ok := b.memoTable.(*hashing.BinaryMemoTable); ok {
@@ -820,7 +821,7 @@ func (b *dictionaryBuilder) newData() *Data {
 
 func (b *dictionaryBuilder) NewDictionaryArray() *Dictionary {
 	a := &Dictionary{}
-	a.refCount = 1
+	a.refCount.Add(1)
 
 	indices := b.newData()
 	a.setData(indices)
@@ -1274,6 +1275,7 @@ type MonthIntervalDictionaryBuilder struct {
 func (b *MonthIntervalDictionaryBuilder) Append(v arrow.MonthInterval) error {
 	return b.appendValue(int32(v))
 }
+
 func (b *MonthIntervalDictionaryBuilder) InsertDictValues(arr *MonthInterval) (err error) {
 	for _, v := range arr.values {
 		if err = b.insertDictValue(int32(v)); err != nil {
@@ -1351,6 +1353,7 @@ func (b *BinaryDictionaryBuilder) InsertDictValues(arr *Binary) (err error) {
 	}
 	return
 }
+
 func (b *BinaryDictionaryBuilder) InsertStringDictValues(arr *String) (err error) {
 	if !arrow.TypeEqual(arr.DataType(), b.dt.ValueType) {
 		return fmt.Errorf("dictionary insert type mismatch: cannot insert values of type %T to dictionary type %T", arr.DataType(), b.dt.ValueType)
@@ -1407,6 +1410,7 @@ type FixedSizeBinaryDictionaryBuilder struct {
 func (b *FixedSizeBinaryDictionaryBuilder) Append(v []byte) error {
 	return b.appendValue(v[:b.byteWidth])
 }
+
 func (b *FixedSizeBinaryDictionaryBuilder) InsertDictValues(arr *FixedSizeBinary) (err error) {
 	var (
 		beg = arr.array.data.offset * b.byteWidth
@@ -1429,6 +1433,7 @@ type Decimal32DictionaryBuilder struct {
 func (b *Decimal32DictionaryBuilder) Append(v decimal.Decimal32) error {
 	return b.appendValue((*(*[arrow.Decimal32SizeBytes]byte)(unsafe.Pointer(&v)))[:])
 }
+
 func (b *Decimal32DictionaryBuilder) InsertDictValues(arr *Decimal32) (err error) {
 	data := arrow.Decimal32Traits.CastToBytes(arr.values)
 	for len(data) > 0 {
@@ -1447,6 +1452,7 @@ type Decimal64DictionaryBuilder struct {
 func (b *Decimal64DictionaryBuilder) Append(v decimal.Decimal64) error {
 	return b.appendValue((*(*[arrow.Decimal64SizeBytes]byte)(unsafe.Pointer(&v)))[:])
 }
+
 func (b *Decimal64DictionaryBuilder) InsertDictValues(arr *Decimal64) (err error) {
 	data := arrow.Decimal64Traits.CastToBytes(arr.values)
 	for len(data) > 0 {
@@ -1465,6 +1471,7 @@ type Decimal128DictionaryBuilder struct {
 func (b *Decimal128DictionaryBuilder) Append(v decimal128.Num) error {
 	return b.appendValue((*(*[arrow.Decimal128SizeBytes]byte)(unsafe.Pointer(&v)))[:])
 }
+
 func (b *Decimal128DictionaryBuilder) InsertDictValues(arr *Decimal128) (err error) {
 	data := arrow.Decimal128Traits.CastToBytes(arr.values)
 	for len(data) > 0 {
@@ -1483,6 +1490,7 @@ type Decimal256DictionaryBuilder struct {
 func (b *Decimal256DictionaryBuilder) Append(v decimal256.Num) error {
 	return b.appendValue((*(*[arrow.Decimal256SizeBytes]byte)(unsafe.Pointer(&v)))[:])
 }
+
 func (b *Decimal256DictionaryBuilder) InsertDictValues(arr *Decimal256) (err error) {
 	data := arrow.Decimal256Traits.CastToBytes(arr.values)
 	for len(data) > 0 {
@@ -1501,6 +1509,7 @@ type MonthDayNanoDictionaryBuilder struct {
 func (b *MonthDayNanoDictionaryBuilder) Append(v arrow.MonthDayNanoInterval) error {
 	return b.appendValue((*(*[arrow.MonthDayNanoIntervalSizeBytes]byte)(unsafe.Pointer(&v)))[:])
 }
+
 func (b *MonthDayNanoDictionaryBuilder) InsertDictValues(arr *MonthDayNanoInterval) (err error) {
 	data := arrow.MonthDayNanoIntervalTraits.CastToBytes(arr.values)
 	for len(data) > 0 {
@@ -1519,6 +1528,7 @@ type DayTimeDictionaryBuilder struct {
 func (b *DayTimeDictionaryBuilder) Append(v arrow.DayTimeInterval) error {
 	return b.appendValue((*(*[arrow.DayTimeIntervalSizeBytes]byte)(unsafe.Pointer(&v)))[:])
 }
+
 func (b *DayTimeDictionaryBuilder) InsertDictValues(arr *DayTimeInterval) (err error) {
 	data := arrow.DayTimeIntervalTraits.CastToBytes(arr.values)
 	for len(data) > 0 {

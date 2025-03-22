@@ -49,7 +49,7 @@ type leafReader struct {
 	recordRdr file.RecordReader
 	props     ArrowReadProperties
 
-	refCount int64
+	refCount atomic.Int64
 }
 
 func newLeafReader(rctx *readerCtx, field *arrow.Field, input *columnIterator, leafInfo file.LevelInfo, props ArrowReadProperties, bufferPool *sync.Pool) (*ColumnReader, error) {
@@ -60,18 +60,19 @@ func newLeafReader(rctx *readerCtx, field *arrow.Field, input *columnIterator, l
 		descr:     input.Descr(),
 		recordRdr: file.NewRecordReader(input.Descr(), leafInfo, field.Type, rctx.mem, bufferPool),
 		props:     props,
-		refCount:  1,
 	}
+	ret.refCount.Add(1)
+
 	err := ret.nextRowGroup()
 	return &ColumnReader{ret}, err
 }
 
 func (lr *leafReader) Retain() {
-	atomic.AddInt64(&lr.refCount, 1)
+	lr.refCount.Add(1)
 }
 
 func (lr *leafReader) Release() {
-	if atomic.AddInt64(&lr.refCount, -1) == 0 {
+	if lr.refCount.Add(-1) == 0 {
 		lr.releaseOut()
 		if lr.recordRdr != nil {
 			lr.recordRdr.Release()
@@ -165,15 +166,15 @@ type structReader struct {
 	hasRepeatedChild bool
 	props            ArrowReadProperties
 
-	refCount int64
+	refCount atomic.Int64
 }
 
 func (sr *structReader) Retain() {
-	atomic.AddInt64(&sr.refCount, 1)
+	sr.refCount.Add(1)
 }
 
 func (sr *structReader) Release() {
-	if atomic.AddInt64(&sr.refCount, -1) == 0 {
+	if sr.refCount.Add(-1) == 0 {
 		if sr.defRepLevelChild != nil {
 			sr.defRepLevelChild.Release()
 			sr.defRepLevelChild = nil
@@ -192,8 +193,8 @@ func newStructReader(rctx *readerCtx, filtered *arrow.Field, levelInfo file.Leve
 		levelInfo: levelInfo,
 		children:  children,
 		props:     props,
-		refCount:  1,
 	}
+	ret.refCount.Add(1)
 
 	// there could be a mix of children some might be repeated and some might not be
 	// if possible use one that isn't since that will be guaranteed to have the least
@@ -348,20 +349,24 @@ type listReader struct {
 	info     file.LevelInfo
 	itemRdr  *ColumnReader
 	props    ArrowReadProperties
-	refCount int64
+	refCount atomic.Int64
 }
 
 func newListReader(rctx *readerCtx, field *arrow.Field, info file.LevelInfo, childRdr *ColumnReader, props ArrowReadProperties) *ColumnReader {
 	childRdr.Retain()
-	return &ColumnReader{&listReader{rctx, field, info, childRdr, props, 1}}
+	lr := &listReader{rctx: rctx, field: field, info: info, itemRdr: childRdr, props: props}
+	lr.refCount.Add(1)
+	return &ColumnReader{
+		lr,
+	}
 }
 
 func (lr *listReader) Retain() {
-	atomic.AddInt64(&lr.refCount, 1)
+	lr.refCount.Add(1)
 }
 
 func (lr *listReader) Release() {
-	if atomic.AddInt64(&lr.refCount, -1) == 0 {
+	if lr.refCount.Add(-1) == 0 {
 		if lr.itemRdr != nil {
 			lr.itemRdr.Release()
 			lr.itemRdr = nil
@@ -473,7 +478,14 @@ type fixedSizeListReader struct {
 
 func newFixedSizeListReader(rctx *readerCtx, field *arrow.Field, info file.LevelInfo, childRdr *ColumnReader, props ArrowReadProperties) *ColumnReader {
 	childRdr.Retain()
-	return &ColumnReader{&fixedSizeListReader{listReader{rctx, field, info, childRdr, props, 1}}}
+	lr := &listReader{rctx: rctx, field: field, info: info, itemRdr: childRdr, props: props}
+	lr.refCount.Add(1)
+
+	return &ColumnReader{
+		&fixedSizeListReader{
+			*lr,
+		},
+	}
 }
 
 // helper function to combine chunks into a single array.
@@ -613,9 +625,7 @@ func transferBinary(rdr file.RecordReader, dt arrow.DataType) *arrow.Chunked {
 }
 
 func transferInt(rdr file.RecordReader, dt arrow.DataType) arrow.ArrayData {
-	var (
-		output reflect.Value
-	)
+	var output reflect.Value
 
 	signed := true
 	// create buffer for proper type since parquet only has int32 and int64
@@ -795,9 +805,7 @@ func transferDecimalInteger(rdr file.RecordReader, dt arrow.DataType) arrow.Arra
 }
 
 func uint64FromBigEndianShifted(buf []byte) uint64 {
-	var (
-		bytes [8]byte
-	)
+	var bytes [8]byte
 	copy(bytes[8-len(buf):], buf)
 	return binary.BigEndian.Uint64(bytes[:])
 }

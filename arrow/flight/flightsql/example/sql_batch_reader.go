@@ -99,7 +99,7 @@ func getArrowType(c *sql.ColumnType) arrow.DataType {
 const maxBatchSize = 1024
 
 type SqlBatchReader struct {
-	refCount int64
+	refCount atomic.Int64
 
 	schema *arrow.Schema
 	rows   *sql.Rows
@@ -152,12 +152,15 @@ func NewSqlBatchReaderWithSchema(mem memory.Allocator, schema *arrow.Schema, row
 		}
 	}
 
-	return &SqlBatchReader{
-		refCount: 1,
-		bldr:     array.NewRecordBuilder(mem, schema),
-		schema:   schema,
-		rowdest:  rowdest,
-		rows:     rows}, nil
+	sqb := &SqlBatchReader{
+		bldr:    array.NewRecordBuilder(mem, schema),
+		schema:  schema,
+		rowdest: rowdest,
+		rows:    rows,
+	}
+
+	sqb.refCount.Add(1)
+	return sqb, nil
 }
 
 func NewSqlBatchReader(mem memory.Allocator, rows *sql.Rows) (*SqlBatchReader, error) {
@@ -219,22 +222,24 @@ func NewSqlBatchReader(mem memory.Allocator, rows *sql.Rows) (*SqlBatchReader, e
 	}
 
 	schema := arrow.NewSchema(fields, nil)
-	return &SqlBatchReader{
-		refCount: 1,
-		bldr:     array.NewRecordBuilder(mem, schema),
-		schema:   schema,
-		rowdest:  rowdest,
-		rows:     rows}, nil
+	sbr := &SqlBatchReader{
+		bldr:    array.NewRecordBuilder(mem, schema),
+		schema:  schema,
+		rowdest: rowdest,
+		rows:    rows,
+	}
+	sbr.refCount.Add(1)
+	return sbr, nil
 }
 
 func (r *SqlBatchReader) Retain() {
-	atomic.AddInt64(&r.refCount, 1)
+	r.refCount.Add(1)
 }
 
 func (r *SqlBatchReader) Release() {
-	debug.Assert(atomic.LoadInt64(&r.refCount) > 0, "too many releases")
+	debug.Assert(r.refCount.Load() > 0, "too many releases")
 
-	if atomic.AddInt64(&r.refCount, -1) == 0 {
+	if r.refCount.Add(-1) == 0 {
 		r.rows.Close()
 		r.rows, r.schema, r.rowdest = nil, nil, nil
 		r.bldr.Release()

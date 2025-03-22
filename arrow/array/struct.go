@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync/atomic"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
@@ -107,7 +106,7 @@ func NewStructArrayWithNulls(cols []arrow.Array, names []string, nullBitmap *mem
 // NewStructData returns a new Struct array value from data.
 func NewStructData(data arrow.ArrayData) *Struct {
 	a := &Struct{}
-	a.refCount = 1
+	a.refCount.Add(1)
 	a.setData(data.(*Data))
 	return a
 }
@@ -256,10 +255,12 @@ type StructBuilder struct {
 // NewStructBuilder returns a builder, using the provided memory allocator.
 func NewStructBuilder(mem memory.Allocator, dtype *arrow.StructType) *StructBuilder {
 	b := &StructBuilder{
-		builder: builder{refCount: 1, mem: mem},
+		builder: builder{mem: mem},
 		dtype:   dtype,
 		fields:  make([]Builder, dtype.NumFields()),
 	}
+	b.refCount.Add(1)
+
 	for i, f := range dtype.Fields() {
 		b.fields[i] = NewBuilder(b.mem, f.Type)
 	}
@@ -278,9 +279,9 @@ func (b *StructBuilder) Type() arrow.DataType {
 // Release decreases the reference count by 1.
 // When the reference count goes to zero, the memory is freed.
 func (b *StructBuilder) Release() {
-	debug.Assert(atomic.LoadInt64(&b.refCount) > 0, "too many releases")
+	debug.Assert(b.refCount.Load() > 0, "too many releases")
 
-	if atomic.AddInt64(&b.refCount, -1) == 0 {
+	if b.refCount.Add(-1) == 0 {
 		if b.nullBitmap != nil {
 			b.nullBitmap.Release()
 			b.nullBitmap = nil

@@ -34,7 +34,7 @@ type numericArray[T arrow.IntType | arrow.UintType | arrow.FloatType] struct {
 
 func newNumericData[T arrow.IntType | arrow.UintType | arrow.FloatType](data arrow.ArrayData) numericArray[T] {
 	a := numericArray[T]{}
-	a.refCount = 1
+	a.refCount.Add(1)
 	a.setData(data.(*Data))
 	return a
 }
