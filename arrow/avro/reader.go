@@ -54,7 +54,7 @@ type OCFReader struct {
 	avroSchemaEdits []schemaEdit
 	schema          *arrow.Schema
 
-	refs   int64
+	refs   atomic.Int64
 	bld    *array.RecordBuilder
 	bldMap *fieldPos
 	ldr    *dataLoader
@@ -89,11 +89,12 @@ func NewOCFReader(r io.Reader, opts ...Option) (*OCFReader, error) {
 
 	rr := &OCFReader{
 		r:            ocfr,
-		refs:         1,
 		chunk:        1,
 		avroChanSize: 500,
 		recChanSize:  10,
 	}
+	rr.refs.Add(1)
+
 	for _, opt := range opts {
 		opt(rr)
 	}
@@ -318,16 +319,16 @@ func WithChunk(n int) Option {
 // Retain increases the reference count by 1.
 // Retain may be called simultaneously from multiple goroutines.
 func (r *OCFReader) Retain() {
-	atomic.AddInt64(&r.refs, 1)
+	r.refs.Add(1)
 }
 
 // Release decreases the reference count by 1.
 // When the reference count goes to zero, the memory is freed.
 // Release may be called simultaneously from multiple goroutines.
 func (r *OCFReader) Release() {
-	debug.Assert(atomic.LoadInt64(&r.refs) > 0, "too many releases")
+	debug.Assert(r.refs.Load() > 0, "too many releases")
 
-	if atomic.AddInt64(&r.refs, -1) == 0 {
+	if r.refs.Add(-1) == 0 {
 		if r.cur != nil {
 			r.cur.Release()
 		}

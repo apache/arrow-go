@@ -28,13 +28,13 @@ import (
 import "C"
 
 type importAllocator struct {
-	bufCount int64
+	bufCount atomic.Int64
 
 	arr *CArrowArray
 }
 
 func (i *importAllocator) addBuffer() {
-	atomic.AddInt64(&i.bufCount, 1)
+	i.bufCount.Add(1)
 }
 
 func (*importAllocator) Allocate(int) []byte {
@@ -46,9 +46,9 @@ func (*importAllocator) Reallocate(int, []byte) []byte {
 }
 
 func (i *importAllocator) Free([]byte) {
-	debug.Assert(atomic.LoadInt64(&i.bufCount) > 0, "too many releases")
+	debug.Assert(i.bufCount.Load() > 0, "too many releases")
 
-	if atomic.AddInt64(&i.bufCount, -1) == 0 {
+	if i.bufCount.Add(-1) == 0 {
 		defer C.free(unsafe.Pointer(i.arr))
 		C.ArrowArrayRelease(i.arr)
 		if C.ArrowArrayIsReleased(i.arr) != 1 {
