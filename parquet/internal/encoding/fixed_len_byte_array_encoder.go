@@ -41,11 +41,15 @@ func (enc *PlainFixedLenByteArrayEncoder) Put(in []parquet.FixedLenByteArray) {
 
 	bytesNeeded := len(in) * typeLen
 	enc.sink.Reserve(bytesNeeded)
+
+	emptyValue := make([]byte, typeLen)
+
 	for _, val := range in {
 		if val == nil {
-			panic("value cannot be nil")
+			enc.sink.UnsafeWrite(emptyValue)
+		} else {
+			enc.sink.UnsafeWrite(val[:typeLen])
 		}
-		enc.sink.UnsafeWrite(val[:typeLen])
 	}
 }
 
