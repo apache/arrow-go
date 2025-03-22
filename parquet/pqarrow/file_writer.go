@@ -338,3 +338,7 @@ func (fw *FileWriter) WriteColumnData(data arrow.Array) error {
 	defer chunked.Release()
 	return fw.WriteColumnChunked(chunked, 0, int64(data.Len()))
 }
+
+func (fw *FileWriter) FileMetadata() (*metadata.FileMetaData, error) {
+	return fw.wr.FileMetadata()
+}

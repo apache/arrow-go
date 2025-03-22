@@ -906,13 +906,13 @@ func takeIdxDispatch[ValT arrow.IntType](values, indices *exec.ArraySpan, out *e
 
 	switch indices.Type.(arrow.FixedWidthDataType).Bytes() {
 	case 1:
-		primitiveTakeImpl[uint8, ValT](getter, indices, out)
+		primitiveTakeImpl[uint8](getter, indices, out)
 	case 2:
-		primitiveTakeImpl[uint16, ValT](getter, indices, out)
+		primitiveTakeImpl[uint16](getter, indices, out)
 	case 4:
-		primitiveTakeImpl[uint32, ValT](getter, indices, out)
+		primitiveTakeImpl[uint32](getter, indices, out)
 	case 8:
-		primitiveTakeImpl[uint64, ValT](getter, indices, out)
+		primitiveTakeImpl[uint64](getter, indices, out)
 	default:
 		return fmt.Errorf("%w: invalid indices byte width", arrow.ErrIndex)
 	}
@@ -1147,7 +1147,7 @@ func filterExec(ctx *exec.KernelCtx, outputLen int64, values, selection *exec.Ar
 	return nil
 }
 
-func binaryFilterNonNull[OffsetT int32 | int64](ctx *exec.KernelCtx, values, filter *exec.ArraySpan, outputLen int64, nullSelection NullSelectionBehavior, out *exec.ExecResult) error {
+func binaryFilterNonNull[OffsetT int32 | int64](ctx *exec.KernelCtx, values, filter *exec.ArraySpan, outputLen int64, _ NullSelectionBehavior, out *exec.ExecResult) error {
 	var (
 		offsetBuilder = newBufferBuilder[OffsetT](exec.GetAllocator(ctx.Ctx))
 		dataBuilder   = newBufferBuilder[uint8](exec.GetAllocator(ctx.Ctx))

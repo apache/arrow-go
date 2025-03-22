@@ -26,6 +26,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 )
 
 type simpleExtensionTypeFactory[P comparable] struct {
@@ -95,13 +96,6 @@ type simpleExtensionArrayFactory[P comparable] struct {
 	array.ExtensionArrayBase
 }
 
-type uuidExtParams struct{}
-
-var uuidType = simpleExtensionTypeFactory[uuidExtParams]{
-	name: "arrow.uuid", getStorage: func(uuidExtParams) arrow.DataType {
-		return &arrow.FixedSizeBinaryType{ByteWidth: 16}
-	}}
-
 type fixedCharExtensionParams struct {
 	Length int32 `json:"length"`
 }
@@ -138,7 +132,7 @@ var intervalDayType = simpleExtensionTypeFactory[intervalDayExtensionParams]{
 	},
 }
 
-func uuid() arrow.DataType { return uuidType.CreateType(uuidExtParams{}) }
+func uuid() arrow.DataType { return extensions.NewUUIDType() }
 func fixedChar(length int32) arrow.DataType {
 	return fixedCharType.CreateType(fixedCharExtensionParams{Length: length})
 }

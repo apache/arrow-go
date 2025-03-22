@@ -26,6 +26,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute"
+	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/substrait-io/substrait-go/v3/expr"
 	"github.com/substrait-io/substrait-go/v3/extensions"
 	"github.com/substrait-io/substrait-go/v3/types"
@@ -41,7 +42,8 @@ const (
 	SubstraitComparisonFuncsURI = SubstraitDefaultURIPrefix + "functions_comparison.yaml"
 	SubstraitBooleanFuncsURI    = SubstraitDefaultURIPrefix + "functions_boolean.yaml"
 
-	TimestampTzTimezone = "UTC"
+	SubstraitIcebergSetFuncURI = "https://github.com/apache/iceberg-go/blob/main/table/substrait/functions_set.yaml"
+	TimestampTzTimezone        = "UTC"
 )
 
 var hashSeed maphash.Seed
@@ -127,6 +129,15 @@ func init() {
 			panic(err)
 		}
 	}
+
+	for _, fn := range []string{"is_in"} {
+		err := DefaultExtensionIDRegistry.AddSubstraitScalarToArrow(
+			extensions.ID{URI: SubstraitIcebergSetFuncURI, Name: fn},
+			setLookupFuncSubstraitToArrowFunc)
+		if err != nil {
+			panic(err)
+		}
+	}
 }
 
 type overflowBehavior string
@@ -178,7 +189,7 @@ func parseOption[typ ~string](sf *expr.ScalarFunction, optionName string, parser
 	return def, arrow.ErrNotImplemented
 }
 
-type substraitToArrow = func(*expr.ScalarFunction) (fname string, opts compute.FunctionOptions, err error)
+type substraitToArrow = func(*expr.ScalarFunction, []compute.Datum) (fname string, args []compute.Datum, opts compute.FunctionOptions, err error)
 type arrowToSubstrait = func(fname string) (extensions.ID, []*types.FunctionOption, error)
 
 var substraitToArrowFuncMap = map[string]string{
@@ -199,7 +210,32 @@ var arrowToSubstraitFuncMap = map[string]string{
 	"or_kleene":     "or",
 }
 
-func simpleMapSubstraitToArrowFunc(sf *expr.ScalarFunction) (fname string, opts compute.FunctionOptions, err error) {
+func setLookupFuncSubstraitToArrowFunc(sf *expr.ScalarFunction, input []compute.Datum) (fname string, args []compute.Datum, opts compute.FunctionOptions, err error) {
+	fname, _, _ = strings.Cut(sf.Name(), ":")
+	f, ok := substraitToArrowFuncMap[fname]
+	if ok {
+		fname = f
+	}
+
+	setopts := &compute.SetOptions{
+		NullBehavior: compute.NullMatchingMatch,
+	}
+	switch input[1].Kind() {
+	case compute.KindArray, compute.KindChunked:
+		setopts.ValueSet = input[1]
+	case compute.KindScalar:
+		// should be a list scalar
+		setopts.ValueSet = compute.NewDatumWithoutOwning(
+			input[1].(*compute.ScalarDatum).Value.(*scalar.List).Value)
+	}
+
+	args, opts = input[0:1], setopts
+	return
+}
+
+func simpleMapSubstraitToArrowFunc(sf *expr.ScalarFunction, input []compute.Datum) (fname string, args []compute.Datum, opts compute.FunctionOptions, err error) {
+	args = input
+
 	fname, _, _ = strings.Cut(sf.Name(), ":")
 	f, ok := substraitToArrowFuncMap[fname]
 	if ok {
@@ -219,19 +255,19 @@ func simpleMapArrowToSubstraitFunc(uri string) arrowToSubstrait {
 }
 
 func decodeOptionlessOverflowableArithmetic(n string) substraitToArrow {
-	return func(sf *expr.ScalarFunction) (fname string, opts compute.FunctionOptions, err error) {
+	return func(sf *expr.ScalarFunction, input []compute.Datum) (fname string, args []compute.Datum, opts compute.FunctionOptions, err error) {
 		overflow, err := parseOption(sf, "overflow", &overflowParser, []overflowBehavior{overflowSILENT, overflowERROR}, overflowSILENT)
 		if err != nil {
-			return n, nil, err
+			return n, input, nil, err
 		}
 
 		switch overflow {
 		case overflowSILENT:
-			return n + "_unchecked", nil, nil
+			return n + "_unchecked", input, nil, nil
 		case overflowERROR:
-			return n, nil, nil
+			return n, input, nil, nil
 		default:
-			return n, nil, arrow.ErrNotImplemented
+			return n, input, nil, arrow.ErrNotImplemented
 		}
 	}
 }

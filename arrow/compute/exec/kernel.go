@@ -68,6 +68,7 @@ type NonAggKernel interface {
 	GetNullHandling() NullHandling
 	GetMemAlloc() MemAlloc
 	CanFillSlices() bool
+	Cleanup() error
 }
 
 // KernelCtx is a small struct holding the context for a kernel execution
@@ -604,6 +605,7 @@ type ScalarKernel struct {
 	CanWriteIntoSlices bool
 	NullHandling       NullHandling
 	MemAlloc           MemAlloc
+	CleanupFn          func(KernelState) error
 }
 
 // NewScalarKernel constructs a new kernel for scalar execution, constructing
@@ -627,6 +629,13 @@ func NewScalarKernelWithSig(sig *KernelSignature, exec ArrayKernelExec, init Ker
 		NullHandling:       NullIntersection,
 		MemAlloc:           MemPrealloc,
 	}
+}
+
+func (s *ScalarKernel) Cleanup() error {
+	if s.CleanupFn != nil {
+		return s.CleanupFn(s.Data)
+	}
+	return nil
 }
 
 func (s *ScalarKernel) Exec(ctx *KernelCtx, sp *ExecSpan, out *ExecResult) error {
@@ -693,3 +702,4 @@ func (s *VectorKernel) Exec(ctx *KernelCtx, sp *ExecSpan, out *ExecResult) error
 func (s VectorKernel) GetNullHandling() NullHandling { return s.NullHandling }
 func (s VectorKernel) GetMemAlloc() MemAlloc         { return s.MemAlloc }
 func (s VectorKernel) CanFillSlices() bool           { return s.CanWriteIntoSlices }
+func (s VectorKernel) Cleanup() error                { return nil }

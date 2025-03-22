@@ -524,7 +524,6 @@ func executeScalarBatch(ctx context.Context, input compute.ExecBatch, exp expr.E
 			err       error
 			allScalar = true
 			args      = make([]compute.Datum, e.NArgs())
-			argTypes  = make([]arrow.DataType, e.NArgs())
 		)
 		for i := 0; i < e.NArgs(); i++ {
 			switch v := e.Arg(i).(type) {
@@ -543,18 +542,21 @@ func executeScalarBatch(ctx context.Context, input compute.ExecBatch, exp expr.E
 			default:
 				return nil, arrow.ErrNotImplemented
 			}
-
-			argTypes[i] = args[i].(compute.ArrayLikeDatum).Type()
 		}
 
 		_, conv, ok := ext.DecodeFunction(e.FuncRef())
 		if !ok {
-			return nil, arrow.ErrNotImplemented
+			return nil, fmt.Errorf("%w: %s", arrow.ErrNotImplemented, e.Name())
 		}
 
-		fname, opts, err := conv(e)
+		fname, args, opts, err := conv(e, args)
 		if err != nil {
 			return nil, err
+		}
+
+		argTypes := make([]arrow.DataType, len(args))
+		for i, arg := range args {
+			argTypes[i] = arg.(compute.ArrayLikeDatum).Type()
 		}
 
 		ectx := compute.GetExecCtx(ctx)

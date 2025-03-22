@@ -213,9 +213,12 @@ func (fw *Writer) Close() (err error) {
 		}()
 
 		err = fw.FlushWithFooter()
-		fw.metadata.Clear()
 	}
 	return nil
+}
+
+func (fw *Writer) FileMetadata() (*metadata.FileMetaData, error) {
+	return fw.metadata.Snapshot()
 }
 
 // FlushWithFooter closes any open row group writer and writes the file footer, leaving
