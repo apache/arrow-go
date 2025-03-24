@@ -19,6 +19,7 @@ package array
 import (
 	"bytes"
 	"fmt"
+	"iter"
 	"strings"
 	"sync/atomic"
 
@@ -403,6 +404,84 @@ func (b *RecordBuilder) UnmarshalJSON(data []byte) error {
 		}
 	}
 	return nil
+}
+
+type iterReader struct {
+	refCount atomic.Int64
+
+	schema *arrow.Schema
+	cur    arrow.Record
+
+	next func() (arrow.Record, error, bool)
+	stop func()
+
+	err error
+}
+
+func (ir *iterReader) Schema() *arrow.Schema { return ir.schema }
+
+func (ir *iterReader) Retain() { ir.refCount.Add(1) }
+func (ir *iterReader) Release() {
+	debug.Assert(ir.refCount.Load() > 0, "too many releases")
+
+	if ir.refCount.Add(-1) == 0 {
+		ir.stop()
+		ir.schema, ir.next = nil, nil
+		if ir.cur != nil {
+			ir.cur.Release()
+		}
+	}
+}
+
+func (ir *iterReader) Record() arrow.Record { return ir.cur }
+func (ir *iterReader) Err() error           { return ir.err }
+
+func (ir *iterReader) Next() bool {
+	if ir.cur != nil {
+		ir.cur.Release()
+	}
+
+	var ok bool
+	ir.cur, ir.err, ok = ir.next()
+	if ir.err != nil {
+		ir.stop()
+		return false
+	}
+
+	return ok
+}
+
+// ReaderFromIter wraps a go iterator for arrow.Record + error into a RecordReader
+// interface object for ease of use.
+func ReaderFromIter(schema *arrow.Schema, itr iter.Seq2[arrow.Record, error]) RecordReader {
+	next, stop := iter.Pull2(itr)
+	rdr := &iterReader{
+		schema: schema,
+		next:   next,
+		stop:   stop,
+	}
+	rdr.refCount.Add(1)
+	return rdr
+}
+
+// IterFromReader converts a RecordReader interface into an iterator that
+// you can use range on. The semantics are still important, if a record
+// that is returned is desired to be utilized beyond the scope of an iteration
+// then Retain must be called on it.
+func IterFromReader(rdr RecordReader) iter.Seq2[arrow.Record, error] {
+	rdr.Retain()
+	return func(yield func(arrow.Record, error) bool) {
+		defer rdr.Release()
+		for rdr.Next() {
+			if !yield(rdr.Record(), nil) {
+				return
+			}
+		}
+
+		if rdr.Err() != nil {
+			yield(nil, rdr.Err())
+		}
+	}
 }
 
 var (

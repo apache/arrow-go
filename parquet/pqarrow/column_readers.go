@@ -92,7 +92,7 @@ func (lr *leafReader) IsOrHasRepeatedChild() bool { return false }
 
 func (lr *leafReader) LoadBatch(nrecords int64) (err error) {
 	lr.releaseOut()
-	lr.recordRdr.Reset()
+	lr.recordRdr.ResetValues()
 
 	if err := lr.recordRdr.Reserve(nrecords); err != nil {
 		return err
@@ -134,6 +134,16 @@ func (lr *leafReader) clearOut() (out *arrow.Chunked) {
 }
 
 func (lr *leafReader) Field() *arrow.Field { return lr.field }
+
+func (lr *leafReader) SeekToRow(rowIdx int64) error {
+	pr, offset, err := lr.input.FindChunkForRow(rowIdx)
+	if err != nil {
+		return err
+	}
+
+	lr.recordRdr.SetPageReader(pr)
+	return lr.recordRdr.SeekToRow(offset)
+}
 
 func (lr *leafReader) nextRowGroup() error {
 	pr, err := lr.input.NextChunk()
@@ -225,6 +235,21 @@ func (sr *structReader) GetRepLevels() ([]int16, error) {
 	// are optional/repeated or has a repeated child
 	// meaning all children must have rep/def levels associated with them
 	return sr.defRepLevelChild.GetRepLevels()
+}
+
+func (sr *structReader) SeekToRow(rowIdx int64) error {
+	var g errgroup.Group
+	if !sr.props.Parallel {
+		g.SetLimit(1)
+	}
+
+	for _, rdr := range sr.children {
+		g.Go(func() error {
+			return rdr.SeekToRow(rowIdx)
+		})
+	}
+
+	return g.Wait()
 }
 
 func (sr *structReader) LoadBatch(nrecords int64) error {
@@ -355,6 +380,10 @@ func (lr *listReader) GetRepLevels() ([]int16, error) {
 func (lr *listReader) Field() *arrow.Field { return lr.field }
 
 func (lr *listReader) IsOrHasRepeatedChild() bool { return true }
+
+func (lr *listReader) SeekToRow(rowIdx int64) error {
+	return lr.itemRdr.SeekToRow(rowIdx)
+}
 
 func (lr *listReader) LoadBatch(nrecords int64) error {
 	return lr.itemRdr.LoadBatch(nrecords)

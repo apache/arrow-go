@@ -504,7 +504,7 @@ func (n *nullArrayFactory) create() *Data {
 	return out
 }
 
-func (n *nullArrayFactory) createChild(dt arrow.DataType, i, length int) *Data {
+func (n *nullArrayFactory) createChild(_ arrow.DataType, i, length int) *Data {
 	childFactory := &nullArrayFactory{
 		mem: n.mem, dt: n.dt.(arrow.NestedType).Fields()[i].Type,
 		len: length, buf: n.buf}
@@ -520,4 +520,8 @@ func MakeArrayOfNull(mem memory.Allocator, dt arrow.DataType, length int) arrow.
 	data := (&nullArrayFactory{mem: mem, dt: dt, len: length}).create()
 	defer data.Release()
 	return MakeFromData(data)
+}
+
+func stripNulls(s string) string {
+	return strings.TrimRight(s, "\x00")
 }

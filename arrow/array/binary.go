@@ -450,4 +450,8 @@ var (
 
 	_ BinaryLike = (*Binary)(nil)
 	_ BinaryLike = (*LargeBinary)(nil)
+
+	_ arrow.TypedArray[[]byte] = (*Binary)(nil)
+	_ arrow.TypedArray[[]byte] = (*LargeBinary)(nil)
+	_ arrow.TypedArray[[]byte] = (*BinaryView)(nil)
 )

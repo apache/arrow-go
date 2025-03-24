@@ -24,7 +24,6 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/JohnCGriffin/overflow"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -531,9 +530,10 @@ func extractStats(dataHeader dataheader) (pageStats metadata.EncodedStatistics) 
 func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 	if p.dictOffset > 0 {
 		hdr := format.NewPageHeader()
+		readBufSize := min(int(p.dataOffset-p.baseOffset), p.r.BufferSize())
 		rd := utils.NewBufferedReader(
 			io.NewSectionReader(p.r.Outer(), p.dictOffset-p.baseOffset, p.dataOffset-p.baseOffset),
-			p.r.BufferSize())
+			readBufSize)
 		if err := p.readPageHeader(rd, hdr); err != nil {
 			return nil, err
 		}
@@ -787,7 +787,7 @@ func (p *serializedPageReader) Next() bool {
 			// extract stats
 			firstRowIdx := p.rowsSeen
 			p.rowsSeen += int64(dataHeader.GetNumRows())
-			levelsBytelen, ok := overflow.Add(int(dataHeader.GetDefinitionLevelsByteLength()), int(dataHeader.GetRepetitionLevelsByteLength()))
+			levelsBytelen, ok := utils.Add(int(dataHeader.GetDefinitionLevelsByteLength()), int(dataHeader.GetRepetitionLevelsByteLength()))
 			if !ok {
 				p.err = xerrors.New("parquet: levels size too large (corrupt file?)")
 				return false

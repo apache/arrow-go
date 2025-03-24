@@ -22,7 +22,6 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/JohnCGriffin/overflow"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
@@ -64,6 +63,7 @@ type RecordReader interface {
 	// ReleaseValues transfers the buffer of data with the values to the caller,
 	// a new buffer will be allocated on subsequent calls.
 	ReleaseValues() *memory.Buffer
+	ResetValues()
 	// NullCount returns the number of nulls decoded
 	NullCount() int64
 	// Type returns the parquet physical type of the column
@@ -79,6 +79,10 @@ type RecordReader interface {
 	// Release decrements the ref count by one, releasing the internal buffers when
 	// the ref count is 0.
 	Release()
+	// SeekToRow will shift the record reader so that subsequent reads will
+	// start at the desired row. It will utilize Offset Indexes if they exist
+	// to skip pages and seek.
+	SeekToRow(int64) error
 }
 
 // BinaryRecordReader provides an extra GetBuilderChunks function above and beyond
@@ -208,7 +212,7 @@ func (pr *primitiveRecordReader) ResetValues() {
 func (pr *primitiveRecordReader) numBytesForValues(nitems int64) (num int64, err error) {
 	typeSize := int64(pr.Descriptor().PhysicalType().ByteSize())
 	var ok bool
-	if num, ok = overflow.Mul64(nitems, typeSize); !ok {
+	if num, ok = utils.Mul64(nitems, typeSize); !ok {
 		err = xerrors.New("total size of items too large")
 	}
 	return
@@ -392,7 +396,7 @@ func updateCapacity(cap, size, extra int64) (int64, error) {
 	if extra < 0 {
 		return 0, xerrors.New("negative size (corrupt file?)")
 	}
-	target, ok := overflow.Add64(size, extra)
+	target, ok := utils.Add(size, extra)
 	if !ok {
 		return 0, xerrors.New("allocation size too large (corrupt file?)")
 	}
@@ -423,7 +427,7 @@ func (rr *recordReader) reserveLevels(extra int64) error {
 		}
 
 		if newCap > rr.levelsCap {
-			capBytes, ok := overflow.Mul(int(newCap), arrow.Int16SizeBytes)
+			capBytes, ok := utils.Mul(int(newCap), arrow.Int16SizeBytes)
 			if !ok {
 				return fmt.Errorf("allocation size too large (corrupt file?)")
 			}
@@ -441,12 +445,27 @@ func (rr *recordReader) reserveValues(extra int64) error {
 	return rr.recordReaderImpl.ReserveValues(extra, rr.leafInfo.HasNullableValues())
 }
 
-func (rr *recordReader) resetValues() {
+func (rr *recordReader) ResetValues() {
 	rr.recordReaderImpl.ResetValues()
 }
 
+func (rr *recordReader) SeekToRow(recordIdx int64) error {
+	if err := rr.recordReaderImpl.SeekToRow(recordIdx); err != nil {
+		return err
+	}
+
+	rr.atRecStart = true
+	rr.recordsRead = 0
+	// force re-reading the definition/repetition levels
+	// calling SeekToRow on the underlying column reader will ensure that
+	// the next reads will pull from the correct row
+	rr.levelsPos, rr.levelsWritten = 0, 0
+
+	return nil
+}
+
 func (rr *recordReader) Reset() {
-	rr.resetValues()
+	rr.ResetValues()
 
 	if rr.levelsWritten > 0 {
 		remain := int(rr.levelsWritten - rr.levelsPos)

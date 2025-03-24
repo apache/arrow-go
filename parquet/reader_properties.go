@@ -17,7 +17,6 @@
 package parquet
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 
@@ -39,11 +38,11 @@ type ReaderProperties struct {
 	// just use the read stream when reading data. Otherwise we will buffer
 	// the data we're going to read into memory first and then read that buffer.
 	//
-	// If reading from higher latency IO, like S3, it might improve performance to
-	// set this to true in order to read the entire row group in at once rather than
-	// make multiple smaller data requests. For low latency IO streams or if only
-	// reading small portions / subsets  of the parquet file, this can be set to false
-	// to reduce the amount of IO performed in order to avoid reading excess amounts of data.
+	// When accessing data from IO sources with higher latency, like S3, setting this
+	// to false may improve performance by reading the entire row group at once rather
+	// than sending multiple smaller IO requests. For IO streams with low latency, setting
+	// this to true can optimize memory usage for the reader. Additionally, this can decrease
+	// the amount of data retrieved when only needs to access small portions of the parquet file.
 	BufferedStreamEnabled bool
 }
 
@@ -87,5 +86,5 @@ func (r *ReaderProperties) GetStream(source io.ReaderAt, start, nbytes int64) (B
 		return nil, fmt.Errorf("parquet: tried reading %d bytes starting at position %d from file but only got %d", nbytes, start, n)
 	}
 
-	return utils.NewBufferedReader(bytes.NewReader(data), int(nbytes)), nil
+	return utils.NewByteReader(data), nil
 }
