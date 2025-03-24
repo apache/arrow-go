@@ -63,6 +63,7 @@ type RecordReader interface {
 	// ReleaseValues transfers the buffer of data with the values to the caller,
 	// a new buffer will be allocated on subsequent calls.
 	ReleaseValues() *memory.Buffer
+	ResetValues()
 	// NullCount returns the number of nulls decoded
 	NullCount() int64
 	// Type returns the parquet physical type of the column
@@ -78,6 +79,10 @@ type RecordReader interface {
 	// Release decrements the ref count by one, releasing the internal buffers when
 	// the ref count is 0.
 	Release()
+	// SeekToRow will shift the record reader so that subsequent reads will
+	// start at the desired row. It will utilize Offset Indexes if they exist
+	// to skip pages and seek.
+	SeekToRow(int64) error
 }
 
 // BinaryRecordReader provides an extra GetBuilderChunks function above and beyond
@@ -440,12 +445,27 @@ func (rr *recordReader) reserveValues(extra int64) error {
 	return rr.recordReaderImpl.ReserveValues(extra, rr.leafInfo.HasNullableValues())
 }
 
-func (rr *recordReader) resetValues() {
+func (rr *recordReader) ResetValues() {
 	rr.recordReaderImpl.ResetValues()
 }
 
+func (rr *recordReader) SeekToRow(recordIdx int64) error {
+	if err := rr.recordReaderImpl.SeekToRow(recordIdx); err != nil {
+		return err
+	}
+
+	rr.atRecStart = true
+	rr.recordsRead = 0
+	// force re-reading the definition/repetition levels
+	// calling SeekToRow on the underlying column reader will ensure that
+	// the next reads will pull from the correct row
+	rr.levelsPos, rr.levelsWritten = 0, 0
+
+	return nil
+}
+
 func (rr *recordReader) Reset() {
-	rr.resetValues()
+	rr.ResetValues()
 
 	if rr.levelsWritten > 0 {
 		remain := int(rr.levelsWritten - rr.levelsPos)
