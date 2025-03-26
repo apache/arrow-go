@@ -130,7 +130,7 @@ func (f *treeNode) namePath() []string {
 	return f.path
 }
 
-// namePath returns the path to the field in json dot notation
+// dotPath returns the path to the field in json dot notation
 func (f *treeNode) dotPath() string {
 	var path string = "$"
 	for i, p := range f.path {
