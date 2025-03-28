@@ -33,7 +33,7 @@ func TestSplitBlockFilter(t *testing.T) {
 	const S = 3
 	const P = 0.01
 
-	bf := blockSplitBloomFilter{
+	bf := &blockSplitBloomFilter{
 		bitset32: make([]uint32, optimalNumBytes(N, P)),
 	}
 
