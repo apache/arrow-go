@@ -357,7 +357,7 @@ type EncodingStats struct {
 // Finish finalizes the metadata with the given offsets,
 // flushes any compression that needs to be done, and performs
 // any encryption if an encryptor is provided.
-func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFallback bool, encStats EncodingStats, _ encryption.Encryptor) error {
+func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFallback bool, encStats EncodingStats, encryptor encryption.Encryptor) error {
 	if info.DictPageOffset > 0 {
 		c.chunk.MetaData.DictionaryPageOffset = &info.DictPageOffset
 		c.fileOffset = info.DictPageOffset
@@ -419,10 +419,6 @@ func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFal
 	}
 	c.chunk.MetaData.EncodingStats = thriftEncodingStats
 
-	return nil
-}
-
-func (c *ColumnChunkMetaDataBuilder) PopulateCryptoData(encryptor encryption.Encryptor) error {
 	encryptProps := c.props.ColumnEncryptionProperties(c.column.Path())
 	if encryptProps != nil && encryptProps.IsEncrypted() {
 		ccmd := format.NewColumnCryptoMetaData()
@@ -462,6 +458,7 @@ func (c *ColumnChunkMetaDataBuilder) PopulateCryptoData(encryptor encryption.Enc
 			}
 		}
 	}
+
 	return nil
 }
 
