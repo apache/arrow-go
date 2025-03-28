@@ -177,6 +177,15 @@ func (r *RowGroupMetaDataBuilder) Finish(_ int64, ordinal int16) error {
 		// so we must get total compressed size from column builder
 		totalCompressed += r.colBuilders[idx].TotalCompressedSize()
 		totalUncompressed += r.colBuilders[idx].TotalUncompressedSize()
+
+		if r.fileEncryptor != nil {
+			enc := r.fileEncryptor.GetColumnMetaEncryptor(r.colBuilders[idx].Descr().Path())
+			if enc != nil {
+				enc.UpdateAad(encryption.CreateModuleAad(enc.FileAad(), encryption.ColumnMetaModule,
+					ordinal, int16(idx), -1))
+				r.colBuilders[idx].PopulateCryptoData(enc)
+			}
+		}
 	}
 
 	if len(r.props.SortingColumns()) > 0 {

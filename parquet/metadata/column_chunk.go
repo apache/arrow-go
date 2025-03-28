@@ -419,6 +419,10 @@ func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFal
 	}
 	c.chunk.MetaData.EncodingStats = thriftEncodingStats
 
+	return nil
+}
+
+func (c *ColumnChunkMetaDataBuilder) PopulateCryptoData(encryptor encryption.Encryptor) error {
 	encryptProps := c.props.ColumnEncryptionProperties(c.column.Path())
 	if encryptProps != nil && encryptProps.IsEncrypted() {
 		ccmd := format.NewColumnCryptoMetaData()
@@ -458,7 +462,6 @@ func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFal
 			}
 		}
 	}
-
 	return nil
 }
 
