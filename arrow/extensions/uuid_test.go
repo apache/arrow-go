@@ -74,7 +74,7 @@ func TestUUIDExtensionRecordBuilder(t *testing.T) {
 	require.Equal(t, "[{\"uuid\":\""+testUUID.String()+"\"}\n,{\"uuid\":null}\n,{\"uuid\":\""+testUUID.String()+"\"}\n]", string(b))
 	record1, _, err := array.RecordFromJSON(memory.DefaultAllocator, schema, bytes.NewReader(b))
 	require.NoError(t, err)
-	require.Equal(t, record, record1)
+	require.True(t, array.RecordEqual(record, record1))
 }
 
 func TestUUIDStringRoundTrip(t *testing.T) {
