@@ -99,6 +99,8 @@ type RowGroupMetaDataBuilder struct {
 	schema      *schema.Schema
 	colBuilders []*ColumnChunkMetaDataBuilder
 	nextCol     int
+
+	fileEncryptor encryption.FileEncryptor
 }
 
 // NewRowGroupMetaDataBuilder returns a builder using the given properties and underlying thrift object.
@@ -166,21 +168,24 @@ func (r *RowGroupMetaDataBuilder) Finish(_ int64, ordinal int16) error {
 		totalUncompressed int64
 	)
 
-	for idx, col := range r.rg.Columns {
-		if col.FileOffset < 0 {
-			return fmt.Errorf("parquet: Column %d is not complete", idx)
-		}
+	for idx := range r.rg.Columns {
 		if idx == 0 {
-			if col.MetaData.IsSetDictionaryPageOffset() && col.MetaData.GetDictionaryPageOffset() > 0 {
-				fileOffset = col.MetaData.GetDictionaryPageOffset()
-			} else {
-				fileOffset = col.MetaData.DataPageOffset
-			}
+			fileOffset = r.colBuilders[idx].fileOffset
 		}
+
 		// sometimes column metadata is encrypted and not available to read
 		// so we must get total compressed size from column builder
 		totalCompressed += r.colBuilders[idx].TotalCompressedSize()
 		totalUncompressed += r.colBuilders[idx].TotalUncompressedSize()
+
+		if r.fileEncryptor != nil {
+			enc := r.fileEncryptor.GetColumnMetaEncryptor(r.colBuilders[idx].Descr().Path())
+			if enc != nil {
+				enc.UpdateAad(encryption.CreateModuleAad(enc.FileAad(), encryption.ColumnMetaModule,
+					r.rg.GetOrdinal(), int16(idx), -1))
+				r.colBuilders[idx].PopulateCryptoData(enc)
+			}
+		}
 	}
 
 	if len(r.props.SortingColumns()) > 0 {

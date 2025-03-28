@@ -218,6 +218,13 @@ func (c *ColumnChunkMetaData) BloomFilterOffset() int64 {
 	return c.columnMeta.GetBloomFilterOffset()
 }
 
+// BloomFilterLength is the length of the serialized bloomfilter including the
+// serialized bloom filter header. This was only added in 2.10 so it may not exist,
+// returning 0 in that case.
+func (c *ColumnChunkMetaData) BloomFilterLength() int32 {
+	return c.columnMeta.GetBloomFilterLength()
+}
+
 // StatsSet returns true only if there are statistics set in the metadata and the column
 // descriptor has a sort order that is not SortUnknown
 //
@@ -267,6 +274,7 @@ type ColumnChunkMetaDataBuilder struct {
 
 	compressedSize   int64
 	uncompressedSize int64
+	fileOffset       int64
 }
 
 func NewColumnChunkMetaDataBuilder(props *parquet.WriterProperties, column *schema.Column) *ColumnChunkMetaDataBuilder {
@@ -349,12 +357,12 @@ type EncodingStats struct {
 // Finish finalizes the metadata with the given offsets,
 // flushes any compression that needs to be done, and performs
 // any encryption if an encryptor is provided.
-func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFallback bool, encStats EncodingStats, metaEncryptor encryption.Encryptor) error {
+func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFallback bool, encStats EncodingStats, _ encryption.Encryptor) error {
 	if info.DictPageOffset > 0 {
 		c.chunk.MetaData.DictionaryPageOffset = &info.DictPageOffset
-		c.chunk.FileOffset = info.DictPageOffset + info.CompressedSize
+		c.fileOffset = info.DictPageOffset
 	} else {
-		c.chunk.FileOffset = info.DataPageOffset + info.CompressedSize
+		c.fileOffset = info.DataPageOffset
 	}
 
 	c.chunk.MetaData.NumValues = info.NumValues
@@ -411,6 +419,10 @@ func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFal
 	}
 	c.chunk.MetaData.EncodingStats = thriftEncodingStats
 
+	return nil
+}
+
+func (c *ColumnChunkMetaDataBuilder) PopulateCryptoData(encryptor encryption.Encryptor) error {
 	encryptProps := c.props.ColumnEncryptionProperties(c.column.Path())
 	if encryptProps != nil && encryptProps.IsEncrypted() {
 		ccmd := format.NewColumnCryptoMetaData()
@@ -436,7 +448,7 @@ func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFal
 				return err
 			}
 			var buf bytes.Buffer
-			metaEncryptor.Encrypt(&buf, data)
+			encryptor.Encrypt(&buf, data)
 			c.chunk.EncryptedColumnMetadata = buf.Bytes()
 
 			if encryptedFooter {
