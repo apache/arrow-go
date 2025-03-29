@@ -33,7 +33,7 @@ type Float16 struct {
 
 func NewFloat16Data(data arrow.ArrayData) *Float16 {
 	a := &Float16{}
-	a.refCount = 1
+	a.refCount.Add(1)
 	a.setData(data.(*Data))
 	return a
 }

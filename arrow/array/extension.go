@@ -86,7 +86,7 @@ func NewExtensionArrayWithStorage(dt arrow.ExtensionType, storage arrow.Array) a
 // underlying data built for the storage array.
 func NewExtensionData(data arrow.ArrayData) ExtensionArray {
 	base := ExtensionArrayBase{}
-	base.refCount = 1
+	base.refCount.Add(1)
 	base.setData(data.(*Data))
 
 	// use the ExtensionType's ArrayType to construct the correctly typed object

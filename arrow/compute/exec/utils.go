@@ -158,7 +158,7 @@ func RechunkArraysConsistently(groups [][]arrow.Array) [][]arrow.Array {
 
 type ChunkResolver struct {
 	offsets []int64
-	cached  int64
+	cached  atomic.Int64
 }
 
 func NewChunkResolver(chunks []arrow.Array) *ChunkResolver {
@@ -184,7 +184,7 @@ func (c *ChunkResolver) Resolve(idx int64) (chunk, index int64) {
 		return 0, idx
 	}
 
-	cached := atomic.LoadInt64(&c.cached)
+	cached := c.cached.Load()
 	cacheHit := idx >= c.offsets[cached] && idx < c.offsets[cached+1]
 	if cacheHit {
 		return cached, idx - c.offsets[cached]
@@ -196,7 +196,7 @@ func (c *ChunkResolver) Resolve(idx int64) (chunk, index int64) {
 	}
 
 	chunk, index = int64(chkIdx), idx-c.offsets[chkIdx]
-	atomic.StoreInt64(&c.cached, chunk)
+	c.cached.Store(chunk)
 	return
 }
 
@@ -214,7 +214,8 @@ type BoolIter struct {
 
 func NewBoolIter(arr *ArraySpan) ArrayIter[bool] {
 	return &BoolIter{
-		Rdr: bitutil.NewBitmapReader(arr.Buffers[1].Buf, int(arr.Offset), int(arr.Len))}
+		Rdr: bitutil.NewBitmapReader(arr.Buffers[1].Buf, int(arr.Offset), int(arr.Len)),
+	}
 }
 
 func (b *BoolIter) Next() (out bool) {
