@@ -47,6 +47,7 @@ type FileMetaDataBuilder struct {
 	currentRgBldr  *RowGroupMetaDataBuilder
 	kvmeta         KeyValueMetadata
 	cryptoMetadata *format.FileCryptoMetaData
+	fileEncryptor  encryption.FileEncryptor
 }
 
 // NewFileMetadataBuilder will use the default writer properties if nil is passed for
@@ -63,6 +64,10 @@ func NewFileMetadataBuilder(schema *schema.Schema, props *parquet.WriterProperti
 		kvmeta:         kvmeta,
 		cryptoMetadata: crypto,
 	}
+}
+
+func (f *FileMetaDataBuilder) SetFileEncryptor(encryptor encryption.FileEncryptor) {
+	f.fileEncryptor = encryptor
 }
 
 // GetFileCryptoMetaData returns the cryptographic information for encrypting/
@@ -92,6 +97,7 @@ func (f *FileMetaDataBuilder) AppendRowGroup() *RowGroupMetaDataBuilder {
 	rg := format.NewRowGroup()
 	f.rowGroups = append(f.rowGroups, rg)
 	f.currentRgBldr = NewRowGroupMetaDataBuilder(f.props, f.schema, rg)
+	f.currentRgBldr.fileEncryptor = f.fileEncryptor
 	return f.currentRgBldr
 }
 

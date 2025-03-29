@@ -158,6 +158,7 @@ func (fw *Writer) startFile() {
 		}
 
 		fw.fileEncryptor = encryption.NewFileEncryptor(encryptionProps, fw.props.Allocator())
+		fw.metadata.SetFileEncryptor(fw.fileEncryptor)
 		if encryptionProps.EncryptedFooter() {
 			magic = magicEBytes
 		}

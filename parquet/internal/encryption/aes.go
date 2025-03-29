@@ -54,6 +54,8 @@ const (
 	DictPageHeaderModule
 	ColumnIndexModule
 	OffsetIndexModule
+	BloomFilterHeaderModule
+	BloomFilterBitsetModule
 )
 
 type aesEncryptor struct {
