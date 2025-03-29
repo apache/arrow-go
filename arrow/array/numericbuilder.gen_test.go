@@ -2479,7 +2479,8 @@ func TestTime32BuilderUnmarshalJSON(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
 
-	bldr := array.NewTime32Builder(mem)
+	dtype := &arrow.Time32Type{Unit: arrow.Second}
+	bldr := array.NewTime32Builder(mem, dtype)
 	defer bldr.Release()
 
 	jsonstr := `[0, 1, "+Inf", 2, 3, "NaN", "NaN", 4, 5, "-Inf"]`
@@ -2708,7 +2709,8 @@ func TestTime64BuilderUnmarshalJSON(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
 
-	bldr := array.NewTime64Builder(mem)
+	dtype := &arrow.Time64Type{Unit: arrow.Second}
+	bldr := array.NewTime64Builder(mem, dtype)
 	defer bldr.Release()
 
 	jsonstr := `[0, 1, "+Inf", 2, 3, "NaN", "NaN", 4, 5, "-Inf"]`
@@ -3392,7 +3394,8 @@ func TestDurationBuilderUnmarshalJSON(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
 
-	bldr := array.NewDurationBuilder(mem)
+	dtype := &arrow.DurationType{Unit: arrow.Second}
+	bldr := array.NewDurationBuilder(mem, dtype)
 	defer bldr.Release()
 
 	jsonstr := `[0, 1, "+Inf", 2, 3, "NaN", "NaN", 4, 5, "-Inf"]`
