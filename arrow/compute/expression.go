@@ -490,6 +490,7 @@ func Cast(ex Expression, dt arrow.DataType) Expression {
 	return NewCall("cast", []Expression{ex}, opts)
 }
 
+// Deprecated: Use SetOptions instead
 type SetLookupOptions struct {
 	ValueSet  Datum `compute:"value_set"`
 	SkipNulls bool  `compute:"skip_nulls"`
