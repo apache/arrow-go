@@ -89,6 +89,7 @@ func (suite *BloomFilterBuilderSuite) TestSingleRowGroup() {
 		// to force the offset to be set as a non-zero value
 		suite.Require().NoError(bldr.WriteTo(wr))
 	}
+	runtime.GC()
 
 	finalMeta, err := metaBldr.Finish()
 	suite.Require().NoError(err)

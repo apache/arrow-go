@@ -18,6 +18,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+// algorithms defined in https://github.com/apache/parquet-format/blob/master/BloomFilter.md
+// describing the proper definitions for the bloom filter hash functions
+// to be compatible with the parquet format
+
 #define bitsSetPerBlock 8
 static const uint32_t SALT[bitsSetPerBlock] = {
     0x47b6137bU, 0x44974d91U, 0x8824ad5bU, 0xa2b7289dU,

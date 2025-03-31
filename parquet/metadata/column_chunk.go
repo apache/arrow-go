@@ -355,8 +355,9 @@ type EncodingStats struct {
 }
 
 // Finish finalizes the metadata with the given offsets,
-// flushes any compression that needs to be done, and performs
-// any encryption if an encryptor is provided.
+// flushes any compression that needs to be done.
+// Encryption will be performed by calling PopulateCryptoData
+// after this function is called.
 func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFallback bool, encStats EncodingStats, encryptor encryption.Encryptor) error {
 	if info.DictPageOffset > 0 {
 		c.chunk.MetaData.DictionaryPageOffset = &info.DictPageOffset
