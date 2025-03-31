@@ -220,7 +220,7 @@ func (pw *serializedPageWriter) Close(hasDict, fallback bool) error {
 		DataEncodingStats: pw.dataEncodingStats,
 	}
 	pw.FinishPageIndexes(0)
-	pw.metaData.Finish(chunkInfo, hasDict, fallback, encodingStats, pw.metaEncryptor)
+	pw.metaData.Finish(chunkInfo, hasDict, fallback, encodingStats)
 	_, err := pw.metaData.WriteTo(pw.sink)
 	return err
 }
@@ -505,7 +505,7 @@ func (bw *bufferedPageWriter) Close(hasDict, fallback bool) error {
 		DictEncodingStats: bw.pager.dictEncodingStats,
 		DataEncodingStats: bw.pager.dataEncodingStats,
 	}
-	bw.metadata.Finish(chunkInfo, hasDict, fallback, encodingStats, bw.pager.metaEncryptor)
+	bw.metadata.Finish(chunkInfo, hasDict, fallback, encodingStats)
 	bw.pager.FinishPageIndexes(position)
 
 	bw.metadata.WriteTo(bw.inMemSink)

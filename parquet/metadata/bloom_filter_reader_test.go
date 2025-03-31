@@ -214,20 +214,14 @@ func (suite *EncryptedBloomFilterBuilderSuite) TestEncryptedBloomFilters() {
 		filterMap["c1"] = bf1
 		filterMap["c2"] = bf2
 
-		c1Enc := encryptor.GetColumnMetaEncryptor("c1")
-		c1Enc.UpdateAad(encryption.CreateModuleAad(c1Enc.FileAad(), encryption.ColumnMetaModule, 0, 0, -1))
-
-		c2Enc := encryptor.GetColumnMetaEncryptor("c2")
-		c2Enc.UpdateAad(encryption.CreateModuleAad(c2Enc.FileAad(), encryption.ColumnMetaModule, 0, 1, -1))
-
 		colChunk1 := rgMeta.NextColumnChunk()
-		colChunk1.Finish(metadata.ChunkMetaInfo{}, false, false, metadata.EncodingStats{}, c1Enc)
+		colChunk1.Finish(metadata.ChunkMetaInfo{}, false, false, metadata.EncodingStats{})
 
 		colChunk2 := rgMeta.NextColumnChunk()
-		colChunk2.Finish(metadata.ChunkMetaInfo{}, false, false, metadata.EncodingStats{}, c2Enc)
+		colChunk2.Finish(metadata.ChunkMetaInfo{}, false, false, metadata.EncodingStats{})
 
 		colChunk3 := rgMeta.NextColumnChunk()
-		colChunk3.Finish(metadata.ChunkMetaInfo{}, false, false, metadata.EncodingStats{}, nil)
+		colChunk3.Finish(metadata.ChunkMetaInfo{}, false, false, metadata.EncodingStats{})
 
 		wr := &utils.TellWrapper{Writer: &suite.buf}
 		wr.Write([]byte("PAR1")) // offset of 0 means unset, so write something

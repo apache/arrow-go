@@ -358,7 +358,7 @@ type EncodingStats struct {
 // flushes any compression that needs to be done.
 // Encryption will be performed by calling PopulateCryptoData
 // after this function is called.
-func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFallback bool, encStats EncodingStats, encryptor encryption.Encryptor) error {
+func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFallback bool, encStats EncodingStats) error {
 	if info.DictPageOffset > 0 {
 		c.chunk.MetaData.DictionaryPageOffset = &info.DictPageOffset
 		c.fileOffset = info.DictPageOffset

@@ -46,8 +46,8 @@ func generateTableMetaData(schema *schema.Schema, props *parquet.WriterPropertie
 	statsFloat.Signed = true
 	col2Builder.SetStats(statsFloat)
 
-	col1Builder.Finish(metadata.ChunkMetaInfo{int64(nrows) / 2, 4, 0, 10, 512, 600}, true, false, metadata.EncodingStats{dictEncodingStats, dataEncodingStats}, nil)
-	col2Builder.Finish(metadata.ChunkMetaInfo{int64(nrows) / 2, 24, 0, 30, 512, 600}, true, false, metadata.EncodingStats{dictEncodingStats, dataEncodingStats}, nil)
+	col1Builder.Finish(metadata.ChunkMetaInfo{int64(nrows) / 2, 4, 0, 10, 512, 600}, true, false, metadata.EncodingStats{dictEncodingStats, dataEncodingStats})
+	col2Builder.Finish(metadata.ChunkMetaInfo{int64(nrows) / 2, 24, 0, 30, 512, 600}, true, false, metadata.EncodingStats{dictEncodingStats, dataEncodingStats})
 
 	rg1Builder.SetNumRows(nrows / 2)
 	rg1Builder.Finish(1024, -1)
@@ -60,8 +60,8 @@ func generateTableMetaData(schema *schema.Schema, props *parquet.WriterPropertie
 	col1Builder.SetStats(statsInt)
 	col2Builder.SetStats(statsFloat)
 	dictEncodingStats = make(map[parquet.Encoding]int32)
-	col1Builder.Finish(metadata.ChunkMetaInfo{int64(nrows) / 2, 0 /*dictionary page offset*/, 0, 10, 512, 600}, false /* has dictionary */, false, metadata.EncodingStats{dictEncodingStats, dataEncodingStats}, nil)
-	col2Builder.Finish(metadata.ChunkMetaInfo{int64(nrows) / 2, 16, 0, 26, 512, 600}, true, false, metadata.EncodingStats{dictEncodingStats, dataEncodingStats}, nil)
+	col1Builder.Finish(metadata.ChunkMetaInfo{int64(nrows) / 2, 0 /*dictionary page offset*/, 0, 10, 512, 600}, false /* has dictionary */, false, metadata.EncodingStats{dictEncodingStats, dataEncodingStats})
+	col2Builder.Finish(metadata.ChunkMetaInfo{int64(nrows) / 2, 16, 0, 26, 512, 600}, true, false, metadata.EncodingStats{dictEncodingStats, dataEncodingStats})
 
 	rg2Builder.SetNumRows(nrows / 2)
 	rg2Builder.Finish(1024, -1)
