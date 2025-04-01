@@ -18,16 +18,20 @@ package metadata_test
 
 import (
 	"bytes"
+	"os"
 	"runtime"
 	"sync"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	"github.com/apache/arrow-go/v18/parquet/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/schema"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -272,4 +276,74 @@ func (suite *EncryptedBloomFilterBuilderSuite) TestEncryptedBloomFilters() {
 func TestBloomFilterRoundTrip(t *testing.T) {
 	suite.Run(t, new(BloomFilterBuilderSuite))
 	suite.Run(t, new(EncryptedBloomFilterBuilderSuite))
+}
+
+func TestReadBloomFilter(t *testing.T) {
+	dir := os.Getenv("PARQUET_TEST_DATA")
+	if dir == "" {
+		t.Skip("PARQUET_TEST_DATA not set")
+	}
+	require.DirExists(t, dir)
+
+	files := []string{"data_index_bloom_encoding_stats.parquet",
+		"data_index_bloom_encoding_with_length.parquet"}
+
+	for _, testfile := range files {
+		t.Run(testfile, func(t *testing.T) {
+			rdr, err := file.OpenParquetFile(dir+"/"+testfile, false)
+			require.NoError(t, err)
+			defer rdr.Close()
+
+			bloomFilterRdr := rdr.GetBloomFilterReader()
+			rg0, err := bloomFilterRdr.RowGroup(0)
+			require.NoError(t, err)
+			require.NotNil(t, rg0)
+
+			rg1, err := bloomFilterRdr.RowGroup(1)
+			assert.Nil(t, rg1)
+			assert.Error(t, err)
+			assert.ErrorContains(t, err, "row group index 1 out of range")
+
+			bf, err := rg0.GetColumnBloomFilter(0)
+			require.NoError(t, err)
+			require.NotNil(t, bf)
+
+			bf1, err := rg0.GetColumnBloomFilter(1)
+			assert.Nil(t, bf1)
+			assert.Error(t, err)
+			assert.ErrorContains(t, err, "column index 1 out of range")
+
+			baBloomFilter := metadata.TypedBloomFilter[parquet.ByteArray]{bf}
+			assert.True(t, baBloomFilter.Check([]byte("Hello")))
+			assert.False(t, baBloomFilter.Check([]byte("NOT_EXISTS")))
+		})
+	}
+}
+
+func TestBloomFilterReaderFileNotHaveFilter(t *testing.T) {
+	// can still get a BloomFilterReader and a RowGroupBloomFilterReader
+	// but cannot get a non-null BloomFilter
+	dir := os.Getenv("PARQUET_TEST_DATA")
+	if dir == "" {
+		t.Skip("PARQUET_TEST_DATA not set")
+	}
+	require.DirExists(t, dir)
+
+	rdr, err := file.OpenParquetFile(dir+"/alltypes_plain.parquet", false)
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	bloomFilterRdr := rdr.GetBloomFilterReader()
+	rg0, err := bloomFilterRdr.RowGroup(0)
+	require.NoError(t, err)
+	require.NotNil(t, rg0)
+
+	rg1, err := bloomFilterRdr.RowGroup(1)
+	assert.Nil(t, rg1)
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "row group index 1 out of range")
+
+	bf, err := rg0.GetColumnBloomFilter(0)
+	require.NoError(t, err)
+	require.Nil(t, bf)
 }

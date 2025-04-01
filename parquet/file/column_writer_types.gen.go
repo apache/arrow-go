@@ -184,6 +184,10 @@ func (w *Int32ColumnChunkWriter) writeValues(values []int32, numNulls int64) {
 	if w.pageStatistics != nil {
 		w.pageStatistics.(*metadata.Int32Statistics).Update(values, numNulls)
 	}
+	if w.bloomFilter != nil {
+		// TODO: optimize for Dictionary Encoding case
+		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+	}
 }
 
 func (w *Int32ColumnChunkWriter) writeValuesSpaced(spacedValues []int32, numRead, numValues int64, validBits []byte, validBitsOffset int64) {
@@ -195,6 +199,10 @@ func (w *Int32ColumnChunkWriter) writeValuesSpaced(spacedValues []int32, numRead
 	if w.pageStatistics != nil {
 		nulls := numValues - numRead
 		w.pageStatistics.(*metadata.Int32Statistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
+	}
+	if w.bloomFilter != nil {
+		// TODO: optimize for Dictionary Encoding case
+		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
 	}
 }
 
@@ -374,6 +382,10 @@ func (w *Int64ColumnChunkWriter) writeValues(values []int64, numNulls int64) {
 	if w.pageStatistics != nil {
 		w.pageStatistics.(*metadata.Int64Statistics).Update(values, numNulls)
 	}
+	if w.bloomFilter != nil {
+		// TODO: optimize for Dictionary Encoding case
+		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+	}
 }
 
 func (w *Int64ColumnChunkWriter) writeValuesSpaced(spacedValues []int64, numRead, numValues int64, validBits []byte, validBitsOffset int64) {
@@ -385,6 +397,10 @@ func (w *Int64ColumnChunkWriter) writeValuesSpaced(spacedValues []int64, numRead
 	if w.pageStatistics != nil {
 		nulls := numValues - numRead
 		w.pageStatistics.(*metadata.Int64Statistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
+	}
+	if w.bloomFilter != nil {
+		// TODO: optimize for Dictionary Encoding case
+		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
 	}
 }
 
@@ -564,6 +580,10 @@ func (w *Int96ColumnChunkWriter) writeValues(values []parquet.Int96, numNulls in
 	if w.pageStatistics != nil {
 		w.pageStatistics.(*metadata.Int96Statistics).Update(values, numNulls)
 	}
+	if w.bloomFilter != nil {
+		// TODO: optimize for Dictionary Encoding case
+		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+	}
 }
 
 func (w *Int96ColumnChunkWriter) writeValuesSpaced(spacedValues []parquet.Int96, numRead, numValues int64, validBits []byte, validBitsOffset int64) {
@@ -575,6 +595,10 @@ func (w *Int96ColumnChunkWriter) writeValuesSpaced(spacedValues []parquet.Int96,
 	if w.pageStatistics != nil {
 		nulls := numValues - numRead
 		w.pageStatistics.(*metadata.Int96Statistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
+	}
+	if w.bloomFilter != nil {
+		// TODO: optimize for Dictionary Encoding case
+		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
 	}
 }
 
@@ -754,6 +778,10 @@ func (w *Float32ColumnChunkWriter) writeValues(values []float32, numNulls int64)
 	if w.pageStatistics != nil {
 		w.pageStatistics.(*metadata.Float32Statistics).Update(values, numNulls)
 	}
+	if w.bloomFilter != nil {
+		// TODO: optimize for Dictionary Encoding case
+		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+	}
 }
 
 func (w *Float32ColumnChunkWriter) writeValuesSpaced(spacedValues []float32, numRead, numValues int64, validBits []byte, validBitsOffset int64) {
@@ -765,6 +793,10 @@ func (w *Float32ColumnChunkWriter) writeValuesSpaced(spacedValues []float32, num
 	if w.pageStatistics != nil {
 		nulls := numValues - numRead
 		w.pageStatistics.(*metadata.Float32Statistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
+	}
+	if w.bloomFilter != nil {
+		// TODO: optimize for Dictionary Encoding case
+		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
 	}
 }
 
@@ -944,6 +976,10 @@ func (w *Float64ColumnChunkWriter) writeValues(values []float64, numNulls int64)
 	if w.pageStatistics != nil {
 		w.pageStatistics.(*metadata.Float64Statistics).Update(values, numNulls)
 	}
+	if w.bloomFilter != nil {
+		// TODO: optimize for Dictionary Encoding case
+		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+	}
 }
 
 func (w *Float64ColumnChunkWriter) writeValuesSpaced(spacedValues []float64, numRead, numValues int64, validBits []byte, validBitsOffset int64) {
@@ -955,6 +991,10 @@ func (w *Float64ColumnChunkWriter) writeValuesSpaced(spacedValues []float64, num
 	if w.pageStatistics != nil {
 		nulls := numValues - numRead
 		w.pageStatistics.(*metadata.Float64Statistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
+	}
+	if w.bloomFilter != nil {
+		// TODO: optimize for Dictionary Encoding case
+		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
 	}
 }
 
@@ -1137,6 +1177,10 @@ func (w *BooleanColumnChunkWriter) writeValues(values []bool, numNulls int64) {
 	if w.pageStatistics != nil {
 		w.pageStatistics.(*metadata.BooleanStatistics).Update(values, numNulls)
 	}
+	if w.bloomFilter != nil {
+		// TODO: optimize for Dictionary Encoding case
+		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+	}
 }
 
 func (w *BooleanColumnChunkWriter) writeValuesSpaced(spacedValues []bool, numRead, numValues int64, validBits []byte, validBitsOffset int64) {
@@ -1148,6 +1192,10 @@ func (w *BooleanColumnChunkWriter) writeValuesSpaced(spacedValues []bool, numRea
 	if w.pageStatistics != nil {
 		nulls := numValues - numRead
 		w.pageStatistics.(*metadata.BooleanStatistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
+	}
+	if w.bloomFilter != nil {
+		// TODO: optimize for Dictionary Encoding case
+		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
 	}
 }
 
@@ -1327,6 +1375,10 @@ func (w *ByteArrayColumnChunkWriter) writeValues(values []parquet.ByteArray, num
 	if w.pageStatistics != nil {
 		w.pageStatistics.(*metadata.ByteArrayStatistics).Update(values, numNulls)
 	}
+	if w.bloomFilter != nil {
+		// TODO: optimize for Dictionary Encoding case
+		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+	}
 }
 
 func (w *ByteArrayColumnChunkWriter) writeValuesSpaced(spacedValues []parquet.ByteArray, numRead, numValues int64, validBits []byte, validBitsOffset int64) {
@@ -1338,6 +1390,10 @@ func (w *ByteArrayColumnChunkWriter) writeValuesSpaced(spacedValues []parquet.By
 	if w.pageStatistics != nil {
 		nulls := numValues - numRead
 		w.pageStatistics.(*metadata.ByteArrayStatistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
+	}
+	if w.bloomFilter != nil {
+		// TODO: optimize for Dictionary Encoding case
+		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
 	}
 }
 
@@ -1521,6 +1577,10 @@ func (w *FixedLenByteArrayColumnChunkWriter) writeValues(values []parquet.FixedL
 			w.pageStatistics.(*metadata.FixedLenByteArrayStatistics).Update(values, numNulls)
 		}
 	}
+	if w.bloomFilter != nil {
+		// TODO: optimize for Dictionary Encoding case
+		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+	}
 }
 
 func (w *FixedLenByteArrayColumnChunkWriter) writeValuesSpaced(spacedValues []parquet.FixedLenByteArray, numRead, numValues int64, validBits []byte, validBitsOffset int64) {
@@ -1536,6 +1596,10 @@ func (w *FixedLenByteArrayColumnChunkWriter) writeValuesSpaced(spacedValues []pa
 		} else {
 			w.pageStatistics.(*metadata.FixedLenByteArrayStatistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
 		}
+	}
+	if w.bloomFilter != nil {
+		// TODO: optimize for Dictionary Encoding case
+		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
 	}
 }
 
