@@ -404,6 +404,13 @@ type StructType struct {
 //
 // StructOf panics if there is a field with an invalid DataType.
 func StructOf(fs ...Field) *StructType {
+	return StructOfWithMetadata(Metadata{}, fs...)
+}
+
+// StructOfWithMetadata returns the struct type with fields fs and metadata.
+//
+// StructOfWithMetadata panics if there is a field with an invalid DataType.
+func StructOfWithMetadata(metadata Metadata, fs ...Field) *StructType {
 	n := len(fs)
 	if n == 0 {
 		return &StructType{}
@@ -412,6 +419,7 @@ func StructOf(fs ...Field) *StructType {
 	t := &StructType{
 		fields: make([]Field, n),
 		index:  make(map[string][]int, n),
+		meta:   metadata,
 	}
 	for i, f := range fs {
 		if f.Type == nil {
@@ -521,6 +529,10 @@ func (t *StructType) Fingerprint() string {
 
 func (*StructType) Layout() DataTypeLayout {
 	return DataTypeLayout{Buffers: []BufferSpec{SpecBitmap()}}
+}
+
+func (t *StructType) Metadata() Metadata {
+	return t.meta
 }
 
 type MapType struct {

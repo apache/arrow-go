@@ -83,8 +83,9 @@ func TestListOf(t *testing.T) {
 
 func TestStructOf(t *testing.T) {
 	for _, tc := range []struct {
-		fields []Field
-		want   DataType
+		fields   []Field
+		want     DataType
+		metadata Metadata
 	}{
 		{
 			fields: nil,
@@ -190,9 +191,22 @@ func TestStructOf(t *testing.T) {
 				index: map[string][]int{"f1": {0, 2}, "f2": {1}},
 			},
 		},
+		{
+			metadata: NewMetadata([]string{"k"}, []string{"v"}),
+			fields: []Field{
+				{Name: "f1", Type: PrimitiveTypes.Int32},
+			},
+			want: &StructType{
+				fields: []Field{
+					{Name: "f1", Type: PrimitiveTypes.Int32},
+				},
+				index: map[string][]int{"f1": {0}},
+				meta:  NewMetadata([]string{"k"}, []string{"v"}),
+			},
+		},
 	} {
 		t.Run("", func(t *testing.T) {
-			got := StructOf(tc.fields...)
+			got := StructOfWithMetadata(tc.metadata, tc.fields...)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("got=%#v, want=%#v", got, tc.want)
 			}
