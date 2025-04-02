@@ -40,6 +40,7 @@ type Writer struct {
 	fileEncryptor    encryption.FileEncryptor
 	rowGroupWriter   *rowGroupWriter
 	pageIndexBuilder *metadata.PageIndexBuilder
+	bloomFilters     *metadata.FileBloomFilterBuilder
 
 	// The Schema of this writer
 	Schema *schema.Schema
@@ -135,6 +136,7 @@ func (fw *Writer) appendRowGroup(buffered bool) *rowGroupWriter {
 
 	fw.rowGroupWriter = newRowGroupWriter(fw.sink, rgMeta, int16(fw.rowGroups)-1,
 		fw.props, buffered, fw.fileEncryptor, fw.pageIndexBuilder)
+	fw.bloomFilters.AppendRowGroup(rgMeta, fw.rowGroupWriter.bloomFilters)
 	return fw.rowGroupWriter
 }
 
@@ -163,6 +165,12 @@ func (fw *Writer) startFile() {
 			magic = magicEBytes
 		}
 	}
+
+	fw.bloomFilters = &metadata.FileBloomFilterBuilder{
+		Schema:    fw.Schema,
+		Encryptor: fw.fileEncryptor,
+	}
+
 	n, err := fw.sink.Write(magic)
 	if n != 4 || err != nil {
 		panic("failed to write magic number")
@@ -236,6 +244,9 @@ func (fw *Writer) FlushWithFooter() error {
 			fw.rowGroupWriter.Close()
 		}
 		fw.rowGroupWriter = nil
+		if err := fw.bloomFilters.WriteTo(fw.sink); err != nil {
+			return err
+		}
 
 		fw.writePageIndex()
 

@@ -44,11 +44,12 @@ var (
 
 // Reader is the main interface for reading a parquet file
 type Reader struct {
-	r               parquet.ReaderAtSeeker
-	props           *parquet.ReaderProperties
-	metadata        *metadata.FileMetaData
-	fileDecryptor   encryption.FileDecryptor
-	pageIndexReader *metadata.PageIndexReader
+	r                 parquet.ReaderAtSeeker
+	props             *parquet.ReaderProperties
+	metadata          *metadata.FileMetaData
+	fileDecryptor     encryption.FileDecryptor
+	pageIndexReader   *metadata.PageIndexReader
+	bloomFilterReader *metadata.BloomFilterReader
 
 	bufferPool sync.Pool
 }
@@ -326,4 +327,17 @@ func (f *Reader) RowGroup(i int) *RowGroupReader {
 
 func (f *Reader) GetPageIndexReader() *metadata.PageIndexReader {
 	return f.pageIndexReader
+}
+
+func (f *Reader) GetBloomFilterReader() *metadata.BloomFilterReader {
+	if f.bloomFilterReader == nil {
+		f.bloomFilterReader = &metadata.BloomFilterReader{
+			Input:         f.r,
+			FileMetadata:  f.metadata,
+			Props:         f.props,
+			FileDecryptor: f.fileDecryptor,
+			BufferPool:    &f.bufferPool,
+		}
+	}
+	return f.bloomFilterReader
 }

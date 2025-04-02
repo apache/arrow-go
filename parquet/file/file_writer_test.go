@@ -1067,3 +1067,92 @@ func TestPageIndexRoundTripSuite(t *testing.T) {
 		suite.Run(t, &PageIndexRoundTripSuite{pageVersion: parquet.DataPageV2})
 	})
 }
+
+func TestWriteBloomFilters(t *testing.T) {
+	input1 := []parquet.ByteArray{
+		parquet.ByteArray("hello"),
+		parquet.ByteArray("world"),
+		parquet.ByteArray("hello"),
+		parquet.ByteArray("parquet"),
+	}
+
+	input2 := []parquet.ByteArray{
+		parquet.ByteArray("foo"),
+		parquet.ByteArray("bar"),
+		parquet.ByteArray("baz"),
+		parquet.ByteArray("columns"),
+	}
+
+	size := len(input1)
+	chunk := size / 2
+
+	props := parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(false),
+		parquet.WithBloomFilterEnabledFor("col1", true),
+		parquet.WithBatchSize(int64(chunk)),
+	)
+
+	field1, err := schema.NewPrimitiveNode("col1", parquet.Repetitions.Required,
+		parquet.Types.ByteArray, -1, -1)
+	require.NoError(t, err)
+	field2, err := schema.NewPrimitiveNode("col2", parquet.Repetitions.Required,
+		parquet.Types.ByteArray, -1, -1)
+	require.NoError(t, err)
+	sc, err := schema.NewGroupNode("test", parquet.Repetitions.Required,
+		schema.FieldList{field1, field2}, -1)
+	require.NoError(t, err)
+
+	sink := encoding.NewBufferWriter(0, memory.DefaultAllocator)
+	writer := file.NewParquetWriter(sink, sc, file.WithWriterProps(props))
+
+	rgw := writer.AppendRowGroup()
+	cwr, err := rgw.NextColumn()
+	require.NoError(t, err)
+
+	cw, ok := cwr.(*file.ByteArrayColumnChunkWriter)
+	require.True(t, ok)
+
+	nVals, err := cw.WriteBatch(input1[:chunk], nil, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, chunk, nVals)
+
+	nVals, err = cw.WriteBatch(input1[chunk:], nil, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, chunk, nVals)
+
+	cwr, err = rgw.NextColumn()
+	require.NoError(t, err)
+	cw, ok = cwr.(*file.ByteArrayColumnChunkWriter)
+	require.True(t, ok)
+
+	nVals, err = cw.WriteBatch(input2, nil, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, size, nVals)
+
+	require.NoError(t, cwr.Close())
+	require.NoError(t, rgw.Close())
+	require.NoError(t, writer.Close())
+
+	rdr, err := file.NewParquetReader(bytes.NewReader(sink.Bytes()))
+	require.NoError(t, err)
+
+	bloom := rdr.GetBloomFilterReader()
+	bloomRgr, err := bloom.RowGroup(0)
+	require.NoError(t, err)
+
+	filter, err := bloomRgr.GetColumnBloomFilter(1)
+	require.NoError(t, err)
+	require.Nil(t, filter) // no filter written for col2
+
+	filter, err = bloomRgr.GetColumnBloomFilter(0)
+	require.NoError(t, err)
+	require.NotNil(t, filter)
+
+	byteArrayFilter := metadata.TypedBloomFilter[parquet.ByteArray]{BloomFilter: filter}
+	assert.True(t, byteArrayFilter.Check(parquet.ByteArray("hello")))
+	assert.True(t, byteArrayFilter.Check(parquet.ByteArray("world")))
+	assert.True(t, byteArrayFilter.Check(parquet.ByteArray("parquet")))
+	assert.False(t, byteArrayFilter.Check(parquet.ByteArray("foo")))
+	assert.False(t, byteArrayFilter.Check(parquet.ByteArray("bar")))
+	assert.False(t, byteArrayFilter.Check(parquet.ByteArray("baz")))
+}

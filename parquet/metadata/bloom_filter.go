@@ -48,7 +48,7 @@ const (
 
 var (
 	salt = [bitsSetPerBlock]uint32{
-		0x476137b, 0x44974d91, 0x8824ad5b, 0xa2b7289d,
+		0x47b6137b, 0x44974d91, 0x8824ad5b, 0xa2b7289d,
 		0x705495c7, 0x2df1424b, 0x9efc4947, 0x5c6bfb31}
 
 	defaultHashStrategy = format.BloomFilterHash{XXHASH: &format.XxHash{}}
