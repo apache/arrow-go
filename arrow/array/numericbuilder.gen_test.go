@@ -237,7 +237,7 @@ func TestInt64BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewInt64Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, "+Inf", 2, 3, "NaN", "NaN", 4, 5, "-Inf"]`
+	jsonstr := `[0, 1, null, 2.3, -11]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -247,9 +247,11 @@ func TestInt64BuilderUnmarshalJSON(t *testing.T) {
 
 	assert.NotNil(t, arr)
 
-	assert.False(t, math.IsInf(float64(arr.Value(0)), 0), arr.Value(0))
-	assert.True(t, math.IsInf(float64(arr.Value(2)), 1), arr.Value(2))
-	assert.True(t, math.IsNaN(float64(arr.Value(5))), arr.Value(5))
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
 func TestUint64StringRoundTrip(t *testing.T) {
@@ -461,7 +463,7 @@ func TestUint64BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewUint64Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, "+Inf", 2, 3, "NaN", "NaN", 4, 5, "-Inf"]`
+	jsonstr := `[0, 1, null, 2.3, -11]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -471,9 +473,11 @@ func TestUint64BuilderUnmarshalJSON(t *testing.T) {
 
 	assert.NotNil(t, arr)
 
-	assert.False(t, math.IsInf(float64(arr.Value(0)), 0), arr.Value(0))
-	assert.True(t, math.IsInf(float64(arr.Value(2)), 1), arr.Value(2))
-	assert.True(t, math.IsNaN(float64(arr.Value(5))), arr.Value(5))
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
 func TestFloat64StringRoundTrip(t *testing.T) {
@@ -909,7 +913,7 @@ func TestInt32BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewInt32Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, "+Inf", 2, 3, "NaN", "NaN", 4, 5, "-Inf"]`
+	jsonstr := `[0, 1, null, 2.3, -11]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -919,9 +923,11 @@ func TestInt32BuilderUnmarshalJSON(t *testing.T) {
 
 	assert.NotNil(t, arr)
 
-	assert.False(t, math.IsInf(float64(arr.Value(0)), 0), arr.Value(0))
-	assert.True(t, math.IsInf(float64(arr.Value(2)), 1), arr.Value(2))
-	assert.True(t, math.IsNaN(float64(arr.Value(5))), arr.Value(5))
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
 func TestUint32StringRoundTrip(t *testing.T) {
@@ -1133,7 +1139,7 @@ func TestUint32BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewUint32Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, "+Inf", 2, 3, "NaN", "NaN", 4, 5, "-Inf"]`
+	jsonstr := `[0, 1, null, 2.3, -11]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -1143,9 +1149,11 @@ func TestUint32BuilderUnmarshalJSON(t *testing.T) {
 
 	assert.NotNil(t, arr)
 
-	assert.False(t, math.IsInf(float64(arr.Value(0)), 0), arr.Value(0))
-	assert.True(t, math.IsInf(float64(arr.Value(2)), 1), arr.Value(2))
-	assert.True(t, math.IsNaN(float64(arr.Value(5))), arr.Value(5))
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
 func TestFloat32StringRoundTrip(t *testing.T) {
@@ -1581,7 +1589,7 @@ func TestInt16BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewInt16Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, "+Inf", 2, 3, "NaN", "NaN", 4, 5, "-Inf"]`
+	jsonstr := `[0, 1, null, 2.3, -11]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -1591,9 +1599,11 @@ func TestInt16BuilderUnmarshalJSON(t *testing.T) {
 
 	assert.NotNil(t, arr)
 
-	assert.False(t, math.IsInf(float64(arr.Value(0)), 0), arr.Value(0))
-	assert.True(t, math.IsInf(float64(arr.Value(2)), 1), arr.Value(2))
-	assert.True(t, math.IsNaN(float64(arr.Value(5))), arr.Value(5))
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
 func TestUint16StringRoundTrip(t *testing.T) {
@@ -1805,7 +1815,7 @@ func TestUint16BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewUint16Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, "+Inf", 2, 3, "NaN", "NaN", 4, 5, "-Inf"]`
+	jsonstr := `[0, 1, null, 2.3, -11]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -1815,9 +1825,11 @@ func TestUint16BuilderUnmarshalJSON(t *testing.T) {
 
 	assert.NotNil(t, arr)
 
-	assert.False(t, math.IsInf(float64(arr.Value(0)), 0), arr.Value(0))
-	assert.True(t, math.IsInf(float64(arr.Value(2)), 1), arr.Value(2))
-	assert.True(t, math.IsNaN(float64(arr.Value(5))), arr.Value(5))
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
 func TestInt8StringRoundTrip(t *testing.T) {
@@ -2029,7 +2041,7 @@ func TestInt8BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewInt8Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, "+Inf", 2, 3, "NaN", "NaN", 4, 5, "-Inf"]`
+	jsonstr := `[0, 1, null, 2.3, -11]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -2039,9 +2051,11 @@ func TestInt8BuilderUnmarshalJSON(t *testing.T) {
 
 	assert.NotNil(t, arr)
 
-	assert.False(t, math.IsInf(float64(arr.Value(0)), 0), arr.Value(0))
-	assert.True(t, math.IsInf(float64(arr.Value(2)), 1), arr.Value(2))
-	assert.True(t, math.IsNaN(float64(arr.Value(5))), arr.Value(5))
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
 func TestUint8StringRoundTrip(t *testing.T) {
@@ -2253,7 +2267,7 @@ func TestUint8BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewUint8Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, "+Inf", 2, 3, "NaN", "NaN", 4, 5, "-Inf"]`
+	jsonstr := `[0, 1, null, 2.3, -11]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -2263,9 +2277,11 @@ func TestUint8BuilderUnmarshalJSON(t *testing.T) {
 
 	assert.NotNil(t, arr)
 
-	assert.False(t, math.IsInf(float64(arr.Value(0)), 0), arr.Value(0))
-	assert.True(t, math.IsInf(float64(arr.Value(2)), 1), arr.Value(2))
-	assert.True(t, math.IsNaN(float64(arr.Value(5))), arr.Value(5))
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
 func TestTime32StringRoundTrip(t *testing.T) {
@@ -2483,7 +2499,7 @@ func TestTime32BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewTime32Builder(mem, dtype)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, "+Inf", 2, 3, "NaN", "NaN", 4, 5, "-Inf"]`
+	jsonstr := `[0, 1, null, 2.3, -11]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -2493,9 +2509,11 @@ func TestTime32BuilderUnmarshalJSON(t *testing.T) {
 
 	assert.NotNil(t, arr)
 
-	assert.False(t, math.IsInf(float64(arr.Value(0)), 0), arr.Value(0))
-	assert.True(t, math.IsInf(float64(arr.Value(2)), 1), arr.Value(2))
-	assert.True(t, math.IsNaN(float64(arr.Value(5))), arr.Value(5))
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
 func TestTime64StringRoundTrip(t *testing.T) {
@@ -2713,7 +2731,7 @@ func TestTime64BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewTime64Builder(mem, dtype)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, "+Inf", 2, 3, "NaN", "NaN", 4, 5, "-Inf"]`
+	jsonstr := `[0, 1, null, 2.3, -11]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -2723,9 +2741,11 @@ func TestTime64BuilderUnmarshalJSON(t *testing.T) {
 
 	assert.NotNil(t, arr)
 
-	assert.False(t, math.IsInf(float64(arr.Value(0)), 0), arr.Value(0))
-	assert.True(t, math.IsInf(float64(arr.Value(2)), 1), arr.Value(2))
-	assert.True(t, math.IsNaN(float64(arr.Value(5))), arr.Value(5))
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
 func TestDate32StringRoundTrip(t *testing.T) {
@@ -2937,7 +2957,7 @@ func TestDate32BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewDate32Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, "+Inf", 2, 3, "NaN", "NaN", 4, 5, "-Inf"]`
+	jsonstr := `[0, 1, null, 2.3, -11]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -2947,9 +2967,11 @@ func TestDate32BuilderUnmarshalJSON(t *testing.T) {
 
 	assert.NotNil(t, arr)
 
-	assert.False(t, math.IsInf(float64(arr.Value(0)), 0), arr.Value(0))
-	assert.True(t, math.IsInf(float64(arr.Value(2)), 1), arr.Value(2))
-	assert.True(t, math.IsNaN(float64(arr.Value(5))), arr.Value(5))
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
 func TestDate64StringRoundTrip(t *testing.T) {
@@ -3168,7 +3190,7 @@ func TestDate64BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewDate64Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, "+Inf", 2, 3, "NaN", "NaN", 4, 5, "-Inf"]`
+	jsonstr := `[0, 1, null, 2.3, -11]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -3178,9 +3200,11 @@ func TestDate64BuilderUnmarshalJSON(t *testing.T) {
 
 	assert.NotNil(t, arr)
 
-	assert.False(t, math.IsInf(float64(arr.Value(0)), 0), arr.Value(0))
-	assert.True(t, math.IsInf(float64(arr.Value(2)), 1), arr.Value(2))
-	assert.True(t, math.IsNaN(float64(arr.Value(5))), arr.Value(5))
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
 func TestDurationStringRoundTrip(t *testing.T) {
@@ -3398,7 +3422,7 @@ func TestDurationBuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewDurationBuilder(mem, dtype)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, "+Inf", 2, 3, "NaN", "NaN", 4, 5, "-Inf"]`
+	jsonstr := `[0, 1, null, 2.3, -11]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -3408,7 +3432,9 @@ func TestDurationBuilderUnmarshalJSON(t *testing.T) {
 
 	assert.NotNil(t, arr)
 
-	assert.False(t, math.IsInf(float64(arr.Value(0)), 0), arr.Value(0))
-	assert.True(t, math.IsInf(float64(arr.Value(2)), 1), arr.Value(2))
-	assert.True(t, math.IsNaN(float64(arr.Value(5))), arr.Value(5))
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
