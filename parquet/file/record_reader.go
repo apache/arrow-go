@@ -130,12 +130,12 @@ type primitiveRecordReader struct {
 	validBits     *memory.Buffer
 	mem           memory.Allocator
 
-	refCount  int64
+	refCount  atomic.Int64
 	useValues bool
 }
 
-func createPrimitiveRecordReader(descr *schema.Column, mem memory.Allocator, bufferPool *sync.Pool) primitiveRecordReader {
-	return primitiveRecordReader{
+func createPrimitiveRecordReader(descr *schema.Column, mem memory.Allocator, bufferPool *sync.Pool) *primitiveRecordReader {
+	prr := &primitiveRecordReader{
 		ColumnChunkReader: newTypedColumnChunkReader(columnChunkReader{
 			descr:      descr,
 			mem:        mem,
@@ -144,17 +144,19 @@ func createPrimitiveRecordReader(descr *schema.Column, mem memory.Allocator, buf
 		values:    memory.NewResizableBuffer(mem),
 		validBits: memory.NewResizableBuffer(mem),
 		mem:       mem,
-		refCount:  1,
 		useValues: descr.PhysicalType() != parquet.Types.ByteArray && descr.PhysicalType() != parquet.Types.FixedLenByteArray,
 	}
+
+	prr.refCount.Add(1)
+	return prr
 }
 
 func (pr *primitiveRecordReader) Retain() {
-	atomic.AddInt64(&pr.refCount, 1)
+	pr.refCount.Add(1)
 }
 
 func (pr *primitiveRecordReader) Release() {
-	if atomic.AddInt64(&pr.refCount, -1) == 0 {
+	if pr.refCount.Add(-1) == 0 {
 		if pr.values != nil {
 			pr.values.Release()
 			pr.values = nil
@@ -325,7 +327,7 @@ type recordReader struct {
 	defLevels *memory.Buffer
 	repLevels *memory.Buffer
 
-	refCount int64
+	refCount atomic.Int64
 }
 
 // binaryRecordReader is the recordReaderImpl for non-primitive data
@@ -346,22 +348,22 @@ func newRecordReader(descr *schema.Column, info LevelInfo, mem memory.Allocator,
 		mem = memory.DefaultAllocator
 	}
 
-	pr := createPrimitiveRecordReader(descr, mem, bufferPool)
-	return &recordReader{
-		refCount:         1,
-		recordReaderImpl: &pr,
+	rr := &recordReader{
+		recordReaderImpl: createPrimitiveRecordReader(descr, mem, bufferPool),
 		leafInfo:         info,
 		defLevels:        memory.NewResizableBuffer(mem),
 		repLevels:        memory.NewResizableBuffer(mem),
 	}
+	rr.refCount.Add(1)
+	return rr
 }
 
 func (rr *recordReader) Retain() {
-	atomic.AddInt64(&rr.refCount, 1)
+	rr.refCount.Add(1)
 }
 
 func (rr *recordReader) Release() {
-	if atomic.AddInt64(&rr.refCount, -1) == 0 {
+	if rr.refCount.Add(-1) == 0 {
 		rr.recordReaderImpl.Release()
 		rr.defLevels.Release()
 		rr.repLevels.Release()
@@ -761,17 +763,18 @@ func newFLBARecordReader(descr *schema.Column, info LevelInfo, mem memory.Alloca
 
 	byteWidth := descr.TypeLength()
 
-	return &binaryRecordReader{&recordReader{
+	brr := &binaryRecordReader{&recordReader{
 		recordReaderImpl: &flbaRecordReader{
-			createPrimitiveRecordReader(descr, mem, bufferPool),
+			*createPrimitiveRecordReader(descr, mem, bufferPool),
 			array.NewFixedSizeBinaryBuilder(mem, &arrow.FixedSizeBinaryType{ByteWidth: byteWidth}),
 			nil,
 		},
 		leafInfo:  info,
 		defLevels: memory.NewResizableBuffer(mem),
 		repLevels: memory.NewResizableBuffer(mem),
-		refCount:  1,
 	}}
+	brr.refCount.Add(1)
+	return brr
 }
 
 // byteArrayRecordReader is the specialization impl for byte-array columns
@@ -793,17 +796,18 @@ func newByteArrayRecordReader(descr *schema.Column, info LevelInfo, dtype arrow.
 		dt = arrow.BinaryTypes.Binary
 	}
 
-	return &binaryRecordReader{&recordReader{
+	brr := &binaryRecordReader{&recordReader{
 		recordReaderImpl: &byteArrayRecordReader{
-			createPrimitiveRecordReader(descr, mem, bufferPool),
+			*createPrimitiveRecordReader(descr, mem, bufferPool),
 			array.NewBinaryBuilder(mem, dt),
 			nil,
 		},
 		leafInfo:  info,
 		defLevels: memory.NewResizableBuffer(mem),
 		repLevels: memory.NewResizableBuffer(mem),
-		refCount:  1,
 	}}
+	brr.refCount.Add(1)
+	return brr
 }
 
 func (br *byteArrayRecordReader) ReserveValues(extra int64, hasNullable bool) error {
@@ -913,10 +917,10 @@ func newByteArrayDictRecordReader(descr *schema.Column, info LevelInfo, dtype ar
 		dt.ValueType = arrow.BinaryTypes.Binary
 	}
 
-	return &binaryRecordReader{&recordReader{
+	brr := &binaryRecordReader{&recordReader{
 		recordReaderImpl: &byteArrayDictRecordReader{
 			byteArrayRecordReader: byteArrayRecordReader{
-				createPrimitiveRecordReader(descr, mem, bufferPool),
+				*createPrimitiveRecordReader(descr, mem, bufferPool),
 				array.NewDictionaryBuilder(mem, dt),
 				nil,
 			},
@@ -925,8 +929,10 @@ func newByteArrayDictRecordReader(descr *schema.Column, info LevelInfo, dtype ar
 		leafInfo:  info,
 		defLevels: memory.NewResizableBuffer(mem),
 		repLevels: memory.NewResizableBuffer(mem),
-		refCount:  1,
 	}}
+
+	brr.refCount.Add(1)
+	return brr
 }
 
 func (bd *byteArrayDictRecordReader) GetBuilderChunks() []arrow.Array {

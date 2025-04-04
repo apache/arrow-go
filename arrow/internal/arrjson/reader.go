@@ -28,7 +28,7 @@ import (
 )
 
 type Reader struct {
-	refs int64
+	refs atomic.Int64
 
 	schema *arrow.Schema
 	recs   []arrow.Record
@@ -55,27 +55,27 @@ func NewReader(r io.Reader, opts ...Option) (*Reader, error) {
 	schema := schemaFromJSON(raw.Schema, &memo)
 	dictionariesFromJSON(cfg.alloc, raw.Dictionaries, &memo)
 	rr := &Reader{
-		refs:   1,
 		schema: schema,
 		recs:   recordsFromJSON(cfg.alloc, schema, raw.Records, &memo),
 		memo:   &memo,
 	}
+	rr.refs.Add(1)
 	return rr, nil
 }
 
 // Retain increases the reference count by 1.
 // Retain may be called simultaneously from multiple goroutines.
 func (r *Reader) Retain() {
-	atomic.AddInt64(&r.refs, 1)
+	r.refs.Add(1)
 }
 
 // Release decreases the reference count by 1.
 // When the reference count goes to zero, the memory is freed.
 // Release may be called simultaneously from multiple goroutines.
 func (r *Reader) Release() {
-	debug.Assert(atomic.LoadInt64(&r.refs) > 0, "too many releases")
+	debug.Assert(r.refs.Load() > 0, "too many releases")
 
-	if atomic.AddInt64(&r.refs, -1) == 0 {
+	if r.refs.Add(-1) == 0 {
 		for i, rec := range r.recs {
 			if r.recs[i] != nil {
 				rec.Release()
@@ -106,6 +106,4 @@ func (r *Reader) ReadAt(index int) (arrow.Record, error) {
 	return rec, nil
 }
 
-var (
-	_ arrio.Reader = (*Reader)(nil)
-)
+var _ arrio.Reader = (*Reader)(nil)

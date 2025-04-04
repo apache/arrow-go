@@ -40,7 +40,7 @@ type dataMessageReader struct {
 	rdr DataStreamReader
 
 	peeked   *FlightData
-	refCount int64
+	refCount atomic.Int64
 	msg      *ipc.Message
 
 	lastAppMetadata []byte
@@ -78,13 +78,13 @@ func (d *dataMessageReader) Message() (*ipc.Message, error) {
 }
 
 func (d *dataMessageReader) Retain() {
-	atomic.AddInt64(&d.refCount, 1)
+	d.refCount.Add(1)
 }
 
 func (d *dataMessageReader) Release() {
-	debug.Assert(atomic.LoadInt64(&d.refCount) > 0, "too many releases")
+	debug.Assert(d.refCount.Load() > 0, "too many releases")
 
-	if atomic.AddInt64(&d.refCount, -1) == 0 {
+	if d.refCount.Add(-1) == 0 {
 		if d.msg != nil {
 			d.msg.Release()
 			d.msg = nil
@@ -154,7 +154,8 @@ func NewRecordReader(r DataStreamReader, opts ...ipc.Option) (*Reader, error) {
 		return nil, err
 	}
 
-	rdr := &Reader{dmr: &dataMessageReader{rdr: r, refCount: 1}}
+	rdr := &Reader{dmr: &dataMessageReader{rdr: r}}
+	rdr.dmr.refCount.Add(1)
 	rdr.dmr.descr = data.FlightDescriptor
 	if len(data.DataHeader) > 0 {
 		rdr.dmr.peeked = data

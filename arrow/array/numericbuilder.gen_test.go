@@ -230,6 +230,30 @@ func TestInt64Builder_Resize(t *testing.T) {
 	assert.Equal(t, 5, ab.Len())
 }
 
+func TestInt64BuilderUnmarshalJSON(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewInt64Builder(mem)
+	defer bldr.Release()
+
+	jsonstr := `[0, 1, null, 2.3, -11]`
+
+	err := bldr.UnmarshalJSON([]byte(jsonstr))
+	assert.NoError(t, err)
+
+	arr := bldr.NewInt64Array()
+	defer arr.Release()
+
+	assert.NotNil(t, arr)
+
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
+}
+
 func TestUint64StringRoundTrip(t *testing.T) {
 	// 1. create array
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
@@ -430,6 +454,30 @@ func TestUint64Builder_Resize(t *testing.T) {
 
 	ab.Resize(32)
 	assert.Equal(t, 5, ab.Len())
+}
+
+func TestUint64BuilderUnmarshalJSON(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewUint64Builder(mem)
+	defer bldr.Release()
+
+	jsonstr := `[0, 1, null, 2.3, -11]`
+
+	err := bldr.UnmarshalJSON([]byte(jsonstr))
+	assert.NoError(t, err)
+
+	arr := bldr.NewUint64Array()
+	defer arr.Release()
+
+	assert.NotNil(t, arr)
+
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
 func TestFloat64StringRoundTrip(t *testing.T) {
@@ -858,6 +906,30 @@ func TestInt32Builder_Resize(t *testing.T) {
 	assert.Equal(t, 5, ab.Len())
 }
 
+func TestInt32BuilderUnmarshalJSON(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewInt32Builder(mem)
+	defer bldr.Release()
+
+	jsonstr := `[0, 1, null, 2.3, -11]`
+
+	err := bldr.UnmarshalJSON([]byte(jsonstr))
+	assert.NoError(t, err)
+
+	arr := bldr.NewInt32Array()
+	defer arr.Release()
+
+	assert.NotNil(t, arr)
+
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
+}
+
 func TestUint32StringRoundTrip(t *testing.T) {
 	// 1. create array
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
@@ -1058,6 +1130,30 @@ func TestUint32Builder_Resize(t *testing.T) {
 
 	ab.Resize(32)
 	assert.Equal(t, 5, ab.Len())
+}
+
+func TestUint32BuilderUnmarshalJSON(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewUint32Builder(mem)
+	defer bldr.Release()
+
+	jsonstr := `[0, 1, null, 2.3, -11]`
+
+	err := bldr.UnmarshalJSON([]byte(jsonstr))
+	assert.NoError(t, err)
+
+	arr := bldr.NewUint32Array()
+	defer arr.Release()
+
+	assert.NotNil(t, arr)
+
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
 func TestFloat32StringRoundTrip(t *testing.T) {
@@ -1486,6 +1582,30 @@ func TestInt16Builder_Resize(t *testing.T) {
 	assert.Equal(t, 5, ab.Len())
 }
 
+func TestInt16BuilderUnmarshalJSON(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewInt16Builder(mem)
+	defer bldr.Release()
+
+	jsonstr := `[0, 1, null, 2.3, -11]`
+
+	err := bldr.UnmarshalJSON([]byte(jsonstr))
+	assert.NoError(t, err)
+
+	arr := bldr.NewInt16Array()
+	defer arr.Release()
+
+	assert.NotNil(t, arr)
+
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
+}
+
 func TestUint16StringRoundTrip(t *testing.T) {
 	// 1. create array
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
@@ -1686,6 +1806,30 @@ func TestUint16Builder_Resize(t *testing.T) {
 
 	ab.Resize(32)
 	assert.Equal(t, 5, ab.Len())
+}
+
+func TestUint16BuilderUnmarshalJSON(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewUint16Builder(mem)
+	defer bldr.Release()
+
+	jsonstr := `[0, 1, null, 2.3, -11]`
+
+	err := bldr.UnmarshalJSON([]byte(jsonstr))
+	assert.NoError(t, err)
+
+	arr := bldr.NewUint16Array()
+	defer arr.Release()
+
+	assert.NotNil(t, arr)
+
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
 func TestInt8StringRoundTrip(t *testing.T) {
@@ -1890,6 +2034,30 @@ func TestInt8Builder_Resize(t *testing.T) {
 	assert.Equal(t, 5, ab.Len())
 }
 
+func TestInt8BuilderUnmarshalJSON(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewInt8Builder(mem)
+	defer bldr.Release()
+
+	jsonstr := `[0, 1, null, 2.3, -11]`
+
+	err := bldr.UnmarshalJSON([]byte(jsonstr))
+	assert.NoError(t, err)
+
+	arr := bldr.NewInt8Array()
+	defer arr.Release()
+
+	assert.NotNil(t, arr)
+
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
+}
+
 func TestUint8StringRoundTrip(t *testing.T) {
 	// 1. create array
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
@@ -2090,6 +2258,30 @@ func TestUint8Builder_Resize(t *testing.T) {
 
 	ab.Resize(32)
 	assert.Equal(t, 5, ab.Len())
+}
+
+func TestUint8BuilderUnmarshalJSON(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewUint8Builder(mem)
+	defer bldr.Release()
+
+	jsonstr := `[0, 1, null, 2.3, -11]`
+
+	err := bldr.UnmarshalJSON([]byte(jsonstr))
+	assert.NoError(t, err)
+
+	arr := bldr.NewUint8Array()
+	defer arr.Release()
+
+	assert.NotNil(t, arr)
+
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
 func TestTime32StringRoundTrip(t *testing.T) {
@@ -2299,6 +2491,31 @@ func TestTime32Builder_Resize(t *testing.T) {
 	assert.Equal(t, 5, ab.Len())
 }
 
+func TestTime32BuilderUnmarshalJSON(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dtype := &arrow.Time32Type{Unit: arrow.Second}
+	bldr := array.NewTime32Builder(mem, dtype)
+	defer bldr.Release()
+
+	jsonstr := `[0, 1, null, 2.3, -11]`
+
+	err := bldr.UnmarshalJSON([]byte(jsonstr))
+	assert.NoError(t, err)
+
+	arr := bldr.NewTime32Array()
+	defer arr.Release()
+
+	assert.NotNil(t, arr)
+
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
+}
+
 func TestTime64StringRoundTrip(t *testing.T) {
 	// 1. create array
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
@@ -2506,6 +2723,31 @@ func TestTime64Builder_Resize(t *testing.T) {
 	assert.Equal(t, 5, ab.Len())
 }
 
+func TestTime64BuilderUnmarshalJSON(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dtype := &arrow.Time64Type{Unit: arrow.Second}
+	bldr := array.NewTime64Builder(mem, dtype)
+	defer bldr.Release()
+
+	jsonstr := `[0, 1, null, 2.3, -11]`
+
+	err := bldr.UnmarshalJSON([]byte(jsonstr))
+	assert.NoError(t, err)
+
+	arr := bldr.NewTime64Array()
+	defer arr.Release()
+
+	assert.NotNil(t, arr)
+
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
+}
+
 func TestDate32StringRoundTrip(t *testing.T) {
 	// 1. create array
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
@@ -2706,6 +2948,30 @@ func TestDate32Builder_Resize(t *testing.T) {
 
 	ab.Resize(32)
 	assert.Equal(t, 5, ab.Len())
+}
+
+func TestDate32BuilderUnmarshalJSON(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewDate32Builder(mem)
+	defer bldr.Release()
+
+	jsonstr := `[0, 1, null, 2.3, -11]`
+
+	err := bldr.UnmarshalJSON([]byte(jsonstr))
+	assert.NoError(t, err)
+
+	arr := bldr.NewDate32Array()
+	defer arr.Release()
+
+	assert.NotNil(t, arr)
+
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
 func TestDate64StringRoundTrip(t *testing.T) {
@@ -2917,6 +3183,30 @@ func TestDate64Builder_Resize(t *testing.T) {
 	assert.Equal(t, 5, ab.Len())
 }
 
+func TestDate64BuilderUnmarshalJSON(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewDate64Builder(mem)
+	defer bldr.Release()
+
+	jsonstr := `[0, 1, null, 2.3, -11]`
+
+	err := bldr.UnmarshalJSON([]byte(jsonstr))
+	assert.NoError(t, err)
+
+	arr := bldr.NewDate64Array()
+	defer arr.Release()
+
+	assert.NotNil(t, arr)
+
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
+}
+
 func TestDurationStringRoundTrip(t *testing.T) {
 	// 1. create array
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
@@ -3122,4 +3412,29 @@ func TestDurationBuilder_Resize(t *testing.T) {
 
 	ab.Resize(32)
 	assert.Equal(t, 5, ab.Len())
+}
+
+func TestDurationBuilderUnmarshalJSON(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dtype := &arrow.DurationType{Unit: arrow.Second}
+	bldr := array.NewDurationBuilder(mem, dtype)
+	defer bldr.Release()
+
+	jsonstr := `[0, 1, null, 2.3, -11]`
+
+	err := bldr.UnmarshalJSON([]byte(jsonstr))
+	assert.NoError(t, err)
+
+	arr := bldr.NewDurationArray()
+	defer arr.Release()
+
+	assert.NotNil(t, arr)
+
+	assert.Equal(t, int64(0), int64(arr.Value(0)))
+	assert.Equal(t, int64(1), int64(arr.Value(1)))
+	assert.True(t, arr.IsNull(2))
+	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(5), int64(arr.Len()))
 }

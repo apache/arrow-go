@@ -35,7 +35,7 @@ import (
 )
 
 type SqliteTablesSchemaBatchReader struct {
-	refCount int64
+	refCount atomic.Int64
 
 	mem        memory.Allocator
 	ctx        context.Context
@@ -57,24 +57,25 @@ func NewSqliteTablesSchemaBatchReader(ctx context.Context, mem memory.Allocator,
 		return nil, err
 	}
 
-	return &SqliteTablesSchemaBatchReader{
-		refCount:   1,
+	stsbr := &SqliteTablesSchemaBatchReader{
 		ctx:        ctx,
 		rdr:        rdr,
 		stmt:       stmt,
 		mem:        mem,
 		schemaBldr: array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary),
-	}, nil
+	}
+	stsbr.refCount.Add(1)
+	return stsbr, nil
 }
 
 func (s *SqliteTablesSchemaBatchReader) Err() error { return s.err }
 
-func (s *SqliteTablesSchemaBatchReader) Retain() { atomic.AddInt64(&s.refCount, 1) }
+func (s *SqliteTablesSchemaBatchReader) Retain() { s.refCount.Add(1) }
 
 func (s *SqliteTablesSchemaBatchReader) Release() {
-	debug.Assert(atomic.LoadInt64(&s.refCount) > 0, "too many releases")
+	debug.Assert(s.refCount.Load() > 0, "too many releases")
 
-	if atomic.AddInt64(&s.refCount, -1) == 0 {
+	if s.refCount.Add(-1) == 0 {
 		s.rdr.Release()
 		s.stmt.Close()
 		s.schemaBldr.Release()
