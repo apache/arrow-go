@@ -322,6 +322,11 @@ func (f *Reader) RowGroup(i int) *RowGroupReader {
 		fileDecryptor:   f.fileDecryptor,
 		bufferPool:      &f.bufferPool,
 		pageIndexReader: f.pageIndexReader,
+		// don't pre-emptively initialize the row group page index reader
+		// do it on demand, but ensure that it is goroutine safe.
+		rgPageIndexReader: sync.OnceValues(func() (*metadata.RowGroupPageIndexReader, error) {
+			return f.pageIndexReader.RowGroup(i)
+		}),
 	}
 }
 

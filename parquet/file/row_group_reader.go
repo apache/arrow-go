@@ -42,7 +42,7 @@ type RowGroupReader struct {
 	fileDecryptor encryption.FileDecryptor
 
 	pageIndexReader   *metadata.PageIndexReader
-	rgPageIndexReader *metadata.RowGroupPageIndexReader
+	rgPageIndexReader func() (*metadata.RowGroupPageIndexReader, error)
 	bufferPool        *sync.Pool
 }
 
@@ -86,12 +86,9 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 		return nil, err
 	}
 
-	if r.rgPageIndexReader == nil {
-		rgIdx, err := r.pageIndexReader.RowGroup(int(r.rgMetadata.Ordinal()))
-		if err != nil {
-			return nil, err
-		}
-		r.rgPageIndexReader = rgIdx
+	rgIdxRdr, err := r.rgPageIndexReader()
+	if err != nil {
+		return nil, err
 	}
 
 	colStart := col.DataPageOffset()
@@ -128,7 +125,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 			r:                 stream,
 			chunk:             col,
 			colIdx:            i,
-			pgIndexReader:     r.rgPageIndexReader,
+			pgIndexReader:     rgIdxRdr,
 			maxPageHeaderSize: defaultMaxPageHeaderSize,
 			nrows:             col.NumValues(),
 			mem:               r.props.Allocator(),
@@ -157,7 +154,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 			r:                 stream,
 			chunk:             col,
 			colIdx:            i,
-			pgIndexReader:     r.rgPageIndexReader,
+			pgIndexReader:     rgIdxRdr,
 			maxPageHeaderSize: defaultMaxPageHeaderSize,
 			nrows:             col.NumValues(),
 			mem:               r.props.Allocator(),
@@ -181,7 +178,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 		r:                 stream,
 		chunk:             col,
 		colIdx:            i,
-		pgIndexReader:     r.rgPageIndexReader,
+		pgIndexReader:     rgIdxRdr,
 		maxPageHeaderSize: defaultMaxPageHeaderSize,
 		nrows:             col.NumValues(),
 		mem:               r.props.Allocator(),
