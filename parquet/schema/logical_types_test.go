@@ -227,7 +227,7 @@ func TestLogicalTypeProperties(t *testing.T) {
 		{"bson", schema.BSONLogicalType{}, false, true, true},
 		{"uuid", schema.UUIDLogicalType{}, false, true, true},
 		{"float16", schema.Float16LogicalType{}, false, true, true},
-		{"variant", schema.VariantLogicalType{}, false, true, true},
+		{"variant", schema.VariantLogicalType{}, true, true, true},
 		{"nological", schema.NoLogicalType{}, false, false, true},
 		{"unknown", schema.UnknownLogicalType{}, false, false, false},
 	}
