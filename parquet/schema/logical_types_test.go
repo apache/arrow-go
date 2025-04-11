@@ -160,6 +160,7 @@ func TestNewTypeIncompatibility(t *testing.T) {
 		{"uuid", schema.UUIDLogicalType{}, schema.UUIDLogicalType{}},
 		{"float16", schema.Float16LogicalType{}, schema.Float16LogicalType{}},
 		{"null", schema.NullLogicalType{}, schema.NullLogicalType{}},
+		{"variant", schema.VariantLogicalType{}, schema.VariantLogicalType{}},
 		{"not-utc-time_milli", schema.NewTimeLogicalType(false /* adjustedToUTC */, schema.TimeUnitMillis), schema.TimeLogicalType{}},
 		{"not-utc-time-micro", schema.NewTimeLogicalType(false /* adjustedToUTC */, schema.TimeUnitMicros), schema.TimeLogicalType{}},
 		{"not-utc-time-nano", schema.NewTimeLogicalType(false /* adjustedToUTC */, schema.TimeUnitNanos), schema.TimeLogicalType{}},
@@ -226,6 +227,7 @@ func TestLogicalTypeProperties(t *testing.T) {
 		{"bson", schema.BSONLogicalType{}, false, true, true},
 		{"uuid", schema.UUIDLogicalType{}, false, true, true},
 		{"float16", schema.Float16LogicalType{}, false, true, true},
+		{"variant", schema.VariantLogicalType{}, false, true, true},
 		{"nological", schema.NoLogicalType{}, false, false, true},
 		{"unknown", schema.UnknownLogicalType{}, false, false, false},
 	}
@@ -456,6 +458,7 @@ func TestLogicalTypeRepresentation(t *testing.T) {
 		{"bson", schema.BSONLogicalType{}, "BSON", `{"Type": "BSON"}`},
 		{"uuid", schema.UUIDLogicalType{}, "UUID", `{"Type": "UUID"}`},
 		{"float16", schema.Float16LogicalType{}, "Float16", `{"Type": "Float16"}`},
+		{"variant", schema.VariantLogicalType{}, "Variant", `{"Type": "Variant"}`},
 		{"none", schema.NoLogicalType{}, "None", `{"Type": "None"}`},
 	}
 
@@ -502,6 +505,7 @@ func TestLogicalTypeSortOrder(t *testing.T) {
 		{"bson", schema.BSONLogicalType{}, schema.SortUNSIGNED},
 		{"uuid", schema.UUIDLogicalType{}, schema.SortUNSIGNED},
 		{"float16", schema.Float16LogicalType{}, schema.SortSIGNED},
+		{"variant", schema.VariantLogicalType{}, schema.SortUNKNOWN},
 		{"none", schema.NoLogicalType{}, schema.SortUNKNOWN},
 	}
 
