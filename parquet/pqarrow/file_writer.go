@@ -338,3 +338,10 @@ func (fw *FileWriter) WriteColumnData(data arrow.Array) error {
 	defer chunked.Release()
 	return fw.WriteColumnChunked(chunked, 0, int64(data.Len()))
 }
+
+// FileMetadata returns the current state of the FileMetadata that would be written
+// if this file were to be closed. If the file has already been closed, then this
+// will return the FileMetaData which was written to the file.
+func (fw *FileWriter) FileMetadata() (*metadata.FileMetaData, error) {
+	return fw.wr.FileMetadata()
+}

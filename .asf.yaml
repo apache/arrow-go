@@ -29,11 +29,13 @@ github:
     rebase: false
     squash: true
   features:
+    discussions: true
     issues: true
   protected_branches:
     main:
       required_linear_history: true
 notifications:
+  discussions: user@arrow.apache.org
   commits: commits@arrow.apache.org
   issues_status: issues@arrow.apache.org
   issues_comment: github@arrow.apache.org

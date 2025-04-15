@@ -204,7 +204,7 @@ type BinaryArithmeticSuite[T arrow.NumericType] struct {
 	scalarEqualOpts []scalar.EqualOption
 }
 
-func (BinaryArithmeticSuite[T]) DataType() arrow.DataType {
+func (*BinaryArithmeticSuite[T]) DataType() arrow.DataType {
 	return arrow.GetDataType[T]()
 }
 

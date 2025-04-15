@@ -65,7 +65,7 @@ type Interface interface {
 }
 
 type tensorBase struct {
-	refCount int64
+	refCount atomic.Int64
 	dtype    arrow.DataType
 	bw       int64 // bytes width
 	data     arrow.ArrayData
@@ -77,16 +77,16 @@ type tensorBase struct {
 // Retain increases the reference count by 1.
 // Retain may be called simultaneously from multiple goroutines.
 func (tb *tensorBase) Retain() {
-	atomic.AddInt64(&tb.refCount, 1)
+	tb.refCount.Add(1)
 }
 
 // Release decreases the reference count by 1.
 // Release may be called simultaneously from multiple goroutines.
 // When the reference count goes to zero, the memory is freed.
 func (tb *tensorBase) Release() {
-	debug.Assert(atomic.LoadInt64(&tb.refCount) > 0, "too many releases")
+	debug.Assert(tb.refCount.Load() > 0, "too many releases")
 
-	if atomic.AddInt64(&tb.refCount, -1) == 0 {
+	if tb.refCount.Add(-1) == 0 {
 		tb.data.Release()
 		tb.data = nil
 	}
@@ -172,14 +172,14 @@ func New(data arrow.ArrayData, shape, strides []int64, names []string) Interface
 
 func newTensor(dtype arrow.DataType, data arrow.ArrayData, shape, strides []int64, names []string) *tensorBase {
 	tb := tensorBase{
-		refCount: 1,
-		dtype:    dtype,
-		bw:       int64(dtype.(arrow.FixedWidthDataType).BitWidth()) / 8,
-		data:     data,
-		shape:    shape,
-		strides:  strides,
-		names:    names,
+		dtype:   dtype,
+		bw:      int64(dtype.(arrow.FixedWidthDataType).BitWidth()) / 8,
+		data:    data,
+		shape:   shape,
+		strides: strides,
+		names:   names,
 	}
+	tb.refCount.Add(1)
 	tb.data.Retain()
 
 	if len(tb.shape) > 0 && len(tb.strides) == 0 {

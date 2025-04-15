@@ -20,6 +20,7 @@ package compute
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"runtime"
@@ -579,6 +580,10 @@ func (s *scalarExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 }
 
 func (s *scalarExecutor) executeSpans(data chan<- Datum) (err error) {
+	defer func() {
+		err = errors.Join(err, s.kernel.Cleanup())
+	}()
+
 	var (
 		input  exec.ExecSpan
 		output exec.ExecResult
@@ -645,7 +650,7 @@ func (s *scalarExecutor) executeSingleSpan(input *exec.ExecSpan, out *exec.ExecR
 	return s.kernel.Exec(s.ctx, input, out)
 }
 
-func (s *scalarExecutor) setupPrealloc(totalLen int64, args []Datum) error {
+func (s *scalarExecutor) setupPrealloc(_ int64, args []Datum) error {
 	s.numOutBuf = len(s.outType.Layout().Buffers)
 	outTypeID := s.outType.ID()
 	// default to no validity pre-allocation for the following cases:

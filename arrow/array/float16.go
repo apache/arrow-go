@@ -33,7 +33,7 @@ type Float16 struct {
 
 func NewFloat16Data(data arrow.ArrayData) *Float16 {
 	a := &Float16{}
-	a.refCount = 1
+	a.refCount.Add(1)
 	a.setData(data.(*Data))
 	return a
 }
@@ -104,18 +104,6 @@ func (a *Float16) MarshalJSON() ([]byte, error) {
 		}
 	}
 	return json.Marshal(vals)
-}
-
-func arrayEqualFloat16(left, right *Float16) bool {
-	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
-			continue
-		}
-		if left.Value(i) != right.Value(i) {
-			return false
-		}
-	}
-	return true
 }
 
 var (

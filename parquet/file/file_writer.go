@@ -40,6 +40,7 @@ type Writer struct {
 	fileEncryptor    encryption.FileEncryptor
 	rowGroupWriter   *rowGroupWriter
 	pageIndexBuilder *metadata.PageIndexBuilder
+	bloomFilters     *metadata.FileBloomFilterBuilder
 
 	// The Schema of this writer
 	Schema *schema.Schema
@@ -135,6 +136,7 @@ func (fw *Writer) appendRowGroup(buffered bool) *rowGroupWriter {
 
 	fw.rowGroupWriter = newRowGroupWriter(fw.sink, rgMeta, int16(fw.rowGroups)-1,
 		fw.props, buffered, fw.fileEncryptor, fw.pageIndexBuilder)
+	fw.bloomFilters.AppendRowGroup(rgMeta, fw.rowGroupWriter.bloomFilters)
 	return fw.rowGroupWriter
 }
 
@@ -158,10 +160,17 @@ func (fw *Writer) startFile() {
 		}
 
 		fw.fileEncryptor = encryption.NewFileEncryptor(encryptionProps, fw.props.Allocator())
+		fw.metadata.SetFileEncryptor(fw.fileEncryptor)
 		if encryptionProps.EncryptedFooter() {
 			magic = magicEBytes
 		}
 	}
+
+	fw.bloomFilters = &metadata.FileBloomFilterBuilder{
+		Schema:    fw.Schema,
+		Encryptor: fw.fileEncryptor,
+	}
+
 	n, err := fw.sink.Write(magic)
 	if n != 4 || err != nil {
 		panic("failed to write magic number")
@@ -213,9 +222,15 @@ func (fw *Writer) Close() (err error) {
 		}()
 
 		err = fw.FlushWithFooter()
-		fw.metadata.Clear()
 	}
 	return nil
+}
+
+// FileMetadata returns the current state of the FileMetadata that would be written
+// if this file were to be closed. If the file has already been closed, then this
+// will return the FileMetaData which was written to the file.
+func (fw *Writer) FileMetadata() (*metadata.FileMetaData, error) {
+	return fw.metadata.Snapshot()
 }
 
 // FlushWithFooter closes any open row group writer and writes the file footer, leaving
@@ -229,6 +244,9 @@ func (fw *Writer) FlushWithFooter() error {
 			fw.rowGroupWriter.Close()
 		}
 		fw.rowGroupWriter = nil
+		if err := fw.bloomFilters.WriteTo(fw.sink); err != nil {
+			return err
+		}
 
 		fw.writePageIndex()
 

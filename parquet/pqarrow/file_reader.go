@@ -389,7 +389,6 @@ func (fr *FileReader) ReadRowGroups(ctx context.Context, indices, rowGroups []in
 	// if the context is in error, but we haven't set an error yet, then it means that the parent context
 	// was cancelled. In this case, we should exit early as some columns may not have been read yet.
 	err = errors.Join(err, ctx.Err())
-
 	if err != nil {
 		// if we encountered an error, consume any waiting data on the channel
 		// so the goroutines don't leak and so memory can get cleaned up. we already
@@ -491,14 +490,15 @@ func (fr *FileReader) GetRecordReader(ctx context.Context, colIndices, rowGroups
 	if fr.Props.BatchSize <= 0 {
 		batchSize = nrows
 	}
-	return &recordReader{
+	rr := &recordReader{
 		numRows:      nrows,
 		batchSize:    batchSize,
 		parallel:     fr.Props.Parallel,
 		sc:           sc,
 		fieldReaders: readers,
-		refCount:     1,
-	}, nil
+	}
+	rr.refCount.Add(1)
+	return rr, nil
 }
 
 func (fr *FileReader) getReader(ctx context.Context, field *SchemaField, arrowField arrow.Field) (out *ColumnReader, err error) {
@@ -558,8 +558,10 @@ func (fr *FileReader) getReader(ctx context.Context, field *SchemaField, arrowFi
 		if len(childFields) == 0 {
 			return nil, nil
 		}
-		filtered := arrow.Field{Name: arrowField.Name, Nullable: arrowField.Nullable,
-			Metadata: arrowField.Metadata, Type: arrow.StructOf(childFields...)}
+		filtered := arrow.Field{
+			Name: arrowField.Name, Nullable: arrowField.Nullable,
+			Metadata: arrowField.Metadata, Type: arrow.StructOf(childFields...),
+		}
 		out = newStructReader(&rctx, &filtered, field.LevelInfo, childReaders, fr.Props)
 	case arrow.LIST, arrow.FIXED_SIZE_LIST, arrow.MAP:
 		child := field.Children[0]
@@ -682,7 +684,7 @@ type recordReader struct {
 	cur          arrow.Record
 	err          error
 
-	refCount int64
+	refCount atomic.Int64
 }
 
 func (r *recordReader) SeekToRow(row int64) error {
@@ -705,11 +707,11 @@ func (r *recordReader) SeekToRow(row int64) error {
 }
 
 func (r *recordReader) Retain() {
-	atomic.AddInt64(&r.refCount, 1)
+	r.refCount.Add(1)
 }
 
 func (r *recordReader) Release() {
-	if atomic.AddInt64(&r.refCount, -1) == 0 {
+	if r.refCount.Add(-1) == 0 {
 		if r.cur != nil {
 			r.cur.Release()
 			r.cur = nil
