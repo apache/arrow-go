@@ -138,3 +138,23 @@ func TestCompressReaderWriter(t *testing.T) {
 		})
 	}
 }
+
+func TestMarshalText(t *testing.T) {
+	compression := compress.Codecs.Zstd
+	data, err := compression.MarshalText()
+	assert.NoError(t, err)
+	assert.Equal(t, "ZSTD", string(data))
+}
+
+func TestUnmarshalText(t *testing.T) {
+	var compression compress.Compression
+	err := compression.UnmarshalText([]byte("ZSTD"))
+	assert.NoError(t, err)
+	assert.Equal(t, compress.Codecs.Zstd, compression)
+}
+
+func TestUnmarshalTextError(t *testing.T) {
+	var compression compress.Compression
+	err := compression.UnmarshalText([]byte("NO SUCH CODEC"))
+	assert.EqualError(t, err, "not a valid CompressionCodec string")
+}
