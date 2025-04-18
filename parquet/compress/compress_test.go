@@ -139,18 +139,39 @@ func TestCompressReaderWriter(t *testing.T) {
 	}
 }
 
+var marshalTests = []struct {
+	text  string
+	codec compress.Compression
+}{
+	{"UNCOMPRESSED", compress.Codecs.Uncompressed},
+	{"SNAPPY", compress.Codecs.Snappy},
+	{"GZIP", compress.Codecs.Gzip},
+	{"LZO", compress.Codecs.Lzo},
+	{"BROTLI", compress.Codecs.Brotli},
+	{"LZ4", compress.Codecs.Lz4},
+	{"ZSTD", compress.Codecs.Zstd},
+	{"LZ4_RAW", compress.Codecs.Lz4Raw},
+}
+
 func TestMarshalText(t *testing.T) {
-	compression := compress.Codecs.Zstd
-	data, err := compression.MarshalText()
-	assert.NoError(t, err)
-	assert.Equal(t, "ZSTD", string(data))
+	for _, tt := range marshalTests {
+		t.Run(tt.text, func(t *testing.T) {
+			data, err := tt.codec.MarshalText()
+			assert.NoError(t, err)
+			assert.Equal(t, tt.text, string(data))
+		})
+	}
 }
 
 func TestUnmarshalText(t *testing.T) {
-	var compression compress.Compression
-	err := compression.UnmarshalText([]byte("ZSTD"))
-	assert.NoError(t, err)
-	assert.Equal(t, compress.Codecs.Zstd, compression)
+	for _, tt := range marshalTests {
+		t.Run(tt.text, func(t *testing.T) {
+			var compression compress.Compression
+			err := compression.UnmarshalText([]byte(tt.text))
+			assert.NoError(t, err)
+			assert.Equal(t, tt.codec, compression)
+		})
+	}
 }
 
 func TestUnmarshalTextError(t *testing.T) {
