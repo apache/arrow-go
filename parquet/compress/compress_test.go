@@ -138,3 +138,44 @@ func TestCompressReaderWriter(t *testing.T) {
 		})
 	}
 }
+
+var marshalTests = []struct {
+	text  string
+	codec compress.Compression
+}{
+	{"UNCOMPRESSED", compress.Codecs.Uncompressed},
+	{"SNAPPY", compress.Codecs.Snappy},
+	{"GZIP", compress.Codecs.Gzip},
+	{"LZO", compress.Codecs.Lzo},
+	{"BROTLI", compress.Codecs.Brotli},
+	{"LZ4", compress.Codecs.Lz4},
+	{"ZSTD", compress.Codecs.Zstd},
+	{"LZ4_RAW", compress.Codecs.Lz4Raw},
+}
+
+func TestMarshalText(t *testing.T) {
+	for _, tt := range marshalTests {
+		t.Run(tt.text, func(t *testing.T) {
+			data, err := tt.codec.MarshalText()
+			assert.NoError(t, err)
+			assert.Equal(t, tt.text, string(data))
+		})
+	}
+}
+
+func TestUnmarshalText(t *testing.T) {
+	for _, tt := range marshalTests {
+		t.Run(tt.text, func(t *testing.T) {
+			var compression compress.Compression
+			err := compression.UnmarshalText([]byte(tt.text))
+			assert.NoError(t, err)
+			assert.Equal(t, tt.codec, compression)
+		})
+	}
+}
+
+func TestUnmarshalTextError(t *testing.T) {
+	var compression compress.Compression
+	err := compression.UnmarshalText([]byte("NO SUCH CODEC"))
+	assert.EqualError(t, err, "not a valid CompressionCodec string")
+}

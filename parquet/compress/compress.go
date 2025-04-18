@@ -33,6 +33,14 @@ func (c Compression) String() string {
 	return parquet.CompressionCodec(c).String()
 }
 
+func (c Compression) MarshalText() ([]byte, error) {
+	return parquet.CompressionCodec(c).MarshalText()
+}
+
+func (c *Compression) UnmarshalText(text []byte) error {
+	return (*parquet.CompressionCodec)(c).UnmarshalText(text)
+}
+
 // DefaultCompressionLevel will use flate.DefaultCompression since many of the compression libraries
 // use that to denote "use the default".
 const DefaultCompressionLevel = flate.DefaultCompression
