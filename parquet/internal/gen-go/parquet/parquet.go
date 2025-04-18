@@ -279,6 +279,70 @@ func (p *FieldRepetitionType) Value() (driver.Value, error) {
 	return int64(*p), nil
 }
 
+//Edge interpolation algorithm for Geography logical type
+type EdgeInterpolationAlgorithm int64
+const (
+	EdgeInterpolationAlgorithm_SPHERICAL EdgeInterpolationAlgorithm = 0
+	EdgeInterpolationAlgorithm_VINCENTY EdgeInterpolationAlgorithm = 1
+	EdgeInterpolationAlgorithm_THOMAS EdgeInterpolationAlgorithm = 2
+	EdgeInterpolationAlgorithm_ANDOYER EdgeInterpolationAlgorithm = 3
+	EdgeInterpolationAlgorithm_KARNEY EdgeInterpolationAlgorithm = 4
+)
+
+func (p EdgeInterpolationAlgorithm) String() string {
+	switch p {
+	case EdgeInterpolationAlgorithm_SPHERICAL: return "SPHERICAL"
+	case EdgeInterpolationAlgorithm_VINCENTY: return "VINCENTY"
+	case EdgeInterpolationAlgorithm_THOMAS: return "THOMAS"
+	case EdgeInterpolationAlgorithm_ANDOYER: return "ANDOYER"
+	case EdgeInterpolationAlgorithm_KARNEY: return "KARNEY"
+	}
+	return "<UNSET>"
+}
+
+func EdgeInterpolationAlgorithmFromString(s string) (EdgeInterpolationAlgorithm, error) {
+	switch s {
+	case "SPHERICAL": return EdgeInterpolationAlgorithm_SPHERICAL, nil
+	case "VINCENTY": return EdgeInterpolationAlgorithm_VINCENTY, nil
+	case "THOMAS": return EdgeInterpolationAlgorithm_THOMAS, nil
+	case "ANDOYER": return EdgeInterpolationAlgorithm_ANDOYER, nil
+	case "KARNEY": return EdgeInterpolationAlgorithm_KARNEY, nil
+	}
+	return EdgeInterpolationAlgorithm(0), fmt.Errorf("not a valid EdgeInterpolationAlgorithm string")
+}
+
+
+func EdgeInterpolationAlgorithmPtr(v EdgeInterpolationAlgorithm) *EdgeInterpolationAlgorithm { return &v }
+
+func (p EdgeInterpolationAlgorithm) MarshalText() ([]byte, error) {
+	return []byte(p.String()), nil
+}
+
+func (p *EdgeInterpolationAlgorithm) UnmarshalText(text []byte) error {
+	q, err := EdgeInterpolationAlgorithmFromString(string(text))
+	if err != nil {
+		return err
+	}
+	*p = q
+	return nil
+}
+
+func (p *EdgeInterpolationAlgorithm) Scan(value interface{}) error {
+	v, ok := value.(int64)
+	if !ok {
+		return errors.New("Scan value is not int64")
+	}
+	*p = EdgeInterpolationAlgorithm(v)
+	return nil
+}
+
+func (p *EdgeInterpolationAlgorithm) Value() (driver.Value, error) {
+	if p == nil {
+		return nil, nil
+	}
+	return int64(*p), nil
+}
+
 //Encodings supported by Parquet.  Not all encodings are valid for all types.  These
 //enums are also used to specify the encoding of definition and repetition levels.
 //See the accompanying doc for the details of the more complicated encodings.
@@ -875,6 +939,721 @@ func (p *SizeStatistics) LogValue() slog.Value {
 var _ slog.LogValuer = (*SizeStatistics)(nil)
 
 func (p *SizeStatistics) Validate() error {
+	return nil
+}
+
+// Bounding box for GEOMETRY or GEOGRAPHY type in the representation of min/max
+// value pair of coordinates from each axis.
+// 
+// Attributes:
+//  - Xmin
+//  - Xmax
+//  - Ymin
+//  - Ymax
+//  - Zmin
+//  - Zmax
+//  - Mmin
+//  - Mmax
+// 
+type BoundingBox struct {
+	Xmin float64 `thrift:"xmin,1,required" db:"xmin" json:"xmin"`
+	Xmax float64 `thrift:"xmax,2,required" db:"xmax" json:"xmax"`
+	Ymin float64 `thrift:"ymin,3,required" db:"ymin" json:"ymin"`
+	Ymax float64 `thrift:"ymax,4,required" db:"ymax" json:"ymax"`
+	Zmin *float64 `thrift:"zmin,5" db:"zmin" json:"zmin,omitempty"`
+	Zmax *float64 `thrift:"zmax,6" db:"zmax" json:"zmax,omitempty"`
+	Mmin *float64 `thrift:"mmin,7" db:"mmin" json:"mmin,omitempty"`
+	Mmax *float64 `thrift:"mmax,8" db:"mmax" json:"mmax,omitempty"`
+}
+
+func NewBoundingBox() *BoundingBox {
+	return &BoundingBox{}
+}
+
+
+
+func (p *BoundingBox) GetXmin() float64 {
+	return p.Xmin
+}
+
+
+
+func (p *BoundingBox) GetXmax() float64 {
+	return p.Xmax
+}
+
+
+
+func (p *BoundingBox) GetYmin() float64 {
+	return p.Ymin
+}
+
+
+
+func (p *BoundingBox) GetYmax() float64 {
+	return p.Ymax
+}
+
+var BoundingBox_Zmin_DEFAULT float64
+
+func (p *BoundingBox) GetZmin() float64 {
+	if !p.IsSetZmin() {
+		return BoundingBox_Zmin_DEFAULT
+	}
+	return *p.Zmin
+}
+
+var BoundingBox_Zmax_DEFAULT float64
+
+func (p *BoundingBox) GetZmax() float64 {
+	if !p.IsSetZmax() {
+		return BoundingBox_Zmax_DEFAULT
+	}
+	return *p.Zmax
+}
+
+var BoundingBox_Mmin_DEFAULT float64
+
+func (p *BoundingBox) GetMmin() float64 {
+	if !p.IsSetMmin() {
+		return BoundingBox_Mmin_DEFAULT
+	}
+	return *p.Mmin
+}
+
+var BoundingBox_Mmax_DEFAULT float64
+
+func (p *BoundingBox) GetMmax() float64 {
+	if !p.IsSetMmax() {
+		return BoundingBox_Mmax_DEFAULT
+	}
+	return *p.Mmax
+}
+
+func (p *BoundingBox) IsSetZmin() bool {
+	return p.Zmin != nil
+}
+
+func (p *BoundingBox) IsSetZmax() bool {
+	return p.Zmax != nil
+}
+
+func (p *BoundingBox) IsSetMmin() bool {
+	return p.Mmin != nil
+}
+
+func (p *BoundingBox) IsSetMmax() bool {
+	return p.Mmax != nil
+}
+
+func (p *BoundingBox) Read(ctx context.Context, iprot thrift.TProtocol) error {
+	if _, err := iprot.ReadStructBegin(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
+	}
+
+	var issetXmin bool = false;
+	var issetXmax bool = false;
+	var issetYmin bool = false;
+	var issetYmax bool = false;
+
+	for {
+		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
+		if err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T field %d read error: ", p, fieldId), err)
+		}
+		if fieldTypeId == thrift.STOP {
+			break
+		}
+		switch fieldId {
+		case 1:
+			if fieldTypeId == thrift.DOUBLE {
+				if err := p.ReadField1(ctx, iprot); err != nil {
+					return err
+				}
+				issetXmin = true
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
+		case 2:
+			if fieldTypeId == thrift.DOUBLE {
+				if err := p.ReadField2(ctx, iprot); err != nil {
+					return err
+				}
+				issetXmax = true
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
+		case 3:
+			if fieldTypeId == thrift.DOUBLE {
+				if err := p.ReadField3(ctx, iprot); err != nil {
+					return err
+				}
+				issetYmin = true
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
+		case 4:
+			if fieldTypeId == thrift.DOUBLE {
+				if err := p.ReadField4(ctx, iprot); err != nil {
+					return err
+				}
+				issetYmax = true
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
+		case 5:
+			if fieldTypeId == thrift.DOUBLE {
+				if err := p.ReadField5(ctx, iprot); err != nil {
+					return err
+				}
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
+		case 6:
+			if fieldTypeId == thrift.DOUBLE {
+				if err := p.ReadField6(ctx, iprot); err != nil {
+					return err
+				}
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
+		case 7:
+			if fieldTypeId == thrift.DOUBLE {
+				if err := p.ReadField7(ctx, iprot); err != nil {
+					return err
+				}
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
+		case 8:
+			if fieldTypeId == thrift.DOUBLE {
+				if err := p.ReadField8(ctx, iprot); err != nil {
+					return err
+				}
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
+		default:
+			if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+				return err
+			}
+		}
+		if err := iprot.ReadFieldEnd(ctx); err != nil {
+			return err
+		}
+	}
+	if err := iprot.ReadStructEnd(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
+	}
+	if !issetXmin{
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Xmin is not set"));
+	}
+	if !issetXmax{
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Xmax is not set"));
+	}
+	if !issetYmin{
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Ymin is not set"));
+	}
+	if !issetYmax{
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field Ymax is not set"));
+	}
+	return nil
+}
+
+func (p *BoundingBox) ReadField1(ctx context.Context, iprot thrift.TProtocol) error {
+	if v, err := iprot.ReadDouble(ctx); err != nil {
+		return thrift.PrependError("error reading field 1: ", err)
+	} else {
+		p.Xmin = v
+	}
+	return nil
+}
+
+func (p *BoundingBox) ReadField2(ctx context.Context, iprot thrift.TProtocol) error {
+	if v, err := iprot.ReadDouble(ctx); err != nil {
+		return thrift.PrependError("error reading field 2: ", err)
+	} else {
+		p.Xmax = v
+	}
+	return nil
+}
+
+func (p *BoundingBox) ReadField3(ctx context.Context, iprot thrift.TProtocol) error {
+	if v, err := iprot.ReadDouble(ctx); err != nil {
+		return thrift.PrependError("error reading field 3: ", err)
+	} else {
+		p.Ymin = v
+	}
+	return nil
+}
+
+func (p *BoundingBox) ReadField4(ctx context.Context, iprot thrift.TProtocol) error {
+	if v, err := iprot.ReadDouble(ctx); err != nil {
+		return thrift.PrependError("error reading field 4: ", err)
+	} else {
+		p.Ymax = v
+	}
+	return nil
+}
+
+func (p *BoundingBox) ReadField5(ctx context.Context, iprot thrift.TProtocol) error {
+	if v, err := iprot.ReadDouble(ctx); err != nil {
+		return thrift.PrependError("error reading field 5: ", err)
+	} else {
+		p.Zmin = &v
+	}
+	return nil
+}
+
+func (p *BoundingBox) ReadField6(ctx context.Context, iprot thrift.TProtocol) error {
+	if v, err := iprot.ReadDouble(ctx); err != nil {
+		return thrift.PrependError("error reading field 6: ", err)
+	} else {
+		p.Zmax = &v
+	}
+	return nil
+}
+
+func (p *BoundingBox) ReadField7(ctx context.Context, iprot thrift.TProtocol) error {
+	if v, err := iprot.ReadDouble(ctx); err != nil {
+		return thrift.PrependError("error reading field 7: ", err)
+	} else {
+		p.Mmin = &v
+	}
+	return nil
+}
+
+func (p *BoundingBox) ReadField8(ctx context.Context, iprot thrift.TProtocol) error {
+	if v, err := iprot.ReadDouble(ctx); err != nil {
+		return thrift.PrependError("error reading field 8: ", err)
+	} else {
+		p.Mmax = &v
+	}
+	return nil
+}
+
+func (p *BoundingBox) Write(ctx context.Context, oprot thrift.TProtocol) error {
+	if err := oprot.WriteStructBegin(ctx, "BoundingBox"); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
+	}
+	if p != nil {
+		if err := p.writeField1(ctx, oprot); err != nil { return err }
+		if err := p.writeField2(ctx, oprot); err != nil { return err }
+		if err := p.writeField3(ctx, oprot); err != nil { return err }
+		if err := p.writeField4(ctx, oprot); err != nil { return err }
+		if err := p.writeField5(ctx, oprot); err != nil { return err }
+		if err := p.writeField6(ctx, oprot); err != nil { return err }
+		if err := p.writeField7(ctx, oprot); err != nil { return err }
+		if err := p.writeField8(ctx, oprot); err != nil { return err }
+	}
+	if err := oprot.WriteFieldStop(ctx); err != nil {
+		return thrift.PrependError("write field stop error: ", err)
+	}
+	if err := oprot.WriteStructEnd(ctx); err != nil {
+		return thrift.PrependError("write struct stop error: ", err)
+	}
+	return nil
+}
+
+func (p *BoundingBox) writeField1(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if err := oprot.WriteFieldBegin(ctx, "xmin", thrift.DOUBLE, 1); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write field begin error 1:xmin: ", p), err)
+	}
+	if err := oprot.WriteDouble(ctx, float64(p.Xmin)); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T.xmin (1) field write error: ", p), err)
+	}
+	if err := oprot.WriteFieldEnd(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write field end error 1:xmin: ", p), err)
+	}
+	return err
+}
+
+func (p *BoundingBox) writeField2(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if err := oprot.WriteFieldBegin(ctx, "xmax", thrift.DOUBLE, 2); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write field begin error 2:xmax: ", p), err)
+	}
+	if err := oprot.WriteDouble(ctx, float64(p.Xmax)); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T.xmax (2) field write error: ", p), err)
+	}
+	if err := oprot.WriteFieldEnd(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write field end error 2:xmax: ", p), err)
+	}
+	return err
+}
+
+func (p *BoundingBox) writeField3(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if err := oprot.WriteFieldBegin(ctx, "ymin", thrift.DOUBLE, 3); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write field begin error 3:ymin: ", p), err)
+	}
+	if err := oprot.WriteDouble(ctx, float64(p.Ymin)); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T.ymin (3) field write error: ", p), err)
+	}
+	if err := oprot.WriteFieldEnd(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write field end error 3:ymin: ", p), err)
+	}
+	return err
+}
+
+func (p *BoundingBox) writeField4(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if err := oprot.WriteFieldBegin(ctx, "ymax", thrift.DOUBLE, 4); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write field begin error 4:ymax: ", p), err)
+	}
+	if err := oprot.WriteDouble(ctx, float64(p.Ymax)); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T.ymax (4) field write error: ", p), err)
+	}
+	if err := oprot.WriteFieldEnd(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write field end error 4:ymax: ", p), err)
+	}
+	return err
+}
+
+func (p *BoundingBox) writeField5(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if p.IsSetZmin() {
+		if err := oprot.WriteFieldBegin(ctx, "zmin", thrift.DOUBLE, 5); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 5:zmin: ", p), err)
+		}
+		if err := oprot.WriteDouble(ctx, float64(*p.Zmin)); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T.zmin (5) field write error: ", p), err)
+		}
+		if err := oprot.WriteFieldEnd(ctx); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 5:zmin: ", p), err)
+		}
+	}
+	return err
+}
+
+func (p *BoundingBox) writeField6(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if p.IsSetZmax() {
+		if err := oprot.WriteFieldBegin(ctx, "zmax", thrift.DOUBLE, 6); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 6:zmax: ", p), err)
+		}
+		if err := oprot.WriteDouble(ctx, float64(*p.Zmax)); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T.zmax (6) field write error: ", p), err)
+		}
+		if err := oprot.WriteFieldEnd(ctx); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 6:zmax: ", p), err)
+		}
+	}
+	return err
+}
+
+func (p *BoundingBox) writeField7(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if p.IsSetMmin() {
+		if err := oprot.WriteFieldBegin(ctx, "mmin", thrift.DOUBLE, 7); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 7:mmin: ", p), err)
+		}
+		if err := oprot.WriteDouble(ctx, float64(*p.Mmin)); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T.mmin (7) field write error: ", p), err)
+		}
+		if err := oprot.WriteFieldEnd(ctx); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 7:mmin: ", p), err)
+		}
+	}
+	return err
+}
+
+func (p *BoundingBox) writeField8(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if p.IsSetMmax() {
+		if err := oprot.WriteFieldBegin(ctx, "mmax", thrift.DOUBLE, 8); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 8:mmax: ", p), err)
+		}
+		if err := oprot.WriteDouble(ctx, float64(*p.Mmax)); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T.mmax (8) field write error: ", p), err)
+		}
+		if err := oprot.WriteFieldEnd(ctx); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 8:mmax: ", p), err)
+		}
+	}
+	return err
+}
+
+func (p *BoundingBox) Equals(other *BoundingBox) bool {
+	if p == other {
+		return true
+	} else if p == nil || other == nil {
+		return false
+	}
+	if p.Xmin != other.Xmin { return false }
+	if p.Xmax != other.Xmax { return false }
+	if p.Ymin != other.Ymin { return false }
+	if p.Ymax != other.Ymax { return false }
+	if p.Zmin != other.Zmin {
+		if p.Zmin == nil || other.Zmin == nil {
+			return false
+		}
+		if (*p.Zmin) != (*other.Zmin) { return false }
+	}
+	if p.Zmax != other.Zmax {
+		if p.Zmax == nil || other.Zmax == nil {
+			return false
+		}
+		if (*p.Zmax) != (*other.Zmax) { return false }
+	}
+	if p.Mmin != other.Mmin {
+		if p.Mmin == nil || other.Mmin == nil {
+			return false
+		}
+		if (*p.Mmin) != (*other.Mmin) { return false }
+	}
+	if p.Mmax != other.Mmax {
+		if p.Mmax == nil || other.Mmax == nil {
+			return false
+		}
+		if (*p.Mmax) != (*other.Mmax) { return false }
+	}
+	return true
+}
+
+func (p *BoundingBox) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("BoundingBox(%+v)", *p)
+}
+
+func (p *BoundingBox) LogValue() slog.Value {
+	if p == nil {
+		return slog.AnyValue(nil)
+	}
+	v := thrift.SlogTStructWrapper{
+		Type: "*parquet.BoundingBox",
+		Value: p,
+	}
+	return slog.AnyValue(v)
+}
+
+var _ slog.LogValuer = (*BoundingBox)(nil)
+
+func (p *BoundingBox) Validate() error {
+	return nil
+}
+
+// Statistics specific to Geometry and Geography logical types
+// 
+// Attributes:
+//  - Bbox: A bounding box of geospatial instances
+//  - GeospatialTypes: Geospatial type codes of all instances, or an empty list if not known
+// 
+type GeospatialStatistics struct {
+	Bbox *BoundingBox `thrift:"bbox,1" db:"bbox" json:"bbox,omitempty"`
+	GeospatialTypes []int32 `thrift:"geospatial_types,2" db:"geospatial_types" json:"geospatial_types,omitempty"`
+}
+
+func NewGeospatialStatistics() *GeospatialStatistics {
+	return &GeospatialStatistics{}
+}
+
+var GeospatialStatistics_Bbox_DEFAULT *BoundingBox
+
+func (p *GeospatialStatistics) GetBbox() *BoundingBox {
+	if !p.IsSetBbox() {
+		return GeospatialStatistics_Bbox_DEFAULT
+	}
+	return p.Bbox
+}
+
+var GeospatialStatistics_GeospatialTypes_DEFAULT []int32
+
+
+func (p *GeospatialStatistics) GetGeospatialTypes() []int32 {
+	return p.GeospatialTypes
+}
+
+func (p *GeospatialStatistics) IsSetBbox() bool {
+	return p.Bbox != nil
+}
+
+func (p *GeospatialStatistics) IsSetGeospatialTypes() bool {
+	return p.GeospatialTypes != nil
+}
+
+func (p *GeospatialStatistics) Read(ctx context.Context, iprot thrift.TProtocol) error {
+	if _, err := iprot.ReadStructBegin(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
+	}
+
+
+	for {
+		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
+		if err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T field %d read error: ", p, fieldId), err)
+		}
+		if fieldTypeId == thrift.STOP {
+			break
+		}
+		switch fieldId {
+		case 1:
+			if fieldTypeId == thrift.STRUCT {
+				if err := p.ReadField1(ctx, iprot); err != nil {
+					return err
+				}
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
+		case 2:
+			if fieldTypeId == thrift.LIST {
+				if err := p.ReadField2(ctx, iprot); err != nil {
+					return err
+				}
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
+		default:
+			if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+				return err
+			}
+		}
+		if err := iprot.ReadFieldEnd(ctx); err != nil {
+			return err
+		}
+	}
+	if err := iprot.ReadStructEnd(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
+	}
+	return nil
+}
+
+func (p *GeospatialStatistics) ReadField1(ctx context.Context, iprot thrift.TProtocol) error {
+	p.Bbox = &BoundingBox{}
+	if err := p.Bbox.Read(ctx, iprot); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", p.Bbox), err)
+	}
+	return nil
+}
+
+func (p *GeospatialStatistics) ReadField2(ctx context.Context, iprot thrift.TProtocol) error {
+	_, size, err := iprot.ReadListBegin(ctx)
+	if err != nil {
+		return thrift.PrependError("error reading list begin: ", err)
+	}
+	tSlice := make([]int32, 0, size)
+	p.GeospatialTypes = tSlice
+	for i := 0; i < size; i++ {
+		var _elem4 int32
+		if v, err := iprot.ReadI32(ctx); err != nil {
+			return thrift.PrependError("error reading field 0: ", err)
+		} else {
+			_elem4 = v
+		}
+		p.GeospatialTypes = append(p.GeospatialTypes, _elem4)
+	}
+	if err := iprot.ReadListEnd(ctx); err != nil {
+		return thrift.PrependError("error reading list end: ", err)
+	}
+	return nil
+}
+
+func (p *GeospatialStatistics) Write(ctx context.Context, oprot thrift.TProtocol) error {
+	if err := oprot.WriteStructBegin(ctx, "GeospatialStatistics"); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
+	}
+	if p != nil {
+		if err := p.writeField1(ctx, oprot); err != nil { return err }
+		if err := p.writeField2(ctx, oprot); err != nil { return err }
+	}
+	if err := oprot.WriteFieldStop(ctx); err != nil {
+		return thrift.PrependError("write field stop error: ", err)
+	}
+	if err := oprot.WriteStructEnd(ctx); err != nil {
+		return thrift.PrependError("write struct stop error: ", err)
+	}
+	return nil
+}
+
+func (p *GeospatialStatistics) writeField1(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if p.IsSetBbox() {
+		if err := oprot.WriteFieldBegin(ctx, "bbox", thrift.STRUCT, 1); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 1:bbox: ", p), err)
+		}
+		if err := p.Bbox.Write(ctx, oprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error writing struct: ", p.Bbox), err)
+		}
+		if err := oprot.WriteFieldEnd(ctx); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 1:bbox: ", p), err)
+		}
+	}
+	return err
+}
+
+func (p *GeospatialStatistics) writeField2(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if p.IsSetGeospatialTypes() {
+		if err := oprot.WriteFieldBegin(ctx, "geospatial_types", thrift.LIST, 2); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 2:geospatial_types: ", p), err)
+		}
+		if err := oprot.WriteListBegin(ctx, thrift.I32, len(p.GeospatialTypes)); err != nil {
+			return thrift.PrependError("error writing list begin: ", err)
+		}
+		for _, v := range p.GeospatialTypes {
+			if err := oprot.WriteI32(ctx, int32(v)); err != nil {
+				return thrift.PrependError(fmt.Sprintf("%T. (0) field write error: ", p), err)
+			}
+		}
+		if err := oprot.WriteListEnd(ctx); err != nil {
+			return thrift.PrependError("error writing list end: ", err)
+		}
+		if err := oprot.WriteFieldEnd(ctx); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 2:geospatial_types: ", p), err)
+		}
+	}
+	return err
+}
+
+func (p *GeospatialStatistics) Equals(other *GeospatialStatistics) bool {
+	if p == other {
+		return true
+	} else if p == nil || other == nil {
+		return false
+	}
+	if !p.Bbox.Equals(other.Bbox) { return false }
+	if len(p.GeospatialTypes) != len(other.GeospatialTypes) { return false }
+	for i, _tgt := range p.GeospatialTypes {
+		_src5 := other.GeospatialTypes[i]
+		if _tgt != _src5 { return false }
+	}
+	return true
+}
+
+func (p *GeospatialStatistics) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("GeospatialStatistics(%+v)", *p)
+}
+
+func (p *GeospatialStatistics) LogValue() slog.Value {
+	if p == nil {
+		return slog.AnyValue(nil)
+	}
+	v := thrift.SlogTStructWrapper{
+		Type: "*parquet.GeospatialStatistics",
+		Value: p,
+	}
+	return slog.AnyValue(v)
+}
+
+var _ slog.LogValuer = (*GeospatialStatistics)(nil)
+
+func (p *GeospatialStatistics) Validate() error {
 	return nil
 }
 
@@ -3507,6 +4286,524 @@ func (p *BsonType) Validate() error {
 	return nil
 }
 
+// Embedded Variant logical type annotation
+// 
+// Attributes:
+//  - SpecificationVersion
+// 
+type VariantType struct {
+	SpecificationVersion *int8 `thrift:"specification_version,1" db:"specification_version" json:"specification_version,omitempty"`
+}
+
+func NewVariantType() *VariantType {
+	return &VariantType{}
+}
+
+var VariantType_SpecificationVersion_DEFAULT int8
+
+func (p *VariantType) GetSpecificationVersion() int8 {
+	if !p.IsSetSpecificationVersion() {
+		return VariantType_SpecificationVersion_DEFAULT
+	}
+	return *p.SpecificationVersion
+}
+
+func (p *VariantType) IsSetSpecificationVersion() bool {
+	return p.SpecificationVersion != nil
+}
+
+func (p *VariantType) Read(ctx context.Context, iprot thrift.TProtocol) error {
+	if _, err := iprot.ReadStructBegin(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
+	}
+
+
+	for {
+		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
+		if err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T field %d read error: ", p, fieldId), err)
+		}
+		if fieldTypeId == thrift.STOP {
+			break
+		}
+		switch fieldId {
+		case 1:
+			if fieldTypeId == thrift.BYTE {
+				if err := p.ReadField1(ctx, iprot); err != nil {
+					return err
+				}
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
+		default:
+			if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+				return err
+			}
+		}
+		if err := iprot.ReadFieldEnd(ctx); err != nil {
+			return err
+		}
+	}
+	if err := iprot.ReadStructEnd(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
+	}
+	return nil
+}
+
+func (p *VariantType) ReadField1(ctx context.Context, iprot thrift.TProtocol) error {
+	if v, err := iprot.ReadByte(ctx); err != nil {
+		return thrift.PrependError("error reading field 1: ", err)
+	} else {
+		temp := int8(v)
+		p.SpecificationVersion = &temp
+	}
+	return nil
+}
+
+func (p *VariantType) Write(ctx context.Context, oprot thrift.TProtocol) error {
+	if err := oprot.WriteStructBegin(ctx, "VariantType"); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
+	}
+	if p != nil {
+		if err := p.writeField1(ctx, oprot); err != nil { return err }
+	}
+	if err := oprot.WriteFieldStop(ctx); err != nil {
+		return thrift.PrependError("write field stop error: ", err)
+	}
+	if err := oprot.WriteStructEnd(ctx); err != nil {
+		return thrift.PrependError("write struct stop error: ", err)
+	}
+	return nil
+}
+
+func (p *VariantType) writeField1(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if p.IsSetSpecificationVersion() {
+		if err := oprot.WriteFieldBegin(ctx, "specification_version", thrift.BYTE, 1); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 1:specification_version: ", p), err)
+		}
+		if err := oprot.WriteByte(ctx, int8(*p.SpecificationVersion)); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T.specification_version (1) field write error: ", p), err)
+		}
+		if err := oprot.WriteFieldEnd(ctx); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 1:specification_version: ", p), err)
+		}
+	}
+	return err
+}
+
+func (p *VariantType) Equals(other *VariantType) bool {
+	if p == other {
+		return true
+	} else if p == nil || other == nil {
+		return false
+	}
+	if p.SpecificationVersion != other.SpecificationVersion {
+		if p.SpecificationVersion == nil || other.SpecificationVersion == nil {
+			return false
+		}
+		if (*p.SpecificationVersion) != (*other.SpecificationVersion) { return false }
+	}
+	return true
+}
+
+func (p *VariantType) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("VariantType(%+v)", *p)
+}
+
+func (p *VariantType) LogValue() slog.Value {
+	if p == nil {
+		return slog.AnyValue(nil)
+	}
+	v := thrift.SlogTStructWrapper{
+		Type: "*parquet.VariantType",
+		Value: p,
+	}
+	return slog.AnyValue(v)
+}
+
+var _ slog.LogValuer = (*VariantType)(nil)
+
+func (p *VariantType) Validate() error {
+	return nil
+}
+
+// Embedded Geometry logical type annotation
+// 
+// Geospatial features in the Well-Known Binary (WKB) format and edges interpolation
+// is always linear/planar.
+// 
+// A custom CRS can be set by the crs field. If unset, it defaults to "OGC:CRS84",
+// which means that the geometries must be stored in longitude, latitude based on
+// the WGS84 datum.
+// 
+// Allowed for physical type: BYTE_ARRAY.
+// 
+// See Geospatial.md for details.
+// 
+// Attributes:
+//  - Crs
+// 
+type GeometryType struct {
+	Crs *string `thrift:"crs,1" db:"crs" json:"crs,omitempty"`
+}
+
+func NewGeometryType() *GeometryType {
+	return &GeometryType{}
+}
+
+var GeometryType_Crs_DEFAULT string
+
+func (p *GeometryType) GetCrs() string {
+	if !p.IsSetCrs() {
+		return GeometryType_Crs_DEFAULT
+	}
+	return *p.Crs
+}
+
+func (p *GeometryType) IsSetCrs() bool {
+	return p.Crs != nil
+}
+
+func (p *GeometryType) Read(ctx context.Context, iprot thrift.TProtocol) error {
+	if _, err := iprot.ReadStructBegin(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
+	}
+
+
+	for {
+		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
+		if err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T field %d read error: ", p, fieldId), err)
+		}
+		if fieldTypeId == thrift.STOP {
+			break
+		}
+		switch fieldId {
+		case 1:
+			if fieldTypeId == thrift.STRING {
+				if err := p.ReadField1(ctx, iprot); err != nil {
+					return err
+				}
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
+		default:
+			if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+				return err
+			}
+		}
+		if err := iprot.ReadFieldEnd(ctx); err != nil {
+			return err
+		}
+	}
+	if err := iprot.ReadStructEnd(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
+	}
+	return nil
+}
+
+func (p *GeometryType) ReadField1(ctx context.Context, iprot thrift.TProtocol) error {
+	if v, err := iprot.ReadString(ctx); err != nil {
+		return thrift.PrependError("error reading field 1: ", err)
+	} else {
+		p.Crs = &v
+	}
+	return nil
+}
+
+func (p *GeometryType) Write(ctx context.Context, oprot thrift.TProtocol) error {
+	if err := oprot.WriteStructBegin(ctx, "GeometryType"); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
+	}
+	if p != nil {
+		if err := p.writeField1(ctx, oprot); err != nil { return err }
+	}
+	if err := oprot.WriteFieldStop(ctx); err != nil {
+		return thrift.PrependError("write field stop error: ", err)
+	}
+	if err := oprot.WriteStructEnd(ctx); err != nil {
+		return thrift.PrependError("write struct stop error: ", err)
+	}
+	return nil
+}
+
+func (p *GeometryType) writeField1(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if p.IsSetCrs() {
+		if err := oprot.WriteFieldBegin(ctx, "crs", thrift.STRING, 1); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 1:crs: ", p), err)
+		}
+		if err := oprot.WriteString(ctx, string(*p.Crs)); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T.crs (1) field write error: ", p), err)
+		}
+		if err := oprot.WriteFieldEnd(ctx); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 1:crs: ", p), err)
+		}
+	}
+	return err
+}
+
+func (p *GeometryType) Equals(other *GeometryType) bool {
+	if p == other {
+		return true
+	} else if p == nil || other == nil {
+		return false
+	}
+	if p.Crs != other.Crs {
+		if p.Crs == nil || other.Crs == nil {
+			return false
+		}
+		if (*p.Crs) != (*other.Crs) { return false }
+	}
+	return true
+}
+
+func (p *GeometryType) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("GeometryType(%+v)", *p)
+}
+
+func (p *GeometryType) LogValue() slog.Value {
+	if p == nil {
+		return slog.AnyValue(nil)
+	}
+	v := thrift.SlogTStructWrapper{
+		Type: "*parquet.GeometryType",
+		Value: p,
+	}
+	return slog.AnyValue(v)
+}
+
+var _ slog.LogValuer = (*GeometryType)(nil)
+
+func (p *GeometryType) Validate() error {
+	return nil
+}
+
+// Embedded Geography logical type annotation
+// 
+// Geospatial features in the WKB format with an explicit (non-linear/non-planar)
+// edges interpolation algorithm.
+// 
+// A custom geographic CRS can be set by the crs field, where longitudes are
+// bound by [-180, 180] and latitudes are bound by [-90, 90]. If unset, the CRS
+// defaults to "OGC:CRS84".
+// 
+// An optional algorithm can be set to correctly interpret edges interpolation
+// of the geometries. If unset, the algorithm defaults to SPHERICAL.
+// 
+// Allowed for physical type: BYTE_ARRAY.
+// 
+// See Geospatial.md for details.
+// 
+// Attributes:
+//  - Crs
+//  - Algorithm
+// 
+type GeographyType struct {
+	Crs *string `thrift:"crs,1" db:"crs" json:"crs,omitempty"`
+	Algorithm *EdgeInterpolationAlgorithm `thrift:"algorithm,2" db:"algorithm" json:"algorithm,omitempty"`
+}
+
+func NewGeographyType() *GeographyType {
+	return &GeographyType{}
+}
+
+var GeographyType_Crs_DEFAULT string
+
+func (p *GeographyType) GetCrs() string {
+	if !p.IsSetCrs() {
+		return GeographyType_Crs_DEFAULT
+	}
+	return *p.Crs
+}
+
+var GeographyType_Algorithm_DEFAULT EdgeInterpolationAlgorithm
+
+func (p *GeographyType) GetAlgorithm() EdgeInterpolationAlgorithm {
+	if !p.IsSetAlgorithm() {
+		return GeographyType_Algorithm_DEFAULT
+	}
+	return *p.Algorithm
+}
+
+func (p *GeographyType) IsSetCrs() bool {
+	return p.Crs != nil
+}
+
+func (p *GeographyType) IsSetAlgorithm() bool {
+	return p.Algorithm != nil
+}
+
+func (p *GeographyType) Read(ctx context.Context, iprot thrift.TProtocol) error {
+	if _, err := iprot.ReadStructBegin(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
+	}
+
+
+	for {
+		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
+		if err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T field %d read error: ", p, fieldId), err)
+		}
+		if fieldTypeId == thrift.STOP {
+			break
+		}
+		switch fieldId {
+		case 1:
+			if fieldTypeId == thrift.STRING {
+				if err := p.ReadField1(ctx, iprot); err != nil {
+					return err
+				}
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
+		case 2:
+			if fieldTypeId == thrift.I32 {
+				if err := p.ReadField2(ctx, iprot); err != nil {
+					return err
+				}
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
+		default:
+			if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+				return err
+			}
+		}
+		if err := iprot.ReadFieldEnd(ctx); err != nil {
+			return err
+		}
+	}
+	if err := iprot.ReadStructEnd(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
+	}
+	return nil
+}
+
+func (p *GeographyType) ReadField1(ctx context.Context, iprot thrift.TProtocol) error {
+	if v, err := iprot.ReadString(ctx); err != nil {
+		return thrift.PrependError("error reading field 1: ", err)
+	} else {
+		p.Crs = &v
+	}
+	return nil
+}
+
+func (p *GeographyType) ReadField2(ctx context.Context, iprot thrift.TProtocol) error {
+	if v, err := iprot.ReadI32(ctx); err != nil {
+		return thrift.PrependError("error reading field 2: ", err)
+	} else {
+		temp := EdgeInterpolationAlgorithm(v)
+		p.Algorithm = &temp
+	}
+	return nil
+}
+
+func (p *GeographyType) Write(ctx context.Context, oprot thrift.TProtocol) error {
+	if err := oprot.WriteStructBegin(ctx, "GeographyType"); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
+	}
+	if p != nil {
+		if err := p.writeField1(ctx, oprot); err != nil { return err }
+		if err := p.writeField2(ctx, oprot); err != nil { return err }
+	}
+	if err := oprot.WriteFieldStop(ctx); err != nil {
+		return thrift.PrependError("write field stop error: ", err)
+	}
+	if err := oprot.WriteStructEnd(ctx); err != nil {
+		return thrift.PrependError("write struct stop error: ", err)
+	}
+	return nil
+}
+
+func (p *GeographyType) writeField1(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if p.IsSetCrs() {
+		if err := oprot.WriteFieldBegin(ctx, "crs", thrift.STRING, 1); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 1:crs: ", p), err)
+		}
+		if err := oprot.WriteString(ctx, string(*p.Crs)); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T.crs (1) field write error: ", p), err)
+		}
+		if err := oprot.WriteFieldEnd(ctx); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 1:crs: ", p), err)
+		}
+	}
+	return err
+}
+
+func (p *GeographyType) writeField2(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if p.IsSetAlgorithm() {
+		if err := oprot.WriteFieldBegin(ctx, "algorithm", thrift.I32, 2); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 2:algorithm: ", p), err)
+		}
+		if err := oprot.WriteI32(ctx, int32(*p.Algorithm)); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T.algorithm (2) field write error: ", p), err)
+		}
+		if err := oprot.WriteFieldEnd(ctx); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 2:algorithm: ", p), err)
+		}
+	}
+	return err
+}
+
+func (p *GeographyType) Equals(other *GeographyType) bool {
+	if p == other {
+		return true
+	} else if p == nil || other == nil {
+		return false
+	}
+	if p.Crs != other.Crs {
+		if p.Crs == nil || other.Crs == nil {
+			return false
+		}
+		if (*p.Crs) != (*other.Crs) { return false }
+	}
+	if p.Algorithm != other.Algorithm {
+		if p.Algorithm == nil || other.Algorithm == nil {
+			return false
+		}
+		if (*p.Algorithm) != (*other.Algorithm) { return false }
+	}
+	return true
+}
+
+func (p *GeographyType) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("GeographyType(%+v)", *p)
+}
+
+func (p *GeographyType) LogValue() slog.Value {
+	if p == nil {
+		return slog.AnyValue(nil)
+	}
+	v := thrift.SlogTStructWrapper{
+		Type: "*parquet.GeographyType",
+		Value: p,
+	}
+	return slog.AnyValue(v)
+}
+
+var _ slog.LogValuer = (*GeographyType)(nil)
+
+func (p *GeographyType) Validate() error {
+	return nil
+}
+
 // LogicalType annotations to replace ConvertedType.
 // 
 // To maintain compatibility, implementations using LogicalType for a
@@ -3528,6 +4825,9 @@ func (p *BsonType) Validate() error {
 //  - BSON
 //  - UUID
 //  - FLOAT16
+//  - VARIANT
+//  - GEOMETRY
+//  - GEOGRAPHY
 // 
 type LogicalType struct {
 	STRING *StringType `thrift:"STRING,1" db:"STRING" json:"STRING,omitempty"`
@@ -3545,6 +4845,9 @@ type LogicalType struct {
 	BSON *BsonType `thrift:"BSON,13" db:"BSON" json:"BSON,omitempty"`
 	UUID *UUIDType `thrift:"UUID,14" db:"UUID" json:"UUID,omitempty"`
 	FLOAT16 *Float16Type `thrift:"FLOAT16,15" db:"FLOAT16" json:"FLOAT16,omitempty"`
+	VARIANT *VariantType `thrift:"VARIANT,16" db:"VARIANT" json:"VARIANT,omitempty"`
+	GEOMETRY *GeometryType `thrift:"GEOMETRY,17" db:"GEOMETRY" json:"GEOMETRY,omitempty"`
+	GEOGRAPHY *GeographyType `thrift:"GEOGRAPHY,18" db:"GEOGRAPHY" json:"GEOGRAPHY,omitempty"`
 }
 
 func NewLogicalType() *LogicalType {
@@ -3677,6 +4980,33 @@ func (p *LogicalType) GetFLOAT16() *Float16Type {
 	return p.FLOAT16
 }
 
+var LogicalType_VARIANT_DEFAULT *VariantType
+
+func (p *LogicalType) GetVARIANT() *VariantType {
+	if !p.IsSetVARIANT() {
+		return LogicalType_VARIANT_DEFAULT
+	}
+	return p.VARIANT
+}
+
+var LogicalType_GEOMETRY_DEFAULT *GeometryType
+
+func (p *LogicalType) GetGEOMETRY() *GeometryType {
+	if !p.IsSetGEOMETRY() {
+		return LogicalType_GEOMETRY_DEFAULT
+	}
+	return p.GEOMETRY
+}
+
+var LogicalType_GEOGRAPHY_DEFAULT *GeographyType
+
+func (p *LogicalType) GetGEOGRAPHY() *GeographyType {
+	if !p.IsSetGEOGRAPHY() {
+		return LogicalType_GEOGRAPHY_DEFAULT
+	}
+	return p.GEOGRAPHY
+}
+
 func (p *LogicalType) CountSetFieldsLogicalType() int {
 	count := 0
 	if (p.IsSetSTRING()) {
@@ -3719,6 +5049,15 @@ func (p *LogicalType) CountSetFieldsLogicalType() int {
 		count++
 	}
 	if (p.IsSetFLOAT16()) {
+		count++
+	}
+	if (p.IsSetVARIANT()) {
+		count++
+	}
+	if (p.IsSetGEOMETRY()) {
+		count++
+	}
+	if (p.IsSetGEOGRAPHY()) {
 		count++
 	}
 	return count
@@ -3779,6 +5118,18 @@ func (p *LogicalType) IsSetUUID() bool {
 
 func (p *LogicalType) IsSetFLOAT16() bool {
 	return p.FLOAT16 != nil
+}
+
+func (p *LogicalType) IsSetVARIANT() bool {
+	return p.VARIANT != nil
+}
+
+func (p *LogicalType) IsSetGEOMETRY() bool {
+	return p.GEOMETRY != nil
+}
+
+func (p *LogicalType) IsSetGEOGRAPHY() bool {
+	return p.GEOGRAPHY != nil
 }
 
 func (p *LogicalType) Read(ctx context.Context, iprot thrift.TProtocol) error {
@@ -3936,6 +5287,36 @@ func (p *LogicalType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 					return err
 				}
 			}
+		case 16:
+			if fieldTypeId == thrift.STRUCT {
+				if err := p.ReadField16(ctx, iprot); err != nil {
+					return err
+				}
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
+		case 17:
+			if fieldTypeId == thrift.STRUCT {
+				if err := p.ReadField17(ctx, iprot); err != nil {
+					return err
+				}
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
+		case 18:
+			if fieldTypeId == thrift.STRUCT {
+				if err := p.ReadField18(ctx, iprot); err != nil {
+					return err
+				}
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
 		default:
 			if err := iprot.Skip(ctx, fieldTypeId); err != nil {
 				return err
@@ -4063,6 +5444,30 @@ func (p *LogicalType) ReadField15(ctx context.Context, iprot thrift.TProtocol) e
 	return nil
 }
 
+func (p *LogicalType) ReadField16(ctx context.Context, iprot thrift.TProtocol) error {
+	p.VARIANT = &VariantType{}
+	if err := p.VARIANT.Read(ctx, iprot); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", p.VARIANT), err)
+	}
+	return nil
+}
+
+func (p *LogicalType) ReadField17(ctx context.Context, iprot thrift.TProtocol) error {
+	p.GEOMETRY = &GeometryType{}
+	if err := p.GEOMETRY.Read(ctx, iprot); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", p.GEOMETRY), err)
+	}
+	return nil
+}
+
+func (p *LogicalType) ReadField18(ctx context.Context, iprot thrift.TProtocol) error {
+	p.GEOGRAPHY = &GeographyType{}
+	if err := p.GEOGRAPHY.Read(ctx, iprot); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", p.GEOGRAPHY), err)
+	}
+	return nil
+}
+
 func (p *LogicalType) Write(ctx context.Context, oprot thrift.TProtocol) error {
 	if c := p.CountSetFieldsLogicalType(); c != 1 {
 		return fmt.Errorf("%T write union: exactly one field must be set (%d set)", p, c)
@@ -4085,6 +5490,9 @@ func (p *LogicalType) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		if err := p.writeField13(ctx, oprot); err != nil { return err }
 		if err := p.writeField14(ctx, oprot); err != nil { return err }
 		if err := p.writeField15(ctx, oprot); err != nil { return err }
+		if err := p.writeField16(ctx, oprot); err != nil { return err }
+		if err := p.writeField17(ctx, oprot); err != nil { return err }
+		if err := p.writeField18(ctx, oprot); err != nil { return err }
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -4305,6 +5713,51 @@ func (p *LogicalType) writeField15(ctx context.Context, oprot thrift.TProtocol) 
 	return err
 }
 
+func (p *LogicalType) writeField16(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if p.IsSetVARIANT() {
+		if err := oprot.WriteFieldBegin(ctx, "VARIANT", thrift.STRUCT, 16); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 16:VARIANT: ", p), err)
+		}
+		if err := p.VARIANT.Write(ctx, oprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error writing struct: ", p.VARIANT), err)
+		}
+		if err := oprot.WriteFieldEnd(ctx); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 16:VARIANT: ", p), err)
+		}
+	}
+	return err
+}
+
+func (p *LogicalType) writeField17(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if p.IsSetGEOMETRY() {
+		if err := oprot.WriteFieldBegin(ctx, "GEOMETRY", thrift.STRUCT, 17); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 17:GEOMETRY: ", p), err)
+		}
+		if err := p.GEOMETRY.Write(ctx, oprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error writing struct: ", p.GEOMETRY), err)
+		}
+		if err := oprot.WriteFieldEnd(ctx); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 17:GEOMETRY: ", p), err)
+		}
+	}
+	return err
+}
+
+func (p *LogicalType) writeField18(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if p.IsSetGEOGRAPHY() {
+		if err := oprot.WriteFieldBegin(ctx, "GEOGRAPHY", thrift.STRUCT, 18); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 18:GEOGRAPHY: ", p), err)
+		}
+		if err := p.GEOGRAPHY.Write(ctx, oprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error writing struct: ", p.GEOGRAPHY), err)
+		}
+		if err := oprot.WriteFieldEnd(ctx); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 18:GEOGRAPHY: ", p), err)
+		}
+	}
+	return err
+}
+
 func (p *LogicalType) Equals(other *LogicalType) bool {
 	if p == other {
 		return true
@@ -4325,6 +5778,9 @@ func (p *LogicalType) Equals(other *LogicalType) bool {
 	if !p.BSON.Equals(other.BSON) { return false }
 	if !p.UUID.Equals(other.UUID) { return false }
 	if !p.FLOAT16.Equals(other.FLOAT16) { return false }
+	if !p.VARIANT.Equals(other.VARIANT) { return false }
+	if !p.GEOMETRY.Equals(other.GEOMETRY) { return false }
+	if !p.GEOGRAPHY.Equals(other.GEOGRAPHY) { return false }
 	return true
 }
 
@@ -8342,6 +9798,7 @@ func (p *PageEncodingStats) Validate() error {
 // representations. The histograms contained in these statistics can
 // also be useful in some cases for more fine-grained nullability/list length
 // filter pushdown.
+//  - GeospatialStatistics: Optional statistics specific for Geometry and Geography logical types
 // 
 type ColumnMetaData struct {
 	Type Type `thrift:"type,1,required" db:"type" json:"type"`
@@ -8360,6 +9817,7 @@ type ColumnMetaData struct {
 	BloomFilterOffset *int64 `thrift:"bloom_filter_offset,14" db:"bloom_filter_offset" json:"bloom_filter_offset,omitempty"`
 	BloomFilterLength *int32 `thrift:"bloom_filter_length,15" db:"bloom_filter_length" json:"bloom_filter_length,omitempty"`
 	SizeStatistics *SizeStatistics `thrift:"size_statistics,16" db:"size_statistics" json:"size_statistics,omitempty"`
+	GeospatialStatistics *GeospatialStatistics `thrift:"geospatial_statistics,17" db:"geospatial_statistics" json:"geospatial_statistics,omitempty"`
 }
 
 func NewColumnMetaData() *ColumnMetaData {
@@ -8482,6 +9940,15 @@ func (p *ColumnMetaData) GetSizeStatistics() *SizeStatistics {
 	return p.SizeStatistics
 }
 
+var ColumnMetaData_GeospatialStatistics_DEFAULT *GeospatialStatistics
+
+func (p *ColumnMetaData) GetGeospatialStatistics() *GeospatialStatistics {
+	if !p.IsSetGeospatialStatistics() {
+		return ColumnMetaData_GeospatialStatistics_DEFAULT
+	}
+	return p.GeospatialStatistics
+}
+
 func (p *ColumnMetaData) IsSetKeyValueMetadata() bool {
 	return p.KeyValueMetadata != nil
 }
@@ -8512,6 +9979,10 @@ func (p *ColumnMetaData) IsSetBloomFilterLength() bool {
 
 func (p *ColumnMetaData) IsSetSizeStatistics() bool {
 	return p.SizeStatistics != nil
+}
+
+func (p *ColumnMetaData) IsSetGeospatialStatistics() bool {
+	return p.GeospatialStatistics != nil
 }
 
 func (p *ColumnMetaData) Read(ctx context.Context, iprot thrift.TProtocol) error {
@@ -8705,6 +10176,16 @@ func (p *ColumnMetaData) Read(ctx context.Context, iprot thrift.TProtocol) error
 					return err
 				}
 			}
+		case 17:
+			if fieldTypeId == thrift.STRUCT {
+				if err := p.ReadField17(ctx, iprot); err != nil {
+					return err
+				}
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
 		default:
 			if err := iprot.Skip(ctx, fieldTypeId); err != nil {
 				return err
@@ -8762,14 +10243,14 @@ func (p *ColumnMetaData) ReadField2(ctx context.Context, iprot thrift.TProtocol)
 	tSlice := make([]Encoding, 0, size)
 	p.Encodings = tSlice
 	for i := 0; i < size; i++ {
-		var _elem4 Encoding
+		var _elem6 Encoding
 		if v, err := iprot.ReadI32(ctx); err != nil {
 			return thrift.PrependError("error reading field 0: ", err)
 		} else {
 			temp := Encoding(v)
-			_elem4 = temp
+			_elem6 = temp
 		}
-		p.Encodings = append(p.Encodings, _elem4)
+		p.Encodings = append(p.Encodings, _elem6)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -8785,13 +10266,13 @@ func (p *ColumnMetaData) ReadField3(ctx context.Context, iprot thrift.TProtocol)
 	tSlice := make([]string, 0, size)
 	p.PathInSchema = tSlice
 	for i := 0; i < size; i++ {
-		var _elem5 string
+		var _elem7 string
 		if v, err := iprot.ReadString(ctx); err != nil {
 			return thrift.PrependError("error reading field 0: ", err)
 		} else {
-			_elem5 = v
+			_elem7 = v
 		}
-		p.PathInSchema = append(p.PathInSchema, _elem5)
+		p.PathInSchema = append(p.PathInSchema, _elem7)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -8844,11 +10325,11 @@ func (p *ColumnMetaData) ReadField8(ctx context.Context, iprot thrift.TProtocol)
 	tSlice := make([]*KeyValue, 0, size)
 	p.KeyValueMetadata = tSlice
 	for i := 0; i < size; i++ {
-		_elem6 := &KeyValue{}
-		if err := _elem6.Read(ctx, iprot); err != nil {
-			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem6), err)
+		_elem8 := &KeyValue{}
+		if err := _elem8.Read(ctx, iprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem8), err)
 		}
-		p.KeyValueMetadata = append(p.KeyValueMetadata, _elem6)
+		p.KeyValueMetadata = append(p.KeyValueMetadata, _elem8)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -8899,11 +10380,11 @@ func (p *ColumnMetaData) ReadField13(ctx context.Context, iprot thrift.TProtocol
 	tSlice := make([]*PageEncodingStats, 0, size)
 	p.EncodingStats = tSlice
 	for i := 0; i < size; i++ {
-		_elem7 := &PageEncodingStats{}
-		if err := _elem7.Read(ctx, iprot); err != nil {
-			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem7), err)
+		_elem9 := &PageEncodingStats{}
+		if err := _elem9.Read(ctx, iprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem9), err)
 		}
-		p.EncodingStats = append(p.EncodingStats, _elem7)
+		p.EncodingStats = append(p.EncodingStats, _elem9)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -8937,6 +10418,14 @@ func (p *ColumnMetaData) ReadField16(ctx context.Context, iprot thrift.TProtocol
 	return nil
 }
 
+func (p *ColumnMetaData) ReadField17(ctx context.Context, iprot thrift.TProtocol) error {
+	p.GeospatialStatistics = &GeospatialStatistics{}
+	if err := p.GeospatialStatistics.Read(ctx, iprot); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", p.GeospatialStatistics), err)
+	}
+	return nil
+}
+
 func (p *ColumnMetaData) Write(ctx context.Context, oprot thrift.TProtocol) error {
 	if err := oprot.WriteStructBegin(ctx, "ColumnMetaData"); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
@@ -8958,6 +10447,7 @@ func (p *ColumnMetaData) Write(ctx context.Context, oprot thrift.TProtocol) erro
 		if err := p.writeField14(ctx, oprot); err != nil { return err }
 		if err := p.writeField15(ctx, oprot); err != nil { return err }
 		if err := p.writeField16(ctx, oprot); err != nil { return err }
+		if err := p.writeField17(ctx, oprot); err != nil { return err }
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -9224,6 +10714,21 @@ func (p *ColumnMetaData) writeField16(ctx context.Context, oprot thrift.TProtoco
 	return err
 }
 
+func (p *ColumnMetaData) writeField17(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if p.IsSetGeospatialStatistics() {
+		if err := oprot.WriteFieldBegin(ctx, "geospatial_statistics", thrift.STRUCT, 17); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 17:geospatial_statistics: ", p), err)
+		}
+		if err := p.GeospatialStatistics.Write(ctx, oprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error writing struct: ", p.GeospatialStatistics), err)
+		}
+		if err := oprot.WriteFieldEnd(ctx); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 17:geospatial_statistics: ", p), err)
+		}
+	}
+	return err
+}
+
 func (p *ColumnMetaData) Equals(other *ColumnMetaData) bool {
 	if p == other {
 		return true
@@ -9233,13 +10738,13 @@ func (p *ColumnMetaData) Equals(other *ColumnMetaData) bool {
 	if p.Type != other.Type { return false }
 	if len(p.Encodings) != len(other.Encodings) { return false }
 	for i, _tgt := range p.Encodings {
-		_src8 := other.Encodings[i]
-		if _tgt != _src8 { return false }
+		_src10 := other.Encodings[i]
+		if _tgt != _src10 { return false }
 	}
 	if len(p.PathInSchema) != len(other.PathInSchema) { return false }
 	for i, _tgt := range p.PathInSchema {
-		_src9 := other.PathInSchema[i]
-		if _tgt != _src9 { return false }
+		_src11 := other.PathInSchema[i]
+		if _tgt != _src11 { return false }
 	}
 	if p.Codec != other.Codec { return false }
 	if p.NumValues != other.NumValues { return false }
@@ -9247,8 +10752,8 @@ func (p *ColumnMetaData) Equals(other *ColumnMetaData) bool {
 	if p.TotalCompressedSize != other.TotalCompressedSize { return false }
 	if len(p.KeyValueMetadata) != len(other.KeyValueMetadata) { return false }
 	for i, _tgt := range p.KeyValueMetadata {
-		_src10 := other.KeyValueMetadata[i]
-		if !_tgt.Equals(_src10) { return false }
+		_src12 := other.KeyValueMetadata[i]
+		if !_tgt.Equals(_src12) { return false }
 	}
 	if p.DataPageOffset != other.DataPageOffset { return false }
 	if p.IndexPageOffset != other.IndexPageOffset {
@@ -9266,8 +10771,8 @@ func (p *ColumnMetaData) Equals(other *ColumnMetaData) bool {
 	if !p.Statistics.Equals(other.Statistics) { return false }
 	if len(p.EncodingStats) != len(other.EncodingStats) { return false }
 	for i, _tgt := range p.EncodingStats {
-		_src11 := other.EncodingStats[i]
-		if !_tgt.Equals(_src11) { return false }
+		_src13 := other.EncodingStats[i]
+		if !_tgt.Equals(_src13) { return false }
 	}
 	if p.BloomFilterOffset != other.BloomFilterOffset {
 		if p.BloomFilterOffset == nil || other.BloomFilterOffset == nil {
@@ -9282,6 +10787,7 @@ func (p *ColumnMetaData) Equals(other *ColumnMetaData) bool {
 		if (*p.BloomFilterLength) != (*other.BloomFilterLength) { return false }
 	}
 	if !p.SizeStatistics.Equals(other.SizeStatistics) { return false }
+	if !p.GeospatialStatistics.Equals(other.GeospatialStatistics) { return false }
 	return true
 }
 
@@ -9484,13 +10990,13 @@ func (p *EncryptionWithColumnKey) ReadField1(ctx context.Context, iprot thrift.T
 	tSlice := make([]string, 0, size)
 	p.PathInSchema = tSlice
 	for i := 0; i < size; i++ {
-		var _elem12 string
+		var _elem14 string
 		if v, err := iprot.ReadString(ctx); err != nil {
 			return thrift.PrependError("error reading field 0: ", err)
 		} else {
-			_elem12 = v
+			_elem14 = v
 		}
-		p.PathInSchema = append(p.PathInSchema, _elem12)
+		p.PathInSchema = append(p.PathInSchema, _elem14)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -9568,8 +11074,8 @@ func (p *EncryptionWithColumnKey) Equals(other *EncryptionWithColumnKey) bool {
 	}
 	if len(p.PathInSchema) != len(other.PathInSchema) { return false }
 	for i, _tgt := range p.PathInSchema {
-		_src13 := other.PathInSchema[i]
-		if _tgt != _src13 { return false }
+		_src15 := other.PathInSchema[i]
+		if _tgt != _src15 { return false }
 	}
 	if bytes.Compare(p.KeyMetadata, other.KeyMetadata) != 0 { return false }
 	return true
@@ -10596,11 +12102,11 @@ func (p *RowGroup) ReadField1(ctx context.Context, iprot thrift.TProtocol) error
 	tSlice := make([]*ColumnChunk, 0, size)
 	p.Columns = tSlice
 	for i := 0; i < size; i++ {
-		_elem14 := &ColumnChunk{}
-		if err := _elem14.Read(ctx, iprot); err != nil {
-			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem14), err)
+		_elem16 := &ColumnChunk{}
+		if err := _elem16.Read(ctx, iprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem16), err)
 		}
-		p.Columns = append(p.Columns, _elem14)
+		p.Columns = append(p.Columns, _elem16)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -10634,11 +12140,11 @@ func (p *RowGroup) ReadField4(ctx context.Context, iprot thrift.TProtocol) error
 	tSlice := make([]*SortingColumn, 0, size)
 	p.SortingColumns = tSlice
 	for i := 0; i < size; i++ {
-		_elem15 := &SortingColumn{}
-		if err := _elem15.Read(ctx, iprot); err != nil {
-			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem15), err)
+		_elem17 := &SortingColumn{}
+		if err := _elem17.Read(ctx, iprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem17), err)
 		}
-		p.SortingColumns = append(p.SortingColumns, _elem15)
+		p.SortingColumns = append(p.SortingColumns, _elem17)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -10818,15 +12324,15 @@ func (p *RowGroup) Equals(other *RowGroup) bool {
 	}
 	if len(p.Columns) != len(other.Columns) { return false }
 	for i, _tgt := range p.Columns {
-		_src16 := other.Columns[i]
-		if !_tgt.Equals(_src16) { return false }
+		_src18 := other.Columns[i]
+		if !_tgt.Equals(_src18) { return false }
 	}
 	if p.TotalByteSize != other.TotalByteSize { return false }
 	if p.NumRows != other.NumRows { return false }
 	if len(p.SortingColumns) != len(other.SortingColumns) { return false }
 	for i, _tgt := range p.SortingColumns {
-		_src17 := other.SortingColumns[i]
-		if !_tgt.Equals(_src17) { return false }
+		_src19 := other.SortingColumns[i]
+		if !_tgt.Equals(_src19) { return false }
 	}
 	if p.FileOffset != other.FileOffset {
 		if p.FileOffset == nil || other.FileOffset == nil {
@@ -10990,6 +12496,9 @@ func (p *TypeDefinedOrder) Validate() error {
 //   ENUM - unsigned byte-wise comparison
 //   LIST - undefined
 //   MAP - undefined
+//   VARIANT - undefined
+//   GEOMETRY - undefined
+//   GEOGRAPHY - undefined
 // 
 // In the absence of logical types, the sort order is determined by the physical type:
 //   BOOLEAN - false, true
@@ -11497,11 +13006,11 @@ func (p *OffsetIndex) ReadField1(ctx context.Context, iprot thrift.TProtocol) er
 	tSlice := make([]*PageLocation, 0, size)
 	p.PageLocations = tSlice
 	for i := 0; i < size; i++ {
-		_elem18 := &PageLocation{}
-		if err := _elem18.Read(ctx, iprot); err != nil {
-			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem18), err)
+		_elem20 := &PageLocation{}
+		if err := _elem20.Read(ctx, iprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem20), err)
 		}
-		p.PageLocations = append(p.PageLocations, _elem18)
+		p.PageLocations = append(p.PageLocations, _elem20)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -11517,13 +13026,13 @@ func (p *OffsetIndex) ReadField2(ctx context.Context, iprot thrift.TProtocol) er
 	tSlice := make([]int64, 0, size)
 	p.UnencodedByteArrayDataBytes = tSlice
 	for i := 0; i < size; i++ {
-		var _elem19 int64
+		var _elem21 int64
 		if v, err := iprot.ReadI64(ctx); err != nil {
 			return thrift.PrependError("error reading field 0: ", err)
 		} else {
-			_elem19 = v
+			_elem21 = v
 		}
-		p.UnencodedByteArrayDataBytes = append(p.UnencodedByteArrayDataBytes, _elem19)
+		p.UnencodedByteArrayDataBytes = append(p.UnencodedByteArrayDataBytes, _elem21)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -11600,13 +13109,13 @@ func (p *OffsetIndex) Equals(other *OffsetIndex) bool {
 	}
 	if len(p.PageLocations) != len(other.PageLocations) { return false }
 	for i, _tgt := range p.PageLocations {
-		_src20 := other.PageLocations[i]
-		if !_tgt.Equals(_src20) { return false }
+		_src22 := other.PageLocations[i]
+		if !_tgt.Equals(_src22) { return false }
 	}
 	if len(p.UnencodedByteArrayDataBytes) != len(other.UnencodedByteArrayDataBytes) { return false }
 	for i, _tgt := range p.UnencodedByteArrayDataBytes {
-		_src21 := other.UnencodedByteArrayDataBytes[i]
-		if _tgt != _src21 { return false }
+		_src23 := other.UnencodedByteArrayDataBytes[i]
+		if _tgt != _src23 { return false }
 	}
 	return true
 }
@@ -11884,13 +13393,13 @@ func (p *ColumnIndex) ReadField1(ctx context.Context, iprot thrift.TProtocol) er
 	tSlice := make([]bool, 0, size)
 	p.NullPages = tSlice
 	for i := 0; i < size; i++ {
-		var _elem22 bool
+		var _elem24 bool
 		if v, err := iprot.ReadBool(ctx); err != nil {
 			return thrift.PrependError("error reading field 0: ", err)
 		} else {
-			_elem22 = v
+			_elem24 = v
 		}
-		p.NullPages = append(p.NullPages, _elem22)
+		p.NullPages = append(p.NullPages, _elem24)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -11906,13 +13415,13 @@ func (p *ColumnIndex) ReadField2(ctx context.Context, iprot thrift.TProtocol) er
 	tSlice := make([][]byte, 0, size)
 	p.MinValues = tSlice
 	for i := 0; i < size; i++ {
-		var _elem23 []byte
+		var _elem25 []byte
 		if v, err := iprot.ReadBinary(ctx); err != nil {
 			return thrift.PrependError("error reading field 0: ", err)
 		} else {
-			_elem23 = v
+			_elem25 = v
 		}
-		p.MinValues = append(p.MinValues, _elem23)
+		p.MinValues = append(p.MinValues, _elem25)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -11928,13 +13437,13 @@ func (p *ColumnIndex) ReadField3(ctx context.Context, iprot thrift.TProtocol) er
 	tSlice := make([][]byte, 0, size)
 	p.MaxValues = tSlice
 	for i := 0; i < size; i++ {
-		var _elem24 []byte
+		var _elem26 []byte
 		if v, err := iprot.ReadBinary(ctx); err != nil {
 			return thrift.PrependError("error reading field 0: ", err)
 		} else {
-			_elem24 = v
+			_elem26 = v
 		}
-		p.MaxValues = append(p.MaxValues, _elem24)
+		p.MaxValues = append(p.MaxValues, _elem26)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -11960,13 +13469,13 @@ func (p *ColumnIndex) ReadField5(ctx context.Context, iprot thrift.TProtocol) er
 	tSlice := make([]int64, 0, size)
 	p.NullCounts = tSlice
 	for i := 0; i < size; i++ {
-		var _elem25 int64
+		var _elem27 int64
 		if v, err := iprot.ReadI64(ctx); err != nil {
 			return thrift.PrependError("error reading field 0: ", err)
 		} else {
-			_elem25 = v
+			_elem27 = v
 		}
-		p.NullCounts = append(p.NullCounts, _elem25)
+		p.NullCounts = append(p.NullCounts, _elem27)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -11982,13 +13491,13 @@ func (p *ColumnIndex) ReadField6(ctx context.Context, iprot thrift.TProtocol) er
 	tSlice := make([]int64, 0, size)
 	p.RepetitionLevelHistograms = tSlice
 	for i := 0; i < size; i++ {
-		var _elem26 int64
+		var _elem28 int64
 		if v, err := iprot.ReadI64(ctx); err != nil {
 			return thrift.PrependError("error reading field 0: ", err)
 		} else {
-			_elem26 = v
+			_elem28 = v
 		}
-		p.RepetitionLevelHistograms = append(p.RepetitionLevelHistograms, _elem26)
+		p.RepetitionLevelHistograms = append(p.RepetitionLevelHistograms, _elem28)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -12004,13 +13513,13 @@ func (p *ColumnIndex) ReadField7(ctx context.Context, iprot thrift.TProtocol) er
 	tSlice := make([]int64, 0, size)
 	p.DefinitionLevelHistograms = tSlice
 	for i := 0; i < size; i++ {
-		var _elem27 int64
+		var _elem29 int64
 		if v, err := iprot.ReadI64(ctx); err != nil {
 			return thrift.PrependError("error reading field 0: ", err)
 		} else {
-			_elem27 = v
+			_elem29 = v
 		}
-		p.DefinitionLevelHistograms = append(p.DefinitionLevelHistograms, _elem27)
+		p.DefinitionLevelHistograms = append(p.DefinitionLevelHistograms, _elem29)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -12193,34 +13702,34 @@ func (p *ColumnIndex) Equals(other *ColumnIndex) bool {
 	}
 	if len(p.NullPages) != len(other.NullPages) { return false }
 	for i, _tgt := range p.NullPages {
-		_src28 := other.NullPages[i]
-		if _tgt != _src28 { return false }
+		_src30 := other.NullPages[i]
+		if _tgt != _src30 { return false }
 	}
 	if len(p.MinValues) != len(other.MinValues) { return false }
 	for i, _tgt := range p.MinValues {
-		_src29 := other.MinValues[i]
-		if bytes.Compare(_tgt, _src29) != 0 { return false }
+		_src31 := other.MinValues[i]
+		if bytes.Compare(_tgt, _src31) != 0 { return false }
 	}
 	if len(p.MaxValues) != len(other.MaxValues) { return false }
 	for i, _tgt := range p.MaxValues {
-		_src30 := other.MaxValues[i]
-		if bytes.Compare(_tgt, _src30) != 0 { return false }
+		_src32 := other.MaxValues[i]
+		if bytes.Compare(_tgt, _src32) != 0 { return false }
 	}
 	if p.BoundaryOrder != other.BoundaryOrder { return false }
 	if len(p.NullCounts) != len(other.NullCounts) { return false }
 	for i, _tgt := range p.NullCounts {
-		_src31 := other.NullCounts[i]
-		if _tgt != _src31 { return false }
+		_src33 := other.NullCounts[i]
+		if _tgt != _src33 { return false }
 	}
 	if len(p.RepetitionLevelHistograms) != len(other.RepetitionLevelHistograms) { return false }
 	for i, _tgt := range p.RepetitionLevelHistograms {
-		_src32 := other.RepetitionLevelHistograms[i]
-		if _tgt != _src32 { return false }
+		_src34 := other.RepetitionLevelHistograms[i]
+		if _tgt != _src34 { return false }
 	}
 	if len(p.DefinitionLevelHistograms) != len(other.DefinitionLevelHistograms) { return false }
 	for i, _tgt := range p.DefinitionLevelHistograms {
-		_src33 := other.DefinitionLevelHistograms[i]
-		if _tgt != _src33 { return false }
+		_src35 := other.DefinitionLevelHistograms[i]
+		if _tgt != _src35 { return false }
 	}
 	return true
 }
@@ -13228,11 +14737,11 @@ func (p *FileMetaData) ReadField2(ctx context.Context, iprot thrift.TProtocol) e
 	tSlice := make([]*SchemaElement, 0, size)
 	p.Schema = tSlice
 	for i := 0; i < size; i++ {
-		_elem34 := &SchemaElement{}
-		if err := _elem34.Read(ctx, iprot); err != nil {
-			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem34), err)
+		_elem36 := &SchemaElement{}
+		if err := _elem36.Read(ctx, iprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem36), err)
 		}
-		p.Schema = append(p.Schema, _elem34)
+		p.Schema = append(p.Schema, _elem36)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -13257,11 +14766,11 @@ func (p *FileMetaData) ReadField4(ctx context.Context, iprot thrift.TProtocol) e
 	tSlice := make([]*RowGroup, 0, size)
 	p.RowGroups = tSlice
 	for i := 0; i < size; i++ {
-		_elem35 := &RowGroup{}
-		if err := _elem35.Read(ctx, iprot); err != nil {
-			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem35), err)
+		_elem37 := &RowGroup{}
+		if err := _elem37.Read(ctx, iprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem37), err)
 		}
-		p.RowGroups = append(p.RowGroups, _elem35)
+		p.RowGroups = append(p.RowGroups, _elem37)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -13277,11 +14786,11 @@ func (p *FileMetaData) ReadField5(ctx context.Context, iprot thrift.TProtocol) e
 	tSlice := make([]*KeyValue, 0, size)
 	p.KeyValueMetadata = tSlice
 	for i := 0; i < size; i++ {
-		_elem36 := &KeyValue{}
-		if err := _elem36.Read(ctx, iprot); err != nil {
-			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem36), err)
+		_elem38 := &KeyValue{}
+		if err := _elem38.Read(ctx, iprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem38), err)
 		}
-		p.KeyValueMetadata = append(p.KeyValueMetadata, _elem36)
+		p.KeyValueMetadata = append(p.KeyValueMetadata, _elem38)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -13306,11 +14815,11 @@ func (p *FileMetaData) ReadField7(ctx context.Context, iprot thrift.TProtocol) e
 	tSlice := make([]*ColumnOrder, 0, size)
 	p.ColumnOrders = tSlice
 	for i := 0; i < size; i++ {
-		_elem37 := &ColumnOrder{}
-		if err := _elem37.Read(ctx, iprot); err != nil {
-			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem37), err)
+		_elem39 := &ColumnOrder{}
+		if err := _elem39.Read(ctx, iprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem39), err)
 		}
-		p.ColumnOrders = append(p.ColumnOrders, _elem37)
+		p.ColumnOrders = append(p.ColumnOrders, _elem39)
 	}
 	if err := iprot.ReadListEnd(ctx); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -13527,19 +15036,19 @@ func (p *FileMetaData) Equals(other *FileMetaData) bool {
 	if p.Version != other.Version { return false }
 	if len(p.Schema) != len(other.Schema) { return false }
 	for i, _tgt := range p.Schema {
-		_src38 := other.Schema[i]
-		if !_tgt.Equals(_src38) { return false }
+		_src40 := other.Schema[i]
+		if !_tgt.Equals(_src40) { return false }
 	}
 	if p.NumRows != other.NumRows { return false }
 	if len(p.RowGroups) != len(other.RowGroups) { return false }
 	for i, _tgt := range p.RowGroups {
-		_src39 := other.RowGroups[i]
-		if !_tgt.Equals(_src39) { return false }
+		_src41 := other.RowGroups[i]
+		if !_tgt.Equals(_src41) { return false }
 	}
 	if len(p.KeyValueMetadata) != len(other.KeyValueMetadata) { return false }
 	for i, _tgt := range p.KeyValueMetadata {
-		_src40 := other.KeyValueMetadata[i]
-		if !_tgt.Equals(_src40) { return false }
+		_src42 := other.KeyValueMetadata[i]
+		if !_tgt.Equals(_src42) { return false }
 	}
 	if p.CreatedBy != other.CreatedBy {
 		if p.CreatedBy == nil || other.CreatedBy == nil {
@@ -13549,8 +15058,8 @@ func (p *FileMetaData) Equals(other *FileMetaData) bool {
 	}
 	if len(p.ColumnOrders) != len(other.ColumnOrders) { return false }
 	for i, _tgt := range p.ColumnOrders {
-		_src41 := other.ColumnOrders[i]
-		if !_tgt.Equals(_src41) { return false }
+		_src43 := other.ColumnOrders[i]
+		if !_tgt.Equals(_src43) { return false }
 	}
 	if !p.EncryptionAlgorithm.Equals(other.EncryptionAlgorithm) { return false }
 	if bytes.Compare(p.FooterSigningKeyMetadata, other.FooterSigningKeyMetadata) != 0 { return false }

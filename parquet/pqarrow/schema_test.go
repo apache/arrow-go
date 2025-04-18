@@ -472,3 +472,35 @@ func TestProperListElementNullability(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, arrSchema.Equal(outSchema), "expected: %s, got: %s", arrSchema, outSchema)
 }
+
+func TestConvertSchemaParquetVariant(t *testing.T) {
+	// unshredded variant:
+	// optional group variant_col {
+	//   required binary metadata;
+	//   required binary value;
+	// }
+	//
+	// shredded variants will be added later
+	parquetFields := make(schema.FieldList, 0)
+	metadata := schema.NewByteArrayNode("metadata", parquet.Repetitions.Required, -1)
+	value := schema.NewByteArrayNode("value", parquet.Repetitions.Required, -1)
+
+	variant, err := schema.NewGroupNodeLogical("variant_unshredded", parquet.Repetitions.Optional,
+		schema.FieldList{metadata, value}, schema.VariantLogicalType{}, -1)
+	require.NoError(t, err)
+	parquetFields = append(parquetFields, variant)
+
+	pqschema := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, parquetFields, -1)))
+	outSchema, err := pqarrow.FromParquet(pqschema, nil, nil)
+	require.NoError(t, err)
+
+	assert.EqualValues(t, 1, outSchema.NumFields())
+	assert.Equal(t, "variant_unshredded", outSchema.Field(0).Name)
+	assert.Equal(t, arrow.EXTENSION, outSchema.Field(0).Type.ID())
+
+	assert.Equal(t, "parquet.variant", outSchema.Field(0).Type.(arrow.ExtensionType).ExtensionName())
+
+	sc, err := pqarrow.ToParquet(outSchema, nil, pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+	assert.True(t, pqschema.Equals(sc), pqschema.String(), sc.String())
+}

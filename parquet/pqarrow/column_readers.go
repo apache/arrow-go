@@ -473,17 +473,17 @@ func (lr *listReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
 
 // column reader logic for fixed size lists instead of variable length ones.
 type fixedSizeListReader struct {
-	listReader
+	*listReader
 }
 
 func newFixedSizeListReader(rctx *readerCtx, field *arrow.Field, info file.LevelInfo, childRdr *ColumnReader, props ArrowReadProperties) *ColumnReader {
 	childRdr.Retain()
-	lr := &listReader{rctx: rctx, field: field, info: info, itemRdr: childRdr, props: props}
+	lr := listReader{rctx: rctx, field: field, info: info, itemRdr: childRdr, props: props}
 	lr.refCount.Add(1)
 
 	return &ColumnReader{
 		&fixedSizeListReader{
-			*lr,
+			&lr,
 		},
 	}
 }
