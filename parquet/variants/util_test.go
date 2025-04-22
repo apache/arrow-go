@@ -272,3 +272,60 @@ func TestReadNthItem(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckBounds(t *testing.T) {
+	cases := []struct {
+		name      string
+		raw       []byte
+		low, high int
+		wantErr   bool
+	}{
+		{
+			name: "In bounds",
+			raw:  make([]byte, 10),
+			low:  1,
+			high: 9,
+		},
+		{
+			name: "low == high",
+			raw:  make([]byte, 10),
+			low:  1,
+			high: 1,
+		},
+		{
+			name:    "Out of bounds (idx == len(raw))",
+			raw:     make([]byte, 10),
+			low:     10,
+			high:    10,
+			wantErr: true,
+		},
+		{
+			name:    "high < low",
+			raw:     make([]byte, 10),
+			low:     5,
+			high:    1,
+			wantErr: true,
+		},
+		{
+			name:    "Negative index",
+			raw:     make([]byte, 10),
+			low:     -1,
+			high:    1,
+			wantErr: true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := checkBounds(c.raw, c.low, c.high)
+			if err != nil {
+				if c.wantErr {
+					return
+				}
+				t.Fatalf("Unexpected error: %v", err)
+			} else if c.wantErr {
+				t.Fatalf("Got no error when one was expected")
+			}
+		})
+	}
+}

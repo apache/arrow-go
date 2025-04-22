@@ -68,6 +68,12 @@ func checkBounds(raw []byte, low, high int) error {
 	if high > maxPos {
 		return fmt.Errorf("out of bounds: trying to access position %d, max is %d", high, maxPos)
 	}
+	if high < low {
+		return fmt.Errorf("incorrect bounds- high (%d) must higher than or equal to low (%d)", high, low)
+	}
+	if low < 0 {
+		return fmt.Errorf("bounds must be positive, have [%d, %d]", low, high)
+	}
 	return nil
 }
 
@@ -107,6 +113,7 @@ func kindFromValue(val any) BasicType {
 		return BasicObject
 	case reflect.Array, reflect.Slice:
 		typ := v.Type()
+		// Byte arrays are primitives. UUID happens to fall into this bucket too serindiptously.
 		if typ.Elem().Kind() == reflect.Uint8 {
 			return BasicPrimitive
 		}

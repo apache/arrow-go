@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/uuid"
 )
 
 func diffByteArrays(t *testing.T, got, want []byte) {
@@ -147,33 +148,19 @@ func TestInt(t *testing.T) {
 func TestUUID(t *testing.T) {
 	cases := []struct {
 		name string
-		uuid []byte
+		uuid uuid.UUID
 		want []byte
 	}{
 		{
 			name: "UUID no padding",
-			uuid: []byte("sixteencharacter"),
+			uuid: func() uuid.UUID {
+				u, _ := uuid.FromBytes([]byte("sixteencharacter"))
+				return u
+			}(),
 			want: []byte{
 				0b1010000, // Basic primitive UUID
 				's', 'i', 'x', 't', 'e', 'e', 'n',
 				'c', 'h', 'a', 'r', 'a', 'c', 't', 'e', 'r',
-			},
-		},
-		{
-			name: "UUID truncation",
-			uuid: []byte("sixteencharacters"),
-			want: []byte{
-				0b1010000, // Basic primitive UUID
-				's', 'i', 'x', 't', 'e', 'e', 'n',
-				'c', 'h', 'a', 'r', 'a', 'c', 't', 'e', 'r',
-			},
-		},
-		{
-			name: "UUID padding",
-			uuid: []byte("small"),
-			want: []byte{
-				0b1010000, // Basic primitive UUID
-				's', 'm', 'a', 'l', 'l', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 			},
 		},
 	}
@@ -190,7 +177,8 @@ func TestUUID(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unmarshalUUID(): %v", err)
 			}
-			diff(t, gotUUID, c.want[1:])
+			gotUUIDBytes, _ := gotUUID.MarshalBinary()
+			diff(t, gotUUIDBytes, c.want[1:])
 		})
 	}
 }
@@ -359,14 +347,31 @@ func TestUnmarshalPrimitive(t *testing.T) {
 			want:    []byte{},
 		},
 		{
-			name:    "Unmarshal UUID to byte slice",
-			encoded: mustMarshalPrimitive(t, []byte("sixteencharacter"), MarshalAsUUID),
-			want:    []byte("sixteencharacter"),
+			name: "Unmarshal UUID",
+			encoded: func() []byte {
+				u, _ := uuid.FromBytes([]byte("sixteencharacter"))
+				return mustMarshalPrimitive(t, u)
+			}(),
+			want: func() uuid.UUID {
+				u, _ := uuid.FromBytes([]byte("sixteencharacter"))
+				return u
+			}(),
 		},
 		{
-			name:    "Unmarshal UUID to string",
-			encoded: mustMarshalPrimitive(t, "sixteencharacter", MarshalAsUUID),
-			want:    "sixteencharacter",
+			name: "Unmarshal UUID to byte slice",
+			encoded: func() []byte {
+				u, _ := uuid.FromBytes([]byte("sixteencharacter"))
+				return mustMarshalPrimitive(t, u)
+			}(),
+			want: []byte("sixteencharacter"),
+		},
+		{
+			name: "Unmarshal UUID to string",
+			encoded: func() []byte {
+				u, _ := uuid.FromBytes([]byte("sixteencharacter"))
+				return mustMarshalPrimitive(t, u)
+			}(),
+			want: "73697874-6565-6e63-6861-726163746572",
 		},
 		{
 			name:          "Unmarshal into int8 would overflow",
