@@ -23,6 +23,9 @@ import (
 	"reflect"
 	"strings"
 	"time"
+	"unsafe"
+
+	"github.com/google/uuid"
 )
 
 // Variant primitive type IDs.
@@ -162,15 +165,11 @@ func marshalPrimitive(v any, w io.Writer, opts ...MarshalOpts) (int, error) {
 		return marshalFloat(val, w), nil
 	case float64:
 		return marshalDouble(val, w), nil
+	case uuid.UUID:
+		return marshalUUID(val, w), nil
 	case string:
-		if allOpts&MarshalAsUUID != 0 {
-			return marshalUUID([]byte(val), w), nil
-		}
 		return marshalString(val, w), nil
 	case []byte:
-		if allOpts&MarshalAsUUID != 0 {
-			return marshalUUID([]byte(val), w), nil
-		}
 		return marshalBinary(val, w), nil
 	case time.Time:
 		if allOpts&MarshalAsDate != 0 {
@@ -195,6 +194,7 @@ func marshalPrimitive(v any, w io.Writer, opts ...MarshalOpts) (int, error) {
 func unmarshalPrimitive(raw []byte, offset int, destPtr reflect.Value) error {
 	dest := destPtr.Elem()
 	kind := dest.Kind()
+	isEmptyInterface := kind == reflect.Interface && dest.NumMethod() == 0
 
 	if err := checkBounds(raw, offset, offset); err != nil {
 		return err
@@ -218,7 +218,7 @@ func unmarshalPrimitive(raw []byte, offset int, destPtr reflect.Value) error {
 		if err != nil {
 			return err
 		}
-		if kind == reflect.Interface {
+		if isEmptyInterface {
 			dest.Set(reflect.ValueOf(iv))
 		} else if dest.CanInt() {
 			if dest.OverflowInt(iv) {
@@ -261,7 +261,7 @@ func unmarshalPrimitive(raw []byte, offset int, destPtr reflect.Value) error {
 		if err != nil {
 			return err
 		}
-		if !dest.CanFloat() && kind != reflect.Interface {
+		if !dest.CanFloat() && !isEmptyInterface {
 			return fmt.Errorf("cannot decode Variant value of %s into dest %s", prim, kind)
 		}
 		switch kind {
@@ -277,7 +277,7 @@ func unmarshalPrimitive(raw []byte, offset int, destPtr reflect.Value) error {
 		if err != nil {
 			return err
 		}
-		if !dest.CanFloat() && kind != reflect.Interface {
+		if !dest.CanFloat() && !isEmptyInterface {
 			return fmt.Errorf("cannot decode Variant value of %s into dest %s", prim, kind)
 		}
 		switch kind {
@@ -300,7 +300,7 @@ func unmarshalPrimitive(raw []byte, offset int, destPtr reflect.Value) error {
 
 		// Time can be decoded into either an int64 (the physical time), or into a time.Time struct.
 		// Anything else is invalid.
-		if kind == reflect.Int64 || kind == reflect.Interface {
+		if kind == reflect.Int64 || isEmptyInterface {
 			dest.Set(reflect.ValueOf(int64(tsv)))
 		} else if kind == reflect.Uint64 {
 			dest.Set(reflect.ValueOf(tsv))
@@ -330,9 +330,9 @@ func unmarshalPrimitive(raw []byte, offset int, destPtr reflect.Value) error {
 		if err != nil {
 			return err
 		}
-		if kind == reflect.String || kind == reflect.Interface {
+		if kind == reflect.String || isEmptyInterface {
 			dest.Set(reflect.ValueOf(str))
-		} else if kind == reflect.Slice && dest.Type().Elem().Kind() == reflect.Uint8 {
+		} else if dest.Type() == reflect.TypeOf([]byte{}) {
 			dest.Set(reflect.ValueOf([]byte(str)))
 		} else {
 			return fmt.Errorf("cannot decode Variant value of %s into dest %s", prim, kind)
@@ -342,7 +342,7 @@ func unmarshalPrimitive(raw []byte, offset int, destPtr reflect.Value) error {
 		if err != nil {
 			return err
 		}
-		if kind == reflect.Slice && dest.Type().Elem().Kind() == reflect.Uint8 || kind == reflect.Interface {
+		if isEmptyInterface || dest.Type() == reflect.TypeOf([]byte{}) {
 			dest.Set(reflect.ValueOf(bytes))
 		} else if kind == reflect.String {
 			dest.Set(reflect.ValueOf(string(bytes)))
@@ -350,14 +350,22 @@ func unmarshalPrimitive(raw []byte, offset int, destPtr reflect.Value) error {
 			return fmt.Errorf("cannot decode Variant value of %s into dest %s", prim, kind)
 		}
 	case primitiveUUID:
-		bytes, err := unmarshalUUID(raw, offset)
+		u, err := unmarshalUUID(raw, offset)
 		if err != nil {
 			return err
 		}
-		if kind == reflect.Slice && dest.Type().Elem().Kind() == reflect.Uint8 || kind == reflect.Interface {
+		if dest.Type() == reflect.TypeOf(uuid.UUID{}) || isEmptyInterface {
+			dest.Set(reflect.ValueOf(u))
+		} else if dest.Type() == reflect.TypeOf([]byte{}) {
+			bytes, _ := u.MarshalBinary()
 			dest.Set(reflect.ValueOf(bytes))
+		} else if dest.Type() == reflect.TypeOf([16]byte{}) {
+			bytes, _ := u.MarshalBinary()
+			var fixed [16]byte
+			copy(fixed[:], bytes)
+			dest.Set(reflect.ValueOf(fixed))
 		} else if kind == reflect.String {
-			dest.Set(reflect.ValueOf(string(bytes)))
+			dest.Set(reflect.ValueOf(u.String()))
 		} else {
 			return fmt.Errorf("cannot decode Variant UUID into dest %s", kind)
 		}
@@ -518,25 +526,19 @@ func marshalString(str string, w io.Writer) int {
 	return 1 + encodePrimitiveBytes([]byte(strings.ToValidUTF8(str, "\uFFFD")), w)
 }
 
-func marshalUUID(uuid []byte, w io.Writer) int {
+func marshalUUID(u uuid.UUID, w io.Writer) int {
 	hdr, _ := primitiveHeader(primitiveUUID)
 	w.Write([]byte{hdr})
-
-	// A UUID is 16 bytes. Either pad or truncate to this length.
-	if len(uuid) > 16 {
-		uuid = uuid[:16]
-	} else if pad := 16 - len(uuid); pad > 0 {
-		uuid = append(uuid, make([]byte, pad)...)
-	}
-	w.Write(uuid)
+	m, _ := u.MarshalBinary() // MarshalBinary() can never return an error
+	w.Write(m)
 	return 17
 }
 
-func unmarshalUUID(raw []byte, offset int) ([]byte, error) {
+func unmarshalUUID(raw []byte, offset int) (uuid.UUID, error) {
 	if err := checkBounds(raw, offset, offset+17); err != nil {
-		return nil, err
+		return uuid.UUID{}, err
 	}
-	return raw[offset+1 : offset+17], nil
+	return uuid.FromBytes(raw[offset+1 : offset+17])
 }
 
 func unmarshalString(raw []byte, offset int) (string, error) {
@@ -553,14 +555,16 @@ func unmarshalString(raw []byte, offset int) (string, error) {
 		if endIdx > maxPos {
 			return "", fmt.Errorf("end index is out of bounds: trying to access position %d, max position is %d", endIdx, maxPos)
 		}
-		return string(raw[offset+1 : endIdx]), nil
+		strPtr := (*byte)(unsafe.Pointer(&raw[offset+1]))
+		return unsafe.String(strPtr, l), nil
 	}
 
 	b, err := getBytes(raw, offset+1)
 	if err != nil {
 		return "", err
 	}
-	return string(b), nil
+	strPtr := (*byte)(unsafe.Pointer(&b[0]))
+	return unsafe.String(strPtr, len(b)), nil
 }
 
 func getBytes(raw []byte, offset int) ([]byte, error) {
@@ -630,14 +634,6 @@ func encodeTimestamp(t int64, nanos, ntz bool, w io.Writer) int {
 	encodeNumber(t, 8, w)
 	return 9
 }
-
-// func decodeTimestamp(raw []byte, offset int) (int64, error) {
-// 	ts, err := readUint(raw, offset+1, 8)
-// 	if err != nil {
-// 		return -1, err
-// 	}
-// 	return int64(ts), nil
-// }
 
 func unmarshalTimestamp(raw []byte, offset int) (time.Time, error) {
 	typ, _ := primitiveFromHeader(raw[offset])

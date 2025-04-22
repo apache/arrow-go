@@ -33,7 +33,7 @@ import (
 //   - Timestamp (all varieties): time.Time
 //   - String: string
 //   - Binary: []byte
-//   - UUID: string
+//   - UUID: uuid.UUID
 //   - Array: []any
 //   - Object: map[string]any
 

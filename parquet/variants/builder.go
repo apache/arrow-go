@@ -54,7 +54,6 @@ const (
 	MarshalAsDate
 	MarshalAsTime
 	MarshalAsTimestamp
-	MarshalAsUUID
 )
 
 var errAlreadyBuilt = errors.New("component already built")

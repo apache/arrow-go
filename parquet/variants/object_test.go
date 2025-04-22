@@ -656,7 +656,7 @@ func TestExtractFieldInfo(t *testing.T) {
 		JustName   int `variant:"just_name"`
 		EmptyTag   int `variant:""`
 		WithOpts   int `variant:"with_opts,ntz,date,nanos,time"`
-		OptsNoName int `variant:",uuid"`
+		OptsNoName int `variant:",ntz"`
 		UnknownOpt int `variant:"unknown,not_defined_opt"`
 	}
 	cases := []struct {
@@ -690,7 +690,7 @@ func TestExtractFieldInfo(t *testing.T) {
 			name:     "Just options, no name uses struct field name",
 			field:    4,
 			wantName: "OptsNoName",
-			wantOpts: []MarshalOpts{MarshalAsUUID},
+			wantOpts: []MarshalOpts{MarshalTimeNTZ},
 		},
 		{
 			name:     "Ignore unknown options",

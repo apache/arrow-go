@@ -107,8 +107,6 @@ func extractFieldInfo(field reflect.StructField) (string, []MarshalOpts) {
 			opts = append(opts, MarshalAsTime)
 		case "timestamp":
 			opts = append(opts, MarshalAsTimestamp)
-		case "uuid":
-			opts = append(opts, MarshalAsUUID)
 		}
 	}
 
