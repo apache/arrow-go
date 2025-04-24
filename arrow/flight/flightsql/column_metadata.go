@@ -50,6 +50,7 @@ const (
 	IsCaseSensitiveKey = "ARROW:FLIGHT:SQL:IS_CASE_SENSITIVE"
 	IsReadOnlyKey      = "ARROW:FLIGHT:SQL:IS_READ_ONLY"
 	IsSearchableKey    = "ARROW:FLIGHT:SQL:IS_SEARCHABLE"
+	RemarksKey         = "ARROW:FLIGHT:SQL:REMARKS"
 )
 
 // ColumnMetadata is a helper object for managing and querying the
@@ -128,6 +129,10 @@ func (c *ColumnMetadata) IsReadOnly() (bool, bool) {
 
 func (c *ColumnMetadata) IsSearchable() (bool, bool) {
 	return c.findBoolVal(IsSearchableKey)
+}
+
+func (c *ColumnMetadata) Remarks() (string, bool) {
+	return c.findStrVal(RemarksKey)
 }
 
 // ColumnMetadataBuilder is a convenience builder for constructing
@@ -213,5 +218,11 @@ func (c *ColumnMetadataBuilder) IsReadOnly(v bool) *ColumnMetadataBuilder {
 func (c *ColumnMetadataBuilder) IsSearchable(v bool) *ColumnMetadataBuilder {
 	c.keys = append(c.keys, IsSearchableKey)
 	c.vals = append(c.vals, boolToStr(v))
+	return c
+}
+
+func (c *ColumnMetadataBuilder) Remarks(remarks string) *ColumnMetadataBuilder {
+	c.keys = append(c.keys, RemarksKey)
+	c.vals = append(c.vals, remarks)
 	return c
 }
