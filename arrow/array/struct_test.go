@@ -24,6 +24,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStructArray(t *testing.T) {
@@ -529,4 +530,35 @@ func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 			},
 		)
 	}
+}
+
+func TestCreateStructWithNulls(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer pool.AssertSize(t, 0)
+
+	var (
+		fields = []arrow.Field{
+			{Name: "f1", Type: arrow.PrimitiveTypes.Float64, Nullable: true},
+			{Name: "f2", Type: arrow.PrimitiveTypes.Int32, Nullable: false},
+		}
+		dtype = arrow.StructOf(fields...)
+	)
+
+	sb := array.NewStructBuilder(pool, dtype)
+	defer sb.Release()
+
+	sb.AppendNulls(100)
+
+	arr := sb.NewArray().(*array.Struct)
+	defer arr.Release()
+
+	assert.EqualValues(t, 100, arr.Len())
+	assert.EqualValues(t, 100, arr.NullN())
+
+	arr2, err := array.NewStructArrayWithFieldsAndNulls(
+		[]arrow.Array{arr.Field(0), arr.Field(1)}, fields, arr.Data().Buffers()[0], arr.NullN(), 0)
+	require.NoError(t, err)
+	defer arr2.Release()
+
+	assert.True(t, array.Equal(arr, arr2))
 }
