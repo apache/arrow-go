@@ -18,6 +18,7 @@ package pqarrow
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -240,6 +241,22 @@ func repFromNullable(isnullable bool) parquet.Repetition {
 	return parquet.Repetitions.Required
 }
 
+func variantToNode(t *variantExtensionType, field arrow.Field, props *parquet.WriterProperties, arrProps ArrowWriterProperties) (schema.Node, error) {
+	metadataNode, err := fieldToNode("metadata", t.Metadata(), props, arrProps)
+	if err != nil {
+		return nil, err
+	}
+
+	valueNode, err := fieldToNode("value", t.Value(), props, arrProps)
+	if err != nil {
+		return nil, err
+	}
+
+	return schema.NewGroupNodeLogical(field.Name, repFromNullable(field.Nullable),
+		schema.FieldList{metadataNode, valueNode}, schema.VariantLogicalType{},
+		fieldIDFromMeta(field.Metadata))
+}
+
 func structToNode(field arrow.Field, props *parquet.WriterProperties, arrprops ArrowWriterProperties) (schema.Node, error) {
 	typ := field.Type.(*arrow.StructType)
 	if typ.NumFields() == 0 {
@@ -306,6 +323,11 @@ func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties
 			}, fieldIDFromMeta(field.Metadata))
 		}
 		return schema.MapOf(field.Name, keyNode, valueNode, repFromNullable(field.Nullable), fieldIDFromMeta(field.Metadata))
+	case arrow.EXTENSION:
+		extType := field.Type.(arrow.ExtensionType)
+		if extType.ExtensionName() == "parquet.variant" {
+			return variantToNode(extType.(*variantExtensionType), field, props, arrprops)
+		}
 	}
 
 	// Not a GroupNode
@@ -831,11 +853,29 @@ func mapToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *sc
 	return nil
 }
 
+func variantToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *schemaTree, parent, out *SchemaField) error {
+	// this is for unshredded variants. shredded variants may have more fields
+	if n.NumFields() != 2 {
+		return errors.New("VARIANT group must have exactly 2 children")
+	}
+
+	var err error
+	if err = groupToStructField(n, currentLevels, ctx, out); err != nil {
+		return err
+	}
+
+	storageType := out.Field.Type
+	out.Field.Type, err = newVariantType(storageType)
+	return err
+}
+
 func groupToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *schemaTree, parent, out *SchemaField) error {
 	if n.LogicalType().Equals(schema.NewListLogicalType()) {
 		return listToSchemaField(n, currentLevels, ctx, parent, out)
 	} else if n.LogicalType().Equals(schema.MapLogicalType{}) {
 		return mapToSchemaField(n, currentLevels, ctx, parent, out)
+	} else if n.LogicalType().Equals(schema.VariantLogicalType{}) {
+		return variantToSchemaField(n, currentLevels, ctx, parent, out)
 	}
 
 	if n.RepetitionType() == parquet.Repetitions.Repeated {

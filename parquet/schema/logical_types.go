@@ -70,6 +70,8 @@ func getLogicalType(l *format.LogicalType) LogicalType {
 		return UUIDLogicalType{}
 	case l.IsSetFLOAT16():
 		return Float16LogicalType{}
+	case l.IsSetVARIANT():
+		return VariantLogicalType{}
 	case l == nil:
 		return NoLogicalType{}
 	default:
@@ -1107,6 +1109,41 @@ func (Float16LogicalType) toThrift() *format.LogicalType {
 
 func (Float16LogicalType) Equals(rhs LogicalType) bool {
 	_, ok := rhs.(Float16LogicalType)
+	return ok
+}
+
+type VariantLogicalType struct{ baseLogicalType }
+
+func (VariantLogicalType) IsNested() bool { return true }
+
+func (VariantLogicalType) SortOrder() SortOrder {
+	return SortUNKNOWN
+}
+
+func (VariantLogicalType) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]string{"Type": VariantLogicalType{}.String()})
+}
+
+func (VariantLogicalType) String() string {
+	return "Variant"
+}
+
+func (VariantLogicalType) ToConvertedType() (ConvertedType, DecimalMetadata) {
+	return ConvertedTypes.None, DecimalMetadata{}
+}
+
+func (VariantLogicalType) IsCompatible(ct ConvertedType, _ DecimalMetadata) bool {
+	return ct == ConvertedTypes.None
+}
+
+func (VariantLogicalType) IsApplicable(parquet.Type, int32) bool { return false }
+
+func (VariantLogicalType) toThrift() *format.LogicalType {
+	return &format.LogicalType{VARIANT: format.NewVariantType()}
+}
+
+func (VariantLogicalType) Equals(rhs LogicalType) bool {
+	_, ok := rhs.(VariantLogicalType)
 	return ok
 }
 
