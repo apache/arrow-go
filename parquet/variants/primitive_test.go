@@ -22,8 +22,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func diffByteArrays(t *testing.T, got, want []byte) {
@@ -127,7 +130,8 @@ func TestInt(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var b bytes.Buffer
-			size := marshalInt(c.val, &b)
+			size, err := marshalNumeric(c.val, &b)
+			require.NoError(t, err)
 			encoded := b.Bytes()
 			checkSize(t, size, encoded)
 			if gotHdr := encoded[0]; gotHdr != c.wantHdr {
@@ -167,7 +171,8 @@ func TestUUID(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var b bytes.Buffer
-			size := marshalUUID(c.uuid, &b)
+			size, err := marshalUUID(c.uuid, &b)
+			require.NoError(t, err)
 			if size != 17 {
 				t.Fatalf("Incorrect size. Got %d, want 17", size)
 			}
@@ -185,7 +190,8 @@ func TestUUID(t *testing.T) {
 
 func TestFloat(t *testing.T) {
 	var b bytes.Buffer
-	size := marshalFloat(1.1, &b)
+	size, err := marshalNumeric(1.1, &b)
+	require.NoError(t, err)
 	encodedFloat := b.Bytes()
 	checkSize(t, size, encodedFloat)
 	diffByteArrays(t, encodedFloat, []byte{
@@ -206,7 +212,8 @@ func TestFloat(t *testing.T) {
 
 func TestDouble(t *testing.T) {
 	var b bytes.Buffer
-	size := marshalDouble(1.1, &b)
+	size, err := marshalNumeric(float64(1.1), &b)
+	require.NoError(t, err)
 	encodedDouble := b.Bytes()
 	checkSize(t, size, encodedDouble)
 	diffByteArrays(t, encodedDouble, []byte{
@@ -470,7 +477,8 @@ func TestString(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var b bytes.Buffer
-			size := marshalString(c.str, &b)
+			size, err := marshalString(c.str, &b)
+			require.NoError(t, err)
 			checkSize(t, size, c.wantEncoded)
 
 			gotEncoded := b.Bytes()
@@ -504,7 +512,8 @@ func TestBinary(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var b bytes.Buffer
-			size := marshalBinary(c.bin, &b)
+			size, err := marshalBinary(c.bin, &b)
+			require.NoError(t, err)
 			checkSize(t, size, c.wantEncoded)
 			diff(t, b.Bytes(), c.wantEncoded)
 		})
@@ -549,7 +558,8 @@ func TestTimestamp(t *testing.T) {
 				ref = ref.Local()
 			}
 			var b bytes.Buffer
-			size := marshalTimestamp(ref, c.nanos, &b)
+			size, err := marshalTimestamp(ref, c.nanos, &b)
+			require.NoError(t, err)
 			wantEncoded := []byte{c.wantHdr}
 			if c.nanos {
 				wantEncoded = append(wantEncoded, []byte{
@@ -591,7 +601,8 @@ func TestTimestamp(t *testing.T) {
 func TestDate(t *testing.T) {
 	day := time.Unix(0, 0).Add(10000 * 24 * time.Hour)
 	var b bytes.Buffer
-	size := marshalDate(day, &b)
+	size, err := marshalNumeric(arrow.Date32FromTime(day), &b)
+	require.NoError(t, err)
 	encodedDate := b.Bytes()
 	checkSize(t, size, encodedDate)
 	diffByteArrays(t, encodedDate, []byte{
@@ -602,10 +613,6 @@ func TestDate(t *testing.T) {
 		0x00, // 10000 = 0x0000 2710
 	})
 	got, err := unmarshalDate(encodedDate, 0)
-	if err != nil {
-		t.Fatalf("unmarshalDate(): %v", err)
-	}
-	if want := day; got != want {
-		t.Fatalf("Incorrect date: got %s, want %s", got, want)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, got, day)
 }
