@@ -24,6 +24,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 )
 
 func diffByteArrays(t *testing.T, got, want []byte) {
@@ -127,7 +128,8 @@ func TestInt(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var b bytes.Buffer
-			size := marshalInt(c.val, &b)
+			size, err := marshalNumeric(c.val, &b)
+			require.NoError(t, err)
 			encoded := b.Bytes()
 			checkSize(t, size, encoded)
 			if gotHdr := encoded[0]; gotHdr != c.wantHdr {
@@ -167,7 +169,8 @@ func TestUUID(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var b bytes.Buffer
-			size := marshalUUID(c.uuid, &b)
+			size, err := marshalUUID(c.uuid, &b)
+			require.NoError(t, err)
 			if size != 17 {
 				t.Fatalf("Incorrect size. Got %d, want 17", size)
 			}
@@ -185,7 +188,8 @@ func TestUUID(t *testing.T) {
 
 func TestFloat(t *testing.T) {
 	var b bytes.Buffer
-	size := marshalFloat(1.1, &b)
+	size, err := marshalNumeric(1.1, &b)
+	require.NoError(t, err)
 	encodedFloat := b.Bytes()
 	checkSize(t, size, encodedFloat)
 	diffByteArrays(t, encodedFloat, []byte{
@@ -206,7 +210,8 @@ func TestFloat(t *testing.T) {
 
 func TestDouble(t *testing.T) {
 	var b bytes.Buffer
-	size := marshalDouble(1.1, &b)
+	size, err := marshalNumeric(float64(1.1), &b)
+	require.NoError(t, err)
 	encodedDouble := b.Bytes()
 	checkSize(t, size, encodedDouble)
 	diffByteArrays(t, encodedDouble, []byte{
@@ -470,7 +475,8 @@ func TestString(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var b bytes.Buffer
-			size := marshalString(c.str, &b)
+			size, err := marshalString(c.str, &b)
+			require.NoError(t, err)
 			checkSize(t, size, c.wantEncoded)
 
 			gotEncoded := b.Bytes()
@@ -504,7 +510,8 @@ func TestBinary(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var b bytes.Buffer
-			size := marshalBinary(c.bin, &b)
+			size, err := marshalBinary(c.bin, &b)
+			require.NoError(t, err)
 			checkSize(t, size, c.wantEncoded)
 			diff(t, b.Bytes(), c.wantEncoded)
 		})
