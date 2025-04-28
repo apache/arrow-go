@@ -173,7 +173,7 @@ func (e *ExtensionArrayBase) ValueStr(i int) string {
 }
 
 // no-op function that exists simply to force embedding this in any extension array types.
-func (ExtensionArrayBase) mustEmbedExtensionArrayBase() {}
+func (*ExtensionArrayBase) mustEmbedExtensionArrayBase() {}
 
 // ExtensionBuilder is a convenience builder so that NewBuilder and such will still work
 // with extension types properly. Depending on preference it may be cleaner or easier to just use

@@ -27,8 +27,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/decimal"
-	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -434,12 +432,61 @@ func createDictBuilder[T arrow.ValueType](mem memory.Allocator, idxbldr IndexBui
 			dt:         dt,
 		},
 	}
+	ret.builder.refCount.Add(1)
 
 	if init != nil {
 		if err := ret.InsertDictValues(init.(arrValues[T])); err != nil {
 			panic(err)
 		}
 	}
+	return ret
+}
+
+func createBinaryDictBuilder(mem memory.Allocator, idxbldr IndexBuilder, memo hashing.MemoTable, dt *arrow.DictionaryType, init arrow.Array) DictionaryBuilder {
+	ret := &BinaryDictionaryBuilder{
+		dictionaryBuilder: dictionaryBuilder{
+			builder:    builder{mem: mem},
+			idxBuilder: idxbldr,
+			memoTable:  memo,
+			dt:         dt,
+		},
+	}
+	ret.builder.refCount.Add(1)
+
+	if init != nil {
+		switch v := init.(type) {
+		case *String:
+			if err := ret.InsertStringDictValues(v); err != nil {
+				panic(err)
+			}
+		case *Binary:
+			if err := ret.InsertDictValues(v); err != nil {
+				panic(err)
+			}
+		}
+	}
+	return ret
+}
+
+func createFixedSizeDictBuilder[T fsbType](mem memory.Allocator, idxbldr IndexBuilder, memo hashing.MemoTable, dt *arrow.DictionaryType, init arrow.Array) DictionaryBuilder {
+	var z T
+	ret := &fixedSizeDictionaryBuilder[T]{
+		dictionaryBuilder: dictionaryBuilder{
+			builder:    builder{mem: mem},
+			idxBuilder: idxbldr,
+			memoTable:  memo,
+			dt:         dt,
+		},
+		byteWidth: int(unsafe.Sizeof(z)),
+	}
+	ret.builder.refCount.Add(1)
+
+	if init != nil {
+		if err := ret.InsertDictValues(init.(arrValues[T])); err != nil {
+			panic(err)
+		}
+	}
+
 	return ret
 }
 
@@ -460,18 +507,17 @@ func NewDictionaryBuilderWithDict(mem memory.Allocator, dt *arrow.DictionaryType
 		panic(fmt.Errorf("arrow/array: unsupported builder for value type of %T", dt))
 	}
 
-	bldr := dictionaryBuilder{
-		builder:    builder{mem: mem},
-		idxBuilder: idxbldr,
-		memoTable:  memo,
-		dt:         dt,
-	}
-
-	bldr.builder.refCount.Add(1)
-
 	switch dt.ValueType.ID() {
 	case arrow.NULL:
-		ret := &NullDictionaryBuilder{bldr}
+		ret := &NullDictionaryBuilder{
+			dictionaryBuilder: dictionaryBuilder{
+				builder:    builder{mem: mem},
+				idxBuilder: idxbldr,
+				memoTable:  memo,
+				dt:         dt,
+			},
+		}
+		ret.builder.refCount.Add(1)
 		debug.Assert(init == nil, "arrow/array: doesn't make sense to init a null dictionary")
 		return ret
 	case arrow.UINT8:
@@ -496,26 +542,20 @@ func NewDictionaryBuilderWithDict(mem memory.Allocator, dt *arrow.DictionaryType
 		return createDictBuilder[float32](mem, idxbldr, memo, dt, init)
 	case arrow.FLOAT64:
 		return createDictBuilder[float64](mem, idxbldr, memo, dt, init)
-	case arrow.STRING:
-		ret := &BinaryDictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertStringDictValues(init.(*String)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
-	case arrow.BINARY:
-		ret := &BinaryDictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Binary)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+	case arrow.STRING, arrow.BINARY:
+		return createBinaryDictBuilder(mem, idxbldr, memo, dt, init)
 	case arrow.FIXED_SIZE_BINARY:
 		ret := &FixedSizeBinaryDictionaryBuilder{
-			bldr, dt.ValueType.(*arrow.FixedSizeBinaryType).ByteWidth,
+			dictionaryBuilder: dictionaryBuilder{
+				builder:    builder{mem: mem},
+				idxBuilder: idxbldr,
+				memoTable:  memo,
+				dt:         dt,
+			},
+			byteWidth: dt.ValueType.(*arrow.FixedSizeBinaryType).ByteWidth,
 		}
+		ret.builder.refCount.Add(1)
+
 		if init != nil {
 			if err = ret.InsertDictValues(init.(*FixedSizeBinary)); err != nil {
 				panic(err)
@@ -535,45 +575,15 @@ func NewDictionaryBuilderWithDict(mem memory.Allocator, dt *arrow.DictionaryType
 	case arrow.INTERVAL_MONTHS:
 		return createDictBuilder[arrow.MonthInterval](mem, idxbldr, memo, dt, init)
 	case arrow.INTERVAL_DAY_TIME:
-		ret := &DayTimeDictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*DayTimeInterval)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createFixedSizeDictBuilder[arrow.DayTimeInterval](mem, idxbldr, memo, dt, init)
 	case arrow.DECIMAL32:
-		ret := &Decimal32DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Decimal32)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createFixedSizeDictBuilder[decimal.Decimal32](mem, idxbldr, memo, dt, init)
 	case arrow.DECIMAL64:
-		ret := &Decimal64DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Decimal64)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createFixedSizeDictBuilder[decimal.Decimal64](mem, idxbldr, memo, dt, init)
 	case arrow.DECIMAL128:
-		ret := &Decimal128DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Decimal128)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createFixedSizeDictBuilder[decimal.Decimal128](mem, idxbldr, memo, dt, init)
 	case arrow.DECIMAL256:
-		ret := &Decimal256DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Decimal256)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createFixedSizeDictBuilder[decimal.Decimal256](mem, idxbldr, memo, dt, init)
 	case arrow.LIST:
 	case arrow.STRUCT:
 	case arrow.SPARSE_UNION:
@@ -583,24 +593,12 @@ func NewDictionaryBuilderWithDict(mem memory.Allocator, dt *arrow.DictionaryType
 	case arrow.EXTENSION:
 	case arrow.FIXED_SIZE_LIST:
 	case arrow.DURATION:
-		ret := &DurationDictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Duration)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[arrow.Duration](mem, idxbldr, memo, dt, init)
 	case arrow.LARGE_STRING:
 	case arrow.LARGE_BINARY:
 	case arrow.LARGE_LIST:
 	case arrow.INTERVAL_MONTH_DAY_NANO:
-		ret := &MonthDayNanoDictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*MonthDayNanoInterval)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createFixedSizeDictBuilder[arrow.MonthDayNanoInterval](mem, idxbldr, memo, dt, init)
 	}
 
 	panic("arrow/array: unimplemented dictionary key type")
@@ -1027,6 +1025,12 @@ type Time64DictionaryBuilder = dictBuilder[arrow.Time64]
 type Date32DictionaryBuilder = dictBuilder[arrow.Date32]
 type Date64DictionaryBuilder = dictBuilder[arrow.Date64]
 type MonthIntervalDictionaryBuilder = dictBuilder[arrow.MonthInterval]
+type DayTimeDictionaryBuilder = fixedSizeDictionaryBuilder[arrow.DayTimeInterval]
+type Decimal32DictionaryBuilder = fixedSizeDictionaryBuilder[decimal.Decimal32]
+type Decimal64DictionaryBuilder = fixedSizeDictionaryBuilder[decimal.Decimal64]
+type Decimal128DictionaryBuilder = fixedSizeDictionaryBuilder[decimal.Decimal128]
+type Decimal256DictionaryBuilder = fixedSizeDictionaryBuilder[decimal.Decimal256]
+type MonthDayNanoDictionaryBuilder = fixedSizeDictionaryBuilder[arrow.MonthDayNanoInterval]
 
 type BinaryDictionaryBuilder struct {
 	dictionaryBuilder
@@ -1103,6 +1107,41 @@ func (b *BinaryDictionaryBuilder) ValueStr(i int) string {
 	return string(b.Value(i))
 }
 
+type fsbType interface {
+	arrow.DayTimeInterval | arrow.MonthDayNanoInterval |
+		decimal.Decimal32 | decimal.Decimal64 | decimal.Decimal128 | decimal.Decimal256
+}
+
+type fixedSizeDictionaryBuilder[T fsbType] struct {
+	dictionaryBuilder
+	byteWidth int
+}
+
+func (b *fixedSizeDictionaryBuilder[T]) Append(v T) error {
+	if v, ok := any(v).([]byte); ok {
+		return b.appendBytes(v[:b.byteWidth])
+	}
+
+	sliceHdr := struct {
+		Addr *T
+		Len  int
+		Cap  int
+	}{&v, b.byteWidth, b.byteWidth}
+	slice := *(*[]byte)(unsafe.Pointer(&sliceHdr))
+	return b.appendValue(slice)
+}
+
+func (b *fixedSizeDictionaryBuilder[T]) InsertDictValues(arr arrValues[T]) (err error) {
+	data := arrow.GetBytes(arr.Values())
+	for len(data) > 0 {
+		if err = b.insertDictBytes(data[:b.byteWidth]); err != nil {
+			break
+		}
+		data = data[b.byteWidth:]
+	}
+	return
+}
+
 type FixedSizeBinaryDictionaryBuilder struct {
 	dictionaryBuilder
 	byteWidth int
@@ -1127,119 +1166,119 @@ func (b *FixedSizeBinaryDictionaryBuilder) InsertDictValues(arr *FixedSizeBinary
 	return
 }
 
-type Decimal32DictionaryBuilder struct {
-	dictionaryBuilder
-}
+// type Decimal32DictionaryBuilder struct {
+// 	dictionaryBuilder
+// }
 
-func (b *Decimal32DictionaryBuilder) Append(v decimal.Decimal32) error {
-	return b.appendValue((*(*[arrow.Decimal32SizeBytes]byte)(unsafe.Pointer(&v)))[:])
-}
+// func (b *Decimal32DictionaryBuilder) Append(v decimal.Decimal32) error {
+// 	return b.appendValue((*(*[arrow.Decimal32SizeBytes]byte)(unsafe.Pointer(&v)))[:])
+// }
 
-func (b *Decimal32DictionaryBuilder) InsertDictValues(arr *Decimal32) (err error) {
-	data := arrow.Decimal32Traits.CastToBytes(arr.values)
-	for len(data) > 0 {
-		if err = b.insertDictValue(data[:arrow.Decimal32SizeBytes]); err != nil {
-			break
-		}
-		data = data[arrow.Decimal32SizeBytes:]
-	}
-	return
-}
+// func (b *Decimal32DictionaryBuilder) InsertDictValues(arr *Decimal32) (err error) {
+// 	data := arrow.Decimal32Traits.CastToBytes(arr.values)
+// 	for len(data) > 0 {
+// 		if err = b.insertDictValue(data[:arrow.Decimal32SizeBytes]); err != nil {
+// 			break
+// 		}
+// 		data = data[arrow.Decimal32SizeBytes:]
+// 	}
+// 	return
+// }
 
-type Decimal64DictionaryBuilder struct {
-	dictionaryBuilder
-}
+// type Decimal64DictionaryBuilder struct {
+// 	dictionaryBuilder
+// }
 
-func (b *Decimal64DictionaryBuilder) Append(v decimal.Decimal64) error {
-	return b.appendValue((*(*[arrow.Decimal64SizeBytes]byte)(unsafe.Pointer(&v)))[:])
-}
+// func (b *Decimal64DictionaryBuilder) Append(v decimal.Decimal64) error {
+// 	return b.appendValue((*(*[arrow.Decimal64SizeBytes]byte)(unsafe.Pointer(&v)))[:])
+// }
 
-func (b *Decimal64DictionaryBuilder) InsertDictValues(arr *Decimal64) (err error) {
-	data := arrow.Decimal64Traits.CastToBytes(arr.values)
-	for len(data) > 0 {
-		if err = b.insertDictValue(data[:arrow.Decimal64SizeBytes]); err != nil {
-			break
-		}
-		data = data[arrow.Decimal64SizeBytes:]
-	}
-	return
-}
+// func (b *Decimal64DictionaryBuilder) InsertDictValues(arr *Decimal64) (err error) {
+// 	data := arrow.Decimal64Traits.CastToBytes(arr.values)
+// 	for len(data) > 0 {
+// 		if err = b.insertDictValue(data[:arrow.Decimal64SizeBytes]); err != nil {
+// 			break
+// 		}
+// 		data = data[arrow.Decimal64SizeBytes:]
+// 	}
+// 	return
+// }
 
-type Decimal128DictionaryBuilder struct {
-	dictionaryBuilder
-}
+// type Decimal128DictionaryBuilder struct {
+// 	dictionaryBuilder
+// }
 
-func (b *Decimal128DictionaryBuilder) Append(v decimal128.Num) error {
-	return b.appendValue((*(*[arrow.Decimal128SizeBytes]byte)(unsafe.Pointer(&v)))[:])
-}
+// func (b *Decimal128DictionaryBuilder) Append(v decimal128.Num) error {
+// 	return b.appendValue((*(*[arrow.Decimal128SizeBytes]byte)(unsafe.Pointer(&v)))[:])
+// }
 
-func (b *Decimal128DictionaryBuilder) InsertDictValues(arr *Decimal128) (err error) {
-	data := arrow.Decimal128Traits.CastToBytes(arr.values)
-	for len(data) > 0 {
-		if err = b.insertDictValue(data[:arrow.Decimal128SizeBytes]); err != nil {
-			break
-		}
-		data = data[arrow.Decimal128SizeBytes:]
-	}
-	return
-}
+// func (b *Decimal128DictionaryBuilder) InsertDictValues(arr *Decimal128) (err error) {
+// 	data := arrow.Decimal128Traits.CastToBytes(arr.values)
+// 	for len(data) > 0 {
+// 		if err = b.insertDictValue(data[:arrow.Decimal128SizeBytes]); err != nil {
+// 			break
+// 		}
+// 		data = data[arrow.Decimal128SizeBytes:]
+// 	}
+// 	return
+// }
 
-type Decimal256DictionaryBuilder struct {
-	dictionaryBuilder
-}
+// type Decimal256DictionaryBuilder struct {
+// 	dictionaryBuilder
+// }
 
-func (b *Decimal256DictionaryBuilder) Append(v decimal256.Num) error {
-	return b.appendValue((*(*[arrow.Decimal256SizeBytes]byte)(unsafe.Pointer(&v)))[:])
-}
+// func (b *Decimal256DictionaryBuilder) Append(v decimal256.Num) error {
+// 	return b.appendValue((*(*[arrow.Decimal256SizeBytes]byte)(unsafe.Pointer(&v)))[:])
+// }
 
-func (b *Decimal256DictionaryBuilder) InsertDictValues(arr *Decimal256) (err error) {
-	data := arrow.Decimal256Traits.CastToBytes(arr.values)
-	for len(data) > 0 {
-		if err = b.insertDictValue(data[:arrow.Decimal256SizeBytes]); err != nil {
-			break
-		}
-		data = data[arrow.Decimal256SizeBytes:]
-	}
-	return
-}
+// func (b *Decimal256DictionaryBuilder) InsertDictValues(arr *Decimal256) (err error) {
+// 	data := arrow.Decimal256Traits.CastToBytes(arr.values)
+// 	for len(data) > 0 {
+// 		if err = b.insertDictValue(data[:arrow.Decimal256SizeBytes]); err != nil {
+// 			break
+// 		}
+// 		data = data[arrow.Decimal256SizeBytes:]
+// 	}
+// 	return
+// }
 
-type MonthDayNanoDictionaryBuilder struct {
-	dictionaryBuilder
-}
+// type MonthDayNanoDictionaryBuilder struct {
+// 	dictionaryBuilder
+// }
 
-func (b *MonthDayNanoDictionaryBuilder) Append(v arrow.MonthDayNanoInterval) error {
-	return b.appendValue((*(*[arrow.MonthDayNanoIntervalSizeBytes]byte)(unsafe.Pointer(&v)))[:])
-}
+// func (b *MonthDayNanoDictionaryBuilder) Append(v arrow.MonthDayNanoInterval) error {
+// 	return b.appendValue((*(*[arrow.MonthDayNanoIntervalSizeBytes]byte)(unsafe.Pointer(&v)))[:])
+// }
 
-func (b *MonthDayNanoDictionaryBuilder) InsertDictValues(arr *MonthDayNanoInterval) (err error) {
-	data := arrow.MonthDayNanoIntervalTraits.CastToBytes(arr.values)
-	for len(data) > 0 {
-		if err = b.insertDictValue(data[:arrow.MonthDayNanoIntervalSizeBytes]); err != nil {
-			break
-		}
-		data = data[arrow.MonthDayNanoIntervalSizeBytes:]
-	}
-	return
-}
+// func (b *MonthDayNanoDictionaryBuilder) InsertDictValues(arr *MonthDayNanoInterval) (err error) {
+// 	data := arrow.MonthDayNanoIntervalTraits.CastToBytes(arr.values)
+// 	for len(data) > 0 {
+// 		if err = b.insertDictValue(data[:arrow.MonthDayNanoIntervalSizeBytes]); err != nil {
+// 			break
+// 		}
+// 		data = data[arrow.MonthDayNanoIntervalSizeBytes:]
+// 	}
+// 	return
+// }
 
-type DayTimeDictionaryBuilder struct {
-	dictionaryBuilder
-}
+// type DayTimeDictionaryBuilder struct {
+// 	dictionaryBuilder
+// }
 
-func (b *DayTimeDictionaryBuilder) Append(v arrow.DayTimeInterval) error {
-	return b.appendValue((*(*[arrow.DayTimeIntervalSizeBytes]byte)(unsafe.Pointer(&v)))[:])
-}
+// func (b *DayTimeDictionaryBuilder) Append(v arrow.DayTimeInterval) error {
+// 	return b.appendValue((*(*[arrow.DayTimeIntervalSizeBytes]byte)(unsafe.Pointer(&v)))[:])
+// }
 
-func (b *DayTimeDictionaryBuilder) InsertDictValues(arr *DayTimeInterval) (err error) {
-	data := arrow.DayTimeIntervalTraits.CastToBytes(arr.values)
-	for len(data) > 0 {
-		if err = b.insertDictValue(data[:arrow.DayTimeIntervalSizeBytes]); err != nil {
-			break
-		}
-		data = data[arrow.DayTimeIntervalSizeBytes:]
-	}
-	return
-}
+// func (b *DayTimeDictionaryBuilder) InsertDictValues(arr *DayTimeInterval) (err error) {
+// 	data := arrow.DayTimeIntervalTraits.CastToBytes(arr.values)
+// 	for len(data) > 0 {
+// 		if err = b.insertDictValue(data[:arrow.DayTimeIntervalSizeBytes]); err != nil {
+// 			break
+// 		}
+// 		data = data[arrow.DayTimeIntervalSizeBytes:]
+// 	}
+// 	return
+// }
 
 func IsTrivialTransposition(transposeMap []int32) bool {
 	for i, t := range transposeMap {
