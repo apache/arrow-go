@@ -2228,7 +2228,7 @@ func getQuerySchema() *arrow.Schema {
 				IsSearchable(true).
 				CatalogName("catalog_test").
 				Precision(100).
-        Remarks("test column").
+				Remarks("test column").
 				Build().Data}}, nil)
 }
 
@@ -2243,7 +2243,7 @@ func getQueryWithTransactionSchema() *arrow.Schema {
 				SchemaName("schema_test").
 				IsSearchable(true).
 				CatalogName("catalog_test").
-        Remarks("test column").
+				Remarks("test column").
 				Precision(100).Build().Data}}, nil)
 }
 
