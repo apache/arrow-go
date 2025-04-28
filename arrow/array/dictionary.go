@@ -425,6 +425,24 @@ type dictionaryBuilder struct {
 	idxBuilder  IndexBuilder
 }
 
+func createDictBuilder[T arrow.ValueType](mem memory.Allocator, idxbldr IndexBuilder, memo hashing.MemoTable, dt *arrow.DictionaryType, init arrow.Array) DictionaryBuilder {
+	ret := &dictBuilder[T]{
+		dictionaryBuilder: dictionaryBuilder{
+			builder:    builder{mem: mem},
+			idxBuilder: idxbldr,
+			memoTable:  memo,
+			dt:         dt,
+		},
+	}
+
+	if init != nil {
+		if err := ret.InsertDictValues(init.(arrValues[T])); err != nil {
+			panic(err)
+		}
+	}
+	return ret
+}
+
 // NewDictionaryBuilderWithDict initializes a dictionary builder and inserts the values from `init` as the first
 // values in the dictionary, but does not insert them as values into the array.
 func NewDictionaryBuilderWithDict(mem memory.Allocator, dt *arrow.DictionaryType, init arrow.Array) DictionaryBuilder {
@@ -457,93 +475,27 @@ func NewDictionaryBuilderWithDict(mem memory.Allocator, dt *arrow.DictionaryType
 		debug.Assert(init == nil, "arrow/array: doesn't make sense to init a null dictionary")
 		return ret
 	case arrow.UINT8:
-		ret := &Uint8DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Uint8)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[uint8](mem, idxbldr, memo, dt, init)
 	case arrow.INT8:
-		ret := &Int8DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Int8)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[int8](mem, idxbldr, memo, dt, init)
 	case arrow.UINT16:
-		ret := &Uint16DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Uint16)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[uint16](mem, idxbldr, memo, dt, init)
 	case arrow.INT16:
-		ret := &Int16DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Int16)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[int16](mem, idxbldr, memo, dt, init)
 	case arrow.UINT32:
-		ret := &Uint32DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Uint32)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[uint32](mem, idxbldr, memo, dt, init)
 	case arrow.INT32:
-		ret := &Int32DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Int32)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[int32](mem, idxbldr, memo, dt, init)
 	case arrow.UINT64:
-		ret := &Uint64DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Uint64)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[uint64](mem, idxbldr, memo, dt, init)
 	case arrow.INT64:
-		ret := &Int64DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Int64)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[int64](mem, idxbldr, memo, dt, init)
 	case arrow.FLOAT16:
-		ret := &Float16DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Float16)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[float16.Num](mem, idxbldr, memo, dt, init)
 	case arrow.FLOAT32:
-		ret := &Float32DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Float32)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[float32](mem, idxbldr, memo, dt, init)
 	case arrow.FLOAT64:
-		ret := &Float64DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Float64)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[float64](mem, idxbldr, memo, dt, init)
 	case arrow.STRING:
 		ret := &BinaryDictionaryBuilder{bldr}
 		if init != nil {
@@ -571,53 +523,17 @@ func NewDictionaryBuilderWithDict(mem memory.Allocator, dt *arrow.DictionaryType
 		}
 		return ret
 	case arrow.DATE32:
-		ret := &Date32DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Date32)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[arrow.Date32](mem, idxbldr, memo, dt, init)
 	case arrow.DATE64:
-		ret := &Date64DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Date64)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[arrow.Date64](mem, idxbldr, memo, dt, init)
 	case arrow.TIMESTAMP:
-		ret := &TimestampDictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Timestamp)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[arrow.Timestamp](mem, idxbldr, memo, dt, init)
 	case arrow.TIME32:
-		ret := &Time32DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Time32)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[arrow.Time32](mem, idxbldr, memo, dt, init)
 	case arrow.TIME64:
-		ret := &Time64DictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*Time64)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[arrow.Time64](mem, idxbldr, memo, dt, init)
 	case arrow.INTERVAL_MONTHS:
-		ret := &MonthIntervalDictionaryBuilder{bldr}
-		if init != nil {
-			if err = ret.InsertDictValues(init.(*MonthInterval)); err != nil {
-				panic(err)
-			}
-		}
-		return ret
+		return createDictBuilder[arrow.MonthInterval](mem, idxbldr, memo, dt, init)
 	case arrow.INTERVAL_DAY_TIME:
 		ret := &DayTimeDictionaryBuilder{bldr}
 		if init != nil {
@@ -1072,13 +988,20 @@ func (b *NullDictionaryBuilder) AppendArray(arr arrow.Array) error {
 	return nil
 }
 
-type Int8DictionaryBuilder struct {
+type dictBuilder[T arrow.ValueType] struct {
 	dictionaryBuilder
 }
 
-func (b *Int8DictionaryBuilder) Append(v int8) error { return b.appendValue(v) }
-func (b *Int8DictionaryBuilder) InsertDictValues(arr *Int8) (err error) {
-	for _, v := range arr.values {
+func (b *dictBuilder[T]) Append(v T) error {
+	return b.appendValue(v)
+}
+
+type arrValues[T arrow.ValueType] interface {
+	Values() []T
+}
+
+func (b *dictBuilder[T]) InsertDictValues(arr arrValues[T]) (err error) {
+	for _, v := range arr.Values() {
 		if err = b.insertDictValue(v); err != nil {
 			break
 		}
@@ -1086,246 +1009,24 @@ func (b *Int8DictionaryBuilder) InsertDictValues(arr *Int8) (err error) {
 	return
 }
 
-type Uint8DictionaryBuilder struct {
-	dictionaryBuilder
-}
-
-func (b *Uint8DictionaryBuilder) Append(v uint8) error { return b.appendValue(v) }
-func (b *Uint8DictionaryBuilder) InsertDictValues(arr *Uint8) (err error) {
-	for _, v := range arr.values {
-		if err = b.insertDictValue(v); err != nil {
-			break
-		}
-	}
-	return
-}
-
-type Int16DictionaryBuilder struct {
-	dictionaryBuilder
-}
-
-func (b *Int16DictionaryBuilder) Append(v int16) error { return b.appendValue(v) }
-func (b *Int16DictionaryBuilder) InsertDictValues(arr *Int16) (err error) {
-	for _, v := range arr.values {
-		if err = b.insertDictValue(v); err != nil {
-			break
-		}
-	}
-	return
-}
-
-type Uint16DictionaryBuilder struct {
-	dictionaryBuilder
-}
-
-func (b *Uint16DictionaryBuilder) Append(v uint16) error { return b.appendValue(v) }
-func (b *Uint16DictionaryBuilder) InsertDictValues(arr *Uint16) (err error) {
-	for _, v := range arr.values {
-		if err = b.insertDictValue(v); err != nil {
-			break
-		}
-	}
-	return
-}
-
-type Int32DictionaryBuilder struct {
-	dictionaryBuilder
-}
-
-func (b *Int32DictionaryBuilder) Append(v int32) error { return b.appendValue(v) }
-func (b *Int32DictionaryBuilder) InsertDictValues(arr *Int32) (err error) {
-	for _, v := range arr.values {
-		if err = b.insertDictValue(v); err != nil {
-			break
-		}
-	}
-	return
-}
-
-type Uint32DictionaryBuilder struct {
-	dictionaryBuilder
-}
-
-func (b *Uint32DictionaryBuilder) Append(v uint32) error { return b.appendValue(v) }
-func (b *Uint32DictionaryBuilder) InsertDictValues(arr *Uint32) (err error) {
-	for _, v := range arr.values {
-		if err = b.insertDictValue(v); err != nil {
-			break
-		}
-	}
-	return
-}
-
-type Int64DictionaryBuilder struct {
-	dictionaryBuilder
-}
-
-func (b *Int64DictionaryBuilder) Append(v int64) error { return b.appendValue(v) }
-func (b *Int64DictionaryBuilder) InsertDictValues(arr *Int64) (err error) {
-	for _, v := range arr.values {
-		if err = b.insertDictValue(v); err != nil {
-			break
-		}
-	}
-	return
-}
-
-type Uint64DictionaryBuilder struct {
-	dictionaryBuilder
-}
-
-func (b *Uint64DictionaryBuilder) Append(v uint64) error { return b.appendValue(v) }
-func (b *Uint64DictionaryBuilder) InsertDictValues(arr *Uint64) (err error) {
-	for _, v := range arr.values {
-		if err = b.insertDictValue(v); err != nil {
-			break
-		}
-	}
-	return
-}
-
-type DurationDictionaryBuilder struct {
-	dictionaryBuilder
-}
-
-func (b *DurationDictionaryBuilder) Append(v arrow.Duration) error { return b.appendValue(int64(v)) }
-func (b *DurationDictionaryBuilder) InsertDictValues(arr *Duration) (err error) {
-	for _, v := range arr.values {
-		if err = b.insertDictValue(int64(v)); err != nil {
-			break
-		}
-	}
-	return
-}
-
-type TimestampDictionaryBuilder struct {
-	dictionaryBuilder
-}
-
-func (b *TimestampDictionaryBuilder) Append(v arrow.Timestamp) error { return b.appendValue(int64(v)) }
-func (b *TimestampDictionaryBuilder) InsertDictValues(arr *Timestamp) (err error) {
-	for _, v := range arr.values {
-		if err = b.insertDictValue(int64(v)); err != nil {
-			break
-		}
-	}
-	return
-}
-
-type Time32DictionaryBuilder struct {
-	dictionaryBuilder
-}
-
-func (b *Time32DictionaryBuilder) Append(v arrow.Time32) error { return b.appendValue(int32(v)) }
-func (b *Time32DictionaryBuilder) InsertDictValues(arr *Time32) (err error) {
-	for _, v := range arr.values {
-		if err = b.insertDictValue(int32(v)); err != nil {
-			break
-		}
-	}
-	return
-}
-
-type Time64DictionaryBuilder struct {
-	dictionaryBuilder
-}
-
-func (b *Time64DictionaryBuilder) Append(v arrow.Time64) error { return b.appendValue(int64(v)) }
-func (b *Time64DictionaryBuilder) InsertDictValues(arr *Time64) (err error) {
-	for _, v := range arr.values {
-		if err = b.insertDictValue(int64(v)); err != nil {
-			break
-		}
-	}
-	return
-}
-
-type Date32DictionaryBuilder struct {
-	dictionaryBuilder
-}
-
-func (b *Date32DictionaryBuilder) Append(v arrow.Date32) error { return b.appendValue(int32(v)) }
-func (b *Date32DictionaryBuilder) InsertDictValues(arr *Date32) (err error) {
-	for _, v := range arr.values {
-		if err = b.insertDictValue(int32(v)); err != nil {
-			break
-		}
-	}
-	return
-}
-
-type Date64DictionaryBuilder struct {
-	dictionaryBuilder
-}
-
-func (b *Date64DictionaryBuilder) Append(v arrow.Date64) error { return b.appendValue(int64(v)) }
-func (b *Date64DictionaryBuilder) InsertDictValues(arr *Date64) (err error) {
-	for _, v := range arr.values {
-		if err = b.insertDictValue(int64(v)); err != nil {
-			break
-		}
-	}
-	return
-}
-
-type MonthIntervalDictionaryBuilder struct {
-	dictionaryBuilder
-}
-
-func (b *MonthIntervalDictionaryBuilder) Append(v arrow.MonthInterval) error {
-	return b.appendValue(int32(v))
-}
-
-func (b *MonthIntervalDictionaryBuilder) InsertDictValues(arr *MonthInterval) (err error) {
-	for _, v := range arr.values {
-		if err = b.insertDictValue(int32(v)); err != nil {
-			break
-		}
-	}
-	return
-}
-
-type Float16DictionaryBuilder struct {
-	dictionaryBuilder
-}
-
-func (b *Float16DictionaryBuilder) Append(v float16.Num) error { return b.appendValue(v.Uint16()) }
-func (b *Float16DictionaryBuilder) InsertDictValues(arr *Float16) (err error) {
-	for _, v := range arr.values {
-		if err = b.insertDictValue(v.Uint16()); err != nil {
-			break
-		}
-	}
-	return
-}
-
-type Float32DictionaryBuilder struct {
-	dictionaryBuilder
-}
-
-func (b *Float32DictionaryBuilder) Append(v float32) error { return b.appendValue(v) }
-func (b *Float32DictionaryBuilder) InsertDictValues(arr *Float32) (err error) {
-	for _, v := range arr.values {
-		if err = b.insertDictValue(v); err != nil {
-			break
-		}
-	}
-	return
-}
-
-type Float64DictionaryBuilder struct {
-	dictionaryBuilder
-}
-
-func (b *Float64DictionaryBuilder) Append(v float64) error { return b.appendValue(v) }
-func (b *Float64DictionaryBuilder) InsertDictValues(arr *Float64) (err error) {
-	for _, v := range arr.values {
-		if err = b.insertDictValue(v); err != nil {
-			break
-		}
-	}
-	return
-}
+type Int8DictionaryBuilder = dictBuilder[int8]
+type Uint8DictionaryBuilder = dictBuilder[uint8]
+type Int16DictionaryBuilder = dictBuilder[int16]
+type Uint16DictionaryBuilder = dictBuilder[uint16]
+type Int32DictionaryBuilder = dictBuilder[int32]
+type Uint32DictionaryBuilder = dictBuilder[uint32]
+type Int64DictionaryBuilder = dictBuilder[int64]
+type Uint64DictionaryBuilder = dictBuilder[uint64]
+type Float16DictionaryBuilder = dictBuilder[float16.Num]
+type Float32DictionaryBuilder = dictBuilder[float32]
+type Float64DictionaryBuilder = dictBuilder[float64]
+type DurationDictionaryBuilder = dictBuilder[arrow.Duration]
+type TimestampDictionaryBuilder = dictBuilder[arrow.Timestamp]
+type Time32DictionaryBuilder = dictBuilder[arrow.Time32]
+type Time64DictionaryBuilder = dictBuilder[arrow.Time64]
+type Date32DictionaryBuilder = dictBuilder[arrow.Date32]
+type Date64DictionaryBuilder = dictBuilder[arrow.Date64]
+type MonthIntervalDictionaryBuilder = dictBuilder[arrow.MonthInterval]
 
 type BinaryDictionaryBuilder struct {
 	dictionaryBuilder

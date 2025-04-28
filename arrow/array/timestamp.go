@@ -52,8 +52,10 @@ func (a *Timestamp) Reset(data *Data) {
 // Value returns the value at the specified index.
 func (a *Timestamp) Value(i int) arrow.Timestamp { return a.values[i] }
 
+func (a *Timestamp) Values() []arrow.Timestamp { return a.values }
+
 // TimestampValues returns the values.
-func (a *Timestamp) TimestampValues() []arrow.Timestamp { return a.values }
+func (a *Timestamp) TimestampValues() []arrow.Timestamp { return a.Values() }
 
 // String returns a string representation of the array.
 func (a *Timestamp) String() string {
