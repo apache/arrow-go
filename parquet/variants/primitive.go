@@ -28,6 +28,7 @@ import (
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/google/uuid"
 )
 
@@ -136,6 +137,35 @@ func primitiveHeader(prim primitiveType) (byte, error) {
 	return hdr, nil
 }
 
+func marshalDecimal[T decimal.Decimal32 | decimal.Decimal64 | decimal.Decimal128](scale int8, val T, w io.Writer) (int, error) {
+	hdr := [2]byte{0, byte(scale)}
+	switch v := any(val).(type) {
+	case decimal.Decimal32:
+		hdr[0], _ = primitiveHeader(primitiveDecimal4)
+		if _, err := w.Write(hdr[:]); err != nil {
+			return 0, err
+		}
+		return 6, binary.Write(w, binary.LittleEndian, int32(v))
+	case decimal.Decimal64:
+		hdr[0], _ = primitiveHeader(primitiveDecimal8)
+		if _, err := w.Write(hdr[:]); err != nil {
+			return 0, err
+		}
+		return 10, binary.Write(w, binary.LittleEndian, int64(v))
+	case decimal.Decimal128:
+		hdr[0], _ = primitiveHeader(primitiveDecimal16)
+		if _, err := w.Write(hdr[:]); err != nil {
+			return 0, err
+		}
+		if err := binary.Write(w, binary.LittleEndian, v.LowBits()); err != nil {
+			return 2, err
+		}
+		return 18, binary.Write(w, binary.LittleEndian, v.HighBits())
+	default:
+		panic("should never get here")
+	}
+}
+
 // marshalPrimitive takes in a primitive value, asserts its type, then marshals the data according to the Variant spec
 // into the provided writer, returning the number of bytes written.
 //
@@ -176,6 +206,12 @@ func marshalPrimitive(v any, w io.Writer, opts ...MarshalOpts) (int, error) {
 		return marshalNumeric(val, w)
 	case float64:
 		return marshalNumeric(val, w)
+	case arrow.Date32:
+		return marshalNumeric(val, w)
+	case arrow.Date64:
+		return marshalNumeric(arrow.Date32FromTime(val.ToTime()), w)
+	case arrow.Time64:
+		return marshalNumeric(val, w)
 	case uuid.UUID:
 		return marshalUUID(val, w)
 	case string:
@@ -183,15 +219,13 @@ func marshalPrimitive(v any, w io.Writer, opts ...MarshalOpts) (int, error) {
 	case []byte:
 		return marshalBinary(val, w)
 	case arrow.Timestamp:
-		return encodeTimestamp(int64(val), allOpts&MarshalTimeNanos != 0, true, w), nil
-	// TODO: add arrow.Time32/arrow.Time64
-	// TODO: add arrow.Date32/arrow.Date64
+		return encodeTimestamp(int64(val), allOpts&MarshalTimeNanos != 0, false, w)
 	// TODO: add decimal.Decimal32/Decimal64/Decimal128
 	case time.Time:
 		if allOpts&MarshalAsDate != 0 {
-			return marshalDate(val, w), nil
+			return marshalNumeric(arrow.Date32FromTime(val), w)
 		}
-		return marshalTimestamp(val, allOpts&MarshalTimeNanos != 0, w), nil
+		return marshalTimestamp(val, allOpts&MarshalTimeNanos != 0, w)
 	}
 	if v == nil {
 		return marshalNull(w), nil
@@ -417,29 +451,35 @@ func unmarshalBoolean(raw []byte, offset int) (bool, error) {
 	return prim == primitiveTrue, nil
 }
 
-func marshalNumeric[T float32 | float64 | int8 | int16 | int32 | int64](val T, w io.Writer) (int, error) {
-	buf := make([]byte, binary.Size(val)+1)
+func marshalNumeric[T float32 | float64 | int8 | int16 | int32 | int64 | arrow.Date32 | arrow.Time64](val T, w io.Writer) (int, error) {
+	var hdr byte
 	switch any(val).(type) {
 	case int8:
-		buf[0], _ = primitiveHeader(primitiveInt8)
+		hdr, _ = primitiveHeader(primitiveInt8)
 	case int16:
-		buf[0], _ = primitiveHeader(primitiveInt16)
+		hdr, _ = primitiveHeader(primitiveInt16)
 	case int32:
-		buf[0], _ = primitiveHeader(primitiveInt32)
+		hdr, _ = primitiveHeader(primitiveInt32)
 	case int64:
-		buf[0], _ = primitiveHeader(primitiveInt64)
+		hdr, _ = primitiveHeader(primitiveInt64)
 	case float32:
-		buf[0], _ = primitiveHeader(primitiveFloat)
+		hdr, _ = primitiveHeader(primitiveFloat)
 	case float64:
-		buf[0], _ = primitiveHeader(primitiveDouble)
+		hdr, _ = primitiveHeader(primitiveDouble)
+	case arrow.Date32:
+		hdr, _ = primitiveHeader(primitiveDate)
+	case arrow.Time64:
+		hdr, _ = primitiveHeader(primitiveTimeNTZ)
 	}
 
-	binary.Encode(buf[1:], binary.LittleEndian, val)
-	return w.Write(buf)
+	if _, err := w.Write([]byte{hdr}); err != nil {
+		return 0, err
+	}
+	return binary.Size(val) + 1, binary.Write(w, binary.LittleEndian, val)
 }
 
 func marshalBinary[T string | []byte](val T, w io.Writer) (int, error) {
-	buf := make([]byte, 5)
+	var buf [5]byte
 	switch any(val).(type) {
 	case []byte:
 		buf[0], _ = primitiveHeader(primitiveBinary)
@@ -448,7 +488,7 @@ func marshalBinary[T string | []byte](val T, w io.Writer) (int, error) {
 	}
 
 	binary.Encode(buf[1:], binary.LittleEndian, int32(len(val)))
-	n, err := w.Write(buf)
+	n, err := w.Write(buf[:])
 	if err != nil {
 		return n, err
 	}
@@ -645,32 +685,17 @@ func unmarshalBinary(raw []byte, offset int) ([]byte, error) {
 	return getBytes(raw, offset+1)
 }
 
-func marshalTimestamp(t time.Time, nanos bool, w io.Writer) int {
-	var typ primitiveType
+func marshalTimestamp(t time.Time, nanos bool, w io.Writer) (int, error) {
 	var ts int64
-	ntz := t.Location() == time.UTC
 	if nanos {
 		ts = t.UnixNano()
-		if ntz {
-			typ = primitiveTimestampNTZNanos
-		} else {
-			typ = primitiveTimestampNanos
-		}
 	} else {
 		ts = t.UnixMicro()
-		if ntz {
-			typ = primitiveTimestampNTZMicros
-		} else {
-			typ = primitiveTimestampMicros
-		}
 	}
-	hdr, _ := primitiveHeader(typ)
-	w.Write([]byte{hdr})
-	encodeNumber(ts, 8, w)
-	return 9
+	return encodeTimestamp(ts, nanos, t.Location() == time.UTC, w)
 }
 
-func encodeTimestamp(t int64, nanos, ntz bool, w io.Writer) int {
+func encodeTimestamp(t int64, nanos, ntz bool, w io.Writer) (int, error) {
 	var typ primitiveType
 	if nanos {
 		if ntz {
@@ -686,9 +711,10 @@ func encodeTimestamp(t int64, nanos, ntz bool, w io.Writer) int {
 		}
 	}
 	hdr, _ := primitiveHeader(typ)
-	w.Write([]byte{hdr})
-	encodeNumber(t, 8, w)
-	return 9
+	if _, err := w.Write([]byte{hdr}); err != nil {
+		return 0, err
+	}
+	return 9, binary.Write(w, binary.LittleEndian, t)
 }
 
 func unmarshalTimestamp(raw []byte, offset int) (time.Time, error) {
@@ -711,15 +737,15 @@ func unmarshalTimestamp(raw []byte, offset int) (time.Time, error) {
 	return ret, nil
 }
 
-func marshalDate(t time.Time, w io.Writer) int {
-	epoch := time.Unix(0, 0)
-	since := t.Sub(epoch)
-	days := int64(since.Hours() / 24)
-	hdr, _ := primitiveHeader(primitiveDate)
-	w.Write([]byte{hdr})
-	encodeNumber(days, 4, w)
-	return 5
-}
+// func marshalDate(t time.Time, w io.Writer) int {
+// 	epoch := time.Unix(0, 0)
+// 	since := t.Sub(epoch)
+// 	days := int64(since.Hours() / 24)
+// 	hdr, _ := primitiveHeader(primitiveDate)
+// 	w.Write([]byte{hdr})
+// 	encodeNumber(days, 4, w)
+// 	return 5
+// }
 
 func unmarshalDate(raw []byte, offset int) (time.Time, error) {
 	days, err := readUint(raw, offset+1, 4)

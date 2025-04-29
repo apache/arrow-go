@@ -95,10 +95,10 @@ func Marshal(val any, opts ...MarshalOpts) (*MarshaledVariant, error) {
 
 func (vb *VariantBuilder) check() error {
 	if vb.built {
-		return errors.New("Variant has already been built")
+		return errors.New("variant has already been built")
 	}
 	if vb.typ != BasicUndefined {
-		return fmt.Errorf("Variant type has already been started as a %q", vb.typ)
+		return fmt.Errorf("variant type has already been started as a %q", vb.typ)
 	}
 	return nil
 }

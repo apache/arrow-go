@@ -22,8 +22,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -556,7 +558,8 @@ func TestTimestamp(t *testing.T) {
 				ref = ref.Local()
 			}
 			var b bytes.Buffer
-			size := marshalTimestamp(ref, c.nanos, &b)
+			size, err := marshalTimestamp(ref, c.nanos, &b)
+			require.NoError(t, err)
 			wantEncoded := []byte{c.wantHdr}
 			if c.nanos {
 				wantEncoded = append(wantEncoded, []byte{
@@ -598,7 +601,8 @@ func TestTimestamp(t *testing.T) {
 func TestDate(t *testing.T) {
 	day := time.Unix(0, 0).Add(10000 * 24 * time.Hour)
 	var b bytes.Buffer
-	size := marshalDate(day, &b)
+	size, err := marshalNumeric(arrow.Date32FromTime(day), &b)
+	require.NoError(t, err)
 	encodedDate := b.Bytes()
 	checkSize(t, size, encodedDate)
 	diffByteArrays(t, encodedDate, []byte{
@@ -609,10 +613,6 @@ func TestDate(t *testing.T) {
 		0x00, // 10000 = 0x0000 2710
 	})
 	got, err := unmarshalDate(encodedDate, 0)
-	if err != nil {
-		t.Fatalf("unmarshalDate(): %v", err)
-	}
-	if want := day; got != want {
-		t.Fatalf("Incorrect date: got %s, want %s", got, want)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, got, day)
 }
