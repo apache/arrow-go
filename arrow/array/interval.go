@@ -62,7 +62,8 @@ func (a *MonthInterval) ValueStr(i int) string {
 	}
 	return fmt.Sprintf("%v", a.Value(i))
 }
-func (a *MonthInterval) MonthIntervalValues() []arrow.MonthInterval { return a.values }
+func (a *MonthInterval) MonthIntervalValues() []arrow.MonthInterval { return a.Values() }
+func (a *MonthInterval) Values() []arrow.MonthInterval              { return a.values }
 
 func (a *MonthInterval) String() string {
 	o := new(strings.Builder)

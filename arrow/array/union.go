@@ -735,7 +735,7 @@ type unionBuilder struct {
 	typesBuilder *int8BufferBuilder
 }
 
-func newUnionBuilder(mem memory.Allocator, children []Builder, typ arrow.UnionType) unionBuilder {
+func newUnionBuilder(mem memory.Allocator, children []Builder, typ arrow.UnionType) *unionBuilder {
 	if children == nil {
 		children = make([]Builder, 0)
 	}
@@ -767,7 +767,7 @@ func newUnionBuilder(mem memory.Allocator, children []Builder, typ arrow.UnionTy
 		b.typeIDtoBuilder[typeID] = c
 	}
 
-	return b
+	return &b
 }
 
 func (b *unionBuilder) NumChildren() int {
@@ -878,7 +878,7 @@ func (b *unionBuilder) newData() *Data {
 // that they have the correct number of preceding elements that have been
 // added to the builder beforehand.
 type SparseUnionBuilder struct {
-	unionBuilder
+	*unionBuilder
 }
 
 // NewEmptySparseUnionBuilder is a helper to construct a SparseUnionBuilder
@@ -1108,7 +1108,7 @@ func (b *SparseUnionBuilder) UnmarshalOne(dec *json.Decoder) error {
 // methods. You can also add new types to the union on the fly by using
 // AppendChild.
 type DenseUnionBuilder struct {
-	unionBuilder
+	*unionBuilder
 
 	offsetsBuilder *int32BufferBuilder
 }

@@ -16,9 +16,9 @@
 # under the License.
 
 ARG arch=amd64
-ARG go=1.22.6
+ARG go=1.23
 FROM ${arch}/golang:${go}-bookworm
 
 # Copy the go.mod and go.sum over and pre-download all the dependencies
 COPY . /arrow-go
-RUN cd /arrow-go && go mod download
+RUN cd /arrow-go && go mod download github.com/apache/arrow-go/v18@latest
