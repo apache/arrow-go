@@ -422,9 +422,12 @@ func (w *columnWriter) FlushBufferedDataPages() (err error) {
 		}
 	}
 
-	for _, p := range w.pages {
+	for i, p := range w.pages {
 		defer p.Release()
 		if err = w.WriteDataPage(p); err != nil {
+			// To keep pages in consistent state,
+			// remove the pages that will be released using above defer call.
+			w.pages = w.pages[i+1:]
 			return err
 		}
 	}

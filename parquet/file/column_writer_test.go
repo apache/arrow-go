@@ -18,6 +18,7 @@ package file_test
 
 import (
 	"bytes"
+	"errors"
 	"math"
 	"reflect"
 	"runtime"
@@ -791,4 +792,43 @@ func TestDictionaryReslice(t *testing.T) {
 
 		})
 	}
+}
+
+// TestWriteDataFailure asserts that if WriteDataPage fails, the internal state of the
+// ColumnChunkWriter is still valid and accessing function does not panic.
+func TestWriteDataFailure(t *testing.T) {
+	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.Must(schema.ListOf(
+			schema.Must(schema.NewPrimitiveNode("column", parquet.Repetitions.Optional, parquet.Types.Int32, -1, -1)),
+			parquet.Repetitions.Optional, -1)),
+	}, -1)))
+	descr := sc.Column(0)
+	props := parquet.NewWriterProperties(
+		parquet.WithStats(true),
+		parquet.WithVersion(parquet.V1_0),
+		parquet.WithDataPageVersion(parquet.DataPageV1),
+		parquet.WithDictionaryDefault(true)) // true to enable buffering pages.
+
+	metadata := metadata.NewColumnChunkMetaDataBuilder(props, descr)
+	pager := new(mockpagewriter)
+	defer pager.AssertExpectations(t)
+	pager.On("HasCompressor").Return(false)
+	wr := file.NewColumnChunkWriter(metadata, pager, props).(*file.Int32ColumnChunkWriter)
+
+	// Write some valid data.
+	wr.WriteBatch([]int32{0, 1, 2, 3},
+		[]int16{3, 3, 0, 3, 2, 3},
+		[]int16{0, 1, 0, 0, 1, 1})
+
+	// Simulate WriteDataPage failure.
+	failureErr := errors.New("mock error from WriteDataPage")
+	pager.On("WriteDataPage", mock.MatchedBy(func(page file.DataPage) bool {
+		_, ok := page.(*file.DataPageV1)
+		return ok
+	})).Return(0, failureErr)
+
+	// Expect error from FlushBufferedDataPages but it should leave internal fields in valid state.
+	err := wr.FlushBufferedDataPages()
+	assert.Equal(t, err, failureErr)
+	assert.Equal(t, int64(0), wr.TotalBytesWritten())
 }
