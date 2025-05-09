@@ -268,7 +268,8 @@ func ExportArrowArray(arr arrow.Array, out *CArrowArray, outSchema *CArrowSchema
 // callbacks to be a working ArrowArrayStream utilizing the passed in RecordReader. The
 // CArrowArrayStream takes ownership of the RecordReader until the consumer calls the release
 // callback, as such it is unnecessary to call Release on the passed in reader unless it has
-// previously been retained.
+// previously been retained. To call that release callback and prevent a memory leak, you can
+// call ReleaseCArrowArrayStream on the CArrowArrayStream once it is no longer needed.
 //
 // WARNING: the output ArrowArrayStream MUST BE ZERO INITIALIZED, or the Go garbage
 // collector may error at runtime, due to CGO rules ("the current implementation may
@@ -283,6 +284,9 @@ func ReleaseCArrowArray(arr *CArrowArray) { releaseArr(arr) }
 
 // ReleaseCArrowSchema calls ArrowSchemaRelease on the passed in cdata schema
 func ReleaseCArrowSchema(schema *CArrowSchema) { releaseSchema(schema) }
+
+// ReleaseCArrowArrayStream calls ArrowArrayStreamRelease on the passed in cdata stream
+func ReleaseCArrowArrayStream(stream *CArrowArrayStream) { releaseStream(stream) }
 
 // RecordMessage is a simple container for a record batch channel to stream for
 // using the Async C Data Interface via ExportAsyncRecordBatchStream.

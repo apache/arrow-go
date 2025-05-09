@@ -98,10 +98,6 @@ func exportInt32TypeSchema() CArrowSchema {
 	return s
 }
 
-func releaseStream(s *CArrowArrayStream) {
-	C.ArrowArrayStreamRelease(s)
-}
-
 func schemaIsReleased(s *CArrowSchema) bool {
 	return C.ArrowSchemaIsReleased(s) == 1
 }
