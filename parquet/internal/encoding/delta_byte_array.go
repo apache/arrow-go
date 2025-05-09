@@ -171,7 +171,7 @@ func (d *DeltaByteArrayDecoder) SetData(nvalues int, data []byte) error {
 		return err
 	}
 
-	d.prefixLengths = make([]int32, nvalues)
+	d.prefixLengths = make([]int32, prefixLenDec.ValuesLeft())
 	// decode all the prefix lengths first so we know how many bytes it took to get the
 	// prefix lengths for nvalues
 	prefixLenDec.Decode(d.prefixLengths)
