@@ -1035,3 +1035,7 @@ func releaseArr(arr *CArrowArray) {
 func releaseSchema(schema *CArrowSchema) {
 	C.ArrowSchemaRelease(schema)
 }
+
+func releaseStream(stream *CArrowArrayStream) {
+	C.ArrowArrayStreamRelease(stream)
+}
