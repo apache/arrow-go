@@ -237,6 +237,17 @@ func WithStringsReplacer(replacer *strings.Replacer) Option {
 	}
 }
 
+func WithCustomTypeConverter(converter func(typ arrow.DataType, col arrow.Array) (result []string, handled bool)) Option {
+	return func(cfg config) {
+		switch cfg := cfg.(type) {
+		case *Writer:
+			cfg.customTypeConverter = converter
+		default:
+			panic(fmt.Errorf("%w: WithCustomTypeConverter only allowed on csv Writer", arrow.ErrInvalid))
+		}
+	}
+}
+
 func validate(schema *arrow.Schema) {
 	for i, f := range schema.Fields() {
 		if !typeSupported(f.Type) {
