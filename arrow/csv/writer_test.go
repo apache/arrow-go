@@ -19,10 +19,13 @@ package csv_test
 import (
 	"bufio"
 	"bytes"
+	"context"
 	ecsv "encoding/csv"
 	"fmt"
 	"io"
 	"log"
+	"os"
+	"path"
 	"strings"
 	"testing"
 
@@ -34,7 +37,11 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -427,4 +434,112 @@ func BenchmarkWrite(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+// TestParquetTestingCSVWriter tests that the CSV writer successfully convert arrow/parquet-testing files to CSV
+func TestParquetTestingCSVWriter(t *testing.T) {
+	dir := os.Getenv("PARQUET_TEST_DATA")
+	if dir == "" {
+		dir = "../../parquet-testing/data"
+		t.Log("PARQUET_TEST_DATA not set, using ../../parquet-testing/data")
+	}
+	assert.DirExists(t, dir)
+
+	testFile, err := os.Open(path.Join(dir, "alltypes_plain.parquet"))
+	require.NoError(t, err)
+	defer testFile.Close()
+
+	r, err := file.NewParquetReader(testFile)
+	require.NoError(t, err)
+	defer r.Close()
+
+	alloc := memory.NewGoAllocator()
+
+	arrowReader, err := pqarrow.NewFileReader(r, pqarrow.ArrowReadProperties{BatchSize: 1024}, alloc)
+	require.NoError(t, err)
+
+	schema, err := arrowReader.Schema()
+	require.NoError(t, err)
+
+	buf := &bytes.Buffer{}
+	csvWriter := csv.NewWriter(buf, schema, csv.WithHeader(true))
+
+	recordReader, err := arrowReader.GetRecordReader(context.Background(), nil, nil)
+	require.NoError(t, err)
+
+	for recordReader.Next() {
+		rec := recordReader.Record()
+		err := csvWriter.Write(rec)
+		require.NoError(t, err)
+	}
+	require.NoError(t, csvWriter.Error())
+	require.NoError(t, csvWriter.Flush())
+
+	expected := `id,bool_col,tinyint_col,smallint_col,int_col,bigint_col,float_col,double_col,date_string_col,string_col,timestamp_col
+4,true,0,0,0,0,0,0,MDMvMDEvMDk=,MA==,2009-03-01 00:00:00
+5,false,1,1,1,10,1.1,10.1,MDMvMDEvMDk=,MQ==,2009-03-01 00:01:00
+6,true,0,0,0,0,0,0,MDQvMDEvMDk=,MA==,2009-04-01 00:00:00
+7,false,1,1,1,10,1.1,10.1,MDQvMDEvMDk=,MQ==,2009-04-01 00:01:00
+2,true,0,0,0,0,0,0,MDIvMDEvMDk=,MA==,2009-02-01 00:00:00
+3,false,1,1,1,10,1.1,10.1,MDIvMDEvMDk=,MQ==,2009-02-01 00:01:00
+0,true,0,0,0,0,0,0,MDEvMDEvMDk=,MA==,2009-01-01 00:00:00
+1,false,1,1,1,10,1.1,10.1,MDEvMDEvMDk=,MQ==,2009-01-01 00:01:00
+`
+
+	require.Equal(t, expected, buf.String())
+
+}
+
+// TestParquetTestingCSVWriter tests that the CSV writer successfully convert arrow/parquet-testing files to CSV
+func TestCustomTypeConversion(t *testing.T) {
+	dir := os.Getenv("PARQUET_TEST_DATA")
+	if dir == "" {
+		dir = "../../parquet-testing/data"
+		t.Log("PARQUET_TEST_DATA not set, using ../../parquet-testing/data")
+	}
+	assert.DirExists(t, dir)
+
+	testFile, err := os.Open(path.Join(dir, "alltypes_plain.parquet"))
+	require.NoError(t, err)
+	defer testFile.Close()
+
+	r, err := file.NewParquetReader(testFile)
+	require.NoError(t, err)
+	defer r.Close()
+
+	alloc := memory.NewGoAllocator()
+
+	arrowReader, err := pqarrow.NewFileReader(r, pqarrow.ArrowReadProperties{BatchSize: 1024}, alloc)
+	require.NoError(t, err)
+
+	schema, err := arrowReader.Schema()
+	require.NoError(t, err)
+
+	buf := &bytes.Buffer{}
+	csvWriter := csv.NewWriter(buf, schema, csv.WithHeader(true))
+
+	recordReader, err := arrowReader.GetRecordReader(context.Background(), nil, nil)
+	require.NoError(t, err)
+
+	for recordReader.Next() {
+		rec := recordReader.Record()
+		err := csvWriter.Write(rec)
+		require.NoError(t, err)
+	}
+	require.NoError(t, csvWriter.Error())
+	require.NoError(t, csvWriter.Flush())
+
+	expected := `id,bool_col,tinyint_col,smallint_col,int_col,bigint_col,float_col,double_col,date_string_col,string_col,timestamp_col
+4,true,0,0,0,0,0,0,MDMvMDEvMDk=,MA==,2009-03-01 00:00:00
+5,false,1,1,1,10,1.1,10.1,MDMvMDEvMDk=,MQ==,2009-03-01 00:01:00
+6,true,0,0,0,0,0,0,MDQvMDEvMDk=,MA==,2009-04-01 00:00:00
+7,false,1,1,1,10,1.1,10.1,MDQvMDEvMDk=,MQ==,2009-04-01 00:01:00
+2,true,0,0,0,0,0,0,MDIvMDEvMDk=,MA==,2009-02-01 00:00:00
+3,false,1,1,1,10,1.1,10.1,MDIvMDEvMDk=,MQ==,2009-02-01 00:01:00
+0,true,0,0,0,0,0,0,MDEvMDEvMDk=,MA==,2009-01-01 00:00:00
+1,false,1,1,1,10,1.1,10.1,MDEvMDEvMDk=,MQ==,2009-01-01 00:01:00
+`
+
+	require.Equal(t, expected, buf.String())
+
 }
