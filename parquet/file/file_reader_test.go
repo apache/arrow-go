@@ -844,6 +844,9 @@ func TestDeltaByteArray(t *testing.T) {
 	require.NoError(t, err)
 	defer fileReader.Close()
 
+	nrows := fileReader.MetaData().NumRows
+	assert.Equal(t, nrows, int64(len(records)), "expected %d rows, got %d", len(records), nrows)
+
 	arrowReader, err := pqarrow.NewFileReader(
 		fileReader,
 		pqarrow.ArrowReadProperties{BatchSize: 1024},
