@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/csv"
 	"fmt"
 	"io"
 	"os"
@@ -819,4 +820,55 @@ func TestLZ4RawLargerFileRead(t *testing.T) {
 		[]byte("a9ee2527-821b-4b71-a926-03f73c3fc8b7"),
 	}
 	require.Equal(t, expectedValsHead, vals[:len(expectedValsHead)])
+}
+
+func TestDeltaByteArray(t *testing.T) {
+	dir := os.Getenv("PARQUET_TEST_DATA")
+	if dir == "" {
+		t.Skip("no path supplied with PARQUET_TEST_DATA")
+	}
+	require.DirExists(t, dir)
+
+	expected, err := os.ReadFile(path.Join(dir, "delta_byte_array_expect.csv"))
+	require.NoError(t, err)
+	csvReader := csv.NewReader(bytes.NewReader(expected))
+
+	records, err := csvReader.ReadAll()
+	require.NoError(t, err)
+
+	records = records[1:] // skip header
+
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	fileReader, err := file.OpenParquetFile(path.Join(dir, "delta_byte_array.parquet"),
+		false, file.WithReadProps(props))
+	require.NoError(t, err)
+	defer fileReader.Close()
+
+	nrows := fileReader.MetaData().NumRows
+	assert.Equal(t, nrows, int64(len(records)), "expected %d rows, got %d", len(records), nrows)
+
+	arrowReader, err := pqarrow.NewFileReader(
+		fileReader,
+		pqarrow.ArrowReadProperties{BatchSize: 1024},
+		memory.DefaultAllocator,
+	)
+	require.NoError(t, err)
+
+	rr, err := arrowReader.GetRecordReader(context.Background(), nil, nil)
+	require.NoError(t, err)
+	defer rr.Release()
+
+	for rr.Next() {
+		rec := rr.Record()
+		for i := range int(rec.NumCols()) {
+			vals := rec.Column(i)
+			for j := range vals.Len() {
+				if vals.IsNull(j) {
+					require.Equal(t, records[j][i], "")
+					continue
+				}
+				require.Equal(t, records[j][i], vals.ValueStr(j))
+			}
+		}
+	}
 }

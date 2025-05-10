@@ -101,6 +101,7 @@ func (d *deltaBitPackDecoder[T]) SetData(nvalues int, data []byte) error {
 
 	d.valsPerMini = uint32(d.blockSize / d.miniBlocksPerBlock)
 	d.usedFirst = false
+	d.nvals = int(d.totalValues)
 	return nil
 }
 
