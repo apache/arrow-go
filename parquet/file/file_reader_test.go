@@ -860,11 +860,9 @@ func TestDeltaByteArray(t *testing.T) {
 
 	for rr.Next() {
 		rec := rr.Record()
-		defer rec.Release()
-
-		for i := 0; i < int(rec.NumCols()); i++ {
+		for i := range int(rec.NumCols()) {
 			vals := rec.Column(i)
-			for j := 0; j < vals.Len(); j++ {
+			for j := range vals.Len() {
 				if vals.IsNull(j) {
 					require.Equal(t, records[j][i], "")
 					continue

@@ -768,7 +768,7 @@ func TestRecordBatch(t *testing.T) {
 
 func TestRecordReaderStream(t *testing.T) {
 	stream := arrayStreamTest()
-	defer releaseStream(stream)
+	defer ReleaseCArrowArrayStream(stream)
 
 	rdr := ImportCArrayStream(stream, nil)
 	i := 0
@@ -852,7 +852,7 @@ func TestExportRecordReaderStreamLifetime(t *testing.T) {
 
 	// C Stream is holding on to memory
 	assert.NotEqual(t, 0, mem.CurrentAlloc())
-	releaseStream(out)
+	ReleaseCArrowArrayStream(out)
 }
 
 func TestEmptyListExport(t *testing.T) {
