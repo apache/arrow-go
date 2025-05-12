@@ -237,15 +237,26 @@ func WithStringsReplacer(replacer *strings.Replacer) Option {
 	}
 }
 
-func validate(schema *arrow.Schema) {
+func WithCustomTypeConverter(converter func(typ arrow.DataType, col arrow.Array) (result []string, handled bool)) Option {
+	return func(cfg config) {
+		switch cfg := cfg.(type) {
+		case *Writer:
+			cfg.customTypeConverter = converter
+		default:
+			panic(fmt.Errorf("%w: WithCustomTypeConverter only allowed on csv Writer", arrow.ErrInvalid))
+		}
+	}
+}
+
+func validateRead(schema *arrow.Schema) {
 	for i, f := range schema.Fields() {
-		if !typeSupported(f.Type) {
+		if !readTypeSupported(f.Type) {
 			panic(fmt.Errorf("arrow/csv: field %d (%s) has invalid data type %T", i, f.Name, f.Type))
 		}
 	}
 }
 
-func typeSupported(dt arrow.DataType) bool {
+func readTypeSupported(dt arrow.DataType) bool {
 	switch dt := dt.(type) {
 	case *arrow.BooleanType:
 	case *arrow.Int8Type, *arrow.Int16Type, *arrow.Int32Type, *arrow.Int64Type:
@@ -258,7 +269,7 @@ func typeSupported(dt arrow.DataType) bool {
 	case *arrow.MapType:
 		return false
 	case arrow.ListLikeType:
-		return typeSupported(dt.Elem())
+		return readTypeSupported(dt.Elem())
 	case *arrow.BinaryType, *arrow.LargeBinaryType, *arrow.FixedSizeBinaryType:
 	case arrow.ExtensionType:
 	case *arrow.NullType:
