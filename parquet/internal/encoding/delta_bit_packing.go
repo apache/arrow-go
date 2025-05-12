@@ -198,7 +198,7 @@ func (d *deltaBitPackDecoder[T]) Discard(n int) (int, error) {
 // Decode retrieves min(remaining values, len(out)) values from the data and returns the number
 // of values actually decoded and any errors encountered.
 func (d *deltaBitPackDecoder[T]) Decode(out []T) (int, error) {
-	max := shared_utils.Min(len(out), int(d.totalValues))
+	max := shared_utils.Min(len(out), int(d.nvals))
 	if max == 0 {
 		return 0, nil
 	}
