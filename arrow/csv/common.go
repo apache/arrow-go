@@ -247,3 +247,34 @@ func WithCustomTypeConverter(converter func(typ arrow.DataType, col arrow.Array)
 		}
 	}
 }
+
+func validateRead(schema *arrow.Schema) {
+	for i, f := range schema.Fields() {
+		if !readTypeSupported(f.Type) {
+			panic(fmt.Errorf("arrow/csv: field %d (%s) has invalid data type %T", i, f.Name, f.Type))
+		}
+	}
+}
+
+func readTypeSupported(dt arrow.DataType) bool {
+	switch dt := dt.(type) {
+	case *arrow.BooleanType:
+	case *arrow.Int8Type, *arrow.Int16Type, *arrow.Int32Type, *arrow.Int64Type:
+	case *arrow.Uint8Type, *arrow.Uint16Type, *arrow.Uint32Type, *arrow.Uint64Type:
+	case *arrow.Float16Type, *arrow.Float32Type, *arrow.Float64Type:
+	case *arrow.StringType, *arrow.LargeStringType:
+	case *arrow.TimestampType:
+	case *arrow.Date32Type, *arrow.Date64Type:
+	case *arrow.Decimal128Type, *arrow.Decimal256Type:
+	case *arrow.MapType:
+		return false
+	case arrow.ListLikeType:
+		return readTypeSupported(dt.Elem())
+	case *arrow.BinaryType, *arrow.LargeBinaryType, *arrow.FixedSizeBinaryType:
+	case arrow.ExtensionType:
+	case *arrow.NullType:
+	default:
+		return false
+	}
+	return true
+}

@@ -106,6 +106,7 @@ func NewInferringReader(r io.Reader, opts ...Option) *Reader {
 // NewReader panics if the given schema contains fields that have types that are not
 // primitive types.
 func NewReader(r io.Reader, schema *arrow.Schema, opts ...Option) *Reader {
+	validateRead(schema)
 	rr := &Reader{
 		r:                csv.NewReader(r),
 		schema:           schema,
