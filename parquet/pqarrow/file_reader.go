@@ -697,13 +697,22 @@ func (r *recordReader) SeekToRow(row int64) error {
 		return fmt.Errorf("invalid row index %d, file only has %d rows", row, r.numRows)
 	}
 
-	for _, fr := range r.fieldReaders {
-		if err := fr.SeekToRow(row); err != nil {
-			return err
-		}
+	var (
+		np = 1
+		g  errgroup.Group
+	)
+
+	if r.parallel {
+		np = len(r.fieldReaders)
 	}
 
-	return nil
+	g.SetLimit(np)
+	for _, fr := range r.fieldReaders {
+		fr := fr
+		g.Go(func() error { return fr.SeekToRow(row) })
+	}
+
+	return g.Wait()
 }
 
 func (r *recordReader) Retain() {
