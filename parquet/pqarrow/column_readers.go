@@ -93,7 +93,7 @@ func (lr *leafReader) IsOrHasRepeatedChild() bool { return false }
 
 func (lr *leafReader) LoadBatch(nrecords int64) (err error) {
 	lr.releaseOut()
-	lr.recordRdr.ResetValues()
+	lr.recordRdr.Reset()
 
 	if err := lr.recordRdr.Reserve(nrecords); err != nil {
 		return err
