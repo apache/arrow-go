@@ -397,7 +397,8 @@ func TestDeltaLengthByteArrayPackingWithNulls(t *testing.T) {
 func TestRleBooleanEncodingFileRead(t *testing.T) {
 	dir := os.Getenv("PARQUET_TEST_DATA")
 	if dir == "" {
-		t.Skip("no path supplied with PARQUET_TEST_DATA")
+		dir = "../../parquet-testing/data"
+		t.Log("PARQUET_TEST_DATA not set, using ../../parquet-testing/data")
 	}
 	assert.DirExists(t, dir)
 
@@ -473,7 +474,8 @@ func (m *mockBadReader) ReadAt(p []byte, off int64) (n int, err error) {
 func TestBadReader(t *testing.T) {
 	dir := os.Getenv("PARQUET_TEST_DATA")
 	if dir == "" {
-		t.Skip("no path supplied with PARQUET_TEST_DATA")
+		dir = "../../parquet-testing/data"
+		t.Log("PARQUET_TEST_DATA not set, using ../../parquet-testing/data")
 	}
 	require.DirExists(t, dir)
 
@@ -505,7 +507,8 @@ func TestBadReader(t *testing.T) {
 func TestByteStreamSplitEncodingFileRead(t *testing.T) {
 	dir := os.Getenv("PARQUET_TEST_DATA")
 	if dir == "" {
-		t.Skip("no path supplied with PARQUET_TEST_DATA")
+		dir = "../../parquet-testing/data"
+		t.Log("PARQUET_TEST_DATA not set, using ../../parquet-testing/data")
 	}
 	require.DirExists(t, dir)
 
@@ -700,7 +703,8 @@ func TestDeltaBinaryPackedMultipleBatches(t *testing.T) {
 func TestLZ4RawFileRead(t *testing.T) {
 	dir := os.Getenv("PARQUET_TEST_DATA")
 	if dir == "" {
-		t.Skip("no path supplied with PARQUET_TEST_DATA")
+		dir = "../../parquet-testing/data"
+		t.Log("PARQUET_TEST_DATA not set, using ../../parquet-testing/data")
 	}
 	require.DirExists(t, dir)
 
@@ -783,7 +787,8 @@ func TestLZ4RawFileRead(t *testing.T) {
 func TestLZ4RawLargerFileRead(t *testing.T) {
 	dir := os.Getenv("PARQUET_TEST_DATA")
 	if dir == "" {
-		t.Skip("no path supplied with PARQUET_TEST_DATA")
+		dir = "../../parquet-testing/data"
+		t.Log("PARQUET_TEST_DATA not set, using ../../parquet-testing/data")
 	}
 	require.DirExists(t, dir)
 
@@ -825,7 +830,8 @@ func TestLZ4RawLargerFileRead(t *testing.T) {
 func TestDeltaByteArray(t *testing.T) {
 	dir := os.Getenv("PARQUET_TEST_DATA")
 	if dir == "" {
-		t.Skip("no path supplied with PARQUET_TEST_DATA")
+		dir = "../../parquet-testing/data"
+		t.Log("PARQUET_TEST_DATA not set, using ../../parquet-testing/data")
 	}
 	require.DirExists(t, dir)
 
@@ -840,6 +846,55 @@ func TestDeltaByteArray(t *testing.T) {
 
 	props := parquet.NewReaderProperties(memory.DefaultAllocator)
 	fileReader, err := file.OpenParquetFile(path.Join(dir, "delta_byte_array.parquet"),
+		false, file.WithReadProps(props))
+	require.NoError(t, err)
+	defer fileReader.Close()
+
+	nrows := fileReader.MetaData().NumRows
+	assert.Equal(t, nrows, int64(len(records)), "expected %d rows, got %d", len(records), nrows)
+
+	arrowReader, err := pqarrow.NewFileReader(
+		fileReader,
+		pqarrow.ArrowReadProperties{BatchSize: 1024},
+		memory.DefaultAllocator,
+	)
+	require.NoError(t, err)
+
+	rr, err := arrowReader.GetRecordReader(context.Background(), nil, nil)
+	require.NoError(t, err)
+	defer rr.Release()
+
+	for rr.Next() {
+		rec := rr.Record()
+		for i := range int(rec.NumCols()) {
+			vals := rec.Column(i)
+			for j := range vals.Len() {
+				if vals.IsNull(j) {
+					require.Equal(t, records[j][i], "")
+					continue
+				}
+				require.Equal(t, records[j][i], vals.ValueStr(j))
+			}
+		}
+	}
+}
+
+func TestListColumns(t *testing.T) {
+	dir := os.Getenv("PARQUET_TEST_DATA")
+	if dir == "" {
+		dir = "../../parquet-testing/data"
+		t.Log("PARQUET_TEST_DATA not set, using ../../parquet-testing/data")
+	}
+	require.DirExists(t, dir)
+
+	records := [][]string{
+		{"[1,2,3]", "[\"abc\",\"efg\",\"hij\"]"},
+		{"[null,1]", ""},
+		{"[4]", "[\"efg\",null,\"hij\",\"xyz\"]"},
+	}
+
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	fileReader, err := file.OpenParquetFile(path.Join(dir, "list_columns.parquet"),
 		false, file.WithReadProps(props))
 	require.NoError(t, err)
 	defer fileReader.Close()
