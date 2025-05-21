@@ -21,6 +21,10 @@ set -eux
 
 source_dir=${1}
 
+export PARQUET_TEST_DATA=${1}/parquet-testing/data
+export PARQUET_TEST_BAD_DATA=${1}/parquet-testing/bad_data
+export ARROW_TEST_DATA=${1}/arrow-testing/data
+
 case "$(uname)" in
 MINGW*)
   # -race and -asan don't work on Windows currently
@@ -69,9 +73,6 @@ go test "${test_args[@]}" -tags ${tags},noasm ./...
 
 popd
 
-export PARQUET_TEST_DATA=${1}/parquet-testing/data
-export PARQUET_TEST_BAD_DATA=${1}/parquet-testing/bad_data
-export ARROW_TEST_DATA=${1}/arrow-testing/data
 pushd "${source_dir}/parquet"
 
 go test "${test_args[@]}" -tags assert ./...
