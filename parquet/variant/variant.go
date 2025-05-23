@@ -32,13 +32,14 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/internal/debug"
+	"github.com/apache/arrow-go/v18/parquet/internal/debug"
 	"github.com/google/uuid"
 )
 
 //go:generate go tool stringer -type=BasicType -linecomment -output=basic_type_string.go
 //go:generate go tool stringer -type=PrimitiveType -linecomment -output=primitive_type_string.go
 
+// BasicType represents the fundamental type category of a variant value.
 type BasicType int
 
 const (
@@ -53,6 +54,7 @@ func basicTypeFromHeader(hdr byte) BasicType {
 	return BasicType(hdr & basicTypeMask)
 }
 
+// PrimitiveType represents specific primitive data types within the variant format.
 type PrimitiveType int
 
 const (
@@ -84,6 +86,8 @@ func primitiveTypeFromHeader(hdr byte) PrimitiveType {
 	return PrimitiveType((hdr >> basicTypeBits) & typeInfoMask)
 }
 
+// Type represents the high-level variant data type.
+// This is what applications typically use to identify the type of a variant value.
 type Type int
 
 const (
@@ -130,14 +134,19 @@ const (
 )
 
 var (
+	// EmptyMetadataBytes contains a minimal valid metadata section with no dictionary entries.
 	EmptyMetadataBytes = [3]byte{0x1, 0, 0}
 )
 
+// Metadata represents the dictionary part of a variant value, which stores
+// the keys used in object values.
 type Metadata struct {
 	data []byte
 	keys [][]byte
 }
 
+// NewMetadata creates a Metadata instance from a raw byte slice.
+// It validates the metadata format and loads the key dictionary.
 func NewMetadata(data []byte) (Metadata, error) {
 	m := Metadata{data: data}
 	if len(data) < hdrSizeBytes+minOffsetSizeBytes*2 {
@@ -166,6 +175,7 @@ func NewMetadata(data []byte) (Metadata, error) {
 	return m, nil
 }
 
+// Clone creates a deep copy of the metadata.
 func (m *Metadata) Clone() Metadata {
 	return Metadata{
 		data: bytes.Clone(m.data),
@@ -208,16 +218,25 @@ func (m *Metadata) loadDictionary(offsetSz uint8) (uint32, error) {
 	return dictSize, nil
 }
 
+// Bytes returns the raw byte representation of the metadata.
 func (m Metadata) Bytes() []byte { return m.data }
 
-func (m Metadata) Version() uint8        { return m.data[0] & versionMask }
+// Version returns the metadata format version.
+func (m Metadata) Version() uint8 { return m.data[0] & versionMask }
+
+// SortedAndUnique returns whether the keys in the metadata dictionary are sorted and unique.
 func (m Metadata) SortedAndUnique() bool { return m.data[0]&sortedStrMask != 0 }
+
+// OffsetSize returns the size in bytes used to store offsets in the metadata.
 func (m Metadata) OffsetSize() uint8 {
 	return ((m.data[0] >> offsetSizeBitShift) & offsetSizeMask) + 1
 }
 
+// DictionarySize returns the number of keys in the metadata dictionary.
 func (m Metadata) DictionarySize() uint32 { return uint32(len(m.keys)) }
 
+// KeyAt returns the string key at the given dictionary ID.
+// Returns an error if the ID is out of range.
 func (m Metadata) KeyAt(id uint32) (string, error) {
 	if id >= uint32(len(m.keys)) {
 		return "", fmt.Errorf("invalid variant metadata: id out of range: %d >= %d",
@@ -227,6 +246,12 @@ func (m Metadata) KeyAt(id uint32) (string, error) {
 	return unsafe.String(&m.keys[id][0], len(m.keys[id])), nil
 }
 
+// IdFor returns the dictionary IDs for the given key.
+// If the metadata is sorted and unique, this performs a binary search.
+// Otherwise, it performs a linear search.
+//
+// If the metadata is not sorted and unique, then it's possible that multiple
+// IDs will be returned for the same key.
 func (m Metadata) IdFor(key string) []uint32 {
 	k := unsafe.Slice(unsafe.StringData(key), len(key))
 
@@ -249,15 +274,19 @@ func (m Metadata) IdFor(key string) []uint32 {
 	return ret
 }
 
+// DecimalValue represents a decimal number with a specified scale.
+// The generic parameter T can be any supported variant decimal type (Decimal32, Decimal64, Decimal128).
 type DecimalValue[T decimal.DecimalTypes] struct {
 	Scale uint8
 	Value decimal.Num[T]
 }
 
+// MarshalJSON implements the json.Marshaler interface for DecimalValue.
 func (v DecimalValue[T]) MarshalJSON() ([]byte, error) {
 	return []byte(v.Value.ToString(int32(v.Scale))), nil
 }
 
+// ArrayValue represents an array of variant values.
 type ArrayValue struct {
 	value []byte
 	meta  Metadata
@@ -268,22 +297,31 @@ type ArrayValue struct {
 	offsetStart uint8
 }
 
+// MarshalJSON implements the json.Marshaler interface for ArrayValue.
 func (v ArrayValue) MarshalJSON() ([]byte, error) {
-	return json.Marshal(v.Values())
+	return json.Marshal(slices.Collect(v.Values()))
 }
 
-func (v ArrayValue) NumElements() uint32 { return v.numElements }
+// Len returns the number of elements in the array.
+func (v ArrayValue) Len() uint32 { return v.numElements }
 
-func (v ArrayValue) Values() []Value {
-	values := make([]Value, v.numElements)
-	for i := range v.numElements {
-		idx := uint32(v.offsetStart) + i*uint32(v.offsetSize)
-		offset := readLEU32(v.value[idx : idx+uint32(v.offsetSize)])
-		values[i] = Value{value: v.value[v.dataStart+offset:], meta: v.meta}
+// Values returns an iterator for the elements in the array, allowing
+// for lazy evaluation of the offsets (for the situation where not all elements
+// are iterated).
+func (v ArrayValue) Values() iter.Seq[Value] {
+	return func(yield func(Value) bool) {
+		for i := range v.numElements {
+			idx := uint32(v.offsetStart) + i*uint32(v.offsetSize)
+			offset := readLEU32(v.value[idx : idx+uint32(v.offsetSize)])
+			if !yield(Value{value: v.value[v.dataStart+offset:], meta: v.meta}) {
+				return
+			}
+		}
 	}
-	return values
 }
 
+// Value returns the Value at the specified index.
+// Returns an error if the index is out of range.
 func (v ArrayValue) Value(i uint32) (Value, error) {
 	if i >= v.numElements {
 		return Value{}, fmt.Errorf("%w: invalid array value: index out of range: %d >= %d",
@@ -296,6 +334,7 @@ func (v ArrayValue) Value(i uint32) (Value, error) {
 	return Value{meta: v.meta, value: v.value[v.dataStart+offset:]}, nil
 }
 
+// ObjectValue represents an object (map/dictionary) of key-value pairs.
 type ObjectValue struct {
 	value []byte
 	meta  Metadata
@@ -308,12 +347,17 @@ type ObjectValue struct {
 	idStart     uint8
 }
 
+// ObjectField represents a key-value pair in an object.
 type ObjectField struct {
 	Key   string
 	Value Value
 }
 
+// NumElements returns the number of fields in the object.
 func (v ObjectValue) NumElements() uint32 { return v.numElements }
+
+// ValueByKey returns the field with the specified key.
+// Returns arrow.ErrNotFound if the key doesn't exist.
 func (v ObjectValue) ValueByKey(key string) (ObjectField, error) {
 	n := v.numElements
 
@@ -367,6 +411,8 @@ func (v ObjectValue) ValueByKey(key string) (ObjectField, error) {
 	return ObjectField{}, arrow.ErrNotFound
 }
 
+// FieldAt returns the field at the specified index.
+// Returns an error if the index is out of range.
 func (v ObjectValue) FieldAt(i uint32) (ObjectField, error) {
 	if i >= v.numElements {
 		return ObjectField{}, fmt.Errorf("%w: invalid object value: index out of range: %d >= %d",
@@ -388,6 +434,7 @@ func (v ObjectValue) FieldAt(i uint32) (ObjectField, error) {
 		Value: Value{value: v.value[v.dataStart+offset:], meta: v.meta}}, nil
 }
 
+// Values returns an iterator over all key-value pairs in the object.
 func (v ObjectValue) Values() iter.Seq2[string, Value] {
 	return func(yield func(string, Value) bool) {
 		for i := range v.numElements {
@@ -408,6 +455,7 @@ func (v ObjectValue) Values() iter.Seq2[string, Value] {
 	}
 }
 
+// MarshalJSON implements the json.Marshaler interface for ObjectValue.
 func (v ObjectValue) MarshalJSON() ([]byte, error) {
 	// for now we'll use a naive approach and just build a map
 	// then marshal it. This is not the most efficient way to do this
@@ -417,11 +465,13 @@ func (v ObjectValue) MarshalJSON() ([]byte, error) {
 	return json.Marshal(mapping)
 }
 
+// Value represents a variant value of any type.
 type Value struct {
 	value []byte
 	meta  Metadata
 }
 
+// NewWithMetadata creates a Value with the provided metadata and value bytes.
 func NewWithMetadata(meta Metadata, value []byte) (Value, error) {
 	if len(value) == 0 {
 		return Value{}, errors.New("invalid variant value: empty")
@@ -430,6 +480,7 @@ func NewWithMetadata(meta Metadata, value []byte) (Value, error) {
 	return Value{value: value, meta: meta}, nil
 }
 
+// New creates a Value by parsing both the metadata and value bytes.
 func New(meta, value []byte) (Value, error) {
 	m, err := NewMetadata(meta)
 	if err != nil {
@@ -439,16 +490,25 @@ func New(meta, value []byte) (Value, error) {
 	return NewWithMetadata(m, value)
 }
 
+// Bytes returns the raw byte representation of the value (excluding metadata).
 func (v Value) Bytes() []byte { return v.value }
 
-func (v Value) Clone() Value { return Value{value: bytes.Clone(v.value)} }
+// Clone creates a deep copy of the value including its metadata.
+func (v Value) Clone() Value {
+	return Value{
+		meta:  v.meta.Clone(),
+		value: bytes.Clone(v.value)}
+}
 
+// Metadata returns the metadata associated with the value.
 func (v Value) Metadata() Metadata { return v.meta }
 
+// BasicType returns the fundamental type category of the value.
 func (v Value) BasicType() BasicType {
 	return basicTypeFromHeader(v.value[0])
 }
 
+// Type returns the specific data type of the value.
 func (v Value) Type() Type {
 	switch t := v.BasicType(); t {
 	case BasicPrimitive:
@@ -507,6 +567,21 @@ func (v Value) Type() Type {
 	}
 }
 
+// Value returns the Go value representation of the variant.
+// The returned type depends on the variant type:
+//   - Null: nil
+//   - Bool: bool
+//   - Int8/16/32/64: corresponding int type
+//   - Float/Double: float32/float64
+//   - String: string
+//   - Binary: []byte
+//   - Decimal: DecimalValue
+//   - Date: arrow.Date32
+//   - Time: arrow.Time64
+//   - Timestamp: arrow.Timestamp
+//   - UUID: uuid.UUID
+//   - Object: ObjectValue
+//   - Array: ArrayValue
 func (v Value) Value() any {
 	switch t := v.BasicType(); t {
 	case BasicPrimitive:
@@ -535,7 +610,7 @@ func (v Value) Value() any {
 			PrimitiveTimestampNanos, PrimitiveTimestampNanosNTZ:
 			return arrow.Timestamp(readExact[int64](v.value[1:]))
 		case PrimitiveTimeMicrosNTZ:
-			return arrow.Time32(readExact[int32](v.value[1:]))
+			return arrow.Time64(readExact[int64](v.value[1:]))
 		case PrimitiveUUID:
 			debug.Assert(len(v.value[1:]) == 16, "invalid UUID length")
 			return uuid.Must(uuid.FromBytes(v.value[1:]))
@@ -625,6 +700,7 @@ func (v Value) Value() any {
 	return nil
 }
 
+// MarshalJSON implements the json.Marshaler interface for Value.
 func (v Value) MarshalJSON() ([]byte, error) {
 	result := v.Value()
 	switch t := result.(type) {

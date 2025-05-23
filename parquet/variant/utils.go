@@ -22,7 +22,7 @@ import (
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow/endian"
-	"github.com/apache/arrow-go/v18/arrow/internal/debug"
+	"github.com/apache/arrow-go/v18/parquet/internal/debug"
 )
 
 func readLEU32(b []byte) uint32 {

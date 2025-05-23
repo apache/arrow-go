@@ -26,7 +26,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/extensions/variant"
+	"github.com/apache/arrow-go/v18/parquet/variant"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -427,7 +427,7 @@ func TestArrayValues(t *testing.T) {
 		assert.Equal(t, variant.Array, v.Type())
 
 		arr := v.Value().(variant.ArrayValue)
-		assert.EqualValues(t, 4, arr.NumElements())
+		assert.EqualValues(t, 4, arr.Len())
 
 		elem0, err := arr.Value(0)
 		require.NoError(t, err)
@@ -463,7 +463,7 @@ func TestArrayValues(t *testing.T) {
 		assert.Equal(t, variant.Array, v.Type())
 
 		arr := v.Value().(variant.ArrayValue)
-		assert.EqualValues(t, 0, arr.NumElements())
+		assert.EqualValues(t, 0, arr.Len())
 		_, err := arr.Value(0)
 		require.ErrorIs(t, err, arrow.ErrIndex)
 	})
@@ -473,7 +473,7 @@ func TestArrayValues(t *testing.T) {
 		assert.Equal(t, variant.Array, v.Type())
 
 		arr := v.Value().(variant.ArrayValue)
-		assert.EqualValues(t, 3, arr.NumElements())
+		assert.EqualValues(t, 3, arr.Len())
 
 		elem0, err := arr.Value(0)
 		require.NoError(t, err)
