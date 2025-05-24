@@ -497,7 +497,8 @@ func (v Value) Bytes() []byte { return v.value }
 func (v Value) Clone() Value {
 	return Value{
 		meta:  v.meta.Clone(),
-		value: bytes.Clone(v.value)}
+		value: bytes.Clone(v.value),
+	}
 }
 
 // Metadata returns the metadata associated with the value.
