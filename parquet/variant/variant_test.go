@@ -18,6 +18,7 @@ package variant_test
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -114,6 +115,7 @@ func TestBasicRead(t *testing.T) {
 			key, err := m.KeyAt(uint32(i))
 			require.NoError(t, err)
 			assert.Equal(t, k, key)
+			assert.Equal(t, uint32(i), m.IdFor(k)[0])
 		}
 	})
 }
@@ -400,6 +402,10 @@ func TestTimestampNanos(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, variant.TimestampNanos, v.Type())
 		assert.Equal(t, arrow.Timestamp(-1), v.Value())
+
+		out, err := json.Marshal(v)
+		require.NoError(t, err)
+		assert.JSONEq(t, `"1969-12-31 23:59:59.999999999Z"`, string(out))
 	})
 
 	t.Run("ts nanos tz positive", func(t *testing.T) {
@@ -409,6 +415,10 @@ func TestTimestampNanos(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, variant.TimestampNanos, v.Type())
 		assert.Equal(t, arrow.Timestamp(1744877350123456789), v.Value())
+
+		out, err := json.Marshal(v)
+		require.NoError(t, err)
+		assert.JSONEq(t, `"2025-04-17 08:09:10.123456789Z"`, string(out))
 	})
 
 	t.Run("ts nanos ntz positive", func(t *testing.T) {
@@ -418,6 +428,12 @@ func TestTimestampNanos(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, variant.TimestampNanosNTZ, v.Type())
 		assert.Equal(t, arrow.Timestamp(1744877350123456789), v.Value())
+
+		tm := time.Unix(1744877350123456789/int64(time.Second), 1744877350123456789%int64(time.Second))
+		tm = tm.In(time.Local)
+		out, err := json.Marshal(v)
+		require.NoError(t, err)
+		assert.JSONEq(t, tm.Format(`"2006-01-02 15:04:05.999999999Z0700"`), string(out))
 	})
 }
 
@@ -509,4 +525,263 @@ func TestArrayValues(t *testing.T) {
 		]`
 		assert.JSONEq(t, expected, string(out))
 	})
+}
+
+func TestInvalidMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata []byte
+		errMsg   string
+	}{
+		{
+			name:     "empty metadata",
+			metadata: []byte{},
+			errMsg:   "too short",
+		},
+		{
+			name:     "unsupported version",
+			metadata: []byte{0x02, 0x00, 0x00}, // Version != 1 is unsupported
+			errMsg:   "unsupported version",
+		},
+		{
+			name:     "truncated metadata",
+			metadata: []byte{0x01, 0x05}, // Metadata too short for its header
+			errMsg:   "too short",
+		},
+		{
+			name:     "too short for dict size",
+			metadata: []byte{0x81, 0x01, 0x00}, // Offset size is 3, not enough bytes
+			errMsg:   "too short for dictionary",
+		},
+		{
+			name:     "key count exceeds metadata size",
+			metadata: []byte{0x01, 0xFF, 0x00}, // Claims to have many keys but doesn't
+			errMsg:   "out of range",
+		},
+		{
+			name:     "string data out of range",
+			metadata: []byte{0x01, 0x01, 0x00, 0x05},
+			errMsg:   "string data out of range",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := variant.NewMetadata(tt.metadata)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, variant.ErrInvalidMetadata)
+			assert.Contains(t, err.Error(), tt.errMsg)
+
+			_, err = variant.New(tt.metadata, []byte{})
+			require.Error(t, err)
+			assert.ErrorIs(t, err, variant.ErrInvalidMetadata)
+			assert.Contains(t, err.Error(), tt.errMsg)
+		})
+	}
+}
+
+func TestInvalidValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata []byte
+		value    []byte
+		errMsg   string
+	}{
+		{
+			name:     "empty value",
+			metadata: variant.EmptyMetadataBytes[:],
+			value:    []byte{},
+			errMsg:   "invalid variant value: empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := variant.New(tt.metadata, tt.value)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errMsg)
+		})
+	}
+}
+
+func TestInvalidObjectAccess(t *testing.T) {
+	v := loadVariant(t, "object_primitive")
+	obj := v.Value().(variant.ObjectValue)
+
+	t.Run("field_at_out_of_bounds", func(t *testing.T) {
+		_, err := obj.FieldAt(obj.NumElements())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "out of range")
+		assert.ErrorIs(t, err, arrow.ErrIndex)
+	})
+
+	t.Run("corrupt_id", func(t *testing.T) {
+		// Create a corrupt variant with invalid field ID
+		objBytes := v.Bytes()
+		idPosition := 2 // Assumes field ID is at this position - adjust if needed
+
+		// Make a copy so we don't modify the original
+		corruptBytes := make([]byte, len(objBytes))
+		copy(corruptBytes, objBytes)
+
+		// Set field ID to an invalid value
+		corruptBytes[idPosition] = 0xFF
+
+		corrupt, err := variant.NewWithMetadata(v.Metadata(), corruptBytes)
+		require.NoError(t, err)
+
+		corruptObj := corrupt.Value().(variant.ObjectValue)
+		_, err = corruptObj.FieldAt(0)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "fieldID")
+
+		_, err = corruptObj.ValueByKey("int_field")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "fieldID")
+	})
+}
+
+func TestInvalidArrayAccess(t *testing.T) {
+	v := loadVariant(t, "array_primitive")
+	arr := v.Value().(variant.ArrayValue)
+
+	t.Run("out_of_bounds", func(t *testing.T) {
+		_, err := arr.Value(arr.Len())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "out of range")
+		assert.ErrorIs(t, err, arrow.ErrIndex)
+	})
+
+	t.Run("negative_index", func(t *testing.T) {
+		_, err := arr.Value(uint32(math.MaxUint32))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "out of range")
+	})
+}
+
+func TestInvalidBuilderOperations(t *testing.T) {
+	t.Run("invalid_object_size", func(t *testing.T) {
+		var b variant.Builder
+		start := b.Offset()
+
+		// Move offset to before start to create invalid size
+		b.AppendInt(123)
+		fields := []variant.FieldEntry{{Key: "test", ID: 0, Offset: -10}}
+
+		err := b.FinishObject(start+10, fields)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid object size")
+	})
+
+	t.Run("invalid_array_size", func(t *testing.T) {
+		var b variant.Builder
+		start := b.Offset()
+
+		// Move offset to before start to create invalid size
+		b.AppendInt(123)
+		offsets := []int{-10}
+
+		err := b.FinishArray(start+10, offsets)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid array size")
+	})
+
+}
+
+func TestUnsupportedTypes(t *testing.T) {
+	var b variant.Builder
+
+	tests := []struct {
+		name  string
+		value interface{}
+	}{
+		{
+			name:  "complex number",
+			value: complex(1, 2),
+		},
+		{
+			name:  "function",
+			value: func() {},
+		},
+		{
+			name:  "channel",
+			value: make(chan int),
+		},
+		{
+			name: "map with non-string keys",
+			value: map[int]string{
+				1: "test",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := b.Append(tt.value)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestDuplicateKeys(t *testing.T) {
+	t.Run("disallow_duplicates", func(t *testing.T) {
+		var b variant.Builder
+		b.SetAllowDuplicates(false) // default, but explicit for test clarity
+
+		start := b.Offset()
+		fields := make([]variant.FieldEntry, 0)
+
+		fields = append(fields, b.NextField(start, "key"))
+		require.NoError(t, b.AppendInt(1))
+
+		fields = append(fields, b.NextField(start, "key"))
+		require.NoError(t, b.AppendInt(2))
+
+		err := b.FinishObject(start, fields)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "disallowed duplicate key")
+	})
+
+	t.Run("allow_duplicates", func(t *testing.T) {
+		var b variant.Builder
+		b.SetAllowDuplicates(true)
+
+		start := b.Offset()
+		fields := make([]variant.FieldEntry, 0)
+
+		fields = append(fields, b.NextField(start, "key"))
+		require.NoError(t, b.AppendInt(1))
+
+		fields = append(fields, b.NextField(start, "key"))
+		require.NoError(t, b.AppendInt(2))
+
+		require.NoError(t, b.FinishObject(start, fields))
+
+		v, err := b.Build()
+		require.NoError(t, err)
+
+		obj := v.Value().(variant.ObjectValue)
+		field, err := obj.ValueByKey("key")
+		require.NoError(t, err)
+		assert.Equal(t, int8(2), field.Value.Value())
+	})
+}
+
+func TestValueCloneConsistency(t *testing.T) {
+	var b variant.Builder
+	require.NoError(t, b.AppendString("test"))
+
+	v, err := b.Build()
+	require.NoError(t, err)
+
+	cloned := v.Clone()
+
+	// Reset should invalidate the original value's buffer
+	b.Reset()
+	require.NoError(t, b.AppendInt(123))
+
+	// Original value's buffer is now used for something else
+	// But the cloned value should still be valid
+	assert.Equal(t, variant.String, cloned.Type())
+	assert.Equal(t, "test", cloned.Value())
 }

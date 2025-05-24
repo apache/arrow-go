@@ -151,8 +151,13 @@ func extractFieldInfo(f reflect.StructField) (name string, o AppendOpt) {
 //															  // timestamp(UTC=true,NANOS)
 //			}
 //
+// There is only one case where options can conflict currently: If both [OptTimeAsDate] and
+// [OptTimeAsTime] are set, then [OptTimeAsDate] will take precedence.
+//
 // Options specified in the struct tags will be OR'd with any options passed to the original call
-// to Append.
+// to Append. As a result, if a Struct field tag sets [OptTimeAsTime], but the call to Append
+// passes [OptTimeAsDate], then the value will be appended as a date since that option takes
+// precedence.
 func (b *Builder) Append(v any, opts ...AppendOpt) error {
 	var o AppendOpt
 	for _, opt := range opts {
@@ -731,10 +736,9 @@ func (b *Builder) FinishObject(start int, fields []FieldEntry) error {
 	}
 
 	var (
-		dataSize           = b.buf.Len() - start
-		isLarge            = sz > math.MaxUint8
-		sizeBytes          = 1
-		idSize, offsetSize = intSize(int(maxID)), intSize(dataSize)
+		dataSize  = b.buf.Len() - start
+		isLarge   = sz > math.MaxUint8
+		sizeBytes = 1
 	)
 
 	if isLarge {
@@ -745,6 +749,7 @@ func (b *Builder) FinishObject(start int, fields []FieldEntry) error {
 		return errors.New("invalid object size")
 	}
 
+	idSize, offsetSize := intSize(int(maxID)), intSize(dataSize)
 	headerSize := 1 + sizeBytes + sz*int(idSize) + (sz+1)*int(offsetSize)
 	// shift the just written data to make room for the header section
 	b.buf.Grow(headerSize)

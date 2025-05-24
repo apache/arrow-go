@@ -51,6 +51,9 @@ const (
 )
 
 func basicTypeFromHeader(hdr byte) BasicType {
+	// because we're doing hdr & 0x3, it is impossible for the result
+	// to be outside of the range of BasicType. Therefore, we don't
+	// need to perform any checks. The value will always be [0,3]
 	return BasicType(hdr & basicTypeMask)
 }
 
@@ -136,6 +139,8 @@ const (
 var (
 	// EmptyMetadataBytes contains a minimal valid metadata section with no dictionary entries.
 	EmptyMetadataBytes = [3]byte{0x1, 0, 0}
+
+	ErrInvalidMetadata = errors.New("invalid variant metadata")
 )
 
 // Metadata represents the dictionary part of a variant value, which stores
@@ -150,29 +155,15 @@ type Metadata struct {
 func NewMetadata(data []byte) (Metadata, error) {
 	m := Metadata{data: data}
 	if len(data) < hdrSizeBytes+minOffsetSizeBytes*2 {
-		return m, fmt.Errorf("invalid variant metadata: too short: size=%d", len(data))
+		return m, fmt.Errorf("%w: too short: size=%d", ErrInvalidMetadata, len(data))
 	}
 
 	if m.Version() != supportedVersion {
-		return m, fmt.Errorf("invalid variant metadata: unsupported version: %d", m.Version())
+		return m, fmt.Errorf("%w: unsupported version: %d", ErrInvalidMetadata, m.Version())
 	}
 
 	offsetSz := m.OffsetSize()
-	if offsetSz < minOffsetSizeBytes || offsetSz > maxOffsetSizeBytes {
-		return m, fmt.Errorf("invalid variant metadata: invalid offset size: %d", offsetSz)
-	}
-
-	dictSize, err := m.loadDictionary(offsetSz)
-	if err != nil {
-		return m, err
-	}
-
-	if hdrSizeBytes+int(dictSize+1)*int(offsetSz) > len(m.data) {
-		return m, fmt.Errorf("invalid variant metadata: offset out of range: %d > %d",
-			(dictSize+hdrSizeBytes)*uint32(offsetSz), len(m.data))
-	}
-
-	return m, nil
+	return m, m.loadDictionary(offsetSz)
 }
 
 // Clone creates a deep copy of the metadata.
@@ -186,21 +177,26 @@ func (m *Metadata) Clone() Metadata {
 	}
 }
 
-func (m *Metadata) loadDictionary(offsetSz uint8) (uint32, error) {
+func (m *Metadata) loadDictionary(offsetSz uint8) error {
 	if int(offsetSz+hdrSizeBytes) > len(m.data) {
-		return 0, errors.New("invalid variant metadata: too short for dictionary size")
+		return fmt.Errorf("%w: too short for dictionary size", ErrInvalidMetadata)
 	}
 
 	dictSize := readLEU32(m.data[hdrSizeBytes : hdrSizeBytes+offsetSz])
 	m.keys = make([][]byte, dictSize)
 
 	if dictSize == 0 {
-		return 0, nil
+		return nil
 	}
 
 	// first offset is always 0
 	offsetStart, offsetPos := uint32(0), hdrSizeBytes+offsetSz
 	valuesStart := hdrSizeBytes + (dictSize+2)*uint32(offsetSz)
+	if hdrSizeBytes+int(dictSize+1)*int(offsetSz) > len(m.data) {
+		return fmt.Errorf("%w: offset out of range: %d > %d",
+			ErrInvalidMetadata, (dictSize+hdrSizeBytes)*uint32(offsetSz), len(m.data))
+	}
+
 	for i := range dictSize {
 		offsetPos += offsetSz
 		end := readLEU32(m.data[offsetPos : offsetPos+offsetSz])
@@ -208,14 +204,14 @@ func (m *Metadata) loadDictionary(offsetSz uint8) (uint32, error) {
 		keySize := end - offsetStart
 		valStart := valuesStart + offsetStart
 		if valStart+keySize > uint32(len(m.data)) {
-			return 0, fmt.Errorf("invalid variant metadata: string data out of range: %d + %d > %d",
-				valStart, keySize, len(m.data))
+			return fmt.Errorf("%w: string data out of range: %d + %d > %d",
+				ErrInvalidMetadata, valStart, keySize, len(m.data))
 		}
 		m.keys[i] = m.data[valStart : valStart+keySize]
 		offsetStart += keySize
 	}
 
-	return dictSize, nil
+	return nil
 }
 
 // Bytes returns the raw byte representation of the metadata.
@@ -265,8 +261,8 @@ func (m Metadata) IdFor(key string) []uint32 {
 		return ret
 	}
 
-	for i, k := range m.keys {
-		if bytes.Equal(k, k) {
+	for i, kb := range m.keys {
+		if bytes.Equal(kb, k) {
 			ret = append(ret, uint32(i))
 		}
 	}
