@@ -36,8 +36,8 @@ import (
 	"github.com/google/uuid"
 )
 
-//go:generate go tool stringer -type=BasicType -linecomment -output=basic_type_string.go
-//go:generate go tool stringer -type=PrimitiveType -linecomment -output=primitive_type_string.go
+//go:generate go tool stringer -type=BasicType -linecomment -output=basic_type_stringer.go
+//go:generate go tool stringer -type=PrimitiveType -linecomment -output=primitive_type_stringer.go
 
 // BasicType represents the fundamental type category of a variant value.
 type BasicType int
