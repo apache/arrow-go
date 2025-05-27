@@ -129,11 +129,11 @@ const (
 	maxOffsetSizeBytes       = 4
 
 	// mask is applied after shift
-	offsetSizeMask     uint8 = 0b11
-	offsetSizeBitShift uint8 = 6
-	supportedVersion         = 1
-	maxShortStringSize       = 0x3F
-	maxSizeLimit             = 128 * 1024 * 1024 // 128MB
+	offsetSizeMask       uint8 = 0b11
+	offsetSizeBitShift   uint8 = 6
+	supportedVersion           = 1
+	maxShortStringSize         = 0x3F
+	metadataMaxSizeLimit       = 128 * 1024 * 1024 // 128MB
 )
 
 var (

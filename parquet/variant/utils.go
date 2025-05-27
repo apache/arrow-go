@@ -84,7 +84,7 @@ func objectHeader(large bool, idSize, offsetSize uint8) byte {
 }
 
 func intSize(v int) uint8 {
-	debug.Assert(v <= maxSizeLimit, "size too large")
+	debug.Assert(v <= metadataMaxSizeLimit, "size too large")
 	debug.Assert(v >= 0, "size cannot be negative")
 
 	switch {

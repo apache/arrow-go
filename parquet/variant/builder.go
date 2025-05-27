@@ -41,6 +41,7 @@ type Builder struct {
 	buf             bytes.Buffer
 	dict            map[string]uint32
 	dictKeys        [][]byte
+	totalDictSize   int
 	allowDuplicates bool
 }
 
@@ -67,6 +68,7 @@ func (b *Builder) AddKey(key string) (id uint32) {
 	id = uint32(len(b.dictKeys))
 	b.dict[key] = id
 	b.dictKeys = append(b.dictKeys, unsafe.Slice(unsafe.StringData(key), len(key)))
+	b.totalDictSize += len(key)
 
 	return id
 }
@@ -804,26 +806,22 @@ func (b *Builder) Reset() {
 // performing this copy.
 func (b *Builder) Build() (Value, error) {
 	nkeys := len(b.dictKeys)
-	totalDictSize := 0
-	for _, k := range b.dictKeys {
-		totalDictSize += len(k)
-	}
 
 	// determine the number of bytes required per offset entry.
 	// the largest offset is the one-past-the-end value, the total size.
 	// It's very unlikely that the number of keys could be larger, but
 	// incorporate that into the calculation in case of pathological data.
-	maxSize := max(totalDictSize, nkeys)
-	if maxSize > maxSizeLimit {
+	maxSize := max(b.totalDictSize, nkeys)
+	if maxSize > metadataMaxSizeLimit {
 		return Value{}, fmt.Errorf("metadata size too large: %d", maxSize)
 	}
 
 	offsetSize := intSize(int(maxSize))
 	offsetStart := 1 + offsetSize
 	stringStart := int(offsetStart) + (nkeys+1)*int(offsetSize)
-	metadataSize := stringStart + totalDictSize
+	metadataSize := stringStart + b.totalDictSize
 
-	if metadataSize > maxSizeLimit {
+	if metadataSize > metadataMaxSizeLimit {
 		return Value{}, fmt.Errorf("metadata size too large: %d", metadataSize)
 	}
 
