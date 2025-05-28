@@ -34,3 +34,5 @@ parquet/internal/gen-go/parquet/GoUnusedProtection__.go
 parquet/internal/gen-go/parquet/parquet-consts.go
 parquet/internal/gen-go/parquet/parquet.go
 parquet/version_string.go
+parquet/variant/basic_type_stringer.go
+parquet/variant/primitive_type_stringer.go
