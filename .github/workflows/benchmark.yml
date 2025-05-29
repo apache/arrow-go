@@ -1,0 +1,71 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: Benchmarks
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - ".github/workflows/benchmark.yml"
+      - "ci/scripts/bench.sh"
+      - "ci/scripts/bench_adapt.py"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    container: debian:12
+    strategy:
+      matrix:
+        go: ['1.22.7']
+        arch: ['amd64']
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y git ca-certificates
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install Go ${{ matrix.go }} for Benchmarks
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+          cache-dependency-path: go.sum
+          check-latest: false
+      - name: Run Benchmarks
+        if: github.event_name != 'push'
+        run: bash ci/scripts/bench.sh $(pwd) --json
+      - name: Upload results
+        if: github.event_name == 'push' && github.repository == 'apache/arrow-go' && github.ref_name == 'main'
+        env:
+          CONBENCH_URL: https://conbench.ursa.dev
+          CONBENCH_EMAIL: ${{ secrets.CONBENCH_EMAIL }}
+          CONBENCH_PASSWORD: ${{ secrets.CONBENCH_PASS }}
+          CONBENCH_REF: ${{ github.ref_name }}
+          CONBENCH_MACHINE_INFO_NAME: ${{ matrix.arch }}-debian-12
+        run: |
+          python3 -m pip install benchadapt@git+https://github.com/conbench/conbench.git@main#subdirectory=benchadapt/python
+          python3 ci/scripts/bench_adapt.py
