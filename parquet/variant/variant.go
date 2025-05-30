@@ -309,7 +309,12 @@ func (v ArrayValue) Values() iter.Seq[Value] {
 		for i := range v.numElements {
 			idx := uint32(v.offsetStart) + i*uint32(v.offsetSize)
 			offset := readLEU32(v.value[idx : idx+uint32(v.offsetSize)])
-			if !yield(Value{value: v.value[v.dataStart+offset:], meta: v.meta}) {
+
+			val := v.value[v.dataStart+offset:]
+			sz := valueSize(val)
+			val = val[:sz] // trim to actual size
+
+			if !yield(Value{value: val, meta: v.meta}) {
 				return
 			}
 		}
@@ -444,7 +449,9 @@ func (v ObjectValue) Values() iter.Seq2[string, Value] {
 			offsetIdx := uint32(v.offsetStart) + i*uint32(v.offsetSize)
 			offset := readLEU32(v.value[offsetIdx : offsetIdx+uint32(v.offsetSize)])
 
-			if !yield(k, Value{value: v.value[v.dataStart+offset:], meta: v.meta}) {
+			value := v.value[v.dataStart+offset:]
+			sz := valueSize(value)
+			if !yield(k, Value{value: value[:sz], meta: v.meta}) {
 				return
 			}
 		}
@@ -460,6 +467,8 @@ func (v ObjectValue) MarshalJSON() ([]byte, error) {
 	maps.Insert(mapping, v.Values())
 	return json.Marshal(mapping)
 }
+
+var NullValue = Value{meta: Metadata{data: EmptyMetadataBytes[:]}, value: []byte{0}}
 
 // Value represents a variant value of any type.
 type Value struct {
@@ -484,6 +493,11 @@ func New(meta, value []byte) (Value, error) {
 	}
 
 	return NewWithMetadata(m, value)
+}
+
+func (v Value) String() string {
+	b, _ := json.Marshal(v)
+	return string(b)
 }
 
 // Bytes returns the raw byte representation of the value (excluding metadata).
@@ -714,7 +728,7 @@ func (v Value) MarshalJSON() ([]byte, error) {
 		case PrimitiveTimestampNanosNTZ:
 			result = t.ToTime(arrow.Nanosecond).In(time.Local).Format("2006-01-02 15:04:05.999999999Z0700")
 		}
-	case arrow.Time32:
+	case arrow.Time64:
 		result = t.ToTime(arrow.Microsecond).In(time.Local).Format("15:04:05.999999Z0700")
 	}
 

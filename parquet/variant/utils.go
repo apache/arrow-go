@@ -147,9 +147,9 @@ func valueSize(v []byte) int {
 			return 2
 		case PrimitiveInt16:
 			return 3
-		case PrimitiveInt32, PrimitiveDate, PrimitiveFloat, PrimitiveTimeMicrosNTZ:
+		case PrimitiveInt32, PrimitiveDate, PrimitiveFloat:
 			return 5
-		case PrimitiveInt64, PrimitiveDouble,
+		case PrimitiveInt64, PrimitiveDouble, PrimitiveTimeMicrosNTZ,
 			PrimitiveTimestampMicros, PrimitiveTimestampMicrosNTZ,
 			PrimitiveTimestampNanos, PrimitiveTimestampNanosNTZ:
 			return 9

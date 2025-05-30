@@ -25,6 +25,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/flight"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -241,7 +242,7 @@ func repFromNullable(isnullable bool) parquet.Repetition {
 	return parquet.Repetitions.Required
 }
 
-func variantToNode(t *variantExtensionType, field arrow.Field, props *parquet.WriterProperties, arrProps ArrowWriterProperties) (schema.Node, error) {
+func variantToNode(t *extensions.VariantType, field arrow.Field, props *parquet.WriterProperties, arrProps ArrowWriterProperties) (schema.Node, error) {
 	metadataNode, err := fieldToNode("metadata", t.Metadata(), props, arrProps)
 	if err != nil {
 		return nil, err
@@ -251,6 +252,8 @@ func variantToNode(t *variantExtensionType, field arrow.Field, props *parquet.Wr
 	if err != nil {
 		return nil, err
 	}
+
+	//TODO: implement shredding
 
 	return schema.NewGroupNodeLogical(field.Name, repFromNullable(field.Nullable),
 		schema.FieldList{metadataNode, valueNode}, schema.VariantLogicalType{},
@@ -326,7 +329,7 @@ func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties
 	case arrow.EXTENSION:
 		extType := field.Type.(arrow.ExtensionType)
 		if extType.ExtensionName() == "parquet.variant" {
-			return variantToNode(extType.(*variantExtensionType), field, props, arrprops)
+			return variantToNode(extType.(*extensions.VariantType), field, props, arrprops)
 		}
 	}
 
@@ -853,8 +856,9 @@ func mapToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *sc
 	return nil
 }
 
-func variantToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *schemaTree, parent, out *SchemaField) error {
+func variantToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *schemaTree, _, out *SchemaField) error {
 	// this is for unshredded variants. shredded variants may have more fields
+	// TODO: implement support for shredded variants
 	if n.NumFields() != 2 {
 		return errors.New("VARIANT group must have exactly 2 children")
 	}
@@ -865,7 +869,7 @@ func variantToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx
 	}
 
 	storageType := out.Field.Type
-	out.Field.Type, err = newVariantType(storageType)
+	out.Field.Type, err = extensions.NewVariantType(storageType)
 	return err
 }
 

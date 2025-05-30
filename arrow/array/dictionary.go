@@ -296,8 +296,8 @@ func (d *Dictionary) GetOneForMarshal(i int) interface{} {
 }
 
 func (d *Dictionary) MarshalJSON() ([]byte, error) {
-	vals := make([]interface{}, d.Len())
-	for i := 0; i < d.Len(); i++ {
+	vals := make([]any, d.Len())
+	for i := range d.Len() {
 		vals[i] = d.GetOneForMarshal(i)
 	}
 	return json.Marshal(vals)
@@ -1650,6 +1650,32 @@ func UnifyTableDicts(alloc memory.Allocator, table arrow.Table) (arrow.Table, er
 		defer cols[i].Release()
 	}
 	return NewTable(table.Schema(), cols, table.NumRows()), nil
+}
+
+type dictWrapper[T arrow.ValueType] struct {
+	*Dictionary
+
+	typedDict arrow.TypedArray[T]
+}
+
+// NewDictWrapper creates a simple wrapper around a Dictionary array provides the
+// a Value method which will use the underlying dictionary to return the value
+// at the given index. This simplifies the interaction of a dictionary array to
+// provide a typed interface as if it were a non-dictionary array.
+func NewDictWrapper[T arrow.ValueType](dict *Dictionary) (arrow.TypedArray[T], error) {
+	typed, ok := dict.Dictionary().(arrow.TypedArray[T])
+	if !ok {
+		return nil, fmt.Errorf("arrow/array: dictionary type %s is not a typed array of %T", dict.Dictionary().DataType(), (*T)(nil))
+	}
+
+	return &dictWrapper[T]{
+		Dictionary: dict,
+		typedDict:  typed,
+	}, nil
+}
+
+func (dw *dictWrapper[T]) Value(i int) T {
+	return dw.typedDict.Value(dw.GetValueIndex(i))
 }
 
 var (

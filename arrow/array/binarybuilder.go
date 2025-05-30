@@ -700,7 +700,18 @@ func (b *BinaryViewBuilder) NewArray() arrow.Array {
 	return b.NewBinaryViewArray()
 }
 
+type BinaryLikeBuilder interface {
+	Builder
+	Append([]byte)
+	AppendValues([][]byte, []bool)
+	UnsafeAppend([]byte)
+	ReserveData(int)
+}
+
 var (
 	_ Builder = (*BinaryBuilder)(nil)
 	_ Builder = (*BinaryViewBuilder)(nil)
+
+	_ BinaryLikeBuilder = (*BinaryBuilder)(nil)
+	_ BinaryLikeBuilder = (*BinaryViewBuilder)(nil)
 )
