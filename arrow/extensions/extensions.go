@@ -25,6 +25,7 @@ var canonicalExtensionTypes = []arrow.ExtensionType{
 	NewUUIDType(),
 	&OpaqueType{},
 	&JSONType{},
+	&VariantType{},
 }
 
 func init() {
