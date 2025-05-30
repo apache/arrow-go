@@ -728,7 +728,7 @@ func (v Value) MarshalJSON() ([]byte, error) {
 		case PrimitiveTimestampNanosNTZ:
 			result = t.ToTime(arrow.Nanosecond).In(time.Local).Format("2006-01-02 15:04:05.999999999Z0700")
 		}
-	case arrow.Time32:
+	case arrow.Time64:
 		result = t.ToTime(arrow.Microsecond).In(time.Local).Format("15:04:05.999999Z0700")
 	}
 

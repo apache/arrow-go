@@ -212,7 +212,7 @@ func validStruct(s *arrow.StructType) bool {
 			return false
 		}
 
-		if nt, ok := typedField.Type.(arrow.NestedType); ok {
+		if nt, ok := typedField.Type.(arrow.NestedType); ok && nt.Name() != "extension" {
 			return validNestedType(nt)
 		}
 
@@ -889,9 +889,42 @@ type VariantBuilder struct {
 	shreddedSchema shreddedSchema
 
 	structBldr *array.StructBuilder
-	metaBldr   *array.BinaryBuilder
-	valueBldr  *array.BinaryBuilder
+	metaBldr   array.BinaryLikeBuilder
+	valueBldr  array.BinaryLikeBuilder
 	typedBldr  shreddedBuilder
+}
+
+type binaryDictBuilderAdapter struct {
+	*array.BinaryDictionaryBuilder
+}
+
+func (b *binaryDictBuilderAdapter) ReserveData(int) {}
+
+func (b *binaryDictBuilderAdapter) AppendValues(v [][]byte, valids []bool) {
+	if len(valids) == 0 {
+		for _, val := range v {
+			b.Append(val)
+		}
+		return
+	}
+
+	for i, valid := range valids {
+		if !valid {
+			b.AppendNull()
+		} else {
+			b.Append(v[i])
+		}
+	}
+}
+
+func (b *binaryDictBuilderAdapter) UnsafeAppend(v []byte) {
+	b.Append(v)
+}
+
+func (b *binaryDictBuilderAdapter) Append(v []byte) {
+	if err := b.BinaryDictionaryBuilder.Append(v); err != nil {
+		panic(fmt.Sprintf("error appending value %s to binary dictionary builder: %v", string(v), err))
+	}
 }
 
 // NewVariantBuilder creates a new VariantBuilder for the given variant type which may
@@ -906,12 +939,20 @@ func NewVariantBuilder(mem memory.Allocator, dt *VariantType) *VariantBuilder {
 		typedBldr = createShreddedBuilder(shreddedSchema.typedSchema, structBldr.FieldBuilder(shreddedSchema.typedIdx))
 	}
 
+	var metaBldr array.BinaryLikeBuilder
+	switch b := structBldr.FieldBuilder(shreddedSchema.metadataIdx).(type) {
+	case *array.BinaryDictionaryBuilder:
+		metaBldr = &binaryDictBuilderAdapter{BinaryDictionaryBuilder: b}
+	case array.BinaryLikeBuilder:
+		metaBldr = b
+	}
+
 	return &VariantBuilder{
 		ExtensionBuilder: bldr,
 		shreddedSchema:   shreddedSchema,
 		structBldr:       structBldr,
-		metaBldr:         structBldr.FieldBuilder(shreddedSchema.metadataIdx).(*array.BinaryBuilder),
-		valueBldr:        structBldr.FieldBuilder(shreddedSchema.variantIdx).(*array.BinaryBuilder),
+		metaBldr:         metaBldr,
+		valueBldr:        structBldr.FieldBuilder(shreddedSchema.variantIdx).(array.BinaryLikeBuilder),
 		typedBldr:        typedBldr,
 	}
 }
@@ -1110,7 +1151,7 @@ type shreddedArrayBuilder struct {
 	listBldr *array.ListBuilder
 	elemBldr *array.StructBuilder
 
-	valueBldr *array.BinaryBuilder
+	valueBldr array.BinaryLikeBuilder
 	typedBldr shreddedBuilder
 }
 
@@ -1383,7 +1424,7 @@ func (b *shreddedPrimitiveBuilder) tryTyped(v variant.Value) (residual []byte) {
 
 type shreddedFieldBuilder struct {
 	structBldr *array.StructBuilder
-	valueBldr  *array.BinaryBuilder
+	valueBldr  array.BinaryLikeBuilder
 	typedBldr  shreddedBuilder
 }
 
@@ -1468,7 +1509,7 @@ func createShreddedBuilder(s variantSchema, typed array.Builder) shreddedBuilder
 			fb := stBldr.FieldBuilder(i).(*array.StructBuilder)
 			fieldBuilders[field.fieldName] = shreddedFieldBuilder{
 				structBldr: fb,
-				valueBldr:  fb.FieldBuilder(field.variantIdx).(*array.BinaryBuilder),
+				valueBldr:  fb.FieldBuilder(field.variantIdx).(array.BinaryLikeBuilder),
 				typedBldr:  createShreddedBuilder(field.schema, fb.FieldBuilder(field.typedIdx)),
 			}
 		}
@@ -1483,7 +1524,7 @@ func createShreddedBuilder(s variantSchema, typed array.Builder) shreddedBuilder
 		return &shreddedArrayBuilder{
 			listBldr:  listBldr,
 			elemBldr:  elemBldr,
-			valueBldr: elemBldr.FieldBuilder(s.elemVariantIdx).(*array.BinaryBuilder),
+			valueBldr: elemBldr.FieldBuilder(s.elemVariantIdx).(array.BinaryLikeBuilder),
 			typedBldr: createShreddedBuilder(s.elemSchema, elemBldr.FieldBuilder(s.elemTypedIdx)),
 		}
 	case shreddedPrimitiveSchema:

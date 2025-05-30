@@ -19,13 +19,17 @@ package extensions_test
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
+	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/json"
 	"github.com/apache/arrow-go/v18/parquet/variant"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -860,4 +864,252 @@ func TestVariantShreddedBuilder(t *testing.T) {
 			assert.EqualValues(t, 1729794954163, typed.Value(5))
 		})
 	})
+}
+
+func TestVariantWithDecimals(t *testing.T) {
+	s := arrow.StructOf(
+		arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary},
+		arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+		arrow.Field{Name: "typed_value", Type: arrow.StructOf(
+			arrow.Field{Name: "decimal4", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: &arrow.Decimal32Type{Precision: 4, Scale: 2}, Nullable: true},
+			)},
+			arrow.Field{Name: "decimal8", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: &arrow.Decimal64Type{Precision: 6, Scale: 4}, Nullable: true},
+			)},
+			arrow.Field{Name: "decimal16", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: &arrow.Decimal128Type{Precision: 8, Scale: 3}, Nullable: true},
+			)},
+		), Nullable: true})
+
+	vt, err := extensions.NewVariantType(s)
+	require.NoError(t, err)
+	bldr := extensions.NewVariantBuilder(memory.DefaultAllocator, vt)
+	defer bldr.Release()
+
+	values := []any{
+		map[string]any{
+			"decimal4": variant.DecimalValue[decimal.Decimal32]{
+				Value: decimal.Decimal32(123),
+				Scale: 2,
+			},
+			"decimal8": variant.DecimalValue[decimal.Decimal32]{
+				Value: decimal.Decimal32(12345),
+				Scale: 4,
+			},
+			"decimal16": variant.DecimalValue[decimal.Decimal32]{
+				Value: decimal.Decimal32(12345678),
+				Scale: 3,
+			},
+		},
+		map[string]any{
+			"decimal4": variant.DecimalValue[decimal.Decimal64]{
+				Value: decimal.Decimal64(123),
+				Scale: 2,
+			},
+			"decimal8": variant.DecimalValue[decimal.Decimal64]{
+				Value: decimal.Decimal64(123456),
+				Scale: 4,
+			},
+			"decimal16": variant.DecimalValue[decimal.Decimal64]{
+				Value: decimal.Decimal64(12345678),
+				Scale: 3,
+			},
+		},
+		map[string]any{
+			"decimal4": variant.DecimalValue[decimal.Decimal128]{
+				Value: decimal128.FromI64(123),
+				Scale: 2,
+			},
+			"decimal8": variant.DecimalValue[decimal.Decimal128]{
+				Value: decimal128.FromI64(123456),
+				Scale: 4,
+			},
+			"decimal16": variant.DecimalValue[decimal.Decimal128]{
+				Value: decimal128.FromI64(12345678),
+				Scale: 3,
+			},
+		},
+		map[string]any{
+			"decimal4": variant.DecimalValue[decimal.Decimal32]{
+				Value: decimal.Decimal32(12345),
+				Scale: 2,
+			},
+			"decimal8": variant.DecimalValue[decimal.Decimal32]{
+				Value: decimal.Decimal32(1234567),
+				Scale: 4,
+			},
+			"decimal16": variant.DecimalValue[decimal.Decimal32]{
+				Value: decimal.Decimal32(123456789),
+				Scale: 3,
+			},
+		},
+	}
+
+	var b variant.Builder
+	for _, val := range values {
+		require.NoError(t, b.Append(val))
+		v, err := b.Build()
+		require.NoError(t, err)
+		bldr.Append(v)
+		b.Reset()
+	}
+
+	arr := bldr.NewArray()
+	defer arr.Release()
+
+	out, err := json.Marshal(arr)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[
+		{
+			"decimal4": 1.23,
+			"decimal8": 1.2345,
+			"decimal16": 12345.678
+		},
+		{
+			"decimal4": 1.23,
+			"decimal8": 12.3456,
+			"decimal16": 12345.678
+		},
+		{
+			"decimal4": 1.23,
+			"decimal8": 12.3456,
+			"decimal16": 12345.678
+		},
+		{
+			"decimal4": 123.45,
+			"decimal8": 123.4567,
+			"decimal16": 123456.789
+		}
+	]`, string(out))
+}
+
+func TestManyTypesShredded(t *testing.T) {
+	s := arrow.StructOf(
+		arrow.Field{Name: "metadata", Type: &arrow.DictionaryType{
+			IndexType: arrow.PrimitiveTypes.Uint8, ValueType: arrow.BinaryTypes.Binary}},
+		arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+		arrow.Field{Name: "typed_value", Type: arrow.StructOf(
+			arrow.Field{Name: "strval", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.BinaryTypes.String, Nullable: true},
+			)},
+			arrow.Field{Name: "bool", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.FixedWidthTypes.Boolean, Nullable: true},
+			)},
+			arrow.Field{Name: "int8", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Int8, Nullable: true},
+			)},
+			arrow.Field{Name: "uint8", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Uint8, Nullable: true},
+			)},
+			arrow.Field{Name: "int16", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Int16, Nullable: true},
+			)},
+			arrow.Field{Name: "uint16", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Uint16, Nullable: true},
+			)},
+			arrow.Field{Name: "int32", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			)},
+			arrow.Field{Name: "uint32", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Uint32, Nullable: true},
+			)},
+			arrow.Field{Name: "bytes", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.BinaryTypes.LargeBinary, Nullable: true},
+			)},
+			arrow.Field{Name: "event_day", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.FixedWidthTypes.Date32, Nullable: true},
+			)},
+			arrow.Field{Name: "timemicro", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.FixedWidthTypes.Time64us, Nullable: true},
+			)},
+			arrow.Field{Name: "uuid", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: extensions.NewUUIDType(), Nullable: true},
+			)},
+			arrow.Field{Name: "location", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.StructOf(
+					arrow.Field{Name: "latitude", Type: arrow.StructOf(
+						arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+						arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Float64, Nullable: true},
+					)},
+					arrow.Field{Name: "longitude", Type: arrow.StructOf(
+						arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+						arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Float32, Nullable: true},
+					)},
+				), Nullable: true})},
+		), Nullable: true})
+
+	vt, err := extensions.NewVariantType(s)
+	require.NoError(t, err)
+	bldr := extensions.NewVariantBuilder(memory.DefaultAllocator, vt)
+	defer bldr.Release()
+
+	values := []any{
+		map[string]any{
+			"strval":    "click",
+			"bool":      true,
+			"int8":      int8(42),
+			"uint8":     uint8(255),
+			"int16":     int16(12345),
+			"uint16":    uint16(54321),
+			"int32":     int32(1234567890),
+			"uint32":    uint32(1234567890),
+			"bytes":     []byte{0xDE, 0xAD, 0xBE, 0xEF},
+			"timemicro": arrow.Time64(43200000000),
+			"uuid":      uuid.MustParse("123e4567-e89b-12d3-a456-426614174000"),
+			"event_day": arrow.Date32FromTime(time.Date(2024, 10, 24, 0, 0, 0, 0, time.UTC)),
+			"location": map[string]any{
+				"latitude":  37.7749,
+				"longitude": -122.4194,
+			},
+		},
+	}
+
+	var b variant.Builder
+	require.NoError(t, b.Append(values[0]))
+
+	v, err := b.Build()
+	require.NoError(t, err)
+	bldr.Append(v)
+	b.Reset()
+
+	arr := bldr.NewArray()
+	defer arr.Release()
+
+	out, err := json.Marshal(arr)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[{
+		"strval": "click",
+		"bool": true,
+		"int8": 42,
+		"uint8": 255,
+		"int16": 12345,
+		"uint16": 54321,
+		"int32": 1234567890,
+		"uint32": 1234567890,
+		"bytes": "3q2+7w==",
+		"timemicro": "`+time.UnixMicro(43200000000).In(time.Local).Format("15:04:05.999999Z0700")+`",
+		"uuid": "123e4567-e89b-12d3-a456-426614174000",
+		"event_day": "2024-10-24",
+		"location": {
+			"latitude": 37.7749,
+			"longitude": -122.4194
+		}
+	}]`, string(out))
 }
