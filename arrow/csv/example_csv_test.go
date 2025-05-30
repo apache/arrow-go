@@ -1,20 +1,4 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-package main
+package csv_test
 
 import (
 	"fmt"
@@ -25,12 +9,12 @@ import (
 	arrowcsv "github.com/apache/arrow-go/v18/arrow/csv"
 )
 
-func main() {
-	filePath := "../../../arrow-testing/data/csv/aggregate_test_100.csv" // Test csv file
+func ExampleReader() {
+	filePath := "../../arrow-testing/data/csv/aggregate_test_100.csv" // Test csv file
 	f, err := os.Open(filePath)
 	if err != nil {
 		fmt.Printf("Failed to open file: %v\n", err)
-		os.Exit(1)
+		return
 	}
 	defer f.Close()
 
@@ -58,10 +42,10 @@ func main() {
 	if !ok {
 		if err := reader.Err(); err != nil {
 			fmt.Printf("Error reading CSV: %v\n", err)
-			os.Exit(1)
+			return
 		}
 		fmt.Println("No records found")
-		os.Exit(0)
+		return
 	}
 
 	record := reader.Record()
@@ -69,9 +53,10 @@ func main() {
 
 	fmt.Printf("Number of rows: %d\n", record.NumRows())
 	fmt.Printf("Number of columns: %d\n", record.NumCols())
+	fmt.Println()
 
-	fmt.Println("\nBasic statistics for numeric columns:")
-	for i := 1; i < 10; i++ { // colss c2 through c10 are Int64
+	fmt.Println("Basic statistics for numeric columns:")
+	for i := 1; i < 10; i++ { // cols c2 through c10 are Int64
 		col := record.Column(i).(*array.Int64)
 		var sum int64
 		for j := 0; j < col.Len(); j++ {
@@ -90,4 +75,21 @@ func main() {
 		avg := sum / float64(col.Len())
 		fmt.Printf("Column c%d: Average = %.4f\n", i+1, avg)
 	}
+
+	// Output:
+	// Number of rows: 100
+	// Number of columns: 13
+	//
+	// Basic statistics for numeric columns:
+	// Column c2: Average = 2.85
+	// Column c3: Average = 7.81
+	// Column c4: Average = 2319.97
+	// Column c5: Average = 158626279.61
+	// Column c6: Average = 59276376114661656.00
+	// Column c7: Average = 130.60
+	// Column c8: Average = 30176.41
+	// Column c9: Average = 2220897700.60
+	// Column c10: Average = -86834033398685392.00
+	// Column c11: Average = 0.4793
+	// Column c12: Average = 0.5090
 }
