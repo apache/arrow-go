@@ -1057,7 +1057,7 @@ func TestManyTypesShredded(t *testing.T) {
 
 	vt, err := extensions.NewVariantType(s)
 	require.NoError(t, err)
-	bldr := extensions.NewVariantBuilder(memory.DefaultAllocator, vt)
+	bldr := vt.NewBuilder(memory.DefaultAllocator).(*extensions.VariantBuilder)
 	defer bldr.Release()
 
 	values := []any{
@@ -1112,4 +1112,117 @@ func TestManyTypesShredded(t *testing.T) {
 			"longitude": -122.4194
 		}
 	}]`, string(out))
+}
+
+func TestVariantBuilderTimestamps(t *testing.T) {
+	s := arrow.StructOf(
+		arrow.Field{Name: "metadata", Type: &arrow.DictionaryType{
+			IndexType: arrow.PrimitiveTypes.Uint8, ValueType: arrow.BinaryTypes.Binary}},
+		arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+		arrow.Field{Name: "typed_value", Type: arrow.StructOf(
+			arrow.Field{Name: "tsmicro", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.FixedWidthTypes.Timestamp_us, Nullable: true},
+			)},
+			arrow.Field{Name: "tsmicro_ntz", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: &arrow.TimestampType{Unit: arrow.Microsecond}, Nullable: true},
+			)},
+			arrow.Field{Name: "tsnano", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.FixedWidthTypes.Timestamp_ns, Nullable: true},
+			)},
+			arrow.Field{Name: "tsnano_ntz", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: &arrow.TimestampType{Unit: arrow.Nanosecond}, Nullable: true},
+			)},
+		), Nullable: true})
+
+	vt, err := extensions.NewVariantType(s)
+	require.NoError(t, err)
+	bldr := vt.NewBuilder(memory.DefaultAllocator).(*extensions.VariantBuilder)
+	defer bldr.Release()
+
+	tmMicro, _ := arrow.TimestampFromString("2024-10-24T12:34:56.789012Z", arrow.Microsecond)
+	tmNano, _ := arrow.TimestampFromString("2024-10-24T12:34:56.789012345Z", arrow.Nanosecond)
+
+	var b variant.Builder
+	require.NoError(t, b.Append(map[string]any{
+		"tsmicro":     tmNano,
+		"tsmicro_ntz": tmNano,
+		"tsnano":      tmNano,
+		"tsnano_ntz":  tmNano,
+	}, variant.OptTimestampNano, variant.OptTimestampUTC))
+	v, err := b.Build()
+	require.NoError(t, err)
+	bldr.Append(v)
+	b.Reset()
+
+	require.NoError(t, b.Append(map[string]any{
+		"tsmicro":     tmMicro,
+		"tsmicro_ntz": tmMicro,
+		"tsnano":      tmMicro,
+		"tsnano_ntz":  tmMicro,
+	}, variant.OptTimestampUTC))
+	v, err = b.Build()
+	require.NoError(t, err)
+	bldr.Append(v)
+	b.Reset()
+
+	require.NoError(t, b.Append(map[string]any{
+		"tsmicro":     tmNano,
+		"tsmicro_ntz": tmNano,
+		"tsnano":      tmNano,
+		"tsnano_ntz":  tmNano,
+	}, variant.OptTimestampNano))
+	v, err = b.Build()
+	require.NoError(t, err)
+	bldr.Append(v)
+	b.Reset()
+
+	require.NoError(t, b.Append(map[string]any{
+		"tsmicro":     tmMicro,
+		"tsmicro_ntz": tmMicro,
+		"tsnano":      tmMicro,
+		"tsnano_ntz":  tmMicro,
+	}))
+	v, err = b.Build()
+	require.NoError(t, err)
+	bldr.Append(v)
+	b.Reset()
+
+	arr := bldr.NewArray()
+	defer arr.Release()
+
+	microLocal := tmMicro.ToTime(arrow.Microsecond).Local().Format("2006-01-02 15:04:05.999999Z0700")
+	nanoLocal := tmNano.ToTime(arrow.Nanosecond).Local().Format("2006-01-02 15:04:05.999999999Z0700")
+
+	out, err := json.Marshal(arr)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[
+		{
+			"tsmicro": "2024-10-24 12:34:56.789012345Z",
+			"tsmicro_ntz": "2024-10-24 12:34:56.789012345Z",
+			"tsnano": "2024-10-24 12:34:56.789012345Z",
+			"tsnano_ntz": "2024-10-24 12:34:56.789012345Z"
+		},
+		{
+			"tsmicro": "2024-10-24 12:34:56.789012Z",
+			"tsmicro_ntz": "2024-10-24 12:34:56.789012Z",
+			"tsnano": "2024-10-24 12:34:56.789012Z",
+			"tsnano_ntz": "2024-10-24 12:34:56.789012Z"
+		},
+		{
+			"tsmicro": "`+nanoLocal+`",
+			"tsmicro_ntz": "`+nanoLocal+`",
+			"tsnano": "`+nanoLocal+`",
+			"tsnano_ntz": "`+nanoLocal+`"
+		},
+		{
+			"tsmicro": "`+microLocal+`",
+			"tsmicro_ntz": "`+microLocal+`",
+			"tsnano": "`+microLocal+`",
+			"tsnano_ntz": "`+microLocal+`"
+		}
+	]`, string(out))
 }

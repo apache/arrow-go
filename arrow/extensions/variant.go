@@ -548,7 +548,7 @@ func createPrimitiveVariantReader(arr arrow.Array) (typedValReader, error) {
 				arrow.ErrInvalid, a.DataType().(*arrow.TimestampType).Unit)
 		}
 
-		if dt.TimeZone == "" || dt.TimeZone == "UTC" {
+		if dt.TimeZone == "UTC" {
 			opt |= variant.OptTimestampUTC
 		}
 
