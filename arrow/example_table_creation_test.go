@@ -26,7 +26,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
-func ExampleTableCreationAndOperations() {
+func Example_tableCreation() {
 	// Create a schema with three fields
 	schema := arrow.NewSchema([]arrow.Field{
 		{Name: "intField", Type: arrow.PrimitiveTypes.Int64, Nullable: false},

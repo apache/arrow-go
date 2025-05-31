@@ -24,7 +24,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
-func ExampleTypeConversion() {
+func Example_typeConversion() {
 	pool := memory.NewGoAllocator()
 
 	// 1. Basic type conversion (Int32 to Int64)

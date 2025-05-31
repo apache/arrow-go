@@ -26,7 +26,7 @@ import (
 	arrowcsv "github.com/apache/arrow-go/v18/arrow/csv"
 )
 
-func ExampleReader() {
+func Example_reader() {
 	filePath := "../../arrow-testing/data/csv/aggregate_test_100.csv" // Test csv file
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -65,8 +65,8 @@ func ExampleReader() {
 		return
 	}
 
+	// Get the record but don't release it - the reader will handle that
 	record := reader.Record()
-	defer record.Release()
 
 	fmt.Printf("Number of rows: %d\n", record.NumRows())
 	fmt.Printf("Number of columns: %d\n", record.NumCols())

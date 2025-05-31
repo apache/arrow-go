@@ -24,7 +24,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
-func ExampleMemoryPerformance() {
+func Example_memoryPerf() {
 	// Create a memory allocator
 	pool := memory.NewGoAllocator()
 
