@@ -51,7 +51,7 @@ type VariantType struct {
 }
 
 // NewDefaultVariantType creates a basic, non-shredded variant type. The underlying
-// storage type will be struct<metadata: binary required, value: binary required>.
+// storage type will be struct<metadata: binary non-null, value: binary non-null>.
 func NewDefaultVariantType() *VariantType {
 	s := arrow.StructOf(
 		arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
@@ -65,15 +65,15 @@ func NewDefaultVariantType() *VariantType {
 //
 // The rules for a variant storage type are:
 //  1. MUST be a struct
-//  2. MUST have required field named "metadata" that is binary/largebinary/binary_view
+//  2. MUST have non-nullable field named "metadata" that is binary/largebinary/binary_view
 //  3. Must satisfy exactly one of the following:
-//     a. MUST have required field named "value" that is binary/largebinary/binary_view
-//     b. MUST have an optional field named "value" that is binary/largebinary/binary_view
-//     and another optional field named "typed_value" that is either a primitive type or
+//     a. MUST have non-nullable field named "value" that is binary/largebinary/binary_view
+//     b. MUST have an nullable field named "value" that is binary/largebinary/binary_view
+//     and another nullable field named "typed_value" that is either a primitive type or
 //     a list/large_list/list_view or struct which also satisfies the following requirements:
-//     i. The elements must be REQUIRED
-//     ii. There must either be a single REQUIRED field named "value" which is
-//     binary/largebinary/binary_view or have an optional "value" field and an optional
+//     i. The elements must be NON-NULLABLE
+//     ii. There must either be a single NON-NULLABLE field named "value" which is
+//     binary/largebinary/binary_view or have an nullable "value" field and an nullable
 //     "typed_value" field that follows the rules laid out in (b).
 //
 // The metadata field may also be dictionary encoded
@@ -90,11 +90,11 @@ func NewVariantType(storage arrow.DataType) (*VariantType, error) {
 	)
 
 	if metadataFieldIdx, ok = s.FieldIdx("metadata"); !ok {
-		return nil, fmt.Errorf("%w: missing required field 'metadata' in variant storage type %s", arrow.ErrInvalid, storage)
+		return nil, fmt.Errorf("%w: missing non-nullable field 'metadata' in variant storage type %s", arrow.ErrInvalid, storage)
 	}
 
 	if valueFieldIdx, ok = s.FieldIdx("value"); !ok {
-		return nil, fmt.Errorf("%w: missing required field 'value' in variant storage type %s", arrow.ErrInvalid, storage)
+		return nil, fmt.Errorf("%w: missing non-nullable field 'value' in variant storage type %s", arrow.ErrInvalid, storage)
 	}
 
 	if s.NumFields() > 3 {
