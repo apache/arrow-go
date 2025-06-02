@@ -73,7 +73,7 @@ func NewDefaultVariantType() *VariantType {
 //     a list/large_list/list_view or struct which also satisfies the following requirements:
 //     i. The elements must be REQUIRED
 //     ii. There must either be a single REQUIRED field named "value" which is
-//     binary/largebinary/binary_view or havve an optional "value" field and an optional
+//     binary/largebinary/binary_view or have an optional "value" field and an optional
 //     "typed_value" field that follows the rules laid out in (b).
 //
 // The metadata field may also be dictionary encoded
