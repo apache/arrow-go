@@ -791,11 +791,11 @@ func (b *Builder) FinishObject(start int, fields []FieldEntry) error {
 	return nil
 }
 
-// AppendEncoded is a special case where we directly append a pre-encoded variant
+// UnsafeAppendEncoded is a special case where we directly append a pre-encoded variant
 // value. Its keys must already be in the dictionary and v must already be
 // a properly encoded variant value. No checking is performed here currently, so
 // be careful as this can easily lead to an invalid variant result.
-func (b *Builder) AppendEncoded(v []byte) error {
+func (b *Builder) UnsafeAppendEncoded(v []byte) error {
 	// this is a special case where we append a pre-encoded value.
 	// the value must be a valid variant value, so it must start with
 	// a primitive header byte.

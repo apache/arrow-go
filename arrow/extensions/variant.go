@@ -713,7 +713,7 @@ func constructVariant(b *variant.Builder, meta variant.Metadata, value []byte, t
 			return nil
 		}
 
-		return b.AppendEncoded(value)
+		return b.UnsafeAppendEncoded(value)
 	case map[string]typedPair:
 		fields := make([]variant.FieldEntry, 0, len(v))
 		objstart := b.Offset()
@@ -739,7 +739,7 @@ func constructVariant(b *variant.Builder, meta variant.Metadata, value []byte, t
 
 			for key, field := range objval.Values() {
 				fields = append(fields, b.NextField(objstart, key))
-				if err := b.AppendEncoded(field.Bytes()); err != nil {
+				if err := b.UnsafeAppendEncoded(field.Bytes()); err != nil {
 					return fmt.Errorf("error appending field %s: %w", key, err)
 				}
 			}
@@ -760,7 +760,7 @@ func constructVariant(b *variant.Builder, meta variant.Metadata, value []byte, t
 
 		return b.FinishArray(arrstart, elems)
 	case []byte:
-		return b.AppendEncoded(v)
+		return b.UnsafeAppendEncoded(v)
 	default:
 		return fmt.Errorf("%w: unsupported typed value type %T for variant", arrow.ErrInvalid, v)
 	}
@@ -1463,7 +1463,7 @@ func (b *shreddedObjBuilder) tryTyped(v variant.Value) (residual []byte) {
 		if !ok {
 			// field is not shredded, put it in the untyped value col
 			fields = append(fields, varbuilder.NextField(start, key))
-			if err := varbuilder.AppendEncoded(val.Bytes()); err != nil {
+			if err := varbuilder.UnsafeAppendEncoded(val.Bytes()); err != nil {
 				panic(fmt.Sprintf("error appending field %s: %v", key, err))
 			}
 		} else {
