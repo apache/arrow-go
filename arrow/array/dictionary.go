@@ -1658,7 +1658,7 @@ type dictWrapper[T arrow.ValueType] struct {
 	typedDict arrow.TypedArray[T]
 }
 
-// NewDictWrapper creates a simple wrapper around a Dictionary array provides the
+// NewDictWrapper creates a simple wrapper around a Dictionary array that provides
 // a Value method which will use the underlying dictionary to return the value
 // at the given index. This simplifies the interaction of a dictionary array to
 // provide a typed interface as if it were a non-dictionary array.
