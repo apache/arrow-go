@@ -61,8 +61,8 @@ func TestVariantExtensionType(t *testing.T) {
 		expectedErr string
 	}{
 		{arrow.StructOf(arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary}),
-			"missing required field 'value'"},
-		{arrow.StructOf(arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary}), "missing required field 'metadata'"},
+			"missing non-nullable field 'value'"},
+		{arrow.StructOf(arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary}), "missing non-nullable field 'metadata'"},
 		{arrow.StructOf(arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary},
 			arrow.Field{Name: "value", Type: arrow.PrimitiveTypes.Int32}),
 			"value field must be non-nullable binary type, got int32"},
