@@ -33,6 +33,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/google/uuid"
+	"golang.org/x/exp/constraints"
 )
 
 // Builder is used to construct Variant values by appending data of various types.
@@ -43,6 +44,19 @@ type Builder struct {
 	dictKeys        [][]byte
 	totalDictSize   int
 	allowDuplicates bool
+}
+
+func NewBuilderFromMeta(m Metadata) *Builder {
+	b := new(Builder)
+
+	b.dictKeys = m.keys
+	b.dict = make(map[string]uint32)
+	for i, key := range m.keys {
+		b.dict[string(key)] = uint32(i)
+		b.totalDictSize += len(key)
+	}
+
+	return b
 }
 
 // SetAllowDuplicates controls whether duplicate keys are allowed in objects.
@@ -777,6 +791,18 @@ func (b *Builder) FinishObject(start int, fields []FieldEntry) error {
 	return nil
 }
 
+// UnsafeAppendEncoded is a special case where we directly append a pre-encoded variant
+// value. Its keys must already be in the dictionary and v must already be
+// a properly encoded variant value. No checking is performed here currently, so
+// be careful as this can easily lead to an invalid variant result.
+func (b *Builder) UnsafeAppendEncoded(v []byte) error {
+	// this is a special case where we append a pre-encoded value.
+	// the value must be a valid variant value, so it must start with
+	// a primitive header byte.
+	_, err := b.buf.Write(v)
+	return err
+}
+
 // Reset truncates the builder's buffer and clears the dictionary while re-using the
 // underlying storage where possible. This allows for reusing the builder while keeping
 // the total memory usage low. The caveat to this is that any variant value returned
@@ -794,6 +820,14 @@ func (b *Builder) Reset() {
 		b.dictKeys[i] = nil
 	}
 	b.dictKeys = b.dictKeys[:0]
+}
+
+// BuildWithoutMeta returns just the raw variant bytes that were built without
+// constructing metadata at all. This is useful for the case where we're building
+// the remainder of a shredded variant and don't need to re-construct the metadata
+// for the result.
+func (b *Builder) BuildWithoutMeta() []byte {
+	return b.buf.Bytes()
 }
 
 // Build creates a Variant Value from the builder's current state.
@@ -847,4 +881,28 @@ func (b *Builder) Build() (Value, error) {
 			keys: b.dictKeys,
 		},
 	}, nil
+}
+
+type variantPrimitiveType interface {
+	constraints.Integer | constraints.Float | string | []byte |
+		arrow.Date32 | arrow.Time64 | arrow.Timestamp | bool |
+		uuid.UUID | DecimalValue[decimal.Decimal32] |
+		DecimalValue[decimal.Decimal64] | DecimalValue[decimal.Decimal128]
+}
+
+// Encode is a convenience function that produces the encoded bytes for a primitive
+// variant value. At the moment this is just delegating to the [Builder.Append] method,
+// but in the future it will be optimized to avoid the extra overhead and reduce allocations.
+func Encode[T variantPrimitiveType](v T, opt ...AppendOpt) ([]byte, error) {
+	var b Builder
+	if err := b.Append(v, opt...); err != nil {
+		return nil, fmt.Errorf("failed to append value: %w", err)
+	}
+
+	val, err := b.Build()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build variant value: %w", err)
+	}
+
+	return val.value, nil
 }
