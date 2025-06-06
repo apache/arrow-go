@@ -688,7 +688,9 @@ func TestArrowWriteNestedSubfieldDictionary(t *testing.T) {
 	dictValues := array.NewDictionaryArray(dictType, indices, dict)
 	defer dictValues.Release()
 
-	data := array.NewData(arrow.ListOf(dictType), 3, []*memory.Buffer{nil, offsets.Data().Buffers()[1]},
+	data := array.NewData(arrow.ListOfField(arrow.Field{
+		Name: "element", Type: dictType, Nullable: true,
+		Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"-1"})}), 3, []*memory.Buffer{nil, offsets.Data().Buffers()[1]},
 		[]arrow.ArrayData{dictValues.Data()}, 0, 0)
 	defer data.Release()
 	values := array.NewListData(data)

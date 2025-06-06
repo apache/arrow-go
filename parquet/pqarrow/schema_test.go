@@ -473,6 +473,36 @@ func TestProperListElementNullability(t *testing.T) {
 	assert.True(t, arrSchema.Equal(outSchema), "expected: %s, got: %s", arrSchema, outSchema)
 }
 
+func TestFieldNestedPropagate(t *testing.T) {
+	arrSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "transformations", Type: arrow.ListOfField(
+			arrow.Field{
+				Name: "element",
+				Type: arrow.StructOf(
+					arrow.Field{Name: "destination", Type: arrow.BinaryTypes.String,
+						Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"6"})},
+					arrow.Field{Name: "transform_type", Type: arrow.BinaryTypes.String,
+						Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"7"})},
+					arrow.Field{Name: "transform_value", Type: arrow.BinaryTypes.String,
+						Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"8"})},
+					arrow.Field{Name: "source_cols", Type: arrow.ListOfField(
+						arrow.Field{Name: "element", Type: arrow.BinaryTypes.String, Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"10"})}),
+						Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"9"})},
+				),
+				Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"5"}),
+			},
+		), Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"4"})},
+	}, nil)
+
+	pqSchema, err := pqarrow.ToParquet(arrSchema, nil, pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+
+	result, err := pqarrow.FromParquet(pqSchema, nil, metadata.KeyValueMetadata{})
+	require.NoError(t, err)
+
+	assert.True(t, arrSchema.Equal(result), "expected: %s, got: %s", arrSchema, result)
+}
+
 func TestConvertSchemaParquetVariant(t *testing.T) {
 	// unshredded variant:
 	// optional group variant_col {

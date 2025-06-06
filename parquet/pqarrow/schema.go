@@ -1015,19 +1015,19 @@ func getNestedFactory(origin, inferred arrow.DataType) func(fieldList []arrow.Fi
 		switch origin.ID() {
 		case arrow.LIST:
 			return func(list []arrow.Field) arrow.DataType {
-				return arrow.ListOf(list[0].Type)
+				return arrow.ListOfField(list[0])
 			}
 		case arrow.FIXED_SIZE_LIST:
 			sz := origin.(*arrow.FixedSizeListType).Len()
 			return func(list []arrow.Field) arrow.DataType {
-				return arrow.FixedSizeListOf(sz, list[0].Type)
+				return arrow.FixedSizeListOfField(sz, list[0])
 			}
 		}
 	case arrow.MAP:
 		if origin.ID() == arrow.MAP {
 			return func(list []arrow.Field) arrow.DataType {
 				valType := list[0].Type.(*arrow.StructType)
-				return arrow.MapOf(valType.Field(0).Type, valType.Field(1).Type)
+				return arrow.MapOfFields(valType.Field(0), valType.Field(1))
 			}
 		}
 	}
