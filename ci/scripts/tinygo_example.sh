@@ -21,7 +21,7 @@ set -eux
 
 cd ~
 pushd /src
-tinygo build -tags noasm -o ~/example_tinygo arrow/_examples/helloworld/main.go
+tinygo build -tags noasm -o ~/example_tinygo arrow/examples/table_creation/main.go
 popd
 
 ./example_tinygo
