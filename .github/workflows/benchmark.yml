@@ -35,10 +35,6 @@ jobs:
         go: ['1.24.3']
         arch: ['amd64']
     steps:
-      # - name: Install dependencies
-      #   run: |
-      #     apt-get update
-      #     apt-get install -y git ca-certificates
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
