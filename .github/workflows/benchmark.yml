@@ -29,7 +29,7 @@ permissions:
   contents: read
 jobs:
   benchmark:
-    runs-on: ubuntu-latest    
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         go: ['1.22.7']
