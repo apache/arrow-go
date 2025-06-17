@@ -29,8 +29,7 @@ permissions:
   contents: read
 jobs:
   benchmark:
-    runs-on: ubuntu-latest
-    container: debian:12
+    runs-on: ubuntu-latest    
     strategy:
       matrix:
         go: ['1.22.7']
