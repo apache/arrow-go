@@ -222,8 +222,8 @@ jobs:
         run: |
           ci/scripts/test.sh $(pwd)
   windows:
-    name: AMD64 Windows 2019 Go ${{ matrix.go }}
-    runs-on: windows-2019
+    name: AMD64 Windows 2022 Go ${{ matrix.go }}
+    runs-on: windows-2022
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -250,7 +250,7 @@ jobs:
         run: ci/scripts/test.sh $(pwd)
   windows-mingw:
     name: AMD64 Windows MinGW ${{ matrix.mingw-n-bits }} CGO
-    runs-on: windows-2019
+    runs-on: windows-2022
     timeout-minutes: 20
     strategy:
       fail-fast: false
