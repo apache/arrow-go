@@ -52,11 +52,11 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/flight/flightsql/schema_ref"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
+	"github.com/uptrace/bun/driver/sqliteshim"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	_ "modernc.org/sqlite"
 )
 
 func genRandomString() []byte {
@@ -146,7 +146,7 @@ func prepareQueryForGetKeys(filter string) string {
 }
 
 func CreateDB() (*sql.DB, error) {
-	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
+	db, err := sql.Open(sqliteshim.DriverName(), "file::memory:?cache=shared")
 	if err != nil {
 		return nil, err
 	}
