@@ -52,6 +52,7 @@ func (suite *BloomFilterBuilderSuite) SetupTest() {
 
 func (suite *BloomFilterBuilderSuite) TearDownTest() {
 	runtime.GC() // we use setfinalizer to clean up the buffers, so run the GC
+	runtime.GC()
 	suite.mem.AssertSize(suite.T(), 0)
 }
 
