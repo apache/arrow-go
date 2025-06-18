@@ -31,7 +31,14 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/flight/flightsql"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	sqlite3 "modernc.org/sqlite/lib"
+)
+
+const (
+	SQLITE_INTEGER = 1
+	SQLITE_FLOAT   = 2
+	SQLITE_TEXT    = 3
+	SQLITE_BLOB    = 4
+	SQLITE_NULL    = 5
 )
 
 type SqliteTablesSchemaBatchReader struct {
@@ -96,34 +103,34 @@ func (s *SqliteTablesSchemaBatchReader) Record() arrow.Record { return s.record 
 
 func getSqlTypeFromTypeName(sqltype string) int {
 	if sqltype == "" {
-		return sqlite3.SQLITE_NULL
+		return SQLITE_NULL
 	}
 
 	sqltype = strings.ToLower(sqltype)
 
 	if strings.HasPrefix(sqltype, "varchar") || strings.HasPrefix(sqltype, "char") {
-		return sqlite3.SQLITE_TEXT
+		return SQLITE_TEXT
 	}
 
 	switch sqltype {
 	case "int", "integer":
-		return sqlite3.SQLITE_INTEGER
+		return SQLITE_INTEGER
 	case "real":
-		return sqlite3.SQLITE_FLOAT
+		return SQLITE_FLOAT
 	case "blob":
-		return sqlite3.SQLITE_BLOB
+		return SQLITE_BLOB
 	case "text", "date":
-		return sqlite3.SQLITE_TEXT
+		return SQLITE_TEXT
 	default:
-		return sqlite3.SQLITE_NULL
+		return SQLITE_NULL
 	}
 }
 
 func getPrecisionFromCol(sqltype int) int {
 	switch sqltype {
-	case sqlite3.SQLITE_INTEGER:
+	case SQLITE_INTEGER:
 		return 10
-	case sqlite3.SQLITE_FLOAT:
+	case SQLITE_FLOAT:
 		return 15
 	}
 	return 0
@@ -137,7 +144,7 @@ func getColumnMetadata(bldr *flightsql.ColumnMetadataBuilder, sqltype int, table
 		bldr.TableName(table)
 	}
 	switch sqltype {
-	case sqlite3.SQLITE_TEXT, sqlite3.SQLITE_BLOB:
+	case SQLITE_TEXT, SQLITE_BLOB:
 	default:
 		bldr.Precision(int32(getPrecisionFromCol(sqltype)))
 	}

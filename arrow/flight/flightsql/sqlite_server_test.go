@@ -39,7 +39,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
-	sqlite3 "modernc.org/sqlite/lib"
+)
+
+const (
+	SQLITE_INTEGER = 1
+	SQLITE_FLOAT   = 2
+	SQLITE_TEXT    = 3
+	SQLITE_BLOB    = 4
 )
 
 type FlightSqliteServerSuite struct {
@@ -60,10 +66,10 @@ func (s *FlightSqliteServerSuite) getColMetadata(colType int, table string) arro
 		bldr.TableName(table)
 	}
 	switch colType {
-	case sqlite3.SQLITE_TEXT, sqlite3.SQLITE_BLOB:
-	case sqlite3.SQLITE_INTEGER:
+	case SQLITE_TEXT, SQLITE_BLOB:
+	case SQLITE_INTEGER:
 		bldr.Precision(10)
-	case sqlite3.SQLITE_FLOAT:
+	case SQLITE_FLOAT:
 		bldr.Precision(15)
 	default:
 		bldr.Precision(0)
@@ -131,10 +137,10 @@ func (s *FlightSqliteServerSuite) TestCommandStatementQuery() {
 	s.NotNil(rec)
 
 	expectedSchema := arrow.NewSchema([]arrow.Field{
-		{Name: "id", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(sqlite3.SQLITE_INTEGER, ""), Nullable: true},
-		{Name: "keyName", Type: arrow.BinaryTypes.String, Metadata: s.getColMetadata(sqlite3.SQLITE_TEXT, ""), Nullable: true},
-		{Name: "value", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(sqlite3.SQLITE_INTEGER, ""), Nullable: true},
-		{Name: "foreignId", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(sqlite3.SQLITE_INTEGER, ""), Nullable: true},
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(SQLITE_INTEGER, ""), Nullable: true},
+		{Name: "keyName", Type: arrow.BinaryTypes.String, Metadata: s.getColMetadata(SQLITE_TEXT, ""), Nullable: true},
+		{Name: "value", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(SQLITE_INTEGER, ""), Nullable: true},
+		{Name: "foreignId", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(SQLITE_INTEGER, ""), Nullable: true},
 	}, nil)
 
 	s.Truef(expectedSchema.Equal(rec.Schema()), "expected: %s\ngot: %s", expectedSchema, rec.Schema())
@@ -315,13 +321,13 @@ func (s *FlightSqliteServerSuite) TestCommandGetTablesWithIncludedSchemas() {
 
 	tableSchema := arrow.NewSchema([]arrow.Field{
 		{Name: "id", Type: arrow.PrimitiveTypes.Int64,
-			Metadata: s.getColMetadata(sqlite3.SQLITE_INTEGER, dbTableName)},
+			Metadata: s.getColMetadata(SQLITE_INTEGER, dbTableName)},
 		{Name: "keyName", Type: arrow.BinaryTypes.String, Nullable: true,
-			Metadata: s.getColMetadata(sqlite3.SQLITE_TEXT, dbTableName)},
+			Metadata: s.getColMetadata(SQLITE_TEXT, dbTableName)},
 		{Name: "value", Type: arrow.PrimitiveTypes.Int64, Nullable: true,
-			Metadata: s.getColMetadata(sqlite3.SQLITE_INTEGER, dbTableName)},
+			Metadata: s.getColMetadata(SQLITE_INTEGER, dbTableName)},
 		{Name: "foreignId", Type: arrow.PrimitiveTypes.Int64, Nullable: true,
-			Metadata: s.getColMetadata(sqlite3.SQLITE_INTEGER, dbTableName)},
+			Metadata: s.getColMetadata(SQLITE_INTEGER, dbTableName)},
 	}, nil)
 	schemaBuf := flight.SerializeSchema(tableSchema, s.mem)
 	binaryBldr := array.NewBinaryBuilder(s.mem, arrow.BinaryTypes.Binary)
@@ -484,10 +490,10 @@ func (s *FlightSqliteServerSuite) TestCommandPreparedStatementQuery() {
 	s.NoError(err)
 
 	expectedSchema := arrow.NewSchema([]arrow.Field{
-		{Name: "id", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(sqlite3.SQLITE_INTEGER, ""), Nullable: true},
-		{Name: "keyName", Type: arrow.BinaryTypes.String, Metadata: s.getColMetadata(sqlite3.SQLITE_TEXT, ""), Nullable: true},
-		{Name: "value", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(sqlite3.SQLITE_INTEGER, ""), Nullable: true},
-		{Name: "foreignId", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(sqlite3.SQLITE_INTEGER, ""), Nullable: true}}, nil)
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(SQLITE_INTEGER, ""), Nullable: true},
+		{Name: "keyName", Type: arrow.BinaryTypes.String, Metadata: s.getColMetadata(SQLITE_TEXT, ""), Nullable: true},
+		{Name: "value", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(SQLITE_INTEGER, ""), Nullable: true},
+		{Name: "foreignId", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(SQLITE_INTEGER, ""), Nullable: true}}, nil)
 
 	idArr := s.fromJSON(arrow.PrimitiveTypes.Int64, `[1, 2, 3, 4]`)
 	defer idArr.Release()
@@ -543,10 +549,10 @@ func (s *FlightSqliteServerSuite) TestCommandPreparedStatementQueryWithParams() 
 	s.NoError(err)
 
 	expectedSchema := arrow.NewSchema([]arrow.Field{
-		{Name: "id", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(sqlite3.SQLITE_INTEGER, ""), Nullable: true},
-		{Name: "keyName", Type: arrow.BinaryTypes.String, Metadata: s.getColMetadata(sqlite3.SQLITE_TEXT, ""), Nullable: true},
-		{Name: "value", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(sqlite3.SQLITE_INTEGER, ""), Nullable: true},
-		{Name: "foreignId", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(sqlite3.SQLITE_INTEGER, ""), Nullable: true}}, nil)
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(SQLITE_INTEGER, ""), Nullable: true},
+		{Name: "keyName", Type: arrow.BinaryTypes.String, Metadata: s.getColMetadata(SQLITE_TEXT, ""), Nullable: true},
+		{Name: "value", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(SQLITE_INTEGER, ""), Nullable: true},
+		{Name: "foreignId", Type: arrow.PrimitiveTypes.Int64, Metadata: s.getColMetadata(SQLITE_INTEGER, ""), Nullable: true}}, nil)
 
 	idArr := s.fromJSON(arrow.PrimitiveTypes.Int64, `[1, 3]`)
 	defer idArr.Release()

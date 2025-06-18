@@ -51,7 +51,6 @@ require (
 	gonum.org/v1/gonum v0.16.0
 	google.golang.org/grpc v1.72.1
 	google.golang.org/protobuf v1.36.6
-	modernc.org/sqlite v1.38.0
 )
 
 require (
@@ -98,4 +97,5 @@ require (
 	modernc.org/libc v1.65.10 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
+	modernc.org/sqlite v1.38.0 // indirect
 )
