@@ -18,7 +18,9 @@ package flight
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"sync/atomic"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -256,7 +258,7 @@ func ConcatenateReaders(rdrs []array.RecordReader, ch chan<- StreamChunk) {
 			ch <- StreamChunk{Data: rec}
 		}
 		if e, ok := r.(haserr); ok {
-			if e.Err() != nil {
+			if e.Err() != nil && !errors.Is(e.Err(), io.EOF) {
 				ch <- StreamChunk{Err: e.Err()}
 				return
 			}

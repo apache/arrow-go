@@ -21,7 +21,6 @@ package example
 
 import (
 	"database/sql"
-	"errors"
 	"io"
 	"reflect"
 	"strconv"
@@ -266,7 +265,7 @@ func (r *SqlBatchReader) Next() bool {
 
 	rows := 0
 	for rows < maxBatchSize && r.rows.Next() {
-		if err := r.rows.Scan(r.rowdest...); err != nil && !errors.Is(err, io.EOF) {
+		if err := r.rows.Scan(r.rowdest...); err != nil && err.Error() != io.EOF.Error() {
 			// Not really useful except for testing Flight SQL clients
 			detail := wrapperspb.StringValue{Value: r.schema.String()}
 			if st, sterr := status.New(codes.Unknown, err.Error()).WithDetails(&detail); sterr != nil {

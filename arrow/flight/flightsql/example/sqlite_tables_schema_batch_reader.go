@@ -175,7 +175,7 @@ func (s *SqliteTablesSchemaBatchReader) Next() bool {
 		for rows.Next() {
 			if err := rows.Scan(&tableName, &name, &typ, &nn); err != nil {
 				rows.Close()
-				if !errors.Is(err, io.EOF) {
+				if err.Error() != io.EOF.Error() {
 					s.err = err
 				}
 				return false
