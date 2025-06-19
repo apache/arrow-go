@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -871,5 +872,11 @@ func appendTimestampData(b *array.TimestampBuilder, data interface{}) {
 		case int64:
 			b.Append(arrow.Timestamp(v))
 		}
+	case time.Time:
+		v, err := arrow.TimestampFromTime(dt, b.Type().(*arrow.TimestampType).Unit)
+		if err != nil {
+			panic(err)
+		}
+		b.Append(v)
 	}
 }
