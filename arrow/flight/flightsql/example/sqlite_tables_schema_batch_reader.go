@@ -22,6 +22,8 @@ package example
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"io"
 	"strings"
 	"sync/atomic"
 
@@ -173,7 +175,9 @@ func (s *SqliteTablesSchemaBatchReader) Next() bool {
 		for rows.Next() {
 			if err := rows.Scan(&tableName, &name, &typ, &nn); err != nil {
 				rows.Close()
-				s.err = err
+				if err.Error() != io.EOF.Error() {
+					s.err = err
+				}
 				return false
 			}
 
@@ -186,7 +190,7 @@ func (s *SqliteTablesSchemaBatchReader) Next() bool {
 		}
 
 		rows.Close()
-		if rows.Err() != nil {
+		if rows.Err() != nil && !errors.Is(rows.Err(), io.EOF) {
 			s.err = rows.Err()
 			return false
 		}
