@@ -214,7 +214,7 @@ func spacedExpand(buffer interface{}, nullCount int, validBits []byte, validBits
 	}
 
 	var (
-		numValues int = bufferRef.Len()
+		numValues = bufferRef.Len()
 	)
 
 	idxDecode := int64(numValues - nullCount)

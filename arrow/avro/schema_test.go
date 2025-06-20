@@ -352,7 +352,7 @@ func TestSchemaStringEqual(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v", err)
 			}
-			if !(fmt.Sprintf("%+v", want.String()) == fmt.Sprintf("%+v", got.String())) {
+			if fmt.Sprintf("%+v", want.String()) != fmt.Sprintf("%+v", got.String()) {
 				t.Fatalf("got=%v,\n want=%v", got.String(), want.String())
 			} else {
 				t.Logf("schema.String() comparison passed")

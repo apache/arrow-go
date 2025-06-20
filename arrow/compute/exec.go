@@ -150,7 +150,7 @@ func execInternal(ctx context.Context, fn Function, opts FunctionOptions, passed
 			}
 		case FuncVector:
 			vkernel := k.(*exec.VectorKernel)
-			if !(allSame || !vkernel.CanExecuteChunkWise) {
+			if !allSame && vkernel.CanExecuteChunkWise {
 				return nil, fmt.Errorf("%w: vector kernel arguments must all be the same length", arrow.ErrInvalid)
 			}
 		}

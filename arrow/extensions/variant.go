@@ -395,7 +395,7 @@ func (v *VariantArray) String() string {
 
 		val, err := v.Value(i)
 		if err != nil {
-			o.WriteString(fmt.Sprintf("error: %v", err))
+			fmt.Fprintf(o, "error: %v", err)
 			continue
 		}
 
@@ -1002,12 +1002,13 @@ func variantTypeFromArrow(dt arrow.DataType) variant.Type {
 	case arrow.TIMESTAMP:
 		dt := dt.(*arrow.TimestampType)
 		isUTC := dt.TimeZone == "" || dt.TimeZone == "UTC"
-		if dt.Unit == arrow.Microsecond {
+		switch dt.Unit {
+		case arrow.Microsecond:
 			if isUTC {
 				return variant.TimestampMicros
 			}
 			return variant.TimestampMicrosNTZ
-		} else if dt.Unit == arrow.Nanosecond {
+		case arrow.Nanosecond:
 			if isUTC {
 				return variant.TimestampNanos
 			}

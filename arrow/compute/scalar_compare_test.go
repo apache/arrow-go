@@ -1195,7 +1195,7 @@ func (c *CompareStringSuite) validateCompareComputed(op kernels.CompareOperator,
 	}
 
 	defer expected.Release()
-	c.CompareSuite.validateCompareDatum(op, lhs, rhs, expected)
+	c.validateCompareDatum(op, lhs, rhs, expected)
 }
 
 func (c *CompareStringSuite) TestRandomCompareArrayArray() {

@@ -169,7 +169,7 @@ func (pr *primitiveRecordReader) Release() {
 }
 
 func (pr *primitiveRecordReader) SetPageReader(rdr PageReader) {
-	pr.ColumnChunkReader.setPageReader(rdr)
+	pr.setPageReader(rdr)
 }
 
 func (pr *primitiveRecordReader) ReleaseValidBits() *memory.Buffer {
@@ -444,7 +444,7 @@ func (rr *recordReader) reserveLevels(extra int64) error {
 }
 
 func (rr *recordReader) reserveValues(extra int64) error {
-	return rr.recordReaderImpl.ReserveValues(extra, rr.leafInfo.HasNullableValues())
+	return rr.ReserveValues(extra, rr.leafInfo.HasNullableValues())
 }
 
 func (rr *recordReader) ResetValues() {

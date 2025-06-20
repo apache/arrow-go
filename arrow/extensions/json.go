@@ -55,7 +55,7 @@ func NewJSONType(storageType arrow.DataType) (*JSONType, error) {
 func (b *JSONType) ArrayType() reflect.Type { return reflect.TypeOf(JSONArray{}) }
 
 func (b *JSONType) Deserialize(storageType arrow.DataType, data string) (arrow.ExtensionType, error) {
-	if !(data == "" || data == "{}") {
+	if data != "" && data != "{}" {
 		return nil, fmt.Errorf("serialized metadata for JSON extension type must be '' or '{}', found: %s", data)
 	}
 	return NewJSONType(storageType)

@@ -320,9 +320,9 @@ func (e *extensionSet) GetArrowRegistry() *ExtensionIDRegistry       { return e.
 func (e *extensionSet) GetSubstraitRegistry() expr.ExtensionRegistry { return e.ExtensionRegistry }
 
 func (e *extensionSet) DecodeTypeArrow(anchor uint32) (extensions.ID, arrow.DataType, bool) {
-	id, ok := e.Set.DecodeType(anchor)
+	id, ok := e.DecodeType(anchor)
 	if !ok {
-		if id, ok = e.Set.DecodeTypeVariation(anchor); !ok {
+		if id, ok = e.DecodeTypeVariation(anchor); !ok {
 			return id, nil, false
 		}
 	}
@@ -332,7 +332,7 @@ func (e *extensionSet) DecodeTypeArrow(anchor uint32) (extensions.ID, arrow.Data
 }
 
 func (e *extensionSet) DecodeFunction(ref uint32) (extensions.ID, substraitToArrow, bool) {
-	id, ok := e.Set.DecodeFunc(ref)
+	id, ok := e.DecodeFunc(ref)
 	if !ok {
 		return id, nil, false
 	}
@@ -353,7 +353,7 @@ func (e *extensionSet) EncodeTypeVariation(dt arrow.DataType) (extensions.ID, ui
 		return extensions.ID{}, 0, false
 	}
 
-	return id, e.Set.GetTypeVariationAnchor(id), true
+	return id, e.GetTypeVariationAnchor(id), true
 }
 
 func (e *extensionSet) EncodeType(dt arrow.DataType) (extensions.ID, uint32, bool) {
@@ -362,11 +362,11 @@ func (e *extensionSet) EncodeType(dt arrow.DataType) (extensions.ID, uint32, boo
 		return extensions.ID{}, 0, false
 	}
 
-	return id, e.Set.GetTypeAnchor(id), true
+	return id, e.GetTypeAnchor(id), true
 }
 
 func (e *extensionSet) EncodeFunction(id extensions.ID) uint32 {
-	return e.Set.GetFuncAnchor(id)
+	return e.GetFuncAnchor(id)
 }
 
 // ExtensionIDRegistry manages a set of mappings between Arrow types

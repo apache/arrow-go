@@ -150,7 +150,7 @@ func (b *baseFunction) Validate() error {
 	}
 
 	argCount := len(b.doc.ArgNames)
-	if argCount != b.arity.NArgs && !(b.arity.IsVarArgs && argCount == b.arity.NArgs+1) {
+	if argCount != b.arity.NArgs && (!b.arity.IsVarArgs || argCount != b.arity.NArgs+1) {
 		return fmt.Errorf("in function '%s': number of argument names for function doc != function arity", b.name)
 	}
 

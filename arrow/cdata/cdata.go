@@ -281,9 +281,10 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 		case 'L': // large list
 			dt = arrow.LargeListOfField(childFields[0])
 		case 'v': // list view/large list view
-			if f[2] == 'l' {
+			switch f[2] {
+			case 'l':
 				dt = arrow.ListViewOfField(childFields[0])
-			} else if f[2] == 'L' {
+			case 'L':
 				dt = arrow.LargeListViewOfField(childFields[0])
 			}
 		case 'w': // fixed size list is w:# where # is the list size.
@@ -963,10 +964,10 @@ func (n *nativeCRecordBatchReader) Record() arrow.Record { return n.cur }
 
 func (n *nativeCRecordBatchReader) Next() bool {
 	err := n.next()
-	switch {
-	case err == nil:
+	switch err {
+	case nil:
 		return true
-	case err == io.EOF:
+	case io.EOF:
 		return false
 	}
 	n.err = err

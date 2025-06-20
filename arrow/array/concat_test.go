@@ -19,6 +19,7 @@ package array_test
 import (
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"sort"
 	"strings"
 	"testing"
@@ -31,7 +32,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"golang.org/x/exp/rand"
 )
 
 func TestConcatenateValueBuffersNull(t *testing.T) {
@@ -298,9 +298,9 @@ func (cts *ConcatTestSuite) checkTrailingBitsZeroed(bitmap *memory.Buffer, lengt
 
 func (cts *ConcatTestSuite) offsets(length, slicecount int32) []int32 {
 	offsets := make([]int32, slicecount+1)
-	dist := rand.New(rand.NewSource(cts.seed))
+	dist := rand.New(rand.NewPCG(cts.seed, 0))
 	for i := range offsets {
-		offsets[i] = dist.Int31n(length + 1)
+		offsets[i] = dist.Int32N(length + 1)
 	}
 	sort.Slice(offsets, func(i, j int) bool { return offsets[i] < offsets[j] })
 	return offsets
@@ -308,9 +308,9 @@ func (cts *ConcatTestSuite) offsets(length, slicecount int32) []int32 {
 
 func (cts *ConcatTestSuite) largeoffsets(length int64, slicecount int32) []int64 {
 	offsets := make([]int64, slicecount+1)
-	dist := rand.New(rand.NewSource(cts.seed))
+	dist := rand.New(rand.NewPCG(cts.seed, 0))
 	for i := range offsets {
-		offsets[i] = dist.Int63n(length + 1)
+		offsets[i] = dist.Int64N(length + 1)
 	}
 	sort.Slice(offsets, func(i, j int) bool { return offsets[i] < offsets[j] })
 	return offsets

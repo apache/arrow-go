@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"math/rand/v2"
 	"strconv"
 	"testing"
 
@@ -32,7 +33,6 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/internal/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
-	"golang.org/x/exp/rand"
 	"gonum.org/v1/gonum/stat/distuv"
 )
 
@@ -550,15 +550,15 @@ func (r *RLERandomSuite) TestRandomSequences() {
 	const maxgroup = 16
 
 	values := make([]uint64, ngroups+maxgroup)
-	seed := rand.Uint64() ^ (rand.Uint64() << 32)
-	gen := rand.New(rand.NewSource(seed))
+	seed1, seed2 := rand.Uint64(), rand.Uint64()<<32
+	gen := rand.New(rand.NewPCG(seed1, seed2))
 
 	for itr := 0; itr < niters; itr++ {
 		parity := false
 		values = values[:0]
 
 		for i := 0; i < ngroups; i++ {
-			groupsize := gen.Intn(19) + 1
+			groupsize := gen.IntN(19) + 1
 			if groupsize > maxgroup {
 				groupsize = 1
 			}
@@ -572,7 +572,7 @@ func (r *RLERandomSuite) TestRandomSequences() {
 			}
 			parity = !parity
 		}
-		r.Require().Truef(r.checkRoundTrip(values, bits.Len(uint(len(values)))), "failing seed: %d", seed)
+		r.Require().Truef(r.checkRoundTrip(values, bits.Len(uint(len(values)))), "failing seed: %d,%d", seed1, seed2)
 	}
 }
 
@@ -584,7 +584,7 @@ type RandomArrayGenerator struct {
 }
 
 func NewRandomArrayGenerator(seed uint64) RandomArrayGenerator {
-	src := rand.NewSource(seed)
+	src := rand.NewPCG(seed, 0)
 	return RandomArrayGenerator{seed, 0, src, rand.New(src)}
 }
 
@@ -592,7 +592,7 @@ func (r *RandomArrayGenerator) generateBitmap(buffer []byte, n int64, prob float
 	count := int64(0)
 	r.extra++
 
-	dist := distuv.Bernoulli{P: prob, Src: rand.NewSource(r.seed + r.extra)}
+	dist := distuv.Bernoulli{P: prob, Src: rand.NewPCG(r.seed, r.extra)}
 	for i := int(0); int64(i) < n; i++ {
 		if dist.Rand() != float64(0.0) {
 			bitutil.SetBit(buffer, i)
@@ -616,10 +616,10 @@ func (r *RandomArrayGenerator) Int32(size int64, min, max int32, prob float64) a
 	buffers[1].Resize(int(size * int64(arrow.Int32SizeBytes)))
 
 	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
+	dist := rand.New(rand.NewPCG(r.seed, r.extra))
 	out := arrow.Int32Traits.CastFromBytes(buffers[1].Bytes())
 	for i := int64(0); i < size; i++ {
-		out[i] = int32(dist.Int31n(max-min+1)) + min
+		out[i] = int32(dist.Int32N(max-min+1)) + min
 	}
 
 	return array.NewInt32Data(array.NewData(arrow.PrimitiveTypes.Int32, int(size), buffers, nil, int(nullCount), 0))

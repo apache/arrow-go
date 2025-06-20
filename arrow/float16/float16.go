@@ -63,10 +63,10 @@ func (f Num) Float32() float32 {
 	exp := (f.bits >> 10) & 0x1f
 	res := uint32(exp) + 127 - 15
 	fc := uint32(f.bits & 0x3ff)
-	switch {
-	case exp == 0:
+	switch exp {
+	case 0:
 		res = 0
-	case exp == 0x1f:
+	case 0x1f:
 		res = 0xff
 	}
 	return math.Float32frombits((sn << 31) | (res << 23) | (fc << 13))

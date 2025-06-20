@@ -249,7 +249,7 @@ func propagateNulls(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ArraySp
 	var (
 		arrsWithNulls = make([]*exec.ArraySpan, 0, len(batch.Values))
 		isAllNull     bool
-		prealloc      bool = out.Buffers[0].Buf != nil
+		prealloc      = out.Buffers[0].Buf != nil
 	)
 
 	for i := range batch.Values {
@@ -440,7 +440,7 @@ func (e *nonAggExecImpl) Init(ctx *exec.KernelCtx, args exec.KernelInitArgs) (er
 }
 
 func (e *nonAggExecImpl) prepareOutput(length int) *exec.ExecResult {
-	var nullCount int = array.UnknownNullCount
+	var nullCount = array.UnknownNullCount
 
 	if e.kernel.GetNullHandling() == exec.NullNoOutput {
 		nullCount = 0
@@ -761,7 +761,7 @@ func iterateExecSpans(batch *ExecBatch, maxChunkSize int64, promoteIfAllScalar b
 	}
 
 	var (
-		args           []Datum = batch.Values
+		args           = batch.Values
 		haveChunked    bool
 		chunkIdxes           = make([]int, len(args))
 		valuePositions       = make([]int64, len(args))

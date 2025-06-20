@@ -98,14 +98,14 @@ func (pfr *ProtobufFieldReflection) GetDescriptor() protoreflect.FieldDescriptor
 }
 
 func (pfr *ProtobufFieldReflection) name() string {
-	if pfr.isOneOf() && pfr.schemaOptions.oneOfHandler != OneOfNull {
+	if pfr.isOneOf() && pfr.oneOfHandler != OneOfNull {
 		return pfr.fieldNameFormatter(string(pfr.descriptor.ContainingOneof().Name()))
 	}
 	return pfr.fieldNameFormatter(string(pfr.descriptor.Name()))
 }
 
 func (pfr *ProtobufFieldReflection) arrowType() arrow.Type {
-	if pfr.isOneOf() && pfr.schemaOptions.oneOfHandler == OneOfDenseUnion {
+	if pfr.isOneOf() && pfr.oneOfHandler == OneOfDenseUnion {
 		return arrow.DENSE_UNION
 	}
 	if pfr.isEnum() {
@@ -643,7 +643,7 @@ func (msg ProtobufMessageReflection) Record(mem memory.Allocator) arrow.Record {
 	var fieldNames []string
 	for i, f := range msg.fields {
 		f.AppendValueOrNull(recordBuilder.Field(i), mem)
-		fieldNames = append(fieldNames, f.protobufReflection.name())
+		fieldNames = append(fieldNames, f.name())
 	}
 
 	var arrays []arrow.Array
@@ -752,7 +752,7 @@ func (f ProtobufMessageFieldReflection) AppendValueOrNull(b array.Builder, mem m
 
 	switch b.Type().ID() {
 	case arrow.STRING:
-		if f.protobufReflection.isEnum() {
+		if f.isEnum() {
 			b.(*array.StringBuilder).Append(string(fd.Enum().Values().ByNumber(pv.Enum()).Name()))
 		} else {
 			b.(*array.StringBuilder).Append(pv.String())
@@ -760,7 +760,7 @@ func (f ProtobufMessageFieldReflection) AppendValueOrNull(b array.Builder, mem m
 	case arrow.BINARY:
 		b.(*array.BinaryBuilder).Append(pv.Bytes())
 	case arrow.INT32:
-		if f.protobufReflection.isEnum() {
+		if f.isEnum() {
 			b.(*array.Int32Builder).Append(int32(f.reflectValue().Int()))
 		} else {
 			b.(*array.Int32Builder).Append(int32(pv.Int()))

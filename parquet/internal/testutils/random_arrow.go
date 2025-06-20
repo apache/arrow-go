@@ -17,11 +17,12 @@
 package testutils
 
 import (
+	"math/rand/v2"
+
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	"golang.org/x/exp/rand"
 )
 
 // RandomNonNull generates a random arrow array of the requested type with length size with no nulls.
@@ -156,10 +157,11 @@ func RandomNonNull(mem memory.Allocator, dt arrow.DataType, size int) arrow.Arra
 		defer bldr.Release()
 
 		buf := make([]byte, 12)
-		r := rand.New(rand.NewSource(0))
+		src := &rand.ChaCha8{}
+		r := rand.New(src)
 		for i := 0; i < size; i++ {
-			length := r.Intn(12-2+1) + 2
-			r.Read(buf[:length])
+			length := r.IntN(12-2+1) + 2
+			src.Read(buf[:length])
 			bldr.Append(buf[:length])
 		}
 		return bldr.NewArray()
@@ -168,7 +170,7 @@ func RandomNonNull(mem memory.Allocator, dt arrow.DataType, size int) arrow.Arra
 		defer bldr.Release()
 
 		buf := make([]byte, 10)
-		r := rand.New(rand.NewSource(0))
+		r := &rand.ChaCha8{}
 		for i := 0; i < size; i++ {
 			r.Read(buf)
 			bldr.Append(buf)
@@ -416,15 +418,16 @@ func RandomNullable(dt arrow.DataType, size int, numNulls int) arrow.Array {
 		}
 
 		buf := make([]byte, 12)
-		r := rand.New(rand.NewSource(0))
+		src := &rand.ChaCha8{}
+		r := rand.New(src)
 		for i := 0; i < size; i++ {
 			if !valid[i] {
 				bldr.AppendNull()
 				continue
 			}
 
-			length := r.Intn(12-2+1) + 2
-			r.Read(buf[:length])
+			length := r.IntN(12-2+1) + 2
+			src.Read(buf[:length])
 			bldr.Append(buf[:length])
 		}
 		return bldr.NewArray()
@@ -441,15 +444,16 @@ func RandomNullable(dt arrow.DataType, size int, numNulls int) arrow.Array {
 		}
 
 		buf := make([]byte, 12)
-		r := rand.New(rand.NewSource(0))
+		src := &rand.ChaCha8{}
+		r := rand.New(src)
 		for i := 0; i < size; i++ {
 			if !valid[i] {
 				bldr.AppendNull()
 				continue
 			}
 
-			length := r.Intn(12-2+1) + 2
-			r.Read(buf[:length])
+			length := r.IntN(12-2+1) + 2
+			src.Read(buf[:length])
 			// trivially force data to be valid UTF8 by making it all ASCII
 			for idx := range buf[:length] {
 				buf[idx] &= 0x7f
@@ -470,7 +474,7 @@ func RandomNullable(dt arrow.DataType, size int, numNulls int) arrow.Array {
 		}
 
 		buf := make([]byte, 10)
-		r := rand.New(rand.NewSource(0))
+		r := &rand.ChaCha8{}
 		for i := 0; i < size; i++ {
 			if !valid[i] {
 				bldr.AppendNull()

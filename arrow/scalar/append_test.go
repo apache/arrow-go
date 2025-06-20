@@ -14,12 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build go1.18
-
 package scalar_test
 
 import (
 	"math"
+	"math/rand/v2"
 	"strings"
 	"testing"
 
@@ -32,7 +31,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"golang.org/x/exp/constraints"
-	"golang.org/x/exp/rand"
 	"gonum.org/v1/gonum/stat/distuv"
 )
 
@@ -42,14 +40,14 @@ type primitiveTypes interface {
 
 func draw[T constraints.Integer](n int64, min, max T) []T {
 	const seed = 1337
-	gen := rand.New(rand.NewSource(seed))
+	gen := rand.New(rand.NewPCG(seed, 0))
 
 	normalizedMin := uint64(math.Abs(float64(min)))
 	normalizedMax := uint64(max) + normalizedMin
 
 	out := make([]T, n)
 	for i := range out {
-		out[i] = T(gen.Uint64n(normalizedMax) - normalizedMin)
+		out[i] = T(gen.Uint64N(normalizedMax) - normalizedMin)
 	}
 	return out
 }
@@ -58,7 +56,7 @@ func drawFloat[T float32 | float64](n int64) []T {
 	const seed = 0xdeadbeef
 	d := distuv.Uniform{
 		Min: -1000.0, Max: 1000.0,
-		Src: rand.NewSource(seed),
+		Src: rand.New(rand.NewPCG(seed, 0)),
 	}
 
 	out := make([]T, n)
@@ -70,14 +68,14 @@ func drawFloat[T float32 | float64](n int64) []T {
 
 func drawBytes[T string | []byte](n int64, minLen, maxLen int) []T {
 	const seed = 1337
-	gen := rand.New(rand.NewSource(seed))
+	gen := rand.New(rand.NewPCG(seed, 0))
 
 	out := make([]T, n)
 	for i := range out {
-		l := gen.Intn(maxLen-minLen+1) + minLen
+		l := gen.IntN(maxLen-minLen+1) + minLen
 		buf := make([]byte, l)
 		for j := range buf {
-			buf[j] = uint8(gen.Intn(int('z')-int('A')+1) + int('A'))
+			buf[j] = uint8(gen.IntN(int('z')-int('A')+1) + int('A'))
 		}
 		out[i] = T(buf)
 	}
@@ -88,7 +86,7 @@ func randomBools(n int64, pctFalse float64) []bool {
 	const seed = 0
 	d := distuv.Uniform{
 		Min: 0.0, Max: 1.0,
-		Src: rand.NewSource(seed),
+		Src: rand.NewPCG(seed, 0),
 	}
 
 	out := make([]bool, n)

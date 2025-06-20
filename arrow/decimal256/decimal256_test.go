@@ -601,7 +601,7 @@ func TestHexFromString(t *testing.T) {
 		t.Errorf("expected: %s, actual: %s\n", decStr, num.ToString(38))
 
 		actualCoeff := num.BigInt()
-		expectedCoeff, _ := (&big.Int{}).SetString(strings.Replace(decStr, ".", "", -1), 10)
+		expectedCoeff, _ := (&big.Int{}).SetString(strings.ReplaceAll(decStr, ".", ""), 10)
 		t.Errorf("expected(hex): %X, actual(hex): %X\n", expectedCoeff.Bytes(), actualCoeff.Bytes())
 	}
 }

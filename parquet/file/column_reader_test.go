@@ -122,10 +122,11 @@ func makePages(version parquet.DataPageVersion, d *schema.Column, npages, lvlsPe
 	}
 
 	values := reflect.MakeSlice(reflect.SliceOf(typ), nvalues, nvalues)
-	if enc == parquet.Encodings.Plain {
+	switch enc {
+	case parquet.Encodings.Plain:
 		initValues(values)
 		return testutils.PaginatePlain(version, d, values, defLevels, repLevels, maxDef, maxRep, lvlsPerPage, valuesPerPage, parquet.Encodings.Plain), nvalues, values, defLevels, repLevels
-	} else if enc == parquet.Encodings.PlainDict || enc == parquet.Encodings.RLEDict {
+	case parquet.Encodings.PlainDict, parquet.Encodings.RLEDict:
 		initDictValues(values, lvlsPerPage)
 		return testutils.PaginateDict(version, d, values, defLevels, repLevels, maxDef, maxRep, lvlsPerPage, valuesPerPage, parquet.Encodings.RLEDict), nvalues, values, defLevels, repLevels
 	}
@@ -218,10 +219,10 @@ func (p *PrimitiveReaderSuite) checkResults(typ reflect.Type) {
 
 	var (
 		read        int64 = 0
-		totalRead   int   = 0
-		batchActual int   = 0
+		totalRead         = 0
+		batchActual       = 0
 		batchSize   int32 = 8
-		batch       int   = 0
+		batch             = 0
 	)
 
 	p.Require().NotNil(p.reader)
@@ -251,7 +252,7 @@ func (p *PrimitiveReaderSuite) checkResults(typ reflect.Type) {
 		totalRead += batch
 		batchActual += int(read)
 		batchSize = int32(utils.Min(1<<24, utils.Max(int(batchSize*2), 4096)))
-		if batch <= 0 {
+		if read <= 0 {
 			break
 		}
 	}

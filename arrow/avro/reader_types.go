@@ -249,7 +249,7 @@ func (d *dataLoader) loadDatum(data any) error {
 }
 
 func (d *dataLoader) newChild() *dataLoader {
-	var child *dataLoader = &dataLoader{
+	var child = &dataLoader{
 		depth: d.depth + 1,
 	}
 	d.children = append(d.children, child)
@@ -257,7 +257,7 @@ func (d *dataLoader) newChild() *dataLoader {
 }
 
 func (d *dataLoader) newListChild(list *fieldPos) *dataLoader {
-	var child *dataLoader = &dataLoader{
+	var child = &dataLoader{
 		list:  list,
 		item:  list.childrens[0],
 		depth: d.depth + 1,
@@ -267,7 +267,7 @@ func (d *dataLoader) newListChild(list *fieldPos) *dataLoader {
 }
 
 func (d *dataLoader) newMapChild(mapField *fieldPos) *dataLoader {
-	var child *dataLoader = &dataLoader{
+	var child = &dataLoader{
 		mapField: mapField,
 		depth:    d.depth + 1,
 	}
@@ -296,7 +296,7 @@ func newFieldPos() *fieldPos { return &fieldPos{index: -1} }
 func (f *fieldPos) children() []*fieldPos { return f.childrens }
 
 func (f *fieldPos) newChild(childName string, childBuilder array.Builder, meta arrow.Metadata) *fieldPos {
-	var child fieldPos = fieldPos{
+	var child = fieldPos{
 		parent:    f,
 		fieldName: childName,
 		builder:   childBuilder,

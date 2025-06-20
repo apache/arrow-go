@@ -242,7 +242,7 @@ func infoFromTags(f reflect.StructTag) *taggedInfo {
 			info.Exclude = true
 			return &info
 		}
-		for _, tag := range strings.Split(strings.Replace(ptags, "\t", "", -1), ",") {
+		for _, tag := range strings.Split(strings.ReplaceAll(ptags, "\t", ""), ",") {
 			tag = strings.TrimSpace(tag)
 			kv := strings.SplitN(tag, "=", 2)
 			key := strings.TrimSpace(strings.ToLower(kv[0]))
@@ -488,9 +488,10 @@ func typeToNode(name string, typ reflect.Type, repType parquet.Repetition, info 
 
 		bitwidth := int8(typ.Bits())
 		if physical != parquet.Types.Undefined {
-			if ptyp == parquet.Types.Int32 {
+			switch ptyp {
+			case parquet.Types.Int32:
 				bitwidth = 32
-			} else if ptyp == parquet.Types.Int64 {
+			case parquet.Types.Int64:
 				bitwidth = 64
 			}
 		}
@@ -517,9 +518,10 @@ func typeToNode(name string, typ reflect.Type, repType parquet.Repetition, info 
 
 		bitwidth := int8(typ.Bits())
 		if physical != parquet.Types.Undefined {
-			if ptyp == parquet.Types.Int32 {
+			switch ptyp {
+			case parquet.Types.Int32:
 				bitwidth = 32
-			} else if ptyp == parquet.Types.Int64 {
+			case parquet.Types.Int64:
 				bitwidth = 64
 			}
 		}
