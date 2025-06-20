@@ -46,7 +46,7 @@ type ComputeInternalsTestSuite struct {
 
 func (c *ComputeInternalsTestSuite) SetupTest() {
 	c.mem = memory.NewCheckedAllocator(memory.DefaultAllocator)
-	c.rng = gen.NewRandomArrayGenerator(0, c.mem)
+	c.rng = gen.NewRandomArrayGenerator(1337, c.mem)
 
 	c.resetCtx()
 }
