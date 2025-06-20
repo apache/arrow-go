@@ -21,6 +21,7 @@ package testutils
 import (
 	"encoding/binary"
 	"math"
+	"math/rand/v2"
 	"time"
 	"unsafe"
 
@@ -33,7 +34,6 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 
-	"golang.org/x/exp/rand"
 	"gonum.org/v1/gonum/stat/distuv"
 )
 
@@ -48,7 +48,7 @@ type RandomArrayGenerator struct {
 
 // NewRandomArrayGenerator constructs a new generator with the requested Seed
 func NewRandomArrayGenerator(seed uint64) RandomArrayGenerator {
-	src := rand.NewSource(seed)
+	src := rand.NewPCG(seed, 0)
 	return RandomArrayGenerator{seed, 0, src, rand.New(src)}
 }
 
@@ -62,7 +62,7 @@ func (r *RandomArrayGenerator) GenerateBitmap(buffer []byte, n int64, prob float
 
 	// bernoulli distribution uses P to determine the probability of a 0 or a 1,
 	// which we'll use to generate the bitmap.
-	dist := distuv.Bernoulli{P: prob, Src: rand.NewSource(r.seed + r.extra)}
+	dist := distuv.Bernoulli{P: prob, Src: rand.NewPCG(r.seed, r.extra)}
 	for i := 0; int64(i) < n; i++ {
 		if dist.Rand() != float64(0.0) {
 			bitutil.SetBit(buffer, i)
@@ -88,7 +88,7 @@ func (r *RandomArrayGenerator) ByteArray(size int64, minLen, maxLen int32, nullP
 	defer lengths.Release()
 
 	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
+	dist := rand.New(rand.NewPCG(r.seed, r.extra))
 	bldr := array.NewStringBuilder(memory.DefaultAllocator)
 	defer bldr.Release()
 
@@ -98,7 +98,7 @@ func (r *RandomArrayGenerator) ByteArray(size int64, minLen, maxLen int32, nullP
 		if lengths.IsValid(i) {
 			l := lengths.Value(i)
 			for j := int32(0); j < l; j++ {
-				strbuf[j] = byte(dist.Int31n(int32('z')-int32('A')+1) + int32('A'))
+				strbuf[j] = byte(dist.Int32N(int32('z')-int32('A')+1) + int32('A'))
 			}
 			val := strbuf[:l]
 			bldr.Append(*(*string)(unsafe.Pointer(&val)))
@@ -124,10 +124,10 @@ func (r *RandomArrayGenerator) Uint8(size int64, min, max uint8, prob float64) a
 	buffers[1].Resize(int(size * int64(arrow.Uint8SizeBytes)))
 
 	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
+	dist := rand.New(rand.NewPCG(r.seed, r.extra))
 	out := arrow.Uint8Traits.CastFromBytes(buffers[1].Bytes())
 	for i := int64(0); i < size; i++ {
-		out[i] = uint8(dist.Intn(int(max-min+1))) + min
+		out[i] = uint8(dist.IntN(int(max-min+1))) + min
 	}
 
 	return array.NewUint8Data(array.NewData(arrow.PrimitiveTypes.Uint8, int(size), buffers, nil, int(nullCount), 0))
@@ -147,10 +147,10 @@ func (r *RandomArrayGenerator) Int32(size int64, min, max int32, pctNull float64
 	buffers[1].Resize(arrow.Int32Traits.BytesRequired(int(size)))
 
 	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
+	dist := rand.New(rand.NewPCG(r.seed, r.extra))
 	out := arrow.Int32Traits.CastFromBytes(buffers[1].Bytes())
 	for i := int64(0); i < size; i++ {
-		out[i] = dist.Int31n(max-min+1) + min
+		out[i] = dist.Int32N(max-min+1) + min
 	}
 	return array.NewInt32Data(array.NewData(arrow.PrimitiveTypes.Int32, int(size), buffers, nil, int(nullCount), 0))
 }
@@ -169,10 +169,10 @@ func (r *RandomArrayGenerator) Int64(size int64, min, max int64, pctNull float64
 	buffers[1].Resize(arrow.Int64Traits.BytesRequired(int(size)))
 
 	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
+	dist := rand.New(rand.NewPCG(r.seed, r.extra))
 	out := arrow.Int64Traits.CastFromBytes(buffers[1].Bytes())
 	for i := int64(0); i < size; i++ {
-		out[i] = dist.Int63n(max-min+1) + min
+		out[i] = dist.Int64N(max-min+1) + min
 	}
 	return array.NewInt64Data(array.NewData(arrow.PrimitiveTypes.Int64, int(size), buffers, nil, int(nullCount), 0))
 }
@@ -191,7 +191,7 @@ func (r *RandomArrayGenerator) Float64(size int64, pctNull float64) *array.Float
 	buffers[1].Resize(arrow.Float64Traits.BytesRequired(int(size)))
 
 	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
+	dist := rand.New(rand.NewPCG(r.seed, r.extra))
 	out := arrow.Float64Traits.CastFromBytes(buffers[1].Bytes())
 	for i := int64(0); i < size; i++ {
 		out[i] = dist.NormFloat64()
@@ -231,43 +231,43 @@ func (r *RandomArrayGenerator) StringWithRepeats(mem memory.Allocator, sz, uniqu
 // FillRandomInt8 populates the slice out with random int8 values between min and max using
 // seed as the random see for generation to allow consistency for testing.
 func FillRandomInt8(seed uint64, min, max int8, out []int8) {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, 0))
 	for idx := range out {
-		out[idx] = int8(r.Intn(int(max-min+1))) + min
+		out[idx] = int8(r.IntN(int(max-min+1))) + min
 	}
 }
 
 // FillRandomUint8 populates the slice out with random uint8 values between min and max using
 // seed as the random see for generation to allow consistency for testing.
 func FillRandomUint8(seed uint64, min, max uint8, out []uint8) {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, 0))
 	for idx := range out {
-		out[idx] = uint8(r.Intn(int(max-min+1))) + min
+		out[idx] = uint8(r.IntN(int(max-min+1))) + min
 	}
 }
 
 // FillRandomInt16 populates the slice out with random int16 values between min and max using
 // seed as the random see for generation to allow consistency for testing.
 func FillRandomInt16(seed uint64, min, max int16, out []int16) {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, 0))
 	for idx := range out {
-		out[idx] = int16(r.Intn(int(max-min+1))) + min
+		out[idx] = int16(r.IntN(int(max-min+1))) + min
 	}
 }
 
 // FillRandomUint16 populates the slice out with random uint16 values between min and max using
 // seed as the random see for generation to allow consistency for testing.
 func FillRandomUint16(seed uint64, min, max uint16, out []uint16) {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, 0))
 	for idx := range out {
-		out[idx] = uint16(r.Intn(int(max-min+1))) + min
+		out[idx] = uint16(r.IntN(int(max-min+1))) + min
 	}
 }
 
 // FillRandomInt32 populates out with random int32 values using seed as the random
 // seed for the generator to allow consistency for testing.
 func FillRandomInt32(seed uint64, out []int32) {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, 0))
 	for idx := range out {
 		out[idx] = int32(r.Uint32())
 	}
@@ -276,34 +276,34 @@ func FillRandomInt32(seed uint64, out []int32) {
 // FillRandomInt32Max populates out with random int32 values between 0 and max using seed as the random
 // seed for the generator to allow consistency for testing.
 func FillRandomInt32Max(seed uint64, max int32, out []int32) {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, 0))
 	for idx := range out {
-		out[idx] = r.Int31n(max)
+		out[idx] = r.Int32N(max)
 	}
 }
 
 // FillRandomUint32Max populates out with random uint32 values between 0 and max using seed as the random
 // seed for the generator to allow consistency for testing.
 func FillRandomUint32Max(seed uint64, max uint32, out []uint32) {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, 0))
 	for idx := range out {
-		out[idx] = uint32(r.Uint64n(uint64(max)))
+		out[idx] = uint32(r.Uint64N(uint64(max)))
 	}
 }
 
 // FillRandomInt64Max populates out with random int64 values between 0 and max using seed as the random
 // seed for the generator to allow consistency for testing.
 func FillRandomInt64Max(seed uint64, max int64, out []int64) {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, 0))
 	for idx := range out {
-		out[idx] = r.Int63n(max)
+		out[idx] = r.Int64N(max)
 	}
 }
 
 // FillRandomUint32 populates out with random uint32 values using seed as the random
 // seed for the generator to allow consistency for testing.
 func FillRandomUint32(seed uint64, out []uint32) {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, 0))
 	for idx := range out {
 		out[idx] = r.Uint32()
 	}
@@ -312,7 +312,7 @@ func FillRandomUint32(seed uint64, out []uint32) {
 // FillRandomUint64 populates out with random uint64 values using seed as the random
 // seed for the generator to allow consistency for testing.
 func FillRandomUint64(seed uint64, out []uint64) {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, 0))
 	for idx := range out {
 		out[idx] = r.Uint64()
 	}
@@ -321,16 +321,16 @@ func FillRandomUint64(seed uint64, out []uint64) {
 // FillRandomUint64Max populates out with random uint64 values between 0 and max using seed as the random
 // seed for the generator to allow consistency for testing.
 func FillRandomUint64Max(seed uint64, max uint64, out []uint64) {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, 0))
 	for idx := range out {
-		out[idx] = r.Uint64n(max)
+		out[idx] = r.Uint64N(max)
 	}
 }
 
 // FillRandomInt64 populates out with random int64 values using seed as the random
 // seed for the generator to allow consistency for testing.
 func FillRandomInt64(seed uint64, out []int64) {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, 0))
 	for idx := range out {
 		out[idx] = int64(r.Uint64())
 	}
@@ -340,7 +340,7 @@ func FillRandomInt64(seed uint64, out []int64) {
 // seed for the generator to allow consistency for testing. It does this by generating
 // three random uint32 values for each int96 value.
 func FillRandomInt96(seed uint64, out []parquet.Int96) {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, 0))
 	for idx := range out {
 		*(*int32)(unsafe.Pointer(&out[idx][0])) = int32(r.Uint32())
 		*(*int32)(unsafe.Pointer(&out[idx][4])) = int32(r.Uint32())
@@ -374,7 +374,7 @@ func randFloat64(r *rand.Rand) float64 {
 // to better spread the values out and ensure we do not return any NaN or Inf values.
 func randFloat16(r *rand.Rand) float16.Num {
 	for {
-		f := float16.FromBits(uint16(r.Uint64n(math.MaxUint16 + 1)))
+		f := float16.FromBits(uint16(r.Uint64N(math.MaxUint16 + 1)))
 		if !f.IsNaN() {
 			return f
 		}
@@ -384,7 +384,7 @@ func randFloat16(r *rand.Rand) float16.Num {
 // FillRandomFloat32 populates out with random float32 values using seed as the random
 // seed for the generator to allow consistency for testing.
 func FillRandomFloat32(seed uint64, out []float32) {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, 0))
 	for idx := range out {
 		out[idx] = randFloat32(r)
 	}
@@ -393,7 +393,7 @@ func FillRandomFloat32(seed uint64, out []float32) {
 // FillRandomFloat64 populates out with random float64 values using seed as the random
 // seed for the generator to allow consistency for testing.
 func FillRandomFloat64(seed uint64, out []float64) {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, 0))
 	for idx := range out {
 		out[idx] = randFloat64(r)
 	}
@@ -402,7 +402,7 @@ func FillRandomFloat64(seed uint64, out []float64) {
 // FillRandomFloat16 populates out with random float64 values using seed as the random
 // seed for the generator to allow consistency for testing.
 func FillRandomFloat16(seed uint64, out []float16.Num) {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, 0))
 	for idx := range out {
 		out[idx] = randFloat16(r)
 	}
@@ -425,8 +425,11 @@ func FillRandomByteArray(seed uint64, out []parquet.ByteArray, heap *memory.Buff
 func FillRandomFixedByteArray(seed uint64, out []parquet.FixedLenByteArray, heap *memory.Buffer, size int) {
 	heap.Resize(len(out) * size)
 
+	var seedBytes [32]byte
+	binary.LittleEndian.PutUint64(seedBytes[:8], seed)
+
 	buf := heap.Bytes()
-	r := rand.New(rand.NewSource(seed))
+	r := rand.NewChaCha8(seedBytes)
 	for idx := range out {
 		r.Read(buf[:size])
 		out[idx] = buf[:size]
@@ -438,7 +441,7 @@ func FillRandomFixedByteArray(seed uint64, out []parquet.FixedLenByteArray, heap
 // seed as the random seed to the generator in order to allow consistency for testing. This uses
 // a Bernoulli distribution of values.
 func FillRandomBooleans(p float64, seed uint64, out []bool) {
-	dist := distuv.Bernoulli{P: p, Src: rand.NewSource(seed)}
+	dist := distuv.Bernoulli{P: p, Src: rand.NewPCG(seed, 0)}
 	for idx := range out {
 		out[idx] = dist.Rand() != float64(0.0)
 	}
@@ -449,7 +452,7 @@ func FillRandomBooleans(p float64, seed uint64, out []bool) {
 // the default Golang random generator distribution of float64 values between 0 and 1 comparing against
 // pctNull. If the random value is > pctNull, it is true.
 func fillRandomIsValid(seed uint64, pctNull float64, out []bool) {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, 0))
 	for idx := range out {
 		out[idx] = r.Float64() > pctNull
 	}
@@ -494,11 +497,15 @@ func InitValues(values interface{}, heap *memory.Buffer) {
 func RandomByteArray(seed uint64, out []parquet.ByteArray, heap *memory.Buffer, minlen, maxlen int) {
 	heap.Resize(len(out) * (maxlen + arrow.Uint32SizeBytes))
 
+	var seedBytes [32]byte
+	binary.LittleEndian.PutUint64(seedBytes[:8], seed)
+
 	buf := heap.Bytes()
-	r := rand.New(rand.NewSource(seed))
+	src := rand.NewChaCha8(seedBytes)
+	r := rand.New(src)
 	for idx := range out {
-		length := r.Intn(maxlen-minlen+1) + minlen
-		r.Read(buf[:length])
+		length := r.IntN(maxlen-minlen+1) + minlen
+		src.Read(buf[:length])
 		out[idx] = buf[:length]
 
 		buf = buf[length:]
@@ -509,7 +516,10 @@ func RandomByteArray(seed uint64, out []parquet.ByteArray, heap *memory.Buffer, 
 // for the values and seed as the random generator seed to allow consistency for testing. The
 // resulting values will be either 32 bytes or 16 bytes each depending on the precision.
 func RandomDecimals(n int64, seed uint64, precision int32) []byte {
-	r := rand.New(rand.NewSource(seed))
+	var seedBytes [32]byte
+	binary.LittleEndian.PutUint64(seedBytes[:8], seed)
+
+	r := rand.NewChaCha8(seedBytes)
 	nreqBytes := pqarrow.DecimalSize(precision)
 	byteWidth := 32
 	if precision <= 38 {

@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"testing"
 	"unsafe"
 
@@ -32,7 +33,6 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/exp/rand"
 	"gonum.org/v1/gonum/stat/distuv"
 )
 
@@ -50,7 +50,7 @@ func randomUint8(size, truePct int, sampleVals [2]uint8, seed uint64) []uint8 {
 
 	dist := distuv.Bernoulli{
 		P:   float64(truePct) / 100.0,
-		Src: rand.NewSource(seed),
+		Src: rand.NewPCG(seed, 0),
 	}
 
 	for idx := range ret {
@@ -70,7 +70,7 @@ func randomInt32(size, truePct int, sampleVals [2]int32, seed uint64) []int32 {
 
 	dist := distuv.Bernoulli{
 		P:   float64(truePct) / 100.0,
-		Src: rand.NewSource(seed),
+		Src: rand.NewPCG(seed, 0),
 	}
 
 	for idx := range ret {

@@ -18,13 +18,14 @@ package gen
 
 import (
 	"math"
+	"math/rand/v2"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	"golang.org/x/exp/rand"
 	"gonum.org/v1/gonum/stat/distuv"
 )
 
@@ -40,7 +41,7 @@ type RandomArrayGenerator struct {
 
 // NewRandomArrayGenerator constructs a new generator with the requested Seed
 func NewRandomArrayGenerator(seed uint64, mem memory.Allocator) RandomArrayGenerator {
-	src := rand.NewSource(seed)
+	src := rand.NewPCG(seed, 0)
 	return RandomArrayGenerator{seed, 0, src, rand.New(src), mem}
 }
 
@@ -54,7 +55,7 @@ func (r *RandomArrayGenerator) GenerateBitmap(buffer []byte, n int64, prob float
 
 	// bernoulli distribution uses P to determine the probability of a 0 or a 1,
 	// which we'll use to generate the bitmap.
-	dist := distuv.Bernoulli{P: 1 - prob, Src: rand.NewSource(r.seed + r.extra)}
+	dist := distuv.Bernoulli{P: 1 - prob, Src: rand.NewPCG(r.seed, r.extra)}
 	for i := 0; int64(i) < n; i++ {
 		if dist.Rand() != float64(0.0) {
 			bitutil.SetBit(buffer, i)
@@ -99,112 +100,46 @@ func (r *RandomArrayGenerator) baseGenPrimitive(size int64, prob float64, byteWi
 	return buffers, nullCount
 }
 
-func (r *RandomArrayGenerator) Int8(size int64, min, max int8, prob float64) arrow.Array {
-	buffers, nullcount := r.baseGenPrimitive(size, prob, arrow.Int8SizeBytes)
+func genArray[T arrow.IntType | arrow.UintType](r *RandomArrayGenerator, size int64, min, max T, prob float64) arrow.Array {
+	buffers, nullcount := r.baseGenPrimitive(size, prob, int(unsafe.Sizeof(T(0))))
 	for _, b := range buffers {
 		defer b.Release()
 	}
 
 	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
-	out := arrow.Int8Traits.CastFromBytes(buffers[1].Bytes())
+	dist := rand.New(rand.NewPCG(r.seed, r.extra))
+	out := arrow.GetData[T](buffers[1].Bytes())
 	for i := int64(0); i < size; i++ {
-		out[i] = int8(dist.Intn(int(max)-int(min+1))) + min
+		out[i] = T(dist.IntN(int(max)-int(min+1))) + min
 	}
 
-	data := array.NewData(arrow.PrimitiveTypes.Int8, int(size), buffers, nil, int(nullcount), 0)
+	data := array.NewData(arrow.GetDataType[T](), int(size), buffers, nil, int(nullcount), 0)
 	defer data.Release()
-	return array.NewInt8Data(data)
+	return array.MakeFromData(data)
+}
+
+func (r *RandomArrayGenerator) Int8(size int64, min, max int8, prob float64) arrow.Array {
+	return genArray(r, size, min, max, prob)
 }
 
 func (r *RandomArrayGenerator) Uint8(size int64, min, max uint8, prob float64) arrow.Array {
-	buffers, nullcount := r.baseGenPrimitive(size, prob, arrow.Uint8SizeBytes)
-	for _, b := range buffers {
-		defer b.Release()
-	}
-
-	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
-	out := arrow.Uint8Traits.CastFromBytes(buffers[1].Bytes())
-	for i := int64(0); i < size; i++ {
-		out[i] = uint8(dist.Intn(int(max)-int(min)+1)) + min
-	}
-
-	data := array.NewData(arrow.PrimitiveTypes.Uint8, int(size), buffers, nil, int(nullcount), 0)
-	defer data.Release()
-	return array.NewUint8Data(data)
+	return genArray(r, size, min, max, prob)
 }
 
 func (r *RandomArrayGenerator) Int16(size int64, min, max int16, prob float64) arrow.Array {
-	buffers, nullcount := r.baseGenPrimitive(size, prob, arrow.Int16SizeBytes)
-	for _, b := range buffers {
-		defer b.Release()
-	}
-
-	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
-	out := arrow.Int16Traits.CastFromBytes(buffers[1].Bytes())
-	for i := int64(0); i < size; i++ {
-		out[i] = int16(dist.Intn(int(max)-int(min)+1)) + min
-	}
-
-	data := array.NewData(arrow.PrimitiveTypes.Int16, int(size), buffers, nil, int(nullcount), 0)
-	defer data.Release()
-	return array.NewInt16Data(data)
+	return genArray(r, size, min, max, prob)
 }
 
 func (r *RandomArrayGenerator) Uint16(size int64, min, max uint16, prob float64) arrow.Array {
-	buffers, nullcount := r.baseGenPrimitive(size, prob, arrow.Uint16SizeBytes)
-	for _, b := range buffers {
-		defer b.Release()
-	}
-
-	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
-	out := arrow.Uint16Traits.CastFromBytes(buffers[1].Bytes())
-	for i := int64(0); i < size; i++ {
-		out[i] = uint16(dist.Intn(int(max)-int(min)+1)) + min
-	}
-
-	data := array.NewData(arrow.PrimitiveTypes.Uint16, int(size), buffers, nil, int(nullcount), 0)
-	defer data.Release()
-	return array.NewUint16Data(data)
+	return genArray(r, size, min, max, prob)
 }
 
 func (r *RandomArrayGenerator) Int32(size int64, min, max int32, prob float64) arrow.Array {
-	buffers, nullcount := r.baseGenPrimitive(size, prob, arrow.Int32SizeBytes)
-	for _, b := range buffers {
-		defer b.Release()
-	}
-
-	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
-	out := arrow.Int32Traits.CastFromBytes(buffers[1].Bytes())
-	for i := int64(0); i < size; i++ {
-		out[i] = int32(dist.Intn(int(max)-int(min)+1)) + min
-	}
-
-	data := array.NewData(arrow.PrimitiveTypes.Int32, int(size), buffers, nil, int(nullcount), 0)
-	defer data.Release()
-	return array.NewInt32Data(data)
+	return genArray(r, size, min, max, prob)
 }
 
 func (r *RandomArrayGenerator) Uint32(size int64, min, max uint32, prob float64) arrow.Array {
-	buffers, nullcount := r.baseGenPrimitive(size, prob, arrow.Uint32SizeBytes)
-	for _, b := range buffers {
-		defer b.Release()
-	}
-
-	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
-	out := arrow.Uint32Traits.CastFromBytes(buffers[1].Bytes())
-	for i := int64(0); i < size; i++ {
-		out[i] = uint32(dist.Uint64n(uint64(max)-uint64(min)+1)) + min
-	}
-
-	data := array.NewData(arrow.PrimitiveTypes.Uint32, int(size), buffers, nil, int(nullcount), 0)
-	defer data.Release()
-	return array.NewUint32Data(data)
+	return genArray(r, size, min, max, prob)
 }
 
 func (r *RandomArrayGenerator) Int64(size int64, min, max int64, prob float64) arrow.Array {
@@ -214,7 +149,7 @@ func (r *RandomArrayGenerator) Int64(size int64, min, max int64, prob float64) a
 	}
 
 	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
+	dist := rand.New(rand.NewPCG(r.seed, r.extra))
 	out := arrow.Int64Traits.CastFromBytes(buffers[1].Bytes())
 	if max == math.MaxInt64 && min == math.MinInt64 {
 		for i := int64(0); i < size; i++ {
@@ -222,7 +157,7 @@ func (r *RandomArrayGenerator) Int64(size int64, min, max int64, prob float64) a
 		}
 	} else {
 		for i := int64(0); i < size; i++ {
-			out[i] = dist.Int63n(max-min+1) + min
+			out[i] = dist.Int64N(max-min+1) + min
 		}
 	}
 
@@ -238,7 +173,7 @@ func (r *RandomArrayGenerator) Uint64(size int64, min, max uint64, prob float64)
 	}
 
 	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
+	dist := rand.New(rand.NewPCG(r.seed, r.extra))
 	out := arrow.Uint64Traits.CastFromBytes(buffers[1].Bytes())
 	if max == math.MaxUint64 {
 		for i := int64(0); i < size; i++ {
@@ -246,7 +181,7 @@ func (r *RandomArrayGenerator) Uint64(size int64, min, max uint64, prob float64)
 		}
 	} else {
 		for i := int64(0); i < size; i++ {
-			out[i] = dist.Uint64n(max-min+1) + min
+			out[i] = dist.Uint64N(max-min+1) + min
 		}
 	}
 
@@ -262,7 +197,7 @@ func (r *RandomArrayGenerator) Float32(size int64, min, max float32, prob float6
 	}
 
 	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
+	dist := rand.New(rand.NewPCG(r.seed, r.extra))
 	out := arrow.Float32Traits.CastFromBytes(buffers[1].Bytes())
 	for i := int64(0); i < size; i++ {
 		out[i] = min + dist.Float32()*(max+1-min)
@@ -280,7 +215,7 @@ func (r *RandomArrayGenerator) Float64(size int64, min, max float64, prob float6
 	}
 
 	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
+	dist := rand.New(rand.NewPCG(r.seed, r.extra))
 	out := arrow.Float64Traits.CastFromBytes(buffers[1].Bytes())
 	for i := int64(0); i < size; i++ {
 		out[i] = dist.NormFloat64() + (max - min)
@@ -299,13 +234,13 @@ func (r *RandomArrayGenerator) String(size int64, minLength, maxLength int, null
 	defer bldr.Release()
 
 	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
+	dist := rand.New(rand.NewPCG(r.seed, r.extra))
 
 	buf := make([]byte, 0, maxLength)
 	gen := func(n int32) string {
 		out := buf[:n]
 		for i := range out {
-			out[i] = uint8(dist.Int31n(int32('z')-int32('A')+1) + int32('A'))
+			out[i] = uint8(dist.Int32N(int32('z')-int32('A')+1) + int32('A'))
 		}
 		return string(out)
 	}
@@ -329,13 +264,13 @@ func (r *RandomArrayGenerator) LargeString(size int64, minLength, maxLength int6
 	defer bldr.Release()
 
 	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
+	dist := rand.New(rand.NewPCG(r.seed, r.extra))
 
 	buf := make([]byte, 0, maxLength)
 	gen := func(n int64) string {
 		out := buf[:n]
 		for i := range out {
-			out[i] = uint8(dist.Int63n(int64('z')-int64('A')+1) + int64('A'))
+			out[i] = uint8(dist.Int64N(int64('z')-int64('A')+1) + int64('A'))
 		}
 		return string(out)
 	}
@@ -363,13 +298,13 @@ func (r *RandomArrayGenerator) generateBinaryView(dt arrow.DataType, size int64,
 	defer bldr.Release()
 
 	r.extra++
-	dist := rand.New(rand.NewSource(r.seed + r.extra))
+	dist := rand.New(rand.NewPCG(r.seed, r.extra))
 
 	buf := make([]byte, 0, maxLength)
 	gen := func(n int32) string {
 		out := buf[:n]
 		for i := range out {
-			out[i] = uint8(dist.Int31n(int32('z')-int32('A')+1) + int32('A'))
+			out[i] = uint8(dist.Int32N(int32('z')-int32('A')+1) + int32('A'))
 		}
 		return string(out)
 	}
@@ -422,9 +357,9 @@ func viewOffsetsFromLengthsArray32(
 	sizes := sizesArray.Int32Values()
 	offsets := make([]int32, sizesArray.Len())
 
-	offsetDeltaRand := rand.New(rand.NewSource(seed))
+	offsetDeltaRand := rand.New(rand.NewPCG(seed, 0))
 	sampleOffset := func(offsetBase int32) int32 {
-		delta := int32(offsetDeltaRand.Int63n(2*int64(avgLength)) - int64(avgLength))
+		delta := int32(offsetDeltaRand.Int64N(2*int64(avgLength)) - int64(avgLength))
 		offset := offsetBase + delta
 		if offset < 0 {
 			return 0
@@ -463,9 +398,9 @@ func viewOffsetsFromLengthsArray64(
 	sizes := sizesArray.Int64Values()
 	offsets := make([]int64, sizesArray.Len())
 
-	offsetDeltaRand := rand.New(rand.NewSource(seed))
+	offsetDeltaRand := rand.New(rand.NewPCG(seed, 0))
 	sampleOffset := func(offsetBase int64) int64 {
-		delta := int64(offsetDeltaRand.Int63n(2*avgLength) - avgLength)
+		delta := int64(offsetDeltaRand.Int64N(2*avgLength) - avgLength)
 		offset := offsetBase + delta
 		if offset < 0 {
 			return 0

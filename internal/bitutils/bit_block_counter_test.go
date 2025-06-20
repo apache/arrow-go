@@ -17,13 +17,13 @@
 package bitutils_test
 
 import (
+	"math/rand/v2"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/exp/rand"
 )
 
 const kWordSize = 64
@@ -184,7 +184,7 @@ func TestFourWordsRandomData(t *testing.T) {
 	)
 
 	buf := make([]byte, nbytes)
-	r := rand.New(rand.NewSource(0))
+	r := &rand.ChaCha8{}
 	r.Read(buf)
 
 	checkWithOffset := func(offset int64) {

@@ -17,10 +17,10 @@
 package bitutils_test
 
 import (
+	"math/rand/v2"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/internal/bitutils"
-	"golang.org/x/exp/rand"
 )
 
 const kBufferSize int64 = 1024 * 8
@@ -46,7 +46,7 @@ func runBench(b *testing.B, bitmap []byte, nbits int64, fn func([]byte, int64, i
 func BenchmarkGenerateBits(b *testing.B) {
 	nbits := kBufferSize * 8
 	// random bytes
-	r := rand.New(rand.NewSource(0))
+	r := &rand.ChaCha8{}
 	bitmap := make([]byte, kBufferSize)
 	r.Read(bitmap)
 
@@ -58,7 +58,7 @@ func BenchmarkGenerateBits(b *testing.B) {
 func BenchmarkGenerateBitsUnrolled(b *testing.B) {
 	nbits := kBufferSize * 8
 	// random bytes
-	r := rand.New(rand.NewSource(0))
+	r := &rand.ChaCha8{}
 	bitmap := make([]byte, kBufferSize)
 	r.Read(bitmap)
 
