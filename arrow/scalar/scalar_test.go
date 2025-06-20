@@ -882,7 +882,7 @@ func getScalars(mem memory.Allocator) []scalar.Scalar {
 		scalar.NewDecimal256Scalar(decimal256.FromI64(10), &arrow.Decimal256Type{Precision: 16, Scale: 4}),
 		scalar.NewStringScalarFromBuffer(hello),
 		scalar.NewListScalar(int8Arr),
-		scalar.NewMapScalar(mapArr.List.ListValues()),
+		scalar.NewMapScalar(mapArr.ListValues()),
 		scalar.NewFixedSizeListScalar(int8Arr),
 		scalar.NewStructScalar([]scalar.Scalar{scalar.NewInt32Scalar(2), scalar.NewInt32Scalar(6)},
 			arrow.StructOf([]arrow.Field{{Name: "min", Type: arrow.PrimitiveTypes.Int32}, {Name: "max", Type: arrow.PrimitiveTypes.Int32}}...)),

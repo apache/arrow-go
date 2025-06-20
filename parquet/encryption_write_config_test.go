@@ -137,9 +137,9 @@ func (en *EncryptionConfigTestSuite) encryptFile(configs *parquet.FileEncryption
 		int64Writer := nextColumn().(*file.Int64ColumnChunkWriter)
 		for i := 0; i < 2*en.rowsPerRG; i++ {
 			var (
-				defLevel       = [1]int16{1}
-				repLevel       = [1]int16{0}
-				value    int64 = int64(i) * 1000 * 1000 * 1000 * 1000
+				defLevel = [1]int16{1}
+				repLevel = [1]int16{0}
+				value    = int64(i) * 1000 * 1000 * 1000 * 1000
 			)
 			if i%2 == 0 {
 				repLevel[0] = 0

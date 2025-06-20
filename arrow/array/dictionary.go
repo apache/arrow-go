@@ -63,7 +63,7 @@ type Dictionary struct {
 // and dictionary using the given type.
 func NewDictionaryArray(typ arrow.DataType, indices, dict arrow.Array) *Dictionary {
 	a := &Dictionary{}
-	a.array.refCount.Add(1)
+	a.refCount.Add(1)
 	dictdata := NewData(typ, indices.Len(), indices.Data().Buffers(), indices.Data().Children(), indices.NullN(), indices.Data().Offset())
 	dictdata.dictionary = dict.Data().(*Data)
 	dict.Data().Retain()
@@ -432,7 +432,7 @@ func createDictBuilder[T arrow.ValueType](mem memory.Allocator, idxbldr IndexBui
 			dt:         dt,
 		},
 	}
-	ret.builder.refCount.Add(1)
+	ret.refCount.Add(1)
 
 	if init != nil {
 		if err := ret.InsertDictValues(init.(arrValues[T])); err != nil {
@@ -451,7 +451,7 @@ func createBinaryDictBuilder(mem memory.Allocator, idxbldr IndexBuilder, memo ha
 			dt:         dt,
 		},
 	}
-	ret.builder.refCount.Add(1)
+	ret.refCount.Add(1)
 
 	if init != nil {
 		switch v := init.(type) {
@@ -479,7 +479,7 @@ func createFixedSizeDictBuilder[T fsbType](mem memory.Allocator, idxbldr IndexBu
 		},
 		byteWidth: int(unsafe.Sizeof(z)),
 	}
-	ret.builder.refCount.Add(1)
+	ret.refCount.Add(1)
 
 	if init != nil {
 		if err := ret.InsertDictValues(init.(arrValues[T])); err != nil {
@@ -517,7 +517,7 @@ func NewDictionaryBuilderWithDict(mem memory.Allocator, dt *arrow.DictionaryType
 				dt:         dt,
 			},
 		}
-		ret.builder.refCount.Add(1)
+		ret.refCount.Add(1)
 		debug.Assert(init == nil, "arrow/array: doesn't make sense to init a null dictionary")
 		return ret
 	case arrow.UINT8:
@@ -554,7 +554,7 @@ func NewDictionaryBuilderWithDict(mem memory.Allocator, dt *arrow.DictionaryType
 			},
 			byteWidth: dt.ValueType.(*arrow.FixedSizeBinaryType).ByteWidth,
 		}
-		ret.builder.refCount.Add(1)
+		ret.refCount.Add(1)
 
 		if init != nil {
 			if err = ret.InsertDictValues(init.(*FixedSizeBinary)); err != nil {
@@ -656,7 +656,7 @@ func (b *dictionaryBuilder) Resize(n int) {
 }
 
 func (b *dictionaryBuilder) ResetFull() {
-	b.builder.reset()
+	b.reset()
 	b.idxBuilder.NewArray().Release()
 	b.memoTable.Reset()
 }
@@ -1153,8 +1153,8 @@ func (b *FixedSizeBinaryDictionaryBuilder) Append(v []byte) error {
 
 func (b *FixedSizeBinaryDictionaryBuilder) InsertDictValues(arr *FixedSizeBinary) (err error) {
 	var (
-		beg = arr.array.data.offset * b.byteWidth
-		end = (arr.array.data.offset + arr.data.length) * b.byteWidth
+		beg = arr.data.offset * b.byteWidth
+		end = (arr.data.offset + arr.data.length) * b.byteWidth
 	)
 	data := arr.valueBytes[beg:end]
 	for len(data) > 0 {

@@ -251,7 +251,7 @@ type nullableNode struct {
 }
 
 func (n *nullableNode) clone() pathNode {
-	var ret nullableNode = *n
+	var ret = *n
 	return &ret
 }
 
@@ -632,7 +632,7 @@ type int16BufferBuilder struct {
 }
 
 func (b *int16BufferBuilder) Values() []int16 {
-	return arrow.Int16Traits.CastFromBytes(b.PooledBufferWriter.Bytes())
+	return arrow.Int16Traits.CastFromBytes(b.Bytes())
 }
 
 func (b *int16BufferBuilder) Value(i int) int16 {
@@ -651,12 +651,12 @@ func (b *int16BufferBuilder) AppendCopies(count int, val int16) {
 }
 
 func (b *int16BufferBuilder) UnsafeAppend(v int16) {
-	b.PooledBufferWriter.UnsafeWrite((*(*[2]byte)(unsafe.Pointer(&v)))[:])
+	b.UnsafeWrite((*(*[2]byte)(unsafe.Pointer(&v)))[:])
 }
 
 func (b *int16BufferBuilder) Append(v int16) {
 	b.PooledBufferWriter.Reserve(arrow.Int16SizeBytes)
-	b.PooledBufferWriter.Write((*(*[2]byte)(unsafe.Pointer(&v)))[:])
+	b.Write((*(*[2]byte)(unsafe.Pointer(&v)))[:])
 }
 
 func fillRepLevels(count int, repLvl int16, ctx *pathWriteCtx) {

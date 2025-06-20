@@ -310,7 +310,7 @@ func NewClientFromConn(cc grpc.ClientConnInterface, auth ClientAuthHandler) Clie
 func (c *client) AuthenticateBasicToken(ctx context.Context, username, password string, opts ...grpc.CallOption) (context.Context, error) {
 	authCtx := metadata.AppendToOutgoingContext(ctx, "Authorization", "Basic "+base64.RawStdEncoding.EncodeToString([]byte(strings.Join([]string{username, password}, ":"))))
 
-	stream, err := c.FlightServiceClient.Handshake(authCtx, opts...)
+	stream, err := c.Handshake(authCtx, opts...)
 	if err != nil {
 		return ctx, err
 	}
@@ -346,7 +346,7 @@ func (c *client) Authenticate(ctx context.Context, opts ...grpc.CallOption) erro
 		return status.Error(codes.NotFound, "cannot authenticate without an auth-handler")
 	}
 
-	stream, err := c.FlightServiceClient.Handshake(ctx, opts...)
+	stream, err := c.Handshake(ctx, opts...)
 	if err != nil {
 		return err
 	}

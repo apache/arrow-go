@@ -65,7 +65,7 @@ type Parametric1Type struct {
 
 func NewParametric1Type(p int32) *Parametric1Type {
 	ret := &Parametric1Type{param: p}
-	ret.ExtensionBase.Storage = arrow.PrimitiveTypes.Int32
+	ret.Storage = arrow.PrimitiveTypes.Int32
 	return ret
 }
 
@@ -116,7 +116,7 @@ type Parametric2Type struct {
 
 func NewParametric2Type(p int32) *Parametric2Type {
 	ret := &Parametric2Type{param: p}
-	ret.ExtensionBase.Storage = arrow.PrimitiveTypes.Int32
+	ret.Storage = arrow.PrimitiveTypes.Int32
 	return ret
 }
 

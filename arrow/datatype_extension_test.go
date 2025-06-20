@@ -42,7 +42,7 @@ func (BadExtensionType) Deserialize(_ arrow.DataType, _ string) (arrow.Extension
 func TestMustEmbedBase(t *testing.T) {
 	var ext interface{} = &BadExtensionType{}
 	assert.Panics(t, func() {
-		var _ arrow.ExtensionType = ext.(arrow.ExtensionType)
+		var _ = ext.(arrow.ExtensionType)
 	})
 }
 

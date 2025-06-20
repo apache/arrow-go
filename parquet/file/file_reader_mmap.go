@@ -64,12 +64,12 @@ func (m *mmapAdapter) Seek(offset int64, whence int) (int64, error) {
 	case io.SeekCurrent:
 		newPos = m.pos + offs
 	case io.SeekEnd:
-		newPos = int64(m.ReaderAt.Len()) + offs
+		newPos = int64(m.Len()) + offs
 	}
 	if newPos < 0 {
 		return 0, xerrors.New("negative result pos")
 	}
-	if newPos > int64(m.ReaderAt.Len()) {
+	if newPos > int64(m.Len()) {
 		return 0, xerrors.New("new position exceeds size of file")
 	}
 	m.pos = newPos

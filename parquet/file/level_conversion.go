@@ -179,10 +179,8 @@ func defLevelsToBitmapInternal(defLevels []int16, info LevelInfo, out *ValidityB
 
 // DefLevelsToBitmap creates a validitybitmap out of the passed in definition levels and info object.
 func DefLevelsToBitmap(defLevels []int16, info LevelInfo, out *ValidityBitmapInputOutput) {
-	hasRepeatedParent := false
-	if info.RepLevel > 0 {
-		hasRepeatedParent = true
-	}
+	hasRepeatedParent := info.RepLevel > 0
+
 	defLevelsToBitmapInternal(defLevels, info, out, hasRepeatedParent)
 }
 

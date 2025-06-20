@@ -611,9 +611,10 @@ func newColumnIndexBuilder[T parquet.ColumnTypes](descr *schema.Column) *columnI
 }
 
 func (b *columnIndexBuilder[T]) AddPage(stats *EncodedStatistics) error {
-	if b.state == stateFinished {
+	switch b.state {
+	case stateFinished:
 		return fmt.Errorf("%w: cannot add page to finished ColumnIndexBuilder", arrow.ErrInvalid)
-	} else if b.state == stateDiscarded {
+	case stateDiscarded:
 		return nil
 	}
 
@@ -750,9 +751,10 @@ func (o *OffsetIndexBuilder) AddPageLoc(pgloc PageLocation) error {
 }
 
 func (o *OffsetIndexBuilder) AddPage(offset, firstRowIdx int64, compressedPgSize int32) error {
-	if o.state == stateFinished {
+	switch o.state {
+	case stateFinished:
 		return fmt.Errorf("%w: cannot add page to finished OffsetIndexBuilder", arrow.ErrInvalid)
-	} else if o.state == stateDiscarded {
+	case stateDiscarded:
 		// offset index is discarded, do nothing
 		return nil
 	}

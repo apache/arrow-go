@@ -568,10 +568,10 @@ func (f *FieldWrapper) UnmarshalJSON(data []byte) error {
 
 	if len(f.Metadata) > 0 { // unmarshal the key/value metadata pairs
 		var (
-			mdkeys         = make([]string, 0, len(f.Metadata))
-			mdvals         = make([]string, 0, len(f.Metadata))
-			extKeyIdx  int = -1
-			extDataIdx int = -1
+			mdkeys     = make([]string, 0, len(f.Metadata))
+			mdvals     = make([]string, 0, len(f.Metadata))
+			extKeyIdx  = -1
+			extDataIdx = -1
 		)
 
 		for i, kv := range f.Metadata {
