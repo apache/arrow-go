@@ -71,6 +71,7 @@ type config struct {
 	ensureNativeEndian bool
 	noAutoSchema       bool
 	emitDictDeltas     bool
+	emitSchema         bool
 	minSpaceSavings    *float64
 }
 
@@ -111,6 +112,15 @@ func WithAllocator(mem memory.Allocator) Option {
 func WithSchema(schema *arrow.Schema) Option {
 	return func(cfg *config) {
 		cfg.schema = schema
+	}
+}
+
+// WithSchemalessOutput tells the writer to skip writing the schema data
+// to the target output. Useful when the target wants only messages
+// of type RecordBatch.
+func WithSchemalessOutput() Option {
+	return func(cfg *config) {
+		cfg.emitSchema = false
 	}
 }
 
