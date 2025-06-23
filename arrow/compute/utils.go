@@ -353,7 +353,7 @@ func commonTemporal(vals ...arrow.DataType) arrow.DataType {
 				loc = tz
 			}
 			zone = &ts.TimeZone
-			finestUnit = exec.Max(finestUnit, ts.Unit)
+			finestUnit = max(finestUnit, ts.Unit)
 		case arrow.TIME32, arrow.TIME64:
 			ts := ty.(arrow.TemporalWithUnit)
 			finestUnit = max(finestUnit, ts.TimeUnit())
@@ -367,9 +367,9 @@ func commonTemporal(vals ...arrow.DataType) arrow.DataType {
 		}
 	}
 
-	sawTimestampOrDate := zone != nil || sawDate32 || sawDate64 || sawDuration
+	sawTimestampOrDate := zone != nil || sawDate32 || sawDate64
 
-	if sawTime && sawTimestampOrDate {
+	if sawTimestampOrDate && (sawTime || sawDuration) {
 		// no common type possible
 		return nil
 	}
@@ -383,8 +383,6 @@ func commonTemporal(vals ...arrow.DataType) arrow.DataType {
 			return arrow.FixedWidthTypes.Date64
 		case sawDate32:
 			return arrow.FixedWidthTypes.Date32
-		case sawDuration:
-			return &arrow.DurationType{Unit: finestUnit}
 		}
 	} else if sawTime {
 		switch finestUnit {
@@ -393,6 +391,9 @@ func commonTemporal(vals ...arrow.DataType) arrow.DataType {
 		case arrow.Microsecond, arrow.Nanosecond:
 			return &arrow.Time64Type{Unit: finestUnit}
 		}
+	} else if sawDuration {
+		// we can only get here if we ONLY saw durations
+		return &arrow.DurationType{Unit: finestUnit}
 	}
 	return nil
 }
