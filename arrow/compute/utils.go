@@ -136,10 +136,10 @@ func commonTemporalResolution(vals ...arrow.DataType) (arrow.TimeUnit, bool) {
 			isTimeUnit = true
 			continue
 		case *arrow.Date64Type:
-			finestUnit = exec.Max(finestUnit, arrow.Millisecond)
+			finestUnit = max(finestUnit, arrow.Millisecond)
 			isTimeUnit = true
 		case arrow.TemporalWithUnit:
-			finestUnit = exec.Max(finestUnit, dt.TimeUnit())
+			finestUnit = max(finestUnit, dt.TimeUnit())
 			isTimeUnit = true
 		default:
 			continue
