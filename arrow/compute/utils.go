@@ -136,10 +136,10 @@ func commonTemporalResolution(vals ...arrow.DataType) (arrow.TimeUnit, bool) {
 			isTimeUnit = true
 			continue
 		case *arrow.Date64Type:
-			finestUnit = exec.Max(finestUnit, arrow.Millisecond)
+			finestUnit = max(finestUnit, arrow.Millisecond)
 			isTimeUnit = true
 		case arrow.TemporalWithUnit:
-			finestUnit = exec.Max(finestUnit, dt.TimeUnit())
+			finestUnit = max(finestUnit, dt.TimeUnit())
 			isTimeUnit = true
 		default:
 			continue
@@ -332,6 +332,7 @@ func commonTemporal(vals ...arrow.DataType) arrow.DataType {
 		zone                 *string
 		loc                  *time.Location
 		sawDate32, sawDate64 bool
+		sawDuration, sawTime bool
 	)
 
 	for _, ty := range vals {
@@ -340,7 +341,7 @@ func commonTemporal(vals ...arrow.DataType) arrow.DataType {
 			// date32's unit is days, but the coarsest we have is seconds
 			sawDate32 = true
 		case arrow.DATE64:
-			finestUnit = exec.Max(finestUnit, arrow.Millisecond)
+			finestUnit = max(finestUnit, arrow.Millisecond)
 			sawDate64 = true
 		case arrow.TIMESTAMP:
 			ts := ty.(*arrow.TimestampType)
@@ -352,20 +353,47 @@ func commonTemporal(vals ...arrow.DataType) arrow.DataType {
 				loc = tz
 			}
 			zone = &ts.TimeZone
-			finestUnit = exec.Max(finestUnit, ts.Unit)
+			finestUnit = max(finestUnit, ts.Unit)
+		case arrow.TIME32, arrow.TIME64:
+			ts := ty.(arrow.TemporalWithUnit)
+			finestUnit = max(finestUnit, ts.TimeUnit())
+			sawTime = true
+		case arrow.DURATION:
+			ts := ty.(*arrow.DurationType)
+			finestUnit = max(finestUnit, ts.Unit)
+			sawDuration = true
 		default:
 			return nil
 		}
 	}
 
-	switch {
-	case zone != nil:
-		// at least one timestamp seen
-		return &arrow.TimestampType{Unit: finestUnit, TimeZone: *zone}
-	case sawDate64:
-		return arrow.FixedWidthTypes.Date64
-	case sawDate32:
-		return arrow.FixedWidthTypes.Date32
+	sawTimestampOrDate := zone != nil || sawDate32 || sawDate64
+
+	if sawTimestampOrDate && (sawTime || sawDuration) {
+		// no common type possible
+		return nil
+	}
+
+	if sawTimestampOrDate {
+		switch {
+		case zone != nil:
+			// at least one timestamp seen
+			return &arrow.TimestampType{Unit: finestUnit, TimeZone: *zone}
+		case sawDate64:
+			return arrow.FixedWidthTypes.Date64
+		case sawDate32:
+			return arrow.FixedWidthTypes.Date32
+		}
+	} else if sawTime {
+		switch finestUnit {
+		case arrow.Second, arrow.Millisecond:
+			return &arrow.Time32Type{Unit: finestUnit}
+		case arrow.Microsecond, arrow.Nanosecond:
+			return &arrow.Time64Type{Unit: finestUnit}
+		}
+	} else if sawDuration {
+		// we can only get here if we ONLY saw durations
+		return &arrow.DurationType{Unit: finestUnit}
 	}
 	return nil
 }

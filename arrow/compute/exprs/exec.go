@@ -32,9 +32,9 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
-	"github.com/substrait-io/substrait-go/v3/expr"
-	"github.com/substrait-io/substrait-go/v3/extensions"
-	"github.com/substrait-io/substrait-go/v3/types"
+	"github.com/substrait-io/substrait-go/v4/expr"
+	"github.com/substrait-io/substrait-go/v4/extensions"
+	"github.com/substrait-io/substrait-go/v4/types"
 )
 
 func makeExecBatch(ctx context.Context, schema *arrow.Schema, partial compute.Datum) (out compute.ExecBatch, err error) {
@@ -330,16 +330,17 @@ func literalToDatum(mem memory.Allocator, lit expr.Literal, ext ExtensionIDSet) 
 		s, err := scalar.NewStructScalarWithNames(fields, names)
 		return compute.NewDatum(s), err
 	case *expr.ProtoLiteral:
-		switch v := v.Value.(type) {
-		case *types.Decimal:
-			if len(v.Value) != arrow.Decimal128SizeBytes {
+		switch t := v.Type.(type) {
+		case *types.DecimalType:
+			byts := v.Value.([]byte)
+			if len(byts) != arrow.Decimal128SizeBytes {
 				return nil, fmt.Errorf("%w: decimal literal had %d bytes (expected %d)",
-					arrow.ErrInvalid, len(v.Value), arrow.Decimal128SizeBytes)
+					arrow.ErrInvalid, len(byts), arrow.Decimal128SizeBytes)
 			}
 
 			var val decimal128.Num
 			data := (*(*[arrow.Decimal128SizeBytes]byte)(unsafe.Pointer(&val)))[:]
-			copy(data, v.Value)
+			copy(data, byts)
 			if endian.IsBigEndian {
 				// reverse the bytes
 				for i := len(data)/2 - 1; i >= 0; i-- {
@@ -349,31 +350,35 @@ func literalToDatum(mem memory.Allocator, lit expr.Literal, ext ExtensionIDSet) 
 			}
 
 			return compute.NewDatum(scalar.NewDecimal128Scalar(val,
-				&arrow.Decimal128Type{Precision: v.Precision, Scale: v.Scale})), nil
-		case *types.UserDefinedLiteral: // not yet implemented
-		case *types.IntervalYearToMonth:
+				&arrow.Decimal128Type{Precision: t.Precision, Scale: t.Scale})), nil
+		case *types.UserDefinedType: // not yet implemented
+		case *types.IntervalYearToMonthType:
 			bldr := array.NewInt32Builder(memory.DefaultAllocator)
 			defer bldr.Release()
+
+			val := v.Value.(*types.IntervalYearToMonth)
 			typ := intervalYear()
-			bldr.Append(v.Years)
-			bldr.Append(v.Months)
+			bldr.Append(val.Years)
+			bldr.Append(val.Months)
 			arr := bldr.NewArray()
 			defer arr.Release()
 			return &compute.ScalarDatum{Value: scalar.NewExtensionScalar(
 				scalar.NewFixedSizeListScalar(arr), typ)}, nil
-		case *types.IntervalDayToSecond:
+		case *types.IntervalDayType:
 			bldr := array.NewInt32Builder(memory.DefaultAllocator)
 			defer bldr.Release()
+
+			val := v.Value.(*types.IntervalDayToSecond)
 			typ := intervalDay()
-			bldr.Append(v.Days)
-			bldr.Append(v.Seconds)
+			bldr.Append(val.Days)
+			bldr.Append(val.Seconds)
 			arr := bldr.NewArray()
 			defer arr.Release()
 			return &compute.ScalarDatum{Value: scalar.NewExtensionScalar(
 				scalar.NewFixedSizeListScalar(arr), typ)}, nil
-		case *types.VarChar:
+		case *types.VarCharType:
 			return compute.NewDatum(scalar.NewExtensionScalar(
-				scalar.NewStringScalar(v.Value), varChar(int32(v.Length)))), nil
+				scalar.NewStringScalar(v.Value.(string)), varChar(int32(t.Length)))), nil
 		}
 	}
 

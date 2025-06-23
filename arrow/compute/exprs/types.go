@@ -27,9 +27,9 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
-	"github.com/substrait-io/substrait-go/v3/expr"
-	"github.com/substrait-io/substrait-go/v3/extensions"
-	"github.com/substrait-io/substrait-go/v3/types"
+	"github.com/substrait-io/substrait-go/v4/expr"
+	"github.com/substrait-io/substrait-go/v4/extensions"
+	"github.com/substrait-io/substrait-go/v4/types"
 )
 
 const (
@@ -540,6 +540,10 @@ func FieldsFromSubstrait(typeList []types.Type, nextName func() string, ext Exte
 	return
 }
 
+func substraitToArrowTimeUnit(in types.TimePrecision) arrow.TimeUnit {
+	return arrow.TimeUnit(in / 3)
+}
+
 // ToSubstraitType converts an arrow data type to a Substrait Type. Since
 // arrow types don't have a nullable flag (it is in the arrow.Field) but
 // Substrait types do, the nullability must be passed in here.
@@ -691,6 +695,32 @@ func ToSubstraitType(dt arrow.DataType, nullable bool, ext ExtensionIDSet) (type
 			Key:         keyType,
 			Value:       valueType,
 		}, nil
+	case arrow.TIME32:
+		unit := dt.(*arrow.Time32Type).Unit
+		return &types.PrecisionTimeType{
+			Nullability: nullability,
+			Precision:   types.TimePrecision(unit * 3),
+		}, nil
+	case arrow.TIME64:
+		unit := dt.(*arrow.Time64Type).Unit
+		return &types.PrecisionTimeType{
+			Nullability: nullability,
+			Precision:   types.TimePrecision(unit * 3),
+		}, nil
+	case arrow.TIMESTAMP:
+		dt := dt.(*arrow.TimestampType)
+		if dt.TimeZone != "" {
+			return &types.PrecisionTimestampTzType{
+				PrecisionTimestampType: types.PrecisionTimestampType{
+					Nullability: nullability,
+					Precision:   types.TimePrecision(dt.Unit * 3),
+				},
+			}, nil
+		}
+		return &types.PrecisionTimestampType{
+			Nullability: nullability,
+			Precision:   types.TimePrecision(dt.Unit * 3),
+		}, nil
 	}
 
 	return nil, arrow.ErrNotImplemented
@@ -729,6 +759,43 @@ func FromSubstraitType(t types.Type, ext ExtensionIDSet) (arrow.DataType, bool, 
 		return arrow.BinaryTypes.String, nullable, nil
 	case *types.BinaryType:
 		return arrow.BinaryTypes.Binary, nullable, nil
+	case *types.PrecisionTimeType:
+		switch t.Precision {
+		case types.PrecisionSeconds:
+			return &arrow.Time32Type{Unit: arrow.Second}, nullable, nil
+		case types.PrecisionMilliSeconds:
+			return &arrow.Time32Type{Unit: arrow.Millisecond}, nullable, nil
+		case types.PrecisionMicroSeconds:
+			return &arrow.Time64Type{Unit: arrow.Microsecond}, nullable, nil
+		case types.PrecisionNanoSeconds:
+			return &arrow.Time64Type{Unit: arrow.Nanosecond}, nullable, nil
+		}
+	case *types.PrecisionTimestampType:
+		switch t.Precision {
+		case types.PrecisionSeconds:
+			return &arrow.TimestampType{Unit: arrow.Second}, nullable, nil
+		case types.PrecisionMilliSeconds:
+			return &arrow.TimestampType{Unit: arrow.Millisecond}, nullable, nil
+		case types.PrecisionMicroSeconds:
+			return &arrow.TimestampType{Unit: arrow.Microsecond}, nullable, nil
+		case types.PrecisionNanoSeconds:
+			return &arrow.TimestampType{Unit: arrow.Nanosecond}, nullable, nil
+		}
+	case *types.PrecisionTimestampTzType:
+		switch t.Precision {
+		case types.PrecisionSeconds:
+			return &arrow.TimestampType{Unit: arrow.Second, TimeZone: TimestampTzTimezone},
+				nullable, nil
+		case types.PrecisionMilliSeconds:
+			return &arrow.TimestampType{Unit: arrow.Millisecond, TimeZone: TimestampTzTimezone},
+				nullable, nil
+		case types.PrecisionMicroSeconds:
+			return &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: TimestampTzTimezone},
+				nullable, nil
+		case types.PrecisionNanoSeconds:
+			return &arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: TimestampTzTimezone},
+				nullable, nil
+		}
 	case *types.TimestampType:
 		return &arrow.TimestampType{Unit: arrow.Microsecond}, nullable, nil
 	case *types.TimestampTzType:
