@@ -81,6 +81,7 @@ func newConfig(opts ...Option) *config {
 		codec:              -1, // uncompressed
 		ensureNativeEndian: true,
 		compressNP:         1,
+		emitSchema:         true,
 	}
 
 	for _, opt := range opts {
