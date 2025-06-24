@@ -496,7 +496,7 @@ func startsExponent(s byte) bool {
 
 func parseDigitsRun(s string) (digits, rest string) {
 	pos := strings.IndexFunc(s, func(r rune) bool {
-		return !(r >= '0' && r <= '9')
+		return r < '0' || r > '9'
 	})
 	if pos == -1 {
 		return s, ""
