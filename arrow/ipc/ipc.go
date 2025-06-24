@@ -71,7 +71,7 @@ type config struct {
 	ensureNativeEndian bool
 	noAutoSchema       bool
 	emitDictDeltas     bool
-	emitSchema         bool
+	skipEmittingSchema bool
 	minSpaceSavings    *float64
 }
 
@@ -81,7 +81,6 @@ func newConfig(opts ...Option) *config {
 		codec:              -1, // uncompressed
 		ensureNativeEndian: true,
 		compressNP:         1,
-		emitSchema:         true,
 	}
 
 	for _, opt := range opts {
@@ -121,7 +120,7 @@ func WithSchema(schema *arrow.Schema) Option {
 // of type RecordBatch.
 func WithSchemalessOutput() Option {
 	return func(cfg *config) {
-		cfg.emitSchema = false
+		cfg.skipEmittingSchema = true
 	}
 }
 
