@@ -785,3 +785,74 @@ func TestAppendReset(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"key": "value"}`, string(out3))
 }
+
+func TestBuilderFromJSON(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		val   any
+	}{
+		{"null_value", `null`, nil},
+		{"boolean_true", `true`, true},
+		{"boolean_false", `false`, false},
+		{"int8", `42`, int8(42)},
+		{"int16", `1234`, int16(1234)},
+		{"int32", `123456`, int32(123456)},
+		{"int64", `1234567890123`, int64(1234567890123)},
+		{"decimal", `123.456789`, variant.DecimalValue[decimal.Decimal128]{
+			Scale: 6, Value: decimal128.FromU64(123456789),
+		}},
+		{"string", `"test string"`, "test string"},
+		{"float64", `1e+20`, float64(1e+20)},
+		{"array", `[1, 2, 3]`, []int{1, 2, 3}},
+		{"object", `{"key": "value"}`, map[string]any{"key": "value"}},
+		{"nested_object", `{"outer": {"inner": 42}}`, map[string]any{
+			"outer": map[string]any{"inner": 42},
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, err := variant.ParseJSON(tt.input, false)
+			require.NoError(t, err)
+
+			var b variant.Builder
+			require.NoError(t, b.Append(tt.val))
+			expected, err := b.Build()
+			require.NoError(t, err)
+
+			assert.Equal(t, expected.Type(), v.Type())
+			assert.Equal(t, expected.Bytes(), v.Bytes())
+			assert.Equal(t, expected.Metadata().Bytes(), v.Metadata().Bytes())
+		})
+	}
+}
+
+func TestBuilderJSONErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr string
+	}{
+		{"empty string", ``, "unexpected end of JSON input"},
+		{"invalid token", `a`, "failed to decode JSON token"},
+		{"missing array end", `[1, 2, 3`, "failed to decode JSON array end"},
+		{"invalid array", `[1, "foo", bar`, "failed to decode JSON token"},
+		{"missing elem", `[1,`, "unexpected end of JSON input"},
+		{"invalid elem", `[1, 5 }`, "expected end of JSON array, got }"},
+		{"extra delimiter", `]`, "unexpected JSON delimiter"},
+		{"invalid key", `{"key": "value", 42: "invalid"}`, "expected string key in JSON object"},
+		{"eof key", `{"key": 1,`, "unexpected end of JSON input"},
+		{"invalid token key", `{ab`, "failed to decode JSON key"},
+		{"invalid object", `{"key": foo}`, "failed to decode JSON token"},
+		{"invalid object end", `{"key": 123 ]`, "expected end of JSON object"},
+		{"missing object end", `{"key": 123`, "failed to decode JSON object end"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := variant.ParseJSON(tt.input, false)
+			assert.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
