@@ -17,6 +17,7 @@
 package extensions
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"reflect"
@@ -971,6 +972,41 @@ func (b *VariantBuilder) Append(v variant.Value) {
 	} else {
 		b.valueBldr.AppendNull()
 	}
+}
+
+func (b *VariantBuilder) Unmarshal(dec *json.Decoder) error {
+	for dec.More() {
+		if err := b.UnmarshalOne(dec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (b *VariantBuilder) UnmarshalJSON(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+
+	t, err := dec.Token()
+	if err != nil {
+		return err
+	}
+
+	if delim, ok := t.(json.Delim); !ok || delim != '[' {
+		return fmt.Errorf("variant builder must unpack from json array, found %s", delim)
+	}
+
+	return b.Unmarshal(dec)
+}
+
+func (b *VariantBuilder) UnmarshalOne(dec *json.Decoder) error {
+	v, err := variant.Unmarshal(dec, false)
+	if err != nil {
+		return fmt.Errorf("error unmarshalling variant value: %w", err)
+	}
+
+	b.Append(v)
+	return nil
 }
 
 func variantTypeFromArrow(dt arrow.DataType) variant.Type {

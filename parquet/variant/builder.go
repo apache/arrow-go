@@ -922,6 +922,31 @@ func ParseJSON(data string, allowDuplicateKeys bool) (Value, error) {
 	return b.Build()
 }
 
+func ParseJSONBytes(data []byte, allowDuplicateKeys bool) (Value, error) {
+	var b Builder
+	b.SetAllowDuplicates(allowDuplicateKeys)
+
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber() // to handle JSON numbers as json.Number
+
+	if err := b.buildJSON(dec); err != nil {
+		return Value{}, fmt.Errorf("failed to parse JSON: %w", err)
+	}
+
+	return b.Build()
+}
+
+func Unmarshal(dec *json.Decoder, allowDuplicateKeys bool) (Value, error) {
+	var b Builder
+	b.SetAllowDuplicates(allowDuplicateKeys)
+
+	if err := b.buildJSON(dec); err != nil {
+		return Value{}, fmt.Errorf("failed to unmarshal JSON: %w", err)
+	}
+
+	return b.Build()
+}
+
 func (b *Builder) buildJSON(dec *json.Decoder) error {
 	tok, err := dec.Token()
 	if err != nil {
@@ -982,6 +1007,8 @@ func (b *Builder) buildJSON(dec *json.Decoder) error {
 		default:
 			return fmt.Errorf("unexpected JSON delimiter: %v", v)
 		}
+	case float64:
+		return b.AppendFloat64(v)
 	case string:
 		return b.AppendString(v)
 	case bool:
