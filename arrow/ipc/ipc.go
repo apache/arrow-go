@@ -115,10 +115,10 @@ func WithSchema(schema *arrow.Schema) Option {
 	}
 }
 
-// WithSchemalessOutput tells the writer to skip writing the schema data
-// to the target output. Useful when the target wants only messages
-// of type RecordBatch.
-func WithSchemalessOutput() Option {
+// withSchemalessOutput tells the writer to skip writing the schema data
+// to the target output. Used internally to setup an ipc.Writer as
+// a RecordBatchWriter.
+func withSchemalessOutput() Option {
 	return func(cfg *config) {
 		cfg.skipEmittingSchema = true
 	}
