@@ -332,3 +332,28 @@ func TestGetPayloads(t *testing.T) {
 
 	assert.Truef(t, array.RecordEqual(rec, got), "expected: %s\ngot: %s", rec, got)
 }
+
+func TestWritePayload(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewRecordBuilder(mem, arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int8}}, nil))
+	bldr.Field(0).(*array.Int8Builder).AppendValues([]int8{1, 2, 3, 4, 5}, nil)
+	rec := bldr.NewRecord()
+	defer rec.Release()
+
+	var buf bytes.Buffer
+	p, err := GetRecordBatchPayload(rec, WithAllocator(mem))
+	defer p.Release()
+	require.NoError(t, err)
+
+	_, err = p.WritePayload(&buf)
+	require.NoError(t, err)
+
+	r := NewMessageReader(&buf, WithAllocator(mem))
+	defer r.Release()
+
+	msg, err := r.Message()
+	require.NoError(t, err)
+	require.True(t, msg.Type() == MessageRecordBatch)
+}
