@@ -115,15 +115,6 @@ func WithSchema(schema *arrow.Schema) Option {
 	}
 }
 
-// withSchemalessOutput tells the writer to skip writing the schema data
-// to the target output. Used internally to setup an ipc.Writer as
-// a RecordBatchWriter.
-func withSchemalessOutput() Option {
-	return func(cfg *config) {
-		cfg.skipEmittingSchema = true
-	}
-}
-
 // WithLZ4 tells the writer to use LZ4 Frame compression on the data
 // buffers before writing. Requires >= Arrow 1.0.0 to read/decompress
 func WithLZ4() Option {
