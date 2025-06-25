@@ -91,9 +91,8 @@ type Writer struct {
 
 	// map of the last written dictionaries by id
 	// so we can avoid writing the same dictionary over and over
-	lastWrittenDicts   map[int64]arrow.Array
-	emitDictDeltas     bool
-	skipEmittingSchema bool
+	lastWrittenDicts map[int64]arrow.Array
+	emitDictDeltas   bool
 }
 
 // NewWriterWithPayloadWriter constructs a writer with the provided payload writer
@@ -117,15 +116,14 @@ func NewWriterWithPayloadWriter(pw PayloadWriter, opts ...Option) *Writer {
 func NewWriter(w io.Writer, opts ...Option) *Writer {
 	cfg := newConfig(opts...)
 	return &Writer{
-		w:                  w,
-		mem:                cfg.alloc,
-		pw:                 &streamWriter{w: w},
-		schema:             cfg.schema,
-		codec:              cfg.codec,
-		emitDictDeltas:     cfg.emitDictDeltas,
-		skipEmittingSchema: cfg.skipEmittingSchema,
-		compressNP:         cfg.compressNP,
-		compressors:        make([]compressor, cfg.compressNP),
+		w:              w,
+		mem:            cfg.alloc,
+		pw:             &streamWriter{w: w},
+		schema:         cfg.schema,
+		codec:          cfg.codec,
+		emitDictDeltas: cfg.emitDictDeltas,
+		compressNP:     cfg.compressNP,
+		compressors:    make([]compressor, cfg.compressNP),
 	}
 }
 
@@ -277,11 +275,6 @@ func (w *Writer) start() error {
 
 	w.mapper.ImportSchema(w.schema)
 	w.lastWrittenDicts = make(map[int64]arrow.Array)
-
-	// skip writing schema payloads
-	if w.skipEmittingSchema {
-		return nil
-	}
 
 	// write out schema payloads
 	ps := payloadFromSchema(w.schema, w.mem, &w.mapper)

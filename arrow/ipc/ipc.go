@@ -71,7 +71,6 @@ type config struct {
 	ensureNativeEndian bool
 	noAutoSchema       bool
 	emitDictDeltas     bool
-	skipEmittingSchema bool
 	minSpaceSavings    *float64
 }
 
