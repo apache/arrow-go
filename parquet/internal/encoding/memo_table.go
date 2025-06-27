@@ -75,7 +75,13 @@ type NumericMemoTable interface {
 	WriteOutSubsetLE(start int, out []byte)
 }
 
-type TypedMemoTable[T hashing.MemoTypes] = hashing.TypedMemoTable[T]
+// using a generic type alias would require go1.24, so for now we'll just create
+// a new interface that we can later on replace as an alias.
+type TypedMemoTable[T hashing.MemoTypes] interface {
+	MemoTable
+	Exists(T) bool
+	InsertOrGet(val T) (idx int, found bool, err error)
+}
 
 // BinaryMemoTable is an extension of the MemoTable interface adding extra methods
 // for handling byte arrays/strings/fixed length byte arrays.
