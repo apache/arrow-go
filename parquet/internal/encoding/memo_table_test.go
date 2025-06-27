@@ -82,7 +82,7 @@ func (m *MemoTableTestSuite) TestInt64() {
 	)
 
 	// table := encoding.NewInt64MemoTable(nil)
-	table := hashing.NewInt64MemoTable(0)
+	table := hashing.NewMemoTable[int64](0)
 	m.Zero(table.Size())
 	m.assertGetNotFound(table, A)
 	m.assertGetNullNotFound(table)
@@ -151,7 +151,7 @@ func (m *MemoTableTestSuite) TestFloat64() {
 	)
 
 	// table := encoding.NewFloat64MemoTable(nil)
-	table := hashing.NewFloat64MemoTable(0)
+	table := hashing.NewMemoTable[float64](0)
 	m.Zero(table.Size())
 	m.assertGetNotFound(table, A)
 	m.assertGetNullNotFound(table)

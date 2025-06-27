@@ -365,31 +365,31 @@ func createIndexBuilder(mem memory.Allocator, dt arrow.FixedWidthDataType) (ret 
 func createMemoTable(mem memory.Allocator, dt arrow.DataType) (ret hashing.MemoTable, err error) {
 	switch dt.ID() {
 	case arrow.INT8:
-		ret = hashing.NewInt8MemoTable(0)
+		ret = hashing.NewMemoTable[int8](0)
 	case arrow.UINT8:
-		ret = hashing.NewUint8MemoTable(0)
+		ret = hashing.NewMemoTable[uint8](0)
 	case arrow.INT16:
-		ret = hashing.NewInt16MemoTable(0)
+		ret = hashing.NewMemoTable[int16](0)
 	case arrow.UINT16:
-		ret = hashing.NewUint16MemoTable(0)
+		ret = hashing.NewMemoTable[uint16](0)
 	case arrow.INT32:
-		ret = hashing.NewInt32MemoTable(0)
+		ret = hashing.NewMemoTable[int32](0)
 	case arrow.UINT32:
-		ret = hashing.NewUint32MemoTable(0)
+		ret = hashing.NewMemoTable[uint32](0)
 	case arrow.INT64:
-		ret = hashing.NewInt64MemoTable(0)
+		ret = hashing.NewMemoTable[int64](0)
 	case arrow.UINT64:
-		ret = hashing.NewUint64MemoTable(0)
+		ret = hashing.NewMemoTable[uint64](0)
 	case arrow.DURATION, arrow.TIMESTAMP, arrow.DATE64, arrow.TIME64:
-		ret = hashing.NewInt64MemoTable(0)
+		ret = hashing.NewMemoTable[int64](0)
 	case arrow.TIME32, arrow.DATE32, arrow.INTERVAL_MONTHS:
-		ret = hashing.NewInt32MemoTable(0)
+		ret = hashing.NewMemoTable[int32](0)
 	case arrow.FLOAT16:
-		ret = hashing.NewUint16MemoTable(0)
+		ret = hashing.NewMemoTable[uint16](0)
 	case arrow.FLOAT32:
-		ret = hashing.NewFloat32MemoTable(0)
+		ret = hashing.NewMemoTable[float32](0)
 	case arrow.FLOAT64:
-		ret = hashing.NewFloat64MemoTable(0)
+		ret = hashing.NewMemoTable[float64](0)
 	case arrow.BINARY, arrow.FIXED_SIZE_BINARY, arrow.DECIMAL32, arrow.DECIMAL64,
 		arrow.DECIMAL128, arrow.DECIMAL256, arrow.INTERVAL_DAY_TIME, arrow.INTERVAL_MONTH_DAY_NANO:
 		ret = hashing.NewBinaryMemoTable(0, 0, NewBinaryBuilder(mem, arrow.BinaryTypes.Binary))

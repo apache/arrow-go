@@ -75,6 +75,14 @@ type NumericMemoTable interface {
 	WriteOutSubsetLE(start int, out []byte)
 }
 
+// using a generic type alias would require go1.24, so for now we'll just create
+// a new interface that we can later on replace as an alias.
+type TypedMemoTable[T hashing.MemoTypes] interface {
+	MemoTable
+	Exists(T) bool
+	InsertOrGet(val T) (idx int, found bool, err error)
+}
+
 // BinaryMemoTable is an extension of the MemoTable interface adding extra methods
 // for handling byte arrays/strings/fixed length byte arrays.
 type BinaryMemoTable interface {
@@ -104,24 +112,28 @@ type BinaryMemoTable interface {
 	Release()
 }
 
+func NewDictionary[T int32 | int64 | float32 | float64]() TypedMemoTable[T] {
+	return hashing.NewMemoTable[T](0)
+}
+
 // NewInt32Dictionary returns a memotable interface for use with Int32 values only
 func NewInt32Dictionary() MemoTable {
-	return hashing.NewInt32MemoTable(0)
+	return hashing.NewMemoTable[int32](0)
 }
 
 // NewInt64Dictionary returns a memotable interface for use with Int64 values only
 func NewInt64Dictionary() MemoTable {
-	return hashing.NewInt64MemoTable(0)
+	return hashing.NewMemoTable[int64](0)
 }
 
 // NewFloat32Dictionary returns a memotable interface for use with Float32 values only
 func NewFloat32Dictionary() MemoTable {
-	return hashing.NewFloat32MemoTable(0)
+	return hashing.NewMemoTable[float32](0)
 }
 
 // NewFloat64Dictionary returns a memotable interface for use with Float64 values only
 func NewFloat64Dictionary() MemoTable {
-	return hashing.NewFloat64MemoTable(0)
+	return hashing.NewMemoTable[float64](0)
 }
 
 // NewBinaryDictionary returns a memotable interface for use with strings, byte slices,

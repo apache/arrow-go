@@ -222,7 +222,7 @@ func BenchmarkMemoTableFloat64(b *testing.B) {
 			b.ResetTimer()
 			b.Run("xxh3", func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
-					tbl := hashing.NewFloat64MemoTable(0)
+					tbl := hashing.NewMemoTable[float64](0)
 					for _, v := range values {
 						tbl.GetOrInsert(v)
 					}
@@ -258,7 +258,7 @@ func BenchmarkMemoTableInt32(b *testing.B) {
 			b.ResetTimer()
 			b.Run("xxh3", func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
-					tbl := hashing.NewInt32MemoTable(0)
+					tbl := hashing.NewMemoTable[int32](0)
 					for _, v := range values {
 						tbl.GetOrInsert(v)
 					}
