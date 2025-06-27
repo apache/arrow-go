@@ -83,6 +83,8 @@ type ArrayData interface {
 	Dictionary() ArrayData
 	// SizeInBytes returns the size of the ArrayData buffers and any children and/or dictionary in bytes.
 	SizeInBytes() uint64
+
+	Equal(ArrayData) bool
 }
 
 // Array represents an immutable sequence of values using the Arrow in-memory format.

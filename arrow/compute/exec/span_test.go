@@ -406,7 +406,8 @@ func TestArraySpan_MakeData(t *testing.T) {
 				}
 				got := a.MakeData()
 				want := tt.want(mem)
-				if !reflect.DeepEqual(got, want) {
+
+				if !got.Equal(want) {
 					t.Errorf("ArraySpan.MakeData() = %v, want %v", got, want)
 				}
 				want.Release()
