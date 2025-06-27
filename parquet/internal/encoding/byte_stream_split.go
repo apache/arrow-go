@@ -193,15 +193,13 @@ func validateByteStreamSplitPageData(typeLen, nvals int, data []byte) (int, erro
 	return len(data) / typeLen, nil
 }
 
-// ByteStreamSplitFloat32Encoder writes the underlying bytes of the Float32
-// into interlaced streams as defined by the BYTE_STREAM_SPLIT encoding
-type ByteStreamSplitFloat32Encoder struct {
-	PlainFloat32Encoder
+type byteStreamSplitEncoder[T int32 | int64 | float32 | float64] struct {
+	PlainEncoder[T]
 	flushBuffer *PooledBufferWriter
 }
 
-func (enc *ByteStreamSplitFloat32Encoder) FlushValues() (Buffer, error) {
-	in, err := enc.PlainFloat32Encoder.FlushValues()
+func (enc *byteStreamSplitEncoder[T]) FlushValues() (Buffer, error) {
+	in, err := enc.PlainEncoder.FlushValues()
 	if err != nil {
 		return nil, err
 	}
@@ -211,99 +209,38 @@ func (enc *ByteStreamSplitFloat32Encoder) FlushValues() (Buffer, error) {
 	}
 
 	enc.flushBuffer.buf.Resize(in.Len())
-	encodeByteStreamSplitWidth4(enc.flushBuffer.Bytes(), in.Bytes())
+	var z T
+	switch any(z).(type) {
+	case int32, float32:
+		encodeByteStreamSplitWidth4(enc.flushBuffer.Bytes(), in.Bytes())
+	case int64, float64:
+		encodeByteStreamSplitWidth8(enc.flushBuffer.Bytes(), in.Bytes())
+	}
+
 	return enc.flushBuffer.Finish(), nil
 }
 
-func (enc *ByteStreamSplitFloat32Encoder) Release() {
-	enc.PlainFloat32Encoder.Release()
-	releaseBufferToPool(enc.flushBuffer)
-	enc.flushBuffer = nil
-}
-
-// ByteStreamSplitFloat64Encoder writes the underlying bytes of the Float64
-// into interlaced streams as defined by the BYTE_STREAM_SPLIT encoding
-type ByteStreamSplitFloat64Encoder struct {
-	PlainFloat64Encoder
-	flushBuffer *PooledBufferWriter
-}
-
-func (enc *ByteStreamSplitFloat64Encoder) FlushValues() (Buffer, error) {
-	in, err := enc.PlainFloat64Encoder.FlushValues()
-	if err != nil {
-		return nil, err
-	}
-
-	if enc.flushBuffer == nil {
-		enc.flushBuffer = NewPooledBufferWriter(in.Len())
-	}
-
-	enc.flushBuffer.buf.Resize(in.Len())
-	encodeByteStreamSplitWidth8(enc.flushBuffer.Bytes(), in.Bytes())
-	return enc.flushBuffer.Finish(), nil
-}
-
-func (enc *ByteStreamSplitFloat64Encoder) Release() {
-	enc.PlainFloat64Encoder.Release()
+func (enc *byteStreamSplitEncoder[T]) Release() {
+	enc.PlainEncoder.Release()
 	releaseBufferToPool(enc.flushBuffer)
 	enc.flushBuffer = nil
 }
 
 // ByteStreamSplitInt32Encoder writes the underlying bytes of the Int32
 // into interlaced streams as defined by the BYTE_STREAM_SPLIT encoding
-type ByteStreamSplitInt32Encoder struct {
-	PlainInt32Encoder
-	flushBuffer *PooledBufferWriter
-}
-
-func (enc *ByteStreamSplitInt32Encoder) FlushValues() (Buffer, error) {
-	in, err := enc.PlainInt32Encoder.FlushValues()
-	if err != nil {
-		return nil, err
-	}
-
-	if enc.flushBuffer == nil {
-		enc.flushBuffer = NewPooledBufferWriter(in.Len())
-	}
-
-	enc.flushBuffer.buf.Resize(in.Len())
-	encodeByteStreamSplitWidth4(enc.flushBuffer.Bytes(), in.Bytes())
-	return enc.flushBuffer.Finish(), nil
-}
-
-func (enc *ByteStreamSplitInt32Encoder) Release() {
-	enc.PlainInt32Encoder.Release()
-	releaseBufferToPool(enc.flushBuffer)
-	enc.flushBuffer = nil
-}
+type ByteStreamSplitInt32Encoder = byteStreamSplitEncoder[int32]
 
 // ByteStreamSplitInt64Encoder writes the underlying bytes of the Int64
 // into interlaced streams as defined by the BYTE_STREAM_SPLIT encoding
-type ByteStreamSplitInt64Encoder struct {
-	PlainInt64Encoder
-	flushBuffer *PooledBufferWriter
-}
+type ByteStreamSplitInt64Encoder = byteStreamSplitEncoder[int64]
 
-func (enc *ByteStreamSplitInt64Encoder) FlushValues() (Buffer, error) {
-	in, err := enc.PlainInt64Encoder.FlushValues()
-	if err != nil {
-		return nil, err
-	}
+// ByteStreamSplitFloat32Encoder writes the underlying bytes of the Float32
+// into interlaced streams as defined by the BYTE_STREAM_SPLIT encoding
+type ByteStreamSplitFloat32Encoder = byteStreamSplitEncoder[float32]
 
-	if enc.flushBuffer == nil {
-		enc.flushBuffer = NewPooledBufferWriter(in.Len())
-	}
-
-	enc.flushBuffer.buf.Resize(in.Len())
-	encodeByteStreamSplitWidth8(enc.flushBuffer.Bytes(), in.Bytes())
-	return enc.flushBuffer.Finish(), nil
-}
-
-func (enc *ByteStreamSplitInt64Encoder) Release() {
-	enc.PlainInt64Encoder.Release()
-	releaseBufferToPool(enc.flushBuffer)
-	enc.flushBuffer = nil
-}
+// ByteStreamSplitFloat64Encoder writes the underlying bytes of the Float64
+// into interlaced streams as defined by the BYTE_STREAM_SPLIT encoding
+type ByteStreamSplitFloat64Encoder = byteStreamSplitEncoder[float64]
 
 // ByteStreamSplitFloat32Decoder is a decoder for BYTE_STREAM_SPLIT-encoded
 // bytes representing Float32 values
