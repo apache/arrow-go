@@ -32,6 +32,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/decimal"
+	"github.com/apache/arrow-go/v18/internal/json"
 	"github.com/google/uuid"
 	"golang.org/x/exp/constraints"
 )
@@ -905,4 +906,145 @@ func Encode[T variantPrimitiveType](v T, opt ...AppendOpt) ([]byte, error) {
 	}
 
 	return val.value, nil
+}
+
+func ParseJSON(data string, allowDuplicateKeys bool) (Value, error) {
+	var b Builder
+	b.SetAllowDuplicates(allowDuplicateKeys)
+
+	dec := json.NewDecoder(strings.NewReader(data))
+	dec.UseNumber() // to handle JSON numbers as json.Number
+
+	if err := b.buildJSON(dec); err != nil {
+		return Value{}, fmt.Errorf("failed to parse JSON: %w", err)
+	}
+
+	return b.Build()
+}
+
+func ParseJSONBytes(data []byte, allowDuplicateKeys bool) (Value, error) {
+	var b Builder
+	b.SetAllowDuplicates(allowDuplicateKeys)
+
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber() // to handle JSON numbers as json.Number
+
+	if err := b.buildJSON(dec); err != nil {
+		return Value{}, fmt.Errorf("failed to parse JSON: %w", err)
+	}
+
+	return b.Build()
+}
+
+func Unmarshal(dec *json.Decoder, allowDuplicateKeys bool) (Value, error) {
+	var b Builder
+	b.SetAllowDuplicates(allowDuplicateKeys)
+
+	if err := b.buildJSON(dec); err != nil {
+		return Value{}, fmt.Errorf("failed to unmarshal JSON: %w", err)
+	}
+
+	return b.Build()
+}
+
+func (b *Builder) buildJSON(dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return fmt.Errorf("unexpected end of JSON input")
+		}
+		return fmt.Errorf("failed to decode JSON token: %w", err)
+	}
+
+	switch v := tok.(type) {
+	case json.Delim:
+		switch v {
+		case '{':
+			start, fields := b.Offset(), make([]FieldEntry, 0)
+			for dec.More() {
+				key, err := dec.Token()
+				if err != nil {
+					if errors.Is(err, io.EOF) {
+						return fmt.Errorf("unexpected end of JSON input")
+					}
+					return fmt.Errorf("failed to decode JSON key: %w", err)
+				}
+
+				switch key := key.(type) {
+				case string:
+					fields = append(fields, b.NextField(start, key))
+					if err := b.buildJSON(dec); err != nil {
+						return err
+					}
+				default:
+					return fmt.Errorf("expected string key in JSON object, got %T", key)
+				}
+			}
+			tok, err = dec.Token()
+			if err != nil {
+				return fmt.Errorf("failed to decode JSON object end: %w", err)
+			}
+			if tok != json.Delim('}') {
+				return fmt.Errorf("expected end of JSON object, got %v", tok)
+			}
+			return b.FinishObject(start, fields)
+		case '[':
+			start, offsets := b.Offset(), make([]int, 0)
+			for dec.More() {
+				offsets = append(offsets, b.NextElement(start))
+				if err := b.buildJSON(dec); err != nil {
+					return err
+				}
+			}
+			tok, err = dec.Token()
+			if err != nil {
+				return fmt.Errorf("failed to decode JSON array end: %w", err)
+			}
+			if tok != json.Delim(']') {
+				return fmt.Errorf("expected end of JSON array, got %v", tok)
+			}
+			return b.FinishArray(start, offsets)
+		default:
+			return fmt.Errorf("unexpected JSON delimiter: %v", v)
+		}
+	case float64:
+		return b.AppendFloat64(v)
+	case string:
+		return b.AppendString(v)
+	case bool:
+		return b.AppendBool(v)
+	case nil:
+		return b.AppendNull()
+	case json.Number:
+		num, err := v.Int64()
+		if err == nil {
+			return b.AppendInt(num)
+		}
+
+		if !b.tryParseDecimal(v.String()) {
+			fnum, err := v.Float64()
+			if err == nil {
+				return b.AppendFloat64(fnum)
+			}
+			return fmt.Errorf("failed to parse JSON number: %w", err)
+		}
+
+		return nil
+	default:
+		return fmt.Errorf("unexpected JSON token type: %T", v)
+	}
+}
+
+func (b *Builder) tryParseDecimal(input string) bool {
+	prec, scale, err := decimal.PrecScaleFromString(input)
+	if err != nil {
+		return false
+	}
+
+	n, err := decimal.Decimal128FromString(input, prec, scale)
+	if err != nil {
+		return false
+	}
+
+	return b.AppendDecimal16(uint8(scale), n) == nil
 }
