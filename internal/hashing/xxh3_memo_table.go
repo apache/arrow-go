@@ -106,15 +106,6 @@ const (
 	loadFactor int64  = 2
 )
 
-// func max(a, b uint64) uint64 {
-// 	if a > b {
-// 		return a
-// 	}
-// 	return b
-// }
-
-// var isNan32Cmp = func(v float32) bool { return math.IsNaN(float64(v)) }
-
 // KeyNotFound is the constant returned by memo table functions when a key isn't found in the table
 const KeyNotFound = -1
 
