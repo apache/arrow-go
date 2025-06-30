@@ -16,19 +16,12 @@
 
 //go:build !s390x
 
-package utils
+package encoding
 
-import "golang.org/x/exp/constraints"
+func writeLE[T fixedLenTypes](enc *encoder, in []T) {
+	enc.append(getBytes(in))
+}
 
-var (
-	ToLEInt16   = func(x int16) int16 { return x }
-	ToLEUint16  = func(x uint16) uint16 { return x }
-	ToLEUint32  = func(x uint32) uint32 { return x }
-	ToLEUint64  = func(x uint64) uint64 { return x }
-	ToLEInt32   = func(x int32) int32 { return x }
-	ToLEInt64   = func(x int64) int64 { return x }
-	ToLEFloat32 = func(x float32) float32 { return x }
-	ToLEFloat64 = func(x float64) float64 { return x }
-)
-
-func ToLE[T constraints.Integer | constraints.Float](x T) T { return x }
+func copyFrom[T fixedLenTypes](dst []T, src []byte) {
+	copy(dst, fromBytes[T](src))
+}
