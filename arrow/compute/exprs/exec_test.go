@@ -27,14 +27,15 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/compute"
 	"github.com/apache/arrow-go/v18/arrow/compute/exprs"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/substrait-io/substrait-go/v3/expr"
-	"github.com/substrait-io/substrait-go/v3/types"
+	"github.com/substrait-io/substrait-go/v4/expr"
+	"github.com/substrait-io/substrait-go/v4/types"
 )
 
 var (
@@ -475,6 +476,148 @@ func TestGenerateMask(t *testing.T) {
 			defer mask.Release()
 
 			assertEqual(t, expectedMask, mask)
+		})
+	}
+}
+
+func Test_Types(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		name   string
+		schema func() *arrow.Schema
+		record func(rq *require.Assertions, schema *arrow.Schema) arrow.Record
+		val    func(rq *require.Assertions) expr.Literal
+	}{
+		{
+			name: "expect arrow.TIME64 (ns) ok",
+			schema: func() *arrow.Schema {
+				field := arrow.Field{
+					Name:     "col",
+					Type:     &arrow.Time64Type{Unit: arrow.Nanosecond},
+					Nullable: true,
+				}
+
+				return arrow.NewSchema([]arrow.Field{field}, nil)
+			},
+			record: func(rq *require.Assertions, schema *arrow.Schema) arrow.Record {
+				b := array.NewTime64Builder(memory.DefaultAllocator, &arrow.Time64Type{Unit: arrow.Nanosecond})
+				defer b.Release()
+
+				t1, err := arrow.Time64FromString("10:00:00.000000", arrow.Nanosecond)
+				rq.NoError(err, "Failed to create Time64 value")
+
+				b.AppendValues([]arrow.Time64{t1}, []bool{true})
+
+				return array.NewRecord(schema, []arrow.Array{b.NewArray()}, 1)
+			},
+			val: func(rq *require.Assertions) expr.Literal {
+				v, err := arrow.Time64FromString("11:00:00.000000", arrow.Nanosecond)
+				rq.NoError(err, "Failed to create Time64 value")
+
+				return expr.NewPrimitiveLiteral(types.Time(v), true)
+			},
+		},
+		{
+			name: "expect arrow.TIMESTAMP (ns) ok",
+			schema: func() *arrow.Schema {
+				field := arrow.Field{
+					Name:     "col",
+					Type:     &arrow.TimestampType{Unit: arrow.Nanosecond},
+					Nullable: true,
+				}
+
+				return arrow.NewSchema([]arrow.Field{field}, nil)
+			},
+			record: func(rq *require.Assertions, schema *arrow.Schema) arrow.Record {
+				b := array.NewTimestampBuilder(memory.DefaultAllocator, &arrow.TimestampType{Unit: arrow.Nanosecond})
+				defer b.Release()
+
+				t1, err := arrow.TimestampFromString("2021-01-01T10:00:00.000000Z", arrow.Nanosecond)
+				rq.NoError(err, "Failed to create Timestamp value")
+
+				b.AppendValues([]arrow.Timestamp{t1}, []bool{true})
+
+				return array.NewRecord(schema, []arrow.Array{b.NewArray()}, 1)
+			},
+			val: func(rq *require.Assertions) expr.Literal {
+				v, err := arrow.TimestampFromString("2021-01-01T11:00:00.000000Z", arrow.Microsecond)
+				rq.NoError(err, "Failed to create Timestamp value")
+
+				return expr.NewPrimitiveLiteral(types.Timestamp(v), true)
+			},
+		},
+		{
+			name: "expect arrow.DECIMAL128 ok",
+			schema: func() *arrow.Schema {
+				field := arrow.Field{
+					Name:     "col",
+					Type:     &arrow.Decimal128Type{Precision: 38, Scale: 10},
+					Nullable: true,
+				}
+
+				return arrow.NewSchema([]arrow.Field{field}, nil)
+			},
+			record: func(rq *require.Assertions, schema *arrow.Schema) arrow.Record {
+				b := array.NewDecimal128Builder(memory.DefaultAllocator, &arrow.Decimal128Type{Precision: 38, Scale: 10})
+				defer b.Release()
+
+				d, err := decimal.Decimal128FromFloat(123.456789, 38, 10)
+				rq.NoError(err, "Failed to create Decimal128 value")
+
+				b.Append(d)
+
+				return array.NewRecord(schema, []arrow.Array{b.NewArray()}, 1)
+			},
+			val: func(rq *require.Assertions) expr.Literal {
+				v, p, s, err := expr.DecimalStringToBytes("456.7890123456")
+				rq.NoError(err, "Failed to convert decimal string to bytes")
+
+				lit, err := expr.NewLiteral(&types.Decimal{
+					Value:     v[:16],
+					Precision: p,
+					Scale:     s,
+				}, true)
+				rq.NoError(err, "Failed to create Decimal128 literal")
+
+				return lit
+			},
+		},
+	}
+
+	for _, tc := range tt {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			rq := require.New(t)
+			schema := tc.schema()
+			record := tc.record(rq, schema)
+
+			extSet := exprs.GetExtensionIDSet(ctx)
+			builder := exprs.NewExprBuilder(extSet)
+
+			err := builder.SetInputSchema(schema)
+			rq.NoError(err, "Failed to set input schema")
+
+			b, err := builder.CallScalar("less", nil,
+				builder.FieldRef("col"),
+				builder.Literal(tc.val(rq)),
+			)
+
+			rq.NoError(err, "Failed to call scalar")
+
+			e, err := b.BuildExpr()
+			rq.NoError(err, "Failed to build expression")
+
+			ctx = exprs.WithExtensionIDSet(ctx, extSet)
+
+			dr := compute.NewDatum(record)
+			defer dr.Release()
+
+			_, err = exprs.ExecuteScalarExpression(ctx, schema, e, dr)
+			rq.NoError(err, "Failed to execute scalar expression")
 		})
 	}
 }
