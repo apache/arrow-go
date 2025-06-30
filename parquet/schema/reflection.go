@@ -376,9 +376,6 @@ func typeToNode(name string, typ reflect.Type, repType parquet.Repetition, info 
 		}
 		return Must(MapOf(name, key, value, repType, fieldID))
 	case reflect.Struct:
-		if typ == reflect.TypeOf(float16.Num(0)) {
-			return MustPrimitive(NewPrimitiveNodeLogical(name, repType, Float16LogicalType{}, parquet.Types.FixedLenByteArray, 2, fieldID))
-		}
 		// structs are Group nodes
 		fields := make(FieldList, 0)
 		for i := 0; i < typ.NumField(); i++ {
@@ -502,6 +499,10 @@ func typeToNode(name string, typ reflect.Type, repType parquet.Repetition, info 
 
 		return MustPrimitive(NewPrimitiveNodeLogical(name, repType, NewIntLogicalType(bitwidth, true), ptyp, 0, fieldID))
 	case reflect.Uint, reflect.Uint32, reflect.Uint8, reflect.Uint16, reflect.Uint64:
+		if typ == reflect.TypeOf(float16.Num(0)) {
+			return MustPrimitive(NewPrimitiveNodeLogical(name, repType, Float16LogicalType{}, parquet.Types.FixedLenByteArray, 2, fieldID))
+		}
+
 		// handle unsigned integer types and default to the corresponding logical type for it.
 		ptyp := parquet.Types.Int32
 		if typ.Bits() == 64 {
