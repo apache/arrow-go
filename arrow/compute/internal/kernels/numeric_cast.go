@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
+	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
 	"golang.org/x/exp/constraints"
@@ -506,7 +507,7 @@ func CastFloat64ToDecimal(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.E
 	return executor(ctx, batch, out)
 }
 
-func CastDecimalToFloating[OutT constraints.Float](ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+func CastDecimalToFloating[OutT constraints.Float | float16.Num](ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 	var (
 		executor exec.ArrayKernelExec
 	)
@@ -514,20 +515,34 @@ func CastDecimalToFloating[OutT constraints.Float](ctx *exec.KernelCtx, batch *e
 	switch dt := batch.Values[0].Array.Type.(type) {
 	case *arrow.Decimal128Type:
 		scale := dt.Scale
-		executor = ScalarUnaryNotNull(func(_ *exec.KernelCtx, v decimal128.Num, err *error) OutT {
-			return OutT(v.ToFloat64(scale))
-		})
+		switch out.Type.ID() {
+		case arrow.FLOAT16:
+			executor = ScalarUnaryNotNull(func(_ *exec.KernelCtx, v decimal128.Num, err *error) OutT {
+				return OutT(float16.New(v.ToFloat32(scale)))
+			})
+		default:
+			executor = ScalarUnaryNotNull(func(_ *exec.KernelCtx, v decimal128.Num, err *error) OutT {
+				return OutT(v.ToFloat64(scale))
+			})
+		}
 	case *arrow.Decimal256Type:
 		scale := dt.Scale
-		executor = ScalarUnaryNotNull(func(_ *exec.KernelCtx, v decimal256.Num, err *error) OutT {
-			return OutT(v.ToFloat64(scale))
-		})
+		switch out.Type.ID() {
+		case arrow.FLOAT16:
+			executor = ScalarUnaryNotNull(func(_ *exec.KernelCtx, v decimal128.Num, err *error) OutT {
+				return OutT(float16.New(v.ToFloat32(scale)))
+			})
+		default:
+			executor = ScalarUnaryNotNull(func(_ *exec.KernelCtx, v decimal256.Num, err *error) OutT {
+				return OutT(v.ToFloat64(scale))
+			})
+		}
 	}
 
 	return executor(ctx, batch, out)
 }
 
-func boolToNum[T numeric](_ *exec.KernelCtx, in []byte, out []T) error {
+func boolToNum[T numeric | float16.Num](_ *exec.KernelCtx, in []byte, out []T) error {
 	var (
 		zero T
 		one  = T(1)
@@ -543,13 +558,25 @@ func boolToNum[T numeric](_ *exec.KernelCtx, in []byte, out []T) error {
 	return nil
 }
 
-func checkFloatTrunc[InT constraints.Float, OutT arrow.IntType | arrow.UintType](in, out *exec.ArraySpan) error {
-	wasTrunc := func(out OutT, in InT) bool {
+func wasTrunc[InT constraints.Float | float16.Num, OutT arrow.IntType | arrow.UintType](out OutT, in InT) bool {
+	switch v := any(in).(type) {
+	case float16.Num:
+		return float16.New(float32(out)) != v
+	default:
 		return InT(out) != in
 	}
-	wasTruncMaybeNull := func(out OutT, in InT, isValid bool) bool {
+}
+
+func wasTruncMaybeNull[InT constraints.Float | float16.Num, OutT arrow.IntType | arrow.UintType](out OutT, in InT, isValid bool) bool {
+	switch v := any(in).(type) {
+	case float16.Num:
+		return isValid && (float16.New(float32(out)) != v)
+	default:
 		return isValid && (InT(out) != in)
 	}
+}
+
+func checkFloatTrunc[InT constraints.Float | float16.Num, OutT arrow.IntType | arrow.UintType](in, out *exec.ArraySpan) error {
 	getError := func(val InT) error {
 		return fmt.Errorf("%w: float value %f was truncated converting to %s",
 			arrow.ErrInvalid, val, out.Type)
@@ -598,7 +625,7 @@ func checkFloatTrunc[InT constraints.Float, OutT arrow.IntType | arrow.UintType]
 	return nil
 }
 
-func checkFloatToIntTruncImpl[T constraints.Float](in, out *exec.ArraySpan) error {
+func checkFloatToIntTruncImpl[T constraints.Float | float16.Num](in, out *exec.ArraySpan) error {
 	switch out.Type.ID() {
 	case arrow.INT8:
 		return checkFloatTrunc[T, int8](in, out)
@@ -623,6 +650,8 @@ func checkFloatToIntTruncImpl[T constraints.Float](in, out *exec.ArraySpan) erro
 
 func checkFloatToIntTrunc(in, out *exec.ArraySpan) error {
 	switch in.Type.ID() {
+	case arrow.FLOAT16:
+		return checkFloatToIntTruncImpl[float16.Num](in, out)
 	case arrow.FLOAT32:
 		return checkFloatToIntTruncImpl[float32](in, out)
 	case arrow.FLOAT64:
@@ -729,7 +758,7 @@ func getParseStringExec[OffsetT int32 | int64](out arrow.Type) exec.ArrayKernelE
 	panic("invalid type for getParseStringExec")
 }
 
-func addCommonNumberCasts[T numeric](outTy arrow.DataType, kernels []exec.ScalarKernel) []exec.ScalarKernel {
+func addCommonNumberCasts[T numeric | float16.Num](outTy arrow.DataType, kernels []exec.ScalarKernel) []exec.ScalarKernel {
 	kernels = append(kernels, GetCommonCastKernels(outTy.ID(), exec.NewOutputType(outTy))...)
 
 	kernels = append(kernels, exec.NewScalarKernel(
@@ -759,7 +788,7 @@ func GetCastToInteger[T arrow.IntType | arrow.UintType](outType arrow.DataType) 
 			CastIntToInt, nil))
 	}
 
-	for _, inTy := range floatingTypes {
+	for _, inTy := range append(floatingTypes, arrow.FixedWidthTypes.Float16) {
 		kernels = append(kernels, exec.NewScalarKernel(
 			[]exec.InputType{exec.NewExactInput(inTy)}, output,
 			CastFloatingToInteger, nil))
@@ -775,7 +804,7 @@ func GetCastToInteger[T arrow.IntType | arrow.UintType](outType arrow.DataType) 
 	return kernels
 }
 
-func GetCastToFloating[T constraints.Float](outType arrow.DataType) []exec.ScalarKernel {
+func GetCastToFloating[T constraints.Float | float16.Num](outType arrow.DataType) []exec.ScalarKernel {
 	kernels := make([]exec.ScalarKernel, 0)
 
 	output := exec.NewOutputType(outType)
@@ -785,7 +814,7 @@ func GetCastToFloating[T constraints.Float](outType arrow.DataType) []exec.Scala
 			CastIntegerToFloating, nil))
 	}
 
-	for _, inTy := range floatingTypes {
+	for _, inTy := range append(floatingTypes, arrow.FixedWidthTypes.Float16) {
 		kernels = append(kernels, exec.NewScalarKernel(
 			[]exec.InputType{exec.NewExactInput(inTy)}, output,
 			CastFloatingToFloating, nil))

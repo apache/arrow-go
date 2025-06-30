@@ -25,20 +25,20 @@ import (
 
 func TestFloat16(t *testing.T) {
 	cases := map[Num]float32{
-		{bits: 0x3c00}: 1,
-		{bits: 0x4000}: 2,
-		{bits: 0xc000}: -2,
-		{bits: 0x0000}: 0,
-		{bits: 0x5b8f}: 241.875,
-		{bits: 0xdb8f}: -241.875,
-		{bits: 0x48c8}: 9.5625,
-		{bits: 0xc8c8}: -9.5625,
+		0x3c00: 1,
+		0x4000: 2,
+		0xc000: -2,
+		0x0000: 0,
+		0x5b8f: 241.875,
+		0xdb8f: -241.875,
+		0x48c8: 9.5625,
+		0xc8c8: -9.5625,
 	}
 	for k, v := range cases {
 		f := k.Float32()
 		assert.Equal(t, v, f, "float32 values should be the same")
 		i := New(v)
-		assert.Equal(t, k.bits, i.bits, "float16 values should be the same")
+		assert.Equal(t, k, i, "float16 values should be the same")
 		assert.Equal(t, k.Uint16(), i.Uint16(), "float16 values should be the same")
 		assert.Equal(t, k.String(), fmt.Sprintf("%v", v), "string representation differ")
 	}
@@ -50,9 +50,9 @@ func TestAdd(t *testing.T) {
 		rhs  Num
 		want Num
 	}{
-		{Num{bits: 0x0000}, Num{bits: 0x0000}, Num{bits: 0x0000}}, // 0 + 0 = 0
-		{Num{bits: 0x3c00}, Num{bits: 0x4000}, Num{bits: 0x4200}}, // 1 + 2 = 3
-		{Num{bits: 0x4248}, Num{bits: 0x3245}, Num{bits: 0x42AC}}, // 3.141 + 0.196 = 3.336
+		{Num(0x0000), Num(0x0000), Num(0x0000)}, // 0 + 0 = 0
+		{Num(0x3c00), Num(0x4000), Num(0x4200)}, // 1 + 2 = 3
+		{Num(0x4248), Num(0x3245), Num(0x42AC)}, // 3.141 + 0.196 = 3.336
 	} {
 		t.Run("add", func(t *testing.T) {
 			n := tc.n.Add(tc.rhs)
@@ -69,9 +69,9 @@ func TestSub(t *testing.T) {
 		rhs  Num
 		want Num
 	}{
-		{Num{bits: 0x0000}, Num{bits: 0x0000}, Num{bits: 0x0000}}, // 0 - 0 = 0
-		{Num{bits: 0x3c00}, Num{bits: 0x4000}, Num{bits: 0xBC00}}, // 1 - 2 = -1
-		{Num{bits: 0x4248}, Num{bits: 0x3245}, Num{bits: 0x41E3}}, // 3.141 - 0.196 = 2.944
+		{Num(0x0000), Num(0x0000), Num(0x0000)}, // 0 - 0 = 0
+		{Num(0x3c00), Num(0x4000), Num(0xBC00)}, // 1 - 2 = -1
+		{Num(0x4248), Num(0x3245), Num(0x41E3)}, // 3.141 - 0.196 = 2.944
 	} {
 		t.Run("sub", func(t *testing.T) {
 			n := tc.n.Sub(tc.rhs)
@@ -88,9 +88,9 @@ func TestMul(t *testing.T) {
 		rhs  Num
 		want Num
 	}{
-		{Num{bits: 0x0000}, Num{bits: 0x0000}, Num{bits: 0x0000}}, // 0 * 0 = 0
-		{Num{bits: 0x3c00}, Num{bits: 0x4000}, Num{bits: 0x4000}}, // 1 * 2 = 2
-		{Num{bits: 0x4248}, Num{bits: 0x3245}, Num{bits: 0x38EC}}, // 3.141 * 0.196 = 0.6153
+		{Num(0x0000), Num(0x0000), Num(0x0000)}, // 0 * 0 = 0
+		{Num(0x3c00), Num(0x4000), Num(0x4000)}, // 1 * 2 = 2
+		{Num(0x4248), Num(0x3245), Num(0x38EC)}, // 3.141 * 0.196 = 0.6153
 	} {
 		t.Run("mul", func(t *testing.T) {
 			n := tc.n.Mul(tc.rhs)
@@ -107,9 +107,9 @@ func TestDiv(t *testing.T) {
 		rhs  Num
 		want Num
 	}{
-		{Num{bits: 0x0000}, Num{bits: 0x3c00}, Num{bits: 0x0000}}, // 0 / 1 = 0
-		{Num{bits: 0x3c00}, Num{bits: 0x4000}, Num{bits: 0x3800}}, // 1 / 2 = 0.5
-		{Num{bits: 0x4248}, Num{bits: 0x3245}, Num{bits: 0x4C01}}, // 3.141 * 0.196 = 16.02
+		{Num(0x0000), Num(0x3c00), Num(0x0000)}, // 0 / 1 = 0
+		{Num(0x3c00), Num(0x4000), Num(0x3800)}, // 1 / 2 = 0.5
+		{Num(0x4248), Num(0x3245), Num(0x4C01)}, // 3.141 * 0.196 = 16.02
 	} {
 		t.Run("div", func(t *testing.T) {
 			n := tc.n.Div(tc.rhs)
@@ -126,9 +126,9 @@ func TestGreater(t *testing.T) {
 		rhs  Num
 		want bool
 	}{
-		{Num{bits: 0x3c00}, Num{bits: 0x4000}, false}, // 1 > 2 = false
-		{Num{bits: 0x4900}, Num{bits: 0x4900}, false}, // 10 == 10 = false
-		{Num{bits: 0x4248}, Num{bits: 0x3245}, true},  // 3.141 > 0.196 = true
+		{Num(0x3c00), Num(0x4000), false}, // 1 > 2 = false
+		{Num(0x4900), Num(0x4900), false}, // 10 == 10 = false
+		{Num(0x4248), Num(0x3245), true},  // 3.141 > 0.196 = true
 	} {
 		t.Run("greater", func(t *testing.T) {
 			n := tc.n.Greater(tc.rhs)
@@ -145,9 +145,9 @@ func TestLess(t *testing.T) {
 		rhs  Num
 		want bool
 	}{
-		{Num{bits: 0x3c00}, Num{bits: 0x4000}, true},  // 1 < 2 = true
-		{Num{bits: 0x4900}, Num{bits: 0x4900}, false}, // 10 == 10 = false
-		{Num{bits: 0x4248}, Num{bits: 0x3245}, false}, // 3.141 < 0.196 = false
+		{Num(0x3c00), Num(0x4000), true},  // 1 < 2 = true
+		{Num(0x4900), Num(0x4900), false}, // 10 == 10 = false
+		{Num(0x4248), Num(0x3245), false}, // 3.141 < 0.196 = false
 	} {
 		t.Run("less", func(t *testing.T) {
 			n := tc.n.Less(tc.rhs)
@@ -164,9 +164,9 @@ func TestCmp(t *testing.T) {
 		rhs  Num
 		want int
 	}{
-		{Num{bits: 0x3c00}, Num{bits: 0x4000}, -1}, // cmp(1, 2) = -1
-		{Num{bits: 0x4900}, Num{bits: 0x4900}, 0},  // cmp(10, 10) = 0
-		{Num{bits: 0x4248}, Num{bits: 0x3245}, 1},  // cmp(3.141, 0.196) = 1
+		{Num(0x3c00), Num(0x4000), -1}, // cmp(1, 2) = -1
+		{Num(0x4900), Num(0x4900), 0},  // cmp(10, 10) = 0
+		{Num(0x4248), Num(0x3245), 1},  // cmp(3.141, 0.196) = 1
 	} {
 		t.Run("cmp", func(t *testing.T) {
 			n := tc.n.Cmp(tc.rhs)
@@ -183,8 +183,8 @@ func TestMax(t *testing.T) {
 		rhs  []Num
 		want Num
 	}{
-		{Num{bits: 0x3c00}, []Num{{bits: 0x4000}, {bits: 0x4580}, {bits: 0x3C00}, {bits: 0x4247}}, Num{bits: 0x4580}}, // max(2, 5.5, 1, 3.14) = 5.5
-		{Num{bits: 0x4248}, []Num{{bits: 0xC000}, {bits: 0xC580}, {bits: 0x3C00}, {bits: 0x4247}}, Num{bits: 0x4248}}, // max(-2, -5.5, 1, 3.14) = 3.14
+		{Num(0x3c00), []Num{Num(0x4000), Num(0x4580), Num(0x3C00), Num(0x4247)}, Num(0x4580)}, // max(2, 5.5, 1, 3.14) = 5.5
+		{Num(0x4248), []Num{Num(0xC000), Num(0xC580), Num(0x3C00), Num(0x4247)}, Num(0x4248)}, // max(-2, -5.5, 1, 3.14) = 3.14
 	} {
 		t.Run("max", func(t *testing.T) {
 			n := Max(tc.n, tc.rhs...)
@@ -201,8 +201,8 @@ func TestMin(t *testing.T) {
 		rhs  []Num
 		want Num
 	}{
-		{Num{bits: 0x3c00}, []Num{{bits: 0x4000}, {bits: 0x4580}, {bits: 0x3C00}, {bits: 0x4247}}, Num{bits: 0x3C00}}, // min(2, 5.5, 1, 3.14) = 1
-		{Num{bits: 0x4248}, []Num{{bits: 0x4000}, {bits: 0xC580}, {bits: 0xBC00}, {bits: 0x4247}}, Num{bits: 0xC580}}, // min(2, -5.5, -1, 3.14) = -5.5
+		{Num(0x3c00), []Num{Num(0x4000), Num(0x4580), Num(0x3C00), Num(0x4247)}, Num(0x3C00)}, // min(2, 5.5, 1, 3.14) = 1
+		{Num(0x4248), []Num{Num(0x4000), Num(0xC580), Num(0xBC00), Num(0x4247)}, Num(0xC580)}, // min(2, -5.5, -1, 3.14) = -5.5
 	} {
 		t.Run("min", func(t *testing.T) {
 			n := Min(tc.n, tc.rhs...)
@@ -218,9 +218,9 @@ func TestAbs(t *testing.T) {
 		n    Num
 		want Num
 	}{
-		{Num{bits: 0x4580}, Num{bits: 0x4580}}, // 5.5
-		{Num{bits: 0x0000}, Num{bits: 0x0000}}, // 0
-		{Num{bits: 0xC580}, Num{bits: 0x4580}}, // -5.5
+		{Num(0x4580), Num(0x4580)}, // 5.5
+		{Num(0x0000), Num(0x0000)}, // 0
+		{Num(0xC580), Num(0x4580)}, // -5.5
 	} {
 		t.Run("abs", func(t *testing.T) {
 			n := tc.n.Abs()
@@ -236,10 +236,10 @@ func TestSign(t *testing.T) {
 		n    Num
 		want int
 	}{
-		{Num{bits: 0x4580}, 1},  // 5.5
-		{Num{bits: 0x0000}, 0},  // 0
-		{Num{bits: 0x8000}, 0},  // -0
-		{Num{bits: 0xC580}, -1}, // -5.5
+		{Num(0x4580), 1},  // 5.5
+		{Num(0x0000), 0},  // 0
+		{Num(0x8000), 0},  // -0
+		{Num(0xC580), -1}, // -5.5
 	} {
 		t.Run("sign", func(t *testing.T) {
 			n := tc.n.Sign()
@@ -255,10 +255,10 @@ func TestSignbit(t *testing.T) {
 		n    Num
 		want bool
 	}{
-		{Num{bits: 0x4580}, false}, // 5.5
-		{Num{bits: 0x0000}, false}, // 0
-		{Num{bits: 0x8000}, true},  // -0
-		{Num{bits: 0xC580}, true},  // -5.5
+		{Num(0x4580), false}, // 5.5
+		{Num(0x0000), false}, // 0
+		{Num(0x8000), true},  // -0
+		{Num(0xC580), true},  // -5.5
 	} {
 		t.Run("signbit", func(t *testing.T) {
 			n := tc.n.Signbit()
@@ -278,10 +278,10 @@ func TestIsNaN(t *testing.T) {
 		{NaN().Negate(), true},
 		{Inf(), false},
 		{Inf().Negate(), false},
-		{Num{bits: 0x7c01}, true}, // nan
-		{Num{bits: 0xfc01}, true}, // -nan
-		{Num{bits: 0x7e00}, true}, // nan
-		{Num{bits: 0xfe00}, true}, // -nan
+		{Num(0x7c01), true}, // nan
+		{Num(0xfc01), true}, // -nan
+		{Num(0x7e00), true}, // nan
+		{Num(0xfe00), true}, // -nan
 	} {
 		t.Run("isnan", func(t *testing.T) {
 			n := tc.n.IsNaN()

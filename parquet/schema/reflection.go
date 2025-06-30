@@ -376,7 +376,7 @@ func typeToNode(name string, typ reflect.Type, repType parquet.Repetition, info 
 		}
 		return Must(MapOf(name, key, value, repType, fieldID))
 	case reflect.Struct:
-		if typ == reflect.TypeOf(float16.Num{}) {
+		if typ == reflect.TypeOf(float16.Num(0)) {
 			return MustPrimitive(NewPrimitiveNodeLogical(name, repType, Float16LogicalType{}, parquet.Types.FixedLenByteArray, 2, fieldID))
 		}
 		// structs are Group nodes
