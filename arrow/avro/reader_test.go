@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"testing"
@@ -162,7 +161,7 @@ func TestReader(t *testing.T) {
 			sp := filepath.Join(testdata.TestdataDir(), fullSchemaFileName)
 			avroSchemaBytes, err := os.ReadFile(sp)
 			if err != nil {
-				log.Fatal(err)
+				t.Fatal(err)
 			}
 			schema, err := hamba.ParseBytes(avroSchemaBytes)
 			if err != nil {

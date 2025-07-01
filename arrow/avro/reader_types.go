@@ -424,7 +424,11 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 		}
 	case *array.Decimal128Builder:
 		f.appendFunc = func(data interface{}) error {
-			err := appendDecimal128Data(bt, data)
+			decimalType, ok := field.Type.(arrow.DecimalType)
+			if !ok {
+				return nil
+			}
+			err := appendDecimal128Data(bt, data, decimalType)
 			if err != nil {
 				return err
 			}
@@ -645,7 +649,7 @@ func appendDate32Data(b *array.Date32Builder, data interface{}) {
 	}
 }
 
-func appendDecimal128Data(b *array.Decimal128Builder, data interface{}) error {
+func appendDecimal128Data(b *array.Decimal128Builder, data interface{}, typ arrow.DecimalType) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
@@ -674,6 +678,20 @@ func appendDecimal128Data(b *array.Decimal128Builder, data interface{}) error {
 		} else {
 			var bigIntData big.Int
 			b.Append(decimal128.FromBigInt(bigIntData.SetBytes(buf.Bytes())))
+		}
+	case *big.Rat:
+		scale := typ.GetScale()
+
+		scaled := new(big.Rat).Mul(dt, big.NewRat(1, 1))
+		scaleFactor := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(scale)), nil)
+		scaled.Mul(scaled, new(big.Rat).SetInt(scaleFactor))
+
+		intVal := scaled.Num()
+
+		if intVal.IsInt64() {
+			b.Append(decimal128.FromI64(intVal.Int64()))
+		} else {
+			b.Append(decimal128.FromBigInt(intVal))
 		}
 	}
 	return nil

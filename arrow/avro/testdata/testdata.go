@@ -18,6 +18,7 @@ const (
 	SchemaFileName     = "alltypes.avsc"
 	sampleAvroFileName = "alltypes.avro"
 	sampleJSONFileName = "alltypes.json"
+	decimalTypeScale   = 2
 )
 
 type ByteArray []byte
@@ -55,6 +56,18 @@ func (t MD5) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t[:])
 }
 
+type DecimalType []byte
+
+func (t DecimalType) MarshalJSON() ([]byte, error) {
+	val := 0
+	for _, b := range t {
+		val = (val << 8) | int(b)
+	}
+	s := fmt.Sprintf("%0*d", decimalTypeScale+1, val)
+	point := len(s) - decimalTypeScale
+	return json.Marshal(s[:point] + "." + s[point:])
+}
+
 type Example struct {
 	InheritNull       string            `avro:"inheritNull" json:"inheritNull"`
 	ExplicitNamespace ExplicitNamespace `avro:"explicitNamespace" json:"explicitNamespace"`
@@ -66,8 +79,8 @@ type Example struct {
 	IsEmergency       bool              `avro:"is_emergency" json:"is_emergency"`
 	RemoteIP          *ByteArray        `avro:"remote_ip" json:"remote_ip"`
 	Person            PersonData        `avro:"person" json:"person"`
-	// DecimalField      []byte            `avro:"decimalField" json:"decimalField"`
-	UUIDField string `avro:"uuidField" json:"uuidField"`
+	DecimalField      DecimalType       `avro:"decimalField" json:"decimalField"`
+	UUIDField         string            `avro:"uuidField" json:"uuidField"`
 	// TimeMillis        int32        `avro:"timemillis" json:"timemillis"`
 	// TimeMicros        int64        `avro:"timemicros" json:"timemicros"`
 	TimestampMillis TimestampMillis `avro:"timestampmillis" json:"timestampmillis"`
@@ -159,8 +172,8 @@ func sampleData() Example {
 			Mapfield:   MapField{"foo": 123, "bar": 456},
 			ArrayField: []string{"one", "two"},
 		},
-		// DecimalField:    []byte{0x07, 0xD0},
-		UUIDField: "123e4567-e89b-12d3-a456-426614174000",
+		DecimalField: DecimalType{0x00, 0x00, 0x00, 0x00, 0x00, 0x26, 0x94},
+		UUIDField:    "123e4567-e89b-12d3-a456-426614174000",
 		// TimeMillis:      int32(time.Now().Hour()*3600000 + time.Now().Minute()*60000),
 		// TimeMicros:      int64(time.Now().Hour()*3600000000 + time.Now().Minute()*60000000),
 		TimestampMillis: TimestampMillis(time.Now().UnixNano() / int64(time.Millisecond)),
