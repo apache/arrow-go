@@ -17,212 +17,29 @@
 package avro
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"log"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/avro/testdata"
 	hamba "github.com/hamba/avro/v2"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestEditSchemaStringEqual(t *testing.T) {
+const fullSchemaFileName = "fullschema.avsc"
+
+func TestReader(t *testing.T) {
 	tests := []struct {
-		avroSchema  string
-		arrowSchema []arrow.Field
+		avroSchemaFile string
+		arrowSchema    []arrow.Field
 	}{
 		{
-			avroSchema: `{
-				"fields": [
-					{
-						"name": "inheritNull",
-						"type": {
-							"name": "Simple",
-							"symbols": [
-								"a",
-								"b"
-							],
-							"type": "enum"
-						}
-					},
-					{
-						"name": "explicitNamespace",
-						"type": {
-							"name": "test",
-							"namespace": "org.hamba.avro",
-							"size": 12,
-							"type": "fixed"
-						}
-					},
-					{
-						"name": "fullName",
-						"type": {
-							"type": "record",
-							"name": "fullName_data",
-							"namespace": "ignored",
-							"doc": "A name attribute with a fullname, so the namespace attribute is ignored. The fullname is 'a.full.Name', and the namespace is 'a.full'.",
-							"fields": [{
-									"name": "inheritNamespace",
-									"type": {
-										"type": "enum",
-										"name": "Understanding",
-										"doc": "A simple name (attribute) and no namespace attribute: inherit the namespace of the enclosing type 'a.full.Name'. The fullname is 'a.full.Understanding'.",
-										"symbols": ["d", "e"]
-									}
-								}, {
-									"name": "md5",
-									"type": {
-                                            "name": "md5_data",
-                                            "type": "fixed",
-									        "size": 16,
-									        "namespace": "ignored"
-                                    }
-								}
-							]
-						}
-					},
-					{
-						"name": "id",
-						"type": "int"
-					},
-					{
-						"name": "bigId",
-						"type": "long"
-					},
-					{
-						"name": "temperature",
-						"type": [
-							"null",
-							"float"
-						]
-					},
-					{
-						"name": "fraction",
-						"type": [
-							"null",
-							"double"
-						]
-					},
-					{
-						"name": "is_emergency",
-						"type": "boolean"
-					},
-					{
-						"name": "remote_ip",
-						"type": [
-							"null",
-							"bytes"
-						]
-					},
-					{
-						"name": "person",
-						"type": {
-							"fields": [
-								{
-									"name": "lastname",
-									"type": "string"
-								},
-								{
-									"name": "address",
-									"type": {
-										"fields": [
-											{
-												"name": "streetaddress",
-												"type": "string"
-											},
-											{
-												"name": "city",
-												"type": "string"
-											}
-										],
-										"name": "AddressUSRecord",
-										"type": "record"
-									}
-								},
-								{
-									"name": "mapfield",
-									"type": {
-										"default": {
-										},
-										"type": "map",
-										"values": "long"
-									}
-								},
-								{
-									"name": "arrayField",
-									"type": {
-										"default": [
-										],
-										"items": "string",
-										"type": "array"
-									}
-								}
-							],
-							"name": "person_data",
-							"type": "record"
-						}
-					},
-					{
-						"name": "decimalField",
-						"type": {
-							"logicalType": "decimal",
-							"precision": 4,
-							"scale": 2,
-							"type": "bytes"
-						}
-					},
-					{
-						"logicalType": "uuid",
-						"name": "uuidField",
-						"type": "string"
-					},
-					{
-						"name": "timemillis",
-						"type": {
-							"type": "int",
-							"logicalType": "time-millis"
-						}
-					},
-					{
-						"name": "timemicros",
-						"type": {
-								"type": "long",
-								"logicalType": "time-micros"
-						}
-					},
-					{
-						"name": "timestampmillis",
-						"type": {
-							"type": "long",
-							"logicalType": "timestamp-millis"
-						}
-					},
-					{
-						"name": "timestampmicros",
-						"type": {
-							"type": "long",
-							"logicalType": "timestamp-micros"
-						}
-					},
-					{
-						"name": "duration",
-						"type": {
-							"name": "duration",
-							"namespace": "whyowhy",
-							"logicalType": "duration",
-							"size": 12,
-							"type": "fixed"
-						}
-					},
-					{
-						"name": "date",
-						"type": {
-							"logicalType": "date",
-							"type": "int"
-						}
-					}
-				],
-				"name": "Example",
-				"type": "record"
-			}`,
+			avroSchemaFile: "fullschema.avsc",
 			arrowSchema: []arrow.Field{
 				{
 					Name: "explicitNamespace",
@@ -336,10 +153,18 @@ func TestEditSchemaStringEqual(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		t.Run("", func(t *testing.T) {
+		tp := testdata.Generate()
+		defer os.RemoveAll(filepath.Dir(tp.Avro))
+
+		t.Run("ShouldParseSchemaWithEdits", func(t *testing.T) {
 			want := arrow.NewSchema(test.arrowSchema, nil)
 
-			schema, err := hamba.ParseBytes([]byte(test.avroSchema))
+			sp := filepath.Join(testdata.TestdataDir(), fullSchemaFileName)
+			avroSchemaBytes, err := os.ReadFile(sp)
+			if err != nil {
+				log.Fatal(err)
+			}
+			schema, err := hamba.ParseBytes(avroSchemaBytes)
 			if err != nil {
 				t.Fatalf("%v", err)
 			}
@@ -354,11 +179,45 @@ func TestEditSchemaStringEqual(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v", err)
 			}
-			if fmt.Sprintf("%+v", want.String()) != fmt.Sprintf("%+v", got.String()) {
+			assert.Equal(t, want.String(), got.String())
+			if !(fmt.Sprintf("%+v", want.String()) == fmt.Sprintf("%+v", got.String())) {
 				t.Fatalf("got=%v,\n want=%v", got.String(), want.String())
-			} else {
-				t.Logf("schema.String() comparison passed")
 			}
+		})
+
+		t.Run("ShouldLoadExpectedRecords", func(t *testing.T) {
+			b, err := os.ReadFile(tp.Avro)
+			if err != nil {
+				t.Error(err)
+			}
+			r := bytes.NewReader(b)
+
+			opts := []Option{WithChunk(-1)}
+			ar, err := NewOCFReader(r, opts...)
+			if err != nil {
+				t.Error(err)
+			}
+			defer ar.Close()
+
+			exists := ar.Next()
+
+			if ar.Err() != nil {
+				t.Error("failed to read next record: %w", ar.Err())
+			}
+			if !exists {
+				t.Error("no record exists")
+			}
+			a, err := ar.Record().MarshalJSON()
+			assert.NoError(t, err)
+			var avroParsed []map[string]any
+			json.Unmarshal(a, &avroParsed)
+
+			j, err := os.ReadFile(tp.Json)
+			assert.NoError(t, err)
+			var jsonParsed map[string]any
+			json.Unmarshal(j, &jsonParsed)
+
+			assert.Equal(t, jsonParsed, avroParsed[0])
 		})
 	}
 }

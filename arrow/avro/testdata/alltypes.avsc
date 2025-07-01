@@ -1,0 +1,108 @@
+{
+	"fields": [
+		{
+			"name": "inheritNull",
+			"type": {
+				"name": "Simple",
+				"symbols": [
+					"a",
+					"b"
+				],
+				"type": "enum"
+			}
+		},
+		{
+			"name": "id",
+			"type": "int"
+		},
+		{
+			"name": "bigId",
+			"type": "long"
+		},
+		{
+			"name": "temperature",
+			"type": [
+				"null",
+				"float"
+			]
+		},
+		{
+			"name": "fraction",
+			"type": [
+				"null",
+				"double"
+			]
+		},
+		{
+			"name": "is_emergency",
+			"type": "boolean"
+		},
+		{
+			"name": "remote_ip",
+			"type": [
+				"null",
+				"bytes"
+			]
+		},
+		{
+			"name": "person",
+			"type": {
+				"fields": [
+					{
+						"name": "lastname",
+						"type": "string"
+					},
+					{
+						"name": "address",
+						"type": {
+							"fields": [
+								{
+									"name": "streetaddress",
+									"type": "string"
+								},
+								{
+									"name": "city",
+									"type": "string"
+								}
+							],
+							"name": "AddressUSRecord",
+							"type": "record"
+						}
+					},
+					{
+						"name": "arrayField",
+						"type": {
+							"default": [
+							],
+							"items": "string",
+							"type": "array"
+						}
+					}
+				],
+				"name": "person_data",
+				"type": "record"
+			}
+		},
+		{
+			"logicalType": "uuid",
+			"name": "uuidField",
+			"type": "string"
+		},
+		{
+			"name": "timestampmillis",
+			"type": {
+				"type": "long",
+				"logicalType": "timestamp-millis"
+			}
+		},
+		{
+			"name": "timestampmicros",
+			"type": {
+				"type": "long",
+				"logicalType": "timestamp-micros"
+			}
+		}
+	],
+	"name": "Example",
+	"type": "record"
+}
