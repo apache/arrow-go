@@ -106,6 +106,15 @@
 						}
 					},
 					{
+						"name": "mapfield",
+						"type": {
+							"default": {
+							},
+							"type": "map",
+							"values": "long"
+						}
+					},
+					{
 						"name": "arrayField",
 						"type": {
 							"default": [

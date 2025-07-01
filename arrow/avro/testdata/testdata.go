@@ -66,7 +66,7 @@ type Example struct {
 	IsEmergency       bool              `avro:"is_emergency" json:"is_emergency"`
 	RemoteIP          *ByteArray        `avro:"remote_ip" json:"remote_ip"`
 	Person            PersonData        `avro:"person" json:"person"`
-	// DecimalField      []byte       `avro:"decimalField" json:"decimalField"`
+	// DecimalField      []byte            `avro:"decimalField" json:"decimalField"`
 	UUIDField string `avro:"uuidField" json:"uuidField"`
 	// TimeMillis        int32        `avro:"timemillis" json:"timemillis"`
 	// TimeMicros        int64        `avro:"timemicros" json:"timemicros"`
@@ -80,12 +80,21 @@ type FullNameData struct {
 	InheritNamespace string `avro:"inheritNamespace" json:"inheritNamespace"`
 	Md5              MD5    `avro:"md5" json:"md5"`
 }
+type MapField map[string]int64
+
+func (t MapField) MarshalJSON() ([]byte, error) {
+	arr := make([]map[string]any, 0, len(t))
+	for k, v := range t {
+		arr = append(arr, map[string]any{"key": k, "value": v})
+	}
+	return json.Marshal(arr)
+}
 
 type PersonData struct {
-	Lastname string          `avro:"lastname" json:"lastname"`
-	Address  AddressUSRecord `avro:"address" json:"address"`
-	// Mapfield   map[string]int64 `avro:"mapfield" json:"mapfield"`
-	ArrayField []string `avro:"arrayField" json:"arrayField"`
+	Lastname   string          `avro:"lastname" json:"lastname"`
+	Address    AddressUSRecord `avro:"address" json:"address"`
+	Mapfield   MapField        `avro:"mapfield" json:"mapfield"`
+	ArrayField []string        `avro:"arrayField" json:"arrayField"`
 }
 
 type AddressUSRecord struct {
@@ -147,7 +156,7 @@ func sampleData() Example {
 				Streetaddress: "123 Main St",
 				City:          "Metropolis",
 			},
-			// Mapfield:   map[string]int64{"foo": 123, "bar": 456},
+			Mapfield:   MapField{"foo": 123, "bar": 456},
 			ArrayField: []string{"one", "two"},
 		},
 		// DecimalField:    []byte{0x07, 0xD0},
