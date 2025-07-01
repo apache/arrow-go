@@ -375,3 +375,27 @@ func (t Type) ByteSize() int {
 type ColumnTypes interface {
 	bool | int32 | int64 | float32 | float64 | Int96 | ByteArray | FixedLenByteArray
 }
+
+func GetColumnType[T ColumnTypes]() Type {
+	var z T
+	switch any(z).(type) {
+	case bool:
+		return Types.Boolean
+	case int32:
+		return Types.Int32
+	case int64:
+		return Types.Int64
+	case float32:
+		return Types.Float
+	case float64:
+		return Types.Double
+	case Int96:
+		return Types.Int96
+	case ByteArray:
+		return Types.ByteArray
+	case FixedLenByteArray:
+		return Types.FixedLenByteArray
+	default:
+		panic("unknown column type")
+	}
+}

@@ -14,21 +14,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !s390x
+//go:build s390x
 
-package utils
+package encoding
 
-import "golang.org/x/exp/constraints"
+import (
+	"bytes"
+	"encoding/binary"
 
-var (
-	ToLEInt16   = func(x int16) int16 { return x }
-	ToLEUint16  = func(x uint16) uint16 { return x }
-	ToLEUint32  = func(x uint32) uint32 { return x }
-	ToLEUint64  = func(x uint64) uint64 { return x }
-	ToLEInt32   = func(x int32) int32 { return x }
-	ToLEInt64   = func(x int64) int64 { return x }
-	ToLEFloat32 = func(x float32) float32 { return x }
-	ToLEFloat64 = func(x float64) float64 { return x }
+	"github.com/apache/arrow-go/v18/parquet"
 )
 
-func ToLE[T constraints.Integer | constraints.Float](x T) T { return x }
+func writeLE[T fixedLenTypes](enc *encoder, in []T) {
+	var z T
+	switch any(z).(type) {
+	case parquet.Int96:
+		enc.append(getBytes(in))
+	default:
+		binary.Write(enc.sink, binary.LittleEndian, in)
+	}
+}
+
+func copyFrom[T fixedLenTypes](dst []T, src []byte) {
+	var z T
+	switch any(z).(type) {
+	case parquet.Int96:
+		copy(dst, fromBytes[T](src))
+	default:
+		r := bytes.NewReader(src)
+		binary.Read(r, binary.LittleEndian, dst)
+	}
+}

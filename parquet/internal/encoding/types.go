@@ -19,6 +19,7 @@ package encoding
 import (
 	"io"
 	"sync"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
@@ -468,4 +469,25 @@ func (b *BufferWriter) Seek(offset int64, whence int) (int64, error) {
 
 func (b *BufferWriter) Tell() int64 {
 	return int64(b.pos)
+}
+
+type fixedLenTypes interface {
+	int32 | int64 | parquet.Int96 | float32 | float64
+}
+
+func getBytes[T fixedLenTypes](in []T) []byte {
+	var z T
+	return unsafe.Slice((*byte)(unsafe.Pointer(unsafe.SliceData(in))),
+		len(in)*int(unsafe.Sizeof(z)))
+}
+
+func fromBytes[T fixedLenTypes](in []byte) []T {
+	var z T
+	return unsafe.Slice((*T)(unsafe.Pointer(unsafe.SliceData(in))),
+		len(in)/int(unsafe.Sizeof(z)))
+}
+
+func requiredBytes[T fixedLenTypes](n int) int {
+	var z T
+	return n * int(unsafe.Sizeof(z))
 }
