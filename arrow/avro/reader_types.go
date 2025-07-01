@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"reflect"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -733,6 +734,13 @@ func appendFixedSizeBinaryData(b *array.FixedSizeBinaryBuilder, data interface{}
 			b.AppendNull()
 		case []byte:
 			b.Append(v)
+		}
+	default:
+		v := reflect.ValueOf(data)
+		if v.Kind() == reflect.Array && v.Type().Elem().Kind() == reflect.Uint8 {
+			bytes := make([]byte, v.Len())
+			reflect.Copy(reflect.ValueOf(bytes), v)
+			b.Append(bytes)
 		}
 	}
 }

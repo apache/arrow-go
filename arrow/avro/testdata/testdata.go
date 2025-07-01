@@ -43,17 +43,29 @@ func (t TimestampMillis) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fmt.Sprintf("%sZ", strings.TrimRight(ts, "0.")))
 }
 
+type ExplicitNamespace [12]byte
+
+func (t ExplicitNamespace) MarshalJSON() ([]byte, error) {
+	return json.Marshal(t[:])
+}
+
+type MD5 [16]byte
+
+func (t MD5) MarshalJSON() ([]byte, error) {
+	return json.Marshal(t[:])
+}
+
 type Example struct {
-	InheritNull string `avro:"inheritNull" json:"inheritNull"`
-	// ExplicitNamespace [12]byte     `avro:"explicitNamespace" json:"explicitNamespace"`
-	// FullName          FullNameData `avro:"fullName" json:"fullName"`
-	ID          int32      `avro:"id" json:"id"`
-	BigID       int64      `avro:"bigId" json:"bigId"`
-	Temperature *float32   `avro:"temperature" json:"temperature"`
-	Fraction    *float64   `avro:"fraction" json:"fraction"`
-	IsEmergency bool       `avro:"is_emergency" json:"is_emergency"`
-	RemoteIP    *ByteArray `avro:"remote_ip" json:"remote_ip"`
-	Person      PersonData `avro:"person" json:"person"`
+	InheritNull       string            `avro:"inheritNull" json:"inheritNull"`
+	ExplicitNamespace ExplicitNamespace `avro:"explicitNamespace" json:"explicitNamespace"`
+	FullName          FullNameData      `avro:"fullName" json:"fullName"`
+	ID                int32             `avro:"id" json:"id"`
+	BigID             int64             `avro:"bigId" json:"bigId"`
+	Temperature       *float32          `avro:"temperature" json:"temperature"`
+	Fraction          *float64          `avro:"fraction" json:"fraction"`
+	IsEmergency       bool              `avro:"is_emergency" json:"is_emergency"`
+	RemoteIP          *ByteArray        `avro:"remote_ip" json:"remote_ip"`
+	Person            PersonData        `avro:"person" json:"person"`
 	// DecimalField      []byte       `avro:"decimalField" json:"decimalField"`
 	UUIDField string `avro:"uuidField" json:"uuidField"`
 	// TimeMillis        int32        `avro:"timemillis" json:"timemillis"`
@@ -65,8 +77,8 @@ type Example struct {
 }
 
 type FullNameData struct {
-	InheritNamespace string   `avro:"inheritNamespace" json:"inheritNamespace"`
-	Md5              [16]byte `avro:"md5" json:"md5"`
+	InheritNamespace string `avro:"inheritNamespace" json:"inheritNamespace"`
+	Md5              MD5    `avro:"md5" json:"md5"`
 }
 
 type PersonData struct {
@@ -117,12 +129,12 @@ func TestdataDir() string {
 
 func sampleData() Example {
 	return Example{
-		InheritNull: "a",
-		// ExplicitNamespace: [12]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
-		// FullName: FullNameData{
-		// 	InheritNamespace: "d",
-		// 	Md5:              [16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
-		// },
+		InheritNull:       "a",
+		ExplicitNamespace: ExplicitNamespace{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+		FullName: FullNameData{
+			InheritNamespace: "d",
+			Md5:              MD5{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+		},
 		ID:          42,
 		BigID:       42000000000,
 		Temperature: func() *float32 { v := float32(36.6); return &v }(),

@@ -12,6 +12,42 @@
 			}
 		},
 		{
+			"name": "explicitNamespace",
+			"type": {
+				"name": "test",
+				"namespace": "org.hamba.avro",
+				"size": 12,
+				"type": "fixed"
+			}
+		},
+		{
+			"name": "fullName",
+			"type": {
+				"type": "record",
+				"name": "fullName_data",
+				"namespace": "ignored",
+				"doc": "A name attribute with a fullname, so the namespace attribute is ignored. The fullname is 'a.full.Name', and the namespace is 'a.full'.",
+				"fields": [{
+						"name": "inheritNamespace",
+						"type": {
+							"type": "enum",
+							"name": "Understanding",
+							"doc": "A simple name (attribute) and no namespace attribute: inherit the namespace of the enclosing type 'a.full.Name'. The fullname is 'a.full.Understanding'.",
+							"symbols": ["d", "e"]
+						}
+					}, {
+						"name": "md5",
+						"type": {
+							"name": "md5_data",
+							"type": "fixed",
+							"size": 16,
+							"namespace": "ignored"
+						}
+					}
+				]
+			}
+		},
+		{
 			"name": "id",
 			"type": "int"
 		},
