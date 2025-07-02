@@ -59,7 +59,10 @@ func Example_writeReadParquet() {
 		parquet.WithCompression(compress.Codecs.Snappy),
 	)
 
-	// Create arrow writer props to store the schema in the parquet file
+	// WithStoreSchema embeds the original Arrow schema into the Parquet file metadata,
+	// allowing it to be accurately restored when reading. This ensures correct handling
+	// of advanced types like dictionaries and improves cross-language type consistency
+	// in libraries that support the "ARROW:schema" metadata.
 	arrowWriterProps := pqarrow.NewArrowWriterProperties(
 		pqarrow.WithStoreSchema(),
 	)
@@ -74,13 +77,9 @@ func Example_writeReadParquet() {
 	recordBuilder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
 
 	// Create a builder for each field
-	intFieldIdx := schema.FieldIndices("intField")[0]
-	stringFieldIdx := schema.FieldIndices("stringField")[0]
-	listFieldIdx := schema.FieldIndices("listField")[0]
-
-	intFieldBuilder := recordBuilder.Field(intFieldIdx).(*array.Int32Builder)
-	stringFieldBuilder := recordBuilder.Field(stringFieldIdx).(*array.StringBuilder)
-	listFieldBuilder := recordBuilder.Field(listFieldIdx).(*array.ListBuilder)
+	intFieldBuilder := recordBuilder.Field(0).(*array.Int32Builder)
+	stringFieldBuilder := recordBuilder.Field(1).(*array.StringBuilder)
+	listFieldBuilder := recordBuilder.Field(2).(*array.ListBuilder)
 
 	// Get the builder for the list's values (Float32)
 	fl32Builder := listFieldBuilder.ValueBuilder().(*array.Float32Builder)
@@ -107,7 +106,7 @@ func Example_writeReadParquet() {
 
 	// IMPORTANT: Close the writer to finalize the file
 	if err := writer.Close(); err != nil {
-		log.Printf("Failed to close parquet writer: %v", err)
+		log.Fatalf("Failed to close parquet writer: %v", err)
 	}
 
 	// --- Phase 2: Reading parquet file ---
@@ -145,7 +144,7 @@ func Example_writeReadParquet() {
 		colIndices[idx] = schema.FieldIndices(colNames[idx])[0]
 	}
 
-	// Get the current record from the reader
+	// Get a record reader from the file to iterate over
 	recordReader, err := arrowReader.GetRecordReader(context.TODO(), colIndices, nil)
 	if err != nil {
 		log.Fatalf("Failed to get record reader: %v", err)
@@ -155,12 +154,11 @@ func Example_writeReadParquet() {
 	for recordReader.Next() {
 		// Create a record
 		record := recordReader.Record()
-		record.Retain()
 
 		// Get columns
-		intCol := record.Column(colIndices[0]).(*array.Int32)
-		stringCol := record.Column(colIndices[1]).(*array.String)
-		listCol := record.Column(colIndices[2]).(*array.List)
+		intCol := record.Column(0).(*array.Int32)
+		stringCol := record.Column(1).(*array.String)
+		listCol := record.Column(2).(*array.List)
 		listValueCol := listCol.ListValues().(*array.Float32)
 
 		// Iterate over the rows within the current record
@@ -170,8 +168,6 @@ func Example_writeReadParquet() {
 
 			fmt.Printf("%d  %s  %v\n", intCol.Value(idx), stringCol.Value(idx), listValueCol.Float32Values()[start:end])
 		}
-
-		record.Release()
 	}
 
 	// Output:
