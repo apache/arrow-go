@@ -137,6 +137,15 @@
         "type": "bytes"
       }
     },
+		{
+      "name": "decimal256Field",
+      "type": {
+        "logicalType": "decimal",
+        "precision": 60,
+        "scale": 2,
+        "type": "bytes"
+      }
+    },
     {
       "logicalType": "uuid",
       "name": "uuidField",

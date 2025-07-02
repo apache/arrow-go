@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/big"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -59,11 +61,8 @@ func (t MD5) MarshalJSON() ([]byte, error) {
 type DecimalType []byte
 
 func (t DecimalType) MarshalJSON() ([]byte, error) {
-	val := 0
-	for _, b := range t {
-		val = (val << 8) | int(b)
-	}
-	s := fmt.Sprintf("%0*d", decimalTypeScale+1, val)
+	v := new(big.Int).SetBytes(t)
+	s := fmt.Sprintf("%0*s", decimalTypeScale+1, v.String())
 	point := len(s) - decimalTypeScale
 	return json.Marshal(s[:point] + "." + s[point:])
 }
@@ -79,7 +78,8 @@ type Example struct {
 	IsEmergency       bool              `avro:"is_emergency" json:"is_emergency"`
 	RemoteIP          *ByteArray        `avro:"remote_ip" json:"remote_ip"`
 	Person            PersonData        `avro:"person" json:"person"`
-	DecimalField      DecimalType       `avro:"decimalField" json:"decimalField"`
+	DecimalField      DecimalType    `avro:"decimalField" json:"decimalField"`
+	Decimal256Field   DecimalType    `avro:"decimal256Field" json:"decimal256Field"`
 	UUIDField         string            `avro:"uuidField" json:"uuidField"`
 	// TimeMillis        int32        `avro:"timemillis" json:"timemillis"`
 	// TimeMicros        int64        `avro:"timemicros" json:"timemicros"`
@@ -96,9 +96,15 @@ type FullNameData struct {
 type MapField map[string]int64
 
 func (t MapField) MarshalJSON() ([]byte, error) {
+	keys := make([]string, 0, len(t))
+	for k := range t {
+		keys = append(keys, k)
+	}
+
+	sort.Sort(sort.Reverse(sort.StringSlice(keys)))
 	arr := make([]map[string]any, 0, len(t))
-	for k, v := range t {
-		arr = append(arr, map[string]any{"key": k, "value": v})
+	for _, k := range keys {
+		arr = append(arr, map[string]any{"key": k, "value": t[k]})
 	}
 	return json.Marshal(arr)
 }
@@ -173,7 +179,12 @@ func sampleData() Example {
 			ArrayField: []string{"one", "two"},
 		},
 		DecimalField: DecimalType{0x00, 0x00, 0x00, 0x00, 0x00, 0x26, 0x94},
-		UUIDField:    "123e4567-e89b-12d3-a456-426614174000",
+		Decimal256Field: DecimalType{
+			0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
+			0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+			0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x01,
+		},
+		UUIDField: "123e4567-e89b-12d3-a456-426614174000",
 		// TimeMillis:      int32(time.Now().Hour()*3600000 + time.Now().Minute()*60000),
 		// TimeMicros:      int64(time.Now().Hour()*3600000000 + time.Now().Minute()*60000000),
 		TimestampMillis: TimestampMillis(time.Now().UnixNano() / int64(time.Millisecond)),

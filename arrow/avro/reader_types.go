@@ -424,11 +424,11 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 		}
 	case *array.Decimal128Builder:
 		f.appendFunc = func(data interface{}) error {
-			decimalType, ok := field.Type.(arrow.DecimalType)
+			typ, ok := field.Type.(arrow.DecimalType)
 			if !ok {
 				return nil
 			}
-			err := appendDecimal128Data(bt, data, decimalType)
+			err := appendDecimal128Data(bt, data, typ)
 			if err != nil {
 				return err
 			}
@@ -436,7 +436,11 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 		}
 	case *array.Decimal256Builder:
 		f.appendFunc = func(data interface{}) error {
-			err := appendDecimal256Data(bt, data)
+			typ, ok := field.Type.(arrow.DecimalType)
+			if !ok {
+				return nil
+			}
+			err := appendDecimal256Data(bt, data, typ)
 			if err != nil {
 				return err
 			}
@@ -680,24 +684,18 @@ func appendDecimal128Data(b *array.Decimal128Builder, data interface{}, typ arro
 			b.Append(decimal128.FromBigInt(bigIntData.SetBytes(buf.Bytes())))
 		}
 	case *big.Rat:
-		scale := typ.GetScale()
+		v := bigRatToBigInt(dt, typ)
 
-		scaled := new(big.Rat).Mul(dt, big.NewRat(1, 1))
-		scaleFactor := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(scale)), nil)
-		scaled.Mul(scaled, new(big.Rat).SetInt(scaleFactor))
-
-		intVal := scaled.Num()
-
-		if intVal.IsInt64() {
-			b.Append(decimal128.FromI64(intVal.Int64()))
+		if v.IsInt64() {
+			b.Append(decimal128.FromI64(v.Int64()))
 		} else {
-			b.Append(decimal128.FromBigInt(intVal))
+			b.Append(decimal128.FromBigInt(v))
 		}
 	}
 	return nil
 }
 
-func appendDecimal256Data(b *array.Decimal256Builder, data interface{}) error {
+func appendDecimal256Data(b *array.Decimal256Builder, data interface{}, typ arrow.DecimalType) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
@@ -709,8 +707,19 @@ func appendDecimal256Data(b *array.Decimal256Builder, data interface{}) error {
 		var bigIntData big.Int
 		buf := bytes.NewBuffer(dt["bytes"].([]byte))
 		b.Append(decimal256.FromBigInt(bigIntData.SetBytes(buf.Bytes())))
+	case *big.Rat:
+		b.Append(decimal256.FromBigInt(bigRatToBigInt(dt, typ)))
 	}
 	return nil
+}
+
+func bigRatToBigInt(dt *big.Rat, typ arrow.DecimalType) *big.Int {
+	scale := big.NewInt(int64(typ.GetScale()))
+	scaledNum := new(big.Int).Set(dt.Num())
+	scaleFactor := new(big.Int).Exp(big.NewInt(10), scale, nil)
+	scaledNum.Mul(scaledNum, scaleFactor)
+	scaledNum.Quo(scaledNum, dt.Denom())
+	return scaledNum
 }
 
 // Avro duration logical type annotates Avro fixed type of size 12, which stores three little-endian
