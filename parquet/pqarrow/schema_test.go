@@ -534,3 +534,107 @@ func TestConvertSchemaParquetVariant(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, pqschema.Equals(sc), pqschema.String(), sc.String())
 }
+
+func TestShreddedVariantSchema(t *testing.T) {
+	metaNoFieldID := arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"-1"})
+
+	s := arrow.StructOf(
+		arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Metadata: metaNoFieldID},
+		arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true, Metadata: metaNoFieldID},
+		arrow.Field{Name: "typed_value", Type: arrow.StructOf(
+			arrow.Field{Name: "tsmicro", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true, Metadata: metaNoFieldID},
+				arrow.Field{Name: "typed_value", Type: arrow.FixedWidthTypes.Timestamp_us, Nullable: true, Metadata: metaNoFieldID},
+			), Metadata: metaNoFieldID},
+			arrow.Field{Name: "strval", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true, Metadata: metaNoFieldID},
+				arrow.Field{Name: "typed_value", Type: arrow.BinaryTypes.String, Nullable: true, Metadata: metaNoFieldID},
+			), Metadata: metaNoFieldID},
+			arrow.Field{Name: "bool", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true, Metadata: metaNoFieldID},
+				arrow.Field{Name: "typed_value", Type: arrow.FixedWidthTypes.Boolean, Nullable: true, Metadata: metaNoFieldID},
+			), Metadata: metaNoFieldID},
+			arrow.Field{Name: "uuid", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true, Metadata: metaNoFieldID},
+				arrow.Field{Name: "typed_value", Type: extensions.NewUUIDType(), Nullable: true, Metadata: metaNoFieldID},
+			), Metadata: metaNoFieldID},
+		), Nullable: true, Metadata: metaNoFieldID})
+
+	vt, err := extensions.NewVariantType(s)
+	require.NoError(t, err)
+
+	arrSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "variant_col", Type: vt, Nullable: true, Metadata: metaNoFieldID},
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64, Nullable: false, Metadata: metaNoFieldID},
+	}, nil)
+
+	sc, err := pqarrow.ToParquet(arrSchema, nil, pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+
+	// the equivalent shredded variant parquet schema looks like this:
+	// repeated group field_id=-1 schema {
+	//   optional group field_id=-1 variant_col (Variant) {
+	//     required byte_array field_id=-1 metadata;
+	//     optional byte_array field_id=-1 value;
+	//     optional group field_id=-1 typed_value {
+	//       required group field_id=-1 tsmicro {
+	//         optional byte_array field_id=-1 value;
+	//         optional int64 field_id=-1 typed_value (Timestamp(isAdjustedToUTC=true, timeUnit=microseconds, is_from_converted_type=false, force_set_converted_type=true));
+	//       }
+	//       required group field_id=-1 strval {
+	//         optional byte_array field_id=-1 value;
+	//         optional byte_array field_id=-1 typed_value (String);
+	//       }
+	//       required group field_id=-1 bool {
+	//         optional byte_array field_id=-1 value;
+	//         optional boolean field_id=-1 typed_value;
+	//       }
+	//       required group field_id=-1 uuid {
+	//         optional byte_array field_id=-1 value;
+	//         optional fixed_len_byte_array field_id=-1 typed_value (UUID);
+	//       }
+	//     }
+	//   }
+	//   required int64 field_id=-1 id (Int(bitWidth=64, isSigned=true));
+	// }
+
+	expected := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema",
+		parquet.Repetitions.Repeated, schema.FieldList{
+			schema.Must(schema.NewGroupNodeLogical("variant_col", parquet.Repetitions.Optional, schema.FieldList{
+				schema.MustPrimitive(schema.NewPrimitiveNode("metadata", parquet.Repetitions.Required, parquet.Types.ByteArray, -1, -1)),
+				schema.MustPrimitive(schema.NewPrimitiveNode("value", parquet.Repetitions.Optional, parquet.Types.ByteArray, -1, -1)),
+				schema.MustGroup(schema.NewGroupNode("typed_value", parquet.Repetitions.Optional, schema.FieldList{
+					schema.MustGroup(schema.NewGroupNode("tsmicro", parquet.Repetitions.Required, schema.FieldList{
+						schema.MustPrimitive(schema.NewPrimitiveNode("value", parquet.Repetitions.Optional, parquet.Types.ByteArray, -1, -1)),
+						schema.MustPrimitive(schema.NewPrimitiveNodeLogical("typed_value", parquet.Repetitions.Optional, schema.NewTimestampLogicalTypeWithOpts(
+							schema.WithTSTimeUnitType(schema.TimeUnitMicros), schema.WithTSIsAdjustedToUTC(), schema.WithTSForceConverted(),
+						), parquet.Types.Int64, -1, -1)),
+					}, -1)),
+					schema.MustGroup(schema.NewGroupNode("strval", parquet.Repetitions.Required, schema.FieldList{
+						schema.MustPrimitive(schema.NewPrimitiveNode("value", parquet.Repetitions.Optional, parquet.Types.ByteArray, -1, -1)),
+						schema.MustPrimitive(schema.NewPrimitiveNodeLogical("typed_value", parquet.Repetitions.Optional,
+							schema.StringLogicalType{}, parquet.Types.ByteArray, -1, -1)),
+					}, -1)),
+					schema.MustGroup(schema.NewGroupNode("bool", parquet.Repetitions.Required, schema.FieldList{
+						schema.MustPrimitive(schema.NewPrimitiveNode("value", parquet.Repetitions.Optional, parquet.Types.ByteArray, -1, -1)),
+						schema.MustPrimitive(schema.NewPrimitiveNode("typed_value", parquet.Repetitions.Optional,
+							parquet.Types.Boolean, -1, -1)),
+					}, -1)),
+					schema.MustGroup(schema.NewGroupNode("uuid", parquet.Repetitions.Required, schema.FieldList{
+						schema.MustPrimitive(schema.NewPrimitiveNode("value", parquet.Repetitions.Optional, parquet.Types.ByteArray, -1, -1)),
+						schema.MustPrimitive(schema.NewPrimitiveNodeLogical("typed_value", parquet.Repetitions.Optional,
+							schema.UUIDLogicalType{}, parquet.Types.FixedLenByteArray, 16, -1)),
+					}, -1)),
+				}, -1)),
+			}, schema.VariantLogicalType{}, -1)),
+			schema.MustPrimitive(schema.NewPrimitiveNodeLogical("id", parquet.Repetitions.Required,
+				schema.NewIntLogicalType(64, true), parquet.Types.Int64, -1, -1)),
+		}, -1)))
+
+	assert.True(t, sc.Equals(expected), "expected: %s\ngot: %s", expected, sc)
+
+	arrsc, err := pqarrow.FromParquet(sc, nil, metadata.KeyValueMetadata{})
+	require.NoError(t, err)
+
+	assert.True(t, arrSchema.Equal(arrsc), "expected: %s\ngot: %s", arrSchema, arrsc)
+}
