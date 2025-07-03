@@ -27,10 +27,12 @@ import (
 // stored on 16 bits.
 //
 // See https://en.wikipedia.org/wiki/Half-precision_floating-point_format for more informations.
-type Num uint16
+type Num struct {
+	bits uint16
+}
 
 var (
-	MaxNum = Num(0b0111101111111111)
+	MaxNum = Num{bits: 0b0111101111111111}
 	MinNum = MaxNum.Negate()
 )
 
@@ -54,7 +56,7 @@ func New(f float32) Num {
 		res = 0
 		fc = 0
 	}
-	return Num((sn << 15) | uint16(res<<10) | fc)
+	return Num{bits: (sn << 15) | uint16(res<<10) | fc}
 }
 
 func (f Num) Format(s fmt.State, verb rune) {
@@ -62,10 +64,10 @@ func (f Num) Format(s fmt.State, verb rune) {
 }
 
 func (f Num) Float32() float32 {
-	sn := uint32((f >> 15) & 0x1)
-	exp := (f >> 10) & 0x1f
+	sn := uint32((f.bits >> 15) & 0x1)
+	exp := (f.bits >> 10) & 0x1f
 	res := uint32(exp) + 127 - 15
-	fc := uint32(f & 0x3ff)
+	fc := uint32(f.bits & 0x3ff)
 	switch exp {
 	case 0:
 		res = 0
@@ -76,7 +78,7 @@ func (f Num) Float32() float32 {
 }
 
 func (n Num) Negate() Num {
-	return Num(n ^ 0x8000)
+	return Num{bits: n.bits ^ 0x8000}
 }
 
 func (n Num) Add(rhs Num) Num {
@@ -174,29 +176,29 @@ func (n Num) Sign() int {
 	return 1
 }
 
-func (n Num) Signbit() bool { return (n & 0x8000) != 0 }
+func (n Num) Signbit() bool { return (n.bits & 0x8000) != 0 }
 
-func (n Num) IsNaN() bool { return (n & 0x7fff) > 0x7c00 }
+func (n Num) IsNaN() bool { return (n.bits & 0x7fff) > 0x7c00 }
 
-func (n Num) IsInf() bool { return (n & 0x7c00) == 0x7c00 }
+func (n Num) IsInf() bool { return (n.bits & 0x7c00) == 0x7c00 }
 
-func (n Num) IsZero() bool { return (n & 0x7fff) == 0 }
+func (n Num) IsZero() bool { return (n.bits & 0x7fff) == 0 }
 
-func (f Num) Uint16() uint16 { return uint16(f) }
+func (f Num) Uint16() uint16 { return uint16(f.bits) }
 func (f Num) String() string { return strconv.FormatFloat(float64(f.Float32()), 'g', -1, 32) }
 
-func Inf() Num { return Num(0x7c00) }
+func Inf() Num { return Num{bits: 0x7c00} }
 
-func NaN() Num { return Num(0x7fff) }
+func NaN() Num { return Num{bits: 0x7fff} }
 
-func FromBits(src uint16) Num { return Num(src) }
+func FromBits(src uint16) Num { return Num{bits: src} }
 
 func FromLEBytes(src []byte) Num {
-	return Num(binary.LittleEndian.Uint16(src))
+	return Num{bits: binary.LittleEndian.Uint16(src)}
 }
 
 func (f Num) PutLEBytes(dst []byte) {
-	binary.LittleEndian.PutUint16(dst, uint16(f))
+	binary.LittleEndian.PutUint16(dst, f.bits)
 }
 
 func (f Num) ToLEBytes() []byte {

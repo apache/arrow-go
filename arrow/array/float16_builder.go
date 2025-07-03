@@ -87,7 +87,7 @@ func (b *Float16Builder) AppendNulls(n int) {
 
 func (b *Float16Builder) AppendEmptyValue() {
 	b.Reserve(1)
-	b.UnsafeAppend(float16.Num(0))
+	b.UnsafeAppend(float16.Num{})
 }
 
 func (b *Float16Builder) AppendEmptyValues(n int) {
@@ -230,7 +230,7 @@ func (b *Float16Builder) UnmarshalOne(dec *json.Decoder) error {
 	default:
 		return &json.UnmarshalTypeError{
 			Value:  fmt.Sprint(t),
-			Type:   reflect.TypeOf(float16.Num(0)),
+			Type:   reflect.TypeOf(float16.Num{}),
 			Offset: dec.InputOffset(),
 		}
 	}

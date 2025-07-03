@@ -42,7 +42,7 @@ var typMap = map[reflect.Type]arrow.DataType{
 	reflect.TypeOf(arrow.Date32(0)): arrow.FixedWidthTypes.Date32,
 	reflect.TypeOf(arrow.Date64(0)): arrow.FixedWidthTypes.Date64,
 	reflect.TypeOf(true):            arrow.FixedWidthTypes.Boolean,
-	reflect.TypeOf(float16.Num(0)):  arrow.FixedWidthTypes.Float16,
+	reflect.TypeOf(float16.Num{}):   arrow.FixedWidthTypes.Float16,
 	reflect.TypeOf([]byte{}):        arrow.BinaryTypes.Binary,
 }
 
