@@ -651,6 +651,8 @@ func appendDate32Data(b *array.Date32Builder, data interface{}) {
 		case int32:
 			b.Append(arrow.Date32(v))
 		}
+	case time.Time:
+		b.Append(arrow.Date32FromTime(dt))
 	}
 }
 

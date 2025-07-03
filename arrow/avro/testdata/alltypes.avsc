@@ -188,6 +188,13 @@
         "size": 12,
         "type": "fixed"
       }
+    },
+    {
+        "name": "date",
+        "type": {
+            "logicalType": "date",
+            "type": "int"
+        }
     }
   ],
   "name": "Example",

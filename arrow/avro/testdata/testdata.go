@@ -94,6 +94,13 @@ func (t Duration) MarshalJSON() ([]byte, error) {
 	return json.Marshal(m)
 }
 
+type Date int32
+
+func (t Date) MarshalJSON() ([]byte, error) {
+	v := time.Unix(int64(t)*86400, 0).UTC().Format("2006-01-02")
+	return json.Marshal(v)
+}
+
 type Example struct {
 	InheritNull       string            `avro:"inheritNull" json:"inheritNull"`
 	ExplicitNamespace ExplicitNamespace `avro:"explicitNamespace" json:"explicitNamespace"`
@@ -113,7 +120,7 @@ type Example struct {
 	TimestampMillis   TimestampMillis   `avro:"timestampmillis" json:"timestampmillis"`
 	TimestampMicros   TimestampMicros   `avro:"timestampmicros" json:"timestampmicros"`
 	Duration          Duration          `avro:"duration" json:"duration"`
-	// Date              int32        `avro:"date" json:"date"`
+	Date              Date              `avro:"date" json:"date"`
 }
 
 type FullNameData struct {
@@ -211,7 +218,7 @@ func sampleData() Example {
 		TimestampMillis: TimestampMillis(time.Now().UnixNano() / int64(time.Millisecond)),
 		TimestampMicros: TimestampMicros(time.Now().UnixNano() / int64(time.Microsecond)),
 		Duration:        Duration{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
-		// Date:            int32(time.Now().Unix() / 86400),
+		Date:            Date(time.Now().Unix() / 86400),
 	}
 }
 
