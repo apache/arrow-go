@@ -178,6 +178,16 @@
         "type": "long",
         "logicalType": "timestamp-micros"
       }
+    },
+    {
+      "name": "duration",
+      "type": {
+        "name": "duration",
+        "namespace": "whyowhy",
+        "logicalType": "duration",
+        "size": 12,
+        "type": "fixed"
+      }
     }
   ],
   "name": "Example",

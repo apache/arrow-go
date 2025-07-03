@@ -31,6 +31,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	hamba "github.com/hamba/avro/v2"
 )
 
 type dataLoader struct {
@@ -746,6 +747,12 @@ func appendDurationData(b *array.MonthDayNanoIntervalBuilder, data interface{}) 
 			dur.Nanoseconds = int64(binary.LittleEndian.Uint32(dtb[8:]) * 1000000)
 			b.Append(*dur)
 		}
+	case hamba.LogicalDuration:
+		b.Append(arrow.MonthDayNanoInterval{
+			Months: int32(dt.Months),
+			Days: int32(dt.Days),
+			Nanoseconds: int64(dt.Milliseconds) * int64(time.Millisecond),
+		})
 	}
 }
 

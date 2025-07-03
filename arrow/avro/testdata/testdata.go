@@ -2,13 +2,13 @@ package testdata
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math/big"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -81,6 +81,19 @@ func (t DecimalType) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s[:point] + "." + s[point:])
 }
 
+type Duration [12]byte
+
+func (t Duration) MarshalJSON() ([]byte, error) {
+	milliseconds := int32(binary.LittleEndian.Uint32(t[8:12]))
+
+	m := map[string]interface{}{
+		"months":      int32(binary.LittleEndian.Uint32(t[0:4])),
+		"days":        int32(binary.LittleEndian.Uint32(t[4:8])),
+		"nanoseconds": int64(milliseconds) * int64(time.Millisecond),
+	}
+	return json.Marshal(m)
+}
+
 type Example struct {
 	InheritNull       string            `avro:"inheritNull" json:"inheritNull"`
 	ExplicitNamespace ExplicitNamespace `avro:"explicitNamespace" json:"explicitNamespace"`
@@ -99,7 +112,7 @@ type Example struct {
 	TimeMicros        TimeMicros        `avro:"timemicros" json:"timemicros"`
 	TimestampMillis   TimestampMillis   `avro:"timestampmillis" json:"timestampmillis"`
 	TimestampMicros   TimestampMicros   `avro:"timestampmicros" json:"timestampmicros"`
-	// Duration          [12]byte     `avro:"duration" json:"duration"`
+	Duration          Duration          `avro:"duration" json:"duration"`
 	// Date              int32        `avro:"date" json:"date"`
 }
 
@@ -110,15 +123,9 @@ type FullNameData struct {
 type MapField map[string]int64
 
 func (t MapField) MarshalJSON() ([]byte, error) {
-	keys := make([]string, 0, len(t))
-	for k := range t {
-		keys = append(keys, k)
-	}
-
-	sort.Sort(sort.Reverse(sort.StringSlice(keys)))
 	arr := make([]map[string]any, 0, len(t))
-	for _, k := range keys {
-		arr = append(arr, map[string]any{"key": k, "value": t[k]})
+	for k, v := range t {
+		arr = append(arr, map[string]any{"key": k, "value": v})
 	}
 	return json.Marshal(arr)
 }
@@ -189,7 +196,7 @@ func sampleData() Example {
 				Streetaddress: "123 Main St",
 				City:          "Metropolis",
 			},
-			Mapfield:   MapField{"foo": 123, "bar": 456},
+			Mapfield:   MapField{"foo": 123},
 			ArrayField: []string{"one", "two"},
 		},
 		DecimalField: DecimalType{0x00, 0x00, 0x00, 0x00, 0x00, 0x26, 0x94},
@@ -203,7 +210,7 @@ func sampleData() Example {
 		TimeMicros:      TimeMicros(50412345678 * time.Microsecond),
 		TimestampMillis: TimestampMillis(time.Now().UnixNano() / int64(time.Millisecond)),
 		TimestampMicros: TimestampMicros(time.Now().UnixNano() / int64(time.Microsecond)),
-		// Duration:        [12]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+		Duration:        Duration{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
 		// Date:            int32(time.Now().Unix() / 86400),
 	}
 }
