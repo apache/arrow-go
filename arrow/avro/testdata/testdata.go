@@ -46,6 +46,14 @@ func (t TimestampMillis) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fmt.Sprintf("%sZ", strings.TrimRight(ts, "0.")))
 }
 
+type TimeMillis int32
+
+func (t TimeMillis) MarshalJSON() ([]byte, error) {
+	tm := time.Unix(0, int64(t)*int64(time.Millisecond)).UTC()
+	s := fmt.Sprintf("%02d:%02d:%02d", tm.Hour(), tm.Minute(), tm.Second())
+	return json.Marshal(s)
+}
+
 type ExplicitNamespace [12]byte
 
 func (t ExplicitNamespace) MarshalJSON() ([]byte, error) {
@@ -81,7 +89,7 @@ type Example struct {
 	DecimalField      DecimalType    `avro:"decimalField" json:"decimalField"`
 	Decimal256Field   DecimalType    `avro:"decimal256Field" json:"decimal256Field"`
 	UUIDField         string            `avro:"uuidField" json:"uuidField"`
-	// TimeMillis        int32        `avro:"timemillis" json:"timemillis"`
+	TimeMillis        TimeMillis        `avro:"timemillis" json:"timemillis"`
 	// TimeMicros        int64        `avro:"timemicros" json:"timemicros"`
 	TimestampMillis TimestampMillis `avro:"timestampmillis" json:"timestampmillis"`
 	TimestampMicros TimestampMicros `avro:"timestampmicros" json:"timestampmicros"`
@@ -185,7 +193,7 @@ func sampleData() Example {
 			0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x01,
 		},
 		UUIDField: "123e4567-e89b-12d3-a456-426614174000",
-		// TimeMillis:      int32(time.Now().Hour()*3600000 + time.Now().Minute()*60000),
+		TimeMillis:      TimeMillis(time.Now().Hour()*3600000 + time.Now().Minute()*60000),
 		// TimeMicros:      int64(time.Now().Hour()*3600000000 + time.Now().Minute()*60000000),
 		TimestampMillis: TimestampMillis(time.Now().UnixNano() / int64(time.Millisecond)),
 		TimestampMicros: TimestampMicros(time.Now().UnixNano() / int64(time.Microsecond)),

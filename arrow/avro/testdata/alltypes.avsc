@@ -137,7 +137,7 @@
         "type": "bytes"
       }
     },
-		{
+    {
       "name": "decimal256Field",
       "type": {
         "logicalType": "decimal",
@@ -150,6 +150,13 @@
       "logicalType": "uuid",
       "name": "uuidField",
       "type": "string"
+    },
+    {
+      "name": "timemillis",
+      "type": {
+        "type": "int",
+        "logicalType": "time-millis"
+      }
     },
     {
       "name": "timestampmillis",
