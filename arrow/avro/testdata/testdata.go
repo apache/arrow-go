@@ -46,12 +46,18 @@ func (t TimestampMillis) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fmt.Sprintf("%sZ", strings.TrimRight(ts, "0.")))
 }
 
-type TimeMillis int32
+type TimeMillis time.Duration
 
 func (t TimeMillis) MarshalJSON() ([]byte, error) {
-	tm := time.Unix(0, int64(t)*int64(time.Millisecond)).UTC()
-	s := fmt.Sprintf("%02d:%02d:%02d", tm.Hour(), tm.Minute(), tm.Second())
-	return json.Marshal(s)
+	ts := time.Unix(0, int64(t)).UTC().Format("15:04:05.000")
+	return json.Marshal(strings.TrimRight(ts, "0."))
+}
+
+type TimeMicros time.Duration
+
+func (t TimeMicros) MarshalJSON() ([]byte, error) {
+	ts := time.Unix(0, int64(t)).UTC().Format("15:04:05.000000")
+	return json.Marshal(strings.TrimRight(ts, "0."))
 }
 
 type ExplicitNamespace [12]byte
@@ -86,13 +92,13 @@ type Example struct {
 	IsEmergency       bool              `avro:"is_emergency" json:"is_emergency"`
 	RemoteIP          *ByteArray        `avro:"remote_ip" json:"remote_ip"`
 	Person            PersonData        `avro:"person" json:"person"`
-	DecimalField      DecimalType    `avro:"decimalField" json:"decimalField"`
-	Decimal256Field   DecimalType    `avro:"decimal256Field" json:"decimal256Field"`
+	DecimalField      DecimalType       `avro:"decimalField" json:"decimalField"`
+	Decimal256Field   DecimalType       `avro:"decimal256Field" json:"decimal256Field"`
 	UUIDField         string            `avro:"uuidField" json:"uuidField"`
 	TimeMillis        TimeMillis        `avro:"timemillis" json:"timemillis"`
-	// TimeMicros        int64        `avro:"timemicros" json:"timemicros"`
-	TimestampMillis TimestampMillis `avro:"timestampmillis" json:"timestampmillis"`
-	TimestampMicros TimestampMicros `avro:"timestampmicros" json:"timestampmicros"`
+	TimeMicros        TimeMicros        `avro:"timemicros" json:"timemicros"`
+	TimestampMillis   TimestampMillis   `avro:"timestampmillis" json:"timestampmillis"`
+	TimestampMicros   TimestampMicros   `avro:"timestampmicros" json:"timestampmicros"`
 	// Duration          [12]byte     `avro:"duration" json:"duration"`
 	// Date              int32        `avro:"date" json:"date"`
 }
@@ -192,9 +198,9 @@ func sampleData() Example {
 			0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
 			0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x01,
 		},
-		UUIDField: "123e4567-e89b-12d3-a456-426614174000",
-		TimeMillis:      TimeMillis(time.Now().Hour()*3600000 + time.Now().Minute()*60000),
-		// TimeMicros:      int64(time.Now().Hour()*3600000000 + time.Now().Minute()*60000000),
+		UUIDField:       "123e4567-e89b-12d3-a456-426614174000",
+		TimeMillis:      TimeMillis(50412345 * time.Millisecond),
+		TimeMicros:      TimeMicros(50412345678 * time.Microsecond),
 		TimestampMillis: TimestampMillis(time.Now().UnixNano() / int64(time.Millisecond)),
 		TimestampMicros: TimestampMicros(time.Now().UnixNano() / int64(time.Microsecond)),
 		// Duration:        [12]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},

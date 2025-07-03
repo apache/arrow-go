@@ -876,8 +876,7 @@ func appendTime32Data(b *array.Time32Builder, data interface{}) {
 			b.Append(arrow.Time32(v))
 		}
 	case time.Duration:
-		v := int32(dt / time.Millisecond)
-		b.Append(arrow.Time32(v))
+		b.Append(arrow.Time32(dt.Milliseconds()))
 	}
 }
 
@@ -894,6 +893,8 @@ func appendTime64Data(b *array.Time64Builder, data interface{}) {
 		case int64:
 			b.Append(arrow.Time64(v))
 		}
+	case time.Duration:
+		b.Append(arrow.Time64(dt.Microseconds()))
 	}
 }
 

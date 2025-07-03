@@ -159,6 +159,13 @@
       }
     },
     {
+      "name": "timemicros",
+      "type": {
+          "type": "long",
+          "logicalType": "time-micros"
+      }
+    },
+    {
       "name": "timestampmillis",
       "type": {
         "type": "long",
