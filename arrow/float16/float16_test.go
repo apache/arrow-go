@@ -38,7 +38,7 @@ func TestFloat16(t *testing.T) {
 		f := k.Float32()
 		assert.Equal(t, v, f, "float32 values should be the same")
 		i := New(v)
-		assert.Equal(t, k.bits, i.bits, "float16 values should be the same")
+		assert.Equal(t, k, i, "float16 values should be the same")
 		assert.Equal(t, k.Uint16(), i.Uint16(), "float16 values should be the same")
 		assert.Equal(t, k.String(), fmt.Sprintf("%v", v), "string representation differ")
 	}
