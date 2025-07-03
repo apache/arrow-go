@@ -27,15 +27,20 @@
         "name": "fullName_data",
         "namespace": "ignored",
         "doc": "A name attribute with a fullname, so the namespace attribute is ignored. The fullname is 'a.full.Name', and the namespace is 'a.full'.",
-        "fields": [{
+        "fields": [
+          {
             "name": "inheritNamespace",
             "type": {
               "type": "enum",
               "name": "Understanding",
               "doc": "A simple name (attribute) and no namespace attribute: inherit the namespace of the enclosing type 'a.full.Name'. The fullname is 'a.full.Understanding'.",
-              "symbols": ["d", "e"]
+              "symbols": [
+                "d",
+                "e"
+              ]
             }
-          }, {
+          },
+          {
             "name": "md5",
             "type": {
               "name": "md5_data",
@@ -108,8 +113,7 @@
           {
             "name": "mapfield",
             "type": {
-              "default": {
-              },
+              "default": {},
               "type": "map",
               "values": "long"
             }
@@ -117,8 +121,7 @@
           {
             "name": "arrayField",
             "type": {
-              "default": [
-              ],
+              "default": [],
               "items": "string",
               "type": "array"
             }
@@ -161,8 +164,8 @@
     {
       "name": "timemicros",
       "type": {
-          "type": "long",
-          "logicalType": "time-micros"
+        "type": "long",
+        "logicalType": "time-micros"
       }
     },
     {
@@ -190,11 +193,11 @@
       }
     },
     {
-        "name": "date",
-        "type": {
-            "logicalType": "date",
-            "type": "int"
-        }
+      "name": "date",
+      "type": {
+        "logicalType": "date",
+        "type": "int"
+      }
     }
   ],
   "name": "Example",

@@ -30,15 +30,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const fullSchemaFileName = "fullschema.avsc"
-
 func TestReader(t *testing.T) {
 	tests := []struct {
-		avroSchemaFile string
 		arrowSchema    []arrow.Field
 	}{
 		{
-			avroSchemaFile: "fullschema.avsc",
 			arrowSchema: []arrow.Field{
 				{
 					Name: "explicitNamespace",
@@ -120,6 +116,10 @@ func TestReader(t *testing.T) {
 					Type: &arrow.Decimal128Type{Precision: 4, Scale: 2},
 				},
 				{
+					Name: "decimal256Field",
+					Type: &arrow.Decimal256Type{Precision: 60, Scale: 2},
+				},
+				{
 					Name: "uuidField",
 					Type: arrow.BinaryTypes.String,
 				},
@@ -158,14 +158,9 @@ func TestReader(t *testing.T) {
 		t.Run("ShouldParseSchemaWithEdits", func(t *testing.T) {
 			want := arrow.NewSchema(test.arrowSchema, nil)
 
-			sp := filepath.Join(testdata.TestdataDir(), fullSchemaFileName)
-			avroSchemaBytes, err := os.ReadFile(sp)
+			schema, err := testdata.AllTypesAvroSchema()
 			if err != nil {
 				t.Fatal(err)
-			}
-			schema, err := hamba.ParseBytes(avroSchemaBytes)
-			if err != nil {
-				t.Fatalf("%v", err)
 			}
 			r := new(OCFReader)
 			r.avroSchema = schema.String()

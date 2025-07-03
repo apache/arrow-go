@@ -183,6 +183,15 @@ func TestdataDir() string {
 	return ""
 }
 
+func AllTypesAvroSchema() (avro.Schema, error) {
+	sp := filepath.Join(TestdataDir(), SchemaFileName)
+	avroSchemaBytes, err := os.ReadFile(sp)
+	if err != nil {
+		return nil, err
+	}
+	return avro.ParseBytes(avroSchemaBytes)
+}
+
 func sampleData() Example {
 	return Example{
 		InheritNull:       "a",
