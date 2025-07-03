@@ -183,8 +183,8 @@ func TestMax(t *testing.T) {
 		rhs  []Num
 		want Num
 	}{
-		{Num{bits: 0x3c00}, []Num{Num{bits: 0x4000}, Num{bits: 0x4580}, Num{bits: 0x3C00}, Num{bits: 0x4247}}, Num{bits: 0x4580}}, // max(2, 5.5, 1, 3.14) = 5.5
-		{Num{bits: 0x4248}, []Num{Num{bits: 0xC000}, Num{bits: 0xC580}, Num{bits: 0x3C00}, Num{bits: 0x4247}}, Num{bits: 0x4248}}, // max(-2, -5.5, 1, 3.14) = 3.14
+		{Num{bits: 0x3c00}, []Num{{bits: 0x4000}, {bits: 0x4580}, {bits: 0x3C00}, {bits: 0x4247}}, Num{bits: 0x4580}}, // max(2, 5.5, 1, 3.14) = 5.5
+		{Num{bits: 0x4248}, []Num{{bits: 0xC000}, {bits: 0xC580}, {bits: 0x3C00}, {bits: 0x4247}}, Num{bits: 0x4248}}, // max(-2, -5.5, 1, 3.14) = 3.14
 	} {
 		t.Run("max", func(t *testing.T) {
 			n := Max(tc.n, tc.rhs...)
@@ -201,8 +201,8 @@ func TestMin(t *testing.T) {
 		rhs  []Num
 		want Num
 	}{
-		{Num{bits: 0x3c00}, []Num{Num{bits: 0x4000}, Num{bits: 0x4580}, Num{bits: 0x3C00}, Num{bits: 0x4247}}, Num{bits: 0x3C00}}, // min(2, 5.5, 1, 3.14) = 1
-		{Num{bits: 0x4248}, []Num{Num{bits: 0x4000}, Num{bits: 0xC580}, Num{bits: 0xBC00}, Num{bits: 0x4247}}, Num{bits: 0xC580}}, // min(2, -5.5, -1, 3.14) = -5.5
+		{Num{bits: 0x3c00}, []Num{{bits: 0x4000}, {bits: 0x4580}, {bits: 0x3C00}, {bits: 0x4247}}, Num{bits: 0x3C00}}, // min(2, 5.5, 1, 3.14) = 1
+		{Num{bits: 0x4248}, []Num{{bits: 0x4000}, {bits: 0xC580}, {bits: 0xBC00}, {bits: 0x4247}}, Num{bits: 0xC580}}, // min(2, -5.5, -1, 3.14) = -5.5
 	} {
 		t.Run("min", func(t *testing.T) {
 			n := Min(tc.n, tc.rhs...)
