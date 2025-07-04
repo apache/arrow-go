@@ -751,8 +751,8 @@ func appendDurationData(b *array.MonthDayNanoIntervalBuilder, data interface{}) 
 		}
 	case hamba.LogicalDuration:
 		b.Append(arrow.MonthDayNanoInterval{
-			Months: int32(dt.Months),
-			Days: int32(dt.Days),
+			Months:      int32(dt.Months),
+			Days:        int32(dt.Days),
 			Nanoseconds: int64(dt.Milliseconds) * int64(time.Millisecond),
 		})
 	}

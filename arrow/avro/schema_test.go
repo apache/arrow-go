@@ -26,7 +26,7 @@ import (
 
 func TestSchemaStringEqual(t *testing.T) {
 	tests := []struct {
-		arrowSchema    []arrow.Field
+		arrowSchema []arrow.Field
 	}{
 		{
 			arrowSchema: []arrow.Field{
