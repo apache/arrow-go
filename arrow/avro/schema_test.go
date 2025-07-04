@@ -21,208 +21,14 @@ import (
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
-	hamba "github.com/hamba/avro/v2"
+	"github.com/apache/arrow-go/v18/arrow/avro/testdata"
 )
 
 func TestSchemaStringEqual(t *testing.T) {
 	tests := []struct {
-		avroSchema  string
 		arrowSchema []arrow.Field
 	}{
 		{
-			avroSchema: `{
-				"fields": [
-					{
-						"name": "inheritNull",
-						"type": {
-							"name": "Simple",
-							"symbols": [
-								"a",
-								"b"
-							],
-							"type": "enum"
-						}
-					},
-					{
-						"name": "explicitNamespace",
-						"type": {
-							"name": "test",
-							"namespace": "org.hamba.avro",
-							"size": 12,
-							"type": "fixed"
-						}
-					},
-					{
-						"name": "fullName",
-						"type": {
-							"type": "record",
-							"name": "fullName_data",
-							"namespace": "ignored",
-							"doc": "A name attribute with a fullname, so the namespace attribute is ignored. The fullname is 'a.full.Name', and the namespace is 'a.full'.",
-							"fields": [{
-									"name": "inheritNamespace",
-									"type": {
-										"type": "enum",
-										"name": "Understanding",
-										"doc": "A simple name (attribute) and no namespace attribute: inherit the namespace of the enclosing type 'a.full.Name'. The fullname is 'a.full.Understanding'.",
-										"symbols": ["d", "e"]
-									}
-								}, {
-									"name": "md5",
-									"type": {
-                                            "name": "md5_data",
-                                            "type": "fixed",
-									        "size": 16,
-									        "namespace": "ignored"
-                                    }
-								}
-							]
-						}
-					},
-					{
-						"name": "id",
-						"type": "int"
-					},
-					{
-						"name": "bigId",
-						"type": "long"
-					},
-					{
-						"name": "temperature",
-						"type": [
-							"null",
-							"float"
-						]
-					},
-					{
-						"name": "fraction",
-						"type": [
-							"null",
-							"double"
-						]
-					},
-					{
-						"name": "is_emergency",
-						"type": "boolean"
-					},
-					{
-						"name": "remote_ip",
-						"type": [
-							"null",
-							"bytes"
-						]
-					},
-					{
-						"name": "person",
-						"type": {
-							"fields": [
-								{
-									"name": "lastname",
-									"type": "string"
-								},
-								{
-									"name": "address",
-									"type": {
-										"fields": [
-											{
-												"name": "streetaddress",
-												"type": "string"
-											},
-											{
-												"name": "city",
-												"type": "string"
-											}
-										],
-										"name": "AddressUSRecord",
-										"type": "record"
-									}
-								},
-								{
-									"name": "mapfield",
-									"type": {
-										"default": {
-										},
-										"type": "map",
-										"values": "long"
-									}
-								},
-								{
-									"name": "arrayField",
-									"type": {
-										"default": [
-										],
-										"items": "string",
-										"type": "array"
-									}
-								}
-							],
-							"name": "person_data",
-							"type": "record"
-						}
-					},
-					{
-						"name": "decimalField",
-						"type": {
-							"logicalType": "decimal",
-							"precision": 4,
-							"scale": 2,
-							"type": "bytes"
-						}
-					},
-					{
-						"logicalType": "uuid",
-						"name": "uuidField",
-						"type": "string"
-					},
-					{
-						"name": "timemillis",
-						"type": {
-							"type": "int",
-							"logicalType": "time-millis"
-						}
-					},
-					{
-						"name": "timemicros",
-						"type": {
-								"type": "long",
-								"logicalType": "time-micros"
-						}
-					},
-					{
-						"name": "timestampmillis",
-						"type": {
-							"type": "long",
-							"logicalType": "timestamp-millis"
-						}
-					},
-					{
-						"name": "timestampmicros",
-						"type": {
-							"type": "long",
-							"logicalType": "timestamp-micros"
-						}
-					},
-					{
-						"name": "duration",
-						"type": {
-							"name": "duration",
-							"namespace": "whyowhy",
-							"logicalType": "duration",
-							"size": 12,
-							"type": "fixed"
-						}
-					},
-					{
-						"name": "date",
-						"type": {
-							"logicalType": "date",
-							"type": "int"
-						}
-					}
-				],
-				"name": "Example",
-				"type": "record"
-			}`,
 			arrowSchema: []arrow.Field{
 				{
 					Name:     "inheritNull",
@@ -310,6 +116,10 @@ func TestSchemaStringEqual(t *testing.T) {
 					Type: &arrow.Decimal128Type{Precision: 4, Scale: 2},
 				},
 				{
+					Name: "decimal256Field",
+					Type: &arrow.Decimal256Type{Precision: 60, Scale: 2},
+				},
+				{
 					Name: "uuidField",
 					Type: arrow.BinaryTypes.String,
 				},
@@ -344,7 +154,8 @@ func TestSchemaStringEqual(t *testing.T) {
 	for _, test := range tests {
 		t.Run("", func(t *testing.T) {
 			want := arrow.NewSchema(test.arrowSchema, nil)
-			schema, err := hamba.ParseBytes([]byte(test.avroSchema))
+
+			schema, err := testdata.AllTypesAvroSchema()
 			if err != nil {
 				t.Fatalf("%v", err)
 			}
