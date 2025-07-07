@@ -574,7 +574,7 @@ func (c *CastSuite) TestToIntDowncastUnsafe() {
 }
 
 func (c *CastSuite) TestFloatingToInt() {
-	for _, from := range []arrow.DataType{arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Float64} {
+	for _, from := range []arrow.DataType{arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Float64, arrow.FixedWidthTypes.Float16} {
 		for _, to := range []arrow.DataType{arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int64} {
 			// float to int no truncation
 			c.checkCast(from, to, `[1.0, null, 0.0, -1.0, 5.0]`, `[1, null, 0, -1, 5]`)
@@ -587,6 +587,12 @@ func (c *CastSuite) TestFloatingToInt() {
 			opts.AllowFloatTruncate = true
 			c.checkCastOpts(from, to, `[1.5, 0.0, null, 0.5, -1.5, 5.5]`, `[1, 0, null, 0, -1, 5]`, *opts)
 		}
+	}
+}
+
+func (c *CastSuite) TestFloat16ToFloating() {
+	for _, to := range []arrow.DataType{arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Float64} {
+		c.checkCast(arrow.FixedWidthTypes.Float16, to, `[1.5, null, 0.0, -1.5, 5.5]`, `[1.5, null, 0.0, -1.5, 5.5]`)
 	}
 }
 

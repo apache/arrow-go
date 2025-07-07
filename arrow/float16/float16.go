@@ -18,6 +18,7 @@ package float16
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 	"strconv"
 )
@@ -56,6 +57,10 @@ func New(f float32) Num {
 		fc = 0
 	}
 	return Num{bits: (sn << 15) | uint16(res<<10) | fc}
+}
+
+func (f Num) Format(s fmt.State, verb rune) {
+	fmt.Fprintf(s, fmt.FormatString(s, verb), f.Float32())
 }
 
 func (f Num) Float32() float32 {
@@ -179,7 +184,7 @@ func (n Num) IsInf() bool { return (n.bits & 0x7c00) == 0x7c00 }
 
 func (n Num) IsZero() bool { return (n.bits & 0x7fff) == 0 }
 
-func (f Num) Uint16() uint16 { return f.bits }
+func (f Num) Uint16() uint16 { return uint16(f.bits) }
 func (f Num) String() string { return strconv.FormatFloat(float64(f.Float32()), 'g', -1, 32) }
 
 func Inf() Num { return Num{bits: 0x7c00} }

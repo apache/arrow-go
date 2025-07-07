@@ -695,7 +695,11 @@ func castNumberToNumberUnsafe(in, out *exec.ArraySpan) {
 
 	inputOffset := in.Type.(arrow.FixedWidthDataType).Bytes() * int(in.Offset)
 	outputOffset := out.Type.(arrow.FixedWidthDataType).Bytes() * int(out.Offset)
-	castNumericUnsafe(in.Type.ID(), out.Type.ID(), in.Buffers[1].Buf[inputOffset:], out.Buffers[1].Buf[outputOffset:], int(in.Len))
+	if in.Type.ID() == arrow.FLOAT16 || out.Type.ID() == arrow.FLOAT16 {
+		castNumericGo(in.Type.ID(), out.Type.ID(), in.Buffers[1].Buf[inputOffset:], out.Buffers[1].Buf[outputOffset:], int(in.Len))
+	} else {
+		castNumericUnsafe(in.Type.ID(), out.Type.ID(), in.Buffers[1].Buf[inputOffset:], out.Buffers[1].Buf[outputOffset:], int(in.Len))
+	}
 }
 
 func MaxDecimalDigitsForInt(id arrow.Type) (int32, error) {
