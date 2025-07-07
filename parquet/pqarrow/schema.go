@@ -865,8 +865,6 @@ func mapToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *sc
 }
 
 func variantToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *schemaTree, _, out *SchemaField) error {
-	// this is for unshredded variants. shredded variants may have more fields
-	// TODO: implement support for shredded variants
 	switch n.NumFields() {
 	case 2, 3:
 	default:
