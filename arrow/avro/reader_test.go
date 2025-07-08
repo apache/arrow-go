@@ -32,7 +32,7 @@ import (
 
 func TestReader(t *testing.T) {
 	tests := []struct {
-		arrowSchema    []arrow.Field
+		arrowSchema []arrow.Field
 	}{
 		{
 			arrowSchema: []arrow.Field{
@@ -174,7 +174,7 @@ func TestReader(t *testing.T) {
 				t.Fatalf("%v", err)
 			}
 			assert.Equal(t, want.String(), got.String())
-			if !(fmt.Sprintf("%+v", want.String()) == fmt.Sprintf("%+v", got.String())) {
+			if fmt.Sprintf("%+v", want.String()) != fmt.Sprintf("%+v", got.String()) {
 				t.Fatalf("got=%v,\n want=%v", got.String(), want.String())
 			}
 		})

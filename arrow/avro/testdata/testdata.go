@@ -1,3 +1,19 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package testdata
 
 import (
@@ -238,8 +254,11 @@ func writeOCFSampleData(td string, data Example) string {
 		log.Fatal(err)
 	}
 	defer ocfFile.Close()
-	as := readAvroSchema(TestdataDir())
-	encoder, err := ocf.NewEncoder(as.String(), ocfFile)
+	schema, err := AllTypesAvroSchema()
+	if err != nil {
+		log.Fatal(err)
+	}
+	encoder, err := ocf.NewEncoder(schema.String(), ocfFile)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -250,18 +269,6 @@ func writeOCFSampleData(td string, data Example) string {
 		log.Fatal(err)
 	}
 	return path
-}
-
-func readAvroSchema(td string) avro.Schema {
-	avroSchemaBytes, err := os.ReadFile(filepath.Join(td, SchemaFileName))
-	if err != nil {
-		log.Fatal(err)
-	}
-	schema, err := avro.Parse(string(avroSchemaBytes))
-	if err != nil {
-		log.Fatal(err)
-	}
-	return schema
 }
 
 func writeJSONSampleData(td string, data Example) string {
