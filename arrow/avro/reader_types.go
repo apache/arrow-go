@@ -22,6 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"reflect"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -29,6 +31,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	hamba "github.com/hamba/avro/v2"
 )
 
 type dataLoader struct {
@@ -422,7 +425,11 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 		}
 	case *array.Decimal128Builder:
 		f.appendFunc = func(data interface{}) error {
-			err := appendDecimal128Data(bt, data)
+			typ, ok := field.Type.(arrow.DecimalType)
+			if !ok {
+				return nil
+			}
+			err := appendDecimal128Data(bt, data, typ)
 			if err != nil {
 				return err
 			}
@@ -430,7 +437,11 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 		}
 	case *array.Decimal256Builder:
 		f.appendFunc = func(data interface{}) error {
-			err := appendDecimal256Data(bt, data)
+			typ, ok := field.Type.(arrow.DecimalType)
+			if !ok {
+				return nil
+			}
+			err := appendDecimal256Data(bt, data, typ)
 			if err != nil {
 				return err
 			}
@@ -640,10 +651,12 @@ func appendDate32Data(b *array.Date32Builder, data interface{}) {
 		case int32:
 			b.Append(arrow.Date32(v))
 		}
+	case time.Time:
+		b.Append(arrow.Date32FromTime(dt))
 	}
 }
 
-func appendDecimal128Data(b *array.Decimal128Builder, data interface{}) error {
+func appendDecimal128Data(b *array.Decimal128Builder, data interface{}, typ arrow.DecimalType) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
@@ -673,11 +686,19 @@ func appendDecimal128Data(b *array.Decimal128Builder, data interface{}) error {
 			var bigIntData big.Int
 			b.Append(decimal128.FromBigInt(bigIntData.SetBytes(buf.Bytes())))
 		}
+	case *big.Rat:
+		v := bigRatToBigInt(dt, typ)
+
+		if v.IsInt64() {
+			b.Append(decimal128.FromI64(v.Int64()))
+		} else {
+			b.Append(decimal128.FromBigInt(v))
+		}
 	}
 	return nil
 }
 
-func appendDecimal256Data(b *array.Decimal256Builder, data interface{}) error {
+func appendDecimal256Data(b *array.Decimal256Builder, data interface{}, typ arrow.DecimalType) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
@@ -689,8 +710,19 @@ func appendDecimal256Data(b *array.Decimal256Builder, data interface{}) error {
 		var bigIntData big.Int
 		buf := bytes.NewBuffer(dt["bytes"].([]byte))
 		b.Append(decimal256.FromBigInt(bigIntData.SetBytes(buf.Bytes())))
+	case *big.Rat:
+		b.Append(decimal256.FromBigInt(bigRatToBigInt(dt, typ)))
 	}
 	return nil
+}
+
+func bigRatToBigInt(dt *big.Rat, typ arrow.DecimalType) *big.Int {
+	scale := big.NewInt(int64(typ.GetScale()))
+	scaledNum := new(big.Int).Set(dt.Num())
+	scaleFactor := new(big.Int).Exp(big.NewInt(10), scale, nil)
+	scaledNum.Mul(scaledNum, scaleFactor)
+	scaledNum.Quo(scaledNum, dt.Denom())
+	return scaledNum
 }
 
 // Avro duration logical type annotates Avro fixed type of size 12, which stores three little-endian
@@ -717,6 +749,12 @@ func appendDurationData(b *array.MonthDayNanoIntervalBuilder, data interface{}) 
 			dur.Nanoseconds = int64(binary.LittleEndian.Uint32(dtb[8:]) * 1000000)
 			b.Append(*dur)
 		}
+	case hamba.LogicalDuration:
+		b.Append(arrow.MonthDayNanoInterval{
+			Months:      int32(dt.Months),
+			Days:        int32(dt.Days),
+			Nanoseconds: int64(dt.Milliseconds) * int64(time.Millisecond),
+		})
 	}
 }
 
@@ -732,6 +770,13 @@ func appendFixedSizeBinaryData(b *array.FixedSizeBinaryBuilder, data interface{}
 			b.AppendNull()
 		case []byte:
 			b.Append(v)
+		}
+	default:
+		v := reflect.ValueOf(data)
+		if v.Kind() == reflect.Array && v.Type().Elem().Kind() == reflect.Uint8 {
+			bytes := make([]byte, v.Len())
+			reflect.Copy(reflect.ValueOf(bytes), v)
+			b.Append(bytes)
 		}
 	}
 }
@@ -839,6 +884,8 @@ func appendTime32Data(b *array.Time32Builder, data interface{}) {
 		case int32:
 			b.Append(arrow.Time32(v))
 		}
+	case time.Duration:
+		b.Append(arrow.Time32(dt.Milliseconds()))
 	}
 }
 
@@ -855,6 +902,8 @@ func appendTime64Data(b *array.Time64Builder, data interface{}) {
 		case int64:
 			b.Append(arrow.Time64(v))
 		}
+	case time.Duration:
+		b.Append(arrow.Time64(dt.Microseconds()))
 	}
 }
 
@@ -871,5 +920,11 @@ func appendTimestampData(b *array.TimestampBuilder, data interface{}) {
 		case int64:
 			b.Append(arrow.Timestamp(v))
 		}
+	case time.Time:
+		v, err := arrow.TimestampFromTime(dt, b.Type().(*arrow.TimestampType).Unit)
+		if err != nil {
+			panic(err)
+		}
+		b.Append(v)
 	}
 }
