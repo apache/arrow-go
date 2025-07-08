@@ -253,11 +253,19 @@ func variantToNode(t *extensions.VariantType, field arrow.Field, props *parquet.
 		return nil, err
 	}
 
-	//TODO: implement shredding
+	fields := schema.FieldList{metadataNode, valueNode}
+
+	typedField := t.TypedValue()
+	if typedField.Type != nil {
+		typedNode, err := fieldToNode("typed_value", typedField, props, arrProps)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, typedNode)
+	}
 
 	return schema.NewGroupNodeLogical(field.Name, repFromNullable(field.Nullable),
-		schema.FieldList{metadataNode, valueNode}, schema.VariantLogicalType{},
-		fieldIDFromMeta(field.Metadata))
+		fields, schema.VariantLogicalType{}, fieldIDFromMeta(field.Metadata))
 }
 
 func structToNode(field arrow.Field, props *parquet.WriterProperties, arrprops ArrowWriterProperties) (schema.Node, error) {
@@ -857,10 +865,10 @@ func mapToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *sc
 }
 
 func variantToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *schemaTree, _, out *SchemaField) error {
-	// this is for unshredded variants. shredded variants may have more fields
-	// TODO: implement support for shredded variants
-	if n.NumFields() != 2 {
-		return errors.New("VARIANT group must have exactly 2 children")
+	switch n.NumFields() {
+	case 2, 3:
+	default:
+		return errors.New("VARIANT group must have exactly 2 or 3 children")
 	}
 
 	var err error

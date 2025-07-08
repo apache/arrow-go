@@ -168,6 +168,14 @@ func (v *VariantType) Value() arrow.Field {
 	return v.StorageType().(*arrow.StructType).Field(v.valueFieldIdx)
 }
 
+func (v *VariantType) TypedValue() arrow.Field {
+	if v.typedValueFieldIdx == -1 {
+		return arrow.Field{}
+	}
+
+	return v.StorageType().(*arrow.StructType).Field(v.typedValueFieldIdx)
+}
+
 func (*VariantType) ExtensionName() string { return "parquet.variant" }
 
 func (v *VariantType) String() string {
