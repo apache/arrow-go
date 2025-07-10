@@ -2314,3 +2314,52 @@ func TestEmptyListDeltaBinaryPacked(t *testing.T) {
 	assert.True(t, schema.Equal(tbl.Schema()))
 	assert.EqualValues(t, 1, tbl.NumRows())
 }
+
+func TestReadWriteNonShreddedVariant(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	bldr := extensions.NewVariantBuilder(mem, extensions.NewDefaultVariantType())
+	defer bldr.Release()
+
+	jsonData := `[
+			42,
+			"text",
+			[1, 2, 3],
+			{"name": "Alice"},
+			[{"id": 1, "name": "Item 1"}, {"id": 2, "name": "Item 2"}],
+			{"items": [1, "two", true], "metadata": {"created": "2025-01-01"}},
+			null
+		]`
+
+	err := bldr.UnmarshalJSON([]byte(jsonData))
+	require.NoError(t, err)
+
+	arr := bldr.NewArray()
+	defer arr.Release()
+
+	rec := array.NewRecord(arrow.NewSchema([]arrow.Field{
+		{Name: "variant", Type: arr.DataType(), Nullable: true},
+	}, nil), []arrow.Array{arr}, -1)
+
+	var buf bytes.Buffer
+	wr, err := pqarrow.NewFileWriter(rec.Schema(), &buf, nil,
+		pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+
+	require.NoError(t, wr.Write(rec))
+	rec.Release()
+	wr.Close()
+
+	rdr, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	reader, err := pqarrow.NewFileReader(rdr, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	tbl, err := reader.ReadTable(context.Background())
+	require.NoError(t, err)
+	defer tbl.Release()
+
+	assert.True(t, array.Equal(arr, tbl.Column(0).Data().Chunk(0)))
+}
