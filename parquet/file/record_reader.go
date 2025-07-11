@@ -555,6 +555,7 @@ func (rr *recordReader) ReadRecordData(numRecords int64) (int64, error) {
 		// no repetition levels, skip delimiting logic. each level
 		// represents null or not null entry
 		recordsRead = utils.Min(rr.levelsWritten-rr.levelsPos, numRecords)
+		valuesToRead = recordsRead
 		// this is advanced by delimitRecords which we skipped
 		rr.levelsPos += recordsRead
 	} else {

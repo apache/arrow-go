@@ -18,7 +18,6 @@ package pqarrow
 
 import (
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -243,25 +242,25 @@ func repFromNullable(isnullable bool) parquet.Repetition {
 }
 
 func variantToNode(t *extensions.VariantType, field arrow.Field, props *parquet.WriterProperties, arrProps ArrowWriterProperties) (schema.Node, error) {
-	metadataNode, err := fieldToNode("metadata", t.Metadata(), props, arrProps)
+	fields := make(schema.FieldList, 2, 3)
+	var err error
+
+	fields[0], err = fieldToNode("metadata", t.Metadata(), props, arrProps)
 	if err != nil {
 		return nil, err
 	}
 
-	valueNode, err := fieldToNode("value", t.Value(), props, arrProps)
+	fields[1], err = fieldToNode("value", t.Value(), props, arrProps)
 	if err != nil {
 		return nil, err
 	}
 
-	fields := schema.FieldList{metadataNode, valueNode}
-
-	typedField := t.TypedValue()
-	if typedField.Type != nil {
-		typedNode, err := fieldToNode("typed_value", typedField, props, arrProps)
+	if typed := t.TypedValue(); typed.Type != nil {
+		typedValue, err := fieldToNode("typed_value", typed, props, arrProps)
 		if err != nil {
 			return nil, err
 		}
-		fields = append(fields, typedNode)
+		fields = append(fields, typedValue)
 	}
 
 	return schema.NewGroupNodeLogical(field.Name, repFromNullable(field.Nullable),
@@ -868,8 +867,33 @@ func variantToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx
 	switch n.NumFields() {
 	case 2, 3:
 	default:
-		return errors.New("VARIANT group must have exactly 2 or 3 children")
+		return fmt.Errorf("VARIANT group must have exactly 2 or 3 children, not %d", n.NumFields())
 	}
+
+	if n.RepetitionType() == parquet.Repetitions.Repeated {
+		// list of variants
+		out.Children = make([]SchemaField, 1)
+		repeatedAncestorDef := currentLevels.IncrementRepeated()
+		if err := groupToStructField(n, currentLevels, ctx, &out.Children[0]); err != nil {
+			return err
+		}
+
+		storageType := out.Children[0].Field.Type
+		elemType, err := extensions.NewVariantType(storageType)
+		if err != nil {
+			return err
+		}
+
+		out.Children[0].Field.Type = elemType
+		out.Field = &arrow.Field{Name: n.Name(), Type: arrow.ListOfField(*out.Children[0].Field), Nullable: true,
+			Metadata: createFieldMeta(int(n.FieldID()))}
+		ctx.LinkParent(&out.Children[0], out)
+		out.LevelInfo = currentLevels
+		out.LevelInfo.RepeatedAncestorDefLevel = repeatedAncestorDef
+		return nil
+	}
+
+	currentLevels.Increment(n)
 
 	var err error
 	if err = groupToStructField(n, currentLevels, ctx, out); err != nil {

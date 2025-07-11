@@ -111,6 +111,37 @@ func (fr *FileReader) Schema() (*arrow.Schema, error) {
 	return FromParquet(fr.rdr.MetaData().Schema, &fr.Props, fr.rdr.MetaData().KeyValueMetadata())
 }
 
+type extensionReader struct {
+	colReaderImpl
+
+	fieldWithExt arrow.Field
+}
+
+func (er *extensionReader) Field() *arrow.Field {
+	return &er.fieldWithExt
+}
+
+func (er *extensionReader) BuildArray(boundedLen int64) (*arrow.Chunked, error) {
+	if er.colReaderImpl == nil {
+		return nil, errors.New("extension reader has no underlying column reader implementation")
+	}
+
+	chkd, err := er.colReaderImpl.BuildArray(boundedLen)
+	if err != nil {
+		return nil, err
+	}
+	defer chkd.Release()
+
+	extType := er.fieldWithExt.Type.(arrow.ExtensionType)
+
+	newChunks := make([]arrow.Array, len(chkd.Chunks()))
+	for i, c := range chkd.Chunks() {
+		newChunks[i] = array.NewExtensionArrayWithStorage(extType, c)
+	}
+
+	return arrow.NewChunked(extType, newChunks), nil
+}
+
 type colReaderImpl interface {
 	LoadBatch(nrecs int64) error
 	BuildArray(boundedLen int64) (*arrow.Chunked, error)
@@ -517,7 +548,14 @@ func (fr *FileReader) getReader(ctx context.Context, field *SchemaField, arrowFi
 
 	switch arrowField.Type.ID() {
 	case arrow.EXTENSION:
-		return nil, xerrors.New("extension type not implemented")
+		storageField := arrowField
+		storageField.Type = arrowField.Type.(arrow.ExtensionType).StorageType()
+		storageReader, err := fr.getReader(ctx, field, storageField)
+		if err != nil {
+			return nil, err
+		}
+
+		return &ColumnReader{&extensionReader{colReaderImpl: storageReader, fieldWithExt: arrowField}}, nil
 	case arrow.STRUCT:
 
 		childReaders := make([]*ColumnReader, len(field.Children))
