@@ -1574,3 +1574,84 @@ func TestVariantBuilderUnmarshalJSON(t *testing.T) {
 		assert.Equal(t, int8(5), innerVal2.Value())
 	})
 }
+
+func TestNewSimpleShreddedVariantType(t *testing.T) {
+	assert.True(t, arrow.TypeEqual(extensions.NewDefaultVariantType(),
+		extensions.NewShreddedVariantType(nil)))
+
+	vt := extensions.NewShreddedVariantType(arrow.PrimitiveTypes.Float32)
+	s := arrow.StructOf(
+		arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary},
+		arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+		arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Float32, Nullable: true})
+
+	assert.Truef(t, arrow.TypeEqual(vt.Storage, s), "expected %s, got %s", s, vt.Storage)
+}
+
+func TestNewShreddedVariantType(t *testing.T) {
+	vt := extensions.NewShreddedVariantType(arrow.StructOf(arrow.Field{
+		Name: "event_type",
+		Type: arrow.BinaryTypes.String,
+	}, arrow.Field{
+		Name: "event_ts",
+		Type: arrow.FixedWidthTypes.Timestamp_us,
+	}))
+
+	assert.NotNil(t, vt)
+	s := arrow.StructOf(
+		arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary},
+		arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+		arrow.Field{Name: "typed_value", Type: arrow.StructOf(
+			arrow.Field{Name: "event_type", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.BinaryTypes.String, Nullable: true},
+			)},
+			arrow.Field{Name: "event_ts", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.FixedWidthTypes.Timestamp_us, Nullable: true},
+			)},
+		), Nullable: true})
+
+	assert.Truef(t, arrow.TypeEqual(vt.Storage, s), "expected %s, got %s", s, vt.Storage)
+}
+
+func TestShreddedVariantNested(t *testing.T) {
+	vt := extensions.NewShreddedVariantType(arrow.StructOf(
+		arrow.Field{Name: "strval", Type: arrow.BinaryTypes.String},
+		arrow.Field{Name: "bool", Type: arrow.FixedWidthTypes.Boolean},
+		arrow.Field{Name: "location", Type: arrow.ListOf(arrow.StructOf(
+			arrow.Field{Name: "latitude", Type: arrow.PrimitiveTypes.Float64},
+			arrow.Field{Name: "longitude", Type: arrow.PrimitiveTypes.Float32},
+		))}))
+
+	s := arrow.StructOf(
+		arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary},
+		arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+		arrow.Field{Name: "typed_value", Type: arrow.StructOf(
+			arrow.Field{Name: "strval", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.BinaryTypes.String, Nullable: true},
+			)},
+			arrow.Field{Name: "bool", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.FixedWidthTypes.Boolean, Nullable: true},
+			)},
+			arrow.Field{Name: "location", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.ListOfNonNullable(arrow.StructOf(
+					arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+					arrow.Field{Name: "typed_value", Type: arrow.StructOf(
+						arrow.Field{Name: "latitude", Type: arrow.StructOf(
+							arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+							arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Float64, Nullable: true},
+						)},
+						arrow.Field{Name: "longitude", Type: arrow.StructOf(
+							arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+							arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Float32, Nullable: true},
+						)},
+					), Nullable: true},
+				)), Nullable: true})},
+		), Nullable: true})
+
+	assert.Truef(t, arrow.TypeEqual(vt.Storage, s), "expected %s, got %s", s, vt.Storage)
+}

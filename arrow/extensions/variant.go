@@ -62,6 +62,83 @@ func NewDefaultVariantType() *VariantType {
 	return vt
 }
 
+func createShreddedField(dt arrow.DataType) arrow.DataType {
+	switch t := dt.(type) {
+	case arrow.ListLikeType:
+		return arrow.ListOfNonNullable(arrow.StructOf(
+			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+			arrow.Field{Name: "typed_value", Type: createShreddedField(t.Elem()), Nullable: true},
+		))
+	case *arrow.StructType:
+		fields := make([]arrow.Field, 0, t.NumFields())
+		for i := range t.NumFields() {
+			f := t.Field(i)
+			fields = append(fields, arrow.Field{
+				Name: f.Name,
+				Type: arrow.StructOf(arrow.Field{
+					Name:     "value",
+					Type:     arrow.BinaryTypes.Binary,
+					Nullable: true,
+				}, arrow.Field{
+					Name:     "typed_value",
+					Type:     createShreddedField(f.Type),
+					Nullable: true,
+				}),
+				Nullable: false,
+				Metadata: f.Metadata,
+			})
+		}
+		return arrow.StructOf(fields...)
+	default:
+		return dt
+	}
+}
+
+// NewShreddedVariantType creates a new VariantType extension type using the provided
+// type to define a shredded schema by setting the `typed_value` field accordingly and
+// properly constructing the shredded fields for structs, lists and so on.
+//
+// For example:
+//
+//	NewShreddedVariantType(arrow.StructOf(
+//	     arrow.Field{Name: "latitude", Type: arrow.PrimitiveTypes.Float64},
+//	     arrow.Field{Name: "longitude", Type: arrow.PrimitiveTypes.Float32}))
+//
+// Will create a variant type with the following structure:
+//
+//	arrow.StructOf(
+//	     arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
+//	     arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+//	     arrow.Field{Name: "typed_value", Type: arrow.StructOf(
+//	       arrow.Field{Name: "latitude", Type: arrow.StructOf(
+//	         arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+//	         arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Float64, Nullable: true}),
+//	         Nullable: false},
+//	     arrow.Field{Name: "longitude", Type: arrow.StructOf(
+//	         arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+//	         arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Float32, Nullable: true}),
+//	         Nullable: false},
+//	 ), Nullable: true})
+//
+// This is intended to be a convenient way to create a shredded variant type from a definition
+// of the fields to shred. If the provided data type is nil, it will create a default
+// variant type.
+func NewShreddedVariantType(dt arrow.DataType) *VariantType {
+	if dt == nil {
+		return NewDefaultVariantType()
+	}
+
+	vt, _ := NewVariantType(arrow.StructOf(
+		arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
+		arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+		arrow.Field{
+			Name:     "typed_value",
+			Type:     createShreddedField(dt),
+			Nullable: true,
+		}))
+	return vt
+}
+
 // NewVariantType creates a new variant type based on the provided storage type.
 //
 // The rules for a variant storage type are:
@@ -166,6 +243,14 @@ func (v *VariantType) Metadata() arrow.Field {
 
 func (v *VariantType) Value() arrow.Field {
 	return v.StorageType().(*arrow.StructType).Field(v.valueFieldIdx)
+}
+
+func (v *VariantType) TypedValue() arrow.Field {
+	if v.typedValueFieldIdx == -1 {
+		return arrow.Field{}
+	}
+
+	return v.StorageType().(*arrow.StructType).Field(v.typedValueFieldIdx)
 }
 
 func (*VariantType) ExtensionName() string { return "parquet.variant" }
@@ -1472,8 +1557,9 @@ type shreddedObjBuilder struct {
 }
 
 func (b *shreddedObjBuilder) AppendMissing() {
-	b.structBldr.Append(true)
+	b.structBldr.AppendValues([]bool{false})
 	for _, fieldBldr := range b.fieldBuilders {
+		fieldBldr.structBldr.Append(true)
 		fieldBldr.valueBldr.AppendNull()
 		fieldBldr.typedBldr.AppendMissing()
 	}
@@ -1481,7 +1567,7 @@ func (b *shreddedObjBuilder) AppendMissing() {
 
 func (b *shreddedObjBuilder) tryTyped(v variant.Value) (residual []byte) {
 	if v.Type() != variant.Object {
-		b.structBldr.AppendNull()
+		b.AppendMissing()
 		return v.Bytes()
 	}
 
