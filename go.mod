@@ -21,7 +21,7 @@ go 1.23.0
 toolchain go1.23.2
 
 require (
-	github.com/andybalholm/brotli v1.1.1
+	github.com/andybalholm/brotli v1.2.0
 	github.com/apache/thrift v0.22.0
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815
@@ -32,7 +32,7 @@ require (
 	github.com/hamba/avro/v2 v2.29.0
 	github.com/klauspost/asmfmt v1.3.2
 	github.com/klauspost/compress v1.18.0
-	github.com/klauspost/cpuid/v2 v2.2.10
+	github.com/klauspost/cpuid/v2 v2.2.11
 	github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8
 	github.com/minio/c2goasm v0.0.0-20190812172519-36a3d3bbc4f3
 	github.com/pierrec/lz4/v4 v4.1.22
