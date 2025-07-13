@@ -2314,3 +2314,107 @@ func TestEmptyListDeltaBinaryPacked(t *testing.T) {
 	assert.True(t, schema.Equal(tbl.Schema()))
 	assert.EqualValues(t, 1, tbl.NumRows())
 }
+
+func TestReadWriteNonShreddedVariant(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	bldr := extensions.NewVariantBuilder(mem, extensions.NewDefaultVariantType())
+	defer bldr.Release()
+
+	jsonData := `[
+			42,
+			"text",
+			[1, 2, 3],
+			{"name": "Alice"},
+			[{"id": 1, "name": "Item 1"}, {"id": 2, "name": "Item 2"}],
+			{"items": [1, "two", true], "metadata": {"created": "2025-01-01"}},
+			null
+		]`
+
+	err := bldr.UnmarshalJSON([]byte(jsonData))
+	require.NoError(t, err)
+
+	arr := bldr.NewArray()
+	defer arr.Release()
+
+	rec := array.NewRecord(arrow.NewSchema([]arrow.Field{
+		{Name: "variant", Type: arr.DataType(), Nullable: true},
+	}, nil), []arrow.Array{arr}, -1)
+
+	var buf bytes.Buffer
+	wr, err := pqarrow.NewFileWriter(rec.Schema(), &buf, nil,
+		pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+
+	require.NoError(t, wr.Write(rec))
+	rec.Release()
+	wr.Close()
+
+	rdr, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	reader, err := pqarrow.NewFileReader(rdr, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	tbl, err := reader.ReadTable(context.Background())
+	require.NoError(t, err)
+	defer tbl.Release()
+
+	assert.True(t, array.Equal(arr, tbl.Column(0).Data().Chunk(0)))
+}
+
+func TestReadWriteShreddedVariant(t *testing.T) {
+	vt := extensions.NewShreddedVariantType(arrow.StructOf(
+		arrow.Field{Name: "event_type", Type: arrow.BinaryTypes.String},
+		arrow.Field{Name: "event_ts", Type: arrow.FixedWidthTypes.Timestamp_us}))
+
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	bldr := vt.NewBuilder(mem)
+	defer bldr.Release()
+
+	jsonData := `[
+			{"event_type": "noop", "event_ts": "1970-01-21 00:29:54.114937Z"},
+			42,
+			{"event_type": "text", "event_ts": "1970-01-21 00:29:54.954163Z"},
+			{"event_type": "list", "event_ts": "1970-01-21 00:29:54.240241Z"},
+			"text",
+			{"event_type": "object", "event_ts": "1970-01-21 00:29:54.146402Z"},			
+			null
+		]`
+
+	err := bldr.UnmarshalJSON([]byte(jsonData))
+	require.NoError(t, err)
+
+	arr := bldr.NewArray()
+	defer arr.Release()
+
+	rec := array.NewRecord(arrow.NewSchema([]arrow.Field{
+		{Name: "variant", Type: arr.DataType(), Nullable: true},
+	}, nil), []arrow.Array{arr}, -1)
+
+	var buf bytes.Buffer
+	wr, err := pqarrow.NewFileWriter(rec.Schema(), &buf,
+		parquet.NewWriterProperties(parquet.WithDictionaryDefault(false)),
+		pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+
+	require.NoError(t, wr.Write(rec))
+	rec.Release()
+	wr.Close()
+
+	rdr, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	reader, err := pqarrow.NewFileReader(rdr, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	tbl, err := reader.ReadTable(context.Background())
+	require.NoError(t, err)
+	defer tbl.Release()
+
+	assert.Truef(t, array.Equal(arr, tbl.Column(0).Data().Chunk(0)),
+		"expected: %s\ngot: %s", arr, tbl.Column(0).Data().Chunk(0))
+}
