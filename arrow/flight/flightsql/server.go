@@ -916,6 +916,14 @@ func (f *flightSqlServer) DoGet(request *flight.Ticket, stream flight.FlightServ
 		return err
 	}
 
+	defer func() {
+		for chunk := range cc {
+			if chunk.Data != nil {
+				chunk.Data.Release()
+			}
+		}
+	}()
+
 	wr := flight.NewRecordWriter(stream, ipc.WithSchema(sc))
 	defer wr.Close()
 
