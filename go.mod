@@ -39,7 +39,7 @@ require (
 	github.com/pterm/pterm v0.12.81
 	github.com/stoewer/go-strcase v1.3.1
 	github.com/stretchr/testify v1.10.0
-	github.com/substrait-io/substrait-go/v4 v4.1.0
+	github.com/substrait-io/substrait-go/v4 v4.3.0
 	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.0.2
 	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0
@@ -99,5 +99,3 @@ require (
 	modernc.org/strutil v1.2.0 // indirect
 	modernc.org/token v1.1.0 // indirect
 )
-
-replace github.com/substrait-io/substrait-go/v4 => github.com/zeroshade/substrait-go/v4 v4.0.0-20250619204834-2c8e786d8b5e
