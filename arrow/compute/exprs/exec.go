@@ -479,9 +479,19 @@ func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.Exe
 	} else if err != nil {
 		return nil, err
 	}
-	if !arrow.TypeEqual(out.(compute.ArrayLikeDatum).Type(), expectedType) {
-		return nil, fmt.Errorf("%w: referenced field %s was %s, but should have been %s",
-			arrow.ErrInvalid, ref, out.(compute.ArrayLikeDatum).Type(), expectedType)
+
+	dt := out.(compute.ArrayLikeDatum).Type()
+	if !arrow.TypeEqual(dt, expectedType) {
+		// substrait doesn't have a LARGE_STRING or LARGE_BINARY type, so we
+		// need to special case check if we got a LARGE_STRING or LARGE_BINARY
+		// type when we expected a STRING or BINARY type.
+		switch {
+		case expectedType.ID() == arrow.STRING && dt.ID() == arrow.LARGE_STRING:
+		case expectedType.ID() == arrow.BINARY && dt.ID() == arrow.LARGE_BINARY:
+		default:
+			return nil, fmt.Errorf("%w: referenced field %s was %s, but should have been %s",
+				arrow.ErrInvalid, ref, dt, expectedType)
+		}
 	}
 
 	return out, nil
