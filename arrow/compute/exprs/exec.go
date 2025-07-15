@@ -395,6 +395,11 @@ func literalToDatum(mem memory.Allocator, lit expr.Literal, ext ExtensionIDSet) 
 // You can provide an allocator to use through the context via compute.WithAllocator.
 //
 // You can provide the ExtensionIDSet to use through the context via WithExtensionIDSet.
+//
+// Note: Substrait expressions do not have an equivalent to LargeString/LargeBinary, so
+// field references which expect a string or binary will allow their Large counterparts
+// to be used as well. Most of the time, this shouldn't be an issue as the compute kernels
+// should handle any casting that might be necessary.
 func ExecuteScalarExpression(ctx context.Context, inputSchema *arrow.Schema, expression expr.Expression, partialInput compute.Datum) (compute.Datum, error) {
 	if expression == nil {
 		return nil, arrow.ErrInvalid
