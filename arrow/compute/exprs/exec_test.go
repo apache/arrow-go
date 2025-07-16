@@ -621,3 +621,44 @@ func Test_Types(t *testing.T) {
 		})
 	}
 }
+
+func TestLargeTypes(t *testing.T) {
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "str", Type: arrow.BinaryTypes.LargeString, Nullable: true},
+		{Name: "bin", Type: arrow.BinaryTypes.LargeBinary, Nullable: true},
+	}, nil)
+
+	rec, _, err := array.RecordFromJSON(memory.DefaultAllocator, sc, strings.NewReader(`[
+		{"str": "hello world", "bin": "Zm9vYmFy"}
+	]`))
+	require.NoError(t, err)
+	defer rec.Release()
+
+	dr := compute.NewDatumWithoutOwning(rec)
+
+	t.Run("large_string ref", func(t *testing.T) {
+		bldr := exprs.NewExprBuilder(extSet)
+		require.NoError(t, bldr.SetInputSchema(sc))
+
+		e, err := bldr.FieldRef("str").BuildExpr()
+		require.NoError(t, err, "Failed to build field reference expression")
+
+		ctx := context.Background()
+		result, err := exprs.ExecuteScalarExpression(ctx, sc, e, dr)
+		require.NoError(t, err, "Failed to execute scalar expression")
+		defer result.Release()
+	})
+
+	t.Run("large_binary ref", func(t *testing.T) {
+		bldr := exprs.NewExprBuilder(extSet)
+		require.NoError(t, bldr.SetInputSchema(sc))
+
+		e, err := bldr.FieldRef("bin").BuildExpr()
+		require.NoError(t, err, "Failed to build field reference expression")
+
+		ctx := context.Background()
+		result, err := exprs.ExecuteScalarExpression(ctx, sc, e, dr)
+		require.NoError(t, err, "Failed to execute scalar expression")
+		defer result.Release()
+	})
+}

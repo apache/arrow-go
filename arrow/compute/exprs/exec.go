@@ -395,6 +395,11 @@ func literalToDatum(mem memory.Allocator, lit expr.Literal, ext ExtensionIDSet) 
 // You can provide an allocator to use through the context via compute.WithAllocator.
 //
 // You can provide the ExtensionIDSet to use through the context via WithExtensionIDSet.
+//
+// Note: Substrait expressions do not have an equivalent to LargeString/LargeBinary, so
+// field references which expect a string or binary will allow their Large counterparts
+// to be used as well. Most of the time, this shouldn't be an issue as the compute kernels
+// should handle any casting that might be necessary.
 func ExecuteScalarExpression(ctx context.Context, inputSchema *arrow.Schema, expression expr.Expression, partialInput compute.Datum) (compute.Datum, error) {
 	if expression == nil {
 		return nil, arrow.ErrInvalid
@@ -479,9 +484,19 @@ func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.Exe
 	} else if err != nil {
 		return nil, err
 	}
-	if !arrow.TypeEqual(out.(compute.ArrayLikeDatum).Type(), expectedType) {
-		return nil, fmt.Errorf("%w: referenced field %s was %s, but should have been %s",
-			arrow.ErrInvalid, ref, out.(compute.ArrayLikeDatum).Type(), expectedType)
+
+	dt := out.(compute.ArrayLikeDatum).Type()
+	if !arrow.TypeEqual(dt, expectedType) {
+		// substrait doesn't have a LARGE_STRING or LARGE_BINARY type, so we
+		// need to special case check if we got a LARGE_STRING or LARGE_BINARY
+		// type when we expected a STRING or BINARY type.
+		switch {
+		case expectedType.ID() == arrow.STRING && dt.ID() == arrow.LARGE_STRING:
+		case expectedType.ID() == arrow.BINARY && dt.ID() == arrow.LARGE_BINARY:
+		default:
+			return nil, fmt.Errorf("%w: referenced field %s was %s, but should have been %s",
+				arrow.ErrInvalid, ref, dt, expectedType)
+		}
 	}
 
 	return out, nil
