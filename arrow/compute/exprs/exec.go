@@ -379,6 +379,36 @@ func literalToDatum(mem memory.Allocator, lit expr.Literal, ext ExtensionIDSet) 
 		case *types.VarCharType:
 			return compute.NewDatum(scalar.NewExtensionScalar(
 				scalar.NewStringScalar(v.Value.(string)), varChar(int32(t.Length)))), nil
+		case *types.PrecisionTimeType:
+			dt, _, err := FromSubstraitType(t, ext)
+			if err != nil {
+				return nil, err
+			}
+
+			switch dt.ID() {
+			case arrow.TIME32:
+				return &compute.ScalarDatum{Value: scalar.NewTime32Scalar(
+					arrow.Time32(v.Value.(int64)), dt)}, nil
+			case arrow.TIME64:
+				return &compute.ScalarDatum{Value: scalar.NewTime64Scalar(
+					arrow.Time64(v.Value.(int64)), dt)}, nil
+			}
+		case *types.PrecisionTimestampType:
+			dt, _, err := FromSubstraitType(t, ext)
+			if err != nil {
+				return nil, err
+			}
+
+			return &compute.ScalarDatum{Value: scalar.NewTimestampScalar(
+				arrow.Timestamp(v.Value.(int64)), dt)}, nil
+		case *types.PrecisionTimestampTzType:
+			dt, _, err := FromSubstraitType(t, ext)
+			if err != nil {
+				return nil, err
+			}
+
+			return &compute.ScalarDatum{Value: scalar.NewTimestampScalar(
+				arrow.Timestamp(v.Value.(int64)), dt)}, nil
 		}
 	}
 
