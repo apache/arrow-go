@@ -151,7 +151,7 @@ func generateJSONData(n int) []byte {
 			"name":     fmt.Sprintf("record_%d", i),
 			"value":    float64(i) * 1.5,
 			"active":   i%2 == 0,
-			"metadata": fmt.Sprintf("metadata_%d_%s", i, strings.Repeat("x", 500)),
+			"metadata": fmt.Sprintf("metadata_%d_%s", i, make([]byte, 500)),
 		}
 	}
 
