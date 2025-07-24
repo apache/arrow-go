@@ -519,6 +519,43 @@ func Test_Types(t *testing.T) {
 			},
 		},
 		{
+			name: "expect arrow.TIME64 (ns) ok",
+			schema: func() *arrow.Schema {
+				field := arrow.Field{
+					Name:     "col",
+					Type:     &arrow.Time64Type{Unit: arrow.Nanosecond},
+					Nullable: true,
+				}
+
+				return arrow.NewSchema([]arrow.Field{field}, nil)
+			},
+			record: func(rq *require.Assertions, schema *arrow.Schema) arrow.Record {
+				b := array.NewTime64Builder(memory.DefaultAllocator, &arrow.Time64Type{Unit: arrow.Nanosecond})
+				defer b.Release()
+
+				t1, err := arrow.Time64FromString("10:00:00.000000", arrow.Nanosecond)
+				rq.NoError(err, "Failed to create Time64 value")
+
+				b.AppendValues([]arrow.Time64{t1}, []bool{true})
+
+				return array.NewRecord(schema, []arrow.Array{b.NewArray()}, 1)
+			},
+			val: func(rq *require.Assertions) expr.Literal {
+				v, err := arrow.Time64FromString("11:00:00.000000", arrow.Nanosecond)
+				rq.NoError(err, "Failed to create Time64 value")
+
+				pt := &types.PrecisionTime{
+					Precision: int32(arrow.Nanosecond) * 3,
+					Value:     int64(v),
+				}
+
+				lit, err := expr.NewLiteral(pt, true)
+				rq.NoError(err, "Failed to create literal")
+
+				return lit
+			},
+		},
+		{
 			name: "expect arrow.TIMESTAMP (ns) ok",
 			schema: func() *arrow.Schema {
 				field := arrow.Field{
