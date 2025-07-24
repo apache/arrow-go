@@ -164,7 +164,7 @@ func FromJSON(mem memory.Allocator, dt arrow.DataType, r io.Reader, opts ...From
 		}
 	}
 
-	if err = dec.Decode(bldr); err != nil {
+	if err = bldr.Unmarshal(dec); err != nil {
 		return nil, dec.InputOffset(), err
 	}
 
