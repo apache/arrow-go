@@ -164,7 +164,7 @@ func FromJSON(mem memory.Allocator, dt arrow.DataType, r io.Reader, opts ...From
 		}
 	}
 
-	if err = bldr.Unmarshal(dec); err != nil {
+	if err = dec.Decode(bldr); err != nil {
 		return nil, dec.InputOffset(), err
 	}
 
@@ -211,14 +211,67 @@ func RecordFromStructArray(in *Struct, schema *arrow.Schema) arrow.Record {
 // A record batch from JSON is equivalent to reading a struct array in from json and then
 // converting it to a record batch.
 func RecordFromJSON(mem memory.Allocator, schema *arrow.Schema, r io.Reader, opts ...FromJSONOption) (arrow.Record, int64, error) {
-	st := arrow.StructOf(schema.Fields()...)
-	arr, off, err := FromJSON(mem, st, r, opts...)
-	if err != nil {
-		return nil, off, err
+	var cfg fromJSONCfg
+	for _, o := range opts {
+		o(&cfg)
 	}
-	defer arr.Release()
 
-	return RecordFromStructArray(arr.(*Struct), schema), off, nil
+	if cfg.startOffset != 0 {
+		seeker, ok := r.(io.ReadSeeker)
+		if !ok {
+			return nil, 0, errors.New("using StartOffset option requires reader to be a ReadSeeker, cannot seek")
+		}
+		if _, err := seeker.Seek(cfg.startOffset, io.SeekStart); err != nil {
+			return nil, 0, fmt.Errorf("failed to seek to start offset %d: %w", cfg.startOffset, err)
+		}
+	}
+
+	if mem == nil {
+		mem = memory.DefaultAllocator
+	}
+
+	bldr := NewRecordBuilder(mem, schema)
+	defer bldr.Release()
+
+	dec := json.NewDecoder(r)
+	if cfg.useNumber {
+		dec.UseNumber()
+	}
+
+	if !cfg.multiDocument {
+		t, err := dec.Token()
+		if err != nil {
+			return nil, dec.InputOffset(), err
+		}
+		if delim, ok := t.(json.Delim); !ok || delim != '[' {
+			return nil, dec.InputOffset(), fmt.Errorf("json doc must be an array, found %s", delim)
+		}
+
+		for dec.More() {
+			if err := dec.Decode(bldr); err != nil {
+				return nil, dec.InputOffset(), fmt.Errorf("failed to decode json: %w", err)
+			}
+		}
+
+		// consume the last ']'
+		if _, err = dec.Token(); err != nil {
+			return nil, dec.InputOffset(), fmt.Errorf("failed to decode json: %w", err)
+		}
+
+		return bldr.NewRecord(), dec.InputOffset(), nil
+	}
+
+	for {
+		err := dec.Decode(bldr)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, dec.InputOffset(), fmt.Errorf("failed to decode json: %w", err)
+		}
+	}
+
+	return bldr.NewRecord(), dec.InputOffset(), nil
 }
 
 // RecordToJSON writes out the given record following the format of each row is a single object
