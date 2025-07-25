@@ -210,6 +210,9 @@ func RecordFromStructArray(in *Struct, schema *arrow.Schema) arrow.Record {
 //
 // A record batch from JSON is equivalent to reading a struct array in from json and then
 // converting it to a record batch.
+//
+// See https://github.com/apache/arrow-go/issues/448 for more details on
+// why this isn't a simple wrapper around FromJSON.
 func RecordFromJSON(mem memory.Allocator, schema *arrow.Schema, r io.Reader, opts ...FromJSONOption) (arrow.Record, int64, error) {
 	var cfg fromJSONCfg
 	for _, o := range opts {
