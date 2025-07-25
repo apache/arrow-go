@@ -23,7 +23,9 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/internal/json"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTimestampStringRoundTrip(t *testing.T) {
@@ -297,4 +299,42 @@ func TestTimestampEquality(t *testing.T) {
 	assert.Equal(t, arrs[0].Value(1), arrs[1].Value(1))
 	assert.Equal(t, arrs[0].Value(1), arrs[2].Value(1))
 	assert.Equal(t, arrs[1].Value(1), arrs[2].Value(1))
+}
+
+func TestTimestampArrayJSONRoundTrip(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	tz, _ := time.LoadLocation("America/Phoenix")
+	dt := &arrow.TimestampType{Unit: arrow.Second, TimeZone: tz.String()}
+	b := array.NewTimestampBuilder(mem, dt)
+	defer b.Release()
+
+	b.Append(-34226955)
+	b.Append(1456767743)
+
+	arr := b.NewArray()
+	defer arr.Release()
+
+	assert.Equal(t, "1968-11-30T13:30:45-07:00", arr.ValueStr(0))
+	assert.Equal(t, "2016-02-29T10:42:23-07:00", arr.ValueStr(1))
+	assert.Equal(t, 2, arr.Len())
+	assert.Equal(t, 0, arr.NullN())
+
+	json_bytes, err := arr.MarshalJSON()
+	require.NoError(t, err)
+
+	expectedJSON := `["1968-11-30T13:30:45-07:00","2016-02-29T10:42:23-07:00"]`
+	require.Equal(t, expectedJSON, string(json_bytes))
+
+	var timestamps []time.Time
+	err = json.Unmarshal(json_bytes, &timestamps)
+	require.NoError(t, err)
+	require.Len(t, timestamps, 2)
+
+	expectedTime1 := time.Date(1968, time.November, 30, 13, 30, 45, 0, tz)
+	expectedTime2 := time.Date(2016, time.February, 29, 10, 42, 23, 0, tz)
+
+	assert.Equal(t, expectedTime1.Unix(), timestamps[0].Unix())
+	assert.Equal(t, expectedTime2.Unix(), timestamps[1].Unix())
 }
