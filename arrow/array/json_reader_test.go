@@ -17,12 +17,15 @@
 package array_test
 
 import (
+	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/internal/json"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -138,4 +141,123 @@ func TestUnmarshalJSON(t *testing.T) {
 	defer record.Release()
 
 	assert.NotNil(t, record)
+}
+
+func generateJSONData(n int) []byte {
+	records := make([]map[string]any, n)
+	for i := range n {
+		records[i] = map[string]any{
+			"id":       i,
+			"name":     fmt.Sprintf("record_%d", i),
+			"value":    float64(i) * 1.5,
+			"active":   i%2 == 0,
+			"metadata": fmt.Sprintf("metadata_%d_%s", i, make([]byte, 500)),
+		}
+	}
+
+	data, _ := json.Marshal(records)
+	return data
+}
+
+func jsonArrayToNDJSON(data []byte) ([]byte, error) {
+	var records []json.RawMessage
+	if err := json.Unmarshal(data, &records); err != nil {
+		return nil, err
+	}
+
+	var ndjson bytes.Buffer
+	for _, record := range records {
+		ndjson.Write(record)
+		ndjson.WriteString("\n")
+	}
+
+	return ndjson.Bytes(), nil
+}
+
+func BenchmarkRecordFromJSON(b *testing.B) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "name", Type: arrow.BinaryTypes.String},
+		{Name: "value", Type: arrow.PrimitiveTypes.Float64},
+		{Name: "active", Type: arrow.FixedWidthTypes.Boolean},
+		{Name: "metadata", Type: arrow.BinaryTypes.String},
+	}, nil)
+
+	testSizes := []int64{1000, 5000, 10000}
+
+	for _, size := range testSizes {
+		b.Run(fmt.Sprintf("Size_%d", size), func(b *testing.B) {
+			data := generateJSONData(int(size))
+			pool := memory.NewGoAllocator()
+
+			var rdr bytes.Reader
+			b.SetBytes(int64(len(data)))
+			b.ResetTimer()
+			for range b.N {
+				rdr.Reset(data)
+
+				record, _, err := array.RecordFromJSON(pool, schema, &rdr)
+				if err != nil {
+					b.Error(err)
+				}
+
+				if record.NumRows() != size {
+					b.Errorf("expected %d rows, got %d", size, record.NumRows())
+				}
+				record.Release()
+			}
+		})
+	}
+}
+
+func BenchmarkJSONReader(b *testing.B) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "name", Type: arrow.BinaryTypes.String},
+		{Name: "value", Type: arrow.PrimitiveTypes.Float64},
+		{Name: "active", Type: arrow.FixedWidthTypes.Boolean},
+		{Name: "metadata", Type: arrow.BinaryTypes.String},
+	}, nil)
+
+	testSizes := []int64{1000, 5000, 10000}
+
+	for _, size := range testSizes {
+		b.Run(fmt.Sprintf("Size_%d", size), func(b *testing.B) {
+			data := generateJSONData(int(size))
+			data, err := jsonArrayToNDJSON(data)
+			if err != nil {
+				b.Fatalf("failed to convert JSON to NDJSON: %v", err)
+			}
+
+			var rdr bytes.Reader
+			for _, chkSize := range []int{-1, int(size / 2), int(size)} {
+				b.Run(fmt.Sprintf("ChunkSize_%d", chkSize), func(b *testing.B) {
+					pool := memory.NewGoAllocator()
+					b.SetBytes(int64(len(data)))
+					b.ResetTimer()
+					for range b.N {
+						rdr.Reset(data)
+
+						jsonRdr := array.NewJSONReader(&rdr, schema, array.WithAllocator(pool),
+							array.WithChunk(chkSize))
+
+						var totalRows int64
+						for jsonRdr.Next() {
+							rec := jsonRdr.Record()
+							totalRows += rec.NumRows()
+						}
+
+						if err := jsonRdr.Err(); err != nil {
+							b.Errorf("error reading JSON: %v", err)
+						}
+						jsonRdr.Release()
+
+						if totalRows != size {
+							b.Errorf("expected %d rows, got %d", size, totalRows)
+						}
+					}
+				})
+			}
+		})
+	}
 }
