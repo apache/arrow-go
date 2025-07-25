@@ -50,16 +50,16 @@ func (b ByteArray) MarshalJSON() ([]byte, error) {
 type TimestampMicros int64
 
 func (t TimestampMicros) MarshalJSON() ([]byte, error) {
-	ts := time.Unix(0, int64(t)*int64(time.Microsecond)).UTC().Format("2006-01-02 15:04:05.000000")
+	ts := time.Unix(0, int64(t)*int64(time.Microsecond)).UTC().Format(time.RFC3339Nano)
 	// arrow record marshaller trims trailing zero digits from timestamp so we do the same
-	return json.Marshal(fmt.Sprintf("%sZ", strings.TrimRight(ts, "0.")))
+	return json.Marshal(ts)
 }
 
 type TimestampMillis int64
 
 func (t TimestampMillis) MarshalJSON() ([]byte, error) {
-	ts := time.Unix(0, int64(t)*int64(time.Millisecond)).UTC().Format("2006-01-02 15:04:05.000")
-	return json.Marshal(fmt.Sprintf("%sZ", strings.TrimRight(ts, "0.")))
+	ts := time.Unix(0, int64(t)*int64(time.Millisecond)).UTC().Format(time.RFC3339Nano)
+	return json.Marshal(ts)
 }
 
 type TimeMillis time.Duration
