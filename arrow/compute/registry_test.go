@@ -21,13 +21,13 @@ package compute_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/exp/slices"
 )
 
 var registry compute.FunctionRegistry

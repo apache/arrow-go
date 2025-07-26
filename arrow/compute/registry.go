@@ -19,11 +19,11 @@
 package compute
 
 import (
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
-	"golang.org/x/exp/maps"
-	"golang.org/x/exp/slices"
 )
 
 type FunctionRegistry interface {
@@ -138,7 +138,7 @@ func (reg *funcRegistry) GetFunctionNames() (out []string) {
 	reg.mx.RLock()
 	defer reg.mx.RUnlock()
 
-	out = append(out, maps.Keys(reg.nameToFunction)...)
+	out = append(out, slices.Collect(maps.Keys(reg.nameToFunction))...)
 	slices.Sort(out)
 	return
 }

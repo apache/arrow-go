@@ -19,8 +19,10 @@
 package exec
 
 import (
+	"cmp"
 	"fmt"
 	"math"
+	"slices"
 	"sync/atomic"
 	"unsafe"
 
@@ -28,8 +30,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	"golang.org/x/exp/constraints"
-	"golang.org/x/exp/slices"
 )
 
 // GetSpanValues returns a properly typed slice by reinterpreting
@@ -51,14 +51,14 @@ func GetSpanOffsets[T int32 | int64](span *ArraySpan, i int) []T {
 	return ret[span.Offset:]
 }
 
-func Min[T constraints.Ordered](a, b T) T {
+func Min[T cmp.Ordered](a, b T) T {
 	if a < b {
 		return a
 	}
 	return b
 }
 
-func Max[T constraints.Ordered](a, b T) T {
+func Max[T cmp.Ordered](a, b T) T {
 	if a > b {
 		return a
 	}
