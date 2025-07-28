@@ -650,7 +650,10 @@ func (v Value) Value() any {
 		}
 	case BasicShortString:
 		sz := int(v.value[0] >> 2)
-		return unsafe.String(&v.value[1], sz)
+		if sz > 0 {
+			return unsafe.String(&v.value[1], sz)
+		}
+		return ""
 	case BasicObject:
 		valueHdr := (v.value[0] >> basicTypeBits)
 		fieldOffsetSz := (valueHdr & 0b11) + 1
