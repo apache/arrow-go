@@ -136,3 +136,22 @@ func TestSizeInBytes(t *testing.T) {
 		}
 	})
 }
+
+func TestDataReleaseWithNilChildData(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	// Create a Data object that simulates the state after a failed concatenation
+	// where childData slice is allocated but contains nil elements
+	buffers := []*memory.Buffer{memory.NewBufferBytes([]byte("test-buffer"))}
+	data := NewData(arrow.ListOf(arrow.PrimitiveTypes.Int32), 1, buffers, nil, 0, 0)
+
+	// Simulate the scenario where childData is allocated but elements remain nil
+	// This happens in concat.go when childData is allocated but concat() fails
+	data.childData = make([]arrow.ArrayData, 1)
+	// data.childData[0] remains nil (simulating failed concat)
+
+	assert.NotPanics(t, func() {
+		data.Release()
+	}, "Release() should not panic when childData contains nil elements")
+}
