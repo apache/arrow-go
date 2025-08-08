@@ -699,3 +699,85 @@ func TestLargeTypes(t *testing.T) {
 		defer result.Release()
 	})
 }
+
+func TestDecimalFilterLarge(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		name string
+		n    int
+	}{
+		{
+			name: "arrow.DECIMAL128 - number of records < 33 ok",
+			n:    32,
+		},
+		{
+			name: "arrow.DECIMAL128 - number of records >= 33 panic",
+			n:    33,
+		},
+	}
+
+	for _, tc := range tt {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			rq := require.New(t)
+
+			typ := &arrow.Decimal128Type{Precision: 3, Scale: 1}
+			field := arrow.Field{
+				Name:     "col",
+				Type:     typ,
+				Nullable: true,
+			}
+			schema := arrow.NewSchema([]arrow.Field{field}, nil)
+
+			db := array.NewDecimal128Builder(memory.DefaultAllocator, typ)
+			defer db.Release()
+
+			for i := 0; i < tc.n; i++ {
+				d, err := decimal.Decimal128FromFloat(float64(i), 3, 1)
+				rq.NoError(err, "Failed to create Decimal128 value")
+
+				db.Append(d)
+			}
+
+			rec := array.NewRecord(schema, []arrow.Array{db.NewArray()}, int64(tc.n))
+
+			extSet := exprs.GetExtensionIDSet(ctx)
+			builder := exprs.NewExprBuilder(extSet)
+
+			err := builder.SetInputSchema(schema)
+			rq.NoError(err, "Failed to set input schema")
+
+			v, p, s, err := expr.DecimalStringToBytes("10.0")
+			rq.NoError(err, "Failed to convert decimal string to bytes")
+
+			lit, err := expr.NewLiteral(&types.Decimal{
+				Value:     v[:16],
+				Precision: p,
+				Scale:     s,
+			}, true)
+			rq.NoError(err, "Failed to create Decimal128 literal")
+
+			b, err := builder.CallScalar("less", nil,
+				builder.FieldRef("col"),
+				builder.Literal(lit),
+			)
+
+			rq.NoError(err, "Failed to call scalar")
+
+			e, err := b.BuildExpr()
+			rq.NoError(err, "Failed to build expression")
+
+			ctx = exprs.WithExtensionIDSet(ctx, extSet)
+
+			dr := compute.NewDatum(rec)
+			defer dr.Release()
+
+			_, err = exprs.ExecuteScalarExpression(ctx, schema, e, dr)
+			rq.NoError(err, "Failed to execute scalar expression")
+		})
+	}
+}
