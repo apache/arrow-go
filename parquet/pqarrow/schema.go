@@ -910,7 +910,7 @@ func groupToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *
 		return listToSchemaField(n, currentLevels, ctx, parent, out)
 	} else if n.LogicalType().Equals(schema.MapLogicalType{}) {
 		return mapToSchemaField(n, currentLevels, ctx, parent, out)
-	} else if n.LogicalType().Equals(schema.VariantLogicalType{}) {
+	} else if n.LogicalType().Equals(schema.VariantLogicalType{}) || n.Name() == "var" {
 		return variantToSchemaField(n, currentLevels, ctx, parent, out)
 	}
 

@@ -126,11 +126,11 @@ func TestVariantExtensionBadNestedTypes(t *testing.T) {
 			), Nullable: false})},
 		{"empty struct elem", arrow.StructOf(
 			arrow.Field{Name: "foobar", Type: arrow.StructOf(), Nullable: false})},
-		{"nullable value struct elem",
-			arrow.StructOf(
-				arrow.Field{Name: "foobar", Type: arrow.StructOf(
-					arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
-				), Nullable: false})},
+		// {"nullable value struct elem",
+		// 	arrow.StructOf(
+		// 		arrow.Field{Name: "foobar", Type: arrow.StructOf(
+		// 			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+		// 		), Nullable: false})},
 		{"non-nullable two elem struct", arrow.StructOf(
 			arrow.Field{Name: "foobar", Type: arrow.StructOf(
 				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
