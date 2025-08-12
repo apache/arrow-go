@@ -48,7 +48,7 @@ func main() {
 	defer rec.Release()
 
 	// Create a table from the record
-	tbl := array.NewTableFromRecords(schema, []arrow.Record{rec})
+	tbl := array.NewTableFromRecords(schema, []arrow.RecordBatch{rec})
 	defer tbl.Release()
 
 	// Calculate sum of floatField
