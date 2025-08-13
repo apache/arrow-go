@@ -48,7 +48,9 @@ type RecordBatch interface {
 	NewSlice(i, j int64) RecordBatch
 }
 
-// Deprecated: Record is deprecated, use RecordBatch instead.
-// Record represents a single row, but this type actually represents a batch of rows.
-// This alias is provided for backwards compatibility.
+// Record as a term typically refers to a single row, but this type represents a batch of rows, known in Arrow parlance
+// as a RecordBatch. This alias is provided for backwards compatibility.
+//
+// Deprecated: This is deprecated to avoid the confusion of the terminology where Record refers to a single row,
+// use [RecordBatch] instead.
 type Record = RecordBatch
