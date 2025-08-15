@@ -230,7 +230,7 @@ func (b *Int64Builder) UnmarshalOne(dec *json.Decoder) error {
 	case float64:
 		b.Append(int64(v))
 	case json.Number:
-		f, err := strconv.ParseInt(v.String(), 10, 8*8)
+		f, err := strconv.ParseFloat(v.String(), 8*8)
 		if err != nil {
 			return &json.UnmarshalTypeError{
 				Value:  v.String(),
@@ -471,7 +471,7 @@ func (b *Uint64Builder) UnmarshalOne(dec *json.Decoder) error {
 	case float64:
 		b.Append(uint64(v))
 	case json.Number:
-		f, err := strconv.ParseUint(v.String(), 10, 8*8)
+		f, err := strconv.ParseFloat(v.String(), 8*8)
 		if err != nil {
 			return &json.UnmarshalTypeError{
 				Value:  v.String(),
