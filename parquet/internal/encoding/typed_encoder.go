@@ -307,6 +307,11 @@ func (dc *dictConverter[T]) IsValid(idxes ...utils.IndexType) bool {
 	return min >= 0 && int(min) < len(dc.dict) && int(max) >= 0 && int(max) < len(dc.dict)
 }
 
+func (dc *dictConverter[T]) IsValidSingle(idx utils.IndexType) bool {
+	dc.ensure(idx)
+	return int(idx) >= 0 && int(idx) < len(dc.dict)
+}
+
 func (dc *dictConverter[T]) Fill(o []T, val utils.IndexType) error {
 	if err := dc.ensure(val); err != nil {
 		return err
