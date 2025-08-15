@@ -64,7 +64,7 @@ func getspaced[T parquet.ColumnTypes | uint64](r *RleDecoder, dc DictionaryConve
 		case r.repCount > 0:
 			batch, remain, validRun = r.consumeRepeatCounts(read, batchSize, remain, validRun, bitReader)
 			current := IndexType(r.curVal)
-			if !dc.IsValid(current) {
+			if !dc.IsValidSingle(current) {
 				return read, nil
 			}
 			dc.Fill(vals[:batch], current)
@@ -151,7 +151,7 @@ func (r *TypedRleDecoder[T]) GetBatchWithDict(dc DictionaryConverter[T], vals []
 		switch {
 		case r.repCount > 0:
 			idx := IndexType(r.curVal)
-			if !dc.IsValid(idx) {
+			if !dc.IsValidSingle(idx) {
 				return read, nil
 			}
 			batch := utils.Min(remain, int(r.repCount))

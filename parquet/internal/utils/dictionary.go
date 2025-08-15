@@ -41,7 +41,9 @@ type DictionaryConverter[T parquet.ColumnTypes | uint64] interface {
 	FillZero([]T)
 	// IsValid validates that all of the indexes passed in are valid indexes for the dictionary
 	IsValid(...IndexType) bool
-	// IsValidSingle(IndexType) bool
+	// IsValidSingle validates that the index passed in is a valid index for the dictionary
+	// This is an optimisation, to avoid allocating a slice for a single value
+	IsValidSingle(IndexType) bool
 }
 
 // converter for getspaced that handles runs that get returned directly
@@ -49,6 +51,8 @@ type DictionaryConverter[T parquet.ColumnTypes | uint64] interface {
 type plainConverter[T ~uint64] struct{}
 
 func (plainConverter[T]) IsValid(...IndexType) bool { return true }
+
+func (plainConverter[T]) IsValidSingle(IndexType) bool { return true }
 
 func (plainConverter[T]) Fill(values []T, val IndexType) error {
 	if len(values) == 0 {
