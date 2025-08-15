@@ -118,7 +118,7 @@ func (pbad *PlainByteArrayDecoder) DecodeSpaced(out []parquet.ByteArray, nullCou
 }
 
 func (d *DictByteArrayDecoder) InsertDictionary(bldr array.Builder) error {
-	conv := d.dictValueDecoder.(*ByteArrayDictConverter)
+	conv := d.dictValueDecoder.(*dictConverter[parquet.ByteArray])
 	dictLength := cap(conv.dict)
 	conv.ensure(pqutils.IndexType(dictLength))
 

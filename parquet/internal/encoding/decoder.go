@@ -105,7 +105,7 @@ func (d *decoder) Encoding() parquet.Encoding { return parquet.Encoding(d.encodi
 type dictDecoder[T parquet.ColumnTypes] struct {
 	decoder
 	mem              memory.Allocator
-	dictValueDecoder utils.DictionaryConverter
+	dictValueDecoder utils.DictionaryConverter[T]
 	idxDecoder       *utils.TypedRleDecoder[T]
 
 	idxScratchSpace []uint64
@@ -118,7 +118,7 @@ func (d *dictDecoder[T]) SetDict(dict TypedDecoder) {
 		panic("parquet: mismatch dictionary and column data type")
 	}
 
-	d.dictValueDecoder = NewDictConverter(dict)
+	d.dictValueDecoder = NewDictConverter[T](dict)
 }
 
 // SetData sets the index value data into the decoder.
