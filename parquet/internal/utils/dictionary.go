@@ -19,6 +19,8 @@ package utils
 import (
 	"math"
 	"reflect"
+
+	"github.com/apache/arrow-go/v18/parquet"
 )
 
 // IndexType is the type we're going to use for Dictionary indexes, currently
@@ -47,12 +49,25 @@ type DictionaryConverter interface {
 	IsValid(...IndexType) bool
 }
 
+type DictionaryConverter2[T parquet.ColumnTypes | uint64] interface {
+	// Copy populates the input slice by the dictionary values at the indexes from the IndexType slice
+	Copy2([]T, []IndexType) error
+	// Fill fills the input slice with the value specified by the dictionary index passed in.
+	Fill2([]T, IndexType) error
+	// FillZero fills the input slice with the zero value for the given type.
+	FillZero2([]T)
+	// IsValid validates that all of the indexes passed in are valid indexes for the dictionary
+	IsValid(...IndexType) bool
+	// IsValidSingle(IndexType) bool
+}
+
 // converter for getspaced that handles runs that get returned directly
 // as output, rather than using a dictionary
-type plainConverter struct{}
+type plainConverter[T ~uint64] struct{}
 
-func (plainConverter) IsValid(...IndexType) bool { return true }
-func (plainConverter) Fill(values interface{}, val IndexType) error {
+func (plainConverter[T]) IsValid(...IndexType) bool { return true }
+
+func (plainConverter[T]) Fill(values interface{}, val IndexType) error {
 	v := reflect.ValueOf(values)
 	switch v.Type().Elem().Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
@@ -67,7 +82,7 @@ func (plainConverter) Fill(values interface{}, val IndexType) error {
 	return nil
 }
 
-func (plainConverter) FillZero(values interface{}) {
+func (plainConverter[T]) FillZero(values interface{}) {
 	v := reflect.ValueOf(values)
 	zeroVal := reflect.New(v.Type().Elem()).Elem()
 
@@ -77,11 +92,40 @@ func (plainConverter) FillZero(values interface{}) {
 	}
 }
 
-func (plainConverter) Copy(out interface{}, values []IndexType) error {
+func (plainConverter[T]) Copy(out interface{}, values []IndexType) error {
 	vout := reflect.ValueOf(out)
 	vin := reflect.ValueOf(values)
 	for i := 0; i < vin.Len(); i++ {
 		vout.Index(i).Set(vin.Index(i).Convert(vout.Type().Elem()))
+	}
+	return nil
+}
+
+func (plainConverter[T]) Fill2(values []T, val IndexType) error {
+	if len(values) == 0 {
+		return nil
+	}
+	values[0] = T(val)
+	for i := 1; i < len(values); i *= 2 {
+		copy(values[i:], values[0:i])
+	}
+	return nil
+}
+
+func (plainConverter[T]) FillZero2(values []T) {
+	if len(values) == 0 {
+		return
+	}
+	var zero T
+	values[0] = zero
+	for i := 1; i < len(values); i *= 2 {
+		copy(values[i:], values[0:i])
+	}
+}
+
+func (plainConverter[T]) Copy2(out []T, values []IndexType) error {
+	for i := range values {
+		out[i] = T(values[i])
 	}
 	return nil
 }

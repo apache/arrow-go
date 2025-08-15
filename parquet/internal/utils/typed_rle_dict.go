@@ -17,6 +17,8 @@
 package utils
 
 import (
+	"bytes"
+
 	"github.com/apache/arrow-go/v18/internal/bitutils"
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -124,4 +126,106 @@ func consumeLiterals[T parquet.ColumnTypes | uint64](r *RleDecoder, dc Dictionar
 	}
 	r.litCount -= int32(batch)
 	return read, skipped, run, nil
+}
+
+type TypedRleDecoder[T parquet.ColumnTypes | uint64] struct {
+	RleDecoder
+}
+
+func NewTypedRleDecoder[T parquet.ColumnTypes | uint64](data *bytes.Reader, width int) *TypedRleDecoder[T] {
+	return &TypedRleDecoder[T]{
+		RleDecoder: RleDecoder{r: NewBitReader(data), bitWidth: width},
+	}
+}
+
+func (r *TypedRleDecoder[T]) GetBatchWithDict(dc DictionaryConverter, vals []T) (int, error) {
+	var (
+		read        = 0
+		size        = len(vals)
+		indexbuffer [1024]IndexType
+	)
+
+	for read < size {
+		remain := size - read
+
+		switch {
+		case r.repCount > 0:
+			idx := IndexType(r.curVal)
+			if !dc.IsValid(idx) {
+				return read, nil
+			}
+			batch := utils.Min(remain, int(r.repCount))
+			if err := dc.Fill(vals[:batch], idx); err != nil {
+				return read, err
+			}
+			r.repCount -= int32(batch)
+			read += batch
+			vals = vals[batch:]
+		case r.litCount > 0:
+			litbatch := utils.Min(utils.Min(remain, int(r.litCount)), 1024)
+			buf := indexbuffer[:litbatch]
+			n, _ := r.r.GetBatchIndex(uint(r.bitWidth), buf)
+			if n != litbatch {
+				return read, nil
+			}
+			if !dc.IsValid(buf...) {
+				return read, nil
+			}
+			if err := dc.Copy(vals, buf); err != nil {
+				return read, nil
+			}
+			r.litCount -= int32(litbatch)
+			read += litbatch
+			vals = vals[litbatch:]
+		default:
+			if !r.Next() {
+				return read, nil
+			}
+		}
+	}
+
+	return read, nil
+}
+
+func (r *TypedRleDecoder[T]) GetBatchWithDictSpaced(dc DictionaryConverter, vals []T, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
+	if nullCount == 0 {
+		return r.GetBatchWithDict(dc, vals)
+	}
+
+	var (
+		blockCounter   = bitutils.NewBitBlockCounter(validBits, validBitsOffset, int64(len(vals)))
+		processed      = 0
+		totalProcessed = 0
+		block          bitutils.BitBlockCount
+		err            error
+	)
+
+	for {
+		block = blockCounter.NextFourWords()
+		if block.Len == 0 {
+			break
+		}
+
+		switch {
+		case block.AllSet():
+			processed, err = r.GetBatchWithDict(dc, vals[:block.Len])
+		case block.NoneSet():
+			dc.FillZero(vals[:block.Len])
+			processed = int(block.Len)
+		default:
+			processed, err = getspaced(&r.RleDecoder, dc, vals, int(block.Len), int(block.Len)-int(block.Popcnt), validBits, validBitsOffset)
+		}
+
+		if err != nil {
+			break
+		}
+
+		totalProcessed += processed
+		vals = vals[int(block.Len):]
+		validBitsOffset += int64(block.Len)
+		if processed != int(block.Len) {
+			break
+		}
+	}
+	return totalProcessed, err
 }
