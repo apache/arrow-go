@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"sync"
@@ -808,5 +810,85 @@ func TestFullSeekRow(t *testing.T) {
 			assert.Equal(t, []int16{1, 3, 3, 3, 0}, defLvls[:total])
 			assert.Equal(t, []int16{0, 0, 1, 1, 0}, repLvls[:total])
 		})
+	}
+}
+
+func BenchmarkReadInt32Column(b *testing.B) {
+	// generate parquet with RLE-dictionary encoded int32 column
+	tempdir := b.TempDir()
+	filepath := filepath.Join(tempdir, "rle-dict-int32.parquet")
+
+	props := parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(true),
+		parquet.WithDataPageSize(128*1024*1024), // 128MB
+		parquet.WithBatchSize(128*1024*1024),
+		parquet.WithMaxRowGroupLength(100_000),
+		parquet.WithDataPageVersion(parquet.DataPageV2),
+		parquet.WithVersion(parquet.V2_LATEST),
+	)
+	outFile, err := os.Create(filepath)
+	require.NoError(b, err)
+
+	sc, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewInt32Node("col", parquet.Repetitions.Required, -1),
+	}, -1)
+	require.NoError(b, err)
+
+	writer := file.NewParquetWriter(outFile, sc, file.WithWriterProps(props))
+
+	// 10 row groups of 100 000 rows = 1 000 000 rows in total
+	value := int32(1)
+	for range 10 {
+		rgWriter := writer.AppendBufferedRowGroup()
+		cwr, _ := rgWriter.Column(0)
+		cw := cwr.(*file.Int32ColumnChunkWriter)
+		valuesIn := make([]int32, 0, 100_000)
+		repeats := 1
+		for len(valuesIn) < 100_000 {
+			repeatedValue := make([]int32, repeats)
+			for i := range repeatedValue {
+				repeatedValue[i] = value
+			}
+			if len(valuesIn)+len(repeatedValue) > 100_000 {
+				repeatedValue = repeatedValue[:100_000-len(valuesIn)]
+			}
+			valuesIn = append(valuesIn, repeatedValue[:]...)
+			// repeat values from 1 to 50 times
+			repeats = (repeats % 50) + 1
+			value++
+		}
+		cw.WriteBatch(valuesIn, nil, nil)
+		rgWriter.Close()
+	}
+	err = writer.Close()
+	require.NoError(b, err)
+
+	reader, err := file.OpenParquetFile(filepath, false)
+	require.NoError(b, err)
+	defer reader.Close()
+
+	numValues := reader.NumRows()
+	values := make([]int32, numValues)
+	b.StopTimer()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		startIndex := 0
+		for rg := 0; rg < reader.NumRowGroups(); rg++ {
+			rgReader := reader.RowGroup(rg)
+			colReader, err := rgReader.Column(0)
+			require.NoError(b, err)
+
+			cr, ok := colReader.(*file.Int32ColumnChunkReader)
+			require.True(b, ok)
+
+			b.StartTimer()
+			_, valuesRead, err := cr.ReadBatch(rgReader.NumRows(), values, nil, nil)
+			b.StopTimer()
+			require.NoError(b, err)
+
+			startIndex += valuesRead
+			require.Equal(b, rgReader.NumRows(), int64(valuesRead))
+		}
+		require.Equal(b, numValues, int64(startIndex))
 	}
 }
