@@ -307,12 +307,10 @@ func (dc *dictConverter[T]) IsValid(idxes ...utils.IndexType) bool {
 	return min >= 0 && int(min) < len(dc.dict) && int(max) >= 0 && int(max) < len(dc.dict)
 }
 
-func (dc *dictConverter[T]) Fill(out any, val utils.IndexType) error {
-	o := out.([]T)
+func (dc *dictConverter[T]) Fill(o []T, val utils.IndexType) error {
 	if err := dc.ensure(val); err != nil {
 		return err
 	}
-
 	o[0] = dc.dict[val]
 	for i := 1; i < len(o); i *= 2 {
 		copy(o[i:], o[:i])
@@ -320,29 +318,19 @@ func (dc *dictConverter[T]) Fill(out any, val utils.IndexType) error {
 	return nil
 }
 
-func (dc *dictConverter[T]) FillZero(out any) {
-	o := out.([]T)
+func (dc *dictConverter[T]) FillZero(o []T) {
 	o[0] = dc.zeroVal
 	for i := 1; i < len(o); i *= 2 {
 		copy(o[i:], o[:i])
 	}
 }
 
-func (dc *dictConverter[T]) Copy(out any, vals []utils.IndexType) error {
-	o := out.([]T)
+func (dc *dictConverter[T]) Copy(o []T, vals []utils.IndexType) error {
 	for idx, val := range vals {
 		o[idx] = dc.dict[val]
 	}
 	return nil
 }
-
-type Int32DictConverter = dictConverter[int32]
-type Int64DictConverter = dictConverter[int64]
-type Float32DictConverter = dictConverter[float32]
-type Float64DictConverter = dictConverter[float64]
-type Int96DictConverter = dictConverter[parquet.Int96]
-type ByteArrayDictConverter = dictConverter[parquet.ByteArray]
-type FixedLenByteArrayDictConverter = dictConverter[parquet.FixedLenByteArray]
 
 // the int96EncoderTraits struct is used to make it easy to create encoders and decoders based on type
 type int96EncoderTraits struct{}
@@ -664,25 +652,8 @@ func (enc *DictFixedLenByteArrayEncoder) Type() parquet.Type {
 
 // NewDictConverter creates a dict converter of the appropriate type, using the passed in
 // decoder as the decoder to decode the dictionary index.
-func NewDictConverter(dict TypedDecoder) utils.DictionaryConverter {
-	switch dict.Type() {
-	case parquet.Types.Int32:
-		return &Int32DictConverter{valueDecoder: dict.(Int32Decoder), dict: make([]int32, 0, dict.ValuesLeft())}
-	case parquet.Types.Int64:
-		return &Int64DictConverter{valueDecoder: dict.(Int64Decoder), dict: make([]int64, 0, dict.ValuesLeft())}
-	case parquet.Types.Int96:
-		return &Int96DictConverter{valueDecoder: dict.(Int96Decoder), dict: make([]parquet.Int96, 0, dict.ValuesLeft())}
-	case parquet.Types.Float:
-		return &Float32DictConverter{valueDecoder: dict.(Float32Decoder), dict: make([]float32, 0, dict.ValuesLeft())}
-	case parquet.Types.Double:
-		return &Float64DictConverter{valueDecoder: dict.(Float64Decoder), dict: make([]float64, 0, dict.ValuesLeft())}
-	case parquet.Types.ByteArray:
-		return &ByteArrayDictConverter{valueDecoder: dict.(ByteArrayDecoder), dict: make([]parquet.ByteArray, 0, dict.ValuesLeft())}
-	case parquet.Types.FixedLenByteArray:
-		return &FixedLenByteArrayDictConverter{valueDecoder: dict.(FixedLenByteArrayDecoder), dict: make([]parquet.FixedLenByteArray, 0, dict.ValuesLeft())}
-	default:
-		return nil
-	}
+func NewDictConverter[T parquet.ColumnTypes](dict TypedDecoder) utils.DictionaryConverter[T] {
+	return &dictConverter[T]{valueDecoder: dict.(Decoder[T]), dict: make([]T, 0, dict.ValuesLeft())}
 }
 
 var (

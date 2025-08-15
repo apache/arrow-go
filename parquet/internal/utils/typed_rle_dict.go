@@ -25,7 +25,7 @@ import (
 	"golang.org/x/xerrors"
 )
 
-func getspaced[T parquet.ColumnTypes | uint64](r *RleDecoder, dc DictionaryConverter, vals []T, batchSize, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
+func getspaced[T parquet.ColumnTypes | uint64](r *RleDecoder, dc DictionaryConverter[T], vals []T, batchSize, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
 	if nullCount == batchSize {
 		dc.FillZero(vals[:batchSize])
 		return batchSize, nil
@@ -88,7 +88,7 @@ func getspaced[T parquet.ColumnTypes | uint64](r *RleDecoder, dc DictionaryConve
 	return read, nil
 }
 
-func consumeLiterals[T parquet.ColumnTypes | uint64](r *RleDecoder, dc DictionaryConverter, vals []T, remain int, buf []IndexType, run bitutils.BitRun, bitRdr bitutils.BitRunReader) (int, int, bitutils.BitRun, error) {
+func consumeLiterals[T parquet.ColumnTypes | uint64](r *RleDecoder, dc DictionaryConverter[T], vals []T, remain int, buf []IndexType, run bitutils.BitRun, bitRdr bitutils.BitRunReader) (int, int, bitutils.BitRun, error) {
 	batch := utils.Min(utils.Min(remain, int(r.litCount)), len(buf))
 	buf = buf[:batch]
 
@@ -138,7 +138,7 @@ func NewTypedRleDecoder[T parquet.ColumnTypes | uint64](data *bytes.Reader, widt
 	}
 }
 
-func (r *TypedRleDecoder[T]) GetBatchWithDict(dc DictionaryConverter, vals []T) (int, error) {
+func (r *TypedRleDecoder[T]) GetBatchWithDict(dc DictionaryConverter[T], vals []T) (int, error) {
 	var (
 		read        = 0
 		size        = len(vals)
@@ -187,7 +187,7 @@ func (r *TypedRleDecoder[T]) GetBatchWithDict(dc DictionaryConverter, vals []T) 
 	return read, nil
 }
 
-func (r *TypedRleDecoder[T]) GetBatchWithDictSpaced(dc DictionaryConverter, vals []T, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
+func (r *TypedRleDecoder[T]) GetBatchWithDictSpaced(dc DictionaryConverter[T], vals []T, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
 	if nullCount == 0 {
 		return r.GetBatchWithDict(dc, vals)
 	}

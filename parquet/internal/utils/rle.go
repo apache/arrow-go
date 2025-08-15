@@ -262,7 +262,7 @@ func (r *RleDecoder) GetBatchSpaced(vals []uint64, nullcount int, validBits []by
 		if block.AllSet() {
 			processed = r.GetBatch(vals[:block.Len])
 		} else if block.NoneSet() {
-			converter.FillZero2(vals[:block.Len])
+			converter.FillZero(vals[:block.Len])
 			processed = int(block.Len)
 		} else {
 			processed, err = getspaced(r, converter, vals, int(block.Len), int(block.Len-block.Popcnt), validBits, validBitsOffset)
