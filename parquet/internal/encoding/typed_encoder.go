@@ -184,7 +184,7 @@ func (intDecoderTraits[T]) BytesRequired(n int) int {
 
 func (intDecoderTraits[T]) Decoder(e parquet.Encoding, descr *schema.Column, useDict bool, mem memory.Allocator) TypedDecoder {
 	if useDict {
-		return &typedDictDecoder[T]{dictDecoder{decoder: newDecoderBase(format.Encoding_RLE_DICTIONARY, descr), mem: mem}}
+		return &typedDictDecoder[T]{dictDecoder[T]{decoder: newDecoderBase(format.Encoding_RLE_DICTIONARY, descr), mem: mem}}
 	}
 
 	switch e {
@@ -213,7 +213,7 @@ func (floatDecoderTraits[T]) BytesRequired(n int) int {
 
 func (floatDecoderTraits[T]) Decoder(e parquet.Encoding, descr *schema.Column, useDict bool, mem memory.Allocator) TypedDecoder {
 	if useDict {
-		return &typedDictDecoder[T]{dictDecoder{decoder: newDecoderBase(format.Encoding_RLE_DICTIONARY, descr), mem: mem}}
+		return &typedDictDecoder[T]{dictDecoder: dictDecoder[T]{decoder: newDecoderBase(format.Encoding_RLE_DICTIONARY, descr), mem: mem}}
 	}
 
 	switch e {
@@ -227,7 +227,7 @@ func (floatDecoderTraits[T]) Decoder(e parquet.Encoding, descr *schema.Column, u
 }
 
 type typedDictDecoder[T int32 | int64 | float32 | float64 | parquet.Int96 | parquet.ByteArray | parquet.FixedLenByteArray] struct {
-	dictDecoder
+	dictDecoder[T]
 }
 
 func (d *typedDictDecoder[T]) Type() parquet.Type {
@@ -374,7 +374,7 @@ func (int96DecoderTraits) BytesRequired(n int) int {
 // Decoder returns a decoder for int96 typed data of the requested encoding type if available
 func (int96DecoderTraits) Decoder(e parquet.Encoding, descr *schema.Column, useDict bool, mem memory.Allocator) TypedDecoder {
 	if useDict {
-		return &DictInt96Decoder{dictDecoder{decoder: newDecoderBase(format.Encoding_RLE_DICTIONARY, descr), mem: mem}}
+		return &DictInt96Decoder{dictDecoder[parquet.Int96]{decoder: newDecoderBase(format.Encoding_RLE_DICTIONARY, descr), mem: mem}}
 	}
 
 	switch e {
@@ -518,7 +518,7 @@ func (byteArrayDecoderTraits) BytesRequired(n int) int {
 // Decoder returns a decoder for byteArray typed data of the requested encoding type if available
 func (byteArrayDecoderTraits) Decoder(e parquet.Encoding, descr *schema.Column, useDict bool, mem memory.Allocator) TypedDecoder {
 	if useDict {
-		return &DictByteArrayDecoder{dictDecoder{decoder: newDecoderBase(format.Encoding_RLE_DICTIONARY, descr), mem: mem}}
+		return &DictByteArrayDecoder{dictDecoder[parquet.ByteArray]{decoder: newDecoderBase(format.Encoding_RLE_DICTIONARY, descr), mem: mem}}
 	}
 
 	switch e {
@@ -558,7 +558,7 @@ func (enc *DictByteArrayEncoder) Type() parquet.Type {
 
 // DictByteArrayDecoder is a decoder for decoding dictionary encoded data for parquet.ByteArray columns
 type DictByteArrayDecoder struct {
-	dictDecoder
+	dictDecoder[parquet.ByteArray]
 }
 
 // Type returns the underlying physical type that can be decoded with this decoder
@@ -639,7 +639,7 @@ func (fixedLenByteArrayDecoderTraits) BytesRequired(n int) int {
 // Decoder returns a decoder for fixedLenByteArray typed data of the requested encoding type if available
 func (fixedLenByteArrayDecoderTraits) Decoder(e parquet.Encoding, descr *schema.Column, useDict bool, mem memory.Allocator) TypedDecoder {
 	if useDict {
-		return &DictFixedLenByteArrayDecoder{dictDecoder{decoder: newDecoderBase(format.Encoding_RLE_DICTIONARY, descr), mem: mem}}
+		return &DictFixedLenByteArrayDecoder{dictDecoder[parquet.FixedLenByteArray]{decoder: newDecoderBase(format.Encoding_RLE_DICTIONARY, descr), mem: mem}}
 	}
 
 	switch e {
