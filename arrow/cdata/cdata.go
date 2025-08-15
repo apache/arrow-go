@@ -950,7 +950,7 @@ type nativeCRecordBatchReader struct {
 	arr    *CArrowArray
 	schema *arrow.Schema
 
-	cur arrow.Record
+	cur arrow.RecordBatch
 	err error
 }
 
@@ -959,8 +959,8 @@ type nativeCRecordBatchReader struct {
 func (n *nativeCRecordBatchReader) Retain()  {}
 func (n *nativeCRecordBatchReader) Release() {}
 
-func (n *nativeCRecordBatchReader) Err() error           { return n.err }
-func (n *nativeCRecordBatchReader) Record() arrow.Record { return n.cur }
+func (n *nativeCRecordBatchReader) Err() error                { return n.err }
+func (n *nativeCRecordBatchReader) Record() arrow.RecordBatch { return n.cur }
 
 func (n *nativeCRecordBatchReader) Next() bool {
 	err := n.next()
@@ -1021,7 +1021,7 @@ func (n *nativeCRecordBatchReader) getError(errno int) error {
 	return fmt.Errorf("%w: %s", syscall.Errno(errno), C.GoString(C.stream_get_last_error(n.stream)))
 }
 
-func (n *nativeCRecordBatchReader) Read() (arrow.Record, error) {
+func (n *nativeCRecordBatchReader) Read() (arrow.RecordBatch, error) {
 	if err := n.next(); err != nil {
 		n.err = err
 		return nil, err

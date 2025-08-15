@@ -47,7 +47,7 @@ type schemaEdit struct {
 	value  any
 }
 
-// Reader wraps goavro/OCFReader and creates array.Records from a schema.
+// Reader wraps goavro/OCFReader and creates array.RecordBatches from a schema.
 type OCFReader struct {
 	r               *ocf.Decoder
 	avroSchema      string
@@ -58,7 +58,7 @@ type OCFReader struct {
 	bld    *array.RecordBuilder
 	bldMap *fieldPos
 	ldr    *dataLoader
-	cur    arrow.Record
+	cur    arrow.RecordBatch
 	err    error
 
 	primed     bool
@@ -70,7 +70,7 @@ type OCFReader struct {
 	avroChan       chan any
 	avroDatumCount int64
 	avroChanSize   int
-	recChan        chan arrow.Record
+	recChan        chan arrow.RecordBatch
 
 	bldDone chan struct{}
 
@@ -80,7 +80,7 @@ type OCFReader struct {
 }
 
 // NewReader returns a reader that reads from an Avro OCF file and creates
-// arrow.Records from the converted avro data.
+// arrow.RecordBatches from the converted avro data.
 func NewOCFReader(r io.Reader, opts ...Option) (*OCFReader, error) {
 	ocfr, err := ocf.NewDecoder(r)
 	if err != nil {
@@ -100,7 +100,7 @@ func NewOCFReader(r io.Reader, opts ...Option) (*OCFReader, error) {
 	}
 
 	rr.avroChan = make(chan any, rr.avroChanSize)
-	rr.recChan = make(chan arrow.Record, rr.recChanSize)
+	rr.recChan = make(chan arrow.RecordBatch, rr.recChanSize)
 	rr.bldDone = make(chan struct{})
 	schema, err := avro.Parse(string(ocfr.Metadata()["avro.schema"]))
 	if err != nil {
@@ -170,7 +170,7 @@ func (rr *OCFReader) Reuse(r io.Reader, opts ...Option) error {
 	rr.primed = false
 
 	rr.avroChan = make(chan any, rr.avroChanSize)
-	rr.recChan = make(chan arrow.Record, rr.recChanSize)
+	rr.recChan = make(chan arrow.RecordBatch, rr.recChanSize)
 	rr.bldDone = make(chan struct{})
 
 	rr.readerCtx, rr.readCancel = context.WithCancel(context.Background())
@@ -192,7 +192,7 @@ func (r *OCFReader) Schema() *arrow.Schema { return r.schema }
 // Record returns the current record that has been extracted from the
 // underlying Avro OCF file.
 // It is valid until the next call to Next.
-func (r *OCFReader) Record() arrow.Record { return r.cur }
+func (r *OCFReader) Record() arrow.RecordBatch { return r.cur }
 
 // Metrics returns the maximum queue depth of the Avro record read cache and of the
 // converted Arrow record cache.

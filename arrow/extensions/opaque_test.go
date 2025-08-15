@@ -173,7 +173,7 @@ func TestOpaqueTypeBatchRoundTrip(t *testing.T) {
 		[]arrow.Array{arr}, -1)
 	defer batch.Release()
 
-	var written arrow.Record
+	var written arrow.RecordBatch
 	{
 		var buf bytes.Buffer
 		wr := ipc.NewWriter(&buf, ipc.WithSchema(batch.Schema()))

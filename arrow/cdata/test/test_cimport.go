@@ -110,7 +110,7 @@ func makeSchema() *arrow.Schema {
 	}, &meta)
 }
 
-func makeBatch() arrow.Record {
+func makeBatch() arrow.RecordBatch {
 	bldr := array.NewRecordBuilder(alloc, makeSchema())
 	defer bldr.Release()
 
