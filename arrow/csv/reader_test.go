@@ -250,7 +250,7 @@ func TestCSVReaderParseError(t *testing.T) {
 
 	n := 0
 	lines := 0
-	var rec arrow.Record
+	var rec arrow.RecordBatch
 	for r.Next() {
 		if rec != nil {
 			rec.Release()
@@ -891,7 +891,7 @@ func TestInferringSchema(t *testing.T) {
 	]`))
 	defer exp.Release()
 
-	assertRowEqual := func(expected, actual arrow.Record, row int) {
+	assertRowEqual := func(expected, actual arrow.RecordBatch, row int) {
 		ex := expected.NewSlice(int64(row), int64(row+1))
 		defer ex.Release()
 		assert.Truef(t, array.RecordEqual(ex, actual), "expected: %s\ngot: %s", ex, actual)

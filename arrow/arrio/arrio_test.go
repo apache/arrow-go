@@ -36,7 +36,7 @@ const (
 	streamKind
 )
 
-func (k copyKind) write(t *testing.T, f *os.File, mem memory.Allocator, schema *arrow.Schema, recs []arrow.Record) {
+func (k copyKind) write(t *testing.T, f *os.File, mem memory.Allocator, schema *arrow.Schema, recs []arrow.RecordBatch) {
 	t.Helper()
 
 	switch k {
@@ -49,7 +49,7 @@ func (k copyKind) write(t *testing.T, f *os.File, mem memory.Allocator, schema *
 	}
 }
 
-func (k copyKind) check(t *testing.T, f *os.File, mem memory.Allocator, schema *arrow.Schema, recs []arrow.Record) {
+func (k copyKind) check(t *testing.T, f *os.File, mem memory.Allocator, schema *arrow.Schema, recs []arrow.RecordBatch) {
 	t.Helper()
 
 	switch k {

@@ -844,7 +844,7 @@ func TestExportRecordReaderStreamLifetime(t *testing.T) {
 	rec := array.NewRecord(schema, []arrow.Array{arr}, 0)
 	defer rec.Release()
 
-	rdr, _ := array.NewRecordReader(schema, []arrow.Record{rec})
+	rdr, _ := array.NewRecordReader(schema, []arrow.RecordBatch{rec})
 	defer rdr.Release()
 
 	out := createTestStreamObj()
@@ -980,7 +980,7 @@ func (r *failingReader) Next() bool {
 	r.opCount -= 1
 	return r.opCount > 0
 }
-func (r *failingReader) Record() arrow.Record {
+func (r *failingReader) Record() arrow.RecordBatch {
 	arrdata.Records["primitives"][0].Retain()
 	return arrdata.Records["primitives"][0]
 }

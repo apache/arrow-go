@@ -112,7 +112,7 @@ func ImportCArray(arr *CArrowArray, schema *CArrowSchema) (arrow.Field, arrow.Ar
 //
 // NOTE: The array takes ownership of the underlying memory buffers via ArrowArrayMove,
 // it does not take ownership of the actual arr object itself.
-func ImportCRecordBatchWithSchema(arr *CArrowArray, sc *arrow.Schema) (arrow.Record, error) {
+func ImportCRecordBatchWithSchema(arr *CArrowArray, sc *arrow.Schema) (arrow.RecordBatch, error) {
 	imp, err := importCArrayAsType(arr, arrow.StructOf(sc.Fields()...))
 	if err != nil {
 		return nil, err
@@ -144,7 +144,7 @@ func ImportCRecordBatchWithSchema(arr *CArrowArray, sc *arrow.Schema) (arrow.Rec
 //
 // NOTE: The array takes ownership of the underlying memory buffers via ArrowArrayMove,
 // it does not take ownership of the actual arr object itself.
-func ImportCRecordBatch(arr *CArrowArray, sc *CArrowSchema) (arrow.Record, error) {
+func ImportCRecordBatch(arr *CArrowArray, sc *CArrowSchema) (arrow.RecordBatch, error) {
 	field, err := importSchema(sc)
 	if err != nil {
 		return nil, err
@@ -232,7 +232,7 @@ func ExportArrowSchema(schema *arrow.Schema, out *CArrowSchema) {
 // may error at runtime, due to CGO rules ("the current implementation may sometimes
 // cause a runtime error if the contents of the C memory appear to be a Go pointer").
 // You have been warned!
-func ExportArrowRecordBatch(rb arrow.Record, out *CArrowArray, outSchema *CArrowSchema) {
+func ExportArrowRecordBatch(rb arrow.RecordBatch, out *CArrowArray, outSchema *CArrowSchema) {
 	children := make([]arrow.ArrayData, rb.NumCols())
 	for i := range rb.Columns() {
 		children[i] = rb.Column(i).Data()
@@ -291,7 +291,7 @@ func ReleaseCArrowArrayStream(stream *CArrowArrayStream) { releaseStream(stream)
 // RecordMessage is a simple container for a record batch channel to stream for
 // using the Async C Data Interface via ExportAsyncRecordBatchStream.
 type RecordMessage struct {
-	Record             arrow.Record
+	Record             arrow.RecordBatch
 	AdditionalMetadata arrow.Metadata
 	Err                error
 }
