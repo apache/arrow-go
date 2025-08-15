@@ -143,24 +143,24 @@ func (r *RleDecoder) Next() bool {
 		nbytes := int(bitutil.BytesForBits(int64(r.bitWidth)))
 		switch {
 		case nbytes > 4:
-			if !r.r.GetAligned(nbytes, &r.curVal) {
+			if !r.r.getAlignedUint64(nbytes, &r.curVal) {
 				return false
 			}
 		case nbytes > 2:
 			var val uint32
-			if !r.r.GetAligned(nbytes, &val) {
+			if !r.r.getAlignedUint32(nbytes, &val) {
 				return false
 			}
 			r.curVal = uint64(val)
 		case nbytes > 1:
 			var val uint16
-			if !r.r.GetAligned(nbytes, &val) {
+			if !r.r.getAlignedUint16(nbytes, &val) {
 				return false
 			}
 			r.curVal = uint64(val)
 		default:
 			var val uint8
-			if !r.r.GetAligned(nbytes, &val) {
+			if !r.r.getAlignedUint8(nbytes, &val) {
 				return false
 			}
 			r.curVal = uint64(val)
