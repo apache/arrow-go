@@ -18,7 +18,6 @@ package encoding
 
 import (
 	"bytes"
-	"reflect"
 
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
@@ -207,15 +206,8 @@ func (d *dictDecoder) DecodeIndicesSpaced(numValues, nullCount int, validBits []
 // spacedExpand is used to take a slice of data and utilize the bitmap provided to fill in nulls into the
 // correct slots according to the bitmap in order to produce a fully expanded result slice with nulls
 // in the correct slots.
-func spacedExpand(buffer interface{}, nullCount int, validBits []byte, validBitsOffset int64) int {
-	bufferRef := reflect.ValueOf(buffer)
-	if bufferRef.Kind() != reflect.Slice {
-		panic("invalid spacedexpand type, not slice")
-	}
-
-	var (
-		numValues = bufferRef.Len()
-	)
+func spacedExpand[T parquet.ColumnTypes](buffer []T, nullCount int, validBits []byte, validBitsOffset int64) int {
+	numValues := len(buffer)
 
 	idxDecode := int64(numValues - nullCount)
 	if idxDecode == 0 { // if there's nothing to decode there's nothing to do.
@@ -236,8 +228,8 @@ func spacedExpand(buffer interface{}, nullCount int, validBits []byte, validBits
 		// overwrite any existing data with the correctly spaced data. Any data that happens to be left in the null
 		// slots is fine since it shouldn't matter and saves us work.
 		idxDecode -= run.Length
-		n := reflect.Copy(bufferRef.Slice(int(run.Pos), bufferRef.Len()), bufferRef.Slice(int(idxDecode), int(int64(idxDecode)+run.Length)))
-		debug.Assert(n == int(run.Length), "reflect.Copy copied incorrect number of elements in spacedExpand")
+		n := copy(buffer[run.Pos:], buffer[idxDecode:int64(idxDecode)+run.Length])
+		debug.Assert(n == int(run.Length), "copy copied incorrect number of elements in spacedExpand")
 	}
 
 	return numValues
