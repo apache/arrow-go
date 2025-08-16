@@ -40,6 +40,7 @@ type ShreddedVariantTestSuite struct {
 	suite.Suite
 
 	dirPrefix string
+	outDir    string
 	cases     []Case
 
 	errorCases    []Case
@@ -53,12 +54,17 @@ func (s *ShreddedVariantTestSuite) SetupSuite() {
 		s.T().Skip("PARQUET_TEST_DATA environment variable not set")
 	}
 
+	s.outDir = filepath.Join(dir, "..", "go_variant")
 	s.dirPrefix = filepath.Join(dir, "..", "shredded_variant")
 	cases, err := os.Open(filepath.Join(s.dirPrefix, "cases.json"))
+
 	s.Require().NoError(err, "Failed to open cases.json")
 	defer cases.Close()
 
 	s.Require().NoError(json.NewDecoder(cases).Decode(&s.cases))
+
+	// Copy cases.json to output directory
+	s.copyCasesJSON()
 
 	s.errorCases = slices.DeleteFunc(slices.Clone(s.cases), func(c Case) bool {
 		return c.ErrorMessage == ""
@@ -91,7 +97,8 @@ func readUnsigned(b []byte) (result uint32) {
 }
 
 func (s *ShreddedVariantTestSuite) readVariant(filename string) variant.Value {
-	data, err := os.ReadFile(filename)
+	data, err := os.ReadFile(filepath.Join(s.dirPrefix, filename))
+
 	s.Require().NoError(err, "Failed to read variant file: %s", filename)
 
 	hdr := data[0]
@@ -104,6 +111,8 @@ func (s *ShreddedVariantTestSuite) readVariant(filename string) variant.Value {
 	endOffset := dataOffset + int(readUnsigned(data[idx:idx+offsetSize]))
 	val, err := variant.New(data[:endOffset], data[endOffset:])
 	s.Require().NoError(err, "Failed to create variant from data: %s", filename)
+
+	s.writeVariant(val, filepath.Join(s.outDir, filename))
 	return val
 }
 
@@ -114,7 +123,78 @@ func (s *ShreddedVariantTestSuite) readParquet(filename string) arrow.Table {
 
 	tbl, err := pqarrow.ReadTable(context.Background(), file, nil, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
 	s.Require().NoError(err, "Failed to read Parquet file: %s", filename)
+
+	s.writeParquet(tbl, filepath.Join(s.outDir, filename))
 	return tbl
+}
+
+func (s *ShreddedVariantTestSuite) writeVariant(v variant.Value, filename string) {
+	// Helper to serialize a variant.Value to disk in the same layout expected by
+	// readVariant (metadata immediately followed by value bytes).
+	// The file will be created relative to the suite data directory unless an
+	// absolute path is supplied.
+
+	path := filename
+	if !filepath.IsAbs(filename) {
+		path = filepath.Join(s.dirPrefix, filename)
+	}
+
+	// Ensure the destination directory exists.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		s.Require().NoError(err, "failed to create directory for variant file")
+	}
+
+	f, err := os.Create(path)
+	s.Require().NoError(err, "failed to create variant file: %s", path)
+	defer f.Close()
+
+	// Write metadata followed by value bytes.
+	if _, err = f.Write(v.Metadata().Bytes()); err != nil {
+		s.Require().NoError(err, "failed to write metadata to variant file: %s", path)
+	}
+	if _, err = f.Write(v.Bytes()); err != nil {
+		s.Require().NoError(err, "failed to write value bytes to variant file: %s", path)
+	}
+}
+
+func (s *ShreddedVariantTestSuite) writeParquet(tbl arrow.Table, filename string) {
+	// Helper to persist an Arrow table containing variant columns to a Parquet file.
+	path := filename
+	if !filepath.IsAbs(filename) {
+		path = filepath.Join(s.dirPrefix, filename)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		s.Require().NoError(err, "failed to create directory for parquet file")
+	}
+
+	f, err := os.Create(path)
+	s.Require().NoError(err, "failed to create parquet file: %s", path)
+	defer f.Close()
+
+	fw, err := pqarrow.NewFileWriter(tbl.Schema(), f, nil, pqarrow.DefaultWriterProps())
+	s.Require().NoError(err, "failed to create parquet writer")
+	defer fw.Close()
+
+	// Write the entire table as a single row group.
+	rowGroupSize := int64(tbl.NumRows())
+	if rowGroupSize == 0 {
+		rowGroupSize = 1 // still produce a single row group for empty tables
+	}
+
+	s.Require().NoError(fw.WriteTable(tbl, rowGroupSize), "failed to write table to parquet file")
+}
+
+func (s *ShreddedVariantTestSuite) copyCasesJSON() {
+	// Copy cases.json from source directory to output directory
+	srcPath := filepath.Join(s.dirPrefix, "cases.json")
+	destPath := filepath.Join(s.outDir, "cases.json")
+
+	// Copy file directly
+	data, err := os.ReadFile(srcPath)
+	s.Require().NoError(err, "failed to read source cases.json")
+
+	err = os.WriteFile(destPath, data, 0o644)
+	s.Require().NoError(err, "failed to write destination cases.json")
 }
 
 func zip[T, U any](a iter.Seq[T], b iter.Seq[U]) iter.Seq2[T, U] {
@@ -201,8 +281,9 @@ func (s *ShreddedVariantTestSuite) TestSingleVariantCases() {
 					s.T().Skip("Skipping case 138 due to missing value column")
 				}
 
-				expected := s.readVariant(filepath.Join(s.dirPrefix, c.VariantFile))
+				expected := s.readVariant(c.VariantFile)
 				tbl := s.readParquet(c.ParquetFile)
+
 				defer tbl.Release()
 
 				col := tbl.Column(1).Data().Chunk(0)
@@ -237,7 +318,7 @@ func (s *ShreddedVariantTestSuite) TestMultiVariantCases() {
 						continue
 					}
 
-					expected := s.readVariant(filepath.Join(s.dirPrefix, *variantFile))
+					expected := s.readVariant(*variantFile)
 					actual, err := variantArray.Value(i)
 					s.Require().NoError(err, "Failed to get variant value at index %d", i)
 					s.assertVariantEqual(expected, actual)
