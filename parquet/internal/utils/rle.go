@@ -110,6 +110,8 @@ type RleDecoder struct {
 	curVal   uint64
 	repCount int32
 	litCount int32
+
+	indexbuffer [1024]IndexType
 }
 
 func NewRleDecoder(data *bytes.Reader, width int) *RleDecoder {
