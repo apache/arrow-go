@@ -59,7 +59,7 @@ func TestBuildPrimitive(t *testing.T) {
 		{"primitive_int32", func(b *variant.Builder) error { return b.AppendInt(123456) }},
 		// FIXME: https://github.com/apache/parquet-testing/issues/82
 		// primitive_int64 is an int32 value, but the metadata is int64
-		{"primitive_int64", func(b *variant.Builder) error { return b.AppendInt(12345678) }},
+		{"primitive_int64", func(b *variant.Builder) error { return b.AppendInt(1234567890123456789) }},
 		{"primitive_float", func(b *variant.Builder) error { return b.AppendFloat32(1234568000) }},
 		{"primitive_double", func(b *variant.Builder) error { return b.AppendFloat64(1234567890.1234) }},
 		{"primitive_string", func(b *variant.Builder) error {

@@ -154,7 +154,7 @@ func TestPrimitiveVariants(t *testing.T) {
 		{"primitive_int32", int32(123456), variant.Int32, "123456"},
 		// FIXME: https://github.com/apache/parquet-testing/issues/82
 		// primitive_int64 is an int32 value, but the metadata is int64
-		{"primitive_int64", int32(12345678), variant.Int32, "12345678"},
+		{"primitive_int64", int64(1234567890123456789), variant.Int64, "1234567890123456789"},
 		{"primitive_float", float32(1234567940.0), variant.Float, "1234568000"},
 		{"primitive_double", float64(1234567890.1234), variant.Double, "1234567890.1234"},
 		{"primitive_string",
