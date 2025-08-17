@@ -19,10 +19,12 @@ package pqarrow_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"iter"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -31,6 +33,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/json"
+	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/apache/arrow-go/v18/parquet/variant"
 	"github.com/stretchr/testify/suite"
@@ -39,7 +42,10 @@ import (
 type ShreddedVariantTestSuite struct {
 	suite.Suite
 
+	generate bool
+
 	dirPrefix string
+	outDir    string
 	cases     []Case
 
 	errorCases    []Case
@@ -54,6 +60,11 @@ func (s *ShreddedVariantTestSuite) SetupSuite() {
 	}
 
 	s.dirPrefix = filepath.Join(dir, "..", "shredded_variant")
+	s.outDir = filepath.Join(dir, "..", "go_variant")
+	if s.generate {
+		s.Require().NoError(os.MkdirAll(s.outDir, 0o755), "Failed to create output directory: %s", s.outDir)
+	}
+
 	cases, err := os.Open(filepath.Join(s.dirPrefix, "cases.json"))
 	s.Require().NoError(err, "Failed to open cases.json")
 	defer cases.Close()
@@ -71,17 +82,28 @@ func (s *ShreddedVariantTestSuite) SetupSuite() {
 	s.multiVariant = slices.DeleteFunc(slices.Clone(s.cases), func(c Case) bool {
 		return c.ErrorMessage != "" || c.VariantFile != "" || len(c.VariantFiles) == 0
 	})
+
+	if s.generate {
+		cases.Seek(0, io.SeekStart)
+		outCases, err := os.Create(filepath.Join(s.outDir, "cases.json"))
+		s.Require().NoError(err, "Failed to create cases.json")
+		defer outCases.Close()
+
+		io.Copy(outCases, cases)
+		outCases.Sync()
+	}
 }
 
 type Case struct {
 	Number       int       `json:"case_number"`
 	Title        string    `json:"test"`
+	Notes        string    `json:"notes,omitempty"`
 	ParquetFile  string    `json:"parquet_file"`
-	VariantFile  string    `json:"variant_file"`
-	VariantFiles []*string `json:"variant_files"`
-	VariantData  string    `json:"variant"`
-	Variants     string    `json:"variants"`
-	ErrorMessage string    `json:"error_message"`
+	VariantFile  string    `json:"variant_file,omitempty"`
+	VariantFiles []*string `json:"variant_files,omitempty"`
+	VariantData  string    `json:"variant,omitempty"`
+	Variants     string    `json:"variants,omitempty"`
+	ErrorMessage string    `json:"error_message,omitempty"`
 }
 
 func readUnsigned(b []byte) (result uint32) {
@@ -115,6 +137,28 @@ func (s *ShreddedVariantTestSuite) readParquet(filename string) arrow.Table {
 	tbl, err := pqarrow.ReadTable(context.Background(), file, nil, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
 	s.Require().NoError(err, "Failed to read Parquet file: %s", filename)
 	return tbl
+}
+
+func (s *ShreddedVariantTestSuite) writeVariantFile(filename string, val variant.Value) {
+	out, err := os.Create(filepath.Join(s.outDir, filename))
+	s.Require().NoError(err)
+	defer out.Close()
+
+	_, err = out.Write(val.Metadata().Bytes())
+	s.Require().NoError(err)
+	_, err = out.Write(val.Bytes())
+	s.Require().NoError(err)
+}
+
+func (s *ShreddedVariantTestSuite) writeParquetFile(filename string, tbl arrow.Table) {
+	out, err := os.Create(filepath.Join(s.outDir, filename))
+	s.Require().NoError(err)
+	defer out.Close()
+
+	s.Require().NoError(pqarrow.WriteTable(tbl, out, max(1, tbl.NumRows()), parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(false), parquet.WithStats(false),
+		parquet.WithStoreDecimalAsInteger(true),
+	), pqarrow.DefaultWriterProps()))
 }
 
 func zip[T, U any](a iter.Seq[T], b iter.Seq[U]) iter.Seq2[T, U] {
@@ -182,28 +226,21 @@ func (s *ShreddedVariantTestSuite) TestSingleVariantCases() {
 	for _, c := range s.singleVariant {
 		s.Run(c.Title, func() {
 			s.Run(fmt.Sprint(c.Number), func() {
-				switch c.Number {
-				case 125:
-					s.T().Skip("Skipping case 125 due to inconsistent definition of behavior")
-				case 41:
-					s.T().Skip("Skipping case 41 due to missing value column")
-				case 43:
-					s.T().Skip("Skipping case 43 due to unknown definition of behavior")
-				case 84:
-					s.T().Skip("Skipping case 84 due to incorrect optional fields")
-				case 88:
-					s.T().Skip("Skipping case 88 due to missing value column")
-				case 131:
-					s.T().Skip("Skipping case 131 due to missing value column")
-				case 132:
-					s.T().Skip("Skipping case 132 due to missing value column")
-				case 138:
-					s.T().Skip("Skipping case 138 due to missing value column")
+				if strings.Contains(c.ParquetFile, "-INVALID") {
+					s.T().Skip(c.Notes)
 				}
 
 				expected := s.readVariant(filepath.Join(s.dirPrefix, c.VariantFile))
+				if s.generate {
+					s.writeVariantFile(c.VariantFile, expected)
+				}
+
 				tbl := s.readParquet(c.ParquetFile)
 				defer tbl.Release()
+
+				if s.generate {
+					s.writeParquetFile(c.ParquetFile, tbl)
+				}
 
 				col := tbl.Column(1).Data().Chunk(0)
 				s.Require().IsType(&extensions.VariantArray{}, col)
@@ -226,6 +263,10 @@ func (s *ShreddedVariantTestSuite) TestMultiVariantCases() {
 				tbl := s.readParquet(c.ParquetFile)
 				defer tbl.Release()
 
+				if s.generate {
+					s.writeParquetFile(c.ParquetFile, tbl)
+				}
+
 				s.Require().EqualValues(len(c.VariantFiles), tbl.NumRows(), "Expected number of rows to match number of variant files")
 				col := tbl.Column(1).Data().Chunk(0)
 				s.Require().IsType(&extensions.VariantArray{}, col)
@@ -238,6 +279,10 @@ func (s *ShreddedVariantTestSuite) TestMultiVariantCases() {
 					}
 
 					expected := s.readVariant(filepath.Join(s.dirPrefix, *variantFile))
+					if s.generate {
+						s.writeVariantFile(*variantFile, expected)
+					}
+
 					actual, err := variantArray.Value(i)
 					s.Require().NoError(err, "Failed to get variant value at index %d", i)
 					s.assertVariantEqual(expected, actual)
@@ -261,6 +306,10 @@ func (s *ShreddedVariantTestSuite) TestErrorCases() {
 				tbl := s.readParquet(c.ParquetFile)
 				defer tbl.Release()
 
+				if s.generate {
+					s.writeParquetFile(c.ParquetFile, tbl)
+				}
+
 				col := tbl.Column(1).Data().Chunk(0)
 				s.Require().IsType(&extensions.VariantArray{}, col)
 
@@ -273,5 +322,5 @@ func (s *ShreddedVariantTestSuite) TestErrorCases() {
 }
 
 func TestShreddedVariantExamples(t *testing.T) {
-	suite.Run(t, new(ShreddedVariantTestSuite))
+	suite.Run(t, &ShreddedVariantTestSuite{generate: false})
 }
