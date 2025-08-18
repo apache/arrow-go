@@ -26,7 +26,6 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
-	"github.com/apache/arrow-go/v18/internal/utils"
 	"golang.org/x/xerrors"
 )
 
@@ -37,7 +36,7 @@ const (
 func MinRLEBufferSize(bitWidth int) int {
 	maxLiteralRunSize := 1 + bitutil.BytesForBits(int64(MaxValuesPerLiteralRun*bitWidth))
 	maxRepeatedRunSize := binary.MaxVarintLen32 + bitutil.BytesForBits(int64(bitWidth))
-	return int(utils.Max(maxLiteralRunSize, maxRepeatedRunSize))
+	return int(max(maxLiteralRunSize, maxRepeatedRunSize))
 }
 
 func MaxRLEBufferSize(width, numValues int) int {
@@ -48,7 +47,7 @@ func MaxRLEBufferSize(width, numValues int) int {
 	minRepeatedRunSize := 1 + int(bitutil.BytesForBits(int64(width)))
 	repeatedMaxSize := int(bitutil.BytesForBits(int64(numValues))) * minRepeatedRunSize
 
-	return utils.Max(literalMaxSize, repeatedMaxSize)
+	return max(literalMaxSize, repeatedMaxSize)
 }
 
 // Utility classes to do run length encoding (RLE) for fixed bit width values.  If runs
@@ -181,11 +180,11 @@ func (r *RleDecoder) Discard(n int) int {
 		remain := n - read
 
 		if r.repCount > 0 {
-			repbatch := int(math.Min(float64(remain), float64(r.repCount)))
+			repbatch := min(remain, int(r.repCount))
 			r.repCount -= int32(repbatch)
 			read += repbatch
 		} else if r.litCount > 0 {
-			litbatch := int(math.Min(float64(remain), float64(r.litCount)))
+			litbatch := min(remain, int(r.litCount))
 			n, _ := r.r.Discard(uint(r.bitWidth), litbatch)
 			if n != litbatch {
 				return read
@@ -211,7 +210,7 @@ func (r *RleDecoder) GetBatch(values []uint64) int {
 		remain := size - read
 
 		if r.repCount > 0 {
-			repbatch := int(math.Min(float64(remain), float64(r.repCount)))
+			repbatch := min(remain, int(r.repCount))
 			for i := 0; i < repbatch; i++ {
 				out[i] = r.curVal
 			}
@@ -220,7 +219,7 @@ func (r *RleDecoder) GetBatch(values []uint64) int {
 			read += repbatch
 			out = out[repbatch:]
 		} else if r.litCount > 0 {
-			litbatch := int(math.Min(float64(remain), float64(r.litCount)))
+			litbatch := min(remain, int(r.litCount))
 			n, _ := r.r.GetBatch(uint(r.bitWidth), out[:litbatch])
 			if n != litbatch {
 				return read
@@ -290,7 +289,7 @@ func (r *RleDecoder) consumeRepeatCounts(read, batchSize, remain int, run bituti
 	repeatBatch := 0
 	for r.repCount > 0 && (read+repeatBatch) < batchSize {
 		if run.Set {
-			updateSize := int(utils.Min(run.Len, int64(r.repCount)))
+			updateSize := int(min(run.Len, int64(r.repCount)))
 			r.repCount -= int32(updateSize)
 			repeatBatch += updateSize
 			run.Len -= int64(updateSize)
