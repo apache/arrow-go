@@ -20,7 +20,6 @@ import (
 	"bytes"
 
 	"github.com/apache/arrow-go/v18/internal/bitutils"
-	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"golang.org/x/xerrors"
 )
@@ -89,7 +88,7 @@ func getspaced[T parquet.ColumnTypes | uint64](r *RleDecoder, dc DictionaryConve
 }
 
 func consumeLiterals[T parquet.ColumnTypes | uint64](r *RleDecoder, dc DictionaryConverter[T], vals []T, remain int, buf []IndexType, run bitutils.BitRun, bitRdr bitutils.BitRunReader) (int, int, bitutils.BitRun, error) {
-	batch := utils.Min(utils.Min(remain, int(r.litCount)), len(buf))
+	batch := min(remain, int(r.litCount), len(buf))
 	buf = buf[:batch]
 
 	n, _ := r.r.GetBatchIndex(uint(r.bitWidth), buf)
@@ -107,7 +106,7 @@ func consumeLiterals[T parquet.ColumnTypes | uint64](r *RleDecoder, dc Dictionar
 	)
 	for read < batch {
 		if run.Set {
-			updateSize := utils.Min(batch-read, int(run.Len))
+			updateSize := min(batch-read, int(run.Len))
 			if err := dc.Copy(vals, buf[read:read+updateSize]); err != nil {
 				return 0, 0, run, err
 			}
@@ -154,7 +153,7 @@ func (r *TypedRleDecoder[T]) GetBatchWithDict(dc DictionaryConverter[T], vals []
 			if !dc.IsValidSingle(idx) {
 				return read, nil
 			}
-			batch := utils.Min(remain, int(r.repCount))
+			batch := min(remain, int(r.repCount))
 			if err := dc.Fill(vals[:batch], idx); err != nil {
 				return read, err
 			}
@@ -162,7 +161,7 @@ func (r *TypedRleDecoder[T]) GetBatchWithDict(dc DictionaryConverter[T], vals []
 			read += batch
 			vals = vals[batch:]
 		case r.litCount > 0:
-			litbatch := utils.Min(utils.Min(remain, int(r.litCount)), 1024)
+			litbatch := min(remain, int(r.litCount), 1024)
 			buf := indexbuffer[:litbatch]
 			n, _ := r.r.GetBatchIndex(uint(r.bitWidth), buf)
 			if n != litbatch {
