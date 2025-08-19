@@ -195,7 +195,7 @@ func (d *ChunkedDatum) Equals(other Datum) bool {
 	return false
 }
 
-// RecordDatum contains an arrow.RecordBatch for passing a full record to an expression
+// RecordDatum contains an array.Record for passing a full record to an expression
 // or to compute.
 type RecordDatum struct {
 	Value arrow.RecordBatch
@@ -245,10 +245,10 @@ func (d *TableDatum) Equals(other Datum) bool {
 // as the argument.
 //
 // An arrow.Array gets an ArrayDatum
-// An arrow.Chunked gets a ChunkedDatum
-// An arrow.RecordBatch gets a RecordDatum
-// An arrow.Table gets a TableDatum
-// a scalar.Scalar gets a ScalarDatum
+// An array.Chunked gets a ChunkedDatum
+// An array.Record gets a RecordDatum
+// An array.Table gets a TableDatum
+// A scalar.Scalar gets a ScalarDatum
 //
 // Anything else is passed to scalar.MakeScalar and receives a scalar
 // datum of that appropriate type.
@@ -275,7 +275,7 @@ func NewDatum(value interface{}) Datum {
 // to outlive the Datum.
 //
 // Only use this if you know what you're doing. For the most part this is
-// just a convenience function.
+// just a convenience function.+-
 
 func NewDatumWithoutOwning(value interface{}) Datum {
 	switch v := value.(type) {
