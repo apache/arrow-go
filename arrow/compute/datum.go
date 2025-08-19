@@ -198,7 +198,7 @@ func (d *ChunkedDatum) Equals(other Datum) bool {
 // RecordDatum contains an array.Record for passing a full record to an expression
 // or to compute.
 type RecordDatum struct {
-	Value arrow.Record
+	Value arrow.RecordBatch
 }
 
 func (RecordDatum) Kind() DatumKind          { return KindRecord }
@@ -247,8 +247,8 @@ func (d *TableDatum) Equals(other Datum) bool {
 // An arrow.Array gets an ArrayDatum
 // An array.Chunked gets a ChunkedDatum
 // An array.Record gets a RecordDatum
-// an array.Table gets a TableDatum
-// a scalar.Scalar gets a ScalarDatum
+// An array.Table gets a TableDatum
+// A scalar.Scalar gets a ScalarDatum
 //
 // Anything else is passed to scalar.MakeScalar and receives a scalar
 // datum of that appropriate type.
@@ -285,7 +285,7 @@ func NewDatumWithoutOwning(value interface{}) Datum {
 		return &ArrayDatum{v}
 	case *arrow.Chunked:
 		return &ChunkedDatum{v}
-	case arrow.Record:
+	case arrow.RecordBatch:
 		return &RecordDatum{v}
 	case arrow.Table:
 		return &TableDatum{v}

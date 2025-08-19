@@ -57,7 +57,7 @@ func NewWriter(w io.Writer, schema *arrow.Schema) (*Writer, error) {
 	return ww, nil
 }
 
-func (w *Writer) Write(rec arrow.Record) error {
+func (w *Writer) Write(rec arrow.RecordBatch) error {
 	if w.nrecs == 0 {
 		pairs, err := dictutils.CollectDictionaries(rec, &w.mapper)
 		if err != nil {

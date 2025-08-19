@@ -58,7 +58,7 @@ func totalArraySize(arr arrow.Array, seenBuffers map[*memory.Buffer]struct{}) in
 	return totalArrayDataSize(arr.Data(), seenBuffers)
 }
 
-func totalRecordSize(record arrow.Record, seenBuffers map[*memory.Buffer]struct{}) int64 {
+func totalRecordSize(record arrow.RecordBatch, seenBuffers map[*memory.Buffer]struct{}) int64 {
 	var sum int64
 	for _, c := range record.Columns() {
 		sum += totalArraySize(c, seenBuffers)
@@ -72,8 +72,8 @@ func TotalArraySize(arr arrow.Array) int64 {
 	return totalArraySize(arr, seenBuffer)
 }
 
-// TotalRecordSize return the sum of bytes in each buffer referenced by the Record.
-func TotalRecordSize(record arrow.Record) int64 {
+// TotalRecordSize return the sum of bytes in each buffer referenced by the RecordBatch.
+func TotalRecordSize(record arrow.RecordBatch) int64 {
 	seenBuffer := make(map[*memory.Buffer]struct{})
 	return totalRecordSize(record, seenBuffer)
 }

@@ -630,8 +630,8 @@ func (msg ProtobufMessageReflection) Schema() *arrow.Schema {
 	return arrow.NewSchema(fields, nil)
 }
 
-// Record returns an arrow.Record for a protobuf message
-func (msg ProtobufMessageReflection) Record(mem memory.Allocator) arrow.Record {
+// Record returns an arrow.RecordBatch for a protobuf message
+func (msg ProtobufMessageReflection) Record(mem memory.Allocator) arrow.RecordBatch {
 	if mem == nil {
 		mem = memory.NewGoAllocator()
 	}

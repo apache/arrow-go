@@ -796,15 +796,15 @@ type Record struct {
 	Columns []Array `json:"columns"`
 }
 
-func recordsFromJSON(mem memory.Allocator, schema *arrow.Schema, recs []Record, memo *dictutils.Memo) []arrow.Record {
-	vs := make([]arrow.Record, len(recs))
+func recordsFromJSON(mem memory.Allocator, schema *arrow.Schema, recs []Record, memo *dictutils.Memo) []arrow.RecordBatch {
+	vs := make([]arrow.RecordBatch, len(recs))
 	for i, rec := range recs {
 		vs[i] = recordFromJSON(mem, schema, rec, memo)
 	}
 	return vs
 }
 
-func recordFromJSON(mem memory.Allocator, schema *arrow.Schema, rec Record, memo *dictutils.Memo) arrow.Record {
+func recordFromJSON(mem memory.Allocator, schema *arrow.Schema, rec Record, memo *dictutils.Memo) arrow.RecordBatch {
 	arrs := arraysFromJSON(mem, schema, rec.Columns)
 	if err := dictutils.ResolveDictionaries(memo, arrs, dictutils.NewFieldPos(), mem); err != nil {
 		panic(err)
@@ -819,7 +819,7 @@ func recordFromJSON(mem memory.Allocator, schema *arrow.Schema, rec Record, memo
 	return array.NewRecord(schema, cols, int64(rec.Count))
 }
 
-func recordToJSON(rec arrow.Record) Record {
+func recordToJSON(rec arrow.RecordBatch) Record {
 	return Record{
 		Count:   rec.NumRows(),
 		Columns: arraysToJSON(rec.Schema(), rec.Columns()),
