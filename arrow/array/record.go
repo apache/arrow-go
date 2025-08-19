@@ -471,7 +471,7 @@ func ReaderFromIter(schema *arrow.Schema, itr iter.Seq2[arrow.Record, error]) Re
 // then Retain must be called on it.
 func IterFromReader(rdr RecordReader) iter.Seq2[arrow.Record, error] {
 	rdr.Retain()
-	return func(yield func(arrow.Record, error) bool) {
+	return func(yield func(arrow.RecordBatch, error) bool) {
 		defer rdr.Release()
 		for rdr.Next() {
 			if !yield(rdr.Record(), nil) {

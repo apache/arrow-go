@@ -197,7 +197,7 @@ func RecordToStructArray(rec arrow.Record) *Struct {
 // of the struct will be used to define the record batch. Otherwise the passed in
 // schema will be used to create the record batch. If passed in, the schema must match
 // the fields of the struct column.
-func RecordFromStructArray(in *Struct, schema *arrow.Schema) arrow.Record {
+func RecordFromStructArray(in *Struct, schema *arrow.Schema) arrow.RecordBatch {
 	if schema == nil {
 		schema = arrow.NewSchema(in.DataType().(*arrow.StructType).Fields(), nil)
 	}
@@ -213,7 +213,7 @@ func RecordFromStructArray(in *Struct, schema *arrow.Schema) arrow.Record {
 //
 // See https://github.com/apache/arrow-go/issues/448 for more details on
 // why this isn't a simple wrapper around FromJSON.
-func RecordFromJSON(mem memory.Allocator, schema *arrow.Schema, r io.Reader, opts ...FromJSONOption) (arrow.Record, int64, error) {
+func RecordFromJSON(mem memory.Allocator, schema *arrow.Schema, r io.Reader, opts ...FromJSONOption) (arrow.RecordBatch, int64, error) {
 	var cfg fromJSONCfg
 	for _, o := range opts {
 		o(&cfg)
@@ -279,7 +279,7 @@ func RecordFromJSON(mem memory.Allocator, schema *arrow.Schema, r io.Reader, opt
 
 // RecordToJSON writes out the given record following the format of each row is a single object
 // on a single line of the output.
-func RecordToJSON(rec arrow.Record, w io.Writer) error {
+func RecordToJSON(rec arrow.RecordBatch, w io.Writer) error {
 	enc := json.NewEncoder(w)
 
 	fields := rec.Schema().Fields()
@@ -297,7 +297,7 @@ func RecordToJSON(rec arrow.Record, w io.Writer) error {
 }
 
 func TableFromJSON(mem memory.Allocator, sc *arrow.Schema, recJSON []string, opt ...FromJSONOption) (arrow.Table, error) {
-	batches := make([]arrow.Record, len(recJSON))
+	batches := make([]arrow.RecordBatch, len(recJSON))
 	for i, batchJSON := range recJSON {
 		batch, _, err := RecordFromJSON(mem, sc, strings.NewReader(batchJSON), opt...)
 		if err != nil {

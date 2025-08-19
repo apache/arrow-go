@@ -576,7 +576,7 @@ func FilterArray(ctx context.Context, values, filter arrow.Array, options Filter
 	return outDatum.(*ArrayDatum).MakeArray(), nil
 }
 
-func FilterRecordBatch(ctx context.Context, batch arrow.Record, filter arrow.Array, opts *FilterOptions) (arrow.Record, error) {
+func FilterRecordBatch(ctx context.Context, batch arrow.RecordBatch, filter arrow.Array, opts *FilterOptions) (arrow.RecordBatch, error) {
 	if batch.NumRows() != int64(filter.Len()) {
 		return nil, fmt.Errorf("%w: filter inputs must all be the same length", arrow.ErrInvalid)
 	}

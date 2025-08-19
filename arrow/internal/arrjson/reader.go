@@ -31,7 +31,7 @@ type Reader struct {
 	refs atomic.Int64
 
 	schema *arrow.Schema
-	recs   []arrow.Record
+	recs   []arrow.RecordBatch
 	memo   *dictutils.Memo
 
 	irec int // current record index. used for the arrio.Reader interface.
@@ -89,7 +89,7 @@ func (r *Reader) Release() {
 func (r *Reader) Schema() *arrow.Schema { return r.schema }
 func (r *Reader) NumRecords() int       { return len(r.recs) }
 
-func (r *Reader) Read() (arrow.Record, error) {
+func (r *Reader) Read() (arrow.RecordBatch, error) {
 	if r.irec == r.NumRecords() {
 		return nil, io.EOF
 	}
@@ -98,7 +98,7 @@ func (r *Reader) Read() (arrow.Record, error) {
 	return rec, nil
 }
 
-func (r *Reader) ReadAt(index int) (arrow.Record, error) {
+func (r *Reader) ReadAt(index int) (arrow.RecordBatch, error) {
 	if index >= r.NumRecords() {
 		return nil, io.EOF
 	}
