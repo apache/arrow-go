@@ -282,10 +282,10 @@ type TableReader struct {
 	refCount atomic.Int64
 
 	tbl   arrow.Table
-	cur   int64        // current row
-	max   int64        // total number of rows
+	cur   int64             // current row
+	max   int64             // total number of rows
 	rec   arrow.RecordBatch // current RecordBatch
-	chksz int64        // chunk size
+	chksz int64             // chunk size
 
 	chunks  []*arrow.Chunked
 	slots   []int   // chunk indices
@@ -320,8 +320,8 @@ func NewTableReader(tbl arrow.Table, chunkSize int64) *TableReader {
 	return tr
 }
 
-func (tr *TableReader) Schema() *arrow.Schema { return tr.tbl.Schema() }
-func (tr *TableReader) Record() arrow.RecordBatch  { return tr.rec }
+func (tr *TableReader) Schema() *arrow.Schema     { return tr.tbl.Schema() }
+func (tr *TableReader) Record() arrow.RecordBatch { return tr.rec }
 
 func (tr *TableReader) Next() bool {
 	if tr.cur >= tr.max {
