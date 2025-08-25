@@ -21,7 +21,6 @@ import (
 	"errors"
 	"io"
 	"math"
-	"reflect"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -122,22 +121,19 @@ func (b *BitReader) GetZigZagVlqInt() (int64, bool) {
 // error if there aren't enough bytes left.
 func (b *BitReader) ReadByte() (byte, error) {
 	var tmp byte
-	if ok := b.GetAligned(1, &tmp); !ok {
+	if ok := GetAligned(b, 1, &tmp); !ok {
 		return 0, errors.New("failed to read byte")
 	}
 
 	return tmp, nil
 }
 
-// GetAligned reads nbytes from the underlying stream into the passed interface value.
+// GetAligned reads nbytes from the underlying stream into the passed value.
 // Returning false if there aren't enough bytes remaining in the stream or if an invalid
 // type is passed. The bytes are read aligned to byte boundaries.
-//
-// v must be a pointer to a byte or sized uint type (*byte, *uint16, *uint32, *uint64).
-// encoded values are assumed to be little endian.
-func (b *BitReader) GetAligned(nbytes int, v interface{}) bool {
+func GetAligned[T byte | uint16 | uint32 | uint64](b *BitReader, nbytes int, v *T) bool {
 	// figure out the number of bytes to represent v
-	typBytes := int(reflect.TypeOf(v).Elem().Size())
+	typBytes := int(unsafe.Sizeof(*v))
 	if nbytes > typBytes {
 		return false
 	}
@@ -152,10 +148,13 @@ func (b *BitReader) GetAligned(nbytes int, v interface{}) bool {
 	if n != nbytes {
 		return false
 	}
-	// zero pad the bytes
-	memory.Set(b.raw[n:typBytes], 0)
 
-	switch v := v.(type) {
+	if typBytes > n {
+		// zero pad the bytes
+		memory.Set(b.raw[n:typBytes], 0)
+	}
+
+	switch v := any(v).(type) {
 	case *byte:
 		*v = b.raw[0]
 	case *uint64:
@@ -164,12 +163,9 @@ func (b *BitReader) GetAligned(nbytes int, v interface{}) bool {
 		*v = binary.LittleEndian.Uint32(b.raw[:typBytes])
 	case *uint16:
 		*v = binary.LittleEndian.Uint16(b.raw[:typBytes])
-	default:
-		return false
 	}
 
 	b.byteoffset += int64(nbytes)
-
 	b.bitoffset = 0
 	b.fillbuffer()
 	return true
