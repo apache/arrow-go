@@ -180,10 +180,6 @@ func NewVariantType(storage arrow.DataType) (*VariantType, error) {
 		return nil, fmt.Errorf("%w: there must be at least one of 'value' or 'typed_value' fields in variant storage type %s", arrow.ErrInvalid, storage)
 	}
 
-	// if valueFieldIdx, ok = s.FieldIdx("value"); !ok {
-	// 	return nil, fmt.Errorf("%w: missing non-nullable field 'value' in variant storage type %s", arrow.ErrInvalid, storage)
-	// }
-
 	if s.NumFields() == 3 && (!valueOk || !typedValueOk) {
 		return nil, fmt.Errorf("%w: has 3 fields, but missing one of 'value' or 'typed_value' fields, %s", arrow.ErrInvalid, storage)
 	}
