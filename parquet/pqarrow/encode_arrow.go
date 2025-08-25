@@ -333,7 +333,7 @@ func writeDenseArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, leafArr 
 			case arrow.DECIMAL128:
 				for idx, val := range leafArr.(*array.Decimal128).Values() {
 					debug.Assert(val.HighBits() == 0 || val.HighBits() == -1, "casting Decimal128 greater than the value range; high bits must be 0 or -1")
-					debug.Assert(val.LowBits() <= math.MaxUint32, "casting Decimal128 to int32 when value > MaxUint32")
+					debug.Assert(int64(val.LowBits()) <= math.MaxUint32, "casting Decimal128 to int32 when value > MaxUint32")
 					data[idx] = int32(val.LowBits())
 				}
 			case arrow.DECIMAL256:

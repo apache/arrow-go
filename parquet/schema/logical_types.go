@@ -24,6 +24,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/debug"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
+	"github.com/apache/thrift/lib/go/thrift"
 )
 
 // DecimalMetadata is a struct for managing scale and precision information between
@@ -1139,7 +1140,7 @@ func (VariantLogicalType) IsCompatible(ct ConvertedType, _ DecimalMetadata) bool
 func (VariantLogicalType) IsApplicable(parquet.Type, int32) bool { return false }
 
 func (VariantLogicalType) toThrift() *format.LogicalType {
-	return &format.LogicalType{VARIANT: format.NewVariantType()}
+	return &format.LogicalType{VARIANT: &format.VariantType{SpecificationVersion: thrift.Int8Ptr(1)}}
 }
 
 func (VariantLogicalType) Equals(rhs LogicalType) bool {

@@ -61,21 +61,18 @@ func TestVariantExtensionType(t *testing.T) {
 		expectedErr string
 	}{
 		{arrow.StructOf(arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary}),
-			"missing non-nullable field 'value'"},
+			"there must be at least one of 'value' or 'typed_value' fields in variant storage type"},
 		{arrow.StructOf(arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary}), "missing non-nullable field 'metadata'"},
 		{arrow.StructOf(arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary},
 			arrow.Field{Name: "value", Type: arrow.PrimitiveTypes.Int32}),
-			"value field must be non-nullable binary type, got int32"},
+			"value field must be binary type, got int32"},
 		{arrow.StructOf(arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary},
 			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary},
 			arrow.Field{Name: "extra", Type: arrow.BinaryTypes.Binary}),
-			"has 3 fields, but missing 'typed_value' field"},
+			"has 3 fields, but missing one of 'value' or 'typed_value' field"},
 		{arrow.StructOf(arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: true},
 			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: false}),
 			"metadata field must be non-nullable binary type"},
-		{arrow.StructOf(arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
-			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true}),
-			"value field must be non-nullable binary type"},
 		{arrow.FixedWidthTypes.Boolean, "bad storage type bool for variant type"},
 		{arrow.StructOf(
 			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
@@ -86,16 +83,6 @@ func TestVariantExtensionType(t *testing.T) {
 			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.String, Nullable: false},
 			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: false}),
 			"metadata field must be non-nullable binary type, got utf8"},
-		{arrow.StructOf(
-			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
-			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: false},
-			arrow.Field{Name: "typed_value", Type: arrow.BinaryTypes.String, Nullable: true}),
-			"value field must be nullable if typed_value is present"},
-		{arrow.StructOf(
-			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
-			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
-			arrow.Field{Name: "typed_value", Type: arrow.BinaryTypes.String, Nullable: false}),
-			"typed_value field must be nullable"},
 	}
 
 	for _, tt := range tests {
@@ -126,11 +113,6 @@ func TestVariantExtensionBadNestedTypes(t *testing.T) {
 			), Nullable: false})},
 		{"empty struct elem", arrow.StructOf(
 			arrow.Field{Name: "foobar", Type: arrow.StructOf(), Nullable: false})},
-		{"nullable value struct elem",
-			arrow.StructOf(
-				arrow.Field{Name: "foobar", Type: arrow.StructOf(
-					arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
-				), Nullable: false})},
 		{"non-nullable two elem struct", arrow.StructOf(
 			arrow.Field{Name: "foobar", Type: arrow.StructOf(
 				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
