@@ -164,7 +164,7 @@ func (enc *typedDictEncoder[T]) PutDictionary(values arrow.Array) error {
 	enc.dictEncodedSize += values.Len() * int(unsafe.Sizeof(T(0)))
 	data := values.(arrvalues[T]).Values()
 
-	typedMemo := enc.mem.(TypedMemoTable[T])
+	typedMemo := enc.memo.(TypedMemoTable[T])
 	for _, val := range data {
 		if _, _, err := typedMemo.InsertOrGet(val); err != nil {
 			return err
