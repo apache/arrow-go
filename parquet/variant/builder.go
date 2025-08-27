@@ -887,7 +887,7 @@ func (b *Builder) Build() (Value, error) {
 type variantPrimitiveType interface {
 	constraints.Integer | constraints.Float | string | []byte |
 		arrow.Date32 | arrow.Time64 | arrow.Timestamp | bool |
-		uuid.UUID | DecimalValue[decimal.Decimal32] |
+		uuid.UUID | DecimalValue[decimal.Decimal32] | time.Time |
 		DecimalValue[decimal.Decimal64] | DecimalValue[decimal.Decimal128]
 }
 
@@ -895,17 +895,25 @@ type variantPrimitiveType interface {
 // variant value. At the moment this is just delegating to the [Builder.Append] method,
 // but in the future it will be optimized to avoid the extra overhead and reduce allocations.
 func Encode[T variantPrimitiveType](v T, opt ...AppendOpt) ([]byte, error) {
+	out, err := Of(v, opt...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode variant value: %w", err)
+	}
+	return out.value, nil
+}
+
+func Of[T variantPrimitiveType](v T, opt ...AppendOpt) (Value, error) {
 	var b Builder
 	if err := b.Append(v, opt...); err != nil {
-		return nil, fmt.Errorf("failed to append value: %w", err)
+		return Value{}, fmt.Errorf("failed to append value: %w", err)
 	}
 
 	val, err := b.Build()
 	if err != nil {
-		return nil, fmt.Errorf("failed to build variant value: %w", err)
+		return Value{}, fmt.Errorf("failed to build variant value: %w", err)
 	}
 
-	return val.value, nil
+	return val, nil
 }
 
 func ParseJSON(data string, allowDuplicateKeys bool) (Value, error) {

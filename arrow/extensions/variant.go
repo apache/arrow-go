@@ -18,6 +18,7 @@ package extensions
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -171,21 +172,23 @@ func NewVariantType(storage arrow.DataType) (*VariantType, error) {
 		return nil, fmt.Errorf("%w: missing non-nullable field 'metadata' in variant storage type %s", arrow.ErrInvalid, storage)
 	}
 
-	if valueFieldIdx, ok = s.FieldIdx("value"); !ok {
-		return nil, fmt.Errorf("%w: missing non-nullable field 'value' in variant storage type %s", arrow.ErrInvalid, storage)
+	var valueOk, typedValueOk bool
+	valueFieldIdx, valueOk = s.FieldIdx("value")
+	typedValueFieldIdx, typedValueOk = s.FieldIdx("typed_value")
+
+	if !valueOk && !typedValueOk {
+		return nil, fmt.Errorf("%w: there must be at least one of 'value' or 'typed_value' fields in variant storage type %s", arrow.ErrInvalid, storage)
+	}
+
+	if s.NumFields() == 3 && (!valueOk || !typedValueOk) {
+		return nil, fmt.Errorf("%w: has 3 fields, but missing one of 'value' or 'typed_value' fields, %s", arrow.ErrInvalid, storage)
 	}
 
 	if s.NumFields() > 3 {
 		return nil, fmt.Errorf("%w: too many fields in variant storage type %s, expected 2 or 3", arrow.ErrInvalid, storage)
 	}
 
-	if s.NumFields() == 3 {
-		if typedValueFieldIdx, ok = s.FieldIdx("typed_value"); !ok {
-			return nil, fmt.Errorf("%w: has 3 fields, but missing 'typed_value' field, %s", arrow.ErrInvalid, storage)
-		}
-	}
-
-	mdField, valField := s.Field(metadataFieldIdx), s.Field(valueFieldIdx)
+	mdField := s.Field(metadataFieldIdx)
 	if mdField.Nullable {
 		return nil, fmt.Errorf("%w: metadata field must be non-nullable binary type, got %s", arrow.ErrInvalid, mdField.Type)
 	}
@@ -196,11 +199,14 @@ func NewVariantType(storage arrow.DataType) (*VariantType, error) {
 		}
 	}
 
-	if !isBinary(valField.Type) || (valField.Nullable && typedValueFieldIdx == -1) {
-		return nil, fmt.Errorf("%w: value field must be non-nullable binary type, got %s", arrow.ErrInvalid, valField.Type)
+	if valueOk {
+		valField := s.Field(valueFieldIdx)
+		if !isBinary(valField.Type) {
+			return nil, fmt.Errorf("%w: value field must be binary type, got %s", arrow.ErrInvalid, valField.Type)
+		}
 	}
 
-	if typedValueFieldIdx == -1 {
+	if !typedValueOk {
 		return &VariantType{
 			ExtensionBase:      arrow.ExtensionBase{Storage: storage},
 			metadataFieldIdx:   metadataFieldIdx,
@@ -209,17 +215,17 @@ func NewVariantType(storage arrow.DataType) (*VariantType, error) {
 		}, nil
 	}
 
-	valueField := s.Field(valueFieldIdx)
-	if !valueField.Nullable {
-		return nil, fmt.Errorf("%w: value field must be nullable if typed_value is present, got %s", arrow.ErrInvalid, valueField.Type)
-	}
-
 	typedValueField := s.Field(typedValueFieldIdx)
 	if !typedValueField.Nullable {
 		return nil, fmt.Errorf("%w: typed_value field must be nullable, got %s", arrow.ErrInvalid, typedValueField.Type)
 	}
 
-	if nt, ok := typedValueField.Type.(arrow.NestedType); ok {
+	dt := typedValueField.Type
+	if dt.ID() == arrow.EXTENSION {
+		dt = dt.(arrow.ExtensionType).StorageType()
+	}
+
+	if nt, ok := dt.(arrow.NestedType); ok {
 		if !validNestedType(nt) {
 			return nil, fmt.Errorf("%w: typed_value field must be a valid nested type, got %s", arrow.ErrInvalid, typedValueField.Type)
 		}
@@ -242,6 +248,9 @@ func (v *VariantType) Metadata() arrow.Field {
 }
 
 func (v *VariantType) Value() arrow.Field {
+	if v.valueFieldIdx == -1 {
+		return arrow.Field{}
+	}
 	return v.StorageType().(*arrow.StructType).Field(v.valueFieldIdx)
 }
 
@@ -286,7 +295,7 @@ func validStruct(s *arrow.StructType) bool {
 	switch s.NumFields() {
 	case 1:
 		f := s.Field(0)
-		return f.Name == "value" && !f.Nullable && isBinary(f.Type)
+		return (f.Name == "value" && isBinary(f.Type)) || f.Name == "typed_value"
 	case 2:
 		valField, ok := s.FieldByName("value")
 		if !ok || !valField.Nullable || !isBinary(valField.Type) {
@@ -365,8 +374,6 @@ func (v *VariantArray) initReader() {
 		vt := v.ExtensionType().(*VariantType)
 		st := v.Storage().(*array.Struct)
 		metaField := st.Field(vt.metadataFieldIdx)
-		valueField := st.Field(vt.valueFieldIdx)
-
 		metadata, ok := metaField.(arrow.TypedArray[[]byte])
 		if !ok {
 			// we already validated that if the metadata field isn't a binary
@@ -374,24 +381,30 @@ func (v *VariantArray) initReader() {
 			metadata, _ = array.NewDictWrapper[[]byte](metaField.(*array.Dictionary))
 		}
 
-		if vt.typedValueFieldIdx == -1 {
+		var value arrow.TypedArray[[]byte]
+		if vt.valueFieldIdx != -1 {
+			valueField := st.Field(vt.valueFieldIdx)
+			value = valueField.(arrow.TypedArray[[]byte])
+		}
+
+		var ivreader typedValReader
+		var err error
+		if vt.typedValueFieldIdx != -1 {
+			ivreader, err = getReader(st.Field(vt.typedValueFieldIdx))
+			if err != nil {
+				v.rdrErr = err
+				return
+			}
+			v.rdr = &shreddedVariantReader{
+				metadata:   metadata,
+				value:      value,
+				typedValue: ivreader,
+			}
+		} else {
 			v.rdr = &basicVariantReader{
 				metadata: metadata,
-				value:    valueField.(arrow.TypedArray[[]byte]),
+				value:    value,
 			}
-			return
-		}
-
-		ivreader, err := getReader(st.Field(vt.typedValueFieldIdx))
-		if err != nil {
-			v.rdrErr = err
-			return
-		}
-
-		v.rdr = &shreddedVariantReader{
-			metadata:   metadata,
-			value:      valueField.(arrow.TypedArray[[]byte]),
-			typedValue: ivreader,
 		}
 	})
 }
@@ -419,6 +432,9 @@ func (v *VariantArray) Metadata() arrow.TypedArray[[]byte] {
 // value of null).
 func (v *VariantArray) UntypedValues() arrow.TypedArray[[]byte] {
 	vt := v.ExtensionType().(*VariantType)
+	if vt.valueFieldIdx == -1 {
+		return nil
+	}
 	return v.Storage().(*array.Struct).Field(vt.valueFieldIdx).(arrow.TypedArray[[]byte])
 }
 
@@ -451,7 +467,6 @@ func (v *VariantArray) IsNull(i int) bool {
 	}
 
 	vt := v.ExtensionType().(*VariantType)
-	valArr := v.Storage().(*array.Struct).Field(vt.valueFieldIdx)
 	if vt.typedValueFieldIdx != -1 {
 		typedArr := v.Storage().(*array.Struct).Field(vt.typedValueFieldIdx)
 		if !typedArr.IsNull(i) {
@@ -459,6 +474,7 @@ func (v *VariantArray) IsNull(i int) bool {
 		}
 	}
 
+	valArr := v.Storage().(*array.Struct).Field(vt.valueFieldIdx)
 	b := valArr.(arrow.TypedArray[[]byte]).Value(i)
 	return len(b) == 1 && b[0] == 0 // variant null
 }
@@ -747,9 +763,20 @@ func getReader(typedArr arrow.Array) (typedValReader, error) {
 			childType := child.DataType().(*arrow.StructType)
 
 			valueIdx, _ := childType.FieldIdx("value")
-			valueArr := child.Field(valueIdx).(arrow.TypedArray[[]byte])
+			var valueArr arrow.TypedArray[[]byte]
+			if valueIdx != -1 {
+				valueArr = child.Field(valueIdx).(arrow.TypedArray[[]byte])
+			}
 
-			typedValueIdx, _ := childType.FieldIdx("typed_value")
+			typedValueIdx, exists := childType.FieldIdx("typed_value")
+			if !exists {
+				fieldReaders[fieldList[i].Name] = fieldReaderPair{
+					values:   valueArr,
+					typedVal: nil,
+				}
+				continue
+			}
+
 			typedRdr, err := getReader(child.Field(typedValueIdx))
 			if err != nil {
 				return nil, fmt.Errorf("error getting typed value reader for field %s: %w", fieldList[i].Name, err)
@@ -768,13 +795,22 @@ func getReader(typedArr arrow.Array) (typedValReader, error) {
 	case array.ListLike:
 		listValues := arr.ListValues().(*array.Struct)
 		elemType := listValues.DataType().(*arrow.StructType)
+
+		var valueArr arrow.TypedArray[[]byte]
+		var typedRdr typedValReader
+
 		valueIdx, _ := elemType.FieldIdx("value")
-		valueArr := listValues.Field(valueIdx).(arrow.TypedArray[[]byte])
+		if valueIdx != -1 {
+			valueArr = listValues.Field(valueIdx).(arrow.TypedArray[[]byte])
+		}
 
 		typedValueIdx, _ := elemType.FieldIdx("typed_value")
-		typedRdr, err := getReader(listValues.Field(typedValueIdx))
-		if err != nil {
-			return nil, fmt.Errorf("error getting typed value reader: %w", err)
+		if typedValueIdx != -1 {
+			var err error
+			typedRdr, err = getReader(listValues.Field(typedValueIdx))
+			if err != nil {
+				return nil, fmt.Errorf("error getting typed value reader: %w", err)
+			}
 		}
 
 		return &typedListReader{
@@ -796,6 +832,7 @@ func constructVariant(b *variant.Builder, meta variant.Metadata, value []byte, t
 	switch v := typedVal.(type) {
 	case nil:
 		if len(value) == 0 {
+			b.AppendNull()
 			return nil
 		}
 
@@ -846,6 +883,9 @@ func constructVariant(b *variant.Builder, meta variant.Metadata, value []byte, t
 
 		return b.FinishArray(arrstart, elems)
 	case []byte:
+		if len(value) > 0 {
+			return errors.New("invalid variant, conflicting value and typed_value")
+		}
 		return b.UnsafeAppendEncoded(v)
 	default:
 		return fmt.Errorf("%w: unsupported typed value type %T for variant", arrow.ErrInvalid, v)
@@ -876,14 +916,24 @@ func (v *typedObjReader) Value(meta variant.Metadata, i int) (any, error) {
 		return nil, nil
 	}
 
+	var err error
 	result := make(map[string]typedPair)
 	for name, rdr := range v.fieldRdrs {
-		typedValue, err := rdr.typedVal.Value(meta, i)
-		if err != nil {
-			return nil, fmt.Errorf("error reading typed value for field %s at index %d: %w", name, i, err)
+		var typedValue any
+		if rdr.typedVal != nil {
+			typedValue, err = rdr.typedVal.Value(meta, i)
+			if err != nil {
+				return nil, fmt.Errorf("error reading typed value for field %s at index %d: %w", name, i, err)
+			}
 		}
+
+		var val []byte
+		if rdr.values != nil {
+			val = rdr.values.Value(i)
+		}
+
 		result[name] = typedPair{
-			Value:      rdr.values.Value(i),
+			Value:      val,
 			TypedValue: typedValue,
 		}
 	}
@@ -913,7 +963,11 @@ func (v *typedListReader) Value(meta variant.Metadata, i int) (any, error) {
 
 	result := make([]typedPair, 0, end-start)
 	for j := start; j < end; j++ {
-		val := v.valueArr.Value(int(j))
+		var val []byte
+		if v.valueArr != nil {
+			val = v.valueArr.Value(int(j))
+		}
+
 		typedValue, err := v.typedVal.Value(meta, int(j))
 		if err != nil {
 			return nil, fmt.Errorf("error reading typed value at index %d: %w", j, err)
@@ -956,12 +1010,17 @@ func (v *shreddedVariantReader) Value(i int) (variant.Value, error) {
 	}
 
 	b := variant.NewBuilderFromMeta(meta)
+	b.SetAllowDuplicates(true)
 	typed, err := v.typedValue.Value(meta, i)
 	if err != nil {
 		return variant.NullValue, fmt.Errorf("error reading typed value at index %d: %w", i, err)
 	}
 
-	if err := constructVariant(b, meta, v.value.Value(i), typed); err != nil {
+	var value []byte
+	if v.value != nil {
+		value = v.value.Value(i)
+	}
+	if err := constructVariant(b, meta, value, typed); err != nil {
 		return variant.NullValue, fmt.Errorf("error constructing variant at index %d: %w", i, err)
 	}
 	return b.Build()
