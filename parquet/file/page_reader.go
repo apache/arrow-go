@@ -53,7 +53,7 @@ type PageReader interface {
 	// Get the dictionary page for this column chunk
 	GetDictionaryPage() (*DictionaryPage, error)
 	SeekToPageWithRow(rowIdx int64) error
-	// Close close the reader and free the resources
+	// Close releases the resources held by the reader.
 	Close()
 }
 
@@ -389,18 +389,15 @@ func (p *serializedPageReader) init(compressType compress.Compression, ctx *Cryp
 	if p.mem == nil {
 		p.mem = memory.NewGoAllocator()
 	}
+	p.decompressBuffer = memory.NewResizableBuffer(p.mem)
+	p.dataPageBuffer = memory.NewResizableBuffer(p.mem)
+	p.dictPageBuffer = memory.NewResizableBuffer(p.mem)
 
 	codec, err := compress.GetCodec(compressType)
 	if err != nil {
 		return err
 	}
 	p.codec = codec
-
-	if p.decompressBuffer == nil {
-		p.decompressBuffer = memory.NewResizableBuffer(p.mem)
-		p.dataPageBuffer = memory.NewResizableBuffer(p.mem)
-		p.dictPageBuffer = memory.NewResizableBuffer(p.mem)
-	}
 
 	if ctx != nil {
 		p.cryptoCtx = *ctx

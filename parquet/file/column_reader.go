@@ -113,7 +113,7 @@ type ColumnChunkReader interface {
 	// automatically read the first page of the page reader passed in until
 	// HasNext which will read in the next page.
 	setPageReader(PageReader)
-	// Close releases the resources allocated by the memory allocator
+	// Close releases the resources held by the column reader.
 	Close()
 }
 
