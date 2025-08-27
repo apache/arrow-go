@@ -113,6 +113,8 @@ type ColumnChunkReader interface {
 	// automatically read the first page of the page reader passed in until
 	// HasNext which will read in the next page.
 	setPageReader(PageReader)
+	// Close releases the resources allocated by the memory allocator
+	Close()
 }
 
 type columnChunkReader struct {
@@ -225,6 +227,15 @@ func (c *columnChunkReader) setPageReader(rdr PageReader) {
 	c.decoders = make(map[format.Encoding]encoding.TypedDecoder)
 	c.newDictionary = false
 	c.numBuffered, c.numDecoded = 0, 0
+}
+
+func (c *columnChunkReader) Close() {
+	if c.curPage != nil {
+		c.curPage.Release()
+	}
+	if c.rdr != nil {
+		c.rdr.Close()
+	}
 }
 
 func (c *columnChunkReader) getDefLvlBuffer(sz int64) []int16 {

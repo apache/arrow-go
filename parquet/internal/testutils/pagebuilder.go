@@ -234,6 +234,8 @@ type MockPageReader struct {
 	curpage int
 }
 
+func (m *MockPageReader) Close() {}
+
 func (m *MockPageReader) Err() error {
 	return m.Called().Error(0)
 }
