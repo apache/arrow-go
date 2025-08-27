@@ -751,12 +751,10 @@ func (p *serializedPageReader) Next() bool {
 				return false
 			}
 
-			p.dataPageBuffer.ResizeNoShrink(lenUncompressed)
-			buf := memory.NewBufferBytes(p.dataPageBuffer.Bytes())
-
 			firstRowIdx := p.rowsSeen
 			p.rowsSeen += int64(dataHeader.GetNumValues())
-			data, err := p.decompress(p.r, lenCompressed, buf.Bytes())
+			p.dataPageBuffer.ResizeNoShrink(lenUncompressed)
+			data, err := p.decompress(p.r, lenCompressed, p.dataPageBuffer.Bytes())
 			if err != nil {
 				p.err = err
 				return false
@@ -769,7 +767,7 @@ func (p *serializedPageReader) Next() bool {
 			// make datapagev1
 			p.curPage = &DataPageV1{
 				page: page{
-					buf:      buf,
+					buf:      memory.NewBufferBytes(data),
 					typ:      p.curPageHdr.Type,
 					nvals:    dataHeader.GetNumValues(),
 					encoding: dataHeader.GetEncoding(),
