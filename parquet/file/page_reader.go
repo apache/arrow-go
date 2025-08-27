@@ -576,8 +576,9 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 		}
 
 		p.dictPageBuffer.ResizeNoShrink(lenUncompressed)
+		buf := memory.NewBufferBytes(p.dictPageBuffer.Bytes())
 
-		data, err := p.decompress(rd, lenCompressed, p.dictPageBuffer.Bytes())
+		data, err := p.decompress(rd, lenCompressed, buf.Bytes())
 		if err != nil {
 			return nil, err
 		}
@@ -587,7 +588,7 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 
 		return &DictionaryPage{
 			page: page{
-				buf:      memory.NewBufferBytes(data),
+				buf:      buf,
 				typ:      hdr.Type,
 				nvals:    dictHeader.GetNumValues(),
 				encoding: dictHeader.GetEncoding(),
@@ -724,7 +725,9 @@ func (p *serializedPageReader) Next() bool {
 			}
 
 			p.dictPageBuffer.ResizeNoShrink(lenUncompressed)
-			data, err := p.decompress(p.r, lenCompressed, p.dictPageBuffer.Bytes())
+			buf := memory.NewBufferBytes(p.dictPageBuffer.Bytes())
+
+			data, err := p.decompress(p.r, lenCompressed, buf.Bytes())
 			if err != nil {
 				p.err = err
 				return false
@@ -737,7 +740,7 @@ func (p *serializedPageReader) Next() bool {
 			// make dictionary page
 			p.curPage = &DictionaryPage{
 				page: page{
-					buf:      memory.NewBufferBytes(data),
+					buf:      buf,
 					typ:      p.curPageHdr.Type,
 					nvals:    dictHeader.GetNumValues(),
 					encoding: dictHeader.GetEncoding(),
@@ -753,10 +756,12 @@ func (p *serializedPageReader) Next() bool {
 				return false
 			}
 
+			p.dataPageBuffer.ResizeNoShrink(lenUncompressed)
+			buf := memory.NewBufferBytes(p.dataPageBuffer.Bytes())
+
 			firstRowIdx := p.rowsSeen
 			p.rowsSeen += int64(dataHeader.GetNumValues())
-			p.dataPageBuffer.ResizeNoShrink(lenUncompressed)
-			data, err := p.decompress(p.r, lenCompressed, p.dataPageBuffer.Bytes())
+			data, err := p.decompress(p.r, lenCompressed, buf.Bytes())
 			if err != nil {
 				p.err = err
 				return false
@@ -769,7 +774,7 @@ func (p *serializedPageReader) Next() bool {
 			// make datapagev1
 			p.curPage = &DataPageV1{
 				page: page{
-					buf:      memory.NewBufferBytes(data),
+					buf:      buf,
 					typ:      p.curPageHdr.Type,
 					nvals:    dataHeader.GetNumValues(),
 					encoding: dataHeader.GetEncoding(),
