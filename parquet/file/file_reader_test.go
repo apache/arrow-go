@@ -26,6 +26,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"sync/atomic"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -46,6 +47,28 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
+
+type allocatorWithStats struct {
+	allocated atomic.Int64
+}
+
+func (a *allocatorWithStats) Allocate(n int) []byte {
+	a.allocated.Add(int64(n))
+	return make([]byte, n)
+}
+
+func (a *allocatorWithStats) Free(b []byte) {
+	a.allocated.Add(-int64(len(b)))
+}
+
+func (a *allocatorWithStats) Allocated() int64 {
+	return a.allocated.Load()
+}
+
+func (a *allocatorWithStats) Reallocate(size int, b []byte) []byte {
+	a.Free(b)
+	return a.Allocate(size)
+}
 
 func getDummyStats(statSize int, fillAll bool) *format.Statistics {
 	statBytes := make([]byte, statSize)
@@ -123,10 +146,10 @@ func (p *PageSerdeSuite) SetupTest() {
 	p.ResetStream()
 }
 
-func (p *PageSerdeSuite) InitSerializedPageReader(nrows int64, codec compress.Compression) {
+func (p *PageSerdeSuite) InitSerializedPageReader(nrows int64, codec compress.Compression, allocator memory.Allocator) {
 	p.EndStream()
 
-	p.pageReader, _ = file.NewPageReader(utils.NewByteReader(p.buffer.Bytes()), nrows, codec, memory.DefaultAllocator, nil)
+	p.pageReader, _ = file.NewPageReader(utils.NewByteReader(p.buffer.Bytes()), nrows, codec, allocator, nil)
 }
 
 func (p *PageSerdeSuite) WriteDataPageHeader(maxSerialized int, uncompressed, compressed int32) {
@@ -189,7 +212,7 @@ func (p *PageSerdeSuite) TestDataPageV1() {
 	p.dataPageHdr.NumValues = nrows
 
 	p.WriteDataPageHeader(1024, 0, 0)
-	p.InitSerializedPageReader(nrows, compress.Codecs.Uncompressed)
+	p.InitSerializedPageReader(nrows, compress.Codecs.Uncompressed, memory.DefaultAllocator)
 	p.True(p.pageReader.Next())
 	currentPage := p.pageReader.Page()
 	p.CheckDataPageHeader(p.dataPageHdr, currentPage)
@@ -200,12 +223,15 @@ func (p *PageSerdeSuite) TestDataPageV2() {
 		statsSize = 512
 		nrows     = 4444
 	)
+	alloc := &allocatorWithStats{}
 	p.dataPageHdrV2.Statistics = getDummyStats(statsSize, true)
 	p.dataPageHdrV2.NumValues = nrows
-	p.WriteDataPageHeaderV2(1024, 0, 0)
-	p.InitSerializedPageReader(nrows, compress.Codecs.Uncompressed)
+	p.WriteDataPageHeaderV2(1024, 20, 10)
+	p.InitSerializedPageReader(nrows, compress.Codecs.Uncompressed, alloc)
 	p.True(p.pageReader.Next())
 	p.CheckDataPageHeaderV2(p.dataPageHdrV2, p.pageReader.Page())
+	p.pageReader.Close()
+	p.EqualValues(0, alloc.Allocated())
 }
 
 func (p *PageSerdeSuite) TestLargePageHeaders() {
@@ -224,7 +250,7 @@ func (p *PageSerdeSuite) TestLargePageHeaders() {
 	p.LessOrEqual(statsSize, int(pos))
 	p.GreaterOrEqual(16*1024*1024, int(pos))
 
-	p.InitSerializedPageReader(nrows, compress.Codecs.Uncompressed)
+	p.InitSerializedPageReader(nrows, compress.Codecs.Uncompressed, memory.DefaultAllocator)
 	p.True(p.pageReader.Next())
 	p.CheckDataPageHeader(p.dataPageHdr, p.pageReader.Page())
 }
@@ -243,7 +269,7 @@ func (p *PageSerdeSuite) TestFailLargePageHeaders() {
 	p.GreaterOrEqual(maxHeaderSize, int(pos))
 
 	p.LessOrEqual(smallerMaxSize, int(pos))
-	p.InitSerializedPageReader(nrows, compress.Codecs.Uncompressed)
+	p.InitSerializedPageReader(nrows, compress.Codecs.Uncompressed, memory.DefaultAllocator)
 	p.pageReader.SetMaxPageHeaderSize(smallerMaxSize)
 	p.NotPanics(func() { p.False(p.pageReader.Next()) })
 	p.Error(p.pageReader.Err())
@@ -282,7 +308,7 @@ func (p *PageSerdeSuite) TestCompression() {
 				p.NoError(err)
 			}
 
-			p.InitSerializedPageReader(nrows*npages, c)
+			p.InitSerializedPageReader(nrows*npages, c, memory.DefaultAllocator)
 
 			for _, data := range fauxData {
 				p.True(p.pageReader.Next())
