@@ -18,7 +18,6 @@ package encoding
 
 import (
 	"bytes"
-	"reflect"
 
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
@@ -103,31 +102,31 @@ func (d *decoder) ValuesLeft() int { return d.nvals }
 // Encoding returns the encoding type used by this decoder to decode the bytes.
 func (d *decoder) Encoding() parquet.Encoding { return parquet.Encoding(d.encoding) }
 
-type dictDecoder struct {
+type dictDecoder[T parquet.ColumnTypes] struct {
 	decoder
 	mem              memory.Allocator
-	dictValueDecoder utils.DictionaryConverter
-	idxDecoder       *utils.RleDecoder
+	dictValueDecoder utils.DictionaryConverter[T]
+	idxDecoder       *utils.TypedRleDecoder[T]
 
 	idxScratchSpace []uint64
 }
 
 // SetDict sets a decoder that can be used to decode the dictionary that is
 // used for this column in order to return the proper values.
-func (d *dictDecoder) SetDict(dict TypedDecoder) {
+func (d *dictDecoder[T]) SetDict(dict TypedDecoder) {
 	if dict.Type() != d.descr.PhysicalType() {
 		panic("parquet: mismatch dictionary and column data type")
 	}
 
-	d.dictValueDecoder = NewDictConverter(dict)
+	d.dictValueDecoder = NewDictConverter[T](dict)
 }
 
 // SetData sets the index value data into the decoder.
-func (d *dictDecoder) SetData(nvals int, data []byte) error {
+func (d *dictDecoder[T]) SetData(nvals int, data []byte) error {
 	d.nvals = nvals
 	if len(data) == 0 {
 		// no data, bitwidth can safely be 0
-		d.idxDecoder = utils.NewRleDecoder(bytes.NewReader(data), 0 /* bitwidth */)
+		d.idxDecoder = utils.NewTypedRleDecoder[T](bytes.NewReader(data), 0 /* bitwidth */)
 		return nil
 	}
 
@@ -138,29 +137,29 @@ func (d *dictDecoder) SetData(nvals int, data []byte) error {
 	}
 
 	// pass the rest of the data, minus that first byte, to the decoder
-	d.idxDecoder = utils.NewRleDecoder(bytes.NewReader(data[1:]), int(width))
+	d.idxDecoder = utils.NewTypedRleDecoder[T](bytes.NewReader(data[1:]), int(width))
 	return nil
 }
 
-func (d *dictDecoder) discard(n int) (int, error) {
+func (d *dictDecoder[T]) discard(n int) (int, error) {
 	n = d.idxDecoder.Discard(n)
 	d.nvals -= n
 	return n, nil
 }
 
-func (d *dictDecoder) decode(out interface{}) (int, error) {
+func (d *dictDecoder[T]) decode(out []T) (int, error) {
 	n, err := d.idxDecoder.GetBatchWithDict(d.dictValueDecoder, out)
 	d.nvals -= n
 	return n, err
 }
 
-func (d *dictDecoder) decodeSpaced(out interface{}, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
+func (d *dictDecoder[T]) decodeSpaced(out []T, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
 	n, err := d.idxDecoder.GetBatchWithDictSpaced(d.dictValueDecoder, out, nullCount, validBits, validBitsOffset)
 	d.nvals -= n
 	return n, err
 }
 
-func (d *dictDecoder) DecodeIndices(numValues int, bldr array.Builder) (int, error) {
+func (d *dictDecoder[T]) DecodeIndices(numValues int, bldr array.Builder) (int, error) {
 	n := shared_utils.Min(numValues, d.nvals)
 	if cap(d.idxScratchSpace) < n {
 		d.idxScratchSpace = make([]uint64, n, bitutil.NextPowerOf2(n))
@@ -179,7 +178,7 @@ func (d *dictDecoder) DecodeIndices(numValues int, bldr array.Builder) (int, err
 	return n, nil
 }
 
-func (d *dictDecoder) DecodeIndicesSpaced(numValues, nullCount int, validBits []byte, offset int64, bldr array.Builder) (int, error) {
+func (d *dictDecoder[T]) DecodeIndicesSpaced(numValues, nullCount int, validBits []byte, offset int64, bldr array.Builder) (int, error) {
 	if cap(d.idxScratchSpace) < numValues {
 		d.idxScratchSpace = make([]uint64, numValues, bitutil.NextPowerOf2(numValues))
 	} else {
@@ -207,15 +206,8 @@ func (d *dictDecoder) DecodeIndicesSpaced(numValues, nullCount int, validBits []
 // spacedExpand is used to take a slice of data and utilize the bitmap provided to fill in nulls into the
 // correct slots according to the bitmap in order to produce a fully expanded result slice with nulls
 // in the correct slots.
-func spacedExpand(buffer interface{}, nullCount int, validBits []byte, validBitsOffset int64) int {
-	bufferRef := reflect.ValueOf(buffer)
-	if bufferRef.Kind() != reflect.Slice {
-		panic("invalid spacedexpand type, not slice")
-	}
-
-	var (
-		numValues = bufferRef.Len()
-	)
+func spacedExpand[T parquet.ColumnTypes](buffer []T, nullCount int, validBits []byte, validBitsOffset int64) int {
+	numValues := len(buffer)
 
 	idxDecode := int64(numValues - nullCount)
 	if idxDecode == 0 { // if there's nothing to decode there's nothing to do.
@@ -236,8 +228,8 @@ func spacedExpand(buffer interface{}, nullCount int, validBits []byte, validBits
 		// overwrite any existing data with the correctly spaced data. Any data that happens to be left in the null
 		// slots is fine since it shouldn't matter and saves us work.
 		idxDecode -= run.Length
-		n := reflect.Copy(bufferRef.Slice(int(run.Pos), bufferRef.Len()), bufferRef.Slice(int(idxDecode), int(int64(idxDecode)+run.Length)))
-		debug.Assert(n == int(run.Length), "reflect.Copy copied incorrect number of elements in spacedExpand")
+		n := copy(buffer[run.Pos:], buffer[idxDecode:int64(idxDecode)+run.Length])
+		debug.Assert(n == int(run.Length), "copy copied incorrect number of elements in spacedExpand")
 	}
 
 	return numValues

@@ -21,7 +21,6 @@ import (
 	"errors"
 	"io"
 	"math"
-	"reflect"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -122,28 +121,22 @@ func (b *BitReader) GetZigZagVlqInt() (int64, bool) {
 // error if there aren't enough bytes left.
 func (b *BitReader) ReadByte() (byte, error) {
 	var tmp byte
-	if ok := b.GetAligned(1, &tmp); !ok {
+	if ok := b.getAlignedUint8(1, &tmp); !ok {
 		return 0, errors.New("failed to read byte")
 	}
 
 	return tmp, nil
 }
 
-// GetAligned reads nbytes from the underlying stream into the passed interface value.
+// getAlignedUint8 reads nbytes from the underlying stream into the passed uint8 value.
 // Returning false if there aren't enough bytes remaining in the stream or if an invalid
 // type is passed. The bytes are read aligned to byte boundaries.
-//
-// v must be a pointer to a byte or sized uint type (*byte, *uint16, *uint32, *uint64).
-// encoded values are assumed to be little endian.
-func (b *BitReader) GetAligned(nbytes int, v interface{}) bool {
-	// figure out the number of bytes to represent v
-	typBytes := int(reflect.TypeOf(v).Elem().Size())
-	if nbytes > typBytes {
+func (b *BitReader) getAlignedUint8(nbytes int, v *uint8) bool {
+	if nbytes > 1 {
 		return false
 	}
 
 	bread := bitutil.BytesForBits(int64(b.bitoffset))
-
 	b.byteoffset += bread
 	n, err := b.reader.ReadAt(b.raw[:nbytes], b.byteoffset)
 	if err != nil && err != io.EOF {
@@ -152,24 +145,91 @@ func (b *BitReader) GetAligned(nbytes int, v interface{}) bool {
 	if n != nbytes {
 		return false
 	}
-	// zero pad the bytes
-	memory.Set(b.raw[n:typBytes], 0)
 
-	switch v := v.(type) {
-	case *byte:
-		*v = b.raw[0]
-	case *uint64:
-		*v = binary.LittleEndian.Uint64(b.raw[:typBytes])
-	case *uint32:
-		*v = binary.LittleEndian.Uint32(b.raw[:typBytes])
-	case *uint16:
-		*v = binary.LittleEndian.Uint16(b.raw[:typBytes])
-	default:
+	*v = b.raw[0]
+
+	b.byteoffset += int64(nbytes)
+	b.bitoffset = 0
+	b.fillbuffer()
+	return true
+}
+
+// getAlignedUint16 reads nbytes from the underlying stream into the passed uint16 value.
+func (b *BitReader) getAlignedUint16(nbytes int, v *uint16) bool {
+	if nbytes > 2 {
 		return false
 	}
 
-	b.byteoffset += int64(nbytes)
+	bread := bitutil.BytesForBits(int64(b.bitoffset))
+	b.byteoffset += bread
+	n, err := b.reader.ReadAt(b.raw[:nbytes], b.byteoffset)
+	if err != nil && err != io.EOF {
+		return false
+	}
+	if n != nbytes {
+		return false
+	}
 
+	// zero pad the bytes
+	memory.Set(b.raw[n:2], 0)
+
+	*v = binary.LittleEndian.Uint16(b.raw[:2])
+
+	b.byteoffset += int64(nbytes)
+	b.bitoffset = 0
+	b.fillbuffer()
+	return true
+}
+
+// getAlignedUint32 reads nbytes from the underlying stream into the passed uint32 value.
+func (b *BitReader) getAlignedUint32(nbytes int, v *uint32) bool {
+	if nbytes > 4 {
+		return false
+	}
+
+	bread := bitutil.BytesForBits(int64(b.bitoffset))
+	b.byteoffset += bread
+	n, err := b.reader.ReadAt(b.raw[:nbytes], b.byteoffset)
+	if err != nil && err != io.EOF {
+		return false
+	}
+	if n != nbytes {
+		return false
+	}
+
+	// zero pad the bytes
+	memory.Set(b.raw[n:4], 0)
+
+	*v = binary.LittleEndian.Uint32(b.raw[:4])
+
+	b.byteoffset += int64(nbytes)
+	b.bitoffset = 0
+	b.fillbuffer()
+	return true
+}
+
+// getAlignedUint64 reads nbytes from the underlying stream into the passed uint64 value.
+func (b *BitReader) getAlignedUint64(nbytes int, v *uint64) bool {
+	if nbytes > 8 {
+		return false
+	}
+
+	bread := bitutil.BytesForBits(int64(b.bitoffset))
+	b.byteoffset += bread
+	n, err := b.reader.ReadAt(b.raw[:nbytes], b.byteoffset)
+	if err != nil && err != io.EOF {
+		return false
+	}
+	if n != nbytes {
+		return false
+	}
+
+	// zero pad the bytes
+	memory.Set(b.raw[n:8], 0)
+
+	*v = binary.LittleEndian.Uint64(b.raw[:8])
+
+	b.byteoffset += int64(nbytes)
 	b.bitoffset = 0
 	b.fillbuffer()
 	return true

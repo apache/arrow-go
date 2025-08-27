@@ -26,12 +26,8 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
-	"github.com/apache/arrow-go/v18/internal/utils"
-	"github.com/apache/arrow-go/v18/parquet"
 	"golang.org/x/xerrors"
 )
-
-//go:generate go run ../../../arrow/_tools/tmpl/main.go -i -data=physical_types.tmpldata typed_rle_dict.gen.go.tmpl
 
 const (
 	MaxValuesPerLiteralRun = (1 << 6) * 8
@@ -40,7 +36,7 @@ const (
 func MinRLEBufferSize(bitWidth int) int {
 	maxLiteralRunSize := 1 + bitutil.BytesForBits(int64(MaxValuesPerLiteralRun*bitWidth))
 	maxRepeatedRunSize := binary.MaxVarintLen32 + bitutil.BytesForBits(int64(bitWidth))
-	return int(utils.Max(maxLiteralRunSize, maxRepeatedRunSize))
+	return int(max(maxLiteralRunSize, maxRepeatedRunSize))
 }
 
 func MaxRLEBufferSize(width, numValues int) int {
@@ -51,7 +47,7 @@ func MaxRLEBufferSize(width, numValues int) int {
 	minRepeatedRunSize := 1 + int(bitutil.BytesForBits(int64(width)))
 	repeatedMaxSize := int(bitutil.BytesForBits(int64(numValues))) * minRepeatedRunSize
 
-	return utils.Max(literalMaxSize, repeatedMaxSize)
+	return max(literalMaxSize, repeatedMaxSize)
 }
 
 // Utility classes to do run length encoding (RLE) for fixed bit width values.  If runs
@@ -146,24 +142,24 @@ func (r *RleDecoder) Next() bool {
 		nbytes := int(bitutil.BytesForBits(int64(r.bitWidth)))
 		switch {
 		case nbytes > 4:
-			if !r.r.GetAligned(nbytes, &r.curVal) {
+			if !r.r.getAlignedUint64(nbytes, &r.curVal) {
 				return false
 			}
 		case nbytes > 2:
 			var val uint32
-			if !r.r.GetAligned(nbytes, &val) {
+			if !r.r.getAlignedUint32(nbytes, &val) {
 				return false
 			}
 			r.curVal = uint64(val)
 		case nbytes > 1:
 			var val uint16
-			if !r.r.GetAligned(nbytes, &val) {
+			if !r.r.getAlignedUint16(nbytes, &val) {
 				return false
 			}
 			r.curVal = uint64(val)
 		default:
 			var val uint8
-			if !r.r.GetAligned(nbytes, &val) {
+			if !r.r.getAlignedUint8(nbytes, &val) {
 				return false
 			}
 			r.curVal = uint64(val)
@@ -184,11 +180,11 @@ func (r *RleDecoder) Discard(n int) int {
 		remain := n - read
 
 		if r.repCount > 0 {
-			repbatch := int(math.Min(float64(remain), float64(r.repCount)))
+			repbatch := min(remain, int(r.repCount))
 			r.repCount -= int32(repbatch)
 			read += repbatch
 		} else if r.litCount > 0 {
-			litbatch := int(math.Min(float64(remain), float64(r.litCount)))
+			litbatch := min(remain, int(r.litCount))
 			n, _ := r.r.Discard(uint(r.bitWidth), litbatch)
 			if n != litbatch {
 				return read
@@ -214,7 +210,7 @@ func (r *RleDecoder) GetBatch(values []uint64) int {
 		remain := size - read
 
 		if r.repCount > 0 {
-			repbatch := int(math.Min(float64(remain), float64(r.repCount)))
+			repbatch := min(remain, int(r.repCount))
 			for i := 0; i < repbatch; i++ {
 				out[i] = r.curVal
 			}
@@ -223,7 +219,7 @@ func (r *RleDecoder) GetBatch(values []uint64) int {
 			read += repbatch
 			out = out[repbatch:]
 		} else if r.litCount > 0 {
-			litbatch := int(math.Min(float64(remain), float64(r.litCount)))
+			litbatch := min(remain, int(r.litCount))
 			n, _ := r.r.GetBatch(uint(r.bitWidth), out[:litbatch])
 			if n != litbatch {
 				return read
@@ -246,7 +242,7 @@ func (r *RleDecoder) GetBatchSpaced(vals []uint64, nullcount int, validBits []by
 		return r.GetBatch(vals), nil
 	}
 
-	converter := plainConverter{}
+	converter := plainConverter[uint64]{}
 	blockCounter := bitutils.NewBitBlockCounter(validBits, validBitsOffset, int64(len(vals)))
 
 	var (
@@ -268,7 +264,7 @@ func (r *RleDecoder) GetBatchSpaced(vals []uint64, nullcount int, validBits []by
 			converter.FillZero(vals[:block.Len])
 			processed = int(block.Len)
 		} else {
-			processed, err = r.getspaced(converter, vals, int(block.Len), int(block.Len-block.Popcnt), validBits, validBitsOffset)
+			processed, err = getspaced(r, converter, vals, int(block.Len), int(block.Len-block.Popcnt), validBits, validBitsOffset)
 			if err != nil {
 				return totalProcessed, err
 			}
@@ -285,92 +281,6 @@ func (r *RleDecoder) GetBatchSpaced(vals []uint64, nullcount int, validBits []by
 	return totalProcessed, nil
 }
 
-func (r *RleDecoder) getspaced(dc DictionaryConverter, vals interface{}, batchSize, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
-	switch vals := vals.(type) {
-	case []int32:
-		return r.getspacedInt32(dc, vals, batchSize, nullCount, validBits, validBitsOffset)
-	case []int64:
-		return r.getspacedInt64(dc, vals, batchSize, nullCount, validBits, validBitsOffset)
-	case []float32:
-		return r.getspacedFloat32(dc, vals, batchSize, nullCount, validBits, validBitsOffset)
-	case []float64:
-		return r.getspacedFloat64(dc, vals, batchSize, nullCount, validBits, validBitsOffset)
-	case []parquet.ByteArray:
-		return r.getspacedByteArray(dc, vals, batchSize, nullCount, validBits, validBitsOffset)
-	case []parquet.FixedLenByteArray:
-		return r.getspacedFixedLenByteArray(dc, vals, batchSize, nullCount, validBits, validBitsOffset)
-	case []parquet.Int96:
-		return r.getspacedInt96(dc, vals, batchSize, nullCount, validBits, validBitsOffset)
-	case []uint64:
-		return r.getspacedUint64(dc, vals, batchSize, nullCount, validBits, validBitsOffset)
-	default:
-		return 0, xerrors.New("parquet/rle: getspaced invalid type")
-	}
-}
-
-func (r *RleDecoder) getspacedUint64(dc DictionaryConverter, vals []uint64, batchSize, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
-	if nullCount == batchSize {
-		dc.FillZero(vals[:batchSize])
-		return batchSize, nil
-	}
-
-	read := 0
-	remain := batchSize - nullCount
-
-	const bufferSize = 1024
-	var indexbuffer [bufferSize]IndexType
-
-	// assume no bits to start
-	bitReader := bitutils.NewBitRunReader(validBits, validBitsOffset, int64(batchSize))
-	validRun := bitReader.NextRun()
-	for read < batchSize {
-		if validRun.Len == 0 {
-			validRun = bitReader.NextRun()
-		}
-
-		if !validRun.Set {
-			dc.FillZero(vals[:int(validRun.Len)])
-			vals = vals[int(validRun.Len):]
-			read += int(validRun.Len)
-			validRun.Len = 0
-			continue
-		}
-
-		if r.repCount == 0 && r.litCount == 0 {
-			if !r.Next() {
-				return read, nil
-			}
-		}
-
-		var batch int
-		switch {
-		case r.repCount > 0:
-			batch, remain, validRun = r.consumeRepeatCounts(read, batchSize, remain, validRun, bitReader)
-			current := IndexType(r.curVal)
-			if !dc.IsValid(current) {
-				return read, nil
-			}
-			dc.Fill(vals[:batch], current)
-		case r.litCount > 0:
-			var (
-				litread int
-				skipped int
-				err     error
-			)
-			litread, skipped, validRun, err = r.consumeLiteralsUint64(dc, vals, remain, indexbuffer[:], validRun, bitReader)
-			if err != nil {
-				return read, err
-			}
-			batch = litread + skipped
-			remain -= litread
-		}
-
-		vals = vals[batch:]
-		read += batch
-	}
-	return read, nil
-}
-
 func (r *RleDecoder) consumeRepeatCounts(read, batchSize, remain int, run bitutils.BitRun, bitRdr bitutils.BitRunReader) (int, int, bitutils.BitRun) {
 	// Consume the entire repeat counts incrementing repeat_batch to
 	// be the total of nulls + values consumed, we only need to
@@ -379,7 +289,7 @@ func (r *RleDecoder) consumeRepeatCounts(read, batchSize, remain int, run bituti
 	repeatBatch := 0
 	for r.repCount > 0 && (read+repeatBatch) < batchSize {
 		if run.Set {
-			updateSize := int(utils.Min(run.Len, int64(r.repCount)))
+			updateSize := int(min(run.Len, int64(r.repCount)))
 			r.repCount -= int32(updateSize)
 			repeatBatch += updateSize
 			run.Len -= int64(updateSize)
@@ -394,88 +304,6 @@ func (r *RleDecoder) consumeRepeatCounts(read, batchSize, remain int, run bituti
 		}
 	}
 	return repeatBatch, remain, run
-}
-
-func (r *RleDecoder) consumeLiteralsUint64(dc DictionaryConverter, vals []uint64, remain int, buf []IndexType, run bitutils.BitRun, bitRdr bitutils.BitRunReader) (int, int, bitutils.BitRun, error) {
-	batch := utils.Min(utils.Min(remain, int(r.litCount)), len(buf))
-	buf = buf[:batch]
-
-	n, _ := r.r.GetBatchIndex(uint(r.bitWidth), buf)
-	if n != batch {
-		return 0, 0, run, xerrors.New("was not able to retrieve correct number of indexes")
-	}
-
-	if !dc.IsValid(buf...) {
-		return 0, 0, run, xerrors.New("invalid index values found for dictionary converter")
-	}
-
-	var (
-		read    int
-		skipped int
-	)
-	for read < batch {
-		if run.Set {
-			updateSize := utils.Min(batch-read, int(run.Len))
-			if err := dc.Copy(vals, buf[read:read+updateSize]); err != nil {
-				return 0, 0, run, err
-			}
-			read += updateSize
-			vals = vals[updateSize:]
-			run.Len -= int64(updateSize)
-		} else {
-			dc.FillZero(vals[:int(run.Len)])
-			vals = vals[int(run.Len):]
-			skipped += int(run.Len)
-			run.Len = 0
-		}
-		if run.Len == 0 {
-			run = bitRdr.NextRun()
-		}
-	}
-	r.litCount -= int32(batch)
-	return read, skipped, run, nil
-}
-
-func (r *RleDecoder) GetBatchWithDict(dc DictionaryConverter, vals interface{}) (int, error) {
-	switch vals := vals.(type) {
-	case []int32:
-		return r.GetBatchWithDictInt32(dc, vals)
-	case []int64:
-		return r.GetBatchWithDictInt64(dc, vals)
-	case []float32:
-		return r.GetBatchWithDictFloat32(dc, vals)
-	case []float64:
-		return r.GetBatchWithDictFloat64(dc, vals)
-	case []parquet.ByteArray:
-		return r.GetBatchWithDictByteArray(dc, vals)
-	case []parquet.FixedLenByteArray:
-		return r.GetBatchWithDictFixedLenByteArray(dc, vals)
-	case []parquet.Int96:
-		return r.GetBatchWithDictInt96(dc, vals)
-	default:
-		return 0, xerrors.New("parquet/rle: GetBatchWithDict invalid type")
-	}
-}
-
-func (r *RleDecoder) GetBatchWithDictSpaced(dc DictionaryConverter, vals interface{}, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
-	switch vals := vals.(type) {
-	case []int32:
-		return r.GetBatchWithDictSpacedInt32(dc, vals, nullCount, validBits, validBitsOffset)
-	case []int64:
-		return r.GetBatchWithDictSpacedInt64(dc, vals, nullCount, validBits, validBitsOffset)
-	case []float32:
-		return r.GetBatchWithDictSpacedFloat32(dc, vals, nullCount, validBits, validBitsOffset)
-	case []float64:
-		return r.GetBatchWithDictSpacedFloat64(dc, vals, nullCount, validBits, validBitsOffset)
-	case []parquet.ByteArray:
-		return r.GetBatchWithDictSpacedByteArray(dc, vals, nullCount, validBits, validBitsOffset)
-	case []parquet.FixedLenByteArray:
-		return r.GetBatchWithDictSpacedFixedLenByteArray(dc, vals, nullCount, validBits, validBitsOffset)
-	case []parquet.Int96:
-		return r.GetBatchWithDictSpacedInt96(dc, vals, nullCount, validBits, validBitsOffset)
-	default:
-		return 0, xerrors.New("parquet/rle: GetBatchWithDictSpaced invalid type")
-	}
 }
 
 type RleEncoder struct {
