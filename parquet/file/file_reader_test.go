@@ -308,7 +308,8 @@ func (p *PageSerdeSuite) TestCompression() {
 				p.NoError(err)
 			}
 
-			p.InitSerializedPageReader(nrows*npages, c, memory.DefaultAllocator)
+			alloc := &allocatorWithStats{}
+			p.InitSerializedPageReader(nrows*npages, c, alloc)
 
 			for _, data := range fauxData {
 				p.True(p.pageReader.Next())
@@ -316,6 +317,8 @@ func (p *PageSerdeSuite) TestCompression() {
 				p.IsType(&file.DataPageV1{}, page)
 				p.Equal(data, page.Data())
 			}
+			p.pageReader.Close()
+			p.EqualValues(0, alloc.Allocated())
 			p.ResetStream()
 		})
 	}

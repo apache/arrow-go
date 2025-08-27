@@ -392,6 +392,7 @@ func (p *serializedPageReader) init(compressType compress.Compression, ctx *Cryp
 	p.decompressBuffer = memory.NewResizableBuffer(p.mem)
 	p.dataPageBuffer = memory.NewResizableBuffer(p.mem)
 	p.dictPageBuffer = memory.NewResizableBuffer(p.mem)
+	p.decompressBuffer.ResizeNoShrink(defaultPageHeaderSize)
 
 	codec, err := compress.GetCodec(compressType)
 	if err != nil {
@@ -439,6 +440,7 @@ func NewPageReader(r parquet.BufferedReader, nrows int64, compressType compress.
 		dataPageBuffer:   memory.NewResizableBuffer(mem),
 		dictPageBuffer:   memory.NewResizableBuffer(mem),
 	}
+	rdr.decompressBuffer.ResizeNoShrink(defaultPageHeaderSize)
 	if ctx != nil {
 		rdr.cryptoCtx = *ctx
 		rdr.initDecryption()
