@@ -101,10 +101,10 @@ func initServer(port int, srv flight.Server) int {
 
 type integrationDataSet struct {
 	schema *arrow.Schema
-	chunks []arrow.Record
+	chunks []arrow.RecordBatch
 }
 
-func consumeFlightLocation(ctx context.Context, loc *flight.Location, tkt *flight.Ticket, orig []arrow.Record, opts ...grpc.DialOption) error {
+func consumeFlightLocation(ctx context.Context, loc *flight.Location, tkt *flight.Ticket, orig []arrow.RecordBatch, opts ...grpc.DialOption) error {
 	client, err := flight.NewClientWithMiddleware(loc.GetUri(), nil, nil, opts...)
 	if err != nil {
 		return err
@@ -177,7 +177,7 @@ func (s *defaultIntegrationTester) RunClient(addr string, opts ...grpc.DialOptio
 	}
 
 	dataSet := integrationDataSet{
-		chunks: make([]arrow.Record, 0),
+		chunks: make([]arrow.RecordBatch, 0),
 		schema: rdr.Schema(),
 	}
 
@@ -332,7 +332,7 @@ func (s *defaultIntegrationTester) DoPut(stream flight.FlightService_DoPutServer
 
 	key = desc.Path[0]
 	dataset.schema = rdr.Schema()
-	dataset.chunks = make([]arrow.Record, 0)
+	dataset.chunks = make([]arrow.RecordBatch, 0)
 	for rdr.Next() {
 		rec := rdr.Record()
 		rec.Retain()
@@ -568,7 +568,7 @@ func (o *orderedScenarioTester) RunClient(addr string, opts ...grpc.DialOption) 
 		return fmt.Errorf("expected to server return FlightInfo.ordered = true")
 	}
 
-	var recs []arrow.Record
+	var recs []arrow.RecordBatch
 	for _, ep := range info.Endpoint {
 		if len(ep.Location) != 0 {
 			return fmt.Errorf("expected to receive empty locations to use the original service: %s",
@@ -931,7 +931,7 @@ func (tester *expirationTimeDoGetScenarioTester) RunClient(addr string, opts ...
 		return err
 	}
 
-	var recs []arrow.Record
+	var recs []arrow.RecordBatch
 	for _, ep := range info.Endpoint {
 		if len(recs) == 0 {
 			if ep.ExpirationTime != nil {
@@ -3078,7 +3078,7 @@ func getIngestRecords() array.RecordReader {
 	rec := array.NewRecord(schema, []arrow.Array{arr}, ingestStatementExpectedRows)
 	defer rec.Release()
 
-	rdr, _ := array.NewRecordReader(schema, []arrow.Record{rec})
+	rdr, _ := array.NewRecordReader(schema, []arrow.RecordBatch{rec})
 
 	return rdr
 }

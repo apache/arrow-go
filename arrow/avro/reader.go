@@ -189,10 +189,17 @@ func (r *OCFReader) AvroSchema() string { return r.avroSchema }
 // Schema returns the converted Arrow schema of the Avro OCF
 func (r *OCFReader) Schema() *arrow.Schema { return r.schema }
 
+// RecordBatch returns the current record batch that has been extracted from the
+// underlying Avro OCF file.
+// It is valid until the next call to Next.
+func (r *OCFReader) RecordBatch() arrow.RecordBatch { return r.cur }
+
 // Record returns the current record that has been extracted from the
 // underlying Avro OCF file.
 // It is valid until the next call to Next.
-func (r *OCFReader) Record() arrow.RecordBatch { return r.cur }
+//
+// Deprecated: Use RecordBatch instead.
+func (r *OCFReader) Record() arrow.Record { return r.cur }
 
 // Metrics returns the maximum queue depth of the Avro record read cache and of the
 // converted Arrow record cache.

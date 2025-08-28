@@ -363,7 +363,7 @@ func (s *SQLiteFlightSQLServer) GetFlightInfoXdbcTypeInfo(_ context.Context, _ f
 }
 
 func (s *SQLiteFlightSQLServer) DoGetXdbcTypeInfo(_ context.Context, cmd flightsql.GetXdbcTypeInfo) (*arrow.Schema, <-chan flight.StreamChunk, error) {
-	var batch arrow.Record
+	var batch arrow.RecordBatch
 	if cmd.GetDataType() == nil {
 		batch = GetTypeInfoResult(s.Alloc)
 	} else {

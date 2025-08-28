@@ -37,6 +37,7 @@ type RecordReader interface {
 	Schema() *arrow.Schema
 
 	Next() bool
+	RecordBatch() arrow.RecordBatch
 	Record() arrow.Record
 	Err() error
 }
@@ -46,12 +47,12 @@ type simpleRecords struct {
 	refCount atomic.Int64
 
 	schema *arrow.Schema
-	recs   []arrow.Record
-	cur    arrow.Record
+	recs   []arrow.RecordBatch
+	cur    arrow.RecordBatch
 }
 
 // NewRecordReader returns a simple iterator over the given slice of records.
-func NewRecordReader(schema *arrow.Schema, recs []arrow.Record) (RecordReader, error) {
+func NewRecordReader(schema *arrow.Schema, recs []arrow.RecordBatch) (RecordReader, error) {
 	rs := &simpleRecords{
 		schema: schema,
 		recs:   recs,
@@ -96,8 +97,9 @@ func (rs *simpleRecords) Release() {
 	}
 }
 
-func (rs *simpleRecords) Schema() *arrow.Schema { return rs.schema }
-func (rs *simpleRecords) Record() arrow.Record  { return rs.cur }
+func (rs *simpleRecords) Schema() *arrow.Schema          { return rs.schema }
+func (rs *simpleRecords) RecordBatch() arrow.RecordBatch { return rs.cur }
+func (rs *simpleRecords) Record() arrow.Record           { return rs.cur }
 func (rs *simpleRecords) Next() bool {
 	if len(rs.recs) == 0 {
 		return false
@@ -125,7 +127,7 @@ type simpleRecord struct {
 //
 // NewRecord panics if the columns and schema are inconsistent.
 // NewRecord panics if rows is larger than the height of the columns.
-func NewRecord(schema *arrow.Schema, cols []arrow.Array, nrows int64) arrow.Record {
+func NewRecord(schema *arrow.Schema, cols []arrow.Array, nrows int64) arrow.RecordBatch {
 	rec := &simpleRecord{
 		schema: schema,
 		rows:   nrows,
@@ -156,7 +158,7 @@ func NewRecord(schema *arrow.Schema, cols []arrow.Array, nrows int64) arrow.Reco
 	return rec
 }
 
-func (rec *simpleRecord) SetColumn(i int, arr arrow.Array) (arrow.Record, error) {
+func (rec *simpleRecord) SetColumn(i int, arr arrow.Array) (arrow.RecordBatch, error) {
 	if i < 0 || i >= len(rec.arrs) {
 		return nil, fmt.Errorf("arrow/array: column index out of range [0, %d): got=%d", len(rec.arrs), i)
 	}
@@ -242,7 +244,7 @@ func (rec *simpleRecord) ColumnName(i int) string  { return rec.schema.Field(i).
 //
 // NewSlice panics if the slice is outside the valid range of the record array.
 // NewSlice panics if j < i.
-func (rec *simpleRecord) NewSlice(i, j int64) arrow.Record {
+func (rec *simpleRecord) NewSlice(i, j int64) arrow.RecordBatch {
 	arrs := make([]arrow.Array, len(rec.arrs))
 	for ii, arr := range rec.arrs {
 		arrs[ii] = NewSlice(arr, i, j)
@@ -331,7 +333,7 @@ func (b *RecordBuilder) Reserve(size int) {
 // The returned Record must be Release()'d after use.
 //
 // NewRecord panics if the fields' builder do not have the same length.
-func (b *RecordBuilder) NewRecord() arrow.Record {
+func (b *RecordBuilder) NewRecord() arrow.RecordBatch {
 	cols := make([]arrow.Array, len(b.fields))
 	rows := int64(0)
 
@@ -411,9 +413,9 @@ type iterReader struct {
 	refCount atomic.Int64
 
 	schema *arrow.Schema
-	cur    arrow.Record
+	cur    arrow.RecordBatch
 
-	next func() (arrow.Record, error, bool)
+	next func() (arrow.RecordBatch, error, bool)
 	stop func()
 
 	err error
@@ -434,8 +436,9 @@ func (ir *iterReader) Release() {
 	}
 }
 
-func (ir *iterReader) Record() arrow.Record { return ir.cur }
-func (ir *iterReader) Err() error           { return ir.err }
+func (ir *iterReader) RecordBatch() arrow.RecordBatch { return ir.cur }
+func (ir *iterReader) Record() arrow.Record           { return ir.cur }
+func (ir *iterReader) Err() error                     { return ir.err }
 
 func (ir *iterReader) Next() bool {
 	if ir.cur != nil {
@@ -452,9 +455,9 @@ func (ir *iterReader) Next() bool {
 	return ok
 }
 
-// ReaderFromIter wraps a go iterator for arrow.Record + error into a RecordReader
+// ReaderFromIter wraps a go iterator for arrow.RecordBatch + error into a RecordReader
 // interface object for ease of use.
-func ReaderFromIter(schema *arrow.Schema, itr iter.Seq2[arrow.Record, error]) RecordReader {
+func ReaderFromIter(schema *arrow.Schema, itr iter.Seq2[arrow.RecordBatch, error]) RecordReader {
 	next, stop := iter.Pull2(itr)
 	rdr := &iterReader{
 		schema: schema,
@@ -469,12 +472,12 @@ func ReaderFromIter(schema *arrow.Schema, itr iter.Seq2[arrow.Record, error]) Re
 // you can use range on. The semantics are still important, if a record
 // that is returned is desired to be utilized beyond the scope of an iteration
 // then Retain must be called on it.
-func IterFromReader(rdr RecordReader) iter.Seq2[arrow.Record, error] {
+func IterFromReader(rdr RecordReader) iter.Seq2[arrow.RecordBatch, error] {
 	rdr.Retain()
 	return func(yield func(arrow.RecordBatch, error) bool) {
 		defer rdr.Release()
 		for rdr.Next() {
-			if !yield(rdr.Record(), nil) {
+			if !yield(rdr.RecordBatch(), nil) {
 				return
 			}
 		}

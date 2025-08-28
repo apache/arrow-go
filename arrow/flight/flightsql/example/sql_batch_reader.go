@@ -104,7 +104,7 @@ type SqlBatchReader struct {
 
 	schema *arrow.Schema
 	rows   *sql.Rows
-	record arrow.Record
+	record arrow.RecordBatch
 	bldr   *array.RecordBuilder
 	err    error
 
@@ -253,6 +253,11 @@ func (r *SqlBatchReader) Release() {
 }
 func (r *SqlBatchReader) Schema() *arrow.Schema { return r.schema }
 
+func (r *SqlBatchReader) RecordBatch() arrow.RecordBatch { return r.record }
+
+// Record returns the current record.
+//
+// Deprecated: Use RecordBatch instead.
 func (r *SqlBatchReader) Record() arrow.Record { return r.record }
 
 func (r *SqlBatchReader) Err() error { return r.err }

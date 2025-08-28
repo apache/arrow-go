@@ -180,7 +180,7 @@ func FromJSON(mem memory.Allocator, dt arrow.DataType, r io.Reader, opts ...From
 
 // RecordToStructArray constructs a struct array from the columns of the record batch
 // by referencing them, zero-copy.
-func RecordToStructArray(rec arrow.Record) *Struct {
+func RecordToStructArray(rec arrow.RecordBatch) *Struct {
 	cols := make([]arrow.ArrayData, rec.NumCols())
 	for i, c := range rec.Columns() {
 		cols[i] = c.Data()

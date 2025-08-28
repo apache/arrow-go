@@ -879,7 +879,8 @@ func (r *recordReader) Next() bool {
 	return r.next()
 }
 
-func (r *recordReader) Record() arrow.Record { return r.cur }
+func (r *recordReader) RecordBatch() arrow.RecordBatch { return r.cur }
+func (r *recordReader) Record() arrow.Record           { return r.cur }
 
 func (r *recordReader) Err() error {
 	if r.err == io.EOF {

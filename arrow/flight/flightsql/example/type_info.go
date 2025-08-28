@@ -28,7 +28,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
-func GetTypeInfoResult(mem memory.Allocator) arrow.Record {
+func GetTypeInfoResult(mem memory.Allocator) arrow.RecordBatch {
 	typeNames, _, _ := array.FromJSON(mem, arrow.BinaryTypes.String,
 		strings.NewReader(`["bit", "tinyint", "bigint", "longvarbinary",
 						    "varbinary", "text", "longvarchar", "char",
@@ -97,7 +97,7 @@ func GetTypeInfoResult(mem memory.Allocator) arrow.Record {
 		sqlDataType, sqlDateTimeSub, numPrecRadix, intervalPrecision}, 17)
 }
 
-func GetFilteredTypeInfoResult(mem memory.Allocator, filter int32) arrow.Record {
+func GetFilteredTypeInfoResult(mem memory.Allocator, filter int32) arrow.RecordBatch {
 	batch := GetTypeInfoResult(mem)
 	defer batch.Release()
 
