@@ -96,8 +96,6 @@ func (s *SqliteTablesSchemaBatchReader) Schema() *arrow.Schema {
 
 func (s *SqliteTablesSchemaBatchReader) RecordBatch() arrow.RecordBatch { return s.record }
 
-// Record returns the current record.
-//
 // Deprecated: Use [RecordBatch] instead.
 func (s *SqliteTablesSchemaBatchReader) Record() arrow.Record { return s.RecordBatch() }
 

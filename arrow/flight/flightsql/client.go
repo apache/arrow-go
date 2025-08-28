@@ -1381,14 +1381,6 @@ func (p *PreparedStatement) SetParameters(binding arrow.RecordBatch) {
 	}
 }
 
-// SetRecord takes a record to send as the parameter bindings when
-// executing. It should match the schema from ParameterSchema.
-//
-// Deprecated: Use SetParameters instead.
-func (p *PreparedStatement) SetRecord(binding arrow.Record) {
-	p.SetParameters(binding)
-}
-
 // SetRecordReader takes a RecordReader to send as the parameter bindings when
 // executing. It should match the schema from ParameterSchema.
 //

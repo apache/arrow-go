@@ -255,8 +255,6 @@ func (r *SqlBatchReader) Schema() *arrow.Schema { return r.schema }
 
 func (r *SqlBatchReader) RecordBatch() arrow.RecordBatch { return r.record }
 
-// Record returns the current record.
-//
 // Deprecated: Use [RecordBatch] instead.
 func (r *SqlBatchReader) Record() arrow.Record { return r.RecordBatch() }
 
