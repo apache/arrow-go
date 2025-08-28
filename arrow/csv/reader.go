@@ -231,8 +231,8 @@ func (r *Reader) RecordBatch() arrow.RecordBatch { return r.cur }
 // underlying CSV file.
 // It is valid until the next call to Next.
 //
-// Deprecated: Use RecordBatch instead.
-func (r *Reader) Record() arrow.Record { return r.cur }
+// Deprecated: Use [RecordBatch] instead.
+func (r *Reader) Record() arrow.Record { return r.RecordBatch() }
 
 // Next returns whether a Record could be extracted from the underlying CSV file.
 //

@@ -376,7 +376,7 @@ func (f *FileReader) RecordBatch(i int) (arrow.RecordBatch, error) {
 // The returned value is valid until the next call to Record.
 // Users need to call Retain on that Record to keep it valid for longer.
 //
-// Deprecated: Use RecordBatch instead.
+// Deprecated: Use [RecordBatch] instead.
 func (f *FileReader) Record(i int) (arrow.Record, error) {
 	return f.RecordBatch(i)
 }
@@ -419,7 +419,7 @@ func (f *FileReader) RecordBatchAt(i int) (arrow.RecordBatch, error) {
 // caller and must call Release() to free the memory. This method is safe to
 // call concurrently.
 //
-// Deprecated: Use RecordBatchAt instead.
+// Deprecated: Use [RecordBatchAt] instead.
 func (f *FileReader) RecordAt(i int) (arrow.Record, error) {
 	return f.RecordBatchAt(i)
 }

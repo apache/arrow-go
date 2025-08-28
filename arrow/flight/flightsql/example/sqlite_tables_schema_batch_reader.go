@@ -98,8 +98,8 @@ func (s *SqliteTablesSchemaBatchReader) RecordBatch() arrow.RecordBatch { return
 
 // Record returns the current record.
 //
-// Deprecated: Use RecordBatch instead.
-func (s *SqliteTablesSchemaBatchReader) Record() arrow.Record { return s.record }
+// Deprecated: Use [RecordBatch] instead.
+func (s *SqliteTablesSchemaBatchReader) Record() arrow.Record { return s.RecordBatch() }
 
 func getSqlTypeFromTypeName(sqltype string) int {
 	if sqltype == "" {

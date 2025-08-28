@@ -267,9 +267,9 @@ func (r *Reader) RecordBatch() arrow.RecordBatch {
 // underlying stream.
 // It is valid until the next call to Next.
 //
-// Deprecated: Use RecordBatch instead.
+// Deprecated: Use [RecordBatch] instead.
 func (r *Reader) Record() arrow.Record {
-	return r.rec
+	return r.RecordBatch()
 }
 
 // Read reads the current record batch from the underlying stream and an error, if any.

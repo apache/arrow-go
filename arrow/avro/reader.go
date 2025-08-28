@@ -198,8 +198,8 @@ func (r *OCFReader) RecordBatch() arrow.RecordBatch { return r.cur }
 // underlying Avro OCF file.
 // It is valid until the next call to Next.
 //
-// Deprecated: Use RecordBatch instead.
-func (r *OCFReader) Record() arrow.Record { return r.cur }
+// Deprecated: Use [RecordBatch] instead.
+func (r *OCFReader) Record() arrow.Record { return r.RecordBatch() }
 
 // Metrics returns the maximum queue depth of the Avro record read cache and of the
 // converted Arrow record cache.

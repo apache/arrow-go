@@ -985,8 +985,7 @@ func (r *failingReader) RecordBatch() arrow.RecordBatch {
 	return arrdata.Records["primitives"][0]
 }
 func (r *failingReader) Record() arrow.Record {
-	arrdata.Records["primitives"][0].Retain()
-	return arrdata.Records["primitives"][0]
+	return r.RecordBatch()
 }
 func (r *failingReader) Err() error {
 	if r.opCount == 0 {

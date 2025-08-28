@@ -131,8 +131,8 @@ func (r *JSONReader) RecordBatch() arrow.RecordBatch { return r.cur }
 // Record returns the last read in record. The returned record is only valid
 // until the next call to Next unless Retain is called on the record itself.
 //
-// Deprecated: Use RecordBatch instead.
-func (r *JSONReader) Record() arrow.Record { return r.cur }
+// Deprecated: Use [RecordBatch] instead.
+func (r *JSONReader) Record() arrow.Record { return r.RecordBatch() }
 
 func (r *JSONReader) Retain() {
 	r.refs.Add(1)
