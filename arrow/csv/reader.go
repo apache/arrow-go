@@ -222,10 +222,17 @@ func (r *Reader) Err() error { return r.err }
 
 func (r *Reader) Schema() *arrow.Schema { return r.schema }
 
+// RecordBatch returns the current record batch that has been extracted from the
+// underlying CSV file.
+// It is valid until the next call to Next.
+func (r *Reader) RecordBatch() arrow.RecordBatch { return r.cur }
+
 // Record returns the current record that has been extracted from the
 // underlying CSV file.
 // It is valid until the next call to Next.
-func (r *Reader) Record() arrow.RecordBatch { return r.cur }
+//
+// Deprecated: Use [RecordBatch] instead.
+func (r *Reader) Record() arrow.Record { return r.RecordBatch() }
 
 // Next returns whether a Record could be extracted from the underlying CSV file.
 //

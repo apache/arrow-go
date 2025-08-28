@@ -879,7 +879,10 @@ func (r *recordReader) Next() bool {
 	return r.next()
 }
 
-func (r *recordReader) Record() arrow.Record { return r.cur }
+func (r *recordReader) RecordBatch() arrow.RecordBatch { return r.cur }
+
+// Deprecated: Use [RecordBatch] instead.
+func (r *recordReader) Record() arrow.Record { return r.RecordBatch() }
 
 func (r *recordReader) Err() error {
 	if r.err == io.EOF {

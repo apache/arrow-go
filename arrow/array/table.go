@@ -320,8 +320,11 @@ func NewTableReader(tbl arrow.Table, chunkSize int64) *TableReader {
 	return tr
 }
 
-func (tr *TableReader) Schema() *arrow.Schema     { return tr.tbl.Schema() }
-func (tr *TableReader) Record() arrow.RecordBatch { return tr.rec }
+func (tr *TableReader) Schema() *arrow.Schema          { return tr.tbl.Schema() }
+func (tr *TableReader) RecordBatch() arrow.RecordBatch { return tr.rec }
+
+// Deprecated: Use [RecordBatch] instead.
+func (tr *TableReader) Record() arrow.Record { return tr.RecordBatch() }
 
 func (tr *TableReader) Next() bool {
 	if tr.cur >= tr.max {

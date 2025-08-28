@@ -980,9 +980,12 @@ func (r *failingReader) Next() bool {
 	r.opCount -= 1
 	return r.opCount > 0
 }
-func (r *failingReader) Record() arrow.RecordBatch {
+func (r *failingReader) RecordBatch() arrow.RecordBatch {
 	arrdata.Records["primitives"][0].Retain()
 	return arrdata.Records["primitives"][0]
+}
+func (r *failingReader) Record() arrow.Record {
+	return r.RecordBatch()
 }
 func (r *failingReader) Err() error {
 	if r.opCount == 0 {

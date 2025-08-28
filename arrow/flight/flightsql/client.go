@@ -1097,7 +1097,7 @@ type PreparedStatement struct {
 	handle        []byte
 	datasetSchema *arrow.Schema
 	paramSchema   *arrow.Schema
-	paramBinding  arrow.Record
+	paramBinding  arrow.RecordBatch
 	streamBinding array.RecordReader
 	closed        bool
 }
@@ -1373,7 +1373,7 @@ func (p *PreparedStatement) clearParameters() {
 // from under the statement. Release will be called on a previous binding
 // record or reader if it existed, and will be called upon calling Close on the
 // PreparedStatement.
-func (p *PreparedStatement) SetParameters(binding arrow.Record) {
+func (p *PreparedStatement) SetParameters(binding arrow.RecordBatch) {
 	p.clearParameters()
 	p.paramBinding = binding
 	if p.paramBinding != nil {

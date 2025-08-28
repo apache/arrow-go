@@ -959,8 +959,11 @@ type nativeCRecordBatchReader struct {
 func (n *nativeCRecordBatchReader) Retain()  {}
 func (n *nativeCRecordBatchReader) Release() {}
 
-func (n *nativeCRecordBatchReader) Err() error                { return n.err }
-func (n *nativeCRecordBatchReader) Record() arrow.RecordBatch { return n.cur }
+func (n *nativeCRecordBatchReader) Err() error                     { return n.err }
+func (n *nativeCRecordBatchReader) RecordBatch() arrow.RecordBatch { return n.cur }
+
+// Deprecated: Use [RecordBatch] instead.
+func (n *nativeCRecordBatchReader) Record() arrow.Record { return n.RecordBatch() }
 
 func (n *nativeCRecordBatchReader) Next() bool {
 	err := n.next()

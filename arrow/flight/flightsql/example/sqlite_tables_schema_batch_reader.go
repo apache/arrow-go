@@ -44,7 +44,7 @@ type SqliteTablesSchemaBatchReader struct {
 	rdr        array.RecordReader
 	stmt       *sql.Stmt
 	schemaBldr *array.BinaryBuilder
-	record     arrow.Record
+	record     arrow.RecordBatch
 	err        error
 }
 
@@ -94,7 +94,10 @@ func (s *SqliteTablesSchemaBatchReader) Schema() *arrow.Schema {
 	return arrow.NewSchema(fields, nil)
 }
 
-func (s *SqliteTablesSchemaBatchReader) Record() arrow.Record { return s.record }
+func (s *SqliteTablesSchemaBatchReader) RecordBatch() arrow.RecordBatch { return s.record }
+
+// Deprecated: Use [RecordBatch] instead.
+func (s *SqliteTablesSchemaBatchReader) Record() arrow.Record { return s.RecordBatch() }
 
 func getSqlTypeFromTypeName(sqltype string) int {
 	if sqltype == "" {
