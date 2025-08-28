@@ -114,7 +114,7 @@ type ColumnChunkReader interface {
 	// HasNext which will read in the next page.
 	setPageReader(PageReader)
 	// Close releases the resources held by the column reader.
-	Close()
+	Close() error
 }
 
 type columnChunkReader struct {
@@ -229,13 +229,11 @@ func (c *columnChunkReader) setPageReader(rdr PageReader) {
 	c.numBuffered, c.numDecoded = 0, 0
 }
 
-func (c *columnChunkReader) Close() {
+func (c *columnChunkReader) Close() error {
 	if c.curPage != nil {
 		c.curPage.Release()
 	}
-	if c.rdr != nil {
-		c.rdr.Close()
-	}
+	return c.rdr.Close()
 }
 
 func (c *columnChunkReader) getDefLvlBuffer(sz int64) []int16 {

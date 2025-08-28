@@ -54,7 +54,7 @@ type PageReader interface {
 	GetDictionaryPage() (*DictionaryPage, error)
 	SeekToPageWithRow(rowIdx int64) error
 	// Close releases the resources held by the reader.
-	Close()
+	Close() error
 }
 
 type PageType = format.PageType
@@ -377,12 +377,13 @@ type serializedPageReader struct {
 	err              error
 }
 
-func (p *serializedPageReader) Close() {
+func (p *serializedPageReader) Close() error {
 	if p.decompressBuffer != nil {
 		p.decompressBuffer.Release()
 		p.dictPageBuffer.Release()
 		p.dataPageBuffer.Release()
 	}
+	return nil
 }
 
 func (p *serializedPageReader) init(compressType compress.Compression, ctx *CryptoContext) error {
