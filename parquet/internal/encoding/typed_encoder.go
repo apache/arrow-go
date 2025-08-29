@@ -602,16 +602,6 @@ func (d *FixedLenByteArrayDecoderWrapper) Decode(out []parquet.FixedLenByteArray
 	return n, nil
 }
 
-// NewByteArrayDecoderWrapper creates a new ByteArrayDecoderWrapper
-func NewByteArrayDecoderWrapper(decoder ByteArrayDecoder) *ByteArrayDecoderWrapper {
-	return &ByteArrayDecoderWrapper{ByteArrayDecoder: decoder}
-}
-
-// NewFixedLenByteArrayDecoderWrapper creates a new FixedLenByteArrayDecoderWrapper
-func NewFixedLenByteArrayDecoderWrapper(decoder FixedLenByteArrayDecoder) *FixedLenByteArrayDecoderWrapper {
-	return &FixedLenByteArrayDecoderWrapper{FixedLenByteArrayDecoder: decoder}
-}
-
 // DictByteArrayDecoder is a decoder for decoding dictionary encoded data for parquet.ByteArray columns
 type DictByteArrayDecoder struct {
 	dictDecoder
