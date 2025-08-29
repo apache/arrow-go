@@ -113,6 +113,8 @@ type ColumnChunkReader interface {
 	// automatically read the first page of the page reader passed in until
 	// HasNext which will read in the next page.
 	setPageReader(PageReader)
+	// Close releases the resources held by the column reader.
+	Close() error
 }
 
 type columnChunkReader struct {
@@ -225,6 +227,13 @@ func (c *columnChunkReader) setPageReader(rdr PageReader) {
 	c.decoders = make(map[format.Encoding]encoding.TypedDecoder)
 	c.newDictionary = false
 	c.numBuffered, c.numDecoded = 0, 0
+}
+
+func (c *columnChunkReader) Close() error {
+	if c.curPage != nil {
+		c.curPage.Release()
+	}
+	return c.rdr.Close()
 }
 
 func (c *columnChunkReader) getDefLvlBuffer(sz int64) []int16 {
@@ -412,21 +421,21 @@ func (c *columnChunkReader) initDataDecoder(page Page, lvlByteLen int64) error {
 	}
 
 	buf = buf[lvlByteLen:]
-	encoding := page.Encoding()
+	enc := page.Encoding()
 
-	if isDictIndexEncoding(encoding) {
+	if isDictIndexEncoding(enc) {
 		// if we're seeking or otherwise skipping pages, we may not have read
 		// the dictionary page in yet, so let's ensure we got it if one exists
 		if err := c.readDictionary(); err != nil {
 			return err
 		}
-		encoding = format.Encoding_RLE_DICTIONARY
+		enc = format.Encoding_RLE_DICTIONARY
 	}
 
-	if decoder, ok := c.decoders[encoding]; ok {
+	if decoder, ok := c.decoders[enc]; ok {
 		c.curDecoder = decoder
 	} else {
-		switch encoding {
+		switch enc {
 		case format.Encoding_RLE:
 			if c.descr.PhysicalType() != parquet.Types.Boolean {
 				return fmt.Errorf("parquet: only boolean supports RLE encoding, got %s", c.descr.PhysicalType())
@@ -437,16 +446,27 @@ func (c *columnChunkReader) initDataDecoder(page Page, lvlByteLen int64) error {
 			format.Encoding_DELTA_LENGTH_BYTE_ARRAY,
 			format.Encoding_DELTA_BINARY_PACKED,
 			format.Encoding_BYTE_STREAM_SPLIT:
-			c.curDecoder = c.decoderTraits.Decoder(parquet.Encoding(encoding), c.descr, false, c.mem)
-			c.decoders[encoding] = c.curDecoder
+			c.curDecoder = c.decoderTraits.Decoder(parquet.Encoding(enc), c.descr, false, c.mem)
+			c.decoders[enc] = c.curDecoder
 		case format.Encoding_RLE_DICTIONARY:
 			return errors.New("parquet: dictionary page must be before data page")
 		default:
-			return fmt.Errorf("parquet: unknown encoding type %s", encoding)
+			return fmt.Errorf("parquet: unknown encoding type %s", enc)
 		}
 	}
 
-	c.curEncoding = encoding
+	switch c.descr.PhysicalType() {
+	case parquet.Types.FixedLenByteArray:
+		c.curDecoder = &encoding.FixedLenByteArrayDecoderWrapper{
+			FixedLenByteArrayDecoder: c.curDecoder.(encoding.FixedLenByteArrayDecoder),
+		}
+	case parquet.Types.ByteArray:
+		c.curDecoder = &encoding.ByteArrayDecoderWrapper{
+			ByteArrayDecoder: c.curDecoder.(encoding.ByteArrayDecoder),
+		}
+	}
+
+	c.curEncoding = enc
 	c.curDecoder.SetData(int(c.numBuffered), buf)
 	return nil
 }
