@@ -31,6 +31,22 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/schema"
 )
 
+func cloneByteArray[T parquet.ByteArray | parquet.FixedLenByteArray](src []T) {
+	totalLength := 0
+	for i := range src {
+		totalLength += len(src[i])
+	}
+
+	buf := make([]byte, totalLength)
+	pos := 0
+	for i := range src {
+		srcLen := len(src[i])
+		copy(buf[pos:pos+srcLen], src[i])
+		src[i] = T(buf[pos : pos+srcLen])
+		pos += srcLen
+	}
+}
+
 type Encoder[T parquet.ColumnTypes] interface {
 	TypedEncoder
 	Put([]T)
@@ -554,6 +570,46 @@ type DictByteArrayEncoder struct {
 // Type returns the underlying physical type that can be encoded with this encoder
 func (enc *DictByteArrayEncoder) Type() parquet.Type {
 	return parquet.Types.ByteArray
+}
+
+// ByteArrayDecoderWrapper is a wrapper around a ByteArrayDecoder that ensures
+// that the decoded byte arrays are copied into a new, contiguous buffer.
+type ByteArrayDecoderWrapper struct {
+	ByteArrayDecoder
+}
+
+func (d *ByteArrayDecoderWrapper) Decode(out []parquet.ByteArray) (int, error) {
+	n, err := d.ByteArrayDecoder.Decode(out)
+	if err != nil {
+		return n, err
+	}
+	cloneByteArray(out[:n])
+	return n, nil
+}
+
+// FixedLenByteArrayDecoderWrapper is a wrapper around a FixedLenByteArrayDecoder that ensures
+// that the decoded byte arrays are copied into a new, contiguous buffer.
+type FixedLenByteArrayDecoderWrapper struct {
+	FixedLenByteArrayDecoder
+}
+
+func (d *FixedLenByteArrayDecoderWrapper) Decode(out []parquet.FixedLenByteArray) (int, error) {
+	n, err := d.FixedLenByteArrayDecoder.Decode(out)
+	if err != nil {
+		return n, err
+	}
+	cloneByteArray(out[:n])
+	return n, nil
+}
+
+// NewByteArrayDecoderWrapper creates a new ByteArrayDecoderWrapper
+func NewByteArrayDecoderWrapper(decoder ByteArrayDecoder) *ByteArrayDecoderWrapper {
+	return &ByteArrayDecoderWrapper{ByteArrayDecoder: decoder}
+}
+
+// NewFixedLenByteArrayDecoderWrapper creates a new FixedLenByteArrayDecoderWrapper
+func NewFixedLenByteArrayDecoderWrapper(decoder FixedLenByteArrayDecoder) *FixedLenByteArrayDecoderWrapper {
+	return &FixedLenByteArrayDecoderWrapper{FixedLenByteArrayDecoder: decoder}
 }
 
 // DictByteArrayDecoder is a decoder for decoding dictionary encoded data for parquet.ByteArray columns
