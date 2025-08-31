@@ -36,7 +36,9 @@ func (cr *Int32ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return nvalues, err
 }
 
-// ReadBatch reads batchSize values from the column.
+// ReadBatchInPage and ReadBatch reads batchSize values from the column, which are used in tests.
+// The former reads only within the current page and caller should copy the values if needed,
+// while the latter reads across multiple page to fill the batch and values have been clones.
 //
 // Returns error if values is not at least big enough to hold the number of values that will be read.
 //
@@ -70,7 +72,9 @@ func (cr *Int64ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return nvalues, err
 }
 
-// ReadBatch reads batchSize values from the column.
+// ReadBatchInPage and ReadBatch reads batchSize values from the column, which are used in tests.
+// The former reads only within the current page and caller should copy the values if needed,
+// while the latter reads across multiple page to fill the batch and values have been clones.
 //
 // Returns error if values is not at least big enough to hold the number of values that will be read.
 //
@@ -104,7 +108,9 @@ func (cr *Int96ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return nvalues, err
 }
 
-// ReadBatch reads batchSize values from the column.
+// ReadBatchInPage and ReadBatch reads batchSize values from the column, which are used in tests.
+// The former reads only within the current page and caller should copy the values if needed,
+// while the latter reads across multiple page to fill the batch and values have been clones.
 //
 // Returns error if values is not at least big enough to hold the number of values that will be read.
 //
@@ -138,7 +144,9 @@ func (cr *Float32ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return nvalues, err
 }
 
-// ReadBatch reads batchSize values from the column.
+// ReadBatchInPage and ReadBatch reads batchSize values from the column, which are used in tests.
+// The former reads only within the current page and caller should copy the values if needed,
+// while the latter reads across multiple page to fill the batch and values have been clones.
 //
 // Returns error if values is not at least big enough to hold the number of values that will be read.
 //
@@ -172,7 +180,9 @@ func (cr *Float64ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return nvalues, err
 }
 
-// ReadBatch reads batchSize values from the column.
+// ReadBatchInPage and ReadBatch reads batchSize values from the column, which are used in tests.
+// The former reads only within the current page and caller should copy the values if needed,
+// while the latter reads across multiple page to fill the batch and values have been clones.
 //
 // Returns error if values is not at least big enough to hold the number of values that will be read.
 //
@@ -206,7 +216,9 @@ func (cr *BooleanColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return nvalues, err
 }
 
-// ReadBatch reads batchSize values from the column.
+// ReadBatchInPage and ReadBatch reads batchSize values from the column, which are used in tests.
+// The former reads only within the current page and caller should copy the values if needed,
+// while the latter reads across multiple page to fill the batch and values have been clones.
 //
 // Returns error if values is not at least big enough to hold the number of values that will be read.
 //
@@ -240,7 +252,9 @@ func (cr *ByteArrayColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return nvalues, err
 }
 
-// ReadBatch reads batchSize values from the column.
+// ReadBatchInPage and ReadBatch reads batchSize values from the column, which are used in tests.
+// The former reads only within the current page and caller should copy the values if needed,
+// while the latter reads across multiple page to fill the batch and values have been clones.
 //
 // Returns error if values is not at least big enough to hold the number of values that will be read.
 //
@@ -278,7 +292,9 @@ func (cr *FixedLenByteArrayColumnChunkReader) Skip(nvalues int64) (int64, error)
 	return nvalues, err
 }
 
-// ReadBatch reads batchSize values from the column.
+// ReadBatchInPage and ReadBatch reads batchSize values from the column, which are used in tests.
+// The former reads only within the current page and caller should copy the values if needed,
+// while the latter reads across multiple page to fill the batch and values have been clones.
 //
 // Returns error if values is not at least big enough to hold the number of values that will be read.
 //

@@ -666,18 +666,18 @@ func (c *columnChunkReader) skipRows(nrows int64) error {
 
 type readerFunc func(int64, int64) (int, error)
 
-// base function for reading a batch of values, this will read until it either reads in batchSize values or
-// it hits the end of the column chunk, including reading multiple pages.
+// readBatch is base function for reading a batch of values, this will read until it either reads
+// in batchSize values or it hits the end of the column chunk, including reading multiple pages.
 //
 // totalValues is the total number of values which were read in, and thus would be the total number
 // of definition levels and repetition levels which were populated (if they were non-nil). totalRead
 // is the number of physical values that were read in (ie: the number of non-null values)
 func (c *columnChunkReader) readBatch(batchSize int64, defLvls, repLvls []int16, readFn readerFunc) (totalLvls int64, totalRead int, err error) {
 	var (
-		defs   []int16
-		reps   []int16
-		ndefs  int64
-		toRead int
+		defs []int16
+		reps []int16
+		lvls int64
+		read int
 	)
 
 	for totalLvls < batchSize && c.HasNext() && err == nil {
@@ -687,23 +687,17 @@ func (c *columnChunkReader) readBatch(batchSize int64, defLvls, repLvls []int16,
 		if repLvls != nil {
 			reps = repLvls[totalLvls:]
 		}
-		ndefs, toRead, err = c.readBatchInPage(batchSize-totalLvls, int64(totalRead), defs, reps, readFn)
-		if err != nil {
-			return totalLvls, totalRead, err
-		}
-		totalLvls += ndefs
-		totalRead += toRead
+		lvls, read, err = c.readBatchInPage(batchSize-totalLvls, int64(totalRead), defs, reps, readFn)
+		totalLvls += lvls
+		totalRead += read
 	}
 	return totalLvls, totalRead, err
 }
 
-// base function for reading a batch of values, this ensure the values are in the same page and
-// user should make a copy of the values if they want to keep them.
-//
-// totalValues is the total number of values which were read in, and thus would be the total number
-// of definition levels and repetition levels which were populated (if they were non-nil). totalRead
-// is the number of physical values that were read in (ie: the number of non-null values)
-func (c *columnChunkReader) readBatchInPage(batchSize int64, start int64, defLvls, repLvls []int16, readFn readerFunc) (totalLvls int64, totalRead int, err error) {
+// readBatchInPage is a helper function for reading a batch of values. This function ensures
+// the read values are from the same page and may be shallow copies of the underlying page data.
+// User should make a copy of the values if they want to keep them.
+func (c *columnChunkReader) readBatchInPage(batchSize int64, totalRead int64, defLvls, repLvls []int16, readFn readerFunc) (lvls int64, read int, err error) {
 	if !c.HasNext() {
 		return 0, 0, c.err
 	}
@@ -713,14 +707,14 @@ func (c *columnChunkReader) readBatchInPage(batchSize int64, start int64, defLvl
 		return 0, 0, err
 	}
 
-	read, err := readFn(start, toRead)
+	read, err = readFn(totalRead, toRead)
 	// the total number of values processed here is the maximum of
 	// the number of definition levels or the number of physical values read.
 	// if this is a required field, ndefs will be 0 since there is no definition
 	// levels stored with it and `read` will be the number of values, otherwise
 	// we use ndefs since it will be equal to or greater than read.
-	totalVals := int64(utils.Max(ndefs, read))
-	c.consumeBufferedValues(totalVals)
+	lvls = int64(utils.Max(ndefs, read))
+	c.consumeBufferedValues(lvls)
 
-	return totalVals, read, err
+	return lvls, read, err
 }
