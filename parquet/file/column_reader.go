@@ -38,6 +38,22 @@ const (
 	defaultPageHeaderSize = 16 * 1024
 )
 
+func CloneByteArray[T parquet.ByteArray | parquet.FixedLenByteArray](src []T) {
+	totalLength := 0
+	for i := range src {
+		totalLength += len(src[i])
+	}
+
+	buf := make([]byte, totalLength)
+	pos := 0
+	for i := range src {
+		srcLen := len(src[i])
+		copy(buf[pos:pos+srcLen], src[i])
+		src[i] = T(buf[pos : pos+srcLen])
+		pos += srcLen
+	}
+}
+
 //go:generate go run ../../arrow/_tools/tmpl/main.go -i -data=../internal/encoding/physical_types.tmpldata column_reader_types.gen.go.tmpl
 
 func isDictIndexEncoding(e format.Encoding) bool {
@@ -223,6 +239,7 @@ func (c *columnChunkReader) consumeBufferedValues(n int64) { c.numDecoded += n }
 func (c *columnChunkReader) numAvailValues() int64         { return c.numBuffered - c.numDecoded }
 func (c *columnChunkReader) pager() PageReader             { return c.rdr }
 func (c *columnChunkReader) setPageReader(rdr PageReader) {
+	c.Close()
 	c.rdr, c.err = rdr, nil
 	c.decoders = make(map[format.Encoding]encoding.TypedDecoder)
 	c.newDictionary = false
@@ -233,7 +250,10 @@ func (c *columnChunkReader) Close() error {
 	if c.curPage != nil {
 		c.curPage.Release()
 	}
-	return c.rdr.Close()
+	if c.rdr != nil {
+		return c.rdr.Close()
+	}
+	return nil
 }
 
 func (c *columnChunkReader) getDefLvlBuffer(sz int64) []int16 {
@@ -349,6 +369,11 @@ func (c *columnChunkReader) readNewPage() bool {
 			return true
 		}
 	}
+
+	// If we get here, we're at the end of the column, and the page must
+	// be released in Next() already. So set it to nil to avoid being
+	// released twice.
+	c.curPage = nil
 	c.err = c.rdr.Err()
 	return false
 }
@@ -649,11 +674,10 @@ type readerFunc func(int64, int64) (int, error)
 // is the number of physical values that were read in (ie: the number of non-null values)
 func (c *columnChunkReader) readBatch(batchSize int64, defLvls, repLvls []int16, readFn readerFunc) (totalLvls int64, totalRead int, err error) {
 	var (
-		read   int
 		defs   []int16
 		reps   []int16
-		ndefs  int
-		toRead int64
+		ndefs  int64
+		toRead int
 	)
 
 	for totalLvls < batchSize && c.HasNext() && err == nil {
@@ -663,22 +687,40 @@ func (c *columnChunkReader) readBatch(batchSize int64, defLvls, repLvls []int16,
 		if repLvls != nil {
 			reps = repLvls[totalLvls:]
 		}
-		ndefs, toRead, err = c.determineNumToRead(batchSize-totalLvls, defs, reps)
+		ndefs, toRead, err = c.readBatchInPage(batchSize-totalLvls, int64(totalRead), defs, reps, readFn)
 		if err != nil {
 			return totalLvls, totalRead, err
 		}
-
-		read, err = readFn(int64(totalRead), toRead)
-		// the total number of values processed here is the maximum of
-		// the number of definition levels or the number of physical values read.
-		// if this is a required field, ndefs will be 0 since there is no definition
-		// levels stored with it and `read` will be the number of values, otherwise
-		// we use ndefs since it will be equal to or greater than read.
-		totalVals := int64(utils.Max(ndefs, read))
-		c.consumeBufferedValues(totalVals)
-
-		totalLvls += totalVals
-		totalRead += read
+		totalLvls += ndefs
+		totalRead += toRead
 	}
 	return totalLvls, totalRead, err
+}
+
+// base function for reading a batch of values, this ensure the values are in the same page and
+// user should make a copy of the values if they want to keep them.
+//
+// totalValues is the total number of values which were read in, and thus would be the total number
+// of definition levels and repetition levels which were populated (if they were non-nil). totalRead
+// is the number of physical values that were read in (ie: the number of non-null values)
+func (c *columnChunkReader) readBatchInPage(batchSize int64, start int64, defLvls, repLvls []int16, readFn readerFunc) (totalLvls int64, totalRead int, err error) {
+	if !c.HasNext() {
+		return 0, 0, c.err
+	}
+
+	ndefs, toRead, err := c.determineNumToRead(batchSize, defLvls, repLvls)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	read, err := readFn(start, toRead)
+	// the total number of values processed here is the maximum of
+	// the number of definition levels or the number of physical values read.
+	// if this is a required field, ndefs will be 0 since there is no definition
+	// levels stored with it and `read` will be the number of values, otherwise
+	// we use ndefs since it will be equal to or greater than read.
+	totalVals := int64(utils.Max(ndefs, read))
+	c.consumeBufferedValues(totalVals)
+
+	return totalVals, read, err
 }

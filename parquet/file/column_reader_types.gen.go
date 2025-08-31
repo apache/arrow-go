@@ -45,6 +45,12 @@ func (cr *Int32ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 //
 // total is the number of rows that were read, valuesRead is the actual number of physical values
 // that were read excluding nulls
+func (cr *Int32ColumnChunkReader) ReadBatchInPage(batchSize int64, values []int32, defLvls, repLvls []int16) (total int64, valuesRead int, err error) {
+	return cr.readBatchInPage(batchSize, 0, defLvls, repLvls, func(start, len int64) (int, error) {
+		return cr.curDecoder.(encoding.Int32Decoder).Decode(values[start : start+len])
+	})
+}
+
 func (cr *Int32ColumnChunkReader) ReadBatch(batchSize int64, values []int32, defLvls, repLvls []int16) (total int64, valuesRead int, err error) {
 	return cr.readBatch(batchSize, defLvls, repLvls, func(start, len int64) (int, error) {
 		return cr.curDecoder.(encoding.Int32Decoder).Decode(values[start : start+len])
@@ -73,6 +79,12 @@ func (cr *Int64ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 //
 // total is the number of rows that were read, valuesRead is the actual number of physical values
 // that were read excluding nulls
+func (cr *Int64ColumnChunkReader) ReadBatchInPage(batchSize int64, values []int64, defLvls, repLvls []int16) (total int64, valuesRead int, err error) {
+	return cr.readBatchInPage(batchSize, 0, defLvls, repLvls, func(start, len int64) (int, error) {
+		return cr.curDecoder.(encoding.Int64Decoder).Decode(values[start : start+len])
+	})
+}
+
 func (cr *Int64ColumnChunkReader) ReadBatch(batchSize int64, values []int64, defLvls, repLvls []int16) (total int64, valuesRead int, err error) {
 	return cr.readBatch(batchSize, defLvls, repLvls, func(start, len int64) (int, error) {
 		return cr.curDecoder.(encoding.Int64Decoder).Decode(values[start : start+len])
@@ -101,6 +113,12 @@ func (cr *Int96ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 //
 // total is the number of rows that were read, valuesRead is the actual number of physical values
 // that were read excluding nulls
+func (cr *Int96ColumnChunkReader) ReadBatchInPage(batchSize int64, values []parquet.Int96, defLvls, repLvls []int16) (total int64, valuesRead int, err error) {
+	return cr.readBatchInPage(batchSize, 0, defLvls, repLvls, func(start, len int64) (int, error) {
+		return cr.curDecoder.(encoding.Int96Decoder).Decode(values[start : start+len])
+	})
+}
+
 func (cr *Int96ColumnChunkReader) ReadBatch(batchSize int64, values []parquet.Int96, defLvls, repLvls []int16) (total int64, valuesRead int, err error) {
 	return cr.readBatch(batchSize, defLvls, repLvls, func(start, len int64) (int, error) {
 		return cr.curDecoder.(encoding.Int96Decoder).Decode(values[start : start+len])
@@ -129,6 +147,12 @@ func (cr *Float32ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 //
 // total is the number of rows that were read, valuesRead is the actual number of physical values
 // that were read excluding nulls
+func (cr *Float32ColumnChunkReader) ReadBatchInPage(batchSize int64, values []float32, defLvls, repLvls []int16) (total int64, valuesRead int, err error) {
+	return cr.readBatchInPage(batchSize, 0, defLvls, repLvls, func(start, len int64) (int, error) {
+		return cr.curDecoder.(encoding.Float32Decoder).Decode(values[start : start+len])
+	})
+}
+
 func (cr *Float32ColumnChunkReader) ReadBatch(batchSize int64, values []float32, defLvls, repLvls []int16) (total int64, valuesRead int, err error) {
 	return cr.readBatch(batchSize, defLvls, repLvls, func(start, len int64) (int, error) {
 		return cr.curDecoder.(encoding.Float32Decoder).Decode(values[start : start+len])
@@ -157,6 +181,12 @@ func (cr *Float64ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 //
 // total is the number of rows that were read, valuesRead is the actual number of physical values
 // that were read excluding nulls
+func (cr *Float64ColumnChunkReader) ReadBatchInPage(batchSize int64, values []float64, defLvls, repLvls []int16) (total int64, valuesRead int, err error) {
+	return cr.readBatchInPage(batchSize, 0, defLvls, repLvls, func(start, len int64) (int, error) {
+		return cr.curDecoder.(encoding.Float64Decoder).Decode(values[start : start+len])
+	})
+}
+
 func (cr *Float64ColumnChunkReader) ReadBatch(batchSize int64, values []float64, defLvls, repLvls []int16) (total int64, valuesRead int, err error) {
 	return cr.readBatch(batchSize, defLvls, repLvls, func(start, len int64) (int, error) {
 		return cr.curDecoder.(encoding.Float64Decoder).Decode(values[start : start+len])
@@ -185,6 +215,12 @@ func (cr *BooleanColumnChunkReader) Skip(nvalues int64) (int64, error) {
 //
 // total is the number of rows that were read, valuesRead is the actual number of physical values
 // that were read excluding nulls
+func (cr *BooleanColumnChunkReader) ReadBatchInPage(batchSize int64, values []bool, defLvls, repLvls []int16) (total int64, valuesRead int, err error) {
+	return cr.readBatchInPage(batchSize, 0, defLvls, repLvls, func(start, len int64) (int, error) {
+		return cr.curDecoder.(encoding.BooleanDecoder).Decode(values[start : start+len])
+	})
+}
+
 func (cr *BooleanColumnChunkReader) ReadBatch(batchSize int64, values []bool, defLvls, repLvls []int16) (total int64, valuesRead int, err error) {
 	return cr.readBatch(batchSize, defLvls, repLvls, func(start, len int64) (int, error) {
 		return cr.curDecoder.(encoding.BooleanDecoder).Decode(values[start : start+len])
@@ -213,9 +249,19 @@ func (cr *ByteArrayColumnChunkReader) Skip(nvalues int64) (int64, error) {
 //
 // total is the number of rows that were read, valuesRead is the actual number of physical values
 // that were read excluding nulls
+func (cr *ByteArrayColumnChunkReader) ReadBatchInPage(batchSize int64, values []parquet.ByteArray, defLvls, repLvls []int16) (total int64, valuesRead int, err error) {
+	return cr.readBatchInPage(batchSize, 0, defLvls, repLvls, func(start, len int64) (int, error) {
+		return cr.curDecoder.(encoding.ByteArrayDecoder).Decode(values[start : start+len])
+	})
+}
+
 func (cr *ByteArrayColumnChunkReader) ReadBatch(batchSize int64, values []parquet.ByteArray, defLvls, repLvls []int16) (total int64, valuesRead int, err error) {
 	return cr.readBatch(batchSize, defLvls, repLvls, func(start, len int64) (int, error) {
-		return cr.curDecoder.(encoding.ByteArrayDecoder).Decode(values[start : start+len])
+		n, err := cr.curDecoder.(encoding.ByteArrayDecoder).Decode(values[start : start+len])
+		if err == nil {
+			CloneByteArray(values[start : start+len])
+		}
+		return n, err
 	})
 }
 
@@ -241,8 +287,18 @@ func (cr *FixedLenByteArrayColumnChunkReader) Skip(nvalues int64) (int64, error)
 //
 // total is the number of rows that were read, valuesRead is the actual number of physical values
 // that were read excluding nulls
+func (cr *FixedLenByteArrayColumnChunkReader) ReadBatchInPage(batchSize int64, values []parquet.FixedLenByteArray, defLvls, repLvls []int16) (total int64, valuesRead int, err error) {
+	return cr.readBatchInPage(batchSize, 0, defLvls, repLvls, func(start, len int64) (int, error) {
+		return cr.curDecoder.(encoding.FixedLenByteArrayDecoder).Decode(values[start : start+len])
+	})
+}
+
 func (cr *FixedLenByteArrayColumnChunkReader) ReadBatch(batchSize int64, values []parquet.FixedLenByteArray, defLvls, repLvls []int16) (total int64, valuesRead int, err error) {
 	return cr.readBatch(batchSize, defLvls, repLvls, func(start, len int64) (int, error) {
-		return cr.curDecoder.(encoding.FixedLenByteArrayDecoder).Decode(values[start : start+len])
+		n, err := cr.curDecoder.(encoding.FixedLenByteArrayDecoder).Decode(values[start : start+len])
+		if err == nil {
+			CloneByteArray(values[start : start+len])
+		}
+		return n, err
 	})
 }
