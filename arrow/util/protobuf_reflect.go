@@ -18,6 +18,8 @@ package util
 
 import (
 	"fmt"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
 	"reflect"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -118,6 +120,9 @@ func (pfr *ProtobufFieldReflection) arrowType() arrow.Type {
 			return arrow.DICTIONARY
 		}
 	}
+	if pfr.isJson() {
+		return arrow.STRING
+	}
 	if pfr.isStruct() {
 		return arrow.STRUCT
 	}
@@ -168,6 +173,13 @@ func (pfr *ProtobufFieldReflection) isOneOf() bool {
 
 func (pfr *ProtobufFieldReflection) isEnum() bool {
 	return pfr.descriptor.Kind() == protoreflect.EnumKind
+}
+
+func (pfr *ProtobufFieldReflection) isJson() bool {
+	if pfr.descriptor.Kind() != protoreflect.MessageKind {
+		return false
+	}
+	return pfr.descriptor.Message().FullName() == "google.protobuf.Struct"
 }
 
 func (pfr *ProtobufFieldReflection) isStruct() bool {
@@ -603,6 +615,7 @@ type protobufReflection interface {
 	GetDescriptor() protoreflect.FieldDescriptor
 	isNull() bool
 	isEnum() bool
+	isJson() bool
 	asDictionary() protobufDictReflection
 	isList() bool
 	asList() protobufListReflection
@@ -754,6 +767,11 @@ func (f ProtobufMessageFieldReflection) AppendValueOrNull(b array.Builder, mem m
 	case arrow.STRING:
 		if f.isEnum() {
 			b.(*array.StringBuilder).Append(string(fd.Enum().Values().ByNumber(pv.Enum()).Name()))
+		} else if f.protobufReflection.isJson() {
+			valueAsStructPb := f.reflectValue().Interface().(structpb.Struct)
+			jsonData, _ := protojson.Marshal(&valueAsStructPb)
+
+			b.(*array.StringBuilder).Append(string(jsonData))
 		} else {
 			b.(*array.StringBuilder).Append(pv.String())
 		}
