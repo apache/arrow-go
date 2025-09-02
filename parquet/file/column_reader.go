@@ -38,7 +38,8 @@ const (
 	defaultPageHeaderSize = 16 * 1024
 )
 
-func CloneByteArray[T parquet.ByteArray | parquet.FixedLenByteArray](src []T) {
+// cloneByteArray is a helper function to clone a slice of byte slices
+func cloneByteArray[T ~[]byte](src []T) {
 	totalLength := 0
 	for i := range src {
 		totalLength += len(src[i])
@@ -246,6 +247,7 @@ func (c *columnChunkReader) setPageReader(rdr PageReader) {
 	c.numBuffered, c.numDecoded = 0, 0
 }
 
+// Close closes the page raeder and the page if set.
 func (c *columnChunkReader) Close() error {
 	if c.curPage != nil {
 		c.curPage.Release()
@@ -371,8 +373,7 @@ func (c *columnChunkReader) readNewPage() bool {
 	}
 
 	// If we get here, we're at the end of the column, and the page must
-	// be released in Next() already. So set it to nil to avoid being
-	// released twice.
+	// have already been released. So set it to nil to avoid releasing twice.
 	c.curPage = nil
 	c.err = c.rdr.Err()
 	return false
@@ -669,7 +670,7 @@ type readerFunc func(int64, int64) (int, error)
 // readBatch is base function for reading a batch of values, this will read until it either reads
 // in batchSize values or it hits the end of the column chunk, including reading multiple pages.
 //
-// totalValues is the total number of values which were read in, and thus would be the total number
+// totalLvls is the total number of values which were read in, and thus would be the total number
 // of definition levels and repetition levels which were populated (if they were non-nil). totalRead
 // is the number of physical values that were read in (ie: the number of non-null values)
 func (c *columnChunkReader) readBatch(batchSize int64, defLvls, repLvls []int16, readFn readerFunc) (totalLvls int64, totalRead int, err error) {
@@ -695,8 +696,9 @@ func (c *columnChunkReader) readBatch(batchSize int64, defLvls, repLvls []int16,
 }
 
 // readBatchInPage is a helper function for reading a batch of values. This function ensures
-// the read values are from the same page and may be shallow copies of the underlying page data.
-// User should make a copy of the values if they want to keep them.
+// the read values are from the same page.
+//
+// TotalRead is the start index to pass to readFn.
 func (c *columnChunkReader) readBatchInPage(batchSize int64, totalRead int64, defLvls, repLvls []int16, readFn readerFunc) (lvls int64, read int, err error) {
 	if !c.HasNext() {
 		return 0, 0, c.err

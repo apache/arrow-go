@@ -36,10 +36,10 @@ func (cr *Int32ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return nvalues, err
 }
 
-// ReadBatchInPage and ReadBatch reads batchSize values from the column, which are used in tests.
-// The former reads only within the current page and caller should copy the values if needed,
-// while the latter reads across multiple page to fill the batch and values have been clones.
-//
+// ReadBatchInPage and ReadBatch are used to read batchSize values from the column, currently they are
+// used in test. The former one only reads values from the same page, while the latter one reads across
+// multiple pages to fill the batch.
+
 // Returns error if values is not at least big enough to hold the number of values that will be read.
 //
 // defLvls and repLvls can be nil, or will be populated if not nil. If not nil, they must be
@@ -72,10 +72,10 @@ func (cr *Int64ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return nvalues, err
 }
 
-// ReadBatchInPage and ReadBatch reads batchSize values from the column, which are used in tests.
-// The former reads only within the current page and caller should copy the values if needed,
-// while the latter reads across multiple page to fill the batch and values have been clones.
-//
+// ReadBatchInPage and ReadBatch are used to read batchSize values from the column, currently they are
+// used in test. The former one only reads values from the same page, while the latter one reads across
+// multiple pages to fill the batch.
+
 // Returns error if values is not at least big enough to hold the number of values that will be read.
 //
 // defLvls and repLvls can be nil, or will be populated if not nil. If not nil, they must be
@@ -108,10 +108,10 @@ func (cr *Int96ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return nvalues, err
 }
 
-// ReadBatchInPage and ReadBatch reads batchSize values from the column, which are used in tests.
-// The former reads only within the current page and caller should copy the values if needed,
-// while the latter reads across multiple page to fill the batch and values have been clones.
-//
+// ReadBatchInPage and ReadBatch are used to read batchSize values from the column, currently they are
+// used in test. The former one only reads values from the same page, while the latter one reads across
+// multiple pages to fill the batch.
+
 // Returns error if values is not at least big enough to hold the number of values that will be read.
 //
 // defLvls and repLvls can be nil, or will be populated if not nil. If not nil, they must be
@@ -144,10 +144,10 @@ func (cr *Float32ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return nvalues, err
 }
 
-// ReadBatchInPage and ReadBatch reads batchSize values from the column, which are used in tests.
-// The former reads only within the current page and caller should copy the values if needed,
-// while the latter reads across multiple page to fill the batch and values have been clones.
-//
+// ReadBatchInPage and ReadBatch are used to read batchSize values from the column, currently they are
+// used in test. The former one only reads values from the same page, while the latter one reads across
+// multiple pages to fill the batch.
+
 // Returns error if values is not at least big enough to hold the number of values that will be read.
 //
 // defLvls and repLvls can be nil, or will be populated if not nil. If not nil, they must be
@@ -180,10 +180,10 @@ func (cr *Float64ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return nvalues, err
 }
 
-// ReadBatchInPage and ReadBatch reads batchSize values from the column, which are used in tests.
-// The former reads only within the current page and caller should copy the values if needed,
-// while the latter reads across multiple page to fill the batch and values have been clones.
-//
+// ReadBatchInPage and ReadBatch are used to read batchSize values from the column, currently they are
+// used in test. The former one only reads values from the same page, while the latter one reads across
+// multiple pages to fill the batch.
+
 // Returns error if values is not at least big enough to hold the number of values that will be read.
 //
 // defLvls and repLvls can be nil, or will be populated if not nil. If not nil, they must be
@@ -216,10 +216,10 @@ func (cr *BooleanColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return nvalues, err
 }
 
-// ReadBatchInPage and ReadBatch reads batchSize values from the column, which are used in tests.
-// The former reads only within the current page and caller should copy the values if needed,
-// while the latter reads across multiple page to fill the batch and values have been clones.
-//
+// ReadBatchInPage and ReadBatch are used to read batchSize values from the column, currently they are
+// used in test. The former one only reads values from the same page, while the latter one reads across
+// multiple pages to fill the batch.
+
 // Returns error if values is not at least big enough to hold the number of values that will be read.
 //
 // defLvls and repLvls can be nil, or will be populated if not nil. If not nil, they must be
@@ -252,9 +252,12 @@ func (cr *ByteArrayColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return nvalues, err
 }
 
-// ReadBatchInPage and ReadBatch reads batchSize values from the column, which are used in tests.
-// The former reads only within the current page and caller should copy the values if needed,
-// while the latter reads across multiple page to fill the batch and values have been clones.
+// ReadBatchInPage and ReadBatch are used to read batchSize values from the column, currently they are
+// used in test. The former one only reads values from the same page, and might be shallow copies of the
+// underlying page data, while the latter one reads across multiple pages to fill the batch and values
+// have been cloned. User should choose the appropriate one based on their use cases. For example, if user
+// only needs to read and process values one by one, ReadBatchInPage is more efficient. Otherwise, if user
+// want to cache the values for later use, ReadBatch is more suitable.
 //
 // Returns error if values is not at least big enough to hold the number of values that will be read.
 //
@@ -273,7 +276,7 @@ func (cr *ByteArrayColumnChunkReader) ReadBatch(batchSize int64, values []parque
 	return cr.readBatch(batchSize, defLvls, repLvls, func(start, len int64) (int, error) {
 		n, err := cr.curDecoder.(encoding.ByteArrayDecoder).Decode(values[start : start+len])
 		if err == nil {
-			CloneByteArray(values[start : start+len])
+			cloneByteArray(values[start : start+len])
 		}
 		return n, err
 	})
@@ -292,9 +295,12 @@ func (cr *FixedLenByteArrayColumnChunkReader) Skip(nvalues int64) (int64, error)
 	return nvalues, err
 }
 
-// ReadBatchInPage and ReadBatch reads batchSize values from the column, which are used in tests.
-// The former reads only within the current page and caller should copy the values if needed,
-// while the latter reads across multiple page to fill the batch and values have been clones.
+// ReadBatchInPage and ReadBatch are used to read batchSize values from the column, currently they are
+// used in test. The former one only reads values from the same page, and might be shallow copies of the
+// underlying page data, while the latter one reads across multiple pages to fill the batch and values
+// have been cloned. User should choose the appropriate one based on their use cases. For example, if user
+// only needs to read and process values one by one, ReadBatchInPage is more efficient. Otherwise, if user
+// want to cache the values for later use, ReadBatch is more suitable.
 //
 // Returns error if values is not at least big enough to hold the number of values that will be read.
 //
@@ -313,7 +319,7 @@ func (cr *FixedLenByteArrayColumnChunkReader) ReadBatch(batchSize int64, values 
 	return cr.readBatch(batchSize, defLvls, repLvls, func(start, len int64) (int, error) {
 		n, err := cr.curDecoder.(encoding.FixedLenByteArrayDecoder).Decode(values[start : start+len])
 		if err == nil {
-			CloneByteArray(values[start : start+len])
+			cloneByteArray(values[start : start+len])
 		}
 		return n, err
 	})
