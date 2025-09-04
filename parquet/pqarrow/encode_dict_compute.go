@@ -117,7 +117,9 @@ func writeDictionaryArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, lea
 		}
 
 		nonNullCount := indices.Len() - indices.NullN()
-		pageStats.IncNulls(int64(len(defLevels) - nonNullCount))
+		nullCount := max(int64(len(defLevels)-nonNullCount), 0)
+
+		pageStats.IncNulls(nullCount)
 		pageStats.IncNumValues(int64(nonNullCount))
 		return pageStats.UpdateFromArrow(referencedDict, false)
 	}

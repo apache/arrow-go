@@ -67,6 +67,49 @@ func (ps *ParquetIOTestSuite) TestSingleColumnOptionalDictionaryWrite() {
 	}
 }
 
+func (ps *ParquetIOTestSuite) TestSingleColumnRequiredDictionaryWrite() {
+	for _, dt := range dictEncodingSupportedTypeList {
+		// skip tests for bool as we don't do dictionaries for it
+		if dt.ID() == arrow.BOOL {
+			continue
+		}
+
+		ps.Run(dt.Name(), func() {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(ps.T(), 0)
+
+			bldr := array.NewDictionaryBuilder(mem, &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int16, ValueType: dt})
+			defer bldr.Release()
+
+			values := testutils.RandomNonNull(mem, dt, smallSize)
+			defer values.Release()
+			ps.Require().NoError(bldr.AppendArray(values))
+
+			arr := bldr.NewDictionaryArray()
+			defer arr.Release()
+
+			sc := ps.makeSimpleSchema(arr.DataType(), parquet.Repetitions.Required)
+			data := ps.writeDictionaryColumn(mem, sc, arr)
+
+			rdr, err := file.NewParquetReader(bytes.NewReader(data))
+			ps.NoError(err)
+			defer rdr.Close()
+
+			metadata := rdr.MetaData()
+			ps.Len(metadata.RowGroups, 1)
+
+			rg := metadata.RowGroup(0)
+			col, err := rg.ColumnChunk(0)
+			ps.NoError(err)
+
+			stats, err := col.Statistics()
+			ps.NoError(err)
+			ps.EqualValues(smallSize, stats.NumValues())
+			ps.EqualValues(0, stats.NullCount())
+		})
+	}
+}
+
 func TestPqarrowDictionaries(t *testing.T) {
 	suite.Run(t, &ArrowWriteDictionarySuite{dataPageVersion: parquet.DataPageV1})
 	suite.Run(t, &ArrowWriteDictionarySuite{dataPageVersion: parquet.DataPageV2})

@@ -1284,6 +1284,30 @@ func (ps *ParquetIOTestSuite) writeColumn(mem memory.Allocator, sc *schema.Group
 	return buf.Bytes()
 }
 
+func (ps *ParquetIOTestSuite) writeDictionaryColumn(mem memory.Allocator, sc *schema.GroupNode, values arrow.Array) []byte {
+	var buf bytes.Buffer
+	arrsc, err := pqarrow.FromParquet(schema.NewSchema(sc), nil, nil)
+	ps.NoError(err)
+
+	writer, err := pqarrow.NewFileWriter(
+		arrsc,
+		&buf,
+		parquet.NewWriterProperties(
+			parquet.WithDictionaryDefault(true),
+			parquet.WithStats(true),
+		),
+		pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem)),
+	)
+	ps.NoError(err)
+
+	writer.NewRowGroup()
+	ps.NoError(writer.WriteColumnData(values))
+	ps.NoError(writer.Close())
+	ps.NoError(writer.Close())
+
+	return buf.Bytes()
+}
+
 func (ps *ParquetIOTestSuite) readAndCheckSingleColumnFile(mem memory.Allocator, data []byte, values arrow.Array) {
 	reader := ps.createReader(mem, data)
 	cr, err := reader.GetColumn(context.TODO(), 0)
@@ -1315,6 +1339,23 @@ var fullTypeList = []arrow.DataType{
 	arrow.PrimitiveTypes.Float32,
 	arrow.PrimitiveTypes.Float64,
 	arrow.FixedWidthTypes.Float16,
+	arrow.BinaryTypes.String,
+	arrow.BinaryTypes.Binary,
+	&arrow.FixedSizeBinaryType{ByteWidth: 10},
+	&arrow.Decimal128Type{Precision: 1, Scale: 0},
+	&arrow.Decimal128Type{Precision: 5, Scale: 4},
+	&arrow.Decimal128Type{Precision: 10, Scale: 9},
+	&arrow.Decimal128Type{Precision: 19, Scale: 18},
+	&arrow.Decimal128Type{Precision: 23, Scale: 22},
+	&arrow.Decimal128Type{Precision: 27, Scale: 26},
+	&arrow.Decimal128Type{Precision: 38, Scale: 37},
+}
+
+var dictEncodingSupportedTypeList = []arrow.DataType{
+	arrow.PrimitiveTypes.Int32,
+	arrow.PrimitiveTypes.Int64,
+	arrow.PrimitiveTypes.Float32,
+	arrow.PrimitiveTypes.Float64,
 	arrow.BinaryTypes.String,
 	arrow.BinaryTypes.Binary,
 	&arrow.FixedSizeBinaryType{ByteWidth: 10},
