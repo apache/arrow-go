@@ -290,6 +290,7 @@ func (ad *ArrowWriteDictionarySuite) TestStatisticsWithFallback() {
 				}
 
 				ad.False(pr.Next())
+				ad.NoError(pr.Close())
 			}
 		})
 	}
