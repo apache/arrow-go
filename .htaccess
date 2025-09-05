@@ -15,4 +15,4 @@
 # specific language governing permissions and limitations
 # under the License.
 
-Redirect permanent /go/ https://pkg.go.dev/github.com/apache/arrow-go/
+Redirect permanent /go/ https://pkg.go.dev/github.com/apache/arrow-go/v18/
