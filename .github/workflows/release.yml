@@ -19,8 +19,8 @@ name: Release
 on:
   push:
     tags:
-      - "*"
-      - "!*-rc*"
+      - "v*"
+      - "!v*-rc*"
 permissions:
   contents: write
 env:
