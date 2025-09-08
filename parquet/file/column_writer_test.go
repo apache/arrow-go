@@ -292,12 +292,38 @@ func (p *PrimitiveWriterTestSuite) readColumnFully(compression compress.Compress
 		read := p.ReadBatch(reader, totalValues-valuesRead, valuesRead, p.DefLevelsOut[valuesRead:], p.RepLevelsOut[valuesRead:])
 		valuesRead += read
 	}
+	p.NoError(reader.Close())
 	return valuesRead
+}
+
+// checkReadColumnByPage is used to check the data read from two interface is same
+func (p *PrimitiveWriterTestSuite) checkReadColumnByPage(compression compress.Compression) {
+	totalValues := int64(len(p.DefLevelsOut))
+	pagereader, _ := file.NewPageReader(arrutils.NewByteReader(p.readbuffer.Bytes()), totalValues, compression, mem, nil)
+	reader := file.NewColumnReader(p.descr, pagereader, mem, &p.bufferPool)
+
+	valuesRead := int64(0)
+	for valuesRead < totalValues {
+		read := p.ReadBatchInPage(reader, totalValues-valuesRead, valuesRead, p.DefLevelsOut[valuesRead:], p.RepLevelsOut[valuesRead:])
+		switch reader.(type) {
+		case *file.ByteArrayColumnChunkReader:
+			batchOut := p.ValuesOut.([]parquet.ByteArray)
+			pageOut := p.ValuesOutPage.([]parquet.ByteArray)
+			p.Equal(batchOut[valuesRead:valuesRead+read], pageOut[valuesRead:valuesRead+read])
+		case *file.FixedLenByteArrayColumnChunkReader:
+			batchOut := p.ValuesOut.([]parquet.FixedLenByteArray)
+			pageOut := p.ValuesOutPage.([]parquet.FixedLenByteArray)
+			p.Equal(batchOut[valuesRead:valuesRead+read], pageOut[valuesRead:valuesRead+read])
+		}
+		valuesRead += read
+	}
+	p.NoError(reader.Close())
 }
 
 func (p *PrimitiveWriterTestSuite) readAndCompare(compression compress.Compression, nrows int64) {
 	p.SetupValuesOut(nrows)
 	p.readColumnFully(compression)
+	p.checkReadColumnByPage(compression)
 	p.Equal(p.Values, p.ValuesOut)
 }
 
@@ -394,6 +420,7 @@ func (p *PrimitiveWriterTestSuite) testDictionaryFallbackEncoding(version parque
 	// Read all the rows so that we are sure that also the non-dictionary pages are read correctly
 	p.SetupValuesOut(VeryLargeSize)
 	valuesRead := p.readColumnFully(compress.Codecs.Uncompressed)
+	p.checkReadColumnByPage(compress.Codecs.Uncompressed)
 	p.EqualValues(VeryLargeSize, valuesRead)
 	p.Equal(p.Values, p.ValuesOut)
 
