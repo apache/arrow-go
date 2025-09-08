@@ -254,31 +254,31 @@ func (p *PrimitiveTypedTest) ReadBatch(reader file.ColumnChunkReader, batch, val
 	}
 }
 
-func (p *PrimitiveTypedTest) ReadBatchInPage(reader file.ColumnChunkReader, batch, valuesRead int64, defLevels, repLevels []int16) int64 {
+func (p *PrimitiveTypedTest) ReadBatchInPage(reader file.ColumnChunkReader, batch int64, defLevels, repLevels []int16) int64 {
 	switch r := reader.(type) {
 	case *file.Int32ColumnChunkReader:
-		_, read, _ := r.ReadBatchInPage(batch, p.ValuesOutPage.([]int32)[valuesRead:], defLevels, repLevels)
+		_, read, _ := r.ReadBatchInPage(batch, p.ValuesOutPage.([]int32), defLevels, repLevels)
 		return int64(read)
 	case *file.Int64ColumnChunkReader:
-		_, read, _ := r.ReadBatchInPage(batch, p.ValuesOutPage.([]int64)[valuesRead:], defLevels, repLevels)
+		_, read, _ := r.ReadBatchInPage(batch, p.ValuesOutPage.([]int64), defLevels, repLevels)
 		return int64(read)
 	case *file.Float32ColumnChunkReader:
-		_, read, _ := r.ReadBatchInPage(batch, p.ValuesOutPage.([]float32)[valuesRead:], defLevels, repLevels)
+		_, read, _ := r.ReadBatchInPage(batch, p.ValuesOutPage.([]float32), defLevels, repLevels)
 		return int64(read)
 	case *file.Float64ColumnChunkReader:
-		_, read, _ := r.ReadBatchInPage(batch, p.ValuesOutPage.([]float64)[valuesRead:], defLevels, repLevels)
+		_, read, _ := r.ReadBatchInPage(batch, p.ValuesOutPage.([]float64), defLevels, repLevels)
 		return int64(read)
 	case *file.Int96ColumnChunkReader:
-		_, read, _ := r.ReadBatchInPage(batch, p.ValuesOutPage.([]parquet.Int96)[valuesRead:], defLevels, repLevels)
+		_, read, _ := r.ReadBatchInPage(batch, p.ValuesOutPage.([]parquet.Int96), defLevels, repLevels)
 		return int64(read)
 	case *file.ByteArrayColumnChunkReader:
-		_, read, _ := r.ReadBatchInPage(batch, p.ValuesOutPage.([]parquet.ByteArray)[valuesRead:], defLevels, repLevels)
+		_, read, _ := r.ReadBatchInPage(batch, p.ValuesOutPage.([]parquet.ByteArray), defLevels, repLevels)
 		return int64(read)
 	case *file.BooleanColumnChunkReader:
-		_, read, _ := r.ReadBatchInPage(batch, p.ValuesOutPage.([]bool)[valuesRead:], defLevels, repLevels)
+		_, read, _ := r.ReadBatchInPage(batch, p.ValuesOutPage.([]bool), defLevels, repLevels)
 		return int64(read)
 	case *file.FixedLenByteArrayColumnChunkReader:
-		_, read, _ := r.ReadBatchInPage(batch, p.ValuesOutPage.([]parquet.FixedLenByteArray)[valuesRead:], defLevels, repLevels)
+		_, read, _ := r.ReadBatchInPage(batch, p.ValuesOutPage.([]parquet.FixedLenByteArray), defLevels, repLevels)
 		return int64(read)
 	default:
 		panic("unimplemented")

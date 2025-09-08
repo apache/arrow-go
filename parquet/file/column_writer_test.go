@@ -298,22 +298,25 @@ func (p *PrimitiveWriterTestSuite) readColumnFully(compression compress.Compress
 
 // checkReadColumnByPage is used to check the data read from two interface is same
 func (p *PrimitiveWriterTestSuite) checkReadColumnByPage(compression compress.Compression) {
+	if p.descr.PhysicalType() != parquet.Types.FixedLenByteArray && p.descr.PhysicalType() != parquet.Types.ByteArray {
+		return
+	}
 	totalValues := int64(len(p.DefLevelsOut))
 	pagereader, _ := file.NewPageReader(arrutils.NewByteReader(p.readbuffer.Bytes()), totalValues, compression, mem, nil)
 	reader := file.NewColumnReader(p.descr, pagereader, mem, &p.bufferPool)
 
 	valuesRead := int64(0)
 	for valuesRead < totalValues {
-		read := p.ReadBatchInPage(reader, totalValues-valuesRead, valuesRead, p.DefLevelsOut[valuesRead:], p.RepLevelsOut[valuesRead:])
+		read := p.ReadBatchInPage(reader, totalValues-valuesRead, p.DefLevelsOut, p.RepLevelsOut)
 		switch reader.(type) {
 		case *file.ByteArrayColumnChunkReader:
 			batchOut := p.ValuesOut.([]parquet.ByteArray)
 			pageOut := p.ValuesOutPage.([]parquet.ByteArray)
-			p.Equal(batchOut[valuesRead:valuesRead+read], pageOut[valuesRead:valuesRead+read])
+			p.Equal(batchOut[valuesRead:valuesRead+read], pageOut[:read])
 		case *file.FixedLenByteArrayColumnChunkReader:
 			batchOut := p.ValuesOut.([]parquet.FixedLenByteArray)
 			pageOut := p.ValuesOutPage.([]parquet.FixedLenByteArray)
-			p.Equal(batchOut[valuesRead:valuesRead+read], pageOut[valuesRead:valuesRead+read])
+			p.Equal(batchOut[valuesRead:valuesRead+read], pageOut[:read])
 		}
 		valuesRead += read
 	}
