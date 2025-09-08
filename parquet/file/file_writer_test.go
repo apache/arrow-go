@@ -714,6 +714,7 @@ func (t *PageIndexRoundTripSuite) readPageIndexes(expectNumRG, expectNumPages in
 				}
 			}
 
+			t.Require().NoError(pgRdr.Close())
 			t.Require().NoError(pgRdr.Err())
 		}
 	}
