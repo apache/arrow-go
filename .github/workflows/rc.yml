@@ -22,7 +22,7 @@ on:
       - '**'
       - '!dependabot/**'
     tags:
-      - '*-rc*'
+      - 'v*-rc*'
   pull_request:
 concurrency:
   group: ${{ github.repository }}-${{ github.head_ref || github.sha }}-${{ github.workflow }}
