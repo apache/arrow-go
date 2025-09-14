@@ -517,6 +517,24 @@ func (s *BitmapOpSuite) TestBitmapOr() {
 	})
 }
 
+func (s *BitmapOpSuite) TestBitmapXnor() {
+	op := bitmapOp{
+		noAlloc: bitutil.BitmapXnor,
+		alloc:   bitutil.BitmapXnorAlloc,
+	}
+
+	leftBits := []int{0, 1, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1}
+	rightBits := []int{0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0}
+	resultBits := []bool{true, false, true, false, false, false, true, false, false, true, false, false, false, false}
+
+	s.Run("aligned", func() {
+		s.testAligned(op, leftBits, rightBits, resultBits)
+	})
+	s.Run("unaligned", func() {
+		s.testUnaligned(op, leftBits, rightBits, resultBits)
+	})
+}
+
 func TestBitmapOps(t *testing.T) {
 	suite.Run(t, new(BitmapOpSuite))
 }
