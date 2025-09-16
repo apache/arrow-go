@@ -368,6 +368,7 @@ func (rr *recordReader) Release() {
 		rr.defLevels.Release()
 		rr.repLevels.Release()
 		rr.defLevels, rr.repLevels = nil, nil
+		rr.Close()
 	}
 }
 

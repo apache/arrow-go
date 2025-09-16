@@ -99,6 +99,7 @@ type PageSerdeSuite struct {
 	dataPageHdr   format.DataPageHeader
 	dataPageHdrV2 format.DataPageHeaderV2
 
+	alloc      *memory.CheckedAllocator
 	pageReader file.PageReader
 }
 
@@ -126,7 +127,8 @@ func (p *PageSerdeSuite) SetupTest() {
 func (p *PageSerdeSuite) InitSerializedPageReader(nrows int64, codec compress.Compression) {
 	p.EndStream()
 
-	p.pageReader, _ = file.NewPageReader(utils.NewByteReader(p.buffer.Bytes()), nrows, codec, memory.DefaultAllocator, nil)
+	p.alloc = memory.NewCheckedAllocator(memory.NewGoAllocator())
+	p.pageReader, _ = file.NewPageReader(utils.NewByteReader(p.buffer.Bytes()), nrows, codec, p.alloc, nil)
 }
 
 func (p *PageSerdeSuite) WriteDataPageHeader(maxSerialized int, uncompressed, compressed int32) {
@@ -193,6 +195,8 @@ func (p *PageSerdeSuite) TestDataPageV1() {
 	p.True(p.pageReader.Next())
 	currentPage := p.pageReader.Page()
 	p.CheckDataPageHeader(p.dataPageHdr, currentPage)
+	p.NoError(p.pageReader.Close())
+	p.alloc.AssertSize(p.T(), 0)
 }
 
 func (p *PageSerdeSuite) TestDataPageV2() {
@@ -200,12 +204,15 @@ func (p *PageSerdeSuite) TestDataPageV2() {
 		statsSize = 512
 		nrows     = 4444
 	)
+
 	p.dataPageHdrV2.Statistics = getDummyStats(statsSize, true)
 	p.dataPageHdrV2.NumValues = nrows
-	p.WriteDataPageHeaderV2(1024, 0, 0)
+	p.WriteDataPageHeaderV2(1024, 20, 10)
 	p.InitSerializedPageReader(nrows, compress.Codecs.Uncompressed)
 	p.True(p.pageReader.Next())
 	p.CheckDataPageHeaderV2(p.dataPageHdrV2, p.pageReader.Page())
+	p.pageReader.Close()
+	p.alloc.AssertSize(p.T(), 0)
 }
 
 func (p *PageSerdeSuite) TestLargePageHeaders() {
@@ -227,6 +234,8 @@ func (p *PageSerdeSuite) TestLargePageHeaders() {
 	p.InitSerializedPageReader(nrows, compress.Codecs.Uncompressed)
 	p.True(p.pageReader.Next())
 	p.CheckDataPageHeader(p.dataPageHdr, p.pageReader.Page())
+	p.NoError(p.pageReader.Close())
+	p.alloc.AssertSize(p.T(), 0)
 }
 
 func (p *PageSerdeSuite) TestFailLargePageHeaders() {
@@ -247,6 +256,8 @@ func (p *PageSerdeSuite) TestFailLargePageHeaders() {
 	p.pageReader.SetMaxPageHeaderSize(smallerMaxSize)
 	p.NotPanics(func() { p.False(p.pageReader.Next()) })
 	p.Error(p.pageReader.Err())
+	p.NoError(p.pageReader.Close())
+	p.alloc.AssertSize(p.T(), 0)
 }
 
 func (p *PageSerdeSuite) TestCompression() {
@@ -290,6 +301,8 @@ func (p *PageSerdeSuite) TestCompression() {
 				p.IsType(&file.DataPageV1{}, page)
 				p.Equal(data, page.Data())
 			}
+			p.pageReader.Close()
+			p.alloc.AssertSize(p.T(), 0)
 			p.ResetStream()
 		})
 	}

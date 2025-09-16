@@ -1,0 +1,101 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: Release
+on:
+  push:
+    tags:
+      - "v*"
+      - "!v*-rc*"
+permissions:
+  contents: write
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Download RC contents
+        run: |
+          latest_rc_tag=$(gh release list \
+                            --jq '.[].tagName' \
+                            --json tagName \
+                            --repo ${GITHUB_REPOSITORY} | \
+                              grep -F "${GITHUB_REF_NAME}-rc" | \
+                              head -n1)
+          gh release download ${latest_rc_tag} \
+            --repo ${GITHUB_REPOSITORY} \
+            --dir dists
+      - name: Create GitHub Release
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          gh release create ${GITHUB_REF_NAME} \
+            --discussion-category Announcements \
+            --generate-notes \
+            --repo ${GITHUB_REPOSITORY} \
+            --title "Apache Arrow Go ${version}" \
+            --verify-tag \
+            dists/*
+      - name: Checkout asf-site
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: asf-site
+          path: site
+      - name: Update documentation
+        run: |
+          # v18.4.1 -> 18.4.1
+          version=${GITHUB_REF_NAME#v}
+          # 18.4.1 -> 18
+          major_version=${version%%.*}
+          # 18.4.1 -> 4.1
+          minor_patch_version=${version#*.}
+
+          cd site
+          cp ../.asf.yaml ./
+          if [ "${minor_patch_version}" = "0.0" ]; then
+            # Major release
+            cat <<HTACCESS > .htaccess
+          # Licensed to the Apache Software Foundation (ASF) under one
+          # or more contributor license agreements.  See the NOTICE file
+          # distributed with this work for additional information
+          # regarding copyright ownership.  The ASF licenses this file
+          # to you under the Apache License, Version 2.0 (the
+          # "License"); you may not use this file except in compliance
+          # with the License.  You may obtain a copy of the License at
+          #
+          #   http://www.apache.org/licenses/LICENSE-2.0
+          #
+          # Unless required by applicable law or agreed to in writing,
+          # software distributed under the License is distributed on an
+          # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+          # KIND, either express or implied.  See the License for the
+          # specific language governing permissions and limitations
+          # under the License.
+
+          Redirect permanent /go/ https://pkg.go.dev/github.com/apache/arrow-go/v${major_version}/
+          HTACCESS
+          fi
+          git add .
+
+          if [ "$(git diff --cached)" != "" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git commit -m "Update docs for ${version}"
+            git push origin "$(git branch --show-current)"
+          fi
