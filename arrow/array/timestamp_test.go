@@ -28,6 +28,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	// We test against the deprecated format for backwards compatibility
+	// See https://github.com/apache/arrow-go/pull/450
+	deprecatedFormat = "2006-01-02 15:04:05.999999999Z0700"
+)
+
 func TestTimestampStringRoundTrip(t *testing.T) {
 	// 1. create array
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
@@ -252,6 +258,24 @@ func TestTimestampValueStr(t *testing.T) {
 
 	assert.Equal(t, "1968-11-30T13:30:45-07:00", arr.ValueStr(0))
 	assert.Equal(t, "2016-02-29T10:42:23-07:00", arr.ValueStr(1))
+}
+
+func TestTimestampValueStrWithDeprecatedFormat(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dt := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/Phoenix"}
+	b := array.NewTimestampBuilderWithFormat(mem, dt, deprecatedFormat)
+	defer b.Release()
+
+	b.Append(-34226955)
+	b.Append(1456767743)
+
+	arr := b.NewArray()
+	defer arr.Release()
+
+	assert.Equal(t, "1968-11-30 13:30:45-0700", arr.ValueStr(0))
+	assert.Equal(t, "2016-02-29 10:42:23-0700", arr.ValueStr(1))
 }
 
 func TestTimestampEquality(t *testing.T) {

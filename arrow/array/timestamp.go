@@ -34,11 +34,16 @@ import (
 type Timestamp struct {
 	array
 	values []arrow.Timestamp
+	format string
 }
 
 // NewTimestampData creates a new Timestamp from Data.
 func NewTimestampData(data arrow.ArrayData) *Timestamp {
-	a := &Timestamp{}
+	return NewTimestampDataWithFormat(data, time.RFC3339Nano)
+}
+
+func NewTimestampDataWithFormat(data arrow.ArrayData, format string) *Timestamp {
+	a := &Timestamp{format: format}
 	a.refCount.Add(1)
 	a.setData(data.(*Data))
 	return a
@@ -93,7 +98,11 @@ func (a *Timestamp) ValueStr(i int) string {
 	}
 
 	toTime, _ := a.DataType().(*arrow.TimestampType).GetToTimeFunc()
-	return toTime(a.values[i]).Format(time.RFC3339Nano)
+	format := a.format
+	if format == "" {
+		format = time.RFC3339Nano
+	}
+	return toTime(a.values[i]).Format(format)
 }
 
 func (a *Timestamp) GetOneForMarshal(i int) interface{} {
@@ -130,10 +139,15 @@ type TimestampBuilder struct {
 	dtype   *arrow.TimestampType
 	data    *memory.Buffer
 	rawData []arrow.Timestamp
+	format  string
 }
 
 func NewTimestampBuilder(mem memory.Allocator, dtype *arrow.TimestampType) *TimestampBuilder {
-	tb := &TimestampBuilder{builder: builder{mem: mem}, dtype: dtype}
+	return NewTimestampBuilderWithFormat(mem, dtype, time.RFC3339Nano)
+}
+
+func NewTimestampBuilderWithFormat(mem memory.Allocator, dtype *arrow.TimestampType, format string) *TimestampBuilder {
+	tb := &TimestampBuilder{builder: builder{mem: mem}, dtype: dtype, format: format}
 	tb.refCount.Add(1)
 	return tb
 }
@@ -259,14 +273,18 @@ func (b *TimestampBuilder) Resize(n int) {
 // NewArray creates a Timestamp array from the memory buffers used by the builder and resets the TimestampBuilder
 // so it can be used to build a new array.
 func (b *TimestampBuilder) NewArray() arrow.Array {
-	return b.NewTimestampArray()
+	return b.NewTimestampArrayWithFormat(b.format)
 }
 
 // NewTimestampArray creates a Timestamp array from the memory buffers used by the builder and resets the TimestampBuilder
 // so it can be used to build a new array.
 func (b *TimestampBuilder) NewTimestampArray() (a *Timestamp) {
+	return b.NewTimestampArrayWithFormat(b.format)
+}
+
+func (b *TimestampBuilder) NewTimestampArrayWithFormat(format string) (a *Timestamp) {
 	data := b.newData()
-	a = NewTimestampData(data)
+	a = NewTimestampDataWithFormat(data, b.format)
 	data.Release()
 	return
 }
