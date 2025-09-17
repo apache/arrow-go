@@ -17,6 +17,7 @@
 package array
 
 import (
+	"bytes"
 	"hash/maphash"
 	"math/bits"
 	"sync/atomic"
@@ -76,6 +77,59 @@ func NewDataWithDictionary(dtype arrow.DataType, length int, buffers []*memory.B
 	}
 	data.dictionary = dict
 	return data
+}
+
+func (d *Data) Equal(other arrow.ArrayData) bool {
+	rhs, ok := other.(*Data)
+	if !ok {
+		return false
+	}
+
+	if d == rhs {
+		return true
+	}
+
+	switch {
+	case !arrow.TypeEqual(d.dtype, rhs.dtype):
+		return false
+	case d.length != rhs.length || d.nulls != rhs.nulls || d.offset != rhs.offset:
+		return false
+	case len(d.buffers) != len(rhs.buffers):
+		return false
+	case len(d.childData) != len(rhs.childData):
+		return false
+	case d.dictionary != nil && rhs.dictionary == nil:
+		return false
+	case d.dictionary == nil && rhs.dictionary != nil:
+		return false
+	}
+
+	if d.dictionary != nil {
+		if !d.dictionary.Equal(rhs.dictionary) {
+			return false
+		}
+	}
+
+	for i := range d.childData {
+		if !d.childData[i].Equal(rhs.childData[i]) {
+			return false
+		}
+	}
+
+	for i, b := range d.buffers {
+		switch {
+		case b == nil:
+			if rhs.buffers[i] != nil {
+				return false
+			}
+		case rhs.buffers[i] == nil:
+			return false
+		case !bytes.Equal(b.Bytes(), rhs.buffers[i].Bytes()):
+			return false
+		}
+	}
+
+	return true
 }
 
 func (d *Data) Copy() *Data {
