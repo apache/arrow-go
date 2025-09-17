@@ -16,7 +16,7 @@
 # under the License.
 
 ARG arch=amd64
-ARG go=1.23
+ARG go=1.24
 FROM ${arch}/golang:${go}-bookworm
 
 # Copy the go.mod and go.sum over and pre-download all the dependencies
