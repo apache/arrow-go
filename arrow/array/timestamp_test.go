@@ -29,9 +29,9 @@ import (
 )
 
 const (
-	// We test against the deprecated format for backwards compatibility
+	// We test against the deprecated layout for backwards compatibility
 	// See https://github.com/apache/arrow-go/pull/450
-	deprecatedFormat = "2006-01-02 15:04:05.999999999Z0700"
+	deprecatedLayout = "2006-01-02 15:04:05.999999999Z0700"
 )
 
 func TestTimestampStringRoundTrip(t *testing.T) {
@@ -260,12 +260,12 @@ func TestTimestampValueStr(t *testing.T) {
 	assert.Equal(t, "2016-02-29T10:42:23-07:00", arr.ValueStr(1))
 }
 
-func TestTimestampValueStrWithDeprecatedFormat(t *testing.T) {
+func TestTimestampValueStrWithDeprecatedLayout(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
 
 	dt := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/Phoenix"}
-	b := array.NewTimestampBuilderWithFormat(mem, dt, deprecatedFormat)
+	b := array.NewTimestampBuilderWithLayout(mem, dt, deprecatedLayout)
 	defer b.Release()
 
 	b.Append(-34226955)

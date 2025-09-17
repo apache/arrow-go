@@ -34,16 +34,18 @@ import (
 type Timestamp struct {
 	array
 	values []arrow.Timestamp
-	format string
+	layout string
 }
 
 // NewTimestampData creates a new Timestamp from Data.
 func NewTimestampData(data arrow.ArrayData) *Timestamp {
-	return NewTimestampDataWithFormat(data, time.RFC3339Nano)
+	return NewTimestampDataWithLayout(data, time.RFC3339Nano)
 }
 
-func NewTimestampDataWithFormat(data arrow.ArrayData, format string) *Timestamp {
-	a := &Timestamp{format: format}
+// NewTimestampDataWithLayout creates a new Timestamp from Data with a custom string value layout.
+// This is useful for cases where consumers expect a non standard layout
+func NewTimestampDataWithLayout(data arrow.ArrayData, layout string) *Timestamp {
+	a := &Timestamp{layout: layout}
 	a.refCount.Add(1)
 	a.setData(data.(*Data))
 	return a
@@ -98,11 +100,11 @@ func (a *Timestamp) ValueStr(i int) string {
 	}
 
 	toTime, _ := a.DataType().(*arrow.TimestampType).GetToTimeFunc()
-	format := a.format
-	if format == "" {
-		format = time.RFC3339Nano
+	layout := a.layout
+	if layout == "" {
+		layout = time.RFC3339Nano
 	}
-	return toTime(a.values[i]).Format(format)
+	return toTime(a.values[i]).Format(layout)
 }
 
 func (a *Timestamp) GetOneForMarshal(i int) interface{} {
@@ -139,15 +141,15 @@ type TimestampBuilder struct {
 	dtype   *arrow.TimestampType
 	data    *memory.Buffer
 	rawData []arrow.Timestamp
-	format  string
+	layout  string
 }
 
 func NewTimestampBuilder(mem memory.Allocator, dtype *arrow.TimestampType) *TimestampBuilder {
-	return NewTimestampBuilderWithFormat(mem, dtype, time.RFC3339Nano)
+	return NewTimestampBuilderWithLayout(mem, dtype, time.RFC3339Nano)
 }
 
-func NewTimestampBuilderWithFormat(mem memory.Allocator, dtype *arrow.TimestampType, format string) *TimestampBuilder {
-	tb := &TimestampBuilder{builder: builder{mem: mem}, dtype: dtype, format: format}
+func NewTimestampBuilderWithLayout(mem memory.Allocator, dtype *arrow.TimestampType, layout string) *TimestampBuilder {
+	tb := &TimestampBuilder{builder: builder{mem: mem}, dtype: dtype, layout: layout}
 	tb.refCount.Add(1)
 	return tb
 }
@@ -273,18 +275,18 @@ func (b *TimestampBuilder) Resize(n int) {
 // NewArray creates a Timestamp array from the memory buffers used by the builder and resets the TimestampBuilder
 // so it can be used to build a new array.
 func (b *TimestampBuilder) NewArray() arrow.Array {
-	return b.NewTimestampArrayWithFormat(b.format)
+	return b.NewTimestampArrayWithFormat(b.layout)
 }
 
 // NewTimestampArray creates a Timestamp array from the memory buffers used by the builder and resets the TimestampBuilder
 // so it can be used to build a new array.
 func (b *TimestampBuilder) NewTimestampArray() (a *Timestamp) {
-	return b.NewTimestampArrayWithFormat(b.format)
+	return b.NewTimestampArrayWithFormat(b.layout)
 }
 
 func (b *TimestampBuilder) NewTimestampArrayWithFormat(format string) (a *Timestamp) {
 	data := b.newData()
-	a = NewTimestampDataWithFormat(data, b.format)
+	a = NewTimestampDataWithLayout(data, b.layout)
 	data.Release()
 	return
 }
