@@ -264,6 +264,20 @@ func simpleArrArrCompare[T arrow.NumericType | string](mem memory.Allocator, op 
 	return compute.NewDatum(result)
 }
 
+type BooleanCompareSuite struct {
+	CompareSuite
+}
+
+func (b *BooleanCompareSuite) TestBooleanBasics() {
+	var (
+		example1JSON = `[true, false, true, false]`
+		example2JSON = `[true, false, false, true]`
+	)
+
+	b.validateCompare(kernels.CmpEQ, arrow.FixedWidthTypes.Boolean, example1JSON, example2JSON, `[true, true, false, false]`)
+	b.validateCompare(kernels.CmpNE, arrow.FixedWidthTypes.Boolean, example1JSON, example2JSON, `[false, false, true, true]`)
+}
+
 type NumericCompareSuite[T arrow.NumericType] struct {
 	CompareSuite
 }
@@ -1224,6 +1238,7 @@ func (c *CompareStringSuite) TestRandomCompareArrayArray() {
 }
 
 func TestComparisons(t *testing.T) {
+	suite.Run(t, new(BooleanCompareSuite))
 	suite.Run(t, new(NumericCompareSuite[int8]))
 	suite.Run(t, new(NumericCompareSuite[int16]))
 	suite.Run(t, new(NumericCompareSuite[int32]))
