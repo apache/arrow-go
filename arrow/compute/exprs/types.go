@@ -113,10 +113,19 @@ func init() {
 		}
 	}
 
-	for _, fn := range []string{"and", "or", "not"} {
+	for _, fn := range []string{"and", "or", "xor", "not"} {
 		err := DefaultExtensionIDRegistry.AddSubstraitScalarToArrow(
 			extensions.ID{URI: SubstraitBooleanFuncsURI, Name: fn},
 			simpleMapSubstraitToArrowFunc)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	// NOTE: "not" is already registered for conversion to substrait
+	for _, fn := range []string{"and", "or", "xor"} {
+		err := DefaultExtensionIDRegistry.AddArrowToSubstrait(fn,
+			simpleMapArrowToSubstraitFunc(SubstraitBooleanFuncsURI))
 		if err != nil {
 			panic(err)
 		}
