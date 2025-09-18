@@ -51,7 +51,6 @@ type TimestampMicros int64
 
 func (t TimestampMicros) MarshalJSON() ([]byte, error) {
 	ts := time.Unix(0, int64(t)*int64(time.Microsecond)).UTC().Format(time.RFC3339Nano)
-	// arrow record marshaller trims trailing zero digits from timestamp so we do the same
 	return json.Marshal(ts)
 }
 
