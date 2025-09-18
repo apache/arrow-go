@@ -265,7 +265,7 @@ func TestTimestampValueStrWithDeprecatedLayout(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	dt := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/Phoenix"}
-	b := array.NewTimestampBuilderWithLayout(mem, dt, deprecatedLayout)
+	b := array.NewTimestampBuilderWithValueStrLayout(mem, dt, deprecatedLayout)
 	defer b.Release()
 
 	b.Append(-34226955)

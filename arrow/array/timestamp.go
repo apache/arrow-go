@@ -39,12 +39,13 @@ type Timestamp struct {
 
 // NewTimestampData creates a new Timestamp from Data.
 func NewTimestampData(data arrow.ArrayData) *Timestamp {
-	return NewTimestampDataWithLayout(data, time.RFC3339Nano)
+	return NewTimestampDataWithValueStrLayout(data, time.RFC3339Nano)
 }
 
-// NewTimestampDataWithLayout creates a new Timestamp from Data with a custom string value layout.
+// NewTimestampDataWithValueStrLayout creates a new Timestamp from Data with a custom ValueStr layout.
+// The layout is passed to the time.Time.Format method.
 // This is useful for cases where consumers expect a non standard layout
-func NewTimestampDataWithLayout(data arrow.ArrayData, layout string) *Timestamp {
+func NewTimestampDataWithValueStrLayout(data arrow.ArrayData, layout string) *Timestamp {
 	a := &Timestamp{layout: layout}
 	a.refCount.Add(1)
 	a.setData(data.(*Data))
@@ -145,10 +146,13 @@ type TimestampBuilder struct {
 }
 
 func NewTimestampBuilder(mem memory.Allocator, dtype *arrow.TimestampType) *TimestampBuilder {
-	return NewTimestampBuilderWithLayout(mem, dtype, time.RFC3339Nano)
+	return NewTimestampBuilderWithValueStrLayout(mem, dtype, time.RFC3339Nano)
 }
 
-func NewTimestampBuilderWithLayout(mem memory.Allocator, dtype *arrow.TimestampType, layout string) *TimestampBuilder {
+// NewTimestampBuilderWithValueStrLayout creates a new TimestampBuilder with a custom ValueStr layout.
+// The layout is passed to the time.Time.Format method.
+// This is useful for cases where consumers expect a non standard layout
+func NewTimestampBuilderWithValueStrLayout(mem memory.Allocator, dtype *arrow.TimestampType, layout string) *TimestampBuilder {
 	tb := &TimestampBuilder{builder: builder{mem: mem}, dtype: dtype, layout: layout}
 	tb.refCount.Add(1)
 	return tb
@@ -286,7 +290,7 @@ func (b *TimestampBuilder) NewTimestampArray() (a *Timestamp) {
 
 func (b *TimestampBuilder) NewTimestampArrayWithFormat(format string) (a *Timestamp) {
 	data := b.newData()
-	a = NewTimestampDataWithLayout(data, b.layout)
+	a = NewTimestampDataWithValueStrLayout(data, b.layout)
 	data.Release()
 	return
 }
