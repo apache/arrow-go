@@ -146,14 +146,13 @@ latest_go_version() {
     options+=("--header" "Authorization: Bearer ${GITHUB_TOKEN}")
   fi
   curl \
-   "${options[@]}" \
-   https://api.github.com/repos/golang/go/git/matching-refs/tags/go |
-  jq -r ' .[] | .ref' |
-  sort -V |
-  tail -1 |
-  sed 's,refs/tags/go,,g'
+    "${options[@]}" \
+    https://api.github.com/repos/golang/go/git/matching-refs/tags/go |
+    jq -r ' .[] | .ref' |
+    sort -V |
+    tail -1 |
+    sed 's,refs/tags/go,,g'
 }
-
 
 ensure_go() {
   if [ "${VERIFY_FORCE_USE_GO_BINARY}" -le 0 ]; then
