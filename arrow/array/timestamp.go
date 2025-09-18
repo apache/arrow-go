@@ -279,16 +279,12 @@ func (b *TimestampBuilder) Resize(n int) {
 // NewArray creates a Timestamp array from the memory buffers used by the builder and resets the TimestampBuilder
 // so it can be used to build a new array.
 func (b *TimestampBuilder) NewArray() arrow.Array {
-	return b.NewTimestampArrayWithFormat(b.layout)
+	return b.NewTimestampArray()
 }
 
 // NewTimestampArray creates a Timestamp array from the memory buffers used by the builder and resets the TimestampBuilder
 // so it can be used to build a new array.
 func (b *TimestampBuilder) NewTimestampArray() (a *Timestamp) {
-	return b.NewTimestampArrayWithFormat(b.layout)
-}
-
-func (b *TimestampBuilder) NewTimestampArrayWithFormat(format string) (a *Timestamp) {
 	data := b.newData()
 	a = NewTimestampDataWithValueStrLayout(data, b.layout)
 	data.Release()

@@ -362,3 +362,26 @@ func TestTimestampArrayJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, expectedTime1.Unix(), timestamps[0].Unix())
 	assert.Equal(t, expectedTime2.Unix(), timestamps[1].Unix())
 }
+
+func TestTimestampArrayJSONRoundTripWithDeprecatedLayout(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	tz, _ := time.LoadLocation("America/Phoenix")
+	dt := &arrow.TimestampType{Unit: arrow.Second, TimeZone: tz.String()}
+	b := array.NewTimestampBuilderWithValueStrLayout(mem, dt, deprecatedLayout)
+	defer b.Release()
+
+	b.Append(-34226955)
+	b.Append(1456767743)
+
+	arr := b.NewArray()
+	defer arr.Release()
+
+	json_bytes, err := arr.MarshalJSON()
+	require.NoError(t, err)
+
+	expectedJSON := `["1968-11-30 13:30:45-0700","2016-02-29 10:42:23-0700"]`
+	require.Equal(t, expectedJSON, string(json_bytes))
+
+}
