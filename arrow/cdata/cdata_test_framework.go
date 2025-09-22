@@ -53,6 +53,7 @@ package cdata
 // }
 // void export_int32_type(struct ArrowSchema* schema);
 // void export_int32_array(const int32_t*, int64_t, struct ArrowArray*);
+// void export_str_array_with_nulls(int64_t nitems, struct ArrowArray* out);
 // int test1_is_released();
 // void test_primitive(struct ArrowSchema* schema, const char* fmt);
 // void free_malloced_schemas(struct ArrowSchema**);
@@ -96,6 +97,12 @@ func exportInt32TypeSchema() CArrowSchema {
 	var s CArrowSchema
 	C.export_int32_type(&s)
 	return s
+}
+
+func exportStrArrayWithNulls(nitems int64) CArrowArray {
+	var arr CArrowArray
+	C.export_str_array_with_nulls(C.int64_t(nitems), &arr)
+	return arr
 }
 
 func schemaIsReleased(s *CArrowSchema) bool {

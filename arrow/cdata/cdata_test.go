@@ -737,6 +737,20 @@ func TestNestedArrays(t *testing.T) {
 	}
 }
 
+func TestStrArrayAllNulls(t *testing.T) {
+	arr := exportStrArrayWithNulls(1000)
+	carr, err := ImportCArrayWithType(&arr, arrow.BinaryTypes.String)
+	require.NoError(t, err)
+	defer carr.Release()
+
+	buffer := carr.Data().Buffers()[2]
+	assert.NotNil(t, buffer)
+	bs := buffer.Bytes()
+	assert.Equal(t, 1000, carr.Len())
+	assert.Equal(t, 1000, carr.NullN())
+	assert.Empty(t, bs)
+}
+
 func TestRecordBatch(t *testing.T) {
 	mem := mallocator.NewMallocator()
 	defer mem.AssertSize(t, 0)
