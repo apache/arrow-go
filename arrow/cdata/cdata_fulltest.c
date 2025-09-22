@@ -384,8 +384,8 @@ void export_str_array_with_nulls(int64_t nitems, struct ArrowArray* out) {
     int64_t bitmap_nbytes = (nitems + 7) / 8;
     out->buffers[0] = malloc(bitmap_nbytes);
     memset((void*)out->buffers[0], 0, bitmap_nbytes);
-    out->buffers[1] = malloc(nitems * sizeof(int32_t));
-    memset((void*)out->buffers[1], 0, nitems * sizeof(int32_t));
+    out->buffers[1] = malloc((nitems + 1) * sizeof(int32_t));
+    memset((void*)out->buffers[1], 0, (nitems + 1) * sizeof(int32_t));
     out->buffers[2] = (void*)0x1;
 }
 
