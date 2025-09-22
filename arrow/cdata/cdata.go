@@ -370,10 +370,10 @@ func (imp *cimporter) importChild(parent *cimporter, src *CArrowArray) error {
 
 // import any child arrays for lists, structs, and so on.
 func (imp *cimporter) doImportChildren() error {
-	children := unsafe.Slice(imp.arr.children, imp.arr.n_children)
-
-	if len(children) > 0 {
-		imp.children = make([]cimporter, len(children))
+	var children []*CArrowArray
+	if imp.arr.n_children > 0 {
+		children = unsafe.Slice(imp.arr.children, imp.arr.n_children)
+		imp.children = make([]cimporter, imp.arr.n_children)
 	}
 
 	// handle the cases
@@ -711,10 +711,12 @@ func (imp *cimporter) importBinaryViewLike() (err error) {
 		return
 	}
 
-	dataBufferSizes := unsafe.Slice((*int64)(unsafe.Pointer(imp.cbuffers[len(buffers)])), len(buffers)-2)
-	for i, size := range dataBufferSizes {
-		if buffers[i+2], err = imp.importVariableValuesBuffer(i+2, 1, size); err != nil {
-			return
+	if len(buffers) > 2 {
+		dataBufferSizes := unsafe.Slice((*int64)(unsafe.Pointer(imp.cbuffers[len(buffers)])), len(buffers)-2)
+		for i, size := range dataBufferSizes {
+			if buffers[i+2], err = imp.importVariableValuesBuffer(i+2, 1, size); err != nil {
+				return
+			}
 		}
 	}
 
@@ -866,7 +868,7 @@ func (imp *cimporter) checkNumBuffers(n int64) error {
 func (imp *cimporter) importBuffer(bufferID int, sz int64) (*memory.Buffer, error) {
 	// this is not a copy, we're just having a slice which points at the data
 	// it's still owned by the C.ArrowArray object and its backing C++ object.
-	if imp.cbuffers[bufferID] == nil {
+	if imp.cbuffers[bufferID] == nil || sz == 0 {
 		if sz != 0 {
 			return nil, errors.New("invalid buffer")
 		}
