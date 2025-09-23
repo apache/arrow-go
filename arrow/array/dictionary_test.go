@@ -1899,6 +1899,20 @@ func TestBinaryDictionaryPanic(t *testing.T) {
 	assert.True(t, allocator.paniced)
 }
 
+func TestDictionaryBuilderDuration(t *testing.T) {
+	// verify fix for https://github.com/apache/arrow-go/issues/516
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.FixedWidthTypes.Duration_ms}
+	bldr := array.NewDictionaryBuilder(memory.DefaultAllocator, dictType)
+	defer bldr.Release()
+
+	b := bldr.(*array.DurationDictionaryBuilder)
+	assert.NoError(t, b.Append(arrow.Duration(42)))
+	arr := b.NewDictionaryArray()
+	defer arr.Release()
+}
+
 func BenchmarkBinaryDictionaryBuilder(b *testing.B) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(b, 0)
