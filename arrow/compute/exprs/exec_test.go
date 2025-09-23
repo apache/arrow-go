@@ -743,7 +743,7 @@ func TestDecimalFilterLarge(t *testing.T) {
 				db.Append(d)
 			}
 
-			rec := array.NewRecord(schema, []arrow.Array{db.NewArray()}, int64(tc.n))
+			rec := array.NewRecordBatch(schema, []arrow.Array{db.NewArray()}, int64(tc.n))
 
 			extSet := exprs.GetExtensionIDSet(ctx)
 			builder := exprs.NewExprBuilder(extSet)
@@ -761,23 +761,45 @@ func TestDecimalFilterLarge(t *testing.T) {
 			}, true)
 			rq.NoError(err, "Failed to create Decimal128 literal")
 
-			b, err := builder.CallScalar("less", nil,
-				builder.FieldRef("col"),
-				builder.Literal(lit),
-			)
+			t.Run("array_scalar", func(t *testing.T) {
+				b, err := builder.CallScalar("less", nil,
+					builder.FieldRef("col"),
+					builder.Literal(lit),
+				)
 
-			rq.NoError(err, "Failed to call scalar")
+				rq.NoError(err, "Failed to call scalar")
 
-			e, err := b.BuildExpr()
-			rq.NoError(err, "Failed to build expression")
+				e, err := b.BuildExpr()
+				rq.NoError(err, "Failed to build expression")
 
-			ctx = exprs.WithExtensionIDSet(ctx, extSet)
+				ctx = exprs.WithExtensionIDSet(ctx, extSet)
 
-			dr := compute.NewDatum(rec)
-			defer dr.Release()
+				dr := compute.NewDatum(rec)
+				defer dr.Release()
 
-			_, err = exprs.ExecuteScalarExpression(ctx, schema, e, dr)
-			rq.NoError(err, "Failed to execute scalar expression")
+				_, err = exprs.ExecuteScalarExpression(ctx, schema, e, dr)
+				rq.NoError(err, "Failed to execute scalar expression")
+			})
+
+			t.Run("scalar_array", func(t *testing.T) {
+				b, err := builder.CallScalar("less", nil,
+					builder.Literal(lit),
+					builder.FieldRef("col"),
+				)
+
+				rq.NoError(err, "Failed to call scalar")
+
+				e, err := b.BuildExpr()
+				rq.NoError(err, "Failed to build expression")
+
+				ctx = exprs.WithExtensionIDSet(ctx, extSet)
+
+				dr := compute.NewDatum(rec)
+				defer dr.Release()
+
+				_, err = exprs.ExecuteScalarExpression(ctx, schema, e, dr)
+				rq.NoError(err, "Failed to execute scalar expression")
+			})
 		})
 	}
 }
