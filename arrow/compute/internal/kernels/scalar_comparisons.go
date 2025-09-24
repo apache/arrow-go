@@ -110,7 +110,7 @@ func comparePrimitiveArrayScalar[T arrow.FixedWidthType](op cmpScalarRight[T, T]
 		}
 
 		for j := 0; j < nbatches; j++ {
-			op(left, rightVal, tmpOutSlice)
+			op(left[:batchSize], rightVal, tmpOutSlice)
 			left = left[batchSize:]
 			packBits(tmpOutput, out)
 			out = out[batchSize/8:]
