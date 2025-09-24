@@ -122,6 +122,10 @@ func (enc *DictByteArrayEncoder) PutSpaced(in []parquet.ByteArray, validBits []b
 	})
 }
 
+func (enc *DictByteArrayEncoder) NormalizeDict(values arrow.Array) (arrow.Array, error) {
+	return values, nil
+}
+
 // PutDictionary allows pre-seeding a dictionary encoder with
 // a dictionary from an Arrow Array.
 //
