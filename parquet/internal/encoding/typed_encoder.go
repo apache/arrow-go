@@ -160,6 +160,7 @@ type arrvalues[T arrow.ValueType] interface {
 
 func (enc *typedDictEncoder[T]) NormalizeDict(values arrow.Array) (arrow.Array, error) {
 	if _, ok := values.(arrvalues[T]); ok {
+		values.Retain()
 		return values, nil
 	}
 

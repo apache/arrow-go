@@ -147,6 +147,7 @@ func (enc *DictFixedLenByteArrayEncoder) PutSpaced(in []parquet.FixedLenByteArra
 }
 
 func (enc *DictFixedLenByteArrayEncoder) NormalizeDict(values arrow.Array) (arrow.Array, error) {
+	values.Retain()
 	return values, nil
 }
 

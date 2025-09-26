@@ -117,9 +117,7 @@ type DictEncoder interface {
 	// native type. e.g. a dictionary of type int8 will be cast to an int32
 	// dictionary for parquet storage.
 	//
-	// The returned array must be released by the caller if different from
-	// the input array. If no normalization is needed, the input array
-	// may be returned as-is.
+	// The returned array must always be released by the caller.
 	NormalizeDict(arrow.Array) (arrow.Array, error)
 }
 

@@ -1353,6 +1353,9 @@ var fullTypeList = []arrow.DataType{
 
 var dictEncodingSupportedTypeList = []arrow.DataType{
 	arrow.PrimitiveTypes.Int8,
+	arrow.PrimitiveTypes.Uint8,
+	arrow.PrimitiveTypes.Int16,
+	arrow.PrimitiveTypes.Uint16,
 	arrow.PrimitiveTypes.Int32,
 	arrow.PrimitiveTypes.Int64,
 	arrow.PrimitiveTypes.Float32,

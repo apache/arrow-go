@@ -123,6 +123,7 @@ func (enc *DictByteArrayEncoder) PutSpaced(in []parquet.ByteArray, validBits []b
 }
 
 func (enc *DictByteArrayEncoder) NormalizeDict(values arrow.Array) (arrow.Array, error) {
+	values.Retain()
 	return values, nil
 }
 

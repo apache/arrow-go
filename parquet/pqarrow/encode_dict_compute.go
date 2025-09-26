@@ -94,11 +94,7 @@ func writeDictionaryArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, lea
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if normalized != dict {
-			normalized.Release()
-		}
-	}()
+	defer normalized.Release()
 
 	updateStats := func() error {
 		var referencedDict arrow.Array
