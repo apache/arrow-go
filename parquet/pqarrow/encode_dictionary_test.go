@@ -68,45 +68,54 @@ func (ps *ParquetIOTestSuite) TestSingleColumnOptionalDictionaryWrite() {
 }
 
 func (ps *ParquetIOTestSuite) TestSingleColumnRequiredDictionaryWrite() {
+	idxTypes := []arrow.DataType{
+		arrow.PrimitiveTypes.Int8, arrow.PrimitiveTypes.Int16,
+		arrow.PrimitiveTypes.Uint8, arrow.PrimitiveTypes.Uint16,
+		arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int64,
+		arrow.PrimitiveTypes.Uint32, arrow.PrimitiveTypes.Uint64}
+
 	for _, dt := range dictEncodingSupportedTypeList {
 		// skip tests for bool as we don't do dictionaries for it
 		if dt.ID() == arrow.BOOL {
 			continue
 		}
 
-		ps.Run(dt.Name(), func() {
-			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-			defer mem.AssertSize(ps.T(), 0)
+		for _, idxtype := range idxTypes {
 
-			bldr := array.NewDictionaryBuilder(mem, &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int16, ValueType: dt})
-			defer bldr.Release()
+			ps.Run(dt.Name()+" key="+idxtype.Name(), func() {
+				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+				defer mem.AssertSize(ps.T(), 0)
 
-			values := testutils.RandomNonNull(mem, dt, smallSize)
-			defer values.Release()
-			ps.Require().NoError(bldr.AppendArray(values))
+				bldr := array.NewDictionaryBuilder(mem, &arrow.DictionaryType{IndexType: idxtype, ValueType: dt})
+				defer bldr.Release()
 
-			arr := bldr.NewDictionaryArray()
-			defer arr.Release()
+				values := testutils.RandomNonNull(mem, dt, smallSize)
+				defer values.Release()
+				ps.Require().NoError(bldr.AppendArray(values))
 
-			sc := ps.makeSimpleSchema(arr.DataType(), parquet.Repetitions.Required)
-			data := ps.writeDictionaryColumn(mem, sc, arr)
+				arr := bldr.NewDictionaryArray()
+				defer arr.Release()
 
-			rdr, err := file.NewParquetReader(bytes.NewReader(data))
-			ps.NoError(err)
-			defer rdr.Close()
+				sc := ps.makeSimpleSchema(arr.DataType(), parquet.Repetitions.Required)
+				data := ps.writeDictionaryColumn(mem, sc, arr)
 
-			metadata := rdr.MetaData()
-			ps.Len(metadata.RowGroups, 1)
+				rdr, err := file.NewParquetReader(bytes.NewReader(data))
+				ps.NoError(err)
+				defer rdr.Close()
 
-			rg := metadata.RowGroup(0)
-			col, err := rg.ColumnChunk(0)
-			ps.NoError(err)
+				metadata := rdr.MetaData()
+				ps.Len(metadata.RowGroups, 1)
 
-			stats, err := col.Statistics()
-			ps.NoError(err)
-			ps.EqualValues(smallSize, stats.NumValues())
-			ps.EqualValues(0, stats.NullCount())
-		})
+				rg := metadata.RowGroup(0)
+				col, err := rg.ColumnChunk(0)
+				ps.NoError(err)
+
+				stats, err := col.Statistics()
+				ps.NoError(err)
+				ps.EqualValues(smallSize, stats.NumValues())
+				ps.EqualValues(0, stats.NullCount())
+			})
+		}
 	}
 }
 
