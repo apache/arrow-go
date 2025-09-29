@@ -28,6 +28,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	// We test against the deprecated layout for backwards compatibility
+	// See https://github.com/apache/arrow-go/pull/450
+	deprecatedLayout = "2006-01-02 15:04:05.999999999Z0700"
+)
+
 func TestTimestampStringRoundTrip(t *testing.T) {
 	// 1. create array
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
@@ -254,6 +260,24 @@ func TestTimestampValueStr(t *testing.T) {
 	assert.Equal(t, "2016-02-29T10:42:23-07:00", arr.ValueStr(1))
 }
 
+func TestTimestampValueStrWithDeprecatedLayout(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dt := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/Phoenix"}
+	b := array.NewTimestampBuilderWithValueStrLayout(mem, dt, deprecatedLayout)
+	defer b.Release()
+
+	b.Append(-34226955)
+	b.Append(1456767743)
+
+	arr := b.NewArray()
+	defer arr.Release()
+
+	assert.Equal(t, "1968-11-30 13:30:45-0700", arr.ValueStr(0))
+	assert.Equal(t, "2016-02-29 10:42:23-0700", arr.ValueStr(1))
+}
+
 func TestTimestampEquality(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
@@ -337,4 +361,27 @@ func TestTimestampArrayJSONRoundTrip(t *testing.T) {
 
 	assert.Equal(t, expectedTime1.Unix(), timestamps[0].Unix())
 	assert.Equal(t, expectedTime2.Unix(), timestamps[1].Unix())
+}
+
+func TestTimestampArrayJSONRoundTripWithDeprecatedLayout(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	tz, _ := time.LoadLocation("America/Phoenix")
+	dt := &arrow.TimestampType{Unit: arrow.Second, TimeZone: tz.String()}
+	b := array.NewTimestampBuilderWithValueStrLayout(mem, dt, deprecatedLayout)
+	defer b.Release()
+
+	b.Append(-34226955)
+	b.Append(1456767743)
+
+	arr := b.NewArray()
+	defer arr.Release()
+
+	json_bytes, err := arr.MarshalJSON()
+	require.NoError(t, err)
+
+	expectedJSON := `["1968-11-30 13:30:45-0700","2016-02-29 10:42:23-0700"]`
+	require.Equal(t, expectedJSON, string(json_bytes))
+
 }
