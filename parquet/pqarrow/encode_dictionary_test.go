@@ -469,9 +469,9 @@ func (ar *ArrowReadDictSuite) checkStreamReadWholeFile(expected arrow.Table) {
 	ar.Require().NoError(err)
 	defer rrdr.Release()
 
-	recs := make([]arrow.Record, 0)
+	recs := make([]arrow.RecordBatch, 0)
 	for rrdr.Next() {
-		rec := rrdr.Record()
+		rec := rrdr.RecordBatch()
 		rec.Retain()
 		defer rec.Release()
 		recs = append(recs, rec)

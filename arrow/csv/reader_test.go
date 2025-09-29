@@ -63,7 +63,7 @@ func Example() {
 
 	n := 0
 	for r.Next() {
-		rec := r.Record()
+		rec := r.RecordBatch()
 		for i, col := range rec.Columns() {
 			fmt.Printf("rec[%d][%q]: %v\n", n, rec.ColumnName(i), col)
 		}
@@ -141,7 +141,7 @@ func Example_withChunk() {
 
 	n := 0
 	for r.Next() {
-		rec := r.Record()
+		rec := r.RecordBatch()
 		for i, col := range rec.Columns() {
 			fmt.Printf("rec[%d][%q]: %v\n", n, rec.ColumnName(i), col)
 		}
@@ -255,7 +255,7 @@ func TestCSVReaderParseError(t *testing.T) {
 		if rec != nil {
 			rec.Release()
 		}
-		rec = r.Record()
+		rec = r.RecordBatch()
 		rec.Retain()
 
 		if n == 1 && r.Err() == nil {
@@ -380,7 +380,7 @@ func testCSVReader(t *testing.T, filepath string, withHeader bool, stringsCanBeN
 	out := new(bytes.Buffer)
 	n := 0
 	for r.Next() {
-		rec := r.Record()
+		rec := r.RecordBatch()
 		for i, col := range rec.Columns() {
 			fmt.Fprintf(out, "rec[%d][%q]: %v\n", n, rec.ColumnName(i), col)
 		}
@@ -490,7 +490,7 @@ rec[2]["date64"]: [(null)]
 		)
 
 		r.Next()
-		r.Record()
+		r.RecordBatch()
 
 		r.Release()
 	}
@@ -723,7 +723,7 @@ rec[0]["str"]: ["str-0" "str-1" "str-2" "str-3" "str-4" "str-5" "str-6" "str-7" 
 
 			n := 0
 			for r.Next() {
-				rec := r.Record()
+				rec := r.RecordBatch()
 				for i, col := range rec.Columns() {
 					fmt.Fprintf(out, "rec[%d][%q]: %v\n", n, rec.ColumnName(i), col)
 				}
@@ -759,7 +759,7 @@ func TestReadCSVDecimalCols(t *testing.T) {
 	defer r.Release()
 
 	assert.True(t, r.Next())
-	rec := r.Record()
+	rec := r.RecordBatch()
 	rec.Retain()
 	assert.False(t, r.Next())
 	defer rec.Release()
@@ -781,7 +781,7 @@ func TestReadCSVDecimalCols(t *testing.T) {
 	dec256Bldr.Append(decimal256.FromI64(-123))
 	dec256Bldr.Append(decimal256.FromU64(12300000000))
 
-	exRec := bldr.NewRecord()
+	exRec := bldr.NewRecordBatch()
 	defer exRec.Release()
 
 	assert.Truef(t, array.RecordEqual(exRec, rec), "expected: %s\nactual: %s", exRec, rec)
@@ -843,7 +843,7 @@ func benchRead(b *testing.B, raw []byte, rows, cols, chunks int) {
 
 		n := int64(0)
 		for r.Next() {
-			n += r.Record().NumRows()
+			n += r.RecordBatch().NumRows()
 		}
 
 		r.Release()
@@ -899,13 +899,13 @@ func TestInferringSchema(t *testing.T) {
 
 	assert.True(t, expSchema.Equal(r.Schema()), expSchema.String(), r.Schema().String())
 	// verify first row:
-	assertRowEqual(exp, r.Record(), 0)
+	assertRowEqual(exp, r.RecordBatch(), 0)
 	assert.True(t, r.Next())
-	assertRowEqual(exp, r.Record(), 1)
+	assertRowEqual(exp, r.RecordBatch(), 1)
 	assert.True(t, r.Next())
-	assertRowEqual(exp, r.Record(), 2)
+	assertRowEqual(exp, r.RecordBatch(), 2)
 	assert.True(t, r.Next())
-	assertRowEqual(exp, r.Record(), 3)
+	assertRowEqual(exp, r.RecordBatch(), 3)
 	assert.False(t, r.Next())
 }
 
@@ -930,7 +930,7 @@ func TestInferCSVOptions(t *testing.T) {
 	defer r.Release()
 
 	assert.True(t, r.Next())
-	rec := r.Record()
+	rec := r.RecordBatch()
 	rec.Retain()
 	defer rec.Release()
 	assert.False(t, r.Next())

@@ -69,12 +69,12 @@ func TestMakeExecBatch(t *testing.T) {
 
 	tests := []struct {
 		name  string
-		batch arrow.Record
+		batch arrow.RecordBatch
 	}{
 		{"empty", empty},
-		{"subset", array.NewRecord(arrow.NewSchema([]arrow.Field{getField("i32"), getField("f32")}, nil),
+		{"subset", array.NewRecordBatch(arrow.NewSchema([]arrow.Field{getField("i32"), getField("f32")}, nil),
 			[]arrow.Array{i32, f32}, numRows)},
-		{"flipped subset", array.NewRecord(arrow.NewSchema([]arrow.Field{getField("f32"), getField("i32")}, nil),
+		{"flipped subset", array.NewRecordBatch(arrow.NewSchema([]arrow.Field{getField("f32"), getField("i32")}, nil),
 			[]arrow.Array{f32, i32}, numRows)},
 	}
 

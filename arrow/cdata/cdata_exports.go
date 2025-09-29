@@ -470,7 +470,7 @@ func (rr cRecordReader) getSchema(out *CArrowSchema) int {
 
 func (rr cRecordReader) next(out *CArrowArray) int {
 	if rr.rdr.Next() {
-		ExportArrowRecordBatch(rr.rdr.Record(), out, nil)
+		ExportArrowRecordBatch(rr.rdr.RecordBatch(), out, nil)
 		return 0
 	}
 	C.ArrowArrayMarkReleased(out)

@@ -187,7 +187,7 @@ func TestUnrecognizedExtensionType(t *testing.T) {
 	extArr := exampleUUID(pool)
 	defer extArr.Release()
 
-	batch := array.NewRecord(
+	batch := array.NewRecordBatch(
 		arrow.NewSchema([]arrow.Field{
 			{Name: "f0", Type: extArr.DataType(), Nullable: true}}, nil),
 		[]arrow.Array{extArr}, 4)
@@ -217,7 +217,7 @@ func TestUnrecognizedExtensionType(t *testing.T) {
 	// create a record batch with the same data, but the field should contain the
 	// extension metadata and be of the storage type instead of being the extension type.
 	extMetadata := arrow.NewMetadata([]string{ExtensionTypeKeyName, ExtensionMetadataKeyName}, []string{"uuid", "uuid-serialized"})
-	batchNoExt := array.NewRecord(
+	batchNoExt := array.NewRecordBatch(
 		arrow.NewSchema([]arrow.Field{
 			{Name: "f0", Type: storageArr.DataType(), Nullable: true, Metadata: extMetadata},
 		}, nil), []arrow.Array{storageArr}, 4)

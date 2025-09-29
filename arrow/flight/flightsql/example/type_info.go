@@ -90,7 +90,7 @@ func GetTypeInfoResult(mem memory.Allocator) arrow.RecordBatch {
 	numPrecRadix := zeroIntArray
 	intervalPrecision := zeroIntArray
 
-	return array.NewRecord(schema_ref.XdbcTypeInfo, []arrow.Array{
+	return array.NewRecordBatch(schema_ref.XdbcTypeInfo, []arrow.Array{
 		typeNames, dataType, columnSize, literalPrefix, literalSuffix,
 		createParams, nullable, caseSensitive, searchable, unsignedAttribute,
 		fixedPrecScale, autoUniqueVal, localTypeName, minimalScale, maximumScale,

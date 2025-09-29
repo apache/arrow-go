@@ -44,7 +44,7 @@ func main() {
 	builder.Field(2).(*array.Float64Builder).AppendValues([]float64{1, 0, 3, 0, 5}, []bool{true, false, true, false, true})
 
 	// Create a record
-	rec := builder.NewRecord()
+	rec := builder.NewRecordBatch()
 	defer rec.Release()
 
 	// Create a table from the record

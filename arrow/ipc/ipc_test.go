@@ -362,7 +362,7 @@ func TestDictionary(t *testing.T) {
 	arr := bldr.NewArray()
 	defer arr.Release()
 	// Create a first record with field = "value_0"
-	record := array.NewRecord(schema, []arrow.Array{arr}, 1)
+	record := array.NewRecordBatch(schema, []arrow.Array{arr}, 1)
 	defer record.Release()
 
 	expectedJson, err := record.MarshalJSON()
@@ -377,7 +377,7 @@ func TestDictionary(t *testing.T) {
 	require.NoError(t, bldr.UnmarshalJSON([]byte(`["value_1"]`)))
 	arr = bldr.NewArray()
 	defer arr.Release()
-	record = array.NewRecord(schema, []arrow.Array{arr}, 1)
+	record = array.NewRecordBatch(schema, []arrow.Array{arr}, 1)
 
 	// record, _, err = array.RecordFromJSON(pool, schema, strings.NewReader(`[{"field": ["value_1"]}]`))
 	// require.NoError(t, err)
@@ -422,7 +422,7 @@ func TestDictionaryDeltas(t *testing.T) {
 	arr := bldr.NewArray()
 	defer arr.Release()
 	// Create a first record with field = "value_0"
-	record := array.NewRecord(schema, []arrow.Array{arr}, 1)
+	record := array.NewRecordBatch(schema, []arrow.Array{arr}, 1)
 	defer record.Release()
 
 	expectedJson, err := record.MarshalJSON()
@@ -437,7 +437,7 @@ func TestDictionaryDeltas(t *testing.T) {
 	require.NoError(t, bldr.UnmarshalJSON([]byte(`["value_1"]`)))
 	arr = bldr.NewArray()
 	defer arr.Release()
-	record = array.NewRecord(schema, []arrow.Array{arr}, 1)
+	record = array.NewRecordBatch(schema, []arrow.Array{arr}, 1)
 	defer record.Release()
 
 	expectedJson, err = record.MarshalJSON()
@@ -507,7 +507,7 @@ func Example_mapSlice() {
 	}
 	defer arr.Release()
 
-	rec := array.NewRecord(schema, []arrow.Array{arr}, int64(arr.Len()))
+	rec := array.NewRecordBatch(schema, []arrow.Array{arr}, int64(arr.Len()))
 	defer rec.Release()
 	rec2 := rec.NewSlice(1, 2)
 	defer rec2.Release()
@@ -559,7 +559,7 @@ func Example_listSlice() {
 	}
 	defer arr.Release()
 
-	rec := array.NewRecord(schema, []arrow.Array{arr}, int64(arr.Len()))
+	rec := array.NewRecordBatch(schema, []arrow.Array{arr}, int64(arr.Len()))
 	defer rec.Release()
 	rec2 := rec.NewSlice(1, 2)
 	defer rec2.Release()
@@ -605,7 +605,7 @@ func TestIpcEmptyMap(t *testing.T) {
 	require.NoError(t, err)
 	defer arr.Release()
 
-	rec := array.NewRecord(schema, []arrow.Array{arr}, int64(arr.Len()))
+	rec := array.NewRecordBatch(schema, []arrow.Array{arr}, int64(arr.Len()))
 	defer rec.Release()
 
 	var buf bytes.Buffer
@@ -662,7 +662,7 @@ func TestArrowBinaryIPCWriterTruncatedVOffsets(t *testing.T) {
 			Nullable: true,
 		},
 	}, nil)
-	record := array.NewRecord(schema, []arrow.Array{str}, 2)
+	record := array.NewRecordBatch(schema, []arrow.Array{str}, 2)
 
 	var output bytes.Buffer
 	writer := ipc.NewWriter(&output, ipc.WithSchema(schema))

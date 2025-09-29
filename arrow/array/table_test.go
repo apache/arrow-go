@@ -632,16 +632,16 @@ func TestTableFromRecords(t *testing.T) {
 	b.Field(0).(*array.Int32Builder).AppendValues([]int32{7, 8, 9, 10}, []bool{true, true, false, true})
 	b.Field(1).(*array.Float64Builder).AppendValues([]float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, nil)
 
-	rec1 := b.NewRecord()
+	rec1 := b.NewRecordBatch()
 	defer rec1.Release()
 
 	b.Field(0).(*array.Int32Builder).AppendValues([]int32{11, 12, 13, 14, 15, 16, 17, 18, 19, 20}, nil)
 	b.Field(1).(*array.Float64Builder).AppendValues([]float64{11, 12, 13, 14, 15, 16, 17, 18, 19, 20}, nil)
 
-	rec2 := b.NewRecord()
+	rec2 := b.NewRecordBatch()
 	defer rec2.Release()
 
-	tbl := array.NewTableFromRecords(schema, []arrow.Record{rec1, rec2})
+	tbl := array.NewTableFromRecords(schema, []arrow.RecordBatch{rec1, rec2})
 	defer tbl.Release()
 
 	if got, want := tbl.Schema(), schema; !got.Equal(want) {
@@ -763,7 +763,7 @@ func TestTableReader(t *testing.T) {
 				sum int64
 			)
 			for tr.Next() {
-				rec := tr.Record()
+				rec := tr.RecordBatch()
 				if got, want := rec.Schema(), tbl.Schema(); !got.Equal(want) {
 					t.Fatalf("invalid schema: got=%#v, want=%#v", got, want)
 				}
@@ -806,16 +806,16 @@ func TestTableToString(t *testing.T) {
 	b.Field(0).(*array.Int32Builder).AppendValues([]int32{7, 8, 9, 10}, []bool{true, true, false, true})
 	b.Field(1).(*array.Float64Builder).AppendValues([]float64{11, 12, 13, 14, 15, 16, 17, 18, 19, 20}, nil)
 
-	rec1 := b.NewRecord()
+	rec1 := b.NewRecordBatch()
 	defer rec1.Release()
 
 	b.Field(0).(*array.Int32Builder).AppendValues([]int32{111, 112, 113, 114, 115, 116, 117, 118, 119, 120}, nil)
 	b.Field(1).(*array.Float64Builder).AppendValues([]float64{211, 212, 213, 214, 215, 216, 217, 218, 219, 220}, nil)
 
-	rec2 := b.NewRecord()
+	rec2 := b.NewRecordBatch()
 	defer rec2.Release()
 
-	tbl := array.NewTableFromRecords(schema, []arrow.Record{rec1, rec2})
+	tbl := array.NewTableFromRecords(schema, []arrow.RecordBatch{rec1, rec2})
 	defer tbl.Release()
 
 	table_str := tbl.String()

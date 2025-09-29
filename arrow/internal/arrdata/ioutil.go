@@ -46,7 +46,7 @@ func CheckArrowFile(t *testing.T, f *os.File, mem memory.Allocator, schema *arro
 	defer r.Close()
 
 	for i := 0; i < r.NumRecords(); i++ {
-		rec, err := r.Record(i)
+		rec, err := r.RecordBatch(i)
 		if err != nil {
 			t.Fatalf("could not read record %d: %v", i, err)
 		}
@@ -80,7 +80,7 @@ func CheckArrowConcurrentFile(t *testing.T, f *os.File, mem memory.Allocator, sc
 	errs := make(chan error, r.NumRecords())
 	checkRecord := func(i int) {
 		defer g.Done()
-		rec, err := r.RecordAt(i)
+		rec, err := r.RecordBatchAt(i)
 		if err != nil {
 			errs <- fmt.Errorf("could not read record %d: %v", i, err)
 			return
@@ -128,7 +128,7 @@ func CheckArrowStream(t *testing.T, f *os.File, mem memory.Allocator, schema *ar
 
 	n := 0
 	for r.Next() {
-		rec := r.Record()
+		rec := r.RecordBatch()
 		if !array.RecordEqual(rec, recs[n]) {
 			t.Fatalf("records[%d] differ, got: %s, expected %s", n, rec, recs[n])
 		}

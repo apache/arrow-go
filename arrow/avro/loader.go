@@ -59,7 +59,7 @@ func (r *OCFReader) recordFactory() {
 				return
 			}
 		}
-		r.recChan <- r.bld.NewRecord()
+		r.recChan <- r.bld.NewRecordBatch()
 		r.bldDone <- struct{}{}
 	case r.chunk >= 1:
 		for data := range r.avroChan {
@@ -73,12 +73,12 @@ func (r *OCFReader) recordFactory() {
 			}
 			recChunk++
 			if recChunk >= r.chunk {
-				r.recChan <- r.bld.NewRecord()
+				r.recChan <- r.bld.NewRecordBatch()
 				recChunk = 0
 			}
 		}
 		if recChunk != 0 {
-			r.recChan <- r.bld.NewRecord()
+			r.recChan <- r.bld.NewRecordBatch()
 		}
 		r.bldDone <- struct{}{}
 	}

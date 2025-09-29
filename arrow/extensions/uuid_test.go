@@ -68,7 +68,7 @@ func TestUUIDExtensionRecordBuilder(t *testing.T) {
 	builder.Field(0).(*extensions.UUIDBuilder).Append(testUUID)
 	builder.Field(0).(*extensions.UUIDBuilder).AppendNull()
 	builder.Field(0).(*extensions.UUIDBuilder).Append(testUUID)
-	record := builder.NewRecord()
+	record := builder.NewRecordBatch()
 	b, err := record.MarshalJSON()
 	require.NoError(t, err)
 	require.Equal(t, "[{\"uuid\":\""+testUUID.String()+"\"}\n,{\"uuid\":null}\n,{\"uuid\":\""+testUUID.String()+"\"}\n]", string(b))
@@ -159,7 +159,7 @@ func TestUUIDTypeBatchIPCRoundTrip(t *testing.T) {
 	arr := bldr.NewArray()
 	defer arr.Release()
 
-	batch := array.NewRecord(arrow.NewSchema([]arrow.Field{{Name: "field", Type: typ, Nullable: true}}, nil),
+	batch := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{{Name: "field", Type: typ, Nullable: true}}, nil),
 		[]arrow.Array{arr}, -1)
 	defer batch.Release()
 
@@ -233,7 +233,7 @@ func TestUUIDRecordToJSON(t *testing.T) {
 	uuidArr, ok := arr.(*extensions.UUIDArray)
 	require.True(t, ok)
 
-	rec := array.NewRecord(arrow.NewSchema([]arrow.Field{{Name: "uuid", Type: typ, Nullable: true}}, nil), []arrow.Array{uuidArr}, 3)
+	rec := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{{Name: "uuid", Type: typ, Nullable: true}}, nil), []arrow.Array{uuidArr}, 3)
 	defer rec.Release()
 
 	buf := bytes.NewBuffer([]byte("\n")) // expected output has leading newline for clearer formatting

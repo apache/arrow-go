@@ -486,7 +486,7 @@ func Test_Types(t *testing.T) {
 	tt := []struct {
 		name   string
 		schema func() *arrow.Schema
-		record func(rq *require.Assertions, schema *arrow.Schema) arrow.Record
+		record func(rq *require.Assertions, schema *arrow.Schema) arrow.RecordBatch
 		val    func(rq *require.Assertions) expr.Literal
 	}{
 		{
@@ -500,7 +500,7 @@ func Test_Types(t *testing.T) {
 
 				return arrow.NewSchema([]arrow.Field{field}, nil)
 			},
-			record: func(rq *require.Assertions, schema *arrow.Schema) arrow.Record {
+			record: func(rq *require.Assertions, schema *arrow.Schema) arrow.RecordBatch {
 				b := array.NewTime64Builder(memory.DefaultAllocator, &arrow.Time64Type{Unit: arrow.Nanosecond})
 				defer b.Release()
 
@@ -509,7 +509,7 @@ func Test_Types(t *testing.T) {
 
 				b.AppendValues([]arrow.Time64{t1}, []bool{true})
 
-				return array.NewRecord(schema, []arrow.Array{b.NewArray()}, 1)
+				return array.NewRecordBatch(schema, []arrow.Array{b.NewArray()}, 1)
 			},
 			val: func(rq *require.Assertions) expr.Literal {
 				v, err := arrow.Time64FromString("11:00:00.000000", arrow.Nanosecond)
@@ -529,7 +529,7 @@ func Test_Types(t *testing.T) {
 
 				return arrow.NewSchema([]arrow.Field{field}, nil)
 			},
-			record: func(rq *require.Assertions, schema *arrow.Schema) arrow.Record {
+			record: func(rq *require.Assertions, schema *arrow.Schema) arrow.RecordBatch {
 				b := array.NewTime64Builder(memory.DefaultAllocator, &arrow.Time64Type{Unit: arrow.Nanosecond})
 				defer b.Release()
 
@@ -538,7 +538,7 @@ func Test_Types(t *testing.T) {
 
 				b.AppendValues([]arrow.Time64{t1}, []bool{true})
 
-				return array.NewRecord(schema, []arrow.Array{b.NewArray()}, 1)
+				return array.NewRecordBatch(schema, []arrow.Array{b.NewArray()}, 1)
 			},
 			val: func(rq *require.Assertions) expr.Literal {
 				v, err := arrow.Time64FromString("11:00:00.000000", arrow.Nanosecond)
@@ -566,7 +566,7 @@ func Test_Types(t *testing.T) {
 
 				return arrow.NewSchema([]arrow.Field{field}, nil)
 			},
-			record: func(rq *require.Assertions, schema *arrow.Schema) arrow.Record {
+			record: func(rq *require.Assertions, schema *arrow.Schema) arrow.RecordBatch {
 				b := array.NewTimestampBuilder(memory.DefaultAllocator, &arrow.TimestampType{Unit: arrow.Nanosecond})
 				defer b.Release()
 
@@ -575,7 +575,7 @@ func Test_Types(t *testing.T) {
 
 				b.AppendValues([]arrow.Timestamp{t1}, []bool{true})
 
-				return array.NewRecord(schema, []arrow.Array{b.NewArray()}, 1)
+				return array.NewRecordBatch(schema, []arrow.Array{b.NewArray()}, 1)
 			},
 			val: func(rq *require.Assertions) expr.Literal {
 				v, err := arrow.TimestampFromString("2021-01-01T11:00:00.000000Z", arrow.Microsecond)
@@ -595,7 +595,7 @@ func Test_Types(t *testing.T) {
 
 				return arrow.NewSchema([]arrow.Field{field}, nil)
 			},
-			record: func(rq *require.Assertions, schema *arrow.Schema) arrow.Record {
+			record: func(rq *require.Assertions, schema *arrow.Schema) arrow.RecordBatch {
 				b := array.NewDecimal128Builder(memory.DefaultAllocator, &arrow.Decimal128Type{Precision: 38, Scale: 10})
 				defer b.Release()
 
@@ -604,7 +604,7 @@ func Test_Types(t *testing.T) {
 
 				b.Append(d)
 
-				return array.NewRecord(schema, []arrow.Array{b.NewArray()}, 1)
+				return array.NewRecordBatch(schema, []arrow.Array{b.NewArray()}, 1)
 			},
 			val: func(rq *require.Assertions) expr.Literal {
 				v, p, s, err := expr.DecimalStringToBytes("456.7890123456")
@@ -743,7 +743,7 @@ func TestDecimalFilterLarge(t *testing.T) {
 				db.Append(d)
 			}
 
-			rec := array.NewRecord(schema, []arrow.Array{db.NewArray()}, int64(tc.n))
+			rec := array.NewRecordBatch(schema, []arrow.Array{db.NewArray()}, int64(tc.n))
 
 			extSet := exprs.GetExtensionIDSet(ctx)
 			builder := exprs.NewExprBuilder(extSet)

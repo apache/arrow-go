@@ -281,7 +281,7 @@ func (s *SQLiteFlightSQLServer) DoGetCatalogs(context.Context) (*arrow.Schema, <
 	}
 	defer catalogs.Release()
 
-	batch := array.NewRecord(schema, []arrow.Array{catalogs}, 1)
+	batch := array.NewRecordBatch(schema, []arrow.Array{catalogs}, 1)
 
 	ch := make(chan flight.StreamChunk, 1)
 	ch <- flight.StreamChunk{Data: batch}
@@ -313,7 +313,7 @@ func (s *SQLiteFlightSQLServer) DoGetDBSchemas(_ context.Context, cmd flightsql.
 		}
 		defer dbSchemas.Release()
 
-		batch := array.NewRecord(schema, []arrow.Array{catalogs, dbSchemas}, 1)
+		batch := array.NewRecordBatch(schema, []arrow.Array{catalogs, dbSchemas}, 1)
 		ch <- flight.StreamChunk{Data: batch}
 	}
 
@@ -589,7 +589,7 @@ func scalarToIFace(s scalar.Scalar) (interface{}, error) {
 func getParamsForStatement(rdr flight.MessageReader) (params [][]interface{}, err error) {
 	params = make([][]interface{}, 0)
 	for rdr.Next() {
-		rec := rdr.Record()
+		rec := rdr.RecordBatch()
 
 		nrows := int(rec.NumRows())
 		ncols := int(rec.NumCols())

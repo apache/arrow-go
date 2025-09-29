@@ -419,12 +419,12 @@ func (b *BaseServer) DoGetSqlInfo(_ context.Context, cmd GetSqlInfo) (*arrow.Sch
 		}
 	}
 
-	batch := bldr.NewRecord()
+	batch := bldr.NewRecordBatch()
 	defer batch.Release()
 	debug.Assert(int(batch.NumRows()) == len(cmd.GetInfo()), "too many rows added to SqlInfo result")
 
 	ch := make(chan flight.StreamChunk)
-	rdr, err := array.NewRecordReader(schema_ref.SqlInfo, []arrow.Record{batch})
+	rdr, err := array.NewRecordReader(schema_ref.SqlInfo, []arrow.RecordBatch{batch})
 	if err != nil {
 		return nil, nil, status.Errorf(codes.Internal, "error producing record response: %s", err.Error())
 	}
