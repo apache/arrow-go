@@ -45,10 +45,10 @@ func TestSliceAndWrite(t *testing.T) {
 	defer b.Release()
 
 	b.Field(0).(*array.StringBuilder).AppendValues([]string{"foo", "bar", "baz"}, nil)
-	rec := b.NewRecord()
+	rec := b.NewRecordBatch()
 	defer rec.Release()
 
-	sliceAndWrite := func(rec arrow.Record, schema *arrow.Schema) {
+	sliceAndWrite := func(rec arrow.RecordBatch, schema *arrow.Schema) {
 		slice := rec.NewSlice(1, 2)
 		defer slice.Release()
 
@@ -135,7 +135,7 @@ func TestWriterCatchPanic(t *testing.T) {
 	defer b.Release()
 
 	b.Field(0).(*array.StringBuilder).AppendValues([]string{"foo", "bar", "baz"}, nil)
-	rec := b.NewRecord()
+	rec := b.NewRecordBatch()
 	defer rec.Release()
 
 	// mess up the first offset for the string column
@@ -160,7 +160,7 @@ func TestWriterMemCompression(t *testing.T) {
 	defer b.Release()
 
 	b.Field(0).(*array.StringBuilder).AppendValues([]string{"foo", "bar", "baz"}, nil)
-	rec := b.NewRecord()
+	rec := b.NewRecordBatch()
 	defer rec.Release()
 
 	var buf bytes.Buffer
@@ -240,7 +240,7 @@ func TestWriteWithCompressionAndMinSavings(t *testing.T) {
 func TestWriterInferSchema(t *testing.T) {
 	bldr := array.NewRecordBuilder(memory.DefaultAllocator, arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int8}}, nil))
 	bldr.Field(0).(*array.Int8Builder).AppendValues([]int8{1, 2, 3, 4, 5}, nil)
-	rec := bldr.NewRecord()
+	rec := bldr.NewRecordBatch()
 	defer rec.Release()
 
 	var buf bytes.Buffer
@@ -302,7 +302,7 @@ func TestGetPayloads(t *testing.T) {
 	defer b.Release()
 
 	b.Field(0).(*array.StringBuilder).AppendValues([]string{"foo", "bar", "baz"}, nil)
-	rec := b.NewRecord()
+	rec := b.NewRecordBatch()
 	defer rec.Release()
 
 	schemaPayload := GetSchemaPayload(rec.Schema(), mem)
@@ -339,7 +339,7 @@ func TestWritePayload(t *testing.T) {
 
 	bldr := array.NewRecordBuilder(mem, arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int8}}, nil))
 	bldr.Field(0).(*array.Int8Builder).AppendValues([]int8{1, 2, 3, 4, 5}, nil)
-	rec := bldr.NewRecord()
+	rec := bldr.NewRecordBatch()
 	defer rec.Release()
 
 	var buf bytes.Buffer

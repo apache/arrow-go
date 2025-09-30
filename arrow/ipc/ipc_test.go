@@ -64,18 +64,18 @@ func TestArrow12072(t *testing.T) {
 			[]string{strconv.Itoa(rand.Intn(100))}, nil)
 	}
 
-	rec := b.NewRecord()
+	rec := b.NewRecordBatch()
 	defer rec.Release()
 
-	tbl := array.NewTableFromRecords(schema, []arrow.Record{rec})
+	tbl := array.NewTableFromRecords(schema, []arrow.RecordBatch{rec})
 	defer tbl.Release()
 
 	tr := array.NewTableReader(tbl, 1)
 	defer tr.Release()
 
-	data := []arrow.Record{}
+	data := []arrow.RecordBatch{}
 	for tr.Next() {
-		rec := tr.Record()
+		rec := tr.RecordBatch()
 		rec.Retain()
 		defer rec.Release()
 		data = append(data, rec)
@@ -98,7 +98,7 @@ func TestArrow12072(t *testing.T) {
 			rdr, err := ipc.NewReader(bytes.NewReader(buf))
 			assert.NoError(t, err)
 			for rdr.Next() {
-				out := rdr.Record()
+				out := rdr.RecordBatch()
 				assert.Truef(t, array.RecordEqual(rec, out), "expected: %s\ngot: %s\n", rec, out)
 			}
 			assert.NoError(t, rdr.Err())
@@ -178,7 +178,7 @@ func writeThenReadTable(t *testing.T, alloc memory.Allocator, table arrow.Table)
 	tr := array.NewTableReader(table, 0)
 	defer tr.Release()
 	for tr.Next() {
-		require.NoError(t, writer.Write(tr.Record()))
+		require.NoError(t, writer.Write(tr.RecordBatch()))
 	}
 	require.NoError(t, writer.Close())
 
@@ -186,9 +186,9 @@ func writeThenReadTable(t *testing.T, alloc memory.Allocator, table arrow.Table)
 	reader, err := ipc.NewReader(buf, ipc.WithAllocator(alloc))
 	require.NoError(t, err)
 	defer reader.Release()
-	records := make([]arrow.Record, 0)
+	records := make([]arrow.RecordBatch, 0)
 	for reader.Next() {
-		rec := reader.Record()
+		rec := reader.RecordBatch()
 		rec.Retain()
 		defer rec.Release()
 		records = append(records, rec)
@@ -286,10 +286,10 @@ func TestIPCTable(t *testing.T) {
 	defer b.Release()
 	b.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2, 3, 4}, []bool{true, true, false, true})
 
-	rec1 := b.NewRecord()
+	rec1 := b.NewRecordBatch()
 	defer rec1.Release()
 
-	tbl := array.NewTableFromRecords(schema, []arrow.Record{rec1})
+	tbl := array.NewTableFromRecords(schema, []arrow.RecordBatch{rec1})
 	defer tbl.Release()
 
 	var buf bytes.Buffer
@@ -307,7 +307,7 @@ func TestIPCTable(t *testing.T) {
 
 	n := 0
 	for tr.Next() {
-		rec := tr.Record()
+		rec := tr.RecordBatch()
 		for i, col := range rec.Columns() {
 			t.Logf("rec[%d][%q]: %v nulls:%v\n", n,
 				rec.ColumnName(i), col, col.NullBitmapBytes())
@@ -326,7 +326,7 @@ func TestIPCTable(t *testing.T) {
 	}
 	n = 0
 	for ipcReader.Next() {
-		rec := ipcReader.Record()
+		rec := ipcReader.RecordBatch()
 		for i, col := range rec.Columns() {
 			t.Logf("rec[%d][%q]: %v nulls:%v\n", n,
 				rec.ColumnName(i), col, col.NullBitmapBytes())
@@ -455,7 +455,7 @@ func TestDictionaryDeltas(t *testing.T) {
 // Encode and decode a record over a tuple of IPC writer and reader.
 // IPC writer and reader are the same from one call to another.
 func encodeDecodeIpcStream(t *testing.T,
-	record arrow.Record,
+	record arrow.RecordBatch,
 	bufWriter *bytes.Buffer, ipcWriter *ipc.Writer,
 	bufReader *bytes.Reader, ipcReader *ipc.Reader) ([]byte, *ipc.Reader, error) {
 
@@ -476,7 +476,7 @@ func encodeDecodeIpcStream(t *testing.T,
 		ipcReader = newIpcReader
 	}
 	ipcReader.Next()
-	record = ipcReader.Record()
+	record = ipcReader.RecordBatch()
 
 	// Return the decoded record as a json string
 	json, err := record.MarshalJSON()
@@ -528,7 +528,7 @@ func Example_mapSlice() {
 	defer r.Release()
 
 	r.Next()
-	fmt.Println(r.Record())
+	fmt.Println(r.RecordBatch())
 
 	// Output:
 	// record:
@@ -580,7 +580,7 @@ func Example_listSlice() {
 	defer r.Release()
 
 	r.Next()
-	fmt.Println(r.Record())
+	fmt.Println(r.RecordBatch())
 
 	// Output:
 	// record:
@@ -618,8 +618,8 @@ func TestIpcEmptyMap(t *testing.T) {
 	defer r.Release()
 
 	assert.True(t, r.Next())
-	assert.Zero(t, r.Record().NumRows())
-	assert.True(t, arrow.TypeEqual(dt, r.Record().Column(0).DataType()))
+	assert.Zero(t, r.RecordBatch().NumRows())
+	assert.True(t, arrow.TypeEqual(dt, r.RecordBatch().Column(0).DataType()))
 }
 
 // GH-41993
@@ -677,7 +677,7 @@ func TestArrowBinaryIPCWriterTruncatedVOffsets(t *testing.T) {
 	require.True(t, reader.Next())
 	require.NoError(t, reader.Err())
 
-	rec := reader.Record()
+	rec := reader.RecordBatch()
 	require.EqualValues(t, 1, rec.NumCols())
 	require.EqualValues(t, 2, rec.NumRows())
 

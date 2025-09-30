@@ -309,7 +309,7 @@ func (s *FlightSqlServerSuite) TestExecuteIngestNil() {
 }
 
 func (s *FlightSqlServerSuite) TestExecuteIngestInvalid() {
-	reclist := []arrow.Record{}
+	reclist := []arrow.RecordBatch{}
 	rdr, err := array.NewRecordReader(arrow.NewSchema([]arrow.Field{}, nil), reclist)
 	s.NoError(err)
 	defer rdr.Release()

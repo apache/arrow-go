@@ -81,7 +81,7 @@ func writeRecordsIntoBuffer(t *testing.T, numRecords int) *bytes.Buffer {
 	return buf
 }
 
-func getTestRecords(mem memory.Allocator, numRecords int) (*arrow.Schema, []arrow.Record) {
+func getTestRecords(mem memory.Allocator, numRecords int) (*arrow.Schema, []arrow.RecordBatch) {
 	meta := arrow.NewMetadata([]string{}, []string{})
 	s := arrow.NewSchema([]arrow.Field{
 		{Name: "test-col", Type: arrow.PrimitiveTypes.Int64},
@@ -90,13 +90,13 @@ func getTestRecords(mem memory.Allocator, numRecords int) (*arrow.Schema, []arro
 	builder := array.NewRecordBuilder(mem, s)
 	defer builder.Release()
 
-	recs := make([]arrow.Record, numRecords)
+	recs := make([]arrow.RecordBatch, numRecords)
 	for i := 0; i < len(recs); i++ {
 		col := builder.Field(0).(*array.Int64Builder)
 		for i := 0; i < 10; i++ {
 			col.Append(int64(i))
 		}
-		recs[i] = builder.NewRecord()
+		recs[i] = builder.NewRecordBatch()
 	}
 
 	return s, recs
