@@ -25,6 +25,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -187,4 +188,204 @@ func BenchmarkFilterInsertBulk(b *testing.B) {
 		bf.InsertBulk(x)
 	}
 	b.SetBytes(bytesPerFilterBlock * int64(len(x)))
+}
+
+func TestAdaptiveBloomFilterEdgeCases(t *testing.T) {
+	mem := memory.DefaultAllocator
+
+	// Create a simple column for testing
+	col := schema.NewColumn(schema.NewByteArrayNode("test", parquet.Repetitions.Required, -1), 1, 1)
+
+	t.Run("InsertBulk handles duplicate hashes correctly", func(t *testing.T) {
+		bf := NewAdaptiveBlockSplitBloomFilter(1024, 3, 0.01, col, mem).(*adaptiveBlockSplitBloomFilter)
+
+		// Insert the same hash multiple times
+		duplicateHash := uint64(12345)
+		hashes := []uint64{duplicateHash, duplicateHash, duplicateHash}
+
+		initialDistinct := bf.numDistinct
+		bf.InsertBulk(hashes)
+
+		// numDistinct should only increase by 1, not 3
+		// Currently this will fail because the bug causes it to increment by 3
+		expectedDistinct := initialDistinct + 1
+		if bf.numDistinct != expectedDistinct {
+			t.Errorf("InsertBulk duplicate handling bug: expected numDistinct=%d, got %d",
+				expectedDistinct, bf.numDistinct)
+		}
+	})
+
+	t.Run("candidate selection uses correct comparison logic", func(t *testing.T) {
+		// Use larger maxBytes and more candidates to ensure multiple candidates are created
+		bf := NewAdaptiveBlockSplitBloomFilter(8192, 5, 0.01, col, mem).(*adaptiveBlockSplitBloomFilter)
+
+		if len(bf.candidates) < 2 {
+			t.Skip("Need at least 2 candidates to test comparison functions")
+		}
+
+		// Test MinFunc - should return the candidate with smallest size
+		optimal := bf.optimalCandidate()
+		minSize := optimal.bloomFilter.Size()
+
+		for _, c := range bf.candidates {
+			if c.bloomFilter.Size() < minSize {
+				t.Errorf("optimalCandidate() sign error: found candidate with smaller size %d < %d",
+					c.bloomFilter.Size(), minSize)
+			}
+		}
+
+		// Test MaxFunc - largestCandidate should have the largest size
+		maxSize := bf.largestCandidate.bloomFilter.Size()
+		for _, c := range bf.candidates {
+			if c.bloomFilter.Size() > maxSize {
+				t.Errorf("largestCandidate sign error: found candidate with larger size %d > %d",
+					c.bloomFilter.Size(), maxSize)
+			}
+		}
+	})
+
+	t.Run("bloom filter data survives garbage collection", func(t *testing.T) {
+		bf := NewAdaptiveBlockSplitBloomFilter(1024, 1, 0.01, col, mem).(*adaptiveBlockSplitBloomFilter)
+
+		// Insert some data
+		hashes := []uint64{1, 2, 3, 4, 5}
+		bf.InsertBulk(hashes)
+
+		// Force garbage collection to trigger finalizers
+		runtime.GC()
+		runtime.GC()
+
+		// The bloom filter should still work after GC
+		// If the GC issue exists, this might cause a panic or incorrect results
+		for _, h := range hashes {
+			if !bf.CheckHash(h) {
+				t.Errorf("Hash %d not found after GC - potential GC safety issue", h)
+			}
+		}
+	})
+}
+
+func TestAdaptiveBloomFilterEndToEnd(t *testing.T) {
+	// This test simulates the full workflow: write parquet with adaptive bloom filters,
+	// then read it back and verify bloom filter functionality
+
+	mem := memory.DefaultAllocator
+
+	// Create test data
+	testValues := []parquet.ByteArray{
+		[]byte("apple"),
+		[]byte("banana"),
+		[]byte("cherry"),
+		[]byte("date"),
+		[]byte("elderberry"),
+		[]byte("fig"),
+		[]byte("grape"),
+		[]byte("honeydew"),
+	}
+
+	// Values that should NOT be in the bloom filter
+	absentValues := []parquet.ByteArray{
+		[]byte("absent1"),
+		[]byte("absent2"),
+		[]byte("absent3"),
+	}
+
+	col := schema.NewColumn(schema.NewByteArrayNode("test_column", parquet.Repetitions.Required, -1), 1, 1)
+
+	t.Run("create adaptive bloom filter with test data", func(t *testing.T) {
+		// Create adaptive bloom filter as would be done during parquet writing
+		bf := NewAdaptiveBlockSplitBloomFilter(1024, 3, 0.01, col, mem).(*adaptiveBlockSplitBloomFilter)
+		hasher := bf.Hasher()
+
+		// Insert test values (this simulates what happens during parquet writing)
+		var hashes []uint64
+		for _, val := range testValues {
+			hashes = append(hashes, GetHash(hasher, val))
+		}
+
+		// Test bulk insertion with some duplicates to verify our fix
+		duplicatedHashes := append(hashes, hashes[0], hashes[1], hashes[0]) // Add some duplicates
+		bf.InsertBulk(duplicatedHashes)
+
+		// Verify all original values are found
+		for _, val := range testValues {
+			hash := GetHash(hasher, val)
+			if !bf.CheckHash(hash) {
+				t.Errorf("Value %q (hash %d) not found in bloom filter", val, hash)
+			}
+		}
+
+		// Verify absent values are (most likely) not found
+		falsePositives := 0
+		for _, val := range absentValues {
+			hash := GetHash(hasher, val)
+			if bf.CheckHash(hash) {
+				falsePositives++
+			}
+		}
+
+		// With a 1% false positive rate and 3 absent values, we expect 0-1 false positives most of the time
+		if falsePositives > 1 {
+			t.Logf("Note: Got %d false positives out of %d absent values (this can happen with bloom filters)",
+				falsePositives, len(absentValues))
+		}
+
+		t.Logf("Bloom filter stats: size=%d bytes, numDistinct=%d, candidates=%d",
+			bf.Size(), bf.numDistinct, len(bf.candidates))
+	})
+
+	t.Run("verify duplicate handling in bulk operations", func(t *testing.T) {
+		bf := NewAdaptiveBlockSplitBloomFilter(1024, 3, 0.01, col, mem).(*adaptiveBlockSplitBloomFilter)
+		hasher := bf.Hasher()
+
+		// Create a slice with many duplicates
+		testHash := GetHash(hasher, testValues[0])
+		duplicateHashes := make([]uint64, 100)
+		for i := range duplicateHashes {
+			duplicateHashes[i] = testHash
+		}
+
+		initialDistinct := bf.numDistinct
+		bf.InsertBulk(duplicateHashes)
+
+		// Should only increment numDistinct by 1, not 100
+		expectedDistinct := initialDistinct + 1
+		if bf.numDistinct != expectedDistinct {
+			t.Errorf("Duplicate handling failed: expected numDistinct=%d, got %d",
+				expectedDistinct, bf.numDistinct)
+		}
+
+		// The value should still be findable
+		if !bf.CheckHash(testHash) {
+			t.Error("Hash not found after bulk insert with duplicates")
+		}
+	})
+
+	t.Run("verify optimal candidate selection", func(t *testing.T) {
+		// Create bloom filter with multiple candidates
+		bf := NewAdaptiveBlockSplitBloomFilter(4096, 4, 0.01, col, mem).(*adaptiveBlockSplitBloomFilter)
+
+		if len(bf.candidates) < 2 {
+			t.Skip("Need multiple candidates to test selection logic")
+		}
+
+		// Insert some data to trigger candidate elimination
+		hasher := bf.Hasher()
+		for i, val := range testValues {
+			hash := GetHash(hasher, val)
+			bf.InsertHash(hash)
+
+			// Check optimal candidate selection is working
+			optimal := bf.optimalCandidate()
+			largest := bf.largestCandidate
+
+			if optimal.bloomFilter.Size() > largest.bloomFilter.Size() {
+				t.Errorf("Iteration %d: optimal candidate size (%d) > largest candidate size (%d)",
+					i, optimal.bloomFilter.Size(), largest.bloomFilter.Size())
+			}
+		}
+
+		t.Logf("Final candidates: %d, optimal size: %d bytes",
+			len(bf.candidates), bf.optimalCandidate().bloomFilter.Size())
+	})
 }
