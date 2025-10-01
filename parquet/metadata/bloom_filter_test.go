@@ -206,8 +206,6 @@ func TestAdaptiveBloomFilterEdgeCases(t *testing.T) {
 		initialDistinct := bf.numDistinct
 		bf.InsertBulk(hashes)
 
-		// numDistinct should only increase by 1, not 3
-		// Currently this will fail because the bug causes it to increment by 3
 		expectedDistinct := initialDistinct + 1
 		if bf.numDistinct != expectedDistinct {
 			t.Errorf("InsertBulk duplicate handling bug: expected numDistinct=%d, got %d",
@@ -256,7 +254,6 @@ func TestAdaptiveBloomFilterEdgeCases(t *testing.T) {
 		runtime.GC()
 
 		// The bloom filter should still work after GC
-		// If the GC issue exists, this might cause a panic or incorrect results
 		for _, h := range hashes {
 			if !bf.CheckHash(h) {
 				t.Errorf("Hash %d not found after GC - potential GC safety issue", h)
@@ -303,8 +300,8 @@ func TestAdaptiveBloomFilterEndToEnd(t *testing.T) {
 			hashes = append(hashes, GetHash(hasher, val))
 		}
 
-		// Test bulk insertion with some duplicates to verify our fix
-		duplicatedHashes := append(hashes, hashes[0], hashes[1], hashes[0]) // Add some duplicates
+		// Test bulk insertion with some duplicates
+		duplicatedHashes := append(hashes, hashes[0], hashes[1], hashes[0])
 		bf.InsertBulk(duplicatedHashes)
 
 		// Verify all original values are found
