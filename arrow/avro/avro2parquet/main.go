@@ -102,7 +102,7 @@ func main() {
 			fmt.Println(err)
 			os.Exit(6)
 		}
-		recs := av2arReader.Record()
+		recs := av2arReader.RecordBatch()
 		err = pr.WriteBuffered(recs)
 		if err != nil {
 			fmt.Println(err)

@@ -102,11 +102,11 @@ func (*testServer) DoGetStatement(ctx context.Context, ticket flightsql.Statemen
 		b.AppendNull()
 		c := make(chan flight.StreamChunk, 2)
 		c <- flight.StreamChunk{
-			Data: array.NewRecord(sc, []arrow.Array{b.NewArray()}, 1),
+			Data: array.NewRecordBatch(sc, []arrow.Array{b.NewArray()}, 1),
 		}
 		b.Append(1)
 		c <- flight.StreamChunk{
-			Data: array.NewRecord(sc, []arrow.Array{b.NewArray()}, 1),
+			Data: array.NewRecordBatch(sc, []arrow.Array{b.NewArray()}, 1),
 		}
 		close(c)
 		cc = c
@@ -120,7 +120,7 @@ func (*testServer) DoGetStatement(ctx context.Context, ticket flightsql.Statemen
 		b.Append(2)
 		c := make(chan flight.StreamChunk, 2)
 		c <- flight.StreamChunk{
-			Data: array.NewRecord(sc, []arrow.Array{b.NewArray()}, 1),
+			Data: array.NewRecordBatch(sc, []arrow.Array{b.NewArray()}, 1),
 		}
 		c <- flight.StreamChunk{
 			Err: status.Error(codes.Internal, "test error"),
@@ -182,7 +182,7 @@ func (*testServer) DoPutCommandStatementIngest(ctx context.Context, cmd flightsq
 	var maxRows int64 = 50
 	var nRows int64
 	for rdr.Next() {
-		rec := rdr.Record()
+		rec := rdr.RecordBatch()
 		if nRows+rec.NumRows() > maxRows {
 			return nRows, fmt.Errorf("ingested rows exceeded maximum of %d", maxRows)
 		}
@@ -236,9 +236,9 @@ func (s *FlightSqlServerSuite) TestExecute() {
 	s.Require().Len(ep, 1)
 	fr, err := s.cl.DoGet(context.TODO(), ep[0].GetTicket())
 	s.Require().NoError(err)
-	var recs []arrow.Record
+	var recs []arrow.RecordBatch
 	for fr.Next() {
-		rec := fr.Record()
+		rec := fr.RecordBatch()
 		rec.Retain()
 		defer rec.Release()
 		recs = append(recs, rec)
@@ -309,7 +309,7 @@ func (s *FlightSqlServerSuite) TestExecuteIngestNil() {
 }
 
 func (s *FlightSqlServerSuite) TestExecuteIngestInvalid() {
-	reclist := []arrow.Record{}
+	reclist := []arrow.RecordBatch{}
 	rdr, err := array.NewRecordReader(arrow.NewSchema([]arrow.Field{}, nil), reclist)
 	s.NoError(err)
 	defer rdr.Release()
@@ -379,7 +379,7 @@ func (s *FlightSqlServerSuite) TestExecuteIngestWithServerError() {
 	s.Equal(nRowsExpected, nRowsIngested)
 }
 
-func generateRecords(alloc memory.Allocator, nRecords, nRowsPerRecord int) []arrow.Record {
+func generateRecords(alloc memory.Allocator, nRecords, nRowsPerRecord int) []arrow.RecordBatch {
 	schema := arrow.NewSchema(
 		[]arrow.Field{
 			{Name: "one", Type: arrow.FixedWidthTypes.Boolean},
@@ -393,7 +393,7 @@ func generateRecords(alloc memory.Allocator, nRecords, nRowsPerRecord int) []arr
 	defer bldr.Release()
 
 	var val int
-	reclist := make([]arrow.Record, nRecords)
+	reclist := make([]arrow.RecordBatch, nRecords)
 	for i := 0; i < nRecords; i++ {
 		for j := 0; j < nRowsPerRecord; j++ {
 			bldr.Field(0).(*array.BooleanBuilder).Append(val%2 == 0)
@@ -401,7 +401,7 @@ func generateRecords(alloc memory.Allocator, nRecords, nRowsPerRecord int) []arr
 			bldr.Field(2).(*array.Int64Builder).Append(int64(val))
 			val++
 		}
-		reclist[i] = bldr.NewRecord()
+		reclist[i] = bldr.NewRecordBatch()
 	}
 	return reclist
 }

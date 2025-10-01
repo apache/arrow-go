@@ -160,7 +160,7 @@ func (s *SqliteTablesSchemaBatchReader) Next() bool {
 		return false
 	}
 
-	rec := s.rdr.Record()
+	rec := s.rdr.RecordBatch()
 	tableNameArr := rec.Column(rec.Schema().FieldIndices("table_name")[0]).(*array.String)
 
 	bldr := flightsql.NewColumnMetadataBuilder()
@@ -206,6 +206,6 @@ func (s *SqliteTablesSchemaBatchReader) Next() bool {
 	schemaCol := s.schemaBldr.NewArray()
 	defer schemaCol.Release()
 
-	s.record = array.NewRecord(s.Schema(), append(rec.Columns(), schemaCol), rec.NumRows())
+	s.record = array.NewRecordBatch(s.Schema(), append(rec.Columns(), schemaCol), rec.NumRows())
 	return true
 }

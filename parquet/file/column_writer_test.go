@@ -813,7 +813,7 @@ func TestDictionaryReslice(t *testing.T) {
 			for i := 0; i < 2000; i++ {
 				b.Field(0).(*array.BinaryDictionaryBuilder).AppendString("test_value")
 			}
-			rec := b.NewRecord()
+			rec := b.NewRecordBatch()
 			out := &bytes.Buffer{}
 			pqw, err := pqarrow.NewFileWriter(rec.Schema(), out, nil, pqarrow.NewArrowWriterProperties())
 			assert.NoError(t, err)

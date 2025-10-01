@@ -216,9 +216,9 @@ func TestRecordReaderParallel(t *testing.T) {
 	assert.NotNil(t, rr)
 	defer rr.Release()
 
-	records := make([]arrow.Record, 0)
+	records := make([]arrow.RecordBatch, 0)
 	for rr.Next() {
-		rec := rr.Record()
+		rec := rr.RecordBatch()
 		defer rec.Release()
 
 		assert.Truef(t, sc.Equal(rec.Schema()), "expected: %s\ngot: %s", sc, rec.Schema())
@@ -232,9 +232,9 @@ func TestRecordReaderParallel(t *testing.T) {
 	defer tr.Release()
 
 	assert.True(t, tr.Next())
-	assert.Truef(t, array.RecordEqual(tr.Record(), records[0]), "expected: %s\ngot: %s", tr.Record(), records[0])
+	assert.Truef(t, array.RecordEqual(tr.RecordBatch(), records[0]), "expected: %s\ngot: %s", tr.RecordBatch(), records[0])
 	assert.True(t, tr.Next())
-	assert.Truef(t, array.RecordEqual(tr.Record(), records[1]), "expected: %s\ngot: %s", tr.Record(), records[1])
+	assert.Truef(t, array.RecordEqual(tr.RecordBatch(), records[1]), "expected: %s\ngot: %s", tr.RecordBatch(), records[1])
 }
 
 func TestRecordReaderSerial(t *testing.T) {
@@ -268,17 +268,17 @@ func TestRecordReaderSerial(t *testing.T) {
 	rec, err := rr.Read()
 	assert.NoError(t, err)
 	tr.Next()
-	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+	assert.Truef(t, array.RecordEqual(tr.RecordBatch(), rec), "expected: %s\ngot: %s", tr.RecordBatch(), rec)
 
 	rec, err = rr.Read()
 	assert.NoError(t, err)
 	tr.Next()
-	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+	assert.Truef(t, array.RecordEqual(tr.RecordBatch(), rec), "expected: %s\ngot: %s", tr.RecordBatch(), rec)
 
 	rec, err = rr.Read()
 	assert.NoError(t, err)
 	tr.Next()
-	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+	assert.Truef(t, array.RecordEqual(tr.RecordBatch(), rec), "expected: %s\ngot: %s", tr.RecordBatch(), rec)
 
 	rec, err = rr.Read()
 	assert.Same(t, io.EOF, err)
@@ -318,28 +318,28 @@ func TestRecordReaderSeekToRow(t *testing.T) {
 			rec, err := rr.Read()
 			assert.NoError(t, err)
 			tr.Next()
-			assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+			assert.Truef(t, array.RecordEqual(tr.RecordBatch(), rec), "expected: %s\ngot: %s", tr.RecordBatch(), rec)
 
 			require.NoError(t, rr.SeekToRow(0))
 			rec, err = rr.Read()
 			assert.NoError(t, err)
-			assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+			assert.Truef(t, array.RecordEqual(tr.RecordBatch(), rec), "expected: %s\ngot: %s", tr.RecordBatch(), rec)
 
 			rec, err = rr.Read()
 			assert.NoError(t, err)
 			tr.Next()
-			assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+			assert.Truef(t, array.RecordEqual(tr.RecordBatch(), rec), "expected: %s\ngot: %s", tr.RecordBatch(), rec)
 
 			require.NoError(t, rr.SeekToRow(2))
 			rec, err = rr.Read()
 			assert.NoError(t, err)
-			assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+			assert.Truef(t, array.RecordEqual(tr.RecordBatch(), rec), "expected: %s\ngot: %s", tr.RecordBatch(), rec)
 
 			require.NoError(t, rr.SeekToRow(4))
 			rec, err = rr.Read()
 			tr.Next()
 			assert.NoError(t, err)
-			assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+			assert.Truef(t, array.RecordEqual(tr.RecordBatch(), rec), "expected: %s\ngot: %s", tr.RecordBatch(), rec)
 		})
 	}
 }
@@ -375,17 +375,17 @@ func TestRecordReaderMultiRowGroup(t *testing.T) {
 	rec, err := rr.Read()
 	assert.NoError(t, err)
 	tr.Next()
-	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+	assert.Truef(t, array.RecordEqual(tr.RecordBatch(), rec), "expected: %s\ngot: %s", tr.RecordBatch(), rec)
 
 	rec, err = rr.Read()
 	assert.NoError(t, err)
 	tr.Next()
-	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+	assert.Truef(t, array.RecordEqual(tr.RecordBatch(), rec), "expected: %s\ngot: %s", tr.RecordBatch(), rec)
 
 	rec, err = rr.Read()
 	assert.NoError(t, err)
 	tr.Next()
-	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+	assert.Truef(t, array.RecordEqual(tr.RecordBatch(), rec), "expected: %s\ngot: %s", tr.RecordBatch(), rec)
 
 	rec, err = rr.Read()
 	assert.Same(t, io.EOF, err)
@@ -423,32 +423,32 @@ func TestRecordReaderSeekToRowMultiRowGroup(t *testing.T) {
 	rec, err := rr.Read()
 	assert.NoError(t, err)
 	tr.Next()
-	first := tr.Record()
+	first := tr.RecordBatch()
 	first.Retain()
 	defer first.Release()
 
-	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+	assert.Truef(t, array.RecordEqual(tr.RecordBatch(), rec), "expected: %s\ngot: %s", tr.RecordBatch(), rec)
 
 	require.NoError(t, rr.SeekToRow(0))
 	rec, err = rr.Read()
 	assert.NoError(t, err)
-	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+	assert.Truef(t, array.RecordEqual(tr.RecordBatch(), rec), "expected: %s\ngot: %s", tr.RecordBatch(), rec)
 
 	rec, err = rr.Read()
 	assert.NoError(t, err)
 	tr.Next()
-	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+	assert.Truef(t, array.RecordEqual(tr.RecordBatch(), rec), "expected: %s\ngot: %s", tr.RecordBatch(), rec)
 
 	require.NoError(t, rr.SeekToRow(2))
 	rec, err = rr.Read()
 	assert.NoError(t, err)
-	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+	assert.Truef(t, array.RecordEqual(tr.RecordBatch(), rec), "expected: %s\ngot: %s", tr.RecordBatch(), rec)
 
 	require.NoError(t, rr.SeekToRow(4))
 	rec, err = rr.Read()
 	tr.Next()
 	assert.NoError(t, err)
-	assert.Truef(t, array.RecordEqual(tr.Record(), rec), "expected: %s\ngot: %s", tr.Record(), rec)
+	assert.Truef(t, array.RecordEqual(tr.RecordBatch(), rec), "expected: %s\ngot: %s", tr.RecordBatch(), rec)
 
 	require.NoError(t, rr.SeekToRow(0))
 	rec, err = rr.Read()

@@ -164,13 +164,13 @@ func (fw *FileWriter) NumRows() int {
 //
 // More memory is utilized compared to Write as the whole row group data is kept in memory before it's written
 // since Parquet files must have an entire column written before writing the next column.
-func (fw *FileWriter) WriteBuffered(rec arrow.Record) error {
+func (fw *FileWriter) WriteBuffered(rec arrow.RecordBatch) error {
 	if !rec.Schema().Equal(fw.schema) {
 		return fmt.Errorf("record schema does not match writer's. \nrecord: %s\nwriter: %s", rec.Schema(), fw.schema)
 	}
 
 	var (
-		recList []arrow.Record
+		recList []arrow.RecordBatch
 		maxRows = fw.wr.Properties().MaxRowGroupLength()
 		curRows int
 		err     error
@@ -184,9 +184,9 @@ func (fw *FileWriter) WriteBuffered(rec arrow.Record) error {
 	}
 
 	if int64(curRows)+rec.NumRows() <= maxRows {
-		recList = []arrow.Record{rec}
+		recList = []arrow.RecordBatch{rec}
 	} else {
-		recList = []arrow.Record{rec.NewSlice(0, maxRows-int64(curRows))}
+		recList = []arrow.RecordBatch{rec.NewSlice(0, maxRows-int64(curRows))}
 		defer recList[0].Release()
 		for offset := maxRows - int64(curRows); offset < rec.NumRows(); offset += maxRows {
 			s := rec.NewSlice(offset, offset+utils.Min(maxRows, rec.NumRows()-offset))
@@ -218,22 +218,22 @@ func (fw *FileWriter) WriteBuffered(rec arrow.Record) error {
 // Performance-wise Write might be more favorable than WriteBuffered if you're dealing with:
 // * a highly-restricted memory environment
 // * very large records with lots of rows (potentially close to the max row group length)
-func (fw *FileWriter) Write(rec arrow.Record) error {
+func (fw *FileWriter) Write(rec arrow.RecordBatch) error {
 	if !rec.Schema().Equal(fw.schema) {
 		return fmt.Errorf("record schema does not match writer's. \nrecord: %s\nwriter: %s", rec.Schema(), fw.schema)
 	}
 
-	var recList []arrow.Record
+	var recList []arrow.RecordBatch
 	rowgroupLen := fw.wr.Properties().MaxRowGroupLength()
 	if rec.NumRows() > rowgroupLen {
-		recList = make([]arrow.Record, 0)
+		recList = make([]arrow.RecordBatch, 0)
 		for offset := int64(0); offset < rec.NumRows(); offset += rowgroupLen {
 			s := rec.NewSlice(offset, offset+utils.Min(rowgroupLen, rec.NumRows()-offset))
 			defer s.Release()
 			recList = append(recList, s)
 		}
 	} else {
-		recList = []arrow.Record{rec}
+		recList = []arrow.RecordBatch{rec}
 	}
 
 	for _, r := range recList {

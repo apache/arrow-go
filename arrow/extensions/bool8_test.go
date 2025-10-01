@@ -72,7 +72,7 @@ func TestBool8ExtensionRecordBuilder(t *testing.T) {
 	defer builder.Release()
 
 	builder.Field(0).(*extensions.Bool8Builder).Append(true)
-	record := builder.NewRecord()
+	record := builder.NewRecordBatch()
 	defer record.Release()
 
 	b, err := record.MarshalJSON()
@@ -86,7 +86,7 @@ func TestBool8ExtensionRecordBuilder(t *testing.T) {
 	require.Equal(t, record, record1)
 
 	require.NoError(t, builder.UnmarshalJSON([]byte(`{"bool8":true}`)))
-	record = builder.NewRecord()
+	record = builder.NewRecordBatch()
 	defer record.Release()
 
 	require.Equal(t, schema, record.Schema())
@@ -186,7 +186,7 @@ func TestBool8TypeBatchIPCRoundTrip(t *testing.T) {
 	arr := array.NewExtensionArrayWithStorage(typ, storage)
 	defer arr.Release()
 
-	batch := array.NewRecord(arrow.NewSchema([]arrow.Field{{Name: "field", Type: typ, Nullable: true}}, nil),
+	batch := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{{Name: "field", Type: typ, Nullable: true}}, nil),
 		[]arrow.Array{arr}, -1)
 	defer batch.Release()
 

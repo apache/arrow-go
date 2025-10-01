@@ -129,7 +129,7 @@ func ImportCRecordBatchWithSchema(arr *CArrowArray, sc *arrow.Schema) (arrow.Rec
 		cols[i] = st.Field(i)
 	}
 
-	return array.NewRecord(sc, cols, int64(st.Len())), nil
+	return array.NewRecordBatch(sc, cols, int64(st.Len())), nil
 }
 
 // ImportCRecordBatch imports an ArrowArray from C as a record batch. If err is not nil,

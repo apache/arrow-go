@@ -488,7 +488,7 @@ func newRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buf
 		defer cols[i].Release()
 	}
 
-	return array.NewRecord(schema, cols, rows)
+	return array.NewRecordBatch(schema, cols, rows)
 }
 
 type ipcSource struct {

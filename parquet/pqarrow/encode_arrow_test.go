@@ -166,10 +166,10 @@ func makeDateTypeTable(mem memory.Allocator, expected bool, partialDays bool) ar
 		bldr.Field(0).(*array.Date64Builder).AppendValues(d64Values, isValid)
 	}
 
-	rec := bldr.NewRecord()
+	rec := bldr.NewRecordBatch()
 	defer rec.Release()
 
-	return array.NewTableFromRecords(arrsc, []arrow.Record{rec})
+	return array.NewTableFromRecords(arrsc, []arrow.RecordBatch{rec})
 }
 
 func makeTimestampTypeTable(mem memory.Allocator, expected bool) arrow.Table {
@@ -201,10 +201,10 @@ func makeTimestampTypeTable(mem memory.Allocator, expected bool) arrow.Table {
 	bldr.Field(0).(*array.TimestampBuilder).AppendValues(ts64msValues, isValid)
 	bldr.Field(1).(*array.TimestampBuilder).AppendValues(ts64msValues, isValid)
 
-	rec := bldr.NewRecord()
+	rec := bldr.NewRecordBatch()
 	defer rec.Release()
 
-	return array.NewTableFromRecords(arrsc, []arrow.Record{rec})
+	return array.NewTableFromRecords(arrsc, []arrow.RecordBatch{rec})
 }
 
 func TestWriteArrowCols(t *testing.T) {
@@ -448,7 +448,7 @@ func TestWriteKeyValueMetadata(t *testing.T) {
 		b.AppendNull()
 	}
 
-	rec := bldr.NewRecord()
+	rec := bldr.NewRecordBatch()
 	defer rec.Release()
 
 	props := parquet.NewWriterProperties(
@@ -493,7 +493,7 @@ func TestWriteEmptyLists(t *testing.T) {
 		b.AppendNull()
 	}
 
-	rec := bldr.NewRecord()
+	rec := bldr.NewRecordBatch()
 	defer rec.Release()
 
 	props := parquet.NewWriterProperties(
@@ -532,7 +532,7 @@ func TestWriteAllNullsWithDeltaEncoding(t *testing.T) {
 		b.AppendNull()
 	}
 
-	rec := bldr.NewRecord()
+	rec := bldr.NewRecordBatch()
 	defer rec.Release()
 
 	props := parquet.NewWriterProperties(
@@ -2005,7 +2005,7 @@ func TestForceLargeTypes(t *testing.T) {
 	bldr.Field(0).(*array.LargeStringBuilder).AppendValues([]string{"hello", "foo", "bar"}, nil)
 	bldr.Field(1).(*array.BinaryBuilder).AppendValues([][]byte{[]byte("hello"), []byte("foo"), []byte("bar")}, nil)
 
-	rec := bldr.NewRecord()
+	rec := bldr.NewRecordBatch()
 	defer rec.Release()
 
 	var buf bytes.Buffer
@@ -2059,7 +2059,7 @@ func TestBufferedRecWrite(t *testing.T) {
 		array.NewStructData(structData),
 	}
 
-	rec := array.NewRecord(sc, cols, SIZELEN)
+	rec := array.NewRecordBatch(sc, cols, SIZELEN)
 	defer rec.Release()
 
 	var (
@@ -2257,7 +2257,7 @@ func (ps *ParquetIOTestSuite) TestArrowExtensionTypeLogicalType() {
 
 	bldr.Field(0).(*extensions.UUIDBuilder).Append(uuid.New())
 	bldr.Field(1).(*array.ExtensionBuilder).AppendValueFromString(`{"hello": ["world", 2, true], "world": null}`)
-	rec := bldr.NewRecord()
+	rec := bldr.NewRecordBatch()
 	defer rec.Release()
 
 	var buf bytes.Buffer
@@ -2305,7 +2305,7 @@ func TestWriteTableMemoryAllocation(t *testing.T) {
 	abld.ValueBuilder().(*array.Int64Builder).Append(2)
 	bld.Field(4).(*extensions.UUIDBuilder).Append(uuid.MustParse("00000000-0000-0000-0000-000000000001"))
 
-	rec := bld.NewRecord()
+	rec := bld.NewRecordBatch()
 	bld.Release()
 
 	var buf bytes.Buffer
@@ -2332,7 +2332,7 @@ func TestEmptyListDeltaBinaryPacked(t *testing.T) {
 
 	listBuilder := builder.Field(0).(*array.ListBuilder)
 	listBuilder.Append(true)
-	arrowRec := builder.NewRecord()
+	arrowRec := builder.NewRecordBatch()
 	defer arrowRec.Release()
 
 	var buf bytes.Buffer
@@ -2383,7 +2383,7 @@ func TestReadWriteNonShreddedVariant(t *testing.T) {
 	arr := bldr.NewArray()
 	defer arr.Release()
 
-	rec := array.NewRecord(arrow.NewSchema([]arrow.Field{
+	rec := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{
 		{Name: "variant", Type: arr.DataType(), Nullable: true},
 	}, nil), []arrow.Array{arr}, -1)
 
@@ -2436,7 +2436,7 @@ func TestReadWriteShreddedVariant(t *testing.T) {
 	arr := bldr.NewArray()
 	defer arr.Release()
 
-	rec := array.NewRecord(arrow.NewSchema([]arrow.Field{
+	rec := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{
 		{Name: "variant", Type: arr.DataType(), Nullable: true},
 	}, nil), []arrow.Array{arr}, -1)
 

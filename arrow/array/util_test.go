@@ -532,13 +532,13 @@ func TestRecordBuilderUnmarshalJSONExtraFields(t *testing.T) {
 	require.True(t, s.Scan())
 	require.NoError(t, bldr.UnmarshalJSON(s.Bytes()))
 
-	rec1 := bldr.NewRecord()
+	rec1 := bldr.NewRecordBatch()
 	defer rec1.Release()
 
 	require.True(t, s.Scan())
 	require.NoError(t, bldr.UnmarshalJSON(s.Bytes()))
 
-	rec2 := bldr.NewRecord()
+	rec2 := bldr.NewRecordBatch()
 	defer rec2.Release()
 
 	assert.Truef(t, array.RecordEqual(rec1, rec2), "expected: %s\nactual: %s", rec1, rec2)

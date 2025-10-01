@@ -99,7 +99,7 @@ func Test_fromArrowType(t *testing.T) {
 	b.Field(19).(*array.DurationBuilder).Append(1)
 	b.Field(20).(*array.DurationBuilder).Append(1)
 
-	rec := b.NewRecord()
+	rec := b.NewRecordBatch()
 	defer rec.Release()
 
 	tf := func(t *testing.T, idx int, want any) {

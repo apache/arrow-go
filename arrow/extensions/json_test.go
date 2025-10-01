@@ -144,7 +144,7 @@ func TestJSONTypeBatchIPCRoundTrip(t *testing.T) {
 			arr := array.NewExtensionArrayWithStorage(typ, storage)
 			defer arr.Release()
 
-			batch := array.NewRecord(arrow.NewSchema([]arrow.Field{{Name: "field", Type: typ, Nullable: true}}, nil),
+			batch := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{{Name: "field", Type: typ, Nullable: true}}, nil),
 				[]arrow.Array{arr}, -1)
 			defer batch.Release()
 
@@ -239,7 +239,7 @@ func TestJSONRecordToJSON(t *testing.T) {
 			jsonArr, ok := arr.(*extensions.JSONArray)
 			require.True(t, ok)
 
-			rec := array.NewRecord(arrow.NewSchema([]arrow.Field{{Name: "json", Type: typ, Nullable: true}}, nil), []arrow.Array{jsonArr}, 6)
+			rec := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{{Name: "json", Type: typ, Nullable: true}}, nil), []arrow.Array{jsonArr}, 6)
 			defer rec.Release()
 
 			buf := bytes.NewBuffer([]byte("\n")) // expected output has leading newline for clearer formatting

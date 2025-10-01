@@ -80,7 +80,7 @@ func TestUnionSliceEquals(t *testing.T) {
 	defer sparse.Release()
 	defer dense.Release()
 
-	batch := array.NewRecord(schema, []arrow.Array{sparse, dense}, -1)
+	batch := array.NewRecordBatch(schema, []arrow.Array{sparse, dense}, -1)
 	defer batch.Release()
 
 	checkUnion := func(arr arrow.Array) {

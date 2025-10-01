@@ -70,7 +70,7 @@ func Example_writer() {
 	b.Field(1).(*array.Float64Builder).AppendValues([]float64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, nil)
 	b.Field(2).(*array.StringBuilder).AppendValues([]string{"str-0", "str-1", "str-2", "str-3", "str-4", "str-5", "str-6", "str-7", "str-8", "str-9"}, nil)
 
-	rec := b.NewRecord()
+	rec := b.NewRecordBatch()
 	defer rec.Release()
 
 	w := csv.NewWriter(f, schema, csv.WithComma(';'))
@@ -94,7 +94,7 @@ func Example_writer() {
 
 	n := 0
 	for r.Next() {
-		rec := r.Record()
+		rec := r.RecordBatch()
 		for i, col := range rec.Columns() {
 			fmt.Printf("rec[%d][%q]: %v\n", n, rec.ColumnName(i), col)
 		}
@@ -300,7 +300,7 @@ func testCSVWriter(t *testing.T, data [][]string, writeHeader bool, fmtr func(bo
 		field.AppendNull()
 	}
 
-	rec := b.NewRecord()
+	rec := b.NewRecordBatch()
 	defer rec.Release()
 
 	w := csv.NewWriter(f, schema,
@@ -419,7 +419,7 @@ func BenchmarkWrite(b *testing.B) {
 		bldr.Field(15).(*array.Decimal256Builder).Append(decimal256.FromI64(int64(i)))
 	}
 
-	rec := bldr.NewRecord()
+	rec := bldr.NewRecordBatch()
 	defer rec.Release()
 
 	w := csv.NewWriter(io.Discard, schema, csv.WithComma(';'), csv.WithCRLF(false))
@@ -470,7 +470,7 @@ func TestParquetTestingCSVWriter(t *testing.T) {
 		require.NoError(t, err)
 
 		for recordReader.Next() {
-			rec := recordReader.Record()
+			rec := recordReader.RecordBatch()
 			err := csvWriter.Write(rec)
 			require.NoError(t, err)
 		}
@@ -519,7 +519,7 @@ func TestParquetTestingCSVWriter(t *testing.T) {
 		require.NoError(t, err)
 
 		for recordReader.Next() {
-			rec := recordReader.Record()
+			rec := recordReader.RecordBatch()
 			err := csvWriter.Write(rec)
 			require.NoError(t, err)
 		}
@@ -617,7 +617,7 @@ func TestCustomTypeConversion(t *testing.T) {
 	require.NoError(t, err)
 
 	for recordReader.Next() {
-		rec := recordReader.Record()
+		rec := recordReader.RecordBatch()
 		err := csvWriter.Write(rec)
 		require.NoError(t, err)
 	}

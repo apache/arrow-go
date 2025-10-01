@@ -127,7 +127,7 @@ func (s *FlightSqliteServerSuite) TestCommandStatementQuery() {
 	defer rdr.Release()
 
 	s.True(rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	s.NotNil(rec)
 
 	expectedSchema := arrow.NewSchema([]arrow.Field{
@@ -148,7 +148,7 @@ func (s *FlightSqliteServerSuite) TestCommandStatementQuery() {
 	foreignarr := s.fromJSON(arrow.PrimitiveTypes.Int64, `[1, 1, 1, null]`)
 	defer foreignarr.Release()
 
-	expectedRec := array.NewRecord(expectedSchema, []arrow.Array{idarr, keyarr, valarr, foreignarr}, 4)
+	expectedRec := array.NewRecordBatch(expectedSchema, []arrow.Array{idarr, keyarr, valarr, foreignarr}, 4)
 	defer expectedRec.Release()
 
 	s.Truef(array.RecordEqual(expectedRec, rec), "expected: %s\ngot: %s", expectedRec, rec)
@@ -175,11 +175,11 @@ func (s *FlightSqliteServerSuite) TestCommandGetTables() {
 	tableType := s.fromJSON(arrow.BinaryTypes.String, `["table", "table", "table"]`)
 	defer tableType.Release()
 
-	expectedRec := array.NewRecord(schema_ref.Tables, []arrow.Array{catalogName, schemaName, tableName, tableType}, 3)
+	expectedRec := array.NewRecordBatch(schema_ref.Tables, []arrow.Array{catalogName, schemaName, tableName, tableType}, 3)
 	defer expectedRec.Release()
 
 	s.True(rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	s.NotNil(rec)
 	rec.Retain()
 	defer rec.Release()
@@ -222,7 +222,7 @@ func (s *FlightSqliteServerSuite) TestCommandGetTablesWithTableFilter() {
 	schema := s.fromJSON(arrow.BinaryTypes.String, `[""]`)
 	table := s.fromJSON(arrow.BinaryTypes.String, `["intTable"]`)
 	tabletype := s.fromJSON(arrow.BinaryTypes.String, `["table"]`)
-	expected := array.NewRecord(schema_ref.Tables, []arrow.Array{catalog, schema, table, tabletype}, 1)
+	expected := array.NewRecordBatch(schema_ref.Tables, []arrow.Array{catalog, schema, table, tabletype}, 1)
 	defer func() {
 		catalog.Release()
 		schema.Release()
@@ -232,7 +232,7 @@ func (s *FlightSqliteServerSuite) TestCommandGetTablesWithTableFilter() {
 	}()
 
 	s.True(rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	s.NotNil(rec)
 	rec.Retain()
 	defer rec.Release()
@@ -280,11 +280,11 @@ func (s *FlightSqliteServerSuite) TestCommandGetTablesWithExistingTableTypeFilte
 	tableType := s.fromJSON(arrow.BinaryTypes.String, `["table", "table", "table"]`)
 	defer tableType.Release()
 
-	expectedRec := array.NewRecord(schema_ref.Tables, []arrow.Array{catalogName, schemaName, tableName, tableType}, 3)
+	expectedRec := array.NewRecordBatch(schema_ref.Tables, []arrow.Array{catalogName, schemaName, tableName, tableType}, 3)
 	defer expectedRec.Release()
 
 	s.True(rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	s.NotNil(rec)
 	rec.Retain()
 	defer rec.Release()
@@ -328,7 +328,7 @@ func (s *FlightSqliteServerSuite) TestCommandGetTablesWithIncludedSchemas() {
 	binaryBldr.Append(schemaBuf)
 	schemaCol := binaryBldr.NewArray()
 
-	expected := array.NewRecord(schema_ref.TablesWithIncludedSchema, []arrow.Array{catalog, schema, table, tabletype, schemaCol}, 1)
+	expected := array.NewRecordBatch(schema_ref.TablesWithIncludedSchema, []arrow.Array{catalog, schema, table, tabletype, schemaCol}, 1)
 	defer func() {
 		catalog.Release()
 		schema.Release()
@@ -340,7 +340,7 @@ func (s *FlightSqliteServerSuite) TestCommandGetTablesWithIncludedSchemas() {
 	}()
 
 	s.True(rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	s.NotNil(rec)
 	rec.Retain()
 	defer rec.Release()
@@ -362,7 +362,7 @@ func (s *FlightSqliteServerSuite) TestCommandGetTypeInfo() {
 	defer expected.Release()
 
 	s.True(rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	s.Truef(array.RecordEqual(expected, rec), "expected: %s\ngot: %s", expected, rec)
 	s.False(rdr.Next())
 }
@@ -379,7 +379,7 @@ func (s *FlightSqliteServerSuite) TestCommandGetTypeInfoFiltered() {
 	defer expected.Release()
 
 	s.True(rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	s.Truef(array.RecordEqual(expected, rec), "expected: %s\ngot: %s", expected, rec)
 	s.False(rdr.Next())
 }
@@ -395,12 +395,12 @@ func (s *FlightSqliteServerSuite) TestCommandGetCatalogs() {
 	s.True(rdr.Schema().Equal(schema_ref.Catalogs), rdr.Schema().String())
 
 	catalog := s.fromJSON(arrow.BinaryTypes.String, `["main"]`)
-	expected := array.NewRecord(schema_ref.Catalogs, []arrow.Array{catalog}, 1)
+	expected := array.NewRecordBatch(schema_ref.Catalogs, []arrow.Array{catalog}, 1)
 	defer catalog.Release()
 	defer expected.Release()
 
 	s.True(rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	s.NotNil(rec)
 	rec.Retain()
 	defer rec.Release()
@@ -421,13 +421,13 @@ func (s *FlightSqliteServerSuite) TestCommandGetDbSchemas() {
 
 	catalog := s.fromJSON(arrow.BinaryTypes.String, `["main"]`)
 	schema := s.fromJSON(arrow.BinaryTypes.String, `[""]`)
-	expected := array.NewRecord(schema_ref.DBSchemas, []arrow.Array{catalog, schema}, 1)
+	expected := array.NewRecordBatch(schema_ref.DBSchemas, []arrow.Array{catalog, schema}, 1)
 	defer catalog.Release()
 	defer schema.Release()
 	defer expected.Release()
 
 	s.True(rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	s.NotNil(rec)
 	rec.Retain()
 	defer rec.Release()
@@ -446,11 +446,11 @@ func (s *FlightSqliteServerSuite) TestCommandGetTableTypes() {
 
 	expected := s.fromJSON(arrow.BinaryTypes.String, `["table"]`)
 	defer expected.Release()
-	expectedRec := array.NewRecord(schema_ref.TableTypes, []arrow.Array{expected}, 1)
+	expectedRec := array.NewRecordBatch(schema_ref.TableTypes, []arrow.Array{expected}, 1)
 	defer expectedRec.Release()
 
 	s.True(rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	s.Truef(array.RecordEqual(expectedRec, rec), "expected: %s\ngot: %s", expected, rec)
 	s.False(rdr.Next())
 }
@@ -498,11 +498,11 @@ func (s *FlightSqliteServerSuite) TestCommandPreparedStatementQuery() {
 	foreignIdArr := s.fromJSON(arrow.PrimitiveTypes.Int64, `[1, 1, 1, null]`)
 	defer foreignIdArr.Release()
 
-	expected := array.NewRecord(expectedSchema, []arrow.Array{idArr, keyNameArr, valueArr, foreignIdArr}, 4)
+	expected := array.NewRecordBatch(expectedSchema, []arrow.Array{idArr, keyNameArr, valueArr, foreignIdArr}, 4)
 	defer expected.Release()
 
 	s.True(rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	s.Truef(array.RecordEqual(expected, rec), "expected: %s\ngot: %s", expected, rec)
 	s.False(rdr.Next())
 }
@@ -522,7 +522,7 @@ func (s *FlightSqliteServerSuite) TestCommandPreparedStatementQueryWithParams() 
 	paramArr, _ := array.NewDenseUnionFromArraysWithFields(typeIDs,
 		offsets, []arrow.Array{strArray, bytesArr, bigintArr, dblArr},
 		[]string{"string", "bytes", "bigint", "double"})
-	batch := array.NewRecord(arrow.NewSchema([]arrow.Field{
+	batch := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{
 		{Name: "parameter_1", Type: paramArr.DataType()}}, nil),
 		[]arrow.Array{paramArr}, 1)
 	defer func() {
@@ -557,11 +557,11 @@ func (s *FlightSqliteServerSuite) TestCommandPreparedStatementQueryWithParams() 
 	foreignIdArr := s.fromJSON(arrow.PrimitiveTypes.Int64, `[1, 1]`)
 	defer foreignIdArr.Release()
 
-	expected := array.NewRecord(expectedSchema, []arrow.Array{idArr, keyNameArr, valueArr, foreignIdArr}, 2)
+	expected := array.NewRecordBatch(expectedSchema, []arrow.Array{idArr, keyNameArr, valueArr, foreignIdArr}, 2)
 	defer expected.Release()
 
 	s.True(rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	s.Truef(array.RecordEqual(expected, rec), "expected: %s\ngot: %s", expected, rec)
 	s.False(rdr.Next())
 }
@@ -594,7 +594,7 @@ func (s *FlightSqliteServerSuite) TestCommandPreparedStatementUpdateWithParams()
 		offsets, []arrow.Array{strArray, bytesArr, bigintArr, dblArr},
 		[]string{"string", "bytes", "bigint", "double"})
 	s.NoError(err)
-	batch := array.NewRecord(arrow.NewSchema([]arrow.Field{
+	batch := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{
 		{Name: "parameter_1", Type: paramArr.DataType()}}, nil),
 		[]arrow.Array{paramArr}, 1)
 	defer func() {
@@ -653,11 +653,11 @@ func (s *FlightSqliteServerSuite) TestCommandGetPrimaryKeys() {
 	bldr.Field(3).(*array.StringBuilder).Append("id")
 	bldr.Field(4).(*array.Int32Builder).Append(1)
 	bldr.Field(5).AppendNull()
-	expected := bldr.NewRecord()
+	expected := bldr.NewRecordBatch()
 	defer expected.Release()
 
 	s.True(rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	s.Truef(array.RecordEqual(expected, rec), "expected: %s\ngot: %s", expected, rec)
 	s.False(rdr.Next())
 }
@@ -685,11 +685,11 @@ func (s *FlightSqliteServerSuite) TestCommandGetImportedKeys() {
 	bldr.Field(10).AppendNull()
 	bldr.Field(11).(*array.Uint8Builder).Append(3)
 	bldr.Field(12).(*array.Uint8Builder).Append(3)
-	expected := bldr.NewRecord()
+	expected := bldr.NewRecordBatch()
 	defer expected.Release()
 
 	s.True(rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	s.Truef(array.RecordEqual(expected, rec), "expected: %s\ngot: %s", expected, rec)
 	s.False(rdr.Next())
 }
@@ -717,11 +717,11 @@ func (s *FlightSqliteServerSuite) TestCommandGetExportedKeys() {
 	bldr.Field(10).AppendNull()
 	bldr.Field(11).(*array.Uint8Builder).Append(3)
 	bldr.Field(12).(*array.Uint8Builder).Append(3)
-	expected := bldr.NewRecord()
+	expected := bldr.NewRecordBatch()
 	defer expected.Release()
 
 	s.True(rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	s.Truef(array.RecordEqual(expected, rec), "expected: %s\ngot: %s", expected, rec)
 	s.False(rdr.Next())
 }
@@ -751,11 +751,11 @@ func (s *FlightSqliteServerSuite) TestCommandGetCrossRef() {
 	bldr.Field(10).AppendNull()
 	bldr.Field(11).(*array.Uint8Builder).Append(3)
 	bldr.Field(12).(*array.Uint8Builder).Append(3)
-	expected := bldr.NewRecord()
+	expected := bldr.NewRecordBatch()
 	defer expected.Release()
 
 	s.True(rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	s.Truef(array.RecordEqual(expected, rec), "expected: %s\ngot: %s", expected, rec)
 	s.False(rdr.Next())
 }
@@ -823,7 +823,7 @@ func (s *FlightSqliteServerSuite) TestCommandGetSqlInfo() {
 	defer rdr.Release()
 
 	s.True(rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	rec.Retain()
 	defer rec.Release()
 	s.False(rdr.Next())
@@ -863,9 +863,9 @@ func (s *FlightSqliteServerSuite) TestTransactions() {
 
 	toTable := func(r *flight.Reader) arrow.Table {
 		defer r.Release()
-		recs := make([]arrow.Record, 0)
+		recs := make([]arrow.RecordBatch, 0)
 		for rdr.Next() {
-			r := rdr.Record()
+			r := rdr.RecordBatch()
 			r.Retain()
 			defer r.Release()
 			recs = append(recs, r)

@@ -66,7 +66,7 @@ func TestRecord(t *testing.T) {
 	defer col2_1.Release()
 
 	cols := []arrow.Array{col1, col2}
-	rec := array.NewRecord(schema, cols, -1)
+	rec := array.NewRecordBatch(schema, cols, -1)
 	defer rec.Release()
 
 	rec.Retain()
@@ -232,7 +232,7 @@ func TestRecord(t *testing.T) {
 					}
 				}()
 			}
-			rec := array.NewRecord(tc.schema, tc.cols, tc.rows)
+			rec := array.NewRecordBatch(tc.schema, tc.cols, tc.rows)
 			defer rec.Release()
 			if got, want := rec.NumRows(), tc.rows; got != want {
 				t.Fatalf("invalid number of rows: got=%d, want=%d", got, want)
@@ -252,7 +252,7 @@ func TestRecordReader(t *testing.T) {
 		},
 		nil,
 	)
-	rec1 := func() arrow.Record {
+	rec1 := func() arrow.RecordBatch {
 		col1 := func() arrow.Array {
 			ib := array.NewInt32Builder(mem)
 			defer ib.Release()
@@ -272,11 +272,11 @@ func TestRecordReader(t *testing.T) {
 		defer col2.Release()
 
 		cols := []arrow.Array{col1, col2}
-		return array.NewRecord(schema, cols, -1)
+		return array.NewRecordBatch(schema, cols, -1)
 	}()
 	defer rec1.Release()
 
-	rec2 := func() arrow.Record {
+	rec2 := func() arrow.RecordBatch {
 		col1 := func() arrow.Array {
 			ib := array.NewInt32Builder(mem)
 			defer ib.Release()
@@ -296,11 +296,11 @@ func TestRecordReader(t *testing.T) {
 		defer col2.Release()
 
 		cols := []arrow.Array{col1, col2}
-		return array.NewRecord(schema, cols, -1)
+		return array.NewRecordBatch(schema, cols, -1)
 	}()
 	defer rec2.Release()
 
-	recs := []arrow.Record{rec1, rec2}
+	recs := []arrow.RecordBatch{rec1, rec2}
 	t.Run("simple reader", func(t *testing.T) {
 		itr, err := array.NewRecordReader(schema, recs)
 		if err != nil {
@@ -318,7 +318,7 @@ func TestRecordReader(t *testing.T) {
 		n := 0
 		for itr.Next() {
 			n++
-			if got, want := itr.Record(), recs[n-1]; !reflect.DeepEqual(got, want) {
+			if got, want := itr.RecordBatch(), recs[n-1]; !reflect.DeepEqual(got, want) {
 				t.Fatalf("itr[%d], invalid record. got=%#v, want=%#v", n-1, got, want)
 			}
 		}
@@ -332,7 +332,7 @@ func TestRecordReader(t *testing.T) {
 	})
 
 	t.Run("iter to reader", func(t *testing.T) {
-		itr := func(yield func(arrow.Record, error) bool) {
+		itr := func(yield func(arrow.RecordBatch, error) bool) {
 			for _, r := range recs {
 				if !yield(r, nil) {
 					return
@@ -357,8 +357,8 @@ func TestRecordReader(t *testing.T) {
 			// by default it will release records when the reader is released
 			// leading to too many releases on the original record
 			// so we retain it to keep it from going away while the test runs
-			rdr.Record().Retain()
-			if got, want := rdr.Record(), recs[n-1]; !reflect.DeepEqual(got, want) {
+			rdr.RecordBatch().Retain()
+			if got, want := rdr.RecordBatch(), recs[n-1]; !reflect.DeepEqual(got, want) {
 				t.Fatalf("itr[%d], invalid record. got=%#v, want=%#v", n-1, got, want)
 			}
 		}
@@ -465,7 +465,7 @@ func TestRecordBuilderRespectsFixedSizeArrayNullability(t *testing.T) {
 			vb := lb.ValueBuilder().(*array.Int32Builder)
 			vb.Append(10)
 
-			rec := b.NewRecord()
+			rec := b.NewRecordBatch()
 			defer rec.Release()
 
 			if got, want := rec.Column(0).String(), "[[10]]"; got != want {
@@ -510,7 +510,7 @@ func TestRecordBuilder(t *testing.T) {
 		}
 	}
 
-	rec := b.NewRecord()
+	rec := b.NewRecordBatch()
 	defer rec.Release()
 
 	if got, want := rec.Schema(), schema; !got.Equal(want) {
@@ -614,7 +614,7 @@ var testMessageSchema = arrow.NewSchema(
 	nil,
 )
 
-func (m *testMessage) Fill(rec arrow.Record, row int) error {
+func (m *testMessage) Fill(rec arrow.RecordBatch, row int) error {
 	m.Reset()
 
 	// foo
@@ -713,8 +713,8 @@ type testMessageArrowRecordBuilder struct {
 	rb *array.RecordBuilder
 }
 
-func (b *testMessageArrowRecordBuilder) Build() arrow.Record {
-	return b.rb.NewRecord()
+func (b *testMessageArrowRecordBuilder) Build() arrow.RecordBatch {
+	return b.rb.NewRecordBatch()
 }
 
 func (b *testMessageArrowRecordBuilder) Release() {

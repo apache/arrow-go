@@ -774,7 +774,7 @@ func TestRecordBatch(t *testing.T) {
 	assert.Equal(t, "a", rbschema.Field(0).Name)
 	assert.Equal(t, "b", rbschema.Field(1).Name)
 
-	rec := array.NewRecord(rbschema, []arrow.Array{arr.(*array.Struct).Field(0), arr.(*array.Struct).Field(1)}, -1)
+	rec := array.NewRecordBatch(rbschema, []arrow.Array{arr.(*array.Struct).Field(0), arr.(*array.Struct).Field(1)}, -1)
 	defer rec.Release()
 
 	assert.True(t, array.RecordEqual(rb, rec))
@@ -855,7 +855,7 @@ func TestExportRecordReaderStreamLifetime(t *testing.T) {
 	arr := bldr.NewArray()
 	defer arr.Release()
 
-	rec := array.NewRecord(schema, []arrow.Array{arr}, 0)
+	rec := array.NewRecordBatch(schema, []arrow.Array{arr}, 0)
 	defer rec.Release()
 
 	rdr, _ := array.NewRecordReader(schema, []arrow.RecordBatch{rec})

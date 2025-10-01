@@ -284,7 +284,7 @@ records: 3
 
 				var w interface {
 					io.Closer
-					Write(arrow.Record) error
+					Write(arrow.RecordBatch) error
 				}
 
 				switch {

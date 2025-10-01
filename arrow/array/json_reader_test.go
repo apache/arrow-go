@@ -60,7 +60,7 @@ func TestJSONReader(t *testing.T) {
 	n := 0
 	for rdr.Next() {
 		n++
-		rec := rdr.Record()
+		rec := rdr.RecordBatch()
 		assert.NotNil(t, rec)
 		assert.EqualValues(t, 1, rec.NumRows())
 		assert.EqualValues(t, 3, rec.NumCols())
@@ -84,7 +84,7 @@ func TestJSONReaderAll(t *testing.T) {
 	defer rdr.Release()
 
 	assert.True(t, rdr.Next())
-	rec := rdr.Record()
+	rec := rdr.RecordBatch()
 	assert.NotNil(t, rec)
 	assert.NoError(t, rdr.Err())
 
@@ -109,7 +109,7 @@ func TestJSONReaderChunked(t *testing.T) {
 	n := 0
 	for rdr.Next() {
 		n++
-		rec := rdr.Record()
+		rec := rdr.RecordBatch()
 		assert.NotNil(t, rec)
 		assert.NoError(t, rdr.Err())
 		assert.EqualValues(t, 4, rec.NumRows())
@@ -137,7 +137,7 @@ func TestUnmarshalJSON(t *testing.T) {
 	err := recordBuilder.UnmarshalJSON([]byte(jsondata))
 	assert.NoError(t, err)
 
-	record := recordBuilder.NewRecord()
+	record := recordBuilder.NewRecordBatch()
 	defer record.Release()
 
 	assert.NotNil(t, record)
@@ -243,7 +243,7 @@ func BenchmarkJSONReader(b *testing.B) {
 
 						var totalRows int64
 						for jsonRdr.Next() {
-							rec := jsonRdr.Record()
+							rec := jsonRdr.RecordBatch()
 							totalRows += rec.NumRows()
 						}
 

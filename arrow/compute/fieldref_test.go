@@ -267,7 +267,7 @@ func TestFieldRefRecord(t *testing.T) {
 	gamma := gammaBldr.NewStructArray()
 	defer gamma.Release()
 
-	rec := array.NewRecord(arrow.NewSchema([]arrow.Field{
+	rec := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{
 		{Name: "alpha", Type: alpha.DataType(), Nullable: true},
 		{Name: "alpha", Type: beta.DataType(), Nullable: true},
 		{Name: "alpha", Type: gamma.DataType(), Nullable: true},
