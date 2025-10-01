@@ -34,8 +34,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/substrait-io/substrait-go/v4/expr"
-	"github.com/substrait-io/substrait-go/v4/types"
+	"github.com/substrait-io/substrait-go/v7/expr"
+	"github.com/substrait-io/substrait-go/v7/types"
 )
 
 var (

@@ -26,7 +26,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/compute"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
-	"github.com/substrait-io/substrait-go/v4/expr"
+	"github.com/substrait-io/substrait-go/v7/expr"
 )
 
 func getFields(typ arrow.DataType) []arrow.Field {
