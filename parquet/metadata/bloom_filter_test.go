@@ -207,38 +207,27 @@ func TestAdaptiveBloomFilterEdgeCases(t *testing.T) {
 		bf.InsertBulk(hashes)
 
 		expectedDistinct := initialDistinct + 1
-		if bf.numDistinct != expectedDistinct {
-			t.Errorf("InsertBulk duplicate handling bug: expected numDistinct=%d, got %d",
-				expectedDistinct, bf.numDistinct)
-		}
+		assert.Equal(t, expectedDistinct, bf.numDistinct)
 	})
 
 	t.Run("candidate selection uses correct comparison logic", func(t *testing.T) {
 		// Use larger maxBytes and more candidates to ensure multiple candidates are created
 		bf := NewAdaptiveBlockSplitBloomFilter(8192, 5, 0.01, col, mem).(*adaptiveBlockSplitBloomFilter)
 
-		if len(bf.candidates) < 2 {
-			t.Skip("Need at least 2 candidates to test comparison functions")
-		}
+		assert.GreaterOrEqual(t, len(bf.candidates), 2, "Expected at least 2 candidates with numCandidates=5")
 
 		// Test MinFunc - should return the candidate with smallest size
 		optimal := bf.optimalCandidate()
 		minSize := optimal.bloomFilter.Size()
 
 		for _, c := range bf.candidates {
-			if c.bloomFilter.Size() < minSize {
-				t.Errorf("optimalCandidate() sign error: found candidate with smaller size %d < %d",
-					c.bloomFilter.Size(), minSize)
-			}
+			assert.GreaterOrEqual(t, c.bloomFilter.Size(), minSize)
 		}
 
 		// Test MaxFunc - largestCandidate should have the largest size
 		maxSize := bf.largestCandidate.bloomFilter.Size()
 		for _, c := range bf.candidates {
-			if c.bloomFilter.Size() > maxSize {
-				t.Errorf("largestCandidate sign error: found candidate with larger size %d > %d",
-					c.bloomFilter.Size(), maxSize)
-			}
+			assert.LessOrEqual(t, c.bloomFilter.Size(), maxSize)
 		}
 	})
 
@@ -255,9 +244,7 @@ func TestAdaptiveBloomFilterEdgeCases(t *testing.T) {
 
 		// The bloom filter should still work after GC
 		for _, h := range hashes {
-			if !bf.CheckHash(h) {
-				t.Errorf("Hash %d not found after GC - potential GC safety issue", h)
-			}
+			assert.Truef(t, bf.CheckHash(h), "hash %d not found after GC - potential GC safety issue", h)
 		}
 	})
 }
@@ -306,10 +293,7 @@ func TestAdaptiveBloomFilterEndToEnd(t *testing.T) {
 
 		// Verify all original values are found
 		for _, val := range testValues {
-			hash := GetHash(hasher, val)
-			if !bf.CheckHash(hash) {
-				t.Errorf("Value %q (hash %d) not found in bloom filter", val, hash)
-			}
+			assert.True(t, bf.CheckHash(GetHash(hasher, val)))
 		}
 
 		// Verify absent values are (most likely) not found
@@ -347,28 +331,21 @@ func TestAdaptiveBloomFilterEndToEnd(t *testing.T) {
 
 		// Should only increment numDistinct by 1, not 100
 		expectedDistinct := initialDistinct + 1
-		if bf.numDistinct != expectedDistinct {
-			t.Errorf("Duplicate handling failed: expected numDistinct=%d, got %d",
-				expectedDistinct, bf.numDistinct)
-		}
+		assert.Equal(t, expectedDistinct, bf.numDistinct)
 
 		// The value should still be findable
-		if !bf.CheckHash(testHash) {
-			t.Error("Hash not found after bulk insert with duplicates")
-		}
+		assert.True(t, bf.CheckHash(testHash))
 	})
 
 	t.Run("verify optimal candidate selection", func(t *testing.T) {
 		// Create bloom filter with multiple candidates
 		bf := NewAdaptiveBlockSplitBloomFilter(4096, 4, 0.01, col, mem).(*adaptiveBlockSplitBloomFilter)
 
-		if len(bf.candidates) < 2 {
-			t.Skip("Need multiple candidates to test selection logic")
-		}
+		assert.GreaterOrEqual(t, len(bf.candidates), 2, "Expected at least 2 candidates with numCandidates=4")
 
 		// Insert some data to trigger candidate elimination
 		hasher := bf.Hasher()
-		for i, val := range testValues {
+		for _, val := range testValues {
 			hash := GetHash(hasher, val)
 			bf.InsertHash(hash)
 
@@ -376,10 +353,7 @@ func TestAdaptiveBloomFilterEndToEnd(t *testing.T) {
 			optimal := bf.optimalCandidate()
 			largest := bf.largestCandidate
 
-			if optimal.bloomFilter.Size() > largest.bloomFilter.Size() {
-				t.Errorf("Iteration %d: optimal candidate size (%d) > largest candidate size (%d)",
-					i, optimal.bloomFilter.Size(), largest.bloomFilter.Size())
-			}
+			assert.LessOrEqual(t, optimal.bloomFilter.Size(), largest.bloomFilter.Size())
 		}
 
 		t.Logf("Final candidates: %d, optimal size: %d bytes",
