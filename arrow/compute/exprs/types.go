@@ -37,10 +37,10 @@ const (
 	ArrowExtTypesUrn          = "https://github.com/apache/arrow/blob/main/format/substrait/extension_types.yaml"
 	SubstraitDefaultURIPrefix = extensions.SubstraitDefaultURNPrefix
 	// URN for official Substrait Arithmetic funcs extensions
-	SubstraitArithmeticFuncsURI = SubstraitDefaultURIPrefix + "functions_arithmetic.yaml"
+	SubstraitArithmeticFuncsURI = SubstraitDefaultURIPrefix + "functions_arithmetic"
 	// URN for official Substrait Comparison funcs extensions
-	SubstraitComparisonFuncsURI = SubstraitDefaultURIPrefix + "functions_comparison.yaml"
-	SubstraitBooleanFuncsURI    = SubstraitDefaultURIPrefix + "functions_boolean.yaml"
+	SubstraitComparisonFuncsURI = SubstraitDefaultURIPrefix + "functions_comparison"
+	SubstraitBooleanFuncsURI    = SubstraitDefaultURIPrefix + "functions_boolean"
 
 	SubstraitIcebergSetFuncURI = "https://github.com/apache/iceberg-go/blob/main/table/substrait/functions_set.yaml"
 	TimestampTzTimezone        = "UTC"
