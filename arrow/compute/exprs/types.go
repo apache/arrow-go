@@ -27,20 +27,20 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
-	"github.com/substrait-io/substrait-go/v4/expr"
-	"github.com/substrait-io/substrait-go/v4/extensions"
-	"github.com/substrait-io/substrait-go/v4/types"
+	"github.com/substrait-io/substrait-go/v7/expr"
+	"github.com/substrait-io/substrait-go/v7/extensions"
+	"github.com/substrait-io/substrait-go/v7/types"
 )
 
 const (
-	// URI for official Arrow Substrait Extension Types
-	ArrowExtTypesUri          = "https://github.com/apache/arrow/blob/main/format/substrait/extension_types.yaml"
-	SubstraitDefaultURIPrefix = extensions.SubstraitDefaultURIPrefix
-	// URI for official Substrait Arithmetic funcs extensions
-	SubstraitArithmeticFuncsURI = SubstraitDefaultURIPrefix + "functions_arithmetic.yaml"
-	// URI for official Substrait Comparison funcs extensions
-	SubstraitComparisonFuncsURI = SubstraitDefaultURIPrefix + "functions_comparison.yaml"
-	SubstraitBooleanFuncsURI    = SubstraitDefaultURIPrefix + "functions_boolean.yaml"
+	// URN for official Arrow Substrait Extension Types
+	ArrowExtTypesUrn          = "https://github.com/apache/arrow/blob/main/format/substrait/extension_types.yaml"
+	SubstraitDefaultURIPrefix = extensions.SubstraitDefaultURNPrefix
+	// URN for official Substrait Arithmetic funcs extensions
+	SubstraitArithmeticFuncsURI = SubstraitDefaultURIPrefix + "functions_arithmetic"
+	// URN for official Substrait Comparison funcs extensions
+	SubstraitComparisonFuncsURI = SubstraitDefaultURIPrefix + "functions_comparison"
+	SubstraitBooleanFuncsURI    = SubstraitDefaultURIPrefix + "functions_boolean"
 
 	SubstraitIcebergSetFuncURI = "https://github.com/apache/iceberg-go/blob/main/table/substrait/functions_set.yaml"
 	TimestampTzTimezone        = "UTC"
@@ -72,7 +72,7 @@ func init() {
 
 	for _, t := range types {
 		err := DefaultExtensionIDRegistry.RegisterType(extensions.ID{
-			URI: ArrowExtTypesUri, Name: t.name}, t.dt)
+			URN: ArrowExtTypesUrn, Name: t.name}, t.dt)
 		if err != nil {
 			panic(err)
 		}
@@ -80,7 +80,7 @@ func init() {
 
 	for _, fn := range []string{"add", "subtract", "multiply", "divide", "power", "sqrt", "abs"} {
 		err := DefaultExtensionIDRegistry.AddSubstraitScalarToArrow(
-			extensions.ID{URI: SubstraitArithmeticFuncsURI, Name: fn},
+			extensions.ID{URN: SubstraitArithmeticFuncsURI, Name: fn},
 			decodeOptionlessOverflowableArithmetic(fn))
 		if err != nil {
 			panic(err)
@@ -90,7 +90,7 @@ func init() {
 	for _, fn := range []string{"add", "subtract", "multiply", "divide"} {
 		err := DefaultExtensionIDRegistry.AddArrowToSubstrait(fn,
 			encodeOptionlessOverflowableArithmetic(extensions.ID{
-				URI: SubstraitArithmeticFuncsURI, Name: fn}))
+				URN: SubstraitArithmeticFuncsURI, Name: fn}))
 		if err != nil {
 			panic(err)
 		}
@@ -98,7 +98,7 @@ func init() {
 
 	for _, fn := range []string{"equal", "not_equal", "lt", "lte", "gt", "gte", "is_null", "is_not_null", "is_nan"} {
 		err := DefaultExtensionIDRegistry.AddSubstraitScalarToArrow(
-			extensions.ID{URI: SubstraitComparisonFuncsURI, Name: fn},
+			extensions.ID{URN: SubstraitComparisonFuncsURI, Name: fn},
 			simpleMapSubstraitToArrowFunc)
 		if err != nil {
 			panic(err)
@@ -115,7 +115,7 @@ func init() {
 
 	for _, fn := range []string{"and", "or", "not"} {
 		err := DefaultExtensionIDRegistry.AddSubstraitScalarToArrow(
-			extensions.ID{URI: SubstraitBooleanFuncsURI, Name: fn},
+			extensions.ID{URN: SubstraitBooleanFuncsURI, Name: fn},
 			simpleMapSubstraitToArrowFunc)
 		if err != nil {
 			panic(err)
@@ -132,7 +132,7 @@ func init() {
 
 	for _, fn := range []string{"is_in"} {
 		err := DefaultExtensionIDRegistry.AddSubstraitScalarToArrow(
-			extensions.ID{URI: SubstraitIcebergSetFuncURI, Name: fn},
+			extensions.ID{URN: SubstraitIcebergSetFuncURI, Name: fn},
 			setLookupFuncSubstraitToArrowFunc)
 		if err != nil {
 			panic(err)
@@ -244,13 +244,13 @@ func simpleMapSubstraitToArrowFunc(sf *expr.ScalarFunction, input []compute.Datu
 	return
 }
 
-func simpleMapArrowToSubstraitFunc(uri string) arrowToSubstrait {
+func simpleMapArrowToSubstraitFunc(urn string) arrowToSubstrait {
 	return func(fname string) (extensions.ID, []*types.FunctionOption, error) {
 		f, ok := arrowToSubstraitFuncMap[fname]
 		if ok {
 			fname = f
 		}
-		return extensions.ID{URI: uri, Name: fname}, nil, nil
+		return extensions.ID{URN: urn, Name: fname}, nil, nil
 	}
 }
 
