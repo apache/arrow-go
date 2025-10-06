@@ -95,7 +95,7 @@ func Example_writeReadParquet() {
 	}
 
 	// Create a record
-	record := recordBuilder.NewRecord()
+	record := recordBuilder.NewRecordBatch()
 	if err := writer.Write(record); err != nil {
 		log.Fatalf("Failed to write record: %v", err)
 
@@ -153,7 +153,7 @@ func Example_writeReadParquet() {
 
 	for recordReader.Next() {
 		// Create a record
-		record := recordReader.Record()
+		record := recordReader.RecordBatch()
 
 		// Get columns
 		intCol := record.Column(0).(*array.Int32)

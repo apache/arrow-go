@@ -99,7 +99,7 @@ func makeNullRecords() []arrow.RecordBatch {
 
 	recs := make([]arrow.RecordBatch, len(chunks))
 	for i, chunk := range chunks {
-		recs[i] = array.NewRecord(schema, chunk, -1)
+		recs[i] = array.NewRecordBatch(schema, chunk, -1)
 	}
 
 	return recs
@@ -182,7 +182,7 @@ func makePrimitiveRecords() []arrow.RecordBatch {
 
 	recs := make([]arrow.RecordBatch, len(chunks))
 	for i, chunk := range chunks {
-		recs[i] = array.NewRecord(schema, chunk, -1)
+		recs[i] = array.NewRecordBatch(schema, chunk, -1)
 	}
 
 	return recs
@@ -260,7 +260,7 @@ func makeStructsRecords() []arrow.RecordBatch {
 
 	recs := make([]arrow.RecordBatch, len(chunks))
 	for i, chunk := range chunks {
-		recs[i] = array.NewRecord(schema, chunk, -1)
+		recs[i] = array.NewRecordBatch(schema, chunk, -1)
 	}
 
 	return recs
@@ -317,7 +317,7 @@ func makeListsRecords() []arrow.RecordBatch {
 
 	recs := make([]arrow.RecordBatch, len(chunks))
 	for i, chunk := range chunks {
-		recs[i] = array.NewRecord(schema, chunk, -1)
+		recs[i] = array.NewRecordBatch(schema, chunk, -1)
 	}
 
 	return recs
@@ -374,7 +374,7 @@ func makeListViewsRecords() []arrow.RecordBatch {
 
 	recs := make([]arrow.RecordBatch, len(chunks))
 	for i, chunk := range chunks {
-		recs[i] = array.NewRecord(schema, chunk, -1)
+		recs[i] = array.NewRecordBatch(schema, chunk, -1)
 	}
 
 	return recs
@@ -424,7 +424,7 @@ func makeFixedSizeListsRecords() []arrow.RecordBatch {
 
 	recs := make([]arrow.RecordBatch, len(chunks))
 	for i, chunk := range chunks {
-		recs[i] = array.NewRecord(schema, chunk, -1)
+		recs[i] = array.NewRecordBatch(schema, chunk, -1)
 	}
 
 	return recs
@@ -463,7 +463,7 @@ func makeStringsRecords() []arrow.RecordBatch {
 
 	recs := make([]arrow.RecordBatch, len(chunks))
 	for i, chunk := range chunks {
-		recs[i] = array.NewRecord(schema, chunk, -1)
+		recs[i] = array.NewRecordBatch(schema, chunk, -1)
 	}
 
 	return recs
@@ -564,7 +564,7 @@ func makeFixedWidthTypesRecords() []arrow.RecordBatch {
 
 	recs := make([]arrow.RecordBatch, len(chunks))
 	for i, chunk := range chunks {
-		recs[i] = array.NewRecord(schema, chunk, -1)
+		recs[i] = array.NewRecordBatch(schema, chunk, -1)
 	}
 
 	return recs
@@ -603,7 +603,7 @@ func makeFixedSizeBinariesRecords() []arrow.RecordBatch {
 
 	recs := make([]arrow.RecordBatch, len(chunks))
 	for i, chunk := range chunks {
-		recs[i] = array.NewRecord(schema, chunk, -1)
+		recs[i] = array.NewRecordBatch(schema, chunk, -1)
 	}
 
 	return recs
@@ -684,7 +684,7 @@ func makeIntervalsRecords() []arrow.RecordBatch {
 
 	recs := make([]arrow.RecordBatch, len(chunks))
 	for i, chunk := range chunks {
-		recs[i] = array.NewRecord(schema, chunk, -1)
+		recs[i] = array.NewRecordBatch(schema, chunk, -1)
 	}
 
 	return recs
@@ -741,7 +741,7 @@ func makeDurationsRecords() []arrow.RecordBatch {
 
 	recs := make([]arrow.RecordBatch, len(chunks))
 	for i, chunk := range chunks {
-		recs[i] = array.NewRecord(schema, chunk, -1)
+		recs[i] = array.NewRecordBatch(schema, chunk, -1)
 	}
 
 	return recs
@@ -791,7 +791,7 @@ func makeDecimal128sRecords() []arrow.RecordBatch {
 
 	recs := make([]arrow.RecordBatch, len(chunks))
 	for i, chunk := range chunks {
-		recs[i] = array.NewRecord(schema, chunk, -1)
+		recs[i] = array.NewRecordBatch(schema, chunk, -1)
 	}
 
 	return recs
@@ -836,7 +836,7 @@ func makeDecimal256sRecords() []arrow.RecordBatch {
 
 	recs := make([]arrow.RecordBatch, len(chunks))
 	for i, chunk := range chunks {
-		recs[i] = array.NewRecord(schema, chunk, -1)
+		recs[i] = array.NewRecordBatch(schema, chunk, -1)
 	}
 
 	return recs
@@ -958,7 +958,7 @@ func makeMapsRecords() []arrow.RecordBatch {
 
 	recs := make([]arrow.RecordBatch, len(chunks))
 	for i, chunk := range chunks {
-		recs[i] = array.NewRecord(schema, chunk, -1)
+		recs[i] = array.NewRecordBatch(schema, chunk, -1)
 	}
 
 	return recs
@@ -1037,7 +1037,7 @@ func makeExtensionRecords() []arrow.RecordBatch {
 
 	recs := make([]arrow.RecordBatch, len(chunks))
 	for i, chunk := range chunks {
-		recs[i] = array.NewRecord(schema, chunk, -1)
+		recs[i] = array.NewRecordBatch(schema, chunk, -1)
 	}
 
 	return recs
@@ -1101,8 +1101,8 @@ func makeUnionRecords() []arrow.RecordBatch {
 	defer dense2.Release()
 
 	return []arrow.RecordBatch{
-		array.NewRecord(schema, []arrow.Array{sparse1, dense1}, -1),
-		array.NewRecord(schema, []arrow.Array{sparse2, dense2}, -1)}
+		array.NewRecordBatch(schema, []arrow.Array{sparse1, dense1}, -1),
+		array.NewRecordBatch(schema, []arrow.Array{sparse2, dense2}, -1)}
 }
 
 func makeRunEndEncodedRecords() []arrow.RecordBatch {
@@ -1150,7 +1150,7 @@ func makeRunEndEncodedRecords() []arrow.RecordBatch {
 
 	recs := make([]arrow.RecordBatch, len(chunks))
 	for i, chunk := range chunks {
-		recs[i] = array.NewRecord(schema, chunk, -1)
+		recs[i] = array.NewRecordBatch(schema, chunk, -1)
 	}
 
 	return recs
@@ -1189,7 +1189,7 @@ func makeStringViewRecords() []arrow.RecordBatch {
 
 	recs := make([]arrow.RecordBatch, len(chunks))
 	for i, chunk := range chunks {
-		recs[i] = array.NewRecord(schema, chunk, -1)
+		recs[i] = array.NewRecordBatch(schema, chunk, -1)
 	}
 
 	return recs

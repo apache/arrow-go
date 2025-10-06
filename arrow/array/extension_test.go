@@ -70,7 +70,7 @@ func (e *ExtensionTypeTestSuite) TestParametricArrays() {
 	p4 := exampleParametric(pool, p4Type, []int32{5, 6, 7, 9}, nil)
 	defer p4.Release()
 
-	rb := array.NewRecord(arrow.NewSchema([]arrow.Field{
+	rb := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{
 		{Name: "f0", Type: p1Type, Nullable: true},
 		{Name: "f1", Type: p2Type, Nullable: true},
 		{Name: "f2", Type: p3Type, Nullable: true},

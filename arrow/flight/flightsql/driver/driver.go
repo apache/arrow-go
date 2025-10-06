@@ -43,9 +43,9 @@ type Rows struct {
 	// schema stores the row schema, like column names.
 	schema *arrow.Schema
 	// recordChan enables async reading from server, while client interates.
-	recordChan chan arrow.Record
+	recordChan chan arrow.RecordBatch
 	// currentRecord stores a record with n>=0 rows.
-	currentRecord arrow.Record
+	currentRecord arrow.RecordBatch
 	// currentRow tracks the position (row) within currentRecord.
 	currentRow uint64
 	// initializedChan prevents the row being used before properly initialized.
@@ -59,7 +59,7 @@ type Rows struct {
 
 func newRows() *Rows {
 	return &Rows{
-		recordChan:      make(chan arrow.Record, recordChanBufferSizeDefault),
+		recordChan:      make(chan arrow.RecordBatch, recordChanBufferSizeDefault),
 		initializedChan: make(chan bool),
 	}
 }
@@ -324,7 +324,7 @@ func (s *Stmt) setParameters(args []driver.NamedValue) error {
 		}
 	}
 
-	rec := recBuilder.NewRecord()
+	rec := recBuilder.NewRecordBatch()
 	defer rec.Release()
 
 	s.stmt.SetParameters(rec)
@@ -555,7 +555,7 @@ func (r *Rows) streamRecordset(ctx context.Context, c *flightsql.Client, endpoin
 					return
 				}
 
-				record := reader.Record()
+				record := reader.RecordBatch()
 				record.Retain()
 
 				if record.NumRows() < 1 {

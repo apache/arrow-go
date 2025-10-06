@@ -40,7 +40,7 @@ func TestReaderCatchPanic(t *testing.T) {
 	defer b.Release()
 
 	b.Field(0).(*array.StringBuilder).AppendValues([]string{"foo", "bar", "baz"}, nil)
-	rec := b.NewRecord()
+	rec := b.NewRecordBatch()
 	defer rec.Release()
 
 	buf := new(bytes.Buffer)
@@ -81,7 +81,7 @@ func TestReaderCheckedAllocator(t *testing.T) {
 	bldr.Append([]byte("bar"))
 	bldr.Append([]byte("baz"))
 
-	rec := b.NewRecord()
+	rec := b.NewRecordBatch()
 	defer rec.Release()
 
 	buf := new(bytes.Buffer)
@@ -105,10 +105,10 @@ func TestMappedReader(t *testing.T) {
 	defer b.Release()
 	b.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2, 3, 4}, []bool{true, true, false, true})
 
-	rec1 := b.NewRecord()
+	rec1 := b.NewRecordBatch()
 	defer rec1.Release()
 
-	tbl := array.NewTableFromRecords(schema, []arrow.Record{rec1})
+	tbl := array.NewTableFromRecords(schema, []arrow.RecordBatch{rec1})
 	defer tbl.Release()
 
 	var buf bytes.Buffer
@@ -121,7 +121,7 @@ func TestMappedReader(t *testing.T) {
 
 	n := 0
 	for tr.Next() {
-		rec := tr.Record()
+		rec := tr.RecordBatch()
 		for i, col := range rec.Columns() {
 			t.Logf("rec[%d][%q]: %v nulls:%v\n", n,
 				rec.ColumnName(i), col, col.NullBitmapBytes())
@@ -192,7 +192,7 @@ func BenchmarkIPC(b *testing.B) {
 	bldr.Append([]byte("bar"))
 	bldr.Append([]byte("baz"))
 
-	rec := rb.NewRecord()
+	rec := rb.NewRecordBatch()
 	defer rec.Release()
 
 	for _, codec := range []struct {

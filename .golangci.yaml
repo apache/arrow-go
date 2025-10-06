@@ -31,10 +31,6 @@ linters:
       - third_party$
       - builtin$
       - examples$
-    rules:
-      - linters:
-          - staticcheck
-        text: "SA1019"
 issues:
   fix: true
 formatters:

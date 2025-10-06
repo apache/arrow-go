@@ -127,7 +127,7 @@ func consumeFlightLocation(ctx context.Context, loc *flight.Location, tkt *fligh
 			return fmt.Errorf("got fewer batches than expected, received so far: %d, expected: %d", i, len(orig))
 		}
 
-		if !array.RecordEqual(chunk, rdr.Record()) {
+		if !array.RecordEqual(chunk, rdr.RecordBatch()) {
 			return fmt.Errorf("batch %d doesn't match", i)
 		}
 
@@ -334,7 +334,7 @@ func (s *defaultIntegrationTester) DoPut(stream flight.FlightService_DoPutServer
 	dataset.schema = rdr.Schema()
 	dataset.chunks = make([]arrow.RecordBatch, 0)
 	for rdr.Next() {
-		rec := rdr.Record()
+		rec := rdr.RecordBatch()
 		rec.Retain()
 
 		dataset.chunks = append(dataset.chunks, rec)
@@ -587,7 +587,7 @@ func (o *orderedScenarioTester) RunClient(addr string, opts ...grpc.DialOption) 
 		defer rdr.Release()
 
 		for rdr.Next() {
-			record := rdr.Record()
+			record := rdr.RecordBatch()
 			record.Retain()
 			defer record.Release()
 			recs = append(recs, record)
@@ -702,7 +702,7 @@ func (o *orderedScenarioTester) DoGet(tkt *flight.Ticket, fs flight.FlightServic
 		b.Field(0).(*array.Int32Builder).AppendValues([]int32{100, 200, 300}, nil)
 	}
 	w := flight.NewRecordWriter(fs, ipc.WithSchema(schema))
-	rec := b.NewRecord()
+	rec := b.NewRecordBatch()
 	defer rec.Release()
 	w.Write(rec)
 
@@ -816,7 +816,7 @@ func (tester *expirationTimeScenarioTester) DoGet(tkt *flight.Ticket, fs flight.
 	defer b.Release()
 	b.Field(0).(*array.Uint32Builder).AppendValues([]uint32{uint32(index)}, nil)
 	w := flight.NewRecordWriter(fs, ipc.WithSchema(schema))
-	rec := b.NewRecord()
+	rec := b.NewRecordBatch()
 	defer rec.Release()
 	w.Write(rec)
 
@@ -962,7 +962,7 @@ func (tester *expirationTimeDoGetScenarioTester) RunClient(addr string, opts ...
 		defer rdr.Release()
 
 		for rdr.Next() {
-			record := rdr.Record()
+			record := rdr.RecordBatch()
 			record.Retain()
 			defer record.Release()
 			recs = append(recs, record)
@@ -1673,7 +1673,7 @@ func (m *flightSqlScenarioTester) ValidatePreparedStatementExecution(client *fli
 
 	arr, _, _ := array.FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int64, strings.NewReader("[1]"))
 	defer arr.Release()
-	params := array.NewRecord(getQuerySchema(), []arrow.Array{arr}, 1)
+	params := array.NewRecordBatch(getQuerySchema(), []arrow.Array{arr}, 1)
 	defer params.Release()
 	prepared.SetParameters(params)
 
@@ -2316,7 +2316,7 @@ func (m *flightSqlExtensionScenarioTester) ValidateMetadataRetrieval(client *fli
 
 	infoValues := make(flightsql.SqlInfoResultMap)
 	for rdr.Next() {
-		rec := rdr.Record()
+		rec := rdr.RecordBatch()
 		names, values := rec.Column(0).(*array.Uint32), rec.Column(1).(*array.DenseUnion)
 
 		for i := 0; i < int(rec.NumRows()); i++ {
@@ -2439,7 +2439,7 @@ func (m *flightSqlExtensionScenarioTester) ValidateStatementExecution(client *fl
 func (m *flightSqlExtensionScenarioTester) ValidatePreparedStatementExecution(client *flightsql.Client) error {
 	arr, _, _ := array.FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int64, strings.NewReader("[1]"))
 	defer arr.Release()
-	params := array.NewRecord(getQuerySchema(), []arrow.Array{arr}, 1)
+	params := array.NewRecordBatch(getQuerySchema(), []arrow.Array{arr}, 1)
 	defer params.Release()
 
 	ctx := context.Background()
@@ -2564,7 +2564,7 @@ func (m *flightSqlExtensionScenarioTester) ValidateTransactions(client *flightsq
 
 	arr, _, _ := array.FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int64, strings.NewReader("[1]"))
 	defer arr.Release()
-	params := array.NewRecord(getQuerySchema(), []arrow.Array{arr}, 1)
+	params := array.NewRecordBatch(getQuerySchema(), []arrow.Array{arr}, 1)
 	defer params.Release()
 
 	prepared, err := txn.Prepare(ctx, "SELECT PREPARED STATEMENT")
@@ -3025,7 +3025,7 @@ func (m *flightSqlIngestionScenarioTester) DoPutCommandStatementIngest(ctx conte
 
 	var nRecords int64
 	for rdr.Next() {
-		rec := rdr.Record()
+		rec := rdr.RecordBatch()
 		nRecords += rec.NumRows()
 
 		if err := assertEq(true, expectedSchema.Equal(rec.Schema())); err != nil {
@@ -3075,7 +3075,7 @@ func getIngestRecords() array.RecordReader {
 	arr := array.MakeArrayOfNull(memory.DefaultAllocator, arrow.PrimitiveTypes.Int64, int(ingestStatementExpectedRows))
 	defer arr.Release()
 
-	rec := array.NewRecord(schema, []arrow.Array{arr}, ingestStatementExpectedRows)
+	rec := array.NewRecordBatch(schema, []arrow.Array{arr}, ingestStatementExpectedRows)
 	defer rec.Release()
 
 	rdr, _ := array.NewRecordReader(schema, []arrow.RecordBatch{rec})

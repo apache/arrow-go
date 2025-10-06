@@ -670,7 +670,7 @@ func TestDeltaBinaryPackedMultipleBatches(t *testing.T) {
 	for i := 0; i < size; i++ {
 		b.Field(0).(*array.Int64Builder).Append(int64(i))
 	}
-	rec := b.NewRecord()
+	rec := b.NewRecordBatch()
 	defer rec.Release()
 
 	// Write the data to Parquet using the file writer
@@ -698,7 +698,7 @@ func TestDeltaBinaryPackedMultipleBatches(t *testing.T) {
 
 	totalRows := 0
 	for rr.Next() {
-		rec := rr.Record()
+		rec := rr.RecordBatch()
 		for i := 0; i < int(rec.NumRows()); i++ {
 			col := rec.Column(0).(*array.Int64)
 
@@ -878,7 +878,7 @@ func TestDeltaByteArray(t *testing.T) {
 	defer rr.Release()
 
 	for rr.Next() {
-		rec := rr.Record()
+		rec := rr.RecordBatch()
 		for i := range int(rec.NumCols()) {
 			vals := rec.Column(i)
 			for j := range vals.Len() {
@@ -927,7 +927,7 @@ func TestListColumns(t *testing.T) {
 	defer rr.Release()
 
 	for rr.Next() {
-		rec := rr.Record()
+		rec := rr.RecordBatch()
 		for i := range int(rec.NumCols()) {
 			vals := rec.Column(i)
 			for j := range vals.Len() {

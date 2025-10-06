@@ -201,7 +201,7 @@ func TestReader(t *testing.T) {
 			if !exists {
 				t.Error("no record exists")
 			}
-			a, err := ar.Record().MarshalJSON()
+			a, err := ar.RecordBatch().MarshalJSON()
 			assert.NoError(t, err)
 			var avroParsed []map[string]any
 			json.Unmarshal(a, &avroParsed)

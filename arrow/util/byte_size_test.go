@@ -36,7 +36,7 @@ func TestTotalArrayReusedBuffers(t *testing.T) {
 	arr := bldr.NewArray()
 	defer arr.Release()
 
-	rec := array.NewRecord(arrow.NewSchema([]arrow.Field{
+	rec := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{
 		{Name: "a", Type: arrow.FixedWidthTypes.Boolean},
 		{Name: "b", Type: arrow.FixedWidthTypes.Boolean},
 	}, nil), []arrow.Array{arr, arr}, 1)
@@ -44,7 +44,7 @@ func TestTotalArrayReusedBuffers(t *testing.T) {
 
 	assert.Equal(t, int64(5), util.TotalRecordSize(rec))
 
-	rec1 := array.NewRecord(arrow.NewSchema([]arrow.Field{
+	rec1 := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{
 		{Name: "a", Type: arrow.FixedWidthTypes.Boolean},
 	}, nil), []arrow.Array{arr}, 1)
 	defer rec1.Release()
@@ -103,7 +103,7 @@ func TestTotalArraySizeRecord(t *testing.T) {
 	defer recordBldr.Release()
 	recordBldr.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2, 3}, nil)
 	recordBldr.Field(1).(*array.Int64Builder).AppendValues([]int64{4, 5, 6}, nil)
-	record := recordBldr.NewRecord()
+	record := recordBldr.NewRecordBatch()
 	defer record.Release()
 
 	assert.Equal(t, int64(44), util.TotalRecordSize(record))

@@ -306,7 +306,7 @@ func (d *dictEncoder) Encode(p *Payload, id int64, isDelta bool, dict arrow.Arra
 	}()
 
 	schema := arrow.NewSchema([]arrow.Field{{Name: "dictionary", Type: dict.DataType(), Nullable: true}}, nil)
-	batch := array.NewRecord(schema, []arrow.Array{dict}, int64(dict.Len()))
+	batch := array.NewRecordBatch(schema, []arrow.Array{dict}, int64(dict.Len()))
 	defer batch.Release()
 	if err := d.encode(p, batch); err != nil {
 		return err

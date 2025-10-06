@@ -93,7 +93,7 @@ func importRecordBatch(scptr, rbptr uintptr) {
 	lb.Append(true)
 	vb.AppendValues([]int32{2, 42}, nil)
 
-	expectedRec := bldr.NewRecord()
+	expectedRec := bldr.NewRecordBatch()
 	defer expectedRec.Release()
 
 	if !array.RecordEqual(expectedRec, rec) {
@@ -126,7 +126,7 @@ func makeBatch() arrow.RecordBatch {
 	valbldr.Append(2)
 	valbldr.Append(42)
 
-	return bldr.NewRecord()
+	return bldr.NewRecordBatch()
 }
 
 //export exportSchema

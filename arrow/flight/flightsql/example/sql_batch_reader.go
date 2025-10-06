@@ -345,6 +345,6 @@ func (r *SqlBatchReader) Next() bool {
 		rows++
 	}
 
-	r.record = r.bldr.NewRecord()
+	r.record = r.bldr.NewRecordBatch()
 	return rows > 0
 }

@@ -476,7 +476,7 @@ func Example_record() {
 	b.Field(0).(*array.Int32Builder).AppendValues([]int32{7, 8, 9, 10}, []bool{true, true, false, true})
 	b.Field(1).(*array.Float64Builder).AppendValues([]float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, nil)
 
-	rec := b.NewRecord()
+	rec := b.NewRecordBatch()
 	defer rec.Release()
 
 	for i, col := range rec.Columns() {
@@ -506,13 +506,13 @@ func Example_recordReader() {
 	b.Field(0).(*array.Int32Builder).AppendValues([]int32{7, 8, 9, 10}, []bool{true, true, false, true})
 	b.Field(1).(*array.Float64Builder).AppendValues([]float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, nil)
 
-	rec1 := b.NewRecord()
+	rec1 := b.NewRecordBatch()
 	defer rec1.Release()
 
 	b.Field(0).(*array.Int32Builder).AppendValues([]int32{11, 12, 13, 14, 15, 16, 17, 18, 19, 20}, nil)
 	b.Field(1).(*array.Float64Builder).AppendValues([]float64{11, 12, 13, 14, 15, 16, 17, 18, 19, 20}, nil)
 
-	rec2 := b.NewRecord()
+	rec2 := b.NewRecordBatch()
 	defer rec2.Release()
 
 	itr, err := array.NewRecordReader(schema, []arrow.RecordBatch{rec1, rec2})
@@ -523,7 +523,7 @@ func Example_recordReader() {
 
 	n := 0
 	for itr.Next() {
-		rec := itr.Record()
+		rec := itr.RecordBatch()
 		for i, col := range rec.Columns() {
 			fmt.Printf("rec[%d][%q]: %v\n", n, rec.ColumnName(i), col)
 		}
@@ -555,13 +555,13 @@ func Example_table() {
 	b.Field(0).(*array.Int32Builder).AppendValues([]int32{7, 8, 9, 10}, []bool{true, true, false, true})
 	b.Field(1).(*array.Float64Builder).AppendValues([]float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, nil)
 
-	rec1 := b.NewRecord()
+	rec1 := b.NewRecordBatch()
 	defer rec1.Release()
 
 	b.Field(0).(*array.Int32Builder).AppendValues([]int32{11, 12, 13, 14, 15, 16, 17, 18, 19, 20}, nil)
 	b.Field(1).(*array.Float64Builder).AppendValues([]float64{11, 12, 13, 14, 15, 16, 17, 18, 19, 20}, nil)
 
-	rec2 := b.NewRecord()
+	rec2 := b.NewRecordBatch()
 	defer rec2.Release()
 
 	tbl := array.NewTableFromRecords(schema, []arrow.RecordBatch{rec1, rec2})
@@ -572,7 +572,7 @@ func Example_table() {
 
 	n := 0
 	for tr.Next() {
-		rec := tr.Record()
+		rec := tr.RecordBatch()
 		for i, col := range rec.Columns() {
 			fmt.Printf("rec[%d][%q]: %v\n", n, rec.ColumnName(i), col)
 		}

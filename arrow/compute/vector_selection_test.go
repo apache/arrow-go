@@ -820,7 +820,7 @@ type FilterKernelWithRecordBatch struct {
 	FilterKernelTestSuite
 }
 
-func (f *FilterKernelWithRecordBatch) doFilter(sc *arrow.Schema, batchJSON, selection string, opts compute.FilterOptions) (arrow.Record, error) {
+func (f *FilterKernelWithRecordBatch) doFilter(sc *arrow.Schema, batchJSON, selection string, opts compute.FilterOptions) (arrow.RecordBatch, error) {
 	rec, _, err := array.RecordFromJSON(f.mem, sc, strings.NewReader(batchJSON), array.WithUseNumber())
 	if err != nil {
 		return nil, err
@@ -1464,7 +1464,7 @@ type TakeKernelTestRecord struct {
 	TakeKernelTestTyped
 }
 
-func (tk *TakeKernelTestRecord) takeJSON(schm *arrow.Schema, batchJSON string, indexType arrow.DataType, indices string) (arrow.Record, error) {
+func (tk *TakeKernelTestRecord) takeJSON(schm *arrow.Schema, batchJSON string, indexType arrow.DataType, indices string) (arrow.RecordBatch, error) {
 	batch, _, err := array.RecordFromJSON(tk.mem, schm, strings.NewReader(batchJSON))
 	tk.Require().NoError(err)
 	defer batch.Release()

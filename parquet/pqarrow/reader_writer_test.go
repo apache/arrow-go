@@ -316,8 +316,8 @@ func buildTableForTest(mem memory.Allocator) arrow.Table {
 		bldr.Field(5).(*array.BooleanBuilder).Append(true)
 	}
 
-	rec := bldr.NewRecord()
-	return array.NewTableFromRecords(schema, []arrow.Record{rec})
+	rec := bldr.NewRecordBatch()
+	return array.NewTableFromRecords(schema, []arrow.RecordBatch{rec})
 }
 
 func BenchmarkWriteTableCompressed(b *testing.B) {

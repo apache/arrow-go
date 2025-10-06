@@ -169,7 +169,7 @@ func TestOpaqueTypeBatchRoundTrip(t *testing.T) {
 	arr := array.NewExtensionArrayWithStorage(typ, storage)
 	defer arr.Release()
 
-	batch := array.NewRecord(arrow.NewSchema([]arrow.Field{{Name: "field", Type: typ, Nullable: true}}, nil),
+	batch := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{{Name: "field", Type: typ, Nullable: true}}, nil),
 		[]arrow.Array{arr}, -1)
 	defer batch.Release()
 

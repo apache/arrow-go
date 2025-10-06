@@ -71,7 +71,7 @@ func (w *Writer) Write(rec arrow.RecordBatch) error {
 		for _, p := range pairs {
 			defer p.Dict.Release()
 			sc := arrow.NewSchema([]arrow.Field{{Name: fmt.Sprintf("DICT%d", p.ID), Type: p.Dict.DataType(), Nullable: true}}, nil)
-			dummy := array.NewRecord(sc, []arrow.Array{p.Dict}, int64(p.Dict.Len()))
+			dummy := array.NewRecordBatch(sc, []arrow.Array{p.Dict}, int64(p.Dict.Len()))
 			defer dummy.Release()
 			w.raw.Dictionaries = append(w.raw.Dictionaries, Dictionary{ID: p.ID, Data: recordToJSON(dummy)})
 		}

@@ -66,7 +66,7 @@ func Example_reader() {
 	}
 
 	// Get the record but don't release it - the reader will handle that
-	record := reader.Record()
+	record := reader.RecordBatch()
 
 	fmt.Printf("Number of rows: %d\n", record.NumRows())
 	fmt.Printf("Number of columns: %d\n", record.NumCols())

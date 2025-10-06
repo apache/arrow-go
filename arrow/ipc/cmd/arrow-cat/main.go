@@ -100,7 +100,7 @@ func processStream(w io.Writer, rin io.Reader) error {
 		for r.Next() {
 			n++
 			fmt.Fprintf(w, "record %d...\n", n)
-			rec := r.Record()
+			rec := r.RecordBatch()
 			for i, col := range rec.Columns() {
 				fmt.Fprintf(w, "  col[%d] %q: %v\n", i, rec.ColumnName(i), col)
 			}
@@ -154,7 +154,7 @@ func processFile(w io.Writer, fname string) error {
 	fmt.Fprintf(w, "version: %v\n", r.Version())
 	for i := 0; i < r.NumRecords(); i++ {
 		fmt.Fprintf(w, "record %d/%d...\n", i+1, r.NumRecords())
-		rec, err := r.Record(i)
+		rec, err := r.RecordBatch(i)
 		if err != nil {
 			return err
 		}

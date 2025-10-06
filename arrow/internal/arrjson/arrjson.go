@@ -816,7 +816,7 @@ func recordFromJSON(mem memory.Allocator, schema *arrow.Schema, rec Record, memo
 		defer d.Release()
 		defer cols[i].Release()
 	}
-	return array.NewRecord(schema, cols, int64(rec.Count))
+	return array.NewRecordBatch(schema, cols, int64(rec.Count))
 }
 
 func recordToJSON(rec arrow.RecordBatch) Record {

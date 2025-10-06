@@ -194,7 +194,7 @@ func takeRecordImpl(ctx context.Context, opts FunctionOptions, args ...Datum) (D
 		return nil, err
 	}
 
-	outRec := array.NewRecord(rb.Schema(), cols, nrows)
+	outRec := array.NewRecordBatch(rb.Schema(), cols, nrows)
 	return &RecordDatum{Value: outRec}, nil
 }
 
@@ -619,7 +619,7 @@ func FilterRecordBatch(ctx context.Context, batch arrow.RecordBatch, filter arro
 		return nil, err
 	}
 
-	return array.NewRecord(batch.Schema(), cols, int64(indicesArr.Len())), nil
+	return array.NewRecordBatch(batch.Schema(), cols, int64(indicesArr.Len())), nil
 }
 
 func FilterTable(ctx context.Context, tbl arrow.Table, filter Datum, opts *FilterOptions) (arrow.Table, error) {

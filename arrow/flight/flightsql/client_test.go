@@ -571,7 +571,7 @@ func (s *FlightSqlClientSuite) TestPreparedStatementExecuteReaderBinding() {
 	s.NoError(err)
 	defer rec.Release()
 
-	rdr, err := array.NewRecordReader(rec.Schema(), []arrow.Record{rec, rec, rec})
+	rdr, err := array.NewRecordReader(rec.Schema(), []arrow.RecordBatch{rec, rec, rec})
 	s.NoError(err)
 	prepared.SetRecordReader(rdr)
 
