@@ -42,7 +42,7 @@ const (
 	SubstraitComparisonFuncsURI = SubstraitDefaultURIPrefix + "functions_comparison"
 	SubstraitBooleanFuncsURI    = SubstraitDefaultURIPrefix + "functions_boolean"
 
-	SubstraitIcebergSetFuncURI = "https://github.com/apache/iceberg-go/blob/main/table/substrait/functions_set.yaml"
+	SubstraitIcebergSetFuncURN = "extension:apache.iceberg:functions_set"
 	TimestampTzTimezone        = "UTC"
 )
 
@@ -132,7 +132,7 @@ func init() {
 
 	for _, fn := range []string{"is_in"} {
 		err := DefaultExtensionIDRegistry.AddSubstraitScalarToArrow(
-			extensions.ID{URN: SubstraitIcebergSetFuncURI, Name: fn},
+			extensions.ID{URN: SubstraitIcebergSetFuncURN, Name: fn},
 			setLookupFuncSubstraitToArrowFunc)
 		if err != nil {
 			panic(err)
