@@ -26,11 +26,10 @@ type Message struct {
 	flatbuffers.Table
 }
 
-func GetRootAsMessage(buf []byte, offset flatbuffers.UOffsetT) *Message {
+func GetRootAsMessage(buf []byte, offset flatbuffers.UOffsetT) (x Message) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Message{}
 	x.Init(buf, n+offset)
-	return x
+	return
 }
 
 func (rcv *Message) Init(buf []byte, i flatbuffers.UOffsetT) {
