@@ -23,7 +23,7 @@ import (
 )
 
 type Message struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsMessage(buf []byte, offset flatbuffers.UOffsetT) *Message {
@@ -34,75 +34,71 @@ func GetRootAsMessage(buf []byte, offset flatbuffers.UOffsetT) *Message {
 }
 
 func (rcv *Message) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Message) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func (rcv *Message) Version() MetadataVersion {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return MetadataVersion(rcv._tab.GetInt16(o + rcv._tab.Pos))
+		return MetadataVersion(rcv.GetInt16(o + rcv.Pos))
 	}
 	return 0
 }
 
 func (rcv *Message) MutateVersion(n MetadataVersion) bool {
-	return rcv._tab.MutateInt16Slot(4, int16(n))
+	return rcv.MutateInt16Slot(4, int16(n))
 }
 
 func (rcv *Message) HeaderType() MessageHeader {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		return MessageHeader(rcv._tab.GetByte(o + rcv._tab.Pos))
+		return MessageHeader(rcv.GetByte(o + rcv.Pos))
 	}
 	return 0
 }
 
 func (rcv *Message) MutateHeaderType(n MessageHeader) bool {
-	return rcv._tab.MutateByteSlot(6, byte(n))
+	return rcv.MutateByteSlot(6, byte(n))
 }
 
 func (rcv *Message) Header(obj *flatbuffers.Table) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
-		rcv._tab.Union(obj, o)
+		rcv.Union(obj, o)
 		return true
 	}
 	return false
 }
 
 func (rcv *Message) BodyLength() int64 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
+	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
-		return rcv._tab.GetInt64(o + rcv._tab.Pos)
+		return rcv.GetInt64(o + rcv.Pos)
 	}
 	return 0
 }
 
 func (rcv *Message) MutateBodyLength(n int64) bool {
-	return rcv._tab.MutateInt64Slot(10, n)
+	return rcv.MutateInt64Slot(10, n)
 }
 
 func (rcv *Message) CustomMetadata(obj *KeyValue, j int) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	o := flatbuffers.UOffsetT(rcv.Offset(12))
 	if o != 0 {
-		x := rcv._tab.Vector(o)
+		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 4
-		x = rcv._tab.Indirect(x)
-		obj.Init(rcv._tab.Bytes, x)
+		x = rcv.Indirect(x)
+		obj.Init(rcv.Bytes, x)
 		return true
 	}
 	return false
 }
 
 func (rcv *Message) CustomMetadataLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	o := flatbuffers.UOffsetT(rcv.Offset(12))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }
