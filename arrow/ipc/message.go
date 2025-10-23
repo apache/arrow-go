@@ -154,10 +154,7 @@ type messageReader struct {
 
 // NewMessageReader returns a reader that reads messages from an input stream.
 func NewMessageReader(r io.Reader, opts ...Option) MessageReader {
-	cfg := newConfig()
-	for _, opt := range opts {
-		opt(cfg)
-	}
+	cfg := newConfig(opts...)
 
 	mr := &messageReader{r: r, mem: cfg.alloc}
 	mr.refCount.Add(1)

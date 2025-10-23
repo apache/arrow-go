@@ -63,10 +63,7 @@ func NewReaderFromMessageReader(r MessageReader, opts ...Option) (reader *Reader
 			err = utils.FormatRecoveredError("arrow/ipc: unknown error while reading", pErr)
 		}
 	}()
-	cfg := newConfig()
-	for _, opt := range opts {
-		opt(cfg)
-	}
+	cfg := newConfig(opts...)
 
 	rr := &Reader{
 		r:        r,
