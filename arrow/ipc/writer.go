@@ -87,7 +87,7 @@ type Writer struct {
 	codec           flatbuf.CompressionType
 	compressNP      int
 	compressors     []compressor
-	minSpaceSavings *float64
+	minSpaceSavings float64
 
 	// map of the last written dictionaries by id
 	// so we can avoid writing the same dictionary over and over
@@ -328,7 +328,7 @@ type recordEncoder struct {
 	codec           flatbuf.CompressionType
 	compressNP      int
 	compressors     []compressor
-	minSpaceSavings *float64
+	minSpaceSavings float64
 }
 
 func newRecordEncoder(
@@ -338,7 +338,7 @@ func newRecordEncoder(
 	allow64b bool,
 	codec flatbuf.CompressionType,
 	compressNP int,
-	minSpaceSavings *float64,
+	minSpaceSavings float64,
 	compressors []compressor,
 ) *recordEncoder {
 	return &recordEncoder{
@@ -355,12 +355,12 @@ func newRecordEncoder(
 
 func (w *recordEncoder) shouldCompress(uncompressed, compressed int) bool {
 	debug.Assert(uncompressed > 0, "uncompressed size is 0")
-	if w.minSpaceSavings == nil {
+	if w.minSpaceSavings == 0 {
 		return true
 	}
 
 	savings := 1.0 - float64(compressed)/float64(uncompressed)
-	return savings >= *w.minSpaceSavings
+	return savings >= w.minSpaceSavings
 }
 
 func (w *recordEncoder) reset() {
@@ -477,13 +477,10 @@ func (w *recordEncoder) encode(p *Payload, rec arrow.RecordBatch) error {
 	}
 
 	if w.codec != -1 {
-		if w.minSpaceSavings != nil {
-			pct := *w.minSpaceSavings
-			if pct < 0 || pct > 1 {
-				p.Release()
-				return fmt.Errorf("%w: minSpaceSavings not in range [0,1]. Provided %.05f",
-					arrow.ErrInvalid, pct)
-			}
+		if w.minSpaceSavings < 0 || w.minSpaceSavings > 1 {
+			p.Release()
+			return fmt.Errorf("%w: minSpaceSavings not in range [0,1]. Provided %.05f",
+				arrow.ErrInvalid, w.minSpaceSavings)
 		}
 		w.compressBodyBuffers(p)
 	}

@@ -195,7 +195,7 @@ func TestWriteWithCompressionAndMinSavings(t *testing.T) {
 
 	for _, codec := range []flatbuf.CompressionType{flatbuf.CompressionTypeLZ4_FRAME, flatbuf.CompressionTypeZSTD} {
 		compressors := []compressor{getCompressor(codec)}
-		enc := newRecordEncoder(mem, 0, 5, true, codec, 1, nil, compressors)
+		enc := newRecordEncoder(mem, 0, 5, true, codec, 1, 0, compressors)
 		var payload Payload
 		require.NoError(t, enc.encode(&payload, batch))
 		assert.Len(t, payload.body, 2)
@@ -207,7 +207,7 @@ func TestWriteWithCompressionAndMinSavings(t *testing.T) {
 		assert.Greater(t, compressedSize, int64(0))
 		expectedSavings := 1.0 - float64(compressedSize)/float64(uncompressedSize)
 
-		compressEncoder := newRecordEncoder(mem, 0, 5, true, codec, 1, &expectedSavings, compressors)
+		compressEncoder := newRecordEncoder(mem, 0, 5, true, codec, 1, expectedSavings, compressors)
 		payload.Release()
 		payload.body = payload.body[:0]
 		require.NoError(t, compressEncoder.encode(&payload, batch))
@@ -220,7 +220,7 @@ func TestWriteWithCompressionAndMinSavings(t *testing.T) {
 		// slightly bump the threshold. the body buffer should now be prefixed
 		// with -1 and its content left uncompressed
 		minSavings := math.Nextafter(expectedSavings, 1.0)
-		compressEncoder.minSpaceSavings = &minSavings
+		compressEncoder.minSpaceSavings = minSavings
 		require.NoError(t, compressEncoder.encode(&payload, batch))
 		assert.Len(t, payload.body, 2)
 		assert.EqualValues(t, -1, prefixedSize(payload.body[1]))
@@ -229,7 +229,7 @@ func TestWriteWithCompressionAndMinSavings(t *testing.T) {
 		payload.body = payload.body[:0]
 
 		for _, outOfRange := range []float64{math.Nextafter(1.0, 2.0), math.Nextafter(0, -1)} {
-			compressEncoder.minSpaceSavings = &outOfRange
+			compressEncoder.minSpaceSavings = outOfRange
 			err := compressEncoder.encode(&payload, batch)
 			assert.ErrorIs(t, err, arrow.ErrInvalid)
 			assert.ErrorContains(t, err, "minSpaceSavings not in range [0,1]")
