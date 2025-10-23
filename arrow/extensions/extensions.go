@@ -26,6 +26,8 @@ var canonicalExtensionTypes = []arrow.ExtensionType{
 	&OpaqueType{},
 	&JSONType{},
 	&VariantType{},
+	// GeoArrow extension types
+	NewPointType(),
 }
 
 func init() {
