@@ -243,7 +243,7 @@ func (f *FileReader) readSchema(ensureNativeEndian bool) error {
 	)
 
 	schema, ok := f.footer.data.Schema()
-	if ok == false {
+	if !ok {
 		return fmt.Errorf("arrow/ipc: could not load schema from flatbuffer data")
 	}
 	f.schema, err = schemaFromFB(schema, &f.memo)
