@@ -25,7 +25,7 @@ import (
 // / ----------------------------------------------------------------------
 // / A Schema describes the columns in a row batch
 type Schema struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsSchema(buf []byte, offset flatbuffers.UOffsetT) Schema {
@@ -36,21 +36,17 @@ func GetRootAsSchema(buf []byte, offset flatbuffers.UOffsetT) Schema {
 }
 
 func (rcv *Schema) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Schema) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 // / endianness of the buffer
 // / it is Little Endian by default
 // / if endianness doesn't match the underlying system then the vectors need to be converted
 func (rcv *Schema) Endianness() Endianness {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return Endianness(rcv._tab.GetInt16(o + rcv._tab.Pos))
+		return Endianness(rcv.GetInt16(o + rcv.Pos))
 	}
 	return 0
 }
@@ -59,73 +55,73 @@ func (rcv *Schema) Endianness() Endianness {
 // / it is Little Endian by default
 // / if endianness doesn't match the underlying system then the vectors need to be converted
 func (rcv *Schema) MutateEndianness(n Endianness) bool {
-	return rcv._tab.MutateInt16Slot(4, int16(n))
+	return rcv.MutateInt16Slot(4, int16(n))
 }
 
 func (rcv *Schema) Fields(obj *Field, j int) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		x := rcv._tab.Vector(o)
+		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 4
-		x = rcv._tab.Indirect(x)
-		obj.Init(rcv._tab.Bytes, x)
+		x = rcv.Indirect(x)
+		obj.Init(rcv.Bytes, x)
 		return true
 	}
 	return false
 }
 
 func (rcv *Schema) FieldsLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }
 
 func (rcv *Schema) CustomMetadata(obj *KeyValue, j int) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
-		x := rcv._tab.Vector(o)
+		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 4
-		x = rcv._tab.Indirect(x)
-		obj.Init(rcv._tab.Bytes, x)
+		x = rcv.Indirect(x)
+		obj.Init(rcv.Bytes, x)
 		return true
 	}
 	return false
 }
 
 func (rcv *Schema) CustomMetadataLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }
 
 // / Features used in the stream/file.
 func (rcv *Schema) Features(j int) Feature {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
+	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
-		a := rcv._tab.Vector(o)
-		return Feature(rcv._tab.GetInt64(a + flatbuffers.UOffsetT(j*8)))
+		a := rcv.Vector(o)
+		return Feature(rcv.GetInt64(a + flatbuffers.UOffsetT(j*8)))
 	}
 	return 0
 }
 
 func (rcv *Schema) FeaturesLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
+	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }
 
 // / Features used in the stream/file.
 func (rcv *Schema) MutateFeatures(j int, n Feature) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
+	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
-		a := rcv._tab.Vector(o)
-		return rcv._tab.MutateInt64(a+flatbuffers.UOffsetT(j*8), int64(n))
+		a := rcv.Vector(o)
+		return rcv.MutateInt64(a+flatbuffers.UOffsetT(j*8), int64(n))
 	}
 	return false
 }

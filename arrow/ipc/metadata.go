@@ -165,14 +165,6 @@ func unitToFB(unit arrow.TimeUnit) flatbuf.TimeUnit {
 	}
 }
 
-// initFB is a helper function to handle flatbuffers' polymorphism.
-func initFB(init func([]byte, flatbuffers.UOffsetT), tbl flatbuffers.Table, msg flatbuf.Message) {
-	if !msg.Header(&tbl) {
-		panic("arrow/ipc: could not initialize from flatbuffer")
-	}
-	init(tbl.Bytes, tbl.Pos)
-}
-
 func fieldFromFB(field *flatbuf.Field, pos dictutils.FieldPos, memo *dictutils.Memo) (arrow.Field, error) {
 	var (
 		err error

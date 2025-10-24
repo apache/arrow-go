@@ -449,7 +449,7 @@ func newRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buf
 		md    flatbuf.RecordBatch
 		codec decompressor
 	)
-	initFB(md.Init, md.Table(), msg)
+	msg.Header(&md.Table)
 	rows := md.Length()
 
 	bodyCompress := md.Compression(nil)
@@ -833,7 +833,7 @@ func readDictionary(memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buff
 		data  flatbuf.RecordBatch
 		codec decompressor
 	)
-	initFB(md.Init, md.Table(), msg)
+	msg.Header(&md.Table)
 
 	md.Data(&data)
 	bodyCompress := data.Compression(nil)
