@@ -509,11 +509,10 @@ func (p *serializedPageReader) decompress(rd io.Reader, lenCompressed int, buf [
 	// However, bytes.Buffer always attempts to read at least bytes.MinRead (which is 512 bytes) from the
 	// underlying reader, even if there is less data available than that. So even if there are no more bytes,
 	// the buffer must have at least bytes.MinRead capacity remaining to avoid a relocation.
-	allocSize := lenCompressed
 	if p.decompressBuffer.Cap() < lenCompressed+bytes.MinRead {
-		allocSize = lenCompressed + bytes.MinRead
+		p.decompressBuffer.Reserve(lenCompressed + bytes.MinRead)
 	}
-	p.decompressBuffer.ResizeNoShrink(allocSize)
+	p.decompressBuffer.ResizeNoShrink(lenCompressed)
 	b := bytes.NewBuffer(p.decompressBuffer.Bytes()[:0])
 	if _, err := io.CopyN(b, rd, int64(lenCompressed)); err != nil {
 		return nil, err
