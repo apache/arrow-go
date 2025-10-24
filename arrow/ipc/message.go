@@ -137,6 +137,7 @@ type messageReader struct {
 	msg      *Message
 
 	header [4]byte
+	metamsg []byte
 	meta   *memory.Buffer
 	body   *memory.Buffer
 }
@@ -212,7 +213,10 @@ func (r *messageReader) Message() (*Message, error) {
 		msgLen = int32(cid)
 	}
 
-	buf = make([]byte, msgLen)
+	if len(r.metamsg) < int(msgLen) {
+		r.metamsg = make([]byte, msgLen)
+	}
+	buf = r.metamsg[:msgLen]
 	_, err = io.ReadFull(r.r, buf)
 	if err != nil {
 		return nil, fmt.Errorf("arrow/ipc: could not read message metadata: %w", err)
