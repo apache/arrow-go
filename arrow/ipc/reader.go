@@ -118,14 +118,20 @@ func NewReader(r io.Reader, opts ...Option) (rr *Reader, err error) {
 // underlying stream.
 func (r *Reader) Err() error { return r.err }
 
-func (r *Reader) Schema() *arrow.Schema {
-	if r.schema == nil {
-		if err := r.readSchema(r.expectedSchema); err != nil {
-			r.err = fmt.Errorf("arrow/ipc: could not read schema from stream: %w", err)
-			r.done = true
-		}
+func (r *Reader) schemaSlow() *arrow.Schema {
+	if err := r.readSchema(r.expectedSchema); err != nil {
+		r.err = fmt.Errorf("arrow/ipc: could not read schema from stream: %w", err)
+		r.done = true
+		return nil
 	}
 	return r.schema
+}
+
+func (r *Reader) Schema() *arrow.Schema {
+	if r.schema != nil {
+		return r.schema
+	}
+	return r.schemaSlow()
 }
 
 func (r *Reader) readSchema(schema *arrow.Schema) error {
