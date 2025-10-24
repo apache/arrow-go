@@ -148,18 +148,23 @@ type messageReader struct {
 	refCount atomic.Int64
 	msg      *Message
 
-	mem memory.Allocator
 	header [4]byte
-	meta *memory.Buffer
+	meta   *memory.Buffer
+	body   *memory.Buffer
+}
+
+func newMessageReader(r io.Reader, cfg *config) MessageReader {
+	mr := &messageReader{r: r}
+	mr.body = memory.NewResizableBuffer(cfg.alloc)
+	mr.refCount.Add(1)
+	return mr
 }
 
 // NewMessageReader returns a reader that reads messages from an input stream.
 func NewMessageReader(r io.Reader, opts ...Option) MessageReader {
 	cfg := newConfig(opts...)
+	return newMessageReader(r, cfg)
 
-	mr := &messageReader{r: r, mem: cfg.alloc}
-	mr.refCount.Add(1)
-	return mr
 }
 
 // Retain increases the reference count by 1.
@@ -179,6 +184,8 @@ func (r *messageReader) Release() {
 			r.msg.Release()
 			r.msg = nil
 		}
+		r.body.Release()
+		r.body = nil
 	}
 }
 
@@ -224,12 +231,16 @@ func (r *messageReader) Message() (*Message, error) {
 
 	msg := flatbuf.GetRootAsMessage(buf, 0)
 	bodyLen := msg.BodyLength()
+	if r.meta == nil {
+		r.meta = memory.NewBufferBytes(msg.Bytes)
+	} else {
+		r.meta.Reset(msg.Bytes)
+	}
 
-	body := memory.NewResizableBuffer(r.mem)
-	defer body.Release()
-	body.Resize(int(bodyLen))
+	r.body.Resize(0)
+	r.body.Resize(int(bodyLen))
 
-	_, err = io.ReadFull(r.r, body.Bytes())
+	_, err = io.ReadFull(r.r, r.body.Bytes())
 	if err != nil {
 		return nil, fmt.Errorf("arrow/ipc: could not read message body: %w", err)
 	}
@@ -238,12 +249,7 @@ func (r *messageReader) Message() (*Message, error) {
 		r.msg.Release()
 		r.msg = nil
 	}
-	if r.meta == nil {
-		r.meta = memory.NewBufferBytes(msg.Bytes)
-	} else {
-		r.meta.Reset(msg.Bytes)
-	}
-	r.msg = newMessageFromFB(msg, r.meta , body)
+	r.msg = newMessageFromFB(msg, r.meta, r.body)
 
 	return r.msg, nil
 }

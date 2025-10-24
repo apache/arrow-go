@@ -93,8 +93,7 @@ func NewReader(r io.Reader, opts ...Option) (rr *Reader, err error) {
 		}
 	}()
 	cfg := newConfig(opts...)
-	mr := &messageReader{r: r, mem: cfg.alloc}
-	mr.refCount.Add(1)
+	mr := newMessageReader(r, cfg)
 	rr = &Reader{
 		r:        mr,
 		refCount: atomic.Int64{},
