@@ -75,24 +75,12 @@ type Message struct {
 // NewMessage creates a new message from the metadata and body buffers.
 // NewMessage panics if any of these buffers is nil.
 func NewMessage(meta, body *memory.Buffer) *Message {
-	if meta == nil || body == nil {
-		panic("arrow/ipc: nil buffers")
-	}
-	meta.Retain()
-	body.Retain()
-	m := &Message{
-		msg:  flatbuf.GetRootAsMessage(meta.Bytes(), 0),
-		meta: meta,
-		body: body,
-	}
-	m.refCount.Add(1)
-	return m
+	msg := flatbuf.GetRootAsMessage(meta.Bytes(), 0)
+	return newMessageFromFB(msg, meta, body)
 }
 
 func newMessageFromFB(msg flatbuf.Message, meta *memory.Buffer, body *memory.Buffer) *Message {
-	if body == nil {
-		panic("arrow/ipc: nil buffers")
-	}
+	meta.Retain()
 	body.Retain()
 	m := &Message{
 		msg:  msg,

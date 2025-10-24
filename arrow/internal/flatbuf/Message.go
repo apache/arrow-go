@@ -28,13 +28,9 @@ type Message struct {
 
 func GetRootAsMessage(buf []byte, offset flatbuffers.UOffsetT) (x Message) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x.Init(buf, n+offset)
+	x.Bytes = buf
+	x.Pos = n+offset
 	return
-}
-
-func (rcv *Message) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv.Bytes = buf
-	rcv.Pos = i
 }
 
 func (rcv *Message) Version() MetadataVersion {
