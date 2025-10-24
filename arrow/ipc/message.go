@@ -156,6 +156,7 @@ type messageReader struct {
 func newMessageReader(r io.Reader, cfg *config) MessageReader {
 	mr := &messageReader{r: r}
 	mr.body = memory.NewResizableBuffer(cfg.alloc)
+	mr.meta = memory.NewBufferBytes(nil)
 	mr.refCount.Add(1)
 	return mr
 }
@@ -231,11 +232,7 @@ func (r *messageReader) Message() (*Message, error) {
 
 	msg := flatbuf.GetRootAsMessage(buf, 0)
 	bodyLen := msg.BodyLength()
-	if r.meta == nil {
-		r.meta = memory.NewBufferBytes(msg.Bytes)
-	} else {
-		r.meta.Reset(msg.Bytes)
-	}
+	r.meta.Reset(msg.Bytes)
 
 	r.body.Resize(0)
 	r.body.Resize(int(bodyLen))
