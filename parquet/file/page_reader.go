@@ -383,6 +383,9 @@ func (p *serializedPageReader) Close() error {
 		p.dictPageBuffer.Release()
 		p.dataPageBuffer.Release()
 	}
+	if p.r != nil {
+		p.r.Free()
+	}
 	return nil
 }
 
@@ -594,7 +597,8 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 		readBufSize := min(int(p.dataOffset-p.baseOffset), p.r.BufferSize())
 		rd := utils.NewBufferedReader(
 			io.NewSectionReader(p.r.Outer(), p.dictOffset-p.baseOffset, p.dataOffset-p.baseOffset),
-			readBufSize)
+			readBufSize,
+			p.mem)
 		if err := p.readPageHeader(rd, hdr); err != nil {
 			return nil, err
 		}
