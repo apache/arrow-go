@@ -383,6 +383,9 @@ func (p *serializedPageReader) Close() error {
 		p.dictPageBuffer.Release()
 		p.dataPageBuffer.Release()
 	}
+	if p.r != nil {
+		p.r.Free()
+	}
 	return nil
 }
 
@@ -501,6 +504,14 @@ func (p *serializedPageReader) Page() Page {
 }
 
 func (p *serializedPageReader) decompress(rd io.Reader, lenCompressed int, buf []byte) ([]byte, error) {
+	// As of go1.25.3: There is an issue when bytes.Buffer and io.CopyN are used together. io.CopyN
+	// uses io.LimitReader, which does an additional read on the underlying reader to determine EOF.
+	// However, bytes.Buffer always attempts to read at least bytes.MinRead (which is 512 bytes) from the
+	// underlying reader, even if there is less data available than that. So even if there are no more bytes,
+	// the buffer must have at least bytes.MinRead capacity remaining to avoid a relocation.
+	if p.decompressBuffer.Cap() < lenCompressed+bytes.MinRead {
+		p.decompressBuffer.Reserve(lenCompressed + bytes.MinRead)
+	}
 	p.decompressBuffer.ResizeNoShrink(lenCompressed)
 	b := bytes.NewBuffer(p.decompressBuffer.Bytes()[:0])
 	if _, err := io.CopyN(b, rd, int64(lenCompressed)); err != nil {
@@ -550,7 +561,8 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 		readBufSize := min(int(p.dataOffset-p.baseOffset), p.r.BufferSize())
 		rd := utils.NewBufferedReader(
 			io.NewSectionReader(p.r.Outer(), p.dictOffset-p.baseOffset, p.dataOffset-p.baseOffset),
-			readBufSize)
+			readBufSize,
+			p.mem)
 		if err := p.readPageHeader(rd, hdr); err != nil {
 			return nil, err
 		}
