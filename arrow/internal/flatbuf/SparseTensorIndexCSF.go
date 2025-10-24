@@ -138,15 +138,15 @@ func (rcv *SparseTensorIndexCSF) IndptrType() (obj Int, ok bool) {
 ///                       [0, 2, 4, 5, 8]
 ///                     ].
 /// ```
-func (rcv *SparseTensorIndexCSF) IndptrBuffers(obj *Buffer, j int) bool {
+func (rcv *SparseTensorIndexCSF) IndptrBuffers(j int) (obj Buffer, ok bool) {
 	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
 		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 16
 		obj.Init(rcv.Bytes, x)
-		return true
+		ok = true
 	}
-	return false
+	return
 }
 
 func (rcv *SparseTensorIndexCSF) IndptrBuffersLength() int {
@@ -194,15 +194,15 @@ func (rcv *SparseTensorIndexCSF) IndicesType() (obj Int, ok bool) {
 ///                        [1, 2, 0, 2, 0, 0, 1, 2]
 ///                      ].
 /// ```
-func (rcv *SparseTensorIndexCSF) IndicesBuffers(obj *Buffer, j int) bool {
+func (rcv *SparseTensorIndexCSF) IndicesBuffers(j int) (obj Buffer, ok bool) {
 	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
 		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 16
 		obj.Init(rcv.Bytes, x)
-		return true
+		ok = true
 	}
-	return false
+	return
 }
 
 func (rcv *SparseTensorIndexCSF) IndicesBuffersLength() int {

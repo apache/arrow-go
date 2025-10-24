@@ -78,33 +78,33 @@ func (r *basicReaderImpl) getFooterEnd() (int64, error) {
 }
 
 func (r *basicReaderImpl) block(mem memory.Allocator, f *footerBlock, i int) (dataBlock, error) {
-	var blk flatbuf.Block
-	if !f.data.RecordBatches(&blk, i) {
+	if blk, ok := f.data.RecordBatches(i); !ok {
 		return fileBlock{}, fmt.Errorf("arrow/ipc: could not extract file block %d", i)
-	}
+	} else {
 
-	return fileBlock{
-		offset: blk.Offset(),
-		meta:   blk.MetaDataLength(),
-		body:   blk.BodyLength(),
-		r:      r.r,
-		mem:    mem,
-	}, nil
+		return fileBlock{
+			offset: blk.Offset(),
+			meta:   blk.MetaDataLength(),
+			body:   blk.BodyLength(),
+			r:      r.r,
+			mem:    mem,
+		}, nil
+	}
 }
 
 func (r *basicReaderImpl) dict(mem memory.Allocator, f *footerBlock, i int) (dataBlock, error) {
-	var blk flatbuf.Block
-	if !f.data.Dictionaries(&blk, i) {
+	if blk, ok := f.data.Dictionaries(i); !ok {
 		return fileBlock{}, fmt.Errorf("arrow/ipc: could not extract dictionary block %d", i)
-	}
+	} else {
 
-	return fileBlock{
-		offset: blk.Offset(),
-		meta:   blk.MetaDataLength(),
-		body:   blk.BodyLength(),
-		r:      r.r,
-		mem:    mem,
-	}, nil
+		return fileBlock{
+			offset: blk.Offset(),
+			meta:   blk.MetaDataLength(),
+			body:   blk.BodyLength(),
+			r:      r.r,
+			mem:    mem,
+		}, nil
+	}
 }
 
 type mappedReaderImpl struct {
@@ -122,31 +122,31 @@ func (r *mappedReaderImpl) getBytes(offset, length int64) ([]byte, error) {
 func (r *mappedReaderImpl) getFooterEnd() (int64, error) { return int64(len(r.data)), nil }
 
 func (r *mappedReaderImpl) block(_ memory.Allocator, f *footerBlock, i int) (dataBlock, error) {
-	var blk flatbuf.Block
-	if !f.data.RecordBatches(&blk, i) {
+	if blk, ok := f.data.RecordBatches(i); !ok {
 		return mappedFileBlock{}, fmt.Errorf("arrow/ipc: could not extract file block %d", i)
-	}
+	} else {
 
-	return mappedFileBlock{
-		offset: blk.Offset(),
-		meta:   blk.MetaDataLength(),
-		body:   blk.BodyLength(),
-		data:   r.data,
-	}, nil
+		return mappedFileBlock{
+			offset: blk.Offset(),
+			meta:   blk.MetaDataLength(),
+			body:   blk.BodyLength(),
+			data:   r.data,
+		}, nil
+	}
 }
 
 func (r *mappedReaderImpl) dict(_ memory.Allocator, f *footerBlock, i int) (dataBlock, error) {
-	var blk flatbuf.Block
-	if !f.data.Dictionaries(&blk, i) {
+	if blk, ok := f.data.Dictionaries(i); !ok {
 		return mappedFileBlock{}, fmt.Errorf("arrow/ipc: could not extract dictionary block %d", i)
-	}
+	} else {
 
-	return mappedFileBlock{
-		offset: blk.Offset(),
-		meta:   blk.MetaDataLength(),
-		body:   blk.BodyLength(),
-		data:   r.data,
-	}, nil
+		return mappedFileBlock{
+			offset: blk.Offset(),
+			meta:   blk.MetaDataLength(),
+			body:   blk.BodyLength(),
+			data:   r.data,
+		}, nil
+	}
 }
 
 // FileReader is an Arrow file reader.
@@ -495,7 +495,8 @@ type ipcSource struct {
 
 func (src *ipcSource) buffer(i int) *memory.Buffer {
 	var buf flatbuf.Buffer
-	if !src.meta.Buffers(&buf, i) {
+	var ok bool
+	if buf, ok = src.meta.Buffers(i); !ok {
 		panic("arrow/ipc: buffer index out of bound")
 	}
 
@@ -527,11 +528,10 @@ func (src *ipcSource) buffer(i int) *memory.Buffer {
 }
 
 func (src *ipcSource) fieldMetadata(i int) flatbuf.FieldNode {
-	var node flatbuf.FieldNode
-	if !src.meta.Nodes(&node, i) {
-		panic("arrow/ipc: field metadata out of bound")
+	if node, ok := src.meta.Nodes(i); ok {
+		return node
 	}
-	return node
+	panic("arrow/ipc: field metadata out of bound")
 }
 
 func (src *ipcSource) variadicCount(i int) int64 {

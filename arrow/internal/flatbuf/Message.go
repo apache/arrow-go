@@ -96,16 +96,16 @@ func (rcv *Message) MutateBodyLength(n int64) bool {
 	return rcv.MutateInt64Slot(10, n)
 }
 
-func (rcv *Message) CustomMetadata(obj *KeyValue, j int) bool {
+func (rcv *Message) CustomMetadata(j int) (obj KeyValue, ok bool) {
 	o := flatbuffers.UOffsetT(rcv.Offset(12))
 	if o != 0 {
 		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 4
 		x = rcv.Indirect(x)
 		obj.Init(rcv.Bytes, x)
-		return true
+		ok = true
 	}
-	return false
+	return
 }
 
 func (rcv *Message) CustomMetadataLength() int {

@@ -181,16 +181,14 @@ func fieldFromFB(field *flatbuf.Field, pos dictutils.FieldPos, memo *dictutils.M
 	n := field.ChildrenLength()
 	children := make([]arrow.Field, n)
 	for i := range children {
-		var childFB flatbuf.Field
-		if !field.Children(&childFB, i) {
+		if childFB, ok := field.Children(i); !ok {
 			return o, fmt.Errorf("arrow/ipc: could not load field child %d", i)
-
+		} else {
+			children[i], err = fieldFromFB(&childFB, pos.Child(int32(i)), memo)
+			if err != nil {
+				return o, fmt.Errorf("arrow/ipc: could not convert field child %d: %w", i, err)
+			}
 		}
-		child, err := fieldFromFB(&childFB, pos.Child(int32(i)), memo)
-		if err != nil {
-			return o, fmt.Errorf("arrow/ipc: could not convert field child %d: %w", i, err)
-		}
-		children[i] = child
 	}
 
 	o.Type, err = typeFromFB(field, pos, children, &o.Metadata, memo)
@@ -1015,7 +1013,7 @@ func durationFromFB(data flatbuf.Duration) (arrow.DataType, error) {
 
 type customMetadataer interface {
 	CustomMetadataLength() int
-	CustomMetadata(*flatbuf.KeyValue, int) bool
+	CustomMetadata(int) (flatbuf.KeyValue, bool)
 }
 
 func metadataFromFB(md customMetadataer) (arrow.Metadata, error) {
@@ -1025,12 +1023,12 @@ func metadataFromFB(md customMetadataer) (arrow.Metadata, error) {
 	)
 
 	for i := range keys {
-		var kv flatbuf.KeyValue
-		if !md.CustomMetadata(&kv, i) {
+		if kv, ok := md.CustomMetadata(i); !ok {
 			return arrow.Metadata{}, fmt.Errorf("arrow/ipc: could not read key-value %d from flatbuffer", i)
+		} else {
+			keys[i] = string(kv.Key())
+			vals[i] = string(kv.Value())
 		}
-		keys[i] = string(kv.Key())
-		vals[i] = string(kv.Value())
 	}
 
 	return arrow.NewMetadata(keys, vals), nil
@@ -1067,12 +1065,11 @@ func schemaFromFB(schema flatbuf.Schema, memo *dictutils.Memo) (*arrow.Schema, e
 	)
 
 	for i := range fields {
-		var field flatbuf.Field
-		if !schema.Fields(&field, i) {
+		if field, ok := schema.Fields(i); !ok {
 			return nil, fmt.Errorf("arrow/ipc: could not read field %d from schema", i)
+		} else {
+			fields[i], err = fieldFromFB(&field, pos.Child(int32(i)), memo)
 		}
-
-		fields[i], err = fieldFromFB(&field, pos.Child(int32(i)), memo)
 		if err != nil {
 			return nil, fmt.Errorf("arrow/ipc: could not convert field %d from flatbuf: %w", i, err)
 		}

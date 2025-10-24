@@ -77,16 +77,16 @@ func (rcv *Tensor) Type(obj *flatbuffers.Table) bool {
 /// The type of data contained in a value cell. Currently only fixed-width
 /// value types are supported, no strings or nested types
 /// The dimensions of the tensor, optionally named
-func (rcv *Tensor) Shape(obj *TensorDim, j int) bool {
+func (rcv *Tensor) Shape(j int) (obj TensorDim, ok bool) {
 	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
 		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 4
 		x = rcv.Indirect(x)
 		obj.Init(rcv.Bytes, x)
-		return true
+		ok = true
 	}
-	return false
+	return
 }
 
 func (rcv *Tensor) ShapeLength() int {

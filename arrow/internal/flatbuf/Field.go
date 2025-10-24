@@ -115,16 +115,16 @@ func (rcv *Field) Dictionary() (obj DictionaryEncoding, ok bool) {
 /// Present only if the field is dictionary encoded.
 /// children apply only to nested data types like Struct, List and Union. For
 /// primitive types children will have length 0.
-func (rcv *Field) Children(obj *Field, j int) bool {
+func (rcv *Field) Children(j int) (obj Field, ok bool) {
 	o := flatbuffers.UOffsetT(rcv.Offset(14))
 	if o != 0 {
 		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 4
 		x = rcv.Indirect(x)
 		obj.Init(rcv.Bytes, x)
-		return true
+		ok = true
 	}
-	return false
+	return
 }
 
 func (rcv *Field) ChildrenLength() int {
@@ -138,16 +138,16 @@ func (rcv *Field) ChildrenLength() int {
 /// children apply only to nested data types like Struct, List and Union. For
 /// primitive types children will have length 0.
 /// User-defined metadata
-func (rcv *Field) CustomMetadata(obj *KeyValue, j int) bool {
+func (rcv *Field) CustomMetadata(j int) (obj KeyValue, ok bool) {
 	o := flatbuffers.UOffsetT(rcv.Offset(16))
 	if o != 0 {
 		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 4
 		x = rcv.Indirect(x)
 		obj.Init(rcv.Bytes, x)
-		return true
+		ok = true
 	}
-	return false
+	return
 }
 
 func (rcv *Field) CustomMetadataLength() int {

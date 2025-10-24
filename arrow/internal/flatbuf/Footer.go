@@ -76,15 +76,15 @@ func (rcv *Footer) Schema() (obj Schema, ok bool) {
 	return
 }
 
-func (rcv *Footer) Dictionaries(obj *Block, j int) bool {
+func (rcv *Footer) Dictionaries(j int) (obj Block, ok bool) {
 	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
 		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 24
 		obj.Init(rcv.Bytes, x)
-		return true
+		ok = true
 	}
-	return false
+	return
 }
 
 func (rcv *Footer) DictionariesLength() int {
@@ -95,15 +95,15 @@ func (rcv *Footer) DictionariesLength() int {
 	return 0
 }
 
-func (rcv *Footer) RecordBatches(obj *Block, j int) bool {
+func (rcv *Footer) RecordBatches(j int) (obj Block, ok bool) {
 	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
 		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 24
 		obj.Init(rcv.Bytes, x)
-		return true
+		ok = true
 	}
-	return false
+	return
 }
 
 func (rcv *Footer) RecordBatchesLength() int {
@@ -115,16 +115,16 @@ func (rcv *Footer) RecordBatchesLength() int {
 }
 
 /// User-defined metadata
-func (rcv *Footer) CustomMetadata(obj *KeyValue, j int) bool {
+func (rcv *Footer) CustomMetadata(j int) (obj KeyValue, ok bool) {
 	o := flatbuffers.UOffsetT(rcv.Offset(12))
 	if o != 0 {
 		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 4
 		x = rcv.Indirect(x)
 		obj.Init(rcv.Bytes, x)
-		return true
+		ok = true
 	}
-	return false
+	return
 }
 
 func (rcv *Footer) CustomMetadataLength() int {

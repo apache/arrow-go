@@ -71,15 +71,15 @@ func (rcv *RecordBatch) MutateLength(n int64) bool {
 }
 
 /// Nodes correspond to the pre-ordered flattened logical schema
-func (rcv *RecordBatch) Nodes(obj *FieldNode, j int) bool {
+func (rcv *RecordBatch) Nodes(j int) (obj FieldNode, ok bool) {
 	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
 		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 16
 		obj.Init(rcv.Bytes, x)
-		return true
+		ok = true
 	}
-	return false
+	return
 }
 
 func (rcv *RecordBatch) NodesLength() int {
@@ -97,15 +97,15 @@ func (rcv *RecordBatch) NodesLength() int {
 /// example, most primitive arrays will have 2 buffers, 1 for the validity
 /// bitmap and 1 for the values. For struct arrays, there will only be a
 /// single buffer for the validity (nulls) bitmap
-func (rcv *RecordBatch) Buffers(obj *Buffer, j int) bool {
+func (rcv *RecordBatch) Buffers(j int) (obj Buffer, ok bool) {
 	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
 		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 16
 		obj.Init(rcv.Bytes, x)
-		return true
+		ok = true
 	}
-	return false
+	return
 }
 
 func (rcv *RecordBatch) BuffersLength() int {

@@ -71,16 +71,16 @@ func (rcv *Schema) MutateEndianness(n Endianness) bool {
 	return rcv.MutateInt16Slot(4, int16(n))
 }
 
-func (rcv *Schema) Fields(obj *Field, j int) bool {
+func (rcv *Schema) Fields(j int) (obj Field, ok bool) {
 	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
 		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 4
 		x = rcv.Indirect(x)
 		obj.Init(rcv.Bytes, x)
-		return true
+		ok = true
 	}
-	return false
+	return
 }
 
 func (rcv *Schema) FieldsLength() int {
@@ -91,16 +91,16 @@ func (rcv *Schema) FieldsLength() int {
 	return 0
 }
 
-func (rcv *Schema) CustomMetadata(obj *KeyValue, j int) bool {
+func (rcv *Schema) CustomMetadata(j int) (obj KeyValue, ok bool) {
 	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
 		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 4
 		x = rcv.Indirect(x)
 		obj.Init(rcv.Bytes, x)
-		return true
+		ok = true
 	}
-	return false
+	return
 }
 
 func (rcv *Schema) CustomMetadataLength() int {
