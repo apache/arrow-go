@@ -134,11 +134,13 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 	}
 
 	if r.fileDecryptor == nil {
+		stream.Free()
 		return nil, xerrors.New("column in rowgroup is encrypted, but no file decryptor")
 	}
 
 	const encryptedRowGroupsLimit = 32767
 	if i > encryptedRowGroupsLimit {
+		stream.Free()
 		return nil, xerrors.New("encrypted files cannot contain more than 32767 column chunks")
 	}
 

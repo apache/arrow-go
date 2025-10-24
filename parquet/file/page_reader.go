@@ -505,12 +505,15 @@ func (p *serializedPageReader) Page() Page {
 
 func (p *serializedPageReader) decompress(rd io.Reader, lenCompressed int, buf []byte) ([]byte, error) {
 	p.decompressBuffer.ResizeNoShrink(lenCompressed)
-	b := bytes.NewBuffer(p.decompressBuffer.Bytes()[:0])
-	if _, err := io.CopyN(b, rd, int64(lenCompressed)); err != nil {
+	data := p.decompressBuffer.Bytes()
+	n, err := io.ReadFull(rd, data)
+	if err != nil {
 		return nil, err
 	}
+	if n != lenCompressed {
+		return nil, fmt.Errorf("parquet: expected to read %d bytes but only read %d", lenCompressed, n)
+	}
 
-	data := p.decompressBuffer.Bytes()
 	if p.cryptoCtx.DataDecryptor != nil {
 		data = p.cryptoCtx.DataDecryptor.Decrypt(p.decompressBuffer.Bytes())
 	}
@@ -599,6 +602,7 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 			io.NewSectionReader(p.r.Outer(), p.dictOffset-p.baseOffset, p.dataOffset-p.baseOffset),
 			readBufSize,
 			p.mem)
+		defer rd.Free()
 		if err := p.readPageHeader(rd, hdr); err != nil {
 			return nil, err
 		}
@@ -809,6 +813,7 @@ func (p *serializedPageReader) Next() bool {
 
 			firstRowIdx := p.rowsSeen
 			p.rowsSeen += int64(dataHeader.GetNumValues())
+
 			data, err := p.decompress(p.r, lenCompressed, buf.Bytes())
 			if err != nil {
 				p.err = err
