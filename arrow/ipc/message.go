@@ -89,14 +89,14 @@ func NewMessage(meta, body *memory.Buffer) *Message {
 	return m
 }
 
-func newMessageFromFB(meta flatbuf.Message, body *memory.Buffer) *Message {
+func newMessageFromFB(msg flatbuf.Message, meta *memory.Buffer, body *memory.Buffer) *Message {
 	if body == nil {
 		panic("arrow/ipc: nil buffers")
 	}
 	body.Retain()
 	m := &Message{
-		msg:  meta,
-		meta: memory.NewBufferBytes(meta.Bytes),
+		msg:  msg,
+		meta: meta,
 		body: body,
 	}
 	m.refCount.Add(1)
@@ -150,6 +150,7 @@ type messageReader struct {
 
 	mem memory.Allocator
 	header [4]byte
+	meta *memory.Buffer
 }
 
 // NewMessageReader returns a reader that reads messages from an input stream.
@@ -221,8 +222,8 @@ func (r *messageReader) Message() (*Message, error) {
 		return nil, fmt.Errorf("arrow/ipc: could not read message metadata: %w", err)
 	}
 
-	meta := flatbuf.GetRootAsMessage(buf, 0)
-	bodyLen := meta.BodyLength()
+	msg := flatbuf.GetRootAsMessage(buf, 0)
+	bodyLen := msg.BodyLength()
 
 	body := memory.NewResizableBuffer(r.mem)
 	defer body.Release()
@@ -237,7 +238,12 @@ func (r *messageReader) Message() (*Message, error) {
 		r.msg.Release()
 		r.msg = nil
 	}
-	r.msg = newMessageFromFB(meta, body)
+	if r.meta == nil {
+		r.meta = memory.NewBufferBytes(msg.Bytes)
+	} else {
+		r.meta.Reset(msg.Bytes)
+	}
+	r.msg = newMessageFromFB(msg, r.meta , body)
 
 	return r.msg, nil
 }
