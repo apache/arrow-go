@@ -460,7 +460,7 @@ func newRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buf
 
 	ctx := &arrayLoaderContext{
 		src: ipcSource{
-			meta:     &md,
+			meta:     md,
 			rawBytes: body,
 			codec:    codec,
 			mem:      mem,
@@ -492,7 +492,7 @@ func newRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buf
 }
 
 type ipcSource struct {
-	meta     *flatbuf.RecordBatch
+	meta     flatbuf.RecordBatch
 	rawBytes *memory.Buffer
 	codec    decompressor
 	mem      memory.Allocator
@@ -850,9 +850,9 @@ func readDictionary(memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buff
 		return 0, fmt.Errorf("arrow/ipc: no dictionary type found with id: %d", id)
 	}
 
-	ctx := &arrayLoaderContext{
+	ctx := arrayLoaderContext{
 		src: ipcSource{
-			meta:     &data,
+			meta:     data,
 			codec:    codec,
 			rawBytes: body,
 			mem:      mem,
