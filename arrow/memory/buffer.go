@@ -149,12 +149,12 @@ func (b *Buffer) resize(newSize int, shrink bool) {
 	} else {
 		// Buffer is not growing, so shrink to the requested size without
 		// excess space.
-		newCap := roundUpToMultipleOf64(newSize)
-		if len(b.buf) != newCap {
-			if newSize == 0 {
-				b.mem.Free(b.buf)
-				b.buf = nil
-			} else {
+		if newSize == 0 {
+			b.mem.Free(b.buf)
+			b.buf = nil
+		} else {
+			newCap := roundUpToMultipleOf64(newSize)
+			if len(b.buf) != newCap {
 				b.buf = b.mem.Reallocate(newCap, b.buf)
 			}
 		}

@@ -23,117 +23,123 @@ import (
 )
 
 type Tensor struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsTensor(buf []byte, offset flatbuffers.UOffsetT) *Tensor {
+func GetRootAsTensor(buf []byte, offset flatbuffers.UOffsetT) (x Tensor) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Tensor{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
-func (rcv *Tensor) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
+func FinishTensorBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.Finish(offset)
 }
 
-func (rcv *Tensor) Table() flatbuffers.Table {
-	return rcv._tab
+func GetSizePrefixedRootAsTensor(buf []byte, offset flatbuffers.UOffsetT) (x Tensor) {
+	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
+	return x
+}
+
+func FinishSizePrefixedTensorBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.FinishSizePrefixed(offset)
+}
+
+func (rcv *Tensor) Init(buf []byte, i flatbuffers.UOffsetT) {
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func (rcv *Tensor) TypeType() Type {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return Type(rcv._tab.GetByte(o + rcv._tab.Pos))
+		return Type(rcv.GetByte(o + rcv.Pos))
 	}
 	return 0
 }
 
 func (rcv *Tensor) MutateTypeType(n Type) bool {
-	return rcv._tab.MutateByteSlot(4, byte(n))
+	return rcv.MutateByteSlot(4, byte(n))
 }
 
-// / The type of data contained in a value cell. Currently only fixed-width
-// / value types are supported, no strings or nested types
+/// The type of data contained in a value cell. Currently only fixed-width
+/// value types are supported, no strings or nested types
 func (rcv *Tensor) Type(obj *flatbuffers.Table) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		rcv._tab.Union(obj, o)
+		rcv.Union(obj, o)
 		return true
 	}
 	return false
 }
 
-// / The type of data contained in a value cell. Currently only fixed-width
-// / value types are supported, no strings or nested types
-// / The dimensions of the tensor, optionally named
-func (rcv *Tensor) Shape(obj *TensorDim, j int) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+/// The type of data contained in a value cell. Currently only fixed-width
+/// value types are supported, no strings or nested types
+/// The dimensions of the tensor, optionally named
+func (rcv *Tensor) Shape(j int) (obj TensorDim, ok bool) {
+	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
-		x := rcv._tab.Vector(o)
+		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 4
-		x = rcv._tab.Indirect(x)
-		obj.Init(rcv._tab.Bytes, x)
-		return true
+		x = rcv.Indirect(x)
+		obj.Init(rcv.Bytes, x)
+		ok = true
 	}
-	return false
+	return
 }
 
 func (rcv *Tensor) ShapeLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }
 
-// / The dimensions of the tensor, optionally named
-// / Non-negative byte offsets to advance one value cell along each dimension
-// / If omitted, default to row-major order (C-like).
+/// The dimensions of the tensor, optionally named
+/// Non-negative byte offsets to advance one value cell along each dimension
+/// If omitted, default to row-major order (C-like).
 func (rcv *Tensor) Strides(j int) int64 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
+	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
-		a := rcv._tab.Vector(o)
-		return rcv._tab.GetInt64(a + flatbuffers.UOffsetT(j*8))
+		a := rcv.Vector(o)
+		return rcv.GetInt64(a + flatbuffers.UOffsetT(j*8))
 	}
 	return 0
 }
 
 func (rcv *Tensor) StridesLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
+	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }
 
-// / Non-negative byte offsets to advance one value cell along each dimension
-// / If omitted, default to row-major order (C-like).
+/// Non-negative byte offsets to advance one value cell along each dimension
+/// If omitted, default to row-major order (C-like).
 func (rcv *Tensor) MutateStrides(j int, n int64) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
+	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
-		a := rcv._tab.Vector(o)
-		return rcv._tab.MutateInt64(a+flatbuffers.UOffsetT(j*8), n)
+		a := rcv.Vector(o)
+		return rcv.MutateInt64(a+flatbuffers.UOffsetT(j*8), n)
 	}
 	return false
 }
 
-// / The location and size of the tensor's data
-func (rcv *Tensor) Data(obj *Buffer) *Buffer {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+/// The location and size of the tensor's data
+func (rcv *Tensor) Data() (obj Buffer, ok bool) {
+	o := flatbuffers.UOffsetT(rcv.Offset(12))
 	if o != 0 {
-		x := o + rcv._tab.Pos
-		if obj == nil {
-			obj = new(Buffer)
-		}
-		obj.Init(rcv._tab.Bytes, x)
-		return obj
+		x := o + rcv.Pos
+		obj.Init(rcv.Bytes, x)
+		ok = true
 	}
-	return nil
+	return
 }
 
-// / The location and size of the tensor's data
+/// The location and size of the tensor's data
 func TensorStart(builder *flatbuffers.Builder) {
 	builder.StartObject(5)
 }

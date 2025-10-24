@@ -43,7 +43,7 @@ type readerImpl interface {
 type footerBlock struct {
 	offset int64
 	buffer *memory.Buffer
-	data   *flatbuf.Footer
+	data   flatbuf.Footer
 }
 
 type dataBlock interface {
@@ -78,33 +78,33 @@ func (r *basicReaderImpl) getFooterEnd() (int64, error) {
 }
 
 func (r *basicReaderImpl) block(mem memory.Allocator, f *footerBlock, i int) (dataBlock, error) {
-	var blk flatbuf.Block
-	if !f.data.RecordBatches(&blk, i) {
+	if blk, ok := f.data.RecordBatches(i); !ok {
 		return fileBlock{}, fmt.Errorf("arrow/ipc: could not extract file block %d", i)
-	}
+	} else {
 
-	return fileBlock{
-		offset: blk.Offset(),
-		meta:   blk.MetaDataLength(),
-		body:   blk.BodyLength(),
-		r:      r.r,
-		mem:    mem,
-	}, nil
+		return fileBlock{
+			offset: blk.Offset(),
+			meta:   blk.MetaDataLength(),
+			body:   blk.BodyLength(),
+			r:      r.r,
+			mem:    mem,
+		}, nil
+	}
 }
 
 func (r *basicReaderImpl) dict(mem memory.Allocator, f *footerBlock, i int) (dataBlock, error) {
-	var blk flatbuf.Block
-	if !f.data.Dictionaries(&blk, i) {
+	if blk, ok := f.data.Dictionaries(i); !ok {
 		return fileBlock{}, fmt.Errorf("arrow/ipc: could not extract dictionary block %d", i)
-	}
+	} else {
 
-	return fileBlock{
-		offset: blk.Offset(),
-		meta:   blk.MetaDataLength(),
-		body:   blk.BodyLength(),
-		r:      r.r,
-		mem:    mem,
-	}, nil
+		return fileBlock{
+			offset: blk.Offset(),
+			meta:   blk.MetaDataLength(),
+			body:   blk.BodyLength(),
+			r:      r.r,
+			mem:    mem,
+		}, nil
+	}
 }
 
 type mappedReaderImpl struct {
@@ -122,31 +122,31 @@ func (r *mappedReaderImpl) getBytes(offset, length int64) ([]byte, error) {
 func (r *mappedReaderImpl) getFooterEnd() (int64, error) { return int64(len(r.data)), nil }
 
 func (r *mappedReaderImpl) block(_ memory.Allocator, f *footerBlock, i int) (dataBlock, error) {
-	var blk flatbuf.Block
-	if !f.data.RecordBatches(&blk, i) {
+	if blk, ok := f.data.RecordBatches(i); !ok {
 		return mappedFileBlock{}, fmt.Errorf("arrow/ipc: could not extract file block %d", i)
-	}
+	} else {
 
-	return mappedFileBlock{
-		offset: blk.Offset(),
-		meta:   blk.MetaDataLength(),
-		body:   blk.BodyLength(),
-		data:   r.data,
-	}, nil
+		return mappedFileBlock{
+			offset: blk.Offset(),
+			meta:   blk.MetaDataLength(),
+			body:   blk.BodyLength(),
+			data:   r.data,
+		}, nil
+	}
 }
 
 func (r *mappedReaderImpl) dict(_ memory.Allocator, f *footerBlock, i int) (dataBlock, error) {
-	var blk flatbuf.Block
-	if !f.data.Dictionaries(&blk, i) {
+	if blk, ok := f.data.Dictionaries(i); !ok {
 		return mappedFileBlock{}, fmt.Errorf("arrow/ipc: could not extract dictionary block %d", i)
-	}
+	} else {
 
-	return mappedFileBlock{
-		offset: blk.Offset(),
-		meta:   blk.MetaDataLength(),
-		body:   blk.BodyLength(),
-		data:   r.data,
-	}, nil
+		return mappedFileBlock{
+			offset: blk.Offset(),
+			meta:   blk.MetaDataLength(),
+			body:   blk.BodyLength(),
+			data:   r.data,
+		}, nil
+	}
 }
 
 // FileReader is an Arrow file reader.
@@ -242,8 +242,8 @@ func (f *FileReader) readSchema(ensureNativeEndian bool) error {
 		kind dictutils.Kind
 	)
 
-	schema := f.footer.data.Schema(nil)
-	if schema == nil {
+	schema, ok := f.footer.data.Schema()
+	if !ok {
 		return fmt.Errorf("arrow/ipc: could not load schema from flatbuffer data")
 	}
 	f.schema, err = schemaFromFB(schema, &f.memo)
@@ -275,7 +275,7 @@ func (f *FileReader) readSchema(ensureNativeEndian bool) error {
 			return err
 		}
 
-		kind, err = readDictionary(&f.memo, msg.meta, msg.body, f.swapEndianness, f.mem)
+		kind, err = readDictionary(&f.memo, msg, f.swapEndianness, f.mem)
 		if err != nil {
 			return err
 		}
@@ -322,7 +322,7 @@ func (f *FileReader) Schema() *arrow.Schema {
 }
 
 func (f *FileReader) NumDictionaries() int {
-	if f.footer.data == nil {
+	if f.footer.data.Bytes == nil {
 		return 0
 	}
 	return f.footer.data.DictionariesLength()
@@ -339,10 +339,6 @@ func (f *FileReader) Version() MetadataVersion {
 // Close cleans up resources used by the File.
 // Close does not close the underlying reader.
 func (f *FileReader) Close() error {
-	if f.footer.data != nil {
-		f.footer.data = nil
-	}
-
 	if f.footer.buffer != nil {
 		f.footer.buffer.Release()
 		f.footer.buffer = nil
@@ -449,18 +445,17 @@ func newRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buf
 		md    flatbuf.RecordBatch
 		codec decompressor
 	)
-	initFB(&md, msg.Header)
+	msg.Header(&md.Table)
 	rows := md.Length()
 
-	bodyCompress := md.Compression(nil)
-	if bodyCompress != nil {
+	if bodyCompress, ok := md.Compression(); ok {
 		codec = getDecompressor(bodyCompress.Codec())
 		defer codec.Close()
 	}
 
 	ctx := &arrayLoaderContext{
 		src: ipcSource{
-			meta:     &md,
+			meta:     md,
 			rawBytes: body,
 			codec:    codec,
 			mem:      mem,
@@ -492,7 +487,7 @@ func newRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buf
 }
 
 type ipcSource struct {
-	meta     *flatbuf.RecordBatch
+	meta     flatbuf.RecordBatch
 	rawBytes *memory.Buffer
 	codec    decompressor
 	mem      memory.Allocator
@@ -500,7 +495,8 @@ type ipcSource struct {
 
 func (src *ipcSource) buffer(i int) *memory.Buffer {
 	var buf flatbuf.Buffer
-	if !src.meta.Buffers(&buf, i) {
+	var ok bool
+	if buf, ok = src.meta.Buffers(i); !ok {
 		panic("arrow/ipc: buffer index out of bound")
 	}
 
@@ -531,12 +527,11 @@ func (src *ipcSource) buffer(i int) *memory.Buffer {
 	return raw
 }
 
-func (src *ipcSource) fieldMetadata(i int) *flatbuf.FieldNode {
-	var node flatbuf.FieldNode
-	if !src.meta.Nodes(&node, i) {
-		panic("arrow/ipc: field metadata out of bound")
+func (src *ipcSource) fieldMetadata(i int) flatbuf.FieldNode {
+	if node, ok := src.meta.Nodes(i); ok {
+		return node
 	}
-	return &node
+	panic("arrow/ipc: field metadata out of bound")
 }
 
 func (src *ipcSource) variadicCount(i int) int64 {
@@ -553,7 +548,7 @@ type arrayLoaderContext struct {
 	version   MetadataVersion
 }
 
-func (ctx *arrayLoaderContext) field() *flatbuf.FieldNode {
+func (ctx *arrayLoaderContext) field() flatbuf.FieldNode {
 	field := ctx.src.fieldMetadata(ctx.ifield)
 	ctx.ifield++
 	return field
@@ -647,7 +642,7 @@ func (ctx *arrayLoaderContext) loadArray(dt arrow.DataType) arrow.ArrayData {
 	}
 }
 
-func (ctx *arrayLoaderContext) loadCommon(typ arrow.Type, nbufs int) (*flatbuf.FieldNode, []*memory.Buffer) {
+func (ctx *arrayLoaderContext) loadCommon(typ arrow.Type, nbufs int) (flatbuf.FieldNode, []*memory.Buffer) {
 	buffers := make([]*memory.Buffer, 0, nbufs)
 	field := ctx.field()
 
@@ -826,18 +821,15 @@ func (ctx *arrayLoaderContext) loadUnion(dt arrow.UnionType) arrow.ArrayData {
 	return array.NewData(dt, int(field.Length()), buffers, subs, 0, 0)
 }
 
-func readDictionary(memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buffer, swapEndianness bool, mem memory.Allocator) (dictutils.Kind, error) {
+func readDictionary(memo *dictutils.Memo, msg *Message, swapEndianness bool, mem memory.Allocator) (dictutils.Kind, error) {
 	var (
-		msg   = flatbuf.GetRootAsMessage(meta.Bytes(), 0)
 		md    flatbuf.DictionaryBatch
-		data  flatbuf.RecordBatch
 		codec decompressor
 	)
-	initFB(&md, msg.Header)
+	msg.msg.Header(&md.Table)
 
-	md.Data(&data)
-	bodyCompress := data.Compression(nil)
-	if bodyCompress != nil {
+	data, _ := md.Data()
+	if bodyCompress, ok := data.Compression(); ok {
 		codec = getDecompressor(bodyCompress.Codec())
 		defer codec.Close()
 	}
@@ -850,11 +842,11 @@ func readDictionary(memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buff
 		return 0, fmt.Errorf("arrow/ipc: no dictionary type found with id: %d", id)
 	}
 
-	ctx := &arrayLoaderContext{
+	ctx := arrayLoaderContext{
 		src: ipcSource{
-			meta:     &data,
+			meta:     data,
 			codec:    codec,
-			rawBytes: body,
+			rawBytes: msg.body,
 			mem:      mem,
 		},
 		memo: memo,

@@ -23,35 +23,44 @@ import (
 )
 
 type Interval struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsInterval(buf []byte, offset flatbuffers.UOffsetT) *Interval {
+func GetRootAsInterval(buf []byte, offset flatbuffers.UOffsetT) (x Interval) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Interval{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
-func (rcv *Interval) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
+func FinishIntervalBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.Finish(offset)
 }
 
-func (rcv *Interval) Table() flatbuffers.Table {
-	return rcv._tab
+func GetSizePrefixedRootAsInterval(buf []byte, offset flatbuffers.UOffsetT) (x Interval) {
+	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
+	return x
+}
+
+func FinishSizePrefixedIntervalBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.FinishSizePrefixed(offset)
+}
+
+func (rcv *Interval) Init(buf []byte, i flatbuffers.UOffsetT) {
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func (rcv *Interval) Unit() IntervalUnit {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return IntervalUnit(rcv._tab.GetInt16(o + rcv._tab.Pos))
+		return IntervalUnit(rcv.GetInt16(o + rcv.Pos))
 	}
 	return 0
 }
 
 func (rcv *Interval) MutateUnit(n IntervalUnit) bool {
-	return rcv._tab.MutateInt16Slot(4, int16(n))
+	return rcv.MutateInt16Slot(4, int16(n))
 }
 
 func IntervalStart(builder *flatbuffers.Builder) {

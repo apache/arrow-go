@@ -22,73 +22,79 @@ import (
 	flatbuffers "github.com/google/flatbuffers/go"
 )
 
-// / For sending dictionary encoding information. Any Field can be
-// / dictionary-encoded, but in this case none of its children may be
-// / dictionary-encoded.
-// / There is one vector / column per dictionary, but that vector / column
-// / may be spread across multiple dictionary batches by using the isDelta
-// / flag
+/// For sending dictionary encoding information. Any Field can be
+/// dictionary-encoded, but in this case none of its children may be
+/// dictionary-encoded.
+/// There is one vector / column per dictionary, but that vector / column
+/// may be spread across multiple dictionary batches by using the isDelta
+/// flag
 type DictionaryBatch struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsDictionaryBatch(buf []byte, offset flatbuffers.UOffsetT) *DictionaryBatch {
+func GetRootAsDictionaryBatch(buf []byte, offset flatbuffers.UOffsetT) (x DictionaryBatch) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &DictionaryBatch{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
-func (rcv *DictionaryBatch) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
+func FinishDictionaryBatchBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.Finish(offset)
 }
 
-func (rcv *DictionaryBatch) Table() flatbuffers.Table {
-	return rcv._tab
+func GetSizePrefixedRootAsDictionaryBatch(buf []byte, offset flatbuffers.UOffsetT) (x DictionaryBatch) {
+	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
+	return x
+}
+
+func FinishSizePrefixedDictionaryBatchBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.FinishSizePrefixed(offset)
+}
+
+func (rcv *DictionaryBatch) Init(buf []byte, i flatbuffers.UOffsetT) {
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func (rcv *DictionaryBatch) Id() int64 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return rcv._tab.GetInt64(o + rcv._tab.Pos)
+		return rcv.GetInt64(o + rcv.Pos)
 	}
 	return 0
 }
 
 func (rcv *DictionaryBatch) MutateId(n int64) bool {
-	return rcv._tab.MutateInt64Slot(4, n)
+	return rcv.MutateInt64Slot(4, n)
 }
 
-func (rcv *DictionaryBatch) Data(obj *RecordBatch) *RecordBatch {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+func (rcv *DictionaryBatch) Data() (obj RecordBatch, ok bool) {
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		x := rcv._tab.Indirect(o + rcv._tab.Pos)
-		if obj == nil {
-			obj = new(RecordBatch)
-		}
-		obj.Init(rcv._tab.Bytes, x)
-		return obj
+		x := rcv.Indirect(o + rcv.Pos)
+		obj.Init(rcv.Bytes, x)
+		ok = true
 	}
-	return nil
+	return
 }
 
-// / If isDelta is true the values in the dictionary are to be appended to a
-// / dictionary with the indicated id. If isDelta is false this dictionary
-// / should replace the existing dictionary.
+/// If isDelta is true the values in the dictionary are to be appended to a
+/// dictionary with the indicated id. If isDelta is false this dictionary
+/// should replace the existing dictionary.
 func (rcv *DictionaryBatch) IsDelta() bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
-		return rcv._tab.GetBool(o + rcv._tab.Pos)
+		return rcv.GetBool(o + rcv.Pos)
 	}
 	return false
 }
 
-// / If isDelta is true the values in the dictionary are to be appended to a
-// / dictionary with the indicated id. If isDelta is false this dictionary
-// / should replace the existing dictionary.
+/// If isDelta is true the values in the dictionary are to be appended to a
+/// dictionary with the indicated id. If isDelta is false this dictionary
+/// should replace the existing dictionary.
 func (rcv *DictionaryBatch) MutateIsDelta(n bool) bool {
-	return rcv._tab.MutateBoolSlot(8, n)
+	return rcv.MutateBoolSlot(8, n)
 }
 
 func DictionaryBatchStart(builder *flatbuffers.Builder) {

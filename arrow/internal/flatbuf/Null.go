@@ -22,25 +22,34 @@ import (
 	flatbuffers "github.com/google/flatbuffers/go"
 )
 
-// / These are stored in the flatbuffer in the Type union below
+/// These are stored in the flatbuffer in the Type union below
 type Null struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsNull(buf []byte, offset flatbuffers.UOffsetT) *Null {
+func GetRootAsNull(buf []byte, offset flatbuffers.UOffsetT) (x Null) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Null{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
-func (rcv *Null) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
+func FinishNullBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.Finish(offset)
 }
 
-func (rcv *Null) Table() flatbuffers.Table {
-	return rcv._tab
+func GetSizePrefixedRootAsNull(buf []byte, offset flatbuffers.UOffsetT) (x Null) {
+	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
+	return x
+}
+
+func FinishSizePrefixedNullBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.FinishSizePrefixed(offset)
+}
+
+func (rcv *Null) Init(buf []byte, i flatbuffers.UOffsetT) {
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func NullStart(builder *flatbuffers.Builder) {

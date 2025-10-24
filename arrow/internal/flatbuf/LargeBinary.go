@@ -22,26 +22,35 @@ import (
 	flatbuffers "github.com/google/flatbuffers/go"
 )
 
-// / Same as Binary, but with 64-bit offsets, allowing to represent
-// / extremely large data values.
+/// Same as Binary, but with 64-bit offsets, allowing to represent
+/// extremely large data values.
 type LargeBinary struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsLargeBinary(buf []byte, offset flatbuffers.UOffsetT) *LargeBinary {
+func GetRootAsLargeBinary(buf []byte, offset flatbuffers.UOffsetT) (x LargeBinary) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &LargeBinary{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
-func (rcv *LargeBinary) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
+func FinishLargeBinaryBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.Finish(offset)
 }
 
-func (rcv *LargeBinary) Table() flatbuffers.Table {
-	return rcv._tab
+func GetSizePrefixedRootAsLargeBinary(buf []byte, offset flatbuffers.UOffsetT) (x LargeBinary) {
+	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
+	return x
+}
+
+func FinishSizePrefixedLargeBinaryBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.FinishSizePrefixed(offset)
+}
+
+func (rcv *LargeBinary) Init(buf []byte, i flatbuffers.UOffsetT) {
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func LargeBinaryStart(builder *flatbuffers.Builder) {

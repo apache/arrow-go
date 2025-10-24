@@ -22,26 +22,35 @@ import (
 	flatbuffers "github.com/google/flatbuffers/go"
 )
 
-// / Same as List, but with 64-bit offsets, allowing to represent
-// / extremely large data values.
+/// Same as List, but with 64-bit offsets, allowing to represent
+/// extremely large data values.
 type LargeList struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsLargeList(buf []byte, offset flatbuffers.UOffsetT) *LargeList {
+func GetRootAsLargeList(buf []byte, offset flatbuffers.UOffsetT) (x LargeList) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &LargeList{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
-func (rcv *LargeList) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
+func FinishLargeListBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.Finish(offset)
 }
 
-func (rcv *LargeList) Table() flatbuffers.Table {
-	return rcv._tab
+func GetSizePrefixedRootAsLargeList(buf []byte, offset flatbuffers.UOffsetT) (x LargeList) {
+	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
+	return x
+}
+
+func FinishSizePrefixedLargeListBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.FinishSizePrefixed(offset)
+}
+
+func (rcv *LargeList) Init(buf []byte, i flatbuffers.UOffsetT) {
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func LargeListStart(builder *flatbuffers.Builder) {

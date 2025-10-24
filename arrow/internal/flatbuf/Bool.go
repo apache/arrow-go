@@ -23,23 +23,32 @@ import (
 )
 
 type Bool struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsBool(buf []byte, offset flatbuffers.UOffsetT) *Bool {
+func GetRootAsBool(buf []byte, offset flatbuffers.UOffsetT) (x Bool) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Bool{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
-func (rcv *Bool) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
+func FinishBoolBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.Finish(offset)
 }
 
-func (rcv *Bool) Table() flatbuffers.Table {
-	return rcv._tab
+func GetSizePrefixedRootAsBool(buf []byte, offset flatbuffers.UOffsetT) (x Bool) {
+	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
+	return x
+}
+
+func FinishSizePrefixedBoolBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.FinishSizePrefixed(offset)
+}
+
+func (rcv *Bool) Init(buf []byte, i flatbuffers.UOffsetT) {
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func BoolStart(builder *flatbuffers.Builder) {

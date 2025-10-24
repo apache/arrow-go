@@ -21,9 +21,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/textproto"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -85,7 +85,7 @@ func (s *serverAddCookieMiddleware) StartCall(ctx context.Context) context.Conte
 		}
 	}
 
-	if !reflect.DeepEqual(s.expectedCookies, got) {
+	if !maps.Equal(s.expectedCookies, got) {
 		panic(fmt.Sprintf("did not get expected cookies, expected %+v, got %+v", s.expectedCookies, got))
 	}
 

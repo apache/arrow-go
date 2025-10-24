@@ -22,27 +22,36 @@ import (
 	flatbuffers "github.com/google/flatbuffers/go"
 )
 
-// / A Struct_ in the flatbuffer metadata is the same as an Arrow Struct
-// / (according to the physical memory layout). We used Struct_ here as
-// / Struct is a reserved word in Flatbuffers
+/// A Struct_ in the flatbuffer metadata is the same as an Arrow Struct
+/// (according to the physical memory layout). We used Struct_ here as
+/// Struct is a reserved word in Flatbuffers
 type Struct_ struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsStruct_(buf []byte, offset flatbuffers.UOffsetT) *Struct_ {
+func GetRootAsStruct_(buf []byte, offset flatbuffers.UOffsetT) (x Struct_) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Struct_{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
-func (rcv *Struct_) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
+func FinishStruct_Buffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.Finish(offset)
 }
 
-func (rcv *Struct_) Table() flatbuffers.Table {
-	return rcv._tab
+func GetSizePrefixedRootAsStruct_(buf []byte, offset flatbuffers.UOffsetT) (x Struct_) {
+	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
+	return x
+}
+
+func FinishSizePrefixedStruct_Buffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.FinishSizePrefixed(offset)
+}
+
+func (rcv *Struct_) Init(buf []byte, i flatbuffers.UOffsetT) {
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func Struct_Start(builder *flatbuffers.Builder) {
