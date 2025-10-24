@@ -22,6 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
 type Reader interface {
@@ -38,6 +40,7 @@ type byteReader struct {
 
 // NewByteReader creates a new ByteReader instance from the given byte slice.
 // It wraps the bytes.NewReader function to implement BufferedReader interface.
+// It is considered not to own the underlying byte slice, so the Free method is a no-op.
 func NewByteReader(buf []byte) *byteReader {
 	r := bytes.NewReader(buf)
 	return &byteReader{
@@ -108,10 +111,43 @@ func (r *byteReader) Reset(Reader) {}
 
 func (r *byteReader) BufferSize() int { return len(r.buf) }
 
+func (r *byteReader) Free() {}
+
+// bytesBufferReader is a byte slice with a bytes reader wrapped around it.
+// It uses an allocator to allocate and free the underlying byte slice.
+type bytesBufferReader struct {
+	alloc memory.Allocator
+	byteReader
+}
+
+// NewBytesBufferReader creates a new bytesBufferReader with the given size and allocator.
+func NewBytesBufferReader(size int, alloc memory.Allocator) *bytesBufferReader {
+	buf := alloc.Allocate(size)
+	return &bytesBufferReader{
+		alloc: alloc,
+		byteReader: byteReader{
+			bytes.NewReader(buf),
+			buf,
+			0,
+		},
+	}
+}
+
+// Outer returns the underlying byte slice.
+func (r *bytesBufferReader) Buffer() []byte {
+	return r.buf
+}
+
+// Free releases the underlying byte slice back to the allocator.
+func (r *bytesBufferReader) Free() {
+	r.alloc.Free(r.buf)
+}
+
 // bufferedReader is similar to bufio.Reader except
 // it will expand the buffer if necessary when asked to Peek
 // more bytes than are in the buffer
 type bufferedReader struct {
+	alloc    memory.Allocator // allocator used to allocate the buffer
 	bufferSz int
 	buf      []byte
 	r, w     int
@@ -122,9 +158,10 @@ type bufferedReader struct {
 // NewBufferedReader returns a buffered reader with similar semantics to bufio.Reader
 // except Peek will expand the internal buffer if needed rather than return
 // an error.
-func NewBufferedReader(rd Reader, sz int) *bufferedReader {
+func NewBufferedReader(rd Reader, sz int, alloc memory.Allocator) *bufferedReader {
 	r := &bufferedReader{
-		rd: rd,
+		alloc: alloc,
+		rd:    rd,
 	}
 	r.resizeBuffer(sz)
 	return r
@@ -140,11 +177,9 @@ func (b *bufferedReader) Reset(rd Reader) {
 
 func (b *bufferedReader) resetBuffer() {
 	if b.buf == nil {
-		b.buf = make([]byte, b.bufferSz)
+		b.buf = b.alloc.Allocate(b.bufferSz)
 	} else if b.bufferSz > cap(b.buf) {
-		buf := b.buf
-		b.buf = make([]byte, b.bufferSz)
-		copy(b.buf, buf)
+		b.buf = b.alloc.Reallocate(b.bufferSz, b.buf)
 	} else {
 		b.buf = b.buf[:b.bufferSz]
 	}
@@ -297,4 +332,8 @@ func (b *bufferedReader) Read(p []byte) (n int, err error) {
 	n = copy(p, b.buf[b.r:b.w])
 	b.r += n
 	return n, nil
+}
+
+func (b *bufferedReader) Free() {
+	b.alloc.Free(b.buf)
 }
