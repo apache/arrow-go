@@ -608,6 +608,7 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 			io.NewSectionReader(p.r.Outer(), p.dictOffset-p.baseOffset, p.dataOffset-p.baseOffset),
 			readBufSize,
 			p.mem)
+		defer rd.Free()
 		if err := p.readPageHeader(rd, hdr); err != nil {
 			return nil, err
 		}
@@ -818,6 +819,7 @@ func (p *serializedPageReader) Next() bool {
 
 			firstRowIdx := p.rowsSeen
 			p.rowsSeen += int64(dataHeader.GetNumValues())
+
 			data, err := p.decompress(p.r, lenCompressed, buf.Bytes())
 			if err != nil {
 				p.err = err
