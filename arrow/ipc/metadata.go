@@ -166,15 +166,11 @@ func unitToFB(unit arrow.TimeUnit) flatbuf.TimeUnit {
 }
 
 // initFB is a helper function to handle flatbuffers' polymorphism.
-func initFB(t interface {
-	Table() flatbuffers.Table
-	Init([]byte, flatbuffers.UOffsetT)
-}, f func(tbl *flatbuffers.Table) bool) {
-	tbl := t.Table()
-	if !f(&tbl) {
-		panic(fmt.Errorf("arrow/ipc: could not initialize %T from flatbuffer", t))
+func initFB(init func([]byte, flatbuffers.UOffsetT), tbl flatbuffers.Table, msg flatbuf.Message) {
+	if !msg.Header(&tbl) {
+		panic("arrow/ipc: could not initialize from flatbuffer")
 	}
-	t.Init(tbl.Bytes, tbl.Pos)
+	init(tbl.Bytes, tbl.Pos)
 }
 
 func fieldFromFB(field *flatbuf.Field, pos dictutils.FieldPos, memo *dictutils.Memo) (arrow.Field, error) {
@@ -1072,7 +1068,7 @@ func metadataToFB(b *flatbuffers.Builder, meta arrow.Metadata, start startVecFun
 	return b.EndVector(n)
 }
 
-func schemaFromFB(schema *flatbuf.Schema, memo *dictutils.Memo) (*arrow.Schema, error) {
+func schemaFromFB(schema flatbuf.Schema, memo *dictutils.Memo) (*arrow.Schema, error) {
 	var (
 		err    error
 		fields = make([]arrow.Field, schema.FieldsLength())
@@ -1091,7 +1087,7 @@ func schemaFromFB(schema *flatbuf.Schema, memo *dictutils.Memo) (*arrow.Schema, 
 		}
 	}
 
-	md, err := metadataFromFB(schema)
+	md, err := metadataFromFB(&schema)
 	if err != nil {
 		return nil, fmt.Errorf("arrow/ipc: could not convert schema metadata from flatbuf: %w", err)
 	}

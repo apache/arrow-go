@@ -124,7 +124,11 @@ func TestRWFooter(t *testing.T) {
 				t.Errorf("invalid metadata version: got=%[1]d %#[1]x, want=%[2]d %#[2]x", int16(got), int16(want))
 			}
 
-			schema, err := schemaFromFB(footer.Schema(nil), nil)
+			aschema, ok := footer.Schema()
+			if !ok {
+				t.Fatal("no schema")
+			}
+			schema, err := schemaFromFB(aschema, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

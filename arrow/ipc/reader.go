@@ -146,9 +146,9 @@ func (r *Reader) readSchema(schema *arrow.Schema) error {
 
 	// FIXME(sbinet) refactor msg-header handling.
 	var schemaFB flatbuf.Schema
-	initFB(&schemaFB, msg.msg.Header)
+	initFB(schemaFB.Init, schemaFB.Table(), msg.msg)
 
-	r.schema, err = schemaFromFB(&schemaFB, &r.memo)
+	r.schema, err = schemaFromFB(schemaFB, &r.memo)
 	if err != nil {
 		return fmt.Errorf("arrow/ipc: could not decode schema from message schema: %w", err)
 	}

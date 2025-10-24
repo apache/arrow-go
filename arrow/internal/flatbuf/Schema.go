@@ -28,9 +28,9 @@ type Schema struct {
 	_tab flatbuffers.Table
 }
 
-func GetRootAsSchema(buf []byte, offset flatbuffers.UOffsetT) *Schema {
+func GetRootAsSchema(buf []byte, offset flatbuffers.UOffsetT) Schema {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Schema{}
+	x := Schema{}
 	x.Init(buf, n+offset)
 	return x
 }

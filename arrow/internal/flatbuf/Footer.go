@@ -57,17 +57,15 @@ func (rcv *Footer) MutateVersion(n MetadataVersion) bool {
 	return rcv._tab.MutateInt16Slot(4, int16(n))
 }
 
-func (rcv *Footer) Schema(obj *Schema) *Schema {
+func (rcv *Footer) Schema() (Schema, bool) {
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
 	if o != 0 {
 		x := rcv._tab.Indirect(o + rcv._tab.Pos)
-		if obj == nil {
-			obj = new(Schema)
-		}
+		obj := Schema{}
 		obj.Init(rcv._tab.Bytes, x)
-		return obj
+		return obj, true
 	}
-	return nil
+	return Schema{}, false
 }
 
 func (rcv *Footer) Dictionaries(obj *Block, j int) bool {

@@ -242,8 +242,8 @@ func (f *FileReader) readSchema(ensureNativeEndian bool) error {
 		kind dictutils.Kind
 	)
 
-	schema := f.footer.data.Schema(nil)
-	if schema == nil {
+	schema, ok := f.footer.data.Schema()
+	if ok == false {
 		return fmt.Errorf("arrow/ipc: could not load schema from flatbuffer data")
 	}
 	f.schema, err = schemaFromFB(schema, &f.memo)
@@ -449,7 +449,7 @@ func newRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buf
 		md    flatbuf.RecordBatch
 		codec decompressor
 	)
-	initFB(&md, msg.Header)
+	initFB(md.Init, md.Table(), msg)
 	rows := md.Length()
 
 	bodyCompress := md.Compression(nil)
@@ -833,7 +833,7 @@ func readDictionary(memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buff
 		data  flatbuf.RecordBatch
 		codec decompressor
 	)
-	initFB(&md, msg.Header)
+	initFB(md.Init, md.Table(), msg)
 
 	md.Data(&data)
 	bodyCompress := data.Compression(nil)
