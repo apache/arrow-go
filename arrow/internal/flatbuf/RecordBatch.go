@@ -31,9 +31,8 @@ type RecordBatch struct {
 
 func GetRootAsRecordBatch(buf []byte, offset flatbuffers.UOffsetT) (x RecordBatch) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x.Bytes = buf
-	x.Pos = n+offset
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 // / number of records / rows. The arrays in the batch should all have this

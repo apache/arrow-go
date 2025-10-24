@@ -51,11 +51,10 @@ type Map struct {
 	flatbuffers.Table
 }
 
-func GetRootAsMap(buf []byte, offset flatbuffers.UOffsetT) *Map {
+func GetRootAsMap(buf []byte, offset flatbuffers.UOffsetT) (x Map) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Map{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Map) Init(buf []byte, i flatbuffers.UOffsetT) {

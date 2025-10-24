@@ -28,11 +28,10 @@ type LargeUtf8 struct {
 	flatbuffers.Table
 }
 
-func GetRootAsLargeUtf8(buf []byte, offset flatbuffers.UOffsetT) *LargeUtf8 {
+func GetRootAsLargeUtf8(buf []byte, offset flatbuffers.UOffsetT) (x LargeUtf8) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &LargeUtf8{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *LargeUtf8) Init(buf []byte, i flatbuffers.UOffsetT) {

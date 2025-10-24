@@ -29,11 +29,10 @@ type Struct_ struct {
 	flatbuffers.Table
 }
 
-func GetRootAsStruct_(buf []byte, offset flatbuffers.UOffsetT) *Struct_ {
+func GetRootAsStruct_(buf []byte, offset flatbuffers.UOffsetT) (x Struct_) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Struct_{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Struct_) Init(buf []byte, i flatbuffers.UOffsetT) {

@@ -26,11 +26,10 @@ type RunLengthEncoded struct {
 	flatbuffers.Table
 }
 
-func GetRootAsRunLengthEncoded(buf []byte, offset flatbuffers.UOffsetT) *RunLengthEncoded {
+func GetRootAsRunLengthEncoded(buf []byte, offset flatbuffers.UOffsetT) (x RunLengthEncoded) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &RunLengthEncoded{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *RunLengthEncoded) Init(buf []byte, i flatbuffers.UOffsetT) {

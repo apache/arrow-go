@@ -29,11 +29,10 @@ type TensorDim struct {
 	flatbuffers.Table
 }
 
-func GetRootAsTensorDim(buf []byte, offset flatbuffers.UOffsetT) *TensorDim {
+func GetRootAsTensorDim(buf []byte, offset flatbuffers.UOffsetT) (x TensorDim) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &TensorDim{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *TensorDim) Init(buf []byte, i flatbuffers.UOffsetT) {

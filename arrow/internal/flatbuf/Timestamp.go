@@ -131,11 +131,10 @@ type Timestamp struct {
 	flatbuffers.Table
 }
 
-func GetRootAsTimestamp(buf []byte, offset flatbuffers.UOffsetT) *Timestamp {
+func GetRootAsTimestamp(buf []byte, offset flatbuffers.UOffsetT) (x Timestamp) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Timestamp{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Timestamp) Init(buf []byte, i flatbuffers.UOffsetT) {

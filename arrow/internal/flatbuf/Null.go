@@ -27,11 +27,10 @@ type Null struct {
 	flatbuffers.Table
 }
 
-func GetRootAsNull(buf []byte, offset flatbuffers.UOffsetT) *Null {
+func GetRootAsNull(buf []byte, offset flatbuffers.UOffsetT) (x Null) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Null{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Null) Init(buf []byte, i flatbuffers.UOffsetT) {

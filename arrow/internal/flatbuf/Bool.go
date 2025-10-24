@@ -26,11 +26,10 @@ type Bool struct {
 	flatbuffers.Table
 }
 
-func GetRootAsBool(buf []byte, offset flatbuffers.UOffsetT) *Bool {
+func GetRootAsBool(buf []byte, offset flatbuffers.UOffsetT) (x Bool) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Bool{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Bool) Init(buf []byte, i flatbuffers.UOffsetT) {

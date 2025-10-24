@@ -26,11 +26,10 @@ type List struct {
 	flatbuffers.Table
 }
 
-func GetRootAsList(buf []byte, offset flatbuffers.UOffsetT) *List {
+func GetRootAsList(buf []byte, offset flatbuffers.UOffsetT) (x List) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &List{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *List) Init(buf []byte, i flatbuffers.UOffsetT) {

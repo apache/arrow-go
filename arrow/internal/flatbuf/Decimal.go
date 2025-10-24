@@ -30,11 +30,10 @@ type Decimal struct {
 	flatbuffers.Table
 }
 
-func GetRootAsDecimal(buf []byte, offset flatbuffers.UOffsetT) *Decimal {
+func GetRootAsDecimal(buf []byte, offset flatbuffers.UOffsetT) (x Decimal) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Decimal{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Decimal) Init(buf []byte, i flatbuffers.UOffsetT) {

@@ -28,8 +28,7 @@ type Message struct {
 
 func GetRootAsMessage(buf []byte, offset flatbuffers.UOffsetT) (x Message) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x.Bytes = buf
-	x.Pos = n+offset
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return
 }
 

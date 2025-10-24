@@ -33,11 +33,10 @@ type BinaryView struct {
 	flatbuffers.Table
 }
 
-func GetRootAsBinaryView(buf []byte, offset flatbuffers.UOffsetT) *BinaryView {
+func GetRootAsBinaryView(buf []byte, offset flatbuffers.UOffsetT) (x BinaryView) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &BinaryView{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *BinaryView) Init(buf []byte, i flatbuffers.UOffsetT) {

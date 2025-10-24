@@ -26,11 +26,10 @@ type FixedSizeList struct {
 	flatbuffers.Table
 }
 
-func GetRootAsFixedSizeList(buf []byte, offset flatbuffers.UOffsetT) *FixedSizeList {
+func GetRootAsFixedSizeList(buf []byte, offset flatbuffers.UOffsetT) (x FixedSizeList) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &FixedSizeList{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *FixedSizeList) Init(buf []byte, i flatbuffers.UOffsetT) {

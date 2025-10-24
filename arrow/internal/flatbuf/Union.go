@@ -30,11 +30,10 @@ type Union struct {
 	flatbuffers.Table
 }
 
-func GetRootAsUnion(buf []byte, offset flatbuffers.UOffsetT) *Union {
+func GetRootAsUnion(buf []byte, offset flatbuffers.UOffsetT) (x Union) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Union{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Union) Init(buf []byte, i flatbuffers.UOffsetT) {

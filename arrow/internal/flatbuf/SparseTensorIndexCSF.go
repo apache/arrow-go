@@ -27,11 +27,10 @@ type SparseTensorIndexCSF struct {
 	flatbuffers.Table
 }
 
-func GetRootAsSparseTensorIndexCSF(buf []byte, offset flatbuffers.UOffsetT) *SparseTensorIndexCSF {
+func GetRootAsSparseTensorIndexCSF(buf []byte, offset flatbuffers.UOffsetT) (x SparseTensorIndexCSF) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &SparseTensorIndexCSF{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *SparseTensorIndexCSF) Init(buf []byte, i flatbuffers.UOffsetT) {

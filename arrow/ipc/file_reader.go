@@ -43,7 +43,7 @@ type readerImpl interface {
 type footerBlock struct {
 	offset int64
 	buffer *memory.Buffer
-	data   *flatbuf.Footer
+	data   flatbuf.Footer
 }
 
 type dataBlock interface {
@@ -322,7 +322,7 @@ func (f *FileReader) Schema() *arrow.Schema {
 }
 
 func (f *FileReader) NumDictionaries() int {
-	if f.footer.data == nil {
+	if f.footer.data.Bytes == nil {
 		return 0
 	}
 	return f.footer.data.DictionariesLength()
@@ -339,10 +339,6 @@ func (f *FileReader) Version() MetadataVersion {
 // Close cleans up resources used by the File.
 // Close does not close the underlying reader.
 func (f *FileReader) Close() error {
-	if f.footer.data != nil {
-		f.footer.data = nil
-	}
-
 	if f.footer.buffer != nil {
 		f.footer.buffer.Release()
 		f.footer.buffer = nil

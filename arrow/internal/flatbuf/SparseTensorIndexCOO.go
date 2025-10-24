@@ -58,11 +58,10 @@ type SparseTensorIndexCOO struct {
 	flatbuffers.Table
 }
 
-func GetRootAsSparseTensorIndexCOO(buf []byte, offset flatbuffers.UOffsetT) *SparseTensorIndexCOO {
+func GetRootAsSparseTensorIndexCOO(buf []byte, offset flatbuffers.UOffsetT) (x SparseTensorIndexCOO) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &SparseTensorIndexCOO{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *SparseTensorIndexCOO) Init(buf []byte, i flatbuffers.UOffsetT) {

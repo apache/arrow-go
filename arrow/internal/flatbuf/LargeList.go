@@ -28,11 +28,10 @@ type LargeList struct {
 	flatbuffers.Table
 }
 
-func GetRootAsLargeList(buf []byte, offset flatbuffers.UOffsetT) *LargeList {
+func GetRootAsLargeList(buf []byte, offset flatbuffers.UOffsetT) (x LargeList) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &LargeList{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *LargeList) Init(buf []byte, i flatbuffers.UOffsetT) {

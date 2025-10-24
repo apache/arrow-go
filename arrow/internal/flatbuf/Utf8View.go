@@ -33,11 +33,10 @@ type Utf8View struct {
 	flatbuffers.Table
 }
 
-func GetRootAsUtf8View(buf []byte, offset flatbuffers.UOffsetT) *Utf8View {
+func GetRootAsUtf8View(buf []byte, offset flatbuffers.UOffsetT) (x Utf8View) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Utf8View{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Utf8View) Init(buf []byte, i flatbuffers.UOffsetT) {

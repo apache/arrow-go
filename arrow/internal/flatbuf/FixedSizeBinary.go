@@ -26,11 +26,10 @@ type FixedSizeBinary struct {
 	flatbuffers.Table
 }
 
-func GetRootAsFixedSizeBinary(buf []byte, offset flatbuffers.UOffsetT) *FixedSizeBinary {
+func GetRootAsFixedSizeBinary(buf []byte, offset flatbuffers.UOffsetT) (x FixedSizeBinary) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &FixedSizeBinary{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *FixedSizeBinary) Init(buf []byte, i flatbuffers.UOffsetT) {

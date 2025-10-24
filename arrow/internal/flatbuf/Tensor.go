@@ -26,11 +26,10 @@ type Tensor struct {
 	flatbuffers.Table
 }
 
-func GetRootAsTensor(buf []byte, offset flatbuffers.UOffsetT) *Tensor {
+func GetRootAsTensor(buf []byte, offset flatbuffers.UOffsetT) (x Tensor) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Tensor{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Tensor) Init(buf []byte, i flatbuffers.UOffsetT) {

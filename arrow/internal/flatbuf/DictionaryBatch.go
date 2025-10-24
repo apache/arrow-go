@@ -34,10 +34,9 @@ type DictionaryBatch struct {
 
 func GetRootAsDictionaryBatch(buf []byte, offset flatbuffers.UOffsetT) (x DictionaryBatch) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x.Table = flatbuffers.Table{Bytes: buf, Pos: n + offset}
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
-
 func (rcv *DictionaryBatch) Id() int64 {
 	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {

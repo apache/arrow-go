@@ -29,11 +29,10 @@ type KeyValue struct {
 	flatbuffers.Table
 }
 
-func GetRootAsKeyValue(buf []byte, offset flatbuffers.UOffsetT) *KeyValue {
+func GetRootAsKeyValue(buf []byte, offset flatbuffers.UOffsetT) (x KeyValue) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &KeyValue{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *KeyValue) Init(buf []byte, i flatbuffers.UOffsetT) {

@@ -32,11 +32,10 @@ type Date struct {
 	flatbuffers.Table
 }
 
-func GetRootAsDate(buf []byte, offset flatbuffers.UOffsetT) *Date {
+func GetRootAsDate(buf []byte, offset flatbuffers.UOffsetT) (x Date) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Date{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Date) Init(buf []byte, i flatbuffers.UOffsetT) {

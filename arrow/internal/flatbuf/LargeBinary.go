@@ -28,11 +28,10 @@ type LargeBinary struct {
 	flatbuffers.Table
 }
 
-func GetRootAsLargeBinary(buf []byte, offset flatbuffers.UOffsetT) *LargeBinary {
+func GetRootAsLargeBinary(buf []byte, offset flatbuffers.UOffsetT) (x LargeBinary) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &LargeBinary{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *LargeBinary) Init(buf []byte, i flatbuffers.UOffsetT) {

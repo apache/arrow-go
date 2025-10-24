@@ -27,11 +27,10 @@ type SparseMatrixIndexCSX struct {
 	flatbuffers.Table
 }
 
-func GetRootAsSparseMatrixIndexCSX(buf []byte, offset flatbuffers.UOffsetT) *SparseMatrixIndexCSX {
+func GetRootAsSparseMatrixIndexCSX(buf []byte, offset flatbuffers.UOffsetT) (x SparseMatrixIndexCSX) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &SparseMatrixIndexCSX{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *SparseMatrixIndexCSX) Init(buf []byte, i flatbuffers.UOffsetT) {

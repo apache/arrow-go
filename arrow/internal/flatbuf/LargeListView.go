@@ -28,11 +28,10 @@ type LargeListView struct {
 	flatbuffers.Table
 }
 
-func GetRootAsLargeListView(buf []byte, offset flatbuffers.UOffsetT) *LargeListView {
+func GetRootAsLargeListView(buf []byte, offset flatbuffers.UOffsetT) (x LargeListView) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &LargeListView{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *LargeListView) Init(buf []byte, i flatbuffers.UOffsetT) {

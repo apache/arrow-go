@@ -26,11 +26,10 @@ type Duration struct {
 	flatbuffers.Table
 }
 
-func GetRootAsDuration(buf []byte, offset flatbuffers.UOffsetT) *Duration {
+func GetRootAsDuration(buf []byte, offset flatbuffers.UOffsetT) (x Duration) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Duration{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Duration) Init(buf []byte, i flatbuffers.UOffsetT) {

@@ -27,11 +27,10 @@ type Binary struct {
 	flatbuffers.Table
 }
 
-func GetRootAsBinary(buf []byte, offset flatbuffers.UOffsetT) *Binary {
+func GetRootAsBinary(buf []byte, offset flatbuffers.UOffsetT) (x Binary) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Binary{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Binary) Init(buf []byte, i flatbuffers.UOffsetT) {

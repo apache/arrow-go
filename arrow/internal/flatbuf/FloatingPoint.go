@@ -26,11 +26,10 @@ type FloatingPoint struct {
 	flatbuffers.Table
 }
 
-func GetRootAsFloatingPoint(buf []byte, offset flatbuffers.UOffsetT) *FloatingPoint {
+func GetRootAsFloatingPoint(buf []byte, offset flatbuffers.UOffsetT) (x FloatingPoint) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &FloatingPoint{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *FloatingPoint) Init(buf []byte, i flatbuffers.UOffsetT) {

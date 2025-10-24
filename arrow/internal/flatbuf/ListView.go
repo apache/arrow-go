@@ -29,11 +29,10 @@ type ListView struct {
 	flatbuffers.Table
 }
 
-func GetRootAsListView(buf []byte, offset flatbuffers.UOffsetT) *ListView {
+func GetRootAsListView(buf []byte, offset flatbuffers.UOffsetT) (x ListView) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &ListView{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *ListView) Init(buf []byte, i flatbuffers.UOffsetT) {

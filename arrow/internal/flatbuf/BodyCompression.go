@@ -29,11 +29,10 @@ type BodyCompression struct {
 	flatbuffers.Table
 }
 
-func GetRootAsBodyCompression(buf []byte, offset flatbuffers.UOffsetT) *BodyCompression {
+func GetRootAsBodyCompression(buf []byte, offset flatbuffers.UOffsetT) (x BodyCompression) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &BodyCompression{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *BodyCompression) Init(buf []byte, i flatbuffers.UOffsetT) {

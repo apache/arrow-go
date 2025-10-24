@@ -40,11 +40,10 @@ type Time struct {
 	flatbuffers.Table
 }
 
-func GetRootAsTime(buf []byte, offset flatbuffers.UOffsetT) *Time {
+func GetRootAsTime(buf []byte, offset flatbuffers.UOffsetT) (x Time) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Time{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Time) Init(buf []byte, i flatbuffers.UOffsetT) {

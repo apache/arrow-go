@@ -29,11 +29,10 @@ type Footer struct {
 	flatbuffers.Table
 }
 
-func GetRootAsFooter(buf []byte, offset flatbuffers.UOffsetT) *Footer {
+func GetRootAsFooter(buf []byte, offset flatbuffers.UOffsetT) (x Footer) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Footer{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Footer) Init(buf []byte, i flatbuffers.UOffsetT) {

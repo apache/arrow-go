@@ -26,11 +26,10 @@ type Interval struct {
 	flatbuffers.Table
 }
 
-func GetRootAsInterval(buf []byte, offset flatbuffers.UOffsetT) *Interval {
+func GetRootAsInterval(buf []byte, offset flatbuffers.UOffsetT) (x Interval) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Interval{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Interval) Init(buf []byte, i flatbuffers.UOffsetT) {

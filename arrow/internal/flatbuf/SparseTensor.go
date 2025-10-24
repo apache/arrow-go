@@ -26,11 +26,10 @@ type SparseTensor struct {
 	flatbuffers.Table
 }
 
-func GetRootAsSparseTensor(buf []byte, offset flatbuffers.UOffsetT) *SparseTensor {
+func GetRootAsSparseTensor(buf []byte, offset flatbuffers.UOffsetT) (x SparseTensor) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &SparseTensor{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *SparseTensor) Init(buf []byte, i flatbuffers.UOffsetT) {

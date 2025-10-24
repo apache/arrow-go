@@ -27,11 +27,10 @@ type Utf8 struct {
 	flatbuffers.Table
 }
 
-func GetRootAsUtf8(buf []byte, offset flatbuffers.UOffsetT) *Utf8 {
+func GetRootAsUtf8(buf []byte, offset flatbuffers.UOffsetT) (x Utf8) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Utf8{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Utf8) Init(buf []byte, i flatbuffers.UOffsetT) {

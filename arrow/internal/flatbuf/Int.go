@@ -26,11 +26,10 @@ type Int struct {
 	flatbuffers.Table
 }
 
-func GetRootAsInt(buf []byte, offset flatbuffers.UOffsetT) *Int {
+func GetRootAsInt(buf []byte, offset flatbuffers.UOffsetT) (x Int) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Int{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Int) Init(buf []byte, i flatbuffers.UOffsetT) {

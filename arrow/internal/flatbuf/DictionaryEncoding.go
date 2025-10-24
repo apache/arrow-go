@@ -26,11 +26,10 @@ type DictionaryEncoding struct {
 	flatbuffers.Table
 }
 
-func GetRootAsDictionaryEncoding(buf []byte, offset flatbuffers.UOffsetT) *DictionaryEncoding {
+func GetRootAsDictionaryEncoding(buf []byte, offset flatbuffers.UOffsetT) (x DictionaryEncoding) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &DictionaryEncoding{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *DictionaryEncoding) Init(buf []byte, i flatbuffers.UOffsetT) {

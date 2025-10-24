@@ -31,11 +31,10 @@ type RunEndEncoded struct {
 	flatbuffers.Table
 }
 
-func GetRootAsRunEndEncoded(buf []byte, offset flatbuffers.UOffsetT) *RunEndEncoded {
+func GetRootAsRunEndEncoded(buf []byte, offset flatbuffers.UOffsetT) (x RunEndEncoded) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &RunEndEncoded{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *RunEndEncoded) Init(buf []byte, i flatbuffers.UOffsetT) {

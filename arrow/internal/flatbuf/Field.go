@@ -29,11 +29,10 @@ type Field struct {
 	flatbuffers.Table
 }
 
-func GetRootAsField(buf []byte, offset flatbuffers.UOffsetT) *Field {
+func GetRootAsField(buf []byte, offset flatbuffers.UOffsetT) (x Field) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Field{}
-	x.Init(buf, n+offset)
-	return x
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
+	return
 }
 
 func (rcv *Field) Init(buf []byte, i flatbuffers.UOffsetT) {
