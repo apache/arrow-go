@@ -30,7 +30,7 @@ import (
 // / Since it uses a variable number of data buffers, each Field with this type
 // / must have a corresponding entry in `variadicBufferCounts`.
 type BinaryView struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsBinaryView(buf []byte, offset flatbuffers.UOffsetT) *BinaryView {
@@ -41,12 +41,8 @@ func GetRootAsBinaryView(buf []byte, offset flatbuffers.UOffsetT) *BinaryView {
 }
 
 func (rcv *BinaryView) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *BinaryView) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func BinaryViewStart(builder *flatbuffers.Builder) {

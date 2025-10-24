@@ -30,7 +30,7 @@ import (
 // / Since it uses a variable number of data buffers, each Field with this type
 // / must have a corresponding entry in `variadicBufferCounts`.
 type Utf8View struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsUtf8View(buf []byte, offset flatbuffers.UOffsetT) *Utf8View {
@@ -41,12 +41,8 @@ func GetRootAsUtf8View(buf []byte, offset flatbuffers.UOffsetT) *Utf8View {
 }
 
 func (rcv *Utf8View) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Utf8View) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func Utf8ViewStart(builder *flatbuffers.Builder) {

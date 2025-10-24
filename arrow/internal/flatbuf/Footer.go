@@ -26,7 +26,7 @@ import (
 // / Arrow File metadata
 // /
 type Footer struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsFooter(buf []byte, offset flatbuffers.UOffsetT) *Footer {
@@ -37,92 +37,88 @@ func GetRootAsFooter(buf []byte, offset flatbuffers.UOffsetT) *Footer {
 }
 
 func (rcv *Footer) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Footer) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func (rcv *Footer) Version() MetadataVersion {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return MetadataVersion(rcv._tab.GetInt16(o + rcv._tab.Pos))
+		return MetadataVersion(rcv.GetInt16(o + rcv.Pos))
 	}
 	return 0
 }
 
 func (rcv *Footer) MutateVersion(n MetadataVersion) bool {
-	return rcv._tab.MutateInt16Slot(4, int16(n))
+	return rcv.MutateInt16Slot(4, int16(n))
 }
 
 func (rcv *Footer) Schema() (Schema, bool) {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		x := rcv._tab.Indirect(o + rcv._tab.Pos)
+		x := rcv.Indirect(o + rcv.Pos)
 		obj := Schema{}
-		obj.Init(rcv._tab.Bytes, x)
+		obj.Init(rcv.Bytes, x)
 		return obj, true
 	}
 	return Schema{}, false
 }
 
 func (rcv *Footer) Dictionaries(obj *Block, j int) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
-		x := rcv._tab.Vector(o)
+		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 24
-		obj.Init(rcv._tab.Bytes, x)
+		obj.Init(rcv.Bytes, x)
 		return true
 	}
 	return false
 }
 
 func (rcv *Footer) DictionariesLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }
 
 func (rcv *Footer) RecordBatches(obj *Block, j int) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
+	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
-		x := rcv._tab.Vector(o)
+		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 24
-		obj.Init(rcv._tab.Bytes, x)
+		obj.Init(rcv.Bytes, x)
 		return true
 	}
 	return false
 }
 
 func (rcv *Footer) RecordBatchesLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
+	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }
 
 // / User-defined metadata
 func (rcv *Footer) CustomMetadata(obj *KeyValue, j int) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	o := flatbuffers.UOffsetT(rcv.Offset(12))
 	if o != 0 {
-		x := rcv._tab.Vector(o)
+		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 4
-		x = rcv._tab.Indirect(x)
-		obj.Init(rcv._tab.Bytes, x)
+		x = rcv.Indirect(x)
+		obj.Init(rcv.Bytes, x)
 		return true
 	}
 	return false
 }
 
 func (rcv *Footer) CustomMetadataLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	o := flatbuffers.UOffsetT(rcv.Offset(12))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }

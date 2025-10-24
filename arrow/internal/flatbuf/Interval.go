@@ -23,7 +23,7 @@ import (
 )
 
 type Interval struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsInterval(buf []byte, offset flatbuffers.UOffsetT) *Interval {
@@ -34,24 +34,20 @@ func GetRootAsInterval(buf []byte, offset flatbuffers.UOffsetT) *Interval {
 }
 
 func (rcv *Interval) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Interval) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func (rcv *Interval) Unit() IntervalUnit {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return IntervalUnit(rcv._tab.GetInt16(o + rcv._tab.Pos))
+		return IntervalUnit(rcv.GetInt16(o + rcv.Pos))
 	}
 	return 0
 }
 
 func (rcv *Interval) MutateUnit(n IntervalUnit) bool {
-	return rcv._tab.MutateInt16Slot(4, int16(n))
+	return rcv.MutateInt16Slot(4, int16(n))
 }
 
 func IntervalStart(builder *flatbuffers.Builder) {

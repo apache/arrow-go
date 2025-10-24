@@ -24,7 +24,7 @@ import (
 
 // / Unicode with UTF-8 encoding
 type Utf8 struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsUtf8(buf []byte, offset flatbuffers.UOffsetT) *Utf8 {
@@ -35,12 +35,8 @@ func GetRootAsUtf8(buf []byte, offset flatbuffers.UOffsetT) *Utf8 {
 }
 
 func (rcv *Utf8) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Utf8) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func Utf8Start(builder *flatbuffers.Builder) {

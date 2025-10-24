@@ -24,7 +24,7 @@ import (
 
 // / Compressed Sparse Row format, that is matrix-specific.
 type SparseMatrixIndexCSR struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsSparseMatrixIndexCSR(buf []byte, offset flatbuffers.UOffsetT) *SparseMatrixIndexCSR {
@@ -35,23 +35,19 @@ func GetRootAsSparseMatrixIndexCSR(buf []byte, offset flatbuffers.UOffsetT) *Spa
 }
 
 func (rcv *SparseMatrixIndexCSR) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *SparseMatrixIndexCSR) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 // / The type of values in indptrBuffer
 func (rcv *SparseMatrixIndexCSR) IndptrType(obj *Int) *Int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		x := rcv._tab.Indirect(o + rcv._tab.Pos)
+		x := rcv.Indirect(o + rcv.Pos)
 		if obj == nil {
 			obj = new(Int)
 		}
-		obj.Init(rcv._tab.Bytes, x)
+		obj.Init(rcv.Bytes, x)
 		return obj
 	}
 	return nil
@@ -81,13 +77,13 @@ func (rcv *SparseMatrixIndexCSR) IndptrType(obj *Int) *Int {
 // /
 // /   indptr(X) = [0, 2, 3, 5, 5, 8, 10].
 func (rcv *SparseMatrixIndexCSR) IndptrBuffer(obj *Buffer) *Buffer {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		x := o + rcv._tab.Pos
+		x := o + rcv.Pos
 		if obj == nil {
 			obj = new(Buffer)
 		}
-		obj.Init(rcv._tab.Bytes, x)
+		obj.Init(rcv.Bytes, x)
 		return obj
 	}
 	return nil
@@ -117,13 +113,13 @@ func (rcv *SparseMatrixIndexCSR) IndptrBuffer(obj *Buffer) *Buffer {
 // /   indptr(X) = [0, 2, 3, 5, 5, 8, 10].
 // / The type of values in indicesBuffer
 func (rcv *SparseMatrixIndexCSR) IndicesType(obj *Int) *Int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
-		x := rcv._tab.Indirect(o + rcv._tab.Pos)
+		x := rcv.Indirect(o + rcv.Pos)
 		if obj == nil {
 			obj = new(Int)
 		}
-		obj.Init(rcv._tab.Bytes, x)
+		obj.Init(rcv.Bytes, x)
 		return obj
 	}
 	return nil
@@ -140,13 +136,13 @@ func (rcv *SparseMatrixIndexCSR) IndicesType(obj *Int) *Int {
 // /
 // / Note that the indices are sorted in lexicographical order for each row.
 func (rcv *SparseMatrixIndexCSR) IndicesBuffer(obj *Buffer) *Buffer {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
+	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
-		x := o + rcv._tab.Pos
+		x := o + rcv.Pos
 		if obj == nil {
 			obj = new(Buffer)
 		}
-		obj.Init(rcv._tab.Bytes, x)
+		obj.Init(rcv.Bytes, x)
 		return obj
 	}
 	return nil

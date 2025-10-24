@@ -26,7 +26,7 @@ import (
 // / bodies. Intended for use with RecordBatch but could be used for other
 // / message types
 type BodyCompression struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsBodyCompression(buf []byte, offset flatbuffers.UOffsetT) *BodyCompression {
@@ -37,20 +37,16 @@ func GetRootAsBodyCompression(buf []byte, offset flatbuffers.UOffsetT) *BodyComp
 }
 
 func (rcv *BodyCompression) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *BodyCompression) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 // / Compressor library.
 // / For LZ4_FRAME, each compressed buffer must consist of a single frame.
 func (rcv *BodyCompression) Codec() CompressionType {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return CompressionType(rcv._tab.GetInt8(o + rcv._tab.Pos))
+		return CompressionType(rcv.GetInt8(o + rcv.Pos))
 	}
 	return 0
 }
@@ -58,21 +54,21 @@ func (rcv *BodyCompression) Codec() CompressionType {
 // / Compressor library.
 // / For LZ4_FRAME, each compressed buffer must consist of a single frame.
 func (rcv *BodyCompression) MutateCodec(n CompressionType) bool {
-	return rcv._tab.MutateInt8Slot(4, int8(n))
+	return rcv.MutateInt8Slot(4, int8(n))
 }
 
 // / Indicates the way the record batch body was compressed
 func (rcv *BodyCompression) Method() BodyCompressionMethod {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		return BodyCompressionMethod(rcv._tab.GetInt8(o + rcv._tab.Pos))
+		return BodyCompressionMethod(rcv.GetInt8(o + rcv.Pos))
 	}
 	return 0
 }
 
 // / Indicates the way the record batch body was compressed
 func (rcv *BodyCompression) MutateMethod(n BodyCompressionMethod) bool {
-	return rcv._tab.MutateInt8Slot(6, int8(n))
+	return rcv.MutateInt8Slot(6, int8(n))
 }
 
 func BodyCompressionStart(builder *flatbuffers.Builder) {

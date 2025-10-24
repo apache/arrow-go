@@ -25,7 +25,7 @@ import (
 // / Same as Binary, but with 64-bit offsets, allowing to represent
 // / extremely large data values.
 type LargeBinary struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsLargeBinary(buf []byte, offset flatbuffers.UOffsetT) *LargeBinary {
@@ -36,12 +36,8 @@ func GetRootAsLargeBinary(buf []byte, offset flatbuffers.UOffsetT) *LargeBinary 
 }
 
 func (rcv *LargeBinary) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *LargeBinary) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func LargeBinaryStart(builder *flatbuffers.Builder) {

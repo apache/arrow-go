@@ -26,7 +26,7 @@ import (
 // / sizes allowing for writes in any order and sharing of child values among
 // / list values.
 type ListView struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsListView(buf []byte, offset flatbuffers.UOffsetT) *ListView {
@@ -37,12 +37,8 @@ func GetRootAsListView(buf []byte, offset flatbuffers.UOffsetT) *ListView {
 }
 
 func (rcv *ListView) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *ListView) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func ListViewStart(builder *flatbuffers.Builder) {

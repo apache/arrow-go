@@ -26,7 +26,7 @@ import (
 // / (according to the physical memory layout). We used Struct_ here as
 // / Struct is a reserved word in Flatbuffers
 type Struct_ struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsStruct_(buf []byte, offset flatbuffers.UOffsetT) *Struct_ {
@@ -37,12 +37,8 @@ func GetRootAsStruct_(buf []byte, offset flatbuffers.UOffsetT) *Struct_ {
 }
 
 func (rcv *Struct_) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Struct_) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func Struct_Start(builder *flatbuffers.Builder) {

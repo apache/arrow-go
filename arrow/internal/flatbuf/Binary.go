@@ -24,7 +24,7 @@ import (
 
 // / Opaque binary data
 type Binary struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsBinary(buf []byte, offset flatbuffers.UOffsetT) *Binary {
@@ -35,12 +35,8 @@ func GetRootAsBinary(buf []byte, offset flatbuffers.UOffsetT) *Binary {
 }
 
 func (rcv *Binary) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Binary) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func BinaryStart(builder *flatbuffers.Builder) {

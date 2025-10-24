@@ -23,48 +23,44 @@ import (
 )
 
 type Block struct {
-	_tab flatbuffers.Struct
+	flatbuffers.Struct
 }
 
 func (rcv *Block) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Block) Table() flatbuffers.Table {
-	return rcv._tab.Table
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 // / Index to the start of the RecordBlock (note this is past the Message header)
 func (rcv *Block) Offset() int64 {
-	return rcv._tab.GetInt64(rcv._tab.Pos + flatbuffers.UOffsetT(0))
+	return rcv.GetInt64(rcv.Pos + flatbuffers.UOffsetT(0))
 }
 
 // / Index to the start of the RecordBlock (note this is past the Message header)
 func (rcv *Block) MutateOffset(n int64) bool {
-	return rcv._tab.MutateInt64(rcv._tab.Pos+flatbuffers.UOffsetT(0), n)
+	return rcv.MutateInt64(rcv.Pos+flatbuffers.UOffsetT(0), n)
 }
 
 // / Length of the metadata
 func (rcv *Block) MetaDataLength() int32 {
-	return rcv._tab.GetInt32(rcv._tab.Pos + flatbuffers.UOffsetT(8))
+	return rcv.GetInt32(rcv.Pos + flatbuffers.UOffsetT(8))
 }
 
 // / Length of the metadata
 func (rcv *Block) MutateMetaDataLength(n int32) bool {
-	return rcv._tab.MutateInt32(rcv._tab.Pos+flatbuffers.UOffsetT(8), n)
+	return rcv.MutateInt32(rcv.Pos+flatbuffers.UOffsetT(8), n)
 }
 
 // / Length of the data (this is aligned so there can be a gap between this and
 // / the metadata).
 func (rcv *Block) BodyLength() int64 {
-	return rcv._tab.GetInt64(rcv._tab.Pos + flatbuffers.UOffsetT(16))
+	return rcv.GetInt64(rcv.Pos + flatbuffers.UOffsetT(16))
 }
 
 // / Length of the data (this is aligned so there can be a gap between this and
 // / the metadata).
 func (rcv *Block) MutateBodyLength(n int64) bool {
-	return rcv._tab.MutateInt64(rcv._tab.Pos+flatbuffers.UOffsetT(16), n)
+	return rcv.MutateInt64(rcv.Pos+flatbuffers.UOffsetT(16), n)
 }
 
 func CreateBlock(builder *flatbuffers.Builder, offset int64, metaDataLength int32, bodyLength int64) flatbuffers.UOffsetT {

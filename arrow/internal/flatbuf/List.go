@@ -23,7 +23,7 @@ import (
 )
 
 type List struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsList(buf []byte, offset flatbuffers.UOffsetT) *List {
@@ -34,12 +34,8 @@ func GetRootAsList(buf []byte, offset flatbuffers.UOffsetT) *List {
 }
 
 func (rcv *List) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *List) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func ListStart(builder *flatbuffers.Builder) {

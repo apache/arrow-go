@@ -23,7 +23,7 @@ import (
 )
 
 type RunLengthEncoded struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsRunLengthEncoded(buf []byte, offset flatbuffers.UOffsetT) *RunLengthEncoded {
@@ -34,12 +34,8 @@ func GetRootAsRunLengthEncoded(buf []byte, offset flatbuffers.UOffsetT) *RunLeng
 }
 
 func (rcv *RunLengthEncoded) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *RunLengthEncoded) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func RunLengthEncodedStart(builder *flatbuffers.Builder) {

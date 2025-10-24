@@ -23,7 +23,7 @@ import (
 )
 
 type Bool struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsBool(buf []byte, offset flatbuffers.UOffsetT) *Bool {
@@ -34,12 +34,8 @@ func GetRootAsBool(buf []byte, offset flatbuffers.UOffsetT) *Bool {
 }
 
 func (rcv *Bool) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Bool) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func BoolStart(builder *flatbuffers.Builder) {

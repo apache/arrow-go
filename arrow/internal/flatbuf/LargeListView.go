@@ -25,7 +25,7 @@ import (
 // / Same as ListView, but with 64-bit offsets and sizes, allowing to represent
 // / extremely large data values.
 type LargeListView struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsLargeListView(buf []byte, offset flatbuffers.UOffsetT) *LargeListView {
@@ -36,12 +36,8 @@ func GetRootAsLargeListView(buf []byte, offset flatbuffers.UOffsetT) *LargeListV
 }
 
 func (rcv *LargeListView) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *LargeListView) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func LargeListViewStart(builder *flatbuffers.Builder) {

@@ -23,7 +23,7 @@ import (
 )
 
 type Duration struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsDuration(buf []byte, offset flatbuffers.UOffsetT) *Duration {
@@ -34,24 +34,20 @@ func GetRootAsDuration(buf []byte, offset flatbuffers.UOffsetT) *Duration {
 }
 
 func (rcv *Duration) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Duration) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func (rcv *Duration) Unit() TimeUnit {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return TimeUnit(rcv._tab.GetInt16(o + rcv._tab.Pos))
+		return TimeUnit(rcv.GetInt16(o + rcv.Pos))
 	}
 	return 1
 }
 
 func (rcv *Duration) MutateUnit(n TimeUnit) bool {
-	return rcv._tab.MutateInt16Slot(4, int16(n))
+	return rcv.MutateInt16Slot(4, int16(n))
 }
 
 func DurationStart(builder *flatbuffers.Builder) {

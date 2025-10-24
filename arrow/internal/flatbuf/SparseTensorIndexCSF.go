@@ -24,7 +24,7 @@ import (
 
 // / Compressed Sparse Fiber (CSF) sparse tensor index.
 type SparseTensorIndexCSF struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsSparseTensorIndexCSF(buf []byte, offset flatbuffers.UOffsetT) *SparseTensorIndexCSF {
@@ -35,12 +35,8 @@ func GetRootAsSparseTensorIndexCSF(buf []byte, offset flatbuffers.UOffsetT) *Spa
 }
 
 func (rcv *SparseTensorIndexCSF) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *SparseTensorIndexCSF) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 // / CSF is a generalization of compressed sparse row (CSR) index.
@@ -75,13 +71,13 @@ func (rcv *SparseTensorIndexCSF) Table() flatbuffers.Table {
 // / ```
 // / The type of values in indptrBuffers
 func (rcv *SparseTensorIndexCSF) IndptrType(obj *Int) *Int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		x := rcv._tab.Indirect(o + rcv._tab.Pos)
+		x := rcv.Indirect(o + rcv.Pos)
 		if obj == nil {
 			obj = new(Int)
 		}
-		obj.Init(rcv._tab.Bytes, x)
+		obj.Init(rcv.Bytes, x)
 		return obj
 	}
 	return nil
@@ -133,20 +129,20 @@ func (rcv *SparseTensorIndexCSF) IndptrType(obj *Int) *Int {
 // /                     ].
 // / ```
 func (rcv *SparseTensorIndexCSF) IndptrBuffers(obj *Buffer, j int) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		x := rcv._tab.Vector(o)
+		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 16
-		obj.Init(rcv._tab.Bytes, x)
+		obj.Init(rcv.Bytes, x)
 		return true
 	}
 	return false
 }
 
 func (rcv *SparseTensorIndexCSF) IndptrBuffersLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }
@@ -167,13 +163,13 @@ func (rcv *SparseTensorIndexCSF) IndptrBuffersLength() int {
 // / ```
 // / The type of values in indicesBuffers
 func (rcv *SparseTensorIndexCSF) IndicesType(obj *Int) *Int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
-		x := rcv._tab.Indirect(o + rcv._tab.Pos)
+		x := rcv.Indirect(o + rcv.Pos)
 		if obj == nil {
 			obj = new(Int)
 		}
-		obj.Init(rcv._tab.Bytes, x)
+		obj.Init(rcv.Bytes, x)
 		return obj
 	}
 	return nil
@@ -192,20 +188,20 @@ func (rcv *SparseTensorIndexCSF) IndicesType(obj *Int) *Int {
 // /                      ].
 // / ```
 func (rcv *SparseTensorIndexCSF) IndicesBuffers(obj *Buffer, j int) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
+	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
-		x := rcv._tab.Vector(o)
+		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 16
-		obj.Init(rcv._tab.Bytes, x)
+		obj.Init(rcv.Bytes, x)
 		return true
 	}
 	return false
 }
 
 func (rcv *SparseTensorIndexCSF) IndicesBuffersLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
+	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }
@@ -228,18 +224,18 @@ func (rcv *SparseTensorIndexCSF) IndicesBuffersLength() int {
 // /   axisOrder(X) = [0, 1, 2, 3].
 // / ```
 func (rcv *SparseTensorIndexCSF) AxisOrder(j int) int32 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	o := flatbuffers.UOffsetT(rcv.Offset(12))
 	if o != 0 {
-		a := rcv._tab.Vector(o)
-		return rcv._tab.GetInt32(a + flatbuffers.UOffsetT(j*4))
+		a := rcv.Vector(o)
+		return rcv.GetInt32(a + flatbuffers.UOffsetT(j*4))
 	}
 	return 0
 }
 
 func (rcv *SparseTensorIndexCSF) AxisOrderLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	o := flatbuffers.UOffsetT(rcv.Offset(12))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }
@@ -251,10 +247,10 @@ func (rcv *SparseTensorIndexCSF) AxisOrderLength() int {
 // /   axisOrder(X) = [0, 1, 2, 3].
 // / ```
 func (rcv *SparseTensorIndexCSF) MutateAxisOrder(j int, n int32) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	o := flatbuffers.UOffsetT(rcv.Offset(12))
 	if o != 0 {
-		a := rcv._tab.Vector(o)
-		return rcv._tab.MutateInt32(a+flatbuffers.UOffsetT(j*4), n)
+		a := rcv.Vector(o)
+		return rcv.MutateInt32(a+flatbuffers.UOffsetT(j*4), n)
 	}
 	return false
 }

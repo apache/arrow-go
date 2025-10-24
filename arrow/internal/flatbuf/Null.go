@@ -24,7 +24,7 @@ import (
 
 // / These are stored in the flatbuffer in the Type union below
 type Null struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsNull(buf []byte, offset flatbuffers.UOffsetT) *Null {
@@ -35,12 +35,8 @@ func GetRootAsNull(buf []byte, offset flatbuffers.UOffsetT) *Null {
 }
 
 func (rcv *Null) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Null) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func NullStart(builder *flatbuffers.Builder) {

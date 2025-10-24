@@ -23,7 +23,7 @@ import (
 )
 
 type FloatingPoint struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsFloatingPoint(buf []byte, offset flatbuffers.UOffsetT) *FloatingPoint {
@@ -34,24 +34,20 @@ func GetRootAsFloatingPoint(buf []byte, offset flatbuffers.UOffsetT) *FloatingPo
 }
 
 func (rcv *FloatingPoint) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *FloatingPoint) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func (rcv *FloatingPoint) Precision() Precision {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return Precision(rcv._tab.GetInt16(o + rcv._tab.Pos))
+		return Precision(rcv.GetInt16(o + rcv.Pos))
 	}
 	return 0
 }
 
 func (rcv *FloatingPoint) MutatePrecision(n Precision) bool {
-	return rcv._tab.MutateInt16Slot(4, int16(n))
+	return rcv.MutateInt16Slot(4, int16(n))
 }
 
 func FloatingPointStart(builder *flatbuffers.Builder) {

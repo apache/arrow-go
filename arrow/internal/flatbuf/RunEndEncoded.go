@@ -28,7 +28,7 @@ import (
 // / each corresponding index in the values child array ends.
 // / Like list/struct types, the value array can be of any type.
 type RunEndEncoded struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsRunEndEncoded(buf []byte, offset flatbuffers.UOffsetT) *RunEndEncoded {
@@ -39,12 +39,8 @@ func GetRootAsRunEndEncoded(buf []byte, offset flatbuffers.UOffsetT) *RunEndEnco
 }
 
 func (rcv *RunEndEncoded) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *RunEndEncoded) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func RunEndEncodedStart(builder *flatbuffers.Builder) {

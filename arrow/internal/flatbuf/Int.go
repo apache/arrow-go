@@ -23,7 +23,7 @@ import (
 )
 
 type Int struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsInt(buf []byte, offset flatbuffers.UOffsetT) *Int {
@@ -34,36 +34,32 @@ func GetRootAsInt(buf []byte, offset flatbuffers.UOffsetT) *Int {
 }
 
 func (rcv *Int) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Int) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func (rcv *Int) BitWidth() int32 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return rcv._tab.GetInt32(o + rcv._tab.Pos)
+		return rcv.GetInt32(o + rcv.Pos)
 	}
 	return 0
 }
 
 func (rcv *Int) MutateBitWidth(n int32) bool {
-	return rcv._tab.MutateInt32Slot(4, n)
+	return rcv.MutateInt32Slot(4, n)
 }
 
 func (rcv *Int) IsSigned() bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		return rcv._tab.GetBool(o + rcv._tab.Pos)
+		return rcv.GetBool(o + rcv.Pos)
 	}
 	return false
 }
 
 func (rcv *Int) MutateIsSigned(n bool) bool {
-	return rcv._tab.MutateBoolSlot(6, n)
+	return rcv.MutateBoolSlot(6, n)
 }
 
 func IntStart(builder *flatbuffers.Builder) {

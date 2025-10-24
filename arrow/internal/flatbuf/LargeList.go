@@ -25,7 +25,7 @@ import (
 // / Same as List, but with 64-bit offsets, allowing to represent
 // / extremely large data values.
 type LargeList struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsLargeList(buf []byte, offset flatbuffers.UOffsetT) *LargeList {
@@ -36,12 +36,8 @@ func GetRootAsLargeList(buf []byte, offset flatbuffers.UOffsetT) *LargeList {
 }
 
 func (rcv *LargeList) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *LargeList) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func LargeListStart(builder *flatbuffers.Builder) {

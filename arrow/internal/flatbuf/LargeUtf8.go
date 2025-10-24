@@ -25,7 +25,7 @@ import (
 // / Same as Utf8, but with 64-bit offsets, allowing to represent
 // / extremely large data values.
 type LargeUtf8 struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
 func GetRootAsLargeUtf8(buf []byte, offset flatbuffers.UOffsetT) *LargeUtf8 {
@@ -36,12 +36,8 @@ func GetRootAsLargeUtf8(buf []byte, offset flatbuffers.UOffsetT) *LargeUtf8 {
 }
 
 func (rcv *LargeUtf8) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *LargeUtf8) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func LargeUtf8Start(builder *flatbuffers.Builder) {
