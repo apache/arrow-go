@@ -448,8 +448,7 @@ func newRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buf
 	msg.Header(&md.Table)
 	rows := md.Length()
 
-	bodyCompress := md.Compression(nil)
-	if bodyCompress != nil {
+	if bodyCompress, ok := md.Compression(); ok {
 		codec = getDecompressor(bodyCompress.Codec())
 		defer codec.Close()
 	}
@@ -825,14 +824,12 @@ func (ctx *arrayLoaderContext) loadUnion(dt arrow.UnionType) arrow.ArrayData {
 func readDictionary(memo *dictutils.Memo, msg *Message, swapEndianness bool, mem memory.Allocator) (dictutils.Kind, error) {
 	var (
 		md    flatbuf.DictionaryBatch
-		data  flatbuf.RecordBatch
 		codec decompressor
 	)
 	msg.msg.Header(&md.Table)
 
-	md.Data(&data)
-	bodyCompress := data.Compression(nil)
-	if bodyCompress != nil {
+	data, _ := md.Data()
+	if bodyCompress, ok := data.Compression(); ok {
 		codec = getDecompressor(bodyCompress.Codec())
 		defer codec.Close()
 	}

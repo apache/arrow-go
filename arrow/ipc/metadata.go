@@ -591,11 +591,10 @@ func typeFromFB(field *flatbuf.Field, pos dictutils.FieldPos, children []arrow.F
 	var (
 		dictID        = int64(-1)
 		dictValueType arrow.DataType
-		encoding      = field.Dictionary(nil)
 	)
-	if encoding != nil {
-		var idt flatbuf.Int
-		encoding.IndexType(&idt)
+
+	if encoding, ok := field.Dictionary(); ok {
+		idt, _ := encoding.IndexType()
 		idxType, err := intFromFB(idt)
 		if err != nil {
 			return nil, err
