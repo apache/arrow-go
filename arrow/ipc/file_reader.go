@@ -275,7 +275,7 @@ func (f *FileReader) readSchema(ensureNativeEndian bool) error {
 			return err
 		}
 
-		kind, err = readDictionary(&f.memo, msg.meta, msg.body, f.swapEndianness, f.mem)
+		kind, err = readDictionary(&f.memo, msg, f.swapEndianness, f.mem)
 		if err != nil {
 			return err
 		}
@@ -822,14 +822,13 @@ func (ctx *arrayLoaderContext) loadUnion(dt arrow.UnionType) arrow.ArrayData {
 	return array.NewData(dt, int(field.Length()), buffers, subs, 0, 0)
 }
 
-func readDictionary(memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buffer, swapEndianness bool, mem memory.Allocator) (dictutils.Kind, error) {
+func readDictionary(memo *dictutils.Memo, msg *Message, swapEndianness bool, mem memory.Allocator) (dictutils.Kind, error) {
 	var (
-		msg   = flatbuf.GetRootAsMessage(meta.Bytes(), 0)
 		md    flatbuf.DictionaryBatch
 		data  flatbuf.RecordBatch
 		codec decompressor
 	)
-	msg.Header(&md.Table)
+	msg.msg.Header(&md.Table)
 
 	md.Data(&data)
 	bodyCompress := data.Compression(nil)
@@ -850,7 +849,7 @@ func readDictionary(memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buff
 		src: ipcSource{
 			meta:     data,
 			codec:    codec,
-			rawBytes: body,
+			rawBytes: msg.body,
 			mem:      mem,
 		},
 		memo: memo,
