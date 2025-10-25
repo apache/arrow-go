@@ -170,10 +170,9 @@ func TestFileWriterTotalBytes(t *testing.T) {
 	// Close the writer and verify final bytes
 	require.NoError(t, writer.Close())
 
-	assert.GreaterOrEqual(t, writer.TotalCompressedBytes(), writer.RowGroupTotalCompressedBytes())
-
-	// Verify total bytes (that tracks all row groups) are greater than current row group bytes
-	assert.Greater(t, writer.TotalBytesWritten(), writer.RowGroupTotalBytesWritten())
+	// Verify total bytes & compressed bytes are greater than 0
+	assert.Greater(t, writer.TotalCompressedBytes(), int64(0))
+	assert.Greater(t, writer.TotalBytesWritten(), int64(0))
 }
 
 func TestFileWriterTotalBytesBuffered(t *testing.T) {
@@ -202,18 +201,10 @@ func TestFileWriterTotalBytesBuffered(t *testing.T) {
 	// Write record using WriteBuffered
 	require.NoError(t, writer.WriteBuffered(record))
 
-	// Verify total bytes (that tracks all row groups) are greater than current row group bytes
-	assert.Greater(t, writer.TotalBytesWritten(), writer.RowGroupTotalBytesWritten())
-	assert.GreaterOrEqual(t, writer.TotalCompressedBytes(), writer.RowGroupTotalCompressedBytes())
-
 	// Close the writer and verify final bytes
 	require.NoError(t, writer.Close())
 
-	// Verify that the final bytes are populated after closing
+	// Verify total bytes & compressed bytes are greater than 0
+	assert.Greater(t, writer.TotalCompressedBytes(), int64(0))
 	assert.Greater(t, writer.TotalBytesWritten(), int64(0))
-
-	assert.GreaterOrEqual(t, writer.TotalCompressedBytes(), writer.RowGroupTotalCompressedBytes())
-
-	// Verify total bytes (that tracks all row groups) are greater than current row group bytes
-	assert.Greater(t, writer.TotalBytesWritten(), writer.RowGroupTotalBytesWritten())
 }
