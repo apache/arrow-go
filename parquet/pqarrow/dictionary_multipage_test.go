@@ -99,7 +99,7 @@ func TestArrowDictionaryTypeMultiplePages(t *testing.T) {
 	dictArray := dictBuilder.NewDictionaryArray()
 	defer dictArray.Release()
 
-	rec := array.NewRecord(schema, []arrow.Array{dictArray}, int64(numRows))
+	rec := array.NewRecordBatch(schema, []arrow.Array{dictArray}, int64(numRows))
 	defer rec.Release()
 
 	err = writer.Write(rec)
