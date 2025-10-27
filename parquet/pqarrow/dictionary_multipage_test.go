@@ -139,7 +139,7 @@ func TestArrowDictionaryTypeMultiplePages(t *testing.T) {
 		require.NoError(t, err, "Failed to read Arrow Dictionary type with multiple pages")
 
 		totalRows += rec.NumRows()
-		rec.Release()
+		// Note: Don't call rec.Release() here - the record reader manages record lifecycle
 	}
 
 	require.Equal(t, int64(numRows), totalRows, "Should read all rows")
