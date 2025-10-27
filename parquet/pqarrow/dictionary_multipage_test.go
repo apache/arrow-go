@@ -68,7 +68,7 @@ func TestArrowDictionaryTypeMultiplePages(t *testing.T) {
 	props := parquet.NewWriterProperties(
 		parquet.WithDictionaryDefault(true),
 		parquet.WithCompression(compress.Codecs.Snappy),
-		parquet.WithDataPageSize(4096), // Small page size to force multiple pages
+		parquet.WithDataPageSize(10), // Small page size to force multiple pages
 		parquet.WithMaxRowGroupLength(100000),
 		parquet.WithAllocator(mem),
 	)
@@ -90,7 +90,7 @@ func TestArrowDictionaryTypeMultiplePages(t *testing.T) {
 
 	// Create data with few unique values (good for dictionary)
 	values := []string{"ValueA", "ValueB", "ValueC", "ValueD"}
-	numRows := 50000
+	numRows := 2000
 
 	for i := 0; i < numRows; i++ {
 		require.NoError(t, dictBuilder.AppendString(values[i%len(values)]))
