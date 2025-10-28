@@ -38,17 +38,17 @@ const (
 	defaultPageHeaderSize = 16 * 1024
 )
 
-// DictionaryState tracks the lifecycle of dictionary handling for a column chunk
-type DictionaryState int
+// dictionaryState tracks the lifecycle of dictionary handling for a column chunk
+type dictionaryState int
 
 const (
-	// DictNotRead: Dictionary page has not been read yet
-	DictNotRead DictionaryState = iota
-	// DictReadNotInserted: Dictionary page has been read and decoder configured,
+	// dictNotRead: Dictionary page has not been read yet
+	dictNotRead dictionaryState = iota
+	// dictReadNotInserted: Dictionary page has been read and decoder configured,
 	// but not yet inserted into Arrow builder (for Arrow Dictionary types only)
-	DictReadNotInserted
-	// DictFullyProcessed: Dictionary has been read, configured, and inserted into builder
-	DictFullyProcessed
+	dictReadNotInserted
+	// dictFullyProcessed: Dictionary has been read, configured, and inserted into builder
+	dictFullyProcessed
 )
 
 // cloneByteArray is a helper function to clone a slice of byte slices
@@ -173,7 +173,7 @@ type columnChunkReader struct {
 	defLvlBuffer []int16
 	repLvlBuffer []int16
 
-	dictState DictionaryState
+	dictState dictionaryState
 }
 
 func newTypedColumnChunkReader(base columnChunkReader) ColumnChunkReader {
@@ -256,7 +256,7 @@ func (c *columnChunkReader) setPageReader(rdr PageReader) {
 	c.Close()
 	c.rdr, c.err = rdr, nil
 	c.decoders = make(map[format.Encoding]encoding.TypedDecoder)
-	c.dictState = DictNotRead
+	c.dictState = dictNotRead
 	c.numBuffered, c.numDecoded = 0, 0
 }
 
@@ -299,8 +299,8 @@ func (c *columnChunkReader) HasNext() bool {
 }
 
 func (c *columnChunkReader) readDictionary() error {
-	// If dictionary has been read (in any state beyond DictNotRead), skip reading
-	if c.dictState != DictNotRead {
+	// If dictionary has been read (in any state beyond dictNotRead), skip reading
+	if c.dictState != dictNotRead {
 		return nil
 	}
 
@@ -340,8 +340,8 @@ func (c *columnChunkReader) configureDict(page *DictionaryPage) error {
 
 	// Dictionary page has been read and decoder configured
 	// For non-Arrow Dictionary types, this is the final state
-	// For Arrow Dictionary types, record reader will advance to DictFullyProcessed
-	c.dictState = DictReadNotInserted
+	// For Arrow Dictionary types, record reader will advance to dictFullyProcessed
+	c.dictState = dictReadNotInserted
 	c.curDecoder = c.decoders[enc]
 	return nil
 }

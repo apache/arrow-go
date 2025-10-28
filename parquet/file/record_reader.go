@@ -954,7 +954,7 @@ func (bd *byteArrayDictRecordReader) flushBuilder() {
 func (bd *byteArrayDictRecordReader) maybeWriteNewDictionary() error {
 	rdr := bd.ColumnChunkReader.(*ByteArrayColumnChunkReader)
 	// Only process dictionary if it's been read but not yet inserted into builder
-	if rdr.dictState == DictReadNotInserted {
+	if rdr.dictState == dictReadNotInserted {
 		// Flush the builder and insert the new dictionary values
 		bd.flushBuilder()
 		bd.bldr.(*array.BinaryDictionaryBuilder).ResetFull()
@@ -963,7 +963,7 @@ func (bd *byteArrayDictRecordReader) maybeWriteNewDictionary() error {
 			return err
 		}
 		// Mark dictionary as fully processed (read + inserted)
-		rdr.dictState = DictFullyProcessed
+		rdr.dictState = dictFullyProcessed
 	}
 	return nil
 }
