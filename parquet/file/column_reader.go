@@ -38,6 +38,19 @@ const (
 	defaultPageHeaderSize = 16 * 1024
 )
 
+// dictionaryState tracks the lifecycle of dictionary handling for a column chunk
+type dictionaryState int
+
+const (
+	// dictNotRead: Dictionary page has not been read yet
+	dictNotRead dictionaryState = iota
+	// dictReadNotInserted: Dictionary page has been read and decoder configured,
+	// but not yet inserted into Arrow builder (for Arrow Dictionary types only)
+	dictReadNotInserted
+	// dictFullyProcessed: Dictionary has been read, configured, and inserted into builder
+	dictFullyProcessed
+)
+
 // cloneByteArray is a helper function to clone a slice of byte slices
 func cloneByteArray[T ~[]byte](src []T) {
 	totalLength := 0
@@ -160,7 +173,7 @@ type columnChunkReader struct {
 	defLvlBuffer []int16
 	repLvlBuffer []int16
 
-	newDictionary bool
+	dictState dictionaryState
 }
 
 func newTypedColumnChunkReader(base columnChunkReader) ColumnChunkReader {
@@ -243,7 +256,7 @@ func (c *columnChunkReader) setPageReader(rdr PageReader) {
 	c.Close()
 	c.rdr, c.err = rdr, nil
 	c.decoders = make(map[format.Encoding]encoding.TypedDecoder)
-	c.newDictionary = false
+	c.dictState = dictNotRead
 	c.numBuffered, c.numDecoded = 0, 0
 }
 
@@ -286,7 +299,8 @@ func (c *columnChunkReader) HasNext() bool {
 }
 
 func (c *columnChunkReader) readDictionary() error {
-	if c.newDictionary {
+	// If dictionary has been read (in any state beyond dictNotRead), skip reading
+	if c.dictState != dictNotRead {
 		return nil
 	}
 
@@ -324,7 +338,10 @@ func (c *columnChunkReader) configureDict(page *DictionaryPage) error {
 		return xerrors.New("parquet: dictionary index must be plain encoding")
 	}
 
-	c.newDictionary = true
+	// Dictionary page has been read and decoder configured
+	// For non-Arrow Dictionary types, this is the final state
+	// For Arrow Dictionary types, record reader will advance to dictFullyProcessed
+	c.dictState = dictReadNotInserted
 	c.curDecoder = c.decoders[enc]
 	return nil
 }
