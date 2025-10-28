@@ -50,6 +50,8 @@ type BufferedReader interface {
 	Peek(int) ([]byte, error)
 	Discard(int) (int, error)
 	Outer() utils.Reader
+	// Buffered returns the number of bytes already read and stored in the buffer
+	Buffered() int
 	BufferSize() int
 	Reset(utils.Reader)
 	Free()

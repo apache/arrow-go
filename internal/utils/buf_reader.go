@@ -111,6 +111,8 @@ func (r *byteReader) Reset(Reader) {}
 
 func (r *byteReader) BufferSize() int { return len(r.buf) }
 
+func (r *byteReader) Buffered() int { return len(r.buf) - r.pos }
+
 func (r *byteReader) Free() {}
 
 // bytesBufferReader is a byte slice with a bytes reader wrapped around it.
