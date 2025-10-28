@@ -122,6 +122,9 @@ type bytesBufferReader struct {
 
 // NewBytesBufferReader creates a new bytesBufferReader with the given size and allocator.
 func NewBytesBufferReader(size int, alloc memory.Allocator) *bytesBufferReader {
+	if alloc == nil {
+		alloc = memory.DefaultAllocator
+	}
 	buf := alloc.Allocate(size)
 	return &bytesBufferReader{
 		alloc: alloc,
@@ -159,6 +162,9 @@ type bufferedReader struct {
 // except Peek will expand the internal buffer if needed rather than return
 // an error.
 func NewBufferedReader(rd Reader, sz int, alloc memory.Allocator) *bufferedReader {
+	if alloc == nil {
+		alloc = memory.DefaultAllocator
+	}
 	r := &bufferedReader{
 		alloc: alloc,
 		rd:    rd,
