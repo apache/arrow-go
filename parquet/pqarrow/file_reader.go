@@ -527,6 +527,7 @@ func (fr *FileReader) GetRecordReader(ctx context.Context, colIndices, rowGroups
 		parallel:     fr.Props.Parallel,
 		sc:           sc,
 		fieldReaders: readers,
+		mem:          fr.mem,
 	}
 	rr.refCount.Add(1)
 	return rr, nil
@@ -721,6 +722,7 @@ type recordReader struct {
 	fieldReaders []*ColumnReader
 	cur          arrow.RecordBatch
 	err          error
+	mem          memory.Allocator
 
 	refCount atomic.Int64
 }
@@ -789,7 +791,7 @@ func (r *recordReader) next() bool {
 			return io.EOF
 		}
 
-		arrdata, err := chunksToSingle(data)
+		arrdata, err := chunksToSingle(data, r.mem)
 		if err != nil {
 			return err
 		}
