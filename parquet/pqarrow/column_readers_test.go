@@ -28,7 +28,8 @@ import (
 )
 
 func TestChunksToSingle(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	t.Run("empty chunked array", func(t *testing.T) {
 		chunked := arrow.NewChunked(arrow.PrimitiveTypes.Int32, []arrow.Array{})
