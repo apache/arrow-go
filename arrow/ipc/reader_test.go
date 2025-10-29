@@ -236,8 +236,7 @@ func BenchmarkIPC(b *testing.B) {
 			require.NoError(b, writer.Write(rec))
 			bufBytes := buf.Bytes()
 
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				func() {
 					reader, err := NewReader(bytes.NewReader(bufBytes), WithAllocator(alloc))
 					if err != nil {

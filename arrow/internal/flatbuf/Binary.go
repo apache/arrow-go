@@ -22,25 +22,34 @@ import (
 	flatbuffers "github.com/google/flatbuffers/go"
 )
 
-// / Opaque binary data
+/// Opaque binary data
 type Binary struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsBinary(buf []byte, offset flatbuffers.UOffsetT) *Binary {
+func GetRootAsBinary(buf []byte, offset flatbuffers.UOffsetT) (x Binary) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Binary{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
-func (rcv *Binary) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
+func FinishBinaryBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.Finish(offset)
 }
 
-func (rcv *Binary) Table() flatbuffers.Table {
-	return rcv._tab
+func GetSizePrefixedRootAsBinary(buf []byte, offset flatbuffers.UOffsetT) (x Binary) {
+	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
+	return x
+}
+
+func FinishSizePrefixedBinaryBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.FinishSizePrefixed(offset)
+}
+
+func (rcv *Binary) Init(buf []byte, i flatbuffers.UOffsetT) {
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func BinaryStart(builder *flatbuffers.Builder) {

@@ -22,42 +22,51 @@ import (
 	flatbuffers "github.com/google/flatbuffers/go"
 )
 
-// / Date is either a 32-bit or 64-bit signed integer type representing an
-// / elapsed time since UNIX epoch (1970-01-01), stored in either of two units:
-// /
-// / * Milliseconds (64 bits) indicating UNIX time elapsed since the epoch (no
-// /   leap seconds), where the values are evenly divisible by 86400000
-// / * Days (32 bits) since the UNIX epoch
+/// Date is either a 32-bit or 64-bit signed integer type representing an
+/// elapsed time since UNIX epoch (1970-01-01), stored in either of two units:
+///
+/// * Milliseconds (64 bits) indicating UNIX time elapsed since the epoch (no
+///   leap seconds), where the values are evenly divisible by 86400000
+/// * Days (32 bits) since the UNIX epoch
 type Date struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsDate(buf []byte, offset flatbuffers.UOffsetT) *Date {
+func GetRootAsDate(buf []byte, offset flatbuffers.UOffsetT) (x Date) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Date{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
-func (rcv *Date) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
+func FinishDateBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.Finish(offset)
 }
 
-func (rcv *Date) Table() flatbuffers.Table {
-	return rcv._tab
+func GetSizePrefixedRootAsDate(buf []byte, offset flatbuffers.UOffsetT) (x Date) {
+	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
+	return x
+}
+
+func FinishSizePrefixedDateBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.FinishSizePrefixed(offset)
+}
+
+func (rcv *Date) Init(buf []byte, i flatbuffers.UOffsetT) {
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func (rcv *Date) Unit() DateUnit {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return DateUnit(rcv._tab.GetInt16(o + rcv._tab.Pos))
+		return DateUnit(rcv.GetInt16(o + rcv.Pos))
 	}
 	return 1
 }
 
 func (rcv *Date) MutateUnit(n DateUnit) bool {
-	return rcv._tab.MutateInt16Slot(4, int16(n))
+	return rcv.MutateInt16Slot(4, int16(n))
 }
 
 func DateStart(builder *flatbuffers.Builder) {

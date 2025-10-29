@@ -67,7 +67,7 @@ func (m MessageType) String() string {
 // Message is an IPC message, including metadata and body.
 type Message struct {
 	refCount atomic.Int64
-	msg      *flatbuf.Message
+	msg      flatbuf.Message
 	meta     *memory.Buffer
 	body     *memory.Buffer
 }
@@ -75,28 +75,16 @@ type Message struct {
 // NewMessage creates a new message from the metadata and body buffers.
 // NewMessage panics if any of these buffers is nil.
 func NewMessage(meta, body *memory.Buffer) *Message {
-	if meta == nil || body == nil {
-		panic("arrow/ipc: nil buffers")
-	}
+	msg := flatbuf.GetRootAsMessage(meta.Bytes(), 0)
+	return newMessageFromFB(msg, meta, body)
+}
+
+func newMessageFromFB(msg flatbuf.Message, meta *memory.Buffer, body *memory.Buffer) *Message {
 	meta.Retain()
 	body.Retain()
 	m := &Message{
-		msg:  flatbuf.GetRootAsMessage(meta.Bytes(), 0),
+		msg:  msg,
 		meta: meta,
-		body: body,
-	}
-	m.refCount.Add(1)
-	return m
-}
-
-func newMessageFromFB(meta *flatbuf.Message, body *memory.Buffer) *Message {
-	if meta == nil || body == nil {
-		panic("arrow/ipc: nil buffers")
-	}
-	body.Retain()
-	m := &Message{
-		msg:  meta,
-		meta: memory.NewBufferBytes(meta.Table().Bytes),
 		body: body,
 	}
 	m.refCount.Add(1)
@@ -118,7 +106,6 @@ func (msg *Message) Release() {
 	if msg.refCount.Add(-1) == 0 {
 		msg.meta.Release()
 		msg.body.Release()
-		msg.msg = nil
 		msg.meta = nil
 		msg.body = nil
 	}
@@ -149,19 +136,25 @@ type messageReader struct {
 	refCount atomic.Int64
 	msg      *Message
 
-	mem memory.Allocator
+	header [4]byte
+	metamsg []byte
+	meta   *memory.Buffer
+	body   *memory.Buffer
+}
+
+func newMessageReader(r io.Reader, cfg *config) MessageReader {
+	mr := &messageReader{r: r}
+	mr.body = memory.NewResizableBuffer(cfg.alloc)
+	mr.meta = memory.NewBufferBytes(nil)
+	mr.refCount.Add(1)
+	return mr
 }
 
 // NewMessageReader returns a reader that reads messages from an input stream.
 func NewMessageReader(r io.Reader, opts ...Option) MessageReader {
-	cfg := newConfig()
-	for _, opt := range opts {
-		opt(cfg)
-	}
+	cfg := newConfig(opts...)
+	return newMessageReader(r, cfg)
 
-	mr := &messageReader{r: r, mem: cfg.alloc}
-	mr.refCount.Add(1)
-	return mr
 }
 
 // Retain increases the reference count by 1.
@@ -181,6 +174,8 @@ func (r *messageReader) Release() {
 			r.msg.Release()
 			r.msg = nil
 		}
+		r.body.Release()
+		r.body = nil
 	}
 }
 
@@ -188,7 +183,7 @@ func (r *messageReader) Release() {
 // underlying stream.
 // It is valid until the next call to Message.
 func (r *messageReader) Message() (*Message, error) {
-	buf := make([]byte, 4)
+	buf := r.header[:]
 	_, err := io.ReadFull(r.r, buf)
 	if err != nil {
 		return nil, fmt.Errorf("arrow/ipc: could not read continuation indicator: %w", err)
@@ -218,20 +213,23 @@ func (r *messageReader) Message() (*Message, error) {
 		msgLen = int32(cid)
 	}
 
-	buf = make([]byte, msgLen)
+	if len(r.metamsg) < int(msgLen) {
+		r.metamsg = make([]byte, msgLen)
+	}
+	buf = r.metamsg[:msgLen]
 	_, err = io.ReadFull(r.r, buf)
 	if err != nil {
 		return nil, fmt.Errorf("arrow/ipc: could not read message metadata: %w", err)
 	}
 
-	meta := flatbuf.GetRootAsMessage(buf, 0)
-	bodyLen := meta.BodyLength()
+	msg := flatbuf.GetRootAsMessage(buf, 0)
+	bodyLen := msg.BodyLength()
+	r.meta.Reset(msg.Bytes)
 
-	body := memory.NewResizableBuffer(r.mem)
-	defer body.Release()
-	body.Resize(int(bodyLen))
+	r.body.Resize(0)
+	r.body.Resize(int(bodyLen))
 
-	_, err = io.ReadFull(r.r, body.Bytes())
+	_, err = io.ReadFull(r.r, r.body.Bytes())
 	if err != nil {
 		return nil, fmt.Errorf("arrow/ipc: could not read message body: %w", err)
 	}
@@ -240,7 +238,7 @@ func (r *messageReader) Message() (*Message, error) {
 		r.msg.Release()
 		r.msg = nil
 	}
-	r.msg = newMessageFromFB(meta, body)
+	r.msg = newMessageFromFB(msg, r.meta, r.body)
 
 	return r.msg, nil
 }

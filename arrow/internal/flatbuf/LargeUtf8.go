@@ -22,26 +22,35 @@ import (
 	flatbuffers "github.com/google/flatbuffers/go"
 )
 
-// / Same as Utf8, but with 64-bit offsets, allowing to represent
-// / extremely large data values.
+/// Same as Utf8, but with 64-bit offsets, allowing to represent
+/// extremely large data values.
 type LargeUtf8 struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsLargeUtf8(buf []byte, offset flatbuffers.UOffsetT) *LargeUtf8 {
+func GetRootAsLargeUtf8(buf []byte, offset flatbuffers.UOffsetT) (x LargeUtf8) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &LargeUtf8{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
-func (rcv *LargeUtf8) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
+func FinishLargeUtf8Buffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.Finish(offset)
 }
 
-func (rcv *LargeUtf8) Table() flatbuffers.Table {
-	return rcv._tab
+func GetSizePrefixedRootAsLargeUtf8(buf []byte, offset flatbuffers.UOffsetT) (x LargeUtf8) {
+	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
+	return x
+}
+
+func FinishSizePrefixedLargeUtf8Buffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.FinishSizePrefixed(offset)
+}
+
+func (rcv *LargeUtf8) Init(buf []byte, i flatbuffers.UOffsetT) {
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func LargeUtf8Start(builder *flatbuffers.Builder) {

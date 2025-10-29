@@ -22,26 +22,35 @@ import (
 	flatbuffers "github.com/google/flatbuffers/go"
 )
 
-// / Same as ListView, but with 64-bit offsets and sizes, allowing to represent
-// / extremely large data values.
+/// Same as ListView, but with 64-bit offsets and sizes, allowing to represent
+/// extremely large data values.
 type LargeListView struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsLargeListView(buf []byte, offset flatbuffers.UOffsetT) *LargeListView {
+func GetRootAsLargeListView(buf []byte, offset flatbuffers.UOffsetT) (x LargeListView) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &LargeListView{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
-func (rcv *LargeListView) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
+func FinishLargeListViewBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.Finish(offset)
 }
 
-func (rcv *LargeListView) Table() flatbuffers.Table {
-	return rcv._tab
+func GetSizePrefixedRootAsLargeListView(buf []byte, offset flatbuffers.UOffsetT) (x LargeListView) {
+	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
+	return x
+}
+
+func FinishSizePrefixedLargeListViewBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.FinishSizePrefixed(offset)
+}
+
+func (rcv *LargeListView) Init(buf []byte, i flatbuffers.UOffsetT) {
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func LargeListViewStart(builder *flatbuffers.Builder) {

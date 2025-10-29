@@ -22,62 +22,71 @@ import (
 	flatbuffers "github.com/google/flatbuffers/go"
 )
 
-// / Time is either a 32-bit or 64-bit signed integer type representing an
-// / elapsed time since midnight, stored in either of four units: seconds,
-// / milliseconds, microseconds or nanoseconds.
-// /
-// / The integer `bitWidth` depends on the `unit` and must be one of the following:
-// / * SECOND and MILLISECOND: 32 bits
-// / * MICROSECOND and NANOSECOND: 64 bits
-// /
-// / The allowed values are between 0 (inclusive) and 86400 (=24*60*60) seconds
-// / (exclusive), adjusted for the time unit (for example, up to 86400000
-// / exclusive for the MILLISECOND unit).
-// / This definition doesn't allow for leap seconds. Time values from
-// / measurements with leap seconds will need to be corrected when ingesting
-// / into Arrow (for example by replacing the value 86400 with 86399).
+/// Time is either a 32-bit or 64-bit signed integer type representing an
+/// elapsed time since midnight, stored in either of four units: seconds,
+/// milliseconds, microseconds or nanoseconds.
+///
+/// The integer `bitWidth` depends on the `unit` and must be one of the following:
+/// * SECOND and MILLISECOND: 32 bits
+/// * MICROSECOND and NANOSECOND: 64 bits
+///
+/// The allowed values are between 0 (inclusive) and 86400 (=24*60*60) seconds
+/// (exclusive), adjusted for the time unit (for example, up to 86400000
+/// exclusive for the MILLISECOND unit).
+/// This definition doesn't allow for leap seconds. Time values from
+/// measurements with leap seconds will need to be corrected when ingesting
+/// into Arrow (for example by replacing the value 86400 with 86399).
 type Time struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsTime(buf []byte, offset flatbuffers.UOffsetT) *Time {
+func GetRootAsTime(buf []byte, offset flatbuffers.UOffsetT) (x Time) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Time{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
-func (rcv *Time) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
+func FinishTimeBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.Finish(offset)
 }
 
-func (rcv *Time) Table() flatbuffers.Table {
-	return rcv._tab
+func GetSizePrefixedRootAsTime(buf []byte, offset flatbuffers.UOffsetT) (x Time) {
+	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
+	return x
+}
+
+func FinishSizePrefixedTimeBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) {
+	builder.FinishSizePrefixed(offset)
+}
+
+func (rcv *Time) Init(buf []byte, i flatbuffers.UOffsetT) {
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func (rcv *Time) Unit() TimeUnit {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return TimeUnit(rcv._tab.GetInt16(o + rcv._tab.Pos))
+		return TimeUnit(rcv.GetInt16(o + rcv.Pos))
 	}
 	return 1
 }
 
 func (rcv *Time) MutateUnit(n TimeUnit) bool {
-	return rcv._tab.MutateInt16Slot(4, int16(n))
+	return rcv.MutateInt16Slot(4, int16(n))
 }
 
 func (rcv *Time) BitWidth() int32 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		return rcv._tab.GetInt32(o + rcv._tab.Pos)
+		return rcv.GetInt32(o + rcv.Pos)
 	}
 	return 32
 }
 
 func (rcv *Time) MutateBitWidth(n int32) bool {
-	return rcv._tab.MutateInt32Slot(6, n)
+	return rcv.MutateInt32Slot(6, n)
 }
 
 func TimeStart(builder *flatbuffers.Builder) {
