@@ -17,11 +17,17 @@
 package pqarrow
 
 import (
+	"bytes"
+	"context"
+	"io"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/compress"
+	"github.com/apache/arrow-go/v18/parquet/file"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -148,4 +154,122 @@ func TestChunksToSingle(t *testing.T) {
 		assert.Equal(t, "hello", resultArr.Value(0))
 		assert.Equal(t, "parquet", resultArr.Value(3))
 	})
+}
+
+func TestChunkedTableRoundTrip(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema(
+		[]arrow.Field{
+			{Name: "int64_col", Type: arrow.PrimitiveTypes.Int64, Nullable: false},
+			{Name: "string_col", Type: arrow.BinaryTypes.String, Nullable: true},
+		},
+		nil,
+	)
+
+	// Test data across 3 chunks: 5 + 3 + 2 = 10 rows
+	allInt64Values := []int64{10, 20, 30, 40, 50, 60, 70, 80, 90, 100}
+	allStringValues := []string{"hello", "world", "arrow", "parquet", "go", "chunked", "table", "test", "final", "chunk"}
+
+	var buf bytes.Buffer
+	props := parquet.NewWriterProperties(
+		parquet.WithCompression(compress.Codecs.Snappy),
+		parquet.WithAllocator(mem),
+	)
+
+	writerProps := NewArrowWriterProperties(
+		WithAllocator(mem),
+	)
+
+	writer, err := NewFileWriter(schema, &buf, props, writerProps)
+	require.NoError(t, err)
+
+	// Write three chunks: 5 rows, 3 rows, 2 rows
+	chunks := []struct{ start, end int }{
+		{0, 5},  // First chunk: 5 rows
+		{5, 8},  // Second chunk: 3 rows
+		{8, 10}, // Third chunk: 2 rows
+	}
+
+	for _, chunk := range chunks {
+		int64Builder := array.NewInt64Builder(mem)
+		int64Builder.AppendValues(allInt64Values[chunk.start:chunk.end], nil)
+		int64Arr := int64Builder.NewInt64Array()
+		int64Builder.Release()
+
+		stringBuilder := array.NewStringBuilder(mem)
+		stringBuilder.AppendValues(allStringValues[chunk.start:chunk.end], nil)
+		stringArr := stringBuilder.NewStringArray()
+		stringBuilder.Release()
+
+		rec := array.NewRecordBatch(schema, []arrow.Array{int64Arr, stringArr}, int64(chunk.end-chunk.start))
+
+		err = writer.Write(rec)
+		require.NoError(t, err)
+
+		rec.Release()
+		int64Arr.Release()
+		stringArr.Release()
+	}
+
+	err = writer.Close()
+	require.NoError(t, err)
+
+	// Read back from parquet
+	pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()),
+		file.WithReadProps(parquet.NewReaderProperties(mem)))
+	require.NoError(t, err)
+	defer pf.Close()
+
+	reader, err := NewFileReader(pf, ArrowReadProperties{}, mem)
+	require.NoError(t, err)
+
+	rr, err := reader.GetRecordReader(context.Background(), nil, nil)
+	require.NoError(t, err)
+	defer rr.Release()
+
+	var records []arrow.RecordBatch
+	for {
+		rec, err := rr.Read()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		rec.Retain()
+		records = append(records, rec)
+	}
+
+	readTable := array.NewTableFromRecords(schema, records)
+	defer readTable.Release()
+
+	for _, rec := range records {
+		rec.Release()
+	}
+
+	// Verify the read table
+	require.Equal(t, int64(10), readTable.NumRows())
+	require.Equal(t, int64(2), readTable.NumCols())
+
+	// Verify int64 column values
+	int64Col := readTable.Column(0).Data()
+	int64Single, err := chunksToSingle(int64Col, mem)
+	require.NoError(t, err)
+	defer int64Single.Release()
+	int64Arr := array.MakeFromData(int64Single).(*array.Int64)
+	defer int64Arr.Release()
+	for i := 0; i < int64Arr.Len(); i++ {
+		assert.Equal(t, allInt64Values[i], int64Arr.Value(i))
+	}
+
+	// Verify string column values
+	stringCol := readTable.Column(1).Data()
+	stringSingle, err := chunksToSingle(stringCol, mem)
+	require.NoError(t, err)
+	defer stringSingle.Release()
+	stringArr := array.MakeFromData(stringSingle).(*array.String)
+	defer stringArr.Release()
+	for i := 0; i < stringArr.Len(); i++ {
+		assert.Equal(t, allStringValues[i], stringArr.Value(i))
+	}
 }
