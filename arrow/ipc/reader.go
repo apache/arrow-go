@@ -41,6 +41,7 @@ type Reader struct {
 
 	refCount atomic.Int64
 	rec      arrow.RecordBatch
+	meta     *arrow.Metadata
 	err      error
 
 	// types dictTypeMap
@@ -50,6 +51,7 @@ type Reader struct {
 	swapEndianness     bool
 	ensureNativeEndian bool
 	expectedSchema     *arrow.Schema
+	readCustomMetadata bool
 
 	mem memory.Allocator
 }
@@ -76,6 +78,7 @@ func NewReaderFromMessageReader(r MessageReader, opts ...Option) (reader *Reader
 		mem:                cfg.alloc,
 		ensureNativeEndian: cfg.ensureNativeEndian,
 		expectedSchema:     cfg.schema,
+		readCustomMetadata: cfg.readCustomMetadata,
 	}
 	rr.refCount.Add(1)
 
@@ -170,6 +173,9 @@ func (r *Reader) Next() bool {
 		r.rec.Release()
 		r.rec = nil
 	}
+	if r.meta != nil {
+		r.meta = nil
+	}
 
 	if r.err != nil || r.done {
 		return false
@@ -251,7 +257,14 @@ func (r *Reader) next() bool {
 		r.err = fmt.Errorf("arrow/ipc: invalid message type (got=%v, want=%v", got, want)
 		return false
 	}
-
+	if r.readCustomMetadata {
+		rootMsg := flatbuf.GetRootAsMessage(msg.meta.Bytes(), 0)
+		meta, err := metadataFromFB(rootMsg)
+		if err != nil {
+			panic(err)
+		}
+		r.meta = &meta
+	}
 	r.rec = newRecordBatch(r.schema, &r.memo, msg.meta, msg.body, r.swapEndianness, r.mem)
 	return true
 }
@@ -261,6 +274,12 @@ func (r *Reader) next() bool {
 // It is valid until the next call to Next.
 func (r *Reader) RecordBatch() arrow.RecordBatch {
 	return r.rec
+}
+
+// RecordBatchCustomMetadata returns the current record batch custom metadata from the
+// underlying stream.
+func (r *Reader) RecordBatchCustomMetadata() (*arrow.Metadata, error) {
+	return r.meta, nil
 }
 
 // Record returns the current record that has been extracted from the
@@ -279,7 +298,9 @@ func (r *Reader) Read() (arrow.RecordBatch, error) {
 		r.rec.Release()
 		r.rec = nil
 	}
-
+	if r.meta != nil {
+		r.meta = nil
+	}
 	if !r.next() {
 		if r.done && r.err == nil {
 			return nil, io.EOF
