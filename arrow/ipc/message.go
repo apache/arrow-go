@@ -149,7 +149,7 @@ type messageReader struct {
 	refCount atomic.Int64
 	msg      *Message
 
-	mem memory.Allocator
+	mem    memory.Allocator
 	header [4]byte
 }
 
