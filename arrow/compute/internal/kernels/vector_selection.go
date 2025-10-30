@@ -1486,7 +1486,15 @@ func VarBinaryImpl[OffsetT int32 | int64](ctx *exec.KernelCtx, batch *exec.ExecS
 	if values.Len > 0 {
 		dataLength := rawOffsets[values.Len] - rawOffsets[0]
 		meanValueLen := float64(dataLength) / float64(values.Len)
-		dataBuilder.reserve(int(meanValueLen))
+		estimatedTotalSize := int(meanValueLen * float64(outputLength))
+
+		// Cap the pre-allocation at a reasonable size
+		const maxPreAlloc = 16777216 // 16 MB
+		if estimatedTotalSize > maxPreAlloc {
+			estimatedTotalSize = maxPreAlloc
+		}
+
+		dataBuilder.reserve(estimatedTotalSize)
 	}
 
 	offsetBuilder.reserve(int(outputLength) + 1)
