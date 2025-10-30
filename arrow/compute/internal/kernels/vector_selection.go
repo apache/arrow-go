@@ -1511,7 +1511,22 @@ func VarBinaryImpl[OffsetT int32 | int64](ctx *exec.KernelCtx, batch *exec.ExecS
 			}
 			offset += valSize
 			if valSize > OffsetT(spaceAvail) {
-				dataBuilder.reserve(int(valSize))
+				// Calculate how much total capacity we need
+				needed := dataBuilder.len() + int(valSize)
+				newCap := dataBuilder.cap()
+
+				// Double capacity until we have enough space
+				// This gives us O(log n) reallocations instead of O(n)
+				if newCap == 0 {
+					newCap = int(valSize)
+				}
+				for newCap < needed {
+					newCap = newCap * 2
+				}
+
+				// Reserve the additional capacity
+				additional := newCap - dataBuilder.len()
+				dataBuilder.reserve(additional)
 				spaceAvail = dataBuilder.cap() - dataBuilder.len()
 			}
 			dataBuilder.unsafeAppendSlice(rawData[valOffset : valOffset+valSize])
