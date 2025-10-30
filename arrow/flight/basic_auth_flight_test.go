@@ -81,7 +81,7 @@ func TestErrorAuths(t *testing.T) {
 
 	go func() {
 		if err := s.Serve(); err != nil {
-			t.Fatal(err)
+			panic(err)
 		}
 	}()
 	defer s.Shutdown()
