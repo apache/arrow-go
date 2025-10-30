@@ -67,7 +67,7 @@ func (m MessageType) String() string {
 // Message is an IPC message, including metadata and body.
 type Message struct {
 	refCount atomic.Int64
-	msg      *flatbuf.Message
+	msg      flatbuf.Message
 	meta     *memory.Buffer
 	body     *memory.Buffer
 }
@@ -89,14 +89,14 @@ func NewMessage(meta, body *memory.Buffer) *Message {
 	return m
 }
 
-func newMessageFromFB(meta *flatbuf.Message, body *memory.Buffer) *Message {
-	if meta == nil || body == nil {
+func newMessageFromFB(meta flatbuf.Message, body *memory.Buffer) *Message {
+	if body == nil {
 		panic("arrow/ipc: nil buffers")
 	}
 	body.Retain()
 	m := &Message{
 		msg:  meta,
-		meta: memory.NewBufferBytes(meta.Table().Bytes),
+		meta: memory.NewBufferBytes(meta.Table.Bytes),
 		body: body,
 	}
 	m.refCount.Add(1)
@@ -118,7 +118,6 @@ func (msg *Message) Release() {
 	if msg.refCount.Add(-1) == 0 {
 		msg.meta.Release()
 		msg.body.Release()
-		msg.msg = nil
 		msg.meta = nil
 		msg.body = nil
 	}
