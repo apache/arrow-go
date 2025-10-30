@@ -79,7 +79,7 @@ func TestErrorAuths(t *testing.T) {
 	f := &HeaderAuthTestFlight{}
 	s.RegisterFlightService(f)
 
-	go func () {
+	go func() {
 		if err := s.Serve(); err != nil {
 			t.Fatal(err)
 		}
