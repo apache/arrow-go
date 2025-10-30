@@ -1835,7 +1835,7 @@ func BenchmarkTakeMultiColumn(b *testing.B) {
 	tsBldr.Release()
 
 	// Create record batch
-	batch := array.NewRecord(schema, arrays, numRows)
+	batch := array.NewRecordBatch(schema, arrays, numRows)
 	defer batch.Release()
 
 	// Create indices for partitioning pattern
