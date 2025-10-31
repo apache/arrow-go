@@ -18,6 +18,7 @@ package arrow
 
 import (
 	"reflect"
+	"slices"
 )
 
 type typeEqualsConfig struct {
@@ -122,7 +123,7 @@ func TypeEqual(left, right DataType, opts ...TypeEqualOption) bool {
 			return false
 		}
 
-		if !reflect.DeepEqual(l.ChildIDs(), r.ChildIDs()) {
+		if !slices.Equal(l.ChildIDs(), r.ChildIDs()) {
 			return false
 		}
 
@@ -149,6 +150,8 @@ func TypeEqual(left, right DataType, opts ...TypeEqualOption) bool {
 		r := right.(*RunEndEncodedType)
 		return TypeEqual(l.Encoded(), r.Encoded(), opts...) &&
 			TypeEqual(l.runEnds, r.runEnds, opts...)
+	case *ListViewType:
+		return l.elem.Equal(right.(*ListViewType).elem)
 	default:
 		return reflect.DeepEqual(left, right)
 	}

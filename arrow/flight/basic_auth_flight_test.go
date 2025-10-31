@@ -73,11 +73,17 @@ func (*validator) IsValid(bearerToken string) (interface{}, error) {
 func TestErrorAuths(t *testing.T) {
 	unary, stream := flight.CreateServerBearerTokenAuthInterceptors(&validator{})
 	s := flight.NewFlightServer(grpc.UnaryInterceptor(unary), grpc.StreamInterceptor(stream))
-	s.Init("localhost:0")
+	if err := s.Init("localhost:0"); err != nil {
+		panic(err)
+	}
 	f := &HeaderAuthTestFlight{}
 	s.RegisterFlightService(f)
 
-	go s.Serve()
+	go func() {
+		if err := s.Serve(); err != nil {
+			panic(err)
+		}
+	}()
 	defer s.Shutdown()
 
 	client, err := flight.NewFlightClient(s.Addr().String(), nil, grpc.WithTransportCredentials(insecure.NewCredentials()))
