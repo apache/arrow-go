@@ -60,7 +60,7 @@ func TestBool8ExtensionBuilder(t *testing.T) {
 	require.NoError(t, err)
 	defer arr1.Release()
 
-	require.Equal(t, arr, arr1)
+	require.True(t, array.Equal(arr, arr1))
 }
 
 func TestBool8ExtensionRecordBuilder(t *testing.T) {
@@ -83,7 +83,7 @@ func TestBool8ExtensionRecordBuilder(t *testing.T) {
 	require.NoError(t, err)
 	defer record1.Release()
 
-	require.Equal(t, record, record1)
+	require.True(t, array.RecordEqual(record, record1))
 
 	require.NoError(t, builder.UnmarshalJSON([]byte(`{"bool8":true}`)))
 	record = builder.NewRecordBatch()
