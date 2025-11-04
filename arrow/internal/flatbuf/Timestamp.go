@@ -128,13 +128,12 @@ import (
 /// was UTC; for example, the naive date-time "January 1st 1970, 00h00" would
 /// be encoded as timestamp value 0.
 type Timestamp struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsTimestamp(buf []byte, offset flatbuffers.UOffsetT) *Timestamp {
+func GetRootAsTimestamp(buf []byte, offset flatbuffers.UOffsetT) (x Timestamp) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Timestamp{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -142,10 +141,9 @@ func FinishTimestampBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOff
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsTimestamp(buf []byte, offset flatbuffers.UOffsetT) *Timestamp {
+func GetSizePrefixedRootAsTimestamp(buf []byte, offset flatbuffers.UOffsetT) (x Timestamp) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &Timestamp{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -154,24 +152,20 @@ func FinishSizePrefixedTimestampBuffer(builder *flatbuffers.Builder, offset flat
 }
 
 func (rcv *Timestamp) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Timestamp) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func (rcv *Timestamp) Unit() TimeUnit {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return TimeUnit(rcv._tab.GetInt16(o + rcv._tab.Pos))
+		return TimeUnit(rcv.GetInt16(o + rcv.Pos))
 	}
 	return 0
 }
 
 func (rcv *Timestamp) MutateUnit(n TimeUnit) bool {
-	return rcv._tab.MutateInt16Slot(4, int16(n))
+	return rcv.MutateInt16Slot(4, int16(n))
 }
 
 /// The timezone is an optional string indicating the name of a timezone,
@@ -185,9 +179,9 @@ func (rcv *Timestamp) MutateUnit(n TimeUnit) bool {
 /// Whether a timezone string is present indicates different semantics about
 /// the data (see above).
 func (rcv *Timestamp) Timezone() []byte {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		return rcv._tab.ByteVector(o + rcv._tab.Pos)
+		return rcv.ByteVector(o + rcv.Pos)
 	}
 	return nil
 }
