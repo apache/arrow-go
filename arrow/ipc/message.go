@@ -96,7 +96,7 @@ func newMessageFromFB(meta flatbuf.Message, body *memory.Buffer) *Message {
 	body.Retain()
 	m := &Message{
 		msg:  meta,
-		meta: memory.NewBufferBytes(meta.Table.Bytes),
+		meta: memory.NewBufferBytes(meta.Bytes),
 		body: body,
 	}
 	m.refCount.Add(1)
