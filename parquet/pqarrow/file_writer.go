@@ -323,6 +323,8 @@ func (fw *FileWriter) Close() error {
 			if err := fw.rgw.Close(); err != nil {
 				return err
 			}
+			fw.totalCompressedBytes += fw.rgw.TotalCompressedBytes()
+			fw.totalBytesWritten += fw.rgw.TotalBytesWritten()
 		}
 
 		writeCtx := arrowCtxFromContext(fw.ctx)

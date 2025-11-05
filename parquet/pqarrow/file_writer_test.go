@@ -170,9 +170,9 @@ func TestFileWriterTotalBytes(t *testing.T) {
 	// Close the writer and verify final bytes
 	require.NoError(t, writer.Close())
 
-	// Verify total bytes & compressed bytes are greater than 0
-	assert.Greater(t, writer.TotalCompressedBytes(), int64(0))
-	assert.Greater(t, writer.TotalBytesWritten(), int64(0))
+	// Verify total bytes & compressed bytes are correct
+	assert.Equal(t, writer.TotalCompressedBytes(), int64(54))
+	assert.Equal(t, writer.TotalBytesWritten(), int64(612))
 }
 
 func TestFileWriterTotalBytesBuffered(t *testing.T) {
@@ -204,7 +204,7 @@ func TestFileWriterTotalBytesBuffered(t *testing.T) {
 	// Close the writer and verify final bytes
 	require.NoError(t, writer.Close())
 
-	// Verify total bytes & compressed bytes are greater than 0
-	assert.Greater(t, writer.TotalCompressedBytes(), int64(0))
-	assert.Greater(t, writer.TotalBytesWritten(), int64(0))
+	// Verify total bytes & compressed bytes are correct
+	assert.Equal(t, writer.TotalCompressedBytes(), int64(72))
+	assert.Equal(t, writer.TotalBytesWritten(), int64(784))
 }
