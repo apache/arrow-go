@@ -113,7 +113,7 @@
 //	STRUCT                  Group                     -
 //	MAP                     Group (MAP)               -
 //	DICTIONARY              (converted to value type) -
-//	EXTENSION               (depends on storage)
+//	EXTENSION               (depends on storage)      (may be custom)
 //
 // * FLBA means FixedLenByteArray
 //
