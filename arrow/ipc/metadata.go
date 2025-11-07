@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/endian"
@@ -183,7 +184,8 @@ func fieldFromFB(field *flatbuf.Field, pos dictutils.FieldPos, memo *dictutils.M
 		o   arrow.Field
 	)
 
-	o.Name = string(field.Name())
+	name := field.Name()
+	o.Name = unsafe.String(&name[0], len(name))
 	o.Nullable = field.Nullable()
 	o.Metadata, err = metadataFromFB(field)
 	if err != nil {
