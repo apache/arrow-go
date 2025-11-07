@@ -35,6 +35,7 @@ import (
 // Magic string identifying an Apache Arrow file.
 var Magic = []byte("ARROW1")
 
+
 const (
 	currentMetadataVersion = MetadataV5
 	minMetadataVersion     = MetadataV4
@@ -462,7 +463,7 @@ func (fv *fieldVisitor) visit(field arrow.Field) {
 		field.Type = dt.StorageType()
 		fv.visit(field)
 		fv.meta[ExtensionTypeKeyName] = dt.ExtensionName()
-		fv.meta[ExtensionMetadataKeyName] = string(dt.Serialize())
+		fv.meta[ExtensionMetadataKeyName] = dt.Serialize()
 
 	case *arrow.DictionaryType:
 		field.Type = dt.ValueType
@@ -988,8 +989,9 @@ func timeFromFB(data flatbuf.Time) (arrow.DataType, error) {
 
 func timestampFromFB(data flatbuf.Timestamp) (arrow.DataType, error) {
 	unit := unitFromFB(data.Unit())
-	tz := string(data.Timezone())
-	return &arrow.TimestampType{Unit: unit, TimeZone: tz}, nil
+	tz := data.Timezone()
+	tzs := unsafe.String(&tz[0], len(tz))
+	return &arrow.TimestampType{Unit: unit, TimeZone: tzs}, nil
 }
 
 func dateFromFB(data flatbuf.Date) (arrow.DataType, error) {
