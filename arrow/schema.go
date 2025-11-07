@@ -19,7 +19,6 @@ package arrow
 import (
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/apache/arrow-go/v18/arrow/endian"
@@ -57,7 +56,7 @@ func MetadataFrom(kv map[string]string) Metadata {
 	for k := range kv {
 		md.keys = append(md.keys, k)
 	}
-	sort.Strings(md.keys)
+	slices.Sort(md.keys)
 	for _, k := range md.keys {
 		md.values = append(md.values, kv[k])
 	}
