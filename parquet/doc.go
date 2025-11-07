@@ -79,7 +79,12 @@
 // # Arrow to Parquet Type Mappings
 //
 // When reading and writing Parquet, the parquet package converts between Arrow
-// and Parquet types in the following manner:
+// and Parquet types in the manner described in the table below.
+//
+// When converting a Parquet type where a large and non-large offset Arrow type
+// would work, the non-large variant is chosen. If the Parquet file is written
+// with `WithStoreSchema`, types will be preserved and dictionaries will be
+// restored when round-tripping.
 //
 //	Arrow Type              Parquet Physical Type     Parquet Logical Type
 //	----------              ---------------------     --------------------
