@@ -18,6 +18,7 @@ package arrow
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -129,8 +130,8 @@ func (md Metadata) sortedIndices() []int {
 		idxes[i] = i
 	}
 
-	sort.Slice(idxes, func(i, j int) bool {
-		return md.keys[idxes[i]] < md.keys[idxes[j]]
+	slices.SortFunc(idxes, func(i, j int) int {
+		return strings.Compare(md.keys[idxes[i]], md.keys[idxes[j]])
 	})
 	return idxes
 }
