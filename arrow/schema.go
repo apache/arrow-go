@@ -130,7 +130,7 @@ func (md Metadata) sortedIndices() []int {
 	}
 
 	slices.SortFunc(idxes, func(i, j int) int {
-		return strings.Compare(md.keys[idxes[i]], md.keys[idxes[j]])
+		return strings.Compare(md.keys[i], md.keys[j])
 	})
 	return idxes
 }

@@ -149,6 +149,18 @@ func TestMetadata(t *testing.T) {
 	})
 }
 
+func TestMetadataSortedIndices(t *testing.T) {
+	md1 := NewMetadata(
+		[]string{"..", "a", "b", "c", "A", "B", "C"},
+		[]string{"1", "2", "3", "4", "5", "6", "7"})
+
+	md2 := NewMetadata(
+		[]string{"A", "B", "C", "..", "a", "b", "c"},
+		[]string{"5", "6", "7", "1", "2", "3", "4"})
+
+	assert.True(t, md1.Equal(md2))
+}
+
 func TestSchema(t *testing.T) {
 	for _, tc := range []struct {
 		fields    []Field
