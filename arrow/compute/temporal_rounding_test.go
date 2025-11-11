@@ -20,6 +20,7 @@ package compute_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -725,7 +726,7 @@ func TestTemporalRoundingErrors(t *testing.T) {
 
 func TestTemporalTimezoneAware(t *testing.T) {
 	// This test verifies that temporal rounding operates on local time in the specified timezone,
-	// matching PyArrow behavior (as confirmed by test_pyarrow_timezone_behavior.py).
+	// matching PyArrow behavior.
 	// It tests calendar-based rounding (year, quarter, month, week, day) across multiple timezones.
 	ctx := context.Background()
 	mem := memory.NewGoAllocator()
@@ -1050,6 +1051,222 @@ func TestTemporalHalfRoundingModes(t *testing.T) {
 				t.Errorf("Expected %v (%s), got %v (%s)",
 					expected, time.UnixMicro(int64(expected)).UTC(),
 					actual, time.UnixMicro(int64(actual)).UTC())
+			}
+		})
+	}
+}
+
+func TestTemporalRoundingDateSupport(t *testing.T) {
+	// Test that date types are supported (PyArrow compatibility)
+	ctx := context.Background()
+	mem := memory.NewGoAllocator()
+
+	// Common date32 inputs for vectorized testing
+	date32Input := []arrow.Date32{1, 4, 7, 11} // 1970-01-02 (Fri), 1970-01-05 (Mon), 1970-01-08 (Thu), 1970-01-12 (Mon)
+
+	// Common date64 inputs (with sub-day precision)
+	date64Input := []arrow.Date64{
+		86400000,             // Exactly 1 day (midnight)
+		86400000 + 43200000,  // 1.5 days
+		172800000 + 1,        // 2 days + 1ms
+		259200000 + 64800000, // 3.75 days
+	}
+
+	testVectors := []struct {
+		name     string
+		dateType arrow.DataType
+		input    interface{} // []arrow.Date32 or []arrow.Date64
+		opts     compute.RoundTemporalOptions
+		fn       func(context.Context, compute.RoundTemporalOptions, compute.Datum) (compute.Datum, error)
+		expected interface{} // []arrow.Date32 or []arrow.Date64
+	}{
+		{
+			name:     "date32_floor_to_day",
+			dateType: arrow.FixedWidthTypes.Date32,
+			input:    []arrow.Date32{1, 2, 3, 4, 5},
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalDay},
+			fn:       compute.FloorTemporal,
+			expected: []arrow.Date32{1, 2, 3, 4, 5}, // Identity operation
+		},
+		{
+			name:     "date32_floor_to_week",
+			dateType: arrow.FixedWidthTypes.Date32,
+			input:    date32Input,
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalWeek, WeekStartsMonday: true},
+			fn:       compute.FloorTemporal,
+			expected: []arrow.Date32{-3, 4, 4, 11}, // Floor to Monday
+		},
+		{
+			name:     "date32_ceil_to_week",
+			dateType: arrow.FixedWidthTypes.Date32,
+			input:    date32Input,
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalWeek, WeekStartsMonday: true},
+			fn:       compute.CeilTemporal,
+			expected: []arrow.Date32{4, 4, 11, 11}, // Ceil to Monday
+		},
+		{
+			name:     "date64_floor_to_day",
+			dateType: arrow.FixedWidthTypes.Date64,
+			input:    date64Input,
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalDay},
+			fn:       compute.FloorTemporal,
+			expected: []arrow.Date64{86400000, 86400000, 172800000, 259200000}, // Floor to midnight
+		},
+		{
+			name:     "date64_ceil_to_day",
+			dateType: arrow.FixedWidthTypes.Date64,
+			input:    date64Input,
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalDay},
+			fn:       compute.CeilTemporal,
+			expected: []arrow.Date64{86400000, 172800000, 259200000, 345600000}, // Ceil to midnight
+		},
+		{
+			name:     "date64_round_to_day",
+			dateType: arrow.FixedWidthTypes.Date64,
+			input:    date64Input,
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalDay},
+			fn:       compute.RoundTemporal,
+			expected: []arrow.Date64{86400000, 172800000, 172800000, 345600000}, // Round to nearest midnight
+		},
+		{
+			name:     "date64_floor_to_month",
+			dateType: arrow.FixedWidthTypes.Date64,
+			input:    []arrow.Date64{2678400000, 5097600000}, // 1970-02-01, 1970-03-01
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalMonth},
+			fn:       compute.FloorTemporal,
+			expected: []arrow.Date64{2678400000, 5097600000}, // Already at month boundaries
+		},
+	}
+
+	for _, tv := range testVectors {
+		t.Run(tv.name, func(t *testing.T) {
+			var arr arrow.Array
+			switch tv.dateType.ID() {
+			case arrow.DATE32:
+				bldr := array.NewDate32Builder(mem)
+				defer bldr.Release()
+				bldr.AppendValues(tv.input.([]arrow.Date32), nil)
+				arr = bldr.NewArray()
+			case arrow.DATE64:
+				bldr := array.NewDate64Builder(mem)
+				defer bldr.Release()
+				bldr.AppendValues(tv.input.([]arrow.Date64), nil)
+				arr = bldr.NewArray()
+			}
+			defer arr.Release()
+
+			result, err := tv.fn(ctx, tv.opts, compute.NewDatum(arr))
+			require.NoError(t, err)
+			defer result.Release()
+
+			resultArr := result.(*compute.ArrayDatum).MakeArray()
+			defer resultArr.Release()
+
+			switch tv.dateType.ID() {
+			case arrow.DATE32:
+				date32Result := resultArr.(*array.Date32)
+				expected := tv.expected.([]arrow.Date32)
+				require.Equal(t, len(expected), date32Result.Len())
+				for i := 0; i < date32Result.Len(); i++ {
+					assert.Equal(t, expected[i], date32Result.Value(i), "index %d", i)
+				}
+			case arrow.DATE64:
+				date64Result := resultArr.(*array.Date64)
+				expected := tv.expected.([]arrow.Date64)
+				require.Equal(t, len(expected), date64Result.Len())
+				for i := 0; i < date64Result.Len(); i++ {
+					assert.Equal(t, expected[i], date64Result.Value(i), "index %d", i)
+				}
+			}
+		})
+	}
+
+	t.Run("date32_with_nulls", func(t *testing.T) {
+		bldr := array.NewDate32Builder(mem)
+		defer bldr.Release()
+		bldr.AppendValues([]arrow.Date32{1, 0, 3}, []bool{true, false, true})
+		arr := bldr.NewArray()
+		defer arr.Release()
+
+		opts := compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalDay}
+		result, err := compute.FloorTemporal(ctx, opts, compute.NewDatum(arr))
+		require.NoError(t, err)
+		defer result.Release()
+
+		resultArr := result.(*compute.ArrayDatum).MakeArray()
+		defer resultArr.Release()
+		date32Result := resultArr.(*array.Date32)
+
+		assert.Equal(t, 3, date32Result.Len())
+		assert.True(t, date32Result.IsValid(0))
+		assert.False(t, date32Result.IsValid(1))
+		assert.True(t, date32Result.IsValid(2))
+		assert.Equal(t, arrow.Date32(1), date32Result.Value(0))
+		assert.Equal(t, arrow.Date32(3), date32Result.Value(2))
+	})
+}
+
+func TestTemporalRoundingInvalidType(t *testing.T) {
+	// Test that non-temporal types return appropriate errors
+	ctx := context.Background()
+	mem := memory.NewGoAllocator()
+
+	testCases := []struct {
+		name     string
+		makeArr  func() arrow.Array
+		typeName string
+	}{
+		{
+			name: "int64",
+			makeArr: func() arrow.Array {
+				bldr := array.NewInt64Builder(mem)
+				defer bldr.Release()
+				bldr.AppendValues([]int64{1, 2, 3, 4, 5}, nil)
+				return bldr.NewArray()
+			},
+			typeName: "int64",
+		},
+		{
+			name: "float64",
+			makeArr: func() arrow.Array {
+				bldr := array.NewFloat64Builder(mem)
+				defer bldr.Release()
+				bldr.AppendValues([]float64{1.0, 2.0, 3.0}, nil)
+				return bldr.NewArray()
+			},
+			typeName: "float64",
+		},
+		{
+			name: "string",
+			makeArr: func() arrow.Array {
+				bldr := array.NewStringBuilder(mem)
+				defer bldr.Release()
+				bldr.AppendValues([]string{"a", "b", "c"}, nil)
+				return bldr.NewArray()
+			},
+			typeName: "utf8",
+		},
+	}
+
+	opts := compute.RoundTemporalOptions{
+		Multiple: 1,
+		Unit:     compute.RoundTemporalHour,
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			arr := tc.makeArr()
+			defer arr.Release()
+
+			_, err := compute.FloorTemporal(ctx, opts, compute.NewDatum(arr))
+			if err == nil {
+				t.Fatalf("expected error for %s type, got nil", tc.typeName)
+			}
+
+			// Should mention the type in the error message
+			errMsg := err.Error()
+			if !strings.Contains(errMsg, "timestamp") && !strings.Contains(errMsg, "temporal") {
+				t.Errorf("error message: %s", errMsg)
 			}
 		})
 	}

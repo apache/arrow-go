@@ -1239,6 +1239,38 @@ func RoundTemporalKernel(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.Ex
 
 func roundTemporalExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult, state roundTemporalState) error {
 	input := &batch.Values[0].Array
+
+	// Handle date types by converting to timestamp equivalents
+	switch input.Type.ID() {
+	case arrow.DATE32:
+		// Date32 stores days since epoch as int32, treat as timestamp[s] at midnight
+		fn := func(_ *exec.KernelCtx, days int32, e *error) int32 {
+			// Convert days to seconds (timestamp at midnight UTC)
+			tsSeconds := int64(days) * 86400
+			result, err := roundTimestamp(tsSeconds, arrow.Second, nil, state)
+			if err != nil {
+				*e = err
+				return 0
+			}
+			// Convert back to days
+			return int32(result / 86400)
+		}
+		return ScalarUnaryNotNull(fn)(ctx, batch, out)
+
+	case arrow.DATE64:
+		// Date64 stores milliseconds since epoch, treat as timestamp[ms]
+		fn := func(_ *exec.KernelCtx, ms int64, e *error) int64 {
+			result, err := roundTimestamp(ms, arrow.Millisecond, nil, state)
+			if err != nil {
+				*e = err
+				return 0
+			}
+			return result
+		}
+		return ScalarUnaryNotNull(fn)(ctx, batch, out)
+	}
+
+	// Handle timestamp types
 	inputType := input.Type.(arrow.TemporalWithUnit)
 
 	// Extract timezone if present (for timestamp types)
@@ -1290,9 +1322,32 @@ func (m *timestampUnitMatcher) Equals(other exec.TypeMatcher) bool {
 	return false
 }
 
+type dateTypeMatcher struct {
+	dateTypeID arrow.Type
+}
+
+func (m *dateTypeMatcher) Matches(typ arrow.DataType) bool {
+	return typ.ID() == m.dateTypeID
+}
+
+func (m *dateTypeMatcher) String() string {
+	if m.dateTypeID == arrow.DATE32 {
+		return "date32"
+	}
+	return "date64"
+}
+
+func (m *dateTypeMatcher) Equals(other exec.TypeMatcher) bool {
+	if o, ok := other.(*dateTypeMatcher); ok {
+		return m.dateTypeID == o.dateTypeID
+	}
+	return false
+}
+
 func GetTemporalRoundingKernels(init exec.KernelInitFn, execFn exec.ArrayKernelExec) []exec.ScalarKernel {
 	kernels := make([]exec.ScalarKernel, 0)
 
+	// Timestamp kernels
 	for _, unit := range arrow.TimeUnitValues {
 		kernels = append(kernels, exec.NewScalarKernel(
 			[]exec.InputType{exec.NewMatchedInput(&timestampUnitMatcher{unit: unit})},
@@ -1301,6 +1356,22 @@ func GetTemporalRoundingKernels(init exec.KernelInitFn, execFn exec.ArrayKernelE
 			init,
 		))
 	}
+
+	// Date32 kernel
+	kernels = append(kernels, exec.NewScalarKernel(
+		[]exec.InputType{exec.NewMatchedInput(&dateTypeMatcher{dateTypeID: arrow.DATE32})},
+		OutputFirstType,
+		execFn,
+		init,
+	))
+
+	// Date64 kernel
+	kernels = append(kernels, exec.NewScalarKernel(
+		[]exec.InputType{exec.NewMatchedInput(&dateTypeMatcher{dateTypeID: arrow.DATE64})},
+		OutputFirstType,
+		execFn,
+		init,
+	))
 
 	return append(kernels, NullExecKernel(1))
 }
