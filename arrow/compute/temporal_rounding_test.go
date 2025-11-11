@@ -399,6 +399,54 @@ func TestTemporalRoundingVectors(t *testing.T) {
 			},
 		},
 		{
+			name:      "floor to quarter",
+			funcName:  "floor_temporal",
+			inputUnit: arrow.Second,
+			expected: []time.Time{
+				time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),  // Q1 2023
+				time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),  // Q1 2023
+				time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),  // Q1 2023
+				time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),  // Q1 2023
+				time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),  // Q1 2023
+				time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),  // Q1 2023 (March is Q1)
+				time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),  // Q1 2023
+				time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC),  // Q1 1970
+				time.Date(1969, 10, 1, 0, 0, 0, 0, time.UTC), // Q4 1969 (Oct-Dec)
+				time.Date(2023, 10, 1, 0, 0, 0, 0, time.UTC), // Q4 2023
+				time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),  // Q1 2024 (Feb is Q1)
+				time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),  // Q1 2023
+				time.Date(2050, 10, 1, 0, 0, 0, 0, time.UTC), // Q4 2050
+			},
+			opts: compute.RoundTemporalOptions{
+				Multiple: 1,
+				Unit:     compute.RoundTemporalQuarter,
+			},
+		},
+		{
+			name:      "ceil to quarter",
+			funcName:  "ceil_temporal",
+			inputUnit: arrow.Second,
+			expected: []time.Time{
+				time.Date(2023, 4, 1, 0, 0, 0, 0, time.UTC), // -> Q2 2023
+				time.Date(2023, 4, 1, 0, 0, 0, 0, time.UTC), // -> Q2 2023
+				time.Date(2023, 4, 1, 0, 0, 0, 0, time.UTC), // -> Q2 2023
+				time.Date(2023, 4, 1, 0, 0, 0, 0, time.UTC), // -> Q2 2023
+				time.Date(2023, 4, 1, 0, 0, 0, 0, time.UTC), // -> Q2 2023 (not at quarter boundary)
+				time.Date(2023, 4, 1, 0, 0, 0, 0, time.UTC), // -> Q2 2023 (March 1 is in Q1)
+				time.Date(2023, 4, 1, 0, 0, 0, 0, time.UTC), // -> Q2 2023
+				time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC), // already at Q1 start
+				time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC), // -> Q1 1970
+				time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), // -> Q1 2024
+				time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC), // -> Q2 2024
+				time.Date(2023, 4, 1, 0, 0, 0, 0, time.UTC), // -> Q2 2023
+				time.Date(2051, 1, 1, 0, 0, 0, 0, time.UTC), // -> Q1 2051
+			},
+			opts: compute.RoundTemporalOptions{
+				Multiple: 1,
+				Unit:     compute.RoundTemporalQuarter,
+			},
+		},
+		{
 			name:      "floor to year",
 			funcName:  "floor_temporal",
 			inputUnit: arrow.Second,
@@ -659,15 +707,6 @@ func TestTemporalRoundingErrors(t *testing.T) {
 			errMsg: "rounding multiple must be positive",
 		},
 		{
-			name:     "unsupported calendar unit",
-			funcName: "round_temporal",
-			opts: &compute.RoundTemporalOptions{
-				Multiple: 1,
-				Unit:     compute.RoundTemporalQuarter,
-			},
-			errMsg: "unsupported calendar unit",
-		},
-		{
 			name:     "invalid options type",
 			funcName: "floor_temporal",
 			opts:     &compute.RoundOptions{NDigits: 2},
@@ -684,76 +723,77 @@ func TestTemporalRoundingErrors(t *testing.T) {
 	}
 }
 
-func TestTemporalWithTimezone(t *testing.T) {
+func TestTemporalTimezoneAware(t *testing.T) {
+	// This test verifies that temporal rounding operates on local time in the specified timezone,
+	// matching PyArrow behavior (as confirmed by test_pyarrow_timezone_behavior.py).
+	// It tests calendar-based rounding (year, quarter, month, week, day) across multiple timezones.
 	ctx := context.Background()
 	mem := memory.NewGoAllocator()
 
-	// Test multiple timezones to ensure the matcher works correctly
-	timezones := []string{"UTC", "America/New_York", "Europe/London", "Asia/Tokyo"}
+	// Test timestamp: 2024-07-15 14:30:00 UTC
+	// In America/New_York (UTC-4 in July), this is 2024-07-15 10:30:00 local
+	// In Asia/Tokyo (UTC+9), this is 2024-07-15 23:30:00 local
+	testTime := time.Date(2024, 7, 15, 14, 30, 0, 0, time.UTC)
 
-	for _, tz := range timezones {
-		t.Run(tz, func(t *testing.T) {
-			bldr := array.NewTimestampBuilder(mem, &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: tz})
-			defer bldr.Release()
+	testCases := []struct {
+		name        string
+		tz          string
+		unit        compute.RoundTemporalUnit
+		expectedUTC time.Time
+	}{
+		// Day rounding
+		{name: "day_utc", tz: "UTC", unit: compute.RoundTemporalDay,
+			expectedUTC: time.Date(2024, 7, 15, 0, 0, 0, 0, time.UTC)},
+		{name: "day_ny", tz: "America/New_York", unit: compute.RoundTemporalDay,
+			expectedUTC: time.Date(2024, 7, 15, 4, 0, 0, 0, time.UTC)}, // 2024-07-15 00:00 EDT = 04:00 UTC
+		{name: "day_tokyo", tz: "Asia/Tokyo", unit: compute.RoundTemporalDay,
+			expectedUTC: time.Date(2024, 7, 14, 15, 0, 0, 0, time.UTC)}, // 2024-07-15 00:00 JST = Jul 14 15:00 UTC
 
-			// Add some test timestamps
-			bldr.Append(arrow.Timestamp(time.Date(2024, 3, 15, 14, 30, 45, 0, time.UTC).UnixMicro()))
-			bldr.Append(arrow.Timestamp(time.Date(2024, 3, 15, 14, 45, 30, 0, time.UTC).UnixMicro()))
-			bldr.AppendNull()
-			bldr.Append(arrow.Timestamp(time.Date(2024, 3, 15, 15, 15, 15, 0, time.UTC).UnixMicro()))
+		// Month rounding
+		{name: "month_utc", tz: "UTC", unit: compute.RoundTemporalMonth,
+			expectedUTC: time.Date(2024, 7, 1, 0, 0, 0, 0, time.UTC)},
+		{name: "month_ny", tz: "America/New_York", unit: compute.RoundTemporalMonth,
+			expectedUTC: time.Date(2024, 7, 1, 4, 0, 0, 0, time.UTC)}, // 2024-07-01 00:00 EDT
+		{name: "month_tokyo", tz: "Asia/Tokyo", unit: compute.RoundTemporalMonth,
+			expectedUTC: time.Date(2024, 6, 30, 15, 0, 0, 0, time.UTC)}, // 2024-07-01 00:00 JST
 
-			input := bldr.NewArray()
-			defer input.Release()
+		// Quarter rounding (Q3 starts July 1)
+		{name: "quarter_utc", tz: "UTC", unit: compute.RoundTemporalQuarter,
+			expectedUTC: time.Date(2024, 7, 1, 0, 0, 0, 0, time.UTC)},
+		{name: "quarter_ny", tz: "America/New_York", unit: compute.RoundTemporalQuarter,
+			expectedUTC: time.Date(2024, 7, 1, 4, 0, 0, 0, time.UTC)}, // 2024-07-01 00:00 EDT
+		{name: "quarter_tokyo", tz: "Asia/Tokyo", unit: compute.RoundTemporalQuarter,
+			expectedUTC: time.Date(2024, 6, 30, 15, 0, 0, 0, time.UTC)}, // 2024-07-01 00:00 JST
 
-			opts := compute.RoundTemporalOptions{
-				Multiple: 1,
-				Unit:     compute.RoundTemporalHour,
-			}
+		// Year rounding
+		{name: "year_utc", tz: "UTC", unit: compute.RoundTemporalYear,
+			expectedUTC: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{name: "year_ny", tz: "America/New_York", unit: compute.RoundTemporalYear,
+			expectedUTC: time.Date(2024, 1, 1, 5, 0, 0, 0, time.UTC)}, // 2024-01-01 00:00 EST = 05:00 UTC
+		{name: "year_tokyo", tz: "Asia/Tokyo", unit: compute.RoundTemporalYear,
+			expectedUTC: time.Date(2023, 12, 31, 15, 0, 0, 0, time.UTC)}, // 2024-01-01 00:00 JST
 
-			// Test floor
-			result, err := compute.FloorTemporal(ctx, opts, compute.NewDatum(input))
-			require.NoError(t, err)
-			defer result.Release()
-
-			tsArr := result.(*compute.ArrayDatum).MakeArray().(*array.Timestamp)
-			defer tsArr.Release()
-
-			// Verify timezone is preserved
-			outputZone := tsArr.DataType().(*arrow.TimestampType).TimeZone
-			assert.Equal(t, tz, outputZone)
-
-			// Verify values are rounded correctly
-			assert.Equal(t, arrow.Timestamp(time.Date(2024, 3, 15, 14, 0, 0, 0, time.UTC).UnixMicro()), tsArr.Value(0))
-			assert.Equal(t, arrow.Timestamp(time.Date(2024, 3, 15, 14, 0, 0, 0, time.UTC).UnixMicro()), tsArr.Value(1))
-			assert.False(t, tsArr.IsValid(2)) // null preserved
-			assert.Equal(t, arrow.Timestamp(time.Date(2024, 3, 15, 15, 0, 0, 0, time.UTC).UnixMicro()), tsArr.Value(3))
-		})
+		// Week rounding (Monday start)
+		{name: "week_utc", tz: "UTC", unit: compute.RoundTemporalWeek,
+			expectedUTC: time.Date(2024, 7, 15, 0, 0, 0, 0, time.UTC)}, // 2024-07-15 is Monday
+		{name: "week_ny", tz: "America/New_York", unit: compute.RoundTemporalWeek,
+			expectedUTC: time.Date(2024, 7, 15, 4, 0, 0, 0, time.UTC)}, // Monday 00:00 EDT
+		{name: "week_tokyo", tz: "Asia/Tokyo", unit: compute.RoundTemporalWeek,
+			expectedUTC: time.Date(2024, 7, 14, 15, 0, 0, 0, time.UTC)}, // Monday 00:00 JST
 	}
-}
 
-func TestTemporalTimezoneSemantics(t *testing.T) {
-	// This test verifies that temporal rounding operates on the underlying UTC timestamp,
-	// not on the local time in the specified timezone. This matches Arrow/PyArrow behavior.
-	ctx := context.Background()
-	mem := memory.NewGoAllocator()
-
-	// Create a timestamp at 2024-03-15 02:30:00 UTC
-	// In America/New_York (UTC-5), this would be 2024-03-14 21:30:00
-	// In Asia/Tokyo (UTC+9), this would be 2024-03-15 11:30:00
-	utcTime := time.Date(2024, 3, 15, 2, 30, 0, 0, time.UTC)
-
-	for _, tz := range []string{"UTC", "America/New_York", "Asia/Tokyo"} {
-		t.Run(tz, func(t *testing.T) {
-			bldr := array.NewTimestampBuilder(mem, &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: tz})
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			bldr := array.NewTimestampBuilder(mem, &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: tc.tz})
 			defer bldr.Release()
-			bldr.Append(arrow.Timestamp(utcTime.UnixMicro()))
+			bldr.Append(arrow.Timestamp(testTime.UnixMicro()))
 			input := bldr.NewArray()
 			defer input.Release()
 
-			// Floor to day
 			result, err := compute.FloorTemporal(ctx, compute.RoundTemporalOptions{
-				Multiple: 1,
-				Unit:     compute.RoundTemporalDay,
+				Multiple:         1,
+				Unit:             tc.unit,
+				WeekStartsMonday: true,
 			}, compute.NewDatum(input))
 			require.NoError(t, err)
 			defer result.Release()
@@ -761,14 +801,77 @@ func TestTemporalTimezoneSemantics(t *testing.T) {
 			tsArr := result.(*compute.ArrayDatum).MakeArray().(*array.Timestamp)
 			defer tsArr.Release()
 
-			// The result should be 2024-03-15 00:00:00 UTC for ALL timezones
-			// because Arrow timestamps are always UTC internally
-			expected := time.Date(2024, 3, 15, 0, 0, 0, 0, time.UTC).UnixMicro()
-			assert.Equal(t, arrow.Timestamp(expected), tsArr.Value(0),
-				"Floor to day should operate on UTC timestamp regardless of timezone metadata")
+			// Verify the result matches the expected UTC time
+			expected := arrow.Timestamp(tc.expectedUTC.UnixMicro())
+			actual := tsArr.Value(0)
+			if expected != actual {
+				t.Errorf("Expected %v (%s), got %v (%s)",
+					expected, time.UnixMicro(int64(expected)).UTC(),
+					actual, time.UnixMicro(int64(actual)).UTC())
+			}
 
 			// Timezone metadata should be preserved
-			assert.Equal(t, tz, tsArr.DataType().(*arrow.TimestampType).TimeZone)
+			assert.Equal(t, tc.tz, tsArr.DataType().(*arrow.TimestampType).TimeZone)
+		})
+	}
+}
+
+func TestTemporalTimezoneNaiveCalendarRounding(t *testing.T) {
+	// This test verifies that timezone-naive timestamps can still be rounded with calendar units.
+	// They should be treated as if they are in UTC.
+	ctx := context.Background()
+	mem := memory.NewGoAllocator()
+
+	testTime := time.Date(2024, 7, 15, 14, 30, 0, 0, time.UTC)
+
+	testCases := []struct {
+		name        string
+		unit        compute.RoundTemporalUnit
+		expectedUTC time.Time
+	}{
+		{name: "day", unit: compute.RoundTemporalDay,
+			expectedUTC: time.Date(2024, 7, 15, 0, 0, 0, 0, time.UTC)},
+		{name: "week", unit: compute.RoundTemporalWeek,
+			expectedUTC: time.Date(2024, 7, 15, 0, 0, 0, 0, time.UTC)}, // Monday
+		{name: "month", unit: compute.RoundTemporalMonth,
+			expectedUTC: time.Date(2024, 7, 1, 0, 0, 0, 0, time.UTC)},
+		{name: "quarter", unit: compute.RoundTemporalQuarter,
+			expectedUTC: time.Date(2024, 7, 1, 0, 0, 0, 0, time.UTC)}, // Q3
+		{name: "year", unit: compute.RoundTemporalYear,
+			expectedUTC: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create timezone-naive timestamp (empty TimeZone string)
+			bldr := array.NewTimestampBuilder(mem, &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: ""})
+			defer bldr.Release()
+			bldr.Append(arrow.Timestamp(testTime.UnixMicro()))
+			input := bldr.NewArray()
+			defer input.Release()
+
+			result, err := compute.FloorTemporal(ctx, compute.RoundTemporalOptions{
+				Multiple:         1,
+				Unit:             tc.unit,
+				WeekStartsMonday: true,
+			}, compute.NewDatum(input))
+			require.NoError(t, err)
+			defer result.Release()
+
+			tsArr := result.(*compute.ArrayDatum).MakeArray().(*array.Timestamp)
+			defer tsArr.Release()
+
+			// Verify the result (should be treated as UTC)
+			expected := arrow.Timestamp(tc.expectedUTC.UnixMicro())
+			actual := tsArr.Value(0)
+			if expected != actual {
+				t.Errorf("Expected %v (%s), got %v (%s)",
+					expected, time.UnixMicro(int64(expected)).UTC(),
+					actual, time.UnixMicro(int64(actual)).UTC())
+			}
+
+			// Timezone should remain empty
+			assert.Equal(t, "", tsArr.DataType().(*arrow.TimestampType).TimeZone)
 		})
 	}
 }

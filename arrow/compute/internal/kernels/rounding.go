@@ -826,8 +826,6 @@ const (
 	RoundTemporalNanosecond
 )
 
-var epoch time.Time = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
-
 const (
 	dayNanos = 86400 * 1000000000
 )
@@ -909,14 +907,24 @@ func unitInNanos(unit RoundTemporalUnit) (int64, bool) {
 }
 
 // roundTimestamp rounds a timestamp value according to the specified options
-func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, opts roundTemporalState) (int64, error) {
-	// Fast path: calendar-based rounding (year, quarter, month, week)
+// tz is the timezone for timezone-aware rounding (nil for UTC)
+func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts roundTemporalState) (int64, error) {
+	// Fast path: calendar-based rounding (year, quarter, month, week, day)
+	// These always require timezone-aware conversion
 	if !opts.isSubDay {
 		tsNanos := convertToNanos(ts, inputUnit)
-		return roundTimestampCalendar(tsNanos, inputUnit, opts)
+		return roundTimestampCalendar(tsNanos, inputUnit, tz, opts)
 	}
 
-	// Optimized path: sub-day rounding
+	// For sub-day units with timezone, we need to check if rounding to day boundaries
+	if tz != nil && opts.Unit == RoundTemporalDay {
+		// Day rounding must respect timezone boundaries
+		tsNanos := convertToNanos(ts, inputUnit)
+		return roundTimestampCalendar(tsNanos, inputUnit, tz, opts)
+	}
+
+	// Optimized path: sub-day rounding (hour, minute, second, etc.)
+	// For sub-day units, timezone doesn't affect the rounding unless using calendar origin
 	// Try to avoid conversion to nanoseconds if we can work directly in the input unit
 	if canRoundInInputUnit(inputUnit, opts.unitNanos) && !opts.useCalendarOrigin {
 		// Fast path: round directly in the input unit
@@ -931,7 +939,14 @@ func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, opts roundTemporalState)
 	var origin int64 = 0
 	if opts.useCalendarOrigin {
 		// Use start of day as origin
-		origin = (tsNanos / dayNanos) * dayNanos
+		// For timezone-aware, this needs to be in the local timezone
+		if tz != nil {
+			t := time.Unix(0, tsNanos).In(tz)
+			startOfDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, tz)
+			origin = startOfDay.UnixNano()
+		} else {
+			origin = (tsNanos / dayNanos) * dayNanos
+		}
 	}
 
 	adjusted := tsNanos - origin
@@ -1040,14 +1055,19 @@ func roundToMultipleInt64(value, multiple int64, mode RoundMode, strictCeil bool
 	return quotient * multiple
 }
 
-func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, opts roundTemporalState) (int64, error) {
-	// For calendar-based units (year, quarter, month, week), we need to work with actual dates
+func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Location, opts roundTemporalState) (int64, error) {
+	// For calendar-based units (year, quarter, month, week, day), we need to work with actual dates
 	// This is a simplified implementation - a complete one would need full calendar support
 
-	// Convert to time.Time for calendar operations
+	// Use UTC as default timezone if none specified
+	if tz == nil {
+		tz = time.UTC
+	}
+
+	// Convert to time.Time for calendar operations in the specified timezone
 	secs := tsNanos / 1000000000
 	nanos := tsNanos % 1000000000
-	t := time.Unix(secs, nanos).UTC()
+	t := time.Unix(secs, nanos).In(tz)
 
 	var rounded time.Time
 
@@ -1057,21 +1077,48 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, opts roundT
 		roundedYear := (year / int(opts.Multiple)) * int(opts.Multiple)
 		switch opts.mode {
 		case RoundDown:
-			rounded = time.Date(roundedYear, 1, 1, 0, 0, 0, 0, time.UTC)
+			rounded = time.Date(roundedYear, 1, 1, 0, 0, 0, 0, tz)
 		case RoundUp:
-			if opts.CeilIsStrictlyGreater || !t.Equal(time.Date(roundedYear, 1, 1, 0, 0, 0, 0, time.UTC)) {
+			if opts.CeilIsStrictlyGreater || !t.Equal(time.Date(roundedYear, 1, 1, 0, 0, 0, 0, tz)) {
 				roundedYear += int(opts.Multiple)
 			}
-			rounded = time.Date(roundedYear, 1, 1, 0, 0, 0, 0, time.UTC)
+			rounded = time.Date(roundedYear, 1, 1, 0, 0, 0, 0, tz)
 		default:
 			// For half rounding modes, check if we're in first or second half of period
 			nextYear := roundedYear + int(opts.Multiple)
-			midPoint := time.Date(roundedYear+int(opts.Multiple)/2, 1, 1, 0, 0, 0, 0, time.UTC)
+			midPoint := time.Date(roundedYear+int(opts.Multiple)/2, 1, 1, 0, 0, 0, 0, tz)
 			if t.Before(midPoint) {
-				rounded = time.Date(roundedYear, 1, 1, 0, 0, 0, 0, time.UTC)
+				rounded = time.Date(roundedYear, 1, 1, 0, 0, 0, 0, tz)
 			} else {
-				rounded = time.Date(nextYear, 1, 1, 0, 0, 0, 0, time.UTC)
+				rounded = time.Date(nextYear, 1, 1, 0, 0, 0, 0, tz)
 			}
+		}
+
+	case RoundTemporalQuarter:
+		// Quarters: Q1=Jan-Mar (1-3), Q2=Apr-Jun (4-6), Q3=Jul-Sep (7-9), Q4=Oct-Dec (10-12)
+		month := int(t.Month())
+		year := t.Year()
+		// Calculate total quarters since year 0
+		totalQuarters := year*4 + (month-1)/3
+		roundedQuarters := (totalQuarters / int(opts.Multiple)) * int(opts.Multiple)
+		roundedYear := roundedQuarters / 4
+		roundedQuarter := roundedQuarters % 4
+		roundedMonth := roundedQuarter*3 + 1 // First month of the quarter
+
+		switch opts.mode {
+		case RoundDown:
+			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
+		case RoundUp:
+			if opts.CeilIsStrictlyGreater || !t.Equal(time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)) {
+				roundedQuarters += int(opts.Multiple)
+				roundedYear = roundedQuarters / 4
+				roundedQuarter = roundedQuarters % 4
+				roundedMonth = roundedQuarter*3 + 1
+			}
+			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
+		default:
+			// Simplified: round to nearest quarter
+			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
 		}
 
 	case RoundTemporalMonth:
@@ -1084,17 +1131,17 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, opts roundT
 
 		switch opts.mode {
 		case RoundDown:
-			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, time.UTC)
+			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
 		case RoundUp:
-			if opts.CeilIsStrictlyGreater || !t.Equal(time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, time.UTC)) {
+			if opts.CeilIsStrictlyGreater || !t.Equal(time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)) {
 				roundedMonths += int(opts.Multiple)
 				roundedYear = roundedMonths / 12
 				roundedMonth = (roundedMonths % 12) + 1
 			}
-			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, time.UTC)
+			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
 		default:
 			// Simplified: round to nearest month
-			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, time.UTC)
+			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
 		}
 
 	case RoundTemporalWeek:
@@ -1104,7 +1151,7 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, opts roundT
 			weekday = (weekday + 6) % 7
 		}
 		startOfWeek := t.AddDate(0, 0, -weekday)
-		startOfWeek = time.Date(startOfWeek.Year(), startOfWeek.Month(), startOfWeek.Day(), 0, 0, 0, 0, time.UTC)
+		startOfWeek = time.Date(startOfWeek.Year(), startOfWeek.Month(), startOfWeek.Day(), 0, 0, 0, 0, tz)
 
 		// Calculate which week period this falls into
 		// This is simplified - proper implementation would need epoch calculation
@@ -1122,21 +1169,29 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, opts roundT
 		}
 
 	case RoundTemporalDay:
-		// Round to start of day
-		startOfDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
-		dayNum := int(t.Sub(epoch).Hours() / 24)
-		roundedDay := (dayNum / int(opts.Multiple)) * int(opts.Multiple)
+		// Round to start of day in the local timezone
+		startOfDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, tz)
 
 		switch opts.mode {
 		case RoundDown:
-			rounded = epoch.AddDate(0, 0, roundedDay)
+			// For floor, just use the start of the current day
+			rounded = startOfDay
 		case RoundUp:
+			// For ceil, if not already at start of day, move to start of next day
 			if opts.CeilIsStrictlyGreater || !t.Equal(startOfDay) {
-				roundedDay += int(opts.Multiple)
+				rounded = startOfDay.AddDate(0, 0, 1)
+			} else {
+				rounded = startOfDay
 			}
-			rounded = epoch.AddDate(0, 0, roundedDay)
 		default:
-			rounded = epoch.AddDate(0, 0, roundedDay)
+			// For round/half-up, check if closer to start of this day or next
+			nextDay := startOfDay.AddDate(0, 0, 1)
+			midPoint := startOfDay.Add(12 * time.Hour)
+			if t.Before(midPoint) {
+				rounded = startOfDay
+			} else {
+				rounded = nextDay
+			}
 		}
 
 	default:
@@ -1171,8 +1226,18 @@ func roundTemporalExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.Exec
 	input := &batch.Values[0].Array
 	inputType := input.Type.(arrow.TemporalWithUnit)
 
+	// Extract timezone if present (for timestamp types)
+	var tz *time.Location
+	if tsType, ok := input.Type.(*arrow.TimestampType); ok && tsType.TimeZone != "" {
+		var err error
+		tz, err = time.LoadLocation(tsType.TimeZone)
+		if err != nil {
+			return fmt.Errorf("%w: invalid timezone %q: %v", arrow.ErrInvalid, tsType.TimeZone, err)
+		}
+	}
+
 	fn := func(_ *exec.KernelCtx, ts int64, e *error) int64 {
-		result, err := roundTimestamp(ts, inputType.TimeUnit(), state)
+		result, err := roundTimestamp(ts, inputType.TimeUnit(), tz, state)
 		if err != nil {
 			*e = err
 			return 0
