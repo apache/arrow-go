@@ -874,7 +874,7 @@ func InitRoundTemporalState(_ *exec.KernelCtx, args exec.KernelInitArgs) (exec.K
 		return nil, fmt.Errorf("%w: rounding multiple must be positive", arrow.ErrInvalid)
 	}
 
-	// Pre-calculate values that are constant for this rounding operation
+	// Pre-calculate constants for this rounding operation
 	rs.unitNanos, rs.isSubDay = unitInNanos(rs.Unit)
 	if rs.isSubDay {
 		rs.roundingInterval = rs.unitNanos * rs.Multiple
@@ -884,7 +884,8 @@ func InitRoundTemporalState(_ *exec.KernelCtx, args exec.KernelInitArgs) (exec.K
 	return rs, nil
 }
 
-// unitInNanos returns the duration of the unit in nanoseconds for sub-day units
+// unitInNanos returns (nanoseconds, hasFixedDuration) for a temporal unit.
+// Returns false for calendar units with variable durations (year, quarter, month, week).
 func unitInNanos(unit RoundTemporalUnit) (int64, bool) {
 	switch unit {
 	case RoundTemporalNanosecond:
@@ -906,40 +907,35 @@ func unitInNanos(unit RoundTemporalUnit) (int64, bool) {
 	}
 }
 
-// roundTimestamp rounds a timestamp value according to the specified options
-// tz is the timezone for timezone-aware rounding (nil for UTC)
+// roundTimestamp rounds a timestamp value according to the specified options.
+// tz specifies the timezone for calendar-aware rounding (nil defaults to UTC).
 func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts roundTemporalState) (int64, error) {
-	// Fast path: calendar-based rounding (year, quarter, month, week, day)
-	// These always require timezone-aware conversion
+	// Calendar units with variable duration (year, quarter, month, week) require date arithmetic
 	if !opts.isSubDay {
 		tsNanos := convertToNanos(ts, inputUnit)
 		return roundTimestampCalendar(tsNanos, inputUnit, tz, opts)
 	}
 
-	// For sub-day units with timezone, we need to check if rounding to day boundaries
+	// Day rounding with timezone requires calendar arithmetic (days vary: 23/24/25 hours due to DST)
 	if tz != nil && opts.Unit == RoundTemporalDay {
-		// Day rounding must respect timezone boundaries
 		tsNanos := convertToNanos(ts, inputUnit)
 		return roundTimestampCalendar(tsNanos, inputUnit, tz, opts)
 	}
 
-	// Optimized path: sub-day rounding (hour, minute, second, etc.)
-	// For sub-day units, timezone doesn't affect the rounding unless using calendar origin
-	// Try to avoid conversion to nanoseconds if we can work directly in the input unit
+	// Sub-day units (hour, minute, second, etc.) use fixed-duration arithmetic
+	// Fast path: round directly in input unit if possible (no origin, compatible units)
 	if canRoundInInputUnit(inputUnit, opts.unitNanos) && !opts.useCalendarOrigin {
-		// Fast path: round directly in the input unit
 		intervalInInputUnit := opts.roundingInterval / unitScaleFactor(inputUnit)
 		rounded := roundToMultipleInt64(ts, intervalInInputUnit, opts.mode, opts.CeilIsStrictlyGreater)
 		return rounded, nil
 	}
 
-	// Fallback: convert to nanoseconds for origin calculation or incompatible units
+	// Slow path: convert to nanoseconds for calendar origin or incompatible units
 	tsNanos := convertToNanos(ts, inputUnit)
 
 	var origin int64 = 0
 	if opts.useCalendarOrigin {
-		// Use start of day as origin
-		// For timezone-aware, this needs to be in the local timezone
+		// Calendar origin: round relative to start of day (timezone-aware if tz != nil)
 		if tz != nil {
 			t := time.Unix(0, tsNanos).In(tz)
 			startOfDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, tz)
@@ -956,7 +952,7 @@ func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts 
 	return convertFromNanos(result, inputUnit), nil
 }
 
-// unitScaleFactor returns the number of nanoseconds in one unit of the given time unit
+// unitScaleFactor returns nanoseconds per unit for the given time unit
 func unitScaleFactor(unit arrow.TimeUnit) int64 {
 	switch unit {
 	case arrow.Second:
@@ -972,9 +968,8 @@ func unitScaleFactor(unit arrow.TimeUnit) int64 {
 	}
 }
 
-// canRoundInInputUnit determines if we can round directly in the input unit
-// without converting to nanoseconds. This is possible when the rounding interval
-// is evenly divisible by the input unit's scale.
+// canRoundInInputUnit checks if rounding can be done in the input unit
+// without converting to nanoseconds (true when rounding interval is evenly divisible).
 func canRoundInInputUnit(inputUnit arrow.TimeUnit, roundingIntervalNanos int64) bool {
 	return roundingIntervalNanos%unitScaleFactor(inputUnit) == 0
 }
@@ -1064,10 +1059,9 @@ func halfRoundPeriod(t, periodStart, periodEnd time.Time) time.Time {
 	return periodEnd
 }
 
+// roundTimestampCalendar handles calendar-based rounding (year, quarter, month, week, day).
+// Requires date arithmetic for variable-length periods and timezone-aware boundaries.
 func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Location, opts roundTemporalState) (int64, error) {
-	// For calendar-based units (year, quarter, month, week, day), we need to work with actual dates
-
-	// Use UTC as default timezone if none specified
 	if tz == nil {
 		tz = time.UTC
 	}
@@ -1092,7 +1086,6 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 			}
 			rounded = time.Date(roundedYear, 1, 1, 0, 0, 0, 0, tz)
 		default:
-			// Half-rounding: find the exact midpoint of the N-year period
 			yearStart := time.Date(roundedYear, 1, 1, 0, 0, 0, 0, tz)
 			nextYear := roundedYear + int(opts.Multiple)
 			yearEnd := time.Date(nextYear, 1, 1, 0, 0, 0, 0, tz)
@@ -1100,10 +1093,9 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 		}
 
 	case RoundTemporalQuarter:
-		// Quarters: Q1=Jan-Mar (1-3), Q2=Apr-Jun (4-6), Q3=Jul-Sep (7-9), Q4=Oct-Dec (10-12)
+		// Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec
 		month := int(t.Month())
 		year := t.Year()
-		// Calculate total quarters since year 0
 		totalQuarters := year*4 + (month-1)/3
 		roundedQuarters := (totalQuarters / int(opts.Multiple)) * int(opts.Multiple)
 		roundedYear := roundedQuarters / 4
@@ -1122,7 +1114,6 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 			}
 			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
 		default:
-			// Half-rounding: find midpoint of the quarter period
 			quarterStart := time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
 			nextQuarterNum := roundedQuarters + int(opts.Multiple)
 			nextYear := nextQuarterNum / 4
@@ -1151,7 +1142,6 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 			}
 			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
 		default:
-			// Half-rounding: find midpoint of the month period
 			monthStart := time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
 			nextMonthNum := roundedMonths + int(opts.Multiple)
 			nextYear := nextMonthNum / 12
@@ -1161,7 +1151,6 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 		}
 
 	case RoundTemporalWeek:
-		// Find start of week for the input time
 		weekday := int(t.Weekday())
 		if opts.WeekStartsMonday {
 			weekday = (weekday + 6) % 7
@@ -1169,7 +1158,7 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 		startOfWeek := t.AddDate(0, 0, -weekday)
 		startOfWeek = time.Date(startOfWeek.Year(), startOfWeek.Month(), startOfWeek.Day(), 0, 0, 0, 0, tz)
 
-		// For Multiple > 1, calculate N-week periods from epoch
+		// Calculate N-week periods from epoch for Multiple > 1
 		epochInTz := time.Unix(0, 0).In(tz)
 		epochWeekday := int(epochInTz.Weekday())
 		if opts.WeekStartsMonday {
@@ -1178,7 +1167,6 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 		epochWeekStart := epochInTz.AddDate(0, 0, -epochWeekday)
 		epochWeekStart = time.Date(epochWeekStart.Year(), epochWeekStart.Month(), epochWeekStart.Day(), 0, 0, 0, 0, tz)
 
-		// Calculate weeks since epoch week start
 		daysSinceEpochWeek := int(startOfWeek.Sub(epochWeekStart).Hours() / 24)
 		weeksSinceEpoch := daysSinceEpochWeek / 7
 		roundedWeeks := (weeksSinceEpoch / int(opts.Multiple)) * int(opts.Multiple)
@@ -1194,28 +1182,23 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 				rounded = roundedWeekStart
 			}
 		default:
-			// Half-rounding: find midpoint of the N-week period
 			weekEnd := roundedWeekStart.AddDate(0, 0, 7*int(opts.Multiple))
 			rounded = halfRoundPeriod(t, roundedWeekStart, weekEnd)
 		}
 
 	case RoundTemporalDay:
-		// Round to start of day in the local timezone
 		startOfDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, tz)
 
 		switch opts.mode {
 		case RoundDown:
-			// For floor, just use the start of the current day
 			rounded = startOfDay
 		case RoundUp:
-			// For ceil, if not already at start of day, move to start of next day
 			if opts.CeilIsStrictlyGreater || !t.Equal(startOfDay) {
 				rounded = startOfDay.AddDate(0, 0, 1)
 			} else {
 				rounded = startOfDay
 			}
 		default:
-			// For round/half-up, check if closer to start of this day or next
 			nextDay := startOfDay.AddDate(0, 0, 1)
 			rounded = halfRoundPeriod(t, startOfDay, nextDay)
 		}
