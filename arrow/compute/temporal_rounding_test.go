@@ -683,3 +683,106 @@ func TestTemporalRoundingErrors(t *testing.T) {
 		})
 	}
 }
+
+// Benchmarks for temporal rounding functions
+
+// Helper function to create timestamp arrays for benchmarks
+func makeTimestampArray(count int, unit arrow.TimeUnit, interval time.Duration) arrow.Array {
+	mem := memory.NewGoAllocator()
+	bldr := array.NewTimestampBuilder(mem, &arrow.TimestampType{Unit: unit, TimeZone: "UTC"})
+	defer bldr.Release()
+	bldr.Reserve(count)
+
+	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < count; i++ {
+		ts := baseTime.Add(time.Duration(i) * interval)
+		switch unit {
+		case arrow.Second:
+			bldr.Append(arrow.Timestamp(ts.Unix()))
+		case arrow.Millisecond:
+			bldr.Append(arrow.Timestamp(ts.UnixMilli()))
+		case arrow.Microsecond:
+			bldr.Append(arrow.Timestamp(ts.UnixMicro()))
+		case arrow.Nanosecond:
+			bldr.Append(arrow.Timestamp(ts.UnixNano()))
+		}
+	}
+	return bldr.NewArray()
+}
+
+func BenchmarkTemporalRounding(b *testing.B) {
+	benchmarks := []struct {
+		name     string
+		fn       func(context.Context, compute.RoundTemporalOptions, compute.Datum) (compute.Datum, error)
+		unit     arrow.TimeUnit
+		interval time.Duration
+		opts     compute.RoundTemporalOptions
+	}{
+		{
+			name:     "FloorToHour_Microsecond",
+			fn:       compute.FloorTemporal,
+			unit:     arrow.Microsecond,
+			interval: time.Minute,
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalHour},
+		},
+		{
+			name:     "FloorToDay_Millisecond",
+			fn:       compute.FloorTemporal,
+			unit:     arrow.Millisecond,
+			interval: time.Minute,
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalDay},
+		},
+		{
+			name:     "CeilToHour_Nanosecond",
+			fn:       compute.CeilTemporal,
+			unit:     arrow.Nanosecond,
+			interval: time.Minute,
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalHour},
+		},
+		{
+			name:     "RoundToHour_Microsecond",
+			fn:       compute.RoundTemporal,
+			unit:     arrow.Microsecond,
+			interval: time.Minute,
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalHour},
+		},
+		{
+			name:     "FloorWithCalendarOrigin",
+			fn:       compute.FloorTemporal,
+			unit:     arrow.Microsecond,
+			interval: time.Minute,
+			opts:     compute.RoundTemporalOptions{Multiple: 2, Unit: compute.RoundTemporalHour, CalendarBasedOrigin: true},
+		},
+		{
+			name:     "FloorSeconds",
+			fn:       compute.FloorTemporal,
+			unit:     arrow.Second,
+			interval: time.Minute,
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalHour},
+		},
+		{
+			name:     "FloorToMonth_CalendarBased",
+			fn:       compute.FloorTemporal,
+			unit:     arrow.Microsecond,
+			interval: 24 * time.Hour,
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalMonth},
+		},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			arr := makeTimestampArray(100000, bm.unit, bm.interval)
+			defer arr.Release()
+
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				datum, err := bm.fn(context.Background(), bm.opts, compute.NewDatum(arr))
+				if err != nil {
+					b.Fatal(err)
+				}
+				datum.Release()
+			}
+		})
+	}
+}

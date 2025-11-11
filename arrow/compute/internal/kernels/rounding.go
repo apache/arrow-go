@@ -826,6 +826,12 @@ const (
 	RoundTemporalNanosecond
 )
 
+var epoch time.Time = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+
+const (
+	dayNanos = 86400 * 1000000000
+)
+
 // RoundTemporalOptions provides configuration for temporal rounding operations
 type RoundTemporalOptions struct {
 	// Multiple is the number of units to round to. Must be positive.
@@ -845,6 +851,12 @@ func (RoundTemporalOptions) TypeName() string { return "RoundTemporalOptions" }
 type roundTemporalState struct {
 	RoundTemporalOptions
 	mode RoundMode
+
+	// Pre-calculated values to avoid repeated computation
+	unitNanos         int64 // Duration of the unit in nanoseconds
+	roundingInterval  int64 // unitNanos * Multiple
+	isSubDay          bool  // true if this is a sub-day unit (can use fast path)
+	useCalendarOrigin bool  // true if using calendar-based origin
 }
 
 func InitRoundTemporalState(_ *exec.KernelCtx, args exec.KernelInitArgs) (exec.KernelState, error) {
@@ -862,6 +874,13 @@ func InitRoundTemporalState(_ *exec.KernelCtx, args exec.KernelInitArgs) (exec.K
 
 	if rs.Multiple <= 0 {
 		return nil, fmt.Errorf("%w: rounding multiple must be positive", arrow.ErrInvalid)
+	}
+
+	// Pre-calculate values that are constant for this rounding operation
+	rs.unitNanos, rs.isSubDay = unitInNanos(rs.Unit)
+	if rs.isSubDay {
+		rs.roundingInterval = rs.unitNanos * rs.Multiple
+		rs.useCalendarOrigin = rs.CalendarBasedOrigin && rs.Unit <= RoundTemporalDay
 	}
 
 	return rs, nil
@@ -891,61 +910,68 @@ func unitInNanos(unit RoundTemporalUnit) (int64, bool) {
 
 // roundTimestamp rounds a timestamp value according to the specified options
 func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, opts roundTemporalState) (int64, error) {
-	// Convert to nanoseconds for easier calculation
-	tsNanos := convertToNanos(ts, inputUnit)
-
-	unitNanos, isSubDay := unitInNanos(opts.Unit)
-	if !isSubDay {
-		// Calendar-based rounding (year, quarter, month, week)
+	// Fast path: calendar-based rounding (year, quarter, month, week)
+	if !opts.isSubDay {
+		tsNanos := convertToNanos(ts, inputUnit)
 		return roundTimestampCalendar(tsNanos, inputUnit, opts)
 	}
 
-	// Sub-day unit rounding
-	multiple := opts.Multiple
-	roundingInterval := unitNanos * multiple
+	// Optimized path: sub-day rounding
+	// Try to avoid conversion to nanoseconds if we can work directly in the input unit
+	if canRoundInInputUnit(inputUnit, opts.unitNanos) && !opts.useCalendarOrigin {
+		// Fast path: round directly in the input unit
+		intervalInInputUnit := opts.roundingInterval / unitScaleFactor(inputUnit)
+		rounded := roundToMultipleInt64(ts, intervalInInputUnit, opts.mode, opts.CeilIsStrictlyGreater)
+		return rounded, nil
+	}
+
+	// Fallback: convert to nanoseconds for origin calculation or incompatible units
+	tsNanos := convertToNanos(ts, inputUnit)
 
 	var origin int64 = 0
-	if opts.CalendarBasedOrigin && opts.Unit <= RoundTemporalDay {
+	if opts.useCalendarOrigin {
 		// Use start of day as origin
-		dayNanos := int64(86400 * 1000000000)
 		origin = (tsNanos / dayNanos) * dayNanos
 	}
 
 	adjusted := tsNanos - origin
-	rounded := roundToMultipleInt64(adjusted, roundingInterval, opts.mode, opts.CeilIsStrictlyGreater)
+	rounded := roundToMultipleInt64(adjusted, opts.roundingInterval, opts.mode, opts.CeilIsStrictlyGreater)
 	result := origin + rounded
 
 	return convertFromNanos(result, inputUnit), nil
 }
 
-func convertToNanos(ts int64, unit arrow.TimeUnit) int64 {
+// unitScaleFactor returns the number of nanoseconds in one unit of the given time unit
+func unitScaleFactor(unit arrow.TimeUnit) int64 {
 	switch unit {
 	case arrow.Second:
-		return ts * 1000000000
+		return 1_000_000_000
 	case arrow.Millisecond:
-		return ts * 1000000
+		return 1_000_000
 	case arrow.Microsecond:
-		return ts * 1000
+		return 1_000
 	case arrow.Nanosecond:
-		return ts
+		return 1
 	default:
-		return ts
+		return 1
 	}
 }
 
+// canRoundInInputUnit determines if we can round directly in the input unit
+// without converting to nanoseconds. This is possible when the rounding interval
+// is evenly divisible by the input unit's scale.
+func canRoundInInputUnit(inputUnit arrow.TimeUnit, roundingIntervalNanos int64) bool {
+	return roundingIntervalNanos%unitScaleFactor(inputUnit) == 0
+}
+
+// convertToNanos converts a timestamp value to nanoseconds
+func convertToNanos(ts int64, unit arrow.TimeUnit) int64 {
+	return ts * unitScaleFactor(unit)
+}
+
+// convertFromNanos converts a nanosecond timestamp to the specified unit
 func convertFromNanos(nanos int64, unit arrow.TimeUnit) int64 {
-	switch unit {
-	case arrow.Second:
-		return nanos / 1000000000
-	case arrow.Millisecond:
-		return nanos / 1000000
-	case arrow.Microsecond:
-		return nanos / 1000
-	case arrow.Nanosecond:
-		return nanos
-	default:
-		return nanos
-	}
+	return nanos / unitScaleFactor(unit)
 }
 
 func roundToMultipleInt64(value, multiple int64, mode RoundMode, strictCeil bool) int64 {
@@ -1098,19 +1124,19 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, opts roundT
 	case RoundTemporalDay:
 		// Round to start of day
 		startOfDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
-		dayNum := int(t.Sub(time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)).Hours() / 24)
+		dayNum := int(t.Sub(epoch).Hours() / 24)
 		roundedDay := (dayNum / int(opts.Multiple)) * int(opts.Multiple)
 
 		switch opts.mode {
 		case RoundDown:
-			rounded = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, roundedDay)
+			rounded = epoch.AddDate(0, 0, roundedDay)
 		case RoundUp:
 			if opts.CeilIsStrictlyGreater || !t.Equal(startOfDay) {
 				roundedDay += int(opts.Multiple)
 			}
-			rounded = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, roundedDay)
+			rounded = epoch.AddDate(0, 0, roundedDay)
 		default:
-			rounded = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, roundedDay)
+			rounded = epoch.AddDate(0, 0, roundedDay)
 		}
 
 	default:
