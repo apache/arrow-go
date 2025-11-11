@@ -21,6 +21,7 @@ package kernels
 import (
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
@@ -806,4 +807,373 @@ func FixedRoundDecimalExec[T decimal128.Num | decimal256.Num](mode RoundMode) ex
 		}()
 	}
 	panic("should never get here")
+}
+
+// RoundTemporalUnit represents units supported for temporal rounding
+type RoundTemporalUnit int8
+
+const (
+	RoundTemporalYear RoundTemporalUnit = iota
+	RoundTemporalQuarter
+	RoundTemporalMonth
+	RoundTemporalWeek
+	RoundTemporalDay
+	RoundTemporalHour
+	RoundTemporalMinute
+	RoundTemporalSecond
+	RoundTemporalMillisecond
+	RoundTemporalMicrosecond
+	RoundTemporalNanosecond
+)
+
+// RoundTemporalOptions provides configuration for temporal rounding operations
+type RoundTemporalOptions struct {
+	// Multiple is the number of units to round to. Must be positive.
+	Multiple int64
+	// Unit is the rounding unit (day, hour, etc.)
+	Unit RoundTemporalUnit
+	// WeekStartsMonday determines the start of the week for week-based rounding
+	WeekStartsMonday bool
+	// CeilIsStrictlyGreater: if true, ceil returns a value strictly greater than input
+	CeilIsStrictlyGreater bool
+	// CalendarBasedOrigin: if true, use calendar units as origin (e.g., start of day for hours)
+	CalendarBasedOrigin bool
+}
+
+func (RoundTemporalOptions) TypeName() string { return "RoundTemporalOptions" }
+
+type roundTemporalState struct {
+	RoundTemporalOptions
+	mode RoundMode
+}
+
+func InitRoundTemporalState(_ *exec.KernelCtx, args exec.KernelInitArgs) (exec.KernelState, error) {
+	var rs roundTemporalState
+
+	opts, ok := args.Options.(*RoundTemporalOptions)
+	if ok {
+		rs.RoundTemporalOptions = *opts
+	} else {
+		if rs.RoundTemporalOptions, ok = args.Options.(RoundTemporalOptions); !ok {
+			return nil, fmt.Errorf("%w: attempted to initialize kernel state from invalid function options",
+				arrow.ErrInvalid)
+		}
+	}
+
+	if rs.Multiple <= 0 {
+		return nil, fmt.Errorf("%w: rounding multiple must be positive", arrow.ErrInvalid)
+	}
+
+	return rs, nil
+}
+
+// unitInNanos returns the duration of the unit in nanoseconds for sub-day units
+func unitInNanos(unit RoundTemporalUnit) (int64, bool) {
+	switch unit {
+	case RoundTemporalNanosecond:
+		return 1, true
+	case RoundTemporalMicrosecond:
+		return 1000, true
+	case RoundTemporalMillisecond:
+		return 1000000, true
+	case RoundTemporalSecond:
+		return 1000000000, true
+	case RoundTemporalMinute:
+		return 60 * 1000000000, true
+	case RoundTemporalHour:
+		return 3600 * 1000000000, true
+	case RoundTemporalDay:
+		return 86400 * 1000000000, true
+	default:
+		return 0, false
+	}
+}
+
+// roundTimestamp rounds a timestamp value according to the specified options
+func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, opts roundTemporalState) (int64, error) {
+	// Convert to nanoseconds for easier calculation
+	tsNanos := convertToNanos(ts, inputUnit)
+
+	unitNanos, isSubDay := unitInNanos(opts.Unit)
+	if !isSubDay {
+		// Calendar-based rounding (year, quarter, month, week)
+		return roundTimestampCalendar(tsNanos, inputUnit, opts)
+	}
+
+	// Sub-day unit rounding
+	multiple := opts.Multiple
+	roundingInterval := unitNanos * multiple
+
+	var origin int64 = 0
+	if opts.CalendarBasedOrigin && opts.Unit <= RoundTemporalDay {
+		// Use start of day as origin
+		dayNanos := int64(86400 * 1000000000)
+		origin = (tsNanos / dayNanos) * dayNanos
+	}
+
+	adjusted := tsNanos - origin
+	rounded := roundToMultipleInt64(adjusted, roundingInterval, opts.mode, opts.CeilIsStrictlyGreater)
+	result := origin + rounded
+
+	return convertFromNanos(result, inputUnit), nil
+}
+
+func convertToNanos(ts int64, unit arrow.TimeUnit) int64 {
+	switch unit {
+	case arrow.Second:
+		return ts * 1000000000
+	case arrow.Millisecond:
+		return ts * 1000000
+	case arrow.Microsecond:
+		return ts * 1000
+	case arrow.Nanosecond:
+		return ts
+	default:
+		return ts
+	}
+}
+
+func convertFromNanos(nanos int64, unit arrow.TimeUnit) int64 {
+	switch unit {
+	case arrow.Second:
+		return nanos / 1000000000
+	case arrow.Millisecond:
+		return nanos / 1000000
+	case arrow.Microsecond:
+		return nanos / 1000
+	case arrow.Nanosecond:
+		return nanos
+	default:
+		return nanos
+	}
+}
+
+func roundToMultipleInt64(value, multiple int64, mode RoundMode, strictCeil bool) int64 {
+	if multiple == 0 || value%multiple == 0 {
+		if strictCeil && mode == RoundUp {
+			return value + multiple
+		}
+		return value
+	}
+
+	quotient := value / multiple
+	remainder := value % multiple
+
+	switch mode {
+	case RoundDown:
+		if remainder < 0 {
+			return (quotient - 1) * multiple
+		}
+		return quotient * multiple
+	case RoundUp:
+		if remainder > 0 || (strictCeil && remainder == 0) {
+			return (quotient + 1) * multiple
+		}
+		if remainder < 0 {
+			return quotient * multiple
+		}
+		return (quotient + 1) * multiple
+	case HalfUp, HalfDown, HalfToEven:
+		half := multiple / 2
+		absRemainder := remainder
+		if absRemainder < 0 {
+			absRemainder = -absRemainder
+		}
+
+		if absRemainder < half {
+			return quotient * multiple
+		} else if absRemainder > half {
+			if remainder > 0 {
+				return (quotient + 1) * multiple
+			}
+			return (quotient - 1) * multiple
+		} else {
+			// Exactly on the halfway point
+			switch mode {
+			case HalfDown:
+				if remainder > 0 {
+					return quotient * multiple
+				}
+				return (quotient - 1) * multiple
+			case HalfUp:
+				if remainder > 0 {
+					return (quotient + 1) * multiple
+				}
+				return quotient * multiple
+			case HalfToEven:
+				if quotient%2 == 0 {
+					return quotient * multiple
+				}
+				if remainder > 0 {
+					return (quotient + 1) * multiple
+				}
+				return (quotient - 1) * multiple
+			}
+		}
+	}
+	return quotient * multiple
+}
+
+func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, opts roundTemporalState) (int64, error) {
+	// For calendar-based units (year, quarter, month, week), we need to work with actual dates
+	// This is a simplified implementation - a complete one would need full calendar support
+
+	// Convert to time.Time for calendar operations
+	secs := tsNanos / 1000000000
+	nanos := tsNanos % 1000000000
+	t := time.Unix(secs, nanos).UTC()
+
+	var rounded time.Time
+
+	switch opts.Unit {
+	case RoundTemporalYear:
+		year := t.Year()
+		roundedYear := (year / int(opts.Multiple)) * int(opts.Multiple)
+		switch opts.mode {
+		case RoundDown:
+			rounded = time.Date(roundedYear, 1, 1, 0, 0, 0, 0, time.UTC)
+		case RoundUp:
+			if opts.CeilIsStrictlyGreater || !t.Equal(time.Date(roundedYear, 1, 1, 0, 0, 0, 0, time.UTC)) {
+				roundedYear += int(opts.Multiple)
+			}
+			rounded = time.Date(roundedYear, 1, 1, 0, 0, 0, 0, time.UTC)
+		default:
+			// For half rounding modes, check if we're in first or second half of period
+			nextYear := roundedYear + int(opts.Multiple)
+			midPoint := time.Date(roundedYear+int(opts.Multiple)/2, 1, 1, 0, 0, 0, 0, time.UTC)
+			if t.Before(midPoint) {
+				rounded = time.Date(roundedYear, 1, 1, 0, 0, 0, 0, time.UTC)
+			} else {
+				rounded = time.Date(nextYear, 1, 1, 0, 0, 0, 0, time.UTC)
+			}
+		}
+
+	case RoundTemporalMonth:
+		month := int(t.Month())
+		year := t.Year()
+		totalMonths := year*12 + month - 1
+		roundedMonths := (totalMonths / int(opts.Multiple)) * int(opts.Multiple)
+		roundedYear := roundedMonths / 12
+		roundedMonth := (roundedMonths % 12) + 1
+
+		switch opts.mode {
+		case RoundDown:
+			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, time.UTC)
+		case RoundUp:
+			if opts.CeilIsStrictlyGreater || !t.Equal(time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, time.UTC)) {
+				roundedMonths += int(opts.Multiple)
+				roundedYear = roundedMonths / 12
+				roundedMonth = (roundedMonths % 12) + 1
+			}
+			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, time.UTC)
+		default:
+			// Simplified: round to nearest month
+			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, time.UTC)
+		}
+
+	case RoundTemporalWeek:
+		// Find start of week
+		weekday := int(t.Weekday())
+		if opts.WeekStartsMonday {
+			weekday = (weekday + 6) % 7
+		}
+		startOfWeek := t.AddDate(0, 0, -weekday)
+		startOfWeek = time.Date(startOfWeek.Year(), startOfWeek.Month(), startOfWeek.Day(), 0, 0, 0, 0, time.UTC)
+
+		// Calculate which week period this falls into
+		// This is simplified - proper implementation would need epoch calculation
+		switch opts.mode {
+		case RoundDown:
+			rounded = startOfWeek
+		case RoundUp:
+			if opts.CeilIsStrictlyGreater || !t.Equal(startOfWeek) {
+				rounded = startOfWeek.AddDate(0, 0, 7*int(opts.Multiple))
+			} else {
+				rounded = startOfWeek
+			}
+		default:
+			rounded = startOfWeek
+		}
+
+	case RoundTemporalDay:
+		// Round to start of day
+		startOfDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+		dayNum := int(t.Sub(time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)).Hours() / 24)
+		roundedDay := (dayNum / int(opts.Multiple)) * int(opts.Multiple)
+
+		switch opts.mode {
+		case RoundDown:
+			rounded = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, roundedDay)
+		case RoundUp:
+			if opts.CeilIsStrictlyGreater || !t.Equal(startOfDay) {
+				roundedDay += int(opts.Multiple)
+			}
+			rounded = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, roundedDay)
+		default:
+			rounded = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, roundedDay)
+		}
+
+	default:
+		return 0, fmt.Errorf("%w: unsupported calendar unit", arrow.ErrNotImplemented)
+	}
+
+	// Convert back to the input unit
+	roundedNanos := rounded.UnixNano()
+	return convertFromNanos(roundedNanos, inputUnit), nil
+}
+
+// Kernel execution functions for temporal rounding
+func FloorTemporalKernel(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+	state := ctx.State.(roundTemporalState)
+	state.mode = RoundDown
+	return roundTemporalExec(ctx, batch, out, state)
+}
+
+func CeilTemporalKernel(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+	state := ctx.State.(roundTemporalState)
+	state.mode = RoundUp
+	return roundTemporalExec(ctx, batch, out, state)
+}
+
+func RoundTemporalKernel(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+	state := ctx.State.(roundTemporalState)
+	state.mode = HalfUp
+	return roundTemporalExec(ctx, batch, out, state)
+}
+
+func roundTemporalExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult, state roundTemporalState) error {
+	input := &batch.Values[0].Array
+	inputType := input.Type.(arrow.TemporalWithUnit)
+
+	fn := func(_ *exec.KernelCtx, ts int64, e *error) int64 {
+		result, err := roundTimestamp(ts, inputType.TimeUnit(), state)
+		if err != nil {
+			*e = err
+			return 0
+		}
+		return result
+	}
+
+	switch inputType.TimeUnit() {
+	case arrow.Second, arrow.Millisecond, arrow.Microsecond, arrow.Nanosecond:
+		return ScalarUnaryNotNull(fn)(ctx, batch, out)
+	default:
+		return fmt.Errorf("%w: unsupported time unit", arrow.ErrNotImplemented)
+	}
+}
+
+func GetTemporalRoundingKernels(init exec.KernelInitFn, execFn exec.ArrayKernelExec) []exec.ScalarKernel {
+	kernels := make([]exec.ScalarKernel, 0)
+
+	for _, unit := range arrow.TimeUnitValues {
+		tsType := &arrow.TimestampType{Unit: unit}
+		kernels = append(kernels, exec.NewScalarKernel(
+			[]exec.InputType{exec.NewExactInput(tsType)},
+			exec.NewOutputType(tsType),
+			execFn,
+			init,
+		))
+	}
+
+	return append(kernels, NullExecKernel(1))
 }
