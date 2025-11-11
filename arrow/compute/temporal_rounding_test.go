@@ -749,6 +749,14 @@ func TestTemporalTimezoneAware(t *testing.T) {
 		{name: "day_tokyo", tz: "Asia/Tokyo", unit: compute.RoundTemporalDay,
 			expectedUTC: time.Date(2024, 7, 14, 15, 0, 0, 0, time.UTC)}, // 2024-07-15 00:00 JST = Jul 14 15:00 UTC
 
+		// Week rounding (Monday start) - input is 2024-07-15 14:30 UTC = Mon 10:30 EDT, Mon 23:30 JST
+		{name: "week_utc", tz: "UTC", unit: compute.RoundTemporalWeek,
+			expectedUTC: time.Date(2024, 7, 15, 0, 0, 0, 0, time.UTC)}, // Floor to Monday 00:00 UTC
+		{name: "week_ny", tz: "America/New_York", unit: compute.RoundTemporalWeek,
+			expectedUTC: time.Date(2024, 7, 8, 4, 0, 0, 0, time.UTC)}, // Floor to Monday 00:00 EDT (previous Monday in NY time)
+		{name: "week_tokyo", tz: "Asia/Tokyo", unit: compute.RoundTemporalWeek,
+			expectedUTC: time.Date(2024, 7, 14, 15, 0, 0, 0, time.UTC)}, // Floor to Monday 00:00 JST
+
 		// Month rounding
 		{name: "month_utc", tz: "UTC", unit: compute.RoundTemporalMonth,
 			expectedUTC: time.Date(2024, 7, 1, 0, 0, 0, 0, time.UTC)},
@@ -772,14 +780,6 @@ func TestTemporalTimezoneAware(t *testing.T) {
 			expectedUTC: time.Date(2024, 1, 1, 5, 0, 0, 0, time.UTC)}, // 2024-01-01 00:00 EST = 05:00 UTC
 		{name: "year_tokyo", tz: "Asia/Tokyo", unit: compute.RoundTemporalYear,
 			expectedUTC: time.Date(2023, 12, 31, 15, 0, 0, 0, time.UTC)}, // 2024-01-01 00:00 JST
-
-		// Week rounding (Monday start)
-		{name: "week_utc", tz: "UTC", unit: compute.RoundTemporalWeek,
-			expectedUTC: time.Date(2024, 7, 15, 0, 0, 0, 0, time.UTC)}, // 2024-07-15 is Monday
-		{name: "week_ny", tz: "America/New_York", unit: compute.RoundTemporalWeek,
-			expectedUTC: time.Date(2024, 7, 15, 4, 0, 0, 0, time.UTC)}, // Monday 00:00 EDT
-		{name: "week_tokyo", tz: "Asia/Tokyo", unit: compute.RoundTemporalWeek,
-			expectedUTC: time.Date(2024, 7, 14, 15, 0, 0, 0, time.UTC)}, // Monday 00:00 JST
 	}
 
 	for _, tc := range testCases {
@@ -872,6 +872,185 @@ func TestTemporalTimezoneNaiveCalendarRounding(t *testing.T) {
 
 			// Timezone should remain empty
 			assert.Equal(t, "", tsArr.DataType().(*arrow.TimestampType).TimeZone)
+		})
+	}
+}
+
+func TestTemporalMultiPeriodRounding(t *testing.T) {
+	// Tests for rounding with Multiple > 1 (N-period rounding)
+	ctx := context.Background()
+	mem := memory.NewGoAllocator()
+
+	testCases := []struct {
+		name        string
+		input       time.Time
+		unit        compute.RoundTemporalUnit
+		multiple    int64
+		funcName    string
+		expectedUTC time.Time
+	}{
+		// 2-week periods from epoch (epoch Monday = Dec 29, 1969)
+		{name: "floor_2weeks", input: time.Date(2024, 1, 17, 12, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalWeek, multiple: 2, funcName: "floor_temporal",
+			expectedUTC: time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)}, // Start of 2-week period (Monday Jan 15)
+		{name: "ceil_2weeks", input: time.Date(2024, 1, 17, 12, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalWeek, multiple: 2, funcName: "ceil_temporal",
+			expectedUTC: time.Date(2024, 1, 29, 0, 0, 0, 0, time.UTC)}, // Next 2-week period
+		{name: "round_2weeks_before_mid", input: time.Date(2024, 1, 19, 12, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalWeek, multiple: 2, funcName: "round_temporal",
+			expectedUTC: time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)}, // Before midpoint (Jan 22)
+		{name: "round_2weeks_after_mid", input: time.Date(2024, 1, 25, 12, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalWeek, multiple: 2, funcName: "round_temporal",
+			expectedUTC: time.Date(2024, 1, 29, 0, 0, 0, 0, time.UTC)}, // After midpoint
+
+		// 3-month periods
+		{name: "floor_3months", input: time.Date(2024, 5, 15, 12, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalMonth, multiple: 3, funcName: "floor_temporal",
+			expectedUTC: time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC)}, // Apr-Jun period
+		{name: "ceil_3months", input: time.Date(2024, 5, 15, 12, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalMonth, multiple: 3, funcName: "ceil_temporal",
+			expectedUTC: time.Date(2024, 7, 1, 0, 0, 0, 0, time.UTC)}, // Next period
+		{name: "round_3months_before_mid", input: time.Date(2024, 4, 20, 12, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalMonth, multiple: 3, funcName: "round_temporal",
+			expectedUTC: time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC)}, // Before midpoint
+		{name: "round_3months_after_mid", input: time.Date(2024, 5, 20, 12, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalMonth, multiple: 3, funcName: "round_temporal",
+			expectedUTC: time.Date(2024, 7, 1, 0, 0, 0, 0, time.UTC)}, // After midpoint
+
+		// 2-quarter periods (6 months)
+		{name: "floor_2quarters", input: time.Date(2024, 8, 15, 12, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalQuarter, multiple: 2, funcName: "floor_temporal",
+			expectedUTC: time.Date(2024, 7, 1, 0, 0, 0, 0, time.UTC)}, // Q3-Q4 period starts July 1
+		{name: "ceil_2quarters", input: time.Date(2024, 8, 15, 12, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalQuarter, multiple: 2, funcName: "ceil_temporal",
+			expectedUTC: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)}, // Next period
+		{name: "round_2quarters_before_mid", input: time.Date(2024, 9, 15, 12, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalQuarter, multiple: 2, funcName: "round_temporal",
+			expectedUTC: time.Date(2024, 7, 1, 0, 0, 0, 0, time.UTC)}, // Before midpoint (Oct 1)
+		{name: "round_2quarters_after_mid", input: time.Date(2024, 11, 15, 12, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalQuarter, multiple: 2, funcName: "round_temporal",
+			expectedUTC: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)}, // After midpoint
+
+		// 2-year periods
+		{name: "floor_2years", input: time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalYear, multiple: 2, funcName: "floor_temporal",
+			expectedUTC: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}, // 2024-2025 period
+		{name: "ceil_2years", input: time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalYear, multiple: 2, funcName: "ceil_temporal",
+			expectedUTC: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}, // Next period
+		{name: "round_2years_before_mid", input: time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalYear, multiple: 2, funcName: "round_temporal",
+			expectedUTC: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}, // Before midpoint (July 1 2025)
+		{name: "round_2years_after_mid", input: time.Date(2025, 8, 15, 12, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalYear, multiple: 2, funcName: "round_temporal",
+			expectedUTC: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}, // After midpoint
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			bldr := array.NewTimestampBuilder(mem, &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: ""})
+			defer bldr.Release()
+			bldr.Append(arrow.Timestamp(tc.input.UnixMicro()))
+			input := bldr.NewArray()
+			defer input.Release()
+
+			opts := compute.RoundTemporalOptions{
+				Multiple:         tc.multiple,
+				Unit:             tc.unit,
+				WeekStartsMonday: true,
+			}
+
+			result, err := compute.CallFunction(ctx, tc.funcName, &opts, compute.NewDatum(input))
+			require.NoError(t, err)
+			defer result.Release()
+
+			tsArr := result.(*compute.ArrayDatum).MakeArray().(*array.Timestamp)
+			defer tsArr.Release()
+
+			expected := arrow.Timestamp(tc.expectedUTC.UnixMicro())
+			actual := tsArr.Value(0)
+			if expected != actual {
+				t.Errorf("Expected %v (%s), got %v (%s)",
+					expected, time.UnixMicro(int64(expected)).UTC(),
+					actual, time.UnixMicro(int64(actual)).UTC())
+			}
+		})
+	}
+}
+
+func TestTemporalHalfRoundingModes(t *testing.T) {
+	// Tests for half-rounding modes (HalfUp, HalfDown, HalfToEven) with calendar units
+	ctx := context.Background()
+	mem := memory.NewGoAllocator()
+
+	testCases := []struct {
+		name        string
+		input       time.Time
+		unit        compute.RoundTemporalUnit
+		multiple    int64
+		expectedUTC time.Time
+	}{
+		// Week half-rounding
+		{name: "week_before_mid", input: time.Date(2024, 1, 10, 0, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalWeek, multiple: 1,
+			expectedUTC: time.Date(2024, 1, 8, 0, 0, 0, 0, time.UTC)}, // Before Thursday midpoint
+		{name: "week_after_mid", input: time.Date(2024, 1, 13, 0, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalWeek, multiple: 1,
+			expectedUTC: time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)}, // After Thursday midpoint
+
+		// Month half-rounding
+		{name: "month_before_mid", input: time.Date(2024, 1, 10, 0, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalMonth, multiple: 1,
+			expectedUTC: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}, // Before Jan 16th midpoint
+		{name: "month_after_mid", input: time.Date(2024, 1, 20, 0, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalMonth, multiple: 1,
+			expectedUTC: time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)}, // After midpoint
+
+		// Quarter half-rounding
+		{name: "quarter_before_mid", input: time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalQuarter, multiple: 1,
+			expectedUTC: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}, // Before Feb 15th midpoint
+		{name: "quarter_after_mid", input: time.Date(2024, 2, 20, 0, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalQuarter, multiple: 1,
+			expectedUTC: time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC)}, // After midpoint
+
+		// Year half-rounding
+		{name: "year_before_mid", input: time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalYear, multiple: 1,
+			expectedUTC: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}, // Before July 2nd midpoint
+		{name: "year_after_mid", input: time.Date(2024, 9, 1, 0, 0, 0, 0, time.UTC),
+			unit: compute.RoundTemporalYear, multiple: 1,
+			expectedUTC: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)}, // After midpoint
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			bldr := array.NewTimestampBuilder(mem, &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: ""})
+			defer bldr.Release()
+			bldr.Append(arrow.Timestamp(tc.input.UnixMicro()))
+			input := bldr.NewArray()
+			defer input.Release()
+
+			opts := compute.RoundTemporalOptions{
+				Multiple:         tc.multiple,
+				Unit:             tc.unit,
+				WeekStartsMonday: true,
+			}
+
+			result, err := compute.RoundTemporal(ctx, opts, compute.NewDatum(input))
+			require.NoError(t, err)
+			defer result.Release()
+
+			tsArr := result.(*compute.ArrayDatum).MakeArray().(*array.Timestamp)
+			defer tsArr.Release()
+
+			expected := arrow.Timestamp(tc.expectedUTC.UnixMicro())
+			actual := tsArr.Value(0)
+			if expected != actual {
+				t.Errorf("Expected %v (%s), got %v (%s)",
+					expected, time.UnixMicro(int64(expected)).UTC(),
+					actual, time.UnixMicro(int64(actual)).UTC())
+			}
 		})
 	}
 }

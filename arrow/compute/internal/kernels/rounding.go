@@ -1055,9 +1055,17 @@ func roundToMultipleInt64(value, multiple int64, mode RoundMode, strictCeil bool
 	return quotient * multiple
 }
 
+// halfRoundPeriod performs half-rounding by finding the midpoint between period start and end
+func halfRoundPeriod(t, periodStart, periodEnd time.Time) time.Time {
+	midPoint := periodStart.Add(periodEnd.Sub(periodStart) / 2)
+	if t.Before(midPoint) {
+		return periodStart
+	}
+	return periodEnd
+}
+
 func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Location, opts roundTemporalState) (int64, error) {
 	// For calendar-based units (year, quarter, month, week, day), we need to work with actual dates
-	// This is a simplified implementation - a complete one would need full calendar support
 
 	// Use UTC as default timezone if none specified
 	if tz == nil {
@@ -1084,14 +1092,11 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 			}
 			rounded = time.Date(roundedYear, 1, 1, 0, 0, 0, 0, tz)
 		default:
-			// For half rounding modes, check if we're in first or second half of period
+			// Half-rounding: find the exact midpoint of the N-year period
+			yearStart := time.Date(roundedYear, 1, 1, 0, 0, 0, 0, tz)
 			nextYear := roundedYear + int(opts.Multiple)
-			midPoint := time.Date(roundedYear+int(opts.Multiple)/2, 1, 1, 0, 0, 0, 0, tz)
-			if t.Before(midPoint) {
-				rounded = time.Date(roundedYear, 1, 1, 0, 0, 0, 0, tz)
-			} else {
-				rounded = time.Date(nextYear, 1, 1, 0, 0, 0, 0, tz)
-			}
+			yearEnd := time.Date(nextYear, 1, 1, 0, 0, 0, 0, tz)
+			rounded = halfRoundPeriod(t, yearStart, yearEnd)
 		}
 
 	case RoundTemporalQuarter:
@@ -1117,8 +1122,14 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 			}
 			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
 		default:
-			// Simplified: round to nearest quarter
-			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
+			// Half-rounding: find midpoint of the quarter period
+			quarterStart := time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
+			nextQuarterNum := roundedQuarters + int(opts.Multiple)
+			nextYear := nextQuarterNum / 4
+			nextQuarter := nextQuarterNum % 4
+			nextMonth := nextQuarter*3 + 1
+			quarterEnd := time.Date(nextYear, time.Month(nextMonth), 1, 0, 0, 0, 0, tz)
+			rounded = halfRoundPeriod(t, quarterStart, quarterEnd)
 		}
 
 	case RoundTemporalMonth:
@@ -1140,12 +1151,17 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 			}
 			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
 		default:
-			// Simplified: round to nearest month
-			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
+			// Half-rounding: find midpoint of the month period
+			monthStart := time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
+			nextMonthNum := roundedMonths + int(opts.Multiple)
+			nextYear := nextMonthNum / 12
+			nextMonth := (nextMonthNum % 12) + 1
+			monthEnd := time.Date(nextYear, time.Month(nextMonth), 1, 0, 0, 0, 0, tz)
+			rounded = halfRoundPeriod(t, monthStart, monthEnd)
 		}
 
 	case RoundTemporalWeek:
-		// Find start of week
+		// Find start of week for the input time
 		weekday := int(t.Weekday())
 		if opts.WeekStartsMonday {
 			weekday = (weekday + 6) % 7
@@ -1153,19 +1169,34 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 		startOfWeek := t.AddDate(0, 0, -weekday)
 		startOfWeek = time.Date(startOfWeek.Year(), startOfWeek.Month(), startOfWeek.Day(), 0, 0, 0, 0, tz)
 
-		// Calculate which week period this falls into
-		// This is simplified - proper implementation would need epoch calculation
+		// For Multiple > 1, calculate N-week periods from epoch
+		epochInTz := time.Unix(0, 0).In(tz)
+		epochWeekday := int(epochInTz.Weekday())
+		if opts.WeekStartsMonday {
+			epochWeekday = (epochWeekday + 6) % 7
+		}
+		epochWeekStart := epochInTz.AddDate(0, 0, -epochWeekday)
+		epochWeekStart = time.Date(epochWeekStart.Year(), epochWeekStart.Month(), epochWeekStart.Day(), 0, 0, 0, 0, tz)
+
+		// Calculate weeks since epoch week start
+		daysSinceEpochWeek := int(startOfWeek.Sub(epochWeekStart).Hours() / 24)
+		weeksSinceEpoch := daysSinceEpochWeek / 7
+		roundedWeeks := (weeksSinceEpoch / int(opts.Multiple)) * int(opts.Multiple)
+		roundedWeekStart := epochWeekStart.AddDate(0, 0, roundedWeeks*7)
+
 		switch opts.mode {
 		case RoundDown:
-			rounded = startOfWeek
+			rounded = roundedWeekStart
 		case RoundUp:
-			if opts.CeilIsStrictlyGreater || !t.Equal(startOfWeek) {
-				rounded = startOfWeek.AddDate(0, 0, 7*int(opts.Multiple))
+			if opts.CeilIsStrictlyGreater || !t.Equal(roundedWeekStart) {
+				rounded = roundedWeekStart.AddDate(0, 0, 7*int(opts.Multiple))
 			} else {
-				rounded = startOfWeek
+				rounded = roundedWeekStart
 			}
 		default:
-			rounded = startOfWeek
+			// Half-rounding: find midpoint of the N-week period
+			weekEnd := roundedWeekStart.AddDate(0, 0, 7*int(opts.Multiple))
+			rounded = halfRoundPeriod(t, roundedWeekStart, weekEnd)
 		}
 
 	case RoundTemporalDay:
@@ -1186,12 +1217,7 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 		default:
 			// For round/half-up, check if closer to start of this day or next
 			nextDay := startOfDay.AddDate(0, 0, 1)
-			midPoint := startOfDay.Add(12 * time.Hour)
-			if t.Before(midPoint) {
-				rounded = startOfDay
-			} else {
-				rounded = nextDay
-			}
+			rounded = halfRoundPeriod(t, startOfDay, nextDay)
 		}
 
 	default:
