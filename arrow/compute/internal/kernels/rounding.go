@@ -1162,14 +1162,35 @@ func roundTemporalExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.Exec
 	}
 }
 
+type timestampUnitMatcher struct {
+	unit arrow.TimeUnit
+}
+
+func (m *timestampUnitMatcher) Matches(typ arrow.DataType) bool {
+	if ts, ok := typ.(*arrow.TimestampType); ok {
+		return ts.Unit == m.unit
+	}
+	return false
+}
+
+func (m *timestampUnitMatcher) String() string {
+	return "timestamp(unit=" + m.unit.String() + ")"
+}
+
+func (m *timestampUnitMatcher) Equals(other exec.TypeMatcher) bool {
+	if o, ok := other.(*timestampUnitMatcher); ok {
+		return m.unit == o.unit
+	}
+	return false
+}
+
 func GetTemporalRoundingKernels(init exec.KernelInitFn, execFn exec.ArrayKernelExec) []exec.ScalarKernel {
 	kernels := make([]exec.ScalarKernel, 0)
 
 	for _, unit := range arrow.TimeUnitValues {
-		tsType := &arrow.TimestampType{Unit: unit}
 		kernels = append(kernels, exec.NewScalarKernel(
-			[]exec.InputType{exec.NewExactInput(tsType)},
-			exec.NewOutputType(tsType),
+			[]exec.InputType{exec.NewMatchedInput(&timestampUnitMatcher{unit: unit})},
+			OutputFirstType,
 			execFn,
 			init,
 		))
