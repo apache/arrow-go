@@ -684,6 +684,95 @@ func TestTemporalRoundingErrors(t *testing.T) {
 	}
 }
 
+func TestTemporalWithTimezone(t *testing.T) {
+	ctx := context.Background()
+	mem := memory.NewGoAllocator()
+
+	// Test multiple timezones to ensure the matcher works correctly
+	timezones := []string{"UTC", "America/New_York", "Europe/London", "Asia/Tokyo"}
+
+	for _, tz := range timezones {
+		t.Run(tz, func(t *testing.T) {
+			bldr := array.NewTimestampBuilder(mem, &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: tz})
+			defer bldr.Release()
+
+			// Add some test timestamps
+			bldr.Append(arrow.Timestamp(time.Date(2024, 3, 15, 14, 30, 45, 0, time.UTC).UnixMicro()))
+			bldr.Append(arrow.Timestamp(time.Date(2024, 3, 15, 14, 45, 30, 0, time.UTC).UnixMicro()))
+			bldr.AppendNull()
+			bldr.Append(arrow.Timestamp(time.Date(2024, 3, 15, 15, 15, 15, 0, time.UTC).UnixMicro()))
+
+			input := bldr.NewArray()
+			defer input.Release()
+
+			opts := compute.RoundTemporalOptions{
+				Multiple: 1,
+				Unit:     compute.RoundTemporalHour,
+			}
+
+			// Test floor
+			result, err := compute.FloorTemporal(ctx, opts, compute.NewDatum(input))
+			require.NoError(t, err)
+			defer result.Release()
+
+			tsArr := result.(*compute.ArrayDatum).MakeArray().(*array.Timestamp)
+			defer tsArr.Release()
+
+			// Verify timezone is preserved
+			outputZone := tsArr.DataType().(*arrow.TimestampType).TimeZone
+			assert.Equal(t, tz, outputZone)
+
+			// Verify values are rounded correctly
+			assert.Equal(t, arrow.Timestamp(time.Date(2024, 3, 15, 14, 0, 0, 0, time.UTC).UnixMicro()), tsArr.Value(0))
+			assert.Equal(t, arrow.Timestamp(time.Date(2024, 3, 15, 14, 0, 0, 0, time.UTC).UnixMicro()), tsArr.Value(1))
+			assert.False(t, tsArr.IsValid(2)) // null preserved
+			assert.Equal(t, arrow.Timestamp(time.Date(2024, 3, 15, 15, 0, 0, 0, time.UTC).UnixMicro()), tsArr.Value(3))
+		})
+	}
+}
+
+func TestTemporalTimezoneSemantics(t *testing.T) {
+	// This test verifies that temporal rounding operates on the underlying UTC timestamp,
+	// not on the local time in the specified timezone. This matches Arrow/PyArrow behavior.
+	ctx := context.Background()
+	mem := memory.NewGoAllocator()
+
+	// Create a timestamp at 2024-03-15 02:30:00 UTC
+	// In America/New_York (UTC-5), this would be 2024-03-14 21:30:00
+	// In Asia/Tokyo (UTC+9), this would be 2024-03-15 11:30:00
+	utcTime := time.Date(2024, 3, 15, 2, 30, 0, 0, time.UTC)
+
+	for _, tz := range []string{"UTC", "America/New_York", "Asia/Tokyo"} {
+		t.Run(tz, func(t *testing.T) {
+			bldr := array.NewTimestampBuilder(mem, &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: tz})
+			defer bldr.Release()
+			bldr.Append(arrow.Timestamp(utcTime.UnixMicro()))
+			input := bldr.NewArray()
+			defer input.Release()
+
+			// Floor to day
+			result, err := compute.FloorTemporal(ctx, compute.RoundTemporalOptions{
+				Multiple: 1,
+				Unit:     compute.RoundTemporalDay,
+			}, compute.NewDatum(input))
+			require.NoError(t, err)
+			defer result.Release()
+
+			tsArr := result.(*compute.ArrayDatum).MakeArray().(*array.Timestamp)
+			defer tsArr.Release()
+
+			// The result should be 2024-03-15 00:00:00 UTC for ALL timezones
+			// because Arrow timestamps are always UTC internally
+			expected := time.Date(2024, 3, 15, 0, 0, 0, 0, time.UTC).UnixMicro()
+			assert.Equal(t, arrow.Timestamp(expected), tsArr.Value(0),
+				"Floor to day should operate on UTC timestamp regardless of timezone metadata")
+
+			// Timezone metadata should be preserved
+			assert.Equal(t, tz, tsArr.DataType().(*arrow.TimestampType).TimeZone)
+		})
+	}
+}
+
 // Benchmarks for temporal rounding functions
 
 // Helper function to create timestamp arrays for benchmarks
