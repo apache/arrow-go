@@ -59,7 +59,7 @@ type temporalTestVector struct {
 
 func TestTemporalRoundingVectors(t *testing.T) {
 	ctx := context.Background()
-	mem := memory.NewGoAllocator()
+	mem := memory.DefaultAllocator
 
 	testVectors := []temporalTestVector{
 		{
@@ -605,7 +605,7 @@ func TestTemporalRoundingVectors(t *testing.T) {
 
 func TestTemporalWithNulls(t *testing.T) {
 	ctx := context.Background()
-	mem := memory.NewGoAllocator()
+	mem := memory.DefaultAllocator
 
 	testCases := []struct {
 		name     string
@@ -674,7 +674,7 @@ func TestTemporalWithNulls(t *testing.T) {
 
 func TestTemporalRoundingErrors(t *testing.T) {
 	ctx := context.Background()
-	mem := memory.NewGoAllocator()
+	mem := memory.DefaultAllocator
 
 	bldr := array.NewTimestampBuilder(mem, &arrow.TimestampType{Unit: arrow.Second})
 	defer bldr.Release()
@@ -729,7 +729,7 @@ func TestTemporalTimezoneAware(t *testing.T) {
 	// matching PyArrow behavior.
 	// It tests calendar-based rounding (year, quarter, month, week, day) across multiple timezones.
 	ctx := context.Background()
-	mem := memory.NewGoAllocator()
+	mem := memory.DefaultAllocator
 
 	// Test timestamp: 2024-07-15 14:30:00 UTC
 	// In America/New_York (UTC-4 in July), this is 2024-07-15 10:30:00 local
@@ -821,7 +821,7 @@ func TestTemporalTimezoneNaiveCalendarRounding(t *testing.T) {
 	// This test verifies that timezone-naive timestamps can still be rounded with calendar units.
 	// They should be treated as if they are in UTC.
 	ctx := context.Background()
-	mem := memory.NewGoAllocator()
+	mem := memory.DefaultAllocator
 
 	testTime := time.Date(2024, 7, 15, 14, 30, 0, 0, time.UTC)
 
@@ -880,7 +880,7 @@ func TestTemporalTimezoneNaiveCalendarRounding(t *testing.T) {
 func TestTemporalMultiPeriodRounding(t *testing.T) {
 	// Tests for rounding with Multiple > 1 (N-period rounding)
 	ctx := context.Background()
-	mem := memory.NewGoAllocator()
+	mem := memory.DefaultAllocator
 
 	testCases := []struct {
 		name        string
@@ -982,7 +982,7 @@ func TestTemporalMultiPeriodRounding(t *testing.T) {
 func TestTemporalHalfRoundingModes(t *testing.T) {
 	// Tests for half-rounding modes (HalfUp, HalfDown, HalfToEven) with calendar units
 	ctx := context.Background()
-	mem := memory.NewGoAllocator()
+	mem := memory.DefaultAllocator
 
 	testCases := []struct {
 		name        string
@@ -1059,7 +1059,7 @@ func TestTemporalHalfRoundingModes(t *testing.T) {
 func TestTemporalRoundingDateSupport(t *testing.T) {
 	// Test that date types are supported (PyArrow compatibility)
 	ctx := context.Background()
-	mem := memory.NewGoAllocator()
+	mem := memory.DefaultAllocator
 
 	// Common date32 inputs for vectorized testing
 	date32Input := []arrow.Date32{1, 4, 7, 11} // 1970-01-02 (Fri), 1970-01-05 (Mon), 1970-01-08 (Thu), 1970-01-12 (Mon)
@@ -1209,7 +1209,7 @@ func TestTemporalRoundingDateSupport(t *testing.T) {
 func TestTemporalRoundingTimeSupport(t *testing.T) {
 	// Test that time types are supported (PyArrow compatibility)
 	ctx := context.Background()
-	mem := memory.NewGoAllocator()
+	mem := memory.DefaultAllocator
 
 	testVectors := []struct {
 		name     string
@@ -1316,7 +1316,7 @@ func TestTemporalRoundingTimeSupport(t *testing.T) {
 func TestTemporalRoundingInvalidType(t *testing.T) {
 	// Test that non-temporal types return appropriate errors
 	ctx := context.Background()
-	mem := memory.NewGoAllocator()
+	mem := memory.DefaultAllocator
 
 	testCases := []struct {
 		name     string
@@ -1383,7 +1383,7 @@ func TestTemporalRoundingInvalidType(t *testing.T) {
 
 // Helper function to create timestamp arrays for benchmarks
 func makeTimestampArray(count int, unit arrow.TimeUnit, interval time.Duration) arrow.Array {
-	mem := memory.NewGoAllocator()
+	mem := memory.DefaultAllocator
 	bldr := array.NewTimestampBuilder(mem, &arrow.TimestampType{Unit: unit, TimeZone: "UTC"})
 	defer bldr.Release()
 	bldr.Reserve(count)
