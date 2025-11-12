@@ -1206,6 +1206,113 @@ func TestTemporalRoundingDateSupport(t *testing.T) {
 	})
 }
 
+func TestTemporalRoundingTimeSupport(t *testing.T) {
+	// Test that time types are supported (PyArrow compatibility)
+	ctx := context.Background()
+	mem := memory.NewGoAllocator()
+
+	testVectors := []struct {
+		name     string
+		timeType arrow.DataType
+		input    interface{} // []arrow.Time32 or []arrow.Time64
+		opts     compute.RoundTemporalOptions
+		fn       func(context.Context, compute.RoundTemporalOptions, compute.Datum) (compute.Datum, error)
+		expected interface{} // []arrow.Time32 or []arrow.Time64
+	}{
+		{
+			name:     "time32_s_floor_to_minute",
+			timeType: &arrow.Time32Type{Unit: arrow.Second},
+			input:    []arrow.Time32{3661, 7322, 10983}, // 1:01:01, 2:02:02, 3:03:03
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalMinute},
+			fn:       compute.FloorTemporal,
+			expected: []arrow.Time32{3660, 7320, 10980}, // 1:01:00, 2:02:00, 3:03:00
+		},
+		{
+			name:     "time32_ms_floor_to_second",
+			timeType: &arrow.Time32Type{Unit: arrow.Millisecond},
+			input:    []arrow.Time32{3661500, 7322750}, // 1:01:01.500, 2:02:02.750
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalSecond},
+			fn:       compute.FloorTemporal,
+			expected: []arrow.Time32{3661000, 7322000}, // 1:01:01.000, 2:02:02.000
+		},
+		{
+			name:     "time64_us_ceil_to_second",
+			timeType: &arrow.Time64Type{Unit: arrow.Microsecond},
+			input:    []arrow.Time64{3661000001, 7322000002}, // 1:01:01.000001, 2:02:02.000002
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalSecond},
+			fn:       compute.CeilTemporal,
+			expected: []arrow.Time64{3662000000, 7323000000}, // 1:01:02.000000, 2:02:03.000000
+		},
+		{
+			name:     "time64_ns_round_to_millisecond",
+			timeType: &arrow.Time64Type{Unit: arrow.Nanosecond},
+			input:    []arrow.Time64{3661000400000, 3661000600000}, // 1:01:01.000400000, 1:01:01.000600000
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalMillisecond},
+			fn:       compute.RoundTemporal,
+			expected: []arrow.Time64{3661000000000, 3661001000000}, // 1:01:01.000000000, 1:01:01.001000000
+		},
+		{
+			name:     "time32_wrap_at_midnight_ceil",
+			timeType: &arrow.Time32Type{Unit: arrow.Second},
+			input:    []arrow.Time32{86399}, // 23:59:59
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalMinute},
+			fn:       compute.CeilTemporal,
+			expected: []arrow.Time32{0}, // Wraps to 00:00:00
+		},
+		{
+			name:     "time64_wrap_at_midnight_ceil",
+			timeType: &arrow.Time64Type{Unit: arrow.Microsecond},
+			input:    []arrow.Time64{86399999999}, // 23:59:59.999999
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalSecond},
+			fn:       compute.CeilTemporal,
+			expected: []arrow.Time64{0}, // Wraps to 00:00:00.000000
+		},
+	}
+
+	for _, tv := range testVectors {
+		t.Run(tv.name, func(t *testing.T) {
+			var arr arrow.Array
+			switch tt := tv.timeType.(type) {
+			case *arrow.Time32Type:
+				bldr := array.NewTime32Builder(mem, tt)
+				defer bldr.Release()
+				bldr.AppendValues(tv.input.([]arrow.Time32), nil)
+				arr = bldr.NewArray()
+			case *arrow.Time64Type:
+				bldr := array.NewTime64Builder(mem, tt)
+				defer bldr.Release()
+				bldr.AppendValues(tv.input.([]arrow.Time64), nil)
+				arr = bldr.NewArray()
+			}
+			defer arr.Release()
+
+			result, err := tv.fn(ctx, tv.opts, compute.NewDatum(arr))
+			require.NoError(t, err)
+			defer result.Release()
+
+			resultArr := result.(*compute.ArrayDatum).MakeArray()
+			defer resultArr.Release()
+
+			switch tv.timeType.ID() {
+			case arrow.TIME32:
+				time32Result := resultArr.(*array.Time32)
+				expected := tv.expected.([]arrow.Time32)
+				require.Equal(t, len(expected), time32Result.Len())
+				for i := 0; i < time32Result.Len(); i++ {
+					assert.Equal(t, expected[i], time32Result.Value(i), "index %d", i)
+				}
+			case arrow.TIME64:
+				time64Result := resultArr.(*array.Time64)
+				expected := tv.expected.([]arrow.Time64)
+				require.Equal(t, len(expected), time64Result.Len())
+				for i := 0; i < time64Result.Len(); i++ {
+					assert.Equal(t, expected[i], time64Result.Value(i), "index %d", i)
+				}
+			}
+		})
+	}
+}
+
 func TestTemporalRoundingInvalidType(t *testing.T) {
 	// Test that non-temporal types return appropriate errors
 	ctx := context.Background()

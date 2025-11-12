@@ -1268,6 +1268,57 @@ func roundTemporalExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.Exec
 			return result
 		}
 		return ScalarUnaryNotNull(fn)(ctx, batch, out)
+
+	case arrow.TIME32:
+		// Time32 stores time-of-day in seconds or milliseconds
+		// Rounding wraps at day boundaries (modulo 24 hours)
+		timeType := input.Type.(*arrow.Time32Type)
+		fn := func(_ *exec.KernelCtx, time int32, e *error) int32 {
+			// Convert to int64 for rounding
+			result, err := roundTimestamp(int64(time), timeType.Unit, nil, state)
+			if err != nil {
+				*e = err
+				return 0
+			}
+			// Wrap at day boundary
+			var dayInUnit int64
+			if timeType.Unit == arrow.Second {
+				dayInUnit = 86400 // 24 hours in seconds
+			} else {
+				dayInUnit = 86400000 // 24 hours in milliseconds
+			}
+			wrapped := result % dayInUnit
+			if wrapped < 0 {
+				wrapped += dayInUnit
+			}
+			return int32(wrapped)
+		}
+		return ScalarUnaryNotNull(fn)(ctx, batch, out)
+
+	case arrow.TIME64:
+		// Time64 stores time-of-day in microseconds or nanoseconds
+		// Rounding wraps at day boundaries (modulo 24 hours)
+		timeType := input.Type.(*arrow.Time64Type)
+		fn := func(_ *exec.KernelCtx, time int64, e *error) int64 {
+			result, err := roundTimestamp(time, timeType.Unit, nil, state)
+			if err != nil {
+				*e = err
+				return 0
+			}
+			// Wrap at day boundary
+			var dayInUnit int64
+			if timeType.Unit == arrow.Microsecond {
+				dayInUnit = 86400000000 // 24 hours in microseconds
+			} else {
+				dayInUnit = 86400000000000 // 24 hours in nanoseconds
+			}
+			wrapped := result % dayInUnit
+			if wrapped < 0 {
+				wrapped += dayInUnit
+			}
+			return wrapped
+		}
+		return ScalarUnaryNotNull(fn)(ctx, batch, out)
 	}
 
 	// Handle timestamp types
@@ -1344,6 +1395,38 @@ func (m *dateTypeMatcher) Equals(other exec.TypeMatcher) bool {
 	return false
 }
 
+type timeTypeMatcher struct {
+	timeTypeID arrow.Type
+	unit       arrow.TimeUnit
+}
+
+func (m *timeTypeMatcher) Matches(typ arrow.DataType) bool {
+	if typ.ID() != m.timeTypeID {
+		return false
+	}
+	switch t := typ.(type) {
+	case *arrow.Time32Type:
+		return t.Unit == m.unit
+	case *arrow.Time64Type:
+		return t.Unit == m.unit
+	}
+	return false
+}
+
+func (m *timeTypeMatcher) String() string {
+	if m.timeTypeID == arrow.TIME32 {
+		return fmt.Sprintf("time32[%s]", m.unit)
+	}
+	return fmt.Sprintf("time64[%s]", m.unit)
+}
+
+func (m *timeTypeMatcher) Equals(other exec.TypeMatcher) bool {
+	if o, ok := other.(*timeTypeMatcher); ok {
+		return m.timeTypeID == o.timeTypeID && m.unit == o.unit
+	}
+	return false
+}
+
 func GetTemporalRoundingKernels(init exec.KernelInitFn, execFn exec.ArrayKernelExec) []exec.ScalarKernel {
 	kernels := make([]exec.ScalarKernel, 0)
 
@@ -1368,6 +1451,34 @@ func GetTemporalRoundingKernels(init exec.KernelInitFn, execFn exec.ArrayKernelE
 	// Date64 kernel
 	kernels = append(kernels, exec.NewScalarKernel(
 		[]exec.InputType{exec.NewMatchedInput(&dateTypeMatcher{dateTypeID: arrow.DATE64})},
+		OutputFirstType,
+		execFn,
+		init,
+	))
+
+	// Time32 kernels (seconds and milliseconds)
+	kernels = append(kernels, exec.NewScalarKernel(
+		[]exec.InputType{exec.NewMatchedInput(&timeTypeMatcher{timeTypeID: arrow.TIME32, unit: arrow.Second})},
+		OutputFirstType,
+		execFn,
+		init,
+	))
+	kernels = append(kernels, exec.NewScalarKernel(
+		[]exec.InputType{exec.NewMatchedInput(&timeTypeMatcher{timeTypeID: arrow.TIME32, unit: arrow.Millisecond})},
+		OutputFirstType,
+		execFn,
+		init,
+	))
+
+	// Time64 kernels (microseconds and nanoseconds)
+	kernels = append(kernels, exec.NewScalarKernel(
+		[]exec.InputType{exec.NewMatchedInput(&timeTypeMatcher{timeTypeID: arrow.TIME64, unit: arrow.Microsecond})},
+		OutputFirstType,
+		execFn,
+		init,
+	))
+	kernels = append(kernels, exec.NewScalarKernel(
+		[]exec.InputType{exec.NewMatchedInput(&timeTypeMatcher{timeTypeID: arrow.TIME64, unit: arrow.Nanosecond})},
 		OutputFirstType,
 		execFn,
 		init,
