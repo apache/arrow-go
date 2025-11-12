@@ -1136,6 +1136,22 @@ func TestTemporalRoundingDateSupport(t *testing.T) {
 			fn:       compute.FloorTemporal,
 			expected: []arrow.Date64{2678400000, 5097600000}, // Already at month boundaries
 		},
+		{
+			name:     "date32_negative_floor_to_week",
+			dateType: arrow.FixedWidthTypes.Date32,
+			input:    []arrow.Date32{-10, -1, 0, 1}, // 1969-12-22, 1969-12-31, 1970-01-01, 1970-01-02
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalWeek, WeekStartsMonday: true},
+			fn:       compute.FloorTemporal,
+			expected: []arrow.Date32{-10, -3, -3, -3}, // 1969-12-22 (Mon), 1969-12-29 (Mon), 1969-12-29, 1969-12-29
+		},
+		{
+			name:     "date64_negative_floor_to_day",
+			dateType: arrow.FixedWidthTypes.Date64,
+			input:    []arrow.Date64{-86400000, -1, 0, 86400000}, // -1 day, -1ms, epoch, +1 day
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalDay},
+			fn:       compute.FloorTemporal,
+			expected: []arrow.Date64{-86400000, -86400000, 0, 86400000}, // 1969-12-31, 1969-12-31, 1970-01-01, 1970-01-02
+		},
 	}
 
 	for _, tv := range testVectors {
@@ -1266,6 +1282,30 @@ func TestTemporalRoundingTimeSupport(t *testing.T) {
 			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalSecond},
 			fn:       compute.CeilTemporal,
 			expected: []arrow.Time64{0}, // Wraps to 00:00:00.000000
+		},
+		{
+			name:     "time32_negative_floor_to_hour",
+			timeType: &arrow.Time32Type{Unit: arrow.Second},
+			input:    []arrow.Time32{-3600, -1, 0, 3600}, // -1 hour, -1 second, 0, +1 hour
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalHour},
+			fn:       compute.FloorTemporal,
+			expected: []arrow.Time32{82800, 82800, 0, 3600}, // 23:00, 23:00, 00:00, 01:00
+		},
+		{
+			name:     "time32_negative_floor_to_minute",
+			timeType: &arrow.Time32Type{Unit: arrow.Second},
+			input:    []arrow.Time32{-3661}, // -1:01:01 (wraps to 22:58:59)
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalMinute},
+			fn:       compute.FloorTemporal,
+			expected: []arrow.Time32{82680}, // 22:58:00
+		},
+		{
+			name:     "time64_negative_floor_to_hour",
+			timeType: &arrow.Time64Type{Unit: arrow.Microsecond},
+			input:    []arrow.Time64{-3600000000, 0, 3600000000}, // -1 hour, 0, +1 hour
+			opts:     compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalHour},
+			fn:       compute.FloorTemporal,
+			expected: []arrow.Time64{82800000000, 0, 3600000000}, // 23:00, 00:00, 01:00
 		},
 	}
 
