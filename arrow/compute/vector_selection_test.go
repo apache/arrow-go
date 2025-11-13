@@ -1677,7 +1677,7 @@ func BenchmarkTakeString(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			mem := memory.NewGoAllocator()
+			mem := memory.DefaultAllocator
 			ctx := compute.WithAllocator(context.Background(), mem)
 
 			// Create source array with strings of specified average length
@@ -1731,7 +1731,7 @@ func BenchmarkTakeString(b *testing.B) {
 func BenchmarkTakeStringPartitionPattern(b *testing.B) {
 	// Simulate real-world partitioning workload where data is reorganized
 	// into multiple partitions (e.g., by timestamp month + host)
-	mem := memory.NewGoAllocator()
+	mem := memory.DefaultAllocator
 	ctx := compute.WithAllocator(context.Background(), mem)
 
 	const numRows = 50000
@@ -1777,7 +1777,7 @@ func BenchmarkTakeStringPartitionPattern(b *testing.B) {
 func BenchmarkTakeMultiColumn(b *testing.B) {
 	// Benchmark Take on a record batch with multiple string columns
 	// to simulate real-world use cases (e.g., CloudFront logs with 20+ string columns)
-	mem := memory.NewGoAllocator()
+	mem := memory.DefaultAllocator
 	ctx := compute.WithAllocator(context.Background(), mem)
 
 	const numRows = 50000
@@ -1892,7 +1892,7 @@ func BenchmarkTakeList(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			mem := memory.NewGoAllocator()
+			mem := memory.DefaultAllocator
 			ctx := compute.WithAllocator(context.Background(), mem)
 
 			// Create source array with lists of specified average length
@@ -1958,7 +1958,7 @@ func BenchmarkTakeList(b *testing.B) {
 func BenchmarkTakeNestedList(b *testing.B) {
 	// Test nested list types (list<list<int32>>)
 	// This is particularly relevant for complex schemas like usage events with resources
-	mem := memory.NewGoAllocator()
+	mem := memory.DefaultAllocator
 	ctx := compute.WithAllocator(context.Background(), mem)
 
 	const numRows = 50000
@@ -2013,7 +2013,7 @@ func BenchmarkTakeNestedList(b *testing.B) {
 func BenchmarkTakeListPartitionPattern(b *testing.B) {
 	// Simulate real-world partitioning workload where list data is reorganized
 	// into multiple partitions (e.g., usage events with resources by timestamp + source)
-	mem := memory.NewGoAllocator()
+	mem := memory.DefaultAllocator
 	ctx := compute.WithAllocator(context.Background(), mem)
 
 	const numRows = 50000
