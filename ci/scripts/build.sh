@@ -73,3 +73,5 @@ if [[ "${ARROW_INTEGRATION_GO}" = "ON" ]]; then
 
   popd
 fi
+
+go install -tags pqarrow_read_only ./...
