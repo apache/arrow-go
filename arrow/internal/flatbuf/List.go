@@ -23,13 +23,12 @@ import (
 )
 
 type List struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsList(buf []byte, offset flatbuffers.UOffsetT) *List {
+func GetRootAsList(buf []byte, offset flatbuffers.UOffsetT) (x List) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &List{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -37,10 +36,9 @@ func FinishListBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT)
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsList(buf []byte, offset flatbuffers.UOffsetT) *List {
+func GetSizePrefixedRootAsList(buf []byte, offset flatbuffers.UOffsetT) (x List) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &List{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -49,12 +47,8 @@ func FinishSizePrefixedListBuffer(builder *flatbuffers.Builder, offset flatbuffe
 }
 
 func (rcv *List) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *List) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func ListStart(builder *flatbuffers.Builder) {
