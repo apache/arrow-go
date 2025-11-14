@@ -73,3 +73,9 @@ if [[ "${ARROW_INTEGRATION_GO}" = "ON" ]]; then
 
   popd
 fi
+
+pushd "${source_dir}/parquet"
+
+go install -tags pqarrow_read_only ./...
+
+popd
