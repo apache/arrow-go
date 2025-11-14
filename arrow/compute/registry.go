@@ -169,7 +169,7 @@ func (reg *funcRegistry) canAddFuncName(name string, allowOverwrite bool) bool {
 }
 
 func (reg *funcRegistry) doAddFunction(fn Function, allowOverwrite bool, add bool) bool {
-	debug.Assert(fn.Validate() == nil, "invalid function")
+	debug.Assert(fn.Validate() == nil, "invalid function: "+fn.Validate().Error())
 
 	lk := reg.getLocker(add)
 	lk.Lock()

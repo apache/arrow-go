@@ -593,33 +593,33 @@ use half-to-even rule to break ties.`,
 	floorTemporalDoc = FunctionDoc{
 		Summary: "Round temporal values down to nearest multiple of specified time unit",
 		Description: `Round temporal values down to nearest multiple of specified time unit.
-Null values emit null. An error is returned if the values have a defined timezone
-but it cannot be found in the timezone database.
+Null values emit null. An error is returned if the values have a defined
+timezone but it cannot be found in the timezone database.
 
-Supported units: year, quarter, month, week, day, hour, minute, second, millisecond,
-microsecond, nanosecond.`,
+Supported units: year, quarter, month, week, day, hour, minute, second,
+millisecond, microsecond, nanosecond.`,
 		ArgNames:    []string{"timestamps"},
 		OptionsType: "RoundTemporalOptions",
 	}
 	ceilTemporalDoc = FunctionDoc{
 		Summary: "Round temporal values up to nearest multiple of specified time unit",
 		Description: `Round temporal values up to nearest multiple of specified time unit.
-Null values emit null. An error is returned if the values have a defined timezone
-but it cannot be found in the timezone database.
+Null values emit null. An error is returned if the values have a defined
+timezone but it cannot be found in the timezone database.
 
-Supported units: year, quarter, month, week, day, hour, minute, second, millisecond,
-microsecond, nanosecond.`,
+Supported units: year, quarter, month, week, day, hour, minute, second,
+millisecond, microsecond, nanosecond.`,
 		ArgNames:    []string{"timestamps"},
 		OptionsType: "RoundTemporalOptions",
 	}
 	roundTemporalDoc = FunctionDoc{
 		Summary: "Round temporal values to nearest multiple of specified time unit",
 		Description: `Round temporal values to nearest multiple of specified time unit.
-Null values emit null. An error is returned if the values have a defined timezone
-but it cannot be found in the timezone database.
+Null values emit null. An error is returned if the values have a defined
+timezone but it cannot be found in the timezone database.
 
-Supported units: year, quarter, month, week, day, hour, minute, second, millisecond,
-microsecond, nanosecond.`,
+Supported units: year, quarter, month, week, day, hour, minute, second,
+millisecond, microsecond, nanosecond.`,
 		ArgNames:    []string{"timestamps"},
 		OptionsType: "RoundTemporalOptions",
 	}
