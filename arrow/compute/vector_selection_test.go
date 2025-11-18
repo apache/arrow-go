@@ -1264,23 +1264,23 @@ func (tk *TakeKernelMap) TestMapStringInt32() {
 
 	mapJSON := `[
 		{},
-		{"a": 1, "b": 2},
-		{"a": 2, "b": null},
-		{"a": 3, "b": 4}
+		{"a": 1},
+		{"a": 2, "b": 3, "c": 4},
+		{"w": 5, "x": 6, "y": 7, "z": null}
 	]`
 	tk.checkTake(tk.dt, mapJSON, `[]`, `[]`)
 	tk.checkTake(tk.dt, mapJSON, `[3, 1, 3, 1, 3]`, `[
-		{"a": 3, "b": 4},
-		{"a": 1, "b": 2},
-		{"a": 3, "b": 4},
-		{"a": 1, "b": 2},
-		{"a": 3, "b": 4}
+		{"w": 5, "x": 6, "y": 7, "z": null}
+		{"a": 1},
+		{"w": 5, "x": 6, "y": 7, "z": null}
+		{"a": 1},
+		{"w": 5, "x": 6, "y": 7, "z": null}
 	]`)
 	tk.checkTake(tk.dt, mapJSON, `[4, 2, 1, 6]`, `[
-		{"a": 2, "b": null},
-		{"a": 1, "b": 2},
-		{"a": 2, "b": null},
-		{"a": 3, "b": 4}
+		{"a": 2, "b": 3, "c": 4},
+		{"a": 1},
+		{"a": 2, "b": 3, "c": 4},
+		{"w": 5, "x": 6, "y": 7, "z": null}
 	]`)
 	tk.checkTake(tk.dt, mapJSON, `[0, 1, 2, 3]`, mapJSON)
 
@@ -1292,24 +1292,24 @@ func (tk *TakeKernelMap) TestMapStringLargeString() {
 
 	mapJSON := `[
 		{},
-		{"a": "b", "c": "d"},
-		{"a": "e", "c": "f"},
-		{"a": "g", "c": "h"}
+		{"a": "b"},
+		{"a": "c", "d": "e", "f": "g"},
+		{"w": "x", "y": "z", "m": "n", "o": null}
 	]`
 
 	tk.checkTake(tk.dt, mapJSON, `[]`, `[]`)
 	tk.checkTake(tk.dt, mapJSON, `[3, 1, 3, 1, 3]`, `[
-		{"a": "g", "c": "h"},
-		{"a": "b", "c": "d"},
-		{"a": "g", "c": "h"},
-		{"a": "b", "c": "d"},
-		{"a": "g", "c": "h"}
+		{"w": "x", "y": "z", "m": "n", "o": null},
+		{"a": "b"},
+		{"w": "x", "y": "z", "m": "n", "o": null},
+		{"a": "b"},
+		{"w": "x", "y": "z", "m": "n", "o": null},
 	]`)
 	tk.checkTake(tk.dt, mapJSON, `[4, 2, 1, 6]`, `[
 		{"a": "e", "c": "f"},
-		{"a": "b", "c": "d"},
-		{"a": "e", "c": "f"},
-		{"a": "g", "c": "h"}
+		{"w": "x", "y": "z", "m": "n", "o": null},
+		{"a": "b"},
+		{"w": "x", "y": "z", "m": "n", "o": null}
 	]`)
 	tk.checkTake(tk.dt, mapJSON, `[0, 1, 2, 3]`, mapJSON)
 
@@ -1321,24 +1321,24 @@ func (tk *TakeKernelMap) TestMapIntListString() {
 
 	mapJSON := `[
 		{},
-		{1: ["a", "b"], 2: ["c", "d"]},
-		{1: [3, 4], 2: ["e", "f"]},
-		{1: [5, 6], 2: ["g", "h", null]}
+		{1: ["a"]},
+		{1: ["b", "c"], 2: ["d"], 3: ["e", "f", "g"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]}
 	]`
 
 	tk.checkTake(tk.dt, mapJSON, `[]`, `[]`)
 	tk.checkTake(tk.dt, mapJSON, `[3, 1, 3, 1, 3]`, `[
-		{1: [5, 6], 2: ["g", "h", null]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
 		{1: ["a", "b"], 2: ["c", "d"]},
-		{1: [5, 6], 2: ["g", "h", null]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
 		{1: ["a", "b"], 2: ["c", "d"]},
-		{1: [5, 6], 2: ["g", "h", null]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
 	]`)
 	tk.checkTake(tk.dt, mapJSON, `[4, 2, 1, 6]`, `[
-		{1: [3, 4], 2: ["e", "f"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
 		{1: ["a", "b"], 2: ["c", "d"]},
-		{1: [3, 4], 2: ["e", "f"]},
-		{1: [5, 6], 2: ["g", "h", null]}
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]}
 	]`)
 	tk.checkTake(tk.dt, mapJSON, `[0, 1, 2, 3]`, mapJSON)
 
