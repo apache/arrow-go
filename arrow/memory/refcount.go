@@ -1,3 +1,5 @@
+//go:build refcounting
+
 package memory
 
 import (
@@ -12,6 +14,37 @@ type Refcount struct {
 	Dependencies []**Refcount
 	Buffers []**Buffer
 	Derived []unsafe.Pointer
+}
+
+func (r *Refcount) ReferenceDependency(d ...**Refcount) {
+	if r.Dependencies == nil {
+		r.Dependencies = d
+	} else {
+		for _, d := range d {
+			r.Dependencies = append(r.Dependencies, d)
+		}
+	}
+}
+
+func (r *Refcount) ReferenceBuffer(b...**Buffer) {
+	if r.Buffers == nil {
+		r.Buffers = b
+	} else {
+		for _, b := range b {
+			r.Buffers = append(r.Buffers, b)
+		}
+	}
+}
+
+
+func (r *Refcount) ReferenceDerived(p ...unsafe.Pointer) {
+	if r.Derived == nil {
+		r.Derived = p
+	} else {
+		for _, p := range p {
+			r.Derived = append(r.Derived, p)
+		}
+	}
 }
 
 func (r *Refcount) Retain() {

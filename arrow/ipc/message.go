@@ -86,8 +86,8 @@ func NewMessage(meta, body *memory.Buffer) *Message {
 		meta: meta,
 		body: body,
 	}
-	m.Refcount.Buffers = []**memory.Buffer{&m.meta, &m.body}
-	m.Derived = []unsafe.Pointer{unsafe.Pointer(&m.msg)}
+	m.ReferenceBuffer(&m.meta, &m.body)
+	m.ReferenceDerived(unsafe.Pointer(&m.msg))
 	m.Retain()
 	return m
 }
@@ -102,8 +102,8 @@ func newMessageFromFB(meta *flatbuf.Message, body *memory.Buffer) *Message {
 		meta: memory.NewBufferBytes(meta.Table().Bytes),
 		body: body,
 	}
-	m.Refcount.Buffers = []**memory.Buffer{&m.meta, &m.body}
-	m.Derived = []unsafe.Pointer{unsafe.Pointer(&m.msg)}
+	m.ReferenceBuffer(&m.meta, &m.body)
+	m.ReferenceDerived(unsafe.Pointer(&m.msg))
 	m.Retain()
 	return m
 }
