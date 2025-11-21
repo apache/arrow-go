@@ -1,4 +1,4 @@
-//go:build !refcounting
+//go:build norc
 
 package memory
 
