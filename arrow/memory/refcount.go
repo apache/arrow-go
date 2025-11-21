@@ -11,40 +11,33 @@ import (
 
 type Refcount struct {
 	count        atomic.Int64
-	Dependencies []**Refcount
-	Buffers []**Buffer
-	Derived []unsafe.Pointer
+	dependencies []**Refcount
+	buffers      []**Buffer
+	derived      []unsafe.Pointer
 }
 
+// Must only be called once per object. Defines the dependency tree.
+// When this object is completely unreferenced, all dependencies will
+// be unreferenced by it and, if this was the only object still
+// referencing them, they will be freed as well, recursively.
 func (r *Refcount) ReferenceDependency(d ...**Refcount) {
-	if r.Dependencies == nil {
-		r.Dependencies = d
-	} else {
-		for _, d := range d {
-			r.Dependencies = append(r.Dependencies, d)
-		}
-	}
+	r.dependencies = d
 }
 
-func (r *Refcount) ReferenceBuffer(b...**Buffer) {
-	if r.Buffers == nil {
-		r.Buffers = b
-	} else {
-		for _, b := range b {
-			r.Buffers = append(r.Buffers, b)
-		}
-	}
+// Must only be called once per object. Defines buffers that are referenced
+// by this object. When this object is unreferenced, all such buffers will
+// be deallocated immediately.
+func (r *Refcount) ReferenceBuffer(b ...**Buffer) {
+	r.buffers = b
 }
 
-
+// Must only be called once per object, with a list of pointers that are
+// _derived from_ allocations owned by or referenced by this object.
+// When this object is unreferenced, all such pointers will be nilled.
+// Note: this needs the _address of_ the pointers to nil, _not_ the pointers
+// themselves!
 func (r *Refcount) ReferenceDerived(p ...unsafe.Pointer) {
-	if r.Derived == nil {
-		r.Derived = p
-	} else {
-		for _, p := range p {
-			r.Derived = append(r.Derived, p)
-		}
-	}
+	r.derived = p
 }
 
 func (r *Refcount) Retain() {
@@ -54,17 +47,17 @@ func (r *Refcount) Retain() {
 func (r *Refcount) Release() {
 	new := r.count.Add(-1)
 	if new == 0 {
-		for _, buffer := range r.Buffers {
+		for _, buffer := range r.buffers {
 			(*buffer).Release()
 			*buffer = nil
 		}
-		for _, dependency := range r.Dependencies {
+		for _, dependency := range r.dependencies {
 			(*dependency).Release()
 			*dependency = nil
 		}
-		r.Buffers = nil
-		r.Dependencies = nil
-		for _, derived := range r.Derived {
+		r.buffers = nil
+		r.dependencies = nil
+		for _, derived := range r.derived {
 			*((*uintptr)(derived)) = 0
 		}
 	} else if new < 0 {
