@@ -2,6 +2,7 @@ package memory
 
 import (
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 )
@@ -10,7 +11,7 @@ type Refcount struct {
 	count        atomic.Int64
 	Dependencies []**Refcount
 	Buffers []**Buffer
-	Additional func()
+	Derived []unsafe.Pointer
 }
 
 func (r *Refcount) Retain() {
@@ -30,8 +31,8 @@ func (r *Refcount) Release() {
 		}
 		r.Buffers = nil
 		r.Dependencies = nil
-		if r.Additional != nil {
-			r.Additional()
+		for _, derived := range r.Derived {
+			*((*uintptr)(derived)) = 0
 		}
 	} else if new < 0 {
 		// This branch can be optimized out when !debug

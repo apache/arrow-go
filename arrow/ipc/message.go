@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/internal/flatbuf"
@@ -86,7 +87,7 @@ func NewMessage(meta, body *memory.Buffer) *Message {
 		body: body,
 	}
 	m.Refcount.Buffers = []**memory.Buffer{&m.meta, &m.body}
-	m.Additional = func() { m.msg = nil }
+	m.Derived = []unsafe.Pointer{unsafe.Pointer(&m.msg)}
 	m.Retain()
 	return m
 }
@@ -102,7 +103,7 @@ func newMessageFromFB(meta *flatbuf.Message, body *memory.Buffer) *Message {
 		body: body,
 	}
 	m.Refcount.Buffers = []**memory.Buffer{&m.meta, &m.body}
-	m.Additional = func() { m.msg = nil }
+	m.Derived = []unsafe.Pointer{unsafe.Pointer(&m.msg)}
 	m.Retain()
 	return m
 }
