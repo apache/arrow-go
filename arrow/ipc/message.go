@@ -22,6 +22,7 @@ import (
 	"io"
 	"sync/atomic"
 
+	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/internal/flatbuf"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
@@ -157,7 +158,7 @@ func (r *messageReader) Retain() {
 // When the reference count goes to zero, the memory is freed.
 // Release may be called simultaneously from multiple goroutines.
 func (r *messageReader) Release() {
-	r.refCount.Load()
+	debug.Assert(r.refCount.Load() > 0, "too many releases")
 
 	if r.refCount.Add(-1) == 0 {
 		if r.msg != nil {
