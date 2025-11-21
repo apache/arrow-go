@@ -20,10 +20,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"sync/atomic"
 	"unsafe"
 
-	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/internal/flatbuf"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
@@ -128,9 +126,9 @@ type MessageReader interface {
 
 // MessageReader reads messages from an io.Reader.
 type messageReader struct {
+	memory.Refcount
 	r io.Reader
 
-	refCount atomic.Int64
 	msg      *Message
 
 	mem    memory.Allocator
@@ -145,28 +143,9 @@ func NewMessageReader(r io.Reader, opts ...Option) MessageReader {
 	}
 
 	mr := &messageReader{r: r, mem: cfg.alloc}
-	mr.refCount.Add(1)
+	mr.Retain()
+	mr.ReferenceDependency(unsafe.Pointer(&mr.msg))
 	return mr
-}
-
-// Retain increases the reference count by 1.
-// Retain may be called simultaneously from multiple goroutines.
-func (r *messageReader) Retain() {
-	r.refCount.Add(1)
-}
-
-// Release decreases the reference count by 1.
-// When the reference count goes to zero, the memory is freed.
-// Release may be called simultaneously from multiple goroutines.
-func (r *messageReader) Release() {
-	debug.Assert(r.refCount.Load() > 0, "too many releases")
-
-	if r.refCount.Add(-1) == 0 {
-		if r.msg != nil {
-			r.msg.Release()
-			r.msg = nil
-		}
-	}
 }
 
 // Message returns the current message that has been extracted from the
