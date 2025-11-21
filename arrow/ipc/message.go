@@ -22,7 +22,6 @@ import (
 	"io"
 	"sync/atomic"
 
-	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/internal/flatbuf"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
@@ -66,10 +65,10 @@ func (m MessageType) String() string {
 
 // Message is an IPC message, including metadata and body.
 type Message struct {
-	refCount atomic.Int64
-	msg      *flatbuf.Message
-	meta     *memory.Buffer
-	body     *memory.Buffer
+	memory.Refcount
+	msg  *flatbuf.Message
+	meta *memory.Buffer
+	body *memory.Buffer
 }
 
 // NewMessage creates a new message from the metadata and body buffers.
@@ -85,7 +84,9 @@ func NewMessage(meta, body *memory.Buffer) *Message {
 		meta: meta,
 		body: body,
 	}
-	m.refCount.Add(1)
+	m.Refcount.Buffers = []**memory.Buffer{&m.meta, &m.body}
+	m.Additional = func() { m.msg = nil }
+	m.Retain()
 	return m
 }
 
@@ -99,29 +100,10 @@ func newMessageFromFB(meta *flatbuf.Message, body *memory.Buffer) *Message {
 		meta: memory.NewBufferBytes(meta.Table().Bytes),
 		body: body,
 	}
-	m.refCount.Add(1)
+	m.Refcount.Buffers = []**memory.Buffer{&m.meta, &m.body}
+	m.Additional = func() { m.msg = nil }
+	m.Retain()
 	return m
-}
-
-// Retain increases the reference count by 1.
-// Retain may be called simultaneously from multiple goroutines.
-func (msg *Message) Retain() {
-	msg.refCount.Add(1)
-}
-
-// Release decreases the reference count by 1.
-// Release may be called simultaneously from multiple goroutines.
-// When the reference count goes to zero, the memory is freed.
-func (msg *Message) Release() {
-	debug.Assert(msg.refCount.Load() > 0, "too many releases")
-
-	if msg.refCount.Add(-1) == 0 {
-		msg.meta.Release()
-		msg.body.Release()
-		msg.msg = nil
-		msg.meta = nil
-		msg.body = nil
-	}
 }
 
 func (msg *Message) Version() MetadataVersion {
@@ -175,7 +157,7 @@ func (r *messageReader) Retain() {
 // When the reference count goes to zero, the memory is freed.
 // Release may be called simultaneously from multiple goroutines.
 func (r *messageReader) Release() {
-	debug.Assert(r.refCount.Load() > 0, "too many releases")
+	r.refCount.Load()
 
 	if r.refCount.Add(-1) == 0 {
 		if r.msg != nil {
