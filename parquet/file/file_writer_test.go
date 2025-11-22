@@ -424,6 +424,47 @@ func TestKeyValueMetadata(t *testing.T) {
 	assert.Equal(t, testValue, *got)
 }
 
+func TestWriterTotalBytesAndCompressedBytes(t *testing.T) {
+	fields := schema.FieldList{
+		schema.NewInt32Node("col", parquet.Repetitions.Required, -1),
+	}
+	sc, _ := schema.NewGroupNode("root", parquet.Repetitions.Required, fields, -1)
+
+	sink := encoding.NewBufferWriter(0, memory.DefaultAllocator)
+	props := parquet.NewWriterProperties(parquet.WithCompression(compress.Codecs.Snappy))
+	writer := file.NewParquetWriter(sink, sc, file.WithWriterProps(props))
+
+	rgw := writer.AppendRowGroup()
+	cwr, err := rgw.NextColumn()
+	require.NoError(t, err)
+	cw := cwr.(*file.Int32ColumnChunkWriter)
+
+	values := []int32{1, 2, 3, 4, 5}
+	_, err = cw.WriteBatch(values, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, cw.Close())
+	require.NoError(t, rgw.Close())
+	require.NoError(t, writer.Close())
+
+	// TotalBytesWritten should match the size of the underlying sink.
+	buffer := sink.Finish()
+	defer buffer.Release()
+	require.Equal(t, int64(buffer.Len()), writer.TotalBytesWritten())
+
+	// TotalCompressedBytes should match the sum of row group compressed sizes
+	// reported in the file metadata.
+	reader, err := file.NewParquetReader(bytes.NewReader(buffer.Bytes()))
+	require.NoError(t, err)
+	defer reader.Close()
+
+	fileMeta := reader.MetaData()
+	var totalCompressed int64
+	for i := 0; i < fileMeta.NumRowGroups(); i++ {
+		totalCompressed += fileMeta.RowGroup(i).TotalCompressedSize()
+	}
+	require.Equal(t, totalCompressed, writer.TotalCompressedBytes())
+}
+
 func createSerializeTestSuite(typ reflect.Type) suite.TestingSuite {
 	return &SerializeTestSuite{PrimitiveTypedTest: testutils.NewPrimitiveTypedTest(typ)}
 }
