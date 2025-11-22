@@ -49,16 +49,14 @@ func WriteTable(tbl arrow.Table, w io.Writer, chunkSize int64, props *parquet.Wr
 
 // FileWriter is an object for writing Arrow directly to a parquet file.
 type FileWriter struct {
-	wr                   *file.Writer
-	schema               *arrow.Schema
-	manifest             *SchemaManifest
-	rgw                  file.RowGroupWriter
-	arrowProps           ArrowWriterProperties
-	ctx                  context.Context
-	colIdx               int
-	closed               bool
-	totalCompressedBytes int64
-	totalBytesWritten    int64
+	wr         *file.Writer
+	schema     *arrow.Schema
+	manifest   *SchemaManifest
+	rgw        file.RowGroupWriter
+	arrowProps ArrowWriterProperties
+	ctx        context.Context
+	colIdx     int
+	closed     bool
 }
 
 // NewFileWriter returns a writer for writing Arrow directly to a parquetfile, rather than
@@ -100,8 +98,6 @@ func NewFileWriter(arrschema *arrow.Schema, w io.Writer, props *parquet.WriterPr
 func (fw *FileWriter) NewRowGroup() {
 	if fw.rgw != nil {
 		fw.rgw.Close()
-		fw.totalCompressedBytes += fw.rgw.TotalCompressedBytes()
-		fw.totalBytesWritten += fw.rgw.TotalBytesWritten()
 	}
 	fw.rgw = fw.wr.AppendRowGroup()
 	fw.colIdx = 0
@@ -115,8 +111,6 @@ func (fw *FileWriter) NewRowGroup() {
 func (fw *FileWriter) NewBufferedRowGroup() {
 	if fw.rgw != nil {
 		fw.rgw.Close()
-		fw.totalCompressedBytes += fw.rgw.TotalCompressedBytes()
-		fw.totalBytesWritten += fw.rgw.TotalBytesWritten()
 	}
 	fw.rgw = fw.wr.AppendBufferedRowGroup()
 	fw.colIdx = 0
@@ -126,14 +120,20 @@ func (fw *FileWriter) NewBufferedRowGroup() {
 // that have been written to the file so far. It includes all the closed row groups
 // and the current row group.
 func (fw *FileWriter) TotalCompressedBytes() int64 {
-	return fw.totalCompressedBytes + fw.RowGroupTotalCompressedBytes()
+	if fw.wr != nil {
+		return fw.wr.TotalCompressedBytes()
+	}
+	return 0
 }
 
 // TotalBytesWritten returns the total number of bytes
 // that have been written to the file so far. It includes all the closed row groups
 // and the current row group.
 func (fw *FileWriter) TotalBytesWritten() int64 {
-	return fw.totalBytesWritten + fw.RowGroupTotalBytesWritten()
+	if fw.wr != nil {
+		return fw.wr.TotalBytesWritten()
+	}
+	return 0
 }
 
 // RowGroupTotalCompressedBytes returns the total number of bytes after compression
@@ -323,8 +323,6 @@ func (fw *FileWriter) Close() error {
 			if err := fw.rgw.Close(); err != nil {
 				return err
 			}
-			fw.totalCompressedBytes += fw.rgw.TotalCompressedBytes()
-			fw.totalBytesWritten += fw.rgw.TotalBytesWritten()
 		}
 
 		writeCtx := arrowCtxFromContext(fw.ctx)
