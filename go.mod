@@ -37,7 +37,7 @@ require (
 	github.com/pterm/pterm v0.12.82
 	github.com/stoewer/go-strcase v1.3.1
 	github.com/stretchr/testify v1.11.1
-	github.com/substrait-io/substrait-go/v7 v7.1.0
+	github.com/substrait-io/substrait-go/v7 v7.2.0
 	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.0.2
 	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0
