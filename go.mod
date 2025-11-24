@@ -46,7 +46,7 @@ require (
 	golang.org/x/tools v0.39.0
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da
 	gonum.org/v1/gonum v0.16.0
-	google.golang.org/grpc v1.76.0
+	google.golang.org/grpc v1.77.0
 	google.golang.org/protobuf v1.36.10
 	modernc.org/sqlite v1.29.6
 )
@@ -89,7 +89,7 @@ require (
 	golang.org/x/telemetry v0.0.0-20251111182119-bc8e575c7b54 // indirect
 	golang.org/x/term v0.37.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250804133106-a7a43d27e69b // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20251022142026-3a174f9686a8 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/gc/v3 v3.0.0-20240107210532-573471604cb6 // indirect
 	modernc.org/libc v1.41.0 // indirect
