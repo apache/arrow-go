@@ -133,3 +133,78 @@ func TestFileWriterBuffered(t *testing.T) {
 	require.NoError(t, writer.Close())
 	assert.Equal(t, 4, writer.NumRows())
 }
+
+func TestFileWriterTotalBytes(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "one", Nullable: true, Type: arrow.PrimitiveTypes.Float64},
+		{Name: "two", Nullable: true, Type: arrow.PrimitiveTypes.Float64},
+	}, nil)
+
+	data := `[
+		{"one": 1, "two": 2},
+		{"one": 3, "two": 4}
+	]`
+	record1, _, err := array.RecordFromJSON(memory.DefaultAllocator, schema, strings.NewReader(data))
+	require.NoError(t, err)
+	defer record1.Release()
+
+	data2 := `[
+		{"one": 5, "two": 6},
+		{"one": 7, "two": 8}
+	]`
+	record2, _, err := array.RecordFromJSON(memory.DefaultAllocator, schema, strings.NewReader(data2))
+	require.NoError(t, err)
+	defer record2.Release()
+
+	output := &bytes.Buffer{}
+	writerProps := parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(2))
+	writer, err := pqarrow.NewFileWriter(schema, output, writerProps, pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+
+	// Write first record
+	require.NoError(t, writer.Write(record1))
+
+	// Write second record, which creates a new row group
+	require.NoError(t, writer.Write(record2))
+
+	// Close the writer and verify final bytes
+	require.NoError(t, writer.Close())
+
+	// Verify total bytes & compressed bytes are correct
+	assert.Equal(t, int64(408), writer.TotalCompressedBytes())
+	assert.Equal(t, int64(912), writer.TotalBytesWritten())
+}
+
+func TestFileWriterTotalBytesBuffered(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "one", Nullable: true, Type: arrow.PrimitiveTypes.Float64},
+		{Name: "two", Nullable: true, Type: arrow.PrimitiveTypes.Float64},
+	}, nil)
+
+	data := `[
+		{"one": 1, "two": 2},
+		{"one": 3, "two": 4},
+		{"one": 5, "two": 6},
+		{"one": 7, "two": 8},
+		{"one": 9, "two": 10}
+	]`
+	record, _, err := array.RecordFromJSON(memory.DefaultAllocator, schema, strings.NewReader(data))
+	require.NoError(t, err)
+	defer record.Release()
+
+	output := &bytes.Buffer{}
+	// Use a large max row group length to ensure both records go into the same row group
+	writerProps := parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(2))
+	writer, err := pqarrow.NewFileWriter(schema, output, writerProps, pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+
+	// Write record using WriteBuffered
+	require.NoError(t, writer.WriteBuffered(record))
+
+	// Close the writer and verify final bytes
+	require.NoError(t, writer.Close())
+
+	// Verify total bytes & compressed bytes are correct
+	assert.Equal(t, int64(596), writer.TotalCompressedBytes())
+	assert.Equal(t, int64(1308), writer.TotalBytesWritten())
+}
