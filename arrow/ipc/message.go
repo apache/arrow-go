@@ -129,7 +129,7 @@ type messageReader struct {
 	memory.Refcount
 	r io.Reader
 
-	msg      *Message
+	msg *Message
 
 	mem    memory.Allocator
 	header [4]byte
