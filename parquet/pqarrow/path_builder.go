@@ -412,6 +412,7 @@ func (p *pathBuilder) Visit(arr arrow.Array) error {
 			defLevelIfEmpty: p.info.maxDefLevel,
 		})
 		// if arr.data.offset > 0, slice?
+		p.nullableInParent = arr.DataType().(*arrow.FixedSizeListType).ElemField().Nullable
 		return p.Visit(larr.ListValues())
 	case arrow.DICTIONARY:
 		// only currently handle dictionaryarray where the dictionary
