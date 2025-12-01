@@ -154,8 +154,8 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/substrait-io/substrait v0.75.0 h1:26l61irh5kQBLeDUcgDLnm+p4s2dJloHU6PPK0RAiB0=
 github.com/substrait-io/substrait v0.75.0/go.mod h1:MPFNw6sToJgpD5Z2rj0rQrdP/Oq8HG7Z2t3CAEHtkHw=
-github.com/substrait-io/substrait-go/v7 v7.1.0 h1:5CHACWNnFkSR8TnrH46Touzk39TqsdVWChpu7v5B2qY=
-github.com/substrait-io/substrait-go/v7 v7.1.0/go.mod h1:4GZ6c+UaojOGEG4ynyHrDFFmWGCVtbKdfzp6LXWdHmc=
+github.com/substrait-io/substrait-go/v7 v7.2.0 h1:49QFXeydO8OZyedzWOwHG0fG4BcXXlOwsbMalPwGWpA=
+github.com/substrait-io/substrait-go/v7 v7.2.0/go.mod h1:4GZ6c+UaojOGEG4ynyHrDFFmWGCVtbKdfzp6LXWdHmc=
 github.com/substrait-io/substrait-protobuf/go v0.75.0 h1:6SjuEESDB8oOhdQMPMGb4uy0tyZOYt1EBwS/Wcr61fs=
 github.com/substrait-io/substrait-protobuf/go v0.75.0/go.mod h1:hn+Szm1NmZZc91FwWK9EXD/lmuGBSRTJ5IvHhlG1YnQ=
 github.com/tidwall/gjson v1.14.2 h1:6BBkirS0rAHjumnjHF6qgy5d2YAJ1TLIaFE2lzfOLqo=
