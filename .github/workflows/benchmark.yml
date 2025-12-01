@@ -36,7 +36,7 @@ jobs:
         arch: ['amd64']
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5.0.1
+        uses: actions/checkout@v6.0.0
         with:
           submodules: recursive
       - name: Set up Python
