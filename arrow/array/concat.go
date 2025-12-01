@@ -861,7 +861,7 @@ func updateRuns[T int16 | int32 | int64](inputData []arrow.ArrayData, inputBuffe
 		// we can check the last runEnd in the src and add it to the
 		// last value that we're adjusting them all by to see if we
 		// are going to overflow
-		if int64(lastEnd)+int64(int(src[len(src)-1])-inputData[i].Offset()) > int64(maxOf[T]()) {
+		if uint64(lastEnd)+uint64(int(src[len(src)-1])-inputData[i].Offset()) > uint64(maxOf[T]()) {
 			return fmt.Errorf("%w: overflow in run-length-encoded run ends concat", arrow.ErrInvalid)
 		}
 
