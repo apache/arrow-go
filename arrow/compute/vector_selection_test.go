@@ -1255,6 +1255,96 @@ func (tk *TakeKernelLists) TestFixedSizeListInt32() {
 	tk.assertNoValidityBitmapUnknownNullCountJSON(tk.dt, `[[1, null, 3], [4, 5, 6], [7, 8, null]]`, `[0, 1, 0]`)
 }
 
+type TakeKernelMap struct {
+	TakeKernelTestTyped
+}
+
+func (tk *TakeKernelMap) TestMapStringInt32() {
+	tk.dt = arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32)
+
+	mapJSON := `[
+		{},
+		{"a": 1},
+		{"a": 2, "b": 3, "c": 4},
+		{"w": 5, "x": 6, "y": 7, "z": null}
+	]`
+	tk.checkTake(tk.dt, mapJSON, `[]`, `[]`)
+	tk.checkTake(tk.dt, mapJSON, `[3, 1, 3, 1, 3]`, `[
+		{"w": 5, "x": 6, "y": 7, "z": null}
+		{"a": 1},
+		{"w": 5, "x": 6, "y": 7, "z": null}
+		{"a": 1},
+		{"w": 5, "x": 6, "y": 7, "z": null}
+	]`)
+	tk.checkTake(tk.dt, mapJSON, `[4, 2, 1, 6]`, `[
+		{"a": 2, "b": 3, "c": 4},
+		{"a": 1},
+		{"a": 2, "b": 3, "c": 4},
+		{"w": 5, "x": 6, "y": 7, "z": null}
+	]`)
+	tk.checkTake(tk.dt, mapJSON, `[0, 1, 2, 3]`, mapJSON)
+
+	tk.assertNoValidityBitmapUnknownNullCountJSON(tk.dt, `[{"a": 1, "b": 2}, {"a": 2, "b": 3}]`, `[0, 1, 0]`)
+}
+
+func (tk *TakeKernelMap) TestMapStringLargeString() {
+	tk.dt = arrow.MapOf(arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString)
+
+	mapJSON := `[
+		{},
+		{"a": "b"},
+		{"a": "c", "d": "e", "f": "g"},
+		{"w": "x", "y": "z", "m": "n", "o": null}
+	]`
+
+	tk.checkTake(tk.dt, mapJSON, `[]`, `[]`)
+	tk.checkTake(tk.dt, mapJSON, `[3, 1, 3, 1, 3]`, `[
+		{"w": "x", "y": "z", "m": "n", "o": null},
+		{"a": "b"},
+		{"w": "x", "y": "z", "m": "n", "o": null},
+		{"a": "b"},
+		{"w": "x", "y": "z", "m": "n", "o": null},
+	]`)
+	tk.checkTake(tk.dt, mapJSON, `[4, 2, 1, 6]`, `[
+		{"a": "e", "c": "f"},
+		{"w": "x", "y": "z", "m": "n", "o": null},
+		{"a": "b"},
+		{"w": "x", "y": "z", "m": "n", "o": null}
+	]`)
+	tk.checkTake(tk.dt, mapJSON, `[0, 1, 2, 3]`, mapJSON)
+
+	tk.assertNoValidityBitmapUnknownNullCountJSON(tk.dt, `[{"a": "b", "c": "d"}, {"a": "e", "c": "f"}]`, `[0, 1, 0]`)
+}
+
+func (tk *TakeKernelMap) TestMapIntListString() {
+	tk.dt = arrow.MapOf(arrow.PrimitiveTypes.Int32, arrow.ListOf(arrow.BinaryTypes.String))
+
+	mapJSON := `[
+		{},
+		{1: ["a"]},
+		{1: ["b", "c"], 2: ["d"], 3: ["e", "f", "g"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]}
+	]`
+
+	tk.checkTake(tk.dt, mapJSON, `[]`, `[]`)
+	tk.checkTake(tk.dt, mapJSON, `[3, 1, 3, 1, 3]`, `[
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
+		{1: ["a", "b"], 2: ["c", "d"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
+		{1: ["a", "b"], 2: ["c", "d"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
+	]`)
+	tk.checkTake(tk.dt, mapJSON, `[4, 2, 1, 6]`, `[
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
+		{1: ["a", "b"], 2: ["c", "d"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]}
+	]`)
+	tk.checkTake(tk.dt, mapJSON, `[0, 1, 2, 3]`, mapJSON)
+
+	tk.assertNoValidityBitmapUnknownNullCountJSON(tk.dt, `[{1: ["a", "b"], 2: ["c", "d"]}, {1: [3, 4], 2: ["e", "f"]}]`, `[0, 1, 0]`)
+}
+
 type TakeKernelDenseUnion struct {
 	TakeKernelTestTyped
 }
