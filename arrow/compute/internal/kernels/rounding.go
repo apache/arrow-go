@@ -1335,28 +1335,6 @@ func roundTemporalExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.Exec
 	}
 }
 
-type timestampUnitMatcher struct {
-	unit arrow.TimeUnit
-}
-
-func (m *timestampUnitMatcher) Matches(typ arrow.DataType) bool {
-	if ts, ok := typ.(*arrow.TimestampType); ok {
-		return ts.Unit == m.unit
-	}
-	return false
-}
-
-func (m *timestampUnitMatcher) String() string {
-	return "timestamp(unit=" + m.unit.String() + ")"
-}
-
-func (m *timestampUnitMatcher) Equals(other exec.TypeMatcher) bool {
-	if o, ok := other.(*timestampUnitMatcher); ok {
-		return m.unit == o.unit
-	}
-	return false
-}
-
 type dateTypeMatcher struct {
 	dateTypeID arrow.Type
 }
@@ -1379,45 +1357,13 @@ func (m *dateTypeMatcher) Equals(other exec.TypeMatcher) bool {
 	return false
 }
 
-type timeTypeMatcher struct {
-	timeTypeID arrow.Type
-	unit       arrow.TimeUnit
-}
-
-func (m *timeTypeMatcher) Matches(typ arrow.DataType) bool {
-	if typ.ID() != m.timeTypeID {
-		return false
-	}
-	switch t := typ.(type) {
-	case *arrow.Time32Type:
-		return t.Unit == m.unit
-	case *arrow.Time64Type:
-		return t.Unit == m.unit
-	}
-	return false
-}
-
-func (m *timeTypeMatcher) String() string {
-	if m.timeTypeID == arrow.TIME32 {
-		return fmt.Sprintf("time32[%s]", m.unit)
-	}
-	return fmt.Sprintf("time64[%s]", m.unit)
-}
-
-func (m *timeTypeMatcher) Equals(other exec.TypeMatcher) bool {
-	if o, ok := other.(*timeTypeMatcher); ok {
-		return m.timeTypeID == o.timeTypeID && m.unit == o.unit
-	}
-	return false
-}
-
 func GetTemporalRoundingKernels(init exec.KernelInitFn, execFn exec.ArrayKernelExec) []exec.ScalarKernel {
 	kernels := make([]exec.ScalarKernel, 0)
 
 	// Timestamp kernels
 	for _, unit := range arrow.TimeUnitValues {
 		kernels = append(kernels, exec.NewScalarKernel(
-			[]exec.InputType{exec.NewMatchedInput(&timestampUnitMatcher{unit: unit})},
+			[]exec.InputType{exec.NewMatchedInput(exec.TimestampTypeUnit(unit))},
 			OutputFirstType,
 			execFn,
 			init,
@@ -1442,13 +1388,13 @@ func GetTemporalRoundingKernels(init exec.KernelInitFn, execFn exec.ArrayKernelE
 
 	// Time32 kernels (seconds and milliseconds)
 	kernels = append(kernels, exec.NewScalarKernel(
-		[]exec.InputType{exec.NewMatchedInput(&timeTypeMatcher{timeTypeID: arrow.TIME32, unit: arrow.Second})},
+		[]exec.InputType{exec.NewMatchedInput(exec.Time32TypeUnit(arrow.Second))},
 		OutputFirstType,
 		execFn,
 		init,
 	))
 	kernels = append(kernels, exec.NewScalarKernel(
-		[]exec.InputType{exec.NewMatchedInput(&timeTypeMatcher{timeTypeID: arrow.TIME32, unit: arrow.Millisecond})},
+		[]exec.InputType{exec.NewMatchedInput(exec.Time32TypeUnit(arrow.Millisecond))},
 		OutputFirstType,
 		execFn,
 		init,
@@ -1456,13 +1402,13 @@ func GetTemporalRoundingKernels(init exec.KernelInitFn, execFn exec.ArrayKernelE
 
 	// Time64 kernels (microseconds and nanoseconds)
 	kernels = append(kernels, exec.NewScalarKernel(
-		[]exec.InputType{exec.NewMatchedInput(&timeTypeMatcher{timeTypeID: arrow.TIME64, unit: arrow.Microsecond})},
+		[]exec.InputType{exec.NewMatchedInput(exec.Time64TypeUnit(arrow.Microsecond))},
 		OutputFirstType,
 		execFn,
 		init,
 	))
 	kernels = append(kernels, exec.NewScalarKernel(
-		[]exec.InputType{exec.NewMatchedInput(&timeTypeMatcher{timeTypeID: arrow.TIME64, unit: arrow.Nanosecond})},
+		[]exec.InputType{exec.NewMatchedInput(exec.Time64TypeUnit(arrow.Nanosecond))},
 		OutputFirstType,
 		execFn,
 		init,
