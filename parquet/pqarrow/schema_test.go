@@ -426,6 +426,316 @@ func TestListStructBackwardCompatible(t *testing.T) {
 	assert.True(t, arrowSchema.Equal(arrsc), arrowSchema.String(), arrsc.String())
 }
 
+func TestNestedFieldIndex(t *testing.T) {
+	cases := []struct {
+		name string
+		s    *schema.Schema
+	}{
+		{
+			name: "RepeatedPrimitive",
+			s: schema.NewSchema(schema.MustGroup(
+				schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+					schema.Must(schema.NewPrimitiveNodeLogical(
+						"tags",
+						parquet.Repetitions.Repeated,
+						schema.StringLogicalType{},
+						parquet.Types.ByteArray,
+						0,
+						-1,
+					)),
+				}, -1),
+			)),
+		}, {
+			name: "SimpleList",
+			s: schema.NewSchema(schema.MustGroup(
+				schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+					schema.MustGroup(schema.ListOf(
+						schema.Must(schema.NewPrimitiveNodeLogical(
+							"element",
+							parquet.Repetitions.Required,
+							schema.StringLogicalType{},
+							parquet.Types.ByteArray,
+							0,
+							-1,
+						)),
+						parquet.Repetitions.Required,
+						-1,
+					)),
+				}, -1),
+			)),
+		},
+		{
+			name: "ListOfOptionalElements",
+			s: schema.NewSchema(schema.MustGroup(
+				schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+					schema.MustGroup(schema.ListOf(
+						schema.Must(schema.NewPrimitiveNodeLogical(
+							"element",
+							parquet.Repetitions.Optional,
+							schema.StringLogicalType{},
+							parquet.Types.ByteArray,
+							1,
+							-1,
+						)),
+						parquet.Repetitions.Required,
+						-1,
+					)),
+				}, -1),
+			)),
+		},
+		{
+			name: "NestedStruct",
+			s: schema.NewSchema(schema.MustGroup(
+				schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+					schema.Must(schema.NewPrimitiveNodeLogical(
+						"name",
+						parquet.Repetitions.Required,
+						schema.StringLogicalType{},
+						parquet.Types.ByteArray,
+						0,
+						-1,
+					)),
+					schema.MustGroup(schema.NewGroupNode("address", parquet.Repetitions.Required, schema.FieldList{
+						schema.Must(schema.NewPrimitiveNodeLogical(
+							"city",
+							parquet.Repetitions.Required,
+							schema.StringLogicalType{},
+							parquet.Types.ByteArray,
+							1,
+							-1,
+						)),
+						schema.Must(schema.NewPrimitiveNodeLogical(
+							"street",
+							parquet.Repetitions.Optional,
+							schema.StringLogicalType{},
+							parquet.Types.ByteArray,
+							2,
+							-1,
+						)),
+					}, 3)),
+				}, -1),
+			)),
+		},
+		{
+			name: "ListOfStructs",
+			s: schema.NewSchema(schema.MustGroup(
+				schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+					schema.MustGroup(schema.ListOf(
+						schema.MustGroup(schema.NewGroupNode("contact", parquet.Repetitions.Required, schema.FieldList{
+							schema.Must(schema.NewPrimitiveNodeLogical(
+								"email",
+								parquet.Repetitions.Required,
+								schema.StringLogicalType{},
+								parquet.Types.ByteArray,
+								1,
+								-1,
+							)),
+						}, 2)),
+						parquet.Repetitions.Required,
+						-1,
+					)),
+				}, -1),
+			)),
+		},
+		{
+			name: "MapRequiredValues",
+			s: schema.NewSchema(schema.MustGroup(
+				schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+					schema.MustGroup(schema.MapOf(
+						"attrs",
+						schema.Must(schema.NewPrimitiveNodeLogical(
+							"key",
+							parquet.Repetitions.Required,
+							schema.StringLogicalType{},
+							parquet.Types.ByteArray,
+							1,
+							-1,
+						)),
+						schema.Must(schema.NewPrimitiveNodeLogical(
+							"value",
+							parquet.Repetitions.Required,
+							schema.StringLogicalType{},
+							parquet.Types.ByteArray,
+							2,
+							-1,
+						)),
+						parquet.Repetitions.Required,
+						0,
+					)),
+				}, -1),
+			)),
+		},
+		{
+			name: "RepeatedGroup",
+			s: schema.NewSchema(schema.MustGroup(
+				schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+					schema.MustGroup(schema.NewGroupNode("items", parquet.Repetitions.Repeated, schema.FieldList{
+						schema.Must(schema.NewPrimitiveNode(
+							"id",
+							parquet.Repetitions.Required,
+							parquet.Types.Int32,
+							0,
+							-1,
+						)),
+						schema.Must(schema.NewPrimitiveNodeLogical(
+							"tag",
+							parquet.Repetitions.Optional,
+							schema.StringLogicalType{},
+							parquet.Types.ByteArray,
+							1,
+							-1,
+						)),
+					}, 2)),
+				}, -1),
+			)),
+		},
+		{
+			name: "DeeplyNested",
+			s: schema.NewSchema(schema.MustGroup(
+				schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+					schema.MustGroup(schema.NewGroupNode("level1", parquet.Repetitions.Required, schema.FieldList{
+						schema.MustGroup(schema.NewGroupNode("level2", parquet.Repetitions.Required, schema.FieldList{
+							schema.MustGroup(schema.ListOf(
+								schema.Must(schema.NewPrimitiveNode(
+									"element",
+									parquet.Repetitions.Required,
+									parquet.Types.Int32,
+									2,
+									-1,
+								)),
+								parquet.Repetitions.Required,
+								-1,
+							)),
+						}, 1)),
+					}, 0)),
+				}, -1),
+			)),
+		},
+		{
+			name: "ListOfMaps",
+			s: schema.NewSchema(schema.MustGroup(
+				schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+					schema.MustGroup(schema.ListOf(
+						schema.MustGroup(schema.MapOf(
+							"map_item",
+							schema.Must(schema.NewPrimitiveNodeLogical(
+								"key",
+								parquet.Repetitions.Required,
+								schema.StringLogicalType{},
+								parquet.Types.ByteArray,
+								1,
+								-1,
+							)),
+							schema.Must(schema.NewPrimitiveNode(
+								"value",
+								parquet.Repetitions.Required,
+								parquet.Types.Int32,
+								2,
+								-1,
+							)),
+							parquet.Repetitions.Required,
+							0,
+						)),
+						parquet.Repetitions.Required,
+						-1,
+					)),
+				}, -1),
+			)),
+		},
+		{
+			name: "RepeatedVariant",
+			s: schema.NewSchema(schema.MustGroup(
+				schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+					schema.MustGroup(schema.NewGroupNodeLogical(
+						"variant_list",
+						parquet.Repetitions.Repeated,
+						schema.FieldList{
+							schema.Must(schema.NewPrimitiveNode(
+								"metadata",
+								parquet.Repetitions.Required,
+								parquet.Types.ByteArray,
+								1,
+								-1,
+							)),
+							schema.Must(schema.NewPrimitiveNode(
+								"value",
+								parquet.Repetitions.Optional,
+								parquet.Types.ByteArray,
+								2,
+								-1,
+							)),
+						},
+						schema.VariantLogicalType{},
+						0,
+					)),
+				}, -1),
+			)),
+		},
+		{
+			name: "MapNestedKeyAndValue",
+			s: schema.NewSchema(schema.MustGroup(
+				schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+					schema.MustGroup(schema.MapOf(
+						"attrs",
+						// Nested key: struct with id and name
+						schema.MustGroup(schema.NewGroupNode("key_struct", parquet.Repetitions.Required, schema.FieldList{
+							schema.Must(schema.NewPrimitiveNode(
+								"id",
+								parquet.Repetitions.Required,
+								parquet.Types.Int32,
+								1,
+								-1,
+							)),
+							schema.Must(schema.NewPrimitiveNodeLogical(
+								"name",
+								parquet.Repetitions.Required,
+								schema.StringLogicalType{},
+								parquet.Types.ByteArray,
+								2,
+								-1,
+							)),
+						}, 3)),
+						// Nested value: list of strings
+						schema.MustGroup(schema.ListOf(
+							schema.Must(schema.NewPrimitiveNodeLogical(
+								"element",
+								parquet.Repetitions.Required,
+								schema.StringLogicalType{},
+								parquet.Types.ByteArray,
+								5,
+								-1,
+							)),
+							parquet.Repetitions.Required,
+							-1,
+						)),
+						parquet.Repetitions.Required,
+						0,
+					)),
+				}, -1),
+			)),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest, err := pqarrow.NewSchemaManifest(tc.s, metadata.KeyValueMetadata{}, nil)
+			assert.NoError(t, err)
+			assertFieldColIndexCorrect(t, manifest.Fields)
+		})
+	}
+}
+
+func assertFieldColIndexCorrect(t *testing.T, fields []pqarrow.SchemaField) {
+	for _, field := range fields {
+		if field.Children != nil {
+			assert.Equal(t, -1, field.ColIndex)
+			assertFieldColIndexCorrect(t, field.Children)
+		} else {
+			assert.NotEqual(t, -1, field.Children)
+		}
+	}
+}
+
 // TestUnsupportedTypes tests the error message for unsupported types. This test should be updated
 // when support for these types is added.
 func TestUnsupportedTypes(t *testing.T) {
