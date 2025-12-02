@@ -787,3 +787,126 @@ func TestConcatPanic(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, concat)
 }
+
+// github.com/apache/arrow-go/issues/562
+func TestREESliceAndConcatenate(t *testing.T) {
+	mem := memory.DefaultAllocator
+
+	// Create REE array for: [100, 100, 100, 200, 200, 300, 300, 300]
+	// Using builders to construct the values and run ends
+
+	valuesBuilder := array.NewInt64Builder(mem)
+	defer valuesBuilder.Release()
+	valuesBuilder.AppendValues([]int64{100, 200, 300}, nil)
+	values := valuesBuilder.NewInt64Array()
+	defer values.Release()
+
+	runEndsBuilder := array.NewInt32Builder(mem)
+	defer runEndsBuilder.Release()
+	runEndsBuilder.AppendValues([]int32{3, 5, 8}, nil)
+	runEnds := runEndsBuilder.NewInt32Array()
+	defer runEnds.Release()
+
+	// NewRunEndEncodedArray(runEnds, values, logicalLength, offset)
+	// The logical length is 8 (the value of the last run end)
+	reeArray := array.NewRunEndEncodedArray(runEnds, values, 8, 0)
+	defer reeArray.Release()
+
+	// Verify original array is correct
+	t.Log("Original array:")
+	ree := reeArray
+	reeValues := ree.Values().(*array.Int64)
+	for i := 0; i < ree.Len(); i++ {
+		physicalIdx := ree.GetPhysicalIndex(i)
+		val := reeValues.Value(physicalIdx)
+		t.Logf("  [%d] = %d", i, val)
+	}
+
+	// Slice the array into three parts
+	slice1 := array.NewSlice(reeArray, 0, 3) // [100, 100, 100]
+	defer slice1.Release()
+
+	slice2 := array.NewSlice(reeArray, 3, 5) // [200, 200]
+	defer slice2.Release()
+
+	slice3 := array.NewSlice(reeArray, 5, 8) // [300, 300, 300]
+	defer slice3.Release()
+
+	// Concatenate the slices in reverse order: slice3, slice2, slice1
+	// Expected result: [300, 300, 300, 200, 200, 100, 100, 100]
+	result, err := array.Concatenate([]arrow.Array{slice3, slice2, slice1}, mem)
+	require.NoError(t, err, "Concatenate should succeed")
+	defer result.Release()
+
+	require.Equal(t, 8, result.Len(), "Concatenated array should have 8 elements")
+
+	// Verify the concatenated values
+	t.Log("Concatenated array:")
+	resultREE := result.(*array.RunEndEncoded)
+	resultValues := resultREE.Values().(*array.Int64)
+
+	expected := []int64{300, 300, 300, 200, 200, 100, 100, 100}
+	actual := make([]int64, result.Len())
+
+	for i := 0; i < result.Len(); i++ {
+		physicalIdx := resultREE.GetPhysicalIndex(i)
+		actual[i] = resultValues.Value(physicalIdx)
+		t.Logf("  [%d] = %d (expected %d)", i, actual[i], expected[i])
+	}
+
+	// This assertion will fail due to the bug
+	require.Equal(t, expected, actual,
+		"Concatenated sliced REE arrays should preserve original values")
+}
+
+// TestREESliceAndConcatenateInOrder is a simpler variant that concatenates
+// slices in their original order.
+// github.com/apache/arrow-go/issues/562
+func TestREESliceAndConcatenateInOrder(t *testing.T) {
+	mem := memory.DefaultAllocator
+
+	// Create REE array: [100, 100, 200, 200]
+	valuesBuilder := array.NewInt64Builder(mem)
+	defer valuesBuilder.Release()
+	valuesBuilder.AppendValues([]int64{100, 200}, nil)
+	values := valuesBuilder.NewInt64Array()
+	defer values.Release()
+
+	runEndsBuilder := array.NewInt32Builder(mem)
+	defer runEndsBuilder.Release()
+	runEndsBuilder.AppendValues([]int32{2, 4}, nil)
+	runEnds := runEndsBuilder.NewInt32Array()
+	defer runEnds.Release()
+
+	reeArray := array.NewRunEndEncodedArray(runEnds, values, 4, 0)
+	defer reeArray.Release()
+
+	// Slice into two parts
+	slice1 := array.NewSlice(reeArray, 0, 2) // [100, 100]
+	defer slice1.Release()
+
+	slice2 := array.NewSlice(reeArray, 2, 4) // [200, 200]
+	defer slice2.Release()
+
+	// Concatenate in order
+	result, err := array.Concatenate([]arrow.Array{slice1, slice2}, mem)
+	require.NoError(t, err)
+	defer result.Release()
+
+	// Verify values
+	resultREE := result.(*array.RunEndEncoded)
+	resultValues := resultREE.Values().(*array.Int64)
+
+	expected := []int64{100, 100, 200, 200}
+	actual := make([]int64, result.Len())
+
+	t.Log("Concatenated array (in order):")
+	for i := 0; i < result.Len(); i++ {
+		physicalIdx := resultREE.GetPhysicalIndex(i)
+		actual[i] = resultValues.Value(physicalIdx)
+		t.Logf("  [%d] = %d (expected %d)", i, actual[i], expected[i])
+	}
+
+	require.Equal(t, expected, actual,
+		"Concatenating sliced REE arrays in order should work correctly")
+}
