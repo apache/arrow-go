@@ -1255,6 +1255,96 @@ func (tk *TakeKernelLists) TestFixedSizeListInt32() {
 	tk.assertNoValidityBitmapUnknownNullCountJSON(tk.dt, `[[1, null, 3], [4, 5, 6], [7, 8, null]]`, `[0, 1, 0]`)
 }
 
+type TakeKernelMap struct {
+	TakeKernelTestTyped
+}
+
+func (tk *TakeKernelMap) TestMapStringInt32() {
+	tk.dt = arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32)
+
+	mapJSON := `[
+		{},
+		{"a": 1},
+		{"a": 2, "b": 3, "c": 4},
+		{"w": 5, "x": 6, "y": 7, "z": null}
+	]`
+	tk.checkTake(tk.dt, mapJSON, `[]`, `[]`)
+	tk.checkTake(tk.dt, mapJSON, `[3, 1, 3, 1, 3]`, `[
+		{"w": 5, "x": 6, "y": 7, "z": null}
+		{"a": 1},
+		{"w": 5, "x": 6, "y": 7, "z": null}
+		{"a": 1},
+		{"w": 5, "x": 6, "y": 7, "z": null}
+	]`)
+	tk.checkTake(tk.dt, mapJSON, `[4, 2, 1, 6]`, `[
+		{"a": 2, "b": 3, "c": 4},
+		{"a": 1},
+		{"a": 2, "b": 3, "c": 4},
+		{"w": 5, "x": 6, "y": 7, "z": null}
+	]`)
+	tk.checkTake(tk.dt, mapJSON, `[0, 1, 2, 3]`, mapJSON)
+
+	tk.assertNoValidityBitmapUnknownNullCountJSON(tk.dt, `[{"a": 1, "b": 2}, {"a": 2, "b": 3}]`, `[0, 1, 0]`)
+}
+
+func (tk *TakeKernelMap) TestMapStringLargeString() {
+	tk.dt = arrow.MapOf(arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString)
+
+	mapJSON := `[
+		{},
+		{"a": "b"},
+		{"a": "c", "d": "e", "f": "g"},
+		{"w": "x", "y": "z", "m": "n", "o": null}
+	]`
+
+	tk.checkTake(tk.dt, mapJSON, `[]`, `[]`)
+	tk.checkTake(tk.dt, mapJSON, `[3, 1, 3, 1, 3]`, `[
+		{"w": "x", "y": "z", "m": "n", "o": null},
+		{"a": "b"},
+		{"w": "x", "y": "z", "m": "n", "o": null},
+		{"a": "b"},
+		{"w": "x", "y": "z", "m": "n", "o": null},
+	]`)
+	tk.checkTake(tk.dt, mapJSON, `[4, 2, 1, 6]`, `[
+		{"a": "e", "c": "f"},
+		{"w": "x", "y": "z", "m": "n", "o": null},
+		{"a": "b"},
+		{"w": "x", "y": "z", "m": "n", "o": null}
+	]`)
+	tk.checkTake(tk.dt, mapJSON, `[0, 1, 2, 3]`, mapJSON)
+
+	tk.assertNoValidityBitmapUnknownNullCountJSON(tk.dt, `[{"a": "b", "c": "d"}, {"a": "e", "c": "f"}]`, `[0, 1, 0]`)
+}
+
+func (tk *TakeKernelMap) TestMapIntListString() {
+	tk.dt = arrow.MapOf(arrow.PrimitiveTypes.Int32, arrow.ListOf(arrow.BinaryTypes.String))
+
+	mapJSON := `[
+		{},
+		{1: ["a"]},
+		{1: ["b", "c"], 2: ["d"], 3: ["e", "f", "g"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]}
+	]`
+
+	tk.checkTake(tk.dt, mapJSON, `[]`, `[]`)
+	tk.checkTake(tk.dt, mapJSON, `[3, 1, 3, 1, 3]`, `[
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
+		{1: ["a", "b"], 2: ["c", "d"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
+		{1: ["a", "b"], 2: ["c", "d"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
+	]`)
+	tk.checkTake(tk.dt, mapJSON, `[4, 2, 1, 6]`, `[
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
+		{1: ["a", "b"], 2: ["c", "d"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]}
+	]`)
+	tk.checkTake(tk.dt, mapJSON, `[0, 1, 2, 3]`, mapJSON)
+
+	tk.assertNoValidityBitmapUnknownNullCountJSON(tk.dt, `[{1: ["a", "b"], 2: ["c", "d"]}, {1: [3, 4], 2: ["e", "f"]}]`, `[0, 1, 0]`)
+}
+
 type TakeKernelDenseUnion struct {
 	TakeKernelTestTyped
 }
@@ -1677,7 +1767,7 @@ func BenchmarkTakeString(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			mem := memory.NewGoAllocator()
+			mem := memory.DefaultAllocator
 			ctx := compute.WithAllocator(context.Background(), mem)
 
 			// Create source array with strings of specified average length
@@ -1731,7 +1821,7 @@ func BenchmarkTakeString(b *testing.B) {
 func BenchmarkTakeStringPartitionPattern(b *testing.B) {
 	// Simulate real-world partitioning workload where data is reorganized
 	// into multiple partitions (e.g., by timestamp month + host)
-	mem := memory.NewGoAllocator()
+	mem := memory.DefaultAllocator
 	ctx := compute.WithAllocator(context.Background(), mem)
 
 	const numRows = 50000
@@ -1777,7 +1867,7 @@ func BenchmarkTakeStringPartitionPattern(b *testing.B) {
 func BenchmarkTakeMultiColumn(b *testing.B) {
 	// Benchmark Take on a record batch with multiple string columns
 	// to simulate real-world use cases (e.g., CloudFront logs with 20+ string columns)
-	mem := memory.NewGoAllocator()
+	mem := memory.DefaultAllocator
 	ctx := compute.WithAllocator(context.Background(), mem)
 
 	const numRows = 50000
@@ -1861,6 +1951,205 @@ func BenchmarkTakeMultiColumn(b *testing.B) {
 		result.Release()
 		batchDatum.Release()
 		indicesDatum.Release()
+	}
+
+	b.ReportMetric(float64(numRows*b.N)/b.Elapsed().Seconds(), "rows/sec")
+}
+
+// Benchmark tests for Take operation with list types
+// These benchmarks test the performance improvements from buffer pre-allocation
+// and exponential growth in ListImpl for nested data reorganization.
+
+func BenchmarkTakeList(b *testing.B) {
+	// Test various batch sizes and list lengths
+	benchmarks := []struct {
+		name       string
+		numRows    int64
+		avgListLen int
+		listType   arrow.DataType
+	}{
+		{"SmallBatch_ShortLists", 1000, 5, arrow.ListOf(arrow.PrimitiveTypes.Int32)},
+		{"MediumBatch_ShortLists", 10000, 5, arrow.ListOf(arrow.PrimitiveTypes.Int32)},
+		{"LargeBatch_ShortLists", 50000, 5, arrow.ListOf(arrow.PrimitiveTypes.Int32)},
+		{"XLargeBatch_ShortLists", 100000, 5, arrow.ListOf(arrow.PrimitiveTypes.Int32)},
+		{"SmallBatch_MediumLists", 1000, 20, arrow.ListOf(arrow.PrimitiveTypes.Int32)},
+		{"MediumBatch_MediumLists", 10000, 20, arrow.ListOf(arrow.PrimitiveTypes.Int32)},
+		{"LargeBatch_MediumLists", 50000, 20, arrow.ListOf(arrow.PrimitiveTypes.Int32)},
+		{"XLargeBatch_MediumLists", 100000, 20, arrow.ListOf(arrow.PrimitiveTypes.Int32)},
+		{"LargeBatch_ShortLists_Large", 50000, 5, arrow.LargeListOf(arrow.PrimitiveTypes.Int32)},
+		{"XLargeBatch_MediumLists_Large", 100000, 20, arrow.LargeListOf(arrow.PrimitiveTypes.Int32)},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			mem := memory.DefaultAllocator
+			ctx := compute.WithAllocator(context.Background(), mem)
+
+			// Create source array with lists of specified average length
+			bldr := array.NewBuilder(mem, bm.listType)
+			defer bldr.Release()
+
+			// Generate test data with varying list lengths
+			for i := int64(0); i < bm.numRows; i++ {
+				// Vary list length around the average
+				listLen := bm.avgListLen + int(i%5) - 2
+				if listLen < 0 {
+					listLen = 0
+				}
+
+				switch b := bldr.(type) {
+				case *array.ListBuilder:
+					b.Append(true)
+					valBldr := b.ValueBuilder().(*array.Int32Builder)
+					for j := 0; j < listLen; j++ {
+						valBldr.Append(int32(i*100 + int64(j)))
+					}
+				case *array.LargeListBuilder:
+					b.Append(true)
+					valBldr := b.ValueBuilder().(*array.Int32Builder)
+					for j := 0; j < listLen; j++ {
+						valBldr.Append(int32(i*100 + int64(j)))
+					}
+				}
+			}
+			values := bldr.NewArray()
+			defer values.Release()
+
+			// Create indices that simulate partitioning/reorganization
+			// Use a pattern that would be common in partitioned writes:
+			// reverse order to maximize data movement
+			indicesBldr := array.NewInt64Builder(mem)
+			defer indicesBldr.Release()
+			for i := bm.numRows - 1; i >= 0; i-- {
+				indicesBldr.Append(i)
+			}
+			indices := indicesBldr.NewArray()
+			defer indices.Release()
+
+			// Reset timer after setup
+			b.ResetTimer()
+			b.ReportAllocs()
+
+			// Run benchmark
+			for i := 0; i < b.N; i++ {
+				result, err := compute.TakeArray(ctx, values, indices)
+				if err != nil {
+					b.Fatal(err)
+				}
+				result.Release()
+			}
+
+			// Report throughput
+			b.ReportMetric(float64(bm.numRows*int64(b.N))/b.Elapsed().Seconds(), "rows/sec")
+		})
+	}
+}
+
+func BenchmarkTakeNestedList(b *testing.B) {
+	// Test nested list types (list<list<int32>>)
+	// This is particularly relevant for complex schemas like usage events with resources
+	mem := memory.DefaultAllocator
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	const numRows = 50000
+	const avgOuterListLen = 3
+	const avgInnerListLen = 4
+
+	// Create source data
+	dt := arrow.ListOf(arrow.ListOf(arrow.PrimitiveTypes.Int32))
+	bldr := array.NewBuilder(mem, dt).(*array.ListBuilder)
+	defer bldr.Release()
+
+	for i := 0; i < numRows; i++ {
+		bldr.Append(true)
+		innerListBldr := bldr.ValueBuilder().(*array.ListBuilder)
+		innerValBldr := innerListBldr.ValueBuilder().(*array.Int32Builder)
+
+		numInnerLists := avgOuterListLen + (i % 3) - 1
+		for j := 0; j < numInnerLists; j++ {
+			innerListBldr.Append(true)
+			numVals := avgInnerListLen + (j % 3) - 1
+			for k := 0; k < numVals; k++ {
+				innerValBldr.Append(int32(i*1000 + j*10 + k))
+			}
+		}
+	}
+	values := bldr.NewArray()
+	defer values.Release()
+
+	// Create indices for partitioning pattern
+	indicesBldr := array.NewInt64Builder(mem)
+	defer indicesBldr.Release()
+	for i := numRows - 1; i >= 0; i-- {
+		indicesBldr.Append(int64(i))
+	}
+	indices := indicesBldr.NewArray()
+	defer indices.Release()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		result, err := compute.TakeArray(ctx, values, indices)
+		if err != nil {
+			b.Fatal(err)
+		}
+		result.Release()
+	}
+
+	b.ReportMetric(float64(numRows*b.N)/b.Elapsed().Seconds(), "rows/sec")
+}
+
+func BenchmarkTakeListPartitionPattern(b *testing.B) {
+	// Simulate real-world partitioning workload where list data is reorganized
+	// into multiple partitions (e.g., usage events with resources by timestamp + source)
+	mem := memory.DefaultAllocator
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	const numRows = 50000
+	const numPartitions = 8
+	const avgListLen = 15
+
+	// Create source data
+	dt := arrow.ListOf(arrow.BinaryTypes.String)
+	bldr := array.NewBuilder(mem, dt).(*array.ListBuilder)
+	defer bldr.Release()
+
+	valBldr := bldr.ValueBuilder().(*array.StringBuilder)
+	for i := 0; i < numRows; i++ {
+		bldr.Append(true)
+		listLen := avgListLen + (i % 5) - 2
+		if listLen < 0 {
+			listLen = 0
+		}
+		for j := 0; j < listLen; j++ {
+			valBldr.Append(fmt.Sprintf("resource_%d_%d", i, j))
+		}
+	}
+	values := bldr.NewArray()
+	defer values.Release()
+
+	// Create indices that simulate partitioning by interleaving
+	// (every Nth row goes to partition N)
+	indicesBldr := array.NewInt64Builder(mem)
+	defer indicesBldr.Release()
+	for partition := 0; partition < numPartitions; partition++ {
+		for i := partition; i < numRows; i += numPartitions {
+			indicesBldr.Append(int64(i))
+		}
+	}
+	indices := indicesBldr.NewArray()
+	defer indices.Release()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		result, err := compute.TakeArray(ctx, values, indices)
+		if err != nil {
+			b.Fatal(err)
+		}
+		result.Release()
 	}
 
 	b.ReportMetric(float64(numRows*b.N)/b.Elapsed().Seconds(), "rows/sec")

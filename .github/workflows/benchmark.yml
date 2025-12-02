@@ -36,7 +36,7 @@ jobs:
         arch: ['amd64']
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6.0.0
         with:
           submodules: recursive
       - name: Set up Python
@@ -44,7 +44,7 @@ jobs:
         with:
           python-version: '3.9'
       - name: Install Go ${{ matrix.go }} for Benchmarks
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v6.1.0
         with:
           go-version: ${{ matrix.go }}
           cache: true

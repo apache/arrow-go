@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build !pqarrow_read_only
+
 package pqarrow
 
 import (
@@ -114,6 +116,26 @@ func (fw *FileWriter) NewBufferedRowGroup() {
 	}
 	fw.rgw = fw.wr.AppendBufferedRowGroup()
 	fw.colIdx = 0
+}
+
+// TotalCompressedBytes returns the total number of bytes after compression
+// that have been written to the file so far. It includes all the closed row groups
+// and the current row group.
+func (fw *FileWriter) TotalCompressedBytes() int64 {
+	if fw.wr != nil {
+		return fw.wr.TotalCompressedBytes()
+	}
+	return 0
+}
+
+// TotalBytesWritten returns the total number of bytes
+// that have been written to the file so far. It includes all the closed row groups
+// and the current row group.
+func (fw *FileWriter) TotalBytesWritten() int64 {
+	if fw.wr != nil {
+		return fw.wr.TotalBytesWritten()
+	}
+	return 0
 }
 
 // RowGroupTotalCompressedBytes returns the total number of bytes after compression
