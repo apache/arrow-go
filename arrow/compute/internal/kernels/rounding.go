@@ -1335,28 +1335,6 @@ func roundTemporalExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.Exec
 	}
 }
 
-type dateTypeMatcher struct {
-	dateTypeID arrow.Type
-}
-
-func (m *dateTypeMatcher) Matches(typ arrow.DataType) bool {
-	return typ.ID() == m.dateTypeID
-}
-
-func (m *dateTypeMatcher) String() string {
-	if m.dateTypeID == arrow.DATE32 {
-		return "date32"
-	}
-	return "date64"
-}
-
-func (m *dateTypeMatcher) Equals(other exec.TypeMatcher) bool {
-	if o, ok := other.(*dateTypeMatcher); ok {
-		return m.dateTypeID == o.dateTypeID
-	}
-	return false
-}
-
 func GetTemporalRoundingKernels(init exec.KernelInitFn, execFn exec.ArrayKernelExec) []exec.ScalarKernel {
 	kernels := make([]exec.ScalarKernel, 0)
 
@@ -1372,7 +1350,7 @@ func GetTemporalRoundingKernels(init exec.KernelInitFn, execFn exec.ArrayKernelE
 
 	// Date32 kernel
 	kernels = append(kernels, exec.NewScalarKernel(
-		[]exec.InputType{exec.NewMatchedInput(&dateTypeMatcher{dateTypeID: arrow.DATE32})},
+		[]exec.InputType{exec.NewMatchedInput(exec.Date32Type())},
 		OutputFirstType,
 		execFn,
 		init,
@@ -1380,7 +1358,7 @@ func GetTemporalRoundingKernels(init exec.KernelInitFn, execFn exec.ArrayKernelE
 
 	// Date64 kernel
 	kernels = append(kernels, exec.NewScalarKernel(
-		[]exec.InputType{exec.NewMatchedInput(&dateTypeMatcher{dateTypeID: arrow.DATE64})},
+		[]exec.InputType{exec.NewMatchedInput(exec.Date64Type())},
 		OutputFirstType,
 		execFn,
 		init,
