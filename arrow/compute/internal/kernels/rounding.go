@@ -926,7 +926,7 @@ func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts 
 	// Sub-day units (hour, minute, second, etc.) use fixed-duration arithmetic
 	// Fast path: round directly in input unit if possible (no origin, compatible units)
 	if canRoundInInputUnit(inputUnit, opts.unitNanos) && !opts.useCalendarOrigin {
-		intervalInInputUnit := opts.roundingInterval / unitScaleFactor(inputUnit)
+		intervalInInputUnit := opts.roundingInterval / int64(inputUnit.Multiplier())
 		rounded := roundToMultipleInt64(ts, intervalInInputUnit, opts.mode, opts.CeilIsStrictlyGreater)
 		return rounded, nil
 	}
@@ -953,36 +953,20 @@ func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts 
 	return convertFromNanos(result, inputUnit), nil
 }
 
-// unitScaleFactor returns nanoseconds per unit for the given time unit
-func unitScaleFactor(unit arrow.TimeUnit) int64 {
-	switch unit {
-	case arrow.Second:
-		return 1_000_000_000
-	case arrow.Millisecond:
-		return 1_000_000
-	case arrow.Microsecond:
-		return 1_000
-	case arrow.Nanosecond:
-		return 1
-	default:
-		return 1
-	}
-}
-
 // canRoundInInputUnit checks if rounding can be done in the input unit
 // without converting to nanoseconds (true when rounding interval is evenly divisible).
 func canRoundInInputUnit(inputUnit arrow.TimeUnit, roundingIntervalNanos int64) bool {
-	return roundingIntervalNanos%unitScaleFactor(inputUnit) == 0
+	return roundingIntervalNanos%int64(inputUnit.Multiplier()) == 0
 }
 
 // convertToNanos converts a timestamp value to nanoseconds
 func convertToNanos(ts int64, unit arrow.TimeUnit) int64 {
-	return ts * unitScaleFactor(unit)
+	return ts * int64(unit.Multiplier())
 }
 
 // convertFromNanos converts a nanosecond timestamp to the specified unit
 func convertFromNanos(nanos int64, unit arrow.TimeUnit) int64 {
-	return nanos / unitScaleFactor(unit)
+	return nanos / int64(unit.Multiplier())
 }
 
 func roundToMultipleInt64(value, multiple int64, mode RoundMode, strictCeil bool) int64 {
