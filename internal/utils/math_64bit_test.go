@@ -28,7 +28,7 @@ import (
 
 func TestMul_64bit(t *testing.T) {
 	// These constants are smaller in magnitude than the exact square root.
-	assert.Greater(t, sqrtMinInt, int(math.Sqrt(math.MinInt64)))
+	assert.Greater(t, sqrtMinInt, -int(math.Sqrt(math.MaxInt64)))
 	assert.Less(t, sqrtMaxInt, int(math.Sqrt(math.MaxInt64)))
 
 	for _, tt := range []struct {
