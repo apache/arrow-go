@@ -22,6 +22,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -37,7 +38,6 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
-	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/thrift"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
@@ -994,6 +994,32 @@ func TestEncryptFile(t *testing.T) {
 	require.NoError(t, err)
 }
 
+type keyIDRetriever map[string]string
+
+// PutKey adds a key with the given string ID that can be retrieved
+func (s keyIDRetriever) PutKey(keyID, key string) {
+	s[keyID] = key
+}
+
+// GetKey expects the keymetadata to match one of the keys that were added
+// with PutKey and panics if the key cannot be found.
+func (s keyIDRetriever) GetKey(keyMetadata []byte) string {
+	var mdMap map[string]any
+	err := json.Unmarshal(keyMetadata, &mdMap)
+	if err != nil {
+		panic(fmt.Errorf("parquet: invalid key metadata: %w", err))
+	}
+	keyMetadataStr, ok := mdMap["masterKeyID"].(string)
+	if !ok {
+		panic(fmt.Errorf("parquet: masterKeyID missing from key metadata"))
+	}
+	k, ok := s[keyMetadataStr]
+	if !ok {
+		panic(fmt.Errorf("parquet: key missing for id %s", keyMetadata))
+	}
+	return k
+}
+
 func TestDecryptFile(t *testing.T) {
 	dir := "../../tools"
 	require.DirExists(t, dir)
@@ -1001,7 +1027,7 @@ func TestDecryptFile(t *testing.T) {
 	footerKeyID := "footer_key"
 	footerKey := "0123456789012345"
 
-	stringKr := make(encryption.StringKeyIDRetriever)
+	stringKr := make(keyIDRetriever)
 	stringKr.PutKey(footerKeyID, footerKey)
 	decryptProps := parquet.NewFileDecryptionProperties(parquet.WithKeyRetriever(stringKr))
 	// decryptProps := parquet.NewFileDecryptionProperties(parquet.WithFooterKey(footerKey))
