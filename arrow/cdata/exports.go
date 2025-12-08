@@ -84,13 +84,13 @@ func releaseExportedSchema(schema *CArrowSchema) {
 	C.free(unsafe.Pointer(schema.format))
 	C.free(unsafe.Pointer(schema.metadata))
 
-	if schema.n_children == 0 {
-		return
-	}
-
 	if schema.dictionary != nil {
 		C.ArrowSchemaRelease(schema.dictionary)
 		C.free(unsafe.Pointer(schema.dictionary))
+	}
+
+	if schema.n_children == 0 {
+		return
 	}
 
 	children := unsafe.Slice(schema.children, schema.n_children)
@@ -153,28 +153,28 @@ func releaseExportedArray(arr *CArrowArray) {
 //export streamGetSchema
 func streamGetSchema(handle *CArrowArrayStream, out *CArrowSchema) C.int {
 	h := getHandle(handle.private_data)
-	rdr := h.Value().(cRecordReader)
+	rdr := h.Value().(*cRecordReader)
 	return C.int(rdr.getSchema(out))
 }
 
 //export streamGetNext
 func streamGetNext(handle *CArrowArrayStream, out *CArrowArray) C.int {
 	h := getHandle(handle.private_data)
-	rdr := h.Value().(cRecordReader)
+	rdr := h.Value().(*cRecordReader)
 	return C.int(rdr.next(out))
 }
 
 //export streamGetError
 func streamGetError(handle *CArrowArrayStream) *C.cchar_t {
 	h := getHandle(handle.private_data)
-	rdr := h.Value().(cRecordReader)
+	rdr := h.Value().(*cRecordReader)
 	return rdr.getLastError()
 }
 
 //export streamRelease
 func streamRelease(handle *CArrowArrayStream) {
 	h := getHandle(handle.private_data)
-	h.Value().(cRecordReader).release()
+	h.Value().(*cRecordReader).release()
 	h.Delete()
 	C.free(unsafe.Pointer(handle.private_data))
 	handle.release = nil
@@ -187,7 +187,7 @@ func exportStream(rdr array.RecordReader, out *CArrowArrayStream) {
 	out.get_last_error = (*[0]byte)(C.streamGetError)
 	out.release = (*[0]byte)(C.streamRelease)
 	rdr.Retain()
-	h := cgo.NewHandle(cRecordReader{rdr: rdr, err: nil})
+	h := cgo.NewHandle(&cRecordReader{rdr: rdr, err: nil})
 	out.private_data = createHandle(h)
 }
 
@@ -206,6 +206,9 @@ type taskState struct {
 //export asyncStreamOnSchema
 func asyncStreamOnSchema(self *CArrowAsyncDeviceStreamHandler, schema *CArrowSchema) C.int {
 	h := getHandle(self.private_data)
+	defer C.free(self.private_data)
+	defer h.Delete()
+
 	handler := h.Value().(cAsyncState)
 	defer close(handler.ch)
 
@@ -235,7 +238,6 @@ func asyncStreamOnSchema(self *CArrowAsyncDeviceStreamHandler, schema *CArrowSch
 		ctx:       handler.ctx,
 		taskQueue: taskQueue,
 	}))
-	defer h.Delete()
 
 	C.goCallRequest(self.producer, C.int64_t(handler.queueSize))
 	go asyncTaskQueue(handler.ctx, sc, recordStream, taskQueue, self.producer)
@@ -347,7 +349,10 @@ func exportAsyncProducer(schema *arrow.Schema, stream <-chan RecordMessage, hand
 	}()
 
 	producer := C.get_producer()
-	defer C.free(unsafe.Pointer(producer))
+	defer func() {
+		C.free(producer.private_data)
+		C.free(unsafe.Pointer(producer))
+	}()
 
 	producer.device_type = C.ARROW_DEVICE_CPU
 	producer.request = (*[0]byte)(C.asyncProducerRequest)
@@ -410,6 +415,7 @@ func exportAsyncProducer(schema *arrow.Schema, stream <-chan RecordMessage, hand
 				if status != C.int(0) {
 					msg.Record.Release()
 					getHandle(task.private_data).Delete()
+					C.free(task.private_data)
 					return fmt.Errorf("on_next_task failed with status %d", status)
 				}
 			default:

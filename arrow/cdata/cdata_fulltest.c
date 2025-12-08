@@ -114,10 +114,12 @@ static void release_nested_internal(struct ArrowSchema* schema,
     for (int i = 0; i < schema->n_children; ++i) {
         ArrowSchemaRelease(schema->children[i]);
         free(schema->children[i]);
-    }
+    }    
     if (is_dynamic) {
         free((void*)schema->format);
         free((void*)schema->name);
+    } else {
+        free(schema->children);
     }
     ArrowSchemaMarkReleased(schema);
 }
@@ -160,7 +162,8 @@ void test_primitive(struct ArrowSchema* schema, const char* fmt) {
 
 // Since test_lists et al. allocate an entirely array of ArrowSchema pointers,
 // need to expose a function to free it.
-void free_malloced_schemas(struct ArrowSchema** schemas) {
+void free_malloced_schemas(struct ArrowSchema** schemas) {    
+    free(schemas[0]);
     free(schemas);
 }
 
@@ -325,6 +328,7 @@ static void release_stream(struct ArrowArrayStream* st) {
 static void release_the_array(struct ArrowArray* out) {
     for (int i = 0; i < out->n_children; ++i) {
         ArrowArrayRelease(out->children[i]);
+        free(out->children[i]);
     }
     free((void*)out->children);
     free(out->buffers);
@@ -454,6 +458,7 @@ int test_exported_stream(struct ArrowArrayStream* stream) {
       stream->release(stream);
       break;
     }
+    array.release(&array);    
   }
   return 0;
 }

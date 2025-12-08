@@ -459,7 +459,7 @@ type cRecordReader struct {
 	err *C.char
 }
 
-func (rr cRecordReader) getSchema(out *CArrowSchema) int {
+func (rr *cRecordReader) getSchema(out *CArrowSchema) int {
 	schema := rr.rdr.Schema()
 	if schema == nil {
 		return rr.maybeError()
@@ -468,7 +468,7 @@ func (rr cRecordReader) getSchema(out *CArrowSchema) int {
 	return 0
 }
 
-func (rr cRecordReader) next(out *CArrowArray) int {
+func (rr *cRecordReader) next(out *CArrowArray) int {
 	if rr.rdr.Next() {
 		ExportArrowRecordBatch(rr.rdr.RecordBatch(), out, nil)
 		return 0
@@ -477,7 +477,7 @@ func (rr cRecordReader) next(out *CArrowArray) int {
 	return rr.maybeError()
 }
 
-func (rr cRecordReader) maybeError() int {
+func (rr *cRecordReader) maybeError() int {
 	err := rr.rdr.Err()
 	if err != nil {
 		return C.EIO
@@ -485,7 +485,7 @@ func (rr cRecordReader) maybeError() int {
 	return 0
 }
 
-func (rr cRecordReader) getLastError() *C.char {
+func (rr *cRecordReader) getLastError() *C.char {
 	err := rr.rdr.Err()
 	if err != nil {
 		if rr.err != nil {
@@ -496,7 +496,7 @@ func (rr cRecordReader) getLastError() *C.char {
 	return rr.err
 }
 
-func (rr cRecordReader) release() {
+func (rr *cRecordReader) release() {
 	if rr.err != nil {
 		C.free(unsafe.Pointer(rr.err))
 	}

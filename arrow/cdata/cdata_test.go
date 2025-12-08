@@ -50,6 +50,7 @@ func TestSchemaExport(t *testing.T) {
 	sc := exportInt32TypeSchema()
 	f, err := importSchema(&sc)
 	assert.NoError(t, err)
+	defer ReleaseCArrowSchema(&sc)
 
 	keys, _ := getMetadataKeys()
 	vals, _ := getMetadataValues()
@@ -66,6 +67,7 @@ func TestSimpleArrayExport(t *testing.T) {
 	assert.False(t, test1IsReleased())
 
 	testarr := exportInt32Array()
+	defer freeCArray(testarr)
 	arr, err := ImportCArrayWithType(testarr, arrow.PrimitiveTypes.Int32)
 	assert.NoError(t, err)
 
@@ -79,7 +81,9 @@ func TestSimpleArrayExport(t *testing.T) {
 
 func TestSimpleArrayAndSchema(t *testing.T) {
 	sc := exportInt32TypeSchema()
+	defer ReleaseCArrowSchema(&sc)
 	testarr := exportInt32Array()
+	defer freeCArray(testarr)
 
 	// grab address of the buffer we stuck into the ArrowArray object
 	buflist := (*[2]unsafe.Pointer)(unsafe.Pointer(testarr.buffers))
@@ -89,6 +93,7 @@ func TestSimpleArrayAndSchema(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, arrow.PrimitiveTypes.Int32, fld.Type)
 	assert.EqualValues(t, 10, arr.Len())
+	defer arr.Release()
 
 	// verify that the address is the same of the first integer for the
 	// slice that is being used by the arrow.Array and the original buffer
@@ -782,6 +787,7 @@ func TestRecordBatch(t *testing.T) {
 
 func TestRecordReaderStream(t *testing.T) {
 	stream := arrayStreamTest()
+	defer releaseStreamTest(stream)
 	defer ReleaseCArrowArrayStream(stream)
 
 	rdr := ImportCArrayStream(stream, nil)
@@ -806,6 +812,7 @@ func TestRecordReaderStream(t *testing.T) {
 		assert.Equal(t, "bar", rec.Column(1).(*array.String).Value(1))
 		assert.Equal(t, "baz", rec.Column(1).(*array.String).Value(2))
 	}
+	runtime.GC()
 }
 
 func TestExportRecordReaderStream(t *testing.T) {
@@ -813,6 +820,7 @@ func TestExportRecordReaderStream(t *testing.T) {
 	rdr, _ := array.NewRecordReader(reclist[0].Schema(), reclist)
 
 	out := createTestStreamObj()
+	defer releaseStreamTest(out)
 	ExportRecordReader(rdr, out)
 
 	assert.NotNil(t, out.get_schema)
@@ -822,7 +830,7 @@ func TestExportRecordReaderStream(t *testing.T) {
 	assert.NotNil(t, out.private_data)
 
 	h := *(*cgo.Handle)(out.private_data)
-	assert.Same(t, rdr, h.Value().(cRecordReader).rdr)
+	assert.Same(t, rdr, h.Value().(*cRecordReader).rdr)
 
 	importedRdr := ImportCArrayStream(out, nil)
 	i := 0
@@ -862,6 +870,7 @@ func TestExportRecordReaderStreamLifetime(t *testing.T) {
 	defer rdr.Release()
 
 	out := createTestStreamObj()
+	defer releaseStreamTest(out)
 	ExportRecordReader(rdr, out)
 
 	// C Stream is holding on to memory
@@ -878,6 +887,7 @@ func TestEmptyListExport(t *testing.T) {
 
 	var out CArrowArray
 	ExportArrowArray(arr, &out, nil)
+	defer ReleaseCArrowArray(&out)
 
 	assert.Zero(t, out.length)
 	assert.Zero(t, out.null_count)
@@ -898,6 +908,8 @@ func TestEmptyDictExport(t *testing.T) {
 	var out CArrowArray
 	var sc CArrowSchema
 	ExportArrowArray(arr, &out, &sc)
+	defer ReleaseCArrowArray(&out)
+	defer ReleaseCArrowSchema(&sc)
 
 	assert.EqualValues(t, 'c', *sc.format)
 	assert.NotZero(t, sc.flags&1)
@@ -933,6 +945,8 @@ func TestEmptyStringExport(t *testing.T) {
 	var out CArrowArray
 	var sc CArrowSchema
 	ExportArrowArray(arr, &out, &sc)
+	defer ReleaseCArrowArray(&out)
+	defer ReleaseCArrowSchema(&sc)
 
 	assert.EqualValues(t, 'u', *sc.format)
 	assert.Zero(t, sc.n_children)
@@ -958,6 +972,8 @@ func TestEmptyUnionExport(t *testing.T) {
 	var out CArrowArray
 	var sc CArrowSchema
 	ExportArrowArray(arr, &out, &sc)
+	defer ReleaseCArrowArray(&out)
+	defer ReleaseCArrowSchema(&sc)
 
 	assert.EqualValues(t, 1, sc.n_children)
 	assert.Nil(t, sc.dictionary)
@@ -1015,18 +1031,21 @@ func TestRecordReaderError(t *testing.T) {
 		t.Fatalf("Expected error but got none")
 	}
 	assert.Contains(t, err.Error(), "Expected error message")
+	runtime.GC()
 
 	err = roundTripStreamTest(&failingReader{opCount: 2})
 	if err == nil {
 		t.Fatalf("Expected error but got none")
 	}
 	assert.Contains(t, err.Error(), "Expected error message")
+	runtime.GC()
 
 	err = roundTripStreamTest(&failingReader{opCount: 3})
 	if err == nil {
 		t.Fatalf("Expected error but got none")
 	}
 	assert.Contains(t, err.Error(), "Expected error message")
+	runtime.GC()
 }
 
 func TestRecordReaderImportError(t *testing.T) {
@@ -1061,6 +1080,7 @@ func TestConfuseGoGc(t *testing.T) {
 				assert.NoError(t, err)
 				runtime.GC()
 				assert.NoError(t, confuseGoGc(rdr))
+				rdr.Release()
 				runtime.GC()
 			}
 			wg.Done()

@@ -937,6 +937,7 @@ func initReader(rdr *nativeCRecordBatchReader, stream *CArrowArrayStream) error 
 		return rdr.getError(int(errno))
 	}
 	defer C.ArrowSchemaRelease(&sc)
+
 	s, err := ImportCArrowSchema((*CArrowSchema)(&sc))
 	if err != nil {
 		return err
