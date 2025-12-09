@@ -123,6 +123,10 @@ func exportInt32Array() *CArrowArray {
 	return arr
 }
 
+func freeCArray(arr *CArrowArray) {
+	C.free(unsafe.Pointer(arr))
+}
+
 func isReleased(arr *CArrowArray) bool {
 	return C.ArrowArrayIsReleased(arr) == 1
 }
@@ -408,6 +412,10 @@ func arrayStreamTest() *CArrowArrayStream {
 	return st
 }
 
+func releaseStreamTest(st *CArrowArrayStream) {
+	C.free(unsafe.Pointer(st))
+}
+
 func exportedStreamTest(reader array.RecordReader) error {
 	out := C.get_test_stream()
 	ExportRecordReader(reader, out)
@@ -421,6 +429,7 @@ func exportedStreamTest(reader array.RecordReader) error {
 
 func roundTripStreamTest(reader array.RecordReader) error {
 	out := C.get_test_stream()
+	defer C.free(unsafe.Pointer(out))
 	ExportRecordReader(reader, out)
 	rdr, err := ImportCRecordReader(out, nil)
 
