@@ -40,7 +40,7 @@ fi
 tag="v${version}"
 rc_tag="${tag}-rc${rc}"
 echo "Tagging for release: ${tag}"
-git tag "${tag}" "${rc_tag}^{}"
+git tag "${tag}" "${rc_tag}^{}" -m "${tag}"
 git push origin "${tag}"
 
 release_id="apache-arrow-go-${version}"
