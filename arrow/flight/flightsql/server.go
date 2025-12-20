@@ -381,7 +381,7 @@ func (b *BaseServer) GetFlightInfoSqlInfo(_ context.Context, _ GetSqlInfo, desc 
 }
 
 // DoGetSqlInfo returns a flight stream containing the list of sqlinfo results
-func (b *BaseServer) DoGetSqlInfo(_ context.Context, cmd GetSqlInfo) (*arrow.Schema, <-chan flight.StreamChunk, error) {
+func (b *BaseServer) DoGetSqlInfo(ctx context.Context, cmd GetSqlInfo) (*arrow.Schema, <-chan flight.StreamChunk, error) {
 	if b.Alloc == nil {
 		b.Alloc = memory.DefaultAllocator
 	}
@@ -430,7 +430,7 @@ func (b *BaseServer) DoGetSqlInfo(_ context.Context, cmd GetSqlInfo) (*arrow.Sch
 	}
 
 	// StreamChunksFromReader will call release on the reader when done
-	go flight.StreamChunksFromReader(rdr, ch)
+	go flight.StreamChunksFromReader(ctx, rdr, ch)
 	return schema_ref.SqlInfo, ch, nil
 }
 
@@ -927,19 +927,24 @@ func (f *flightSqlServer) DoGet(request *flight.Ticket, stream flight.FlightServ
 	wr := flight.NewRecordWriter(stream, ipc.WithSchema(sc))
 	defer wr.Close()
 
-	for chunk := range cc {
-		if chunk.Err != nil {
-			return chunk.Err
+	for {
+		select {
+		case <-stream.Context().Done():
+			return stream.Context().Err()
+		case chunk, ok := <-cc:
+			if !ok {
+				return nil
+			}
+			if chunk.Err != nil {
+				return chunk.Err
+			}
+			wr.SetFlightDescriptor(chunk.Desc)
+			if err := wr.WriteWithAppMetadata(chunk.Data, chunk.AppMetadata); err != nil {
+				return err
+			}
+			chunk.Data.Release()
 		}
-
-		wr.SetFlightDescriptor(chunk.Desc)
-		if err = wr.WriteWithAppMetadata(chunk.Data, chunk.AppMetadata); err != nil {
-			return err
-		}
-		chunk.Data.Release()
 	}
-
-	return err
 }
 
 type putMetadataWriter struct {
