@@ -50,6 +50,12 @@ func dict(index arrow.DataType) arrow.DataType {
 	}
 }
 
+func ree(runEnds arrow.DataType) arrow.DataType {
+	v := arrow.RunEndEncodedOf(runEnds, arrow.PrimitiveTypes.Int16)
+	v.ValueNullable = false
+	return v
+}
+
 // All tests use this in a for loop to make sure everything works for every possible
 // encoding of offsets (primitive, dictionary, run-end)
 var allAllowedOffsetTypes = []arrow.DataType{
@@ -65,6 +71,11 @@ var allAllowedOffsetTypes = []arrow.DataType{
 	dict(arrow.PrimitiveTypes.Int16),
 	dict(arrow.PrimitiveTypes.Int32),
 	dict(arrow.PrimitiveTypes.Int64),
+
+	// run-end encoded offsetType
+	ree(arrow.PrimitiveTypes.Int16),
+	ree(arrow.PrimitiveTypes.Int32),
+	ree(arrow.PrimitiveTypes.Int64),
 }
 
 func TestTimestampWithOffsetTypePrimitiveBasics(t *testing.T) {
@@ -132,6 +143,47 @@ func TestTimestampWithOffsetTypeDictionaryEncodedBasics(t *testing.T) {
 				arrow.Field{
 					Name: "offset_minutes",
 					Type: dict(indexType),
+					Nullable: false,
+				},
+			),
+			typ.StorageType()))
+
+		assert.Equal(t, "extension<arrow.timestamp_with_offset>", typ.String())
+	}
+}
+
+func TestTimestampWithOffsetTypeRunEndEncodedBasics(t *testing.T) {
+	invalidRunEndsType := arrow.PrimitiveTypes.Float32
+	_, err := extensions.NewTimestampWithOffsetTypeRunEndEncoded(testTimeUnit, invalidRunEndsType)
+	assert.True(t, err != nil, "Err should not be nil if run ends type is invalid")
+
+	runEndsTypes := []arrow.DataType{
+		arrow.PrimitiveTypes.Int16,
+		arrow.PrimitiveTypes.Int32,
+		arrow.PrimitiveTypes.Int64,
+	};
+
+	for _, indexType := range runEndsTypes {
+		typ, err := extensions.NewTimestampWithOffsetTypeRunEndEncoded(testTimeUnit, indexType)
+		assert.True(t, err == nil, "Err should be nil")
+
+		assert.Equal(t, "arrow.timestamp_with_offset", typ.ExtensionName())
+		assert.True(t, typ.ExtensionEquals(typ))
+
+		assert.True(t, arrow.TypeEqual(typ, typ))
+		assert.True(t, arrow.TypeEqual(
+			arrow.StructOf(
+				arrow.Field{
+					Name: "timestamp",
+					Type: &arrow.TimestampType{
+						Unit:     testTimeUnit,
+						TimeZone: "UTC",
+					},
+					Nullable: false,
+				},
+				arrow.Field{
+					Name: "offset_minutes",
+					Type: ree(indexType),
 					Nullable: false,
 				},
 			),
