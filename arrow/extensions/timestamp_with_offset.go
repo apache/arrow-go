@@ -17,7 +17,7 @@
 package extensions
 
 import (
-	_ "bytes"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -35,19 +35,31 @@ type TimestampWithOffsetType struct {
 	arrow.ExtensionBase
 }
 
+func isOffsetTypeOk(offsetType arrow.DataType) bool {
+	switch offsetType := offsetType.(type) {
+	case *arrow.Int16Type:
+		return true
+	case *arrow.DictionaryType:
+		return arrow.IsInteger(offsetType.IndexType.ID()) && arrow.TypeEqual(offsetType.ValueType, arrow.PrimitiveTypes.Int16)
+	default:
+		return false
+	}
+}
+
 // Whether the storageType is compatible with TimestampWithOffset.
 //
-// Returns (time_unit, ok). If ok is false, time unit is garbage.
-func isDataTypeCompatible(storageType arrow.DataType) (arrow.TimeUnit, bool) {
+// Returns (time_unit, offset_type, ok). If ok is false, time_unit and offset_type are garbage.
+func isDataTypeCompatible(storageType arrow.DataType) (arrow.TimeUnit, arrow.DataType, bool) {
 	timeUnit := arrow.Second
+	offsetType := arrow.PrimitiveTypes.Int16
 	switch t := storageType.(type) {
 	case *arrow.StructType:
 		if t.NumFields() != 2 {
-			return timeUnit, false
+			return timeUnit, offsetType, false
 		}
 
-		maybeTimestamp := t.Field(0);
-		maybeOffset := t.Field(1);
+		maybeTimestamp := t.Field(0)
+		maybeOffset := t.Field(1)
 
 		timestampOk := false
 		switch timestampType := maybeTimestamp.Type.(type) {
@@ -59,49 +71,84 @@ func isDataTypeCompatible(storageType arrow.DataType) (arrow.TimeUnit, bool) {
 		default:
 		}
 
+		offsetOk := isOffsetTypeOk(maybeOffset.Type)
+
 		ok := maybeTimestamp.Name == "timestamp" &&
 			timestampOk &&
 			!maybeTimestamp.Nullable &&
 			maybeOffset.Name == "offset_minutes" &&
-			arrow.TypeEqual(maybeOffset.Type, arrow.PrimitiveTypes.Int16) &&
+			offsetOk &&
 			!maybeOffset.Nullable
 
-		return timeUnit, ok
+		return timeUnit, maybeOffset.Type, ok
 	default:
-		return timeUnit, false
+		return timeUnit, offsetType, false
 	}
 }
 
-
 // NewTimestampWithOffsetType creates a new TimestampWithOffsetType with the underlying storage type set correctly to
-// Struct(timestamp=Timestamp(T, "UTC"), offset_minutes=Int16), where T is any TimeUnit.
-func NewTimestampWithOffsetType(unit arrow.TimeUnit) *TimestampWithOffsetType {
+// Struct(timestamp=Timestamp(T, "UTC"), offset_minutes=O), where T is any TimeUnit and O is a valid offset type.
+//
+// The error will be populated if the data type is not a valid encoding of the offsets field.
+func NewTimestampWithOffsetType(unit arrow.TimeUnit, offsetType arrow.DataType) (*TimestampWithOffsetType, error) {
+	if !isOffsetTypeOk(offsetType) {
+		return nil, errors.New(fmt.Sprintf("Invalid offset type %s", offsetType))
+	}
+
 	return &TimestampWithOffsetType{
 		ExtensionBase: arrow.ExtensionBase{
 			Storage: arrow.StructOf(
 				arrow.Field{
 					Name: "timestamp",
 					Type: &arrow.TimestampType{
-						Unit: unit,
+						Unit:     unit,
 						TimeZone: "UTC",
 					},
 					Nullable: false,
 				},
 				arrow.Field{
-					Name: "offset_minutes",
-					Type: arrow.PrimitiveTypes.Int16,
+					Name:     "offset_minutes",
+					Type:     offsetType,
 					Nullable: false,
 				},
 			),
 		},
-	}
+	}, nil
 }
 
-func (b *TimestampWithOffsetType) ArrayType() reflect.Type { return reflect.TypeOf(TimestampWithOffsetArray{}) }
+
+// NewTimestampWithOffsetTypePrimitiveEncoded creates a new TimestampWithOffsetType with the underlying storage type set correctly to
+// Struct(timestamp=Timestamp(T, "UTC"), offset_minutes=Int16), where T is any TimeUnit.
+func NewTimestampWithOffsetTypePrimitiveEncoded(unit arrow.TimeUnit) *TimestampWithOffsetType {
+	v, _ := NewTimestampWithOffsetType(unit, arrow.PrimitiveTypes.Int16)
+	// SAFETY: This should never error as Int16 is always a valid offset type
+
+	return v
+}
+
+// NewTimestampWithOffsetType creates a new TimestampWithOffsetType with the underlying storage type set correctly to
+// Struct(timestamp=Timestamp(T, "UTC"), offset_minutes=Dictionary(I, Int16)), where T is any TimeUnit and I is a
+// valid Dictionary index type.
+//
+// The error will be populated if the index is not a valid dictionary-encoding index type.
+func NewTimestampWithOffsetTypeDictionaryEncoded(unit arrow.TimeUnit, index arrow.DataType) (*TimestampWithOffsetType, error) {
+	offsetType := arrow.DictionaryType{
+		IndexType: index,
+		ValueType: arrow.PrimitiveTypes.Int16,
+		Ordered:   false,
+	}
+	return NewTimestampWithOffsetType(unit, &offsetType)
+}
+
+func (b *TimestampWithOffsetType) ArrayType() reflect.Type {
+	return reflect.TypeOf(TimestampWithOffsetArray{})
+}
 
 func (b *TimestampWithOffsetType) ExtensionName() string { return "arrow.timestamp_with_offset" }
 
-func (b *TimestampWithOffsetType) String() string { return fmt.Sprintf("extension<%s>", b.ExtensionName()) }
+func (b *TimestampWithOffsetType) String() string {
+	return fmt.Sprintf("extension<%s>", b.ExtensionName())
+}
 
 func (e *TimestampWithOffsetType) MarshalJSON() ([]byte, error) {
 	return []byte(fmt.Sprintf(`{"name":"%s","metadata":%s}`, e.ExtensionName(), e.Serialize())), nil
@@ -110,23 +157,30 @@ func (e *TimestampWithOffsetType) MarshalJSON() ([]byte, error) {
 func (b *TimestampWithOffsetType) Serialize() string { return "" }
 
 func (b *TimestampWithOffsetType) Deserialize(storageType arrow.DataType, data string) (arrow.ExtensionType, error) {
-	timeUnit, ok := isDataTypeCompatible(storageType)
+	timeUnit, offsetType, ok := isDataTypeCompatible(storageType)
 	if !ok {
 		return nil, fmt.Errorf("invalid storage type for TimestampWithOffsetType: %s", storageType.Name())
 	}
-	return NewTimestampWithOffsetType(timeUnit), nil
+
+	v, _ := NewTimestampWithOffsetType(timeUnit, offsetType)
+	// SAFETY: the offsetType has already been checked by isDataTypeCompatible, so we can ignore the error
+
+	return v, nil
 }
 
 func (b *TimestampWithOffsetType) ExtensionEquals(other arrow.ExtensionType) bool {
 	return b.ExtensionName() == other.ExtensionName()
 }
 
-func (b *TimestampWithOffsetType) TimeUnit() arrow.TimeUnit { 
+func (b *TimestampWithOffsetType) TimeUnit() arrow.TimeUnit {
 	return b.ExtensionBase.Storage.(*arrow.StructType).Fields()[0].Type.(*arrow.TimestampType).TimeUnit()
 }
 
 func (b *TimestampWithOffsetType) NewBuilder(mem memory.Allocator) array.Builder {
-	return NewTimestampWithOffsetBuilder(mem, b.TimeUnit())
+	v, _ := NewTimestampWithOffsetBuilder(mem, b.TimeUnit(), arrow.PrimitiveTypes.Int16)
+	// SAFETY: This will never error as Int16 is always a valid type for the offset field
+
+	return v
 }
 
 // TimestampWithOffsetArray is a simple array of struct
@@ -153,13 +207,13 @@ func (a *TimestampWithOffsetArray) String() string {
 }
 
 func timeFromFieldValues(utcTimestamp arrow.Timestamp, offsetMinutes int16, unit arrow.TimeUnit) time.Time {
-	hours := offsetMinutes / 60;
+	hours := offsetMinutes / 60
 	minutes := offsetMinutes % 60
 	if minutes < 0 {
 		minutes = -minutes
 	}
 
-	loc := time.FixedZone(fmt.Sprintf("UTC%+03d:%02d", hours, minutes), int(offsetMinutes) * 60)
+	loc := time.FixedZone(fmt.Sprintf("UTC%+03d:%02d", hours, minutes), int(offsetMinutes)*60)
 	return utcTimestamp.ToTime(unit).In(loc)
 }
 
@@ -182,11 +236,18 @@ func (a *TimestampWithOffsetArray) rawValueUnsafe(i int) (arrow.Timestamp, int16
 
 	timestampField := structs.Field(0)
 	timestamps := timestampField.(*array.Timestamp)
-	offsets := structs.Field(1).(*array.Int16)
 
 	timeUnit := timestampField.DataType().(*arrow.TimestampType).Unit
-	utcTimestamp := timestamps.Value(i)	
-	offsetMinutes := offsets.Value(i)
+	utcTimestamp := timestamps.Value(i)
+
+	var offsetMinutes int16
+
+	switch offsets := structs.Field(1).(type) {
+	case *array.Int16:
+		offsetMinutes = offsets.Value(i)
+	case *array.Dictionary:
+		offsetMinutes = offsets.Dictionary().(*array.Int16).Value(offsets.GetValueIndex(i))
+	}
 
 	return utcTimestamp, offsetMinutes, timeUnit
 }
@@ -243,18 +304,25 @@ type TimestampWithOffsetBuilder struct {
 	*array.ExtensionBuilder
 
 	// The layout used to parse any timestamps from strings. Defaults to time.RFC3339
-	Layout string
-	unit   arrow.TimeUnit
+	Layout     string
+	unit       arrow.TimeUnit
+	offsetType arrow.DataType
 }
 
 // NewTimestampWithOffsetBuilder creates a new TimestampWithOffsetBuilder, exposing a convenient and efficient interface
 // for writing time.Time values to the underlying storage array.
-func NewTimestampWithOffsetBuilder(mem memory.Allocator, unit arrow.TimeUnit) *TimestampWithOffsetBuilder {
-	return &TimestampWithOffsetBuilder{
-		unit: unit,
-		Layout: time.RFC3339,
-		ExtensionBuilder: array.NewExtensionBuilder(mem, NewTimestampWithOffsetType(unit)),
+func NewTimestampWithOffsetBuilder(mem memory.Allocator, unit arrow.TimeUnit, offsetType arrow.DataType) (*TimestampWithOffsetBuilder, error) {
+	dataType, err := NewTimestampWithOffsetType(unit, offsetType)
+	if err != nil {
+		return nil, err
 	}
+
+	return &TimestampWithOffsetBuilder{
+		unit:             unit,
+		offsetType: 	  offsetType,
+		Layout:           time.RFC3339,
+		ExtensionBuilder: array.NewExtensionBuilder(mem, dataType),
+	}, nil
 }
 
 func (b *TimestampWithOffsetBuilder) Append(v time.Time) {
@@ -263,7 +331,13 @@ func (b *TimestampWithOffsetBuilder) Append(v time.Time) {
 
 	structBuilder.Append(true)
 	structBuilder.FieldBuilder(0).(*array.TimestampBuilder).Append(timestamp)
-	structBuilder.FieldBuilder(1).(*array.Int16Builder).Append(int16(offsetMinutes))
+
+	switch offsets := structBuilder.FieldBuilder(1).(type) {
+	case *array.Int16Builder:
+		offsets.Append(int16(offsetMinutes))
+	case *array.Int16DictionaryBuilder:
+		offsets.Append(int16(offsetMinutes))
+	}
 }
 
 func (b *TimestampWithOffsetBuilder) UnsafeAppend(v time.Time) {
@@ -272,10 +346,16 @@ func (b *TimestampWithOffsetBuilder) UnsafeAppend(v time.Time) {
 
 	structBuilder.Append(true)
 	structBuilder.FieldBuilder(0).(*array.TimestampBuilder).UnsafeAppend(timestamp)
-	structBuilder.FieldBuilder(1).(*array.Int16Builder).UnsafeAppend(int16(offsetMinutes))
+
+	switch offsets := structBuilder.FieldBuilder(1).(type) {
+	case *array.Int16Builder:
+		offsets.UnsafeAppend(int16(offsetMinutes))
+	case *array.Int16DictionaryBuilder:
+		offsets.Append(int16(offsetMinutes))
+	}
 }
 
-// By default, this will try to parse the string using the RFC3339 layout. 
+// By default, this will try to parse the string using the RFC3339 layout.
 //
 // You can change the default layout by using builder.SetLayout()
 func (b *TimestampWithOffsetBuilder) AppendValueFromString(s string) error {
@@ -295,22 +375,36 @@ func (b *TimestampWithOffsetBuilder) AppendValueFromString(s string) error {
 
 func (b *TimestampWithOffsetBuilder) AppendValues(values []time.Time, valids []bool) {
 	structBuilder := b.ExtensionBuilder.Builder.(*array.StructBuilder)
-	timestamps := structBuilder.FieldBuilder(0).(*array.TimestampBuilder);
-	offsets := structBuilder.FieldBuilder(1).(*array.Int16Builder);
+	timestamps := structBuilder.FieldBuilder(0).(*array.TimestampBuilder)
 
 	structBuilder.AppendValues(valids)
+	// SAFETY: by this point we know all buffers have available space given the earlier
+	// call to structBuilder.AppendValues which calls Reserve internally, so it's OK to
+	// call UnsafeAppend on inner builders
 
-	for i, v := range values {
-		timestamp, offsetMinutes := fieldValuesFromTime(v, b.unit)
-
-		// SAFETY: by this point we know all buffers have available space given the earlier
-		// call to structBuilder.AppendValues which calls Reserve internally
-		if valids[i] {
-			timestamps.UnsafeAppend(timestamp)
-			offsets.UnsafeAppend(offsetMinutes)
-		} else {
-			timestamps.UnsafeAppendBoolToBitmap(false)
-			offsets.UnsafeAppendBoolToBitmap(false)
+	switch offsets := structBuilder.FieldBuilder(1).(type) {
+	case *array.Int16Builder:
+		for i, v := range values {
+			timestamp, offsetMinutes := fieldValuesFromTime(v, b.unit)
+			if valids[i] {
+				timestamps.UnsafeAppend(timestamp)
+				offsets.UnsafeAppend(offsetMinutes)
+			} else {
+				timestamps.UnsafeAppendBoolToBitmap(false)
+				offsets.UnsafeAppendBoolToBitmap(false)
+			}
+		}
+	case *array.Int16DictionaryBuilder:
+		for i, v := range values {
+			timestamp, offsetMinutes := fieldValuesFromTime(v, b.unit)
+			if valids[i] {
+				timestamps.UnsafeAppend(timestamp)
+				// TODO: I was here, this needs to be equivalent to UnsafeAppend
+				offsets.Append(offsetMinutes)
+			} else {
+				timestamps.UnsafeAppendBoolToBitmap(false)
+				offsets.UnsafeAppendBoolToBitmap(false)
+			}
 		}
 	}
 }
@@ -350,5 +444,5 @@ var (
 	_ arrow.ExtensionType          = (*TimestampWithOffsetType)(nil)
 	_ array.CustomExtensionBuilder = (*TimestampWithOffsetType)(nil)
 	_ array.ExtensionArray         = (*TimestampWithOffsetArray)(nil)
-	_ array.Builder 	       = (*TimestampWithOffsetBuilder)(nil)
+	_ array.Builder                = (*TimestampWithOffsetBuilder)(nil)
 )
