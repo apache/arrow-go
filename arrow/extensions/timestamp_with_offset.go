@@ -285,13 +285,70 @@ func (a *TimestampWithOffsetArray) Value(i int) time.Time {
 	return timeFromFieldValues(utcTimestamp, offsetMinutes, timeUnit)
 }
 
+// Iterates over the array and calls the callback with the timestamp at each position. If it's null,
+// the timestamp will be nil.
+//
+// This will iterate using the fastest method given the underlying storage array
+func (a* TimestampWithOffsetArray) iterValues(callback func(i int, utcTimestamp *time.Time)) {
+	structs := a.Storage().(*array.Struct)
+	offsets := structs.Field(1)
+	if reeOffsets, isRee := offsets.(*array.RunEndEncoded); isRee {
+		timestampField := structs.Field(0)
+		timeUnit := timestampField.DataType().(*arrow.TimestampType).Unit
+		timestamps := timestampField.(*array.Timestamp)
+
+		offsetValues := reeOffsets.Values().(*array.Int16)
+		offsetPhysicalIdx := 0
+
+		var getRunEnd (func(int) int)
+		switch arr := reeOffsets.RunEndsArr().(type) {
+		case *array.Int16:
+			getRunEnd = func(idx int) int { return int(arr.Value(idx)) }
+		case *array.Int32:
+			getRunEnd = func(idx int) int { return int(arr.Value(idx)) }
+		case *array.Int64:
+			getRunEnd = func(idx int) int { return int(arr.Value(idx)) }
+		}
+
+		for i := 0; i < a.Len(); i++ {
+			if i >= getRunEnd(offsetPhysicalIdx) {
+				offsetPhysicalIdx += 1
+			}
+
+			timestamp := (*time.Time)(nil)
+			if a.IsValid(i) {
+				utcTimestamp := timestamps.Value(i)
+				offsetMinutes := offsetValues.Value(offsetPhysicalIdx)
+				v := timeFromFieldValues(utcTimestamp, offsetMinutes, timeUnit)
+				timestamp = &v
+			} 
+
+			callback(i, timestamp)
+		}
+	} else {
+		for i := 0; i < a.Len(); i++ {
+			timestamp := (*time.Time)(nil)
+			if a.IsValid(i) {
+				utcTimestamp, offsetMinutes, timeUnit := a.rawValueUnsafe(i)
+				v := timeFromFieldValues(utcTimestamp, offsetMinutes, timeUnit)
+				timestamp = &v
+			} 
+
+			callback(i, timestamp)
+		}
+	}
+}
+
+
 func (a *TimestampWithOffsetArray) Values() []time.Time {
 	values := make([]time.Time, a.Len())
-	// TODO: optimize for run-end encoding
-	for i := range a.Len() {
-		val := a.Value(i)
-		values[i] = val
-	}
+	a.iterValues(func(i int, timestamp *time.Time) {
+		if timestamp == nil {
+			values[i] = time.Unix(0, 0)
+		} else {
+			values[i] = *timestamp
+		}
+	})
 	return values
 }
 
@@ -306,15 +363,9 @@ func (a *TimestampWithOffsetArray) ValueStr(i int) string {
 
 func (a *TimestampWithOffsetArray) MarshalJSON() ([]byte, error) {
 	values := make([]interface{}, a.Len())
-	// TODO: optimize for run-end encoding
-	for i := 0; i < a.Len(); i++ {
-		if a.IsValid(i) {
-			utcTimestamp, offsetMinutes, timeUnit := a.rawValueUnsafe(i)
-			values[i] = timeFromFieldValues(utcTimestamp, offsetMinutes, timeUnit)
-		} else {
-			values[i] = nil
-		}
-	}
+	a.iterValues(func(i int, timestamp *time.Time) {
+		values[i] = timestamp
+	})
 	return json.Marshal(values)
 }
 
