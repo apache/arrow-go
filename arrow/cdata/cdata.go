@@ -408,6 +408,11 @@ func (imp *cimporter) doImportChildren() error {
 		for i, c := range children {
 			imp.children[i].dt = st.Field(i).Type
 			if err := imp.children[i].importChild(imp, c); err != nil {
+				for j := 0; j < i; j++ {
+					if imp.children[j].data != nil {
+						imp.children[j].data.Release()
+					}
+				}
 				return err
 			}
 		}
@@ -431,6 +436,11 @@ func (imp *cimporter) doImportChildren() error {
 		for i, c := range children {
 			imp.children[i].dt = dt.Fields()[i].Type
 			if err := imp.children[i].importChild(imp, c); err != nil {
+				for j := 0; j < i; j++ {
+					if imp.children[j].data != nil {
+						imp.children[j].data.Release()
+					}
+				}
 				return err
 			}
 		}
@@ -439,6 +449,11 @@ func (imp *cimporter) doImportChildren() error {
 		for i, c := range children {
 			imp.children[i].dt = dt.Fields()[i].Type
 			if err := imp.children[i].importChild(imp, c); err != nil {
+				for j := 0; j < i; j++ {
+					if imp.children[j].data != nil {
+						imp.children[j].data.Release()
+					}
+				}
 				return err
 			}
 		}
