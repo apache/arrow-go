@@ -19,6 +19,7 @@ package extensions
 import (
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"time"
@@ -41,6 +42,13 @@ func isOffsetTypeOk(offsetType arrow.DataType) bool {
 		return true
 	case *arrow.DictionaryType:
 		return arrow.IsInteger(offsetType.IndexType.ID()) && arrow.TypeEqual(offsetType.ValueType, arrow.PrimitiveTypes.Int16)
+	case *arrow.RunEndEncodedType:
+		return offsetType.ValidRunEndsType(offsetType.RunEnds()) && 
+			arrow.TypeEqual(offsetType.Encoded(), arrow.PrimitiveTypes.Int16)
+			// FIXME: Technically this should be non-nullable, but a Arrow IPC does not deserialize
+			// ValueNullable properly, so enforcing this here would always fail when reading from an IPC
+			// stream
+			// !offsetType.ValueNullable
 	default:
 		return false
 	}
@@ -139,6 +147,21 @@ func NewTimestampWithOffsetTypeDictionaryEncoded(unit arrow.TimeUnit, index arro
 	}
 	return NewTimestampWithOffsetType(unit, &offsetType)
 }
+
+// NewTimestampWithOffsetType creates a new TimestampWithOffsetType with the underlying storage type set correctly to
+// Struct(timestamp=Timestamp(T, "UTC"), offset_minutes=RunEndEncoded(E, Int16)), where T is any TimeUnit and E is a
+// valid run-ends type.
+//
+// The error will be populated if runEnds is not a valid run-end encoding run-ends type.
+func NewTimestampWithOffsetTypeRunEndEncoded(unit arrow.TimeUnit, runEnds arrow.DataType) (*TimestampWithOffsetType, error) {
+	offsetType := arrow.RunEndEncodedOf(runEnds, arrow.PrimitiveTypes.Int16)
+	if !offsetType.ValidRunEndsType(runEnds) {
+		return nil, errors.New(fmt.Sprintf("Invalid run-ends type %s", runEnds))
+	}
+
+	return NewTimestampWithOffsetType(unit, offsetType)
+}
+
 
 func (b *TimestampWithOffsetType) ArrayType() reflect.Type {
 	return reflect.TypeOf(TimestampWithOffsetArray{})
@@ -247,6 +270,8 @@ func (a *TimestampWithOffsetArray) rawValueUnsafe(i int) (arrow.Timestamp, int16
 		offsetMinutes = offsets.Value(i)
 	case *array.Dictionary:
 		offsetMinutes = offsets.Dictionary().(*array.Int16).Value(offsets.GetValueIndex(i))
+	case *array.RunEndEncoded:
+		offsetMinutes = offsets.Values().(*array.Int16).Value(offsets.GetPhysicalIndex(i))
 	}
 
 	return utcTimestamp, offsetMinutes, timeUnit
@@ -262,6 +287,7 @@ func (a *TimestampWithOffsetArray) Value(i int) time.Time {
 
 func (a *TimestampWithOffsetArray) Values() []time.Time {
 	values := make([]time.Time, a.Len())
+	// TODO: optimize for run-end encoding
 	for i := range a.Len() {
 		val := a.Value(i)
 		values[i] = val
@@ -280,6 +306,7 @@ func (a *TimestampWithOffsetArray) ValueStr(i int) string {
 
 func (a *TimestampWithOffsetArray) MarshalJSON() ([]byte, error) {
 	values := make([]interface{}, a.Len())
+	// TODO: optimize for run-end encoding
 	for i := 0; i < a.Len(); i++ {
 		if a.IsValid(i) {
 			utcTimestamp, offsetMinutes, timeUnit := a.rawValueUnsafe(i)
@@ -307,6 +334,8 @@ type TimestampWithOffsetBuilder struct {
 	Layout     string
 	unit       arrow.TimeUnit
 	offsetType arrow.DataType
+	// lastOffset is only used to determine when to start new runs with run-end encoded offsets
+	lastOffset int16
 }
 
 // NewTimestampWithOffsetBuilder creates a new TimestampWithOffsetBuilder, exposing a convenient and efficient interface
@@ -320,6 +349,7 @@ func NewTimestampWithOffsetBuilder(mem memory.Allocator, unit arrow.TimeUnit, of
 	return &TimestampWithOffsetBuilder{
 		unit:             unit,
 		offsetType: 	  offsetType,
+		lastOffset:       math.MaxInt16,
 		Layout:           time.RFC3339,
 		ExtensionBuilder: array.NewExtensionBuilder(mem, dataType),
 	}, nil
@@ -327,6 +357,7 @@ func NewTimestampWithOffsetBuilder(mem memory.Allocator, unit arrow.TimeUnit, of
 
 func (b *TimestampWithOffsetBuilder) Append(v time.Time) {
 	timestamp, offsetMinutes := fieldValuesFromTime(v, b.unit)
+	offsetMinutes16 := int16(offsetMinutes)
 	structBuilder := b.ExtensionBuilder.Builder.(*array.StructBuilder)
 
 	structBuilder.Append(true)
@@ -334,14 +365,25 @@ func (b *TimestampWithOffsetBuilder) Append(v time.Time) {
 
 	switch offsets := structBuilder.FieldBuilder(1).(type) {
 	case *array.Int16Builder:
-		offsets.Append(int16(offsetMinutes))
+		offsets.Append(offsetMinutes16)
 	case *array.Int16DictionaryBuilder:
-		offsets.Append(int16(offsetMinutes))
+		offsets.Append(offsetMinutes16)
+	case *array.RunEndEncodedBuilder:
+		if offsetMinutes != b.lastOffset {
+			offsets.Append(1)
+			offsets.ValueBuilder().(*array.Int16Builder).Append(offsetMinutes16)
+		} else {
+			offsets.ContinueRun(1)
+		}
+
+		b.lastOffset = offsetMinutes16
 	}
+
 }
 
 func (b *TimestampWithOffsetBuilder) UnsafeAppend(v time.Time) {
 	timestamp, offsetMinutes := fieldValuesFromTime(v, b.unit)
+	offsetMinutes16 := int16(offsetMinutes)
 	structBuilder := b.ExtensionBuilder.Builder.(*array.StructBuilder)
 
 	structBuilder.Append(true)
@@ -349,9 +391,18 @@ func (b *TimestampWithOffsetBuilder) UnsafeAppend(v time.Time) {
 
 	switch offsets := structBuilder.FieldBuilder(1).(type) {
 	case *array.Int16Builder:
-		offsets.UnsafeAppend(int16(offsetMinutes))
+		offsets.UnsafeAppend(offsetMinutes16)
 	case *array.Int16DictionaryBuilder:
-		offsets.Append(int16(offsetMinutes))
+		offsets.Append(offsetMinutes16)
+	case *array.RunEndEncodedBuilder:
+		if offsetMinutes != b.lastOffset {
+			offsets.Append(1)
+			offsets.ValueBuilder().(*array.Int16Builder).Append(offsetMinutes16)
+		} else {
+			offsets.ContinueRun(1)
+		}
+
+		b.lastOffset = offsetMinutes16
 	}
 }
 
@@ -399,8 +450,26 @@ func (b *TimestampWithOffsetBuilder) AppendValues(values []time.Time, valids []b
 			timestamp, offsetMinutes := fieldValuesFromTime(v, b.unit)
 			if valids[i] {
 				timestamps.UnsafeAppend(timestamp)
-				// TODO: I was here, this needs to be equivalent to UnsafeAppend
 				offsets.Append(offsetMinutes)
+			} else {
+				timestamps.UnsafeAppendBoolToBitmap(false)
+				offsets.UnsafeAppendBoolToBitmap(false)
+			}
+		}
+	case *array.RunEndEncodedBuilder:
+		offsetValuesBuilder := offsets.ValueBuilder().(*array.Int16Builder)
+		for i, v := range values {
+			timestamp, offsetMinutes := fieldValuesFromTime(v, b.unit)
+			if valids[i] {
+				timestamps.UnsafeAppend(timestamp)
+				offsetMinutes16 := int16(offsetMinutes)
+				if offsetMinutes != b.lastOffset {
+					offsets.Append(1)
+					offsetValuesBuilder.Append(offsetMinutes16)
+				} else {
+					offsets.ContinueRun(1)
+				}
+				b.lastOffset = offsetMinutes16
 			} else {
 				timestamps.UnsafeAppendBoolToBitmap(false)
 				offsets.UnsafeAppendBoolToBitmap(false)
