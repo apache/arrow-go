@@ -16,22 +16,12 @@
 
 //go:build go1.24 && !tinygo
 
-package metadata
+package memory
 
-import (
-	"runtime"
-	"sync"
+import "runtime"
 
-	"github.com/apache/arrow-go/v18/arrow/memory"
-)
+type cleanup = runtime.Cleanup
 
-func addCleanup(bf *blockSplitBloomFilter, bufferPool *sync.Pool) {
-	runtime.AddCleanup(bf, func(data *memory.Buffer) {
-		if bufferPool != nil {
-			data.ResizeNoShrink(0)
-			bufferPool.Put(data)
-		} else {
-			data.Release()
-		}
-	}, bf.data)
+func addCleanup[T, S any](ptr *T, cleanup func(S), arg S) cleanup {
+	return runtime.AddCleanup(ptr, cleanup, arg)
 }
