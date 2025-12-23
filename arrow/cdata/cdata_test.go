@@ -834,7 +834,6 @@ func TestImportDenseUnionWithInvalidSchema(t *testing.T) {
 	defer freeTestMallocatorArr(carr, mem)
 
 	unionSc := testUnion([]string{"+ud:5,10", "i", "u"}, []string{"", "u0", "u1"}, []int64{0, flagIsNullable, flagIsNullable})
-	defer freeMallocedSchemas(unionSc)
 
 	structSc := testStruct([]string{"+s", "+ud:5,10"}, []string{"", "union_field"}, []int64{0, 0})
 	defer freeMallocedSchemas(structSc)
@@ -886,7 +885,6 @@ func TestImportSPARSEUnionWithInvalidSchema(t *testing.T) {
 	defer freeTestMallocatorArr(carr, mem)
 
 	unionSc := testUnion([]string{"+us:5,10", "i", "u"}, []string{"", "u0", "u1"}, []int64{0, flagIsNullable, flagIsNullable})
-	defer freeMallocedSchemas(unionSc)
 
 	structSc := testStruct([]string{"+s", "+us:5,10"}, []string{"", "union_field"}, []int64{0, 0})
 	defer freeMallocedSchemas(structSc)
