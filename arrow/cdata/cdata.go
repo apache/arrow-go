@@ -407,7 +407,9 @@ func (imp *cimporter) doImportChildren() error {
 		st := imp.dt.(*arrow.StructType)
 		for i, c := range children {
 			imp.children[i].dt = st.Field(i).Type
-			imp.children[i].importChild(imp, c)
+			if err := imp.children[i].importChild(imp, c); err != nil {
+				return err
+			}
 		}
 	case arrow.RUN_END_ENCODED: // import run-ends and values
 		st := imp.dt.(*arrow.RunEndEncodedType)
@@ -428,13 +430,17 @@ func (imp *cimporter) doImportChildren() error {
 		dt := imp.dt.(*arrow.DenseUnionType)
 		for i, c := range children {
 			imp.children[i].dt = dt.Fields()[i].Type
-			imp.children[i].importChild(imp, c)
+			if err := imp.children[i].importChild(imp, c); err != nil {
+				return err
+			}
 		}
 	case arrow.SPARSE_UNION:
 		dt := imp.dt.(*arrow.SparseUnionType)
 		for i, c := range children {
 			imp.children[i].dt = dt.Fields()[i].Type
-			imp.children[i].importChild(imp, c)
+			if err := imp.children[i].importChild(imp, c); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -463,8 +469,10 @@ func (imp *cimporter) doImportArr(src *CArrowArray) error {
 	// memory that we have to track the lifetime of.
 	defer func() {
 		if imp.alloc.bufCount.Load() == 0 {
-			C.ArrowArrayRelease(imp.arr)
-			C.free(unsafe.Pointer(imp.arr))
+			if C.ArrowArrayIsReleased(imp.arr) == 0 {
+				C.ArrowArrayRelease(imp.arr)
+				C.free(unsafe.Pointer(imp.arr))
+			}
 		}
 	}()
 
@@ -474,20 +482,13 @@ func (imp *cimporter) doImportArr(src *CArrowArray) error {
 // import is called recursively as needed for importing an array and its children
 // in order to generate array.Data objects
 func (imp *cimporter) doImport() error {
-	// move the array from the src object passed in to the one referenced by
-	// this importer. That way we can set up a finalizer on the created
-	// arrow.ArrayData object so we clean up our Array's memory when garbage collected.
-	defer func(arr *CArrowArray) {
-		// this should only occur in the case of an error happening
-		// during import, at which point we need to clean up the
-		// ArrowArray struct we allocated.
-		if imp.data == nil {
-			C.free(unsafe.Pointer(arr))
-		}
-	}(imp.arr)
-
 	// import any children
 	if err := imp.doImportChildren(); err != nil {
+		for _, c := range imp.children {
+			if c.data != nil {
+				c.data.Release()
+			}
+		}
 		return err
 	}
 
