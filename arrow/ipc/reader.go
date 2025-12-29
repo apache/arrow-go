@@ -141,11 +141,10 @@ func (r *Reader) readSchema(schema *arrow.Schema) error {
 		return fmt.Errorf("arrow/ipc: invalid message type (got=%v, want=%v)", msg.Type(), MessageSchema)
 	}
 
-	// FIXME(sbinet) refactor msg-header handling.
 	var schemaFB flatbuf.Schema
-	initFB(&schemaFB, msg.msg.Header)
+	msg.msg.Header(&schemaFB.Table)
 
-	r.schema, err = schemaFromFB(&schemaFB, &r.memo)
+	r.schema, err = schemaFromFB(schemaFB, &r.memo)
 	if err != nil {
 		return fmt.Errorf("arrow/ipc: could not decode schema from message schema: %w", err)
 	}
