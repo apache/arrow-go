@@ -354,7 +354,7 @@ func (s *SQLiteFlightSQLServer) DoGetTables(ctx context.Context, cmd flightsql.G
 	}
 
 	schema := rdr.Schema()
-	go flight.StreamChunksFromReader(rdr, ch)
+	go flight.StreamChunksFromReader(ctx, rdr, ch)
 	return schema, ch, nil
 }
 
@@ -485,7 +485,7 @@ func doGetQuery(ctx context.Context, mem memory.Allocator, db dbQueryCtx, query 
 	}
 
 	ch := make(chan flight.StreamChunk)
-	go flight.StreamChunksFromReader(rdr, ch)
+	go flight.StreamChunksFromReader(ctx, rdr, ch)
 	return schema, ch, nil
 }
 
