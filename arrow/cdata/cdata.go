@@ -461,6 +461,10 @@ func (imp *cimporter) doImportArr(src *CArrowArray) error {
 		imp.alloc = &importAllocator{arr: imp.arr}
 	}
 
+	if err := imp.doImport(); err != nil {
+		return err
+	}
+
 	// we tie the releasing of the array to when the buffers are
 	// cleaned up, so if there are no buffers that we've imported
 	// such as for a null array or a nested array with no bitmap
@@ -469,14 +473,12 @@ func (imp *cimporter) doImportArr(src *CArrowArray) error {
 	// memory that we have to track the lifetime of.
 	defer func() {
 		if imp.alloc.bufCount.Load() == 0 {
-			if C.ArrowArrayIsReleased(imp.arr) == 0 {
-				C.ArrowArrayRelease(imp.arr)
-				C.free(unsafe.Pointer(imp.arr))
-			}
+			C.ArrowArrayRelease(imp.arr)
+			C.free(unsafe.Pointer(imp.arr))
 		}
 	}()
 
-	return imp.doImport()
+	return nil
 }
 
 // import is called recursively as needed for importing an array and its children
