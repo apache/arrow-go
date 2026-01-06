@@ -783,3 +783,28 @@ func TestValueCloneConsistency(t *testing.T) {
 	assert.Equal(t, variant.String, cloned.Type())
 	assert.Equal(t, "test", cloned.Value())
 }
+
+// test fix from github.com/apache/arrow-go/issues/623
+func TestVariantJSONRoundTrip(t *testing.T) {
+	jsonBytes := []byte(`{
+  "object_array": [
+    {
+      "a_field_name_1": "some value AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "a_field_name_2": "some value AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "a_field_name_3": "some value",
+      "a_field_name_4": "some value",
+      "a_field_name_5": "some value",
+      "a_field_name_6": "some value",
+      "a_field_name_7": "some value",
+      "a_field_name_8": "some value",
+      "a_field_name_9": "some value",
+      "a_field_name_10": "some value"
+    }
+  ]
+}`)
+	variantFromJSON, err := variant.ParseJSONBytes(jsonBytes, false)
+	if err != nil {
+		panic(err)
+	}
+	assert.JSONEq(t, string(jsonBytes), variantFromJSON.String())
+}
