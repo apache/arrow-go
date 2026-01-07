@@ -25,7 +25,7 @@ require (
 	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815
 	github.com/goccy/go-json v0.10.5
 	github.com/golang/snappy v1.0.0
-	github.com/google/flatbuffers v25.9.23+incompatible
+	github.com/google/flatbuffers v25.12.19+incompatible
 	github.com/google/uuid v1.6.0
 	github.com/hamba/avro/v2 v2.30.0
 	github.com/klauspost/asmfmt v1.3.2
