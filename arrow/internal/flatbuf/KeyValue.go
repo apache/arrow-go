@@ -26,13 +26,12 @@ import (
 /// user defined key value pairs to add custom metadata to arrow
 /// key namespacing is the responsibility of the user
 type KeyValue struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsKeyValue(buf []byte, offset flatbuffers.UOffsetT) *KeyValue {
+func GetRootAsKeyValue(buf []byte, offset flatbuffers.UOffsetT) (x KeyValue) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &KeyValue{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -40,10 +39,9 @@ func FinishKeyValueBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffs
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsKeyValue(buf []byte, offset flatbuffers.UOffsetT) *KeyValue {
+func GetSizePrefixedRootAsKeyValue(buf []byte, offset flatbuffers.UOffsetT) (x KeyValue) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &KeyValue{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -52,26 +50,22 @@ func FinishSizePrefixedKeyValueBuffer(builder *flatbuffers.Builder, offset flatb
 }
 
 func (rcv *KeyValue) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *KeyValue) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func (rcv *KeyValue) Key() []byte {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return rcv._tab.ByteVector(o + rcv._tab.Pos)
+		return rcv.ByteVector(o + rcv.Pos)
 	}
 	return nil
 }
 
 func (rcv *KeyValue) Value() []byte {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		return rcv._tab.ByteVector(o + rcv._tab.Pos)
+		return rcv.ByteVector(o + rcv.Pos)
 	}
 	return nil
 }
