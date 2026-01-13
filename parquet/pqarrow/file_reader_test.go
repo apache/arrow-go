@@ -578,3 +578,77 @@ func TestReadParquetFile(t *testing.T) {
 	_, err = arrowRdr.ReadTable(ctx)
 	assert.NoError(t, err)
 }
+
+func TestPartialStructColumnRead(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	// Create schema with nested struct containing multiple fields
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "nested", Type: arrow.StructOf(
+			arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Float64},
+			arrow.Field{Name: "b", Type: arrow.PrimitiveTypes.Float64},
+			arrow.Field{Name: "c", Type: arrow.PrimitiveTypes.Float64},
+		)},
+	}, nil)
+
+	// Write parquet file with sample data
+	buf := new(bytes.Buffer)
+	writer, err := pqarrow.NewFileWriter(schema, buf, nil, pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+
+	b := array.NewRecordBuilder(mem, schema)
+	defer b.Release()
+
+	sb := b.Field(0).(*array.StructBuilder)
+	sb.Append(true)
+	sb.FieldBuilder(0).(*array.Float64Builder).Append(1.0)
+	sb.FieldBuilder(1).(*array.Float64Builder).Append(2.0)
+	sb.FieldBuilder(2).(*array.Float64Builder).Append(3.0)
+
+	rec := b.NewRecordBatch()
+	defer rec.Release()
+
+	require.NoError(t, writer.Write(rec))
+	require.NoError(t, writer.Close())
+
+	// Read back with partial column projection (only nested.a and nested.c)
+	pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer pf.Close()
+
+	fr, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{}, mem)
+	require.NoError(t, err)
+
+	// Only read leaf indices 0 (nested.a) and 2 (nested.c), skip 1 (nested.b)
+	partialLeaves := map[int]bool{0: true, 2: true}
+	fieldIdx, err := fr.Manifest.GetFieldIndices([]int{0})
+	require.NoError(t, err)
+
+	// This should NOT panic
+	reader, err := fr.GetFieldReader(context.Background(), fieldIdx[0], partialLeaves, []int{0})
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+
+	// Verify the filtered struct type only has 2 fields (a and c)
+	field := reader.Field()
+	structType := field.Type.(*arrow.StructType)
+	require.Equal(t, 2, structType.NumFields())
+	require.Equal(t, "a", structType.Field(0).Name)
+	require.Equal(t, "c", structType.Field(1).Name)
+
+	// Read and verify data
+	chunked, err := reader.NextBatch(1)
+	require.NoError(t, err)
+	defer chunked.Release()
+	require.Equal(t, 1, chunked.Len())
+
+	// Get the first chunk and verify values (should have a=1.0, c=3.0, no b)
+	arr := chunked.Chunk(0).(*array.Struct)
+
+	aArr := arr.Field(0).(*array.Float64)
+	require.Equal(t, 1.0, aArr.Value(0))
+
+	cArr := arr.Field(1).(*array.Float64)
+	require.Equal(t, 3.0, cArr.Value(0))
+}

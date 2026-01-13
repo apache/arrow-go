@@ -594,6 +594,8 @@ func (fr *FileReader) getReader(ctx context.Context, field *SchemaField, arrowFi
 		// because we performed getReader concurrently, we need to prune out any empty readers
 		childReaders = slices.DeleteFunc(childReaders,
 			func(r *ColumnReader) bool { return r == nil })
+		childFields = slices.DeleteFunc(childFields,
+			func(f arrow.Field) bool { return f.Type == nil })
 		if len(childFields) == 0 {
 			return nil, nil
 		}
