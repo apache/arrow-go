@@ -829,7 +829,9 @@ func (s *FlightSqlServerSessionSuite) TestCloseSession() {
 	s.NotNil(setRes)
 	s.Empty(setRes.Errors)
 
-	closeRes, err := s.cl.CloseSession(ctx, &flight.CloseSessionRequest{})
+	var trailer metadata.MD
+
+	closeRes, err := s.cl.CloseSession(ctx, &flight.CloseSessionRequest{}, grpc.Trailer(&trailer))
 	s.NoError(err)
 	s.NotNil(closeRes)
 	s.Equal(flight.CloseSessionResultClosed, closeRes.GetStatus())
