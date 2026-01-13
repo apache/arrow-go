@@ -741,7 +741,10 @@ func (s *FlightSqlServerSessionSuite) TestSetSessionOptions() {
 
 func (s *FlightSqlServerSessionSuite) TestGetSetGetSessionOptions() {
 	ctx := context.TODO()
-	getRes, err := s.cl.GetSessionOptions(ctx, &flight.GetSessionOptionsRequest{})
+
+	var trailer metadata.MD
+
+	getRes, err := s.cl.GetSessionOptions(ctx, &flight.GetSessionOptionsRequest{}, grpc.Trailer(&trailer))
 	s.NoError(err)
 	s.NotNil(getRes)
 	s.Len(getRes.SessionOptions, 0)
@@ -756,12 +759,12 @@ func (s *FlightSqlServerSessionSuite) TestGetSetGetSessionOptions() {
 	s.NoError(err)
 	s.NotNil(optionVals)
 
-	setRes, err := s.cl.SetSessionOptions(ctx, &flight.SetSessionOptionsRequest{SessionOptions: optionVals})
+	setRes, err := s.cl.SetSessionOptions(ctx, &flight.SetSessionOptionsRequest{SessionOptions: optionVals}, grpc.Trailer(&trailer))
 	s.NoError(err)
 	s.NotNil(setRes)
 	s.Empty(setRes.Errors)
 
-	getRes2, err := s.cl.GetSessionOptions(ctx, &flight.GetSessionOptionsRequest{})
+	getRes2, err := s.cl.GetSessionOptions(ctx, &flight.GetSessionOptionsRequest{}, grpc.Trailer(&trailer))
 	s.NoError(err)
 	s.NotNil(getRes2)
 
@@ -775,6 +778,9 @@ func (s *FlightSqlServerSessionSuite) TestGetSetGetSessionOptions() {
 
 func (s *FlightSqlServerSessionSuite) TestSetRemoveSessionOptions() {
 	ctx := context.TODO()
+
+	var trailer metadata.MD
+
 	initialOpts := map[string]any{
 		"foolong":            int64(123),
 		"bardouble":          456.0,
@@ -785,7 +791,7 @@ func (s *FlightSqlServerSessionSuite) TestSetRemoveSessionOptions() {
 	s.NoError(err)
 	s.NotNil(optionVals)
 
-	setRes, err := s.cl.SetSessionOptions(ctx, &flight.SetSessionOptionsRequest{SessionOptions: optionVals})
+	setRes, err := s.cl.SetSessionOptions(ctx, &flight.SetSessionOptionsRequest{SessionOptions: optionVals}, grpc.Trailer(&trailer))
 	s.NoError(err)
 	s.NotNil(setRes)
 	s.Empty(setRes.Errors)
@@ -796,12 +802,12 @@ func (s *FlightSqlServerSessionSuite) TestSetRemoveSessionOptions() {
 	s.NoError(err)
 	s.NotNil(removeKeyOpts)
 
-	setRes2, err := s.cl.SetSessionOptions(ctx, &flight.SetSessionOptionsRequest{SessionOptions: removeKeyOpts})
+	setRes2, err := s.cl.SetSessionOptions(ctx, &flight.SetSessionOptionsRequest{SessionOptions: removeKeyOpts}, grpc.Trailer(&trailer))
 	s.NoError(err)
 	s.NotNil(setRes2)
 	s.Empty(setRes2.Errors)
 
-	getRes, err := s.cl.GetSessionOptions(ctx, &flight.GetSessionOptionsRequest{})
+	getRes, err := s.cl.GetSessionOptions(ctx, &flight.GetSessionOptionsRequest{}, grpc.Trailer(&trailer))
 	s.NoError(err)
 	s.NotNil(getRes)
 
