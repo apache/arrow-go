@@ -287,6 +287,11 @@ func TestCookiesClone(t *testing.T) {
 	}
 	makeReq(client1, t)
 
+	// Give client middleware time to process the cookies.
+	// Without this, the next request may start before the cookies
+	// are stored in the jar, causing a race condition.
+	time.Sleep(50 * time.Millisecond)
+
 	// validate set
 	cookieMiddleware.expectedCookies = map[string]string{
 		"foo": "bar", "foo2": "bar2",

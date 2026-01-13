@@ -1000,11 +1000,10 @@ func TestStatelessServerSessionCookies(t *testing.T) {
 	require.NoError(t, err)
 	defer client.Close()
 
-	var trailer metadata.MD
-
 	ctx := context.TODO()
 
 	// Get empty session; should create new session since one doesn't exist
+	trailer := metadata.MD{}
 	_, err = client.GetSessionOptions(ctx, &flight.GetSessionOptionsRequest{}, grpc.Trailer(&trailer))
 	require.NoError(t, err)
 
@@ -1017,6 +1016,7 @@ func TestStatelessServerSessionCookies(t *testing.T) {
 	require.NotNil(t, optionVals)
 
 	// Add option to existing session
+	trailer = metadata.MD{}
 	_, err = client.SetSessionOptions(ctx, &flight.SetSessionOptionsRequest{SessionOptions: optionVals}, grpc.Trailer(&trailer))
 	require.NoError(t, err)
 
@@ -1025,6 +1025,7 @@ func TestStatelessServerSessionCookies(t *testing.T) {
 	require.Equal(t, `arrow_flight_session=ChAKBWhlbGxvEgcKBXdvcmxk`, trailer.Get("set-cookie")[0]) // base64 of binary '{"hello":"world"}' proto message
 
 	// Close the existing session
+	trailer = metadata.MD{}
 	_, err = client.CloseSession(ctx, &flight.CloseSessionRequest{}, grpc.Trailer(&trailer))
 	require.NoError(t, err)
 
@@ -1037,6 +1038,7 @@ func TestStatelessServerSessionCookies(t *testing.T) {
 	// Get the session; his should create a new session because we just closed the previous one
 	// Realistically no session is "created", this just happens because the client was told to drop the cookie
 	// in the last step.
+	trailer = metadata.MD{}
 	_, err = client.GetSessionOptions(ctx, &flight.GetSessionOptionsRequest{}, grpc.Trailer(&trailer))
 	require.NoError(t, err)
 
@@ -1045,6 +1047,7 @@ func TestStatelessServerSessionCookies(t *testing.T) {
 	require.Equal(t, "arrow_flight_session=", trailer.Get("set-cookie")[0])
 
 	// Close the new session
+	trailer = metadata.MD{}
 	_, err = client.CloseSession(ctx, &flight.CloseSessionRequest{}, grpc.Trailer(&trailer))
 	require.NoError(t, err)
 
