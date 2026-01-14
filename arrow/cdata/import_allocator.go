@@ -29,6 +29,7 @@ import "C"
 
 type importAllocator struct {
 	bufCount atomic.Int64
+	released atomic.Bool
 
 	arr *CArrowArray
 }
@@ -49,6 +50,12 @@ func (i *importAllocator) Free([]byte) {
 	debug.Assert(i.bufCount.Load() > 0, "too many releases")
 
 	if i.bufCount.Add(-1) == 0 {
+		i.forceRelease()
+	}
+}
+
+func (i *importAllocator) forceRelease() {
+	if i.released.CompareAndSwap(false, true) {
 		defer C.free(unsafe.Pointer(i.arr))
 		C.ArrowArrayRelease(i.arr)
 		if C.ArrowArrayIsReleased(i.arr) != 1 {
