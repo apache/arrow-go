@@ -139,7 +139,7 @@ func TestComparisons(t *testing.T) {
 		one  = scalar.MakeScalar(int32(1))
 		two  = scalar.MakeScalar(int32(2))
 
-		exampleUUID  = uuid.MustParse("102cb62f-e6f8-4eb0-9973-d9b012ff0967")
+		exampleUUID    = uuid.MustParse("102cb62f-e6f8-4eb0-9973-d9b012ff0967")
 		exampleUUID2   = uuid.MustParse("c1b0d8e0-0b0e-4b1e-9b0a-0e0b0d0c0a0b")
 		uuidStorage, _ = scalar.MakeScalarParam(exampleUUID[:],
 			&arrow.FixedSizeBinaryType{ByteWidth: 16})
