@@ -25,13 +25,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/internal/flatbuf"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // reproducer from ARROW-13529
@@ -356,4 +357,50 @@ func TestWritePayload(t *testing.T) {
 	msg, err := r.Message()
 	require.NoError(t, err)
 	require.True(t, msg.Type() == MessageRecordBatch)
+}
+
+// TestVariadicCountsNotAccumulatedAcrossEncode verifies that variadicCounts
+// does not accumulate across encode calls separated by reset(). Without this,
+// each batch's variadic counts would include counts from previous batches,
+// producing malformed IPC that other implementations (e.g., arrow-rs) cannot
+// read.
+func TestVariadicCountsNotAccumulatedAcrossEncode(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	enc := newRecordEncoder(
+		mem, 0,
+		kMaxNestingDepth,
+		false,
+		-1,
+		1,
+		0,
+		nil,
+	)
+
+	// Create a StringView array with a long string (>12 bytes uses out-of-line
+	// storage, which adds to variadicCounts).
+	bldr := array.NewStringViewBuilder(mem)
+	bldr.Append("this_is_a_long_string_value")
+	arr := bldr.NewArray()
+	bldr.Release()
+	defer arr.Release()
+
+	schema := arrow.NewSchema(
+		[]arrow.Field{
+			{Name: "sv", Type: arrow.BinaryTypes.StringView},
+		}, nil,
+	)
+	rec := array.NewRecordBatch(schema, []arrow.Array{arr}, 1)
+	defer rec.Release()
+
+	expectedCounts := []int64{1}
+	for range 2 {
+		enc.reset()
+
+		var p Payload
+		require.NoError(t, enc.encode(&p, rec))
+		require.Equal(t, expectedCounts, enc.variadicCounts)
+		p.Release()
+	}
 }
