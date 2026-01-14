@@ -741,7 +741,10 @@ func (s *FlightSqlServerSessionSuite) TestSetSessionOptions() {
 
 func (s *FlightSqlServerSessionSuite) TestGetSetGetSessionOptions() {
 	ctx := context.TODO()
-	getRes, err := s.cl.GetSessionOptions(ctx, &flight.GetSessionOptionsRequest{})
+
+	var trailer metadata.MD
+
+	getRes, err := s.cl.GetSessionOptions(ctx, &flight.GetSessionOptionsRequest{}, grpc.Trailer(&trailer))
 	s.NoError(err)
 	s.NotNil(getRes)
 	s.Len(getRes.SessionOptions, 0)
@@ -756,12 +759,12 @@ func (s *FlightSqlServerSessionSuite) TestGetSetGetSessionOptions() {
 	s.NoError(err)
 	s.NotNil(optionVals)
 
-	setRes, err := s.cl.SetSessionOptions(ctx, &flight.SetSessionOptionsRequest{SessionOptions: optionVals})
+	setRes, err := s.cl.SetSessionOptions(ctx, &flight.SetSessionOptionsRequest{SessionOptions: optionVals}, grpc.Trailer(&trailer))
 	s.NoError(err)
 	s.NotNil(setRes)
 	s.Empty(setRes.Errors)
 
-	getRes2, err := s.cl.GetSessionOptions(ctx, &flight.GetSessionOptionsRequest{})
+	getRes2, err := s.cl.GetSessionOptions(ctx, &flight.GetSessionOptionsRequest{}, grpc.Trailer(&trailer))
 	s.NoError(err)
 	s.NotNil(getRes2)
 
@@ -775,6 +778,9 @@ func (s *FlightSqlServerSessionSuite) TestGetSetGetSessionOptions() {
 
 func (s *FlightSqlServerSessionSuite) TestSetRemoveSessionOptions() {
 	ctx := context.TODO()
+
+	var trailer metadata.MD
+
 	initialOpts := map[string]any{
 		"foolong":            int64(123),
 		"bardouble":          456.0,
@@ -785,7 +791,7 @@ func (s *FlightSqlServerSessionSuite) TestSetRemoveSessionOptions() {
 	s.NoError(err)
 	s.NotNil(optionVals)
 
-	setRes, err := s.cl.SetSessionOptions(ctx, &flight.SetSessionOptionsRequest{SessionOptions: optionVals})
+	setRes, err := s.cl.SetSessionOptions(ctx, &flight.SetSessionOptionsRequest{SessionOptions: optionVals}, grpc.Trailer(&trailer))
 	s.NoError(err)
 	s.NotNil(setRes)
 	s.Empty(setRes.Errors)
@@ -796,12 +802,12 @@ func (s *FlightSqlServerSessionSuite) TestSetRemoveSessionOptions() {
 	s.NoError(err)
 	s.NotNil(removeKeyOpts)
 
-	setRes2, err := s.cl.SetSessionOptions(ctx, &flight.SetSessionOptionsRequest{SessionOptions: removeKeyOpts})
+	setRes2, err := s.cl.SetSessionOptions(ctx, &flight.SetSessionOptionsRequest{SessionOptions: removeKeyOpts}, grpc.Trailer(&trailer))
 	s.NoError(err)
 	s.NotNil(setRes2)
 	s.Empty(setRes2.Errors)
 
-	getRes, err := s.cl.GetSessionOptions(ctx, &flight.GetSessionOptionsRequest{})
+	getRes, err := s.cl.GetSessionOptions(ctx, &flight.GetSessionOptionsRequest{}, grpc.Trailer(&trailer))
 	s.NoError(err)
 	s.NotNil(getRes)
 
@@ -829,7 +835,9 @@ func (s *FlightSqlServerSessionSuite) TestCloseSession() {
 	s.NotNil(setRes)
 	s.Empty(setRes.Errors)
 
-	closeRes, err := s.cl.CloseSession(ctx, &flight.CloseSessionRequest{})
+	var trailer metadata.MD
+
+	closeRes, err := s.cl.CloseSession(ctx, &flight.CloseSessionRequest{}, grpc.Trailer(&trailer))
 	s.NoError(err)
 	s.NotNil(closeRes)
 	s.Equal(flight.CloseSessionResultClosed, closeRes.GetStatus())
@@ -992,11 +1000,10 @@ func TestStatelessServerSessionCookies(t *testing.T) {
 	require.NoError(t, err)
 	defer client.Close()
 
-	var trailer metadata.MD
-
 	ctx := context.TODO()
 
 	// Get empty session; should create new session since one doesn't exist
+	trailer := metadata.MD{}
 	_, err = client.GetSessionOptions(ctx, &flight.GetSessionOptionsRequest{}, grpc.Trailer(&trailer))
 	require.NoError(t, err)
 
@@ -1009,6 +1016,7 @@ func TestStatelessServerSessionCookies(t *testing.T) {
 	require.NotNil(t, optionVals)
 
 	// Add option to existing session
+	trailer = metadata.MD{}
 	_, err = client.SetSessionOptions(ctx, &flight.SetSessionOptionsRequest{SessionOptions: optionVals}, grpc.Trailer(&trailer))
 	require.NoError(t, err)
 
@@ -1017,6 +1025,7 @@ func TestStatelessServerSessionCookies(t *testing.T) {
 	require.Equal(t, `arrow_flight_session=ChAKBWhlbGxvEgcKBXdvcmxk`, trailer.Get("set-cookie")[0]) // base64 of binary '{"hello":"world"}' proto message
 
 	// Close the existing session
+	trailer = metadata.MD{}
 	_, err = client.CloseSession(ctx, &flight.CloseSessionRequest{}, grpc.Trailer(&trailer))
 	require.NoError(t, err)
 
@@ -1029,6 +1038,7 @@ func TestStatelessServerSessionCookies(t *testing.T) {
 	// Get the session; his should create a new session because we just closed the previous one
 	// Realistically no session is "created", this just happens because the client was told to drop the cookie
 	// in the last step.
+	trailer = metadata.MD{}
 	_, err = client.GetSessionOptions(ctx, &flight.GetSessionOptionsRequest{}, grpc.Trailer(&trailer))
 	require.NoError(t, err)
 
@@ -1037,6 +1047,7 @@ func TestStatelessServerSessionCookies(t *testing.T) {
 	require.Equal(t, "arrow_flight_session=", trailer.Get("set-cookie")[0])
 
 	// Close the new session
+	trailer = metadata.MD{}
 	_, err = client.CloseSession(ctx, &flight.CloseSessionRequest{}, grpc.Trailer(&trailer))
 	require.NoError(t, err)
 

@@ -235,6 +235,11 @@ func TestCookieExpiration(t *testing.T) {
 	}
 	makeReq(client, t)
 
+	// Give client middleware time to process the deletion cookie.
+	// Without this, the next request may start before the cookie
+	// is removed from the jar, causing a race condition.
+	time.Sleep(50 * time.Millisecond)
+
 	// verify it's been deleted
 	cookieMiddleware.expectedCookies = map[string]string{}
 	makeReq(client, t)
@@ -281,6 +286,11 @@ func TestCookiesClone(t *testing.T) {
 		{Name: "foo2", Value: "bar2", MaxAge: 1},
 	}
 	makeReq(client1, t)
+
+	// Give client middleware time to process the cookies.
+	// Without this, the next request may start before the cookies
+	// are stored in the jar, causing a race condition.
+	time.Sleep(50 * time.Millisecond)
 
 	// validate set
 	cookieMiddleware.expectedCookies = map[string]string{
