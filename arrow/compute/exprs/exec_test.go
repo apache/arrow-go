@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/substrait-io/substrait-go/v7/expr"
 	"github.com/substrait-io/substrait-go/v7/types"
+	proto "github.com/substrait-io/substrait-protobuf/go/substraitpb"
 )
 
 var (
@@ -138,8 +139,6 @@ func TestComparisons(t *testing.T) {
 		one  = scalar.MakeScalar(int32(1))
 		two  = scalar.MakeScalar(int32(2))
 
-		str            = scalar.MakeScalar("hello")
-		bin            = scalar.MakeScalar([]byte("hello"))
 		exampleUUID    = uuid.MustParse("102cb62f-e6f8-4eb0-9973-d9b012ff0967")
 		exampleUUID2   = uuid.MustParse("c1b0d8e0-0b0e-4b1e-9b0a-0e0b0d0c0a0b")
 		uuidStorage, _ = scalar.MakeScalarParam(exampleUUID[:],
@@ -201,8 +200,12 @@ func TestComparisons(t *testing.T) {
 	expect(t, "greater", one, zero, true)
 	expect(t, "greater", one, two, false)
 
-	expect(t, "equal", str, bin, true)
-	expect(t, "equal", bin, str, true)
+	// Note: Direct comparison between string and binary types is not supported
+	// in substrait-go v7.2.2+ due to stricter type parameter validation.
+	// Previously these comparisons were allowed but are now correctly rejected
+	// as 'equal(any1, any1)' requires both arguments to be the same type.
+	// expect(t, "equal", str, bin, true)
+	// expect(t, "equal", bin, str, true)
 
 	expect(t, "equal", uuidScalar, uuidScalar, true)
 	expect(t, "equal", uuidScalar, uuidScalar2, false)
@@ -515,7 +518,15 @@ func Test_Types(t *testing.T) {
 				v, err := arrow.Time64FromString("11:00:00.000000", arrow.Nanosecond)
 				rq.NoError(err, "Failed to create Time64 value")
 
-				return expr.NewPrimitiveLiteral(types.Time(v), true)
+				pt := &types.PrecisionTime{
+					Precision: int32(arrow.Nanosecond) * 3,
+					Value:     int64(v),
+				}
+
+				lit, err := expr.NewLiteral(pt, true)
+				rq.NoError(err, "Failed to create literal")
+
+				return lit
 			},
 		},
 		{
@@ -578,10 +589,20 @@ func Test_Types(t *testing.T) {
 				return array.NewRecordBatch(schema, []arrow.Array{b.NewArray()}, 1)
 			},
 			val: func(rq *require.Assertions) expr.Literal {
-				v, err := arrow.TimestampFromString("2021-01-01T11:00:00.000000Z", arrow.Microsecond)
+				v, err := arrow.TimestampFromString("2021-01-01T11:00:00.000000Z", arrow.Nanosecond)
 				rq.NoError(err, "Failed to create Timestamp value")
 
-				return expr.NewPrimitiveLiteral(types.Timestamp(v), true)
+				pts := &types.PrecisionTimestamp{
+					PrecisionTimestamp: &proto.Expression_Literal_PrecisionTimestamp{
+						Precision: int32(arrow.Nanosecond) * 3,
+						Value:     int64(v),
+					},
+				}
+
+				lit, err := expr.NewLiteral(pts, true)
+				rq.NoError(err, "Failed to create literal")
+
+				return lit
 			},
 		},
 		{
@@ -607,12 +628,12 @@ func Test_Types(t *testing.T) {
 				return array.NewRecordBatch(schema, []arrow.Array{b.NewArray()}, 1)
 			},
 			val: func(rq *require.Assertions) expr.Literal {
-				v, p, s, err := expr.DecimalStringToBytes("456.7890123456")
+				v, _, s, err := expr.DecimalStringToBytes("456.7890123456")
 				rq.NoError(err, "Failed to convert decimal string to bytes")
 
 				lit, err := expr.NewLiteral(&types.Decimal{
 					Value:     v[:16],
-					Precision: p,
+					Precision: 38,
 					Scale:     s,
 				}, true)
 				rq.NoError(err, "Failed to create Decimal128 literal")
