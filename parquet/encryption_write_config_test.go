@@ -61,9 +61,7 @@ import (
  *                                  keys. Use the alternative (AES_GCM_CTR_V1) algorithm.
  */
 
-var (
-	tempdir string
-)
+var tempdir string
 
 type EncryptionConfigTestSuite struct {
 	suite.Suite
@@ -79,13 +77,16 @@ type EncryptionConfigTestSuite struct {
 	columnEncryptionKey2 string
 }
 
-func (en *EncryptionConfigTestSuite) encryptFile(configs *parquet.FileEncryptionProperties, filename string) {
+func (en *EncryptionConfigTestSuite) encryptFile(configs *parquet.FileEncryptionProperties, filename string, writerOpts ...parquet.WriterProperty) {
 	filename = filepath.Join(tempdir, filename)
 
-	props := parquet.NewWriterProperties(
+	opts := []parquet.WriterProperty{
 		parquet.WithPageIndexEnabled(true),
 		parquet.WithCompression(compress.Codecs.Snappy),
-		parquet.WithEncryptionProperties(configs))
+		parquet.WithEncryptionProperties(configs),
+	}
+	opts = append(opts, writerOpts...)
+	props := parquet.NewWriterProperties(opts...)
 	outFile, err := os.Create(filename)
 	en.Require().NoError(err)
 	en.Require().NotNil(outFile)
@@ -135,20 +136,18 @@ func (en *EncryptionConfigTestSuite) encryptFile(configs *parquet.FileEncryption
 
 		// write the int64 column, each row repeats twice
 		int64Writer := nextColumn().(*file.Int64ColumnChunkWriter)
-		for i := 0; i < 2*en.rowsPerRG; i++ {
+		for i := 0; i < en.rowsPerRG; i++ {
 			var (
-				defLevel = [1]int16{1}
-				repLevel = [1]int16{0}
-				value    = int64(i) * 1000 * 1000 * 1000 * 1000
+				defLevels = []int16{1, 1}
+				repLevels = []int16{0, 1}
+				values    = []int64{
+					int64(i*2) * 1000 * 1000 * 1000 * 1000,
+					int64(i*2+1) * 1000 * 1000 * 1000 * 1000,
+				}
 			)
-			if i%2 == 0 {
-				repLevel[0] = 0
-			} else {
-				repLevel[0] = 1
-			}
 
-			n, err := int64Writer.WriteBatch([]int64{value}, defLevel[:], repLevel[:])
-			en.EqualValues(1, n)
+			n, err := int64Writer.WriteBatch(values, defLevels, repLevels)
+			en.EqualValues(2, n)
 			en.Require().NoError(err)
 		}
 
@@ -263,7 +262,11 @@ func (en *EncryptionConfigTestSuite) SetupSuite() {
 // (uniform encryption)
 func (en *EncryptionConfigTestSuite) TestUniformEncryption() {
 	props := parquet.NewFileEncryptionProperties(en.footerEncryptionKey, parquet.WithFooterKeyMetadata("kf"))
-	en.encryptFile(props, "tmp_uniform_encryption.parquet.encrypted")
+	en.encryptFile(props.Clone(""), "tmp_uniform_encryption.parquet.encrypted")
+	en.encryptFile(props.Clone(""), "tmp_uniform_encryption.parquet.uncompressed.encrypted", parquet.WithCompression(compress.Codecs.Uncompressed))
+	en.encryptFile(props.Clone(""), "tmp_uniform_encryption.parquet.v2.encrypted", parquet.WithDataPageVersion(parquet.DataPageV2))
+	en.encryptFile(props.Clone(""), "tmp_uniform_encryption.parquet.v2.uncompressed.encrypted", parquet.WithCompression(compress.Codecs.Uncompressed),
+		parquet.WithDataPageVersion(parquet.DataPageV2))
 }
 
 // Encryption config 2: Encrypt Two Columns and the Footer, with different keys
@@ -273,7 +276,11 @@ func (en *EncryptionConfigTestSuite) TestEncryptTwoColumnsAndFooter() {
 	encryptCols[en.pathToFloatField] = parquet.NewColumnEncryptionProperties(en.pathToFloatField, parquet.WithKey(en.columnEncryptionKey2), parquet.WithKeyID("kc2"))
 
 	props := parquet.NewFileEncryptionProperties(en.footerEncryptionKey, parquet.WithFooterKeyMetadata("kf"), parquet.WithEncryptedColumns(encryptCols))
-	en.encryptFile(props, "tmp_encrypt_columns_and_footer.parquet.encrypted")
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer.parquet.encrypted")
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer.parquet.uncompressed.encrypted", parquet.WithCompression(compress.Codecs.Uncompressed))
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer.parquet.v2.encrypted", parquet.WithDataPageVersion(parquet.DataPageV2))
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer.parquet.v2.uncompressed.encrypted", parquet.WithCompression(compress.Codecs.Uncompressed),
+		parquet.WithDataPageVersion(parquet.DataPageV2))
 }
 
 // Encryption Config 3: encrypt two columns, with different keys.
@@ -285,7 +292,11 @@ func (en *EncryptionConfigTestSuite) TestEncryptTwoColumnsPlaintextFooter() {
 	encryptCols[en.pathToFloatField] = parquet.NewColumnEncryptionProperties(en.pathToFloatField, parquet.WithKey(en.columnEncryptionKey2), parquet.WithKeyID("kc2"))
 
 	props := parquet.NewFileEncryptionProperties(en.footerEncryptionKey, parquet.WithFooterKeyMetadata("kf"), parquet.WithEncryptedColumns(encryptCols), parquet.WithPlaintextFooter())
-	en.encryptFile(props, "tmp_encrypt_columns_plaintext_footer.parquet.encrypted")
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_plaintext_footer.parquet.encrypted")
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_plaintext_footer.parquet.uncompressed.encrypted", parquet.WithCompression(compress.Codecs.Uncompressed))
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_plaintext_footer.parquet.v2.encrypted", parquet.WithDataPageVersion(parquet.DataPageV2))
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_plaintext_footer.parquet.v2.uncompressed.encrypted", parquet.WithCompression(compress.Codecs.Uncompressed),
+		parquet.WithDataPageVersion(parquet.DataPageV2))
 }
 
 // Encryption Config 4: Encrypt two columns and the footer, with different keys
@@ -296,7 +307,11 @@ func (en *EncryptionConfigTestSuite) TestEncryptTwoColumnsAndFooterWithAadPrefix
 	encryptCols[en.pathToFloatField] = parquet.NewColumnEncryptionProperties(en.pathToFloatField, parquet.WithKey(en.columnEncryptionKey2), parquet.WithKeyID("kc2"))
 
 	props := parquet.NewFileEncryptionProperties(en.footerEncryptionKey, parquet.WithFooterKeyMetadata("kf"), parquet.WithEncryptedColumns(encryptCols), parquet.WithAadPrefix(en.fileName))
-	en.encryptFile(props, "tmp_encrypt_columns_and_footer_aad.parquet.encrypted")
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer_aad.parquet.encrypted")
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer_aad.parquet.uncompressed.encrypted", parquet.WithCompression(compress.Codecs.Uncompressed))
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer_aad.parquet.v2.encrypted", parquet.WithDataPageVersion(parquet.DataPageV2))
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer_aad.parquet.v2.uncompressed.encrypted", parquet.WithCompression(compress.Codecs.Uncompressed),
+		parquet.WithDataPageVersion(parquet.DataPageV2))
 }
 
 // Encryption Config 5: Encrypt Two columns and the footer, with different keys
@@ -307,7 +322,11 @@ func (en *EncryptionConfigTestSuite) TestEncryptTwoColumnsAndFooterWithAadPrefix
 	encryptCols[en.pathToFloatField] = parquet.NewColumnEncryptionProperties(en.pathToFloatField, parquet.WithKey(en.columnEncryptionKey2), parquet.WithKeyID("kc2"))
 
 	props := parquet.NewFileEncryptionProperties(en.footerEncryptionKey, parquet.WithFooterKeyMetadata("kf"), parquet.WithAadPrefix(en.fileName), parquet.DisableAadPrefixStorage())
-	en.encryptFile(props, "tmp_encrypt_columns_and_footer_disable_aad_storage.parquet.encrypted")
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer_disable_aad_storage.parquet.encrypted")
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer_disable_aad_storage.parquet.uncompressed.encrypted", parquet.WithCompression(compress.Codecs.Uncompressed))
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer_disable_aad_storage.parquet.v2.encrypted", parquet.WithDataPageVersion(parquet.DataPageV2))
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer_disable_aad_storage.parquet.v2.uncompressed.encrypted", parquet.WithCompression(compress.Codecs.Uncompressed),
+		parquet.WithDataPageVersion(parquet.DataPageV2))
 }
 
 // Encryption Config 6: Encrypt two columns and the footer, with different keys.
@@ -318,7 +337,11 @@ func (en *EncryptionConfigTestSuite) TestEncryptTwoColumnsAndFooterAesGcmCtr() {
 	encryptCols[en.pathToFloatField] = parquet.NewColumnEncryptionProperties(en.pathToFloatField, parquet.WithKey(en.columnEncryptionKey2), parquet.WithKeyID("kc2"))
 
 	props := parquet.NewFileEncryptionProperties(en.footerEncryptionKey, parquet.WithFooterKeyMetadata("kf"), parquet.WithEncryptedColumns(encryptCols), parquet.WithAlg(parquet.AesCtr))
-	en.encryptFile(props, "tmp_encrypt_columns_and_footer_ctr.parquet.encrypted")
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer_ctr.parquet.encrypted")
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer_ctr.parquet.uncompressed.encrypted", parquet.WithCompression(compress.Codecs.Uncompressed))
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer_ctr.parquet.v2.encrypted", parquet.WithDataPageVersion(parquet.DataPageV2))
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer_ctr.parquet.v2.uncompressed.encrypted", parquet.WithCompression(compress.Codecs.Uncompressed),
+		parquet.WithDataPageVersion(parquet.DataPageV2))
 }
 
 func TestFileEncryption(t *testing.T) {
