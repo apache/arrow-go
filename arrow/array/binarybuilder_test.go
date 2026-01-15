@@ -149,3 +149,54 @@ func TestBinaryBuilderLarge_ReserveData(t *testing.T) {
 	assert.Zero(t, ab.Cap(), "unexpected ArrayBuilder.Cap(), NewBinaryArray did not reset state")
 	assert.Zero(t, ab.NullN(), "unexpected ArrayBuilder.NullN(), NewBinaryArray did not reset state")
 }
+
+// TestBinaryBuilder_AllEmptyValues reproduces issue #625
+// When all values in a binary column are empty, they should be treated as
+// empty byte slices, not as NULL values
+func TestBinaryBuilder_AllEmptyValues(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	ab := array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
+	defer ab.Release()
+
+	// Case 1: Empty + Data - this works correctly
+	ab.Append([]byte(""))
+	ab.Append([]byte(""))
+	ab.Append([]byte("SGVsbG8sIFdvcmxkIQ=="))
+
+	ar := ab.NewBinaryArray()
+	defer ar.Release()
+
+	assert.Equal(t, 3, ar.Len())
+	assert.Equal(t, 0, ar.NullN())
+
+	// First two should be empty slices, not nil
+	for i := 0; i < 2; i++ {
+		assert.False(t, ar.IsNull(i), "value %d should not be null", i)
+		assert.NotNil(t, ar.Value(i), "value %d should not be nil", i)
+		assert.Equal(t, 0, len(ar.Value(i)), "value %d should be empty slice", i)
+	}
+	assert.Equal(t, []byte("SGVsbG8sIFdvcmxkIQ=="), ar.Value(2))
+
+	// Case 2: All Empty - this is the failing case
+	ab2 := array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
+	defer ab2.Release()
+
+	ab2.Append([]byte(""))
+	ab2.Append([]byte(""))
+	ab2.Append([]byte(""))
+
+	ar2 := ab2.NewBinaryArray()
+	defer ar2.Release()
+
+	assert.Equal(t, 3, ar2.Len())
+	assert.Equal(t, 0, ar2.NullN(), "no values should be null")
+
+	// All three should be empty slices, not nil
+	for i := 0; i < 3; i++ {
+		assert.False(t, ar2.IsNull(i), "value %d should not be null", i)
+		assert.NotNil(t, ar2.Value(i), "value %d should not be nil", i)
+		assert.Equal(t, 0, len(ar2.Value(i)), "value %d should be empty slice", i)
+	}
+}

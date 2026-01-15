@@ -366,7 +366,7 @@ func TestNullRecordFromProtobuf(t *testing.T) {
 		"fixed64":0,
 		"sfixed32":0,
 		"bool":false,
-		"bytes":null,
+		"bytes":"",
 		"double":0,
 		"enum":"OPTION_0",
 		"message":null,
