@@ -185,7 +185,7 @@ func TestBinaryBuilder_AllEmptyValues(t *testing.T) {
 
 	ab2.Append([]byte(""))
 	ab2.Append([]byte(""))
-	ab2.Append([]byte(""))
+	ab2.AppendEmptyValue()
 
 	ar2 := ab2.NewBinaryArray()
 	defer ar2.Release()
@@ -198,5 +198,25 @@ func TestBinaryBuilder_AllEmptyValues(t *testing.T) {
 		assert.False(t, ar2.IsNull(i), "value %d should not be null", i)
 		assert.NotNil(t, ar2.Value(i), "value %d should not be nil", i)
 		assert.Equal(t, 0, len(ar2.Value(i)), "value %d should be empty slice", i)
+	}
+
+	// Case 3: All Null
+	ab3 := array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
+	defer ab3.Release()
+
+	ab3.AppendNull()
+	ab3.AppendNull()
+	ab3.AppendNull()
+
+	ar3 := ab3.NewBinaryArray()
+	defer ar3.Release()
+
+	assert.Equal(t, 3, ar3.Len())
+	assert.Equal(t, 3, ar3.NullN(), "all values should be null")
+
+	for i := 0; i < 3; i++ {
+		assert.True(t, ar3.IsNull(i), "value %d should be null", i)
+		assert.Empty(t, ar3.Value(i), "value %d should be nil", i)
+		assert.Zero(t, len(ar3.Value(i)), "value %d should be empty slice", i)
 	}
 }
