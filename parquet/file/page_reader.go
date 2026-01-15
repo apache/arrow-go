@@ -515,7 +515,7 @@ func (p *serializedPageReader) decompress(rd io.Reader, lenCompressed int, buf [
 	return p.codec.Decode(buf, data), nil
 }
 
-func (p *serializedPageReader) decryptV2(rd io.Reader, lenCompressed int, levelsBytelen int, compressed bool, buf []byte) error {
+func (p *serializedPageReader) readV2Encrypted(rd io.Reader, lenCompressed int, levelsBytelen int, compressed bool, buf []byte) error {
 	// if encrypted, we need to decrypt before decompressing
 	p.decompressBuffer.ResizeNoShrink(lenCompressed)
 	b := bytes.NewBuffer(p.decompressBuffer.Bytes()[:0])
@@ -538,7 +538,7 @@ func (p *serializedPageReader) decryptV2(rd io.Reader, lenCompressed int, levels
 	return nil
 }
 
-func (p *serializedPageReader) decompressV2(rd io.Reader, lenCompressed int, levelsBytelen int, compressed bool, buf []byte) error {
+func (p *serializedPageReader) readV2Unencrypted(rd io.Reader, lenCompressed int, levelsBytelen int, compressed bool, buf []byte) error {
 	if !compressed {
 		// uncompressed, just read into the buffer
 		if _, err := io.ReadFull(rd, buf); err != nil {
@@ -856,12 +856,12 @@ func (p *serializedPageReader) Next() bool {
 			}
 
 			if p.cryptoCtx.DataDecryptor != nil {
-				if err := p.decryptV2(p.r, lenCompressed, levelsBytelen, compressed, buf.Bytes()); err != nil {
+				if err := p.readV2Encrypted(p.r, lenCompressed, levelsBytelen, compressed, buf.Bytes()); err != nil {
 					p.err = err
 					return false
 				}
 			} else {
-				if err := p.decompressV2(p.r, lenCompressed, levelsBytelen, compressed, buf.Bytes()); err != nil {
+				if err := p.readV2Unencrypted(p.r, lenCompressed, levelsBytelen, compressed, buf.Bytes()); err != nil {
 					p.err = err
 					return false
 				}
