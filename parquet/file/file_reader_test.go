@@ -207,7 +207,7 @@ func (p *PageSerdeSuite) TestDataPageV2() {
 
 	p.dataPageHdrV2.Statistics = getDummyStats(statsSize, true)
 	p.dataPageHdrV2.NumValues = nrows
-	p.WriteDataPageHeaderV2(1024, 20, 10)
+	p.WriteDataPageHeaderV2(1024, 0, 0)
 	p.InitSerializedPageReader(nrows, compress.Codecs.Uncompressed)
 	p.True(p.pageReader.Next())
 	p.CheckDataPageHeaderV2(p.dataPageHdrV2, p.pageReader.Page())
@@ -310,7 +310,8 @@ func (p *PageSerdeSuite) TestCompression() {
 
 func TestWithEOFReader(t *testing.T) {
 	root, _ := schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{
-		schema.NewInt32Node("int_col", parquet.Repetitions.Required, -1)}, -1)
+		schema.NewInt32Node("int_col", parquet.Repetitions.Required, -1),
+	}, -1)
 	props := parquet.NewWriterProperties(parquet.WithVersion(parquet.V2_LATEST))
 
 	var buf bytes.Buffer

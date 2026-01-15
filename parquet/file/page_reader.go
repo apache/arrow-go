@@ -515,6 +515,50 @@ func (p *serializedPageReader) decompress(rd io.Reader, lenCompressed int, buf [
 	return p.codec.Decode(buf, data), nil
 }
 
+func (p *serializedPageReader) readV2Encrypted(rd io.Reader, lenCompressed int, levelsBytelen int, compressed bool, buf []byte) error {
+	// if encrypted, we need to decrypt before decompressing
+	p.decompressBuffer.ResizeNoShrink(lenCompressed)
+	b := bytes.NewBuffer(p.decompressBuffer.Bytes()[:0])
+	if _, err := io.CopyN(b, rd, int64(lenCompressed)); err != nil {
+		return err
+	}
+	data := p.cryptoCtx.DataDecryptor.Decrypt(p.decompressBuffer.Bytes())
+	// encrypted + uncompressed -> just copy the decrypted data to output buffer
+	if !compressed {
+		copy(buf, data)
+		return nil
+	}
+
+	// definition + repetition levels are always uncompressed
+	if levelsBytelen > 0 {
+		copy(buf, data[:levelsBytelen])
+		data = data[levelsBytelen:]
+	}
+	p.codec.Decode(buf[levelsBytelen:], data)
+	return nil
+}
+
+func (p *serializedPageReader) readV2Unencrypted(rd io.Reader, lenCompressed int, levelsBytelen int, compressed bool, buf []byte) error {
+	if !compressed {
+		// uncompressed, just read into the buffer
+		if _, err := io.ReadFull(rd, buf); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// definition + repetition levels are always uncompressed
+	if levelsBytelen > 0 {
+		if _, err := io.ReadFull(rd, buf[:levelsBytelen]); err != nil {
+			return err
+		}
+	}
+	if _, err := p.decompress(p.r, lenCompressed-levelsBytelen, buf[levelsBytelen:]); err != nil {
+		return err
+	}
+	return nil
+}
+
 type dataheader interface {
 	IsSetStatistics() bool
 	GetStatistics() *format.Statistics
@@ -628,7 +672,6 @@ func (p *serializedPageReader) readPageHeader(rd parquet.BufferedReader, hdr *fo
 			}
 			continue
 		}
-
 		rd.Discard(len(view) - int(remaining) + extra)
 		break
 	}
@@ -812,15 +855,16 @@ func (p *serializedPageReader) Next() bool {
 				return false
 			}
 
-			if compressed {
-				if levelsBytelen > 0 {
-					io.ReadFull(p.r, buf.Bytes()[:levelsBytelen])
-				}
-				if _, p.err = p.decompress(p.r, lenCompressed-levelsBytelen, buf.Bytes()[levelsBytelen:]); p.err != nil {
+			if p.cryptoCtx.DataDecryptor != nil {
+				if err := p.readV2Encrypted(p.r, lenCompressed, levelsBytelen, compressed, buf.Bytes()); err != nil {
+					p.err = err
 					return false
 				}
 			} else {
-				io.ReadFull(p.r, buf.Bytes())
+				if err := p.readV2Unencrypted(p.r, lenCompressed, levelsBytelen, compressed, buf.Bytes()); err != nil {
+					p.err = err
+					return false
+				}
 			}
 
 			if buf.Len() != lenUncompressed {
