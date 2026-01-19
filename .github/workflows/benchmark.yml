@@ -44,7 +44,7 @@ jobs:
         with:
           python-version: '3.9'
       - name: Install Go ${{ matrix.go }} for Benchmarks
-        uses: actions/setup-go@v6.1.0
+        uses: actions/setup-go@v6.2.0
         with:
           go-version: ${{ matrix.go }}
           cache: true
