@@ -19,6 +19,7 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"google.golang.org/protobuf/types/known/structpb"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -43,28 +44,31 @@ type J map[string]any
 func AllTheTypesFixture() Fixture {
 	e := J{"field1": "Example"}
 
+	s, _ := structpb.NewStruct(e)
+
 	m := J{
-		"str":          "Hello",
-		"int32":        10,
-		"int64":        100,
-		"sint32":       -10,
-		"sin64":        -100,
-		"uint32":       10,
-		"uint64":       100,
-		"fixed32":      10,
-		"fixed64":      1000,
-		"sfixed32":     10,
-		"bool":         false,
-		"bytes":        "SGVsbG8sIHdvcmxkIQ==",
-		"double":       1.1,
-		"enum":         "OPTION_1",
-		"message":      e,
-		"oneof":        []any{0, "World"},
-		"any":          J{"field1": "Example"},
-		"simple_map":   []J{{"key": 99, "value": "Hello"}},
-		"complex_map":  []J{{"key": "complex", "value": e}},
-		"simple_list":  []any{"Hello", "World"},
-		"complex_list": []J{e},
+		"str":            "Hello",
+		"int32":          10,
+		"int64":          100,
+		"sint32":         -10,
+		"sin64":          -100,
+		"uint32":         10,
+		"uint64":         100,
+		"fixed32":        10,
+		"fixed64":        1000,
+		"sfixed32":       10,
+		"bool":           false,
+		"bytes":          "SGVsbG8sIHdvcmxkIQ==",
+		"double":         1.1,
+		"enum":           "OPTION_1",
+		"message":        e,
+		"oneof":          []any{0, "World"},
+		"any":            J{"field1": "Example"},
+		"simple_map":     []J{{"key": 99, "value": "Hello"}},
+		"complex_map":    []J{{"key": "complex", "value": e}},
+		"simple_list":    []any{"Hello", "World"},
+		"complex_list":   []J{e},
+		"jsonlike_field": "{\"field1\":\"Example\"}",
 	}
 	jm, err := json.Marshal(m)
 	if err != nil {
@@ -97,14 +101,15 @@ func AllTheTypesFixture() Fixture {
 		Any:      anyMsg,
 		//Breaks the test as the Golang maps have a non-deterministic order
 		//SimpleMap:   map[int32]string{99: "Hello", 100: "World", 98: "How", 101: "Are", 1: "You"},
-		SimpleMap:   map[int32]string{99: "Hello"},
-		ComplexMap:  map[string]*util_message.ExampleMessage{"complex": &exampleMsg},
-		SimpleList:  []string{"Hello", "World"},
-		ComplexList: []*util_message.ExampleMessage{&exampleMsg},
+		SimpleMap:     map[int32]string{99: "Hello"},
+		ComplexMap:    map[string]*util_message.ExampleMessage{"complex": &exampleMsg},
+		SimpleList:    []string{"Hello", "World"},
+		ComplexList:   []*util_message.ExampleMessage{&exampleMsg},
+		JsonlikeField: s,
 	}
 
 	schema := `schema:
-  fields: 22
+  fields: 23
     - str: type=utf8, nullable
     - int32: type=int32, nullable
     - int64: type=int64, nullable
@@ -126,7 +131,8 @@ func AllTheTypesFixture() Fixture {
     - simple_map: type=map<int32, utf8, items_nullable>, nullable
     - complex_map: type=map<utf8, struct<field1: utf8>, items_nullable>, nullable
     - simple_list: type=list<item: utf8, nullable>, nullable
-    - complex_list: type=list<item: struct<field1: utf8>, nullable>, nullable`
+    - complex_list: type=list<item: struct<field1: utf8>, nullable>, nullable
+    - jsonlike_field: type=utf8, nullable`
 
 	return Fixture{
 		msg:     &msg,
@@ -240,7 +246,7 @@ func TestGetSchema(t *testing.T) {
 
 	pmr = NewProtobufMessageReflection(f.msg, WithOneOfHandler(OneOfDenseUnion))
 	want := `schema:
-  fields: 21
+  fields: 22
     - str: type=utf8, nullable
     - int32: type=int32, nullable
     - int64: type=int64, nullable
@@ -261,7 +267,8 @@ func TestGetSchema(t *testing.T) {
     - simple_map: type=map<int32, utf8, items_nullable>, nullable
     - complex_map: type=map<utf8, struct<field1: utf8>, items_nullable>, nullable
     - simple_list: type=list<item: utf8, nullable>, nullable
-    - complex_list: type=list<item: struct<field1: utf8>, nullable>, nullable`
+    - complex_list: type=list<item: struct<field1: utf8>, nullable>, nullable
+    - jsonlike_field: type=utf8, nullable`
 	CheckSchema(t, pmr, want)
 
 	excludeComplex := func(pfr *ProtobufFieldReflection) bool {
@@ -376,7 +383,8 @@ func TestNullRecordFromProtobuf(t *testing.T) {
 		"simple_map":[],
 		"complex_map":[],
 		"simple_list":[],
-		"complex_list":[]
+		"complex_list":[],
+		"jsonlike_field":null
 	}]`)
 }
 
