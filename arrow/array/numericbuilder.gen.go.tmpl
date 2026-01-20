@@ -393,7 +393,7 @@ func (b *{{.Name}}Builder) UnmarshalOne(dec *json.Decoder) error {
 	case float64:
 		b.Append({{.name}}(v))
 	case json.Number:
-{{if or (eq .Name "Float32") (eq .Name "Float64") -}}
+{{if or (eq .Name "Float32") (eq .Name "Float64") (eq .Name "Int64") (eq .Name "Uint64")-}}
 		f, err := strconv.ParseFloat(v.String(), {{.Size}}*8)
 {{else if eq (printf "%.1s" .Name) "U" -}}
 		f, err := strconv.ParseUint(v.String(), 10, {{.Size}}*8)
