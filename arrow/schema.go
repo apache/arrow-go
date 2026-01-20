@@ -195,7 +195,7 @@ func (sc *Schema) IsNativeEndian() bool          { return sc.endianness == endia
 func (sc *Schema) Metadata() Metadata            { return sc.meta }
 
 // Fields returns the fields of the schema.
-// The result is not a copy of the schema's fields and therefor should not be modified by the caller.
+// The result is not a clone of the schema's fields and therefore should not be modified by the caller.
 func (sc *Schema) Fields() []Field   { return sc.fields }
 func (sc *Schema) Field(i int) Field { return sc.fields[i] }
 func (sc *Schema) NumFields() int    { return len(sc.fields) }
