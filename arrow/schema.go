@@ -169,6 +169,19 @@ func NewSchema(fields []Field, metadata *Metadata) *Schema {
 }
 
 func NewSchemaWithEndian(fields []Field, metadata *Metadata, e endian.Endianness) *Schema {
+	var mdClone *Metadata
+	if metadata != nil {
+		md := metadata.clone()
+		mdClone = &md
+	}
+
+	fClone := make([]Field, len(fields))
+	copy(fClone, fields)
+
+	return newSchema(fClone, mdClone, e)
+}
+
+func newSchema(fields []Field, metadata *Metadata, e endian.Endianness) *Schema {
 	sc := &Schema{
 		fields:     fields,
 		index:      make(map[string][]int, len(fields)),
@@ -187,16 +200,17 @@ func NewSchemaWithEndian(fields []Field, metadata *Metadata, e endian.Endianness
 }
 
 func (sc *Schema) WithEndianness(e endian.Endianness) *Schema {
-	return NewSchemaWithEndian(sc.fields, &sc.meta, e)
+	return newSchema(sc.fields, &sc.meta, e)
 }
 
 func (sc *Schema) Endianness() endian.Endianness { return sc.endianness }
 func (sc *Schema) IsNativeEndian() bool          { return sc.endianness == endian.NativeEndian }
 func (sc *Schema) Metadata() Metadata            { return sc.meta }
-
-// Fields returns the fields of the schema.
-// The result is not a clone of the schema's fields and therefore should not be modified by the caller.
-func (sc *Schema) Fields() []Field   { return sc.fields }
+func (sc *Schema) Fields() []Field {
+	fields := make([]Field, len(sc.fields))
+	copy(fields, sc.fields)
+	return fields
+}
 func (sc *Schema) Field(i int) Field { return sc.fields[i] }
 func (sc *Schema) NumFields() int    { return len(sc.fields) }
 
@@ -264,7 +278,7 @@ func (s *Schema) AddField(i int, field Field) (*Schema, error) {
 		copy(fields[i+1:], s.fields[i:])
 	}
 
-	return NewSchema(fields, &s.meta), nil
+	return newSchema(fields, &s.meta, s.endianness), nil
 }
 
 func (s *Schema) String() string {
