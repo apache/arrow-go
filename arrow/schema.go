@@ -227,9 +227,9 @@ func (sc *Schema) FieldsByName(n string) ([]Field, bool) {
 			fields = append(fields, sc.fields[v])
 		}
 		return fields, ok
-	} else {
-		return nil, false
 	}
+
+	return nil, false
 }
 
 // FieldIndices returns the indices of the named field or nil.
