@@ -551,9 +551,11 @@ func (p *PrimitiveReaderSuite) TestRepetitionLvlBytesWithMaxRepZero() {
 	// bytes: the page header reports 1 byte for repetition levels even
 	// though the max rep level is 0. If that byte isn't skipped then
 	// we get def levels of [1, 1, 0, 0] instead of the correct [1, 1, 1, 0].
-	pageData := [...]byte{0x3, 0x3, 0x7, 0x80, 0x1, 0x4, 0x3,
+	pageData := [...]byte{
+		0x3, 0x3, 0x7, 0x80, 0x1, 0x4, 0x3,
 		0x18, 0x1, 0x2, 0x0, 0x0, 0x0, 0xc,
-		0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}
+		0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+	}
 
 	p.pages = append(p.pages, file.NewDataPageV2(memory.NewBufferBytes(pageData[:]), batchSize, 1, batchSize,
 		parquet.Encodings.DeltaBinaryPacked, 2, 1, int32(len(pageData)), false))
@@ -733,7 +735,6 @@ func TestFullSeekRow(t *testing.T) {
 
 	for _, dataPageVersion := range []parquet.DataPageVersion{parquet.DataPageV2, parquet.DataPageV1} {
 		t.Run(fmt.Sprintf("DataPageVersion=%v", dataPageVersion+1), func(t *testing.T) {
-
 			props := parquet.NewWriterProperties(parquet.WithAllocator(mem),
 				parquet.WithDataPageVersion(dataPageVersion), parquet.WithDataPageSize(1),
 				parquet.WithPageIndexEnabled(true))

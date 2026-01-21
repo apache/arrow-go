@@ -295,9 +295,7 @@ func (d *TestDecryptionSuite) decryptFile(filename string, decryptConfigNum int)
 		// Read all rows in column
 		i = 0
 		for int96reader.HasNext() {
-			var (
-				val [1]parquet.Int96
-			)
+			var val [1]parquet.Int96
 
 			// read one value at a time. the number of rows read is returned. values
 			// read contains the number of non-null rows
@@ -553,15 +551,34 @@ func (d *TestDecryptionSuite) checkResults(fileName string, decryptionConfig, en
 // once the file is read and the second exists in parquet-testing/data folder
 func (d *TestDecryptionSuite) TestDecryption() {
 	tests := []struct {
-		file   string
-		config uint
+		file            string
+		config          uint
+		isInDataStorage bool
 	}{
-		{"uniform_encryption.parquet.encrypted", 1},
-		{"encrypt_columns_and_footer.parquet.encrypted", 2},
-		{"encrypt_columns_plaintext_footer.parquet.encrypted", 3},
-		{"encrypt_columns_and_footer_aad.parquet.encrypted", 4},
-		{"encrypt_columns_and_footer_disable_aad_storage.parquet.encrypted", 5},
-		{"encrypt_columns_and_footer_ctr.parquet.encrypted", 6},
+		{"uniform_encryption.parquet.encrypted", 1, true},
+		{"uniform_encryption.parquet.uncompressed.encrypted", 1, false},
+		{"uniform_encryption.parquet.v2.encrypted", 1, false},
+		{"uniform_encryption.parquet.v2.uncompressed.encrypted", 1, false},
+		{"encrypt_columns_and_footer.parquet.encrypted", 2, true},
+		{"encrypt_columns_and_footer.parquet.uncompressed.encrypted", 2, false},
+		{"encrypt_columns_and_footer.parquet.v2.encrypted", 2, false},
+		{"encrypt_columns_and_footer.parquet.v2.uncompressed.encrypted", 2, false},
+		{"encrypt_columns_plaintext_footer.parquet.encrypted", 3, true},
+		{"encrypt_columns_plaintext_footer.parquet.uncompressed.encrypted", 3, false},
+		{"encrypt_columns_plaintext_footer.parquet.v2.encrypted", 3, false},
+		{"encrypt_columns_plaintext_footer.parquet.v2.uncompressed.encrypted", 3, false},
+		{"encrypt_columns_and_footer_aad.parquet.encrypted", 4, true},
+		{"encrypt_columns_and_footer_aad.parquet.uncompressed.encrypted", 4, false},
+		{"encrypt_columns_and_footer_aad.parquet.v2.encrypted", 4, false},
+		{"encrypt_columns_and_footer_aad.parquet.v2.uncompressed.encrypted", 4, false},
+		{"encrypt_columns_and_footer_disable_aad_storage.parquet.encrypted", 5, true},
+		{"encrypt_columns_and_footer_disable_aad_storage.parquet.uncompressed.encrypted", 5, false},
+		{"encrypt_columns_and_footer_disable_aad_storage.parquet.v2.encrypted", 5, false},
+		{"encrypt_columns_and_footer_disable_aad_storage.parquet.v2.uncompressed.encrypted", 5, false},
+		{"encrypt_columns_and_footer_ctr.parquet.encrypted", 6, true},
+		{"encrypt_columns_and_footer_ctr.parquet.uncompressed.encrypted", 6, false},
+		{"encrypt_columns_and_footer_ctr.parquet.v2.encrypted", 6, false},
+		{"encrypt_columns_and_footer_ctr.parquet.v2.uncompressed.encrypted", 6, false},
 	}
 	for _, tt := range tests {
 		d.Run(tt.file, func() {
@@ -576,14 +593,16 @@ func (d *TestDecryptionSuite) TestDecryption() {
 			}
 			os.Remove(tmpFile)
 
-			file := path.Join(getDataDir(), tt.file)
-			d.Require().FileExists(file)
+			if tt.isInDataStorage {
+				file := path.Join(getDataDir(), tt.file)
+				d.Require().FileExists(file)
 
-			for idx := range d.decryptionConfigs {
-				decConfig := idx + 1
-				d.Run(fmt.Sprintf("config %d", decConfig), func() {
-					d.checkResults(file, uint(decConfig), tt.config)
-				})
+				for idx := range d.decryptionConfigs {
+					decConfig := idx + 1
+					d.Run(fmt.Sprintf("config %d", decConfig), func() {
+						d.checkResults(file, uint(decConfig), tt.config)
+					})
+				}
 			}
 		})
 	}
