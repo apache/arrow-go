@@ -40,7 +40,7 @@ require (
 	github.com/substrait-io/substrait-go/v7 v7.2.2
 	github.com/substrait-io/substrait-protobuf/go v0.78.1
 	github.com/tidwall/sjson v1.2.5
-	github.com/zeebo/xxh3 v1.0.2
+	github.com/zeebo/xxh3 v1.1.0
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96
 	golang.org/x/sync v0.19.0
 	golang.org/x/sys v0.40.0
