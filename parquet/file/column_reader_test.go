@@ -966,44 +966,213 @@ func TestDecryptColumns(t *testing.T) {
 	}
 }
 
-func BenchmarkReadInt32Column(b *testing.B) {
-	// generate parquet with RLE-dictionary encoded int32 column
-	tempdir := b.TempDir()
-	filepath := filepath.Join(tempdir, "rle-dict-int32.parquet")
+var (
+	benchmarkFilesOnce sync.Once
+	benchmarkTempDir   string
+	benchmarkFiles     = make(map[string]string)
 
+	benchmarkKeyRetriever = func() encryption.StringKeyIDRetriever {
+		stringKr := make(encryption.StringKeyIDRetriever)
+		stringKr.PutKey(FooterEncryptionKeyID, FooterEncryptionKey)
+		stringKr.PutKey(ColumnEncryptionKey1ID, ColumnEncryptionKey1)
+		return stringKr
+	}
+)
+
+func TestMain(m *testing.M) {
+	// Create benchmark files
+	err := setupBenchmarkFiles()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to set up benchmark files: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Run the tests/benchmarks
+	code := m.Run()
+
+	// Cleanup temp directory after everything is done
+	if benchmarkTempDir != "" {
+		os.RemoveAll(benchmarkTempDir)
+	}
+
+	os.Exit(code)
+}
+
+func setupBenchmarkFiles() error {
+	var err error
+	benchmarkTempDir, err = os.MkdirTemp("", "parquet-bench-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp dir: %v", err)
+	}
+
+	// Create V1 file
+	v1File := filepath.Join(benchmarkTempDir, "rle-dict-int32.v1.parquet")
 	props := parquet.NewWriterProperties(
 		parquet.WithDictionaryDefault(true),
 		parquet.WithDataPageSize(128*1024*1024), // 128MB
 		parquet.WithBatchSize(128*1024*1024),
-		parquet.WithMaxRowGroupLength(100_000),
+		parquet.WithMaxRowGroupLength(1_000_000),
+		parquet.WithDataPageVersion(parquet.DataPageV1),
+		parquet.WithVersion(parquet.V2_LATEST),
+	)
+	if err := createBenchmarkFile(v1File, props); err != nil {
+		return err
+	}
+	benchmarkFiles["v1"] = v1File
+
+	// Create V2 file
+	v2File := filepath.Join(benchmarkTempDir, "rle-dict-int32.v2.parquet")
+	props = parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(true),
+		parquet.WithDataPageSize(128*1024*1024), // 128MB
+		parquet.WithBatchSize(128*1024*1024),
+		parquet.WithMaxRowGroupLength(1_000_000),
 		parquet.WithDataPageVersion(parquet.DataPageV2),
 		parquet.WithVersion(parquet.V2_LATEST),
 	)
+	if err := createBenchmarkFile(v2File, props); err != nil {
+		return err
+	}
+	benchmarkFiles["v2"] = v2File
+
+	// Create V1 Snappy file
+	v1SnappyFile := filepath.Join(benchmarkTempDir, "rle-dict-int32.v1.snappy.parquet")
+	props = parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(true),
+		parquet.WithDataPageSize(128*1024*1024), // 128MB
+		parquet.WithBatchSize(128*1024*1024),
+		parquet.WithMaxRowGroupLength(1_000_000),
+		parquet.WithCompression(compress.Codecs.Snappy),
+		parquet.WithDataPageVersion(parquet.DataPageV1),
+		parquet.WithVersion(parquet.V2_LATEST),
+	)
+	if err = createBenchmarkFile(v1SnappyFile, props); err != nil {
+		return err
+	}
+	benchmarkFiles["v1-snappy"] = v1SnappyFile
+
+	// Create V2 Snappy file
+	v2SnappyFile := filepath.Join(benchmarkTempDir, "rle-dict-int32.v2.snappy.parquet")
+	props = parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(true),
+		parquet.WithDataPageSize(128*1024*1024), // 128MB
+		parquet.WithBatchSize(128*1024*1024),
+		parquet.WithMaxRowGroupLength(1_000_000),
+		parquet.WithCompression(compress.Codecs.Snappy),
+		parquet.WithDataPageVersion(parquet.DataPageV2),
+		parquet.WithVersion(parquet.V2_LATEST),
+	)
+	if err = createBenchmarkFile(v2SnappyFile, props); err != nil {
+		return err
+	}
+	benchmarkFiles["v2-snappy"] = v2SnappyFile
+
+	// Create encrypted files
+	encryptCols := make(parquet.ColumnPathToEncryptionPropsMap)
+	encryptCols["col"] = parquet.NewColumnEncryptionProperties("col", parquet.WithKey(ColumnEncryptionKey1), parquet.WithKeyID(ColumnEncryptionKey1ID))
+	encryptProps := parquet.NewFileEncryptionProperties(FooterEncryptionKey, parquet.WithFooterKeyMetadata(FooterEncryptionKeyID),
+		parquet.WithEncryptedColumns(encryptCols), parquet.WithAlg(parquet.AesCtr))
+
+	// Create V1 encrypted file
+	v1EncFile := filepath.Join(benchmarkTempDir, "rle-dict-int32.v1.encrypted.parquet")
+	props = parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(true),
+		parquet.WithDataPageSize(128*1024*1024), // 128MB
+		parquet.WithBatchSize(128*1024*1024),
+		parquet.WithMaxRowGroupLength(1_000_000),
+		parquet.WithDataPageVersion(parquet.DataPageV1),
+		parquet.WithVersion(parquet.V2_LATEST),
+		parquet.WithEncryptionProperties(encryptProps.Clone("")),
+	)
+	if err := createBenchmarkFile(v1EncFile, props); err != nil {
+		return err
+	}
+	benchmarkFiles["v1-encrypted"] = v1EncFile
+
+	// Create V2 encrypted file
+	v2EncFile := filepath.Join(benchmarkTempDir, "rle-dict-int32.v2.encrypted.parquet")
+	props = parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(true),
+		parquet.WithDataPageSize(128*1024*1024), // 128MB
+		parquet.WithBatchSize(128*1024*1024),
+		parquet.WithMaxRowGroupLength(1_000_000),
+		parquet.WithDataPageVersion(parquet.DataPageV2),
+		parquet.WithVersion(parquet.V2_LATEST),
+		parquet.WithEncryptionProperties(encryptProps.Clone("")),
+	)
+	if err := createBenchmarkFile(v2EncFile, props); err != nil {
+		return err
+	}
+	benchmarkFiles["v2-encrypted"] = v2EncFile
+
+	// Create V1 Snappy encrypted file
+	v1SnappyEncFile := filepath.Join(benchmarkTempDir, "rle-dict-int32.v1.snappy.encrypted.parquet")
+	props = parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(true),
+		parquet.WithDataPageSize(128*1024*1024), // 128MB
+		parquet.WithBatchSize(128*1024*1024),
+		parquet.WithMaxRowGroupLength(1_000_000),
+		parquet.WithCompression(compress.Codecs.Snappy),
+		parquet.WithDataPageVersion(parquet.DataPageV1),
+		parquet.WithVersion(parquet.V2_LATEST),
+		parquet.WithEncryptionProperties(encryptProps.Clone("")),
+	)
+	if err := createBenchmarkFile(v1SnappyEncFile, props); err != nil {
+		return err
+	}
+	benchmarkFiles["v1-snappy-encrypted"] = v1SnappyEncFile
+
+	// Create V2 Snappy encrypted file
+	v2SnappyEncFile := filepath.Join(benchmarkTempDir, "rle-dict-int32.v2.snappy.encrypted.parquet")
+	props = parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(true),
+		parquet.WithDataPageSize(128*1024*1024), // 128MB
+		parquet.WithBatchSize(128*1024*1024),
+		parquet.WithMaxRowGroupLength(1_000_000),
+		parquet.WithCompression(compress.Codecs.Snappy),
+		parquet.WithDataPageVersion(parquet.DataPageV2),
+		parquet.WithVersion(parquet.V2_LATEST),
+		parquet.WithEncryptionProperties(encryptProps.Clone("")),
+	)
+	if err := createBenchmarkFile(v2SnappyEncFile, props); err != nil {
+		return err
+	}
+	benchmarkFiles["v2-snappy-encrypted"] = v2SnappyEncFile
+
+	return nil
+}
+
+func createBenchmarkFile(filepath string, props *parquet.WriterProperties) error {
 	outFile, err := os.Create(filepath)
-	require.NoError(b, err)
+	if err != nil {
+		return fmt.Errorf("failed to create benchmark file: %v", err)
+	}
+	defer outFile.Close()
 
 	sc, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
 		schema.NewInt32Node("col", parquet.Repetitions.Required, -1),
 	}, -1)
-	require.NoError(b, err)
+	if err != nil {
+		return fmt.Errorf("failed to create schema: %v", err)
+	}
 
 	writer := file.NewParquetWriter(outFile, sc, file.WithWriterProps(props))
 
-	// 10 row groups of 100 000 rows = 1 000 000 rows in total
+	// 10 row groups of 1_000_000 rows = 10_000_000 rows in total
 	value := int32(1)
 	for range 10 {
 		rgWriter := writer.AppendBufferedRowGroup()
 		cwr, _ := rgWriter.Column(0)
 		cw := cwr.(*file.Int32ColumnChunkWriter)
-		valuesIn := make([]int32, 0, 100_000)
+		valuesIn := make([]int32, 0, 1_000_000)
 		repeats := 1
-		for len(valuesIn) < 100_000 {
+		for len(valuesIn) < 1_000_000 {
 			repeatedValue := make([]int32, repeats)
 			for i := range repeatedValue {
 				repeatedValue[i] = value
 			}
-			if len(valuesIn)+len(repeatedValue) > 100_000 {
-				repeatedValue = repeatedValue[:100_000-len(valuesIn)]
+			if len(valuesIn)+len(repeatedValue) > 1_000_000 {
+				repeatedValue = repeatedValue[:1_000_000-len(valuesIn)]
 			}
 			valuesIn = append(valuesIn, repeatedValue[:]...)
 			// repeat values from 1 to 50 times
@@ -1013,16 +1182,27 @@ func BenchmarkReadInt32Column(b *testing.B) {
 		cw.WriteBatch(valuesIn, nil, nil)
 		rgWriter.Close()
 	}
-	err = writer.Close()
-	require.NoError(b, err)
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("failed to close parquet writer: %v", err)
+	}
+	return nil
+}
 
-	reader, err := file.OpenParquetFile(filepath, false)
+func benchmarkReadInt32ColumnWithDecryption(b *testing.B, filepath string, readProps *parquet.ReaderProperties) {
+	var reader *file.Reader
+	var err error
+
+	if readProps != nil {
+		reader, err = file.OpenParquetFile(filepath, false, file.WithReadProps(readProps))
+	} else {
+		reader, err = file.OpenParquetFile(filepath, false)
+	}
 	require.NoError(b, err)
 	defer reader.Close()
 
 	numValues := reader.NumRows()
 	values := make([]int32, numValues)
-	b.StopTimer()
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		startIndex := 0
@@ -1034,9 +1214,7 @@ func BenchmarkReadInt32Column(b *testing.B) {
 			cr, ok := colReader.(*file.Int32ColumnChunkReader)
 			require.True(b, ok)
 
-			b.StartTimer()
-			_, valuesRead, err := cr.ReadBatch(rgReader.NumRows(), values, nil, nil)
-			b.StopTimer()
+			_, valuesRead, err := cr.ReadBatch(rgReader.NumRows(), values[startIndex:], nil, nil)
 			require.NoError(b, err)
 
 			startIndex += valuesRead
@@ -1044,4 +1222,77 @@ func BenchmarkReadInt32Column(b *testing.B) {
 		}
 		require.Equal(b, numValues, int64(startIndex))
 	}
+}
+
+func BenchmarkReadInt32(b *testing.B) {
+	b.Run("V1Page", func(b *testing.B) {
+		benchmarkReadInt32ColumnWithDecryption(b, benchmarkFiles["v1"], nil)
+	})
+	b.Run("V2Page", func(b *testing.B) {
+		benchmarkReadInt32ColumnWithDecryption(b, benchmarkFiles["v2"], nil)
+	})
+	b.Run("V1PageSnappy", func(b *testing.B) {
+		benchmarkReadInt32ColumnWithDecryption(b, benchmarkFiles["v1-snappy"], nil)
+	})
+	b.Run("V2PageSnappy", func(b *testing.B) {
+		benchmarkReadInt32ColumnWithDecryption(b, benchmarkFiles["v2-snappy"], nil)
+	})
+
+	// Set up decryption properties
+	decryptProps := parquet.NewFileDecryptionProperties(parquet.WithKeyRetriever(benchmarkKeyRetriever()))
+	readProps := parquet.NewReaderProperties(mem)
+	b.Run("V1PageEncrypted", func(b *testing.B) {
+		readProps.FileDecryptProps = decryptProps.Clone("")
+		benchmarkReadInt32ColumnWithDecryption(b, benchmarkFiles["v1-encrypted"], readProps)
+	})
+	b.Run("V2PageEncrypted", func(b *testing.B) {
+		readProps.FileDecryptProps = decryptProps.Clone("")
+		benchmarkReadInt32ColumnWithDecryption(b, benchmarkFiles["v2-encrypted"], readProps)
+	})
+
+	b.Run("V1PageSnappyEncrypted", func(b *testing.B) {
+		readProps.FileDecryptProps = decryptProps.Clone("")
+		benchmarkReadInt32ColumnWithDecryption(b, benchmarkFiles["v1-snappy-encrypted"], readProps)
+	})
+
+	b.Run("V2PageSnappyEncrypted", func(b *testing.B) {
+		readProps.FileDecryptProps = decryptProps.Clone("")
+		benchmarkReadInt32ColumnWithDecryption(b, benchmarkFiles["v2-snappy-encrypted"], readProps)
+	})
+}
+
+func BenchmarkReadInt32Buffered(b *testing.B) {
+	readProps := parquet.NewReaderProperties(mem)
+	readProps.BufferedStreamEnabled = true
+	b.Run("V1Page", func(b *testing.B) {
+		benchmarkReadInt32ColumnWithDecryption(b, benchmarkFiles["v1"], readProps)
+	})
+	b.Run("V2Page", func(b *testing.B) {
+		benchmarkReadInt32ColumnWithDecryption(b, benchmarkFiles["v2"], readProps)
+	})
+	b.Run("V1PageSnappy", func(b *testing.B) {
+		benchmarkReadInt32ColumnWithDecryption(b, benchmarkFiles["v1-snappy"], readProps)
+	})
+	b.Run("V2PageSnappy", func(b *testing.B) {
+		benchmarkReadInt32ColumnWithDecryption(b, benchmarkFiles["v2-snappy"], readProps)
+	})
+
+	// Set up decryption properties
+	decryptProps := parquet.NewFileDecryptionProperties(parquet.WithKeyRetriever(benchmarkKeyRetriever()))
+	b.Run("V1PageEncrypted", func(b *testing.B) {
+		readProps.FileDecryptProps = decryptProps.Clone("")
+		benchmarkReadInt32ColumnWithDecryption(b, benchmarkFiles["v1-encrypted"], readProps)
+	})
+	b.Run("V2PageEncrypted", func(b *testing.B) {
+		readProps.FileDecryptProps = decryptProps.Clone("")
+		benchmarkReadInt32ColumnWithDecryption(b, benchmarkFiles["v2-encrypted"], readProps)
+	})
+	b.Run("V1PageSnappyEncrypted", func(b *testing.B) {
+		readProps.FileDecryptProps = decryptProps.Clone("")
+		benchmarkReadInt32ColumnWithDecryption(b, benchmarkFiles["v1-snappy-encrypted"], readProps)
+	})
+	b.Run("V2PageSnappyEncrypted", func(b *testing.B) {
+		readProps.FileDecryptProps = decryptProps.Clone("")
+		benchmarkReadInt32ColumnWithDecryption(b, benchmarkFiles["v2-snappy-encrypted"], readProps)
+	})
 }
