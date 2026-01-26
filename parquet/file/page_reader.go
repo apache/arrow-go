@@ -508,24 +508,6 @@ func (p *serializedPageReader) Page() Page {
 	return p.curPage
 }
 
-func (p *serializedPageReader) decompress(rd io.Reader, lenCompressed int, buf []byte) ([]byte, error) {
-	p.decompressBuffer.ResizeNoShrink(lenCompressed)
-	data := p.decompressBuffer.Bytes()
-	n, err := io.ReadFull(rd, data)
-	if err != nil {
-		return nil, err
-	}
-	if n != lenCompressed {
-		return nil, fmt.Errorf("parquet: expected to read %d bytes but only read %d", lenCompressed, n)
-	}
-
-	if p.cryptoCtx.DataDecryptor != nil {
-		data = p.cryptoCtx.DataDecryptor.Decrypt(p.decompressBuffer.Bytes())
-	}
-
-	return p.codec.Decode(buf, data), nil
-}
-
 type dataheader interface {
 	IsSetStatistics() bool
 	GetStatistics() *format.Statistics
@@ -712,12 +694,9 @@ func (p *serializedPageReader) readOrStealData(r parquet.BufferedReader, lenComp
 	}
 
 	buffer.ResizeNoShrink(lenCompressed)
-	n, err := io.ReadFull(r, buffer.Bytes()[:lenCompressed])
+	_, err := io.ReadFull(r, buffer.Bytes()[:lenCompressed])
 	if err != nil {
 		return nil, err
-	}
-	if n != lenCompressed {
-		return nil, fmt.Errorf("parquet: expected to read %d bytes but only read %d", lenCompressed, n)
 	}
 	return buffer.Bytes()[:lenCompressed], nil
 }
@@ -773,21 +752,13 @@ func (p *serializedPageReader) readV2UnencryptedCompressedWithLevels(r parquet.B
 	// Special case: unencrypted + compressed + has levels
 	// Read levels directly into output buffer, compressed data into decompress buffer
 	buffer.ResizeNoShrink(lenUncompressed)
-	n, err := io.ReadFull(r, buffer.Bytes()[:levelsBytelen])
-	if err != nil {
+	if _, err := io.ReadFull(r, buffer.Bytes()[:levelsBytelen]); err != nil {
 		return nil, err
-	}
-	if n != levelsBytelen {
-		return nil, fmt.Errorf("parquet: expected to read %d bytes but only read %d", levelsBytelen, n)
 	}
 
 	p.decompressBuffer.ResizeNoShrink(lenCompressed - levelsBytelen)
-	n, err = io.ReadFull(r, p.decompressBuffer.Bytes())
-	if err != nil {
+	if _, err := io.ReadFull(r, p.decompressBuffer.Bytes()); err != nil {
 		return nil, err
-	}
-	if n != lenCompressed-levelsBytelen {
-		return nil, fmt.Errorf("parquet: expected to read %d bytes but only read %d", lenCompressed-levelsBytelen, n)
 	}
 
 	p.codec.Decode(buffer.Bytes()[levelsBytelen:], p.decompressBuffer.Bytes())
