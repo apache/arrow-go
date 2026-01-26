@@ -17,7 +17,6 @@
 package file
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -509,36 +508,6 @@ func (p *serializedPageReader) Page() Page {
 	return p.curPage
 }
 
-func (p *serializedPageReader) stealFromBuffer(br parquet.BufferedReader, lenUncompressed int) ([]byte, error) {
-	data, err := br.Peek(lenUncompressed)
-	if err != nil {
-		return nil, err
-	}
-	if p.cryptoCtx.DataDecryptor != nil {
-		data = p.cryptoCtx.DataDecryptor.Decrypt(data)
-	}
-	// advance the reader
-	_, err = br.Discard(lenUncompressed)
-	if err != nil && err != io.EOF {
-		return nil, err
-	}
-	return data, nil
-}
-
-func (p *serializedPageReader) readUncompressed(br parquet.BufferedReader, lenUncompressed int, buf []byte) ([]byte, error) {
-	n, err := io.ReadFull(br, buf[:lenUncompressed])
-	if err != nil {
-		return nil, err
-	}
-	if n != lenUncompressed {
-		return nil, fmt.Errorf("parquet: expected to read %d bytes but only read %d", lenUncompressed, n)
-	}
-	if p.cryptoCtx.DataDecryptor != nil {
-		buf = p.cryptoCtx.DataDecryptor.Decrypt(buf)
-	}
-	return buf, nil
-}
-
 func (p *serializedPageReader) decompress(rd io.Reader, lenCompressed int, buf []byte) ([]byte, error) {
 	p.decompressBuffer.ResizeNoShrink(lenCompressed)
 	data := p.decompressBuffer.Bytes()
@@ -555,50 +524,6 @@ func (p *serializedPageReader) decompress(rd io.Reader, lenCompressed int, buf [
 	}
 
 	return p.codec.Decode(buf, data), nil
-}
-
-func (p *serializedPageReader) readV2Encrypted(rd io.Reader, lenCompressed int, levelsBytelen int, compressed bool, buf []byte) error {
-	// if encrypted, we need to decrypt before decompressing
-	p.decompressBuffer.ResizeNoShrink(lenCompressed)
-	b := bytes.NewBuffer(p.decompressBuffer.Bytes()[:0])
-	if _, err := io.CopyN(b, rd, int64(lenCompressed)); err != nil {
-		return err
-	}
-	data := p.cryptoCtx.DataDecryptor.Decrypt(p.decompressBuffer.Bytes())
-	// encrypted + uncompressed -> just copy the decrypted data to output buffer
-	if !compressed {
-		copy(buf, data)
-		return nil
-	}
-
-	// definition + repetition levels are always uncompressed
-	if levelsBytelen > 0 {
-		copy(buf, data[:levelsBytelen])
-		data = data[levelsBytelen:]
-	}
-	p.codec.Decode(buf[levelsBytelen:], data)
-	return nil
-}
-
-func (p *serializedPageReader) readV2Unencrypted(rd io.Reader, lenCompressed int, levelsBytelen int, compressed bool, buf []byte) error {
-	if !compressed {
-		// uncompressed, just read into the buffer
-		if _, err := io.ReadFull(rd, buf); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	// definition + repetition levels are always uncompressed
-	if levelsBytelen > 0 {
-		if _, err := io.ReadFull(rd, buf[:levelsBytelen]); err != nil {
-			return err
-		}
-	}
-	if _, err := p.decompress(p.r, lenCompressed-levelsBytelen, buf[levelsBytelen:]); err != nil {
-		return err
-	}
-	return nil
 }
 
 type dataheader interface {
@@ -664,7 +589,7 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 			return nil, errors.New("parquet: invalid page header (negative number of values)")
 		}
 
-		data, err := p.getPageBytes(rd, p.isCompressed, lenCompressed, lenUncompressed, p.dictPageBuffer)
+		data, err := p.getPageBytesV1(rd, p.isCompressed, lenCompressed, lenUncompressed, p.dictPageBuffer)
 		if err != nil {
 			return nil, fmt.Errorf("parquet: could not read dictionary page data: %w", err)
 		}
@@ -770,18 +695,148 @@ func (p *serializedPageReader) SeekToPageWithRow(rowIdx int64) error {
 	return p.err
 }
 
-func (p *serializedPageReader) getPageBytes(
+// readOrStealData attempts to steal data from the buffered reader if enough is buffered,
+// otherwise reads from the underlying reader into the provided buffer.
+func (p *serializedPageReader) readOrStealData(r parquet.BufferedReader, lenCompressed int, buffer *memory.Buffer) ([]byte, error) {
+	if r.Buffered() >= lenCompressed {
+		data, err := r.Peek(lenCompressed)
+		if err != nil {
+			return nil, err
+		}
+		// advance the reader
+		_, err = r.Discard(lenCompressed)
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+		return data, nil
+	}
+
+	buffer.ResizeNoShrink(lenCompressed)
+	n, err := io.ReadFull(r, buffer.Bytes()[:lenCompressed])
+	if err != nil {
+		return nil, err
+	}
+	if n != lenCompressed {
+		return nil, fmt.Errorf("parquet: expected to read %d bytes but only read %d", lenCompressed, n)
+	}
+	return buffer.Bytes()[:lenCompressed], nil
+}
+
+func (p *serializedPageReader) getPageBytesV1(
 	r parquet.BufferedReader, isCompressed bool, lenCompressed, lenUncompressed int, buffer *memory.Buffer,
 ) ([]byte, error) {
+	// 8 possible cases:
+	// 1. enough data buffered (r.Buffered() >= lenCompressed)
+	//   a. encrypted
+	//      i. compressed -> resize output buffer to lenUncompressed, steal (Peek+Discard) buffer, decrypt (allocates new buffer), decompress into output buffer (has enough allocated size) and return output buffer
+	//      ii. not compressed -> resize output buffer to lenCompressed, steal buffer, decrypt (allocates new buffer) and return new buffer
+	//   b. not encrypted
+	//      i. compressed -> resize output buffer to lenUncompressed, steal buffer, decompress into output buffer (has enough allocated size) and return output buffer
+	//      ii. not compressed -> steal from buffer and return
+	// 2. not enough data buffered
+	//   a. encrypted
+	//      i. compressed -> resize output buffer to lenUncompressed, read into output buffer, decrypt (allocates new buffer), decompress into output buffer (has enough allocated size) and return output buffer
+	//      ii. not compressed -> resize output buffer to lenCompressed, read into output buffer, decrypt (allocates new buffer) and return new buffer
+	//   b. not encrypted
+	//      i. compressed -> resize decompress buffer to lenCompressed, read into decompress buffer, decompress into output buffer (has enough allocated size) and return output buffer
+	//      ii. not compressed -> read into output buffer and return
+
+	// Determine which buffer to read into
+	var readBuffer *memory.Buffer
+	if isCompressed {
+		readBuffer = p.decompressBuffer
+	} else {
+		readBuffer = buffer
+	}
+
+	// Read or steal data
+	data, err := p.readOrStealData(r, lenCompressed, readBuffer)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decrypt if needed
+	if p.cryptoCtx.DataDecryptor != nil {
+		data = p.cryptoCtx.DataDecryptor.Decrypt(data)
+	}
+
+	// Decompress if needed
 	if isCompressed {
 		buffer.ResizeNoShrink(lenUncompressed)
-		return p.decompress(r, lenCompressed, buffer.Bytes())
+		return p.codec.Decode(buffer.Bytes(), data), nil
 	}
-	if r.Buffered() >= lenCompressed {
-		return p.stealFromBuffer(r, lenCompressed)
-	}
+
+	return data, nil
+}
+
+func (p *serializedPageReader) readV2UnencryptedCompressedWithLevels(r parquet.BufferedReader, lenCompressed, lenUncompressed, levelsBytelen int, buffer *memory.Buffer) ([]byte, error) {
+	// Special case: unencrypted + compressed + has levels
+	// Read levels directly into output buffer, compressed data into decompress buffer
 	buffer.ResizeNoShrink(lenUncompressed)
-	return p.readUncompressed(r, lenCompressed, buffer.Bytes())
+	n, err := io.ReadFull(r, buffer.Bytes()[:levelsBytelen])
+	if err != nil {
+		return nil, err
+	}
+	if n != levelsBytelen {
+		return nil, fmt.Errorf("parquet: expected to read %d bytes but only read %d", levelsBytelen, n)
+	}
+
+	p.decompressBuffer.ResizeNoShrink(lenCompressed - levelsBytelen)
+	n, err = io.ReadFull(r, p.decompressBuffer.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	if n != lenCompressed-levelsBytelen {
+		return nil, fmt.Errorf("parquet: expected to read %d bytes but only read %d", lenCompressed-levelsBytelen, n)
+	}
+
+	p.codec.Decode(buffer.Bytes()[levelsBytelen:], p.decompressBuffer.Bytes())
+	return buffer.Bytes(), nil
+}
+
+func (p *serializedPageReader) getPageBytesV2(
+	r parquet.BufferedReader, isCompressed bool, lenCompressed, lenUncompressed, levelsBytelen int, buffer *memory.Buffer,
+) ([]byte, error) {
+	// Special case: unencrypted + compressed + has levels - read levels and compressed data separately
+	if r.Buffered() < lenCompressed && p.cryptoCtx.DataDecryptor == nil && isCompressed && levelsBytelen > 0 {
+		return p.readV2UnencryptedCompressedWithLevels(r, lenCompressed, lenUncompressed, levelsBytelen, buffer)
+	}
+
+	// Determine which buffer to read into
+	var readBuffer *memory.Buffer
+	if p.cryptoCtx.DataDecryptor == nil && isCompressed {
+		readBuffer = p.decompressBuffer
+	} else {
+		readBuffer = buffer
+	}
+
+	var data []byte
+	var err error
+	// Read or steal data
+	data, err = p.readOrStealData(r, lenCompressed, readBuffer)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decrypt if needed
+	if p.cryptoCtx.DataDecryptor != nil {
+		data = p.cryptoCtx.DataDecryptor.Decrypt(data)
+	}
+
+	// Handle uncompressed case
+	if !isCompressed {
+		return data, nil
+	}
+
+	// Decompress - handle levels if present
+	buffer.ResizeNoShrink(lenUncompressed)
+	if levelsBytelen > 0 {
+		copy(buffer.Bytes(), data[:levelsBytelen])
+		p.codec.Decode(buffer.Bytes()[levelsBytelen:], data[levelsBytelen:])
+		return buffer.Bytes(), nil
+	}
+
+	return p.codec.Decode(buffer.Bytes(), data), nil
 }
 
 func (p *serializedPageReader) Next() bool {
@@ -823,7 +878,7 @@ func (p *serializedPageReader) Next() bool {
 				return false
 			}
 
-			data, err := p.getPageBytes(p.r, p.isCompressed, lenCompressed, lenUncompressed, p.dictPageBuffer)
+			data, err := p.getPageBytesV1(p.r, p.isCompressed, lenCompressed, lenUncompressed, p.dictPageBuffer)
 			if err != nil {
 				p.err = err
 				return false
@@ -855,13 +910,13 @@ func (p *serializedPageReader) Next() bool {
 			firstRowIdx := p.rowsSeen
 			p.rowsSeen += int64(dataHeader.GetNumValues())
 
-			data, err := p.getPageBytes(p.r, p.isCompressed, lenCompressed, lenUncompressed, p.dataPageBuffer)
+			data, err := p.getPageBytesV1(p.r, p.isCompressed, lenCompressed, lenUncompressed, p.dataPageBuffer)
 			if err != nil {
 				p.err = err
 				return false
 			}
 			if len(data) != lenUncompressed {
-				p.err = fmt.Errorf("parquet: metadata said %d bytes uncompressed data page, got %d bytes", lenUncompressed, len(data))
+				p.err = fmt.Errorf("parquet: metadata said %d bytes uncompressed V1 data page, got %d bytes", lenUncompressed, len(data))
 				return false
 			}
 
@@ -892,9 +947,6 @@ func (p *serializedPageReader) Next() bool {
 				return false
 			}
 
-			p.dataPageBuffer.ResizeNoShrink(lenUncompressed)
-			buf := memory.NewBufferBytes(p.dataPageBuffer.Bytes())
-
 			compressed := dataHeader.GetIsCompressed()
 			// extract stats
 			firstRowIdx := p.rowsSeen
@@ -905,27 +957,20 @@ func (p *serializedPageReader) Next() bool {
 				return false
 			}
 
-			if p.cryptoCtx.DataDecryptor != nil {
-				if err := p.readV2Encrypted(p.r, lenCompressed, levelsBytelen, compressed, buf.Bytes()); err != nil {
-					p.err = err
-					return false
-				}
-			} else {
-				if err := p.readV2Unencrypted(p.r, lenCompressed, levelsBytelen, compressed, buf.Bytes()); err != nil {
-					p.err = err
-					return false
-				}
+			data, err := p.getPageBytesV2(p.r, compressed, lenCompressed, lenUncompressed, levelsBytelen, p.dataPageBuffer)
+			if err != nil {
+				p.err = err
+				return false
 			}
-
-			if buf.Len() != lenUncompressed {
-				p.err = fmt.Errorf("parquet: metadata said %d bytes uncompressed data page, got %d bytes", lenUncompressed, buf.Len())
+			if len(data) != lenUncompressed {
+				p.err = fmt.Errorf("parquet: metadata said %d bytes uncompressed V2 data page, got %d bytes", lenUncompressed, len(data))
 				return false
 			}
 
 			// make datapage v2
 			p.curPage = &DataPageV2{
 				page: page{
-					buf:      buf,
+					buf:      memory.NewBufferBytes(data),
 					typ:      p.curPageHdr.Type,
 					nvals:    dataHeader.GetNumValues(),
 					encoding: dataHeader.GetEncoding(),
