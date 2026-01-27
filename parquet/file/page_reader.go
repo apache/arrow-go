@@ -17,7 +17,6 @@
 package file
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -502,14 +501,19 @@ func (p *serializedPageReader) Page() Page {
 
 func (p *serializedPageReader) decompress(rd io.Reader, lenCompressed int, buf []byte) ([]byte, error) {
 	p.decompressBuffer.ResizeNoShrink(lenCompressed)
-	b := bytes.NewBuffer(p.decompressBuffer.Bytes()[:0])
-	if _, err := io.CopyN(b, rd, int64(lenCompressed)); err != nil {
+
+	// Read directly into the memory.Buffer's backing slice
+	n, err := io.ReadFull(rd, p.decompressBuffer.Bytes()[:lenCompressed])
+	if err != nil {
 		return nil, err
 	}
+	if n != lenCompressed {
+		return nil, fmt.Errorf("parquet: expected to read %d compressed bytes, got %d", lenCompressed, n)
+	}
 
-	data := p.decompressBuffer.Bytes()
+	data := p.decompressBuffer.Bytes()[:lenCompressed]
 	if p.cryptoCtx.DataDecryptor != nil {
-		data = p.cryptoCtx.DataDecryptor.Decrypt(p.decompressBuffer.Bytes())
+		data = p.cryptoCtx.DataDecryptor.Decrypt(data)
 	}
 
 	return p.codec.Decode(buf, data), nil

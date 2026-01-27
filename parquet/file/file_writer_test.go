@@ -1198,3 +1198,119 @@ func TestWriteBloomFilters(t *testing.T) {
 	assert.False(t, byteArrayFilter.Check(parquet.ByteArray("bar")))
 	assert.False(t, byteArrayFilter.Check(parquet.ByteArray("baz")))
 }
+
+// TestBufferedStreamDictionaryCompressed tests the fix for issue #619
+// where BufferedStreamEnabled=true with dictionary encoding and compression
+// caused "dict spaced eof exception" and "snappy: corrupt input" errors.
+// This was due to a bug in the decompress() method that read from the wrong buffer.
+func TestBufferedStreamDictionaryCompressed(t *testing.T) {
+	// Create schema with a string column that will use dictionary encoding
+	fields := schema.FieldList{
+		schema.NewByteArrayNode("dict_col", parquet.Repetitions.Required, -1),
+		schema.NewInt32Node("value_col", parquet.Repetitions.Required, -1),
+	}
+	sc, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, fields, -1)
+	require.NoError(t, err)
+
+	sink := encoding.NewBufferWriter(0, memory.DefaultAllocator)
+	defer sink.Release()
+
+	// Write with dictionary encoding and Snappy compression
+	props := parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(true),
+		parquet.WithCompression(compress.Codecs.Snappy),
+	)
+
+	writer := file.NewParquetWriter(sink, sc, file.WithWriterProps(props))
+	rgWriter := writer.AppendBufferedRowGroup()
+
+	// Write dictionary column with repeated values to trigger dictionary encoding
+	dictCol, err := rgWriter.Column(0)
+	require.NoError(t, err)
+	dictWriter := dictCol.(*file.ByteArrayColumnChunkWriter)
+
+	const numValues = 1000
+	dictValues := make([]parquet.ByteArray, numValues)
+	for i := 0; i < numValues; i++ {
+		// Use only 10 unique values to ensure dictionary encoding is used
+		dictValues[i] = parquet.ByteArray(fmt.Sprintf("value_%d", i%10))
+	}
+	_, err = dictWriter.WriteBatch(dictValues, nil, nil)
+	require.NoError(t, err)
+
+	// Write value column
+	valueCol, err := rgWriter.Column(1)
+	require.NoError(t, err)
+	valueWriter := valueCol.(*file.Int32ColumnChunkWriter)
+
+	values := make([]int32, numValues)
+	for i := 0; i < numValues; i++ {
+		values[i] = int32(i)
+	}
+	_, err = valueWriter.WriteBatch(values, nil, nil)
+	require.NoError(t, err)
+
+	require.NoError(t, rgWriter.Close())
+	require.NoError(t, writer.Close())
+
+	buffer := sink.Finish()
+	defer buffer.Release()
+
+	// Verify dictionary page was written
+	reader, err := file.NewParquetReader(bytes.NewReader(buffer.Bytes()))
+	require.NoError(t, err)
+	defer reader.Close()
+
+	rgReader := reader.RowGroup(0)
+	chunk, err := rgReader.MetaData().ColumnChunk(0)
+	require.NoError(t, err)
+	assert.True(t, chunk.HasDictionaryPage(), "Expected dictionary page to be written")
+
+	// Now read with BufferedStreamEnabled=true (the issue #619 condition)
+	readProps := parquet.NewReaderProperties(memory.DefaultAllocator)
+	readProps.BufferSize = 1024
+	readProps.BufferedStreamEnabled = true
+
+	bufferedReader, err := file.NewParquetReader(bytes.NewReader(buffer.Bytes()), file.WithReadProps(readProps))
+	require.NoError(t, err)
+	defer bufferedReader.Close()
+
+	// Read the data back
+	bufferedRgReader := bufferedReader.RowGroup(0)
+	assert.EqualValues(t, numValues, bufferedRgReader.NumRows())
+
+	// Read dictionary column
+	dictColReader, err := bufferedRgReader.Column(0)
+	require.NoError(t, err)
+	dictChunkReader := dictColReader.(*file.ByteArrayColumnChunkReader)
+
+	readDictValues := make([]parquet.ByteArray, numValues)
+	defLevels := make([]int16, numValues)
+	repLevels := make([]int16, numValues)
+
+	total, valuesRead, err := dictChunkReader.ReadBatch(int64(numValues), readDictValues, defLevels, repLevels)
+	require.NoError(t, err, "Should not get 'dict spaced eof exception' or 'snappy: corrupt input'")
+	assert.EqualValues(t, numValues, total)
+	assert.EqualValues(t, numValues, valuesRead)
+
+	// Verify the data is correct
+	for i := 0; i < numValues; i++ {
+		expected := parquet.ByteArray(fmt.Sprintf("value_%d", i%10))
+		assert.Equal(t, expected, readDictValues[i], "Value mismatch at index %d", i)
+	}
+
+	// Read value column to ensure it also works
+	valueColReader, err := bufferedRgReader.Column(1)
+	require.NoError(t, err)
+	valueChunkReader := valueColReader.(*file.Int32ColumnChunkReader)
+
+	readValues := make([]int32, numValues)
+	total, valuesRead, err = valueChunkReader.ReadBatch(int64(numValues), readValues, defLevels, repLevels)
+	require.NoError(t, err)
+	assert.EqualValues(t, numValues, total)
+	assert.EqualValues(t, numValues, valuesRead)
+
+	for i := 0; i < numValues; i++ {
+		assert.Equal(t, int32(i), readValues[i])
+	}
+}
