@@ -522,11 +522,16 @@ func (p *serializedPageReader) decompress(rd io.Reader, lenCompressed int, buf [
 func (p *serializedPageReader) readV2Encrypted(rd io.Reader, lenCompressed int, levelsBytelen int, compressed bool, buf []byte) error {
 	// if encrypted, we need to decrypt before decompressing
 	p.decompressBuffer.ResizeNoShrink(lenCompressed)
-	b := bytes.NewBuffer(p.decompressBuffer.Bytes()[:0])
-	if _, err := io.CopyN(b, rd, int64(lenCompressed)); err != nil {
+
+	n, err := io.ReadFull(rd, p.decompressBuffer.Bytes()[:lenCompressed])
+	if err != nil {
 		return err
 	}
-	data := p.cryptoCtx.DataDecryptor.Decrypt(p.decompressBuffer.Bytes())
+	if n != lenCompressed {
+		return fmt.Errorf("parquet: expected to read %d compressed bytes, got %d", lenCompressed, n)
+	}
+
+	data := p.cryptoCtx.DataDecryptor.Decrypt(p.decompressBuffer.Bytes()[:lenCompressed])
 	// encrypted + uncompressed -> just copy the decrypted data to output buffer
 	if !compressed {
 		copy(buf, data)
