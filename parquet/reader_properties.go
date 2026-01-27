@@ -50,8 +50,11 @@ type BufferedReader interface {
 	Peek(int) ([]byte, error)
 	Discard(int) (int, error)
 	Outer() utils.Reader
+	// Buffered returns the number of bytes already read and stored in the buffer
+	Buffered() int
 	BufferSize() int
 	Reset(utils.Reader)
+	Free()
 	io.Reader
 }
 
@@ -74,17 +77,19 @@ func (r *ReaderProperties) Allocator() memory.Allocator { return r.alloc }
 // into a buffer in memory and return a bytes.NewReader for that buffer.
 func (r *ReaderProperties) GetStream(source io.ReaderAt, start, nbytes int64) (BufferedReader, error) {
 	if r.BufferedStreamEnabled {
-		return utils.NewBufferedReader(io.NewSectionReader(source, start, nbytes), int(r.BufferSize)), nil
+		return utils.NewBufferedReader(io.NewSectionReader(source, start, nbytes), int(r.BufferSize), r.alloc), nil
 	}
 
-	data := make([]byte, nbytes)
-	n, err := source.ReadAt(data, start)
+	buf := utils.NewBytesBufferReader(int(nbytes), r.alloc)
+	n, err := source.ReadAt(buf.Buffer(), start)
 	if err != nil {
+		buf.Free()
 		return nil, fmt.Errorf("parquet: tried reading from file, but got error: %w", err)
 	}
 	if n != int(nbytes) {
+		buf.Free()
 		return nil, fmt.Errorf("parquet: tried reading %d bytes starting at position %d from file but only got %d", nbytes, start, n)
 	}
 
-	return utils.NewByteReader(data), nil
+	return buf, nil
 }
