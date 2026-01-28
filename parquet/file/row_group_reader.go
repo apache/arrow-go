@@ -114,7 +114,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 		colLen += padding
 	}
 
-	stream, err := r.props.GetStream(r.r, colStart, colLen)
+	stream, err := r.props.GetStreamV2(r.r, colStart, colLen)
 	if err != nil {
 		return nil, err
 	}
