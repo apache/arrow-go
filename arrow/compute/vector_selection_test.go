@@ -1432,6 +1432,73 @@ func (tk *TakeKernelStruct) TestStruct() {
 	tk.assertNoValidityBitmapUnknownNullCountJSON(tk.dt, `[{"a": 1}, {"a": 2, "b": "hello"}]`, `[0, 1, 0]`)
 }
 
+func (tk *TakeKernelStruct) TestNestedStruct() {
+	// Define nested struct type: struct<a: int32, b: struct<x: int32, y: string>>
+	innerStruct := arrow.StructOf(
+		arrow.Field{Name: "x", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		arrow.Field{Name: "y", Type: arrow.BinaryTypes.String, Nullable: true},
+	)
+	outerStruct := arrow.StructOf(
+		arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		arrow.Field{Name: "b", Type: innerStruct, Nullable: true},
+	)
+
+	nestedJSON := `[
+		{"a": 1, "b": {"x": 10, "y": "hello"}},
+		{"a": 2, "b": {"x": 20, "y": "world"}},
+		null,
+		{"a": 4, "b": null}
+	]`
+
+	// Test basic reordering
+	tk.checkTake(outerStruct, nestedJSON, `[1, 0, 3]`, `[
+		{"a": 2, "b": {"x": 20, "y": "world"}},
+		{"a": 1, "b": {"x": 10, "y": "hello"}},
+		{"a": 4, "b": null}
+	]`)
+
+	// Test with nulls at different levels
+	tk.checkTake(outerStruct, nestedJSON, `[2, 3, 0]`, `[
+		null,
+		{"a": 4, "b": null},
+		{"a": 1, "b": {"x": 10, "y": "hello"}}
+	]`)
+
+	// Test with duplicates
+	tk.checkTake(outerStruct, nestedJSON, `[0, 0, 1, 1]`, `[
+		{"a": 1, "b": {"x": 10, "y": "hello"}},
+		{"a": 1, "b": {"x": 10, "y": "hello"}},
+		{"a": 2, "b": {"x": 20, "y": "world"}},
+		{"a": 2, "b": {"x": 20, "y": "world"}}
+	]`)
+}
+
+func (tk *TakeKernelStruct) TestDeeplyNestedStruct() {
+	// struct<a: int32, b: struct<x: int32, y: struct<z: string>>>
+	innermostStruct := arrow.StructOf(
+		arrow.Field{Name: "z", Type: arrow.BinaryTypes.String, Nullable: true},
+	)
+	middleStruct := arrow.StructOf(
+		arrow.Field{Name: "x", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		arrow.Field{Name: "y", Type: innermostStruct, Nullable: true},
+	)
+	outerStruct := arrow.StructOf(
+		arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		arrow.Field{Name: "b", Type: middleStruct, Nullable: true},
+	)
+
+	deeplyNestedJSON := `[
+		{"a": 1, "b": {"x": 10, "y": {"z": "deep"}}},
+		{"a": 2, "b": {"x": 20, "y": {"z": "deeper"}}}
+	]`
+
+	tk.checkTake(outerStruct, deeplyNestedJSON, `[1, 0, 1]`, `[
+		{"a": 2, "b": {"x": 20, "y": {"z": "deeper"}}},
+		{"a": 1, "b": {"x": 10, "y": {"z": "deep"}}},
+		{"a": 2, "b": {"x": 20, "y": {"z": "deeper"}}}
+	]`)
+}
+
 type TakeKernelTestChunked struct {
 	TakeKernelTestTyped
 }
