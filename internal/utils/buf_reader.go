@@ -40,7 +40,7 @@ type byteReader struct {
 
 // NewByteReader creates a new ByteReader instance from the given byte slice.
 // It wraps the bytes.NewReader function to implement BufferedReader interface.
-// It is considered not to own the underlying byte slice, so the Free method is a no-op.
+// It is considered not to own the underlying byte slice.
 func NewByteReader(buf []byte) *byteReader {
 	r := bytes.NewReader(buf)
 	return &byteReader{
@@ -113,7 +113,11 @@ func (r *byteReader) BufferSize() int { return len(r.buf) }
 
 func (r *byteReader) Buffered() int { return len(r.buf) - r.pos }
 
-func (r *byteReader) Free() {}
+func (r *byteReader) Free() {
+	r.r = nil
+	r.buf = nil
+	r.pos = 0
+}
 
 // bytesBufferReader is a byte slice with a bytes reader wrapped around it.
 // It uses an allocator to allocate and free the underlying byte slice.

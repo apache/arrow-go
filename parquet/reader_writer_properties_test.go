@@ -89,16 +89,16 @@ func TestReaderPropsGetStreamWithAllocator(t *testing.T) {
 
 	// no leak on success
 	props := parquet.NewReaderProperties(pool)
-	bufRdr, err := props.GetStream(rdr, 0, int64(len(data)))
+	bufRdr, err := props.GetStreamV2(rdr, 0, int64(len(data)))
 	assert.NoError(t, err)
 	bufRdr.Free()
 
 	// no leak on reader error
-	_, err = props.GetStream(&mockReaderAt{}, 0, 10)
+	_, err = props.GetStreamV2(&mockReaderAt{}, 0, 10)
 	assert.Error(t, err)
 
 	// no leak on insufficient read
-	_, err = props.GetStream(rdr, 0, int64(len(data)+10))
+	_, err = props.GetStreamV2(rdr, 0, int64(len(data)+10))
 	assert.Error(t, err)
 }
 
@@ -113,19 +113,19 @@ func TestReaderPropsGetStreamBufferedWithAllocator(t *testing.T) {
 	props.BufferedStreamEnabled = true
 
 	buf := make([]byte, len(data))
-	bufRdr, err := props.GetStream(rdr, 0, int64(len(data)))
+	bufRdr, err := props.GetStreamV2(rdr, 0, int64(len(data)))
 	assert.NoError(t, err)
 	_, err = bufRdr.Read(buf)
 	assert.NoError(t, err)
 	bufRdr.Free()
 
-	bufRdr, err = props.GetStream(&mockReaderAt{}, 0, 10)
+	bufRdr, err = props.GetStreamV2(&mockReaderAt{}, 0, 10)
 	assert.NoError(t, err)
 	_, err = bufRdr.Read(buf)
 	assert.Error(t, err)
 	bufRdr.Free()
 
-	bufRdr, err = props.GetStream(rdr, 0, int64(len(data)+10))
+	bufRdr, err = props.GetStreamV2(rdr, 0, int64(len(data)+10))
 	assert.NoError(t, err)
 	n, err := bufRdr.Read(buf)
 	assert.NoError(t, err)
