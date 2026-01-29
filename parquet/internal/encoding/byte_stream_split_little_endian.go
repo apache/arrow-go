@@ -20,6 +20,7 @@ package encoding
 
 import (
 	"fmt"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/parquet/internal/debug"
 )
@@ -37,6 +38,21 @@ func decodeByteStreamSplitBatchWidth4InByteOrder(data []byte, nValues, stride in
 		out[width*element+1] = data[stride+element]
 		out[width*element+2] = data[2*stride+element]
 		out[width*element+3] = data[3*stride+element]
+	}
+}
+
+func decodeByteStreamSplitBatchWidth8InByteOrderV2(data []byte, nValues, stride int, out []byte) {
+	const width = 4
+	// Narrow slices to help the compiler eliminate bounds checks.
+	s0 := data[:nValues]
+	s1 := data[stride : stride+nValues]
+	s2 := data[2*stride : 2*stride+nValues]
+	s3 := data[3*stride : 3*stride+nValues]
+
+	out = out[:width*nValues]
+	out32 := unsafe.Slice((*uint32)(unsafe.Pointer(&out[0])), nValues)
+	for i := range nValues {
+		out32[i] = uint32(s0[i]) | uint32(s1[i])<<8 | uint32(s2[i])<<16 | uint32(s3[i])<<24
 	}
 }
 
