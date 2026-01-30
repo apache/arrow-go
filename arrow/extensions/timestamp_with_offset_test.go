@@ -34,13 +34,13 @@ import (
 
 var testTimeUnit = arrow.Microsecond
 
-var testDate1 = time.Date(2025, 01, 01, 00, 00, 00, 00, time.FixedZone("UTC+00:00", 0))
+var testDate0 = time.Date(2025, 01, 01, 00, 00, 00, 00, time.FixedZone("UTC+00:00", 0))
 
-var testZone1 = time.FixedZone("UTC-08:00", -8*60*60)
-var testDate2 = testDate1.In(testZone1)
+var testZone1 = time.FixedZone("UTC-08:30", -8*60*60 -30*60)
+var testDate1 = testDate0.In(testZone1)
 
-var testZone2 = time.FixedZone("UTC+06:00", +6*60*60)
-var testDate3 = testDate1.In(testZone2)
+var testZone2 = time.FixedZone("UTC+11:00", +11*60*60)
+var testDate2 = testDate0.In(testZone2)
 
 func dict(index arrow.DataType) arrow.DataType {
 	return &arrow.DictionaryType{
@@ -201,20 +201,20 @@ func TestTimestampWithOffsetExtensionBuilder(t *testing.T) {
 	// use that encoding (there is no way to pass a flag to array.FromJSON to say explicitly what storage type you want)
 	primitiveBuilder, err := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, arrow.PrimitiveTypes.Int16)
 	assert.NoError(t, err)
-	primitiveBuilder.Append(testDate1)
+	primitiveBuilder.Append(testDate0)
 	primitiveBuilder.AppendNull()
+	primitiveBuilder.Append(testDate1)
 	primitiveBuilder.Append(testDate2)
-	primitiveBuilder.Append(testDate3)
 	jsonComparisonArr := primitiveBuilder.NewArray()
 	defer jsonComparisonArr.Release()
 
 	for _, offsetType := range allAllowedOffsetTypes {
 		builder, _ := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, offsetType)
 
-		builder.Append(testDate1)
+		builder.Append(testDate0)
 		builder.AppendNull()
+		builder.Append(testDate1)
 		builder.Append(testDate2)
-		builder.Append(testDate3)
 
 		// it should build the array with the correct size
 		arr := builder.NewArray()
@@ -223,9 +223,9 @@ func TestTimestampWithOffsetExtensionBuilder(t *testing.T) {
 		defer arr.Release()
 
 		// typedArr.Value(i) should return values adjusted for their original timezone
-		assert.Equal(t, testDate1, typedArr.Value(0))
-		assert.Equal(t, testDate2, typedArr.Value(2))
-		assert.Equal(t, testDate3, typedArr.Value(3))
+		assert.Equal(t, testDate0, typedArr.Value(0))
+		assert.Equal(t, testDate1, typedArr.Value(2))
+		assert.Equal(t, testDate2, typedArr.Value(3))
 
 		// storage TimeUnit should be the same as we pass in to the builder, and storage timezone should be UTC
 		timestampStructField := typedArr.Storage().(*array.Struct).Field(0)
@@ -235,13 +235,13 @@ func TestTimestampWithOffsetExtensionBuilder(t *testing.T) {
 
 		// stored values should be equivalent to the raw values in UTC
 		timestampsArr := timestampStructField.(*array.Timestamp)
-		assert.Equal(t, testDate1.In(time.UTC), timestampsArr.Value(0).ToTime(testTimeUnit))
-		assert.Equal(t, testDate2.In(time.UTC), timestampsArr.Value(2).ToTime(testTimeUnit))
-		assert.Equal(t, testDate3.In(time.UTC), timestampsArr.Value(3).ToTime(testTimeUnit))
+		assert.Equal(t, testDate0.In(time.UTC), timestampsArr.Value(0).ToTime(testTimeUnit))
+		assert.Equal(t, testDate1.In(time.UTC), timestampsArr.Value(2).ToTime(testTimeUnit))
+		assert.Equal(t, testDate2.In(time.UTC), timestampsArr.Value(3).ToTime(testTimeUnit))
 
 		// the array should encode itself as JSON and string
 		arrStr := arr.String()
-		assert.Equal(t, fmt.Sprintf(`["%[1]s" (null) "%[2]s" "%[3]s"]`, testDate1, testDate2, testDate3), arrStr)
+		assert.Equal(t, fmt.Sprintf(`["%[1]s" (null) "%[2]s" "%[3]s"]`, testDate0, testDate1, testDate2), arrStr)
 		jsonStr, err := json.Marshal(arr)
 		assert.NoError(t, err)
 
@@ -270,23 +270,23 @@ func TestTimestampWithOffsetExtensionRecordBuilder(t *testing.T) {
 		fieldBuilder := builder.Field(0).(*extensions.TimestampWithOffsetBuilder)
 
 		// append a simple time.Time
-		fieldBuilder.Append(testDate1)
+		fieldBuilder.Append(testDate0)
 
 		// append a null and 2 time.Time all at once
 		values := []time.Time{
 			time.Unix(0, 0).In(time.UTC),
+			testDate1,
 			testDate2,
-			testDate3,
 		}
 		valids := []bool{false, true, true}
 		fieldBuilder.AppendValues(values, valids)
 
 		// append a value from RFC3339 string
-		fieldBuilder.AppendValueFromString(testDate1.Format(time.RFC3339))
+		fieldBuilder.AppendValueFromString(testDate0.Format(time.RFC3339))
 
 		// append value formatted in a different string layout
 		fieldBuilder.Layout = time.RFC3339Nano
-		fieldBuilder.AppendValueFromString(testDate2.Format(time.RFC3339Nano))
+		fieldBuilder.AppendValueFromString(testDate1.Format(time.RFC3339Nano))
 
 		record := builder.NewRecordBatch()
 
@@ -295,10 +295,10 @@ func TestTimestampWithOffsetExtensionRecordBuilder(t *testing.T) {
 		require.NoError(t, err)
 		expect := `[{"timestamp_with_offset":"2025-01-01T00:00:00Z"}
 ,{"timestamp_with_offset":null}
-,{"timestamp_with_offset":"2024-12-31T16:00:00-08:00"}
-,{"timestamp_with_offset":"2025-01-01T06:00:00+06:00"}
+,{"timestamp_with_offset":"2024-12-31T15:30:00-08:30"}
+,{"timestamp_with_offset":"2025-01-01T11:00:00+11:00"}
 ,{"timestamp_with_offset":"2025-01-01T00:00:00Z"}
-,{"timestamp_with_offset":"2024-12-31T16:00:00-08:00"}
+,{"timestamp_with_offset":"2024-12-31T15:30:00-08:30"}
 ]`
 		require.Equal(t, expect, string(json))
 
@@ -317,10 +317,10 @@ func TestTimestampWithOffsetTypeBatchIPCRoundTrip(t *testing.T) {
 
 	for _, offsetType := range allAllowedOffsetTypes {
 		builder, _ := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, offsetType)
-		builder.Append(testDate1)
+		builder.Append(testDate0)
 		builder.AppendNull()
+		builder.Append(testDate1)
 		builder.Append(testDate2)
-		builder.Append(testDate3)
 		arr := builder.NewArray()
 		defer arr.Release()
 
