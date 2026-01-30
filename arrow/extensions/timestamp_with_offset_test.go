@@ -79,7 +79,7 @@ var allAllowedOffsetTypes = []arrow.DataType{
 }
 
 func TestTimestampWithOffsetTypePrimitiveBasics(t *testing.T) {
-	typ := extensions.NewTimestampWithOffsetTypePrimitiveEncoded(testTimeUnit)
+	typ := extensions.NewTimestampWithOffsetType(testTimeUnit)
 
 	assert.Equal(t, "arrow.timestamp_with_offset", typ.ExtensionName())
 	assert.True(t, typ.ExtensionEquals(typ))
@@ -246,7 +246,7 @@ func TestTimestampWithOffsetExtensionBuilder(t *testing.T) {
 		assert.NoError(t, err)
 
 		// roundtripping from JSON with array.FromJSON should work
-		expectedDataType, _ := extensions.NewTimestampWithOffsetType(testTimeUnit, offsetType)
+		expectedDataType, _ := extensions.NewTimestampWithOffsetTypeCustomOffset(testTimeUnit, offsetType)
 		roundtripped, _, err := array.FromJSON(mem, expectedDataType, bytes.NewReader(jsonStr))
 		defer roundtripped.Release()
 		assert.NoError(t, err)
@@ -256,7 +256,7 @@ func TestTimestampWithOffsetExtensionBuilder(t *testing.T) {
 
 func TestTimestampWithOffsetExtensionRecordBuilder(t *testing.T) {
 	for _, offsetType := range allAllowedOffsetTypes {
-		dataType, _ := extensions.NewTimestampWithOffsetType(testTimeUnit, offsetType)
+		dataType, _ := extensions.NewTimestampWithOffsetTypeCustomOffset(testTimeUnit, offsetType)
 		schema := arrow.NewSchema([]arrow.Field{
 			{
 				Name:     "timestamp_with_offset",
@@ -324,7 +324,7 @@ func TestTimestampWithOffsetTypeBatchIPCRoundTrip(t *testing.T) {
 		arr := builder.NewArray()
 		defer arr.Release()
 
-		typ, _ := extensions.NewTimestampWithOffsetType(testTimeUnit, offsetType)
+		typ, _ := extensions.NewTimestampWithOffsetTypeCustomOffset(testTimeUnit, offsetType)
 
 		batch := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{{Name: "timestamp_with_offset", Type: typ, Nullable: true}}, nil), []arrow.Array{arr}, -1)
 		defer batch.Release()
