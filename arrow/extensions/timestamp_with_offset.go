@@ -19,8 +19,10 @@ package extensions
 import (
 	"errors"
 	"fmt"
+	"iter"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -57,41 +59,31 @@ func isOffsetTypeOk(offsetType arrow.DataType) bool {
 // Whether the storageType is compatible with TimestampWithOffset.
 //
 // Returns (time_unit, offset_type, ok). If ok is false, time_unit and offset_type are garbage.
-func isDataTypeCompatible(storageType arrow.DataType) (arrow.TimeUnit, arrow.DataType, bool) {
-	timeUnit := arrow.Second
-	offsetType := arrow.PrimitiveTypes.Int16
-	switch t := storageType.(type) {
-	case *arrow.StructType:
-		if t.NumFields() != 2 {
-			return timeUnit, offsetType, false
-		}
+func isDataTypeCompatible(storageType arrow.DataType) (unit arrow.TimeUnit, offsetType arrow.DataType, ok bool) {
+	unit = arrow.Second
+	offsetType = arrow.PrimitiveTypes.Int16
+	ok = false
 
-		maybeTimestamp := t.Field(0)
-		maybeOffset := t.Field(1)
-
-		timestampOk := false
-		switch timestampType := maybeTimestamp.Type.(type) {
-		case *arrow.TimestampType:
-			if timestampType.TimeZone == "UTC" {
-				timestampOk = true
-				timeUnit = timestampType.TimeUnit()
-			}
-		default:
-		}
-
-		offsetOk := isOffsetTypeOk(maybeOffset.Type)
-
-		ok := maybeTimestamp.Name == "timestamp" &&
-			timestampOk &&
-			!maybeTimestamp.Nullable &&
-			maybeOffset.Name == "offset_minutes" &&
-			offsetOk &&
-			!maybeOffset.Nullable
-
-		return timeUnit, maybeOffset.Type, ok
-	default:
-		return timeUnit, offsetType, false
+	st, compat := storageType.(*arrow.StructType)
+	if !compat || st.NumFields() != 2 {
+		return 
 	}
+
+	if ts, compat := st.Field(0).Type.(*arrow.TimestampType); compat && ts.TimeZone == "UTC" {        
+		unit = ts.TimeUnit()
+	} else {
+		return
+	}
+
+	maybeOffset := st.Field(1)
+	offsetType = maybeOffset.Type
+
+	ok = st.Field(0).Name == "timestamp" &&
+		!st.Field(0).Nullable &&
+		maybeOffset.Name == "offset_minutes" &&
+		isOffsetTypeOk(offsetType) &&
+		!maybeOffset.Nullable
+	return
 }
 
 // NewTimestampWithOffsetType creates a new TimestampWithOffsetType with the underlying storage type set correctly to
@@ -185,10 +177,7 @@ func (b *TimestampWithOffsetType) Deserialize(storageType arrow.DataType, data s
 		return nil, fmt.Errorf("invalid storage type for TimestampWithOffsetType: %s", storageType.Name())
 	}
 
-	v, _ := NewTimestampWithOffsetType(timeUnit, offsetType)
-	// SAFETY: the offsetType has already been checked by isDataTypeCompatible, so we can ignore the error
-
-	return v, nil
+	return NewTimestampWithOffsetType(timeUnit, offsetType)
 }
 
 func (b *TimestampWithOffsetType) ExtensionEquals(other arrow.ExtensionType) bool {
@@ -196,7 +185,7 @@ func (b *TimestampWithOffsetType) ExtensionEquals(other arrow.ExtensionType) boo
 }
 
 func (b *TimestampWithOffsetType) TimeUnit() arrow.TimeUnit {
-	return b.ExtensionBase.Storage.(*arrow.StructType).Fields()[0].Type.(*arrow.TimestampType).TimeUnit()
+	return b.ExtensionBase.Storage.(*arrow.StructType).Field(0).Type.(*arrow.TimestampType).TimeUnit()
 }
 
 func (b *TimestampWithOffsetType) NewBuilder(mem memory.Allocator) array.Builder {
@@ -245,6 +234,7 @@ func fieldValuesFromTime(t time.Time, unit arrow.TimeUnit) (arrow.Timestamp, int
 	utc := t.UTC()
 	naiveUtc := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
 	offsetMinutes := int16(naiveUtc.Sub(t).Minutes())
+
 	// SAFETY: unit MUST have been validated to a valid arrow.TimeUnit value before
 	// this function. Otherwise, ignoring this error is not safe.
 	timestamp, _ := arrow.TimestampFromTime(utc, unit)
@@ -285,71 +275,70 @@ func (a *TimestampWithOffsetArray) Value(i int) time.Time {
 	return timeFromFieldValues(utcTimestamp, offsetMinutes, timeUnit)
 }
 
-// Iterates over the array and calls the callback with the timestamp at each position. If it's null,
-// the timestamp will be nil.
+// Iterates over the array returning the timestamp at each position.
+//
+// If the timestamp is null, the returned time will be the unix epoch.
 //
 // This will iterate using the fastest method given the underlying storage array
-func (a* TimestampWithOffsetArray) iterValues(callback func(i int, utcTimestamp *time.Time)) {
-	structs := a.Storage().(*array.Struct)
-	offsets := structs.Field(1)
-	if reeOffsets, isRee := offsets.(*array.RunEndEncoded); isRee {
-		timestampField := structs.Field(0)
-		timeUnit := timestampField.DataType().(*arrow.TimestampType).Unit
-		timestamps := timestampField.(*array.Timestamp)
+func (a* TimestampWithOffsetArray) iterValues() iter.Seq[time.Time] {
+	return func(yield func(time.Time) bool) {
+		structs := a.Storage().(*array.Struct)
+		offsets := structs.Field(1)
+		if reeOffsets, isRee := offsets.(*array.RunEndEncoded); isRee {
+			timestampField := structs.Field(0)
+			timeUnit := timestampField.DataType().(*arrow.TimestampType).Unit
+			timestamps := timestampField.(*array.Timestamp)
 
-		offsetValues := reeOffsets.Values().(*array.Int16)
-		offsetPhysicalIdx := 0
+			offsetValues := reeOffsets.Values().(*array.Int16)
+			offsetPhysicalIdx := 0
 
-		var getRunEnd (func(int) int)
-		switch arr := reeOffsets.RunEndsArr().(type) {
-		case *array.Int16:
-			getRunEnd = func(idx int) int { return int(arr.Value(idx)) }
-		case *array.Int32:
-			getRunEnd = func(idx int) int { return int(arr.Value(idx)) }
-		case *array.Int64:
-			getRunEnd = func(idx int) int { return int(arr.Value(idx)) }
-		}
-
-		for i := 0; i < a.Len(); i++ {
-			if i >= getRunEnd(offsetPhysicalIdx) {
-				offsetPhysicalIdx += 1
+			var getRunEnd (func(int) int)
+			switch arr := reeOffsets.RunEndsArr().(type) {
+			case *array.Int16:
+				getRunEnd = func(idx int) int { return int(arr.Value(idx)) }
+			case *array.Int32:
+				getRunEnd = func(idx int) int { return int(arr.Value(idx)) }
+			case *array.Int64:
+				getRunEnd = func(idx int) int { return int(arr.Value(idx)) }
 			}
 
-			timestamp := (*time.Time)(nil)
-			if a.IsValid(i) {
-				utcTimestamp := timestamps.Value(i)
-				offsetMinutes := offsetValues.Value(offsetPhysicalIdx)
-				v := timeFromFieldValues(utcTimestamp, offsetMinutes, timeUnit)
-				timestamp = &v
-			} 
+			for i := 0; i < a.Len(); i++ {
+				if i >= getRunEnd(offsetPhysicalIdx) {
+					offsetPhysicalIdx += 1
+				}
 
-			callback(i, timestamp)
-		}
-	} else {
-		for i := 0; i < a.Len(); i++ {
-			timestamp := (*time.Time)(nil)
-			if a.IsValid(i) {
-				utcTimestamp, offsetMinutes, timeUnit := a.rawValueUnsafe(i)
-				v := timeFromFieldValues(utcTimestamp, offsetMinutes, timeUnit)
-				timestamp = &v
-			} 
+				ts:= time.Unix(0, 0)
+				if a.IsValid(i) {
+					utcTimestamp := timestamps.Value(i)
+					offsetMinutes := offsetValues.Value(offsetPhysicalIdx)
+					v := timeFromFieldValues(utcTimestamp, offsetMinutes, timeUnit)
+					ts = v
+				} 
 
-			callback(i, timestamp)
+				if !yield(ts) {
+					return
+				}
+			}
+		} else {
+			for i := 0; i < a.Len(); i++ {
+				ts:= time.Unix(0, 0)
+				if a.IsValid(i) {
+					utcTimestamp, offsetMinutes, timeUnit := a.rawValueUnsafe(i)
+					v := timeFromFieldValues(utcTimestamp, offsetMinutes, timeUnit)
+					ts = v
+				} 
+
+				if !yield(ts) {
+					return
+				}
+			}
 		}
 	}
 }
 
 
 func (a *TimestampWithOffsetArray) Values() []time.Time {
-	values := make([]time.Time, a.Len())
-	a.iterValues(func(i int, timestamp *time.Time) {
-		if timestamp == nil {
-			values[i] = time.Unix(0, 0)
-		} else {
-			values[i] = *timestamp
-		}
-	})
-	return values
+	return slices.Collect(a.iterValues())
 }
 
 func (a *TimestampWithOffsetArray) ValueStr(i int) string {
@@ -363,9 +352,15 @@ func (a *TimestampWithOffsetArray) ValueStr(i int) string {
 
 func (a *TimestampWithOffsetArray) MarshalJSON() ([]byte, error) {
 	values := make([]interface{}, a.Len())
-	a.iterValues(func(i int, timestamp *time.Time) {
-		values[i] = timestamp
-	})
+	i := 0
+	for ts := range a.iterValues() {
+		if ts.Unix() == 0 {
+			values[i] = nil
+		} else {
+			values[i] = &ts
+		}
+		i += 1
+	}
 	return json.Marshal(values)
 }
 
