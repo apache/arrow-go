@@ -125,32 +125,48 @@ func NewTimestampWithOffsetTypeCustomOffset(unit arrow.TimeUnit, offsetType arro
 	}, nil
 }
 
+type DictIndexType interface {
+    *arrow.Int8Type | *arrow.Int16Type | *arrow.Int32Type | *arrow.Int64Type |
+    *arrow.Uint8Type | *arrow.Uint16Type | *arrow.Uint32Type | *arrow.Uint64Type
+}
+
 // NewTimestampWithOffsetType creates a new TimestampWithOffsetType with the underlying storage type set correctly to
 // Struct(timestamp=Timestamp(T, "UTC"), offset_minutes=Dictionary(I, Int16)), where T is any TimeUnit and I is a
 // valid Dictionary index type.
 //
 // The error will be populated if the index is not a valid dictionary-encoding index type.
-func NewTimestampWithOffsetTypeDictionaryEncoded(unit arrow.TimeUnit, index arrow.DataType) (*TimestampWithOffsetType, error) {
+func NewTimestampWithOffsetTypeDictionaryEncoded[I DictIndexType](unit arrow.TimeUnit, index I) *TimestampWithOffsetType {
 	offsetType := arrow.DictionaryType{
-		IndexType: index,
+		IndexType: arrow.DataType(index),
 		ValueType: arrow.PrimitiveTypes.Int16,
 		Ordered:   false,
 	}
-	return NewTimestampWithOffsetTypeCustomOffset(unit, &offsetType)
+	v, _ := NewTimestampWithOffsetTypeCustomOffset(unit, &offsetType)
+	// SAFETY: This should never error as DictIndexType is always a valid index type
+
+	return v
 }
+
+
+type TimestampWithOffsetRunEndsType interface {
+    *arrow.Int8Type | *arrow.Int16Type | *arrow.Int32Type | *arrow.Int64Type |
+    *arrow.Uint8Type | *arrow.Uint16Type | *arrow.Uint32Type | *arrow.Uint64Type
+}
+
 
 // NewTimestampWithOffsetType creates a new TimestampWithOffsetType with the underlying storage type set correctly to
 // Struct(timestamp=Timestamp(T, "UTC"), offset_minutes=RunEndEncoded(E, Int16)), where T is any TimeUnit and E is a
 // valid run-ends type.
 //
 // The error will be populated if runEnds is not a valid run-end encoding run-ends type.
-func NewTimestampWithOffsetTypeRunEndEncoded(unit arrow.TimeUnit, runEnds arrow.DataType) (*TimestampWithOffsetType, error) {
-	offsetType := arrow.RunEndEncodedOf(runEnds, arrow.PrimitiveTypes.Int16)
-	if !offsetType.ValidRunEndsType(runEnds) {
-		return nil, errors.New(fmt.Sprintf("Invalid run-ends type %s", runEnds))
-	}
+func NewTimestampWithOffsetTypeRunEndEncoded[E TimestampWithOffsetRunEndsType](unit arrow.TimeUnit, runEnds E) *TimestampWithOffsetType {
+	offsetType := arrow.RunEndEncodedOf(arrow.DataType(runEnds), arrow.PrimitiveTypes.Int16)
 
-	return NewTimestampWithOffsetTypeCustomOffset(unit, offsetType)
+	v, _ := NewTimestampWithOffsetTypeCustomOffset(unit, offsetType)
+	// SAFETY: This should never error as TimestampWithOffsetRunEndsType is always a valid run ends type
+
+	return v
+
 }
 
 

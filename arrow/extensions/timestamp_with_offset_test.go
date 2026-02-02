@@ -106,91 +106,77 @@ func TestTimestampWithOffsetTypePrimitiveBasics(t *testing.T) {
 	assert.Equal(t, "extension<arrow.timestamp_with_offset>", typ.String())
 }
 
+func assertDictBasics[I extensions.DictIndexType](t *testing.T, indexType I) {
+	typ := extensions.NewTimestampWithOffsetTypeDictionaryEncoded(testTimeUnit, indexType)
+
+	assert.Equal(t, "arrow.timestamp_with_offset", typ.ExtensionName())
+	assert.True(t, typ.ExtensionEquals(typ))
+
+	assert.True(t, arrow.TypeEqual(typ, typ))
+	assert.True(t, arrow.TypeEqual(
+		arrow.StructOf(
+			arrow.Field{
+				Name: "timestamp",
+				Type: &arrow.TimestampType{
+					Unit:     testTimeUnit,
+					TimeZone: "UTC",
+				},
+				Nullable: false,
+			},
+			arrow.Field{
+				Name: "offset_minutes",
+				Type: dict(arrow.DataType(indexType)),
+				Nullable: false,
+			},
+		),
+		typ.StorageType()))
+
+	assert.Equal(t, "extension<arrow.timestamp_with_offset>", typ.String())
+}
+
 func TestTimestampWithOffsetTypeDictionaryEncodedBasics(t *testing.T) {
-	invalidIndexType := arrow.PrimitiveTypes.Float32
-	_, err := extensions.NewTimestampWithOffsetTypeDictionaryEncoded(testTimeUnit, invalidIndexType)
-	assert.True(t, err != nil, "Err should not be nil if index type is invalid dict key")
+	assertDictBasics(t, &arrow.Uint8Type{})
+	assertDictBasics(t, &arrow.Uint16Type{})
+	assertDictBasics(t, &arrow.Uint32Type{})
+	assertDictBasics(t, &arrow.Uint64Type{})
+	assertDictBasics(t, &arrow.Int8Type{})
+	assertDictBasics(t, &arrow.Int16Type{})
+	assertDictBasics(t, &arrow.Int32Type{})
+	assertDictBasics(t, &arrow.Int64Type{})
+}
 
-	indexTypes := []arrow.DataType{
-		arrow.PrimitiveTypes.Uint8,
-		arrow.PrimitiveTypes.Uint16,
-		arrow.PrimitiveTypes.Uint32,
-		arrow.PrimitiveTypes.Uint64,
-		arrow.PrimitiveTypes.Int8,
-		arrow.PrimitiveTypes.Int16,
-		arrow.PrimitiveTypes.Int32,
-		arrow.PrimitiveTypes.Int64,
-	};
+func assertReeBasics[E extensions.TimestampWithOffsetRunEndsType](t *testing.T, runEndsType E) {
+	typ := extensions.NewTimestampWithOffsetTypeRunEndEncoded(testTimeUnit, runEndsType)
 
-	for _, indexType := range indexTypes {
-		typ, err := extensions.NewTimestampWithOffsetTypeDictionaryEncoded(testTimeUnit, indexType)
-		assert.True(t, err == nil, "Err should be nil")
+	assert.Equal(t, "arrow.timestamp_with_offset", typ.ExtensionName())
+	assert.True(t, typ.ExtensionEquals(typ))
 
-		assert.Equal(t, "arrow.timestamp_with_offset", typ.ExtensionName())
-		assert.True(t, typ.ExtensionEquals(typ))
-
-		assert.True(t, arrow.TypeEqual(typ, typ))
-		assert.True(t, arrow.TypeEqual(
-			arrow.StructOf(
-				arrow.Field{
-					Name: "timestamp",
-					Type: &arrow.TimestampType{
-						Unit:     testTimeUnit,
-						TimeZone: "UTC",
-					},
-					Nullable: false,
+	assert.True(t, arrow.TypeEqual(typ, typ))
+	assert.True(t, arrow.TypeEqual(
+		arrow.StructOf(
+			arrow.Field{
+				Name: "timestamp",
+				Type: &arrow.TimestampType{
+					Unit:     testTimeUnit,
+					TimeZone: "UTC",
 				},
-				arrow.Field{
-					Name: "offset_minutes",
-					Type: dict(indexType),
-					Nullable: false,
-				},
-			),
-			typ.StorageType()))
+				Nullable: false,
+			},
+			arrow.Field{
+				Name: "offset_minutes",
+				Type: ree(arrow.DataType(runEndsType)),
+				Nullable: false,
+			},
+		),
+		typ.StorageType()))
 
-		assert.Equal(t, "extension<arrow.timestamp_with_offset>", typ.String())
-	}
+	assert.Equal(t, "extension<arrow.timestamp_with_offset>", typ.String())
 }
 
 func TestTimestampWithOffsetTypeRunEndEncodedBasics(t *testing.T) {
-	invalidRunEndsType := arrow.PrimitiveTypes.Float32
-	_, err := extensions.NewTimestampWithOffsetTypeRunEndEncoded(testTimeUnit, invalidRunEndsType)
-	assert.True(t, err != nil, "Err should not be nil if run ends type is invalid")
-
-	runEndsTypes := []arrow.DataType{
-		arrow.PrimitiveTypes.Int16,
-		arrow.PrimitiveTypes.Int32,
-		arrow.PrimitiveTypes.Int64,
-	};
-
-	for _, indexType := range runEndsTypes {
-		typ, err := extensions.NewTimestampWithOffsetTypeRunEndEncoded(testTimeUnit, indexType)
-		assert.True(t, err == nil, "Err should be nil")
-
-		assert.Equal(t, "arrow.timestamp_with_offset", typ.ExtensionName())
-		assert.True(t, typ.ExtensionEquals(typ))
-
-		assert.True(t, arrow.TypeEqual(typ, typ))
-		assert.True(t, arrow.TypeEqual(
-			arrow.StructOf(
-				arrow.Field{
-					Name: "timestamp",
-					Type: &arrow.TimestampType{
-						Unit:     testTimeUnit,
-						TimeZone: "UTC",
-					},
-					Nullable: false,
-				},
-				arrow.Field{
-					Name: "offset_minutes",
-					Type: ree(indexType),
-					Nullable: false,
-				},
-			),
-			typ.StorageType()))
-
-		assert.Equal(t, "extension<arrow.timestamp_with_offset>", typ.String())
-	}
+	assertReeBasics(t, &arrow.Int16Type{})
+	assertReeBasics(t, &arrow.Int32Type{})
+	assertReeBasics(t, &arrow.Int64Type{})
 }
 
 func TestTimestampWithOffsetExtensionBuilder(t *testing.T) {
