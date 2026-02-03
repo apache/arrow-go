@@ -179,20 +179,38 @@ func TestTimestampWithOffsetTypeRunEndEncodedBasics(t *testing.T) {
 	assertReeBasics(t, &arrow.Int64Type{})
 }
 
+func TestTimestampWithOffsetEquals(t *testing.T) {
+	// Completely different types are not equal
+	assert.False(t, extensions.NewTimestampWithOffsetType(arrow.Nanosecond).ExtensionEquals(extensions.NewBool8Type()))
+
+	// Different time units are not equal
+	// assert.False(t, extensions.NewTimestampWithOffsetType(arrow.Nanosecond).ExtensionEquals(extensions.NewTimestampWithOffsetType(arrow.Microsecond)))
+	// assert.False(t, extensions.NewTimestampWithOffsetType(arrow.Nanosecond).ExtensionEquals(extensions.NewTimestampWithOffsetType(arrow.Second)))
+	// assert.False(t, extensions.NewTimestampWithOffsetType(arrow.Microsecond).ExtensionEquals(extensions.NewTimestampWithOffsetType(arrow.Second)))
+	//
+	// // Different underlying storage type is not equal
+	// assert.False(t, extensions.NewTimestampWithOffsetType(arrow.Microsecond).ExtensionEquals(extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Int16Type{})))
+	// assert.False(t, extensions.NewTimestampWithOffsetType(arrow.Microsecond).ExtensionEquals(extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Int16Type{})))
+	// assert.False(t, extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Int16Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Int16Type{})))
+	//
+	// // Dict-encoding key type is not equal
+	// assert.False(t, extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Int16Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Uint16Type{})))
+	//
+	// // REE index type is not equal
+	// assert.False(t, extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Int16Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Uint16Type{})))
+	//
+	// // Equals OK
+	// assert.False(t, extensions.NewTimestampWithOffsetType(arrow.Nanosecond).ExtensionEquals(extensions.NewTimestampWithOffsetType(arrow.Nanosecond)))
+	// assert.False(t, extensions.NewTimestampWithOffsetType(arrow.Microsecond).ExtensionEquals(extensions.NewTimestampWithOffsetType(arrow.Microsecond)))
+	// assert.False(t, extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Int16Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Int16Type{})))
+	// assert.False(t, extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Uint16Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Uint16Type{})))
+	// assert.False(t, extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Int16Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Int16Type{})))
+	// assert.False(t, extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Uint16Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Uint16Type{})))
+}
+
 func TestTimestampWithOffsetExtensionBuilder(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
-
-	// NOTE: we need to compare the arrays parsed from JSON with a primitive-encoded array, since that will always
-	// use that encoding (there is no way to pass a flag to array.FromJSON to say explicitly what storage type you want)
-	primitiveBuilder, err := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, arrow.PrimitiveTypes.Int16)
-	assert.NoError(t, err)
-	primitiveBuilder.Append(testDate0)
-	primitiveBuilder.AppendNull()
-	primitiveBuilder.Append(testDate1)
-	primitiveBuilder.Append(testDate2)
-	jsonComparisonArr := primitiveBuilder.NewArray()
-	defer jsonComparisonArr.Release()
 
 	for _, offsetType := range allAllowedOffsetTypes {
 		builder, _ := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, offsetType)
@@ -236,7 +254,7 @@ func TestTimestampWithOffsetExtensionBuilder(t *testing.T) {
 		roundtripped, _, err := array.FromJSON(mem, expectedDataType, bytes.NewReader(jsonStr))
 		defer roundtripped.Release()
 		assert.NoError(t, err)
-		assert.Truef(t, array.Equal(jsonComparisonArr, roundtripped), "expected %s\n\ngot %s", jsonComparisonArr, roundtripped)
+		assert.Truef(t, array.Equal(arr, roundtripped), "expected %s\n\ngot %s", arr, roundtripped)
 	}
 }
 

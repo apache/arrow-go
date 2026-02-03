@@ -45,12 +45,12 @@ func isOffsetTypeOk(offsetType arrow.DataType) bool {
 	case *arrow.DictionaryType:
 		return arrow.IsInteger(offsetType.IndexType.ID()) && arrow.TypeEqual(offsetType.ValueType, arrow.PrimitiveTypes.Int16)
 	case *arrow.RunEndEncodedType:
-		return offsetType.ValidRunEndsType(offsetType.RunEnds()) && 
+		return offsetType.ValidRunEndsType(offsetType.RunEnds()) &&
 			arrow.TypeEqual(offsetType.Encoded(), arrow.PrimitiveTypes.Int16)
-			// FIXME: Technically this should be non-nullable, but a Arrow IPC does not deserialize
-			// ValueNullable properly, so enforcing this here would always fail when reading from an IPC
-			// stream
-			// !offsetType.ValueNullable
+		// FIXME: Technically this should be non-nullable, but a Arrow IPC does not deserialize
+		// ValueNullable properly, so enforcing this here would always fail when reading from an IPC
+		// stream
+		// !offsetType.ValueNullable
 	default:
 		return false
 	}
@@ -66,10 +66,10 @@ func isDataTypeCompatible(storageType arrow.DataType) (unit arrow.TimeUnit, offs
 
 	st, compat := storageType.(*arrow.StructType)
 	if !compat || st.NumFields() != 2 {
-		return 
+		return
 	}
 
-	if ts, compat := st.Field(0).Type.(*arrow.TimestampType); compat && ts.TimeZone == "UTC" {        
+	if ts, compat := st.Field(0).Type.(*arrow.TimestampType); compat && ts.TimeZone == "UTC" {
 		unit = ts.TimeUnit()
 	} else {
 		return
@@ -126,8 +126,8 @@ func NewTimestampWithOffsetTypeCustomOffset(unit arrow.TimeUnit, offsetType arro
 }
 
 type DictIndexType interface {
-    *arrow.Int8Type | *arrow.Int16Type | *arrow.Int32Type | *arrow.Int64Type |
-    *arrow.Uint8Type | *arrow.Uint16Type | *arrow.Uint32Type | *arrow.Uint64Type
+	*arrow.Int8Type | *arrow.Int16Type | *arrow.Int32Type | *arrow.Int64Type |
+		*arrow.Uint8Type | *arrow.Uint16Type | *arrow.Uint32Type | *arrow.Uint64Type
 }
 
 // NewTimestampWithOffsetType creates a new TimestampWithOffsetType with the underlying storage type set correctly to
@@ -147,12 +147,10 @@ func NewTimestampWithOffsetTypeDictionaryEncoded[I DictIndexType](unit arrow.Tim
 	return v
 }
 
-
 type TimestampWithOffsetRunEndsType interface {
-    *arrow.Int8Type | *arrow.Int16Type | *arrow.Int32Type | *arrow.Int64Type |
-    *arrow.Uint8Type | *arrow.Uint16Type | *arrow.Uint32Type | *arrow.Uint64Type
+	*arrow.Int8Type | *arrow.Int16Type | *arrow.Int32Type | *arrow.Int64Type |
+		*arrow.Uint8Type | *arrow.Uint16Type | *arrow.Uint32Type | *arrow.Uint64Type
 }
-
 
 // NewTimestampWithOffsetType creates a new TimestampWithOffsetType with the underlying storage type set correctly to
 // Struct(timestamp=Timestamp(T, "UTC"), offset_minutes=RunEndEncoded(E, Int16)), where T is any TimeUnit and E is a
@@ -168,7 +166,6 @@ func NewTimestampWithOffsetTypeRunEndEncoded[E TimestampWithOffsetRunEndsType](u
 	return v
 
 }
-
 
 func (b *TimestampWithOffsetType) ArrayType() reflect.Type {
 	return reflect.TypeOf(TimestampWithOffsetArray{})
@@ -196,7 +193,12 @@ func (b *TimestampWithOffsetType) Deserialize(storageType arrow.DataType, data s
 }
 
 func (b *TimestampWithOffsetType) ExtensionEquals(other arrow.ExtensionType) bool {
-	return b.ExtensionName() == other.ExtensionName()
+	return b.ExtensionName() == other.ExtensionName() &&
+		arrow.TypeEqual(b.StorageType(), other.StorageType())
+}
+
+func (b *TimestampWithOffsetType) OffsetType() arrow.DataType {
+	return b.ExtensionBase.Storage.(*arrow.StructType).Field(1).Type
 }
 
 func (b *TimestampWithOffsetType) TimeUnit() arrow.TimeUnit {
@@ -204,9 +206,7 @@ func (b *TimestampWithOffsetType) TimeUnit() arrow.TimeUnit {
 }
 
 func (b *TimestampWithOffsetType) NewBuilder(mem memory.Allocator) array.Builder {
-	v, _ := NewTimestampWithOffsetBuilder(mem, b.TimeUnit(), arrow.PrimitiveTypes.Int16)
-	// SAFETY: This will never error as Int16 is always a valid type for the offset field
-
+	v, _ := NewTimestampWithOffsetBuilder(mem, b.TimeUnit(), b.OffsetType())
 	return v
 }
 
@@ -295,7 +295,7 @@ func (a *TimestampWithOffsetArray) Value(i int) time.Time {
 // If the timestamp is null, the returned time will be the unix epoch.
 //
 // This will iterate using the fastest method given the underlying storage array
-func (a* TimestampWithOffsetArray) iterValues() iter.Seq[time.Time] {
+func (a *TimestampWithOffsetArray) iterValues() iter.Seq[time.Time] {
 	return func(yield func(time.Time) bool) {
 		structs := a.Storage().(*array.Struct)
 		offsets := structs.Field(1)
@@ -322,13 +322,13 @@ func (a* TimestampWithOffsetArray) iterValues() iter.Seq[time.Time] {
 					offsetPhysicalIdx += 1
 				}
 
-				ts:= time.Unix(0, 0)
+				ts := time.Unix(0, 0)
 				if a.IsValid(i) {
 					utcTimestamp := timestamps.Value(i)
 					offsetMinutes := offsetValues.Value(offsetPhysicalIdx)
 					v := timeFromFieldValues(utcTimestamp, offsetMinutes, timeUnit)
 					ts = v
-				} 
+				}
 
 				if !yield(ts) {
 					return
@@ -336,12 +336,12 @@ func (a* TimestampWithOffsetArray) iterValues() iter.Seq[time.Time] {
 			}
 		} else {
 			for i := 0; i < a.Len(); i++ {
-				ts:= time.Unix(0, 0)
+				ts := time.Unix(0, 0)
 				if a.IsValid(i) {
 					utcTimestamp, offsetMinutes, timeUnit := a.rawValueUnsafe(i)
 					v := timeFromFieldValues(utcTimestamp, offsetMinutes, timeUnit)
 					ts = v
-				} 
+				}
 
 				if !yield(ts) {
 					return
@@ -350,7 +350,6 @@ func (a* TimestampWithOffsetArray) iterValues() iter.Seq[time.Time] {
 		}
 	}
 }
-
 
 func (a *TimestampWithOffsetArray) Values() []time.Time {
 	return slices.Collect(a.iterValues())
@@ -409,7 +408,7 @@ func NewTimestampWithOffsetBuilder(mem memory.Allocator, unit arrow.TimeUnit, of
 
 	return &TimestampWithOffsetBuilder{
 		unit:             unit,
-		offsetType: 	  offsetType,
+		offsetType:       offsetType,
 		lastOffset:       math.MaxInt16,
 		Layout:           time.RFC3339,
 		ExtensionBuilder: array.NewExtensionBuilder(mem, dataType),
