@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/parquet"
 	"golang.org/x/sys/cpu"
 )
 
@@ -139,6 +140,103 @@ func BenchmarkDecodeByteStreamSplitBatchWidth4(b *testing.B) {
 					})
 				}
 			}
+		})
+	}
+}
+
+// TestDecodeByteStreamSplitFLBAWidth2 validates correctness of all FLBA width-2 decoding implementations
+func TestDecodeByteStreamSplitFLBAWidth2(t *testing.T) {
+	const width = 2
+
+	// Test various sizes including edge cases
+	sizes := []int{1, 2, 7, 8, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 512, 1024}
+
+	for _, nValues := range sizes {
+		t.Run(fmt.Sprintf("nValues=%d", nValues), func(t *testing.T) {
+			// Setup encoded data (byte stream split format)
+			stride := nValues
+			data := make([]byte, width*nValues)
+
+			// Initialize with predictable pattern
+			for i := 0; i < nValues; i++ {
+				data[i] = byte(i % 256)              // stream 0
+				data[stride+i] = byte((i + 1) % 256) // stream 1
+			}
+
+			// Expected output: FixedLenByteArray slices with interleaved bytes
+			expected := make([]parquet.FixedLenByteArray, nValues)
+			for i := 0; i < nValues; i++ {
+				expected[i] = make(parquet.FixedLenByteArray, width)
+				expected[i][0] = byte(i % 256)
+				expected[i][1] = byte((i + 1) % 256)
+			}
+
+			// Test reference implementation
+			t.Run("Reference", func(t *testing.T) {
+				out := make([]parquet.FixedLenByteArray, nValues)
+				for i := range out {
+					out[i] = make(parquet.FixedLenByteArray, width)
+				}
+				decodeByteStreamSplitBatchFLBAWidth2(data, nValues, stride, out)
+				for i := 0; i < nValues; i++ {
+					if !bytes.Equal(out[i], expected[i]) {
+						t.Errorf("Reference implementation mismatch at index %d: got %v, want %v", i, out[i], expected[i])
+						break
+					}
+				}
+			})
+
+			// Test V2 implementation
+			t.Run("V2", func(t *testing.T) {
+				out := make([]parquet.FixedLenByteArray, nValues)
+				for i := range out {
+					out[i] = make(parquet.FixedLenByteArray, width)
+				}
+				decodeByteStreamSplitBatchFLBAWidth2V2(data, nValues, stride, out)
+				for i := 0; i < nValues; i++ {
+					if !bytes.Equal(out[i], expected[i]) {
+						t.Errorf("V2 implementation mismatch at index %d: got %v, want %v", i, out[i], expected[i])
+						break
+					}
+				}
+			})
+		})
+	}
+}
+
+// BenchmarkDecodeByteStreamSplitBatchFLBAWidth2 benchmarks all FLBA width-2 decoding implementations.
+func BenchmarkDecodeByteStreamSplitBatchFLBAWidth2(b *testing.B) {
+	const width = 2
+	sizes := []int{8, 64, 512, 4096, 32768, 262144}
+
+	for _, nValues := range sizes {
+		b.Run(fmt.Sprintf("nValues=%d", nValues), func(b *testing.B) {
+			stride := nValues
+			data := make([]byte, width*nValues)
+			for i := 0; i < nValues; i++ {
+				data[i] = byte(i % 256)
+				data[stride+i] = byte((i + 1) % 256)
+			}
+			out := make([]parquet.FixedLenByteArray, nValues)
+			for i := range out {
+				out[i] = make(parquet.FixedLenByteArray, width)
+			}
+
+			b.SetBytes(int64(width * nValues))
+
+			b.Run("Reference", func(b *testing.B) {
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					decodeByteStreamSplitBatchFLBAWidth2(data, nValues, stride, out)
+				}
+			})
+
+			b.Run("V2", func(b *testing.B) {
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					decodeByteStreamSplitBatchFLBAWidth2V2(data, nValues, stride, out)
+				}
+			})
 		})
 	}
 }
