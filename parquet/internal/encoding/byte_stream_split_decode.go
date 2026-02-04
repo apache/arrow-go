@@ -49,6 +49,18 @@ func decodeByteStreamSplitBatchFLBAWidth2(data []byte, nValues, stride int, out 
 	}
 }
 
+func decodeByteStreamSplitBatchFLBAWidth2V2(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) {
+	const width = 2
+	// Narrow slices to help the compiler eliminate bounds checks.
+	s0 := data[:nValues]
+	s1 := data[stride : stride+nValues]
+
+	for i := range nValues {
+		out16 := (*uint16)(unsafe.Pointer(&out[i][0]))
+		*out16 = uint16(s0[i]) | uint16(s1[i])<<8
+	}
+}
+
 // decodeByteStreamSplitBatchFLBAWidth4 decodes the batch of nValues FixedLenByteArrays of length 4 provided by 'data',
 // into the output slice 'out' using BYTE_STREAM_SPLIT encoding.
 // 'out' must have space for at least nValues slices.
