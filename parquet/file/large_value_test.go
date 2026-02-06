@@ -129,8 +129,8 @@ func TestLargeStringArrayWithArrow(t *testing.T) {
 	// Each batch: 10 values × 10MB = 100MB
 	// Total: 11 batches = 1.1GB written (only 100MB memory at a time!)
 	const valueSize = 10 * 1024 * 1024 // 10MB per string (realistic large blob)
-	const valuesPerBatch = 10           // 10 values per batch
-	const numBatches = 11               // 11 batches = 1.1GB total
+	const valuesPerBatch = 10          // 10 values per batch
+	const numBatches = 11              // 11 batches = 1.1GB total
 
 	largeStr := string(make([]byte, valueSize))
 
@@ -142,7 +142,7 @@ func TestLargeStringArrayWithArrow(t *testing.T) {
 		}
 		arr := builder.NewArray()
 
-		rec := array.NewRecord(arrowSchema, []arrow.Array{arr}, int64(valuesPerBatch))
+		rec := array.NewRecordBatch(arrowSchema, []arrow.Array{arr}, int64(valuesPerBatch))
 
 		// Write batch - this should NOT panic with int32 overflow
 		err = pqw.Write(rec)
