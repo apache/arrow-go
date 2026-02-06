@@ -48,7 +48,7 @@ func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
 		parquet.WithVersion(parquet.V2_LATEST),
 		parquet.WithDataPageVersion(parquet.DataPageV2),
 		parquet.WithDictionaryDefault(false), // Plain encoding
-		parquet.WithDataPageSize(1024*1024), // 1MB page size
+		parquet.WithDataPageSize(1024*1024),  // 1MB page size
 	)
 
 	out := &bytes.Buffer{}
@@ -172,7 +172,7 @@ func testSingleLargeValueExceedingInt32Max(t *testing.T) {
 	colWriter, _ := rgw.NextColumn()
 
 	// Single value of 3GB
-	const valueSize = 3 * 1024 * 1024 * 1024 // 3GB
+	const valueSize = int64(3 * 1024 * 1024 * 1024) // 3GB
 	largeValue := make([]byte, valueSize)
 
 	values := []parquet.ByteArray{largeValue}
