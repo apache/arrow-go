@@ -64,7 +64,7 @@ func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
 	// This exceeds the 1GB flush threshold, triggering automatic page flushes
 	// Uses less memory than testing full 2GB, but still validates the fix
 	const valueSize = 50 * 1024 * 1024 // 50MB per value
-	const numValues = 25                 // 25 values = 1.25GB total
+	const numValues = 25               // 25 values = 1.25GB total
 
 	// Create a single large value and reuse it (memory efficient)
 	largeValue := make([]byte, valueSize)
@@ -118,7 +118,7 @@ func TestLargeStringArrayWithArrow(t *testing.T) {
 	defer builder.Release()
 
 	const valueSize = 50 * 1024 * 1024 // 50MB per string
-	const numValues = 25                 // 25 strings = 1.25GB total
+	const numValues = 25               // 25 strings = 1.25GB total
 	largeStr := string(make([]byte, valueSize))
 
 	for i := 0; i < numValues; i++ {
