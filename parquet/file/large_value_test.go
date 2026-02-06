@@ -60,13 +60,13 @@ func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
 	rgw := writer.AppendRowGroup()
 	colWriter, _ := rgw.NextColumn()
 
-	// Create 550 values of 2MB each (1.1GB total)
+	// Create 700 values of 1.5MB each (1.05GB total)
 	// This exceeds the 1GB flush threshold, triggering automatic page flushes
-	// Uses minimal memory (single 2MB buffer reused) while testing loop logic thoroughly
-	const valueSize = 2 * 1024 * 1024 // 2MB per value (>= 1MB threshold for large value handling)
-	const numValues = 550             // 550 values = 1.1GB total
+	// Uses minimal memory (single 1.5MB buffer reused) while testing loop logic thoroughly
+	const valueSize = 1.5 * 1024 * 1024 // 1.5MB per value (>= 1MB threshold for large value handling)
+	const numValues = 700               // 700 values = 1.05GB total
 
-	// Create a single 2MB buffer and reuse it (only allocates 2MB!)
+	// Create a single 1.5MB buffer and reuse it (only allocates 1.5MB!)
 	largeValue := make([]byte, valueSize)
 	for i := range largeValue {
 		largeValue[i] = byte(i % 256)
@@ -112,25 +112,6 @@ func TestLargeStringArrayWithArrow(t *testing.T) {
 	field := arrow.Field{Name: "large_strings", Type: arrow.BinaryTypes.LargeString, Nullable: true}
 	arrowSchema := arrow.NewSchema([]arrow.Field{field}, nil)
 
-	// Build array with large strings using LargeStringBuilder
-	// Use 22 values × 50MB = 1.1GB total (just crosses 1GB threshold)
-	builder := array.NewLargeStringBuilder(mem)
-	defer builder.Release()
-
-	const valueSize = 50 * 1024 * 1024 // 50MB per string
-	const numValues = 22               // 22 strings = 1.1GB total
-	largeStr := string(make([]byte, valueSize))
-
-	for i := 0; i < numValues; i++ {
-		builder.Append(largeStr)
-	}
-
-	arr := builder.NewArray()
-	defer arr.Release()
-
-	rec := array.NewRecordBatch(arrowSchema, []arrow.Array{arr}, numValues)
-	defer rec.Release()
-
 	// Write to Parquet
 	out := &bytes.Buffer{}
 	props := parquet.NewWriterProperties(
@@ -144,9 +125,35 @@ func TestLargeStringArrayWithArrow(t *testing.T) {
 	pqw, err := pqarrow.NewFileWriter(arrowSchema, out, props, pqarrow.NewArrowWriterProperties())
 	require.NoError(t, err)
 
-	// This should NOT panic with int32 overflow
-	err = pqw.Write(rec)
-	assert.NoError(t, err)
+	// Write in multiple batches to reduce memory usage
+	// Each batch: 10 values × 10MB = 100MB
+	// Total: 11 batches = 1.1GB written (only 100MB memory at a time!)
+	const valueSize = 10 * 1024 * 1024 // 10MB per string (realistic large blob)
+	const valuesPerBatch = 10           // 10 values per batch
+	const numBatches = 11               // 11 batches = 1.1GB total
+
+	largeStr := string(make([]byte, valueSize))
+
+	for batchNum := 0; batchNum < numBatches; batchNum++ {
+		// Build a small batch
+		builder := array.NewLargeStringBuilder(mem)
+		for i := 0; i < valuesPerBatch; i++ {
+			builder.Append(largeStr)
+		}
+		arr := builder.NewArray()
+
+		rec := array.NewRecord(arrowSchema, []arrow.Array{arr}, int64(valuesPerBatch))
+
+		// Write batch - this should NOT panic with int32 overflow
+		err = pqw.Write(rec)
+
+		// Clean up batch resources
+		rec.Release()
+		arr.Release()
+		builder.Release()
+
+		assert.NoError(t, err)
+	}
 
 	err = pqw.Close()
 	assert.NoError(t, err)
