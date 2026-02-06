@@ -18,7 +18,6 @@ package file_test
 
 import (
 	"bytes"
-	"runtime"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -36,10 +35,6 @@ import (
 // values that would exceed the 1GB flush threshold does not cause an int32 overflow panic.
 // The fix ensures pages are flushed automatically before buffer size exceeds safe limits.
 func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
-	if runtime.GOARCH == "386" {
-		t.Skip("Skipping test on 32-bit architecture")
-	}
-
 	// Create schema with a single byte array column
 	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
 		schema.Must(schema.NewPrimitiveNode("large_data", parquet.Repetitions.Optional, parquet.Types.ByteArray, -1, -1)),
@@ -60,13 +55,13 @@ func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
 	rgw := writer.AppendRowGroup()
 	colWriter, _ := rgw.NextColumn()
 
-	// Create 25 values, each 50MB (1.25GB total)
+	// Create 550 values of 2MB each (1.1GB total)
 	// This exceeds the 1GB flush threshold, triggering automatic page flushes
-	// Uses less memory than testing full 2GB, but still validates the fix
-	const valueSize = 50 * 1024 * 1024 // 50MB per value
-	const numValues = 25               // 25 values = 1.25GB total
+	// Uses minimal memory (single 2MB buffer reused) while testing loop logic thoroughly
+	const valueSize = 2 * 1024 * 1024 // 2MB per value (>= 1MB threshold for large value handling)
+	const numValues = 550             // 550 values = 1.1GB total
 
-	// Create a single large value and reuse it (memory efficient)
+	// Create a single 2MB buffer and reuse it (only allocates 2MB!)
 	largeValue := make([]byte, valueSize)
 	for i := range largeValue {
 		largeValue[i] = byte(i % 256)
@@ -74,7 +69,7 @@ func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
 
 	values := make([]parquet.ByteArray, numValues)
 	for i := range values {
-		values[i] = largeValue // Reuse same buffer (doesn't matter for overflow test)
+		values[i] = largeValue // Reuse same buffer (memory efficient: 2MB total, writes 1.1GB)
 	}
 
 	// This should NOT panic with int32 overflow
@@ -102,10 +97,6 @@ func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
 // This tests the pqarrow integration path which is commonly used.
 // Uses LARGE_STRING type (int64 offsets) to handle >1GB of string data without overflow.
 func TestLargeStringArrayWithArrow(t *testing.T) {
-	if runtime.GOARCH == "386" {
-		t.Skip("Skipping test on 32-bit architecture")
-	}
-
 	mem := memory.NewGoAllocator()
 
 	// Create Arrow schema with LARGE_STRING field (uses int64 offsets, can handle >2GB)
@@ -113,12 +104,12 @@ func TestLargeStringArrayWithArrow(t *testing.T) {
 	arrowSchema := arrow.NewSchema([]arrow.Field{field}, nil)
 
 	// Build array with large strings using LargeStringBuilder
-	// Use 25 values × 50MB = 1.25GB total (crosses 1GB threshold, less memory than 2.5GB)
+	// Use 22 values × 50MB = 1.1GB total (just crosses 1GB threshold)
 	builder := array.NewLargeStringBuilder(mem)
 	defer builder.Release()
 
 	const valueSize = 50 * 1024 * 1024 // 50MB per string
-	const numValues = 25               // 25 strings = 1.25GB total
+	const numValues = 22               // 22 strings = 1.1GB total
 	largeStr := string(make([]byte, valueSize))
 
 	for i := 0; i < numValues; i++ {
