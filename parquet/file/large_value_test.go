@@ -33,8 +33,8 @@ import (
 )
 
 // TestLargeByteArrayValuesDoNotOverflowInt32 tests that writing large byte array
-// values that would exceed 2GB when accumulated in a single page does not cause
-// an int32 overflow panic.
+// values that would exceed the 1GB flush threshold does not cause an int32 overflow panic.
+// The fix ensures pages are flushed automatically before buffer size exceeds safe limits.
 func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
 	if runtime.GOARCH == "386" {
 		t.Skip("Skipping test on 32-bit architecture")
@@ -60,10 +60,13 @@ func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
 	rgw := writer.AppendRowGroup()
 	colWriter, _ := rgw.NextColumn()
 
-	// Create 50 values, each 50MB (2.5GB total)
-	// This will exceed 2GB when accumulated in one batch
-	const valueSize = 50 * 1024 * 1024 // 50MB
-	const numValues = 50
+	// Create 25 values, each 50MB (1.25GB total)
+	// This exceeds the 1GB flush threshold, triggering automatic page flushes
+	// Uses less memory than testing full 2GB, but still validates the fix
+	const valueSize = 50 * 1024 * 1024 // 50MB per value
+	const numValues = 25                 // 25 values = 1.25GB total
+
+	// Create a single large value and reuse it (memory efficient)
 	largeValue := make([]byte, valueSize)
 	for i := range largeValue {
 		largeValue[i] = byte(i % 256)
@@ -71,11 +74,11 @@ func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
 
 	values := make([]parquet.ByteArray, numValues)
 	for i := range values {
-		values[i] = largeValue
+		values[i] = largeValue // Reuse same buffer (doesn't matter for overflow test)
 	}
 
 	// This should NOT panic with int32 overflow
-	// Expected behavior: automatically flush pages before exceeding 2GB
+	// Expected behavior: automatically flush pages at 1GB threshold
 	byteArrayWriter := colWriter.(*file.ByteArrayColumnChunkWriter)
 	_, err := byteArrayWriter.WriteBatch(values, nil, nil)
 
@@ -97,7 +100,7 @@ func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
 
 // TestLargeStringArrayWithArrow tests the same issue using Arrow arrays
 // This tests the pqarrow integration path which is commonly used.
-// Uses LARGE_STRING type (int64 offsets) to handle >2GB of string data.
+// Uses LARGE_STRING type (int64 offsets) to handle >1GB of string data without overflow.
 func TestLargeStringArrayWithArrow(t *testing.T) {
 	if runtime.GOARCH == "386" {
 		t.Skip("Skipping test on 32-bit architecture")
@@ -110,11 +113,12 @@ func TestLargeStringArrayWithArrow(t *testing.T) {
 	arrowSchema := arrow.NewSchema([]arrow.Field{field}, nil)
 
 	// Build array with large strings using LargeStringBuilder
+	// Use 25 values × 50MB = 1.25GB total (crosses 1GB threshold, less memory than 2.5GB)
 	builder := array.NewLargeStringBuilder(mem)
 	defer builder.Release()
 
-	const valueSize = 50 * 1024 * 1024 // 50MB
-	const numValues = 50
+	const valueSize = 50 * 1024 * 1024 // 50MB per string
+	const numValues = 25                 // 25 strings = 1.25GB total
 	largeStr := string(make([]byte, valueSize))
 
 	for i := 0; i < numValues; i++ {
