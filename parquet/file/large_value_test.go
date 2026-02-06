@@ -34,9 +34,6 @@ import (
 // TestLargeByteArrayValuesDoNotOverflowInt32 tests that writing large byte array
 // values that would exceed 2GB when accumulated in a single page does not cause
 // an int32 overflow panic.
-//
-// This is the RED phase - the test should FAIL because the bug exists.
-// Expected failure: panic when trying to cast >2GB buffer size to int32
 func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
 	// Create schema with a single byte array column
 	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
@@ -94,17 +91,17 @@ func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
 }
 
 // TestLargeStringArrayWithArrow tests the same issue using Arrow arrays
-// This tests the pqarrow integration path which is commonly used
-// TODO: Re-enable once pqarrow layer is also fixed for large value handling
-func testLargeStringArrayWithArrow(t *testing.T) {
+// This tests the pqarrow integration path which is commonly used.
+// Uses LARGE_STRING type (int64 offsets) to handle >2GB of string data.
+func TestLargeStringArrayWithArrow(t *testing.T) {
 	mem := memory.NewGoAllocator()
 
-	// Create Arrow schema with large string field
-	field := arrow.Field{Name: "large_strings", Type: arrow.BinaryTypes.String, Nullable: true}
+	// Create Arrow schema with LARGE_STRING field (uses int64 offsets, can handle >2GB)
+	field := arrow.Field{Name: "large_strings", Type: arrow.BinaryTypes.LargeString, Nullable: true}
 	arrowSchema := arrow.NewSchema([]arrow.Field{field}, nil)
 
-	// Build array with large strings
-	builder := array.NewStringBuilder(mem)
+	// Build array with large strings using LargeStringBuilder
+	builder := array.NewLargeStringBuilder(mem)
 	defer builder.Release()
 
 	const valueSize = 50 * 1024 * 1024 // 50MB
@@ -118,7 +115,7 @@ func testLargeStringArrayWithArrow(t *testing.T) {
 	arr := builder.NewArray()
 	defer arr.Release()
 
-	rec := array.NewRecord(arrowSchema, []arrow.Array{arr}, numValues)
+	rec := array.NewRecordBatch(arrowSchema, []arrow.Array{arr}, numValues)
 	defer rec.Release()
 
 	// Write to Parquet
