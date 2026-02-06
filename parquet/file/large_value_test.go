@@ -18,6 +18,7 @@ package file_test
 
 import (
 	"bytes"
+	"runtime"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -35,6 +36,10 @@ import (
 // values that would exceed the 1GB flush threshold does not cause an int32 overflow panic.
 // The fix ensures pages are flushed automatically before buffer size exceeds safe limits.
 func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
+	if runtime.GOARCH == "386" {
+		t.Skip("Skipping test on 32-bit architecture")
+	}
+
 	// Create schema with a single byte array column
 	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
 		schema.Must(schema.NewPrimitiveNode("large_data", parquet.Repetitions.Optional, parquet.Types.ByteArray, -1, -1)),
@@ -97,6 +102,10 @@ func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
 // This tests the pqarrow integration path which is commonly used.
 // Uses LARGE_STRING type (int64 offsets) to handle >1GB of string data without overflow.
 func TestLargeStringArrayWithArrow(t *testing.T) {
+	if runtime.GOARCH == "386" {
+		t.Skip("Skipping test on 32-bit architecture")
+	}
+
 	mem := memory.NewGoAllocator()
 
 	// Create Arrow schema with LARGE_STRING field (uses int64 offsets, can handle >2GB)
