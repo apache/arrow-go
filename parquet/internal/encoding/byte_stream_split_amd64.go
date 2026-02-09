@@ -15,28 +15,44 @@
 // limitations under the License.
 
 //go:build !noasm
-// +build !noasm
 
 package encoding
 
 import (
+	"fmt"
 	"unsafe"
+
+	"github.com/apache/arrow-go/v18/parquet/internal/debug"
+	"golang.org/x/sys/cpu"
 )
+
+func init() {
+	if cpu.X86.HasAVX2 {
+	}
+}
 
 //go:noescape
 func _decodeByteStreamSplitWidth4AVX2(data, out unsafe.Pointer, nValues, stride int)
+
+//go:noescape
+func _decodeByteStreamSplitWidth8AVX2(data, out unsafe.Pointer, nValues, stride int)
 
 func decodeByteStreamSplitBatchWidth4AVX2(data []byte, nValues, stride int, out []byte) {
 	if nValues == 0 {
 		return
 	}
-	// Bounds checking
-	if len(out) < nValues*4 {
-		panic("output buffer too small")
-	}
-	if len(data) < 4*stride {
-		panic("input buffer too small")
-	}
-
+	const width = 4
+	debug.Assert(len(out) >= nValues*width, fmt.Sprintf("not enough space in output buffer for decoding, out: %d bytes, data: %d bytes", len(out), len(data)))
+	debug.Assert(len(data) >= width*stride, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), width*stride))
 	_decodeByteStreamSplitWidth4AVX2(unsafe.Pointer(&data[0]), unsafe.Pointer(&out[0]), nValues, stride)
+}
+
+func decodeByteStreamSplitBatchWidth8AVX2(data []byte, nValues, stride int, out []byte) {
+	if nValues == 0 {
+		return
+	}
+	const width = 8
+	debug.Assert(len(out) >= nValues*width, fmt.Sprintf("not enough space in output buffer for decoding, out: %d bytes, data: %d bytes", len(out), len(data)))
+	debug.Assert(len(data) >= width*stride, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), width*stride))
+	_decodeByteStreamSplitWidth8AVX2(unsafe.Pointer(&data[0]), unsafe.Pointer(&out[0]), nValues, stride)
 }
