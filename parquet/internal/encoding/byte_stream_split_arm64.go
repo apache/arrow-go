@@ -28,6 +28,8 @@ import (
 
 func init() {
 	if cpu.ARM64.HasASIMD {
+		decodeByteStreamSplitBatchWidth4 = decodeByteStreamSplitBatchWidth4NEON
+		decodeByteStreamSplitBatchWidth8 = decodeByteStreamSplitBatchWidth8NEON
 	}
 }
 

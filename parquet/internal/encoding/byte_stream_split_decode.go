@@ -25,11 +25,8 @@ import (
 )
 
 var (
-	decodeByteStreamSplitBatchWidth4     func(data []byte, nValues, stride int, out []byte)                      = decodeByteStreamSplitBatchWidth4Default
-	decodeByteStreamSplitBatchWidth8     func(data []byte, nValues, stride int, out []byte)                      = decodeByteStreamSplitBatchWidth8Default
-	decodeByteStreamSplitBatchFLBAWidth2 func(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) = decodeByteStreamSplitBatchFLBAWidth2Default
-	decodeByteStreamSplitBatchFLBAWidth4 func(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) = decodeByteStreamSplitBatchFLBAWidth4Default
-	decodeByteStreamSplitBatchFLBAWidth8 func(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) = decodeByteStreamSplitBatchFLBAWidth8Default
+	decodeByteStreamSplitBatchWidth4 func(data []byte, nValues, stride int, out []byte) = decodeByteStreamSplitBatchWidth4Default
+	decodeByteStreamSplitBatchWidth8 func(data []byte, nValues, stride int, out []byte) = decodeByteStreamSplitBatchWidth8Default
 )
 
 // decodeByteStreamSplitBatchWidth4 decodes the batch of nValues raw bytes representing a 4-byte datatype provided by 'data',
@@ -90,7 +87,7 @@ func decodeByteStreamSplitBatchFLBA(data []byte, nValues, stride, width int, out
 // decodeByteStreamSplitBatchFLBAWidth2 decodes the batch of nValues FixedLenByteArrays of length 2 provided by 'data',
 // into the output slice 'out' using BYTE_STREAM_SPLIT encoding.
 // 'out' must have space for at least nValues slices.
-func decodeByteStreamSplitBatchFLBAWidth2Default(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) {
+func decodeByteStreamSplitBatchFLBAWidth2(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) {
 	const width = 2
 	debug.Assert(len(out) >= nValues, fmt.Sprintf("not enough space in output slice for decoding, out: %d values, data: %d values", len(out), nValues))
 	debug.Assert(len(data) >= width*stride, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), width*stride))
@@ -105,7 +102,7 @@ func decodeByteStreamSplitBatchFLBAWidth2Default(data []byte, nValues, stride in
 // decodeByteStreamSplitBatchFLBAWidth4 decodes the batch of nValues FixedLenByteArrays of length 4 provided by 'data',
 // into the output slice 'out' using BYTE_STREAM_SPLIT encoding.
 // 'out' must have space for at least nValues slices.
-func decodeByteStreamSplitBatchFLBAWidth4Default(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) {
+func decodeByteStreamSplitBatchFLBAWidth4(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) {
 	const width = 4
 	debug.Assert(len(out) >= nValues, fmt.Sprintf("not enough space in output slice for decoding, out: %d values, data: %d values", len(out), nValues))
 	debug.Assert(len(data) >= width*stride, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), width*stride))
@@ -122,7 +119,7 @@ func decodeByteStreamSplitBatchFLBAWidth4Default(data []byte, nValues, stride in
 // decodeByteStreamSplitBatchFLBAWidth8 decodes the batch of nValues FixedLenByteArrays of length 8 provided by 'data',
 // into the output slice 'out' using BYTE_STREAM_SPLIT encoding.
 // 'out' must have space for at least nValues slices.
-func decodeByteStreamSplitBatchFLBAWidth8Default(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) {
+func decodeByteStreamSplitBatchFLBAWidth8(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) {
 	const width = 8
 	debug.Assert(len(out) >= nValues, fmt.Sprintf("not enough space in output slice for decoding, out: %d values, data: %d values", len(out), nValues))
 	debug.Assert(len(data) >= width*stride, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), width*stride))
