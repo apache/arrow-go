@@ -31,18 +31,6 @@ import (
 // 'out' must have space for at least len(data) bytes.
 func decodeByteStreamSplitBatchWidth4InByteOrderDefault(data []byte, nValues, stride int, out []byte) {
 	const width = 4
-	debug.Assert(len(out) >= nValues*width, fmt.Sprintf("not enough space in output buffer for decoding, out: %d bytes, data: %d bytes", len(out), len(data)))
-	for element := 0; element < nValues; element++ {
-		// Little Endian: least significant byte first
-		out[width*element+0] = data[element]
-		out[width*element+1] = data[stride+element]
-		out[width*element+2] = data[2*stride+element]
-		out[width*element+3] = data[3*stride+element]
-	}
-}
-
-func decodeByteStreamSplitBatchWidth8InByteOrderV2(data []byte, nValues, stride int, out []byte) {
-	const width = 4
 	// Narrow slices to help the compiler eliminate bounds checks.
 	s0 := data[:nValues]
 	s1 := data[stride : stride+nValues]
@@ -63,15 +51,19 @@ func decodeByteStreamSplitBatchWidth8InByteOrderV2(data []byte, nValues, stride 
 func decodeByteStreamSplitBatchWidth8InByteOrderDefault(data []byte, nValues, stride int, out []byte) {
 	const width = 8
 	debug.Assert(len(out) >= nValues*width, fmt.Sprintf("not enough space in output buffer for decoding, out: %d bytes, data: %d bytes", len(out), len(data)))
-	for element := 0; element < nValues; element++ {
-		// Little Endian: least significant byte first
-		out[width*element+0] = data[element]
-		out[width*element+1] = data[stride+element]
-		out[width*element+2] = data[2*stride+element]
-		out[width*element+3] = data[3*stride+element]
-		out[width*element+4] = data[4*stride+element]
-		out[width*element+5] = data[5*stride+element]
-		out[width*element+6] = data[6*stride+element]
-		out[width*element+7] = data[7*stride+element]
+	debug.Assert(len(data) >= width*stride, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), width*stride))
+	s0 := data[:nValues]
+	s1 := data[stride : stride+nValues]
+	s2 := data[2*stride : 2*stride+nValues]
+	s3 := data[3*stride : 3*stride+nValues]
+	s4 := data[4*stride : 4*stride+nValues]
+	s5 := data[5*stride : 5*stride+nValues]
+	s6 := data[6*stride : 6*stride+nValues]
+	s7 := data[7*stride : 7*stride+nValues]
+	out = out[:width*nValues]
+	out64 := unsafe.Slice((*uint64)(unsafe.Pointer(&out[0])), nValues)
+	for i := range nValues {
+		out64[i] = uint64(s0[i]) | uint64(s1[i])<<8 | uint64(s2[i])<<16 | uint64(s3[i])<<24 |
+			uint64(s4[i])<<32 | uint64(s5[i])<<40 | uint64(s6[i])<<48 | uint64(s7[i])<<56
 	}
 }
