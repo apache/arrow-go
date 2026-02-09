@@ -28,6 +28,8 @@ import (
 
 func init() {
 	if cpu.X86.HasAVX2 {
+		decodeByteStreamSplitBatchWidth4InByteOrder = decodeByteStreamSplitBatchWidth4AVX2
+		decodeByteStreamSplitBatchWidth8InByteOrder = decodeByteStreamSplitBatchWidth8AVX2
 	}
 }
 
