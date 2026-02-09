@@ -29,7 +29,7 @@ import (
 // by 'data', into the output buffer 'out' using BYTE_STREAM_SPLIT encoding. The values are expected to be in little-endian
 // byte order and are be decoded into the 'out' array in machine's native endianness.
 // 'out' must have space for at least len(data) bytes.
-func decodeByteStreamSplitBatchWidth4InByteOrder(data []byte, nValues, stride int, out []byte) {
+func decodeByteStreamSplitBatchWidth4InByteOrderDefault(data []byte, nValues, stride int, out []byte) {
 	const width = 4
 	debug.Assert(len(out) >= nValues*width, fmt.Sprintf("not enough space in output buffer for decoding, out: %d bytes, data: %d bytes", len(out), len(data)))
 	for element := 0; element < nValues; element++ {
@@ -60,7 +60,7 @@ func decodeByteStreamSplitBatchWidth8InByteOrderV2(data []byte, nValues, stride 
 // by 'data', into the output buffer 'out' using BYTE_STREAM_SPLIT encoding. The values are expected to be in little-endian
 // byte order and are be decoded into the 'out' array in machine's native endianness.
 // 'out' must have space for at least len(data) bytes.
-func decodeByteStreamSplitBatchWidth8InByteOrder(data []byte, nValues, stride int, out []byte) {
+func decodeByteStreamSplitBatchWidth8InByteOrderDefault(data []byte, nValues, stride int, out []byte) {
 	const width = 8
 	debug.Assert(len(out) >= nValues*width, fmt.Sprintf("not enough space in output buffer for decoding, out: %d bytes, data: %d bytes", len(out), len(data)))
 	for element := 0; element < nValues; element++ {
