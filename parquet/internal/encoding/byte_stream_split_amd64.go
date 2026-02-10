@@ -45,7 +45,7 @@ func decodeByteStreamSplitBatchWidth4AVX2(data []byte, nValues, stride int, out 
 	}
 	const width = 4
 	debug.Assert(len(out) >= nValues*width, fmt.Sprintf("not enough space in output buffer for decoding, out: %d bytes, data: %d bytes", len(out), len(data)))
-	debug.Assert(len(data) >= width*stride, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), width*stride))
+	debug.Assert(len(data) >= 3*stride+nValues, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), 3*stride+nValues))
 	_decodeByteStreamSplitWidth4AVX2(unsafe.Pointer(&data[0]), unsafe.Pointer(&out[0]), nValues, stride)
 }
 
@@ -55,6 +55,6 @@ func decodeByteStreamSplitBatchWidth8AVX2(data []byte, nValues, stride int, out 
 	}
 	const width = 8
 	debug.Assert(len(out) >= nValues*width, fmt.Sprintf("not enough space in output buffer for decoding, out: %d bytes, data: %d bytes", len(out), len(data)))
-	debug.Assert(len(data) >= width*stride, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), width*stride))
+	debug.Assert(len(data) >= 7*stride+nValues, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), 7*stride+nValues))
 	_decodeByteStreamSplitWidth8AVX2(unsafe.Pointer(&data[0]), unsafe.Pointer(&out[0]), nValues, stride)
 }
