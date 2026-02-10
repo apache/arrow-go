@@ -35,23 +35,20 @@ TEXT ·_decodeByteStreamSplitWidth4AVX2(SB), NOSPLIT, $0-32
 	JMP suffix_check_avx2
 
 suffix_loop_avx2:
-	// Gather bytes: gathered_byte_data[b] = data[b * stride + i]
-	MOVBQZX (R9)(R14*1), BX   // byte from stream 0
-	MOVBQZX (R10)(R14*1), R15 // byte from stream 1
-
-	// Calculate output offset: i * 4
+	MOVBQZX (R9)(R14*1), BX      // s0
+	MOVBQZX (R10)(R14*1), R15    // s1
+	SHLQ $8, R15
+	ORQ R15, BX
+	MOVBQZX (R11)(R14*1), R15    // s2
+	SHLQ $16, R15
+	ORQ R15, BX
+	MOVBQZX (R12)(R14*1), R15    // s3
+	SHLQ $24, R15
+	ORQ R15, BX
 	MOVQ R14, AX
-	SHLQ $2, AX              // AX = i * 4
 
-	// Store gathered bytes
-	MOVB BX, (DI)(AX*1)
-	MOVB R15, 1(DI)(AX*1)
-
-	MOVBQZX (R11)(R14*1), BX  // byte from stream 2
-	MOVBQZX (R12)(R14*1), R15 // byte from stream 3
-
-	MOVB BX, 2(DI)(AX*1)
-	MOVB R15, 3(DI)(AX*1)
+	SHLQ $2, AX              // AX = i*4
+	MOVL BX, (DI)(AX*1)      // ← single 32-bit store
 
 	INCQ R14
 
@@ -168,34 +165,47 @@ TEXT ·_decodeByteStreamSplitWidth8AVX2(SB), NOSPLIT, $0-32
 	JMP suffix_check_w8_avx2
 
 suffix_loop_w8_avx2:
-	// Calculate output offset: i * 8
+	// Load first byte (stream 0) and start accumulator
+	MOVBQZX (R9)(SI*1), DX   // DX = s0[i] (lowest byte)
+
+	// stream 1 << 8
+	MOVBQZX (R10)(SI*1), AX
+	SHLQ $8, AX
+	ORQ AX, DX
+
+	// stream 2 << 16
+	MOVBQZX (R11)(SI*1), AX
+	SHLQ $16, AX
+	ORQ AX, DX
+
+	// stream 3 << 24
+	MOVBQZX (R12)(SI*1), AX
+	SHLQ $24, AX
+	ORQ AX, DX
+
+	// stream 4 << 32
+	MOVBQZX (R13)(SI*1), AX
+	SHLQ $32, AX
+	ORQ AX, DX
+
+	// stream 5 << 40
+	MOVBQZX (R14)(SI*1), AX
+	SHLQ $40, AX
+	ORQ AX, DX
+
+	// stream 6 << 48
+	MOVBQZX (R15)(SI*1), AX
+	SHLQ $48, AX
+	ORQ AX, DX
+
+	// stream 7 << 56
+	MOVBQZX (BX)(SI*1), AX
+	SHLQ $56, AX
+	ORQ AX, DX
+
 	MOVQ SI, AX
 	SHLQ $3, AX              // AX = i * 8
-
-	// Load and store bytes from all 8 streams
-	MOVBQZX (R9)(SI*1), DX
-	MOVB DX, (DI)(AX*1)
-
-	MOVBQZX (R10)(SI*1), DX
-	MOVB DX, 1(DI)(AX*1)
-
-	MOVBQZX (R11)(SI*1), DX
-	MOVB DX, 2(DI)(AX*1)
-
-	MOVBQZX (R12)(SI*1), DX
-	MOVB DX, 3(DI)(AX*1)
-
-	MOVBQZX (R13)(SI*1), DX
-	MOVB DX, 4(DI)(AX*1)
-
-	MOVBQZX (R14)(SI*1), DX
-	MOVB DX, 5(DI)(AX*1)
-
-	MOVBQZX (R15)(SI*1), DX
-	MOVB DX, 6(DI)(AX*1)
-
-	MOVBQZX (BX)(SI*1), DX
-	MOVB DX, 7(DI)(AX*1)
+	MOVQ DX, (DI)(AX*1)
 
 	INCQ SI
 
