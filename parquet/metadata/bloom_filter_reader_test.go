@@ -127,6 +127,7 @@ func (suite *BloomFilterBuilderSuite) TestSingleRowGroup() {
 			suite.True(bf1.CheckHash(metadata.GetHash(bf1.Hasher(), parquet.ByteArray("Hello"))))
 		}
 		runtime.GC() // force GC to run to put the buffer back into the pool
+		runtime.GC() // finalizers need two GC cycles to run reliably
 		{
 			bf2, err := bfr.GetColumnBloomFilter(1)
 			suite.Require().NoError(err)
@@ -140,8 +141,10 @@ func (suite *BloomFilterBuilderSuite) TestSingleRowGroup() {
 			suite.True(bf3.CheckHash(metadata.GetHash(bf3.Hasher(), parquet.ByteArray("World"))))
 		}
 		runtime.GC() // we're using setfinalizer, so force release
+		runtime.GC() // finalizers need two GC cycles to run reliably
 	}
 	runtime.GC()
+	runtime.GC() // finalizers need two GC cycles to run reliably
 }
 
 const (
@@ -189,6 +192,7 @@ func (suite *EncryptedBloomFilterBuilderSuite) SetupTest() {
 
 func (suite *EncryptedBloomFilterBuilderSuite) TearDownTest() {
 	runtime.GC() // we use setfinalizer to clean up the buffers, so run the GC
+	runtime.GC() // finalizers need two GC cycles to run reliably
 	suite.mem.AssertSize(suite.T(), 0)
 }
 
