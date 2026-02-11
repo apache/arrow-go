@@ -143,6 +143,78 @@ func TestUnmarshalJSON(t *testing.T) {
 	assert.NotNil(t, record)
 }
 
+func TestJSONReaderExponentialNotation(t *testing.T) {
+	tests := []struct {
+		name     string
+		dataType arrow.DataType
+		input    string
+		expected interface{}
+	}{
+		{
+			name:     "int64 exponential notation",
+			dataType: arrow.PrimitiveTypes.Int64,
+			input:    `{"value":"6.6999677E+8"}`,
+			expected: int64(669996770),
+		},
+		{
+			name:     "uint64 exponential notation",
+			dataType: arrow.PrimitiveTypes.Uint64,
+			input:    `{"value":"6.6999677E+8"}`,
+			expected: uint64(669996770),
+		},
+		{
+			name:     "int64 lowercase exponential",
+			dataType: arrow.PrimitiveTypes.Int64,
+			input:    `{"value":"1.5e+3"}`,
+			expected: int64(1500),
+		},
+		{
+			name:     "uint64 negative exponent",
+			dataType: arrow.PrimitiveTypes.Uint64,
+			input:    `{"value":"1.5e+3"}`,
+			expected: uint64(1500),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			schema := arrow.NewSchema([]arrow.Field{
+				{Name: "value", Type: tt.dataType, Nullable: true},
+			}, nil)
+
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
+			recordBuilder := array.NewRecordBuilder(mem, schema)
+			defer recordBuilder.Release()
+
+			err := recordBuilder.UnmarshalJSON([]byte(tt.input))
+			if !assert.NoError(t, err, "should parse exponential notation") {
+				return
+			}
+
+			record := recordBuilder.NewRecordBatch()
+			defer record.Release()
+
+			if !assert.Equal(t, int64(1), record.NumRows()) {
+				return
+			}
+			col := record.Column(0)
+
+			switch v := tt.expected.(type) {
+			case int64:
+				intCol, ok := col.(*array.Int64)
+				assert.True(t, ok)
+				assert.Equal(t, v, intCol.Value(0))
+			case uint64:
+				uintCol, ok := col.(*array.Uint64)
+				assert.True(t, ok)
+				assert.Equal(t, v, uintCol.Value(0))
+			}
+		})
+	}
+}
+
 func generateJSONData(n int) []byte {
 	records := make([]map[string]any, n)
 	for i := range n {
