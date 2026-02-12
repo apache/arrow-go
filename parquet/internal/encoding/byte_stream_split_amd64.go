@@ -1,0 +1,60 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//go:build !noasm
+
+package encoding
+
+import (
+	"fmt"
+	"unsafe"
+
+	"github.com/apache/arrow-go/v18/parquet/internal/debug"
+	"golang.org/x/sys/cpu"
+)
+
+func init() {
+	if cpu.X86.HasAVX2 {
+		decodeByteStreamSplitBatchWidth4 = decodeByteStreamSplitBatchWidth4AVX2
+		decodeByteStreamSplitBatchWidth8 = decodeByteStreamSplitBatchWidth8AVX2
+	}
+}
+
+//go:noescape
+func _decodeByteStreamSplitWidth4AVX2(data, out unsafe.Pointer, nValues, stride int)
+
+//go:noescape
+func _decodeByteStreamSplitWidth8AVX2(data, out unsafe.Pointer, nValues, stride int)
+
+func decodeByteStreamSplitBatchWidth4AVX2(data []byte, nValues, stride int, out []byte) {
+	if nValues == 0 {
+		return
+	}
+	const width = 4
+	debug.Assert(len(out) >= nValues*width, fmt.Sprintf("not enough space in output buffer for decoding, out: %d bytes, data: %d bytes", len(out), len(data)))
+	debug.Assert(len(data) >= 3*stride+nValues, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), 3*stride+nValues))
+	_decodeByteStreamSplitWidth4AVX2(unsafe.Pointer(&data[0]), unsafe.Pointer(&out[0]), nValues, stride)
+}
+
+func decodeByteStreamSplitBatchWidth8AVX2(data []byte, nValues, stride int, out []byte) {
+	if nValues == 0 {
+		return
+	}
+	const width = 8
+	debug.Assert(len(out) >= nValues*width, fmt.Sprintf("not enough space in output buffer for decoding, out: %d bytes, data: %d bytes", len(out), len(data)))
+	debug.Assert(len(data) >= 7*stride+nValues, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), 7*stride+nValues))
+	_decodeByteStreamSplitWidth8AVX2(unsafe.Pointer(&data[0]), unsafe.Pointer(&out[0]), nValues, stride)
+}
