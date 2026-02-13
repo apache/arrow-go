@@ -18,6 +18,7 @@ package file_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"reflect"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/endian"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/compress"
@@ -498,9 +500,11 @@ type errCloseWriter struct {
 func (c *errCloseWriter) Write(p []byte) (n int, err error) {
 	return c.sink.Write(p)
 }
+
 func (c *errCloseWriter) Close() error {
 	return fmt.Errorf("error during close")
 }
+
 func (c *errCloseWriter) Bytes() []byte {
 	return c.sink.Bytes()
 }
@@ -669,6 +673,13 @@ func NewColumnIndexObject(colIdx metadata.ColumnIndex) (ret ColumnIndexObject) {
 }
 
 func simpleEncode[T int32 | int64 | float32 | float64](val T) []byte {
+	if endian.IsBigEndian {
+		buf := bytes.NewBuffer(nil)
+		if err := binary.Write(buf, binary.LittleEndian, val); err != nil {
+			panic(err)
+		}
+		return buf.Bytes()
+	}
 	return unsafe.Slice((*byte)(unsafe.Pointer(&val)), unsafe.Sizeof(val))
 }
 
@@ -987,10 +998,16 @@ func (t *PageIndexRoundTripSuite) TestMultiplePages() {
 	t.Equal(t.columnIndexes, []ColumnIndexObject{
 		{
 			nullPages: []bool{false, false, false, true},
-			minValues: [][]byte{simpleEncode(int64(1)), simpleEncode(int64(3)),
-				simpleEncode(int64(6)), {}},
-			maxValues: [][]byte{simpleEncode(int64(2)), simpleEncode(int64(4)),
-				simpleEncode(int64(6)), {}},
+			minValues: [][]byte{
+				simpleEncode(int64(1)), simpleEncode(int64(3)),
+				simpleEncode(int64(6)),
+				{},
+			},
+			maxValues: [][]byte{
+				simpleEncode(int64(2)), simpleEncode(int64(4)),
+				simpleEncode(int64(6)),
+				{},
+			},
 			boundaryOrder: metadata.Ascending, nullCounts: []int64{0, 0, 1, 2},
 		},
 		{
