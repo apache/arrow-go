@@ -18,7 +18,6 @@ package file_test
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"math"
 	"reflect"
@@ -28,8 +27,8 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
-	"github.com/apache/arrow-go/v18/arrow/endian"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/apache/arrow-go/v18/parquet/file"
@@ -673,13 +672,7 @@ func NewColumnIndexObject(colIdx metadata.ColumnIndex) (ret ColumnIndexObject) {
 }
 
 func simpleEncode[T int32 | int64 | float32 | float64](val T) []byte {
-	if endian.IsBigEndian {
-		buf := bytes.NewBuffer(nil)
-		if err := binary.Write(buf, binary.LittleEndian, val); err != nil {
-			panic(err)
-		}
-		return buf.Bytes()
-	}
+	val = utils.ToLE(val)
 	return unsafe.Slice((*byte)(unsafe.Pointer(&val)), unsafe.Sizeof(val))
 }
 
