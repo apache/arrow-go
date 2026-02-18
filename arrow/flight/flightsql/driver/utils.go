@@ -276,7 +276,7 @@ func setFieldValue(builder array.Builder, arg interface{}) error {
 				b.Append(arrow.Time64(x))
 			}
 		case time.Time:
-			b.Append(arrow.Time64(v.Nanosecond()))
+			b.Append(arrow.Time64(v.UnixNano()))
 		default:
 			return fmt.Errorf("invalid value type %T for builder %T", arg, builder)
 		}
