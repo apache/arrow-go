@@ -18,6 +18,7 @@ package parquet_test
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -67,7 +68,67 @@ func TestReaderPropsGetStreamInsufficient(t *testing.T) {
 	buf := memory.NewBufferBytes([]byte(data))
 	rdr := bytes.NewReader(buf.Bytes())
 
-	props := parquet.NewReaderProperties(nil)
-	_, err := props.GetStream(rdr, 12, 15)
+	props1 := parquet.NewReaderProperties(nil)
+	_, err := props1.GetStream(rdr, 12, 15)
 	assert.Error(t, err)
+}
+
+type mockReaderAt struct{}
+
+func (m *mockReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	return 0, errors.New("mock error")
+}
+
+func TestReaderPropsGetStreamWithAllocator(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer pool.AssertSize(t, 0)
+
+	data := "data to read"
+	buf := memory.NewBufferBytes([]byte(data))
+	rdr := bytes.NewReader(buf.Bytes())
+
+	// no leak on success
+	props := parquet.NewReaderProperties(pool)
+	bufRdr, err := props.GetStreamV2(rdr, 0, int64(len(data)))
+	assert.NoError(t, err)
+	bufRdr.Free()
+
+	// no leak on reader error
+	_, err = props.GetStreamV2(&mockReaderAt{}, 0, 10)
+	assert.Error(t, err)
+
+	// no leak on insufficient read
+	_, err = props.GetStreamV2(rdr, 0, int64(len(data)+10))
+	assert.Error(t, err)
+}
+
+func TestReaderPropsGetStreamBufferedWithAllocator(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer pool.AssertSize(t, 0)
+
+	data := "data to read"
+	rdr := bytes.NewReader(memory.NewBufferBytes([]byte(data)).Bytes())
+
+	props := parquet.NewReaderProperties(pool)
+	props.BufferedStreamEnabled = true
+
+	buf := make([]byte, len(data))
+	bufRdr, err := props.GetStreamV2(rdr, 0, int64(len(data)))
+	assert.NoError(t, err)
+	_, err = bufRdr.Read(buf)
+	assert.NoError(t, err)
+	bufRdr.Free()
+
+	bufRdr, err = props.GetStreamV2(&mockReaderAt{}, 0, 10)
+	assert.NoError(t, err)
+	_, err = bufRdr.Read(buf)
+	assert.Error(t, err)
+	bufRdr.Free()
+
+	bufRdr, err = props.GetStreamV2(rdr, 0, int64(len(data)+10))
+	assert.NoError(t, err)
+	n, err := bufRdr.Read(buf)
+	assert.NoError(t, err)
+	assert.NotEqual(t, len(data)+10, n)
+	bufRdr.Free()
 }

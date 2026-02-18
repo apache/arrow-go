@@ -136,7 +136,8 @@ type DictionaryPageBuilder struct {
 func NewDictionaryPageBuilder(d *schema.Column) *DictionaryPageBuilder {
 	return &DictionaryPageBuilder{
 		encoding.NewEncoder(d.PhysicalType(), parquet.Encodings.Plain, true, d, mem).(encoding.DictEncoder),
-		0, false}
+		0, false,
+	}
 }
 
 func (d *DictionaryPageBuilder) AppendValues(values interface{}) encoding.Buffer {
@@ -243,9 +244,12 @@ func (m *MockPageReader) Err() error {
 }
 
 func (m *MockPageReader) Reset(parquet.BufferedReader, int64, compress.Compression, *file.CryptoContext) {
+	// no-op
 }
 
-func (m *MockPageReader) SetMaxPageHeaderSize(int) {}
+func (m *MockPageReader) SetMaxPageHeaderSize(int) {
+	// no-op
+}
 
 func (m *MockPageReader) Page() file.Page {
 	return m.TestData().Get("pages").Data().([]file.Page)[m.curpage-1]
@@ -278,8 +282,8 @@ func (m *MockPageReader) Next() bool {
 }
 
 func PaginatePlain(version parquet.DataPageVersion, d *schema.Column, values reflect.Value, defLevels, repLevels []int16,
-	maxDef, maxRep int16, lvlsPerPage int, valuesPerPage []int, enc parquet.Encoding) []file.Page {
-
+	maxDef, maxRep int16, lvlsPerPage int, valuesPerPage []int, enc parquet.Encoding,
+) []file.Page {
 	var (
 		npages      = len(valuesPerPage)
 		defLvlStart = 0
