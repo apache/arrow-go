@@ -14,24 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build go1.24 && !tinygo
+//go:build !go1.24 || tinygo
 
-package metadata
+package memory
 
-import (
-	"runtime"
-	"sync"
+type cleanup struct{}
 
-	"github.com/apache/arrow-go/v18/arrow/memory"
-)
+func (cleanup) Stop() {}
 
-func addCleanup(bf *blockSplitBloomFilter, bufferPool *sync.Pool) {
-	runtime.AddCleanup(bf, func(data *memory.Buffer) {
-		if bufferPool != nil {
-			data.ResizeNoShrink(0)
-			bufferPool.Put(data)
-		} else {
-			data.Release()
-		}
-	}, bf.data)
+func addCleanup[T, S any](*T, func(S), S) cleanup {
+	return cleanup{}
 }
