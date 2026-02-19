@@ -732,7 +732,7 @@ func TestMapColumnWithFilters(t *testing.T) {
 	// Read the record batch
 	require.True(t, rr.Next())
 	result := rr.RecordBatch()
-	defer result.Release()
+	// Note: Don't release result manually - the record reader owns it
 
 	// Verify schema - should have only 2 fields (id and properties)
 	require.Equal(t, 2, int(result.NumCols()))
