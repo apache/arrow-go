@@ -652,3 +652,127 @@ func TestPartialStructColumnRead(t *testing.T) {
 	cArr := arr.Field(1).(*array.Float64)
 	require.Equal(t, 3.0, cArr.Value(0))
 }
+
+// TestMapColumnWithFilters tests that map columns can be read correctly when
+// using column filtering. This is a regression test for a bug where reading
+// a map column with filters would fail because the code tried to filter the
+// individual key and value columns of the map's internal key-value struct.
+// Maps require both key and value columns to be read together, so leaf filtering
+// must be disabled for map types.
+func TestMapColumnWithFilters(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	// Create schema with a map column and other columns
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "properties", Type: arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32)},
+		{Name: "value", Type: arrow.PrimitiveTypes.Float64},
+	}, nil)
+
+	// Build test data
+	b := array.NewRecordBuilder(mem, schema)
+	defer b.Release()
+
+	// Build ID column
+	idBuilder := b.Field(0).(*array.Int64Builder)
+	idBuilder.AppendValues([]int64{1, 2}, nil)
+
+	// Build map column
+	mapBuilder := b.Field(1).(*array.MapBuilder)
+	kb := mapBuilder.KeyBuilder().(*array.StringBuilder)
+	vb := mapBuilder.ItemBuilder().(*array.Int32Builder)
+
+	// First map: {"key1": 100, "key2": 200}
+	mapBuilder.Append(true)
+	kb.AppendValues([]string{"key1", "key2"}, nil)
+	vb.AppendValues([]int32{100, 200}, nil)
+
+	// Second map: {"key3": 300}
+	mapBuilder.Append(true)
+	kb.AppendValues([]string{"key3"}, nil)
+	vb.AppendValues([]int32{300}, nil)
+
+	// Build value column
+	valueBuilder := b.Field(2).(*array.Float64Builder)
+	valueBuilder.AppendValues([]float64{1.5, 2.5}, nil)
+
+	rec := b.NewRecordBatch()
+	defer rec.Release()
+
+	// Write to parquet
+	buf := new(bytes.Buffer)
+	writer, err := pqarrow.NewFileWriter(schema, buf, nil, pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(rec))
+	require.NoError(t, writer.Close())
+
+	// Read back with column filtering (only read id and properties, skip value)
+	pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer pf.Close()
+
+	fr, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{}, mem)
+	require.NoError(t, err)
+
+	// Read only columns for the first two fields (id and map)
+	// Column 0 = id
+	// Column 1 = map.key
+	// Column 2 = map.value
+	// Column 3 = value (skipped)
+	// This exercises the code path where maps need both key and value columns
+	// even when column filtering is active
+	ctx := context.Background()
+	colIndices := []int{0, 1, 2} // id, map.key, map.value
+	rr, err := fr.GetRecordReader(ctx, colIndices, nil)
+	require.NoError(t, err)
+	require.NotNil(t, rr)
+	defer rr.Release()
+
+	// Read the record batch
+	require.True(t, rr.Next())
+	result := rr.RecordBatch()
+	defer result.Release()
+
+	// Verify schema - should have only 2 fields (id and properties)
+	require.Equal(t, 2, int(result.NumCols()))
+	require.Equal(t, "id", result.Schema().Field(0).Name)
+	require.Equal(t, "properties", result.Schema().Field(1).Name)
+
+	// Verify ID column
+	idCol := result.Column(0).(*array.Int64)
+	require.Equal(t, int64(1), idCol.Value(0))
+	require.Equal(t, int64(2), idCol.Value(1))
+
+	// Verify map column - this is the critical test for the fix
+	// The key test is that reading succeeds without panic
+	mapCol := result.Column(1).(*array.Map)
+	require.Equal(t, 2, mapCol.Len())
+
+	// Verify the map has the correct structure (keys and items arrays exist)
+	keys := mapCol.Keys().(*array.String)
+	vals := mapCol.Items().(*array.Int32)
+	require.NotNil(t, keys)
+	require.NotNil(t, vals)
+
+	// Verify total number of key-value pairs across all maps
+	require.Equal(t, 3, keys.Len()) // Total: 2 from first map + 1 from second map
+	require.Equal(t, 3, vals.Len())
+
+	// Verify the map offsets are correct
+	start0, end0 := mapCol.ValueOffsets(0)
+	require.Equal(t, int64(0), start0)
+	require.Equal(t, int64(2), end0) // First map has entries from 0 to 2 (2 entries)
+
+	start1, end1 := mapCol.ValueOffsets(1)
+	require.Equal(t, int64(2), start1)
+	require.Equal(t, int64(3), end1) // Second map has entries from 2 to 3 (1 entry)
+
+	// Verify key-value pairs
+	require.Equal(t, "key1", keys.Value(0))
+	require.Equal(t, int32(100), vals.Value(0))
+	require.Equal(t, "key2", keys.Value(1))
+	require.Equal(t, int32(200), vals.Value(1))
+	require.Equal(t, "key3", keys.Value(2))
+	require.Equal(t, int32(300), vals.Value(2))
+}
