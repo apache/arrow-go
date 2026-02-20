@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -687,4 +688,260 @@ func TestArrowBinaryIPCWriterTruncatedVOffsets(t *testing.T) {
 	require.Equal(t, "banana", col.Value(1))
 
 	require.False(t, reader.Next())
+}
+
+func TestRecordBatchCustomMetadataRoundtrip(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	schema := arrow.NewSchema(
+		[]arrow.Field{{Name: "x", Type: arrow.PrimitiveTypes.Int32}},
+		nil,
+	)
+
+	bldr := array.NewInt32Builder(mem)
+	defer bldr.Release()
+	bldr.AppendValues([]int32{1, 2, 3}, nil)
+	col := bldr.NewArray()
+	defer col.Release()
+
+	meta := arrow.NewMetadata([]string{"k1", "k2"}, []string{"v1", "v2"})
+	rec := array.NewRecordBatchWithMetadata(schema, []arrow.Array{col}, 3, meta)
+	defer rec.Release()
+
+	// Write to IPC stream
+	var buf bytes.Buffer
+	writer := ipc.NewWriter(&buf, ipc.WithSchema(schema))
+	require.NoError(t, writer.Write(rec))
+	require.NoError(t, writer.Close())
+
+	// Read back
+	reader, err := ipc.NewReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer reader.Release()
+
+	require.True(t, reader.Next())
+	got := reader.RecordBatch()
+
+	rm, ok := got.(arrow.RecordBatchWithMetadata)
+	require.True(t, ok, "record batch should implement RecordBatchWithMetadata")
+
+	require.Equal(t, meta.Keys(), rm.Metadata().Keys())
+	require.Equal(t, meta.Values(), rm.Metadata().Values())
+}
+
+func TestRecordBatchCustomMetadataFileRoundtrip(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	schema := arrow.NewSchema(
+		[]arrow.Field{{Name: "x", Type: arrow.PrimitiveTypes.Int32}},
+		nil,
+	)
+
+	bldr := array.NewInt32Builder(mem)
+	defer bldr.Release()
+	bldr.AppendValues([]int32{10, 20}, nil)
+	col := bldr.NewArray()
+	defer col.Release()
+
+	meta := arrow.NewMetadata([]string{"file_key"}, []string{"file_value"})
+	rec := array.NewRecordBatchWithMetadata(schema, []arrow.Array{col}, 2, meta)
+	defer rec.Release()
+
+	// Write to IPC file
+	var buf bytes.Buffer
+	writer, err := ipc.NewFileWriter(&buf, ipc.WithSchema(schema))
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(rec))
+	require.NoError(t, writer.Close())
+
+	// Read back
+	reader, err := ipc.NewFileReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer reader.Close()
+
+	require.Equal(t, 1, reader.NumRecords())
+	got, err := reader.RecordBatchAt(0)
+	require.NoError(t, err)
+	defer got.Release()
+
+	rm, ok := got.(arrow.RecordBatchWithMetadata)
+	require.True(t, ok, "record batch should implement RecordBatchWithMetadata")
+
+	require.Equal(t, meta.Keys(), rm.Metadata().Keys())
+	require.Equal(t, meta.Values(), rm.Metadata().Values())
+}
+
+func TestRecordBatchCustomMetadataInterop(t *testing.T) {
+	t.Run("file", func(t *testing.T) {
+		f, err := os.Open("testdata/custom_metadata.arrow")
+		require.NoError(t, err)
+		defer f.Close()
+
+		reader, err := ipc.NewFileReader(f)
+		require.NoError(t, err)
+		defer reader.Close()
+
+		// Verify schema metadata
+		schemaMeta := reader.Schema().Metadata()
+		idx := schemaMeta.FindKey("schema_key")
+		require.GreaterOrEqual(t, idx, 0)
+		require.Equal(t, "schema_value", schemaMeta.Values()[idx])
+
+		require.Equal(t, 2, reader.NumRecords())
+
+		// Batch 1
+		rec0, err := reader.RecordBatchAt(0)
+		require.NoError(t, err)
+		defer rec0.Release()
+		rm0, ok := rec0.(arrow.RecordBatchWithMetadata)
+		require.True(t, ok)
+		m0 := rm0.Metadata()
+		require.Equal(t, "1", m0.Values()[m0.FindKey("batch_num")])
+		require.Equal(t, "value1", m0.Values()[m0.FindKey("key1")])
+
+		// Batch 2
+		rec1, err := reader.RecordBatchAt(1)
+		require.NoError(t, err)
+		defer rec1.Release()
+		rm1, ok := rec1.(arrow.RecordBatchWithMetadata)
+		require.True(t, ok)
+		m1 := rm1.Metadata()
+		require.Equal(t, "2", m1.Values()[m1.FindKey("batch_num")])
+		require.Equal(t, "value2", m1.Values()[m1.FindKey("key2")])
+	})
+
+	t.Run("stream", func(t *testing.T) {
+		data, err := os.ReadFile("testdata/custom_metadata_stream.arrows")
+		require.NoError(t, err)
+
+		reader, err := ipc.NewReader(bytes.NewReader(data))
+		require.NoError(t, err)
+		defer reader.Release()
+
+		// Verify schema metadata
+		schemaMeta := reader.Schema().Metadata()
+		idx := schemaMeta.FindKey("schema_key")
+		require.GreaterOrEqual(t, idx, 0)
+		require.Equal(t, "schema_value", schemaMeta.Values()[idx])
+
+		// Batch 1
+		require.True(t, reader.Next())
+		rec0 := reader.RecordBatch()
+		rm0, ok := rec0.(arrow.RecordBatchWithMetadata)
+		require.True(t, ok)
+		m0 := rm0.Metadata()
+		require.Equal(t, "1", m0.Values()[m0.FindKey("batch_num")])
+		require.Equal(t, "value1", m0.Values()[m0.FindKey("key1")])
+
+		// Batch 2
+		require.True(t, reader.Next())
+		rec1 := reader.RecordBatch()
+		rm1, ok := rec1.(arrow.RecordBatchWithMetadata)
+		require.True(t, ok)
+		m1 := rm1.Metadata()
+		require.Equal(t, "2", m1.Values()[m1.FindKey("batch_num")])
+		require.Equal(t, "value2", m1.Values()[m1.FindKey("key2")])
+
+		require.False(t, reader.Next())
+	})
+}
+
+func TestRecordBatchCustomMetadataSlice(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	schema := arrow.NewSchema(
+		[]arrow.Field{{Name: "x", Type: arrow.PrimitiveTypes.Int32}},
+		nil,
+	)
+
+	bldr := array.NewInt32Builder(mem)
+	defer bldr.Release()
+	bldr.AppendValues([]int32{1, 2, 3, 4}, nil)
+	col := bldr.NewArray()
+	defer col.Release()
+
+	meta := arrow.NewMetadata([]string{"slice_key"}, []string{"slice_value"})
+	rec := array.NewRecordBatchWithMetadata(schema, []arrow.Array{col}, 4, meta)
+	defer rec.Release()
+
+	sliced := rec.NewSlice(1, 3)
+	defer sliced.Release()
+
+	rm, ok := sliced.(arrow.RecordBatchWithMetadata)
+	require.True(t, ok, "sliced record should implement RecordBatchWithMetadata")
+	require.Equal(t, meta.Keys(), rm.Metadata().Keys())
+	require.Equal(t, meta.Values(), rm.Metadata().Values())
+	require.EqualValues(t, 2, sliced.NumRows())
+}
+
+func TestRecordBatchCustomMetadataSetColumn(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	schema := arrow.NewSchema(
+		[]arrow.Field{
+			{Name: "x", Type: arrow.PrimitiveTypes.Int32},
+			{Name: "y", Type: arrow.PrimitiveTypes.Int32},
+		},
+		nil,
+	)
+
+	bldr := array.NewInt32Builder(mem)
+	defer bldr.Release()
+	bldr.AppendValues([]int32{1, 2}, nil)
+	col1 := bldr.NewArray()
+	defer col1.Release()
+
+	bldr.AppendValues([]int32{3, 4}, nil)
+	col2 := bldr.NewArray()
+	defer col2.Release()
+
+	meta := arrow.NewMetadata([]string{"set_key"}, []string{"set_value"})
+	rec := array.NewRecordBatchWithMetadata(schema, []arrow.Array{col1, col2}, 2, meta)
+	defer rec.Release()
+
+	bldr.AppendValues([]int32{5, 6}, nil)
+	newCol := bldr.NewArray()
+	defer newCol.Release()
+
+	updated, err := rec.SetColumn(0, newCol)
+	require.NoError(t, err)
+	defer updated.Release()
+
+	rm, ok := updated.(arrow.RecordBatchWithMetadata)
+	require.True(t, ok, "updated record should implement RecordBatchWithMetadata")
+	require.Equal(t, meta.Keys(), rm.Metadata().Keys())
+	require.Equal(t, meta.Values(), rm.Metadata().Values())
+}
+
+func TestRecordBatchNoMetadataRoundtrip(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	schema := arrow.NewSchema(
+		[]arrow.Field{{Name: "x", Type: arrow.PrimitiveTypes.Int32}},
+		nil,
+	)
+
+	bldr := array.NewInt32Builder(mem)
+	defer bldr.Release()
+	bldr.AppendValues([]int32{1, 2, 3}, nil)
+	col := bldr.NewArray()
+	defer col.Release()
+
+	rec := array.NewRecordBatch(schema, []arrow.Array{col}, 3)
+	defer rec.Release()
+
+	// Write to IPC stream
+	var buf bytes.Buffer
+	writer := ipc.NewWriter(&buf, ipc.WithSchema(schema))
+	require.NoError(t, writer.Write(rec))
+	require.NoError(t, writer.Close())
+
+	// Read back
+	reader, err := ipc.NewReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer reader.Release()
+
+	require.True(t, reader.Next())
+	got := reader.RecordBatch()
+
+	rm, ok := got.(arrow.RecordBatchWithMetadata)
+	require.True(t, ok, "record batch should implement RecordBatchWithMetadata")
+
+	// Metadata should be empty, not nil
+	require.Equal(t, 0, rm.Metadata().Len())
 }
