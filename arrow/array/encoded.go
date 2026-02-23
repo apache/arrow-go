@@ -386,6 +386,15 @@ func (b *RunEndEncodedBuilder) ContinueRun(n uint64) {
 	b.addLength(n)
 }
 
+func (b *RunEndEncodedBuilder) UnsafeAppendBoolToBitmap(v bool) {
+	if !v {
+		b.finishRun()
+	}
+
+	b.values.UnsafeAppendBoolToBitmap(v)
+	b.addLength(1)
+}
+
 func (b *RunEndEncodedBuilder) AppendNull() {
 	b.finishRun()
 	b.values.AppendNull()
