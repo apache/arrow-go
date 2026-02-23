@@ -38,7 +38,7 @@ require (
 	github.com/stoewer/go-strcase v1.3.1
 	github.com/stretchr/testify v1.11.1
 	github.com/substrait-io/substrait-go/v7 v7.3.0
-	github.com/substrait-io/substrait-protobuf/go v0.80.0
+	github.com/substrait-io/substrait-protobuf/go v0.81.0
 	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.1.0
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96
