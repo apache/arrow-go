@@ -20,7 +20,9 @@ import (
 	"bytes"
 	"fmt"
 	"testing"
+	"unsafe"
 
+	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 )
 
@@ -54,12 +56,12 @@ func TestDecodeByteStreamSplitWidth4(t *testing.T) {
 		out := make([]byte, width*nValues)
 		t.Run(fmt.Sprintf("nValues=%d", nValues), func(t *testing.T) {
 			decodeByteStreamSplitBatchWidth4InByteOrder(data, nValues, stride, out)
-			if !bytes.Equal(out, expected) {
-				for i := 0; i < len(expected); i++ {
-					if out[i] != expected[i] {
-						t.Errorf("First mismatch at index %d: got %d, want %d", i, out[i], expected[i])
-						break
-					}
+			for i := 0; i < nValues; i++ {
+				got := utils.ToLE(*(*uint32)(unsafe.Pointer(&out[i*4])))
+				want := *(*uint32)(unsafe.Pointer(&expected[i*4]))
+				if got != want {
+					t.Errorf("Mismatch at index %d: got %08x, want %08x", i, got, want)
+					break
 				}
 			}
 		})
@@ -130,13 +132,12 @@ func TestDecodeByteStreamSplitWidth8(t *testing.T) {
 		t.Run(fmt.Sprintf("nValues=%d", nValues), func(t *testing.T) {
 			out := make([]byte, width*nValues)
 			decodeByteStreamSplitBatchWidth8InByteOrder(data, nValues, stride, out)
-			if !bytes.Equal(out, expected) {
-				t.Errorf("Reference implementation produced incorrect output")
-				for i := 0; i < len(expected); i++ {
-					if out[i] != expected[i] {
-						t.Errorf("First mismatch at index %d: got %d, want %d", i, out[i], expected[i])
-						break
-					}
+			for i := 0; i < nValues; i++ {
+				got := utils.ToLE(*(*uint64)(unsafe.Pointer(&out[i*8])))
+				want := *(*uint64)(unsafe.Pointer(&expected[i*8]))
+				if got != want {
+					t.Errorf("Mismatch at index %d: got %016x, want %016x", i, got, want)
+					break
 				}
 			}
 		})

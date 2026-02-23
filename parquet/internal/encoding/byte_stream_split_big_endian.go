@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/debug"
 )
 
@@ -41,7 +42,8 @@ func decodeByteStreamSplitBatchWidth4InByteOrderDefault(data []byte, nValues, st
 	out = out[:width*nValues]
 	out32 := unsafe.Slice((*uint32)(unsafe.Pointer(&out[0])), nValues)
 	for i := range nValues {
-		out32[i] = uint32(s3[i]) | uint32(s2[i])<<8 | uint32(s1[i])<<16 | uint32(s0[i])<<24
+		// Big-endian machine: put s0 as MSB, s3 as LSB
+		out32[i] = uint32(s3[i])<<24 | uint32(s2[i])<<16 | uint32(s1[i])<<8 | uint32(s0[i])
 	}
 }
 
@@ -64,7 +66,49 @@ func decodeByteStreamSplitBatchWidth8InByteOrderDefault(data []byte, nValues, st
 	out = out[:width*nValues]
 	out64 := unsafe.Slice((*uint64)(unsafe.Pointer(&out[0])), nValues)
 	for i := range nValues {
-		out64[i] = uint64(s7[i]) | uint64(s6[i])<<8 | uint64(s5[i])<<16 | uint64(s4[i])<<24 |
-			uint64(s3[i])<<32 | uint64(s2[i])<<40 | uint64(s1[i])<<48 | uint64(s0[i])<<56
+		// Big-endian machine: put s0 as MSB, s7 as LSB
+		out64[i] = uint64(s7[i])<<56 | uint64(s6[i])<<48 | uint64(s5[i])<<40 | uint64(s4[i])<<32 |
+			uint64(s3[i])<<24 | uint64(s2[i])<<16 | uint64(s1[i])<<8 | uint64(s0[i])
+	}
+}
+
+// decodeByteStreamSplitBatchFLBAWidth2 decodes the batch of nValues FixedLenByteArrays of length 2 provided by 'data',
+// into the output slice 'out' using BYTE_STREAM_SPLIT encoding.
+// 'out' must have space for at least nValues slices.
+func decodeByteStreamSplitBatchFLBAWidth2(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) {
+	debug.Assert(len(out) >= nValues, fmt.Sprintf("not enough space in output slice for decoding, out: %d values, data: %d values", len(out), nValues))
+	for element := 0; element < nValues; element++ {
+		out[element][0] = data[element]
+		out[element][1] = data[stride+element]
+	}
+}
+
+// decodeByteStreamSplitBatchFLBAWidth4 decodes the batch of nValues FixedLenByteArrays of length 4 provided by 'data',
+// into the output slice 'out' using BYTE_STREAM_SPLIT encoding.
+// 'out' must have space for at least nValues slices.
+func decodeByteStreamSplitBatchFLBAWidth4(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) {
+	debug.Assert(len(out) >= nValues, fmt.Sprintf("not enough space in output slice for decoding, out: %d values, data: %d values", len(out), nValues))
+	for element := 0; element < nValues; element++ {
+		out[element][0] = data[element]
+		out[element][1] = data[stride+element]
+		out[element][2] = data[stride*2+element]
+		out[element][3] = data[stride*3+element]
+	}
+}
+
+// decodeByteStreamSplitBatchFLBAWidth8 decodes the batch of nValues FixedLenByteArrays of length 8 provided by 'data',
+// into the output slice 'out' using BYTE_STREAM_SPLIT encoding.
+// 'out' must have space for at least nValues slices.
+func decodeByteStreamSplitBatchFLBAWidth8(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) {
+	debug.Assert(len(out) >= nValues, fmt.Sprintf("not enough space in output slice for decoding, out: %d values, data: %d values", len(out), nValues))
+	for element := 0; element < nValues; element++ {
+		out[element][0] = data[element]
+		out[element][1] = data[stride+element]
+		out[element][2] = data[stride*2+element]
+		out[element][3] = data[stride*3+element]
+		out[element][4] = data[stride*4+element]
+		out[element][5] = data[stride*5+element]
+		out[element][6] = data[stride*6+element]
+		out[element][7] = data[stride*7+element]
 	}
 }
