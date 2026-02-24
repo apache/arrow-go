@@ -19,7 +19,6 @@
 package encoding
 
 import (
-	"fmt"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/parquet"
@@ -32,9 +31,9 @@ import (
 // 'out' must have space for at least len(data) bytes.
 func decodeByteStreamSplitBatchWidth4InByteOrderDefault(data []byte, nValues, stride int, out []byte) {
 	const width = 4
-	debug.Assert(len(out) >= nValues*width, fmt.Sprintf("not enough space in output buffer for decoding, out: %d bytes, data: %d bytes", len(out), len(data)))
+	debug.Assert(len(out) >= nValues*width, "not enough space in output buffer for decoding")
 	// the beginning of the data slice can be truncated, but for valid encoding we need at least (width-1)*stride+nValues bytes
-	debug.Assert(len(data) >= 3*stride+nValues, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), 3*stride+nValues))
+	debug.Assert(len(data) >= 3*stride+nValues, "not enough data for decoding")
 	s0 := data[:nValues]
 	s1 := data[stride : stride+nValues]
 	s2 := data[2*stride : 2*stride+nValues]
@@ -52,8 +51,8 @@ func decodeByteStreamSplitBatchWidth4InByteOrderDefault(data []byte, nValues, st
 // 'out' must have space for at least len(data) bytes.
 func decodeByteStreamSplitBatchWidth8InByteOrderDefault(data []byte, nValues, stride int, out []byte) {
 	const width = 8
-	debug.Assert(len(out) >= nValues*width, fmt.Sprintf("not enough space in output buffer for decoding, out: %d bytes, data: %d bytes", len(out), len(data)))
-	debug.Assert(len(data) >= 7*stride+nValues, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), 7*stride+nValues))
+	debug.Assert(len(out) >= nValues*width, "not enough space in output buffer for decoding")
+	debug.Assert(len(data) >= 7*stride+nValues, "not enough data for decoding")
 	s0 := data[:nValues]
 	s1 := data[stride : stride+nValues]
 	s2 := data[2*stride : 2*stride+nValues]
@@ -74,9 +73,8 @@ func decodeByteStreamSplitBatchWidth8InByteOrderDefault(data []byte, nValues, st
 // into the output slice 'out' using BYTE_STREAM_SPLIT encoding.
 // 'out' must have space for at least nValues slices.
 func decodeByteStreamSplitBatchFLBAWidth2(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) {
-	const width = 2
-	debug.Assert(len(out) >= nValues, fmt.Sprintf("not enough space in output slice for decoding, out: %d values, data: %d values", len(out), nValues))
-	debug.Assert(len(data) >= stride+nValues, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), stride+nValues))
+	debug.Assert(len(out) >= nValues, "not enough space in output slice for decoding")
+	debug.Assert(len(data) >= stride+nValues, "not enough data for decoding")
 	s0 := data[:nValues]
 	s1 := data[stride : stride+nValues]
 	for i := range nValues {
@@ -89,9 +87,8 @@ func decodeByteStreamSplitBatchFLBAWidth2(data []byte, nValues, stride int, out 
 // into the output slice 'out' using BYTE_STREAM_SPLIT encoding.
 // 'out' must have space for at least nValues slices.
 func decodeByteStreamSplitBatchFLBAWidth4(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) {
-	const width = 4
-	debug.Assert(len(out) >= nValues, fmt.Sprintf("not enough space in output slice for decoding, out: %d values, data: %d values", len(out), nValues))
-	debug.Assert(len(data) >= 3*stride+nValues, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), 3*stride+nValues))
+	debug.Assert(len(out) >= nValues, "not enough space in output slice for decoding")
+	debug.Assert(len(data) >= 3*stride+nValues, "not enough data for decoding")
 	s0 := data[:nValues]
 	s1 := data[stride : stride+nValues]
 	s2 := data[stride*2 : stride*2+nValues]
@@ -106,9 +103,8 @@ func decodeByteStreamSplitBatchFLBAWidth4(data []byte, nValues, stride int, out 
 // into the output slice 'out' using BYTE_STREAM_SPLIT encoding.
 // 'out' must have space for at least nValues slices.
 func decodeByteStreamSplitBatchFLBAWidth8(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) {
-	const width = 8
-	debug.Assert(len(out) >= nValues, fmt.Sprintf("not enough space in output slice for decoding, out: %d values, data: %d values", len(out), nValues))
-	debug.Assert(len(data) >= 7*stride+nValues, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), 7*stride+nValues))
+	debug.Assert(len(out) >= nValues, "not enough space in output slice for decoding")
+	debug.Assert(len(data) >= 7*stride+nValues, "not enough data for decoding")
 	s0 := data[:nValues]
 	s1 := data[stride : stride+nValues]
 	s2 := data[stride*2 : stride*2+nValues]
