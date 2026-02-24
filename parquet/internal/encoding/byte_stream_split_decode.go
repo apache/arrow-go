@@ -17,8 +17,6 @@
 package encoding
 
 import (
-	"fmt"
-
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/debug"
 )
@@ -32,8 +30,8 @@ var (
 // into the output slice 'out' using BYTE_STREAM_SPLIT encoding.
 // 'out' must have space for at least nValues slices.
 func decodeByteStreamSplitBatchFLBA(data []byte, nValues, stride, width int, out []parquet.FixedLenByteArray) {
-	debug.Assert(len(out) >= nValues, fmt.Sprintf("not enough space in output slice for decoding, out: %d values, data: %d values", len(out), nValues))
-	debug.Assert(len(data) >= (width-1)*stride+nValues, fmt.Sprintf("not enough data for decoding, data: %d bytes, expected at least: %d bytes", len(data), (width-1)*stride+nValues))
+	debug.Assert(len(out) >= nValues, "not enough space in output slice for decoding")
+	debug.Assert(len(data) >= (width-1)*stride+nValues, "not enough data for decoding")
 	for stream := 0; stream < width; stream++ {
 		for element := 0; element < nValues; element++ {
 			encLoc := stride*stream + element
