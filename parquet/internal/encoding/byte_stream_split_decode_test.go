@@ -70,7 +70,7 @@ func TestDecodeByteStreamSplitWidth4(t *testing.T) {
 
 func BenchmarkDecodeByteStreamSplitBatchWidth4(b *testing.B) {
 	const width = 4
-	sizes := []int{8, 64, 512, 4096, 32768, 2097152, 16777216}
+	sizes := []int{8, 10, 64, 100, 512, 1000, 4096, 10000, 32768, 100000, 2097152, 10000000, 16777216}
 
 	for _, nValues := range sizes {
 		stride := nValues
@@ -146,7 +146,7 @@ func TestDecodeByteStreamSplitWidth8(t *testing.T) {
 
 func BenchmarkDecodeByteStreamSplitBatchWidth8(b *testing.B) {
 	const width = 8
-	sizes := []int{8, 64, 512, 4096, 32768, 2097152, 16777216}
+	sizes := []int{8, 10, 64, 100, 512, 1000, 4096, 10000, 32768, 100000, 2097152, 10000000, 16777216}
 
 	for _, nValues := range sizes {
 		stride := nValues
@@ -216,7 +216,7 @@ func TestDecodeByteStreamSplitFLBAWidth2(t *testing.T) {
 
 func BenchmarkDecodeByteStreamSplitBatchFLBAWidth2(b *testing.B) {
 	const width = 2
-	sizes := []int{8, 64, 512, 4096, 32768, 262144, 2097152, 16777216}
+	sizes := []int{8, 10, 64, 100, 512, 1000, 4096, 10000, 32768, 100000, 2097152, 10000000, 16777216}
 
 	for _, nValues := range sizes {
 		stride := nValues
@@ -286,7 +286,7 @@ func TestDecodeByteStreamSplitFLBAWidth4(t *testing.T) {
 
 func BenchmarkDecodeByteStreamSplitBatchFLBAWidth4(b *testing.B) {
 	const width = 4
-	sizes := []int{8, 64, 512, 4096, 32768, 262144, 2097152, 16777216}
+	sizes := []int{8, 10, 64, 100, 512, 1000, 4096, 10000, 32768, 100000, 2097152, 10000000, 16777216}
 
 	for _, nValues := range sizes {
 		stride := nValues
@@ -364,7 +364,7 @@ func TestDecodeByteStreamSplitFLBAWidth8(t *testing.T) {
 
 func BenchmarkDecodeByteStreamSplitBatchFLBAWidth8(b *testing.B) {
 	const width = 8
-	sizes := []int{8, 64, 512, 4096, 32768, 262144, 2097152, 16777216}
+	sizes := []int{8, 10, 64, 100, 512, 1000, 4096, 10000, 32768, 100000, 2097152, 10000000, 16777216}
 
 	for _, nValues := range sizes {
 		stride := nValues
