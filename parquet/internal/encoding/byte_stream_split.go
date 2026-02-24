@@ -30,7 +30,7 @@ import (
 // encodeByteStreamSplit encodes the raw bytes provided by 'in' into the output buffer 'data' using BYTE_STREAM_SPLIT encoding.
 // 'data' must have space for at least len(in) bytes.
 func encodeByteStreamSplit(data []byte, in []byte, width int) {
-	debug.Assert(len(data) >= len(in), fmt.Sprintf("not enough space in destination buffer for encoding, dest: %d bytes, src: %d bytes", len(data), len(in)))
+	debug.Assert(len(data) >= len(in), "not enough space in destination buffer for encoding")
 	numElements := len(in) / width
 	for stream := 0; stream < width; stream++ {
 		for element := 0; element < numElements; element++ {
@@ -44,7 +44,7 @@ func encodeByteStreamSplit(data []byte, in []byte, width int) {
 // encodeByteStreamSplitWidth2 implements encodeByteStreamSplit optimized for types stored using 2 bytes.
 // 'data' must have space for at least len(in) bytes.
 func encodeByteStreamSplitWidth2(data []byte, in []byte) {
-	debug.Assert(len(data) >= len(in), fmt.Sprintf("not enough space in destination buffer for encoding, dest: %d bytes, src: %d bytes", len(data), len(in)))
+	debug.Assert(len(data) >= len(in), "not enough space in destination buffer for encoding")
 	const width = 2
 	numElements := len(in) / width
 	for element := 0; element < numElements; element++ {
@@ -57,7 +57,7 @@ func encodeByteStreamSplitWidth2(data []byte, in []byte) {
 // encodeByteStreamSplitWidth4 implements encodeByteStreamSplit optimized for types stored using 4 bytes.
 // 'data' must have space for at least len(in) bytes.
 func encodeByteStreamSplitWidth4(data []byte, in []byte) {
-	debug.Assert(len(data) >= len(in), fmt.Sprintf("not enough space in destination buffer for encoding, dest: %d bytes, src: %d bytes", len(data), len(in)))
+	debug.Assert(len(data) >= len(in), "not enough space in destination buffer for encoding")
 	const width = 4
 	numElements := len(in) / width
 	for element := 0; element < numElements; element++ {
@@ -72,7 +72,7 @@ func encodeByteStreamSplitWidth4(data []byte, in []byte) {
 // encodeByteStreamSplitWidth8 implements encodeByteStreamSplit optimized for types stored using 8 bytes.
 // 'data' must have space for at least len(in) bytes.
 func encodeByteStreamSplitWidth8(data []byte, in []byte) {
-	debug.Assert(len(data) >= len(in), fmt.Sprintf("not enough space in destination buffer for encoding, dest: %d bytes, src: %d bytes", len(data), len(in)))
+	debug.Assert(len(data) >= len(in), "not enough space in destination buffer for encoding")
 	const width = 8
 	numElements := len(in) / width
 	for element := 0; element < numElements; element++ {
