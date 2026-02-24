@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -97,7 +98,8 @@ func NewReader(r io.Reader, opts ...Option) (rr *Reader, err error) {
 	}()
 	cfg := newConfig(opts...)
 	mr := &messageReader{r: r, mem: cfg.alloc}
-	mr.refCount.Add(1)
+	mr.Retain()
+	mr.ReferenceDependency(unsafe.Pointer(&mr.msg))
 	rr = &Reader{
 		r:        mr,
 		refCount: atomic.Int64{},
