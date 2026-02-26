@@ -27,7 +27,10 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/flight"
 	"github.com/apache/arrow-go/v18/arrow/flight/flightsql"
 	pb "github.com/apache/arrow-go/v18/arrow/flight/gen/flight"
+	"github.com/apache/arrow-go/v18/arrow/internal/flatbuf"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	flatbuffers "github.com/google/flatbuffers/go"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
@@ -163,6 +166,7 @@ func getAction(cmd proto.Message) *flight.Action {
 func (s *FlightSqlClientSuite) SetupTest() {
 	s.mockClient = FlightServiceClientMock{}
 	s.sqlClient.Client = &s.mockClient
+	s.sqlClient.Alloc = memory.DefaultAllocator
 	s.callOpts = []grpc.CallOption{grpc.EmptyCallOption{}}
 }
 
@@ -647,6 +651,153 @@ func (s *FlightSqlClientSuite) TestExecuteUpdate() {
 	num, err := s.sqlClient.ExecuteUpdate(context.TODO(), query, s.callOpts...)
 	s.NoError(err)
 	s.EqualValues(100, num)
+}
+
+func (s *FlightSqlClientSuite) TestExecuteIngestWithIPCOptions() {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "id", Type: arrow.PrimitiveTypes.Int64}}, nil)
+	rec, _, err := array.RecordFromJSON(memory.DefaultAllocator, schema, strings.NewReader(`[{"id": 1}]`))
+	s.Require().NoError(err)
+	defer rec.Release()
+
+	rdr, err := array.NewRecordReader(schema, []arrow.RecordBatch{rec})
+	s.Require().NoError(err)
+	defer rdr.Release()
+
+	request := &flightsql.ExecuteIngestOpts{
+		Table:                  "target_table",
+		TableDefinitionOptions: &flightsql.TableDefinitionOptions{},
+	}
+
+	result := &pb.DoPutUpdateResult{RecordCount: 1}
+	resdata, _ := proto.Marshal(result)
+
+	mockedPut := &mockDoPutClient{}
+	defer mockedPut.AssertExpectations(s.T())
+
+	var sent []*flight.FlightData
+	mockedPut.On("Send", mock.AnythingOfType("*flight.FlightData")).Run(func(args mock.Arguments) {
+		sent = append(sent, proto.Clone(args.Get(0).(*flight.FlightData)).(*flight.FlightData))
+	}).Return(nil)
+	mockedPut.On("CloseSend").Return(nil)
+	mockedPut.On("Recv").Return(&pb.PutResult{AppMetadata: resdata}, nil).Once()
+	mockedPut.On("Recv").Return(&pb.PutResult{}, io.EOF).Once()
+
+	s.mockClient.On("DoPut", s.callOpts).Return(mockedPut, nil)
+
+	count, err := s.sqlClient.ExecuteIngest(
+		context.Background(),
+		rdr,
+		request,
+		flightsql.BuildCallOptions(
+			flightsql.WithGRPCCallOptions(s.callOpts...),
+			flightsql.WithIPCCallOptions(ipc.WithLZ4()),
+		)...,
+	)
+	s.Require().NoError(err)
+	s.EqualValues(1, count)
+
+	var rbCompression *flatbuf.BodyCompression
+	for _, fd := range sent {
+		if len(fd.DataHeader) == 0 {
+			continue
+		}
+
+		msg := flatbuf.GetRootAsMessage(fd.DataHeader, 0)
+		if msg.HeaderType() != flatbuf.MessageHeaderRecordBatch {
+			continue
+		}
+
+		var header flatbuffers.Table
+		if !msg.Header(&header) {
+			continue
+		}
+
+		var batch flatbuf.RecordBatch
+		batch.Init(header.Bytes, header.Pos)
+		rbCompression = batch.Compression(nil)
+		break
+	}
+
+	if s.NotNil(rbCompression, "record batch should include compression metadata") {
+		s.Equal(flatbuf.CompressionTypeLZ4_FRAME, rbCompression.Codec())
+	}
+}
+
+func (s *FlightSqlClientSuite) TestExecuteIngestWithSchemaOverrideOption() {
+	dataSchema := arrow.NewSchema([]arrow.Field{{Name: "id", Type: arrow.PrimitiveTypes.Int64}}, nil)
+	overrideSchema := arrow.NewSchema([]arrow.Field{{Name: "name", Type: arrow.BinaryTypes.String}}, nil)
+
+	rec, _, err := array.RecordFromJSON(memory.DefaultAllocator, dataSchema, strings.NewReader(`[{"id": 1}]`))
+	s.Require().NoError(err)
+	defer rec.Release()
+
+	rdr, err := array.NewRecordReader(dataSchema, []arrow.RecordBatch{rec})
+	s.Require().NoError(err)
+	defer rdr.Release()
+
+	request := &flightsql.ExecuteIngestOpts{
+		Table:                  "target_table",
+		TableDefinitionOptions: &flightsql.TableDefinitionOptions{},
+	}
+
+	mockedPut := &mockDoPutClient{}
+	defer mockedPut.AssertExpectations(s.T())
+	mockedPut.On("Send", mock.AnythingOfType("*flight.FlightData")).Return(nil)
+
+	s.mockClient.On("DoPut", s.callOpts).Return(mockedPut, nil)
+
+	_, err = s.sqlClient.ExecuteIngest(
+		context.Background(),
+		rdr,
+		request,
+		flightsql.BuildCallOptions(
+			flightsql.WithGRPCCallOptions(s.callOpts...),
+			flightsql.WithIPCCallOptions(ipc.WithSchema(overrideSchema)),
+		)...,
+	)
+	s.Error(err)
+	s.ErrorContains(err, "different schema")
+}
+
+func (s *FlightSqlClientSuite) TestExecuteIngestWithSliceOptions() {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "id", Type: arrow.PrimitiveTypes.Int64}}, nil)
+	rec, _, err := array.RecordFromJSON(memory.DefaultAllocator, schema, strings.NewReader(`[{"id": 1}]`))
+	s.Require().NoError(err)
+	defer rec.Release()
+
+	rdr, err := array.NewRecordReader(schema, []arrow.RecordBatch{rec})
+	s.Require().NoError(err)
+	defer rdr.Release()
+
+	request := &flightsql.ExecuteIngestOpts{
+		Table:                  "target_table",
+		TableDefinitionOptions: &flightsql.TableDefinitionOptions{},
+	}
+
+	result := &pb.DoPutUpdateResult{RecordCount: 1}
+	resdata, _ := proto.Marshal(result)
+
+	mockedPut := &mockDoPutClient{}
+	defer mockedPut.AssertExpectations(s.T())
+	mockedPut.On("Send", mock.AnythingOfType("*flight.FlightData")).Return(nil)
+	mockedPut.On("CloseSend").Return(nil)
+	mockedPut.On("Recv").Return(&pb.PutResult{AppMetadata: resdata}, nil).Once()
+	mockedPut.On("Recv").Return(&pb.PutResult{}, io.EOF).Once()
+
+	s.mockClient.On("DoPut", s.callOpts).Return(mockedPut, nil)
+
+	ipcOpts := []ipc.Option{ipc.WithLZ4()}
+	count, err := s.sqlClient.ExecuteIngest(
+		context.Background(),
+		rdr,
+		request,
+		flightsql.BuildCallOptions(
+			flightsql.WithGRPCCallOptions(s.callOpts...),
+			flightsql.WithIPCCallOptions(ipcOpts...),
+		)...,
+	)
+	s.Require().NoError(err)
+	s.EqualValues(1, count)
 }
 
 func (s *FlightSqlClientSuite) TestGetSqlInfo() {

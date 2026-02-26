@@ -256,6 +256,9 @@ func (c *Client) ExecuteIngest(ctx context.Context, rdr array.RecordReader, reqO
 		updateResult pb.DoPutUpdateResult
 	)
 
+	// ipcOptions are overloaded into grpc options for backwards compatibility
+	grpcOpts, ipcOpts := splitCallOptions(opts)
+
 	cmd := (*pb.CommandStatementIngest)(reqOptions)
 
 	// Servers cannot infer defaults for these parameters, so we validate the request to ensure they are set.
@@ -270,11 +273,14 @@ func (c *Client) ExecuteIngest(ctx context.Context, rdr array.RecordReader, reqO
 		return 0, err
 	}
 
-	if stream, err = c.Client.DoPut(ctx, opts...); err != nil {
+	if stream, err = c.Client.DoPut(ctx, grpcOpts...); err != nil {
 		return 0, err
 	}
 
-	wr = flight.NewRecordWriter(stream, ipc.WithAllocator(c.Alloc), ipc.WithSchema(rdr.Schema()))
+	writerOpts := make([]ipc.Option, 0, 2+len(ipcOpts))
+	writerOpts = append(writerOpts, ipc.WithAllocator(c.Alloc), ipc.WithSchema(rdr.Schema()))
+	writerOpts = append(writerOpts, ipcOpts...)
+	wr = flight.NewRecordWriter(stream, writerOpts...)
 	defer wr.Close()
 
 	wr.SetFlightDescriptor(desc)

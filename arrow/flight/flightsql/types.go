@@ -18,6 +18,8 @@ package flightsql
 
 import (
 	pb "github.com/apache/arrow-go/v18/arrow/flight/gen/flight"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -148,7 +150,88 @@ type (
 	// - TransactionId: Ingest as part of this transaction
 	// - Options: Additional, backend-specific options
 	ExecuteIngestOpts pb.CommandStatementIngest
+
+	CallOptionInput interface {
+		appendClientCallOptions(grpcOpts *[]grpc.CallOption, ipcOpts *[]ipc.Option)
+	}
+
+	grpcCallOptionsInput struct {
+		opts []grpc.CallOption
+	}
+
+	ipcCallOptionsInput struct {
+		opts []ipc.Option
+	}
+
+	// Wrap IPC options as an empty grpc CallOption so they can be passed through
+	// existing methods that accept grpc call options.
+	ipcCallOptions struct {
+		grpc.EmptyCallOption
+		opts []ipc.Option
+	}
 )
+
+func (o grpcCallOptionsInput) appendClientCallOptions(grpcOpts *[]grpc.CallOption, _ *[]ipc.Option) {
+	*grpcOpts = append(*grpcOpts, o.opts...)
+}
+
+func (o ipcCallOptionsInput) appendClientCallOptions(_ *[]grpc.CallOption, ipcOpts *[]ipc.Option) {
+	*ipcOpts = append(*ipcOpts, o.opts...)
+}
+
+// WithGRPCCallOptions creates typed grpc call-option input for BuildCallOptions.
+func WithGRPCCallOptions(opts ...grpc.CallOption) CallOptionInput {
+	copied := make([]grpc.CallOption, len(opts))
+	copy(copied, opts)
+	return grpcCallOptionsInput{opts: copied}
+}
+
+// WithIPCCallOptions creates typed IPC writer-option input for BuildCallOptions.
+func WithIPCCallOptions(opts ...ipc.Option) CallOptionInput {
+	copied := make([]ipc.Option, len(opts))
+	copy(copied, opts)
+	return ipcCallOptionsInput{opts: copied}
+}
+
+// BuildCallOptions combines typed grpc and IPC option inputs into grpc call
+// options for client APIs.
+//
+// The resulting options can be expanded directly into methods like ExecuteIngest.
+func BuildCallOptions(opts ...CallOptionInput) []grpc.CallOption {
+	grpcOpts := make([]grpc.CallOption, 0)
+	ipcOpts := make([]ipc.Option, 0)
+
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		opt.appendClientCallOptions(&grpcOpts, &ipcOpts)
+	}
+
+	if len(ipcOpts) == 0 {
+		return grpcOpts
+	}
+
+	out := make([]grpc.CallOption, 0, len(grpcOpts)+1)
+	out = append(out, grpcOpts...)
+	out = append(out, &ipcCallOptions{opts: ipcOpts})
+	return out
+}
+
+func splitCallOptions(opts []grpc.CallOption) ([]grpc.CallOption, []ipc.Option) {
+	grpcOpts := make([]grpc.CallOption, 0, len(opts))
+	ipcOpts := make([]ipc.Option, 0)
+
+	for _, opt := range opts {
+		if ipcCallOpt, ok := opt.(*ipcCallOptions); ok {
+			ipcOpts = append(ipcOpts, ipcCallOpt.opts...)
+			continue
+		}
+		grpcOpts = append(grpcOpts, opt)
+	}
+
+	return grpcOpts, ipcOpts
+}
 
 // SqlInfo enum values
 const (
