@@ -684,14 +684,12 @@ func (s *FlightSqlClientSuite) TestExecuteIngestWithIPCOptions() {
 
 	s.mockClient.On("DoPut", s.callOpts).Return(mockedPut, nil)
 
-	count, err := s.sqlClient.ExecuteIngest(
+	count, err := s.sqlClient.ExecuteIngestWithIPC(
 		context.Background(),
 		rdr,
 		request,
-		flightsql.BuildCallOptions(
-			flightsql.WithGRPCCallOptions(s.callOpts...),
-			flightsql.WithIPCCallOptions(ipc.WithLZ4()),
-		)...,
+		[]ipc.Option{ipc.WithLZ4()},
+		s.callOpts...,
 	)
 	s.Require().NoError(err)
 	s.EqualValues(1, count)
@@ -746,14 +744,12 @@ func (s *FlightSqlClientSuite) TestExecuteIngestWithSchemaOverrideOption() {
 
 	s.mockClient.On("DoPut", s.callOpts).Return(mockedPut, nil)
 
-	_, err = s.sqlClient.ExecuteIngest(
+	_, err = s.sqlClient.ExecuteIngestWithIPC(
 		context.Background(),
 		rdr,
 		request,
-		flightsql.BuildCallOptions(
-			flightsql.WithGRPCCallOptions(s.callOpts...),
-			flightsql.WithIPCCallOptions(ipc.WithSchema(overrideSchema)),
-		)...,
+		[]ipc.Option{ipc.WithSchema(overrideSchema)},
+		s.callOpts...,
 	)
 	s.Error(err)
 	s.ErrorContains(err, "different schema")
@@ -787,14 +783,12 @@ func (s *FlightSqlClientSuite) TestExecuteIngestWithSliceOptions() {
 	s.mockClient.On("DoPut", s.callOpts).Return(mockedPut, nil)
 
 	ipcOpts := []ipc.Option{ipc.WithLZ4()}
-	count, err := s.sqlClient.ExecuteIngest(
+	count, err := s.sqlClient.ExecuteIngestWithIPC(
 		context.Background(),
 		rdr,
 		request,
-		flightsql.BuildCallOptions(
-			flightsql.WithGRPCCallOptions(s.callOpts...),
-			flightsql.WithIPCCallOptions(ipcOpts...),
-		)...,
+		ipcOpts,
+		s.callOpts...,
 	)
 	s.Require().NoError(err)
 	s.EqualValues(1, count)

@@ -247,6 +247,18 @@ func (c *Client) ExecuteSubstraitUpdate(ctx context.Context, plan SubstraitPlan,
 // The provided RecordReader will be retained for the duration of the call, but it is the caller's
 // responsibility to release the original reference.
 func (c *Client) ExecuteIngest(ctx context.Context, rdr array.RecordReader, reqOptions *ExecuteIngestOpts, opts ...grpc.CallOption) (int64, error) {
+	return c.executeIngest(ctx, rdr, reqOptions, nil, opts...)
+}
+
+// ExecuteIngestWithIPC is like ExecuteIngest, and also allows configuring IPC
+// stream writer options such as compression.
+// The provided RecordReader will be retained for the duration of the call, but it is the caller's
+// responsibility to release the original reference.
+func (c *Client) ExecuteIngestWithIPC(ctx context.Context, rdr array.RecordReader, reqOptions *ExecuteIngestOpts, ipcOpts []ipc.Option, opts ...grpc.CallOption) (int64, error) {
+	return c.executeIngest(ctx, rdr, reqOptions, ipcOpts, opts...)
+}
+
+func (c *Client) executeIngest(ctx context.Context, rdr array.RecordReader, reqOptions *ExecuteIngestOpts, ipcOpts []ipc.Option, opts ...grpc.CallOption) (int64, error) {
 	var (
 		err          error
 		desc         *flight.FlightDescriptor
@@ -255,9 +267,6 @@ func (c *Client) ExecuteIngest(ctx context.Context, rdr array.RecordReader, reqO
 		res          *pb.PutResult
 		updateResult pb.DoPutUpdateResult
 	)
-
-	// ipcOptions are overloaded into grpc options for backwards compatibility
-	grpcOpts, ipcOpts := splitCallOptions(opts)
 
 	cmd := (*pb.CommandStatementIngest)(reqOptions)
 
@@ -273,7 +282,7 @@ func (c *Client) ExecuteIngest(ctx context.Context, rdr array.RecordReader, reqO
 		return 0, err
 	}
 
-	if stream, err = c.Client.DoPut(ctx, grpcOpts...); err != nil {
+	if stream, err = c.Client.DoPut(ctx, opts...); err != nil {
 		return 0, err
 	}
 
