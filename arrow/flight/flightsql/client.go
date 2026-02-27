@@ -247,6 +247,18 @@ func (c *Client) ExecuteSubstraitUpdate(ctx context.Context, plan SubstraitPlan,
 // The provided RecordReader will be retained for the duration of the call, but it is the caller's
 // responsibility to release the original reference.
 func (c *Client) ExecuteIngest(ctx context.Context, rdr array.RecordReader, reqOptions *ExecuteIngestOpts, opts ...grpc.CallOption) (int64, error) {
+	return c.executeIngest(ctx, rdr, reqOptions, nil, opts...)
+}
+
+// ExecuteIngestWithIPC is like ExecuteIngest, and also allows configuring IPC
+// stream writer options such as compression.
+// The provided RecordReader will be retained for the duration of the call, but it is the caller's
+// responsibility to release the original reference.
+func (c *Client) ExecuteIngestWithIPC(ctx context.Context, rdr array.RecordReader, reqOptions *ExecuteIngestOpts, ipcOpts []ipc.Option, opts ...grpc.CallOption) (int64, error) {
+	return c.executeIngest(ctx, rdr, reqOptions, ipcOpts, opts...)
+}
+
+func (c *Client) executeIngest(ctx context.Context, rdr array.RecordReader, reqOptions *ExecuteIngestOpts, ipcOpts []ipc.Option, opts ...grpc.CallOption) (int64, error) {
 	var (
 		err          error
 		desc         *flight.FlightDescriptor
@@ -274,7 +286,10 @@ func (c *Client) ExecuteIngest(ctx context.Context, rdr array.RecordReader, reqO
 		return 0, err
 	}
 
-	wr = flight.NewRecordWriter(stream, ipc.WithAllocator(c.Alloc), ipc.WithSchema(rdr.Schema()))
+	writerOpts := make([]ipc.Option, 0, 2+len(ipcOpts))
+	writerOpts = append(writerOpts, ipc.WithAllocator(c.Alloc), ipc.WithSchema(rdr.Schema()))
+	writerOpts = append(writerOpts, ipcOpts...)
+	wr = flight.NewRecordWriter(stream, writerOpts...)
 	defer wr.Close()
 
 	wr.SetFlightDescriptor(desc)
