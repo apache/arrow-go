@@ -70,11 +70,11 @@ rc_hash="$(git rev-list --max-count=1 "${rc_tag}")"
 id="apache-arrow-go-${version}"
 tar_gz="${id}.tar.gz"
 
-if [ "${RELEASE_SIGN}" -gt 0 ]; then
-  git_origin_url="$(git remote get-url origin)"
-  repository="${git_origin_url#*github.com?}"
-  repository="${repository%.git}"
+git_origin_url="$(git remote get-url origin)"
+repository="${git_origin_url#*github.com?}"
+repository="${repository%.git}"
 
+if [ "${RELEASE_SIGN}" -gt 0 ]; then
   echo "Looking for GitHub Actions workflow on ${repository}:${rc_tag}"
   run_id=""
   while [ -z "${run_id}" ]; do
@@ -109,6 +109,14 @@ if [ "${RELEASE_UPLOAD}" -gt 0 ]; then
     "${tar_gz}.asc"
 fi
 
+gh release download "${rc_tag}" \
+  --dir . \
+  --pattern "${tar_gz}.sha512" \
+  --repo "${repository}" \
+  --clobber
+
+SOURCE_TARBALL_HASH=$(cat "${tar_gz}.sha512" | awk '{print $1}')
+
 echo "Draft email for dev@arrow.apache.org mailing list"
 echo ""
 echo "---------------------------------------------------------"
@@ -125,6 +133,10 @@ This release candidate is based on commit:
 ${rc_hash} [1]
 
 The source release rc${rc} is hosted at [2].
+
+This is not a permanent URL. If the RC is accepted, it will be moved to 
+the final release location. The SHA512 hash of the source tarball is:
+${SOURCE_TARBALL_HASH}.
 
 Please download, verify checksums and signatures, run the unit tests,
 and vote on the release. See [3] for how to validate a release candidate.
