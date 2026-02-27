@@ -115,7 +115,8 @@ gh release download "${rc_tag}" \
   --repo "${repository}" \
   --clobber
 
-SOURCE_TARBALL_HASH=$(cat "${tar_gz}.sha512" | awk '{print $1}')
+SOURCE_TARBALL_HASH=$(awk '{print $1}' "${tar_gz}.sha512")
+rm -f "${tar_gz}.sha512"
 
 echo "Draft email for dev@arrow.apache.org mailing list"
 echo ""
