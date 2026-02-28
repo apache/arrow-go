@@ -26,13 +26,12 @@ import (
 /// sizes allowing for writes in any order and sharing of child values among
 /// list values.
 type ListView struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsListView(buf []byte, offset flatbuffers.UOffsetT) *ListView {
+func GetRootAsListView(buf []byte, offset flatbuffers.UOffsetT) (x ListView) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &ListView{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -40,10 +39,9 @@ func FinishListViewBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffs
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsListView(buf []byte, offset flatbuffers.UOffsetT) *ListView {
+func GetSizePrefixedRootAsListView(buf []byte, offset flatbuffers.UOffsetT) (x ListView) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &ListView{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -52,12 +50,8 @@ func FinishSizePrefixedListViewBuffer(builder *flatbuffers.Builder, offset flatb
 }
 
 func (rcv *ListView) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *ListView) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func ListViewStart(builder *flatbuffers.Builder) {

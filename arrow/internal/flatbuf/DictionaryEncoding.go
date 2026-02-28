@@ -23,13 +23,12 @@ import (
 )
 
 type DictionaryEncoding struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsDictionaryEncoding(buf []byte, offset flatbuffers.UOffsetT) *DictionaryEncoding {
+func GetRootAsDictionaryEncoding(buf []byte, offset flatbuffers.UOffsetT) (x DictionaryEncoding) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &DictionaryEncoding{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -37,10 +36,9 @@ func FinishDictionaryEncodingBuffer(builder *flatbuffers.Builder, offset flatbuf
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsDictionaryEncoding(buf []byte, offset flatbuffers.UOffsetT) *DictionaryEncoding {
+func GetSizePrefixedRootAsDictionaryEncoding(buf []byte, offset flatbuffers.UOffsetT) (x DictionaryEncoding) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &DictionaryEncoding{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -49,21 +47,17 @@ func FinishSizePrefixedDictionaryEncodingBuffer(builder *flatbuffers.Builder, of
 }
 
 func (rcv *DictionaryEncoding) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *DictionaryEncoding) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 /// The known dictionary id in the application where this data is used. In
 /// the file or streaming formats, the dictionary ids are found in the
 /// DictionaryBatch messages
 func (rcv *DictionaryEncoding) Id() int64 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return rcv._tab.GetInt64(o + rcv._tab.Pos)
+		return rcv.GetInt64(o + rcv.Pos)
 	}
 	return 0
 }
@@ -72,7 +66,7 @@ func (rcv *DictionaryEncoding) Id() int64 {
 /// the file or streaming formats, the dictionary ids are found in the
 /// DictionaryBatch messages
 func (rcv *DictionaryEncoding) MutateId(n int64) bool {
-	return rcv._tab.MutateInt64Slot(4, n)
+	return rcv.MutateInt64Slot(4, n)
 }
 
 /// The dictionary indices are constrained to be non-negative integers. If
@@ -80,17 +74,14 @@ func (rcv *DictionaryEncoding) MutateId(n int64) bool {
 /// cross-language compatibility and performance, implementations are
 /// recommended to prefer signed integer types over unsigned integer types
 /// and to avoid uint64 indices unless they are required by an application.
-func (rcv *DictionaryEncoding) IndexType(obj *Int) *Int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+func (rcv *DictionaryEncoding) IndexType() (obj Int, ok bool) {
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		x := rcv._tab.Indirect(o + rcv._tab.Pos)
-		if obj == nil {
-			obj = new(Int)
-		}
-		obj.Init(rcv._tab.Bytes, x)
-		return obj
+		x := rcv.Indirect(o + rcv.Pos)
+		obj.Init(rcv.Bytes, x)
+		ok = true
 	}
-	return nil
+	return
 }
 
 /// The dictionary indices are constrained to be non-negative integers. If
@@ -103,9 +94,9 @@ func (rcv *DictionaryEncoding) IndexType(obj *Int) *Int {
 /// is used to represent ordered categorical data, and we provide a way to
 /// preserve that metadata here
 func (rcv *DictionaryEncoding) IsOrdered() bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
-		return rcv._tab.GetBool(o + rcv._tab.Pos)
+		return rcv.GetBool(o + rcv.Pos)
 	}
 	return false
 }
@@ -115,19 +106,19 @@ func (rcv *DictionaryEncoding) IsOrdered() bool {
 /// is used to represent ordered categorical data, and we provide a way to
 /// preserve that metadata here
 func (rcv *DictionaryEncoding) MutateIsOrdered(n bool) bool {
-	return rcv._tab.MutateBoolSlot(8, n)
+	return rcv.MutateBoolSlot(8, n)
 }
 
 func (rcv *DictionaryEncoding) DictionaryKind() DictionaryKind {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
+	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
-		return DictionaryKind(rcv._tab.GetInt16(o + rcv._tab.Pos))
+		return DictionaryKind(rcv.GetInt16(o + rcv.Pos))
 	}
 	return 0
 }
 
 func (rcv *DictionaryEncoding) MutateDictionaryKind(n DictionaryKind) bool {
-	return rcv._tab.MutateInt16Slot(10, int16(n))
+	return rcv.MutateInt16Slot(10, int16(n))
 }
 
 func DictionaryEncodingStart(builder *flatbuffers.Builder) {

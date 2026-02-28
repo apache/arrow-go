@@ -124,7 +124,11 @@ func TestRWFooter(t *testing.T) {
 				t.Errorf("invalid metadata version: got=%[1]d %#[1]x, want=%[2]d %#[2]x", int16(got), int16(want))
 			}
 
-			schema, err := schemaFromFB(footer.Schema(nil), nil)
+			fbschema, ok := footer.Schema()
+			if !ok {
+				t.Fatalf("footer schema missing")
+			}
+			schema, err := schemaFromFB(fbschema, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -138,14 +142,14 @@ func TestRWFooter(t *testing.T) {
 			}
 
 			for i, dict := range tc.dicts {
-				var blk flatbuf.Block
-				if !footer.Dictionaries(&blk, i) {
+				if blk, ok := footer.Dictionaries(i); !ok {
 					t.Fatalf("could not get dictionary %d", i)
-				}
-				got := fileBlock{offset: blk.Offset(), meta: blk.MetaDataLength(), body: blk.BodyLength()}
-				want := dict
-				if got != want {
-					t.Errorf("dict[%d] differ:\ngot= %v\nwant=%v", i, got, want)
+				} else {
+					got := fileBlock{offset: blk.Offset(), meta: blk.MetaDataLength(), body: blk.BodyLength()}
+					want := dict
+					if got != want {
+						t.Errorf("dict[%d] differ:\ngot= %v\nwant=%v", i, got, want)
+					}
 				}
 			}
 
@@ -154,14 +158,14 @@ func TestRWFooter(t *testing.T) {
 			}
 
 			for i, rec := range tc.recs {
-				var blk flatbuf.Block
-				if !footer.RecordBatches(&blk, i) {
+				if blk, ok := footer.RecordBatches(i); !ok {
 					t.Fatalf("could not get record %d", i)
-				}
-				got := fileBlock{offset: blk.Offset(), meta: blk.MetaDataLength(), body: blk.BodyLength()}
-				want := rec
-				if got != want {
-					t.Errorf("record[%d] differ:\ngot= %v\nwant=%v", i, got, want)
+				} else {
+					got := fileBlock{offset: blk.Offset(), meta: blk.MetaDataLength(), body: blk.BodyLength()}
+					want := rec
+					if got != want {
+						t.Errorf("record[%d] differ:\ngot= %v\nwant=%v", i, got, want)
+					}
 				}
 			}
 		})

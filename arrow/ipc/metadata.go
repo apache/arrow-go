@@ -165,19 +165,7 @@ func unitToFB(unit arrow.TimeUnit) flatbuf.TimeUnit {
 	}
 }
 
-// initFB is a helper function to handle flatbuffers' polymorphism.
-func initFB(t interface {
-	Table() flatbuffers.Table
-	Init([]byte, flatbuffers.UOffsetT)
-}, f func(tbl *flatbuffers.Table) bool) {
-	tbl := t.Table()
-	if !f(&tbl) {
-		panic(fmt.Errorf("arrow/ipc: could not initialize %T from flatbuffer", t))
-	}
-	t.Init(tbl.Bytes, tbl.Pos)
-}
-
-func fieldFromFB(field *flatbuf.Field, pos dictutils.FieldPos, memo *dictutils.Memo) (arrow.Field, error) {
+func fieldFromFB(field flatbuf.Field, pos dictutils.FieldPos, memo *dictutils.Memo) (arrow.Field, error) {
 	var (
 		err error
 		o   arrow.Field
@@ -185,7 +173,7 @@ func fieldFromFB(field *flatbuf.Field, pos dictutils.FieldPos, memo *dictutils.M
 
 	o.Name = string(field.Name())
 	o.Nullable = field.Nullable()
-	o.Metadata, err = metadataFromFB(field)
+	o.Metadata, err = metadataFromFB(field.CustomMetadataLength(), field.CustomMetadata)
 	if err != nil {
 		return o, err
 	}
@@ -193,16 +181,14 @@ func fieldFromFB(field *flatbuf.Field, pos dictutils.FieldPos, memo *dictutils.M
 	n := field.ChildrenLength()
 	children := make([]arrow.Field, n)
 	for i := range children {
-		var childFB flatbuf.Field
-		if !field.Children(&childFB, i) {
+		if childFB, ok := field.Children(i); !ok {
 			return o, fmt.Errorf("arrow/ipc: could not load field child %d", i)
-
+		} else {
+			children[i], err = fieldFromFB(childFB, pos.Child(int32(i)), memo)
+			if err != nil {
+				return o, fmt.Errorf("arrow/ipc: could not convert field child %d: %w", i, err)
+			}
 		}
-		child, err := fieldFromFB(&childFB, pos.Child(int32(i)), memo)
-		if err != nil {
-			return o, fmt.Errorf("arrow/ipc: could not convert field child %d: %w", i, err)
-		}
-		children[i] = child
 	}
 
 	o.Type, err = typeFromFB(field, pos, children, &o.Metadata, memo)
@@ -589,7 +575,7 @@ func (fv *fieldVisitor) result(field arrow.Field) flatbuffers.UOffsetT {
 	return offset
 }
 
-func typeFromFB(field *flatbuf.Field, pos dictutils.FieldPos, children []arrow.Field, md *arrow.Metadata, memo *dictutils.Memo) (arrow.DataType, error) {
+func typeFromFB(field flatbuf.Field, pos dictutils.FieldPos, children []arrow.Field, md *arrow.Metadata, memo *dictutils.Memo) (arrow.DataType, error) {
 	var data flatbuffers.Table
 	if !field.Type(&data) {
 		return nil, fmt.Errorf("arrow/ipc: could not load field type data")
@@ -603,11 +589,13 @@ func typeFromFB(field *flatbuf.Field, pos dictutils.FieldPos, children []arrow.F
 	var (
 		dictID        = int64(-1)
 		dictValueType arrow.DataType
-		encoding      = field.Dictionary(nil)
+		encoding, ok  = field.Dictionary()
 	)
-	if encoding != nil {
-		var idt flatbuf.Int
-		encoding.IndexType(&idt)
+	if ok {
+		idt, ok := encoding.IndexType()
+		if !ok {
+			return nil, fmt.Errorf("arrow/ipc: could not load encoding type")
+		}
 		idxType, err := intFromFB(idt)
 		if err != nil {
 			return nil, err
@@ -1026,24 +1014,19 @@ func durationFromFB(data flatbuf.Duration) (arrow.DataType, error) {
 	return nil, fmt.Errorf("arrow/ipc: Duration type with %d unit not implemented", data.Unit())
 }
 
-type customMetadataer interface {
-	CustomMetadataLength() int
-	CustomMetadata(*flatbuf.KeyValue, int) bool
-}
-
-func metadataFromFB(md customMetadataer) (arrow.Metadata, error) {
+func metadataFromFB(len int, f func(int) (flatbuf.KeyValue, bool)) (arrow.Metadata, error) {
 	var (
-		keys = make([]string, md.CustomMetadataLength())
-		vals = make([]string, md.CustomMetadataLength())
+		keys = make([]string, len)
+		vals = make([]string, len)
 	)
 
 	for i := range keys {
-		var kv flatbuf.KeyValue
-		if !md.CustomMetadata(&kv, i) {
+		if kv, ok := f(i); !ok {
 			return arrow.Metadata{}, fmt.Errorf("arrow/ipc: could not read key-value %d from flatbuffer", i)
+		} else {
+			keys[i] = string(kv.Key())
+			vals[i] = string(kv.Value())
 		}
-		keys[i] = string(kv.Key())
-		vals[i] = string(kv.Value())
 	}
 
 	return arrow.NewMetadata(keys, vals), nil
@@ -1072,7 +1055,7 @@ func metadataToFB(b *flatbuffers.Builder, meta arrow.Metadata, start startVecFun
 	return b.EndVector(n)
 }
 
-func schemaFromFB(schema *flatbuf.Schema, memo *dictutils.Memo) (*arrow.Schema, error) {
+func schemaFromFB(schema flatbuf.Schema, memo *dictutils.Memo) (*arrow.Schema, error) {
 	var (
 		err    error
 		fields = make([]arrow.Field, schema.FieldsLength())
@@ -1080,18 +1063,17 @@ func schemaFromFB(schema *flatbuf.Schema, memo *dictutils.Memo) (*arrow.Schema, 
 	)
 
 	for i := range fields {
-		var field flatbuf.Field
-		if !schema.Fields(&field, i) {
+		if field, ok := schema.Fields(i); !ok {
 			return nil, fmt.Errorf("arrow/ipc: could not read field %d from schema", i)
+		} else {
+			fields[i], err = fieldFromFB(field, pos.Child(int32(i)), memo)
 		}
-
-		fields[i], err = fieldFromFB(&field, pos.Child(int32(i)), memo)
 		if err != nil {
 			return nil, fmt.Errorf("arrow/ipc: could not convert field %d from flatbuf: %w", i, err)
 		}
 	}
 
-	md, err := metadataFromFB(schema)
+	md, err := metadataFromFB(schema.CustomMetadataLength(), schema.CustomMetadata)
 	if err != nil {
 		return nil, fmt.Errorf("arrow/ipc: could not convert schema metadata from flatbuf: %w", err)
 	}

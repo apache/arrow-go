@@ -23,13 +23,12 @@ import (
 )
 
 type Duration struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsDuration(buf []byte, offset flatbuffers.UOffsetT) *Duration {
+func GetRootAsDuration(buf []byte, offset flatbuffers.UOffsetT) (x Duration) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Duration{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -37,10 +36,9 @@ func FinishDurationBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffs
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsDuration(buf []byte, offset flatbuffers.UOffsetT) *Duration {
+func GetSizePrefixedRootAsDuration(buf []byte, offset flatbuffers.UOffsetT) (x Duration) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &Duration{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -49,24 +47,20 @@ func FinishSizePrefixedDurationBuffer(builder *flatbuffers.Builder, offset flatb
 }
 
 func (rcv *Duration) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Duration) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func (rcv *Duration) Unit() TimeUnit {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return TimeUnit(rcv._tab.GetInt16(o + rcv._tab.Pos))
+		return TimeUnit(rcv.GetInt16(o + rcv.Pos))
 	}
 	return 1
 }
 
 func (rcv *Duration) MutateUnit(n TimeUnit) bool {
-	return rcv._tab.MutateInt16Slot(4, int16(n))
+	return rcv.MutateInt16Slot(4, int16(n))
 }
 
 func DurationStart(builder *flatbuffers.Builder) {
