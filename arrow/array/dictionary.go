@@ -623,6 +623,12 @@ func (b *dictionaryBuilder) Release() {
 	}
 }
 
+func (b *dictionaryBuilder) UnsafeAppendBoolToBitmap(v bool) {
+	b.length += 1
+	b.nulls += 1
+	b.idxBuilder.UnsafeAppendBoolToBitmap(v)
+}
+
 func (b *dictionaryBuilder) AppendNull() {
 	b.length += 1
 	b.nulls += 1
