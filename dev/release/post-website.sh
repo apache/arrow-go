@@ -77,7 +77,7 @@ contributors=$(${contributors_command_line} | grep -v dependabot)
 n_commits=$(git log --pretty=oneline "${git_range}" | grep -c -i -v "chore: Bump")
 n_contributors=$(${contributors_command_line} | grep -c -v dependabot)
 
-git_changelog="$(gh release view --json body --jq .body | grep -v '@dependabot' | sed -e 's/^#/##/g')"
+git_changelog="$(gh release view --json body --jq .body | grep -v '@dependabot' | sed -e 's/^#/##/g')" | sed -e 's|\(https://github.com/apache/arrow-go/pull/\([[:digit:]]\+\)\)|[#\2](\1)|g'
 popd
 
 pushd "${ARROW_SITE_DIR}"
