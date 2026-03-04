@@ -34,7 +34,7 @@ set -x
 VERSION="$1"
 RC="$2"
 
-ARROW_DIST_BASE_URL="https://dist.apache.org/repos/dist/dev/arrow"
+ARROW_KEYS_URL="https://www.apache.org/dyn/closer.lua?action=download&filename=arrow/KEYS"
 DOWNLOAD_RC_BASE_URL="https://github.com/apache/arrow-go/releases/download/v${VERSION}-rc${RC}"
 ARCHIVE_BASE_NAME="apache-arrow-go-${VERSION}"
 
@@ -83,7 +83,7 @@ download_rc_file() {
 
 import_gpg_keys() {
   if [ "${VERIFY_SIGN}" -gt 0 ]; then
-    download "${ARROW_DIST_BASE_URL}/KEYS"
+    download "${ARROW_KEYS_URL}"
     gpg --import KEYS
   fi
 }
