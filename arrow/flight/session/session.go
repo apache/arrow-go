@@ -141,12 +141,16 @@ func (session *serverSession) EraseSessionOption(name string) {
 }
 
 func (session *serverSession) Close() error {
+	session.mu.Lock()
+	defer session.mu.Unlock()
 	session.options = nil
 	session.closed = true
 	return nil
 }
 
 func (session *serverSession) Closed() bool {
+	session.mu.RLock()
+	defer session.mu.RUnlock()
 	return session.closed
 }
 
