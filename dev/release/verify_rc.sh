@@ -83,7 +83,7 @@ download_rc_file() {
 
 import_gpg_keys() {
   if [ "${VERIFY_SIGN}" -gt 0 ]; then
-    download "${ARROW_DIST_URL}"
+    download "${ARROW_KEYS_URL}"
     gpg --import KEYS
   fi
 }
