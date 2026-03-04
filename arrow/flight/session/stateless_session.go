@@ -51,6 +51,12 @@ func (manager *statelessServerSessionManager) GetSession(ctx context.Context) (S
 
 	session, err = getSessionFromIncomingCookie(ctx)
 	if err == nil {
+		// Check if the session has been marked as closed.
+		// This handles the race between CallCompleted marking the session closed
+		// and StartCall looking it up from the cookie.
+		if session.Closed() {
+			return nil, ErrNoSession
+		}
 		return session, err
 	}
 	if err == http.ErrNoCookie {

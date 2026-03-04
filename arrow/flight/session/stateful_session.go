@@ -178,6 +178,12 @@ func (manager *statefulServerSessionManager) GetSession(ctx context.Context) (Se
 			// cookie before processing the session deletion trailer.
 			return nil, ErrNoSession
 		}
+		// Also check if the session has been marked as closed but not yet removed.
+		// This handles the race between CallCompleted removing the session and
+		// StartCall looking it up from the cookie.
+		if session.Closed() {
+			return nil, ErrNoSession
+		}
 		return session, nil
 	}
 	if err == http.ErrNoCookie {
