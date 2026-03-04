@@ -225,7 +225,11 @@ func (middleware *serverSessionMiddleware) CallCompleted(ctx context.Context, _ 
 	}
 
 	if session.Closed() {
-		// Invalidate the client's cookie
+		// Invalidate the client's cookie by sending back the incoming cookie
+		// with MaxAge=-1. This follows the HTTP cookie protocol for deletion.
+		// Note: For stateless sessions, there's an inherent race condition where
+		// the client might send the old cookie again before processing this trailer.
+		// This is acceptable as the session data is client-controlled anyway.
 		clientCookie.MaxAge = -1
 		grpc.SetTrailer(ctx, metadata.Pairs("Set-Cookie", clientCookie.String()))
 

@@ -51,14 +51,6 @@ func (manager *statelessServerSessionManager) GetSession(ctx context.Context) (S
 
 	session, err = getSessionFromIncomingCookie(ctx)
 	if err == nil {
-		// Check if the session has been marked as closed.
-		// While freshly decoded sessions always have closed=false, this check
-		// provides defense against edge cases where a session might be cached
-		// or reused. It also handles the race condition where a client sends
-		// a request with a stale cookie before processing the deletion trailer.
-		if session.Closed() {
-			return nil, ErrNoSession
-		}
 		return session, err
 	}
 	if err == http.ErrNoCookie {
