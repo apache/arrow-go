@@ -34,7 +34,7 @@ set -x
 VERSION="$1"
 RC="$2"
 
-ARROW_DIST_URL="https://www.apache.org/dyn/closer.lua?action=download&filename=arrow/KEYS"
+ARROW_KEYS_URL="https://www.apache.org/dyn/closer.lua?action=download&filename=arrow/KEYS"
 DOWNLOAD_RC_BASE_URL="https://github.com/apache/arrow-go/releases/download/v${VERSION}-rc${RC}"
 ARCHIVE_BASE_NAME="apache-arrow-go-${VERSION}"
 
