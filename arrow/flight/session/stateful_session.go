@@ -170,7 +170,21 @@ func (manager *statefulServerSessionManager) GetSession(ctx context.Context) (Se
 
 	sessionID, err := getSessionIDFromIncomingCookie(ctx)
 	if err == nil {
-		return manager.store.Get(sessionID)
+		session, err := manager.store.Get(sessionID)
+		if err != nil {
+			// If the session isn't in the store (e.g., it was closed/removed),
+			// treat it as if no session exists so a new one can be created.
+			// This handles the race condition where a client sends a stale
+			// cookie before processing the session deletion trailer.
+			return nil, ErrNoSession
+		}
+		// Also check if the session has been marked as closed but not yet removed.
+		// This handles the race between CallCompleted removing the session and
+		// StartCall looking it up from the cookie.
+		if session.Closed() {
+			return nil, ErrNoSession
+		}
+		return session, nil
 	}
 	if err == http.ErrNoCookie {
 		return nil, ErrNoSession
