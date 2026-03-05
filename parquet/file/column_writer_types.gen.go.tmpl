@@ -17,8 +17,6 @@
 package file
 
 import (
-    "fmt"
-
     "github.com/apache/arrow-go/v18/internal/utils"
     "github.com/apache/arrow-go/v18/parquet"
     "github.com/apache/arrow-go/v18/parquet/metadata"
@@ -85,6 +83,71 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBatch(values []{{.name}}, defLevels, r
   case values != nil:
     n = int64(len(values))
   }
+{{- if .isByteArray}}
+  // For variable-length types, we use adaptive batch sizing to ensure
+  // each batch's encoded data stays well within int32 range. This prevents
+  // overflow in FlushCurrentPage when computing uncompressed page size.
+  const maxSafeBatchDataSize int64 = 1 << 30 // 1GB
+
+  batchSize := w.props.WriteBatchSize()
+  maxDefLevel := w.descr.MaxDefinitionLevel()
+  isV2WithRep := w.props.DataPageVersion() != parquet.DataPageV1 &&
+    repLevels != nil && w.descr.MaxRepetitionLevel() > 0
+  levelOffset := int64(0)
+
+  for levelOffset < n {
+    remaining := n - levelOffset
+    batch := min(remaining, batchSize)
+
+    // Scan values to find safe batch boundary
+    if values != nil {
+      valScan := valueOffset
+      var cumDataSize int64
+      for li := int64(0); li < batch; li++ {
+        isValue := defLevels == nil || maxDefLevel == 0 ||
+          defLevels[levelOffset+li] == maxDefLevel
+        if isValue && valScan < int64(len(values)) {
+{{- if eq .Name "ByteArray"}}
+          valSize := int64(len(values[valScan])) + 4
+{{- else}}
+          valSize := int64(w.descr.TypeLength()) + 4
+{{- end}}
+          if cumDataSize+valSize > maxSafeBatchDataSize && li > 0 {
+            batch = li
+            break
+          }
+          cumDataSize += valSize
+          valScan++
+        }
+      }
+    }
+
+    // V2 row-boundary alignment
+    if isV2WithRep && levelOffset+batch < n {
+      for batch > 1 && repLevels[levelOffset+batch] != 0 {
+        batch--
+      }
+    }
+    if batch < 1 {
+      batch = 1
+    }
+
+    // Process batch
+    toWrite := w.writeLevels(batch, levelSliceOrNil(defLevels, levelOffset, batch),
+      levelSliceOrNil(repLevels, levelOffset, batch))
+    var vals []{{.name}}
+    if values != nil {
+      vals = values[valueOffset : valueOffset+toWrite]
+    }
+    w.writeValues(vals, batch-toWrite)
+    if err := w.commitWriteAndCheckPageLimit(batch, toWrite); err != nil {
+      panic(err)
+    }
+    valueOffset += toWrite
+    w.checkDictionarySizeLimit()
+    levelOffset += batch
+  }
+{{- else}}
   w.doBatches(n, repLevels, func(offset, batch int64) {
     var vals []{{.name}}
 
@@ -101,6 +164,7 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBatch(values []{{.name}}, defLevels, r
     valueOffset += toWrite
     w.checkDictionarySizeLimit()
   })
+{{- end}}
   return
 }
 
@@ -125,6 +189,61 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBatchSpaced(values []{{.name}}, defLev
   if defLevels == nil {
     length = len(values)
   }
+{{- if .isByteArray}}
+  // For variable-length types, use adaptive batch sizing to keep encoded
+  // data within int32 range per page.
+  const maxSafeBatchDataSize int64 = 1 << 30 // 1GB
+
+  batchSize := w.props.WriteBatchSize()
+  levelOffset := int64(0)
+  n := int64(length)
+
+  for levelOffset < n {
+    remaining := n - levelOffset
+    batch := min(remaining, batchSize)
+
+    // Conservative scan: estimate data size from values starting at valueOffset
+    if values != nil {
+      var cumDataSize int64
+      for vi := int64(0); vi < batch && valueOffset+vi < int64(len(values)); vi++ {
+{{- if eq .Name "ByteArray"}}
+        valSize := int64(len(values[valueOffset+vi])) + 4
+{{- else}}
+        valSize := int64(w.descr.TypeLength()) + 4
+{{- end}}
+        if cumDataSize+valSize > maxSafeBatchDataSize && vi > 0 {
+          batch = vi
+          break
+        }
+        cumDataSize += valSize
+      }
+    }
+    if batch < 1 {
+      batch = 1
+    }
+
+    info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, levelOffset, batch), batch)
+
+    w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, levelOffset, batch), levelSliceOrNil(repLevels, levelOffset, batch))
+    var vals []{{.name}}
+    if values != nil {
+      vals = values[valueOffset : valueOffset+info.numSpaced()]
+    }
+
+    if w.bitsBuffer != nil {
+      w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
+    } else {
+      w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
+    }
+    if err := w.commitWriteAndCheckPageLimit(batch, info.numSpaced()); err != nil {
+      panic(err)
+    }
+    valueOffset += info.numSpaced()
+
+    w.checkDictionarySizeLimit()
+    levelOffset += batch
+  }
+{{- else}}
   doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
     var vals []{{.name}}
     info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
@@ -144,6 +263,7 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBatchSpaced(values []{{.name}}, defLev
 
     w.checkDictionarySizeLimit()
   })
+{{- end}}
 }
 
 func (w *{{.Name}}ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels, repLevels []int16) (err error) {
@@ -185,58 +305,7 @@ func (w *{{.Name}}ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLe
 }
 
 func (w *{{.Name}}ColumnChunkWriter) writeValues(values []{{.name}}, numNulls int64) {
-{{- if or (eq .Name "ByteArray") (eq .Name "FixedLenByteArray")}}
-  // For variable-length types, we need to check buffer size to prevent int32 overflow
-  // For small values (<1MB), checking frequently adds negligible overhead
-  // For large values (>1MB), we MUST check before each value
-  const maxSafeBufferSize = 1.0 * 1024 * 1024 * 1024 // 1GB threshold
-  const largeValueThreshold = 1.0 * 1024 * 1024      // 1MB
-
-  encoder := w.currentEncoder.(encoding.{{.Name}}Encoder)
-  currentSize := w.currentEncoder.EstimatedDataEncodedSize()
-
-  // Batch process small values, check individually for large values
-  batchStart := 0
-  for i := 0; i < len(values); i++ {
-{{- if eq .Name "ByteArray"}}
-    valueSize := int64(len(values[i]))
-{{- else}}
-    valueSize := int64(w.descr.TypeLength())
-{{- end}}
-
-    // If this value might cause overflow, flush first
-    if currentSize + valueSize >= maxSafeBufferSize {
-      // Add accumulated batch before flushing
-      if i > batchStart {
-        encoder.Put(values[batchStart:i])
-        currentSize = w.currentEncoder.EstimatedDataEncodedSize()
-      }
-      // Flush the page
-      if err := w.FlushCurrentPage(); err != nil {
-        panic(err)
-      }
-      batchStart = i
-      currentSize = 0
-    }
-
-    // Track size estimate
-    currentSize += valueSize + 4 // +4 for length prefix
-
-    // For large values, add and flush immediately if needed
-    if valueSize >= largeValueThreshold {
-      encoder.Put(values[i:i+1])
-      batchStart = i + 1
-      currentSize = w.currentEncoder.EstimatedDataEncodedSize()
-    }
-  }
-
-  // Add remaining batch
-  if batchStart < len(values) {
-    encoder.Put(values[batchStart:])
-  }
-{{- else}}
   w.currentEncoder.(encoding.{{.Name}}Encoder).Put(values)
-{{- end}}
   if w.pageStatistics != nil {
 {{- if ne .Name "FixedLenByteArray"}}
     w.pageStatistics.(*metadata.{{.Name}}Statistics).Update(values, numNulls)
@@ -255,54 +324,11 @@ func (w *{{.Name}}ColumnChunkWriter) writeValues(values []{{.name}}, numNulls in
 }
 
 func (w *{{.Name}}ColumnChunkWriter) writeValuesSpaced(spacedValues []{{.name}}, numRead, numValues int64, validBits []byte, validBitsOffset int64) {
-{{- if or (eq .Name "ByteArray") (eq .Name "FixedLenByteArray")}}
-  // For variable-length types, we need to check buffer size to prevent int32 overflow
-  // For small values (<1MB), checking frequently adds negligible overhead
-  // For large values (>1MB), we MUST check before each value
-  const maxSafeBufferSize = 1.0 * 1024 * 1024 * 1024 // 1GB threshold
-  const largeValueThreshold = 1.0 * 1024 * 1024      // 1MB
-
-  encoder := w.currentEncoder.(encoding.{{.Name}}Encoder)
-  currentSize := w.currentEncoder.EstimatedDataEncodedSize()
-
-  for i := 0; i < len(spacedValues); i++ {
-{{- if eq .Name "ByteArray"}}
-    valueSize := int64(len(spacedValues[i]))
-{{- else}}
-    valueSize := int64(w.descr.TypeLength())
-{{- end}}
-
-    // If this value might cause overflow, flush first
-    if currentSize + valueSize >= maxSafeBufferSize {
-      if err := w.FlushCurrentPage(); err != nil {
-        // If flush fails, panic will be caught by WriteBatch's defer recover
-        panic(err)
-      }
-      currentSize = 0
-    }
-
-    // Add the value
-    chunk := spacedValues[i:i+1]
-    if len(spacedValues) != int(numRead) && validBits != nil {
-      encoder.PutSpaced(chunk, validBits, validBitsOffset+int64(i))
-    } else {
-      encoder.Put(chunk)
-    }
-
-    // Track size estimate (only update for large values or every 100 values)
-    if valueSize >= largeValueThreshold || i % 100 == 0 {
-      currentSize = w.currentEncoder.EstimatedDataEncodedSize()
-    } else {
-      currentSize += valueSize + 4 // +4 for length prefix
-    }
-  }
-{{- else}}
   if len(spacedValues) != int(numRead) {
     w.currentEncoder.(encoding.{{.Name}}Encoder).PutSpaced(spacedValues, validBits, validBitsOffset)
   } else {
     w.currentEncoder.(encoding.{{.Name}}Encoder).Put(spacedValues)
   }
-{{- end}}
   if w.pageStatistics != nil {
     nulls := numValues - numRead
 {{- if ne .Name "FixedLenByteArray"}}
