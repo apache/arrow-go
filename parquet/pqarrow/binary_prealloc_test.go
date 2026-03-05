@@ -128,7 +128,7 @@ func buildBinaryTable(t *testing.T, totalRows, minLen, maxLen int, nullFrac floa
 	sc := arrow.NewSchema([]arrow.Field{{Name: "payload", Type: arrow.BinaryTypes.Binary, Nullable: true}}, nil)
 	col := arrow.NewColumnFromArr(sc.Field(0), arr)
 	defer col.Release()
-	return array.NewTable(sc, []arrow.Column{*col}, int64(totalRows))
+	return array.NewTable(sc, []arrow.Column{col}, int64(totalRows))
 }
 
 // TestPreAllocBinaryData_DefaultIsDisabled verifies that the zero value of
@@ -185,7 +185,7 @@ func TestPreAllocBinaryData_CorrectOutput(t *testing.T) {
 		sc := arrow.NewSchema([]arrow.Field{{Name: "s", Type: arrow.BinaryTypes.String, Nullable: false}}, nil)
 		col := arrow.NewColumnFromArr(sc.Field(0), arr)
 		defer col.Release()
-		tbl := array.NewTable(sc, []arrow.Column{*col}, int64(totalRows))
+		tbl := array.NewTable(sc, []arrow.Column{col}, int64(totalRows))
 		defer tbl.Release()
 
 		data := writeParquetTable(t, tbl, rowsPerRG, writerProps)
@@ -225,7 +225,7 @@ func TestPreAllocBinaryData_CorrectOutput(t *testing.T) {
 		sc := arrow.NewSchema([]arrow.Field{{Name: "n", Type: arrow.PrimitiveTypes.Int32, Nullable: false}}, nil)
 		col := arrow.NewColumnFromArr(sc.Field(0), arr)
 		defer col.Release()
-		tbl := array.NewTable(sc, []arrow.Column{*col}, int64(totalRows))
+		tbl := array.NewTable(sc, []arrow.Column{col}, int64(totalRows))
 		defer tbl.Release()
 
 		data := writeParquetTable(t, tbl, rowsPerRG, writerProps)
@@ -257,7 +257,7 @@ func TestPreAllocBinaryData_CorrectOutput(t *testing.T) {
 		sc := arrow.NewSchema([]arrow.Field{{Name: "fixed", Type: &arrow.FixedSizeBinaryType{ByteWidth: byteWidth}, Nullable: false}}, nil)
 		col := arrow.NewColumnFromArr(sc.Field(0), arr)
 		defer col.Release()
-		tbl := array.NewTable(sc, []arrow.Column{*col}, int64(totalRows))
+		tbl := array.NewTable(sc, []arrow.Column{col}, int64(totalRows))
 		defer tbl.Release()
 
 		data := writeParquetTable(t, tbl, rowsPerRG, writerProps)
@@ -286,7 +286,7 @@ func TestPreAllocBinaryData_CorrectOutput(t *testing.T) {
 		sc := arrow.NewSchema([]arrow.Field{{Name: "d", Type: arrow.BinaryTypes.Binary, Nullable: false}}, nil)
 		col := arrow.NewColumnFromArr(sc.Field(0), arr)
 		defer col.Release()
-		tbl := array.NewTable(sc, []arrow.Column{*col}, int64(totalRows))
+		tbl := array.NewTable(sc, []arrow.Column{col}, int64(totalRows))
 		defer tbl.Release()
 
 		data := writeParquetTable(t, tbl, rowsPerRG, dictWriterProps)
@@ -378,7 +378,7 @@ func TestPreAllocBinaryData_SingleRow(t *testing.T) {
 	sc := arrow.NewSchema([]arrow.Field{{Name: "x", Type: arrow.BinaryTypes.Binary, Nullable: false}}, nil)
 	col := arrow.NewColumnFromArr(sc.Field(0), arr)
 	defer col.Release()
-	tbl := array.NewTable(sc, []arrow.Column{*col}, 1)
+	tbl := array.NewTable(sc, []arrow.Column{col}, 1)
 	defer tbl.Release()
 
 	writerProps := parquet.NewWriterProperties(parquet.WithDictionaryDefault(false))
