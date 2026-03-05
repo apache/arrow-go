@@ -130,8 +130,12 @@ func (lr *leafReader) BuildArray(int64) (*arrow.Chunked, error) {
 
 // reserveBinaryData pre-allocates the underlying BinaryBuilder's data buffer
 // proportionally: (rowsToRead / curRGNumRows) * curRGUncompressedBytes.
-// It is a no-op for non-binary columns or when size metadata is unavailable.
+// It is a no-op for non-binary columns, when size metadata is unavailable,
+// or when PreAllocBinaryData is not enabled in the read properties.
 func (lr *leafReader) reserveBinaryData(rowsToRead int64) {
+	if !lr.props.PreAllocBinaryData {
+		return
+	}
 	brdr, ok := lr.recordRdr.(file.BinaryRecordReader)
 	if !ok || lr.curRGNumRows <= 0 || lr.curRGUncompressedBytes <= 0 {
 		return

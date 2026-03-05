@@ -165,6 +165,11 @@ type ArrowReadProperties struct {
 	Parallel bool
 	// BatchSize is the size used for calls to NextBatch when reading whole columns
 	BatchSize int64
+	// PreAllocBinaryData, if true, pre-allocates the BinaryBuilder data buffer at
+	// the start of each batch using TotalUncompressedSize and NumRows from the
+	// column chunk metadata. This reduces O(log n) realloc cycles per row group
+	// for large binary/string columns. Disabled by default.
+	PreAllocBinaryData bool
 
 	readDictIndices   map[int]struct{}
 	forceLargeIndices map[int]struct{}
