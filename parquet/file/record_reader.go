@@ -91,6 +91,9 @@ type BinaryRecordReader interface {
 	RecordReader
 	GetBuilderChunks() []arrow.Array
 	ReadDictionary() bool
+	// ReserveData pre-allocates nbytes in the underlying data buffer to reduce
+	// reallocations when the total data size is known in advance.
+	ReserveData(int64)
 }
 
 // recordReaderImpl is the internal interface implemented for different types
@@ -117,6 +120,7 @@ type binaryRecordReaderImpl interface {
 	recordReaderImpl
 	GetBuilderChunks() []arrow.Array
 	ReadDictionary() bool
+	ReserveData(int64)
 }
 
 // primitiveRecordReader is a record reader for primitive types, ie: not byte array or fixed len byte array
@@ -341,6 +345,10 @@ func (b *binaryRecordReader) ReadDictionary() bool {
 
 func (b *binaryRecordReader) GetBuilderChunks() []arrow.Array {
 	return b.recordReaderImpl.(binaryRecordReaderImpl).GetBuilderChunks()
+}
+
+func (b *binaryRecordReader) ReserveData(nbytes int64) {
+	b.recordReaderImpl.(binaryRecordReaderImpl).ReserveData(nbytes)
 }
 
 func newRecordReader(descr *schema.Column, info LevelInfo, mem memory.Allocator, bufferPool *sync.Pool) RecordReader {
@@ -758,6 +766,8 @@ func (fr *flbaRecordReader) GetBuilderChunks() []arrow.Array {
 
 func (fr *flbaRecordReader) ReadDictionary() bool { return false }
 
+func (fr *flbaRecordReader) ReserveData(int64) {}
+
 func newFLBARecordReader(descr *schema.Column, info LevelInfo, mem memory.Allocator, bufferPool *sync.Pool) RecordReader {
 	if mem == nil {
 		mem = memory.DefaultAllocator
@@ -815,6 +825,18 @@ func newByteArrayRecordReader(descr *schema.Column, info LevelInfo, dtype arrow.
 func (br *byteArrayRecordReader) ReserveValues(extra int64, hasNullable bool) error {
 	br.bldr.Reserve(int(extra))
 	return br.primitiveRecordReader.ReserveValues(extra, hasNullable)
+}
+
+// ReserveData pre-allocates nbytes in the builder's data buffer.
+// This reduces reallocations when the total binary payload size is known in advance,
+// e.g. from TotalUncompressedSize in the column chunk metadata.
+func (br *byteArrayRecordReader) ReserveData(nbytes int64) {
+	if nbytes <= 0 {
+		return
+	}
+	if binaryBldr, ok := br.bldr.(*array.BinaryBuilder); ok {
+		binaryBldr.ReserveData(int(nbytes))
+	}
 }
 
 func (br *byteArrayRecordReader) Retain() {
