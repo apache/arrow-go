@@ -19,7 +19,9 @@ package file
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
+	"math"
 	"strconv"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -303,7 +305,12 @@ func (w *columnWriter) FlushCurrentPage() error {
 		repLevelsRLESize = int32(w.repLevelSink.Len())
 	}
 
-	uncompressed := defLevelsRLESize + repLevelsRLESize + int32(values.Len())
+	uncompressed64 := int64(defLevelsRLESize) + int64(repLevelsRLESize) + int64(values.Len())
+	if uncompressed64 > math.MaxInt32 {
+		return fmt.Errorf("parquet: uncompressed page size %d exceeds INT32_MAX (%d)",
+			uncompressed64, int64(math.MaxInt32))
+	}
+	uncompressed := int32(uncompressed64)
 	if isV1DataPage {
 		err = w.buildDataPageV1(defLevelsRLESize, repLevelsRLESize, uncompressed, values.Bytes())
 	} else {
@@ -378,7 +385,7 @@ func (w *columnWriter) buildDataPageV2(defLevelsRLESize, repLevelsRLESize, uncom
 
 	// concatenate uncompressed levels and the possibly compressed values
 	var combined bytes.Buffer
-	combined.Grow(int(defLevelsRLESize + repLevelsRLESize + int32(len(data))))
+	combined.Grow(int(int64(defLevelsRLESize) + int64(repLevelsRLESize) + int64(len(data))))
 	w.concatBuffers(defLevelsRLESize, repLevelsRLESize, data, &combined)
 
 	pageStats, err := w.getPageStatistics()
