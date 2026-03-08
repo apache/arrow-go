@@ -505,7 +505,15 @@ func (c *Connection) QueryContext(ctx context.Context, query string, args []driv
 		defer cancel()
 	}
 
-	info, err := c.client.Execute(execCtx, query)
+	var (
+		info *flight.FlightInfo
+		err  error
+	)
+	if c.txn != nil && c.txn.ID().IsValid() {
+		info, err = c.txn.Execute(execCtx, query)
+	} else {
+		info, err = c.client.Execute(execCtx, query)
+	}
 	if err != nil {
 		return nil, err
 	}
