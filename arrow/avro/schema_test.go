@@ -83,9 +83,8 @@ func TestSchemaStringEqual(t *testing.T) {
 					Name: "person",
 					Type: arrow.StructOf(
 						arrow.Field{
-							Name:     "lastname",
-							Type:     arrow.BinaryTypes.String,
-							Nullable: true,
+							Name: "lastname",
+							Type: arrow.BinaryTypes.String,
 						},
 						arrow.Field{
 							Name: "address",
@@ -101,9 +100,8 @@ func TestSchemaStringEqual(t *testing.T) {
 							),
 						},
 						arrow.Field{
-							Name:     "mapfield",
-							Type:     arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int64),
-							Nullable: true,
+							Name: "mapfield",
+							Type: arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int64),
 						},
 						arrow.Field{
 							Name: "arrayField",

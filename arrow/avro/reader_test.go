@@ -101,9 +101,8 @@ func TestReader(t *testing.T) {
 							),
 						},
 						arrow.Field{
-							Name:     "mapfield",
-							Type:     arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int64),
-							Nullable: true,
+							Name: "mapfield",
+							Type: arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int64),
 						},
 						arrow.Field{
 							Name: "arrayField",
