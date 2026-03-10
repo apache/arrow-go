@@ -1815,9 +1815,9 @@ func TestFilterKernels(t *testing.T) {
 // BenchmarkTakePrimitive benchmarks Take on primitive types (int64)
 func BenchmarkTakePrimitive(b *testing.B) {
 	benchmarks := []struct {
-		name       string
-		numRows    int64
-		indexType  string
+		name      string
+		numRows   int64
+		indexType string
 	}{
 		{"SmallBatch_1K", 1000, "random"},
 		{"MediumBatch_10K", 10000, "random"},
@@ -1888,10 +1888,10 @@ func BenchmarkTakePrimitive(b *testing.B) {
 // BenchmarkTakePrimitiveWithNulls benchmarks Take on primitive types with sparse nulls
 func BenchmarkTakePrimitiveWithNulls(b *testing.B) {
 	benchmarks := []struct {
-		name       string
-		numRows    int64
-		nullRate   float64
-		indexType  string
+		name      string
+		numRows   int64
+		nullRate  float64
+		indexType string
 	}{
 		{"LargeBatch_SparseNulls_Random", 50000, 0.05, "random"},
 		{"LargeBatch_SparseNulls_Sorted", 50000, 0.05, "sorted"},
@@ -1951,10 +1951,10 @@ func BenchmarkTakePrimitiveWithNulls(b *testing.B) {
 // BenchmarkTakeDictionary benchmarks Take on dictionary-encoded arrays
 func BenchmarkTakeDictionary(b *testing.B) {
 	benchmarks := []struct {
-		name       string
-		numRows    int64
-		dictSize   int
-		indexType  string
+		name      string
+		numRows   int64
+		dictSize  int
+		indexType string
 	}{
 		{"LargeBatch_SmallDict_Random", 50000, 100, "random"},
 		{"LargeBatch_SmallDict_Sorted", 50000, 100, "sorted"},

@@ -833,11 +833,18 @@ func primitiveTakeImpl[IdxT arrow.UintType, ValT arrow.IntType](values primitive
 				primitiveTakeImplSorted[IdxT, ValT](values, indices, out)
 				return
 			}
-			// Note: reverse sorted is less common, so we don't check for it
-			// to avoid the overhead. The unrolled loop below handles it well.
+			// Check for reverse sorted - use sequential loop to avoid cache penalties
+			// Loop unrolling amplifies cache miss penalties in reverse access patterns
+			if isReverseSorted(indicesData) {
+				for i := 0; i < len(indicesData); i++ {
+					outData[i] = values.GetValue(int64(indicesData[i]))
+				}
+				out.Nulls = 0
+				return
+			}
 		}
 
-		// Unroll loop for better performance
+		// Unroll loop for better performance (random access patterns)
 		i := 0
 		for ; i+4 <= len(indicesData); i += 4 {
 			outData[i] = values.GetValue(int64(indicesData[i]))
