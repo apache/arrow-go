@@ -1505,6 +1505,52 @@ func (s *SqlTestSuite) TestTxRollback() {
 	wg.Wait()
 }
 
+func (s *SqlTestSuite) TestTxQueryContextUsesTransaction() {
+	t := s.T()
+
+	// Create and start the server
+	server, addr, err := s.createServer()
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		require.NoError(s.T(), s.startServer(server))
+	}()
+	defer s.stopServer(server)
+	time.Sleep(100 * time.Millisecond)
+
+	// Configure client
+	cfg := s.Config
+	cfg.Address = addr
+	db, err := sql.Open("flightsql", cfg.DSN())
+	require.NoError(t, err)
+	defer db.Close()
+
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+
+	// Create table and insert one row inside the transaction.
+	_, err = tx.ExecContext(ctx, fmt.Sprintf(s.Statements["create table"], s.TableName))
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, fmt.Sprintf(s.Statements["insert"], s.TableName, "inside-tx", 123))
+	require.NoError(t, err)
+
+	// This zero-argument query must execute inside the active transaction.
+	var count int
+	err = tx.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s", s.TableName)).Scan(&count)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+
+	require.NoError(t, tx.Rollback())
+
+	// Tear-down server
+	s.stopServer(server)
+	wg.Wait()
+}
+
 func (s *SqlTestSuite) TestTxCommit() {
 	t := s.T()
 

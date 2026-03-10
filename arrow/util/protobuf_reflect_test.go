@@ -119,14 +119,14 @@ func AllTheTypesFixture() Fixture {
     - bytes: type=binary, nullable
     - double: type=float64, nullable
     - enum: type=dictionary<values=utf8, indices=int32, ordered=false>, nullable
-    - message: type=struct<field1: utf8>, nullable
+    - message: type=struct<field1: utf8 nullable>, nullable
     - oneofstring: type=utf8, nullable
-    - oneofmessage: type=struct<field1: utf8>, nullable
-    - any: type=struct<field1: utf8>, nullable
+    - oneofmessage: type=struct<field1: utf8 nullable>, nullable
+    - any: type=struct<field1: utf8 nullable>, nullable
     - simple_map: type=map<int32, utf8, items_nullable>, nullable
-    - complex_map: type=map<utf8, struct<field1: utf8>, items_nullable>, nullable
+    - complex_map: type=map<utf8, struct<field1: utf8 nullable>, items_nullable>, nullable
     - simple_list: type=list<item: utf8, nullable>, nullable
-    - complex_list: type=list<item: struct<field1: utf8>, nullable>, nullable`
+    - complex_list: type=list<item: struct<field1: utf8 nullable>, nullable>, nullable`
 
 	return Fixture{
 		msg:     &msg,
@@ -255,13 +255,13 @@ func TestGetSchema(t *testing.T) {
     - bytes: type=binary, nullable
     - double: type=float64, nullable
     - enum: type=dictionary<values=utf8, indices=int32, ordered=false>, nullable
-    - message: type=struct<field1: utf8>, nullable
-    - oneof: type=dense_union<oneofstring: type=utf8, nullable=0, oneofmessage: type=struct<field1: utf8>, nullable=1>, nullable
-    - any: type=struct<field1: utf8>, nullable
+    - message: type=struct<field1: utf8 nullable>, nullable
+    - oneof: type=dense_union<oneofstring: type=utf8, nullable=0, oneofmessage: type=struct<field1: utf8 nullable>, nullable=1>, nullable
+    - any: type=struct<field1: utf8 nullable>, nullable
     - simple_map: type=map<int32, utf8, items_nullable>, nullable
-    - complex_map: type=map<utf8, struct<field1: utf8>, items_nullable>, nullable
+    - complex_map: type=map<utf8, struct<field1: utf8 nullable>, items_nullable>, nullable
     - simple_list: type=list<item: utf8, nullable>, nullable
-    - complex_list: type=list<item: struct<field1: utf8>, nullable>, nullable`
+    - complex_list: type=list<item: struct<field1: utf8 nullable>, nullable>, nullable`
 	CheckSchema(t, pmr, want)
 
 	excludeComplex := func(pfr *ProtobufFieldReflection) bool {
@@ -386,8 +386,8 @@ func TestExcludedNested(t *testing.T) {
 	}
 	schema := `schema:
   fields: 2
-    - simple_a: type=list<item: struct<field1: utf8>, nullable>, nullable
-    - simple_b: type=list<item: struct<field1: utf8>, nullable>, nullable`
+    - simple_a: type=list<item: struct<field1: utf8 nullable>, nullable>, nullable
+    - simple_b: type=list<item: struct<field1: utf8 nullable>, nullable>, nullable`
 
 	simpleNested := util_message.SimpleNested{
 		SimpleA: []*util_message.ExampleMessage{&msg},
@@ -415,8 +415,8 @@ func TestExcludedNested(t *testing.T) {
 	f := AllTheTypesNoAnyFixture()
 	schema = `schema:
   fields: 2
-    - all_the_types_no_any_a: type=list<item: struct<str: utf8, int32: int32, int64: int64, sint32: int32, sin64: int64, uint32: uint32, uint64: uint64, fixed32: uint32, fixed64: uint64, sfixed32: int32, bool: bool, bytes: binary, double: float64, enum: dictionary<values=utf8, indices=int32, ordered=false>, message: struct<field1: utf8>, oneofstring: utf8, oneofmessage: struct<field1: utf8>, simple_map: map<int32, utf8, items_nullable>, complex_map: map<utf8, struct<field1: utf8>, items_nullable>, simple_list: list<item: utf8, nullable>, complex_list: list<item: struct<field1: utf8>, nullable>>, nullable>, nullable
-    - all_the_types_no_any_b: type=list<item: struct<str: utf8, int32: int32, int64: int64, sint32: int32, sin64: int64, uint32: uint32, uint64: uint64, fixed32: uint32, fixed64: uint64, sfixed32: int32, bool: bool, bytes: binary, double: float64, enum: dictionary<values=utf8, indices=int32, ordered=false>, message: struct<field1: utf8>, oneofstring: utf8, oneofmessage: struct<field1: utf8>, simple_map: map<int32, utf8, items_nullable>, complex_map: map<utf8, struct<field1: utf8>, items_nullable>, simple_list: list<item: utf8, nullable>, complex_list: list<item: struct<field1: utf8>, nullable>>, nullable>, nullable`
+    - all_the_types_no_any_a: type=list<item: struct<str: utf8 nullable, int32: int32 nullable, int64: int64 nullable, sint32: int32 nullable, sin64: int64 nullable, uint32: uint32 nullable, uint64: uint64 nullable, fixed32: uint32 nullable, fixed64: uint64 nullable, sfixed32: int32 nullable, bool: bool nullable, bytes: binary nullable, double: float64 nullable, enum: dictionary<values=utf8, indices=int32, ordered=false> nullable, message: struct<field1: utf8 nullable> nullable, oneofstring: utf8 nullable, oneofmessage: struct<field1: utf8 nullable> nullable, simple_map: map<int32, utf8, items_nullable> nullable, complex_map: map<utf8, struct<field1: utf8 nullable>, items_nullable> nullable, simple_list: list<item: utf8, nullable> nullable, complex_list: list<item: struct<field1: utf8 nullable>, nullable> nullable>, nullable>, nullable
+    - all_the_types_no_any_b: type=list<item: struct<str: utf8 nullable, int32: int32 nullable, int64: int64 nullable, sint32: int32 nullable, sin64: int64 nullable, uint32: uint32 nullable, uint64: uint64 nullable, fixed32: uint32 nullable, fixed64: uint64 nullable, sfixed32: int32 nullable, bool: bool nullable, bytes: binary nullable, double: float64 nullable, enum: dictionary<values=utf8, indices=int32, ordered=false> nullable, message: struct<field1: utf8 nullable> nullable, oneofstring: utf8 nullable, oneofmessage: struct<field1: utf8 nullable> nullable, simple_map: map<int32, utf8, items_nullable> nullable, complex_map: map<utf8, struct<field1: utf8 nullable>, items_nullable> nullable, simple_list: list<item: utf8, nullable> nullable, complex_list: list<item: struct<field1: utf8 nullable>, nullable> nullable>, nullable>, nullable`
 
 	complexNested := util_message.ComplexNested{
 		AllTheTypesNoAnyA: []*util_message.AllTheTypesNoAny{f.msg.(*util_message.AllTheTypesNoAny)},
@@ -445,8 +445,8 @@ func TestExcludedNested(t *testing.T) {
 
 	schema = `schema:
   fields: 2
-    - complex_nested: type=struct<all_the_types_no_any_a: list<item: struct<str: utf8, int32: int32, int64: int64, sint32: int32, sin64: int64, uint32: uint32, uint64: uint64, fixed32: uint32, fixed64: uint64, sfixed32: int32, bool: bool, bytes: binary, double: float64, enum: dictionary<values=utf8, indices=int32, ordered=false>, message: struct<field1: utf8>, oneofstring: utf8, oneofmessage: struct<field1: utf8>, simple_map: map<int32, utf8, items_nullable>, complex_map: map<utf8, struct<field1: utf8>, items_nullable>, simple_list: list<item: utf8, nullable>, complex_list: list<item: struct<field1: utf8>, nullable>>, nullable>, all_the_types_no_any_b: list<item: struct<str: utf8, int32: int32, int64: int64, sint32: int32, sin64: int64, uint32: uint32, uint64: uint64, fixed32: uint32, fixed64: uint64, sfixed32: int32, bool: bool, bytes: binary, double: float64, enum: dictionary<values=utf8, indices=int32, ordered=false>, message: struct<field1: utf8>, oneofstring: utf8, oneofmessage: struct<field1: utf8>, simple_map: map<int32, utf8, items_nullable>, complex_map: map<utf8, struct<field1: utf8>, items_nullable>, simple_list: list<item: utf8, nullable>, complex_list: list<item: struct<field1: utf8>, nullable>>, nullable>>, nullable
-    - simple_nested: type=struct<simple_a: list<item: struct<field1: utf8>, nullable>, simple_b: list<item: struct<field1: utf8>, nullable>>, nullable`
+    - complex_nested: type=struct<all_the_types_no_any_a: list<item: struct<str: utf8 nullable, int32: int32 nullable, int64: int64 nullable, sint32: int32 nullable, sin64: int64 nullable, uint32: uint32 nullable, uint64: uint64 nullable, fixed32: uint32 nullable, fixed64: uint64 nullable, sfixed32: int32 nullable, bool: bool nullable, bytes: binary nullable, double: float64 nullable, enum: dictionary<values=utf8, indices=int32, ordered=false> nullable, message: struct<field1: utf8 nullable> nullable, oneofstring: utf8 nullable, oneofmessage: struct<field1: utf8 nullable> nullable, simple_map: map<int32, utf8, items_nullable> nullable, complex_map: map<utf8, struct<field1: utf8 nullable>, items_nullable> nullable, simple_list: list<item: utf8, nullable> nullable, complex_list: list<item: struct<field1: utf8 nullable>, nullable> nullable>, nullable> nullable, all_the_types_no_any_b: list<item: struct<str: utf8 nullable, int32: int32 nullable, int64: int64 nullable, sint32: int32 nullable, sin64: int64 nullable, uint32: uint32 nullable, uint64: uint64 nullable, fixed32: uint32 nullable, fixed64: uint64 nullable, sfixed32: int32 nullable, bool: bool nullable, bytes: binary nullable, double: float64 nullable, enum: dictionary<values=utf8, indices=int32, ordered=false> nullable, message: struct<field1: utf8 nullable> nullable, oneofstring: utf8 nullable, oneofmessage: struct<field1: utf8 nullable> nullable, simple_map: map<int32, utf8, items_nullable> nullable, complex_map: map<utf8, struct<field1: utf8 nullable>, items_nullable> nullable, simple_list: list<item: utf8, nullable> nullable, complex_list: list<item: struct<field1: utf8 nullable>, nullable> nullable>, nullable> nullable>, nullable
+    - simple_nested: type=struct<simple_a: list<item: struct<field1: utf8 nullable>, nullable> nullable, simple_b: list<item: struct<field1: utf8 nullable>, nullable> nullable>, nullable`
 
 	deepNested := util_message.DeepNested{
 		ComplexNested: &complexNested,

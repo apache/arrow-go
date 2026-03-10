@@ -444,6 +444,9 @@ func (t *StructType) String() string {
 			o.WriteString(", ")
 		}
 		o.WriteString(fmt.Sprintf("%s: %v", f.Name, f.Type))
+		if f.Nullable {
+			o.WriteString(" nullable")
+		}
 	}
 	o.WriteString(">")
 	return o.String()
