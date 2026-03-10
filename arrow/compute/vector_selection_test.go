@@ -1812,6 +1812,217 @@ func TestFilterKernels(t *testing.T) {
 // These benchmarks test the performance improvements from buffer pre-allocation
 // in VarBinaryImpl for string/binary data reorganization (e.g., partitioning).
 
+// BenchmarkTakePrimitive benchmarks Take on primitive types (int64)
+func BenchmarkTakePrimitive(b *testing.B) {
+	benchmarks := []struct {
+		name       string
+		numRows    int64
+		indexType  string
+	}{
+		{"SmallBatch_1K", 1000, "random"},
+		{"MediumBatch_10K", 10000, "random"},
+		{"LargeBatch_50K", 50000, "random"},
+		{"XLargeBatch_100K", 100000, "random"},
+		{"SmallBatch_1K_Sorted", 1000, "sorted"},
+		{"MediumBatch_10K_Sorted", 10000, "sorted"},
+		{"LargeBatch_50K_Sorted", 50000, "sorted"},
+		{"XLargeBatch_100K_Sorted", 100000, "sorted"},
+		{"SmallBatch_1K_Reverse", 1000, "reverse"},
+		{"MediumBatch_10K_Reverse", 10000, "reverse"},
+		{"LargeBatch_50K_Reverse", 50000, "reverse"},
+		{"XLargeBatch_100K_Reverse", 100000, "reverse"},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			mem := memory.DefaultAllocator
+			ctx := compute.WithAllocator(context.Background(), mem)
+
+			// Create source array with int64 values
+			bldr := array.NewInt64Builder(mem)
+			defer bldr.Release()
+
+			for i := int64(0); i < bm.numRows; i++ {
+				bldr.Append(i * 2)
+			}
+			values := bldr.NewArray()
+			defer values.Release()
+
+			// Create indices based on type
+			indicesBldr := array.NewInt64Builder(mem)
+			defer indicesBldr.Release()
+
+			switch bm.indexType {
+			case "sorted":
+				// Monotonically increasing indices
+				for i := int64(0); i < bm.numRows; i++ {
+					indicesBldr.Append(i)
+				}
+			case "reverse":
+				// Reverse sorted indices
+				for i := bm.numRows - 1; i >= 0; i-- {
+					indicesBldr.Append(i)
+				}
+			default: // "random"
+				// Random indices
+				for i := int64(0); i < bm.numRows; i++ {
+					indicesBldr.Append(i % bm.numRows)
+				}
+			}
+			indices := indicesBldr.NewArray()
+			defer indices.Release()
+
+			b.ReportMetric(float64(bm.numRows), "rows/sec")
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result, err := compute.Take(ctx, *compute.DefaultTakeOptions(), &compute.ArrayDatum{values.Data()}, &compute.ArrayDatum{indices.Data()})
+				if err != nil {
+					b.Fatal(err)
+				}
+				result.Release()
+			}
+		})
+	}
+}
+
+// BenchmarkTakePrimitiveWithNulls benchmarks Take on primitive types with sparse nulls
+func BenchmarkTakePrimitiveWithNulls(b *testing.B) {
+	benchmarks := []struct {
+		name       string
+		numRows    int64
+		nullRate   float64
+		indexType  string
+	}{
+		{"LargeBatch_SparseNulls_Random", 50000, 0.05, "random"},
+		{"LargeBatch_SparseNulls_Sorted", 50000, 0.05, "sorted"},
+		{"LargeBatch_DenseNulls_Random", 50000, 0.30, "random"},
+		{"LargeBatch_DenseNulls_Sorted", 50000, 0.30, "sorted"},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			mem := memory.DefaultAllocator
+			ctx := compute.WithAllocator(context.Background(), mem)
+
+			// Create source array with int64 values and nulls
+			bldr := array.NewInt64Builder(mem)
+			defer bldr.Release()
+
+			for i := int64(0); i < bm.numRows; i++ {
+				if float64(i%100)/100.0 < bm.nullRate {
+					bldr.AppendNull()
+				} else {
+					bldr.Append(i * 2)
+				}
+			}
+			values := bldr.NewArray()
+			defer values.Release()
+
+			// Create indices based on type
+			indicesBldr := array.NewInt64Builder(mem)
+			defer indicesBldr.Release()
+
+			switch bm.indexType {
+			case "sorted":
+				for i := int64(0); i < bm.numRows; i++ {
+					indicesBldr.Append(i)
+				}
+			default: // "random"
+				for i := int64(0); i < bm.numRows; i++ {
+					indicesBldr.Append((i * 1103515245) % bm.numRows)
+				}
+			}
+			indices := indicesBldr.NewArray()
+			defer indices.Release()
+
+			b.ReportMetric(float64(bm.numRows), "rows/sec")
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result, err := compute.Take(ctx, *compute.DefaultTakeOptions(), &compute.ArrayDatum{values.Data()}, &compute.ArrayDatum{indices.Data()})
+				if err != nil {
+					b.Fatal(err)
+				}
+				result.Release()
+			}
+		})
+	}
+}
+
+// BenchmarkTakeDictionary benchmarks Take on dictionary-encoded arrays
+func BenchmarkTakeDictionary(b *testing.B) {
+	benchmarks := []struct {
+		name       string
+		numRows    int64
+		dictSize   int
+		indexType  string
+	}{
+		{"LargeBatch_SmallDict_Random", 50000, 100, "random"},
+		{"LargeBatch_SmallDict_Sorted", 50000, 100, "sorted"},
+		{"LargeBatch_LargeDict_Random", 50000, 10000, "random"},
+		{"LargeBatch_LargeDict_Sorted", 50000, 10000, "sorted"},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			mem := memory.DefaultAllocator
+			ctx := compute.WithAllocator(context.Background(), mem)
+
+			// Create dictionary values
+			dictBldr := array.NewInt64Builder(mem)
+			defer dictBldr.Release()
+			for i := 0; i < bm.dictSize; i++ {
+				dictBldr.Append(int64(i * 1000))
+			}
+			dict := dictBldr.NewArray()
+			defer dict.Release()
+
+			// Create indices into dictionary
+			indicesBldr := array.NewInt32Builder(mem)
+			defer indicesBldr.Release()
+			for i := int64(0); i < bm.numRows; i++ {
+				indicesBldr.Append(int32(i % int64(bm.dictSize)))
+			}
+			dictIndices := indicesBldr.NewArray()
+			defer dictIndices.Release()
+
+			// Create dictionary array
+			dictType := &arrow.DictionaryType{
+				IndexType: arrow.PrimitiveTypes.Int32,
+				ValueType: arrow.PrimitiveTypes.Int64,
+			}
+			values := array.NewDictionaryArray(dictType, dictIndices, dict)
+			defer values.Release()
+
+			// Create take indices based on type
+			takeIndicesBldr := array.NewInt64Builder(mem)
+			defer takeIndicesBldr.Release()
+
+			switch bm.indexType {
+			case "sorted":
+				for i := int64(0); i < bm.numRows; i++ {
+					takeIndicesBldr.Append(i)
+				}
+			default: // "random"
+				for i := int64(0); i < bm.numRows; i++ {
+					takeIndicesBldr.Append((i * 1103515245) % bm.numRows)
+				}
+			}
+			takeIndices := takeIndicesBldr.NewArray()
+			defer takeIndices.Release()
+
+			b.ReportMetric(float64(bm.numRows), "rows/sec")
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result, err := compute.Take(ctx, *compute.DefaultTakeOptions(), &compute.ArrayDatum{values.Data()}, &compute.ArrayDatum{takeIndices.Data()})
+				if err != nil {
+					b.Fatal(err)
+				}
+				result.Release()
+			}
+		})
+	}
+}
+
 func BenchmarkTakeString(b *testing.B) {
 	// Test various batch sizes and string lengths
 	benchmarks := []struct {
