@@ -49,6 +49,10 @@ type leafReader struct {
 	recordRdr file.RecordReader
 	props     ArrowReadProperties
 
+	// current row group size metadata, used to proportion binary data pre-allocation
+	curRGUncompressedBytes int64
+	curRGNumRows           int64
+
 	refCount atomic.Int64
 }
 
@@ -63,7 +67,7 @@ func newLeafReader(rctx *readerCtx, field *arrow.Field, input *columnIterator, l
 	}
 	ret.refCount.Add(1)
 
-	err := ret.nextRowGroup()
+	err := ret.nextRowGroup(0)
 	return &ColumnReader{ret}, err
 }
 
@@ -94,6 +98,9 @@ func (lr *leafReader) IsOrHasRepeatedChild() bool { return false }
 func (lr *leafReader) LoadBatch(nrecords int64) (err error) {
 	lr.releaseOut()
 	lr.recordRdr.Reset()
+	// The binary builder was reset by GetBuilderChunks() at the end of the
+	// previous LoadBatch. Pre-allocate its data buffer now, while it's fresh.
+	lr.reserveBinaryData(nrecords)
 
 	if err := lr.recordRdr.Reserve(nrecords); err != nil {
 		return err
@@ -108,7 +115,7 @@ func (lr *leafReader) LoadBatch(nrecords int64) (err error) {
 		}
 		nrecords -= numRead
 		if numRead == 0 {
-			if err = lr.nextRowGroup(); err != nil {
+			if err = lr.nextRowGroup(nrecords); err != nil {
 				return err
 			}
 		}
@@ -119,6 +126,25 @@ func (lr *leafReader) LoadBatch(nrecords int64) (err error) {
 
 func (lr *leafReader) BuildArray(int64) (*arrow.Chunked, error) {
 	return lr.clearOut(), nil
+}
+
+// reserveBinaryData pre-allocates the underlying BinaryBuilder's data buffer
+// proportionally: (rowsToRead / curRGNumRows) * curRGUncompressedBytes.
+// It is a no-op for non-binary columns, when size metadata is unavailable,
+// or when PreAllocBinaryData is not enabled in the read properties.
+func (lr *leafReader) reserveBinaryData(rowsToRead int64) {
+	if !lr.props.PreAllocBinaryData {
+		return
+	}
+	brdr, ok := lr.recordRdr.(file.BinaryRecordReader)
+	if !ok || lr.curRGNumRows <= 0 || lr.curRGUncompressedBytes <= 0 {
+		return
+	}
+	effective := rowsToRead
+	if effective <= 0 || effective > lr.curRGNumRows {
+		effective = lr.curRGNumRows
+	}
+	brdr.ReserveData(lr.curRGUncompressedBytes * effective / lr.curRGNumRows)
 }
 
 // releaseOut will clear lr.out as well as release it if it wasn't nil
@@ -146,12 +172,21 @@ func (lr *leafReader) SeekToRow(rowIdx int64) error {
 	return lr.recordRdr.SeekToRow(offset)
 }
 
-func (lr *leafReader) nextRowGroup() error {
-	pr, err := lr.input.NextChunk()
+// nextRowGroup advances to the next row group. remainingRows is the number of
+// records still to be read in the current batch; pass 0 during initialization
+// (no batch is in progress yet, so no pre-allocation is needed).
+func (lr *leafReader) nextRowGroup(remainingRows int64) error {
+	pr, uncompressedBytes, numRows, err := lr.input.NextChunk()
 	if err != nil {
 		return err
 	}
 	lr.recordRdr.SetPageReader(pr)
+	lr.curRGUncompressedBytes = uncompressedBytes
+	lr.curRGNumRows = numRows
+	// When called mid-batch, extend the builder's data buffer for the new row group.
+	if remainingRows > 0 {
+		lr.reserveBinaryData(remainingRows)
+	}
 	return nil
 }
 
