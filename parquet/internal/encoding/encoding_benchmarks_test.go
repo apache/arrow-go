@@ -679,3 +679,308 @@ func BenchmarkDeltaBinaryPackedDecodingInt32(b *testing.B) {
 		})
 	}
 }
+
+// Extended MemoTable benchmarks for int64
+func BenchmarkMemoTableInt64(b *testing.B) {
+	tests := []struct {
+		nunique int32
+		nvalues int64
+	}{
+		{100, 65535},
+		{1000, 65535},
+		{5000, 65535},
+	}
+
+	for _, tt := range tests {
+		b.Run(fmt.Sprintf("%d unique n %d", tt.nunique, tt.nvalues), func(b *testing.B) {
+			rag := testutils.NewRandomArrayGenerator(0)
+			dict := rag.Int64(int64(tt.nunique), 0, math.MaxInt64-1, 0)
+			indices := rag.Int32(tt.nvalues, 0, int32(tt.nunique)-1, 0)
+
+			values := make([]int64, tt.nvalues)
+			for idx := range values {
+				values[idx] = dict.Value(int(indices.Value(idx)))
+			}
+			b.ResetTimer()
+			b.Run("xxh3", func(b *testing.B) {
+				for i := 0; i < b.N; i++ {
+					tbl := hashing.NewMemoTable[int64](0)
+					for _, v := range values {
+						tbl.GetOrInsert(v)
+					}
+					if tbl.Size() != int(tt.nunique) {
+						b.Fatal(tbl.Size(), tt.nunique)
+					}
+				}
+			})
+
+			b.Run("go map", func(b *testing.B) {
+				for i := 0; i < b.N; i++ {
+					tbl := encoding.NewInt64MemoTable(memory.DefaultAllocator)
+					for _, v := range values {
+						tbl.GetOrInsert(v)
+					}
+					if tbl.Size() != int(tt.nunique) {
+						b.Fatal(tbl.Size(), tt.nunique)
+					}
+				}
+			})
+		})
+	}
+}
+
+// Extended MemoTable benchmarks for float32
+func BenchmarkMemoTableFloat32(b *testing.B) {
+	tests := []struct {
+		nunique int32
+		nvalues int64
+	}{
+		{100, 65535},
+		{1000, 65535},
+		{5000, 65535},
+	}
+
+	for _, tt := range tests {
+		b.Run(fmt.Sprintf("%d unique n %d", tt.nunique, tt.nvalues), func(b *testing.B) {
+			rag := testutils.NewRandomArrayGenerator(0)
+			// Generate float32 by converting float64 to float32
+			dict64 := rag.Float64(int64(tt.nunique), 0)
+			dict := make([]float32, tt.nunique)
+			for i := range dict {
+				dict[i] = float32(dict64.Value(i))
+			}
+			indices := rag.Int32(tt.nvalues, 0, int32(tt.nunique)-1, 0)
+
+			values := make([]float32, tt.nvalues)
+			for idx := range values {
+				values[idx] = dict[indices.Value(idx)]
+			}
+
+			b.ResetTimer()
+			b.Run("xxh3", func(b *testing.B) {
+				for i := 0; i < b.N; i++ {
+					tbl := hashing.NewMemoTable[float32](0)
+					for _, v := range values {
+						tbl.GetOrInsert(v)
+					}
+					if tbl.Size() != int(tt.nunique) {
+						b.Fatal(tbl.Size(), tt.nunique)
+					}
+				}
+			})
+			b.ResetTimer()
+			b.Run("go map", func(b *testing.B) {
+				for i := 0; i < b.N; i++ {
+					tbl := encoding.NewFloat32MemoTable(memory.DefaultAllocator)
+					for _, v := range values {
+						tbl.GetOrInsert(v)
+					}
+					if tbl.Size() != int(tt.nunique) {
+						b.Fatal(tbl.Size(), tt.nunique)
+					}
+				}
+			})
+		})
+	}
+}
+
+// High cardinality benchmark
+func BenchmarkMemoTableHighCardinality(b *testing.B) {
+	tests := []struct {
+		nunique int32
+		nvalues int64
+	}{
+		{100000, 1000000},
+		{500000, 1000000},
+		{1000000, 1000000},
+	}
+
+	for _, tt := range tests {
+		b.Run(fmt.Sprintf("%d unique n %d", tt.nunique, tt.nvalues), func(b *testing.B) {
+			rag := testutils.NewRandomArrayGenerator(0)
+			dict := rag.Int32(int64(tt.nunique), 0, math.MaxInt32-1, 0)
+			indices := rag.Int32(tt.nvalues, 0, int32(tt.nunique)-1, 0)
+
+			values := make([]int32, tt.nvalues)
+			for idx := range values {
+				values[idx] = dict.Value(int(indices.Value(idx)))
+			}
+			b.ResetTimer()
+			b.Run("xxh3", func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					tbl := hashing.NewMemoTable[int32](0)
+					for _, v := range values {
+						tbl.GetOrInsert(v)
+					}
+					if tbl.Size() != int(tt.nunique) {
+						b.Fatal(tbl.Size(), tt.nunique)
+					}
+				}
+			})
+		})
+	}
+}
+
+// NaN handling benchmark for float types
+func BenchmarkMemoTableNaN(b *testing.B) {
+	b.Run("float64", func(b *testing.B) {
+		values := make([]float64, 10000)
+		for idx := range values {
+			if idx%10 == 0 {
+				values[idx] = math.NaN()
+			} else {
+				values[idx] = float64(idx % 100)
+			}
+		}
+
+		b.Run("xxh3", func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				tbl := hashing.NewMemoTable[float64](0)
+				for _, v := range values {
+					tbl.GetOrInsert(v)
+				}
+			}
+		})
+
+		b.Run("go map", func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				tbl := encoding.NewFloat64MemoTable(memory.DefaultAllocator)
+				for _, v := range values {
+					tbl.GetOrInsert(v)
+				}
+			}
+		})
+	})
+
+	b.Run("float32", func(b *testing.B) {
+		values := make([]float32, 10000)
+		for idx := range values {
+			if idx%10 == 0 {
+				values[idx] = float32(math.NaN())
+			} else {
+				values[idx] = float32(idx % 100)
+			}
+		}
+
+		b.Run("xxh3", func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				tbl := hashing.NewMemoTable[float32](0)
+				for _, v := range values {
+					tbl.GetOrInsert(v)
+				}
+			}
+		})
+
+		b.Run("go map", func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				tbl := encoding.NewFloat32MemoTable(memory.DefaultAllocator)
+				for _, v := range values {
+					tbl.GetOrInsert(v)
+				}
+			}
+		})
+	})
+}
+
+// Infinity handling benchmark for float types
+func BenchmarkMemoTableInfinity(b *testing.B) {
+	b.Run("float64", func(b *testing.B) {
+		values := make([]float64, 10000)
+		for idx := range values {
+			switch idx % 10 {
+			case 0:
+				values[idx] = math.Inf(1)
+			case 1:
+				values[idx] = math.Inf(-1)
+			default:
+				values[idx] = float64(idx % 100)
+			}
+		}
+
+		b.Run("xxh3", func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				tbl := hashing.NewMemoTable[float64](0)
+				for _, v := range values {
+					tbl.GetOrInsert(v)
+				}
+			}
+		})
+
+		b.Run("go map", func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				tbl := encoding.NewFloat64MemoTable(memory.DefaultAllocator)
+				for _, v := range values {
+					tbl.GetOrInsert(v)
+				}
+			}
+		})
+	})
+}
+
+// Null handling benchmark
+func BenchmarkMemoTableNullHandling(b *testing.B) {
+	b.Run("int32 with nulls", func(b *testing.B) {
+		rag := testutils.NewRandomArrayGenerator(0)
+		dict := rag.Int32(1000, 0, math.MaxInt32-1, 0)
+		indices := rag.Int32(65535, 0, 999, 0)
+
+		values := make([]int32, 65535)
+		for idx := range values {
+			values[idx] = dict.Value(int(indices.Value(idx)))
+		}
+
+		b.Run("xxh3", func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				tbl := hashing.NewMemoTable[int32](0)
+				tbl.GetOrInsertNull()
+				for _, v := range values {
+					tbl.GetOrInsert(v)
+				}
+			}
+		})
+
+		b.Run("go map", func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				tbl := encoding.NewInt32MemoTable(memory.DefaultAllocator)
+				tbl.GetOrInsertNull()
+				for _, v := range values {
+					tbl.GetOrInsert(v)
+				}
+			}
+		})
+	})
+
+	b.Run("binary with nulls", func(b *testing.B) {
+		rag := testutils.NewRandomArrayGenerator(0)
+		dict := rag.ByteArray(1000, 8, 32, 0).(*array.String)
+		indices := rag.Int32(65535, 0, 999, 0)
+
+		values := make([]parquet.ByteArray, 65535)
+		for idx := range values {
+			values[idx] = []byte(dict.Value(int(indices.Value(idx))))
+		}
+
+		b.Run("xxh3", func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				tbl := hashing.NewBinaryMemoTable(0, -1, array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary))
+				tbl.GetOrInsertNull()
+				for _, v := range values {
+					tbl.GetOrInsert(v)
+				}
+				tbl.Release()
+			}
+		})
+
+		b.Run("go map", func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				tbl := encoding.NewBinaryMemoTable(memory.DefaultAllocator)
+				tbl.GetOrInsertNull()
+				for _, v := range values {
+					tbl.GetOrInsert(v)
+				}
+				tbl.Release()
+			}
+		})
+	})
+}
