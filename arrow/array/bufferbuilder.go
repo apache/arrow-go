@@ -31,6 +31,7 @@ type bufBuilder interface {
 	Release()
 	Len() int
 	Cap() int
+	Capacity() int
 	Bytes() []byte
 	resize(int)
 	Advance(int)
@@ -77,6 +78,10 @@ func (b *bufferBuilder) Len() int { return b.length }
 
 // Cap returns the total number of bytes that can be stored without allocating additional memory.
 func (b *bufferBuilder) Cap() int { return b.capacity }
+
+// Capacity returns the total number of bytes that can be stored without allocating additional memory.
+// This is an alias for Cap() to provide a more intuitive API.
+func (b *bufferBuilder) Capacity() int { return b.capacity }
 
 // Bytes returns a slice of length b.Len().
 // The slice is only valid for use until the next buffer modification. That is, until the next call
