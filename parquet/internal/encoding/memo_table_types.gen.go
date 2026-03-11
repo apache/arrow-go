@@ -23,11 +23,16 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 )
 
-// standard map based implementation of memo tables which can be more efficient
-// in some cases based on the uniqueness / amount / size of the data.
-// these are left here for now for use in the benchmarks to compare against the
-// custom hash table implementation in the internal/hashing package as a base
-// benchmark comparison.
+// Legacy map-based memo table implementations.
+//
+// Deprecated: These implementations are kept only for benchmark comparison purposes.
+// Production code should use the constructors from NewInt32Dictionary(), NewInt64Dictionary(),
+// NewFloat32Dictionary(), etc. which use xxh3-based implementations from internal/hashing.
+// Benchmarks show the xxh3 implementations are 2-3x faster than these Go map-based
+// approaches, with better memory characteristics and more predictable performance
+// across different data distributions.
+//
+// These implementations will be removed in a future release.
 
 func NewInt32MemoTable(memory.Allocator) MemoTable {
 	return &int32MemoTableImpl{
