@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"math"
 	"time"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -264,19 +265,26 @@ func writeDenseArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, leafArr 
 			break
 		}
 
-		// Optimized path: write directly from bitmap without conversion to []bool
-		boolArr := leafArr.(*array.Boolean)
-		bitmapBytes := boolArr.Data().Buffers()[1].Bytes() // value bitmap
-		bitmapOffset := int64(boolArr.Data().Offset())
-		numValues := leafArr.Len()
-
+		// Optimized path for non-nullable: write directly from bitmap without conversion to []bool
+		// For nullable columns, fall back to []bool conversion to properly handle null positions
 		if !maybeParentNulls && noNulls {
+			boolArr := leafArr.(*array.Boolean)
+			bitmapBytes := boolArr.Data().Buffers()[1].Bytes() // value bitmap
+			bitmapOffset := int64(boolArr.Data().Offset())
+			numValues := leafArr.Len()
+
 			// Non-nullable: use direct bitmap write
 			_, err = wr.WriteBitmapBatch(bitmapBytes, bitmapOffset, numValues, defLevels, repLevels)
 		} else {
-			// Nullable: use spaced bitmap write
-			wr.WriteBitmapBatchSpaced(bitmapBytes, bitmapOffset, numValues, defLevels, repLevels,
-				leafArr.NullBitmapBytes(), int64(leafArr.Data().Offset()))
+			// Nullable: use []bool path to properly handle nulls
+			// (bitmap values at null positions are undefined)
+			ctx.dataBuffer.ResizeNoShrink(leafArr.Len())
+			buf := ctx.dataBuffer.Bytes()
+			data := *(*[]bool)(unsafe.Pointer(&buf))
+			for idx := range data {
+				data[idx] = leafArr.(*array.Boolean).Value(idx)
+			}
+			wr.WriteBatchSpaced(data, defLevels, repLevels, leafArr.NullBitmapBytes(), int64(leafArr.Data().Offset()))
 		}
 	case *file.Int32ColumnChunkWriter:
 		var data []int32
