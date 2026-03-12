@@ -79,7 +79,7 @@ func benchmarkBooleanWrite(b *testing.B, size int, nullable bool) {
 	arr := bldr.NewBooleanArray()
 	defer arr.Release()
 
-	rec := array.NewRecord(arrowSchema, []arrow.Array{arr}, int64(size))
+	rec := array.NewRecordBatch(arrowSchema, []arrow.Array{arr}, int64(size))
 	defer rec.Release()
 
 	b.ResetTimer()
