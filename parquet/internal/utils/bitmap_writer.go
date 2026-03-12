@@ -39,6 +39,8 @@ type BitmapWriter interface {
 	// AppendBools appends the bit representation of the bools slice, returning the number
 	// of bools that were able to fit in the remaining length of the bitmapwriter.
 	AppendBools(in []bool) int
+	// AppendBitmap appends bits directly from a source bitmap, returning the number of bits written.
+	AppendBitmap(srcBitmap []byte, srcOffset int64, length int64) int64
 	// Pos is the current position that will be written next
 	Pos() int
 	// Reset allows reusing the bitmapwriter by resetting Pos to start with length as
@@ -161,6 +163,10 @@ func (bw *firstTimeBitmapWriter) Next() {
 
 func (b *firstTimeBitmapWriter) AppendBools(in []bool) int {
 	panic("Append Bools not yet implemented for firstTimeBitmapWriter")
+}
+
+func (b *firstTimeBitmapWriter) AppendBitmap(srcBitmap []byte, srcOffset int64, length int64) int64 {
+	panic("AppendBitmap not yet implemented for firstTimeBitmapWriter")
 }
 
 func (bw *firstTimeBitmapWriter) Finish() {

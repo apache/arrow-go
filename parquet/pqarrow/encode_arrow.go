@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"math"
 	"time"
-	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -260,23 +259,24 @@ func writeDenseArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, leafArr 
 		if leafArr.DataType().ID() != arrow.BOOL {
 			return fmt.Errorf("type mismatch, column is %s, array is %s", cw.Type(), leafArr.DataType().ID())
 		}
-		// TODO(mtopol): optimize this so that we aren't converting from
-		// the bitmap -> []bool -> bitmap anymore
 		if leafArr.Len() == 0 {
 			_, err = wr.WriteBatch(nil, defLevels, repLevels)
 			break
 		}
 
-		ctx.dataBuffer.ResizeNoShrink(leafArr.Len())
-		buf := ctx.dataBuffer.Bytes()
-		data := *(*[]bool)(unsafe.Pointer(&buf))
-		for idx := range data {
-			data[idx] = leafArr.(*array.Boolean).Value(idx)
-		}
+		// Optimized path: write directly from bitmap without conversion to []bool
+		boolArr := leafArr.(*array.Boolean)
+		bitmapBytes := boolArr.Data().Buffers()[1].Bytes() // value bitmap
+		bitmapOffset := int64(boolArr.Data().Offset())
+		numValues := leafArr.Len()
+
 		if !maybeParentNulls && noNulls {
-			wr.WriteBatch(data, defLevels, repLevels)
+			// Non-nullable: use direct bitmap write
+			_, err = wr.WriteBitmapBatch(bitmapBytes, bitmapOffset, numValues, defLevels, repLevels)
 		} else {
-			wr.WriteBatchSpaced(data, defLevels, repLevels, leafArr.NullBitmapBytes(), int64(leafArr.Data().Offset()))
+			// Nullable: use spaced bitmap write
+			wr.WriteBitmapBatchSpaced(bitmapBytes, bitmapOffset, numValues, defLevels, repLevels,
+				leafArr.NullBitmapBytes(), int64(leafArr.Data().Offset()))
 		}
 	case *file.Int32ColumnChunkWriter:
 		var data []int32
