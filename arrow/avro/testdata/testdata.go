@@ -126,6 +126,7 @@ type Example struct {
 	Fraction          *float64          `avro:"fraction" json:"fraction"`
 	IsEmergency       bool              `avro:"is_emergency" json:"is_emergency"`
 	RemoteIP          *ByteArray        `avro:"remote_ip" json:"remote_ip"`
+	NullableRemoteIPS *[]ByteArray      `avro:"nullable_remote_ips" json:"nullable_remote_ips"`
 	Person            PersonData        `avro:"person" json:"person"`
 	DecimalField      DecimalType       `avro:"decimalField" json:"decimalField"`
 	Decimal256Field   DecimalType       `avro:"decimal256Field" json:"decimal256Field"`
@@ -215,12 +216,12 @@ func sampleData() Example {
 			InheritNamespace: "d",
 			Md5:              MD5{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
 		},
-		ID:          42,
-		BigID:       42000000000,
-		Temperature: func() *float32 { v := float32(36.6); return &v }(),
-		Fraction:    func() *float64 { v := float64(0.75); return &v }(),
-		IsEmergency: true,
-		RemoteIP:    func() *ByteArray { v := ByteArray{192, 168, 1, 1}; return &v }(),
+		ID:                42,
+		BigID:             42000000000,
+		Temperature:       func() *float32 { v := float32(36.6); return &v }(),
+		Fraction:          func() *float64 { v := float64(0.75); return &v }(),
+		IsEmergency:       true,
+		RemoteIP:          func() *ByteArray { v := ByteArray{192, 168, 1, 1}; return &v }(),
 		Person: PersonData{
 			Lastname: "Doe",
 			Address: AddressUSRecord{
@@ -248,7 +249,7 @@ func sampleData() Example {
 
 func writeOCFSampleData(td string, data Example) string {
 	path := filepath.Join(td, sampleAvroFileName)
-	ocfFile, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	ocfFile, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -272,7 +273,7 @@ func writeOCFSampleData(td string, data Example) string {
 
 func writeJSONSampleData(td string, data Example) string {
 	path := filepath.Join(td, sampleJSONFileName)
-	jsonFile, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	jsonFile, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		log.Fatal(err)
 	}

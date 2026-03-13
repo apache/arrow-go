@@ -106,7 +106,7 @@ func arrowSchemafromAvro(n *schemaNode) {
 			k := strconv.FormatInt(int64(index), 10)
 			symbols[k] = symbol
 		}
-		var dt = arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint64, ValueType: arrow.BinaryTypes.String, Ordered: false}
+		dt := arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint64, ValueType: arrow.BinaryTypes.String, Ordered: false}
 		sl := int64(len(symbols))
 		switch {
 		case sl <= math.MaxUint8:
@@ -125,12 +125,14 @@ func arrowSchemafromAvro(n *schemaNode) {
 		} else {
 			arrowSchemafromAvro(c)
 		}
+		var typ *arrow.ListType
 		switch c.arrowField.Nullable {
 		case true:
-			n.arrowField = arrow.Field{Name: n.name, Type: arrow.ListOfField(c.arrowField), Metadata: c.arrowField.Metadata}
+			typ = arrow.ListOfField(c.arrowField)
 		case false:
-			n.arrowField = arrow.Field{Name: n.name, Type: arrow.ListOfNonNullable(c.arrowField.Type), Metadata: c.arrowField.Metadata}
+			typ = arrow.ListOfNonNullable(c.arrowField.Type)
 		}
+		n.arrowField = buildArrowField(n, typ, c.arrowField.Metadata)
 	case "map":
 		n.schemaCache.Add(n.schema.(*avro.MapSchema).Values().(avro.NamedSchema).Name(), n.schema.(*avro.MapSchema).Values())
 		c := n.newChild(n.name, n.schema.(*avro.MapSchema).Values())
@@ -160,7 +162,7 @@ func arrowSchemafromAvro(n *schemaNode) {
 			n.arrowField = buildArrowField(n, avroPrimitiveToArrowType(string(st)), arrow.Metadata{})
 		}
 	case "float", "double", "boolean":
-		n.arrowField = arrow.Field{Name: n.name, Type: avroPrimitiveToArrowType(string(st)), Nullable: n.nullable}
+		n.arrowField = buildArrowField(n, avroPrimitiveToArrowType(string(st)), arrow.Metadata{})
 	case "<ref>":
 		refSchema := n.schemaCache.Get(string(n.schema.(*avro.RefSchema).Schema().Name()))
 		if refSchema == nil {

@@ -81,6 +81,11 @@ func TestReader(t *testing.T) {
 					Nullable: true,
 				},
 				{
+					Name:     "nullable_remote_ips",
+					Type:     arrow.ListOfNonNullable(arrow.BinaryTypes.Binary),
+					Nullable: true,
+				},
+				{
 					Name: "person",
 					Type: arrow.StructOf(
 						arrow.Field{

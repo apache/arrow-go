@@ -86,6 +86,16 @@
       ]
     },
     {
+      "name": "nullable_remote_ips",
+      "type": [
+        "null",
+        {
+          "type": "array",
+          "items": "bytes"
+        }
+      ]
+    },
+    {
       "name": "person",
       "type": {
         "fields": [
