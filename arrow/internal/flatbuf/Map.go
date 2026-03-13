@@ -48,13 +48,12 @@ import (
 /// for Map can make Map an alias for List. The "layout" attribute for the Map
 /// field must have the same contents as a List.
 type Map struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsMap(buf []byte, offset flatbuffers.UOffsetT) *Map {
+func GetRootAsMap(buf []byte, offset flatbuffers.UOffsetT) (x Map) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Map{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -62,10 +61,9 @@ func FinishMapBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT) 
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsMap(buf []byte, offset flatbuffers.UOffsetT) *Map {
+func GetSizePrefixedRootAsMap(buf []byte, offset flatbuffers.UOffsetT) (x Map) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &Map{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -74,26 +72,22 @@ func FinishSizePrefixedMapBuffer(builder *flatbuffers.Builder, offset flatbuffer
 }
 
 func (rcv *Map) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Map) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 /// Set to true if the keys within each value are sorted
 func (rcv *Map) KeysSorted() bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return rcv._tab.GetBool(o + rcv._tab.Pos)
+		return rcv.GetBool(o + rcv.Pos)
 	}
 	return false
 }
 
 /// Set to true if the keys within each value are sorted
 func (rcv *Map) MutateKeysSorted(n bool) bool {
-	return rcv._tab.MutateBoolSlot(4, n)
+	return rcv.MutateBoolSlot(4, n)
 }
 
 func MapStart(builder *flatbuffers.Builder) {
