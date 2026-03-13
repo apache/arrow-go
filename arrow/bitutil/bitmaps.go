@@ -175,9 +175,12 @@ func (b *BitmapWriter) AppendBitmap(srcBitmap []byte, srcOffset int64, length in
 		return 0
 	}
 
-	// Finish current byte to ensure we're at a clean state
 	bitOffset := bits.TrailingZeros32(uint32(b.bitMask))
 	dstOffset := int64(b.byteOffset)*8 + int64(bitOffset)
+
+	// Flush curByte to buffer before CopyBitmap overwrites it
+	// Similar to how AppendBools writes curByte to appslice[0]
+	b.buf[b.byteOffset] = b.curByte
 
 	// Use CopyBitmap for efficient bit-level copying
 	CopyBitmap(srcBitmap, int(srcOffset), int(space), b.buf, int(dstOffset))
@@ -188,8 +191,9 @@ func (b *BitmapWriter) AppendBitmap(srcBitmap []byte, srcOffset int64, length in
 	b.bitMask = BitMask[newBitOffset]
 	b.byteOffset += (bitOffset + int(space)) / 8
 
-	// Update curByte to reflect the current byte's state
-	if b.pos < b.length {
+	// Reload curByte to reflect the current byte's state after CopyBitmap
+	// We must reload even if pos == length, as Finish() may need to write curByte
+	if b.byteOffset < len(b.buf) {
 		b.curByte = b.buf[b.byteOffset]
 	}
 

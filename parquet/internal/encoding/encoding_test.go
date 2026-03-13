@@ -908,3 +908,164 @@ func TestBooleanPlainDecoderAfterFlushing(t *testing.T) {
 	assert.Equal(t, n, 1)
 	assert.Equal(t, decSlice[0], false)
 }
+
+func TestBooleanPlainEncoderPutBitmap(t *testing.T) {
+	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Optional, -1), 0, 0)
+	enc := encoding.NewEncoder(parquet.Types.Boolean, parquet.Encodings.Plain, false, descr, memory.DefaultAllocator)
+	benc := enc.(encoding.BooleanEncoder)
+
+	// Create test bitmap
+	bitmapBytes := make([]byte, bitutil.BytesForBits(16))
+	expected := []bool{true, false, true, true, false, false, true, false,
+		false, true, false, true, false, true, false, true}
+	for i, bit := range expected {
+		if bit {
+			bitutil.SetBit(bitmapBytes, i)
+		}
+	}
+
+	// Write using PutBitmap
+	type bitmapEncoder interface {
+		PutBitmap(bitmap []byte, offset int64, length int64)
+	}
+	if bme, ok := benc.(bitmapEncoder); ok {
+		bme.PutBitmap(bitmapBytes, 0, 16)
+	} else {
+		t.Skip("Encoder does not support PutBitmap")
+	}
+
+	// Flush and decode
+	buf, err := benc.FlushValues()
+	assert.NoError(t, err)
+
+	dec := encoding.NewDecoder(parquet.Types.Boolean, parquet.Encodings.Plain, descr, memory.DefaultAllocator)
+	bdec := dec.(encoding.BooleanDecoder)
+	err = bdec.SetData(16, buf.Buf())
+	assert.NoError(t, err)
+
+	decoded := make([]bool, 16)
+	n, err := bdec.Decode(decoded)
+	assert.NoError(t, err)
+	assert.Equal(t, 16, n)
+	assert.Equal(t, expected, decoded)
+}
+
+func TestBooleanPlainEncoderPutBitmapUnaligned(t *testing.T) {
+	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Optional, -1), 0, 0)
+	enc := encoding.NewEncoder(parquet.Types.Boolean, parquet.Encodings.Plain, false, descr, memory.DefaultAllocator)
+	benc := enc.(encoding.BooleanEncoder)
+
+	// Create test bitmap with offset
+	srcBits := []bool{false, false, true, false, true, true, false, false, true, false}
+	bitmapBytes := make([]byte, bitutil.BytesForBits(int64(len(srcBits))))
+	for i, bit := range srcBits {
+		if bit {
+			bitutil.SetBit(bitmapBytes, i)
+		}
+	}
+
+	// Write 6 bits starting from offset 2
+	expected := srcBits[2:8]
+	type bitmapEncoder interface {
+		PutBitmap(bitmap []byte, offset int64, length int64)
+	}
+	if bme, ok := benc.(bitmapEncoder); ok {
+		bme.PutBitmap(bitmapBytes, 2, 6)
+	} else {
+		t.Skip("Encoder does not support PutBitmap")
+	}
+
+	// Flush and decode
+	buf, err := benc.FlushValues()
+	assert.NoError(t, err)
+
+	dec := encoding.NewDecoder(parquet.Types.Boolean, parquet.Encodings.Plain, descr, memory.DefaultAllocator)
+	bdec := dec.(encoding.BooleanDecoder)
+	err = bdec.SetData(6, buf.Buf())
+	assert.NoError(t, err)
+
+	decoded := make([]bool, 6)
+	n, err := bdec.Decode(decoded)
+	assert.NoError(t, err)
+	assert.Equal(t, 6, n)
+	assert.Equal(t, expected, decoded)
+}
+
+func TestBooleanPlainDecoderDecodeToBitmap(t *testing.T) {
+	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Optional, -1), 0, 0)
+	enc := encoding.NewEncoder(parquet.Types.Boolean, parquet.Encodings.Plain, false, descr, memory.DefaultAllocator)
+	benc := enc.(encoding.BooleanEncoder)
+
+	// Encode test data
+	expected := []bool{true, false, true, true, false, false, true, false,
+		false, true, false, true, false, true, false, true}
+	benc.Put(expected)
+	buf, err := benc.FlushValues()
+	assert.NoError(t, err)
+
+	// Decode using DecodeToBitmap
+	dec := encoding.NewDecoder(parquet.Types.Boolean, parquet.Encodings.Plain, descr, memory.DefaultAllocator)
+	bdec := dec.(encoding.BooleanDecoder)
+	err = bdec.SetData(16, buf.Buf())
+	assert.NoError(t, err)
+
+	outBitmap := make([]byte, bitutil.BytesForBits(16))
+	type bitmapDecoder interface {
+		DecodeToBitmap(out []byte, outOffset int64, length int) (int, error)
+	}
+	if bmd, ok := bdec.(bitmapDecoder); ok {
+		n, err := bmd.DecodeToBitmap(outBitmap, 0, 16)
+		assert.NoError(t, err)
+		assert.Equal(t, 16, n)
+
+		// Verify bitmap contents
+		for i, expectedBit := range expected {
+			actualBit := bitutil.BitIsSet(outBitmap, i)
+			assert.Equal(t, expectedBit, actualBit, "bit mismatch at position %d", i)
+		}
+	} else {
+		t.Skip("Decoder does not support DecodeToBitmap")
+	}
+}
+
+func TestBooleanPlainDecoderDecodeToBitmapUnaligned(t *testing.T) {
+	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Optional, -1), 0, 0)
+	enc := encoding.NewEncoder(parquet.Types.Boolean, parquet.Encodings.Plain, false, descr, memory.DefaultAllocator)
+	benc := enc.(encoding.BooleanEncoder)
+
+	// Encode test data
+	expected := []bool{true, false, true, true, false, false}
+	benc.Put(expected)
+	buf, err := benc.FlushValues()
+	assert.NoError(t, err)
+
+	// Decode to unaligned offset
+	dec := encoding.NewDecoder(parquet.Types.Boolean, parquet.Encodings.Plain, descr, memory.DefaultAllocator)
+	bdec := dec.(encoding.BooleanDecoder)
+	err = bdec.SetData(6, buf.Buf())
+	assert.NoError(t, err)
+
+	outBitmap := make([]byte, bitutil.BytesForBits(10)) // Extra space
+	type bitmapDecoder interface {
+		DecodeToBitmap(out []byte, outOffset int64, length int) (int, error)
+	}
+	if bmd, ok := bdec.(bitmapDecoder); ok {
+		// Decode starting at bit offset 3
+		n, err := bmd.DecodeToBitmap(outBitmap, 3, 6)
+		assert.NoError(t, err)
+		assert.Equal(t, 6, n)
+
+		// Verify bitmap contents at offset 3
+		for i, expectedBit := range expected {
+			actualBit := bitutil.BitIsSet(outBitmap, 3+i)
+			assert.Equal(t, expectedBit, actualBit, "bit mismatch at position %d", i)
+		}
+
+		// Verify bits 0-2 are unmodified (should be false)
+		for i := 0; i < 3; i++ {
+			assert.False(t, bitutil.BitIsSet(outBitmap, i), "bit at position %d should be false", i)
+		}
+	} else {
+		t.Skip("Decoder does not support DecodeToBitmap")
+	}
+}
