@@ -227,7 +227,7 @@ func (s *Struct) CastTo(to arrow.DataType) (Scalar, error) {
 		if i > 0 {
 			bld.WriteString(", ")
 		}
-		bld.WriteString(fmt.Sprintf("%s:%s = %s", st.Field(i).Name, st.Field(i).Type, v.String()))
+		fmt.Fprintf(&bld, "%s:%s = %s", st.Field(i).Name, st.Field(i).Type, v.String())
 	}
 	bld.WriteByte('}')
 	buf := memory.NewBufferBytes(bld.Bytes())
