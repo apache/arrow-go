@@ -939,8 +939,8 @@ func bigEndianToDecimal256(buf []byte) (decimal256.Num, error) {
 			result := initWord
 			if len(buf) > 0 {
 				// incorporate the actual values if present
-				// shift left enough bits to make room for the incoming int64
-				result = result << uint64(wordLen)
+				// shift left enough bits to make room for the incoming bytes
+				result = result << uint64(wordLen*8)
 				// preserve the upper bits by inplace OR-ing the int64
 				result |= uint64FromBigEndianShifted(word)
 			}
