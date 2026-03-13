@@ -430,7 +430,7 @@ func (s *SqlTestSuite) TestRowsManualPrematureClose() {
 	sb.WriteString(sqlInsert)
 
 	for i := 0; i < rowCount; i++ {
-		sb.WriteString(fmt.Sprintf(`('%s', %d),`, getRandomString(gen, randStringLen), gen.Int()))
+		fmt.Fprintf(&sb, `('%s', %d),`, getRandomString(gen, randStringLen), gen.Int())
 	}
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
@@ -515,7 +515,7 @@ func (s *SqlTestSuite) TestRowsNormalExhaustion() {
 	sb.WriteString(sqlInsert)
 
 	for i := 0; i < rowCount; i++ {
-		sb.WriteString(fmt.Sprintf(`('%s', %d),`, getRandomString(gen, randStringLen), gen.Int()))
+		fmt.Fprintf(&sb, `('%s', %d),`, getRandomString(gen, randStringLen), gen.Int())
 	}
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
@@ -607,7 +607,7 @@ func (s *SqlTestSuite) TestRowsPrematureCloseDuringNextLoop() {
 	sb.WriteString(sqlInsert)
 
 	for i := 0; i < rowCount; i++ {
-		sb.WriteString(fmt.Sprintf(`('%s', %d),`, getRandomString(gen, randStringLen), gen.Int()))
+		fmt.Fprintf(&sb, `('%s', %d),`, getRandomString(gen, randStringLen), gen.Int())
 	}
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
@@ -701,7 +701,7 @@ func (s *SqlTestSuite) TestRowsInterruptionByContextManualCancellation() {
 	sb.WriteString(sqlInsert)
 
 	for i := 0; i < rowCount; i++ {
-		sb.WriteString(fmt.Sprintf(`('%s', %d),`, getRandomString(gen, randStringLen), gen.Int()))
+		fmt.Fprintf(&sb, `('%s', %d),`, getRandomString(gen, randStringLen), gen.Int())
 	}
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
@@ -789,7 +789,7 @@ func (s *SqlTestSuite) TestRowsInterruptionByContextTimeout() {
 	sb.WriteString(sqlInsert)
 
 	for i := 0; i < rowCount; i++ {
-		sb.WriteString(fmt.Sprintf(`('%s', %d),`, getRandomString(gen, randStringLen), gen.Int()))
+		fmt.Fprintf(&sb, `('%s', %d),`, getRandomString(gen, randStringLen), gen.Int())
 	}
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
@@ -881,7 +881,7 @@ func (s *SqlTestSuite) TestRowsManualPrematureCloseStmt() {
 	sb.WriteString(sqlInsert)
 
 	for i := 0; i < rowCount; i++ {
-		sb.WriteString(fmt.Sprintf(`('%s', %d),`, getRandomString(gen, randStringLen), gen.Int()))
+		fmt.Fprintf(&sb, `('%s', %d),`, getRandomString(gen, randStringLen), gen.Int())
 	}
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
@@ -972,7 +972,7 @@ func (s *SqlTestSuite) TestRowsNormalExhaustionStmt() {
 	sb.WriteString(sqlInsert)
 
 	for i := 0; i < rowCount; i++ {
-		sb.WriteString(fmt.Sprintf(`('%s', %d),`, getRandomString(gen, randStringLen), gen.Int()))
+		fmt.Fprintf(&sb, `('%s', %d),`, getRandomString(gen, randStringLen), gen.Int())
 	}
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
@@ -1067,7 +1067,7 @@ func (s *SqlTestSuite) TestRowsPrematureCloseDuringNextLoopStmt() {
 	sb.WriteString(sqlInsert)
 
 	for i := 0; i < rowCount; i++ {
-		sb.WriteString(fmt.Sprintf(`('%s', %d),`, getRandomString(gen, randStringLen), gen.Int()))
+		fmt.Fprintf(&sb, `('%s', %d),`, getRandomString(gen, randStringLen), gen.Int())
 	}
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
@@ -1167,7 +1167,7 @@ func (s *SqlTestSuite) TestRowsInterruptionByContextManualCancellationStmt() {
 	sb.WriteString(sqlInsert)
 
 	for i := 0; i < rowCount; i++ {
-		sb.WriteString(fmt.Sprintf(`('%s', %d),`, getRandomString(gen, randStringLen), gen.Int()))
+		fmt.Fprintf(&sb, `('%s', %d),`, getRandomString(gen, randStringLen), gen.Int())
 	}
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
@@ -1258,7 +1258,7 @@ func (s *SqlTestSuite) TestRowsInterruptionByContextTimeoutStmt() {
 	sb.WriteString(sqlInsert)
 
 	for i := 0; i < rowCount; i++ {
-		sb.WriteString(fmt.Sprintf(`('%s', %d),`, getRandomString(gen, randStringLen), gen.Int()))
+		fmt.Fprintf(&sb, `('%s', %d),`, getRandomString(gen, randStringLen), gen.Int())
 	}
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")

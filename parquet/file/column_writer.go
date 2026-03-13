@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"strconv"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -449,8 +448,7 @@ func (w *columnWriter) writeLevels(numValues int64, defLevels, repLevels []int16
 	// if the field is required and non-repeated, no definition levels
 	if defLevels != nil && maxDefLevel > 0 {
 		for _, v := range defLevels[:numValues] {
-			debug.Assert(v <= maxDefLevel, "columnwriter: invalid definition level "+
-				strconv.Itoa(int(v))+" for column "+w.descr.Path())
+			debug.Assert(v <= maxDefLevel, "columnwriter: invalid definition level")
 			if v == maxDefLevel {
 				toWrite++
 			}
