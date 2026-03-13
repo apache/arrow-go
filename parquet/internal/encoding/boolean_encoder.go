@@ -64,6 +64,33 @@ func (enc *PlainBooleanEncoder) Put(in []bool) {
 	}
 }
 
+// PutBitmap encodes boolean values directly from a bitmap without converting to []bool.
+// This avoids the 8x memory overhead of bool slices.
+func (enc *PlainBooleanEncoder) PutBitmap(bitmap []byte, offset int64, length int64) {
+	if enc.bitsBuffer == nil {
+		enc.bitsBuffer = make([]byte, boolBufSize)
+	}
+	if enc.wr == nil {
+		enc.wr = utils.NewBitmapWriter(enc.bitsBuffer, 0, boolsInBuf)
+	}
+	if length == 0 {
+		return
+	}
+
+	for length > 0 {
+		n := enc.wr.AppendBitmap(bitmap, offset, length)
+		offset += n
+		length -= n
+
+		if length > 0 {
+			// Buffer is full, flush it
+			enc.wr.Finish()
+			enc.append(enc.bitsBuffer)
+			enc.wr.Reset(0, boolsInBuf)
+		}
+	}
+}
+
 // PutSpaced will use the validBits bitmap to determine which values are nulls
 // and can be left out from the slice, and the encoded without those nulls.
 func (enc *PlainBooleanEncoder) PutSpaced(in []bool, validBits []byte, validBitsOffset int64) {

@@ -862,3 +862,94 @@ func TestWriteDataFailure(t *testing.T) {
 	assert.Equal(t, err, failureErr)
 	assert.Equal(t, int64(0), wr.TotalBytesWritten())
 }
+
+func (b *BooleanValueWriterSuite) TestWriteBitmapBatch() {
+	b.SetupSchema(parquet.Repetitions.Required, 1)
+	writer := b.buildWriter(SmallSize, parquet.DefaultColumnProperties(), parquet.WithVersion(parquet.V1_0)).(*file.BooleanColumnChunkWriter)
+
+	// Create test bitmap with alternating pattern for SmallSize elements
+	expected := make([]bool, SmallSize)
+	bitmapBytes := make([]byte, bitutil.BytesForBits(int64(SmallSize)))
+	for i := 0; i < SmallSize; i++ {
+		val := (i % 4) < 2 // Pattern: true, true, false, false, repeat
+		expected[i] = val
+		if val {
+			bitutil.SetBit(bitmapBytes, i)
+		}
+	}
+
+	// Write using WriteBitmapBatch
+	n, err := writer.WriteBitmapBatch(bitmapBytes, 0, SmallSize, nil, nil)
+	b.NoError(err)
+	b.Equal(int64(SmallSize), n)
+
+	writer.Close()
+	b.readColumn(compress.Codecs.Uncompressed)
+	b.Equal(expected, b.ValuesOut)
+}
+
+func (b *BooleanValueWriterSuite) TestWriteBitmapBatchUnaligned() {
+	b.SetupSchema(parquet.Repetitions.Required, 1)
+	writer := b.buildWriter(SmallSize, parquet.DefaultColumnProperties(), parquet.WithVersion(parquet.V1_0)).(*file.BooleanColumnChunkWriter)
+
+	// Create source bitmap with more elements
+	srcSize := SmallSize + 10
+	srcBits := make([]bool, srcSize)
+	bitmapBytes := make([]byte, bitutil.BytesForBits(int64(srcSize)))
+	for i := 0; i < srcSize; i++ {
+		val := (i % 3) == 0
+		srcBits[i] = val
+		if val {
+			bitutil.SetBit(bitmapBytes, i)
+		}
+	}
+
+	// Write SmallSize bits starting from offset 5
+	expected := srcBits[5 : 5+SmallSize]
+	n, err := writer.WriteBitmapBatch(bitmapBytes, 5, SmallSize, nil, nil)
+	b.NoError(err)
+	b.Equal(int64(SmallSize), n)
+
+	writer.Close()
+	b.readColumn(compress.Codecs.Uncompressed)
+	b.Equal(expected, b.ValuesOut)
+}
+
+func (b *BooleanValueWriterSuite) TestWriteBitmapBatchSpaced() {
+	b.SetupSchema(parquet.Repetitions.Optional, 1)
+	b.descr = b.Schema.Column(0)
+
+	// Create test data with nulls (every 4th element is null)
+	bitmapBytes := make([]byte, bitutil.BytesForBits(int64(SmallSize)))
+	validBits := make([]byte, bitutil.BytesForBits(int64(SmallSize)))
+	defLevels := make([]int16, SmallSize)
+	expected := make([]bool, 0)
+
+	for i := 0; i < SmallSize; i++ {
+		if i%4 == 0 {
+			// Null value
+			defLevels[i] = 0
+		} else {
+			// Valid value
+			defLevels[i] = 1
+			bitutil.SetBit(validBits, i)
+			val := (i % 3) == 1
+			if val {
+				bitutil.SetBit(bitmapBytes, i)
+			}
+			expected = append(expected, val)
+		}
+	}
+
+	writer := b.buildWriter(int64(SmallSize), parquet.DefaultColumnProperties(), parquet.WithVersion(parquet.V1_0)).(*file.BooleanColumnChunkWriter)
+	writer.WriteBitmapBatchSpaced(bitmapBytes, 0, SmallSize, defLevels, nil, validBits, 0)
+	writer.Close()
+
+	// Read back with proper def levels setup
+	b.GenerateData(SmallSize) // This initializes DefLevels and DefLevelsOut properly for optional
+	values := b.readColumn(compress.Codecs.Uncompressed)
+	b.Equal(int64(len(expected)), values) // Should read only non-null values
+
+	// ValuesOut should contain only the non-null values
+	b.Equal(expected, b.ValuesOut.([]bool)[:values])
+}
