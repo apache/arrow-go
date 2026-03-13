@@ -106,7 +106,7 @@ func arrowSchemafromAvro(n *schemaNode) {
 			k := strconv.FormatInt(int64(index), 10)
 			symbols[k] = symbol
 		}
-		var dt = arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint64, ValueType: arrow.BinaryTypes.String, Ordered: false}
+		dt := arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint64, ValueType: arrow.BinaryTypes.String, Ordered: false}
 		sl := int64(len(symbols))
 		switch {
 		case sl <= math.MaxUint8:
