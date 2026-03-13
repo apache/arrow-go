@@ -717,14 +717,22 @@ func (c *columnIterator) FindChunkForRow(rowIdx int64) (file.PageReader, int64, 
 		arrow.ErrInvalid, rowIdx, idx)
 }
 
-func (c *columnIterator) NextChunk() (file.PageReader, error) {
+func (c *columnIterator) NextChunk() (file.PageReader, int64, int64, error) {
 	if len(c.rowGroups) == 0 || c.rgIdx >= len(c.rowGroups) {
-		return nil, nil
+		return nil, 0, 0, nil
 	}
 
 	rgr := c.rdr.RowGroup(c.rowGroups[c.rgIdx])
+	numRows := rgr.NumRows()
+
+	var uncompressedBytes int64
+	if colMeta, err := rgr.MetaData().ColumnChunk(c.index); err == nil {
+		uncompressedBytes = colMeta.TotalUncompressedSize()
+	}
+
 	c.rgIdx++
-	return rgr.GetColumnPageReader(c.index)
+	pr, err := rgr.GetColumnPageReader(c.index)
+	return pr, uncompressedBytes, numRows, err
 }
 
 func (c *columnIterator) Descr() *schema.Column { return c.schema.Column(c.index) }

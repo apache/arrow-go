@@ -33,11 +33,11 @@ require (
 	github.com/klauspost/cpuid/v2 v2.3.0
 	github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8
 	github.com/minio/c2goasm v0.0.0-20190812172519-36a3d3bbc4f3
-	github.com/pierrec/lz4/v4 v4.1.25
+	github.com/pierrec/lz4/v4 v4.1.26
 	github.com/pterm/pterm v0.12.83
 	github.com/stoewer/go-strcase v1.3.1
 	github.com/stretchr/testify v1.11.1
-	github.com/substrait-io/substrait-go/v7 v7.5.0
+	github.com/substrait-io/substrait-go/v7 v7.5.1
 	github.com/substrait-io/substrait-protobuf/go v0.81.0
 	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.1.0
@@ -47,7 +47,7 @@ require (
 	golang.org/x/tools v0.42.0
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da
 	gonum.org/v1/gonum v0.17.0
-	google.golang.org/grpc v1.79.1
+	google.golang.org/grpc v1.79.2
 	google.golang.org/protobuf v1.36.11
 	modernc.org/sqlite v1.46.1
 )

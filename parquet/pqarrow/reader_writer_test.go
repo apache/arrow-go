@@ -355,6 +355,144 @@ func BenchmarkWriteTableCompressed(b *testing.B) {
 	}
 }
 
+// BenchmarkPreAllocBinaryData measures the read throughput of a two-column
+// parquet file — a slim string id column and a fat binary blob column — with
+// and without the PreAllocBinaryData optimisation enabled.
+//
+// # Workload
+//
+// The file uses 2 row groups of 484 rows each, with blob values of 5 KB–50 KB
+// (avg ~27 KB/row, ~26 MB total uncompressed). This is proportionally identical
+// to the production workload (~105 MB/RG) while keeping benchmark setup fast.
+//
+//	id column:   10–50 B ASCII strings, no nulls
+//	blob column: 5 KB–50 KB per value, 5% nulls, Zstd compression
+//
+// # Sub-benchmarks
+//
+//	prealloc=false/batchAll        baseline: no pre-allocation, entire file in one pass
+//	prealloc=false/batchPerRG      baseline: no pre-allocation, one batch per row group
+//	prealloc=false/batchQuarterRG  baseline: no pre-allocation, four batches per row group
+//	prealloc=true/batchAll         optimised: full file in one pass
+//	prealloc=true/batchPerRG       optimised: one batch per row group
+//	prealloc=true/batchQuarterRG   optimised: four batches per row group
+//
+// Run with:
+//
+//	go test ./parquet/pqarrow/ -run='^$' -bench=BenchmarkPreAllocBinaryData -benchmem -count=3
+//
+// Compare B/op and allocs/op between prealloc=false and prealloc=true to
+// quantify the reduction in intermediate BinaryBuilder reallocations.
+func BenchmarkPreAllocBinaryData(b *testing.B) {
+	const (
+		numRGs    = 2
+		rowsPerRG = 484
+		totalRows = numRGs * rowsPerRG
+	)
+
+	mem := memory.DefaultAllocator
+	writerProps := parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(false),
+		parquet.WithCompression(compress.Codecs.Zstd),
+	)
+
+	// --- build slim id column: 10–50 B ASCII strings, no nulls ---
+	idRng := rand.New(rand.NewPCG(11, 0))
+	idBldr := array.NewStringBuilder(mem)
+	for i := 0; i < totalRows; i++ {
+		length := 10 + int(idRng.IntN(41))
+		val := make([]byte, length)
+		for j := range val {
+			val[j] = byte('a' + idRng.IntN(26))
+		}
+		idBldr.Append(string(val))
+	}
+	idArr := idBldr.NewArray()
+	idBldr.Release()
+	b.Cleanup(func() { idArr.Release() })
+
+	// --- build fat blob column: 5 KB–50 KB per value, 5% nulls ---
+	// avg ~27 KB/row × 484 rows ≈ 13 MB uncompressed per row group.
+	// Proportionally identical to the production workload while keeping
+	// benchmark setup fast.
+	blobRng := rand.New(rand.NewPCG(22, 0))
+	blobBldr := array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
+	for i := 0; i < totalRows; i++ {
+		if blobRng.Float64() < 0.05 {
+			blobBldr.AppendNull()
+			continue
+		}
+		length := 5_000 + int(blobRng.IntN(45_001)) // 5 KB–50 KB
+		val := make([]byte, length)
+		for j := range val {
+			val[j] = byte(blobRng.IntN(256))
+		}
+		blobBldr.Append(val)
+	}
+	blobArr := blobBldr.NewArray()
+	blobBldr.Release()
+	b.Cleanup(func() { blobArr.Release() })
+
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.BinaryTypes.String, Nullable: false},
+		{Name: "blob", Type: arrow.BinaryTypes.Binary, Nullable: true},
+	}, nil)
+
+	idChk := arrow.NewChunked(sc.Field(0).Type, []arrow.Array{idArr})
+	blobChk := arrow.NewChunked(sc.Field(1).Type, []arrow.Array{blobArr})
+	idCol := arrow.NewColumn(sc.Field(0), idChk)
+	blobCol := arrow.NewColumn(sc.Field(1), blobChk)
+	idChk.Release()
+	blobChk.Release()
+	tbl := array.NewTable(sc, []arrow.Column{*idCol, *blobCol}, int64(totalRows))
+	idCol.Release()
+	blobCol.Release()
+	b.Cleanup(func() { tbl.Release() })
+
+	// Write once; reuse parquetData across all sub-benchmarks and b.N iterations.
+	var buf bytes.Buffer
+	require.NoError(b, pqarrow.WriteTable(tbl, &buf, int64(rowsPerRG), writerProps, pqarrow.DefaultWriterProps()))
+	parquetData := buf.Bytes()
+
+	batchSizes := []struct {
+		name string
+		size int64
+	}{
+		{"batchAll", 0},
+		{"batchPerRG", rowsPerRG},
+		{"batchQuarterRG", rowsPerRG / 4},
+	}
+
+	for _, prealloc := range []bool{false, true} {
+		prealloc := prealloc
+		b.Run(fmt.Sprintf("prealloc=%v", prealloc), func(b *testing.B) {
+			for _, bs := range batchSizes {
+				bs := bs
+				b.Run(bs.name, func(b *testing.B) {
+					ctx := context.Background()
+					b.ResetTimer()
+					b.ReportAllocs()
+					b.SetBytes(int64(len(parquetData)))
+
+					for n := 0; n < b.N; n++ {
+						pf, err := file.NewParquetReader(bytes.NewReader(parquetData))
+						require.NoError(b, err)
+						props := pqarrow.ArrowReadProperties{
+							PreAllocBinaryData: prealloc,
+							BatchSize:          bs.size,
+						}
+						reader, err := pqarrow.NewFileReader(pf, props, mem)
+						require.NoError(b, err)
+						out, err := reader.ReadTable(ctx)
+						require.NoError(b, err)
+						out.Release()
+					}
+				})
+			}
+		})
+	}
+}
+
 func BenchmarkReadTableCompressed(b *testing.B) {
 	ctx := context.Background()
 	mem := memory.DefaultAllocator
