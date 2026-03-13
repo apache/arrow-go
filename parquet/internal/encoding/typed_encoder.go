@@ -123,6 +123,8 @@ func (floatEncodingTraits[T]) Encoder(e format.Encoding, useDict bool, descr *sc
 				encoder: newEncoderBase(e, descr, mem),
 			},
 		}
+	case format.Encoding_ALP:
+		return newAlpEncoder[T](e, descr, mem)
 	default:
 		panic("unimplemented encoding for float types: " + e.String())
 	}
@@ -243,6 +245,8 @@ func (floatDecoderTraits[T]) Decoder(e parquet.Encoding, descr *schema.Column, u
 		return &PlainDecoder[T]{decoder: newDecoderBase(format.Encoding(e), descr)}
 	case parquet.Encodings.ByteStreamSplit:
 		return &ByteStreamSplitDecoder[T]{decoder: newDecoderBase(format.Encoding(e), descr)}
+	case parquet.Encodings.ALP:
+		return &alpDecoder[T]{decoder: newDecoderBase(format.Encoding(e), descr)}
 	default:
 		panic("unimplemented encoding for float types: " + e.String())
 	}
