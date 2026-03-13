@@ -18,6 +18,7 @@ package extensions
 
 import (
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/extensions/geoarrow"
 )
 
 var canonicalExtensionTypes = []arrow.ExtensionType{
@@ -27,7 +28,8 @@ var canonicalExtensionTypes = []arrow.ExtensionType{
 	&JSONType{},
 	&VariantType{},
 	// GeoArrow extension types
-	NewPointType(),
+	geoarrow.NewWKBType(),
+	geoarrow.NewPointType(),
 }
 
 func init() {
