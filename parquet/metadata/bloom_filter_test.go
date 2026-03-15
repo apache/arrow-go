@@ -360,3 +360,137 @@ func TestAdaptiveBloomFilterEndToEnd(t *testing.T) {
 			len(bf.candidates), bf.optimalCandidate().bloomFilter.Size())
 	})
 }
+
+func TestGetHashesFromBitmap(t *testing.T) {
+	mem := memory.DefaultAllocator
+	bf := NewBloomFilter(32, 1024, mem)
+	hasher := bf.Hasher()
+
+	t.Run("empty bitmap", func(t *testing.T) {
+		hashes := GetHashesFromBitmap(hasher, []byte{}, 0, 0)
+		assert.Empty(t, hashes)
+	})
+
+	t.Run("single byte aligned", func(t *testing.T) {
+		bitmap := []byte{0b10101010} // alternating true/false
+		numValues := int64(8)
+		
+		hashes := GetHashesFromBitmap(hasher, bitmap, 0, numValues)
+		assert.Len(t, hashes, 8)
+		
+		// Verify each hash corresponds to the bit value
+		// Bit 0 = 0 (false), Bit 1 = 1 (true), Bit 2 = 0 (false), etc.
+		for i := int64(0); i < numValues; i++ {
+			val := bitutil.BitIsSet(bitmap, int(i))
+			expectedHash := GetHash(hasher, val)
+			assert.Equal(t, expectedHash, hashes[i], "hash mismatch at position %d", i)
+		}
+	})
+
+	t.Run("unaligned offset", func(t *testing.T) {
+		// Create bitmap: [0,0,0,1,1,0,1,0, 1,1,1,...]
+		bitmap := make([]byte, 2)
+		bitutil.SetBit(bitmap, 3)
+		bitutil.SetBit(bitmap, 4)
+		bitutil.SetBit(bitmap, 6)
+		bitutil.SetBit(bitmap, 8)
+		bitutil.SetBit(bitmap, 9)
+		bitutil.SetBit(bitmap, 10)
+		
+		// Read 5 bits starting from offset 3: [1,1,0,1,0]
+		offset := int64(3)
+		numValues := int64(5)
+		
+		hashes := GetHashesFromBitmap(hasher, bitmap, offset, numValues)
+		assert.Len(t, hashes, 5)
+		
+		// Verify the hashes match the bit values at the offset
+		for i := int64(0); i < numValues; i++ {
+			val := bitutil.BitIsSet(bitmap, int(offset+i))
+			expectedHash := GetHash(hasher, val)
+			assert.Equal(t, expectedHash, hashes[i], "hash mismatch at offset %d position %d", offset, i)
+		}
+	})
+
+	t.Run("all true bits", func(t *testing.T) {
+		bitmap := []byte{0xFF, 0xFF} // all bits set
+		numValues := int64(16)
+		
+		hashes := GetHashesFromBitmap(hasher, bitmap, 0, numValues)
+		assert.Len(t, hashes, 16)
+		
+		// All hashes should be identical (hash of true)
+		expectedHash := GetHash(hasher, true)
+		for i, hash := range hashes {
+			assert.Equal(t, expectedHash, hash, "hash mismatch at position %d", i)
+		}
+	})
+
+	t.Run("all false bits", func(t *testing.T) {
+		bitmap := []byte{0x00, 0x00} // all bits clear
+		numValues := int64(16)
+		
+		hashes := GetHashesFromBitmap(hasher, bitmap, 0, numValues)
+		assert.Len(t, hashes, 16)
+		
+		// All hashes should be identical (hash of false)
+		expectedHash := GetHash(hasher, false)
+		for i, hash := range hashes {
+			assert.Equal(t, expectedHash, hash, "hash mismatch at position %d", i)
+		}
+	})
+
+	t.Run("large bitmap", func(t *testing.T) {
+		numValues := int64(1000)
+		bitmap := make([]byte, bitutil.BytesForBits(numValues))
+		
+		// Set every 3rd bit
+		for i := int64(0); i < numValues; i += 3 {
+			bitutil.SetBit(bitmap, int(i))
+		}
+		
+		hashes := GetHashesFromBitmap(hasher, bitmap, 0, numValues)
+		assert.Len(t, hashes, 1000)
+		
+		// Verify hashes match bit values
+		hashTrue := GetHash(hasher, true)
+		hashFalse := GetHash(hasher, false)
+		
+		for i := int64(0); i < numValues; i++ {
+			if i%3 == 0 {
+				assert.Equal(t, hashTrue, hashes[i], "expected true hash at position %d", i)
+			} else {
+				assert.Equal(t, hashFalse, hashes[i], "expected false hash at position %d", i)
+			}
+		}
+	})
+
+	t.Run("consistency with GetHash", func(t *testing.T) {
+		// Verify that GetHashesFromBitmap produces same results as GetHash for each bool
+		testCases := []struct {
+			name   string
+			bitmap []byte
+			offset int64
+			count  int64
+		}{
+			{"aligned_8", []byte{0b10110100}, 0, 8},
+			{"unaligned_start", []byte{0xFF, 0x00}, 3, 10},
+			{"single_bit", []byte{0b00000001}, 0, 1},
+			{"partial_byte", []byte{0b11110000}, 2, 5},
+		}
+		
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				hashes := GetHashesFromBitmap(hasher, tc.bitmap, tc.offset, tc.count)
+				
+				// Generate expected hashes using GetHash on individual bools
+				for i := int64(0); i < tc.count; i++ {
+					val := bitutil.BitIsSet(tc.bitmap, int(tc.offset+i))
+					expectedHash := GetHash(hasher, val)
+					assert.Equal(t, expectedHash, hashes[i], 
+						"hash mismatch at position %d (bit value: %v)", i, val)
+				}
+			})
+		}
+	})
+}
