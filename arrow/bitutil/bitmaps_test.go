@@ -596,3 +596,133 @@ func BenchmarkBitmapAnd(b *testing.B) {
 		})
 	}
 }
+
+func TestBitmapWriterAppendBitmap(t *testing.T) {
+	tests := []struct {
+		name       string
+		srcBits    []bool
+		dstOffset  int
+		srcOffset  int64
+		length     int64
+		wantResult []bool
+	}{
+		{
+			name:       "append_aligned",
+			srcBits:    []bool{true, false, true, true, false, false, true, false},
+			dstOffset:  0,
+			srcOffset:  0,
+			length:     8,
+			wantResult: []bool{true, false, true, true, false, false, true, false},
+		},
+		{
+			name:       "append_unaligned_source",
+			srcBits:    []bool{false, false, true, false, true, true, false, false, true, false},
+			dstOffset:  0,
+			srcOffset:  2,
+			length:     6,
+			wantResult: []bool{true, false, true, true, false, false},
+		},
+		{
+			name:       "append_unaligned_dest",
+			srcBits:    []bool{true, true, false, false},
+			dstOffset:  3,
+			srcOffset:  0,
+			length:     4,
+			wantResult: []bool{true, true, false, false},
+		},
+		{
+			name:       "append_partial_byte",
+			srcBits:    []bool{true, false, true},
+			dstOffset:  0,
+			srcOffset:  0,
+			length:     3,
+			wantResult: []bool{true, false, true},
+		},
+		{
+			name:       "append_multiple_bytes",
+			srcBits:    []bool{true, false, true, false, true, false, true, false, false, true, false, true, false, true, false, true},
+			dstOffset:  0,
+			srcOffset:  0,
+			length:     16,
+			wantResult: []bool{true, false, true, false, true, false, true, false, false, true, false, true, false, true, false, true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create source bitmap
+			srcBytes := make([]byte, bitutil.BytesForBits(int64(len(tt.srcBits))))
+			for i, bit := range tt.srcBits {
+				if bit {
+					bitutil.SetBit(srcBytes, i)
+				}
+			}
+
+			// Create destination bitmap
+			dstBytes := make([]byte, bitutil.BytesForBits(int64(tt.dstOffset+len(tt.wantResult))))
+			writer := bitutil.NewBitmapWriter(dstBytes, tt.dstOffset, len(tt.wantResult))
+
+			// Append bitmap
+			written := writer.AppendBitmap(srcBytes, tt.srcOffset, tt.length)
+			writer.Finish()
+
+			// Verify
+			assert.Equal(t, tt.length, written, "wrong number of bits written")
+			for i, expectedBit := range tt.wantResult {
+				actualBit := bitutil.BitIsSet(dstBytes, tt.dstOffset+i)
+				assert.Equal(t, expectedBit, actualBit, "bit mismatch at position %d", i)
+			}
+		})
+	}
+}
+
+func TestBitmapWriterAppendBitmapEmpty(t *testing.T) {
+	dstBytes := make([]byte, 10)
+	writer := bitutil.NewBitmapWriter(dstBytes, 0, 8)
+
+	// Append zero bits
+	written := writer.AppendBitmap([]byte{0xFF}, 0, 0)
+	assert.Equal(t, int64(0), written)
+}
+
+func TestBitmapWriterAppendBitmapFull(t *testing.T) {
+	dstBytes := make([]byte, 1)
+	writer := bitutil.NewBitmapWriter(dstBytes, 0, 4)
+
+	srcBytes := []byte{0xFF}
+
+	// Write 4 bits
+	written := writer.AppendBitmap(srcBytes, 0, 4)
+	assert.Equal(t, int64(4), written)
+
+	// Try to write more (should write 0 since buffer is full)
+	written = writer.AppendBitmap(srcBytes, 0, 4)
+	assert.Equal(t, int64(0), written)
+}
+
+func TestBitmapWriterAppendBitmapLarge(t *testing.T) {
+	// Test with large bitmap (1024 bits = 128 bytes)
+	numBits := 1024
+	srcBytes := make([]byte, bitutil.BytesForBits(int64(numBits)))
+	dstBytes := make([]byte, bitutil.BytesForBits(int64(numBits)))
+
+	// Create alternating pattern
+	for i := 0; i < numBits; i++ {
+		if i%2 == 0 {
+			bitutil.SetBit(srcBytes, i)
+		}
+	}
+
+	writer := bitutil.NewBitmapWriter(dstBytes, 0, numBits)
+	written := writer.AppendBitmap(srcBytes, 0, int64(numBits))
+	writer.Finish()
+
+	assert.Equal(t, int64(numBits), written)
+
+	// Verify pattern
+	for i := 0; i < numBits; i++ {
+		expected := i%2 == 0
+		actual := bitutil.BitIsSet(dstBytes, i)
+		assert.Equal(t, expected, actual, "bit mismatch at position %d", i)
+	}
+}

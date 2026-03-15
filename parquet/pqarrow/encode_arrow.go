@@ -260,22 +260,30 @@ func writeDenseArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, leafArr 
 		if leafArr.DataType().ID() != arrow.BOOL {
 			return fmt.Errorf("type mismatch, column is %s, array is %s", cw.Type(), leafArr.DataType().ID())
 		}
-		// TODO(mtopol): optimize this so that we aren't converting from
-		// the bitmap -> []bool -> bitmap anymore
 		if leafArr.Len() == 0 {
 			_, err = wr.WriteBatch(nil, defLevels, repLevels)
 			break
 		}
 
-		ctx.dataBuffer.ResizeNoShrink(leafArr.Len())
-		buf := ctx.dataBuffer.Bytes()
-		data := *(*[]bool)(unsafe.Pointer(&buf))
-		for idx := range data {
-			data[idx] = leafArr.(*array.Boolean).Value(idx)
-		}
+		// Optimized path for non-nullable: write directly from bitmap without conversion to []bool
+		// For nullable columns, fall back to []bool conversion to properly handle null positions
 		if !maybeParentNulls && noNulls {
-			wr.WriteBatch(data, defLevels, repLevels)
+			boolArr := leafArr.(*array.Boolean)
+			bitmapBytes := boolArr.Data().Buffers()[1].Bytes() // value bitmap
+			bitmapOffset := int64(boolArr.Data().Offset())
+			numValues := leafArr.Len()
+
+			// Non-nullable: use direct bitmap write
+			_, err = wr.WriteBitmapBatch(bitmapBytes, bitmapOffset, numValues, defLevels, repLevels)
 		} else {
+			// Nullable: use []bool path to properly handle nulls
+			// (bitmap values at null positions are undefined)
+			ctx.dataBuffer.ResizeNoShrink(leafArr.Len())
+			buf := ctx.dataBuffer.Bytes()
+			data := *(*[]bool)(unsafe.Pointer(&buf))
+			for idx := range data {
+				data[idx] = leafArr.(*array.Boolean).Value(idx)
+			}
 			wr.WriteBatchSpaced(data, defLevels, repLevels, leafArr.NullBitmapBytes(), int64(leafArr.Data().Offset()))
 		}
 	case *file.Int32ColumnChunkWriter:

@@ -119,6 +119,55 @@ func (dec *PlainBooleanDecoder) Decode(out []bool) (int, error) {
 	return max, nil
 }
 
+// DecodeToBitmap decodes boolean values directly to a bitmap without converting through []bool.
+// This avoids the 8x memory overhead of bool slices.
+// Returns the number of values decoded.
+func (dec *PlainBooleanDecoder) DecodeToBitmap(out []byte, outOffset int64, length int) (int, error) {
+	max := shared_utils.Min(length, dec.nvals)
+	if max == 0 {
+		return 0, nil
+	}
+
+	// Check if we're aligned and can do a fast copy
+	if dec.bitOffset == 0 && outOffset%8 == 0 {
+		// Fast path: both source and destination are byte-aligned
+		bytesToCopy := bitutil.BytesForBits(int64(max))
+		srcSlice := dec.data[:bytesToCopy]
+		dstSlice := out[outOffset/8 : outOffset/8+int64(bytesToCopy)]
+
+		// Handle full bytes
+		fullBytes := max / 8
+		if fullBytes > 0 {
+			copy(dstSlice, srcSlice[:fullBytes])
+		}
+
+		// Handle trailing bits
+		trailingBits := max % 8
+		if trailingBits > 0 {
+			lastByte := srcSlice[fullBytes]
+			mask := byte((1 << trailingBits) - 1)
+			dstSlice[fullBytes] = (dstSlice[fullBytes] &^ mask) | (lastByte & mask)
+		}
+
+		dec.data = dec.data[bytesToCopy:]
+		dec.nvals -= max
+		return max, nil
+	}
+
+	// Slow path: use CopyBitmap for unaligned cases
+	srcBitOffset := dec.bitOffset
+	bitutil.CopyBitmap(dec.data, srcBitOffset, max, out, int(outOffset))
+
+	// Update decoder state
+	totalBitsRead := srcBitOffset + max
+	bytesConsumed := totalBitsRead / 8
+	dec.data = dec.data[bytesConsumed:]
+	dec.bitOffset = totalBitsRead % 8
+	dec.nvals -= max
+
+	return max, nil
+}
+
 // DecodeSpaced is like Decode except it expands the values to leave spaces for null
 // as determined by the validBits bitmap.
 func (dec *PlainBooleanDecoder) DecodeSpaced(out []bool, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
