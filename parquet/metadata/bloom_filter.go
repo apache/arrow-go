@@ -155,6 +155,37 @@ func GetHashesFromBitmap(h Hasher, bitmap []byte, bitmapOffset int64, numValues 
 	return out
 }
 
+// GetSpacedHashesFromBitmap computes hashes for boolean values from a bitmap with validity information,
+// only hashing valid (non-null) values. Returns hashes for numValid values.
+// This avoids the 8x memory overhead of converting to []bool.
+func GetSpacedHashesFromBitmap(h Hasher, numValid int64, bitmap []byte, bitmapOffset int64, numValues int64, validBits []byte, validBitsOffset int64) []uint64 {
+	if numValid == 0 {
+		return []uint64{}
+	}
+
+	out := make([]uint64, 0, numValid)
+
+	// Use SetBitRunReader to efficiently iterate over valid values
+	setReader := bitutils.NewSetBitRunReader(validBits, validBitsOffset, numValues)
+	for {
+		run := setReader.NextRun()
+		if run.Length == 0 {
+			break
+		}
+
+		// Hash each valid bit in this run
+		for i := int64(0); i < run.Length; i++ {
+			val := bitutil.BitIsSet(bitmap, int(bitmapOffset+run.Pos+i))
+			var b [1]byte
+			if val {
+				b[0] = 1
+			}
+			out = append(out, h.Sum64(b[:]))
+		}
+	}
+	return out
+}
+
 func getBytes[T parquet.ColumnTypes](v T) []byte {
 	switch v := any(v).(type) {
 	case parquet.ByteArray:

@@ -461,10 +461,9 @@ func (w *{{.Name}}ColumnChunkWriter) writeBitmapValuesSpaced(bitmap []byte, bitm
     w.pageStatistics.(*metadata.BooleanStatistics).UpdateFromBitmapSpaced(bitmap, bitmapOffset, numValues, validBits, validBitsOffset, nulls)
   }
 
-  // Bloom filter still needs []bool for GetSpacedHashes
-  // TODO: Add GetSpacedHashesFromBitmap for full bitmap path
+  // Use bitmap-aware bloom filter hashing
   if w.bloomFilter != nil {
-    w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
+    w.bloomFilter.InsertBulk(metadata.GetSpacedHashesFromBitmap(w.bloomFilter.Hasher(), numRead, bitmap, bitmapOffset, numValues, validBits, validBitsOffset))
   }
 }
 
