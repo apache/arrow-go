@@ -412,7 +412,7 @@ func (s *{{.Name}}Statistics) UpdateFromArrow(values arrow.Array, updateCounts b
   return fmt.Errorf("%w: update float16 stats from Arrow", arrow.ErrNotImplemented)
 {{else}}
   if values.DataType().(arrow.FixedWidthDataType).Bytes() != arrow.{{.Name}}SizeBytes {
-    return fmt.Errorf("%w: cannot update {{.name}} stats with %s arrow array", 
+    return fmt.Errorf("%w: cannot update {{.name}} stats with %s arrow array",
       arrow.ErrInvalid, values.DataType())
   }
 
@@ -421,6 +421,84 @@ func (s *{{.Name}}Statistics) UpdateFromArrow(values arrow.Array, updateCounts b
   return nil
 {{end -}}
 }
+
+{{if eq .Name "Boolean"}}
+// UpdateFromBitmap updates statistics from a boolean bitmap without converting to []bool.
+// This avoids the 8x memory overhead and provides better performance.
+func (s *{{.Name}}Statistics) UpdateFromBitmap(bitmap []byte, bitmapOffset int64, numValues int64, numNulls int64) {
+  s.IncNulls(numNulls)
+  s.nvalues += numValues
+
+  if numValues == 0 {
+    return
+  }
+
+  s.SetMinMax(s.getMinMaxFromBitmap(bitmap, bitmapOffset, numValues))
+}
+
+// UpdateFromBitmapSpaced updates statistics from a spaced boolean bitmap.
+func (s *{{.Name}}Statistics) UpdateFromBitmapSpaced(bitmap []byte, bitmapOffset int64, numValues int64, validBits []byte, validBitsOffset int64, numNull int64) {
+  s.IncNulls(numNull)
+  notnull := numValues - numNull
+  s.nvalues += notnull
+
+  if notnull == 0 {
+    return
+  }
+
+  // For spaced case, we need to check valid bits
+  min := s.defaultMin()
+  max := s.defaultMax()
+
+  if s.bitSetReader == nil {
+    s.bitSetReader = bitutils.NewSetBitRunReader(validBits, validBitsOffset, numValues)
+  } else {
+    s.bitSetReader.Reset(validBits, validBitsOffset, numValues)
+  }
+
+  for {
+    run := s.bitSetReader.NextRun()
+    if run.Length == 0 {
+      break
+    }
+    // Check bits in this valid run
+    for i := int64(0); i < run.Length; i++ {
+      if bitutil.BitIsSet(bitmap, int(bitmapOffset+run.Pos+i)) {
+        max = true
+      } else {
+        min = false
+      }
+      // Early exit if we've found both values
+      if !min && max {
+        s.SetMinMax(min, max)
+        return
+      }
+    }
+  }
+
+  s.SetMinMax(min, max)
+}
+
+// getMinMaxFromBitmap finds min/max directly from bitmap.
+// For booleans: min is false if any false exists, max is true if any true exists.
+func (s *{{.Name}}Statistics) getMinMaxFromBitmap(bitmap []byte, bitmapOffset int64, numValues int64) (min, max bool) {
+  min = true  // Will become false if we find any false
+  max = false // Will become true if we find any true
+
+  for i := int64(0); i < numValues; i++ {
+    if bitutil.BitIsSet(bitmap, int(bitmapOffset+i)) {
+      max = true
+    } else {
+      min = false
+    }
+    // Early exit optimization: if we've seen both values, we're done
+    if !min && max {
+      return
+    }
+  }
+  return
+}
+{{end}}
 
 // SetMinMax updates the min and max values only if they are not currently set
 // or if argMin is less than the current min / argMax is greater than the current max

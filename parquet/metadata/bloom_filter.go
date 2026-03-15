@@ -134,6 +134,27 @@ func GetSpacedHashes[T parquet.ColumnTypes](h Hasher, numValid int64, vals []T, 
 	return out
 }
 
+// GetHashesFromBitmap computes hashes for boolean values directly from a bitmap
+// without converting to []bool, avoiding 8x memory overhead.
+func GetHashesFromBitmap(h Hasher, bitmap []byte, bitmapOffset int64, numValues int64) []uint64 {
+	if numValues == 0 {
+		return []uint64{}
+	}
+
+	// Convert each bool bit to []byte for hashing
+	out := make([]uint64, numValues)
+	for i := int64(0); i < numValues; i++ {
+		val := bitutil.BitIsSet(bitmap, int(bitmapOffset+i))
+		// Hash the boolean as a single byte (0x00 or 0x01)
+		var b [1]byte
+		if val {
+			b[0] = 1
+		}
+		out[i] = h.Sum64(b[:])
+	}
+	return out
+}
+
 func getBytes[T parquet.ColumnTypes](v T) []byte {
 	switch v := any(v).(type) {
 	case parquet.ByteArray:

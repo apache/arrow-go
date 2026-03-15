@@ -430,39 +430,42 @@ func (w *{{.Name}}ColumnChunkWriter) writeBitmapValues(bitmap []byte, bitmapOffs
     w.currentEncoder.(encoding.BooleanEncoder).Put(values)
   }
 
-  // Note: Statistics and bloom filter updates would require converting back to []bool
-  // For now, skip them to maintain the performance benefit
-  // In production, we'd need bitmap-aware statistics/bloom filter methods
+  // Update statistics and bloom filter using bitmap-aware methods
   if w.pageStatistics != nil {
-    // Convert for statistics (unavoidable for now)
-    values := make([]bool, numValues)
-    for i := int64(0); i < numValues; i++ {
-      values[i] = bitutil.BitIsSet(bitmap, int(bitmapOffset+i))
-    }
-    w.pageStatistics.(*metadata.BooleanStatistics).Update(values, numNulls)
+    w.pageStatistics.(*metadata.BooleanStatistics).UpdateFromBitmap(bitmap, bitmapOffset, numValues, numNulls)
   }
   if w.bloomFilter != nil {
-    // Convert for bloom filter (unavoidable for now)
-    values := make([]bool, numValues)
-    for i := int64(0); i < numValues; i++ {
-      values[i] = bitutil.BitIsSet(bitmap, int(bitmapOffset+i))
-    }
-    w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+    w.bloomFilter.InsertBulk(metadata.GetHashesFromBitmap(w.bloomFilter.Hasher(), bitmap, bitmapOffset, numValues))
   }
 }
 
 // writeBitmapValuesSpaced writes boolean values from a bitmap with validity information
 func (w *{{.Name}}ColumnChunkWriter) writeBitmapValuesSpaced(bitmap []byte, bitmapOffset int64, numRead, numValues int64, validBits []byte, validBitsOffset int64) {
-  // For spaced writes, we need to compress the bitmap according to validity
-  // This requires converting to []bool for now
-  // A future optimization could implement bitmap-to-bitmap compression
+  // For encoding, we still need to convert to []bool since PutSpaced expects []bool
+  // TODO: Add PutSpacedBitmap to encoder interface for full bitmap path
   spacedValues := make([]bool, numValues)
   for i := int64(0); i < numValues; i++ {
     spacedValues[i] = bitutil.BitIsSet(bitmap, int(bitmapOffset+i))
   }
 
-  // Use existing spaced write logic
-  w.writeValuesSpaced(spacedValues, numRead, numValues, validBits, validBitsOffset)
+  // Encode using spaced values
+  if len(spacedValues) != int(numRead) {
+    w.currentEncoder.(encoding.BooleanEncoder).PutSpaced(spacedValues, validBits, validBitsOffset)
+  } else {
+    w.currentEncoder.(encoding.BooleanEncoder).Put(spacedValues)
+  }
+
+  // Use bitmap-aware statistics update
+  if w.pageStatistics != nil {
+    nulls := numValues - numRead
+    w.pageStatistics.(*metadata.BooleanStatistics).UpdateFromBitmapSpaced(bitmap, bitmapOffset, numValues, validBits, validBitsOffset, nulls)
+  }
+
+  // Bloom filter still needs []bool for GetSpacedHashes
+  // TODO: Add GetSpacedHashesFromBitmap for full bitmap path
+  if w.bloomFilter != nil {
+    w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
+  }
 }
 
 {{end}}

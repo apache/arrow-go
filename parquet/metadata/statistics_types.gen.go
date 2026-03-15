@@ -24,6 +24,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
@@ -1713,6 +1714,82 @@ func (s *BooleanStatistics) UpdateFromArrow(values arrow.Array, updateCounts boo
 	return fmt.Errorf("%w: update boolean stats from Arrow", arrow.ErrNotImplemented)
 }
 
+// UpdateFromBitmap updates statistics from a boolean bitmap without converting to []bool.
+// This avoids the 8x memory overhead and provides better performance.
+func (s *BooleanStatistics) UpdateFromBitmap(bitmap []byte, bitmapOffset int64, numValues int64, numNulls int64) {
+	s.IncNulls(numNulls)
+	s.nvalues += numValues
+
+	if numValues == 0 {
+		return
+	}
+
+	s.SetMinMax(s.getMinMaxFromBitmap(bitmap, bitmapOffset, numValues))
+}
+
+// UpdateFromBitmapSpaced updates statistics from a spaced boolean bitmap.
+func (s *BooleanStatistics) UpdateFromBitmapSpaced(bitmap []byte, bitmapOffset int64, numValues int64, validBits []byte, validBitsOffset int64, numNull int64) {
+	s.IncNulls(numNull)
+	notnull := numValues - numNull
+	s.nvalues += notnull
+
+	if notnull == 0 {
+		return
+	}
+
+	// For spaced case, we need to check valid bits
+	min := s.defaultMin()
+	max := s.defaultMax()
+
+	if s.bitSetReader == nil {
+		s.bitSetReader = bitutils.NewSetBitRunReader(validBits, validBitsOffset, numValues)
+	} else {
+		s.bitSetReader.Reset(validBits, validBitsOffset, numValues)
+	}
+
+	for {
+		run := s.bitSetReader.NextRun()
+		if run.Length == 0 {
+			break
+		}
+		// Check bits in this valid run
+		for i := int64(0); i < run.Length; i++ {
+			if bitutil.BitIsSet(bitmap, int(bitmapOffset+run.Pos+i)) {
+				max = true
+			} else {
+				min = false
+			}
+			// Early exit if we've found both values
+			if !min && max {
+				s.SetMinMax(min, max)
+				return
+			}
+		}
+	}
+
+	s.SetMinMax(min, max)
+}
+
+// getMinMaxFromBitmap finds min/max directly from bitmap.
+// For booleans: min is false if any false exists, max is true if any true exists.
+func (s *BooleanStatistics) getMinMaxFromBitmap(bitmap []byte, bitmapOffset int64, numValues int64) (min, max bool) {
+	min = true  // Will become false if we find any false
+	max = false // Will become true if we find any true
+
+	for i := int64(0); i < numValues; i++ {
+		if bitutil.BitIsSet(bitmap, int(bitmapOffset+i)) {
+			max = true
+		} else {
+			min = false
+		}
+		// Early exit optimization: if we've seen both values, we're done
+		if !min && max {
+			return
+		}
+	}
+	return
+}
+
 // SetMinMax updates the min and max values only if they are not currently set
 // or if argMin is less than the current min / argMax is greater than the current max
 func (s *BooleanStatistics) SetMinMax(argMin, argMax bool) {
@@ -2005,7 +2082,7 @@ func (s *ByteArrayStatistics) UpdateFromArrow(values arrow.Array, updateCounts b
 	)
 
 	for i := 0; i < arr.Len(); i++ {
-		nextOffset := curOffset + int64(arr.ValueLen(i))		
+		nextOffset := curOffset + int64(arr.ValueLen(i))
 		v := data[curOffset:nextOffset]
 		curOffset = nextOffset
 
