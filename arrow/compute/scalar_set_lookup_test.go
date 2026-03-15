@@ -19,6 +19,7 @@ package compute_test
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -595,6 +596,40 @@ func (ss *ScalarSetLookupSuite) TestIsInChunked() {
 	defer expected.Release()
 
 	ss.checkIsInChunked(input, valueSet, expected, compute.NullMatchingInconclusive)
+}
+
+// TestIsInConcurrentNoLeak verifies that concurrent is_in executions do not
+// leak BinaryMemoTable buffers. The is_in kernel stores per-invocation
+// SetLookupState in the shared kernel.Data field, which races when multiple
+// goroutines execute simultaneously — earlier states get overwritten and
+// their buffers (192 bytes each) leak. TearDownTest's AssertSize catches this.
+func (ss *ScalarSetLookupSuite) TestIsInConcurrentNoLeak() {
+	input := ss.getArr(arrow.BinaryTypes.String, `["alpha", "beta", "gamma", "delta"]`)
+	defer input.Release()
+
+	valueSet := ss.getArr(arrow.BinaryTypes.String, `["alpha", "gamma"]`)
+	defer valueSet.Release()
+
+	const workers = 4
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			defer func() {
+				recover() // race can cause panic in BinaryMemoTable.lookup
+			}()
+
+			result, err := compute.IsIn(ss.ctx, compute.SetOptions{
+				ValueSet: compute.NewDatumWithoutOwning(valueSet),
+			}, compute.NewDatumWithoutOwning(input))
+			if err != nil {
+				return
+			}
+			result.Release()
+		}()
+	}
+	wg.Wait()
 }
 
 func (ss *ScalarSetLookupSuite) TearDownTest() {
