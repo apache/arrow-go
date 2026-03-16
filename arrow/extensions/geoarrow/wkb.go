@@ -202,14 +202,14 @@ func (wkb *WKBType) unmarshalJSONOne(dec *arrowjson.Decoder) (WKBBytes, bool, er
 }
 
 func (wkb *WKBType) NewBuilder(mem memory.Allocator) array.Builder {
-	return &builder[WKBBytes, *WKBType]{
+	return &valueBuilder[WKBBytes, *WKBType]{
 		ExtensionBuilder: array.NewExtensionBuilder(mem, wkb),
 	}
 }
 
 // WKBArray is a type alias to represent an array of WKB encoded geometries.
 type WKBArray = geometryArray[WKBBytes, *WKBType]
-type WKBBuilder = builder[WKBBytes, *WKBType]
+type WKBBuilder = valueBuilder[WKBBytes, *WKBType]
 
 var _ arrow.ExtensionType = (*WKBType)(nil)
 var _ array.ExtensionArray = (*WKBArray)(nil)
