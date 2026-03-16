@@ -142,15 +142,18 @@ func GetHashesFromBitmap(h Hasher, bitmap []byte, bitmapOffset int64, numValues 
 	}
 
 	// Convert each bool bit to []byte for hashing
+	// Reuse a single-byte slice to avoid allocating per value
 	out := make([]uint64, numValues)
+	b := []byte{0}
 	for i := int64(0); i < numValues; i++ {
 		val := bitutil.BitIsSet(bitmap, int(bitmapOffset+i))
 		// Hash the boolean as a single byte (0x00 or 0x01)
-		var b [1]byte
 		if val {
 			b[0] = 1
+		} else {
+			b[0] = 0
 		}
-		out[i] = h.Sum64(b[:])
+		out[i] = h.Sum64(b)
 	}
 	return out
 }
@@ -166,6 +169,8 @@ func GetSpacedHashesFromBitmap(h Hasher, numValid int64, bitmap []byte, bitmapOf
 	out := make([]uint64, 0, numValid)
 
 	// Use SetBitRunReader to efficiently iterate over valid values
+	// Reuse a single-byte slice to avoid allocating per value
+	b := []byte{0}
 	setReader := bitutils.NewSetBitRunReader(validBits, validBitsOffset, numValues)
 	for {
 		run := setReader.NextRun()
@@ -176,11 +181,12 @@ func GetSpacedHashesFromBitmap(h Hasher, numValid int64, bitmap []byte, bitmapOf
 		// Hash each valid bit in this run
 		for i := int64(0); i < run.Length; i++ {
 			val := bitutil.BitIsSet(bitmap, int(bitmapOffset+run.Pos+i))
-			var b [1]byte
 			if val {
 				b[0] = 1
+			} else {
+				b[0] = 0
 			}
-			out = append(out, h.Sum64(b[:]))
+			out = append(out, h.Sum64(b))
 		}
 	}
 	return out
