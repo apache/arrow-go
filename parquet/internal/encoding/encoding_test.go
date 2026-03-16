@@ -1069,3 +1069,113 @@ func TestBooleanPlainDecoderDecodeToBitmapUnaligned(t *testing.T) {
 		t.Skip("Decoder does not support DecodeToBitmap")
 	}
 }
+
+func TestPlainBooleanEncoderPutSpacedBitmapBasic(t *testing.T) {
+	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Optional, -1), 0, 0)
+	enc := encoding.NewEncoder(parquet.Types.Boolean, parquet.Encodings.Plain, false, descr, memory.DefaultAllocator)
+	benc := enc.(encoding.BooleanEncoder)
+	
+	// Cast to access PutSpacedBitmap
+	type bitmapSpacedEncoder interface {
+		PutSpacedBitmap(bitmap []byte, bitmapOffset int64, numValues int64, validBits []byte, validBitsOffset int64) int64
+	}
+	spacedEnc := benc.(bitmapSpacedEncoder)
+	
+	// Data bitmap: [true, false, true, true, false, false, true, false]
+	bitmap := []byte{0b01001101} // LSB first
+	validBits := []byte{0xFF}     // all valid
+	
+	numValid := spacedEnc.PutSpacedBitmap(bitmap, 0, 8, validBits, 0)
+	assert.Equal(t, int64(8), numValid)
+	
+	buf, err := enc.FlushValues()
+	require.NoError(t, err)
+	
+	// Decode and verify
+	dec := encoding.NewDecoder(parquet.Types.Boolean, parquet.Encodings.Plain, descr, memory.DefaultAllocator)
+	bdec := dec.(encoding.BooleanDecoder)
+	err = bdec.SetData(8, buf.Bytes())
+	require.NoError(t, err)
+	
+	out := make([]bool, 8)
+	n, err := bdec.Decode(out)
+	require.NoError(t, err)
+	assert.Equal(t, 8, n)
+	
+	expected := []bool{true, false, true, true, false, false, true, false}
+	assert.Equal(t, expected, out)
+}
+
+func TestPlainBooleanEncoderPutSpacedBitmapWithNulls(t *testing.T) {
+	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Optional, -1), 0, 0)
+	enc := encoding.NewEncoder(parquet.Types.Boolean, parquet.Encodings.Plain, false, descr, memory.DefaultAllocator)
+	benc := enc.(encoding.BooleanEncoder)
+	
+	type bitmapSpacedEncoder interface {
+		PutSpacedBitmap(bitmap []byte, bitmapOffset int64, numValues int64, validBits []byte, validBitsOffset int64) int64
+	}
+	spacedEnc := benc.(bitmapSpacedEncoder)
+	
+	// Data bitmap: [1,1,1,1,0,0,0,0]
+	bitmap := []byte{0b00001111}
+	// Valid bits: [1,0,1,0,1,0,1,0] - only positions 0,2,4,6 are valid
+	validBits := []byte{0b01010101}
+	
+	numValid := spacedEnc.PutSpacedBitmap(bitmap, 0, 8, validBits, 0)
+	assert.Equal(t, int64(4), numValid, "should encode 4 valid values")
+	
+	buf, err := enc.FlushValues()
+	require.NoError(t, err)
+	
+	// Decode and verify - should get compressed bitmap (only valid values)
+	dec := encoding.NewDecoder(parquet.Types.Boolean, parquet.Encodings.Plain, descr, memory.DefaultAllocator)
+	bdec := dec.(encoding.BooleanDecoder)
+	err = bdec.SetData(4, buf.Bytes())
+	require.NoError(t, err)
+	
+	out := make([]bool, 4)
+	n, err := bdec.Decode(out)
+	require.NoError(t, err)
+	assert.Equal(t, 4, n)
+	
+	// Valid positions 0,2,4,6 have data bits 1,1,0,0
+	expected := []bool{true, true, false, false}
+	assert.Equal(t, expected, out)
+}
+
+func TestPlainBooleanEncoderPutSpacedBitmapConsistency(t *testing.T) {
+	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Optional, -1), 0, 0)
+	
+	// Verify PutSpacedBitmap produces same output as PutSpaced with []bool
+	bitmap := []byte{0b10110010}
+	validBits := []byte{0xFF}
+	numValues := int64(8)
+	
+	// Encode using PutSpacedBitmap
+	enc1 := encoding.NewEncoder(parquet.Types.Boolean, parquet.Encodings.Plain, false, descr, memory.DefaultAllocator)
+	benc1 := enc1.(encoding.BooleanEncoder)
+	
+	type bitmapSpacedEncoder interface {
+		PutSpacedBitmap(bitmap []byte, bitmapOffset int64, numValues int64, validBits []byte, validBitsOffset int64) int64
+	}
+	spacedEnc1 := benc1.(bitmapSpacedEncoder)
+	
+	spacedEnc1.PutSpacedBitmap(bitmap, 0, numValues, validBits, 0)
+	buf1, err := enc1.FlushValues()
+	require.NoError(t, err)
+	
+	// Encode using PutSpaced with []bool
+	enc2 := encoding.NewEncoder(parquet.Types.Boolean, parquet.Encodings.Plain, false, descr, memory.DefaultAllocator)
+	benc2 := enc2.(encoding.BooleanEncoder)
+	
+	bools := make([]bool, numValues)
+	for i := int64(0); i < numValues; i++ {
+		bools[i] = bitutil.BitIsSet(bitmap, int(i))
+	}
+	benc2.PutSpaced(bools, validBits, 0)
+	buf2, err := enc2.FlushValues()
+	require.NoError(t, err)
+	
+	// Both should produce identical encoded output
+	assert.Equal(t, buf2.Bytes(), buf1.Bytes(), "encoded output should match")
+}

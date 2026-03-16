@@ -441,18 +441,26 @@ func (w *{{.Name}}ColumnChunkWriter) writeBitmapValues(bitmap []byte, bitmapOffs
 
 // writeBitmapValuesSpaced writes boolean values from a bitmap with validity information
 func (w *{{.Name}}ColumnChunkWriter) writeBitmapValuesSpaced(bitmap []byte, bitmapOffset int64, numRead, numValues int64, validBits []byte, validBitsOffset int64) {
-  // For encoding, we still need to convert to []bool since PutSpaced expects []bool
-  // TODO: Add PutSpacedBitmap to encoder interface for full bitmap path
-  spacedValues := make([]bool, numValues)
-  for i := int64(0); i < numValues; i++ {
-    spacedValues[i] = bitutil.BitIsSet(bitmap, int(bitmapOffset+i))
+  // Try to use bitmap-aware encoder interface if available
+  type bitmapSpacedEncoder interface {
+    PutSpacedBitmap(bitmap []byte, bitmapOffset int64, numValues int64, validBits []byte, validBitsOffset int64) int64
   }
 
-  // Encode using spaced values
-  if len(spacedValues) != int(numRead) {
-    w.currentEncoder.(encoding.BooleanEncoder).PutSpaced(spacedValues, validBits, validBitsOffset)
+  if enc, ok := w.currentEncoder.(bitmapSpacedEncoder); ok {
+    // Direct bitmap path - no []bool conversion!
+    enc.PutSpacedBitmap(bitmap, bitmapOffset, numValues, validBits, validBitsOffset)
   } else {
-    w.currentEncoder.(encoding.BooleanEncoder).Put(spacedValues)
+    // Fallback: convert to []bool for encoders that don't support bitmap interface
+    spacedValues := make([]bool, numValues)
+    for i := int64(0); i < numValues; i++ {
+      spacedValues[i] = bitutil.BitIsSet(bitmap, int(bitmapOffset+i))
+    }
+
+    if len(spacedValues) != int(numRead) {
+      w.currentEncoder.(encoding.BooleanEncoder).PutSpaced(spacedValues, validBits, validBitsOffset)
+    } else {
+      w.currentEncoder.(encoding.BooleanEncoder).Put(spacedValues)
+    }
   }
 
   // Use bitmap-aware statistics update
