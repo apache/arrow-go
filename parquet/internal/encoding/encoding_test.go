@@ -1179,3 +1179,91 @@ func TestPlainBooleanEncoderPutSpacedBitmapConsistency(t *testing.T) {
 	// Both should produce identical encoded output
 	assert.Equal(t, buf2.Bytes(), buf1.Bytes(), "encoded output should match")
 }
+
+func TestRleBooleanEncoderPutSpacedBitmap(t *testing.T) {
+	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Optional, -1), 0, 0)
+	enc := encoding.NewEncoder(parquet.Types.Boolean, parquet.Encodings.RLE, false, descr, memory.DefaultAllocator)
+	benc := enc.(encoding.BooleanEncoder)
+	
+	type bitmapSpacedEncoder interface {
+		PutSpacedBitmap(bitmap []byte, bitmapOffset int64, numValues int64, validBits []byte, validBitsOffset int64) int64
+	}
+	spacedEnc, ok := benc.(bitmapSpacedEncoder)
+	require.True(t, ok, "RleBooleanEncoder should implement bitmapSpacedEncoder interface")
+	
+	// Data bitmap: [true,true,false,true,false,false,true,false]
+	bitmap := []byte{0b01001011}
+	// Valid bits: [1,0,1,0,1,0,1,0] - positions 0,2,4,6 are valid
+	validBits := []byte{0b01010101}
+	
+	numValid := spacedEnc.PutSpacedBitmap(bitmap, 0, 8, validBits, 0)
+	assert.Equal(t, int64(4), numValid, "should encode 4 valid values")
+	
+	buf, err := enc.FlushValues()
+	require.NoError(t, err)
+	defer buf.Release()
+	
+	// Decode and verify - should get only the valid positions: [true, false, false, true]
+	dec := encoding.NewDecoder(parquet.Types.Boolean, parquet.Encodings.RLE, descr, memory.DefaultAllocator)
+	bdec := dec.(encoding.BooleanDecoder)
+	err = bdec.SetData(4, buf.Bytes())
+	require.NoError(t, err)
+	
+	out := make([]bool, 4)
+	n, err := bdec.Decode(out)
+	require.NoError(t, err)
+	assert.Equal(t, 4, n)
+	
+	// Valid values are at positions 0,2,4,6 with values true,false,false,true
+	expected := []bool{true, false, false, true}
+	assert.Equal(t, expected, out)
+}
+
+func TestRleBooleanEncoderPutSpacedBitmapConsistency(t *testing.T) {
+	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Optional, -1), 0, 0)
+	
+	// Create test data
+	bitmap := []byte{0b10110101}
+	validBits := []byte{0b11110011}
+	
+	// Encode with bitmap method
+	enc1 := encoding.NewEncoder(parquet.Types.Boolean, parquet.Encodings.RLE, false, descr, memory.DefaultAllocator)
+	benc1 := enc1.(encoding.BooleanEncoder)
+	type bitmapSpacedEncoder interface {
+		PutSpacedBitmap(bitmap []byte, bitmapOffset int64, numValues int64, validBits []byte, validBitsOffset int64) int64
+	}
+	spacedEnc := benc1.(bitmapSpacedEncoder)
+	numValid := spacedEnc.PutSpacedBitmap(bitmap, 0, 8, validBits, 0)
+	buf1, _ := enc1.FlushValues()
+	defer buf1.Release()
+	
+	// Encode with []bool method (reference)
+	enc2 := encoding.NewEncoder(parquet.Types.Boolean, parquet.Encodings.RLE, false, descr, memory.DefaultAllocator)
+	benc2 := enc2.(encoding.BooleanEncoder)
+	spacedValues := make([]bool, 8)
+	for i := 0; i < 8; i++ {
+		spacedValues[i] = bitutil.BitIsSet(bitmap, i)
+	}
+	benc2.PutSpaced(spacedValues, validBits, 0)
+	buf2, _ := enc2.FlushValues()
+	defer buf2.Release()
+	
+	// Both should produce identical output
+	assert.Equal(t, buf2.Bytes(), buf1.Bytes(), "bitmap and []bool methods should produce identical output")
+	
+	// Decode both and verify they match
+	dec1 := encoding.NewDecoder(parquet.Types.Boolean, parquet.Encodings.RLE, descr, memory.DefaultAllocator)
+	bdec1 := dec1.(encoding.BooleanDecoder)
+	bdec1.SetData(int(numValid), buf1.Bytes())
+	
+	dec2 := encoding.NewDecoder(parquet.Types.Boolean, parquet.Encodings.RLE, descr, memory.DefaultAllocator)
+	bdec2 := dec2.(encoding.BooleanDecoder)
+	bdec2.SetData(int(numValid), buf2.Bytes())
+	
+	out1 := make([]bool, numValid)
+	out2 := make([]bool, numValid)
+	bdec1.Decode(out1)
+	bdec2.Decode(out2)
+	
+	assert.Equal(t, out2, out1, "decoded values should match")
+}
