@@ -301,9 +301,9 @@ func TestBooleanStatisticsUpdateFromBitmap(t *testing.T) {
 		stats := metadata.NewBooleanStatistics(descr, mem)
 		bitmap := []byte{0xFF, 0xFF} // all bits set
 		numValues := int64(16)
-		
+
 		stats.UpdateFromBitmap(bitmap, 0, numValues, 0)
-		
+
 		assert.True(t, stats.HasMinMax())
 		assert.Equal(t, true, stats.Min(), "min should be true when all bits are true")
 		assert.Equal(t, true, stats.Max(), "max should be true when all bits are true")
@@ -315,9 +315,9 @@ func TestBooleanStatisticsUpdateFromBitmap(t *testing.T) {
 		stats := metadata.NewBooleanStatistics(descr, mem)
 		bitmap := []byte{0x00, 0x00} // all bits clear
 		numValues := int64(16)
-		
+
 		stats.UpdateFromBitmap(bitmap, 0, numValues, 0)
-		
+
 		assert.True(t, stats.HasMinMax())
 		assert.Equal(t, false, stats.Min(), "min should be false when all bits are false")
 		assert.Equal(t, false, stats.Max(), "max should be false when all bits are false")
@@ -329,9 +329,9 @@ func TestBooleanStatisticsUpdateFromBitmap(t *testing.T) {
 		stats := metadata.NewBooleanStatistics(descr, mem)
 		bitmap := []byte{0b10101010} // alternating bits
 		numValues := int64(8)
-		
+
 		stats.UpdateFromBitmap(bitmap, 0, numValues, 0)
-		
+
 		assert.True(t, stats.HasMinMax())
 		assert.Equal(t, false, stats.Min(), "min should be false with mixed bits")
 		assert.Equal(t, true, stats.Max(), "max should be true with mixed bits")
@@ -347,13 +347,13 @@ func TestBooleanStatisticsUpdateFromBitmap(t *testing.T) {
 		bitutil.SetBit(bitmap, 6)
 		bitutil.SetBit(bitmap, 8)
 		bitutil.SetBit(bitmap, 9)
-		
+
 		// Read 5 bits starting from offset 3: [1,1,0,1,0] -> has both true and false
 		offset := int64(3)
 		numValues := int64(5)
-		
+
 		stats.UpdateFromBitmap(bitmap, offset, numValues, 0)
-		
+
 		assert.True(t, stats.HasMinMax())
 		assert.Equal(t, false, stats.Min(), "should find false bit")
 		assert.Equal(t, true, stats.Max(), "should find true bit")
@@ -365,22 +365,22 @@ func TestBooleanStatisticsUpdateFromBitmap(t *testing.T) {
 		bitmap := []byte{0xFF}
 		numValues := int64(8)
 		numNulls := int64(3)
-		
+
 		stats.UpdateFromBitmap(bitmap, 0, numValues, numNulls)
-		
+
 		assert.Equal(t, numValues, stats.NumValues())
 		assert.Equal(t, numNulls, stats.NullCount())
 	})
 
 	t.Run("multiple updates", func(t *testing.T) {
 		stats := metadata.NewBooleanStatistics(descr, mem)
-		
+
 		// First update: all true
 		bitmap1 := []byte{0xFF}
 		stats.UpdateFromBitmap(bitmap1, 0, 8, 0)
 		assert.Equal(t, true, stats.Min())
 		assert.Equal(t, true, stats.Max())
-		
+
 		// Second update: has false - should update min
 		bitmap2 := []byte{0x00}
 		stats.UpdateFromBitmap(bitmap2, 0, 8, 0)
@@ -394,13 +394,13 @@ func TestBooleanStatisticsUpdateFromBitmap(t *testing.T) {
 		stats := metadata.NewBooleanStatistics(descr, mem)
 		numValues := int64(10000)
 		bitmap := make([]byte, bitutil.BytesForBits(numValues))
-		
+
 		// Set first bit to true, second to false (early exit should trigger)
 		bitutil.SetBit(bitmap, 0) // true
 		// bit 1 is false
-		
+
 		stats.UpdateFromBitmap(bitmap, 0, numValues, 0)
-		
+
 		assert.Equal(t, false, stats.Min())
 		assert.Equal(t, true, stats.Max())
 	})
@@ -418,22 +418,22 @@ func TestBooleanStatisticsUpdateFromBitmap(t *testing.T) {
 			{"mixed", []byte{0b10110010}, 0, 8},
 			{"unaligned", []byte{0xFF, 0x00}, 3, 10},
 		}
-		
+
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
 				stats1 := metadata.NewBooleanStatistics(descr, mem)
 				stats2 := metadata.NewBooleanStatistics(descr, mem)
-				
+
 				// Update using bitmap
 				stats1.UpdateFromBitmap(tc.bitmap, tc.offset, tc.count, 0)
-				
+
 				// Update using []bool
 				bools := make([]bool, tc.count)
 				for i := int64(0); i < tc.count; i++ {
 					bools[i] = bitutil.BitIsSet(tc.bitmap, int(tc.offset+i))
 				}
 				stats2.Update(bools, 0)
-				
+
 				// Both should produce same results
 				assert.Equal(t, stats2.Min(), stats1.Min(), "min mismatch")
 				assert.Equal(t, stats2.Max(), stats1.Max(), "max mismatch")
@@ -452,11 +452,11 @@ func TestBooleanStatisticsUpdateFromBitmapSpaced(t *testing.T) {
 	t.Run("all valid bits", func(t *testing.T) {
 		stats := metadata.NewBooleanStatistics(descr, mem)
 		bitmap := []byte{0b10101010} // data: alternating
-		validBits := []byte{0xFF}     // all valid
+		validBits := []byte{0xFF}    // all valid
 		numValues := int64(8)
-		
+
 		stats.UpdateFromBitmapSpaced(bitmap, 0, numValues, validBits, 0, 0)
-		
+
 		assert.True(t, stats.HasMinMax())
 		assert.Equal(t, false, stats.Min())
 		assert.Equal(t, true, stats.Max())
@@ -471,9 +471,9 @@ func TestBooleanStatisticsUpdateFromBitmapSpaced(t *testing.T) {
 		validBits := []byte{0b01010101}
 		numValues := int64(8)
 		numNulls := int64(4)
-		
+
 		stats.UpdateFromBitmapSpaced(bitmap, 0, numValues, validBits, 0, numNulls)
-		
+
 		assert.True(t, stats.HasMinMax())
 		// Valid positions are 0,2,4,6 with data bits: 1,1,0,0
 		assert.Equal(t, false, stats.Min(), "should find false at position 4 or 6")
@@ -487,9 +487,9 @@ func TestBooleanStatisticsUpdateFromBitmapSpaced(t *testing.T) {
 		bitmap := []byte{0xFF}
 		validBits := []byte{0x00} // all null
 		numValues := int64(8)
-		
+
 		stats.UpdateFromBitmapSpaced(bitmap, 0, numValues, validBits, 0, numValues)
-		
+
 		assert.False(t, stats.HasMinMax(), "should not have min/max with all nulls")
 		assert.Equal(t, int64(0), stats.NumValues())
 		assert.Equal(t, numValues, stats.NullCount())
@@ -500,23 +500,23 @@ func TestBooleanStatisticsUpdateFromBitmapSpaced(t *testing.T) {
 		// Create larger bitmaps with offset
 		bitmap := make([]byte, 3)
 		validBits := make([]byte, 3)
-		
+
 		// Set some data bits starting from offset 5
-		bitutil.SetBit(bitmap, 5)  // true
-		bitutil.SetBit(bitmap, 6)  // true
+		bitutil.SetBit(bitmap, 5) // true
+		bitutil.SetBit(bitmap, 6) // true
 		// bit 7 = false
-		bitutil.SetBit(bitmap, 8)  // true
+		bitutil.SetBit(bitmap, 8) // true
 		// bit 9 = false
-		
+
 		// Set valid bits (skip position 6)
 		bitutil.SetBit(validBits, 5)
 		// bit 6 is null
 		bitutil.SetBit(validBits, 7)
 		bitutil.SetBit(validBits, 8)
 		bitutil.SetBit(validBits, 9)
-		
+
 		stats.UpdateFromBitmapSpaced(bitmap, 5, 5, validBits, 5, 1)
-		
+
 		assert.True(t, stats.HasMinMax())
 		// Valid positions: 5(true), 7(false), 8(true), 9(false)
 		assert.Equal(t, false, stats.Min())
@@ -530,9 +530,9 @@ func TestBooleanStatisticsUpdateFromBitmapSpaced(t *testing.T) {
 		bitmap := []byte{0b00001111}
 		// Valid: only first 4 bits (all true in data)
 		validBits := []byte{0b00001111}
-		
+
 		stats.UpdateFromBitmapSpaced(bitmap, 0, 8, validBits, 0, 4)
-		
+
 		assert.True(t, stats.HasMinMax())
 		assert.Equal(t, true, stats.Min(), "only true values are valid")
 		assert.Equal(t, true, stats.Max())
@@ -544,9 +544,9 @@ func TestBooleanStatisticsUpdateFromBitmapSpaced(t *testing.T) {
 		bitmap := []byte{0b00001111}
 		// Valid: only last 4 bits (all false in data)
 		validBits := []byte{0b11110000}
-		
+
 		stats.UpdateFromBitmapSpaced(bitmap, 0, 8, validBits, 0, 4)
-		
+
 		assert.True(t, stats.HasMinMax())
 		assert.Equal(t, false, stats.Min(), "only false values are valid")
 		assert.Equal(t, false, stats.Max())
@@ -558,20 +558,20 @@ func TestBooleanStatisticsUpdateFromBitmapSpaced(t *testing.T) {
 		validBits := []byte{0b11010110}
 		numValues := int64(8)
 		numNulls := int64(3)
-		
+
 		stats1 := metadata.NewBooleanStatistics(descr, mem)
 		stats2 := metadata.NewBooleanStatistics(descr, mem)
-		
+
 		// Update using bitmap
 		stats1.UpdateFromBitmapSpaced(bitmap, 0, numValues, validBits, 0, numNulls)
-		
+
 		// Update using []bool
 		bools := make([]bool, numValues)
 		for i := int64(0); i < numValues; i++ {
 			bools[i] = bitutil.BitIsSet(bitmap, int(i))
 		}
 		stats2.UpdateSpaced(bools, validBits, 0, numNulls)
-		
+
 		// Both should produce same results
 		assert.Equal(t, stats2.HasMinMax(), stats1.HasMinMax())
 		if stats1.HasMinMax() {
@@ -584,19 +584,19 @@ func TestBooleanStatisticsUpdateFromBitmapSpaced(t *testing.T) {
 
 	t.Run("multiple updates accumulate correctly", func(t *testing.T) {
 		stats := metadata.NewBooleanStatistics(descr, mem)
-		
+
 		// First update: only true values
 		bitmap1 := []byte{0xFF}
 		validBits1 := []byte{0x0F} // first 4 valid
 		stats.UpdateFromBitmapSpaced(bitmap1, 0, 8, validBits1, 0, 4)
 		assert.Equal(t, true, stats.Min())
 		assert.Equal(t, true, stats.Max())
-		
+
 		// Second update: has false values
 		bitmap2 := []byte{0x00}
 		validBits2 := []byte{0xF0} // last 4 valid
 		stats.UpdateFromBitmapSpaced(bitmap2, 0, 8, validBits2, 0, 4)
-		
+
 		assert.Equal(t, false, stats.Min(), "should update to include false")
 		assert.Equal(t, true, stats.Max())
 		assert.Equal(t, int64(8), stats.NumValues())
