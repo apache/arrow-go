@@ -328,11 +328,12 @@ func (pt *PointType) unmarshalJSONOne(dec *arrowjson.Decoder) (PointValue, bool,
 }
 
 func (pt *PointType) NewBuilder(mem memory.Allocator) array.Builder {
-	return &Builder[PointValue, *PointType]{
+	return &builder[PointValue, *PointType]{
 		ExtensionBuilder: array.NewExtensionBuilder(mem, pt),
 	}
 }
 
 type PointArray = geometryArray[PointValue, *PointType]
+type PointBuilder = builder[PointValue, *PointType]
 
 var _ array.CustomExtensionBuilder = (*PointType)(nil)

@@ -137,7 +137,7 @@ func TestPointBuilder(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	typ := geoarrow.NewPointType()
-	builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.PointValue, *geoarrow.PointType])
+	builder := typ.NewBuilder(mem).(*geoarrow.PointBuilder)
 	defer builder.Release()
 
 	builder.Append(geoarrow.NewPointValue(1.0, 2.0))
@@ -167,7 +167,7 @@ func TestPointBuilderXYZ(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	typ := geoarrow.NewPointType(geoarrow.PointWithStorage(xyzStorage()))
-	builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.PointValue, *geoarrow.PointType])
+	builder := typ.NewBuilder(mem).(*geoarrow.PointBuilder)
 	defer builder.Release()
 
 	builder.Append(geoarrow.NewPointValueZ(1.0, 2.0, 3.0))
@@ -189,7 +189,7 @@ func TestPointBuilderXYM(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	typ := geoarrow.NewPointType(geoarrow.PointWithStorage(xymStorage()))
-	builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.PointValue, *geoarrow.PointType])
+	builder := typ.NewBuilder(mem).(*geoarrow.PointBuilder)
 	defer builder.Release()
 
 	builder.Append(geoarrow.NewPointValueM(1.0, 2.0, 100.0))
@@ -208,7 +208,7 @@ func TestPointBuilderXYZM(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	typ := geoarrow.NewPointType(geoarrow.PointWithStorage(xyzmStorage()))
-	builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.PointValue, *geoarrow.PointType])
+	builder := typ.NewBuilder(mem).(*geoarrow.PointBuilder)
 	defer builder.Release()
 
 	builder.Append(geoarrow.NewPointValueZM(1.0, 2.0, 3.0, 100.0))
@@ -228,7 +228,7 @@ func TestPointAppendValues(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	typ := geoarrow.NewPointType()
-	builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.PointValue, *geoarrow.PointType])
+	builder := typ.NewBuilder(mem).(*geoarrow.PointBuilder)
 	defer builder.Release()
 
 	values := []geoarrow.PointValue{
@@ -291,7 +291,7 @@ func TestPointStringRoundTrip(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	typ := geoarrow.NewPointType()
-	builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.PointValue, *geoarrow.PointType])
+	builder := typ.NewBuilder(mem).(*geoarrow.PointBuilder)
 	defer builder.Release()
 
 	builder.Append(geoarrow.NewPointValue(1.0, 2.0))
@@ -302,7 +302,7 @@ func TestPointStringRoundTrip(t *testing.T) {
 	defer arr.Release()
 
 	// Rebuild from ValueStr
-	builder2 := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.PointValue, *geoarrow.PointType])
+	builder2 := typ.NewBuilder(mem).(*geoarrow.PointBuilder)
 	defer builder2.Release()
 
 	for i := 0; i < arr.Len(); i++ {
@@ -320,7 +320,7 @@ func TestPointJSONRoundTrip(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	typ := geoarrow.NewPointType()
-	builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.PointValue, *geoarrow.PointType])
+	builder := typ.NewBuilder(mem).(*geoarrow.PointBuilder)
 	defer builder.Release()
 
 	builder.Append(geoarrow.NewPointValue(1.5, 2.5))
@@ -347,7 +347,7 @@ func TestPointIPCRoundTrip(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	typ := geoarrow.NewPointType()
-	builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.PointValue, *geoarrow.PointType])
+	builder := typ.NewBuilder(mem).(*geoarrow.PointBuilder)
 
 	builder.Append(geoarrow.NewPointValue(1.0, 2.0))
 	builder.AppendNull()
@@ -389,7 +389,7 @@ func TestPointRecordBuilder(t *testing.T) {
 	recBuilder := array.NewRecordBuilder(mem, schema)
 	defer recBuilder.Release()
 
-	pointBuilder := recBuilder.Field(0).(*geoarrow.Builder[geoarrow.PointValue, *geoarrow.PointType])
+	pointBuilder := recBuilder.Field(0).(*geoarrow.PointBuilder)
 	pointBuilder.Append(geoarrow.NewPointValue(1.0, 2.0))
 	pointBuilder.AppendNull()
 	pointBuilder.Append(geoarrow.NewPointValue(3.0, 4.0))
@@ -416,7 +416,7 @@ func TestPointValuesMethod(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	typ := geoarrow.NewPointType()
-	builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.PointValue, *geoarrow.PointType])
+	builder := typ.NewBuilder(mem).(*geoarrow.PointBuilder)
 	defer builder.Release()
 
 	builder.Append(geoarrow.NewPointValue(1.0, 2.0))
@@ -443,15 +443,15 @@ func TestPointMarshalJSON(t *testing.T) {
 		expected string
 	}{
 		{
-			name:    "XY",
-			storage: xyStorage(),
-			points:  []geoarrow.PointValue{geoarrow.NewPointValue(1.5, 2.5), geoarrow.NewPointValue(3.0, 4.0)},
+			name:     "XY",
+			storage:  xyStorage(),
+			points:   []geoarrow.PointValue{geoarrow.NewPointValue(1.5, 2.5), geoarrow.NewPointValue(3.0, 4.0)},
 			expected: "[[1.5,2.5],[3,4]]",
 		},
 		{
-			name:    "XYZ",
-			storage: xyzStorage(),
-			points:  []geoarrow.PointValue{geoarrow.NewPointValueZ(1.0, 2.0, 3.0)},
+			name:     "XYZ",
+			storage:  xyzStorage(),
+			points:   []geoarrow.PointValue{geoarrow.NewPointValueZ(1.0, 2.0, 3.0)},
 			expected: "[[1,2,3]]",
 		},
 	}
@@ -459,7 +459,7 @@ func TestPointMarshalJSON(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			typ := geoarrow.NewPointType(geoarrow.PointWithStorage(tc.storage))
-			builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.PointValue, *geoarrow.PointType])
+			builder := typ.NewBuilder(mem).(*geoarrow.PointBuilder)
 			defer builder.Release()
 
 			for _, p := range tc.points {

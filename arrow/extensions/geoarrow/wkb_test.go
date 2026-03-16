@@ -87,7 +87,7 @@ func TestWKBBuilder(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	typ := geoarrow.NewWKBType()
-	builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.WKBBytes, *geoarrow.WKBType])
+	builder := typ.NewBuilder(mem).(*geoarrow.WKBBuilder)
 	defer builder.Release()
 
 	builder.Append(geoarrow.WKBBytes(testWKBPoint))
@@ -111,7 +111,7 @@ func TestWKBBuilderBinaryStorage(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	typ := geoarrow.NewWKBType(geoarrow.WKBWithBinaryStorage())
-	builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.WKBBytes, *geoarrow.WKBType])
+	builder := typ.NewBuilder(mem).(*geoarrow.WKBBuilder)
 	defer builder.Release()
 
 	builder.Append(geoarrow.WKBBytes(testWKBPoint))
@@ -127,7 +127,7 @@ func TestWKBAppendValues(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	typ := geoarrow.NewWKBType()
-	builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.WKBBytes, *geoarrow.WKBType])
+	builder := typ.NewBuilder(mem).(*geoarrow.WKBBuilder)
 	defer builder.Release()
 
 	values := []geoarrow.WKBBytes{
@@ -182,7 +182,7 @@ func TestWKBStringRoundTrip(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	typ := geoarrow.NewWKBType()
-	builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.WKBBytes, *geoarrow.WKBType])
+	builder := typ.NewBuilder(mem).(*geoarrow.WKBBuilder)
 	defer builder.Release()
 
 	builder.Append(geoarrow.WKBBytes(testWKBPoint))
@@ -193,7 +193,7 @@ func TestWKBStringRoundTrip(t *testing.T) {
 	defer arr.Release()
 
 	// Rebuild from ValueStr
-	builder2 := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.WKBBytes, *geoarrow.WKBType])
+	builder2 := typ.NewBuilder(mem).(*geoarrow.WKBBuilder)
 	defer builder2.Release()
 
 	for i := 0; i < arr.Len(); i++ {
@@ -211,7 +211,7 @@ func TestWKBJSONRoundTrip(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	typ := geoarrow.NewWKBType()
-	builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.WKBBytes, *geoarrow.WKBType])
+	builder := typ.NewBuilder(mem).(*geoarrow.WKBBuilder)
 	defer builder.Release()
 
 	builder.Append(geoarrow.WKBBytes(testWKBPoint))
@@ -238,7 +238,7 @@ func TestWKBIPCRoundTrip(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	typ := geoarrow.NewWKBType()
-	builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.WKBBytes, *geoarrow.WKBType])
+	builder := typ.NewBuilder(mem).(*geoarrow.WKBBuilder)
 
 	builder.Append(geoarrow.WKBBytes(testWKBPoint))
 	builder.AppendNull()
@@ -280,7 +280,7 @@ func TestWKBRecordBuilder(t *testing.T) {
 	recBuilder := array.NewRecordBuilder(mem, schema)
 	defer recBuilder.Release()
 
-	wkbBuilder := recBuilder.Field(0).(*geoarrow.Builder[geoarrow.WKBBytes, *geoarrow.WKBType])
+	wkbBuilder := recBuilder.Field(0).(*geoarrow.WKBBuilder)
 	wkbBuilder.Append(geoarrow.WKBBytes(testWKBPoint))
 	wkbBuilder.AppendNull()
 
@@ -301,7 +301,7 @@ func TestWKBValuesMethod(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	typ := geoarrow.NewWKBType()
-	builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.WKBBytes, *geoarrow.WKBType])
+	builder := typ.NewBuilder(mem).(*geoarrow.WKBBuilder)
 	defer builder.Release()
 
 	builder.Append(geoarrow.WKBBytes(testWKBPoint))
@@ -322,7 +322,7 @@ func TestWKBMarshalJSON(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	typ := geoarrow.NewWKBType()
-	builder := typ.NewBuilder(mem).(*geoarrow.Builder[geoarrow.WKBBytes, *geoarrow.WKBType])
+	builder := typ.NewBuilder(mem).(*geoarrow.WKBBuilder)
 	defer builder.Release()
 
 	builder.Append(geoarrow.WKBBytes(testWKBPoint))
