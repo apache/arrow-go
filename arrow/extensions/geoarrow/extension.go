@@ -25,9 +25,9 @@ import (
 )
 
 const (
-	ExtensionNameWKB     = "geoarrow.wkb"
-	ExtensionNamePoint   = "geoarrow.point"
-	ExtensionNamePolygon = "geoarrow.polygon"
+	ExtensionNameWKB   = "geoarrow.wkb"
+	ExtensionNamePoint = "geoarrow.point"
+	// TODO ExtensionNamePolygon = "geoarrow.polygon"
 	// TODO ExtensionNameWKT = "geoarrow.wkt"
 	// TODO ExtensionNameLineString = "geoarrow.linestring"
 	// TODO ExtensionNameMultiPoint = "geoarrow.multipoint"

@@ -30,7 +30,6 @@ var canonicalExtensionTypes = []arrow.ExtensionType{
 	// GeoArrow extension types
 	geoarrow.NewWKBType(),
 	geoarrow.NewPointType(),
-	geoarrow.NewPolygonType(),
 }
 
 func init() {
