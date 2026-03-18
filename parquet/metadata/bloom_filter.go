@@ -145,7 +145,7 @@ func GetHashesFromBitmap(h Hasher, bitmap []byte, bitmapOffset int64, numValues 
 	// Reuse a single-byte slice to avoid allocating per value
 	out := make([]uint64, numValues)
 	b := []byte{0}
-	for i := int64(0); i < numValues; i++ {
+	for i := range numValues {
 		val := bitutil.BitIsSet(bitmap, int(bitmapOffset+i))
 		// Hash the boolean as a single byte (0x00 or 0x01)
 		if val {
@@ -179,7 +179,7 @@ func GetSpacedHashesFromBitmap(h Hasher, numValid int64, bitmap []byte, bitmapOf
 		}
 
 		// Hash each valid bit in this run
-		for i := int64(0); i < run.Length; i++ {
+		for i := range run.Length {
 			val := bitutil.BitIsSet(bitmap, int(bitmapOffset+run.Pos+i))
 			if val {
 				b[0] = 1
