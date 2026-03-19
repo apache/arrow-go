@@ -272,6 +272,7 @@ func (t *toThriftVisitor) VisitPost(Node) {}
 func ToThrift(schema *GroupNode) []*format.SchemaElement {
 	t := &toThriftVisitor{make([]*format.SchemaElement, 0)}
 	schema.Visit(t)
+	t.elements[0].RepetitionType = nil
 	return t.elements
 }
 

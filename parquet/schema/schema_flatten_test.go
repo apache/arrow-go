@@ -92,8 +92,10 @@ func (s *SchemaFlattenSuite) TestDecimalMetadata() {
 
 func (s *SchemaFlattenSuite) TestNestedExample() {
 	elements := make([]*format.SchemaElement, 0)
+	root := NewGroup(s.name, format.FieldRepetitionType_REPEATED, 2 /* numChildren */, 0 /* fieldID */)
+	root.RepetitionType = nil
 	elements = append(elements,
-		NewGroup(s.name, format.FieldRepetitionType_REPEATED, 2 /* numChildren */, 0 /* fieldID */),
+		root,
 		NewPrimitive("a" /* name */, format.FieldRepetitionType_REQUIRED, format.Type_INT32, 1 /* fieldID */),
 		NewGroup("bag" /* name */, format.FieldRepetitionType_OPTIONAL, 1 /* numChildren */, 2 /* fieldID */))
 
@@ -118,6 +120,23 @@ func (s *SchemaFlattenSuite) TestNestedExample() {
 
 func TestSchemaFlatten(t *testing.T) {
 	suite.Run(t, new(SchemaFlattenSuite))
+}
+
+func TestToThriftRootRepetitionStripped(t *testing.T) {
+	for _, rep := range []parquet.Repetition{
+		parquet.Repetitions.Repeated,
+		parquet.Repetitions.Required,
+		parquet.Repetitions.Optional,
+	} {
+		group := MustGroup(NewGroupNode("schema", rep, FieldList{
+			NewInt32Node("a", parquet.Repetitions.Required, -1),
+		}, -1))
+		elements := ToThrift(group)
+		assert.False(t, elements[0].IsSetRepetitionType(),
+			"root element should not have repetition_type set (was %v)", rep)
+		assert.True(t, elements[1].IsSetRepetitionType(),
+			"non-root element must have repetition_type set")
+	}
 }
 
 func TestInvalidConvertedTypeInDeserialize(t *testing.T) {
