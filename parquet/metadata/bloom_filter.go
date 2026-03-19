@@ -134,6 +134,64 @@ func GetSpacedHashes[T parquet.ColumnTypes](h Hasher, numValid int64, vals []T, 
 	return out
 }
 
+// GetHashesFromBitmap computes hashes for boolean values directly from a bitmap
+// without converting to []bool, avoiding 8x memory overhead.
+func GetHashesFromBitmap(h Hasher, bitmap []byte, bitmapOffset int64, numValues int64) []uint64 {
+	if numValues == 0 {
+		return []uint64{}
+	}
+
+	// Convert each bool bit to []byte for hashing
+	// Reuse a single-byte slice to avoid allocating per value
+	out := make([]uint64, numValues)
+	b := []byte{0}
+	for i := range numValues {
+		val := bitutil.BitIsSet(bitmap, int(bitmapOffset+i))
+		// Hash the boolean as a single byte (0x00 or 0x01)
+		if val {
+			b[0] = 1
+		} else {
+			b[0] = 0
+		}
+		out[i] = h.Sum64(b)
+	}
+	return out
+}
+
+// GetSpacedHashesFromBitmap computes hashes for boolean values from a bitmap with validity information,
+// only hashing valid (non-null) values. Returns hashes for numValid values.
+// This avoids the 8x memory overhead of converting to []bool.
+func GetSpacedHashesFromBitmap(h Hasher, numValid int64, bitmap []byte, bitmapOffset int64, numValues int64, validBits []byte, validBitsOffset int64) []uint64 {
+	if numValid == 0 {
+		return []uint64{}
+	}
+
+	out := make([]uint64, 0, numValid)
+
+	// Use SetBitRunReader to efficiently iterate over valid values
+	// Reuse a single-byte slice to avoid allocating per value
+	b := []byte{0}
+	setReader := bitutils.NewSetBitRunReader(validBits, validBitsOffset, numValues)
+	for {
+		run := setReader.NextRun()
+		if run.Length == 0 {
+			break
+		}
+
+		// Hash each valid bit in this run
+		for i := range run.Length {
+			val := bitutil.BitIsSet(bitmap, int(bitmapOffset+run.Pos+i))
+			if val {
+				b[0] = 1
+			} else {
+				b[0] = 0
+			}
+			out = append(out, h.Sum64(b))
+		}
+	}
+	return out
+}
+
 func getBytes[T parquet.ColumnTypes](v T) []byte {
 	switch v := any(v).(type) {
 	case parquet.ByteArray:

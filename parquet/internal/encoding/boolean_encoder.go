@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
+	"github.com/apache/arrow-go/v18/internal/bitutils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/debug"
 	"github.com/apache/arrow-go/v18/parquet/internal/utils"
@@ -29,6 +30,41 @@ const (
 	boolBufSize = 1024
 	boolsInBuf  = boolBufSize * 8
 )
+
+// compressBitmapWithValidity extracts only the valid bits from a source bitmap,
+// compressing it into a contiguous destination bitmap. Uses SetBitRunReader for
+// efficient iteration over valid runs.
+func compressBitmapWithValidity(
+	srcBitmap []byte,
+	srcOffset int64,
+	numValues int64,
+	validBits []byte,
+	validBitsOffset int64,
+	numValid int64,
+) []byte {
+	if numValid == 0 {
+		return []byte{}
+	}
+
+	// Allocate destination bitmap to hold only valid bits
+	dstBitmap := make([]byte, bitutil.BytesForBits(numValid))
+	dstWriter := utils.NewBitmapWriter(dstBitmap, 0, int(numValid))
+
+	// Use SetBitRunReader to efficiently iterate over valid runs
+	reader := bitutils.NewSetBitRunReader(validBits, validBitsOffset, numValues)
+	for {
+		run := reader.NextRun()
+		if run.Length == 0 {
+			break
+		}
+
+		// Copy this run of valid bits from source to destination
+		dstWriter.AppendBitmap(srcBitmap, srcOffset+run.Pos, run.Length)
+	}
+
+	dstWriter.Finish()
+	return dstBitmap
+}
 
 // PlainBooleanEncoder encodes bools as a bitmap as per the Plain Encoding
 type PlainBooleanEncoder struct {
@@ -99,6 +135,29 @@ func (enc *PlainBooleanEncoder) PutSpaced(in []bool, validBits []byte, validBits
 	enc.Put(bufferOut[:nvalid])
 }
 
+// PutSpacedBitmap encodes boolean values directly from a bitmap with validity information,
+// without converting to []bool. This avoids the 8x memory overhead of bool slices.
+// It compresses the bitmap by extracting only valid (non-null) bits.
+func (enc *PlainBooleanEncoder) PutSpacedBitmap(bitmap []byte, bitmapOffset int64, numValues int64, validBits []byte, validBitsOffset int64) int64 {
+	if numValues == 0 {
+		return 0
+	}
+
+	// Count the number of valid values to pre-allocate destination bitmap
+	numValid := int64(bitutil.CountSetBits(validBits, int(validBitsOffset), int(numValues)))
+	if numValid == 0 {
+		return 0
+	}
+
+	// Compress bitmap: extract only valid bits
+	compressedBitmap := compressBitmapWithValidity(bitmap, bitmapOffset, numValues, validBits, validBitsOffset, numValid)
+
+	// Encode the compressed bitmap
+	enc.PutBitmap(compressedBitmap, 0, numValid)
+
+	return numValid
+}
+
 // EstimatedDataEncodedSize returns the current number of bytes that have
 // been buffered so far
 func (enc *PlainBooleanEncoder) EstimatedDataEncodedSize() int64 {
@@ -138,6 +197,44 @@ func (enc *RleBooleanEncoder) PutSpaced(in []bool, validBits []byte, validBitsOf
 	bufferOut := make([]bool, len(in))
 	nvalid := spacedCompress(in, bufferOut, validBits, validBitsOffset)
 	enc.Put(bufferOut[:nvalid])
+}
+
+// PutSpacedBitmap encodes boolean values from a bitmap with validity information.
+// Note: RleBooleanEncoder buffers values as []bool for RLE encoding at flush time,
+// so we extract valid bits to []bool. This is still better than the caller doing
+// the full bitmap-to-[]bool conversion for all values.
+func (enc *RleBooleanEncoder) PutSpacedBitmap(bitmap []byte, bitmapOffset int64, numValues int64, validBits []byte, validBitsOffset int64) int64 {
+	if numValues == 0 {
+		return 0
+	}
+
+	// Count valid values
+	numValid := int64(bitutil.CountSetBits(validBits, int(validBitsOffset), int(numValues)))
+	if numValid == 0 {
+		return 0
+	}
+
+	// Extract valid bits to []bool for buffering
+	// Use SetBitRunReader to efficiently iterate over valid values
+	bufferOut := make([]bool, numValid)
+	idx := 0
+
+	reader := bitutils.NewSetBitRunReader(validBits, validBitsOffset, numValues)
+	for {
+		run := reader.NextRun()
+		if run.Length == 0 {
+			break
+		}
+
+		// Convert this run of bits to bools
+		for i := int64(0); i < run.Length; i++ {
+			bufferOut[idx] = bitutil.BitIsSet(bitmap, int(bitmapOffset+run.Pos+i))
+			idx++
+		}
+	}
+
+	enc.Put(bufferOut)
+	return numValid
 }
 
 func (enc *RleBooleanEncoder) EstimatedDataEncodedSize() int64 {
