@@ -46,7 +46,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@def8c394e3ad351a79bc93815e4a585520fe993b # v6.2.0
         with:
-          go-version: '1.24'
+          go-version: '1.25'
           cache: true
           cache-dependency-path: go.sum
       - name: Install pre-commit
