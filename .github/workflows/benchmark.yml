@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go: ['1.24.3']
+        go: ['1.26.1']
         arch: ['amd64']
     steps:
       - name: Checkout repository
