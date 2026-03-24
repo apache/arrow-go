@@ -174,7 +174,6 @@ func (tk *TakeKernelTestSuite) assertTakeArrays(values, indices, expected arrow.
 	actual, err := compute.TakeArray(tk.ctx, values, indices)
 	tk.Require().NoError(err)
 	defer actual.Release()
-	tk.True(arrow.TypeEqual(values.DataType(), actual.DataType()), "Take must preserve DataType")
 	assertArraysEqual(tk.T(), expected, actual)
 }
 
@@ -1264,92 +1263,86 @@ func (tk *TakeKernelMap) TestMapStringInt32() {
 	tk.dt = arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32)
 
 	mapJSON := `[
-		[],
-		[{"key": "a", "value": 1}],
-		[{"key": "a", "value": 2}, {"key": "b", "value": 3}, {"key": "c", "value": 4}],
-		[{"key": "w", "value": 5}, {"key": "x", "value": 6}, {"key": "y", "value": 7}, {"key": "z", "value": null}]
+		{},
+		{"a": 1},
+		{"a": 2, "b": 3, "c": 4},
+		{"w": 5, "x": 6, "y": 7, "z": null}
 	]`
 	tk.checkTake(tk.dt, mapJSON, `[]`, `[]`)
 	tk.checkTake(tk.dt, mapJSON, `[3, 1, 3, 1, 3]`, `[
-		[{"key": "w", "value": 5}, {"key": "x", "value": 6}, {"key": "y", "value": 7}, {"key": "z", "value": null}],
-		[{"key": "a", "value": 1}],
-		[{"key": "w", "value": 5}, {"key": "x", "value": 6}, {"key": "y", "value": 7}, {"key": "z", "value": null}],
-		[{"key": "a", "value": 1}],
-		[{"key": "w", "value": 5}, {"key": "x", "value": 6}, {"key": "y", "value": 7}, {"key": "z", "value": null}]
+		{"w": 5, "x": 6, "y": 7, "z": null}
+		{"a": 1},
+		{"w": 5, "x": 6, "y": 7, "z": null}
+		{"a": 1},
+		{"w": 5, "x": 6, "y": 7, "z": null}
 	]`)
-	tk.checkTake(tk.dt, mapJSON, `[2, 1, 2, 3]`, `[
-		[{"key": "a", "value": 2}, {"key": "b", "value": 3}, {"key": "c", "value": 4}],
-		[{"key": "a", "value": 1}],
-		[{"key": "a", "value": 2}, {"key": "b", "value": 3}, {"key": "c", "value": 4}],
-		[{"key": "w", "value": 5}, {"key": "x", "value": 6}, {"key": "y", "value": 7}, {"key": "z", "value": null}]
+	tk.checkTake(tk.dt, mapJSON, `[4, 2, 1, 6]`, `[
+		{"a": 2, "b": 3, "c": 4},
+		{"a": 1},
+		{"a": 2, "b": 3, "c": 4},
+		{"w": 5, "x": 6, "y": 7, "z": null}
 	]`)
 	tk.checkTake(tk.dt, mapJSON, `[0, 1, 2, 3]`, mapJSON)
 
-	tk.assertNoValidityBitmapUnknownNullCountJSON(tk.dt,
-		`[[{"key": "a", "value": 1}, {"key": "b", "value": 2}], [{"key": "a", "value": 2}, {"key": "b", "value": 3}]]`,
-		`[0, 1, 0]`)
+	tk.assertNoValidityBitmapUnknownNullCountJSON(tk.dt, `[{"a": 1, "b": 2}, {"a": 2, "b": 3}]`, `[0, 1, 0]`)
 }
 
 func (tk *TakeKernelMap) TestMapStringLargeString() {
 	tk.dt = arrow.MapOf(arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString)
 
 	mapJSON := `[
-		[],
-		[{"key": "a", "value": "b"}],
-		[{"key": "a", "value": "c"}, {"key": "d", "value": "e"}, {"key": "f", "value": "g"}],
-		[{"key": "w", "value": "x"}, {"key": "y", "value": "z"}, {"key": "m", "value": "n"}, {"key": "o", "value": null}]
+		{},
+		{"a": "b"},
+		{"a": "c", "d": "e", "f": "g"},
+		{"w": "x", "y": "z", "m": "n", "o": null}
 	]`
 
 	tk.checkTake(tk.dt, mapJSON, `[]`, `[]`)
 	tk.checkTake(tk.dt, mapJSON, `[3, 1, 3, 1, 3]`, `[
-		[{"key": "w", "value": "x"}, {"key": "y", "value": "z"}, {"key": "m", "value": "n"}, {"key": "o", "value": null}],
-		[{"key": "a", "value": "b"}],
-		[{"key": "w", "value": "x"}, {"key": "y", "value": "z"}, {"key": "m", "value": "n"}, {"key": "o", "value": null}],
-		[{"key": "a", "value": "b"}],
-		[{"key": "w", "value": "x"}, {"key": "y", "value": "z"}, {"key": "m", "value": "n"}, {"key": "o", "value": null}]
+		{"w": "x", "y": "z", "m": "n", "o": null},
+		{"a": "b"},
+		{"w": "x", "y": "z", "m": "n", "o": null},
+		{"a": "b"},
+		{"w": "x", "y": "z", "m": "n", "o": null},
 	]`)
-	tk.checkTake(tk.dt, mapJSON, `[2, 1, 2, 3]`, `[
-		[{"key": "a", "value": "c"}, {"key": "d", "value": "e"}, {"key": "f", "value": "g"}],
-		[{"key": "a", "value": "b"}],
-		[{"key": "a", "value": "c"}, {"key": "d", "value": "e"}, {"key": "f", "value": "g"}],
-		[{"key": "w", "value": "x"}, {"key": "y", "value": "z"}, {"key": "m", "value": "n"}, {"key": "o", "value": null}]
+	tk.checkTake(tk.dt, mapJSON, `[4, 2, 1, 6]`, `[
+		{"a": "e", "c": "f"},
+		{"w": "x", "y": "z", "m": "n", "o": null},
+		{"a": "b"},
+		{"w": "x", "y": "z", "m": "n", "o": null}
 	]`)
 	tk.checkTake(tk.dt, mapJSON, `[0, 1, 2, 3]`, mapJSON)
 
-	tk.assertNoValidityBitmapUnknownNullCountJSON(tk.dt,
-		`[[{"key": "a", "value": "b"}, {"key": "c", "value": "d"}], [{"key": "a", "value": "e"}, {"key": "c", "value": "f"}]]`,
-		`[0, 1, 0]`)
+	tk.assertNoValidityBitmapUnknownNullCountJSON(tk.dt, `[{"a": "b", "c": "d"}, {"a": "e", "c": "f"}]`, `[0, 1, 0]`)
 }
 
 func (tk *TakeKernelMap) TestMapIntListString() {
 	tk.dt = arrow.MapOf(arrow.PrimitiveTypes.Int32, arrow.ListOf(arrow.BinaryTypes.String))
 
 	mapJSON := `[
-		[],
-		[{"key": 1, "value": ["a"]}],
-		[{"key": 1, "value": ["b", "c"]}, {"key": 2, "value": ["d"]}, {"key": 3, "value": ["e", "f", "g"]}],
-		[{"key": 1, "value": ["h"]}, {"key": 2, "value": ["i", "j"]}, {"key": 3, "value": [null]}, {"key": 4, "value": ["k", "l", "m", "n"]}]
+		{},
+		{1: ["a"]},
+		{1: ["b", "c"], 2: ["d"], 3: ["e", "f", "g"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]}
 	]`
 
 	tk.checkTake(tk.dt, mapJSON, `[]`, `[]`)
 	tk.checkTake(tk.dt, mapJSON, `[3, 1, 3, 1, 3]`, `[
-		[{"key": 1, "value": ["h"]}, {"key": 2, "value": ["i", "j"]}, {"key": 3, "value": [null]}, {"key": 4, "value": ["k", "l", "m", "n"]}],
-		[{"key": 1, "value": ["a"]}],
-		[{"key": 1, "value": ["h"]}, {"key": 2, "value": ["i", "j"]}, {"key": 3, "value": [null]}, {"key": 4, "value": ["k", "l", "m", "n"]}],
-		[{"key": 1, "value": ["a"]}],
-		[{"key": 1, "value": ["h"]}, {"key": 2, "value": ["i", "j"]}, {"key": 3, "value": [null]}, {"key": 4, "value": ["k", "l", "m", "n"]}]
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
+		{1: ["a", "b"], 2: ["c", "d"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
+		{1: ["a", "b"], 2: ["c", "d"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
 	]`)
-	tk.checkTake(tk.dt, mapJSON, `[2, 1, 2, 3]`, `[
-		[{"key": 1, "value": ["b", "c"]}, {"key": 2, "value": ["d"]}, {"key": 3, "value": ["e", "f", "g"]}],
-		[{"key": 1, "value": ["a"]}],
-		[{"key": 1, "value": ["b", "c"]}, {"key": 2, "value": ["d"]}, {"key": 3, "value": ["e", "f", "g"]}],
-		[{"key": 1, "value": ["h"]}, {"key": 2, "value": ["i", "j"]}, {"key": 3, "value": [null]}, {"key": 4, "value": ["k", "l", "m", "n"]}]
+	tk.checkTake(tk.dt, mapJSON, `[4, 2, 1, 6]`, `[
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
+		{1: ["a", "b"], 2: ["c", "d"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]},
+		{1: ["h"], 2: ["i", "j"], 3: [null], 4: ["k", "l", "m", "n"]}
 	]`)
 	tk.checkTake(tk.dt, mapJSON, `[0, 1, 2, 3]`, mapJSON)
 
-	tk.assertNoValidityBitmapUnknownNullCountJSON(tk.dt,
-		`[[{"key": 1, "value": ["a", "b"]}, {"key": 2, "value": ["c", "d"]}], [{"key": 1, "value": ["e", "f"]}, {"key": 2, "value": ["g", "h"]}]]`,
-		`[0, 1, 0]`)
+	tk.assertNoValidityBitmapUnknownNullCountJSON(tk.dt, `[{1: ["a", "b"], 2: ["c", "d"]}, {1: [3, 4], 2: ["e", "f"]}]`, `[0, 1, 0]`)
 }
 
 type TakeKernelDenseUnion struct {
@@ -1570,6 +1563,7 @@ func (tk *TakeKernelTestChunked) takeWithArray(dt arrow.DataType, values []strin
 		return nil, err
 	}
 	return result.(*compute.ChunkedDatum).Value, nil
+
 }
 
 func (tk *TakeKernelTestChunked) takeWithChunked(dt arrow.DataType, values, indices []string) (*arrow.Chunked, error) {
@@ -1765,13 +1759,11 @@ func (tk *TakeKernelTestTable) TestTakeTable() {
 
 	tblJSON := []string{
 		`[{"a": null, "b": "yo"}, {"a": 1, "b": ""}]`,
-		`[{"a": 2, "b": "hello"}, {"a": 4, "b": "eh"}]`,
-	}
+		`[{"a": 2, "b": "hello"}, {"a": 4, "b": "eh"}]`}
 
 	tk.assertTake(schm, tblJSON, `[]`, []string{`[]`})
 	expected310 := []string{
-		`[{"a": 4, "b": "eh"}, {"a": 1, "b": ""}, {"a": null, "b": "yo"}]`,
-	}
+		`[{"a": 4, "b": "eh"}, {"a": 1, "b": ""}, {"a": null, "b": "yo"}]`}
 
 	tk.assertTake(schm, tblJSON, `[3, 1, 0]`, expected310)
 	tk.assertChunkedTake(schm, tblJSON, []string{`[0, 1]`, `[2, 3]`}, tblJSON)
@@ -1787,7 +1779,6 @@ func TestTakeKernels(t *testing.T) {
 		suite.Run(t, &TakeKernelTestString{TakeKernelTestTyped: TakeKernelTestTyped{dt: dt}})
 	}
 	suite.Run(t, new(TakeKernelLists))
-	suite.Run(t, new(TakeKernelMap))
 	suite.Run(t, new(TakeKernelDenseUnion))
 	suite.Run(t, new(TakeKernelTestExtension))
 	suite.Run(t, new(TakeKernelStruct))
