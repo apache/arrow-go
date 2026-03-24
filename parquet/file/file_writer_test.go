@@ -617,7 +617,7 @@ func TestAlpFileRoundtrip(t *testing.T) {
 		},
 		{
 			name:   "special_values",
-			values: []float64{0, -0.0, 1.5, -1.5, math.Inf(1), math.Inf(-1), math.NaN()},
+			values: []float64{0, math.Copysign(0, -1), 1.5, -1.5, math.Inf(1), math.Inf(-1), math.NaN()},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -43,9 +43,9 @@ const (
 	alpMaxLogVectorSize   = 15
 	alpMinLogVectorSize   = 3
 
-	alpInfoSize       = 4 // exponent(1) + factor(1) + num_exceptions(2)
-	alpFloatForInfo   = 5 // frame_of_reference(4) + bit_width(1)
-	alpDoubleForInfo  = 9 // frame_of_reference(8) + bit_width(1)
+	alpInfoSize      = 4 // exponent(1) + factor(1) + num_exceptions(2)
+	alpFloatForInfo  = 5 // frame_of_reference(4) + bit_width(1)
+	alpDoubleForInfo = 9 // frame_of_reference(8) + bit_width(1)
 
 	alpFloatMaxExponent  = 10
 	alpDoubleMaxExponent = 18
@@ -53,7 +53,7 @@ const (
 	alpSamplerVectors        = 8
 	alpMaxPresetCombinations = 5
 
-	alpMagicFloat32 = float32(12582912.0)     // 2^22 + 2^23
+	alpMagicFloat32 = float32(12582912.0)         // 2^22 + 2^23
 	alpMagicFloat64 = float64(6755399441055744.0) // 2^51 + 2^52
 
 	alpNegZeroFloat32Bits = uint32(0x80000000)
@@ -69,6 +69,7 @@ var (
 		1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18,
 	}
 )
+
 func alpFloatMultiplier(exponent, factor int) float32 {
 	m := alpFloatPow10[exponent]
 	if factor > 0 {
@@ -287,6 +288,7 @@ func alpUnpackBits64(packed []byte, count, bitWidth int) []uint64 {
 
 	return out
 }
+
 type alpEncodingParams struct {
 	exponent      int
 	factor        int
@@ -378,6 +380,7 @@ func alpFindBestFloat64ParamsWithPresets(values []float64, offset, length int, p
 	}
 	return best
 }
+
 type alpEncoder[T float32 | float64] struct {
 	encoder
 
@@ -712,12 +715,13 @@ func (enc *alpEncoder[T]) Reset() {
 func (enc *alpEncoder[T]) Release() {
 	enc.encoder.Release()
 }
+
 type alpDecoder[T float32 | float64] struct {
 	decoder
 
-	vectorSize    int
-	totalCount    int
-	numVectors    int
+	vectorSize int
+	totalCount int
+	numVectors int
 
 	vectorOffsets   []uint32
 	bodyData        []byte
@@ -960,6 +964,7 @@ func (dec *alpDecoder[T]) Discard(n int) (int, error) {
 	dec.currentIndex += n
 	return n, nil
 }
+
 type AlpFloat32Encoder = alpEncoder[float32]
 type AlpFloat64Encoder = alpEncoder[float64]
 type AlpFloat32Decoder = alpDecoder[float32]

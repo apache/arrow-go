@@ -187,8 +187,8 @@ func TestAlpEncodeDecodeFloat64(t *testing.T) {
 func TestAlpMultiplier(t *testing.T) {
 	assert.Equal(t, float32(1.0), alpFloatMultiplier(0, 0))
 	assert.Equal(t, float32(100.0), alpFloatMultiplier(2, 0))
-	assert.Equal(t, float32(10.0), alpFloatMultiplier(2, 1))   // 100/10 = 10
-	assert.Equal(t, float32(1.0), alpFloatMultiplier(2, 2))    // 100/100 = 1
+	assert.Equal(t, float32(10.0), alpFloatMultiplier(2, 1)) // 100/10 = 10
+	assert.Equal(t, float32(1.0), alpFloatMultiplier(2, 2))  // 100/100 = 1
 	assert.Equal(t, float32(1e10), alpFloatMultiplier(10, 0))
 
 	assert.Equal(t, float64(1.0), alpDoubleMultiplier(0, 0))
@@ -1303,4 +1303,3 @@ func TestAlpPanicsForNonFloatTypes(t *testing.T) {
 		NewDecoder(parquet.Types.Int32, parquet.Encodings.ALP, col, mem)
 	}, "ALP should panic for non-float decoder")
 }
-
