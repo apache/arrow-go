@@ -1769,6 +1769,33 @@ func (tk *TakeKernelTestTable) TestTakeTable() {
 	tk.assertChunkedTake(schm, tblJSON, []string{`[0, 1]`, `[2, 3]`}, tblJSON)
 }
 
+// TestMapPreservesValueNullable verifies that Take preserves the Map's struct
+// child type exactly.  arrow.MapOf marks the value field Nullable: true; a
+// buggy selectMapImpl reconstructs the struct child via arrow.StructOf field
+// literals whose Nullable defaults to false, silently dropping the flag.
+// The outer MapType is always preserved by the kernel framework, so the
+// mismatch must be checked on the struct child directly.
+func TestMapPreservesValueNullable(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.TODO(), mem)
+
+	dt := arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32)
+	values, _, _ := array.FromJSON(mem, dt, strings.NewReader(`[[{"key": "a", "value": 1}]]`), array.WithUseNumber())
+	defer values.Release()
+	indices, _, _ := array.FromJSON(mem, arrow.PrimitiveTypes.Int8, strings.NewReader(`[0]`))
+	defer indices.Release()
+
+	actual, err := compute.TakeArray(ctx, values, indices)
+	require.NoError(t, err)
+	defer actual.Release()
+
+	wantChildType := values.Data().Children()[0].DataType()
+	gotChildType := actual.Data().Children()[0].DataType()
+	assert.Truef(t, arrow.TypeEqual(wantChildType, gotChildType),
+		"Map struct child type not preserved:\nwant: %s\n got: %s", wantChildType, gotChildType)
+}
+
 func TestTakeKernels(t *testing.T) {
 	suite.Run(t, new(TakeKernelTest))
 	for _, dt := range numericTypes {
