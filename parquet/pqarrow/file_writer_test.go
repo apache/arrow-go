@@ -208,3 +208,22 @@ func TestFileWriterTotalBytesBuffered(t *testing.T) {
 	assert.Equal(t, int64(596), writer.TotalCompressedBytes())
 	assert.Equal(t, int64(1306), writer.TotalBytesWritten())
 }
+
+func TestWriteOnClosedFileWriter(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "one", Nullable: true, Type: arrow.PrimitiveTypes.Float64},
+	}, nil)
+
+	output := &bytes.Buffer{}
+	writer, err := pqarrow.NewFileWriter(schema, output, parquet.NewWriterProperties(), pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+
+	// Close the writer
+	require.NoError(t, writer.Close())
+
+	// Call each write method and ensure they all return an error stating the writer is already closed
+	require.ErrorContains(t, writer.WriteBuffered(nil), "already closed")
+	require.ErrorContains(t, writer.Write(nil), "already closed")
+	require.ErrorContains(t, writer.WriteColumnChunked(nil, 0, 0), "already closed")
+	require.ErrorContains(t, writer.WriteColumnData(nil), "already closed")
+}
