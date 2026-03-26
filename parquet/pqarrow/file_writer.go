@@ -187,6 +187,9 @@ func (fw *FileWriter) NumRows() int {
 // More memory is utilized compared to Write as the whole row group data is kept in memory before it's written
 // since Parquet files must have an entire column written before writing the next column.
 func (fw *FileWriter) WriteBuffered(rec arrow.RecordBatch) error {
+	if fw.closed {
+		return fmt.Errorf("WriteBuffered called on already closed FileWriter")
+	}
 	if !rec.Schema().Equal(fw.schema) {
 		return fmt.Errorf("record schema does not match writer's. \nrecord: %s\nwriter: %s", rec.Schema(), fw.schema)
 	}
@@ -241,6 +244,9 @@ func (fw *FileWriter) WriteBuffered(rec arrow.RecordBatch) error {
 // * a highly-restricted memory environment
 // * very large records with lots of rows (potentially close to the max row group length)
 func (fw *FileWriter) Write(rec arrow.RecordBatch) error {
+	if fw.closed {
+		return fmt.Errorf("invalid write call: FileWriter is already closed")
+	}
 	if !rec.Schema().Equal(fw.schema) {
 		return fmt.Errorf("record schema does not match writer's. \nrecord: %s\nwriter: %s", rec.Schema(), fw.schema)
 	}
@@ -276,6 +282,9 @@ func (fw *FileWriter) Write(rec arrow.RecordBatch) error {
 // row group for each chunk of chunkSize rows in the table. Calling this with 0 rows will
 // still write a 0 length Row Group to the file.
 func (fw *FileWriter) WriteTable(tbl arrow.Table, chunkSize int64) error {
+	if fw.closed {
+		return fmt.Errorf("invalid write call: FileWriter is already closed")
+	}
 	if chunkSize <= 0 && tbl.NumRows() > 0 {
 		return xerrors.New("chunk size per row group must be greater than 0")
 	} else if !tbl.Schema().Equal(fw.schema) {
@@ -344,6 +353,9 @@ func (fw *FileWriter) Close() error {
 // building of writing columns to a file via arrow data without needing to already have
 // a record or table.
 func (fw *FileWriter) WriteColumnChunked(data *arrow.Chunked, offset, size int64) error {
+	if fw.closed {
+		return fmt.Errorf("invalid write call: FileWriter is already closed")
+	}
 	acw, err := newArrowColumnWriter(data, offset, size, fw.manifest, fw.rgw, fw.colIdx)
 	if err != nil {
 		return err
@@ -356,6 +368,9 @@ func (fw *FileWriter) WriteColumnChunked(data *arrow.Chunked, offset, size int64
 // it is based on the current column of the row group writer allowing progressive building
 // of the file by columns without needing a full record or table to write.
 func (fw *FileWriter) WriteColumnData(data arrow.Array) error {
+	if fw.closed {
+		return fmt.Errorf("invalid write call: FileWriter is already closed")
+	}
 	chunked := arrow.NewChunked(data.DataType(), []arrow.Array{data})
 	defer chunked.Release()
 	return fw.WriteColumnChunked(chunked, 0, int64(data.Len()))
