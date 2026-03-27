@@ -485,6 +485,33 @@ func structFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResul
 	return nil
 }
 
+func dictionaryFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+	indices, err := kernels.GetTakeIndices(exec.GetAllocator(ctx.Ctx),
+		&batch.Values[1].Array, ctx.State.(kernels.FilterState).NullSelection)
+	if err != nil {
+		return err
+	}
+	defer indices.Release()
+
+	filter := NewDatum(indices)
+	defer filter.Release()
+
+	valData := batch.Values[0].Array.MakeData()
+	defer valData.Release()
+
+	vals := NewDatum(valData)
+	defer vals.Release()
+
+	result, err := Take(ctx.Ctx, kernels.TakeOptions{BoundsCheck: false}, vals, filter)
+	if err != nil {
+		return err
+	}
+	defer result.Release()
+
+	out.TakeOwnership(result.(*ArrayDatum).Value)
+	return nil
+}
+
 func structTake(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 	// generate top level validity bitmap
 	if err := kernels.TakeExec(kernels.StructImpl)(ctx, batch, out); err != nil {
@@ -519,6 +546,26 @@ func structTake(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult)
 	return eg.Wait()
 }
 
+func dictionaryTake(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+	dictArr := batch.Values[0].Array.MakeArray().(*array.Dictionary)
+	defer dictArr.Release()
+
+	selection := batch.Values[1].Array.MakeArray()
+	defer selection.Release()
+
+	takenIndices, err := TakeArrayOpts(ctx.Ctx, dictArr.Indices(), selection, kernels.TakeOptions{BoundsCheck: ctx.State.(kernels.TakeState).BoundsCheck})
+	if err != nil {
+		return err
+	}
+	defer takenIndices.Release()
+
+	result := array.NewDictionaryArray(dictArr.DataType(), takenIndices, dictArr.Dictionary())
+	defer result.Release()
+
+	out.TakeOwnership(result.Data())
+	return nil
+}
+
 // RegisterVectorSelection registers functions that select specific
 // values from arrays such as Take and Filter
 func RegisterVectorSelection(reg FunctionRegistry) {
@@ -533,6 +580,7 @@ func RegisterVectorSelection(reg FunctionRegistry) {
 		{In: exec.NewIDInput(arrow.LARGE_LIST), Exec: selectListImpl(kernels.FilterExec(kernels.ListImpl[int64]))},
 		{In: exec.NewIDInput(arrow.FIXED_SIZE_LIST), Exec: selectListImpl(kernels.FilterExec(kernels.FSLImpl))},
 		{In: exec.NewIDInput(arrow.DENSE_UNION), Exec: denseUnionImpl(kernels.FilterExec(kernels.DenseUnionImpl))},
+		{In: exec.NewIDInput(arrow.DICTIONARY), Exec: dictionaryFilter},
 		{In: exec.NewIDInput(arrow.EXTENSION), Exec: extensionFilterImpl},
 		{In: exec.NewIDInput(arrow.STRUCT), Exec: structFilter},
 	}...)
@@ -543,6 +591,7 @@ func RegisterVectorSelection(reg FunctionRegistry) {
 		{In: exec.NewIDInput(arrow.FIXED_SIZE_LIST), Exec: selectListImpl(kernels.TakeExec(kernels.FSLImpl))},
 		{In: exec.NewIDInput(arrow.MAP), Exec: selectMapImpl(kernels.TakeExec(kernels.MapImpl))},
 		{In: exec.NewIDInput(arrow.DENSE_UNION), Exec: denseUnionImpl(kernels.TakeExec(kernels.DenseUnionImpl))},
+		{In: exec.NewIDInput(arrow.DICTIONARY), Exec: dictionaryTake},
 		{In: exec.NewIDInput(arrow.EXTENSION), Exec: extensionTakeImpl},
 		{In: exec.NewIDInput(arrow.STRUCT), Exec: structTake},
 	}...)
