@@ -133,6 +133,66 @@ func (*testServer) DoGetStatement(ctx context.Context, ticket flightsql.Statemen
 	return
 }
 
+func (*testServer) CreatePreparedStatement(ctx context.Context, req flightsql.ActionCreatePreparedStatementRequest) (result flightsql.ActionCreatePreparedStatementResult, err error) {
+	query := req.GetQuery()
+	var isUpdate *bool
+	result.Handle = []byte(query)
+	switch query {
+	case "prepared query":
+		isUpdate := false
+		result.IsUpdate = &isUpdate
+	case "prepared update":
+		isUpdate := true
+		result.IsUpdate = &isUpdate
+	default:
+		err = fmt.Errorf("unknown query: %s", query)
+	}
+	if isUpdate != nil {
+		result.IsUpdate = isUpdate
+	}
+	return
+}
+
+func (*testServer) GetFlightInfoPreparedStatement(ctx context.Context, q flightsql.PreparedStatementQuery, fd *flight.FlightDescriptor) (*flight.FlightInfo, error) {
+	return &flight.FlightInfo{
+		FlightDescriptor: fd,
+		Endpoint: []*flight.FlightEndpoint{{
+			Ticket: &flight.Ticket{Ticket: fd.Cmd},
+		}},
+	}, nil
+}
+
+func (*testServer) DoGetPreparedStatement(ctx context.Context, q flightsql.PreparedStatementQuery) (sc *arrow.Schema, cc <-chan flight.StreamChunk, err error) {
+	handle := string(q.GetPreparedStatementHandle())
+	switch handle {
+	case "prepared query":
+		b := array.NewInt16Builder(memory.DefaultAllocator)
+		sc = arrow.NewSchema([]arrow.Field{{
+			Name:     "t1",
+			Type:     b.Type(),
+			Nullable: true,
+		}}, nil)
+		b.AppendNull()
+		c := make(chan flight.StreamChunk, 2)
+		c <- flight.StreamChunk{
+			Data: array.NewRecordBatch(sc, []arrow.Array{b.NewArray()}, 1),
+		}
+		b.Append(1)
+		c <- flight.StreamChunk{
+			Data: array.NewRecordBatch(sc, []arrow.Array{b.NewArray()}, 1),
+		}
+		close(c)
+		cc = c
+	default:
+		err = fmt.Errorf("unknown prepared statement handle: %s", handle)
+	}
+	return
+}
+
+func (*testServer) ClosePreparedStatement(ctx context.Context, req flightsql.ActionClosePreparedStatementRequest) error {
+	return nil
+}
+
 func (*testServer) SetSessionOptions(ctx context.Context, req *flight.SetSessionOptionsRequest) (*flight.SetSessionOptionsResult, error) {
 	session, err := session.GetSessionFromContext(ctx)
 	if err != nil {
@@ -284,6 +344,54 @@ func (s *FlightSqlServerSuite) TestExecuteChunkError() {
 		st := status.Convert(err)
 		s.Assert().Equal(codes.Internal, st.Code())
 		s.Assert().Equal("test error", st.Message())
+	}
+}
+
+func (s *FlightSqlServerSuite) TestExecutePreparedStatementQuery() {
+	prep, err := s.cl.Prepare(context.TODO(), "prepared query")
+	s.Require().NoError(err)
+	defer prep.Close(context.TODO())
+
+	s.Require().NotNil(prep.IsUpdate())
+	s.Assert().Equal(false, *prep.IsUpdate())
+
+	fi, err := prep.Execute(context.TODO())
+	s.Require().NoError(err)
+	ep := fi.GetEndpoint()
+	s.Require().Len(ep, 1)
+	fr, err := s.cl.DoGet(context.TODO(), ep[0].GetTicket())
+	s.Require().NoError(err)
+	var recs []arrow.RecordBatch
+	for fr.Next() {
+		rec := fr.RecordBatch()
+		rec.Retain()
+		defer rec.Release()
+		recs = append(recs, rec)
+	}
+	s.Require().NoError(fr.Err())
+	tbl := array.NewTableFromRecords(fr.Schema(), recs)
+	defer tbl.Release()
+	s.Assert().Equal(int64(2), tbl.NumRows())
+	s.Assert().Equal(int64(1), tbl.NumCols())
+	col := tbl.Column(0)
+	s.Assert().Equal("t1", col.Name())
+	s.Assert().Equal(2, col.Len())
+	s.Assert().Equal(1, col.NullN())
+	s.Assert().Equal(arrow.INT16, col.DataType().ID())
+	var n int
+	for _, arr := range col.Data().Chunks() {
+		data := array.NewInt16Data(arr.Data())
+		defer data.Release()
+		for i := 0; i < data.Len(); i++ {
+			switch n {
+			case 0:
+				s.Assert().Equal(true, data.IsNull(i))
+			case 1:
+				s.Assert().Equal(false, data.IsNull(i))
+				s.Assert().Equal(int16(1), data.Value(i))
+			}
+			n++
+		}
 	}
 }
 
