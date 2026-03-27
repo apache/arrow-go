@@ -283,6 +283,7 @@ jobs:
         run: |
           ci/scripts/msys2_setup.sh
       - name: Get required Go version
+        shell: msys2 {0}
         run: "(. .env && echo \"GO_VERSION=${GO}\") >> $GITHUB_ENV"
       - name: Update CGO Env vars
         shell: msys2 {0}
