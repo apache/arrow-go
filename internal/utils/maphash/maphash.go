@@ -14,27 +14,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build go1.20 || tinygo
+//go:build !tinygo
 
-package compute
+package maphash
 
-import (
-	"math/bits"
-	"unsafe"
+import "hash/maphash"
 
-	"github.com/apache/arrow-go/v18/internal/utils/maphash"
+type MapHash = maphash.Hash
+type Seed = maphash.Seed
 
-	"github.com/apache/arrow-go/v18/arrow"
-)
-
-func (f FieldPath) hash(h *maphash.MapHash) {
-	raw := unsafe.Pointer(unsafe.SliceData(f))
-	var byteLen int
-	if bits.UintSize == 32 {
-		byteLen = arrow.Int32Traits.BytesRequired(len(f))
-	} else {
-		byteLen = arrow.Int64Traits.BytesRequired(len(f))
-	}
-
-	h.Write(unsafe.Slice((*byte)(raw), byteLen))
+func MakeSeed() Seed {
+	return maphash.MakeSeed()
 }

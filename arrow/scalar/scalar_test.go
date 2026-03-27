@@ -19,11 +19,12 @@ package scalar_test
 import (
 	"bytes"
 	"fmt"
-	"hash/maphash"
 	"math/bits"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/apache/arrow-go/v18/internal/utils/maphash"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"

@@ -19,12 +19,13 @@ package scalar
 import (
 	"encoding/binary"
 	"fmt"
-	"hash/maphash"
 	"math"
 	"math/big"
 	"reflect"
 	"strconv"
 	"unsafe"
+
+	"github.com/apache/arrow-go/v18/internal/utils/maphash"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -969,7 +970,7 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 }
 
 func Hash(seed maphash.Seed, s Scalar) uint64 {
-	var h maphash.Hash
+	var h maphash.MapHash
 	h.SetSeed(seed)
 	binary.Write(&h, endian.Native, arrow.HashType(seed, s.DataType()))
 
