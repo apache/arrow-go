@@ -193,6 +193,18 @@ func (*testServer) ClosePreparedStatement(ctx context.Context, req flightsql.Act
 	return nil
 }
 
+func (*testServer) DoPutPreparedStatementUpdate(ctx context.Context, cmd flightsql.PreparedStatementUpdate, rdr flight.MessageReader) (int64, error) {
+	handle := string(cmd.GetPreparedStatementHandle())
+	switch handle {
+	case "prepared update":
+		// Simulates executing a DML query
+		// that affects 2 rows
+		return 2, nil
+	default:
+		return 0, fmt.Errorf("unknown prepared statement handle: %s", handle)
+	}
+}
+
 func (*testServer) SetSessionOptions(ctx context.Context, req *flight.SetSessionOptionsRequest) (*flight.SetSessionOptionsResult, error) {
 	session, err := session.GetSessionFromContext(ctx)
 	if err != nil {
@@ -393,6 +405,19 @@ func (s *FlightSqlServerSuite) TestExecutePreparedStatementQuery() {
 			n++
 		}
 	}
+}
+
+func (s *FlightSqlServerSuite) TestExecutePreparedStatementUpdate() {
+	prep, err := s.cl.Prepare(context.TODO(), "prepared update")
+	s.Require().NoError(err)
+	defer prep.Close(context.TODO())
+
+	s.Require().NotNil(prep.IsUpdate())
+	s.Assert().Equal(true, *prep.IsUpdate())
+
+	nrecords, err := prep.ExecuteUpdate(context.TODO())
+	s.Require().NoError(err)
+	s.Assert().Equal(int64(2), nrecords)
 }
 
 func (s *FlightSqlServerSuite) TestExecutePoll() {
