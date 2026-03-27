@@ -18,6 +18,7 @@ package array
 
 import (
 	"reflect"
+	"runtime"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -29,43 +30,45 @@ import (
 func TestBinary(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
+	{
+		b := NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
 
-	b := NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
+		values := [][]byte{
+			[]byte("AAA"),
+			nil,
+			[]byte("BBBB"),
+		}
+		valid := []bool{true, false, true}
+		b.AppendValues(values, valid)
 
-	values := [][]byte{
-		[]byte("AAA"),
-		nil,
-		[]byte("BBBB"),
+		b.Retain()
+		b.Release()
+
+		a := b.NewBinaryArray()
+		assert.Equal(t, 3, a.Len())
+		assert.Equal(t, 1, a.NullN())
+		assert.Equal(t, []byte("AAA"), a.Value(0))
+		assert.Equal(t, []byte{}, a.Value(1))
+		assert.Equal(t, []byte("BBBB"), a.Value(2))
+		assert.Equal(t, "QUFB", a.ValueStr(0))
+		assert.Equal(t, NullValueStr, a.ValueStr(1))
+		a.Release()
+
+		// Test builder reset and NewArray API.
+		b.AppendValues(values, valid)
+		a = b.NewArray().(*Binary)
+		assert.Equal(t, 3, a.Len())
+		assert.Equal(t, 1, a.NullN())
+		assert.Equal(t, []byte("AAA"), a.Value(0))
+		assert.Equal(t, []byte{}, a.Value(1))
+		assert.Equal(t, []byte("BBBB"), a.Value(2))
+		assert.Equal(t, "QUFB", a.ValueStr(0))
+		assert.Equal(t, NullValueStr, a.ValueStr(1))
+		a.Release()
+
+		b.Release()
 	}
-	valid := []bool{true, false, true}
-	b.AppendValues(values, valid)
-
-	b.Retain()
-	b.Release()
-
-	a := b.NewBinaryArray()
-	assert.Equal(t, 3, a.Len())
-	assert.Equal(t, 1, a.NullN())
-	assert.Equal(t, []byte("AAA"), a.Value(0))
-	assert.Equal(t, []byte{}, a.Value(1))
-	assert.Equal(t, []byte("BBBB"), a.Value(2))
-	assert.Equal(t, "QUFB", a.ValueStr(0))
-	assert.Equal(t, NullValueStr, a.ValueStr(1))
-	a.Release()
-
-	// Test builder reset and NewArray API.
-	b.AppendValues(values, valid)
-	a = b.NewArray().(*Binary)
-	assert.Equal(t, 3, a.Len())
-	assert.Equal(t, 1, a.NullN())
-	assert.Equal(t, []byte("AAA"), a.Value(0))
-	assert.Equal(t, []byte{}, a.Value(1))
-	assert.Equal(t, []byte("BBBB"), a.Value(2))
-	assert.Equal(t, "QUFB", a.ValueStr(0))
-	assert.Equal(t, NullValueStr, a.ValueStr(1))
-	a.Release()
-
-	b.Release()
+	runtime.GC()
 }
 
 func TestLargeBinary(t *testing.T) {
