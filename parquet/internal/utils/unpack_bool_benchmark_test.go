@@ -18,29 +18,11 @@ package utils_test
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/parquet/internal/utils"
 )
-
-func BenchmarkBytesToBools(b *testing.B) {
-	for _, nBytes := range []int{64, 256, 1024, 4096, 16384} {
-		in := make([]byte, nBytes)
-		rng := rand.New(rand.NewSource(42))
-		for i := range in {
-			in[i] = byte(rng.Intn(256))
-		}
-		out := make([]bool, nBytes*8)
-
-		b.Run(fmt.Sprintf("bytes=%d", nBytes), func(b *testing.B) {
-			b.SetBytes(int64(nBytes))
-			for i := 0; i < b.N; i++ {
-				utils.BytesToBools(in, out)
-			}
-		})
-	}
-}
 
 func TestBytesToBoolsCorrectness(t *testing.T) {
 	rng := rand.New(rand.NewSource(12345))
@@ -76,6 +58,23 @@ func TestBytesToBoolsCorrectness(t *testing.T) {
 	}
 }
 
+func BenchmarkBytesToBools(b *testing.B) {
+	for _, size := range []int{64, 256, 1024, 4096, 16384} {
+		in := make([]byte, size)
+		for i := range in {
+			in[i] = byte(rand.IntN(256))
+		}
+		out := make([]bool, size*8)
+
+		b.Run("bytes="+bToStr(size), func(b *testing.B) {
+			b.SetBytes(int64(size))
+			for i := 0; i < b.N; i++ {
+				utils.BytesToBools(in, out)
+			}
+		})
+	}
+}
+
 func TestBytesToBoolsOutlenSmaller(t *testing.T) {
 	in := []byte{0xFF, 0xAA, 0x55}
 	for outlen := 1; outlen <= 24; outlen++ {
@@ -101,5 +100,20 @@ func TestBytesToBoolsOutlenSmaller(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func bToStr(n int) string {
+	switch {
+	case n >= 16384:
+		return "16K"
+	case n >= 4096:
+		return "4K"
+	case n >= 1024:
+		return "1K"
+	case n >= 256:
+		return "256"
+	default:
+		return "64"
 	}
 }
