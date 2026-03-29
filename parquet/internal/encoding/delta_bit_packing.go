@@ -54,6 +54,7 @@ type deltaBitPackDecoder[T int32 | int64] struct {
 	lastVal     int64
 
 	miniBlockValues []T
+	deltaBuf        []uint64
 }
 
 // returns the number of bytes read so far
@@ -138,14 +139,33 @@ func (d *deltaBitPackDecoder[T]) unpackNextMini() error {
 	d.deltaBitWidth = d.deltaBitWidths.Bytes()[int(d.miniBlockIdx)]
 	d.currentMiniBlockVals = d.valsPerMini
 
-	for j := 0; j < int(d.valsPerMini); j++ {
-		delta, ok := d.bitdecoder.GetValue(int(d.deltaBitWidth))
-		if !ok {
-			return errors.New("parquet: eof exception")
-		}
+	n := int(d.valsPerMini)
+	width := uint(d.deltaBitWidth)
 
-		d.lastVal += int64(delta) + int64(d.minDelta)
-		d.miniBlockValues = append(d.miniBlockValues, T(d.lastVal))
+	if width == 0 {
+		for j := 0; j < n; j++ {
+			d.lastVal += int64(d.minDelta)
+			d.miniBlockValues = append(d.miniBlockValues, T(d.lastVal))
+		}
+	} else {
+		if cap(d.deltaBuf) < 1 {
+			d.deltaBuf = make([]uint64, 1)
+		}
+		d.deltaBuf = d.deltaBuf[:1]
+		minDelta := d.minDelta
+
+		for j := 0; j < n; j++ {
+			nread, err := d.bitdecoder.GetBatch(width, d.deltaBuf)
+			if err != nil {
+				return err
+			}
+			if nread != 1 {
+				return errors.New("parquet: eof exception")
+			}
+
+			d.lastVal += int64(d.deltaBuf[0]) + minDelta
+			d.miniBlockValues = append(d.miniBlockValues, T(d.lastVal))
+		}
 	}
 	d.miniBlockIdx++
 	return nil
