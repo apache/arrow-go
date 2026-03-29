@@ -20,7 +20,11 @@ package utils
 func bytesToBoolsGo(in []byte, out []bool) {
 	for i, b := range in {
 		for j := 0; j < 8; j++ {
-			out[8*i+j] = (b & (1 << j)) != 0
+			idx := 8*i + j
+			if idx >= len(out) {
+				return
+			}
+			out[idx] = (b & (1 << j)) != 0
 		}
 	}
 }
