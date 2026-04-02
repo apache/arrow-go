@@ -17,12 +17,15 @@
 package flightsql_test
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"testing"
 )
 
 func TestMain(m *testing.M) {
+	flag.Parse()
+
 	// FlightSQL tests involve gRPC server/client interactions that are
 	// inherently racy under -race/-asan and spuriously fail in CI.
 	// Use -short in CI to skip them; they still run locally via
