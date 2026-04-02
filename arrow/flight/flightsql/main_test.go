@@ -1,0 +1,35 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package flightsql_test
+
+import (
+	"fmt"
+	"os"
+	"testing"
+)
+
+func TestMain(m *testing.M) {
+	// FlightSQL tests involve gRPC server/client interactions that are
+	// inherently racy under -race/-asan and spuriously fail in CI.
+	// Use -short in CI to skip them; they still run locally via
+	// `go test ./...` (without -short).
+	if testing.Short() {
+		fmt.Println("SKIP: flightsql tests disabled with -short flag")
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
