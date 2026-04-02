@@ -176,7 +176,7 @@ jobs:
         with:
           submodules: recursive
       - name: Setup Go
-        uses: actions/setup-go@def8c394e3ad351a79bc93815e4a585520fe993b # v6.2.0
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.2.0
         with:
           go-version: ${{ matrix.go }}
           cache: true
@@ -205,7 +205,7 @@ jobs:
         with:
           submodules: recursive
       - name: Setup Go
-        uses: actions/setup-go@def8c394e3ad351a79bc93815e4a585520fe993b # v6.2.0
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.2.0
         with:
           go-version: ${{ matrix.go }}
           cache: true
@@ -237,7 +237,7 @@ jobs:
         with:
           submodules: recursive
       - name: Setup Go
-        uses: actions/setup-go@def8c394e3ad351a79bc93815e4a585520fe993b # v6.2.0
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.2.0
         with:
           go-version: ${{ matrix.go }}
           cache: true
@@ -292,7 +292,7 @@ jobs:
           echo "CGO_LDFLAGS=-g -O2 -L$(cygpath --windows ${MINGW_PREFIX}/lib) -L$(cygpath --windows ${MINGW_PREFIX}/bin)" >> $GITHUB_ENV
           echo "MINGW_PREFIX=$(cygpath --windows ${MINGW_PREFIX})" >> $GITHUB_ENV
       - name: Setup Go
-        uses: actions/setup-go@def8c394e3ad351a79bc93815e4a585520fe993b # v6.2.0
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.2.0
         with:
           go-version: "${{ env.GO_VERSION }}"
           cache: true
@@ -316,7 +316,7 @@ jobs:
         run: |
           (. .env && echo "GO_VERSION=${GO}") >> $GITHUB_ENV
       - name: Setup Go
-        uses: actions/setup-go@def8c394e3ad351a79bc93815e4a585520fe993b # v6.2.0
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.2.0
         with:
           go-version: "${{ env.GO_VERSION }}"
           cache: true
