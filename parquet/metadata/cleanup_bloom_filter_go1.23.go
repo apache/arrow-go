@@ -32,4 +32,5 @@ func addCleanup(bf *blockSplitBloomFilter, bufferPool *sync.Pool) {
 			f.data.Release()
 		}
 	})
+	bf.cancelCleanup = func() { runtime.SetFinalizer(bf, nil) }
 }

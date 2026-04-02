@@ -26,7 +26,7 @@ import (
 )
 
 func addCleanup(bf *blockSplitBloomFilter, bufferPool *sync.Pool) {
-	runtime.AddCleanup(bf, func(data *memory.Buffer) {
+	c := runtime.AddCleanup(bf, func(data *memory.Buffer) {
 		if bufferPool != nil {
 			data.ResizeNoShrink(0)
 			bufferPool.Put(data)
@@ -34,4 +34,5 @@ func addCleanup(bf *blockSplitBloomFilter, bufferPool *sync.Pool) {
 			data.Release()
 		}
 	}, bf.data)
+	bf.cancelCleanup = c.Stop
 }

@@ -239,10 +239,11 @@ type blockSplitBloomFilter struct {
 	data     *memory.Buffer
 	bitset32 []uint32
 
-	hasher       Hasher
-	algorithm    format.BloomFilterAlgorithm
-	hashStrategy format.BloomFilterHash
-	compression  format.BloomFilterCompression
+	hasher        Hasher
+	algorithm     format.BloomFilterAlgorithm
+	hashStrategy  format.BloomFilterHash
+	compression   format.BloomFilterCompression
+	cancelCleanup func()
 }
 
 func (b *blockSplitBloomFilter) getAlg() *format.BloomFilterAlgorithm {
