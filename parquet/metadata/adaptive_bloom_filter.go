@@ -125,7 +125,11 @@ func (b *adaptiveBlockSplitBloomFilter) InsertHash(hash uint64) {
 	}
 
 	b.candidates = slices.DeleteFunc(b.candidates, func(c *bloomFilterCandidate) bool {
-		return c.expectedNDV < uint32(b.numDistinct) && c != b.largestCandidate
+		if c.expectedNDV < uint32(b.numDistinct) && c != b.largestCandidate {
+			c.bloomFilter.data.Release()
+			return true
+		}
+		return false
 	})
 
 	for _, c := range b.candidates {
@@ -150,7 +154,11 @@ func (b *adaptiveBlockSplitBloomFilter) InsertBulk(hashes []uint64) {
 	b.numDistinct += int64(len(uniqueNewHashes))
 
 	b.candidates = slices.DeleteFunc(b.candidates, func(c *bloomFilterCandidate) bool {
-		return c.expectedNDV < uint32(b.numDistinct) && c != b.largestCandidate
+		if c.expectedNDV < uint32(b.numDistinct) && c != b.largestCandidate {
+			c.bloomFilter.data.Release()
+			return true
+		}
+		return false
 	})
 
 	for _, c := range b.candidates {
@@ -169,7 +177,18 @@ func (b *adaptiveBlockSplitBloomFilter) CheckHash(hash uint64) bool {
 func (b *adaptiveBlockSplitBloomFilter) WriteTo(w io.Writer, enc encryption.Encryptor) (int, error) {
 	b.finalized = true
 
-	return b.optimalCandidate().bloomFilter.WriteTo(w, enc)
+	optimal := b.optimalCandidate()
+	n, err := optimal.bloomFilter.WriteTo(w, enc)
+
+	// Release all candidate buffers eagerly. Double-Release from the
+	// GC cleanup is a safe no-op (buffer's internal slice is already nil).
+	for _, c := range b.candidates {
+		c.bloomFilter.data.Release()
+	}
+	b.candidates = nil
+	b.largestCandidate = nil
+
+	return n, err
 }
 
 func (b *adaptiveBlockSplitBloomFilter) initCandidates(maxBytes uint32, numCandidates int, fpp float64) {
