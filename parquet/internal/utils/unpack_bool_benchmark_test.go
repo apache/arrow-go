@@ -25,13 +25,13 @@ import (
 )
 
 func TestBytesToBoolsCorrectness(t *testing.T) {
-	rng := rand.New(rand.NewSource(12345))
+	rng := rand.New(rand.NewPCG(12345, 12345))
 
 	for _, nBytes := range []int{1, 2, 3, 7, 8, 15, 16, 31, 32, 63, 64, 100, 256, 1024} {
 		t.Run(fmt.Sprintf("bytes=%d", nBytes), func(t *testing.T) {
 			in := make([]byte, nBytes)
 			for i := range in {
-				in[i] = byte(rng.Intn(256))
+				in[i] = byte(rng.IntN(256))
 			}
 
 			outlen := nBytes * 8
