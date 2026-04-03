@@ -156,8 +156,8 @@ github.com/substrait-io/substrait v0.84.0 h1:krf3WFSltV184/JUJirwYlyR6ksgccVc3IA
 github.com/substrait-io/substrait v0.84.0/go.mod h1:MPFNw6sToJgpD5Z2rj0rQrdP/Oq8HG7Z2t3CAEHtkHw=
 github.com/substrait-io/substrait-go/v7 v7.6.0 h1:YMo/ZS0XqHoNSvQ/TRxkQ03iE47vk0z+gl8LXCPazZM=
 github.com/substrait-io/substrait-go/v7 v7.6.0/go.mod h1:/THTJcGbArvo7tPHMUkSlWdQxJ9LED2WYrp5qNb9DhA=
-github.com/substrait-io/substrait-protobuf/go v0.84.0 h1:UcaZ+CE7l2UKJcNY9QlGcFFKv6h4jFDo8QhdTb5L4X0=
-github.com/substrait-io/substrait-protobuf/go v0.84.0/go.mod h1:hn+Szm1NmZZc91FwWK9EXD/lmuGBSRTJ5IvHhlG1YnQ=
+github.com/substrait-io/substrait-protobuf/go v0.85.0 h1:zk6MtNWLtDSl8a7qCZRFH0+EIIXVrrd/hsgYK/SQTgM=
+github.com/substrait-io/substrait-protobuf/go v0.85.0/go.mod h1:hn+Szm1NmZZc91FwWK9EXD/lmuGBSRTJ5IvHhlG1YnQ=
 github.com/tidwall/gjson v1.14.2 h1:6BBkirS0rAHjumnjHF6qgy5d2YAJ1TLIaFE2lzfOLqo=
 github.com/tidwall/gjson v1.14.2/go.mod h1:/wbyibRr2FHMks5tjHJ5F8dMZh3AcwJEMf5vlfC0lxk=
 github.com/tidwall/match v1.1.1 h1:+Ho715JplO36QYgwN9PGYNhgZvoUSc9X2c80KVTi+GA=
