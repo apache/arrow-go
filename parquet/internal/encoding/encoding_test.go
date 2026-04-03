@@ -444,6 +444,17 @@ func (b *BaseEncodingTestSuite) TestByteStreamSplitRoundTrip() {
 	}
 }
 
+func (b *BaseEncodingTestSuite) TestAlpRoundTrip() {
+	b.initData(10000, 1)
+
+	switch b.typ {
+	case reflect.TypeOf(float32(0)), reflect.TypeOf(float64(0)):
+		b.checkRoundTrip(parquet.Encodings.ALP)
+	default:
+		b.Panics(func() { b.checkRoundTrip(parquet.Encodings.ALP) })
+	}
+}
+
 func (b *BaseEncodingTestSuite) TestSpacedRoundTrip() {
 	exec := func(vals, repeats int, validBitsOffset int64, nullProb float64) {
 		b.Run(fmt.Sprintf("%d vals %d repeats %d offset %0.3f null", vals, repeats, validBitsOffset, 1-nullProb), func() {
