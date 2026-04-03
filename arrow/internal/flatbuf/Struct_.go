@@ -26,13 +26,12 @@ import (
 /// (according to the physical memory layout). We used Struct_ here as
 /// Struct is a reserved word in Flatbuffers
 type Struct_ struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsStruct_(buf []byte, offset flatbuffers.UOffsetT) *Struct_ {
+func GetRootAsStruct_(buf []byte, offset flatbuffers.UOffsetT) (x Struct_) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Struct_{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -40,10 +39,9 @@ func FinishStruct_Buffer(builder *flatbuffers.Builder, offset flatbuffers.UOffse
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsStruct_(buf []byte, offset flatbuffers.UOffsetT) *Struct_ {
+func GetSizePrefixedRootAsStruct_(buf []byte, offset flatbuffers.UOffsetT) (x Struct_) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &Struct_{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -52,12 +50,8 @@ func FinishSizePrefixedStruct_Buffer(builder *flatbuffers.Builder, offset flatbu
 }
 
 func (rcv *Struct_) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Struct_) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func Struct_Start(builder *flatbuffers.Builder) {
