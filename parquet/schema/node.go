@@ -172,7 +172,7 @@ func NewPrimitiveNodeLogical(name string, repetition parquet.Repetition, logical
 		n.convertedType, n.decimalMetaData = n.logicalType.ToConvertedType()
 	}
 
-	if (n.logicalType == nil || !n.logicalType.IsNested() && !n.logicalType.IsNone() || !n.logicalType.IsCompatible(n.convertedType, DecimalMetadata{})) {
+	if n.logicalType == nil || n.logicalType.IsNested() || !n.logicalType.IsCompatible(n.convertedType, n.decimalMetaData) {
 		return nil, fmt.Errorf("invalid logical type %s", n.logicalType)
 	}
 
