@@ -33,6 +33,48 @@ import (
 	"golang.org/x/xerrors"
 )
 
+// normalizeFieldForParquet recursively normalizes an Arrow field so that its
+// type matches the Parquet column structure that fieldToNode would produce.
+// Specifically, list element field names are set to "element" because
+// ListOfWithName (used by fieldToNode) always names the Parquet element group
+// "element", regardless of the original Arrow element field name.
+func normalizeFieldForParquet(f arrow.Field) arrow.Field {
+	switch dt := f.Type.(type) {
+	case *arrow.ListType:
+		elem := normalizeFieldForParquet(dt.ElemField())
+		elem.Name = "element"
+		return arrow.Field{Name: f.Name, Type: arrow.ListOfField(elem), Nullable: f.Nullable, Metadata: f.Metadata}
+	case *arrow.FixedSizeListType:
+		elem := normalizeFieldForParquet(dt.ElemField())
+		elem.Name = "element"
+		return arrow.Field{Name: f.Name, Type: arrow.FixedSizeListOfField(dt.Len(), elem), Nullable: f.Nullable, Metadata: f.Metadata}
+	case *arrow.StructType:
+		fields := make([]arrow.Field, dt.NumFields())
+		for i := 0; i < dt.NumFields(); i++ {
+			fields[i] = normalizeFieldForParquet(dt.Field(i))
+		}
+		return arrow.Field{Name: f.Name, Type: arrow.StructOf(fields...), Nullable: f.Nullable, Metadata: f.Metadata}
+	case *arrow.MapType:
+		key := normalizeFieldForParquet(dt.KeyField())
+		item := normalizeFieldForParquet(dt.ItemField())
+		return arrow.Field{Name: f.Name, Type: arrow.MapOfFields(key, item), Nullable: f.Nullable, Metadata: f.Metadata}
+	}
+	return f
+}
+
+// normalizeSchemaForParquet returns a copy of the Arrow schema with list element
+// field names updated to "element" to match the Parquet column paths produced by
+// fieldToNode. This is used when storing the ARROW:schema metadata to ensure
+// consistency between the stored schema and the actual Parquet column structure.
+func normalizeSchemaForParquet(sc *arrow.Schema) *arrow.Schema {
+	fields := make([]arrow.Field, sc.NumFields())
+	for i, f := range sc.Fields() {
+		fields[i] = normalizeFieldForParquet(f)
+	}
+	meta := sc.Metadata()
+	return arrow.NewSchema(fields, &meta)
+}
+
 // WriteTable is a convenience function to create and write a full array.Table to a parquet file. The schema
 // and columns will be determined by the schema of the table, writing the file out to the provided writer.
 // The chunksize will be utilized in order to determine the size of the row groups.
@@ -80,7 +122,14 @@ func NewFileWriter(arrschema *arrow.Schema, w io.Writer, props *parquet.WriterPr
 	}
 
 	if arrprops.storeSchema {
-		serializedSchema := flight.SerializeSchema(arrschema, props.Allocator())
+		// Normalize the Arrow schema so that list element field names match the
+		// Parquet column group names. fieldToNode always uses "element" as the
+		// Parquet group name for list element fields (via ListOfWithName), but
+		// arrow.ListOf() uses "item" as the Arrow element field name. This
+		// inconsistency causes readers (e.g. Snowflake) that map ARROW:schema field
+		// names to Parquet column paths to fail to locate the correct columns.
+		schemaToStore := normalizeSchemaForParquet(arrschema)
+		serializedSchema := flight.SerializeSchema(schemaToStore, props.Allocator())
 		meta.Append("ARROW:schema", base64.StdEncoding.EncodeToString(serializedSchema))
 	}
 
