@@ -18,6 +18,7 @@ package compute_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -638,4 +639,44 @@ func (ss *ScalarSetLookupSuite) TearDownTest() {
 
 func TestScalarSetLookup(t *testing.T) {
 	suite.Run(t, new(ScalarSetLookupSuite))
+}
+
+func BenchmarkIsInBinary(b *testing.B) {
+	const numRows = 100_000
+	const valueSetSize = 10
+
+	mem := memory.DefaultAllocator
+	ctx := compute.WithAllocator(context.TODO(), mem)
+
+	bldr := array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
+	defer bldr.Release()
+	for i := range numRows {
+		v := []byte(fmt.Sprintf("value-%08d", i%1000))
+		bldr.Append(v)
+	}
+	input := bldr.NewArray()
+	defer input.Release()
+
+	vsBldr := array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
+	defer vsBldr.Release()
+	for i := range valueSetSize {
+		v := []byte(fmt.Sprintf("value-%08d", i))
+		vsBldr.Append(v)
+	}
+	valueSet := vsBldr.NewArray()
+	defer valueSet.Release()
+
+	opts := compute.SetOptions{
+		ValueSet: compute.NewDatumWithoutOwning(valueSet),
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for range b.N {
+		result, err := compute.IsIn(ctx, opts, compute.NewDatumWithoutOwning(input))
+		if err != nil {
+			b.Fatal(err)
+		}
+		result.Release()
+	}
 }
