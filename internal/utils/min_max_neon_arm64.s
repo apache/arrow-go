@@ -12,6 +12,9 @@ TEXT ·_int32_max_min_neon(SB), $0-32
 	MOVD    minout+16(FP), R2
 	MOVD    maxout+24(FP), R3
 
+	// The Go ABI saves the frame pointer register one word below the
+	// caller's frame. Make room so we don't overwrite it. Needs to stay
+	// 16-byte aligned
 	SUB $16, RSP
 	WORD $0xa9bf7bfd // stp    x29, x30, [sp, #-16]!
 	WORD $0x7100043f // cmp    w1, #1
@@ -32,6 +35,7 @@ int32_early_exit:
 	WORD $0xb900006b // str    w11, [x3]
 	WORD $0xb900004a // str    w10, [x2]
 	WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
+	// Put the stack pointer back where it was
 	ADD $16, RSP
 	RET
 int32_neon:
@@ -75,6 +79,7 @@ int32_done:
 	WORD $0xb900006b // str    w11, [x3]
 	WORD $0xb900004a // str    w10, [x2]
 	WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
+	// Put the stack pointer back where it was
 	ADD $16, RSP
 	RET
 
@@ -86,6 +91,9 @@ TEXT ·_uint32_max_min_neon(SB), $0-32
 	MOVD    minout+16(FP), R2
 	MOVD    maxout+24(FP), R3
 
+	// The Go ABI saves the frame pointer register one word below the
+	// caller's frame. Make room so we don't overwrite it. Needs to stay
+	// 16-byte aligned
 	SUB $16, RSP
 	WORD $0xa9bf7bfd // stp    x29, x30, [sp, #-16]!
 	WORD $0x7100043f // cmp    w1, #1
@@ -106,6 +114,7 @@ uint32_early_exit:
 	WORD $0xb900006a // str    w10, [x3]
 	WORD $0xb900004b // str    w11, [x2]
 	WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
+	// Put the stack pointer back where it was
 	ADD $16, RSP
 	RET
 uint32_neon:
@@ -149,6 +158,7 @@ uint32_done:
 	WORD $0xb900006a // str    w10, [x3]
 	WORD $0xb900004b // str    w11, [x2]
 	WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
+	// Put the stack pointer back where it was
 	ADD $16, RSP
 	RET
 
@@ -160,6 +170,9 @@ TEXT ·_int64_max_min_neon(SB), $0-32
 	MOVD    minout+16(FP), R2
 	MOVD    maxout+24(FP), R3
 
+	// The Go ABI saves the frame pointer register one word below the
+	// caller's frame. Make room so we don't overwrite it. Needs to stay
+	// 16-byte aligned
 	SUB $16, RSP
 	WORD $0xa9bf7bfd // stp    x29, x30, [sp, #-16]!
 	WORD $0x7100043f // cmp    w1, #1
@@ -180,6 +193,7 @@ int64_early_exit:
 	WORD $0xf900006b // str    x11, [x3]
 	WORD $0xf900004a // str    x10, [x2]
 	WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
+	// Put the stack pointer back where it was
 	ADD $16, RSP
 	RET
 int64_neon:
@@ -233,6 +247,7 @@ int64_done:
 	WORD $0xf900006b // str    x11, [x3]
 	WORD $0xf900004a // str    x10, [x2]
 	WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
+	// Put the stack pointer back where it was
 	ADD $16, RSP
 	RET
 
@@ -245,6 +260,9 @@ TEXT ·_uint64_max_min_neon(SB), $0-32
 	MOVD    minout+16(FP), R2
 	MOVD    maxout+24(FP), R3
 
+	// The Go ABI saves the frame pointer register one word below the
+	// caller's frame. Make room so we don't overwrite it. Needs to stay
+	// 16-byte aligned
 	SUB $16, RSP
 	WORD $0xa9bf7bfd // stp    x29, x30, [sp, #-16]!
 	WORD $0x7100043f // cmp    w1, #1
@@ -265,6 +283,7 @@ uint64_early_exit:
 	WORD $0xf900006a // str    x10, [x3]
 	WORD $0xf900004b // str    x11, [x2]
 	WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
+	// Put the stack pointer back where it was
 	ADD $16, RSP
 	RET
 uint64_neon:
@@ -318,5 +337,6 @@ uint64_done:
 	WORD $0xf900006a // str    x10, [x3]
 	WORD $0xf900004b // str    x11, [x2]
 	WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
+	// Put the stack pointer back where it was
 	ADD $16, RSP
 	RET
