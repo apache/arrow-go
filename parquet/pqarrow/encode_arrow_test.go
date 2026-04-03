@@ -2145,11 +2145,20 @@ func TestListOfStructWithEmptyListStoreSchema(t *testing.T) {
 	amtb := sb.FieldBuilder(2).(*array.StringBuilder)
 
 	lb.Append(true)
-	sb.Append(true); idb.Append("op-1"); tokb.Append("USDC"); amtb.Append("10")
-	sb.Append(true); idb.Append("op-2"); tokb.Append("ETH"); amtb.Append("1.5")
+	sb.Append(true)
+	idb.Append("op-1")
+	tokb.Append("USDC")
+	amtb.Append("10")
+	sb.Append(true)
+	idb.Append("op-2")
+	tokb.Append("ETH")
+	amtb.Append("1.5")
 	lb.Append(true) // empty list
 	lb.Append(true)
-	sb.Append(true); idb.Append("op-3"); tokb.AppendNull(); amtb.Append("42")
+	sb.Append(true)
+	idb.Append("op-3")
+	tokb.AppendNull()
+	amtb.Append("42")
 
 	rec := b.NewRecord()
 	defer rec.Release()
