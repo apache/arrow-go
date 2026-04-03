@@ -1533,9 +1533,9 @@ func makeListArray(values arrow.Array, size, nullcount int) arrow.Array {
 	nullBitmap := make([]byte, int(bitutil.BytesForBits(int64(size))))
 
 	curOffset := 0
-	for i := 0; i < size; i++ {
+	for i := range size {
 		offsetsArr[i] = int32(curOffset)
-		if !(((i % 2) == 0) && ((i / 2) < nullcount)) {
+		if i%2 != 0 || i/2 >= nullcount {
 			// non-null list (list with index 1 is always empty)
 			bitutil.SetBit(nullBitmap, i)
 			if i != 1 {
@@ -2160,7 +2160,7 @@ func TestListOfStructWithEmptyListStoreSchema(t *testing.T) {
 	tokb.AppendNull()
 	amtb.Append("42")
 
-	rec := b.NewRecord()
+	rec := b.NewRecordBatch()
 	defer rec.Release()
 
 	var buf bytes.Buffer
