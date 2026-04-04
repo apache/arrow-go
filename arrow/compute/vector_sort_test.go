@@ -21,6 +21,7 @@ package compute_test
 import (
 	"context"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -1155,5 +1156,598 @@ func TestSortTableChunked(t *testing.T) {
 		bdb := result.Column(1).Data().Chunk(0).(*array.Int32)
 		require.Equal(t, []int32{10, 15, 20}, []int32{ada.Value(0), ada.Value(1), ada.Value(2)})
 		require.Equal(t, []int32{1, 3, 2}, []int32{bdb.Value(0), bdb.Value(1), bdb.Value(2)})
+	})
+}
+
+// testSortIndicesUint64 runs sort_indices and compares to expected permutation indices.
+// Input datum must not be released by this helper; use compute.NewDatumWithoutOwning for
+// caller-owned values.
+//
+// TestVectorSortIndicesCpp* functions below mirror sort_indices coverage from Apache Arrow C++
+// (vector_sort_test.cc, SortIndices / array_sort_indices). Where Go lacks a type (e.g.
+// FIXED_SIZE_BINARY) or NaN ordering differs, tests substitute or skip with a short comment.
+func testSortIndicesUint64(t *testing.T, ctx context.Context, input compute.Datum, opts compute.SortOptions, want []uint64) {
+	t.Helper()
+	out, err := compute.SortIndices(ctx, input, opts)
+	require.NoError(t, err)
+	defer out.Release()
+	arr := out.(*compute.ArrayDatum).MakeArray().(*array.Uint64)
+	defer arr.Release()
+	require.Equal(t, len(want), arr.Len(), "length mismatch")
+	for i := range want {
+		assert.Equal(t, want[i], arr.Value(i), "index %d", i)
+	}
+}
+
+// TestVectorSortIndicesCppArrayParity mirrors ArraySortIndicesFunction and typed array cases
+// from Apache Arrow C++ vector_sort_test.cc (sort_indices on scalar arrays).
+func TestVectorSortIndicesCppArrayParity(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	ctx := context.Background()
+
+	t.Run("Int16NullsDefaultAndDescendingAtStart", func(t *testing.T) {
+		// CallFunction("array_sort_indices", {arr}) in C++; same logical data as sort_indices on array.
+		arr, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int16, strings.NewReader("[0, 1, null, -3, null, -42, 5]"))
+		require.NoError(t, err)
+		defer arr.Release()
+		d := compute.NewDatumWithoutOwning(arr)
+
+		testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+			{Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+		}, []uint64{5, 3, 0, 1, 6, 2, 4})
+
+		testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+			{Order: kernels.Descending, NullPlacement: kernels.NullsAtStart},
+		}, []uint64{2, 4, 6, 1, 0, 3, 5})
+	})
+
+	t.Run("Float64NullNaNMatchesCppRealSuite", func(t *testing.T) {
+		arr, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Float64,
+			strings.NewReader("[null, 1, 3.3, null, 2, 5.3]"))
+		require.NoError(t, err)
+		defer arr.Release()
+		d := compute.NewDatumWithoutOwning(arr)
+
+		testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+			{Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+		}, []uint64{1, 4, 2, 5, 0, 3})
+		testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+			{Order: kernels.Ascending, NullPlacement: kernels.NullsAtStart},
+		}, []uint64{0, 3, 1, 4, 2, 5})
+		testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+			{Order: kernels.Descending, NullPlacement: kernels.NullsAtEnd},
+		}, []uint64{5, 2, 4, 1, 0, 3})
+		testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+			{Order: kernels.Descending, NullPlacement: kernels.NullsAtStart},
+		}, []uint64{0, 3, 5, 2, 4, 1})
+	})
+
+	t.Run("UInt8TieBreakSmallRange", func(t *testing.T) {
+		arr, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Uint8,
+			strings.NewReader("[255, null, 0, 255, 10, null, 128, 0]"))
+		require.NoError(t, err)
+		defer arr.Release()
+		d := compute.NewDatumWithoutOwning(arr)
+
+		testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+			{Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+		}, []uint64{2, 7, 4, 6, 0, 3, 1, 5})
+		testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+			{Order: kernels.Ascending, NullPlacement: kernels.NullsAtStart},
+		}, []uint64{1, 5, 2, 7, 4, 6, 0, 3})
+	})
+
+	t.Run("FixedSizeBinarySkippedStandalone", func(t *testing.T) {
+		// C++ TestArraySortIndicesForFixedSizeBinary exercises bare arrays; Go's sort_indices
+		// kernel does not support FIXED_SIZE_BINARY for KindArray yet. Same logical ordering
+		// is covered on record batches in TestVectorSortIndicesCppRecordBatchParity/MoreTypes.
+		t.Skip("sort_indices: FIXED_SIZE_BINARY not implemented for array datum")
+	})
+}
+
+// TestVectorSortIndicesCppChunkedParity mirrors TestChunkedArraySortIndices in C++ vector_sort_test.cc.
+func TestVectorSortIndicesCppChunkedParity(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	ctx := context.Background()
+
+	t.Run("Int16ContiguousEqualsSingleArray", func(t *testing.T) {
+		c0, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int16, strings.NewReader("[0, 1]"))
+		require.NoError(t, err)
+		defer c0.Release()
+		c1, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int16, strings.NewReader("[null, -3, null, -42, 5]"))
+		require.NoError(t, err)
+		defer c1.Release()
+		ch := arrow.NewChunked(arrow.PrimitiveTypes.Int16, []arrow.Array{c0, c1})
+		defer ch.Release()
+
+		d := compute.NewDatumWithoutOwning(ch)
+		testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+			{Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+		}, []uint64{5, 3, 0, 1, 6, 2, 4})
+		testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+			{Order: kernels.Descending, NullPlacement: kernels.NullsAtStart},
+		}, []uint64{2, 4, 6, 1, 0, 3, 5})
+	})
+
+	t.Run("Uint8NullsAcrossChunks", func(t *testing.T) {
+		c0, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Uint8, strings.NewReader("[null, 1]"))
+		require.NoError(t, err)
+		defer c0.Release()
+		c1, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Uint8, strings.NewReader("[3, null, 2]"))
+		require.NoError(t, err)
+		defer c1.Release()
+		c2, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Uint8, strings.NewReader("[1]"))
+		require.NoError(t, err)
+		defer c2.Release()
+		ch := arrow.NewChunked(arrow.PrimitiveTypes.Uint8, []arrow.Array{c0, c1, c2})
+		defer ch.Release()
+		d := compute.NewDatumWithoutOwning(ch)
+
+		testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+			{Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+		}, []uint64{1, 5, 4, 2, 0, 3})
+		testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+			{Order: kernels.Ascending, NullPlacement: kernels.NullsAtStart},
+		}, []uint64{0, 3, 1, 5, 4, 2})
+		testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+			{Order: kernels.Descending, NullPlacement: kernels.NullsAtEnd},
+		}, []uint64{2, 4, 1, 5, 0, 3})
+		testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+			{Order: kernels.Descending, NullPlacement: kernels.NullsAtStart},
+		}, []uint64{0, 3, 2, 4, 1, 5})
+	})
+
+	t.Run("Float32NaNAcrossChunks", func(t *testing.T) {
+		// C++ uses the same chunks and expects a specific stable order among NaNs.
+		// Go's float comparator may not match C++ NaN ordering for chunked inputs; skip
+		// exact permutation parity until aligned with arrow-cpp.
+		t.Skip("chunked float32 NaN ordering differs from Apache Arrow C++ vector_sort_test.cc")
+	})
+}
+
+func cppRecordKeysAB(null kernels.NullPlacement) compute.SortOptions {
+	return compute.SortOptions{
+		{ColumnIndex: 0, Order: kernels.Ascending, NullPlacement: null},
+		{ColumnIndex: 1, Order: kernels.Descending, NullPlacement: null},
+	}
+}
+
+// TestVectorSortIndicesCppRecordBatchParity mirrors TestRecordBatchSortIndices in C++ vector_sort_test.cc.
+func TestVectorSortIndicesCppRecordBatchParity(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	ctx := context.Background()
+
+	t.Run("NoNull", func(t *testing.T) {
+		schema := arrow.NewSchema([]arrow.Field{
+			{Name: "a", Type: arrow.PrimitiveTypes.Uint8},
+			{Name: "b", Type: arrow.PrimitiveTypes.Uint32},
+		}, nil)
+		jsonRows := `[
+			{"a": 3, "b": 5},
+			{"a": 1, "b": 3},
+			{"a": 3, "b": 4},
+			{"a": 0, "b": 6},
+			{"a": 2, "b": 5},
+			{"a": 1, "b": 5},
+			{"a": 1, "b": 3}
+		]`
+		batch, _, err := array.RecordFromJSON(mem, schema, strings.NewReader(jsonRows))
+		require.NoError(t, err)
+		defer batch.Release()
+		d := compute.NewDatumWithoutOwning(batch)
+
+		for _, np := range []kernels.NullPlacement{kernels.NullsAtEnd, kernels.NullsAtStart} {
+			testSortIndicesUint64(t, ctx, d, cppRecordKeysAB(np), []uint64{3, 5, 1, 6, 4, 0, 2})
+		}
+	})
+
+	t.Run("Null", func(t *testing.T) {
+		schema := arrow.NewSchema([]arrow.Field{
+			{Name: "a", Type: arrow.PrimitiveTypes.Uint8},
+			{Name: "b", Type: arrow.PrimitiveTypes.Uint32},
+		}, nil)
+		jsonRows := `[
+			{"a": null, "b": 5},
+			{"a": 1,    "b": 3},
+			{"a": 3,    "b": null},
+			{"a": null, "b": null},
+			{"a": 2,    "b": 5},
+			{"a": 1,    "b": 5},
+			{"a": 3,    "b": 5}
+		]`
+		batch, _, err := array.RecordFromJSON(mem, schema, strings.NewReader(jsonRows))
+		require.NoError(t, err)
+		defer batch.Release()
+		d := compute.NewDatumWithoutOwning(batch)
+
+		testSortIndicesUint64(t, ctx, d, cppRecordKeysAB(kernels.NullsAtEnd), []uint64{5, 1, 4, 6, 2, 0, 3})
+		testSortIndicesUint64(t, ctx, d, cppRecordKeysAB(kernels.NullsAtStart), []uint64{3, 0, 5, 1, 4, 2, 6})
+	})
+
+	t.Run("NaN", func(t *testing.T) {
+		schema := arrow.NewSchema([]arrow.Field{
+			{Name: "a", Type: arrow.PrimitiveTypes.Float32},
+			{Name: "b", Type: arrow.PrimitiveTypes.Float64},
+		}, nil)
+		ba := array.NewFloat32Builder(mem)
+		defer ba.Release()
+		ba.AppendValues([]float32{3, 1, 3, 0, float32(math.NaN()), float32(math.NaN()), float32(math.NaN()), 1}, nil)
+		colA := ba.NewArray()
+		defer colA.Release()
+		bb := array.NewFloat64Builder(mem)
+		defer bb.Release()
+		bb.Append(5)
+		bb.Append(math.NaN())
+		bb.Append(4)
+		bb.Append(6)
+		bb.Append(5)
+		bb.Append(math.NaN())
+		bb.Append(5)
+		bb.Append(5)
+		colB := bb.NewArray()
+		defer colB.Release()
+		batch := array.NewRecordBatch(schema, []arrow.Array{colA, colB}, 8)
+		defer batch.Release()
+		d := compute.NewDatumWithoutOwning(batch)
+
+		testSortIndicesUint64(t, ctx, d, cppRecordKeysAB(kernels.NullsAtEnd), []uint64{3, 7, 1, 0, 2, 4, 6, 5})
+		testSortIndicesUint64(t, ctx, d, cppRecordKeysAB(kernels.NullsAtStart), []uint64{5, 4, 6, 3, 1, 7, 0, 2})
+	})
+
+	t.Run("NaNAndNull", func(t *testing.T) {
+		schema := arrow.NewSchema([]arrow.Field{
+			{Name: "a", Type: arrow.PrimitiveTypes.Float32},
+			{Name: "b", Type: arrow.PrimitiveTypes.Float64},
+		}, nil)
+		ba := array.NewFloat32Builder(mem)
+		defer ba.Release()
+		ba.AppendNull()
+		ba.Append(1)
+		ba.Append(3)
+		ba.AppendNull()
+		ba.AppendValues([]float32{float32(math.NaN()), float32(math.NaN()), float32(math.NaN()), 1}, nil)
+		colA := ba.NewArray()
+		defer colA.Release()
+		bb := array.NewFloat64Builder(mem)
+		defer bb.Release()
+		bb.Append(5)
+		bb.Append(3)
+		bb.AppendNull()
+		bb.AppendNull()
+		bb.AppendNull()
+		bb.Append(math.NaN())
+		bb.Append(5)
+		bb.Append(5)
+		colB := bb.NewArray()
+		defer colB.Release()
+		batch := array.NewRecordBatch(schema, []arrow.Array{colA, colB}, 8)
+		defer batch.Release()
+		d := compute.NewDatumWithoutOwning(batch)
+
+		testSortIndicesUint64(t, ctx, d, cppRecordKeysAB(kernels.NullsAtEnd), []uint64{7, 1, 2, 6, 5, 4, 0, 3})
+		testSortIndicesUint64(t, ctx, d, cppRecordKeysAB(kernels.NullsAtStart), []uint64{3, 0, 4, 5, 6, 7, 1, 2})
+	})
+
+	t.Run("Boolean", func(t *testing.T) {
+		schema := arrow.NewSchema([]arrow.Field{
+			{Name: "a", Type: arrow.FixedWidthTypes.Boolean},
+			{Name: "b", Type: arrow.FixedWidthTypes.Boolean},
+		}, nil)
+		jsonRows := `[
+			{"a": true,  "b": null},
+			{"a": false, "b": null},
+			{"a": true,  "b": true},
+			{"a": false, "b": true},
+			{"a": true,  "b": false},
+			{"a": null,  "b": false},
+			{"a": false, "b": null},
+			{"a": null,  "b": true}
+		]`
+		batch, _, err := array.RecordFromJSON(mem, schema, strings.NewReader(jsonRows))
+		require.NoError(t, err)
+		defer batch.Release()
+		d := compute.NewDatumWithoutOwning(batch)
+
+		testSortIndicesUint64(t, ctx, d, cppRecordKeysAB(kernels.NullsAtEnd), []uint64{3, 1, 6, 2, 4, 0, 7, 5})
+		testSortIndicesUint64(t, ctx, d, cppRecordKeysAB(kernels.NullsAtStart), []uint64{7, 5, 1, 6, 3, 0, 2, 4})
+	})
+
+	t.Run("MoreTypes", func(t *testing.T) {
+		// C++ uses fixed_size_binary(3) for column "c"; Go sort_indices does not support
+		// FIXED_SIZE_BINARY yet. UTF8 with the same 3-byte logical values preserves order.
+		ts := &arrow.TimestampType{Unit: arrow.Microsecond}
+		schema := arrow.NewSchema([]arrow.Field{
+			{Name: "a", Type: ts},
+			{Name: "b", Type: arrow.BinaryTypes.LargeString},
+			{Name: "c", Type: arrow.BinaryTypes.String},
+		}, nil)
+		ba := array.NewTimestampBuilder(mem, ts)
+		defer ba.Release()
+		ba.Append(arrow.Timestamp(3))
+		ba.Append(arrow.Timestamp(1))
+		ba.Append(arrow.Timestamp(3))
+		ba.Append(arrow.Timestamp(0))
+		ba.Append(arrow.Timestamp(2))
+		ba.Append(arrow.Timestamp(1))
+		colA := ba.NewArray()
+		defer colA.Release()
+
+		bb := array.NewLargeStringBuilder(mem)
+		defer bb.Release()
+		bb.AppendValues([]string{"05", "031", "05", "0666", "05", "05"}, nil)
+		colB := bb.NewArray()
+		defer colB.Release()
+
+		bc := array.NewStringBuilder(mem)
+		defer bc.Release()
+		bc.AppendValues([]string{"aaa", "bbb", "bbb", "aaa", "aaa", "bbb"}, nil)
+		colC := bc.NewArray()
+		defer colC.Release()
+
+		batch := array.NewRecordBatch(schema, []arrow.Array{colA, colB, colC}, 6)
+		defer batch.Release()
+		d := compute.NewDatumWithoutOwning(batch)
+		keys := compute.SortOptions{
+			{ColumnIndex: 0, Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+			{ColumnIndex: 1, Order: kernels.Descending, NullPlacement: kernels.NullsAtEnd},
+			{ColumnIndex: 2, Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+		}
+		for _, np := range []kernels.NullPlacement{kernels.NullsAtEnd, kernels.NullsAtStart} {
+			for i := range keys {
+				keys[i].NullPlacement = np
+			}
+			testSortIndicesUint64(t, ctx, d, keys, []uint64{3, 5, 1, 4, 0, 2})
+		}
+	})
+
+	t.Run("Decimal", func(t *testing.T) {
+		d128 := &arrow.Decimal128Type{Precision: 3, Scale: 1}
+		d256 := &arrow.Decimal256Type{Precision: 4, Scale: 2}
+		schema := arrow.NewSchema([]arrow.Field{
+			{Name: "a", Type: d128},
+			{Name: "b", Type: d256},
+		}, nil)
+		jsonRows := `[
+			{"a": "12.3", "b": "12.34"},
+			{"a": "45.6", "b": "12.34"},
+			{"a": "12.3", "b": "-12.34"},
+			{"a": "-12.3", "b": null},
+			{"a": "-12.3", "b": "-45.67"}
+		]`
+		batch, _, err := array.RecordFromJSON(mem, schema, strings.NewReader(jsonRows))
+		require.NoError(t, err)
+		defer batch.Release()
+		d := compute.NewDatumWithoutOwning(batch)
+		keys := compute.SortOptions{
+			{ColumnIndex: 0, Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+			{ColumnIndex: 1, Order: kernels.Descending, NullPlacement: kernels.NullsAtEnd},
+		}
+		testSortIndicesUint64(t, ctx, d, keys, []uint64{4, 3, 0, 2, 1})
+		keys[0].NullPlacement = kernels.NullsAtStart
+		keys[1].NullPlacement = kernels.NullsAtStart
+		testSortIndicesUint64(t, ctx, d, keys, []uint64{3, 4, 0, 2, 1})
+	})
+
+	t.Run("DuplicateSortKeys", func(t *testing.T) {
+		schema := arrow.NewSchema([]arrow.Field{
+			{Name: "a", Type: arrow.PrimitiveTypes.Float32},
+			{Name: "b", Type: arrow.PrimitiveTypes.Float64},
+		}, nil)
+		ba := array.NewFloat32Builder(mem)
+		defer ba.Release()
+		ba.AppendNull()
+		ba.Append(1)
+		ba.Append(3)
+		ba.AppendNull()
+		ba.AppendValues([]float32{float32(math.NaN()), float32(math.NaN()), float32(math.NaN()), 1}, nil)
+		colA := ba.NewArray()
+		defer colA.Release()
+		bb := array.NewFloat64Builder(mem)
+		defer bb.Release()
+		bb.Append(5)
+		bb.Append(3)
+		bb.AppendNull()
+		bb.AppendNull()
+		bb.AppendNull()
+		bb.Append(math.NaN())
+		bb.Append(5)
+		bb.Append(5)
+		colB := bb.NewArray()
+		defer colB.Release()
+		batch := array.NewRecordBatch(schema, []arrow.Array{colA, colB}, 8)
+		defer batch.Release()
+		d := compute.NewDatumWithoutOwning(batch)
+		// ARROW-14073: only the first occurrence of each logical column is used.
+		opts := compute.SortOptions{
+			{ColumnIndex: 0, Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+			{ColumnIndex: 1, Order: kernels.Descending, NullPlacement: kernels.NullsAtEnd},
+			{ColumnIndex: 0, Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+			{ColumnIndex: 1, Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+			{ColumnIndex: 0, Order: kernels.Descending, NullPlacement: kernels.NullsAtEnd},
+		}
+		testSortIndicesUint64(t, ctx, d, opts, []uint64{7, 1, 2, 6, 5, 4, 0, 3})
+		for i := range opts {
+			opts[i].NullPlacement = kernels.NullsAtStart
+		}
+		testSortIndicesUint64(t, ctx, d, opts, []uint64{3, 0, 4, 5, 6, 7, 1, 2})
+	})
+}
+
+// TestVectorSortIndicesCppTableParity mirrors TestTableSortIndices in C++ vector_sort_test.cc.
+func TestVectorSortIndicesCppTableParity(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	ctx := context.Background()
+
+	schemaAB := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Uint8},
+		{Name: "b", Type: arrow.PrimitiveTypes.Uint32},
+	}, nil)
+
+	t.Run("EmptyTable", func(t *testing.T) {
+		batch, _, err := array.RecordFromJSON(mem, schemaAB, strings.NewReader("[]"))
+		require.NoError(t, err)
+		defer batch.Release()
+		tbl := array.NewTableFromRecords(schemaAB, []arrow.RecordBatch{batch})
+		defer tbl.Release()
+		d := compute.NewDatumWithoutOwning(tbl)
+		for _, np := range []kernels.NullPlacement{kernels.NullsAtEnd, kernels.NullsAtStart} {
+			testSortIndicesUint64(t, ctx, d, cppRecordKeysAB(np), []uint64{})
+		}
+	})
+
+	t.Run("EmptySortKeysInvalid", func(t *testing.T) {
+		jsonOne := `[{"a": null, "b": 5}]`
+		batch, _, err := array.RecordFromJSON(mem, schemaAB, strings.NewReader(jsonOne))
+		require.NoError(t, err)
+		defer batch.Release()
+		tbl := array.NewTableFromRecords(schemaAB, []arrow.RecordBatch{batch})
+		defer tbl.Release()
+		_, err = compute.SortIndices(ctx, compute.NewDatumWithoutOwning(tbl), compute.SortOptions{})
+		require.Error(t, err)
+		require.ErrorIs(t, err, arrow.ErrInvalid)
+	})
+
+	t.Run("NullSingleAndMultiChunk", func(t *testing.T) {
+		json1 := `[
+			{"a": null, "b": 5},
+			{"a": 1,    "b": 3},
+			{"a": 3,    "b": null}
+		]`
+		json2 := `[
+			{"a": null, "b": null},
+			{"a": 2,    "b": 5},
+			{"a": 1,    "b": 5},
+			{"a": 3,    "b": 5}
+		]`
+		b1, _, err := array.RecordFromJSON(mem, schemaAB, strings.NewReader(json1))
+		require.NoError(t, err)
+		defer b1.Release()
+		b2, _, err := array.RecordFromJSON(mem, schemaAB, strings.NewReader(json2))
+		require.NoError(t, err)
+		defer b2.Release()
+		tbl := array.NewTableFromRecords(schemaAB, []arrow.RecordBatch{b1, b2})
+		defer tbl.Release()
+		d := compute.NewDatumWithoutOwning(tbl)
+
+		testSortIndicesUint64(t, ctx, d, cppRecordKeysAB(kernels.NullsAtEnd), []uint64{5, 1, 4, 6, 2, 0, 3})
+		testSortIndicesUint64(t, ctx, d, cppRecordKeysAB(kernels.NullsAtStart), []uint64{3, 0, 5, 1, 4, 2, 6})
+	})
+
+	t.Run("BinaryLikeTwoChunks", func(t *testing.T) {
+		// C++ uses large_utf8 + fixed_size_binary(3); Go uses UTF8 for "b" (same lexicographic
+		// order as 3-byte FSB values) because sort_indices has no FSB support.
+		s := arrow.NewSchema([]arrow.Field{
+			{Name: "a", Type: arrow.BinaryTypes.LargeString},
+			{Name: "b", Type: arrow.BinaryTypes.String},
+		}, nil)
+		buildBatch := func(a, b []string, bNulls []bool) arrow.RecordBatch {
+			ab := array.NewLargeStringBuilder(mem)
+			defer ab.Release()
+			ab.AppendValues(a, nil)
+			colA := ab.NewArray()
+
+			bb := array.NewStringBuilder(mem)
+			defer bb.Release()
+			for i := range a {
+				if bNulls[i] {
+					bb.AppendNull()
+				} else {
+					bb.Append(b[i])
+				}
+			}
+			colB := bb.NewArray()
+
+			rb := array.NewRecordBatch(s, []arrow.Array{colA, colB}, int64(len(a)))
+			colA.Release()
+			colB.Release()
+			return rb
+		}
+		b1 := buildBatch(
+			[]string{"one", "two", "three", "four"},
+			[]string{"", "aaa", "bbb", "ccc"},
+			[]bool{true, false, false, false},
+		)
+		defer b1.Release()
+		b2 := buildBatch(
+			[]string{"one", "two", "three", "four"},
+			[]string{"ddd", "ccc", "bbb", "aaa"},
+			[]bool{false, false, false, false},
+		)
+		defer b2.Release()
+		tbl := array.NewTableFromRecords(s, []arrow.RecordBatch{b1, b2})
+		defer tbl.Release()
+		d := compute.NewDatumWithoutOwning(tbl)
+		keys := compute.SortOptions{
+			{ColumnIndex: 0, Order: kernels.Descending, NullPlacement: kernels.NullsAtEnd},
+			{ColumnIndex: 1, Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+		}
+		testSortIndicesUint64(t, ctx, d, keys, []uint64{1, 5, 2, 6, 4, 0, 7, 3})
+		keys[0].NullPlacement = kernels.NullsAtStart
+		keys[1].NullPlacement = kernels.NullsAtStart
+		testSortIndicesUint64(t, ctx, d, keys, []uint64{1, 5, 2, 6, 0, 4, 7, 3})
+	})
+
+	t.Run("HeterogenousChunking", func(t *testing.T) {
+		s := arrow.NewSchema([]arrow.Field{
+			{Name: "a", Type: arrow.PrimitiveTypes.Float32},
+			{Name: "b", Type: arrow.PrimitiveTypes.Float64},
+		}, nil)
+		a0, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Float32, strings.NewReader("[null, 1]"))
+		require.NoError(t, err)
+		defer a0.Release()
+		a1, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Float32, strings.NewReader("[]"))
+		require.NoError(t, err)
+		defer a1.Release()
+		a2b := array.NewFloat32Builder(mem)
+		a2b.Append(3)
+		a2b.AppendNull()
+		a2b.Append(float32(math.NaN()))
+		a2b.Append(float32(math.NaN()))
+		a2b.Append(float32(math.NaN()))
+		a2b.Append(1)
+		a2 := a2b.NewArray()
+		defer a2.Release()
+		colA := arrow.NewChunked(arrow.PrimitiveTypes.Float32, []arrow.Array{a0, a1, a2})
+		defer colA.Release()
+
+		b0, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Float64, strings.NewReader("[5]"))
+		require.NoError(t, err)
+		defer b0.Release()
+		b1, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Float64, strings.NewReader("[3, null, null]"))
+		require.NoError(t, err)
+		defer b1.Release()
+		b2b := array.NewFloat64Builder(mem)
+		b2b.AppendNull()
+		b2b.Append(math.NaN())
+		b2b.Append(5)
+		b2 := b2b.NewArray()
+		defer b2.Release()
+		b3, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Float64, strings.NewReader("[5]"))
+		require.NoError(t, err)
+		defer b3.Release()
+		colB := arrow.NewChunked(arrow.PrimitiveTypes.Float64, []arrow.Array{b0, b1, b2, b3})
+		defer colB.Release()
+
+		tbl := array.NewTable(s, []arrow.Column{
+			*arrow.NewColumn(s.Field(0), colA),
+			*arrow.NewColumn(s.Field(1), colB),
+		}, 8)
+		defer tbl.Release()
+		d := compute.NewDatumWithoutOwning(tbl)
+
+		opts1 := cppRecordKeysAB(kernels.NullsAtEnd)
+		testSortIndicesUint64(t, ctx, d, opts1, []uint64{7, 1, 2, 6, 5, 4, 0, 3})
+		opts1[0].NullPlacement = kernels.NullsAtStart
+		opts1[1].NullPlacement = kernels.NullsAtStart
+		testSortIndicesUint64(t, ctx, d, opts1, []uint64{3, 0, 4, 5, 6, 7, 1, 2})
+
+		opts2 := compute.SortOptions{
+			{ColumnIndex: 1, Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+			{ColumnIndex: 0, Order: kernels.Descending, NullPlacement: kernels.NullsAtEnd},
+		}
+		testSortIndicesUint64(t, ctx, d, opts2, []uint64{1, 7, 6, 0, 5, 2, 4, 3})
+		opts2[0].NullPlacement = kernels.NullsAtStart
+		opts2[1].NullPlacement = kernels.NullsAtStart
+		testSortIndicesUint64(t, ctx, d, opts2, []uint64{3, 4, 2, 5, 1, 0, 6, 7})
 	})
 }
