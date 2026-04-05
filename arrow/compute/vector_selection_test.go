@@ -66,6 +66,21 @@ func (f *FilterKernelTestSuite) getArr(dt arrow.DataType, str string) arrow.Arra
 	return arr
 }
 
+// assertDictionaryLogicalEqual compares two dictionary arrays by decoding both to the
+// value type and comparing. Use when logical equality is desired (same decoded values)
+// rather than physical (same indices and dictionary).
+func assertDictionaryLogicalEqual(t *testing.T, ctx context.Context, expected, actual arrow.Array) bool {
+	valueType := expected.DataType().(*arrow.DictionaryType).ValueType
+	castOpts := compute.NewCastOptions(valueType, true)
+	decodedExpected, err := compute.CastArray(ctx, expected, castOpts)
+	require.NoError(t, err)
+	defer decodedExpected.Release()
+	decodedActual, err := compute.CastArray(ctx, actual, castOpts)
+	require.NoError(t, err)
+	defer decodedActual.Release()
+	return assertArraysEqual(t, decodedExpected, decodedActual)
+}
+
 func (f *FilterKernelTestSuite) doAssertFilter(values, filter, expected arrow.Array) {
 	ctx := compute.WithAllocator(context.TODO(), f.mem)
 	valDatum := compute.NewDatum(values)
@@ -79,7 +94,11 @@ func (f *FilterKernelTestSuite) doAssertFilter(values, filter, expected arrow.Ar
 		defer out.Release()
 		actual := out.(*compute.ArrayDatum).MakeArray()
 		defer actual.Release()
-		f.Truef(array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+		if expected.DataType().ID() == arrow.DICTIONARY {
+			assertDictionaryLogicalEqual(f.T(), ctx, expected, actual)
+		} else {
+			f.Truef(array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+		}
 	})
 
 	// f.Run("drop", func() {
@@ -174,7 +193,12 @@ func (tk *TakeKernelTestSuite) assertTakeArrays(values, indices, expected arrow.
 	actual, err := compute.TakeArray(tk.ctx, values, indices)
 	tk.Require().NoError(err)
 	defer actual.Release()
-	assertArraysEqual(tk.T(), expected, actual)
+
+	if expected.DataType().ID() == arrow.DICTIONARY {
+		assertDictionaryLogicalEqual(tk.T(), tk.ctx, expected, actual)
+	} else {
+		assertArraysEqual(tk.T(), expected, actual)
+	}
 }
 
 func (tk *TakeKernelTestSuite) takeJSON(dt arrow.DataType, values string, idxType arrow.DataType, indices string) (arrow.Array, error) {
@@ -1805,6 +1829,7 @@ func TestTakeKernels(t *testing.T) {
 	for _, dt := range baseBinaryTypes {
 		suite.Run(t, &TakeKernelTestString{TakeKernelTestTyped: TakeKernelTestTyped{dt: dt}})
 	}
+	suite.Run(t, &TakeKernelTestString{TakeKernelTestTyped: TakeKernelTestTyped{dt: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}}})
 	suite.Run(t, new(TakeKernelLists))
 	suite.Run(t, new(TakeKernelDenseUnion))
 	suite.Run(t, new(TakeKernelTestExtension))
@@ -1826,6 +1851,7 @@ func TestFilterKernels(t *testing.T) {
 	for _, dt := range baseBinaryTypes {
 		suite.Run(t, &FilterKernelWithString{dt: dt})
 	}
+	suite.Run(t, &FilterKernelWithString{dt: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}})
 	suite.Run(t, new(FilterKernelWithList))
 	suite.Run(t, new(FilterKernelWithUnion))
 	suite.Run(t, new(FilterKernelExtension))
