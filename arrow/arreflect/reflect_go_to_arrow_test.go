@@ -778,3 +778,94 @@ func TestBuildListViewArray(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildTemporalTaggedArray(t *testing.T) {
+	mem := memory.NewGoAllocator()
+
+	// reference time-of-day: 2024-01-15 10:30:00 UTC
+	ref := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+
+	t.Run("date32", func(t *testing.T) {
+		vals := []time.Time{ref, ref.AddDate(0, 0, 1)}
+		opts := tagOpts{Temporal: "date32"}
+		sv := reflect.ValueOf(vals)
+		arr, err := buildTemporalArray(sv, opts, mem)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer arr.Release()
+		if arr.DataType().ID() != arrow.DATE32 {
+			t.Errorf("expected DATE32, got %v", arr.DataType().ID())
+		}
+		if arr.Len() != 2 {
+			t.Errorf("expected len 2, got %d", arr.Len())
+		}
+		// roundtrip: convert back and check date
+		d32arr := arr.(*array.Date32)
+		got0 := d32arr.Value(0).ToTime()
+		if got0.Year() != ref.Year() || got0.Month() != ref.Month() || got0.Day() != ref.Day() {
+			t.Errorf("date32 roundtrip: got %v, want %v", got0, ref)
+		}
+	})
+
+	t.Run("date64", func(t *testing.T) {
+		vals := []time.Time{ref}
+		opts := tagOpts{Temporal: "date64"}
+		sv := reflect.ValueOf(vals)
+		arr, err := buildTemporalArray(sv, opts, mem)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer arr.Release()
+		if arr.DataType().ID() != arrow.DATE64 {
+			t.Errorf("expected DATE64, got %v", arr.DataType().ID())
+		}
+		d64arr := arr.(*array.Date64)
+		got0 := d64arr.Value(0).ToTime()
+		if got0.Year() != ref.Year() || got0.Month() != ref.Month() || got0.Day() != ref.Day() {
+			t.Errorf("date64 roundtrip: got %v, want %v", got0, ref)
+		}
+	})
+
+	t.Run("time32", func(t *testing.T) {
+		vals := []time.Time{ref}
+		opts := tagOpts{Temporal: "time32"}
+		sv := reflect.ValueOf(vals)
+		arr, err := buildTemporalArray(sv, opts, mem)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer arr.Release()
+		if arr.DataType().ID() != arrow.TIME32 {
+			t.Errorf("expected TIME32, got %v", arr.DataType().ID())
+		}
+		if arr.Len() != 1 {
+			t.Errorf("expected len 1, got %d", arr.Len())
+		}
+		t32arr := arr.(*array.Time32)
+		val := t32arr.Value(0)
+		if val == 0 {
+			t.Error("expected non-zero time32 value")
+		}
+	})
+
+	t.Run("time64", func(t *testing.T) {
+		vals := []time.Time{ref}
+		opts := tagOpts{Temporal: "time64"}
+		sv := reflect.ValueOf(vals)
+		arr, err := buildTemporalArray(sv, opts, mem)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer arr.Release()
+		if arr.DataType().ID() != arrow.TIME64 {
+			t.Errorf("expected TIME64, got %v", arr.DataType().ID())
+		}
+		t64arr := arr.(*array.Time64)
+		unit := arr.DataType().(*arrow.Time64Type).Unit
+		got0 := t64arr.Value(0).ToTime(unit)
+		if got0.Hour() != ref.Hour() || got0.Minute() != ref.Minute() || got0.Second() != ref.Second() {
+			t.Errorf("time64 roundtrip: got %v, want %v", got0, ref)
+		}
+	})
+}

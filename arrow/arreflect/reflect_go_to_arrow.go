@@ -65,9 +65,9 @@ func buildArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.A
 	case reflect.Struct:
 		switch elemType {
 		case typeOfTime:
-			return buildTemporalArray(vals, mem)
+			return buildTemporalArray(vals, opts, mem)
 		case typeOfDuration:
-			return buildTemporalArray(vals, mem)
+			return buildTemporalArray(vals, opts, mem)
 		case typeOfDec128:
 			return buildDecimalArray(vals, opts, mem)
 		case typeOfDec256:
@@ -168,7 +168,7 @@ func appendPrimitiveValue(b array.Builder, v reflect.Value, dt arrow.DataType) e
 	return nil
 }
 
-func buildTemporalArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
+func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
 	elemType := vals.Type().Elem()
 	for elemType.Kind() == reflect.Ptr {
 		elemType = elemType.Elem()
@@ -178,23 +178,92 @@ func buildTemporalArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, 
 
 	switch elemType {
 	case typeOfTime:
-		dt := &arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: "UTC"}
-		tb := array.NewTimestampBuilder(mem, dt)
-		defer tb.Release()
-		tb.Reserve(vals.Len())
-		for i := 0; i < vals.Len(); i++ {
-			v := vals.Index(i)
-			if isPtr {
-				if v.IsNil() {
-					tb.AppendNull()
-					continue
+		switch opts.Temporal {
+		case "date32":
+			b := array.NewDate32Builder(mem)
+			defer b.Release()
+			b.Reserve(vals.Len())
+			for i := 0; i < vals.Len(); i++ {
+				v := vals.Index(i)
+				if isPtr {
+					if v.IsNil() {
+						b.AppendNull()
+						continue
+					}
+					v = v.Elem()
 				}
-				v = v.Elem()
+				b.Append(arrow.Date32FromTime(v.Interface().(time.Time)))
 			}
-			t := v.Interface().(time.Time)
-			tb.Append(arrow.Timestamp(t.UnixNano()))
+			return b.NewArray(), nil
+		case "date64":
+			b := array.NewDate64Builder(mem)
+			defer b.Release()
+			b.Reserve(vals.Len())
+			for i := 0; i < vals.Len(); i++ {
+				v := vals.Index(i)
+				if isPtr {
+					if v.IsNil() {
+						b.AppendNull()
+						continue
+					}
+					v = v.Elem()
+				}
+				b.Append(arrow.Date64FromTime(v.Interface().(time.Time)))
+			}
+			return b.NewArray(), nil
+		case "time32":
+			dt := &arrow.Time32Type{Unit: arrow.Millisecond}
+			b := array.NewTime32Builder(mem, dt)
+			defer b.Release()
+			b.Reserve(vals.Len())
+			for i := 0; i < vals.Len(); i++ {
+				v := vals.Index(i)
+				if isPtr {
+					if v.IsNil() {
+						b.AppendNull()
+						continue
+					}
+					v = v.Elem()
+				}
+				b.Append(arrow.Time32(v.Interface().(time.Time).UnixNano() / int64(dt.Unit.Multiplier())))
+			}
+			return b.NewArray(), nil
+		case "time64":
+			dt := &arrow.Time64Type{Unit: arrow.Nanosecond}
+			b := array.NewTime64Builder(mem, dt)
+			defer b.Release()
+			b.Reserve(vals.Len())
+			for i := 0; i < vals.Len(); i++ {
+				v := vals.Index(i)
+				if isPtr {
+					if v.IsNil() {
+						b.AppendNull()
+						continue
+					}
+					v = v.Elem()
+				}
+				b.Append(arrow.Time64(v.Interface().(time.Time).UnixNano() / int64(dt.Unit.Multiplier())))
+			}
+			return b.NewArray(), nil
+		default:
+			dt := &arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: "UTC"}
+			tb := array.NewTimestampBuilder(mem, dt)
+			defer tb.Release()
+			tb.Reserve(vals.Len())
+			for i := 0; i < vals.Len(); i++ {
+				v := vals.Index(i)
+				if isPtr {
+					if v.IsNil() {
+						tb.AppendNull()
+						continue
+					}
+					v = v.Elem()
+				}
+				t := v.Interface().(time.Time)
+				tb.Append(arrow.Timestamp(t.UnixNano()))
+			}
+			return tb.NewArray(), nil
 		}
-		return tb.NewArray(), nil
 
 	case typeOfDuration:
 		dt := &arrow.DurationType{Unit: arrow.Nanosecond}
@@ -410,6 +479,16 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 	case *array.TimestampBuilder:
 		t := v.Interface().(time.Time)
 		tb.Append(arrow.Timestamp(t.UnixNano()))
+	case *array.Date32Builder:
+		tb.Append(arrow.Date32FromTime(v.Interface().(time.Time)))
+	case *array.Date64Builder:
+		tb.Append(arrow.Date64FromTime(v.Interface().(time.Time)))
+	case *array.Time32Builder:
+		unit := tb.Type().(*arrow.Time32Type).Unit
+		tb.Append(arrow.Time32(v.Interface().(time.Time).UnixNano() / int64(unit.Multiplier())))
+	case *array.Time64Builder:
+		unit := tb.Type().(*arrow.Time64Type).Unit
+		tb.Append(arrow.Time64(v.Interface().(time.Time).UnixNano() / int64(unit.Multiplier())))
 	case *array.DurationBuilder:
 		d := v.Interface().(time.Duration)
 		tb.Append(arrow.Duration(d.Nanoseconds()))
