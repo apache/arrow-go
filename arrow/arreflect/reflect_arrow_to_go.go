@@ -25,6 +25,18 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 )
 
+func isIntKind(k reflect.Kind) bool {
+	return k == reflect.Int || k == reflect.Int8 || k == reflect.Int16 ||
+		k == reflect.Int32 || k == reflect.Int64
+}
+
+func isUintKind(k reflect.Kind) bool {
+	return k == reflect.Uint || k == reflect.Uint8 || k == reflect.Uint16 ||
+		k == reflect.Uint32 || k == reflect.Uint64 || k == reflect.Uintptr
+}
+
+func isFloatKind(k reflect.Kind) bool { return k == reflect.Float32 || k == reflect.Float64 }
+
 func setValue(v reflect.Value, arr arrow.Array, i int) error {
 	if arr.IsNull(i) {
 		v.Set(reflect.Zero(v.Type()))
@@ -154,60 +166,52 @@ func setPrimitiveValue(v reflect.Value, arr arrow.Array, i int) error {
 
 	switch arr.DataType().ID() {
 	case arrow.INT8:
-		if v.Kind() != reflect.Int && v.Kind() != reflect.Int8 && v.Kind() != reflect.Int16 &&
-			v.Kind() != reflect.Int32 && v.Kind() != reflect.Int64 {
+		if !isIntKind(v.Kind()) {
 			return fmt.Errorf("arreflect: cannot set int8 into %s", v.Type())
 		}
 		v.SetInt(int64(arr.(*array.Int8).Value(i)))
 	case arrow.INT16:
-		if v.Kind() != reflect.Int && v.Kind() != reflect.Int8 && v.Kind() != reflect.Int16 &&
-			v.Kind() != reflect.Int32 && v.Kind() != reflect.Int64 {
+		if !isIntKind(v.Kind()) {
 			return fmt.Errorf("arreflect: cannot set int16 into %s", v.Type())
 		}
 		v.SetInt(int64(arr.(*array.Int16).Value(i)))
 	case arrow.INT32:
-		if v.Kind() != reflect.Int && v.Kind() != reflect.Int8 && v.Kind() != reflect.Int16 &&
-			v.Kind() != reflect.Int32 && v.Kind() != reflect.Int64 {
+		if !isIntKind(v.Kind()) {
 			return fmt.Errorf("arreflect: cannot set int32 into %s", v.Type())
 		}
 		v.SetInt(int64(arr.(*array.Int32).Value(i)))
 	case arrow.INT64:
-		if v.Kind() != reflect.Int && v.Kind() != reflect.Int8 && v.Kind() != reflect.Int16 &&
-			v.Kind() != reflect.Int32 && v.Kind() != reflect.Int64 {
+		if !isIntKind(v.Kind()) {
 			return fmt.Errorf("arreflect: cannot set int64 into %s", v.Type())
 		}
 		v.SetInt(arr.(*array.Int64).Value(i))
 	case arrow.UINT8:
-		if v.Kind() != reflect.Uint && v.Kind() != reflect.Uint8 && v.Kind() != reflect.Uint16 &&
-			v.Kind() != reflect.Uint32 && v.Kind() != reflect.Uint64 && v.Kind() != reflect.Uintptr {
+		if !isUintKind(v.Kind()) {
 			return fmt.Errorf("arreflect: cannot set uint8 into %s", v.Type())
 		}
 		v.SetUint(uint64(arr.(*array.Uint8).Value(i)))
 	case arrow.UINT16:
-		if v.Kind() != reflect.Uint && v.Kind() != reflect.Uint8 && v.Kind() != reflect.Uint16 &&
-			v.Kind() != reflect.Uint32 && v.Kind() != reflect.Uint64 && v.Kind() != reflect.Uintptr {
+		if !isUintKind(v.Kind()) {
 			return fmt.Errorf("arreflect: cannot set uint16 into %s", v.Type())
 		}
 		v.SetUint(uint64(arr.(*array.Uint16).Value(i)))
 	case arrow.UINT32:
-		if v.Kind() != reflect.Uint && v.Kind() != reflect.Uint8 && v.Kind() != reflect.Uint16 &&
-			v.Kind() != reflect.Uint32 && v.Kind() != reflect.Uint64 && v.Kind() != reflect.Uintptr {
+		if !isUintKind(v.Kind()) {
 			return fmt.Errorf("arreflect: cannot set uint32 into %s", v.Type())
 		}
 		v.SetUint(uint64(arr.(*array.Uint32).Value(i)))
 	case arrow.UINT64:
-		if v.Kind() != reflect.Uint && v.Kind() != reflect.Uint8 && v.Kind() != reflect.Uint16 &&
-			v.Kind() != reflect.Uint32 && v.Kind() != reflect.Uint64 && v.Kind() != reflect.Uintptr {
+		if !isUintKind(v.Kind()) {
 			return fmt.Errorf("arreflect: cannot set uint64 into %s", v.Type())
 		}
 		v.SetUint(arr.(*array.Uint64).Value(i))
 	case arrow.FLOAT32:
-		if v.Kind() != reflect.Float32 && v.Kind() != reflect.Float64 {
+		if !isFloatKind(v.Kind()) {
 			return fmt.Errorf("arreflect: cannot set float32 into %s", v.Type())
 		}
 		v.SetFloat(float64(arr.(*array.Float32).Value(i)))
 	case arrow.FLOAT64:
-		if v.Kind() != reflect.Float32 && v.Kind() != reflect.Float64 {
+		if !isFloatKind(v.Kind()) {
 			return fmt.Errorf("arreflect: cannot set float64 into %s", v.Type())
 		}
 		v.SetFloat(arr.(*array.Float64).Value(i))

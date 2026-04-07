@@ -39,6 +39,13 @@ var (
 	typeOfUint      = reflect.TypeOf(uint(0))
 )
 
+const (
+	dec32DefaultPrecision  int32 = 9
+	dec64DefaultPrecision  int32 = 18
+	dec128DefaultPrecision int32 = 38
+	dec256DefaultPrecision int32 = 76
+)
+
 func inferPrimitiveArrowType(t reflect.Type) (arrow.DataType, error) {
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
@@ -80,13 +87,13 @@ func inferPrimitiveArrowType(t reflect.Type) (arrow.DataType, error) {
 	case typeOfDuration:
 		return &arrow.DurationType{Unit: arrow.Nanosecond}, nil
 	case typeOfDec128:
-		return &arrow.Decimal128Type{Precision: 38, Scale: 0}, nil
+		return &arrow.Decimal128Type{Precision: dec128DefaultPrecision, Scale: 0}, nil
 	case typeOfDec32:
-		return &arrow.Decimal32Type{Precision: 9, Scale: 0}, nil
+		return &arrow.Decimal32Type{Precision: dec32DefaultPrecision, Scale: 0}, nil
 	case typeOfDec64:
-		return &arrow.Decimal64Type{Precision: 18, Scale: 0}, nil
+		return &arrow.Decimal64Type{Precision: dec64DefaultPrecision, Scale: 0}, nil
 	case typeOfDec256:
-		return &arrow.Decimal256Type{Precision: 76, Scale: 0}, nil
+		return &arrow.Decimal256Type{Precision: dec256DefaultPrecision, Scale: 0}, nil
 	default:
 		return nil, fmt.Errorf("arreflect: unsupported Go type for Arrow inference: %v", t)
 	}
