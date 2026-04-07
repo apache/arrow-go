@@ -869,10 +869,18 @@ func TestBuildTemporalTaggedArray(t *testing.T) {
 				got0.Hour(), got0.Minute(), got0.Second(),
 				ref.Hour(), ref.Minute(), ref.Second())
 		}
-		// time32 uses millisecond unit — check sub-second precision to ms
-		refMs := ref.Truncate(time.Millisecond)
-		if got0.Nanosecond()/1e6 != refMs.Nanosecond()/1e6 {
-			t.Errorf("time32 millisecond: got %d ms, want %d ms", got0.Nanosecond()/1e6, refMs.Nanosecond()/1e6)
+		refWithMs := time.Date(ref.Year(), ref.Month(), ref.Day(), ref.Hour(), ref.Minute(), ref.Second(), 500_000_000, ref.Location())
+		svMs := reflect.ValueOf([]time.Time{refWithMs})
+		arrMs, err := buildTemporalArray(svMs, tagOpts{Temporal: "time32"}, mem)
+		if err != nil {
+			t.Fatalf("time32 with ms: %v", err)
+		}
+		defer arrMs.Release()
+		t32ms := arrMs.(*array.Time32)
+		unitMs := arrMs.DataType().(*arrow.Time32Type).Unit
+		gotMs := t32ms.Value(0).ToTime(unitMs)
+		if gotMs.Nanosecond()/1_000_000 != 500 {
+			t.Errorf("time32 millisecond: got %d ms, want 500 ms", gotMs.Nanosecond()/1_000_000)
 		}
 	})
 
