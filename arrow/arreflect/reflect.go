@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -300,11 +301,9 @@ func getStructFields(t reflect.Type) []fieldMeta {
 		}
 	}
 
-	for i := 1; i < len(resolved); i++ {
-		for j := i; j > 0 && resolved[j].order < resolved[j-1].order; j-- {
-			resolved[j], resolved[j-1] = resolved[j-1], resolved[j]
-		}
-	}
+	sort.Slice(resolved, func(i, j int) bool {
+		return resolved[i].order < resolved[j].order
+	})
 
 	result := make([]fieldMeta, len(resolved))
 	for i, r := range resolved {

@@ -142,6 +142,57 @@ func inferArrowType(t reflect.Type) (arrow.DataType, error) {
 	}
 }
 
+func applyDecimalOpts(dt arrow.DataType, origType reflect.Type, opts tagOpts) arrow.DataType {
+	if !opts.HasDecimalOpts {
+		return dt
+	}
+	prec, scale := opts.DecimalPrecision, opts.DecimalScale
+	switch origType {
+	case typeOfDec128:
+		return &arrow.Decimal128Type{Precision: prec, Scale: scale}
+	case typeOfDec256:
+		return &arrow.Decimal256Type{Precision: prec, Scale: scale}
+	case typeOfDec32:
+		return &arrow.Decimal32Type{Precision: prec, Scale: scale}
+	case typeOfDec64:
+		return &arrow.Decimal64Type{Precision: prec, Scale: scale}
+	}
+	return dt
+}
+
+func applyTemporalOpts(dt arrow.DataType, origType reflect.Type, opts tagOpts) arrow.DataType {
+	if origType != typeOfTime || opts.Temporal == "" || opts.Temporal == "timestamp" {
+		return dt
+	}
+	switch opts.Temporal {
+	case "date32":
+		return arrow.FixedWidthTypes.Date32
+	case "date64":
+		return arrow.FixedWidthTypes.Date64
+	case "time32":
+		return &arrow.Time32Type{Unit: arrow.Millisecond}
+	case "time64":
+		return &arrow.Time64Type{Unit: arrow.Nanosecond}
+	}
+	return dt
+}
+
+func applyEncodingOpts(dt arrow.DataType, fm fieldMeta) (arrow.DataType, error) {
+	switch {
+	case fm.Opts.Dict:
+		return &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: dt}, nil
+	case fm.Opts.ListView:
+		lt, ok := dt.(*arrow.ListType)
+		if !ok {
+			return nil, fmt.Errorf("arreflect: listview tag on field %q requires a slice type, got %v", fm.Name, dt)
+		}
+		return arrow.ListViewOf(lt.Elem()), nil
+	case fm.Opts.REE:
+		return nil, fmt.Errorf("arreflect: ree tag on struct field %q is not supported; use ree at top-level via FromSlice", fm.Name)
+	}
+	return dt, nil
+}
+
 func inferStructType(t reflect.Type) (*arrow.StructType, error) {
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
@@ -164,50 +215,11 @@ func inferStructType(t reflect.Type) (*arrow.StructType, error) {
 			return nil, fmt.Errorf("struct field %q: %w", fm.Name, err)
 		}
 
-		if fm.Opts.HasDecimalOpts {
-			switch origType {
-			case typeOfDec32:
-				dt = &arrow.Decimal32Type{Precision: fm.Opts.DecimalPrecision, Scale: fm.Opts.DecimalScale}
-			case typeOfDec64:
-				dt = &arrow.Decimal64Type{Precision: fm.Opts.DecimalPrecision, Scale: fm.Opts.DecimalScale}
-			case typeOfDec128:
-				dt = &arrow.Decimal128Type{
-					Precision: fm.Opts.DecimalPrecision,
-					Scale:     fm.Opts.DecimalScale,
-				}
-			case typeOfDec256:
-				dt = &arrow.Decimal256Type{
-					Precision: fm.Opts.DecimalPrecision,
-					Scale:     fm.Opts.DecimalScale,
-				}
-			}
-		}
-
-		if origType == typeOfTime && fm.Opts.Temporal != "" {
-			switch fm.Opts.Temporal {
-			case "date32":
-				dt = arrow.FixedWidthTypes.Date32
-			case "date64":
-				dt = arrow.FixedWidthTypes.Date64
-			case "time32":
-				dt = &arrow.Time32Type{Unit: arrow.Millisecond}
-			case "time64":
-				dt = &arrow.Time64Type{Unit: arrow.Nanosecond}
-			case "timestamp", "":
-			}
-		}
-
-		switch {
-		case fm.Opts.Dict:
-			dt = &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: dt}
-		case fm.Opts.ListView:
-			lt, ok := dt.(*arrow.ListType)
-			if !ok {
-				return nil, fmt.Errorf("arreflect: listview tag on field %q requires a slice type, got %v", fm.Name, dt)
-			}
-			dt = arrow.ListViewOf(lt.Elem())
-		case fm.Opts.REE:
-			return nil, fmt.Errorf("arreflect: ree tag on struct field %q is not supported; use ree at top-level via FromSlice", fm.Name)
+		dt = applyDecimalOpts(dt, origType, fm.Opts)
+		dt = applyTemporalOpts(dt, origType, fm.Opts)
+		dt, err = applyEncodingOpts(dt, fm)
+		if err != nil {
+			return nil, err
 		}
 
 		arrowFields = append(arrowFields, arrow.Field{

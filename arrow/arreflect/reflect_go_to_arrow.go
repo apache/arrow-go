@@ -49,6 +49,11 @@ func buildArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.A
 		return buildListViewArray(vals, mem)
 	}
 
+	switch elemType {
+	case typeOfDec32, typeOfDec64, typeOfDec128, typeOfDec256:
+		return buildDecimalArray(vals, opts, mem)
+	}
+
 	switch elemType.Kind() {
 	case reflect.Slice:
 		if elemType == typeOfByteSlice {
@@ -64,22 +69,13 @@ func buildArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.A
 
 	case reflect.Struct:
 		switch elemType {
-		case typeOfTime:
+		case typeOfTime, typeOfDuration:
 			return buildTemporalArray(vals, opts, mem)
-		case typeOfDuration:
-			return buildTemporalArray(vals, opts, mem)
-		case typeOfDec128:
-			return buildDecimalArray(vals, opts, mem)
-		case typeOfDec256:
-			return buildDecimalArray(vals, opts, mem)
 		default:
 			return buildStructArray(vals, mem)
 		}
 
 	default:
-		if elemType == typeOfDec32 || elemType == typeOfDec64 {
-			return buildDecimalArray(vals, opts, mem)
-		}
 		return buildPrimitiveArray(vals, mem)
 	}
 }
@@ -201,7 +197,7 @@ func iterSlice(vals reflect.Value, isPtr bool, appendNull func(), appendVal func
 	return nil
 }
 
-func listBuildPreamble(vals reflect.Value) (elemDT arrow.DataType, isOuterPtr bool, err error) {
+func inferListElemDT(vals reflect.Value) (elemDT arrow.DataType, isOuterPtr bool, err error) {
 	outerSliceType, isOuterPtr := derefSliceElem(vals)
 	innerElemType := outerSliceType.Elem()
 	for innerElemType.Kind() == reflect.Ptr {
@@ -319,16 +315,19 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 	}
 }
 
+func decimalPrecisionScale(opts tagOpts, defaultPrec int32) (precision, scale int32) {
+	if opts.HasDecimalOpts {
+		return opts.DecimalPrecision, opts.DecimalScale
+	}
+	return defaultPrec, 0
+}
+
 func buildDecimalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
 	elemType, isPtr := derefSliceElem(vals)
 
 	switch elemType {
 	case typeOfDec128:
-		precision, scale := dec128DefaultPrecision, int32(0)
-		if opts.HasDecimalOpts {
-			precision = opts.DecimalPrecision
-			scale = opts.DecimalScale
-		}
+		precision, scale := decimalPrecisionScale(opts, dec128DefaultPrecision)
 		dt := &arrow.Decimal128Type{Precision: precision, Scale: scale}
 		b := array.NewDecimal128Builder(mem, dt)
 		defer b.Release()
@@ -346,11 +345,7 @@ func buildDecimalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (
 		return b.NewArray(), nil
 
 	case typeOfDec256:
-		precision, scale := dec256DefaultPrecision, int32(0)
-		if opts.HasDecimalOpts {
-			precision = opts.DecimalPrecision
-			scale = opts.DecimalScale
-		}
+		precision, scale := decimalPrecisionScale(opts, dec256DefaultPrecision)
 		dt := &arrow.Decimal256Type{Precision: precision, Scale: scale}
 		b := array.NewDecimal256Builder(mem, dt)
 		defer b.Release()
@@ -368,11 +363,7 @@ func buildDecimalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (
 		return b.NewArray(), nil
 
 	case typeOfDec32:
-		precision, scale := dec32DefaultPrecision, int32(0)
-		if opts.HasDecimalOpts {
-			precision = opts.DecimalPrecision
-			scale = opts.DecimalScale
-		}
+		precision, scale := decimalPrecisionScale(opts, dec32DefaultPrecision)
 		dt := &arrow.Decimal32Type{Precision: precision, Scale: scale}
 		b := array.NewDecimal32Builder(mem, dt)
 		defer b.Release()
@@ -386,11 +377,7 @@ func buildDecimalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (
 		return b.NewArray(), nil
 
 	case typeOfDec64:
-		precision, scale := dec64DefaultPrecision, int32(0)
-		if opts.HasDecimalOpts {
-			precision = opts.DecimalPrecision
-			scale = opts.DecimalScale
-		}
+		precision, scale := decimalPrecisionScale(opts, dec64DefaultPrecision)
 		dt := &arrow.Decimal64Type{Precision: precision, Scale: scale}
 		b := array.NewDecimal64Builder(mem, dt)
 		defer b.Release()
@@ -447,6 +434,76 @@ func buildStructArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, er
 	return sb.NewArray(), nil
 }
 
+func appendTemporalValue(b array.Builder, v reflect.Value) error {
+	switch tb := b.(type) {
+	case *array.TimestampBuilder:
+		t, ok := reflect.TypeAssert[time.Time](v)
+		if !ok {
+			return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
+		}
+		tb.Append(arrow.Timestamp(t.UnixNano()))
+	case *array.Date32Builder:
+		t, ok := reflect.TypeAssert[time.Time](v)
+		if !ok {
+			return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
+		}
+		tb.Append(arrow.Date32FromTime(t))
+	case *array.Date64Builder:
+		t, ok := reflect.TypeAssert[time.Time](v)
+		if !ok {
+			return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
+		}
+		tb.Append(arrow.Date64FromTime(t))
+	case *array.Time32Builder:
+		unit := tb.Type().(*arrow.Time32Type).Unit
+		t, ok := reflect.TypeAssert[time.Time](v)
+		if !ok {
+			return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
+		}
+		tb.Append(arrow.Time32(timeOfDayNanos(t) / int64(unit.Multiplier())))
+	case *array.Time64Builder:
+		unit := tb.Type().(*arrow.Time64Type).Unit
+		t, ok := reflect.TypeAssert[time.Time](v)
+		if !ok {
+			return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
+		}
+		tb.Append(arrow.Time64(timeOfDayNanos(t) / int64(unit.Multiplier())))
+	case *array.DurationBuilder:
+		d, ok := reflect.TypeAssert[time.Duration](v)
+		if !ok {
+			return fmt.Errorf("arreflect: expected time.Duration, got %s", v.Type())
+		}
+		tb.Append(arrow.Duration(d.Nanoseconds()))
+	default:
+		return fmt.Errorf("arreflect: unexpected temporal builder %T", b)
+	}
+	return nil
+}
+
+func appendDecimalValue(b array.Builder, v reflect.Value) error {
+	switch tb := b.(type) {
+	case *array.Decimal128Builder:
+		n, ok := reflect.TypeAssert[decimal128.Num](v)
+		if !ok {
+			return fmt.Errorf("arreflect: expected decimal128.Num, got %s", v.Type())
+		}
+		tb.Append(n)
+	case *array.Decimal256Builder:
+		n, ok := reflect.TypeAssert[decimal256.Num](v)
+		if !ok {
+			return fmt.Errorf("arreflect: expected decimal256.Num, got %s", v.Type())
+		}
+		tb.Append(n)
+	case *array.Decimal32Builder:
+		tb.Append(decimal.Decimal32(v.Int()))
+	case *array.Decimal64Builder:
+		tb.Append(decimal.Decimal64(v.Int()))
+	default:
+		return fmt.Errorf("arreflect: unexpected decimal builder %T", b)
+	}
+	return nil
+}
+
 func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 	for v.Kind() == reflect.Ptr {
 		if v.IsNil() {
@@ -487,60 +544,11 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 		} else {
 			tb.Append(v.Bytes())
 		}
-	case *array.TimestampBuilder:
-		t, ok := reflect.TypeAssert[time.Time](v)
-		if !ok {
-			return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
-		}
-		tb.Append(arrow.Timestamp(t.UnixNano()))
-	case *array.Date32Builder:
-		t, ok := reflect.TypeAssert[time.Time](v)
-		if !ok {
-			return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
-		}
-		tb.Append(arrow.Date32FromTime(t))
-	case *array.Date64Builder:
-		t, ok := reflect.TypeAssert[time.Time](v)
-		if !ok {
-			return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
-		}
-		tb.Append(arrow.Date64FromTime(t))
-	case *array.Time32Builder:
-		unit := tb.Type().(*arrow.Time32Type).Unit
-		t, ok := reflect.TypeAssert[time.Time](v)
-		if !ok {
-			return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
-		}
-		tb.Append(arrow.Time32(timeOfDayNanos(t) / int64(unit.Multiplier())))
-	case *array.Time64Builder:
-		unit := tb.Type().(*arrow.Time64Type).Unit
-		t, ok := reflect.TypeAssert[time.Time](v)
-		if !ok {
-			return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
-		}
-		tb.Append(arrow.Time64(timeOfDayNanos(t) / int64(unit.Multiplier())))
-	case *array.DurationBuilder:
-		d, ok := reflect.TypeAssert[time.Duration](v)
-		if !ok {
-			return fmt.Errorf("arreflect: expected time.Duration, got %s", v.Type())
-		}
-		tb.Append(arrow.Duration(d.Nanoseconds()))
-	case *array.Decimal128Builder:
-		n, ok := reflect.TypeAssert[decimal128.Num](v)
-		if !ok {
-			return fmt.Errorf("arreflect: expected decimal128.Num, got %s", v.Type())
-		}
-		tb.Append(n)
-	case *array.Decimal256Builder:
-		n, ok := reflect.TypeAssert[decimal256.Num](v)
-		if !ok {
-			return fmt.Errorf("arreflect: expected decimal256.Num, got %s", v.Type())
-		}
-		tb.Append(n)
-	case *array.Decimal32Builder:
-		tb.Append(decimal.Decimal32(v.Int()))
-	case *array.Decimal64Builder:
-		tb.Append(decimal.Decimal64(v.Int()))
+	case *array.TimestampBuilder, *array.Date32Builder, *array.Date64Builder,
+		*array.Time32Builder, *array.Time64Builder, *array.DurationBuilder:
+		return appendTemporalValue(b, v)
+	case *array.Decimal128Builder, *array.Decimal256Builder, *array.Decimal32Builder, *array.Decimal64Builder:
+		return appendDecimalValue(b, v)
 	case *array.ListBuilder:
 		if v.Kind() == reflect.Slice && v.IsNil() {
 			tb.AppendNull()
@@ -685,39 +693,60 @@ func appendToDictBuilder(db array.DictionaryBuilder, v reflect.Value) error {
 	return fmt.Errorf("arreflect: unsupported builder type %T", db)
 }
 
-func buildListArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
-	elemDT, isOuterPtr, err := listBuildPreamble(vals)
+type listBuilderLike interface {
+	array.Builder
+	ValueBuilder() array.Builder
+}
+
+func buildListLikeArray(vals reflect.Value, mem memory.Allocator, isView bool) (arrow.Array, error) {
+	elemDT, isOuterPtr, err := inferListElemDT(vals)
 	if err != nil {
 		return nil, err
 	}
 
-	lb := array.NewListBuilder(mem, elemDT)
-	defer lb.Release()
+	var bldr listBuilderLike
+	var beginRow func(int)
+	if isView {
+		b := array.NewListViewBuilder(mem, elemDT)
+		bldr = b
+		beginRow = func(n int) { b.AppendWithSize(true, n) }
+	} else {
+		b := array.NewListBuilder(mem, elemDT)
+		bldr = b
+		beginRow = func(_ int) { b.Append(true) }
+	}
+	defer bldr.Release()
 
-	vb := lb.ValueBuilder()
-
+	vb := bldr.ValueBuilder()
 	for i := 0; i < vals.Len(); i++ {
 		outer := vals.Index(i)
 		if isOuterPtr {
 			if outer.IsNil() {
-				lb.AppendNull()
+				bldr.AppendNull()
 				continue
 			}
 			outer = outer.Elem()
 		}
 		if outer.IsNil() {
-			lb.AppendNull()
+			bldr.AppendNull()
 			continue
 		}
-		lb.Append(true)
+		beginRow(outer.Len())
 		for j := 0; j < outer.Len(); j++ {
 			if err := appendValue(vb, outer.Index(j), tagOpts{}); err != nil {
 				return nil, fmt.Errorf("list element [%d][%d]: %w", i, j, err)
 			}
 		}
 	}
+	return bldr.NewArray(), nil
+}
 
-	return lb.NewArray(), nil
+func buildListArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
+	return buildListLikeArray(vals, mem, false)
+}
+
+func buildListViewArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
+	return buildListLikeArray(vals, mem, true)
 }
 
 func buildMapArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
@@ -934,39 +963,4 @@ func buildRunEndEncodedArray(vals reflect.Value, mem memory.Allocator) (arrow.Ar
 	defer valuesArr.Release()
 
 	return array.NewRunEndEncodedArray(runEndsArr, valuesArr, vals.Len(), 0), nil
-}
-
-func buildListViewArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
-	elemDT, isOuterPtr, err := listBuildPreamble(vals)
-	if err != nil {
-		return nil, err
-	}
-
-	lvb := array.NewListViewBuilder(mem, elemDT)
-	defer lvb.Release()
-
-	vb := lvb.ValueBuilder()
-
-	for i := 0; i < vals.Len(); i++ {
-		outer := vals.Index(i)
-		if isOuterPtr {
-			if outer.IsNil() {
-				lvb.AppendNull()
-				continue
-			}
-			outer = outer.Elem()
-		}
-		if outer.IsNil() {
-			lvb.AppendNull()
-			continue
-		}
-		lvb.AppendWithSize(true, outer.Len())
-		for j := 0; j < outer.Len(); j++ {
-			if err := appendValue(vb, outer.Index(j), tagOpts{}); err != nil {
-				return nil, fmt.Errorf("list-view element [%d][%d]: %w", i, j, err)
-			}
-		}
-	}
-
-	return lvb.NewArray(), nil
 }
