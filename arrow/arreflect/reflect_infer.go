@@ -95,7 +95,7 @@ func inferPrimitiveArrowType(t reflect.Type) (arrow.DataType, error) {
 	case typeOfDec256:
 		return &arrow.Decimal256Type{Precision: dec256DefaultPrecision, Scale: 0}, nil
 	default:
-		return nil, fmt.Errorf("arreflect: unsupported Go type for Arrow inference: %v", t)
+		return nil, fmt.Errorf("unsupported Go type for Arrow inference %v: %w", t, ErrUnsupportedType)
 	}
 }
 

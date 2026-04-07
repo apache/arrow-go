@@ -51,10 +51,10 @@ func setValue(v reflect.Value, arr arrow.Array, i int) error {
 	case arrow.BOOL:
 		a, ok := arr.(*array.Boolean)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *Boolean, got %T", arr)
+			return fmt.Errorf("expected *Boolean, got %T: %w", arr, ErrTypeMismatch)
 		}
 		if v.Kind() != reflect.Bool {
-			return fmt.Errorf("arreflect: cannot set bool into %s", v.Type())
+			return fmt.Errorf("cannot set bool into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.SetBool(a.Value(i))
 
@@ -66,40 +66,40 @@ func setValue(v reflect.Value, arr arrow.Array, i int) error {
 	case arrow.STRING:
 		a, ok := arr.(*array.String)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *String, got %T", arr)
+			return fmt.Errorf("expected *String, got %T: %w", arr, ErrTypeMismatch)
 		}
 		if v.Kind() != reflect.String {
-			return fmt.Errorf("arreflect: cannot set string into %s", v.Type())
+			return fmt.Errorf("cannot set string into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.SetString(a.Value(i))
 
 	case arrow.LARGE_STRING:
 		a, ok := arr.(*array.LargeString)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *LargeString, got %T", arr)
+			return fmt.Errorf("expected *LargeString, got %T: %w", arr, ErrTypeMismatch)
 		}
 		if v.Kind() != reflect.String {
-			return fmt.Errorf("arreflect: cannot set string into %s", v.Type())
+			return fmt.Errorf("cannot set string into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.SetString(a.Value(i))
 
 	case arrow.BINARY:
 		a, ok := arr.(*array.Binary)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *Binary, got %T", arr)
+			return fmt.Errorf("expected *Binary, got %T: %w", arr, ErrTypeMismatch)
 		}
 		if v.Kind() != reflect.Slice || v.Type().Elem().Kind() != reflect.Uint8 {
-			return fmt.Errorf("arreflect: cannot set []byte into %s", v.Type())
+			return fmt.Errorf("cannot set []byte into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.SetBytes(a.Value(i))
 
 	case arrow.LARGE_BINARY:
 		a, ok := arr.(*array.LargeBinary)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *LargeBinary, got %T", arr)
+			return fmt.Errorf("expected *LargeBinary, got %T: %w", arr, ErrTypeMismatch)
 		}
 		if v.Kind() != reflect.Slice || v.Type().Elem().Kind() != reflect.Uint8 {
-			return fmt.Errorf("arreflect: cannot set []byte into %s", v.Type())
+			return fmt.Errorf("cannot set []byte into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.SetBytes(a.Value(i))
 
@@ -113,47 +113,47 @@ func setValue(v reflect.Value, arr arrow.Array, i int) error {
 	case arrow.STRUCT:
 		a, ok := arr.(*array.Struct)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *Struct, got %T", arr)
+			return fmt.Errorf("expected *Struct, got %T: %w", arr, ErrTypeMismatch)
 		}
 		return setStructValue(v, a, i)
 
 	case arrow.LIST, arrow.LARGE_LIST, arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW:
 		a, ok := arr.(array.ListLike)
 		if !ok {
-			return fmt.Errorf("arreflect: expected ListLike, got %T", arr)
+			return fmt.Errorf("expected ListLike, got %T: %w", arr, ErrTypeMismatch)
 		}
 		return setListValue(v, a, i)
 
 	case arrow.MAP:
 		a, ok := arr.(*array.Map)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *Map, got %T", arr)
+			return fmt.Errorf("expected *Map, got %T: %w", arr, ErrTypeMismatch)
 		}
 		return setMapValue(v, a, i)
 
 	case arrow.FIXED_SIZE_LIST:
 		a, ok := arr.(*array.FixedSizeList)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *FixedSizeList, got %T", arr)
+			return fmt.Errorf("expected *FixedSizeList, got %T: %w", arr, ErrTypeMismatch)
 		}
 		return setFixedSizeListValue(v, a, i)
 
 	case arrow.DICTIONARY:
 		a, ok := arr.(*array.Dictionary)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *Dictionary, got %T", arr)
+			return fmt.Errorf("expected *Dictionary, got %T: %w", arr, ErrTypeMismatch)
 		}
 		return setDictionaryValue(v, a, i)
 
 	case arrow.RUN_END_ENCODED:
 		a, ok := arr.(*array.RunEndEncoded)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *RunEndEncoded, got %T", arr)
+			return fmt.Errorf("expected *RunEndEncoded, got %T: %w", arr, ErrTypeMismatch)
 		}
 		return setRunEndEncodedValue(v, a, i)
 
 	default:
-		return fmt.Errorf("arreflect: unsupported Arrow type %v for reflection", arr.DataType())
+		return fmt.Errorf("unsupported Arrow type %v for reflection: %w", arr.DataType(), ErrUnsupportedType)
 	}
 	return nil
 }
@@ -167,56 +167,56 @@ func setPrimitiveValue(v reflect.Value, arr arrow.Array, i int) error {
 	switch arr.DataType().ID() {
 	case arrow.INT8:
 		if !isIntKind(v.Kind()) {
-			return fmt.Errorf("arreflect: cannot set int8 into %s", v.Type())
+			return fmt.Errorf("cannot set int8 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.SetInt(int64(arr.(*array.Int8).Value(i)))
 	case arrow.INT16:
 		if !isIntKind(v.Kind()) {
-			return fmt.Errorf("arreflect: cannot set int16 into %s", v.Type())
+			return fmt.Errorf("cannot set int16 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.SetInt(int64(arr.(*array.Int16).Value(i)))
 	case arrow.INT32:
 		if !isIntKind(v.Kind()) {
-			return fmt.Errorf("arreflect: cannot set int32 into %s", v.Type())
+			return fmt.Errorf("cannot set int32 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.SetInt(int64(arr.(*array.Int32).Value(i)))
 	case arrow.INT64:
 		if !isIntKind(v.Kind()) {
-			return fmt.Errorf("arreflect: cannot set int64 into %s", v.Type())
+			return fmt.Errorf("cannot set int64 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.SetInt(arr.(*array.Int64).Value(i))
 	case arrow.UINT8:
 		if !isUintKind(v.Kind()) {
-			return fmt.Errorf("arreflect: cannot set uint8 into %s", v.Type())
+			return fmt.Errorf("cannot set uint8 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.SetUint(uint64(arr.(*array.Uint8).Value(i)))
 	case arrow.UINT16:
 		if !isUintKind(v.Kind()) {
-			return fmt.Errorf("arreflect: cannot set uint16 into %s", v.Type())
+			return fmt.Errorf("cannot set uint16 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.SetUint(uint64(arr.(*array.Uint16).Value(i)))
 	case arrow.UINT32:
 		if !isUintKind(v.Kind()) {
-			return fmt.Errorf("arreflect: cannot set uint32 into %s", v.Type())
+			return fmt.Errorf("cannot set uint32 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.SetUint(uint64(arr.(*array.Uint32).Value(i)))
 	case arrow.UINT64:
 		if !isUintKind(v.Kind()) {
-			return fmt.Errorf("arreflect: cannot set uint64 into %s", v.Type())
+			return fmt.Errorf("cannot set uint64 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.SetUint(arr.(*array.Uint64).Value(i))
 	case arrow.FLOAT32:
 		if !isFloatKind(v.Kind()) {
-			return fmt.Errorf("arreflect: cannot set float32 into %s", v.Type())
+			return fmt.Errorf("cannot set float32 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.SetFloat(float64(arr.(*array.Float32).Value(i)))
 	case arrow.FLOAT64:
 		if !isFloatKind(v.Kind()) {
-			return fmt.Errorf("arreflect: cannot set float64 into %s", v.Type())
+			return fmt.Errorf("cannot set float64 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.SetFloat(arr.(*array.Float64).Value(i))
 	default:
-		return fmt.Errorf("arreflect: unsupported primitive type %v", arr.DataType())
+		return fmt.Errorf("unsupported primitive type %v: %w", arr.DataType(), ErrUnsupportedType)
 	}
 	return nil
 }
@@ -231,10 +231,10 @@ func setTemporalValue(v reflect.Value, arr arrow.Array, i int) error {
 	case arrow.TIMESTAMP:
 		a, ok := arr.(*array.Timestamp)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *Timestamp, got %T", arr)
+			return fmt.Errorf("expected *Timestamp, got %T: %w", arr, ErrTypeMismatch)
 		}
 		if v.Type() != typeOfTime {
-			return fmt.Errorf("arreflect: cannot set time.Time into %s", v.Type())
+			return fmt.Errorf("cannot set time.Time into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		unit := arr.DataType().(*arrow.TimestampType).Unit
 		t := a.Value(i).ToTime(unit)
@@ -243,10 +243,10 @@ func setTemporalValue(v reflect.Value, arr arrow.Array, i int) error {
 	case arrow.DATE32:
 		a, ok := arr.(*array.Date32)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *Date32, got %T", arr)
+			return fmt.Errorf("expected *Date32, got %T: %w", arr, ErrTypeMismatch)
 		}
 		if v.Type() != typeOfTime {
-			return fmt.Errorf("arreflect: cannot set time.Time into %s", v.Type())
+			return fmt.Errorf("cannot set time.Time into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		t := a.Value(i).ToTime()
 		v.Set(reflect.ValueOf(t))
@@ -254,10 +254,10 @@ func setTemporalValue(v reflect.Value, arr arrow.Array, i int) error {
 	case arrow.DATE64:
 		a, ok := arr.(*array.Date64)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *Date64, got %T", arr)
+			return fmt.Errorf("expected *Date64, got %T: %w", arr, ErrTypeMismatch)
 		}
 		if v.Type() != typeOfTime {
-			return fmt.Errorf("arreflect: cannot set time.Time into %s", v.Type())
+			return fmt.Errorf("cannot set time.Time into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		t := a.Value(i).ToTime()
 		v.Set(reflect.ValueOf(t))
@@ -265,10 +265,10 @@ func setTemporalValue(v reflect.Value, arr arrow.Array, i int) error {
 	case arrow.TIME32:
 		a, ok := arr.(*array.Time32)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *Time32, got %T", arr)
+			return fmt.Errorf("expected *Time32, got %T: %w", arr, ErrTypeMismatch)
 		}
 		if v.Type() != typeOfTime {
-			return fmt.Errorf("arreflect: cannot set time.Time into %s", v.Type())
+			return fmt.Errorf("cannot set time.Time into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		unit := arr.DataType().(*arrow.Time32Type).Unit
 		t := a.Value(i).ToTime(unit)
@@ -277,10 +277,10 @@ func setTemporalValue(v reflect.Value, arr arrow.Array, i int) error {
 	case arrow.TIME64:
 		a, ok := arr.(*array.Time64)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *Time64, got %T", arr)
+			return fmt.Errorf("expected *Time64, got %T: %w", arr, ErrTypeMismatch)
 		}
 		if v.Type() != typeOfTime {
-			return fmt.Errorf("arreflect: cannot set time.Time into %s", v.Type())
+			return fmt.Errorf("cannot set time.Time into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		unit := arr.DataType().(*arrow.Time64Type).Unit
 		t := a.Value(i).ToTime(unit)
@@ -289,17 +289,17 @@ func setTemporalValue(v reflect.Value, arr arrow.Array, i int) error {
 	case arrow.DURATION:
 		a, ok := arr.(*array.Duration)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *Duration, got %T", arr)
+			return fmt.Errorf("expected *Duration, got %T: %w", arr, ErrTypeMismatch)
 		}
 		if v.Type() != typeOfDuration {
-			return fmt.Errorf("arreflect: cannot set time.Duration into %s", v.Type())
+			return fmt.Errorf("cannot set time.Duration into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		unit := arr.DataType().(*arrow.DurationType).Unit
 		dur := time.Duration(a.Value(i)) * unit.Multiplier()
 		v.Set(reflect.ValueOf(dur))
 
 	default:
-		return fmt.Errorf("arreflect: unsupported temporal type %v", arr.DataType())
+		return fmt.Errorf("unsupported temporal type %v: %w", arr.DataType(), ErrUnsupportedType)
 	}
 	return nil
 }
@@ -314,10 +314,10 @@ func setDecimalValue(v reflect.Value, arr arrow.Array, i int) error {
 	case arrow.DECIMAL128:
 		a, ok := arr.(*array.Decimal128)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *Decimal128, got %T", arr)
+			return fmt.Errorf("expected *Decimal128, got %T: %w", arr, ErrTypeMismatch)
 		}
 		if v.Type() != typeOfDec128 {
-			return fmt.Errorf("arreflect: cannot set decimal128.Num into %s", v.Type())
+			return fmt.Errorf("cannot set decimal128.Num into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		num := a.Value(i)
 		v.Set(reflect.ValueOf(num))
@@ -325,10 +325,10 @@ func setDecimalValue(v reflect.Value, arr arrow.Array, i int) error {
 	case arrow.DECIMAL256:
 		a, ok := arr.(*array.Decimal256)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *Decimal256, got %T", arr)
+			return fmt.Errorf("expected *Decimal256, got %T: %w", arr, ErrTypeMismatch)
 		}
 		if v.Type() != typeOfDec256 {
-			return fmt.Errorf("arreflect: cannot set decimal256.Num into %s", v.Type())
+			return fmt.Errorf("cannot set decimal256.Num into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		num := a.Value(i)
 		v.Set(reflect.ValueOf(num))
@@ -336,25 +336,25 @@ func setDecimalValue(v reflect.Value, arr arrow.Array, i int) error {
 	case arrow.DECIMAL32:
 		a, ok := arr.(*array.Decimal32)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *Decimal32, got %T", arr)
+			return fmt.Errorf("expected *Decimal32, got %T: %w", arr, ErrTypeMismatch)
 		}
 		if v.Type() != typeOfDec32 {
-			return fmt.Errorf("arreflect: cannot set decimal.Decimal32 into %s", v.Type())
+			return fmt.Errorf("cannot set decimal.Decimal32 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.Set(reflect.ValueOf(a.Value(i)))
 
 	case arrow.DECIMAL64:
 		a, ok := arr.(*array.Decimal64)
 		if !ok {
-			return fmt.Errorf("arreflect: expected *Decimal64, got %T", arr)
+			return fmt.Errorf("expected *Decimal64, got %T: %w", arr, ErrTypeMismatch)
 		}
 		if v.Type() != typeOfDec64 {
-			return fmt.Errorf("arreflect: cannot set decimal.Decimal64 into %s", v.Type())
+			return fmt.Errorf("cannot set decimal.Decimal64 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.Set(reflect.ValueOf(a.Value(i)))
 
 	default:
-		return fmt.Errorf("arreflect: unsupported decimal type %v", arr.DataType())
+		return fmt.Errorf("unsupported decimal type %v: %w", arr.DataType(), ErrUnsupportedType)
 	}
 	return nil
 }
@@ -366,7 +366,7 @@ func setStructValue(v reflect.Value, sa *array.Struct, i int) error {
 	}
 
 	if v.Kind() != reflect.Struct {
-		return fmt.Errorf("arreflect: cannot set struct into %s", v.Type())
+		return fmt.Errorf("cannot set struct into %s: %w", v.Type(), ErrTypeMismatch)
 	}
 
 	fields := cachedStructFields(v.Type())
@@ -391,7 +391,7 @@ func setListValue(v reflect.Value, arr array.ListLike, i int) error {
 	}
 
 	if v.Kind() != reflect.Slice {
-		return fmt.Errorf("arreflect: cannot set list into %s", v.Type())
+		return fmt.Errorf("cannot set list into %s: %w", v.Type(), ErrTypeMismatch)
 	}
 
 	start, end := arr.ValueOffsets(i)
@@ -415,7 +415,7 @@ func setMapValue(v reflect.Value, arr *array.Map, i int) error {
 	}
 
 	if v.Kind() != reflect.Map {
-		return fmt.Errorf("arreflect: cannot set map into %s", v.Type())
+		return fmt.Errorf("cannot set map into %s: %w", v.Type(), ErrTypeMismatch)
 	}
 
 	start, end := arr.ValueOffsets(i)
@@ -469,7 +469,7 @@ func setFixedSizeListValue(v reflect.Value, arr *array.FixedSizeList, i int) err
 		}
 		v.Set(result)
 	default:
-		return fmt.Errorf("arreflect: cannot set fixed-size list into %s", v.Type())
+		return fmt.Errorf("cannot set fixed-size list into %s: %w", v.Type(), ErrTypeMismatch)
 	}
 	return nil
 }

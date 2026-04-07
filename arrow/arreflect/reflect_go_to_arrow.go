@@ -140,19 +140,19 @@ func appendPrimitiveValue(b array.Builder, v reflect.Value, dt arrow.DataType) e
 	case arrow.DURATION:
 		d, ok := reflect.TypeAssert[time.Duration](v)
 		if !ok {
-			return fmt.Errorf("arreflect: expected time.Duration, got %s", v.Type())
+			return fmt.Errorf("expected time.Duration, got %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		b.(*array.DurationBuilder).Append(arrow.Duration(d.Nanoseconds()))
 	case arrow.DECIMAL128:
 		n, ok := reflect.TypeAssert[decimal128.Num](v)
 		if !ok {
-			return fmt.Errorf("arreflect: expected decimal128.Num, got %s", v.Type())
+			return fmt.Errorf("expected decimal128.Num, got %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		b.(*array.Decimal128Builder).Append(n)
 	case arrow.DECIMAL256:
 		n, ok := reflect.TypeAssert[decimal256.Num](v)
 		if !ok {
-			return fmt.Errorf("arreflect: expected decimal256.Num, got %s", v.Type())
+			return fmt.Errorf("expected decimal256.Num, got %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		b.(*array.Decimal256Builder).Append(n)
 	case arrow.DECIMAL32:
@@ -160,7 +160,7 @@ func appendPrimitiveValue(b array.Builder, v reflect.Value, dt arrow.DataType) e
 	case arrow.DECIMAL64:
 		b.(*array.Decimal64Builder).Append(decimal.Decimal64(v.Int()))
 	default:
-		return fmt.Errorf("arreflect: unsupported Arrow type %v", dt)
+		return fmt.Errorf("unsupported Arrow type %v: %w", dt, ErrUnsupportedType)
 	}
 	return nil
 }
@@ -220,7 +220,7 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 			if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
 				t, ok := reflect.TypeAssert[time.Time](v)
 				if !ok {
-					return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
+					return fmt.Errorf("expected time.Time, got %s: %w", v.Type(), ErrTypeMismatch)
 				}
 				b.Append(arrow.Date32FromTime(t))
 				return nil
@@ -235,7 +235,7 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 			if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
 				t, ok := reflect.TypeAssert[time.Time](v)
 				if !ok {
-					return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
+					return fmt.Errorf("expected time.Time, got %s: %w", v.Type(), ErrTypeMismatch)
 				}
 				b.Append(arrow.Date64FromTime(t))
 				return nil
@@ -251,7 +251,7 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 			if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
 				t, ok := reflect.TypeAssert[time.Time](v)
 				if !ok {
-					return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
+					return fmt.Errorf("expected time.Time, got %s: %w", v.Type(), ErrTypeMismatch)
 				}
 				b.Append(arrow.Time32(timeOfDayNanos(t) / int64(dt.Unit.Multiplier())))
 				return nil
@@ -267,7 +267,7 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 			if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
 				t, ok := reflect.TypeAssert[time.Time](v)
 				if !ok {
-					return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
+					return fmt.Errorf("expected time.Time, got %s: %w", v.Type(), ErrTypeMismatch)
 				}
 				b.Append(arrow.Time64(timeOfDayNanos(t) / int64(dt.Unit.Multiplier())))
 				return nil
@@ -283,7 +283,7 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 			if err := iterSlice(vals, isPtr, tb.AppendNull, func(v reflect.Value) error {
 				t, ok := reflect.TypeAssert[time.Time](v)
 				if !ok {
-					return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
+					return fmt.Errorf("expected time.Time, got %s: %w", v.Type(), ErrTypeMismatch)
 				}
 				tb.Append(arrow.Timestamp(t.UnixNano()))
 				return nil
@@ -301,7 +301,7 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 		if err := iterSlice(vals, isPtr, db.AppendNull, func(v reflect.Value) error {
 			d, ok := reflect.TypeAssert[time.Duration](v)
 			if !ok {
-				return fmt.Errorf("arreflect: expected time.Duration, got %s", v.Type())
+				return fmt.Errorf("expected time.Duration, got %s: %w", v.Type(), ErrTypeMismatch)
 			}
 			db.Append(arrow.Duration(d.Nanoseconds()))
 			return nil
@@ -311,7 +311,7 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 		return db.NewArray(), nil
 
 	default:
-		return nil, fmt.Errorf("arreflect: unsupported temporal type %v", elemType)
+		return nil, fmt.Errorf("unsupported temporal type %v: %w", elemType, ErrUnsupportedType)
 	}
 }
 
@@ -335,7 +335,7 @@ func buildDecimalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (
 		if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
 			n, ok := reflect.TypeAssert[decimal128.Num](v)
 			if !ok {
-				return fmt.Errorf("arreflect: expected decimal128.Num, got %s", v.Type())
+				return fmt.Errorf("expected decimal128.Num, got %s: %w", v.Type(), ErrTypeMismatch)
 			}
 			b.Append(n)
 			return nil
@@ -353,7 +353,7 @@ func buildDecimalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (
 		if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
 			n, ok := reflect.TypeAssert[decimal256.Num](v)
 			if !ok {
-				return fmt.Errorf("arreflect: expected decimal256.Num, got %s", v.Type())
+				return fmt.Errorf("expected decimal256.Num, got %s: %w", v.Type(), ErrTypeMismatch)
 			}
 			b.Append(n)
 			return nil
@@ -391,7 +391,7 @@ func buildDecimalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (
 		return b.NewArray(), nil
 
 	default:
-		return nil, fmt.Errorf("arreflect: unsupported decimal type %v", elemType)
+		return nil, fmt.Errorf("unsupported decimal type %v: %w", elemType, ErrUnsupportedType)
 	}
 }
 
@@ -439,43 +439,43 @@ func appendTemporalValue(b array.Builder, v reflect.Value) error {
 	case *array.TimestampBuilder:
 		t, ok := reflect.TypeAssert[time.Time](v)
 		if !ok {
-			return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
+			return fmt.Errorf("expected time.Time, got %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		tb.Append(arrow.Timestamp(t.UnixNano()))
 	case *array.Date32Builder:
 		t, ok := reflect.TypeAssert[time.Time](v)
 		if !ok {
-			return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
+			return fmt.Errorf("expected time.Time, got %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		tb.Append(arrow.Date32FromTime(t))
 	case *array.Date64Builder:
 		t, ok := reflect.TypeAssert[time.Time](v)
 		if !ok {
-			return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
+			return fmt.Errorf("expected time.Time, got %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		tb.Append(arrow.Date64FromTime(t))
 	case *array.Time32Builder:
 		unit := tb.Type().(*arrow.Time32Type).Unit
 		t, ok := reflect.TypeAssert[time.Time](v)
 		if !ok {
-			return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
+			return fmt.Errorf("expected time.Time, got %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		tb.Append(arrow.Time32(timeOfDayNanos(t) / int64(unit.Multiplier())))
 	case *array.Time64Builder:
 		unit := tb.Type().(*arrow.Time64Type).Unit
 		t, ok := reflect.TypeAssert[time.Time](v)
 		if !ok {
-			return fmt.Errorf("arreflect: expected time.Time, got %s", v.Type())
+			return fmt.Errorf("expected time.Time, got %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		tb.Append(arrow.Time64(timeOfDayNanos(t) / int64(unit.Multiplier())))
 	case *array.DurationBuilder:
 		d, ok := reflect.TypeAssert[time.Duration](v)
 		if !ok {
-			return fmt.Errorf("arreflect: expected time.Duration, got %s", v.Type())
+			return fmt.Errorf("expected time.Duration, got %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		tb.Append(arrow.Duration(d.Nanoseconds()))
 	default:
-		return fmt.Errorf("arreflect: unexpected temporal builder %T", b)
+		return fmt.Errorf("unexpected temporal builder %T: %w", b, ErrTypeMismatch)
 	}
 	return nil
 }
@@ -485,13 +485,13 @@ func appendDecimalValue(b array.Builder, v reflect.Value) error {
 	case *array.Decimal128Builder:
 		n, ok := reflect.TypeAssert[decimal128.Num](v)
 		if !ok {
-			return fmt.Errorf("arreflect: expected decimal128.Num, got %s", v.Type())
+			return fmt.Errorf("expected decimal128.Num, got %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		tb.Append(n)
 	case *array.Decimal256Builder:
 		n, ok := reflect.TypeAssert[decimal256.Num](v)
 		if !ok {
-			return fmt.Errorf("arreflect: expected decimal256.Num, got %s", v.Type())
+			return fmt.Errorf("expected decimal256.Num, got %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		tb.Append(n)
 	case *array.Decimal32Builder:
@@ -499,7 +499,7 @@ func appendDecimalValue(b array.Builder, v reflect.Value) error {
 	case *array.Decimal64Builder:
 		tb.Append(decimal.Decimal64(v.Int()))
 	default:
-		return fmt.Errorf("arreflect: unexpected decimal builder %T", b)
+		return fmt.Errorf("unexpected decimal builder %T: %w", b, ErrTypeMismatch)
 	}
 	return nil
 }
@@ -649,7 +649,7 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 		if db, ok := b.(array.DictionaryBuilder); ok {
 			return appendToDictBuilder(db, v)
 		}
-		return fmt.Errorf("arreflect: unsupported builder type %T", b)
+		return fmt.Errorf("unsupported builder type %T: %w", b, ErrUnsupportedType)
 	}
 	return nil
 }
@@ -667,7 +667,7 @@ func appendToDictBuilder(db array.DictionaryBuilder, v reflect.Value) error {
 			}
 			return bdb.Append(v.Bytes())
 		default:
-			return fmt.Errorf("arreflect: unsupported value kind %v for BinaryDictionaryBuilder", v.Kind())
+			return fmt.Errorf("unsupported value kind %v for BinaryDictionaryBuilder: %w", v.Kind(), ErrUnsupportedType)
 		}
 	case *array.Int8DictionaryBuilder:
 		return bdb.Append(int8(v.Int()))
@@ -690,7 +690,7 @@ func appendToDictBuilder(db array.DictionaryBuilder, v reflect.Value) error {
 	case *array.Float64DictionaryBuilder:
 		return bdb.Append(float64(v.Float()))
 	}
-	return fmt.Errorf("arreflect: unsupported builder type %T", db)
+	return fmt.Errorf("unsupported builder type %T: %w", db, ErrUnsupportedType)
 }
 
 type listBuilderLike interface {
@@ -702,6 +702,11 @@ func buildListLikeArray(vals reflect.Value, mem memory.Allocator, isView bool) (
 	elemDT, isOuterPtr, err := inferListElemDT(vals)
 	if err != nil {
 		return nil, err
+	}
+
+	label := "list element"
+	if isView {
+		label = "list-view element"
 	}
 
 	var bldr listBuilderLike
@@ -734,7 +739,7 @@ func buildListLikeArray(vals reflect.Value, mem memory.Allocator, isView bool) (
 		beginRow(outer.Len())
 		for j := 0; j < outer.Len(); j++ {
 			if err := appendValue(vb, outer.Index(j), tagOpts{}); err != nil {
-				return nil, fmt.Errorf("list element [%d][%d]: %w", i, j, err)
+				return nil, fmt.Errorf("%s [%d][%d]: %w", label, i, j, err)
 			}
 		}
 	}
