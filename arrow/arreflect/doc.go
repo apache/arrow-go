@@ -17,11 +17,11 @@
 // Package arreflect provides utilities for converting between
 // Apache Arrow arrays and Go structs using reflection.
 //
-// The primary entry points are the generic functions [Get], [ToSlice],
+// The primary entry points are the generic functions [At], [ToSlice],
 // [FromSlice], [RecordToSlice], and [RecordFromSlice], which convert
 // between Arrow arrays/records and Go slices of structs.
 //
-// Schema inference is available via [SchemaOf] and [TypeOf].
+// Schema inference is available via [InferSchema] and [InferType].
 //
 // Arrow struct tags control field mapping:
 //

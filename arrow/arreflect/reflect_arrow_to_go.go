@@ -63,40 +63,22 @@ func setValue(v reflect.Value, arr arrow.Array, i int) error {
 		arrow.FLOAT32, arrow.FLOAT64:
 		return setPrimitiveValue(v, arr, i)
 
-	case arrow.STRING:
-		a, ok := arr.(*array.String)
+	case arrow.STRING, arrow.LARGE_STRING:
+		type stringer interface{ Value(int) string }
+		a, ok := arr.(stringer)
 		if !ok {
-			return fmt.Errorf("expected *String, got %T: %w", arr, ErrTypeMismatch)
+			return fmt.Errorf("expected string array, got %T: %w", arr, ErrTypeMismatch)
 		}
 		if v.Kind() != reflect.String {
 			return fmt.Errorf("cannot set string into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		v.SetString(a.Value(i))
 
-	case arrow.LARGE_STRING:
-		a, ok := arr.(*array.LargeString)
+	case arrow.BINARY, arrow.LARGE_BINARY:
+		type byter interface{ Value(int) []byte }
+		a, ok := arr.(byter)
 		if !ok {
-			return fmt.Errorf("expected *LargeString, got %T: %w", arr, ErrTypeMismatch)
-		}
-		if v.Kind() != reflect.String {
-			return fmt.Errorf("cannot set string into %s: %w", v.Type(), ErrTypeMismatch)
-		}
-		v.SetString(a.Value(i))
-
-	case arrow.BINARY:
-		a, ok := arr.(*array.Binary)
-		if !ok {
-			return fmt.Errorf("expected *Binary, got %T: %w", arr, ErrTypeMismatch)
-		}
-		if v.Kind() != reflect.Slice || v.Type().Elem().Kind() != reflect.Uint8 {
-			return fmt.Errorf("cannot set []byte into %s: %w", v.Type(), ErrTypeMismatch)
-		}
-		v.SetBytes(a.Value(i))
-
-	case arrow.LARGE_BINARY:
-		a, ok := arr.(*array.LargeBinary)
-		if !ok {
-			return fmt.Errorf("expected *LargeBinary, got %T: %w", arr, ErrTypeMismatch)
+			return fmt.Errorf("expected binary array, got %T: %w", arr, ErrTypeMismatch)
 		}
 		if v.Kind() != reflect.Slice || v.Type().Elem().Kind() != reflect.Uint8 {
 			return fmt.Errorf("cannot set []byte into %s: %w", v.Type(), ErrTypeMismatch)
@@ -159,11 +141,6 @@ func setValue(v reflect.Value, arr arrow.Array, i int) error {
 }
 
 func setPrimitiveValue(v reflect.Value, arr arrow.Array, i int) error {
-	if v.Kind() == reflect.Ptr {
-		v.Set(reflect.New(v.Type().Elem()))
-		v = v.Elem()
-	}
-
 	switch arr.DataType().ID() {
 	case arrow.INT8:
 		if !isIntKind(v.Kind()) {
@@ -221,70 +198,53 @@ func setPrimitiveValue(v reflect.Value, arr arrow.Array, i int) error {
 	return nil
 }
 
-func setTemporalValue(v reflect.Value, arr arrow.Array, i int) error {
-	if v.Kind() == reflect.Ptr {
-		v.Set(reflect.New(v.Type().Elem()))
-		v = v.Elem()
+func setTime(v reflect.Value, t time.Time) error {
+	if v.Type() != typeOfTime {
+		return fmt.Errorf("cannot set time.Time into %s: %w", v.Type(), ErrTypeMismatch)
 	}
+	v.Set(reflect.ValueOf(t))
+	return nil
+}
 
+func setTemporalValue(v reflect.Value, arr arrow.Array, i int) error {
 	switch arr.DataType().ID() {
 	case arrow.TIMESTAMP:
 		a, ok := arr.(*array.Timestamp)
 		if !ok {
 			return fmt.Errorf("expected *Timestamp, got %T: %w", arr, ErrTypeMismatch)
 		}
-		if v.Type() != typeOfTime {
-			return fmt.Errorf("cannot set time.Time into %s: %w", v.Type(), ErrTypeMismatch)
-		}
 		unit := arr.DataType().(*arrow.TimestampType).Unit
-		t := a.Value(i).ToTime(unit)
-		v.Set(reflect.ValueOf(t))
+		return setTime(v, a.Value(i).ToTime(unit))
 
 	case arrow.DATE32:
 		a, ok := arr.(*array.Date32)
 		if !ok {
 			return fmt.Errorf("expected *Date32, got %T: %w", arr, ErrTypeMismatch)
 		}
-		if v.Type() != typeOfTime {
-			return fmt.Errorf("cannot set time.Time into %s: %w", v.Type(), ErrTypeMismatch)
-		}
-		t := a.Value(i).ToTime()
-		v.Set(reflect.ValueOf(t))
+		return setTime(v, a.Value(i).ToTime())
 
 	case arrow.DATE64:
 		a, ok := arr.(*array.Date64)
 		if !ok {
 			return fmt.Errorf("expected *Date64, got %T: %w", arr, ErrTypeMismatch)
 		}
-		if v.Type() != typeOfTime {
-			return fmt.Errorf("cannot set time.Time into %s: %w", v.Type(), ErrTypeMismatch)
-		}
-		t := a.Value(i).ToTime()
-		v.Set(reflect.ValueOf(t))
+		return setTime(v, a.Value(i).ToTime())
 
 	case arrow.TIME32:
 		a, ok := arr.(*array.Time32)
 		if !ok {
 			return fmt.Errorf("expected *Time32, got %T: %w", arr, ErrTypeMismatch)
 		}
-		if v.Type() != typeOfTime {
-			return fmt.Errorf("cannot set time.Time into %s: %w", v.Type(), ErrTypeMismatch)
-		}
 		unit := arr.DataType().(*arrow.Time32Type).Unit
-		t := a.Value(i).ToTime(unit)
-		v.Set(reflect.ValueOf(t))
+		return setTime(v, a.Value(i).ToTime(unit))
 
 	case arrow.TIME64:
 		a, ok := arr.(*array.Time64)
 		if !ok {
 			return fmt.Errorf("expected *Time64, got %T: %w", arr, ErrTypeMismatch)
 		}
-		if v.Type() != typeOfTime {
-			return fmt.Errorf("cannot set time.Time into %s: %w", v.Type(), ErrTypeMismatch)
-		}
 		unit := arr.DataType().(*arrow.Time64Type).Unit
-		t := a.Value(i).ToTime(unit)
-		v.Set(reflect.ValueOf(t))
+		return setTime(v, a.Value(i).ToTime(unit))
 
 	case arrow.DURATION:
 		a, ok := arr.(*array.Duration)
@@ -305,11 +265,6 @@ func setTemporalValue(v reflect.Value, arr arrow.Array, i int) error {
 }
 
 func setDecimalValue(v reflect.Value, arr arrow.Array, i int) error {
-	if v.Kind() == reflect.Ptr {
-		v.Set(reflect.New(v.Type().Elem()))
-		v = v.Elem()
-	}
-
 	switch arr.DataType().ID() {
 	case arrow.DECIMAL128:
 		a, ok := arr.(*array.Decimal128)
@@ -360,11 +315,6 @@ func setDecimalValue(v reflect.Value, arr arrow.Array, i int) error {
 }
 
 func setStructValue(v reflect.Value, sa *array.Struct, i int) error {
-	if v.Kind() == reflect.Ptr {
-		v.Set(reflect.New(v.Type().Elem()))
-		v = v.Elem()
-	}
-
 	if v.Kind() != reflect.Struct {
 		return fmt.Errorf("cannot set struct into %s: %w", v.Type(), ErrTypeMismatch)
 	}
@@ -385,11 +335,6 @@ func setStructValue(v reflect.Value, sa *array.Struct, i int) error {
 }
 
 func setListValue(v reflect.Value, arr array.ListLike, i int) error {
-	if v.Kind() == reflect.Ptr {
-		v.Set(reflect.New(v.Type().Elem()))
-		v = v.Elem()
-	}
-
 	if v.Kind() != reflect.Slice {
 		return fmt.Errorf("cannot set list into %s: %w", v.Type(), ErrTypeMismatch)
 	}
@@ -409,11 +354,6 @@ func setListValue(v reflect.Value, arr array.ListLike, i int) error {
 }
 
 func setMapValue(v reflect.Value, arr *array.Map, i int) error {
-	if v.Kind() == reflect.Ptr {
-		v.Set(reflect.New(v.Type().Elem()))
-		v = v.Elem()
-	}
-
 	if v.Kind() != reflect.Map {
 		return fmt.Errorf("cannot set map into %s: %w", v.Type(), ErrTypeMismatch)
 	}
@@ -441,11 +381,6 @@ func setMapValue(v reflect.Value, arr *array.Map, i int) error {
 }
 
 func setFixedSizeListValue(v reflect.Value, arr *array.FixedSizeList, i int) error {
-	if v.Kind() == reflect.Ptr {
-		v.Set(reflect.New(v.Type().Elem()))
-		v = v.Elem()
-	}
-
 	n := int(arr.DataType().(*arrow.FixedSizeListType).Len())
 	child := arr.ListValues()
 	start, _ := arr.ValueOffsets(i)

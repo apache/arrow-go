@@ -481,7 +481,7 @@ func TestInferArrowSchemaStructFieldEncoding(t *testing.T) {
 	})
 }
 
-func TestGoTypeOf(t *testing.T) {
+func TestInferGoType(t *testing.T) {
 	primitives := []struct {
 		dt   arrow.DataType
 		want reflect.Type

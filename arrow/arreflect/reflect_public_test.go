@@ -26,8 +26,10 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
+func testMem() memory.Allocator { return memory.NewGoAllocator() }
+
 func TestToGo(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := testMem()
 
 	t.Run("int32 element 0", func(t *testing.T) {
 		b := array.NewInt32Builder(mem)
@@ -116,7 +118,7 @@ func TestToGo(t *testing.T) {
 }
 
 func TestToGoSlice(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := testMem()
 
 	t.Run("[]int32", func(t *testing.T) {
 		b := array.NewInt32Builder(mem)
@@ -207,7 +209,7 @@ func TestToGoSlice(t *testing.T) {
 }
 
 func TestFromGoSlice(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := testMem()
 
 	t.Run("[]int32", func(t *testing.T) {
 		arr, err := FromSlice([]int32{1, 2, 3}, mem)
@@ -431,7 +433,7 @@ func TestRecordFromSlice(t *testing.T) {
 	})
 }
 
-func TestGetAny(t *testing.T) {
+func TestAtAny(t *testing.T) {
 	mem := memory.NewGoAllocator()
 	b := array.NewInt32Builder(mem)
 	defer b.Release()
@@ -440,20 +442,20 @@ func TestGetAny(t *testing.T) {
 	arr := b.NewArray()
 	defer arr.Release()
 
-	got, err := GetAny(arr, 0)
+	got, err := AtAny(arr, 0)
 	if err != nil {
-		t.Fatalf("GetAny(0): %v", err)
+		t.Fatalf("AtAny(0): %v", err)
 	}
 	if v, ok := got.(int32); !ok || v != 42 {
-		t.Errorf("GetAny(0) = %v (%T), want int32(42)", got, got)
+		t.Errorf("AtAny(0) = %v (%T), want int32(42)", got, got)
 	}
 
-	got, err = GetAny(arr, 1)
+	got, err = AtAny(arr, 1)
 	if err != nil {
-		t.Fatalf("GetAny(1): %v", err)
+		t.Fatalf("AtAny(1): %v", err)
 	}
 	if v, ok := got.(int32); !ok || v != 0 {
-		t.Errorf("GetAny(1) = %v, want int32(0)", got)
+		t.Errorf("AtAny(1) = %v, want int32(0)", got)
 	}
 }
 
@@ -531,7 +533,37 @@ func TestErrSentinels(t *testing.T) {
 	})
 }
 
-func TestGetAnyComposite(t *testing.T) {
+func TestRecordAt(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	type Row struct {
+		Name  string  `arrow:"name"`
+		Score float64 `arrow:"score"`
+	}
+	rows := []Row{{"alice", 9.5}, {"bob", 7.0}}
+	rec, err := RecordFromSlice(rows, mem)
+	if err != nil {
+		t.Fatalf("RecordFromSlice: %v", err)
+	}
+	defer rec.Release()
+
+	got, err := RecordAt[Row](rec, 0)
+	if err != nil {
+		t.Fatalf("RecordAt(0): %v", err)
+	}
+	if got != rows[0] {
+		t.Errorf("RecordAt(0) = %v, want %v", got, rows[0])
+	}
+
+	got, err = RecordAt[Row](rec, 1)
+	if err != nil {
+		t.Fatalf("RecordAt(1): %v", err)
+	}
+	if got != rows[1] {
+		t.Errorf("RecordAt(1) = %v, want %v", got, rows[1])
+	}
+}
+
+func TestAtAnyComposite(t *testing.T) {
 	mem := memory.NewGoAllocator()
 
 	t.Run("struct", func(t *testing.T) {
@@ -547,9 +579,9 @@ func TestGetAnyComposite(t *testing.T) {
 		arr := sb.NewArray()
 		defer arr.Release()
 
-		got, err := GetAny(arr, 0)
+		got, err := AtAny(arr, 0)
 		if err != nil {
-			t.Fatalf("GetAny: %v", err)
+			t.Fatalf("AtAny: %v", err)
 		}
 
 		v := reflect.ValueOf(got)
@@ -592,9 +624,9 @@ func TestGetAnyComposite(t *testing.T) {
 		arr := lb.NewArray()
 		defer arr.Release()
 
-		got, err := GetAny(arr, 0)
+		got, err := AtAny(arr, 0)
 		if err != nil {
-			t.Fatalf("GetAny: %v", err)
+			t.Fatalf("AtAny: %v", err)
 		}
 
 		v := reflect.ValueOf(got)
@@ -618,9 +650,9 @@ func TestGetAnyComposite(t *testing.T) {
 		arr := mb.NewArray()
 		defer arr.Release()
 
-		got, err := GetAny(arr, 0)
+		got, err := AtAny(arr, 0)
 		if err != nil {
-			t.Fatalf("GetAny: %v", err)
+			t.Fatalf("AtAny: %v", err)
 		}
 
 		v := reflect.ValueOf(got)

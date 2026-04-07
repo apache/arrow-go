@@ -371,22 +371,33 @@ func WithDecimal(precision, scale int32) Option {
 	}
 }
 
+// WithTemporal overrides the Arrow temporal encoding for time.Time slices.
+// Valid values: "date32", "date64", "time32", "time64", "timestamp" (default).
+// Equivalent to tagging a struct field with arrow:",date32" etc.
+func WithTemporal(temporal string) Option {
+	return func(o *tagOpts) { o.Temporal = temporal }
+}
+
 func FromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.Array, error) {
 	if mem == nil {
 		mem = memory.DefaultAllocator
+	}
+	var tOpts tagOpts
+	for _, o := range opts {
+		o(&tOpts)
 	}
 	if len(vals) == 0 {
 		dt, err := inferArrowType(reflect.TypeFor[T]())
 		if err != nil {
 			return nil, err
 		}
+		dt = applyTemporalOpts(dt, reflect.TypeFor[T](), tOpts)
+		if tOpts.Dict {
+			dt = &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: dt}
+		}
 		b := array.NewBuilder(mem, dt)
 		defer b.Release()
 		return b.NewArray(), nil
-	}
-	var tOpts tagOpts
-	for _, o := range opts {
-		o(&tOpts)
 	}
 	sv := reflect.ValueOf(vals)
 	return buildArray(sv, tOpts, mem)
@@ -419,13 +430,22 @@ func RecordAt[T any](rec arrow.Record, i int) (T, error) {
 	return At[T](sa, i)
 }
 
-// GetAny converts a single element at index i of an Arrow array to a Go value,
+// RecordAtAny converts the row at index i of an Arrow Record to a Go value,
+// inferring the Go type from the record's schema at runtime via [InferGoType].
+// Equivalent to AtAny on the struct array underlying the record.
+func RecordAtAny(rec arrow.Record, i int) (any, error) {
+	sa := array.RecordToStructArray(rec)
+	defer sa.Release()
+	return AtAny(sa, i)
+}
+
+// AtAny converts a single element at index i of an Arrow array to a Go value,
 // inferring the Go type from the Arrow DataType at runtime via [InferGoType].
 // Useful when the column type is not known at compile time.
 // Null elements are returned as the Go zero value of the inferred type; use
 // arr.IsNull(i) to distinguish a null element from a genuine zero.
 // For typed access when T is known, prefer [At].
-func GetAny(arr arrow.Array, i int) (any, error) {
+func AtAny(arr arrow.Array, i int) (any, error) {
 	goType, err := InferGoType(arr.DataType())
 	if err != nil {
 		return nil, err
