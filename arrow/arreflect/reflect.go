@@ -17,6 +17,7 @@
 package arreflect
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -26,6 +27,11 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+)
+
+var (
+	ErrUnsupportedType = errors.New("arreflect: unsupported type")
+	ErrTypeMismatch    = errors.New("arreflect: type mismatch")
 )
 
 type tagOpts struct {
@@ -339,7 +345,7 @@ func ToSlice[T any](arr arrow.Array) ([]T, error) {
 	for i := 0; i < n; i++ {
 		v := reflect.ValueOf(&result[i]).Elem()
 		if err := setValue(v, arr, i); err != nil {
-			return nil, fmt.Errorf("arreflect: index %d: %w", i, err)
+			return nil, fmt.Errorf("index %d: %w", i, err)
 		}
 	}
 	return result, nil
@@ -349,7 +355,7 @@ func FromSlice[T any](vals []T, mem memory.Allocator) (arrow.Array, error) {
 	if len(vals) == 0 {
 		dt, err := inferArrowType(reflect.TypeFor[T]())
 		if err != nil {
-			return nil, fmt.Errorf("arreflect: %w", err)
+			return nil, err
 		}
 		b := array.NewBuilder(mem, dt)
 		defer b.Release()
@@ -357,6 +363,10 @@ func FromSlice[T any](vals []T, mem memory.Allocator) (arrow.Array, error) {
 	}
 	sv := reflect.ValueOf(vals)
 	return buildArray(sv, tagOpts{}, mem)
+}
+
+func FromSliceDefault[T any](vals []T) (arrow.Array, error) {
+	return FromSlice(vals, memory.DefaultAllocator)
 }
 
 func RecordToSlice[T any](rec arrow.Record) ([]T, error) {
@@ -376,4 +386,8 @@ func RecordFromSlice[T any](vals []T, mem memory.Allocator) (arrow.Record, error
 		return nil, fmt.Errorf("arreflect: RecordFromSlice requires a struct type T, got %v", reflect.TypeFor[T]())
 	}
 	return array.RecordFromStructArray(sa, nil), nil
+}
+
+func RecordFromSliceDefault[T any](vals []T) (arrow.Record, error) {
+	return RecordFromSlice(vals, memory.DefaultAllocator)
 }

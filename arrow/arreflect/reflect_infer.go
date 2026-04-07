@@ -161,7 +161,7 @@ func inferStructType(t reflect.Type) (*arrow.StructType, error) {
 
 		dt, err := inferArrowType(fm.Type)
 		if err != nil {
-			return nil, fmt.Errorf("arreflect: struct field %q: %w", fm.Name, err)
+			return nil, fmt.Errorf("struct field %q: %w", fm.Name, err)
 		}
 
 		if fm.Opts.HasDecimalOpts {
@@ -193,6 +193,7 @@ func inferStructType(t reflect.Type) (*arrow.StructType, error) {
 				dt = &arrow.Time32Type{Unit: arrow.Millisecond}
 			case "time64":
 				dt = &arrow.Time64Type{Unit: arrow.Nanosecond}
+			case "timestamp", "":
 			}
 		}
 
@@ -219,6 +220,11 @@ func inferStructType(t reflect.Type) (*arrow.StructType, error) {
 	return arrow.StructOf(arrowFields...), nil
 }
 
+// SchemaOf infers an *arrow.Schema from a Go struct type T.
+// T must be a struct type; returns an error otherwise.
+// For column-level type inspection without schema overhead, use [TypeOf].
+// Field names come from arrow struct tags or Go field names.
+// Pointer fields are marked Nullable=true.
 func SchemaOf[T any]() (*arrow.Schema, error) {
 	t := reflect.TypeFor[T]()
 	for t.Kind() == reflect.Ptr {
@@ -238,6 +244,10 @@ func SchemaOf[T any]() (*arrow.Schema, error) {
 	return arrow.NewSchema(fields, nil), nil
 }
 
+// TypeOf infers the Arrow DataType for a Go type T.
+// For struct types, [SchemaOf] is preferred when the result will be used with
+// arrow.Record or array.NewRecord; TypeOf returns an arrow.DataType that would
+// require an additional cast to *arrow.StructType.
 func TypeOf[T any]() (arrow.DataType, error) {
 	t := reflect.TypeFor[T]()
 	return inferArrowType(t)
