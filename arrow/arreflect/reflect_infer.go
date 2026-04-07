@@ -88,7 +88,7 @@ func inferPrimitiveArrowType(t reflect.Type) (arrow.DataType, error) {
 	case typeOfDec256:
 		return &arrow.Decimal256Type{Precision: 76, Scale: 0}, nil
 	default:
-		return nil, fmt.Errorf("unsupported Go type for Arrow inference: %v", t)
+		return nil, fmt.Errorf("arreflect: unsupported Go type for Arrow inference: %v", t)
 	}
 }
 
@@ -140,7 +140,7 @@ func inferStructType(t reflect.Type) (*arrow.StructType, error) {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {
-		return nil, fmt.Errorf("inferStructType: expected struct, got %v", t)
+		return nil, fmt.Errorf("arreflect: expected struct, got %v", t)
 	}
 
 	fields := cachedStructFields(t)
@@ -154,7 +154,7 @@ func inferStructType(t reflect.Type) (*arrow.StructType, error) {
 
 		dt, err := inferArrowType(fm.Type)
 		if err != nil {
-			return nil, fmt.Errorf("inferStructType: field %q: %w", fm.Name, err)
+			return nil, fmt.Errorf("arreflect: struct field %q: %w", fm.Name, err)
 		}
 
 		if fm.Opts.HasDecimalOpts {
@@ -195,11 +195,11 @@ func inferStructType(t reflect.Type) (*arrow.StructType, error) {
 		case fm.Opts.ListView:
 			lt, ok := dt.(*arrow.ListType)
 			if !ok {
-				return nil, fmt.Errorf("inferStructType: listview tag on field %q requires a slice type, got %v", fm.Name, dt)
+				return nil, fmt.Errorf("arreflect: listview tag on field %q requires a slice type, got %v", fm.Name, dt)
 			}
 			dt = arrow.ListViewOf(lt.Elem())
 		case fm.Opts.REE:
-			return nil, fmt.Errorf("inferStructType: ree tag on struct field %q is not supported; use ree at top-level via buildArray", fm.Name)
+			return nil, fmt.Errorf("arreflect: ree tag on struct field %q is not supported; use ree at top-level via FromSlice", fm.Name)
 		}
 
 		arrowFields = append(arrowFields, arrow.Field{
@@ -212,13 +212,13 @@ func inferStructType(t reflect.Type) (*arrow.StructType, error) {
 	return arrow.StructOf(arrowFields...), nil
 }
 
-func InferArrowSchema[T any]() (*arrow.Schema, error) {
+func SchemaOf[T any]() (*arrow.Schema, error) {
 	t := reflect.TypeFor[T]()
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {
-		return nil, fmt.Errorf("InferArrowSchema: T must be a struct type, got %v", t)
+		return nil, fmt.Errorf("arreflect: SchemaOf requires a struct type T, got %v", t)
 	}
 	st, err := inferStructType(t)
 	if err != nil {
@@ -231,7 +231,7 @@ func InferArrowSchema[T any]() (*arrow.Schema, error) {
 	return arrow.NewSchema(fields, nil), nil
 }
 
-func InferArrowType[T any]() (arrow.DataType, error) {
+func TypeOf[T any]() (arrow.DataType, error) {
 	t := reflect.TypeFor[T]()
 	return inferArrowType(t)
 }

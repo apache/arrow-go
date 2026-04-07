@@ -323,7 +323,7 @@ func cachedStructFields(t reflect.Type) []fieldMeta {
 	return v.([]fieldMeta)
 }
 
-func ToGo[T any](arr arrow.Array, i int) (T, error) {
+func Get[T any](arr arrow.Array, i int) (T, error) {
 	var result T
 	v := reflect.ValueOf(&result).Elem()
 	if err := setValue(v, arr, i); err != nil {
@@ -333,23 +333,23 @@ func ToGo[T any](arr arrow.Array, i int) (T, error) {
 	return result, nil
 }
 
-func ToGoSlice[T any](arr arrow.Array) ([]T, error) {
+func ToSlice[T any](arr arrow.Array) ([]T, error) {
 	n := arr.Len()
 	result := make([]T, n)
 	for i := 0; i < n; i++ {
 		v := reflect.ValueOf(&result[i]).Elem()
 		if err := setValue(v, arr, i); err != nil {
-			return nil, fmt.Errorf("ToGoSlice: index %d: %w", i, err)
+			return nil, fmt.Errorf("arreflect: index %d: %w", i, err)
 		}
 	}
 	return result, nil
 }
 
-func FromGoSlice[T any](vals []T, mem memory.Allocator) (arrow.Array, error) {
+func FromSlice[T any](vals []T, mem memory.Allocator) (arrow.Array, error) {
 	if len(vals) == 0 {
 		dt, err := inferArrowType(reflect.TypeFor[T]())
 		if err != nil {
-			return nil, fmt.Errorf("FromGoSlice: %w", err)
+			return nil, fmt.Errorf("arreflect: %w", err)
 		}
 		b := array.NewBuilder(mem, dt)
 		defer b.Release()
@@ -362,18 +362,18 @@ func FromGoSlice[T any](vals []T, mem memory.Allocator) (arrow.Array, error) {
 func RecordToSlice[T any](rec arrow.Record) ([]T, error) {
 	sa := array.RecordToStructArray(rec)
 	defer sa.Release()
-	return ToGoSlice[T](sa)
+	return ToSlice[T](sa)
 }
 
 func RecordFromSlice[T any](vals []T, mem memory.Allocator) (arrow.Record, error) {
-	arr, err := FromGoSlice[T](vals, mem)
+	arr, err := FromSlice[T](vals, mem)
 	if err != nil {
 		return nil, err
 	}
 	defer arr.Release()
 	sa, ok := arr.(*array.Struct)
 	if !ok {
-		return nil, fmt.Errorf("RecordFromSlice: T must be a struct type, got %T", arr)
+		return nil, fmt.Errorf("arreflect: RecordFromSlice requires a struct type T, got %v", reflect.TypeFor[T]())
 	}
 	return array.RecordFromStructArray(sa, nil), nil
 }

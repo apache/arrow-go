@@ -315,7 +315,7 @@ func TestInferArrowSchema(t *testing.T) {
 			Age   int32
 			Score float64
 		}
-		schema, err := InferArrowSchema[S]()
+		schema, err := SchemaOf[S]()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -338,7 +338,7 @@ func TestInferArrowSchema(t *testing.T) {
 			ID    int32
 			Label *string
 		}
-		schema, err := InferArrowSchema[S]()
+		schema, err := SchemaOf[S]()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -355,7 +355,7 @@ func TestInferArrowSchema(t *testing.T) {
 			Keep   string
 			Hidden int32 `arrow:"-"`
 		}
-		schema, err := InferArrowSchema[S]()
+		schema, err := SchemaOf[S]()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -371,7 +371,7 @@ func TestInferArrowSchema(t *testing.T) {
 		type S struct {
 			GoName int64 `arrow:"custom_name"`
 		}
-		schema, err := InferArrowSchema[S]()
+		schema, err := SchemaOf[S]()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -381,7 +381,7 @@ func TestInferArrowSchema(t *testing.T) {
 	})
 
 	t.Run("non-struct type returns error", func(t *testing.T) {
-		_, err := InferArrowSchema[int]()
+		_, err := SchemaOf[int]()
 		if err == nil {
 			t.Error("expected error for non-struct, got nil")
 		}
@@ -390,7 +390,7 @@ func TestInferArrowSchema(t *testing.T) {
 
 func TestInferArrowTypePublic(t *testing.T) {
 	t.Run("int32 is INT32", func(t *testing.T) {
-		dt, err := InferArrowType[int32]()
+		dt, err := TypeOf[int32]()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -400,7 +400,7 @@ func TestInferArrowTypePublic(t *testing.T) {
 	})
 
 	t.Run("[]string is LIST", func(t *testing.T) {
-		dt, err := InferArrowType[[]string]()
+		dt, err := TypeOf[[]string]()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -410,7 +410,7 @@ func TestInferArrowTypePublic(t *testing.T) {
 	})
 
 	t.Run("map[string]float64 is MAP", func(t *testing.T) {
-		dt, err := InferArrowType[map[string]float64]()
+		dt, err := TypeOf[map[string]float64]()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -421,7 +421,7 @@ func TestInferArrowTypePublic(t *testing.T) {
 
 	t.Run("struct{X int32} is STRUCT", func(t *testing.T) {
 		type S struct{ X int32 }
-		dt, err := InferArrowType[S]()
+		dt, err := TypeOf[S]()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -436,7 +436,7 @@ func TestInferArrowSchemaStructFieldEncoding(t *testing.T) {
 		type S struct {
 			Name string `arrow:"name,dict"`
 		}
-		schema, err := InferArrowSchema[S]()
+		schema, err := SchemaOf[S]()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -453,7 +453,7 @@ func TestInferArrowSchemaStructFieldEncoding(t *testing.T) {
 		type S struct {
 			Tags []string `arrow:"tags,listview"`
 		}
-		schema, err := InferArrowSchema[S]()
+		schema, err := SchemaOf[S]()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -470,7 +470,7 @@ func TestInferArrowSchemaStructFieldEncoding(t *testing.T) {
 		type REERow struct {
 			Val string `arrow:"val,ree"`
 		}
-		_, err := InferArrowSchema[REERow]()
+		_, err := SchemaOf[REERow]()
 		if err == nil {
 			t.Fatal("expected error for ree tag on struct field, got nil")
 		}

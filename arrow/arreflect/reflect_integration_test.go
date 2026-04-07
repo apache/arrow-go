@@ -101,15 +101,15 @@ func TestReflectIntegration(t *testing.T) {
 			},
 		}
 
-		arr, err := FromGoSlice(orders, mem)
+		arr, err := FromSlice(orders, mem)
 		if err != nil {
-			t.Fatalf("FromGoSlice: %v", err)
+			t.Fatalf("FromSlice: %v", err)
 		}
 		defer arr.Release()
 
-		output, err := ToGoSlice[integOrder](arr)
+		output, err := ToSlice[integOrder](arr)
 		if err != nil {
-			t.Fatalf("ToGoSlice: %v", err)
+			t.Fatalf("ToSlice: %v", err)
 		}
 
 		if len(output) != len(orders) {
@@ -147,9 +147,9 @@ func TestReflectIntegration(t *testing.T) {
 			rows[i] = integLargeRow{X: int32(i), Y: float64(i) * 1.5}
 		}
 
-		arr, err := FromGoSlice(rows, mem)
+		arr, err := FromSlice(rows, mem)
 		if err != nil {
-			t.Fatalf("FromGoSlice: %v", err)
+			t.Fatalf("FromSlice: %v", err)
 		}
 		defer arr.Release()
 
@@ -157,9 +157,9 @@ func TestReflectIntegration(t *testing.T) {
 			t.Fatalf("array length: got %d, want %d", arr.Len(), n)
 		}
 
-		output, err := ToGoSlice[integLargeRow](arr)
+		output, err := ToSlice[integLargeRow](arr)
 		if err != nil {
-			t.Fatalf("ToGoSlice: %v", err)
+			t.Fatalf("ToSlice: %v", err)
 		}
 
 		if len(output) != n {
@@ -179,15 +179,15 @@ func TestReflectIntegration(t *testing.T) {
 			{A: nil, B: nil, C: nil},
 		}
 
-		arr, err := FromGoSlice(rows, mem)
+		arr, err := FromSlice(rows, mem)
 		if err != nil {
-			t.Fatalf("FromGoSlice: %v", err)
+			t.Fatalf("FromSlice: %v", err)
 		}
 		defer arr.Release()
 
-		output, err := ToGoSlice[integNullable](arr)
+		output, err := ToSlice[integNullable](arr)
 		if err != nil {
-			t.Fatalf("ToGoSlice: %v", err)
+			t.Fatalf("ToSlice: %v", err)
 		}
 
 		if len(output) != 3 {
@@ -207,9 +207,9 @@ func TestReflectIntegration(t *testing.T) {
 	})
 
 	t.Run("empty int32 slice", func(t *testing.T) {
-		arr, err := FromGoSlice[int32]([]int32{}, mem)
+		arr, err := FromSlice[int32]([]int32{}, mem)
 		if err != nil {
-			t.Fatalf("FromGoSlice: %v", err)
+			t.Fatalf("FromSlice: %v", err)
 		}
 		defer arr.Release()
 
@@ -217,12 +217,12 @@ func TestReflectIntegration(t *testing.T) {
 			t.Errorf("array length: got %d, want 0", arr.Len())
 		}
 
-		output, err := ToGoSlice[int32](arr)
+		output, err := ToSlice[int32](arr)
 		if err != nil {
-			t.Fatalf("ToGoSlice: %v", err)
+			t.Fatalf("ToSlice: %v", err)
 		}
 		if output == nil {
-			t.Error("ToGoSlice returned nil, want non-nil empty slice")
+			t.Error("ToSlice returned nil, want non-nil empty slice")
 		}
 		if len(output) != 0 {
 			t.Errorf("output length: got %d, want 0", len(output))
@@ -231,9 +231,9 @@ func TestReflectIntegration(t *testing.T) {
 
 	t.Run("empty struct slice", func(t *testing.T) {
 		type simpleXY struct{ X int32 }
-		arr, err := FromGoSlice[simpleXY]([]simpleXY{}, mem)
+		arr, err := FromSlice[simpleXY]([]simpleXY{}, mem)
 		if err != nil {
-			t.Fatalf("FromGoSlice empty struct: %v", err)
+			t.Fatalf("FromSlice empty struct: %v", err)
 		}
 		defer arr.Release()
 
@@ -258,15 +258,15 @@ func TestReflectIntegration(t *testing.T) {
 			{Required: "fourth", Optional: nil, Count: 40, MaybeCount: nil},
 		}
 
-		arr, err := FromGoSlice(rows, mem)
+		arr, err := FromSlice(rows, mem)
 		if err != nil {
-			t.Fatalf("FromGoSlice: %v", err)
+			t.Fatalf("FromSlice: %v", err)
 		}
 		defer arr.Release()
 
-		output, err := ToGoSlice[integMixed](arr)
+		output, err := ToSlice[integMixed](arr)
 		if err != nil {
-			t.Fatalf("ToGoSlice: %v", err)
+			t.Fatalf("ToSlice: %v", err)
 		}
 
 		if len(output) != len(rows) {
@@ -301,9 +301,9 @@ func TestReflectIntegration(t *testing.T) {
 			{integBase: integBase{ID: 3}, Name: "carol"},
 		}
 
-		arr, err := FromGoSlice(rows, mem)
+		arr, err := FromSlice(rows, mem)
 		if err != nil {
-			t.Fatalf("FromGoSlice: %v", err)
+			t.Fatalf("FromSlice: %v", err)
 		}
 		defer arr.Release()
 
@@ -333,9 +333,9 @@ func TestReflectIntegration(t *testing.T) {
 			t.Error("unexpected field 'Skip' in schema (should be skipped by arrow:\"-\" tag)")
 		}
 
-		output, err := ToGoSlice[integExtended](arr)
+		output, err := ToSlice[integExtended](arr)
 		if err != nil {
-			t.Fatalf("ToGoSlice: %v", err)
+			t.Fatalf("ToSlice: %v", err)
 		}
 
 		if len(output) != len(rows) {
@@ -360,14 +360,14 @@ func TestReflectIntegration(t *testing.T) {
 			{ID: 1, Items: []integOrderItem{{Product: "a", Tags: map[string]string{"k": "v"}, Ratings: [5]float32{1, 2, 3, 4, 5}}}},
 		}
 
-		schema, err := InferArrowSchema[integOrder]()
+		schema, err := SchemaOf[integOrder]()
 		if err != nil {
-			t.Fatalf("InferArrowSchema: %v", err)
+			t.Fatalf("SchemaOf: %v", err)
 		}
 
-		arr, err := FromGoSlice(orders, mem)
+		arr, err := FromSlice(orders, mem)
 		if err != nil {
-			t.Fatalf("FromGoSlice: %v", err)
+			t.Fatalf("FromSlice: %v", err)
 		}
 		defer arr.Release()
 
@@ -395,9 +395,9 @@ func TestReflectIntegration(t *testing.T) {
 			batch1[i] = integLargeRow{X: int32(i + 1), Y: float64(i+1) * 2.0}
 		}
 
-		arr1, err := FromGoSlice(batch1, mem)
+		arr1, err := FromSlice(batch1, mem)
 		if err != nil {
-			t.Fatalf("FromGoSlice batch1: %v", err)
+			t.Fatalf("FromSlice batch1: %v", err)
 		}
 		defer arr1.Release()
 
@@ -406,19 +406,19 @@ func TestReflectIntegration(t *testing.T) {
 			batch2[i] = integLargeRow{X: int32(i * 10), Y: float64(i) * 3.14}
 		}
 
-		arr2, err := FromGoSlice(batch2, mem)
+		arr2, err := FromSlice(batch2, mem)
 		if err != nil {
-			t.Fatalf("FromGoSlice batch2: %v", err)
+			t.Fatalf("FromSlice batch2: %v", err)
 		}
 		defer arr2.Release()
 
-		out1, err := ToGoSlice[integLargeRow](arr1)
+		out1, err := ToSlice[integLargeRow](arr1)
 		if err != nil {
-			t.Fatalf("ToGoSlice batch1: %v", err)
+			t.Fatalf("ToSlice batch1: %v", err)
 		}
-		out2, err := ToGoSlice[integLargeRow](arr2)
+		out2, err := ToSlice[integLargeRow](arr2)
 		if err != nil {
-			t.Fatalf("ToGoSlice batch2: %v", err)
+			t.Fatalf("ToSlice batch2: %v", err)
 		}
 
 		if len(out1) != len(batch1) {
@@ -482,7 +482,7 @@ func BenchmarkReflectFromGoSlice(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		arr, err := FromGoSlice(rows, mem)
+		arr, err := FromSlice(rows, mem)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -497,7 +497,7 @@ func BenchmarkReflectToGoSlice(b *testing.B) {
 		rows[i] = integLargeRow{X: int32(i), Y: float64(i) * 1.5}
 	}
 
-	arr, err := FromGoSlice(rows, mem)
+	arr, err := FromSlice(rows, mem)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -505,7 +505,7 @@ func BenchmarkReflectToGoSlice(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		out, err := ToGoSlice[integLargeRow](arr)
+		out, err := ToSlice[integLargeRow](arr)
 		if err != nil {
 			b.Fatal(err)
 		}

@@ -31,7 +31,7 @@ import (
 
 func buildArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
 	if vals.Kind() != reflect.Slice {
-		return nil, fmt.Errorf("buildArray: expected slice, got %v", vals.Kind())
+		return nil, fmt.Errorf("arreflect: expected slice, got %v", vals.Kind())
 	}
 
 	elemType := vals.Type().Elem()
@@ -92,7 +92,7 @@ func buildPrimitiveArray(vals reflect.Value, mem memory.Allocator) (arrow.Array,
 
 	dt, err := inferArrowType(elemType)
 	if err != nil {
-		return nil, fmt.Errorf("buildPrimitiveArray: %w", err)
+		return nil, fmt.Errorf("arreflect: %w", err)
 	}
 
 	b := array.NewBuilder(mem, dt)
@@ -160,7 +160,7 @@ func appendPrimitiveValue(b array.Builder, v reflect.Value, dt arrow.DataType) e
 	case arrow.DECIMAL64:
 		b.(*array.Decimal64Builder).Append(decimal.Decimal64(v.Int()))
 	default:
-		return fmt.Errorf("appendPrimitiveValue: unsupported Arrow type %v", dt)
+		return fmt.Errorf("arreflect: unsupported Arrow type %v", dt)
 	}
 	return nil
 }
@@ -292,7 +292,7 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 		return db.NewArray(), nil
 
 	default:
-		return nil, fmt.Errorf("buildTemporalArray: unsupported type %v", elemType)
+		return nil, fmt.Errorf("arreflect: unsupported temporal type %v", elemType)
 	}
 }
 
@@ -400,7 +400,7 @@ func buildDecimalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (
 		return b.NewArray(), nil
 
 	default:
-		return nil, fmt.Errorf("buildDecimalArray: unsupported type %v", elemType)
+		return nil, fmt.Errorf("arreflect: unsupported decimal type %v", elemType)
 	}
 }
 
@@ -413,7 +413,7 @@ func buildStructArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, er
 
 	st, err := inferStructType(elemType)
 	if err != nil {
-		return nil, fmt.Errorf("buildStructArray: %w", err)
+		return nil, fmt.Errorf("arreflect: %w", err)
 	}
 
 	fields := cachedStructFields(elemType)
@@ -435,7 +435,7 @@ func buildStructArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, er
 			fv := v.FieldByIndex(fm.Index)
 			fb := sb.FieldBuilder(fi)
 			if err := appendValue(fb, fv, fm.Opts); err != nil {
-				return nil, fmt.Errorf("buildStructArray: field %q: %w", fm.Name, err)
+				return nil, fmt.Errorf("arreflect: struct field %q: %w", fm.Name, err)
 			}
 		}
 	}
@@ -528,7 +528,7 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 	case *array.FixedSizeListBuilder:
 		expectedLen := int(tb.Type().(*arrow.FixedSizeListType).Len())
 		if v.Len() != expectedLen {
-			return fmt.Errorf("appendValue: fixed-size list length mismatch: got %d, want %d", v.Len(), expectedLen)
+			return fmt.Errorf("arreflect: fixed-size list length mismatch: got %d, want %d", v.Len(), expectedLen)
 		}
 		tb.Append(true)
 		vb := tb.ValueBuilder()
@@ -561,7 +561,7 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 			fv := v.FieldByIndex(fm.Index)
 			fb := tb.FieldBuilder(fi)
 			if err := appendValue(fb, fv, fm.Opts); err != nil {
-				return fmt.Errorf("appendValue: struct field %q: %w", fm.Name, err)
+				return fmt.Errorf("arreflect: struct field %q: %w", fm.Name, err)
 			}
 		}
 	case *array.ListViewBuilder:
@@ -589,7 +589,7 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 		if db, ok := b.(array.DictionaryBuilder); ok {
 			return appendToDictBuilder(db, v)
 		}
-		return fmt.Errorf("appendValue: unsupported builder type %T", b)
+		return fmt.Errorf("arreflect: unsupported builder type %T", b)
 	}
 	return nil
 }
@@ -607,7 +607,7 @@ func appendToDictBuilder(db array.DictionaryBuilder, v reflect.Value) error {
 			}
 			return bdb.Append(v.Bytes())
 		default:
-			return fmt.Errorf("appendToDictBuilder: unsupported value kind %v for BinaryDictionaryBuilder", v.Kind())
+			return fmt.Errorf("arreflect: unsupported value kind %v for BinaryDictionaryBuilder", v.Kind())
 		}
 	case *array.Int8DictionaryBuilder:
 		return bdb.Append(int8(v.Int()))
@@ -630,7 +630,7 @@ func appendToDictBuilder(db array.DictionaryBuilder, v reflect.Value) error {
 	case *array.Float64DictionaryBuilder:
 		return bdb.Append(float64(v.Float()))
 	}
-	return fmt.Errorf("appendToDictBuilder: unsupported builder type %T", db)
+	return fmt.Errorf("arreflect: unsupported builder type %T", db)
 }
 
 func buildListArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
@@ -647,7 +647,7 @@ func buildListArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, erro
 
 	elemDT, err := inferArrowType(innerElemType)
 	if err != nil {
-		return nil, fmt.Errorf("buildListArray: %w", err)
+		return nil, fmt.Errorf("arreflect: %w", err)
 	}
 
 	lb := array.NewListBuilder(mem, elemDT)
@@ -671,7 +671,7 @@ func buildListArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, erro
 		lb.Append(true)
 		for j := 0; j < outer.Len(); j++ {
 			if err := appendValue(vb, outer.Index(j), tagOpts{}); err != nil {
-				return nil, fmt.Errorf("buildListArray: element [%d][%d]: %w", i, j, err)
+				return nil, fmt.Errorf("arreflect: list element [%d][%d]: %w", i, j, err)
 			}
 		}
 	}
@@ -698,11 +698,11 @@ func buildMapArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error
 
 	keyDT, err := inferArrowType(keyType)
 	if err != nil {
-		return nil, fmt.Errorf("buildMapArray: key type: %w", err)
+		return nil, fmt.Errorf("arreflect: map key type: %w", err)
 	}
 	valDT, err := inferArrowType(valType)
 	if err != nil {
-		return nil, fmt.Errorf("buildMapArray: value type: %w", err)
+		return nil, fmt.Errorf("arreflect: map value type: %w", err)
 	}
 
 	mb := array.NewMapBuilder(mem, keyDT, valDT, false)
@@ -727,10 +727,10 @@ func buildMapArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error
 		mb.Append(true)
 		for _, key := range m.MapKeys() {
 			if err := appendValue(kb, key, tagOpts{}); err != nil {
-				return nil, fmt.Errorf("buildMapArray: key: %w", err)
+				return nil, fmt.Errorf("arreflect: map key: %w", err)
 			}
 			if err := appendValue(ib, m.MapIndex(key), tagOpts{}); err != nil {
-				return nil, fmt.Errorf("buildMapArray: value: %w", err)
+				return nil, fmt.Errorf("arreflect: map value: %w", err)
 			}
 		}
 	}
@@ -746,7 +746,7 @@ func buildFixedSizeListArray(vals reflect.Value, mem memory.Allocator) (arrow.Ar
 	}
 
 	if elemType.Kind() != reflect.Array {
-		return nil, fmt.Errorf("buildFixedSizeListArray: expected array element, got %v", elemType.Kind())
+		return nil, fmt.Errorf("arreflect: expected array element, got %v", elemType.Kind())
 	}
 
 	n := int32(elemType.Len())
@@ -757,7 +757,7 @@ func buildFixedSizeListArray(vals reflect.Value, mem memory.Allocator) (arrow.Ar
 
 	innerDT, err := inferArrowType(innerElemType)
 	if err != nil {
-		return nil, fmt.Errorf("buildFixedSizeListArray: %w", err)
+		return nil, fmt.Errorf("arreflect: %w", err)
 	}
 
 	fb := array.NewFixedSizeListBuilder(mem, n, innerDT)
@@ -777,7 +777,7 @@ func buildFixedSizeListArray(vals reflect.Value, mem memory.Allocator) (arrow.Ar
 		fb.Append(true)
 		for j := 0; j < int(n); j++ {
 			if err := appendValue(vb, elem.Index(j), tagOpts{}); err != nil {
-				return nil, fmt.Errorf("buildFixedSizeListArray: element [%d][%d]: %w", i, j, err)
+				return nil, fmt.Errorf("arreflect: fixed-size list element [%d][%d]: %w", i, j, err)
 			}
 		}
 	}
@@ -794,7 +794,7 @@ func buildDictionaryArray(vals reflect.Value, mem memory.Allocator) (arrow.Array
 
 	valDT, err := inferArrowType(elemType)
 	if err != nil {
-		return nil, fmt.Errorf("buildDictionaryArray: %w", err)
+		return nil, fmt.Errorf("arreflect: %w", err)
 	}
 
 	dt := &arrow.DictionaryType{
@@ -816,7 +816,7 @@ func buildDictionaryArray(vals reflect.Value, mem memory.Allocator) (arrow.Array
 			elem = elem.Elem()
 		}
 		if err := appendToDictBuilder(db, elem); err != nil {
-			return nil, fmt.Errorf("buildDictionaryArray[%d]: %w", i, err)
+			return nil, fmt.Errorf("arreflect: dictionary element [%d]: %w", i, err)
 		}
 	}
 	return db.NewArray(), nil
@@ -883,7 +883,7 @@ func buildRunEndEncodedArray(vals reflect.Value, mem memory.Allocator) (arrow.Ar
 	runEndsSlice := reflect.ValueOf(runEnds)
 	runEndsArr, err := buildPrimitiveArray(runEndsSlice, mem)
 	if err != nil {
-		return nil, fmt.Errorf("buildRunEndEncodedArray: run ends: %w", err)
+		return nil, fmt.Errorf("arreflect: run-end encoded run ends: %w", err)
 	}
 	defer runEndsArr.Release()
 
@@ -893,7 +893,7 @@ func buildRunEndEncodedArray(vals reflect.Value, mem memory.Allocator) (arrow.Ar
 	}
 	valuesArr, err := buildArray(runValues, tagOpts{}, mem)
 	if err != nil {
-		return nil, fmt.Errorf("buildRunEndEncodedArray: values: %w", err)
+		return nil, fmt.Errorf("arreflect: run-end encoded values: %w", err)
 	}
 	defer valuesArr.Release()
 
@@ -914,7 +914,7 @@ func buildListViewArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, 
 
 	elemDT, err := inferArrowType(innerElemType)
 	if err != nil {
-		return nil, fmt.Errorf("buildListViewArray: %w", err)
+		return nil, fmt.Errorf("arreflect: %w", err)
 	}
 
 	lvb := array.NewListViewBuilder(mem, elemDT)
@@ -938,7 +938,7 @@ func buildListViewArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, 
 		lvb.AppendWithSize(true, outer.Len())
 		for j := 0; j < outer.Len(); j++ {
 			if err := appendValue(vb, outer.Index(j), tagOpts{}); err != nil {
-				return nil, fmt.Errorf("buildListViewArray: element [%d][%d]: %w", i, j, err)
+				return nil, fmt.Errorf("arreflect: list-view element [%d][%d]: %w", i, j, err)
 			}
 		}
 	}

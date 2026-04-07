@@ -17,11 +17,11 @@
 // Package arreflect provides utilities for converting between
 // Apache Arrow arrays and Go structs using reflection.
 //
-// The primary entry points are the generic functions [ToGo], [ToGoSlice],
-// [FromGoSlice], [RecordToSlice], and [RecordFromSlice], which convert
+// The primary entry points are the generic functions [Get], [ToSlice],
+// [FromSlice], [RecordToSlice], and [RecordFromSlice], which convert
 // between Arrow arrays/records and Go slices of structs.
 //
-// Schema inference is available via [InferArrowSchema] and [InferArrowType].
+// Schema inference is available via [SchemaOf] and [TypeOf].
 //
 // Arrow struct tags control field mapping:
 //
@@ -39,4 +39,10 @@
 //	arrow:"field,date64"   — use Date64 instead of Timestamp
 //	arrow:"field,time32"   — use Time32(ms) instead of Timestamp
 //	arrow:"field,time64"   — use Time64(ns) instead of Timestamp
+//
+// Additional tag options:
+//
+//	arrow:"field,listview"              — use ListView instead of List for slice fields
+//	arrow:"field,ree"                   — run-end encoding at top-level only (struct fields not supported)
+//	arrow:"field,decimal(precision,scale)" — override decimal precision and scale (e.g., arrow:",decimal(18,2)")
 package arreflect

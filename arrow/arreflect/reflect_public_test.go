@@ -34,7 +34,7 @@ func TestToGo(t *testing.T) {
 		arr := b.NewInt32Array()
 		defer arr.Release()
 
-		got, err := ToGo[int32](arr, 0)
+		got, err := Get[int32](arr, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -50,7 +50,7 @@ func TestToGo(t *testing.T) {
 		arr := b.NewStringArray()
 		defer arr.Release()
 
-		got, err := ToGo[string](arr, 1)
+		got, err := Get[string](arr, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -65,13 +65,13 @@ func TestToGo(t *testing.T) {
 			Age  int32
 		}
 		vals := []Person{{"Alice", 30}, {"Bob", 25}}
-		arr, err := FromGoSlice(vals, mem)
+		arr, err := FromSlice(vals, mem)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer arr.Release()
 
-		got, err := ToGo[Person](arr, 0)
+		got, err := Get[Person](arr, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -87,7 +87,7 @@ func TestToGo(t *testing.T) {
 		arr := b.NewInt32Array()
 		defer arr.Release()
 
-		got, err := ToGo[*int32](arr, 0)
+		got, err := Get[*int32](arr, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -103,7 +103,7 @@ func TestToGo(t *testing.T) {
 		arr := b.NewInt32Array()
 		defer arr.Release()
 
-		got, err := ToGo[int32](arr, 0)
+		got, err := Get[int32](arr, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -123,7 +123,7 @@ func TestToGoSlice(t *testing.T) {
 		arr := b.NewInt32Array()
 		defer arr.Release()
 
-		got, err := ToGoSlice[int32](arr)
+		got, err := ToSlice[int32](arr)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -145,7 +145,7 @@ func TestToGoSlice(t *testing.T) {
 		arr := b.NewStringArray()
 		defer arr.Release()
 
-		got, err := ToGoSlice[string](arr)
+		got, err := ToSlice[string](arr)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -165,13 +165,13 @@ func TestToGoSlice(t *testing.T) {
 			Name string
 		}
 		vals := []Row{{"Alice"}, {"Bob"}, {"Charlie"}}
-		arr, err := FromGoSlice(vals, mem)
+		arr, err := FromSlice(vals, mem)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer arr.Release()
 
-		got, err := ToGoSlice[Row](arr)
+		got, err := ToSlice[Row](arr)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -191,7 +191,7 @@ func TestToGoSlice(t *testing.T) {
 		arr := b.NewInt32Array()
 		defer arr.Release()
 
-		got, err := ToGoSlice[int32](arr)
+		got, err := ToSlice[int32](arr)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -208,7 +208,7 @@ func TestFromGoSlice(t *testing.T) {
 	mem := memory.NewGoAllocator()
 
 	t.Run("[]int32", func(t *testing.T) {
-		arr, err := FromGoSlice([]int32{1, 2, 3}, mem)
+		arr, err := FromSlice([]int32{1, 2, 3}, mem)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -226,7 +226,7 @@ func TestFromGoSlice(t *testing.T) {
 	})
 
 	t.Run("[]string", func(t *testing.T) {
-		arr, err := FromGoSlice([]string{"a", "b"}, mem)
+		arr, err := FromSlice([]string{"a", "b"}, mem)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -247,7 +247,7 @@ func TestFromGoSlice(t *testing.T) {
 			Score float64
 		}
 		vals := []Row{{"Alice", 9.5}, {"Bob", 8.0}}
-		arr, err := FromGoSlice(vals, mem)
+		arr, err := FromSlice(vals, mem)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -256,7 +256,7 @@ func TestFromGoSlice(t *testing.T) {
 		if arr.Len() != 2 {
 			t.Fatalf("expected len 2, got %d", arr.Len())
 		}
-		got, err := ToGoSlice[Row](arr)
+		got, err := ToSlice[Row](arr)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -269,7 +269,7 @@ func TestFromGoSlice(t *testing.T) {
 
 	t.Run("[]*int32 with nil produces null", func(t *testing.T) {
 		v := int32(42)
-		arr, err := FromGoSlice([]*int32{&v, nil}, mem)
+		arr, err := FromSlice([]*int32{&v, nil}, mem)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -288,7 +288,7 @@ func TestFromGoSlice(t *testing.T) {
 	})
 
 	t.Run("empty []int32 gives length-0 array", func(t *testing.T) {
-		arr, err := FromGoSlice([]int32{}, mem)
+		arr, err := FromSlice([]int32{}, mem)
 		if err != nil {
 			t.Fatal(err)
 		}
