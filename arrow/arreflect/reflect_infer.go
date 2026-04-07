@@ -189,6 +189,17 @@ func inferStructType(t reflect.Type) (*arrow.StructType, error) {
 			}
 		}
 
+		switch {
+		case fm.Opts.Dict:
+			dt = &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: dt}
+		case fm.Opts.ListView:
+			if lt, ok := dt.(*arrow.ListType); ok {
+				dt = arrow.ListViewOf(lt.Elem())
+			}
+		case fm.Opts.REE:
+			dt = arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, dt)
+		}
+
 		arrowFields = append(arrowFields, arrow.Field{
 			Name:     fm.Name,
 			Type:     dt,

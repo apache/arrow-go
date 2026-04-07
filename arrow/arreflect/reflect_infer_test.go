@@ -429,3 +429,39 @@ func TestInferArrowTypePublic(t *testing.T) {
 		}
 	})
 }
+
+func TestInferArrowSchemaStructFieldEncoding(t *testing.T) {
+	t.Run("dict-tagged string field becomes DICTIONARY", func(t *testing.T) {
+		type S struct {
+			Name string `arrow:"name,dict"`
+		}
+		schema, err := InferArrowSchema[S]()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		f, ok := schema.FieldsByName("name")
+		if !ok || len(f) == 0 {
+			t.Fatal("field 'name' not found in schema")
+		}
+		if f[0].Type.ID() != arrow.DICTIONARY {
+			t.Errorf("got %v, want DICTIONARY", f[0].Type.ID())
+		}
+	})
+
+	t.Run("listview-tagged []string field becomes LIST_VIEW", func(t *testing.T) {
+		type S struct {
+			Tags []string `arrow:"tags,listview"`
+		}
+		schema, err := InferArrowSchema[S]()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		f, ok := schema.FieldsByName("tags")
+		if !ok || len(f) == 0 {
+			t.Fatal("field 'tags' not found in schema")
+		}
+		if f[0].Type.ID() != arrow.LIST_VIEW {
+			t.Errorf("got %v, want LIST_VIEW", f[0].Type.ID())
+		}
+	})
+}

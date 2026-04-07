@@ -136,12 +136,6 @@ func parseDecimalOpt(opts *tagOpts, token string) {
 	}
 }
 
-type structFieldsEntry struct {
-	index []int
-	field reflect.StructField
-	depth int
-}
-
 func getStructFields(t reflect.Type) []fieldMeta {
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()

@@ -292,6 +292,45 @@ func TestSetTemporalValue(t *testing.T) {
 			t.Errorf("expected nil for null timestamp pointer")
 		}
 	})
+
+	t.Run("time32", func(t *testing.T) {
+		dt := &arrow.Time32Type{Unit: arrow.Millisecond}
+		b := array.NewTime32Builder(mem, dt)
+		defer b.Release()
+		// 10h30m0s500ms = (10*3600 + 30*60)*1000 + 500 = 37800500 ms
+		b.Append(arrow.Time32(37800500))
+		arr := b.NewArray()
+		defer arr.Release()
+
+		var got time.Time
+		v := reflect.ValueOf(&got).Elem()
+		if err := setValue(v, arr, 0); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Hour() != 10 || got.Minute() != 30 || got.Second() != 0 || got.Nanosecond()/1_000_000 != 500 {
+			t.Errorf("time32: got %v, want 10:30:00.500", got)
+		}
+	})
+
+	t.Run("time64", func(t *testing.T) {
+		dt := &arrow.Time64Type{Unit: arrow.Nanosecond}
+		b := array.NewTime64Builder(mem, dt)
+		defer b.Release()
+		// 10h30m0s123456789ns
+		nanos := int64(10*3600+30*60)*1_000_000_000 + 123456789
+		b.Append(arrow.Time64(nanos))
+		arr := b.NewArray()
+		defer arr.Release()
+
+		var got time.Time
+		v := reflect.ValueOf(&got).Elem()
+		if err := setValue(v, arr, 0); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Hour() != 10 || got.Minute() != 30 || got.Nanosecond() != 123456789 {
+			t.Errorf("time64: got %v, want 10:30:00.123456789", got)
+		}
+	})
 }
 
 func TestSetDecimalValue(t *testing.T) {

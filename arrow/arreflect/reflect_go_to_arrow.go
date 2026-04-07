@@ -520,6 +520,10 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 			}
 		}
 	case *array.FixedSizeListBuilder:
+		expectedLen := int(tb.Type().(*arrow.FixedSizeListType).Len())
+		if v.Len() != expectedLen {
+			return fmt.Errorf("appendValue: fixed-size list length mismatch: got %d, want %d", v.Len(), expectedLen)
+		}
 		tb.Append(true)
 		vb := tb.ValueBuilder()
 		for i := 0; i < v.Len(); i++ {
@@ -565,6 +569,15 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 					return err
 				}
 			}
+		}
+	case *array.RunEndEncodedBuilder:
+		if v.Kind() == reflect.Ptr && v.IsNil() {
+			tb.AppendNull()
+		} else {
+			if err := appendValue(tb.ValueBuilder(), v, tagOpts{}); err != nil {
+				return err
+			}
+			tb.Append(1)
 		}
 	default:
 		if db, ok := b.(array.DictionaryBuilder); ok {
