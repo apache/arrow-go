@@ -829,7 +829,14 @@ func buildRunEndEncodedArray(vals reflect.Value, mem memory.Allocator) (arrow.Ar
 
 	equal := func(a, b reflect.Value) bool {
 		if comparable {
-			return a.Equal(b)
+			da, db := a, b
+			for da.Kind() == reflect.Ptr {
+				if da.IsNil() || db.IsNil() {
+					return da.IsNil() && db.IsNil()
+				}
+				da, db = da.Elem(), db.Elem()
+			}
+			return da.Equal(db)
 		}
 		return reflect.DeepEqual(a.Interface(), b.Interface())
 	}

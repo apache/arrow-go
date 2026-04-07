@@ -716,6 +716,25 @@ func TestBuildRunEndEncodedArray(t *testing.T) {
 			t.Errorf("expected 5 runs for all-distinct, got %d", ree.RunEndsArr().Len())
 		}
 	})
+
+	t.Run("pointer_value_equality", func(t *testing.T) {
+		// Two distinct *string pointers pointing to equal values "x"
+		// Should produce ONE run, not two (value equality, not address equality)
+		x1 := "x"
+		x2 := "x"
+		y := "y"
+		vals := []*string{&x1, &x2, &y}
+		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{REE: true}, mem)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer arr.Release()
+		// "x","x" is one run; "y" is another → 2 runs total
+		ree := arr.(*array.RunEndEncoded)
+		if ree.RunEndsArr().Len() != 2 {
+			t.Errorf("expected 2 runs (x+x coalesced, y), got %d", ree.RunEndsArr().Len())
+		}
+	})
 }
 
 func TestBuildListViewArray(t *testing.T) {
