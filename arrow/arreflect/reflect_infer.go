@@ -193,9 +193,11 @@ func inferStructType(t reflect.Type) (*arrow.StructType, error) {
 		case fm.Opts.Dict:
 			dt = &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: dt}
 		case fm.Opts.ListView:
-			if lt, ok := dt.(*arrow.ListType); ok {
-				dt = arrow.ListViewOf(lt.Elem())
+			lt, ok := dt.(*arrow.ListType)
+			if !ok {
+				return nil, fmt.Errorf("inferStructType: listview tag on field %q requires a slice type, got %v", fm.Name, dt)
 			}
+			dt = arrow.ListViewOf(lt.Elem())
 		case fm.Opts.REE:
 			dt = arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, dt)
 		}

@@ -327,7 +327,7 @@ func TestSetTemporalValue(t *testing.T) {
 		if err := setValue(v, arr, 0); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got.Hour() != 10 || got.Minute() != 30 || got.Nanosecond() != 123456789 {
+		if got.Hour() != 10 || got.Minute() != 30 || got.Second() != 0 || got.Nanosecond() != 123456789 {
 			t.Errorf("time64: got %v, want 10:30:00.123456789", got)
 		}
 	})
