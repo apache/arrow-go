@@ -17,6 +17,7 @@
 package arreflect
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -478,4 +479,80 @@ func TestInferArrowSchemaStructFieldEncoding(t *testing.T) {
 			t.Errorf("unexpected error message: %v", err)
 		}
 	})
+}
+
+func TestGoTypeOf(t *testing.T) {
+	primitives := []struct {
+		dt   arrow.DataType
+		want reflect.Type
+	}{
+		{arrow.PrimitiveTypes.Int32, reflect.TypeOf(int32(0))},
+		{arrow.PrimitiveTypes.Float64, reflect.TypeOf(float64(0))},
+		{arrow.FixedWidthTypes.Boolean, reflect.TypeOf(bool(false))},
+		{arrow.BinaryTypes.String, reflect.TypeOf("")},
+		{arrow.BinaryTypes.Binary, reflect.TypeOf([]byte{})},
+		{&arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: "UTC"}, reflect.TypeOf(time.Time{})},
+		{&arrow.DurationType{Unit: arrow.Nanosecond}, reflect.TypeOf(time.Duration(0))},
+	}
+	for _, tt := range primitives {
+		got, err := GoTypeOf(tt.dt)
+		if err != nil {
+			t.Errorf("GoTypeOf(%v): %v", tt.dt, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("GoTypeOf(%v) = %v, want %v", tt.dt, got, tt.want)
+		}
+	}
+
+	st := arrow.StructOf(
+		arrow.Field{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+		arrow.Field{Name: "name", Type: arrow.BinaryTypes.String, Nullable: true},
+	)
+	structType, err := GoTypeOf(st)
+	if err != nil {
+		t.Fatalf("struct: %v", err)
+	}
+	if structType.Kind() != reflect.Struct {
+		t.Fatalf("want struct, got %v", structType.Kind())
+	}
+	if structType.NumField() != 2 {
+		t.Fatalf("want 2 fields, got %d", structType.NumField())
+	}
+	if structType.Field(1).Type.Kind() != reflect.Ptr {
+		t.Errorf("nullable field should be pointer")
+	}
+	if structType.Field(1).Type.Elem().Kind() != reflect.String {
+		t.Errorf("nullable field should be *string")
+	}
+
+	listType, err := GoTypeOf(arrow.ListOf(arrow.PrimitiveTypes.Int32))
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if listType.Kind() != reflect.Slice {
+		t.Fatalf("want slice, got %v", listType.Kind())
+	}
+	if listType.Elem() != reflect.TypeOf(int32(0)) {
+		t.Errorf("list elem wrong")
+	}
+
+	fslType, err := GoTypeOf(arrow.FixedSizeListOf(3, arrow.PrimitiveTypes.Float32))
+	if err != nil {
+		t.Fatalf("fsl: %v", err)
+	}
+	if fslType.Kind() != reflect.Array {
+		t.Fatalf("want array, got %v", fslType.Kind())
+	}
+	if fslType.Len() != 3 {
+		t.Errorf("array len want 3, got %d", fslType.Len())
+	}
+
+	_, err = GoTypeOf(arrow.Null)
+	if err == nil {
+		t.Error("expected error for unsupported type")
+	}
+	if !errors.Is(err, ErrUnsupportedType) {
+		t.Errorf("want ErrUnsupportedType, got %v", err)
+	}
 }

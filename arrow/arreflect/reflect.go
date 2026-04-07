@@ -390,3 +390,41 @@ func RecordFromSlice[T any](vals []T, mem memory.Allocator) (arrow.Record, error
 func RecordFromSliceDefault[T any](vals []T) (arrow.Record, error) {
 	return RecordFromSlice(vals, memory.DefaultAllocator)
 }
+
+// GetAny converts a single element at index i of an Arrow array to a Go value,
+// inferring the Go type from the Arrow DataType at runtime via [GoTypeOf].
+// Useful when the column type is not known at compile time.
+// For typed access when T is known, prefer [Get].
+func GetAny(arr arrow.Array, i int) (any, error) {
+	goType, err := GoTypeOf(arr.DataType())
+	if err != nil {
+		return nil, err
+	}
+	result := reflect.New(goType).Elem()
+	if err := setValue(result, arr, i); err != nil {
+		return nil, err
+	}
+	return result.Interface(), nil
+}
+
+// ToAnySlice converts all elements of an Arrow array to Go values,
+// inferring the Go type from the Arrow DataType at runtime via [GoTypeOf].
+// All elements share the same inferred Go type; null elements are nil (for
+// nullable column types) or zero values.
+// For typed access when T is known, prefer [ToSlice].
+func ToAnySlice(arr arrow.Array) ([]any, error) {
+	goType, err := GoTypeOf(arr.DataType())
+	if err != nil {
+		return nil, err
+	}
+	n := arr.Len()
+	result := make([]any, n)
+	for i := 0; i < n; i++ {
+		v := reflect.New(goType).Elem()
+		if err := setValue(v, arr, i); err != nil {
+			return nil, fmt.Errorf("index %d: %w", i, err)
+		}
+		result[i] = v.Interface()
+	}
+	return result, nil
+}

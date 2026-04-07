@@ -19,6 +19,7 @@ package arreflect
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -263,4 +264,129 @@ func SchemaOf[T any]() (*arrow.Schema, error) {
 func TypeOf[T any]() (arrow.DataType, error) {
 	t := reflect.TypeFor[T]()
 	return inferArrowType(t)
+}
+
+// GoTypeOf returns the Go reflect.Type corresponding to the given Arrow DataType.
+// For STRUCT types it constructs an anonymous struct type at runtime using
+// [reflect.StructOf]; field names are exported (capitalised) with the original
+// Arrow field name preserved in an arrow struct tag. Nullable Arrow fields
+// (field.Nullable == true) become pointer types (*T).
+// For DICTIONARY and RUN_END_ENCODED types it returns the Go type of the
+// value/encoded type respectively (dictionaries are resolved transparently).
+func GoTypeOf(dt arrow.DataType) (reflect.Type, error) {
+	switch dt.ID() {
+	case arrow.INT8:
+		return reflect.TypeOf(int8(0)), nil
+	case arrow.INT16:
+		return reflect.TypeOf(int16(0)), nil
+	case arrow.INT32:
+		return reflect.TypeOf(int32(0)), nil
+	case arrow.INT64:
+		return reflect.TypeOf(int64(0)), nil
+	case arrow.UINT8:
+		return reflect.TypeOf(uint8(0)), nil
+	case arrow.UINT16:
+		return reflect.TypeOf(uint16(0)), nil
+	case arrow.UINT32:
+		return reflect.TypeOf(uint32(0)), nil
+	case arrow.UINT64:
+		return reflect.TypeOf(uint64(0)), nil
+	case arrow.FLOAT32:
+		return reflect.TypeOf(float32(0)), nil
+	case arrow.FLOAT64:
+		return reflect.TypeOf(float64(0)), nil
+	case arrow.BOOL:
+		return reflect.TypeOf(false), nil
+	case arrow.STRING, arrow.LARGE_STRING:
+		return reflect.TypeOf(""), nil
+	case arrow.BINARY, arrow.LARGE_BINARY:
+		return typeOfByteSlice, nil
+	case arrow.TIMESTAMP, arrow.DATE32, arrow.DATE64, arrow.TIME32, arrow.TIME64:
+		return typeOfTime, nil
+	case arrow.DURATION:
+		return typeOfDuration, nil
+	case arrow.DECIMAL128:
+		return typeOfDec128, nil
+	case arrow.DECIMAL256:
+		return typeOfDec256, nil
+	case arrow.DECIMAL32:
+		return typeOfDec32, nil
+	case arrow.DECIMAL64:
+		return typeOfDec64, nil
+
+	case arrow.LIST, arrow.LARGE_LIST, arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW:
+		var elemDT arrow.DataType
+		switch t := dt.(type) {
+		case *arrow.ListType:
+			elemDT = t.Elem()
+		case *arrow.LargeListType:
+			elemDT = t.Elem()
+		case *arrow.ListViewType:
+			elemDT = t.Elem()
+		case *arrow.LargeListViewType:
+			elemDT = t.Elem()
+		default:
+			return nil, fmt.Errorf("unsupported Arrow type for Go inference: %v: %w", dt, ErrUnsupportedType)
+		}
+		elemType, err := GoTypeOf(elemDT)
+		if err != nil {
+			return nil, err
+		}
+		return reflect.SliceOf(elemType), nil
+
+	case arrow.FIXED_SIZE_LIST:
+		fsl := dt.(*arrow.FixedSizeListType)
+		elemType, err := GoTypeOf(fsl.Elem())
+		if err != nil {
+			return nil, err
+		}
+		return reflect.ArrayOf(int(fsl.Len()), elemType), nil
+
+	case arrow.MAP:
+		mt := dt.(*arrow.MapType)
+		keyType, err := GoTypeOf(mt.KeyType())
+		if err != nil {
+			return nil, err
+		}
+		valType, err := GoTypeOf(mt.ValueType())
+		if err != nil {
+			return nil, err
+		}
+		return reflect.MapOf(keyType, valType), nil
+
+	case arrow.STRUCT:
+		st := dt.(*arrow.StructType)
+		fields := make([]reflect.StructField, st.NumFields())
+		for i := 0; i < st.NumFields(); i++ {
+			f := st.Field(i)
+			ft, err := GoTypeOf(f.Type)
+			if err != nil {
+				return nil, err
+			}
+			if f.Nullable {
+				ft = reflect.PointerTo(ft)
+			}
+			var exportedName string
+			if len(f.Name) == 0 {
+				exportedName = fmt.Sprintf("Field%d", i)
+			} else {
+				exportedName = strings.ToUpper(f.Name[:1]) + f.Name[1:]
+			}
+			fields[i] = reflect.StructField{
+				Name: exportedName,
+				Type: ft,
+				Tag:  reflect.StructTag(fmt.Sprintf(`arrow:%q`, f.Name)),
+			}
+		}
+		return reflect.StructOf(fields), nil
+
+	case arrow.DICTIONARY:
+		return GoTypeOf(dt.(*arrow.DictionaryType).ValueType)
+
+	case arrow.RUN_END_ENCODED:
+		return GoTypeOf(dt.(*arrow.RunEndEncodedType).Encoded())
+
+	default:
+		return nil, fmt.Errorf("unsupported Arrow type for Go inference: %v: %w", dt, ErrUnsupportedType)
+	}
 }

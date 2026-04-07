@@ -428,3 +428,50 @@ func TestRecordFromSlice(t *testing.T) {
 		}
 	})
 }
+
+func TestGetAny(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	b := array.NewInt32Builder(mem)
+	defer b.Release()
+	b.Append(42)
+	b.AppendNull()
+	arr := b.NewArray()
+	defer arr.Release()
+
+	got, err := GetAny(arr, 0)
+	if err != nil {
+		t.Fatalf("GetAny(0): %v", err)
+	}
+	if v, ok := got.(int32); !ok || v != 42 {
+		t.Errorf("GetAny(0) = %v (%T), want int32(42)", got, got)
+	}
+
+	got, err = GetAny(arr, 1)
+	if err != nil {
+		t.Fatalf("GetAny(1): %v", err)
+	}
+	if v, ok := got.(int32); !ok || v != 0 {
+		t.Errorf("GetAny(1) = %v, want int32(0)", got)
+	}
+}
+
+func TestToAnySlice(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	b := array.NewStringBuilder(mem)
+	defer b.Release()
+	b.Append("hello")
+	b.Append("world")
+	arr := b.NewArray()
+	defer arr.Release()
+
+	got, err := ToAnySlice(arr)
+	if err != nil {
+		t.Fatalf("ToAnySlice: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].(string) != "hello" || got[1].(string) != "world" {
+		t.Errorf("got %v, want [hello world]", got)
+	}
+}
