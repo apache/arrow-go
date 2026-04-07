@@ -199,7 +199,7 @@ func inferStructType(t reflect.Type) (*arrow.StructType, error) {
 			}
 			dt = arrow.ListViewOf(lt.Elem())
 		case fm.Opts.REE:
-			dt = arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, dt)
+			return nil, fmt.Errorf("inferStructType: ree tag on struct field %q is not supported; use ree at top-level via buildArray", fm.Name)
 		}
 
 		arrowFields = append(arrowFields, arrow.Field{

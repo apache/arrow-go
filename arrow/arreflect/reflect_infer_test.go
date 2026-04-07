@@ -18,6 +18,7 @@ package arreflect
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +26,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
-	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
 func TestInferPrimitiveArrowType(t *testing.T) {
@@ -466,40 +466,16 @@ func TestInferArrowSchemaStructFieldEncoding(t *testing.T) {
 		}
 	})
 
-	t.Run("ree-tagged field becomes RUN_END_ENCODED", func(t *testing.T) {
+	t.Run("ree-tagged field on struct is unsupported", func(t *testing.T) {
 		type REERow struct {
 			Val string `arrow:"val,ree"`
 		}
-		schema, err := InferArrowSchema[REERow]()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		_, err := InferArrowSchema[REERow]()
+		if err == nil {
+			t.Fatal("expected error for ree tag on struct field, got nil")
 		}
-		if schema.NumFields() != 1 {
-			t.Fatalf("expected 1 field, got %d", schema.NumFields())
-		}
-		if schema.Field(0).Type.ID() != arrow.RUN_END_ENCODED {
-			t.Errorf("expected RUN_END_ENCODED, got %v", schema.Field(0).Type.ID())
-		}
-
-		// Roundtrip: exercises appendValue RunEndEncodedBuilder + setValue RunEndEncoded paths
-		mem := memory.NewGoAllocator()
-		rows := []REERow{{"hello"}, {"hello"}, {"world"}}
-		arr, err := FromGoSlice(rows, mem)
-		if err != nil {
-			t.Fatalf("FromGoSlice: %v", err)
-		}
-		defer arr.Release()
-		got, err := ToGoSlice[REERow](arr)
-		if err != nil {
-			t.Fatalf("ToGoSlice: %v", err)
-		}
-		if len(got) != len(rows) {
-			t.Fatalf("length mismatch: got %d, want %d", len(got), len(rows))
-		}
-		for i, r := range rows {
-			if got[i] != r {
-				t.Errorf("[%d]: got %v, want %v", i, got[i], r)
-			}
+		if !strings.Contains(err.Error(), "ree tag on struct field") {
+			t.Errorf("unexpected error message: %v", err)
 		}
 	})
 }

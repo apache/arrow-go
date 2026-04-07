@@ -356,12 +356,6 @@ func setDecimalValue(v reflect.Value, arr arrow.Array, i int) error {
 }
 
 func setStructValue(v reflect.Value, sa *array.Struct, i int) error {
-	if sa.IsNull(i) {
-		if v.Kind() == reflect.Ptr {
-			v.Set(reflect.Zero(v.Type()))
-		}
-		return nil
-	}
 	if v.Kind() == reflect.Ptr {
 		v.Set(reflect.New(v.Type().Elem()))
 		v = v.Elem()
@@ -387,10 +381,6 @@ func setStructValue(v reflect.Value, sa *array.Struct, i int) error {
 }
 
 func setListValue(v reflect.Value, arr array.ListLike, i int) error {
-	if arr.IsNull(i) {
-		v.Set(reflect.Zero(v.Type()))
-		return nil
-	}
 	if v.Kind() == reflect.Ptr {
 		v.Set(reflect.New(v.Type().Elem()))
 		v = v.Elem()
@@ -415,12 +405,6 @@ func setListValue(v reflect.Value, arr array.ListLike, i int) error {
 }
 
 func setMapValue(v reflect.Value, arr *array.Map, i int) error {
-	if arr.IsNull(i) {
-		if v.Kind() == reflect.Ptr {
-			v.Set(reflect.Zero(v.Type()))
-		}
-		return nil
-	}
 	if v.Kind() == reflect.Ptr {
 		v.Set(reflect.New(v.Type().Elem()))
 		v = v.Elem()
@@ -453,12 +437,6 @@ func setMapValue(v reflect.Value, arr *array.Map, i int) error {
 }
 
 func setFixedSizeListValue(v reflect.Value, arr *array.FixedSizeList, i int) error {
-	if arr.IsNull(i) {
-		if v.Kind() == reflect.Ptr {
-			v.Set(reflect.Zero(v.Type()))
-		}
-		return nil
-	}
 	if v.Kind() == reflect.Ptr {
 		v.Set(reflect.New(v.Type().Elem()))
 		v = v.Elem()
@@ -493,21 +471,9 @@ func setFixedSizeListValue(v reflect.Value, arr *array.FixedSizeList, i int) err
 }
 
 func setDictionaryValue(v reflect.Value, arr *array.Dictionary, i int) error {
-	if arr.IsNull(i) {
-		if v.Kind() == reflect.Ptr {
-			v.Set(reflect.Zero(v.Type()))
-		}
-		return nil
-	}
 	return setValue(v, arr.Dictionary(), arr.GetValueIndex(i))
 }
 
 func setRunEndEncodedValue(v reflect.Value, arr *array.RunEndEncoded, i int) error {
-	if arr.IsNull(i) {
-		if v.Kind() == reflect.Ptr {
-			v.Set(reflect.Zero(v.Type()))
-		}
-		return nil
-	}
 	return setValue(v, arr.Values(), arr.GetPhysicalIndex(i))
 }

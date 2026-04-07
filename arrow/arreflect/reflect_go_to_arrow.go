@@ -146,9 +146,6 @@ func appendPrimitiveValue(b array.Builder, v reflect.Value, dt arrow.DataType) e
 		b.(*array.StringBuilder).Append(v.String())
 	case arrow.BINARY:
 		b.(*array.BinaryBuilder).Append(v.Bytes())
-	case arrow.TIMESTAMP:
-		t := v.Interface().(time.Time)
-		b.(*array.TimestampBuilder).Append(arrow.Timestamp(t.UnixNano()))
 	case arrow.DURATION:
 		d := v.Interface().(time.Duration)
 		b.(*array.DurationBuilder).Append(arrow.Duration(d.Nanoseconds()))
@@ -169,7 +166,8 @@ func appendPrimitiveValue(b array.Builder, v reflect.Value, dt arrow.DataType) e
 }
 
 func timeOfDayNanos(t time.Time) int64 {
-	midnight := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	t = t.UTC()
+	midnight := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 	return t.Sub(midnight).Nanoseconds()
 }
 
