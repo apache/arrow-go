@@ -225,7 +225,9 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 					}
 					v = v.Elem()
 				}
-				b.Append(arrow.Time32(v.Interface().(time.Time).UnixNano() / int64(dt.Unit.Multiplier())))
+				t := v.Interface().(time.Time)
+				midnight := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+				b.Append(arrow.Time32(t.Sub(midnight).Nanoseconds() / int64(dt.Unit.Multiplier())))
 			}
 			return b.NewArray(), nil
 		case "time64":
@@ -242,7 +244,9 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 					}
 					v = v.Elem()
 				}
-				b.Append(arrow.Time64(v.Interface().(time.Time).UnixNano() / int64(dt.Unit.Multiplier())))
+				t64 := v.Interface().(time.Time)
+				midnight64 := time.Date(t64.Year(), t64.Month(), t64.Day(), 0, 0, 0, 0, t64.Location())
+				b.Append(arrow.Time64(t64.Sub(midnight64).Nanoseconds() / int64(dt.Unit.Multiplier())))
 			}
 			return b.NewArray(), nil
 		default:
@@ -485,10 +489,14 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 		tb.Append(arrow.Date64FromTime(v.Interface().(time.Time)))
 	case *array.Time32Builder:
 		unit := tb.Type().(*arrow.Time32Type).Unit
-		tb.Append(arrow.Time32(v.Interface().(time.Time).UnixNano() / int64(unit.Multiplier())))
+		t := v.Interface().(time.Time)
+		midnight := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+		tb.Append(arrow.Time32(t.Sub(midnight).Nanoseconds() / int64(unit.Multiplier())))
 	case *array.Time64Builder:
 		unit := tb.Type().(*arrow.Time64Type).Unit
-		tb.Append(arrow.Time64(v.Interface().(time.Time).UnixNano() / int64(unit.Multiplier())))
+		t := v.Interface().(time.Time)
+		midnight := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+		tb.Append(arrow.Time64(t.Sub(midnight).Nanoseconds() / int64(unit.Multiplier())))
 	case *array.DurationBuilder:
 		d := v.Interface().(time.Duration)
 		tb.Append(arrow.Duration(d.Nanoseconds()))

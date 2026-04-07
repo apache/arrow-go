@@ -862,9 +862,12 @@ func TestBuildTemporalTaggedArray(t *testing.T) {
 			t.Errorf("expected len 1, got %d", arr.Len())
 		}
 		t32arr := arr.(*array.Time32)
-		val := t32arr.Value(0)
-		if val == 0 {
-			t.Error("expected non-zero time32 value")
+		unit := arr.DataType().(*arrow.Time32Type).Unit
+		got0 := t32arr.Value(0).ToTime(unit)
+		if got0.Hour() != ref.Hour() || got0.Minute() != ref.Minute() || got0.Second() != ref.Second() {
+			t.Errorf("time32 roundtrip: got hour=%d min=%d sec=%d, want hour=%d min=%d sec=%d",
+				got0.Hour(), got0.Minute(), got0.Second(),
+				ref.Hour(), ref.Minute(), ref.Second())
 		}
 	})
 
