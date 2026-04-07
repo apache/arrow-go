@@ -739,11 +739,27 @@ func buildRunEndEncodedArray(vals reflect.Value, mem memory.Allocator) (arrow.Ar
 		val reflect.Value
 	}
 
+	// For comparable element types use reflect.Value.Equal (fast, avoids boxing).
+	// For non-comparable types (e.g. slices, maps) fall back to reflect.DeepEqual,
+	// which handles structural equality but cannot compress runs of function values.
+	elemType := vals.Type().Elem()
+	for elemType.Kind() == reflect.Ptr {
+		elemType = elemType.Elem()
+	}
+	comparable := elemType.Comparable()
+
+	equal := func(a, b reflect.Value) bool {
+		if comparable {
+			return a.Equal(b)
+		}
+		return reflect.DeepEqual(a.Interface(), b.Interface())
+	}
+
 	var runs []run
 	current := vals.Index(0)
 	for i := 1; i < vals.Len(); i++ {
 		next := vals.Index(i)
-		if !reflect.DeepEqual(current.Interface(), next.Interface()) {
+		if !equal(current, next) {
 			runs = append(runs, run{end: int32(i), val: current})
 			current = next
 		}
