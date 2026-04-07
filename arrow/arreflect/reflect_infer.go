@@ -19,8 +19,8 @@ package arreflect
 import (
 	"fmt"
 	"reflect"
-	"strings"
 	"time"
+	"unicode"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/decimal"
@@ -348,7 +348,7 @@ func InferGoType(dt arrow.DataType) (reflect.Type, error) {
 		if err != nil {
 			return nil, err
 		}
-		valType, err := InferGoType(mt.ValueType())
+		valType, err := InferGoType(mt.ItemField().Type)
 		if err != nil {
 			return nil, err
 		}
@@ -370,7 +370,8 @@ func InferGoType(dt arrow.DataType) (reflect.Type, error) {
 			if len(f.Name) == 0 {
 				exportedName = fmt.Sprintf("Field%d", i)
 			} else {
-				exportedName = strings.ToUpper(f.Name[:1]) + f.Name[1:]
+				runes := []rune(f.Name)
+				exportedName = string(unicode.ToUpper(runes[0])) + string(runes[1:])
 			}
 			fields[i] = reflect.StructField{
 				Name: exportedName,

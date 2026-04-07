@@ -17,6 +17,8 @@
 package arreflect
 
 import (
+	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -474,4 +476,164 @@ func TestToAnySlice(t *testing.T) {
 	if got[0].(string) != "hello" || got[1].(string) != "world" {
 		t.Errorf("got %v, want [hello world]", got)
 	}
+}
+
+func TestErrSentinels(t *testing.T) {
+	mem := memory.NewGoAllocator()
+
+	t.Run("ErrTypeMismatch via setValue wrong kind", func(t *testing.T) {
+		b := array.NewInt32Builder(mem)
+		defer b.Release()
+		b.Append(42)
+		arr := b.NewArray()
+		defer arr.Release()
+
+		var got string
+		v := reflect.ValueOf(&got).Elem()
+		err := setValue(v, arr, 0)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !errors.Is(err, ErrTypeMismatch) {
+			t.Errorf("expected errors.Is(err, ErrTypeMismatch) = true, got false; err = %v", err)
+		}
+	})
+
+	t.Run("ErrUnsupportedType via InferGoType", func(t *testing.T) {
+		_, err := InferGoType(arrow.Null)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !errors.Is(err, ErrUnsupportedType) {
+			t.Errorf("expected errors.Is(err, ErrUnsupportedType) = true, got false; err = %v", err)
+		}
+	})
+
+	t.Run("ErrTypeMismatch propagates through struct field context wrapper", func(t *testing.T) {
+		st := arrow.StructOf(arrow.Field{Name: "name", Type: arrow.BinaryTypes.String})
+		sb := array.NewStructBuilder(mem, st)
+		defer sb.Release()
+		sb.Append(true)
+		sb.FieldBuilder(0).(*array.StringBuilder).Append("hello")
+		arr := sb.NewArray()
+		defer arr.Release()
+
+		type wrongType struct {
+			Name int32 `arrow:"name"`
+		}
+		_, err := At[wrongType](arr, 0)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !errors.Is(err, ErrTypeMismatch) {
+			t.Errorf("ErrTypeMismatch not found through context wrapper; err = %v", err)
+		}
+	})
+}
+
+func TestGetAnyComposite(t *testing.T) {
+	mem := memory.NewGoAllocator()
+
+	t.Run("struct", func(t *testing.T) {
+		st := arrow.StructOf(
+			arrow.Field{Name: "id", Type: arrow.PrimitiveTypes.Int32},
+			arrow.Field{Name: "name", Type: arrow.BinaryTypes.String},
+		)
+		sb := array.NewStructBuilder(mem, st)
+		defer sb.Release()
+		sb.Append(true)
+		sb.FieldBuilder(0).(*array.Int32Builder).Append(99)
+		sb.FieldBuilder(1).(*array.StringBuilder).Append("alice")
+		arr := sb.NewArray()
+		defer arr.Release()
+
+		got, err := GetAny(arr, 0)
+		if err != nil {
+			t.Fatalf("GetAny: %v", err)
+		}
+
+		v := reflect.ValueOf(got)
+		if v.Kind() != reflect.Struct {
+			t.Fatalf("want struct, got %v", v.Kind())
+		}
+
+		vt := v.Type()
+		var idField, nameField reflect.Value
+		for i := 0; i < v.NumField(); i++ {
+			tag := vt.Field(i).Tag.Get("arrow")
+			switch tag {
+			case "id":
+				idField = v.Field(i)
+			case "name":
+				nameField = v.Field(i)
+			}
+		}
+		if !idField.IsValid() {
+			t.Fatal("id field not found")
+		}
+		if !nameField.IsValid() {
+			t.Fatal("name field not found")
+		}
+		if idField.Int() != 99 {
+			t.Errorf("id = %v, want 99", idField.Int())
+		}
+		if nameField.String() != "alice" {
+			t.Errorf("name = %v, want alice", nameField.String())
+		}
+	})
+
+	t.Run("list", func(t *testing.T) {
+		lb := array.NewListBuilder(mem, arrow.PrimitiveTypes.Int32)
+		defer lb.Release()
+		lb.Append(true)
+		lb.ValueBuilder().(*array.Int32Builder).Append(1)
+		lb.ValueBuilder().(*array.Int32Builder).Append(2)
+		lb.ValueBuilder().(*array.Int32Builder).Append(3)
+		arr := lb.NewArray()
+		defer arr.Release()
+
+		got, err := GetAny(arr, 0)
+		if err != nil {
+			t.Fatalf("GetAny: %v", err)
+		}
+
+		v := reflect.ValueOf(got)
+		if v.Kind() != reflect.Slice {
+			t.Fatalf("want slice, got %v", v.Kind())
+		}
+		if v.Len() != 3 {
+			t.Fatalf("want 3 elems, got %d", v.Len())
+		}
+		if v.Index(0).Int() != 1 || v.Index(2).Int() != 3 {
+			t.Errorf("list = %v, want [1 2 3]", got)
+		}
+	})
+
+	t.Run("map", func(t *testing.T) {
+		mb := array.NewMapBuilder(mem, arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32, false)
+		defer mb.Release()
+		mb.Append(true)
+		mb.KeyBuilder().(*array.StringBuilder).Append("x")
+		mb.ItemBuilder().(*array.Int32Builder).Append(7)
+		arr := mb.NewArray()
+		defer arr.Release()
+
+		got, err := GetAny(arr, 0)
+		if err != nil {
+			t.Fatalf("GetAny: %v", err)
+		}
+
+		v := reflect.ValueOf(got)
+		if v.Kind() != reflect.Map {
+			t.Fatalf("want map, got %v", v.Kind())
+		}
+		key := reflect.ValueOf("x")
+		val := v.MapIndex(key)
+		if !val.IsValid() {
+			t.Fatal("key 'x' not found in map")
+		}
+		if val.Int() != 7 {
+			t.Errorf("map[x] = %v, want 7", val.Int())
+		}
+	})
 }

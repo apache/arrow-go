@@ -475,7 +475,7 @@ func appendTemporalValue(b array.Builder, v reflect.Value) error {
 		}
 		tb.Append(arrow.Duration(d.Nanoseconds()))
 	default:
-		return fmt.Errorf("unexpected temporal builder %T: %w", b, ErrTypeMismatch)
+		return fmt.Errorf("unexpected temporal builder %T: %w", b, ErrUnsupportedType)
 	}
 	return nil
 }
@@ -499,7 +499,7 @@ func appendDecimalValue(b array.Builder, v reflect.Value) error {
 	case *array.Decimal64Builder:
 		tb.Append(decimal.Decimal64(v.Int()))
 	default:
-		return fmt.Errorf("unexpected decimal builder %T: %w", b, ErrTypeMismatch)
+		return fmt.Errorf("unexpected decimal builder %T: %w", b, ErrUnsupportedType)
 	}
 	return nil
 }

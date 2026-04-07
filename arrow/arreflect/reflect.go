@@ -422,6 +422,8 @@ func RecordAt[T any](rec arrow.Record, i int) (T, error) {
 // GetAny converts a single element at index i of an Arrow array to a Go value,
 // inferring the Go type from the Arrow DataType at runtime via [InferGoType].
 // Useful when the column type is not known at compile time.
+// Null elements are returned as the Go zero value of the inferred type; use
+// arr.IsNull(i) to distinguish a null element from a genuine zero.
 // For typed access when T is known, prefer [At].
 func GetAny(arr arrow.Array, i int) (any, error) {
 	goType, err := InferGoType(arr.DataType())
@@ -437,8 +439,9 @@ func GetAny(arr arrow.Array, i int) (any, error) {
 
 // ToAnySlice converts all elements of an Arrow array to Go values,
 // inferring the Go type from the Arrow DataType at runtime via [InferGoType].
-// All elements share the same inferred Go type; null elements are nil (for
-// nullable column types) or zero values.
+// All elements share the same inferred Go type. Null elements are returned as
+// the Go zero value of the inferred type; use arr.IsNull(i) to distinguish
+// a null element from a genuine zero value.
 // For typed access when T is known, prefer [ToSlice].
 func ToAnySlice(arr arrow.Array) ([]any, error) {
 	goType, err := InferGoType(arr.DataType())

@@ -453,7 +453,7 @@ func setFixedSizeListValue(v reflect.Value, arr *array.FixedSizeList, i int) err
 	switch v.Kind() {
 	case reflect.Array:
 		if v.Len() != n {
-			return fmt.Errorf("arreflect: fixed-size list length %d does not match Go array length %d", n, v.Len())
+			return fmt.Errorf("fixed-size list length %d does not match Go array length %d: %w", n, v.Len(), ErrTypeMismatch)
 		}
 		for k := 0; k < n; k++ {
 			if err := setValue(v.Index(k), child, int(start)+k); err != nil {
