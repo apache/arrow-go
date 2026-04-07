@@ -35,6 +35,8 @@ var (
 	typeOfDec128    = reflect.TypeOf(decimal128.Num{})
 	typeOfDec256    = reflect.TypeOf(decimal256.Num{})
 	typeOfByteSlice = reflect.TypeOf([]byte{})
+	typeOfInt       = reflect.TypeOf(int(0))
+	typeOfUint      = reflect.TypeOf(uint(0))
 )
 
 func inferPrimitiveArrowType(t reflect.Type) (arrow.DataType, error) {
@@ -51,6 +53,8 @@ func inferPrimitiveArrowType(t reflect.Type) (arrow.DataType, error) {
 		return arrow.PrimitiveTypes.Int32, nil
 	case reflect.TypeOf(int64(0)):
 		return arrow.PrimitiveTypes.Int64, nil
+	case typeOfInt:
+		return arrow.PrimitiveTypes.Int64, nil
 	case reflect.TypeOf(uint8(0)):
 		return arrow.PrimitiveTypes.Uint8, nil
 	case reflect.TypeOf(uint16(0)):
@@ -58,6 +62,8 @@ func inferPrimitiveArrowType(t reflect.Type) (arrow.DataType, error) {
 	case reflect.TypeOf(uint32(0)):
 		return arrow.PrimitiveTypes.Uint32, nil
 	case reflect.TypeOf(uint64(0)):
+		return arrow.PrimitiveTypes.Uint64, nil
+	case typeOfUint:
 		return arrow.PrimitiveTypes.Uint64, nil
 	case reflect.TypeOf(float32(0)):
 		return arrow.PrimitiveTypes.Float32, nil
@@ -167,6 +173,19 @@ func inferStructType(t reflect.Type) (*arrow.StructType, error) {
 					Precision: fm.Opts.DecimalPrecision,
 					Scale:     fm.Opts.DecimalScale,
 				}
+			}
+		}
+
+		if origType == typeOfTime && fm.Opts.Temporal != "" {
+			switch fm.Opts.Temporal {
+			case "date32":
+				dt = arrow.FixedWidthTypes.Date32
+			case "date64":
+				dt = arrow.FixedWidthTypes.Date64
+			case "time32":
+				dt = &arrow.Time32Type{Unit: arrow.Millisecond}
+			case "time64":
+				dt = &arrow.Time64Type{Unit: arrow.Nanosecond}
 			}
 		}
 

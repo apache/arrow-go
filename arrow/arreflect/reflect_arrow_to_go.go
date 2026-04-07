@@ -388,13 +388,7 @@ func setStructValue(v reflect.Value, sa *array.Struct, i int) error {
 
 func setListValue(v reflect.Value, arr array.ListLike, i int) error {
 	if arr.IsNull(i) {
-		if v.Kind() == reflect.Ptr {
-			v.Set(reflect.Zero(v.Type()))
-			return nil
-		}
-		if v.Kind() == reflect.Slice {
-			v.Set(reflect.MakeSlice(v.Type(), 0, 0))
-		}
+		v.Set(reflect.Zero(v.Type()))
 		return nil
 	}
 	if v.Kind() == reflect.Ptr {

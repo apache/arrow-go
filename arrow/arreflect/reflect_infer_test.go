@@ -38,10 +38,12 @@ func TestInferPrimitiveArrowType(t *testing.T) {
 		{"int16", reflect.TypeOf(int16(0)), arrow.INT16, false},
 		{"int32", reflect.TypeOf(int32(0)), arrow.INT32, false},
 		{"int64", reflect.TypeOf(int64(0)), arrow.INT64, false},
+		{"int", reflect.TypeOf(int(0)), arrow.INT64, false},
 		{"uint8", reflect.TypeOf(uint8(0)), arrow.UINT8, false},
 		{"uint16", reflect.TypeOf(uint16(0)), arrow.UINT16, false},
 		{"uint32", reflect.TypeOf(uint32(0)), arrow.UINT32, false},
 		{"uint64", reflect.TypeOf(uint64(0)), arrow.UINT64, false},
+		{"uint", reflect.TypeOf(uint(0)), arrow.UINT64, false},
 		{"float32", reflect.TypeOf(float32(0)), arrow.FLOAT32, false},
 		{"float64", reflect.TypeOf(float64(0)), arrow.FLOAT64, false},
 		{"bool", reflect.TypeOf(false), arrow.BOOL, false},
@@ -287,6 +289,20 @@ func TestInferStructType(t *testing.T) {
 		_, err := inferStructType(reflect.TypeOf(42))
 		if err == nil {
 			t.Error("expected error for non-struct, got nil")
+		}
+	})
+
+	t.Run("time.Time with date32 tag maps to DATE32", func(t *testing.T) {
+		type S struct {
+			Ts time.Time `arrow:",date32"`
+		}
+		st, err := inferStructType(reflect.TypeOf(S{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		dt := st.Field(0).Type
+		if dt.ID() != arrow.DATE32 {
+			t.Errorf("got %v, want DATE32", dt.ID())
 		}
 	})
 }

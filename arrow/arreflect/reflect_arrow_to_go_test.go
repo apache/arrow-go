@@ -588,6 +588,35 @@ func TestSetListValue(t *testing.T) {
 			t.Errorf("expected [30], got %v", got[1])
 		}
 	})
+
+	t.Run("large list view of int32", func(t *testing.T) {
+		lvb := array.NewLargeListViewBuilder(mem, arrow.PrimitiveTypes.Int32)
+		defer lvb.Release()
+		vb := lvb.ValueBuilder().(*array.Int32Builder)
+
+		lvb.AppendWithSize(true, 2)
+		vb.AppendValues([]int32{1, 2}, nil)
+		lvb.AppendWithSize(true, 1)
+		vb.AppendValues([]int32{3}, nil)
+
+		arr := lvb.NewLargeListViewArray()
+		defer arr.Release()
+
+		var got []int32
+		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, []int32{1, 2}) {
+			t.Errorf("row 0: expected [1,2], got %v", got)
+		}
+
+		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 1); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, []int32{3}) {
+			t.Errorf("row 1: expected [3], got %v", got)
+		}
+	})
 }
 
 func TestSetMapValue(t *testing.T) {

@@ -30,5 +30,13 @@
 //	    Score float64 `arrow:"score"`
 //	    Skip  string  `arrow:"-"`
 //	    Enc   string  `arrow:"enc,dict"`
+//	    T32   time.Time `arrow:"t32,time32"`
 //	}
+//
+// Temporal type overrides for time.Time fields:
+//
+//	arrow:"field,date32"   — use Date32 instead of Timestamp
+//	arrow:"field,date64"   — use Date64 instead of Timestamp
+//	arrow:"field,time32"   — use Time32(ms) instead of Timestamp
+//	arrow:"field,time64"   — use Time64(ns) instead of Timestamp
 package arreflect

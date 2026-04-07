@@ -503,6 +503,8 @@ func appendToDictBuilder(db array.DictionaryBuilder, v reflect.Value) error {
 				return nil
 			}
 			return bdb.Append(v.Bytes())
+		default:
+			return fmt.Errorf("appendToDictBuilder: unsupported value kind %v for BinaryDictionaryBuilder", v.Kind())
 		}
 	case *array.Int8DictionaryBuilder:
 		return bdb.Append(int8(v.Int()))
@@ -681,6 +683,7 @@ func buildFixedSizeListArray(vals reflect.Value, mem memory.Allocator) (arrow.Ar
 }
 
 func buildDictionaryArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
+	n := vals.Len()
 	elemType := vals.Type().Elem()
 	for elemType.Kind() == reflect.Ptr {
 		elemType = elemType.Elem()
@@ -698,16 +701,21 @@ func buildDictionaryArray(vals reflect.Value, mem memory.Allocator) (arrow.Array
 	db := array.NewDictionaryBuilder(mem, dt)
 	defer db.Release()
 
-	rawArr, err := buildPrimitiveArray(vals, mem)
-	if err != nil {
-		return nil, fmt.Errorf("buildDictionaryArray: building raw values: %w", err)
-	}
-	defer rawArr.Release()
+	isPtr := vals.Type().Elem().Kind() == reflect.Ptr
 
-	if err := db.AppendArray(rawArr); err != nil {
-		return nil, fmt.Errorf("buildDictionaryArray: AppendArray: %w", err)
+	for i := 0; i < n; i++ {
+		elem := vals.Index(i)
+		if isPtr {
+			if elem.IsNil() {
+				db.AppendNull()
+				continue
+			}
+			elem = elem.Elem()
+		}
+		if err := appendToDictBuilder(db, elem); err != nil {
+			return nil, fmt.Errorf("buildDictionaryArray[%d]: %w", i, err)
+		}
 	}
-
 	return db.NewArray(), nil
 }
 

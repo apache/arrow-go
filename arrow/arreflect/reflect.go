@@ -37,6 +37,7 @@ type tagOpts struct {
 	DecimalPrecision int32
 	DecimalScale     int32
 	HasDecimalOpts   bool
+	Temporal         string // "timestamp" (default), "date32", "date64", "time32", "time64"
 }
 
 type fieldMeta struct {
@@ -114,6 +115,8 @@ func parseOptions(opts *tagOpts, rest string) {
 			opts.ListView = true
 		case "ree":
 			opts.REE = true
+		case "date32", "date64", "time32", "time64", "timestamp":
+			opts.Temporal = token
 		}
 	}
 }
@@ -158,12 +161,13 @@ func getStructFields(t reflect.Type) []fieldMeta {
 		meta   fieldMeta
 		depth  int
 		tagged bool
+		order  int
 	}
 
 	nameMap := make(map[string][]candidate)
+	orderCounter := 0
 
 	queue := []bfsEntry{{t: t, index: nil, depth: 0}}
-
 	visited := make(map[reflect.Type]bool)
 
 	for len(queue) > 0 {
@@ -227,7 +231,6 @@ func getStructFields(t reflect.Type) []fieldMeta {
 			}
 
 			nullable := sf.Type.Kind() == reflect.Ptr
-
 			tagged := hasTag && opts.Name != ""
 
 			meta := fieldMeta{
@@ -238,10 +241,20 @@ func getStructFields(t reflect.Type) []fieldMeta {
 				Opts:     opts,
 			}
 
-			nameMap[arrowName] = append(nameMap[arrowName], candidate{
+			// Assign insertion order on first encounter of this name.
+			existingCands := nameMap[arrowName]
+			order := orderCounter
+			if len(existingCands) > 0 {
+				order = existingCands[0].order
+			} else {
+				orderCounter++
+			}
+
+			nameMap[arrowName] = append(existingCands, candidate{
 				meta:   meta,
 				depth:  entry.depth,
 				tagged: tagged,
+				order:  order,
 			})
 		}
 	}
@@ -251,83 +264,8 @@ func getStructFields(t reflect.Type) []fieldMeta {
 		order int
 	}
 
-	nameOrder := make(map[string]int)
-	orderCounter := 0
-
-	type bfsEntry2 struct {
-		t     reflect.Type
-		index []int
-		depth int
-	}
-	queue2 := []bfsEntry2{{t: t, index: nil, depth: 0}}
-	visited2 := make(map[reflect.Type]bool)
-
-	for len(queue2) > 0 {
-		entry := queue2[0]
-		queue2 = queue2[1:]
-
-		st := entry.t
-		for st.Kind() == reflect.Ptr {
-			st = st.Elem()
-		}
-		if st.Kind() != reflect.Struct {
-			continue
-		}
-		if entry.depth > 0 {
-			if visited2[st] {
-				continue
-			}
-			visited2[st] = true
-		}
-
-		for i := 0; i < st.NumField(); i++ {
-			sf := st.Field(i)
-			fullIndex := make([]int, len(entry.index)+1)
-			copy(fullIndex, entry.index)
-			fullIndex[len(entry.index)] = i
-
-			if !sf.IsExported() && !sf.Anonymous {
-				continue
-			}
-
-			tagVal, hasTag := sf.Tag.Lookup("arrow")
-			var opts tagOpts
-			if hasTag {
-				opts = parseTag(tagVal)
-			}
-			if opts.Skip {
-				continue
-			}
-
-			arrowName := opts.Name
-			if arrowName == "" {
-				arrowName = sf.Name
-			}
-
-			if sf.Anonymous && !hasTag {
-				ft := sf.Type
-				for ft.Kind() == reflect.Ptr {
-					ft = ft.Elem()
-				}
-				if ft.Kind() == reflect.Struct {
-					queue2 = append(queue2, bfsEntry2{
-						t:     ft,
-						index: fullIndex,
-						depth: entry.depth + 1,
-					})
-					continue
-				}
-			}
-
-			if _, seen := nameOrder[arrowName]; !seen {
-				nameOrder[arrowName] = orderCounter
-				orderCounter++
-			}
-		}
-	}
-
 	resolved := make([]resolvedField, 0, len(nameMap))
-	for name, candidates := range nameMap {
+	for _, candidates := range nameMap {
 		minDepth := candidates[0].depth
 		for _, c := range candidates[1:] {
 			if c.depth < minDepth {
@@ -358,8 +296,7 @@ func getStructFields(t reflect.Type) []fieldMeta {
 		}
 
 		if winner != nil {
-			order := nameOrder[name]
-			resolved = append(resolved, resolvedField{meta: winner.meta, order: order})
+			resolved = append(resolved, resolvedField{meta: winner.meta, order: winner.order})
 		}
 	}
 
