@@ -168,6 +168,11 @@ func appendPrimitiveValue(b array.Builder, v reflect.Value, dt arrow.DataType) e
 	return nil
 }
 
+func timeOfDayNanos(t time.Time) int64 {
+	midnight := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	return t.Sub(midnight).Nanoseconds()
+}
+
 func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
 	elemType := vals.Type().Elem()
 	for elemType.Kind() == reflect.Ptr {
@@ -225,9 +230,7 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 					}
 					v = v.Elem()
 				}
-				t := v.Interface().(time.Time)
-				midnight := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
-				b.Append(arrow.Time32(t.Sub(midnight).Nanoseconds() / int64(dt.Unit.Multiplier())))
+				b.Append(arrow.Time32(timeOfDayNanos(v.Interface().(time.Time)) / int64(dt.Unit.Multiplier())))
 			}
 			return b.NewArray(), nil
 		case "time64":
@@ -244,9 +247,7 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 					}
 					v = v.Elem()
 				}
-				t64 := v.Interface().(time.Time)
-				midnight64 := time.Date(t64.Year(), t64.Month(), t64.Day(), 0, 0, 0, 0, t64.Location())
-				b.Append(arrow.Time64(t64.Sub(midnight64).Nanoseconds() / int64(dt.Unit.Multiplier())))
+				b.Append(arrow.Time64(timeOfDayNanos(v.Interface().(time.Time)) / int64(dt.Unit.Multiplier())))
 			}
 			return b.NewArray(), nil
 		default:
@@ -489,14 +490,10 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 		tb.Append(arrow.Date64FromTime(v.Interface().(time.Time)))
 	case *array.Time32Builder:
 		unit := tb.Type().(*arrow.Time32Type).Unit
-		t := v.Interface().(time.Time)
-		midnight := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
-		tb.Append(arrow.Time32(t.Sub(midnight).Nanoseconds() / int64(unit.Multiplier())))
+		tb.Append(arrow.Time32(timeOfDayNanos(v.Interface().(time.Time)) / int64(unit.Multiplier())))
 	case *array.Time64Builder:
 		unit := tb.Type().(*arrow.Time64Type).Unit
-		t := v.Interface().(time.Time)
-		midnight := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
-		tb.Append(arrow.Time64(t.Sub(midnight).Nanoseconds() / int64(unit.Multiplier())))
+		tb.Append(arrow.Time64(timeOfDayNanos(v.Interface().(time.Time)) / int64(unit.Multiplier())))
 	case *array.DurationBuilder:
 		d := v.Interface().(time.Duration)
 		tb.Append(arrow.Duration(d.Nanoseconds()))

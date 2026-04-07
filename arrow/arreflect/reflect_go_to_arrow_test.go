@@ -869,6 +869,11 @@ func TestBuildTemporalTaggedArray(t *testing.T) {
 				got0.Hour(), got0.Minute(), got0.Second(),
 				ref.Hour(), ref.Minute(), ref.Second())
 		}
+		// time32 uses millisecond unit — check sub-second precision to ms
+		refMs := ref.Truncate(time.Millisecond)
+		if got0.Nanosecond()/1e6 != refMs.Nanosecond()/1e6 {
+			t.Errorf("time32 millisecond: got %d ms, want %d ms", got0.Nanosecond()/1e6, refMs.Nanosecond()/1e6)
+		}
 	})
 
 	t.Run("time64", func(t *testing.T) {
@@ -888,6 +893,20 @@ func TestBuildTemporalTaggedArray(t *testing.T) {
 		got0 := t64arr.Value(0).ToTime(unit)
 		if got0.Hour() != ref.Hour() || got0.Minute() != ref.Minute() || got0.Second() != ref.Second() {
 			t.Errorf("time64 roundtrip: got %v, want %v", got0, ref)
+		}
+		// time64 uses nanosecond unit — verify full nanosecond precision
+		refWithNanos := time.Date(ref.Year(), ref.Month(), ref.Day(), ref.Hour(), ref.Minute(), ref.Second(), 123456789, ref.Location())
+		sv64 := reflect.ValueOf([]time.Time{refWithNanos})
+		arr64, err := buildTemporalArray(sv64, tagOpts{Temporal: "time64"}, mem)
+		if err != nil {
+			t.Fatalf("time64 with nanos: %v", err)
+		}
+		defer arr64.Release()
+		t64arr64 := arr64.(*array.Time64)
+		unit64 := arr64.DataType().(*arrow.Time64Type).Unit
+		got64 := t64arr64.Value(0).ToTime(unit64)
+		if got64.Nanosecond() != refWithNanos.Nanosecond() {
+			t.Errorf("time64 nanosecond: got %d, want %d", got64.Nanosecond(), refWithNanos.Nanosecond())
 		}
 	})
 }
