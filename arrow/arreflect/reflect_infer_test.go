@@ -316,7 +316,7 @@ func TestInferArrowSchema(t *testing.T) {
 			Age   int32
 			Score float64
 		}
-		schema, err := SchemaOf[S]()
+		schema, err := InferSchema[S]()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -339,7 +339,7 @@ func TestInferArrowSchema(t *testing.T) {
 			ID    int32
 			Label *string
 		}
-		schema, err := SchemaOf[S]()
+		schema, err := InferSchema[S]()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -356,7 +356,7 @@ func TestInferArrowSchema(t *testing.T) {
 			Keep   string
 			Hidden int32 `arrow:"-"`
 		}
-		schema, err := SchemaOf[S]()
+		schema, err := InferSchema[S]()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -372,7 +372,7 @@ func TestInferArrowSchema(t *testing.T) {
 		type S struct {
 			GoName int64 `arrow:"custom_name"`
 		}
-		schema, err := SchemaOf[S]()
+		schema, err := InferSchema[S]()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -382,7 +382,7 @@ func TestInferArrowSchema(t *testing.T) {
 	})
 
 	t.Run("non-struct type returns error", func(t *testing.T) {
-		_, err := SchemaOf[int]()
+		_, err := InferSchema[int]()
 		if err == nil {
 			t.Error("expected error for non-struct, got nil")
 		}
@@ -391,7 +391,7 @@ func TestInferArrowSchema(t *testing.T) {
 
 func TestInferArrowTypePublic(t *testing.T) {
 	t.Run("int32 is INT32", func(t *testing.T) {
-		dt, err := TypeOf[int32]()
+		dt, err := InferType[int32]()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -401,7 +401,7 @@ func TestInferArrowTypePublic(t *testing.T) {
 	})
 
 	t.Run("[]string is LIST", func(t *testing.T) {
-		dt, err := TypeOf[[]string]()
+		dt, err := InferType[[]string]()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -411,7 +411,7 @@ func TestInferArrowTypePublic(t *testing.T) {
 	})
 
 	t.Run("map[string]float64 is MAP", func(t *testing.T) {
-		dt, err := TypeOf[map[string]float64]()
+		dt, err := InferType[map[string]float64]()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -422,7 +422,7 @@ func TestInferArrowTypePublic(t *testing.T) {
 
 	t.Run("struct{X int32} is STRUCT", func(t *testing.T) {
 		type S struct{ X int32 }
-		dt, err := TypeOf[S]()
+		dt, err := InferType[S]()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -437,7 +437,7 @@ func TestInferArrowSchemaStructFieldEncoding(t *testing.T) {
 		type S struct {
 			Name string `arrow:"name,dict"`
 		}
-		schema, err := SchemaOf[S]()
+		schema, err := InferSchema[S]()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -454,7 +454,7 @@ func TestInferArrowSchemaStructFieldEncoding(t *testing.T) {
 		type S struct {
 			Tags []string `arrow:"tags,listview"`
 		}
-		schema, err := SchemaOf[S]()
+		schema, err := InferSchema[S]()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -471,7 +471,7 @@ func TestInferArrowSchemaStructFieldEncoding(t *testing.T) {
 		type REERow struct {
 			Val string `arrow:"val,ree"`
 		}
-		_, err := SchemaOf[REERow]()
+		_, err := InferSchema[REERow]()
 		if err == nil {
 			t.Fatal("expected error for ree tag on struct field, got nil")
 		}
@@ -495,13 +495,13 @@ func TestGoTypeOf(t *testing.T) {
 		{&arrow.DurationType{Unit: arrow.Nanosecond}, reflect.TypeOf(time.Duration(0))},
 	}
 	for _, tt := range primitives {
-		got, err := GoTypeOf(tt.dt)
+		got, err := InferGoType(tt.dt)
 		if err != nil {
-			t.Errorf("GoTypeOf(%v): %v", tt.dt, err)
+			t.Errorf("InferGoType(%v): %v", tt.dt, err)
 			continue
 		}
 		if got != tt.want {
-			t.Errorf("GoTypeOf(%v) = %v, want %v", tt.dt, got, tt.want)
+			t.Errorf("InferGoType(%v) = %v, want %v", tt.dt, got, tt.want)
 		}
 	}
 
@@ -509,7 +509,7 @@ func TestGoTypeOf(t *testing.T) {
 		arrow.Field{Name: "id", Type: arrow.PrimitiveTypes.Int64},
 		arrow.Field{Name: "name", Type: arrow.BinaryTypes.String, Nullable: true},
 	)
-	structType, err := GoTypeOf(st)
+	structType, err := InferGoType(st)
 	if err != nil {
 		t.Fatalf("struct: %v", err)
 	}
@@ -526,7 +526,7 @@ func TestGoTypeOf(t *testing.T) {
 		t.Errorf("nullable field should be *string")
 	}
 
-	listType, err := GoTypeOf(arrow.ListOf(arrow.PrimitiveTypes.Int32))
+	listType, err := InferGoType(arrow.ListOf(arrow.PrimitiveTypes.Int32))
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -537,7 +537,7 @@ func TestGoTypeOf(t *testing.T) {
 		t.Errorf("list elem wrong")
 	}
 
-	fslType, err := GoTypeOf(arrow.FixedSizeListOf(3, arrow.PrimitiveTypes.Float32))
+	fslType, err := InferGoType(arrow.FixedSizeListOf(3, arrow.PrimitiveTypes.Float32))
 	if err != nil {
 		t.Fatalf("fsl: %v", err)
 	}
@@ -548,7 +548,7 @@ func TestGoTypeOf(t *testing.T) {
 		t.Errorf("array len want 3, got %d", fslType.Len())
 	}
 
-	_, err = GoTypeOf(arrow.Null)
+	_, err = InferGoType(arrow.Null)
 	if err == nil {
 		t.Error("expected error for unsupported type")
 	}

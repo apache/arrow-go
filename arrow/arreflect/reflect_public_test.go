@@ -34,7 +34,7 @@ func TestToGo(t *testing.T) {
 		arr := b.NewInt32Array()
 		defer arr.Release()
 
-		got, err := Get[int32](arr, 0)
+		got, err := At[int32](arr, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -50,7 +50,7 @@ func TestToGo(t *testing.T) {
 		arr := b.NewStringArray()
 		defer arr.Release()
 
-		got, err := Get[string](arr, 1)
+		got, err := At[string](arr, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -71,7 +71,7 @@ func TestToGo(t *testing.T) {
 		}
 		defer arr.Release()
 
-		got, err := Get[Person](arr, 0)
+		got, err := At[Person](arr, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -87,7 +87,7 @@ func TestToGo(t *testing.T) {
 		arr := b.NewInt32Array()
 		defer arr.Release()
 
-		got, err := Get[*int32](arr, 0)
+		got, err := At[*int32](arr, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -103,7 +103,7 @@ func TestToGo(t *testing.T) {
 		arr := b.NewInt32Array()
 		defer arr.Release()
 
-		got, err := Get[int32](arr, 0)
+		got, err := At[int32](arr, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

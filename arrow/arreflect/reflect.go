@@ -328,7 +328,7 @@ func cachedStructFields(t reflect.Type) []fieldMeta {
 	return v.([]fieldMeta)
 }
 
-func Get[T any](arr arrow.Array, i int) (T, error) {
+func At[T any](arr arrow.Array, i int) (T, error) {
 	var result T
 	v := reflect.ValueOf(&result).Elem()
 	if err := setValue(v, arr, i); err != nil {
@@ -350,7 +350,31 @@ func ToSlice[T any](arr arrow.Array) ([]T, error) {
 	return result, nil
 }
 
-func FromSlice[T any](vals []T, mem memory.Allocator) (arrow.Array, error) {
+// Option configures encoding behavior for [FromSlice] and [RecordFromSlice].
+type Option func(*tagOpts)
+
+// WithDict requests dictionary encoding for the top-level array.
+func WithDict() Option { return func(o *tagOpts) { o.Dict = true } }
+
+// WithListView requests ListView encoding instead of List for slice types.
+func WithListView() Option { return func(o *tagOpts) { o.ListView = true } }
+
+// WithREE requests run-end encoding for the top-level array.
+func WithREE() Option { return func(o *tagOpts) { o.REE = true } }
+
+// WithDecimal sets the precision and scale for decimal types.
+func WithDecimal(precision, scale int32) Option {
+	return func(o *tagOpts) {
+		o.DecimalPrecision = precision
+		o.DecimalScale = scale
+		o.HasDecimalOpts = true
+	}
+}
+
+func FromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.Array, error) {
+	if mem == nil {
+		mem = memory.DefaultAllocator
+	}
 	if len(vals) == 0 {
 		dt, err := inferArrowType(reflect.TypeFor[T]())
 		if err != nil {
@@ -360,12 +384,12 @@ func FromSlice[T any](vals []T, mem memory.Allocator) (arrow.Array, error) {
 		defer b.Release()
 		return b.NewArray(), nil
 	}
+	var tOpts tagOpts
+	for _, o := range opts {
+		o(&tOpts)
+	}
 	sv := reflect.ValueOf(vals)
-	return buildArray(sv, tagOpts{}, mem)
-}
-
-func FromSliceDefault[T any](vals []T) (arrow.Array, error) {
-	return FromSlice(vals, memory.DefaultAllocator)
+	return buildArray(sv, tOpts, mem)
 }
 
 func RecordToSlice[T any](rec arrow.Record) ([]T, error) {
@@ -374,8 +398,8 @@ func RecordToSlice[T any](rec arrow.Record) ([]T, error) {
 	return ToSlice[T](sa)
 }
 
-func RecordFromSlice[T any](vals []T, mem memory.Allocator) (arrow.Record, error) {
-	arr, err := FromSlice[T](vals, mem)
+func RecordFromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.Record, error) {
+	arr, err := FromSlice[T](vals, mem, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -387,16 +411,20 @@ func RecordFromSlice[T any](vals []T, mem memory.Allocator) (arrow.Record, error
 	return array.RecordFromStructArray(sa, nil), nil
 }
 
-func RecordFromSliceDefault[T any](vals []T) (arrow.Record, error) {
-	return RecordFromSlice(vals, memory.DefaultAllocator)
+// RecordAt converts the row at index i of an Arrow Record to a Go value of type T.
+// T must be a struct type whose fields correspond to the record's columns.
+func RecordAt[T any](rec arrow.Record, i int) (T, error) {
+	sa := array.RecordToStructArray(rec)
+	defer sa.Release()
+	return At[T](sa, i)
 }
 
 // GetAny converts a single element at index i of an Arrow array to a Go value,
-// inferring the Go type from the Arrow DataType at runtime via [GoTypeOf].
+// inferring the Go type from the Arrow DataType at runtime via [InferGoType].
 // Useful when the column type is not known at compile time.
-// For typed access when T is known, prefer [Get].
+// For typed access when T is known, prefer [At].
 func GetAny(arr arrow.Array, i int) (any, error) {
-	goType, err := GoTypeOf(arr.DataType())
+	goType, err := InferGoType(arr.DataType())
 	if err != nil {
 		return nil, err
 	}
@@ -408,12 +436,12 @@ func GetAny(arr arrow.Array, i int) (any, error) {
 }
 
 // ToAnySlice converts all elements of an Arrow array to Go values,
-// inferring the Go type from the Arrow DataType at runtime via [GoTypeOf].
+// inferring the Go type from the Arrow DataType at runtime via [InferGoType].
 // All elements share the same inferred Go type; null elements are nil (for
 // nullable column types) or zero values.
 // For typed access when T is known, prefer [ToSlice].
 func ToAnySlice(arr arrow.Array) ([]any, error) {
-	goType, err := GoTypeOf(arr.DataType())
+	goType, err := InferGoType(arr.DataType())
 	if err != nil {
 		return nil, err
 	}

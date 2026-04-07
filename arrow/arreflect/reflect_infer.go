@@ -233,18 +233,18 @@ func inferStructType(t reflect.Type) (*arrow.StructType, error) {
 	return arrow.StructOf(arrowFields...), nil
 }
 
-// SchemaOf infers an *arrow.Schema from a Go struct type T.
+// InferSchema infers an *arrow.Schema from a Go struct type T.
 // T must be a struct type; returns an error otherwise.
-// For column-level type inspection without schema overhead, use [TypeOf].
+// For column-level Arrow type inspection, use [InferType].
 // Field names come from arrow struct tags or Go field names.
 // Pointer fields are marked Nullable=true.
-func SchemaOf[T any]() (*arrow.Schema, error) {
+func InferSchema[T any]() (*arrow.Schema, error) {
 	t := reflect.TypeFor[T]()
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {
-		return nil, fmt.Errorf("arreflect: SchemaOf requires a struct type T, got %v", t)
+		return nil, fmt.Errorf("arreflect: InferSchema requires a struct type T, got %v", t)
 	}
 	st, err := inferStructType(t)
 	if err != nil {
@@ -257,23 +257,23 @@ func SchemaOf[T any]() (*arrow.Schema, error) {
 	return arrow.NewSchema(fields, nil), nil
 }
 
-// TypeOf infers the Arrow DataType for a Go type T.
-// For struct types, [SchemaOf] is preferred when the result will be used with
-// arrow.Record or array.NewRecord; TypeOf returns an arrow.DataType that would
+// InferType infers the Arrow DataType for a Go type T.
+// For struct types, [InferSchema] is preferred when the result will be used with
+// arrow.Record or array.NewRecord; InferType returns an arrow.DataType that would
 // require an additional cast to *arrow.StructType.
-func TypeOf[T any]() (arrow.DataType, error) {
+func InferType[T any]() (arrow.DataType, error) {
 	t := reflect.TypeFor[T]()
 	return inferArrowType(t)
 }
 
-// GoTypeOf returns the Go reflect.Type corresponding to the given Arrow DataType.
+// InferGoType returns the Go reflect.Type corresponding to the given Arrow DataType.
 // For STRUCT types it constructs an anonymous struct type at runtime using
 // [reflect.StructOf]; field names are exported (capitalised) with the original
 // Arrow field name preserved in an arrow struct tag. Nullable Arrow fields
 // (field.Nullable == true) become pointer types (*T).
 // For DICTIONARY and RUN_END_ENCODED types it returns the Go type of the
 // value/encoded type respectively (dictionaries are resolved transparently).
-func GoTypeOf(dt arrow.DataType) (reflect.Type, error) {
+func InferGoType(dt arrow.DataType) (reflect.Type, error) {
 	switch dt.ID() {
 	case arrow.INT8:
 		return reflect.TypeOf(int8(0)), nil
@@ -328,7 +328,7 @@ func GoTypeOf(dt arrow.DataType) (reflect.Type, error) {
 		default:
 			return nil, fmt.Errorf("unsupported Arrow type for Go inference: %v: %w", dt, ErrUnsupportedType)
 		}
-		elemType, err := GoTypeOf(elemDT)
+		elemType, err := InferGoType(elemDT)
 		if err != nil {
 			return nil, err
 		}
@@ -336,7 +336,7 @@ func GoTypeOf(dt arrow.DataType) (reflect.Type, error) {
 
 	case arrow.FIXED_SIZE_LIST:
 		fsl := dt.(*arrow.FixedSizeListType)
-		elemType, err := GoTypeOf(fsl.Elem())
+		elemType, err := InferGoType(fsl.Elem())
 		if err != nil {
 			return nil, err
 		}
@@ -344,11 +344,11 @@ func GoTypeOf(dt arrow.DataType) (reflect.Type, error) {
 
 	case arrow.MAP:
 		mt := dt.(*arrow.MapType)
-		keyType, err := GoTypeOf(mt.KeyType())
+		keyType, err := InferGoType(mt.KeyType())
 		if err != nil {
 			return nil, err
 		}
-		valType, err := GoTypeOf(mt.ValueType())
+		valType, err := InferGoType(mt.ValueType())
 		if err != nil {
 			return nil, err
 		}
@@ -359,7 +359,7 @@ func GoTypeOf(dt arrow.DataType) (reflect.Type, error) {
 		fields := make([]reflect.StructField, st.NumFields())
 		for i := 0; i < st.NumFields(); i++ {
 			f := st.Field(i)
-			ft, err := GoTypeOf(f.Type)
+			ft, err := InferGoType(f.Type)
 			if err != nil {
 				return nil, err
 			}
@@ -381,10 +381,10 @@ func GoTypeOf(dt arrow.DataType) (reflect.Type, error) {
 		return reflect.StructOf(fields), nil
 
 	case arrow.DICTIONARY:
-		return GoTypeOf(dt.(*arrow.DictionaryType).ValueType)
+		return InferGoType(dt.(*arrow.DictionaryType).ValueType)
 
 	case arrow.RUN_END_ENCODED:
-		return GoTypeOf(dt.(*arrow.RunEndEncodedType).Encoded())
+		return InferGoType(dt.(*arrow.RunEndEncodedType).Encoded())
 
 	default:
 		return nil, fmt.Errorf("unsupported Arrow type for Go inference: %v: %w", dt, ErrUnsupportedType)

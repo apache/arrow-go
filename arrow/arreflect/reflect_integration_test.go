@@ -360,7 +360,7 @@ func TestReflectIntegration(t *testing.T) {
 			{ID: 1, Items: []integOrderItem{{Product: "a", Tags: map[string]string{"k": "v"}, Ratings: [5]float32{1, 2, 3, 4, 5}}}},
 		}
 
-		schema, err := SchemaOf[integOrder]()
+		schema, err := InferSchema[integOrder]()
 		if err != nil {
 			t.Fatalf("SchemaOf: %v", err)
 		}
