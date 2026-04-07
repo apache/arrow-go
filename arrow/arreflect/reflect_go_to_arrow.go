@@ -147,13 +147,13 @@ func appendPrimitiveValue(b array.Builder, v reflect.Value, dt arrow.DataType) e
 	case arrow.BINARY:
 		b.(*array.BinaryBuilder).Append(v.Bytes())
 	case arrow.DURATION:
-		d := v.Interface().(time.Duration)
+		d, _ := reflect.TypeAssert[time.Duration](v)
 		b.(*array.DurationBuilder).Append(arrow.Duration(d.Nanoseconds()))
 	case arrow.DECIMAL128:
-		n := v.Interface().(decimal128.Num)
+		n, _ := reflect.TypeAssert[decimal128.Num](v)
 		b.(*array.Decimal128Builder).Append(n)
 	case arrow.DECIMAL256:
-		n := v.Interface().(decimal256.Num)
+		n, _ := reflect.TypeAssert[decimal256.Num](v)
 		b.(*array.Decimal256Builder).Append(n)
 	case arrow.DECIMAL32:
 		b.(*array.Decimal32Builder).Append(decimal.Decimal32(v.Int()))
@@ -195,7 +195,8 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 					}
 					v = v.Elem()
 				}
-				b.Append(arrow.Date32FromTime(v.Interface().(time.Time)))
+				t, _ := reflect.TypeAssert[time.Time](v)
+				b.Append(arrow.Date32FromTime(t))
 			}
 			return b.NewArray(), nil
 		case "date64":
@@ -211,7 +212,8 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 					}
 					v = v.Elem()
 				}
-				b.Append(arrow.Date64FromTime(v.Interface().(time.Time)))
+				t, _ := reflect.TypeAssert[time.Time](v)
+				b.Append(arrow.Date64FromTime(t))
 			}
 			return b.NewArray(), nil
 		case "time32":
@@ -228,7 +230,8 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 					}
 					v = v.Elem()
 				}
-				b.Append(arrow.Time32(timeOfDayNanos(v.Interface().(time.Time)) / int64(dt.Unit.Multiplier())))
+				t, _ := reflect.TypeAssert[time.Time](v)
+				b.Append(arrow.Time32(timeOfDayNanos(t) / int64(dt.Unit.Multiplier())))
 			}
 			return b.NewArray(), nil
 		case "time64":
@@ -245,7 +248,8 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 					}
 					v = v.Elem()
 				}
-				b.Append(arrow.Time64(timeOfDayNanos(v.Interface().(time.Time)) / int64(dt.Unit.Multiplier())))
+				t, _ := reflect.TypeAssert[time.Time](v)
+				b.Append(arrow.Time64(timeOfDayNanos(t) / int64(dt.Unit.Multiplier())))
 			}
 			return b.NewArray(), nil
 		default:
@@ -262,7 +266,7 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 					}
 					v = v.Elem()
 				}
-				t := v.Interface().(time.Time)
+				t, _ := reflect.TypeAssert[time.Time](v)
 				tb.Append(arrow.Timestamp(t.UnixNano()))
 			}
 			return tb.NewArray(), nil
@@ -282,7 +286,7 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 				}
 				v = v.Elem()
 			}
-			d := v.Interface().(time.Duration)
+			d, _ := reflect.TypeAssert[time.Duration](v)
 			db.Append(arrow.Duration(d.Nanoseconds()))
 		}
 		return db.NewArray(), nil
@@ -320,7 +324,7 @@ func buildDecimalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (
 				}
 				v = v.Elem()
 			}
-			n := v.Interface().(decimal128.Num)
+			n, _ := reflect.TypeAssert[decimal128.Num](v)
 			b.Append(n)
 		}
 		return b.NewArray(), nil
@@ -344,7 +348,7 @@ func buildDecimalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (
 				}
 				v = v.Elem()
 			}
-			n := v.Interface().(decimal256.Num)
+			n, _ := reflect.TypeAssert[decimal256.Num](v)
 			b.Append(n)
 		}
 		return b.NewArray(), nil
@@ -480,26 +484,30 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 			tb.Append(v.Bytes())
 		}
 	case *array.TimestampBuilder:
-		t := v.Interface().(time.Time)
+		t, _ := reflect.TypeAssert[time.Time](v)
 		tb.Append(arrow.Timestamp(t.UnixNano()))
 	case *array.Date32Builder:
-		tb.Append(arrow.Date32FromTime(v.Interface().(time.Time)))
+		t, _ := reflect.TypeAssert[time.Time](v)
+		tb.Append(arrow.Date32FromTime(t))
 	case *array.Date64Builder:
-		tb.Append(arrow.Date64FromTime(v.Interface().(time.Time)))
+		t, _ := reflect.TypeAssert[time.Time](v)
+		tb.Append(arrow.Date64FromTime(t))
 	case *array.Time32Builder:
 		unit := tb.Type().(*arrow.Time32Type).Unit
-		tb.Append(arrow.Time32(timeOfDayNanos(v.Interface().(time.Time)) / int64(unit.Multiplier())))
+		t, _ := reflect.TypeAssert[time.Time](v)
+		tb.Append(arrow.Time32(timeOfDayNanos(t) / int64(unit.Multiplier())))
 	case *array.Time64Builder:
 		unit := tb.Type().(*arrow.Time64Type).Unit
-		tb.Append(arrow.Time64(timeOfDayNanos(v.Interface().(time.Time)) / int64(unit.Multiplier())))
+		t, _ := reflect.TypeAssert[time.Time](v)
+		tb.Append(arrow.Time64(timeOfDayNanos(t) / int64(unit.Multiplier())))
 	case *array.DurationBuilder:
-		d := v.Interface().(time.Duration)
+		d, _ := reflect.TypeAssert[time.Duration](v)
 		tb.Append(arrow.Duration(d.Nanoseconds()))
 	case *array.Decimal128Builder:
-		n := v.Interface().(decimal128.Num)
+		n, _ := reflect.TypeAssert[decimal128.Num](v)
 		tb.Append(n)
 	case *array.Decimal256Builder:
-		n := v.Interface().(decimal256.Num)
+		n, _ := reflect.TypeAssert[decimal256.Num](v)
 		tb.Append(n)
 	case *array.Decimal32Builder:
 		tb.Append(decimal.Decimal32(v.Int()))
