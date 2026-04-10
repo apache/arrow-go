@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build go1.18
+//go:build go1.22
 
 package kernels
 
@@ -56,13 +56,13 @@ func makeChunkedInt64Split(tb testing.TB, mem memory.Allocator, n, numChunks int
 	rem := n % numChunks
 	chunks := make([]arrow.Array, 0, numChunks)
 	global := 0
-	for c := 0; c < numChunks; c++ {
+	for c := range numChunks {
 		sz := base
 		if c < rem {
 			sz++
 		}
 		bld := array.NewInt64Builder(mem)
-		for i := 0; i < sz; i++ {
+		for i := range sz {
 			x := int64(global + i)
 			bld.Append((x * 6364136223846793005) ^ (x >> 12))
 		}
@@ -86,7 +86,7 @@ func BenchmarkSortIndices_Int64(b *testing.B) {
 
 			b.ReportAllocs()
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				res, err := SortIndices(ctx, columns, keys)
 				if err != nil {
 					b.Fatal(err)
@@ -111,7 +111,7 @@ func BenchmarkSortIndices_Int64_TwoKeys(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		res, err := SortIndices(ctx, columns, keys)
 		if err != nil {
 			b.Fatal(err)
@@ -132,13 +132,13 @@ func makeChunkedStringSplit(tb testing.TB, mem memory.Allocator, n, numChunks in
 	rem := n % numChunks
 	chunks := make([]arrow.Array, 0, numChunks)
 	global := 0
-	for c := 0; c < numChunks; c++ {
+	for c := range numChunks {
 		sz := base
 		if c < rem {
 			sz++
 		}
 		bld := array.NewStringBuilder(mem)
-		for i := 0; i < sz; i++ {
+		for i := range sz {
 			x := global + i
 			v := (x * 6364136223846793005) ^ (x >> 12)
 			bld.Append(fmt.Sprintf("%016x", v))
@@ -163,7 +163,7 @@ func BenchmarkSortIndices_String(b *testing.B) {
 
 			b.ReportAllocs()
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				res, err := SortIndices(ctx, columns, keys)
 				if err != nil {
 					b.Fatal(err)

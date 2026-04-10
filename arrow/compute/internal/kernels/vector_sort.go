@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build go1.18
+//go:build go1.22
 
 package kernels
 
@@ -146,8 +146,8 @@ func newFixedSizeBinaryComparator(chunks []arrow.Array, numRows int, vn bool) (c
 		return nil, fmt.Errorf("%w: expected *array.FixedSizeBinary chunk", arrow.ErrInvalid)
 	}
 	w := f0.DataType().(*arrow.FixedSizeBinaryType).ByteWidth
-	for i := 1; i < len(chunks); i++ {
-		fi, ok := chunks[i].(*array.FixedSizeBinary)
+	for _, chunk := range chunks[1:] {
+		fi, ok := chunk.(*array.FixedSizeBinary)
 		if !ok {
 			return nil, fmt.Errorf("%w: expected *array.FixedSizeBinary chunk", arrow.ErrInvalid)
 		}
@@ -315,7 +315,7 @@ func alignedChunkBoundaries(columns []*arrow.Chunked) ([]int, bool) {
 		return nil, false
 	}
 	offs := make([]int, n+1)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		chunkLength := ch0[i].Len()
 		for _, col := range columns[1:] {
 			cj := col.Chunks()
@@ -363,7 +363,7 @@ func sortIndicesSingleColumnChunked(indices []uint64, chunks []arrow.Array, comp
 func sortIndicesMultiColumnAlignedChunks(indices []uint64, offs []int, comparators []columnComparator, keys []SortKey, multiComp *multiColumnComparator, tmp []uint64, spanScratch []chunkIndexSpan) {
 	nChunks := len(offs) - 1
 	useRadix := len(keys) <= maxRadixSortKeys
-	for c := 0; c < nChunks; c++ {
+	for c := range nChunks {
 		lo, hi := offs[c], offs[c+1]
 		if useRadix {
 			radixRecordBatchSortRange(indices, tmp, comparators, keys, 0, lo, hi)
@@ -376,7 +376,7 @@ func sortIndicesMultiColumnAlignedChunks(indices []uint64, offs []int, comparato
 	}
 	less := func(a, b uint64) bool { return multiComp.compare(a, b) < 0 }
 	spans := make([]chunkIndexSpan, nChunks)
-	for c := 0; c < nChunks; c++ {
+	for c := range nChunks {
 		spans[c] = chunkIndexSpan{offs[c], offs[c+1]}
 	}
 	pairwiseMergeSortedSpans(indices, tmp, spans, less, spanScratch)

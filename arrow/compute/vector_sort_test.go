@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build go1.18
+//go:build go1.22
 
 package compute_test
 
@@ -316,7 +316,7 @@ func TestSortIndices(t *testing.T) {
 			uint64Arr := resultArr.(*array.Uint64)
 			require.Equal(t, len(tc.expected), uint64Arr.Len(), "result length mismatch")
 
-			for i := 0; i < uint64Arr.Len(); i++ {
+			for i := range uint64Arr.Len() {
 				assert.Equal(t, tc.expected[i], uint64Arr.Value(i), "at index %d", i)
 			}
 		})
@@ -346,7 +346,7 @@ func TestSortArray(t *testing.T) {
 				expected := []int32{1, 1, 2, 3, 4, 5, 6, 9}
 				resultArr := result.(*array.Int32)
 				require.Equal(t, len(expected), resultArr.Len())
-				for i := 0; i < resultArr.Len(); i++ {
+				for i := range resultArr.Len() {
 					assert.Equal(t, expected[i], resultArr.Value(i))
 				}
 			},
@@ -364,7 +364,7 @@ func TestSortArray(t *testing.T) {
 				expected := []int32{9, 6, 5, 4, 3, 2, 1, 1}
 				resultArr := result.(*array.Int32)
 				require.Equal(t, len(expected), resultArr.Len())
-				for i := 0; i < resultArr.Len(); i++ {
+				for i := range resultArr.Len() {
 					assert.Equal(t, expected[i], resultArr.Value(i))
 				}
 			},
@@ -383,7 +383,7 @@ func TestSortArray(t *testing.T) {
 				validity := []bool{true, true, true, true, false}
 				resultArr := result.(*array.Int32)
 				require.Equal(t, len(expected), resultArr.Len())
-				for i := 0; i < resultArr.Len(); i++ {
+				for i := range resultArr.Len() {
 					if validity[i] {
 						assert.Equal(t, expected[i], resultArr.Value(i), "at index %d", i)
 					} else {
@@ -406,7 +406,7 @@ func TestSortArray(t *testing.T) {
 				validity := []bool{false, true, true, true, true}
 				resultArr := result.(*array.Int32)
 				require.Equal(t, len(expected), resultArr.Len())
-				for i := 0; i < resultArr.Len(); i++ {
+				for i := range resultArr.Len() {
 					if validity[i] {
 						assert.Equal(t, expected[i], resultArr.Value(i), "at index %d", i)
 					} else {
@@ -447,7 +447,7 @@ func TestSortArray(t *testing.T) {
 				expected := []string{"apple", "banana", "cherry", "date"}
 				resultArr := result.(*array.String)
 				require.Equal(t, len(expected), resultArr.Len())
-				for i := 0; i < resultArr.Len(); i++ {
+				for i := range resultArr.Len() {
 					assert.Equal(t, expected[i], resultArr.Value(i))
 				}
 			},
@@ -476,7 +476,7 @@ func TestSortArray(t *testing.T) {
 			validateFunc: func(t *testing.T, result arrow.Array) {
 				resultArr := result.(*array.Int32)
 				require.Equal(t, 3, resultArr.Len())
-				for i := 0; i < resultArr.Len(); i++ {
+				for i := range resultArr.Len() {
 					assert.True(t, resultArr.IsNull(i), "expected null at index %d", i)
 				}
 			},
@@ -494,7 +494,7 @@ func TestSortArray(t *testing.T) {
 				expected := []int32{1, 1, 1, 2, 2}
 				resultArr := result.(*array.Int32)
 				require.Equal(t, len(expected), resultArr.Len())
-				for i := 0; i < resultArr.Len(); i++ {
+				for i := range resultArr.Len() {
 					assert.Equal(t, expected[i], resultArr.Value(i))
 				}
 			},
@@ -512,7 +512,7 @@ func TestSortArray(t *testing.T) {
 				expected := []uint64{25, 50, 100, 200}
 				resultArr := result.(*array.Uint64)
 				require.Equal(t, len(expected), resultArr.Len())
-				for i := 0; i < resultArr.Len(); i++ {
+				for i := range resultArr.Len() {
 					assert.Equal(t, expected[i], resultArr.Value(i))
 				}
 			},
@@ -530,7 +530,7 @@ func TestSortArray(t *testing.T) {
 				expected := [][]byte{{1, 2, 3}, {2, 2, 2}, {3, 2, 1}}
 				resultArr := result.(*array.Binary)
 				require.Equal(t, len(expected), resultArr.Len())
-				for i := 0; i < resultArr.Len(); i++ {
+				for i := range resultArr.Len() {
 					assert.Equal(t, expected[i], resultArr.Value(i))
 				}
 			},
@@ -604,7 +604,7 @@ func TestSortRecordBatch(t *testing.T) {
 		resultVal := result.Column(1).(*array.Int32)
 		resultPri := result.Column(2).(*array.Int32)
 
-		for i := 0; i < int(result.NumRows()); i++ {
+		for i := range int(result.NumRows()) {
 			assert.Equal(t, expectedCat[i], resultCat.Value(i), "category at %d", i)
 			assert.Equal(t, expectedVal[i], resultVal.Value(i), "value at %d", i)
 			assert.Equal(t, expectedPri[i], resultPri.Value(i), "priority at %d", i)
@@ -659,7 +659,7 @@ func TestSortRecordBatch(t *testing.T) {
 		expectedCol3 := []int32{200, 100, 400, 300}
 
 		require.Equal(t, 4, int(result.NumRows()))
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			assert.Equal(t, expectedCol1[i], resultCol1.Value(i), "col1 at %d", i)
 			assert.Equal(t, expectedCol2[i], resultCol2.Value(i), "col2 at %d", i)
 			assert.Equal(t, expectedCol3[i], resultCol3.Value(i), "col3 at %d", i)
@@ -750,7 +750,7 @@ func TestSortTable(t *testing.T) {
 		nameData := result.Column(0).Data().Chunk(0).(*array.String)
 		ageData := result.Column(1).Data().Chunk(0).(*array.Int32)
 
-		for i := 0; i < int(result.NumRows()); i++ {
+		for i := range int(result.NumRows()) {
 			assert.Equal(t, expectedNames[i], nameData.Value(i))
 			assert.Equal(t, expectedAges[i], ageData.Value(i))
 		}
@@ -822,7 +822,7 @@ func TestSortTable(t *testing.T) {
 		idData := result.Column(2).Data().Chunk(0).(*array.Int32)
 
 		require.Equal(t, 4, int(result.NumRows()))
-		for i := 0; i < int(result.NumRows()); i++ {
+		for i := range int(result.NumRows()) {
 			assert.Equal(t, expectedCategory[i], categoryData.Value(i), "category at %d", i)
 			assert.Equal(t, expectedPriority[i], priorityData.Value(i), "priority at %d", i)
 			assert.Equal(t, expectedId[i], idData.Value(i), "id at %d", i)
@@ -862,7 +862,7 @@ func TestSortIndicesChunked(t *testing.T) {
 		// Expected: values [1, 1, 3, 4, 5] -> indices [1, 3, 0, 2, 4]
 		expected := []uint64{1, 3, 0, 2, 4}
 		require.Equal(t, len(expected), resultArr.Len())
-		for i := 0; i < resultArr.Len(); i++ {
+		for i := range resultArr.Len() {
 			assert.Equal(t, expected[i], resultArr.Value(i), "index at %d", i)
 		}
 	})
@@ -895,7 +895,7 @@ func TestSortIndicesChunked(t *testing.T) {
 		// Expected: ["a", "b", "c", null] -> indices [2, 0, 3, 1]
 		expected := []uint64{2, 0, 3, 1}
 		require.Equal(t, len(expected), resultArr.Len())
-		for i := 0; i < resultArr.Len(); i++ {
+		for i := range resultArr.Len() {
 			assert.Equal(t, expected[i], resultArr.Value(i), "index at %d", i)
 		}
 	})
@@ -928,7 +928,7 @@ func TestSortIndicesChunked(t *testing.T) {
 		// Expected: [0.5, 1.0, 2.0, NaN] -> indices [3, 0, 2, 1]
 		expected := []uint64{3, 0, 2, 1}
 		require.Equal(t, len(expected), resultArr.Len())
-		for i := 0; i < resultArr.Len(); i++ {
+		for i := range resultArr.Len() {
 			assert.Equal(t, expected[i], resultArr.Value(i), "index at %d", i)
 		}
 	})
@@ -1003,7 +1003,7 @@ func TestSortTableChunked(t *testing.T) {
 		catData := result.Column(0).Data().Chunk(0).(*array.String)
 		valData := result.Column(1).Data().Chunk(0).(*array.Int32)
 
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			assert.Equal(t, expectedCat[i], catData.Value(i), "category at %d", i)
 			assert.Equal(t, expectedVal[i], valData.Value(i), "value at %d", i)
 		}
@@ -1102,7 +1102,7 @@ func TestSortTableChunked(t *testing.T) {
 		col2Data := result.Column(1).Data().Chunk(0).(*array.String)
 		col3Data := result.Column(2).Data().Chunk(0).(*array.Int32)
 
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			assert.Equal(t, expectedCol1[i], col1Data.Value(i), "col1 at %d", i)
 			assert.Equal(t, expectedCol2[i], col2Data.Value(i), "col2 at %d", i)
 			assert.Equal(t, expectedCol3[i], col3Data.Value(i), "col3 at %d", i)
