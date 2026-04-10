@@ -383,8 +383,10 @@ func sortIndicesMultiColumnAlignedChunks(indices []uint64, offs []int, comparato
 }
 
 // SortIndices returns a stable permutation of 0..n-1 that would lexicographically sort the given
-// columns. Each *arrow.Chunked is used via its .Chunks() only—no concatenate. columns[i] pairs with
-// keys[i] for order and null placement on that column.
+// columns. Each *arrow.Chunked is used via its .Chunks() only—no concatenate.
+//
+// Important: columns[i] pairs with keys[i] for order and null placement on that column.
+// This kernel expects the public API to have already extracted the relevant columns from the input batch/table.
 func SortIndices(ctx *exec.KernelCtx, columns []*arrow.Chunked, keys []SortKey) (*exec.ExecResult, error) {
 	if len(columns) == 0 || len(keys) == 0 {
 		return nil, fmt.Errorf("%w: must have at least one column and one sort key", arrow.ErrInvalid)
