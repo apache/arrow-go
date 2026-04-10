@@ -148,13 +148,15 @@ func nullPartitionNoValidityNulls(lo, hi int, nullPlacement NullPlacement) nullP
 }
 
 // visitConstantRanges mirrors VisitConstantRanges in vector_sort.cc.
-func visitConstantRanges(indices []uint64, offsetLo, offsetHi int, key SortKey, comp columnComparator, visit func(rs, re int)) {
-	if offsetHi-offsetLo <= 1 {
+// seg is a view of the permutation buffer (e.g. indices[finiteLo:finiteHi]). visit(rs, re) receives
+// half-open offsets relative to seg; the caller maps them into the full indices slice.
+func visitConstantRanges(seg []uint64, key SortKey, comp columnComparator, visit func(rs, re int)) {
+	if len(seg) <= 1 {
 		return
 	}
-	rs := offsetLo
-	for t := offsetLo + 1; t <= offsetHi; t++ {
-		if t < offsetHi && comp.compareRowsForKey(indices[t-1], indices[t], key) == 0 {
+	rs := 0
+	for t := 1; t <= len(seg); t++ {
+		if t < len(seg) && comp.compareRowsForKey(seg[t-1], seg[t], key) == 0 {
 			continue
 		}
 		if t-rs > 0 {
@@ -196,8 +198,8 @@ func radixRecordBatchSortRange(indices []uint64, scratch []uint64, comparators [
 	// Same order as C++: null-likes, true nulls, then tie ranges among finite values.
 	radixRecordBatchSortRange(indices, scratch, comparators, keys, next, nanLo, nanHi)
 	radixRecordBatchSortRange(indices, scratch, comparators, keys, next, nullLo, nullHi)
-	visitConstantRanges(indices, finiteLo, finiteHi, key, comp, func(rs, re int) {
-		radixRecordBatchSortRange(indices, scratch, comparators, keys, next, rs, re)
+	visitConstantRanges(indices[finiteLo:finiteHi], key, comp, func(rs, re int) {
+		radixRecordBatchSortRange(indices, scratch, comparators, keys, next, finiteLo+rs, finiteLo+re)
 	})
 }
 
