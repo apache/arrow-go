@@ -316,14 +316,14 @@ func alignedChunkBoundaries(columns []*arrow.Chunked) ([]int, bool) {
 	}
 	offs := make([]int, n+1)
 	for i := 0; i < n; i++ {
-		L := ch0[i].Len()
+		chunkLength := ch0[i].Len()
 		for j := 1; j < len(columns); j++ {
 			cj := columns[j].Chunks()
-			if len(cj) != n || cj[i].Len() != L {
+			if len(cj) != n || cj[i].Len() != chunkLength {
 				return nil, false
 			}
 		}
-		offs[i+1] = offs[i] + L
+		offs[i+1] = offs[i] + chunkLength
 	}
 	if offs[n] != columns[0].Len() {
 		return nil, false
