@@ -43,7 +43,7 @@ func isOffsetTypeOk(offsetType arrow.DataType) bool {
 	case *arrow.Int16Type:
 		return true
 	case *arrow.DictionaryType:
-		return arrow.IsInteger(offsetType.IndexType.ID()) && arrow.TypeEqual(offsetType.ValueType, arrow.PrimitiveTypes.Int16)
+		return arrow.TypeEqual(offsetType.ValueType, arrow.PrimitiveTypes.Int16)
 	case *arrow.RunEndEncodedType:
 		return offsetType.ValidRunEndsType(offsetType.RunEnds()) &&
 			arrow.TypeEqual(offsetType.Encoded(), arrow.PrimitiveTypes.Int16)
