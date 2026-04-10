@@ -193,8 +193,7 @@ func sortIndicesImpl(ctx context.Context, opts FunctionOptions, input Datum) (Da
 	}()
 
 	allocator := exec.GetAllocator(ctx)
-	// Kernel expects exec allocator on context; avoid canceling user ctx mid-sort.
-	execCtx := &exec.KernelCtx{Ctx: exec.WithAllocator(context.Background(), allocator)}
+	execCtx := &exec.KernelCtx{Ctx: exec.WithAllocator(ctx, allocator)}
 
 	result, err := kernels.SortIndices(execCtx, sortColumns, sortKeys)
 	if err != nil {
