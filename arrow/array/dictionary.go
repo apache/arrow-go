@@ -646,6 +646,10 @@ func (b *dictionaryBuilder) AppendEmptyValues(n int) {
 	}
 }
 
+func (b *dictionaryBuilder) UnsafeAppendBoolToBitmap(v bool) {
+	panic("Calling UnsafeAppendBoolToBitmap on dictionaryBuilder would leave it in inconsistent state. Use AppendIndices instead.")
+}
+
 func (b *dictionaryBuilder) Reserve(n int) {
 	b.idxBuilder.Reserve(n)
 }
