@@ -33,7 +33,8 @@ var (
 		Description: `This function computes an array of indices that define a stable sort.
 Supports arrays, chunked arrays, record batches, and tables.
 For arrays and chunked arrays, use a single SortKey (ColumnIndex is ignored).
-For record batches and tables, use []SortKey to specify columns and their sort order; at least one key is required and each key must reference a valid column.`,
+For record batches and tables, use []SortKey to specify columns and sort
+order; at least one key is required. Each key must reference a valid column.`,
 		ArgNames:    []string{"input"},
 		OptionsType: "SortKeys",
 	}
@@ -52,9 +53,11 @@ For record batches and tables, use []SortKey to specify columns and their sort o
 
 	sortDoc = FunctionDoc{
 		Summary: "Return a sorted copy of the input",
-		Description: `This function sorts the input using the same ordering as sort_indices and returns
-the reordered values. It is equivalent to take(input, sort_indices(input, options)).
-Supports arrays, chunked arrays, record batches, and tables with the same SortKeys options as sort_indices.`,
+		Description: `This function sorts the input using the same ordering as sort_indices
+and returns the reordered values. It is equivalent to take(input,
+sort_indices(input, options)).
+Supports arrays, chunked arrays, record batches, and tables with the same
+SortKeys options as sort_indices.`,
 		ArgNames:    []string{"input"},
 		OptionsType: "SortKeys",
 	}
