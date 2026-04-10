@@ -45,8 +45,8 @@ const (
 
 // SortOptions defines options for the sort_indices function.
 type SortOptions struct {
-	Order         SortOrder     `compute:"order"`
-	NullPlacement NullPlacement `compute:"null_placement"`
+	Order         SortOrder
+	NullPlacement NullPlacement
 }
 
 func (SortOptions) TypeName() string { return "SortOptions" }
