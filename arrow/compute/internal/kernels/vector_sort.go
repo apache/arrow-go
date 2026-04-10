@@ -23,6 +23,7 @@ import (
 	"slices"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 )
 
@@ -119,6 +120,43 @@ func (m *multiColumnComparator) compare(idxA, idxB uint64) int {
 	return 0
 }
 
+func extensionStorageFixedSizeBinaryChunks(chunks []arrow.Array) ([]arrow.Array, error) {
+	out := make([]arrow.Array, len(chunks))
+	for i, ch := range chunks {
+		ext, ok := ch.(array.ExtensionArray)
+		if !ok {
+			return nil, fmt.Errorf("%w: extension column must implement array.ExtensionArray", arrow.ErrInvalid)
+		}
+		st := ext.Storage()
+		if st.DataType().ID() != arrow.FIXED_SIZE_BINARY {
+			return nil, fmt.Errorf("%w: sorting extension columns is only supported when storage is fixed_size_binary (got %s)",
+				arrow.ErrNotImplemented, st.DataType())
+		}
+		out[i] = st
+	}
+	return out, nil
+}
+
+func newFixedSizeBinaryComparator(chunks []arrow.Array, numRows int, vn bool) (columnComparator, error) {
+	f0, ok := chunks[0].(*array.FixedSizeBinary)
+	if !ok {
+		return nil, fmt.Errorf("%w: expected *array.FixedSizeBinary chunk", arrow.ErrInvalid)
+	}
+	w := f0.DataType().(*arrow.FixedSizeBinaryType).ByteWidth
+	for i := 1; i < len(chunks); i++ {
+		fi, ok := chunks[i].(*array.FixedSizeBinary)
+		if !ok {
+			return nil, fmt.Errorf("%w: expected *array.FixedSizeBinary chunk", arrow.ErrInvalid)
+		}
+		wi := fi.DataType().(*arrow.FixedSizeBinaryType).ByteWidth
+		if wi != w {
+			return nil, fmt.Errorf("%w: fixed_size_binary chunks must have the same byte width (%d vs %d)",
+				arrow.ErrInvalid, w, wi)
+		}
+	}
+	return newPhysicalSortFixedSizeBinaryColumn(chunks, numRows, vn), nil
+}
+
 // createChunkedComparator builds a column comparator for these chunks (one Arrow type for all chunks).
 func createChunkedComparator(chunks []arrow.Array, numRows int) (columnComparator, error) {
 	if len(chunks) == 0 {
@@ -189,6 +227,14 @@ func createChunkedComparator(chunks []arrow.Array, numRows int) (columnComparato
 		return newPhysicalSortBinaryColumn(chunks, numRows, validityNulls), nil
 	case arrow.LARGE_BINARY:
 		return newPhysicalSortLargeBinaryColumn(chunks, numRows, validityNulls), nil
+	case arrow.FIXED_SIZE_BINARY:
+		return newFixedSizeBinaryComparator(chunks, numRows, validityNulls)
+	case arrow.EXTENSION:
+		storageChunks, err := extensionStorageFixedSizeBinaryChunks(chunks)
+		if err != nil {
+			return nil, err
+		}
+		return newFixedSizeBinaryComparator(storageChunks, numRows, validityNulls)
 	default:
 		return nil, fmt.Errorf("%w: sorting not supported for type %s", arrow.ErrNotImplemented, typeID)
 	}

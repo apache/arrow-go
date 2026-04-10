@@ -844,3 +844,28 @@ func (c *physicalSortLargeBinaryColumn) isNullLikeAt(uint64) bool { return false
 func (c *physicalSortLargeBinaryColumn) columnHasValidityNulls() bool {
 	return c.base.columnHasValidityNulls()
 }
+
+type physicalSortFixedSizeBinaryColumn struct{ base physicalColumnBase }
+
+func newPhysicalSortFixedSizeBinaryColumn(chunks []arrow.Array, numRows int, vn bool) *physicalSortFixedSizeBinaryColumn {
+	return &physicalSortFixedSizeBinaryColumn{base: newPhysicalColumnBase(chunks, numRows, vn)}
+}
+
+func (c *physicalSortFixedSizeBinaryColumn) compareRowsForKey(i, j uint64, key SortKey) int {
+	ai, aj, li, lj := c.base.pair(i, j)
+	a := ai.(*array.FixedSizeBinary)
+	b := aj.(*array.FixedSizeBinary)
+	if c.base.validityNulls {
+		if v, stop := compareKeyedNulls(a.IsNull(li), b.IsNull(lj), key); stop {
+			return v
+		}
+	}
+	return compareBytesOrdered(key.Order, a.Value(li), b.Value(lj))
+}
+
+func (c *physicalSortFixedSizeBinaryColumn) isNullAt(row uint64) bool { return c.base.isNullAtGlobal(row) }
+func (c *physicalSortFixedSizeBinaryColumn) hasNullLikeValues() bool  { return false }
+func (c *physicalSortFixedSizeBinaryColumn) isNullLikeAt(uint64) bool { return false }
+func (c *physicalSortFixedSizeBinaryColumn) columnHasValidityNulls() bool {
+	return c.base.columnHasValidityNulls()
+}

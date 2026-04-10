@@ -29,8 +29,10 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/compute"
 	"github.com/apache/arrow-go/v18/arrow/compute/internal/kernels"
 	"github.com/apache/arrow-go/v18/arrow/decimal"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1164,8 +1166,8 @@ func TestSortTableChunked(t *testing.T) {
 // caller-owned values.
 //
 // TestVectorSortIndicesCpp* functions below mirror sort_indices coverage from Apache Arrow C++
-// (vector_sort_test.cc, SortIndices / array_sort_indices). Where Go lacks a type (e.g.
-// FIXED_SIZE_BINARY) or NaN ordering differs, tests substitute or skip with a short comment.
+// (vector_sort_test.cc, SortIndices / array_sort_indices). Where Go differs (e.g. NaN ordering),
+// tests substitute or skip with a short comment.
 func testSortIndicesUint64(t *testing.T, ctx context.Context, input compute.Datum, opts compute.SortOptions, want []uint64) {
 	t.Helper()
 	out, err := compute.SortIndices(ctx, input, opts)
@@ -1237,11 +1239,39 @@ func TestVectorSortIndicesCppArrayParity(t *testing.T) {
 		}, []uint64{1, 5, 2, 7, 4, 6, 0, 3})
 	})
 
-	t.Run("FixedSizeBinarySkippedStandalone", func(t *testing.T) {
-		// C++ TestArraySortIndicesForFixedSizeBinary exercises bare arrays; Go's sort_indices
-		// kernel does not support FIXED_SIZE_BINARY for KindArray yet. Same logical ordering
-		// is covered on record batches in TestVectorSortIndicesCppRecordBatchParity/MoreTypes.
-		t.Skip("sort_indices: FIXED_SIZE_BINARY not implemented for array datum")
+	t.Run("FixedSizeBinaryMatchesCpp", func(t *testing.T) {
+		// C++ TestArraySortIndicesForFixedSizeBinary, fixed_size_binary(3).
+		// array.FromJSON decodes fixed_size_binary elements as standard base64 (builder UnmarshalOne).
+		dt := &arrow.FixedSizeBinaryType{ByteWidth: 3}
+		arr, _, err := array.FromJSON(mem, dt, strings.NewReader(`["ZmVm", "YWJj", "Z2hp"]`))
+		require.NoError(t, err)
+		defer arr.Release()
+		d := compute.NewDatumWithoutOwning(arr)
+		for _, np := range []kernels.NullPlacement{kernels.NullsAtEnd, kernels.NullsAtStart} {
+			testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+				{Order: kernels.Ascending, NullPlacement: np},
+			}, []uint64{1, 0, 2})
+			testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+				{Order: kernels.Descending, NullPlacement: np},
+			}, []uint64{2, 0, 1})
+		}
+		inp := `[null, "Y2Nj", "YmJi", null, "YWFh", "YmJi"]`
+		arr2, _, err := array.FromJSON(mem, dt, strings.NewReader(inp))
+		require.NoError(t, err)
+		defer arr2.Release()
+		d2 := compute.NewDatumWithoutOwning(arr2)
+		testSortIndicesUint64(t, ctx, d2, compute.SortOptions{
+			{Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+		}, []uint64{4, 2, 5, 1, 0, 3})
+		testSortIndicesUint64(t, ctx, d2, compute.SortOptions{
+			{Order: kernels.Ascending, NullPlacement: kernels.NullsAtStart},
+		}, []uint64{0, 3, 4, 2, 5, 1})
+		testSortIndicesUint64(t, ctx, d2, compute.SortOptions{
+			{Order: kernels.Descending, NullPlacement: kernels.NullsAtEnd},
+		}, []uint64{1, 2, 5, 4, 0, 3})
+		testSortIndicesUint64(t, ctx, d2, compute.SortOptions{
+			{Order: kernels.Descending, NullPlacement: kernels.NullsAtStart},
+		}, []uint64{0, 3, 1, 2, 5, 4})
 	})
 }
 
@@ -1453,13 +1483,12 @@ func TestVectorSortIndicesCppRecordBatchParity(t *testing.T) {
 	})
 
 	t.Run("MoreTypes", func(t *testing.T) {
-		// C++ uses fixed_size_binary(3) for column "c"; Go sort_indices does not support
-		// FIXED_SIZE_BINARY yet. UTF8 with the same 3-byte logical values preserves order.
 		ts := &arrow.TimestampType{Unit: arrow.Microsecond}
+		fsb3 := &arrow.FixedSizeBinaryType{ByteWidth: 3}
 		schema := arrow.NewSchema([]arrow.Field{
 			{Name: "a", Type: ts},
 			{Name: "b", Type: arrow.BinaryTypes.LargeString},
-			{Name: "c", Type: arrow.BinaryTypes.String},
+			{Name: "c", Type: fsb3},
 		}, nil)
 		ba := array.NewTimestampBuilder(mem, ts)
 		defer ba.Release()
@@ -1478,9 +1507,11 @@ func TestVectorSortIndicesCppRecordBatchParity(t *testing.T) {
 		colB := bb.NewArray()
 		defer colB.Release()
 
-		bc := array.NewStringBuilder(mem)
+		bc := array.NewFixedSizeBinaryBuilder(mem, fsb3)
 		defer bc.Release()
-		bc.AppendValues([]string{"aaa", "bbb", "bbb", "aaa", "aaa", "bbb"}, nil)
+		for _, v := range [][]byte{[]byte("aaa"), []byte("bbb"), []byte("bbb"), []byte("aaa"), []byte("aaa"), []byte("bbb")} {
+			bc.Append(v)
+		}
 		colC := bc.NewArray()
 		defer colC.Release()
 
@@ -1634,19 +1665,18 @@ func TestVectorSortIndicesCppTableParity(t *testing.T) {
 	})
 
 	t.Run("BinaryLikeTwoChunks", func(t *testing.T) {
-		// C++ uses large_utf8 + fixed_size_binary(3); Go uses UTF8 for "b" (same lexicographic
-		// order as 3-byte FSB values) because sort_indices has no FSB support.
+		fsb3 := &arrow.FixedSizeBinaryType{ByteWidth: 3}
 		s := arrow.NewSchema([]arrow.Field{
 			{Name: "a", Type: arrow.BinaryTypes.LargeString},
-			{Name: "b", Type: arrow.BinaryTypes.String},
+			{Name: "b", Type: fsb3},
 		}, nil)
-		buildBatch := func(a, b []string, bNulls []bool) arrow.RecordBatch {
+		buildBatch := func(a []string, b [][]byte, bNulls []bool) arrow.RecordBatch {
 			ab := array.NewLargeStringBuilder(mem)
 			defer ab.Release()
 			ab.AppendValues(a, nil)
 			colA := ab.NewArray()
 
-			bb := array.NewStringBuilder(mem)
+			bb := array.NewFixedSizeBinaryBuilder(mem, fsb3)
 			defer bb.Release()
 			for i := range a {
 				if bNulls[i] {
@@ -1664,13 +1694,13 @@ func TestVectorSortIndicesCppTableParity(t *testing.T) {
 		}
 		b1 := buildBatch(
 			[]string{"one", "two", "three", "four"},
-			[]string{"", "aaa", "bbb", "ccc"},
+			[][]byte{nil, []byte("aaa"), []byte("bbb"), []byte("ccc")},
 			[]bool{true, false, false, false},
 		)
 		defer b1.Release()
 		b2 := buildBatch(
 			[]string{"one", "two", "three", "four"},
-			[]string{"ddd", "ccc", "bbb", "aaa"},
+			[][]byte{[]byte("ddd"), []byte("ccc"), []byte("bbb"), []byte("aaa")},
 			[]bool{false, false, false, false},
 		)
 		defer b2.Release()
@@ -1750,4 +1780,37 @@ func TestVectorSortIndicesCppTableParity(t *testing.T) {
 		opts2[1].NullPlacement = kernels.NullsAtStart
 		testSortIndicesUint64(t, ctx, d, opts2, []uint64{3, 4, 2, 5, 1, 0, 6, 7})
 	})
+}
+
+// TestSortIndicesUUIDLexicographic checks extension UUID columns sort by underlying 16-byte order.
+func TestSortIndicesUUIDLexicographic(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	ctx := context.Background()
+
+	uLo := uuid.UUID([16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1})
+	uMid := uuid.UUID([16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2})
+	uHi := uuid.UUID([16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3})
+
+	b := extensions.NewUUIDBuilder(mem)
+	defer b.Release()
+	b.Append(uHi)
+	b.AppendNull()
+	b.Append(uLo)
+	b.Append(uMid)
+	arr := b.NewArray()
+	defer arr.Release()
+
+	d := compute.NewDatumWithoutOwning(arr)
+	testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+		{Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+	}, []uint64{2, 3, 0, 1})
+	testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+		{Order: kernels.Ascending, NullPlacement: kernels.NullsAtStart},
+	}, []uint64{1, 2, 3, 0})
+	testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+		{Order: kernels.Descending, NullPlacement: kernels.NullsAtEnd},
+	}, []uint64{0, 3, 2, 1})
+	testSortIndicesUint64(t, ctx, d, compute.SortOptions{
+		{Order: kernels.Descending, NullPlacement: kernels.NullsAtStart},
+	}, []uint64{1, 0, 3, 2})
 }
