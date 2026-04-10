@@ -128,6 +128,9 @@ func extensionStorageFixedSizeBinaryChunks(chunks []arrow.Array) ([]arrow.Array,
 			return nil, fmt.Errorf("%w: extension column must implement array.ExtensionArray", arrow.ErrInvalid)
 		}
 		st := ext.Storage()
+
+		// TODO: allow individual extension types to sort themselves properly
+
 		if st.DataType().ID() != arrow.FIXED_SIZE_BINARY {
 			return nil, fmt.Errorf("%w: sorting extension columns is only supported when storage is fixed_size_binary (got %s)",
 				arrow.ErrNotImplemented, st.DataType())
