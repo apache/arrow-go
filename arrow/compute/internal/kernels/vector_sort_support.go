@@ -175,37 +175,3 @@ func compareCmperOrdered[T interface{ Cmp(T) int }](order SortOrder, vi, vj T) i
 	}
 	return c
 }
-
-func compareDayTimeOrdered(order SortOrder, vi, vj arrow.DayTimeInterval) int {
-	if c := cmp.Compare(vi.Days, vj.Days); c != 0 {
-		if order == Descending {
-			return -c
-		}
-		return c
-	}
-	c := cmp.Compare(vi.Milliseconds, vj.Milliseconds)
-	if order == Descending {
-		return -c
-	}
-	return c
-}
-
-func compareMonthDayNanoOrdered(order SortOrder, vi, vj arrow.MonthDayNanoInterval) int {
-	if c := cmp.Compare(vi.Months, vj.Months); c != 0 {
-		if order == Descending {
-			return -c
-		}
-		return c
-	}
-	if c := cmp.Compare(vi.Days, vj.Days); c != 0 {
-		if order == Descending {
-			return -c
-		}
-		return c
-	}
-	c := cmp.Compare(vi.Nanoseconds, vj.Nanoseconds)
-	if order == Descending {
-		return -c
-	}
-	return c
-}

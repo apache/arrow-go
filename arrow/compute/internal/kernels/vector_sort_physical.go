@@ -685,7 +685,7 @@ func (c *physicalSortDayTimeColumn) compareRowsForKey(i, j uint64, key SortKey) 
 			return v
 		}
 	}
-	return compareDayTimeOrdered(key.Order, a.Value(li), b.Value(lj))
+	return compareCmperOrdered(key.Order, a.Value(li), b.Value(lj))
 }
 
 func (c *physicalSortDayTimeColumn) isNullAt(row uint64) bool { return c.base.isNullAtGlobal(row) }
@@ -710,7 +710,7 @@ func (c *physicalSortMonthDayNanoColumn) compareRowsForKey(i, j uint64, key Sort
 			return v
 		}
 	}
-	return compareMonthDayNanoOrdered(key.Order, a.Value(li), b.Value(lj))
+	return compareCmperOrdered(key.Order, a.Value(li), b.Value(lj))
 }
 
 func (c *physicalSortMonthDayNanoColumn) isNullAt(row uint64) bool { return c.base.isNullAtGlobal(row) }
