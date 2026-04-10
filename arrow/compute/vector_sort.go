@@ -213,8 +213,7 @@ func SortIndices(ctx context.Context, input Datum, keys SortOptions) (Datum, err
 
 // SortIndicesArray computes the indices that would sort the input array.
 func SortIndicesArray(ctx context.Context, input arrow.Array, key SortKey) (arrow.Array, error) {
-	v := NewDatum(input)
-	defer v.Release()
+	v := NewDatumWithoutOwning(input)
 
 	indices, err := SortIndices(ctx, v, SortOptions{key})
 	if err != nil {
@@ -227,8 +226,7 @@ func SortIndicesArray(ctx context.Context, input arrow.Array, key SortKey) (arro
 
 // SortIndicesChunked computes the indices that would sort the input chunked array.
 func SortIndicesChunked(ctx context.Context, input *arrow.Chunked, key SortKey) (arrow.Array, error) {
-	v := NewDatum(input)
-	defer v.Release()
+	v := NewDatumWithoutOwning(input)
 
 	indices, err := SortIndices(ctx, v, SortOptions{key})
 	if err != nil {
@@ -245,8 +243,7 @@ func SortIndicesRecordBatch(ctx context.Context, batch arrow.RecordBatch, keys [
 		return nil, fmt.Errorf("%w: at least one sort key is required", arrow.ErrInvalid)
 	}
 
-	batchDatum := &RecordDatum{Value: batch}
-	defer batchDatum.Release()
+	batchDatum := NewDatumWithoutOwning(batch)
 
 	indices, err := SortIndices(ctx, batchDatum, SortOptions(keys))
 	if err != nil {
@@ -263,8 +260,7 @@ func SortIndicesTable(ctx context.Context, tbl arrow.Table, keys []SortKey) (arr
 		return nil, fmt.Errorf("%w: at least one sort key is required", arrow.ErrInvalid)
 	}
 
-	tblDatum := &TableDatum{Value: tbl}
-	defer tblDatum.Release()
+	tblDatum := NewDatumWithoutOwning(tbl)
 
 	indices, err := SortIndices(ctx, tblDatum, SortOptions(keys))
 	if err != nil {
@@ -294,8 +290,7 @@ func SortArray(ctx context.Context, input arrow.Array, key SortKey) (arrow.Array
 
 // SortChunked returns a sorted copy of the input chunked array.
 func SortChunked(ctx context.Context, input *arrow.Chunked, key SortKey) (*arrow.Chunked, error) {
-	inputDatum := &ChunkedDatum{Value: input}
-	defer inputDatum.Release()
+	inputDatum := NewDatumWithoutOwning(input)
 
 	indices, err := SortIndices(ctx, inputDatum, SortOptions{key})
 	if err != nil {
@@ -330,8 +325,7 @@ func SortRecordBatch(ctx context.Context, batch arrow.RecordBatch, keys []kernel
 		return nil, fmt.Errorf("%w: at least one sort key is required", arrow.ErrInvalid)
 	}
 
-	batchDatum := &RecordDatum{Value: batch}
-	defer batchDatum.Release()
+	batchDatum := NewDatumWithoutOwning(batch)
 
 	indices, err := SortIndices(ctx, batchDatum, SortOptions(keys))
 	if err != nil {
@@ -367,8 +361,7 @@ func SortTable(ctx context.Context, tbl arrow.Table, keys []kernels.SortKey) (ar
 		return nil, fmt.Errorf("%w: at least one sort key is required", arrow.ErrInvalid)
 	}
 
-	tblDatum := &TableDatum{Value: tbl}
-	defer tblDatum.Release()
+	tblDatum := NewDatumWithoutOwning(tbl)
 
 	indices, err := SortIndices(ctx, tblDatum, SortOptions(keys))
 	if err != nil {
