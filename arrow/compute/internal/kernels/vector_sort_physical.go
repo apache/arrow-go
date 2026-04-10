@@ -863,7 +863,9 @@ func (c *physicalSortFixedSizeBinaryColumn) compareRowsForKey(i, j uint64, key S
 	return compareBytesOrdered(key.Order, a.Value(li), b.Value(lj))
 }
 
-func (c *physicalSortFixedSizeBinaryColumn) isNullAt(row uint64) bool { return c.base.isNullAtGlobal(row) }
+func (c *physicalSortFixedSizeBinaryColumn) isNullAt(row uint64) bool {
+	return c.base.isNullAtGlobal(row)
+}
 func (c *physicalSortFixedSizeBinaryColumn) hasNullLikeValues() bool  { return false }
 func (c *physicalSortFixedSizeBinaryColumn) isNullLikeAt(uint64) bool { return false }
 func (c *physicalSortFixedSizeBinaryColumn) columnHasValidityNulls() bool {
