@@ -46,10 +46,7 @@ func partitionNullsOnly(indices, scratch []uint64, lo, hi int, nullPlacement Nul
 		}
 	}
 	if !hasNull {
-		if nullPlacement == NullsAtStart {
-			return nullPartitionIndices{lo, hi, lo, lo}
-		}
-		return nullPartitionIndices{lo, hi, hi, hi}
+		return nullPartitionNoValidityNulls(lo, hi, nullPlacement)
 	}
 	if nullPlacement == NullsAtStart {
 		t := 0
@@ -92,10 +89,7 @@ func partitionNullsOnly(indices, scratch []uint64, lo, hi int, nullPlacement Nul
 // partitionNullLikes mirrors PartitionNullLikes in vector_sort_internal.h (NaN for floats).
 func partitionNullLikes(indices, scratch []uint64, lo, hi int, nullPlacement NullPlacement, hasNullLike bool, isNullLike func(uint64) bool) nullPartitionIndices {
 	if !hasNullLike || lo >= hi {
-		if nullPlacement == NullsAtStart {
-			return nullPartitionIndices{lo, hi, lo, lo}
-		}
-		return nullPartitionIndices{lo, hi, hi, hi}
+		return nullPartitionNoValidityNulls(lo, hi, nullPlacement)
 	}
 	hasLike := false
 	for i := lo; i < hi; i++ {
@@ -105,10 +99,7 @@ func partitionNullLikes(indices, scratch []uint64, lo, hi int, nullPlacement Nul
 		}
 	}
 	if !hasLike {
-		if nullPlacement == NullsAtStart {
-			return nullPartitionIndices{lo, hi, lo, lo}
-		}
-		return nullPartitionIndices{lo, hi, hi, hi}
+		return nullPartitionNoValidityNulls(lo, hi, nullPlacement)
 	}
 	if nullPlacement == NullsAtStart {
 		t := 0
