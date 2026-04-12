@@ -24,7 +24,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815
 	github.com/goccy/go-json v0.10.6
-	github.com/golang/snappy v1.0.0
 	github.com/google/flatbuffers v25.12.19+incompatible
 	github.com/google/uuid v1.6.0
 	github.com/hamba/avro/v2 v2.31.0
@@ -66,6 +65,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/goccy/go-yaml v1.17.1 // indirect
+	github.com/golang/snappy v1.0.0 // indirect
 	github.com/gookit/color v1.6.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kr/text v0.2.0 // indirect
