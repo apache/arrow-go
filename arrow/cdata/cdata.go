@@ -299,9 +299,12 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 				return
 			}
 
-			codes := strings.Split(strings.Split(f, ":")[1], ",")
-			typeCodes := make([]arrow.UnionTypeCode, 0, len(codes))
-			for _, i := range codes {
+			_, val, ok := strings.Cut(f, ":")
+			if !ok {
+				return ret, fmt.Errorf("invalid union type code spec %q", f)
+			}
+			var typeCodes []arrow.UnionTypeCode
+			for i := range strings.SplitSeq(val, ",") {
 				v, e := strconv.ParseInt(i, 10, 8)
 				if e != nil {
 					err = fmt.Errorf("%w: invalid type code: %s", arrow.ErrInvalid, e)

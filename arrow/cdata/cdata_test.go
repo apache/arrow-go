@@ -174,6 +174,24 @@ func TestDecimalSchemaErrors(t *testing.T) {
 	}
 }
 
+func TestUnionSchemaErrors(t *testing.T) {
+	tests := []struct {
+		fmt string
+	}{
+		{"+us"}, // missing ":<type_codes>"
+		{"+ud"}, // missing ":<type_codes>"
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.fmt, func(t *testing.T) {
+			sc := testPrimitive(tt.fmt)
+
+			_, err := ImportCArrowField(&sc)
+			assert.Error(t, err)
+		})
+	}
+}
+
 func TestImportTemporalSchema(t *testing.T) {
 	tests := []struct {
 		typ arrow.DataType
