@@ -195,9 +195,12 @@ func TestImportTemporalSchema(t *testing.T) {
 		{arrow.FixedWidthTypes.Timestamp_s, "tss:UTC"},
 		{&arrow.TimestampType{Unit: arrow.Second}, "tss:"},
 		{&arrow.TimestampType{Unit: arrow.Second, TimeZone: "Europe/Paris"}, "tss:Europe/Paris"},
+		{&arrow.TimestampType{Unit: arrow.Second, TimeZone: "Etc/GMT+1"}, "tss:Etc/GMT+1"},
+		{&arrow.TimestampType{Unit: arrow.Second, TimeZone: "+01:00"}, "tss:+01:00"},
 		{arrow.FixedWidthTypes.Timestamp_ms, "tsm:UTC"},
 		{&arrow.TimestampType{Unit: arrow.Millisecond}, "tsm:"},
 		{&arrow.TimestampType{Unit: arrow.Millisecond, TimeZone: "Europe/Paris"}, "tsm:Europe/Paris"},
+		{&arrow.TimestampType{Unit: arrow.Millisecond, TimeZone: "-07:30"}, "tsm:-07:30"},
 		{arrow.FixedWidthTypes.Timestamp_us, "tsu:UTC"},
 		{&arrow.TimestampType{Unit: arrow.Microsecond}, "tsu:"},
 		{&arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "Europe/Paris"}, "tsu:Europe/Paris"},
@@ -207,7 +210,7 @@ func TestImportTemporalSchema(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.typ.Name(), func(t *testing.T) {
+		t.Run(tt.fmt, func(t *testing.T) {
 			sc := testPrimitive(tt.fmt)
 
 			f, err := ImportCArrowField(&sc)

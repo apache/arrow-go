@@ -202,41 +202,23 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 	}
 
 	// handle types with params via colon
-	typs := strings.Split(f, ":")
-	defaulttz := ""
-	switch typs[0] {
+	switch key, val, _ := strings.Cut(f, ":"); key {
 	case "tss":
-		tz := typs[1]
-		if len(typs[1]) == 0 {
-			tz = defaulttz
-		}
-		dt = &arrow.TimestampType{Unit: arrow.Second, TimeZone: tz}
+		dt = &arrow.TimestampType{Unit: arrow.Second, TimeZone: val}
 	case "tsm":
-		tz := typs[1]
-		if len(typs[1]) == 0 {
-			tz = defaulttz
-		}
-		dt = &arrow.TimestampType{Unit: arrow.Millisecond, TimeZone: tz}
+		dt = &arrow.TimestampType{Unit: arrow.Millisecond, TimeZone: val}
 	case "tsu":
-		tz := typs[1]
-		if len(typs[1]) == 0 {
-			tz = defaulttz
-		}
-		dt = &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: tz}
+		dt = &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: val}
 	case "tsn":
-		tz := typs[1]
-		if len(typs[1]) == 0 {
-			tz = defaulttz
-		}
-		dt = &arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: tz}
+		dt = &arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: val}
 	case "w": // fixed size binary is "w:##" where ## is the byteWidth
-		byteWidth, err := strconv.Atoi(typs[1])
+		byteWidth, err := strconv.Atoi(val)
 		if err != nil {
 			return ret, err
 		}
 		dt = &arrow.FixedSizeBinaryType{ByteWidth: byteWidth}
 	case "d": // decimal types are d:<precision>,<scale>[,<bitsize>] size is assumed 128 if left out
-		props := typs[1]
+		props := val
 		propList := strings.Split(props, ",")
 		bitwidth := 128
 		var precision, scale int
