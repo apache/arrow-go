@@ -314,7 +314,8 @@ func arrayApproxEqualDict(l, r *Dictionary, opt equalOption) bool {
 // helper for building the properly typed indices of the dictionary builder
 type IndexBuilder struct {
 	Builder
-	Append func(int)
+	Append       func(int)
+	UnsafeAppend func(int)
 }
 
 func createIndexBuilder(mem memory.Allocator, dt arrow.FixedWidthDataType) (ret IndexBuilder, err error) {
@@ -324,33 +325,57 @@ func createIndexBuilder(mem memory.Allocator, dt arrow.FixedWidthDataType) (ret 
 		ret.Append = func(idx int) {
 			ret.Builder.(*Int8Builder).Append(int8(idx))
 		}
+		ret.UnsafeAppend = func(idx int) {
+			ret.Builder.(*Int8Builder).UnsafeAppend(int8(idx))
+		}
 	case arrow.UINT8:
 		ret.Append = func(idx int) {
 			ret.Builder.(*Uint8Builder).Append(uint8(idx))
+		}
+		ret.UnsafeAppend = func(idx int) {
+			ret.Builder.(*Uint8Builder).UnsafeAppend(uint8(idx))
 		}
 	case arrow.INT16:
 		ret.Append = func(idx int) {
 			ret.Builder.(*Int16Builder).Append(int16(idx))
 		}
+		ret.UnsafeAppend = func(idx int) {
+			ret.Builder.(*Int16Builder).UnsafeAppend(int16(idx))
+		}
 	case arrow.UINT16:
 		ret.Append = func(idx int) {
 			ret.Builder.(*Uint16Builder).Append(uint16(idx))
+		}
+		ret.UnsafeAppend = func(idx int) {
+			ret.Builder.(*Uint16Builder).UnsafeAppend(uint16(idx))
 		}
 	case arrow.INT32:
 		ret.Append = func(idx int) {
 			ret.Builder.(*Int32Builder).Append(int32(idx))
 		}
+		ret.UnsafeAppend = func(idx int) {
+			ret.Builder.(*Int32Builder).UnsafeAppend(int32(idx))
+		}
 	case arrow.UINT32:
 		ret.Append = func(idx int) {
 			ret.Builder.(*Uint32Builder).Append(uint32(idx))
+		}
+		ret.UnsafeAppend = func(idx int) {
+			ret.Builder.(*Uint32Builder).UnsafeAppend(uint32(idx))
 		}
 	case arrow.INT64:
 		ret.Append = func(idx int) {
 			ret.Builder.(*Int64Builder).Append(int64(idx))
 		}
+		ret.UnsafeAppend = func(idx int) {
+			ret.Builder.(*Int64Builder).UnsafeAppend(int64(idx))
+		}
 	case arrow.UINT64:
 		ret.Append = func(idx int) {
 			ret.Builder.(*Uint64Builder).Append(uint64(idx))
+		}
+		ret.UnsafeAppend = func(idx int) {
+			ret.Builder.(*Uint64Builder).UnsafeAppend(uint64(idx))
 		}
 	default:
 		debug.Assert(false, "dictionary index type must be integral")
@@ -647,7 +672,11 @@ func (b *dictionaryBuilder) AppendEmptyValues(n int) {
 }
 
 func (b *dictionaryBuilder) UnsafeAppendBoolToBitmap(v bool) {
-	panic("Calling UnsafeAppendBoolToBitmap on dictionaryBuilder would leave it in inconsistent state. Use AppendIndices instead.")
+	if !v {
+		b.nulls += 1
+	}
+	b.length += 1
+	b.idxBuilder.UnsafeAppendBoolToBitmap(v)
 }
 
 func (b *dictionaryBuilder) Reserve(n int) {
@@ -782,6 +811,13 @@ func (b *dictionaryBuilder) insertDictValue(val interface{}) error {
 
 func (b *dictionaryBuilder) insertDictBytes(val []byte) error {
 	_, _, err := b.memoTable.GetOrInsertBytes(val)
+	return err
+}
+
+func (b *dictionaryBuilder) unsafeAppendValue(val interface{}) error {
+	idx, _, err := b.memoTable.GetOrInsert(val)
+	b.idxBuilder.UnsafeAppend(idx)
+	b.length += 1
 	return err
 }
 
@@ -992,6 +1028,26 @@ func (b *NullDictionaryBuilder) AppendArray(arr arrow.Array) error {
 
 type dictBuilder[T arrow.ValueType] struct {
 	dictionaryBuilder
+}
+
+func (b *dictBuilder[T]) UnsafeAppend(v T) error {
+	switch val := any(v).(type) {
+	case arrow.Duration:
+		return b.unsafeAppendValue(int64(val))
+	case arrow.Timestamp:
+		return b.unsafeAppendValue(int64(val))
+	case arrow.Time32:
+		return b.unsafeAppendValue(int32(val))
+	case arrow.Time64:
+		return b.unsafeAppendValue(int64(val))
+	case arrow.Date32:
+		return b.unsafeAppendValue(int32(val))
+	case arrow.Date64:
+		return b.unsafeAppendValue(int64(val))
+	case arrow.MonthInterval:
+		return b.unsafeAppendValue(int32(val))
+	}
+	return b.unsafeAppendValue(v)
 }
 
 func (b *dictBuilder[T]) Append(v T) error {
