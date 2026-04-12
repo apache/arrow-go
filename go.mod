@@ -18,6 +18,14 @@ module github.com/apache/arrow-go/v18
 
 go 1.25.0
 
+tool (
+	github.com/klauspost/asmfmt/cmd/asmfmt
+	github.com/minio/asm2plan9s
+	github.com/minio/c2goasm
+	golang.org/x/tools/cmd/goimports
+	golang.org/x/tools/cmd/stringer
+)
+
 require (
 	github.com/andybalholm/brotli v1.2.1
 	github.com/apache/thrift v0.22.0
@@ -28,11 +36,8 @@ require (
 	github.com/google/flatbuffers v25.12.19+incompatible
 	github.com/google/uuid v1.6.0
 	github.com/hamba/avro/v2 v2.31.0
-	github.com/klauspost/asmfmt v1.3.2
 	github.com/klauspost/compress v1.18.5
 	github.com/klauspost/cpuid/v2 v2.3.0
-	github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8
-	github.com/minio/c2goasm v0.0.0-20190812172519-36a3d3bbc4f3
 	github.com/pierrec/lz4/v4 v4.1.26
 	github.com/pterm/pterm v0.12.83
 	github.com/stoewer/go-strcase v1.3.1
@@ -44,7 +49,6 @@ require (
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96
 	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.42.0
-	golang.org/x/tools v0.43.0
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da
 	gonum.org/v1/gonum v0.17.0
 	google.golang.org/grpc v1.80.0
@@ -68,10 +72,13 @@ require (
 	github.com/goccy/go-yaml v1.17.1 // indirect
 	github.com/gookit/color v1.6.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/klauspost/asmfmt v1.3.2 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lithammer/fuzzysearch v1.1.8 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.20 // indirect
+	github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8 // indirect
+	github.com/minio/c2goasm v0.0.0-20190812172519-36a3d3bbc4f3 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
@@ -88,6 +95,7 @@ require (
 	golang.org/x/telemetry v0.0.0-20260311193753-579e4da9a98c // indirect
 	golang.org/x/term v0.41.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/tools v0.43.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120221211-b8f7ae30c516 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.70.0 // indirect

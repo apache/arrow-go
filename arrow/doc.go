@@ -42,5 +42,5 @@ const PkgVersion = "18.5.2"
 //go:generate go run ./gen-flatbuffers.go
 
 // stringer
-//go:generate stringer -type=Type
-//go:generate stringer -type=UnionMode -linecomment
+//go:generate go tool stringer -type=Type
+//go:generate go tool stringer -type=UnionMode -linecomment

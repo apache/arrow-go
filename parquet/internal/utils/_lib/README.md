@@ -33,9 +33,9 @@ compatible Go assembly from C assembly.
 First the tools need to be installed:
 
 ```bash
-go install github.com/klauspost/asmfmt/cmd/asmfmt@latest
-go install github.com/minio/asm2plan9s@latest
-go install github.com/minio/c2goasm@latest
+go get -tool github.com/klauspost/asmfmt/cmd/asmfmt
+go get -tool github.com/minio/asm2plan9s
+go get -tool github.com/minio/c2goasm
 ```
 
 ### Generating for amd64
