@@ -206,3 +206,46 @@ func TestBasicAuthHelpers(t *testing.T) {
 		t.Fatal("should have received carebears")
 	}
 }
+
+func TestBasicAuthMissingCredential(t *testing.T) {
+	s := flight.NewServerWithMiddleware([]flight.ServerMiddleware{flight.CreateServerBasicAuthMiddleware(&validator{})})
+	s.Init("localhost:0")
+	f := &HeaderAuthTestFlight{}
+	s.RegisterFlightService(f)
+	go s.Serve()
+	defer s.Shutdown()
+
+	client, err := flight.NewFlightClient(s.Addr().String(), nil, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(map[string]string{
+		"authorization": "Basic",
+	}))
+
+	fc, err := client.Handshake(ctx)
+	if err != nil {
+		st, ok := status.FromError(err)
+		if !ok {
+			t.Fatalf("expected gRPC status error, got %T: %v", err, err)
+		}
+		if got, want := st.Code(), codes.Unauthenticated; got != want {
+			t.Fatalf("unexpected code: got %v, want %v", got, want)
+		}
+		return
+	}
+
+	_, err = fc.Recv()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("expected gRPC status error, got %T: %v", err, err)
+	}
+	if got, want := st.Code(), codes.Unauthenticated; got != want {
+		t.Fatalf("unexpected code: got %v, want %v", got, want)
+	}
+}
