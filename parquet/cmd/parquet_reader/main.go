@@ -18,6 +18,8 @@ package main
 
 import (
 	"bufio"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -30,8 +32,6 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/schema"
-
-	"github.com/docopt/docopt-go"
 )
 
 var version = ""
@@ -47,33 +47,68 @@ Commands:
 
 Options:
   -h --help                     Show this screen.
-  --print-key-value-metadata    Print out the key-value metadata. [default: false]
-  --only-metadata               Stop after printing metadata, no values.
-  --no-metadata                 Do not print metadata.
-  --output=FILE                 Specify output file for data. [default: -]
-  --no-memory-map               Disable memory mapping the file.
-  --int96-timestamp             Parse INT96 as TIMESTAMP for legacy support.
-  --json                        Format output as JSON instead of text.
-  --csv                         Format output as CSV instead of text.
-  --columns=COLUMNS             Specify a subset of columns to print, comma delimited indexes.`
+`
+
+func printUsage(fs *flag.FlagSet) {
+	fmt.Fprint(fs.Output(), usage)
+	fs.VisitAll(func(f *flag.Flag) {
+		name, flagUsage := flag.UnquoteUsage(f)
+		flagName := "--" + f.Name
+		if name != "" {
+			flagName += "=" + name
+		}
+		fmt.Fprintf(fs.Output(), "  %-30s%s\n", flagName, flagUsage)
+	})
+}
 
 func main() {
-	opts, _ := docopt.ParseDoc(usage)
 	var config struct {
-		ColumnIndexes         bool `docopt:"column-indexes"`
+		ColumnIndexes         bool
 		PrintKeyValueMetadata bool
 		OnlyMetadata          bool
 		NoMetadata            bool
 		Output                string
 		NoMemoryMap           bool
-		JSON                  bool `docopt:"--json"`
-		CSV                   bool `docopt:"--csv"`
-		ParseInt96AsTimestamp bool `docopt:"--int96-timestamp"`
+		JSON                  bool
+		CSV                   bool
+		ParseInt96AsTimestamp bool
 		Columns               string
 		File                  string
 	}
-	opts.Bind(&config)
 
+	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "column-indexes" {
+		config.ColumnIndexes = true
+		args = args[1:]
+	}
+
+	fs := flag.NewFlagSet("parquet_reader", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.BoolVar(&config.OnlyMetadata, "only-metadata", false, "Stop after printing metadata, no values.")
+	fs.BoolVar(&config.NoMetadata, "no-metadata", false, "Do not print metadata.")
+	fs.BoolVar(&config.NoMemoryMap, "no-memory-map", false, "Disable memory mapping the file.")
+	fs.BoolVar(&config.JSON, "json", false, "Format output as JSON instead of text.")
+	fs.BoolVar(&config.CSV, "csv", false, "Format output as CSV instead of text.")
+	fs.StringVar(&config.Output, "output", "-", "Specify output `FILE` for data.")
+	fs.BoolVar(&config.PrintKeyValueMetadata, "print-key-value-metadata", false, "Print out the key-value metadata.")
+	fs.BoolVar(&config.ParseInt96AsTimestamp, "int96-timestamp", false, "Parse INT96 as TIMESTAMP for legacy support.")
+	fs.StringVar(&config.Columns, "columns", "", "Specify a subset of `COLUMNS` to print, comma delimited indexes.")
+	fs.Usage = func() {
+		printUsage(fs)
+	}
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
+		os.Exit(1)
+	}
+	if fs.NArg() != 1 {
+		fs.Usage()
+		fmt.Fprintln(os.Stderr, "expected exactly one parquet file")
+		os.Exit(1)
+	}
+	config.File = fs.Arg(0)
 	parseInt96AsTimestamp = config.ParseInt96AsTimestamp
 
 	var dataOut io.Writer

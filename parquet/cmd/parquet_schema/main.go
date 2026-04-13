@@ -22,23 +22,39 @@ import (
 
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/schema"
-	"github.com/docopt/docopt-go"
 )
 
 const usage = `Parquet Schema Dumper.
+
 Usage:
   parquet_schema -h | --help
   parquet_schema <file>
+
 Options:
-  -h --help   Show this screen.`
+  -h --help   Show this screen.
+`
 
 func main() {
-	args, _ := docopt.ParseDoc(usage)
-	rdr, err := file.OpenParquetFile(args["<file>"].(string), false)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error opening parquet file: ", err)
+	args := os.Args[1:]
+
+	switch len(args) {
+	case 1:
+		switch args[0] {
+		case "-h", "--help":
+			fmt.Fprint(os.Stderr, usage)
+			os.Exit(0)
+		}
+
+		rdr, err := file.OpenParquetFile(args[0], false)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error opening parquet file:", err)
+			os.Exit(1)
+		}
+
+		schema.PrintSchema(rdr.MetaData().Schema.Root(), os.Stdout, 2)
+	default:
+		fmt.Fprint(os.Stderr, usage)
+		fmt.Fprintln(os.Stderr, "expected exactly one parquet file")
 		os.Exit(1)
 	}
-
-	schema.PrintSchema(rdr.MetaData().Schema.Root(), os.Stdout, 2)
 }

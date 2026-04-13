@@ -22,7 +22,6 @@ require (
 	github.com/andybalholm/brotli v1.2.1
 	github.com/apache/thrift v0.22.0
 	github.com/cespare/xxhash/v2 v2.3.0
-	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815
 	github.com/goccy/go-json v0.10.6
 	github.com/google/flatbuffers v25.12.19+incompatible
 	github.com/google/uuid v1.6.0
