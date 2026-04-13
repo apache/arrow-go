@@ -17,6 +17,7 @@
 package arrow
 
 import (
+	"cmp"
 	"fmt"
 	"strconv"
 	"sync"
@@ -720,6 +721,14 @@ type DayTimeInterval struct {
 	Milliseconds int32 `json:"milliseconds"`
 }
 
+// Cmp compares (Days, Milliseconds) lexicographically, matching Apache Arrow ordering for this type.
+func (a DayTimeInterval) Cmp(b DayTimeInterval) int {
+	if c := cmp.Compare(a.Days, b.Days); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.Milliseconds, b.Milliseconds)
+}
+
 // DayTimeIntervalType is encoded as a pair of 32-bit signed integer,
 // representing a number of days and milliseconds (fraction of day).
 type DayTimeIntervalType struct{}
@@ -742,6 +751,17 @@ type MonthDayNanoInterval struct {
 	Months      int32 `json:"months"`
 	Days        int32 `json:"days"`
 	Nanoseconds int64 `json:"nanoseconds"`
+}
+
+// Cmp compares (Months, Days, Nanoseconds) lexicographically, matching Apache Arrow ordering for this type.
+func (a MonthDayNanoInterval) Cmp(b MonthDayNanoInterval) int {
+	if c := cmp.Compare(a.Months, b.Months); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(a.Days, b.Days); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.Nanoseconds, b.Nanoseconds)
 }
 
 // MonthDayNanoIntervalType is encoded as two signed 32-bit integers representing
