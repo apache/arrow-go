@@ -17,11 +17,12 @@
 package file
 
 import (
+	"fmt"
+
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	"github.com/apache/arrow-go/v18/parquet/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
-	"golang.org/x/xerrors"
 )
 
 // RowGroupWriter is the base interface for writing rowgroups, the actual writer
@@ -117,13 +118,13 @@ func (rg *rowGroupWriter) checkRowsWritten() error {
 		if rg.nrows == 0 {
 			rg.nrows = current
 		} else if rg.nrows != current {
-			return xerrors.Errorf("row mismatch for unbuffered row group: %d, count expected: %d, actual: %d", rg.ordinal, current, rg.nrows)
+			return fmt.Errorf("row mismatch for unbuffered row group: %d, count expected: %d, actual: %d", rg.ordinal, current, rg.nrows)
 		}
 	} else if rg.buffered {
 		current := rg.columnWriters[0].RowsWritten()
 		for i, wr := range rg.columnWriters[1:] {
 			if current != wr.RowsWritten() {
-				return xerrors.Errorf("row mismatch for buffered row group: %d, column: %d, count expected: %d, actual: %d", rg.ordinal, i+1, current, wr.RowsWritten())
+				return fmt.Errorf("row mismatch for buffered row group: %d, column: %d, count expected: %d, actual: %d", rg.ordinal, i+1, current, wr.RowsWritten())
 			}
 		}
 		rg.nrows = current
@@ -205,7 +206,7 @@ func (rg *rowGroupWriter) Column(i int) (ColumnChunkWriter, error) {
 	if i >= 0 && i < len(rg.columnWriters) {
 		return rg.columnWriters[i], nil
 	}
-	return nil, xerrors.Errorf("invalid column number requested: %d", i)
+	return nil, fmt.Errorf("invalid column number requested: %d", i)
 }
 
 func (rg *rowGroupWriter) CurrentColumn() int { return rg.metadata.CurrentColumn() }

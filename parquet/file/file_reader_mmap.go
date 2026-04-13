@@ -20,11 +20,11 @@
 package file
 
 import (
+	"errors"
 	"io"
 
 	"github.com/apache/arrow-go/v18/parquet"
 	"golang.org/x/exp/mmap"
-	"golang.org/x/xerrors"
 )
 
 func mmapOpen(filename string) (parquet.ReaderAtSeeker, error) {
@@ -67,10 +67,10 @@ func (m *mmapAdapter) Seek(offset int64, whence int) (int64, error) {
 		newPos = int64(m.Len()) + offs
 	}
 	if newPos < 0 {
-		return 0, xerrors.New("negative result pos")
+		return 0, errors.New("negative result pos")
 	}
 	if newPos > int64(m.Len()) {
-		return 0, xerrors.New("new position exceeds size of file")
+		return 0, errors.New("new position exceeds size of file")
 	}
 	m.pos = newPos
 	return newPos, nil

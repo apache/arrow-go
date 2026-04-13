@@ -18,6 +18,7 @@ package pqarrow
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -31,7 +32,6 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/schema"
-	"golang.org/x/xerrors"
 )
 
 // SchemaField is a holder that defines a specific logical field in the schema
@@ -295,7 +295,7 @@ func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties
 	switch field.Type.ID() {
 	case arrow.NULL:
 		if repType != parquet.Repetitions.Optional {
-			return nil, xerrors.New("nulltype arrow field must be nullable")
+			return nil, errors.New("nulltype arrow field must be nullable")
 		}
 	case arrow.STRUCT:
 		return structToNode(field, props, arrprops)
@@ -438,7 +438,7 @@ func arrowInt(log schema.IntLogicalType) (arrow.DataType, error) {
 		}
 		return arrow.PrimitiveTypes.Uint64, nil
 	default:
-		return nil, xerrors.New("invalid logical type for int32")
+		return nil, errors.New("invalid logical type for int32")
 	}
 }
 
@@ -447,7 +447,7 @@ func arrowTime32(logical schema.TimeLogicalType) (arrow.DataType, error) {
 		return arrow.FixedWidthTypes.Time32ms, nil
 	}
 
-	return nil, xerrors.New(logical.String() + " cannot annotate a time32")
+	return nil, errors.New(logical.String() + " cannot annotate a time32")
 }
 
 func arrowTime64(logical schema.TimeLogicalType) (arrow.DataType, error) {
@@ -457,7 +457,7 @@ func arrowTime64(logical schema.TimeLogicalType) (arrow.DataType, error) {
 	case schema.TimeUnitNanos:
 		return arrow.FixedWidthTypes.Time64ns, nil
 	default:
-		return nil, xerrors.New(logical.String() + " cannot annotate int64")
+		return nil, errors.New(logical.String() + " cannot annotate int64")
 	}
 }
 
@@ -478,7 +478,7 @@ func arrowTimestamp(logical schema.TimestampLogicalType) (arrow.DataType, error)
 	case schema.TimeUnitNanos:
 		return &arrow.TimestampType{TimeZone: tz, Unit: arrow.Nanosecond}, nil
 	default:
-		return nil, xerrors.New("Unrecognized unit in timestamp logical type " + logical.String())
+		return nil, errors.New("Unrecognized unit in timestamp logical type " + logical.String())
 	}
 }
 
@@ -502,7 +502,7 @@ func arrowFromInt32(logical schema.LogicalType) (arrow.DataType, error) {
 	case schema.DateLogicalType:
 		return arrow.FixedWidthTypes.Date32, nil
 	default:
-		return nil, xerrors.New(logical.String() + " cannot annotate int32")
+		return nil, errors.New(logical.String() + " cannot annotate int32")
 	}
 }
 
@@ -521,7 +521,7 @@ func arrowFromInt64(logical schema.LogicalType) (arrow.DataType, error) {
 	case schema.TimestampLogicalType:
 		return arrowTimestamp(logtype)
 	default:
-		return nil, xerrors.New(logical.String() + " cannot annotate int64")
+		return nil, errors.New(logical.String() + " cannot annotate int64")
 	}
 }
 
@@ -537,7 +537,7 @@ func arrowFromByteArray(logical schema.LogicalType) (arrow.DataType, error) {
 		schema.BSONLogicalType:
 		return arrow.BinaryTypes.Binary, nil
 	default:
-		return nil, xerrors.New("unhandled logicaltype " + logical.String() + " for byte_array")
+		return nil, errors.New("unhandled logicaltype " + logical.String() + " for byte_array")
 	}
 }
 
@@ -556,7 +556,7 @@ func arrowFromFLBA(logical schema.LogicalType, length int) (arrow.DataType, erro
 	case schema.Float16LogicalType:
 		return &arrow.Float16Type{}, nil
 	default:
-		return nil, xerrors.New("unhandled logical type " + logical.String() + " for fixed-length byte array")
+		return nil, errors.New("unhandled logical type " + logical.String() + " for fixed-length byte array")
 	}
 }
 
@@ -662,7 +662,7 @@ func getArrowType(physical parquet.Type, logical schema.LogicalType, typeLen int
 	case parquet.Types.FixedLenByteArray:
 		return arrowFromFLBA(logical, typeLen)
 	default:
-		return nil, xerrors.New("invalid physical column type")
+		return nil, errors.New("invalid physical column type")
 	}
 }
 
@@ -676,11 +676,11 @@ func populateLeaf(colIndex int, field *arrow.Field, currentLevels file.LevelInfo
 
 func listToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *schemaTree, parent, out *SchemaField) error {
 	if n.NumFields() != 1 {
-		return xerrors.New("LIST groups must have only 1 child")
+		return errors.New("LIST groups must have only 1 child")
 	}
 
 	if n.RepetitionType() == parquet.Repetitions.Repeated {
-		return xerrors.New("LIST groups must not be repeated")
+		return errors.New("LIST groups must not be repeated")
 	}
 
 	currentLevels.Increment(n)
@@ -691,7 +691,7 @@ func listToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *s
 
 	listNode := n.Field(0)
 	if listNode.RepetitionType() != parquet.Repetitions.Repeated {
-		return xerrors.New("non-repeated nodes in a list group are not supported")
+		return errors.New("non-repeated nodes in a list group are not supported")
 	}
 
 	repeatedAncestorDef := currentLevels.IncrementRepeated()
@@ -791,29 +791,29 @@ func groupToStructField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *
 
 func mapToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *schemaTree, parent, out *SchemaField) error {
 	if n.NumFields() != 1 {
-		return xerrors.New("MAP group must have exactly 1 child")
+		return errors.New("MAP group must have exactly 1 child")
 	}
 	if n.RepetitionType() == parquet.Repetitions.Repeated {
-		return xerrors.New("MAP groups must not be repeated")
+		return errors.New("MAP groups must not be repeated")
 	}
 
 	keyvalueNode := n.Field(0)
 	if keyvalueNode.RepetitionType() != parquet.Repetitions.Repeated {
-		return xerrors.New("Non-repeated keyvalue group in MAP group is not supported")
+		return errors.New("non-repeated keyvalue group in MAP group is not supported")
 	}
 
 	if keyvalueNode.Type() != schema.Group {
-		return xerrors.New("keyvalue node must be a group")
+		return errors.New("keyvalue node must be a group")
 	}
 
 	kvgroup := keyvalueNode.(*schema.GroupNode)
 	if kvgroup.NumFields() != 1 && kvgroup.NumFields() != 2 {
-		return fmt.Errorf("keyvalue node group must have exactly 1 or 2 child elements, Found %d", kvgroup.NumFields())
+		return fmt.Errorf("keyvalue node group must have exactly 1 or 2 child elements, found %d", kvgroup.NumFields())
 	}
 
 	keyNode := kvgroup.Field(0)
 	if keyNode.RepetitionType() != parquet.Repetitions.Required {
-		return xerrors.New("MAP keys must be required")
+		return errors.New("MAP keys must be required")
 	}
 
 	// Arrow doesn't support 1 column maps (i.e. Sets).  The options are to either
@@ -1092,7 +1092,7 @@ func applyOriginalStorageMetadata(origin arrow.Field, inferred *SchemaField) (mo
 			inferred.Field.Type = extType
 		}
 	case arrow.SPARSE_UNION, arrow.DENSE_UNION:
-		err = xerrors.New("unimplemented type")
+		err = errors.New("unimplemented type")
 	case arrow.STRUCT:
 		typ := origin.Type.(*arrow.StructType)
 		if nchildren != typ.NumFields() {

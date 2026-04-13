@@ -17,6 +17,7 @@
 package file
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"math/bits"
@@ -27,7 +28,6 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/internal/bmi"
 	"github.com/apache/arrow-go/v18/parquet/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet/schema"
-	"golang.org/x/xerrors"
 )
 
 type LevelInfo struct {
@@ -204,7 +204,7 @@ func DefRepLevelsToListInfo(defLevels, repLevels []int16, info LevelInfo, out *V
 			// offsets can be null for structs with repeated children
 			if offsetPos < len(offsets) {
 				if offsets[offsetPos] == math.MaxInt32 {
-					return xerrors.New("list index overflow")
+					return errors.New("list index overflow")
 				}
 				offsets[offsetPos]++
 			}
@@ -224,7 +224,7 @@ func DefRepLevelsToListInfo(defLevels, repLevels []int16, info LevelInfo, out *V
 				offsets[offsetPos] = offsets[offsetPos-1]
 				if defLevels[idx] >= info.DefLevel {
 					if offsets[offsetPos] == math.MaxInt32 {
-						return xerrors.New("list index overflow")
+						return errors.New("list index overflow")
 					}
 					offsets[offsetPos]++
 				}
@@ -251,7 +251,7 @@ func DefRepLevelsToListInfo(defLevels, repLevels []int16, info LevelInfo, out *V
 	}
 
 	if out.NullCount > 0 && info.NullSlotUsage > 1 {
-		return xerrors.New("null values with null_slot_usage > 1 not supported.")
+		return errors.New("null values with null_slot_usage > 1 not supported")
 	}
 	return nil
 }

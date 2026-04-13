@@ -18,6 +18,7 @@ package scalar
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -37,7 +38,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	"golang.org/x/xerrors"
 )
 
 // Scalar represents a single value of a specific DataType as opposed to
@@ -97,7 +97,7 @@ func (s *scalar) IsValid() bool { return s.Valid }
 
 func (s *scalar) Validate() error {
 	if s.Type == nil {
-		return xerrors.New("scalar lacks a type")
+		return errors.New("scalar lacks a type")
 	}
 	return nil
 }
@@ -130,7 +130,7 @@ func (n *Null) Validate() (err error) {
 		return
 	}
 	if n.Valid {
-		err = xerrors.New("null scalar should have Valid = false")
+		err = errors.New("null scalar should have Valid = false")
 	}
 	return
 }

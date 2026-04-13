@@ -17,6 +17,7 @@
 package file
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -30,7 +31,6 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
 	"github.com/apache/arrow-go/v18/parquet/schema"
-	"golang.org/x/xerrors"
 )
 
 // RecordReader is an interface for reading entire records/rows at a time
@@ -219,7 +219,7 @@ func (pr *primitiveRecordReader) numBytesForValues(nitems int64) (num int64, err
 	typeSize := int64(pr.Descriptor().PhysicalType().ByteSize())
 	var ok bool
 	if num, ok = utils.Mul64(nitems, typeSize); !ok {
-		err = xerrors.New("total size of items too large")
+		err = errors.New("total size of items too large")
 	}
 	return
 }
@@ -405,14 +405,14 @@ func (rr *recordReader) LevelsPos() int64 { return rr.levelsPos }
 
 func updateCapacity(cap, size, extra int64) (int64, error) {
 	if extra < 0 {
-		return 0, xerrors.New("negative size (corrupt file?)")
+		return 0, errors.New("negative size (corrupt file?)")
 	}
 	target, ok := utils.Add(size, extra)
 	if !ok {
-		return 0, xerrors.New("allocation size too large (corrupt file?)")
+		return 0, errors.New("allocation size too large (corrupt file?)")
 	}
 	if target >= (1 << 62) {
-		return 0, xerrors.New("allocation size too large (corrupt file?)")
+		return 0, errors.New("allocation size too large (corrupt file?)")
 	}
 	if cap >= target {
 		return cap, nil
@@ -652,7 +652,7 @@ func (rr *recordReader) ReadRecords(numRecords int64) (int64, error) {
 				repLevels := rr.RepLevels()[int(rr.levelsWritten):]
 				levelsRead, _ = rr.readDefinitionLevels(defLevels[:batchSize])
 				if rr.readRepetitionLevels(repLevels[:batchSize]) != levelsRead {
-					return 0, xerrors.New("number of decoded rep/def levels did not match")
+					return 0, errors.New("number of decoded rep/def levels did not match")
 				}
 			} else if rr.Descriptor().MaxDefinitionLevel() > 0 {
 				levelsRead, _ = rr.readDefinitionLevels(defLevels[:batchSize])

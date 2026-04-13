@@ -18,6 +18,7 @@ package file
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -32,7 +33,6 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
 	libthrift "github.com/apache/thrift/lib/go/thrift"
-	"golang.org/x/xerrors"
 )
 
 // PageWriter is the interface for both serialized and buffered page writers
@@ -197,7 +197,7 @@ func (pw *serializedPageWriter) updateEncryption(moduleType int8) error {
 	case encryption.DictPageModule:
 		pw.dataEncryptor.UpdateAad(encryption.CreateModuleAad(pw.dataEncryptor.FileAad(), moduleType, pw.rgOrdinal, pw.columnOrdinal, -1))
 	default:
-		return xerrors.New("unknown module type in updateencryption")
+		return errors.New("unknown module type in updateencryption")
 	}
 	return nil
 }
@@ -378,7 +378,7 @@ func (pw *serializedPageWriter) WriteDataPage(page DataPage) (int64, error) {
 		pw.setDataPageV2Header(pageHdr, dpage)
 		defer dataPageV2HeaderPool.Put(pageHdr.DataPageHeaderV2)
 	default:
-		return 0, xerrors.New("parquet: unexpected page type")
+		return 0, errors.New("parquet: unexpected page type")
 	}
 
 	startPos := pw.sink.Tell()

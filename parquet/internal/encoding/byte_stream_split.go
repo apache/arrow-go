@@ -17,6 +17,7 @@
 package encoding
 
 import (
+	"errors"
 	"fmt"
 	"math"
 
@@ -24,7 +25,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/debug"
-	"golang.org/x/xerrors"
 )
 
 // encodeByteStreamSplit encodes the raw bytes provided by 'in' into the output buffer 'data' using BYTE_STREAM_SPLIT encoding.
@@ -268,7 +268,7 @@ func (dec *ByteStreamSplitDecoder[T]) Decode(out []T) (int, error) {
 	toRead := min(len(out), dec.nvals)
 	numBytesNeeded := toRead * typeLen
 	if numBytesNeeded > len(dec.data) || numBytesNeeded > math.MaxInt32 {
-		return 0, xerrors.New("parquet: eof exception")
+		return 0, errors.New("parquet: eof exception")
 	}
 
 	// reinterpret the output slice as bytes so that we can decode directly into it without an intermediate copy
@@ -297,7 +297,7 @@ func (dec *ByteStreamSplitDecoder[T]) DecodeSpaced(out []T, nullCount int, valid
 		return valuesRead, err
 	}
 	if valuesRead != toRead {
-		return valuesRead, xerrors.New("parquet: number of values / definitions levels read did not match")
+		return valuesRead, errors.New("parquet: number of values / definitions levels read did not match")
 	}
 
 	return spacedExpand(out, nullCount, validBits, validBitsOffset), nil

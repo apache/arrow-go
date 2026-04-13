@@ -21,6 +21,7 @@ package pqarrow
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 
@@ -30,7 +31,6 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
-	"golang.org/x/xerrors"
 )
 
 // WriteTable is a convenience function to create and write a full array.Table to a parquet file. The schema
@@ -286,7 +286,7 @@ func (fw *FileWriter) WriteTable(tbl arrow.Table, chunkSize int64) error {
 		return fmt.Errorf("invalid write call: FileWriter is already closed")
 	}
 	if chunkSize <= 0 && tbl.NumRows() > 0 {
-		return xerrors.New("chunk size per row group must be greater than 0")
+		return errors.New("chunk size per row group must be greater than 0")
 	} else if !tbl.Schema().Equal(fw.schema) {
 		return fmt.Errorf("table schema does not match writer's. \nTable: %s\n writer: %s", tbl.Schema(), fw.schema)
 	} else if chunkSize > fw.wr.Properties().MaxRowGroupLength() {

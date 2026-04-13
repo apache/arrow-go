@@ -22,11 +22,11 @@ package utils
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"math"
 
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
-	"golang.org/x/xerrors"
 )
 
 const (
@@ -425,7 +425,7 @@ func (r *RleEncoder) Put(value uint64) error {
 	} else {
 		if r.repCount >= 8 {
 			if !r.flushRepeated() {
-				return xerrors.New("failed to flush repeated value")
+				return errors.New("failed to flush repeated value")
 			}
 		}
 		r.repCount = 1

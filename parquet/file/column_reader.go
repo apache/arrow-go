@@ -28,7 +28,6 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/schema"
-	"golang.org/x/xerrors"
 )
 
 const (
@@ -323,7 +322,7 @@ func (c *columnChunkReader) configureDict(page *DictionaryPage) error {
 	}
 
 	if _, ok := c.decoders[enc]; ok {
-		return xerrors.New("parquet: column chunk cannot have more than one dictionary.")
+		return errors.New("parquet: column chunk cannot have more than one dictionary")
 	}
 
 	switch page.Encoding() {
@@ -335,7 +334,7 @@ func (c *columnChunkReader) configureDict(page *DictionaryPage) error {
 		decoder.SetDict(dict)
 		c.decoders[enc] = decoder
 	default:
-		return xerrors.New("parquet: dictionary index must be plain encoding")
+		return errors.New("parquet: dictionary index must be plain encoding")
 	}
 
 	// Dictionary page has been read and decoder configured
@@ -403,7 +402,7 @@ func (c *columnChunkReader) initLevelDecodersV2(page *DataPageV2) (int64, error)
 	totalLvlLen := int64(page.repLvlByteLen) + int64(page.defLvlByteLen)
 
 	if totalLvlLen > int64(len(buf)) {
-		return totalLvlLen, xerrors.New("parquet: data page too small for levels (corrupt header?)")
+		return totalLvlLen, errors.New("parquet: data page too small for levels (corrupt header?)")
 	}
 
 	if c.descr.MaxRepetitionLevel() > 0 {
@@ -460,7 +459,7 @@ func (c *columnChunkReader) initLevelDecodersV1(page *DataPageV1, repLvlEncoding
 func (c *columnChunkReader) initDataDecoder(page Page, lvlByteLen int64) error {
 	buf := page.Data()
 	if int64(len(buf)) < lvlByteLen {
-		return xerrors.New("parquet: page smaller than size of encoded levels")
+		return errors.New("parquet: page smaller than size of encoded levels")
 	}
 
 	buf = buf[lvlByteLen:]
@@ -566,7 +565,7 @@ func (c *columnChunkReader) determineNumToRead(batchLen int64, defLvls, repLvls 
 	if c.descr.MaxRepetitionLevel() > 0 && repLvls != nil {
 		nreps := c.readRepetitionLevels(repLvls[:size])
 		if defLvls != nil && ndefs != nreps {
-			err = xerrors.New("parquet: number of decoded rep/def levels did not match")
+			err = errors.New("parquet: number of decoded rep/def levels did not match")
 		}
 	}
 	return

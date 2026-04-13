@@ -18,6 +18,7 @@ package encoding
 
 import (
 	"bytes"
+	"errors"
 
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
@@ -29,7 +30,6 @@ import (
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet/schema"
-	"golang.org/x/xerrors"
 )
 
 // DecoderTraits provides an interface for more easily interacting with types
@@ -133,7 +133,7 @@ func (d *dictDecoder[T]) SetData(nvals int, data []byte) error {
 	// grab the bit width from the first byte
 	width := uint8(data[0])
 	if width >= 64 {
-		return xerrors.New("parquet: invalid or corrupted bit width")
+		return errors.New("parquet: invalid or corrupted bit width")
 	}
 
 	// pass the rest of the data, minus that first byte, to the decoder

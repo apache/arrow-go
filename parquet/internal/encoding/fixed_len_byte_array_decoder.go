@@ -23,7 +23,6 @@ import (
 
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
-	"golang.org/x/xerrors"
 )
 
 // PlainFixedLenByteArrayDecoder is a plain encoding decoder for Fixed Length Byte Arrays
@@ -55,7 +54,7 @@ func (pflba *PlainFixedLenByteArrayDecoder) Decode(out []parquet.FixedLenByteArr
 	max := utils.Min(len(out), pflba.nvals)
 	numBytesNeeded := max * pflba.typeLen
 	if numBytesNeeded > len(pflba.data) || numBytesNeeded > math.MaxInt32 {
-		return 0, xerrors.New("parquet: eof exception")
+		return 0, errors.New("parquet: eof exception")
 	}
 
 	for idx := range out[:max] {
@@ -75,7 +74,7 @@ func (pflba *PlainFixedLenByteArrayDecoder) DecodeSpaced(out []parquet.FixedLenB
 		return valuesRead, err
 	}
 	if valuesRead != toRead {
-		return valuesRead, xerrors.New("parquet: number of values / definitions levels read did not match")
+		return valuesRead, errors.New("parquet: number of values / definitions levels read did not match")
 	}
 
 	return spacedExpand(out, nullCount, validBits, validBitsOffset), nil
@@ -123,7 +122,7 @@ func (dec *ByteStreamSplitFixedLenByteArrayDecoder) Decode(out []parquet.FixedLe
 	toRead := min(len(out), dec.nvals)
 	numBytesNeeded := toRead * dec.typeLen
 	if numBytesNeeded > len(dec.data) || numBytesNeeded > math.MaxInt32 {
-		return 0, xerrors.New("parquet: eof exception")
+		return 0, errors.New("parquet: eof exception")
 	}
 
 	for i := range out {
@@ -157,7 +156,7 @@ func (dec *ByteStreamSplitFixedLenByteArrayDecoder) DecodeSpaced(out []parquet.F
 		return valuesRead, err
 	}
 	if valuesRead != toRead {
-		return valuesRead, xerrors.New("parquet: number of values / definitions levels read did not match")
+		return valuesRead, errors.New("parquet: number of values / definitions levels read did not match")
 	}
 
 	return spacedExpand(out, nullCount, validBits, validBitsOffset), nil
