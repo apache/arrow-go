@@ -236,6 +236,78 @@ func TestLargeByteArrayRoundTripCorrectness(t *testing.T) {
 	require.Equal(t, numValues, rowIdx, "did not read back all values")
 }
 
+// TestMixedSizeByteArrayRoundTrip verifies that small ByteArray values
+// are not dropped when a large (≥1MB) value appears in the same WriteBatch.
+func TestMixedSizeByteArrayRoundTrip(t *testing.T) {
+	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.Must(schema.NewPrimitiveNode("data", parquet.Repetitions.Required, parquet.Types.ByteArray, -1, -1)),
+	}, -1)))
+
+	props := parquet.NewWriterProperties(
+		parquet.WithStats(true),
+		parquet.WithDictionaryDefault(false),
+		parquet.WithDataPageSize(1024*1024),
+	)
+
+	// Build values: small, small, small, 2MB, small, small
+	// Each has a unique pattern so corruption is detectable.
+	sizes := []int{65, 100, 200, 2 * 1024 * 1024, 50, 80}
+	values := make([]parquet.ByteArray, len(sizes))
+	for i, sz := range sizes {
+		buf := make([]byte, sz)
+		// Header: index for identification
+		buf[0] = byte(i)
+		// Fill with deterministic pattern
+		for j := 1; j < sz; j++ {
+			buf[j] = byte(i*31 + j)
+		}
+		values[i] = buf
+	}
+
+	// Write
+	out := &bytes.Buffer{}
+	writer := file.NewParquetWriter(out, sc.Root(), file.WithWriterProps(props))
+
+	rgw := writer.AppendRowGroup()
+	colWriter, err := rgw.NextColumn()
+	require.NoError(t, err)
+
+	byteArrayWriter := colWriter.(*file.ByteArrayColumnChunkWriter)
+	_, err = byteArrayWriter.WriteBatch(values, nil, nil)
+	require.NoError(t, err)
+
+	require.NoError(t, colWriter.Close())
+	require.NoError(t, rgw.Close())
+	require.NoError(t, writer.Close())
+
+	// Read back
+	rdr, err := file.NewParquetReader(bytes.NewReader(out.Bytes()))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	require.EqualValues(t, len(values), rdr.NumRows())
+
+	rgr := rdr.RowGroup(0)
+	colReader, err := rgr.Column(0)
+	require.NoError(t, err)
+
+	result := make([]parquet.ByteArray, len(values))
+	_, nVals, err := colReader.(*file.ByteArrayColumnChunkReader).ReadBatch(
+		int64(len(values)), result, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, len(values), nVals)
+
+	for i, expected := range values {
+		got := result[i]
+		require.Equal(t, len(expected), len(got),
+			"value %d: length mismatch (expected %d, got %d)", i, len(expected), len(got))
+		require.Equal(t, expected[0], got[0],
+			"value %d: header mismatch (data corruption)", i)
+		require.True(t, bytes.Equal(expected, got),
+			"value %d: content mismatch", i)
+	}
+}
+
 // TestLargeByteArrayRoundTripWithNulls verifies correctness of the
 // WriteBatchSpaced path (nullable column) with moderately-sized values.
 // Every 3rd value is null. Uses ~3MB total.
