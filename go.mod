@@ -40,7 +40,7 @@ require (
 	github.com/pterm/pterm v0.12.83
 	github.com/stoewer/go-strcase v1.3.1
 	github.com/stretchr/testify v1.11.1
-	github.com/substrait-io/substrait-go/v8 v8.0.0
+	github.com/substrait-io/substrait-go/v8 v8.0.1
 	github.com/substrait-io/substrait-protobuf/go v0.85.0
 	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.1.0
