@@ -19,6 +19,7 @@ package file
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -29,7 +30,6 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
-	"golang.org/x/xerrors"
 )
 
 const (
@@ -39,7 +39,7 @@ const (
 var (
 	magicBytes                  = []byte("PAR1")
 	magicEBytes                 = []byte("PARE")
-	errInconsistentFileMetadata = xerrors.New("parquet: file is smaller than indicated metadata size")
+	errInconsistentFileMetadata = errors.New("parquet: file is smaller than indicated metadata size")
 )
 
 // Reader is the main interface for reading a parquet file
@@ -213,7 +213,7 @@ func (f *Reader) parseMetaData() error {
 		}
 
 		if fileDecryptProps == nil {
-			return xerrors.New("could not read encrypted metadata, no decryption found in reader's properties")
+			return errors.New("could not read encrypted metadata, no decryption found in reader's properties")
 		}
 
 		fileCryptoMetadata, err := metadata.NewFileCryptoMetaData(buf)
@@ -246,13 +246,13 @@ func (f *Reader) handleAadPrefix(fileDecrypt *parquet.FileDecryptionProperties, 
 	aadPrefixInFile := algo.Aad.AadPrefix
 
 	if algo.Aad.SupplyAadPrefix && aadPrefixInProps == "" {
-		return "", xerrors.New("AAD Prefix used for file encryption but not stored in file and not supplied in decryption props")
+		return "", errors.New("AAD Prefix used for file encryption but not stored in file and not supplied in decryption props")
 	}
 
 	if fileHasAadPrefix {
 		if aadPrefixInProps != "" {
 			if aadPrefixInProps != string(aadPrefixInFile) {
-				return "", xerrors.New("AAD prefix in file and in properties but not the same")
+				return "", errors.New("AAD prefix in file and in properties but not the same")
 			}
 		}
 		aadPrefix = aadPrefixInFile
@@ -261,10 +261,10 @@ func (f *Reader) handleAadPrefix(fileDecrypt *parquet.FileDecryptionProperties, 
 		}
 	} else {
 		if !algo.Aad.SupplyAadPrefix && aadPrefixInProps != "" {
-			return "", xerrors.New("AAD Prefix set in decryptionproperties but was not used for file encryption")
+			return "", errors.New("AAD Prefix set in decryptionproperties but was not used for file encryption")
 		}
 		if fileDecrypt.Verifier != nil {
-			return "", xerrors.New("AAD Prefix Verifier is set but AAD Prefix not found in file")
+			return "", errors.New("AAD Prefix Verifier is set but AAD Prefix not found in file")
 		}
 	}
 	return string(append(aadPrefix, algo.Aad.AadFileUnique...)), nil
@@ -283,11 +283,11 @@ func (f *Reader) parseMetaDataEncryptedFilePlaintextFooter(decryptProps *parquet
 		f.metadata.FileDecryptor = f.fileDecryptor
 		if decryptProps.PlaintextFooterIntegrity() {
 			if len(data)-f.metadata.Size() != encryption.GcmTagLength+encryption.NonceLength {
-				return xerrors.New("failed reading metadata for encryption signature")
+				return errors.New("failed reading metadata for encryption signature")
 			}
 
 			if !f.metadata.VerifySignature(data[f.metadata.Size():]) {
-				return xerrors.New("parquet crypto signature verification failed")
+				return errors.New("parquet crypto signature verification failed")
 			}
 		}
 	}

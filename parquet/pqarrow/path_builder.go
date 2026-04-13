@@ -17,6 +17,7 @@
 package pqarrow
 
 import (
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"unsafe"
@@ -27,7 +28,6 @@ import (
 	"github.com/apache/arrow-go/v18/internal/bitutils"
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
-	"golang.org/x/xerrors"
 )
 
 type iterResult int8
@@ -442,7 +442,7 @@ func (p *pathBuilder) Visit(arr arrow.Array) error {
 	case arrow.EXTENSION:
 		return p.Visit(arr.(array.ExtensionArray).Storage())
 	case arrow.SPARSE_UNION, arrow.DENSE_UNION:
-		return xerrors.New("union types aren't supported in parquet")
+		return errors.New("union types aren't supported in parquet")
 	default:
 		p.addTerminalInfo(arr)
 		return nil

@@ -19,12 +19,12 @@ package types
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"reflect"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
-	"golang.org/x/xerrors"
 )
 
 // Parametric1Array is a simple int32 array for use with the Parametric1Type
@@ -100,7 +100,7 @@ func (Parametric1Type) Deserialize(storage arrow.DataType, data string) (arrow.E
 	}
 
 	if storage.ID() != arrow.INT32 {
-		return nil, xerrors.New("parametric1type: must have int32 as underlying storage type")
+		return nil, errors.New("parametric1type: must have int32 as underlying storage type")
 	}
 
 	return &Parametric1Type{arrow.ExtensionBase{Storage: arrow.PrimitiveTypes.Int32}, int32(binary.LittleEndian.Uint32([]byte(data)))}, nil
@@ -155,7 +155,7 @@ func (Parametric2Type) Deserialize(storage arrow.DataType, data string) (arrow.E
 	}
 
 	if storage.ID() != arrow.INT32 {
-		return nil, xerrors.New("parametric1type: must have int32 as underlying storage type")
+		return nil, errors.New("parametric1type: must have int32 as underlying storage type")
 	}
 
 	return &Parametric2Type{arrow.ExtensionBase{Storage: arrow.PrimitiveTypes.Int32}, int32(binary.LittleEndian.Uint32([]byte(data)))}, nil
@@ -214,7 +214,7 @@ func (ExtStructType) Serialize() string { return "ext-struct-type-unique-code" }
 // returning the correct type if it matches "ext-struct-type-unique-code".
 func (ExtStructType) Deserialize(_ arrow.DataType, serialized string) (arrow.ExtensionType, error) {
 	if string(serialized) != "ext-struct-type-unique-code" {
-		return nil, xerrors.New("type identifier did not match")
+		return nil, errors.New("type identifier did not match")
 	}
 	return NewExtStructType(), nil
 }

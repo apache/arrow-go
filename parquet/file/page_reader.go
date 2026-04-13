@@ -31,7 +31,6 @@ import (
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/thrift"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
-	"golang.org/x/xerrors"
 )
 
 // PageReader is the interface used by the columnreader in order to read
@@ -773,7 +772,7 @@ func (p *serializedPageReader) Next() bool {
 			p.cryptoCtx.StartDecryptWithDictionaryPage = false
 			dictHeader := p.curPageHdr.GetDictionaryPageHeader()
 			if dictHeader.GetNumValues() < 0 {
-				p.err = xerrors.New("parquet: invalid page header (negative number of values)")
+				p.err = errors.New("parquet: invalid page header (negative number of values)")
 				return false
 			}
 
@@ -805,7 +804,7 @@ func (p *serializedPageReader) Next() bool {
 			p.pageOrd++
 			dataHeader := p.curPageHdr.GetDataPageHeader()
 			if dataHeader.GetNumValues() < 0 {
-				p.err = xerrors.New("parquet: invalid page header (negative number of values)")
+				p.err = errors.New("parquet: invalid page header (negative number of values)")
 				return false
 			}
 
@@ -842,12 +841,12 @@ func (p *serializedPageReader) Next() bool {
 			p.pageOrd++
 			dataHeader := p.curPageHdr.GetDataPageHeaderV2()
 			if dataHeader.GetNumValues() < 0 {
-				p.err = xerrors.New("parquet: invalid page header (negative number of values)")
+				p.err = errors.New("parquet: invalid page header (negative number of values)")
 				return false
 			}
 
 			if dataHeader.GetDefinitionLevelsByteLength() < 0 || dataHeader.GetRepetitionLevelsByteLength() < 0 {
-				p.err = xerrors.New("parquet: invalid page header (negative levels byte length)")
+				p.err = errors.New("parquet: invalid page header (negative levels byte length)")
 				return false
 			}
 
@@ -860,7 +859,7 @@ func (p *serializedPageReader) Next() bool {
 			p.rowsSeen += int64(dataHeader.GetNumRows())
 			levelsBytelen, ok := utils.Add(int(dataHeader.GetDefinitionLevelsByteLength()), int(dataHeader.GetRepetitionLevelsByteLength()))
 			if !ok {
-				p.err = xerrors.New("parquet: levels size too large (corrupt file?)")
+				p.err = errors.New("parquet: levels size too large (corrupt file?)")
 				return false
 			}
 

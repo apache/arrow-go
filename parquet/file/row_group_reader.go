@@ -17,6 +17,7 @@
 package file
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -26,7 +27,6 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
-	"golang.org/x/xerrors"
 )
 
 const (
@@ -134,12 +134,12 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 	}
 
 	if r.fileDecryptor == nil {
-		return nil, xerrors.New("column in rowgroup is encrypted, but no file decryptor")
+		return nil, errors.New("column in rowgroup is encrypted, but no file decryptor")
 	}
 
 	const encryptedRowGroupsLimit = 32767
 	if i > encryptedRowGroupsLimit {
-		return nil, xerrors.New("encrypted files cannot contain more than 32767 column chunks")
+		return nil, errors.New("encrypted files cannot contain more than 32767 column chunks")
 	}
 
 	if cryptoMetadata.IsSetENCRYPTION_WITH_FOOTER_KEY() {

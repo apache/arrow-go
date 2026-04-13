@@ -18,10 +18,10 @@ package utils
 
 import (
 	"bytes"
+	"errors"
 
 	"github.com/apache/arrow-go/v18/internal/bitutils"
 	"github.com/apache/arrow-go/v18/parquet"
-	"golang.org/x/xerrors"
 )
 
 func getspaced[T parquet.ColumnTypes | uint64](r *RleDecoder, dc DictionaryConverter[T], vals []T, batchSize, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
@@ -93,11 +93,11 @@ func consumeLiterals[T parquet.ColumnTypes | uint64](r *RleDecoder, dc Dictionar
 
 	n, _ := r.r.GetBatchIndex(uint(r.bitWidth), buf)
 	if n != batch {
-		return 0, 0, run, xerrors.New("was not able to retrieve correct number of indexes")
+		return 0, 0, run, errors.New("was not able to retrieve correct number of indexes")
 	}
 
 	if !dc.IsValid(buf...) {
-		return 0, 0, run, xerrors.New("invalid index values found for dictionary converter")
+		return 0, 0, run, errors.New("invalid index values found for dictionary converter")
 	}
 
 	var (

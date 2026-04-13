@@ -17,6 +17,7 @@
 package encoding
 
 import (
+	"errors"
 	"io"
 	"sync"
 	"unsafe"
@@ -26,7 +27,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
-	"golang.org/x/xerrors"
 )
 
 // TypedDecoder is the general interface for all decoder types which can
@@ -467,7 +467,7 @@ func (b *BufferWriter) Seek(offset int64, whence int) (int64, error) {
 		newPos = b.buffer.Len() + offs
 	}
 	if newPos < 0 {
-		return 0, xerrors.New("negative result pos")
+		return 0, errors.New("negative result pos")
 	}
 	b.pos = newPos
 	return int64(newPos), nil

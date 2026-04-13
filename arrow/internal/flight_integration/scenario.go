@@ -40,7 +40,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/internal/arrjson"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	"golang.org/x/xerrors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -367,7 +366,7 @@ func CheckActionResults(ctx context.Context, client flight.Client, action *fligh
 
 	res, err := stream.Recv()
 	if res != nil || err != io.EOF {
-		return xerrors.New("action result stream had too many entries")
+		return errors.New("action result stream had too many entries")
 	}
 	return nil
 }
@@ -501,7 +500,7 @@ func (m *middlewareScenarioTester) RunClient(addr string, opts ...grpc.DialOptio
 	// this call is expected to fail
 	_, err = client.GetFlightInfo(ctx, &flight.FlightDescriptor{Type: flight.DescriptorCMD})
 	if err == nil {
-		return xerrors.New("expected call to fail")
+		return errors.New("expected call to fail")
 	}
 
 	if tm.received != "expected value" {

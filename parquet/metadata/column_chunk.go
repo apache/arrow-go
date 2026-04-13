@@ -19,6 +19,7 @@ package metadata
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"reflect"
 
@@ -29,7 +30,6 @@ import (
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/thrift"
 	"github.com/apache/arrow-go/v18/parquet/schema"
-	"golang.org/x/xerrors"
 )
 
 // PageEncodingStats is used for counting the number of pages of specific
@@ -106,7 +106,7 @@ func NewColumnChunkMetaData(column *format.ColumnChunk, descr *schema.Column, wr
 				thrift.DeserializeThrift(&c.decryptedMeta, decryptor.Decrypt(column.GetEncryptedColumnMetadata()))
 				c.columnMeta = &c.decryptedMeta
 			} else {
-				return nil, xerrors.New("cannot decrypt column metadata. file decryption not setup correctly")
+				return nil, errors.New("cannot decrypt column metadata. file decryption not setup correctly")
 			}
 		}
 	}

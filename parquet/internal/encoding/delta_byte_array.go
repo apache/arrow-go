@@ -17,10 +17,11 @@
 package encoding
 
 import (
+	"errors"
+
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
-	"golang.org/x/xerrors"
 )
 
 // DeltaByteArrayEncoder is an encoder for writing bytearrays which are delta encoded
@@ -270,7 +271,7 @@ func (d *DeltaByteArrayDecoder) DecodeSpaced(out []parquet.ByteArray, nullCount 
 		return values, err
 	}
 	if values != toread {
-		return values, xerrors.New("parquet: number of values / definition levels read did not match")
+		return values, errors.New("parquet: number of values / definition levels read did not match")
 	}
 
 	return spacedExpand(out, nullCount, validBits, validBitsOffset), nil

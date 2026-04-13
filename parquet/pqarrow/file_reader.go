@@ -34,7 +34,6 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/xerrors"
 )
 
 type itrFactory func(int, *file.Reader) *columnIterator
@@ -509,7 +508,7 @@ func (fr *FileReader) GetRecordReader(ctx context.Context, colIndices, rowGroups
 	}
 
 	if len(readers) == 0 {
-		return nil, xerrors.New("no leaf column readers matched col indices")
+		return nil, errors.New("no leaf column readers matched col indices")
 	}
 
 	nrows := int64(0)
@@ -537,7 +536,7 @@ func (fr *FileReader) getReader(ctx context.Context, field *SchemaField, arrowFi
 	rctx := readerCtxFromContext(ctx)
 	if len(field.Children) == 0 {
 		if !field.IsLeaf() {
-			return nil, xerrors.New("parquet non-leaf node has no children")
+			return nil, errors.New("parquet non-leaf node has no children")
 		}
 		if rctx.filterLeaves && !rctx.includesLeaf(field.ColIndex) {
 			return nil, nil

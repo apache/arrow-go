@@ -21,13 +21,13 @@ package cdata
 
 import (
 	"context"
+	"errors"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/arrio"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	"golang.org/x/xerrors"
 )
 
 // SchemaFromPtr is a simple helper function to cast a uintptr to a *CArrowSchema
@@ -151,7 +151,7 @@ func ImportCRecordBatch(arr *CArrowArray, sc *CArrowSchema) (arrow.RecordBatch, 
 	}
 
 	if field.Type.ID() != arrow.STRUCT {
-		return nil, xerrors.New("recordbatch array import must be of struct type")
+		return nil, errors.New("recordbatch array import must be of struct type")
 	}
 
 	return ImportCRecordBatchWithSchema(arr, arrow.NewSchema(field.Type.(*arrow.StructType).Fields(), &field.Metadata))

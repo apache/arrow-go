@@ -54,7 +54,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	"golang.org/x/xerrors"
 )
 
 type (
@@ -224,22 +223,22 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 		var precision, scale int
 
 		if len(propList) < 2 || len(propList) > 3 {
-			return ret, xerrors.Errorf("invalid decimal spec '%s': wrong number of properties", f)
+			return ret, fmt.Errorf("invalid decimal spec '%s': wrong number of properties", f)
 		} else if len(propList) == 3 {
 			bitwidth, err = strconv.Atoi(propList[2])
 			if err != nil {
-				return ret, xerrors.Errorf("could not parse decimal bitwidth in '%s': %s", f, err.Error())
+				return ret, fmt.Errorf("could not parse decimal bitwidth in '%s': %w", f, err)
 			}
 		}
 
 		precision, err = strconv.Atoi(propList[0])
 		if err != nil {
-			return ret, xerrors.Errorf("could not parse decimal precision in '%s': %s", f, err.Error())
+			return ret, fmt.Errorf("could not parse decimal precision in '%s': %w", f, err)
 		}
 
 		scale, err = strconv.Atoi(propList[1])
 		if err != nil {
-			return ret, xerrors.Errorf("could not parse decimal scale in '%s': %s", f, err.Error())
+			return ret, fmt.Errorf("could not parse decimal scale in '%s': %w", f, err)
 		}
 
 		switch bitwidth {
@@ -252,7 +251,7 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 		case 256:
 			dt = &arrow.Decimal256Type{Precision: int32(precision), Scale: int32(scale)}
 		default:
-			return ret, xerrors.Errorf("unsupported decimal bitwidth, got '%s'", f)
+			return ret, fmt.Errorf("unsupported decimal bitwidth, got '%s'", f)
 		}
 	}
 
@@ -328,7 +327,7 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 
 	if dt == nil {
 		// if we didn't find a type, then it's something we haven't implemented.
-		err = xerrors.New("unimplemented type")
+		err = errors.New("unimplemented type")
 	} else {
 		ret.Type = dt
 	}
@@ -797,7 +796,7 @@ func (imp *cimporter) importFixedSizePrimitive() error {
 		values, err = imp.importFixedSizeBuffer(1, bitutil.BytesForBits(int64(fw.BitWidth())))
 	} else {
 		if fw.BitWidth() != 1 {
-			return xerrors.New("invalid bitwidth")
+			return errors.New("invalid bitwidth")
 		}
 		values, err = imp.importBitsBuffer(1)
 	}

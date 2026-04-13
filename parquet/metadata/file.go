@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -31,7 +32,6 @@ import (
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/thrift"
 	"github.com/apache/arrow-go/v18/parquet/schema"
-	"golang.org/x/xerrors"
 )
 
 // DefaultCompressionType is used unless a different compression is specified
@@ -407,7 +407,7 @@ func (f *FileMetaData) SetFilePath(path string) {
 // current file metadata
 func (f *FileMetaData) AppendRowGroups(other *FileMetaData) error {
 	if !f.Schema.Equals(other.Schema) {
-		return xerrors.New("parquet/FileMetaData: AppendRowGroups requires equal schemas")
+		return errors.New("parquet/FileMetaData: AppendRowGroups requires equal schemas")
 	}
 
 	f.RowGroups = append(f.RowGroups, other.GetRowGroups()...)

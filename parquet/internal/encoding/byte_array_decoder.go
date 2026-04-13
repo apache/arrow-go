@@ -26,7 +26,6 @@ import (
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	pqutils "github.com/apache/arrow-go/v18/parquet/internal/utils"
-	"golang.org/x/xerrors"
 )
 
 // PlainByteArrayDecoder decodes a data chunk for bytearrays according to
@@ -81,17 +80,17 @@ func (pbad *PlainByteArrayDecoder) Decode(out []parquet.ByteArray) (int, error) 
 		// there should always be at least four bytes which is the length of the
 		// next value in the data.
 		if len(pbad.data) < 4 {
-			return i, xerrors.New("parquet: eof reading bytearray")
+			return i, errors.New("parquet: eof reading bytearray")
 		}
 
 		// the first 4 bytes are a little endian int32 length
 		byteLen := int32(binary.LittleEndian.Uint32(pbad.data[:4]))
 		if byteLen < 0 {
-			return i, xerrors.New("parquet: invalid BYTE_ARRAY value")
+			return i, errors.New("parquet: invalid BYTE_ARRAY value")
 		}
 
 		if int64(len(pbad.data)) < int64(byteLen)+4 {
-			return i, xerrors.New("parquet: eof reading bytearray")
+			return i, errors.New("parquet: eof reading bytearray")
 		}
 
 		out[i] = pbad.data[4 : byteLen+4 : byteLen+4]
@@ -111,7 +110,7 @@ func (pbad *PlainByteArrayDecoder) DecodeSpaced(out []parquet.ByteArray, nullCou
 		return valuesRead, err
 	}
 	if valuesRead != toRead {
-		return valuesRead, xerrors.New("parquet: number of values / definition levels read did not match")
+		return valuesRead, errors.New("parquet: number of values / definition levels read did not match")
 	}
 
 	return spacedExpand(out, nullCount, validBits, validBitsOffset), nil
