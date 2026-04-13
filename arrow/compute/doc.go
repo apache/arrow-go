@@ -26,4 +26,4 @@
 // Everything in this package should be considered Experimental for now.
 package compute
 
-//go:generate stringer -type=FuncKind -linecomment
+//go:generate go tool stringer -type=FuncKind -linecomment

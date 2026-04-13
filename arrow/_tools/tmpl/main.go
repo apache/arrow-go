@@ -97,9 +97,6 @@ func main() {
 	}
 
 	if *gi {
-		if _, err := exec.LookPath("goimports"); err != nil {
-			errExit("failed to find goimports: %s", err.Error())
-		}
 		formatter = formatSource
 	} else {
 		formatter = format.Source
@@ -191,14 +188,14 @@ var (
 
 func formatSource(in []byte) ([]byte, error) {
 	r := bytes.NewReader(in)
-	cmd := exec.Command("goimports")
+	cmd := exec.Command("go", "tool", "goimports")
 	cmd.Stdin = r
 	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("error running goimports: %s", string(ee.Stderr))
+			return nil, fmt.Errorf("error running 'go tool goimports': %s", string(ee.Stderr))
 		}
-		return nil, fmt.Errorf("error running goimports: %s", string(out))
+		return nil, fmt.Errorf("error running 'go tool goimports': %w", err)
 	}
 
 	return out, nil
