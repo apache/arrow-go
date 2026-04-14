@@ -575,6 +575,9 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 	case *array.ListBuilder, *array.LargeListBuilder, *array.ListViewBuilder, *array.LargeListViewBuilder:
 		return appendListElement(b, v)
 	case *array.FixedSizeListBuilder:
+		if v.Kind() != reflect.Slice && v.Kind() != reflect.Array {
+			return fmt.Errorf("arreflect: cannot set fixed-size list from %s: %w", v.Type(), ErrTypeMismatch)
+		}
 		expectedLen := int(tb.Type().(*arrow.FixedSizeListType).Len())
 		if v.Len() != expectedLen {
 			return fmt.Errorf("arreflect: fixed-size list length mismatch: got %d, want %d", v.Len(), expectedLen)
@@ -871,6 +874,15 @@ func buildDictionaryArray(vals reflect.Value, mem memory.Allocator) (arrow.Array
 	valDT, err := inferArrowType(elemType)
 	if err != nil {
 		return nil, err
+	}
+
+	switch valDT.ID() {
+	case arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64,
+		arrow.UINT8, arrow.UINT16, arrow.UINT32, arrow.UINT64,
+		arrow.FLOAT32, arrow.FLOAT64,
+		arrow.STRING, arrow.BINARY, arrow.BOOL:
+	default:
+		return nil, fmt.Errorf("arreflect: dictionary encoding not supported for %s: %w", valDT, ErrUnsupportedType)
 	}
 
 	dt := &arrow.DictionaryType{
