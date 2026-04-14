@@ -46,6 +46,9 @@ func buildArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.A
 		return buildRunEndEncodedArray(vals, mem)
 	}
 	if opts.ListView {
+		if elemType.Kind() != reflect.Slice || elemType == typeOfByteSlice {
+			return nil, fmt.Errorf("arreflect: WithListView requires a slice-of-slices element type, got %s: %w", elemType, ErrUnsupportedType)
+		}
 		return buildListViewArray(vals, mem)
 	}
 
@@ -133,9 +136,9 @@ func appendPrimitiveValue(b array.Builder, v reflect.Value, dt arrow.DataType) e
 		b.(*array.Float64Builder).Append(float64(v.Float()))
 	case arrow.BOOL:
 		b.(*array.BooleanBuilder).Append(v.Bool())
-	case arrow.STRING, arrow.LARGE_STRING:
+	case arrow.STRING:
 		b.(*array.StringBuilder).Append(v.String())
-	case arrow.BINARY, arrow.LARGE_BINARY:
+	case arrow.BINARY:
 		if v.IsNil() {
 			b.(*array.BinaryBuilder).AppendNull()
 		} else {

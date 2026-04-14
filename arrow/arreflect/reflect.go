@@ -407,8 +407,12 @@ func FromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.Arr
 		if err != nil {
 			return nil, err
 		}
-		dt = applyDecimalOpts(dt, goType, tOpts)
-		dt = applyTemporalOpts(dt, goType, tOpts)
+		derefType := goType
+		for derefType.Kind() == reflect.Ptr {
+			derefType = derefType.Elem()
+		}
+		dt = applyDecimalOpts(dt, derefType, tOpts)
+		dt = applyTemporalOpts(dt, derefType, tOpts)
 		if tOpts.ListView {
 			if lt, ok := dt.(*arrow.ListType); ok {
 				dt = arrow.ListViewOf(lt.Elem())
