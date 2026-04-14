@@ -27,6 +27,8 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuildPrimitiveArray(t *testing.T) {
@@ -36,39 +38,25 @@ func TestBuildPrimitiveArray(t *testing.T) {
 	t.Run("int32", func(t *testing.T) {
 		vals := []int32{1, 2, 3, 4, 5}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.Len() != 5 {
-			t.Errorf("expected 5, got %d", arr.Len())
-		}
-		if arr.DataType().ID() != arrow.INT32 {
-			t.Errorf("expected INT32, got %v", arr.DataType())
-		}
+		assert.Equal(t, 5, arr.Len())
+		assert.Equal(t, arrow.INT32, arr.DataType().ID())
 		typed := arr.(*array.Int32)
 		for i, want := range vals {
-			if typed.Value(i) != want {
-				t.Errorf("[%d] want %d, got %d", i, want, typed.Value(i))
-			}
+			assert.Equal(t, want, typed.Value(i), "[%d] value mismatch", i)
 		}
 	})
 
 	t.Run("string", func(t *testing.T) {
 		vals := []string{"hello", "world", "foo"}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.STRING {
-			t.Errorf("expected STRING, got %v", arr.DataType())
-		}
+		assert.Equal(t, arrow.STRING, arr.DataType().ID())
 		typed := arr.(*array.String)
 		for i, want := range vals {
-			if typed.Value(i) != want {
-				t.Errorf("[%d] want %q, got %q", i, want, typed.Value(i))
-			}
+			assert.Equal(t, want, typed.Value(i), "[%d] value mismatch", i)
 		}
 	})
 
@@ -76,45 +64,29 @@ func TestBuildPrimitiveArray(t *testing.T) {
 		v1, v3 := int32(10), int32(30)
 		vals := []*int32{&v1, nil, &v3}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if !arr.IsNull(1) {
-			t.Error("expected index 1 to be null")
-		}
+		assert.True(t, arr.IsNull(1), "expected index 1 to be null")
 		typed := arr.(*array.Int32)
-		if typed.Value(0) != 10 || typed.Value(2) != 30 {
-			t.Error("unexpected values")
-		}
+		assert.True(t, typed.Value(0) == 10 && typed.Value(2) == 30, "unexpected values")
 	})
 
 	t.Run("bool", func(t *testing.T) {
 		vals := []bool{true, false, true}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.BOOL {
-			t.Errorf("expected BOOL, got %v", arr.DataType())
-		}
+		assert.Equal(t, arrow.BOOL, arr.DataType().ID())
 		typed := arr.(*array.Boolean)
-		if !typed.Value(0) || typed.Value(1) || !typed.Value(2) {
-			t.Error("unexpected bool values")
-		}
+		assert.True(t, typed.Value(0) && !typed.Value(1) && typed.Value(2), "unexpected bool values")
 	})
 
 	t.Run("binary", func(t *testing.T) {
 		vals := [][]byte{{1, 2, 3}, {4, 5}, {6}}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.BINARY {
-			t.Errorf("expected BINARY, got %v", arr.DataType())
-		}
+		assert.Equal(t, arrow.BINARY, arr.DataType().ID())
 	})
 
 	t.Run("numeric_types", func(t *testing.T) {
@@ -134,12 +106,8 @@ func TestBuildPrimitiveArray(t *testing.T) {
 		}
 		for _, tc := range cases {
 			arr, err := buildArray(reflect.ValueOf(tc.vals), tagOpts{}, mem)
-			if err != nil {
-				t.Fatalf("type %v: %v", tc.id, err)
-			}
-			if arr.DataType().ID() != tc.id {
-				t.Errorf("expected %v, got %v", tc.id, arr.DataType())
-			}
+			require.NoError(t, err, "type %v", tc.id)
+			assert.Equal(t, tc.id, arr.DataType().ID(), "expected %v, got %v", tc.id, arr.DataType())
 			arr.Release()
 		}
 	})
@@ -153,36 +121,24 @@ func TestBuildTemporalArray(t *testing.T) {
 		now := time.Now().UTC()
 		vals := []time.Time{now, now.Add(time.Hour)}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.TIMESTAMP {
-			t.Errorf("expected TIMESTAMP, got %v", arr.DataType())
-		}
+		assert.Equal(t, arrow.TIMESTAMP, arr.DataType().ID())
 		typed := arr.(*array.Timestamp)
 		for i, want := range vals {
-			if typed.Value(i) != arrow.Timestamp(want.UnixNano()) {
-				t.Errorf("[%d] timestamp mismatch", i)
-			}
+			assert.Equal(t, arrow.Timestamp(want.UnixNano()), typed.Value(i), "[%d] timestamp mismatch", i)
 		}
 	})
 
 	t.Run("time_duration", func(t *testing.T) {
 		vals := []time.Duration{time.Second, time.Minute, time.Hour}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.DURATION {
-			t.Errorf("expected DURATION, got %v", arr.DataType())
-		}
+		assert.Equal(t, arrow.DURATION, arr.DataType().ID())
 		typed := arr.(*array.Duration)
 		for i, want := range vals {
-			if typed.Value(i) != arrow.Duration(want.Nanoseconds()) {
-				t.Errorf("[%d] duration mismatch", i)
-			}
+			assert.Equal(t, arrow.Duration(want.Nanoseconds()), typed.Value(i), "[%d] duration mismatch", i)
 		}
 	})
 }
@@ -198,18 +154,12 @@ func TestBuildDecimalArray(t *testing.T) {
 			decimal128.New(0, 300),
 		}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.DECIMAL128 {
-			t.Errorf("expected DECIMAL128, got %v", arr.DataType())
-		}
+		assert.Equal(t, arrow.DECIMAL128, arr.DataType().ID())
 		typed := arr.(*array.Decimal128)
 		for i, want := range vals {
-			if typed.Value(i) != want {
-				t.Errorf("[%d] decimal128 mismatch", i)
-			}
+			assert.Equal(t, want, typed.Value(i), "[%d] decimal128 mismatch", i)
 		}
 	})
 
@@ -219,18 +169,12 @@ func TestBuildDecimalArray(t *testing.T) {
 			decimal256.New(0, 0, 0, 200),
 		}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.DECIMAL256 {
-			t.Errorf("expected DECIMAL256, got %v", arr.DataType())
-		}
+		assert.Equal(t, arrow.DECIMAL256, arr.DataType().ID())
 		typed := arr.(*array.Decimal256)
 		for i, want := range vals {
-			if typed.Value(i) != want {
-				t.Errorf("[%d] decimal256 mismatch", i)
-			}
+			assert.Equal(t, want, typed.Value(i), "[%d] decimal256 mismatch", i)
 		}
 	})
 
@@ -238,49 +182,34 @@ func TestBuildDecimalArray(t *testing.T) {
 		vals := []decimal128.Num{decimal128.New(0, 12345)}
 		opts := tagOpts{HasDecimalOpts: true, DecimalPrecision: 10, DecimalScale: 3}
 		arr, err := buildArray(reflect.ValueOf(vals), opts, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
 		dt := arr.DataType().(*arrow.Decimal128Type)
-		if dt.Precision != 10 || dt.Scale != 3 {
-			t.Errorf("expected p=10 s=3, got p=%d s=%d", dt.Precision, dt.Scale)
-		}
+		assert.Equal(t, int32(10), dt.Precision, "expected p=10, got p=%d", dt.Precision)
+		assert.Equal(t, int32(3), dt.Scale, "expected s=3, got s=%d", dt.Scale)
 	})
 
 	t.Run("decimal32", func(t *testing.T) {
 		vals := []decimal.Decimal32{100, 200, 300}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.DECIMAL32 {
-			t.Errorf("expected DECIMAL32, got %v", arr.DataType())
-		}
+		assert.Equal(t, arrow.DECIMAL32, arr.DataType().ID())
 		typed := arr.(*array.Decimal32)
 		for i, want := range vals {
-			if typed.Value(i) != want {
-				t.Errorf("[%d] decimal32 mismatch: got %v, want %v", i, typed.Value(i), want)
-			}
+			assert.Equal(t, want, typed.Value(i), "[%d] decimal32 mismatch", i)
 		}
 	})
 
 	t.Run("decimal64", func(t *testing.T) {
 		vals := []decimal.Decimal64{1000, 2000}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.DECIMAL64 {
-			t.Errorf("expected DECIMAL64, got %v", arr.DataType())
-		}
+		assert.Equal(t, arrow.DECIMAL64, arr.DataType().ID())
 		typed := arr.(*array.Decimal64)
 		for i, want := range vals {
-			if typed.Value(i) != want {
-				t.Errorf("[%d] decimal64 mismatch: got %v, want %v", i, typed.Value(i), want)
-			}
+			assert.Equal(t, want, typed.Value(i), "[%d] decimal64 mismatch", i)
 		}
 	})
 
@@ -288,14 +217,11 @@ func TestBuildDecimalArray(t *testing.T) {
 		vals := []decimal.Decimal32{12345}
 		opts := tagOpts{HasDecimalOpts: true, DecimalPrecision: 9, DecimalScale: 2}
 		arr, err := buildArray(reflect.ValueOf(vals), opts, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
 		dt := arr.DataType().(*arrow.Decimal32Type)
-		if dt.Precision != 9 || dt.Scale != 2 {
-			t.Errorf("expected p=9 s=2, got p=%d s=%d", dt.Precision, dt.Scale)
-		}
+		assert.Equal(t, int32(9), dt.Precision, "expected p=9, got p=%d", dt.Precision)
+		assert.Equal(t, int32(2), dt.Scale, "expected s=2, got s=%d", dt.Scale)
 	})
 }
 
@@ -325,26 +251,16 @@ func TestBuildStructArray(t *testing.T) {
 			{X: 3, Y: "three"},
 		}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.STRUCT {
-			t.Fatalf("expected STRUCT, got %v", arr.DataType())
-		}
+		require.Equal(t, arrow.STRUCT, arr.DataType().ID(), "expected STRUCT, got %v", arr.DataType())
 		typed := arr.(*array.Struct)
-		if typed.Len() != 3 {
-			t.Errorf("expected 3, got %d", typed.Len())
-		}
+		assert.Equal(t, 3, typed.Len())
 		xArr := typed.Field(0).(*array.Int32)
 		yArr := typed.Field(1).(*array.String)
 		for i, want := range vals {
-			if xArr.Value(i) != want.X {
-				t.Errorf("[%d] X: want %d, got %d", i, want.X, xArr.Value(i))
-			}
-			if yArr.Value(i) != want.Y {
-				t.Errorf("[%d] Y: want %q, got %q", i, want.Y, yArr.Value(i))
-			}
+			assert.Equal(t, want.X, xArr.Value(i), "[%d] X mismatch", i)
+			assert.Equal(t, want.Y, yArr.Value(i), "[%d] Y mismatch", i)
 		}
 	})
 
@@ -352,16 +268,10 @@ func TestBuildStructArray(t *testing.T) {
 		v1 := buildSimpleStruct{X: 42, Y: "answer"}
 		vals := []*buildSimpleStruct{&v1, nil}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.Len() != 2 {
-			t.Errorf("expected 2, got %d", arr.Len())
-		}
-		if !arr.IsNull(1) {
-			t.Error("expected index 1 to be null")
-		}
+		assert.Equal(t, 2, arr.Len())
+		assert.True(t, arr.IsNull(1), "expected index 1 to be null")
 	})
 
 	t.Run("nullable_fields", func(t *testing.T) {
@@ -372,17 +282,11 @@ func TestBuildStructArray(t *testing.T) {
 			{X: nil, Y: nil},
 		}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
 		typed := arr.(*array.Struct)
-		if !typed.Field(0).IsNull(1) {
-			t.Error("expected X[1] to be null")
-		}
-		if !typed.Field(1).IsNull(1) {
-			t.Error("expected Y[1] to be null")
-		}
+		assert.True(t, typed.Field(0).IsNull(1), "expected X[1] to be null")
+		assert.True(t, typed.Field(1).IsNull(1), "expected Y[1] to be null")
 	})
 
 	t.Run("nested_struct", func(t *testing.T) {
@@ -391,23 +295,15 @@ func TestBuildStructArray(t *testing.T) {
 			{A: 2, B: buildSimpleStruct{X: 20, Y: "inner2"}},
 		}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.STRUCT {
-			t.Fatalf("expected STRUCT, got %v", arr.DataType())
-		}
+		require.Equal(t, arrow.STRUCT, arr.DataType().ID(), "expected STRUCT, got %v", arr.DataType())
 		typed := arr.(*array.Struct)
 		aArr := typed.Field(0).(*array.Int32)
-		if aArr.Value(0) != 1 || aArr.Value(1) != 2 {
-			t.Error("unexpected A values")
-		}
+		assert.True(t, aArr.Value(0) == 1 && aArr.Value(1) == 2, "unexpected A values")
 		bArr := typed.Field(1).(*array.Struct)
 		bxArr := bArr.Field(0).(*array.Int32)
-		if bxArr.Value(0) != 10 || bxArr.Value(1) != 20 {
-			t.Error("unexpected B.X values")
-		}
+		assert.True(t, bxArr.Value(0) == 10 && bxArr.Value(1) == 20, "unexpected B.X values")
 	})
 }
 
@@ -418,63 +314,39 @@ func TestBuildListArray(t *testing.T) {
 	t.Run("int32_lists", func(t *testing.T) {
 		vals := [][]int32{{1, 2, 3}, {4, 5}, {6}}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.LIST {
-			t.Fatalf("expected LIST, got %v", arr.DataType())
-		}
+		require.Equal(t, arrow.LIST, arr.DataType().ID(), "expected LIST, got %v", arr.DataType())
 		typed := arr.(*array.List)
-		if typed.Len() != 3 {
-			t.Errorf("expected 3, got %d", typed.Len())
-		}
-		if typed.ListValues().(*array.Int32).Len() != 6 {
-			t.Errorf("expected 6 total values")
-		}
+		assert.Equal(t, 3, typed.Len())
+		assert.Equal(t, 6, typed.ListValues().(*array.Int32).Len(), "expected 6 total values")
 	})
 
 	t.Run("null_inner", func(t *testing.T) {
 		vals := [][]int32{{1, 2}, nil, {3}}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if !arr.IsNull(1) {
-			t.Error("expected index 1 to be null")
-		}
+		assert.True(t, arr.IsNull(1), "expected index 1 to be null")
 	})
 
 	t.Run("string_lists", func(t *testing.T) {
 		vals := [][]string{{"a", "b"}, {"c"}}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.LIST {
-			t.Fatalf("expected LIST, got %v", arr.DataType())
-		}
+		require.Equal(t, arrow.LIST, arr.DataType().ID(), "expected LIST, got %v", arr.DataType())
 	})
 
 	t.Run("nested", func(t *testing.T) {
 		vals := [][][]int32{{{1, 2}, {3}}, {{4, 5, 6}}}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.LIST {
-			t.Fatalf("expected outer LIST, got %v", arr.DataType())
-		}
+		require.Equal(t, arrow.LIST, arr.DataType().ID(), "expected outer LIST, got %v", arr.DataType())
 		outer := arr.(*array.List)
-		if outer.Len() != 2 {
-			t.Errorf("expected 2 outer rows, got %d", outer.Len())
-		}
-		if outer.ListValues().DataType().ID() != arrow.LIST {
-			t.Fatalf("expected inner LIST, got %v", outer.ListValues().DataType())
-		}
+		assert.Equal(t, 2, outer.Len(), "expected 2 outer rows, got %d", outer.Len())
+		require.Equal(t, arrow.LIST, outer.ListValues().DataType().ID(), "expected inner LIST, got %v", outer.ListValues().DataType())
 	})
 }
 
@@ -488,41 +360,27 @@ func TestBuildMapArray(t *testing.T) {
 			{"c": 3},
 		}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.MAP {
-			t.Fatalf("expected MAP, got %v", arr.DataType())
-		}
-		if arr.(*array.Map).Len() != 2 {
-			t.Errorf("expected 2, got %d", arr.Len())
-		}
+		require.Equal(t, arrow.MAP, arr.DataType().ID(), "expected MAP, got %v", arr.DataType())
+		assert.Equal(t, 2, arr.(*array.Map).Len())
 	})
 
 	t.Run("null_map", func(t *testing.T) {
 		vals := []map[string]int32{{"a": 1}, nil}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if !arr.IsNull(1) {
-			t.Error("expected index 1 to be null")
-		}
+		assert.True(t, arr.IsNull(1), "expected index 1 to be null")
 	})
 
 	t.Run("entry_count", func(t *testing.T) {
 		vals := []map[string]int32{{"x": 10, "y": 20, "z": 30}}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
 		kvArr := arr.(*array.Map).ListValues().(*array.Struct)
-		if kvArr.Len() != 3 {
-			t.Errorf("expected 3 key-value pairs, got %d", kvArr.Len())
-		}
+		assert.Equal(t, 3, kvArr.Len(), "expected 3 key-value pairs, got %d", kvArr.Len())
 	})
 }
 
@@ -533,42 +391,24 @@ func TestBuildFixedSizeListArray(t *testing.T) {
 	t.Run("int32_n3", func(t *testing.T) {
 		vals := [][3]int32{{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.FIXED_SIZE_LIST {
-			t.Fatalf("expected FIXED_SIZE_LIST, got %v", arr.DataType())
-		}
+		require.Equal(t, arrow.FIXED_SIZE_LIST, arr.DataType().ID(), "expected FIXED_SIZE_LIST, got %v", arr.DataType())
 		typed := arr.(*array.FixedSizeList)
-		if typed.Len() != 3 {
-			t.Errorf("expected 3, got %d", typed.Len())
-		}
-		if typed.DataType().(*arrow.FixedSizeListType).Len() != 3 {
-			t.Error("expected fixed size 3")
-		}
+		assert.Equal(t, 3, typed.Len())
+		assert.Equal(t, int32(3), typed.DataType().(*arrow.FixedSizeListType).Len(), "expected fixed size 3")
 		values := typed.ListValues().(*array.Int32)
-		if values.Len() != 9 {
-			t.Errorf("expected 9 values, got %d", values.Len())
-		}
-		if values.Value(0) != 1 || values.Value(3) != 4 || values.Value(6) != 7 {
-			t.Error("unexpected values")
-		}
+		assert.Equal(t, 9, values.Len())
+		assert.True(t, values.Value(0) == 1 && values.Value(3) == 4 && values.Value(6) == 7, "unexpected values")
 	})
 
 	t.Run("float64_n2", func(t *testing.T) {
 		vals := [][2]float64{{1.0, 2.0}, {3.0, 4.0}}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.FIXED_SIZE_LIST {
-			t.Fatalf("expected FIXED_SIZE_LIST, got %v", arr.DataType())
-		}
-		if arr.DataType().(*arrow.FixedSizeListType).Len() != 2 {
-			t.Error("expected fixed size 2")
-		}
+		require.Equal(t, arrow.FIXED_SIZE_LIST, arr.DataType().ID(), "expected FIXED_SIZE_LIST, got %v", arr.DataType())
+		assert.Equal(t, int32(2), arr.DataType().(*arrow.FixedSizeListType).Len(), "expected fixed size 2")
 	})
 }
 
@@ -579,52 +419,32 @@ func TestBuildDictionaryArray(t *testing.T) {
 	t.Run("string_dict", func(t *testing.T) {
 		vals := []string{"apple", "banana", "apple", "cherry", "banana", "apple"}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{Dict: true}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.DICTIONARY {
-			t.Fatalf("expected DICTIONARY, got %v", arr.DataType())
-		}
+		require.Equal(t, arrow.DICTIONARY, arr.DataType().ID(), "expected DICTIONARY, got %v", arr.DataType())
 		typed := arr.(*array.Dictionary)
-		if typed.Len() != 6 {
-			t.Errorf("expected 6, got %d", typed.Len())
-		}
-		if typed.Dictionary().Len() != 3 {
-			t.Errorf("expected 3 unique, got %d", typed.Dictionary().Len())
-		}
+		assert.Equal(t, 6, typed.Len())
+		assert.Equal(t, 3, typed.Dictionary().Len(), "expected 3 unique, got %d", typed.Dictionary().Len())
 	})
 
 	t.Run("int32_dict", func(t *testing.T) {
 		vals := []int32{1, 2, 1, 3, 2, 1}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{Dict: true}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.DICTIONARY {
-			t.Fatalf("expected DICTIONARY, got %v", arr.DataType())
-		}
+		require.Equal(t, arrow.DICTIONARY, arr.DataType().ID(), "expected DICTIONARY, got %v", arr.DataType())
 		typed := arr.(*array.Dictionary)
-		if typed.Len() != 6 {
-			t.Errorf("expected 6, got %d", typed.Len())
-		}
-		if typed.Dictionary().Len() != 3 {
-			t.Errorf("expected 3 unique, got %d", typed.Dictionary().Len())
-		}
+		assert.Equal(t, 6, typed.Len())
+		assert.Equal(t, 3, typed.Dictionary().Len(), "expected 3 unique, got %d", typed.Dictionary().Len())
 	})
 
 	t.Run("index_type_is_int32", func(t *testing.T) {
 		vals := []string{"x", "y", "z"}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{Dict: true}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
 		dt := arr.DataType().(*arrow.DictionaryType)
-		if dt.IndexType.ID() != arrow.INT32 {
-			t.Errorf("expected INT32 index, got %v", dt.IndexType)
-		}
+		assert.Equal(t, arrow.INT32, dt.IndexType.ID(), "expected INT32 index, got %v", dt.IndexType)
 	})
 }
 
@@ -635,105 +455,64 @@ func TestBuildRunEndEncodedArray(t *testing.T) {
 	t.Run("int32_runs", func(t *testing.T) {
 		vals := []int32{1, 1, 1, 2, 2, 3}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{REE: true}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.RUN_END_ENCODED {
-			t.Fatalf("expected RUN_END_ENCODED, got %v", arr.DataType())
-		}
+		require.Equal(t, arrow.RUN_END_ENCODED, arr.DataType().ID(), "expected RUN_END_ENCODED, got %v", arr.DataType())
 		ree := arr.(*array.RunEndEncoded)
-		if ree.Len() != 6 {
-			t.Errorf("expected 6, got %d", ree.Len())
-		}
+		assert.Equal(t, 6, ree.Len())
 		runEnds := ree.RunEndsArr().(*array.Int32)
-		if runEnds.Len() != 3 {
-			t.Errorf("expected 3 runs, got %d", runEnds.Len())
-		}
-		if runEnds.Value(0) != 3 || runEnds.Value(1) != 5 || runEnds.Value(2) != 6 {
-			t.Errorf("unexpected run ends: %d %d %d",
-				runEnds.Value(0), runEnds.Value(1), runEnds.Value(2))
-		}
+		assert.Equal(t, 3, runEnds.Len(), "expected 3 runs, got %d", runEnds.Len())
+		assert.True(t, runEnds.Value(0) == 3 && runEnds.Value(1) == 5 && runEnds.Value(2) == 6,
+			"unexpected run ends: %d %d %d", runEnds.Value(0), runEnds.Value(1), runEnds.Value(2))
 		values := ree.Values().(*array.Int32)
-		if values.Len() != 3 {
-			t.Errorf("expected 3 values, got %d", values.Len())
-		}
-		if values.Value(0) != 1 || values.Value(1) != 2 || values.Value(2) != 3 {
-			t.Errorf("unexpected values: %d %d %d",
-				values.Value(0), values.Value(1), values.Value(2))
-		}
+		assert.Equal(t, 3, values.Len(), "expected 3 values, got %d", values.Len())
+		assert.True(t, values.Value(0) == 1 && values.Value(1) == 2 && values.Value(2) == 3,
+			"unexpected values: %d %d %d", values.Value(0), values.Value(1), values.Value(2))
 	})
 
 	t.Run("string_runs", func(t *testing.T) {
 		vals := []string{"a", "a", "b", "b", "b", "c"}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{REE: true}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.RUN_END_ENCODED {
-			t.Fatalf("expected RUN_END_ENCODED, got %v", arr.DataType())
-		}
+		require.Equal(t, arrow.RUN_END_ENCODED, arr.DataType().ID(), "expected RUN_END_ENCODED, got %v", arr.DataType())
 		ree := arr.(*array.RunEndEncoded)
-		if ree.Len() != 6 {
-			t.Errorf("expected 6, got %d", ree.Len())
-		}
-		if ree.RunEndsArr().Len() != 3 {
-			t.Errorf("expected 3 runs, got %d", ree.RunEndsArr().Len())
-		}
+		assert.Equal(t, 6, ree.Len())
+		assert.Equal(t, 3, ree.RunEndsArr().Len(), "expected 3 runs, got %d", ree.RunEndsArr().Len())
 	})
 
 	t.Run("single_run", func(t *testing.T) {
 		vals := []int32{42, 42, 42}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{REE: true}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
 		ree := arr.(*array.RunEndEncoded)
-		if ree.Len() != 3 {
-			t.Errorf("expected 3, got %d", ree.Len())
-		}
+		assert.Equal(t, 3, ree.Len())
 		runEnds := ree.RunEndsArr().(*array.Int32)
-		if runEnds.Len() != 1 || runEnds.Value(0) != 3 {
-			t.Errorf("expected 1 run ending at 3, got %d runs, end=%d",
-				runEnds.Len(), runEnds.Value(0))
-		}
+		assert.True(t, runEnds.Len() == 1 && runEnds.Value(0) == 3,
+			"expected 1 run ending at 3, got %d runs, end=%d", runEnds.Len(), runEnds.Value(0))
 	})
 
 	t.Run("all_distinct", func(t *testing.T) {
 		vals := []int32{1, 2, 3, 4, 5}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{REE: true}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
 		ree := arr.(*array.RunEndEncoded)
-		if ree.Len() != 5 {
-			t.Errorf("expected 5, got %d", ree.Len())
-		}
-		if ree.RunEndsArr().Len() != 5 {
-			t.Errorf("expected 5 runs for all-distinct, got %d", ree.RunEndsArr().Len())
-		}
+		assert.Equal(t, 5, ree.Len())
+		assert.Equal(t, 5, ree.RunEndsArr().Len(), "expected 5 runs for all-distinct, got %d", ree.RunEndsArr().Len())
 	})
 
 	t.Run("pointer_value_equality", func(t *testing.T) {
-		// Two distinct *string pointers pointing to equal values "x"
-		// Should produce ONE run, not two (value equality, not address equality)
 		x1 := "x"
 		x2 := "x"
 		y := "y"
 		vals := []*string{&x1, &x2, &y}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{REE: true}, mem)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
 		defer arr.Release()
-		// "x","x" is one run; "y" is another → 2 runs total
 		ree := arr.(*array.RunEndEncoded)
-		if ree.RunEndsArr().Len() != 2 {
-			t.Errorf("expected 2 runs (x+x coalesced, y), got %d", ree.RunEndsArr().Len())
-		}
+		assert.Equal(t, 2, ree.RunEndsArr().Len(), "expected 2 runs (x+x coalesced, y), got %d", ree.RunEndsArr().Len())
 	})
 }
 
@@ -744,64 +523,43 @@ func TestBuildListViewArray(t *testing.T) {
 	t.Run("int32_listview", func(t *testing.T) {
 		vals := [][]int32{{1, 2, 3}, {4, 5}, {6}}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{ListView: true}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.LIST_VIEW {
-			t.Fatalf("expected LIST_VIEW, got %v", arr.DataType())
-		}
+		require.Equal(t, arrow.LIST_VIEW, arr.DataType().ID(), "expected LIST_VIEW, got %v", arr.DataType())
 		typed := arr.(*array.ListView)
-		if typed.Len() != 3 {
-			t.Errorf("expected 3, got %d", typed.Len())
-		}
+		assert.Equal(t, 3, typed.Len())
 	})
 
 	t.Run("null_entry", func(t *testing.T) {
 		vals := [][]int32{{1, 2}, nil, {3}}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{ListView: true}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if !arr.IsNull(1) {
-			t.Error("expected index 1 to be null")
-		}
+		assert.True(t, arr.IsNull(1), "expected index 1 to be null")
 	})
 
 	t.Run("string_listview", func(t *testing.T) {
 		vals := [][]string{{"hello", "world"}, {"foo"}, {"a", "b", "c"}}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{ListView: true}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.LIST_VIEW {
-			t.Fatalf("expected LIST_VIEW, got %v", arr.DataType())
-		}
-		if arr.Len() != 3 {
-			t.Errorf("expected 3, got %d", arr.Len())
-		}
+		require.Equal(t, arrow.LIST_VIEW, arr.DataType().ID(), "expected LIST_VIEW, got %v", arr.DataType())
+		assert.Equal(t, 3, arr.Len())
 	})
 
 	t.Run("total_values", func(t *testing.T) {
 		vals := [][]int32{{10, 20}, {30}}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{ListView: true}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
 		allVals := arr.(*array.ListView).ListValues().(*array.Int32)
-		if allVals.Len() != 3 {
-			t.Errorf("expected 3 total values, got %d", allVals.Len())
-		}
+		assert.Equal(t, 3, allVals.Len(), "expected 3 total values, got %d", allVals.Len())
 	})
 }
 
 func TestBuildTemporalTaggedArray(t *testing.T) {
 	mem := memory.NewGoAllocator()
 
-	// reference time-of-day: 2024-01-15 10:30:00 UTC
 	ref := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
 
 	t.Run("date32", func(t *testing.T) {
@@ -809,22 +567,14 @@ func TestBuildTemporalTaggedArray(t *testing.T) {
 		opts := tagOpts{Temporal: "date32"}
 		sv := reflect.ValueOf(vals)
 		arr, err := buildTemporalArray(sv, opts, mem)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.DATE32 {
-			t.Errorf("expected DATE32, got %v", arr.DataType().ID())
-		}
-		if arr.Len() != 2 {
-			t.Errorf("expected len 2, got %d", arr.Len())
-		}
-		// roundtrip: convert back and check date
+		assert.Equal(t, arrow.DATE32, arr.DataType().ID())
+		assert.Equal(t, 2, arr.Len())
 		d32arr := arr.(*array.Date32)
 		got0 := d32arr.Value(0).ToTime()
-		if got0.Year() != ref.Year() || got0.Month() != ref.Month() || got0.Day() != ref.Day() {
-			t.Errorf("date32 roundtrip: got %v, want %v", got0, ref)
-		}
+		assert.True(t, got0.Year() == ref.Year() && got0.Month() == ref.Month() && got0.Day() == ref.Day(),
+			"date32 roundtrip: got %v, want %v", got0, ref)
 	})
 
 	t.Run("date64", func(t *testing.T) {
@@ -832,18 +582,13 @@ func TestBuildTemporalTaggedArray(t *testing.T) {
 		opts := tagOpts{Temporal: "date64"}
 		sv := reflect.ValueOf(vals)
 		arr, err := buildTemporalArray(sv, opts, mem)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.DATE64 {
-			t.Errorf("expected DATE64, got %v", arr.DataType().ID())
-		}
+		assert.Equal(t, arrow.DATE64, arr.DataType().ID())
 		d64arr := arr.(*array.Date64)
 		got0 := d64arr.Value(0).ToTime()
-		if got0.Year() != ref.Year() || got0.Month() != ref.Month() || got0.Day() != ref.Day() {
-			t.Errorf("date64 roundtrip: got %v, want %v", got0, ref)
-		}
+		assert.True(t, got0.Year() == ref.Year() && got0.Month() == ref.Month() && got0.Day() == ref.Day(),
+			"date64 roundtrip: got %v, want %v", got0, ref)
 	})
 
 	t.Run("time32", func(t *testing.T) {
@@ -851,37 +596,26 @@ func TestBuildTemporalTaggedArray(t *testing.T) {
 		opts := tagOpts{Temporal: "time32"}
 		sv := reflect.ValueOf(vals)
 		arr, err := buildTemporalArray(sv, opts, mem)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.TIME32 {
-			t.Errorf("expected TIME32, got %v", arr.DataType().ID())
-		}
-		if arr.Len() != 1 {
-			t.Errorf("expected len 1, got %d", arr.Len())
-		}
+		assert.Equal(t, arrow.TIME32, arr.DataType().ID())
+		assert.Equal(t, 1, arr.Len())
 		t32arr := arr.(*array.Time32)
 		unit := arr.DataType().(*arrow.Time32Type).Unit
 		got0 := t32arr.Value(0).ToTime(unit)
-		if got0.Hour() != ref.Hour() || got0.Minute() != ref.Minute() || got0.Second() != ref.Second() {
-			t.Errorf("time32 roundtrip: got hour=%d min=%d sec=%d, want hour=%d min=%d sec=%d",
-				got0.Hour(), got0.Minute(), got0.Second(),
-				ref.Hour(), ref.Minute(), ref.Second())
-		}
+		assert.True(t, got0.Hour() == ref.Hour() && got0.Minute() == ref.Minute() && got0.Second() == ref.Second(),
+			"time32 roundtrip: got hour=%d min=%d sec=%d, want hour=%d min=%d sec=%d",
+			got0.Hour(), got0.Minute(), got0.Second(),
+			ref.Hour(), ref.Minute(), ref.Second())
 		refWithMs := time.Date(ref.Year(), ref.Month(), ref.Day(), ref.Hour(), ref.Minute(), ref.Second(), 500_000_000, ref.Location())
 		svMs := reflect.ValueOf([]time.Time{refWithMs})
 		arrMs, err := buildTemporalArray(svMs, tagOpts{Temporal: "time32"}, mem)
-		if err != nil {
-			t.Fatalf("time32 with ms: %v", err)
-		}
+		require.NoError(t, err, "time32 with ms")
 		defer arrMs.Release()
 		t32ms := arrMs.(*array.Time32)
 		unitMs := arrMs.DataType().(*arrow.Time32Type).Unit
 		gotMs := t32ms.Value(0).ToTime(unitMs)
-		if gotMs.Nanosecond()/1_000_000 != 500 {
-			t.Errorf("time32 millisecond: got %d ms, want 500 ms", gotMs.Nanosecond()/1_000_000)
-		}
+		assert.Equal(t, 500, gotMs.Nanosecond()/1_000_000, "time32 millisecond: got %d ms, want 500 ms", gotMs.Nanosecond()/1_000_000)
 	})
 
 	t.Run("time64", func(t *testing.T) {
@@ -889,32 +623,23 @@ func TestBuildTemporalTaggedArray(t *testing.T) {
 		opts := tagOpts{Temporal: "time64"}
 		sv := reflect.ValueOf(vals)
 		arr, err := buildTemporalArray(sv, opts, mem)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
 		defer arr.Release()
-		if arr.DataType().ID() != arrow.TIME64 {
-			t.Errorf("expected TIME64, got %v", arr.DataType().ID())
-		}
+		assert.Equal(t, arrow.TIME64, arr.DataType().ID())
 		t64arr := arr.(*array.Time64)
 		unit := arr.DataType().(*arrow.Time64Type).Unit
 		got0 := t64arr.Value(0).ToTime(unit)
-		if got0.Hour() != ref.Hour() || got0.Minute() != ref.Minute() || got0.Second() != ref.Second() {
-			t.Errorf("time64 roundtrip: got %v, want %v", got0, ref)
-		}
-		// time64 uses nanosecond unit — verify full nanosecond precision
+		assert.True(t, got0.Hour() == ref.Hour() && got0.Minute() == ref.Minute() && got0.Second() == ref.Second(),
+			"time64 roundtrip: got %v, want %v", got0, ref)
 		refWithNanos := time.Date(ref.Year(), ref.Month(), ref.Day(), ref.Hour(), ref.Minute(), ref.Second(), 123456789, ref.Location())
 		sv64 := reflect.ValueOf([]time.Time{refWithNanos})
 		arr64, err := buildTemporalArray(sv64, tagOpts{Temporal: "time64"}, mem)
-		if err != nil {
-			t.Fatalf("time64 with nanos: %v", err)
-		}
+		require.NoError(t, err, "time64 with nanos")
 		defer arr64.Release()
 		t64arr64 := arr64.(*array.Time64)
 		unit64 := arr64.DataType().(*arrow.Time64Type).Unit
 		got64 := t64arr64.Value(0).ToTime(unit64)
-		if got64.Nanosecond() != refWithNanos.Nanosecond() {
-			t.Errorf("time64 nanosecond: got %d, want %d", got64.Nanosecond(), refWithNanos.Nanosecond())
-		}
+		assert.Equal(t, refWithNanos.Nanosecond(), got64.Nanosecond(),
+			"time64 nanosecond: got %d, want %d", got64.Nanosecond(), refWithNanos.Nanosecond())
 	})
 }

@@ -17,13 +17,14 @@
 package arreflect
 
 import (
-	"errors"
 	"reflect"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func testMem() memory.Allocator { return memory.NewGoAllocator() }
@@ -39,12 +40,8 @@ func TestToGo(t *testing.T) {
 		defer arr.Release()
 
 		got, err := At[int32](arr, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got != 10 {
-			t.Errorf("expected 10, got %d", got)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, int32(10), got)
 	})
 
 	t.Run("string element 1", func(t *testing.T) {
@@ -55,12 +52,8 @@ func TestToGo(t *testing.T) {
 		defer arr.Release()
 
 		got, err := At[string](arr, 1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got != "world" {
-			t.Errorf("expected world, got %q", got)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "world", got)
 	})
 
 	t.Run("struct element 0", func(t *testing.T) {
@@ -70,18 +63,13 @@ func TestToGo(t *testing.T) {
 		}
 		vals := []Person{{"Alice", 30}, {"Bob", 25}}
 		arr, err := FromSlice(vals, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
 
 		got, err := At[Person](arr, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got.Name != "Alice" || got.Age != 30 {
-			t.Errorf("expected {Alice 30}, got %+v", got)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "Alice", got.Name)
+		assert.Equal(t, int32(30), got.Age)
 	})
 
 	t.Run("null element to *int32 is nil", func(t *testing.T) {
@@ -92,12 +80,8 @@ func TestToGo(t *testing.T) {
 		defer arr.Release()
 
 		got, err := At[*int32](arr, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got != nil {
-			t.Errorf("expected nil pointer for null, got %v", *got)
-		}
+		require.NoError(t, err)
+		assert.Nil(t, got)
 	})
 
 	t.Run("null element to int32 is zero", func(t *testing.T) {
@@ -108,12 +92,8 @@ func TestToGo(t *testing.T) {
 		defer arr.Release()
 
 		got, err := At[int32](arr, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got != 0 {
-			t.Errorf("expected 0 for null, got %d", got)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, int32(0), got)
 	})
 }
 
@@ -128,17 +108,11 @@ func TestToGoSlice(t *testing.T) {
 		defer arr.Release()
 
 		got, err := ToSlice[int32](arr)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		want := []int32{1, 2, 3}
-		if len(got) != len(want) {
-			t.Fatalf("expected len %d, got %d", len(want), len(got))
-		}
+		require.Len(t, got, len(want))
 		for i, v := range want {
-			if got[i] != v {
-				t.Errorf("index %d: expected %d, got %d", i, v, got[i])
-			}
+			assert.Equal(t, v, got[i], "index %d", i)
 		}
 	})
 
@@ -150,17 +124,11 @@ func TestToGoSlice(t *testing.T) {
 		defer arr.Release()
 
 		got, err := ToSlice[string](arr)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		want := []string{"foo", "bar", "baz"}
-		if len(got) != len(want) {
-			t.Fatalf("expected len %d, got %d", len(want), len(got))
-		}
+		require.Len(t, got, len(want))
 		for i, v := range want {
-			if got[i] != v {
-				t.Errorf("index %d: expected %q, got %q", i, v, got[i])
-			}
+			assert.Equal(t, v, got[i], "index %d", i)
 		}
 	})
 
@@ -170,22 +138,14 @@ func TestToGoSlice(t *testing.T) {
 		}
 		vals := []Row{{"Alice"}, {"Bob"}, {"Charlie"}}
 		arr, err := FromSlice(vals, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
 
 		got, err := ToSlice[Row](arr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(got) != len(vals) {
-			t.Fatalf("expected len %d, got %d", len(vals), len(got))
-		}
+		require.NoError(t, err)
+		require.Len(t, got, len(vals))
 		for i, want := range vals {
-			if got[i].Name != want.Name {
-				t.Errorf("index %d: expected %q, got %q", i, want.Name, got[i].Name)
-			}
+			assert.Equal(t, want.Name, got[i].Name, "index %d", i)
 		}
 	})
 
@@ -196,15 +156,9 @@ func TestToGoSlice(t *testing.T) {
 		defer arr.Release()
 
 		got, err := ToSlice[int32](arr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got == nil {
-			t.Error("expected non-nil empty slice, got nil")
-		}
-		if len(got) != 0 {
-			t.Errorf("expected len 0, got %d", len(got))
-		}
+		require.NoError(t, err)
+		assert.NotNil(t, got, "expected non-nil empty slice, got nil")
+		assert.Len(t, got, 0)
 	})
 }
 
@@ -213,36 +167,25 @@ func TestFromGoSlice(t *testing.T) {
 
 	t.Run("[]int32", func(t *testing.T) {
 		arr, err := FromSlice([]int32{1, 2, 3}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
 
-		if arr.Len() != 3 {
-			t.Fatalf("expected len 3, got %d", arr.Len())
-		}
+		require.Equal(t, 3, arr.Len())
 		typed := arr.(*array.Int32)
 		for i, want := range []int32{1, 2, 3} {
-			if typed.Value(i) != want {
-				t.Errorf("index %d: expected %d, got %d", i, want, typed.Value(i))
-			}
+			assert.Equal(t, want, typed.Value(i), "index %d", i)
 		}
 	})
 
 	t.Run("[]string", func(t *testing.T) {
 		arr, err := FromSlice([]string{"a", "b"}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
 
-		if arr.Len() != 2 {
-			t.Fatalf("expected len 2, got %d", arr.Len())
-		}
+		require.Equal(t, 2, arr.Len())
 		typed := arr.(*array.String)
-		if typed.Value(0) != "a" || typed.Value(1) != "b" {
-			t.Errorf("expected [a b], got [%s %s]", typed.Value(0), typed.Value(1))
-		}
+		assert.Equal(t, "a", typed.Value(0))
+		assert.Equal(t, "b", typed.Value(1))
 	})
 
 	t.Run("[]struct{Name string; Score float64}", func(t *testing.T) {
@@ -252,67 +195,44 @@ func TestFromGoSlice(t *testing.T) {
 		}
 		vals := []Row{{"Alice", 9.5}, {"Bob", 8.0}}
 		arr, err := FromSlice(vals, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
 
-		if arr.Len() != 2 {
-			t.Fatalf("expected len 2, got %d", arr.Len())
-		}
+		require.Equal(t, 2, arr.Len())
 		got, err := ToSlice[Row](arr)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		for i, want := range vals {
-			if got[i].Name != want.Name || got[i].Score != want.Score {
-				t.Errorf("index %d: expected %+v, got %+v", i, want, got[i])
-			}
+			assert.Equal(t, want.Name, got[i].Name, "index %d Name", i)
+			assert.Equal(t, want.Score, got[i].Score, "index %d Score", i)
 		}
 	})
 
 	t.Run("[]*int32 with nil produces null", func(t *testing.T) {
 		v := int32(42)
 		arr, err := FromSlice([]*int32{&v, nil}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
 
-		if arr.Len() != 2 {
-			t.Fatalf("expected len 2, got %d", arr.Len())
-		}
-		if arr.IsNull(1) == false {
-			t.Error("expected index 1 to be null")
-		}
+		require.Equal(t, 2, arr.Len())
+		assert.True(t, arr.IsNull(1), "expected index 1 to be null")
 		typed := arr.(*array.Int32)
-		if typed.Value(0) != 42 {
-			t.Errorf("expected 42 at index 0, got %d", typed.Value(0))
-		}
+		assert.Equal(t, int32(42), typed.Value(0))
 	})
 
 	t.Run("empty []int32 gives length-0 array", func(t *testing.T) {
 		arr, err := FromSlice([]int32{}, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
 
-		if arr.Len() != 0 {
-			t.Errorf("expected len 0, got %d", arr.Len())
-		}
+		assert.Equal(t, 0, arr.Len())
 	})
 
 	t.Run("empty slice with WithListView", func(t *testing.T) {
 		arr, err := FromSlice([][]int32{}, mem, WithListView())
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer arr.Release()
 
-		if arr.DataType().ID() != arrow.LIST_VIEW {
-			t.Errorf("expected LIST_VIEW, got %v", arr.DataType())
-		}
+		assert.Equal(t, arrow.LIST_VIEW, arr.DataType().ID())
 	})
 }
 
@@ -350,16 +270,11 @@ func TestRecordToSlice(t *testing.T) {
 		defer rec.Release()
 
 		got, err := RecordToSlice[Row](rec)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(got) != len(want) {
-			t.Fatalf("expected len %d, got %d", len(want), len(got))
-		}
+		require.NoError(t, err)
+		require.Len(t, got, len(want))
 		for i, w := range want {
-			if got[i].Name != w.Name || got[i].Score != w.Score {
-				t.Errorf("index %d: expected %+v, got %+v", i, w, got[i])
-			}
+			assert.Equal(t, w.Name, got[i].Name, "index %d Name", i)
+			assert.Equal(t, w.Score, got[i].Score, "index %d Score", i)
 		}
 	})
 
@@ -368,12 +283,8 @@ func TestRecordToSlice(t *testing.T) {
 		defer rec.Release()
 
 		got, err := RecordToSlice[Row](rec)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(got) != 0 {
-			t.Errorf("expected empty slice, got len %d", len(got))
-		}
+		require.NoError(t, err)
+		assert.Len(t, got, 0)
 	})
 }
 
@@ -388,59 +299,38 @@ func TestRecordFromSlice(t *testing.T) {
 	t.Run("struct slice produces correct schema and values", func(t *testing.T) {
 		vals := []Row{{"Alice", 9.5}, {"Bob", 8.0}}
 		rec, err := RecordFromSlice(vals, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer rec.Release()
 
-		if rec.NumCols() != 2 {
-			t.Fatalf("expected 2 cols, got %d", rec.NumCols())
-		}
-		if rec.NumRows() != 2 {
-			t.Fatalf("expected 2 rows, got %d", rec.NumRows())
-		}
-		if rec.Schema().Field(0).Name != "Name" {
-			t.Errorf("expected col 0 name 'Name', got %q", rec.Schema().Field(0).Name)
-		}
-		if rec.Schema().Field(1).Name != "Score" {
-			t.Errorf("expected col 1 name 'Score', got %q", rec.Schema().Field(1).Name)
-		}
+		require.Equal(t, int64(2), rec.NumCols())
+		require.Equal(t, int64(2), rec.NumRows())
+		assert.Equal(t, "Name", rec.Schema().Field(0).Name)
+		assert.Equal(t, "Score", rec.Schema().Field(1).Name)
 		nameCol := rec.Column(0).(*array.String)
-		if nameCol.Value(0) != "Alice" || nameCol.Value(1) != "Bob" {
-			t.Errorf("unexpected name values: %q %q", nameCol.Value(0), nameCol.Value(1))
-		}
+		assert.Equal(t, "Alice", nameCol.Value(0))
+		assert.Equal(t, "Bob", nameCol.Value(1))
 		scoreCol := rec.Column(1).(*array.Float64)
-		if scoreCol.Value(0) != 9.5 || scoreCol.Value(1) != 8.0 {
-			t.Errorf("unexpected score values: %v %v", scoreCol.Value(0), scoreCol.Value(1))
-		}
+		assert.Equal(t, 9.5, scoreCol.Value(0))
+		assert.Equal(t, 8.0, scoreCol.Value(1))
 	})
 
 	t.Run("non-struct T returns error", func(t *testing.T) {
 		_, err := RecordFromSlice([]int32{1, 2, 3}, mem)
-		if err == nil {
-			t.Fatal("expected error for non-struct T, got nil")
-		}
+		require.Error(t, err)
 	})
 
 	t.Run("round-trip RecordFromSlice then RecordToSlice", func(t *testing.T) {
 		want := []Row{{"Alice", 9.5}, {"Bob", 8.0}, {"Carol", 7.5}}
 		rec, err := RecordFromSlice(want, mem)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer rec.Release()
 
 		got, err := RecordToSlice[Row](rec)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(got) != len(want) {
-			t.Fatalf("expected len %d, got %d", len(want), len(got))
-		}
+		require.NoError(t, err)
+		require.Len(t, got, len(want))
 		for i, w := range want {
-			if got[i].Name != w.Name || got[i].Score != w.Score {
-				t.Errorf("index %d: expected %+v, got %+v", i, w, got[i])
-			}
+			assert.Equal(t, w.Name, got[i].Name, "index %d Name", i)
+			assert.Equal(t, w.Score, got[i].Score, "index %d Score", i)
 		}
 	})
 }
@@ -455,20 +345,16 @@ func TestAtAny(t *testing.T) {
 	defer arr.Release()
 
 	got, err := AtAny(arr, 0)
-	if err != nil {
-		t.Fatalf("AtAny(0): %v", err)
-	}
-	if v, ok := got.(int32); !ok || v != 42 {
-		t.Errorf("AtAny(0) = %v (%T), want int32(42)", got, got)
-	}
+	require.NoError(t, err, "AtAny(0)")
+	v, ok := got.(int32)
+	assert.True(t, ok, "AtAny(0): expected int32 type, got %T", got)
+	assert.Equal(t, int32(42), v, "AtAny(0) value")
 
 	got, err = AtAny(arr, 1)
-	if err != nil {
-		t.Fatalf("AtAny(1): %v", err)
-	}
-	if v, ok := got.(int32); !ok || v != 0 {
-		t.Errorf("AtAny(1) = %v, want int32(0)", got)
-	}
+	require.NoError(t, err, "AtAny(1)")
+	v, ok = got.(int32)
+	assert.True(t, ok, "AtAny(1): expected int32 type, got %T", got)
+	assert.Equal(t, int32(0), v, "AtAny(1) value")
 }
 
 func TestToAnySlice(t *testing.T) {
@@ -481,15 +367,10 @@ func TestToAnySlice(t *testing.T) {
 	defer arr.Release()
 
 	got, err := ToAnySlice(arr)
-	if err != nil {
-		t.Fatalf("ToAnySlice: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("len = %d, want 2", len(got))
-	}
-	if got[0].(string) != "hello" || got[1].(string) != "world" {
-		t.Errorf("got %v, want [hello world]", got)
-	}
+	require.NoError(t, err, "ToAnySlice")
+	require.Len(t, got, 2)
+	assert.Equal(t, "hello", got[0].(string))
+	assert.Equal(t, "world", got[1].(string))
 }
 
 func TestErrSentinels(t *testing.T) {
@@ -505,22 +386,14 @@ func TestErrSentinels(t *testing.T) {
 		var got string
 		v := reflect.ValueOf(&got).Elem()
 		err := setValue(v, arr, 0)
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-		if !errors.Is(err, ErrTypeMismatch) {
-			t.Errorf("expected errors.Is(err, ErrTypeMismatch) = true, got false; err = %v", err)
-		}
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrTypeMismatch)
 	})
 
 	t.Run("ErrUnsupportedType via InferGoType", func(t *testing.T) {
 		_, err := InferGoType(arrow.Null)
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-		if !errors.Is(err, ErrUnsupportedType) {
-			t.Errorf("expected errors.Is(err, ErrUnsupportedType) = true, got false; err = %v", err)
-		}
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
 	})
 
 	t.Run("ErrTypeMismatch propagates through struct field context wrapper", func(t *testing.T) {
@@ -536,12 +409,8 @@ func TestErrSentinels(t *testing.T) {
 			Name int32 `arrow:"name"`
 		}
 		_, err := At[wrongType](arr, 0)
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-		if !errors.Is(err, ErrTypeMismatch) {
-			t.Errorf("ErrTypeMismatch not found through context wrapper; err = %v", err)
-		}
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrTypeMismatch)
 	})
 }
 
@@ -553,26 +422,16 @@ func TestRecordAt(t *testing.T) {
 	}
 	rows := []Row{{"alice", 9.5}, {"bob", 7.0}}
 	rec, err := RecordFromSlice(rows, mem)
-	if err != nil {
-		t.Fatalf("RecordFromSlice: %v", err)
-	}
+	require.NoError(t, err, "RecordFromSlice")
 	defer rec.Release()
 
 	got, err := RecordAt[Row](rec, 0)
-	if err != nil {
-		t.Fatalf("RecordAt(0): %v", err)
-	}
-	if got != rows[0] {
-		t.Errorf("RecordAt(0) = %v, want %v", got, rows[0])
-	}
+	require.NoError(t, err, "RecordAt(0)")
+	assert.Equal(t, rows[0], got)
 
 	got, err = RecordAt[Row](rec, 1)
-	if err != nil {
-		t.Fatalf("RecordAt(1): %v", err)
-	}
-	if got != rows[1] {
-		t.Errorf("RecordAt(1) = %v, want %v", got, rows[1])
-	}
+	require.NoError(t, err, "RecordAt(1)")
+	assert.Equal(t, rows[1], got)
 }
 
 func TestRecordAtAny(t *testing.T) {
@@ -583,19 +442,13 @@ func TestRecordAtAny(t *testing.T) {
 	}
 	rows := []Row{{"alice", 9.5}, {"bob", 7.0}}
 	rec, err := RecordFromSlice(rows, mem)
-	if err != nil {
-		t.Fatalf("RecordFromSlice: %v", err)
-	}
+	require.NoError(t, err, "RecordFromSlice")
 	defer rec.Release()
 
 	got, err := RecordAtAny(rec, 0)
-	if err != nil {
-		t.Fatalf("RecordAtAny(0): %v", err)
-	}
+	require.NoError(t, err, "RecordAtAny(0)")
 	v := reflect.ValueOf(got)
-	if v.Kind() != reflect.Struct {
-		t.Fatalf("expected struct, got %s", v.Kind())
-	}
+	require.Equal(t, reflect.Struct, v.Kind())
 	var nameField, scoreField reflect.Value
 	for i := 0; i < v.NumField(); i++ {
 		tag := v.Type().Field(i).Tag.Get("arrow")
@@ -606,18 +459,10 @@ func TestRecordAtAny(t *testing.T) {
 			scoreField = v.Field(i)
 		}
 	}
-	if !nameField.IsValid() {
-		t.Fatal("name field not found")
-	}
-	if !scoreField.IsValid() {
-		t.Fatal("score field not found")
-	}
-	if nameField.String() != "alice" {
-		t.Errorf("name = %q, want %q", nameField.String(), "alice")
-	}
-	if scoreField.Float() != 9.5 {
-		t.Errorf("score = %v, want 9.5", scoreField.Float())
-	}
+	require.True(t, nameField.IsValid(), "name field not found")
+	require.True(t, scoreField.IsValid(), "score field not found")
+	assert.Equal(t, "alice", nameField.String())
+	assert.Equal(t, 9.5, scoreField.Float())
 }
 
 func TestRecordToAnySlice(t *testing.T) {
@@ -628,32 +473,22 @@ func TestRecordToAnySlice(t *testing.T) {
 	}
 	rows := []Row{{"alice", 9.5}, {"bob", 7.0}}
 	rec, err := RecordFromSlice(rows, mem)
-	if err != nil {
-		t.Fatalf("RecordFromSlice: %v", err)
-	}
+	require.NoError(t, err, "RecordFromSlice")
 	defer rec.Release()
 
 	got, err := RecordToAnySlice(rec)
-	if err != nil {
-		t.Fatalf("RecordToAnySlice: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("len = %d, want 2", len(got))
-	}
+	require.NoError(t, err, "RecordToAnySlice")
+	require.Len(t, got, 2)
 	for i, row := range got {
 		v := reflect.ValueOf(row)
-		if v.Kind() != reflect.Struct {
-			t.Fatalf("row %d: expected struct, got %s", i, v.Kind())
-		}
+		require.Equal(t, reflect.Struct, v.Kind(), "row %d", i)
 		var nameField reflect.Value
 		for fi := 0; fi < v.NumField(); fi++ {
 			if v.Type().Field(fi).Tag.Get("arrow") == "name" {
 				nameField = v.Field(fi)
 			}
 		}
-		if nameField.String() != rows[i].Name {
-			t.Errorf("row %d name = %q, want %q", i, nameField.String(), rows[i].Name)
-		}
+		assert.Equal(t, rows[i].Name, nameField.String(), "row %d name", i)
 	}
 }
 
@@ -674,14 +509,10 @@ func TestAtAnyComposite(t *testing.T) {
 		defer arr.Release()
 
 		got, err := AtAny(arr, 0)
-		if err != nil {
-			t.Fatalf("AtAny: %v", err)
-		}
+		require.NoError(t, err, "AtAny")
 
 		v := reflect.ValueOf(got)
-		if v.Kind() != reflect.Struct {
-			t.Fatalf("want struct, got %v", v.Kind())
-		}
+		require.Equal(t, reflect.Struct, v.Kind())
 
 		vt := v.Type()
 		var idField, nameField reflect.Value
@@ -694,18 +525,10 @@ func TestAtAnyComposite(t *testing.T) {
 				nameField = v.Field(i)
 			}
 		}
-		if !idField.IsValid() {
-			t.Fatal("id field not found")
-		}
-		if !nameField.IsValid() {
-			t.Fatal("name field not found")
-		}
-		if idField.Int() != 99 {
-			t.Errorf("id = %v, want 99", idField.Int())
-		}
-		if nameField.String() != "alice" {
-			t.Errorf("name = %v, want alice", nameField.String())
-		}
+		require.True(t, idField.IsValid(), "id field not found")
+		require.True(t, nameField.IsValid(), "name field not found")
+		assert.Equal(t, int64(99), idField.Int())
+		assert.Equal(t, "alice", nameField.String())
 	})
 
 	t.Run("list", func(t *testing.T) {
@@ -719,20 +542,13 @@ func TestAtAnyComposite(t *testing.T) {
 		defer arr.Release()
 
 		got, err := AtAny(arr, 0)
-		if err != nil {
-			t.Fatalf("AtAny: %v", err)
-		}
+		require.NoError(t, err, "AtAny")
 
 		v := reflect.ValueOf(got)
-		if v.Kind() != reflect.Slice {
-			t.Fatalf("want slice, got %v", v.Kind())
-		}
-		if v.Len() != 3 {
-			t.Fatalf("want 3 elems, got %d", v.Len())
-		}
-		if v.Index(0).Int() != 1 || v.Index(2).Int() != 3 {
-			t.Errorf("list = %v, want [1 2 3]", got)
-		}
+		require.Equal(t, reflect.Slice, v.Kind())
+		require.Equal(t, 3, v.Len())
+		assert.Equal(t, int64(1), v.Index(0).Int())
+		assert.Equal(t, int64(3), v.Index(2).Int())
 	})
 
 	t.Run("map", func(t *testing.T) {
@@ -745,21 +561,89 @@ func TestAtAnyComposite(t *testing.T) {
 		defer arr.Release()
 
 		got, err := AtAny(arr, 0)
-		if err != nil {
-			t.Fatalf("AtAny: %v", err)
-		}
+		require.NoError(t, err, "AtAny")
 
 		v := reflect.ValueOf(got)
-		if v.Kind() != reflect.Map {
-			t.Fatalf("want map, got %v", v.Kind())
-		}
+		require.Equal(t, reflect.Map, v.Kind())
 		key := reflect.ValueOf("x")
 		val := v.MapIndex(key)
-		if !val.IsValid() {
-			t.Fatal("key 'x' not found in map")
-		}
-		if val.Int() != 7 {
-			t.Errorf("map[x] = %v, want 7", val.Int())
-		}
+		require.True(t, val.IsValid(), "key 'x' not found in map")
+		assert.Equal(t, int64(7), val.Int())
 	})
+}
+
+func TestToAnySliceStructArray(t *testing.T) {
+	mem := testMem()
+	st := arrow.StructOf(
+		arrow.Field{Name: "id", Type: arrow.PrimitiveTypes.Int64, Nullable: false},
+		arrow.Field{Name: "label", Type: arrow.BinaryTypes.String, Nullable: false},
+		arrow.Field{Name: "score", Type: arrow.PrimitiveTypes.Float64, Nullable: true},
+	)
+	sb := array.NewStructBuilder(mem, st)
+	defer sb.Release()
+
+	sb.Append(true)
+	sb.FieldBuilder(0).(*array.Int64Builder).Append(1)
+	sb.FieldBuilder(1).(*array.StringBuilder).Append("alpha")
+	sb.FieldBuilder(2).(*array.Float64Builder).Append(9.5)
+
+	sb.Append(true)
+	sb.FieldBuilder(0).(*array.Int64Builder).Append(2)
+	sb.FieldBuilder(1).(*array.StringBuilder).Append("beta")
+	sb.FieldBuilder(2).(*array.Float64Builder).Append(3.14)
+
+	sb.Append(true)
+	sb.FieldBuilder(0).(*array.Int64Builder).Append(3)
+	sb.FieldBuilder(1).(*array.StringBuilder).Append("gamma")
+	sb.FieldBuilder(2).(*array.Float64Builder).AppendNull()
+
+	arr := sb.NewArray()
+	defer arr.Release()
+
+	got, err := ToAnySlice(arr)
+	require.NoError(t, err, "ToAnySlice")
+	require.Len(t, got, 3)
+
+	type expected struct {
+		id    int64
+		label string
+		score float64
+	}
+	want := []expected{
+		{1, "alpha", 9.5},
+		{2, "beta", 3.14},
+		{3, "gamma", 0},
+	}
+
+	for i, row := range got {
+		v := reflect.ValueOf(row)
+		require.Equal(t, reflect.Struct, v.Kind(), "row %d", i)
+		require.Equal(t, 3, v.NumField(), "row %d", i)
+
+		var id, label, score reflect.Value
+		for fi := 0; fi < v.NumField(); fi++ {
+			switch v.Type().Field(fi).Tag.Get("arrow") {
+			case "id":
+				id = v.Field(fi)
+			case "label":
+				label = v.Field(fi)
+			case "score":
+				score = v.Field(fi)
+			}
+		}
+		require.True(t, id.IsValid() && label.IsValid() && score.IsValid(), "row %d: missing field(s)", i)
+		assert.Equal(t, want[i].id, id.Int(), "row %d id", i)
+		assert.Equal(t, want[i].label, label.String(), "row %d label", i)
+		if score.Kind() == reflect.Ptr {
+			if i == 2 {
+				assert.True(t, score.IsNil(), "row 2 score: want nil")
+			} else {
+				if assert.False(t, score.IsNil(), "row %d score: unexpected nil", i) {
+					assert.Equal(t, want[i].score, score.Elem().Float(), "row %d score", i)
+				}
+			}
+		} else {
+			assert.Equal(t, want[i].score, score.Float(), "row %d score", i)
+		}
+	}
 }

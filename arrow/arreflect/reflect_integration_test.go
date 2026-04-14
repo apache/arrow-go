@@ -17,10 +17,11 @@
 package arreflect
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type integOrderItem struct {
@@ -101,39 +102,23 @@ func TestReflectIntegration(t *testing.T) {
 		}
 
 		arr, err := FromSlice(orders, mem)
-		if err != nil {
-			t.Fatalf("FromSlice: %v", err)
-		}
+		require.NoError(t, err, "FromSlice")
 		defer arr.Release()
 
 		output, err := ToSlice[integOrder](arr)
-		if err != nil {
-			t.Fatalf("ToSlice: %v", err)
-		}
+		require.NoError(t, err, "ToSlice")
 
-		if len(output) != len(orders) {
-			t.Fatalf("length mismatch: got %d, want %d", len(output), len(orders))
-		}
+		require.Len(t, output, len(orders))
 
 		for i, want := range orders {
 			got := output[i]
-			if got.ID != want.ID {
-				t.Errorf("[%d] ID: got %d, want %d", i, got.ID, want.ID)
-			}
-			if len(got.Items) != len(want.Items) {
-				t.Errorf("[%d] Items length: got %d, want %d", i, len(got.Items), len(want.Items))
-				continue
-			}
-			for j, wantItem := range want.Items {
-				gotItem := got.Items[j]
-				if gotItem.Product != wantItem.Product {
-					t.Errorf("[%d][%d] Product: got %q, want %q", i, j, gotItem.Product, wantItem.Product)
-				}
-				if !reflect.DeepEqual(gotItem.Ratings, wantItem.Ratings) {
-					t.Errorf("[%d][%d] Ratings: got %v, want %v", i, j, gotItem.Ratings, wantItem.Ratings)
-				}
-				if !reflect.DeepEqual(gotItem.Tags, wantItem.Tags) {
-					t.Errorf("[%d][%d] Tags: got %v, want %v", i, j, gotItem.Tags, wantItem.Tags)
+			assert.Equal(t, want.ID, got.ID, "[%d] ID", i)
+			if assert.Len(t, got.Items, len(want.Items), "[%d] Items length", i) {
+				for j, wantItem := range want.Items {
+					gotItem := got.Items[j]
+					assert.Equal(t, wantItem.Product, gotItem.Product, "[%d][%d] Product", i, j)
+					assert.Equal(t, wantItem.Ratings, gotItem.Ratings, "[%d][%d] Ratings", i, j)
+					assert.Equal(t, wantItem.Tags, gotItem.Tags, "[%d][%d] Tags", i, j)
 				}
 			}
 		}
@@ -147,27 +132,18 @@ func TestReflectIntegration(t *testing.T) {
 		}
 
 		arr, err := FromSlice(rows, mem)
-		if err != nil {
-			t.Fatalf("FromSlice: %v", err)
-		}
+		require.NoError(t, err, "FromSlice")
 		defer arr.Release()
 
-		if arr.Len() != n {
-			t.Fatalf("array length: got %d, want %d", arr.Len(), n)
-		}
+		require.Equal(t, n, arr.Len())
 
 		output, err := ToSlice[integLargeRow](arr)
-		if err != nil {
-			t.Fatalf("ToSlice: %v", err)
-		}
+		require.NoError(t, err, "ToSlice")
 
-		if len(output) != n {
-			t.Fatalf("output length: got %d, want %d", len(output), n)
-		}
+		require.Len(t, output, n)
 		for i, want := range rows {
-			if output[i].X != want.X || output[i].Y != want.Y {
-				t.Errorf("[%d] got %+v, want %+v", i, output[i], want)
-			}
+			assert.Equal(t, want.X, output[i].X, "[%d] X", i)
+			assert.Equal(t, want.Y, output[i].Y, "[%d] Y", i)
 		}
 	})
 
@@ -179,69 +155,41 @@ func TestReflectIntegration(t *testing.T) {
 		}
 
 		arr, err := FromSlice(rows, mem)
-		if err != nil {
-			t.Fatalf("FromSlice: %v", err)
-		}
+		require.NoError(t, err, "FromSlice")
 		defer arr.Release()
 
 		output, err := ToSlice[integNullable](arr)
-		if err != nil {
-			t.Fatalf("ToSlice: %v", err)
-		}
+		require.NoError(t, err, "ToSlice")
 
-		if len(output) != 3 {
-			t.Fatalf("length: got %d, want 3", len(output))
-		}
+		require.Len(t, output, 3)
 		for i, got := range output {
-			if got.A != nil {
-				t.Errorf("[%d] A: expected nil, got non-nil", i)
-			}
-			if got.B != nil {
-				t.Errorf("[%d] B: expected nil, got non-nil", i)
-			}
-			if got.C != nil {
-				t.Errorf("[%d] C: expected nil, got non-nil", i)
-			}
+			assert.Nil(t, got.A, "[%d] A: expected nil", i)
+			assert.Nil(t, got.B, "[%d] B: expected nil", i)
+			assert.Nil(t, got.C, "[%d] C: expected nil", i)
 		}
 	})
 
 	t.Run("empty int32 slice", func(t *testing.T) {
 		arr, err := FromSlice[int32]([]int32{}, mem)
-		if err != nil {
-			t.Fatalf("FromSlice: %v", err)
-		}
+		require.NoError(t, err, "FromSlice")
 		defer arr.Release()
 
-		if arr.Len() != 0 {
-			t.Errorf("array length: got %d, want 0", arr.Len())
-		}
+		assert.Equal(t, 0, arr.Len())
 
 		output, err := ToSlice[int32](arr)
-		if err != nil {
-			t.Fatalf("ToSlice: %v", err)
-		}
-		if output == nil {
-			t.Error("ToSlice returned nil, want non-nil empty slice")
-		}
-		if len(output) != 0 {
-			t.Errorf("output length: got %d, want 0", len(output))
-		}
+		require.NoError(t, err, "ToSlice")
+		assert.NotNil(t, output, "ToSlice returned nil, want non-nil empty slice")
+		assert.Len(t, output, 0)
 	})
 
 	t.Run("empty struct slice", func(t *testing.T) {
 		type simpleXY struct{ X int32 }
 		arr, err := FromSlice[simpleXY]([]simpleXY{}, mem)
-		if err != nil {
-			t.Fatalf("FromSlice empty struct: %v", err)
-		}
+		require.NoError(t, err, "FromSlice empty struct")
 		defer arr.Release()
 
-		if arr.Len() != 0 {
-			t.Errorf("array length: got %d, want 0", arr.Len())
-		}
-		if arr.DataType().ID() != arrow.STRUCT {
-			t.Errorf("expected STRUCT type for empty struct slice, got %v", arr.DataType())
-		}
+		assert.Equal(t, 0, arr.Len())
+		assert.Equal(t, arrow.STRUCT, arr.DataType().ID())
 	})
 
 	t.Run("mixed nullability round-trip", func(t *testing.T) {
@@ -258,37 +206,27 @@ func TestReflectIntegration(t *testing.T) {
 		}
 
 		arr, err := FromSlice(rows, mem)
-		if err != nil {
-			t.Fatalf("FromSlice: %v", err)
-		}
+		require.NoError(t, err, "FromSlice")
 		defer arr.Release()
 
 		output, err := ToSlice[integMixed](arr)
-		if err != nil {
-			t.Fatalf("ToSlice: %v", err)
-		}
+		require.NoError(t, err, "ToSlice")
 
-		if len(output) != len(rows) {
-			t.Fatalf("length: got %d, want %d", len(output), len(rows))
-		}
+		require.Len(t, output, len(rows))
 
 		for i, want := range rows {
 			got := output[i]
-			if got.Required != want.Required {
-				t.Errorf("[%d] Required: got %q, want %q", i, got.Required, want.Required)
+			assert.Equal(t, want.Required, got.Required, "[%d] Required", i)
+			assert.Equal(t, want.Count, got.Count, "[%d] Count", i)
+			if assert.Equal(t, want.Optional == nil, got.Optional == nil, "[%d] Optional nil mismatch", i) {
+				if got.Optional != nil {
+					assert.Equal(t, *want.Optional, *got.Optional, "[%d] Optional value", i)
+				}
 			}
-			if got.Count != want.Count {
-				t.Errorf("[%d] Count: got %d, want %d", i, got.Count, want.Count)
-			}
-			if (got.Optional == nil) != (want.Optional == nil) {
-				t.Errorf("[%d] Optional nil mismatch: got nil=%v, want nil=%v", i, got.Optional == nil, want.Optional == nil)
-			} else if got.Optional != nil && *got.Optional != *want.Optional {
-				t.Errorf("[%d] Optional value: got %q, want %q", i, *got.Optional, *want.Optional)
-			}
-			if (got.MaybeCount == nil) != (want.MaybeCount == nil) {
-				t.Errorf("[%d] MaybeCount nil mismatch: got nil=%v, want nil=%v", i, got.MaybeCount == nil, want.MaybeCount == nil)
-			} else if got.MaybeCount != nil && *got.MaybeCount != *want.MaybeCount {
-				t.Errorf("[%d] MaybeCount value: got %d, want %d", i, *got.MaybeCount, *want.MaybeCount)
+			if assert.Equal(t, want.MaybeCount == nil, got.MaybeCount == nil, "[%d] MaybeCount nil mismatch", i) {
+				if got.MaybeCount != nil {
+					assert.Equal(t, *want.MaybeCount, *got.MaybeCount, "[%d] MaybeCount value", i)
+				}
 			}
 		}
 	})
@@ -301,15 +239,11 @@ func TestReflectIntegration(t *testing.T) {
 		}
 
 		arr, err := FromSlice(rows, mem)
-		if err != nil {
-			t.Fatalf("FromSlice: %v", err)
-		}
+		require.NoError(t, err, "FromSlice")
 		defer arr.Release()
 
 		st, ok := arr.DataType().(*arrow.StructType)
-		if !ok {
-			t.Fatalf("expected StructType, got %T", arr.DataType())
-		}
+		require.True(t, ok, "expected StructType, got %T", arr.DataType())
 
 		var hasID, hasName, hasSkip bool
 		for i := 0; i < st.NumFields(); i++ {
@@ -322,35 +256,19 @@ func TestReflectIntegration(t *testing.T) {
 				hasSkip = true
 			}
 		}
-		if !hasID {
-			t.Error("expected field 'ID' in schema")
-		}
-		if !hasName {
-			t.Error("expected field 'name' in schema")
-		}
-		if hasSkip {
-			t.Error("unexpected field 'Skip' in schema (should be skipped by arrow:\"-\" tag)")
-		}
+		assert.True(t, hasID, "expected field 'ID' in schema")
+		assert.True(t, hasName, "expected field 'name' in schema")
+		assert.False(t, hasSkip, "unexpected field 'Skip' in schema (should be skipped by arrow:\"-\" tag)")
 
 		output, err := ToSlice[integExtended](arr)
-		if err != nil {
-			t.Fatalf("ToSlice: %v", err)
-		}
+		require.NoError(t, err, "ToSlice")
 
-		if len(output) != len(rows) {
-			t.Fatalf("length: got %d, want %d", len(output), len(rows))
-		}
+		require.Len(t, output, len(rows))
 		for i, want := range rows {
 			got := output[i]
-			if got.ID != want.ID {
-				t.Errorf("[%d] ID: got %d, want %d", i, got.ID, want.ID)
-			}
-			if got.Name != want.Name {
-				t.Errorf("[%d] Name: got %q, want %q", i, got.Name, want.Name)
-			}
-			if got.Skip != "" {
-				t.Errorf("[%d] Skip: expected empty string, got %q", i, got.Skip)
-			}
+			assert.Equal(t, want.ID, got.ID, "[%d] ID", i)
+			assert.Equal(t, want.Name, got.Name, "[%d] Name", i)
+			assert.Equal(t, "", got.Skip, "[%d] Skip: expected empty string", i)
 		}
 	})
 
@@ -360,31 +278,21 @@ func TestReflectIntegration(t *testing.T) {
 		}
 
 		schema, err := InferSchema[integOrder]()
-		if err != nil {
-			t.Fatalf("SchemaOf: %v", err)
-		}
+		require.NoError(t, err, "SchemaOf")
 
 		arr, err := FromSlice(orders, mem)
-		if err != nil {
-			t.Fatalf("FromSlice: %v", err)
-		}
+		require.NoError(t, err, "FromSlice")
 		defer arr.Release()
 
 		st, ok := arr.DataType().(*arrow.StructType)
-		if !ok {
-			t.Fatalf("expected StructType, got %T", arr.DataType())
-		}
+		require.True(t, ok, "expected StructType, got %T", arr.DataType())
 
-		if st.NumFields() != schema.NumFields() {
-			t.Fatalf("field count mismatch: array has %d, schema has %d", st.NumFields(), schema.NumFields())
-		}
+		require.Equal(t, schema.NumFields(), st.NumFields())
 
 		for i := 0; i < schema.NumFields(); i++ {
 			schemaField := schema.Field(i)
 			structField := st.Field(i)
-			if structField.Name != schemaField.Name {
-				t.Errorf("field[%d] name: array has %q, schema has %q", i, structField.Name, schemaField.Name)
-			}
+			assert.Equal(t, schemaField.Name, structField.Name, "field[%d] name", i)
 		}
 	})
 
@@ -395,9 +303,7 @@ func TestReflectIntegration(t *testing.T) {
 		}
 
 		arr1, err := FromSlice(batch1, mem)
-		if err != nil {
-			t.Fatalf("FromSlice batch1: %v", err)
-		}
+		require.NoError(t, err, "FromSlice batch1")
 		defer arr1.Release()
 
 		batch2 := make([]integLargeRow, 5)
@@ -406,36 +312,22 @@ func TestReflectIntegration(t *testing.T) {
 		}
 
 		arr2, err := FromSlice(batch2, mem)
-		if err != nil {
-			t.Fatalf("FromSlice batch2: %v", err)
-		}
+		require.NoError(t, err, "FromSlice batch2")
 		defer arr2.Release()
 
 		out1, err := ToSlice[integLargeRow](arr1)
-		if err != nil {
-			t.Fatalf("ToSlice batch1: %v", err)
-		}
+		require.NoError(t, err, "ToSlice batch1")
 		out2, err := ToSlice[integLargeRow](arr2)
-		if err != nil {
-			t.Fatalf("ToSlice batch2: %v", err)
-		}
+		require.NoError(t, err, "ToSlice batch2")
 
-		if len(out1) != len(batch1) {
-			t.Fatalf("batch1 length: got %d, want %d", len(out1), len(batch1))
-		}
-		if len(out2) != len(batch2) {
-			t.Fatalf("batch2 length: got %d, want %d", len(out2), len(batch2))
-		}
+		require.Len(t, out1, len(batch1))
+		require.Len(t, out2, len(batch2))
 
 		for i, want := range batch1 {
-			if out1[i] != want {
-				t.Errorf("batch1[%d]: got %+v, want %+v", i, out1[i], want)
-			}
+			assert.Equal(t, want, out1[i], "batch1[%d]", i)
 		}
 		for i, want := range batch2 {
-			if out2[i] != want {
-				t.Errorf("batch2[%d]: got %+v, want %+v", i, out2[i], want)
-			}
+			assert.Equal(t, want, out2[i], "batch2[%d]", i)
 		}
 	})
 
@@ -449,27 +341,16 @@ func TestReflectIntegration(t *testing.T) {
 		}
 
 		rec, err := RecordFromSlice(rows, mem)
-		if err != nil {
-			t.Fatalf("RecordFromSlice: %v", err)
-		}
+		require.NoError(t, err, "RecordFromSlice")
 		defer rec.Release()
 
-		if rec.NumRows() != int64(len(rows)) {
-			t.Fatalf("NumRows: got %d, want %d", rec.NumRows(), len(rows))
-		}
+		require.Equal(t, int64(len(rows)), rec.NumRows())
 
 		output, err := RecordToSlice[integLargeRow](rec)
-		if err != nil {
-			t.Fatalf("RecordToSlice: %v", err)
-		}
+		require.NoError(t, err, "RecordToSlice")
 
-		if len(output) != len(rows) {
-			t.Fatalf("output length: got %d, want %d", len(output), len(rows))
-		}
-
-		if !reflect.DeepEqual(rows, output) {
-			t.Errorf("record round-trip mismatch:\n got:  %v\n want: %v", output, rows)
-		}
+		require.Len(t, output, len(rows))
+		assert.Equal(t, rows, output)
 	})
 }
 

@@ -17,7 +17,6 @@
 package arreflect
 
 import (
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -27,6 +26,8 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestInferPrimitiveArrowType(t *testing.T) {
@@ -65,17 +66,11 @@ func TestInferPrimitiveArrowType(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := inferPrimitiveArrowType(tc.goType)
 			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got nil (type: %v)", got)
-				}
+				require.Error(t, err, "expected error, got nil (type: %v)", got)
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got.ID() != tc.wantID {
-				t.Errorf("got ID %v, want %v", got.ID(), tc.wantID)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantID, got.ID())
 		})
 	}
 }
@@ -83,36 +78,22 @@ func TestInferPrimitiveArrowType(t *testing.T) {
 func TestInferArrowType(t *testing.T) {
 	t.Run("[]int32 is LIST", func(t *testing.T) {
 		dt, err := inferArrowType(reflect.TypeOf([]int32{}))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if dt.ID() != arrow.LIST {
-			t.Errorf("got %v, want LIST", dt.ID())
-		}
+		require.NoError(t, err)
+		assert.Equal(t, arrow.LIST, dt.ID())
 	})
 
 	t.Run("[3]float64 is FIXED_SIZE_LIST size 3", func(t *testing.T) {
 		dt, err := inferArrowType(reflect.TypeOf([3]float64{}))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if dt.ID() != arrow.FIXED_SIZE_LIST {
-			t.Errorf("got %v, want FIXED_SIZE_LIST", dt.ID())
-		}
+		require.NoError(t, err)
+		assert.Equal(t, arrow.FIXED_SIZE_LIST, dt.ID())
 		fsl := dt.(*arrow.FixedSizeListType)
-		if fsl.Len() != 3 {
-			t.Errorf("got size %d, want 3", fsl.Len())
-		}
+		assert.Equal(t, int32(3), fsl.Len())
 	})
 
 	t.Run("map[string]int64 is MAP", func(t *testing.T) {
 		dt, err := inferArrowType(reflect.TypeOf(map[string]int64{}))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if dt.ID() != arrow.MAP {
-			t.Errorf("got %v, want MAP", dt.ID())
-		}
+		require.NoError(t, err)
+		assert.Equal(t, arrow.MAP, dt.ID())
 	})
 
 	t.Run("struct with 2 fields is STRUCT", func(t *testing.T) {
@@ -121,16 +102,10 @@ func TestInferArrowType(t *testing.T) {
 			Age  int32
 		}
 		dt, err := inferArrowType(reflect.TypeOf(S{}))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if dt.ID() != arrow.STRUCT {
-			t.Errorf("got %v, want STRUCT", dt.ID())
-		}
+		require.NoError(t, err)
+		assert.Equal(t, arrow.STRUCT, dt.ID())
 		st := dt.(*arrow.StructType)
-		if st.NumFields() != 2 {
-			t.Errorf("got %d fields, want 2", st.NumFields())
-		}
+		assert.Equal(t, 2, st.NumFields())
 	})
 
 	t.Run("[]map[string]struct{Score float64} nested", func(t *testing.T) {
@@ -138,30 +113,18 @@ func TestInferArrowType(t *testing.T) {
 			Score float64
 		}
 		dt, err := inferArrowType(reflect.TypeOf([]map[string]Inner{}))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if dt.ID() != arrow.LIST {
-			t.Errorf("got %v, want LIST", dt.ID())
-		}
+		require.NoError(t, err)
+		assert.Equal(t, arrow.LIST, dt.ID())
 		lt := dt.(*arrow.ListType)
-		if lt.Elem().ID() != arrow.MAP {
-			t.Errorf("list elem got %v, want MAP", lt.Elem().ID())
-		}
+		assert.Equal(t, arrow.MAP, lt.Elem().ID())
 		mt := lt.Elem().(*arrow.MapType)
-		if mt.ValueType().ID() != arrow.STRUCT {
-			t.Errorf("map value got %v, want STRUCT", mt.ValueType().ID())
-		}
+		assert.Equal(t, arrow.STRUCT, mt.ValueType().ID())
 	})
 
 	t.Run("*[]string pointer to slice is LIST", func(t *testing.T) {
 		dt, err := inferArrowType(reflect.TypeOf((*[]string)(nil)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if dt.ID() != arrow.LIST {
-			t.Errorf("got %v, want LIST", dt.ID())
-		}
+		require.NoError(t, err)
+		assert.Equal(t, arrow.LIST, dt.ID())
 	})
 }
 
@@ -172,18 +135,12 @@ func TestInferStructType(t *testing.T) {
 			Score float32
 		}
 		st, err := inferStructType(reflect.TypeOf(S{}))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if st.NumFields() != 2 {
-			t.Fatalf("got %d fields, want 2", st.NumFields())
-		}
-		if st.Field(0).Name != "Name" || st.Field(0).Type.ID() != arrow.STRING {
-			t.Errorf("field 0: got %v/%v, want Name/STRING", st.Field(0).Name, st.Field(0).Type.ID())
-		}
-		if st.Field(1).Name != "Score" || st.Field(1).Type.ID() != arrow.FLOAT32 {
-			t.Errorf("field 1: got %v/%v, want Score/FLOAT32", st.Field(1).Name, st.Field(1).Type.ID())
-		}
+		require.NoError(t, err)
+		require.Equal(t, 2, st.NumFields())
+		assert.Equal(t, "Name", st.Field(0).Name)
+		assert.Equal(t, arrow.STRING, st.Field(0).Type.ID())
+		assert.Equal(t, "Score", st.Field(1).Name)
+		assert.Equal(t, arrow.FLOAT32, st.Field(1).Type.ID())
 	})
 
 	t.Run("pointer fields are nullable", func(t *testing.T) {
@@ -192,15 +149,9 @@ func TestInferStructType(t *testing.T) {
 			Label *string
 		}
 		st, err := inferStructType(reflect.TypeOf(S{}))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if st.Field(0).Nullable {
-			t.Errorf("ID should not be nullable")
-		}
-		if !st.Field(1).Nullable {
-			t.Errorf("Label should be nullable")
-		}
+		require.NoError(t, err)
+		assert.False(t, st.Field(0).Nullable, "ID should not be nullable")
+		assert.True(t, st.Field(1).Nullable, "Label should be nullable")
 	})
 
 	t.Run("arrow:\"-\" tagged field is excluded", func(t *testing.T) {
@@ -209,15 +160,9 @@ func TestInferStructType(t *testing.T) {
 			Hidden int32 `arrow:"-"`
 		}
 		st, err := inferStructType(reflect.TypeOf(S{}))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if st.NumFields() != 1 {
-			t.Errorf("got %d fields, want 1", st.NumFields())
-		}
-		if st.Field(0).Name != "Keep" {
-			t.Errorf("got field name %q, want Keep", st.Field(0).Name)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, 1, st.NumFields())
+		assert.Equal(t, "Keep", st.Field(0).Name)
 	})
 
 	t.Run("arrow custom name tag", func(t *testing.T) {
@@ -225,12 +170,8 @@ func TestInferStructType(t *testing.T) {
 			GoName int64 `arrow:"custom_name"`
 		}
 		st, err := inferStructType(reflect.TypeOf(S{}))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if st.Field(0).Name != "custom_name" {
-			t.Errorf("got %q, want custom_name", st.Field(0).Name)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "custom_name", st.Field(0).Name)
 	})
 
 	t.Run("decimal128 with precision/scale tag", func(t *testing.T) {
@@ -238,17 +179,12 @@ func TestInferStructType(t *testing.T) {
 			Amount decimal128.Num `arrow:",decimal(18,2)"`
 		}
 		st, err := inferStructType(reflect.TypeOf(S{}))
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		dt := st.Field(0).Type
-		if dt.ID() != arrow.DECIMAL128 {
-			t.Fatalf("got %v, want DECIMAL128", dt.ID())
-		}
+		require.Equal(t, arrow.DECIMAL128, dt.ID())
 		d128 := dt.(*arrow.Decimal128Type)
-		if d128.Precision != 18 || d128.Scale != 2 {
-			t.Errorf("got precision=%d scale=%d, want 18,2", d128.Precision, d128.Scale)
-		}
+		assert.Equal(t, int32(18), d128.Precision)
+		assert.Equal(t, int32(2), d128.Scale)
 	})
 
 	t.Run("decimal256 with precision/scale tag", func(t *testing.T) {
@@ -256,17 +192,12 @@ func TestInferStructType(t *testing.T) {
 			Amount decimal256.Num `arrow:",decimal(40,5)"`
 		}
 		st, err := inferStructType(reflect.TypeOf(S{}))
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		dt := st.Field(0).Type
-		if dt.ID() != arrow.DECIMAL256 {
-			t.Fatalf("got %v, want DECIMAL256", dt.ID())
-		}
+		require.Equal(t, arrow.DECIMAL256, dt.ID())
 		d256 := dt.(*arrow.Decimal256Type)
-		if d256.Precision != 40 || d256.Scale != 5 {
-			t.Errorf("got precision=%d scale=%d, want 40,5", d256.Precision, d256.Scale)
-		}
+		assert.Equal(t, int32(40), d256.Precision)
+		assert.Equal(t, int32(5), d256.Scale)
 	})
 
 	t.Run("decimal32 with precision/scale tag", func(t *testing.T) {
@@ -274,24 +205,17 @@ func TestInferStructType(t *testing.T) {
 			Amount decimal.Decimal32 `arrow:",decimal(9,2)"`
 		}
 		st, err := inferStructType(reflect.TypeOf(S{}))
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		dt := st.Field(0).Type
-		if dt.ID() != arrow.DECIMAL32 {
-			t.Fatalf("got %v, want DECIMAL32", dt.ID())
-		}
+		require.Equal(t, arrow.DECIMAL32, dt.ID())
 		d32 := dt.(*arrow.Decimal32Type)
-		if d32.Precision != 9 || d32.Scale != 2 {
-			t.Errorf("got precision=%d scale=%d, want 9,2", d32.Precision, d32.Scale)
-		}
+		assert.Equal(t, int32(9), d32.Precision)
+		assert.Equal(t, int32(2), d32.Scale)
 	})
 
 	t.Run("non-struct returns error", func(t *testing.T) {
 		_, err := inferStructType(reflect.TypeOf(42))
-		if err == nil {
-			t.Error("expected error for non-struct, got nil")
-		}
+		assert.Error(t, err, "expected error for non-struct, got nil")
 	})
 
 	t.Run("time.Time with date32 tag maps to DATE32", func(t *testing.T) {
@@ -299,13 +223,9 @@ func TestInferStructType(t *testing.T) {
 			Ts time.Time `arrow:",date32"`
 		}
 		st, err := inferStructType(reflect.TypeOf(S{}))
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		dt := st.Field(0).Type
-		if dt.ID() != arrow.DATE32 {
-			t.Errorf("got %v, want DATE32", dt.ID())
-		}
+		assert.Equal(t, arrow.DATE32, dt.ID())
 	})
 }
 
@@ -317,21 +237,14 @@ func TestInferArrowSchema(t *testing.T) {
 			Score float64
 		}
 		schema, err := InferSchema[S]()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if schema.NumFields() != 3 {
-			t.Fatalf("got %d fields, want 3", schema.NumFields())
-		}
-		if schema.Field(0).Name != "Name" || schema.Field(0).Type.ID() != arrow.STRING {
-			t.Errorf("field 0: got %v/%v, want Name/STRING", schema.Field(0).Name, schema.Field(0).Type.ID())
-		}
-		if schema.Field(1).Name != "Age" || schema.Field(1).Type.ID() != arrow.INT32 {
-			t.Errorf("field 1: got %v/%v, want Age/INT32", schema.Field(1).Name, schema.Field(1).Type.ID())
-		}
-		if schema.Field(2).Name != "Score" || schema.Field(2).Type.ID() != arrow.FLOAT64 {
-			t.Errorf("field 2: got %v/%v, want Score/FLOAT64", schema.Field(2).Name, schema.Field(2).Type.ID())
-		}
+		require.NoError(t, err)
+		require.Equal(t, 3, schema.NumFields())
+		assert.Equal(t, "Name", schema.Field(0).Name)
+		assert.Equal(t, arrow.STRING, schema.Field(0).Type.ID())
+		assert.Equal(t, "Age", schema.Field(1).Name)
+		assert.Equal(t, arrow.INT32, schema.Field(1).Type.ID())
+		assert.Equal(t, "Score", schema.Field(2).Name)
+		assert.Equal(t, arrow.FLOAT64, schema.Field(2).Type.ID())
 	})
 
 	t.Run("pointer fields are nullable", func(t *testing.T) {
@@ -340,15 +253,9 @@ func TestInferArrowSchema(t *testing.T) {
 			Label *string
 		}
 		schema, err := InferSchema[S]()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if schema.Field(0).Nullable {
-			t.Errorf("ID should not be nullable")
-		}
-		if !schema.Field(1).Nullable {
-			t.Errorf("Label should be nullable")
-		}
+		require.NoError(t, err)
+		assert.False(t, schema.Field(0).Nullable, "ID should not be nullable")
+		assert.True(t, schema.Field(1).Nullable, "Label should be nullable")
 	})
 
 	t.Run("arrow:\"-\" tag excludes field", func(t *testing.T) {
@@ -357,15 +264,9 @@ func TestInferArrowSchema(t *testing.T) {
 			Hidden int32 `arrow:"-"`
 		}
 		schema, err := InferSchema[S]()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if schema.NumFields() != 1 {
-			t.Errorf("got %d fields, want 1", schema.NumFields())
-		}
-		if schema.Field(0).Name != "Keep" {
-			t.Errorf("got field name %q, want Keep", schema.Field(0).Name)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, 1, schema.NumFields())
+		assert.Equal(t, "Keep", schema.Field(0).Name)
 	})
 
 	t.Run("arrow custom name tag", func(t *testing.T) {
@@ -373,62 +274,40 @@ func TestInferArrowSchema(t *testing.T) {
 			GoName int64 `arrow:"custom_name"`
 		}
 		schema, err := InferSchema[S]()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if schema.Field(0).Name != "custom_name" {
-			t.Errorf("got %q, want custom_name", schema.Field(0).Name)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "custom_name", schema.Field(0).Name)
 	})
 
 	t.Run("non-struct type returns error", func(t *testing.T) {
 		_, err := InferSchema[int]()
-		if err == nil {
-			t.Error("expected error for non-struct, got nil")
-		}
+		assert.Error(t, err, "expected error for non-struct, got nil")
 	})
 }
 
 func TestInferArrowTypePublic(t *testing.T) {
 	t.Run("int32 is INT32", func(t *testing.T) {
 		dt, err := InferType[int32]()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if dt.ID() != arrow.INT32 {
-			t.Errorf("got %v, want INT32", dt.ID())
-		}
+		require.NoError(t, err)
+		assert.Equal(t, arrow.INT32, dt.ID())
 	})
 
 	t.Run("[]string is LIST", func(t *testing.T) {
 		dt, err := InferType[[]string]()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if dt.ID() != arrow.LIST {
-			t.Errorf("got %v, want LIST", dt.ID())
-		}
+		require.NoError(t, err)
+		assert.Equal(t, arrow.LIST, dt.ID())
 	})
 
 	t.Run("map[string]float64 is MAP", func(t *testing.T) {
 		dt, err := InferType[map[string]float64]()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if dt.ID() != arrow.MAP {
-			t.Errorf("got %v, want MAP", dt.ID())
-		}
+		require.NoError(t, err)
+		assert.Equal(t, arrow.MAP, dt.ID())
 	})
 
 	t.Run("struct{X int32} is STRUCT", func(t *testing.T) {
 		type S struct{ X int32 }
 		dt, err := InferType[S]()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if dt.ID() != arrow.STRUCT {
-			t.Errorf("got %v, want STRUCT", dt.ID())
-		}
+		require.NoError(t, err)
+		assert.Equal(t, arrow.STRUCT, dt.ID())
 	})
 }
 
@@ -438,16 +317,10 @@ func TestInferArrowSchemaStructFieldEncoding(t *testing.T) {
 			Name string `arrow:"name,dict"`
 		}
 		schema, err := InferSchema[S]()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err)
 		f, ok := schema.FieldsByName("name")
-		if !ok || len(f) == 0 {
-			t.Fatal("field 'name' not found in schema")
-		}
-		if f[0].Type.ID() != arrow.DICTIONARY {
-			t.Errorf("got %v, want DICTIONARY", f[0].Type.ID())
-		}
+		require.True(t, ok && len(f) > 0, "field 'name' not found in schema")
+		assert.Equal(t, arrow.DICTIONARY, f[0].Type.ID())
 	})
 
 	t.Run("listview-tagged []string field becomes LIST_VIEW", func(t *testing.T) {
@@ -455,16 +328,10 @@ func TestInferArrowSchemaStructFieldEncoding(t *testing.T) {
 			Tags []string `arrow:"tags,listview"`
 		}
 		schema, err := InferSchema[S]()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err)
 		f, ok := schema.FieldsByName("tags")
-		if !ok || len(f) == 0 {
-			t.Fatal("field 'tags' not found in schema")
-		}
-		if f[0].Type.ID() != arrow.LIST_VIEW {
-			t.Errorf("got %v, want LIST_VIEW", f[0].Type.ID())
-		}
+		require.True(t, ok && len(f) > 0, "field 'tags' not found in schema")
+		assert.Equal(t, arrow.LIST_VIEW, f[0].Type.ID())
 	})
 
 	t.Run("ree-tagged field on struct is unsupported", func(t *testing.T) {
@@ -472,12 +339,8 @@ func TestInferArrowSchemaStructFieldEncoding(t *testing.T) {
 			Val string `arrow:"val,ree"`
 		}
 		_, err := InferSchema[REERow]()
-		if err == nil {
-			t.Fatal("expected error for ree tag on struct field, got nil")
-		}
-		if !strings.Contains(err.Error(), "ree tag on struct field") {
-			t.Errorf("unexpected error message: %v", err)
-		}
+		require.Error(t, err, "expected error for ree tag on struct field, got nil")
+		assert.True(t, strings.Contains(err.Error(), "ree tag on struct field"), "unexpected error message: %v", err)
 	})
 }
 
@@ -496,12 +359,8 @@ func TestInferGoType(t *testing.T) {
 	}
 	for _, tt := range primitives {
 		got, err := InferGoType(tt.dt)
-		if err != nil {
-			t.Errorf("InferGoType(%v): %v", tt.dt, err)
-			continue
-		}
-		if got != tt.want {
-			t.Errorf("InferGoType(%v) = %v, want %v", tt.dt, got, tt.want)
+		if assert.NoError(t, err, "InferGoType(%v)", tt.dt) {
+			assert.Equal(t, tt.want, got, "InferGoType(%v)", tt.dt)
 		}
 	}
 
@@ -510,49 +369,23 @@ func TestInferGoType(t *testing.T) {
 		arrow.Field{Name: "name", Type: arrow.BinaryTypes.String, Nullable: true},
 	)
 	structType, err := InferGoType(st)
-	if err != nil {
-		t.Fatalf("struct: %v", err)
-	}
-	if structType.Kind() != reflect.Struct {
-		t.Fatalf("want struct, got %v", structType.Kind())
-	}
-	if structType.NumField() != 2 {
-		t.Fatalf("want 2 fields, got %d", structType.NumField())
-	}
-	if structType.Field(1).Type.Kind() != reflect.Ptr {
-		t.Errorf("nullable field should be pointer")
-	}
-	if structType.Field(1).Type.Elem().Kind() != reflect.String {
-		t.Errorf("nullable field should be *string")
-	}
+	require.NoError(t, err, "struct")
+	require.Equal(t, reflect.Struct, structType.Kind())
+	require.Equal(t, 2, structType.NumField())
+	assert.Equal(t, reflect.Ptr, structType.Field(1).Type.Kind(), "nullable field should be pointer")
+	assert.Equal(t, reflect.String, structType.Field(1).Type.Elem().Kind(), "nullable field should be *string")
 
 	listType, err := InferGoType(arrow.ListOf(arrow.PrimitiveTypes.Int32))
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if listType.Kind() != reflect.Slice {
-		t.Fatalf("want slice, got %v", listType.Kind())
-	}
-	if listType.Elem() != reflect.TypeOf(int32(0)) {
-		t.Errorf("list elem wrong")
-	}
+	require.NoError(t, err, "list")
+	require.Equal(t, reflect.Slice, listType.Kind())
+	assert.Equal(t, reflect.TypeOf(int32(0)), listType.Elem(), "list elem wrong")
 
 	fslType, err := InferGoType(arrow.FixedSizeListOf(3, arrow.PrimitiveTypes.Float32))
-	if err != nil {
-		t.Fatalf("fsl: %v", err)
-	}
-	if fslType.Kind() != reflect.Array {
-		t.Fatalf("want array, got %v", fslType.Kind())
-	}
-	if fslType.Len() != 3 {
-		t.Errorf("array len want 3, got %d", fslType.Len())
-	}
+	require.NoError(t, err, "fsl")
+	require.Equal(t, reflect.Array, fslType.Kind())
+	assert.Equal(t, 3, fslType.Len(), "array len want 3")
 
 	_, err = InferGoType(arrow.Null)
-	if err == nil {
-		t.Error("expected error for unsupported type")
-	}
-	if !errors.Is(err, ErrUnsupportedType) {
-		t.Errorf("want ErrUnsupportedType, got %v", err)
-	}
+	require.Error(t, err, "expected error for unsupported type")
+	assert.ErrorIs(t, err, ErrUnsupportedType)
 }

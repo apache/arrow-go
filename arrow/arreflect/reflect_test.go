@@ -19,6 +19,9 @@ package arreflect
 import (
 	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseTag(t *testing.T) {
@@ -75,9 +78,7 @@ func TestParseTag(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			got := parseTag(tt.input)
-			if got != tt.want {
-				t.Errorf("parseTag(%q) = %+v, want %+v", tt.input, got, tt.want)
-			}
+			assert.Equal(t, tt.want, got, "parseTag(%q)", tt.input)
 		})
 	}
 }
@@ -89,15 +90,9 @@ func TestGetStructFields(t *testing.T) {
 			Age  int32
 		}
 		fields := getStructFields(reflect.TypeOf(Simple{}))
-		if len(fields) != 2 {
-			t.Fatalf("expected 2 fields, got %d", len(fields))
-		}
-		if fields[0].Name != "Name" {
-			t.Errorf("fields[0].Name = %q, want %q", fields[0].Name, "Name")
-		}
-		if fields[1].Name != "Age" {
-			t.Errorf("fields[1].Name = %q, want %q", fields[1].Name, "Age")
-		}
+		require.Len(t, fields, 2)
+		assert.Equal(t, "Name", fields[0].Name)
+		assert.Equal(t, "Age", fields[1].Name)
 	})
 
 	t.Run("struct with arrow tags", func(t *testing.T) {
@@ -107,15 +102,9 @@ func TestGetStructFields(t *testing.T) {
 			Internal string  `arrow:"-"`
 		}
 		fields := getStructFields(reflect.TypeOf(Tagged{}))
-		if len(fields) != 2 {
-			t.Fatalf("expected 2 fields, got %d: %v", len(fields), fields)
-		}
-		if fields[0].Name != "user_name" {
-			t.Errorf("fields[0].Name = %q, want %q", fields[0].Name, "user_name")
-		}
-		if fields[1].Name != "score" {
-			t.Errorf("fields[1].Name = %q, want %q", fields[1].Name, "score")
-		}
+		require.Len(t, fields, 2)
+		assert.Equal(t, "user_name", fields[0].Name)
+		assert.Equal(t, "score", fields[1].Name)
 	})
 
 	t.Run("unexported fields skipped", func(t *testing.T) {
@@ -124,12 +113,8 @@ func TestGetStructFields(t *testing.T) {
 			unexported string //nolint:unused
 		}
 		fields := getStructFields(reflect.TypeOf(Mixed{}))
-		if len(fields) != 1 {
-			t.Fatalf("expected 1 field, got %d", len(fields))
-		}
-		if fields[0].Name != "Exported" {
-			t.Errorf("fields[0].Name = %q, want %q", fields[0].Name, "Exported")
-		}
+		require.Len(t, fields, 1)
+		assert.Equal(t, "Exported", fields[0].Name)
 	})
 
 	t.Run("pointer fields are nullable", func(t *testing.T) {
@@ -138,15 +123,9 @@ func TestGetStructFields(t *testing.T) {
 			Optional *string
 		}
 		fields := getStructFields(reflect.TypeOf(WithPointers{}))
-		if len(fields) != 2 {
-			t.Fatalf("expected 2 fields, got %d", len(fields))
-		}
-		if fields[0].Nullable {
-			t.Errorf("Required.Nullable = true, want false")
-		}
-		if !fields[1].Nullable {
-			t.Errorf("Optional.Nullable = false, want true")
-		}
+		require.Len(t, fields, 2)
+		assert.False(t, fields[0].Nullable, "Required.Nullable = true, want false")
+		assert.True(t, fields[1].Nullable, "Optional.Nullable = false, want true")
 	})
 
 	t.Run("embedded struct promotion", func(t *testing.T) {
@@ -159,18 +138,14 @@ func TestGetStructFields(t *testing.T) {
 			Inner
 		}
 		fields := getStructFields(reflect.TypeOf(Outer{}))
-		if len(fields) != 3 {
-			t.Fatalf("expected 3 fields, got %d: %v", len(fields), fields)
-		}
+		require.Len(t, fields, 3)
 		names := make([]string, len(fields))
 		for i, f := range fields {
 			names[i] = f.Name
 		}
 		wantNames := []string{"Name", "City", "Zip"}
 		for i, want := range wantNames {
-			if names[i] != want {
-				t.Errorf("fields[%d].Name = %q, want %q", i, names[i], want)
-			}
+			assert.Equal(t, want, names[i], "fields[%d].Name", i)
 		}
 	})
 
@@ -182,9 +157,7 @@ func TestGetStructFields(t *testing.T) {
 			B
 		}
 		fields := getStructFields(reflect.TypeOf(Conflicted{}))
-		if len(fields) != 0 {
-			t.Errorf("expected 0 fields due to conflict, got %d: %v", len(fields), fields)
-		}
+		assert.Len(t, fields, 0, "expected 0 fields due to conflict")
 	})
 
 	t.Run("embedded with tag overrides promotion", func(t *testing.T) {
@@ -196,12 +169,8 @@ func TestGetStructFields(t *testing.T) {
 			Inner `arrow:"inner_struct"`
 		}
 		fields := getStructFields(reflect.TypeOf(HasTag{}))
-		if len(fields) != 1 {
-			t.Fatalf("expected 1 field, got %d: %v", len(fields), fields)
-		}
-		if fields[0].Name != "inner_struct" {
-			t.Errorf("fields[0].Name = %q, want %q", fields[0].Name, "inner_struct")
-		}
+		require.Len(t, fields, 1)
+		assert.Equal(t, "inner_struct", fields[0].Name)
 	})
 }
 
@@ -214,25 +183,15 @@ func TestCachedStructFields(t *testing.T) {
 	fields1 := cachedStructFields(reflect.TypeOf(S{}))
 	fields2 := cachedStructFields(reflect.TypeOf(S{}))
 
-	if len(fields1) != len(fields2) {
-		t.Fatalf("cached call returned different lengths: %d vs %d", len(fields1), len(fields2))
-	}
+	require.Len(t, fields2, len(fields1), "cached call returned different lengths")
 
 	for i := range fields1 {
-		if fields1[i].Name != fields2[i].Name {
-			t.Errorf("fields[%d].Name mismatch: %q vs %q", i, fields1[i].Name, fields2[i].Name)
-		}
+		assert.Equal(t, fields1[i].Name, fields2[i].Name, "fields[%d].Name mismatch", i)
 	}
 
-	if len(fields1) != 2 {
-		t.Fatalf("expected 2 fields, got %d", len(fields1))
-	}
-	if fields1[0].Name != "X" {
-		t.Errorf("fields1[0].Name = %q, want %q", fields1[0].Name, "X")
-	}
-	if fields1[1].Name != "Y" {
-		t.Errorf("fields1[1].Name = %q, want %q", fields1[1].Name, "Y")
-	}
+	require.Len(t, fields1, 2)
+	assert.Equal(t, "X", fields1[0].Name)
+	assert.Equal(t, "Y", fields1[1].Name)
 }
 
 // ── shared test types used across reflect test files ──────────────────────────

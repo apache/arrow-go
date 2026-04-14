@@ -27,14 +27,14 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func setValueAt[T any](t *testing.T, arr arrow.Array, i int) T {
 	t.Helper()
 	var got T
-	if err := setValue(reflect.ValueOf(&got).Elem(), arr, i); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, i))
 	return got
 }
 
@@ -50,17 +50,11 @@ func TestSetValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[bool](t, arr, 0)
-		if !got {
-			t.Errorf("expected true, got false")
-		}
+		assert.True(t, got, "expected true, got false")
 
 		got = true
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 1); err != nil {
-			t.Fatal(err)
-		}
-		if got {
-			t.Errorf("expected false (null → zero), got true")
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 1))
+		assert.False(t, got, "expected false (null → zero), got true")
 	})
 
 	t.Run("string", func(t *testing.T) {
@@ -71,9 +65,7 @@ func TestSetValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[string](t, arr, 0)
-		if got != "hello" {
-			t.Errorf("expected hello, got %q", got)
-		}
+		assert.Equal(t, "hello", got)
 	})
 
 	t.Run("binary", func(t *testing.T) {
@@ -84,9 +76,7 @@ func TestSetValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[[]byte](t, arr, 0)
-		if string(got) != "data" {
-			t.Errorf("expected data, got %q", got)
-		}
+		assert.Equal(t, "data", string(got))
 	})
 
 	t.Run("unsupported type error", func(t *testing.T) {
@@ -98,9 +88,7 @@ func TestSetValue(t *testing.T) {
 
 		var got int32
 		err := setValue(reflect.ValueOf(&got).Elem(), arr, 0)
-		if err == nil {
-			t.Error("expected error for bool→int32 mismatch")
-		}
+		assert.Error(t, err, "expected error for bool→int32 mismatch")
 	})
 
 	t.Run("pointer allocation", func(t *testing.T) {
@@ -112,17 +100,13 @@ func TestSetValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[*string](t, arr, 0)
-		if got == nil || *got != "ptr" {
-			t.Errorf("expected ptr, got %v", got)
+		if assert.NotNil(t, got) {
+			assert.Equal(t, "ptr", *got)
 		}
 
 		got = new(string)
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 1); err != nil {
-			t.Fatal(err)
-		}
-		if got != nil {
-			t.Errorf("expected nil for null, got %v", got)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 1))
+		assert.Nil(t, got, "expected nil for null, got %v", got)
 	})
 }
 
@@ -138,17 +122,11 @@ func TestSetPrimitiveValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[int32](t, arr, 0)
-		if got != 42 {
-			t.Errorf("expected 42, got %d", got)
-		}
+		assert.Equal(t, int32(42), got)
 
 		got = 99
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 1); err != nil {
-			t.Fatal(err)
-		}
-		if got != 0 {
-			t.Errorf("expected 0 for null, got %d", got)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 1))
+		assert.Equal(t, int32(0), got, "expected 0 for null, got %d", got)
 	})
 
 	t.Run("int64", func(t *testing.T) {
@@ -159,12 +137,8 @@ func TestSetPrimitiveValue(t *testing.T) {
 		defer arr.Release()
 
 		var got int64
-		if err := setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
-		if got != int64(1<<40) {
-			t.Errorf("expected large int64, got %d", got)
-		}
+		require.NoError(t, setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0))
+		assert.Equal(t, int64(1<<40), got)
 	})
 
 	t.Run("uint8", func(t *testing.T) {
@@ -175,12 +149,8 @@ func TestSetPrimitiveValue(t *testing.T) {
 		defer arr.Release()
 
 		var got uint8
-		if err := setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
-		if got != 255 {
-			t.Errorf("expected 255, got %d", got)
-		}
+		require.NoError(t, setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0))
+		assert.Equal(t, uint8(255), got)
 	})
 
 	t.Run("float64", func(t *testing.T) {
@@ -191,12 +161,8 @@ func TestSetPrimitiveValue(t *testing.T) {
 		defer arr.Release()
 
 		var got float64
-		if err := setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
-		if got != 3.14 {
-			t.Errorf("expected 3.14, got %f", got)
-		}
+		require.NoError(t, setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0))
+		assert.Equal(t, 3.14, got)
 	})
 
 	t.Run("type mismatch returns error", func(t *testing.T) {
@@ -208,9 +174,7 @@ func TestSetPrimitiveValue(t *testing.T) {
 
 		var got float64
 		err := setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0)
-		if err == nil {
-			t.Error("expected error for int32→float64 mismatch")
-		}
+		assert.Error(t, err, "expected error for int32→float64 mismatch")
 	})
 }
 
@@ -227,9 +191,7 @@ func TestSetTemporalValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[time.Time](t, arr, 0)
-		if !got.Equal(now) {
-			t.Errorf("expected %v, got %v", now, got)
-		}
+		assert.True(t, got.Equal(now), "expected %v, got %v", now, got)
 	})
 
 	t.Run("date32", func(t *testing.T) {
@@ -241,9 +203,7 @@ func TestSetTemporalValue(t *testing.T) {
 
 		got := setValueAt[time.Time](t, arr, 0)
 		expected := arrow.Date32(19000).ToTime()
-		if !got.Equal(expected) {
-			t.Errorf("expected %v, got %v", expected, got)
-		}
+		assert.True(t, got.Equal(expected), "expected %v, got %v", expected, got)
 	})
 
 	t.Run("duration", func(t *testing.T) {
@@ -256,9 +216,7 @@ func TestSetTemporalValue(t *testing.T) {
 
 		got := setValueAt[time.Duration](t, arr, 0)
 		expected := 5 * time.Second
-		if got != expected {
-			t.Errorf("expected %v, got %v", expected, got)
-		}
+		assert.Equal(t, expected, got)
 	})
 
 	t.Run("null temporal", func(t *testing.T) {
@@ -270,9 +228,7 @@ func TestSetTemporalValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[*time.Time](t, arr, 0)
-		if got != nil {
-			t.Errorf("expected nil for null timestamp pointer")
-		}
+		assert.Nil(t, got, "expected nil for null timestamp pointer")
 	})
 
 	t.Run("time32", func(t *testing.T) {
@@ -286,12 +242,9 @@ func TestSetTemporalValue(t *testing.T) {
 
 		var got time.Time
 		v := reflect.ValueOf(&got).Elem()
-		if err := setValue(v, arr, 0); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got.Hour() != 10 || got.Minute() != 30 || got.Second() != 0 || got.Nanosecond()/1_000_000 != 500 {
-			t.Errorf("time32: got %v, want 10:30:00.500", got)
-		}
+		require.NoError(t, setValue(v, arr, 0))
+		assert.True(t, got.Hour() == 10 && got.Minute() == 30 && got.Second() == 0 && got.Nanosecond()/1_000_000 == 500,
+			"time32: got %v, want 10:30:00.500", got)
 	})
 
 	t.Run("time64", func(t *testing.T) {
@@ -306,12 +259,9 @@ func TestSetTemporalValue(t *testing.T) {
 
 		var got time.Time
 		v := reflect.ValueOf(&got).Elem()
-		if err := setValue(v, arr, 0); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got.Hour() != 10 || got.Minute() != 30 || got.Second() != 0 || got.Nanosecond() != 123456789 {
-			t.Errorf("time64: got %v, want 10:30:00.123456789", got)
-		}
+		require.NoError(t, setValue(v, arr, 0))
+		assert.True(t, got.Hour() == 10 && got.Minute() == 30 && got.Second() == 0 && got.Nanosecond() == 123456789,
+			"time64: got %v, want 10:30:00.123456789", got)
 	})
 }
 
@@ -329,14 +279,10 @@ func TestSetDecimalValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[decimal128.Num](t, arr, 0)
-		if got != num {
-			t.Errorf("expected %v, got %v", num, got)
-		}
+		assert.Equal(t, num, got)
 
 		gotPtr := setValueAt[*decimal128.Num](t, arr, 1)
-		if gotPtr != nil {
-			t.Errorf("expected nil for null decimal128")
-		}
+		assert.Nil(t, gotPtr, "expected nil for null decimal128")
 	})
 
 	t.Run("decimal256", func(t *testing.T) {
@@ -349,9 +295,7 @@ func TestSetDecimalValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[decimal256.Num](t, arr, 0)
-		if got != num {
-			t.Errorf("expected %v, got %v", num, got)
-		}
+		assert.Equal(t, num, got)
 	})
 
 	t.Run("decimal32", func(t *testing.T) {
@@ -365,14 +309,10 @@ func TestSetDecimalValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[decimal.Decimal32](t, arr, 0)
-		if got != num {
-			t.Errorf("expected %v, got %v", num, got)
-		}
+		assert.Equal(t, num, got)
 
 		gotPtr := setValueAt[*decimal.Decimal32](t, arr, 1)
-		if gotPtr != nil {
-			t.Errorf("expected nil for null decimal32")
-		}
+		assert.Nil(t, gotPtr, "expected nil for null decimal32")
 	})
 
 	t.Run("decimal64", func(t *testing.T) {
@@ -385,9 +325,7 @@ func TestSetDecimalValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[decimal.Decimal64](t, arr, 0)
-		if got != num {
-			t.Errorf("expected %v, got %v", num, got)
-		}
+		assert.Equal(t, num, got)
 	})
 }
 
@@ -417,9 +355,7 @@ func TestSetStructValue(t *testing.T) {
 			[]arrow.Array{nameArr, ageArr},
 			[]string{"Name", "Age"},
 		)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer sa.Release()
 
 		type Person struct {
@@ -428,19 +364,13 @@ func TestSetStructValue(t *testing.T) {
 		}
 
 		var got Person
-		if err := setValue(reflect.ValueOf(&got).Elem(), sa, 0); err != nil {
-			t.Fatal(err)
-		}
-		if got.Name != "Alice" || got.Age != 30 {
-			t.Errorf("expected Alice/30, got %+v", got)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), sa, 0))
+		assert.Equal(t, "Alice", got.Name)
+		assert.Equal(t, int32(30), got.Age)
 
-		if err := setValue(reflect.ValueOf(&got).Elem(), sa, 1); err != nil {
-			t.Fatal(err)
-		}
-		if got.Name != "Bob" || got.Age != 25 {
-			t.Errorf("expected Bob/25, got %+v", got)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), sa, 1))
+		assert.Equal(t, "Bob", got.Name)
+		assert.Equal(t, int32(25), got.Age)
 	})
 
 	t.Run("arrow tag mapping", func(t *testing.T) {
@@ -456,9 +386,7 @@ func TestSetStructValue(t *testing.T) {
 			[]arrow.Array{nameArr},
 			[]string{"full_name"},
 		)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer sa.Release()
 
 		type TaggedPerson struct {
@@ -466,12 +394,8 @@ func TestSetStructValue(t *testing.T) {
 		}
 
 		var got TaggedPerson
-		if err := setValue(reflect.ValueOf(&got).Elem(), sa, 0); err != nil {
-			t.Fatal(err)
-		}
-		if got.FullName != "Charlie" {
-			t.Errorf("expected Charlie, got %q", got.FullName)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), sa, 0))
+		assert.Equal(t, "Charlie", got.FullName)
 	})
 
 	t.Run("missing arrow field leaves go field zero", func(t *testing.T) {
@@ -487,9 +411,7 @@ func TestSetStructValue(t *testing.T) {
 			[]arrow.Array{nameArr},
 			[]string{"Name"},
 		)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer sa.Release()
 
 		type PersonWithExtra struct {
@@ -498,15 +420,9 @@ func TestSetStructValue(t *testing.T) {
 		}
 
 		var got PersonWithExtra
-		if err := setValue(reflect.ValueOf(&got).Elem(), sa, 0); err != nil {
-			t.Fatal(err)
-		}
-		if got.Name != "Dave" {
-			t.Errorf("expected Dave, got %q", got.Name)
-		}
-		if got.Email != "" {
-			t.Errorf("expected empty Email, got %q", got.Email)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), sa, 0))
+		assert.Equal(t, "Dave", got.Name)
+		assert.Equal(t, "", got.Email)
 	})
 }
 
@@ -529,23 +445,13 @@ func TestSetListValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[[]int32](t, arr, 0)
-		if !reflect.DeepEqual(got, []int32{1, 2, 3}) {
-			t.Errorf("expected [1,2,3], got %v", got)
-		}
+		assert.Equal(t, []int32{1, 2, 3}, got)
 
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 1); err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(got, []int32{4, 5}) {
-			t.Errorf("expected [4,5], got %v", got)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 1))
+		assert.Equal(t, []int32{4, 5}, got)
 
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 2); err != nil {
-			t.Fatal(err)
-		}
-		if got != nil {
-			t.Errorf("expected nil slice for null list, got %v", got)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 2))
+		assert.Nil(t, got, "expected nil slice for null list, got %v", got)
 	})
 
 	t.Run("nested list of lists", func(t *testing.T) {
@@ -575,18 +481,10 @@ func TestSetListValue(t *testing.T) {
 		defer outerArr.Release()
 
 		var got [][]int32
-		if err := setValue(reflect.ValueOf(&got).Elem(), outerArr, 0); err != nil {
-			t.Fatal(err)
-		}
-		if len(got) != 2 {
-			t.Fatalf("expected 2 inner slices, got %d", len(got))
-		}
-		if !reflect.DeepEqual(got[0], []int32{10, 20}) {
-			t.Errorf("expected [10,20], got %v", got[0])
-		}
-		if !reflect.DeepEqual(got[1], []int32{30}) {
-			t.Errorf("expected [30], got %v", got[1])
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), outerArr, 0))
+		require.Len(t, got, 2, "expected 2 inner slices, got %d", len(got))
+		assert.Equal(t, []int32{10, 20}, got[0])
+		assert.Equal(t, []int32{30}, got[1])
 	})
 
 	t.Run("large list view of int32", func(t *testing.T) {
@@ -603,16 +501,10 @@ func TestSetListValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[[]int32](t, arr, 0)
-		if !reflect.DeepEqual(got, []int32{1, 2}) {
-			t.Errorf("row 0: expected [1,2], got %v", got)
-		}
+		assert.Equal(t, []int32{1, 2}, got, "row 0: expected [1,2], got %v", got)
 
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 1); err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(got, []int32{3}) {
-			t.Errorf("row 1: expected [3], got %v", got)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 1))
+		assert.Equal(t, []int32{3}, got, "row 1: expected [3], got %v", got)
 	})
 }
 
@@ -642,23 +534,14 @@ func TestSetMapValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[map[string]int32](t, arr, 0)
-		if got["a"] != 1 || got["b"] != 2 {
-			t.Errorf("expected {a:1, b:2}, got %v", got)
-		}
+		assert.Equal(t, int32(1), got["a"])
+		assert.Equal(t, int32(2), got["b"])
 
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 1); err != nil {
-			t.Fatal(err)
-		}
-		if got["x"] != 10 {
-			t.Errorf("expected {x:10}, got %v", got)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 1))
+		assert.Equal(t, int32(10), got["x"])
 
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 2); err != nil {
-			t.Fatal(err)
-		}
-		if got != nil {
-			t.Errorf("expected nil map for null, got %v", got)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 2))
+		assert.Nil(t, got, "expected nil map for null, got %v", got)
 	})
 }
 
@@ -680,24 +563,14 @@ func TestSetFixedSizeListValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[[3]int32](t, arr, 0)
-		if got != [3]int32{10, 20, 30} {
-			t.Errorf("expected [10,20,30], got %v", got)
-		}
+		assert.Equal(t, [3]int32{10, 20, 30}, got)
 
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 1); err != nil {
-			t.Fatal(err)
-		}
-		if got != [3]int32{40, 50, 60} {
-			t.Errorf("expected [40,50,60], got %v", got)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 1))
+		assert.Equal(t, [3]int32{40, 50, 60}, got)
 
 		got = [3]int32{1, 2, 3}
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 2); err != nil {
-			t.Fatal(err)
-		}
-		if got != ([3]int32{}) {
-			t.Errorf("expected zero array for null, got %v", got)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 2))
+		assert.Equal(t, [3]int32{}, got, "expected zero array for null, got %v", got)
 	})
 
 	t.Run("go slice", func(t *testing.T) {
@@ -712,9 +585,7 @@ func TestSetFixedSizeListValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[[]int32](t, arr, 0)
-		if !reflect.DeepEqual(got, []int32{7, 8}) {
-			t.Errorf("expected [7,8], got %v", got)
-		}
+		assert.Equal(t, []int32{7, 8}, got)
 	})
 
 	t.Run("size mismatch returns error", func(t *testing.T) {
@@ -729,9 +600,7 @@ func TestSetFixedSizeListValue(t *testing.T) {
 
 		var got [2]int32
 		err := setValue(reflect.ValueOf(&got).Elem(), arr, 0)
-		if err == nil {
-			t.Error("expected error for size mismatch")
-		}
+		assert.Error(t, err, "expected error for size mismatch")
 	})
 }
 
@@ -753,28 +622,16 @@ func TestSetDictionaryValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[string](t, arr, 0)
-		if got != "foo" {
-			t.Errorf("expected foo, got %q", got)
-		}
+		assert.Equal(t, "foo", got)
 
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 1); err != nil {
-			t.Fatal(err)
-		}
-		if got != "bar" {
-			t.Errorf("expected bar, got %q", got)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 1))
+		assert.Equal(t, "bar", got)
 
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 2); err != nil {
-			t.Fatal(err)
-		}
-		if got != "foo" {
-			t.Errorf("expected foo, got %q", got)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 2))
+		assert.Equal(t, "foo", got)
 
 		gotPtr := setValueAt[*string](t, arr, 3)
-		if gotPtr != nil {
-			t.Errorf("expected nil for null dictionary entry")
-		}
+		assert.Nil(t, gotPtr, "expected nil for null dictionary entry")
 	})
 }
 
@@ -795,29 +652,15 @@ func TestSetRunEndEncodedValue(t *testing.T) {
 		defer arr.Release()
 
 		got := setValueAt[string](t, arr, 0)
-		if got != "aaa" {
-			t.Errorf("expected aaa at logical 0, got %q", got)
-		}
+		assert.Equal(t, "aaa", got, "expected aaa at logical 0, got %q", got)
 
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 2); err != nil {
-			t.Fatal(err)
-		}
-		if got != "aaa" {
-			t.Errorf("expected aaa at logical 2, got %q", got)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 2))
+		assert.Equal(t, "aaa", got, "expected aaa at logical 2, got %q", got)
 
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 3); err != nil {
-			t.Fatal(err)
-		}
-		if got != "bbb" {
-			t.Errorf("expected bbb at logical 3, got %q", got)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 3))
+		assert.Equal(t, "bbb", got, "expected bbb at logical 3, got %q", got)
 
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 4); err != nil {
-			t.Fatal(err)
-		}
-		if got != "bbb" {
-			t.Errorf("expected bbb at logical 4, got %q", got)
-		}
+		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 4))
+		assert.Equal(t, "bbb", got, "expected bbb at logical 4, got %q", got)
 	})
 }
