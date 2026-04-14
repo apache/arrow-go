@@ -234,6 +234,7 @@ func TestFromGoSlice(t *testing.T) {
 		defer arr.Release()
 
 		assert.Equal(t, arrow.LIST_VIEW, arr.DataType().ID())
+		assert.Equal(t, arrow.INT32, arr.DataType().(*arrow.ListViewType).Elem().ID())
 	})
 
 	t.Run("empty slice with WithREE", func(t *testing.T) {

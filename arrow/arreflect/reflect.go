@@ -414,13 +414,23 @@ func FromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.Arr
 		dt = applyDecimalOpts(dt, derefType, tOpts)
 		dt = applyTemporalOpts(dt, derefType, tOpts)
 		if tOpts.ListView {
-			lt, ok := dt.(*arrow.ListType)
-			if !ok {
+			if derefType.Kind() != reflect.Slice || derefType == typeOfByteSlice {
 				return nil, fmt.Errorf("arreflect: WithListView requires a slice-of-slices element type, got %s: %w", goType, ErrUnsupportedType)
 			}
-			dt = arrow.ListViewOf(lt.Elem())
+			innerElem := derefType.Elem()
+			for innerElem.Kind() == reflect.Ptr {
+				innerElem = innerElem.Elem()
+			}
+			innerDT, err := inferArrowType(innerElem)
+			if err != nil {
+				return nil, err
+			}
+			dt = arrow.ListViewOf(innerDT)
 		}
 		if tOpts.Dict {
+			if err := validateDictValueType(dt); err != nil {
+				return nil, err
+			}
 			dt = &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: dt}
 		} else if tOpts.REE {
 			dt = arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, dt)

@@ -867,6 +867,18 @@ func buildFixedSizeListArray(vals reflect.Value, mem memory.Allocator) (arrow.Ar
 	return fb.NewArray(), nil
 }
 
+func validateDictValueType(dt arrow.DataType) error {
+	switch dt.ID() {
+	case arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64,
+		arrow.UINT8, arrow.UINT16, arrow.UINT32, arrow.UINT64,
+		arrow.FLOAT32, arrow.FLOAT64,
+		arrow.STRING, arrow.BINARY, arrow.BOOL:
+		return nil
+	default:
+		return fmt.Errorf("arreflect: dictionary encoding not supported for %s: %w", dt, ErrUnsupportedType)
+	}
+}
+
 func buildDictionaryArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
 	n := vals.Len()
 	elemType, isPtr := derefSliceElem(vals)
@@ -876,13 +888,8 @@ func buildDictionaryArray(vals reflect.Value, mem memory.Allocator) (arrow.Array
 		return nil, err
 	}
 
-	switch valDT.ID() {
-	case arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64,
-		arrow.UINT8, arrow.UINT16, arrow.UINT32, arrow.UINT64,
-		arrow.FLOAT32, arrow.FLOAT64,
-		arrow.STRING, arrow.BINARY, arrow.BOOL:
-	default:
-		return nil, fmt.Errorf("arreflect: dictionary encoding not supported for %s: %w", valDT, ErrUnsupportedType)
+	if err := validateDictValueType(valDT); err != nil {
+		return nil, err
 	}
 
 	dt := &arrow.DictionaryType{
