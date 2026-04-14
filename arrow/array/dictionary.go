@@ -1030,27 +1030,38 @@ type dictBuilder[T arrow.ValueType] struct {
 	dictionaryBuilder
 }
 
-func (b *dictBuilder[T]) UnsafeAppend(v T) error {
+func (b *dictBuilder[T]) UnsafeAppend(v T) {
+	// SAFETY: it is safe to ignore the value returned by the calls to `unsafeAppendValue()`
+	// here since `UnsafeAppend()` is statically typed and the only case in which that method
+	// errors is when trying to insert an invalid `interface{}` into the `memoTable`.
+	var err error
 	switch val := any(v).(type) {
 	case arrow.Duration:
-		return b.unsafeAppendValue(int64(val))
+		err = b.unsafeAppendValue(int64(val))
 	case arrow.Timestamp:
-		return b.unsafeAppendValue(int64(val))
+		err = b.unsafeAppendValue(int64(val))
 	case arrow.Time32:
-		return b.unsafeAppendValue(int32(val))
+		err = b.unsafeAppendValue(int32(val))
 	case arrow.Time64:
-		return b.unsafeAppendValue(int64(val))
+		err = b.unsafeAppendValue(int64(val))
 	case arrow.Date32:
-		return b.unsafeAppendValue(int32(val))
+		err = b.unsafeAppendValue(int32(val))
 	case arrow.Date64:
-		return b.unsafeAppendValue(int64(val))
+		err = b.unsafeAppendValue(int64(val))
 	case arrow.MonthInterval:
-		return b.unsafeAppendValue(int32(val))
+		err = b.unsafeAppendValue(int32(val))
 	}
-	return b.unsafeAppendValue(v)
+	err = b.unsafeAppendValue(v)
+	debug.Assert(err == nil, "Trying to insert wrong type into memoTable even though this method is statically typed. This is an implementation bug.")
 }
 
 func (b *dictBuilder[T]) Append(v T) error {
+	// TODO: it is safe to ignore the value returned by the calls to `appendValue()`
+	// here since `Append()` is statically typed and the only case in which that
+	// method errors is when trying to insert an invalid `interface{}` into the `memoTable`.
+	//
+	// This would be a breaking change to the public API of `dictBuilder`, so it needs
+	// to happen over a major release.
 	switch val := any(v).(type) {
 	case arrow.Duration:
 		return b.appendValue(int64(val))
@@ -1118,6 +1129,12 @@ func (b *BinaryDictionaryBuilder) Append(v []byte) error {
 		return nil
 	}
 
+	// TODO: it is safe to ignore the value returned by the call to `appendBytes()`
+	// here since `Append()` is statically typed and the only case in which that
+	// method errors is when trying to insert an invalid `interface{}` into the `memoTable`.
+	//
+	// This would be a breaking change to the public API of `BinaryDictionaryBuilder`,
+	// so it needs to happen over a major release.
 	return b.appendBytes(v)
 }
 
@@ -1194,6 +1211,13 @@ type fixedSizeDictionaryBuilder[T fsbType] struct {
 }
 
 func (b *fixedSizeDictionaryBuilder[T]) Append(v T) error {
+	// TODO: it is safe to ignore the value returned by the calls to `appendValue()`
+	// and `appendBytes()` here since `Append()` is statically typed and the only 
+	// case in which these method error is when trying to insert an invalid 
+	// `interface{}` into the `memoTable`.
+	//
+	// This would be a breaking change to the public API of `fixedSizeDictionaryBuilder`,
+	// so it needs to happen over a major release.
 	if v, ok := any(v).([]byte); ok {
 		return b.appendBytes(v[:b.byteWidth])
 	}
@@ -1224,6 +1248,12 @@ type FixedSizeBinaryDictionaryBuilder struct {
 }
 
 func (b *FixedSizeBinaryDictionaryBuilder) Append(v []byte) error {
+	// TODO: it is safe to ignore the value returned by the calls to `appendValue()`
+	// here since `Append()` is statically typed and the only case in which that
+	// method errors is when trying to insert an invalid `interface{}` into the `memoTable`.
+	//
+	// This would be a breaking change to the public API of `FixedSizeBinaryDictionaryBuilder`,
+	// so it needs to happen over a major release.
 	return b.appendValue(v[:b.byteWidth])
 }
 
