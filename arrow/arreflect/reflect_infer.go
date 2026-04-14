@@ -353,6 +353,9 @@ func InferGoType(dt arrow.DataType) (reflect.Type, error) {
 		if err != nil {
 			return nil, err
 		}
+		if !keyType.Comparable() {
+			return nil, fmt.Errorf("arreflect: InferGoType: MAP key type %v is not comparable in Go: %w", mt.KeyType(), ErrUnsupportedType)
+		}
 		valType, err := InferGoType(mt.ItemField().Type)
 		if err != nil {
 			return nil, err
@@ -362,6 +365,7 @@ func InferGoType(dt arrow.DataType) (reflect.Type, error) {
 	case arrow.STRUCT:
 		st := dt.(*arrow.StructType)
 		fields := make([]reflect.StructField, st.NumFields())
+		seen := make(map[string]string, st.NumFields())
 		for i := 0; i < st.NumFields(); i++ {
 			f := st.Field(i)
 			ft, err := InferGoType(f.Type)
@@ -378,6 +382,10 @@ func InferGoType(dt arrow.DataType) (reflect.Type, error) {
 				runes := []rune(f.Name)
 				exportedName = string(unicode.ToUpper(runes[0])) + string(runes[1:])
 			}
+			if origName, dup := seen[exportedName]; dup {
+				return nil, fmt.Errorf("arreflect: InferGoType: field names %q and %q both export as %q: %w", origName, f.Name, exportedName, ErrUnsupportedType)
+			}
+			seen[exportedName] = f.Name
 			fields[i] = reflect.StructField{
 				Name: exportedName,
 				Type: ft,

@@ -136,7 +136,11 @@ func appendPrimitiveValue(b array.Builder, v reflect.Value, dt arrow.DataType) e
 	case arrow.STRING:
 		b.(*array.StringBuilder).Append(v.String())
 	case arrow.BINARY:
-		b.(*array.BinaryBuilder).Append(v.Bytes())
+		if v.IsNil() {
+			b.(*array.BinaryBuilder).AppendNull()
+		} else {
+			b.(*array.BinaryBuilder).Append(v.Bytes())
+		}
 	case arrow.DURATION:
 		d, err := asDuration(v)
 		if err != nil {
