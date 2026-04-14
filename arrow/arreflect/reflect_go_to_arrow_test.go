@@ -106,6 +106,8 @@ func TestBuildPrimitiveArray(t *testing.T) {
 			{[]uint64{1, 2}, arrow.UINT64},
 			{[]float32{1.0, 2.0}, arrow.FLOAT32},
 			{[]float64{1.1, 2.2}, arrow.FLOAT64},
+			{[]int{1, -2, 3}, arrow.INT64},
+			{[]uint{1, 2, 3}, arrow.UINT64},
 		}
 		for _, tc := range cases {
 			arr, err := buildArray(reflect.ValueOf(tc.vals), tagOpts{}, mem)

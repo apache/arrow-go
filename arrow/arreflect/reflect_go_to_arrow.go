@@ -616,11 +616,6 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 				return fmt.Errorf("struct field %q: %w", fm.Name, err)
 			}
 		}
-	case *array.RunEndEncodedBuilder:
-		tb.Append(1)
-		if err := appendValue(tb.ValueBuilder(), v, tagOpts{}); err != nil {
-			return err
-		}
 	default:
 		if db, ok := b.(array.DictionaryBuilder); ok {
 			return appendToDictBuilder(db, v)

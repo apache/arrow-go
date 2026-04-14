@@ -73,6 +73,10 @@ func TestParseTag(t *testing.T) {
 			input: "name,unknown_option",
 			want:  tagOpts{Name: "name"},
 		},
+		{
+			input: `field,Date32`,
+			want:  tagOpts{Name: "field"},
+		},
 	}
 
 	for _, tt := range tests {
