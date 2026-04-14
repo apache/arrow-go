@@ -19,23 +19,22 @@ package utils
 import (
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 )
 
 func TestMinMaxInt32(t *testing.T) {
 	for _, size := range []int{0, 1, 2, 3, 4, 7, 8, 9, 15, 16, 31, 63, 64, 100, 1024} {
 		t.Run(fmt.Sprintf("n=%d", size), func(t *testing.T) {
-			if size == 0 {
-				// skip empty — both impls may differ on sentinel values
-				return
-			}
+			r := rand.New(&rand.PCG{}) // zero-seed for reproducibility
 			values := make([]int32, size)
 			for i := range values {
-				values[i] = rand.Int31() - math.MaxInt32/2
+				values[i] = r.Int32() - math.MaxInt32/2
 			}
-			values[rand.Intn(size)] = math.MinInt32
-			values[rand.Intn(size)] = math.MaxInt32
+			if size > 0 {
+				values[r.IntN(size)] = math.MinInt32
+				values[r.IntN(size)] = math.MaxInt32
+			}
 
 			goMin, goMax := int32MinMax(values)
 			min, max := GetMinMaxInt32(values)
@@ -49,15 +48,15 @@ func TestMinMaxInt32(t *testing.T) {
 func TestMinMaxUint32(t *testing.T) {
 	for _, size := range []int{0, 1, 2, 3, 4, 7, 8, 9, 15, 16, 31, 63, 64, 100, 1024} {
 		t.Run(fmt.Sprintf("n=%d", size), func(t *testing.T) {
-			if size == 0 {
-				return
-			}
 			values := make([]uint32, size)
+			r := rand.New(&rand.PCG{}) // zero-seed for reproducibility
 			for i := range values {
-				values[i] = rand.Uint32()
+				values[i] = r.Uint32()
 			}
-			values[rand.Intn(size)] = 0
-			values[rand.Intn(size)] = math.MaxUint32
+			if size > 0 {
+				values[r.IntN(size)] = 0
+				values[r.IntN(size)] = math.MaxUint32
+			}
 
 			goMin, goMax := uint32MinMax(values)
 			min, max := GetMinMaxUint32(values)
@@ -71,15 +70,15 @@ func TestMinMaxUint32(t *testing.T) {
 func TestMinMaxInt64(t *testing.T) {
 	for _, size := range []int{0, 1, 2, 3, 4, 7, 8, 9, 15, 16, 31, 63, 64, 100, 1024} {
 		t.Run(fmt.Sprintf("n=%d", size), func(t *testing.T) {
-			if size == 0 {
-				return
-			}
+			r := rand.New(&rand.PCG{}) // zero-seed for reproducibility
 			values := make([]int64, size)
 			for i := range values {
-				values[i] = rand.Int63() - math.MaxInt64/2
+				values[i] = r.Int64() - math.MaxInt64/2
 			}
-			values[rand.Intn(size)] = math.MinInt64
-			values[rand.Intn(size)] = math.MaxInt64
+			if size > 0 {
+				values[r.IntN(size)] = math.MinInt64
+				values[r.IntN(size)] = math.MaxInt64
+			}
 
 			goMin, goMax := int64MinMax(values)
 			min, max := GetMinMaxInt64(values)
@@ -93,15 +92,15 @@ func TestMinMaxInt64(t *testing.T) {
 func TestMinMaxUint64(t *testing.T) {
 	for _, size := range []int{0, 1, 2, 3, 4, 7, 8, 9, 15, 16, 31, 63, 64, 100, 1024} {
 		t.Run(fmt.Sprintf("n=%d", size), func(t *testing.T) {
-			if size == 0 {
-				return
-			}
+			r := rand.New(&rand.PCG{}) // zero-seed for reproducibility
 			values := make([]uint64, size)
 			for i := range values {
-				values[i] = rand.Uint64()
+				values[i] = r.Uint64()
 			}
-			values[rand.Intn(size)] = 0
-			values[rand.Intn(size)] = math.MaxUint64
+			if size > 0 {
+				values[r.IntN(size)] = 0
+				values[r.IntN(size)] = math.MaxUint64
+			}
 
 			goMin, goMax := uint64MinMax(values)
 			min, max := GetMinMaxUint64(values)
@@ -126,8 +125,9 @@ var (
 func BenchmarkMinMaxInt32(b *testing.B) {
 	for _, size := range []int{64, 256, 1024, 8192, 65536} {
 		values := make([]int32, size)
+		r := rand.New(&rand.PCG{}) // zero-seed for reproducibility
 		for i := range values {
-			values[i] = rand.Int31() - math.MaxInt32/2
+			values[i] = r.Int32() - math.MaxInt32/2
 		}
 		b.Run(fmt.Sprintf("n=%d", size), func(b *testing.B) {
 			b.SetBytes(int64(size) * 4)
@@ -141,8 +141,9 @@ func BenchmarkMinMaxInt32(b *testing.B) {
 func BenchmarkMinMaxUint32(b *testing.B) {
 	for _, size := range []int{64, 256, 1024, 8192, 65536} {
 		values := make([]uint32, size)
+		r := rand.New(&rand.PCG{}) // zero-seed for reproducibility
 		for i := range values {
-			values[i] = rand.Uint32()
+			values[i] = r.Uint32()
 		}
 		b.Run(fmt.Sprintf("n=%d", size), func(b *testing.B) {
 			b.SetBytes(int64(size) * 4)
@@ -156,8 +157,9 @@ func BenchmarkMinMaxUint32(b *testing.B) {
 func BenchmarkMinMaxInt64(b *testing.B) {
 	for _, size := range []int{64, 256, 1024, 8192, 65536} {
 		values := make([]int64, size)
+		r := rand.New(&rand.PCG{}) // zero-seed for reproducibility
 		for i := range values {
-			values[i] = rand.Int63() - math.MaxInt64/2
+			values[i] = r.Int64() - math.MaxInt64/2
 		}
 		b.Run(fmt.Sprintf("n=%d", size), func(b *testing.B) {
 			b.SetBytes(int64(size) * 8)
@@ -171,8 +173,9 @@ func BenchmarkMinMaxInt64(b *testing.B) {
 func BenchmarkMinMaxUint64(b *testing.B) {
 	for _, size := range []int{64, 256, 1024, 8192, 65536} {
 		values := make([]uint64, size)
+		r := rand.New(&rand.PCG{}) // zero-seed for reproducibility
 		for i := range values {
-			values[i] = rand.Uint64()
+			values[i] = r.Uint64()
 		}
 		b.Run(fmt.Sprintf("n=%d", size), func(b *testing.B) {
 			b.SetBytes(int64(size) * 8)
