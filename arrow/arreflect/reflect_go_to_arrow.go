@@ -72,7 +72,7 @@ func buildArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.A
 
 	case reflect.Struct:
 		switch elemType {
-		case typeOfTime, typeOfDuration:
+		case typeOfTime:
 			return buildTemporalArray(vals, opts, mem)
 		default:
 			return buildStructArray(vals, mem)
@@ -315,23 +315,6 @@ func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) 
 			}
 			return tb.NewArray(), nil
 		}
-
-	case typeOfDuration:
-		dt := &arrow.DurationType{Unit: arrow.Nanosecond}
-		db := array.NewDurationBuilder(mem, dt)
-		defer db.Release()
-		db.Reserve(vals.Len())
-		if err := iterSlice(vals, isPtr, db.AppendNull, func(v reflect.Value) error {
-			d, err := asDuration(v)
-			if err != nil {
-				return err
-			}
-			db.Append(arrow.Duration(d.Nanoseconds()))
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-		return db.NewArray(), nil
 
 	default:
 		return nil, fmt.Errorf("unsupported temporal type %v: %w", elemType, ErrUnsupportedType)
