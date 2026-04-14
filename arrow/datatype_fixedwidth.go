@@ -18,7 +18,7 @@ package arrow
 
 import (
 	"cmp"
-	"errors"	
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
