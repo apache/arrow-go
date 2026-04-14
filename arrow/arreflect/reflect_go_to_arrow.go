@@ -561,6 +561,10 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 		if v.Kind() != reflect.Slice && v.Kind() != reflect.Array {
 			return fmt.Errorf("arreflect: cannot set fixed-size list from %s: %w", v.Type(), ErrTypeMismatch)
 		}
+		if v.Kind() == reflect.Slice && v.IsNil() {
+			tb.AppendNull()
+			return nil
+		}
 		expectedLen := int(tb.Type().(*arrow.FixedSizeListType).Len())
 		if v.Len() != expectedLen {
 			return fmt.Errorf("arreflect: fixed-size list length mismatch: got %d, want %d", v.Len(), expectedLen)
@@ -868,7 +872,7 @@ func validateDictValueType(dt arrow.DataType) error {
 
 func buildDictionaryArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
 	n := vals.Len()
-	elemType, isPtr := derefSliceElem(vals)
+	elemType, _ := derefSliceElem(vals)
 
 	valDT, err := inferArrowType(elemType)
 	if err != nil {
@@ -888,12 +892,15 @@ func buildDictionaryArray(vals reflect.Value, mem memory.Allocator) (arrow.Array
 
 	for i := 0; i < n; i++ {
 		elem := vals.Index(i)
-		if isPtr {
+		for elem.Kind() == reflect.Ptr {
 			if elem.IsNil() {
 				db.AppendNull()
-				continue
+				break
 			}
 			elem = elem.Elem()
+		}
+		if elem.Kind() == reflect.Ptr {
+			continue
 		}
 		if err := appendToDictBuilder(db, elem); err != nil {
 			return nil, fmt.Errorf("dictionary element [%d]: %w", i, err)
