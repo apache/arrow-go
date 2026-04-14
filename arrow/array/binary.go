@@ -188,6 +188,11 @@ func (a *Binary) Validate() error {
 	if len(a.valueOffsets) < expNumOffsets {
 		return fmt.Errorf("arrow/array: binary offset buffer must have at least %d values, got %d", expNumOffsets, len(a.valueOffsets))
 	}
+	firstOffset := int(a.valueOffsets[0])
+	if firstOffset > len(a.valueBytes) {
+		return fmt.Errorf("arrow/array: string offset %d out of bounds of data buffer (length %d)", firstOffset, len(a.valueBytes))
+	}
+
 	lastOffset := int(a.valueOffsets[expNumOffsets-1])
 	if lastOffset > len(a.valueBytes) {
 		return fmt.Errorf("arrow/array: binary offset %d out of bounds of data buffer (length %d)", lastOffset, len(a.valueBytes))
@@ -377,6 +382,11 @@ func (a *LargeBinary) Validate() error {
 	if len(a.valueOffsets) < expNumOffsets {
 		return fmt.Errorf("arrow/array: large binary offset buffer must have at least %d values, got %d", expNumOffsets, len(a.valueOffsets))
 	}
+	firstOffset := int(a.valueOffsets[0])
+	if firstOffset > len(a.valueBytes) {
+		return fmt.Errorf("arrow/array: string offset %d out of bounds of data buffer (length %d)", firstOffset, len(a.valueBytes))
+	}
+
 	lastOffset := int(a.valueOffsets[expNumOffsets-1])
 	if lastOffset > len(a.valueBytes) {
 		return fmt.Errorf("arrow/array: large binary offset %d out of bounds of data buffer (length %d)", lastOffset, len(a.valueBytes))

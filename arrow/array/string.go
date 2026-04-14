@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"unicode/utf8"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -188,6 +189,10 @@ func (a *String) Validate() error {
 	if len(a.offsets) < expNumOffsets {
 		return fmt.Errorf("arrow/array: string offset buffer must have at least %d values, got %d", expNumOffsets, len(a.offsets))
 	}
+	firstOffset := int(a.offsets[0])
+	if firstOffset > len(a.values) {
+		return fmt.Errorf("arrow/array: string offset %d out of bounds of data buffer (length %d)", firstOffset, len(a.values))
+	}
 	lastOffset := int(a.offsets[expNumOffsets-1])
 	if lastOffset > len(a.values) {
 		return fmt.Errorf("arrow/array: string offset %d out of bounds of data buffer (length %d)", lastOffset, len(a.values))
@@ -214,7 +219,12 @@ func (a *String) ValidateFull() error {
 			return fmt.Errorf("arrow/array: string offsets are not monotonically non-decreasing at index %d: %d < %d",
 				a.data.offset+i, offsets[i], offsets[i-1])
 		}
+		value := a.values[offsets[i-1]:offsets[i]]
+		if !utf8.ValidString(value) {
+		   	return fmt.Errorf("arrow/array: string at index %d is not valid utf8: %s", i-1, value)
+		}
 	}
+
 	return nil
 }
 
@@ -380,6 +390,11 @@ func (a *LargeString) Validate() error {
 	if len(a.offsets) < expNumOffsets {
 		return fmt.Errorf("arrow/array: large string offset buffer must have at least %d values, got %d", expNumOffsets, len(a.offsets))
 	}
+	firstOffset := int(a.offsets[0])
+	if firstOffset > len(a.values) {
+		return fmt.Errorf("arrow/array: string offset %d out of bounds of data buffer (length %d)", firstOffset, len(a.values))
+	}
+
 	lastOffset := int(a.offsets[expNumOffsets-1])
 	if lastOffset > len(a.values) {
 		return fmt.Errorf("arrow/array: large string offset %d out of bounds of data buffer (length %d)", lastOffset, len(a.values))
@@ -405,6 +420,10 @@ func (a *LargeString) ValidateFull() error {
 		if offsets[i] < offsets[i-1] {
 			return fmt.Errorf("arrow/array: large string offsets are not monotonically non-decreasing at index %d: %d < %d",
 				a.data.offset+i, offsets[i], offsets[i-1])
+		}
+		value := a.values[offsets[i-1]:offsets[i]]
+		if !utf8.ValidString(value) {
+		   	return fmt.Errorf("arrow/array: string at index %d is not valid utf8: %s", i-1, value)
 		}
 	}
 	return nil
