@@ -189,7 +189,7 @@ func (a *String) Validate() error {
 	if len(a.offsets) < expNumOffsets {
 		return fmt.Errorf("arrow/array: string offset buffer must have at least %d values, got %d", expNumOffsets, len(a.offsets))
 	}
-	firstOffset := int(a.offsets[0])
+	firstOffset := int(a.offsets[a.data.offset])
 	if firstOffset > len(a.values) {
 		return fmt.Errorf("arrow/array: string offset %d out of bounds of data buffer (length %d)", firstOffset, len(a.values))
 	}
@@ -221,7 +221,7 @@ func (a *String) ValidateFull() error {
 		}
 		value := a.values[offsets[i-1]:offsets[i]]
 		if !utf8.ValidString(value) {
-		   	return fmt.Errorf("arrow/array: string at index %d is not valid utf8: %s", i-1, value)
+			return fmt.Errorf("arrow/array: string at index %d is not valid utf8: %s", a.data.offset+i-1, value)
 		}
 	}
 
@@ -390,9 +390,9 @@ func (a *LargeString) Validate() error {
 	if len(a.offsets) < expNumOffsets {
 		return fmt.Errorf("arrow/array: large string offset buffer must have at least %d values, got %d", expNumOffsets, len(a.offsets))
 	}
-	firstOffset := int(a.offsets[0])
+	firstOffset := int(a.offsets[a.data.offset])
 	if firstOffset > len(a.values) {
-		return fmt.Errorf("arrow/array: string offset %d out of bounds of data buffer (length %d)", firstOffset, len(a.values))
+		return fmt.Errorf("arrow/array: large string offset %d out of bounds of data buffer (length %d)", firstOffset, len(a.values))
 	}
 
 	lastOffset := int(a.offsets[expNumOffsets-1])
@@ -423,7 +423,7 @@ func (a *LargeString) ValidateFull() error {
 		}
 		value := a.values[offsets[i-1]:offsets[i]]
 		if !utf8.ValidString(value) {
-		   	return fmt.Errorf("arrow/array: string at index %d is not valid utf8: %s", i-1, value)
+			return fmt.Errorf("arrow/array: string at index %d is not valid utf8: %s", a.data.offset+i-1, value)
 		}
 	}
 	return nil
