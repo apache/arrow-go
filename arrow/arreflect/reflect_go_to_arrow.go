@@ -43,7 +43,7 @@ func buildArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.A
 		return buildDictionaryArray(vals, mem)
 	}
 	if opts.REE {
-		return buildRunEndEncodedArray(vals, mem)
+		return buildRunEndEncodedArray(vals, opts, mem)
 	}
 	if opts.ListView {
 		if elemType.Kind() != reflect.Slice || elemType == typeOfByteSlice {
@@ -910,14 +910,16 @@ func buildDictionaryArray(vals reflect.Value, mem memory.Allocator) (arrow.Array
 	return db.NewArray(), nil
 }
 
-func buildRunEndEncodedArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
+func buildRunEndEncodedArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
+	valOpts := opts
+	valOpts.REE = false
 	if vals.Len() == 0 {
 		runEndsArr, err := buildPrimitiveArray(reflect.MakeSlice(reflect.TypeOf([]int32{}), 0, 0), mem)
 		if err != nil {
 			return nil, err
 		}
 		defer runEndsArr.Release()
-		valuesArr, err := buildArray(reflect.MakeSlice(vals.Type(), 0, 0), tagOpts{}, mem)
+		valuesArr, err := buildArray(reflect.MakeSlice(vals.Type(), 0, 0), valOpts, mem)
 		if err != nil {
 			return nil, err
 		}
@@ -979,7 +981,7 @@ func buildRunEndEncodedArray(vals reflect.Value, mem memory.Allocator) (arrow.Ar
 	for i, r := range runs {
 		runValues.Index(i).Set(r.val)
 	}
-	valuesArr, err := buildArray(runValues, tagOpts{}, mem)
+	valuesArr, err := buildArray(runValues, valOpts, mem)
 	if err != nil {
 		return nil, fmt.Errorf("run-end encoded values: %w", err)
 	}

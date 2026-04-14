@@ -574,7 +574,8 @@ func TestBuildListViewArray(t *testing.T) {
 }
 
 func TestBuildTemporalTaggedArray(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	ref := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
 
