@@ -687,6 +687,8 @@ func appendListElement(b array.Builder, v reflect.Value) error {
 		lb.Append(true)
 	case *array.LargeListBuilder:
 		lb.Append(true)
+	default:
+		return fmt.Errorf("unexpected list builder type %T: %w", b, ErrUnsupportedType)
 	}
 	vb := la.ValueBuilder()
 	for i := 0; i < v.Len(); i++ {

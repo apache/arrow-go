@@ -302,6 +302,18 @@ func TestFromGoSlice(t *testing.T) {
 			t.Errorf("expected len 0, got %d", arr.Len())
 		}
 	})
+
+	t.Run("empty slice with WithListView", func(t *testing.T) {
+		arr, err := FromSlice([][]int32{}, mem, WithListView())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer arr.Release()
+
+		if arr.DataType().ID() != arrow.LIST_VIEW {
+			t.Errorf("expected LIST_VIEW, got %v", arr.DataType())
+		}
+	})
 }
 
 func TestRecordToSlice(t *testing.T) {
@@ -593,6 +605,12 @@ func TestRecordAtAny(t *testing.T) {
 		case "score":
 			scoreField = v.Field(i)
 		}
+	}
+	if !nameField.IsValid() {
+		t.Fatal("name field not found")
+	}
+	if !scoreField.IsValid() {
+		t.Fatal("score field not found")
 	}
 	if nameField.String() != "alice" {
 		t.Errorf("name = %q, want %q", nameField.String(), "alice")
