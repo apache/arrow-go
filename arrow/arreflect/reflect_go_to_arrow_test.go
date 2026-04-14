@@ -432,6 +432,26 @@ func TestBuildFixedSizeListArray(t *testing.T) {
 		require.Equal(t, arrow.FIXED_SIZE_LIST, arr.DataType().ID(), "expected FIXED_SIZE_LIST, got %v", arr.DataType())
 		assert.Equal(t, int32(2), arr.DataType().(*arrow.FixedSizeListType).Len(), "expected fixed size 2")
 	})
+
+	t.Run("nil_slice_appends_null", func(t *testing.T) {
+		dt := arrow.FixedSizeListOf(3, arrow.PrimitiveTypes.Int32)
+		bldr := array.NewFixedSizeListBuilder(mem, int32(3), arrow.PrimitiveTypes.Int32)
+		defer bldr.Release()
+
+		var nilSlice []int32
+		err := appendValue(bldr, reflect.ValueOf(&nilSlice).Elem(), tagOpts{})
+		require.NoError(t, err)
+
+		bldr.Append(true)
+		vb := bldr.ValueBuilder().(*array.Int32Builder)
+		vb.AppendValues([]int32{1, 2, 3}, nil)
+
+		arr := bldr.NewArray()
+		defer arr.Release()
+		_ = dt
+		assert.True(t, arr.IsNull(0), "nil slice should be null")
+		assert.False(t, arr.IsNull(1), "non-nil should not be null")
+	})
 }
 
 func TestBuildDictionaryArray(t *testing.T) {
@@ -472,6 +492,18 @@ func TestBuildDictionaryArray(t *testing.T) {
 	t.Run("bool_dict_returns_error", func(t *testing.T) {
 		_, err := buildArray(reflect.ValueOf([]bool{true, false}), tagOpts{Dict: true}, mem)
 		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+
+	t.Run("pointer_string_with_nil", func(t *testing.T) {
+		s := "hello"
+		vals := []*string{&s, nil, &s}
+		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{Dict: true}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, 3, arr.Len())
+		assert.False(t, arr.IsNull(0))
+		assert.True(t, arr.IsNull(1))
+		assert.False(t, arr.IsNull(2))
 	})
 }
 
