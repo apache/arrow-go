@@ -1050,8 +1050,9 @@ func (b *dictBuilder[T]) UnsafeAppend(v T) {
 		err = b.unsafeAppendValue(int64(val))
 	case arrow.MonthInterval:
 		err = b.unsafeAppendValue(int32(val))
+	default:
+		err = b.unsafeAppendValue(v)
 	}
-	err = b.unsafeAppendValue(v)
 	debug.Assert(err == nil, "Trying to insert wrong type into memoTable even though this method is statically typed. This is an implementation bug.")
 }
 
@@ -1212,8 +1213,8 @@ type fixedSizeDictionaryBuilder[T fsbType] struct {
 
 func (b *fixedSizeDictionaryBuilder[T]) Append(v T) error {
 	// TODO: it is safe to ignore the value returned by the calls to `appendValue()`
-	// and `appendBytes()` here since `Append()` is statically typed and the only 
-	// case in which these method error is when trying to insert an invalid 
+	// and `appendBytes()` here since `Append()` is statically typed and the only
+	// case in which these method error is when trying to insert an invalid
 	// `interface{}` into the `memoTable`.
 	//
 	// This would be a breaking change to the public API of `fixedSizeDictionaryBuilder`,
