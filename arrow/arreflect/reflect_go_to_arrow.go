@@ -872,7 +872,7 @@ func validateDictValueType(dt arrow.DataType) error {
 	case arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64,
 		arrow.UINT8, arrow.UINT16, arrow.UINT32, arrow.UINT64,
 		arrow.FLOAT32, arrow.FLOAT64,
-		arrow.STRING, arrow.BINARY, arrow.BOOL:
+		arrow.STRING, arrow.BINARY:
 		return nil
 	default:
 		return fmt.Errorf("arreflect: dictionary encoding not supported for %s: %w", dt, ErrUnsupportedType)

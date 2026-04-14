@@ -453,6 +453,11 @@ func TestBuildDictionaryArray(t *testing.T) {
 		dt := arr.DataType().(*arrow.DictionaryType)
 		assert.Equal(t, arrow.INT32, dt.IndexType.ID(), "expected INT32 index, got %v", dt.IndexType)
 	})
+
+	t.Run("bool_dict_returns_error", func(t *testing.T) {
+		_, err := buildArray(reflect.ValueOf([]bool{true, false}), tagOpts{Dict: true}, mem)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
 }
 
 func TestBuildRunEndEncodedArray(t *testing.T) {
