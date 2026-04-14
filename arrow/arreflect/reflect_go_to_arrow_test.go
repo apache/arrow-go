@@ -337,6 +337,19 @@ func TestBuildListArray(t *testing.T) {
 		assert.True(t, arr.IsNull(1), "expected index 1 to be null")
 	})
 
+	t.Run("nil_pointer_list_element", func(t *testing.T) {
+		a := []int32{1, 2}
+		vals := []*[]int32{&a, nil, &a}
+		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, arrow.LIST, arr.DataType().ID())
+		assert.Equal(t, 3, arr.Len())
+		assert.False(t, arr.IsNull(0))
+		assert.True(t, arr.IsNull(1))
+		assert.False(t, arr.IsNull(2))
+	})
+
 	t.Run("string_lists", func(t *testing.T) {
 		vals := [][]string{{"a", "b"}, {"c"}}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
@@ -584,12 +597,13 @@ func TestBuildListViewArray(t *testing.T) {
 		assert.Equal(t, 3, allVals.Len(), "expected 3 total values, got %d", allVals.Len())
 	})
 
-	t.Run("nil_pointer_list_element", func(t *testing.T) {
+	t.Run("nil_pointer_listview_element", func(t *testing.T) {
 		a := []int32{1, 2}
 		vals := []*[]int32{&a, nil, &a}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
+		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{ListView: true}, mem)
 		require.NoError(t, err)
 		defer arr.Release()
+		assert.Equal(t, arrow.LIST_VIEW, arr.DataType().ID())
 		assert.Equal(t, 3, arr.Len())
 		assert.False(t, arr.IsNull(0))
 		assert.True(t, arr.IsNull(1))
