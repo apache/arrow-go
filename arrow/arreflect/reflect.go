@@ -79,42 +79,35 @@ func parseTag(tag string) tagOpts {
 	return opts
 }
 
-func parseOptions(opts *tagOpts, rest string) {
-	for len(rest) > 0 {
-		var token string
-		if idx := strings.Index(rest, ","); idx >= 0 {
-			token = rest[:idx]
-			rest = rest[idx+1:]
-		} else {
-			token = rest
-			rest = ""
+func splitTagTokens(rest string) []string {
+	var tokens []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(rest); i++ {
+		switch rest[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				tokens = append(tokens, strings.TrimSpace(rest[start:i]))
+				start = i + 1
+			}
 		}
-		token = strings.TrimSpace(token)
+	}
+	if start < len(rest) {
+		tokens = append(tokens, strings.TrimSpace(rest[start:]))
+	}
+	return tokens
+}
 
-		if strings.HasPrefix(token, "decimal(") {
-			if strings.HasSuffix(token, ")") {
-				parseDecimalOpt(opts, token)
-				continue
-			}
-			next := token
-			for len(rest) > 0 {
-				var part string
-				if idx := strings.Index(rest, ","); idx >= 0 {
-					part = rest[:idx]
-					rest = rest[idx+1:]
-				} else {
-					part = rest
-					rest = ""
-				}
-				next = next + "," + strings.TrimSpace(part)
-				if strings.HasSuffix(next, ")") {
-					break
-				}
-			}
-			parseDecimalOpt(opts, next)
+func parseOptions(opts *tagOpts, rest string) {
+	for _, token := range splitTagTokens(rest) {
+		if strings.HasPrefix(token, "decimal(") && strings.HasSuffix(token, ")") {
+			parseDecimalOpt(opts, token)
 			continue
 		}
-
 		switch token {
 		case "dict":
 			opts.Dict = true
@@ -143,28 +136,25 @@ func parseDecimalOpt(opts *tagOpts, token string) {
 	}
 }
 
-func getStructFields(t reflect.Type) []fieldMeta {
-	for t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
+type bfsEntry struct {
+	t     reflect.Type
+	index []int
+	depth int
+}
 
-	if t.Kind() != reflect.Struct {
-		return nil
-	}
+type candidate struct {
+	meta   fieldMeta
+	depth  int
+	tagged bool
+	order  int
+}
 
-	type bfsEntry struct {
-		t     reflect.Type
-		index []int
-		depth int
-	}
+type resolvedField struct {
+	meta  fieldMeta
+	order int
+}
 
-	type candidate struct {
-		meta   fieldMeta
-		depth  int
-		tagged bool
-		order  int
-	}
-
+func collectFieldCandidates(t reflect.Type) map[string][]candidate {
 	nameMap := make(map[string][]candidate)
 	orderCounter := 0
 
@@ -242,7 +232,6 @@ func getStructFields(t reflect.Type) []fieldMeta {
 				Opts:     opts,
 			}
 
-			// Assign insertion order on first encounter of this name.
 			existingCands := nameMap[arrowName]
 			order := orderCounter
 			if len(existingCands) > 0 {
@@ -260,11 +249,10 @@ func getStructFields(t reflect.Type) []fieldMeta {
 		}
 	}
 
-	type resolvedField struct {
-		meta  fieldMeta
-		order int
-	}
+	return nameMap
+}
 
+func resolveFieldCandidates(nameMap map[string][]candidate) []fieldMeta {
 	resolved := make([]resolvedField, 0, len(nameMap))
 	for _, candidates := range nameMap {
 		minDepth := candidates[0].depth
@@ -310,6 +298,18 @@ func getStructFields(t reflect.Type) []fieldMeta {
 		result[i] = r.meta
 	}
 	return result
+}
+
+func getStructFields(t reflect.Type) []fieldMeta {
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+
+	return resolveFieldCandidates(collectFieldCandidates(t))
 }
 
 var structFieldCache sync.Map
@@ -374,8 +374,20 @@ func WithDecimal(precision, scale int32) Option {
 // WithTemporal overrides the Arrow temporal encoding for time.Time slices.
 // Valid values: "date32", "date64", "time32", "time64", "timestamp" (default).
 // Equivalent to tagging a struct field with arrow:",date32" etc.
+// Invalid values cause FromSlice to return an error.
 func WithTemporal(temporal string) Option {
 	return func(o *tagOpts) { o.Temporal = temporal }
+}
+
+var validTemporalOpts = map[string]bool{
+	"": true, "timestamp": true, "date32": true, "date64": true, "time32": true, "time64": true,
+}
+
+func validateTemporalOpt(temporal string) error {
+	if !validTemporalOpts[temporal] {
+		return fmt.Errorf("arreflect: invalid WithTemporal value %q; valid values are date32, date64, time32, time64, timestamp: %w", temporal, ErrUnsupportedType)
+	}
+	return nil
 }
 
 func FromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.Array, error) {
@@ -386,12 +398,25 @@ func FromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.Arr
 	for _, o := range opts {
 		o(&tOpts)
 	}
+	if err := validateTemporalOpt(tOpts.Temporal); err != nil {
+		return nil, err
+	}
 	if len(vals) == 0 {
-		dt, err := inferArrowType(reflect.TypeFor[T]())
+		goType := reflect.TypeFor[T]()
+		dt, err := inferArrowType(goType)
 		if err != nil {
 			return nil, err
 		}
-		dt = applyTemporalOpts(dt, reflect.TypeFor[T](), tOpts)
+		dt = applyDecimalOpts(dt, goType, tOpts)
+		dt = applyTemporalOpts(dt, goType, tOpts)
+		if tOpts.ListView {
+			if lt, ok := dt.(*arrow.ListType); ok {
+				dt = arrow.ListViewOf(lt.Elem())
+			}
+		}
+		if tOpts.REE {
+			dt = arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, dt)
+		}
 		if tOpts.Dict {
 			dt = &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: dt}
 		}
@@ -437,6 +462,15 @@ func RecordAtAny(rec arrow.Record, i int) (any, error) {
 	sa := array.RecordToStructArray(rec)
 	defer sa.Release()
 	return AtAny(sa, i)
+}
+
+// RecordToAnySlice converts all rows of an Arrow Record to Go values,
+// inferring the Go type at runtime via [InferGoType].
+// Equivalent to ToAnySlice on the struct array underlying the record.
+func RecordToAnySlice(rec arrow.Record) ([]any, error) {
+	sa := array.RecordToStructArray(rec)
+	defer sa.Release()
+	return ToAnySlice(sa)
 }
 
 // AtAny converts a single element at index i of an Arrow array to a Go value,

@@ -305,7 +305,7 @@ func TestFromGoSlice(t *testing.T) {
 }
 
 func TestRecordToSlice(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := testMem()
 
 	type Row struct {
 		Name  string
@@ -366,7 +366,7 @@ func TestRecordToSlice(t *testing.T) {
 }
 
 func TestRecordFromSlice(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := testMem()
 
 	type Row struct {
 		Name  string
@@ -434,7 +434,7 @@ func TestRecordFromSlice(t *testing.T) {
 }
 
 func TestAtAny(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := testMem()
 	b := array.NewInt32Builder(mem)
 	defer b.Release()
 	b.Append(42)
@@ -460,7 +460,7 @@ func TestAtAny(t *testing.T) {
 }
 
 func TestToAnySlice(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := testMem()
 	b := array.NewStringBuilder(mem)
 	defer b.Release()
 	b.Append("hello")
@@ -481,7 +481,7 @@ func TestToAnySlice(t *testing.T) {
 }
 
 func TestErrSentinels(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := testMem()
 
 	t.Run("ErrTypeMismatch via setValue wrong kind", func(t *testing.T) {
 		b := array.NewInt32Builder(mem)
@@ -534,7 +534,7 @@ func TestErrSentinels(t *testing.T) {
 }
 
 func TestRecordAt(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := testMem()
 	type Row struct {
 		Name  string  `arrow:"name"`
 		Score float64 `arrow:"score"`
@@ -563,8 +563,84 @@ func TestRecordAt(t *testing.T) {
 	}
 }
 
+func TestRecordAtAny(t *testing.T) {
+	mem := testMem()
+	type Row struct {
+		Name  string  `arrow:"name"`
+		Score float64 `arrow:"score"`
+	}
+	rows := []Row{{"alice", 9.5}, {"bob", 7.0}}
+	rec, err := RecordFromSlice(rows, mem)
+	if err != nil {
+		t.Fatalf("RecordFromSlice: %v", err)
+	}
+	defer rec.Release()
+
+	got, err := RecordAtAny(rec, 0)
+	if err != nil {
+		t.Fatalf("RecordAtAny(0): %v", err)
+	}
+	v := reflect.ValueOf(got)
+	if v.Kind() != reflect.Struct {
+		t.Fatalf("expected struct, got %s", v.Kind())
+	}
+	var nameField, scoreField reflect.Value
+	for i := 0; i < v.NumField(); i++ {
+		tag := v.Type().Field(i).Tag.Get("arrow")
+		switch tag {
+		case "name":
+			nameField = v.Field(i)
+		case "score":
+			scoreField = v.Field(i)
+		}
+	}
+	if nameField.String() != "alice" {
+		t.Errorf("name = %q, want %q", nameField.String(), "alice")
+	}
+	if scoreField.Float() != 9.5 {
+		t.Errorf("score = %v, want 9.5", scoreField.Float())
+	}
+}
+
+func TestRecordToAnySlice(t *testing.T) {
+	mem := testMem()
+	type Row struct {
+		Name  string  `arrow:"name"`
+		Score float64 `arrow:"score"`
+	}
+	rows := []Row{{"alice", 9.5}, {"bob", 7.0}}
+	rec, err := RecordFromSlice(rows, mem)
+	if err != nil {
+		t.Fatalf("RecordFromSlice: %v", err)
+	}
+	defer rec.Release()
+
+	got, err := RecordToAnySlice(rec)
+	if err != nil {
+		t.Fatalf("RecordToAnySlice: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	for i, row := range got {
+		v := reflect.ValueOf(row)
+		if v.Kind() != reflect.Struct {
+			t.Fatalf("row %d: expected struct, got %s", i, v.Kind())
+		}
+		var nameField reflect.Value
+		for fi := 0; fi < v.NumField(); fi++ {
+			if v.Type().Field(fi).Tag.Get("arrow") == "name" {
+				nameField = v.Field(fi)
+			}
+		}
+		if nameField.String() != rows[i].Name {
+			t.Errorf("row %d name = %q, want %q", i, nameField.String(), rows[i].Name)
+		}
+	}
+}
+
 func TestAtAnyComposite(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := testMem()
 
 	t.Run("struct", func(t *testing.T) {
 		st := arrow.StructOf(

@@ -38,6 +38,18 @@ var (
 	typeOfByteSlice = reflect.TypeOf([]byte{})
 	typeOfInt       = reflect.TypeOf(int(0))
 	typeOfUint      = reflect.TypeOf(uint(0))
+	typeOfInt8      = reflect.TypeOf(int8(0))
+	typeOfInt16     = reflect.TypeOf(int16(0))
+	typeOfInt32     = reflect.TypeOf(int32(0))
+	typeOfInt64     = reflect.TypeOf(int64(0))
+	typeOfUint8     = reflect.TypeOf(uint8(0))
+	typeOfUint16    = reflect.TypeOf(uint16(0))
+	typeOfUint32    = reflect.TypeOf(uint32(0))
+	typeOfUint64    = reflect.TypeOf(uint64(0))
+	typeOfFloat32   = reflect.TypeOf(float32(0))
+	typeOfFloat64   = reflect.TypeOf(float64(0))
+	typeOfBool      = reflect.TypeOf(false)
+	typeOfString    = reflect.TypeOf("")
 )
 
 const (
@@ -53,33 +65,33 @@ func inferPrimitiveArrowType(t reflect.Type) (arrow.DataType, error) {
 	}
 
 	switch t {
-	case reflect.TypeOf(int8(0)):
+	case typeOfInt8:
 		return arrow.PrimitiveTypes.Int8, nil
-	case reflect.TypeOf(int16(0)):
+	case typeOfInt16:
 		return arrow.PrimitiveTypes.Int16, nil
-	case reflect.TypeOf(int32(0)):
+	case typeOfInt32:
 		return arrow.PrimitiveTypes.Int32, nil
-	case reflect.TypeOf(int64(0)):
+	case typeOfInt64:
 		return arrow.PrimitiveTypes.Int64, nil
 	case typeOfInt:
 		return arrow.PrimitiveTypes.Int64, nil
-	case reflect.TypeOf(uint8(0)):
+	case typeOfUint8:
 		return arrow.PrimitiveTypes.Uint8, nil
-	case reflect.TypeOf(uint16(0)):
+	case typeOfUint16:
 		return arrow.PrimitiveTypes.Uint16, nil
-	case reflect.TypeOf(uint32(0)):
+	case typeOfUint32:
 		return arrow.PrimitiveTypes.Uint32, nil
-	case reflect.TypeOf(uint64(0)):
+	case typeOfUint64:
 		return arrow.PrimitiveTypes.Uint64, nil
 	case typeOfUint:
 		return arrow.PrimitiveTypes.Uint64, nil
-	case reflect.TypeOf(float32(0)):
+	case typeOfFloat32:
 		return arrow.PrimitiveTypes.Float32, nil
-	case reflect.TypeOf(float64(0)):
+	case typeOfFloat64:
 		return arrow.PrimitiveTypes.Float64, nil
-	case reflect.TypeOf(false):
+	case typeOfBool:
 		return arrow.FixedWidthTypes.Boolean, nil
-	case reflect.TypeOf(""):
+	case typeOfString:
 		return arrow.BinaryTypes.String, nil
 	case typeOfByteSlice:
 		return arrow.BinaryTypes.Binary, nil
@@ -276,29 +288,29 @@ func InferType[T any]() (arrow.DataType, error) {
 func InferGoType(dt arrow.DataType) (reflect.Type, error) {
 	switch dt.ID() {
 	case arrow.INT8:
-		return reflect.TypeOf(int8(0)), nil
+		return typeOfInt8, nil
 	case arrow.INT16:
-		return reflect.TypeOf(int16(0)), nil
+		return typeOfInt16, nil
 	case arrow.INT32:
-		return reflect.TypeOf(int32(0)), nil
+		return typeOfInt32, nil
 	case arrow.INT64:
-		return reflect.TypeOf(int64(0)), nil
+		return typeOfInt64, nil
 	case arrow.UINT8:
-		return reflect.TypeOf(uint8(0)), nil
+		return typeOfUint8, nil
 	case arrow.UINT16:
-		return reflect.TypeOf(uint16(0)), nil
+		return typeOfUint16, nil
 	case arrow.UINT32:
-		return reflect.TypeOf(uint32(0)), nil
+		return typeOfUint32, nil
 	case arrow.UINT64:
-		return reflect.TypeOf(uint64(0)), nil
+		return typeOfUint64, nil
 	case arrow.FLOAT32:
-		return reflect.TypeOf(float32(0)), nil
+		return typeOfFloat32, nil
 	case arrow.FLOAT64:
-		return reflect.TypeOf(float64(0)), nil
+		return typeOfFloat64, nil
 	case arrow.BOOL:
-		return reflect.TypeOf(false), nil
+		return typeOfBool, nil
 	case arrow.STRING, arrow.LARGE_STRING:
-		return reflect.TypeOf(""), nil
+		return typeOfString, nil
 	case arrow.BINARY, arrow.LARGE_BINARY:
 		return typeOfByteSlice, nil
 	case arrow.TIMESTAMP, arrow.DATE32, arrow.DATE64, arrow.TIME32, arrow.TIME64:
@@ -315,19 +327,12 @@ func InferGoType(dt arrow.DataType) (reflect.Type, error) {
 		return typeOfDec64, nil
 
 	case arrow.LIST, arrow.LARGE_LIST, arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW:
-		var elemDT arrow.DataType
-		switch t := dt.(type) {
-		case *arrow.ListType:
-			elemDT = t.Elem()
-		case *arrow.LargeListType:
-			elemDT = t.Elem()
-		case *arrow.ListViewType:
-			elemDT = t.Elem()
-		case *arrow.LargeListViewType:
-			elemDT = t.Elem()
-		default:
+		type listLike interface{ Elem() arrow.DataType }
+		ll, ok := dt.(listLike)
+		if !ok {
 			return nil, fmt.Errorf("unsupported Arrow type for Go inference: %v: %w", dt, ErrUnsupportedType)
 		}
+		elemDT := ll.Elem()
 		elemType, err := InferGoType(elemDT)
 		if err != nil {
 			return nil, err

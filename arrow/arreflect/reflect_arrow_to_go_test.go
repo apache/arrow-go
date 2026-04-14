@@ -29,6 +29,15 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
+func setValueAt[T any](t *testing.T, arr arrow.Array, i int) T {
+	t.Helper()
+	var got T
+	if err := setValue(reflect.ValueOf(&got).Elem(), arr, i); err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
 func TestSetValue(t *testing.T) {
 	mem := memory.NewGoAllocator()
 
@@ -40,10 +49,7 @@ func TestSetValue(t *testing.T) {
 		arr := b.NewBooleanArray()
 		defer arr.Release()
 
-		var got bool
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[bool](t, arr, 0)
 		if !got {
 			t.Errorf("expected true, got false")
 		}
@@ -64,10 +70,7 @@ func TestSetValue(t *testing.T) {
 		arr := b.NewStringArray()
 		defer arr.Release()
 
-		var got string
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[string](t, arr, 0)
 		if got != "hello" {
 			t.Errorf("expected hello, got %q", got)
 		}
@@ -80,10 +83,7 @@ func TestSetValue(t *testing.T) {
 		arr := b.NewBinaryArray()
 		defer arr.Release()
 
-		var got []byte
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[[]byte](t, arr, 0)
 		if string(got) != "data" {
 			t.Errorf("expected data, got %q", got)
 		}
@@ -111,10 +111,7 @@ func TestSetValue(t *testing.T) {
 		arr := b.NewStringArray()
 		defer arr.Release()
 
-		var got *string
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[*string](t, arr, 0)
 		if got == nil || *got != "ptr" {
 			t.Errorf("expected ptr, got %v", got)
 		}
@@ -140,10 +137,7 @@ func TestSetPrimitiveValue(t *testing.T) {
 		arr := b.NewInt32Array()
 		defer arr.Release()
 
-		var got int32
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[int32](t, arr, 0)
 		if got != 42 {
 			t.Errorf("expected 42, got %d", got)
 		}
@@ -232,10 +226,7 @@ func TestSetTemporalValue(t *testing.T) {
 		arr := b.NewArray().(*array.Timestamp)
 		defer arr.Release()
 
-		var got time.Time
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[time.Time](t, arr, 0)
 		if !got.Equal(now) {
 			t.Errorf("expected %v, got %v", now, got)
 		}
@@ -248,10 +239,7 @@ func TestSetTemporalValue(t *testing.T) {
 		arr := b.NewArray().(*array.Date32)
 		defer arr.Release()
 
-		var got time.Time
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[time.Time](t, arr, 0)
 		expected := arrow.Date32(19000).ToTime()
 		if !got.Equal(expected) {
 			t.Errorf("expected %v, got %v", expected, got)
@@ -266,10 +254,7 @@ func TestSetTemporalValue(t *testing.T) {
 		arr := b.NewArray().(*array.Duration)
 		defer arr.Release()
 
-		var got time.Duration
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[time.Duration](t, arr, 0)
 		expected := 5 * time.Second
 		if got != expected {
 			t.Errorf("expected %v, got %v", expected, got)
@@ -284,10 +269,7 @@ func TestSetTemporalValue(t *testing.T) {
 		arr := b.NewArray().(*array.Timestamp)
 		defer arr.Release()
 
-		var got *time.Time
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[*time.Time](t, arr, 0)
 		if got != nil {
 			t.Errorf("expected nil for null timestamp pointer")
 		}
@@ -346,18 +328,12 @@ func TestSetDecimalValue(t *testing.T) {
 		arr := b.NewDecimal128Array()
 		defer arr.Release()
 
-		var got decimal128.Num
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[decimal128.Num](t, arr, 0)
 		if got != num {
 			t.Errorf("expected %v, got %v", num, got)
 		}
 
-		var gotPtr *decimal128.Num
-		if err := setValue(reflect.ValueOf(&gotPtr).Elem(), arr, 1); err != nil {
-			t.Fatal(err)
-		}
+		gotPtr := setValueAt[*decimal128.Num](t, arr, 1)
 		if gotPtr != nil {
 			t.Errorf("expected nil for null decimal128")
 		}
@@ -372,10 +348,7 @@ func TestSetDecimalValue(t *testing.T) {
 		arr := b.NewDecimal256Array()
 		defer arr.Release()
 
-		var got decimal256.Num
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[decimal256.Num](t, arr, 0)
 		if got != num {
 			t.Errorf("expected %v, got %v", num, got)
 		}
@@ -391,18 +364,12 @@ func TestSetDecimalValue(t *testing.T) {
 		arr := b.NewArray().(*array.Decimal32)
 		defer arr.Release()
 
-		var got decimal.Decimal32
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[decimal.Decimal32](t, arr, 0)
 		if got != num {
 			t.Errorf("expected %v, got %v", num, got)
 		}
 
-		var gotPtr *decimal.Decimal32
-		if err := setValue(reflect.ValueOf(&gotPtr).Elem(), arr, 1); err != nil {
-			t.Fatal(err)
-		}
+		gotPtr := setValueAt[*decimal.Decimal32](t, arr, 1)
 		if gotPtr != nil {
 			t.Errorf("expected nil for null decimal32")
 		}
@@ -417,10 +384,7 @@ func TestSetDecimalValue(t *testing.T) {
 		arr := b.NewArray().(*array.Decimal64)
 		defer arr.Release()
 
-		var got decimal.Decimal64
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[decimal.Decimal64](t, arr, 0)
 		if got != num {
 			t.Errorf("expected %v, got %v", num, got)
 		}
@@ -564,10 +528,7 @@ func TestSetListValue(t *testing.T) {
 		arr := lb.NewListArray()
 		defer arr.Release()
 
-		var got []int32
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[[]int32](t, arr, 0)
 		if !reflect.DeepEqual(got, []int32{1, 2, 3}) {
 			t.Errorf("expected [1,2,3], got %v", got)
 		}
@@ -641,10 +602,7 @@ func TestSetListValue(t *testing.T) {
 		arr := lvb.NewLargeListViewArray()
 		defer arr.Release()
 
-		var got []int32
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[[]int32](t, arr, 0)
 		if !reflect.DeepEqual(got, []int32{1, 2}) {
 			t.Errorf("row 0: expected [1,2], got %v", got)
 		}
@@ -683,10 +641,7 @@ func TestSetMapValue(t *testing.T) {
 		arr := mb.NewMapArray()
 		defer arr.Release()
 
-		var got map[string]int32
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[map[string]int32](t, arr, 0)
 		if got["a"] != 1 || got["b"] != 2 {
 			t.Errorf("expected {a:1, b:2}, got %v", got)
 		}
@@ -724,10 +679,7 @@ func TestSetFixedSizeListValue(t *testing.T) {
 		arr := b.NewArray().(*array.FixedSizeList)
 		defer arr.Release()
 
-		var got [3]int32
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[[3]int32](t, arr, 0)
 		if got != [3]int32{10, 20, 30} {
 			t.Errorf("expected [10,20,30], got %v", got)
 		}
@@ -759,10 +711,7 @@ func TestSetFixedSizeListValue(t *testing.T) {
 		arr := b.NewArray().(*array.FixedSizeList)
 		defer arr.Release()
 
-		var got []int32
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[[]int32](t, arr, 0)
 		if !reflect.DeepEqual(got, []int32{7, 8}) {
 			t.Errorf("expected [7,8], got %v", got)
 		}
@@ -803,10 +752,7 @@ func TestSetDictionaryValue(t *testing.T) {
 		arr := bldr.NewDictionaryArray()
 		defer arr.Release()
 
-		var got string
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[string](t, arr, 0)
 		if got != "foo" {
 			t.Errorf("expected foo, got %q", got)
 		}
@@ -825,10 +771,7 @@ func TestSetDictionaryValue(t *testing.T) {
 			t.Errorf("expected foo, got %q", got)
 		}
 
-		var gotPtr *string
-		if err := setValue(reflect.ValueOf(&gotPtr).Elem(), arr, 3); err != nil {
-			t.Fatal(err)
-		}
+		gotPtr := setValueAt[*string](t, arr, 3)
 		if gotPtr != nil {
 			t.Errorf("expected nil for null dictionary entry")
 		}
@@ -851,10 +794,7 @@ func TestSetRunEndEncodedValue(t *testing.T) {
 		arr := b.NewRunEndEncodedArray()
 		defer arr.Release()
 
-		var got string
-		if err := setValue(reflect.ValueOf(&got).Elem(), arr, 0); err != nil {
-			t.Fatal(err)
-		}
+		got := setValueAt[string](t, arr, 0)
 		if got != "aaa" {
 			t.Errorf("expected aaa at logical 0, got %q", got)
 		}

@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
-	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
 type integOrderItem struct {
@@ -64,7 +63,7 @@ type integExtended struct {
 }
 
 func TestReflectIntegration(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := testMem()
 
 	t.Run("complex nested round-trip", func(t *testing.T) {
 		orders := []integOrder{
@@ -475,7 +474,7 @@ func TestReflectIntegration(t *testing.T) {
 }
 
 func BenchmarkReflectFromGoSlice(b *testing.B) {
-	mem := memory.NewGoAllocator()
+	mem := testMem()
 	rows := make([]integLargeRow, 1000)
 	for i := range rows {
 		rows[i] = integLargeRow{X: int32(i), Y: float64(i) * 1.5}
@@ -491,7 +490,7 @@ func BenchmarkReflectFromGoSlice(b *testing.B) {
 }
 
 func BenchmarkReflectToGoSlice(b *testing.B) {
-	mem := memory.NewGoAllocator()
+	mem := testMem()
 	rows := make([]integLargeRow, 1000)
 	for i := range rows {
 		rows[i] = integLargeRow{X: int32(i), Y: float64(i) * 1.5}
