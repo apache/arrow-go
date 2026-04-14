@@ -414,9 +414,11 @@ func FromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.Arr
 		dt = applyDecimalOpts(dt, derefType, tOpts)
 		dt = applyTemporalOpts(dt, derefType, tOpts)
 		if tOpts.ListView {
-			if lt, ok := dt.(*arrow.ListType); ok {
-				dt = arrow.ListViewOf(lt.Elem())
+			lt, ok := dt.(*arrow.ListType)
+			if !ok {
+				return nil, fmt.Errorf("arreflect: WithListView requires a slice-of-slices element type, got %s: %w", goType, ErrUnsupportedType)
 			}
+			dt = arrow.ListViewOf(lt.Elem())
 		}
 		if tOpts.REE {
 			dt = arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, dt)
