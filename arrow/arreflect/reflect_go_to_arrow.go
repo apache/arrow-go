@@ -727,6 +727,9 @@ func buildListLikeArray(vals reflect.Value, mem memory.Allocator, isView bool) (
 			bldr.AppendNull()
 			continue
 		}
+		if outer.Kind() != reflect.Slice && outer.Kind() != reflect.Array {
+			return nil, fmt.Errorf("arreflect: %s [%d]: expected slice, got %s: %w", label, i, outer.Type(), ErrTypeMismatch)
+		}
 		beginRow(outer.Len())
 		for j := 0; j < outer.Len(); j++ {
 			if err := appendValue(vb, outer.Index(j), tagOpts{}); err != nil {

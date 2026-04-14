@@ -583,6 +583,18 @@ func TestBuildListViewArray(t *testing.T) {
 		allVals := arr.(*array.ListView).ListValues().(*array.Int32)
 		assert.Equal(t, 3, allVals.Len(), "expected 3 total values, got %d", allVals.Len())
 	})
+
+	t.Run("nil_pointer_list_element", func(t *testing.T) {
+		a := []int32{1, 2}
+		vals := []*[]int32{&a, nil, &a}
+		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, 3, arr.Len())
+		assert.False(t, arr.IsNull(0))
+		assert.True(t, arr.IsNull(1))
+		assert.False(t, arr.IsNull(2))
+	})
 }
 
 func TestBuildTemporalTaggedArray(t *testing.T) {
