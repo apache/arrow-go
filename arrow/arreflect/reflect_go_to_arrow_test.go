@@ -68,7 +68,8 @@ func TestBuildPrimitiveArray(t *testing.T) {
 		defer arr.Release()
 		assert.True(t, arr.IsNull(1), "expected index 1 to be null")
 		typed := arr.(*array.Int32)
-		assert.True(t, typed.Value(0) == 10 && typed.Value(2) == 30, "unexpected values")
+		assert.Equal(t, int32(10), typed.Value(0))
+		assert.Equal(t, int32(30), typed.Value(2))
 	})
 
 	t.Run("bool", func(t *testing.T) {
@@ -78,7 +79,9 @@ func TestBuildPrimitiveArray(t *testing.T) {
 		defer arr.Release()
 		assert.Equal(t, arrow.BOOL, arr.DataType().ID())
 		typed := arr.(*array.Boolean)
-		assert.True(t, typed.Value(0) && !typed.Value(1) && typed.Value(2), "unexpected bool values")
+		assert.True(t, typed.Value(0), "expected Value(0) to be true")
+		assert.False(t, typed.Value(1), "expected Value(1) to be false")
+		assert.True(t, typed.Value(2), "expected Value(2) to be true")
 	})
 
 	t.Run("binary", func(t *testing.T) {
@@ -300,10 +303,12 @@ func TestBuildStructArray(t *testing.T) {
 		require.Equal(t, arrow.STRUCT, arr.DataType().ID(), "expected STRUCT, got %v", arr.DataType())
 		typed := arr.(*array.Struct)
 		aArr := typed.Field(0).(*array.Int32)
-		assert.True(t, aArr.Value(0) == 1 && aArr.Value(1) == 2, "unexpected A values")
+		assert.Equal(t, int32(1), aArr.Value(0))
+		assert.Equal(t, int32(2), aArr.Value(1))
 		bArr := typed.Field(1).(*array.Struct)
 		bxArr := bArr.Field(0).(*array.Int32)
-		assert.True(t, bxArr.Value(0) == 10 && bxArr.Value(1) == 20, "unexpected B.X values")
+		assert.Equal(t, int32(10), bxArr.Value(0))
+		assert.Equal(t, int32(20), bxArr.Value(1))
 	})
 }
 
@@ -399,7 +404,9 @@ func TestBuildFixedSizeListArray(t *testing.T) {
 		assert.Equal(t, int32(3), typed.DataType().(*arrow.FixedSizeListType).Len(), "expected fixed size 3")
 		values := typed.ListValues().(*array.Int32)
 		assert.Equal(t, 9, values.Len())
-		assert.True(t, values.Value(0) == 1 && values.Value(3) == 4 && values.Value(6) == 7, "unexpected values")
+		assert.Equal(t, int32(1), values.Value(0))
+		assert.Equal(t, int32(4), values.Value(3))
+		assert.Equal(t, int32(7), values.Value(6))
 	})
 
 	t.Run("float64_n2", func(t *testing.T) {
@@ -462,12 +469,14 @@ func TestBuildRunEndEncodedArray(t *testing.T) {
 		assert.Equal(t, 6, ree.Len())
 		runEnds := ree.RunEndsArr().(*array.Int32)
 		assert.Equal(t, 3, runEnds.Len(), "expected 3 runs, got %d", runEnds.Len())
-		assert.True(t, runEnds.Value(0) == 3 && runEnds.Value(1) == 5 && runEnds.Value(2) == 6,
-			"unexpected run ends: %d %d %d", runEnds.Value(0), runEnds.Value(1), runEnds.Value(2))
+		assert.Equal(t, int32(3), runEnds.Value(0))
+		assert.Equal(t, int32(5), runEnds.Value(1))
+		assert.Equal(t, int32(6), runEnds.Value(2))
 		values := ree.Values().(*array.Int32)
 		assert.Equal(t, 3, values.Len(), "expected 3 values, got %d", values.Len())
-		assert.True(t, values.Value(0) == 1 && values.Value(1) == 2 && values.Value(2) == 3,
-			"unexpected values: %d %d %d", values.Value(0), values.Value(1), values.Value(2))
+		assert.Equal(t, int32(1), values.Value(0))
+		assert.Equal(t, int32(2), values.Value(1))
+		assert.Equal(t, int32(3), values.Value(2))
 	})
 
 	t.Run("string_runs", func(t *testing.T) {
@@ -489,8 +498,8 @@ func TestBuildRunEndEncodedArray(t *testing.T) {
 		ree := arr.(*array.RunEndEncoded)
 		assert.Equal(t, 3, ree.Len())
 		runEnds := ree.RunEndsArr().(*array.Int32)
-		assert.True(t, runEnds.Len() == 1 && runEnds.Value(0) == 3,
-			"expected 1 run ending at 3, got %d runs, end=%d", runEnds.Len(), runEnds.Value(0))
+		assert.Equal(t, 1, runEnds.Len())
+		assert.Equal(t, int32(3), runEnds.Value(0))
 	})
 
 	t.Run("all_distinct", func(t *testing.T) {
@@ -573,8 +582,9 @@ func TestBuildTemporalTaggedArray(t *testing.T) {
 		assert.Equal(t, 2, arr.Len())
 		d32arr := arr.(*array.Date32)
 		got0 := d32arr.Value(0).ToTime()
-		assert.True(t, got0.Year() == ref.Year() && got0.Month() == ref.Month() && got0.Day() == ref.Day(),
-			"date32 roundtrip: got %v, want %v", got0, ref)
+		assert.Equal(t, ref.Year(), got0.Year())
+		assert.Equal(t, ref.Month(), got0.Month())
+		assert.Equal(t, ref.Day(), got0.Day())
 	})
 
 	t.Run("date64", func(t *testing.T) {
@@ -587,8 +597,9 @@ func TestBuildTemporalTaggedArray(t *testing.T) {
 		assert.Equal(t, arrow.DATE64, arr.DataType().ID())
 		d64arr := arr.(*array.Date64)
 		got0 := d64arr.Value(0).ToTime()
-		assert.True(t, got0.Year() == ref.Year() && got0.Month() == ref.Month() && got0.Day() == ref.Day(),
-			"date64 roundtrip: got %v, want %v", got0, ref)
+		assert.Equal(t, ref.Year(), got0.Year())
+		assert.Equal(t, ref.Month(), got0.Month())
+		assert.Equal(t, ref.Day(), got0.Day())
 	})
 
 	t.Run("time32", func(t *testing.T) {
@@ -603,10 +614,9 @@ func TestBuildTemporalTaggedArray(t *testing.T) {
 		t32arr := arr.(*array.Time32)
 		unit := arr.DataType().(*arrow.Time32Type).Unit
 		got0 := t32arr.Value(0).ToTime(unit)
-		assert.True(t, got0.Hour() == ref.Hour() && got0.Minute() == ref.Minute() && got0.Second() == ref.Second(),
-			"time32 roundtrip: got hour=%d min=%d sec=%d, want hour=%d min=%d sec=%d",
-			got0.Hour(), got0.Minute(), got0.Second(),
-			ref.Hour(), ref.Minute(), ref.Second())
+		assert.Equal(t, ref.Hour(), got0.Hour())
+		assert.Equal(t, ref.Minute(), got0.Minute())
+		assert.Equal(t, ref.Second(), got0.Second())
 		refWithMs := time.Date(ref.Year(), ref.Month(), ref.Day(), ref.Hour(), ref.Minute(), ref.Second(), 500_000_000, ref.Location())
 		svMs := reflect.ValueOf([]time.Time{refWithMs})
 		arrMs, err := buildTemporalArray(svMs, tagOpts{Temporal: "time32"}, mem)
@@ -629,8 +639,9 @@ func TestBuildTemporalTaggedArray(t *testing.T) {
 		t64arr := arr.(*array.Time64)
 		unit := arr.DataType().(*arrow.Time64Type).Unit
 		got0 := t64arr.Value(0).ToTime(unit)
-		assert.True(t, got0.Hour() == ref.Hour() && got0.Minute() == ref.Minute() && got0.Second() == ref.Second(),
-			"time64 roundtrip: got %v, want %v", got0, ref)
+		assert.Equal(t, ref.Hour(), got0.Hour())
+		assert.Equal(t, ref.Minute(), got0.Minute())
+		assert.Equal(t, ref.Second(), got0.Second())
 		refWithNanos := time.Date(ref.Year(), ref.Month(), ref.Day(), ref.Hour(), ref.Minute(), ref.Second(), 123456789, ref.Location())
 		sv64 := reflect.ValueOf([]time.Time{refWithNanos})
 		arr64, err := buildTemporalArray(sv64, tagOpts{Temporal: "time64"}, mem)
@@ -642,4 +653,13 @@ func TestBuildTemporalTaggedArray(t *testing.T) {
 		assert.Equal(t, refWithNanos.Nanosecond(), got64.Nanosecond(),
 			"time64 nanosecond: got %d, want %d", got64.Nanosecond(), refWithNanos.Nanosecond())
 	})
+}
+
+func TestNilByteSliceIsNull(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	arr, err := FromSlice([][]byte{[]byte("hello"), nil}, mem)
+	require.NoError(t, err)
+	defer arr.Release()
+	assert.False(t, arr.IsNull(0), "non-nil byte slice should not be null")
+	assert.True(t, arr.IsNull(1), "nil byte slice should be null")
 }

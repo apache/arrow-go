@@ -389,3 +389,22 @@ func TestInferGoType(t *testing.T) {
 	require.Error(t, err, "expected error for unsupported type")
 	assert.ErrorIs(t, err, ErrUnsupportedType)
 }
+
+func TestInferGoTypeMapNonComparableKey(t *testing.T) {
+	t.Run("MAP with non-comparable key returns error", func(t *testing.T) {
+		dt := arrow.MapOf(arrow.ListOf(arrow.PrimitiveTypes.Int32), arrow.BinaryTypes.String)
+		_, err := InferGoType(dt)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+}
+
+func TestInferGoTypeStructDuplicateExportedNames(t *testing.T) {
+	t.Run("STRUCT with colliding exported names returns error", func(t *testing.T) {
+		st := arrow.StructOf(
+			arrow.Field{Name: "foo", Type: arrow.PrimitiveTypes.Int32},
+			arrow.Field{Name: "Foo", Type: arrow.PrimitiveTypes.Int64},
+		)
+		_, err := InferGoType(st)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+}

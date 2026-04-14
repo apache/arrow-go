@@ -133,9 +133,9 @@ func appendPrimitiveValue(b array.Builder, v reflect.Value, dt arrow.DataType) e
 		b.(*array.Float64Builder).Append(float64(v.Float()))
 	case arrow.BOOL:
 		b.(*array.BooleanBuilder).Append(v.Bool())
-	case arrow.STRING:
+	case arrow.STRING, arrow.LARGE_STRING:
 		b.(*array.StringBuilder).Append(v.String())
-	case arrow.BINARY:
+	case arrow.BINARY, arrow.LARGE_BINARY:
 		if v.IsNil() {
 			b.(*array.BinaryBuilder).AppendNull()
 		} else {

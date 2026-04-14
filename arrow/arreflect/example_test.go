@@ -298,8 +298,16 @@ func ExampleToAnySlice_nullableFields() {
 	}
 	for _, row := range rows {
 		v := reflect.ValueOf(row)
-		name := v.FieldByIndex([]int{0}).String()
-		scoreField := v.FieldByIndex([]int{1})
+		var name string
+		var scoreField reflect.Value
+		for i := 0; i < v.NumField(); i++ {
+			switch v.Type().Field(i).Tag.Get("arrow") {
+			case "name":
+				name = v.Field(i).String()
+			case "score":
+				scoreField = v.Field(i)
+			}
+		}
 		if scoreField.IsNil() {
 			fmt.Printf("%s: <null>\n", name)
 		} else {

@@ -631,7 +631,9 @@ func TestToAnySliceStructArray(t *testing.T) {
 				score = v.Field(fi)
 			}
 		}
-		require.True(t, id.IsValid() && label.IsValid() && score.IsValid(), "row %d: missing field(s)", i)
+		require.True(t, id.IsValid(), "row %d: id field not found", i)
+		require.True(t, label.IsValid(), "row %d: label field not found", i)
+		require.True(t, score.IsValid(), "row %d: score field not found", i)
 		assert.Equal(t, want[i].id, id.Int(), "row %d id", i)
 		assert.Equal(t, want[i].label, label.String(), "row %d label", i)
 		if score.Kind() == reflect.Ptr {
