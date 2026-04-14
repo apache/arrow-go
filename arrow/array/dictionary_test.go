@@ -145,6 +145,47 @@ func (p *PrimitiveDictionaryTestSuite) TestDictionaryBuilderInit() {
 	p.True(array.Equal(expected, arr))
 }
 
+func (p *PrimitiveDictionaryTestSuite) TestDictionaryBuilderReserveAndAppend() {
+	expectedType := &arrow.DictionaryType{IndexType: &arrow.Int8Type{}, ValueType: p.typ}
+	bldr := array.NewDictionaryBuilder(p.mem, expectedType)
+	defer bldr.Release()
+
+	builder := reflect.ValueOf(bldr)
+	appendFn := builder.MethodByName("UnsafeAppend")
+	validFn := builder.MethodByName("UnsafeAppendBoolToBitmap")
+
+	bldr.Reserve(7)
+	validFn.Call([]reflect.Value{reflect.ValueOf(true)})
+	validFn.Call([]reflect.Value{reflect.ValueOf(false)})
+	appendFn.Call([]reflect.Value{reflect.ValueOf(0).Convert(p.reftyp)})
+	appendFn.Call([]reflect.Value{reflect.ValueOf(1).Convert(p.reftyp)})
+	validFn.Call([]reflect.Value{reflect.ValueOf(false)})
+	appendFn.Call([]reflect.Value{reflect.ValueOf(1).Convert(p.reftyp)})
+	appendFn.Call([]reflect.Value{reflect.ValueOf(2).Convert(p.reftyp)})
+
+	p.EqualValues(7, bldr.Len())
+	p.EqualValues(2, bldr.NullN())
+
+	p.EqualValues(3, bldr.DictionarySize())
+
+	arr := bldr.NewArray().(*array.Dictionary)
+	defer arr.Release()
+
+	p.True(arrow.TypeEqual(expectedType, arr.DataType()))
+	expectedDict, _, err := array.FromJSON(p.mem, expectedType.ValueType, strings.NewReader("[0, 1, 2]"))
+	p.NoError(err)
+	defer expectedDict.Release()
+
+	expectedIndices, _, err := array.FromJSON(p.mem, expectedType.IndexType, strings.NewReader("[0, null, 0, 1, null, 1, 2]"))
+	p.NoError(err)
+	defer expectedIndices.Release()
+
+	expected := array.NewDictionaryArray(expectedType, expectedIndices, expectedDict)
+	defer expected.Release()
+
+	p.True(array.Equal(expected, arr))
+}
+
 func (p *PrimitiveDictionaryTestSuite) TestDictionaryNewBuilder() {
 	valueType := p.typ
 	dictArr, _, err := array.FromJSON(p.mem, valueType, strings.NewReader("[1, 2]"))
