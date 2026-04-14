@@ -420,11 +420,10 @@ func FromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.Arr
 			}
 			dt = arrow.ListViewOf(lt.Elem())
 		}
-		if tOpts.REE {
-			dt = arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, dt)
-		}
 		if tOpts.Dict {
 			dt = &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: dt}
+		} else if tOpts.REE {
+			dt = arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, dt)
 		}
 		b := array.NewBuilder(mem, dt)
 		defer b.Release()

@@ -19,6 +19,7 @@ package arreflect
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -233,6 +234,19 @@ func TestFromGoSlice(t *testing.T) {
 		defer arr.Release()
 
 		assert.Equal(t, arrow.LIST_VIEW, arr.DataType().ID())
+	})
+
+	t.Run("empty slice with WithREE", func(t *testing.T) {
+		arr, err := FromSlice([]int32{}, mem, WithREE())
+		require.NoError(t, err)
+		defer arr.Release()
+
+		assert.Equal(t, arrow.RUN_END_ENCODED, arr.DataType().ID())
+	})
+
+	t.Run("WithTemporal invalid value returns error", func(t *testing.T) {
+		_, err := FromSlice([]time.Time{}, mem, WithTemporal("invalid"))
+		assert.ErrorIs(t, err, ErrUnsupportedType)
 	})
 }
 

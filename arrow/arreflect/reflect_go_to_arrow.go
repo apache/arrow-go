@@ -614,10 +614,10 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 			}
 		}
 	case *array.RunEndEncodedBuilder:
+		tb.Append(1)
 		if err := appendValue(tb.ValueBuilder(), v, tagOpts{}); err != nil {
 			return err
 		}
-		tb.Append(1)
 	default:
 		if db, ok := b.(array.DictionaryBuilder); ok {
 			return appendToDictBuilder(db, v)
