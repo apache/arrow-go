@@ -193,6 +193,9 @@ func applyTemporalOpts(dt arrow.DataType, origType reflect.Type, opts tagOpts) a
 func applyEncodingOpts(dt arrow.DataType, fm fieldMeta) (arrow.DataType, error) {
 	switch {
 	case fm.Opts.Dict:
+		if err := validateDictValueType(dt); err != nil {
+			return nil, fmt.Errorf("arreflect: dict tag on field %q: %w", fm.Name, err)
+		}
 		return &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: dt}, nil
 	case fm.Opts.ListView:
 		lt, ok := dt.(*arrow.ListType)
@@ -381,8 +384,14 @@ func InferGoType(dt arrow.DataType) (reflect.Type, error) {
 			} else {
 				runes := []rune(f.Name)
 				runes[0] = unicode.ToUpper(runes[0])
-				if !unicode.IsLetter(runes[0]) {
-					return nil, fmt.Errorf("arreflect: InferGoType: field name %q produces invalid Go identifier: %w", f.Name, ErrUnsupportedType)
+				for j, r := range runes {
+					if j == 0 {
+						if !unicode.IsLetter(r) {
+							return nil, fmt.Errorf("arreflect: InferGoType: field name %q produces invalid Go identifier: %w", f.Name, ErrUnsupportedType)
+						}
+					} else if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
+						return nil, fmt.Errorf("arreflect: InferGoType: field name %q produces invalid Go identifier: %w", f.Name, ErrUnsupportedType)
+					}
 				}
 				exportedName = string(runes)
 			}

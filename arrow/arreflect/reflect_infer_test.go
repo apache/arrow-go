@@ -408,3 +408,22 @@ func TestInferGoTypeStructDuplicateExportedNames(t *testing.T) {
 		assert.ErrorIs(t, err, ErrUnsupportedType)
 	})
 }
+
+func TestInferGoTypeStructInvalidIdentifier(t *testing.T) {
+	cases := []struct {
+		name      string
+		fieldName string
+	}{
+		{"hyphenated", "my-field"},
+		{"space", "a b"},
+		{"dot", "first.name"},
+		{"digit prefix", "1st"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := arrow.StructOf(arrow.Field{Name: tc.fieldName, Type: arrow.PrimitiveTypes.Int32})
+			_, err := InferGoType(st)
+			assert.ErrorIs(t, err, ErrUnsupportedType)
+		})
+	}
+}
