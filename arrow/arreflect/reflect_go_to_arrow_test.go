@@ -530,6 +530,18 @@ func TestBuildRunEndEncodedArray(t *testing.T) {
 		ree := arr.(*array.RunEndEncoded)
 		assert.Equal(t, 2, ree.RunEndsArr().Len(), "expected 2 runs (x+x coalesced, y), got %d", ree.RunEndsArr().Len())
 	})
+
+	t.Run("ree_with_temporal_date32", func(t *testing.T) {
+		t1 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+		t2 := time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC)
+		vals := []time.Time{t1, t1, t2}
+		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{REE: true, Temporal: "date32"}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		ree := arr.(*array.RunEndEncoded)
+		assert.Equal(t, 3, ree.Len())
+		assert.Equal(t, arrow.DATE32, ree.Values().DataType().ID())
+	})
 }
 
 func TestBuildListViewArray(t *testing.T) {

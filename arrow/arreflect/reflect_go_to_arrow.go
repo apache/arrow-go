@@ -896,6 +896,7 @@ func buildDictionaryArray(vals reflect.Value, mem memory.Allocator) (arrow.Array
 func buildRunEndEncodedArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
 	valOpts := opts
 	valOpts.REE = false
+	valOpts.ListView = false
 	if vals.Len() == 0 {
 		runEndsArr, err := buildPrimitiveArray(reflect.MakeSlice(reflect.TypeOf([]int32{}), 0, 0), mem)
 		if err != nil {
