@@ -903,7 +903,7 @@ func buildRunEndEncodedArray(vals reflect.Value, mem memory.Allocator) (arrow.Ar
 			return nil, err
 		}
 		defer runEndsArr.Release()
-		valuesArr, err := buildPrimitiveArray(reflect.MakeSlice(vals.Type(), 0, 0), mem)
+		valuesArr, err := buildArray(reflect.MakeSlice(vals.Type(), 0, 0), tagOpts{}, mem)
 		if err != nil {
 			return nil, err
 		}

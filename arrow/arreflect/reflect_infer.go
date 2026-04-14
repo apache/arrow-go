@@ -381,10 +381,10 @@ func InferGoType(dt arrow.DataType) (reflect.Type, error) {
 			} else {
 				runes := []rune(f.Name)
 				runes[0] = unicode.ToUpper(runes[0])
+				if !unicode.IsLetter(runes[0]) {
+					return nil, fmt.Errorf("arreflect: InferGoType: field name %q produces invalid Go identifier: %w", f.Name, ErrUnsupportedType)
+				}
 				exportedName = string(runes)
-			}
-			if !unicode.IsLetter(rune(exportedName[0])) {
-				return nil, fmt.Errorf("arreflect: InferGoType: field name %q produces invalid Go identifier %q: %w", f.Name, exportedName, ErrUnsupportedType)
 			}
 			if origName, dup := seen[exportedName]; dup {
 				return nil, fmt.Errorf("arreflect: InferGoType: field names %q and %q both export as %q: %w", origName, f.Name, exportedName, ErrUnsupportedType)
