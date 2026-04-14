@@ -657,7 +657,10 @@ func appendListElement(b array.Builder, v reflect.Value) error {
 		AppendNull()
 		ValueBuilder() array.Builder
 	}
-	la := b.(listAppender)
+	la, ok := b.(listAppender)
+	if !ok {
+		return fmt.Errorf("unexpected list builder type %T: %w", b, ErrUnsupportedType)
+	}
 	if v.Kind() == reflect.Slice && v.IsNil() {
 		la.AppendNull()
 		return nil
@@ -684,7 +687,7 @@ func appendListElement(b array.Builder, v reflect.Value) error {
 }
 
 func buildListLikeArray(vals reflect.Value, mem memory.Allocator, isView bool) (arrow.Array, error) {
-	elemDT, isOuterPtr, err := inferListElemDT(vals)
+	elemDT, _, err := inferListElemDT(vals)
 	if err != nil {
 		return nil, err
 	}
@@ -710,14 +713,17 @@ func buildListLikeArray(vals reflect.Value, mem memory.Allocator, isView bool) (
 	vb := bldr.ValueBuilder()
 	for i := 0; i < vals.Len(); i++ {
 		outer := vals.Index(i)
-		if isOuterPtr {
+		for outer.Kind() == reflect.Ptr {
 			if outer.IsNil() {
 				bldr.AppendNull()
-				continue
+				break
 			}
 			outer = outer.Elem()
 		}
-		if outer.IsNil() {
+		if outer.Kind() == reflect.Ptr {
+			continue
+		}
+		if outer.Kind() == reflect.Slice && outer.IsNil() {
 			bldr.AppendNull()
 			continue
 		}

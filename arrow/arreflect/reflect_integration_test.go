@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -350,6 +351,27 @@ func TestReflectIntegration(t *testing.T) {
 		require.NoError(t, err, "RecordToSlice")
 
 		require.Len(t, output, len(rows))
+		assert.Equal(t, rows, output)
+	})
+
+	t.Run("listview_struct_field_roundtrip", func(t *testing.T) {
+		type Row struct {
+			Name string   `arrow:"name"`
+			Tags []string `arrow:"tags,listview"`
+		}
+		rows := []Row{
+			{"alice", []string{"admin", "user"}},
+			{"bob", []string{"guest"}},
+		}
+		arr, err := FromSlice(rows, nil)
+		require.NoError(t, err)
+		defer arr.Release()
+
+		sa := arr.(*array.Struct)
+		require.Equal(t, arrow.LIST_VIEW, sa.Field(1).DataType().ID())
+
+		output, err := ToSlice[Row](arr)
+		require.NoError(t, err)
 		assert.Equal(t, rows, output)
 	})
 }
