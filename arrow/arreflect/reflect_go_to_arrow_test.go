@@ -434,7 +434,6 @@ func TestBuildFixedSizeListArray(t *testing.T) {
 	})
 
 	t.Run("nil_slice_appends_null", func(t *testing.T) {
-		dt := arrow.FixedSizeListOf(3, arrow.PrimitiveTypes.Int32)
 		bldr := array.NewFixedSizeListBuilder(mem, int32(3), arrow.PrimitiveTypes.Int32)
 		defer bldr.Release()
 
@@ -448,7 +447,6 @@ func TestBuildFixedSizeListArray(t *testing.T) {
 
 		arr := bldr.NewArray()
 		defer arr.Release()
-		_ = dt
 		assert.True(t, arr.IsNull(0), "nil slice should be null")
 		assert.False(t, arr.IsNull(1), "non-nil should not be null")
 	})
@@ -500,6 +498,24 @@ func TestBuildDictionaryArray(t *testing.T) {
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{Dict: true}, mem)
 		require.NoError(t, err)
 		defer arr.Release()
+		typed := arr.(*array.Dictionary)
+		assert.Equal(t, arrow.DICTIONARY, arr.DataType().ID())
+		assert.Equal(t, 3, arr.Len())
+		assert.False(t, arr.IsNull(0))
+		assert.True(t, arr.IsNull(1))
+		assert.False(t, arr.IsNull(2))
+		assert.Equal(t, 1, typed.Dictionary().Len(), "expected 1 unique value")
+	})
+
+	t.Run("multi_level_pointer_string", func(t *testing.T) {
+		s := "world"
+		ps := &s
+		var nilPs *string
+		vals := []**string{&ps, &nilPs, &ps}
+		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{Dict: true}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, arrow.DICTIONARY, arr.DataType().ID())
 		assert.Equal(t, 3, arr.Len())
 		assert.False(t, arr.IsNull(0))
 		assert.True(t, arr.IsNull(1))
