@@ -249,6 +249,11 @@ func TestFromGoSlice(t *testing.T) {
 		_, err := FromSlice([]time.Time{}, mem, WithTemporal("invalid"))
 		assert.ErrorIs(t, err, ErrUnsupportedType)
 	})
+
+	t.Run("WithTemporal on non-time type returns error", func(t *testing.T) {
+		_, err := FromSlice([]string{}, mem, WithTemporal("date32"))
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
 }
 
 func TestRecordToSlice(t *testing.T) {

@@ -401,6 +401,7 @@ func FromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.Arr
 	if err := validateTemporalOpt(tOpts.Temporal); err != nil {
 		return nil, err
 	}
+	// "timestamp" is excluded: it is a no-op for non-time.Time types via applyTemporalOpts.
 	if tOpts.Temporal != "" && tOpts.Temporal != "timestamp" {
 		goType := reflect.TypeFor[T]()
 		deref := goType
