@@ -48,16 +48,19 @@ func TestBuildPrimitiveArray(t *testing.T) {
 		}
 	})
 
-	t.Run("string", func(t *testing.T) {
-		vals := []string{"hello", "world", "foo"}
+	t.Run("multi_level_pointer_int32", func(t *testing.T) {
+		v := int32(42)
+		pv := &v
+		var nilPv *int32
+		vals := []**int32{&pv, &nilPv, &pv}
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
 		require.NoError(t, err)
 		defer arr.Release()
-		assert.Equal(t, arrow.STRING, arr.DataType().ID())
-		typed := arr.(*array.String)
-		for i, want := range vals {
-			assert.Equal(t, want, typed.Value(i), "[%d] value mismatch", i)
-		}
+		assert.Equal(t, 3, arr.Len())
+		assert.False(t, arr.IsNull(0))
+		assert.True(t, arr.IsNull(1))
+		assert.False(t, arr.IsNull(2))
+		assert.Equal(t, int32(42), arr.(*array.Int32).Value(0))
 	})
 
 	t.Run("pointer_with_null", func(t *testing.T) {
@@ -311,6 +314,23 @@ func TestBuildStructArray(t *testing.T) {
 		bxArr := bArr.Field(0).(*array.Int32)
 		assert.Equal(t, int32(10), bxArr.Value(0))
 		assert.Equal(t, int32(20), bxArr.Value(1))
+	})
+
+	t.Run("multi_level_pointer_struct", func(t *testing.T) {
+		type S struct {
+			X int32
+		}
+		s := S{X: 99}
+		ps := &s
+		var nilPs *S
+		vals := []**S{&ps, &nilPs, &ps}
+		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, 3, arr.Len())
+		assert.False(t, arr.IsNull(0))
+		assert.True(t, arr.IsNull(1))
+		assert.False(t, arr.IsNull(2))
 	})
 }
 

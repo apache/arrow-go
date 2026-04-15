@@ -98,11 +98,16 @@ func buildPrimitiveArray(vals reflect.Value, mem memory.Allocator) (arrow.Array,
 	for i := 0; i < vals.Len(); i++ {
 		v := vals.Index(i)
 		if isPtr {
-			if v.IsNil() {
-				b.AppendNull()
+			for v.Kind() == reflect.Ptr {
+				if v.IsNil() {
+					b.AppendNull()
+					break
+				}
+				v = v.Elem()
+			}
+			if v.Kind() == reflect.Ptr {
 				continue
 			}
-			v = v.Elem()
 		}
 		if err := appendPrimitiveValue(b, v, dt); err != nil {
 			return nil, err
@@ -207,11 +212,16 @@ func iterSlice(vals reflect.Value, isPtr bool, appendNull func(), appendVal func
 	for i := 0; i < vals.Len(); i++ {
 		v := vals.Index(i)
 		if isPtr {
-			if v.IsNil() {
-				appendNull()
+			for v.Kind() == reflect.Ptr {
+				if v.IsNil() {
+					appendNull()
+					break
+				}
+				v = v.Elem()
+			}
+			if v.Kind() == reflect.Ptr {
 				continue
 			}
-			v = v.Elem()
 		}
 		if err := appendVal(v); err != nil {
 			return err
@@ -421,11 +431,16 @@ func buildStructArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, er
 	for i := 0; i < vals.Len(); i++ {
 		v := vals.Index(i)
 		if isPtr {
-			if v.IsNil() {
-				sb.AppendNull()
+			for v.Kind() == reflect.Ptr {
+				if v.IsNil() {
+					sb.AppendNull()
+					break
+				}
+				v = v.Elem()
+			}
+			if v.Kind() == reflect.Ptr {
 				continue
 			}
-			v = v.Elem()
 		}
 		sb.Append(true)
 		for fi, fm := range fields {
@@ -787,11 +802,16 @@ func buildMapArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error
 	for i := 0; i < vals.Len(); i++ {
 		m := vals.Index(i)
 		if isPtr {
-			if m.IsNil() {
-				mb.AppendNull()
+			for m.Kind() == reflect.Ptr {
+				if m.IsNil() {
+					mb.AppendNull()
+					break
+				}
+				m = m.Elem()
+			}
+			if m.Kind() == reflect.Ptr {
 				continue
 			}
-			m = m.Elem()
 		}
 		if m.IsNil() {
 			mb.AppendNull()
@@ -841,11 +861,16 @@ func buildFixedSizeListArray(vals reflect.Value, mem memory.Allocator) (arrow.Ar
 	for i := 0; i < vals.Len(); i++ {
 		elem := vals.Index(i)
 		if isPtr {
-			if elem.IsNil() {
-				fb.AppendNull()
+			for elem.Kind() == reflect.Ptr {
+				if elem.IsNil() {
+					fb.AppendNull()
+					break
+				}
+				elem = elem.Elem()
+			}
+			if elem.Kind() == reflect.Ptr {
 				continue
 			}
-			elem = elem.Elem()
 		}
 		fb.Append(true)
 		for j := 0; j < int(n); j++ {
