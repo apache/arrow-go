@@ -46,7 +46,7 @@ func dict(index arrow.DataType) arrow.DataType {
 	return &arrow.DictionaryType{
 		IndexType: index,
 		ValueType: arrow.PrimitiveTypes.Int16,
-		Ordered: false,
+		Ordered:   false,
 	}
 }
 
@@ -124,8 +124,8 @@ func assertDictBasics[I extensions.DictIndexType](t *testing.T, indexType I) {
 				Nullable: false,
 			},
 			arrow.Field{
-				Name: "offset_minutes",
-				Type: dict(arrow.DataType(indexType)),
+				Name:     "offset_minutes",
+				Type:     dict(arrow.DataType(indexType)),
 				Nullable: false,
 			},
 		),
@@ -145,7 +145,7 @@ func TestTimestampWithOffsetTypeDictionaryEncodedBasics(t *testing.T) {
 	assertDictBasics(t, &arrow.Int64Type{})
 }
 
-func assertReeBasics[E extensions.DictIndexType](t *testing.T, runEndsType E) {
+func assertReeBasics[E extensions.RunEndsType](t *testing.T, runEndsType E) {
 	typ := extensions.NewTimestampWithOffsetTypeRunEndEncoded(testTimeUnit, runEndsType)
 
 	assert.Equal(t, "arrow.timestamp_with_offset", typ.ExtensionName())
@@ -163,8 +163,8 @@ func assertReeBasics[E extensions.DictIndexType](t *testing.T, runEndsType E) {
 				Nullable: false,
 			},
 			arrow.Field{
-				Name: "offset_minutes",
-				Type: ree(arrow.DataType(runEndsType)),
+				Name:     "offset_minutes",
+				Type:     ree(arrow.DataType(runEndsType)),
 				Nullable: false,
 			},
 		),
@@ -197,15 +197,15 @@ func TestTimestampWithOffsetEquals(t *testing.T) {
 	assert.False(t, extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Int16Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Uint16Type{})))
 
 	// REE index type is not equal
-	assert.False(t, extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Int16Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Uint16Type{})))
+	assert.False(t, extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Int16Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Int32Type{})))
 
 	// Equals OK
-	assert.False(t, extensions.NewTimestampWithOffsetType(arrow.Nanosecond).ExtensionEquals(extensions.NewTimestampWithOffsetType(arrow.Nanosecond)))
-	assert.False(t, extensions.NewTimestampWithOffsetType(arrow.Microsecond).ExtensionEquals(extensions.NewTimestampWithOffsetType(arrow.Microsecond)))
-	assert.False(t, extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Int16Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Int16Type{})))
-	assert.False(t, extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Uint16Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Uint16Type{})))
-	assert.False(t, extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Int16Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Int16Type{})))
-	assert.False(t, extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Uint16Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Uint16Type{})))
+	assert.True(t, extensions.NewTimestampWithOffsetType(arrow.Nanosecond).ExtensionEquals(extensions.NewTimestampWithOffsetType(arrow.Nanosecond)))
+	assert.True(t, extensions.NewTimestampWithOffsetType(arrow.Microsecond).ExtensionEquals(extensions.NewTimestampWithOffsetType(arrow.Microsecond)))
+	assert.True(t, extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Int16Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Int16Type{})))
+	assert.True(t, extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Uint16Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeDictionaryEncoded(arrow.Microsecond, &arrow.Uint16Type{})))
+	assert.True(t, extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Int16Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Int16Type{})))
+	assert.True(t, extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Int32Type{}).ExtensionEquals(extensions.NewTimestampWithOffsetTypeRunEndEncoded(arrow.Microsecond, &arrow.Int32Type{})))
 }
 
 func TestTimestampWithOffsetExtensionBuilder(t *testing.T) {
