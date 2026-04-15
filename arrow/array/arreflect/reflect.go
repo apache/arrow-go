@@ -379,15 +379,51 @@ func WithTemporal(temporal string) Option {
 	return func(o *tagOpts) { o.Temporal = temporal }
 }
 
-var validTemporalOpts = map[string]bool{
-	"": true, "timestamp": true, "date32": true, "date64": true, "time32": true, "time64": true,
-}
-
 func validateTemporalOpt(temporal string) error {
-	if !validTemporalOpts[temporal] {
+	switch temporal {
+	case "", "timestamp", "date32", "date64", "time32", "time64":
+		return nil
+	default:
 		return fmt.Errorf("arreflect: invalid WithTemporal value %q; valid values are date32, date64, time32, time64, timestamp: %w", temporal, ErrUnsupportedType)
 	}
-	return nil
+}
+
+func buildEmptyTyped(goType reflect.Type, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
+	dt, err := inferArrowType(goType)
+	if err != nil {
+		return nil, err
+	}
+	derefType := goType
+	for derefType.Kind() == reflect.Ptr {
+		derefType = derefType.Elem()
+	}
+	dt = applyDecimalOpts(dt, derefType, opts)
+	dt = applyTemporalOpts(dt, derefType, opts)
+	if opts.ListView {
+		if derefType.Kind() != reflect.Slice || derefType == typeOfByteSlice {
+			return nil, fmt.Errorf("arreflect: WithListView requires a slice-of-slices element type, got %s: %w", goType, ErrUnsupportedType)
+		}
+		innerElem := derefType.Elem()
+		for innerElem.Kind() == reflect.Ptr {
+			innerElem = innerElem.Elem()
+		}
+		innerDT, err := inferArrowType(innerElem)
+		if err != nil {
+			return nil, err
+		}
+		dt = arrow.ListViewOf(innerDT)
+	}
+	if opts.Dict {
+		if err := validateDictValueType(dt); err != nil {
+			return nil, err
+		}
+		dt = &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: dt}
+	} else if opts.REE {
+		dt = arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, dt)
+	}
+	b := array.NewBuilder(mem, dt)
+	defer b.Release()
+	return b.NewArray(), nil
 }
 
 func FromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.Array, error) {
@@ -413,42 +449,7 @@ func FromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.Arr
 		}
 	}
 	if len(vals) == 0 {
-		goType := reflect.TypeFor[T]()
-		dt, err := inferArrowType(goType)
-		if err != nil {
-			return nil, err
-		}
-		derefType := goType
-		for derefType.Kind() == reflect.Ptr {
-			derefType = derefType.Elem()
-		}
-		dt = applyDecimalOpts(dt, derefType, tOpts)
-		dt = applyTemporalOpts(dt, derefType, tOpts)
-		if tOpts.ListView {
-			if derefType.Kind() != reflect.Slice || derefType == typeOfByteSlice {
-				return nil, fmt.Errorf("arreflect: WithListView requires a slice-of-slices element type, got %s: %w", goType, ErrUnsupportedType)
-			}
-			innerElem := derefType.Elem()
-			for innerElem.Kind() == reflect.Ptr {
-				innerElem = innerElem.Elem()
-			}
-			innerDT, err := inferArrowType(innerElem)
-			if err != nil {
-				return nil, err
-			}
-			dt = arrow.ListViewOf(innerDT)
-		}
-		if tOpts.Dict {
-			if err := validateDictValueType(dt); err != nil {
-				return nil, err
-			}
-			dt = &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: dt}
-		} else if tOpts.REE {
-			dt = arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, dt)
-		}
-		b := array.NewBuilder(mem, dt)
-		defer b.Release()
-		return b.NewArray(), nil
+		return buildEmptyTyped(reflect.TypeFor[T](), tOpts, mem)
 	}
 	sv := reflect.ValueOf(vals)
 	return buildArray(sv, tOpts, mem)

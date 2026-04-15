@@ -247,11 +247,7 @@ func appendStructFields(sb *array.StructBuilder, v reflect.Value, fields []field
 }
 
 func buildStructArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
-	elemType := vals.Type().Elem()
-	isPtr := elemType.Kind() == reflect.Ptr
-	for elemType.Kind() == reflect.Ptr {
-		elemType = elemType.Elem()
-	}
+	elemType, isPtr := derefSliceElem(vals)
 
 	st, err := inferStructType(elemType)
 	if err != nil {
@@ -574,11 +570,7 @@ func buildListViewArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, 
 }
 
 func buildMapArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
-	mapType := vals.Type().Elem()
-	isPtr := mapType.Kind() == reflect.Ptr
-	for mapType.Kind() == reflect.Ptr {
-		mapType = mapType.Elem()
-	}
+	mapType, isPtr := derefSliceElem(vals)
 
 	keyType := mapType.Key()
 	valType := mapType.Elem()
@@ -628,11 +620,7 @@ func buildMapArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error
 }
 
 func buildFixedSizeListArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
-	elemType := vals.Type().Elem()
-	isPtr := elemType.Kind() == reflect.Ptr
-	for elemType.Kind() == reflect.Ptr {
-		elemType = elemType.Elem()
-	}
+	elemType, isPtr := derefSliceElem(vals)
 
 	if elemType.Kind() != reflect.Array {
 		return nil, fmt.Errorf("arreflect: expected array element, got %v", elemType.Kind())

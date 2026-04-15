@@ -389,6 +389,15 @@ func setMapValue(v reflect.Value, arr *array.Map, i int) error {
 	return nil
 }
 
+func fillFixedSizeList(dst reflect.Value, child arrow.Array, start, n int) error {
+	for k := 0; k < n; k++ {
+		if err := setValue(dst.Index(k), child, start+k); err != nil {
+			return fmt.Errorf("arreflect: fixed-size list element %d: %w", k, err)
+		}
+	}
+	return nil
+}
+
 func setFixedSizeListValue(v reflect.Value, arr *array.FixedSizeList, i int) error {
 	n := int(arr.DataType().(*arrow.FixedSizeListType).Len())
 	child := arr.ListValues()
@@ -399,17 +408,11 @@ func setFixedSizeListValue(v reflect.Value, arr *array.FixedSizeList, i int) err
 		if v.Len() != n {
 			return fmt.Errorf("fixed-size list length %d does not match Go array length %d: %w", n, v.Len(), ErrTypeMismatch)
 		}
-		for k := 0; k < n; k++ {
-			if err := setValue(v.Index(k), child, int(start)+k); err != nil {
-				return fmt.Errorf("arreflect: fixed-size list element %d: %w", k, err)
-			}
-		}
+		return fillFixedSizeList(v, child, int(start), n)
 	case reflect.Slice:
 		result := reflect.MakeSlice(v.Type(), n, n)
-		for k := 0; k < n; k++ {
-			if err := setValue(result.Index(k), child, int(start)+k); err != nil {
-				return fmt.Errorf("arreflect: fixed-size list element %d: %w", k, err)
-			}
+		if err := fillFixedSizeList(result, child, int(start), n); err != nil {
+			return err
 		}
 		v.Set(result)
 	default:

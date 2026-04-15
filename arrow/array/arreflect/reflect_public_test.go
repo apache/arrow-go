@@ -30,6 +30,15 @@ import (
 
 func testMem() memory.Allocator { return memory.NewGoAllocator() }
 
+func fieldValueByTag(v reflect.Value, tag string) reflect.Value {
+	for i := 0; i < v.NumField(); i++ {
+		if v.Type().Field(i).Tag.Get("arrow") == tag {
+			return v.Field(i)
+		}
+	}
+	return reflect.Value{}
+}
+
 func TestToGo(t *testing.T) {
 	mem := testMem()
 
@@ -469,16 +478,8 @@ func TestRecordAtAny(t *testing.T) {
 	require.NoError(t, err, "RecordAtAny(0)")
 	v := reflect.ValueOf(got)
 	require.Equal(t, reflect.Struct, v.Kind())
-	var nameField, scoreField reflect.Value
-	for i := 0; i < v.NumField(); i++ {
-		tag := v.Type().Field(i).Tag.Get("arrow")
-		switch tag {
-		case "name":
-			nameField = v.Field(i)
-		case "score":
-			scoreField = v.Field(i)
-		}
-	}
+	nameField := fieldValueByTag(v, "name")
+	scoreField := fieldValueByTag(v, "score")
 	require.True(t, nameField.IsValid(), "name field not found")
 	require.True(t, scoreField.IsValid(), "score field not found")
 	assert.Equal(t, "alice", nameField.String())
@@ -502,12 +503,7 @@ func TestRecordToAnySlice(t *testing.T) {
 	for i, row := range got {
 		v := reflect.ValueOf(row)
 		require.Equal(t, reflect.Struct, v.Kind(), "row %d", i)
-		var nameField reflect.Value
-		for fi := 0; fi < v.NumField(); fi++ {
-			if v.Type().Field(fi).Tag.Get("arrow") == "name" {
-				nameField = v.Field(fi)
-			}
-		}
+		nameField := fieldValueByTag(v, "name")
 		assert.Equal(t, rows[i].Name, nameField.String(), "row %d name", i)
 	}
 }
@@ -534,17 +530,8 @@ func TestAtAnyComposite(t *testing.T) {
 		v := reflect.ValueOf(got)
 		require.Equal(t, reflect.Struct, v.Kind())
 
-		vt := v.Type()
-		var idField, nameField reflect.Value
-		for i := 0; i < v.NumField(); i++ {
-			tag := vt.Field(i).Tag.Get("arrow")
-			switch tag {
-			case "id":
-				idField = v.Field(i)
-			case "name":
-				nameField = v.Field(i)
-			}
-		}
+		idField := fieldValueByTag(v, "id")
+		nameField := fieldValueByTag(v, "name")
 		require.True(t, idField.IsValid(), "id field not found")
 		require.True(t, nameField.IsValid(), "name field not found")
 		assert.Equal(t, int64(99), idField.Int())
@@ -640,17 +627,9 @@ func TestToAnySliceStructArray(t *testing.T) {
 		require.Equal(t, reflect.Struct, v.Kind(), "row %d", i)
 		require.Equal(t, 3, v.NumField(), "row %d", i)
 
-		var id, label, score reflect.Value
-		for fi := 0; fi < v.NumField(); fi++ {
-			switch v.Type().Field(fi).Tag.Get("arrow") {
-			case "id":
-				id = v.Field(fi)
-			case "label":
-				label = v.Field(fi)
-			case "score":
-				score = v.Field(fi)
-			}
-		}
+		id := fieldValueByTag(v, "id")
+		label := fieldValueByTag(v, "label")
+		score := fieldValueByTag(v, "score")
 		require.True(t, id.IsValid(), "row %d: id field not found", i)
 		require.True(t, label.IsValid(), "row %d: label field not found", i)
 		require.True(t, score.IsValid(), "row %d: score field not found", i)
