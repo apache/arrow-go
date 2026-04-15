@@ -239,15 +239,10 @@ func timeFromFieldValues(utcTimestamp arrow.Timestamp, offsetMinutes int16, unit
 }
 
 func fieldValuesFromTime(t time.Time, unit arrow.TimeUnit) (arrow.Timestamp, int16) {
-	// naive "bitwise" conversion to UTC, keeping the underlying date the same
-	utc := t.UTC()
-	naiveUtc := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
-	offsetMinutes := int16(naiveUtc.Sub(t).Minutes())
-
-	// SAFETY: unit MUST have been validated to a valid arrow.TimeUnit value before
-	// this function. Otherwise, ignoring this error is not safe.
-	timestamp, _ := arrow.TimestampFromTime(utc, unit)
-	return timestamp, offsetMinutes
+	_, offsetSeconds := t.Zone()
+	offsetMinutes := int16(offsetSeconds / 60)
+	ts, _ := arrow.TimestampFromTime(t.UTC(), unit)
+	return ts, offsetMinutes
 }
 
 // Get the raw arrow values at the given index
