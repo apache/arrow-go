@@ -331,6 +331,10 @@ func TestBuildStructArray(t *testing.T) {
 		assert.False(t, arr.IsNull(0))
 		assert.True(t, arr.IsNull(1))
 		assert.False(t, arr.IsNull(2))
+		sa := arr.(*array.Struct)
+		xArr := sa.Field(0).(*array.Int32)
+		assert.Equal(t, int32(99), xArr.Value(0))
+		assert.Equal(t, int32(99), xArr.Value(2))
 	})
 }
 
@@ -364,6 +368,20 @@ func TestBuildListArray(t *testing.T) {
 		require.NoError(t, err)
 		defer arr.Release()
 		assert.Equal(t, arrow.LIST, arr.DataType().ID())
+		assert.Equal(t, 3, arr.Len())
+		assert.False(t, arr.IsNull(0))
+		assert.True(t, arr.IsNull(1))
+		assert.False(t, arr.IsNull(2))
+	})
+
+	t.Run("multi_level_pointer_list", func(t *testing.T) {
+		a := []int32{1, 2}
+		pa := &a
+		var nilPa *[]int32
+		vals := []**[]int32{&pa, &nilPa, &pa}
+		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
 		assert.Equal(t, 3, arr.Len())
 		assert.False(t, arr.IsNull(0))
 		assert.True(t, arr.IsNull(1))
@@ -422,6 +440,20 @@ func TestBuildMapArray(t *testing.T) {
 		kvArr := arr.(*array.Map).ListValues().(*array.Struct)
 		assert.Equal(t, 3, kvArr.Len(), "expected 3 key-value pairs, got %d", kvArr.Len())
 	})
+
+	t.Run("multi_level_pointer_map", func(t *testing.T) {
+		m := map[string]int32{"x": 1}
+		pm := &m
+		var nilPm *map[string]int32
+		vals := []**map[string]int32{&pm, &nilPm, &pm}
+		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, 3, arr.Len())
+		assert.False(t, arr.IsNull(0))
+		assert.True(t, arr.IsNull(1))
+		assert.False(t, arr.IsNull(2))
+	})
 }
 
 func TestBuildFixedSizeListArray(t *testing.T) {
@@ -469,6 +501,20 @@ func TestBuildFixedSizeListArray(t *testing.T) {
 		defer arr.Release()
 		assert.True(t, arr.IsNull(0), "nil slice should be null")
 		assert.False(t, arr.IsNull(1), "non-nil should not be null")
+	})
+
+	t.Run("multi_level_pointer_fixed_size_list", func(t *testing.T) {
+		a := [3]int32{1, 2, 3}
+		pa := &a
+		var nilPa *[3]int32
+		vals := []**[3]int32{&pa, &nilPa, &pa}
+		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, 3, arr.Len())
+		assert.False(t, arr.IsNull(0))
+		assert.True(t, arr.IsNull(1))
+		assert.False(t, arr.IsNull(2))
 	})
 }
 
