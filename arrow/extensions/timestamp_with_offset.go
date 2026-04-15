@@ -280,7 +280,7 @@ func (a *TimestampWithOffsetArray) rawValueUnsafe(i int) (arrow.Timestamp, int16
 
 func (a *TimestampWithOffsetArray) Value(i int) time.Time {
 	if a.IsNull(i) {
-		return time.Unix(0, 0)
+		return time.Time{}
 	}
 	utcTimestamp, offsetMinutes, timeUnit := a.rawValueUnsafe(i)
 	return timeFromFieldValues(utcTimestamp, offsetMinutes, timeUnit)
@@ -288,11 +288,11 @@ func (a *TimestampWithOffsetArray) Value(i int) time.Time {
 
 // Iterates over the array returning the timestamp at each position.
 //
-// If the timestamp is null, the returned time will be the unix epoch.
+// The second parameter indicates whether the timestamp is valid or not.
 //
 // This will iterate using the fastest method given the underlying storage array
-func (a *TimestampWithOffsetArray) iterValues() iter.Seq[time.Time] {
-	return func(yield func(time.Time) bool) {
+func (a *TimestampWithOffsetArray) iterValues() iter.Seq2[time.Time, bool] {
+	return func(yield func(time.Time, bool) bool) {
 		structs := a.Storage().(*array.Struct)
 		offsets := structs.Field(1)
 		if reeOffsets, isRee := offsets.(*array.RunEndEncoded); isRee {
@@ -318,28 +318,30 @@ func (a *TimestampWithOffsetArray) iterValues() iter.Seq[time.Time] {
 					offsetPhysicalIdx += 1
 				}
 
-				ts := time.Unix(0, 0)
-				if a.IsValid(i) {
+				var ts time.Time
+				valid := a.IsValid(i)
+				if valid {
 					utcTimestamp := timestamps.Value(i)
 					offsetMinutes := offsetValues.Value(offsetPhysicalIdx)
 					v := timeFromFieldValues(utcTimestamp, offsetMinutes, timeUnit)
 					ts = v
 				}
 
-				if !yield(ts) {
+				if !yield(ts, valid) {
 					return
 				}
 			}
 		} else {
 			for i := 0; i < a.Len(); i++ {
-				ts := time.Unix(0, 0)
-				if a.IsValid(i) {
+				var ts time.Time
+				valid := a.IsValid(i)
+				if valid {
 					utcTimestamp, offsetMinutes, timeUnit := a.rawValueUnsafe(i)
 					v := timeFromFieldValues(utcTimestamp, offsetMinutes, timeUnit)
 					ts = v
 				}
 
-				if !yield(ts) {
+				if !yield(ts, valid) {
 					return
 				}
 			}
@@ -348,7 +350,13 @@ func (a *TimestampWithOffsetArray) iterValues() iter.Seq[time.Time] {
 }
 
 func (a *TimestampWithOffsetArray) Values() []time.Time {
-	return slices.Collect(a.iterValues())
+	return slices.Collect(func (yield func (time.Time) bool) {
+		for time := range a.iterValues() {
+			if !yield(time) {
+				return
+			}
+		}
+	})
 }
 
 func (a *TimestampWithOffsetArray) ValueStr(i int) string {
@@ -363,8 +371,8 @@ func (a *TimestampWithOffsetArray) ValueStr(i int) string {
 func (a *TimestampWithOffsetArray) MarshalJSON() ([]byte, error) {
 	values := make([]interface{}, a.Len())
 	i := 0
-	for ts := range a.iterValues() {
-		if ts.Unix() == 0 {
+	for ts, valid := range a.iterValues() {
+		if !valid {
 			values[i] = nil
 		} else {
 			values[i] = &ts
