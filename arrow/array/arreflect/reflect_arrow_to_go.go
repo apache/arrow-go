@@ -25,6 +25,15 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 )
 
+func assertArray[T any](arr arrow.Array) (*T, error) {
+	a, ok := any(arr).(*T)
+	if !ok {
+		var zero T
+		return nil, fmt.Errorf("expected *%T, got %T: %w", zero, arr, ErrTypeMismatch)
+	}
+	return a, nil
+}
+
 func isIntKind(k reflect.Kind) bool {
 	return k == reflect.Int || k == reflect.Int8 || k == reflect.Int16 ||
 		k == reflect.Int32 || k == reflect.Int64
@@ -49,9 +58,9 @@ func setValue(v reflect.Value, arr arrow.Array, i int) error {
 
 	switch arr.DataType().ID() {
 	case arrow.BOOL:
-		a, ok := arr.(*array.Boolean)
-		if !ok {
-			return fmt.Errorf("expected *Boolean, got %T: %w", arr, ErrTypeMismatch)
+		a, err := assertArray[array.Boolean](arr)
+		if err != nil {
+			return err
 		}
 		if v.Kind() != reflect.Bool {
 			return fmt.Errorf("cannot set bool into %s: %w", v.Type(), ErrTypeMismatch)
@@ -93,9 +102,9 @@ func setValue(v reflect.Value, arr arrow.Array, i int) error {
 		return setDecimalValue(v, arr, i)
 
 	case arrow.STRUCT:
-		a, ok := arr.(*array.Struct)
-		if !ok {
-			return fmt.Errorf("expected *Struct, got %T: %w", arr, ErrTypeMismatch)
+		a, err := assertArray[array.Struct](arr)
+		if err != nil {
+			return err
 		}
 		return setStructValue(v, a, i)
 
@@ -107,30 +116,30 @@ func setValue(v reflect.Value, arr arrow.Array, i int) error {
 		return setListValue(v, a, i)
 
 	case arrow.MAP:
-		a, ok := arr.(*array.Map)
-		if !ok {
-			return fmt.Errorf("expected *Map, got %T: %w", arr, ErrTypeMismatch)
+		a, err := assertArray[array.Map](arr)
+		if err != nil {
+			return err
 		}
 		return setMapValue(v, a, i)
 
 	case arrow.FIXED_SIZE_LIST:
-		a, ok := arr.(*array.FixedSizeList)
-		if !ok {
-			return fmt.Errorf("expected *FixedSizeList, got %T: %w", arr, ErrTypeMismatch)
+		a, err := assertArray[array.FixedSizeList](arr)
+		if err != nil {
+			return err
 		}
 		return setFixedSizeListValue(v, a, i)
 
 	case arrow.DICTIONARY:
-		a, ok := arr.(*array.Dictionary)
-		if !ok {
-			return fmt.Errorf("expected *Dictionary, got %T: %w", arr, ErrTypeMismatch)
+		a, err := assertArray[array.Dictionary](arr)
+		if err != nil {
+			return err
 		}
 		return setDictionaryValue(v, a, i)
 
 	case arrow.RUN_END_ENCODED:
-		a, ok := arr.(*array.RunEndEncoded)
-		if !ok {
-			return fmt.Errorf("expected *RunEndEncoded, got %T: %w", arr, ErrTypeMismatch)
+		a, err := assertArray[array.RunEndEncoded](arr)
+		if err != nil {
+			return err
 		}
 		return setRunEndEncodedValue(v, a, i)
 
@@ -209,47 +218,47 @@ func setTime(v reflect.Value, t time.Time) error {
 func setTemporalValue(v reflect.Value, arr arrow.Array, i int) error {
 	switch arr.DataType().ID() {
 	case arrow.TIMESTAMP:
-		a, ok := arr.(*array.Timestamp)
-		if !ok {
-			return fmt.Errorf("expected *Timestamp, got %T: %w", arr, ErrTypeMismatch)
+		a, err := assertArray[array.Timestamp](arr)
+		if err != nil {
+			return err
 		}
 		unit := arr.DataType().(*arrow.TimestampType).Unit
 		return setTime(v, a.Value(i).ToTime(unit))
 
 	case arrow.DATE32:
-		a, ok := arr.(*array.Date32)
-		if !ok {
-			return fmt.Errorf("expected *Date32, got %T: %w", arr, ErrTypeMismatch)
+		a, err := assertArray[array.Date32](arr)
+		if err != nil {
+			return err
 		}
 		return setTime(v, a.Value(i).ToTime())
 
 	case arrow.DATE64:
-		a, ok := arr.(*array.Date64)
-		if !ok {
-			return fmt.Errorf("expected *Date64, got %T: %w", arr, ErrTypeMismatch)
+		a, err := assertArray[array.Date64](arr)
+		if err != nil {
+			return err
 		}
 		return setTime(v, a.Value(i).ToTime())
 
 	case arrow.TIME32:
-		a, ok := arr.(*array.Time32)
-		if !ok {
-			return fmt.Errorf("expected *Time32, got %T: %w", arr, ErrTypeMismatch)
+		a, err := assertArray[array.Time32](arr)
+		if err != nil {
+			return err
 		}
 		unit := arr.DataType().(*arrow.Time32Type).Unit
 		return setTime(v, a.Value(i).ToTime(unit))
 
 	case arrow.TIME64:
-		a, ok := arr.(*array.Time64)
-		if !ok {
-			return fmt.Errorf("expected *Time64, got %T: %w", arr, ErrTypeMismatch)
+		a, err := assertArray[array.Time64](arr)
+		if err != nil {
+			return err
 		}
 		unit := arr.DataType().(*arrow.Time64Type).Unit
 		return setTime(v, a.Value(i).ToTime(unit))
 
 	case arrow.DURATION:
-		a, ok := arr.(*array.Duration)
-		if !ok {
-			return fmt.Errorf("expected *Duration, got %T: %w", arr, ErrTypeMismatch)
+		a, err := assertArray[array.Duration](arr)
+		if err != nil {
+			return err
 		}
 		if v.Type() != typeOfDuration {
 			return fmt.Errorf("cannot set time.Duration into %s: %w", v.Type(), ErrTypeMismatch)
@@ -267,9 +276,9 @@ func setTemporalValue(v reflect.Value, arr arrow.Array, i int) error {
 func setDecimalValue(v reflect.Value, arr arrow.Array, i int) error {
 	switch arr.DataType().ID() {
 	case arrow.DECIMAL128:
-		a, ok := arr.(*array.Decimal128)
-		if !ok {
-			return fmt.Errorf("expected *Decimal128, got %T: %w", arr, ErrTypeMismatch)
+		a, err := assertArray[array.Decimal128](arr)
+		if err != nil {
+			return err
 		}
 		if v.Type() != typeOfDec128 {
 			return fmt.Errorf("cannot set decimal128.Num into %s: %w", v.Type(), ErrTypeMismatch)
@@ -278,9 +287,9 @@ func setDecimalValue(v reflect.Value, arr arrow.Array, i int) error {
 		v.Set(reflect.ValueOf(num))
 
 	case arrow.DECIMAL256:
-		a, ok := arr.(*array.Decimal256)
-		if !ok {
-			return fmt.Errorf("expected *Decimal256, got %T: %w", arr, ErrTypeMismatch)
+		a, err := assertArray[array.Decimal256](arr)
+		if err != nil {
+			return err
 		}
 		if v.Type() != typeOfDec256 {
 			return fmt.Errorf("cannot set decimal256.Num into %s: %w", v.Type(), ErrTypeMismatch)
@@ -289,9 +298,9 @@ func setDecimalValue(v reflect.Value, arr arrow.Array, i int) error {
 		v.Set(reflect.ValueOf(num))
 
 	case arrow.DECIMAL32:
-		a, ok := arr.(*array.Decimal32)
-		if !ok {
-			return fmt.Errorf("expected *Decimal32, got %T: %w", arr, ErrTypeMismatch)
+		a, err := assertArray[array.Decimal32](arr)
+		if err != nil {
+			return err
 		}
 		if v.Type() != typeOfDec32 {
 			return fmt.Errorf("cannot set decimal.Decimal32 into %s: %w", v.Type(), ErrTypeMismatch)
@@ -299,9 +308,9 @@ func setDecimalValue(v reflect.Value, arr arrow.Array, i int) error {
 		v.Set(reflect.ValueOf(a.Value(i)))
 
 	case arrow.DECIMAL64:
-		a, ok := arr.(*array.Decimal64)
-		if !ok {
-			return fmt.Errorf("expected *Decimal64, got %T: %w", arr, ErrTypeMismatch)
+		a, err := assertArray[array.Decimal64](arr)
+		if err != nil {
+			return err
 		}
 		if v.Type() != typeOfDec64 {
 			return fmt.Errorf("cannot set decimal.Decimal64 into %s: %w", v.Type(), ErrTypeMismatch)

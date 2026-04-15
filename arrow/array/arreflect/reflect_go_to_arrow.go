@@ -96,55 +96,11 @@ func buildPrimitiveArray(vals reflect.Value, mem memory.Allocator) (arrow.Array,
 	b.Reserve(vals.Len())
 
 	if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
-		return appendPrimitiveValue(b, v, dt)
+		return appendValue(b, v, tagOpts{})
 	}); err != nil {
 		return nil, err
 	}
 	return b.NewArray(), nil
-}
-
-func appendPrimitiveValue(b array.Builder, v reflect.Value, dt arrow.DataType) error {
-	switch dt.ID() {
-	case arrow.INT8:
-		b.(*array.Int8Builder).Append(int8(v.Int()))
-	case arrow.INT16:
-		b.(*array.Int16Builder).Append(int16(v.Int()))
-	case arrow.INT32:
-		b.(*array.Int32Builder).Append(int32(v.Int()))
-	case arrow.INT64:
-		b.(*array.Int64Builder).Append(int64(v.Int()))
-	case arrow.UINT8:
-		b.(*array.Uint8Builder).Append(uint8(v.Uint()))
-	case arrow.UINT16:
-		b.(*array.Uint16Builder).Append(uint16(v.Uint()))
-	case arrow.UINT32:
-		b.(*array.Uint32Builder).Append(uint32(v.Uint()))
-	case arrow.UINT64:
-		b.(*array.Uint64Builder).Append(uint64(v.Uint()))
-	case arrow.FLOAT32:
-		b.(*array.Float32Builder).Append(float32(v.Float()))
-	case arrow.FLOAT64:
-		b.(*array.Float64Builder).Append(float64(v.Float()))
-	case arrow.BOOL:
-		b.(*array.BooleanBuilder).Append(v.Bool())
-	case arrow.STRING:
-		b.(*array.StringBuilder).Append(v.String())
-	case arrow.BINARY:
-		if v.IsNil() {
-			b.(*array.BinaryBuilder).AppendNull()
-		} else {
-			b.(*array.BinaryBuilder).Append(v.Bytes())
-		}
-	case arrow.DURATION:
-		d, err := asDuration(v)
-		if err != nil {
-			return err
-		}
-		b.(*array.DurationBuilder).Append(arrow.Duration(d.Nanoseconds()))
-	default:
-		return fmt.Errorf("unsupported Arrow type %v: %w", dt, ErrUnsupportedType)
-	}
-	return nil
 }
 
 func timeOfDayNanos(t time.Time) int64 {
@@ -253,74 +209,31 @@ func decimalPrecisionScale(opts tagOpts, defaultPrec int32) (precision, scale in
 func buildDecimalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
 	elemType, isPtr := derefSliceElem(vals)
 
+	var b array.Builder
 	switch elemType {
 	case typeOfDec128:
-		precision, scale := decimalPrecisionScale(opts, dec128DefaultPrecision)
-		dt := &arrow.Decimal128Type{Precision: precision, Scale: scale}
-		b := array.NewDecimal128Builder(mem, dt)
-		defer b.Release()
-		b.Reserve(vals.Len())
-		if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
-			n, ok := reflect.TypeAssert[decimal128.Num](v)
-			if !ok {
-				return fmt.Errorf("expected decimal128.Num, got %s: %w", v.Type(), ErrTypeMismatch)
-			}
-			b.Append(n)
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-		return b.NewArray(), nil
-
+		p, s := decimalPrecisionScale(opts, dec128DefaultPrecision)
+		b = array.NewDecimal128Builder(mem, &arrow.Decimal128Type{Precision: p, Scale: s})
 	case typeOfDec256:
-		precision, scale := decimalPrecisionScale(opts, dec256DefaultPrecision)
-		dt := &arrow.Decimal256Type{Precision: precision, Scale: scale}
-		b := array.NewDecimal256Builder(mem, dt)
-		defer b.Release()
-		b.Reserve(vals.Len())
-		if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
-			n, ok := reflect.TypeAssert[decimal256.Num](v)
-			if !ok {
-				return fmt.Errorf("expected decimal256.Num, got %s: %w", v.Type(), ErrTypeMismatch)
-			}
-			b.Append(n)
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-		return b.NewArray(), nil
-
+		p, s := decimalPrecisionScale(opts, dec256DefaultPrecision)
+		b = array.NewDecimal256Builder(mem, &arrow.Decimal256Type{Precision: p, Scale: s})
 	case typeOfDec32:
-		precision, scale := decimalPrecisionScale(opts, dec32DefaultPrecision)
-		dt := &arrow.Decimal32Type{Precision: precision, Scale: scale}
-		b := array.NewDecimal32Builder(mem, dt)
-		defer b.Release()
-		b.Reserve(vals.Len())
-		if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
-			b.Append(decimal.Decimal32(v.Int()))
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-		return b.NewArray(), nil
-
+		p, s := decimalPrecisionScale(opts, dec32DefaultPrecision)
+		b = array.NewDecimal32Builder(mem, &arrow.Decimal32Type{Precision: p, Scale: s})
 	case typeOfDec64:
-		precision, scale := decimalPrecisionScale(opts, dec64DefaultPrecision)
-		dt := &arrow.Decimal64Type{Precision: precision, Scale: scale}
-		b := array.NewDecimal64Builder(mem, dt)
-		defer b.Release()
-		b.Reserve(vals.Len())
-		if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
-			b.Append(decimal.Decimal64(v.Int()))
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-		return b.NewArray(), nil
-
+		p, s := decimalPrecisionScale(opts, dec64DefaultPrecision)
+		b = array.NewDecimal64Builder(mem, &arrow.Decimal64Type{Precision: p, Scale: s})
 	default:
 		return nil, fmt.Errorf("unsupported decimal type %v: %w", elemType, ErrUnsupportedType)
 	}
+	defer b.Release()
+	b.Reserve(vals.Len())
+	if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
+		return appendDecimalValue(b, v)
+	}); err != nil {
+		return nil, err
+	}
+	return b.NewArray(), nil
 }
 
 func appendStructFields(sb *array.StructBuilder, v reflect.Value, fields []fieldMeta) error {
@@ -568,35 +481,23 @@ type listBuilderLike interface {
 }
 
 func appendListElement(b array.Builder, v reflect.Value) error {
-	isNil := v.Kind() == reflect.Slice && v.IsNil()
+	if v.Kind() == reflect.Slice && v.IsNil() {
+		b.AppendNull()
+		return nil
+	}
+
 	var vb array.Builder
 	switch lb := b.(type) {
 	case *array.ListBuilder:
-		if isNil {
-			lb.AppendNull()
-			return nil
-		}
 		lb.Append(true)
 		vb = lb.ValueBuilder()
 	case *array.LargeListBuilder:
-		if isNil {
-			lb.AppendNull()
-			return nil
-		}
 		lb.Append(true)
 		vb = lb.ValueBuilder()
 	case *array.ListViewBuilder:
-		if isNil {
-			lb.AppendNull()
-			return nil
-		}
 		lb.AppendWithSize(true, v.Len())
 		vb = lb.ValueBuilder()
 	case *array.LargeListViewBuilder:
-		if isNil {
-			lb.AppendNull()
-			return nil
-		}
 		lb.AppendWithSize(true, v.Len())
 		vb = lb.ValueBuilder()
 	default:
