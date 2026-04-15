@@ -454,13 +454,13 @@ func FromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.Arr
 	return buildArray(sv, tOpts, mem)
 }
 
-func RecordToSlice[T any](rec arrow.Record) ([]T, error) {
+func RecordToSlice[T any](rec arrow.RecordBatch) ([]T, error) {
 	sa := array.RecordToStructArray(rec)
 	defer sa.Release()
 	return ToSlice[T](sa)
 }
 
-func RecordFromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.Record, error) {
+func RecordFromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.RecordBatch, error) {
 	arr, err := FromSlice[T](vals, mem, opts...)
 	if err != nil {
 		return nil, err
@@ -475,7 +475,7 @@ func RecordFromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arr
 
 // RecordAt converts the row at index i of an Arrow Record to a Go value of type T.
 // T must be a struct type whose fields correspond to the record's columns.
-func RecordAt[T any](rec arrow.Record, i int) (T, error) {
+func RecordAt[T any](rec arrow.RecordBatch, i int) (T, error) {
 	sa := array.RecordToStructArray(rec)
 	defer sa.Release()
 	return At[T](sa, i)
@@ -484,7 +484,7 @@ func RecordAt[T any](rec arrow.Record, i int) (T, error) {
 // RecordAtAny converts the row at index i of an Arrow Record to a Go value,
 // inferring the Go type from the record's schema at runtime via [InferGoType].
 // Equivalent to AtAny on the struct array underlying the record.
-func RecordAtAny(rec arrow.Record, i int) (any, error) {
+func RecordAtAny(rec arrow.RecordBatch, i int) (any, error) {
 	sa := array.RecordToStructArray(rec)
 	defer sa.Release()
 	return AtAny(sa, i)
@@ -493,7 +493,7 @@ func RecordAtAny(rec arrow.Record, i int) (any, error) {
 // RecordToAnySlice converts all rows of an Arrow Record to Go values,
 // inferring the Go type at runtime via [InferGoType].
 // Equivalent to ToAnySlice on the struct array underlying the record.
-func RecordToAnySlice(rec arrow.Record) ([]any, error) {
+func RecordToAnySlice(rec arrow.RecordBatch) ([]any, error) {
 	sa := array.RecordToStructArray(rec)
 	defer sa.Release()
 	return ToAnySlice(sa)

@@ -264,7 +264,7 @@ func TestRecordToSlice(t *testing.T) {
 		Score float64
 	}
 
-	buildRecord := func(rows []Row) arrow.Record {
+	buildRecord := func(rows []Row) arrow.RecordBatch {
 		schema := arrow.NewSchema([]arrow.Field{
 			{Name: "Name", Type: arrow.BinaryTypes.String},
 			{Name: "Score", Type: arrow.PrimitiveTypes.Float64},
@@ -281,7 +281,7 @@ func TestRecordToSlice(t *testing.T) {
 		defer nameArr.Release()
 		scoreArr := scoreB.NewFloat64Array()
 		defer scoreArr.Release()
-		return array.NewRecord(schema, []arrow.Array{nameArr, scoreArr}, int64(len(rows)))
+		return array.NewRecordBatch(schema, []arrow.Array{nameArr, scoreArr}, int64(len(rows)))
 	}
 
 	t.Run("basic 3-row record", func(t *testing.T) {

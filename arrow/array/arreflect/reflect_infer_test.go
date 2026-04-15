@@ -118,7 +118,7 @@ func TestInferArrowType(t *testing.T) {
 		lt := dt.(*arrow.ListType)
 		assert.Equal(t, arrow.MAP, lt.Elem().ID())
 		mt := lt.Elem().(*arrow.MapType)
-		assert.Equal(t, arrow.STRUCT, mt.ValueType().ID())
+		assert.Equal(t, arrow.STRUCT, mt.ItemField().Type.ID())
 	})
 
 	t.Run("*[]string pointer to slice is LIST", func(t *testing.T) {

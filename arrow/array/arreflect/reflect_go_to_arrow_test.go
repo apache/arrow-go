@@ -32,8 +32,7 @@ import (
 )
 
 func TestBuildPrimitiveArray(t *testing.T) {
-	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer mem.AssertSize(t, 0)
+	mem := checkedMem(t)
 
 	t.Run("int32", func(t *testing.T) {
 		vals := []int32{1, 2, 3, 4, 5}
@@ -56,10 +55,7 @@ func TestBuildPrimitiveArray(t *testing.T) {
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
 		require.NoError(t, err)
 		defer arr.Release()
-		assert.Equal(t, 3, arr.Len())
-		assert.False(t, arr.IsNull(0))
-		assert.True(t, arr.IsNull(1))
-		assert.False(t, arr.IsNull(2))
+		assertMultiLevelPtrNullPattern(t, arr)
 		assert.Equal(t, int32(42), arr.(*array.Int32).Value(0))
 	})
 
@@ -122,8 +118,7 @@ func TestBuildPrimitiveArray(t *testing.T) {
 }
 
 func TestBuildTemporalArray(t *testing.T) {
-	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer mem.AssertSize(t, 0)
+	mem := checkedMem(t)
 
 	t.Run("time_time", func(t *testing.T) {
 		now := time.Now().UTC()
@@ -152,8 +147,7 @@ func TestBuildTemporalArray(t *testing.T) {
 }
 
 func TestBuildDecimalArray(t *testing.T) {
-	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer mem.AssertSize(t, 0)
+	mem := checkedMem(t)
 
 	t.Run("decimal128", func(t *testing.T) {
 		vals := []decimal128.Num{
@@ -249,8 +243,7 @@ type buildNullableStruct struct {
 }
 
 func TestBuildStructArray(t *testing.T) {
-	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer mem.AssertSize(t, 0)
+	mem := checkedMem(t)
 
 	t.Run("simple", func(t *testing.T) {
 		vals := []buildSimpleStruct{
@@ -327,10 +320,7 @@ func TestBuildStructArray(t *testing.T) {
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
 		require.NoError(t, err)
 		defer arr.Release()
-		assert.Equal(t, 3, arr.Len())
-		assert.False(t, arr.IsNull(0))
-		assert.True(t, arr.IsNull(1))
-		assert.False(t, arr.IsNull(2))
+		assertMultiLevelPtrNullPattern(t, arr)
 		sa := arr.(*array.Struct)
 		xArr := sa.Field(0).(*array.Int32)
 		assert.Equal(t, int32(99), xArr.Value(0))
@@ -339,8 +329,7 @@ func TestBuildStructArray(t *testing.T) {
 }
 
 func TestBuildListArray(t *testing.T) {
-	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer mem.AssertSize(t, 0)
+	mem := checkedMem(t)
 
 	t.Run("int32_lists", func(t *testing.T) {
 		vals := [][]int32{{1, 2, 3}, {4, 5}, {6}}
@@ -368,10 +357,7 @@ func TestBuildListArray(t *testing.T) {
 		require.NoError(t, err)
 		defer arr.Release()
 		assert.Equal(t, arrow.LIST, arr.DataType().ID())
-		assert.Equal(t, 3, arr.Len())
-		assert.False(t, arr.IsNull(0))
-		assert.True(t, arr.IsNull(1))
-		assert.False(t, arr.IsNull(2))
+		assertMultiLevelPtrNullPattern(t, arr)
 	})
 
 	t.Run("multi_level_pointer_list", func(t *testing.T) {
@@ -382,10 +368,7 @@ func TestBuildListArray(t *testing.T) {
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
 		require.NoError(t, err)
 		defer arr.Release()
-		assert.Equal(t, 3, arr.Len())
-		assert.False(t, arr.IsNull(0))
-		assert.True(t, arr.IsNull(1))
-		assert.False(t, arr.IsNull(2))
+		assertMultiLevelPtrNullPattern(t, arr)
 	})
 
 	t.Run("string_lists", func(t *testing.T) {
@@ -409,8 +392,7 @@ func TestBuildListArray(t *testing.T) {
 }
 
 func TestBuildMapArray(t *testing.T) {
-	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer mem.AssertSize(t, 0)
+	mem := checkedMem(t)
 
 	t.Run("string_int32", func(t *testing.T) {
 		vals := []map[string]int32{
@@ -449,16 +431,12 @@ func TestBuildMapArray(t *testing.T) {
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
 		require.NoError(t, err)
 		defer arr.Release()
-		assert.Equal(t, 3, arr.Len())
-		assert.False(t, arr.IsNull(0))
-		assert.True(t, arr.IsNull(1))
-		assert.False(t, arr.IsNull(2))
+		assertMultiLevelPtrNullPattern(t, arr)
 	})
 }
 
 func TestBuildFixedSizeListArray(t *testing.T) {
-	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer mem.AssertSize(t, 0)
+	mem := checkedMem(t)
 
 	t.Run("int32_n3", func(t *testing.T) {
 		vals := [][3]int32{{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}
@@ -511,16 +489,12 @@ func TestBuildFixedSizeListArray(t *testing.T) {
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
 		require.NoError(t, err)
 		defer arr.Release()
-		assert.Equal(t, 3, arr.Len())
-		assert.False(t, arr.IsNull(0))
-		assert.True(t, arr.IsNull(1))
-		assert.False(t, arr.IsNull(2))
+		assertMultiLevelPtrNullPattern(t, arr)
 	})
 }
 
 func TestBuildDictionaryArray(t *testing.T) {
-	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer mem.AssertSize(t, 0)
+	mem := checkedMem(t)
 
 	t.Run("string_dict", func(t *testing.T) {
 		vals := []string{"apple", "banana", "apple", "cherry", "banana", "apple"}
@@ -583,17 +557,13 @@ func TestBuildDictionaryArray(t *testing.T) {
 		defer arr.Release()
 		typed := arr.(*array.Dictionary)
 		assert.Equal(t, arrow.DICTIONARY, arr.DataType().ID())
-		assert.Equal(t, 3, arr.Len())
-		assert.False(t, arr.IsNull(0))
-		assert.True(t, arr.IsNull(1))
-		assert.False(t, arr.IsNull(2))
+		assertMultiLevelPtrNullPattern(t, arr)
 		assert.Equal(t, 1, typed.Dictionary().Len(), "expected 1 unique value")
 	})
 }
 
 func TestBuildRunEndEncodedArray(t *testing.T) {
-	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer mem.AssertSize(t, 0)
+	mem := checkedMem(t)
 
 	t.Run("int32_runs", func(t *testing.T) {
 		vals := []int32{1, 1, 1, 2, 2, 3}
@@ -674,8 +644,7 @@ func TestBuildRunEndEncodedArray(t *testing.T) {
 }
 
 func TestBuildListViewArray(t *testing.T) {
-	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer mem.AssertSize(t, 0)
+	mem := checkedMem(t)
 
 	t.Run("int32_listview", func(t *testing.T) {
 		vals := [][]int32{{1, 2, 3}, {4, 5}, {6}}
@@ -720,16 +689,12 @@ func TestBuildListViewArray(t *testing.T) {
 		require.NoError(t, err)
 		defer arr.Release()
 		assert.Equal(t, arrow.LIST_VIEW, arr.DataType().ID())
-		assert.Equal(t, 3, arr.Len())
-		assert.False(t, arr.IsNull(0))
-		assert.True(t, arr.IsNull(1))
-		assert.False(t, arr.IsNull(2))
+		assertMultiLevelPtrNullPattern(t, arr)
 	})
 }
 
 func TestBuildTemporalTaggedArray(t *testing.T) {
-	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer mem.AssertSize(t, 0)
+	mem := checkedMem(t)
 
 	ref := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
 

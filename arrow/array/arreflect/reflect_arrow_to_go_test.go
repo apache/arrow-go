@@ -333,30 +333,9 @@ func TestSetStructValue(t *testing.T) {
 	mem := memory.NewGoAllocator()
 
 	t.Run("basic struct", func(t *testing.T) {
-		nameArr := func() *array.String {
-			b := array.NewStringBuilder(mem)
-			defer b.Release()
-			b.Append("Alice")
-			b.Append("Bob")
-			return b.NewStringArray()
-		}()
-		defer nameArr.Release()
-
-		ageArr := func() *array.Int32 {
-			b := array.NewInt32Builder(mem)
-			defer b.Release()
-			b.Append(30)
-			b.Append(25)
-			return b.NewInt32Array()
-		}()
-		defer ageArr.Release()
-
-		sa, err := array.NewStructArray(
-			[]arrow.Array{nameArr, ageArr},
-			[]string{"Name", "Age"},
-		)
-		require.NoError(t, err)
-		defer sa.Release()
+		nameArr := makeStringArray(t, mem, "Alice", "Bob")
+		ageArr := makeInt32Array(t, mem, 30, 25)
+		sa := makeStructArray(t, []arrow.Array{nameArr, ageArr}, []string{"Name", "Age"})
 
 		type Person struct {
 			Name string
@@ -374,20 +353,8 @@ func TestSetStructValue(t *testing.T) {
 	})
 
 	t.Run("arrow tag mapping", func(t *testing.T) {
-		nameArr := func() *array.String {
-			b := array.NewStringBuilder(mem)
-			defer b.Release()
-			b.Append("Charlie")
-			return b.NewStringArray()
-		}()
-		defer nameArr.Release()
-
-		sa, err := array.NewStructArray(
-			[]arrow.Array{nameArr},
-			[]string{"full_name"},
-		)
-		require.NoError(t, err)
-		defer sa.Release()
+		nameArr := makeStringArray(t, mem, "Charlie")
+		sa := makeStructArray(t, []arrow.Array{nameArr}, []string{"full_name"})
 
 		type TaggedPerson struct {
 			FullName string `arrow:"full_name"`
@@ -399,20 +366,8 @@ func TestSetStructValue(t *testing.T) {
 	})
 
 	t.Run("missing arrow field leaves go field zero", func(t *testing.T) {
-		nameArr := func() *array.String {
-			b := array.NewStringBuilder(mem)
-			defer b.Release()
-			b.Append("Dave")
-			return b.NewStringArray()
-		}()
-		defer nameArr.Release()
-
-		sa, err := array.NewStructArray(
-			[]arrow.Array{nameArr},
-			[]string{"Name"},
-		)
-		require.NoError(t, err)
-		defer sa.Release()
+		nameArr := makeStringArray(t, mem, "Dave")
+		sa := makeStructArray(t, []arrow.Array{nameArr}, []string{"Name"})
 
 		type PersonWithExtra struct {
 			Name  string
@@ -430,11 +385,10 @@ func TestSetListValue(t *testing.T) {
 	mem := memory.NewGoAllocator()
 
 	t.Run("list of int32", func(t *testing.T) {
-		vb := array.NewInt32Builder(mem)
 		lb := array.NewListBuilder(mem, arrow.PrimitiveTypes.Int32)
 		defer lb.Release()
 
-		vb = lb.ValueBuilder().(*array.Int32Builder)
+		vb := lb.ValueBuilder().(*array.Int32Builder)
 		lb.Append(true)
 		vb.AppendValues([]int32{1, 2, 3}, nil)
 		lb.Append(true)

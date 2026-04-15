@@ -95,25 +95,11 @@ func buildPrimitiveArray(vals reflect.Value, mem memory.Allocator) (arrow.Array,
 	defer b.Release()
 	b.Reserve(vals.Len())
 
-	for i := 0; i < vals.Len(); i++ {
-		v := vals.Index(i)
-		if isPtr {
-			for v.Kind() == reflect.Ptr {
-				if v.IsNil() {
-					b.AppendNull()
-					break
-				}
-				v = v.Elem()
-			}
-			if v.Kind() == reflect.Ptr {
-				continue
-			}
-		}
-		if err := appendPrimitiveValue(b, v, dt); err != nil {
-			return nil, err
-		}
+	if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
+		return appendPrimitiveValue(b, v, dt)
+	}); err != nil {
+		return nil, err
 	}
-
 	return b.NewArray(), nil
 }
 
@@ -240,95 +226,35 @@ func inferListElemDT(vals reflect.Value) (elemDT arrow.DataType, err error) {
 	return
 }
 
+func temporalBuilder(opts tagOpts, mem memory.Allocator) array.Builder {
+	switch opts.Temporal {
+	case "date32":
+		return array.NewDate32Builder(mem)
+	case "date64":
+		return array.NewDate64Builder(mem)
+	case "time32":
+		return array.NewTime32Builder(mem, &arrow.Time32Type{Unit: arrow.Millisecond})
+	case "time64":
+		return array.NewTime64Builder(mem, &arrow.Time64Type{Unit: arrow.Nanosecond})
+	default:
+		return array.NewTimestampBuilder(mem, &arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: "UTC"})
+	}
+}
+
 func buildTemporalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
 	elemType, isPtr := derefSliceElem(vals)
-
-	switch elemType {
-	case typeOfTime:
-		switch opts.Temporal {
-		case "date32":
-			b := array.NewDate32Builder(mem)
-			defer b.Release()
-			b.Reserve(vals.Len())
-			if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
-				t, err := asTime(v)
-				if err != nil {
-					return err
-				}
-				b.Append(arrow.Date32FromTime(t))
-				return nil
-			}); err != nil {
-				return nil, err
-			}
-			return b.NewArray(), nil
-		case "date64":
-			b := array.NewDate64Builder(mem)
-			defer b.Release()
-			b.Reserve(vals.Len())
-			if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
-				t, err := asTime(v)
-				if err != nil {
-					return err
-				}
-				b.Append(arrow.Date64FromTime(t))
-				return nil
-			}); err != nil {
-				return nil, err
-			}
-			return b.NewArray(), nil
-		case "time32":
-			dt := &arrow.Time32Type{Unit: arrow.Millisecond}
-			b := array.NewTime32Builder(mem, dt)
-			defer b.Release()
-			b.Reserve(vals.Len())
-			if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
-				t, err := asTime(v)
-				if err != nil {
-					return err
-				}
-				b.Append(arrow.Time32(timeOfDayNanos(t) / int64(dt.Unit.Multiplier())))
-				return nil
-			}); err != nil {
-				return nil, err
-			}
-			return b.NewArray(), nil
-		case "time64":
-			dt := &arrow.Time64Type{Unit: arrow.Nanosecond}
-			b := array.NewTime64Builder(mem, dt)
-			defer b.Release()
-			b.Reserve(vals.Len())
-			if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
-				t, err := asTime(v)
-				if err != nil {
-					return err
-				}
-				b.Append(arrow.Time64(timeOfDayNanos(t) / int64(dt.Unit.Multiplier())))
-				return nil
-			}); err != nil {
-				return nil, err
-			}
-			return b.NewArray(), nil
-		default:
-			dt := &arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: "UTC"}
-			tb := array.NewTimestampBuilder(mem, dt)
-			defer tb.Release()
-			tb.Reserve(vals.Len())
-			if err := iterSlice(vals, isPtr, tb.AppendNull, func(v reflect.Value) error {
-				t, err := asTime(v)
-				if err != nil {
-					return err
-				}
-				tb.Append(arrow.Timestamp(t.UnixNano()))
-				return nil
-			}); err != nil {
-				return nil, err
-			}
-			return tb.NewArray(), nil
-		}
-
-	default:
+	if elemType != typeOfTime {
 		return nil, fmt.Errorf("unsupported temporal type %v: %w", elemType, ErrUnsupportedType)
 	}
+	b := temporalBuilder(opts, mem)
+	defer b.Release()
+	b.Reserve(vals.Len())
+	if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
+		return appendTemporalValue(b, v)
+	}); err != nil {
+		return nil, err
+	}
+	return b.NewArray(), nil
 }
 
 func decimalPrecisionScale(opts tagOpts, defaultPrec int32) (precision, scale int32) {
@@ -428,28 +354,18 @@ func buildStructArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, er
 	defer sb.Release()
 	sb.Reserve(vals.Len())
 
-	for i := 0; i < vals.Len(); i++ {
-		v := vals.Index(i)
-		if isPtr {
-			for v.Kind() == reflect.Ptr {
-				if v.IsNil() {
-					sb.AppendNull()
-					break
-				}
-				v = v.Elem()
-			}
-			if v.Kind() == reflect.Ptr {
-				continue
-			}
-		}
+	if err := iterSlice(vals, isPtr, sb.AppendNull, func(v reflect.Value) error {
 		sb.Append(true)
 		for fi, fm := range fields {
 			fv := v.FieldByIndex(fm.Index)
 			fb := sb.FieldBuilder(fi)
 			if err := appendValue(fb, fv, fm.Opts); err != nil {
-				return nil, fmt.Errorf("struct field %q: %w", fm.Name, err)
+				return fmt.Errorf("struct field %q: %w", fm.Name, err)
 			}
 		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	return sb.NewArray(), nil
@@ -672,31 +588,40 @@ type listBuilderLike interface {
 }
 
 func appendListElement(b array.Builder, v reflect.Value) error {
-	type listAppender interface {
-		AppendNull()
-		ValueBuilder() array.Builder
-	}
-	la, ok := b.(listAppender)
-	if !ok {
-		return fmt.Errorf("unexpected list builder type %T: %w", b, ErrUnsupportedType)
-	}
-	if v.Kind() == reflect.Slice && v.IsNil() {
-		la.AppendNull()
-		return nil
-	}
+	isNil := v.Kind() == reflect.Slice && v.IsNil()
+	var vb array.Builder
 	switch lb := b.(type) {
-	case *array.ListViewBuilder:
-		lb.AppendWithSize(true, v.Len())
-	case *array.LargeListViewBuilder:
-		lb.AppendWithSize(true, v.Len())
 	case *array.ListBuilder:
+		if isNil {
+			lb.AppendNull()
+			return nil
+		}
 		lb.Append(true)
+		vb = lb.ValueBuilder()
 	case *array.LargeListBuilder:
+		if isNil {
+			lb.AppendNull()
+			return nil
+		}
 		lb.Append(true)
+		vb = lb.ValueBuilder()
+	case *array.ListViewBuilder:
+		if isNil {
+			lb.AppendNull()
+			return nil
+		}
+		lb.AppendWithSize(true, v.Len())
+		vb = lb.ValueBuilder()
+	case *array.LargeListViewBuilder:
+		if isNil {
+			lb.AppendNull()
+			return nil
+		}
+		lb.AppendWithSize(true, v.Len())
+		vb = lb.ValueBuilder()
 	default:
 		return fmt.Errorf("unexpected list builder type %T: %w", b, ErrUnsupportedType)
 	}
-	vb := la.ValueBuilder()
 	for i := 0; i < v.Len(); i++ {
 		if err := appendValue(vb, v.Index(i), tagOpts{}); err != nil {
 			return err
@@ -799,33 +724,23 @@ func buildMapArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error
 	kb := mb.KeyBuilder()
 	ib := mb.ItemBuilder()
 
-	for i := 0; i < vals.Len(); i++ {
-		m := vals.Index(i)
-		if isPtr {
-			for m.Kind() == reflect.Ptr {
-				if m.IsNil() {
-					mb.AppendNull()
-					break
-				}
-				m = m.Elem()
-			}
-			if m.Kind() == reflect.Ptr {
-				continue
-			}
-		}
+	if err := iterSlice(vals, isPtr, mb.AppendNull, func(m reflect.Value) error {
 		if m.IsNil() {
 			mb.AppendNull()
-			continue
+			return nil
 		}
 		mb.Append(true)
 		for _, key := range m.MapKeys() {
 			if err := appendValue(kb, key, tagOpts{}); err != nil {
-				return nil, fmt.Errorf("map key: %w", err)
+				return fmt.Errorf("map key: %w", err)
 			}
 			if err := appendValue(ib, m.MapIndex(key), tagOpts{}); err != nil {
-				return nil, fmt.Errorf("map value: %w", err)
+				return fmt.Errorf("map value: %w", err)
 			}
 		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	return mb.NewArray(), nil
@@ -858,26 +773,16 @@ func buildFixedSizeListArray(vals reflect.Value, mem memory.Allocator) (arrow.Ar
 
 	vb := fb.ValueBuilder()
 
-	for i := 0; i < vals.Len(); i++ {
-		elem := vals.Index(i)
-		if isPtr {
-			for elem.Kind() == reflect.Ptr {
-				if elem.IsNil() {
-					fb.AppendNull()
-					break
-				}
-				elem = elem.Elem()
-			}
-			if elem.Kind() == reflect.Ptr {
-				continue
-			}
-		}
+	if err := iterSlice(vals, isPtr, fb.AppendNull, func(elem reflect.Value) error {
 		fb.Append(true)
 		for j := 0; j < int(n); j++ {
 			if err := appendValue(vb, elem.Index(j), tagOpts{}); err != nil {
-				return nil, fmt.Errorf("fixed-size list element [%d][%d]: %w", i, j, err)
+				return fmt.Errorf("fixed-size list element [%d]: %w", j, err)
 			}
 		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	return fb.NewArray(), nil
@@ -896,8 +801,7 @@ func validateDictValueType(dt arrow.DataType) error {
 }
 
 func buildDictionaryArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
-	n := vals.Len()
-	elemType, _ := derefSliceElem(vals)
+	elemType, isPtr := derefSliceElem(vals)
 
 	valDT, err := inferArrowType(elemType)
 	if err != nil {
@@ -915,21 +819,10 @@ func buildDictionaryArray(vals reflect.Value, mem memory.Allocator) (arrow.Array
 	db := array.NewDictionaryBuilder(mem, dt)
 	defer db.Release()
 
-	for i := 0; i < n; i++ {
-		elem := vals.Index(i)
-		for elem.Kind() == reflect.Ptr {
-			if elem.IsNil() {
-				db.AppendNull()
-				break
-			}
-			elem = elem.Elem()
-		}
-		if elem.Kind() == reflect.Ptr {
-			continue
-		}
-		if err := appendToDictBuilder(db, elem); err != nil {
-			return nil, fmt.Errorf("dictionary element [%d]: %w", i, err)
-		}
+	if err := iterSlice(vals, isPtr, db.AppendNull, func(elem reflect.Value) error {
+		return appendToDictBuilder(db, elem)
+	}); err != nil {
+		return nil, err
 	}
 	return db.NewArray(), nil
 }

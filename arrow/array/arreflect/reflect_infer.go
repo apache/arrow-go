@@ -366,46 +366,7 @@ func InferGoType(dt arrow.DataType) (reflect.Type, error) {
 		return reflect.MapOf(keyType, valType), nil
 
 	case arrow.STRUCT:
-		st := dt.(*arrow.StructType)
-		fields := make([]reflect.StructField, st.NumFields())
-		seen := make(map[string]string, st.NumFields())
-		for i := 0; i < st.NumFields(); i++ {
-			f := st.Field(i)
-			ft, err := InferGoType(f.Type)
-			if err != nil {
-				return nil, err
-			}
-			if f.Nullable {
-				ft = reflect.PointerTo(ft)
-			}
-			var exportedName string
-			if len(f.Name) == 0 {
-				exportedName = fmt.Sprintf("Field%d", i)
-			} else {
-				runes := []rune(f.Name)
-				runes[0] = unicode.ToUpper(runes[0])
-				for j, r := range runes {
-					if j == 0 {
-						if !unicode.IsLetter(r) {
-							return nil, fmt.Errorf("arreflect: InferGoType: field name %q produces invalid Go identifier: %w", f.Name, ErrUnsupportedType)
-						}
-					} else if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
-						return nil, fmt.Errorf("arreflect: InferGoType: field name %q produces invalid Go identifier: %w", f.Name, ErrUnsupportedType)
-					}
-				}
-				exportedName = string(runes)
-			}
-			if origName, dup := seen[exportedName]; dup {
-				return nil, fmt.Errorf("arreflect: InferGoType: field names %q and %q both export as %q: %w", origName, f.Name, exportedName, ErrUnsupportedType)
-			}
-			seen[exportedName] = f.Name
-			fields[i] = reflect.StructField{
-				Name: exportedName,
-				Type: ft,
-				Tag:  reflect.StructTag(fmt.Sprintf(`arrow:%q`, f.Name)),
-			}
-		}
-		return reflect.StructOf(fields), nil
+		return inferGoStructType(dt.(*arrow.StructType))
 
 	case arrow.DICTIONARY:
 		return InferGoType(dt.(*arrow.DictionaryType).ValueType)
@@ -416,4 +377,51 @@ func InferGoType(dt arrow.DataType) (reflect.Type, error) {
 	default:
 		return nil, fmt.Errorf("unsupported Arrow type for Go inference: %v: %w", dt, ErrUnsupportedType)
 	}
+}
+
+func exportedFieldName(name string, index int) (string, error) {
+	if len(name) == 0 {
+		return fmt.Sprintf("Field%d", index), nil
+	}
+	runes := []rune(name)
+	runes[0] = unicode.ToUpper(runes[0])
+	for j, r := range runes {
+		if j == 0 {
+			if !unicode.IsLetter(r) {
+				return "", fmt.Errorf("arreflect: InferGoType: field name %q produces invalid Go identifier: %w", name, ErrUnsupportedType)
+			}
+		} else if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
+			return "", fmt.Errorf("arreflect: InferGoType: field name %q produces invalid Go identifier: %w", name, ErrUnsupportedType)
+		}
+	}
+	return string(runes), nil
+}
+
+func inferGoStructType(st *arrow.StructType) (reflect.Type, error) {
+	fields := make([]reflect.StructField, st.NumFields())
+	seen := make(map[string]string, st.NumFields())
+	for i := 0; i < st.NumFields(); i++ {
+		f := st.Field(i)
+		ft, err := InferGoType(f.Type)
+		if err != nil {
+			return nil, err
+		}
+		if f.Nullable {
+			ft = reflect.PointerTo(ft)
+		}
+		exportedName, err := exportedFieldName(f.Name, i)
+		if err != nil {
+			return nil, err
+		}
+		if origName, dup := seen[exportedName]; dup {
+			return nil, fmt.Errorf("arreflect: InferGoType: field names %q and %q both export as %q: %w", origName, f.Name, exportedName, ErrUnsupportedType)
+		}
+		seen[exportedName] = f.Name
+		fields[i] = reflect.StructField{
+			Name: exportedName,
+			Type: ft,
+			Tag:  reflect.StructTag(fmt.Sprintf(`arrow:%q`, f.Name)),
+		}
+	}
+	return reflect.StructOf(fields), nil
 }
