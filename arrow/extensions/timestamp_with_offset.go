@@ -474,45 +474,31 @@ func (b *TimestampWithOffsetBuilder) AppendValues(values []time.Time, valids []b
 
 	switch offsets := structBuilder.FieldBuilder(1).(type) {
 	case *array.Int16Builder:
-		for i, v := range values {
+		for _, v := range values {
 			timestamp, offsetMinutes := fieldValuesFromTime(v, b.unit)
-			if valids[i] {
-				timestamps.UnsafeAppend(timestamp)
-				offsets.UnsafeAppend(offsetMinutes)
-			} else {
-				timestamps.UnsafeAppendBoolToBitmap(false)
-				offsets.UnsafeAppendBoolToBitmap(false)
-			}
+			timestamps.UnsafeAppend(timestamp)
+			offsets.UnsafeAppend(offsetMinutes)
 		}
 	case *array.Int16DictionaryBuilder:
-		for i, v := range values {
+		for _, v := range values {
 			timestamp, offsetMinutes := fieldValuesFromTime(v, b.unit)
-			if valids[i] {
-				timestamps.UnsafeAppend(timestamp)
-				offsets.UnsafeAppend(offsetMinutes)
-			} else {
-				timestamps.UnsafeAppendBoolToBitmap(false)
-				offsets.UnsafeAppendBoolToBitmap(false)
-			}
+			timestamps.UnsafeAppend(timestamp)
+			offsets.UnsafeAppend(offsetMinutes)
 		}
 	case *array.RunEndEncodedBuilder:
 		offsetValuesBuilder := offsets.ValueBuilder().(*array.Int16Builder)
 		for i, v := range values {
 			timestamp, offsetMinutes := fieldValuesFromTime(v, b.unit)
-			if valids[i] {
-				timestamps.UnsafeAppend(timestamp)
-				offsetMinutes16 := int16(offsetMinutes)
-				if offsetMinutes != b.lastOffset {
-					offsets.Append(1)
-					offsetValuesBuilder.Append(offsetMinutes16)
-				} else {
-					offsets.ContinueRun(1)
-				}
-				b.lastOffset = offsetMinutes16
+			timestamps.UnsafeAppend(timestamp)
+			offsetMinutes16 := int16(offsetMinutes)
+			// If value at i is null, simply continue the run to maximize compression
+			if valids[i] && offsetMinutes != b.lastOffset {
+				offsets.Append(1)
+				offsetValuesBuilder.Append(offsetMinutes16)
 			} else {
-				timestamps.UnsafeAppendBoolToBitmap(false)
-				offsets.AppendNull()
+				offsets.ContinueRun(1)
 			}
+			b.lastOffset = offsetMinutes16
 		}
 	}
 }
