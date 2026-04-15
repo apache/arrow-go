@@ -408,7 +408,7 @@ func TestBuildFixedSizeListArray(t *testing.T) {
 		defer bldr.Release()
 
 		var nilSlice []int32
-		err := appendValue(bldr, reflect.ValueOf(&nilSlice).Elem(), tagOpts{})
+		err := appendValue(bldr, reflect.ValueOf(&nilSlice).Elem())
 		require.NoError(t, err)
 
 		bldr.Append(true)

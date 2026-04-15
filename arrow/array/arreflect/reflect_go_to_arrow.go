@@ -96,7 +96,7 @@ func buildPrimitiveArray(vals reflect.Value, mem memory.Allocator) (arrow.Array,
 	b.Reserve(vals.Len())
 
 	if err := iterSlice(vals, isPtr, b.AppendNull, func(v reflect.Value) error {
-		return appendValue(b, v, tagOpts{})
+		return appendValue(b, v)
 	}); err != nil {
 		return nil, err
 	}
@@ -239,7 +239,7 @@ func buildDecimalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (
 func appendStructFields(sb *array.StructBuilder, v reflect.Value, fields []fieldMeta) error {
 	sb.Append(true)
 	for fi, fm := range fields {
-		if err := appendValue(sb.FieldBuilder(fi), v.FieldByIndex(fm.Index), fm.Opts); err != nil {
+		if err := appendValue(sb.FieldBuilder(fi), v.FieldByIndex(fm.Index)); err != nil {
 			return fmt.Errorf("struct field %q: %w", fm.Name, err)
 		}
 	}
@@ -338,7 +338,7 @@ func appendDecimalValue(b array.Builder, v reflect.Value) error {
 	return nil
 }
 
-func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
+func appendValue(b array.Builder, v reflect.Value) error {
 	for v.Kind() == reflect.Ptr {
 		if v.IsNil() {
 			b.AppendNull()
@@ -400,7 +400,7 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 		tb.Append(true)
 		vb := tb.ValueBuilder()
 		for i := 0; i < v.Len(); i++ {
-			if err := appendValue(vb, v.Index(i), tagOpts{}); err != nil {
+			if err := appendValue(vb, v.Index(i)); err != nil {
 				return err
 			}
 		}
@@ -412,10 +412,10 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 			kb := tb.KeyBuilder()
 			ib := tb.ItemBuilder()
 			for _, key := range v.MapKeys() {
-				if err := appendValue(kb, key, tagOpts{}); err != nil {
+				if err := appendValue(kb, key); err != nil {
 					return err
 				}
-				if err := appendValue(ib, v.MapIndex(key), tagOpts{}); err != nil {
+				if err := appendValue(ib, v.MapIndex(key)); err != nil {
 					return err
 				}
 			}
@@ -500,7 +500,7 @@ func appendListElement(b array.Builder, v reflect.Value) error {
 		return fmt.Errorf("unexpected list builder type %T: %w", b, ErrUnsupportedType)
 	}
 	for i := 0; i < v.Len(); i++ {
-		if err := appendValue(vb, v.Index(i), tagOpts{}); err != nil {
+		if err := appendValue(vb, v.Index(i)); err != nil {
 			return err
 		}
 	}
@@ -553,7 +553,7 @@ func buildListLikeArray(vals reflect.Value, mem memory.Allocator, isView bool) (
 		}
 		beginRow(outer.Len())
 		for j := 0; j < outer.Len(); j++ {
-			if err := appendValue(vb, outer.Index(j), tagOpts{}); err != nil {
+			if err := appendValue(vb, outer.Index(j)); err != nil {
 				return nil, fmt.Errorf("%s [%d][%d]: %w", label, i, j, err)
 			}
 		}
@@ -604,10 +604,10 @@ func buildMapArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error
 		}
 		mb.Append(true)
 		for _, key := range m.MapKeys() {
-			if err := appendValue(kb, key, tagOpts{}); err != nil {
+			if err := appendValue(kb, key); err != nil {
 				return fmt.Errorf("map key: %w", err)
 			}
-			if err := appendValue(ib, m.MapIndex(key), tagOpts{}); err != nil {
+			if err := appendValue(ib, m.MapIndex(key)); err != nil {
 				return fmt.Errorf("map value: %w", err)
 			}
 		}
@@ -647,7 +647,7 @@ func buildFixedSizeListArray(vals reflect.Value, mem memory.Allocator) (arrow.Ar
 	if err := iterSlice(vals, isPtr, appendNullIdx, func(elem reflect.Value) error {
 		fb.Append(true)
 		for j := 0; j < int(n); j++ {
-			if err := appendValue(vb, elem.Index(j), tagOpts{}); err != nil {
+			if err := appendValue(vb, elem.Index(j)); err != nil {
 				return fmt.Errorf("fixed-size list element [%d][%d]: %w", idx, j, err)
 			}
 		}
