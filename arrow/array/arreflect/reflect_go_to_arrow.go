@@ -754,7 +754,8 @@ func buildFixedSizeListArray(vals reflect.Value, mem memory.Allocator) (arrow.Ar
 	vb := fb.ValueBuilder()
 
 	idx := 0
-	if err := iterSlice(vals, isPtr, fb.AppendNull, func(elem reflect.Value) error {
+	appendNullIdx := func() { fb.AppendNull(); idx++ }
+	if err := iterSlice(vals, isPtr, appendNullIdx, func(elem reflect.Value) error {
 		fb.Append(true)
 		for j := 0; j < int(n); j++ {
 			if err := appendValue(vb, elem.Index(j), tagOpts{}); err != nil {
