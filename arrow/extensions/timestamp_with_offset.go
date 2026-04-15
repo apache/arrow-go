@@ -130,6 +130,11 @@ type DictIndexType interface {
 		*arrow.Uint8Type | *arrow.Uint16Type | *arrow.Uint32Type | *arrow.Uint64Type
 }
 
+
+type RunEndsType interface {
+	*arrow.Int16Type | *arrow.Int32Type | *arrow.Int64Type
+}
+
 // NewTimestampWithOffsetType creates a new TimestampWithOffsetType with the underlying storage type set correctly to
 // Struct(timestamp=Timestamp(T, "UTC"), offset_minutes=Dictionary(I, Int16)), where T is any TimeUnit and I is a
 // valid Dictionary index type.
@@ -148,11 +153,11 @@ func NewTimestampWithOffsetTypeDictionaryEncoded[I DictIndexType](unit arrow.Tim
 // NewTimestampWithOffsetType creates a new TimestampWithOffsetType with the underlying storage type set correctly to
 // Struct(timestamp=Timestamp(T, "UTC"), offset_minutes=RunEndEncoded(E, Int16)), where T is any TimeUnit and E is a
 // valid run-ends type.
-func NewTimestampWithOffsetTypeRunEndEncoded[E DictIndexType](unit arrow.TimeUnit, runEnds E) *TimestampWithOffsetType {
+func NewTimestampWithOffsetTypeRunEndEncoded[E RunEndsType](unit arrow.TimeUnit, runEnds E) *TimestampWithOffsetType {
 	offsetType := arrow.RunEndEncodedOf(arrow.DataType(runEnds), arrow.PrimitiveTypes.Int16)
 
 	v, _ := NewTimestampWithOffsetTypeCustomOffset(unit, offsetType)
-	// SAFETY: This should never error as DictIndexType always a valid run ends type
+	// SAFETY: This should never error as RunEndsType always a valid run ends type
 
 	return v
 
