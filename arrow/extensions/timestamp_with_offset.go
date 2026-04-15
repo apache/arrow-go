@@ -17,7 +17,6 @@
 package extensions
 
 import (
-	"errors"
 	"fmt"
 	"iter"
 	"math"
@@ -95,13 +94,13 @@ func NewTimestampWithOffsetType(unit arrow.TimeUnit) *TimestampWithOffsetType {
 	return v
 }
 
-// NewTimestampWithOffsetType creates a new TimestampWithOffsetType with the underlying storage type set correctly to
+// NewTimestampWithOffsetTypeCustomOffset creates a new TimestampWithOffsetType with the underlying storage type set correctly to
 // Struct(timestamp=Timestamp(T, "UTC"), offset_minutes=O), where T is any TimeUnit and O is a valid offset type.
 //
 // The error will be populated if the data type is not a valid encoding of the offsets field.
 func NewTimestampWithOffsetTypeCustomOffset(unit arrow.TimeUnit, offsetType arrow.DataType) (*TimestampWithOffsetType, error) {
 	if !isOffsetTypeOk(offsetType) {
-		return nil, errors.New(fmt.Sprintf("Invalid offset type %s", offsetType))
+		return nil, fmt.Errorf("invalid offset type %s", offsetType)
 	}
 
 	return &TimestampWithOffsetType{
@@ -130,12 +129,11 @@ type DictIndexType interface {
 		*arrow.Uint8Type | *arrow.Uint16Type | *arrow.Uint32Type | *arrow.Uint64Type
 }
 
-
 type RunEndsType interface {
 	*arrow.Int16Type | *arrow.Int32Type | *arrow.Int64Type
 }
 
-// NewTimestampWithOffsetType creates a new TimestampWithOffsetType with the underlying storage type set correctly to
+// NewTimestampWithOffsetTypeDictionaryEncoded creates a new TimestampWithOffsetType with the underlying storage type set correctly to
 // Struct(timestamp=Timestamp(T, "UTC"), offset_minutes=Dictionary(I, Int16)), where T is any TimeUnit and I is a
 // valid Dictionary index type.
 func NewTimestampWithOffsetTypeDictionaryEncoded[I DictIndexType](unit arrow.TimeUnit, index I) *TimestampWithOffsetType {
@@ -150,7 +148,7 @@ func NewTimestampWithOffsetTypeDictionaryEncoded[I DictIndexType](unit arrow.Tim
 	return v
 }
 
-// NewTimestampWithOffsetType creates a new TimestampWithOffsetType with the underlying storage type set correctly to
+// NewTimestampWithOffsetTypeRunEndEncoded creates a new TimestampWithOffsetType with the underlying storage type set correctly to
 // Struct(timestamp=Timestamp(T, "UTC"), offset_minutes=RunEndEncoded(E, Int16)), where T is any TimeUnit and E is a
 // valid run-ends type.
 func NewTimestampWithOffsetTypeRunEndEncoded[E RunEndsType](unit arrow.TimeUnit, runEnds E) *TimestampWithOffsetType {
@@ -350,7 +348,7 @@ func (a *TimestampWithOffsetArray) iterValues() iter.Seq2[time.Time, bool] {
 }
 
 func (a *TimestampWithOffsetArray) Values() []time.Time {
-	return slices.Collect(func (yield func (time.Time) bool) {
+	return slices.Collect(func(yield func(time.Time) bool) {
 		for time := range a.iterValues() {
 			if !yield(time) {
 				return
@@ -422,7 +420,7 @@ func NewTimestampWithOffsetBuilder(mem memory.Allocator, unit arrow.TimeUnit, of
 func (b *TimestampWithOffsetBuilder) Append(v time.Time) {
 	timestamp, offsetMinutes := fieldValuesFromTime(v, b.unit)
 	offsetMinutes16 := int16(offsetMinutes)
-	structBuilder := b.ExtensionBuilder.Builder.(*array.StructBuilder)
+	structBuilder := b.Builder.(*array.StructBuilder)
 
 	structBuilder.Append(true)
 	structBuilder.FieldBuilder(0).(*array.TimestampBuilder).Append(timestamp)
@@ -464,7 +462,7 @@ func (b *TimestampWithOffsetBuilder) AppendValueFromString(s string) error {
 }
 
 func (b *TimestampWithOffsetBuilder) AppendValues(values []time.Time, valids []bool) {
-	structBuilder := b.ExtensionBuilder.Builder.(*array.StructBuilder)
+	structBuilder := b.Builder.(*array.StructBuilder)
 	timestamps := structBuilder.FieldBuilder(0).(*array.TimestampBuilder)
 
 	structBuilder.AppendValues(valids)
