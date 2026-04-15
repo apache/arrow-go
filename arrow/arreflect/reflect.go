@@ -401,6 +401,16 @@ func FromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.Arr
 	if err := validateTemporalOpt(tOpts.Temporal); err != nil {
 		return nil, err
 	}
+	if tOpts.Temporal != "" && tOpts.Temporal != "timestamp" {
+		goType := reflect.TypeFor[T]()
+		deref := goType
+		for deref.Kind() == reflect.Ptr {
+			deref = deref.Elem()
+		}
+		if deref != typeOfTime {
+			return nil, fmt.Errorf("arreflect: WithTemporal requires a time.Time element type, got %s: %w", deref, ErrUnsupportedType)
+		}
+	}
 	if len(vals) == 0 {
 		goType := reflect.TypeFor[T]()
 		dt, err := inferArrowType(goType)

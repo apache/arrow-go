@@ -18,6 +18,7 @@ package arreflect
 
 import (
 	"testing"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -369,6 +370,27 @@ func TestReflectIntegration(t *testing.T) {
 
 		sa := arr.(*array.Struct)
 		require.Equal(t, arrow.LIST_VIEW, sa.Field(1).DataType().ID())
+
+		output, err := ToSlice[Row](arr)
+		require.NoError(t, err)
+		assert.Equal(t, rows, output)
+	})
+
+	t.Run("duration_struct_field_roundtrip", func(t *testing.T) {
+		type Row struct {
+			Name    string        `arrow:"name"`
+			Elapsed time.Duration `arrow:"elapsed"`
+		}
+		rows := []Row{
+			{"fast", 100 * time.Millisecond},
+			{"slow", 5 * time.Second},
+		}
+		arr, err := FromSlice(rows, nil)
+		require.NoError(t, err)
+		defer arr.Release()
+
+		sa := arr.(*array.Struct)
+		assert.Equal(t, arrow.DURATION, sa.Field(1).DataType().ID())
 
 		output, err := ToSlice[Row](arr)
 		require.NoError(t, err)

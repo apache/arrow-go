@@ -220,8 +220,8 @@ func iterSlice(vals reflect.Value, isPtr bool, appendNull func(), appendVal func
 	return nil
 }
 
-func inferListElemDT(vals reflect.Value) (elemDT arrow.DataType, isOuterPtr bool, err error) {
-	outerSliceType, isOuterPtr := derefSliceElem(vals)
+func inferListElemDT(vals reflect.Value) (elemDT arrow.DataType, err error) {
+	outerSliceType, _ := derefSliceElem(vals)
 	innerElemType := outerSliceType.Elem()
 	for innerElemType.Kind() == reflect.Ptr {
 		innerElemType = innerElemType.Elem()
@@ -691,7 +691,7 @@ func appendListElement(b array.Builder, v reflect.Value) error {
 }
 
 func buildListLikeArray(vals reflect.Value, mem memory.Allocator, isView bool) (arrow.Array, error) {
-	elemDT, _, err := inferListElemDT(vals)
+	elemDT, err := inferListElemDT(vals)
 	if err != nil {
 		return nil, err
 	}
