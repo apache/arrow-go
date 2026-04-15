@@ -515,11 +515,13 @@ func TestBuildDictionaryArray(t *testing.T) {
 		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{Dict: true}, mem)
 		require.NoError(t, err)
 		defer arr.Release()
+		typed := arr.(*array.Dictionary)
 		assert.Equal(t, arrow.DICTIONARY, arr.DataType().ID())
 		assert.Equal(t, 3, arr.Len())
 		assert.False(t, arr.IsNull(0))
 		assert.True(t, arr.IsNull(1))
 		assert.False(t, arr.IsNull(2))
+		assert.Equal(t, 1, typed.Dictionary().Len(), "expected 1 unique value")
 	})
 }
 
