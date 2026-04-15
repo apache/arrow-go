@@ -17,6 +17,7 @@
 package arreflect
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -31,6 +32,11 @@ func checkedMem(t *testing.T) *memory.CheckedAllocator {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	t.Cleanup(func() { mem.AssertSize(t, 0) })
 	return mem
+}
+
+func setValueInto[T any](t *testing.T, dst *T, arr arrow.Array, i int) {
+	t.Helper()
+	require.NoError(t, setValue(reflect.ValueOf(dst).Elem(), arr, i))
 }
 
 func assertMultiLevelPtrNullPattern(t *testing.T, arr arrow.Array) {
@@ -67,4 +73,17 @@ func makeStructArray(t *testing.T, arrays []arrow.Array, names []string) *array.
 	require.NoError(t, err)
 	t.Cleanup(sa.Release)
 	return sa
+}
+
+func mustBuildArray(t *testing.T, vals any, opts tagOpts, mem memory.Allocator) arrow.Array {
+	t.Helper()
+	arr, err := buildArray(reflect.ValueOf(vals), opts, mem)
+	require.NoError(t, err)
+	t.Cleanup(arr.Release)
+	return arr
+}
+
+func mustBuildDefault(t *testing.T, vals any, mem memory.Allocator) arrow.Array {
+	t.Helper()
+	return mustBuildArray(t, vals, tagOpts{}, mem)
 }

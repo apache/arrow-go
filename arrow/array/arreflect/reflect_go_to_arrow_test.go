@@ -36,9 +36,7 @@ func TestBuildPrimitiveArray(t *testing.T) {
 
 	t.Run("int32", func(t *testing.T) {
 		vals := []int32{1, 2, 3, 4, 5}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assert.Equal(t, 5, arr.Len())
 		assert.Equal(t, arrow.INT32, arr.DataType().ID())
 		typed := arr.(*array.Int32)
@@ -52,9 +50,7 @@ func TestBuildPrimitiveArray(t *testing.T) {
 		pv := &v
 		var nilPv *int32
 		vals := []**int32{&pv, &nilPv, &pv}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assertMultiLevelPtrNullPattern(t, arr)
 		assert.Equal(t, int32(42), arr.(*array.Int32).Value(0))
 	})
@@ -62,9 +58,7 @@ func TestBuildPrimitiveArray(t *testing.T) {
 	t.Run("pointer_with_null", func(t *testing.T) {
 		v1, v3 := int32(10), int32(30)
 		vals := []*int32{&v1, nil, &v3}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assert.True(t, arr.IsNull(1), "expected index 1 to be null")
 		typed := arr.(*array.Int32)
 		assert.Equal(t, int32(10), typed.Value(0))
@@ -73,9 +67,7 @@ func TestBuildPrimitiveArray(t *testing.T) {
 
 	t.Run("bool", func(t *testing.T) {
 		vals := []bool{true, false, true}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assert.Equal(t, arrow.BOOL, arr.DataType().ID())
 		typed := arr.(*array.Boolean)
 		assert.True(t, typed.Value(0), "expected Value(0) to be true")
@@ -85,9 +77,7 @@ func TestBuildPrimitiveArray(t *testing.T) {
 
 	t.Run("binary", func(t *testing.T) {
 		vals := [][]byte{{1, 2, 3}, {4, 5}, {6}}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assert.Equal(t, arrow.BINARY, arr.DataType().ID())
 	})
 
@@ -123,9 +113,7 @@ func TestBuildTemporalArray(t *testing.T) {
 	t.Run("time_time", func(t *testing.T) {
 		now := time.Now().UTC()
 		vals := []time.Time{now, now.Add(time.Hour)}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assert.Equal(t, arrow.TIMESTAMP, arr.DataType().ID())
 		typed := arr.(*array.Timestamp)
 		for i, want := range vals {
@@ -135,9 +123,7 @@ func TestBuildTemporalArray(t *testing.T) {
 
 	t.Run("time_duration", func(t *testing.T) {
 		vals := []time.Duration{time.Second, time.Minute, time.Hour}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assert.Equal(t, arrow.DURATION, arr.DataType().ID())
 		typed := arr.(*array.Duration)
 		for i, want := range vals {
@@ -155,9 +141,7 @@ func TestBuildDecimalArray(t *testing.T) {
 			decimal128.New(0, 200),
 			decimal128.New(0, 300),
 		}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assert.Equal(t, arrow.DECIMAL128, arr.DataType().ID())
 		typed := arr.(*array.Decimal128)
 		for i, want := range vals {
@@ -170,9 +154,7 @@ func TestBuildDecimalArray(t *testing.T) {
 			decimal256.New(0, 0, 0, 100),
 			decimal256.New(0, 0, 0, 200),
 		}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assert.Equal(t, arrow.DECIMAL256, arr.DataType().ID())
 		typed := arr.(*array.Decimal256)
 		for i, want := range vals {
@@ -183,9 +165,7 @@ func TestBuildDecimalArray(t *testing.T) {
 	t.Run("decimal128_custom_opts", func(t *testing.T) {
 		vals := []decimal128.Num{decimal128.New(0, 12345)}
 		opts := tagOpts{HasDecimalOpts: true, DecimalPrecision: 10, DecimalScale: 3}
-		arr, err := buildArray(reflect.ValueOf(vals), opts, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, opts, mem)
 		dt := arr.DataType().(*arrow.Decimal128Type)
 		assert.Equal(t, int32(10), dt.Precision, "expected p=10, got p=%d", dt.Precision)
 		assert.Equal(t, int32(3), dt.Scale, "expected s=3, got s=%d", dt.Scale)
@@ -193,9 +173,7 @@ func TestBuildDecimalArray(t *testing.T) {
 
 	t.Run("decimal32", func(t *testing.T) {
 		vals := []decimal.Decimal32{100, 200, 300}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assert.Equal(t, arrow.DECIMAL32, arr.DataType().ID())
 		typed := arr.(*array.Decimal32)
 		for i, want := range vals {
@@ -205,9 +183,7 @@ func TestBuildDecimalArray(t *testing.T) {
 
 	t.Run("decimal64", func(t *testing.T) {
 		vals := []decimal.Decimal64{1000, 2000}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assert.Equal(t, arrow.DECIMAL64, arr.DataType().ID())
 		typed := arr.(*array.Decimal64)
 		for i, want := range vals {
@@ -218,9 +194,7 @@ func TestBuildDecimalArray(t *testing.T) {
 	t.Run("decimal32_custom_opts", func(t *testing.T) {
 		vals := []decimal.Decimal32{12345}
 		opts := tagOpts{HasDecimalOpts: true, DecimalPrecision: 9, DecimalScale: 2}
-		arr, err := buildArray(reflect.ValueOf(vals), opts, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, opts, mem)
 		dt := arr.DataType().(*arrow.Decimal32Type)
 		assert.Equal(t, int32(9), dt.Precision, "expected p=9, got p=%d", dt.Precision)
 		assert.Equal(t, int32(2), dt.Scale, "expected s=2, got s=%d", dt.Scale)
@@ -251,9 +225,7 @@ func TestBuildStructArray(t *testing.T) {
 			{X: 2, Y: "two"},
 			{X: 3, Y: "three"},
 		}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		require.Equal(t, arrow.STRUCT, arr.DataType().ID(), "expected STRUCT, got %v", arr.DataType())
 		typed := arr.(*array.Struct)
 		assert.Equal(t, 3, typed.Len())
@@ -268,9 +240,7 @@ func TestBuildStructArray(t *testing.T) {
 	t.Run("pointer_null_row", func(t *testing.T) {
 		v1 := buildSimpleStruct{X: 42, Y: "answer"}
 		vals := []*buildSimpleStruct{&v1, nil}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assert.Equal(t, 2, arr.Len())
 		assert.True(t, arr.IsNull(1), "expected index 1 to be null")
 	})
@@ -282,9 +252,7 @@ func TestBuildStructArray(t *testing.T) {
 			{X: &x1, Y: &y1},
 			{X: nil, Y: nil},
 		}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		typed := arr.(*array.Struct)
 		assert.True(t, typed.Field(0).IsNull(1), "expected X[1] to be null")
 		assert.True(t, typed.Field(1).IsNull(1), "expected Y[1] to be null")
@@ -295,9 +263,7 @@ func TestBuildStructArray(t *testing.T) {
 			{A: 1, B: buildSimpleStruct{X: 10, Y: "inner1"}},
 			{A: 2, B: buildSimpleStruct{X: 20, Y: "inner2"}},
 		}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		require.Equal(t, arrow.STRUCT, arr.DataType().ID(), "expected STRUCT, got %v", arr.DataType())
 		typed := arr.(*array.Struct)
 		aArr := typed.Field(0).(*array.Int32)
@@ -317,9 +283,7 @@ func TestBuildStructArray(t *testing.T) {
 		ps := &s
 		var nilPs *S
 		vals := []**S{&ps, &nilPs, &ps}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assertMultiLevelPtrNullPattern(t, arr)
 		sa := arr.(*array.Struct)
 		xArr := sa.Field(0).(*array.Int32)
@@ -333,9 +297,7 @@ func TestBuildListArray(t *testing.T) {
 
 	t.Run("int32_lists", func(t *testing.T) {
 		vals := [][]int32{{1, 2, 3}, {4, 5}, {6}}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		require.Equal(t, arrow.LIST, arr.DataType().ID(), "expected LIST, got %v", arr.DataType())
 		typed := arr.(*array.List)
 		assert.Equal(t, 3, typed.Len())
@@ -344,18 +306,14 @@ func TestBuildListArray(t *testing.T) {
 
 	t.Run("null_inner", func(t *testing.T) {
 		vals := [][]int32{{1, 2}, nil, {3}}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assert.True(t, arr.IsNull(1), "expected index 1 to be null")
 	})
 
 	t.Run("nil_pointer_list_element", func(t *testing.T) {
 		a := []int32{1, 2}
 		vals := []*[]int32{&a, nil, &a}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assert.Equal(t, arrow.LIST, arr.DataType().ID())
 		assertMultiLevelPtrNullPattern(t, arr)
 	})
@@ -365,25 +323,19 @@ func TestBuildListArray(t *testing.T) {
 		pa := &a
 		var nilPa *[]int32
 		vals := []**[]int32{&pa, &nilPa, &pa}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assertMultiLevelPtrNullPattern(t, arr)
 	})
 
 	t.Run("string_lists", func(t *testing.T) {
 		vals := [][]string{{"a", "b"}, {"c"}}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		require.Equal(t, arrow.LIST, arr.DataType().ID(), "expected LIST, got %v", arr.DataType())
 	})
 
 	t.Run("nested", func(t *testing.T) {
 		vals := [][][]int32{{{1, 2}, {3}}, {{4, 5, 6}}}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		require.Equal(t, arrow.LIST, arr.DataType().ID(), "expected outer LIST, got %v", arr.DataType())
 		outer := arr.(*array.List)
 		assert.Equal(t, 2, outer.Len(), "expected 2 outer rows, got %d", outer.Len())
@@ -399,26 +351,20 @@ func TestBuildMapArray(t *testing.T) {
 			{"a": 1, "b": 2},
 			{"c": 3},
 		}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		require.Equal(t, arrow.MAP, arr.DataType().ID(), "expected MAP, got %v", arr.DataType())
 		assert.Equal(t, 2, arr.(*array.Map).Len())
 	})
 
 	t.Run("null_map", func(t *testing.T) {
 		vals := []map[string]int32{{"a": 1}, nil}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assert.True(t, arr.IsNull(1), "expected index 1 to be null")
 	})
 
 	t.Run("entry_count", func(t *testing.T) {
 		vals := []map[string]int32{{"x": 10, "y": 20, "z": 30}}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		kvArr := arr.(*array.Map).ListValues().(*array.Struct)
 		assert.Equal(t, 3, kvArr.Len(), "expected 3 key-value pairs, got %d", kvArr.Len())
 	})
@@ -428,9 +374,7 @@ func TestBuildMapArray(t *testing.T) {
 		pm := &m
 		var nilPm *map[string]int32
 		vals := []**map[string]int32{&pm, &nilPm, &pm}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assertMultiLevelPtrNullPattern(t, arr)
 	})
 }
@@ -440,9 +384,7 @@ func TestBuildFixedSizeListArray(t *testing.T) {
 
 	t.Run("int32_n3", func(t *testing.T) {
 		vals := [][3]int32{{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		require.Equal(t, arrow.FIXED_SIZE_LIST, arr.DataType().ID(), "expected FIXED_SIZE_LIST, got %v", arr.DataType())
 		typed := arr.(*array.FixedSizeList)
 		assert.Equal(t, 3, typed.Len())
@@ -456,9 +398,7 @@ func TestBuildFixedSizeListArray(t *testing.T) {
 
 	t.Run("float64_n2", func(t *testing.T) {
 		vals := [][2]float64{{1.0, 2.0}, {3.0, 4.0}}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		require.Equal(t, arrow.FIXED_SIZE_LIST, arr.DataType().ID(), "expected FIXED_SIZE_LIST, got %v", arr.DataType())
 		assert.Equal(t, int32(2), arr.DataType().(*arrow.FixedSizeListType).Len(), "expected fixed size 2")
 	})
@@ -486,9 +426,7 @@ func TestBuildFixedSizeListArray(t *testing.T) {
 		pa := &a
 		var nilPa *[3]int32
 		vals := []**[3]int32{&pa, &nilPa, &pa}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildDefault(t, vals, mem)
 		assertMultiLevelPtrNullPattern(t, arr)
 	})
 }
@@ -498,9 +436,7 @@ func TestBuildDictionaryArray(t *testing.T) {
 
 	t.Run("string_dict", func(t *testing.T) {
 		vals := []string{"apple", "banana", "apple", "cherry", "banana", "apple"}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{Dict: true}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, tagOpts{Dict: true}, mem)
 		require.Equal(t, arrow.DICTIONARY, arr.DataType().ID(), "expected DICTIONARY, got %v", arr.DataType())
 		typed := arr.(*array.Dictionary)
 		assert.Equal(t, 6, typed.Len())
@@ -509,9 +445,7 @@ func TestBuildDictionaryArray(t *testing.T) {
 
 	t.Run("int32_dict", func(t *testing.T) {
 		vals := []int32{1, 2, 1, 3, 2, 1}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{Dict: true}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, tagOpts{Dict: true}, mem)
 		require.Equal(t, arrow.DICTIONARY, arr.DataType().ID(), "expected DICTIONARY, got %v", arr.DataType())
 		typed := arr.(*array.Dictionary)
 		assert.Equal(t, 6, typed.Len())
@@ -520,9 +454,7 @@ func TestBuildDictionaryArray(t *testing.T) {
 
 	t.Run("index_type_is_int32", func(t *testing.T) {
 		vals := []string{"x", "y", "z"}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{Dict: true}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, tagOpts{Dict: true}, mem)
 		dt := arr.DataType().(*arrow.DictionaryType)
 		assert.Equal(t, arrow.INT32, dt.IndexType.ID(), "expected INT32 index, got %v", dt.IndexType)
 	})
@@ -535,9 +467,7 @@ func TestBuildDictionaryArray(t *testing.T) {
 	t.Run("pointer_string_with_nil", func(t *testing.T) {
 		s := "hello"
 		vals := []*string{&s, nil, &s}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{Dict: true}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, tagOpts{Dict: true}, mem)
 		typed := arr.(*array.Dictionary)
 		assert.Equal(t, arrow.DICTIONARY, arr.DataType().ID())
 		assert.Equal(t, 3, arr.Len())
@@ -552,9 +482,7 @@ func TestBuildDictionaryArray(t *testing.T) {
 		ps := &s
 		var nilPs *string
 		vals := []**string{&ps, &nilPs, &ps}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{Dict: true}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, tagOpts{Dict: true}, mem)
 		typed := arr.(*array.Dictionary)
 		assert.Equal(t, arrow.DICTIONARY, arr.DataType().ID())
 		assertMultiLevelPtrNullPattern(t, arr)
@@ -567,9 +495,7 @@ func TestBuildRunEndEncodedArray(t *testing.T) {
 
 	t.Run("int32_runs", func(t *testing.T) {
 		vals := []int32{1, 1, 1, 2, 2, 3}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{REE: true}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, tagOpts{REE: true}, mem)
 		require.Equal(t, arrow.RUN_END_ENCODED, arr.DataType().ID(), "expected RUN_END_ENCODED, got %v", arr.DataType())
 		ree := arr.(*array.RunEndEncoded)
 		assert.Equal(t, 6, ree.Len())
@@ -587,9 +513,7 @@ func TestBuildRunEndEncodedArray(t *testing.T) {
 
 	t.Run("string_runs", func(t *testing.T) {
 		vals := []string{"a", "a", "b", "b", "b", "c"}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{REE: true}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, tagOpts{REE: true}, mem)
 		require.Equal(t, arrow.RUN_END_ENCODED, arr.DataType().ID(), "expected RUN_END_ENCODED, got %v", arr.DataType())
 		ree := arr.(*array.RunEndEncoded)
 		assert.Equal(t, 6, ree.Len())
@@ -598,9 +522,7 @@ func TestBuildRunEndEncodedArray(t *testing.T) {
 
 	t.Run("single_run", func(t *testing.T) {
 		vals := []int32{42, 42, 42}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{REE: true}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, tagOpts{REE: true}, mem)
 		ree := arr.(*array.RunEndEncoded)
 		assert.Equal(t, 3, ree.Len())
 		runEnds := ree.RunEndsArr().(*array.Int32)
@@ -610,9 +532,7 @@ func TestBuildRunEndEncodedArray(t *testing.T) {
 
 	t.Run("all_distinct", func(t *testing.T) {
 		vals := []int32{1, 2, 3, 4, 5}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{REE: true}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, tagOpts{REE: true}, mem)
 		ree := arr.(*array.RunEndEncoded)
 		assert.Equal(t, 5, ree.Len())
 		assert.Equal(t, 5, ree.RunEndsArr().Len(), "expected 5 runs for all-distinct, got %d", ree.RunEndsArr().Len())
@@ -623,9 +543,7 @@ func TestBuildRunEndEncodedArray(t *testing.T) {
 		x2 := "x"
 		y := "y"
 		vals := []*string{&x1, &x2, &y}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{REE: true}, mem)
-		require.NoError(t, err, "unexpected error")
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, tagOpts{REE: true}, mem)
 		ree := arr.(*array.RunEndEncoded)
 		assert.Equal(t, 2, ree.RunEndsArr().Len(), "expected 2 runs (x+x coalesced, y), got %d", ree.RunEndsArr().Len())
 	})
@@ -634,9 +552,7 @@ func TestBuildRunEndEncodedArray(t *testing.T) {
 		t1 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 		t2 := time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC)
 		vals := []time.Time{t1, t1, t2}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{REE: true, Temporal: "date32"}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, tagOpts{REE: true, Temporal: "date32"}, mem)
 		ree := arr.(*array.RunEndEncoded)
 		assert.Equal(t, 3, ree.Len())
 		assert.Equal(t, arrow.DATE32, ree.Values().DataType().ID())
@@ -648,9 +564,7 @@ func TestBuildListViewArray(t *testing.T) {
 
 	t.Run("int32_listview", func(t *testing.T) {
 		vals := [][]int32{{1, 2, 3}, {4, 5}, {6}}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{ListView: true}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, tagOpts{ListView: true}, mem)
 		require.Equal(t, arrow.LIST_VIEW, arr.DataType().ID(), "expected LIST_VIEW, got %v", arr.DataType())
 		typed := arr.(*array.ListView)
 		assert.Equal(t, 3, typed.Len())
@@ -658,26 +572,20 @@ func TestBuildListViewArray(t *testing.T) {
 
 	t.Run("null_entry", func(t *testing.T) {
 		vals := [][]int32{{1, 2}, nil, {3}}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{ListView: true}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, tagOpts{ListView: true}, mem)
 		assert.True(t, arr.IsNull(1), "expected index 1 to be null")
 	})
 
 	t.Run("string_listview", func(t *testing.T) {
 		vals := [][]string{{"hello", "world"}, {"foo"}, {"a", "b", "c"}}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{ListView: true}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, tagOpts{ListView: true}, mem)
 		require.Equal(t, arrow.LIST_VIEW, arr.DataType().ID(), "expected LIST_VIEW, got %v", arr.DataType())
 		assert.Equal(t, 3, arr.Len())
 	})
 
 	t.Run("total_values", func(t *testing.T) {
 		vals := [][]int32{{10, 20}, {30}}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{ListView: true}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, tagOpts{ListView: true}, mem)
 		allVals := arr.(*array.ListView).ListValues().(*array.Int32)
 		assert.Equal(t, 3, allVals.Len(), "expected 3 total values, got %d", allVals.Len())
 	})
@@ -685,9 +593,7 @@ func TestBuildListViewArray(t *testing.T) {
 	t.Run("nil_pointer_listview_element", func(t *testing.T) {
 		a := []int32{1, 2}
 		vals := []*[]int32{&a, nil, &a}
-		arr, err := buildArray(reflect.ValueOf(vals), tagOpts{ListView: true}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
+		arr := mustBuildArray(t, vals, tagOpts{ListView: true}, mem)
 		assert.Equal(t, arrow.LIST_VIEW, arr.DataType().ID())
 		assertMultiLevelPtrNullPattern(t, arr)
 	})

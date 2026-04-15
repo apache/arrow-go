@@ -26,7 +26,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
-	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -34,12 +33,12 @@ import (
 func setValueAt[T any](t *testing.T, arr arrow.Array, i int) T {
 	t.Helper()
 	var got T
-	require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, i))
+	setValueInto(t, &got, arr, i)
 	return got
 }
 
 func TestSetValue(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := checkedMem(t)
 
 	t.Run("bool", func(t *testing.T) {
 		b := array.NewBooleanBuilder(mem)
@@ -53,7 +52,7 @@ func TestSetValue(t *testing.T) {
 		assert.True(t, got, "expected true, got false")
 
 		got = true
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 1))
+		setValueInto(t, &got, arr, 1)
 		assert.False(t, got, "expected false (null → zero), got true")
 	})
 
@@ -105,13 +104,13 @@ func TestSetValue(t *testing.T) {
 		}
 
 		got = new(string)
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 1))
+		setValueInto(t, &got, arr, 1)
 		assert.Nil(t, got, "expected nil for null, got %v", got)
 	})
 }
 
 func TestSetPrimitiveValue(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := checkedMem(t)
 
 	t.Run("int32", func(t *testing.T) {
 		b := array.NewInt32Builder(mem)
@@ -125,7 +124,7 @@ func TestSetPrimitiveValue(t *testing.T) {
 		assert.Equal(t, int32(42), got)
 
 		got = 99
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 1))
+		setValueInto(t, &got, arr, 1)
 		assert.Equal(t, int32(0), got, "expected 0 for null, got %d", got)
 	})
 
@@ -179,7 +178,7 @@ func TestSetPrimitiveValue(t *testing.T) {
 }
 
 func TestSetTemporalValue(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := checkedMem(t)
 
 	t.Run("timestamp", func(t *testing.T) {
 		dt := &arrow.TimestampType{Unit: arrow.Second}
@@ -266,7 +265,7 @@ func TestSetTemporalValue(t *testing.T) {
 }
 
 func TestSetDecimalValue(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := checkedMem(t)
 
 	t.Run("decimal128", func(t *testing.T) {
 		dt := &arrow.Decimal128Type{Precision: 10, Scale: 2}
@@ -330,7 +329,7 @@ func TestSetDecimalValue(t *testing.T) {
 }
 
 func TestSetStructValue(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := checkedMem(t)
 
 	t.Run("basic struct", func(t *testing.T) {
 		nameArr := makeStringArray(t, mem, "Alice", "Bob")
@@ -343,11 +342,11 @@ func TestSetStructValue(t *testing.T) {
 		}
 
 		var got Person
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), sa, 0))
+		setValueInto(t, &got, sa, 0)
 		assert.Equal(t, "Alice", got.Name)
 		assert.Equal(t, int32(30), got.Age)
 
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), sa, 1))
+		setValueInto(t, &got, sa, 1)
 		assert.Equal(t, "Bob", got.Name)
 		assert.Equal(t, int32(25), got.Age)
 	})
@@ -361,7 +360,7 @@ func TestSetStructValue(t *testing.T) {
 		}
 
 		var got TaggedPerson
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), sa, 0))
+		setValueInto(t, &got, sa, 0)
 		assert.Equal(t, "Charlie", got.FullName)
 	})
 
@@ -375,14 +374,14 @@ func TestSetStructValue(t *testing.T) {
 		}
 
 		var got PersonWithExtra
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), sa, 0))
+		setValueInto(t, &got, sa, 0)
 		assert.Equal(t, "Dave", got.Name)
 		assert.Equal(t, "", got.Email)
 	})
 }
 
 func TestSetListValue(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := checkedMem(t)
 
 	t.Run("list of int32", func(t *testing.T) {
 		lb := array.NewListBuilder(mem, arrow.PrimitiveTypes.Int32)
@@ -401,10 +400,10 @@ func TestSetListValue(t *testing.T) {
 		got := setValueAt[[]int32](t, arr, 0)
 		assert.Equal(t, []int32{1, 2, 3}, got)
 
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 1))
+		setValueInto(t, &got, arr, 1)
 		assert.Equal(t, []int32{4, 5}, got)
 
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 2))
+		setValueInto(t, &got, arr, 2)
 		assert.Nil(t, got, "expected nil slice for null list, got %v", got)
 	})
 
@@ -435,7 +434,7 @@ func TestSetListValue(t *testing.T) {
 		defer outerArr.Release()
 
 		var got [][]int32
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), outerArr, 0))
+		setValueInto(t, &got, outerArr, 0)
 		require.Len(t, got, 2, "expected 2 inner slices, got %d", len(got))
 		assert.Equal(t, []int32{10, 20}, got[0])
 		assert.Equal(t, []int32{30}, got[1])
@@ -457,13 +456,13 @@ func TestSetListValue(t *testing.T) {
 		got := setValueAt[[]int32](t, arr, 0)
 		assert.Equal(t, []int32{1, 2}, got, "row 0: expected [1,2], got %v", got)
 
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 1))
+		setValueInto(t, &got, arr, 1)
 		assert.Equal(t, []int32{3}, got, "row 1: expected [3], got %v", got)
 	})
 }
 
 func TestSetMapValue(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := checkedMem(t)
 
 	t.Run("map string to int32", func(t *testing.T) {
 		mb := array.NewMapBuilder(mem, arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32, false)
@@ -491,16 +490,16 @@ func TestSetMapValue(t *testing.T) {
 		assert.Equal(t, int32(1), got["a"])
 		assert.Equal(t, int32(2), got["b"])
 
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 1))
+		setValueInto(t, &got, arr, 1)
 		assert.Equal(t, int32(10), got["x"])
 
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 2))
+		setValueInto(t, &got, arr, 2)
 		assert.Nil(t, got, "expected nil map for null, got %v", got)
 	})
 }
 
 func TestSetFixedSizeListValue(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := checkedMem(t)
 
 	t.Run("go array", func(t *testing.T) {
 		b := array.NewFixedSizeListBuilder(mem, 3, arrow.PrimitiveTypes.Int32)
@@ -519,11 +518,11 @@ func TestSetFixedSizeListValue(t *testing.T) {
 		got := setValueAt[[3]int32](t, arr, 0)
 		assert.Equal(t, [3]int32{10, 20, 30}, got)
 
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 1))
+		setValueInto(t, &got, arr, 1)
 		assert.Equal(t, [3]int32{40, 50, 60}, got)
 
 		got = [3]int32{1, 2, 3}
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 2))
+		setValueInto(t, &got, arr, 2)
 		assert.Equal(t, [3]int32{}, got, "expected zero array for null, got %v", got)
 	})
 
@@ -559,7 +558,7 @@ func TestSetFixedSizeListValue(t *testing.T) {
 }
 
 func TestSetDictionaryValue(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := checkedMem(t)
 
 	t.Run("dictionary int8 to string", func(t *testing.T) {
 		dt := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
@@ -578,10 +577,10 @@ func TestSetDictionaryValue(t *testing.T) {
 		got := setValueAt[string](t, arr, 0)
 		assert.Equal(t, "foo", got)
 
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 1))
+		setValueInto(t, &got, arr, 1)
 		assert.Equal(t, "bar", got)
 
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 2))
+		setValueInto(t, &got, arr, 2)
 		assert.Equal(t, "foo", got)
 
 		gotPtr := setValueAt[*string](t, arr, 3)
@@ -590,7 +589,7 @@ func TestSetDictionaryValue(t *testing.T) {
 }
 
 func TestSetRunEndEncodedValue(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := checkedMem(t)
 
 	t.Run("ree int32 to string", func(t *testing.T) {
 		b := array.NewRunEndEncodedBuilder(mem, arrow.PrimitiveTypes.Int32, arrow.BinaryTypes.String)
@@ -608,13 +607,13 @@ func TestSetRunEndEncodedValue(t *testing.T) {
 		got := setValueAt[string](t, arr, 0)
 		assert.Equal(t, "aaa", got, "expected aaa at logical 0, got %q", got)
 
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 2))
+		setValueInto(t, &got, arr, 2)
 		assert.Equal(t, "aaa", got, "expected aaa at logical 2, got %q", got)
 
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 3))
+		setValueInto(t, &got, arr, 3)
 		assert.Equal(t, "bbb", got, "expected bbb at logical 3, got %q", got)
 
-		require.NoError(t, setValue(reflect.ValueOf(&got).Elem(), arr, 4))
+		setValueInto(t, &got, arr, 4)
 		assert.Equal(t, "bbb", got, "expected bbb at logical 4, got %q", got)
 	})
 }

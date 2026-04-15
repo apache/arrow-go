@@ -141,22 +141,6 @@ func appendPrimitiveValue(b array.Builder, v reflect.Value, dt arrow.DataType) e
 			return err
 		}
 		b.(*array.DurationBuilder).Append(arrow.Duration(d.Nanoseconds()))
-	case arrow.DECIMAL128:
-		n, ok := reflect.TypeAssert[decimal128.Num](v)
-		if !ok {
-			return fmt.Errorf("expected decimal128.Num, got %s: %w", v.Type(), ErrTypeMismatch)
-		}
-		b.(*array.Decimal128Builder).Append(n)
-	case arrow.DECIMAL256:
-		n, ok := reflect.TypeAssert[decimal256.Num](v)
-		if !ok {
-			return fmt.Errorf("expected decimal256.Num, got %s: %w", v.Type(), ErrTypeMismatch)
-		}
-		b.(*array.Decimal256Builder).Append(n)
-	case arrow.DECIMAL32:
-		b.(*array.Decimal32Builder).Append(decimal.Decimal32(v.Int()))
-	case arrow.DECIMAL64:
-		b.(*array.Decimal64Builder).Append(decimal.Decimal64(v.Int()))
 	default:
 		return fmt.Errorf("unsupported Arrow type %v: %w", dt, ErrUnsupportedType)
 	}
@@ -198,14 +182,16 @@ func iterSlice(vals reflect.Value, isPtr bool, appendNull func(), appendVal func
 	for i := 0; i < vals.Len(); i++ {
 		v := vals.Index(i)
 		if isPtr {
+			wasNull := false
 			for v.Kind() == reflect.Ptr {
 				if v.IsNil() {
 					appendNull()
+					wasNull = true
 					break
 				}
 				v = v.Elem()
 			}
-			if v.Kind() == reflect.Ptr {
+			if wasNull {
 				continue
 			}
 		}
@@ -337,6 +323,16 @@ func buildDecimalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (
 	}
 }
 
+func appendStructFields(sb *array.StructBuilder, v reflect.Value, fields []fieldMeta) error {
+	sb.Append(true)
+	for fi, fm := range fields {
+		if err := appendValue(sb.FieldBuilder(fi), v.FieldByIndex(fm.Index), fm.Opts); err != nil {
+			return fmt.Errorf("struct field %q: %w", fm.Name, err)
+		}
+	}
+	return nil
+}
+
 func buildStructArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
 	elemType := vals.Type().Elem()
 	isPtr := elemType.Kind() == reflect.Ptr
@@ -355,15 +351,7 @@ func buildStructArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, er
 	sb.Reserve(vals.Len())
 
 	if err := iterSlice(vals, isPtr, sb.AppendNull, func(v reflect.Value) error {
-		sb.Append(true)
-		for fi, fm := range fields {
-			fv := v.FieldByIndex(fm.Index)
-			fb := sb.FieldBuilder(fi)
-			if err := appendValue(fb, fv, fm.Opts); err != nil {
-				return fmt.Errorf("struct field %q: %w", fm.Name, err)
-			}
-		}
-		return nil
+		return appendStructFields(sb, v, fields)
 	}); err != nil {
 		return nil, err
 	}
@@ -524,16 +512,8 @@ func appendValue(b array.Builder, v reflect.Value, opts tagOpts) error {
 			}
 		}
 	case *array.StructBuilder:
-		elemType := v.Type()
-		fields := cachedStructFields(elemType)
-		tb.Append(true)
-		for fi, fm := range fields {
-			fv := v.FieldByIndex(fm.Index)
-			fb := tb.FieldBuilder(fi)
-			if err := appendValue(fb, fv, fm.Opts); err != nil {
-				return fmt.Errorf("struct field %q: %w", fm.Name, err)
-			}
-		}
+		fields := cachedStructFields(v.Type())
+		return appendStructFields(tb, v, fields)
 	default:
 		if db, ok := b.(array.DictionaryBuilder); ok {
 			return appendToDictBuilder(db, v)

@@ -59,6 +59,8 @@ const (
 	dec256DefaultPrecision int32 = 76
 )
 
+type listElemTyper interface{ Elem() arrow.DataType }
+
 func inferPrimitiveArrowType(t reflect.Type) (arrow.DataType, error) {
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
@@ -330,8 +332,7 @@ func InferGoType(dt arrow.DataType) (reflect.Type, error) {
 		return typeOfDec64, nil
 
 	case arrow.LIST, arrow.LARGE_LIST, arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW:
-		type listLike interface{ Elem() arrow.DataType }
-		ll, ok := dt.(listLike)
+		ll, ok := dt.(listElemTyper)
 		if !ok {
 			return nil, fmt.Errorf("unsupported Arrow type for Go inference: %v: %w", dt, ErrUnsupportedType)
 		}
