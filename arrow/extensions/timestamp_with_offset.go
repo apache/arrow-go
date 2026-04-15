@@ -445,31 +445,6 @@ func (b *TimestampWithOffsetBuilder) Append(v time.Time) {
 
 }
 
-func (b *TimestampWithOffsetBuilder) UnsafeAppend(v time.Time) {
-	timestamp, offsetMinutes := fieldValuesFromTime(v, b.unit)
-	offsetMinutes16 := int16(offsetMinutes)
-	structBuilder := b.ExtensionBuilder.Builder.(*array.StructBuilder)
-
-	structBuilder.Append(true)
-	structBuilder.FieldBuilder(0).(*array.TimestampBuilder).UnsafeAppend(timestamp)
-
-	switch offsets := structBuilder.FieldBuilder(1).(type) {
-	case *array.Int16Builder:
-		offsets.UnsafeAppend(offsetMinutes16)
-	case *array.Int16DictionaryBuilder:
-		offsets.Append(offsetMinutes16)
-	case *array.RunEndEncodedBuilder:
-		if offsetMinutes != b.lastOffset {
-			offsets.Append(1)
-			offsets.ValueBuilder().(*array.Int16Builder).Append(offsetMinutes16)
-		} else {
-			offsets.ContinueRun(1)
-		}
-
-		b.lastOffset = offsetMinutes16
-	}
-}
-
 // By default, this will try to parse the string using the RFC3339 layout.
 //
 // You can change the default layout by using builder.SetLayout()
@@ -514,7 +489,7 @@ func (b *TimestampWithOffsetBuilder) AppendValues(values []time.Time, valids []b
 			timestamp, offsetMinutes := fieldValuesFromTime(v, b.unit)
 			if valids[i] {
 				timestamps.UnsafeAppend(timestamp)
-				offsets.Append(offsetMinutes)
+				offsets.UnsafeAppend(offsetMinutes)
 			} else {
 				timestamps.UnsafeAppendBoolToBitmap(false)
 				offsets.UnsafeAppendBoolToBitmap(false)
@@ -536,7 +511,7 @@ func (b *TimestampWithOffsetBuilder) AppendValues(values []time.Time, valids []b
 				b.lastOffset = offsetMinutes16
 			} else {
 				timestamps.UnsafeAppendBoolToBitmap(false)
-				offsets.UnsafeAppendBoolToBitmap(false)
+				offsets.AppendNull()
 			}
 		}
 	}
