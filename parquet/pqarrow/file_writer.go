@@ -38,41 +38,67 @@ import (
 // Specifically, list element field names are set to "element" because
 // ListOfWithName (used by fieldToNode) always names the Parquet element group
 // "element", regardless of the original Arrow element field name.
-func normalizeFieldForParquet(f arrow.Field) arrow.Field {
+func normalizeFieldForParquet(f arrow.Field) (arrow.Field, error) {
 	switch dt := f.Type.(type) {
 	case *arrow.ListType:
-		elem := normalizeFieldForParquet(dt.ElemField())
+		elem, err := normalizeFieldForParquet(dt.ElemField())
+		if err != nil {
+			return arrow.Field{}, err
+		}
 		elem.Name = "element"
-		return arrow.Field{Name: f.Name, Type: arrow.ListOfField(elem), Nullable: f.Nullable, Metadata: f.Metadata}
+		return arrow.Field{Name: f.Name, Type: arrow.ListOfField(elem), Nullable: f.Nullable, Metadata: f.Metadata}, nil
 	case *arrow.FixedSizeListType:
-		elem := normalizeFieldForParquet(dt.ElemField())
+		elem, err := normalizeFieldForParquet(dt.ElemField())
+		if err != nil {
+			return arrow.Field{}, err
+		}
 		elem.Name = "element"
-		return arrow.Field{Name: f.Name, Type: arrow.FixedSizeListOfField(dt.Len(), elem), Nullable: f.Nullable, Metadata: f.Metadata}
+		return arrow.Field{Name: f.Name, Type: arrow.FixedSizeListOfField(dt.Len(), elem), Nullable: f.Nullable, Metadata: f.Metadata}, nil
 	case *arrow.StructType:
 		fields := make([]arrow.Field, dt.NumFields())
 		for i := 0; i < dt.NumFields(); i++ {
-			fields[i] = normalizeFieldForParquet(dt.Field(i))
+			field, err := normalizeFieldForParquet(dt.Field(i))
+			if err != nil {
+				return arrow.Field{}, err
+			}
+			fields[i] = field
 		}
-		return arrow.Field{Name: f.Name, Type: arrow.StructOf(fields...), Nullable: f.Nullable, Metadata: f.Metadata}
+		return arrow.Field{Name: f.Name, Type: arrow.StructOf(fields...), Nullable: f.Nullable, Metadata: f.Metadata}, nil
 	case *arrow.MapType:
-		key := normalizeFieldForParquet(dt.KeyField())
-		item := normalizeFieldForParquet(dt.ItemField())
-		return arrow.Field{Name: f.Name, Type: arrow.MapOfFields(key, item), Nullable: f.Nullable, Metadata: f.Metadata}
+		key, err := normalizeFieldForParquet(dt.KeyField())
+		if err != nil {
+			return arrow.Field{}, err
+		}
+		item, err := normalizeFieldForParquet(dt.ItemField())
+		if err != nil {
+			return arrow.Field{}, err
+		}
+		return arrow.Field{Name: f.Name, Type: arrow.MapOfFields(key, item), Nullable: f.Nullable, Metadata: f.Metadata}, nil
+	case *arrow.RunEndEncodedType:
+		return arrow.Field{}, fmt.Errorf("RunEndEncoded types are not supported for writing to Parquet files: field %s", f.Name)
+	case *arrow.ListViewType:
+		return arrow.Field{}, fmt.Errorf("ListView types are not supported for writing to Parquet files: field %s", f.Name)
+	case *arrow.LargeListViewType:
+		return arrow.Field{}, fmt.Errorf("LargeListView types are not supported for writing to Parquet files: field %s", f.Name)
 	}
-	return f
+	return f, nil
 }
 
 // normalizeSchemaForParquet returns a copy of the Arrow schema with list element
 // field names updated to "element" to match the Parquet column paths produced by
 // fieldToNode. This is used when storing the ARROW:schema metadata to ensure
 // consistency between the stored schema and the actual Parquet column structure.
-func normalizeSchemaForParquet(sc *arrow.Schema) *arrow.Schema {
+func normalizeSchemaForParquet(sc *arrow.Schema) (*arrow.Schema, error) {
 	fields := make([]arrow.Field, sc.NumFields())
 	for i, f := range sc.Fields() {
-		fields[i] = normalizeFieldForParquet(f)
+		field, err := normalizeFieldForParquet(f)
+		if err != nil {
+			return nil, err
+		}
+		fields[i] = field
 	}
 	meta := sc.Metadata()
-	return arrow.NewSchema(fields, &meta)
+	return arrow.NewSchema(fields, &meta), nil
 }
 
 // WriteTable is a convenience function to create and write a full array.Table to a parquet file. The schema
@@ -128,7 +154,10 @@ func NewFileWriter(arrschema *arrow.Schema, w io.Writer, props *parquet.WriterPr
 		// arrow.ListOf() uses "item" as the Arrow element field name. This
 		// inconsistency causes readers (e.g. Snowflake) that map ARROW:schema field
 		// names to Parquet column paths to fail to locate the correct columns.
-		schemaToStore := normalizeSchemaForParquet(arrschema)
+		schemaToStore, err := normalizeSchemaForParquet(arrschema)
+		if err != nil {
+			return nil, err
+		}
 		serializedSchema := flight.SerializeSchema(schemaToStore, props.Allocator())
 		meta.Append("ARROW:schema", base64.StdEncoding.EncodeToString(serializedSchema))
 	}

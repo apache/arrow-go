@@ -299,7 +299,7 @@ func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties
 		}
 	case arrow.STRUCT:
 		return structToNode(field, props, arrprops)
-	case arrow.FIXED_SIZE_LIST, arrow.LIST:
+	case arrow.FIXED_SIZE_LIST, arrow.LIST, arrow.LARGE_LIST:
 		elemField := field.Type.(arrow.ListLikeType).ElemField()
 
 		child, err := fieldToNode(name, elemField, props, arrprops)
