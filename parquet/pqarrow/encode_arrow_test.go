@@ -19,6 +19,7 @@ package pqarrow_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -1532,9 +1533,9 @@ func makeListArray(values arrow.Array, size, nullcount int) arrow.Array {
 	nullBitmap := make([]byte, int(bitutil.BytesForBits(int64(size))))
 
 	curOffset := 0
-	for i := 0; i < size; i++ {
+	for i := range size {
 		offsetsArr[i] = int32(curOffset)
-		if !(((i % 2) == 0) && ((i / 2) < nullcount)) {
+		if i%2 != 0 || i/2 >= nullcount {
 			// non-null list (list with index 1 is always empty)
 			bitutil.SetBit(nullBitmap, i)
 			if i != 1 {
@@ -2106,6 +2107,105 @@ func (ps *ParquetIOTestSuite) TestStructWithListOfNestedStructs() {
 	defer expected.Release()
 
 	ps.roundTripTable(mem, expected, false)
+}
+
+// TestListOfStructWithEmptyListStoreSchema tests that ARROW:schema metadata stored
+// in a Parquet file uses "element" (not "item") as the list element field name, to
+// match the actual Parquet column paths. This is required for compatibility with
+// readers like Snowflake that resolve columns by matching ARROW:schema field names
+// to Parquet column path segments. See https://github.com/apache/arrow-go/issues/744.
+func TestListOfStructWithEmptyListStoreSchema(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	opsStruct := arrow.StructOf(
+		arrow.Field{Name: "id", Type: arrow.BinaryTypes.String, Nullable: false},
+		arrow.Field{Name: "token", Type: arrow.BinaryTypes.String, Nullable: true},
+		arrow.Field{Name: "amount", Type: arrow.BinaryTypes.String, Nullable: true},
+	)
+	// arrow.ListOf uses "item" as the element field name, which would mismatch
+	// the Parquet column path that uses "element". The fix ensures the stored
+	// ARROW:schema uses "element" to stay consistent with the Parquet columns.
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "block_num", Type: arrow.PrimitiveTypes.Uint64, Nullable: false},
+		{Name: "tx_id", Type: arrow.BinaryTypes.String, Nullable: false},
+		{Name: "ops", Type: arrow.ListOf(opsStruct), Nullable: true},
+	}, nil)
+
+	b := array.NewRecordBuilder(mem, schema)
+	defer b.Release()
+
+	b.Field(0).(*array.Uint64Builder).AppendValues([]uint64{100, 101, 102}, nil)
+	b.Field(1).(*array.StringBuilder).AppendValues([]string{"tx-a", "tx-b", "tx-c"}, nil)
+
+	lb := b.Field(2).(*array.ListBuilder)
+	sb := lb.ValueBuilder().(*array.StructBuilder)
+	idb := sb.FieldBuilder(0).(*array.StringBuilder)
+	tokb := sb.FieldBuilder(1).(*array.StringBuilder)
+	amtb := sb.FieldBuilder(2).(*array.StringBuilder)
+
+	lb.Append(true)
+	sb.Append(true)
+	idb.Append("op-1")
+	tokb.Append("USDC")
+	amtb.Append("10")
+	sb.Append(true)
+	idb.Append("op-2")
+	tokb.Append("ETH")
+	amtb.Append("1.5")
+	lb.Append(true) // empty list
+	lb.Append(true)
+	sb.Append(true)
+	idb.Append("op-3")
+	tokb.AppendNull()
+	amtb.Append("42")
+
+	rec := b.NewRecordBatch()
+	defer rec.Release()
+
+	var buf bytes.Buffer
+	props := parquet.NewWriterProperties(parquet.WithDictionaryDefault(true), parquet.WithStats(true))
+	arrowProps := pqarrow.NewArrowWriterProperties(pqarrow.WithStoreSchema())
+
+	pw, err := pqarrow.NewFileWriter(schema, &buf, props, arrowProps)
+	require.NoError(t, err)
+	require.NoError(t, pw.Write(rec))
+	require.NoError(t, pw.Close())
+
+	// Verify round-trip data is correct.
+	pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer pf.Close()
+
+	fr, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{}, mem)
+	require.NoError(t, err)
+
+	tbl, err := fr.ReadTable(context.Background())
+	require.NoError(t, err)
+	defer tbl.Release()
+
+	require.EqualValues(t, 3, tbl.NumRows())
+
+	// Verify the stored ARROW:schema uses "element" as the list element field name
+	// (consistent with the Parquet column path "ops.list.element.*"), not "item"
+	// (the default Arrow field name from arrow.ListOf()).
+	arrowSchemaEncoded := pf.MetaData().KeyValueMetadata().FindValue("ARROW:schema")
+	require.NotNil(t, arrowSchemaEncoded, "ARROW:schema metadata key must be present")
+	decoded, err := base64.StdEncoding.DecodeString(*arrowSchemaEncoded)
+	require.NoError(t, err)
+	// DeserializeSchema wraps bytes in an IPC stream; use ipc.NewReader to decode.
+	ipcRdr, err := ipc.NewReader(bytes.NewReader(decoded), ipc.WithAllocator(mem))
+	require.NoError(t, err)
+	defer ipcRdr.Release()
+	storedSchema := ipcRdr.Schema()
+
+	opsField, ok := storedSchema.FieldsByName("ops")
+	require.True(t, ok)
+	opsListType, ok := opsField[0].Type.(*arrow.ListType)
+	require.True(t, ok)
+	// Must be "element" (matching Parquet column path) not "item" (Arrow default).
+	assert.Equal(t, "element", opsListType.ElemField().Name,
+		"ARROW:schema element name must match the Parquet column path segment")
 }
 
 func TestParquetArrowIO(t *testing.T) {

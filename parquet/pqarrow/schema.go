@@ -299,7 +299,7 @@ func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties
 		}
 	case arrow.STRUCT:
 		return structToNode(field, props, arrprops)
-	case arrow.FIXED_SIZE_LIST, arrow.LIST:
+	case arrow.FIXED_SIZE_LIST, arrow.LIST, arrow.LARGE_LIST:
 		elemField := field.Type.(arrow.ListLikeType).ElemField()
 
 		child, err := fieldToNode(name, elemField, props, arrprops)
@@ -722,7 +722,7 @@ func listToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *s
 		//   If the name is array or ends in _tuple, this should be a list of struct
 		//   even for single child elements.
 		listGroup := listNode.(*schema.GroupNode)
-		if listGroup.NumFields() == 1 && !(listGroup.Name() == "array" || listGroup.Name() == (n.Name()+"_tuple")) {
+		if listGroup.NumFields() == 1 && (listGroup.Name() != "array" && listGroup.Name() != n.Name()+"_tuple") {
 			// list of primitive type
 			if err := nodeToSchemaField(listGroup.Field(0), currentLevels, ctx, out, &out.Children[0]); err != nil {
 				return err
