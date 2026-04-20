@@ -228,7 +228,8 @@ func (fw *Writer) AppendKeyValueMetadata(key string, value string) error {
 }
 
 // Close closes any open row group writer and writes the file footer. Subsequent
-// calls to close will have no effect.
+// calls to close will have no effect. If the underlying writer implements [io.Closer],
+// then this will also call Close on the underlying writer.
 func (fw *Writer) Close() (err error) {
 	if fw.open {
 		// if any functions here panic, we set open to be false so
@@ -250,7 +251,7 @@ func (fw *Writer) Close() (err error) {
 
 		err = fw.FlushWithFooter()
 	}
-	return nil
+	return
 }
 
 // FileMetadata returns the current state of the FileMetadata that would be written
