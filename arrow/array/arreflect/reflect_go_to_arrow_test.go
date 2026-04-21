@@ -290,6 +290,49 @@ func TestBuildStructArray(t *testing.T) {
 		assert.Equal(t, int32(99), xArr.Value(0))
 		assert.Equal(t, int32(99), xArr.Value(2))
 	})
+
+	t.Run("nil_embedded_pointer_promoted_field", func(t *testing.T) {
+		// Regression: reflect.Value.FieldByIndex panics when traversing a nil
+		// embedded pointer; promoted fields must become null instead.
+		type Inner struct {
+			City string
+			Zip  int32
+		}
+		type Outer struct {
+			Name string
+			*Inner
+		}
+		vals := []Outer{
+			{Name: "Alice", Inner: &Inner{City: "NYC", Zip: 10001}},
+			{Name: "Bob", Inner: nil},
+			{Name: "Carol", Inner: &Inner{City: "LA", Zip: 90001}},
+		}
+		arr := mustBuildDefault(t, vals, mem)
+		require.Equal(t, arrow.STRUCT, arr.DataType().ID())
+		sa := arr.(*array.Struct)
+		require.Equal(t, 3, sa.Len())
+		require.Equal(t, 3, sa.NumField(), "expected 3 promoted fields (Name, City, Zip)")
+
+		nameArr := sa.Field(0).(*array.String)
+		cityArr := sa.Field(1).(*array.String)
+		zipArr := sa.Field(2).(*array.Int32)
+
+		assert.Equal(t, "Alice", nameArr.Value(0))
+		assert.False(t, cityArr.IsNull(0))
+		assert.Equal(t, "NYC", cityArr.Value(0))
+		assert.False(t, zipArr.IsNull(0))
+		assert.Equal(t, int32(10001), zipArr.Value(0))
+
+		assert.Equal(t, "Bob", nameArr.Value(1))
+		assert.True(t, cityArr.IsNull(1), "City should be null when *Inner is nil")
+		assert.True(t, zipArr.IsNull(1), "Zip should be null when *Inner is nil")
+
+		assert.Equal(t, "Carol", nameArr.Value(2))
+		assert.False(t, cityArr.IsNull(2))
+		assert.Equal(t, "LA", cityArr.Value(2))
+		assert.False(t, zipArr.IsNull(2))
+		assert.Equal(t, int32(90001), zipArr.Value(2))
+	})
 }
 
 func TestBuildListArray(t *testing.T) {

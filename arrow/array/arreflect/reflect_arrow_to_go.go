@@ -19,6 +19,7 @@ package arreflect
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -51,8 +52,10 @@ func setValue(v reflect.Value, arr arrow.Array, i int) error {
 		v.Set(reflect.Zero(v.Type()))
 		return nil
 	}
-	if v.Kind() == reflect.Ptr {
-		v.Set(reflect.New(v.Type().Elem()))
+	for v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			v.Set(reflect.New(v.Type().Elem()))
+		}
 		v = v.Elem()
 	}
 
@@ -81,7 +84,7 @@ func setValue(v reflect.Value, arr arrow.Array, i int) error {
 		if v.Kind() != reflect.String {
 			return fmt.Errorf("cannot set string into %s: %w", v.Type(), ErrTypeMismatch)
 		}
-		v.SetString(a.Value(i))
+		v.SetString(strings.Clone(a.Value(i)))
 
 	case arrow.BINARY, arrow.LARGE_BINARY:
 		type byter interface{ Value(int) []byte }
@@ -92,7 +95,10 @@ func setValue(v reflect.Value, arr arrow.Array, i int) error {
 		if v.Kind() != reflect.Slice || v.Type().Elem().Kind() != reflect.Uint8 {
 			return fmt.Errorf("cannot set []byte into %s: %w", v.Type(), ErrTypeMismatch)
 		}
-		v.SetBytes(a.Value(i))
+		src := a.Value(i)
+		dst := make([]byte, len(src))
+		copy(dst, src)
+		v.SetBytes(dst)
 
 	case arrow.TIMESTAMP, arrow.DATE32, arrow.DATE64,
 		arrow.TIME32, arrow.TIME64, arrow.DURATION:
@@ -336,7 +342,12 @@ func setStructValue(v reflect.Value, sa *array.Struct, i int) error {
 		if !found {
 			continue
 		}
-		if err := setValue(v.FieldByIndex(fm.Index), sa.Field(arrowIdx), i); err != nil {
+		fv, ok := fieldByIndexSafe(v, fm.Index)
+		if !ok {
+			// embedded pointer is nil; leave the field at its zero value
+			continue
+		}
+		if err := setValue(fv, sa.Field(arrowIdx), i); err != nil {
 			return fmt.Errorf("arreflect: field %q: %w", fm.Name, err)
 		}
 	}

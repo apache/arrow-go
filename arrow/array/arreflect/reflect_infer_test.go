@@ -417,7 +417,6 @@ func TestInferGoTypeStructInvalidIdentifier(t *testing.T) {
 		{"hyphenated", "my-field"},
 		{"space", "a b"},
 		{"dot", "first.name"},
-		{"digit prefix", "1st"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -426,4 +425,19 @@ func TestInferGoTypeStructInvalidIdentifier(t *testing.T) {
 			assert.ErrorIs(t, err, ErrUnsupportedType)
 		})
 	}
+
+	t.Run("non-letter prefix mapped", func(t *testing.T) {
+		for _, tc := range []struct {
+			name     string
+			expected string
+		}{
+			{"_id", "X_id"},
+			{"1st", "X1st"},
+		} {
+			st := arrow.StructOf(arrow.Field{Name: tc.name, Type: arrow.PrimitiveTypes.Int32})
+			goType, err := InferGoType(st)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.expected, goType.Field(0).Name)
+		}
+	})
 }

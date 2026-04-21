@@ -263,6 +263,25 @@ func TestFromGoSlice(t *testing.T) {
 		_, err := FromSlice([]string{}, mem, WithTemporal("date32"))
 		assert.ErrorIs(t, err, ErrUnsupportedType)
 	})
+
+	t.Run("conflicting options return error", func(t *testing.T) {
+		cases := []struct {
+			name string
+			opts []Option
+		}{
+			{"WithDict+WithREE", []Option{WithDict(), WithREE()}},
+			{"WithDict+WithListView", []Option{WithDict(), WithListView()}},
+			{"WithREE+WithListView", []Option{WithREE(), WithListView()}},
+			{"all three", []Option{WithDict(), WithREE(), WithListView()}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := FromSlice([]int32{1, 2, 3}, mem, tc.opts...)
+				require.Error(t, err)
+				assert.ErrorIs(t, err, ErrUnsupportedType)
+			})
+		}
+	})
 }
 
 func TestRecordToSlice(t *testing.T) {

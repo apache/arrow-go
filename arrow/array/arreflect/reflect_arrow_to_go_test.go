@@ -378,6 +378,59 @@ func TestSetStructValue(t *testing.T) {
 		assert.Equal(t, "Dave", got.Name)
 		assert.Equal(t, "", got.Email)
 	})
+
+	t.Run("nil embedded pointer leaves promoted fields zero", func(t *testing.T) {
+		// Regression: reflect.Value.FieldByIndex panics on nil embedded pointer;
+		// the walker must stop and leave promoted fields at their zero value.
+		nameArr := makeStringArray(t, mem, "Alice")
+		cityArr := makeStringArray(t, mem, "NYC")
+		sa := makeStructArray(t, []arrow.Array{nameArr, cityArr}, []string{"Name", "City"})
+
+		type Inner struct {
+			City string
+		}
+		type Outer struct {
+			Name string
+			*Inner
+		}
+
+		var got Outer
+		setValueInto(t, &got, sa, 0)
+		assert.Equal(t, "Alice", got.Name)
+		assert.Nil(t, got.Inner, "nil embedded pointer should remain nil; promoted City left at zero value")
+	})
+}
+
+func TestSetValueClonesStringAndBytes(t *testing.T) {
+	// Regression: String.Value / Binary.Value return views into the array's
+	// backing buffer. setValue must copy so Go values outlive the array.
+	mem := checkedMem(t)
+
+	t.Run("string", func(t *testing.T) {
+		sb := array.NewStringBuilder(mem)
+		sb.Append("hello world")
+		arr := sb.NewStringArray()
+		sb.Release()
+
+		var got string
+		setValueInto(t, &got, arr, 0)
+		assert.Equal(t, "hello world", got)
+		arr.Release()
+		assert.Equal(t, "hello world", got, "string must survive Arrow array release")
+	})
+
+	t.Run("bytes", func(t *testing.T) {
+		bb := array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
+		bb.Append([]byte{0x01, 0x02, 0x03, 0x04})
+		arr := bb.NewBinaryArray()
+		bb.Release()
+
+		var got []byte
+		setValueInto(t, &got, arr, 0)
+		assert.Equal(t, []byte{0x01, 0x02, 0x03, 0x04}, got)
+		arr.Release()
+		assert.Equal(t, []byte{0x01, 0x02, 0x03, 0x04}, got, "[]byte must survive Arrow array release")
+	})
 }
 
 func TestSetListValue(t *testing.T) {

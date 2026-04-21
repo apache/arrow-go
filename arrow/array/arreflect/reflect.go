@@ -328,6 +328,19 @@ func cachedStructFields(t reflect.Type) []fieldMeta {
 	return v.([]fieldMeta)
 }
 
+func fieldByIndexSafe(v reflect.Value, index []int) (reflect.Value, bool) {
+	for _, idx := range index {
+		if v.Kind() == reflect.Ptr {
+			if v.IsNil() {
+				return reflect.Value{}, false
+			}
+			v = v.Elem()
+		}
+		v = v.Field(idx)
+	}
+	return v, true
+}
+
 func At[T any](arr arrow.Array, i int) (T, error) {
 	var result T
 	v := reflect.ValueOf(&result).Elem()
@@ -388,6 +401,23 @@ func validateTemporalOpt(temporal string) error {
 	}
 }
 
+func validateOptions(opts tagOpts) error {
+	n := 0
+	if opts.Dict {
+		n++
+	}
+	if opts.REE {
+		n++
+	}
+	if opts.ListView {
+		n++
+	}
+	if n > 1 {
+		return fmt.Errorf("arreflect: conflicting options: only one of WithDict, WithREE, WithListView may be specified: %w", ErrUnsupportedType)
+	}
+	return nil
+}
+
 func buildEmptyTyped(goType reflect.Type, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
 	dt, err := inferArrowType(goType)
 	if err != nil {
@@ -433,6 +463,9 @@ func FromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.Arr
 	var tOpts tagOpts
 	for _, o := range opts {
 		o(&tOpts)
+	}
+	if err := validateOptions(tOpts); err != nil {
+		return nil, err
 	}
 	if err := validateTemporalOpt(tOpts.Temporal); err != nil {
 		return nil, err

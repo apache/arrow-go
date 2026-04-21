@@ -239,7 +239,12 @@ func buildDecimalArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (
 func appendStructFields(sb *array.StructBuilder, v reflect.Value, fields []fieldMeta) error {
 	sb.Append(true)
 	for fi, fm := range fields {
-		if err := appendValue(sb.FieldBuilder(fi), v.FieldByIndex(fm.Index)); err != nil {
+		fv, ok := fieldByIndexSafe(v, fm.Index)
+		if !ok {
+			sb.FieldBuilder(fi).AppendNull()
+			continue
+		}
+		if err := appendValue(sb.FieldBuilder(fi), fv); err != nil {
 			return fmt.Errorf("struct field %q: %w", fm.Name, err)
 		}
 	}

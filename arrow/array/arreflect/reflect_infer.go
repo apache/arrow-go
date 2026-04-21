@@ -385,13 +385,19 @@ func exportedFieldName(name string, index int) (string, error) {
 		return fmt.Sprintf("Field%d", index), nil
 	}
 	runes := []rune(name)
-	runes[0] = unicode.ToUpper(runes[0])
+	// If the first rune is not a letter (e.g. '_', digit), prefix with "X"
+	// to produce a valid exported Go identifier while preserving the original
+	// name in the struct tag.
+	if !unicode.IsLetter(runes[0]) {
+		runes = append([]rune{'X'}, runes...)
+	} else {
+		runes[0] = unicode.ToUpper(runes[0])
+	}
 	for j, r := range runes {
 		if j == 0 {
-			if !unicode.IsLetter(r) {
-				return "", fmt.Errorf("arreflect: InferGoType: field name %q produces invalid Go identifier: %w", name, ErrUnsupportedType)
-			}
-		} else if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
+			continue
+		}
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
 			return "", fmt.Errorf("arreflect: InferGoType: field name %q produces invalid Go identifier: %w", name, ErrUnsupportedType)
 		}
 	}
