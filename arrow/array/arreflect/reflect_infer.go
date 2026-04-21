@@ -223,6 +223,9 @@ func inferStructType(t reflect.Type) (*arrow.StructType, error) {
 	arrowFields := make([]arrow.Field, 0, len(fields))
 
 	for _, fm := range fields {
+		if err := validateOptions(fm.Opts); err != nil {
+			return nil, fmt.Errorf("struct field %q: %w", fm.Name, err)
+		}
 		origType := fm.Type
 		for origType.Kind() == reflect.Ptr {
 			origType = origType.Elem()

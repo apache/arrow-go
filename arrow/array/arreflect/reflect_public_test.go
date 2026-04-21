@@ -23,6 +23,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -261,6 +262,20 @@ func TestFromGoSlice(t *testing.T) {
 
 	t.Run("WithTemporal on non-time type returns error", func(t *testing.T) {
 		_, err := FromSlice([]string{}, mem, WithTemporal("date32"))
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+
+	t.Run("WithTemporal timestamp on non-time type returns error", func(t *testing.T) {
+		_, err := FromSlice([]string{}, mem, WithTemporal("timestamp"))
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+
+	t.Run("struct field with malformed decimal tag returns error", func(t *testing.T) {
+		type BadDecimal struct {
+			Amount decimal128.Num `arrow:",decimal(18,two)"`
+		}
+		_, err := FromSlice([]BadDecimal{}, mem)
+		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrUnsupportedType)
 	})
 

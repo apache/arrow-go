@@ -1011,3 +1011,55 @@ func TestAppendDecimalValueErrors(t *testing.T) {
 		assert.ErrorIs(t, err, ErrUnsupportedType)
 	})
 }
+
+func TestAppendTemporalValueUnitHandling(t *testing.T) {
+	mem := checkedMem(t)
+	ref := time.Date(2024, 1, 15, 12, 34, 56, 789_000_000, time.UTC)
+
+	timestampCases := []struct {
+		name string
+		unit arrow.TimeUnit
+	}{
+		{"timestamp_second", arrow.Second},
+		{"timestamp_millisecond", arrow.Millisecond},
+		{"timestamp_microsecond", arrow.Microsecond},
+		{"timestamp_nanosecond", arrow.Nanosecond},
+	}
+	for _, tc := range timestampCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dt := &arrow.TimestampType{Unit: tc.unit}
+			b := array.NewTimestampBuilder(mem, dt)
+			defer b.Release()
+			require.NoError(t, appendTemporalValue(b, reflect.ValueOf(ref)))
+			arr := b.NewArray().(*array.Timestamp)
+			defer arr.Release()
+			got := int64(arr.Value(0))
+			want := ref.UnixNano() / int64(tc.unit.Multiplier())
+			assert.Equal(t, want, got, "%s: stored value should be scaled by unit", tc.name)
+		})
+	}
+
+	durationCases := []struct {
+		name string
+		unit arrow.TimeUnit
+		d    time.Duration
+	}{
+		{"duration_second", arrow.Second, 90 * time.Second},
+		{"duration_millisecond", arrow.Millisecond, 1500 * time.Millisecond},
+		{"duration_microsecond", arrow.Microsecond, 2500 * time.Microsecond},
+		{"duration_nanosecond", arrow.Nanosecond, 12345 * time.Nanosecond},
+	}
+	for _, tc := range durationCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dt := &arrow.DurationType{Unit: tc.unit}
+			b := array.NewDurationBuilder(mem, dt)
+			defer b.Release()
+			require.NoError(t, appendTemporalValue(b, reflect.ValueOf(tc.d)))
+			arr := b.NewArray().(*array.Duration)
+			defer arr.Release()
+			got := int64(arr.Value(0))
+			want := tc.d.Nanoseconds() / int64(tc.unit.Multiplier())
+			assert.Equal(t, want, got, "%s: stored value should be scaled by unit", tc.name)
+		})
+	}
+}

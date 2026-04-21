@@ -276,11 +276,12 @@ func buildStructArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, er
 func appendTemporalValue(b array.Builder, v reflect.Value) error {
 	switch tb := b.(type) {
 	case *array.TimestampBuilder:
+		unit := tb.Type().(*arrow.TimestampType).Unit
 		t, err := asTime(v)
 		if err != nil {
 			return err
 		}
-		tb.Append(arrow.Timestamp(t.UnixNano()))
+		tb.Append(arrow.Timestamp(t.UnixNano() / int64(unit.Multiplier())))
 	case *array.Date32Builder:
 		t, err := asTime(v)
 		if err != nil {
@@ -308,11 +309,12 @@ func appendTemporalValue(b array.Builder, v reflect.Value) error {
 		}
 		tb.Append(arrow.Time64(timeOfDayNanos(t) / int64(unit.Multiplier())))
 	case *array.DurationBuilder:
+		unit := tb.Type().(*arrow.DurationType).Unit
 		d, err := asDuration(v)
 		if err != nil {
 			return err
 		}
-		tb.Append(arrow.Duration(d.Nanoseconds()))
+		tb.Append(arrow.Duration(d.Nanoseconds() / int64(unit.Multiplier())))
 	default:
 		return fmt.Errorf("unexpected temporal builder %T: %w", b, ErrUnsupportedType)
 	}

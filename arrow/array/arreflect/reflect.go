@@ -45,6 +45,7 @@ type tagOpts struct {
 	DecimalScale     int32
 	HasDecimalOpts   bool
 	Temporal         string // "timestamp" (default), "date32", "date64", "time32", "time64"
+	DecimalParseErr  string // diagnostic set when decimal(p,s) tag fails to parse; surfaced by validateOptions
 }
 
 type fieldMeta struct {
@@ -125,15 +126,23 @@ func parseDecimalOpt(opts *tagOpts, token string) {
 	inner := strings.TrimPrefix(token, "decimal(")
 	inner = strings.TrimSuffix(inner, ")")
 	parts := strings.SplitN(inner, ",", 2)
-	if len(parts) == 2 {
-		p, errP := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 32)
-		s, errS := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 32)
-		if errP == nil && errS == nil {
-			opts.HasDecimalOpts = true
-			opts.DecimalPrecision = int32(p)
-			opts.DecimalScale = int32(s)
-		}
+	if len(parts) != 2 {
+		opts.DecimalParseErr = fmt.Sprintf("invalid decimal tag %q: expected decimal(precision,scale)", token)
+		return
 	}
+	p, errP := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 32)
+	if errP != nil {
+		opts.DecimalParseErr = fmt.Sprintf("invalid decimal tag %q: precision %q is not an integer", token, strings.TrimSpace(parts[0]))
+		return
+	}
+	s, errS := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 32)
+	if errS != nil {
+		opts.DecimalParseErr = fmt.Sprintf("invalid decimal tag %q: scale %q is not an integer", token, strings.TrimSpace(parts[1]))
+		return
+	}
+	opts.HasDecimalOpts = true
+	opts.DecimalPrecision = int32(p)
+	opts.DecimalScale = int32(s)
 }
 
 type bfsEntry struct {
@@ -402,6 +411,9 @@ func validateTemporalOpt(temporal string) error {
 }
 
 func validateOptions(opts tagOpts) error {
+	if opts.DecimalParseErr != "" {
+		return fmt.Errorf("arreflect: %s: %w", opts.DecimalParseErr, ErrUnsupportedType)
+	}
 	n := 0
 	if opts.Dict {
 		n++
@@ -470,8 +482,7 @@ func FromSlice[T any](vals []T, mem memory.Allocator, opts ...Option) (arrow.Arr
 	if err := validateTemporalOpt(tOpts.Temporal); err != nil {
 		return nil, err
 	}
-	// "timestamp" is excluded: it is a no-op for non-time.Time types via applyTemporalOpts.
-	if tOpts.Temporal != "" && tOpts.Temporal != "timestamp" {
+	if tOpts.Temporal != "" {
 		goType := reflect.TypeFor[T]()
 		deref := goType
 		for deref.Kind() == reflect.Ptr {

@@ -301,3 +301,37 @@ func TestBuildEmptyTyped(t *testing.T) {
 		assert.Equal(t, arrow.RUN_END_ENCODED, arr.DataType().ID())
 	})
 }
+
+func TestParseDecimalOpt(t *testing.T) {
+	t.Run("valid_tag_sets_precision_and_scale", func(t *testing.T) {
+		got := parseTag(",decimal(18,2)")
+		assert.True(t, got.HasDecimalOpts)
+		assert.Equal(t, int32(18), got.DecimalPrecision)
+		assert.Equal(t, int32(2), got.DecimalScale)
+		assert.Empty(t, got.DecimalParseErr)
+	})
+
+	t.Run("non_integer_precision_records_error", func(t *testing.T) {
+		got := parseTag(",decimal(abc,2)")
+		assert.False(t, got.HasDecimalOpts)
+		assert.NotEmpty(t, got.DecimalParseErr)
+	})
+
+	t.Run("non_integer_scale_records_error", func(t *testing.T) {
+		got := parseTag(",decimal(18,two)")
+		assert.False(t, got.HasDecimalOpts)
+		assert.NotEmpty(t, got.DecimalParseErr)
+	})
+
+	t.Run("missing_scale_records_error", func(t *testing.T) {
+		got := parseTag(",decimal(18)")
+		assert.False(t, got.HasDecimalOpts)
+		assert.NotEmpty(t, got.DecimalParseErr)
+	})
+
+	t.Run("validateOptions_surfaces_parse_error", func(t *testing.T) {
+		err := validateOptions(tagOpts{DecimalParseErr: "bad decimal tag"})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+}
