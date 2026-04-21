@@ -19,7 +19,9 @@ package arreflect
 import (
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -176,6 +178,33 @@ func TestGetStructFields(t *testing.T) {
 		require.Len(t, fields, 1)
 		assert.Equal(t, "inner_struct", fields[0].Name)
 	})
+
+	t.Run("pointer to struct is dereferenced", func(t *testing.T) {
+		type Simple struct {
+			X int32
+			Y string
+		}
+		fields := getStructFields(reflect.TypeOf(&Simple{}))
+		require.Len(t, fields, 2)
+		assert.Equal(t, "X", fields[0].Name)
+		assert.Equal(t, "Y", fields[1].Name)
+	})
+
+	t.Run("multi-level pointer to struct is dereferenced", func(t *testing.T) {
+		type Simple struct {
+			X int32
+		}
+		var pp **Simple
+		fields := getStructFields(reflect.TypeOf(pp))
+		require.Len(t, fields, 1)
+		assert.Equal(t, "X", fields[0].Name)
+	})
+
+	t.Run("non-struct type returns nil", func(t *testing.T) {
+		assert.Nil(t, getStructFields(reflect.TypeOf(int32(0))))
+		assert.Nil(t, getStructFields(reflect.TypeOf("")))
+		assert.Nil(t, getStructFields(reflect.TypeOf([]int32{})))
+	})
 }
 
 func TestCachedStructFields(t *testing.T) {
@@ -196,4 +225,79 @@ func TestCachedStructFields(t *testing.T) {
 	require.Len(t, fields1, 2)
 	assert.Equal(t, "X", fields1[0].Name)
 	assert.Equal(t, "Y", fields1[1].Name)
+}
+
+func TestBuildEmptyTyped(t *testing.T) {
+	mem := checkedMem(t)
+
+	t.Run("unsupported_type_returns_error", func(t *testing.T) {
+		_, err := buildEmptyTyped(reflect.TypeOf((chan int)(nil)), tagOpts{}, mem)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+
+	t.Run("pointer_element_type_is_dereferenced", func(t *testing.T) {
+		arr, err := buildEmptyTyped(reflect.TypeOf((*int32)(nil)), tagOpts{}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, 0, arr.Len())
+		assert.Equal(t, arrow.INT32, arr.DataType().ID())
+	})
+
+	t.Run("multi_level_pointer_element_type", func(t *testing.T) {
+		arr, err := buildEmptyTyped(reflect.TypeOf((**int32)(nil)), tagOpts{}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, 0, arr.Len())
+		assert.Equal(t, arrow.INT32, arr.DataType().ID())
+	})
+
+	t.Run("listview_on_non_slice_type_errors", func(t *testing.T) {
+		_, err := buildEmptyTyped(reflect.TypeOf(int32(0)), tagOpts{ListView: true}, mem)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+
+	t.Run("listview_on_byte_slice_errors", func(t *testing.T) {
+		_, err := buildEmptyTyped(reflect.TypeOf([]byte(nil)), tagOpts{ListView: true}, mem)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+
+	t.Run("listview_with_slice_of_pointers_derefs_inner", func(t *testing.T) {
+		arr, err := buildEmptyTyped(reflect.TypeOf([]*int32(nil)), tagOpts{ListView: true}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, 0, arr.Len())
+		assert.Equal(t, arrow.LIST_VIEW, arr.DataType().ID())
+	})
+
+	t.Run("listview_happy_path", func(t *testing.T) {
+		arr, err := buildEmptyTyped(reflect.TypeOf([]int32(nil)), tagOpts{ListView: true}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, arrow.LIST_VIEW, arr.DataType().ID())
+	})
+
+	t.Run("dict_with_unsupported_value_type_errors", func(t *testing.T) {
+		_, err := buildEmptyTyped(reflect.TypeOf(time.Time{}), tagOpts{Dict: true}, mem)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+
+	t.Run("dict_happy_path", func(t *testing.T) {
+		arr, err := buildEmptyTyped(reflect.TypeOf(""), tagOpts{Dict: true}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, 0, arr.Len())
+		assert.Equal(t, arrow.DICTIONARY, arr.DataType().ID())
+	})
+
+	t.Run("ree_happy_path", func(t *testing.T) {
+		arr, err := buildEmptyTyped(reflect.TypeOf(int32(0)), tagOpts{REE: true}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, 0, arr.Len())
+		assert.Equal(t, arrow.RUN_END_ENCODED, arr.DataType().ID())
+	})
 }

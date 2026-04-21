@@ -441,3 +441,196 @@ func TestInferGoTypeStructInvalidIdentifier(t *testing.T) {
 		}
 	})
 }
+
+func TestInferGoTypeAllPrimitives(t *testing.T) {
+	cases := []struct {
+		name string
+		dt   arrow.DataType
+		want reflect.Type
+	}{
+		{"int8", arrow.PrimitiveTypes.Int8, reflect.TypeOf(int8(0))},
+		{"int16", arrow.PrimitiveTypes.Int16, reflect.TypeOf(int16(0))},
+		{"int64", arrow.PrimitiveTypes.Int64, reflect.TypeOf(int64(0))},
+		{"uint8", arrow.PrimitiveTypes.Uint8, reflect.TypeOf(uint8(0))},
+		{"uint16", arrow.PrimitiveTypes.Uint16, reflect.TypeOf(uint16(0))},
+		{"uint32", arrow.PrimitiveTypes.Uint32, reflect.TypeOf(uint32(0))},
+		{"uint64", arrow.PrimitiveTypes.Uint64, reflect.TypeOf(uint64(0))},
+		{"float32", arrow.PrimitiveTypes.Float32, reflect.TypeOf(float32(0))},
+		{"large_string", arrow.BinaryTypes.LargeString, reflect.TypeOf("")},
+		{"large_binary", arrow.BinaryTypes.LargeBinary, reflect.TypeOf([]byte{})},
+		{"date32", arrow.FixedWidthTypes.Date32, reflect.TypeOf(time.Time{})},
+		{"date64", arrow.FixedWidthTypes.Date64, reflect.TypeOf(time.Time{})},
+		{"time32_ms", &arrow.Time32Type{Unit: arrow.Millisecond}, reflect.TypeOf(time.Time{})},
+		{"time64_ns", &arrow.Time64Type{Unit: arrow.Nanosecond}, reflect.TypeOf(time.Time{})},
+		{"decimal32", &arrow.Decimal32Type{Precision: 9, Scale: 2}, reflect.TypeOf(decimal.Decimal32(0))},
+		{"decimal64", &arrow.Decimal64Type{Precision: 18, Scale: 3}, reflect.TypeOf(decimal.Decimal64(0))},
+		{"decimal128", &arrow.Decimal128Type{Precision: 10, Scale: 2}, reflect.TypeOf(decimal128.Num{})},
+		{"decimal256", &arrow.Decimal256Type{Precision: 20, Scale: 4}, reflect.TypeOf(decimal256.Num{})},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := InferGoType(tc.dt)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestInferGoTypeCompositeTypes(t *testing.T) {
+	t.Run("large_list", func(t *testing.T) {
+		got, err := InferGoType(arrow.LargeListOf(arrow.PrimitiveTypes.Int64))
+		require.NoError(t, err)
+		assert.Equal(t, reflect.Slice, got.Kind())
+		assert.Equal(t, reflect.Int64, got.Elem().Kind())
+	})
+
+	t.Run("list_view", func(t *testing.T) {
+		got, err := InferGoType(arrow.ListViewOf(arrow.PrimitiveTypes.Int32))
+		require.NoError(t, err)
+		assert.Equal(t, reflect.Slice, got.Kind())
+		assert.Equal(t, reflect.Int32, got.Elem().Kind())
+	})
+
+	t.Run("large_list_view", func(t *testing.T) {
+		got, err := InferGoType(arrow.LargeListViewOf(arrow.PrimitiveTypes.Int32))
+		require.NoError(t, err)
+		assert.Equal(t, reflect.Slice, got.Kind())
+	})
+
+	t.Run("list with unsupported element returns error", func(t *testing.T) {
+		_, err := InferGoType(arrow.ListOf(arrow.Null))
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+
+	t.Run("fixed size list with unsupported element returns error", func(t *testing.T) {
+		_, err := InferGoType(arrow.FixedSizeListOf(3, arrow.Null))
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+
+	t.Run("map with unsupported key returns error", func(t *testing.T) {
+		_, err := InferGoType(arrow.MapOf(arrow.Null, arrow.BinaryTypes.String))
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+
+	t.Run("map with unsupported value returns error", func(t *testing.T) {
+		_, err := InferGoType(arrow.MapOf(arrow.BinaryTypes.String, arrow.Null))
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+
+	t.Run("map with comparable key builds map type", func(t *testing.T) {
+		got, err := InferGoType(arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32))
+		require.NoError(t, err)
+		assert.Equal(t, reflect.Map, got.Kind())
+		assert.Equal(t, reflect.String, got.Key().Kind())
+		assert.Equal(t, reflect.Int32, got.Elem().Kind())
+	})
+
+	t.Run("dictionary unwraps to value type", func(t *testing.T) {
+		dt := &arrow.DictionaryType{
+			IndexType: arrow.PrimitiveTypes.Int32,
+			ValueType: arrow.BinaryTypes.String,
+		}
+		got, err := InferGoType(dt)
+		require.NoError(t, err)
+		assert.Equal(t, reflect.String, got.Kind())
+	})
+
+	t.Run("run end encoded unwraps to encoded type", func(t *testing.T) {
+		dt := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int64)
+		got, err := InferGoType(dt)
+		require.NoError(t, err)
+		assert.Equal(t, reflect.Int64, got.Kind())
+	})
+}
+
+func TestApplyTemporalOptsAllBranches(t *testing.T) {
+	timeType := reflect.TypeOf(time.Time{})
+	base := arrow.FixedWidthTypes.Timestamp_ns
+
+	t.Run("non-time type returns dt unchanged", func(t *testing.T) {
+		got := applyTemporalOpts(base, reflect.TypeOf(int32(0)), tagOpts{Temporal: "date32"})
+		assert.Equal(t, base, got)
+	})
+
+	t.Run("empty temporal returns dt unchanged", func(t *testing.T) {
+		got := applyTemporalOpts(base, timeType, tagOpts{Temporal: ""})
+		assert.Equal(t, base, got)
+	})
+
+	t.Run("timestamp returns dt unchanged", func(t *testing.T) {
+		got := applyTemporalOpts(base, timeType, tagOpts{Temporal: "timestamp"})
+		assert.Equal(t, base, got)
+	})
+
+	t.Run("date32", func(t *testing.T) {
+		got := applyTemporalOpts(base, timeType, tagOpts{Temporal: "date32"})
+		assert.Equal(t, arrow.DATE32, got.ID())
+	})
+
+	t.Run("date64", func(t *testing.T) {
+		got := applyTemporalOpts(base, timeType, tagOpts{Temporal: "date64"})
+		assert.Equal(t, arrow.DATE64, got.ID())
+	})
+
+	t.Run("time32", func(t *testing.T) {
+		got := applyTemporalOpts(base, timeType, tagOpts{Temporal: "time32"})
+		assert.Equal(t, arrow.TIME32, got.ID())
+	})
+
+	t.Run("time64", func(t *testing.T) {
+		got := applyTemporalOpts(base, timeType, tagOpts{Temporal: "time64"})
+		assert.Equal(t, arrow.TIME64, got.ID())
+	})
+
+	t.Run("unknown temporal falls through", func(t *testing.T) {
+		got := applyTemporalOpts(base, timeType, tagOpts{Temporal: "bogus"})
+		assert.Equal(t, base, got)
+	})
+}
+
+func TestApplyDecimalOptsAllBranches(t *testing.T) {
+	base := arrow.BinaryTypes.String
+	opts := tagOpts{HasDecimalOpts: true, DecimalPrecision: 18, DecimalScale: 4}
+
+	t.Run("no_decimal_opts_returns_dt_unchanged", func(t *testing.T) {
+		got := applyDecimalOpts(base, reflect.TypeOf(decimal128.Num{}), tagOpts{})
+		assert.Equal(t, base, got)
+	})
+
+	t.Run("decimal128", func(t *testing.T) {
+		got := applyDecimalOpts(base, reflect.TypeOf(decimal128.Num{}), opts)
+		dt, ok := got.(*arrow.Decimal128Type)
+		require.True(t, ok, "expected *arrow.Decimal128Type, got %T", got)
+		assert.Equal(t, int32(18), dt.Precision)
+		assert.Equal(t, int32(4), dt.Scale)
+	})
+
+	t.Run("decimal256", func(t *testing.T) {
+		got := applyDecimalOpts(base, reflect.TypeOf(decimal256.Num{}), opts)
+		dt, ok := got.(*arrow.Decimal256Type)
+		require.True(t, ok, "expected *arrow.Decimal256Type, got %T", got)
+		assert.Equal(t, int32(18), dt.Precision)
+		assert.Equal(t, int32(4), dt.Scale)
+	})
+
+	t.Run("decimal32", func(t *testing.T) {
+		got := applyDecimalOpts(base, reflect.TypeOf(decimal.Decimal32(0)), opts)
+		dt, ok := got.(*arrow.Decimal32Type)
+		require.True(t, ok, "expected *arrow.Decimal32Type, got %T", got)
+		assert.Equal(t, int32(18), dt.Precision)
+		assert.Equal(t, int32(4), dt.Scale)
+	})
+
+	t.Run("decimal64", func(t *testing.T) {
+		got := applyDecimalOpts(base, reflect.TypeOf(decimal.Decimal64(0)), opts)
+		dt, ok := got.(*arrow.Decimal64Type)
+		require.True(t, ok, "expected *arrow.Decimal64Type, got %T", got)
+		assert.Equal(t, int32(18), dt.Precision)
+		assert.Equal(t, int32(4), dt.Scale)
+	})
+
+	t.Run("non_decimal_type_returns_dt_unchanged", func(t *testing.T) {
+		got := applyDecimalOpts(base, reflect.TypeOf(int32(0)), opts)
+		assert.Equal(t, base, got)
+	})
+}

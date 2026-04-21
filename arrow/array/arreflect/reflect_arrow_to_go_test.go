@@ -175,6 +175,141 @@ func TestSetPrimitiveValue(t *testing.T) {
 		err := setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0)
 		assert.Error(t, err, "expected error for int32→float64 mismatch")
 	})
+
+	t.Run("int8", func(t *testing.T) {
+		b := array.NewInt8Builder(mem)
+		defer b.Release()
+		b.Append(-42)
+		arr := b.NewArray().(*array.Int8)
+		defer arr.Release()
+
+		var got int8
+		require.NoError(t, setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0))
+		assert.Equal(t, int8(-42), got)
+
+		var bad float32
+		assert.ErrorIs(t, setPrimitiveValue(reflect.ValueOf(&bad).Elem(), arr, 0), ErrTypeMismatch)
+	})
+
+	t.Run("int16", func(t *testing.T) {
+		b := array.NewInt16Builder(mem)
+		defer b.Release()
+		b.Append(-1234)
+		arr := b.NewArray().(*array.Int16)
+		defer arr.Release()
+
+		var got int16
+		require.NoError(t, setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0))
+		assert.Equal(t, int16(-1234), got)
+
+		var bad float32
+		assert.ErrorIs(t, setPrimitiveValue(reflect.ValueOf(&bad).Elem(), arr, 0), ErrTypeMismatch)
+	})
+
+	t.Run("int64 mismatch", func(t *testing.T) {
+		b := array.NewInt64Builder(mem)
+		defer b.Release()
+		b.Append(1)
+		arr := b.NewArray().(*array.Int64)
+		defer arr.Release()
+
+		var bad string
+		assert.ErrorIs(t, setPrimitiveValue(reflect.ValueOf(&bad).Elem(), arr, 0), ErrTypeMismatch)
+	})
+
+	t.Run("uint16", func(t *testing.T) {
+		b := array.NewUint16Builder(mem)
+		defer b.Release()
+		b.Append(65535)
+		arr := b.NewArray().(*array.Uint16)
+		defer arr.Release()
+
+		var got uint16
+		require.NoError(t, setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0))
+		assert.Equal(t, uint16(65535), got)
+
+		var bad int32
+		assert.ErrorIs(t, setPrimitiveValue(reflect.ValueOf(&bad).Elem(), arr, 0), ErrTypeMismatch)
+	})
+
+	t.Run("uint32", func(t *testing.T) {
+		b := array.NewUint32Builder(mem)
+		defer b.Release()
+		b.Append(4_000_000_000)
+		arr := b.NewArray().(*array.Uint32)
+		defer arr.Release()
+
+		var got uint32
+		require.NoError(t, setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0))
+		assert.Equal(t, uint32(4_000_000_000), got)
+
+		var bad int32
+		assert.ErrorIs(t, setPrimitiveValue(reflect.ValueOf(&bad).Elem(), arr, 0), ErrTypeMismatch)
+	})
+
+	t.Run("uint64", func(t *testing.T) {
+		b := array.NewUint64Builder(mem)
+		defer b.Release()
+		b.Append(1 << 63)
+		arr := b.NewArray().(*array.Uint64)
+		defer arr.Release()
+
+		var got uint64
+		require.NoError(t, setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0))
+		assert.Equal(t, uint64(1<<63), got)
+
+		var bad float64
+		assert.ErrorIs(t, setPrimitiveValue(reflect.ValueOf(&bad).Elem(), arr, 0), ErrTypeMismatch)
+	})
+
+	t.Run("uint8 mismatch", func(t *testing.T) {
+		b := array.NewUint8Builder(mem)
+		defer b.Release()
+		b.Append(1)
+		arr := b.NewArray().(*array.Uint8)
+		defer arr.Release()
+
+		var bad int8
+		assert.ErrorIs(t, setPrimitiveValue(reflect.ValueOf(&bad).Elem(), arr, 0), ErrTypeMismatch)
+	})
+
+	t.Run("float32", func(t *testing.T) {
+		b := array.NewFloat32Builder(mem)
+		defer b.Release()
+		b.Append(2.5)
+		arr := b.NewArray().(*array.Float32)
+		defer arr.Release()
+
+		var got float32
+		require.NoError(t, setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0))
+		assert.Equal(t, float32(2.5), got)
+
+		var bad int32
+		assert.ErrorIs(t, setPrimitiveValue(reflect.ValueOf(&bad).Elem(), arr, 0), ErrTypeMismatch)
+	})
+
+	t.Run("float64 mismatch", func(t *testing.T) {
+		b := array.NewFloat64Builder(mem)
+		defer b.Release()
+		b.Append(1.0)
+		arr := b.NewArray().(*array.Float64)
+		defer arr.Release()
+
+		var bad int32
+		assert.ErrorIs(t, setPrimitiveValue(reflect.ValueOf(&bad).Elem(), arr, 0), ErrTypeMismatch)
+	})
+
+	t.Run("unsupported primitive type returns error", func(t *testing.T) {
+		b := array.NewBooleanBuilder(mem)
+		defer b.Release()
+		b.Append(true)
+		arr := b.NewArray().(*array.Boolean)
+		defer arr.Release()
+
+		var got bool
+		err := setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
 }
 
 func TestSetTemporalValue(t *testing.T) {
@@ -262,6 +397,56 @@ func TestSetTemporalValue(t *testing.T) {
 		assert.True(t, got.Hour() == 10 && got.Minute() == 30 && got.Second() == 0 && got.Nanosecond() == 123456789,
 			"time64: got %v, want 10:30:00.123456789", got)
 	})
+
+	t.Run("date64", func(t *testing.T) {
+		b := array.NewDate64Builder(mem)
+		defer b.Release()
+		ms := int64(1705276800000)
+		b.Append(arrow.Date64(ms))
+		arr := b.NewArray().(*array.Date64)
+		defer arr.Release()
+
+		got := setValueAt[time.Time](t, arr, 0)
+		expected := arrow.Date64(ms).ToTime()
+		assert.True(t, got.Equal(expected), "date64: expected %v, got %v", expected, got)
+	})
+
+	t.Run("type mismatch into non-time returns error", func(t *testing.T) {
+		b := array.NewTimestampBuilder(mem, &arrow.TimestampType{Unit: arrow.Second})
+		defer b.Release()
+		b.Append(arrow.Timestamp(0))
+		arr := b.NewArray().(*array.Timestamp)
+		defer arr.Release()
+
+		var bad int64
+		err := setTemporalValue(reflect.ValueOf(&bad).Elem(), arr, 0)
+		assert.ErrorIs(t, err, ErrTypeMismatch)
+	})
+
+	t.Run("duration into non-duration returns error", func(t *testing.T) {
+		dt := &arrow.DurationType{Unit: arrow.Second}
+		b := array.NewDurationBuilder(mem, dt)
+		defer b.Release()
+		b.Append(arrow.Duration(1))
+		arr := b.NewArray().(*array.Duration)
+		defer arr.Release()
+
+		var bad int64
+		err := setTemporalValue(reflect.ValueOf(&bad).Elem(), arr, 0)
+		assert.ErrorIs(t, err, ErrTypeMismatch)
+	})
+
+	t.Run("unsupported temporal type returns error", func(t *testing.T) {
+		b := array.NewInt32Builder(mem)
+		defer b.Release()
+		b.Append(1)
+		arr := b.NewArray().(*array.Int32)
+		defer arr.Release()
+
+		var got time.Time
+		err := setTemporalValue(reflect.ValueOf(&got).Elem(), arr, 0)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
 }
 
 func TestSetDecimalValue(t *testing.T) {
@@ -326,6 +511,72 @@ func TestSetDecimalValue(t *testing.T) {
 		got := setValueAt[decimal.Decimal64](t, arr, 0)
 		assert.Equal(t, num, got)
 	})
+
+	t.Run("type mismatch into wrong decimal kind returns error", func(t *testing.T) {
+		b128 := array.NewDecimal128Builder(mem, &arrow.Decimal128Type{Precision: 10, Scale: 2})
+		defer b128.Release()
+		b128.Append(decimal128.New(0, 1))
+		arr128 := b128.NewDecimal128Array()
+		defer arr128.Release()
+
+		var got256 decimal256.Num
+		assert.ErrorIs(t, setDecimalValue(reflect.ValueOf(&got256).Elem(), arr128, 0), ErrTypeMismatch)
+
+		var got32 decimal.Decimal32
+		assert.ErrorIs(t, setDecimalValue(reflect.ValueOf(&got32).Elem(), arr128, 0), ErrTypeMismatch)
+
+		b256 := array.NewDecimal256Builder(mem, &arrow.Decimal256Type{Precision: 20, Scale: 4})
+		defer b256.Release()
+		b256.Append(decimal256.New(0, 0, 0, 1))
+		arr256 := b256.NewDecimal256Array()
+		defer arr256.Release()
+
+		var got128 decimal128.Num
+		assert.ErrorIs(t, setDecimalValue(reflect.ValueOf(&got128).Elem(), arr256, 0), ErrTypeMismatch)
+
+		b32 := array.NewDecimal32Builder(mem, &arrow.Decimal32Type{Precision: 9, Scale: 2})
+		defer b32.Release()
+		b32.Append(decimal.Decimal32(1))
+		arr32 := b32.NewArray().(*array.Decimal32)
+		defer arr32.Release()
+
+		var got64 decimal.Decimal64
+		assert.ErrorIs(t, setDecimalValue(reflect.ValueOf(&got64).Elem(), arr32, 0), ErrTypeMismatch)
+
+		b64 := array.NewDecimal64Builder(mem, &arrow.Decimal64Type{Precision: 18, Scale: 3})
+		defer b64.Release()
+		b64.Append(decimal.Decimal64(1))
+		arr64 := b64.NewArray().(*array.Decimal64)
+		defer arr64.Release()
+
+		var badF float64
+		assert.ErrorIs(t, setDecimalValue(reflect.ValueOf(&badF).Elem(), arr64, 0), ErrTypeMismatch)
+	})
+
+	t.Run("unsupported decimal type returns error", func(t *testing.T) {
+		b := array.NewInt32Builder(mem)
+		defer b.Release()
+		b.Append(1)
+		arr := b.NewArray().(*array.Int32)
+		defer arr.Release()
+
+		var got decimal128.Num
+		err := setDecimalValue(reflect.ValueOf(&got).Elem(), arr, 0)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+}
+
+func TestAssertArrayTypeMismatch(t *testing.T) {
+	mem := checkedMem(t)
+	b := array.NewInt32Builder(mem)
+	defer b.Release()
+	b.Append(1)
+	arr := b.NewInt32Array()
+	defer arr.Release()
+
+	_, err := assertArray[array.Float64](arr)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTypeMismatch)
 }
 
 func TestSetStructValue(t *testing.T) {
@@ -607,6 +858,38 @@ func TestSetFixedSizeListValue(t *testing.T) {
 		var got [2]int32
 		err := setValue(reflect.ValueOf(&got).Elem(), arr, 0)
 		assert.Error(t, err, "expected error for size mismatch")
+	})
+
+	t.Run("child element type mismatch errors", func(t *testing.T) {
+		b := array.NewFixedSizeListBuilder(mem, 3, arrow.PrimitiveTypes.Int32)
+		defer b.Release()
+		vb := b.ValueBuilder().(*array.Int32Builder)
+		b.Append(true)
+		vb.AppendValues([]int32{1, 2, 3}, nil)
+
+		arr := b.NewArray().(*array.FixedSizeList)
+		defer arr.Release()
+
+		var got [3]string
+		err := setValue(reflect.ValueOf(&got).Elem(), arr, 0)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrTypeMismatch)
+	})
+
+	t.Run("child element type mismatch on slice errors", func(t *testing.T) {
+		b := array.NewFixedSizeListBuilder(mem, 2, arrow.PrimitiveTypes.Int32)
+		defer b.Release()
+		vb := b.ValueBuilder().(*array.Int32Builder)
+		b.Append(true)
+		vb.AppendValues([]int32{10, 20}, nil)
+
+		arr := b.NewArray().(*array.FixedSizeList)
+		defer arr.Release()
+
+		var got []string
+		err := setValue(reflect.ValueOf(&got).Elem(), arr, 0)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrTypeMismatch)
 	})
 }
 

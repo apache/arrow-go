@@ -739,3 +739,275 @@ func TestNilByteSliceIsNull(t *testing.T) {
 	assert.False(t, arr.IsNull(0), "non-nil byte slice should not be null")
 	assert.True(t, arr.IsNull(1), "nil byte slice should be null")
 }
+
+func TestAppendToDictBuilderAllTypes(t *testing.T) {
+	mem := checkedMem(t)
+
+	cases := []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{"int8", func(t *testing.T) {
+			arr := mustBuildArray(t, []int8{1, 2, 1, 3}, tagOpts{Dict: true}, mem)
+			assert.Equal(t, arrow.DICTIONARY, arr.DataType().ID())
+			assert.Equal(t, 3, arr.(*array.Dictionary).Dictionary().Len())
+		}},
+		{"int16", func(t *testing.T) {
+			arr := mustBuildArray(t, []int16{1, 2, 1, 3}, tagOpts{Dict: true}, mem)
+			assert.Equal(t, 3, arr.(*array.Dictionary).Dictionary().Len())
+		}},
+		{"int64", func(t *testing.T) {
+			arr := mustBuildArray(t, []int64{1, 2, 1, 3}, tagOpts{Dict: true}, mem)
+			assert.Equal(t, 3, arr.(*array.Dictionary).Dictionary().Len())
+		}},
+		{"uint8", func(t *testing.T) {
+			arr := mustBuildArray(t, []uint8{1, 2, 1, 3}, tagOpts{Dict: true}, mem)
+			assert.Equal(t, 3, arr.(*array.Dictionary).Dictionary().Len())
+		}},
+		{"uint16", func(t *testing.T) {
+			arr := mustBuildArray(t, []uint16{1, 2, 1, 3}, tagOpts{Dict: true}, mem)
+			assert.Equal(t, 3, arr.(*array.Dictionary).Dictionary().Len())
+		}},
+		{"uint32", func(t *testing.T) {
+			arr := mustBuildArray(t, []uint32{1, 2, 1, 3}, tagOpts{Dict: true}, mem)
+			assert.Equal(t, 3, arr.(*array.Dictionary).Dictionary().Len())
+		}},
+		{"uint64", func(t *testing.T) {
+			arr := mustBuildArray(t, []uint64{1, 2, 1, 3}, tagOpts{Dict: true}, mem)
+			assert.Equal(t, 3, arr.(*array.Dictionary).Dictionary().Len())
+		}},
+		{"float32", func(t *testing.T) {
+			arr := mustBuildArray(t, []float32{1.1, 2.2, 1.1, 3.3}, tagOpts{Dict: true}, mem)
+			assert.Equal(t, 3, arr.(*array.Dictionary).Dictionary().Len())
+		}},
+		{"float64", func(t *testing.T) {
+			arr := mustBuildArray(t, []float64{1.1, 2.2, 1.1, 3.3}, tagOpts{Dict: true}, mem)
+			assert.Equal(t, 3, arr.(*array.Dictionary).Dictionary().Len())
+		}},
+		{"binary bytes", func(t *testing.T) {
+			arr := mustBuildArray(t, [][]byte{[]byte("a"), []byte("b"), []byte("a")}, tagOpts{Dict: true}, mem)
+			assert.Equal(t, 2, arr.(*array.Dictionary).Dictionary().Len())
+		}},
+		{"binary nil is null", func(t *testing.T) {
+			arr := mustBuildArray(t, [][]byte{[]byte("a"), nil, []byte("a")}, tagOpts{Dict: true}, mem)
+			assert.True(t, arr.IsNull(1))
+			assert.Equal(t, 1, arr.(*array.Dictionary).Dictionary().Len())
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, tc.run)
+	}
+
+	t.Run("binary with unsupported kind returns error", func(t *testing.T) {
+		db := array.NewDictionaryBuilder(mem, &arrow.DictionaryType{
+			IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.Binary,
+		}).(*array.BinaryDictionaryBuilder)
+		defer db.Release()
+		err := appendToDictBuilder(db, reflect.ValueOf(int32(7)))
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+
+	t.Run("unsupported dict builder type returns error", func(t *testing.T) {
+		db := array.NewDictionaryBuilder(mem, &arrow.DictionaryType{
+			IndexType: arrow.PrimitiveTypes.Int32,
+			ValueType: &arrow.Decimal128Type{Precision: 10, Scale: 2},
+		})
+		defer db.Release()
+		err := appendToDictBuilder(db, reflect.ValueOf(decimal128.New(0, 1)))
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+}
+
+func TestAppendListElementDirect(t *testing.T) {
+	mem := checkedMem(t)
+
+	t.Run("nil slice appends null", func(t *testing.T) {
+		lb := array.NewListBuilder(mem, arrow.PrimitiveTypes.Int32)
+		defer lb.Release()
+		var empty []int32
+		require.NoError(t, appendListElement(lb, reflect.ValueOf(empty)))
+		arr := lb.NewArray()
+		defer arr.Release()
+		assert.True(t, arr.IsNull(0))
+	})
+
+	t.Run("large list builder", func(t *testing.T) {
+		lb := array.NewLargeListBuilder(mem, arrow.PrimitiveTypes.Int32)
+		defer lb.Release()
+		require.NoError(t, appendListElement(lb, reflect.ValueOf([]int32{1, 2, 3})))
+		arr := lb.NewArray().(*array.LargeList)
+		defer arr.Release()
+		assert.Equal(t, 1, arr.Len())
+		vb := arr.ListValues().(*array.Int32)
+		assert.Equal(t, 3, vb.Len())
+	})
+
+	t.Run("list view builder", func(t *testing.T) {
+		lb := array.NewListViewBuilder(mem, arrow.PrimitiveTypes.Int32)
+		defer lb.Release()
+		require.NoError(t, appendListElement(lb, reflect.ValueOf([]int32{4, 5})))
+		arr := lb.NewArray().(*array.ListView)
+		defer arr.Release()
+		assert.Equal(t, 1, arr.Len())
+	})
+
+	t.Run("large list view builder", func(t *testing.T) {
+		lb := array.NewLargeListViewBuilder(mem, arrow.PrimitiveTypes.Int32)
+		defer lb.Release()
+		require.NoError(t, appendListElement(lb, reflect.ValueOf([]int32{6})))
+		arr := lb.NewArray().(*array.LargeListView)
+		defer arr.Release()
+		assert.Equal(t, 1, arr.Len())
+	})
+
+	t.Run("unexpected builder type returns error", func(t *testing.T) {
+		b := array.NewInt32Builder(mem)
+		defer b.Release()
+		err := appendListElement(b, reflect.ValueOf([]int32{1}))
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+}
+
+func TestBuildRunEndEncodedArrayExtras(t *testing.T) {
+	mem := checkedMem(t)
+
+	t.Run("empty_slice_direct", func(t *testing.T) {
+		empty := reflect.MakeSlice(reflect.TypeOf([]int32{}), 0, 0)
+		arr, err := buildRunEndEncodedArray(empty, tagOpts{REE: true}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, 0, arr.Len())
+		assert.Equal(t, arrow.RUN_END_ENCODED, arr.DataType().ID())
+	})
+
+	t.Run("nil_pointer_runs_collapse", func(t *testing.T) {
+		s := "x"
+		vals := []*string{nil, nil, &s, nil}
+		arr := mustBuildArray(t, vals, tagOpts{REE: true}, mem)
+		ree := arr.(*array.RunEndEncoded)
+		assert.Equal(t, 4, ree.Len())
+		assert.Equal(t, 3, ree.RunEndsArr().Len(),
+			"expected 3 runs (nil,nil + x + nil), got %d", ree.RunEndsArr().Len())
+	})
+
+	t.Run("nil_and_non_nil_pointer_are_not_equal", func(t *testing.T) {
+		s := "x"
+		vals := []*string{nil, &s}
+		arr := mustBuildArray(t, vals, tagOpts{REE: true}, mem)
+		ree := arr.(*array.RunEndEncoded)
+		assert.Equal(t, 2, ree.RunEndsArr().Len(),
+			"expected 2 runs (nil != &x), got %d", ree.RunEndsArr().Len())
+	})
+
+	t.Run("non_comparable_elem_uses_deep_equal", func(t *testing.T) {
+		vals := [][]int32{{1, 2}, {1, 2}, {3}}
+		arr := mustBuildArray(t, vals, tagOpts{REE: true}, mem)
+		ree := arr.(*array.RunEndEncoded)
+		assert.Equal(t, 3, ree.Len())
+		assert.Equal(t, 2, ree.RunEndsArr().Len(),
+			"expected 2 runs via DeepEqual, got %d", ree.RunEndsArr().Len())
+	})
+}
+
+func TestBuildMapArrayExtras(t *testing.T) {
+	mem := checkedMem(t)
+
+	t.Run("pointer_key_type", func(t *testing.T) {
+		k1, k2 := "a", "b"
+		vals := []map[*string]int32{{&k1: 1, &k2: 2}}
+		arr := mustBuildDefault(t, vals, mem)
+		require.Equal(t, arrow.MAP, arr.DataType().ID())
+		assert.Equal(t, 1, arr.Len())
+	})
+
+	t.Run("pointer_value_type", func(t *testing.T) {
+		v1, v2 := int32(1), int32(2)
+		vals := []map[string]*int32{{"a": &v1, "b": &v2}}
+		arr := mustBuildDefault(t, vals, mem)
+		require.Equal(t, arrow.MAP, arr.DataType().ID())
+		assert.Equal(t, 1, arr.Len())
+	})
+
+	t.Run("unsupported_key_type_errors", func(t *testing.T) {
+		vals := []map[complex64]int32{{1 + 2i: 1}}
+		_, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+
+	t.Run("unsupported_value_type_errors", func(t *testing.T) {
+		vals := []map[string]complex64{{"a": 1 + 2i}}
+		_, err := buildArray(reflect.ValueOf(vals), tagOpts{}, mem)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+}
+
+func TestAppendTemporalValueErrors(t *testing.T) {
+	mem := checkedMem(t)
+	notATime := reflect.ValueOf(int32(42))
+
+	builderCases := []struct {
+		name    string
+		builder array.Builder
+	}{
+		{"timestamp", array.NewTimestampBuilder(mem, &arrow.TimestampType{Unit: arrow.Nanosecond})},
+		{"date32", array.NewDate32Builder(mem)},
+		{"date64", array.NewDate64Builder(mem)},
+		{"time32", array.NewTime32Builder(mem, &arrow.Time32Type{Unit: arrow.Millisecond})},
+		{"time64", array.NewTime64Builder(mem, &arrow.Time64Type{Unit: arrow.Nanosecond})},
+	}
+	for _, tc := range builderCases {
+		t.Run(tc.name+"_requires_time_Time", func(t *testing.T) {
+			defer tc.builder.Release()
+			err := appendTemporalValue(tc.builder, notATime)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrTypeMismatch)
+		})
+	}
+
+	t.Run("duration_requires_time_Duration", func(t *testing.T) {
+		b := array.NewDurationBuilder(mem, &arrow.DurationType{Unit: arrow.Nanosecond})
+		defer b.Release()
+		err := appendTemporalValue(b, notATime)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrTypeMismatch)
+	})
+
+	t.Run("unexpected_builder_type", func(t *testing.T) {
+		b := array.NewInt32Builder(mem)
+		defer b.Release()
+		err := appendTemporalValue(b, reflect.ValueOf(time.Now()))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+}
+
+func TestAppendDecimalValueErrors(t *testing.T) {
+	mem := checkedMem(t)
+	notDecimal := reflect.ValueOf("not a decimal")
+
+	t.Run("decimal128_wrong_type", func(t *testing.T) {
+		b := array.NewDecimal128Builder(mem, &arrow.Decimal128Type{Precision: 10, Scale: 2})
+		defer b.Release()
+		err := appendDecimalValue(b, notDecimal)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrTypeMismatch)
+	})
+
+	t.Run("decimal256_wrong_type", func(t *testing.T) {
+		b := array.NewDecimal256Builder(mem, &arrow.Decimal256Type{Precision: 40, Scale: 2})
+		defer b.Release()
+		err := appendDecimalValue(b, notDecimal)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrTypeMismatch)
+	})
+
+	t.Run("unexpected_builder_type", func(t *testing.T) {
+		b := array.NewInt32Builder(mem)
+		defer b.Release()
+		err := appendDecimalValue(b, reflect.ValueOf(decimal128.New(0, 1)))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+}

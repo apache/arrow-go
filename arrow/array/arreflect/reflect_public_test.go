@@ -405,6 +405,15 @@ func TestAtAny(t *testing.T) {
 	assert.Equal(t, int32(0), v, "AtAny(1) value")
 }
 
+func TestAtAnyErrors(t *testing.T) {
+	arr := array.NewNull(1)
+	defer arr.Release()
+
+	_, err := AtAny(arr, 0)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrUnsupportedType)
+}
+
 func TestToAnySlice(t *testing.T) {
 	mem := testMem()
 	b := array.NewStringBuilder(mem)
