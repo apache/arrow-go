@@ -377,9 +377,9 @@ func appendValue(b array.Builder, v reflect.Value) error {
 		tb.Append(float64(v.Float()))
 	case *array.BooleanBuilder:
 		tb.Append(v.Bool())
-	case *array.StringBuilder:
+	case array.StringLikeBuilder:
 		tb.Append(v.String())
-	case *array.BinaryBuilder:
+	case array.BinaryLikeBuilder:
 		if v.IsNil() {
 			tb.AppendNull()
 		} else {

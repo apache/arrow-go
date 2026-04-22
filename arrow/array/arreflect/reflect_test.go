@@ -73,11 +73,11 @@ func TestParseTag(t *testing.T) {
 		},
 		{
 			input: "name,unknown_option",
-			want:  tagOpts{Name: "name"},
+			want:  tagOpts{Name: "name", ParseErr: "unknown option \"unknown_option\""},
 		},
 		{
 			input: `field,Date32`,
-			want:  tagOpts{Name: "field"},
+			want:  tagOpts{Name: "field", ParseErr: "unknown option \"Date32\""},
 		},
 	}
 
@@ -308,29 +308,29 @@ func TestParseDecimalOpt(t *testing.T) {
 		assert.True(t, got.HasDecimalOpts)
 		assert.Equal(t, int32(18), got.DecimalPrecision)
 		assert.Equal(t, int32(2), got.DecimalScale)
-		assert.Empty(t, got.DecimalParseErr)
+		assert.Empty(t, got.ParseErr)
 	})
 
 	t.Run("non_integer_precision_records_error", func(t *testing.T) {
 		got := parseTag(",decimal(abc,2)")
 		assert.False(t, got.HasDecimalOpts)
-		assert.NotEmpty(t, got.DecimalParseErr)
+		assert.NotEmpty(t, got.ParseErr)
 	})
 
 	t.Run("non_integer_scale_records_error", func(t *testing.T) {
 		got := parseTag(",decimal(18,two)")
 		assert.False(t, got.HasDecimalOpts)
-		assert.NotEmpty(t, got.DecimalParseErr)
+		assert.NotEmpty(t, got.ParseErr)
 	})
 
 	t.Run("missing_scale_records_error", func(t *testing.T) {
 		got := parseTag(",decimal(18)")
 		assert.False(t, got.HasDecimalOpts)
-		assert.NotEmpty(t, got.DecimalParseErr)
+		assert.NotEmpty(t, got.ParseErr)
 	})
 
 	t.Run("validateOptions_surfaces_parse_error", func(t *testing.T) {
-		err := validateOptions(tagOpts{DecimalParseErr: "bad decimal tag"})
+		err := validateOptions(tagOpts{ParseErr: "bad decimal tag"})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrUnsupportedType)
 	})
