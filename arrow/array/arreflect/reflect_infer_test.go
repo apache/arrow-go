@@ -747,3 +747,87 @@ func TestHasLargeableType(t *testing.T) {
 		assert.False(t, hasLargeableType(arrow.MapOf(arrow.PrimitiveTypes.Int64, arrow.PrimitiveTypes.Int64)))
 	})
 }
+
+func TestApplyViewOpts(t *testing.T) {
+	cases := []struct {
+		name  string
+		input arrow.DataType
+		want  arrow.Type
+	}{
+		{"string→string_view", arrow.BinaryTypes.String, arrow.STRING_VIEW},
+		{"binary→binary_view", arrow.BinaryTypes.Binary, arrow.BINARY_VIEW},
+		{"list<string>→list_view<string_view>", arrow.ListOf(arrow.BinaryTypes.String), arrow.LIST_VIEW},
+		{"int64 unchanged", arrow.PrimitiveTypes.Int64, arrow.INT64},
+		{"float32 unchanged", arrow.PrimitiveTypes.Float32, arrow.FLOAT32},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := applyViewOpts(tc.input)
+			assert.Equal(t, tc.want, got.ID())
+		})
+	}
+
+	t.Run("list<string> elem is string_view", func(t *testing.T) {
+		got := applyViewOpts(arrow.ListOf(arrow.BinaryTypes.String))
+		lv, ok := got.(*arrow.ListViewType)
+		require.True(t, ok)
+		assert.Equal(t, arrow.STRING_VIEW, lv.Elem().ID())
+	})
+
+	t.Run("fixed_size_list<string> recurses", func(t *testing.T) {
+		got := applyViewOpts(arrow.FixedSizeListOf(3, arrow.BinaryTypes.String))
+		fsl, ok := got.(*arrow.FixedSizeListType)
+		require.True(t, ok)
+		assert.Equal(t, arrow.STRING_VIEW, fsl.Elem().ID())
+	})
+
+	t.Run("map<string,binary> recurses", func(t *testing.T) {
+		got := applyViewOpts(arrow.MapOf(arrow.BinaryTypes.String, arrow.BinaryTypes.Binary))
+		mt, ok := got.(*arrow.MapType)
+		require.True(t, ok)
+		assert.Equal(t, arrow.STRING_VIEW, mt.KeyType().ID())
+		assert.Equal(t, arrow.BINARY_VIEW, mt.ItemField().Type.ID())
+	})
+
+	t.Run("struct recurses into fields", func(t *testing.T) {
+		st := arrow.StructOf(
+			arrow.Field{Name: "name", Type: arrow.BinaryTypes.String},
+			arrow.Field{Name: "count", Type: arrow.PrimitiveTypes.Int64},
+		)
+		got := applyViewOpts(st)
+		gst, ok := got.(*arrow.StructType)
+		require.True(t, ok)
+		assert.Equal(t, arrow.STRING_VIEW, gst.Field(0).Type.ID())
+		assert.Equal(t, arrow.INT64, gst.Field(1).Type.ID())
+	})
+
+	t.Run("list_view<string> is idempotent", func(t *testing.T) {
+		got := applyViewOpts(arrow.ListViewOf(arrow.BinaryTypes.String))
+		lv, ok := got.(*arrow.ListViewType)
+		require.True(t, ok)
+		assert.Equal(t, arrow.STRING_VIEW, lv.Elem().ID())
+	})
+}
+
+func TestHasViewableType(t *testing.T) {
+	assert.True(t, hasViewableType(arrow.BinaryTypes.String))
+	assert.True(t, hasViewableType(arrow.BinaryTypes.Binary))
+	assert.True(t, hasViewableType(arrow.ListOf(arrow.PrimitiveTypes.Int64)))
+	assert.False(t, hasViewableType(arrow.PrimitiveTypes.Int64))
+	assert.False(t, hasViewableType(arrow.PrimitiveTypes.Float32))
+
+	t.Run("struct with string field is true", func(t *testing.T) {
+		st := arrow.StructOf(arrow.Field{Name: "x", Type: arrow.BinaryTypes.String})
+		assert.True(t, hasViewableType(st))
+	})
+	t.Run("struct with only ints is false", func(t *testing.T) {
+		st := arrow.StructOf(arrow.Field{Name: "x", Type: arrow.PrimitiveTypes.Int32})
+		assert.False(t, hasViewableType(st))
+	})
+	t.Run("fixed_size_list<string> is true", func(t *testing.T) {
+		assert.True(t, hasViewableType(arrow.FixedSizeListOf(4, arrow.BinaryTypes.String)))
+	})
+	t.Run("map with string key is true", func(t *testing.T) {
+		assert.True(t, hasViewableType(arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int64)))
+	})
+}

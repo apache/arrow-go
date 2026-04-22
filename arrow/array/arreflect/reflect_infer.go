@@ -248,6 +248,62 @@ func hasLargeableType(dt arrow.DataType) bool {
 	}
 }
 
+func applyViewOpts(dt arrow.DataType) arrow.DataType {
+	switch dt.ID() {
+	case arrow.STRING:
+		return arrow.BinaryTypes.StringView
+	case arrow.BINARY:
+		return arrow.BinaryTypes.BinaryView
+	case arrow.LIST:
+		return arrow.ListViewOf(applyViewOpts(dt.(*arrow.ListType).Elem()))
+	case arrow.LIST_VIEW:
+		return arrow.ListViewOf(applyViewOpts(dt.(*arrow.ListViewType).Elem()))
+	case arrow.LARGE_LIST:
+		return arrow.LargeListViewOf(applyViewOpts(dt.(*arrow.LargeListType).Elem()))
+	case arrow.LARGE_LIST_VIEW:
+		return arrow.LargeListViewOf(applyViewOpts(dt.(*arrow.LargeListViewType).Elem()))
+	case arrow.FIXED_SIZE_LIST:
+		fsl := dt.(*arrow.FixedSizeListType)
+		return arrow.FixedSizeListOf(fsl.Len(), applyViewOpts(fsl.Elem()))
+	case arrow.MAP:
+		mt := dt.(*arrow.MapType)
+		return arrow.MapOf(applyViewOpts(mt.KeyType()), applyViewOpts(mt.ItemField().Type))
+	case arrow.STRUCT:
+		st := dt.(*arrow.StructType)
+		fields := make([]arrow.Field, st.NumFields())
+		for i := 0; i < st.NumFields(); i++ {
+			f := st.Field(i)
+			f.Type = applyViewOpts(f.Type)
+			fields[i] = f
+		}
+		return arrow.StructOf(fields...)
+	default:
+		return dt
+	}
+}
+
+func hasViewableType(dt arrow.DataType) bool {
+	switch dt.ID() {
+	case arrow.STRING, arrow.BINARY, arrow.LIST:
+		return true
+	case arrow.STRUCT:
+		st := dt.(*arrow.StructType)
+		for i := 0; i < st.NumFields(); i++ {
+			if hasViewableType(st.Field(i).Type) {
+				return true
+			}
+		}
+		return false
+	case arrow.FIXED_SIZE_LIST:
+		return hasViewableType(dt.(*arrow.FixedSizeListType).Elem())
+	case arrow.MAP:
+		mt := dt.(*arrow.MapType)
+		return hasViewableType(mt.KeyType()) || hasViewableType(mt.ItemField().Type)
+	default:
+		return false
+	}
+}
+
 func applyEncodingOpts(dt arrow.DataType, fm fieldMeta) (arrow.DataType, error) {
 	switch {
 	case fm.Opts.Dict:
