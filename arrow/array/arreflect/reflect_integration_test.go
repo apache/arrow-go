@@ -358,7 +358,7 @@ func TestReflectIntegration(t *testing.T) {
 	t.Run("listview_struct_field_roundtrip", func(t *testing.T) {
 		type Row struct {
 			Name string   `arrow:"name"`
-			Tags []string `arrow:"tags,listview"`
+			Tags []string `arrow:"tags,view"`
 		}
 		rows := []Row{
 			{"alice", []string{"admin", "user"}},

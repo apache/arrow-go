@@ -239,7 +239,7 @@ func TestFromGoSlice(t *testing.T) {
 	})
 
 	t.Run("empty slice with WithListView", func(t *testing.T) {
-		arr, err := FromSlice([][]int32{}, mem, WithListView())
+		arr, err := FromSlice([][]int32{}, mem, WithView())
 		require.NoError(t, err)
 		defer arr.Release()
 
@@ -285,9 +285,9 @@ func TestFromGoSlice(t *testing.T) {
 			opts []Option
 		}{
 			{"WithDict+WithREE", []Option{WithDict(), WithREE()}},
-			{"WithDict+WithListView", []Option{WithDict(), WithListView()}},
-			{"WithREE+WithListView", []Option{WithREE(), WithListView()}},
-			{"all three", []Option{WithDict(), WithREE(), WithListView()}},
+			{"WithDict+WithView", []Option{WithDict(), WithView()}},
+			{"WithREE+WithView", []Option{WithREE(), WithView()}},
+			{"all three", []Option{WithDict(), WithREE(), WithView()}},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -742,6 +742,59 @@ func TestUnknownTagOptionError(t *testing.T) {
 
 	t.Run("InferSchema surfaces ErrUnsupportedType for unknown tag", func(t *testing.T) {
 		_, err := InferSchema[Bad]()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+}
+
+func TestWithViewRoundTrip(t *testing.T) {
+	mem := testMem()
+
+	t.Run("[]string WithView round-trips via ToSlice", func(t *testing.T) {
+		input := []string{"alpha", "beta", "gamma"}
+		arr, err := FromSlice(input, mem, WithView())
+		require.NoError(t, err)
+		defer arr.Release()
+
+		assert.Equal(t, arrow.STRING_VIEW, arr.DataType().ID())
+
+		got, err := ToSlice[string](arr)
+		require.NoError(t, err)
+		assert.Equal(t, input, got)
+	})
+
+	t.Run("[][]string WithView produces LIST_VIEW<STRING_VIEW>", func(t *testing.T) {
+		input := [][]string{{"a", "b"}, {"c"}}
+		arr, err := FromSlice(input, mem, WithView())
+		require.NoError(t, err)
+		defer arr.Release()
+
+		assert.Equal(t, arrow.LIST_VIEW, arr.DataType().ID())
+		lv := arr.DataType().(*arrow.ListViewType)
+		assert.Equal(t, arrow.STRING_VIEW, lv.Elem().ID())
+	})
+
+	t.Run("struct with view tag round-trips", func(t *testing.T) {
+		type Row struct {
+			Label string `arrow:"label,view"`
+			Count int32  `arrow:"count"`
+		}
+		input := []Row{{"a", 1}, {"b", 2}}
+		arr, err := FromSlice(input, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+
+		sa := arr.(*array.Struct)
+		assert.Equal(t, arrow.STRING_VIEW, sa.Field(0).DataType().ID())
+		assert.Equal(t, arrow.INT32, sa.Field(1).DataType().ID())
+
+		got, err := ToSlice[Row](arr)
+		require.NoError(t, err)
+		assert.Equal(t, input, got)
+	})
+
+	t.Run("WithView on int64 errors", func(t *testing.T) {
+		_, err := FromSlice([]int64{1}, mem, WithView())
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrUnsupportedType)
 	})

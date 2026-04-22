@@ -429,9 +429,9 @@ func InferGoType(dt arrow.DataType) (reflect.Type, error) {
 		return typeOfFloat64, nil
 	case arrow.BOOL:
 		return typeOfBool, nil
-	case arrow.STRING, arrow.LARGE_STRING:
+	case arrow.STRING, arrow.LARGE_STRING, arrow.STRING_VIEW:
 		return typeOfString, nil
-	case arrow.BINARY, arrow.LARGE_BINARY:
+	case arrow.BINARY, arrow.LARGE_BINARY, arrow.BINARY_VIEW:
 		return typeOfByteSlice, nil
 	case arrow.TIMESTAMP, arrow.DATE32, arrow.DATE64, arrow.TIME32, arrow.TIME64:
 		return typeOfTime, nil

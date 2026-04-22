@@ -42,7 +42,7 @@
 //
 // Additional tag options:
 //
-//	arrow:"field,listview"              — use ListView instead of List for slice fields
+//	arrow:"field,view"                  — use StringView/BinaryView instead of String/Binary for strings, or ListVi for slices
 //	arrow:"field,ree"                   — run-end encoding at top-level only (struct fields not supported)
 //	arrow:"field,decimal(precision,scale)" — override decimal precision and scale (e.g., arrow:",decimal(18,2)")
 package arreflect

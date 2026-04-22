@@ -365,3 +365,37 @@ func ExampleFromSlice_largeStruct() {
 	// Name type: large_utf8
 	// Code type: int32
 }
+
+func ExampleWithView() {
+	mem := memory.NewGoAllocator()
+
+	arr, err := arreflect.FromSlice([]string{"hello", "world"}, mem, arreflect.WithView())
+	if err != nil {
+		panic(err)
+	}
+	defer arr.Release()
+
+	fmt.Println("Type:", arr.DataType())
+	fmt.Println("Len:", arr.Len())
+	// Output:
+	// Type: string_view
+	// Len: 2
+}
+
+func ExampleFromSlice_viewStruct() {
+	type Event struct {
+		Name string `arrow:"name,view"`
+		Code int32  `arrow:"code"`
+	}
+
+	schema, err := arreflect.InferSchema[Event]()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("Schema:", schema)
+	// Output:
+	// Schema: schema:
+	//   fields: 2
+	//     - name: type=string_view
+	//     - code: type=int32
+}

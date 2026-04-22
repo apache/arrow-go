@@ -75,7 +75,7 @@ func setValue(v reflect.Value, arr arrow.Array, i int) error {
 		arrow.FLOAT32, arrow.FLOAT64:
 		return setPrimitiveValue(v, arr, i)
 
-	case arrow.STRING, arrow.LARGE_STRING:
+	case arrow.STRING, arrow.LARGE_STRING, arrow.STRING_VIEW:
 		type stringer interface{ Value(int) string }
 		a, ok := arr.(stringer)
 		if !ok {
@@ -86,7 +86,7 @@ func setValue(v reflect.Value, arr arrow.Array, i int) error {
 		}
 		v.SetString(strings.Clone(a.Value(i)))
 
-	case arrow.BINARY, arrow.LARGE_BINARY:
+	case arrow.BINARY, arrow.LARGE_BINARY, arrow.BINARY_VIEW:
 		type byter interface{ Value(int) []byte }
 		a, ok := arr.(byter)
 		if !ok {
