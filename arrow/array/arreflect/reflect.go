@@ -41,6 +41,7 @@ type tagOpts struct {
 	Dict             bool
 	ListView         bool
 	REE              bool
+	Large            bool
 	DecimalPrecision int32
 	DecimalScale     int32
 	HasDecimalOpts   bool
@@ -108,6 +109,8 @@ func parseOptions(opts *tagOpts, rest string) {
 			opts.ListView = true
 		case "ree":
 			opts.REE = true
+		case "large":
+			opts.Large = true
 		case "date32", "date64", "time32", "time64", "timestamp":
 			opts.Temporal = token
 		default:
@@ -394,6 +397,10 @@ func WithDecimal(precision, scale int32) Option {
 func WithTemporal(temporal string) Option {
 	return func(o *tagOpts) { o.Temporal = temporal }
 }
+
+// WithLarge requests Large type variants (LARGE_STRING, LARGE_BINARY, LARGE_LIST,
+// LARGE_LIST_VIEW) for the top-level array and recursively for nested types.
+func WithLarge() Option { return func(o *tagOpts) { o.Large = true } }
 
 func validateTemporalOpt(temporal string) error {
 	switch temporal {
