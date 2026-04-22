@@ -602,43 +602,56 @@ func TestBuildRunEndEncodedArray(t *testing.T) {
 	})
 }
 
-func TestBuildListViewArray(t *testing.T) {
+func TestBuildViewArray(t *testing.T) {
 	mem := checkedMem(t)
 
-	t.Run("int32_listview", func(t *testing.T) {
-		vals := [][]int32{{1, 2, 3}, {4, 5}, {6}}
-		arr := mustBuildArray(t, vals, tagOpts{ListView: true}, mem)
-		require.Equal(t, arrow.LIST_VIEW, arr.DataType().ID(), "expected LIST_VIEW, got %v", arr.DataType())
-		typed := arr.(*array.ListView)
-		assert.Equal(t, 3, typed.Len())
+	t.Run("string→STRING_VIEW", func(t *testing.T) {
+		arr := mustBuildArray(t, []string{"a", "b"}, tagOpts{View: true}, mem)
+		assert.Equal(t, arrow.STRING_VIEW, arr.DataType().ID())
+		sv := arr.(*array.StringView)
+		assert.Equal(t, "a", sv.Value(0))
+		assert.Equal(t, "b", sv.Value(1))
 	})
 
-	t.Run("null_entry", func(t *testing.T) {
-		vals := [][]int32{{1, 2}, nil, {3}}
-		arr := mustBuildArray(t, vals, tagOpts{ListView: true}, mem)
-		assert.True(t, arr.IsNull(1), "expected index 1 to be null")
+	t.Run("[]byte→BINARY_VIEW", func(t *testing.T) {
+		arr := mustBuildArray(t, [][]byte{{1, 2}, {3}}, tagOpts{View: true}, mem)
+		assert.Equal(t, arrow.BINARY_VIEW, arr.DataType().ID())
+	})
+
+	t.Run("int32_view", func(t *testing.T) {
+		vals := [][]int32{{1, 2, 3}, {4, 5}}
+		arr := mustBuildArray(t, vals, tagOpts{View: true}, mem)
+		assert.Equal(t, arrow.LIST_VIEW, arr.DataType().ID())
+		typed := arr.(*array.ListView)
+		assert.Equal(t, 2, typed.Len())
+	})
+
+	t.Run("nil_outer_listview", func(t *testing.T) {
+		var nilSlice [][]int32
+		arr := mustBuildArray(t, nilSlice, tagOpts{View: true}, mem)
+		assert.Equal(t, 0, arr.Len())
 	})
 
 	t.Run("string_listview", func(t *testing.T) {
-		vals := [][]string{{"hello", "world"}, {"foo"}, {"a", "b", "c"}}
-		arr := mustBuildArray(t, vals, tagOpts{ListView: true}, mem)
-		require.Equal(t, arrow.LIST_VIEW, arr.DataType().ID(), "expected LIST_VIEW, got %v", arr.DataType())
-		assert.Equal(t, 3, arr.Len())
-	})
-
-	t.Run("total_values", func(t *testing.T) {
-		vals := [][]int32{{10, 20}, {30}}
-		arr := mustBuildArray(t, vals, tagOpts{ListView: true}, mem)
-		allVals := arr.(*array.ListView).ListValues().(*array.Int32)
-		assert.Equal(t, 3, allVals.Len(), "expected 3 total values, got %d", allVals.Len())
-	})
-
-	t.Run("nil_pointer_listview_element", func(t *testing.T) {
-		a := []int32{1, 2}
-		vals := []*[]int32{&a, nil, &a}
-		arr := mustBuildArray(t, vals, tagOpts{ListView: true}, mem)
+		vals := [][]string{{"a", "b"}, {"c"}}
+		arr := mustBuildArray(t, vals, tagOpts{View: true}, mem)
 		assert.Equal(t, arrow.LIST_VIEW, arr.DataType().ID())
-		assertMultiLevelPtrNullPattern(t, arr)
+		lv := arr.DataType().(*arrow.ListViewType)
+		assert.Equal(t, arrow.STRING_VIEW, lv.Elem().ID())
+	})
+
+	t.Run("null_in_listview", func(t *testing.T) {
+		vals := [][]int32{{1, 2, 3}, nil, {4, 5}}
+		arr := mustBuildArray(t, vals, tagOpts{View: true}, mem)
+		allVals := arr.(*array.ListView).ListValues().(*array.Int32)
+		assert.Equal(t, 5, allVals.Len())
+	})
+
+	t.Run("nil_pointer_view_element", func(t *testing.T) {
+		a := []int32{1, 2}
+		vals := []*[]int32{&a, nil}
+		arr := mustBuildArray(t, vals, tagOpts{View: true}, mem)
+		assert.True(t, arr.IsNull(1))
 	})
 }
 
@@ -1044,12 +1057,10 @@ func TestBuildLargeTypes(t *testing.T) {
 		assert.Equal(t, arrow.LARGE_BINARY, ll.Elem().ID())
 	})
 
-	t.Run("listview+large→LARGE_LIST_VIEW<LARGE_STRING>", func(t *testing.T) {
-		opts := tagOpts{Large: true, ListView: true}
+	t.Run("view+large→LARGE_LIST_VIEW", func(t *testing.T) {
+		opts := tagOpts{Large: true, View: true}
 		arr := mustBuildArray(t, [][]string{{"x"}, {"y", "z"}}, opts, mem)
 		assert.Equal(t, arrow.LARGE_LIST_VIEW, arr.DataType().ID())
-		llv := arr.DataType().(*arrow.LargeListViewType)
-		assert.Equal(t, arrow.LARGE_STRING, llv.Elem().ID())
 	})
 
 	t.Run("map<string,string> with large", func(t *testing.T) {

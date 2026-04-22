@@ -49,15 +49,25 @@ func buildArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.A
 		}
 	}
 
+	if opts.View {
+		dt, err := inferArrowType(elemType)
+		if err != nil {
+			return nil, err
+		}
+		if !hasViewableType(dt) {
+			return nil, fmt.Errorf("arreflect: view option has no effect on type %s: %w", dt, ErrUnsupportedType)
+		}
+	}
+
 	if opts.Dict {
 		return buildDictionaryArray(vals, opts, mem)
 	}
 	if opts.REE {
 		return buildRunEndEncodedArray(vals, opts, mem)
 	}
-	if opts.ListView {
+	if opts.View {
 		if elemType.Kind() != reflect.Slice || elemType == typeOfByteSlice {
-			return nil, fmt.Errorf("arreflect: WithListView requires a slice-of-slices element type, got %s: %w", elemType, ErrUnsupportedType)
+			return buildPrimitiveArray(vals, opts, mem)
 		}
 		return buildListViewArray(vals, opts, mem)
 	}
@@ -102,6 +112,9 @@ func buildPrimitiveArray(vals reflect.Value, opts tagOpts, mem memory.Allocator)
 	}
 	if opts.Large {
 		dt = applyLargeOpts(dt)
+	}
+	if opts.View {
+		dt = applyViewOpts(dt)
 	}
 
 	b := array.NewBuilder(mem, dt)
@@ -275,6 +288,9 @@ func buildStructArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (a
 		// applyLargeOpts is idempotent, so per-field "large" tags already applied
 		// by inferStructType are safe to walk again here.
 		st = applyLargeOpts(st).(*arrow.StructType)
+	}
+	if opts.View {
+		st = applyViewOpts(st).(*arrow.StructType)
 	}
 
 	fields := cachedStructFields(elemType)
@@ -540,6 +556,9 @@ func buildListLikeArray(vals reflect.Value, mem memory.Allocator, opts tagOpts, 
 	if opts.Large {
 		elemDT = applyLargeOpts(elemDT)
 	}
+	if opts.View {
+		elemDT = applyViewOpts(elemDT)
+	}
 
 	label := "list element"
 	if isView {
@@ -631,6 +650,10 @@ func buildMapArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arro
 		keyDT = applyLargeOpts(keyDT)
 		valDT = applyLargeOpts(valDT)
 	}
+	if opts.View {
+		keyDT = applyViewOpts(keyDT)
+		valDT = applyViewOpts(valDT)
+	}
 
 	mb := array.NewMapBuilder(mem, keyDT, valDT, false)
 	defer mb.Release()
@@ -679,6 +702,9 @@ func buildFixedSizeListArray(vals reflect.Value, opts tagOpts, mem memory.Alloca
 	}
 	if opts.Large {
 		innerDT = applyLargeOpts(innerDT)
+	}
+	if opts.View {
+		innerDT = applyViewOpts(innerDT)
 	}
 
 	fb := array.NewFixedSizeListBuilder(mem, n, innerDT)
@@ -748,7 +774,7 @@ func buildDictionaryArray(vals reflect.Value, _ tagOpts, mem memory.Allocator) (
 func buildRunEndEncodedArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
 	valOpts := opts
 	valOpts.REE = false
-	valOpts.ListView = false
+	valOpts.View = false
 	if vals.Len() == 0 {
 		runEndsArr, err := buildPrimitiveArray(reflect.MakeSlice(reflect.TypeOf([]int32{}), 0, 0), tagOpts{}, mem)
 		if err != nil {
