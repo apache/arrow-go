@@ -798,4 +798,23 @@ func TestWithViewRoundTrip(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrUnsupportedType)
 	})
+
+	t.Run("struct with view-tagged fields via WithView is idempotent", func(t *testing.T) {
+		// Fields already tagged ,view infer to STRING_VIEW; WithView() should still
+		// accept the struct and the top-level applyViewOpts walk is a no-op on views.
+		type Row struct {
+			Name string `arrow:"name,view"`
+			Code int32  `arrow:"code"`
+		}
+		input := []Row{{"click", 1}, {"view", 2}}
+		arr, err := FromSlice(input, mem, WithView())
+		require.NoError(t, err)
+		defer arr.Release()
+		sa := arr.(*array.Struct)
+		assert.Equal(t, arrow.STRING_VIEW, sa.Field(0).DataType().ID())
+
+		got, err := ToSlice[Row](arr)
+		require.NoError(t, err)
+		assert.Equal(t, input, got)
+	})
 }

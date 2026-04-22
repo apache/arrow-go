@@ -851,4 +851,19 @@ func TestHasViewableType(t *testing.T) {
 	t.Run("large_binary is true", func(t *testing.T) {
 		assert.True(t, hasViewableType(arrow.BinaryTypes.LargeBinary))
 	})
+	t.Run("string_view is true", func(t *testing.T) {
+		assert.True(t, hasViewableType(arrow.BinaryTypes.StringView))
+	})
+	t.Run("binary_view is true", func(t *testing.T) {
+		assert.True(t, hasViewableType(arrow.BinaryTypes.BinaryView))
+	})
+	t.Run("list_view is true", func(t *testing.T) {
+		assert.True(t, hasViewableType(arrow.ListViewOf(arrow.PrimitiveTypes.Int64)))
+	})
+	t.Run("large_list is true", func(t *testing.T) {
+		assert.True(t, hasViewableType(arrow.LargeListOf(arrow.PrimitiveTypes.Int64)))
+	})
+	t.Run("large_list_view is true", func(t *testing.T) {
+		assert.True(t, hasViewableType(arrow.LargeListViewOf(arrow.PrimitiveTypes.Int64)))
+	})
 }
