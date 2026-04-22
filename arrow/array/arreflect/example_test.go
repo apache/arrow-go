@@ -318,3 +318,50 @@ func ExampleToAnySlice_nullableFields() {
 	// alice: 9.5
 	// bob: <null>
 }
+
+func ExampleWithLarge() {
+	mem := memory.NewGoAllocator()
+
+	arr, err := arreflect.FromSlice([]string{"hello", "world"}, mem, arreflect.WithLarge())
+	if err != nil {
+		panic(err)
+	}
+	defer arr.Release()
+
+	fmt.Println("Type:", arr.DataType())
+	fmt.Println("Len:", arr.Len())
+	// Output:
+	// Type: large_utf8
+	// Len: 2
+}
+
+func ExampleFromSlice_largeStruct() {
+	type Event struct {
+		Name string `arrow:"name,large"`
+		Code int32  `arrow:"code"`
+	}
+
+	schema, err := arreflect.InferSchema[Event]()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("Schema:", schema)
+
+	mem := memory.NewGoAllocator()
+	arr, err := arreflect.FromSlice([]Event{{"click", 1}, {"view", 2}}, mem)
+	if err != nil {
+		panic(err)
+	}
+	defer arr.Release()
+
+	sa := arr.(*array.Struct)
+	fmt.Println("Name type:", sa.Field(0).DataType())
+	fmt.Println("Code type:", sa.Field(1).DataType())
+	// Output:
+	// Schema: schema:
+	//   fields: 2
+	//     - name: type=large_utf8
+	//     - code: type=int32
+	// Name type: large_utf8
+	// Code type: int32
+}
