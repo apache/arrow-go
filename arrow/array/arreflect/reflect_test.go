@@ -264,19 +264,20 @@ func TestBuildEmptyTyped(t *testing.T) {
 		assert.Equal(t, arrow.INT32, arr.DataType().ID())
 	})
 
-	t.Run("listview_on_non_slice_type_errors", func(t *testing.T) {
+	t.Run("view_on_non_slice_type_errors", func(t *testing.T) {
 		_, err := buildEmptyTyped(reflect.TypeOf(int32(0)), tagOpts{View: true}, mem)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrUnsupportedType)
 	})
 
-	t.Run("listview_on_byte_slice_errors", func(t *testing.T) {
-		_, err := buildEmptyTyped(reflect.TypeOf([]byte(nil)), tagOpts{View: true}, mem)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrUnsupportedType)
+	t.Run("view_happy_path_binary", func(t *testing.T) {
+		arr, err := buildEmptyTyped(reflect.TypeOf([]byte(nil)), tagOpts{View: true}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, arrow.BINARY_VIEW, arr.DataType().ID())
 	})
 
-	t.Run("listview_with_slice_of_pointers_derefs_inner", func(t *testing.T) {
+	t.Run("view_with_slice_of_pointers_derefs_inner", func(t *testing.T) {
 		arr, err := buildEmptyTyped(reflect.TypeOf([]*int32(nil)), tagOpts{View: true}, mem)
 		require.NoError(t, err)
 		defer arr.Release()
@@ -284,11 +285,25 @@ func TestBuildEmptyTyped(t *testing.T) {
 		assert.Equal(t, arrow.LIST_VIEW, arr.DataType().ID())
 	})
 
-	t.Run("listview_happy_path", func(t *testing.T) {
+	t.Run("view_happy_path_list", func(t *testing.T) {
 		arr, err := buildEmptyTyped(reflect.TypeOf([]int32(nil)), tagOpts{View: true}, mem)
 		require.NoError(t, err)
 		defer arr.Release()
 		assert.Equal(t, arrow.LIST_VIEW, arr.DataType().ID())
+	})
+
+	t.Run("view_happy_path_string", func(t *testing.T) {
+		arr, err := buildEmptyTyped(reflect.TypeOf(""), tagOpts{View: true}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, arrow.STRING_VIEW, arr.DataType().ID())
+	})
+
+	t.Run("large_view_empty", func(t *testing.T) {
+		arr, err := buildEmptyTyped(reflect.TypeOf([]string(nil)), tagOpts{Large: true, View: true}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, arrow.LARGE_LIST_VIEW, arr.DataType().ID())
 	})
 
 	t.Run("dict_with_unsupported_value_type_errors", func(t *testing.T) {
@@ -326,7 +341,7 @@ func TestBuildEmptyTyped(t *testing.T) {
 		defer arr.Release()
 		assert.Equal(t, arrow.LARGE_LIST_VIEW, arr.DataType().ID())
 		llv := arr.DataType().(*arrow.LargeListViewType)
-		assert.Equal(t, arrow.LARGE_STRING, llv.Elem().ID())
+		assert.Equal(t, arrow.STRING_VIEW, llv.Elem().ID())
 	})
 
 	t.Run("large_on_int_errors", func(t *testing.T) {

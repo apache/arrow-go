@@ -450,22 +450,28 @@ func buildEmptyTyped(goType reflect.Type, opts tagOpts, mem memory.Allocator) (a
 		dt = applyLargeOpts(dt)
 	}
 	if opts.View {
-		if derefType.Kind() != reflect.Slice || derefType == typeOfByteSlice {
-			return nil, fmt.Errorf("arreflect: WithView requires a slice-of-slices element type, got %s: %w", goType, ErrUnsupportedType)
-		}
-		innerElem := derefType.Elem()
-		for innerElem.Kind() == reflect.Ptr {
-			innerElem = innerElem.Elem()
-		}
-		innerDT, err := inferArrowType(innerElem)
-		if err != nil {
-			return nil, err
-		}
-		if opts.Large {
-			innerDT = applyLargeOpts(innerDT)
-			dt = arrow.LargeListViewOf(innerDT)
+		if derefType.Kind() == reflect.Slice && derefType != typeOfByteSlice {
+			// slice-of-slices: build a LIST_VIEW or LARGE_LIST_VIEW
+			innerElem := derefType.Elem()
+			for innerElem.Kind() == reflect.Ptr {
+				innerElem = innerElem.Elem()
+			}
+			innerDT, err := inferArrowType(innerElem)
+			if err != nil {
+				return nil, err
+			}
+			innerDT = applyViewOpts(innerDT)
+			if opts.Large {
+				dt = arrow.LargeListViewOf(innerDT)
+			} else {
+				dt = arrow.ListViewOf(innerDT)
+			}
 		} else {
-			dt = arrow.ListViewOf(innerDT)
+			// primitive/string/binary: apply view recursively
+			if !hasViewableType(dt) {
+				return nil, fmt.Errorf("arreflect: view option has no effect on type %s: %w", dt, ErrUnsupportedType)
+			}
+			dt = applyViewOpts(dt)
 		}
 	}
 	if opts.Dict {

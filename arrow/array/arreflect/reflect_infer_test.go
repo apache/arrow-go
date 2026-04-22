@@ -323,9 +323,9 @@ func TestInferArrowSchemaStructFieldEncoding(t *testing.T) {
 		assert.Equal(t, arrow.DICTIONARY, f[0].Type.ID())
 	})
 
-	t.Run("listview-tagged []string field becomes LIST_VIEW", func(t *testing.T) {
+	t.Run("view-tagged []string field becomes LIST_VIEW", func(t *testing.T) {
 		type S struct {
-			Tags []string `arrow:"tags,listview"`
+			Tags []string `arrow:"tags,view"`
 		}
 		schema, err := InferSchema[S]()
 		require.NoError(t, err)
@@ -701,21 +701,34 @@ func TestInferStructTypeWithLarge(t *testing.T) {
 	assert.Equal(t, arrow.INT64, st.Field(1).Type.ID(), "Count should be INT64")
 }
 
-func TestApplyEncodingOptsLargeListview(t *testing.T) {
-	// large+listview: applyLargeOpts turns LIST→LARGE_LIST first, then
-	// applyEncodingOpts should emit LARGE_LIST_VIEW
-	fm := fieldMeta{
-		Name: "tags",
-		Type: reflect.TypeOf([]string{}),
-		Opts: tagOpts{Large: true, ListView: true},
+func TestApplyViewOptsViewCombinations(t *testing.T) {
+	t.Run("view+large: LARGE_LIST→LARGE_LIST_VIEW", func(t *testing.T) {
+		dt := applyLargeOpts(arrow.ListOf(arrow.BinaryTypes.String))
+		// dt is now LARGE_LIST<LARGE_STRING>
+		got := applyViewOpts(dt)
+		assert.Equal(t, arrow.LARGE_LIST_VIEW, got.ID())
+	})
+
+	t.Run("view only: LIST→LIST_VIEW", func(t *testing.T) {
+		dt := arrow.ListOf(arrow.BinaryTypes.String)
+		got := applyViewOpts(dt)
+		assert.Equal(t, arrow.LIST_VIEW, got.ID())
+		lv := got.(*arrow.ListViewType)
+		assert.Equal(t, arrow.STRING_VIEW, lv.Elem().ID())
+	})
+}
+
+func TestInferStructTypeWithView(t *testing.T) {
+	type Row struct {
+		Name string   `arrow:",view"`
+		Tags []string `arrow:"tags,view"`
 	}
-	dt := applyLargeOpts(arrow.ListOf(arrow.BinaryTypes.LargeString))
-	// dt is now LARGE_LIST<LARGE_STRING>
-	got, err := applyEncodingOpts(dt, fm)
+	st, err := inferStructType(reflect.TypeOf(Row{}))
 	require.NoError(t, err)
-	assert.Equal(t, arrow.LARGE_LIST_VIEW, got.ID())
-	llv := got.(*arrow.LargeListViewType)
-	assert.Equal(t, arrow.LARGE_STRING, llv.Elem().ID())
+	assert.Equal(t, arrow.STRING_VIEW, st.Field(0).Type.ID(), "Name should be STRING_VIEW")
+	assert.Equal(t, arrow.LIST_VIEW, st.Field(1).Type.ID(), "Tags should be LIST_VIEW")
+	lv := st.Field(1).Type.(*arrow.ListViewType)
+	assert.Equal(t, arrow.STRING_VIEW, lv.Elem().ID())
 }
 
 func TestHasLargeableType(t *testing.T) {
