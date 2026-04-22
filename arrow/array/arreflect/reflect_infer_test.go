@@ -690,6 +690,34 @@ func TestApplyLargeOpts(t *testing.T) {
 	})
 }
 
+func TestInferStructTypeWithLarge(t *testing.T) {
+	type Row struct {
+		Name  string `arrow:",large"`
+		Count int64
+	}
+	st, err := inferStructType(reflect.TypeOf(Row{}))
+	require.NoError(t, err)
+	assert.Equal(t, arrow.LARGE_STRING, st.Field(0).Type.ID(), "Name should be LARGE_STRING")
+	assert.Equal(t, arrow.INT64, st.Field(1).Type.ID(), "Count should be INT64")
+}
+
+func TestApplyEncodingOptsLargeListview(t *testing.T) {
+	// large+listview: applyLargeOpts turns LIST→LARGE_LIST first, then
+	// applyEncodingOpts should emit LARGE_LIST_VIEW
+	fm := fieldMeta{
+		Name: "tags",
+		Type: reflect.TypeOf([]string{}),
+		Opts: tagOpts{Large: true, ListView: true},
+	}
+	dt := applyLargeOpts(arrow.ListOf(arrow.BinaryTypes.LargeString))
+	// dt is now LARGE_LIST<LARGE_STRING>
+	got, err := applyEncodingOpts(dt, fm)
+	require.NoError(t, err)
+	assert.Equal(t, arrow.LARGE_LIST_VIEW, got.ID())
+	llv := got.(*arrow.LargeListViewType)
+	assert.Equal(t, arrow.LARGE_STRING, llv.Elem().ID())
+}
+
 func TestHasLargeableType(t *testing.T) {
 	assert.True(t, hasLargeableType(arrow.BinaryTypes.String))
 	assert.True(t, hasLargeableType(arrow.BinaryTypes.Binary))

@@ -256,11 +256,14 @@ func applyEncodingOpts(dt arrow.DataType, fm fieldMeta) (arrow.DataType, error) 
 		}
 		return &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: dt}, nil
 	case fm.Opts.ListView:
-		lt, ok := dt.(*arrow.ListType)
-		if !ok {
+		switch lt := dt.(type) {
+		case *arrow.ListType:
+			return arrow.ListViewOf(lt.Elem()), nil
+		case *arrow.LargeListType:
+			return arrow.LargeListViewOf(lt.Elem()), nil
+		default:
 			return nil, fmt.Errorf("arreflect: listview tag on field %q requires a slice type, got %v", fm.Name, dt)
 		}
-		return arrow.ListViewOf(lt.Elem()), nil
 	case fm.Opts.REE:
 		return nil, fmt.Errorf("arreflect: ree tag on struct field %q is not supported; use ree at top-level via FromSlice", fm.Name)
 	}
@@ -294,6 +297,9 @@ func inferStructType(t reflect.Type) (*arrow.StructType, error) {
 
 		dt = applyDecimalOpts(dt, origType, fm.Opts)
 		dt = applyTemporalOpts(dt, origType, fm.Opts)
+		if fm.Opts.Large {
+			dt = applyLargeOpts(dt)
+		}
 		dt, err = applyEncodingOpts(dt, fm)
 		if err != nil {
 			return nil, err
