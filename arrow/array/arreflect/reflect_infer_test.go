@@ -769,6 +769,8 @@ func TestApplyViewOpts(t *testing.T) {
 	}{
 		{"string→string_view", arrow.BinaryTypes.String, arrow.STRING_VIEW},
 		{"binary→binary_view", arrow.BinaryTypes.Binary, arrow.BINARY_VIEW},
+		{"large_string→string_view", arrow.BinaryTypes.LargeString, arrow.STRING_VIEW},
+		{"large_binary→binary_view", arrow.BinaryTypes.LargeBinary, arrow.BINARY_VIEW},
 		{"list<string>→list_view<string_view>", arrow.ListOf(arrow.BinaryTypes.String), arrow.LIST_VIEW},
 		{"int64 unchanged", arrow.PrimitiveTypes.Int64, arrow.INT64},
 		{"float32 unchanged", arrow.PrimitiveTypes.Float32, arrow.FLOAT32},

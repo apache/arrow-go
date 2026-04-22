@@ -39,22 +39,15 @@ func buildArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.A
 		elemType = elemType.Elem()
 	}
 
-	if opts.Large {
+	if opts.Large || opts.View {
 		dt, err := inferArrowType(elemType)
 		if err != nil {
 			return nil, err
 		}
-		if !hasLargeableType(dt) {
+		if opts.Large && !hasLargeableType(dt) {
 			return nil, fmt.Errorf("arreflect: large option has no effect on type %s: %w", dt, ErrUnsupportedType)
 		}
-	}
-
-	if opts.View {
-		dt, err := inferArrowType(elemType)
-		if err != nil {
-			return nil, err
-		}
-		if !hasViewableType(dt) {
+		if opts.View && !hasViewableType(dt) {
 			return nil, fmt.Errorf("arreflect: view option has no effect on type %s: %w", dt, ErrUnsupportedType)
 		}
 	}

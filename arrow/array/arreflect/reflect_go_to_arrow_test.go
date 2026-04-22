@@ -1057,10 +1057,13 @@ func TestBuildLargeTypes(t *testing.T) {
 		assert.Equal(t, arrow.LARGE_BINARY, ll.Elem().ID())
 	})
 
-	t.Run("view+large→LARGE_LIST_VIEW", func(t *testing.T) {
+	t.Run("view+large→LARGE_LIST_VIEW<STRING_VIEW>", func(t *testing.T) {
+		// large→LARGE_LIST, then view→LARGE_LIST_VIEW; view wins on string elem (no LARGE_STRING_VIEW)
 		opts := tagOpts{Large: true, View: true}
 		arr := mustBuildArray(t, [][]string{{"x"}, {"y", "z"}}, opts, mem)
 		assert.Equal(t, arrow.LARGE_LIST_VIEW, arr.DataType().ID())
+		llv := arr.DataType().(*arrow.LargeListViewType)
+		assert.Equal(t, arrow.STRING_VIEW, llv.Elem().ID())
 	})
 
 	t.Run("map<string,string> with large", func(t *testing.T) {

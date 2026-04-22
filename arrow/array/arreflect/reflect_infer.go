@@ -250,9 +250,9 @@ func hasLargeableType(dt arrow.DataType) bool {
 
 func applyViewOpts(dt arrow.DataType) arrow.DataType {
 	switch dt.ID() {
-	case arrow.STRING:
+	case arrow.STRING, arrow.LARGE_STRING:
 		return arrow.BinaryTypes.StringView
-	case arrow.BINARY:
+	case arrow.BINARY, arrow.LARGE_BINARY:
 		return arrow.BinaryTypes.BinaryView
 	case arrow.LIST:
 		return arrow.ListViewOf(applyViewOpts(dt.(*arrow.ListType).Elem()))
