@@ -691,3 +691,39 @@ func TestToAnySliceStructArray(t *testing.T) {
 		}
 	}
 }
+
+func TestWithLargeRoundTrip(t *testing.T) {
+	mem := testMem()
+
+	t.Run("[]string WithLarge round-trips via ToSlice", func(t *testing.T) {
+		input := []string{"alpha", "beta", "gamma"}
+		arr, err := FromSlice(input, mem, WithLarge())
+		require.NoError(t, err)
+		defer arr.Release()
+
+		assert.Equal(t, arrow.LARGE_STRING, arr.DataType().ID())
+
+		got, err := ToSlice[string](arr)
+		require.NoError(t, err)
+		assert.Equal(t, input, got)
+	})
+
+	t.Run("struct with large tag round-trips", func(t *testing.T) {
+		type Row struct {
+			Label string `arrow:"label,large"`
+			Count int32  `arrow:"count"`
+		}
+		input := []Row{{"a", 1}, {"b", 2}}
+		arr, err := FromSlice(input, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+
+		sa := arr.(*array.Struct)
+		assert.Equal(t, arrow.LARGE_STRING, sa.Field(0).DataType().ID())
+		assert.Equal(t, arrow.INT32, sa.Field(1).DataType().ID())
+
+		got, err := ToSlice[Row](arr)
+		require.NoError(t, err)
+		assert.Equal(t, input, got)
+	})
+}
