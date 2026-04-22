@@ -192,6 +192,62 @@ func applyTemporalOpts(dt arrow.DataType, origType reflect.Type, opts tagOpts) a
 	return dt
 }
 
+func applyLargeOpts(dt arrow.DataType) arrow.DataType {
+	switch dt.ID() {
+	case arrow.STRING:
+		return arrow.BinaryTypes.LargeString
+	case arrow.BINARY:
+		return arrow.BinaryTypes.LargeBinary
+	case arrow.LIST:
+		return arrow.LargeListOf(applyLargeOpts(dt.(*arrow.ListType).Elem()))
+	case arrow.LIST_VIEW:
+		return arrow.LargeListViewOf(applyLargeOpts(dt.(*arrow.ListViewType).Elem()))
+	case arrow.LARGE_LIST:
+		return arrow.LargeListOf(applyLargeOpts(dt.(*arrow.LargeListType).Elem()))
+	case arrow.LARGE_LIST_VIEW:
+		return arrow.LargeListViewOf(applyLargeOpts(dt.(*arrow.LargeListViewType).Elem()))
+	case arrow.FIXED_SIZE_LIST:
+		fsl := dt.(*arrow.FixedSizeListType)
+		return arrow.FixedSizeListOf(fsl.Len(), applyLargeOpts(fsl.Elem()))
+	case arrow.MAP:
+		mt := dt.(*arrow.MapType)
+		return arrow.MapOf(applyLargeOpts(mt.KeyType()), applyLargeOpts(mt.ItemField().Type))
+	case arrow.STRUCT:
+		st := dt.(*arrow.StructType)
+		fields := make([]arrow.Field, st.NumFields())
+		for i := 0; i < st.NumFields(); i++ {
+			f := st.Field(i)
+			f.Type = applyLargeOpts(f.Type)
+			fields[i] = f
+		}
+		return arrow.StructOf(fields...)
+	default:
+		return dt
+	}
+}
+
+func hasLargeableType(dt arrow.DataType) bool {
+	switch dt.ID() {
+	case arrow.STRING, arrow.BINARY, arrow.LIST, arrow.LIST_VIEW:
+		return true
+	case arrow.STRUCT:
+		st := dt.(*arrow.StructType)
+		for i := 0; i < st.NumFields(); i++ {
+			if hasLargeableType(st.Field(i).Type) {
+				return true
+			}
+		}
+		return false
+	case arrow.FIXED_SIZE_LIST:
+		return hasLargeableType(dt.(*arrow.FixedSizeListType).Elem())
+	case arrow.MAP:
+		mt := dt.(*arrow.MapType)
+		return hasLargeableType(mt.KeyType()) || hasLargeableType(mt.ItemField().Type)
+	default:
+		return false
+	}
+}
+
 func applyEncodingOpts(dt arrow.DataType, fm fieldMeta) (arrow.DataType, error) {
 	switch {
 	case fm.Opts.Dict:

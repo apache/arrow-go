@@ -634,3 +634,88 @@ func TestApplyDecimalOptsAllBranches(t *testing.T) {
 		assert.Equal(t, base, got)
 	})
 }
+
+func TestApplyLargeOpts(t *testing.T) {
+	cases := []struct {
+		name  string
+		input arrow.DataType
+		want  arrow.Type
+	}{
+		{"string→large_string", arrow.BinaryTypes.String, arrow.LARGE_STRING},
+		{"binary→large_binary", arrow.BinaryTypes.Binary, arrow.LARGE_BINARY},
+		{"list<string>→large_list<large_string>", arrow.ListOf(arrow.BinaryTypes.String), arrow.LARGE_LIST},
+		{"list_view<binary>→large_list_view<large_binary>", arrow.ListViewOf(arrow.BinaryTypes.Binary), arrow.LARGE_LIST_VIEW},
+		{"int64 unchanged", arrow.PrimitiveTypes.Int64, arrow.INT64},
+		{"float32 unchanged", arrow.PrimitiveTypes.Float32, arrow.FLOAT32},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := applyLargeOpts(tc.input)
+			assert.Equal(t, tc.want, got.ID())
+		})
+	}
+
+	t.Run("list<binary> elem is large_binary", func(t *testing.T) {
+		got := applyLargeOpts(arrow.ListOf(arrow.BinaryTypes.Binary))
+		ll, ok := got.(*arrow.LargeListType)
+		require.True(t, ok)
+		assert.Equal(t, arrow.LARGE_BINARY, ll.Elem().ID())
+	})
+
+	t.Run("fixed_size_list<string> recurses", func(t *testing.T) {
+		got := applyLargeOpts(arrow.FixedSizeListOf(3, arrow.BinaryTypes.String))
+		fsl, ok := got.(*arrow.FixedSizeListType)
+		require.True(t, ok)
+		assert.Equal(t, arrow.LARGE_STRING, fsl.Elem().ID())
+	})
+
+	t.Run("map<string,binary> recurses", func(t *testing.T) {
+		got := applyLargeOpts(arrow.MapOf(arrow.BinaryTypes.String, arrow.BinaryTypes.Binary))
+		mt, ok := got.(*arrow.MapType)
+		require.True(t, ok)
+		assert.Equal(t, arrow.LARGE_STRING, mt.KeyType().ID())
+		assert.Equal(t, arrow.LARGE_BINARY, mt.ItemField().Type.ID())
+	})
+
+	t.Run("struct recurses into fields", func(t *testing.T) {
+		st := arrow.StructOf(
+			arrow.Field{Name: "name", Type: arrow.BinaryTypes.String},
+			arrow.Field{Name: "count", Type: arrow.PrimitiveTypes.Int64},
+		)
+		got := applyLargeOpts(st)
+		gst, ok := got.(*arrow.StructType)
+		require.True(t, ok)
+		assert.Equal(t, arrow.LARGE_STRING, gst.Field(0).Type.ID())
+		assert.Equal(t, arrow.INT64, gst.Field(1).Type.ID())
+	})
+}
+
+func TestHasLargeableType(t *testing.T) {
+	assert.True(t, hasLargeableType(arrow.BinaryTypes.String))
+	assert.True(t, hasLargeableType(arrow.BinaryTypes.Binary))
+	assert.True(t, hasLargeableType(arrow.ListOf(arrow.PrimitiveTypes.Int64)))
+	assert.True(t, hasLargeableType(arrow.ListViewOf(arrow.PrimitiveTypes.Int64)))
+	assert.False(t, hasLargeableType(arrow.PrimitiveTypes.Int64))
+	assert.False(t, hasLargeableType(arrow.PrimitiveTypes.Float32))
+
+	t.Run("struct with string field is true", func(t *testing.T) {
+		st := arrow.StructOf(arrow.Field{Name: "x", Type: arrow.BinaryTypes.String})
+		assert.True(t, hasLargeableType(st))
+	})
+	t.Run("struct with only ints is false", func(t *testing.T) {
+		st := arrow.StructOf(arrow.Field{Name: "x", Type: arrow.PrimitiveTypes.Int32})
+		assert.False(t, hasLargeableType(st))
+	})
+	t.Run("fixed_size_list<string> is true", func(t *testing.T) {
+		assert.True(t, hasLargeableType(arrow.FixedSizeListOf(4, arrow.BinaryTypes.String)))
+	})
+	t.Run("fixed_size_list<int32> is false", func(t *testing.T) {
+		assert.False(t, hasLargeableType(arrow.FixedSizeListOf(4, arrow.PrimitiveTypes.Int32)))
+	})
+	t.Run("map with string key is true", func(t *testing.T) {
+		assert.True(t, hasLargeableType(arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int64)))
+	})
+	t.Run("map with no strings is false", func(t *testing.T) {
+		assert.False(t, hasLargeableType(arrow.MapOf(arrow.PrimitiveTypes.Int64, arrow.PrimitiveTypes.Int64)))
+	})
+}
