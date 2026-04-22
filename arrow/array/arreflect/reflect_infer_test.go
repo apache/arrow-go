@@ -845,4 +845,10 @@ func TestHasViewableType(t *testing.T) {
 	t.Run("map with string key is true", func(t *testing.T) {
 		assert.True(t, hasViewableType(arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int64)))
 	})
+	t.Run("large_string is true", func(t *testing.T) {
+		assert.True(t, hasViewableType(arrow.BinaryTypes.LargeString))
+	})
+	t.Run("large_binary is true", func(t *testing.T) {
+		assert.True(t, hasViewableType(arrow.BinaryTypes.LargeBinary))
+	})
 }

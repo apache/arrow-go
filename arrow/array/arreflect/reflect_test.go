@@ -308,6 +308,14 @@ func TestBuildEmptyTyped(t *testing.T) {
 		assert.Equal(t, arrow.STRING_VIEW, llv.Elem().ID())
 	})
 
+	t.Run("large_view_string_empty", func(t *testing.T) {
+		// large applied first: STRING→LARGE_STRING; then view: LARGE_STRING→STRING_VIEW
+		arr, err := buildEmptyTyped(reflect.TypeOf(""), tagOpts{Large: true, View: true}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, arrow.STRING_VIEW, arr.DataType().ID())
+	})
+
 	t.Run("dict_with_unsupported_value_type_errors", func(t *testing.T) {
 		_, err := buildEmptyTyped(reflect.TypeOf(time.Time{}), tagOpts{Dict: true}, mem)
 		require.Error(t, err)

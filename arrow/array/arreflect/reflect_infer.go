@@ -284,7 +284,7 @@ func applyViewOpts(dt arrow.DataType) arrow.DataType {
 
 func hasViewableType(dt arrow.DataType) bool {
 	switch dt.ID() {
-	case arrow.STRING, arrow.BINARY, arrow.LIST:
+	case arrow.STRING, arrow.BINARY, arrow.LARGE_STRING, arrow.LARGE_BINARY, arrow.LIST:
 		return true
 	case arrow.STRUCT:
 		st := dt.(*arrow.StructType)
