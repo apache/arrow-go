@@ -304,6 +304,8 @@ func TestBuildEmptyTyped(t *testing.T) {
 		require.NoError(t, err)
 		defer arr.Release()
 		assert.Equal(t, arrow.LARGE_LIST_VIEW, arr.DataType().ID())
+		llv := arr.DataType().(*arrow.LargeListViewType)
+		assert.Equal(t, arrow.STRING_VIEW, llv.Elem().ID())
 	})
 
 	t.Run("dict_with_unsupported_value_type_errors", func(t *testing.T) {
@@ -333,15 +335,6 @@ func TestBuildEmptyTyped(t *testing.T) {
 		require.NoError(t, err)
 		defer arr.Release()
 		assert.Equal(t, arrow.LARGE_STRING, arr.DataType().ID())
-	})
-
-	t.Run("large_listview_empty", func(t *testing.T) {
-		arr, err := buildEmptyTyped(reflect.TypeOf([]string(nil)), tagOpts{Large: true, View: true}, mem)
-		require.NoError(t, err)
-		defer arr.Release()
-		assert.Equal(t, arrow.LARGE_LIST_VIEW, arr.DataType().ID())
-		llv := arr.DataType().(*arrow.LargeListViewType)
-		assert.Equal(t, arrow.STRING_VIEW, llv.Elem().ID())
 	})
 
 	t.Run("large_on_int_errors", func(t *testing.T) {
