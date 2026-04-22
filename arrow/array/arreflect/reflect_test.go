@@ -52,8 +52,8 @@ func TestParseTag(t *testing.T) {
 			want:  tagOpts{Name: "name", Dict: true},
 		},
 		{
-			input: "name,listview",
-			want:  tagOpts{Name: "name", ListView: true},
+			input: "name,view",
+			want:  tagOpts{Name: "name", View: true},
 		},
 		{
 			input: "name,ree",
@@ -84,8 +84,8 @@ func TestParseTag(t *testing.T) {
 			want:  tagOpts{Name: "name", Large: true},
 		},
 		{
-			input: "name,large,listview",
-			want:  tagOpts{Name: "name", Large: true, ListView: true},
+			input: "name,large,view",
+			want:  tagOpts{Name: "name", Large: true, View: true},
 		},
 		{
 			input: "name,large,dict",
@@ -265,19 +265,19 @@ func TestBuildEmptyTyped(t *testing.T) {
 	})
 
 	t.Run("listview_on_non_slice_type_errors", func(t *testing.T) {
-		_, err := buildEmptyTyped(reflect.TypeOf(int32(0)), tagOpts{ListView: true}, mem)
+		_, err := buildEmptyTyped(reflect.TypeOf(int32(0)), tagOpts{View: true}, mem)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrUnsupportedType)
 	})
 
 	t.Run("listview_on_byte_slice_errors", func(t *testing.T) {
-		_, err := buildEmptyTyped(reflect.TypeOf([]byte(nil)), tagOpts{ListView: true}, mem)
+		_, err := buildEmptyTyped(reflect.TypeOf([]byte(nil)), tagOpts{View: true}, mem)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrUnsupportedType)
 	})
 
 	t.Run("listview_with_slice_of_pointers_derefs_inner", func(t *testing.T) {
-		arr, err := buildEmptyTyped(reflect.TypeOf([]*int32(nil)), tagOpts{ListView: true}, mem)
+		arr, err := buildEmptyTyped(reflect.TypeOf([]*int32(nil)), tagOpts{View: true}, mem)
 		require.NoError(t, err)
 		defer arr.Release()
 		assert.Equal(t, 0, arr.Len())
@@ -285,7 +285,7 @@ func TestBuildEmptyTyped(t *testing.T) {
 	})
 
 	t.Run("listview_happy_path", func(t *testing.T) {
-		arr, err := buildEmptyTyped(reflect.TypeOf([]int32(nil)), tagOpts{ListView: true}, mem)
+		arr, err := buildEmptyTyped(reflect.TypeOf([]int32(nil)), tagOpts{View: true}, mem)
 		require.NoError(t, err)
 		defer arr.Release()
 		assert.Equal(t, arrow.LIST_VIEW, arr.DataType().ID())
@@ -321,7 +321,7 @@ func TestBuildEmptyTyped(t *testing.T) {
 	})
 
 	t.Run("large_listview_empty", func(t *testing.T) {
-		arr, err := buildEmptyTyped(reflect.TypeOf([]string(nil)), tagOpts{Large: true, ListView: true}, mem)
+		arr, err := buildEmptyTyped(reflect.TypeOf([]string(nil)), tagOpts{Large: true, View: true}, mem)
 		require.NoError(t, err)
 		defer arr.Release()
 		assert.Equal(t, arrow.LARGE_LIST_VIEW, arr.DataType().ID())

@@ -39,7 +39,7 @@ type tagOpts struct {
 	Name             string
 	Skip             bool
 	Dict             bool
-	ListView         bool
+	View             bool
 	REE              bool
 	Large            bool
 	DecimalPrecision int32
@@ -105,8 +105,8 @@ func parseOptions(opts *tagOpts, rest string) {
 		switch token {
 		case "dict":
 			opts.Dict = true
-		case "listview":
-			opts.ListView = true
+		case "view":
+			opts.View = true
 		case "ree":
 			opts.REE = true
 		case "large":
@@ -375,8 +375,9 @@ type Option func(*tagOpts)
 // WithDict requests dictionary encoding for the top-level array.
 func WithDict() Option { return func(o *tagOpts) { o.Dict = true } }
 
-// WithListView requests ListView encoding instead of List for slice types.
-func WithListView() Option { return func(o *tagOpts) { o.ListView = true } }
+// WithView requests view-type encoding (STRING_VIEW, BINARY_VIEW, LIST_VIEW)
+// for the top-level array and recursively for nested types.
+func WithView() Option { return func(o *tagOpts) { o.View = true } }
 
 // WithREE requests run-end encoding for the top-level array.
 func WithREE() Option { return func(o *tagOpts) { o.REE = true } }
@@ -422,11 +423,11 @@ func validateOptions(opts tagOpts) error {
 	if opts.REE {
 		n++
 	}
-	if opts.ListView {
+	if opts.View {
 		n++
 	}
 	if n > 1 {
-		return fmt.Errorf("arreflect: conflicting options: only one of WithDict, WithREE, WithListView may be specified: %w", ErrUnsupportedType)
+		return fmt.Errorf("arreflect: conflicting options: only one of WithDict, WithREE, WithView may be specified: %w", ErrUnsupportedType)
 	}
 	return nil
 }
@@ -448,9 +449,9 @@ func buildEmptyTyped(goType reflect.Type, opts tagOpts, mem memory.Allocator) (a
 		}
 		dt = applyLargeOpts(dt)
 	}
-	if opts.ListView {
+	if opts.View {
 		if derefType.Kind() != reflect.Slice || derefType == typeOfByteSlice {
-			return nil, fmt.Errorf("arreflect: WithListView requires a slice-of-slices element type, got %s: %w", goType, ErrUnsupportedType)
+			return nil, fmt.Errorf("arreflect: WithView requires a slice-of-slices element type, got %s: %w", goType, ErrUnsupportedType)
 		}
 		innerElem := derefType.Elem()
 		for innerElem.Kind() == reflect.Ptr {
