@@ -701,7 +701,7 @@ func validateDictValueType(dt arrow.DataType) error {
 	}
 }
 
-func buildDictionaryArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
+func buildDictionaryArray(vals reflect.Value, _ tagOpts, mem memory.Allocator) (arrow.Array, error) {
 	elemType, isPtr := derefSliceElem(vals)
 
 	valDT, err := inferArrowType(elemType)
