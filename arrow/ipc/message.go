@@ -20,9 +20,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"sync/atomic"
+	"unsafe"
 
-	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/internal/flatbuf"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
@@ -66,10 +65,10 @@ func (m MessageType) String() string {
 
 // Message is an IPC message, including metadata and body.
 type Message struct {
-	refCount atomic.Int64
-	msg      *flatbuf.Message
-	meta     *memory.Buffer
-	body     *memory.Buffer
+	memory.Refcount
+	msg  *flatbuf.Message
+	meta *memory.Buffer
+	body *memory.Buffer
 }
 
 // NewMessage creates a new message from the metadata and body buffers.
@@ -85,7 +84,9 @@ func NewMessage(meta, body *memory.Buffer) *Message {
 		meta: meta,
 		body: body,
 	}
-	m.refCount.Add(1)
+	m.ReferenceBuffer(&m.meta, &m.body)
+	m.ReferenceDerived(unsafe.Pointer(&m.msg))
+	m.Retain()
 	return m
 }
 
@@ -99,29 +100,10 @@ func newMessageFromFB(meta *flatbuf.Message, body *memory.Buffer) *Message {
 		meta: memory.NewBufferBytes(meta.Table().Bytes),
 		body: body,
 	}
-	m.refCount.Add(1)
+	m.ReferenceBuffer(&m.meta, &m.body)
+	m.ReferenceDerived(unsafe.Pointer(&m.msg))
+	m.Retain()
 	return m
-}
-
-// Retain increases the reference count by 1.
-// Retain may be called simultaneously from multiple goroutines.
-func (msg *Message) Retain() {
-	msg.refCount.Add(1)
-}
-
-// Release decreases the reference count by 1.
-// Release may be called simultaneously from multiple goroutines.
-// When the reference count goes to zero, the memory is freed.
-func (msg *Message) Release() {
-	debug.Assert(msg.refCount.Load() > 0, "too many releases")
-
-	if msg.refCount.Add(-1) == 0 {
-		msg.meta.Release()
-		msg.body.Release()
-		msg.msg = nil
-		msg.meta = nil
-		msg.body = nil
-	}
 }
 
 func (msg *Message) Version() MetadataVersion {
@@ -144,10 +126,10 @@ type MessageReader interface {
 
 // MessageReader reads messages from an io.Reader.
 type messageReader struct {
+	memory.Refcount
 	r io.Reader
 
-	refCount atomic.Int64
-	msg      *Message
+	msg *Message
 
 	mem    memory.Allocator
 	header [4]byte
@@ -161,28 +143,9 @@ func NewMessageReader(r io.Reader, opts ...Option) MessageReader {
 	}
 
 	mr := &messageReader{r: r, mem: cfg.alloc}
-	mr.refCount.Add(1)
+	mr.Retain()
+	mr.ReferenceDependency(unsafe.Pointer(&mr.msg))
 	return mr
-}
-
-// Retain increases the reference count by 1.
-// Retain may be called simultaneously from multiple goroutines.
-func (r *messageReader) Retain() {
-	r.refCount.Add(1)
-}
-
-// Release decreases the reference count by 1.
-// When the reference count goes to zero, the memory is freed.
-// Release may be called simultaneously from multiple goroutines.
-func (r *messageReader) Release() {
-	debug.Assert(r.refCount.Load() > 0, "too many releases")
-
-	if r.refCount.Add(-1) == 0 {
-		if r.msg != nil {
-			r.msg.Release()
-			r.msg = nil
-		}
-	}
 }
 
 // Message returns the current message that has been extracted from the
