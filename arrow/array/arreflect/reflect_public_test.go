@@ -238,7 +238,7 @@ func TestFromGoSlice(t *testing.T) {
 		assert.Equal(t, 0, arr.Len())
 	})
 
-	t.Run("empty slice with WithListView", func(t *testing.T) {
+	t.Run("empty slice with WithView", func(t *testing.T) {
 		arr, err := FromSlice([][]int32{}, mem, WithView())
 		require.NoError(t, err)
 		defer arr.Release()

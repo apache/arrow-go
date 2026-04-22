@@ -42,7 +42,7 @@
 //
 // Additional tag options:
 //
-//	arrow:"field,view"                  — use StringView/BinaryView instead of String/Binary for strings, or ListVi for slices
+//	arrow:"field,view"                  — use STRING_VIEW/BINARY_VIEW for string/bytes fields, or LIST_VIEW for slice fields
 //	arrow:"field,ree"                   — run-end encoding at top-level only (struct fields not supported)
 //	arrow:"field,decimal(precision,scale)" — override decimal precision and scale (e.g., arrow:",decimal(18,2)")
 package arreflect
