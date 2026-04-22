@@ -1012,6 +1012,63 @@ func TestAppendDecimalValueErrors(t *testing.T) {
 	})
 }
 
+func TestBuildLargeTypes(t *testing.T) {
+	mem := checkedMem(t)
+	largeOpts := tagOpts{Large: true}
+
+	t.Run("string→LARGE_STRING", func(t *testing.T) {
+		arr := mustBuildArray(t, []string{"a", "b", "c"}, largeOpts, mem)
+		assert.Equal(t, arrow.LARGE_STRING, arr.DataType().ID())
+		ls := arr.(*array.LargeString)
+		assert.Equal(t, "a", ls.Value(0))
+		assert.Equal(t, "b", ls.Value(1))
+		assert.Equal(t, "c", ls.Value(2))
+	})
+
+	t.Run("[]byte→LARGE_BINARY", func(t *testing.T) {
+		arr := mustBuildArray(t, [][]byte{{1, 2}, {3}}, largeOpts, mem)
+		assert.Equal(t, arrow.LARGE_BINARY, arr.DataType().ID())
+	})
+
+	t.Run("[]string→LARGE_LIST<LARGE_STRING>", func(t *testing.T) {
+		arr := mustBuildArray(t, [][]string{{"a", "b"}, {"c"}}, largeOpts, mem)
+		assert.Equal(t, arrow.LARGE_LIST, arr.DataType().ID())
+		ll := arr.DataType().(*arrow.LargeListType)
+		assert.Equal(t, arrow.LARGE_STRING, ll.Elem().ID())
+	})
+
+	t.Run("[][]byte→LARGE_LIST<LARGE_BINARY>", func(t *testing.T) {
+		arr := mustBuildArray(t, [][][]byte{{{1}, {2}}, {{3}}}, largeOpts, mem)
+		assert.Equal(t, arrow.LARGE_LIST, arr.DataType().ID())
+		ll := arr.DataType().(*arrow.LargeListType)
+		assert.Equal(t, arrow.LARGE_BINARY, ll.Elem().ID())
+	})
+
+	t.Run("listview+large→LARGE_LIST_VIEW<LARGE_STRING>", func(t *testing.T) {
+		opts := tagOpts{Large: true, ListView: true}
+		arr := mustBuildArray(t, [][]string{{"x"}, {"y", "z"}}, opts, mem)
+		assert.Equal(t, arrow.LARGE_LIST_VIEW, arr.DataType().ID())
+		llv := arr.DataType().(*arrow.LargeListViewType)
+		assert.Equal(t, arrow.LARGE_STRING, llv.Elem().ID())
+	})
+
+	t.Run("map<string,string> with large", func(t *testing.T) {
+		arr := mustBuildArray(t, []map[string]string{{"k": "v"}}, largeOpts, mem)
+		assert.Equal(t, arrow.MAP, arr.DataType().ID())
+		mt := arr.DataType().(*arrow.MapType)
+		assert.Equal(t, arrow.LARGE_STRING, mt.KeyType().ID())
+		assert.Equal(t, arrow.LARGE_STRING, mt.ItemField().Type.ID())
+	})
+
+	t.Run("dict+large on string→Dictionary<Int32,STRING> (large ignored for dict)", func(t *testing.T) {
+		opts := tagOpts{Large: true, Dict: true}
+		arr := mustBuildArray(t, []string{"a", "b", "a"}, opts, mem)
+		assert.Equal(t, arrow.DICTIONARY, arr.DataType().ID())
+		dt := arr.DataType().(*arrow.DictionaryType)
+		assert.Equal(t, arrow.STRING, dt.ValueType.ID()) // large not applied, library limitation
+	})
+}
+
 func TestAppendTemporalValueUnitHandling(t *testing.T) {
 	mem := checkedMem(t)
 	ref := time.Date(2024, 1, 15, 12, 34, 56, 789_000_000, time.UTC)

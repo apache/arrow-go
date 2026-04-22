@@ -40,7 +40,7 @@ func buildArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.A
 	}
 
 	if opts.Dict {
-		return buildDictionaryArray(vals, mem)
+		return buildDictionaryArray(vals, opts, mem)
 	}
 	if opts.REE {
 		return buildRunEndEncodedArray(vals, opts, mem)
@@ -49,7 +49,7 @@ func buildArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.A
 		if elemType.Kind() != reflect.Slice || elemType == typeOfByteSlice {
 			return nil, fmt.Errorf("arreflect: WithListView requires a slice-of-slices element type, got %s: %w", elemType, ErrUnsupportedType)
 		}
-		return buildListViewArray(vals, mem)
+		return buildListViewArray(vals, opts, mem)
 	}
 
 	switch elemType {
@@ -60,35 +60,38 @@ func buildArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.A
 	switch elemType.Kind() {
 	case reflect.Slice:
 		if elemType == typeOfByteSlice {
-			return buildPrimitiveArray(vals, mem)
+			return buildPrimitiveArray(vals, opts, mem)
 		}
-		return buildListArray(vals, mem)
+		return buildListArray(vals, opts, mem)
 
 	case reflect.Array:
 		return buildFixedSizeListArray(vals, mem)
 
 	case reflect.Map:
-		return buildMapArray(vals, mem)
+		return buildMapArray(vals, opts, mem)
 
 	case reflect.Struct:
 		switch elemType {
 		case typeOfTime:
 			return buildTemporalArray(vals, opts, mem)
 		default:
-			return buildStructArray(vals, mem)
+			return buildStructArray(vals, opts, mem)
 		}
 
 	default:
-		return buildPrimitiveArray(vals, mem)
+		return buildPrimitiveArray(vals, opts, mem)
 	}
 }
 
-func buildPrimitiveArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
+func buildPrimitiveArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
 	elemType, isPtr := derefSliceElem(vals)
 
 	dt, err := inferArrowType(elemType)
 	if err != nil {
 		return nil, err
+	}
+	if opts.Large {
+		dt = applyLargeOpts(dt)
 	}
 
 	b := array.NewBuilder(mem, dt)
@@ -251,12 +254,15 @@ func appendStructFields(sb *array.StructBuilder, v reflect.Value, fields []field
 	return nil
 }
 
-func buildStructArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
+func buildStructArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
 	elemType, isPtr := derefSliceElem(vals)
 
 	st, err := inferStructType(elemType)
 	if err != nil {
 		return nil, err
+	}
+	if opts.Large {
+		st = applyLargeOpts(st).(*arrow.StructType)
 	}
 
 	fields := cachedStructFields(elemType)
@@ -514,10 +520,13 @@ func appendListElement(b array.Builder, v reflect.Value) error {
 	return nil
 }
 
-func buildListLikeArray(vals reflect.Value, mem memory.Allocator, isView bool) (arrow.Array, error) {
+func buildListLikeArray(vals reflect.Value, mem memory.Allocator, opts tagOpts, isView bool) (arrow.Array, error) {
 	elemDT, err := inferListElemDT(vals)
 	if err != nil {
 		return nil, err
+	}
+	if opts.Large {
+		elemDT = applyLargeOpts(elemDT)
 	}
 
 	label := "list element"
@@ -527,11 +536,20 @@ func buildListLikeArray(vals reflect.Value, mem memory.Allocator, isView bool) (
 
 	var bldr listBuilderLike
 	var beginRow func(int)
-	if isView {
+	switch {
+	case isView && opts.Large:
+		b := array.NewLargeListViewBuilder(mem, elemDT)
+		bldr = b
+		beginRow = func(n int) { b.AppendWithSize(true, n) }
+	case isView:
 		b := array.NewListViewBuilder(mem, elemDT)
 		bldr = b
 		beginRow = func(n int) { b.AppendWithSize(true, n) }
-	} else {
+	case opts.Large:
+		b := array.NewLargeListBuilder(mem, elemDT)
+		bldr = b
+		beginRow = func(_ int) { b.Append(true) }
+	default:
 		b := array.NewListBuilder(mem, elemDT)
 		bldr = b
 		beginRow = func(_ int) { b.Append(true) }
@@ -568,15 +586,15 @@ func buildListLikeArray(vals reflect.Value, mem memory.Allocator, isView bool) (
 	return bldr.NewArray(), nil
 }
 
-func buildListArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
-	return buildListLikeArray(vals, mem, false)
+func buildListArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
+	return buildListLikeArray(vals, mem, opts, false)
 }
 
-func buildListViewArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
-	return buildListLikeArray(vals, mem, true)
+func buildListViewArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
+	return buildListLikeArray(vals, mem, opts, true)
 }
 
-func buildMapArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
+func buildMapArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
 	mapType, isPtr := derefSliceElem(vals)
 
 	keyType := mapType.Key()
@@ -596,6 +614,10 @@ func buildMapArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error
 	valDT, err := inferArrowType(valType)
 	if err != nil {
 		return nil, fmt.Errorf("map value type: %w", err)
+	}
+	if opts.Large {
+		keyDT = applyLargeOpts(keyDT)
+		valDT = applyLargeOpts(valDT)
 	}
 
 	mb := array.NewMapBuilder(mem, keyDT, valDT, false)
@@ -679,13 +701,15 @@ func validateDictValueType(dt arrow.DataType) error {
 	}
 }
 
-func buildDictionaryArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
+func buildDictionaryArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
 	elemType, isPtr := derefSliceElem(vals)
 
 	valDT, err := inferArrowType(elemType)
 	if err != nil {
 		return nil, err
 	}
+	// large is intentionally NOT applied here: Dictionary<Int32, LargeString> is
+	// unimplemented in the Arrow library (NewDictionaryBuilder panics).
 
 	if err := validateDictValueType(valDT); err != nil {
 		return nil, err
@@ -711,7 +735,7 @@ func buildRunEndEncodedArray(vals reflect.Value, opts tagOpts, mem memory.Alloca
 	valOpts.REE = false
 	valOpts.ListView = false
 	if vals.Len() == 0 {
-		runEndsArr, err := buildPrimitiveArray(reflect.MakeSlice(reflect.TypeOf([]int32{}), 0, 0), mem)
+		runEndsArr, err := buildPrimitiveArray(reflect.MakeSlice(reflect.TypeOf([]int32{}), 0, 0), tagOpts{}, mem)
 		if err != nil {
 			return nil, err
 		}
@@ -768,7 +792,7 @@ func buildRunEndEncodedArray(vals reflect.Value, opts tagOpts, mem memory.Alloca
 		runEnds[i] = r.end
 	}
 	runEndsSlice := reflect.ValueOf(runEnds)
-	runEndsArr, err := buildPrimitiveArray(runEndsSlice, mem)
+	runEndsArr, err := buildPrimitiveArray(runEndsSlice, tagOpts{}, mem)
 	if err != nil {
 		return nil, fmt.Errorf("run-end encoded run ends: %w", err)
 	}
