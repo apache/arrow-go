@@ -1155,3 +1155,40 @@ func TestWithLargeErrors(t *testing.T) {
 		assert.Equal(t, arrow.LARGE_STRING, arr.DataType().ID())
 	})
 }
+
+func TestAppendValueViewBuilders(t *testing.T) {
+	mem := checkedMem(t)
+
+	t.Run("StringViewBuilder appends string value", func(t *testing.T) {
+		b := array.NewStringViewBuilder(mem)
+		defer b.Release()
+		err := appendValue(b, reflect.ValueOf("hello"))
+		require.NoError(t, err)
+		arr := b.NewArray()
+		defer arr.Release()
+		assert.Equal(t, 1, arr.Len())
+		assert.Equal(t, "hello", arr.(*array.StringView).Value(0))
+	})
+
+	t.Run("BinaryViewBuilder appends binary value", func(t *testing.T) {
+		b := array.NewBinaryViewBuilder(mem)
+		defer b.Release()
+		err := appendValue(b, reflect.ValueOf([]byte{1, 2, 3}))
+		require.NoError(t, err)
+		arr := b.NewArray()
+		defer arr.Release()
+		assert.Equal(t, 1, arr.Len())
+		assert.Equal(t, []byte{1, 2, 3}, arr.(*array.BinaryView).Value(0))
+	})
+
+	t.Run("BinaryViewBuilder appends null for nil slice", func(t *testing.T) {
+		b := array.NewBinaryViewBuilder(mem)
+		defer b.Release()
+		var nilSlice []byte
+		err := appendValue(b, reflect.ValueOf(nilSlice))
+		require.NoError(t, err)
+		arr := b.NewArray()
+		defer arr.Release()
+		assert.True(t, arr.IsNull(0))
+	})
+}

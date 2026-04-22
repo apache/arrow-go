@@ -727,3 +727,22 @@ func TestWithLargeRoundTrip(t *testing.T) {
 		assert.Equal(t, input, got)
 	})
 }
+
+func TestUnknownTagOptionError(t *testing.T) {
+	type Bad struct {
+		Name string `arrow:"name,unknown_option"`
+	}
+	mem := testMem()
+
+	t.Run("FromSlice surfaces ErrUnsupportedType for unknown tag", func(t *testing.T) {
+		_, err := FromSlice([]Bad{{"x"}}, mem)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+
+	t.Run("InferSchema surfaces ErrUnsupportedType for unknown tag", func(t *testing.T) {
+		_, err := InferSchema[Bad]()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+}
