@@ -460,7 +460,12 @@ func buildEmptyTyped(goType reflect.Type, opts tagOpts, mem memory.Allocator) (a
 		if err != nil {
 			return nil, err
 		}
-		dt = arrow.ListViewOf(innerDT)
+		if opts.Large {
+			innerDT = applyLargeOpts(innerDT)
+			dt = arrow.LargeListViewOf(innerDT)
+		} else {
+			dt = arrow.ListViewOf(innerDT)
+		}
 	}
 	if opts.Dict {
 		if err := validateDictValueType(dt); err != nil {

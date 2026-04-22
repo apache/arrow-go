@@ -312,6 +312,28 @@ func TestBuildEmptyTyped(t *testing.T) {
 		assert.Equal(t, 0, arr.Len())
 		assert.Equal(t, arrow.RUN_END_ENCODED, arr.DataType().ID())
 	})
+
+	t.Run("large_string_empty", func(t *testing.T) {
+		arr, err := buildEmptyTyped(reflect.TypeOf(""), tagOpts{Large: true}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, arrow.LARGE_STRING, arr.DataType().ID())
+	})
+
+	t.Run("large_listview_empty", func(t *testing.T) {
+		arr, err := buildEmptyTyped(reflect.TypeOf([]string(nil)), tagOpts{Large: true, ListView: true}, mem)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, arrow.LARGE_LIST_VIEW, arr.DataType().ID())
+		llv := arr.DataType().(*arrow.LargeListViewType)
+		assert.Equal(t, arrow.LARGE_STRING, llv.Elem().ID())
+	})
+
+	t.Run("large_on_int_errors", func(t *testing.T) {
+		_, err := buildEmptyTyped(reflect.TypeOf(int32(0)), tagOpts{Large: true}, mem)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
 }
 
 func TestParseDecimalOpt(t *testing.T) {
