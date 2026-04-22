@@ -65,7 +65,7 @@ func buildArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.A
 		return buildListArray(vals, opts, mem)
 
 	case reflect.Array:
-		return buildFixedSizeListArray(vals, mem)
+		return buildFixedSizeListArray(vals, opts, mem)
 
 	case reflect.Map:
 		return buildMapArray(vals, opts, mem)
@@ -262,6 +262,8 @@ func buildStructArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (a
 		return nil, err
 	}
 	if opts.Large {
+		// applyLargeOpts is idempotent, so per-field "large" tags already applied
+		// by inferStructType are safe to walk again here.
 		st = applyLargeOpts(st).(*arrow.StructType)
 	}
 
@@ -648,7 +650,7 @@ func buildMapArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arro
 	return mb.NewArray(), nil
 }
 
-func buildFixedSizeListArray(vals reflect.Value, mem memory.Allocator) (arrow.Array, error) {
+func buildFixedSizeListArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.Array, error) {
 	elemType, isPtr := derefSliceElem(vals)
 
 	if elemType.Kind() != reflect.Array {
@@ -664,6 +666,9 @@ func buildFixedSizeListArray(vals reflect.Value, mem memory.Allocator) (arrow.Ar
 	innerDT, err := inferArrowType(innerElemType)
 	if err != nil {
 		return nil, err
+	}
+	if opts.Large {
+		innerDT = applyLargeOpts(innerDT)
 	}
 
 	fb := array.NewFixedSizeListBuilder(mem, n, innerDT)
