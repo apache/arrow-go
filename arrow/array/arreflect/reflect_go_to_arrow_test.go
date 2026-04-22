@@ -1120,3 +1120,38 @@ func TestAppendTemporalValueUnitHandling(t *testing.T) {
 		})
 	}
 }
+
+func TestWithLargeErrors(t *testing.T) {
+	mem := checkedMem(t)
+
+	t.Run("large on int64 slice errors", func(t *testing.T) {
+		_, err := FromSlice([]int64{1, 2, 3}, mem, WithLarge())
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+		assert.Contains(t, err.Error(), "large option has no effect")
+	})
+
+	t.Run("large on float32 slice errors", func(t *testing.T) {
+		_, err := FromSlice([]float32{1.0}, mem, WithLarge())
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+	})
+
+	t.Run("large on struct with no string fields errors", func(t *testing.T) {
+		type NoStrings struct {
+			X int32
+			Y float64
+		}
+		_, err := FromSlice([]NoStrings{{1, 2.0}}, mem, WithLarge())
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedType)
+		assert.Contains(t, err.Error(), "large option has no effect")
+	})
+
+	t.Run("large on string slice succeeds", func(t *testing.T) {
+		arr, err := FromSlice([]string{"a"}, mem, WithLarge())
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, arrow.LARGE_STRING, arr.DataType().ID())
+	})
+}

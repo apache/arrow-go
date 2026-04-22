@@ -442,6 +442,12 @@ func buildEmptyTyped(goType reflect.Type, opts tagOpts, mem memory.Allocator) (a
 	}
 	dt = applyDecimalOpts(dt, derefType, opts)
 	dt = applyTemporalOpts(dt, derefType, opts)
+	if opts.Large {
+		if !hasLargeableType(dt) {
+			return nil, fmt.Errorf("arreflect: large option has no effect on type %s: %w", dt, ErrUnsupportedType)
+		}
+		dt = applyLargeOpts(dt)
+	}
 	if opts.ListView {
 		if derefType.Kind() != reflect.Slice || derefType == typeOfByteSlice {
 			return nil, fmt.Errorf("arreflect: WithListView requires a slice-of-slices element type, got %s: %w", goType, ErrUnsupportedType)

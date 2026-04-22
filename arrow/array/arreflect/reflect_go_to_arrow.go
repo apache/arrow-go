@@ -39,6 +39,16 @@ func buildArray(vals reflect.Value, opts tagOpts, mem memory.Allocator) (arrow.A
 		elemType = elemType.Elem()
 	}
 
+	if opts.Large {
+		dt, err := inferArrowType(elemType)
+		if err != nil {
+			return nil, err
+		}
+		if !hasLargeableType(dt) {
+			return nil, fmt.Errorf("arreflect: large option has no effect on type %s: %w", dt, ErrUnsupportedType)
+		}
+	}
+
 	if opts.Dict {
 		return buildDictionaryArray(vals, opts, mem)
 	}
