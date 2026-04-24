@@ -70,12 +70,13 @@ download() {
     --remote-name \
     --show-error \
     --silent \
+    --output "$2" \
     "$1"
 }
 
 download_rc_file() {
   if [ "${VERIFY_DOWNLOAD}" -gt 0 ]; then
-    download "${DOWNLOAD_RC_BASE_URL}/$1"
+    download "${DOWNLOAD_RC_BASE_URL}/$1" "$1"
   else
     cp "${TOP_SOURCE_DIR}/$1" "$1"
   fi
@@ -83,7 +84,7 @@ download_rc_file() {
 
 import_gpg_keys() {
   if [ "${VERIFY_SIGN}" -gt 0 ]; then
-    download "${ARROW_KEYS_URL}"
+    download "${ARROW_KEYS_URL}" KEYS
     gpg --import KEYS
   fi
 }
