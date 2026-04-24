@@ -66,8 +66,7 @@ setup_tmpdir() {
 download() {
   curl \
     --fail \
-    --location \
-    --remote-name \
+    --location \    
     --show-error \
     --silent \
     --output "$2" \
