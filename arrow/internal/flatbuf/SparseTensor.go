@@ -23,13 +23,12 @@ import (
 )
 
 type SparseTensor struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsSparseTensor(buf []byte, offset flatbuffers.UOffsetT) *SparseTensor {
+func GetRootAsSparseTensor(buf []byte, offset flatbuffers.UOffsetT) (x SparseTensor) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &SparseTensor{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -37,10 +36,9 @@ func FinishSparseTensorBuffer(builder *flatbuffers.Builder, offset flatbuffers.U
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsSparseTensor(buf []byte, offset flatbuffers.UOffsetT) *SparseTensor {
+func GetSizePrefixedRootAsSparseTensor(buf []byte, offset flatbuffers.UOffsetT) (x SparseTensor) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &SparseTensor{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -49,33 +47,29 @@ func FinishSizePrefixedSparseTensorBuffer(builder *flatbuffers.Builder, offset f
 }
 
 func (rcv *SparseTensor) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *SparseTensor) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func (rcv *SparseTensor) TypeType() Type {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return Type(rcv._tab.GetByte(o + rcv._tab.Pos))
+		return Type(rcv.GetByte(o + rcv.Pos))
 	}
 	return 0
 }
 
 func (rcv *SparseTensor) MutateTypeType(n Type) bool {
-	return rcv._tab.MutateByteSlot(4, byte(n))
+	return rcv.MutateByteSlot(4, byte(n))
 }
 
 /// The type of data contained in a value cell.
 /// Currently only fixed-width value types are supported,
 /// no strings or nested types.
 func (rcv *SparseTensor) Type(obj *flatbuffers.Table) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		rcv._tab.Union(obj, o)
+		rcv.Union(obj, o)
 		return true
 	}
 	return false
@@ -85,22 +79,22 @@ func (rcv *SparseTensor) Type(obj *flatbuffers.Table) bool {
 /// Currently only fixed-width value types are supported,
 /// no strings or nested types.
 /// The dimensions of the tensor, optionally named.
-func (rcv *SparseTensor) Shape(obj *TensorDim, j int) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+func (rcv *SparseTensor) Shape(j int) (obj TensorDim, ok bool) {
+	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
-		x := rcv._tab.Vector(o)
+		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 4
-		x = rcv._tab.Indirect(x)
-		obj.Init(rcv._tab.Bytes, x)
-		return true
+		x = rcv.Indirect(x)
+		obj.Init(rcv.Bytes, x)
+		ok = true
 	}
-	return false
+	return
 }
 
 func (rcv *SparseTensor) ShapeLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }
@@ -108,35 +102,35 @@ func (rcv *SparseTensor) ShapeLength() int {
 /// The dimensions of the tensor, optionally named.
 /// The number of non-zero values in a sparse tensor.
 func (rcv *SparseTensor) NonZeroLength() int64 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
+	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
-		return rcv._tab.GetInt64(o + rcv._tab.Pos)
+		return rcv.GetInt64(o + rcv.Pos)
 	}
 	return 0
 }
 
 /// The number of non-zero values in a sparse tensor.
 func (rcv *SparseTensor) MutateNonZeroLength(n int64) bool {
-	return rcv._tab.MutateInt64Slot(10, n)
+	return rcv.MutateInt64Slot(10, n)
 }
 
 func (rcv *SparseTensor) SparseIndexType() SparseTensorIndex {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	o := flatbuffers.UOffsetT(rcv.Offset(12))
 	if o != 0 {
-		return SparseTensorIndex(rcv._tab.GetByte(o + rcv._tab.Pos))
+		return SparseTensorIndex(rcv.GetByte(o + rcv.Pos))
 	}
 	return 0
 }
 
 func (rcv *SparseTensor) MutateSparseIndexType(n SparseTensorIndex) bool {
-	return rcv._tab.MutateByteSlot(12, byte(n))
+	return rcv.MutateByteSlot(12, byte(n))
 }
 
 /// Sparse tensor index
 func (rcv *SparseTensor) SparseIndex(obj *flatbuffers.Table) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(14))
+	o := flatbuffers.UOffsetT(rcv.Offset(14))
 	if o != 0 {
-		rcv._tab.Union(obj, o)
+		rcv.Union(obj, o)
 		return true
 	}
 	return false
@@ -144,17 +138,14 @@ func (rcv *SparseTensor) SparseIndex(obj *flatbuffers.Table) bool {
 
 /// Sparse tensor index
 /// The location and size of the tensor's data
-func (rcv *SparseTensor) Data(obj *Buffer) *Buffer {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(16))
+func (rcv *SparseTensor) Data() (obj Buffer, ok bool) {
+	o := flatbuffers.UOffsetT(rcv.Offset(16))
 	if o != 0 {
-		x := o + rcv._tab.Pos
-		if obj == nil {
-			obj = new(Buffer)
-		}
-		obj.Init(rcv._tab.Bytes, x)
-		return obj
+		x := o + rcv.Pos
+		obj.Init(rcv.Bytes, x)
+		ok = true
 	}
-	return nil
+	return
 }
 
 /// The location and size of the tensor's data

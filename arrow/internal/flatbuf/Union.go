@@ -27,13 +27,12 @@ import (
 /// optionally typeIds provides an indirection between the child offset and the type id
 /// for each child `typeIds[offset]` is the id used in the type vector
 type Union struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsUnion(buf []byte, offset flatbuffers.UOffsetT) *Union {
+func GetRootAsUnion(buf []byte, offset flatbuffers.UOffsetT) (x Union) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Union{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -41,10 +40,9 @@ func FinishUnionBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsUnion(buf []byte, offset flatbuffers.UOffsetT) *Union {
+func GetSizePrefixedRootAsUnion(buf []byte, offset flatbuffers.UOffsetT) (x Union) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &Union{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -53,48 +51,44 @@ func FinishSizePrefixedUnionBuffer(builder *flatbuffers.Builder, offset flatbuff
 }
 
 func (rcv *Union) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Union) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func (rcv *Union) Mode() UnionMode {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return UnionMode(rcv._tab.GetInt16(o + rcv._tab.Pos))
+		return UnionMode(rcv.GetInt16(o + rcv.Pos))
 	}
 	return 0
 }
 
 func (rcv *Union) MutateMode(n UnionMode) bool {
-	return rcv._tab.MutateInt16Slot(4, int16(n))
+	return rcv.MutateInt16Slot(4, int16(n))
 }
 
 func (rcv *Union) TypeIds(j int) int32 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		a := rcv._tab.Vector(o)
-		return rcv._tab.GetInt32(a + flatbuffers.UOffsetT(j*4))
+		a := rcv.Vector(o)
+		return rcv.GetInt32(a + flatbuffers.UOffsetT(j*4))
 	}
 	return 0
 }
 
 func (rcv *Union) TypeIdsLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }
 
 func (rcv *Union) MutateTypeIds(j int, n int32) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		a := rcv._tab.Vector(o)
-		return rcv._tab.MutateInt32(a+flatbuffers.UOffsetT(j*4), n)
+		a := rcv.Vector(o)
+		return rcv.MutateInt32(a+flatbuffers.UOffsetT(j*4), n)
 	}
 	return false
 }
