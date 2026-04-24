@@ -64,7 +64,7 @@ func (p *zstdEncoderPool) getEncoderFromPool(level zstd.EncoderLevel) *zstd.Enco
 		if !ok {
 			pool = &sync.Pool{
 				New: func() interface{} {
-					enc, _ := zstd.NewWriter(nil, zstd.WithZeroFrames(true), zstd.WithEncoderLevel(level), zstd.WithEncoderConcurrency(1))
+					enc, _ := zstd.NewWriter(nil, zstd.WithZeroFrames(true), zstd.WithEncoderLevel(level), zstd.WithEncoderConcurrency(1), zstd.WithAllLitEntropyCompression(true))
 					return enc
 				},
 			}
@@ -92,7 +92,7 @@ func (p *zstdEncoderPool) putEncoderToPool(enc *zstd.Encoder, level zstd.Encoder
 
 func getencoder() *zstd.Encoder {
 	initEncoder.Do(func() {
-		enc, _ = zstd.NewWriter(nil, zstd.WithZeroFrames(true))
+		enc, _ = zstd.NewWriter(nil, zstd.WithZeroFrames(true), zstd.WithAllLitEntropyCompression(true))
 	})
 	return enc
 }
