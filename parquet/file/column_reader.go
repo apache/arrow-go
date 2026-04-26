@@ -487,7 +487,8 @@ func (c *columnChunkReader) initDataDecoder(page Page, lvlByteLen int64) error {
 			format.Encoding_DELTA_BYTE_ARRAY,
 			format.Encoding_DELTA_LENGTH_BYTE_ARRAY,
 			format.Encoding_DELTA_BINARY_PACKED,
-			format.Encoding_BYTE_STREAM_SPLIT:
+			format.Encoding_BYTE_STREAM_SPLIT,
+			format.Encoding_ALP:
 			c.curDecoder = c.decoderTraits.Decoder(parquet.Encoding(encoding), c.descr, false, c.mem)
 			c.decoders[encoding] = c.curDecoder
 		case format.Encoding_RLE_DICTIONARY:
