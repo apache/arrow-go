@@ -452,29 +452,50 @@ func TestArrRecordsJSONRoundTrip(t *testing.T) {
 			continue
 		}
 		t.Run(k, func(t *testing.T) {
-			var buf bytes.Buffer
-			assert.NotPanics(t, func() {
-				enc := json.NewEncoder(&buf)
-				for _, r := range v {
-					if err := enc.Encode(r); err != nil {
-						panic(err)
-					}
+			for _, nullable := range []bool{true, false} {
+				var name string
+				if nullable {
+					name = "nullable"
+				} else {
+					name = "non-nullable"
 				}
-			})
 
-			rdr := bytes.NewReader(buf.Bytes())
-			var cur int64
+				t.Run(name, func(t *testing.T) {
+					fields := v[0].Schema().Fields()
+					for i := range fields {
+						fields[i].Nullable = nullable
+					}
+					meta := v[0].Schema().Metadata()
+					schema := arrow.NewSchema(fields, &meta)
 
-			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
-			defer mem.AssertSize(t, 0)
+					var buf bytes.Buffer
+					assert.NotPanics(t, func() {
+						enc := json.NewEncoder(&buf)
+						for _, rawBatch := range v {
+							batch := array.NewRecordBatch(schema, rawBatch.Columns(), rawBatch.NumRows())
+							if err := enc.Encode(batch); err != nil {
+								panic(err)
+							}
+						}
+					})
 
-			for _, r := range v {
-				rec, off, err := array.RecordFromJSON(mem, r.Schema(), rdr, array.WithStartOffset(cur))
-				assert.NoError(t, err)
-				defer rec.Release()
+					rdr := bytes.NewReader(buf.Bytes())
+					var cur int64
 
-				assert.Truef(t, array.RecordApproxEqual(r, rec), "expected: %s\ngot: %s\n", r, rec)
-				cur += off
+					mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+					defer mem.AssertSize(t, 0)
+
+					for _, rawBatch := range v {
+						batch := array.NewRecordBatch(schema, rawBatch.Columns(), rawBatch.NumRows())
+
+						rec, off, err := array.RecordFromJSON(mem, schema, rdr, array.WithStartOffset(cur))
+						assert.NoError(t, err)
+						defer rec.Release()
+
+						assert.Truef(t, array.RecordApproxEqual(batch, rec), "expected: %s\ngot: %s\n", batch, rec)
+						cur += off
+					}
+				})
 			}
 		})
 	}
