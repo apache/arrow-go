@@ -480,8 +480,18 @@ func (b *StructBuilder) UnmarshalOne(dec *json.Decoder) error {
 				continue
 			}
 
-			if err := b.fields[idx].UnmarshalOne(dec); err != nil {
+			var next json.RawMessage
+			if err := dec.Decode(&next); err != nil {
 				return err
+			}
+
+			if json.IsNullMessage(next) && !b.dtype.(*arrow.StructType).Field(idx).Nullable {
+				b.fields[idx].AppendEmptyValue()
+			} else {
+				sub := json.NewDecoder(bytes.NewReader(next))
+				if err := b.fields[idx].UnmarshalOne(sub); err != nil {
+					return err
+				}
 			}
 		}
 
