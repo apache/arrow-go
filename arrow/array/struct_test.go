@@ -657,6 +657,7 @@ func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 		jsonInput string
 		want      string
 		invalid   bool
+		wantErr   string
 	}{
 		{
 			name:      "missing required field",
@@ -667,8 +668,13 @@ func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 		{
 			name:      "missing optional fields",
 			jsonInput: `[{"f2": 3, "f3": {"f3_3": "test"}}]`,
-			invalid:   false,
 			want:      `{[(null)] [3] {[(null)] [(null)] ["test"]}}`,
+		},
+		{
+			name:      "explicit null in required field",
+			jsonInput: `[{"f2": 3, "f3": {"f3_3": null}}]`,
+			wantErr:   "field 'f3_3' is non-nullable but got null",
+			want:      "",
 		},
 	}
 
@@ -679,9 +685,11 @@ func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 				defer sb.Release()
 
 				err := sb.UnmarshalJSON([]byte(tc.jsonInput))
-				if err != nil {
-					t.Fatal(err)
+				if tc.wantErr != "" {
+					require.ErrorContains(t, err, tc.wantErr)
+					return
 				}
+				require.NoError(t, err)
 
 				arr := sb.NewArray().(*array.Struct)
 				defer arr.Release()
