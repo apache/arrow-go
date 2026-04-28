@@ -119,6 +119,20 @@ type DictEncoder interface {
 	//
 	// The returned array must always be released by the caller.
 	NormalizeDict(arrow.Array) (arrow.Array, error)
+	// FallBackTo translates the buffered indices back through the dictionary
+	// and puts the raw values into the fallback encoder, clearing the dict
+	// encoder's index buffer. Mirrors parquet-mr's
+	// RequiresFallback.fallBackAllValuesTo: used by column writers when the
+	// dictionary overflows mid-chunk so already-buffered values can be
+	// re-encoded with the fallback (PLAIN) encoder instead of being emitted
+	// as a stranded dict-encoded page.
+	FallBackTo(fallback TypedEncoder) error
+	// ObservedRawSize returns the raw input byte count accumulated since
+	// the last page flush. Used alongside DictEncodedSize and
+	// EstimatedDataEncodedSize to decide whether dictionary encoding is
+	// actually saving space before committing the first dict data page —
+	// mirrors parquet-mr's rawDataByteSize.
+	ObservedRawSize() int64
 }
 
 var bufferPool = sync.Pool{

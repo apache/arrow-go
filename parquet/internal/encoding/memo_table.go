@@ -114,6 +114,10 @@ type BinaryMemoTable interface {
 	CopyFixedWidthValues(start int, width int, out []byte)
 	// VisitValues calls visitFn on each value in the table starting with the index specified
 	VisitValues(start int, visitFn func([]byte))
+	// Value returns the byte slice stored at the given dictionary index. The
+	// returned slice is owned by the memo table; callers must copy if they
+	// need the data to outlive the table.
+	Value(i int) []byte
 	// Retain increases the reference count of the separately stored binary data that is
 	// kept alongside the table which contains all of the values in the table. This is
 	// safe to call simultaneously across multiple goroutines.
@@ -305,6 +309,10 @@ func (m *binaryMemoTableImpl) CopyOffsetsSubset(start int, out []int32) {
 
 func (m *binaryMemoTableImpl) CopyOffsets(out []int32) {
 	m.CopyOffsetsSubset(0, out)
+}
+
+func (m *binaryMemoTableImpl) Value(i int) []byte {
+	return m.builder.Value(i)
 }
 
 func (m *binaryMemoTableImpl) VisitValues(start int, visitFn func([]byte)) {

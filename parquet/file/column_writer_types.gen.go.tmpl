@@ -49,6 +49,7 @@ func New{{.Name}}ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pa
 {{- end}}
   ret := &{{.Name}}ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
   ret.currentEncoder = encoding.{{.Name}}EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+  ret.fallbackFn = ret.FallbackToPlain
   return ret
 }
 
@@ -486,15 +487,37 @@ func (w *{{.Name}}ColumnChunkWriter) checkDictionarySizeLimit() {
   }
 }
 
+// FallbackToPlain switches this column from dictionary to PLAIN encoding when
+// the dictionary outgrows the configured page size limit. It mirrors
+// parquet-mr's FallbackValuesWriter: unflushed buffered values are re-encoded
+// as PLAIN (so the next data page is PLAIN, not dict-indexed), and the
+// dictionary page is emitted only if a dict-encoded data page had already
+// been cut before the overflow — otherwise the dictionary is discarded.
 func (w *{{.Name}}ColumnChunkWriter) FallbackToPlain() {
-  if w.currentEncoder.Encoding() == parquet.Encodings.PlainDict {
-    w.WriteDictionaryPage()
-    w.FlushBufferedDataPages()
-    w.fallbackToNonDict = true
-    w.currentEncoder.Release()
-    w.currentEncoder = encoding.{{.Name}}EncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem)
-    w.encoding = parquet.Encodings.Plain
+  if w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
+    return
   }
+
+  dictEnc := w.currentEncoder.(encoding.DictEncoder)
+  plainEnc := encoding.{{.Name}}EncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem).(encoding.{{.Name}}Encoder)
+
+  if len(w.pages) > 0 {
+    if err := w.WriteDictionaryPage(); err != nil {
+      panic(err)
+    }
+    if err := w.drainBufferedDataPages(); err != nil {
+      panic(err)
+    }
+  }
+
+  if err := dictEnc.FallBackTo(plainEnc); err != nil {
+    panic(err)
+  }
+
+  dictEnc.Release()
+  w.currentEncoder = plainEnc
+  w.encoding = parquet.Encodings.Plain
+  w.fallbackToNonDict = true
 }
 {{end}}
 

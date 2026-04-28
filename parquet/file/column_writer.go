@@ -140,6 +140,11 @@ type columnWriter struct {
 	totalCompressedBytes int64
 	closed               bool
 	fallbackToNonDict    bool
+	dictPageWritten      bool
+	// fallbackFn is set by each typed column writer at construction to its
+	// own FallbackToPlain. It lets the base FlushCurrentPage trigger
+	// fallback without needing to know the concrete value type.
+	fallbackFn func()
 
 	pages []DataPage
 
@@ -264,14 +269,44 @@ func (w *columnWriter) commitWriteAndCheckPageLimit(numLevels, numValues int64) 
 	w.numBufferedValues += numLevels
 	w.numDataValues += numValues
 
-	enc := w.currentEncoder.EstimatedDataEncodedSize()
-	if enc >= w.props.DataPageSize() {
+	// While dictionary encoding is active we size pages by raw input bytes
+	// instead of the RLE-indices' encoded size. Mirrors parquet-mr's
+	// FallbackValuesWriter.getBufferedSize — it keeps dict pages roughly
+	// the same raw-byte footprint as the PLAIN pages they'd otherwise be,
+	// which also pulls the first-page compression check into the same
+	// cadence parquet-mr uses and avoids committing dict pages that only
+	// look cheap because their RLE indices are tiny.
+	var bufferedSize int64
+	if w.hasDict && !w.fallbackToNonDict {
+		bufferedSize = w.currentEncoder.(encoding.DictEncoder).ObservedRawSize()
+	} else {
+		bufferedSize = w.currentEncoder.EstimatedDataEncodedSize()
+	}
+	if bufferedSize >= w.props.DataPageSize() {
 		return w.FlushCurrentPage()
 	}
 	return nil
 }
 
 func (w *columnWriter) FlushCurrentPage() error {
+	// Before committing what would be the first dict-encoded data page,
+	// check whether dictionary encoding is actually saving space against
+	// a PLAIN baseline. This mirrors parquet-mr's
+	// FallbackValuesWriter.getBytes + isCompressionSatisfying: if the
+	// dictionary plus the encoded indices meet or exceed the raw input
+	// bytes, fall back to PLAIN now and discard the dictionary — avoiding
+	// the mid-cardinality case where a dict page stays in the file
+	// alongside PLAIN pages without any net compression win.
+	if w.hasDict && !w.fallbackToNonDict && !w.dictPageWritten && len(w.pages) == 0 && w.fallbackFn != nil {
+		dictEnc := w.currentEncoder.(encoding.DictEncoder)
+		rawSize := dictEnc.ObservedRawSize()
+		encodedSize := dictEnc.EstimatedDataEncodedSize()
+		dictSize := int64(dictEnc.DictEncodedSize())
+		if rawSize > 0 && dictSize+encodedSize >= rawSize {
+			w.fallbackFn()
+		}
+	}
+
 	var (
 		defLevelsRLESize int32 = 0
 		repLevelsRLESize int32 = 0
@@ -427,12 +462,17 @@ func (w *columnWriter) FlushBufferedDataPages() (err error) {
 			return err
 		}
 	}
+	return w.drainBufferedDataPages()
+}
 
+// drainBufferedDataPages writes out and releases any pages buffered while
+// dictionary encoding was active. Unlike FlushBufferedDataPages, it does not
+// touch the current encoder's unflushed values, so the caller can re-encode
+// them as PLAIN during a dictionary fallback.
+func (w *columnWriter) drainBufferedDataPages() (err error) {
 	for i, p := range w.pages {
 		defer p.Release()
 		if err = w.WriteDataPage(p); err != nil {
-			// To keep pages in consistent state,
-			// remove the pages that will be released using above defer call.
 			w.pages = w.pages[i+1:]
 			return err
 		}
@@ -502,6 +542,9 @@ func (w *columnWriter) WriteDictionaryPage() error {
 	page := NewDictionaryPage(buffer, int32(dictEncoder.NumEntries()), w.props.DictionaryPageEncoding())
 	written, err := w.pager.WriteDictionaryPage(page)
 	w.totalBytesWritten += written
+	if err == nil {
+		w.dictPageWritten = true
+	}
 	return err
 }
 
@@ -620,7 +663,14 @@ func (w *columnWriter) Close() (err error) {
 		if w.rowsWritten > 0 && chunkStats.IsSet() {
 			w.metaData.SetStats(chunkStats)
 		}
-		err = w.pager.Close(w.hasDict, w.fallbackToNonDict)
+		// Only advertise PLAIN_DICTIONARY / fallback encodings in the column
+		// chunk's encoding list when a dictionary page was actually written.
+		// When fallback discards the dictionary before any dict-encoded page
+		// is flushed, the column contains only PLAIN data and the list should
+		// reflect that unambiguously.
+		advertiseDict := w.hasDict && w.dictPageWritten
+		advertiseFallback := w.fallbackToNonDict && w.dictPageWritten
+		err = w.pager.Close(advertiseDict, advertiseFallback)
 	}
 	return err
 }

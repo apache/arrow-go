@@ -144,6 +144,7 @@ func (enc *typedDictEncoder[T]) Put(in []T) {
 	for _, val := range in {
 		enc.dictEncoder.Put(val)
 	}
+	enc.AddRawSize(int64(len(in)) * int64(unsafe.Sizeof(T(0))))
 }
 
 func (enc *typedDictEncoder[T]) PutSpaced(in []T, validBits []byte, validBitsOffset int64) {
@@ -156,6 +157,22 @@ func (enc *typedDictEncoder[T]) PutSpaced(in []T, validBits []byte, validBitsOff
 type arrvalues[T arrow.ValueType] interface {
 	arrow.TypedArray[T]
 	Values() []T
+}
+
+func (enc *typedDictEncoder[T]) FallBackTo(fallback TypedEncoder) error {
+	target, ok := fallback.(Encoder[T])
+	if !ok {
+		return fmt.Errorf("parquet: dict fallback target encoder has wrong element type")
+	}
+	dict := make([]T, enc.memo.Size())
+	enc.memo.CopyValues(dict)
+	vals := make([]T, len(enc.idxValues))
+	for i, idx := range enc.idxValues {
+		vals[i] = dict[idx]
+	}
+	target.Put(vals)
+	enc.idxValues = enc.idxValues[:0]
+	return nil
 }
 
 func (enc *typedDictEncoder[T]) NormalizeDict(values arrow.Array) (arrow.Array, error) {
@@ -427,6 +444,7 @@ func (enc *DictInt96Encoder) Put(in []parquet.Int96) {
 		}
 		enc.addIndex(memoIdx)
 	}
+	enc.AddRawSize(int64(len(in)) * int64(parquet.Int96SizeBytes))
 }
 
 // PutSpaced is like Put but assumes space for nulls
@@ -444,6 +462,24 @@ func (enc *DictInt96Encoder) PutSpaced(in []parquet.Int96, validBits []byte, val
 // be called on an empty encoder.
 func (enc *DictInt96Encoder) PutDictionary(arrow.Array) error {
 	return fmt.Errorf("%w: direct PutDictionary to Int96", arrow.ErrNotImplemented)
+}
+
+// FallBackTo drains buffered indices through the dictionary into the
+// fallback plain encoder and clears the index buffer.
+func (enc *DictInt96Encoder) FallBackTo(fallback TypedEncoder) error {
+	target, ok := fallback.(Int96Encoder)
+	if !ok {
+		return fmt.Errorf("parquet: dict fallback target encoder has wrong element type")
+	}
+	bm := enc.memo.(BinaryMemoTable)
+	vals := make([]parquet.Int96, len(enc.idxValues))
+	for i, idx := range enc.idxValues {
+		v := bm.Value(int(idx))
+		copy(vals[i][:], v)
+	}
+	target.Put(vals)
+	enc.idxValues = enc.idxValues[:0]
+	return nil
 }
 
 // the boolEncoderTraits struct is used to make it easy to create encoders and decoders based on type

@@ -45,6 +45,7 @@ type Int32ColumnChunkWriter struct {
 func NewInt32ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *Int32ColumnChunkWriter {
 	ret := &Int32ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.Int32EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	ret.fallbackFn = ret.FallbackToPlain
 	return ret
 }
 
@@ -217,15 +218,37 @@ func (w *Int32ColumnChunkWriter) checkDictionarySizeLimit() {
 	}
 }
 
+// FallbackToPlain switches this column from dictionary to PLAIN encoding when
+// the dictionary outgrows the configured page size limit. It mirrors
+// parquet-mr's FallbackValuesWriter: unflushed buffered values are re-encoded
+// as PLAIN (so the next data page is PLAIN, not dict-indexed), and the
+// dictionary page is emitted only if a dict-encoded data page had already
+// been cut before the overflow — otherwise the dictionary is discarded.
 func (w *Int32ColumnChunkWriter) FallbackToPlain() {
-	if w.currentEncoder.Encoding() == parquet.Encodings.PlainDict {
-		w.WriteDictionaryPage()
-		w.FlushBufferedDataPages()
-		w.fallbackToNonDict = true
-		w.currentEncoder.Release()
-		w.currentEncoder = encoding.Int32EncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem)
-		w.encoding = parquet.Encodings.Plain
+	if w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
+		return
 	}
+
+	dictEnc := w.currentEncoder.(encoding.DictEncoder)
+	plainEnc := encoding.Int32EncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem).(encoding.Int32Encoder)
+
+	if len(w.pages) > 0 {
+		if err := w.WriteDictionaryPage(); err != nil {
+			panic(err)
+		}
+		if err := w.drainBufferedDataPages(); err != nil {
+			panic(err)
+		}
+	}
+
+	if err := dictEnc.FallBackTo(plainEnc); err != nil {
+		panic(err)
+	}
+
+	dictEnc.Release()
+	w.currentEncoder = plainEnc
+	w.encoding = parquet.Encodings.Plain
+	w.fallbackToNonDict = true
 }
 
 // Int64ColumnChunkWriter is the typed interface for writing columns to a parquet
@@ -243,6 +266,7 @@ type Int64ColumnChunkWriter struct {
 func NewInt64ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *Int64ColumnChunkWriter {
 	ret := &Int64ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.Int64EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	ret.fallbackFn = ret.FallbackToPlain
 	return ret
 }
 
@@ -415,15 +439,37 @@ func (w *Int64ColumnChunkWriter) checkDictionarySizeLimit() {
 	}
 }
 
+// FallbackToPlain switches this column from dictionary to PLAIN encoding when
+// the dictionary outgrows the configured page size limit. It mirrors
+// parquet-mr's FallbackValuesWriter: unflushed buffered values are re-encoded
+// as PLAIN (so the next data page is PLAIN, not dict-indexed), and the
+// dictionary page is emitted only if a dict-encoded data page had already
+// been cut before the overflow — otherwise the dictionary is discarded.
 func (w *Int64ColumnChunkWriter) FallbackToPlain() {
-	if w.currentEncoder.Encoding() == parquet.Encodings.PlainDict {
-		w.WriteDictionaryPage()
-		w.FlushBufferedDataPages()
-		w.fallbackToNonDict = true
-		w.currentEncoder.Release()
-		w.currentEncoder = encoding.Int64EncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem)
-		w.encoding = parquet.Encodings.Plain
+	if w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
+		return
 	}
+
+	dictEnc := w.currentEncoder.(encoding.DictEncoder)
+	plainEnc := encoding.Int64EncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem).(encoding.Int64Encoder)
+
+	if len(w.pages) > 0 {
+		if err := w.WriteDictionaryPage(); err != nil {
+			panic(err)
+		}
+		if err := w.drainBufferedDataPages(); err != nil {
+			panic(err)
+		}
+	}
+
+	if err := dictEnc.FallBackTo(plainEnc); err != nil {
+		panic(err)
+	}
+
+	dictEnc.Release()
+	w.currentEncoder = plainEnc
+	w.encoding = parquet.Encodings.Plain
+	w.fallbackToNonDict = true
 }
 
 // Int96ColumnChunkWriter is the typed interface for writing columns to a parquet
@@ -441,6 +487,7 @@ type Int96ColumnChunkWriter struct {
 func NewInt96ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *Int96ColumnChunkWriter {
 	ret := &Int96ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.Int96EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	ret.fallbackFn = ret.FallbackToPlain
 	return ret
 }
 
@@ -613,15 +660,37 @@ func (w *Int96ColumnChunkWriter) checkDictionarySizeLimit() {
 	}
 }
 
+// FallbackToPlain switches this column from dictionary to PLAIN encoding when
+// the dictionary outgrows the configured page size limit. It mirrors
+// parquet-mr's FallbackValuesWriter: unflushed buffered values are re-encoded
+// as PLAIN (so the next data page is PLAIN, not dict-indexed), and the
+// dictionary page is emitted only if a dict-encoded data page had already
+// been cut before the overflow — otherwise the dictionary is discarded.
 func (w *Int96ColumnChunkWriter) FallbackToPlain() {
-	if w.currentEncoder.Encoding() == parquet.Encodings.PlainDict {
-		w.WriteDictionaryPage()
-		w.FlushBufferedDataPages()
-		w.fallbackToNonDict = true
-		w.currentEncoder.Release()
-		w.currentEncoder = encoding.Int96EncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem)
-		w.encoding = parquet.Encodings.Plain
+	if w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
+		return
 	}
+
+	dictEnc := w.currentEncoder.(encoding.DictEncoder)
+	plainEnc := encoding.Int96EncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem).(encoding.Int96Encoder)
+
+	if len(w.pages) > 0 {
+		if err := w.WriteDictionaryPage(); err != nil {
+			panic(err)
+		}
+		if err := w.drainBufferedDataPages(); err != nil {
+			panic(err)
+		}
+	}
+
+	if err := dictEnc.FallBackTo(plainEnc); err != nil {
+		panic(err)
+	}
+
+	dictEnc.Release()
+	w.currentEncoder = plainEnc
+	w.encoding = parquet.Encodings.Plain
+	w.fallbackToNonDict = true
 }
 
 // Float32ColumnChunkWriter is the typed interface for writing columns to a parquet
@@ -639,6 +708,7 @@ type Float32ColumnChunkWriter struct {
 func NewFloat32ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *Float32ColumnChunkWriter {
 	ret := &Float32ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.Float32EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	ret.fallbackFn = ret.FallbackToPlain
 	return ret
 }
 
@@ -811,15 +881,37 @@ func (w *Float32ColumnChunkWriter) checkDictionarySizeLimit() {
 	}
 }
 
+// FallbackToPlain switches this column from dictionary to PLAIN encoding when
+// the dictionary outgrows the configured page size limit. It mirrors
+// parquet-mr's FallbackValuesWriter: unflushed buffered values are re-encoded
+// as PLAIN (so the next data page is PLAIN, not dict-indexed), and the
+// dictionary page is emitted only if a dict-encoded data page had already
+// been cut before the overflow — otherwise the dictionary is discarded.
 func (w *Float32ColumnChunkWriter) FallbackToPlain() {
-	if w.currentEncoder.Encoding() == parquet.Encodings.PlainDict {
-		w.WriteDictionaryPage()
-		w.FlushBufferedDataPages()
-		w.fallbackToNonDict = true
-		w.currentEncoder.Release()
-		w.currentEncoder = encoding.Float32EncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem)
-		w.encoding = parquet.Encodings.Plain
+	if w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
+		return
 	}
+
+	dictEnc := w.currentEncoder.(encoding.DictEncoder)
+	plainEnc := encoding.Float32EncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem).(encoding.Float32Encoder)
+
+	if len(w.pages) > 0 {
+		if err := w.WriteDictionaryPage(); err != nil {
+			panic(err)
+		}
+		if err := w.drainBufferedDataPages(); err != nil {
+			panic(err)
+		}
+	}
+
+	if err := dictEnc.FallBackTo(plainEnc); err != nil {
+		panic(err)
+	}
+
+	dictEnc.Release()
+	w.currentEncoder = plainEnc
+	w.encoding = parquet.Encodings.Plain
+	w.fallbackToNonDict = true
 }
 
 // Float64ColumnChunkWriter is the typed interface for writing columns to a parquet
@@ -837,6 +929,7 @@ type Float64ColumnChunkWriter struct {
 func NewFloat64ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *Float64ColumnChunkWriter {
 	ret := &Float64ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.Float64EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	ret.fallbackFn = ret.FallbackToPlain
 	return ret
 }
 
@@ -1009,15 +1102,37 @@ func (w *Float64ColumnChunkWriter) checkDictionarySizeLimit() {
 	}
 }
 
+// FallbackToPlain switches this column from dictionary to PLAIN encoding when
+// the dictionary outgrows the configured page size limit. It mirrors
+// parquet-mr's FallbackValuesWriter: unflushed buffered values are re-encoded
+// as PLAIN (so the next data page is PLAIN, not dict-indexed), and the
+// dictionary page is emitted only if a dict-encoded data page had already
+// been cut before the overflow — otherwise the dictionary is discarded.
 func (w *Float64ColumnChunkWriter) FallbackToPlain() {
-	if w.currentEncoder.Encoding() == parquet.Encodings.PlainDict {
-		w.WriteDictionaryPage()
-		w.FlushBufferedDataPages()
-		w.fallbackToNonDict = true
-		w.currentEncoder.Release()
-		w.currentEncoder = encoding.Float64EncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem)
-		w.encoding = parquet.Encodings.Plain
+	if w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
+		return
 	}
+
+	dictEnc := w.currentEncoder.(encoding.DictEncoder)
+	plainEnc := encoding.Float64EncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem).(encoding.Float64Encoder)
+
+	if len(w.pages) > 0 {
+		if err := w.WriteDictionaryPage(); err != nil {
+			panic(err)
+		}
+		if err := w.drainBufferedDataPages(); err != nil {
+			panic(err)
+		}
+	}
+
+	if err := dictEnc.FallBackTo(plainEnc); err != nil {
+		panic(err)
+	}
+
+	dictEnc.Release()
+	w.currentEncoder = plainEnc
+	w.encoding = parquet.Encodings.Plain
+	w.fallbackToNonDict = true
 }
 
 // BooleanColumnChunkWriter is the typed interface for writing columns to a parquet
@@ -1038,6 +1153,7 @@ func NewBooleanColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, page
 	}
 	ret := &BooleanColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.BooleanEncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	ret.fallbackFn = ret.FallbackToPlain
 	return ret
 }
 
@@ -1332,15 +1448,37 @@ func (w *BooleanColumnChunkWriter) checkDictionarySizeLimit() {
 	}
 }
 
+// FallbackToPlain switches this column from dictionary to PLAIN encoding when
+// the dictionary outgrows the configured page size limit. It mirrors
+// parquet-mr's FallbackValuesWriter: unflushed buffered values are re-encoded
+// as PLAIN (so the next data page is PLAIN, not dict-indexed), and the
+// dictionary page is emitted only if a dict-encoded data page had already
+// been cut before the overflow — otherwise the dictionary is discarded.
 func (w *BooleanColumnChunkWriter) FallbackToPlain() {
-	if w.currentEncoder.Encoding() == parquet.Encodings.PlainDict {
-		w.WriteDictionaryPage()
-		w.FlushBufferedDataPages()
-		w.fallbackToNonDict = true
-		w.currentEncoder.Release()
-		w.currentEncoder = encoding.BooleanEncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem)
-		w.encoding = parquet.Encodings.Plain
+	if w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
+		return
 	}
+
+	dictEnc := w.currentEncoder.(encoding.DictEncoder)
+	plainEnc := encoding.BooleanEncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem).(encoding.BooleanEncoder)
+
+	if len(w.pages) > 0 {
+		if err := w.WriteDictionaryPage(); err != nil {
+			panic(err)
+		}
+		if err := w.drainBufferedDataPages(); err != nil {
+			panic(err)
+		}
+	}
+
+	if err := dictEnc.FallBackTo(plainEnc); err != nil {
+		panic(err)
+	}
+
+	dictEnc.Release()
+	w.currentEncoder = plainEnc
+	w.encoding = parquet.Encodings.Plain
+	w.fallbackToNonDict = true
 }
 
 // ByteArrayColumnChunkWriter is the typed interface for writing columns to a parquet
@@ -1358,6 +1496,7 @@ type ByteArrayColumnChunkWriter struct {
 func NewByteArrayColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *ByteArrayColumnChunkWriter {
 	ret := &ByteArrayColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.ByteArrayEncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	ret.fallbackFn = ret.FallbackToPlain
 	return ret
 }
 
@@ -1603,15 +1742,37 @@ func (w *ByteArrayColumnChunkWriter) checkDictionarySizeLimit() {
 	}
 }
 
+// FallbackToPlain switches this column from dictionary to PLAIN encoding when
+// the dictionary outgrows the configured page size limit. It mirrors
+// parquet-mr's FallbackValuesWriter: unflushed buffered values are re-encoded
+// as PLAIN (so the next data page is PLAIN, not dict-indexed), and the
+// dictionary page is emitted only if a dict-encoded data page had already
+// been cut before the overflow — otherwise the dictionary is discarded.
 func (w *ByteArrayColumnChunkWriter) FallbackToPlain() {
-	if w.currentEncoder.Encoding() == parquet.Encodings.PlainDict {
-		w.WriteDictionaryPage()
-		w.FlushBufferedDataPages()
-		w.fallbackToNonDict = true
-		w.currentEncoder.Release()
-		w.currentEncoder = encoding.ByteArrayEncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem)
-		w.encoding = parquet.Encodings.Plain
+	if w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
+		return
 	}
+
+	dictEnc := w.currentEncoder.(encoding.DictEncoder)
+	plainEnc := encoding.ByteArrayEncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem).(encoding.ByteArrayEncoder)
+
+	if len(w.pages) > 0 {
+		if err := w.WriteDictionaryPage(); err != nil {
+			panic(err)
+		}
+		if err := w.drainBufferedDataPages(); err != nil {
+			panic(err)
+		}
+	}
+
+	if err := dictEnc.FallBackTo(plainEnc); err != nil {
+		panic(err)
+	}
+
+	dictEnc.Release()
+	w.currentEncoder = plainEnc
+	w.encoding = parquet.Encodings.Plain
+	w.fallbackToNonDict = true
 }
 
 // FixedLenByteArrayColumnChunkWriter is the typed interface for writing columns to a parquet
@@ -1629,6 +1790,7 @@ type FixedLenByteArrayColumnChunkWriter struct {
 func NewFixedLenByteArrayColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *FixedLenByteArrayColumnChunkWriter {
 	ret := &FixedLenByteArrayColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.FixedLenByteArrayEncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	ret.fallbackFn = ret.FallbackToPlain
 	return ret
 }
 
@@ -1882,15 +2044,37 @@ func (w *FixedLenByteArrayColumnChunkWriter) checkDictionarySizeLimit() {
 	}
 }
 
+// FallbackToPlain switches this column from dictionary to PLAIN encoding when
+// the dictionary outgrows the configured page size limit. It mirrors
+// parquet-mr's FallbackValuesWriter: unflushed buffered values are re-encoded
+// as PLAIN (so the next data page is PLAIN, not dict-indexed), and the
+// dictionary page is emitted only if a dict-encoded data page had already
+// been cut before the overflow — otherwise the dictionary is discarded.
 func (w *FixedLenByteArrayColumnChunkWriter) FallbackToPlain() {
-	if w.currentEncoder.Encoding() == parquet.Encodings.PlainDict {
-		w.WriteDictionaryPage()
-		w.FlushBufferedDataPages()
-		w.fallbackToNonDict = true
-		w.currentEncoder.Release()
-		w.currentEncoder = encoding.FixedLenByteArrayEncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem)
-		w.encoding = parquet.Encodings.Plain
+	if w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
+		return
 	}
+
+	dictEnc := w.currentEncoder.(encoding.DictEncoder)
+	plainEnc := encoding.FixedLenByteArrayEncoderTraits.Encoder(format.Encoding(parquet.Encodings.Plain), false, w.descr, w.mem).(encoding.FixedLenByteArrayEncoder)
+
+	if len(w.pages) > 0 {
+		if err := w.WriteDictionaryPage(); err != nil {
+			panic(err)
+		}
+		if err := w.drainBufferedDataPages(); err != nil {
+			panic(err)
+		}
+	}
+
+	if err := dictEnc.FallBackTo(plainEnc); err != nil {
+		panic(err)
+	}
+
+	dictEnc.Release()
+	w.currentEncoder = plainEnc
+	w.encoding = parquet.Encodings.Plain
+	w.fallbackToNonDict = true
 }
 
 // NewColumnChunkWriter constructs a column writer of the appropriate type by using the metadata builder

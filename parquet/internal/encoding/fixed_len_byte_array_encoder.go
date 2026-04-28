@@ -136,6 +136,7 @@ func (enc *DictFixedLenByteArrayEncoder) Put(in []parquet.FixedLenByteArray) {
 		}
 		enc.addIndex(memoIdx)
 	}
+	enc.AddRawSize(int64(len(in)) * int64(enc.typeLen))
 }
 
 // PutSpaced is like Put but leaves space for nulls
@@ -149,6 +150,23 @@ func (enc *DictFixedLenByteArrayEncoder) PutSpaced(in []parquet.FixedLenByteArra
 func (enc *DictFixedLenByteArrayEncoder) NormalizeDict(values arrow.Array) (arrow.Array, error) {
 	values.Retain()
 	return values, nil
+}
+
+// FallBackTo drains buffered indices through the dictionary into the
+// fallback plain encoder and clears the index buffer.
+func (enc *DictFixedLenByteArrayEncoder) FallBackTo(fallback TypedEncoder) error {
+	target, ok := fallback.(FixedLenByteArrayEncoder)
+	if !ok {
+		return fmt.Errorf("parquet: dict fallback target encoder has wrong element type")
+	}
+	bm := enc.memo.(BinaryMemoTable)
+	vals := make([]parquet.FixedLenByteArray, len(enc.idxValues))
+	for i, idx := range enc.idxValues {
+		vals[i] = parquet.FixedLenByteArray(bm.Value(int(idx)))
+	}
+	target.Put(vals)
+	enc.idxValues = enc.idxValues[:0]
+	return nil
 }
 
 // PutDictionary allows pre-seeding a dictionary encoder with

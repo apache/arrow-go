@@ -114,6 +114,13 @@ type dictEncoder struct {
 	idxValues       []int32
 	memo            MemoTable
 
+	// rawDataSize is the number of bytes of input values observed since
+	// the last page flush. Mirrors parquet-mr's rawDataByteSize and is
+	// consulted by FlushCurrentPage to decide whether the dictionary is
+	// actually compressing (dict + indices < raw) before committing the
+	// first dict-encoded data page.
+	rawDataSize int64
+
 	preservedDict arrow.Array
 }
 
@@ -134,12 +141,24 @@ func (d *dictEncoder) Reset() {
 	d.dictEncodedSize = 0
 	d.idxValues = d.idxValues[:0]
 	d.idxBuffer.ResizeNoShrink(0)
+	d.rawDataSize = 0
 	d.memo.Reset()
 	if d.preservedDict != nil {
 		d.preservedDict.Release()
 		d.preservedDict = nil
 	}
 }
+
+// ObservedRawSize returns the number of raw input bytes accumulated since
+// the last data page flush. Used with DictEncodedSize and
+// EstimatedDataEncodedSize to evaluate whether dictionary encoding is
+// actually saving space on the first page.
+func (d *dictEncoder) ObservedRawSize() int64 { return d.rawDataSize }
+
+// AddRawSize is used by per-type dict encoders to accumulate the raw-bytes
+// total as values are written. Exported at package scope because the typed
+// encoders live in different files within this package.
+func (d *dictEncoder) AddRawSize(n int64) { d.rawDataSize += n }
 
 func (d *dictEncoder) Release() {
 	d.encoder.Release()
@@ -285,6 +304,7 @@ func (d *dictEncoder) WriteIndices(out []byte) (int, error) {
 	nbytes := enc.Flush()
 
 	d.idxValues = d.idxValues[:0]
+	d.rawDataSize = 0
 	return nbytes + 1, nil
 }
 
