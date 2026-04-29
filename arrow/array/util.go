@@ -284,7 +284,7 @@ func RecordToJSON(rec arrow.RecordBatch, w io.Writer) error {
 	cols := make(map[string]interface{})
 	for i := 0; int64(i) < rec.NumRows(); i++ {
 		for j, c := range rec.Columns() {
-			cols[fields[j].Name] = c.GetOneForMarshal(i)
+			cols[fields[j].Name] = c.GetOneForMarshal(i, true)
 		}
 		if err := enc.Encode(cols); err != nil {
 			return err

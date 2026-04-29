@@ -154,8 +154,8 @@ func (a *String) setData(data *Data) {
 	}
 }
 
-func (a *String) GetOneForMarshal(i int) interface{} {
-	if a.IsValid(i) {
+func (a *String) GetOneForMarshal(i int, nullable bool) interface{} {
+	if !nullable || a.IsValid(i) {
 		return a.Value(i)
 	}
 	return nil
@@ -362,8 +362,8 @@ func (a *LargeString) setData(data *Data) {
 	}
 }
 
-func (a *LargeString) GetOneForMarshal(i int) interface{} {
-	if a.IsValid(i) {
+func (a *LargeString) GetOneForMarshal(i int, nullable bool) interface{} {
+	if !nullable || a.IsValid(i) {
 		return a.Value(i)
 	}
 	return nil
@@ -372,7 +372,7 @@ func (a *LargeString) GetOneForMarshal(i int) interface{} {
 func (a *LargeString) MarshalJSON() ([]byte, error) {
 	vals := make([]interface{}, a.Len())
 	for i := 0; i < a.Len(); i++ {
-		vals[i] = a.GetOneForMarshal(i)
+		vals[i] = a.GetOneForMarshal(i, true)
 	}
 	return json.Marshal(vals)
 }
@@ -526,8 +526,8 @@ func (a *StringView) ValueStr(i int) string {
 	return a.Value(i)
 }
 
-func (a *StringView) GetOneForMarshal(i int) interface{} {
-	if a.IsNull(i) {
+func (a *StringView) GetOneForMarshal(i int, nullable bool) interface{} {
+	if nullable && a.IsNull(i) {
 		return nil
 	}
 	return a.Value(i)
@@ -536,7 +536,7 @@ func (a *StringView) GetOneForMarshal(i int) interface{} {
 func (a *StringView) MarshalJSON() ([]byte, error) {
 	vals := make([]interface{}, a.Len())
 	for i := 0; i < a.Len(); i++ {
-		vals[i] = a.GetOneForMarshal(i)
+		vals[i] = a.GetOneForMarshal(i, true)
 	}
 	return json.Marshal(vals)
 }

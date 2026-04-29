@@ -80,7 +80,7 @@ func (a *Null) setData(data *Data) {
 	a.data.nulls = a.data.length
 }
 
-func (a *Null) GetOneForMarshal(i int) interface{} {
+func (a *Null) GetOneForMarshal(i int, nullable bool) interface{} {
 	return nil
 }
 
