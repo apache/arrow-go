@@ -207,9 +207,14 @@ func (a *Struct) GetOneForMarshal(i int) interface{} {
 	}
 
 	tmp := make(map[string]interface{})
-	fieldList := a.data.dtype.(*arrow.StructType).Fields()
+	dtype := a.data.dtype.(*arrow.StructType)
+	fieldList := dtype.Fields()
 	for j, d := range a.fields {
-		tmp[fieldList[j].Name] = d.GetOneForMarshal(i)
+		if dtype.Field(j).Nullable && a.IsNull(i) {
+			tmp[fieldList[j].Name] = nil
+		} else {
+			tmp[fieldList[j].Name] = d.GetOneForMarshal(i)
+		}
 	}
 	return tmp
 }
