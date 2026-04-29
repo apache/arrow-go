@@ -192,59 +192,59 @@ func makeStructsRecords() []arrow.RecordBatch {
 	mem := memory.NewGoAllocator()
 
 	fields := []arrow.Field{
-		{Name: "f1", Type: arrow.PrimitiveTypes.Int32},
-		{Name: "f2", Type: arrow.BinaryTypes.String},
+		{Name: "f1", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		{Name: "f2", Type: arrow.BinaryTypes.String, Nullable: true},
 	}
 	dtype := arrow.StructOf(fields...)
 	schema := arrow.NewSchema([]arrow.Field{{Name: "struct_nullable", Type: dtype, Nullable: true}}, nil)
 
-	mask := []bool{true, false, false, true, true, true, false, true}
+	innerValids := []bool{true, false, false, true, true}
 	chunks := [][]arrow.Array{
 		{
 			structOf(mem, dtype, [][]arrow.Array{
 				{
-					arrayOf(mem, []int32{-1, -2, -3, -4, -5}, mask[:5]),
-					arrayOf(mem, []string{"111", "222", "333", "444", "555"}, mask[:5]),
+					arrayOf(mem, []int32{-1, -2, -3, -4, -5}, innerValids),
+					arrayOf(mem, []string{"111", "222", "333", "444", "555"}, innerValids),
 				},
 				{
-					arrayOf(mem, []int32{-11, -12, -13, -14, -15}, mask[:5]),
-					arrayOf(mem, []string{"1111", "1222", "1333", "1444", "1555"}, mask[:5]),
+					arrayOf(mem, []int32{-11, -12, -13, -14, -15}, innerValids),
+					arrayOf(mem, []string{"1111", "1222", "1333", "1444", "1555"}, innerValids),
 				},
 				{
-					arrayOf(mem, []int32{-21, -22, -23, -24, -25}, mask[:5]),
-					arrayOf(mem, []string{"2111", "2222", "2333", "2444", "2555"}, mask[:5]),
+					arrayOf(mem, []int32{-21, -22, -23, -24, -25}, innerValids),
+					arrayOf(mem, []string{"2111", "2222", "2333", "2444", "2555"}, innerValids),
 				},
 				{
-					arrayOf(mem, []int32{-31, -32, -33, -34, -35}, mask[:5]),
-					arrayOf(mem, []string{"3111", "3222", "3333", "3444", "3555"}, mask[:5]),
+					arrayOf(mem, []int32{-31, -32, -33, -34, -35}, innerValids),
+					arrayOf(mem, []string{"3111", "3222", "3333", "3444", "3555"}, innerValids),
 				},
 				{
-					arrayOf(mem, []int32{-41, -42, -43, -44, -45}, mask[:5]),
-					arrayOf(mem, []string{"4111", "4222", "4333", "4444", "4555"}, mask[:5]),
+					arrayOf(mem, []int32{-41, -42, -43, -44, -45}, innerValids),
+					arrayOf(mem, []string{"4111", "4222", "4333", "4444", "4555"}, innerValids),
 				},
 			}, []bool{true, false, true, true, true}),
 		},
 		{
 			structOf(mem, dtype, [][]arrow.Array{
 				{
-					arrayOf(mem, []int32{1, 2, 3, 4, 5}, mask[:5]),
-					arrayOf(mem, []string{"-111", "-222", "-333", "-444", "-555"}, mask[:5]),
+					arrayOf(mem, []int32{1, 2, 3, 4, 5}, innerValids),
+					arrayOf(mem, []string{"-111", "-222", "-333", "-444", "-555"}, innerValids),
 				},
 				{
-					arrayOf(mem, []int32{11, 12, 13, 14, 15}, mask[:5]),
-					arrayOf(mem, []string{"-1111", "-1222", "-1333", "-1444", "-1555"}, mask[:5]),
+					arrayOf(mem, []int32{11, 12, 13, 14, 15}, innerValids),
+					arrayOf(mem, []string{"-1111", "-1222", "-1333", "-1444", "-1555"}, innerValids),
 				},
 				{
-					arrayOf(mem, []int32{21, 22, 23, 24, 25}, mask[:5]),
-					arrayOf(mem, []string{"-2111", "-2222", "-2333", "-2444", "-2555"}, mask[:5]),
+					arrayOf(mem, []int32{21, 22, 23, 24, 25}, innerValids),
+					arrayOf(mem, []string{"-2111", "-2222", "-2333", "-2444", "-2555"}, innerValids),
 				},
 				{
-					arrayOf(mem, []int32{31, 32, 33, 34, 35}, mask[:5]),
-					arrayOf(mem, []string{"-3111", "-3222", "-3333", "-3444", "-3555"}, mask[:5]),
+					arrayOf(mem, []int32{31, 32, 33, 34, 35}, innerValids),
+					arrayOf(mem, []string{"-3111", "-3222", "-3333", "-3444", "-3555"}, innerValids),
 				},
 				{
-					arrayOf(mem, []int32{41, 42, 43, 44, 45}, mask[:5]),
-					arrayOf(mem, []string{"-4111", "-4222", "-4333", "-4444", "-4555"}, mask[:5]),
+					arrayOf(mem, []int32{41, 42, 43, 44, 45}, innerValids),
+					arrayOf(mem, []string{"-4111", "-4222", "-4333", "-4444", "-4555"}, innerValids),
 				},
 			}, []bool{true, false, false, true, true}),
 		},
