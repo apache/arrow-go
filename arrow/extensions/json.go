@@ -116,14 +116,18 @@ func (a *JSONArray) ValueBytes(i int) []byte {
 	return b
 }
 
-// ValueJSON wraps the underlying string value as a json.RawMessage,
-// or returns nil if the array value is null.
-func (a *JSONArray) ValueJSON(i int) json.RawMessage {
+func (a *JSONArray) valueJSON(i int, nullable bool) json.RawMessage {
 	var val json.RawMessage
 	if a.IsValid(i) {
 		val = json.RawMessage(a.Storage().(array.StringLike).Value(i))
 	}
 	return val
+}
+
+// ValueJSON wraps the underlying string value as a json.RawMessage,
+// or returns nil if the array value is null.
+func (a *JSONArray) ValueJSON(i int) json.RawMessage {
+	return a.valueJSON(i, true)
 }
 
 // MarshalJSON implements json.Marshaler.
@@ -138,8 +142,8 @@ func (a *JSONArray) MarshalJSON() ([]byte, error) {
 }
 
 // GetOneForMarshal implements arrow.Array.
-func (a *JSONArray) GetOneForMarshal(i int) interface{} {
-	return a.ValueJSON(i)
+func (a *JSONArray) GetOneForMarshal(i int, nullable bool) interface{} {
+	return a.valueJSON(i, nullable)
 }
 
 var (

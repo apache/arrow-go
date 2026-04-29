@@ -86,8 +86,8 @@ func (a *FixedSizeBinary) setData(data *Data) {
 	}
 }
 
-func (a *FixedSizeBinary) GetOneForMarshal(i int) interface{} {
-	if a.IsNull(i) {
+func (a *FixedSizeBinary) GetOneForMarshal(i int, nullable bool) interface{} {
+	if nullable && a.IsNull(i) {
 		return nil
 	}
 

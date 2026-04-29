@@ -90,8 +90,8 @@ func (a *Boolean) setData(data *Data) {
 	}
 }
 
-func (a *Boolean) GetOneForMarshal(i int) interface{} {
-	if a.IsValid(i) {
+func (a *Boolean) GetOneForMarshal(i int, nullable bool) interface{} {
+	if !nullable || a.IsValid(i) {
 		return a.Value(i)
 	}
 	return nil

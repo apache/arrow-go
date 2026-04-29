@@ -320,17 +320,17 @@ func (a *SparseUnion) setData(data *Data) {
 	debug.Assert(a.data.buffers[0] == nil, "arrow/array: validity bitmap for sparse unions should be nil")
 }
 
-func (a *SparseUnion) GetOneForMarshal(i int) interface{} {
+func (a *SparseUnion) GetOneForMarshal(i int, nullable bool) interface{} {
 	typeID := a.RawTypeCodes()[i]
 
 	childID := a.ChildID(i)
 	data := a.Field(childID)
 
-	if data.IsNull(i) {
+	if nullable && data.IsNull(i) {
 		return nil
 	}
 
-	return []interface{}{typeID, data.GetOneForMarshal(i)}
+	return []interface{}{typeID, data.GetOneForMarshal(i, nullable)}
 }
 
 func (a *SparseUnion) MarshalJSON() ([]byte, error) {
@@ -342,7 +342,7 @@ func (a *SparseUnion) MarshalJSON() ([]byte, error) {
 		if i != 0 {
 			buf.WriteByte(',')
 		}
-		if err := enc.Encode(a.GetOneForMarshal(i)); err != nil {
+		if err := enc.Encode(a.GetOneForMarshal(i, true)); err != nil {
 			return nil, err
 		}
 	}
@@ -355,7 +355,7 @@ func (a *SparseUnion) ValueStr(i int) string {
 		return NullValueStr
 	}
 
-	val := a.GetOneForMarshal(i)
+	val := a.GetOneForMarshal(i, true)
 	if val == nil {
 		// child is nil
 		return NullValueStr
@@ -380,7 +380,7 @@ func (a *SparseUnion) String() string {
 
 		field := fieldList[a.ChildID(i)]
 		f := a.Field(a.ChildID(i))
-		fmt.Fprintf(&b, "{%s=%v}", field.Name, f.GetOneForMarshal(i))
+		fmt.Fprintf(&b, "{%s=%v}", field.Name, f.GetOneForMarshal(i, true))
 	}
 	b.WriteByte(']')
 	return b.String()
@@ -613,18 +613,18 @@ func (a *DenseUnion) setData(data *Data) {
 	}
 }
 
-func (a *DenseUnion) GetOneForMarshal(i int) interface{} {
+func (a *DenseUnion) GetOneForMarshal(i int, nullable bool) interface{} {
 	typeID := a.RawTypeCodes()[i]
 
 	childID := a.ChildID(i)
 	data := a.Field(childID)
 
 	offset := int(a.RawValueOffsets()[i])
-	if data.IsNull(offset) {
+	if nullable && data.IsNull(offset) {
 		return nil
 	}
 
-	return []interface{}{typeID, data.GetOneForMarshal(offset)}
+	return []interface{}{typeID, data.GetOneForMarshal(offset, nullable)}
 }
 
 func (a *DenseUnion) MarshalJSON() ([]byte, error) {
@@ -636,7 +636,7 @@ func (a *DenseUnion) MarshalJSON() ([]byte, error) {
 		if i != 0 {
 			buf.WriteByte(',')
 		}
-		if err := enc.Encode(a.GetOneForMarshal(i)); err != nil {
+		if err := enc.Encode(a.GetOneForMarshal(i, true)); err != nil {
 			return nil, err
 		}
 	}
@@ -649,7 +649,7 @@ func (a *DenseUnion) ValueStr(i int) string {
 		return NullValueStr
 	}
 
-	val := a.GetOneForMarshal(i)
+	val := a.GetOneForMarshal(i, true)
 	if val == nil {
 		// child in nil
 		return NullValueStr
@@ -676,7 +676,7 @@ func (a *DenseUnion) String() string {
 
 		field := fieldList[a.ChildID(i)]
 		f := a.Field(a.ChildID(i))
-		fmt.Fprintf(&b, "{%s=%v}", field.Name, f.GetOneForMarshal(int(offsets[i])))
+		fmt.Fprintf(&b, "{%s=%v}", field.Name, f.GetOneForMarshal(int(offsets[i]), true))
 	}
 	b.WriteByte(']')
 	return b.String()
