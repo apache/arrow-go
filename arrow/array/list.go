@@ -61,7 +61,7 @@ func (a *List) ValueStr(i int) string {
 	if !a.IsValid(i) {
 		return NullValueStr
 	}
-	return string(a.GetOneForMarshal(i).(json.RawMessage))
+	return string(a.GetOneForMarshal(i, true).(json.RawMessage))
 }
 
 func (a *List) String() string {
@@ -98,8 +98,8 @@ func (a *List) setData(data *Data) {
 	a.values = MakeFromData(data.childData[0])
 }
 
-func (a *List) GetOneForMarshal(i int) interface{} {
-	if a.IsNull(i) {
+func (a *List) GetOneForMarshal(i int, nullable bool) interface{} {
+	if nullable && a.IsNull(i) {
 		return nil
 	}
 
@@ -121,7 +121,7 @@ func (a *List) MarshalJSON() ([]byte, error) {
 		if i != 0 {
 			buf.WriteByte(',')
 		}
-		if err := enc.Encode(a.GetOneForMarshal(i)); err != nil {
+		if err := enc.Encode(a.GetOneForMarshal(i, true)); err != nil {
 			return nil, err
 		}
 	}
@@ -193,7 +193,7 @@ func (a *LargeList) ValueStr(i int) string {
 	if !a.IsValid(i) {
 		return NullValueStr
 	}
-	return string(a.GetOneForMarshal(i).(json.RawMessage))
+	return string(a.GetOneForMarshal(i, true).(json.RawMessage))
 }
 
 func (a *LargeList) String() string {
@@ -230,8 +230,8 @@ func (a *LargeList) setData(data *Data) {
 	a.values = MakeFromData(data.childData[0])
 }
 
-func (a *LargeList) GetOneForMarshal(i int) interface{} {
-	if a.IsNull(i) {
+func (a *LargeList) GetOneForMarshal(i int, nullable bool) interface{} {
+	if nullable && a.IsNull(i) {
 		return nil
 	}
 
@@ -253,7 +253,7 @@ func (a *LargeList) MarshalJSON() ([]byte, error) {
 		if i != 0 {
 			buf.WriteByte(',')
 		}
-		if err := enc.Encode(a.GetOneForMarshal(i)); err != nil {
+		if err := enc.Encode(a.GetOneForMarshal(i, true)); err != nil {
 			return nil, err
 		}
 	}
@@ -663,7 +663,7 @@ func (a *ListView) ValueStr(i int) string {
 	if !a.IsValid(i) {
 		return NullValueStr
 	}
-	return string(a.GetOneForMarshal(i).(json.RawMessage))
+	return string(a.GetOneForMarshal(i, true).(json.RawMessage))
 }
 
 func (a *ListView) String() string {
@@ -704,8 +704,8 @@ func (a *ListView) setData(data *Data) {
 	a.values = MakeFromData(data.childData[0])
 }
 
-func (a *ListView) GetOneForMarshal(i int) interface{} {
-	if a.IsNull(i) {
+func (a *ListView) GetOneForMarshal(i int, nullable bool) interface{} {
+	if nullable && a.IsNull(i) {
 		return nil
 	}
 
@@ -727,7 +727,7 @@ func (a *ListView) MarshalJSON() ([]byte, error) {
 		if i != 0 {
 			buf.WriteByte(',')
 		}
-		if err := enc.Encode(a.GetOneForMarshal(i)); err != nil {
+		if err := enc.Encode(a.GetOneForMarshal(i, true)); err != nil {
 			return nil, err
 		}
 	}
@@ -810,7 +810,7 @@ func (a *LargeListView) ValueStr(i int) string {
 	if !a.IsValid(i) {
 		return NullValueStr
 	}
-	return string(a.GetOneForMarshal(i).(json.RawMessage))
+	return string(a.GetOneForMarshal(i, true).(json.RawMessage))
 }
 
 func (a *LargeListView) String() string {
@@ -851,8 +851,8 @@ func (a *LargeListView) setData(data *Data) {
 	a.values = MakeFromData(data.childData[0])
 }
 
-func (a *LargeListView) GetOneForMarshal(i int) interface{} {
-	if a.IsNull(i) {
+func (a *LargeListView) GetOneForMarshal(i int, nullable bool) interface{} {
+	if nullable && a.IsNull(i) {
 		return nil
 	}
 
@@ -874,7 +874,7 @@ func (a *LargeListView) MarshalJSON() ([]byte, error) {
 		if i != 0 {
 			buf.WriteByte(',')
 		}
-		if err := enc.Encode(a.GetOneForMarshal(i)); err != nil {
+		if err := enc.Encode(a.GetOneForMarshal(i, true)); err != nil {
 			return nil, err
 		}
 	}

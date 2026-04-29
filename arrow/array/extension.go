@@ -116,8 +116,8 @@ func (e *ExtensionArrayBase) String() string {
 	return fmt.Sprintf("(%s)%s", e.data.dtype, e.storage)
 }
 
-func (e *ExtensionArrayBase) GetOneForMarshal(i int) interface{} {
-	return e.storage.GetOneForMarshal(i)
+func (e *ExtensionArrayBase) GetOneForMarshal(i int, nullable bool) interface{} {
+	return e.storage.GetOneForMarshal(i, nullable)
 }
 
 func (e *ExtensionArrayBase) MarshalJSON() ([]byte, error) {

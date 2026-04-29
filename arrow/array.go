@@ -111,7 +111,7 @@ type Array interface {
 	ValueStr(i int) string
 
 	// Get single value to be marshalled with `json.Marshal`
-	GetOneForMarshal(i int) interface{}
+	GetOneForMarshal(i int, nullable bool) interface{}
 
 	Data() ArrayData
 

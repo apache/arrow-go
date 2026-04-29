@@ -108,8 +108,8 @@ func (a *Timestamp) ValueStr(i int) string {
 	return toTime(a.values[i]).Format(layout)
 }
 
-func (a *Timestamp) GetOneForMarshal(i int) interface{} {
-	if val := a.ValueStr(i); val != NullValueStr {
+func (a *Timestamp) GetOneForMarshal(i int, nullable bool) interface{} {
+	if val := a.ValueStr(i); !nullable || val != NullValueStr {
 		return val
 	}
 	return nil
@@ -118,7 +118,7 @@ func (a *Timestamp) GetOneForMarshal(i int) interface{} {
 func (a *Timestamp) MarshalJSON() ([]byte, error) {
 	vals := make([]interface{}, a.Len())
 	for i := range a.values {
-		vals[i] = a.GetOneForMarshal(i)
+		vals[i] = a.GetOneForMarshal(i, true)
 	}
 
 	return json.Marshal(vals)
