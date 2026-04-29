@@ -233,7 +233,7 @@ func midCardinalityStrings(n, distinct, width int) []parquet.ByteArray {
 	out := make([]parquet.ByteArray, n)
 	for i := range out {
 		// Deterministic, roughly uniform distribution across the pool.
-		out[i] = pool[int(int64(i)*2654435761)%distinct]
+		out[i] = pool[int64(i)*2654435761%int64(distinct)]
 	}
 	return out
 }
