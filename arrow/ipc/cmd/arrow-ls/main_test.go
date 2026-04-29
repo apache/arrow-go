@@ -59,7 +59,7 @@ records: 3
 			name: "structs",
 			want: `schema:
   fields: 1
-    - struct_nullable: type=struct<f1: int32, f2: utf8>, nullable
+    - struct_nullable: type=struct<f1: int32 nullable, f2: utf8 nullable>, nullable
 records: 2
 `,
 		},
@@ -221,7 +221,7 @@ records: 3
 			name:   "structs",
 			want: `schema:
   fields: 1
-    - struct_nullable: type=struct<f1: int32, f2: utf8>, nullable
+    - struct_nullable: type=struct<f1: int32 nullable, f2: utf8 nullable>, nullable
 records: 2
 `,
 		},
@@ -230,7 +230,7 @@ records: 2
 			want: `version: V5
 schema:
   fields: 1
-    - struct_nullable: type=struct<f1: int32, f2: utf8>, nullable
+    - struct_nullable: type=struct<f1: int32 nullable, f2: utf8 nullable>, nullable
 records: 2
 `,
 		},

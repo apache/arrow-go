@@ -948,7 +948,7 @@ func makeStructsWantJSONs() string {
               "isSigned": true,
               "bitWidth": 32
             },
-            "nullable": false,
+            "nullable": true,
             "children": []
           },
           {
@@ -956,7 +956,7 @@ func makeStructsWantJSONs() string {
             "type": {
               "name": "utf8"
             },
-            "nullable": false,
+            "nullable": true,
             "children": []
           }
         ]
