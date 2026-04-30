@@ -39,6 +39,14 @@ func recordEqual(left, right arrow.RecordBatch, opt equalOption) bool {
 	}
 
 	for i := range left.Columns() {
+		lf := left.Schema().Field(i)
+		rf := left.Schema().Field(i)
+		if !lf.Equal(rf) {
+			return false
+		}
+
+		opt.nullable = lf.Nullable
+
 		lc := left.Column(i)
 		rc := right.Column(i)
 		if !equal(lc, rc, opt) {
@@ -63,6 +71,14 @@ func recordApproxEqual(left, right arrow.RecordBatch, opt equalOption) bool {
 	}
 
 	for i := range left.Columns() {
+		lf := left.Schema().Field(i)
+		rf := left.Schema().Field(i)
+		if !lf.Equal(rf) {
+			return false
+		}
+
+		opt.nullable = lf.Nullable
+
 		lc := left.Column(i)
 		rc := right.Column(i)
 		if !arrayApproxEqual(lc, rc, opt) {
@@ -122,7 +138,7 @@ func chunkedEqual(left, right *arrow.Chunked, opt equalOption) bool {
 		return true
 	case left.Len() != right.Len():
 		return false
-	case left.NullN() != right.NullN():
+	case opt.nullable && left.NullN() != right.NullN():
 		return false
 	case !arrow.TypeEqual(left.DataType(), right.DataType()):
 		return false
@@ -149,7 +165,7 @@ func chunkedApproxEqual(left, right *arrow.Chunked, opt equalOption) bool {
 		return true
 	case left.Len() != right.Len():
 		return false
-	case left.NullN() != right.NullN():
+	case opt.nullable && left.NullN() != right.NullN():
 		return false
 	case !arrow.TypeEqual(left.DataType(), right.DataType()):
 		return false
@@ -178,12 +194,16 @@ func tableEqual(left, right arrow.Table, opt equalOption) bool {
 	}
 
 	for i := 0; int64(i) < left.NumCols(); i++ {
-		lc := left.Column(i)
-		rc := right.Column(i)
-		if !lc.Field().Equal(rc.Field()) {
+		lf := left.Schema().Field(i)
+		rf := left.Schema().Field(i)
+		if !lf.Equal(rf) {
 			return false
 		}
 
+		opt.nullable = lf.Nullable
+
+		lc := left.Column(i)
+		rc := right.Column(i)
 		if !chunkedEqual(lc.Data(), rc.Data(), opt) {
 			return false
 		}
@@ -205,12 +225,16 @@ func tableApproxEqual(left, right arrow.Table, opt equalOption) bool {
 	}
 
 	for i := 0; int64(i) < left.NumCols(); i++ {
-		lc := left.Column(i)
-		rc := right.Column(i)
-		if !lc.Field().Equal(rc.Field()) {
+		lf := left.Schema().Field(i)
+		rf := left.Schema().Field(i)
+		if !lf.Equal(rf) {
 			return false
 		}
 
+		opt.nullable = lf.Nullable
+
+		lc := left.Column(i)
+		rc := right.Column(i)
 		if !chunkedApproxEqual(lc.Data(), rc.Data(), opt) {
 			return false
 		}
@@ -229,7 +253,7 @@ func equal(left, right arrow.Array, opt equalOption) bool {
 		return false
 	case left.Len() == 0:
 		return true
-	case left.NullN() == left.Len():
+	case opt.nullable && left.NullN() == left.Len():
 		return true
 	}
 
@@ -411,6 +435,7 @@ type equalOption struct {
 	atol             float64 // absolute tolerance
 	nansEq           bool    // whether NaNs are considered equal.
 	unorderedMapKeys bool    // whether maps are allowed to have different entries order
+	nullable         bool    // whether the fields being compared are considered nullable
 }
 
 func (eq equalOption) f16(f1, f2 float16.Num) bool {
@@ -446,8 +471,9 @@ func (eq equalOption) f64(v1, v2 float64) bool {
 
 func newEqualOption(opts ...EqualOption) equalOption {
 	eq := equalOption{
-		atol:   defaultAbsoluteTolerance,
-		nansEq: false,
+		atol:     defaultAbsoluteTolerance,
+		nansEq:   false,
+		nullable: true,
 	}
 	for _, opt := range opts {
 		opt(&eq)
@@ -481,6 +507,14 @@ func WithUnorderedMapKeys(v bool) EqualOption {
 	}
 }
 
+// WithNullable sets whether the comparison function will consider both fields as nullable. If they're non-nullable, their
+// valids buffer will be ignored for comparison and the underlying values will be used instead
+func WithNullable(v bool) EqualOption {
+	return func(o *equalOption) {
+		o.nullable = v
+	}
+}
+
 // ApproxEqual reports whether the two provided arrays are approximately equal.
 // For non-floating point arrays, it is equivalent to Equal.
 func ApproxEqual(left, right arrow.Array, opts ...EqualOption) bool {
@@ -493,7 +527,7 @@ func arrayApproxEqual(left, right arrow.Array, opt equalOption) bool {
 		return false
 	case left.Len() == 0:
 		return true
-	case left.NullN() == left.Len():
+	case opt.nullable && left.NullN() == left.Len():
 		return true
 	}
 
@@ -648,11 +682,11 @@ func baseArrayEqual(left, right arrow.Array, opt equalOption) bool {
 	switch {
 	case left.Len() != right.Len():
 		return false
-	case left.NullN() != right.NullN():
+	case opt.nullable && left.NullN() != right.NullN():
 		return false
 	case !arrow.TypeEqual(left.DataType(), right.DataType()): // We do not check for metadata as in the C++ implementation.
 		return false
-	case !validityBitmapEqual(left, right):
+	case opt.nullable && !validityBitmapEqual(left, right):
 		return false
 	}
 	return true
@@ -882,7 +916,7 @@ func arrayApproxEqualSingleMapEntry(left, right *Struct, opt equalOption) bool {
 	switch {
 	case left.Len() != right.Len():
 		return false
-	case left.NullN() != right.NullN():
+	case opt.nullable && left.NullN() != right.NullN():
 		return false
 	case !arrow.TypeEqual(left.DataType(), right.DataType()): // We do not check for metadata as in the C++ implementation.
 		return false
