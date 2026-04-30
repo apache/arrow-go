@@ -427,39 +427,20 @@ func (p *PrimitiveWriterTestSuite) testDictionaryFallbackEncoding(version parque
 	p.EqualValues(VeryLargeSize, valuesRead)
 	p.Equal(p.Values, p.ValuesOut)
 
+	// With the parquet-mr-aligned fallback behavior, a dictionary that overflows
+	// before any dict-encoded data page has been flushed is discarded entirely.
+	// With the default page-size parameters used here the dict-encoded
+	// EstimatedDataEncodedSize (RLE indices) stays under DataPageSize right up
+	// to the overflow point, so no dict page and no dict-encoded data pages
+	// appear in the output — the column is pure PLAIN.
 	encodings := p.metadataEncodings()
-	if p.Typ.Kind() == reflect.Bool || p.Typ == reflect.TypeOf(parquet.Int96{}) {
-		// dictionary encoding is not allowed for booleans
-		// there are 2 encodings (PLAIN, RLE) in a non dictionary encoding case
-		p.Equal([]parquet.Encoding{parquet.Encodings.Plain, parquet.Encodings.RLE}, encodings)
-	} else if version == parquet.V1_0 {
-		// There are 4 encodings (PLAIN_DICTIONARY, PLAIN, RLE, PLAIN) in a fallback case
-		// for version 1.0
-		p.Equal([]parquet.Encoding{parquet.Encodings.PlainDict, parquet.Encodings.Plain, parquet.Encodings.RLE, parquet.Encodings.Plain}, encodings)
-	} else {
-		// There are 4 encodings (RLE_DICTIONARY, PLAIN, RLE, PLAIN) in a fallback case for
-		// version 2.0
-		p.Equal([]parquet.Encoding{parquet.Encodings.RLEDict, parquet.Encodings.Plain, parquet.Encodings.RLE, parquet.Encodings.Plain}, encodings)
-	}
+	p.Equal([]parquet.Encoding{parquet.Encodings.Plain, parquet.Encodings.RLE}, encodings)
 
 	encodingStats := p.metadataEncodingStats()
-	if p.Typ.Kind() == reflect.Bool || p.Typ == reflect.TypeOf(parquet.Int96{}) {
-		p.Equal(parquet.Encodings.Plain, encodingStats[0].Encoding)
-		p.Equal(format.PageType_DATA_PAGE, encodingStats[0].PageType)
-	} else if version == parquet.V1_0 {
-		expected := []metadata.PageEncodingStats{
-			{Encoding: parquet.Encodings.PlainDict, PageType: format.PageType_DICTIONARY_PAGE},
-			{Encoding: parquet.Encodings.Plain, PageType: format.PageType_DATA_PAGE},
-			{Encoding: parquet.Encodings.PlainDict, PageType: format.PageType_DATA_PAGE}}
-		p.Equal(expected[0], encodingStats[0])
-		p.ElementsMatch(expected[1:], encodingStats[1:])
-	} else {
-		expected := []metadata.PageEncodingStats{
-			{Encoding: parquet.Encodings.Plain, PageType: format.PageType_DICTIONARY_PAGE},
-			{Encoding: parquet.Encodings.Plain, PageType: format.PageType_DATA_PAGE},
-			{Encoding: parquet.Encodings.RLEDict, PageType: format.PageType_DATA_PAGE}}
-		p.Equal(expected[0], encodingStats[0])
-		p.ElementsMatch(expected[1:], encodingStats[1:])
+	p.NotEmpty(encodingStats)
+	for _, es := range encodingStats {
+		p.Equal(parquet.Encodings.Plain, es.Encoding)
+		p.Equal(format.PageType_DATA_PAGE, es.PageType)
 	}
 }
 

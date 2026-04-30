@@ -188,7 +188,6 @@ func (ad *ArrowWriteDictionarySuite) TestStatisticsWithFallback() {
 		{0, 1},
 		{0, 0},
 		{3}}
-	expectedDictCounts := []int32{4, 4, 4, 3}
 	// pairs of (min, max)
 	expectedMinMax := [][2]string{
 		{"a", "b"},
@@ -266,22 +265,23 @@ func (ad *ArrowWriteDictionarySuite) TestStatisticsWithFallback() {
 			for rowGroup := 0; rowGroup < 2; rowGroup++ {
 				pr, err := rdr.RowGroup(0).GetColumnPageReader(0)
 				ad.Require().NoError(err)
-				ad.True(pr.Next())
-				page := pr.Page()
-				ad.NotNil(page)
-				ad.NoError(pr.Err())
-				ad.Require().IsType((*file.DictionaryPage)(nil), page)
-				dictPage := page.(*file.DictionaryPage)
-				ad.EqualValues(expectedDictCounts[caseIndex], dictPage.NumValues())
+
+				// pqarrow falls back to PLAIN whenever the arrow dict has
+				// duplicates, and does so before any dict-encoded data page
+				// is flushed. Matching parquet-mr, arrow-go now discards the
+				// dictionary in that case — so no DICTIONARY page appears and
+				// all data pages are PLAIN.
 
 				for pageIdx := 0; pageIdx < expectedNumDataPages[caseIndex]; pageIdx++ {
 					ad.True(pr.Next())
-					page = pr.Page()
+					page := pr.Page()
 					ad.NotNil(page)
 					ad.NoError(pr.Err())
 
 					dataPage, ok := page.(file.DataPage)
 					ad.Require().True(ok)
+					ad.EqualValues(parquet.Encodings.Plain, dataPage.Encoding(),
+						"page %d should be PLAIN after dict fallback", pageIdx)
 					stats := dataPage.Statistics()
 					ad.EqualValues(expectedNullByPage[caseIndex][pageIdx], stats.NullCount)
 

@@ -140,6 +140,7 @@ type columnWriter struct {
 	totalCompressedBytes int64
 	closed               bool
 	fallbackToNonDict    bool
+	dictPageWritten      bool
 
 	pages []DataPage
 
@@ -264,8 +265,20 @@ func (w *columnWriter) commitWriteAndCheckPageLimit(numLevels, numValues int64) 
 	w.numBufferedValues += numLevels
 	w.numDataValues += numValues
 
-	enc := w.currentEncoder.EstimatedDataEncodedSize()
-	if enc >= w.props.DataPageSize() {
+	// While dictionary encoding is active we size pages by raw input bytes
+	// instead of the RLE-indices' encoded size. Mirrors parquet-mr's
+	// FallbackValuesWriter.getBufferedSize — it keeps dict pages roughly
+	// the same raw-byte footprint as the PLAIN pages they'd otherwise be,
+	// which also pulls the first-page compression check into the same
+	// cadence parquet-mr uses and avoids committing dict pages that only
+	// look cheap because their RLE indices are tiny.
+	var bufferedSize int64
+	if w.hasDict && !w.fallbackToNonDict {
+		bufferedSize = w.currentEncoder.(encoding.DictEncoder).ObservedRawSize()
+	} else {
+		bufferedSize = w.currentEncoder.EstimatedDataEncodedSize()
+	}
+	if bufferedSize >= w.props.DataPageSize() {
 		return w.FlushCurrentPage()
 	}
 	return nil
@@ -427,7 +440,14 @@ func (w *columnWriter) FlushBufferedDataPages() (err error) {
 			return err
 		}
 	}
+	return w.drainBufferedDataPages()
+}
 
+// drainBufferedDataPages writes out and releases any pages buffered while
+// dictionary encoding was active. Unlike FlushBufferedDataPages, it does not
+// touch the current encoder's unflushed values, so the caller can re-encode
+// them as PLAIN during a dictionary fallback.
+func (w *columnWriter) drainBufferedDataPages() (err error) {
 	for i, p := range w.pages {
 		defer p.Release()
 		if err = w.WriteDataPage(p); err != nil {
@@ -502,6 +522,7 @@ func (w *columnWriter) WriteDictionaryPage() error {
 	page := NewDictionaryPage(buffer, int32(dictEncoder.NumEntries()), w.props.DictionaryPageEncoding())
 	written, err := w.pager.WriteDictionaryPage(page)
 	w.totalBytesWritten += written
+	w.dictPageWritten = err == nil
 	return err
 }
 
@@ -620,7 +641,14 @@ func (w *columnWriter) Close() (err error) {
 		if w.rowsWritten > 0 && chunkStats.IsSet() {
 			w.metaData.SetStats(chunkStats)
 		}
-		err = w.pager.Close(w.hasDict, w.fallbackToNonDict)
+		// Only advertise PLAIN_DICTIONARY / fallback encodings in the column
+		// chunk's encoding list when a dictionary page was actually written.
+		// When fallback discards the dictionary before any dict-encoded page
+		// is flushed, the column contains only PLAIN data and the list should
+		// reflect that unambiguously.
+		advertiseDict := w.hasDict && w.dictPageWritten
+		advertiseFallback := w.fallbackToNonDict && w.dictPageWritten
+		err = w.pager.Close(advertiseDict, advertiseFallback)
 	}
 	return err
 }
