@@ -260,14 +260,14 @@ func (r *RunEndEncoded) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func arrayRunEndEncodedEqual(l, r *RunEndEncoded) bool {
+func arrayRunEndEncodedEqual(l, r *RunEndEncoded, opt equalOption) bool {
 	// types were already checked before getting here, so we know
 	// the encoded types are equal
 	mr := encoded.NewMergedRuns([2]arrow.Array{l, r})
 	for mr.Next() {
 		lIndex := mr.IndexIntoArray(0)
 		rIndex := mr.IndexIntoArray(1)
-		if !SliceEqual(l.values, lIndex, lIndex+1, r.values, rIndex, rIndex+1) {
+		if !sliceEqual(l.values, lIndex, lIndex+1, r.values, rIndex, rIndex+1, opt) {
 			return false
 		}
 	}

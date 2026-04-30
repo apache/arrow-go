@@ -106,9 +106,9 @@ func (a *FixedSizeBinary) MarshalJSON() ([]byte, error) {
 	return json.Marshal(vals)
 }
 
-func arrayEqualFixedSizeBinary(left, right *FixedSizeBinary) bool {
+func arrayEqualFixedSizeBinary(left, right *FixedSizeBinary, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if !bytes.Equal(left.Value(i), right.Value(i)) {

@@ -106,9 +106,9 @@ func (a *Map) Release() {
 	a.items.Release()
 }
 
-func arrayEqualMap(left, right *Map) bool {
+func arrayEqualMap(left, right *Map, opt equalOption) bool {
 	// since Map is implemented using a list, we can just use arrayEqualList
-	return arrayEqualList(left.List, right.List)
+	return arrayEqualList(left.List, right.List, opt)
 }
 
 type MapBuilder struct {

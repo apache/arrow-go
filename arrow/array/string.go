@@ -231,9 +231,9 @@ func (a *String) ValidateFull() error {
 	return nil
 }
 
-func arrayEqualString(left, right *String) bool {
+func arrayEqualString(left, right *String, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if left.Value(i) != right.Value(i) {
@@ -435,9 +435,9 @@ func (a *LargeString) ValidateFull() error {
 	return nil
 }
 
-func arrayEqualLargeString(left, right *LargeString) bool {
+func arrayEqualLargeString(left, right *LargeString, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if left.Value(i) != right.Value(i) {
@@ -541,10 +541,10 @@ func (a *StringView) MarshalJSON() ([]byte, error) {
 	return json.Marshal(vals)
 }
 
-func arrayEqualStringView(left, right *StringView) bool {
+func arrayEqualStringView(left, right *StringView, opt equalOption) bool {
 	leftBufs, rightBufs := left.dataBuffers, right.dataBuffers
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if !left.ValueHeader(i).Equals(leftBufs, right.ValueHeader(i), rightBufs) {

@@ -223,9 +223,9 @@ func (a *Binary) ValidateFull() error {
 	return nil
 }
 
-func arrayEqualBinary(left, right *Binary) bool {
+func arrayEqualBinary(left, right *Binary, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if !bytes.Equal(left.Value(i), right.Value(i)) {
@@ -417,9 +417,9 @@ func (a *LargeBinary) ValidateFull() error {
 	return nil
 }
 
-func arrayEqualLargeBinary(left, right *LargeBinary) bool {
+func arrayEqualLargeBinary(left, right *LargeBinary, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if !bytes.Equal(left.Value(i), right.Value(i)) {
@@ -539,10 +539,10 @@ func (a *BinaryView) MarshalJSON() ([]byte, error) {
 	return json.Marshal(vals)
 }
 
-func arrayEqualBinaryView(left, right *BinaryView) bool {
+func arrayEqualBinaryView(left, right *BinaryView, opt equalOption) bool {
 	leftBufs, rightBufs := left.dataBuffers, right.dataBuffers
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if !left.ValueHeader(i).Equals(leftBufs, right.ValueHeader(i), rightBufs) {
