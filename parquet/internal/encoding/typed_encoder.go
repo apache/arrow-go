@@ -26,6 +26,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/compute"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
+	"github.com/apache/arrow-go/v18/internal/hashing"
 	shared_utils "github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
@@ -471,7 +472,7 @@ func (enc *DictInt96Encoder) FallBackTo(fallback TypedEncoder) error {
 	if !ok {
 		return fmt.Errorf("parquet: dict fallback target encoder has wrong element type")
 	}
-	bm := enc.memo.(BinaryMemoTable)
+	bm := enc.memo.(*hashing.BinaryMemoTable)
 	vals := make([]parquet.Int96, len(enc.idxValues))
 	for i, idx := range enc.idxValues {
 		v := bm.Value(int(idx))

@@ -45,7 +45,6 @@ type Int32ColumnChunkWriter struct {
 func NewInt32ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *Int32ColumnChunkWriter {
 	ret := &Int32ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.Int32EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
-	ret.fallbackFn = ret.FallbackToPlain
 	return ret
 }
 
@@ -213,8 +212,29 @@ func (w *Int32ColumnChunkWriter) checkDictionarySizeLimit() {
 		return
 	}
 
-	if w.currentEncoder.(encoding.DictEncoder).DictEncodedSize() >= int(w.props.DictionaryPageSizeLimit()) {
+	dictEnc := w.currentEncoder.(encoding.DictEncoder)
+	if dictEnc.DictEncodedSize() >= int(w.props.DictionaryPageSizeLimit()) {
 		w.FallbackToPlain()
+		return
+	}
+
+	// Before any dict-encoded data page has been cut, check whether the
+	// dictionary is actually saving space against a PLAIN baseline. Mirrors
+	// parquet-mr's FallbackValuesWriter.shouldFallBack: if the dictionary
+	// plus the encoded indices meet or exceed the raw input bytes, fall back
+	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
+	// case where a dict page stays in the file alongside PLAIN pages without
+	// any net compression win.
+	if !w.dictPageWritten && len(w.pages) == 0 {
+		rawSize := dictEnc.ObservedRawSize()
+		encodedSize := dictEnc.EstimatedDataEncodedSize()
+		dictSize := int64(dictEnc.DictEncodedSize())
+		// For an all-nulls batch rawSize, dictSize, and encodedSize are all 0,
+		// so this 0 >= 0 path triggers. Harmless: nothing is encoded yet, so
+		// PLAIN vs dict doesn't matter and we avoid an empty dictionary.
+		if dictSize+encodedSize >= rawSize {
+			w.FallbackToPlain()
+		}
 	}
 }
 
@@ -266,7 +286,6 @@ type Int64ColumnChunkWriter struct {
 func NewInt64ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *Int64ColumnChunkWriter {
 	ret := &Int64ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.Int64EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
-	ret.fallbackFn = ret.FallbackToPlain
 	return ret
 }
 
@@ -434,8 +453,29 @@ func (w *Int64ColumnChunkWriter) checkDictionarySizeLimit() {
 		return
 	}
 
-	if w.currentEncoder.(encoding.DictEncoder).DictEncodedSize() >= int(w.props.DictionaryPageSizeLimit()) {
+	dictEnc := w.currentEncoder.(encoding.DictEncoder)
+	if dictEnc.DictEncodedSize() >= int(w.props.DictionaryPageSizeLimit()) {
 		w.FallbackToPlain()
+		return
+	}
+
+	// Before any dict-encoded data page has been cut, check whether the
+	// dictionary is actually saving space against a PLAIN baseline. Mirrors
+	// parquet-mr's FallbackValuesWriter.shouldFallBack: if the dictionary
+	// plus the encoded indices meet or exceed the raw input bytes, fall back
+	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
+	// case where a dict page stays in the file alongside PLAIN pages without
+	// any net compression win.
+	if !w.dictPageWritten && len(w.pages) == 0 {
+		rawSize := dictEnc.ObservedRawSize()
+		encodedSize := dictEnc.EstimatedDataEncodedSize()
+		dictSize := int64(dictEnc.DictEncodedSize())
+		// For an all-nulls batch rawSize, dictSize, and encodedSize are all 0,
+		// so this 0 >= 0 path triggers. Harmless: nothing is encoded yet, so
+		// PLAIN vs dict doesn't matter and we avoid an empty dictionary.
+		if dictSize+encodedSize >= rawSize {
+			w.FallbackToPlain()
+		}
 	}
 }
 
@@ -487,7 +527,6 @@ type Int96ColumnChunkWriter struct {
 func NewInt96ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *Int96ColumnChunkWriter {
 	ret := &Int96ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.Int96EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
-	ret.fallbackFn = ret.FallbackToPlain
 	return ret
 }
 
@@ -655,8 +694,29 @@ func (w *Int96ColumnChunkWriter) checkDictionarySizeLimit() {
 		return
 	}
 
-	if w.currentEncoder.(encoding.DictEncoder).DictEncodedSize() >= int(w.props.DictionaryPageSizeLimit()) {
+	dictEnc := w.currentEncoder.(encoding.DictEncoder)
+	if dictEnc.DictEncodedSize() >= int(w.props.DictionaryPageSizeLimit()) {
 		w.FallbackToPlain()
+		return
+	}
+
+	// Before any dict-encoded data page has been cut, check whether the
+	// dictionary is actually saving space against a PLAIN baseline. Mirrors
+	// parquet-mr's FallbackValuesWriter.shouldFallBack: if the dictionary
+	// plus the encoded indices meet or exceed the raw input bytes, fall back
+	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
+	// case where a dict page stays in the file alongside PLAIN pages without
+	// any net compression win.
+	if !w.dictPageWritten && len(w.pages) == 0 {
+		rawSize := dictEnc.ObservedRawSize()
+		encodedSize := dictEnc.EstimatedDataEncodedSize()
+		dictSize := int64(dictEnc.DictEncodedSize())
+		// For an all-nulls batch rawSize, dictSize, and encodedSize are all 0,
+		// so this 0 >= 0 path triggers. Harmless: nothing is encoded yet, so
+		// PLAIN vs dict doesn't matter and we avoid an empty dictionary.
+		if dictSize+encodedSize >= rawSize {
+			w.FallbackToPlain()
+		}
 	}
 }
 
@@ -708,7 +768,6 @@ type Float32ColumnChunkWriter struct {
 func NewFloat32ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *Float32ColumnChunkWriter {
 	ret := &Float32ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.Float32EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
-	ret.fallbackFn = ret.FallbackToPlain
 	return ret
 }
 
@@ -876,8 +935,29 @@ func (w *Float32ColumnChunkWriter) checkDictionarySizeLimit() {
 		return
 	}
 
-	if w.currentEncoder.(encoding.DictEncoder).DictEncodedSize() >= int(w.props.DictionaryPageSizeLimit()) {
+	dictEnc := w.currentEncoder.(encoding.DictEncoder)
+	if dictEnc.DictEncodedSize() >= int(w.props.DictionaryPageSizeLimit()) {
 		w.FallbackToPlain()
+		return
+	}
+
+	// Before any dict-encoded data page has been cut, check whether the
+	// dictionary is actually saving space against a PLAIN baseline. Mirrors
+	// parquet-mr's FallbackValuesWriter.shouldFallBack: if the dictionary
+	// plus the encoded indices meet or exceed the raw input bytes, fall back
+	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
+	// case where a dict page stays in the file alongside PLAIN pages without
+	// any net compression win.
+	if !w.dictPageWritten && len(w.pages) == 0 {
+		rawSize := dictEnc.ObservedRawSize()
+		encodedSize := dictEnc.EstimatedDataEncodedSize()
+		dictSize := int64(dictEnc.DictEncodedSize())
+		// For an all-nulls batch rawSize, dictSize, and encodedSize are all 0,
+		// so this 0 >= 0 path triggers. Harmless: nothing is encoded yet, so
+		// PLAIN vs dict doesn't matter and we avoid an empty dictionary.
+		if dictSize+encodedSize >= rawSize {
+			w.FallbackToPlain()
+		}
 	}
 }
 
@@ -929,7 +1009,6 @@ type Float64ColumnChunkWriter struct {
 func NewFloat64ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *Float64ColumnChunkWriter {
 	ret := &Float64ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.Float64EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
-	ret.fallbackFn = ret.FallbackToPlain
 	return ret
 }
 
@@ -1097,8 +1176,29 @@ func (w *Float64ColumnChunkWriter) checkDictionarySizeLimit() {
 		return
 	}
 
-	if w.currentEncoder.(encoding.DictEncoder).DictEncodedSize() >= int(w.props.DictionaryPageSizeLimit()) {
+	dictEnc := w.currentEncoder.(encoding.DictEncoder)
+	if dictEnc.DictEncodedSize() >= int(w.props.DictionaryPageSizeLimit()) {
 		w.FallbackToPlain()
+		return
+	}
+
+	// Before any dict-encoded data page has been cut, check whether the
+	// dictionary is actually saving space against a PLAIN baseline. Mirrors
+	// parquet-mr's FallbackValuesWriter.shouldFallBack: if the dictionary
+	// plus the encoded indices meet or exceed the raw input bytes, fall back
+	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
+	// case where a dict page stays in the file alongside PLAIN pages without
+	// any net compression win.
+	if !w.dictPageWritten && len(w.pages) == 0 {
+		rawSize := dictEnc.ObservedRawSize()
+		encodedSize := dictEnc.EstimatedDataEncodedSize()
+		dictSize := int64(dictEnc.DictEncodedSize())
+		// For an all-nulls batch rawSize, dictSize, and encodedSize are all 0,
+		// so this 0 >= 0 path triggers. Harmless: nothing is encoded yet, so
+		// PLAIN vs dict doesn't matter and we avoid an empty dictionary.
+		if dictSize+encodedSize >= rawSize {
+			w.FallbackToPlain()
+		}
 	}
 }
 
@@ -1153,7 +1253,6 @@ func NewBooleanColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, page
 	}
 	ret := &BooleanColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.BooleanEncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
-	ret.fallbackFn = ret.FallbackToPlain
 	return ret
 }
 
@@ -1443,8 +1542,29 @@ func (w *BooleanColumnChunkWriter) checkDictionarySizeLimit() {
 		return
 	}
 
-	if w.currentEncoder.(encoding.DictEncoder).DictEncodedSize() >= int(w.props.DictionaryPageSizeLimit()) {
+	dictEnc := w.currentEncoder.(encoding.DictEncoder)
+	if dictEnc.DictEncodedSize() >= int(w.props.DictionaryPageSizeLimit()) {
 		w.FallbackToPlain()
+		return
+	}
+
+	// Before any dict-encoded data page has been cut, check whether the
+	// dictionary is actually saving space against a PLAIN baseline. Mirrors
+	// parquet-mr's FallbackValuesWriter.shouldFallBack: if the dictionary
+	// plus the encoded indices meet or exceed the raw input bytes, fall back
+	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
+	// case where a dict page stays in the file alongside PLAIN pages without
+	// any net compression win.
+	if !w.dictPageWritten && len(w.pages) == 0 {
+		rawSize := dictEnc.ObservedRawSize()
+		encodedSize := dictEnc.EstimatedDataEncodedSize()
+		dictSize := int64(dictEnc.DictEncodedSize())
+		// For an all-nulls batch rawSize, dictSize, and encodedSize are all 0,
+		// so this 0 >= 0 path triggers. Harmless: nothing is encoded yet, so
+		// PLAIN vs dict doesn't matter and we avoid an empty dictionary.
+		if dictSize+encodedSize >= rawSize {
+			w.FallbackToPlain()
+		}
 	}
 }
 
@@ -1496,7 +1616,6 @@ type ByteArrayColumnChunkWriter struct {
 func NewByteArrayColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *ByteArrayColumnChunkWriter {
 	ret := &ByteArrayColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.ByteArrayEncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
-	ret.fallbackFn = ret.FallbackToPlain
 	return ret
 }
 
@@ -1737,8 +1856,29 @@ func (w *ByteArrayColumnChunkWriter) checkDictionarySizeLimit() {
 		return
 	}
 
-	if w.currentEncoder.(encoding.DictEncoder).DictEncodedSize() >= int(w.props.DictionaryPageSizeLimit()) {
+	dictEnc := w.currentEncoder.(encoding.DictEncoder)
+	if dictEnc.DictEncodedSize() >= int(w.props.DictionaryPageSizeLimit()) {
 		w.FallbackToPlain()
+		return
+	}
+
+	// Before any dict-encoded data page has been cut, check whether the
+	// dictionary is actually saving space against a PLAIN baseline. Mirrors
+	// parquet-mr's FallbackValuesWriter.shouldFallBack: if the dictionary
+	// plus the encoded indices meet or exceed the raw input bytes, fall back
+	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
+	// case where a dict page stays in the file alongside PLAIN pages without
+	// any net compression win.
+	if !w.dictPageWritten && len(w.pages) == 0 {
+		rawSize := dictEnc.ObservedRawSize()
+		encodedSize := dictEnc.EstimatedDataEncodedSize()
+		dictSize := int64(dictEnc.DictEncodedSize())
+		// For an all-nulls batch rawSize, dictSize, and encodedSize are all 0,
+		// so this 0 >= 0 path triggers. Harmless: nothing is encoded yet, so
+		// PLAIN vs dict doesn't matter and we avoid an empty dictionary.
+		if dictSize+encodedSize >= rawSize {
+			w.FallbackToPlain()
+		}
 	}
 }
 
@@ -1790,7 +1930,6 @@ type FixedLenByteArrayColumnChunkWriter struct {
 func NewFixedLenByteArrayColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *FixedLenByteArrayColumnChunkWriter {
 	ret := &FixedLenByteArrayColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.FixedLenByteArrayEncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
-	ret.fallbackFn = ret.FallbackToPlain
 	return ret
 }
 
@@ -2039,8 +2178,29 @@ func (w *FixedLenByteArrayColumnChunkWriter) checkDictionarySizeLimit() {
 		return
 	}
 
-	if w.currentEncoder.(encoding.DictEncoder).DictEncodedSize() >= int(w.props.DictionaryPageSizeLimit()) {
+	dictEnc := w.currentEncoder.(encoding.DictEncoder)
+	if dictEnc.DictEncodedSize() >= int(w.props.DictionaryPageSizeLimit()) {
 		w.FallbackToPlain()
+		return
+	}
+
+	// Before any dict-encoded data page has been cut, check whether the
+	// dictionary is actually saving space against a PLAIN baseline. Mirrors
+	// parquet-mr's FallbackValuesWriter.shouldFallBack: if the dictionary
+	// plus the encoded indices meet or exceed the raw input bytes, fall back
+	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
+	// case where a dict page stays in the file alongside PLAIN pages without
+	// any net compression win.
+	if !w.dictPageWritten && len(w.pages) == 0 {
+		rawSize := dictEnc.ObservedRawSize()
+		encodedSize := dictEnc.EstimatedDataEncodedSize()
+		dictSize := int64(dictEnc.DictEncodedSize())
+		// For an all-nulls batch rawSize, dictSize, and encodedSize are all 0,
+		// so this 0 >= 0 path triggers. Harmless: nothing is encoded yet, so
+		// PLAIN vs dict doesn't matter and we avoid an empty dictionary.
+		if dictSize+encodedSize >= rawSize {
+			w.FallbackToPlain()
+		}
 	}
 }
 

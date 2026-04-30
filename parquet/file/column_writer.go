@@ -141,10 +141,6 @@ type columnWriter struct {
 	closed               bool
 	fallbackToNonDict    bool
 	dictPageWritten      bool
-	// fallbackFn is set by each typed column writer at construction to its
-	// own FallbackToPlain. It lets the base FlushCurrentPage trigger
-	// fallback without needing to know the concrete value type.
-	fallbackFn func()
 
 	pages []DataPage
 
@@ -289,24 +285,6 @@ func (w *columnWriter) commitWriteAndCheckPageLimit(numLevels, numValues int64) 
 }
 
 func (w *columnWriter) FlushCurrentPage() error {
-	// Before committing what would be the first dict-encoded data page,
-	// check whether dictionary encoding is actually saving space against
-	// a PLAIN baseline. This mirrors parquet-mr's
-	// FallbackValuesWriter.getBytes + isCompressionSatisfying: if the
-	// dictionary plus the encoded indices meet or exceed the raw input
-	// bytes, fall back to PLAIN now and discard the dictionary — avoiding
-	// the mid-cardinality case where a dict page stays in the file
-	// alongside PLAIN pages without any net compression win.
-	if w.hasDict && !w.fallbackToNonDict && !w.dictPageWritten && len(w.pages) == 0 && w.fallbackFn != nil {
-		dictEnc := w.currentEncoder.(encoding.DictEncoder)
-		rawSize := dictEnc.ObservedRawSize()
-		encodedSize := dictEnc.EstimatedDataEncodedSize()
-		dictSize := int64(dictEnc.DictEncodedSize())
-		if rawSize > 0 && dictSize+encodedSize >= rawSize {
-			w.fallbackFn()
-		}
-	}
-
 	var (
 		defLevelsRLESize int32 = 0
 		repLevelsRLESize int32 = 0
@@ -473,6 +451,8 @@ func (w *columnWriter) drainBufferedDataPages() (err error) {
 	for i, p := range w.pages {
 		defer p.Release()
 		if err = w.WriteDataPage(p); err != nil {
+			// To keep pages in consistent state,
+			// remove the pages that will be released using above defer call.
 			w.pages = w.pages[i+1:]
 			return err
 		}
@@ -542,9 +522,7 @@ func (w *columnWriter) WriteDictionaryPage() error {
 	page := NewDictionaryPage(buffer, int32(dictEncoder.NumEntries()), w.props.DictionaryPageEncoding())
 	written, err := w.pager.WriteDictionaryPage(page)
 	w.totalBytesWritten += written
-	if err == nil {
-		w.dictPageWritten = true
-	}
+	w.dictPageWritten = err == nil
 	return err
 }
 
