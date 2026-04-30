@@ -60,24 +60,26 @@ func ree(runEnds arrow.DataType) arrow.DataType {
 
 // All tests use this in a for loop to make sure everything works for every possible
 // encoding of offsets (primitive, dictionary, run-end)
-var allAllowedOffsetTypes = []arrow.DataType{
+var allAllowedOffsetTypes = make(map[string]arrow.DataType)
+
+func init() {
 	// primitive offsetType
-	arrow.PrimitiveTypes.Int16,
+	allAllowedOffsetTypes["primitive-int16"] = arrow.PrimitiveTypes.Int16
 
 	// dict-encoded offsetType
-	dict(arrow.PrimitiveTypes.Uint8),
-	dict(arrow.PrimitiveTypes.Uint16),
-	dict(arrow.PrimitiveTypes.Uint32),
-	dict(arrow.PrimitiveTypes.Uint64),
-	dict(arrow.PrimitiveTypes.Int8),
-	dict(arrow.PrimitiveTypes.Int16),
-	dict(arrow.PrimitiveTypes.Int32),
-	dict(arrow.PrimitiveTypes.Int64),
+	allAllowedOffsetTypes["dict-Uint8"] = dict(arrow.PrimitiveTypes.Uint8)
+	allAllowedOffsetTypes["dict-Uint16"] = dict(arrow.PrimitiveTypes.Uint16)
+	allAllowedOffsetTypes["dict-Uint32"] = dict(arrow.PrimitiveTypes.Uint32)
+	allAllowedOffsetTypes["dict-Uint64"] = dict(arrow.PrimitiveTypes.Uint64)
+	allAllowedOffsetTypes["dict-Int8"] = dict(arrow.PrimitiveTypes.Int8)
+	allAllowedOffsetTypes["dict-Int16"] = dict(arrow.PrimitiveTypes.Int16)
+	allAllowedOffsetTypes["dict-Int32"] = dict(arrow.PrimitiveTypes.Int32)
+	allAllowedOffsetTypes["dict-Int64"] = dict(arrow.PrimitiveTypes.Int64)
 
 	// run-end encoded offsetType
-	ree(arrow.PrimitiveTypes.Int16),
-	ree(arrow.PrimitiveTypes.Int32),
-	ree(arrow.PrimitiveTypes.Int64),
+	allAllowedOffsetTypes["ree-Int16"] = ree(arrow.PrimitiveTypes.Int16)
+	allAllowedOffsetTypes["ree-Int32"] = ree(arrow.PrimitiveTypes.Int32)
+	allAllowedOffsetTypes["ree-Int64"] = ree(arrow.PrimitiveTypes.Int64)
 }
 
 func TestTimestampWithOffsetTypePrimitiveBasics(t *testing.T) {
@@ -214,98 +216,101 @@ func TestTimestampWithOffsetExtensionBuilder(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
-	for _, offsetType := range allAllowedOffsetTypes {
-		builder, _ := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, offsetType)
+	for name, offsetType := range allAllowedOffsetTypes {
+		t.Run(name, func(t *testing.T) {
+			builder, _ := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, offsetType)
 
-		builder.Append(testDate0)
-		builder.AppendNull()
-		builder.Append(testDate1)
-		builder.Append(testDate2)
-		builder.Append(epoch)
+			builder.Append(testDate0)
+			builder.AppendNull()
+			builder.Append(testDate1)
+			builder.Append(testDate2)
+			builder.Append(epoch)
 
-		// it should build the array with the correct size
-		arr := builder.NewArray()
-		typedArr := arr.(*extensions.TimestampWithOffsetArray)
-		assert.Equal(t, 5, arr.Data().Len())
-		defer arr.Release()
+			// it should build the array with the correct size
+			arr := builder.NewArray()
+			typedArr := arr.(*extensions.TimestampWithOffsetArray)
+			assert.Equal(t, 5, arr.Data().Len())
+			defer arr.Release()
 
-		// typedArr.Value(i) should return values adjusted for their original timezone
-		assert.Equal(t, testDate0, typedArr.Value(0))
-		assert.Equal(t, testDate1, typedArr.Value(2))
-		assert.Equal(t, testDate2, typedArr.Value(3))
-		assert.Equal(t, epoch, typedArr.Value(4))
+			// typedArr.Value(i) should return values adjusted for their original timezone
+			assert.Equal(t, testDate0, typedArr.Value(0))
+			assert.Equal(t, testDate1, typedArr.Value(2))
+			assert.Equal(t, testDate2, typedArr.Value(3))
+			assert.Equal(t, epoch, typedArr.Value(4))
 
-		// storage TimeUnit should be the same as we pass in to the builder, and storage timezone should be UTC
-		timestampStructField := typedArr.Storage().(*array.Struct).Field(0)
-		timestampStructDataType := timestampStructField.DataType().(*arrow.TimestampType)
-		assert.Equal(t, timestampStructDataType.Unit, testTimeUnit)
-		assert.Equal(t, timestampStructDataType.TimeZone, "UTC")
+			// storage TimeUnit should be the same as we pass in to the builder, and storage timezone should be UTC
+			timestampStructField := typedArr.Storage().(*array.Struct).Field(0)
+			timestampStructDataType := timestampStructField.DataType().(*arrow.TimestampType)
+			assert.Equal(t, timestampStructDataType.Unit, testTimeUnit)
+			assert.Equal(t, timestampStructDataType.TimeZone, "UTC")
 
-		// stored values should be equivalent to the raw values in UTC
-		timestampsArr := timestampStructField.(*array.Timestamp)
-		assert.Equal(t, testDate0.In(time.UTC), timestampsArr.Value(0).ToTime(testTimeUnit))
-		assert.Equal(t, testDate1.In(time.UTC), timestampsArr.Value(2).ToTime(testTimeUnit))
-		assert.Equal(t, testDate2.In(time.UTC), timestampsArr.Value(3).ToTime(testTimeUnit))
-		assert.Equal(t, epoch.In(time.UTC), timestampsArr.Value(4).ToTime(testTimeUnit))
+			// stored values should be equivalent to the raw values in UTC
+			timestampsArr := timestampStructField.(*array.Timestamp)
+			assert.Equal(t, testDate0.In(time.UTC), timestampsArr.Value(0).ToTime(testTimeUnit))
+			assert.Equal(t, testDate1.In(time.UTC), timestampsArr.Value(2).ToTime(testTimeUnit))
+			assert.Equal(t, testDate2.In(time.UTC), timestampsArr.Value(3).ToTime(testTimeUnit))
+			assert.Equal(t, epoch.In(time.UTC), timestampsArr.Value(4).ToTime(testTimeUnit))
 
-		// the array should encode itself as JSON and string
-		arrStr := arr.String()
-		assert.Equal(t, fmt.Sprintf(`["%[1]s" (null) "%[2]s" "%[3]s" "%[4]s"]`, testDate0, testDate1, testDate2, epoch), arrStr)
-		jsonStr, err := json.Marshal(arr)
-		assert.NoError(t, err)
+			// the array should encode itself as JSON and string
+			arrStr := arr.String()
+			assert.Equal(t, fmt.Sprintf(`["%[1]s" (null) "%[2]s" "%[3]s" "%[4]s"]`, testDate0, testDate1, testDate2, epoch), arrStr)
+			jsonStr, err := json.Marshal(arr)
+			assert.NoError(t, err)
 
-		// roundtripping from JSON with array.FromJSON should work
-		expectedDataType, _ := extensions.NewTimestampWithOffsetTypeCustomOffset(testTimeUnit, offsetType)
-		roundtripped, _, err := array.FromJSON(mem, expectedDataType, bytes.NewReader(jsonStr))
-		defer roundtripped.Release()
-		assert.NoError(t, err)
-		assert.Truef(t, array.Equal(arr, roundtripped), "expected %s\n\ngot %s", arr, roundtripped)
+			// roundtripping from JSON with array.FromJSON should work
+			expectedDataType, _ := extensions.NewTimestampWithOffsetTypeCustomOffset(testTimeUnit, offsetType)
+			roundtripped, _, err := array.FromJSON(mem, expectedDataType, bytes.NewReader(jsonStr))
+			defer roundtripped.Release()
+			assert.NoError(t, err)
+			assert.Truef(t, array.Equal(arr, roundtripped), "expected %s\n\ngot %s", arr, roundtripped)
+		})
 	}
 }
 
 func TestTimestampWithOffsetExtensionRecordBuilder(t *testing.T) {
-	for _, offsetType := range allAllowedOffsetTypes {
-		dataType, _ := extensions.NewTimestampWithOffsetTypeCustomOffset(testTimeUnit, offsetType)
-		schema := arrow.NewSchema([]arrow.Field{
-			{
-				Name:     "timestamp_with_offset",
-				Nullable: true,
-				Type:     dataType,
-			},
-		}, nil)
-		builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
-		defer builder.Release()
+	for name, offsetType := range allAllowedOffsetTypes {
+		t.Run(name, func(t *testing.T) {
+			dataType, _ := extensions.NewTimestampWithOffsetTypeCustomOffset(testTimeUnit, offsetType)
+			schema := arrow.NewSchema([]arrow.Field{
+				{
+					Name:     "timestamp_with_offset",
+					Nullable: true,
+					Type:     dataType,
+				},
+			}, nil)
+			builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+			defer builder.Release()
 
-		fieldBuilder := builder.Field(0).(*extensions.TimestampWithOffsetBuilder)
+			fieldBuilder := builder.Field(0).(*extensions.TimestampWithOffsetBuilder)
 
-		// append a simple time.Time
-		fieldBuilder.Append(testDate0)
+			// append a simple time.Time
+			fieldBuilder.Append(testDate0)
 
-		// append the epoch
-		fieldBuilder.Append(epoch)
+			// append the epoch
+			fieldBuilder.Append(epoch)
 
-		// append a null and 2 time.Time all at once
-		values := []time.Time{
-			time.Unix(0, 0).In(time.UTC),
-			testDate1,
-			testDate2,
-		}
-		valids := []bool{false, true, true}
-		fieldBuilder.AppendValues(values, valids)
+			// append a null and 2 time.Time all at once
+			values := []time.Time{
+				time.Unix(0, 0).In(time.UTC),
+				testDate1,
+				testDate2,
+			}
+			valids := []bool{false, true, true}
+			fieldBuilder.AppendValues(values, valids)
 
-		// append a value from RFC3339 string
-		fieldBuilder.AppendValueFromString(testDate0.Format(time.RFC3339))
+			// append a value from RFC3339 string
+			fieldBuilder.AppendValueFromString(testDate0.Format(time.RFC3339))
 
-		// append value formatted in a different string layout
-		fieldBuilder.Layout = time.RFC3339Nano
-		fieldBuilder.AppendValueFromString(testDate1.Format(time.RFC3339Nano))
+			// append value formatted in a different string layout
+			fieldBuilder.Layout = time.RFC3339Nano
+			fieldBuilder.AppendValueFromString(testDate1.Format(time.RFC3339Nano))
 
-		record := builder.NewRecordBatch()
+			record := builder.NewRecordBatch()
 
-		// Record batch should JSON-encode values containing per-row timezone info
-		json, err := record.MarshalJSON()
-		require.NoError(t, err)
-		expect := `[{"timestamp_with_offset":"2025-01-01T00:00:00Z"}
+			// Record batch should JSON-encode values containing per-row timezone info
+			json, err := record.MarshalJSON()
+			require.NoError(t, err)
+			expect := `[{"timestamp_with_offset":"2025-01-01T00:00:00Z"}
 ,{"timestamp_with_offset":"1970-01-01T00:00:00Z"}
 ,{"timestamp_with_offset":null}
 ,{"timestamp_with_offset":"2024-12-31T15:30:00-08:30"}
@@ -313,14 +318,15 @@ func TestTimestampWithOffsetExtensionRecordBuilder(t *testing.T) {
 ,{"timestamp_with_offset":"2025-01-01T00:00:00Z"}
 ,{"timestamp_with_offset":"2024-12-31T15:30:00-08:30"}
 ]`
-		require.Equal(t, expect, string(json))
+			require.Equal(t, expect, string(json))
 
-		// Record batch roundtrip to JSON should work
-		roundtripped, _, err := array.RecordFromJSON(memory.DefaultAllocator, schema, bytes.NewReader(json))
-		require.NoError(t, err)
-		defer roundtripped.Release()
-		require.Equal(t, schema, roundtripped.Schema())
-		assert.Truef(t, array.RecordEqual(record, roundtripped), "expected %s\n\ngot %s", record, roundtripped)
+			// Record batch roundtrip to JSON should work
+			roundtripped, _, err := array.RecordFromJSON(memory.DefaultAllocator, schema, bytes.NewReader(json))
+			require.NoError(t, err)
+			defer roundtripped.Release()
+			require.Equal(t, schema, roundtripped.Schema())
+			assert.Truef(t, array.RecordEqual(record, roundtripped), "expected %s\n\ngot %s", record, roundtripped)
+		})
 	}
 }
 
@@ -328,41 +334,43 @@ func TestTimestampWithOffsetTypeBatchIPCRoundTrip(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
-	for _, offsetType := range allAllowedOffsetTypes {
-		builder, _ := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, offsetType)
-		builder.Append(testDate0)
-		builder.AppendNull()
-		builder.Append(testDate1)
-		builder.Append(testDate2)
-		builder.Append(epoch)
-		arr := builder.NewArray()
-		defer arr.Release()
+	for name, offsetType := range allAllowedOffsetTypes {
+		t.Run(name, func(t *testing.T) {
+			builder, _ := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, offsetType)
+			builder.Append(testDate0)
+			builder.AppendNull()
+			builder.Append(testDate1)
+			builder.Append(testDate2)
+			builder.Append(epoch)
+			arr := builder.NewArray()
+			defer arr.Release()
 
-		typ, _ := extensions.NewTimestampWithOffsetTypeCustomOffset(testTimeUnit, offsetType)
+			typ, _ := extensions.NewTimestampWithOffsetTypeCustomOffset(testTimeUnit, offsetType)
 
-		batch := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{{Name: "timestamp_with_offset", Type: typ, Nullable: true}}, nil), []arrow.Array{arr}, -1)
-		defer batch.Release()
+			batch := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{{Name: "timestamp_with_offset", Type: typ, Nullable: true}}, nil), []arrow.Array{arr}, -1)
+			defer batch.Release()
 
-		var written arrow.RecordBatch
-		{
-			var buf bytes.Buffer
-			wr := ipc.NewWriter(&buf, ipc.WithSchema(batch.Schema()))
-			require.NoError(t, wr.Write(batch))
-			require.NoError(t, wr.Close())
+			var written arrow.RecordBatch
+			{
+				var buf bytes.Buffer
+				wr := ipc.NewWriter(&buf, ipc.WithSchema(batch.Schema()))
+				require.NoError(t, wr.Write(batch))
+				require.NoError(t, wr.Close())
 
-			rdr, err := ipc.NewReader(&buf)
-			require.NoError(t, err)
-			written, err = rdr.Read()
-			require.NoError(t, err)
-			written.Retain()
-			defer written.Release()
-			rdr.Release()
-		}
+				rdr, err := ipc.NewReader(&buf)
+				require.NoError(t, err)
+				written, err = rdr.Read()
+				require.NoError(t, err)
+				written.Retain()
+				defer written.Release()
+				rdr.Release()
+			}
 
-		assert.Truef(t, batch.Schema().Equal(written.Schema()), "expected: %s\n\ngot: %s",
-			batch.Schema(), written.Schema())
+			assert.Truef(t, batch.Schema().Equal(written.Schema()), "expected: %s\n\ngot: %s",
+				batch.Schema(), written.Schema())
 
-		assert.Truef(t, array.RecordEqual(batch, written), "expected: %s\n\ngot: %s",
-			batch, written)
+			assert.Truef(t, array.RecordEqual(batch, written), "expected: %s\n\ngot: %s",
+				batch, written)
+		})
 	}
 }
