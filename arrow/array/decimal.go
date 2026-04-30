@@ -110,9 +110,9 @@ func (a *baseDecimal[T]) MarshalJSON() ([]byte, error) {
 func arrayEqualDecimal[T interface {
 	decimal.DecimalTypes
 	decimal.Num[T]
-}](left, right *baseDecimal[T]) bool {
+}](left, right *baseDecimal[T], opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 

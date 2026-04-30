@@ -46,12 +46,12 @@ type ExtensionArray interface {
 
 // two extension arrays are equal if their data types are equal and
 // their underlying storage arrays are equal.
-func arrayEqualExtension(l, r ExtensionArray) bool {
+func arrayEqualExtension(l, r ExtensionArray, opt equalOption) bool {
 	if !arrow.TypeEqual(l.DataType(), r.DataType()) {
 		return false
 	}
 
-	return Equal(l.Storage(), r.Storage())
+	return equal(l.Storage(), r.Storage(), opt)
 }
 
 // two extension arrays are approximately equal if their data types are

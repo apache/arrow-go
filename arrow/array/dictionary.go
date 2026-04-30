@@ -303,8 +303,8 @@ func (d *Dictionary) MarshalJSON() ([]byte, error) {
 	return json.Marshal(vals)
 }
 
-func arrayEqualDict(l, r *Dictionary) bool {
-	return Equal(l.Dictionary(), r.Dictionary()) && Equal(l.indices, r.indices)
+func arrayEqualDict(l, r *Dictionary, opt equalOption) bool {
+	return equal(l.Dictionary(), r.Dictionary(), opt) && equal(l.indices, r.indices, opt)
 }
 
 func arrayApproxEqualDict(l, r *Dictionary, opt equalOption) bool {

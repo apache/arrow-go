@@ -84,9 +84,9 @@ func (a *FixedSizeList) setData(data *Data) {
 	a.values = MakeFromData(data.childData[0])
 }
 
-func arrayEqualFixedSizeList(left, right *FixedSizeList) bool {
+func arrayEqualFixedSizeList(left, right *FixedSizeList, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -94,7 +94,7 @@ func arrayEqualFixedSizeList(left, right *FixedSizeList) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return Equal(l, r)
+			return equal(l, r, opt)
 		}()
 		if !o {
 			return false

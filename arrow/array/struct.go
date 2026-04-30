@@ -239,10 +239,11 @@ func (a *Struct) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func arrayEqualStruct(left, right *Struct) bool {
+func arrayEqualStruct(left, right *Struct, opt equalOption) bool {
 	for i, lf := range left.fields {
 		rf := right.fields[i]
-		if !Equal(lf, rf) {
+		opt.nullable = left.data.dtype.(*arrow.StructType).Field(i).Nullable
+		if !equal(lf, rf, opt) {
 			return false
 		}
 	}
