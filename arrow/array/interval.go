@@ -120,9 +120,9 @@ func (a *MonthInterval) MarshalJSON() ([]byte, error) {
 	return json.Marshal(vals)
 }
 
-func arrayEqualMonthInterval(left, right *MonthInterval) bool {
+func arrayEqualMonthInterval(left, right *MonthInterval, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if left.Value(i) != right.Value(i) {
@@ -422,9 +422,9 @@ func (a *DayTimeInterval) MarshalJSON() ([]byte, error) {
 	return json.Marshal(vals)
 }
 
-func arrayEqualDayTimeInterval(left, right *DayTimeInterval) bool {
+func arrayEqualDayTimeInterval(left, right *DayTimeInterval, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if left.Value(i) != right.Value(i) {
@@ -725,9 +725,9 @@ func (a *MonthDayNanoInterval) MarshalJSON() ([]byte, error) {
 	return json.Marshal(vals)
 }
 
-func arrayEqualMonthDayNanoInterval(left, right *MonthDayNanoInterval) bool {
+func arrayEqualMonthDayNanoInterval(left, right *MonthDayNanoInterval, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if left.Value(i) != right.Value(i) {

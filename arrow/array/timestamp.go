@@ -124,9 +124,9 @@ func (a *Timestamp) MarshalJSON() ([]byte, error) {
 	return json.Marshal(vals)
 }
 
-func arrayEqualTimestamp(left, right *Timestamp) bool {
+func arrayEqualTimestamp(left, right *Timestamp, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if left.Value(i) != right.Value(i) {

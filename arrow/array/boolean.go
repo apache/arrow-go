@@ -109,9 +109,9 @@ func (a *Boolean) MarshalJSON() ([]byte, error) {
 	return json.Marshal(vals)
 }
 
-func arrayEqualBoolean(left, right *Boolean) bool {
+func arrayEqualBoolean(left, right *Boolean, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if left.Value(i) != right.Value(i) {

@@ -405,9 +405,9 @@ func NewDate64Data(data arrow.ArrayData) *Date64 {
 
 func (a *Date64) Date64Values() []arrow.Date64 { return a.Values() }
 
-func arrayEqualFixedWidth[T arrow.FixedWidthType](left, right arrow.TypedArray[T]) bool {
+func arrayEqualFixedWidth[T arrow.FixedWidthType](left, right arrow.TypedArray[T], opt equalOption) bool {
 	for i := range left.Len() {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if left.Value(i) != right.Value(i) {

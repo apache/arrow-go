@@ -266,127 +266,127 @@ func equal(left, right arrow.Array, opt equalOption) bool {
 		return true
 	case *Boolean:
 		r := right.(*Boolean)
-		return arrayEqualBoolean(l, r)
+		return arrayEqualBoolean(l, r, opt)
 	case *FixedSizeBinary:
 		r := right.(*FixedSizeBinary)
-		return arrayEqualFixedSizeBinary(l, r)
+		return arrayEqualFixedSizeBinary(l, r, opt)
 	case *Binary:
 		r := right.(*Binary)
-		return arrayEqualBinary(l, r)
+		return arrayEqualBinary(l, r, opt)
 	case *String:
 		r := right.(*String)
-		return arrayEqualString(l, r)
+		return arrayEqualString(l, r, opt)
 	case *LargeBinary:
 		r := right.(*LargeBinary)
-		return arrayEqualLargeBinary(l, r)
+		return arrayEqualLargeBinary(l, r, opt)
 	case *LargeString:
 		r := right.(*LargeString)
-		return arrayEqualLargeString(l, r)
+		return arrayEqualLargeString(l, r, opt)
 	case *BinaryView:
 		r := right.(*BinaryView)
-		return arrayEqualBinaryView(l, r)
+		return arrayEqualBinaryView(l, r, opt)
 	case *StringView:
 		r := right.(*StringView)
-		return arrayEqualStringView(l, r)
+		return arrayEqualStringView(l, r, opt)
 	case *Int8:
 		r := right.(*Int8)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Int16:
 		r := right.(*Int16)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Int32:
 		r := right.(*Int32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Int64:
 		r := right.(*Int64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Uint8:
 		r := right.(*Uint8)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Uint16:
 		r := right.(*Uint16)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Uint32:
 		r := right.(*Uint32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Uint64:
 		r := right.(*Uint64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Float16:
 		r := right.(*Float16)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Float32:
 		r := right.(*Float32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Float64:
 		r := right.(*Float64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Decimal32:
 		r := right.(*Decimal32)
-		return arrayEqualDecimal(l, r)
+		return arrayEqualDecimal(l, r, opt)
 	case *Decimal64:
 		r := right.(*Decimal64)
-		return arrayEqualDecimal(l, r)
+		return arrayEqualDecimal(l, r, opt)
 	case *Decimal128:
 		r := right.(*Decimal128)
-		return arrayEqualDecimal(l, r)
+		return arrayEqualDecimal(l, r, opt)
 	case *Decimal256:
 		r := right.(*Decimal256)
-		return arrayEqualDecimal(l, r)
+		return arrayEqualDecimal(l, r, opt)
 	case *Date32:
 		r := right.(*Date32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Date64:
 		r := right.(*Date64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Time32:
 		r := right.(*Time32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Time64:
 		r := right.(*Time64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Timestamp:
 		r := right.(*Timestamp)
-		return arrayEqualTimestamp(l, r)
+		return arrayEqualTimestamp(l, r, opt)
 	case *List:
 		r := right.(*List)
-		return arrayEqualList(l, r)
+		return arrayEqualList(l, r, opt)
 	case *LargeList:
 		r := right.(*LargeList)
-		return arrayEqualLargeList(l, r)
+		return arrayEqualLargeList(l, r, opt)
 	case *ListView:
 		r := right.(*ListView)
-		return arrayEqualListView(l, r)
+		return arrayEqualListView(l, r, opt)
 	case *LargeListView:
 		r := right.(*LargeListView)
-		return arrayEqualLargeListView(l, r)
+		return arrayEqualLargeListView(l, r, opt)
 	case *FixedSizeList:
 		r := right.(*FixedSizeList)
-		return arrayEqualFixedSizeList(l, r)
+		return arrayEqualFixedSizeList(l, r, opt)
 	case *Struct:
 		r := right.(*Struct)
-		return arrayEqualStruct(l, r)
+		return arrayEqualStruct(l, r, opt)
 	case *MonthInterval:
 		r := right.(*MonthInterval)
-		return arrayEqualMonthInterval(l, r)
+		return arrayEqualMonthInterval(l, r, opt)
 	case *DayTimeInterval:
 		r := right.(*DayTimeInterval)
-		return arrayEqualDayTimeInterval(l, r)
+		return arrayEqualDayTimeInterval(l, r, opt)
 	case *MonthDayNanoInterval:
 		r := right.(*MonthDayNanoInterval)
-		return arrayEqualMonthDayNanoInterval(l, r)
+		return arrayEqualMonthDayNanoInterval(l, r, opt)
 	case *Duration:
 		r := right.(*Duration)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Map:
 		r := right.(*Map)
-		return arrayEqualMap(l, r)
+		return arrayEqualMap(l, r, opt)
 	case ExtensionArray:
 		r := right.(ExtensionArray)
-		return arrayEqualExtension(l, r)
+		return arrayEqualExtension(l, r, opt)
 	case *Dictionary:
 		r := right.(*Dictionary)
-		return arrayEqualDict(l, r)
+		return arrayEqualDict(l, r, opt)
 	case *SparseUnion:
 		r := right.(*SparseUnion)
 		return arraySparseUnionEqual(l, r)
@@ -540,52 +540,52 @@ func arrayApproxEqual(left, right arrow.Array, opt equalOption) bool {
 		return true
 	case *Boolean:
 		r := right.(*Boolean)
-		return arrayEqualBoolean(l, r)
+		return arrayEqualBoolean(l, r, opt)
 	case *FixedSizeBinary:
 		r := right.(*FixedSizeBinary)
-		return arrayEqualFixedSizeBinary(l, r)
+		return arrayEqualFixedSizeBinary(l, r, opt)
 	case *Binary:
 		r := right.(*Binary)
-		return arrayEqualBinary(l, r)
+		return arrayEqualBinary(l, r, opt)
 	case *String:
 		r := right.(*String)
-		return arrayApproxEqualString(l, r)
+		return arrayApproxEqualString(l, r, opt)
 	case *LargeBinary:
 		r := right.(*LargeBinary)
-		return arrayEqualLargeBinary(l, r)
+		return arrayEqualLargeBinary(l, r, opt)
 	case *LargeString:
 		r := right.(*LargeString)
-		return arrayApproxEqualLargeString(l, r)
+		return arrayApproxEqualLargeString(l, r, opt)
 	case *BinaryView:
 		r := right.(*BinaryView)
-		return arrayEqualBinaryView(l, r)
+		return arrayEqualBinaryView(l, r, opt)
 	case *StringView:
 		r := right.(*StringView)
-		return arrayApproxEqualStringView(l, r)
+		return arrayApproxEqualStringView(l, r, opt)
 	case *Int8:
 		r := right.(*Int8)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Int16:
 		r := right.(*Int16)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Int32:
 		r := right.(*Int32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Int64:
 		r := right.(*Int64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Uint8:
 		r := right.(*Uint8)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Uint16:
 		r := right.(*Uint16)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Uint32:
 		r := right.(*Uint32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Uint64:
 		r := right.(*Uint64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Float16:
 		r := right.(*Float16)
 		return arrayApproxEqualFloat16(l, r, opt)
@@ -597,31 +597,31 @@ func arrayApproxEqual(left, right arrow.Array, opt equalOption) bool {
 		return arrayApproxEqualFloat64(l, r, opt)
 	case *Decimal32:
 		r := right.(*Decimal32)
-		return arrayEqualDecimal(l, r)
+		return arrayEqualDecimal(l, r, opt)
 	case *Decimal64:
 		r := right.(*Decimal64)
-		return arrayEqualDecimal(l, r)
+		return arrayEqualDecimal(l, r, opt)
 	case *Decimal128:
 		r := right.(*Decimal128)
-		return arrayEqualDecimal(l, r)
+		return arrayEqualDecimal(l, r, opt)
 	case *Decimal256:
 		r := right.(*Decimal256)
-		return arrayEqualDecimal(l, r)
+		return arrayEqualDecimal(l, r, opt)
 	case *Date32:
 		r := right.(*Date32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Date64:
 		r := right.(*Date64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Time32:
 		r := right.(*Time32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Time64:
 		r := right.(*Time64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Timestamp:
 		r := right.(*Timestamp)
-		return arrayEqualTimestamp(l, r)
+		return arrayEqualTimestamp(l, r, opt)
 	case *List:
 		r := right.(*List)
 		return arrayApproxEqualList(l, r, opt)
@@ -642,16 +642,16 @@ func arrayApproxEqual(left, right arrow.Array, opt equalOption) bool {
 		return arrayApproxEqualStruct(l, r, opt)
 	case *MonthInterval:
 		r := right.(*MonthInterval)
-		return arrayEqualMonthInterval(l, r)
+		return arrayEqualMonthInterval(l, r, opt)
 	case *DayTimeInterval:
 		r := right.(*DayTimeInterval)
-		return arrayEqualDayTimeInterval(l, r)
+		return arrayEqualDayTimeInterval(l, r, opt)
 	case *MonthDayNanoInterval:
 		r := right.(*MonthDayNanoInterval)
-		return arrayEqualMonthDayNanoInterval(l, r)
+		return arrayEqualMonthDayNanoInterval(l, r, opt)
 	case *Duration:
 		r := right.(*Duration)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Map:
 		r := right.(*Map)
 		if opt.unorderedMapKeys {
@@ -706,9 +706,9 @@ func validityBitmapEqual(left, right arrow.Array) bool {
 	return true
 }
 
-func arrayApproxEqualString(left, right *String) bool {
+func arrayApproxEqualString(left, right *String, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if stripNulls(left.Value(i)) != stripNulls(right.Value(i)) {
@@ -718,9 +718,9 @@ func arrayApproxEqualString(left, right *String) bool {
 	return true
 }
 
-func arrayApproxEqualLargeString(left, right *LargeString) bool {
+func arrayApproxEqualLargeString(left, right *LargeString, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if stripNulls(left.Value(i)) != stripNulls(right.Value(i)) {
@@ -730,9 +730,9 @@ func arrayApproxEqualLargeString(left, right *LargeString) bool {
 	return true
 }
 
-func arrayApproxEqualStringView(left, right *StringView) bool {
+func arrayApproxEqualStringView(left, right *StringView, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if stripNulls(left.Value(i)) != stripNulls(right.Value(i)) {
@@ -744,7 +744,7 @@ func arrayApproxEqualStringView(left, right *StringView) bool {
 
 func arrayApproxEqualFloat16(left, right *Float16, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if !opt.f16(left.Value(i), right.Value(i)) {
@@ -756,7 +756,7 @@ func arrayApproxEqualFloat16(left, right *Float16, opt equalOption) bool {
 
 func arrayApproxEqualFloat32(left, right *Float32, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if !opt.f32(left.Value(i), right.Value(i)) {
@@ -768,7 +768,7 @@ func arrayApproxEqualFloat32(left, right *Float32, opt equalOption) bool {
 
 func arrayApproxEqualFloat64(left, right *Float64, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if !opt.f64(left.Value(i), right.Value(i)) {
@@ -780,7 +780,7 @@ func arrayApproxEqualFloat64(left, right *Float64, opt equalOption) bool {
 
 func arrayApproxEqualList(left, right *List, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -799,7 +799,7 @@ func arrayApproxEqualList(left, right *List, opt equalOption) bool {
 
 func arrayApproxEqualLargeList(left, right *LargeList, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -818,7 +818,7 @@ func arrayApproxEqualLargeList(left, right *LargeList, opt equalOption) bool {
 
 func arrayApproxEqualListView(left, right *ListView, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -837,7 +837,7 @@ func arrayApproxEqualListView(left, right *ListView, opt equalOption) bool {
 
 func arrayApproxEqualLargeListView(left, right *LargeListView, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -856,7 +856,7 @@ func arrayApproxEqualLargeListView(left, right *LargeListView, opt equalOption) 
 
 func arrayApproxEqualFixedSizeList(left, right *FixedSizeList, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -874,11 +874,15 @@ func arrayApproxEqualFixedSizeList(left, right *FixedSizeList, opt equalOption) 
 }
 
 func arrayApproxEqualStruct(left, right *Struct, opt equalOption) bool {
-	return bitutils.VisitSetBitRuns(
-		left.NullBitmapBytes(),
-		int64(left.Offset()), int64(left.Len()),
-		approxEqualStructRun(left, right, opt),
-	) == nil
+	visitFn := approxEqualStructRun(left, right, opt)
+	if opt.nullable {
+		return bitutils.VisitSetBitRuns(
+			left.NullBitmapBytes(),
+			int64(left.Offset()), int64(left.Len()),
+			visitFn,
+		) == nil
+	}
+	return visitFn(0, int64(left.Len())) == nil
 }
 
 func approxEqualStructRun(left, right *Struct, opt equalOption) bitutils.VisitFn {
@@ -895,7 +899,7 @@ func approxEqualStructRun(left, right *Struct, opt equalOption) bitutils.VisitFn
 // arrayApproxEqualMap doesn't care about the order of keys (in Go map traversal order is undefined)
 func arrayApproxEqualMap(left, right *Map, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if !arrayApproxEqualSingleMapEntry(left.newListValue(i).(*Struct), right.newListValue(i).(*Struct), opt) {
@@ -926,7 +930,7 @@ func arrayApproxEqualSingleMapEntry(left, right *Struct, opt equalOption) bool {
 
 	used := make(map[int]bool, right.Len())
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 
@@ -936,7 +940,7 @@ func arrayApproxEqualSingleMapEntry(left, right *Struct, opt equalOption) bool {
 			if used[j] {
 				continue
 			}
-			if right.IsNull(j) {
+			if opt.nullable && right.IsNull(j) {
 				used[j] = true
 				continue
 			}

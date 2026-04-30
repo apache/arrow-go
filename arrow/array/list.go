@@ -129,9 +129,9 @@ func (a *List) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func arrayEqualList(left, right *List) bool {
+func arrayEqualList(left, right *List, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -139,7 +139,7 @@ func arrayEqualList(left, right *List) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return Equal(l, r)
+			return equal(l, r, opt)
 		}()
 		if !o {
 			return false
@@ -261,9 +261,9 @@ func (a *LargeList) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func arrayEqualLargeList(left, right *LargeList) bool {
+func arrayEqualLargeList(left, right *LargeList, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -271,7 +271,7 @@ func arrayEqualLargeList(left, right *LargeList) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return Equal(l, r)
+			return equal(l, r, opt)
 		}()
 		if !o {
 			return false
@@ -735,9 +735,9 @@ func (a *ListView) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func arrayEqualListView(left, right *ListView) bool {
+func arrayEqualListView(left, right *ListView, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -745,7 +745,7 @@ func arrayEqualListView(left, right *ListView) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return Equal(l, r)
+			return equal(l, r, opt)
 		}()
 		if !o {
 			return false
@@ -882,9 +882,9 @@ func (a *LargeListView) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func arrayEqualLargeListView(left, right *LargeListView) bool {
+func arrayEqualLargeListView(left, right *LargeListView, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -892,7 +892,7 @@ func arrayEqualLargeListView(left, right *LargeListView) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return Equal(l, r)
+			return equal(l, r, opt)
 		}()
 		if !o {
 			return false
