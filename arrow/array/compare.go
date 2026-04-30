@@ -26,7 +26,11 @@ import (
 )
 
 // RecordEqual reports whether the two provided records are equal.
-func RecordEqual(left, right arrow.RecordBatch) bool {
+func RecordEqual(left, right arrow.RecordBatch, opts ...EqualOption) bool {
+	return recordEqual(left, right, newEqualOption(opts...))
+}
+
+func recordEqual(left, right arrow.RecordBatch, opt equalOption) bool {
 	switch {
 	case left.NumCols() != right.NumCols():
 		return false
@@ -37,7 +41,7 @@ func RecordEqual(left, right arrow.RecordBatch) bool {
 	for i := range left.Columns() {
 		lc := left.Column(i)
 		rc := right.Column(i)
-		if !Equal(lc, rc) {
+		if !equal(lc, rc, opt) {
 			return false
 		}
 	}
@@ -47,14 +51,16 @@ func RecordEqual(left, right arrow.RecordBatch) bool {
 // RecordApproxEqual reports whether the two provided records are approximately equal.
 // For non-floating point columns, it is equivalent to RecordEqual.
 func RecordApproxEqual(left, right arrow.RecordBatch, opts ...EqualOption) bool {
+	return recordApproxEqual(left, right, newEqualOption(opts...))
+}
+
+func recordApproxEqual(left, right arrow.RecordBatch, opt equalOption) bool {
 	switch {
 	case left.NumCols() != right.NumCols():
 		return false
 	case left.NumRows() != right.NumRows():
 		return false
 	}
-
-	opt := newEqualOption(opts...)
 
 	for i := range left.Columns() {
 		lc := left.Column(i)
@@ -106,7 +112,11 @@ func chunkedBinaryApply(left, right *arrow.Chunked, fn func(left arrow.Array, lb
 }
 
 // ChunkedEqual reports whether two chunked arrays are equal regardless of their chunkings
-func ChunkedEqual(left, right *arrow.Chunked) bool {
+func ChunkedEqual(left, right *arrow.Chunked, opts ...EqualOption) bool {
+	return chunkedEqual(left, right, newEqualOption(opts...))
+}
+
+func chunkedEqual(left, right *arrow.Chunked, opt equalOption) bool {
 	switch {
 	case left == right:
 		return true
@@ -130,6 +140,10 @@ func ChunkedEqual(left, right *arrow.Chunked) bool {
 // ChunkedApproxEqual reports whether two chunked arrays are approximately equal regardless of their chunkings
 // for non-floating point arrays, this is equivalent to ChunkedEqual
 func ChunkedApproxEqual(left, right *arrow.Chunked, opts ...EqualOption) bool {
+	return chunkedApproxEqual(left, right, newEqualOption(opts...))
+}
+
+func chunkedApproxEqual(left, right *arrow.Chunked, opt equalOption) bool {
 	switch {
 	case left == right:
 		return true
@@ -143,7 +157,7 @@ func ChunkedApproxEqual(left, right *arrow.Chunked, opts ...EqualOption) bool {
 
 	var isequal bool
 	chunkedBinaryApply(left, right, func(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64) bool {
-		isequal = SliceApproxEqual(left, lbeg, lend, right, rbeg, rend, opts...)
+		isequal = sliceApproxEqual(left, lbeg, lend, right, rbeg, rend, opt)
 		return isequal
 	})
 
@@ -151,7 +165,11 @@ func ChunkedApproxEqual(left, right *arrow.Chunked, opts ...EqualOption) bool {
 }
 
 // TableEqual returns if the two tables have the same data in the same schema
-func TableEqual(left, right arrow.Table) bool {
+func TableEqual(left, right arrow.Table, opts ...EqualOption) bool {
+	return tableEqual(left, right, newEqualOption(opts...))
+}
+
+func tableEqual(left, right arrow.Table, opt equalOption) bool {
 	switch {
 	case left.NumCols() != right.NumCols():
 		return false
@@ -166,15 +184,19 @@ func TableEqual(left, right arrow.Table) bool {
 			return false
 		}
 
-		if !ChunkedEqual(lc.Data(), rc.Data()) {
+		if !chunkedEqual(lc.Data(), rc.Data(), opt) {
 			return false
 		}
 	}
 	return true
 }
 
-// TableEqual returns if the two tables have the approximately equal data in the same schema
+// TableApproxEqual returns if the two tables have the approximately equal data in the same schema
 func TableApproxEqual(left, right arrow.Table, opts ...EqualOption) bool {
+	return tableApproxEqual(left, right, newEqualOption(opts...))
+}
+
+func tableApproxEqual(left, right arrow.Table, opt equalOption) bool {
 	switch {
 	case left.NumCols() != right.NumCols():
 		return false
@@ -189,7 +211,7 @@ func TableApproxEqual(left, right arrow.Table, opts ...EqualOption) bool {
 			return false
 		}
 
-		if !ChunkedApproxEqual(lc.Data(), rc.Data(), opts...) {
+		if !chunkedApproxEqual(lc.Data(), rc.Data(), opt) {
 			return false
 		}
 	}
@@ -197,9 +219,13 @@ func TableApproxEqual(left, right arrow.Table, opts ...EqualOption) bool {
 }
 
 // Equal reports whether the two provided arrays are equal.
-func Equal(left, right arrow.Array) bool {
+func Equal(left, right arrow.Array, opts ...EqualOption) bool {
+	return equal(left, right, newEqualOption(opts...))
+}
+
+func equal(left, right arrow.Array, opt equalOption) bool {
 	switch {
-	case !baseArrayEqual(left, right):
+	case !baseArrayEqual(left, right, opt):
 		return false
 	case left.Len() == 0:
 		return true
@@ -345,26 +371,29 @@ func Equal(left, right arrow.Array) bool {
 		return arrayDenseUnionEqual(l, r)
 	case *RunEndEncoded:
 		r := right.(*RunEndEncoded)
-		return arrayRunEndEncodedEqual(l, r)
+		return arrayRunEndEncodedEqual(l, r, opt)
 	default:
 		panic(fmt.Errorf("arrow/array: unknown array type %T", l))
 	}
 }
 
 // SliceEqual reports whether slices left[lbeg:lend] and right[rbeg:rend] are equal.
-func SliceEqual(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64) bool {
+func SliceEqual(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64, opts ...EqualOption) bool {
+	return sliceEqual(left, lbeg, lend, right, rbeg, rend, newEqualOption(opts...))
+}
+
+func sliceEqual(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64, opt equalOption) bool {
 	l := NewSlice(left, lbeg, lend)
 	defer l.Release()
 	r := NewSlice(right, rbeg, rend)
 	defer r.Release()
 
-	return Equal(l, r)
+	return equal(l, r, opt)
 }
 
 // SliceApproxEqual reports whether slices left[lbeg:lend] and right[rbeg:rend] are approximately equal.
 func SliceApproxEqual(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64, opts ...EqualOption) bool {
-	opt := newEqualOption(opts...)
-	return sliceApproxEqual(left, lbeg, lend, right, rbeg, rend, opt)
+	return sliceApproxEqual(left, lbeg, lend, right, rbeg, rend, newEqualOption(opts...))
 }
 
 func sliceApproxEqual(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64, opt equalOption) bool {
@@ -455,13 +484,12 @@ func WithUnorderedMapKeys(v bool) EqualOption {
 // ApproxEqual reports whether the two provided arrays are approximately equal.
 // For non-floating point arrays, it is equivalent to Equal.
 func ApproxEqual(left, right arrow.Array, opts ...EqualOption) bool {
-	opt := newEqualOption(opts...)
-	return arrayApproxEqual(left, right, opt)
+	return arrayApproxEqual(left, right, newEqualOption(opts...))
 }
 
 func arrayApproxEqual(left, right arrow.Array, opt equalOption) bool {
 	switch {
-	case !baseArrayEqual(left, right):
+	case !baseArrayEqual(left, right, opt):
 		return false
 	case left.Len() == 0:
 		return true
@@ -616,7 +644,7 @@ func arrayApproxEqual(left, right arrow.Array, opt equalOption) bool {
 	}
 }
 
-func baseArrayEqual(left, right arrow.Array) bool {
+func baseArrayEqual(left, right arrow.Array, opt equalOption) bool {
 	switch {
 	case left.Len() != right.Len():
 		return false
