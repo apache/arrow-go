@@ -18,6 +18,7 @@ package compute_test
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"sync"
@@ -261,6 +262,37 @@ func (ss *ScalarSetLookupSuite) TestIsInFixedSizeBinary() {
 				ss.checkIsInFromJSON(typ,
 					tt.input, tt.valueset, tc.expected, tc.matching)
 			}
+		})
+	}
+}
+
+func (ss *ScalarSetLookupSuite) TestIsInFixedSizeBinaryFastPaths() {
+	// ByteWidths 1, 2, 4, 8 take the SetLookupState[uintN] / visitNumeric
+	// fast-path. Before the fix in #785 this panicked because Init asked
+	// newMemoTable for a FIXED_SIZE_BINARY table (BinaryMemoTable) but the
+	// state expected a TypedMemoTable[uintN]; afterwards the cleanup hook
+	// also tried to type-assert all states as SetLookupState[[]byte].
+	pad := func(s string, w int) string {
+		buf := make([]byte, w)
+		copy(buf, s)
+		return string(buf)
+	}
+	enc := func(s string) string {
+		// scalar_set_lookup_test uses base64-encoded JSON entries via
+		// FixedSizeBinary's standard JSON shape; the helpers below
+		// already accept JSON arrays of base64 strings.
+		return base64.StdEncoding.EncodeToString([]byte(s))
+	}
+	for _, w := range []int{1, 2, 4, 8} {
+		w := w
+		ss.Run(fmt.Sprintf("ByteWidth=%d", w), func() {
+			typ := &arrow.FixedSizeBinaryType{ByteWidth: w}
+			input := fmt.Sprintf(`[%q, %q, %q]`,
+				enc(pad("a", w)), enc(pad("z", w)), enc(pad("b", w)))
+			valueset := fmt.Sprintf(`[%q, %q]`,
+				enc(pad("a", w)), enc(pad("b", w)))
+			ss.checkIsInFromJSON(typ, input, valueset,
+				`[true, false, true]`, compute.NullMatchingMatch)
 		})
 	}
 }
