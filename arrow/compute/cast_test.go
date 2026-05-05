@@ -2077,6 +2077,26 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 		c.Equal("x", sv.Value(0))
 		c.Equal("y", sv.Value(2))
 	})
+
+	c.Run("string_view dict with null in values array", func() {
+		vals := c.buildStringViewArray([]string{"a", "", "c"}, []bool{true, false, true})
+		defer vals.Release()
+		dict := buildDict(vals, []int32{0, 1, 2, 1}, nil)
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.String))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		sv := out.(*array.String)
+		c.Equal(4, sv.Len())
+		c.Equal(2, sv.NullN())
+		c.Equal("a", sv.Value(0))
+		c.True(sv.IsNull(1))
+		c.Equal("c", sv.Value(2))
+		c.True(sv.IsNull(3))
+	})
 }
 
 // checkCastArrayOnly performs a cast and compares the resulting array against

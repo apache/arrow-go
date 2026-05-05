@@ -345,9 +345,10 @@ func unpackDictionary(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecR
 
 // unpackViewDictionary materializes a dictionary whose values are a view
 // type (string_view or binary_view) into a flat view array of the same
-// type, preserving per-element nulls from the dictionary indices. This
-// exists because array_take has no view kernel; the cast meta function
-// still needs to expand dictionaries as part of DICTIONARY -> X casts.
+// type, preserving per-element nulls from the dictionary indices and
+// per-slot nulls from the dictionary values themselves. This exists
+// because array_take has no view kernel; the cast meta function still
+// needs to expand dictionaries as part of DICTIONARY -> X casts.
 func unpackViewDictionary(mem memory.Allocator, dictArr *array.Dictionary) (arrow.Array, error) {
 	switch vals := dictArr.Dictionary().(type) {
 	case *array.StringView:
@@ -359,7 +360,12 @@ func unpackViewDictionary(mem memory.Allocator, dictArr *array.Dictionary) (arro
 				bldr.AppendNull()
 				continue
 			}
-			bldr.Append(vals.Value(dictArr.GetValueIndex(i)))
+			idx := dictArr.GetValueIndex(i)
+			if vals.IsNull(idx) {
+				bldr.AppendNull()
+				continue
+			}
+			bldr.Append(vals.Value(idx))
 		}
 		return bldr.NewArray(), nil
 	case *array.BinaryView:
@@ -371,7 +377,12 @@ func unpackViewDictionary(mem memory.Allocator, dictArr *array.Dictionary) (arro
 				bldr.AppendNull()
 				continue
 			}
-			bldr.Append(vals.Value(dictArr.GetValueIndex(i)))
+			idx := dictArr.GetValueIndex(i)
+			if vals.IsNull(idx) {
+				bldr.AppendNull()
+				continue
+			}
+			bldr.Append(vals.Value(idx))
 		}
 		return bldr.NewArray(), nil
 	default:
