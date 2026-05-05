@@ -176,16 +176,17 @@ func needsViewCoalesce(data arrow.ArrayData) bool {
 // children by retaining them rather than copying.
 func coalesceArrayData(mem memory.Allocator, data arrow.ArrayData) (arrow.ArrayData, error) {
 	if ext, ok := data.DataType().(arrow.ExtensionType); ok {
-		storageData := array.NewData(ext.StorageType(), data.Len(), data.Buffers(),
-			data.Children(), data.NullN(), data.Offset())
+		storageData, err := reshapeArrayDataType(data, ext.StorageType())
+		if err != nil {
+			return nil, err
+		}
 		defer storageData.Release()
 		newStorage, err := coalesceArrayData(mem, storageData)
 		if err != nil {
 			return nil, err
 		}
 		defer newStorage.Release()
-		return array.NewData(data.DataType(), newStorage.Len(), newStorage.Buffers(),
-			newStorage.Children(), newStorage.NullN(), newStorage.Offset()), nil
+		return reshapeArrayDataType(newStorage, data.DataType())
 	}
 
 	switch data.DataType().ID() {
@@ -231,6 +232,24 @@ func coalesceArrayData(mem memory.Allocator, data arrow.ArrayData) (arrow.ArrayD
 		nc.Release()
 	}
 	return result, nil
+}
+
+// reshapeArrayDataType returns a new ArrayData that shares src's buffers,
+// children, nulls, offset, and dictionary but reports the given datatype.
+// Used by the extension unwrap/rewrap path in coalesceArrayData so the
+// Dictionary() member survives both directions (extension<->storage)
+// when the extension's storage type is a dictionary.
+func reshapeArrayDataType(src arrow.ArrayData, dt arrow.DataType) (arrow.ArrayData, error) {
+	if dict := src.Dictionary(); dict != nil {
+		d, ok := dict.(*array.Data)
+		if !ok {
+			return nil, fmt.Errorf("%w: unexpected dictionary data type %T", arrow.ErrInvalid, dict)
+		}
+		return array.NewDataWithDictionary(dt, src.Len(), src.Buffers(),
+			src.NullN(), src.Offset(), d), nil
+	}
+	return array.NewData(dt, src.Len(), src.Buffers(),
+		src.Children(), src.NullN(), src.Offset()), nil
 }
 
 // rebuildViewSingleBuffer rebuilds a BinaryView/StringView ArrayData so that

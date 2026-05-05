@@ -318,12 +318,14 @@ var (
 	_ arrow.ExtensionType  = (*DictExtensionType)(nil)
 	_ arrow.ExtensionType  = (*SmallintType)(nil)
 	_ arrow.ExtensionType  = (*StringViewExtType)(nil)
+	_ arrow.ExtensionType  = (*DictStringViewExtType)(nil)
 	_ array.ExtensionArray = (*Parametric1Array)(nil)
 	_ array.ExtensionArray = (*Parametric2Array)(nil)
 	_ array.ExtensionArray = (*ExtStructArray)(nil)
 	_ array.ExtensionArray = (*DictExtensionArray)(nil)
 	_ array.ExtensionArray = (*SmallintArray)(nil)
 	_ array.ExtensionArray = (*StringViewExtArray)(nil)
+	_ array.ExtensionArray = (*DictStringViewExtArray)(nil)
 )
 
 // StringViewExtArray is an extension array backed by a string_view storage
@@ -369,4 +371,57 @@ func (StringViewExtType) Deserialize(storageType arrow.DataType, data string) (a
 		return nil, fmt.Errorf("invalid storage type for StringViewExtType: %s", storageType)
 	}
 	return NewStringViewExtType(), nil
+}
+
+// DictStringViewExtArray is an extension array backed by a
+// dictionary<int32, string_view> storage array.
+type DictStringViewExtArray struct {
+	array.ExtensionArrayBase
+}
+
+func (a DictStringViewExtArray) ValueStr(i int) string {
+	if a.IsNull(i) {
+		return array.NullValueStr
+	}
+	dict := a.Storage().(*array.Dictionary)
+	vals := dict.Dictionary().(*array.StringView)
+	return vals.Value(dict.GetValueIndex(i))
+}
+
+// DictStringViewExtType wraps dictionary<int32, string_view> as an
+// extension so tests can exercise code paths that must preserve a
+// Dictionary() member when unwrapping/rewrapping extensions at their
+// storage layer.
+type DictStringViewExtType struct {
+	arrow.ExtensionBase
+}
+
+func NewDictStringViewExtType() *DictStringViewExtType {
+	return &DictStringViewExtType{ExtensionBase: arrow.ExtensionBase{
+		Storage: &arrow.DictionaryType{
+			IndexType: arrow.PrimitiveTypes.Int32,
+			ValueType: arrow.BinaryTypes.StringView,
+		}}}
+}
+
+func (DictStringViewExtType) ArrayType() reflect.Type {
+	return reflect.TypeOf(DictStringViewExtArray{})
+}
+
+func (DictStringViewExtType) ExtensionName() string { return "dict_string_view_ext" }
+
+func (DictStringViewExtType) Serialize() string { return "dict_string_view_ext-serialized" }
+
+func (d *DictStringViewExtType) ExtensionEquals(other arrow.ExtensionType) bool {
+	return d.ExtensionName() == other.ExtensionName()
+}
+
+func (d *DictStringViewExtType) Deserialize(storageType arrow.DataType, data string) (arrow.ExtensionType, error) {
+	if data != "dict_string_view_ext-serialized" {
+		return nil, fmt.Errorf("type identifier did not match: '%s'", data)
+	}
+	if !arrow.TypeEqual(d.StorageType(), storageType) {
+		return nil, fmt.Errorf("invalid storage type for DictStringViewExtType: %s", storageType)
+	}
+	return NewDictStringViewExtType(), nil
 }
