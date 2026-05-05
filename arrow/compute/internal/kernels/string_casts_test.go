@@ -58,9 +58,11 @@ func TestReserveFormattedDataOverflowGuard(t *testing.T) {
 // TestFormattedDataLimitPerBuilder verifies the per-destination single-buffer
 // limit used by reserveFormattedData: utf8 and string_view are capped at
 // MaxInt32 (int32 offsets / single overflow buffer), while large_utf8 is
-// capped at MaxInt64 (int64 offsets). Regression test for GH-184: the
-// previous hardcoded MaxInt32 guard incorrectly rejected valid large_utf8
-// casts above 2 GiB.
+// capped at min(MaxInt64, platform int max). On 64-bit builds the large_utf8
+// limit is MaxInt64; on 32-bit builds it is clamped to MaxInt32 so the
+// int(total) conversion in reserveFormattedData never overflows. Regression
+// test for GH-184: the original MaxInt32 guard incorrectly rejected valid
+// large_utf8 casts above 2 GiB on 64-bit platforms.
 func TestFormattedDataLimitPerBuilder(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
@@ -72,6 +74,11 @@ func TestFormattedDataLimitPerBuilder(t *testing.T) {
 	largeBldr := array.NewLargeStringBuilder(mem)
 	defer largeBldr.Release()
 
+	largeWant := int64(math.MaxInt64)
+	if largeWant > int64(math.MaxInt) {
+		largeWant = int64(math.MaxInt)
+	}
+
 	cases := []struct {
 		name string
 		bldr array.StringLikeBuilder
@@ -79,11 +86,37 @@ func TestFormattedDataLimitPerBuilder(t *testing.T) {
 	}{
 		{"utf8", utf8Bldr, math.MaxInt32},
 		{"string_view", viewBldr, math.MaxInt32},
-		{"large_utf8", largeBldr, math.MaxInt64},
+		{"large_utf8", largeBldr, largeWant},
 	}
 	for _, tc := range cases {
 		if got := formattedDataLimit(tc.bldr); got != tc.want {
 			t.Errorf("formattedDataLimit(%s): want %d, got %d", tc.name, tc.want, got)
+		}
+	}
+}
+
+// TestFormattedDataLimitFitsInPlatformInt is the regression test for the
+// GH-184 third-round review finding: reserveFormattedData passes int(total)
+// to ReserveData, so the returned limit must fit in the platform int to
+// prevent overflow on 32-bit builds where int is 32-bit. The assertion
+// holds on both 32- and 64-bit builds by construction.
+func TestFormattedDataLimitFitsInPlatformInt(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	bldrs := []struct {
+		name string
+		bldr array.StringLikeBuilder
+	}{
+		{"utf8", array.NewStringBuilder(mem)},
+		{"string_view", array.NewStringViewBuilder(mem)},
+		{"large_utf8", array.NewLargeStringBuilder(mem)},
+	}
+	for _, tc := range bldrs {
+		defer tc.bldr.Release()
+		if limit := formattedDataLimit(tc.bldr); limit > int64(math.MaxInt) {
+			t.Errorf("formattedDataLimit(%s) = %d exceeds platform math.MaxInt %d",
+				tc.name, limit, int64(math.MaxInt))
 		}
 	}
 }

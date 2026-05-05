@@ -338,15 +338,22 @@ func reserveFormattedData(bldr array.StringLikeBuilder, input *exec.ArraySpan, p
 }
 
 // formattedDataLimit returns the largest contiguous data payload (in bytes)
-// that the destination builder can hold in a single buffer:
+// that the destination builder can hold in a single buffer, clamped so that
+// reserveFormattedData's int(total) conversion cannot overflow:
 //   - *array.StringBuilder      (utf8):        MaxInt32 (int32 offsets)
 //   - *array.StringViewBuilder  (string_view): MaxInt32 (single overflow buffer)
-//   - *array.LargeStringBuilder (large_utf8):  MaxInt64 (int64 offsets)
+//   - *array.LargeStringBuilder (large_utf8):  MaxInt64 (int64 offsets),
+//     clamped to int64(math.MaxInt) so int(total) fits on 32-bit builds
+//     where int is 32-bit.
 func formattedDataLimit(bldr array.StringLikeBuilder) int64 {
+	limit := int64(math.MaxInt32)
 	if _, ok := bldr.(*array.LargeStringBuilder); ok {
-		return math.MaxInt64
+		limit = math.MaxInt64
 	}
-	return math.MaxInt32
+	if limit > int64(math.MaxInt) {
+		limit = int64(math.MaxInt)
+	}
+	return limit
 }
 
 // maxFormattedBytes returns an upper bound on the textual representation
