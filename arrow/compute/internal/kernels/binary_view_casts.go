@@ -72,13 +72,13 @@ func newBinaryAppender(bldr array.Builder) (binaryAppender, error) {
 	case *array.BinaryBuilder:
 		return binaryAppender{bldr: b, appendBytes: b.Append, reserveData: b.ReserveData}, nil
 	case *array.StringBuilder:
-		return binaryAppender{bldr: b, appendBytes: b.BinaryBuilder.Append, reserveData: b.BinaryBuilder.ReserveData}, nil
+		return binaryAppender{bldr: b, appendBytes: b.BinaryBuilder.Append, reserveData: b.ReserveData}, nil
 	case *array.LargeStringBuilder:
-		return binaryAppender{bldr: b, appendBytes: b.BinaryBuilder.Append, reserveData: b.BinaryBuilder.ReserveData}, nil
+		return binaryAppender{bldr: b, appendBytes: b.BinaryBuilder.Append, reserveData: b.ReserveData}, nil
 	case *array.BinaryViewBuilder:
 		return binaryAppender{bldr: b, appendBytes: b.Append, reserveData: b.ReserveData}, nil
 	case *array.StringViewBuilder:
-		return binaryAppender{bldr: b, appendBytes: b.BinaryViewBuilder.Append, reserveData: b.BinaryViewBuilder.ReserveData}, nil
+		return binaryAppender{bldr: b, appendBytes: b.BinaryViewBuilder.Append, reserveData: b.ReserveData}, nil
 	default:
 		return binaryAppender{}, fmt.Errorf("%w: unsupported builder type %T for binary-like output",
 			arrow.ErrNotImplemented, bldr)
