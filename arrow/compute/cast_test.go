@@ -1962,7 +1962,6 @@ func (c *CastSuite) TestChunkedMultiBufferViewInputCoalesced() {
 	chunks := out.(compute.ArrayLikeDatum).Chunks()
 	total := 0
 	for idx, ch := range chunks {
-		defer ch.Release()
 		sv := ch.(*array.String)
 		for i := 0; i < sv.Len(); i++ {
 			want := chunkStr1

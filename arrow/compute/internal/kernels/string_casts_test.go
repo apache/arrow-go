@@ -54,3 +54,65 @@ func TestReserveFormattedDataOverflowGuard(t *testing.T) {
 		t.Fatalf("expected arrow.ErrInvalid, got %v", err)
 	}
 }
+
+// TestFormattedDataLimitPerBuilder verifies the per-destination single-buffer
+// limit used by reserveFormattedData: utf8 and string_view are capped at
+// MaxInt32 (int32 offsets / single overflow buffer), while large_utf8 is
+// capped at MaxInt64 (int64 offsets). Regression test for GH-184: the
+// previous hardcoded MaxInt32 guard incorrectly rejected valid large_utf8
+// casts above 2 GiB.
+func TestFormattedDataLimitPerBuilder(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	utf8Bldr := array.NewStringBuilder(mem)
+	defer utf8Bldr.Release()
+	viewBldr := array.NewStringViewBuilder(mem)
+	defer viewBldr.Release()
+	largeBldr := array.NewLargeStringBuilder(mem)
+	defer largeBldr.Release()
+
+	cases := []struct {
+		name string
+		bldr array.StringLikeBuilder
+		want int64
+	}{
+		{"utf8", utf8Bldr, math.MaxInt32},
+		{"string_view", viewBldr, math.MaxInt32},
+		{"large_utf8", largeBldr, math.MaxInt64},
+	}
+	for _, tc := range cases {
+		if got := formattedDataLimit(tc.bldr); got != tc.want {
+			t.Errorf("formattedDataLimit(%s): want %d, got %d", tc.name, tc.want, got)
+		}
+	}
+}
+
+// TestReserveFormattedDataAllowsLargeUtf8AboveInt32 is the regression test
+// for the GH-184 second-round review finding: reserveFormattedData must not
+// reject totals above MaxInt32 when the destination is large_utf8
+// (LargeStringBuilder), because int64 offsets can represent them. We assert
+// the destination-specific limit via formattedDataLimit rather than driving
+// a multi-gigabyte allocation through the full kernel path, and separately
+// confirm the guard still fires for string_view at the int32 boundary.
+func TestReserveFormattedDataAllowsLargeUtf8AboveInt32(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	largeBldr := array.NewLargeStringBuilder(mem)
+	defer largeBldr.Release()
+
+	if got := formattedDataLimit(largeBldr); got <= math.MaxInt32 {
+		t.Fatalf("large_utf8 destination limit must exceed MaxInt32, got %d", got)
+	}
+
+	viewBldr := array.NewStringViewBuilder(mem)
+	defer viewBldr.Release()
+	span := &exec.ArraySpan{
+		Len:   int64(math.MaxInt32/20) + 1,
+		Nulls: 0,
+	}
+	if err := reserveFormattedData(viewBldr, span, 20); !errors.Is(err, arrow.ErrInvalid) {
+		t.Fatalf("string_view guard should reject total > MaxInt32, got %v", err)
+	}
+}

@@ -318,21 +318,35 @@ func numericToStringCastExec[T arrow.IntType | arrow.UintType | arrow.FloatType]
 
 // reserveFormattedData pre-reserves bldr's data buffer for at most
 // (non-null count) * perValueBytes formatted bytes. Returns arrow.ErrInvalid
-// when the product exceeds the int32 single-buffer limit, avoiding a panic
-// inside BinaryViewBuilder.ReserveData. See GH-184 review feedback.
+// when the product exceeds the destination builder's single-buffer limit,
+// avoiding a panic inside BinaryViewBuilder.ReserveData or an int32 offset
+// overflow in StringBuilder. See GH-184 review feedback.
 func reserveFormattedData(bldr array.StringLikeBuilder, input *exec.ArraySpan, perValueBytes int) error {
 	if perValueBytes <= 0 {
 		return nil
 	}
 	total := int64(input.Len-input.Nulls) * int64(perValueBytes)
-	if total > math.MaxInt32 {
-		return fmt.Errorf("%w: formatted cast payload (%d bytes) exceeds single view data buffer limit (%d bytes)",
-			arrow.ErrInvalid, total, math.MaxInt32)
+	limit := formattedDataLimit(bldr)
+	if total > limit {
+		return fmt.Errorf("%w: formatted cast payload (%d bytes) exceeds single data buffer limit (%d bytes) for destination builder",
+			arrow.ErrInvalid, total, limit)
 	}
 	if total > 0 {
 		bldr.ReserveData(int(total))
 	}
 	return nil
+}
+
+// formattedDataLimit returns the largest contiguous data payload (in bytes)
+// that the destination builder can hold in a single buffer:
+//   - *array.StringBuilder      (utf8):        MaxInt32 (int32 offsets)
+//   - *array.StringViewBuilder  (string_view): MaxInt32 (single overflow buffer)
+//   - *array.LargeStringBuilder (large_utf8):  MaxInt64 (int64 offsets)
+func formattedDataLimit(bldr array.StringLikeBuilder) int64 {
+	if _, ok := bldr.(*array.LargeStringBuilder); ok {
+		return math.MaxInt64
+	}
+	return math.MaxInt32
 }
 
 // maxFormattedBytes returns an upper bound on the textual representation
