@@ -252,6 +252,14 @@ func boolToStringCastExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.E
 	)
 	defer bldr.Release()
 
+	bldr.Reserve(int(input.Len))
+	// 5-byte upper bound covers "false"; keeps string_view output inside a
+	// single overflow data buffer so exec.ArraySpan's fixed [3]BufferSpan
+	// can carry it.
+	if err := reserveFormattedData(bldr, input, 5); err != nil {
+		return err
+	}
+
 	bitutils.VisitBitBlocks(input.Buffers[0].Buf, input.Offset, input.Len,
 		func(pos int64) {
 			bldr.Append(strconv.FormatBool(bitutil.BitIsSet(input.Buffers[1].Buf, int(pos))))

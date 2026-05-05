@@ -2097,6 +2097,68 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 		c.Equal("c", sv.Value(2))
 		c.True(sv.IsNull(3))
 	})
+
+	c.Run("string_view dict to string_view with large non-inline payload", func() {
+		const (
+			valBytes = 200
+			count    = 500
+		)
+		a := strings.Repeat("a", valBytes)
+		b := strings.Repeat("b", valBytes)
+		vals := c.buildStringViewArray([]string{a, b}, nil)
+		defer vals.Release()
+
+		indices := make([]int32, count)
+		for i := range indices {
+			indices[i] = int32(i & 1)
+		}
+		dict := buildDict(vals, indices, nil)
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		c.LessOrEqualf(len(out.Data().Buffers()), 3,
+			"expected <=3 buffers for unpacked view dictionary, got %d",
+			len(out.Data().Buffers()))
+
+		sv := out.(*array.StringView)
+		c.Equal(count, sv.Len())
+		c.Equal(a, sv.Value(0))
+		c.Equal(b, sv.Value(1))
+		c.Equal(a, sv.Value(count-2))
+		c.Equal(b, sv.Value(count-1))
+	})
+}
+
+// TestBoolToStringViewStaysSingleBuffer is a regression test for the
+// GH-184 sixth-round review finding: boolToStringCastExec joined the
+// numeric/temporal-to-string kernels without the matching pre-reservation
+// path, so large bool -> string_view casts could allocate multiple
+// overflow data buffers and exceed exec.ArraySpan's fixed [3]BufferSpan.
+// The kernel now reserves up to 5 bytes per row ("false") on the builder,
+// so the output always has <= 3 buffers regardless of input length.
+func (c *CastSuite) TestBoolToStringViewStaysSingleBuffer() {
+	const count = 1 << 14
+	bldr := array.NewBooleanBuilder(c.mem)
+	defer bldr.Release()
+	for i := 0; i < count; i++ {
+		bldr.Append(i%2 == 0)
+	}
+	in := bldr.NewArray()
+	defer in.Release()
+
+	out, err := compute.CastArray(context.Background(), in,
+		compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+	c.Require().NoError(err)
+	defer out.Release()
+
+	c.LessOrEqualf(len(out.Data().Buffers()), 3,
+		"expected <=3 buffers for bool->string_view, got %d",
+		len(out.Data().Buffers()))
+	c.Equal(count, out.Len())
 }
 
 // checkCastArrayOnly performs a cast and compares the resulting array against
