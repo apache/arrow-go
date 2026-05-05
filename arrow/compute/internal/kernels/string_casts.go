@@ -252,23 +252,25 @@ func boolToStringCastExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.E
 	)
 	defer bldr.Release()
 
-	// Count exact formatted payload: "true" is 4 bytes, "false" is 5.
-	// Only non-null rows contribute bytes. This is tighter than a 5*nonNull
-	// upper bound and avoids rejecting valid large all-true casts near the
-	// MaxInt32 destination-buffer limit.
-	var total int64
-	bitutils.VisitBitBlocks(input.Buffers[0].Buf, input.Offset, input.Len,
-		func(pos int64) {
-			if bitutil.BitIsSet(input.Buffers[1].Buf, int(pos)) {
-				total += 4
-			} else {
-				total += 5
-			}
-		}, func() {})
-
 	bldr.Reserve(int(input.Len))
-	if err := reserveFormattedDataExact(bldr, total); err != nil {
-		return err
+	// "true" (4 bytes) and "false" (5 bytes) are both inline for view
+	// builders; they consume no overflow data, so skip reservation and the
+	// limit check. For offset-based builders, count exact formatted bytes
+	// (tighter than 5*nonNull and avoids rejecting valid large all-true
+	// casts near the int32 limit).
+	if !isViewBuilder(bldr) {
+		var total int64
+		bitutils.VisitBitBlocks(input.Buffers[0].Buf, input.Offset, input.Len,
+			func(pos int64) {
+				if bitutil.BitIsSet(input.Buffers[1].Buf, int(pos)) {
+					total += 4
+				} else {
+					total += 5
+				}
+			}, func() {})
+		if err := reserveFormattedDataExact(bldr, total); err != nil {
+			return err
+		}
 	}
 
 	bitutils.VisitBitBlocks(input.Buffers[0].Buf, input.Offset, input.Len,
@@ -339,9 +341,15 @@ func numericToStringCastExec[T arrow.IntType | arrow.UintType | arrow.FloatType]
 // (non-null count) * perValueBytes formatted bytes. Returns arrow.ErrInvalid
 // when the product exceeds the destination builder's single-buffer limit,
 // avoiding a panic inside BinaryViewBuilder.ReserveData or an int32 offset
-// overflow in StringBuilder. See GH-184 review feedback.
+// overflow in StringBuilder. For view builders whose per-value upper bound
+// is ≤ 12 bytes, all values are stored inline in view headers and consume
+// no overflow data, so reservation and the limit check are skipped. See
+// GH-184 review feedback.
 func reserveFormattedData(bldr array.StringLikeBuilder, input *exec.ArraySpan, perValueBytes int) error {
 	if perValueBytes <= 0 {
+		return nil
+	}
+	if isViewBuilder(bldr) && arrow.IsViewInline(perValueBytes) {
 		return nil
 	}
 	total := int64(input.Len-input.Nulls) * int64(perValueBytes)
@@ -363,6 +371,17 @@ func reserveFormattedDataExact(bldr array.StringLikeBuilder, total int64) error 
 		bldr.ReserveData(int(total))
 	}
 	return nil
+}
+
+// isViewBuilder reports whether bldr writes into a view-typed array whose
+// out-of-line data lives in a single overflow buffer subject to the
+// view_value_size_limit. Only *array.StringViewBuilder satisfies the
+// StringLikeBuilder interface (BinaryViewBuilder's Append takes []byte,
+// not string), so this is effectively a StringView check, kept under a
+// clearer name so the inline-skip callers read as "view builder" intent.
+func isViewBuilder(bldr array.StringLikeBuilder) bool {
+	_, ok := bldr.(*array.StringViewBuilder)
+	return ok
 }
 
 // formattedDataLimit returns the largest contiguous data payload (in bytes)

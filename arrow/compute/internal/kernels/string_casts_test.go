@@ -159,3 +159,41 @@ func TestReserveFormattedDataAllowsLargeUtf8AboveInt32(t *testing.T) {
 		t.Fatalf("string_view guard should reject total > MaxInt32, got %v", err)
 	}
 }
+
+// TestReserveFormattedDataInlineViewSkip is the regression test for the
+// GH-184 seventh-round review finding: for view builders, values whose
+// per-value upper bound passes arrow.IsViewInline (strictly < 12 bytes)
+// are stored inline in view headers and never consume overflow data.
+// reserveFormattedData must skip both the reservation and the
+// single-buffer limit check in that case, so large casts with
+// inline-bounded values (bool, int8..int32, date32, etc.) are not
+// rejected against the overflow-buffer limit they never use.
+func TestReserveFormattedDataInlineViewSkip(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	viewBldr := array.NewStringViewBuilder(mem)
+	defer viewBldr.Release()
+
+	span := &exec.ArraySpan{Len: math.MaxInt32, Nulls: 0}
+
+	if err := reserveFormattedData(viewBldr, span, 5); err != nil {
+		t.Fatalf("string_view with inline-bounded perValueBytes=5 must not error: %v", err)
+	}
+	if err := reserveFormattedData(viewBldr, span, 11); err != nil {
+		t.Fatalf("string_view with boundary perValueBytes=11 must not error: %v", err)
+	}
+	// arrow.IsViewInline uses strict '<' against the 12-byte inline slot,
+	// so 12 is already non-inline and the overflow-buffer limit applies.
+	if err := reserveFormattedData(viewBldr, span, 12); !errors.Is(err, arrow.ErrInvalid) {
+		t.Fatalf("string_view with non-inline perValueBytes=12 must hit the limit, got %v", err)
+	}
+
+	utf8Bldr := array.NewStringBuilder(mem)
+	defer utf8Bldr.Release()
+	// utf8 builders are offset-based; inline skipping does not apply and
+	// a 5-byte-per-row upper bound on MaxInt32 rows overflows int32.
+	if err := reserveFormattedData(utf8Bldr, span, 5); !errors.Is(err, arrow.ErrInvalid) {
+		t.Fatalf("utf8 inline-skip must not apply; expected ErrInvalid, got %v", err)
+	}
+}
