@@ -252,11 +252,22 @@ func boolToStringCastExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.E
 	)
 	defer bldr.Release()
 
+	// Count exact formatted payload: "true" is 4 bytes, "false" is 5.
+	// Only non-null rows contribute bytes. This is tighter than a 5*nonNull
+	// upper bound and avoids rejecting valid large all-true casts near the
+	// MaxInt32 destination-buffer limit.
+	var total int64
+	bitutils.VisitBitBlocks(input.Buffers[0].Buf, input.Offset, input.Len,
+		func(pos int64) {
+			if bitutil.BitIsSet(input.Buffers[1].Buf, int(pos)) {
+				total += 4
+			} else {
+				total += 5
+			}
+		}, func() {})
+
 	bldr.Reserve(int(input.Len))
-	// 5-byte upper bound covers "false"; keeps string_view output inside a
-	// single overflow data buffer so exec.ArraySpan's fixed [3]BufferSpan
-	// can carry it.
-	if err := reserveFormattedData(bldr, input, 5); err != nil {
+	if err := reserveFormattedDataExact(bldr, total); err != nil {
 		return err
 	}
 
@@ -334,6 +345,15 @@ func reserveFormattedData(bldr array.StringLikeBuilder, input *exec.ArraySpan, p
 		return nil
 	}
 	total := int64(input.Len-input.Nulls) * int64(perValueBytes)
+	return reserveFormattedDataExact(bldr, total)
+}
+
+// reserveFormattedDataExact reserves exactly total bytes of out-of-line
+// payload on bldr, returning arrow.ErrInvalid if total exceeds the
+// destination builder's single-buffer limit. Use this when the kernel can
+// compute the exact payload in advance; use reserveFormattedData with a
+// per-value upper bound otherwise.
+func reserveFormattedDataExact(bldr array.StringLikeBuilder, total int64) error {
 	limit := formattedDataLimit(bldr)
 	if total > limit {
 		return fmt.Errorf("%w: formatted cast payload (%d bytes) exceeds single data buffer limit (%d bytes) for destination builder",

@@ -19,6 +19,7 @@
 package compute_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -2131,6 +2132,40 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 		c.Equal(a, sv.Value(count-2))
 		c.Equal(b, sv.Value(count-1))
 	})
+
+	c.Run("binary_view dict to binary_view with large non-inline payload", func() {
+		const (
+			valBytes = 200
+			count    = 500
+		)
+		a := bytes.Repeat([]byte{0xAA}, valBytes)
+		b := bytes.Repeat([]byte{0xBB}, valBytes)
+		vals := c.buildBinaryViewArray([][]byte{a, b})
+		defer vals.Release()
+
+		indices := make([]int32, count)
+		for i := range indices {
+			indices[i] = int32(i & 1)
+		}
+		dict := buildDict(vals, indices, nil)
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.BinaryView))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		c.LessOrEqualf(len(out.Data().Buffers()), 3,
+			"expected <=3 buffers for unpacked binary_view dictionary, got %d",
+			len(out.Data().Buffers()))
+
+		bv := out.(*array.BinaryView)
+		c.Equal(count, bv.Len())
+		c.Equal(a, bv.Value(0))
+		c.Equal(b, bv.Value(1))
+		c.Equal(a, bv.Value(count-2))
+		c.Equal(b, bv.Value(count-1))
+	})
 }
 
 // TestBoolToStringViewStaysSingleBuffer is a regression test for the
@@ -2138,27 +2173,61 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 // numeric/temporal-to-string kernels without the matching pre-reservation
 // path, so large bool -> string_view casts could allocate multiple
 // overflow data buffers and exceed exec.ArraySpan's fixed [3]BufferSpan.
-// The kernel now reserves up to 5 bytes per row ("false") on the builder,
-// so the output always has <= 3 buffers regardless of input length.
+// The kernel now counts exact formatted bytes ("true"=4, "false"=5) and
+// pre-reserves that amount on the builder, so the output always has
+// <= 3 buffers and all-true casts near the int32 limit are not
+// over-rejected relative to the tight bound.
 func (c *CastSuite) TestBoolToStringViewStaysSingleBuffer() {
 	const count = 1 << 14
-	bldr := array.NewBooleanBuilder(c.mem)
-	defer bldr.Release()
-	for i := 0; i < count; i++ {
-		bldr.Append(i%2 == 0)
+
+	check := func(name string, pick func(i int) bool, wantBytes int64) {
+		c.Run(name, func() {
+			bldr := array.NewBooleanBuilder(c.mem)
+			defer bldr.Release()
+			for i := 0; i < count; i++ {
+				bldr.Append(pick(i))
+			}
+			in := bldr.NewArray()
+			defer in.Release()
+
+			out, err := compute.CastArray(context.Background(), in,
+				compute.SafeCastOptions(arrow.BinaryTypes.String))
+			c.Require().NoError(err)
+			defer out.Release()
+
+			c.Equal(count, out.Len())
+			// Data buffer (index 2 for string) holds exactly the formatted
+			// bytes, validating the exact-count payload logic.
+			dataBuf := out.Data().Buffers()[2]
+			c.Require().NotNil(dataBuf)
+			c.Equalf(wantBytes, int64(dataBuf.Len()),
+				"%s: data buffer size should equal exact formatted payload",
+				name)
+		})
 	}
-	in := bldr.NewArray()
-	defer in.Release()
+	check("all true", func(int) bool { return true }, 4*count)
+	check("all false", func(int) bool { return false }, 5*count)
+	check("alternating", func(i int) bool { return i%2 == 0 }, 4*(count/2)+5*(count/2))
 
-	out, err := compute.CastArray(context.Background(), in,
-		compute.SafeCastOptions(arrow.BinaryTypes.StringView))
-	c.Require().NoError(err)
-	defer out.Release()
+	c.Run("string_view stays within 3 buffers", func() {
+		bldr := array.NewBooleanBuilder(c.mem)
+		defer bldr.Release()
+		for i := 0; i < count; i++ {
+			bldr.Append(i%2 == 0)
+		}
+		in := bldr.NewArray()
+		defer in.Release()
 
-	c.LessOrEqualf(len(out.Data().Buffers()), 3,
-		"expected <=3 buffers for bool->string_view, got %d",
-		len(out.Data().Buffers()))
-	c.Equal(count, out.Len())
+		out, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		c.LessOrEqualf(len(out.Data().Buffers()), 3,
+			"expected <=3 buffers for bool->string_view, got %d",
+			len(out.Data().Buffers()))
+		c.Equal(count, out.Len())
+	})
 }
 
 // checkCastArrayOnly performs a cast and compares the resulting array against
