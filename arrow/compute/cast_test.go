@@ -2253,6 +2253,49 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 		c.Equal(b, child.Value(3))
 	})
 
+	// Regression for GH-184 eleventh-round review finding: extension
+	// arrays reuse their storage buffers/children in place, so an
+	// extension over a multi-buffer view hit exec.ArraySpan.SetMembers
+	// before CastFromExtension unwrapped the storage. coalesce must
+	// therefore traverse extensions through their StorageType and
+	// re-wrap after rebuilding so the extension datatype survives.
+	c.Run("extension<string_view multi-buffer> to utf8", func() {
+		extType := types.NewStringViewExtType()
+		arrow.RegisterExtensionType(extType)
+		defer arrow.UnregisterExtensionType("string_view_ext")
+
+		const valBytes = 20000
+		a := strings.Repeat("a", valBytes)
+		b := strings.Repeat("b", valBytes)
+		vbldr := array.NewStringViewBuilder(c.mem)
+		defer vbldr.Release()
+		vbldr.Append(a)
+		vbldr.Append(b)
+		vbldr.Append(a)
+		storage := vbldr.NewArray()
+		defer storage.Release()
+		c.Greaterf(len(storage.Data().Buffers()), 3,
+			"test precondition: extension storage must be multi-buffer; got %d",
+			len(storage.Data().Buffers()))
+
+		extData := array.NewData(extType, storage.Len(), storage.Data().Buffers(),
+			storage.Data().Children(), storage.NullN(), storage.Data().Offset())
+		defer extData.Release()
+		extArr := array.MakeFromData(extData)
+		defer extArr.Release()
+
+		out, err := compute.CastArray(context.Background(), extArr,
+			compute.SafeCastOptions(arrow.BinaryTypes.String))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		sv := out.(*array.String)
+		c.Equal(3, sv.Len())
+		c.Equal(a, sv.Value(0))
+		c.Equal(b, sv.Value(1))
+		c.Equal(a, sv.Value(2))
+	})
+
 	c.Run("string_view dict to string_view with large non-inline payload", func() {
 		const (
 			valBytes = 200

@@ -317,9 +317,56 @@ var (
 	_ arrow.ExtensionType  = (*ExtStructType)(nil)
 	_ arrow.ExtensionType  = (*DictExtensionType)(nil)
 	_ arrow.ExtensionType  = (*SmallintType)(nil)
+	_ arrow.ExtensionType  = (*StringViewExtType)(nil)
 	_ array.ExtensionArray = (*Parametric1Array)(nil)
 	_ array.ExtensionArray = (*Parametric2Array)(nil)
 	_ array.ExtensionArray = (*ExtStructArray)(nil)
 	_ array.ExtensionArray = (*DictExtensionArray)(nil)
 	_ array.ExtensionArray = (*SmallintArray)(nil)
+	_ array.ExtensionArray = (*StringViewExtArray)(nil)
 )
+
+// StringViewExtArray is an extension array backed by a string_view storage
+// array.
+type StringViewExtArray struct {
+	array.ExtensionArrayBase
+}
+
+func (a StringViewExtArray) ValueStr(i int) string {
+	if a.IsNull(i) {
+		return array.NullValueStr
+	}
+	return a.Storage().(*array.StringView).Value(i)
+}
+
+// StringViewExtType wraps arrow.BinaryTypes.StringView as an extension so
+// tests can exercise code paths that must look through extension types
+// at their storage layout.
+type StringViewExtType struct {
+	arrow.ExtensionBase
+}
+
+func NewStringViewExtType() *StringViewExtType {
+	return &StringViewExtType{ExtensionBase: arrow.ExtensionBase{
+		Storage: arrow.BinaryTypes.StringView}}
+}
+
+func (StringViewExtType) ArrayType() reflect.Type { return reflect.TypeOf(StringViewExtArray{}) }
+
+func (StringViewExtType) ExtensionName() string { return "string_view_ext" }
+
+func (StringViewExtType) Serialize() string { return "string_view_ext-serialized" }
+
+func (s *StringViewExtType) ExtensionEquals(other arrow.ExtensionType) bool {
+	return s.ExtensionName() == other.ExtensionName()
+}
+
+func (StringViewExtType) Deserialize(storageType arrow.DataType, data string) (arrow.ExtensionType, error) {
+	if data != "string_view_ext-serialized" {
+		return nil, fmt.Errorf("type identifier did not match: '%s'", data)
+	}
+	if !arrow.TypeEqual(storageType, arrow.BinaryTypes.StringView) {
+		return nil, fmt.Errorf("invalid storage type for StringViewExtType: %s", storageType)
+	}
+	return NewStringViewExtType(), nil
+}

@@ -143,12 +143,16 @@ func coalesceMultiBufferViewDatum(ctx context.Context, d Datum) (Datum, error) {
 
 // needsViewCoalesce reports whether data carries a view array whose
 // payload spans more than the single overflow data buffer exec.ArraySpan
-// can carry. The check recurses into both dictionary values and ordinary
-// child arrays because exec.ArraySpan.SetMembers recursively spans both,
-// so any view descendant anywhere in the shape hits the [3]BufferSpan
-// limit during dispatch.
+// can carry. The check recurses into dictionary values and ordinary
+// child arrays because exec.ArraySpan.SetMembers recursively spans both;
+// extension inputs reuse their storage layout in place, so they are
+// treated as their StorageType for this traversal.
 func needsViewCoalesce(data arrow.ArrayData) bool {
-	switch data.DataType().ID() {
+	dt := data.DataType()
+	if ext, ok := dt.(arrow.ExtensionType); ok {
+		dt = ext.StorageType()
+	}
+	switch dt.ID() {
 	case arrow.BINARY_VIEW, arrow.STRING_VIEW:
 		return len(data.Buffers()) > 3
 	case arrow.DICTIONARY:
@@ -166,9 +170,24 @@ func needsViewCoalesce(data arrow.ArrayData) bool {
 // a single overflow buffer. View arrays are rebuilt via
 // rebuildViewSingleBuffer; dictionaries keep their index buffers and
 // recursively rebuild their values; nested types (list, struct, etc.)
-// keep their own buffers and recursively rebuild each child. Shares
-// already-compliant children by retaining them rather than copying.
+// keep their own buffers and recursively rebuild each child. Extension
+// inputs are rebuilt at their storage layer and then re-wrapped so the
+// original extension datatype survives. Shares already-compliant
+// children by retaining them rather than copying.
 func coalesceArrayData(mem memory.Allocator, data arrow.ArrayData) (arrow.ArrayData, error) {
+	if ext, ok := data.DataType().(arrow.ExtensionType); ok {
+		storageData := array.NewData(ext.StorageType(), data.Len(), data.Buffers(),
+			data.Children(), data.NullN(), data.Offset())
+		defer storageData.Release()
+		newStorage, err := coalesceArrayData(mem, storageData)
+		if err != nil {
+			return nil, err
+		}
+		defer newStorage.Release()
+		return array.NewData(data.DataType(), newStorage.Len(), newStorage.Buffers(),
+			newStorage.Children(), newStorage.NullN(), newStorage.Offset()), nil
+	}
+
 	switch data.DataType().ID() {
 	case arrow.BINARY_VIEW, arrow.STRING_VIEW:
 		return rebuildViewSingleBuffer(mem, data)
