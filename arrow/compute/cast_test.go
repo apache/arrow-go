@@ -1918,13 +1918,13 @@ func (c *CastSuite) TestNumericToStringViewLargePayload() {
 	})
 
 	// Regression test for GH-184 eighth-round review finding: time32[ms]
-	// formats to exactly 12 bytes ("HH:MM:SS.sss") which ViewHeader stores
-	// inline (size <= 12), so the inline-skip in reserveFormattedData must
-	// treat 12 as inline (<=12) rather than strictly < 12 via
-	// arrow.IsViewInline. The boundary itself is exercised directly in
-	// TestReserveFormattedDataInlineViewSkip; this is the cast-level
-	// smoke test verifying the end-to-end path stays within a single
-	// overflow buffer.
+	// formats to exactly 12 bytes ("HH:MM:SS.sss") which ViewHeader
+	// stores inline (size <= 12), so the inline-skip in
+	// reserveFormattedData must treat 12 as inline. This is the
+	// cast-level smoke test verifying the end-to-end path; the boundary
+	// itself is exercised in TestReserveFormattedDataInlineViewSkip.
+	// We additionally assert the output has no overflow data buffer, i.e.
+	// all values stayed inline in view headers.
 	c.Run("time32[ms] to string_view stays inline", func() {
 		t32Type := &arrow.Time32Type{Unit: arrow.Millisecond}
 		bldr := array.NewTime32Builder(c.mem, t32Type)
@@ -1941,9 +1941,16 @@ func (c *CastSuite) TestNumericToStringViewLargePayload() {
 		defer got.Release()
 
 		c.Equal(count, got.Len())
-		c.LessOrEqualf(len(got.Data().Buffers()), 3,
-			"expected <=3 buffers for string_view output, got %d",
-			len(got.Data().Buffers()))
+		bufs := got.Data().Buffers()
+		c.LessOrEqualf(len(bufs), 3,
+			"expected <=3 buffers for string_view output, got %d", len(bufs))
+		// All values must be inline; overflow buffer (index 2) should be
+		// absent or empty.
+		if len(bufs) >= 3 && bufs[2] != nil {
+			c.Equalf(0, bufs[2].Len(),
+				"time32[ms] values are <=12 bytes and must stay inline; "+
+					"found %d bytes in overflow buffer", bufs[2].Len())
+		}
 	})
 }
 

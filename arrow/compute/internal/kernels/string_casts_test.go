@@ -162,13 +162,12 @@ func TestReserveFormattedDataAllowsLargeUtf8AboveInt32(t *testing.T) {
 
 // TestReserveFormattedDataInlineViewSkip is the regression test for the
 // GH-184 seventh/eighth-round review findings: for view builders, values
-// whose per-value upper bound fits inline (<= 12 bytes, matching
-// ViewHeader.IsInline) are stored inside the view header and never
-// consume overflow data. reserveFormattedData must skip both the
-// reservation and the single-buffer limit check in that case, so large
-// casts with inline-bounded values (bool, int8..int32, date32,
-// time32[ms], etc.) are not rejected against the overflow-buffer limit
-// they never use.
+// whose per-value upper bound fits inline (arrow.IsViewInline, <= 12)
+// are stored inside view headers and never consume overflow data.
+// reserveFormattedData must skip both the reservation and the
+// single-buffer limit check in that case, so large casts with
+// inline-bounded values (bool, int8..int32, date32, time32[ms], etc.)
+// are not rejected against the overflow-buffer limit they never use.
 func TestReserveFormattedDataInlineViewSkip(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
@@ -182,7 +181,7 @@ func TestReserveFormattedDataInlineViewSkip(t *testing.T) {
 		t.Fatalf("string_view with inline-bounded perValueBytes=5 must not error: %v", err)
 	}
 	if err := reserveFormattedData(viewBldr, span, 12); err != nil {
-		t.Fatalf("string_view with boundary perValueBytes=12 must not error (inline per ViewHeader.IsInline): %v", err)
+		t.Fatalf("string_view with boundary perValueBytes=12 must not error (inline per arrow.IsViewInline): %v", err)
 	}
 	// Above the inline boundary (12) the overflow-buffer limit is enforced.
 	if err := reserveFormattedData(viewBldr, span, 13); !errors.Is(err, arrow.ErrInvalid) {
