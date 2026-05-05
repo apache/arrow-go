@@ -275,6 +275,9 @@ func timeToStringCastExec[T timeIntrinsic](ctx *exec.KernelCtx, batch *exec.Exec
 	)
 	defer bldr.Release()
 
+	bldr.Reserve(int(input.Len))
+	bldr.ReserveData(int(input.Len-input.Nulls) * maxFormattedBytes(input.Type))
+
 	bitutils.VisitBitBlocks(input.Buffers[0].Buf, input.Offset, input.Len,
 		func(pos int64) {
 			bldr.Append(inputData[pos].FormattedString(inputType.TimeUnit()))
@@ -294,6 +297,9 @@ func numericToStringCastExec[T arrow.IntType | arrow.UintType | arrow.FloatType]
 		)
 		defer bldr.Release()
 
+		bldr.Reserve(int(input.Len))
+		bldr.ReserveData(int(input.Len-input.Nulls) * maxFormattedBytes(input.Type))
+
 		bitutils.VisitBitBlocks(input.Buffers[0].Buf, input.Offset, input.Len,
 			func(pos int64) {
 				bldr.Append(formatter(inputData[pos]))
@@ -303,6 +309,43 @@ func numericToStringCastExec[T arrow.IntType | arrow.UintType | arrow.FloatType]
 		out.TakeOwnership(arr.Data())
 		return nil
 	}
+}
+
+// maxFormattedBytes returns an upper bound on the textual representation
+// of a single value of dt used by the numeric/temporal-to-string kernels.
+// The bound is used to pre-reserve the builder's data buffer so StringView
+// outputs stay within a single overflow block (compute's ArraySpan can
+// carry only one view data buffer). See GH-184 review feedback.
+func maxFormattedBytes(dt arrow.DataType) int {
+	switch dt.ID() {
+	case arrow.INT8, arrow.UINT8:
+		return 4 // "-128" / "255"
+	case arrow.INT16:
+		return 6 // "-32768"
+	case arrow.UINT16:
+		return 5 // "65535"
+	case arrow.INT32:
+		return 11 // "-2147483648"
+	case arrow.UINT32:
+		return 10 // "4294967295"
+	case arrow.INT64, arrow.UINT64:
+		return 20 // "-9223372036854775808"
+	case arrow.FLOAT16:
+		return 12 // covers "-NaN", scientific, and decimal forms
+	case arrow.FLOAT32:
+		return 25 // scientific notation upper bound
+	case arrow.FLOAT64:
+		return 32 // scientific notation upper bound
+	case arrow.DATE32, arrow.DATE64:
+		return 10 // "YYYY-MM-DD"
+	case arrow.TIME32:
+		return 12 // "HH:MM:SS.sss"
+	case arrow.TIME64:
+		return 18 // "HH:MM:SS.nnnnnnnnn"
+	case arrow.TIMESTAMP:
+		return 35 // date + time with ns precision + short tz offset
+	}
+	return 0
 }
 
 func castTimestampToString(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {

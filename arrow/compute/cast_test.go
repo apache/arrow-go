@@ -1759,6 +1759,164 @@ func (c *CastSuite) TestBinaryLikeToBinaryViewLargePayload() {
 	}
 }
 
+// TestMultiBufferViewInputCoalesced is a regression test for the second
+// round of GH-184 review feedback: a BinaryView/StringView input whose
+// payload already spans multiple builder blocks (>32KB) must be coalesced
+// into a single-buffer view before entering compute, since
+// exec.ArraySpan's fixed [3]BufferSpan cannot carry multi-buffer views.
+func (c *CastSuite) TestMultiBufferViewInputCoalesced() {
+	const (
+		perValue = 200
+		count    = 500 // ~100KB of non-inline payload, forces multi-buffer view
+	)
+	longStr := strings.Repeat("y", perValue)
+
+	buildMultiBufferBinaryView := func() arrow.Array {
+		bldr := array.NewBinaryViewBuilder(c.mem)
+		defer bldr.Release()
+		for i := 0; i < count; i++ {
+			bldr.Append([]byte(longStr))
+		}
+		return bldr.NewArray()
+	}
+
+	buildMultiBufferStringView := func() arrow.Array {
+		bldr := array.NewStringViewBuilder(c.mem)
+		defer bldr.Release()
+		for i := 0; i < count; i++ {
+			bldr.Append(longStr)
+		}
+		return bldr.NewArray()
+	}
+
+	c.Run("binary_view input has multiple data buffers", func() {
+		in := buildMultiBufferBinaryView()
+		defer in.Release()
+		c.Greater(len(in.Data().Buffers()), 3,
+			"test precondition: input must be multi-buffer")
+	})
+
+	c.Run("string_view to utf8", func() {
+		in := buildMultiBufferStringView()
+		defer in.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.String))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		sv := got.(*array.String)
+		c.Equal(count, sv.Len())
+		for i := 0; i < sv.Len(); i++ {
+			c.Equalf(longStr, sv.Value(i), "row %d mismatch", i)
+		}
+	})
+
+	c.Run("binary_view to binary", func() {
+		in := buildMultiBufferBinaryView()
+		defer in.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.Binary))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		bv := got.(*array.Binary)
+		c.Equal(count, bv.Len())
+		for i := 0; i < bv.Len(); i++ {
+			c.Equalf(longStr, string(bv.Value(i)), "row %d mismatch", i)
+		}
+	})
+
+	c.Run("binary_view to string_view", func() {
+		in := buildMultiBufferBinaryView()
+		defer in.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		sv := got.(*array.StringView)
+		c.Equal(count, sv.Len())
+		c.LessOrEqualf(len(got.Data().Buffers()), 3,
+			"coalesced output must fit in ArraySpan's 3 buffers, got %d",
+			len(got.Data().Buffers()))
+	})
+}
+
+// TestNumericToStringViewLargePayload is a regression test for the second
+// round of GH-184 review feedback: casting a numeric/temporal column with
+// enough values to produce >32KB of non-inline formatted output must still
+// produce a single-buffer string_view rather than spilling into a second
+// overflow block (which would panic in out.TakeOwnership).
+func (c *CastSuite) TestNumericToStringViewLargePayload() {
+	const count = 5000
+
+	c.Run("int64 to string_view", func() {
+		bldr := array.NewInt64Builder(c.mem)
+		defer bldr.Release()
+		for i := 0; i < count; i++ {
+			// use large magnitudes so formatted strings are 19-20 bytes (non-inline)
+			bldr.Append(int64(-9223372036854775000 + int64(i)))
+		}
+		in := bldr.NewArray()
+		defer in.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		c.Equal(count, got.Len())
+		c.LessOrEqualf(len(got.Data().Buffers()), 3,
+			"expected <=3 buffers for string_view output, got %d",
+			len(got.Data().Buffers()))
+	})
+
+	c.Run("timestamp to string_view", func() {
+		tsType := &arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: "UTC"}
+		bldr := array.NewTimestampBuilder(c.mem, tsType)
+		defer bldr.Release()
+		for i := 0; i < count; i++ {
+			bldr.Append(arrow.Timestamp(int64(1e18) + int64(i)))
+		}
+		in := bldr.NewArray()
+		defer in.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		c.Equal(count, got.Len())
+		c.LessOrEqualf(len(got.Data().Buffers()), 3,
+			"expected <=3 buffers for string_view output, got %d",
+			len(got.Data().Buffers()))
+	})
+
+	c.Run("time64 to string_view", func() {
+		t64Type := &arrow.Time64Type{Unit: arrow.Nanosecond}
+		bldr := array.NewTime64Builder(c.mem, t64Type)
+		defer bldr.Release()
+		for i := 0; i < count; i++ {
+			bldr.Append(arrow.Time64(int64(86400e9-1) - int64(i)))
+		}
+		in := bldr.NewArray()
+		defer in.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		c.Equal(count, got.Len())
+		c.LessOrEqualf(len(got.Data().Buffers()), 3,
+			"expected <=3 buffers for string_view output, got %d",
+			len(got.Data().Buffers()))
+	})
+}
+
 // checkCastArrayOnly performs a cast and compares the resulting array against
 // an expected array built from JSON. It deliberately avoids the per-element
 // scalar iteration path used by checkCast, which relies on scalar.GetScalar

@@ -21,6 +21,7 @@ package compute
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -28,6 +29,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/compute/internal/kernels"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
 var (
@@ -52,6 +54,21 @@ var (
 				return NewDatum(d[0]), nil
 			}
 
+			// Coalesce multi-buffer view inputs. exec.ArraySpan's fixed
+			// [3]BufferSpan cannot carry BinaryView/StringView arrays with
+			// more than one overflow data buffer, so SetMembers would panic
+			// before any kernel runs. Rebuild such inputs with a single data
+			// buffer up front. See GH-184 review feedback.
+			coalescedDatum, err := coalesceMultiBufferViewDatum(ctx, d[0])
+			if err != nil {
+				return nil, err
+			}
+			if coalescedDatum != nil {
+				defer coalescedDatum.Release()
+				d = append([]Datum(nil), d...)
+				d[0] = coalescedDatum
+			}
+
 			fn, err := getCastFunction(castOpts.ToType)
 			if err != nil {
 				return nil, fmt.Errorf("%w from %s", err, d[0].(ArrayLikeDatum).Type())
@@ -63,6 +80,112 @@ var (
 
 func RegisterScalarCast(reg FunctionRegistry) {
 	reg.AddFunction(castMetaFunc, false)
+}
+
+// coalesceMultiBufferViewDatum returns a new ArrayDatum whose view array has
+// a single overflow data buffer, or nil if the input does not need
+// coalescing. Non-array and non-view datums are never coalesced. Callers are
+// responsible for releasing the returned datum.
+func coalesceMultiBufferViewDatum(ctx context.Context, d Datum) (Datum, error) {
+	ad, ok := d.(*ArrayDatum)
+	if !ok {
+		return nil, nil
+	}
+	data := ad.Value
+	switch data.DataType().ID() {
+	case arrow.BINARY_VIEW, arrow.STRING_VIEW:
+	default:
+		return nil, nil
+	}
+	if len(data.Buffers()) <= 3 {
+		return nil, nil
+	}
+
+	mem := exec.GetAllocator(ctx)
+	newData, err := rebuildViewSingleBuffer(mem, data)
+	if err != nil {
+		return nil, err
+	}
+	return &ArrayDatum{Value: newData}, nil
+}
+
+// rebuildViewSingleBuffer rebuilds a BinaryView/StringView ArrayData so that
+// all non-inline payload lives in a single contiguous overflow buffer. The
+// caller owns the returned ArrayData.
+func rebuildViewSingleBuffer(mem memory.Allocator, data arrow.ArrayData) (arrow.ArrayData, error) {
+	arr := array.MakeFromData(data)
+	defer arr.Release()
+
+	var (
+		total   int64
+		getLen  func(int) int
+		getInto func(i int, dst func([]byte))
+	)
+	switch a := arr.(type) {
+	case *array.BinaryView:
+		getLen = a.ValueLen
+		getInto = func(i int, dst func([]byte)) { dst(a.Value(i)) }
+	case *array.StringView:
+		getLen = a.ValueLen
+		getInto = func(i int, dst func([]byte)) {
+			s := a.Value(i)
+			dst([]byte(s))
+		}
+	default:
+		return nil, fmt.Errorf("%w: unexpected view array type %T", arrow.ErrInvalid, arr)
+	}
+	for i := 0; i < arr.Len(); i++ {
+		if arr.IsNull(i) {
+			continue
+		}
+		vlen := getLen(i)
+		if !arrow.IsViewInline(vlen) {
+			total += int64(vlen)
+		}
+	}
+	if total > math.MaxInt32 {
+		return nil, fmt.Errorf("%w: view array out-of-line payload (%d bytes) exceeds single-buffer limit (%d bytes)",
+			arrow.ErrInvalid, total, math.MaxInt32)
+	}
+
+	bldr := array.NewBuilder(mem, arr.DataType())
+	defer bldr.Release()
+	bldr.Reserve(arr.Len())
+
+	switch b := bldr.(type) {
+	case *array.BinaryViewBuilder:
+		if total > 0 {
+			b.ReserveData(int(total))
+		}
+	case *array.StringViewBuilder:
+		if total > 0 {
+			b.ReserveData(int(total))
+		}
+	default:
+		return nil, fmt.Errorf("%w: unexpected view builder type %T", arrow.ErrInvalid, bldr)
+	}
+
+	appendBytes := func([]byte) {}
+	switch b := bldr.(type) {
+	case *array.BinaryViewBuilder:
+		appendBytes = b.Append
+	case *array.StringViewBuilder:
+		appendBytes = b.BinaryViewBuilder.Append
+	}
+
+	for i := 0; i < arr.Len(); i++ {
+		if arr.IsNull(i) {
+			bldr.AppendNull()
+			continue
+		}
+		getInto(i, appendBytes)
+	}
+
+	newArr := bldr.NewArray()
+	defer newArr.Release()
+	result := newArr.Data()
+	result.Retain()
+	return result, nil
 }
 
 type castFunction struct {
