@@ -143,9 +143,10 @@ func coalesceMultiBufferViewDatum(ctx context.Context, d Datum) (Datum, error) {
 
 // needsViewCoalesce reports whether data carries a view array whose
 // payload spans more than the single overflow data buffer exec.ArraySpan
-// can carry. The check recurses into dictionary values because
-// exec.ArraySpan.SetMembers recursively spans the dictionary child and
-// hits the [3]BufferSpan limit there too.
+// can carry. The check recurses into both dictionary values and ordinary
+// child arrays because exec.ArraySpan.SetMembers recursively spans both,
+// so any view descendant anywhere in the shape hits the [3]BufferSpan
+// limit during dispatch.
 func needsViewCoalesce(data arrow.ArrayData) bool {
 	switch data.DataType().ID() {
 	case arrow.BINARY_VIEW, arrow.STRING_VIEW:
@@ -153,13 +154,20 @@ func needsViewCoalesce(data arrow.ArrayData) bool {
 	case arrow.DICTIONARY:
 		return needsViewCoalesce(data.Dictionary())
 	}
+	for _, c := range data.Children() {
+		if needsViewCoalesce(c) {
+			return true
+		}
+	}
 	return false
 }
 
-// coalesceArrayData coalesces data for a view or dictionary-of-view array
-// so it fits the single-overflow-buffer invariant. For view data it
-// delegates to rebuildViewSingleBuffer; for dictionary data it rebuilds
-// the dictionary values and reuses the existing index buffers.
+// coalesceArrayData rebuilds data so that every view descendant lives in
+// a single overflow buffer. View arrays are rebuilt via
+// rebuildViewSingleBuffer; dictionaries keep their index buffers and
+// recursively rebuild their values; nested types (list, struct, etc.)
+// keep their own buffers and recursively rebuild each child. Shares
+// already-compliant children by retaining them rather than copying.
 func coalesceArrayData(mem memory.Allocator, data arrow.ArrayData) (arrow.ArrayData, error) {
 	switch data.DataType().ID() {
 	case arrow.BINARY_VIEW, arrow.STRING_VIEW:
@@ -177,7 +185,33 @@ func coalesceArrayData(mem memory.Allocator, data arrow.ArrayData) (arrow.ArrayD
 		return array.NewDataWithDictionary(data.DataType(), data.Len(),
 			data.Buffers(), data.NullN(), data.Offset(), newDict), nil
 	}
-	return nil, fmt.Errorf("%w: coalesceArrayData: unsupported type %s", arrow.ErrInvalid, data.DataType())
+
+	children := data.Children()
+	if len(children) == 0 {
+		return nil, fmt.Errorf("%w: coalesceArrayData: no view descendants in %s", arrow.ErrInvalid, data.DataType())
+	}
+	newChildren := make([]arrow.ArrayData, len(children))
+	for i, c := range children {
+		if !needsViewCoalesce(c) {
+			c.Retain()
+			newChildren[i] = c
+			continue
+		}
+		nc, err := coalesceArrayData(mem, c)
+		if err != nil {
+			for j := 0; j < i; j++ {
+				newChildren[j].Release()
+			}
+			return nil, err
+		}
+		newChildren[i] = nc
+	}
+	result := array.NewData(data.DataType(), data.Len(), data.Buffers(),
+		newChildren, data.NullN(), data.Offset())
+	for _, nc := range newChildren {
+		nc.Release()
+	}
+	return result, nil
 }
 
 // rebuildViewSingleBuffer rebuilds a BinaryView/StringView ArrayData so that

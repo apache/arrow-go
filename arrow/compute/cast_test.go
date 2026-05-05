@@ -2202,6 +2202,57 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 		c.Equal(b, sv.Value(3))
 	})
 
+	// Regression for GH-184 tenth-round review finding: exec.ArraySpan
+	// .SetMembers recurses through ordinary nested children as well as
+	// dictionary children, so a list<string_view> (or struct-of-view)
+	// whose descendant is multi-buffer also panics before dispatch.
+	// coalesceMultiBufferViewDatum must therefore recurse through
+	// Children() to rebuild any descendant view array in place.
+	c.Run("list<string_view multi-buffer child> to list<utf8>", func() {
+		const valBytes = 20000
+		a := strings.Repeat("a", valBytes)
+		b := strings.Repeat("b", valBytes)
+		vbldr := array.NewStringViewBuilder(c.mem)
+		defer vbldr.Release()
+		vbldr.Append(a)
+		vbldr.Append(b)
+		vbldr.Append(a)
+		vbldr.Append(b)
+		values := vbldr.NewArray()
+		defer values.Release()
+		c.Greaterf(len(values.Data().Buffers()), 3,
+			"test precondition: list values must be multi-buffer; got %d",
+			len(values.Data().Buffers()))
+
+		// Build list<string_view> with two rows: [a, b] and [a, b].
+		listType := arrow.ListOf(arrow.BinaryTypes.StringView)
+		offsetsBuf := memory.NewBufferBytes([]byte{
+			0x00, 0x00, 0x00, 0x00,
+			0x02, 0x00, 0x00, 0x00,
+			0x04, 0x00, 0x00, 0x00,
+		})
+		listData := array.NewData(listType, 2,
+			[]*memory.Buffer{nil, offsetsBuf},
+			[]arrow.ArrayData{values.Data()}, 0, 0)
+		defer listData.Release()
+		listArr := array.MakeFromData(listData)
+		defer listArr.Release()
+
+		out, err := compute.CastArray(context.Background(), listArr,
+			compute.SafeCastOptions(arrow.ListOf(arrow.BinaryTypes.String)))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		got := out.(*array.List)
+		c.Equal(2, got.Len())
+		child := got.ListValues().(*array.String)
+		c.Equal(4, child.Len())
+		c.Equal(a, child.Value(0))
+		c.Equal(b, child.Value(1))
+		c.Equal(a, child.Value(2))
+		c.Equal(b, child.Value(3))
+	})
+
 	c.Run("string_view dict to string_view with large non-inline payload", func() {
 		const (
 			valBytes = 200
