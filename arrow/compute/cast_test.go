@@ -2161,6 +2161,47 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 		c.True(bv.IsNull(3))
 	})
 
+	// Regression for GH-184 ninth-round review finding: when the top-level
+	// input is a dictionary whose *values* are a multi-buffer view array,
+	// exec.ArraySpan.SetMembers recurses into the dictionary child and
+	// hits the fixed [3]BufferSpan before unpackViewDictionary ever runs.
+	// coalesceMultiBufferViewDatum must therefore rebuild the dictionary
+	// values into a single overflow buffer up front. Build dictionary
+	// values that are large enough to span multiple overflow buffers via
+	// the default 32KB block size (two 20,000-byte entries are enough to
+	// trip the multi-buffer condition).
+	c.Run("dict<string_view multi-buffer values> to utf8", func() {
+		const valBytes = 20000
+		a := strings.Repeat("a", valBytes)
+		b := strings.Repeat("b", valBytes)
+		vbldr := array.NewStringViewBuilder(c.mem)
+		defer vbldr.Release()
+		// Force two separate overflow buffers by appending values individually
+		// through the default builder (no pre-reservation).
+		vbldr.Append(a)
+		vbldr.Append(b)
+		vals := vbldr.NewArray()
+		defer vals.Release()
+		c.Greaterf(len(vals.Data().Buffers()), 3,
+			"test precondition: dictionary values must be multi-buffer; got %d",
+			len(vals.Data().Buffers()))
+
+		dict := buildDict(vals, []int32{0, 1, 0, 1}, nil)
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.String))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		sv := out.(*array.String)
+		c.Equal(4, sv.Len())
+		c.Equal(a, sv.Value(0))
+		c.Equal(b, sv.Value(1))
+		c.Equal(a, sv.Value(2))
+		c.Equal(b, sv.Value(3))
+	})
+
 	c.Run("string_view dict to string_view with large non-inline payload", func() {
 		const (
 			valBytes = 200

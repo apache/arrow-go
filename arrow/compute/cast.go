@@ -84,9 +84,11 @@ func RegisterScalarCast(reg FunctionRegistry) {
 
 // coalesceMultiBufferViewDatum returns a new Datum whose view arrays each
 // have a single overflow data buffer, or nil if the input does not need
-// coalescing. Both ArrayDatum and ChunkedDatum view inputs are handled;
-// other datums are never coalesced. Callers are responsible for releasing
-// the returned datum when it is non-nil.
+// coalescing. Both ArrayDatum and ChunkedDatum view inputs are handled,
+// including dictionaries whose values are multi-buffer view arrays (the
+// recursive check matches what exec.ArraySpan.SetMembers traverses).
+// Other datums are never coalesced. Callers are responsible for
+// releasing the returned datum when it is non-nil.
 func coalesceMultiBufferViewDatum(ctx context.Context, d Datum) (Datum, error) {
 	switch v := d.(type) {
 	case *ArrayDatum:
@@ -94,7 +96,7 @@ func coalesceMultiBufferViewDatum(ctx context.Context, d Datum) (Datum, error) {
 			return nil, nil
 		}
 		mem := exec.GetAllocator(ctx)
-		newData, err := rebuildViewSingleBuffer(mem, v.Value)
+		newData, err := coalesceArrayData(mem, v.Value)
 		if err != nil {
 			return nil, err
 		}
@@ -120,7 +122,7 @@ func coalesceMultiBufferViewDatum(ctx context.Context, d Datum) (Datum, error) {
 				newChunks[i] = c
 				continue
 			}
-			newData, err := rebuildViewSingleBuffer(mem, c.Data())
+			newData, err := coalesceArrayData(mem, c.Data())
 			if err != nil {
 				for j := 0; j < i; j++ {
 					newChunks[j].Release()
@@ -139,15 +141,43 @@ func coalesceMultiBufferViewDatum(ctx context.Context, d Datum) (Datum, error) {
 	return nil, nil
 }
 
-// needsViewCoalesce reports whether data is a view array whose payload
-// spans more than the single overflow data buffer exec.ArraySpan can carry.
+// needsViewCoalesce reports whether data carries a view array whose
+// payload spans more than the single overflow data buffer exec.ArraySpan
+// can carry. The check recurses into dictionary values because
+// exec.ArraySpan.SetMembers recursively spans the dictionary child and
+// hits the [3]BufferSpan limit there too.
 func needsViewCoalesce(data arrow.ArrayData) bool {
 	switch data.DataType().ID() {
 	case arrow.BINARY_VIEW, arrow.STRING_VIEW:
-	default:
-		return false
+		return len(data.Buffers()) > 3
+	case arrow.DICTIONARY:
+		return needsViewCoalesce(data.Dictionary())
 	}
-	return len(data.Buffers()) > 3
+	return false
+}
+
+// coalesceArrayData coalesces data for a view or dictionary-of-view array
+// so it fits the single-overflow-buffer invariant. For view data it
+// delegates to rebuildViewSingleBuffer; for dictionary data it rebuilds
+// the dictionary values and reuses the existing index buffers.
+func coalesceArrayData(mem memory.Allocator, data arrow.ArrayData) (arrow.ArrayData, error) {
+	switch data.DataType().ID() {
+	case arrow.BINARY_VIEW, arrow.STRING_VIEW:
+		return rebuildViewSingleBuffer(mem, data)
+	case arrow.DICTIONARY:
+		newValues, err := coalesceArrayData(mem, data.Dictionary())
+		if err != nil {
+			return nil, err
+		}
+		defer newValues.Release()
+		newDict, ok := newValues.(*array.Data)
+		if !ok {
+			return nil, fmt.Errorf("%w: unexpected dictionary values data type %T", arrow.ErrInvalid, newValues)
+		}
+		return array.NewDataWithDictionary(data.DataType(), data.Len(),
+			data.Buffers(), data.NullN(), data.Offset(), newDict), nil
+	}
+	return nil, fmt.Errorf("%w: coalesceArrayData: unsupported type %s", arrow.ErrInvalid, data.DataType())
 }
 
 // rebuildViewSingleBuffer rebuilds a BinaryView/StringView ArrayData so that
