@@ -121,13 +121,16 @@ func TestFormattedDataLimitFitsInPlatformInt(t *testing.T) {
 	}
 }
 
-// TestReserveFormattedDataAllowsLargeUtf8AboveInt32 is the regression test
-// for the GH-184 second-round review finding: reserveFormattedData must not
-// reject totals above MaxInt32 when the destination is large_utf8
-// (LargeStringBuilder), because int64 offsets can represent them. We assert
-// the destination-specific limit via formattedDataLimit rather than driving
-// a multi-gigabyte allocation through the full kernel path, and separately
-// confirm the guard still fires for string_view at the int32 boundary.
+// TestReserveFormattedDataAllowsLargeUtf8AboveInt32 is a platform-aware
+// regression test for the GH-184 second-round review finding: on 64-bit
+// builds, reserveFormattedData must not reject large_utf8 totals above
+// MaxInt32 (int64 offsets can represent them); on 32-bit builds, the
+// destination-specific limit is instead clamped to math.MaxInt32 so
+// int(total) cannot overflow in reserveFormattedData. We assert the
+// destination-specific limit via formattedDataLimit rather than driving
+// a multi-gigabyte allocation through the full kernel path, and
+// separately confirm the guard still fires for string_view at the
+// int32 boundary.
 func TestReserveFormattedDataAllowsLargeUtf8AboveInt32(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
@@ -135,8 +138,15 @@ func TestReserveFormattedDataAllowsLargeUtf8AboveInt32(t *testing.T) {
 	largeBldr := array.NewLargeStringBuilder(mem)
 	defer largeBldr.Release()
 
-	if got := formattedDataLimit(largeBldr); got <= math.MaxInt32 {
-		t.Fatalf("large_utf8 destination limit must exceed MaxInt32, got %d", got)
+	got := formattedDataLimit(largeBldr)
+	if int64(math.MaxInt) > math.MaxInt32 {
+		if got <= math.MaxInt32 {
+			t.Fatalf("64-bit: large_utf8 destination limit must exceed MaxInt32, got %d", got)
+		}
+	} else {
+		if got != math.MaxInt32 {
+			t.Fatalf("32-bit: large_utf8 destination limit must clamp to MaxInt32, got %d", got)
+		}
 	}
 
 	viewBldr := array.NewStringViewBuilder(mem)
