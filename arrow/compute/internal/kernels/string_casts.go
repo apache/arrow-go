@@ -20,6 +20,7 @@ package kernels
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"unicode/utf8"
 
@@ -276,7 +277,9 @@ func timeToStringCastExec[T timeIntrinsic](ctx *exec.KernelCtx, batch *exec.Exec
 	defer bldr.Release()
 
 	bldr.Reserve(int(input.Len))
-	bldr.ReserveData(int(input.Len-input.Nulls) * maxFormattedBytes(input.Type))
+	if err := reserveFormattedData(bldr, input, maxFormattedBytes(input.Type)); err != nil {
+		return err
+	}
 
 	bitutils.VisitBitBlocks(input.Buffers[0].Buf, input.Offset, input.Len,
 		func(pos int64) {
@@ -298,7 +301,9 @@ func numericToStringCastExec[T arrow.IntType | arrow.UintType | arrow.FloatType]
 		defer bldr.Release()
 
 		bldr.Reserve(int(input.Len))
-		bldr.ReserveData(int(input.Len-input.Nulls) * maxFormattedBytes(input.Type))
+		if err := reserveFormattedData(bldr, input, maxFormattedBytes(input.Type)); err != nil {
+			return err
+		}
 
 		bitutils.VisitBitBlocks(input.Buffers[0].Buf, input.Offset, input.Len,
 			func(pos int64) {
@@ -309,6 +314,25 @@ func numericToStringCastExec[T arrow.IntType | arrow.UintType | arrow.FloatType]
 		out.TakeOwnership(arr.Data())
 		return nil
 	}
+}
+
+// reserveFormattedData pre-reserves bldr's data buffer for at most
+// (non-null count) * perValueBytes formatted bytes. Returns arrow.ErrInvalid
+// when the product exceeds the int32 single-buffer limit, avoiding a panic
+// inside BinaryViewBuilder.ReserveData. See GH-184 review feedback.
+func reserveFormattedData(bldr array.StringLikeBuilder, input *exec.ArraySpan, perValueBytes int) error {
+	if perValueBytes <= 0 {
+		return nil
+	}
+	total := int64(input.Len-input.Nulls) * int64(perValueBytes)
+	if total > math.MaxInt32 {
+		return fmt.Errorf("%w: formatted cast payload (%d bytes) exceeds single view data buffer limit (%d bytes)",
+			arrow.ErrInvalid, total, math.MaxInt32)
+	}
+	if total > 0 {
+		bldr.ReserveData(int(total))
+	}
+	return nil
 }
 
 // maxFormattedBytes returns an upper bound on the textual representation
@@ -331,7 +355,7 @@ func maxFormattedBytes(dt arrow.DataType) int {
 	case arrow.INT64, arrow.UINT64:
 		return 20 // "-9223372036854775808"
 	case arrow.FLOAT16:
-		return 12 // covers "-NaN", scientific, and decimal forms
+		return 16 // empirical max from strconv.FormatFloat(32): "-0.000100016594" is 15
 	case arrow.FLOAT32:
 		return 25 // scientific notation upper bound
 	case arrow.FLOAT64:
@@ -383,7 +407,9 @@ func castTimestampToString(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.
 
 	strlen := len(fmtstring)
 	bldr.Reserve(int(input.Len))
-	bldr.ReserveData(int(input.Len-input.Nulls) * strlen)
+	if err := reserveFormattedData(bldr, input, strlen); err != nil {
+		return err
+	}
 
 	bitutils.VisitBitBlocks(input.Buffers[0].Buf, input.Offset, input.Len,
 		func(pos int64) {

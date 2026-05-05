@@ -1917,6 +1917,65 @@ func (c *CastSuite) TestNumericToStringViewLargePayload() {
 	})
 }
 
+// TestChunkedMultiBufferViewInputCoalesced is a regression test for the
+// third round of GH-184 review feedback: a *ChunkedDatum whose chunks are
+// multi-buffer view arrays must also be coalesced by the cast meta function
+// before dispatch; otherwise executor.SetMembers on the second chunk panics.
+func (c *CastSuite) TestChunkedMultiBufferViewInputCoalesced() {
+	const (
+		perValue = 200
+		count    = 500 // ~100KB non-inline payload per chunk
+	)
+	chunkStr1 := strings.Repeat("a", perValue)
+	chunkStr2 := strings.Repeat("b", perValue)
+
+	buildChunk := func(s string) arrow.Array {
+		b := array.NewStringViewBuilder(c.mem)
+		defer b.Release()
+		for i := 0; i < count; i++ {
+			b.Append(s)
+		}
+		return b.NewArray()
+	}
+
+	chunk1 := buildChunk(chunkStr1)
+	defer chunk1.Release()
+	chunk2 := buildChunk(chunkStr2)
+	defer chunk2.Release()
+
+	c.Greater(len(chunk1.Data().Buffers()), 3,
+		"test precondition: chunk1 must be multi-buffer")
+	c.Greater(len(chunk2.Data().Buffers()), 3,
+		"test precondition: chunk2 must be multi-buffer")
+
+	chunked := arrow.NewChunked(arrow.BinaryTypes.StringView, []arrow.Array{chunk1, chunk2})
+	defer chunked.Release()
+
+	in := compute.NewDatum(chunked)
+	defer in.Release()
+
+	out, err := compute.CallFunction(context.Background(), "cast",
+		compute.SafeCastOptions(arrow.BinaryTypes.String), in)
+	c.Require().NoError(err)
+	defer out.Release()
+
+	chunks := out.(compute.ArrayLikeDatum).Chunks()
+	total := 0
+	for idx, ch := range chunks {
+		defer ch.Release()
+		sv := ch.(*array.String)
+		for i := 0; i < sv.Len(); i++ {
+			want := chunkStr1
+			if idx == 1 {
+				want = chunkStr2
+			}
+			c.Equalf(want, sv.Value(i), "chunk %d row %d mismatch", idx, i)
+		}
+		total += sv.Len()
+	}
+	c.Equal(count*2, total)
+}
+
 // checkCastArrayOnly performs a cast and compares the resulting array against
 // an expected array built from JSON. It deliberately avoids the per-element
 // scalar iteration path used by checkCast, which relies on scalar.GetScalar

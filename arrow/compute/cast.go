@@ -82,31 +82,72 @@ func RegisterScalarCast(reg FunctionRegistry) {
 	reg.AddFunction(castMetaFunc, false)
 }
 
-// coalesceMultiBufferViewDatum returns a new ArrayDatum whose view array has
-// a single overflow data buffer, or nil if the input does not need
-// coalescing. Non-array and non-view datums are never coalesced. Callers are
-// responsible for releasing the returned datum.
+// coalesceMultiBufferViewDatum returns a new Datum whose view arrays each
+// have a single overflow data buffer, or nil if the input does not need
+// coalescing. Both ArrayDatum and ChunkedDatum view inputs are handled;
+// other datums are never coalesced. Callers are responsible for releasing
+// the returned datum when it is non-nil.
 func coalesceMultiBufferViewDatum(ctx context.Context, d Datum) (Datum, error) {
-	ad, ok := d.(*ArrayDatum)
-	if !ok {
-		return nil, nil
+	switch v := d.(type) {
+	case *ArrayDatum:
+		if !needsViewCoalesce(v.Value) {
+			return nil, nil
+		}
+		mem := exec.GetAllocator(ctx)
+		newData, err := rebuildViewSingleBuffer(mem, v.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &ArrayDatum{Value: newData}, nil
+
+	case *ChunkedDatum:
+		chunks := v.Value.Chunks()
+		needAny := false
+		for _, c := range chunks {
+			if needsViewCoalesce(c.Data()) {
+				needAny = true
+				break
+			}
+		}
+		if !needAny {
+			return nil, nil
+		}
+		mem := exec.GetAllocator(ctx)
+		newChunks := make([]arrow.Array, len(chunks))
+		for i, c := range chunks {
+			if !needsViewCoalesce(c.Data()) {
+				c.Retain()
+				newChunks[i] = c
+				continue
+			}
+			newData, err := rebuildViewSingleBuffer(mem, c.Data())
+			if err != nil {
+				for j := 0; j < i; j++ {
+					newChunks[j].Release()
+				}
+				return nil, err
+			}
+			newChunks[i] = array.MakeFromData(newData)
+			newData.Release()
+		}
+		chunked := arrow.NewChunked(v.Value.DataType(), newChunks)
+		for _, nc := range newChunks {
+			nc.Release()
+		}
+		return &ChunkedDatum{Value: chunked}, nil
 	}
-	data := ad.Value
+	return nil, nil
+}
+
+// needsViewCoalesce reports whether data is a view array whose payload
+// spans more than the single overflow data buffer exec.ArraySpan can carry.
+func needsViewCoalesce(data arrow.ArrayData) bool {
 	switch data.DataType().ID() {
 	case arrow.BINARY_VIEW, arrow.STRING_VIEW:
 	default:
-		return nil, nil
+		return false
 	}
-	if len(data.Buffers()) <= 3 {
-		return nil, nil
-	}
-
-	mem := exec.GetAllocator(ctx)
-	newData, err := rebuildViewSingleBuffer(mem, data)
-	if err != nil {
-		return nil, err
-	}
-	return &ArrayDatum{Value: newData}, nil
+	return len(data.Buffers()) > 3
 }
 
 // rebuildViewSingleBuffer rebuilds a BinaryView/StringView ArrayData so that
