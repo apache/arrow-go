@@ -1,0 +1,241 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//go:build go1.18
+
+package kernels
+
+import (
+	"fmt"
+	"unicode/utf8"
+	"unsafe"
+
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/compute/exec"
+	"github.com/apache/arrow-go/v18/internal/bitutils"
+)
+
+func validateUtf8View(input *exec.ArraySpan) error {
+	views := arrow.ViewHeaderTraits.CastFromBytes(input.Buffers[1].Buf)
+	dataBuffers := make([][]byte, 0, len(input.Buffers)-2)
+	for i := 2; i < len(input.Buffers); i++ {
+		dataBuffers = append(dataBuffers, input.Buffers[i].Buf)
+	}
+
+	return bitutils.VisitBitBlocksShort(input.Buffers[0].Buf, input.Offset, input.Len,
+		func(pos int64) error {
+			h := &views[input.Offset+pos]
+			var v []byte
+			if h.IsInline() {
+				v = h.InlineBytes()
+			} else {
+				off := h.BufferOffset()
+				v = dataBuffers[h.BufferIndex()][off : off+int32(h.Len())]
+			}
+			if !utf8.Valid(v) {
+				return fmt.Errorf("%w: invalid UTF8 bytes: %x", arrow.ErrInvalid, v)
+			}
+			return nil
+		}, func() error { return nil })
+}
+
+func unsafeStringBytes(s string) []byte {
+	if len(s) == 0 {
+		return nil
+	}
+	return unsafe.Slice(unsafe.StringData(s), len(s))
+}
+
+type binaryAppender struct {
+	bldr        array.Builder
+	appendBytes func([]byte)
+}
+
+func newBinaryAppender(bldr array.Builder) (binaryAppender, error) {
+	switch b := bldr.(type) {
+	case *array.BinaryBuilder:
+		return binaryAppender{bldr: b, appendBytes: b.Append}, nil
+	case *array.StringBuilder:
+		return binaryAppender{bldr: b, appendBytes: b.BinaryBuilder.Append}, nil
+	case *array.LargeStringBuilder:
+		return binaryAppender{bldr: b, appendBytes: b.BinaryBuilder.Append}, nil
+	case *array.BinaryViewBuilder:
+		return binaryAppender{bldr: b, appendBytes: b.Append}, nil
+	case *array.StringViewBuilder:
+		return binaryAppender{bldr: b, appendBytes: b.BinaryViewBuilder.Append}, nil
+	default:
+		return binaryAppender{}, fmt.Errorf("%w: unsupported builder type %T for binary-like output",
+			arrow.ErrNotImplemented, bldr)
+	}
+}
+
+// CastBinaryToBinaryView casts a Binary, LargeBinary, String, LargeString,
+// or FixedSizeBinary array into a BinaryView or StringView array. When the
+// source is a non-utf8 binary type and the destination is a utf8 view type,
+// every non-null element is validated as UTF-8 unless
+// CastOptions.AllowInvalidUtf8 is set.
+func CastBinaryToBinaryView(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+	opts := ctx.State.(CastState)
+	input := &batch.Values[0].Array
+	outputType := out.Type.(arrow.BinaryDataType)
+
+	inputIsUtf8 := false
+	if b, ok := input.Type.(arrow.BinaryDataType); ok {
+		inputIsUtf8 = b.IsUtf8()
+	}
+
+	if !inputIsUtf8 && outputType.IsUtf8() && !opts.AllowInvalidUtf8 {
+		switch input.Type.ID() {
+		case arrow.BINARY:
+			if err := validateUtf8[int32](input); err != nil {
+				return err
+			}
+		case arrow.LARGE_BINARY:
+			if err := validateUtf8[int64](input); err != nil {
+				return err
+			}
+		case arrow.FIXED_SIZE_BINARY:
+			if err := validateUtf8Fsb(input); err != nil {
+				return err
+			}
+		}
+	}
+
+	rawBldr := array.NewBuilder(exec.GetAllocator(ctx.Ctx), out.Type)
+	defer rawBldr.Release()
+	rawBldr.Reserve(int(input.Len))
+
+	ba, err := newBinaryAppender(rawBldr)
+	if err != nil {
+		return err
+	}
+
+	arr := input.MakeArray()
+	defer arr.Release()
+
+	var getVal func(int) []byte
+	switch a := arr.(type) {
+	case *array.Binary:
+		getVal = a.Value
+	case *array.LargeBinary:
+		getVal = a.Value
+	case *array.String:
+		getVal = func(i int) []byte { return unsafeStringBytes(a.Value(i)) }
+	case *array.LargeString:
+		getVal = func(i int) []byte { return unsafeStringBytes(a.Value(i)) }
+	case *array.FixedSizeBinary:
+		getVal = a.Value
+	default:
+		return fmt.Errorf("%w: unsupported input type for cast to %s: %s",
+			arrow.ErrNotImplemented, out.Type, input.Type)
+	}
+
+	for i := 0; i < arr.Len(); i++ {
+		if arr.IsNull(i) {
+			ba.bldr.AppendNull()
+			continue
+		}
+		ba.appendBytes(getVal(i))
+	}
+
+	result := ba.bldr.NewArray()
+	out.TakeOwnership(result.Data())
+	return nil
+}
+
+// CastBinaryViewToBinary casts a BinaryView or StringView array into a
+// Binary, LargeBinary, String, or LargeString array, materializing the
+// referenced byte ranges into a single contiguous data buffer. UTF-8
+// validation is performed when casting from a non-utf8 view into a utf8
+// destination unless CastOptions.AllowInvalidUtf8 is set.
+func CastBinaryViewToBinary[OutOffsetT int32 | int64](ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+	opts := ctx.State.(CastState)
+	input := &batch.Values[0].Array
+	inputType := input.Type.(arrow.BinaryDataType)
+	outputType := out.Type.(arrow.BinaryDataType)
+
+	if !inputType.IsUtf8() && outputType.IsUtf8() && !opts.AllowInvalidUtf8 {
+		if err := validateUtf8View(input); err != nil {
+			return err
+		}
+	}
+
+	rawBldr := array.NewBuilder(exec.GetAllocator(ctx.Ctx), out.Type)
+	defer rawBldr.Release()
+	rawBldr.Reserve(int(input.Len))
+
+	ba, err := newBinaryAppender(rawBldr)
+	if err != nil {
+		return err
+	}
+
+	arr := input.MakeArray()
+	defer arr.Release()
+
+	var getVal func(int) []byte
+	switch a := arr.(type) {
+	case *array.BinaryView:
+		getVal = a.Value
+	case *array.StringView:
+		getVal = func(i int) []byte { return unsafeStringBytes(a.Value(i)) }
+	default:
+		return fmt.Errorf("%w: unsupported input type for view-to-binary cast: %s",
+			arrow.ErrNotImplemented, input.Type)
+	}
+
+	var totalBytes int64
+	for i := 0; i < arr.Len(); i++ {
+		if !arr.IsNull(i) {
+			totalBytes += int64(len(getVal(i)))
+		}
+	}
+	if totalBytes > int64(MaxOf[OutOffsetT]()) {
+		return fmt.Errorf("%w: failed casting from %s to %s: input array too large",
+			arrow.ErrInvalid, input.Type, out.Type)
+	}
+
+	for i := 0; i < arr.Len(); i++ {
+		if arr.IsNull(i) {
+			ba.bldr.AppendNull()
+			continue
+		}
+		ba.appendBytes(getVal(i))
+	}
+
+	result := ba.bldr.NewArray()
+	out.TakeOwnership(result.Data())
+	return nil
+}
+
+// CastBinaryViewToBinaryView handles casts between BinaryView and StringView
+// (and same-type view casts). The cast is zero-copy; UTF-8 validation is
+// performed when casting from a binary_view into a string_view unless
+// CastOptions.AllowInvalidUtf8 is set.
+func CastBinaryViewToBinaryView(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+	opts := ctx.State.(CastState)
+	input := &batch.Values[0].Array
+	inputType := input.Type.(arrow.BinaryDataType)
+	outputType := out.Type.(arrow.BinaryDataType)
+
+	if !inputType.IsUtf8() && outputType.IsUtf8() && !opts.AllowInvalidUtf8 {
+		if err := validateUtf8View(input); err != nil {
+			return err
+		}
+	}
+
+	return ZeroCopyCastExec(ctx, batch, out)
+}

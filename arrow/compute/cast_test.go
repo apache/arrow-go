@@ -1527,6 +1527,233 @@ func (c *CastSuite) TestStringToString() {
 	}
 }
 
+// TestBinaryLikeToBinaryView covers GH-184: casting between base-binary
+// (binary, large_binary, string, large_string, fixed_size_binary) and the
+// view variants (binary_view, string_view). It verifies round-trip fidelity
+// for both short (<=12 byte, inline) and long (out-of-line) values, across
+// null bitmaps, and exercises UTF-8 validation semantics.
+func (c *CastSuite) TestBinaryLikeToBinaryView() {
+	const strInJSON = `["a", "short", "this is a string well over twelve bytes", "", null]`
+
+	for _, from := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString} {
+		c.Run("from "+from.String(), func() {
+			c.Run("to string_view", func() {
+				c.checkCastArrayOnly(from, arrow.BinaryTypes.StringView, strInJSON, strInJSON)
+				c.checkCastArrayOnly(from, arrow.BinaryTypes.StringView, `[]`, `[]`)
+			})
+			c.Run("to binary_view", func() {
+				exp := c.buildBinaryViewArray([][]byte{
+					[]byte("a"), []byte("short"),
+					[]byte("this is a string well over twelve bytes"),
+					[]byte(""), nil,
+				})
+				defer exp.Release()
+
+				in, _, err := array.FromJSON(c.mem, from, strings.NewReader(strInJSON), array.WithUseNumber())
+				c.Require().NoError(err)
+				defer in.Release()
+
+				got, err := compute.CastArray(context.Background(), in,
+					compute.SafeCastOptions(arrow.BinaryTypes.BinaryView))
+				c.Require().NoError(err)
+				defer got.Release()
+
+				c.Truef(array.Equal(exp, got), "expected %s, got %s", exp, got)
+			})
+		})
+	}
+
+	const binJSON = `["aGk=", "dGhpcyBpcyBieXRlcyBiZXlvbmQgdHdlbHZlIGNoYXJz", "//4=", null]`
+	for _, from := range []arrow.DataType{arrow.BinaryTypes.Binary, arrow.BinaryTypes.LargeBinary} {
+		c.Run("from "+from.String(), func() {
+			c.Run("to binary_view", func() {
+				c.checkCastArrayOnly(from, arrow.BinaryTypes.BinaryView, binJSON, binJSON)
+			})
+			c.Run("to string_view rejects invalid utf8", func() {
+				invalid := c.invalidUtf8Arr(from)
+				defer invalid.Release()
+				_, err := compute.CastArray(context.Background(), invalid,
+					compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+				c.ErrorIs(err, arrow.ErrInvalid)
+			})
+			c.Run("to string_view allows invalid utf8 when opted in", func() {
+				invalid := c.invalidUtf8Arr(from)
+				defer invalid.Release()
+				opts := compute.SafeCastOptions(arrow.BinaryTypes.StringView)
+				opts.AllowInvalidUtf8 = true
+				out, err := compute.CastArray(context.Background(), invalid, opts)
+				c.NoError(err)
+				defer out.Release()
+				c.Equal(invalid.Len(), out.Len())
+			})
+		})
+	}
+
+	c.Run("from fixed_size_binary", func() {
+		fsbType := &arrow.FixedSizeBinaryType{ByteWidth: 3}
+		in, _, err := array.FromJSON(c.mem, fsbType,
+			strings.NewReader(`["YWJj", "ZGVm", null]`), array.WithUseNumber())
+		c.Require().NoError(err)
+		defer in.Release()
+
+		exp := c.buildBinaryViewArray([][]byte{[]byte("abc"), []byte("def"), nil})
+		defer exp.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.BinaryView))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		c.Truef(array.Equal(exp, got), "expected %s, got %s", exp, got)
+	})
+}
+
+// TestBinaryViewToBinaryLike covers the reverse direction of GH-184:
+// materializing view arrays back into contiguous binary/string arrays.
+func (c *CastSuite) TestBinaryViewToBinaryLike() {
+	const strJSON = `["a", "short", "this is a string well over twelve bytes", "", null]`
+
+	for _, to := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString} {
+		c.Run("string_view to "+to.String(), func() {
+			c.checkCastArrayOnly(arrow.BinaryTypes.StringView, to, strJSON, strJSON)
+			c.checkCastArrayOnly(arrow.BinaryTypes.StringView, to, `[]`, `[]`)
+		})
+	}
+
+	const binJSON = `["aGk=", "dGhpcyBpcyBieXRlcyBiZXlvbmQgdHdlbHZlIGNoYXJz", "//4=", null]`
+	for _, to := range []arrow.DataType{arrow.BinaryTypes.Binary, arrow.BinaryTypes.LargeBinary} {
+		c.Run("binary_view to "+to.String(), func() {
+			c.checkCastArrayOnly(arrow.BinaryTypes.BinaryView, to, binJSON, binJSON)
+		})
+	}
+
+	c.Run("binary_view to string rejects invalid utf8", func() {
+		invalid := c.buildBinaryViewArray([][]byte{[]byte("ok"), {0xff, 0xfe}})
+		defer invalid.Release()
+
+		_, err := compute.CastArray(context.Background(), invalid,
+			compute.SafeCastOptions(arrow.BinaryTypes.String))
+		c.ErrorIs(err, arrow.ErrInvalid)
+	})
+}
+
+// TestBinaryViewToBinaryView covers cross-view casts (binary_view <->
+// string_view) and identity casts. These are zero-copy except for UTF-8
+// validation in the binary_view -> string_view direction.
+func (c *CastSuite) TestBinaryViewToBinaryView() {
+	values := [][]byte{
+		[]byte("a"), []byte("short"),
+		[]byte("this is a string well over twelve bytes"),
+		[]byte(""), nil,
+	}
+
+	c.Run("string_view to binary_view", func() {
+		in := c.buildStringViewArray([]string{"a", "short", "this is a string well over twelve bytes", "", ""}, []bool{true, true, true, true, false})
+		defer in.Release()
+		exp := c.buildBinaryViewArray(values)
+		defer exp.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.BinaryView))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		c.Truef(array.Equal(exp, got), "expected %s, got %s", exp, got)
+	})
+
+	c.Run("binary_view to string_view valid utf8", func() {
+		in := c.buildBinaryViewArray(values)
+		defer in.Release()
+		exp := c.buildStringViewArray([]string{"a", "short", "this is a string well over twelve bytes", "", ""},
+			[]bool{true, true, true, true, false})
+		defer exp.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		c.Truef(array.Equal(exp, got), "expected %s, got %s", exp, got)
+	})
+
+	c.Run("binary_view to string_view rejects invalid utf8", func() {
+		invalid := c.buildBinaryViewArray([][]byte{[]byte("ok"), {0x80, 0x81}})
+		defer invalid.Release()
+
+		_, err := compute.CastArray(context.Background(), invalid,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.ErrorIs(err, arrow.ErrInvalid)
+	})
+}
+
+// TestCanCastViewTypes verifies CanCast advertises the new view cast paths
+// registered for GH-184.
+func (c *CastSuite) TestCanCastViewTypes() {
+	baseBinary := []arrow.DataType{
+		arrow.BinaryTypes.Binary, arrow.BinaryTypes.LargeBinary,
+		arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString,
+	}
+	viewTypes := []arrow.DataType{arrow.BinaryTypes.BinaryView, arrow.BinaryTypes.StringView}
+
+	for _, from := range baseBinary {
+		for _, to := range viewTypes {
+			c.Truef(compute.CanCast(from, to), "expected CanCast %s -> %s", from, to)
+			c.Truef(compute.CanCast(to, from), "expected CanCast %s -> %s", to, from)
+		}
+	}
+
+	for _, from := range viewTypes {
+		for _, to := range viewTypes {
+			c.Truef(compute.CanCast(from, to), "expected CanCast %s -> %s", from, to)
+		}
+	}
+
+	c.True(compute.CanCast(&arrow.FixedSizeBinaryType{ByteWidth: 3}, arrow.BinaryTypes.BinaryView))
+	c.True(compute.CanCast(&arrow.FixedSizeBinaryType{ByteWidth: 3}, arrow.BinaryTypes.StringView))
+}
+
+// checkCastArrayOnly performs a cast and compares the resulting array against
+// an expected array built from JSON. It deliberately avoids the per-element
+// scalar iteration path used by checkCast, which relies on scalar.GetScalar
+// - that helper does not yet support view types (unrelated to GH-184).
+func (c *CastSuite) checkCastArrayOnly(dtIn, dtOut arrow.DataType, inJSON, outJSON string) {
+	inArr, _, err := array.FromJSON(c.mem, dtIn, strings.NewReader(inJSON), array.WithUseNumber())
+	c.Require().NoError(err)
+	defer inArr.Release()
+
+	expArr, _, err := array.FromJSON(c.mem, dtOut, strings.NewReader(outJSON), array.WithUseNumber())
+	c.Require().NoError(err)
+	defer expArr.Release()
+
+	opts := compute.SafeCastOptions(dtOut)
+	got, err := compute.CastArray(context.Background(), inArr, opts)
+	c.Require().NoError(err)
+	defer got.Release()
+
+	c.Truef(array.Equal(expArr, got), "cast %s -> %s: expected %s, got %s",
+		dtIn, dtOut, expArr, got)
+}
+
+func (c *CastSuite) buildBinaryViewArray(values [][]byte) arrow.Array {
+	bldr := array.NewBinaryViewBuilder(c.mem)
+	defer bldr.Release()
+	for _, v := range values {
+		if v == nil {
+			bldr.AppendNull()
+			continue
+		}
+		bldr.Append(v)
+	}
+	return bldr.NewArray()
+}
+
+func (c *CastSuite) buildStringViewArray(values []string, valid []bool) arrow.Array {
+	bldr := array.NewStringViewBuilder(c.mem)
+	defer bldr.Release()
+	bldr.AppendValues(values, valid)
+	return bldr.NewArray()
+}
+
 func (c *CastSuite) TestStringToInt() {
 	for _, stype := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString} {
 		for _, dt := range signedIntTypes {

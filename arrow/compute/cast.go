@@ -537,6 +537,8 @@ func getBinaryLikeCasts() []*castFunction {
 	addFn("cast_large_binary", arrow.LARGE_BINARY, kernels.GetToBinaryKernels(arrow.BinaryTypes.LargeBinary))
 	addFn("cast_string", arrow.STRING, kernels.GetToBinaryKernels(arrow.BinaryTypes.String))
 	addFn("cast_large_string", arrow.LARGE_STRING, kernels.GetToBinaryKernels(arrow.BinaryTypes.LargeString))
+	addFn("cast_binary_view", arrow.BINARY_VIEW, kernels.GetToBinaryKernels(arrow.BinaryTypes.BinaryView))
+	addFn("cast_string_view", arrow.STRING_VIEW, kernels.GetToBinaryKernels(arrow.BinaryTypes.StringView))
 	addFn("cast_fixed_sized_binary", arrow.FIXED_SIZE_BINARY, kernels.GetFsbCastKernels())
 	return out
 }

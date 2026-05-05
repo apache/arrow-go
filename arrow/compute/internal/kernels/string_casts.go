@@ -178,14 +178,52 @@ func addBinaryToBinaryCast[InOffsetT, OutOffsetT int32 | int64](inType arrow.Typ
 		outType, CastBinaryToBinary[InOffsetT, OutOffsetT], nil)
 }
 
+func addViewToBinaryCast[OutOffsetT int32 | int64](inType arrow.Type, outType exec.OutputType) exec.ScalarKernel {
+	k := exec.NewScalarKernel([]exec.InputType{exec.NewIDInput(inType)},
+		outType, CastBinaryViewToBinary[OutOffsetT], nil)
+	k.NullHandling = exec.NullComputedNoPrealloc
+	k.MemAlloc = exec.MemNoPrealloc
+	return k
+}
+
+func addBinaryToBinaryViewCast(inType arrow.Type, outType exec.OutputType) exec.ScalarKernel {
+	k := exec.NewScalarKernel([]exec.InputType{exec.NewIDInput(inType)},
+		outType, CastBinaryToBinaryView, nil)
+	k.NullHandling = exec.NullComputedNoPrealloc
+	k.MemAlloc = exec.MemNoPrealloc
+	return k
+}
+
+func addViewToViewCast(inType arrow.Type, outType exec.OutputType) exec.ScalarKernel {
+	k := exec.NewScalarKernel([]exec.InputType{exec.NewIDInput(inType)},
+		outType, CastBinaryViewToBinaryView, nil)
+	k.NullHandling = exec.NullComputedNoPrealloc
+	k.MemAlloc = exec.MemNoPrealloc
+	return k
+}
+
 func addToBinaryKernels[OffsetsT int32 | int64](outType exec.OutputType, kernels []exec.ScalarKernel) []exec.ScalarKernel {
 	return append(kernels,
 		addBinaryToBinaryCast[int32, OffsetsT](arrow.STRING, outType),
 		addBinaryToBinaryCast[int32, OffsetsT](arrow.BINARY, outType),
 		addBinaryToBinaryCast[int64, OffsetsT](arrow.LARGE_STRING, outType),
 		addBinaryToBinaryCast[int64, OffsetsT](arrow.LARGE_BINARY, outType),
+		addViewToBinaryCast[OffsetsT](arrow.BINARY_VIEW, outType),
+		addViewToBinaryCast[OffsetsT](arrow.STRING_VIEW, outType),
 		exec.NewScalarKernel([]exec.InputType{exec.NewIDInput(arrow.FIXED_SIZE_BINARY)},
 			outType, CastFsbToBinary[OffsetsT], nil),
+	)
+}
+
+func addToBinaryViewKernels(outType exec.OutputType, kernels []exec.ScalarKernel) []exec.ScalarKernel {
+	return append(kernels,
+		addBinaryToBinaryViewCast(arrow.STRING, outType),
+		addBinaryToBinaryViewCast(arrow.BINARY, outType),
+		addBinaryToBinaryViewCast(arrow.LARGE_STRING, outType),
+		addBinaryToBinaryViewCast(arrow.LARGE_BINARY, outType),
+		addBinaryToBinaryViewCast(arrow.FIXED_SIZE_BINARY, outType),
+		addViewToViewCast(arrow.BINARY_VIEW, outType),
+		addViewToViewCast(arrow.STRING_VIEW, outType),
 	)
 }
 
@@ -403,6 +441,11 @@ func GetToBinaryKernels(outType arrow.DataType) []exec.ScalarKernel {
 		return addNumericAndTemporalToStringCasts(outputType, out)
 	case arrow.LARGE_STRING:
 		out = addToBinaryKernels[int64](outputType, out)
+		return addNumericAndTemporalToStringCasts(outputType, out)
+	case arrow.BINARY_VIEW:
+		return addToBinaryViewKernels(outputType, out)
+	case arrow.STRING_VIEW:
+		out = addToBinaryViewKernels(outputType, out)
 		return addNumericAndTemporalToStringCasts(outputType, out)
 	}
 	return nil
