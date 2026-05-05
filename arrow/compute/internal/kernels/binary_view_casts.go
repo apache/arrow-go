@@ -20,6 +20,7 @@ package kernels
 
 import (
 	"fmt"
+	"math"
 	"unicode/utf8"
 	"unsafe"
 
@@ -63,20 +64,21 @@ func unsafeStringBytes(s string) []byte {
 type binaryAppender struct {
 	bldr        array.Builder
 	appendBytes func([]byte)
+	reserveData func(int)
 }
 
 func newBinaryAppender(bldr array.Builder) (binaryAppender, error) {
 	switch b := bldr.(type) {
 	case *array.BinaryBuilder:
-		return binaryAppender{bldr: b, appendBytes: b.Append}, nil
+		return binaryAppender{bldr: b, appendBytes: b.Append, reserveData: b.ReserveData}, nil
 	case *array.StringBuilder:
-		return binaryAppender{bldr: b, appendBytes: b.BinaryBuilder.Append}, nil
+		return binaryAppender{bldr: b, appendBytes: b.BinaryBuilder.Append, reserveData: b.BinaryBuilder.ReserveData}, nil
 	case *array.LargeStringBuilder:
-		return binaryAppender{bldr: b, appendBytes: b.BinaryBuilder.Append}, nil
+		return binaryAppender{bldr: b, appendBytes: b.BinaryBuilder.Append, reserveData: b.BinaryBuilder.ReserveData}, nil
 	case *array.BinaryViewBuilder:
-		return binaryAppender{bldr: b, appendBytes: b.Append}, nil
+		return binaryAppender{bldr: b, appendBytes: b.Append, reserveData: b.ReserveData}, nil
 	case *array.StringViewBuilder:
-		return binaryAppender{bldr: b, appendBytes: b.BinaryViewBuilder.Append}, nil
+		return binaryAppender{bldr: b, appendBytes: b.BinaryViewBuilder.Append, reserveData: b.BinaryViewBuilder.ReserveData}, nil
 	default:
 		return binaryAppender{}, fmt.Errorf("%w: unsupported builder type %T for binary-like output",
 			arrow.ErrNotImplemented, bldr)
@@ -142,6 +144,29 @@ func CastBinaryToBinaryView(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec
 	default:
 		return fmt.Errorf("%w: unsupported input type for cast to %s: %s",
 			arrow.ErrNotImplemented, out.Type, input.Type)
+	}
+
+	// Pre-size the out-of-line data buffer to the total required capacity so
+	// the builder allocates a single overflow block. ArraySpan only has three
+	// buffer slots (bitmap + view headers + one data buffer); if we let the
+	// builder spill into a second block, TakeOwnership would index past
+	// Buffers[2] and panic. See the review feedback on GH-184.
+	var outOfLineTotal int64
+	for i := 0; i < arr.Len(); i++ {
+		if arr.IsNull(i) {
+			continue
+		}
+		vlen := len(getVal(i))
+		if !arrow.IsViewInline(vlen) {
+			outOfLineTotal += int64(vlen)
+		}
+	}
+	if outOfLineTotal > math.MaxInt32 {
+		return fmt.Errorf("%w: cast from %s to %s: out-of-line payload (%d bytes) exceeds single view data buffer limit (%d bytes)",
+			arrow.ErrInvalid, input.Type, out.Type, outOfLineTotal, math.MaxInt32)
+	}
+	if outOfLineTotal > 0 {
+		ba.reserveData(int(outOfLineTotal))
 	}
 
 	for i := 0; i < arr.Len(); i++ {

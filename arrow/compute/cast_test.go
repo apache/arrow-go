@@ -1712,6 +1712,53 @@ func (c *CastSuite) TestCanCastViewTypes() {
 	c.True(compute.CanCast(&arrow.FixedSizeBinaryType{ByteWidth: 3}, arrow.BinaryTypes.StringView))
 }
 
+// TestBinaryLikeToBinaryViewLargePayload is a regression test for the GH-184
+// review feedback: when the cast output's out-of-line payload would exceed
+// the builder's default 32KB block size, the kernel must still produce a
+// single-data-buffer view so the result fits in ArraySpan's fixed 3-buffer
+// layout. A multi-buffer result would panic in out.TakeOwnership.
+func (c *CastSuite) TestBinaryLikeToBinaryViewLargePayload() {
+	const (
+		perValue = 200
+		count    = 500 // total out-of-line = 100_000 bytes, comfortably over the 32KB block default
+	)
+
+	longStr := strings.Repeat("x", perValue)
+
+	sb := array.NewStringBuilder(c.mem)
+	defer sb.Release()
+	for i := 0; i < count; i++ {
+		sb.Append(longStr)
+	}
+	in := sb.NewArray()
+	defer in.Release()
+
+	for _, to := range []arrow.DataType{arrow.BinaryTypes.StringView, arrow.BinaryTypes.BinaryView} {
+		c.Run("to "+to.String(), func() {
+			got, err := compute.CastArray(context.Background(), in,
+				compute.SafeCastOptions(to))
+			c.Require().NoError(err)
+			defer got.Release()
+
+			c.Equal(count, got.Len())
+			c.LessOrEqualf(len(got.Data().Buffers()), 3,
+				"expected <=3 buffers (bitmap + view headers + 1 data), got %d",
+				len(got.Data().Buffers()))
+
+			switch v := got.(type) {
+			case *array.StringView:
+				for i := 0; i < v.Len(); i++ {
+					c.Equalf(longStr, v.Value(i), "row %d mismatch", i)
+				}
+			case *array.BinaryView:
+				for i := 0; i < v.Len(); i++ {
+					c.Equalf(longStr, string(v.Value(i)), "row %d mismatch", i)
+				}
+			}
+		})
+	}
+}
+
 // checkCastArrayOnly performs a cast and compares the resulting array against
 // an expected array built from JSON. It deliberately avoids the per-element
 // scalar iteration path used by checkCast, which relies on scalar.GetScalar
