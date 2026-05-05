@@ -1975,6 +1975,110 @@ func (c *CastSuite) TestChunkedMultiBufferViewInputCoalesced() {
 	c.Equal(count*2, total)
 }
 
+// TestViewDictionaryUnpackCast is a regression test for the GH-184
+// fifth-round review finding: a cast whose input is a dictionary whose
+// values are string_view or binary_view went through unpackDictionary's
+// TakeArray path, which has no view kernel and errored out. Dictionary
+// unpacking now handles view-typed values directly. Covers dict<string_view>
+// -> utf8, dict<string_view> -> string_view (dict removal), dict<binary_view>
+// -> binary, and null/empty preservation.
+func (c *CastSuite) TestViewDictionaryUnpackCast() {
+	buildDict := func(values arrow.Array, indices []int32, valid []bool) *array.Dictionary {
+		ibldr := array.NewInt32Builder(c.mem)
+		defer ibldr.Release()
+		ibldr.AppendValues(indices, valid)
+		idx := ibldr.NewArray()
+		defer idx.Release()
+
+		dictType := &arrow.DictionaryType{
+			IndexType: arrow.PrimitiveTypes.Int32,
+			ValueType: values.DataType(),
+		}
+		d := array.NewData(dictType, idx.Len(), idx.Data().Buffers(), nil,
+			idx.NullN(), 0)
+		d.SetDictionary(values.Data())
+		da := array.NewDictionaryData(d)
+		d.Release()
+		return da
+	}
+
+	c.Run("string_view dict to utf8", func() {
+		vals := c.buildStringViewArray([]string{"foo", "bar", "baz"}, nil)
+		defer vals.Release()
+		dict := buildDict(vals, []int32{0, 1, 0, 2}, nil)
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.String))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		sv := out.(*array.String)
+		c.Equal(4, sv.Len())
+		c.Equal("foo", sv.Value(0))
+		c.Equal("bar", sv.Value(1))
+		c.Equal("foo", sv.Value(2))
+		c.Equal("baz", sv.Value(3))
+	})
+
+	c.Run("string_view dict to string_view", func() {
+		vals := c.buildStringViewArray([]string{"alpha", "beta"}, nil)
+		defer vals.Release()
+		dict := buildDict(vals, []int32{1, 0, 1}, nil)
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		sv := out.(*array.StringView)
+		c.Equal(3, sv.Len())
+		c.Equal("beta", sv.Value(0))
+		c.Equal("alpha", sv.Value(1))
+		c.Equal("beta", sv.Value(2))
+	})
+
+	c.Run("binary_view dict to binary", func() {
+		vals := c.buildBinaryViewArray([][]byte{[]byte("\x01\x02"), []byte("\x03")})
+		defer vals.Release()
+		dict := buildDict(vals, []int32{0, 1, 0}, nil)
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.Binary))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		bv := out.(*array.Binary)
+		c.Equal(3, bv.Len())
+		c.Equal([]byte("\x01\x02"), bv.Value(0))
+		c.Equal([]byte("\x03"), bv.Value(1))
+		c.Equal([]byte("\x01\x02"), bv.Value(2))
+	})
+
+	c.Run("string_view dict with nulls", func() {
+		vals := c.buildStringViewArray([]string{"x", "y"}, nil)
+		defer vals.Release()
+		dict := buildDict(vals, []int32{0, 0, 1}, []bool{true, false, true})
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.String))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		sv := out.(*array.String)
+		c.Equal(3, sv.Len())
+		c.Equal(1, sv.NullN())
+		c.False(sv.IsNull(0))
+		c.True(sv.IsNull(1))
+		c.False(sv.IsNull(2))
+		c.Equal("x", sv.Value(0))
+		c.Equal("y", sv.Value(2))
+	})
+}
+
 // checkCastArrayOnly performs a cast and compares the resulting array against
 // an expected array built from JSON. It deliberately avoids the per-element
 // scalar iteration path used by checkCast, which relies on scalar.GetScalar

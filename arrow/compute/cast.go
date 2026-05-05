@@ -314,7 +314,18 @@ func unpackDictionary(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecR
 			arrow.ErrInvalid, toType, dictType)
 	}
 
-	unpacked, err := TakeArray(ctx.Ctx, dictArr.Dictionary(), dictArr.Indices())
+	var (
+		unpacked arrow.Array
+		err      error
+	)
+	switch dictArr.Dictionary().DataType().ID() {
+	case arrow.STRING_VIEW, arrow.BINARY_VIEW:
+		// array_take has no view kernel, so unpack view-typed dictionaries
+		// directly into a fresh view array instead of going through TakeArray.
+		unpacked, err = unpackViewDictionary(exec.GetAllocator(ctx.Ctx), dictArr)
+	default:
+		unpacked, err = TakeArray(ctx.Ctx, dictArr.Dictionary(), dictArr.Indices())
+	}
 	if err != nil {
 		return err
 	}
@@ -330,6 +341,43 @@ func unpackDictionary(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecR
 
 	out.TakeOwnership(unpacked.Data())
 	return nil
+}
+
+// unpackViewDictionary materializes a dictionary whose values are a view
+// type (string_view or binary_view) into a flat view array of the same
+// type, preserving per-element nulls from the dictionary indices. This
+// exists because array_take has no view kernel; the cast meta function
+// still needs to expand dictionaries as part of DICTIONARY -> X casts.
+func unpackViewDictionary(mem memory.Allocator, dictArr *array.Dictionary) (arrow.Array, error) {
+	switch vals := dictArr.Dictionary().(type) {
+	case *array.StringView:
+		bldr := array.NewStringViewBuilder(mem)
+		defer bldr.Release()
+		bldr.Reserve(dictArr.Len())
+		for i := 0; i < dictArr.Len(); i++ {
+			if dictArr.IsNull(i) {
+				bldr.AppendNull()
+				continue
+			}
+			bldr.Append(vals.Value(dictArr.GetValueIndex(i)))
+		}
+		return bldr.NewArray(), nil
+	case *array.BinaryView:
+		bldr := array.NewBinaryViewBuilder(mem)
+		defer bldr.Release()
+		bldr.Reserve(dictArr.Len())
+		for i := 0; i < dictArr.Len(); i++ {
+			if dictArr.IsNull(i) {
+				bldr.AppendNull()
+				continue
+			}
+			bldr.Append(vals.Value(dictArr.GetValueIndex(i)))
+		}
+		return bldr.NewArray(), nil
+	default:
+		return nil, fmt.Errorf("%w: unpackViewDictionary: expected view-typed dictionary values, got %s",
+			arrow.ErrInvalid, vals.DataType())
+	}
 }
 
 func CastFromExtension(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
