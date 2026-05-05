@@ -1916,6 +1916,35 @@ func (c *CastSuite) TestNumericToStringViewLargePayload() {
 			"expected <=3 buffers for string_view output, got %d",
 			len(got.Data().Buffers()))
 	})
+
+	// Regression test for GH-184 eighth-round review finding: time32[ms]
+	// formats to exactly 12 bytes ("HH:MM:SS.sss") which ViewHeader stores
+	// inline (size <= 12), so the inline-skip in reserveFormattedData must
+	// treat 12 as inline (<=12) rather than strictly < 12 via
+	// arrow.IsViewInline. The boundary itself is exercised directly in
+	// TestReserveFormattedDataInlineViewSkip; this is the cast-level
+	// smoke test verifying the end-to-end path stays within a single
+	// overflow buffer.
+	c.Run("time32[ms] to string_view stays inline", func() {
+		t32Type := &arrow.Time32Type{Unit: arrow.Millisecond}
+		bldr := array.NewTime32Builder(c.mem, t32Type)
+		defer bldr.Release()
+		for i := 0; i < count; i++ {
+			bldr.Append(arrow.Time32(int32(i)))
+		}
+		in := bldr.NewArray()
+		defer in.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		c.Equal(count, got.Len())
+		c.LessOrEqualf(len(got.Data().Buffers()), 3,
+			"expected <=3 buffers for string_view output, got %d",
+			len(got.Data().Buffers()))
+	})
 }
 
 // TestChunkedMultiBufferViewInputCoalesced is a regression test for the

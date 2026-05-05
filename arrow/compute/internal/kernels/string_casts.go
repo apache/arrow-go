@@ -342,14 +342,14 @@ func numericToStringCastExec[T arrow.IntType | arrow.UintType | arrow.FloatType]
 // when the product exceeds the destination builder's single-buffer limit,
 // avoiding a panic inside BinaryViewBuilder.ReserveData or an int32 offset
 // overflow in StringBuilder. For view builders whose per-value upper bound
-// is ≤ 12 bytes, all values are stored inline in view headers and consume
-// no overflow data, so reservation and the limit check are skipped. See
-// GH-184 review feedback.
+// fits inline (<= 12 bytes, matching ViewHeader.IsInline), all values are
+// stored inline in view headers and consume no overflow data, so
+// reservation and the limit check are skipped. See GH-184 review feedback.
 func reserveFormattedData(bldr array.StringLikeBuilder, input *exec.ArraySpan, perValueBytes int) error {
 	if perValueBytes <= 0 {
 		return nil
 	}
-	if isViewBuilder(bldr) && arrow.IsViewInline(perValueBytes) {
+	if isViewBuilder(bldr) && viewHeaderStoresInline(perValueBytes) {
 		return nil
 	}
 	total := int64(input.Len-input.Nulls) * int64(perValueBytes)
@@ -382,6 +382,16 @@ func reserveFormattedDataExact(bldr array.StringLikeBuilder, total int64) error 
 func isViewBuilder(bldr array.StringLikeBuilder) bool {
 	_, ok := bldr.(*array.StringViewBuilder)
 	return ok
+}
+
+// viewHeaderStoresInline reports whether a value of size n fits inside a
+// view header's 12-byte inline slot, matching ViewHeader.IsInline (<= 12).
+// arrow.IsViewInline uses strict '<' which would mis-classify 12-byte
+// values like time32[ms]'s "HH:MM:SS.sss" as non-inline and reject them
+// against the overflow-buffer limit even though the builder stores them
+// inline.
+func viewHeaderStoresInline(n int) bool {
+	return n <= 12
 }
 
 // formattedDataLimit returns the largest contiguous data payload (in bytes)
