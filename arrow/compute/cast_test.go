@@ -2099,6 +2099,32 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 		c.True(sv.IsNull(3))
 	})
 
+	c.Run("binary_view dict with null in values array", func() {
+		bldr := array.NewBinaryViewBuilder(c.mem)
+		defer bldr.Release()
+		bldr.Append([]byte{0x01, 0x02})
+		bldr.AppendNull()
+		bldr.Append([]byte{0x03})
+		vals := bldr.NewArray()
+		defer vals.Release()
+
+		dict := buildDict(vals, []int32{0, 1, 2, 1}, nil)
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.Binary))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		bv := out.(*array.Binary)
+		c.Equal(4, bv.Len())
+		c.Equal(2, bv.NullN())
+		c.Equal([]byte{0x01, 0x02}, bv.Value(0))
+		c.True(bv.IsNull(1))
+		c.Equal([]byte{0x03}, bv.Value(2))
+		c.True(bv.IsNull(3))
+	})
+
 	c.Run("string_view dict to string_view with large non-inline payload", func() {
 		const (
 			valBytes = 200
