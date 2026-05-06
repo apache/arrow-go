@@ -1819,6 +1819,11 @@ func (s *MockServer) DoPutPreparedStatementQuery(ctx context.Context, qry flight
 		if !s.ExpectedPreparedStatementSchema.Equal(r.Schema()) {
 			return nil, errors.New("parameter schema: unexpected")
 		}
+		// See GH-35328: drain remaining batches before returning to avoid
+		// the io.EOF race between server close and client Write. The other
+		// success path below already does this; this branch must too.
+		for r.Next() {
+		}
 		return qry.GetPreparedStatementHandle(), nil
 	}
 
