@@ -76,6 +76,43 @@ func newBinaryAppender(bldr array.Builder) (binaryAppender, error) {
 	}
 }
 
+// binaryLikeValueAccessor returns a per-index byte slice accessor for any
+// binary-like arrow array. Shared by CastBinaryToBinaryView and
+// CastBinaryViewToBinary so the input-type switch has one source of truth.
+func binaryLikeValueAccessor(arr arrow.Array) (func(int) []byte, error) {
+	switch a := arr.(type) {
+	case *array.Binary:
+		return a.Value, nil
+	case *array.LargeBinary:
+		return a.Value, nil
+	case *array.String:
+		return func(i int) []byte { return unsafeStringBytes(a.Value(i)) }, nil
+	case *array.LargeString:
+		return func(i int) []byte { return unsafeStringBytes(a.Value(i)) }, nil
+	case *array.FixedSizeBinary:
+		return a.Value, nil
+	case *array.BinaryView:
+		return a.Value, nil
+	case *array.StringView:
+		return func(i int) []byte { return unsafeStringBytes(a.Value(i)) }, nil
+	default:
+		return nil, fmt.Errorf("%w: unsupported binary-like type: %s",
+			arrow.ErrNotImplemented, arr.DataType())
+	}
+}
+
+// appendBinaryValues drives the null-preserving append loop shared by
+// both directions of the binary<->view cast kernels.
+func appendBinaryValues(arr arrow.Array, getVal func(int) []byte, ba binaryAppender) {
+	for i := 0; i < arr.Len(); i++ {
+		if arr.IsNull(i) {
+			ba.bldr.AppendNull()
+			continue
+		}
+		ba.appendBytes(getVal(i))
+	}
+}
+
 // CastBinaryToBinaryView casts a Binary, LargeBinary, String, LargeString,
 // or FixedSizeBinary array into a BinaryView or StringView array. When the
 // source is a non-utf8 binary type and the destination is a utf8 view type,
@@ -120,19 +157,8 @@ func CastBinaryToBinaryView(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec
 	arr := input.MakeArray()
 	defer arr.Release()
 
-	var getVal func(int) []byte
-	switch a := arr.(type) {
-	case *array.Binary:
-		getVal = a.Value
-	case *array.LargeBinary:
-		getVal = a.Value
-	case *array.String:
-		getVal = func(i int) []byte { return unsafeStringBytes(a.Value(i)) }
-	case *array.LargeString:
-		getVal = func(i int) []byte { return unsafeStringBytes(a.Value(i)) }
-	case *array.FixedSizeBinary:
-		getVal = a.Value
-	default:
+	getVal, err := binaryLikeValueAccessor(arr)
+	if err != nil {
 		return fmt.Errorf("%w: unsupported input type for cast to %s: %s",
 			arrow.ErrNotImplemented, out.Type, input.Type)
 	}
@@ -160,13 +186,7 @@ func CastBinaryToBinaryView(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec
 		ba.reserveData(int(outOfLineTotal))
 	}
 
-	for i := 0; i < arr.Len(); i++ {
-		if arr.IsNull(i) {
-			ba.bldr.AppendNull()
-			continue
-		}
-		ba.appendBytes(getVal(i))
-	}
+	appendBinaryValues(arr, getVal, ba)
 
 	result := ba.bldr.NewArray()
 	out.TakeOwnership(result.Data())
@@ -202,13 +222,8 @@ func CastBinaryViewToBinary[OutOffsetT int32 | int64](ctx *exec.KernelCtx, batch
 	arr := input.MakeArray()
 	defer arr.Release()
 
-	var getVal func(int) []byte
-	switch a := arr.(type) {
-	case *array.BinaryView:
-		getVal = a.Value
-	case *array.StringView:
-		getVal = func(i int) []byte { return unsafeStringBytes(a.Value(i)) }
-	default:
+	getVal, err := binaryLikeValueAccessor(arr)
+	if err != nil {
 		return fmt.Errorf("%w: unsupported input type for view-to-binary cast: %s",
 			arrow.ErrNotImplemented, input.Type)
 	}
@@ -224,13 +239,7 @@ func CastBinaryViewToBinary[OutOffsetT int32 | int64](ctx *exec.KernelCtx, batch
 			arrow.ErrInvalid, input.Type, out.Type)
 	}
 
-	for i := 0; i < arr.Len(); i++ {
-		if arr.IsNull(i) {
-			ba.bldr.AppendNull()
-			continue
-		}
-		ba.appendBytes(getVal(i))
-	}
+	appendBinaryValues(arr, getVal, ba)
 
 	result := ba.bldr.NewArray()
 	out.TakeOwnership(result.Data())

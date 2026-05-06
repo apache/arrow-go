@@ -445,53 +445,74 @@ func unpackDictionary(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecR
 // because array_take has no view kernel; the cast meta function still
 // needs to expand dictionaries as part of DICTIONARY -> X casts.
 func unpackViewDictionary(mem memory.Allocator, dictArr *array.Dictionary) (arrow.Array, error) {
-	isNullAt := func(valIsNull func(int) bool) func(int) bool {
-		return func(i int) bool {
-			if dictArr.IsNull(i) {
-				return true
-			}
-			return valIsNull(dictArr.GetValueIndex(i))
-		}
-	}
-	lenAt := func(valLen func(int) int) func(int) int {
-		return func(i int) int { return valLen(dictArr.GetValueIndex(i)) }
-	}
-
 	switch vals := dictArr.Dictionary().(type) {
 	case *array.StringView:
-		outOfLine, err := sumOutOfLineBytes(dictArr.Len(), isNullAt(vals.IsNull), lenAt(vals.ValueLen))
-		if err != nil {
-			return nil, err
-		}
 		bldr := array.NewStringViewBuilder(mem)
 		defer bldr.Release()
-		bldr.Reserve(dictArr.Len())
-		if outOfLine > 0 {
-			bldr.ReserveData(int(outOfLine))
-		}
-		buildFromDictionary(dictArr, vals.IsNull,
+		if err := unpackViewDictionaryIntoBuilder(dictArr, vals, vals.ValueLen, bldr,
+			bldr.ReserveData,
 			func(idx int) { bldr.Append(vals.Value(idx)) },
-			bldr.AppendNull)
-		return bldr.NewArray(), nil
-	case *array.BinaryView:
-		outOfLine, err := sumOutOfLineBytes(dictArr.Len(), isNullAt(vals.IsNull), lenAt(vals.ValueLen))
-		if err != nil {
+			bldr.AppendNull); err != nil {
 			return nil, err
 		}
+		return bldr.NewArray(), nil
+	case *array.BinaryView:
 		bldr := array.NewBinaryViewBuilder(mem)
 		defer bldr.Release()
-		bldr.Reserve(dictArr.Len())
-		if outOfLine > 0 {
-			bldr.ReserveData(int(outOfLine))
-		}
-		buildFromDictionary(dictArr, vals.IsNull,
+		if err := unpackViewDictionaryIntoBuilder(dictArr, vals, vals.ValueLen, bldr,
+			bldr.ReserveData,
 			func(idx int) { bldr.Append(vals.Value(idx)) },
-			bldr.AppendNull)
+			bldr.AppendNull); err != nil {
+			return nil, err
+		}
 		return bldr.NewArray(), nil
 	default:
 		return nil, fmt.Errorf("%w: unpackViewDictionary: expected view-typed dictionary values, got %s",
 			arrow.ErrInvalid, vals.DataType())
 	}
+}
+
+// viewValuesNull is the null-check half of the view dictionary values
+// interface; exposed separately because *array.StringView and
+// *array.BinaryView both satisfy it while their Value() return types
+// differ (string vs []byte) and cannot be expressed in one interface.
+type viewValuesNull interface {
+	IsNull(int) bool
+}
+
+// unpackViewDictionaryIntoBuilder runs the shared reserve/walk pipeline
+// for both view-typed dictionary branches of unpackViewDictionary. The
+// caller owns the builder lifecycle and supplies the reserveData /
+// appendValue / appendNull closures so Append can stay typed to the
+// concrete builder (StringViewBuilder.Append takes string,
+// BinaryViewBuilder.Append takes []byte).
+func unpackViewDictionaryIntoBuilder(
+	dictArr *array.Dictionary,
+	vals viewValuesNull,
+	valLen func(int) int,
+	builder array.Builder,
+	reserveData func(int),
+	appendValue func(idx int),
+	appendNull func(),
+) error {
+	outOfLine, err := sumOutOfLineBytes(dictArr.Len(),
+		func(i int) bool {
+			if dictArr.IsNull(i) {
+				return true
+			}
+			return vals.IsNull(dictArr.GetValueIndex(i))
+		},
+		func(i int) int { return valLen(dictArr.GetValueIndex(i)) },
+	)
+	if err != nil {
+		return err
+	}
+	builder.Reserve(dictArr.Len())
+	if outOfLine > 0 {
+		reserveData(int(outOfLine))
+	}
+	buildFromDictionary(dictArr, vals.IsNull, appendValue, appendNull)
+	return nil
 }
 
 // buildFromDictionary walks dictArr and routes each position to either
