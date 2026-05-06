@@ -449,20 +449,24 @@ func unpackViewDictionary(mem memory.Allocator, dictArr *array.Dictionary) (arro
 	case *array.StringView:
 		bldr := array.NewStringViewBuilder(mem)
 		defer bldr.Release()
-		if err := unpackViewDictionaryIntoBuilder(dictArr, vals, vals.ValueLen, bldr,
-			bldr.ReserveData,
-			func(idx int) { bldr.Append(vals.Value(idx)) },
-			bldr.AppendNull); err != nil {
+		if err := unpackViewDictionaryIntoBuilder(dictArr, vals, vals.ValueLen, viewDictBuilderAdapter{
+			builder:     bldr,
+			reserveData: bldr.ReserveData,
+			appendValue: func(idx int) { bldr.Append(vals.Value(idx)) },
+			appendNull:  bldr.AppendNull,
+		}); err != nil {
 			return nil, err
 		}
 		return bldr.NewArray(), nil
 	case *array.BinaryView:
 		bldr := array.NewBinaryViewBuilder(mem)
 		defer bldr.Release()
-		if err := unpackViewDictionaryIntoBuilder(dictArr, vals, vals.ValueLen, bldr,
-			bldr.ReserveData,
-			func(idx int) { bldr.Append(vals.Value(idx)) },
-			bldr.AppendNull); err != nil {
+		if err := unpackViewDictionaryIntoBuilder(dictArr, vals, vals.ValueLen, viewDictBuilderAdapter{
+			builder:     bldr,
+			reserveData: bldr.ReserveData,
+			appendValue: func(idx int) { bldr.Append(vals.Value(idx)) },
+			appendNull:  bldr.AppendNull,
+		}); err != nil {
 			return nil, err
 		}
 		return bldr.NewArray(), nil
@@ -480,21 +484,23 @@ type viewValuesNull interface {
 	IsNull(int) bool
 }
 
+// viewDictBuilderAdapter packages the concrete builder + typed closures
+// needed by unpackViewDictionaryIntoBuilder; boxing them keeps the
+// helper's parameter list tight and lets each caller express the
+// builder-specific Append in one place.
+type viewDictBuilderAdapter struct {
+	builder     array.Builder
+	reserveData func(int)
+	appendValue func(idx int)
+	appendNull  func()
+}
+
 // unpackViewDictionaryIntoBuilder runs the shared reserve/walk pipeline
 // for both view-typed dictionary branches of unpackViewDictionary. The
-// caller owns the builder lifecycle and supplies the reserveData /
-// appendValue / appendNull closures so Append can stay typed to the
-// concrete builder (StringViewBuilder.Append takes string,
-// BinaryViewBuilder.Append takes []byte).
-func unpackViewDictionaryIntoBuilder(
-	dictArr *array.Dictionary,
-	vals viewValuesNull,
-	valLen func(int) int,
-	builder array.Builder,
-	reserveData func(int),
-	appendValue func(idx int),
-	appendNull func(),
-) error {
+// caller owns the builder lifecycle and supplies the adapter so Append
+// can stay typed to the concrete builder (StringViewBuilder.Append takes
+// string, BinaryViewBuilder.Append takes []byte).
+func unpackViewDictionaryIntoBuilder(dictArr *array.Dictionary, vals viewValuesNull, valLen func(int) int, adapter viewDictBuilderAdapter) error {
 	outOfLine, err := sumOutOfLineBytes(dictArr.Len(),
 		func(i int) bool {
 			if dictArr.IsNull(i) {
@@ -507,11 +513,11 @@ func unpackViewDictionaryIntoBuilder(
 	if err != nil {
 		return err
 	}
-	builder.Reserve(dictArr.Len())
+	adapter.builder.Reserve(dictArr.Len())
 	if outOfLine > 0 {
-		reserveData(int(outOfLine))
+		adapter.reserveData(int(outOfLine))
 	}
-	buildFromDictionary(dictArr, vals.IsNull, appendValue, appendNull)
+	buildFromDictionary(dictArr, vals.IsNull, adapter.appendValue, adapter.appendNull)
 	return nil
 }
 
