@@ -21,13 +21,11 @@ package kernels
 import (
 	"fmt"
 	"math"
-	"unicode/utf8"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
-	"github.com/apache/arrow-go/v18/internal/bitutils"
 )
 
 func validateUtf8View(input *exec.ArraySpan) error {
@@ -36,22 +34,15 @@ func validateUtf8View(input *exec.ArraySpan) error {
 	for i := 2; i < len(input.Buffers); i++ {
 		dataBuffers = append(dataBuffers, input.Buffers[i].Buf)
 	}
-
-	return bitutils.VisitBitBlocksShort(input.Buffers[0].Buf, input.Offset, input.Len,
-		func(pos int64) error {
+	return validateUTF8Sequence(input.Buffers[0].Buf, input.Offset, input.Len,
+		func(pos int64) []byte {
 			h := &views[input.Offset+pos]
-			var v []byte
 			if h.IsInline() {
-				v = h.InlineBytes()
-			} else {
-				off := h.BufferOffset()
-				v = dataBuffers[h.BufferIndex()][off : off+int32(h.Len())]
+				return h.InlineBytes()
 			}
-			if !utf8.Valid(v) {
-				return fmt.Errorf("%w: invalid UTF8 bytes: %x", arrow.ErrInvalid, v)
-			}
-			return nil
-		}, func() error { return nil })
+			off := h.BufferOffset()
+			return dataBuffers[h.BufferIndex()][off : off+int32(h.Len())]
+		})
 }
 
 func unsafeStringBytes(s string) []byte {

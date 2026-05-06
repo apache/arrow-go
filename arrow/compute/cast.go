@@ -260,7 +260,6 @@ func rebuildViewSingleBuffer(mem memory.Allocator, data arrow.ArrayData) (arrow.
 	defer arr.Release()
 
 	var (
-		total   int64
 		getLen  func(int) int
 		getInto func(i int, dst func([]byte))
 	)
@@ -277,18 +276,9 @@ func rebuildViewSingleBuffer(mem memory.Allocator, data arrow.ArrayData) (arrow.
 	default:
 		return nil, fmt.Errorf("%w: unexpected view array type %T", arrow.ErrInvalid, arr)
 	}
-	for i := 0; i < arr.Len(); i++ {
-		if arr.IsNull(i) {
-			continue
-		}
-		vlen := getLen(i)
-		if !arrow.IsViewInline(vlen) {
-			total += int64(vlen)
-		}
-	}
-	if total > math.MaxInt32 {
-		return nil, fmt.Errorf("%w: view array out-of-line payload (%d bytes) exceeds single-buffer limit (%d bytes)",
-			arrow.ErrInvalid, total, math.MaxInt32)
+	total, err := sumOutOfLineBytes(arr.Len(), arr.IsNull, getLen)
+	if err != nil {
+		return nil, err
 	}
 
 	bldr := array.NewBuilder(mem, arr.DataType())
@@ -455,9 +445,21 @@ func unpackDictionary(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecR
 // because array_take has no view kernel; the cast meta function still
 // needs to expand dictionaries as part of DICTIONARY -> X casts.
 func unpackViewDictionary(mem memory.Allocator, dictArr *array.Dictionary) (arrow.Array, error) {
+	isNullAt := func(valIsNull func(int) bool) func(int) bool {
+		return func(i int) bool {
+			if dictArr.IsNull(i) {
+				return true
+			}
+			return valIsNull(dictArr.GetValueIndex(i))
+		}
+	}
+	lenAt := func(valLen func(int) int) func(int) int {
+		return func(i int) int { return valLen(dictArr.GetValueIndex(i)) }
+	}
+
 	switch vals := dictArr.Dictionary().(type) {
 	case *array.StringView:
-		outOfLine, err := sumViewDictionaryOutOfLine(dictArr, vals.IsNull, vals.ValueLen)
+		outOfLine, err := sumOutOfLineBytes(dictArr.Len(), isNullAt(vals.IsNull), lenAt(vals.ValueLen))
 		if err != nil {
 			return nil, err
 		}
@@ -467,21 +469,12 @@ func unpackViewDictionary(mem memory.Allocator, dictArr *array.Dictionary) (arro
 		if outOfLine > 0 {
 			bldr.ReserveData(int(outOfLine))
 		}
-		for i := 0; i < dictArr.Len(); i++ {
-			if dictArr.IsNull(i) {
-				bldr.AppendNull()
-				continue
-			}
-			idx := dictArr.GetValueIndex(i)
-			if vals.IsNull(idx) {
-				bldr.AppendNull()
-				continue
-			}
-			bldr.Append(vals.Value(idx))
-		}
+		buildFromDictionary(dictArr, vals.IsNull,
+			func(idx int) { bldr.Append(vals.Value(idx)) },
+			bldr.AppendNull)
 		return bldr.NewArray(), nil
 	case *array.BinaryView:
-		outOfLine, err := sumViewDictionaryOutOfLine(dictArr, vals.IsNull, vals.ValueLen)
+		outOfLine, err := sumOutOfLineBytes(dictArr.Len(), isNullAt(vals.IsNull), lenAt(vals.ValueLen))
 		if err != nil {
 			return nil, err
 		}
@@ -491,18 +484,9 @@ func unpackViewDictionary(mem memory.Allocator, dictArr *array.Dictionary) (arro
 		if outOfLine > 0 {
 			bldr.ReserveData(int(outOfLine))
 		}
-		for i := 0; i < dictArr.Len(); i++ {
-			if dictArr.IsNull(i) {
-				bldr.AppendNull()
-				continue
-			}
-			idx := dictArr.GetValueIndex(i)
-			if vals.IsNull(idx) {
-				bldr.AppendNull()
-				continue
-			}
-			bldr.Append(vals.Value(idx))
-		}
+		buildFromDictionary(dictArr, vals.IsNull,
+			func(idx int) { bldr.Append(vals.Value(idx)) },
+			bldr.AppendNull)
 		return bldr.NewArray(), nil
 	default:
 		return nil, fmt.Errorf("%w: unpackViewDictionary: expected view-typed dictionary values, got %s",
@@ -510,24 +494,42 @@ func unpackViewDictionary(mem memory.Allocator, dictArr *array.Dictionary) (arro
 	}
 }
 
-// sumViewDictionaryOutOfLine returns the total non-inline payload (in bytes)
-// that will be materialized when dictArr is unpacked against vals, returning
-// arrow.ErrInvalid if the total exceeds the view single-data-buffer limit.
-func sumViewDictionaryOutOfLine(dictArr *array.Dictionary, valIsNull func(int) bool, valLen func(int) int) (int64, error) {
-	var total int64
+// buildFromDictionary walks dictArr and routes each position to either
+// appendValue(valueIndex) or appendNull(). A position is null when the
+// dictionary index itself is null or when the referenced value is null.
+func buildFromDictionary(dictArr *array.Dictionary, valIsNull func(int) bool, appendValue func(idx int), appendNull func()) {
 	for i := 0; i < dictArr.Len(); i++ {
 		if dictArr.IsNull(i) {
+			appendNull()
 			continue
 		}
 		idx := dictArr.GetValueIndex(i)
 		if valIsNull(idx) {
+			appendNull()
 			continue
 		}
-		vlen := valLen(idx)
+		appendValue(idx)
+	}
+}
+
+// sumOutOfLineBytes returns the total non-inline payload (in bytes) that
+// would be written to a view array's overflow buffer when iterating n
+// positions with the given predicates, and arrow.ErrInvalid if the total
+// exceeds the single-overflow-buffer limit (math.MaxInt32). Used by
+// rebuildViewSingleBuffer (iterating top-level view rows), the
+// binary-to-view cast kernel, and unpackViewDictionary (where the
+// closures translate dictionary positions into value-level lookups).
+func sumOutOfLineBytes(n int, isNull func(int) bool, valueLen func(int) int) (int64, error) {
+	var total int64
+	for i := 0; i < n; i++ {
+		if isNull(i) {
+			continue
+		}
+		vlen := valueLen(i)
 		if !arrow.IsViewInline(vlen) {
 			total += int64(vlen)
 			if total > math.MaxInt32 {
-				return 0, fmt.Errorf("%w: view dictionary out-of-line payload (%d bytes) exceeds single-buffer limit (%d bytes)",
+				return 0, fmt.Errorf("%w: view out-of-line payload (%d bytes) exceeds single-buffer limit (%d bytes)",
 					arrow.ErrInvalid, total, math.MaxInt32)
 			}
 		}

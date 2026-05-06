@@ -2012,6 +2012,29 @@ func (c *CastSuite) TestChunkedMultiBufferViewInputCoalesced() {
 	c.Equal(count*2, total)
 }
 
+// buildInt32Dictionary builds an int32-indexed *array.Dictionary from the
+// given values array, indices slice, and optional per-index validity. Used
+// by view-dictionary cast regression tests. Indices must be valid against
+// values; the helper handles retain/release bookkeeping internally.
+func (c *CastSuite) buildInt32Dictionary(values arrow.Array, indices []int32, valid []bool) *array.Dictionary {
+	ibldr := array.NewInt32Builder(c.mem)
+	defer ibldr.Release()
+	ibldr.AppendValues(indices, valid)
+	idx := ibldr.NewArray()
+	defer idx.Release()
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int32,
+		ValueType: values.DataType(),
+	}
+	d := array.NewData(dictType, idx.Len(), idx.Data().Buffers(), nil,
+		idx.NullN(), 0)
+	d.SetDictionary(values.Data())
+	da := array.NewDictionaryData(d)
+	d.Release()
+	return da
+}
+
 // TestViewDictionaryUnpackCast is a regression test for the GH-184
 // fifth-round review finding: a cast whose input is a dictionary whose
 // values are string_view or binary_view went through unpackDictionary's
@@ -2020,29 +2043,11 @@ func (c *CastSuite) TestChunkedMultiBufferViewInputCoalesced() {
 // -> utf8, dict<string_view> -> string_view (dict removal), dict<binary_view>
 // -> binary, and null/empty preservation.
 func (c *CastSuite) TestViewDictionaryUnpackCast() {
-	buildDict := func(values arrow.Array, indices []int32, valid []bool) *array.Dictionary {
-		ibldr := array.NewInt32Builder(c.mem)
-		defer ibldr.Release()
-		ibldr.AppendValues(indices, valid)
-		idx := ibldr.NewArray()
-		defer idx.Release()
-
-		dictType := &arrow.DictionaryType{
-			IndexType: arrow.PrimitiveTypes.Int32,
-			ValueType: values.DataType(),
-		}
-		d := array.NewData(dictType, idx.Len(), idx.Data().Buffers(), nil,
-			idx.NullN(), 0)
-		d.SetDictionary(values.Data())
-		da := array.NewDictionaryData(d)
-		d.Release()
-		return da
-	}
 
 	c.Run("string_view dict to utf8", func() {
 		vals := c.buildStringViewArray([]string{"foo", "bar", "baz"}, nil)
 		defer vals.Release()
-		dict := buildDict(vals, []int32{0, 1, 0, 2}, nil)
+		dict := c.buildInt32Dictionary(vals, []int32{0, 1, 0, 2}, nil)
 		defer dict.Release()
 
 		out, err := compute.CastArray(context.Background(), dict,
@@ -2061,7 +2066,7 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 	c.Run("string_view dict to string_view", func() {
 		vals := c.buildStringViewArray([]string{"alpha", "beta"}, nil)
 		defer vals.Release()
-		dict := buildDict(vals, []int32{1, 0, 1}, nil)
+		dict := c.buildInt32Dictionary(vals, []int32{1, 0, 1}, nil)
 		defer dict.Release()
 
 		out, err := compute.CastArray(context.Background(), dict,
@@ -2079,7 +2084,7 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 	c.Run("binary_view dict to binary", func() {
 		vals := c.buildBinaryViewArray([][]byte{[]byte("\x01\x02"), []byte("\x03")})
 		defer vals.Release()
-		dict := buildDict(vals, []int32{0, 1, 0}, nil)
+		dict := c.buildInt32Dictionary(vals, []int32{0, 1, 0}, nil)
 		defer dict.Release()
 
 		out, err := compute.CastArray(context.Background(), dict,
@@ -2097,7 +2102,7 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 	c.Run("string_view dict with nulls", func() {
 		vals := c.buildStringViewArray([]string{"x", "y"}, nil)
 		defer vals.Release()
-		dict := buildDict(vals, []int32{0, 0, 1}, []bool{true, false, true})
+		dict := c.buildInt32Dictionary(vals, []int32{0, 0, 1}, []bool{true, false, true})
 		defer dict.Release()
 
 		out, err := compute.CastArray(context.Background(), dict,
@@ -2118,7 +2123,7 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 	c.Run("string_view dict with null in values array", func() {
 		vals := c.buildStringViewArray([]string{"a", "", "c"}, []bool{true, false, true})
 		defer vals.Release()
-		dict := buildDict(vals, []int32{0, 1, 2, 1}, nil)
+		dict := c.buildInt32Dictionary(vals, []int32{0, 1, 2, 1}, nil)
 		defer dict.Release()
 
 		out, err := compute.CastArray(context.Background(), dict,
@@ -2144,7 +2149,7 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 		vals := bldr.NewArray()
 		defer vals.Release()
 
-		dict := buildDict(vals, []int32{0, 1, 2, 1}, nil)
+		dict := c.buildInt32Dictionary(vals, []int32{0, 1, 2, 1}, nil)
 		defer dict.Release()
 
 		out, err := compute.CastArray(context.Background(), dict,
@@ -2186,7 +2191,7 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 			"test precondition: dictionary values must be multi-buffer; got %d",
 			len(vals.Data().Buffers()))
 
-		dict := buildDict(vals, []int32{0, 1, 0, 1}, nil)
+		dict := c.buildInt32Dictionary(vals, []int32{0, 1, 0, 1}, nil)
 		defer dict.Release()
 
 		out, err := compute.CastArray(context.Background(), dict,
@@ -2310,7 +2315,7 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 		for i := range indices {
 			indices[i] = int32(i & 1)
 		}
-		dict := buildDict(vals, indices, nil)
+		dict := c.buildInt32Dictionary(vals, indices, nil)
 		defer dict.Release()
 
 		out, err := compute.CastArray(context.Background(), dict,
@@ -2344,7 +2349,7 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 		for i := range indices {
 			indices[i] = int32(i & 1)
 		}
-		dict := buildDict(vals, indices, nil)
+		dict := c.buildInt32Dictionary(vals, indices, nil)
 		defer dict.Release()
 
 		out, err := compute.CastArray(context.Background(), dict,

@@ -32,40 +32,42 @@ import (
 	"github.com/apache/arrow-go/v18/internal/bitutils"
 )
 
+// validateUTF8Sequence walks non-null positions in bitmap and validates
+// the byte slice returned by valueAt against utf8.Valid. Shared skeleton
+// for validateUtf8, validateUtf8Fsb, and validateUtf8View so they stay
+// consistent on iteration, error format, and null handling.
+func validateUTF8Sequence(bitmap []byte, off, n int64, valueAt func(pos int64) []byte) error {
+	return bitutils.VisitBitBlocksShort(bitmap, off, n,
+		func(pos int64) error {
+			v := valueAt(pos)
+			if !utf8.Valid(v) {
+				return fmt.Errorf("%w: invalid UTF8 bytes: %x", arrow.ErrInvalid, v)
+			}
+			return nil
+		}, func() error { return nil })
+}
+
 func validateUtf8Fsb(input *exec.ArraySpan) error {
 	var (
 		inputData = input.Buffers[1].Buf
 		width     = int64(input.Type.(*arrow.FixedSizeBinaryType).ByteWidth)
-		bitmap    = input.Buffers[0].Buf
 	)
-
-	return bitutils.VisitBitBlocksShort(bitmap, input.Offset, input.Len,
-		func(pos int64) error {
+	return validateUTF8Sequence(input.Buffers[0].Buf, input.Offset, input.Len,
+		func(pos int64) []byte {
 			pos += input.Offset
-			beg := pos * width
-			end := (pos + 1) * width
-			if !utf8.Valid(inputData[beg:end]) {
-				return fmt.Errorf("%w: invalid UTF8 bytes: %x", arrow.ErrInvalid, inputData[beg:end])
-			}
-			return nil
-		}, func() error { return nil })
+			return inputData[pos*width : (pos+1)*width]
+		})
 }
 
 func validateUtf8[OffsetT int32 | int64](input *exec.ArraySpan) error {
 	var (
 		inputOffsets = exec.GetSpanOffsets[OffsetT](input, 1)
 		inputData    = input.Buffers[2].Buf
-		bitmap       = input.Buffers[0].Buf
 	)
-
-	return bitutils.VisitBitBlocksShort(bitmap, input.Offset, input.Len,
-		func(pos int64) error {
-			v := inputData[inputOffsets[pos]:inputOffsets[pos+1]]
-			if !utf8.Valid(v) {
-				return fmt.Errorf("%w: invalid UTF8 bytes: %x", arrow.ErrInvalid, v)
-			}
-			return nil
-		}, func() error { return nil })
+	return validateUTF8Sequence(input.Buffers[0].Buf, input.Offset, input.Len,
+		func(pos int64) []byte {
+			return inputData[inputOffsets[pos]:inputOffsets[pos+1]]
+		})
 }
 
 func CastFsbToFsb(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
