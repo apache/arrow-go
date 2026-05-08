@@ -19,6 +19,7 @@ package array_test
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -529,6 +530,91 @@ func TestRecordBuilder(t *testing.T) {
 	if got, want := rec.Column(2).String(), `[{["0" "2" "3"] ["a" "b" "c"]} {[] []} {[] []} {["3" "2" "3"] ["a" "b" "c"]} {[] []}]`; got != want {
 		t.Fatalf("invalid column name: got=%q, want=%q", got, want)
 	}
+}
+
+func TestRecordBuilderResize(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "region", Type: arrow.BinaryTypes.String, Nullable: true},
+		{Name: "model", Type: arrow.BinaryTypes.String},
+		{Name: "sales", Type: arrow.PrimitiveTypes.Float64, Nullable: true},
+	}, nil)
+
+	t.Run("truncate", func(t *testing.T) {
+		recordBuilder := array.NewRecordBuilder(mem, schema)
+		defer recordBuilder.Release()
+
+		ndjsonToRecordBuilder(t, recordBuilder, jsondata)
+
+		rb0 := recordBuilder.NewRecordBatch()
+		assert.Equal(t, int64(3), rb0.NumCols())
+		assert.Equal(t, int64(16), rb0.NumRows())
+
+		data0 := recordBatchToNDJSON(t, rb0)
+		rb0.Release()
+
+		ndjsonToRecordBuilder(t, recordBuilder, jsondata)
+		recordBuilder.Resize(8)
+
+		rb1 := recordBuilder.NewRecordBatch()
+		assert.Equal(t, int64(3), rb1.NumCols())
+		assert.Equal(t, int64(8), rb1.NumRows())
+
+		data1 := recordBatchToNDJSON(t, rb1)
+		rb1.Release()
+
+		assert.True(t, strings.HasPrefix(data0, data1))
+	})
+
+	t.Run("truncate_incomplete", func(t *testing.T) {
+		recordBuilder := array.NewRecordBuilder(mem, schema)
+		defer recordBuilder.Release()
+
+		ndjsonToRecordBuilder(t, recordBuilder, jsondata)
+
+		rb0 := recordBuilder.NewRecordBatch()
+		assert.Equal(t, int64(3), rb0.NumCols())
+		assert.Equal(t, int64(16), rb0.NumRows())
+
+		data0 := recordBatchToNDJSON(t, rb0)
+		rb0.Release()
+
+		ndjsonToRecordBuilder(t, recordBuilder, jsondata)
+		recordBuilder.Field(0).(*array.StringBuilder).Append("TN")
+		recordBuilder.Field(0).(*array.StringBuilder).Append("IL")
+		recordBuilder.Field(0).(*array.StringBuilder).Append("WI")
+
+		panicked := false
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					if strings.HasPrefix(r.(error).Error(), "arrow/array:") {
+						panicked = true
+					} else {
+						panic(r)
+					}
+				}
+			}()
+
+			rb1 := recordBuilder.NewRecordBatch()
+			rb1.Release()
+		}()
+
+		assert.True(t, panicked)
+
+		recordBuilder.Resize(-1)
+
+		rb2 := recordBuilder.NewRecordBatch()
+		assert.Equal(t, int64(3), rb2.NumCols())
+		assert.Equal(t, int64(16), rb2.NumRows())
+
+		data2 := recordBatchToNDJSON(t, rb2)
+		rb2.Release()
+
+		assert.Equal(t, data0, data2)
+	})
 }
 
 type testMessage struct {

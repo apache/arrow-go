@@ -348,6 +348,38 @@ func (b *RecordBuilder) Reserve(size int) {
 	}
 }
 
+func (b *RecordBuilder) columnLenRange() (lower, upper int) {
+	if len(b.fields) > 0 {
+		lower = b.fields[0].Len()
+		upper = lower
+
+		for _, f := range b.fields[1:] {
+			lower = min(lower, f.Len())
+			upper = max(upper, f.Len())
+		}
+	}
+	return
+}
+
+// Resize adjusts the space allocated by all the field builders to n elements.
+// If n is greater than an individual builder Cap(), additional memory will be
+// allocated. If n is smaller, the allocated memory may reduced.
+//
+// As a special case, if n equals to -1, all field builders will be resized
+// to the size of the shortest one.
+func (b *RecordBuilder) Resize(n int) {
+	if n >= 0 {
+		for _, f := range b.fields {
+			f.Resize(n)
+		}
+	} else if n == -1 {
+		lower, upper := b.columnLenRange()
+		if lower != upper {
+			b.Resize(lower)
+		}
+	}
+}
+
 // NewRecordBatch creates a new record batch from the memory buffers and resets the
 // RecordBuilder so it can be used to build a new record batch.
 //
@@ -355,8 +387,12 @@ func (b *RecordBuilder) Reserve(size int) {
 //
 // NewRecordBatch panics if the fields' builder do not have the same length.
 func (b *RecordBuilder) NewRecordBatch() arrow.RecordBatch {
+	lower, upper := b.columnLenRange()
+	if lower != upper {
+		panic(fmt.Errorf("arrow/array: some fields have excessive number of rows (want at most %d, have %d)", lower, upper))
+	}
+
 	cols := make([]arrow.Array, len(b.fields))
-	rows := int64(0)
 
 	defer func(cols []arrow.Array) {
 		for _, col := range cols {
@@ -369,14 +405,9 @@ func (b *RecordBuilder) NewRecordBatch() arrow.RecordBatch {
 
 	for i, f := range b.fields {
 		cols[i] = f.NewArray()
-		irow := int64(cols[i].Len())
-		if i > 0 && irow != rows {
-			panic(fmt.Errorf("arrow/array: field %d has %d rows. want=%d", i, irow, rows))
-		}
-		rows = irow
 	}
 
-	return NewRecordBatch(b.schema, cols, rows)
+	return NewRecordBatch(b.schema, cols, int64(lower))
 }
 
 // Deprecated: Use [NewRecordBatch] instead.
