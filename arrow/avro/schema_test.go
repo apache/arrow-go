@@ -18,10 +18,12 @@ package avro
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/avro/testdata"
+	avropkg "github.com/hamba/avro/v2"
 )
 
 func TestSchemaStringEqual(t *testing.T) {
@@ -172,5 +174,28 @@ func TestSchemaStringEqual(t *testing.T) {
 				t.Logf("schema.String() comparison passed")
 			}
 		})
+	}
+}
+
+func TestComplexUnionReportsError(t *testing.T) {
+	// Non-nullable union (e.g. [int, string]) is not supported and should
+	// produce a clear error rather than being silently dropped.
+	const avroSchemaJSON = `{
+		"type": "record",
+		"name": "WithComplexUnion",
+		"fields": [
+			{"name": "value", "type": ["int", "string"]}
+		]
+	}`
+	schema, err := avropkg.Parse(avroSchemaJSON)
+	if err != nil {
+		t.Fatalf("avro parse: %v", err)
+	}
+	got, err := ArrowSchemaFromAvro(schema)
+	if err == nil {
+		t.Fatalf("expected error for complex union, got schema=%v", got)
+	}
+	if !strings.Contains(err.Error(), "union") {
+		t.Fatalf("expected error to mention union, got: %v", err)
 	}
 }
