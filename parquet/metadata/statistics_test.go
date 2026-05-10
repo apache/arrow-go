@@ -603,3 +603,40 @@ func TestBooleanStatisticsUpdateFromBitmapSpaced(t *testing.T) {
 		assert.Equal(t, int64(8), stats.NullCount())
 	})
 }
+
+func TestNewStatisticsDistinctCountUnset(t *testing.T) {
+	// Issue #806: factories must not pre-set hasDistinctCount, otherwise
+	// Encode() emits distinct_count=0 for every column instead of leaving the
+	// optional Thrift field absent. IncDistinct() is responsible for marking
+	// it set when an actual distinct count is computed.
+	mk := func(n *schema.PrimitiveNode) metadata.TypedStatistics {
+		col := schema.NewColumn(n, 0, 0)
+		return metadata.NewStatistics(col, memory.DefaultAllocator)
+	}
+	cases := []struct {
+		name string
+		s    metadata.TypedStatistics
+	}{
+		{"Int32", mk(schema.NewInt32Node("i32", parquet.Repetitions.Required, -1))},
+		{"Int64", mk(schema.NewInt64Node("i64", parquet.Repetitions.Required, -1))},
+		{"Float32", mk(schema.NewFloat32Node("f32", parquet.Repetitions.Required, -1))},
+		{"Float64", mk(schema.NewFloat64Node("f64", parquet.Repetitions.Required, -1))},
+		{"Boolean", mk(schema.NewBooleanNode("b", parquet.Repetitions.Required, -1))},
+		{"ByteArray", mk(schema.NewByteArrayNode("ba", parquet.Repetitions.Required, -1))},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.False(t, c.s.HasDistinctCount(), "fresh stats must not advertise a distinct count")
+			enc, err := c.s.Encode()
+			require.NoError(t, err)
+			assert.False(t, enc.HasDistinctCount, "encoded stats must leave distinct_count unset until IncDistinct is called")
+
+			c.s.IncDistinct(3)
+			assert.True(t, c.s.HasDistinctCount())
+			enc, err = c.s.Encode()
+			require.NoError(t, err)
+			assert.True(t, enc.HasDistinctCount)
+			assert.Equal(t, int64(3), enc.DistinctCount)
+		})
+	}
+}

@@ -62,7 +62,6 @@ func New{{.Name}}Statistics(descr *schema.Column, mem memory.Allocator) *{{.Name
     statistics: statistics{
       descr: descr,
       hasNullCount: true,
-      hasDistinctCount: true,
       order: descr.SortOrder(),
       encoder: encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
       mem: mem,
