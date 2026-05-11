@@ -86,6 +86,47 @@ func TestRWSchema(t *testing.T) {
 	}
 }
 
+func TestMapFieldMetadataRoundTrip(t *testing.T) {
+	keyMeta := arrow.NewMetadata([]string{"my.key.id"}, []string{"100"})
+	itemMeta := arrow.NewMetadata([]string{"my.item.id"}, []string{"200"})
+
+	mapType := arrow.MapOfFields(
+		arrow.Field{Name: "key", Type: arrow.BinaryTypes.String, Metadata: keyMeta},
+		arrow.Field{Name: "value", Type: arrow.PrimitiveTypes.Int32, Nullable: true, Metadata: itemMeta},
+	)
+	mapType.KeysSorted = true
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "m", Type: mapType, Nullable: true},
+	}, nil)
+
+	var buf bytes.Buffer
+	w := NewWriter(&buf, WithSchema(schema), WithAllocator(memory.DefaultAllocator))
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := NewReader(bytes.NewReader(buf.Bytes()), WithAllocator(memory.DefaultAllocator))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Release()
+
+	roundTripped := r.Schema()
+	if !roundTripped.Equal(schema) {
+		t.Fatalf("schema mismatch after IPC round-trip:\ngot:  %s\nwant: %s", roundTripped, schema)
+	}
+
+	rtMap := roundTripped.Field(0).Type.(*arrow.MapType)
+	if got, ok := rtMap.KeyField().Metadata.GetValue("my.key.id"); !ok || got != "100" {
+		t.Fatalf("key field metadata lost after IPC round-trip: got keys=%v", rtMap.KeyField().Metadata.Keys())
+	}
+	if got, ok := rtMap.ItemField().Metadata.GetValue("my.item.id"); !ok || got != "200" {
+		t.Fatalf("item field metadata lost after IPC round-trip: got keys=%v", rtMap.ItemField().Metadata.Keys())
+	}
+	assert.True(t, rtMap.ItemField().Nullable)
+	assert.True(t, rtMap.KeysSorted)
+}
+
 func TestRWFooter(t *testing.T) {
 	for _, tc := range []struct {
 		schema *arrow.Schema
