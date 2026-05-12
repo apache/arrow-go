@@ -843,8 +843,7 @@ func concreteTypeFromFB(typ flatbuf.Type, data flatbuffers.Table, children []arr
 
 		var dt flatbuf.Map
 		dt.Init(data.Bytes, data.Pos)
-		ret := arrow.MapOf(pairType.Field(0).Type, pairType.Field(1).Type)
-		ret.SetItemNullable(pairType.Field(1).Nullable)
+		ret := arrow.MapOfFields(pairType.Field(0), pairType.Field(1))
 		ret.KeysSorted = dt.KeysSorted()
 		return ret, nil
 
