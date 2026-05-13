@@ -139,13 +139,16 @@ func arrowSchemafromAvro(n *schemaNode) {
 		arrowSchemafromAvro(c)
 		n.arrowField = buildArrowField(n, arrow.MapOf(arrow.BinaryTypes.String, c.arrowField.Type), c.arrowField.Metadata)
 	case "union":
-		if n.schema.(*avro.UnionSchema).Nullable() {
-			if len(n.schema.(*avro.UnionSchema).Types()) > 1 {
-				n.schema = n.schema.(*avro.UnionSchema).Types()[1]
+		us := n.schema.(*avro.UnionSchema)
+		if us.Nullable() {
+			if len(us.Types()) > 1 {
+				n.schema = us.Types()[1]
 				n.union = true
 				n.nullable = true
 				arrowSchemafromAvro(n)
 			}
+		} else {
+			panic(fmt.Errorf("complex (non-nullable) avro union at '%v' is not supported", n.schemaPath()))
 		}
 	// Avro "fixed" field type = Arrow FixedSize Primitive BinaryType
 	case "fixed":
@@ -245,6 +248,8 @@ func iterateFields(n *schemaNode) {
 					c.nullable = true
 					arrowSchemafromAvro(c)
 				}
+			} else {
+				panic(fmt.Errorf("complex (non-nullable) avro union in field '%v' is not supported", f.Name()))
 			}
 		default:
 			n.schemaCache.Add(f.Name(), f.Type())
