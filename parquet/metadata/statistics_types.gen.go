@@ -57,12 +57,11 @@ func NewInt32Statistics(descr *schema.Column, mem memory.Allocator) *Int32Statis
 
 	return &Int32Statistics{
 		statistics: statistics{
-			descr:            descr,
-			hasNullCount:     true,
-			hasDistinctCount: true,
-			order:            descr.SortOrder(),
-			encoder:          encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
-			mem:              mem,
+			descr:        descr,
+			hasNullCount: true,
+			order:        descr.SortOrder(),
+			encoder:      encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
+			mem:          mem,
 		},
 	}
 }
@@ -358,12 +357,11 @@ func NewInt64Statistics(descr *schema.Column, mem memory.Allocator) *Int64Statis
 
 	return &Int64Statistics{
 		statistics: statistics{
-			descr:            descr,
-			hasNullCount:     true,
-			hasDistinctCount: true,
-			order:            descr.SortOrder(),
-			encoder:          encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
-			mem:              mem,
+			descr:        descr,
+			hasNullCount: true,
+			order:        descr.SortOrder(),
+			encoder:      encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
+			mem:          mem,
 		},
 	}
 }
@@ -659,12 +657,11 @@ func NewInt96Statistics(descr *schema.Column, mem memory.Allocator) *Int96Statis
 
 	return &Int96Statistics{
 		statistics: statistics{
-			descr:            descr,
-			hasNullCount:     true,
-			hasDistinctCount: true,
-			order:            descr.SortOrder(),
-			encoder:          encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
-			mem:              mem,
+			descr:        descr,
+			hasNullCount: true,
+			order:        descr.SortOrder(),
+			encoder:      encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
+			mem:          mem,
 		},
 	}
 }
@@ -938,12 +935,11 @@ func NewFloat32Statistics(descr *schema.Column, mem memory.Allocator) *Float32St
 
 	return &Float32Statistics{
 		statistics: statistics{
-			descr:            descr,
-			hasNullCount:     true,
-			hasDistinctCount: true,
-			order:            descr.SortOrder(),
-			encoder:          encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
-			mem:              mem,
+			descr:        descr,
+			hasNullCount: true,
+			order:        descr.SortOrder(),
+			encoder:      encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
+			mem:          mem,
 		},
 	}
 }
@@ -1231,12 +1227,11 @@ func NewFloat64Statistics(descr *schema.Column, mem memory.Allocator) *Float64St
 
 	return &Float64Statistics{
 		statistics: statistics{
-			descr:            descr,
-			hasNullCount:     true,
-			hasDistinctCount: true,
-			order:            descr.SortOrder(),
-			encoder:          encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
-			mem:              mem,
+			descr:        descr,
+			hasNullCount: true,
+			order:        descr.SortOrder(),
+			encoder:      encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
+			mem:          mem,
 		},
 	}
 }
@@ -1524,12 +1519,11 @@ func NewBooleanStatistics(descr *schema.Column, mem memory.Allocator) *BooleanSt
 
 	return &BooleanStatistics{
 		statistics: statistics{
-			descr:            descr,
-			hasNullCount:     true,
-			hasDistinctCount: true,
-			order:            descr.SortOrder(),
-			encoder:          encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
-			mem:              mem,
+			descr:        descr,
+			hasNullCount: true,
+			order:        descr.SortOrder(),
+			encoder:      encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
+			mem:          mem,
 		},
 	}
 }
@@ -1879,12 +1873,11 @@ func NewByteArrayStatistics(descr *schema.Column, mem memory.Allocator) *ByteArr
 
 	return &ByteArrayStatistics{
 		statistics: statistics{
-			descr:            descr,
-			hasNullCount:     true,
-			hasDistinctCount: true,
-			order:            descr.SortOrder(),
-			encoder:          encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
-			mem:              mem,
+			descr:        descr,
+			hasNullCount: true,
+			order:        descr.SortOrder(),
+			encoder:      encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
+			mem:          mem,
 		},
 
 		min: make([]byte, 0),
@@ -2187,12 +2180,11 @@ func NewFixedLenByteArrayStatistics(descr *schema.Column, mem memory.Allocator) 
 
 	return &FixedLenByteArrayStatistics{
 		statistics: statistics{
-			descr:            descr,
-			hasNullCount:     true,
-			hasDistinctCount: true,
-			order:            descr.SortOrder(),
-			encoder:          encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
-			mem:              mem,
+			descr:        descr,
+			hasNullCount: true,
+			order:        descr.SortOrder(),
+			encoder:      encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
+			mem:          mem,
 		},
 	}
 }
@@ -2502,12 +2494,11 @@ func NewFloat16Statistics(descr *schema.Column, mem memory.Allocator) *Float16St
 
 	return &Float16Statistics{
 		statistics: statistics{
-			descr:            descr,
-			hasNullCount:     true,
-			hasDistinctCount: true,
-			order:            descr.SortOrder(),
-			encoder:          encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
-			mem:              mem,
+			descr:        descr,
+			hasNullCount: true,
+			order:        descr.SortOrder(),
+			encoder:      encoding.NewEncoder(descr.PhysicalType(), parquet.Encodings.Plain, false, descr, mem),
+			mem:          mem,
 		},
 	}
 }
