@@ -61,7 +61,7 @@ func (f *FilterKernelTestSuite) TearDownTest() {
 }
 
 func (f *FilterKernelTestSuite) getArr(dt arrow.DataType, str string) arrow.Array {
-	arr, _, err := array.FromJSON(f.mem, dt, strings.NewReader(str), array.WithUseNumber())
+	arr, _, err := array.FromJSON(f.mem, dt, strings.NewReader(str))
 	f.Require().NoError(err)
 	return arr
 }
@@ -126,11 +126,11 @@ func (f *FilterKernelTestSuite) assertFilter(values, filter, expected arrow.Arra
 }
 
 func (f *FilterKernelTestSuite) assertFilterJSON(dt arrow.DataType, values, filter, expected string) {
-	valuesArr, _, _ := array.FromJSON(f.mem, dt, strings.NewReader(values), array.WithUseNumber())
+	valuesArr, _, _ := array.FromJSON(f.mem, dt, strings.NewReader(values))
 	defer valuesArr.Release()
 	filterArr, _, _ := array.FromJSON(f.mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(filter))
 	defer filterArr.Release()
-	expectedArr, _, _ := array.FromJSON(f.mem, dt, strings.NewReader(expected), array.WithUseNumber())
+	expectedArr, _, _ := array.FromJSON(f.mem, dt, strings.NewReader(expected))
 	defer expectedArr.Release()
 
 	f.assertFilter(valuesArr, filterArr, expectedArr)
@@ -178,7 +178,7 @@ func (tk *TakeKernelTestSuite) assertTakeArrays(values, indices, expected arrow.
 }
 
 func (tk *TakeKernelTestSuite) takeJSON(dt arrow.DataType, values string, idxType arrow.DataType, indices string) (arrow.Array, error) {
-	valArr, _, _ := array.FromJSON(tk.mem, dt, strings.NewReader(values), array.WithUseNumber())
+	valArr, _, _ := array.FromJSON(tk.mem, dt, strings.NewReader(values))
 	defer valArr.Release()
 	indArr, _, _ := array.FromJSON(tk.mem, idxType, strings.NewReader(indices))
 	defer indArr.Release()
@@ -187,9 +187,9 @@ func (tk *TakeKernelTestSuite) takeJSON(dt arrow.DataType, values string, idxTyp
 }
 
 func (tk *TakeKernelTestSuite) checkTake(dt arrow.DataType, valuesJSON, indicesJSON, expJSON string) {
-	values, _, _ := array.FromJSON(tk.mem, dt, strings.NewReader(valuesJSON), array.WithUseNumber())
+	values, _, _ := array.FromJSON(tk.mem, dt, strings.NewReader(valuesJSON))
 	defer values.Release()
-	expected, _, _ := array.FromJSON(tk.mem, dt, strings.NewReader(expJSON), array.WithUseNumber())
+	expected, _, _ := array.FromJSON(tk.mem, dt, strings.NewReader(expJSON))
 	defer expected.Release()
 
 	for _, idxType := range []arrow.DataType{arrow.PrimitiveTypes.Int8, arrow.PrimitiveTypes.Uint32} {
@@ -268,7 +268,7 @@ func (tk *TakeKernelTestSuite) assertNoValidityBitmapButUnknownNullCount(values,
 }
 
 func (tk *TakeKernelTestSuite) assertNoValidityBitmapUnknownNullCountJSON(dt arrow.DataType, values, indices string) {
-	vals, _, _ := array.FromJSON(tk.mem, dt, strings.NewReader(values), array.WithUseNumber())
+	vals, _, _ := array.FromJSON(tk.mem, dt, strings.NewReader(values))
 	defer vals.Release()
 	inds, _, _ := array.FromJSON(tk.mem, arrow.PrimitiveTypes.Int16, strings.NewReader(indices))
 	defer inds.Release()
@@ -821,7 +821,7 @@ type FilterKernelWithRecordBatch struct {
 }
 
 func (f *FilterKernelWithRecordBatch) doFilter(sc *arrow.Schema, batchJSON, selection string, opts compute.FilterOptions) (arrow.RecordBatch, error) {
-	rec, _, err := array.RecordFromJSON(f.mem, sc, strings.NewReader(batchJSON), array.WithUseNumber())
+	rec, _, err := array.RecordFromJSON(f.mem, sc, strings.NewReader(batchJSON))
 	if err != nil {
 		return nil, err
 	}
@@ -848,7 +848,7 @@ func (f *FilterKernelWithRecordBatch) assertFilter(sc *arrow.Schema, batchJSON, 
 	f.Require().NoError(err)
 	defer actual.Release()
 
-	expected, _, err := array.RecordFromJSON(f.mem, sc, strings.NewReader(expectedBatch), array.WithUseNumber())
+	expected, _, err := array.RecordFromJSON(f.mem, sc, strings.NewReader(expectedBatch))
 	f.Require().NoError(err)
 	defer expected.Release()
 
@@ -1781,7 +1781,7 @@ func TestMapPreservesValueNullable(t *testing.T) {
 	ctx := compute.WithAllocator(context.TODO(), mem)
 
 	dt := arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32)
-	values, _, _ := array.FromJSON(mem, dt, strings.NewReader(`[[{"key": "a", "value": 1}]]`), array.WithUseNumber())
+	values, _, _ := array.FromJSON(mem, dt, strings.NewReader(`[[{"key": "a", "value": 1}]]`))
 	defer values.Release()
 	indices, _, _ := array.FromJSON(mem, arrow.PrimitiveTypes.Int8, strings.NewReader(`[0]`))
 	defer indices.Release()

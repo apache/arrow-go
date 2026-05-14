@@ -572,6 +572,7 @@ func TestRecordFromJSONLargeInt64WithUseNumber(t *testing.T) {
 	}, nil)
 
 	const data = `[{"a": 9223372036854775807}, {"a": -9223372036854775808}]`
+	//nolint:staticcheck // SA1019: explicitly verifying deprecated WithUseNumber still works
 	batch, _, err := array.RecordFromJSON(mem, schema, strings.NewReader(data), array.WithUseNumber())
 	require.NoError(t, err)
 	require.NotNil(t, batch)

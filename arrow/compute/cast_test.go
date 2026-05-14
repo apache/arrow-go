@@ -410,15 +410,15 @@ func (c *CastSuite) TestCanCast() {
 }
 
 func (c *CastSuite) checkCastFails(dt arrow.DataType, input string, opts *compute.CastOptions) {
-	inArr, _, _ := array.FromJSON(c.mem, dt, strings.NewReader(input), array.WithUseNumber())
+	inArr, _, _ := array.FromJSON(c.mem, dt, strings.NewReader(input))
 	defer inArr.Release()
 
 	checkCastFails(c.T(), inArr, *opts)
 }
 
 func (c *CastSuite) checkCastOpts(dtIn, dtOut arrow.DataType, inJSON, outJSON string, opts compute.CastOptions) {
-	inArr, _, _ := array.FromJSON(c.mem, dtIn, strings.NewReader(inJSON), array.WithUseNumber())
-	outArr, _, _ := array.FromJSON(c.mem, dtOut, strings.NewReader(outJSON), array.WithUseNumber())
+	inArr, _, _ := array.FromJSON(c.mem, dtIn, strings.NewReader(inJSON))
+	outArr, _, _ := array.FromJSON(c.mem, dtOut, strings.NewReader(outJSON))
 	defer inArr.Release()
 	defer outArr.Release()
 
@@ -430,13 +430,13 @@ func (c *CastSuite) checkCast(dtIn, dtOut arrow.DataType, inJSON, outJSON string
 }
 
 func (c *CastSuite) checkCastArr(in arrow.Array, dtOut arrow.DataType, json string, opts compute.CastOptions) {
-	outArr, _, _ := array.FromJSON(c.mem, dtOut, strings.NewReader(json), array.WithUseNumber())
+	outArr, _, _ := array.FromJSON(c.mem, dtOut, strings.NewReader(json))
 	defer outArr.Release()
 	checkCast(c.T(), in, outArr, opts)
 }
 
 func (c *CastSuite) checkCastExp(dtIn arrow.DataType, inJSON string, exp arrow.Array) {
-	inArr, _, _ := array.FromJSON(c.mem, dtIn, strings.NewReader(inJSON), array.WithUseNumber())
+	inArr, _, _ := array.FromJSON(c.mem, dtIn, strings.NewReader(inJSON))
 	defer inArr.Release()
 	checkCast(c.T(), inArr, exp, *compute.DefaultCastOptions(true))
 }
@@ -525,8 +525,7 @@ func (c *CastSuite) TestIntegerSignedToUnsigned() {
 	checkCast(c.T(), i32s, u32s, options)
 
 	u64s, _, _ := array.FromJSON(c.mem, arrow.PrimitiveTypes.Uint64,
-		strings.NewReader(`[18446744071562067968, null, 18446744073709551615, 65535, 2147483647]`),
-		array.WithUseNumber()) // have to use WithUseNumber so it doesn't lose precision converting to float64
+		strings.NewReader(`[18446744071562067968, null, 18446744073709551615, 65535, 2147483647]`))
 	defer u64s.Release()
 	checkCast(c.T(), i32s, u64s, options)
 
@@ -606,8 +605,7 @@ func (c *CastSuite) TestIntToFloating() {
 	}
 
 	i64s, _, _ := array.FromJSON(c.mem, arrow.PrimitiveTypes.Int64,
-		strings.NewReader(`[-9223372036854775808, -9223372036854775807, 0, 9223372036854775806,  9223372036854775807]`),
-		array.WithUseNumber())
+		strings.NewReader(`[-9223372036854775808, -9223372036854775807, 0, 9223372036854775806,  9223372036854775807]`))
 	defer i64s.Release()
 
 	checkCastFails(c.T(), i64s, *compute.SafeCastOptions(arrow.PrimitiveTypes.Float64))
@@ -666,7 +664,7 @@ func (c *CastSuite) TestDecimal128ToInt() {
 					strings.NewReader(`[
 						"12345678901234567890000.0000000000",
 						"99999999999999999999999.0000000000",
-						null]`), array.WithUseNumber())
+						null]`))
 				defer overflowNoTrunc.Release()
 				opts.AllowIntOverflow = true
 				c.checkCastArr(overflowNoTrunc, arrow.PrimitiveTypes.Int64,
@@ -691,7 +689,7 @@ func (c *CastSuite) TestDecimal128ToInt() {
 							strings.NewReader(`[
 							"12345678901234567890000.0045345000",
 							"99999999999999999999999.0000344300",
-							null]`), array.WithUseNumber())
+							null]`))
 						defer overflowAndTruncate.Release()
 						if opts.AllowIntOverflow && opts.AllowDecimalTruncate {
 							c.checkCastArr(overflowAndTruncate, arrow.PrimitiveTypes.Int64,
@@ -773,7 +771,7 @@ func (c *CastSuite) TestDecimal256ToInt() {
 					strings.NewReader(`[
 						"1234567890123456789000000.0000000000",
 						"9999999999999999999999999.0000000000",
-						null]`), array.WithUseNumber())
+						null]`))
 				defer overflowNoTrunc.Release()
 				opts.AllowIntOverflow = true
 				c.checkCastArr(overflowNoTrunc, arrow.PrimitiveTypes.Int64,
@@ -798,7 +796,7 @@ func (c *CastSuite) TestDecimal256ToInt() {
 							strings.NewReader(`[
 							"1234567890123456789000000.0045345000",
 							"9999999999999999999999999.0000344300",
-							null]`), array.WithUseNumber())
+							null]`))
 						defer overflowAndTruncate.Release()
 						if opts.AllowIntOverflow && opts.AllowDecimalTruncate {
 							c.checkCastArr(overflowAndTruncate, arrow.PrimitiveTypes.Int64,
@@ -2672,7 +2670,7 @@ func (c *CastSuite) TestTimestampToDate() {
 		0, 951782400000, -2240524800000, 1999987200000,
 		1577836800000, 1577750400000, 1577664000000, 1262217600000,
 		1262304000000, 1262476800000, 1262563200000, 1136073600000,
-		1135987200000, 1230422400000, 1230508800000, 1325376000000, null]`), array.WithUseNumber())
+		1135987200000, 1230422400000, 1230508800000, 1325376000000, null]`))
 	defer date64.Release()
 
 	checkCast(c.T(), stamps, date32, *compute.DefaultCastOptions(true))

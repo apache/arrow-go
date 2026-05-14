@@ -44,7 +44,7 @@ func (ss *ScalarSetLookupSuite) SetupTest() {
 }
 
 func (ss *ScalarSetLookupSuite) getArr(dt arrow.DataType, str string) arrow.Array {
-	arr, _, err := array.FromJSON(ss.mem, dt, strings.NewReader(str), array.WithUseNumber())
+	arr, _, err := array.FromJSON(ss.mem, dt, strings.NewReader(str))
 	ss.Require().NoError(err)
 	return arr
 }

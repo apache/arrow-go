@@ -281,6 +281,7 @@ func TestJSONReaderLargeInt64WithUseNumber(t *testing.T) {
 
 	const ndjson = "{\"a\": 9223372036854775807}\n{\"a\": -9223372036854775808}\n"
 	rdr := array.NewJSONReader(strings.NewReader(ndjson), schema,
+		//nolint:staticcheck // SA1019: explicitly verifying deprecated WithUseNumberJSONReader still works
 		array.WithAllocator(mem), array.WithChunk(-1), array.WithUseNumberJSONReader())
 	defer rdr.Release()
 
