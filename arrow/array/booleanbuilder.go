@@ -243,6 +243,7 @@ func (b *BooleanBuilder) Unmarshal(dec *json.Decoder) error {
 func (b *BooleanBuilder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err

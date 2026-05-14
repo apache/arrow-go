@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/json"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const jsondata = `
@@ -244,6 +245,54 @@ func jsonArrayToNDJSON(data []byte) ([]byte, error) {
 	}
 
 	return ndjson.Bytes(), nil
+}
+
+func TestJSONReaderLargeInt64Default(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	const ndjson = "{\"a\": 9223372036854775807}\n{\"a\": -9223372036854775808}\n"
+	rdr := array.NewJSONReader(strings.NewReader(ndjson), schema,
+		array.WithAllocator(mem), array.WithChunk(-1))
+	defer rdr.Release()
+
+	assert.True(t, rdr.Next())
+	rec := rdr.RecordBatch()
+	require.NotNil(t, rec)
+	assert.NoError(t, rdr.Err())
+	assert.EqualValues(t, 2, rec.NumRows())
+
+	col := rec.Column(0).(*array.Int64)
+	assert.EqualValues(t, int64(9223372036854775807), col.Value(0))
+	assert.EqualValues(t, int64(-9223372036854775808), col.Value(1))
+}
+
+func TestJSONReaderLargeInt64WithUseNumber(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	const ndjson = "{\"a\": 9223372036854775807}\n{\"a\": -9223372036854775808}\n"
+	rdr := array.NewJSONReader(strings.NewReader(ndjson), schema,
+		array.WithAllocator(mem), array.WithChunk(-1), array.WithUseNumberJSONReader())
+	defer rdr.Release()
+
+	assert.True(t, rdr.Next())
+	rec := rdr.RecordBatch()
+	require.NotNil(t, rec)
+	assert.NoError(t, rdr.Err())
+	assert.EqualValues(t, 2, rec.NumRows())
+
+	col := rec.Column(0).(*array.Int64)
+	assert.EqualValues(t, int64(9223372036854775807), col.Value(0))
+	assert.EqualValues(t, int64(-9223372036854775808), col.Value(1))
 }
 
 func BenchmarkRecordFromJSON(b *testing.B) {

@@ -62,6 +62,24 @@ func WithAllocator(mem memory.Allocator) Option {
 	}
 }
 
+// WithUseNumberJSONReader previously enabled UseNumber on the JSONReader's
+// internal json.Decoder. As of issue #804, NewJSONReader unconditionally
+// enables UseNumber so integer values too large to fit in float64 are
+// preserved. This option is now a no-op and is retained for backward
+// compatibility.
+//
+// Deprecated: UseNumber is now always enabled; this option has no effect.
+func WithUseNumberJSONReader() Option {
+	return func(cfg config) {
+		switch cfg := cfg.(type) {
+		case *JSONReader:
+			cfg.useNumber = true
+		default:
+			panic(fmt.Errorf("arrow/json): unknown config type %T", cfg))
+		}
+	}
+}
+
 // JSONReader is a json reader that meets the RecordReader interface definition.
 //
 // To read in an array of objects as a record, you can use RecordFromJSON
@@ -78,8 +96,9 @@ type JSONReader struct {
 	cur  arrow.RecordBatch
 	err  error
 
-	chunk int
-	done  bool
+	chunk     int
+	useNumber bool
+	done      bool
 
 	mem  memory.Allocator
 	next func() bool
@@ -102,6 +121,8 @@ func NewJSONReader(r io.Reader, schema *arrow.Schema, opts ...Option) *JSONReade
 	for _, o := range opts {
 		o(rr)
 	}
+
+	rr.r.UseNumber()
 
 	if rr.mem == nil {
 		rr.mem = memory.DefaultAllocator
@@ -166,7 +187,7 @@ func (r *JSONReader) Next() bool {
 }
 
 func (r *JSONReader) readNext() bool {
-	r.err = r.r.Decode(r.bldr)
+	r.err = r.bldr.UnmarshalOne(r.r)
 	if r.err != nil {
 		r.done = true
 		if errors.Is(r.err, io.EOF) {

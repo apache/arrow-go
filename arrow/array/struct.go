@@ -520,6 +520,7 @@ func (b *StructBuilder) Unmarshal(dec *json.Decoder) error {
 
 func (b *StructBuilder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err

@@ -543,3 +543,210 @@ func TestRecordBuilderUnmarshalJSONExtraFields(t *testing.T) {
 
 	assert.Truef(t, array.RecordEqual(rec1, rec2), "expected: %s\nactual: %s", rec1, rec2)
 }
+
+func TestRecordFromJSONLargeInt64Default(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	const data = `[{"a": 9223372036854775807}, {"a": -9223372036854775808}]`
+	batch, _, err := array.RecordFromJSON(mem, schema, strings.NewReader(data))
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	defer batch.Release()
+
+	col := batch.Column(0).(*array.Int64)
+	assert.EqualValues(t, int64(9223372036854775807), col.Value(0))
+	assert.EqualValues(t, int64(-9223372036854775808), col.Value(1))
+}
+
+func TestRecordFromJSONLargeInt64WithUseNumber(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	const data = `[{"a": 9223372036854775807}, {"a": -9223372036854775808}]`
+	batch, _, err := array.RecordFromJSON(mem, schema, strings.NewReader(data), array.WithUseNumber())
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	defer batch.Release()
+
+	col := batch.Column(0).(*array.Int64)
+	assert.EqualValues(t, int64(9223372036854775807), col.Value(0))
+	assert.EqualValues(t, int64(-9223372036854775808), col.Value(1))
+}
+
+func TestRecordFromJSONLargeDuration(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.FixedWidthTypes.Duration_s},
+	}, nil)
+
+	const data = `[{"a": 9223372036854775807}]`
+	batch, _, err := array.RecordFromJSON(mem, schema, strings.NewReader(data))
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	defer batch.Release()
+
+	col := batch.Column(0).(*array.Duration)
+	assert.EqualValues(t, arrow.Duration(9223372036854775807), col.Value(0))
+}
+
+func TestRecordBuilderUnmarshalJSONLargeInt64(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	bldr := array.NewRecordBuilder(mem, schema)
+	defer bldr.Release()
+
+	require.NoError(t, bldr.UnmarshalJSON([]byte(`{"a": 9223372036854775807}`)))
+
+	rec := bldr.NewRecordBatch()
+	defer rec.Release()
+
+	col := rec.Column(0).(*array.Int64)
+	assert.EqualValues(t, int64(9223372036854775807), col.Value(0))
+}
+
+func TestRecordBuilderUnmarshalOnePreservesUserDecoderOptions(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	bldr := array.NewRecordBuilder(mem, schema)
+	defer bldr.Release()
+
+	src := strings.NewReader(`{"a": 9223372036854775807}`)
+	dec := json.NewDecoder(src)
+	dec.UseNumber()
+
+	require.NoError(t, bldr.UnmarshalOne(dec))
+
+	rec := bldr.NewRecordBatch()
+	defer rec.Release()
+
+	col := rec.Column(0).(*array.Int64)
+	assert.EqualValues(t, int64(9223372036854775807), col.Value(0))
+}
+
+func TestDurationBuilderJSONStringInteger(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	arr, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Duration_s,
+		strings.NewReader(`["9223372036854775807"]`))
+	require.NoError(t, err)
+	require.NotNil(t, arr)
+	defer arr.Release()
+
+	col := arr.(*array.Duration)
+	assert.EqualValues(t, arrow.Duration(9223372036854775807), col.Value(0))
+}
+
+func TestTimestampBuilderJSONStringInteger(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	arr, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Timestamp_s,
+		strings.NewReader(`["9223372036854775807"]`))
+	require.NoError(t, err)
+	require.NotNil(t, arr)
+	defer arr.Release()
+
+	col := arr.(*array.Timestamp)
+	assert.EqualValues(t, arrow.Timestamp(9223372036854775807), col.Value(0))
+}
+
+func TestTime32BuilderJSONStringInteger(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	arr, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Time32s,
+		strings.NewReader(`["2147483647"]`))
+	require.NoError(t, err)
+	require.NotNil(t, arr)
+	defer arr.Release()
+
+	col := arr.(*array.Time32)
+	assert.EqualValues(t, arrow.Time32(2147483647), col.Value(0))
+}
+
+func TestTime64BuilderJSONStringInteger(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	arr, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Time64us,
+		strings.NewReader(`["9223372036854775807"]`))
+	require.NoError(t, err)
+	require.NotNil(t, arr)
+	defer arr.Release()
+
+	col := arr.(*array.Time64)
+	assert.EqualValues(t, arrow.Time64(9223372036854775807), col.Value(0))
+}
+
+func TestDate32BuilderJSONStringInteger(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	arr, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Date32,
+		strings.NewReader(`["2147483647"]`))
+	require.NoError(t, err)
+	require.NotNil(t, arr)
+	defer arr.Release()
+
+	col := arr.(*array.Date32)
+	assert.EqualValues(t, arrow.Date32(2147483647), col.Value(0))
+}
+
+func TestDate64BuilderJSONStringInteger(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	arr, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Date64,
+		strings.NewReader(`["9223372036854775807"]`))
+	require.NoError(t, err)
+	require.NotNil(t, arr)
+	defer arr.Release()
+
+	col := arr.(*array.Date64)
+	assert.EqualValues(t, arrow.Date64(9223372036854775807), col.Value(0))
+}
+
+func TestDurationBuilderJSONStringIntegerInvalid(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	_, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Duration_s,
+		strings.NewReader(`["abc"]`))
+	assert.Error(t, err)
+}
+
+func TestDurationBuilderJSONStringDurationFormat(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	arr, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Duration_s,
+		strings.NewReader(`["3h2m0.5s"]`))
+	require.NoError(t, err)
+	require.NotNil(t, arr)
+	defer arr.Release()
+
+	col := arr.(*array.Duration)
+	assert.EqualValues(t, arrow.Duration(10920), col.Value(0))
+}

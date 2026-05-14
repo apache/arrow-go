@@ -998,6 +998,7 @@ func (b *SparseUnionBuilder) NewSparseUnionArray() (a *SparseUnion) {
 
 func (b *SparseUnionBuilder) UnmarshalJSON(data []byte) (err error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -1257,6 +1258,7 @@ func (b *DenseUnionBuilder) NewDenseUnionArray() (a *DenseUnion) {
 
 func (b *DenseUnionBuilder) UnmarshalJSON(data []byte) (err error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err

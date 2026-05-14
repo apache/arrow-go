@@ -252,10 +252,11 @@ func (b *Int64Builder) UnmarshalOne(dec *json.Decoder) error {
 	case float64:
 		b.Append(int64(v))
 	case json.Number:
-		// Try ParseInt first for direct integer strings, fall back to ParseFloat for exponential notation
+		// Try ParseInt first to preserve precision for integer values too large
+		// for float64. Fall back to ParseFloat for fractional or exponential
+		// input to match the legacy float64 unmarshaling behavior.
 		f, err := strconv.ParseInt(v.String(), 10, 8*8)
 		if err != nil {
-			// Could be exponential notation - try parsing as float
 			fval, ferr := strconv.ParseFloat(v.String(), 64)
 			if ferr != nil {
 				return &json.UnmarshalTypeError{
@@ -264,16 +265,8 @@ func (b *Int64Builder) UnmarshalOne(dec *json.Decoder) error {
 					Offset: dec.InputOffset(),
 				}
 			}
-			// Check if it's a whole number and in valid range
-			if fval != float64(int64(fval)) || fval < -9223372036854775808.0 || fval >= 9223372036854775808.0 {
-				return &json.UnmarshalTypeError{
-					Value:  v.String(),
-					Type:   reflect.TypeOf(int64(0)),
-					Offset: dec.InputOffset(),
-				}
-			}
 			f = int64(fval)
-			err = nil // Clear error after successful float parsing
+			err = nil
 		}
 		if err != nil {
 			return &json.UnmarshalTypeError{
@@ -306,6 +299,7 @@ func (b *Int64Builder) Unmarshal(dec *json.Decoder) error {
 
 func (b *Int64Builder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -537,10 +531,11 @@ func (b *Uint64Builder) UnmarshalOne(dec *json.Decoder) error {
 	case float64:
 		b.Append(uint64(v))
 	case json.Number:
-		// Try ParseUint first for direct integer strings, fall back to ParseFloat for exponential notation
+		// Try ParseUint first to preserve precision for integer values too large
+		// for float64. Fall back to ParseFloat for fractional, exponential, or
+		// signed input to match the legacy float64 unmarshaling behavior.
 		f, err := strconv.ParseUint(v.String(), 10, 8*8)
 		if err != nil {
-			// Could be exponential notation - try parsing as float
 			fval, ferr := strconv.ParseFloat(v.String(), 64)
 			if ferr != nil {
 				return &json.UnmarshalTypeError{
@@ -549,16 +544,8 @@ func (b *Uint64Builder) UnmarshalOne(dec *json.Decoder) error {
 					Offset: dec.InputOffset(),
 				}
 			}
-			// Check if it's a whole number and in valid range
-			if fval != float64(uint64(fval)) || fval < 0 || fval > float64(^uint64(0)) {
-				return &json.UnmarshalTypeError{
-					Value:  v.String(),
-					Type:   reflect.TypeOf(uint64(0)),
-					Offset: dec.InputOffset(),
-				}
-			}
 			f = uint64(fval)
-			err = nil // Clear error after successful float parsing
+			err = nil
 		}
 		if err != nil {
 			return &json.UnmarshalTypeError{
@@ -591,6 +578,7 @@ func (b *Uint64Builder) Unmarshal(dec *json.Decoder) error {
 
 func (b *Uint64Builder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -832,6 +820,7 @@ func (b *Float64Builder) Unmarshal(dec *json.Decoder) error {
 
 func (b *Float64Builder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -1065,10 +1054,11 @@ func (b *Int32Builder) UnmarshalOne(dec *json.Decoder) error {
 	case float64:
 		b.Append(int32(v))
 	case json.Number:
-		// Try ParseInt first for direct integer strings, fall back to ParseFloat for exponential notation
+		// Try ParseInt first to preserve precision for integer values too large
+		// for float64. Fall back to ParseFloat for fractional or exponential
+		// input to match the legacy float64 unmarshaling behavior.
 		f, err := strconv.ParseInt(v.String(), 10, 4*8)
 		if err != nil {
-			// Could be exponential notation - try parsing as float
 			fval, ferr := strconv.ParseFloat(v.String(), 64)
 			if ferr != nil {
 				return &json.UnmarshalTypeError{
@@ -1077,18 +1067,8 @@ func (b *Int32Builder) UnmarshalOne(dec *json.Decoder) error {
 					Offset: dec.InputOffset(),
 				}
 			}
-			// Check if it's a whole number and in valid range
-			minVal := float64(int64(-1) << (4*8 - 1))
-			maxVal := float64(int64(1) << (4*8 - 1))
-			if fval != float64(int64(fval)) || fval < minVal || fval >= maxVal {
-				return &json.UnmarshalTypeError{
-					Value:  v.String(),
-					Type:   reflect.TypeOf(int32(0)),
-					Offset: dec.InputOffset(),
-				}
-			}
 			f = int64(fval)
-			err = nil // Clear error after successful float parsing
+			err = nil
 		}
 		if err != nil {
 			return &json.UnmarshalTypeError{
@@ -1121,6 +1101,7 @@ func (b *Int32Builder) Unmarshal(dec *json.Decoder) error {
 
 func (b *Int32Builder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -1352,10 +1333,11 @@ func (b *Uint32Builder) UnmarshalOne(dec *json.Decoder) error {
 	case float64:
 		b.Append(uint32(v))
 	case json.Number:
-		// Try ParseUint first for direct integer strings, fall back to ParseFloat for exponential notation
+		// Try ParseUint first to preserve precision for integer values too large
+		// for float64. Fall back to ParseFloat for fractional, exponential, or
+		// signed input to match the legacy float64 unmarshaling behavior.
 		f, err := strconv.ParseUint(v.String(), 10, 4*8)
 		if err != nil {
-			// Could be exponential notation - try parsing as float
 			fval, ferr := strconv.ParseFloat(v.String(), 64)
 			if ferr != nil {
 				return &json.UnmarshalTypeError{
@@ -1364,16 +1346,8 @@ func (b *Uint32Builder) UnmarshalOne(dec *json.Decoder) error {
 					Offset: dec.InputOffset(),
 				}
 			}
-			// Check if it's a whole number and in valid range
-			if fval != float64(uint64(fval)) || fval < 0 || fval > float64(^uint32(0)) {
-				return &json.UnmarshalTypeError{
-					Value:  v.String(),
-					Type:   reflect.TypeOf(uint32(0)),
-					Offset: dec.InputOffset(),
-				}
-			}
 			f = uint64(fval)
-			err = nil // Clear error after successful float parsing
+			err = nil
 		}
 		if err != nil {
 			return &json.UnmarshalTypeError{
@@ -1406,6 +1380,7 @@ func (b *Uint32Builder) Unmarshal(dec *json.Decoder) error {
 
 func (b *Uint32Builder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -1647,6 +1622,7 @@ func (b *Float32Builder) Unmarshal(dec *json.Decoder) error {
 
 func (b *Float32Builder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -1880,10 +1856,11 @@ func (b *Int16Builder) UnmarshalOne(dec *json.Decoder) error {
 	case float64:
 		b.Append(int16(v))
 	case json.Number:
-		// Try ParseInt first for direct integer strings, fall back to ParseFloat for exponential notation
+		// Try ParseInt first to preserve precision for integer values too large
+		// for float64. Fall back to ParseFloat for fractional or exponential
+		// input to match the legacy float64 unmarshaling behavior.
 		f, err := strconv.ParseInt(v.String(), 10, 2*8)
 		if err != nil {
-			// Could be exponential notation - try parsing as float
 			fval, ferr := strconv.ParseFloat(v.String(), 64)
 			if ferr != nil {
 				return &json.UnmarshalTypeError{
@@ -1892,18 +1869,8 @@ func (b *Int16Builder) UnmarshalOne(dec *json.Decoder) error {
 					Offset: dec.InputOffset(),
 				}
 			}
-			// Check if it's a whole number and in valid range
-			minVal := float64(int64(-1) << (2*8 - 1))
-			maxVal := float64(int64(1) << (2*8 - 1))
-			if fval != float64(int64(fval)) || fval < minVal || fval >= maxVal {
-				return &json.UnmarshalTypeError{
-					Value:  v.String(),
-					Type:   reflect.TypeOf(int16(0)),
-					Offset: dec.InputOffset(),
-				}
-			}
 			f = int64(fval)
-			err = nil // Clear error after successful float parsing
+			err = nil
 		}
 		if err != nil {
 			return &json.UnmarshalTypeError{
@@ -1936,6 +1903,7 @@ func (b *Int16Builder) Unmarshal(dec *json.Decoder) error {
 
 func (b *Int16Builder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -2167,10 +2135,11 @@ func (b *Uint16Builder) UnmarshalOne(dec *json.Decoder) error {
 	case float64:
 		b.Append(uint16(v))
 	case json.Number:
-		// Try ParseUint first for direct integer strings, fall back to ParseFloat for exponential notation
+		// Try ParseUint first to preserve precision for integer values too large
+		// for float64. Fall back to ParseFloat for fractional, exponential, or
+		// signed input to match the legacy float64 unmarshaling behavior.
 		f, err := strconv.ParseUint(v.String(), 10, 2*8)
 		if err != nil {
-			// Could be exponential notation - try parsing as float
 			fval, ferr := strconv.ParseFloat(v.String(), 64)
 			if ferr != nil {
 				return &json.UnmarshalTypeError{
@@ -2179,16 +2148,8 @@ func (b *Uint16Builder) UnmarshalOne(dec *json.Decoder) error {
 					Offset: dec.InputOffset(),
 				}
 			}
-			// Check if it's a whole number and in valid range
-			if fval != float64(uint64(fval)) || fval < 0 || fval > float64(^uint16(0)) {
-				return &json.UnmarshalTypeError{
-					Value:  v.String(),
-					Type:   reflect.TypeOf(uint16(0)),
-					Offset: dec.InputOffset(),
-				}
-			}
 			f = uint64(fval)
-			err = nil // Clear error after successful float parsing
+			err = nil
 		}
 		if err != nil {
 			return &json.UnmarshalTypeError{
@@ -2221,6 +2182,7 @@ func (b *Uint16Builder) Unmarshal(dec *json.Decoder) error {
 
 func (b *Uint16Builder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -2454,10 +2416,11 @@ func (b *Int8Builder) UnmarshalOne(dec *json.Decoder) error {
 	case float64:
 		b.Append(int8(v))
 	case json.Number:
-		// Try ParseInt first for direct integer strings, fall back to ParseFloat for exponential notation
+		// Try ParseInt first to preserve precision for integer values too large
+		// for float64. Fall back to ParseFloat for fractional or exponential
+		// input to match the legacy float64 unmarshaling behavior.
 		f, err := strconv.ParseInt(v.String(), 10, 1*8)
 		if err != nil {
-			// Could be exponential notation - try parsing as float
 			fval, ferr := strconv.ParseFloat(v.String(), 64)
 			if ferr != nil {
 				return &json.UnmarshalTypeError{
@@ -2466,18 +2429,8 @@ func (b *Int8Builder) UnmarshalOne(dec *json.Decoder) error {
 					Offset: dec.InputOffset(),
 				}
 			}
-			// Check if it's a whole number and in valid range
-			minVal := float64(int64(-1) << (1*8 - 1))
-			maxVal := float64(int64(1) << (1*8 - 1))
-			if fval != float64(int64(fval)) || fval < minVal || fval >= maxVal {
-				return &json.UnmarshalTypeError{
-					Value:  v.String(),
-					Type:   reflect.TypeOf(int8(0)),
-					Offset: dec.InputOffset(),
-				}
-			}
 			f = int64(fval)
-			err = nil // Clear error after successful float parsing
+			err = nil
 		}
 		if err != nil {
 			return &json.UnmarshalTypeError{
@@ -2510,6 +2463,7 @@ func (b *Int8Builder) Unmarshal(dec *json.Decoder) error {
 
 func (b *Int8Builder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -2741,10 +2695,11 @@ func (b *Uint8Builder) UnmarshalOne(dec *json.Decoder) error {
 	case float64:
 		b.Append(uint8(v))
 	case json.Number:
-		// Try ParseUint first for direct integer strings, fall back to ParseFloat for exponential notation
+		// Try ParseUint first to preserve precision for integer values too large
+		// for float64. Fall back to ParseFloat for fractional, exponential, or
+		// signed input to match the legacy float64 unmarshaling behavior.
 		f, err := strconv.ParseUint(v.String(), 10, 1*8)
 		if err != nil {
-			// Could be exponential notation - try parsing as float
 			fval, ferr := strconv.ParseFloat(v.String(), 64)
 			if ferr != nil {
 				return &json.UnmarshalTypeError{
@@ -2753,16 +2708,8 @@ func (b *Uint8Builder) UnmarshalOne(dec *json.Decoder) error {
 					Offset: dec.InputOffset(),
 				}
 			}
-			// Check if it's a whole number and in valid range
-			if fval != float64(uint64(fval)) || fval < 0 || fval > float64(^uint8(0)) {
-				return &json.UnmarshalTypeError{
-					Value:  v.String(),
-					Type:   reflect.TypeOf(uint8(0)),
-					Offset: dec.InputOffset(),
-				}
-			}
 			f = uint64(fval)
-			err = nil // Clear error after successful float parsing
+			err = nil
 		}
 		if err != nil {
 			return &json.UnmarshalTypeError{
@@ -2795,6 +2742,7 @@ func (b *Uint8Builder) Unmarshal(dec *json.Decoder) error {
 
 func (b *Uint8Builder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -2973,6 +2921,10 @@ func (b *Time32Builder) AppendValueFromString(s string) error {
 		b.AppendNull()
 		return nil
 	}
+	if v, parseErr := strconv.ParseInt(s, 10, 32); parseErr == nil {
+		b.Append(arrow.Time32(v))
+		return nil
+	}
 	val, err := arrow.Time32FromString(s, b.dtype.Unit)
 	if err != nil {
 		b.AppendNull()
@@ -2992,6 +2944,10 @@ func (b *Time32Builder) UnmarshalOne(dec *json.Decoder) error {
 	case nil:
 		b.AppendNull()
 	case string:
+		if i, parseErr := strconv.ParseInt(v, 10, 4*8); parseErr == nil {
+			b.Append(arrow.Time32(i))
+			break
+		}
 		tm, err := arrow.Time32FromString(v, b.dtype.Unit)
 		if err != nil {
 			return &json.UnmarshalTypeError{
@@ -3003,15 +2959,17 @@ func (b *Time32Builder) UnmarshalOne(dec *json.Decoder) error {
 
 		b.Append(tm)
 	case json.Number:
-		n, err := v.Int64()
-		if err != nil {
+		if n, err := v.Int64(); err == nil {
+			b.Append(arrow.Time32(n))
+		} else if f, err := v.Float64(); err == nil {
+			b.Append(arrow.Time32(f))
+		} else {
 			return &json.UnmarshalTypeError{
 				Value:  v.String(),
 				Type:   reflect.TypeOf(arrow.Time32(0)),
 				Offset: dec.InputOffset(),
 			}
 		}
-		b.Append(arrow.Time32(n))
 	case float64:
 		b.Append(arrow.Time32(v))
 
@@ -3037,6 +2995,7 @@ func (b *Time32Builder) Unmarshal(dec *json.Decoder) error {
 
 func (b *Time32Builder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -3215,6 +3174,10 @@ func (b *Time64Builder) AppendValueFromString(s string) error {
 		b.AppendNull()
 		return nil
 	}
+	if v, parseErr := strconv.ParseInt(s, 10, 64); parseErr == nil {
+		b.Append(arrow.Time64(v))
+		return nil
+	}
 	val, err := arrow.Time64FromString(s, b.dtype.Unit)
 	if err != nil {
 		b.AppendNull()
@@ -3234,6 +3197,10 @@ func (b *Time64Builder) UnmarshalOne(dec *json.Decoder) error {
 	case nil:
 		b.AppendNull()
 	case string:
+		if i, parseErr := strconv.ParseInt(v, 10, 8*8); parseErr == nil {
+			b.Append(arrow.Time64(i))
+			break
+		}
 		tm, err := arrow.Time64FromString(v, b.dtype.Unit)
 		if err != nil {
 			return &json.UnmarshalTypeError{
@@ -3245,15 +3212,17 @@ func (b *Time64Builder) UnmarshalOne(dec *json.Decoder) error {
 
 		b.Append(tm)
 	case json.Number:
-		n, err := v.Int64()
-		if err != nil {
+		if n, err := v.Int64(); err == nil {
+			b.Append(arrow.Time64(n))
+		} else if f, err := v.Float64(); err == nil {
+			b.Append(arrow.Time64(f))
+		} else {
 			return &json.UnmarshalTypeError{
 				Value:  v.String(),
 				Type:   reflect.TypeOf(arrow.Time64(0)),
 				Offset: dec.InputOffset(),
 			}
 		}
-		b.Append(arrow.Time64(n))
 	case float64:
 		b.Append(arrow.Time64(v))
 
@@ -3279,6 +3248,7 @@ func (b *Time64Builder) Unmarshal(dec *json.Decoder) error {
 
 func (b *Time64Builder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -3456,6 +3426,10 @@ func (b *Date32Builder) AppendValueFromString(s string) error {
 		b.AppendNull()
 		return nil
 	}
+	if v, parseErr := strconv.ParseInt(s, 10, 32); parseErr == nil {
+		b.Append(arrow.Date32(v))
+		return nil
+	}
 	tm, err := time.Parse("2006-01-02", s)
 	if err != nil {
 		b.AppendNull()
@@ -3475,6 +3449,10 @@ func (b *Date32Builder) UnmarshalOne(dec *json.Decoder) error {
 	case nil:
 		b.AppendNull()
 	case string:
+		if i, parseErr := strconv.ParseInt(v, 10, 4*8); parseErr == nil {
+			b.Append(arrow.Date32(i))
+			break
+		}
 		tm, err := time.Parse("2006-01-02", v)
 		if err != nil {
 			return &json.UnmarshalTypeError{
@@ -3486,15 +3464,17 @@ func (b *Date32Builder) UnmarshalOne(dec *json.Decoder) error {
 
 		b.Append(arrow.Date32FromTime(tm))
 	case json.Number:
-		n, err := v.Int64()
-		if err != nil {
+		if n, err := v.Int64(); err == nil {
+			b.Append(arrow.Date32(n))
+		} else if f, err := v.Float64(); err == nil {
+			b.Append(arrow.Date32(f))
+		} else {
 			return &json.UnmarshalTypeError{
 				Value:  v.String(),
 				Type:   reflect.TypeOf(arrow.Date32(0)),
 				Offset: dec.InputOffset(),
 			}
 		}
-		b.Append(arrow.Date32(n))
 	case float64:
 		b.Append(arrow.Date32(v))
 
@@ -3520,6 +3500,7 @@ func (b *Date32Builder) Unmarshal(dec *json.Decoder) error {
 
 func (b *Date32Builder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -3697,6 +3678,10 @@ func (b *Date64Builder) AppendValueFromString(s string) error {
 		b.AppendNull()
 		return nil
 	}
+	if v, parseErr := strconv.ParseInt(s, 10, 64); parseErr == nil {
+		b.Append(arrow.Date64(v))
+		return nil
+	}
 	tm, err := time.Parse("2006-01-02", s)
 	if err != nil {
 		b.AppendNull()
@@ -3716,6 +3701,10 @@ func (b *Date64Builder) UnmarshalOne(dec *json.Decoder) error {
 	case nil:
 		b.AppendNull()
 	case string:
+		if i, parseErr := strconv.ParseInt(v, 10, 8*8); parseErr == nil {
+			b.Append(arrow.Date64(i))
+			break
+		}
 		tm, err := time.Parse("2006-01-02", v)
 		if err != nil {
 			return &json.UnmarshalTypeError{
@@ -3727,15 +3716,17 @@ func (b *Date64Builder) UnmarshalOne(dec *json.Decoder) error {
 
 		b.Append(arrow.Date64FromTime(tm))
 	case json.Number:
-		n, err := v.Int64()
-		if err != nil {
+		if n, err := v.Int64(); err == nil {
+			b.Append(arrow.Date64(n))
+		} else if f, err := v.Float64(); err == nil {
+			b.Append(arrow.Date64(f))
+		} else {
 			return &json.UnmarshalTypeError{
 				Value:  v.String(),
 				Type:   reflect.TypeOf(arrow.Date64(0)),
 				Offset: dec.InputOffset(),
 			}
 		}
-		b.Append(arrow.Date64(n))
 	case float64:
 		b.Append(arrow.Date64(v))
 
@@ -3761,6 +3752,7 @@ func (b *Date64Builder) Unmarshal(dec *json.Decoder) error {
 
 func (b *Date64Builder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -3939,6 +3931,10 @@ func (b *DurationBuilder) AppendValueFromString(s string) error {
 		b.AppendNull()
 		return nil
 	}
+	if v, parseErr := strconv.ParseInt(s, 10, 64); parseErr == nil {
+		b.Append(arrow.Duration(v))
+		return nil
+	}
 	dur, err := time.ParseDuration(s)
 	if err != nil {
 		return err
@@ -3958,18 +3954,27 @@ func (b *DurationBuilder) UnmarshalOne(dec *json.Decoder) error {
 	case nil:
 		b.AppendNull()
 	case json.Number:
-		n, err := v.Int64()
-		if err != nil {
+		if n, err := v.Int64(); err == nil {
+			b.Append(arrow.Duration(n))
+		} else if f, err := v.Float64(); err == nil {
+			b.Append(arrow.Duration(f))
+		} else {
 			return &json.UnmarshalTypeError{
 				Value:  v.String(),
 				Type:   reflect.TypeOf(arrow.Duration(0)),
 				Offset: dec.InputOffset(),
 			}
 		}
-		b.Append(arrow.Duration(n))
 	case float64:
 		b.Append(arrow.Duration(v))
 	case string:
+		// raw integer strings (e.g. "9223372036854775807") - useful when the
+		// caller serializes large integers as strings to bypass JSON number
+		// precision limits
+		if i, parseErr := strconv.ParseInt(v, 10, 64); parseErr == nil {
+			b.Append(arrow.Duration(i))
+			break
+		}
 		// be flexible for specifying durations by accepting forms like
 		// 3h2m0.5s regardless of the unit and converting it to the proper
 		// precision.
@@ -4026,6 +4031,7 @@ func (b *DurationBuilder) Unmarshal(dec *json.Decoder) error {
 
 func (b *DurationBuilder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err

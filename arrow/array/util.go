@@ -61,10 +61,13 @@ func WithStartOffset(off int64) FromJSONOption {
 	}
 }
 
-// WithUseNumber enables the 'UseNumber' option on the json decoder, using
-// the json.Number type instead of assuming float64 for numbers. This is critical
-// if you have numbers that are larger than what can fit into the 53 bits of
-// an IEEE float64 mantissa and want to preserve its value.
+// WithUseNumber previously enabled the 'UseNumber' option on the json decoder.
+// As of issue #804, FromJSON, RecordFromJSON, and TableFromJSON unconditionally
+// enable UseNumber so that integer values too large to fit in float64 (i.e.
+// beyond 2^53) are preserved without silent corruption. This option is now a
+// no-op and is retained for backward compatibility.
+//
+// Deprecated: UseNumber is now always enabled; this option has no effect.
 func WithUseNumber() FromJSONOption {
 	return func(c *fromJSONCfg) {
 		c.useNumber = true
@@ -143,15 +146,12 @@ func FromJSON(mem memory.Allocator, dt arrow.DataType, r io.Reader, opts ...From
 	defer bldr.Release()
 
 	dec := json.NewDecoder(r)
+	dec.UseNumber()
 	defer func() {
 		if errors.Is(err, io.EOF) {
 			err = fmt.Errorf("failed parsing json: %w", io.ErrUnexpectedEOF)
 		}
 	}()
-
-	if cfg.useNumber {
-		dec.UseNumber()
-	}
 
 	if !cfg.multiDocument {
 		t, err := dec.Token()
@@ -237,9 +237,7 @@ func RecordFromJSON(mem memory.Allocator, schema *arrow.Schema, r io.Reader, opt
 	defer bldr.Release()
 
 	dec := json.NewDecoder(r)
-	if cfg.useNumber {
-		dec.UseNumber()
-	}
+	dec.UseNumber()
 
 	if !cfg.multiDocument {
 		t, err := dec.Token()
@@ -251,7 +249,7 @@ func RecordFromJSON(mem memory.Allocator, schema *arrow.Schema, r io.Reader, opt
 		}
 
 		for dec.More() {
-			if err := dec.Decode(bldr); err != nil {
+			if err := bldr.UnmarshalOne(dec); err != nil {
 				return nil, dec.InputOffset(), fmt.Errorf("failed to decode json: %w", err)
 			}
 		}
@@ -265,8 +263,7 @@ func RecordFromJSON(mem memory.Allocator, schema *arrow.Schema, r io.Reader, opt
 	}
 
 	for {
-		err := dec.Decode(bldr)
-		if err != nil {
+		if err := bldr.UnmarshalOne(dec); err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
