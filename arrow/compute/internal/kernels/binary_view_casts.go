@@ -148,12 +148,7 @@ func CastBinaryToBinaryView(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec
 	input := &batch.Values[0].Array
 	outputType := out.Type.(arrow.BinaryDataType)
 
-	inputIsUtf8 := false
-	if b, ok := input.Type.(arrow.BinaryDataType); ok {
-		inputIsUtf8 = b.IsUtf8()
-	}
-
-	if !inputIsUtf8 && outputType.IsUtf8() && !opts.AllowInvalidUtf8 {
+	if shouldValidateUTF8(input.Type, outputType, opts.AllowInvalidUtf8) {
 		switch input.Type.ID() {
 		case arrow.BINARY:
 			if err := validateUtf8[int32](input); err != nil {
@@ -220,7 +215,7 @@ func CastBinaryViewToBinary[OutOffsetT int32 | int64](ctx *exec.KernelCtx, batch
 	inputType := input.Type.(arrow.BinaryDataType)
 	outputType := out.Type.(arrow.BinaryDataType)
 
-	if !inputType.IsUtf8() && outputType.IsUtf8() && !opts.AllowInvalidUtf8 {
+	if shouldValidateUTF8(inputType, outputType, opts.AllowInvalidUtf8) {
 		if err := validateUtf8View(input); err != nil {
 			return err
 		}
@@ -272,7 +267,7 @@ func CastBinaryViewToBinaryView(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *
 	inputType := input.Type.(arrow.BinaryDataType)
 	outputType := out.Type.(arrow.BinaryDataType)
 
-	if !inputType.IsUtf8() && outputType.IsUtf8() && !opts.AllowInvalidUtf8 {
+	if shouldValidateUTF8(inputType, outputType, opts.AllowInvalidUtf8) {
 		if err := validateUtf8View(input); err != nil {
 			return err
 		}

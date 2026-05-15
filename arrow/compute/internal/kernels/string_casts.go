@@ -47,6 +47,22 @@ func validateUTF8Sequence(bitmap []byte, off, n int64, valueAt func(pos int64) [
 		}, func() error { return nil })
 }
 
+// shouldValidateUTF8 reports whether a cast from input to output must
+// reject invalid UTF-8 sequences in the input. Validation is required
+// only when the output is utf8, the input is not already known to be
+// utf8, and the caller has not opted into accepting invalid bytes via
+// CastOptions.AllowInvalidUtf8. Inputs that don't implement
+// BinaryDataType (e.g., FixedSizeBinary) are treated as non-utf8.
+func shouldValidateUTF8(input arrow.DataType, output arrow.BinaryDataType, allowInvalid bool) bool {
+	if allowInvalid || !output.IsUtf8() {
+		return false
+	}
+	if b, ok := input.(arrow.BinaryDataType); ok {
+		return !b.IsUtf8()
+	}
+	return true
+}
+
 func validateUtf8Fsb(input *exec.ArraySpan) error {
 	var (
 		inputData = input.Buffers[1].Buf
@@ -86,7 +102,7 @@ func CastBinaryToBinary[InOffsetsT, OutOffsetsT int32 | int64](ctx *exec.KernelC
 	opts := ctx.State.(CastState)
 	input := &batch.Values[0].Array
 
-	if !input.Type.(arrow.BinaryDataType).IsUtf8() && out.Type.(arrow.BinaryDataType).IsUtf8() && !opts.AllowInvalidUtf8 {
+	if shouldValidateUTF8(input.Type, out.Type.(arrow.BinaryDataType), opts.AllowInvalidUtf8) {
 		if err := validateUtf8[InOffsetsT](input); err != nil {
 			return err
 		}
@@ -139,7 +155,7 @@ func CastFsbToBinary[OffsetsT int32 | int64](ctx *exec.KernelCtx, batch *exec.Ex
 	opts := ctx.State.(CastState)
 	input := &batch.Values[0].Array
 
-	if out.Type.(arrow.BinaryDataType).IsUtf8() && !opts.AllowInvalidUtf8 {
+	if shouldValidateUTF8(input.Type, out.Type.(arrow.BinaryDataType), opts.AllowInvalidUtf8) {
 		if err := validateUtf8Fsb(input); err != nil {
 			return err
 		}
