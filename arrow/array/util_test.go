@@ -769,11 +769,17 @@ func TestJSONNumberStrictValidation(t *testing.T) {
 		{"Uint8Fractional", arrow.PrimitiveTypes.Uint8, `[0.5]`},
 		{"Uint16OutOfRange", arrow.PrimitiveTypes.Uint16, `[65536]`},
 		{"Uint64Negative", arrow.PrimitiveTypes.Uint64, `[-1]`},
+		{"Uint64ExactBoundary", arrow.PrimitiveTypes.Uint64, `[18446744073709551616]`},
+		{"Uint64ExponentialOverflow", arrow.PrimitiveTypes.Uint64, `[1.8446744073709552e+19]`},
 		{"DurationFractional", arrow.FixedWidthTypes.Duration_s, `[1.5]`},
 		{"TimestampFractional", arrow.FixedWidthTypes.Timestamp_s, `[1.5]`},
 		{"Date32Fractional", arrow.FixedWidthTypes.Date32, `[1.5]`},
+		{"Date32OverflowPositive", arrow.FixedWidthTypes.Date32, `[2147483648]`},
+		{"Date32OverflowNegative", arrow.FixedWidthTypes.Date32, `[-2147483649]`},
 		{"Date64Fractional", arrow.FixedWidthTypes.Date64, `[1.5]`},
 		{"Time32Fractional", arrow.FixedWidthTypes.Time32s, `[1.5]`},
+		{"Time32OverflowPositive", arrow.FixedWidthTypes.Time32s, `[2147483648]`},
+		{"Time32OverflowNegative", arrow.FixedWidthTypes.Time32s, `[-2147483649]`},
 		{"Time64Fractional", arrow.FixedWidthTypes.Time64us, `[1.5]`},
 	}
 	for _, tc := range cases {
