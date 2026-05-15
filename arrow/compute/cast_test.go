@@ -1713,11 +1713,11 @@ func (c *CastSuite) TestCanCastViewTypes() {
 	c.True(compute.CanCast(&arrow.FixedSizeBinaryType{ByteWidth: 3}, arrow.BinaryTypes.StringView))
 }
 
-// TestBinaryLikeToBinaryViewLargePayload is a regression test for the GH-184
-// review feedback: when the cast output's out-of-line payload would exceed
-// the builder's default 32KB block size, the kernel must still produce a
-// single-data-buffer view so the result fits in ArraySpan's fixed 3-buffer
-// layout. A multi-buffer result would panic in out.TakeOwnership.
+// TestBinaryLikeToBinaryViewLargePayload verifies that when the cast
+// output's out-of-line payload would exceed the builder's default 32KB
+// block size, the kernel must still produce a single-data-buffer view so
+// the result fits in ArraySpan's fixed 3-buffer layout. A multi-buffer
+// result would panic in out.TakeOwnership.
 func (c *CastSuite) TestBinaryLikeToBinaryViewLargePayload() {
 	const (
 		perValue = 200
@@ -1760,10 +1760,9 @@ func (c *CastSuite) TestBinaryLikeToBinaryViewLargePayload() {
 	}
 }
 
-// TestMultiBufferViewInputCoalesced is a regression test for the second
-// round of GH-184 review feedback: a BinaryView/StringView input whose
-// payload already spans multiple builder blocks (>32KB) must be coalesced
-// into a single-buffer view before entering compute, since
+// TestMultiBufferViewInputCoalesced verifies that a BinaryView/StringView
+// input whose payload already spans multiple builder blocks (>32KB) must
+// be coalesced into a single-buffer view before entering compute, since
 // exec.ArraySpan's fixed [3]BufferSpan cannot carry multi-buffer views.
 func (c *CastSuite) TestMultiBufferViewInputCoalesced() {
 	const (
@@ -1846,11 +1845,11 @@ func (c *CastSuite) TestMultiBufferViewInputCoalesced() {
 	})
 }
 
-// TestNumericToStringViewLargePayload is a regression test for the second
-// round of GH-184 review feedback: casting a numeric/temporal column with
-// enough values to produce >32KB of non-inline formatted output must still
-// produce a single-buffer string_view rather than spilling into a second
-// overflow block (which would panic in out.TakeOwnership).
+// TestNumericToStringViewLargePayload verifies that casting a
+// numeric/temporal column with enough values to produce >32KB of
+// non-inline formatted output must still produce a single-buffer
+// string_view rather than spilling into a second overflow block (which
+// would panic in out.TakeOwnership).
 func (c *CastSuite) TestNumericToStringViewLargePayload() {
 	const count = 5000
 
@@ -1917,9 +1916,8 @@ func (c *CastSuite) TestNumericToStringViewLargePayload() {
 			len(got.Data().Buffers()))
 	})
 
-	// Regression test for GH-184 eighth-round review finding: time32[ms]
-	// formats to exactly 12 bytes ("HH:MM:SS.sss") which ViewHeader
-	// stores inline (size <= 12), so the inline-skip in
+	// time32[ms] formats to exactly 12 bytes ("HH:MM:SS.sss") which
+	// ViewHeader stores inline (size <= 12), so the inline-skip in
 	// reserveFormattedData must treat 12 as inline. This is the
 	// cast-level smoke test verifying the end-to-end path; the boundary
 	// itself is exercised in TestReserveFormattedDataInlineViewSkip.
@@ -1954,10 +1952,10 @@ func (c *CastSuite) TestNumericToStringViewLargePayload() {
 	})
 }
 
-// TestChunkedMultiBufferViewInputCoalesced is a regression test for the
-// third round of GH-184 review feedback: a *ChunkedDatum whose chunks are
-// multi-buffer view arrays must also be coalesced by the cast meta function
-// before dispatch; otherwise executor.SetMembers on the second chunk panics.
+// TestChunkedMultiBufferViewInputCoalesced verifies that a *ChunkedDatum
+// whose chunks are multi-buffer view arrays must also be coalesced by
+// the cast meta function before dispatch; otherwise executor.SetMembers
+// on the second chunk panics.
 func (c *CastSuite) TestChunkedMultiBufferViewInputCoalesced() {
 	const (
 		perValue = 200
@@ -2035,13 +2033,12 @@ func (c *CastSuite) buildInt32Dictionary(values arrow.Array, indices []int32, va
 	return da
 }
 
-// TestViewDictionaryUnpackCast is a regression test for the GH-184
-// fifth-round review finding: a cast whose input is a dictionary whose
-// values are string_view or binary_view went through unpackDictionary's
-// TakeArray path, which has no view kernel and errored out. Dictionary
-// unpacking now handles view-typed values directly. Covers dict<string_view>
-// -> utf8, dict<string_view> -> string_view (dict removal), dict<binary_view>
-// -> binary, and null/empty preservation.
+// TestViewDictionaryUnpackCast verifies that a cast whose input is a
+// dictionary with string_view or binary_view values is handled directly
+// by the view-aware unpacker rather than unpackDictionary's TakeArray
+// path, which has no view kernel and would error out. Covers
+// dict<string_view> -> utf8, dict<string_view> -> string_view (dict
+// removal), dict<binary_view> -> binary, and null/empty preservation.
 func (c *CastSuite) TestViewDictionaryUnpackCast() {
 
 	c.Run("string_view dict to utf8", func() {
@@ -2166,15 +2163,15 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 		c.True(bv.IsNull(3))
 	})
 
-	// Regression for GH-184 ninth-round review finding: when the top-level
-	// input is a dictionary whose *values* are a multi-buffer view array,
-	// exec.ArraySpan.SetMembers recurses into the dictionary child and
-	// hits the fixed [3]BufferSpan before unpackViewDictionary ever runs.
-	// coalesceMultiBufferViewDatum must therefore rebuild the dictionary
-	// values into a single overflow buffer up front. Build dictionary
-	// values that are large enough to span multiple overflow buffers via
-	// the default 32KB block size (two 20,000-byte entries are enough to
-	// trip the multi-buffer condition).
+	// When the top-level input is a dictionary whose *values* are a
+	// multi-buffer view array, exec.ArraySpan.SetMembers recurses into
+	// the dictionary child and hits the fixed [3]BufferSpan before
+	// unpackViewDictionary ever runs. coalesceMultiBufferViewDatum must
+	// therefore rebuild the dictionary values into a single overflow
+	// buffer up front. Build dictionary values that are large enough to
+	// span multiple overflow buffers via the default 32KB block size
+	// (two 20,000-byte entries are enough to trip the multi-buffer
+	// condition).
 	c.Run("dict<string_view multi-buffer values> to utf8", func() {
 		const valBytes = 20000
 		a := strings.Repeat("a", valBytes)
@@ -2207,12 +2204,12 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 		c.Equal(b, sv.Value(3))
 	})
 
-	// Regression for GH-184 tenth-round review finding: exec.ArraySpan
-	// .SetMembers recurses through ordinary nested children as well as
-	// dictionary children, so a list<string_view> (or struct-of-view)
-	// whose descendant is multi-buffer also panics before dispatch.
-	// coalesceMultiBufferViewDatum must therefore recurse through
-	// Children() to rebuild any descendant view array in place.
+	// exec.ArraySpan.SetMembers recurses through ordinary nested children
+	// as well as dictionary children, so a list<string_view> (or
+	// struct-of-view) whose descendant is multi-buffer also panics
+	// before dispatch. coalesceMultiBufferViewDatum must therefore
+	// recurse through Children() to rebuild any descendant view array
+	// in place.
 	c.Run("list<string_view multi-buffer child> to list<utf8>", func() {
 		const valBytes = 20000
 		a := strings.Repeat("a", valBytes)
@@ -2258,12 +2255,12 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 		c.Equal(b, child.Value(3))
 	})
 
-	// Regression for GH-184 eleventh-round review finding: extension
-	// arrays reuse their storage buffers/children in place, so an
-	// extension over a multi-buffer view hit exec.ArraySpan.SetMembers
-	// before CastFromExtension unwrapped the storage. coalesce must
-	// therefore traverse extensions through their StorageType and
-	// re-wrap after rebuilding so the extension datatype survives.
+	// Extension arrays reuse their storage buffers/children in place,
+	// so an extension over a multi-buffer view hit
+	// exec.ArraySpan.SetMembers before CastFromExtension unwrapped the
+	// storage. coalesce must therefore traverse extensions through
+	// their StorageType and re-wrap after rebuilding so the extension
+	// datatype survives.
 	c.Run("extension<string_view multi-buffer> to utf8", func() {
 		extType := types.NewStringViewExtType()
 		arrow.RegisterExtensionType(extType)
@@ -2370,15 +2367,14 @@ func (c *CastSuite) TestViewDictionaryUnpackCast() {
 	})
 }
 
-// TestBoolToStringViewStaysSingleBuffer is a regression test for the
-// GH-184 sixth-round review finding: boolToStringCastExec joined the
-// numeric/temporal-to-string kernels without the matching pre-reservation
-// path, so large bool -> string_view casts could allocate multiple
-// overflow data buffers and exceed exec.ArraySpan's fixed [3]BufferSpan.
-// The kernel now counts exact formatted bytes ("true"=4, "false"=5) and
-// pre-reserves that amount on the builder, so the output always has
-// <= 3 buffers and all-true casts near the int32 limit are not
-// over-rejected relative to the tight bound.
+// TestBoolToStringViewStaysSingleBuffer verifies that boolToStringCastExec
+// (which joined the numeric/temporal-to-string kernels) carries the
+// matching pre-reservation path: large bool -> string_view casts must
+// not allocate multiple overflow data buffers and exceed
+// exec.ArraySpan's fixed [3]BufferSpan. The kernel counts exact
+// formatted bytes ("true"=4, "false"=5) and pre-reserves that amount on
+// the builder, so the output always has <= 3 buffers and all-true casts
+// near the int32 limit are not over-rejected relative to the tight bound.
 func (c *CastSuite) TestBoolToStringViewStaysSingleBuffer() {
 	const count = 1 << 14
 

@@ -28,15 +28,14 @@ import (
 	"github.com/apache/arrow-go/v18/internal/types"
 )
 
-// TestCoalesceArrayDataExtensionOverDictOfView is the regression test for
-// the GH-184 twelfth-round review finding: when an extension's storage is
-// dictionary<...view...>, coalesceArrayData must preserve the
-// Dictionary() member when it unwraps and rewraps the extension so the
-// recursive DICTIONARY branch does not see a nil dictionary. Driven
-// directly at the coalesce helper because the full cast pipeline for
-// extension<dict<...>> hits a pre-existing SetMembers gap unrelated to
-// view coalescing (exec.ArraySpan.SetMembers does not recognize a
-// dictionary stored under an extension type).
+// TestCoalesceArrayDataExtensionOverDictOfView verifies that when an
+// extension's storage is dictionary<...view...>, coalesceArrayData
+// preserves the Dictionary() member when it unwraps and rewraps the
+// extension so the recursive DICTIONARY branch does not see a nil
+// dictionary. Driven directly at the coalesce helper because the full
+// cast pipeline for extension<dict<...>> hits a pre-existing SetMembers
+// gap unrelated to view coalescing (exec.ArraySpan.SetMembers does not
+// recognize a dictionary stored under an extension type).
 func TestCoalesceArrayDataExtensionOverDictOfView(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)

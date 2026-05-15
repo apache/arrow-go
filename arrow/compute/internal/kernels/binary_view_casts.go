@@ -167,7 +167,7 @@ func CastBinaryToBinaryView(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec
 	// the builder allocates a single overflow block. ArraySpan only has three
 	// buffer slots (bitmap + view headers + one data buffer); if we let the
 	// builder spill into a second block, TakeOwnership would index past
-	// Buffers[2] and panic. See the review feedback on GH-184.
+	// Buffers[2] and panic.
 	var outOfLineTotal int64
 	for i := 0; i < arr.Len(); i++ {
 		if arr.IsNull(i) {

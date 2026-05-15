@@ -58,7 +58,7 @@ var (
 			// [3]BufferSpan cannot carry BinaryView/StringView arrays with
 			// more than one overflow data buffer, so SetMembers would panic
 			// before any kernel runs. Rebuild such inputs with a single data
-			// buffer up front. See GH-184 review feedback.
+			// buffer up front.
 			coalescedDatum, err := coalesceMultiBufferViewDatum(ctx, d[0])
 			if err != nil {
 				return nil, err

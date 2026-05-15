@@ -95,11 +95,11 @@ func TestFormattedDataLimitPerBuilder(t *testing.T) {
 	}
 }
 
-// TestFormattedDataLimitFitsInPlatformInt is the regression test for the
-// GH-184 third-round review finding: reserveFormattedData passes int(total)
-// to ReserveData, so the returned limit must fit in the platform int to
-// prevent overflow on 32-bit builds where int is 32-bit. The assertion
-// holds on both 32- and 64-bit builds by construction.
+// TestFormattedDataLimitFitsInPlatformInt verifies that the limit returned
+// by formattedDataLimit fits in the platform int: reserveFormattedData
+// passes int(total) to ReserveData, so the limit must fit in the platform
+// int to prevent overflow on 32-bit builds where int is 32-bit. The
+// assertion holds on both 32- and 64-bit builds by construction.
 func TestFormattedDataLimitFitsInPlatformInt(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
@@ -122,14 +122,13 @@ func TestFormattedDataLimitFitsInPlatformInt(t *testing.T) {
 }
 
 // TestReserveFormattedDataAllowsLargeUtf8AboveInt32 is a platform-aware
-// regression test for the GH-184 second-round review finding: on 64-bit
-// builds, reserveFormattedData must not reject large_utf8 totals above
-// MaxInt32 (int64 offsets can represent them); on 32-bit builds, the
-// destination-specific limit is instead clamped to math.MaxInt32 so
-// int(total) cannot overflow in reserveFormattedData. We assert the
-// destination-specific limit via formattedDataLimit rather than driving
-// a multi-gigabyte allocation through the full kernel path, and
-// separately confirm the guard still fires for string_view at the
+// regression test: on 64-bit builds, reserveFormattedData must not reject
+// large_utf8 totals above MaxInt32 (int64 offsets can represent them);
+// on 32-bit builds, the destination-specific limit is instead clamped to
+// math.MaxInt32 so int(total) cannot overflow in reserveFormattedData.
+// We assert the destination-specific limit via formattedDataLimit rather
+// than driving a multi-gigabyte allocation through the full kernel path,
+// and separately confirm the guard still fires for string_view at the
 // int32 boundary.
 func TestReserveFormattedDataAllowsLargeUtf8AboveInt32(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
@@ -160,10 +159,9 @@ func TestReserveFormattedDataAllowsLargeUtf8AboveInt32(t *testing.T) {
 	}
 }
 
-// TestReserveFormattedDataInlineViewSkip is the regression test for the
-// GH-184 seventh/eighth-round review findings: for view builders, values
-// whose per-value upper bound fits inline (arrow.IsViewInline, <= 12)
-// are stored inside view headers and never consume overflow data.
+// TestReserveFormattedDataInlineViewSkip verifies that for view builders,
+// values whose per-value upper bound fits inline (arrow.IsViewInline,
+// <= 12) are stored inside view headers and never consume overflow data.
 // reserveFormattedData must skip both the reservation and the
 // single-buffer limit check in that case, so large casts with
 // inline-bounded values (bool, int8..int32, date32, time32[ms], etc.)

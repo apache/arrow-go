@@ -346,7 +346,7 @@ func numericToStringCastExec[T arrow.IntType | arrow.UintType | arrow.FloatType]
 // overflow in StringBuilder. For view builders whose per-value upper bound
 // fits inline (arrow.IsViewInline), all values are stored inside view
 // headers and consume no overflow data, so reservation and the limit
-// check are skipped. See GH-184 review feedback.
+// check are skipped.
 func reserveFormattedData(bldr array.StringLikeBuilder, input *exec.ArraySpan, perValueBytes int) error {
 	if perValueBytes <= 0 {
 		return nil
@@ -409,7 +409,7 @@ func formattedDataLimit(bldr array.StringLikeBuilder) int64 {
 // of a single value of dt used by the numeric/temporal-to-string kernels.
 // The bound is used to pre-reserve the builder's data buffer so StringView
 // outputs stay within a single overflow block (compute's ArraySpan can
-// carry only one view data buffer). See GH-184 review feedback.
+// carry only one view data buffer).
 func maxFormattedBytes(dt arrow.DataType) int {
 	switch dt.ID() {
 	case arrow.INT8, arrow.UINT8:
