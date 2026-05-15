@@ -786,6 +786,10 @@ func TestJSONNumberStrictValidation(t *testing.T) {
 		{"Uint64NaNString", arrow.PrimitiveTypes.Uint64, `["NaN"]`},
 		{"Uint64InfString", arrow.PrimitiveTypes.Uint64, `["+Inf"]`},
 		{"Uint64ExponentialOverflowString", arrow.PrimitiveTypes.Uint64, `["1.8446744073709552e+19"]`},
+		{"Int64ExponentBeyondMantissa", arrow.PrimitiveTypes.Int64, `[9.007199254740993e15]`},
+		{"Uint64ExponentBeyondMantissa", arrow.PrimitiveTypes.Uint64, `[9.007199254740993e15]`},
+		{"Int64ExponentBeyondMantissaString", arrow.PrimitiveTypes.Int64, `["9.007199254740993e15"]`},
+		{"Uint64ExponentBeyondMantissaString", arrow.PrimitiveTypes.Uint64, `["9.007199254740993e15"]`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

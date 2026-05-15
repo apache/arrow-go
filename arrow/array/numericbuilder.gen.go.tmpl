@@ -459,6 +459,18 @@ func (b *{{.Name}}Builder) UnmarshalOne(dec *json.Decoder) error {
 					Offset: dec.InputOffset(),
 				}
 			}
+			{{if eq .Size "8" -}}
+			// Beyond 2^53, float64 cannot represent every integer exactly, so
+			// exponent-form input like "9.007199254740993e15" may have been
+			// silently rounded by ParseFloat. Reject conservatively.
+			if math.Abs(fval) >= 9007199254740992 {
+				return &json.UnmarshalTypeError{
+					Value: v,
+					Type: reflect.TypeOf({{.name}}(0)),
+					Offset: dec.InputOffset(),
+				}
+			}
+			{{end -}}
 			truncated := uint64(fval)
 			if fval != float64(truncated) {
 				return &json.UnmarshalTypeError{
@@ -497,6 +509,18 @@ func (b *{{.Name}}Builder) UnmarshalOne(dec *json.Decoder) error {
 					Offset: dec.InputOffset(),
 				}
 			}
+			{{if eq .Size "8" -}}
+			// Beyond 2^53, float64 cannot represent every integer exactly, so
+			// exponent-form input like "9.007199254740993e15" may have been
+			// silently rounded by ParseFloat. Reject conservatively.
+			if math.Abs(fval) >= 9007199254740992 {
+				return &json.UnmarshalTypeError{
+					Value: v,
+					Type: reflect.TypeOf({{.name}}(0)),
+					Offset: dec.InputOffset(),
+				}
+			}
+			{{end -}}
 			truncated := int64(fval)
 			if fval != float64(truncated) {
 				return &json.UnmarshalTypeError{
@@ -549,6 +573,18 @@ func (b *{{.Name}}Builder) UnmarshalOne(dec *json.Decoder) error {
 					Offset: dec.InputOffset(),
 				}
 			}
+			{{if eq .Size "8" -}}
+			// Beyond 2^53, float64 cannot represent every integer exactly, so
+			// exponent-form input like "9.007199254740993e15" may have been
+			// silently rounded by ParseFloat. Reject conservatively.
+			if math.Abs(fval) >= 9007199254740992 {
+				return &json.UnmarshalTypeError{
+					Value: v.String(),
+					Type: reflect.TypeOf({{.name}}(0)),
+					Offset: dec.InputOffset(),
+				}
+			}
+			{{end -}}
 			truncated := uint64(fval)
 			if fval != float64(truncated) {
 				return &json.UnmarshalTypeError{
@@ -589,6 +625,18 @@ func (b *{{.Name}}Builder) UnmarshalOne(dec *json.Decoder) error {
 					Offset: dec.InputOffset(),
 				}
 			}
+			{{if eq .Size "8" -}}
+			// Beyond 2^53, float64 cannot represent every integer exactly, so
+			// exponent-form input like "9.007199254740993e15" may have been
+			// silently rounded by ParseFloat. Reject conservatively.
+			if math.Abs(fval) >= 9007199254740992 {
+				return &json.UnmarshalTypeError{
+					Value: v.String(),
+					Type: reflect.TypeOf({{.name}}(0)),
+					Offset: dec.InputOffset(),
+				}
+			}
+			{{end -}}
 			truncated := int64(fval)
 			if fval != float64(truncated) {
 				return &json.UnmarshalTypeError{

@@ -239,6 +239,16 @@ func (b *Int64Builder) UnmarshalOne(dec *json.Decoder) error {
 					Offset: dec.InputOffset(),
 				}
 			}
+			// Beyond 2^53, float64 cannot represent every integer exactly, so
+			// exponent-form input like "9.007199254740993e15" may have been
+			// silently rounded by ParseFloat. Reject conservatively.
+			if math.Abs(fval) >= 9007199254740992 {
+				return &json.UnmarshalTypeError{
+					Value:  v,
+					Type:   reflect.TypeOf(int64(0)),
+					Offset: dec.InputOffset(),
+				}
+			}
 			truncated := int64(fval)
 			if fval != float64(truncated) {
 				return &json.UnmarshalTypeError{
@@ -277,6 +287,16 @@ func (b *Int64Builder) UnmarshalOne(dec *json.Decoder) error {
 				}
 			}
 			if math.IsNaN(fval) || math.IsInf(fval, 0) || fval < -9223372036854775808.0 || fval >= 9223372036854775808.0 {
+				return &json.UnmarshalTypeError{
+					Value:  v.String(),
+					Type:   reflect.TypeOf(int64(0)),
+					Offset: dec.InputOffset(),
+				}
+			}
+			// Beyond 2^53, float64 cannot represent every integer exactly, so
+			// exponent-form input like "9.007199254740993e15" may have been
+			// silently rounded by ParseFloat. Reject conservatively.
+			if math.Abs(fval) >= 9007199254740992 {
 				return &json.UnmarshalTypeError{
 					Value:  v.String(),
 					Type:   reflect.TypeOf(int64(0)),
@@ -543,6 +563,16 @@ func (b *Uint64Builder) UnmarshalOne(dec *json.Decoder) error {
 					Offset: dec.InputOffset(),
 				}
 			}
+			// Beyond 2^53, float64 cannot represent every integer exactly, so
+			// exponent-form input like "9.007199254740993e15" may have been
+			// silently rounded by ParseFloat. Reject conservatively.
+			if math.Abs(fval) >= 9007199254740992 {
+				return &json.UnmarshalTypeError{
+					Value:  v,
+					Type:   reflect.TypeOf(uint64(0)),
+					Offset: dec.InputOffset(),
+				}
+			}
 			truncated := uint64(fval)
 			if fval != float64(truncated) {
 				return &json.UnmarshalTypeError{
@@ -585,6 +615,16 @@ func (b *Uint64Builder) UnmarshalOne(dec *json.Decoder) error {
 			// For uint64, float64(^uint64(0)) already rounds up to 2^64, so this naturally
 			// rejects the exact 2^64 boundary that the looser `>` check missed.
 			if math.IsNaN(fval) || math.IsInf(fval, 0) || fval < 0 || fval >= float64(^uint64(0))+1 {
+				return &json.UnmarshalTypeError{
+					Value:  v.String(),
+					Type:   reflect.TypeOf(uint64(0)),
+					Offset: dec.InputOffset(),
+				}
+			}
+			// Beyond 2^53, float64 cannot represent every integer exactly, so
+			// exponent-form input like "9.007199254740993e15" may have been
+			// silently rounded by ParseFloat. Reject conservatively.
+			if math.Abs(fval) >= 9007199254740992 {
 				return &json.UnmarshalTypeError{
 					Value:  v.String(),
 					Type:   reflect.TypeOf(uint64(0)),
