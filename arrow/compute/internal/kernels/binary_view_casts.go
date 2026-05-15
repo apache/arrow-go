@@ -113,6 +113,31 @@ func appendBinaryValues(arr arrow.Array, getVal func(int) []byte, ba binaryAppen
 	}
 }
 
+// SumOutOfLineBytes returns the total non-inline payload (in bytes) that
+// would be written to a view array's overflow buffer when iterating n
+// positions with the given predicates, and arrow.ErrInvalid if the total
+// exceeds the single-overflow-buffer limit (math.MaxInt32). Used both by
+// the binary-to-view cast kernel here and by the cast meta function's
+// view-coalescing helpers (where the closures translate dictionary or
+// chunk positions into value-level lookups).
+func SumOutOfLineBytes(n int, isNull func(int) bool, valueLen func(int) int) (int64, error) {
+	var total int64
+	for i := 0; i < n; i++ {
+		if isNull(i) {
+			continue
+		}
+		vlen := valueLen(i)
+		if !arrow.IsViewInline(vlen) {
+			total += int64(vlen)
+			if total > math.MaxInt32 {
+				return 0, fmt.Errorf("%w: view out-of-line payload (%d bytes) exceeds single-buffer limit (%d bytes)",
+					arrow.ErrInvalid, total, math.MaxInt32)
+			}
+		}
+	}
+	return total, nil
+}
+
 // CastBinaryToBinaryView casts a Binary, LargeBinary, String, LargeString,
 // or FixedSizeBinary array into a BinaryView or StringView array. When the
 // source is a non-utf8 binary type and the destination is a utf8 view type,
@@ -168,19 +193,10 @@ func CastBinaryToBinaryView(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec
 	// buffer slots (bitmap + view headers + one data buffer); if we let the
 	// builder spill into a second block, TakeOwnership would index past
 	// Buffers[2] and panic.
-	var outOfLineTotal int64
-	for i := 0; i < arr.Len(); i++ {
-		if arr.IsNull(i) {
-			continue
-		}
-		vlen := len(getVal(i))
-		if !arrow.IsViewInline(vlen) {
-			outOfLineTotal += int64(vlen)
-		}
-	}
-	if outOfLineTotal > math.MaxInt32 {
-		return fmt.Errorf("%w: cast from %s to %s: out-of-line payload (%d bytes) exceeds single view data buffer limit (%d bytes)",
-			arrow.ErrInvalid, input.Type, out.Type, outOfLineTotal, math.MaxInt32)
+	outOfLineTotal, err := SumOutOfLineBytes(arr.Len(), arr.IsNull,
+		func(i int) int { return len(getVal(i)) })
+	if err != nil {
+		return fmt.Errorf("cast from %s to %s: %w", input.Type, out.Type, err)
 	}
 	if outOfLineTotal > 0 {
 		ba.reserveData(int(outOfLineTotal))

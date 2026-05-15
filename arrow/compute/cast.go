@@ -21,7 +21,6 @@ package compute
 import (
 	"context"
 	"fmt"
-	"math"
 	"sync"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -276,7 +275,7 @@ func rebuildViewSingleBuffer(mem memory.Allocator, data arrow.ArrayData) (arrow.
 	default:
 		return nil, fmt.Errorf("%w: unexpected view array type %T", arrow.ErrInvalid, arr)
 	}
-	total, err := sumOutOfLineBytes(arr.Len(), arr.IsNull, getLen)
+	total, err := kernels.SumOutOfLineBytes(arr.Len(), arr.IsNull, getLen)
 	if err != nil {
 		return nil, err
 	}
@@ -501,7 +500,7 @@ type viewDictBuilderAdapter struct {
 // can stay typed to the concrete builder (StringViewBuilder.Append takes
 // string, BinaryViewBuilder.Append takes []byte).
 func unpackViewDictionaryIntoBuilder(dictArr *array.Dictionary, vals viewValuesNull, valLen func(int) int, adapter viewDictBuilderAdapter) error {
-	outOfLine, err := sumOutOfLineBytes(dictArr.Len(),
+	outOfLine, err := kernels.SumOutOfLineBytes(dictArr.Len(),
 		func(i int) bool {
 			if dictArr.IsNull(i) {
 				return true
@@ -537,31 +536,6 @@ func buildFromDictionary(dictArr *array.Dictionary, valIsNull func(int) bool, ap
 		}
 		appendValue(idx)
 	}
-}
-
-// sumOutOfLineBytes returns the total non-inline payload (in bytes) that
-// would be written to a view array's overflow buffer when iterating n
-// positions with the given predicates, and arrow.ErrInvalid if the total
-// exceeds the single-overflow-buffer limit (math.MaxInt32). Used by
-// rebuildViewSingleBuffer (iterating top-level view rows), the
-// binary-to-view cast kernel, and unpackViewDictionary (where the
-// closures translate dictionary positions into value-level lookups).
-func sumOutOfLineBytes(n int, isNull func(int) bool, valueLen func(int) int) (int64, error) {
-	var total int64
-	for i := 0; i < n; i++ {
-		if isNull(i) {
-			continue
-		}
-		vlen := valueLen(i)
-		if !arrow.IsViewInline(vlen) {
-			total += int64(vlen)
-			if total > math.MaxInt32 {
-				return 0, fmt.Errorf("%w: view out-of-line payload (%d bytes) exceeds single-buffer limit (%d bytes)",
-					arrow.ErrInvalid, total, math.MaxInt32)
-			}
-		}
-	}
-	return total, nil
 }
 
 func CastFromExtension(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
