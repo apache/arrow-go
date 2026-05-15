@@ -361,17 +361,15 @@ func (b *TimestampBuilder) UnmarshalOne(dec *json.Decoder) error {
 
 		b.Append(tm)
 	case json.Number:
-		if n, err := v.Int64(); err == nil {
-			b.Append(arrow.Timestamp(n))
-		} else if f, err := v.Float64(); err == nil {
-			b.Append(arrow.Timestamp(f))
-		} else {
+		n, err := v.Int64()
+		if err != nil {
 			return &json.UnmarshalTypeError{
 				Value:  v.String(),
 				Type:   reflect.TypeOf(arrow.Timestamp(0)),
 				Offset: dec.InputOffset(),
 			}
 		}
+		b.Append(arrow.Timestamp(n))
 	case float64:
 		b.Append(arrow.Timestamp(v))
 

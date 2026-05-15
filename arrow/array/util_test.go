@@ -751,3 +751,41 @@ func TestDurationBuilderJSONStringDurationFormat(t *testing.T) {
 	col := arr.(*array.Duration)
 	assert.EqualValues(t, arrow.Duration(10920), col.Value(0))
 }
+
+// TestJSONNumberStrictValidation verifies that with UseNumber always enabled
+// (issue #804), invalid integer JSON inputs are rejected rather than silently
+// truncated, wrapped, or coerced.
+func TestJSONNumberStrictValidation(t *testing.T) {
+	cases := []struct {
+		name string
+		dt   arrow.DataType
+		json string
+	}{
+		{"Int64Fractional", arrow.PrimitiveTypes.Int64, `[1.5]`},
+		{"Int8OutOfRangePositive", arrow.PrimitiveTypes.Int8, `[128]`},
+		{"Int8OutOfRangeNegative", arrow.PrimitiveTypes.Int8, `[-129]`},
+		{"Int16OutOfRange", arrow.PrimitiveTypes.Int16, `[32768]`},
+		{"Uint8Negative", arrow.PrimitiveTypes.Uint8, `[-1]`},
+		{"Uint8Fractional", arrow.PrimitiveTypes.Uint8, `[0.5]`},
+		{"Uint16OutOfRange", arrow.PrimitiveTypes.Uint16, `[65536]`},
+		{"Uint64Negative", arrow.PrimitiveTypes.Uint64, `[-1]`},
+		{"DurationFractional", arrow.FixedWidthTypes.Duration_s, `[1.5]`},
+		{"TimestampFractional", arrow.FixedWidthTypes.Timestamp_s, `[1.5]`},
+		{"Date32Fractional", arrow.FixedWidthTypes.Date32, `[1.5]`},
+		{"Date64Fractional", arrow.FixedWidthTypes.Date64, `[1.5]`},
+		{"Time32Fractional", arrow.FixedWidthTypes.Time32s, `[1.5]`},
+		{"Time64Fractional", arrow.FixedWidthTypes.Time64us, `[1.5]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			arr, _, err := array.FromJSON(mem, tc.dt, strings.NewReader(tc.json))
+			if err == nil {
+				arr.Release()
+				t.Fatalf("expected error for %s with input %s, got nil", tc.name, tc.json)
+			}
+		})
+	}
+}

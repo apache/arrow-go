@@ -318,17 +318,15 @@ func (b *{{.Name}}Builder) UnmarshalOne(dec *json.Decoder) error {
 
 		b.Append({{.QualifiedType}}FromTime(tm))
 	case json.Number:
-		if n, err := v.Int64(); err == nil {
-			b.Append({{.QualifiedType}}(n))
-		} else if f, err := v.Float64(); err == nil {
-			b.Append({{.QualifiedType}}(f))
-		} else {
+		n, err := v.Int64()
+		if err != nil {
 			return &json.UnmarshalTypeError{
 				Value: v.String(),
 				Type: reflect.TypeOf({{.QualifiedType}}(0)),
 				Offset: dec.InputOffset(),
 			}
 		}
+		b.Append({{.QualifiedType}}(n))
 	case float64:
 		b.Append({{.QualifiedType}}(v))
 {{else if or (eq .Name "Time32") (eq .Name "Time64") -}}
@@ -348,32 +346,28 @@ func (b *{{.Name}}Builder) UnmarshalOne(dec *json.Decoder) error {
 
 		b.Append(tm)
 	case json.Number:
-		if n, err := v.Int64(); err == nil {
-			b.Append({{.QualifiedType}}(n))
-		} else if f, err := v.Float64(); err == nil {
-			b.Append({{.QualifiedType}}(f))
-		} else {
+		n, err := v.Int64()
+		if err != nil {
 			return &json.UnmarshalTypeError{
 				Value: v.String(),
 				Type: reflect.TypeOf({{.QualifiedType}}(0)),
 				Offset: dec.InputOffset(),
 			}
 		}
+		b.Append({{.QualifiedType}}(n))
 	case float64:
 		b.Append({{.QualifiedType}}(v))
 {{else if eq .Name "Duration" -}}
 	case json.Number:
-		if n, err := v.Int64(); err == nil {
-			b.Append({{.QualifiedType}}(n))
-		} else if f, err := v.Float64(); err == nil {
-			b.Append({{.QualifiedType}}(f))
-		} else {
+		n, err := v.Int64()
+		if err != nil {
 			return &json.UnmarshalTypeError{
 				Value: v.String(),
 				Type: reflect.TypeOf({{.QualifiedType}}(0)),
 				Offset: dec.InputOffset(),
 			}
 		}
+		b.Append({{.QualifiedType}}(n))
 	case float64:
 		b.Append({{.QualifiedType}}(v))
 	case string:
@@ -491,12 +485,21 @@ func (b *{{.Name}}Builder) UnmarshalOne(dec *json.Decoder) error {
 		f, err := strconv.ParseFloat(v.String(), {{.Size}}*8)
 {{else if eq (printf "%.1s" .Name) "U" -}}
 		// Try ParseUint first to preserve precision for integer values too large
-		// for float64. Fall back to ParseFloat for fractional, exponential, or
-		// signed input to match the legacy float64 unmarshaling behavior.
+		// for float64. Fall back to ParseFloat to support exponential notation
+		// (e.g. "1e3"), but reject fractional or out-of-range values so invalid
+		// JSON like 1.5 or -1 is surfaced as UnmarshalTypeError rather than
+		// silently coerced.
 		f, err := strconv.ParseUint(v.String(), 10, {{.Size}}*8)
 		if err != nil {
 			fval, ferr := strconv.ParseFloat(v.String(), 64)
 			if ferr != nil {
+				return &json.UnmarshalTypeError{
+					Value: v.String(),
+					Type: reflect.TypeOf({{.name}}(0)),
+					Offset: dec.InputOffset(),
+				}
+			}
+			if fval != float64(uint64(fval)) || fval < 0 || fval > float64(^{{.name}}(0)) {
 				return &json.UnmarshalTypeError{
 					Value: v.String(),
 					Type: reflect.TypeOf({{.name}}(0)),
@@ -508,12 +511,27 @@ func (b *{{.Name}}Builder) UnmarshalOne(dec *json.Decoder) error {
 		}
 {{else -}}
 		// Try ParseInt first to preserve precision for integer values too large
-		// for float64. Fall back to ParseFloat for fractional or exponential
-		// input to match the legacy float64 unmarshaling behavior.
+		// for float64. Fall back to ParseFloat to support exponential notation
+		// (e.g. "1e3"), but reject fractional or out-of-range values so invalid
+		// JSON like 1.5 or 128 (for int8) is surfaced as UnmarshalTypeError
+		// rather than silently truncated or wrapped.
 		f, err := strconv.ParseInt(v.String(), 10, {{.Size}}*8)
 		if err != nil {
 			fval, ferr := strconv.ParseFloat(v.String(), 64)
 			if ferr != nil {
+				return &json.UnmarshalTypeError{
+					Value: v.String(),
+					Type: reflect.TypeOf({{.name}}(0)),
+					Offset: dec.InputOffset(),
+				}
+			}
+			{{if eq .Size "8" -}}
+			if fval != float64(int64(fval)) || fval < -9223372036854775808.0 || fval >= 9223372036854775808.0 {
+			{{else -}}
+			minVal := float64(int64(-1) << ({{.Size}}*8-1))
+			maxVal := float64(int64(1) << ({{.Size}}*8-1))
+			if fval != float64(int64(fval)) || fval < minVal || fval >= maxVal {
+			{{end -}}
 				return &json.UnmarshalTypeError{
 					Value: v.String(),
 					Type: reflect.TypeOf({{.name}}(0)),

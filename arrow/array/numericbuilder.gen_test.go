@@ -237,7 +237,7 @@ func TestInt64BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewInt64Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, null, 2.3, -11]`
+	jsonstr := `[0, 1, null, 2, 100]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -251,6 +251,7 @@ func TestInt64BuilderUnmarshalJSON(t *testing.T) {
 	assert.Equal(t, int64(1), int64(arr.Value(1)))
 	assert.True(t, arr.IsNull(2))
 	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(100), int64(arr.Value(4)))
 	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
@@ -463,7 +464,7 @@ func TestUint64BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewUint64Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, null, 2.3, -11]`
+	jsonstr := `[0, 1, null, 2, 100]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -477,6 +478,7 @@ func TestUint64BuilderUnmarshalJSON(t *testing.T) {
 	assert.Equal(t, int64(1), int64(arr.Value(1)))
 	assert.True(t, arr.IsNull(2))
 	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(100), int64(arr.Value(4)))
 	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
@@ -913,7 +915,7 @@ func TestInt32BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewInt32Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, null, 2.3, -11]`
+	jsonstr := `[0, 1, null, 2, 100]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -927,6 +929,7 @@ func TestInt32BuilderUnmarshalJSON(t *testing.T) {
 	assert.Equal(t, int64(1), int64(arr.Value(1)))
 	assert.True(t, arr.IsNull(2))
 	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(100), int64(arr.Value(4)))
 	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
@@ -1139,7 +1142,7 @@ func TestUint32BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewUint32Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, null, 2.3, -11]`
+	jsonstr := `[0, 1, null, 2, 100]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -1153,6 +1156,7 @@ func TestUint32BuilderUnmarshalJSON(t *testing.T) {
 	assert.Equal(t, int64(1), int64(arr.Value(1)))
 	assert.True(t, arr.IsNull(2))
 	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(100), int64(arr.Value(4)))
 	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
@@ -1589,7 +1593,7 @@ func TestInt16BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewInt16Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, null, 2.3, -11]`
+	jsonstr := `[0, 1, null, 2, 100]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -1603,6 +1607,7 @@ func TestInt16BuilderUnmarshalJSON(t *testing.T) {
 	assert.Equal(t, int64(1), int64(arr.Value(1)))
 	assert.True(t, arr.IsNull(2))
 	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(100), int64(arr.Value(4)))
 	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
@@ -1815,7 +1820,7 @@ func TestUint16BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewUint16Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, null, 2.3, -11]`
+	jsonstr := `[0, 1, null, 2, 100]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -1829,6 +1834,7 @@ func TestUint16BuilderUnmarshalJSON(t *testing.T) {
 	assert.Equal(t, int64(1), int64(arr.Value(1)))
 	assert.True(t, arr.IsNull(2))
 	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(100), int64(arr.Value(4)))
 	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
@@ -2041,7 +2047,7 @@ func TestInt8BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewInt8Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, null, 2.3, -11]`
+	jsonstr := `[0, 1, null, 2, 100]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -2055,6 +2061,7 @@ func TestInt8BuilderUnmarshalJSON(t *testing.T) {
 	assert.Equal(t, int64(1), int64(arr.Value(1)))
 	assert.True(t, arr.IsNull(2))
 	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(100), int64(arr.Value(4)))
 	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
@@ -2267,7 +2274,7 @@ func TestUint8BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewUint8Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, null, 2.3, -11]`
+	jsonstr := `[0, 1, null, 2, 100]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -2281,6 +2288,7 @@ func TestUint8BuilderUnmarshalJSON(t *testing.T) {
 	assert.Equal(t, int64(1), int64(arr.Value(1)))
 	assert.True(t, arr.IsNull(2))
 	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(100), int64(arr.Value(4)))
 	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
@@ -2499,7 +2507,7 @@ func TestTime32BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewTime32Builder(mem, dtype)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, null, 2.3, -11]`
+	jsonstr := `[0, 1, null, 2, 100]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -2513,6 +2521,7 @@ func TestTime32BuilderUnmarshalJSON(t *testing.T) {
 	assert.Equal(t, int64(1), int64(arr.Value(1)))
 	assert.True(t, arr.IsNull(2))
 	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(100), int64(arr.Value(4)))
 	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
@@ -2731,7 +2740,7 @@ func TestTime64BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewTime64Builder(mem, dtype)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, null, 2.3, -11]`
+	jsonstr := `[0, 1, null, 2, 100]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -2745,6 +2754,7 @@ func TestTime64BuilderUnmarshalJSON(t *testing.T) {
 	assert.Equal(t, int64(1), int64(arr.Value(1)))
 	assert.True(t, arr.IsNull(2))
 	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(100), int64(arr.Value(4)))
 	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
@@ -2957,7 +2967,7 @@ func TestDate32BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewDate32Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, null, 2.3, -11]`
+	jsonstr := `[0, 1, null, 2, 100]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -2971,6 +2981,7 @@ func TestDate32BuilderUnmarshalJSON(t *testing.T) {
 	assert.Equal(t, int64(1), int64(arr.Value(1)))
 	assert.True(t, arr.IsNull(2))
 	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(100), int64(arr.Value(4)))
 	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
@@ -3190,7 +3201,7 @@ func TestDate64BuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewDate64Builder(mem)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, null, 2.3, -11]`
+	jsonstr := `[0, 1, null, 2, 100]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -3204,6 +3215,7 @@ func TestDate64BuilderUnmarshalJSON(t *testing.T) {
 	assert.Equal(t, int64(1), int64(arr.Value(1)))
 	assert.True(t, arr.IsNull(2))
 	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(100), int64(arr.Value(4)))
 	assert.Equal(t, int64(5), int64(arr.Len()))
 }
 
@@ -3422,7 +3434,7 @@ func TestDurationBuilderUnmarshalJSON(t *testing.T) {
 	bldr := array.NewDurationBuilder(mem, dtype)
 	defer bldr.Release()
 
-	jsonstr := `[0, 1, null, 2.3, -11]`
+	jsonstr := `[0, 1, null, 2, 100]`
 
 	err := bldr.UnmarshalJSON([]byte(jsonstr))
 	assert.NoError(t, err)
@@ -3436,5 +3448,6 @@ func TestDurationBuilderUnmarshalJSON(t *testing.T) {
 	assert.Equal(t, int64(1), int64(arr.Value(1)))
 	assert.True(t, arr.IsNull(2))
 	assert.Equal(t, int64(2), int64(arr.Value(3)))
+	assert.Equal(t, int64(100), int64(arr.Value(4)))
 	assert.Equal(t, int64(5), int64(arr.Len()))
 }
