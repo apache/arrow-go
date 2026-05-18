@@ -19,6 +19,7 @@
 package compute_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -1525,6 +1526,948 @@ func (c *CastSuite) TestStringToString() {
 			}
 		})
 	}
+}
+
+// TestBinaryLikeToBinaryView covers GH-184: casting between base-binary
+// (binary, large_binary, string, large_string, fixed_size_binary) and the
+// view variants (binary_view, string_view). It verifies round-trip fidelity
+// for both short (<=12 byte, inline) and long (out-of-line) values, across
+// null bitmaps, and exercises UTF-8 validation semantics.
+func (c *CastSuite) TestBinaryLikeToBinaryView() {
+	const strInJSON = `["a", "short", "this is a string well over twelve bytes", "", null]`
+
+	for _, from := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString} {
+		c.Run("from "+from.String(), func() {
+			c.Run("to string_view", func() {
+				c.checkCastArrayOnly(from, arrow.BinaryTypes.StringView, strInJSON, strInJSON)
+				c.checkCastArrayOnly(from, arrow.BinaryTypes.StringView, `[]`, `[]`)
+			})
+			c.Run("to binary_view", func() {
+				exp := c.buildBinaryViewArray([][]byte{
+					[]byte("a"), []byte("short"),
+					[]byte("this is a string well over twelve bytes"),
+					[]byte(""), nil,
+				})
+				defer exp.Release()
+
+				in, _, err := array.FromJSON(c.mem, from, strings.NewReader(strInJSON), array.WithUseNumber())
+				c.Require().NoError(err)
+				defer in.Release()
+
+				got, err := compute.CastArray(context.Background(), in,
+					compute.SafeCastOptions(arrow.BinaryTypes.BinaryView))
+				c.Require().NoError(err)
+				defer got.Release()
+
+				c.Truef(array.Equal(exp, got), "expected %s, got %s", exp, got)
+			})
+		})
+	}
+
+	const binJSON = `["aGk=", "dGhpcyBpcyBieXRlcyBiZXlvbmQgdHdlbHZlIGNoYXJz", "//4=", null]`
+	for _, from := range []arrow.DataType{arrow.BinaryTypes.Binary, arrow.BinaryTypes.LargeBinary} {
+		c.Run("from "+from.String(), func() {
+			c.Run("to binary_view", func() {
+				c.checkCastArrayOnly(from, arrow.BinaryTypes.BinaryView, binJSON, binJSON)
+			})
+			c.Run("to string_view rejects invalid utf8", func() {
+				invalid := c.invalidUtf8Arr(from)
+				defer invalid.Release()
+				_, err := compute.CastArray(context.Background(), invalid,
+					compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+				c.ErrorIs(err, arrow.ErrInvalid)
+			})
+			c.Run("to string_view allows invalid utf8 when opted in", func() {
+				invalid := c.invalidUtf8Arr(from)
+				defer invalid.Release()
+				opts := compute.SafeCastOptions(arrow.BinaryTypes.StringView)
+				opts.AllowInvalidUtf8 = true
+				out, err := compute.CastArray(context.Background(), invalid, opts)
+				c.NoError(err)
+				defer out.Release()
+				c.Equal(invalid.Len(), out.Len())
+			})
+		})
+	}
+
+	c.Run("from fixed_size_binary", func() {
+		fsbType := &arrow.FixedSizeBinaryType{ByteWidth: 3}
+		in, _, err := array.FromJSON(c.mem, fsbType,
+			strings.NewReader(`["YWJj", "ZGVm", null]`), array.WithUseNumber())
+		c.Require().NoError(err)
+		defer in.Release()
+
+		exp := c.buildBinaryViewArray([][]byte{[]byte("abc"), []byte("def"), nil})
+		defer exp.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.BinaryView))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		c.Truef(array.Equal(exp, got), "expected %s, got %s", exp, got)
+	})
+}
+
+// TestBinaryViewToBinaryLike covers the reverse direction of GH-184:
+// materializing view arrays back into contiguous binary/string arrays.
+func (c *CastSuite) TestBinaryViewToBinaryLike() {
+	const strJSON = `["a", "short", "this is a string well over twelve bytes", "", null]`
+
+	for _, to := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString} {
+		c.Run("string_view to "+to.String(), func() {
+			c.checkCastArrayOnly(arrow.BinaryTypes.StringView, to, strJSON, strJSON)
+			c.checkCastArrayOnly(arrow.BinaryTypes.StringView, to, `[]`, `[]`)
+		})
+	}
+
+	const binJSON = `["aGk=", "dGhpcyBpcyBieXRlcyBiZXlvbmQgdHdlbHZlIGNoYXJz", "//4=", null]`
+	for _, to := range []arrow.DataType{arrow.BinaryTypes.Binary, arrow.BinaryTypes.LargeBinary} {
+		c.Run("binary_view to "+to.String(), func() {
+			c.checkCastArrayOnly(arrow.BinaryTypes.BinaryView, to, binJSON, binJSON)
+		})
+	}
+
+	c.Run("binary_view to string rejects invalid utf8", func() {
+		invalid := c.buildBinaryViewArray([][]byte{[]byte("ok"), {0xff, 0xfe}})
+		defer invalid.Release()
+
+		_, err := compute.CastArray(context.Background(), invalid,
+			compute.SafeCastOptions(arrow.BinaryTypes.String))
+		c.ErrorIs(err, arrow.ErrInvalid)
+	})
+}
+
+// TestBinaryViewToBinaryView covers cross-view casts (binary_view <->
+// string_view) and identity casts. These are zero-copy except for UTF-8
+// validation in the binary_view -> string_view direction.
+func (c *CastSuite) TestBinaryViewToBinaryView() {
+	values := [][]byte{
+		[]byte("a"), []byte("short"),
+		[]byte("this is a string well over twelve bytes"),
+		[]byte(""), nil,
+	}
+
+	c.Run("string_view to binary_view", func() {
+		in := c.buildStringViewArray([]string{"a", "short", "this is a string well over twelve bytes", "", ""}, []bool{true, true, true, true, false})
+		defer in.Release()
+		exp := c.buildBinaryViewArray(values)
+		defer exp.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.BinaryView))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		c.Truef(array.Equal(exp, got), "expected %s, got %s", exp, got)
+	})
+
+	c.Run("binary_view to string_view valid utf8", func() {
+		in := c.buildBinaryViewArray(values)
+		defer in.Release()
+		exp := c.buildStringViewArray([]string{"a", "short", "this is a string well over twelve bytes", "", ""},
+			[]bool{true, true, true, true, false})
+		defer exp.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		c.Truef(array.Equal(exp, got), "expected %s, got %s", exp, got)
+	})
+
+	c.Run("binary_view to string_view rejects invalid utf8", func() {
+		invalid := c.buildBinaryViewArray([][]byte{[]byte("ok"), {0x80, 0x81}})
+		defer invalid.Release()
+
+		_, err := compute.CastArray(context.Background(), invalid,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.ErrorIs(err, arrow.ErrInvalid)
+	})
+}
+
+// TestCanCastViewTypes verifies CanCast advertises the new view cast paths
+// registered for GH-184.
+func (c *CastSuite) TestCanCastViewTypes() {
+	baseBinary := []arrow.DataType{
+		arrow.BinaryTypes.Binary, arrow.BinaryTypes.LargeBinary,
+		arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString,
+	}
+	viewTypes := []arrow.DataType{arrow.BinaryTypes.BinaryView, arrow.BinaryTypes.StringView}
+
+	for _, from := range baseBinary {
+		for _, to := range viewTypes {
+			c.Truef(compute.CanCast(from, to), "expected CanCast %s -> %s", from, to)
+			c.Truef(compute.CanCast(to, from), "expected CanCast %s -> %s", to, from)
+		}
+	}
+
+	for _, from := range viewTypes {
+		for _, to := range viewTypes {
+			c.Truef(compute.CanCast(from, to), "expected CanCast %s -> %s", from, to)
+		}
+	}
+
+	c.True(compute.CanCast(&arrow.FixedSizeBinaryType{ByteWidth: 3}, arrow.BinaryTypes.BinaryView))
+	c.True(compute.CanCast(&arrow.FixedSizeBinaryType{ByteWidth: 3}, arrow.BinaryTypes.StringView))
+}
+
+// TestBinaryLikeToBinaryViewLargePayload verifies that when the cast
+// output's out-of-line payload would exceed the builder's default 32KB
+// block size, the kernel must still produce a single-data-buffer view so
+// the result fits in ArraySpan's fixed 3-buffer layout. A multi-buffer
+// result would panic in out.TakeOwnership.
+func (c *CastSuite) TestBinaryLikeToBinaryViewLargePayload() {
+	const (
+		perValue = 200
+		count    = 500 // total out-of-line = 100_000 bytes, comfortably over the 32KB block default
+	)
+
+	longStr := strings.Repeat("x", perValue)
+
+	sb := array.NewStringBuilder(c.mem)
+	defer sb.Release()
+	for i := 0; i < count; i++ {
+		sb.Append(longStr)
+	}
+	in := sb.NewArray()
+	defer in.Release()
+
+	for _, to := range []arrow.DataType{arrow.BinaryTypes.StringView, arrow.BinaryTypes.BinaryView} {
+		c.Run("to "+to.String(), func() {
+			got, err := compute.CastArray(context.Background(), in,
+				compute.SafeCastOptions(to))
+			c.Require().NoError(err)
+			defer got.Release()
+
+			c.Equal(count, got.Len())
+			c.LessOrEqualf(len(got.Data().Buffers()), 3,
+				"expected <=3 buffers (bitmap + view headers + 1 data), got %d",
+				len(got.Data().Buffers()))
+
+			switch v := got.(type) {
+			case *array.StringView:
+				for i := 0; i < v.Len(); i++ {
+					c.Equalf(longStr, v.Value(i), "row %d mismatch", i)
+				}
+			case *array.BinaryView:
+				for i := 0; i < v.Len(); i++ {
+					c.Equalf(longStr, string(v.Value(i)), "row %d mismatch", i)
+				}
+			}
+		})
+	}
+}
+
+// TestMultiBufferViewInputCoalesced verifies that a BinaryView/StringView
+// input whose payload already spans multiple builder blocks (>32KB) must
+// be coalesced into a single-buffer view before entering compute, since
+// exec.ArraySpan's fixed [3]BufferSpan cannot carry multi-buffer views.
+func (c *CastSuite) TestMultiBufferViewInputCoalesced() {
+	const (
+		perValue = 200
+		count    = 500 // ~100KB of non-inline payload, forces multi-buffer view
+	)
+	longStr := strings.Repeat("y", perValue)
+
+	buildMultiBufferBinaryView := func() arrow.Array {
+		bldr := array.NewBinaryViewBuilder(c.mem)
+		defer bldr.Release()
+		for i := 0; i < count; i++ {
+			bldr.Append([]byte(longStr))
+		}
+		return bldr.NewArray()
+	}
+
+	buildMultiBufferStringView := func() arrow.Array {
+		bldr := array.NewStringViewBuilder(c.mem)
+		defer bldr.Release()
+		for i := 0; i < count; i++ {
+			bldr.Append(longStr)
+		}
+		return bldr.NewArray()
+	}
+
+	c.Run("binary_view input has multiple data buffers", func() {
+		in := buildMultiBufferBinaryView()
+		defer in.Release()
+		c.Greater(len(in.Data().Buffers()), 3,
+			"test precondition: input must be multi-buffer")
+	})
+
+	c.Run("string_view to utf8", func() {
+		in := buildMultiBufferStringView()
+		defer in.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.String))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		sv := got.(*array.String)
+		c.Equal(count, sv.Len())
+		for i := 0; i < sv.Len(); i++ {
+			c.Equalf(longStr, sv.Value(i), "row %d mismatch", i)
+		}
+	})
+
+	c.Run("binary_view to binary", func() {
+		in := buildMultiBufferBinaryView()
+		defer in.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.Binary))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		bv := got.(*array.Binary)
+		c.Equal(count, bv.Len())
+		for i := 0; i < bv.Len(); i++ {
+			c.Equalf(longStr, string(bv.Value(i)), "row %d mismatch", i)
+		}
+	})
+
+	c.Run("binary_view to string_view", func() {
+		in := buildMultiBufferBinaryView()
+		defer in.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		sv := got.(*array.StringView)
+		c.Equal(count, sv.Len())
+		c.LessOrEqualf(len(got.Data().Buffers()), 3,
+			"coalesced output must fit in ArraySpan's 3 buffers, got %d",
+			len(got.Data().Buffers()))
+	})
+}
+
+// TestNumericToStringViewLargePayload verifies that casting a
+// numeric/temporal column with enough values to produce >32KB of
+// non-inline formatted output must still produce a single-buffer
+// string_view rather than spilling into a second overflow block (which
+// would panic in out.TakeOwnership).
+func (c *CastSuite) TestNumericToStringViewLargePayload() {
+	const count = 5000
+
+	c.Run("int64 to string_view", func() {
+		bldr := array.NewInt64Builder(c.mem)
+		defer bldr.Release()
+		for i := 0; i < count; i++ {
+			// use large magnitudes so formatted strings are 19-20 bytes (non-inline)
+			bldr.Append(int64(-9223372036854775000 + int64(i)))
+		}
+		in := bldr.NewArray()
+		defer in.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		c.Equal(count, got.Len())
+		c.LessOrEqualf(len(got.Data().Buffers()), 3,
+			"expected <=3 buffers for string_view output, got %d",
+			len(got.Data().Buffers()))
+	})
+
+	c.Run("timestamp to string_view", func() {
+		tsType := &arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: "UTC"}
+		bldr := array.NewTimestampBuilder(c.mem, tsType)
+		defer bldr.Release()
+		for i := 0; i < count; i++ {
+			bldr.Append(arrow.Timestamp(int64(1e18) + int64(i)))
+		}
+		in := bldr.NewArray()
+		defer in.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		c.Equal(count, got.Len())
+		c.LessOrEqualf(len(got.Data().Buffers()), 3,
+			"expected <=3 buffers for string_view output, got %d",
+			len(got.Data().Buffers()))
+	})
+
+	c.Run("time64 to string_view", func() {
+		t64Type := &arrow.Time64Type{Unit: arrow.Nanosecond}
+		bldr := array.NewTime64Builder(c.mem, t64Type)
+		defer bldr.Release()
+		for i := 0; i < count; i++ {
+			bldr.Append(arrow.Time64(int64(86400e9-1) - int64(i)))
+		}
+		in := bldr.NewArray()
+		defer in.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		c.Equal(count, got.Len())
+		c.LessOrEqualf(len(got.Data().Buffers()), 3,
+			"expected <=3 buffers for string_view output, got %d",
+			len(got.Data().Buffers()))
+	})
+
+	// time32[ms] formats to exactly 12 bytes ("HH:MM:SS.sss") which
+	// ViewHeader stores inline (size <= 12), so the inline-skip in
+	// reserveFormattedData must treat 12 as inline. This is the
+	// cast-level smoke test verifying the end-to-end path; the boundary
+	// itself is exercised in TestReserveFormattedDataInlineViewSkip.
+	// We additionally assert the output has no overflow data buffer, i.e.
+	// all values stayed inline in view headers.
+	c.Run("time32[ms] to string_view stays inline", func() {
+		t32Type := &arrow.Time32Type{Unit: arrow.Millisecond}
+		bldr := array.NewTime32Builder(c.mem, t32Type)
+		defer bldr.Release()
+		for i := 0; i < count; i++ {
+			bldr.Append(arrow.Time32(int32(i)))
+		}
+		in := bldr.NewArray()
+		defer in.Release()
+
+		got, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer got.Release()
+
+		c.Equal(count, got.Len())
+		bufs := got.Data().Buffers()
+		c.LessOrEqualf(len(bufs), 3,
+			"expected <=3 buffers for string_view output, got %d", len(bufs))
+		// All values must be inline; overflow buffer (index 2) should be
+		// absent or empty.
+		if len(bufs) >= 3 && bufs[2] != nil {
+			c.Equalf(0, bufs[2].Len(),
+				"time32[ms] values are <=12 bytes and must stay inline; "+
+					"found %d bytes in overflow buffer", bufs[2].Len())
+		}
+	})
+}
+
+// TestChunkedMultiBufferViewInputCoalesced verifies that a *ChunkedDatum
+// whose chunks are multi-buffer view arrays must also be coalesced by
+// the cast meta function before dispatch; otherwise executor.SetMembers
+// on the second chunk panics.
+func (c *CastSuite) TestChunkedMultiBufferViewInputCoalesced() {
+	const (
+		perValue = 200
+		count    = 500 // ~100KB non-inline payload per chunk
+	)
+	chunkStr1 := strings.Repeat("a", perValue)
+	chunkStr2 := strings.Repeat("b", perValue)
+
+	buildChunk := func(s string) arrow.Array {
+		b := array.NewStringViewBuilder(c.mem)
+		defer b.Release()
+		for i := 0; i < count; i++ {
+			b.Append(s)
+		}
+		return b.NewArray()
+	}
+
+	chunk1 := buildChunk(chunkStr1)
+	defer chunk1.Release()
+	chunk2 := buildChunk(chunkStr2)
+	defer chunk2.Release()
+
+	c.Greater(len(chunk1.Data().Buffers()), 3,
+		"test precondition: chunk1 must be multi-buffer")
+	c.Greater(len(chunk2.Data().Buffers()), 3,
+		"test precondition: chunk2 must be multi-buffer")
+
+	chunked := arrow.NewChunked(arrow.BinaryTypes.StringView, []arrow.Array{chunk1, chunk2})
+	defer chunked.Release()
+
+	in := compute.NewDatum(chunked)
+	defer in.Release()
+
+	out, err := compute.CallFunction(context.Background(), "cast",
+		compute.SafeCastOptions(arrow.BinaryTypes.String), in)
+	c.Require().NoError(err)
+	defer out.Release()
+
+	chunks := out.(compute.ArrayLikeDatum).Chunks()
+	total := 0
+	for idx, ch := range chunks {
+		sv := ch.(*array.String)
+		for i := 0; i < sv.Len(); i++ {
+			want := chunkStr1
+			if idx == 1 {
+				want = chunkStr2
+			}
+			c.Equalf(want, sv.Value(i), "chunk %d row %d mismatch", idx, i)
+		}
+		total += sv.Len()
+	}
+	c.Equal(count*2, total)
+}
+
+// buildInt32Dictionary builds an int32-indexed *array.Dictionary from the
+// given values array, indices slice, and optional per-index validity. Used
+// by view-dictionary cast regression tests. Indices must be valid against
+// values; the helper handles retain/release bookkeeping internally.
+func (c *CastSuite) buildInt32Dictionary(values arrow.Array, indices []int32, valid []bool) *array.Dictionary {
+	ibldr := array.NewInt32Builder(c.mem)
+	defer ibldr.Release()
+	ibldr.AppendValues(indices, valid)
+	idx := ibldr.NewArray()
+	defer idx.Release()
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int32,
+		ValueType: values.DataType(),
+	}
+	d := array.NewData(dictType, idx.Len(), idx.Data().Buffers(), nil,
+		idx.NullN(), 0)
+	d.SetDictionary(values.Data())
+	da := array.NewDictionaryData(d)
+	d.Release()
+	return da
+}
+
+// TestViewDictionaryUnpackCast verifies that a cast whose input is a
+// dictionary with string_view or binary_view values is handled directly
+// by the view-aware unpacker rather than unpackDictionary's TakeArray
+// path, which has no view kernel and would error out. Covers
+// dict<string_view> -> utf8, dict<string_view> -> string_view (dict
+// removal), dict<binary_view> -> binary, and null/empty preservation.
+func (c *CastSuite) TestViewDictionaryUnpackCast() {
+
+	c.Run("string_view dict to utf8", func() {
+		vals := c.buildStringViewArray([]string{"foo", "bar", "baz"}, nil)
+		defer vals.Release()
+		dict := c.buildInt32Dictionary(vals, []int32{0, 1, 0, 2}, nil)
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.String))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		sv := out.(*array.String)
+		c.Equal(4, sv.Len())
+		c.Equal("foo", sv.Value(0))
+		c.Equal("bar", sv.Value(1))
+		c.Equal("foo", sv.Value(2))
+		c.Equal("baz", sv.Value(3))
+	})
+
+	c.Run("string_view dict to string_view", func() {
+		vals := c.buildStringViewArray([]string{"alpha", "beta"}, nil)
+		defer vals.Release()
+		dict := c.buildInt32Dictionary(vals, []int32{1, 0, 1}, nil)
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		sv := out.(*array.StringView)
+		c.Equal(3, sv.Len())
+		c.Equal("beta", sv.Value(0))
+		c.Equal("alpha", sv.Value(1))
+		c.Equal("beta", sv.Value(2))
+	})
+
+	c.Run("binary_view dict to binary", func() {
+		vals := c.buildBinaryViewArray([][]byte{[]byte("\x01\x02"), []byte("\x03")})
+		defer vals.Release()
+		dict := c.buildInt32Dictionary(vals, []int32{0, 1, 0}, nil)
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.Binary))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		bv := out.(*array.Binary)
+		c.Equal(3, bv.Len())
+		c.Equal([]byte("\x01\x02"), bv.Value(0))
+		c.Equal([]byte("\x03"), bv.Value(1))
+		c.Equal([]byte("\x01\x02"), bv.Value(2))
+	})
+
+	c.Run("string_view dict with nulls", func() {
+		vals := c.buildStringViewArray([]string{"x", "y"}, nil)
+		defer vals.Release()
+		dict := c.buildInt32Dictionary(vals, []int32{0, 0, 1}, []bool{true, false, true})
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.String))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		sv := out.(*array.String)
+		c.Equal(3, sv.Len())
+		c.Equal(1, sv.NullN())
+		c.False(sv.IsNull(0))
+		c.True(sv.IsNull(1))
+		c.False(sv.IsNull(2))
+		c.Equal("x", sv.Value(0))
+		c.Equal("y", sv.Value(2))
+	})
+
+	c.Run("string_view dict with null in values array", func() {
+		vals := c.buildStringViewArray([]string{"a", "", "c"}, []bool{true, false, true})
+		defer vals.Release()
+		dict := c.buildInt32Dictionary(vals, []int32{0, 1, 2, 1}, nil)
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.String))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		sv := out.(*array.String)
+		c.Equal(4, sv.Len())
+		c.Equal(2, sv.NullN())
+		c.Equal("a", sv.Value(0))
+		c.True(sv.IsNull(1))
+		c.Equal("c", sv.Value(2))
+		c.True(sv.IsNull(3))
+	})
+
+	c.Run("binary_view dict with null in values array", func() {
+		bldr := array.NewBinaryViewBuilder(c.mem)
+		defer bldr.Release()
+		bldr.Append([]byte{0x01, 0x02})
+		bldr.AppendNull()
+		bldr.Append([]byte{0x03})
+		vals := bldr.NewArray()
+		defer vals.Release()
+
+		dict := c.buildInt32Dictionary(vals, []int32{0, 1, 2, 1}, nil)
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.Binary))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		bv := out.(*array.Binary)
+		c.Equal(4, bv.Len())
+		c.Equal(2, bv.NullN())
+		c.Equal([]byte{0x01, 0x02}, bv.Value(0))
+		c.True(bv.IsNull(1))
+		c.Equal([]byte{0x03}, bv.Value(2))
+		c.True(bv.IsNull(3))
+	})
+
+	// When the top-level input is a dictionary whose *values* are a
+	// multi-buffer view array, exec.ArraySpan.SetMembers recurses into
+	// the dictionary child and hits the fixed [3]BufferSpan before
+	// unpackViewDictionary ever runs. coalesceMultiBufferViewDatum must
+	// therefore rebuild the dictionary values into a single overflow
+	// buffer up front. Build dictionary values that are large enough to
+	// span multiple overflow buffers via the default 32KB block size
+	// (two 20,000-byte entries are enough to trip the multi-buffer
+	// condition).
+	c.Run("dict<string_view multi-buffer values> to utf8", func() {
+		const valBytes = 20000
+		a := strings.Repeat("a", valBytes)
+		b := strings.Repeat("b", valBytes)
+		vbldr := array.NewStringViewBuilder(c.mem)
+		defer vbldr.Release()
+		// Force two separate overflow buffers by appending values individually
+		// through the default builder (no pre-reservation).
+		vbldr.Append(a)
+		vbldr.Append(b)
+		vals := vbldr.NewArray()
+		defer vals.Release()
+		c.Greaterf(len(vals.Data().Buffers()), 3,
+			"test precondition: dictionary values must be multi-buffer; got %d",
+			len(vals.Data().Buffers()))
+
+		dict := c.buildInt32Dictionary(vals, []int32{0, 1, 0, 1}, nil)
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.String))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		sv := out.(*array.String)
+		c.Equal(4, sv.Len())
+		c.Equal(a, sv.Value(0))
+		c.Equal(b, sv.Value(1))
+		c.Equal(a, sv.Value(2))
+		c.Equal(b, sv.Value(3))
+	})
+
+	// exec.ArraySpan.SetMembers recurses through ordinary nested children
+	// as well as dictionary children, so a list<string_view> (or
+	// struct-of-view) whose descendant is multi-buffer also panics
+	// before dispatch. coalesceMultiBufferViewDatum must therefore
+	// recurse through Children() to rebuild any descendant view array
+	// in place.
+	c.Run("list<string_view multi-buffer child> to list<utf8>", func() {
+		const valBytes = 20000
+		a := strings.Repeat("a", valBytes)
+		b := strings.Repeat("b", valBytes)
+		vbldr := array.NewStringViewBuilder(c.mem)
+		defer vbldr.Release()
+		vbldr.Append(a)
+		vbldr.Append(b)
+		vbldr.Append(a)
+		vbldr.Append(b)
+		values := vbldr.NewArray()
+		defer values.Release()
+		c.Greaterf(len(values.Data().Buffers()), 3,
+			"test precondition: list values must be multi-buffer; got %d",
+			len(values.Data().Buffers()))
+
+		// Build list<string_view> with two rows: [a, b] and [a, b].
+		listType := arrow.ListOf(arrow.BinaryTypes.StringView)
+		offsetsBuf := memory.NewBufferBytes([]byte{
+			0x00, 0x00, 0x00, 0x00,
+			0x02, 0x00, 0x00, 0x00,
+			0x04, 0x00, 0x00, 0x00,
+		})
+		listData := array.NewData(listType, 2,
+			[]*memory.Buffer{nil, offsetsBuf},
+			[]arrow.ArrayData{values.Data()}, 0, 0)
+		defer listData.Release()
+		listArr := array.MakeFromData(listData)
+		defer listArr.Release()
+
+		out, err := compute.CastArray(context.Background(), listArr,
+			compute.SafeCastOptions(arrow.ListOf(arrow.BinaryTypes.String)))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		got := out.(*array.List)
+		c.Equal(2, got.Len())
+		child := got.ListValues().(*array.String)
+		c.Equal(4, child.Len())
+		c.Equal(a, child.Value(0))
+		c.Equal(b, child.Value(1))
+		c.Equal(a, child.Value(2))
+		c.Equal(b, child.Value(3))
+	})
+
+	// Extension arrays reuse their storage buffers/children in place,
+	// so an extension over a multi-buffer view hit
+	// exec.ArraySpan.SetMembers before CastFromExtension unwrapped the
+	// storage. coalesce must therefore traverse extensions through
+	// their StorageType and re-wrap after rebuilding so the extension
+	// datatype survives.
+	c.Run("extension<string_view multi-buffer> to utf8", func() {
+		extType := types.NewStringViewExtType()
+		arrow.RegisterExtensionType(extType)
+		defer arrow.UnregisterExtensionType("string_view_ext")
+
+		const valBytes = 20000
+		a := strings.Repeat("a", valBytes)
+		b := strings.Repeat("b", valBytes)
+		vbldr := array.NewStringViewBuilder(c.mem)
+		defer vbldr.Release()
+		vbldr.Append(a)
+		vbldr.Append(b)
+		vbldr.Append(a)
+		storage := vbldr.NewArray()
+		defer storage.Release()
+		c.Greaterf(len(storage.Data().Buffers()), 3,
+			"test precondition: extension storage must be multi-buffer; got %d",
+			len(storage.Data().Buffers()))
+
+		extData := array.NewData(extType, storage.Len(), storage.Data().Buffers(),
+			storage.Data().Children(), storage.NullN(), storage.Data().Offset())
+		defer extData.Release()
+		extArr := array.MakeFromData(extData)
+		defer extArr.Release()
+
+		out, err := compute.CastArray(context.Background(), extArr,
+			compute.SafeCastOptions(arrow.BinaryTypes.String))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		sv := out.(*array.String)
+		c.Equal(3, sv.Len())
+		c.Equal(a, sv.Value(0))
+		c.Equal(b, sv.Value(1))
+		c.Equal(a, sv.Value(2))
+	})
+
+	c.Run("string_view dict to string_view with large non-inline payload", func() {
+		const (
+			valBytes = 200
+			count    = 500
+		)
+		a := strings.Repeat("a", valBytes)
+		b := strings.Repeat("b", valBytes)
+		vals := c.buildStringViewArray([]string{a, b}, nil)
+		defer vals.Release()
+
+		indices := make([]int32, count)
+		for i := range indices {
+			indices[i] = int32(i & 1)
+		}
+		dict := c.buildInt32Dictionary(vals, indices, nil)
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		c.LessOrEqualf(len(out.Data().Buffers()), 3,
+			"expected <=3 buffers for unpacked view dictionary, got %d",
+			len(out.Data().Buffers()))
+
+		sv := out.(*array.StringView)
+		c.Equal(count, sv.Len())
+		c.Equal(a, sv.Value(0))
+		c.Equal(b, sv.Value(1))
+		c.Equal(a, sv.Value(count-2))
+		c.Equal(b, sv.Value(count-1))
+	})
+
+	c.Run("binary_view dict to binary_view with large non-inline payload", func() {
+		const (
+			valBytes = 200
+			count    = 500
+		)
+		a := bytes.Repeat([]byte{0xAA}, valBytes)
+		b := bytes.Repeat([]byte{0xBB}, valBytes)
+		vals := c.buildBinaryViewArray([][]byte{a, b})
+		defer vals.Release()
+
+		indices := make([]int32, count)
+		for i := range indices {
+			indices[i] = int32(i & 1)
+		}
+		dict := c.buildInt32Dictionary(vals, indices, nil)
+		defer dict.Release()
+
+		out, err := compute.CastArray(context.Background(), dict,
+			compute.SafeCastOptions(arrow.BinaryTypes.BinaryView))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		c.LessOrEqualf(len(out.Data().Buffers()), 3,
+			"expected <=3 buffers for unpacked binary_view dictionary, got %d",
+			len(out.Data().Buffers()))
+
+		bv := out.(*array.BinaryView)
+		c.Equal(count, bv.Len())
+		c.Equal(a, bv.Value(0))
+		c.Equal(b, bv.Value(1))
+		c.Equal(a, bv.Value(count-2))
+		c.Equal(b, bv.Value(count-1))
+	})
+}
+
+// TestBoolToStringViewStaysSingleBuffer verifies that boolToStringCastExec
+// (which joined the numeric/temporal-to-string kernels) carries the
+// matching pre-reservation path: large bool -> string_view casts must
+// not allocate multiple overflow data buffers and exceed
+// exec.ArraySpan's fixed [3]BufferSpan. The kernel counts exact
+// formatted bytes ("true"=4, "false"=5) and pre-reserves that amount on
+// the builder, so the output always has <= 3 buffers and all-true casts
+// near the int32 limit are not over-rejected relative to the tight bound.
+func (c *CastSuite) TestBoolToStringViewStaysSingleBuffer() {
+	const count = 1 << 14
+
+	check := func(name string, pick func(i int) bool, wantBytes int64) {
+		c.Run(name, func() {
+			bldr := array.NewBooleanBuilder(c.mem)
+			defer bldr.Release()
+			for i := 0; i < count; i++ {
+				bldr.Append(pick(i))
+			}
+			in := bldr.NewArray()
+			defer in.Release()
+
+			out, err := compute.CastArray(context.Background(), in,
+				compute.SafeCastOptions(arrow.BinaryTypes.String))
+			c.Require().NoError(err)
+			defer out.Release()
+
+			c.Equal(count, out.Len())
+			// Data buffer (index 2 for string) holds exactly the formatted
+			// bytes, validating the exact-count payload logic.
+			dataBuf := out.Data().Buffers()[2]
+			c.Require().NotNil(dataBuf)
+			c.Equalf(wantBytes, int64(dataBuf.Len()),
+				"%s: data buffer size should equal exact formatted payload",
+				name)
+		})
+	}
+	check("all true", func(int) bool { return true }, 4*count)
+	check("all false", func(int) bool { return false }, 5*count)
+	check("alternating", func(i int) bool { return i%2 == 0 }, 4*(count/2)+5*(count/2))
+
+	c.Run("string_view stays within 3 buffers", func() {
+		bldr := array.NewBooleanBuilder(c.mem)
+		defer bldr.Release()
+		for i := 0; i < count; i++ {
+			bldr.Append(i%2 == 0)
+		}
+		in := bldr.NewArray()
+		defer in.Release()
+
+		out, err := compute.CastArray(context.Background(), in,
+			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		c.LessOrEqualf(len(out.Data().Buffers()), 3,
+			"expected <=3 buffers for bool->string_view, got %d",
+			len(out.Data().Buffers()))
+		c.Equal(count, out.Len())
+	})
+}
+
+// checkCastArrayOnly performs a cast and compares the resulting array against
+// an expected array built from JSON. It deliberately avoids the per-element
+// scalar iteration path used by checkCast, which relies on scalar.GetScalar
+// - that helper does not yet support view types (unrelated to GH-184).
+func (c *CastSuite) checkCastArrayOnly(dtIn, dtOut arrow.DataType, inJSON, outJSON string) {
+	inArr, _, err := array.FromJSON(c.mem, dtIn, strings.NewReader(inJSON), array.WithUseNumber())
+	c.Require().NoError(err)
+	defer inArr.Release()
+
+	expArr, _, err := array.FromJSON(c.mem, dtOut, strings.NewReader(outJSON), array.WithUseNumber())
+	c.Require().NoError(err)
+	defer expArr.Release()
+
+	opts := compute.SafeCastOptions(dtOut)
+	got, err := compute.CastArray(context.Background(), inArr, opts)
+	c.Require().NoError(err)
+	defer got.Release()
+
+	c.Truef(array.Equal(expArr, got), "cast %s -> %s: expected %s, got %s",
+		dtIn, dtOut, expArr, got)
+}
+
+func (c *CastSuite) buildBinaryViewArray(values [][]byte) arrow.Array {
+	bldr := array.NewBinaryViewBuilder(c.mem)
+	defer bldr.Release()
+	for _, v := range values {
+		if v == nil {
+			bldr.AppendNull()
+			continue
+		}
+		bldr.Append(v)
+	}
+	return bldr.NewArray()
+}
+
+func (c *CastSuite) buildStringViewArray(values []string, valid []bool) arrow.Array {
+	bldr := array.NewStringViewBuilder(c.mem)
+	defer bldr.Release()
+	bldr.AppendValues(values, valid)
+	return bldr.NewArray()
 }
 
 func (c *CastSuite) TestStringToInt() {

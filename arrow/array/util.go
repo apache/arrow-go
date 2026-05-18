@@ -447,6 +447,8 @@ func getMaxBufferLen(dt arrow.DataType, length int) int {
 		return bufferLen
 	case arrow.OffsetsDataType:
 		return maxOf(dt.OffsetTypeTraits().BytesRequired(length + 1))
+	case arrow.BinaryViewDataType:
+		return maxOf(arrow.ViewHeaderSizeBytes * length)
 	case *arrow.FixedSizeListType:
 		return maxOf(getMaxBufferLen(dt.Elem(), int(dt.Len())*length))
 	case arrow.ExtensionType:
@@ -495,6 +497,8 @@ func (n *nullArrayFactory) create() *Data {
 		defer arr.Release()
 		dictData = arr.Data()
 	case arrow.FixedWidthDataType:
+		bufs = append(bufs, n.buf)
+	case arrow.BinaryViewDataType:
 		bufs = append(bufs, n.buf)
 	case arrow.BinaryDataType:
 		bufs = append(bufs, n.buf, n.buf)
