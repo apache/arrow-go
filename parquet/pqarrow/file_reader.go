@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/arrio"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -519,6 +520,8 @@ func (fr *FileReader) GetRecordReader(ctx context.Context, colIndices, rowGroups
 	batchSize := fr.Props.BatchSize
 	if fr.Props.BatchSize <= 0 {
 		batchSize = nrows
+	} else {
+		batchSize = min(fr.Props.BatchSize, int64(bitutil.NextPowerOf2(int(nrows))))
 	}
 	rr := &recordReader{
 		numRows:      nrows,
