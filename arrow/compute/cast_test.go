@@ -1548,7 +1548,7 @@ func (c *CastSuite) TestBinaryLikeToBinaryView() {
 				})
 				defer exp.Release()
 
-				in, _, err := array.FromJSON(c.mem, from, strings.NewReader(strInJSON), array.WithUseNumber())
+				in, _, err := array.FromJSON(c.mem, from, strings.NewReader(strInJSON))
 				c.Require().NoError(err)
 				defer in.Release()
 
@@ -1591,7 +1591,7 @@ func (c *CastSuite) TestBinaryLikeToBinaryView() {
 	c.Run("from fixed_size_binary", func() {
 		fsbType := &arrow.FixedSizeBinaryType{ByteWidth: 3}
 		in, _, err := array.FromJSON(c.mem, fsbType,
-			strings.NewReader(`["YWJj", "ZGVm", null]`), array.WithUseNumber())
+			strings.NewReader(`["YWJj", "ZGVm", null]`))
 		c.Require().NoError(err)
 		defer in.Release()
 
@@ -2431,11 +2431,11 @@ func (c *CastSuite) TestBoolToStringViewStaysSingleBuffer() {
 // scalar iteration path used by checkCast, which relies on scalar.GetScalar
 // - that helper does not yet support view types (unrelated to GH-184).
 func (c *CastSuite) checkCastArrayOnly(dtIn, dtOut arrow.DataType, inJSON, outJSON string) {
-	inArr, _, err := array.FromJSON(c.mem, dtIn, strings.NewReader(inJSON), array.WithUseNumber())
+	inArr, _, err := array.FromJSON(c.mem, dtIn, strings.NewReader(inJSON))
 	c.Require().NoError(err)
 	defer inArr.Release()
 
-	expArr, _, err := array.FromJSON(c.mem, dtOut, strings.NewReader(outJSON), array.WithUseNumber())
+	expArr, _, err := array.FromJSON(c.mem, dtOut, strings.NewReader(outJSON))
 	c.Require().NoError(err)
 	defer expArr.Release()
 
