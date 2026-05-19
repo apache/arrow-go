@@ -17,6 +17,7 @@
 package array_test
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"strings"
@@ -230,6 +231,35 @@ func generateJSONData(n int) []byte {
 
 	data, _ := json.Marshal(records)
 	return data
+}
+
+func ndjsonToRecordBuilder(t *testing.T, recordBuilder *array.RecordBuilder, data string) {
+	scanner := bufio.NewScanner(strings.NewReader(data))
+
+	for scanner.Scan() {
+		if len(scanner.Bytes()) > 0 {
+			err := recordBuilder.UnmarshalJSON(scanner.Bytes())
+			assert.NoError(t, err)
+		}
+	}
+
+	assert.NoError(t, scanner.Err())
+}
+
+func recordBatchToNDJSON(t *testing.T, rec arrow.RecordBatch) string {
+	var sb strings.Builder
+
+	arr := array.RecordToStructArray(rec)
+	defer arr.Release()
+
+	for pos := range arr.Len() {
+		s, err := json.Marshal(arr.GetOneForMarshal(pos))
+		assert.NoError(t, err)
+		sb.Write(s)
+		sb.WriteByte('\n')
+	}
+
+	return sb.String()
 }
 
 func jsonArrayToNDJSON(data []byte) ([]byte, error) {
