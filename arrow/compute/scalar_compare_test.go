@@ -52,11 +52,11 @@ func (c *CompareSuite) validateCompareDatum(op kernels.CompareOperator, lhs, rhs
 }
 
 func (c *CompareSuite) validateCompare(op kernels.CompareOperator, dt arrow.DataType, lhsStr, rhsStr, expStr string) {
-	lhs, _, err := array.FromJSON(c.mem, dt, strings.NewReader(lhsStr), array.WithUseNumber())
+	lhs, _, err := array.FromJSON(c.mem, dt, strings.NewReader(lhsStr))
 	c.Require().NoError(err)
-	rhs, _, err := array.FromJSON(c.mem, dt, strings.NewReader(rhsStr), array.WithUseNumber())
+	rhs, _, err := array.FromJSON(c.mem, dt, strings.NewReader(rhsStr))
 	c.Require().NoError(err)
-	exp, _, err := array.FromJSON(c.mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(expStr), array.WithUseNumber())
+	exp, _, err := array.FromJSON(c.mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(expStr))
 	c.Require().NoError(err)
 	defer func() {
 		lhs.Release()
@@ -67,9 +67,9 @@ func (c *CompareSuite) validateCompare(op kernels.CompareOperator, dt arrow.Data
 }
 
 func (c *CompareSuite) validateCompareArrScalar(op kernels.CompareOperator, dt arrow.DataType, lhsStr string, rhs compute.Datum, expStr string) {
-	lhs, _, err := array.FromJSON(c.mem, dt, strings.NewReader(lhsStr), array.WithUseNumber())
+	lhs, _, err := array.FromJSON(c.mem, dt, strings.NewReader(lhsStr))
 	c.Require().NoError(err)
-	exp, _, err := array.FromJSON(c.mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(expStr), array.WithUseNumber())
+	exp, _, err := array.FromJSON(c.mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(expStr))
 	c.Require().NoError(err)
 	defer func() {
 		lhs.Release()
@@ -79,9 +79,9 @@ func (c *CompareSuite) validateCompareArrScalar(op kernels.CompareOperator, dt a
 }
 
 func (c *CompareSuite) validateCompareScalarArr(op kernels.CompareOperator, dt arrow.DataType, lhs compute.Datum, rhsStr string, expStr string) {
-	rhs, _, err := array.FromJSON(c.mem, dt, strings.NewReader(rhsStr), array.WithUseNumber())
+	rhs, _, err := array.FromJSON(c.mem, dt, strings.NewReader(rhsStr))
 	c.Require().NoError(err)
-	exp, _, err := array.FromJSON(c.mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(expStr), array.WithUseNumber())
+	exp, _, err := array.FromJSON(c.mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(expStr))
 	c.Require().NoError(err)
 	defer func() {
 		rhs.Release()
@@ -1323,7 +1323,7 @@ func TestCompareGreaterWithImplicitCasts(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	getArr := func(ty arrow.DataType, str string) arrow.Array {
-		arr, _, err := array.FromJSON(mem, ty, strings.NewReader(str), array.WithUseNumber())
+		arr, _, err := array.FromJSON(mem, ty, strings.NewReader(str))
 		require.NoError(t, err)
 		return arr
 	}
@@ -1377,7 +1377,7 @@ func TestCompareGreaterWithImplicitCastUint64EdgeCase(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	getArr := func(ty arrow.DataType, str string) arrow.Array {
-		arr, _, err := array.FromJSON(mem, ty, strings.NewReader(str), array.WithUseNumber())
+		arr, _, err := array.FromJSON(mem, ty, strings.NewReader(str))
 		require.NoError(t, err)
 		return arr
 	}
@@ -1455,7 +1455,7 @@ func (sv *ScalarValiditySuite) TearDownTest() {
 }
 
 func (sv *ScalarValiditySuite) getArr(dt arrow.DataType, str string) arrow.Array {
-	arr, _, err := array.FromJSON(sv.mem, dt, strings.NewReader(str), array.WithUseNumber())
+	arr, _, err := array.FromJSON(sv.mem, dt, strings.NewReader(str))
 	sv.Require().NoError(err)
 	return arr
 }

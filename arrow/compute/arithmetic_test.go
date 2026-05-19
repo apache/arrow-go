@@ -154,7 +154,7 @@ func (b *BinaryFuncTestSuite) TearDownTest() {
 }
 
 func (b *BinaryFuncTestSuite) getArr(dt arrow.DataType, str string) arrow.Array {
-	arr, _, err := array.FromJSON(b.mem, dt, strings.NewReader(str), array.WithUseNumber())
+	arr, _, err := array.FromJSON(b.mem, dt, strings.NewReader(str))
 	b.Require().NoError(err)
 	return arr
 }
@@ -164,9 +164,9 @@ type Float16BinaryFuncTestSuite struct {
 }
 
 func (b *Float16BinaryFuncTestSuite) assertBinopErr(fn binaryFunc, lhs, rhs string) {
-	left, _, _ := array.FromJSON(b.mem, arrow.FixedWidthTypes.Float16, strings.NewReader(lhs), array.WithUseNumber())
+	left, _, _ := array.FromJSON(b.mem, arrow.FixedWidthTypes.Float16, strings.NewReader(lhs))
 	defer left.Release()
-	right, _, _ := array.FromJSON(b.mem, arrow.FixedWidthTypes.Float16, strings.NewReader(rhs), array.WithUseNumber())
+	right, _, _ := array.FromJSON(b.mem, arrow.FixedWidthTypes.Float16, strings.NewReader(rhs))
 	defer right.Release()
 
 	_, err := fn(&compute.ArrayDatum{left.Data()}, &compute.ArrayDatum{right.Data()})
@@ -288,20 +288,20 @@ func (b *BinaryArithmeticSuite[T]) assertBinopArrs(fn binaryArithmeticFunc, lhs,
 }
 
 func (b *BinaryArithmeticSuite[T]) assertBinopExpArr(fn binaryArithmeticFunc, lhs, rhs string, exp arrow.Array) {
-	left, _, _ := array.FromJSON(b.mem, b.DataType(), strings.NewReader(lhs), array.WithUseNumber())
+	left, _, _ := array.FromJSON(b.mem, b.DataType(), strings.NewReader(lhs))
 	defer left.Release()
-	right, _, _ := array.FromJSON(b.mem, b.DataType(), strings.NewReader(rhs), array.WithUseNumber())
+	right, _, _ := array.FromJSON(b.mem, b.DataType(), strings.NewReader(rhs))
 	defer right.Release()
 
 	b.assertBinopArrs(fn, left, right, exp)
 }
 
 func (b *BinaryArithmeticSuite[T]) assertBinop(fn binaryArithmeticFunc, lhs, rhs, expected string) {
-	left, _, _ := array.FromJSON(b.mem, b.DataType(), strings.NewReader(lhs), array.WithUseNumber())
+	left, _, _ := array.FromJSON(b.mem, b.DataType(), strings.NewReader(lhs))
 	defer left.Release()
-	right, _, _ := array.FromJSON(b.mem, b.DataType(), strings.NewReader(rhs), array.WithUseNumber())
+	right, _, _ := array.FromJSON(b.mem, b.DataType(), strings.NewReader(rhs))
 	defer right.Release()
-	exp, _, _ := array.FromJSON(b.mem, b.DataType(), strings.NewReader(expected), array.WithUseNumber())
+	exp, _, _ := array.FromJSON(b.mem, b.DataType(), strings.NewReader(expected))
 	defer exp.Release()
 
 	b.assertBinopArrs(fn, left, right, exp)
@@ -312,9 +312,9 @@ func (b *BinaryArithmeticSuite[T]) setOverflowCheck(value bool) {
 }
 
 func (b *BinaryArithmeticSuite[T]) assertBinopErr(fn binaryArithmeticFunc, lhs, rhs, expectedMsg string) {
-	left, _, _ := array.FromJSON(b.mem, b.DataType(), strings.NewReader(lhs), array.WithUseNumber())
+	left, _, _ := array.FromJSON(b.mem, b.DataType(), strings.NewReader(lhs))
 	defer left.Release()
-	right, _, _ := array.FromJSON(b.mem, b.DataType(), strings.NewReader(rhs), array.WithUseNumber())
+	right, _, _ := array.FromJSON(b.mem, b.DataType(), strings.NewReader(rhs))
 	defer right.Release()
 
 	assertBinopErr(b.T(), func(left, right compute.Datum) (compute.Datum, error) {
@@ -2449,7 +2449,7 @@ func (us *UnaryArithmeticSuite[T, O]) makeArray(v ...T) arrow.Array {
 }
 
 func (us *UnaryArithmeticSuite[T, O]) getArr(dt arrow.DataType, str string) arrow.Array {
-	arr, _, err := array.FromJSON(us.mem, dt, strings.NewReader(str), array.WithUseNumber())
+	arr, _, err := array.FromJSON(us.mem, dt, strings.NewReader(str))
 	us.Require().NoError(err)
 	return arr
 }
@@ -2504,7 +2504,7 @@ func (us *UnaryArithmeticSuite[T, O]) assertUnaryOpArrs(fn unaryArithmeticFunc[O
 }
 
 func (us *UnaryArithmeticSuite[T, O]) assertUnaryOpExpArr(fn unaryArithmeticFunc[O], arg string, exp arrow.Array) {
-	in, _, err := array.FromJSON(us.mem, us.datatype(), strings.NewReader(arg), array.WithUseNumber())
+	in, _, err := array.FromJSON(us.mem, us.datatype(), strings.NewReader(arg))
 	us.Require().NoError(err)
 	defer in.Release()
 
@@ -2512,10 +2512,10 @@ func (us *UnaryArithmeticSuite[T, O]) assertUnaryOpExpArr(fn unaryArithmeticFunc
 }
 
 func (us *UnaryArithmeticSuite[T, O]) assertUnaryOp(fn unaryArithmeticFunc[O], arg, exp string) {
-	in, _, err := array.FromJSON(us.mem, us.datatype(), strings.NewReader(arg), array.WithUseNumber())
+	in, _, err := array.FromJSON(us.mem, us.datatype(), strings.NewReader(arg))
 	us.Require().NoError(err)
 	defer in.Release()
-	expected, _, err := array.FromJSON(us.mem, us.datatype(), strings.NewReader(exp), array.WithUseNumber())
+	expected, _, err := array.FromJSON(us.mem, us.datatype(), strings.NewReader(exp))
 	us.Require().NoError(err)
 	defer expected.Release()
 
@@ -2523,7 +2523,7 @@ func (us *UnaryArithmeticSuite[T, O]) assertUnaryOp(fn unaryArithmeticFunc[O], a
 }
 
 func (us *UnaryArithmeticSuite[T, O]) assertUnaryOpErr(fn unaryArithmeticFunc[O], arg string, msg string) {
-	in, _, err := array.FromJSON(us.mem, us.datatype(), strings.NewReader(arg), array.WithUseNumber())
+	in, _, err := array.FromJSON(us.mem, us.datatype(), strings.NewReader(arg))
 	us.Require().NoError(err)
 	defer in.Release()
 

@@ -543,3 +543,264 @@ func TestRecordBuilderUnmarshalJSONExtraFields(t *testing.T) {
 
 	assert.Truef(t, array.RecordEqual(rec1, rec2), "expected: %s\nactual: %s", rec1, rec2)
 }
+
+func TestRecordFromJSONLargeInt64Default(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	const data = `[{"a": 9223372036854775807}, {"a": -9223372036854775808}]`
+	batch, _, err := array.RecordFromJSON(mem, schema, strings.NewReader(data))
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	defer batch.Release()
+
+	col := batch.Column(0).(*array.Int64)
+	assert.EqualValues(t, int64(9223372036854775807), col.Value(0))
+	assert.EqualValues(t, int64(-9223372036854775808), col.Value(1))
+}
+
+func TestRecordFromJSONLargeInt64WithUseNumber(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	const data = `[{"a": 9223372036854775807}, {"a": -9223372036854775808}]`
+	//nolint:staticcheck // SA1019: explicitly verifying deprecated WithUseNumber still works
+	batch, _, err := array.RecordFromJSON(mem, schema, strings.NewReader(data), array.WithUseNumber())
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	defer batch.Release()
+
+	col := batch.Column(0).(*array.Int64)
+	assert.EqualValues(t, int64(9223372036854775807), col.Value(0))
+	assert.EqualValues(t, int64(-9223372036854775808), col.Value(1))
+}
+
+func TestRecordFromJSONLargeDuration(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.FixedWidthTypes.Duration_s},
+	}, nil)
+
+	const data = `[{"a": 9223372036854775807}]`
+	batch, _, err := array.RecordFromJSON(mem, schema, strings.NewReader(data))
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	defer batch.Release()
+
+	col := batch.Column(0).(*array.Duration)
+	assert.EqualValues(t, arrow.Duration(9223372036854775807), col.Value(0))
+}
+
+func TestRecordBuilderUnmarshalJSONLargeInt64(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	bldr := array.NewRecordBuilder(mem, schema)
+	defer bldr.Release()
+
+	require.NoError(t, bldr.UnmarshalJSON([]byte(`{"a": 9223372036854775807}`)))
+
+	rec := bldr.NewRecordBatch()
+	defer rec.Release()
+
+	col := rec.Column(0).(*array.Int64)
+	assert.EqualValues(t, int64(9223372036854775807), col.Value(0))
+}
+
+func TestRecordBuilderUnmarshalOnePreservesUserDecoderOptions(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	bldr := array.NewRecordBuilder(mem, schema)
+	defer bldr.Release()
+
+	src := strings.NewReader(`{"a": 9223372036854775807}`)
+	dec := json.NewDecoder(src)
+	dec.UseNumber()
+
+	require.NoError(t, bldr.UnmarshalOne(dec))
+
+	rec := bldr.NewRecordBatch()
+	defer rec.Release()
+
+	col := rec.Column(0).(*array.Int64)
+	assert.EqualValues(t, int64(9223372036854775807), col.Value(0))
+}
+
+func TestDurationBuilderJSONStringInteger(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	arr, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Duration_s,
+		strings.NewReader(`["9223372036854775807"]`))
+	require.NoError(t, err)
+	require.NotNil(t, arr)
+	defer arr.Release()
+
+	col := arr.(*array.Duration)
+	assert.EqualValues(t, arrow.Duration(9223372036854775807), col.Value(0))
+}
+
+func TestTimestampBuilderJSONStringInteger(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	arr, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Timestamp_s,
+		strings.NewReader(`["9223372036854775807"]`))
+	require.NoError(t, err)
+	require.NotNil(t, arr)
+	defer arr.Release()
+
+	col := arr.(*array.Timestamp)
+	assert.EqualValues(t, arrow.Timestamp(9223372036854775807), col.Value(0))
+}
+
+func TestTime32BuilderJSONStringInteger(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	arr, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Time32s,
+		strings.NewReader(`["2147483647"]`))
+	require.NoError(t, err)
+	require.NotNil(t, arr)
+	defer arr.Release()
+
+	col := arr.(*array.Time32)
+	assert.EqualValues(t, arrow.Time32(2147483647), col.Value(0))
+}
+
+func TestTime64BuilderJSONStringInteger(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	arr, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Time64us,
+		strings.NewReader(`["9223372036854775807"]`))
+	require.NoError(t, err)
+	require.NotNil(t, arr)
+	defer arr.Release()
+
+	col := arr.(*array.Time64)
+	assert.EqualValues(t, arrow.Time64(9223372036854775807), col.Value(0))
+}
+
+func TestDate32BuilderJSONStringInteger(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	arr, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Date32,
+		strings.NewReader(`["2147483647"]`))
+	require.NoError(t, err)
+	require.NotNil(t, arr)
+	defer arr.Release()
+
+	col := arr.(*array.Date32)
+	assert.EqualValues(t, arrow.Date32(2147483647), col.Value(0))
+}
+
+func TestDate64BuilderJSONStringInteger(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	arr, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Date64,
+		strings.NewReader(`["9223372036854775807"]`))
+	require.NoError(t, err)
+	require.NotNil(t, arr)
+	defer arr.Release()
+
+	col := arr.(*array.Date64)
+	assert.EqualValues(t, arrow.Date64(9223372036854775807), col.Value(0))
+}
+
+func TestDurationBuilderJSONStringIntegerInvalid(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	_, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Duration_s,
+		strings.NewReader(`["abc"]`))
+	assert.Error(t, err)
+}
+
+func TestDurationBuilderJSONStringDurationFormat(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	arr, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Duration_s,
+		strings.NewReader(`["3h2m0.5s"]`))
+	require.NoError(t, err)
+	require.NotNil(t, arr)
+	defer arr.Release()
+
+	col := arr.(*array.Duration)
+	assert.EqualValues(t, arrow.Duration(10920), col.Value(0))
+}
+
+// TestJSONNumberStrictValidation verifies that with UseNumber always enabled
+// (issue #804), invalid integer JSON inputs are rejected rather than silently
+// truncated, wrapped, or coerced.
+func TestJSONNumberStrictValidation(t *testing.T) {
+	cases := []struct {
+		name string
+		dt   arrow.DataType
+		json string
+	}{
+		{"Int64Fractional", arrow.PrimitiveTypes.Int64, `[1.5]`},
+		{"Int8OutOfRangePositive", arrow.PrimitiveTypes.Int8, `[128]`},
+		{"Int8OutOfRangeNegative", arrow.PrimitiveTypes.Int8, `[-129]`},
+		{"Int16OutOfRange", arrow.PrimitiveTypes.Int16, `[32768]`},
+		{"Uint8Negative", arrow.PrimitiveTypes.Uint8, `[-1]`},
+		{"Uint8Fractional", arrow.PrimitiveTypes.Uint8, `[0.5]`},
+		{"Uint16OutOfRange", arrow.PrimitiveTypes.Uint16, `[65536]`},
+		{"Uint64Negative", arrow.PrimitiveTypes.Uint64, `[-1]`},
+		{"Uint64ExactBoundary", arrow.PrimitiveTypes.Uint64, `[18446744073709551616]`},
+		{"Uint64ExponentialOverflow", arrow.PrimitiveTypes.Uint64, `[1.8446744073709552e+19]`},
+		{"DurationFractional", arrow.FixedWidthTypes.Duration_s, `[1.5]`},
+		{"TimestampFractional", arrow.FixedWidthTypes.Timestamp_s, `[1.5]`},
+		{"Date32Fractional", arrow.FixedWidthTypes.Date32, `[1.5]`},
+		{"Date32OverflowPositive", arrow.FixedWidthTypes.Date32, `[2147483648]`},
+		{"Date32OverflowNegative", arrow.FixedWidthTypes.Date32, `[-2147483649]`},
+		{"Date64Fractional", arrow.FixedWidthTypes.Date64, `[1.5]`},
+		{"Time32Fractional", arrow.FixedWidthTypes.Time32s, `[1.5]`},
+		{"Time32OverflowPositive", arrow.FixedWidthTypes.Time32s, `[2147483648]`},
+		{"Time32OverflowNegative", arrow.FixedWidthTypes.Time32s, `[-2147483649]`},
+		{"Time64Fractional", arrow.FixedWidthTypes.Time64us, `[1.5]`},
+		{"Int64NaNString", arrow.PrimitiveTypes.Int64, `["NaN"]`},
+		{"Int64InfString", arrow.PrimitiveTypes.Int64, `["+Inf"]`},
+		{"Uint64NaNString", arrow.PrimitiveTypes.Uint64, `["NaN"]`},
+		{"Uint64InfString", arrow.PrimitiveTypes.Uint64, `["+Inf"]`},
+		{"Uint64ExponentialOverflowString", arrow.PrimitiveTypes.Uint64, `["1.8446744073709552e+19"]`},
+		{"Int64ExponentBeyondMantissa", arrow.PrimitiveTypes.Int64, `[9.007199254740993e15]`},
+		{"Uint64ExponentBeyondMantissa", arrow.PrimitiveTypes.Uint64, `[9.007199254740993e15]`},
+		{"Int64ExponentBeyondMantissaString", arrow.PrimitiveTypes.Int64, `["9.007199254740993e15"]`},
+		{"Uint64ExponentBeyondMantissaString", arrow.PrimitiveTypes.Uint64, `["9.007199254740993e15"]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			arr, _, err := array.FromJSON(mem, tc.dt, strings.NewReader(tc.json))
+			if err == nil {
+				arr.Release()
+				t.Fatalf("expected error for %s with input %s, got nil", tc.name, tc.json)
+			}
+		})
+	}
+}

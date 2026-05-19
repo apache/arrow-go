@@ -384,12 +384,15 @@ func (b *RecordBuilder) NewRecord() arrow.Record {
 	return b.NewRecordBatch()
 }
 
-// UnmarshalJSON for record builder will read in a single object and add the values
-// to each field in the recordbuilder, missing fields will get a null and unexpected
-// keys will be ignored. If reading in an array of records as a single batch, then use
-// a structbuilder and use RecordFromStruct.
-func (b *RecordBuilder) UnmarshalJSON(data []byte) error {
-	dec := json.NewDecoder(bytes.NewReader(data))
+// UnmarshalOne reads one row (a JSON object) from the supplied decoder and
+// appends a value to each field in the RecordBuilder. Missing fields are
+// appended as nulls and unrecognized keys are silently ignored.
+//
+// Unlike UnmarshalJSON, this method receives an already-configured
+// json.Decoder, so options such as UseNumber set by the caller are honored
+// for nested field decoding. This is critical for preserving large integer
+// values (>2^53) that cannot be represented exactly as float64.
+func (b *RecordBuilder) UnmarshalOne(dec *json.Decoder) error {
 	// should start with a '{'
 	t, err := dec.Token()
 	if err != nil {
@@ -427,12 +430,44 @@ func (b *RecordBuilder) UnmarshalJSON(data []byte) error {
 		}
 	}
 
+	// consume the closing '}'
+	if _, err := dec.Token(); err != nil {
+		return err
+	}
+
 	for i := 0; i < b.schema.NumFields(); i++ {
 		if !keylist[b.schema.Field(i).Name] {
 			b.fields[i].AppendNull()
 		}
 	}
 	return nil
+}
+
+// Unmarshal reads multiple rows from the decoder, calling UnmarshalOne in a
+// loop until dec.More() reports there are no more values. Like UnmarshalOne,
+// this honors decoder configuration such as UseNumber set by the caller.
+func (b *RecordBuilder) Unmarshal(dec *json.Decoder) error {
+	for dec.More() {
+		if err := b.UnmarshalOne(dec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// UnmarshalJSON for record builder will read in a single object and add the values
+// to each field in the recordbuilder, missing fields will get a null and unexpected
+// keys will be ignored. If reading in an array of records as a single batch, then use
+// a structbuilder and use RecordFromStruct.
+//
+// UseNumber is enabled on the internal decoder so that integer values too large
+// to be represented exactly as float64 (e.g. values beyond 2^53) are preserved.
+// Callers who need full control over decoder configuration should use
+// UnmarshalOne with a pre-configured json.Decoder instead.
+func (b *RecordBuilder) UnmarshalJSON(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	return b.UnmarshalOne(dec)
 }
 
 type iterReader struct {

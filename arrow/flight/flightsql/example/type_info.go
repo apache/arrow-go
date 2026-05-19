@@ -62,7 +62,7 @@ func GetTypeInfoResult(mem memory.Allocator) arrow.RecordBatch {
 
 	// reference for creating a boolean() array with only zeros
 	zeroBoolArray, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean,
-		strings.NewReader(`[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]`), array.WithUseNumber())
+		strings.NewReader(`[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]`))
 	if err != nil {
 		panic(err)
 	}

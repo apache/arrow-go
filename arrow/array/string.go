@@ -629,6 +629,7 @@ func (b *StringBuilder) Unmarshal(dec *json.Decoder) error {
 
 func (b *StringBuilder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -722,6 +723,7 @@ func (b *LargeStringBuilder) Unmarshal(dec *json.Decoder) error {
 
 func (b *LargeStringBuilder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -788,6 +790,7 @@ func (b *StringViewBuilder) Unmarshal(dec *json.Decoder) error {
 
 func (b *StringViewBuilder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err

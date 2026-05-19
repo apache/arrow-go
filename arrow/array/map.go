@@ -342,6 +342,7 @@ func (b *MapBuilder) Unmarshal(dec *json.Decoder) error {
 
 func (b *MapBuilder) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
