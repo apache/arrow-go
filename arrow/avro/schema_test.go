@@ -18,12 +18,12 @@ package avro
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/avro/testdata"
-	avropkg "github.com/hamba/avro/v2"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
+	hambaAvro "github.com/hamba/avro/v2"
 )
 
 func TestSchemaStringEqual(t *testing.T) {
@@ -129,6 +129,10 @@ func TestSchemaStringEqual(t *testing.T) {
 					Type: arrow.BinaryTypes.String,
 				},
 				{
+					Name: "fixedUuidField",
+					Type: extensions.NewUUIDType(),
+				},
+				{
 					Name: "timemillis",
 					Type: arrow.FixedWidthTypes.Time32ms,
 				},
@@ -172,7 +176,7 @@ func TestSchemaStringEqual(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v", err)
 			}
-			got, err := ArrowSchemaFromAvro(schema)
+			got, err := ArrowSchemaFromAvroJSON(schema)
 			if err != nil {
 				t.Fatalf("%v", err)
 			}
@@ -185,25 +189,36 @@ func TestSchemaStringEqual(t *testing.T) {
 	}
 }
 
-func TestComplexUnionReportsError(t *testing.T) {
-	// Non-nullable union (e.g. [int, string]) is not supported and should
-	// produce a clear error rather than being silently dropped.
-	const avroSchemaJSON = `{
+// Remove together with [ArrowSchemaFromAvro] at the next major release.
+func TestArrowSchemaFromAvro_Deprecated_PreservesLogicalTypesOnFixed(t *testing.T) {
+	const schemaJSON = `{
 		"type": "record",
-		"name": "WithComplexUnion",
+		"name": "Sample",
 		"fields": [
-			{"name": "value", "type": ["int", "string"]}
+			{"name": "id", "type": "int"},
+			{"name": "name", "type": "string"},
+			{"name": "nullable_double", "type": ["null", "double"]},
+			{"name": "uuid_string", "type": {"type": "string", "logicalType": "uuid"}},
+			{"name": "ts_millis", "type": {"type": "long", "logicalType": "timestamp-millis"}},
+			{"name": "fixed_uuid", "type": {"type": "fixed", "name": "FUUID", "size": 16, "logicalType": "uuid"}},
+			{"name": "fixed_decimal", "type": {"type": "fixed", "name": "FDec", "size": 16, "logicalType": "decimal", "precision": 20, "scale": 4}},
+			{"name": "fixed_duration", "type": {"type": "fixed", "name": "FDur", "size": 12, "logicalType": "duration"}}
 		]
 	}`
-	schema, err := avropkg.Parse(avroSchemaJSON)
+	hambaSchema, err := hambaAvro.Parse(schemaJSON)
 	if err != nil {
-		t.Fatalf("avro parse: %v", err)
+		t.Fatalf("hamba parse: %v", err)
 	}
-	got, err := ArrowSchemaFromAvro(schema)
-	if err == nil {
-		t.Fatalf("expected error for complex union, got schema=%v", got)
+
+	got, err := ArrowSchemaFromAvro(hambaSchema)
+	if err != nil {
+		t.Fatalf("ArrowSchemaFromAvro: %v", err)
 	}
-	if !strings.Contains(err.Error(), "union") {
-		t.Fatalf("expected error to mention union, got: %v", err)
+	want, err := ArrowSchemaFromAvroJSON(schemaJSON)
+	if err != nil {
+		t.Fatalf("ArrowSchemaFromAvroJSON: %v", err)
+	}
+	if got.String() != want.String() {
+		t.Fatalf("schema mismatch:\n got = %s\nwant = %s", got.String(), want.String())
 	}
 }

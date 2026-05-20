@@ -18,6 +18,7 @@
 package avro
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
@@ -26,24 +27,34 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/internal/utils"
-	avro "github.com/hamba/avro/v2"
+	hambaAvro "github.com/hamba/avro/v2"
+	avro "github.com/twmb/avro"
 )
 
+// builtinAvroTypes is the set of Type field values that mean "this SchemaNode
+// is the inline definition of an Avro type." Anything else in node.Type is
+// treated as a named-type reference to a previously-seen record/enum/fixed.
+var builtinAvroTypes = map[string]struct{}{
+	"null": {}, "boolean": {}, "int": {}, "long": {},
+	"float": {}, "double": {}, "bytes": {}, "string": {},
+	"record": {}, "enum": {}, "array": {}, "map": {},
+	"fixed": {}, "union": {},
+}
+
 type schemaNode struct {
-	name         string
-	parent       *schemaNode
-	schema       avro.Schema
-	union        bool
-	nullable     bool
-	childrens    []*schemaNode
-	arrowField   arrow.Field
-	schemaCache  *avro.SchemaCache
-	index, depth int32
+	name       string
+	parent     *schemaNode
+	node       avro.SchemaNode
+	union      bool
+	nullable   bool
+	childrens  []*schemaNode
+	arrowField arrow.Field
+	namedCache map[string]avro.SchemaNode
+	index      int32
 }
 
 func newSchemaNode() *schemaNode {
-	var schemaCache avro.SchemaCache
-	return &schemaNode{name: "", index: -1, schemaCache: &schemaCache}
+	return &schemaNode{index: -1, namedCache: map[string]avro.SchemaNode{}}
 }
 
 func (node *schemaNode) schemaPath() string {
@@ -56,33 +67,84 @@ func (node *schemaNode) schemaPath() string {
 	return path
 }
 
-func (node *schemaNode) newChild(n string, s avro.Schema) *schemaNode {
+func (node *schemaNode) newChild(n string, s avro.SchemaNode) *schemaNode {
 	child := &schemaNode{
-		name:        n,
-		parent:      node,
-		schema:      s,
-		schemaCache: node.schemaCache,
-		index:       int32(len(node.childrens)),
-		depth:       node.depth + 1,
+		name:       n,
+		parent:     node,
+		node:       s,
+		namedCache: node.namedCache,
+		index:      int32(len(node.childrens)),
 	}
 	node.childrens = append(node.childrens, child)
 	return child
 }
 func (node *schemaNode) children() []*schemaNode { return node.childrens }
 
-// func (node *schemaNode) nodeName() string { return node.name }
+// rememberNamed adds a record/enum/fixed SchemaNode to the named-type cache
+// under both its short name and (if a namespace is present) its full name,
+// so later references like {"type": "Address"} or {"type": "ns.Address"}
+// resolve back to the original definition.
+func (node *schemaNode) rememberNamed(s avro.SchemaNode) {
+	if s.Name == "" {
+		return
+	}
+	node.namedCache[s.Name] = s
+	if s.Namespace != "" {
+		node.namedCache[s.Namespace+"."+s.Name] = s
+	}
+}
 
-// ArrowSchemaFromAvro returns a new Arrow schema from an Avro schema
-func ArrowSchemaFromAvro(schema avro.Schema) (s *arrow.Schema, err error) {
+// resolveRef replaces s with its inline definition if s.Type is a named-type
+// reference rather than a builtin Avro type. atField, when non-empty, names
+// the field this reference appears in and is included in the panic so the
+// user can locate the offending entry.
+func (node *schemaNode) resolveRef(s avro.SchemaNode, atField string) avro.SchemaNode {
+	if _, ok := builtinAvroTypes[s.Type]; ok {
+		return s
+	}
+	if def, ok := node.namedCache[s.Type]; ok {
+		return def
+	}
+	loc := node.schemaPath()
+	if atField != "" {
+		loc += "." + atField
+	}
+	panic(fmt.Errorf("unknown named type %q referenced at %s", s.Type, loc))
+}
+
+// ArrowSchemaFromAvroJSON parses an Avro schema given as JSON text and returns
+// the equivalent Arrow schema.
+func ArrowSchemaFromAvroJSON(schemaJSON string) (*arrow.Schema, error) {
+	schema, err := avro.Parse(schemaJSON)
+	if err != nil {
+		return nil, err
+	}
+	return arrowSchemaFromAvroInternal(schema)
+}
+
+// ArrowSchemaFromAvro returns a new Arrow schema from a parsed Avro schema.
+//
+// Deprecated: Use [ArrowSchemaFromAvroJSON] instead — it does not couple
+// callers to a particular Avro library through its signature.
+func ArrowSchemaFromAvro(schema hambaAvro.Schema) (*arrow.Schema, error) {
+	js, err := json.Marshal(schema)
+	if err != nil {
+		return nil, fmt.Errorf("%w: could not serialize hamba avro schema: %w", arrow.ErrInvalid, err)
+	}
+	return ArrowSchemaFromAvroJSON(string(js))
+}
+
+func arrowSchemaFromAvroInternal(schema *avro.Schema) (s *arrow.Schema, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			s = nil
 			err = utils.FormatRecoveredError("invalid avro schema", r)
 		}
 	}()
+	root := schema.Root()
 	n := newSchemaNode()
-	n.schema = schema
-	c := n.newChild(n.schema.(avro.NamedSchema).Name(), n.schema)
+	n.node = root
+	c := n.newChild(root.Name, root)
 	arrowSchemafromAvro(c)
 	var fields []arrow.Field
 	for _, g := range c.children() {
@@ -93,16 +155,16 @@ func ArrowSchemaFromAvro(schema avro.Schema) (s *arrow.Schema, err error) {
 }
 
 func arrowSchemafromAvro(n *schemaNode) {
-	if ns, ok := n.schema.(avro.NamedSchema); ok {
-		n.schemaCache.Add(ns.Name(), ns)
+	n.node = n.resolveRef(n.node, "")
+	if n.node.Name != "" {
+		n.rememberNamed(n.node)
 	}
-	switch st := n.schema.Type(); st {
+	switch st := n.node.Type; st {
 	case "record":
 		iterateFields(n)
 	case "enum":
-		n.schemaCache.Add(n.schema.(avro.NamedSchema).Name(), n.schema.(*avro.EnumSchema))
 		symbols := make(map[string]string)
-		for index, symbol := range n.schema.(avro.PropertySchema).(*avro.EnumSchema).Symbols() {
+		for index, symbol := range n.node.Symbols {
 			k := strconv.FormatInt(int64(index), 10)
 			symbols[k] = symbol
 		}
@@ -118,9 +180,12 @@ func arrowSchemafromAvro(n *schemaNode) {
 		}
 		n.arrowField = buildArrowField(n, &dt, arrow.MetadataFrom(symbols))
 	case "array":
-		// logical items type
-		c := n.newChild(n.name, n.schema.(*avro.ArraySchema).Items())
-		if isLogicalSchemaType(n.schema.(*avro.ArraySchema).Items()) {
+		if n.node.Items == nil {
+			panic(fmt.Errorf("avro array schema at %s has no 'items'", n.schemaPath()))
+		}
+		items := *n.node.Items
+		c := n.newChild(n.name, items)
+		if isLogicalSchemaType(items) {
 			avroLogicalToArrowField(c)
 		} else {
 			arrowSchemafromAvro(c)
@@ -134,62 +199,58 @@ func arrowSchemafromAvro(n *schemaNode) {
 		}
 		n.arrowField = buildArrowField(n, typ, c.arrowField.Metadata)
 	case "map":
-		n.schemaCache.Add(n.schema.(*avro.MapSchema).Values().(avro.NamedSchema).Name(), n.schema.(*avro.MapSchema).Values())
-		c := n.newChild(n.name, n.schema.(*avro.MapSchema).Values())
+		if n.node.Values == nil {
+			panic(fmt.Errorf("avro map schema at %s has no 'values'", n.schemaPath()))
+		}
+		values := *n.node.Values
+		c := n.newChild(n.name, values)
 		arrowSchemafromAvro(c)
 		n.arrowField = buildArrowField(n, arrow.MapOf(arrow.BinaryTypes.String, c.arrowField.Type), c.arrowField.Metadata)
 	case "union":
-		us := n.schema.(*avro.UnionSchema)
-		if us.Nullable() {
-			if len(us.Types()) > 1 {
-				n.schema = us.Types()[1]
-				n.union = true
-				n.nullable = true
-				arrowSchemafromAvro(n)
-			}
-		} else {
-			panic(fmt.Errorf("complex (non-nullable) avro union at '%v' is not supported", n.schemaPath()))
+		branch, ok := nullableBranch(n.node)
+		if !ok {
+			panic(fmt.Errorf("unsupported avro union at %s: only ['null', T] unions with exactly one non-null branch are supported", n.schemaPath()))
 		}
+		n.node = branch
+		n.union = true
+		n.nullable = true
+		arrowSchemafromAvro(n)
 	// Avro "fixed" field type = Arrow FixedSize Primitive BinaryType
 	case "fixed":
-		n.schemaCache.Add(n.schema.(avro.NamedSchema).Name(), n.schema.(*avro.FixedSchema))
-		if isLogicalSchemaType(n.schema) {
+		if isLogicalSchemaType(n.node) {
 			avroLogicalToArrowField(n)
 		} else {
-			n.arrowField = buildArrowField(n, &arrow.FixedSizeBinaryType{ByteWidth: n.schema.(*avro.FixedSchema).Size()}, arrow.Metadata{})
+			n.arrowField = buildArrowField(n, &arrow.FixedSizeBinaryType{ByteWidth: n.node.Size}, arrow.Metadata{})
 		}
 	case "string", "bytes", "int", "long":
-		if isLogicalSchemaType(n.schema) {
+		if isLogicalSchemaType(n.node) {
 			avroLogicalToArrowField(n)
 		} else {
 			n.arrowField = buildArrowField(n, avroPrimitiveToArrowType(string(st)), arrow.Metadata{})
 		}
 	case "float", "double", "boolean":
 		n.arrowField = buildArrowField(n, avroPrimitiveToArrowType(string(st)), arrow.Metadata{})
-	case "<ref>":
-		refSchema := n.schemaCache.Get(string(n.schema.(*avro.RefSchema).Schema().Name()))
-		if refSchema == nil {
-			panic(fmt.Errorf("could not find schema for '%v' in schema cache - %v", n.schemaPath(), n.schema.(*avro.RefSchema).Schema().Name()))
-		}
-		n.schema = refSchema
-		arrowSchemafromAvro(n)
 	case "null":
-		n.schemaCache.Add(n.schema.(*avro.MapSchema).Values().(avro.NamedSchema).Name(), &avro.NullSchema{})
 		n.nullable = true
 		n.arrowField = buildArrowField(n, arrow.Null, arrow.Metadata{})
+	default:
+		panic(fmt.Errorf("unhandled avro type %q at %s", st, n.schemaPath()))
 	}
 }
 
-// iterate record Fields()
+// iterate record Fields
 func iterateFields(n *schemaNode) {
-	for _, f := range n.schema.(*avro.RecordSchema).Fields() {
-		switch ft := f.Type().(type) {
+	for _, f := range n.node.Fields {
+		ft := n.resolveRef(f.Type, f.Name)
+		switch ft.Type {
 		// Avro "array" field type
-		case *avro.ArraySchema:
-			n.schemaCache.Add(f.Name(), ft.Items())
-			// logical items type
-			c := n.newChild(f.Name(), ft.Items())
-			if isLogicalSchemaType(ft.Items()) {
+		case "array":
+			if ft.Items == nil {
+				panic(fmt.Errorf("avro array field %s.%s has no 'items'", n.schemaPath(), f.Name))
+			}
+			items := *ft.Items
+			c := n.newChild(f.Name, items)
+			if isLogicalSchemaType(items) {
 				avroLogicalToArrowField(c)
 			} else {
 				arrowSchemafromAvro(c)
@@ -201,11 +262,11 @@ func iterateFields(n *schemaNode) {
 				c.arrowField = arrow.Field{Name: c.name, Type: arrow.ListOfNonNullable(c.arrowField.Type), Metadata: c.arrowField.Metadata}
 			}
 		// Avro "enum" field type = Arrow dictionary type
-		case *avro.EnumSchema:
-			n.schemaCache.Add(f.Type().(*avro.EnumSchema).Name(), f.Type())
-			c := n.newChild(f.Name(), f.Type())
+		case "enum":
+			n.rememberNamed(ft)
+			c := n.newChild(f.Name, ft)
 			symbols := make(map[string]string)
-			for index, symbol := range ft.Symbols() {
+			for index, symbol := range ft.Symbols {
 				k := strconv.FormatInt(int64(index), 10)
 				symbols[k] = symbol
 			}
@@ -221,46 +282,43 @@ func iterateFields(n *schemaNode) {
 			}
 			c.arrowField = buildArrowField(c, &dt, arrow.MetadataFrom(symbols))
 		// Avro "fixed" field type = Arrow FixedSize Primitive BinaryType
-		case *avro.FixedSchema:
-			n.schemaCache.Add(f.Name(), f.Type())
-			c := n.newChild(f.Name(), f.Type())
-			if isLogicalSchemaType(f.Type()) {
+		case "fixed":
+			n.rememberNamed(ft)
+			c := n.newChild(f.Name, ft)
+			if isLogicalSchemaType(ft) {
 				avroLogicalToArrowField(c)
 			} else {
 				arrowSchemafromAvro(c)
 			}
-		case *avro.RecordSchema:
-			n.schemaCache.Add(f.Name(), f.Type())
-			c := n.newChild(f.Name(), f.Type())
+		case "record":
+			n.rememberNamed(ft)
+			c := n.newChild(f.Name, ft)
 			iterateFields(c)
-			// Avro "map" field type - KVP with value of one type - keys are strings
-		case *avro.MapSchema:
-			n.schemaCache.Add(f.Name(), ft.Values())
-			c := n.newChild(f.Name(), ft.Values())
+		// Avro "map" field type - KVP with value of one type - keys are strings
+		case "map":
+			if ft.Values == nil {
+				panic(fmt.Errorf("avro map field %s.%s has no 'values'", n.schemaPath(), f.Name))
+			}
+			values := *ft.Values
+			c := n.newChild(f.Name, values)
 			arrowSchemafromAvro(c)
 			c.arrowField = buildArrowField(c, arrow.MapOf(arrow.BinaryTypes.String, c.arrowField.Type), c.arrowField.Metadata)
-		case *avro.UnionSchema:
-			if ft.Nullable() {
-				if len(ft.Types()) > 1 {
-					n.schemaCache.Add(f.Name(), ft.Types()[1])
-					c := n.newChild(f.Name(), ft.Types()[1])
-					c.union = true
-					c.nullable = true
-					arrowSchemafromAvro(c)
-				}
-			} else {
-				panic(fmt.Errorf("complex (non-nullable) avro union in field '%v' is not supported", f.Name()))
+		case "union":
+			branch, ok := nullableBranch(ft)
+			if !ok {
+				panic(fmt.Errorf("unsupported avro union at %s.%s: only ['null', T] unions with exactly one non-null branch are supported", n.schemaPath(), f.Name))
 			}
+			c := n.newChild(f.Name, branch)
+			c.union = true
+			c.nullable = true
+			arrowSchemafromAvro(c)
 		default:
-			n.schemaCache.Add(f.Name(), f.Type())
-			if isLogicalSchemaType(f.Type()) {
-				c := n.newChild(f.Name(), f.Type())
+			c := n.newChild(f.Name, ft)
+			if isLogicalSchemaType(ft) {
 				avroLogicalToArrowField(c)
 			} else {
-				c := n.newChild(f.Name(), f.Type())
 				arrowSchemafromAvro(c)
 			}
-
 		}
 	}
 	var fields []arrow.Field
@@ -268,7 +326,7 @@ func iterateFields(n *schemaNode) {
 		fields = append(fields, child.arrowField)
 	}
 
-	namedSchema, ok := isNamedSchema(n.schema)
+	namedSchema, ok := isNamedSchema(n.node)
 
 	var md arrow.Metadata
 	if ok && namedSchema != n.name+"_data" && n.union {
@@ -277,22 +335,46 @@ func iterateFields(n *schemaNode) {
 	n.arrowField = buildArrowField(n, arrow.StructOf(fields...), md)
 }
 
-func isLogicalSchemaType(s avro.Schema) bool {
-	lts, ok := s.(avro.LogicalTypeSchema)
-	if !ok {
-		return false
+// nullableBranch returns the non-null branch of a two-element ["null", T]
+// union, plus true if the union is in that nullable shape. If the union has
+// more than two branches or no null branch, ok is false.
+//
+// Heterogeneous non-nullable unions (e.g. ["null", "int", "string"] or
+// ["int", "string"]) are not supported and callers panic on them rather
+// than silently picking one arm.
+func nullableBranch(s avro.SchemaNode) (avro.SchemaNode, bool) {
+	if s.Type != "union" || len(s.Branches) < 2 {
+		return avro.SchemaNode{}, false
 	}
-	if lts.Logical() != nil {
-		return true
+	var nonNull *avro.SchemaNode
+	for i := range s.Branches {
+		b := s.Branches[i]
+		if b.Type == "null" {
+			continue
+		}
+		if nonNull != nil {
+			return avro.SchemaNode{}, false
+		}
+		nonNull = &b
 	}
-	return false
+	if nonNull == nil {
+		return avro.SchemaNode{}, false
+	}
+	return *nonNull, true
 }
 
-func isNamedSchema(s avro.Schema) (string, bool) {
-	if ns, ok := s.(avro.NamedSchema); ok {
-		return ns.FullName(), ok
+func isLogicalSchemaType(s avro.SchemaNode) bool {
+	return s.LogicalType != ""
+}
+
+func isNamedSchema(s avro.SchemaNode) (string, bool) {
+	if s.Name == "" {
+		return "", false
 	}
-	return "", false
+	if s.Namespace != "" {
+		return s.Namespace + "." + s.Name, true
+	}
+	return s.Name, true
 }
 
 func buildArrowField(n *schemaNode, t arrow.DataType, m arrow.Metadata) arrow.Field {
@@ -337,7 +419,7 @@ func avroPrimitiveToArrowType(avroFieldType string) arrow.DataType {
 func avroLogicalToArrowField(n *schemaNode) {
 	var dt arrow.DataType
 	// Avro logical types
-	switch lt := n.schema.(avro.LogicalTypeSchema).Logical(); lt.Type() {
+	switch n.node.LogicalType {
 	// The decimal logical type represents an arbitrary-precision signed decimal number of the form unscaled × 10-scale.
 	// A decimal logical type annotates Avro bytes or fixed types. The byte array must contain the two’s-complement
 	// representation of the unscaled integer value in big-endian byte order. The scale is fixed, and is specified
@@ -348,13 +430,13 @@ func avroLogicalToArrowField(n *schemaNode) {
 	// precision, a JSON integer representing the (maximum) precision of decimals stored in this type (required).
 	case "decimal":
 		id := arrow.DECIMAL128
-		if lt.(*avro.DecimalLogicalSchema).Precision() > decimal128.MaxPrecision {
+		if n.node.Precision > decimal128.MaxPrecision {
 			id = arrow.DECIMAL256
 		}
-		dt, _ = arrow.NewDecimalType(id, int32(lt.(*avro.DecimalLogicalSchema).Precision()), int32(lt.(*avro.DecimalLogicalSchema).Scale()))
+		dt, _ = arrow.NewDecimalType(id, int32(n.node.Precision), int32(n.node.Scale))
 
-		// The uuid logical type represents a random generated universally unique identifier (UUID).
-		// A uuid logical type annotates an Avro string. The string has to conform with RFC-4122
+	// The uuid logical type represents a random generated universally unique identifier (UUID).
+	// A uuid logical type annotates an Avro string. The string has to conform with RFC-4122
 	case "uuid":
 		dt = extensions.NewUUIDType()
 
@@ -399,21 +481,19 @@ func avroLogicalToArrowField(n *schemaNode) {
 	case "timestamp-micros":
 		dt = arrow.FixedWidthTypes.Timestamp_us
 
-	// The local-timestamp-millis logical type represents a timestamp in a local timezone, regardless of
-	// what specific time zone is considered local, with a precision of one millisecond.
-	// A local-timestamp-millis logical type annotates an Avro long, where the long stores the number of
-	// milliseconds, from 1 January 1970 00:00:00.000.
-	// The local (wall-clock) semantics are preserved by leaving TimeZone unset, distinguishing these from
-	// the global timestamp-millis/micros types above which carry a UTC zone.
+	// The timestamp-nanos logical type represents an instant on the global timeline with nanosecond
+	// precision. twmb/avro decodes it to time.Time (UTC).
+	case "timestamp-nanos":
+		dt = arrow.FixedWidthTypes.Timestamp_ns
+
+	// The local-timestamp-millis/micros/nanos logical types represent a timestamp in a local timezone.
+	// Arrow models that as a TimestampType with no time zone set.
 	case "local-timestamp-millis":
 		dt = &arrow.TimestampType{Unit: arrow.Millisecond}
-
-	// The local-timestamp-micros logical type represents a timestamp in a local timezone, regardless of
-	// what specific time zone is considered local, with a precision of one microsecond.
-	// A local-timestamp-micros logical type annotates an Avro long, where the long stores the number of
-	// microseconds, from 1 January 1970 00:00:00.000000.
 	case "local-timestamp-micros":
 		dt = &arrow.TimestampType{Unit: arrow.Microsecond}
+	case "local-timestamp-nanos":
+		dt = &arrow.TimestampType{Unit: arrow.Nanosecond}
 
 	// The duration logical type represents an amount of time defined by a number of months, days and milliseconds.
 	// This is not equivalent to a number of milliseconds, because, depending on the moment in time from which the
