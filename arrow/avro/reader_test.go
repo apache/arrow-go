@@ -19,14 +19,13 @@ package avro
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/avro/testdata"
-	hamba "github.com/hamba/avro/v2"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -128,6 +127,10 @@ func TestReader(t *testing.T) {
 					Type: arrow.BinaryTypes.String,
 				},
 				{
+					Name: "fixedUuidField",
+					Type: extensions.NewUUIDType(),
+				},
+				{
 					Name: "timemillis",
 					Type: arrow.FixedWidthTypes.Time32ms,
 				},
@@ -167,20 +170,13 @@ func TestReader(t *testing.T) {
 				t.Fatal(err)
 			}
 			r := new(OCFReader)
-			r.avroSchema = schema.String()
+			r.avroSchema = schema
 			r.editAvroSchema(schemaEdit{method: "delete", path: "fields.0"})
-			schema, err = hamba.Parse(r.avroSchema)
+			got, err := ArrowSchemaFromAvroJSON(r.avroSchema)
 			if err != nil {
 				t.Fatalf("%v: could not parse modified avro schema", arrow.ErrInvalid)
 			}
-			got, err := ArrowSchemaFromAvro(schema)
-			if err != nil {
-				t.Fatalf("%v", err)
-			}
 			assert.Equal(t, want.String(), got.String())
-			if fmt.Sprintf("%+v", want.String()) != fmt.Sprintf("%+v", got.String()) {
-				t.Fatalf("got=%v,\n want=%v", got.String(), want.String())
-			}
 		})
 
 		t.Run("ShouldLoadExpectedRecords", func(t *testing.T) {
@@ -200,7 +196,7 @@ func TestReader(t *testing.T) {
 			exists := ar.Next()
 
 			if ar.Err() != nil {
-				t.Error("failed to read next record: %w", ar.Err())
+				t.Errorf("failed to read next record: %v", ar.Err())
 			}
 			if !exists {
 				t.Error("no record exists")

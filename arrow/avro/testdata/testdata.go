@@ -17,8 +17,6 @@
 package testdata
 
 import (
-	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -28,8 +26,9 @@ import (
 	"strings"
 	"time"
 
-	avro "github.com/hamba/avro/v2"
-	"github.com/hamba/avro/v2/ocf"
+	"github.com/google/uuid"
+	"github.com/twmb/avro"
+	"github.com/twmb/avro/ocf"
 )
 
 const (
@@ -42,107 +41,169 @@ const (
 type ByteArray []byte
 
 func (b ByteArray) MarshalJSON() ([]byte, error) {
-	s := fmt.Sprint(b)
-	encoded := base64.StdEncoding.EncodeToString([]byte(s))
-	return json.Marshal(encoded)
+	return json.Marshal([]byte(b))
 }
 
-type TimestampMicros int64
+type TimestampJSON time.Time
 
-func (t TimestampMicros) MarshalJSON() ([]byte, error) {
-	ts := time.Unix(0, int64(t)*int64(time.Microsecond)).UTC().Format(time.RFC3339Nano)
-	return json.Marshal(ts)
+func (t TimestampJSON) MarshalJSON() ([]byte, error) {
+	return json.Marshal(time.Time(t).UTC().Format(time.RFC3339Nano))
 }
 
-type TimestampMillis int64
+type TimeMillisJSON time.Duration
 
-func (t TimestampMillis) MarshalJSON() ([]byte, error) {
-	ts := time.Unix(0, int64(t)*int64(time.Millisecond)).UTC().Format(time.RFC3339Nano)
-	return json.Marshal(ts)
-}
-
-type TimeMillis time.Duration
-
-func (t TimeMillis) MarshalJSON() ([]byte, error) {
+func (t TimeMillisJSON) MarshalJSON() ([]byte, error) {
 	ts := time.Unix(0, int64(t)).UTC().Format("15:04:05.000")
 	return json.Marshal(strings.TrimRight(ts, "0."))
 }
 
-type TimeMicros time.Duration
+type TimeMicrosJSON time.Duration
 
-func (t TimeMicros) MarshalJSON() ([]byte, error) {
+func (t TimeMicrosJSON) MarshalJSON() ([]byte, error) {
 	ts := time.Unix(0, int64(t)).UTC().Format("15:04:05.000000")
 	return json.Marshal(strings.TrimRight(ts, "0."))
 }
 
-type ExplicitNamespace [12]byte
+type FixedJSON []byte
 
-func (t ExplicitNamespace) MarshalJSON() ([]byte, error) {
-	return json.Marshal(t[:])
+func (t FixedJSON) MarshalJSON() ([]byte, error) {
+	return json.Marshal([]byte(t))
 }
 
-type MD5 [16]byte
+type FixedUUIDJSON [16]byte
 
-func (t MD5) MarshalJSON() ([]byte, error) {
-	return json.Marshal(t[:])
+func (t FixedUUIDJSON) MarshalJSON() ([]byte, error) {
+	return json.Marshal(uuid.UUID(t).String())
 }
 
-type DecimalType []byte
+type DecimalJSON struct {
+	Rat *big.Rat
+}
 
-func (t DecimalType) MarshalJSON() ([]byte, error) {
-	v := new(big.Int).SetBytes(t)
-	s := fmt.Sprintf("%0*s", decimalTypeScale+1, v.String())
+func (t DecimalJSON) MarshalJSON() ([]byte, error) {
+	num := new(big.Int).Set(t.Rat.Num())
+	den := new(big.Int).Set(t.Rat.Denom())
+	scaleFactor := new(big.Int).Exp(big.NewInt(10), big.NewInt(decimalTypeScale), nil)
+	num.Mul(num, scaleFactor)
+	num.Quo(num, den)
+	s := fmt.Sprintf("%0*s", decimalTypeScale+1, num.String())
 	point := len(s) - decimalTypeScale
 	return json.Marshal(s[:point] + "." + s[point:])
 }
 
-type Duration [12]byte
+type DurationJSON avro.Duration
 
-func (t Duration) MarshalJSON() ([]byte, error) {
-	milliseconds := int32(binary.LittleEndian.Uint32(t[8:12]))
-
-	m := map[string]interface{}{
-		"months":      int32(binary.LittleEndian.Uint32(t[0:4])),
-		"days":        int32(binary.LittleEndian.Uint32(t[4:8])),
-		"nanoseconds": int64(milliseconds) * int64(time.Millisecond),
+func (t DurationJSON) MarshalJSON() ([]byte, error) {
+	m := map[string]any{
+		"months":      int32(t.Months),
+		"days":        int32(t.Days),
+		"nanoseconds": int64(t.Milliseconds) * int64(time.Millisecond),
 	}
 	return json.Marshal(m)
 }
 
-type Date int32
+type DateJSON time.Time
 
-func (t Date) MarshalJSON() ([]byte, error) {
-	v := time.Unix(int64(t)*86400, 0).UTC().Format("2006-01-02")
-	return json.Marshal(v)
+func (t DateJSON) MarshalJSON() ([]byte, error) {
+	return json.Marshal(time.Time(t).UTC().Format("2006-01-02"))
 }
 
 type Example struct {
-	InheritNull       string            `avro:"inheritNull" json:"inheritNull"`
-	ExplicitNamespace ExplicitNamespace `avro:"explicitNamespace" json:"explicitNamespace"`
-	FullName          FullNameData      `avro:"fullName" json:"fullName"`
-	ID                int32             `avro:"id" json:"id"`
-	BigID             int64             `avro:"bigId" json:"bigId"`
-	Temperature       *float32          `avro:"temperature" json:"temperature"`
-	Fraction          *float64          `avro:"fraction" json:"fraction"`
-	IsEmergency       bool              `avro:"is_emergency" json:"is_emergency"`
-	RemoteIP          *ByteArray        `avro:"remote_ip" json:"remote_ip"`
-	NullableRemoteIPS *[]ByteArray      `avro:"nullable_remote_ips" json:"nullable_remote_ips"`
-	Person            PersonData        `avro:"person" json:"person"`
-	DecimalField      DecimalType       `avro:"decimalField" json:"decimalField"`
-	Decimal256Field   DecimalType       `avro:"decimal256Field" json:"decimal256Field"`
-	UUIDField         string            `avro:"uuidField" json:"uuidField"`
-	TimeMillis        TimeMillis        `avro:"timemillis" json:"timemillis"`
-	TimeMicros        TimeMicros        `avro:"timemicros" json:"timemicros"`
-	TimestampMillis   TimestampMillis   `avro:"timestampmillis" json:"timestampmillis"`
-	TimestampMicros   TimestampMicros   `avro:"timestampmicros" json:"timestampmicros"`
-	Duration          Duration          `avro:"duration" json:"duration"`
-	Date              Date              `avro:"date" json:"date"`
+	InheritNull       string        `avro:"inheritNull"`
+	ExplicitNamespace [12]byte      `avro:"explicitNamespace"`
+	FullName          FullNameData  `avro:"fullName"`
+	ID                int32         `avro:"id"`
+	BigID             int64         `avro:"bigId"`
+	Temperature       *float32      `avro:"temperature"`
+	Fraction          *float64      `avro:"fraction"`
+	IsEmergency       bool          `avro:"is_emergency"`
+	RemoteIP          *[]byte       `avro:"remote_ip"`
+	NullableRemoteIPS *[][]byte     `avro:"nullable_remote_ips"`
+	Person            PersonData    `avro:"person"`
+	DecimalField      *big.Rat      `avro:"decimalField"`
+	Decimal256Field   *big.Rat      `avro:"decimal256Field"`
+	UUIDField         string        `avro:"uuidField"`
+	FixedUUIDField    [16]byte      `avro:"fixedUuidField"`
+	TimeMillis        time.Duration `avro:"timemillis"`
+	TimeMicros        time.Duration `avro:"timemicros"`
+	TimestampMillis   time.Time     `avro:"timestampmillis"`
+	TimestampMicros   time.Time     `avro:"timestampmicros"`
+	Duration          avro.Duration `avro:"duration"`
+	Date              time.Time     `avro:"date"`
+}
+
+func (e Example) MarshalJSON() ([]byte, error) {
+	var remoteIP *ByteArray
+	if e.RemoteIP != nil {
+		v := ByteArray(*e.RemoteIP)
+		remoteIP = &v
+	}
+	var nullableRemoteIPs *[]ByteArray
+	if e.NullableRemoteIPS != nil {
+		arr := make([]ByteArray, len(*e.NullableRemoteIPS))
+		for i, b := range *e.NullableRemoteIPS {
+			arr[i] = ByteArray(b)
+		}
+		nullableRemoteIPs = &arr
+	}
+	out := struct {
+		InheritNull       string         `json:"inheritNull"`
+		ExplicitNamespace FixedJSON      `json:"explicitNamespace"`
+		FullName          fullNameJSON   `json:"fullName"`
+		ID                int32          `json:"id"`
+		BigID             int64          `json:"bigId"`
+		Temperature       *float32       `json:"temperature"`
+		Fraction          *float64       `json:"fraction"`
+		IsEmergency       bool           `json:"is_emergency"`
+		RemoteIP          *ByteArray     `json:"remote_ip"`
+		NullableRemoteIPS *[]ByteArray   `json:"nullable_remote_ips"`
+		Person            PersonData     `json:"person"`
+		DecimalField      DecimalJSON    `json:"decimalField"`
+		Decimal256Field   DecimalJSON    `json:"decimal256Field"`
+		UUIDField         string         `json:"uuidField"`
+		FixedUUIDField    FixedUUIDJSON  `json:"fixedUuidField"`
+		TimeMillis        TimeMillisJSON `json:"timemillis"`
+		TimeMicros        TimeMicrosJSON `json:"timemicros"`
+		TimestampMillis   TimestampJSON  `json:"timestampmillis"`
+		TimestampMicros   TimestampJSON  `json:"timestampmicros"`
+		Duration          DurationJSON   `json:"duration"`
+		Date              DateJSON       `json:"date"`
+	}{
+		InheritNull:       e.InheritNull,
+		ExplicitNamespace: FixedJSON(e.ExplicitNamespace[:]),
+		FullName:          fullNameJSON{InheritNamespace: e.FullName.InheritNamespace, Md5: FixedJSON(e.FullName.Md5[:])},
+		ID:                e.ID,
+		BigID:             e.BigID,
+		Temperature:       e.Temperature,
+		Fraction:          e.Fraction,
+		IsEmergency:       e.IsEmergency,
+		RemoteIP:          remoteIP,
+		NullableRemoteIPS: nullableRemoteIPs,
+		Person:            e.Person,
+		DecimalField:      DecimalJSON{Rat: e.DecimalField},
+		Decimal256Field:   DecimalJSON{Rat: e.Decimal256Field},
+		UUIDField:         e.UUIDField,
+		FixedUUIDField:    FixedUUIDJSON(e.FixedUUIDField),
+		TimeMillis:        TimeMillisJSON(e.TimeMillis),
+		TimeMicros:        TimeMicrosJSON(e.TimeMicros),
+		TimestampMillis:   TimestampJSON(e.TimestampMillis),
+		TimestampMicros:   TimestampJSON(e.TimestampMicros),
+		Duration:          DurationJSON(e.Duration),
+		Date:              DateJSON(e.Date),
+	}
+	return json.Marshal(out)
 }
 
 type FullNameData struct {
-	InheritNamespace string `avro:"inheritNamespace" json:"inheritNamespace"`
-	Md5              MD5    `avro:"md5" json:"md5"`
+	InheritNamespace string   `avro:"inheritNamespace"`
+	Md5              [16]byte `avro:"md5"`
 }
+
+type fullNameJSON struct {
+	InheritNamespace string    `json:"inheritNamespace"`
+	Md5              FixedJSON `json:"md5"`
+}
+
 type MapField map[string]int64
 
 func (t MapField) MarshalJSON() ([]byte, error) {
@@ -199,29 +260,43 @@ func TestdataDir() string {
 	return ""
 }
 
-func AllTypesAvroSchema() (avro.Schema, error) {
+// AllTypesAvroSchema returns the raw JSON of the bundled `alltypes.avsc`
+// testdata schema.
+func AllTypesAvroSchema() (string, error) {
 	sp := filepath.Join(TestdataDir(), SchemaFileName)
 	avroSchemaBytes, err := os.ReadFile(sp)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	return avro.ParseBytes(avroSchemaBytes)
+	return string(avroSchemaBytes), nil
 }
 
 func sampleData() Example {
+	now := time.Now().UTC()
+	// Truncate to micros so timestamp-millis/-micros round-trip exactly.
+	tsMillis := now.Truncate(time.Millisecond)
+	tsMicros := now.Truncate(time.Microsecond)
+	date := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	decimal := new(big.Rat).SetFrac(big.NewInt(9876), big.NewInt(100)) // 98.76
+	decimal256, ok := new(big.Rat).SetString("12345678901234567890123456789012345678901234567890123456.78")
+	if !ok {
+		log.Fatal("bad decimal256 literal in sampleData")
+	}
+
 	return Example{
 		InheritNull:       "a",
-		ExplicitNamespace: ExplicitNamespace{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+		ExplicitNamespace: [12]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
 		FullName: FullNameData{
 			InheritNamespace: "d",
-			Md5:              MD5{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+			Md5:              [16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
 		},
-		ID:                42,
-		BigID:             42000000000,
-		Temperature:       func() *float32 { v := float32(36.6); return &v }(),
-		Fraction:          func() *float64 { v := float64(0.75); return &v }(),
-		IsEmergency:       true,
-		RemoteIP:          func() *ByteArray { v := ByteArray{192, 168, 1, 1}; return &v }(),
+		ID:          42,
+		BigID:       42000000000,
+		Temperature: func() *float32 { v := float32(36.6); return &v }(),
+		Fraction:    func() *float64 { v := float64(0.75); return &v }(),
+		IsEmergency: true,
+		RemoteIP:    func() *[]byte { v := []byte{192, 168, 1, 1}; return &v }(),
 		Person: PersonData{
 			Lastname: "Doe",
 			Address: AddressUSRecord{
@@ -231,19 +306,16 @@ func sampleData() Example {
 			Mapfield:   MapField{"foo": 123},
 			ArrayField: []string{"one", "two"},
 		},
-		DecimalField: DecimalType{0x00, 0x00, 0x00, 0x00, 0x00, 0x26, 0x94},
-		Decimal256Field: DecimalType{
-			0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
-			0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
-			0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x01,
-		},
+		DecimalField:    decimal,
+		Decimal256Field: decimal256,
 		UUIDField:       "123e4567-e89b-12d3-a456-426614174000",
-		TimeMillis:      TimeMillis(50412345 * time.Millisecond),
-		TimeMicros:      TimeMicros(50412345678 * time.Microsecond),
-		TimestampMillis: TimestampMillis(time.Now().UnixNano() / int64(time.Millisecond)),
-		TimestampMicros: TimestampMicros(time.Now().UnixNano() / int64(time.Microsecond)),
-		Duration:        Duration{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
-		Date:            Date(time.Now().Unix() / 86400),
+		FixedUUIDField:  [16]byte{0x55, 0x0e, 0x84, 0x00, 0xe2, 0x9b, 0x41, 0xd4, 0xa7, 0x16, 0x44, 0x66, 0x55, 0x44, 0x00, 0x00},
+		TimeMillis:      50412345 * time.Millisecond,
+		TimeMicros:      50412345678 * time.Microsecond,
+		TimestampMillis: tsMillis,
+		TimestampMicros: tsMicros,
+		Duration:        avro.Duration{Months: 1, Days: 2, Milliseconds: 3},
+		Date:            date,
 	}
 }
 
@@ -254,11 +326,16 @@ func writeOCFSampleData(td string, data Example) string {
 		log.Fatal(err)
 	}
 	defer ocfFile.Close()
-	schema, err := AllTypesAvroSchema()
+	schemaJSON, err := AllTypesAvroSchema()
 	if err != nil {
 		log.Fatal(err)
 	}
-	encoder, err := ocf.NewEncoder(schema.String(), ocfFile)
+	schema, err := avro.Parse(schemaJSON)
+	if err != nil {
+		log.Fatal(err)
+	}
+	// Pass the original JSON so logical-type annotations survive in the OCF header.
+	encoder, err := ocf.NewWriter(ocfFile, schema, ocf.WithSchema(schemaJSON))
 	if err != nil {
 		log.Fatal(err)
 	}

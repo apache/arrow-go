@@ -17,8 +17,6 @@
 package avro
 
 import (
-	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -31,7 +29,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	hamba "github.com/hamba/avro/v2"
+	avro "github.com/twmb/avro"
 )
 
 type dataLoader struct {
@@ -397,14 +395,12 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 	switch bt := b.(type) {
 	case *array.BinaryBuilder:
 		f.appendFunc = func(data interface{}) error {
-			appendBinaryData(bt, data)
-			return nil
+			return appendBinaryData(bt, data)
 		}
 	case *array.BinaryDictionaryBuilder:
 		// has metadata for Avro enum symbols
 		f.appendFunc = func(data interface{}) error {
-			appendBinaryDictData(bt, data)
-			return nil
+			return appendBinaryDictData(bt, data)
 		}
 		// add Avro enum symbols to builder
 		sb := array.NewStringBuilder(memory.DefaultAllocator)
@@ -415,13 +411,11 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 		bt.InsertStringDictValues(sa)
 	case *array.BooleanBuilder:
 		f.appendFunc = func(data interface{}) error {
-			appendBoolData(bt, data)
-			return nil
+			return appendBoolData(bt, data)
 		}
 	case *array.Date32Builder:
 		f.appendFunc = func(data interface{}) error {
-			appendDate32Data(bt, data)
-			return nil
+			return appendDate32Data(bt, data)
 		}
 	case *array.Decimal128Builder:
 		f.appendFunc = func(data interface{}) error {
@@ -429,11 +423,7 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 			if !ok {
 				return nil
 			}
-			err := appendDecimal128Data(bt, data, typ)
-			if err != nil {
-				return err
-			}
-			return nil
+			return appendDecimal128Data(bt, data, typ)
 		}
 	case *array.Decimal256Builder:
 		f.appendFunc = func(data interface{}) error {
@@ -441,54 +431,31 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 			if !ok {
 				return nil
 			}
-			err := appendDecimal256Data(bt, data, typ)
-			if err != nil {
-				return err
-			}
-			return nil
+			return appendDecimal256Data(bt, data, typ)
 		}
 	case *extensions.UUIDBuilder:
 		f.appendFunc = func(data interface{}) error {
-			switch dt := data.(type) {
-			case nil:
-				bt.AppendNull()
-			case string:
-				err := bt.AppendValueFromString(dt)
-				if err != nil {
-					return err
-				}
-			case []byte:
-				err := bt.AppendValueFromString(string(dt))
-				if err != nil {
-					return err
-				}
-			}
-			return nil
+			return appendUUIDData(bt, data, field.Name)
 		}
 	case *array.FixedSizeBinaryBuilder:
 		f.appendFunc = func(data interface{}) error {
-			appendFixedSizeBinaryData(bt, data)
-			return nil
+			return appendFixedSizeBinaryData(bt, data)
 		}
 	case *array.Float32Builder:
 		f.appendFunc = func(data interface{}) error {
-			appendFloat32Data(bt, data)
-			return nil
+			return appendFloat32Data(bt, data)
 		}
 	case *array.Float64Builder:
 		f.appendFunc = func(data interface{}) error {
-			appendFloat64Data(bt, data)
-			return nil
+			return appendFloat64Data(bt, data)
 		}
 	case *array.Int32Builder:
 		f.appendFunc = func(data interface{}) error {
-			appendInt32Data(bt, data)
-			return nil
+			return appendInt32Data(bt, data)
 		}
 	case *array.Int64Builder:
 		f.appendFunc = func(data interface{}) error {
-			appendInt64Data(bt, data)
-			return nil
+			return appendInt64Data(bt, data)
 		}
 	case *array.LargeListBuilder:
 		vb := bt.ValueBuilder()
@@ -546,13 +513,11 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 		}
 	case *array.MonthDayNanoIntervalBuilder:
 		f.appendFunc = func(data interface{}) error {
-			appendDurationData(bt, data)
-			return nil
+			return appendDurationData(bt, data)
 		}
 	case *array.StringBuilder:
 		f.appendFunc = func(data interface{}) error {
-			appendStringData(bt, data)
-			return nil
+			return appendStringData(bt, data)
 		}
 	case *array.StructBuilder:
 		// has metadata for Avro Union named types
@@ -574,126 +539,108 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 		}
 	case *array.Time32Builder:
 		f.appendFunc = func(data interface{}) error {
-			appendTime32Data(bt, data)
-			return nil
+			return appendTime32Data(bt, data)
 		}
 	case *array.Time64Builder:
 		f.appendFunc = func(data interface{}) error {
-			appendTime64Data(bt, data)
-			return nil
+			return appendTime64Data(bt, data)
 		}
 	case *array.TimestampBuilder:
 		f.appendFunc = func(data interface{}) error {
-			appendTimestampData(bt, data)
-			return nil
+			return appendTimestampData(bt, data)
 		}
 	}
 }
 
-func appendBinaryData(b *array.BinaryBuilder, data interface{}) {
-	switch dt := data.(type) {
-	case nil:
-		b.AppendNull()
-	case map[string]any:
-		switch ct := dt["bytes"].(type) {
-		case nil:
-			b.AppendNull()
-		default:
-			b.Append(ct.([]byte))
-		}
-	default:
-		b.Append(fmt.Append([]byte{}, data))
-	}
-}
-
-func appendBinaryDictData(b *array.BinaryDictionaryBuilder, data interface{}) {
+// appendUUIDData accepts the two shapes a UUID may arrive as: a [16]byte
+// (fixed(16)+uuid) or a hex-dash string (string+uuid). Other byte lengths
+// are rejected rather than re-interpreted.
+func appendUUIDData(b *extensions.UUIDBuilder, data any, fieldName string) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
 	case string:
-		b.AppendString(dt)
-	case map[string]any:
-		switch v := dt["string"].(type) {
-		case nil:
-			b.AppendNull()
-		case string:
-			b.AppendString(v)
+		return b.AppendValueFromString(dt)
+	case [16]byte:
+		b.AppendBytes(dt)
+	case []byte:
+		switch len(dt) {
+		case 16:
+			b.AppendBytes([16]byte(dt))
+		case 36:
+			return b.AppendValueFromString(string(dt))
+		default:
+			return fmt.Errorf("avro: %d-byte value cannot be a UUID for column %q", len(dt), fieldName)
 		}
+	default:
+		return fmt.Errorf("avro: unsupported value of type %T for UUID column %q", data, fieldName)
 	}
+	return nil
 }
 
-func appendBoolData(b *array.BooleanBuilder, data interface{}) {
+func appendBinaryData(b *array.BinaryBuilder, data interface{}) error {
+	switch dt := data.(type) {
+	case nil:
+		b.AppendNull()
+	case []byte:
+		b.Append(dt)
+	default:
+		return fmt.Errorf("avro: unsupported value of type %T for Binary column", data)
+	}
+	return nil
+}
+
+func appendBinaryDictData(b *array.BinaryDictionaryBuilder, data interface{}) error {
+	switch dt := data.(type) {
+	case nil:
+		b.AppendNull()
+	case string:
+		if err := b.AppendString(dt); err != nil {
+			return fmt.Errorf("avro: enum symbol %q is not in the dictionary (schema/data mismatch?): %w", dt, err)
+		}
+	default:
+		return fmt.Errorf("avro: unsupported value of type %T for Dictionary column", data)
+	}
+	return nil
+}
+
+func appendBoolData(b *array.BooleanBuilder, data interface{}) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
 	case bool:
 		b.Append(dt)
-	case map[string]any:
-		switch v := dt["boolean"].(type) {
-		case nil:
-			b.AppendNull()
-		case bool:
-			b.Append(v)
-		}
+	default:
+		return fmt.Errorf("avro: unsupported value of type %T for Boolean column", data)
 	}
+	return nil
 }
 
-func appendDate32Data(b *array.Date32Builder, data interface{}) {
+func appendDate32Data(b *array.Date32Builder, data interface{}) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
-	case int32:
-		b.Append(arrow.Date32(dt))
-	case map[string]any:
-		switch v := dt["int"].(type) {
-		case nil:
-			b.AppendNull()
-		case int32:
-			b.Append(arrow.Date32(v))
-		}
 	case time.Time:
 		b.Append(arrow.Date32FromTime(dt))
+	default:
+		return fmt.Errorf("avro: unsupported value of type %T for Date32 column", data)
 	}
+	return nil
 }
 
 func appendDecimal128Data(b *array.Decimal128Builder, data interface{}, typ arrow.DecimalType) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
-	case []byte:
-		buf := bytes.NewBuffer(dt)
-		if len(dt) <= 38 {
-			var intData int64
-			err := binary.Read(buf, binary.BigEndian, &intData)
-			if err != nil {
-				return err
-			}
-			b.Append(decimal128.FromI64(intData))
-		} else {
-			var bigIntData big.Int
-			b.Append(decimal128.FromBigInt(bigIntData.SetBytes(buf.Bytes())))
-		}
-	case map[string]any:
-		buf := bytes.NewBuffer(dt["bytes"].([]byte))
-		if len(dt["bytes"].([]byte)) <= 38 {
-			var intData int64
-			err := binary.Read(buf, binary.BigEndian, &intData)
-			if err != nil {
-				return err
-			}
-			b.Append(decimal128.FromI64(intData))
-		} else {
-			var bigIntData big.Int
-			b.Append(decimal128.FromBigInt(bigIntData.SetBytes(buf.Bytes())))
-		}
 	case *big.Rat:
 		v := bigRatToBigInt(dt, typ)
-
 		if v.IsInt64() {
 			b.Append(decimal128.FromI64(v.Int64()))
 		} else {
 			b.Append(decimal128.FromBigInt(v))
 		}
+	default:
+		return fmt.Errorf("avro: unsupported value of type %T for Decimal128 column", data)
 	}
 	return nil
 }
@@ -702,16 +649,10 @@ func appendDecimal256Data(b *array.Decimal256Builder, data interface{}, typ arro
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
-	case []byte:
-		var bigIntData big.Int
-		buf := bytes.NewBuffer(dt)
-		b.Append(decimal256.FromBigInt(bigIntData.SetBytes(buf.Bytes())))
-	case map[string]any:
-		var bigIntData big.Int
-		buf := bytes.NewBuffer(dt["bytes"].([]byte))
-		b.Append(decimal256.FromBigInt(bigIntData.SetBytes(buf.Bytes())))
 	case *big.Rat:
 		b.Append(decimal256.FromBigInt(bigRatToBigInt(dt, typ)))
+	default:
+		return fmt.Errorf("avro: unsupported value of type %T for Decimal256 column", data)
 	}
 	return nil
 }
@@ -728,203 +669,138 @@ func bigRatToBigInt(dt *big.Rat, typ arrow.DecimalType) *big.Int {
 // Avro duration logical type annotates Avro fixed type of size 12, which stores three little-endian
 // unsigned integers that represent durations at different granularities of time. The first stores
 // a number in months, the second stores a number in days, and the third stores a number in milliseconds.
-func appendDurationData(b *array.MonthDayNanoIntervalBuilder, data interface{}) {
+func appendDurationData(b *array.MonthDayNanoIntervalBuilder, data interface{}) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
-	case []byte:
-		dur := new(arrow.MonthDayNanoInterval)
-		dur.Months = int32(binary.LittleEndian.Uint16(dt[:3]))
-		dur.Days = int32(binary.LittleEndian.Uint16(dt[4:7]))
-		dur.Nanoseconds = int64(binary.LittleEndian.Uint32(dt[8:]) * 1000000)
-		b.Append(*dur)
-	case map[string]any:
-		switch dtb := dt["bytes"].(type) {
-		case nil:
-			b.AppendNull()
-		case []byte:
-			dur := new(arrow.MonthDayNanoInterval)
-			dur.Months = int32(binary.LittleEndian.Uint16(dtb[:3]))
-			dur.Days = int32(binary.LittleEndian.Uint16(dtb[4:7]))
-			dur.Nanoseconds = int64(binary.LittleEndian.Uint32(dtb[8:]) * 1000000)
-			b.Append(*dur)
-		}
-	case hamba.LogicalDuration:
+	case avro.Duration:
 		b.Append(arrow.MonthDayNanoInterval{
 			Months:      int32(dt.Months),
 			Days:        int32(dt.Days),
 			Nanoseconds: int64(dt.Milliseconds) * int64(time.Millisecond),
 		})
+	default:
+		return fmt.Errorf("avro: unsupported value of type %T for Duration column", data)
 	}
+	return nil
 }
 
-func appendFixedSizeBinaryData(b *array.FixedSizeBinaryBuilder, data interface{}) {
+func appendFixedSizeBinaryData(b *array.FixedSizeBinaryBuilder, data interface{}) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
 	case []byte:
 		b.Append(dt)
-	case map[string]any:
-		switch v := dt["bytes"].(type) {
-		case nil:
-			b.AppendNull()
-		case []byte:
-			b.Append(v)
-		}
 	default:
+		// fixed(N) may arrive as a Go [N]byte; accept any byte-array via reflection.
 		v := reflect.ValueOf(data)
 		if v.Kind() == reflect.Array && v.Type().Elem().Kind() == reflect.Uint8 {
-			bytes := make([]byte, v.Len())
-			reflect.Copy(reflect.ValueOf(bytes), v)
-			b.Append(bytes)
+			buf := make([]byte, v.Len())
+			reflect.Copy(reflect.ValueOf(buf), v)
+			b.Append(buf)
+			return nil
 		}
+		return fmt.Errorf("avro: unsupported value of type %T for FixedSizeBinary column", data)
 	}
+	return nil
 }
 
-func appendFloat32Data(b *array.Float32Builder, data interface{}) {
+func appendFloat32Data(b *array.Float32Builder, data interface{}) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
 	case float32:
 		b.Append(dt)
-	case map[string]any:
-		switch v := dt["float"].(type) {
-		case nil:
-			b.AppendNull()
-		case float32:
-			b.Append(v)
-		}
+	default:
+		return fmt.Errorf("avro: unsupported value of type %T for Float32 column", data)
 	}
+	return nil
 }
 
-func appendFloat64Data(b *array.Float64Builder, data interface{}) {
+func appendFloat64Data(b *array.Float64Builder, data interface{}) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
 	case float64:
 		b.Append(dt)
-	case map[string]any:
-		switch v := dt["double"].(type) {
-		case nil:
-			b.AppendNull()
-		case float64:
-			b.Append(v)
-		}
+	default:
+		return fmt.Errorf("avro: unsupported value of type %T for Float64 column", data)
 	}
+	return nil
 }
 
-func appendInt32Data(b *array.Int32Builder, data interface{}) {
+func appendInt32Data(b *array.Int32Builder, data interface{}) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
-	case int:
-		b.Append(int32(dt))
 	case int32:
 		b.Append(dt)
-	case map[string]any:
-		switch v := dt["int"].(type) {
-		case nil:
-			b.AppendNull()
-		case int:
-			b.Append(int32(v))
-		case int32:
-			b.Append(v)
-		}
+	default:
+		return fmt.Errorf("avro: unsupported value of type %T for Int32 column", data)
 	}
+	return nil
 }
 
-func appendInt64Data(b *array.Int64Builder, data interface{}) {
+func appendInt64Data(b *array.Int64Builder, data interface{}) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
-	case int:
-		b.Append(int64(dt))
 	case int64:
 		b.Append(dt)
-	case map[string]any:
-		switch v := dt["long"].(type) {
-		case nil:
-			b.AppendNull()
-		case int:
-			b.Append(int64(v))
-		case int64:
-			b.Append(v)
-		}
+	default:
+		return fmt.Errorf("avro: unsupported value of type %T for Int64 column", data)
 	}
+	return nil
 }
 
-func appendStringData(b *array.StringBuilder, data interface{}) {
+func appendStringData(b *array.StringBuilder, data interface{}) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
 	case string:
 		b.Append(dt)
-	case map[string]any:
-		switch v := dt["string"].(type) {
-		case nil:
-			b.AppendNull()
-		case string:
-			b.Append(v)
-		}
 	default:
-		b.Append(fmt.Sprint(data))
+		return fmt.Errorf("avro: unsupported value of type %T for String column", data)
 	}
+	return nil
 }
 
-func appendTime32Data(b *array.Time32Builder, data interface{}) {
+func appendTime32Data(b *array.Time32Builder, data interface{}) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
-	case int32:
-		b.Append(arrow.Time32(dt))
-	case map[string]any:
-		switch v := dt["int"].(type) {
-		case nil:
-			b.AppendNull()
-		case int32:
-			b.Append(arrow.Time32(v))
-		}
 	case time.Duration:
 		b.Append(arrow.Time32(dt.Milliseconds()))
+	default:
+		return fmt.Errorf("avro: unsupported value of type %T for Time32 column", data)
 	}
+	return nil
 }
 
-func appendTime64Data(b *array.Time64Builder, data interface{}) {
+func appendTime64Data(b *array.Time64Builder, data interface{}) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
-	case int64:
-		b.Append(arrow.Time64(dt))
-	case map[string]any:
-		switch v := dt["long"].(type) {
-		case nil:
-			b.AppendNull()
-		case int64:
-			b.Append(arrow.Time64(v))
-		}
 	case time.Duration:
 		b.Append(arrow.Time64(dt.Microseconds()))
+	default:
+		return fmt.Errorf("avro: unsupported value of type %T for Time64 column", data)
 	}
+	return nil
 }
 
-func appendTimestampData(b *array.TimestampBuilder, data interface{}) {
+func appendTimestampData(b *array.TimestampBuilder, data interface{}) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
-	case int64:
-		b.Append(arrow.Timestamp(dt))
-	case map[string]any:
-		switch v := dt["long"].(type) {
-		case nil:
-			b.AppendNull()
-		case int64:
-			b.Append(arrow.Timestamp(v))
-		}
 	case time.Time:
 		v, err := arrow.TimestampFromTime(dt, b.Type().(*arrow.TimestampType).Unit)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		b.Append(v)
+	default:
+		return fmt.Errorf("avro: unsupported value of type %T for Timestamp column", data)
 	}
+	return nil
 }
