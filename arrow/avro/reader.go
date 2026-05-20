@@ -27,10 +27,9 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	"github.com/hamba/avro/v2/ocf"
 	"github.com/tidwall/sjson"
-
-	avro "github.com/hamba/avro/v2"
+	"github.com/twmb/avro"
+	"github.com/twmb/avro/ocf"
 )
 
 var ErrMismatchFields = errors.New("arrow/avro: number of records mismatch")
@@ -47,9 +46,9 @@ type schemaEdit struct {
 	value  any
 }
 
-// Reader wraps goavro/OCFReader and creates array.RecordBatches from a schema.
+// OCFReader reads Avro OCF files and exposes them as array.RecordBatches.
 type OCFReader struct {
-	r               *ocf.Decoder
+	r               *ocf.Reader
 	avroSchema      string
 	avroSchemaEdits []schemaEdit
 	schema          *arrow.Schema
@@ -82,7 +81,7 @@ type OCFReader struct {
 // NewReader returns a reader that reads from an Avro OCF file and creates
 // arrow.RecordBatches from the converted avro data.
 func NewOCFReader(r io.Reader, opts ...Option) (*OCFReader, error) {
-	ocfr, err := ocf.NewDecoder(r)
+	ocfr, err := ocf.NewReader(r)
 	if err != nil {
 		return nil, fmt.Errorf("%w: could not create avro ocfreader", arrow.ErrInvalid)
 	}
@@ -108,22 +107,20 @@ func NewOCFReader(r io.Reader, opts ...Option) (*OCFReader, error) {
 	}
 	rr.avroSchema = schema.String()
 	if len(rr.avroSchemaEdits) > 0 {
-		// execute schema edits
 		for _, e := range rr.avroSchemaEdits {
 			err := rr.editAvroSchema(e)
 			if err != nil {
 				return nil, fmt.Errorf("%w: could not edit avro schema", arrow.ErrInvalid)
 			}
 		}
-		// validate edited schema
-		schema, err = avro.Parse(rr.avroSchema)
-		if err != nil {
-			return nil, fmt.Errorf("%w: could not parse modified avro schema", arrow.ErrInvalid)
-		}
 	}
-	rr.schema, err = ArrowSchemaFromAvro(schema)
+	rr.schema, err = ArrowSchemaFromAvroJSON(rr.avroSchema)
 	if err != nil {
-		return nil, fmt.Errorf("%w: could not convert avro schema", arrow.ErrInvalid)
+		msg := "could not convert avro schema"
+		if len(rr.avroSchemaEdits) > 0 {
+			msg = "could not parse modified avro schema"
+		}
+		return nil, fmt.Errorf("%w: %s: %w", arrow.ErrInvalid, msg, err)
 	}
 	if rr.mem == nil {
 		rr.mem = memory.DefaultAllocator
@@ -147,7 +144,7 @@ func NewOCFReader(r io.Reader, opts ...Option) (*OCFReader, error) {
 func (rr *OCFReader) Reuse(r io.Reader, opts ...Option) error {
 	rr.Close()
 	rr.err = nil
-	ocfr, err := ocf.NewDecoder(r)
+	ocfr, err := ocf.NewReader(r)
 	if err != nil {
 		return fmt.Errorf("%w: could not create avro ocfreader", arrow.ErrInvalid)
 	}

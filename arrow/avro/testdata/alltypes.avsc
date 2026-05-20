@@ -165,6 +165,15 @@
       "type": "string"
     },
     {
+      "name": "fixedUuidField",
+      "type": {
+        "type": "fixed",
+        "name": "FixedUUID",
+        "size": 16,
+        "logicalType": "uuid"
+      }
+    },
+    {
       "name": "timemillis",
       "type": {
         "type": "int",

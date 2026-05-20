@@ -43,6 +43,7 @@ require (
 	github.com/substrait-io/substrait-go/v8 v8.1.1
 	github.com/substrait-io/substrait-protobuf/go v0.85.0
 	github.com/tidwall/sjson v1.2.5
+	github.com/twmb/avro v1.5.0
 	github.com/zeebo/xxh3 v1.1.0
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96
 	golang.org/x/sync v0.22.0
@@ -67,7 +68,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/goccy/go-yaml v1.17.1 // indirect
-	github.com/golang/snappy v1.0.0 // indirect
 	github.com/gookit/color v1.6.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/asmfmt v1.3.2 // indirect

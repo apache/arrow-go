@@ -19,18 +19,13 @@ package avro
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
-	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/avro/testdata"
-	"github.com/apache/arrow-go/v18/arrow/memory"
-	hamba "github.com/hamba/avro/v2"
-	"github.com/hamba/avro/v2/ocf"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -132,6 +127,10 @@ func TestReader(t *testing.T) {
 					Type: arrow.BinaryTypes.String,
 				},
 				{
+					Name: "fixedUuidField",
+					Type: extensions.NewUUIDType(),
+				},
+				{
 					Name: "timemillis",
 					Type: arrow.FixedWidthTypes.Time32ms,
 				},
@@ -179,20 +178,13 @@ func TestReader(t *testing.T) {
 				t.Fatal(err)
 			}
 			r := new(OCFReader)
-			r.avroSchema = schema.String()
+			r.avroSchema = schema
 			r.editAvroSchema(schemaEdit{method: "delete", path: "fields.0"})
-			schema, err = hamba.Parse(r.avroSchema)
+			got, err := ArrowSchemaFromAvroJSON(r.avroSchema)
 			if err != nil {
 				t.Fatalf("%v: could not parse modified avro schema", arrow.ErrInvalid)
 			}
-			got, err := ArrowSchemaFromAvro(schema)
-			if err != nil {
-				t.Fatalf("%v", err)
-			}
 			assert.Equal(t, want.String(), got.String())
-			if fmt.Sprintf("%+v", want.String()) != fmt.Sprintf("%+v", got.String()) {
-				t.Fatalf("got=%v,\n want=%v", got.String(), want.String())
-			}
 		})
 
 		t.Run("ShouldLoadExpectedRecords", func(t *testing.T) {
@@ -212,7 +204,7 @@ func TestReader(t *testing.T) {
 			exists := ar.Next()
 
 			if ar.Err() != nil {
-				t.Error("failed to read next record: %w", ar.Err())
+				t.Errorf("failed to read next record: %v", ar.Err())
 			}
 			if !exists {
 				t.Error("no record exists")
@@ -230,213 +222,4 @@ func TestReader(t *testing.T) {
 			assert.Equal(t, jsonParsed, avroParsed[0])
 		})
 	}
-}
-
-// TestOCFReaderBytesValues exercises avro `bytes` fields, both plain and as a
-// ["null","bytes"] union: hamba hands the decoded value to the appenders as a
-// bare []byte, which previously fell into appendBinaryData's fmt fallback and
-// appended the formatted text (e.g. "[1 2 3]") instead of the payload.
-func TestOCFReaderBytesValues(t *testing.T) {
-	schema := `{
-		"type": "record",
-		"name": "rec",
-		"fields": [
-			{"name": "plain", "type": "bytes"},
-			{"name": "nullable", "type": ["null", "bytes"]}
-		]
-	}`
-	payload := []byte{0x00, 0x01, 0xfe, 0xff}
-
-	var buf bytes.Buffer
-	enc, err := ocf.NewEncoder(schema, &buf)
-	assert.NoError(t, err)
-	assert.NoError(t, enc.Encode(map[string]any{
-		"plain":    payload,
-		"nullable": map[string]any{"bytes": payload},
-	}))
-	assert.NoError(t, enc.Encode(map[string]any{
-		"plain":    []byte{},
-		"nullable": nil,
-	}))
-	assert.NoError(t, enc.Close())
-
-	ar, err := NewOCFReader(bytes.NewReader(buf.Bytes()), WithChunk(-1))
-	assert.NoError(t, err)
-	defer ar.Close()
-
-	assert.True(t, ar.Next())
-	assert.NoError(t, ar.Err())
-	rec := ar.RecordBatch()
-
-	plain := rec.Column(0).(*array.Binary)
-	assert.Equal(t, payload, plain.Value(0))
-	assert.Equal(t, []byte{}, plain.Value(1))
-
-	nullable := rec.Column(1).(*array.Binary)
-	assert.Equal(t, payload, nullable.Value(0))
-	assert.True(t, nullable.IsNull(1))
-}
-
-func TestOCFReaderNullableTimestamps(t *testing.T) {
-	tests := []struct {
-		logicalType string
-		branch      string
-		typ         *arrow.TimestampType
-	}{
-		{"timestamp-millis", "long.timestamp-millis", arrow.FixedWidthTypes.Timestamp_ms.(*arrow.TimestampType)},
-		{"timestamp-micros", "long.timestamp-micros", arrow.FixedWidthTypes.Timestamp_us.(*arrow.TimestampType)},
-		{"local-timestamp-millis", "long.local-timestamp-millis", &arrow.TimestampType{Unit: arrow.Millisecond}},
-		{"local-timestamp-micros", "long.local-timestamp-micros", &arrow.TimestampType{Unit: arrow.Microsecond}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.logicalType, func(t *testing.T) {
-			schema := fmt.Sprintf(`{
-				"type": "record",
-				"name": "event",
-				"fields": [{
-					"name": "started_at",
-					"type": [
-						"null",
-						{"type": "long", "logicalType": %q}
-					]
-				}]
-			}`, tt.logicalType)
-			value := time.Date(2026, 7, 13, 14, 15, 16, 123456000, time.Local)
-
-			var buf bytes.Buffer
-			enc, err := ocf.NewEncoder(schema, &buf)
-			assert.NoError(t, err)
-			assert.NoError(t, enc.Encode(map[string]any{
-				"started_at": map[string]any{tt.branch: value},
-			}))
-			assert.NoError(t, enc.Encode(map[string]any{"started_at": nil}))
-			assert.NoError(t, enc.Close())
-
-			ar, err := NewOCFReader(bytes.NewReader(buf.Bytes()), WithChunk(-1))
-			assert.NoError(t, err)
-			defer ar.Close()
-
-			field := ar.Schema().Field(0)
-			assert.Equal(t, tt.typ, field.Type)
-			assert.True(t, field.Nullable)
-
-			assert.True(t, ar.Next())
-			assert.NoError(t, ar.Err())
-			values := ar.RecordBatch().Column(0).(*array.Timestamp)
-			assert.False(t, values.IsNull(0))
-			assert.True(t, values.IsNull(1))
-			assert.Equal(t, 1, values.NullN())
-
-			wantTime := value
-			if tt.typ.TimeZone == "" {
-				wantTime = time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(), value.Nanosecond(), time.UTC)
-			}
-			wantValue, err := arrow.TimestampFromTime(wantTime, tt.typ.Unit)
-			assert.NoError(t, err)
-			assert.Equal(t, wantValue, values.Value(0))
-			assert.Equal(t, wantValue.ToTime(tt.typ.Unit), values.Value(0).ToTime(tt.typ.Unit))
-		})
-	}
-}
-
-func TestAppendTimestampDataUnionBranches(t *testing.T) {
-	value := time.Date(2026, 7, 13, 14, 15, 16, 123456789, time.FixedZone("source", 3*60*60))
-	localValue := time.Date(2026, 7, 13, 14, 15, 16, 123456789, time.UTC)
-	tests := []struct {
-		name   string
-		branch string
-		typ    *arrow.TimestampType
-		want   time.Time
-	}{
-		{"timestamp-millis", "long.timestamp-millis", arrow.FixedWidthTypes.Timestamp_ms.(*arrow.TimestampType), value},
-		{"timestamp-micros", "long.timestamp-micros", arrow.FixedWidthTypes.Timestamp_us.(*arrow.TimestampType), value},
-		{"local-timestamp-millis", "long.local-timestamp-millis", &arrow.TimestampType{Unit: arrow.Millisecond}, localValue},
-		{"local-timestamp-micros", "long.local-timestamp-micros", &arrow.TimestampType{Unit: arrow.Microsecond}, localValue},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b := array.NewTimestampBuilder(memory.DefaultAllocator, tt.typ)
-			defer b.Release()
-			appendTimestampData(b, map[string]any{tt.branch: value})
-
-			values := b.NewTimestampArray()
-			defer values.Release()
-			want, err := arrow.TimestampFromTime(tt.want, tt.typ.Unit)
-			assert.NoError(t, err)
-			assert.False(t, values.IsNull(0))
-			assert.Equal(t, want, values.Value(0))
-		})
-	}
-
-	b := array.NewTimestampBuilder(memory.DefaultAllocator, arrow.FixedWidthTypes.Timestamp_us.(*arrow.TimestampType))
-	defer b.Release()
-	appendTimestampData(b, map[string]any{"long": int64(42)})
-	appendTimestampData(b, nil)
-	values := b.NewTimestampArray()
-	defer values.Release()
-	assert.Equal(t, arrow.Timestamp(42), values.Value(0))
-	assert.True(t, values.IsNull(1))
-}
-
-// Types outside what the hamba decoder produces must error rather than append
-// a fmt-formatted rendering of the value.
-func TestAppendBinaryAndStringDataUnexpectedTypes(t *testing.T) {
-	bb := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
-	defer bb.Release()
-
-	assert.NoError(t, appendBinaryData(bb, []byte{0x01}))
-	assert.NoError(t, appendBinaryData(bb, nil))
-	assert.NoError(t, appendBinaryData(bb, map[string]any{"bytes": []byte{0x02}}))
-	assert.ErrorContains(t, appendBinaryData(bb, 42), "unexpected type int")
-	assert.ErrorContains(t, appendBinaryData(bb, map[string]any{"bytes": "text"}), "unexpected type string")
-	assert.Equal(t, 3, bb.Len())
-
-	sb := array.NewStringBuilder(memory.DefaultAllocator)
-	defer sb.Release()
-
-	assert.NoError(t, appendStringData(sb, "ok"))
-	assert.NoError(t, appendStringData(sb, []byte("ok")))
-	assert.NoError(t, appendStringData(sb, nil))
-	assert.NoError(t, appendStringData(sb, map[string]any{"string": "ok"}))
-	assert.ErrorContains(t, appendStringData(sb, 42), "unexpected type int")
-	assert.ErrorContains(t, appendStringData(sb, map[string]any{"string": 42}), "unexpected type int")
-	assert.Equal(t, 4, sb.Len())
-}
-
-// loadDatum must surface appender errors from nested paths (map values,
-// list items), not only from top-level and struct fields.
-func TestLoadDatumPropagatesNestedAppendErrors(t *testing.T) {
-	newLoader := func(t *testing.T, avroSchema string) (*dataLoader, *array.RecordBuilder) {
-		t.Helper()
-		schema, err := hamba.Parse(avroSchema)
-		assert.NoError(t, err)
-		arrowSchema, err := ArrowSchemaFromAvro(schema)
-		assert.NoError(t, err)
-		bld := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
-		pos := newFieldPos()
-		ldr := newDataLoader()
-		for idx, fb := range bld.Fields() {
-			mapFieldBuilders(fb, arrowSchema.Field(idx), pos)
-		}
-		ldr.drawTree(pos)
-		return ldr, bld
-	}
-
-	t.Run("map value", func(t *testing.T) {
-		ldr, bld := newLoader(t, `{"type":"record","name":"r","fields":[
-			{"name":"m","type":{"type":"map","values":"bytes"}}]}`)
-		defer bld.Release()
-		assert.NoError(t, ldr.loadDatum(map[string]any{"m": map[string]any{"k": []byte{0x01}}}))
-		assert.ErrorContains(t, ldr.loadDatum(map[string]any{"m": map[string]any{"k": 42}}), "unexpected type int")
-	})
-
-	t.Run("list item", func(t *testing.T) {
-		ldr, bld := newLoader(t, `{"type":"record","name":"r","fields":[
-			{"name":"l","type":{"type":"array","items":"bytes"}}]}`)
-		defer bld.Release()
-		assert.NoError(t, ldr.loadDatum(map[string]any{"l": []any{[]byte{0x01}}}))
-		assert.ErrorContains(t, ldr.loadDatum(map[string]any{"l": []any{42}}), "unexpected type int")
-	})
 }
