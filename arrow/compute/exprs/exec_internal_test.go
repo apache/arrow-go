@@ -29,6 +29,9 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/substrait-io/substrait-go/v8/expr"
+	"github.com/substrait-io/substrait-go/v8/extensions"
+	"github.com/substrait-io/substrait-go/v8/types"
 )
 
 var (
@@ -109,6 +112,50 @@ func TestMakeExecBatch(t *testing.T) {
 					assert.Truef(t, array.Equal(col, val), "expected: %s\ngot: %s", col, val)
 				}
 			}
+		})
+	}
+}
+
+func TestLiteralToDatumIntervalYearToMonth(t *testing.T) {
+	// memory.NewCheckedAllocator with AssertSize would fail here:
+	// *scalar.Extension does not implement Release() (see
+	// arrow/scalar/scalar.go), so an extension scalar's underlying
+	// storage is never released even when the wrapping Datum is.
+	mem := memory.DefaultAllocator
+
+	extSet := NewExtensionSetDefault(
+		expr.NewEmptyExtensionRegistry(extensions.GetDefaultCollectionWithNoError()))
+
+	const (
+		years  int32 = 3
+		months int32 = 7
+	)
+
+	protoLitType := types.NewIntervalYearToMonthType()
+	protoLit := &expr.ProtoLiteral{
+		Value: &types.IntervalYearToMonth{Years: years, Months: months},
+		Type:  &protoLitType,
+	}
+	expected, err := literalToDatum(mem, protoLit, extSet)
+	require.NoError(t, err, "ProtoLiteral baseline failed")
+	defer expected.Release()
+
+	cases := []struct {
+		name string
+		lit  expr.Literal
+	}{
+		{"value", expr.IntervalYearToMonthLiteral{Years: years, Months: months}},
+		{"pointer", &expr.IntervalYearToMonthLiteral{Years: years, Months: months}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := literalToDatum(mem, tc.lit, extSet)
+			require.NoError(t, err)
+			defer got.Release()
+			assert.Truef(t, got.Equals(expected),
+				"IntervalYearToMonthLiteral (%s) datum did not match ProtoLiteral baseline\nexpected: %s\ngot: %s",
+				tc.name, expected, got)
 		})
 	}
 }
