@@ -18,7 +18,9 @@ package file_test
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"math"
 	"reflect"
 	"slices"
@@ -1323,4 +1325,100 @@ func TestBufferedStreamDictionaryCompressed(t *testing.T) {
 	for i := 0; i < numValues; i++ {
 		assert.Equal(t, int32(i), readValues[i])
 	}
+}
+
+// flakyMagicSink models a transient I/O failure on the first Write call,
+// the failure mode reported in apache/arrow-go#820 for cloud-storage upload
+// writers. Set firstErr to fail with that error on the first Write, or set
+// short to true to return n=len(p)-1, nil on the first Write. All subsequent
+// writes succeed and forward to the embedded buffer.
+type flakyMagicSink struct {
+	buf      bytes.Buffer
+	writes   int
+	firstErr error
+	short    bool
+}
+
+func (f *flakyMagicSink) Write(p []byte) (int, error) {
+	f.writes++
+	if f.writes == 1 {
+		if f.firstErr != nil {
+			return 0, f.firstErr
+		}
+		if f.short {
+			return len(p) - 1, nil
+		}
+	}
+	return f.buf.Write(p)
+}
+
+func newSingleColumnSchema(t *testing.T) *schema.GroupNode {
+	t.Helper()
+	fields := schema.FieldList{schema.NewInt32Node("col", parquet.Repetitions.Required, 1)}
+	sc, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, fields, 0)
+	require.NoError(t, err)
+	return sc
+}
+
+func TestNewParquetWriterWithError_Success(t *testing.T) {
+	var buf bytes.Buffer
+	writer, err := file.NewParquetWriterWithError(&buf, newSingleColumnSchema(t))
+	require.NoError(t, err)
+	require.NotNil(t, writer)
+	require.NoError(t, writer.Close())
+}
+
+func TestNewParquetWriterWithError_FirstWriteFails(t *testing.T) {
+	sink := &flakyMagicSink{firstErr: io.ErrUnexpectedEOF}
+	writer, err := file.NewParquetWriterWithError(sink, newSingleColumnSchema(t))
+	require.Error(t, err)
+	require.Nil(t, writer)
+	require.True(t, errors.Is(err, io.ErrUnexpectedEOF),
+		"expected returned error to wrap io.ErrUnexpectedEOF, got %v", err)
+}
+
+func TestNewParquetWriterWithError_FirstWriteShortWrites(t *testing.T) {
+	sink := &flakyMagicSink{short: true}
+	writer, err := file.NewParquetWriterWithError(sink, newSingleColumnSchema(t))
+	require.Error(t, err)
+	require.Nil(t, writer)
+	require.Contains(t, err.Error(), "short write of magic number")
+}
+
+func TestNewParquetWriter_PreservesPanicMessage(t *testing.T) {
+	sink := &flakyMagicSink{firstErr: io.ErrUnexpectedEOF}
+
+	defer func() {
+		r := recover()
+		require.NotNil(t, r, "NewParquetWriter should panic on first-write failure")
+		msg, ok := r.(string)
+		require.True(t, ok, "panic value should remain a string for back-compat (got %T)", r)
+		require.Equal(t, "failed to write magic number", msg)
+	}()
+
+	_ = file.NewParquetWriter(sink, newSingleColumnSchema(t))
+	t.Fatalf("expected NewParquetWriter to panic, but it returned normally")
+}
+
+func TestPqarrowNewFileWriter_PropagatesInitError(t *testing.T) {
+	arrowSchema := arrow.NewSchema([]arrow.Field{{Name: "f", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	sink := &flakyMagicSink{firstErr: io.ErrUnexpectedEOF}
+
+	writer, err := pqarrow.NewFileWriter(arrowSchema, sink,
+		parquet.NewWriterProperties(), pqarrow.DefaultWriterProps())
+	require.Error(t, err)
+	require.Nil(t, writer)
+	require.True(t, errors.Is(err, io.ErrUnexpectedEOF),
+		"expected returned error to wrap io.ErrUnexpectedEOF, got %v", err)
+}
+
+func TestPqarrowNewFileWriter_PropagatesShortWrite(t *testing.T) {
+	arrowSchema := arrow.NewSchema([]arrow.Field{{Name: "f", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	sink := &flakyMagicSink{short: true}
+
+	writer, err := pqarrow.NewFileWriter(arrowSchema, sink,
+		parquet.NewWriterProperties(), pqarrow.DefaultWriterProps())
+	require.Error(t, err)
+	require.Nil(t, writer)
+	require.Contains(t, err.Error(), "short write of magic number")
 }

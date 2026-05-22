@@ -163,7 +163,10 @@ func NewFileWriter(arrschema *arrow.Schema, w io.Writer, props *parquet.WriterPr
 	}
 
 	schemaNode := pqschema.Root()
-	baseWriter := file.NewParquetWriter(w, schemaNode, file.WithWriterProps(props), file.WithWriteMetadata(meta))
+	baseWriter, err := file.NewParquetWriterWithError(w, schemaNode, file.WithWriterProps(props), file.WithWriteMetadata(meta))
+	if err != nil {
+		return nil, err
+	}
 
 	manifest, err := NewSchemaManifest(pqschema, nil, &ArrowReadProperties{})
 	if err != nil {
