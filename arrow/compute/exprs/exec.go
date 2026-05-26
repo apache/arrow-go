@@ -179,6 +179,18 @@ func GetExtensionIDSet(ctx context.Context) ExtensionIDSet {
 	return v
 }
 
+func intervalYearToMonthDatum(mem memory.Allocator, years, months int32) (compute.Datum, error) {
+	bldr := array.NewInt32Builder(mem)
+	defer bldr.Release()
+
+	bldr.Append(years)
+	bldr.Append(months)
+	arr := bldr.NewArray()
+	defer arr.Release()
+	return &compute.ScalarDatum{Value: scalar.NewExtensionScalar(
+		scalar.NewFixedSizeListScalar(arr), intervalYear())}, nil
+}
+
 func literalToDatum(mem memory.Allocator, lit expr.Literal, ext ExtensionIDSet) (compute.Datum, error) {
 	switch v := lit.(type) {
 	case *expr.PrimitiveLiteral[bool]:
@@ -329,6 +341,10 @@ func literalToDatum(mem memory.Allocator, lit expr.Literal, ext ExtensionIDSet) 
 
 		s, err := scalar.NewStructScalarWithNames(fields, names)
 		return compute.NewDatum(s), err
+	case expr.IntervalYearToMonthLiteral:
+		return intervalYearToMonthDatum(mem, v.Years, v.Months)
+	case *expr.IntervalYearToMonthLiteral:
+		return intervalYearToMonthDatum(mem, v.Years, v.Months)
 	case *expr.ProtoLiteral:
 		switch t := v.Type.(type) {
 		case *types.DecimalType:
@@ -353,19 +369,10 @@ func literalToDatum(mem memory.Allocator, lit expr.Literal, ext ExtensionIDSet) 
 				&arrow.Decimal128Type{Precision: t.Precision, Scale: t.Scale})), nil
 		case *types.UserDefinedType: // not yet implemented
 		case *types.IntervalYearToMonthType:
-			bldr := array.NewInt32Builder(memory.DefaultAllocator)
-			defer bldr.Release()
-
 			val := v.Value.(*types.IntervalYearToMonth)
-			typ := intervalYear()
-			bldr.Append(val.Years)
-			bldr.Append(val.Months)
-			arr := bldr.NewArray()
-			defer arr.Release()
-			return &compute.ScalarDatum{Value: scalar.NewExtensionScalar(
-				scalar.NewFixedSizeListScalar(arr), typ)}, nil
+			return intervalYearToMonthDatum(mem, val.Years, val.Months)
 		case *types.IntervalDayType:
-			bldr := array.NewInt32Builder(memory.DefaultAllocator)
+			bldr := array.NewInt32Builder(mem)
 			defer bldr.Release()
 
 			val := v.Value.(*types.IntervalDayToSecond)
