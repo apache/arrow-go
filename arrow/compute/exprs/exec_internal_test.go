@@ -121,6 +121,7 @@ func TestLiteralToDatumIntervalYearToMonth(t *testing.T) {
 	// *scalar.Extension does not implement Release() (see
 	// arrow/scalar/scalar.go), so an extension scalar's underlying
 	// storage is never released even when the wrapping Datum is.
+	// This will be fixable once https://github.com/apache/arrow-go/issues/827 is addressed.
 	mem := memory.DefaultAllocator
 
 	extSet := NewExtensionSetDefault(
