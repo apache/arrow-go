@@ -70,12 +70,12 @@ func WithWriteMetadata(meta metadata.KeyValueMetadata) WriteOption {
 // If props is nil, then the default Writer Properties will be used. If the key value metadata is not nil,
 // it will be added to the file.
 //
-// This constructor panics with "failed to write magic number" if the
-// initial 4-byte write of the parquet magic header to the underlying sink
-// fails. Callers using a sink that may transiently fail (for example, a
-// cloud-storage upload writer or other network-attached writer) should
-// prefer [NewParquetWriterWithError], which surfaces the failure as a
-// returned error instead.
+// This constructor panics with the literal string "failed to write magic
+// number" if the initial write of the parquet magic header to the
+// underlying sink fails. The behavior is preserved for backward
+// compatibility with callers that string-match the panic value in a
+// recover() block; new code should prefer [NewParquetWriterWithError],
+// which returns the failure as an error instead.
 func NewParquetWriter(w io.Writer, sc *schema.GroupNode, opts ...WriteOption) *Writer {
 	fw, err := NewParquetWriterWithError(w, sc, opts...)
 	if err != nil {
@@ -86,17 +86,16 @@ func NewParquetWriter(w io.Writer, sc *schema.GroupNode, opts ...WriteOption) *W
 	return fw
 }
 
-// NewParquetWriterWithError is identical to [NewParquetWriter] except that
-// it returns an error to the caller if the initial write of the parquet
-// magic header to the underlying sink fails or short-writes. This is the
-// preferred constructor when the sink is backed by a writer that may
-// transiently fail (for example, a Google Cloud Storage resumable upload,
-// an S3 multipart upload, an HDFS client, or any other network-attached
-// writer) where a transient first-write failure should not panic the
-// calling process.
+// NewParquetWriterWithError returns a Writer that writes to the provided
+// io.Writer with the given schema.
 //
 // If props is nil, then the default Writer Properties will be used. If the
 // key value metadata is not nil, it will be added to the file.
+//
+// An error is returned if the initial write of the parquet magic header to
+// the underlying sink fails or short-writes, which can happen when the
+// sink is a flaky or network-attached writer (for example, a cloud-storage
+// upload writer).
 func NewParquetWriterWithError(w io.Writer, sc *schema.GroupNode, opts ...WriteOption) (*Writer, error) {
 	config := &writerConfig{}
 	for _, o := range opts {
