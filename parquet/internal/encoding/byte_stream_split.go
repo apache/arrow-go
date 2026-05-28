@@ -30,7 +30,7 @@ import (
 // encodeByteStreamSplit encodes the raw bytes provided by 'in' into the output buffer 'data' using BYTE_STREAM_SPLIT encoding.
 // 'data' must have space for at least len(in) bytes.
 func encodeByteStreamSplit(data []byte, in []byte, width int) {
-	debug.Assert(len(data) >= len(in), fmt.Sprintf("not enough space in destination buffer for encoding, dest: %d bytes, src: %d bytes", len(data), len(in)))
+	debug.Assert(len(data) >= len(in), "not enough space in destination buffer for encoding")
 	numElements := len(in) / width
 	for stream := 0; stream < width; stream++ {
 		for element := 0; element < numElements; element++ {
@@ -44,7 +44,7 @@ func encodeByteStreamSplit(data []byte, in []byte, width int) {
 // encodeByteStreamSplitWidth2 implements encodeByteStreamSplit optimized for types stored using 2 bytes.
 // 'data' must have space for at least len(in) bytes.
 func encodeByteStreamSplitWidth2(data []byte, in []byte) {
-	debug.Assert(len(data) >= len(in), fmt.Sprintf("not enough space in destination buffer for encoding, dest: %d bytes, src: %d bytes", len(data), len(in)))
+	debug.Assert(len(data) >= len(in), "not enough space in destination buffer for encoding")
 	const width = 2
 	numElements := len(in) / width
 	for element := 0; element < numElements; element++ {
@@ -57,7 +57,7 @@ func encodeByteStreamSplitWidth2(data []byte, in []byte) {
 // encodeByteStreamSplitWidth4 implements encodeByteStreamSplit optimized for types stored using 4 bytes.
 // 'data' must have space for at least len(in) bytes.
 func encodeByteStreamSplitWidth4(data []byte, in []byte) {
-	debug.Assert(len(data) >= len(in), fmt.Sprintf("not enough space in destination buffer for encoding, dest: %d bytes, src: %d bytes", len(data), len(in)))
+	debug.Assert(len(data) >= len(in), "not enough space in destination buffer for encoding")
 	const width = 4
 	numElements := len(in) / width
 	for element := 0; element < numElements; element++ {
@@ -72,7 +72,7 @@ func encodeByteStreamSplitWidth4(data []byte, in []byte) {
 // encodeByteStreamSplitWidth8 implements encodeByteStreamSplit optimized for types stored using 8 bytes.
 // 'data' must have space for at least len(in) bytes.
 func encodeByteStreamSplitWidth8(data []byte, in []byte) {
-	debug.Assert(len(data) >= len(in), fmt.Sprintf("not enough space in destination buffer for encoding, dest: %d bytes, src: %d bytes", len(data), len(in)))
+	debug.Assert(len(data) >= len(in), "not enough space in destination buffer for encoding")
 	const width = 8
 	numElements := len(in) / width
 	for element := 0; element < numElements; element++ {
@@ -85,60 +85,6 @@ func encodeByteStreamSplitWidth8(data []byte, in []byte) {
 		data[numElements*5+element] = in[decLoc+5]
 		data[numElements*6+element] = in[decLoc+6]
 		data[numElements*7+element] = in[decLoc+7]
-	}
-}
-
-// decodeByteStreamSplitBatchFLBA decodes the batch of nValues FixedLenByteArrays provided by 'data',
-// into the output slice 'out' using BYTE_STREAM_SPLIT encoding.
-// 'out' must have space for at least nValues slices.
-func decodeByteStreamSplitBatchFLBA(data []byte, nValues, stride, width int, out []parquet.FixedLenByteArray) {
-	debug.Assert(len(out) >= nValues, fmt.Sprintf("not enough space in output slice for decoding, out: %d values, data: %d values", len(out), nValues))
-	for stream := 0; stream < width; stream++ {
-		for element := 0; element < nValues; element++ {
-			encLoc := stride*stream + element
-			out[element][stream] = data[encLoc]
-		}
-	}
-}
-
-// decodeByteStreamSplitBatchFLBAWidth2 decodes the batch of nValues FixedLenByteArrays of length 2 provided by 'data',
-// into the output slice 'out' using BYTE_STREAM_SPLIT encoding.
-// 'out' must have space for at least nValues slices.
-func decodeByteStreamSplitBatchFLBAWidth2(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) {
-	debug.Assert(len(out) >= nValues, fmt.Sprintf("not enough space in output slice for decoding, out: %d values, data: %d values", len(out), nValues))
-	for element := 0; element < nValues; element++ {
-		out[element][0] = data[element]
-		out[element][1] = data[stride+element]
-	}
-}
-
-// decodeByteStreamSplitBatchFLBAWidth4 decodes the batch of nValues FixedLenByteArrays of length 4 provided by 'data',
-// into the output slice 'out' using BYTE_STREAM_SPLIT encoding.
-// 'out' must have space for at least nValues slices.
-func decodeByteStreamSplitBatchFLBAWidth4(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) {
-	debug.Assert(len(out) >= nValues, fmt.Sprintf("not enough space in output slice for decoding, out: %d values, data: %d values", len(out), nValues))
-	for element := 0; element < nValues; element++ {
-		out[element][0] = data[element]
-		out[element][1] = data[stride+element]
-		out[element][2] = data[stride*2+element]
-		out[element][3] = data[stride*3+element]
-	}
-}
-
-// decodeByteStreamSplitBatchFLBAWidth8 decodes the batch of nValues FixedLenByteArrays of length 8 provided by 'data',
-// into the output slice 'out' using BYTE_STREAM_SPLIT encoding.
-// 'out' must have space for at least nValues slices.
-func decodeByteStreamSplitBatchFLBAWidth8(data []byte, nValues, stride int, out []parquet.FixedLenByteArray) {
-	debug.Assert(len(out) >= nValues, fmt.Sprintf("not enough space in output slice for decoding, out: %d values, data: %d values", len(out), nValues))
-	for element := 0; element < nValues; element++ {
-		out[element][0] = data[element]
-		out[element][1] = data[stride+element]
-		out[element][2] = data[stride*2+element]
-		out[element][3] = data[stride*3+element]
-		out[element][4] = data[stride*4+element]
-		out[element][5] = data[stride*5+element]
-		out[element][6] = data[stride*6+element]
-		out[element][7] = data[stride*7+element]
 	}
 }
 
