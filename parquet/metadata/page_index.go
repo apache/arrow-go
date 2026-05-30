@@ -443,7 +443,6 @@ func determinePageIndexRangesInRowGroup(rgMeta *RowGroupMetaData, cols []int32) 
 		return nil
 	}
 
-	var colChunk *ColumnChunkMetaData
 	if len(cols) == 0 {
 		cols = make([]int32, rgMeta.NumColumns())
 		for i := 0; i < rgMeta.NumColumns(); i++ {
@@ -456,16 +455,16 @@ func determinePageIndexRangesInRowGroup(rgMeta *RowGroupMetaData, cols []int32) 
 			return rng, fmt.Errorf("%w: invalid column ordinal %d", arrow.ErrIndex, i)
 		}
 
-		if colChunk, _ = rgMeta.ColumnChunk(int(i)); colChunk == nil {
-			continue
+		if colIdx, ok := rgMeta.ColumnIndexLocation(int(i)); ok {
+			if err = mergeRange(&colIdx, &ciStart, &ciEnd); err != nil {
+				return
+			}
 		}
 
-		if err = mergeRange(colChunk.GetColumnIndexLocation(), &ciStart, &ciEnd); err != nil {
-			return
-		}
-
-		if err = mergeRange(colChunk.GetOffsetIndexLocation(), &oiStart, &oiEnd); err != nil {
-			return
+		if offsetIdx, ok := rgMeta.OffsetIndexLocation(int(i)); ok {
+			if err = mergeRange(&offsetIdx, &oiStart, &oiEnd); err != nil {
+				return
+			}
 		}
 	}
 
