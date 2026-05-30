@@ -20,23 +20,17 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/apache/arrow-go/v18/parquet"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
-	"github.com/apache/arrow-go/v18/parquet/schema"
 )
 
 func makeRowGroupMetaData(numCols int) *RowGroupMetaData {
-	fields := make(schema.FieldList, numCols)
 	columns := make([]*format.ColumnChunk, numCols)
 	for i := range numCols {
-		fields[i] = schema.NewInt32Node(fmt.Sprintf("c%d", i), parquet.Repetitions.Required, -1)
-
 		ciOffset := int64(1000 * (i + 1))
 		ciLength := int32(500)
 		oiOffset := int64(2000 * (i + 1))
 		oiLength := int32(300)
 		columns[i] = &format.ColumnChunk{
-			MetaData:          &format.ColumnMetaData{Type: format.Type_INT32},
 			ColumnIndexOffset: &ciOffset,
 			ColumnIndexLength: &ciLength,
 			OffsetIndexOffset: &oiOffset,
@@ -44,15 +38,7 @@ func makeRowGroupMetaData(numCols int) *RowGroupMetaData {
 		}
 	}
 
-	root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, fields, -1))
-	sc := schema.NewSchema(root)
-
-	ordinal := int16(0)
-	return NewRowGroupMetaData(&format.RowGroup{
-		Columns: columns,
-		NumRows: 100,
-		Ordinal: &ordinal,
-	}, sc, nil, nil)
+	return NewRowGroupMetaData(&format.RowGroup{Columns: columns}, nil, nil, nil)
 }
 
 func TestDeterminePageIndexRangesInRowGroupAllocs(t *testing.T) {
