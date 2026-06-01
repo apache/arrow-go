@@ -91,6 +91,34 @@ func (r *RowGroupMetaData) SortingColumns() []parquet.SortingColumn {
 	return r.sortCols
 }
 
+// ColumnIndexLocation returns the column index location for a column chunk
+// directly from the underlying thrift struct, avoiding the overhead of
+// constructing a full ColumnChunkMetaData.
+func (r *RowGroupMetaData) ColumnIndexLocation(i int) (IndexLocation, bool) {
+	col := r.rowGroup.Columns[i]
+	if col.IsSetColumnIndexOffset() {
+		return IndexLocation{
+			Offset: col.GetColumnIndexOffset(),
+			Length: col.GetColumnIndexLength(),
+		}, true
+	}
+	return IndexLocation{}, false
+}
+
+// OffsetIndexLocation returns the offset index location for a column chunk
+// directly from the underlying thrift struct, avoiding the overhead of
+// constructing a full ColumnChunkMetaData.
+func (r *RowGroupMetaData) OffsetIndexLocation(i int) (IndexLocation, bool) {
+	col := r.rowGroup.Columns[i]
+	if col.IsSetOffsetIndexOffset() {
+		return IndexLocation{
+			Offset: col.GetOffsetIndexOffset(),
+			Length: col.GetOffsetIndexLength(),
+		}, true
+	}
+	return IndexLocation{}, false
+}
+
 // RowGroupMetaDataBuilder is a convenience object for constructing row group
 // metadata information. Primarily used in conjunction with writing new files.
 type RowGroupMetaDataBuilder struct {
