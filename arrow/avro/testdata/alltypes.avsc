@@ -193,6 +193,20 @@
       }
     },
     {
+      "name": "localtimestampmillis",
+      "type": {
+        "type": "long",
+        "logicalType": "local-timestamp-millis"
+      }
+    },
+    {
+      "name": "localtimestampmicros",
+      "type": {
+        "type": "long",
+        "logicalType": "local-timestamp-micros"
+      }
+    },
+    {
       "name": "duration",
       "type": {
         "name": "duration",

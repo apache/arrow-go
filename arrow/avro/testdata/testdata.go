@@ -135,6 +135,8 @@ type Example struct {
 	TimeMicros        TimeMicros        `avro:"timemicros" json:"timemicros"`
 	TimestampMillis   TimestampMillis   `avro:"timestampmillis" json:"timestampmillis"`
 	TimestampMicros   TimestampMicros   `avro:"timestampmicros" json:"timestampmicros"`
+	LocalTSMillis     TimestampMillis   `avro:"localtimestampmillis" json:"localtimestampmillis"`
+	LocalTSMicros     TimestampMicros   `avro:"localtimestampmicros" json:"localtimestampmicros"`
 	Duration          Duration          `avro:"duration" json:"duration"`
 	Date              Date              `avro:"date" json:"date"`
 }
@@ -216,12 +218,12 @@ func sampleData() Example {
 			InheritNamespace: "d",
 			Md5:              MD5{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
 		},
-		ID:                42,
-		BigID:             42000000000,
-		Temperature:       func() *float32 { v := float32(36.6); return &v }(),
-		Fraction:          func() *float64 { v := float64(0.75); return &v }(),
-		IsEmergency:       true,
-		RemoteIP:          func() *ByteArray { v := ByteArray{192, 168, 1, 1}; return &v }(),
+		ID:          42,
+		BigID:       42000000000,
+		Temperature: func() *float32 { v := float32(36.6); return &v }(),
+		Fraction:    func() *float64 { v := float64(0.75); return &v }(),
+		IsEmergency: true,
+		RemoteIP:    func() *ByteArray { v := ByteArray{192, 168, 1, 1}; return &v }(),
 		Person: PersonData{
 			Lastname: "Doe",
 			Address: AddressUSRecord{
@@ -242,6 +244,8 @@ func sampleData() Example {
 		TimeMicros:      TimeMicros(50412345678 * time.Microsecond),
 		TimestampMillis: TimestampMillis(time.Now().UnixNano() / int64(time.Millisecond)),
 		TimestampMicros: TimestampMicros(time.Now().UnixNano() / int64(time.Microsecond)),
+		LocalTSMillis:   TimestampMillis(time.Now().UnixNano() / int64(time.Millisecond)),
+		LocalTSMicros:   TimestampMicros(time.Now().UnixNano() / int64(time.Microsecond)),
 		Duration:        Duration{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
 		Date:            Date(time.Now().Unix() / 86400),
 	}

@@ -403,17 +403,17 @@ func avroLogicalToArrowField(n *schemaNode) {
 	// what specific time zone is considered local, with a precision of one millisecond.
 	// A local-timestamp-millis logical type annotates an Avro long, where the long stores the number of
 	// milliseconds, from 1 January 1970 00:00:00.000.
-	// Note: not implemented in hamba/avro
-	// case "local-timestamp-millis":
-	// 	dt = &arrow.TimestampType{Unit: arrow.Millisecond}
+	// The local (wall-clock) semantics are preserved by leaving TimeZone unset, distinguishing these from
+	// the global timestamp-millis/micros types above which carry a UTC zone.
+	case "local-timestamp-millis":
+		dt = &arrow.TimestampType{Unit: arrow.Millisecond}
 
 	// The local-timestamp-micros logical type represents a timestamp in a local timezone, regardless of
 	// what specific time zone is considered local, with a precision of one microsecond.
 	// A local-timestamp-micros logical type annotates an Avro long, where the long stores the number of
 	// microseconds, from 1 January 1970 00:00:00.000000.
-	// case "local-timestamp-micros":
-	// Note: not implemented in hamba/avro
-	// 	dt = &arrow.TimestampType{Unit: arrow.Microsecond}
+	case "local-timestamp-micros":
+		dt = &arrow.TimestampType{Unit: arrow.Microsecond}
 
 	// The duration logical type represents an amount of time defined by a number of months, days and milliseconds.
 	// This is not equivalent to a number of milliseconds, because, depending on the moment in time from which the
