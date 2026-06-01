@@ -497,19 +497,27 @@ func (b *StructBuilder) UnmarshalOne(dec *json.Decoder) error {
 			if keylist[key] {
 				return fmt.Errorf("key %s is specified twice", key)
 			}
-
 			keylist[key] = true
 
-			idx, ok := b.dtype.(*arrow.StructType).FieldIdx(key)
+			var next json.RawMessage
+			if err := dec.Decode(&next); err != nil {
+				return err
+			}
+
+			dtype := b.dtype.(*arrow.StructType)
+
+			idx, ok := dtype.FieldIdx(key)
 			if !ok {
-				var extra interface{}
-				if err := dec.Decode(&extra); err != nil {
-					return err
-				}
 				continue
 			}
 
-			if err := b.fields[idx].UnmarshalOne(dec); err != nil {
+			if bytes.Equal(next, []byte("null")) && !dtype.Field(idx).Nullable {
+				return fmt.Errorf("field '%s' is non-nullable but got null", dtype.Field(idx).Name)
+			}
+
+			valDec := json.NewDecoder(bytes.NewReader(next))
+			valDec.UseNumber()
+			if err := b.fields[idx].UnmarshalOne(valDec); err != nil {
 				return err
 			}
 		}
