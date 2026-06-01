@@ -677,7 +677,7 @@ func TestTableFromRecords(t *testing.T) {
 
 	schema := arrow.NewSchema(
 		[]arrow.Field{
-			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32},
+			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
 			{Name: "f2-f64", Type: arrow.PrimitiveTypes.Float64},
 		},
 		nil,
@@ -851,7 +851,7 @@ func TestTableToString(t *testing.T) {
 
 	schema := arrow.NewSchema(
 		[]arrow.Field{
-			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32},
+			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
 			{Name: "f2-f64", Type: arrow.PrimitiveTypes.Float64},
 		},
 		nil,
@@ -880,7 +880,7 @@ func TestTableToString(t *testing.T) {
 	expected_str :=
 		`schema:
   fields: 2
-    - f1-i32: type=int32
+    - f1-i32: type=int32, nullable
     - f2-f64: type=float64
 f1-i32: [[1 2 3 4 5 6 7 8 (null) 10], [111 112 113 114 115 116 117 118 119 120]]
 f2-f64: [[11 12 13 14 15 16 17 18 19 20], [211 212 213 214 215 216 217 218 219 220]]

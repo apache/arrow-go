@@ -948,7 +948,7 @@ func makeStructsWantJSONs() string {
               "isSigned": true,
               "bitWidth": 32
             },
-            "nullable": false,
+            "nullable": true,
             "children": []
           },
           {
@@ -956,7 +956,7 @@ func makeStructsWantJSONs() string {
             "type": {
               "name": "utf8"
             },
-            "nullable": false,
+            "nullable": true,
             "children": []
           }
         ]
@@ -1957,7 +1957,7 @@ func makeStringsWantJSONs() string {
         "type": {
           "name": "utf8"
         },
-        "nullable": false,
+        "nullable": true,
         "children": []
       },
       {
@@ -1965,7 +1965,7 @@ func makeStringsWantJSONs() string {
         "type": {
           "name": "binary"
         },
-        "nullable": false,
+        "nullable": true,
         "children": []
       }
     ]
@@ -5765,7 +5765,7 @@ func makeRunEndEncodedWantJSONs() string {
         "type": {
           "name": "runendencoded"
         },
-        "nullable": false,
+        "nullable": true,
         "children": [
           {
             "name": "run_ends",
@@ -5792,7 +5792,7 @@ func makeRunEndEncodedWantJSONs() string {
         "type": {
           "name": "runendencoded"
         },
-        "nullable": false,
+        "nullable": true,
         "children": [
           {
             "name": "run_ends",
@@ -5821,7 +5821,7 @@ func makeRunEndEncodedWantJSONs() string {
         "type": {
           "name": "runendencoded"
         },
-        "nullable": false,
+        "nullable": true,
         "children": [
           {
             "name": "run_ends",

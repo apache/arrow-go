@@ -1373,8 +1373,8 @@ func TestVectorSortIndicesCppRecordBatchParity(t *testing.T) {
 
 	t.Run("Null", func(t *testing.T) {
 		schema := arrow.NewSchema([]arrow.Field{
-			{Name: "a", Type: arrow.PrimitiveTypes.Uint8},
-			{Name: "b", Type: arrow.PrimitiveTypes.Uint32},
+			{Name: "a", Type: arrow.PrimitiveTypes.Uint8, Nullable: true},
+			{Name: "b", Type: arrow.PrimitiveTypes.Uint32, Nullable: true},
 		}, nil)
 		jsonRows := `[
 			{"a": null, "b": 5},
@@ -1426,8 +1426,8 @@ func TestVectorSortIndicesCppRecordBatchParity(t *testing.T) {
 
 	t.Run("NaNAndNull", func(t *testing.T) {
 		schema := arrow.NewSchema([]arrow.Field{
-			{Name: "a", Type: arrow.PrimitiveTypes.Float32},
-			{Name: "b", Type: arrow.PrimitiveTypes.Float64},
+			{Name: "a", Type: arrow.PrimitiveTypes.Float32, Nullable: true},
+			{Name: "b", Type: arrow.PrimitiveTypes.Float64, Nullable: true},
 		}, nil)
 		ba := array.NewFloat32Builder(mem)
 		defer ba.Release()
@@ -1460,8 +1460,8 @@ func TestVectorSortIndicesCppRecordBatchParity(t *testing.T) {
 
 	t.Run("Boolean", func(t *testing.T) {
 		schema := arrow.NewSchema([]arrow.Field{
-			{Name: "a", Type: arrow.FixedWidthTypes.Boolean},
-			{Name: "b", Type: arrow.FixedWidthTypes.Boolean},
+			{Name: "a", Type: arrow.FixedWidthTypes.Boolean, Nullable: true},
+			{Name: "b", Type: arrow.FixedWidthTypes.Boolean, Nullable: true},
 		}, nil)
 		jsonRows := `[
 			{"a": true,  "b": null},
@@ -1536,7 +1536,7 @@ func TestVectorSortIndicesCppRecordBatchParity(t *testing.T) {
 		d256 := &arrow.Decimal256Type{Precision: 4, Scale: 2}
 		schema := arrow.NewSchema([]arrow.Field{
 			{Name: "a", Type: d128},
-			{Name: "b", Type: d256},
+			{Name: "b", Type: d256, Nullable: true},
 		}, nil)
 		jsonRows := `[
 			{"a": "12.3", "b": "12.34"},
@@ -1561,8 +1561,8 @@ func TestVectorSortIndicesCppRecordBatchParity(t *testing.T) {
 
 	t.Run("DuplicateSortKeys", func(t *testing.T) {
 		schema := arrow.NewSchema([]arrow.Field{
-			{Name: "a", Type: arrow.PrimitiveTypes.Float32},
-			{Name: "b", Type: arrow.PrimitiveTypes.Float64},
+			{Name: "a", Type: arrow.PrimitiveTypes.Float32, Nullable: true},
+			{Name: "b", Type: arrow.PrimitiveTypes.Float64, Nullable: true},
 		}, nil)
 		ba := array.NewFloat32Builder(mem)
 		defer ba.Release()
@@ -1610,8 +1610,8 @@ func TestVectorSortIndicesCppTableParity(t *testing.T) {
 	ctx := context.Background()
 
 	schemaAB := arrow.NewSchema([]arrow.Field{
-		{Name: "a", Type: arrow.PrimitiveTypes.Uint8},
-		{Name: "b", Type: arrow.PrimitiveTypes.Uint32},
+		{Name: "a", Type: arrow.PrimitiveTypes.Uint8, Nullable: true},
+		{Name: "b", Type: arrow.PrimitiveTypes.Uint32, Nullable: true},
 	}, nil)
 
 	t.Run("EmptyTable", func(t *testing.T) {
@@ -1667,8 +1667,8 @@ func TestVectorSortIndicesCppTableParity(t *testing.T) {
 	t.Run("BinaryLikeTwoChunks", func(t *testing.T) {
 		fsb3 := &arrow.FixedSizeBinaryType{ByteWidth: 3}
 		s := arrow.NewSchema([]arrow.Field{
-			{Name: "a", Type: arrow.BinaryTypes.LargeString},
-			{Name: "b", Type: fsb3},
+			{Name: "a", Type: arrow.BinaryTypes.LargeString, Nullable: true},
+			{Name: "b", Type: fsb3, Nullable: true},
 		}, nil)
 		buildBatch := func(a []string, b [][]byte, bNulls []bool) arrow.RecordBatch {
 			ab := array.NewLargeStringBuilder(mem)

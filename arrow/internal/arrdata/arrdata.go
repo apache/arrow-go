@@ -192,8 +192,8 @@ func makeStructsRecords() []arrow.RecordBatch {
 	mem := memory.NewGoAllocator()
 
 	fields := []arrow.Field{
-		{Name: "f1", Type: arrow.PrimitiveTypes.Int32},
-		{Name: "f2", Type: arrow.BinaryTypes.String},
+		{Name: "f1", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		{Name: "f2", Type: arrow.BinaryTypes.String, Nullable: true},
 	}
 	dtype := arrow.StructOf(fields...)
 	schema := arrow.NewSchema([]arrow.Field{{Name: "struct_nullable", Type: dtype, Nullable: true}}, nil)
@@ -433,8 +433,8 @@ func makeFixedSizeListsRecords() []arrow.RecordBatch {
 func makeStringsRecords() []arrow.RecordBatch {
 	mem := memory.NewGoAllocator()
 	schema := arrow.NewSchema([]arrow.Field{
-		{Name: "strings", Type: arrow.BinaryTypes.String},
-		{Name: "bytes", Type: arrow.BinaryTypes.Binary},
+		{Name: "strings", Type: arrow.BinaryTypes.String, Nullable: true},
+		{Name: "bytes", Type: arrow.BinaryTypes.Binary, Nullable: true},
 	}, nil)
 
 	mask := []bool{true, false, false, true, true}
@@ -1108,9 +1108,21 @@ func makeUnionRecords() []arrow.RecordBatch {
 func makeRunEndEncodedRecords() []arrow.RecordBatch {
 	mem := memory.NewGoAllocator()
 	schema := arrow.NewSchema([]arrow.Field{
-		{Name: "ree16", Type: arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int16, arrow.BinaryTypes.String)},
-		{Name: "ree32", Type: arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32)},
-		{Name: "ree64", Type: arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int64, arrow.BinaryTypes.Binary)},
+		{
+			Name:     "ree16",
+			Type:     arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int16, arrow.BinaryTypes.String),
+			Nullable: true,
+		},
+		{
+			Name:     "ree32",
+			Type:     arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32),
+			Nullable: true,
+		},
+		{
+			Name:     "ree64",
+			Type:     arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int64, arrow.BinaryTypes.Binary),
+			Nullable: true,
+		},
 	}, nil)
 
 	schema.Field(1).Type.(*arrow.RunEndEncodedType).ValueNullable = false
