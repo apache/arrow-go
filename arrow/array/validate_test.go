@@ -207,7 +207,7 @@ func TestTopLevelValidate(t *testing.T) {
 
 	t.Run("ValidateRecord validates all columns", func(t *testing.T) {
 		validArr := makeStringArrayRaw(t, []int32{0, 3, 6}, "abcdef", 2, 0)
-		corruptArr := makeStringArrayRaw(t, []int32{0, 5, 3, 5}, "hello", 3, 0)
+		corruptArr := makeStringArrayRaw(t, []int32{0, 4, 3}, "hello", 2, 0)
 
 		schema := arrow.NewSchema([]arrow.Field{
 			{Name: "ok", Type: arrow.BinaryTypes.String},
