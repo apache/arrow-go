@@ -606,7 +606,7 @@ func (fr *FileReader) getReader(ctx context.Context, field *SchemaField, arrowFi
 			Metadata: arrowField.Metadata, Type: arrow.StructOf(childFields...),
 		}
 		out = newStructReader(&rctx, &filtered, field.LevelInfo, childReaders, fr.Props)
-	case arrow.LIST, arrow.FIXED_SIZE_LIST, arrow.MAP:
+	case arrow.LIST, arrow.LARGE_LIST, arrow.FIXED_SIZE_LIST, arrow.MAP:
 		child := field.Children[0]
 
 		// For maps, we must read BOTH key and value columns, regardless of column selection.
@@ -638,7 +638,7 @@ func (fr *FileReader) getReader(ctx context.Context, field *SchemaField, arrowFi
 				arrowField.Type = arrow.ListOf(childReader.Field().Type)
 			}
 			out = newListReader(&rctx, &arrowField, field.LevelInfo, childReader, fr.Props)
-		case *arrow.ListType:
+		case *arrow.ListType, *arrow.LargeListType:
 			out = newListReader(&rctx, &arrowField, field.LevelInfo, childReader, fr.Props)
 		case *arrow.FixedSizeListType:
 			out = newFixedSizeListReader(&rctx, &arrowField, field.LevelInfo, childReader, fr.Props)

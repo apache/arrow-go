@@ -675,3 +675,37 @@ func TestPrimitiveNonNullable(t *testing.T) {
 	assert.EqualValues(t, 0, result.postListVisitedElems[0].start)
 	assert.EqualValues(t, 4, result.postListVisitedElems[0].end)
 }
+
+// Regression test for https://github.com/apache/arrow-go/issues/834
+func TestNullableLargeListSomeNullEntriesSomeNullLists(t *testing.T) {
+	bldr := array.NewLargeListBuilder(memory.DefaultAllocator, arrow.PrimitiveTypes.Int64)
+	defer bldr.Release()
+
+	vb := bldr.ValueBuilder().(*array.Int64Builder)
+
+	bldr.AppendNull()
+	bldr.Append(true)
+	vb.AppendValues([]int64{1, 2, 3}, nil)
+	bldr.Append(true)
+	bldr.Append(true)
+	bldr.AppendNull()
+	bldr.AppendNull()
+	bldr.Append(true)
+	vb.AppendValues([]int64{4, 5}, nil)
+	bldr.Append(true)
+	vb.AppendNull()
+
+	arr := bldr.NewLargeListArray()
+	defer arr.Release()
+
+	mp, err := newMultipathLevelBuilder(arr, true)
+	require.NoError(t, err)
+	defer mp.Release()
+
+	ctx := arrowCtxFromContext(NewArrowWriteContext(context.Background(), nil))
+	result, err := mp.write(0, ctx)
+	require.NoError(t, err)
+
+	assert.Equal(t, []int16{0, 3, 3, 3, 1, 1, 0, 0, 3, 3, 2}, result.defLevels)
+	assert.Equal(t, []int16{0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0}, result.repLevels)
+}

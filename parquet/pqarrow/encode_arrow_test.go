@@ -1994,6 +1994,46 @@ func (ps *ParquetIOTestSuite) TestFixedSizeListNullableElements() {
 	ps.roundTripTable(mem, tbl, true)
 }
 
+// Regression test for https://github.com/apache/arrow-go/issues/834
+func (ps *ParquetIOTestSuite) TestLargeListRoundTrip() {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(ps.T(), 0)
+
+	elemField := arrow.Field{
+		Name:     "element",
+		Type:     arrow.PrimitiveTypes.Int32,
+		Nullable: true,
+		Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"-1"}),
+	}
+	bldr := array.NewLargeListBuilderWithField(mem, elemField)
+	defer bldr.Release()
+
+	vb := bldr.ValueBuilder().(*array.Int32Builder)
+	bldr.Append(true)
+	vb.AppendValues([]int32{1, 2, 3}, nil)
+	bldr.AppendNull()
+	bldr.Append(true) // empty list
+	bldr.Append(true)
+	vb.AppendValues([]int32{4, 5}, nil)
+	arr := bldr.NewLargeListArray()
+	defer arr.Release()
+
+	field := arrow.Field{
+		Name:     "x",
+		Type:     arr.DataType(),
+		Nullable: true,
+		Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"-1"}),
+	}
+	cnk := arrow.NewChunked(field.Type, []arrow.Array{arr})
+	defer arr.Release()
+
+	tbl := array.NewTable(arrow.NewSchema([]arrow.Field{field}, nil), []arrow.Column{*arrow.NewColumn(field, cnk)}, -1)
+	defer cnk.Release()
+	defer tbl.Release()
+
+	ps.roundTripTable(mem, tbl, true)
+}
+
 func (ps *ParquetIOTestSuite) TestNull() {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(ps.T(), 0)
@@ -2206,6 +2246,64 @@ func TestListOfStructWithEmptyListStoreSchema(t *testing.T) {
 	// Must be "element" (matching Parquet column path) not "item" (Arrow default).
 	assert.Equal(t, "element", opsListType.ElemField().Name,
 		"ARROW:schema element name must match the Parquet column path segment")
+}
+
+// Regression test for https://github.com/apache/arrow-go/issues/834
+func TestLargeListStoreSchema(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "x", Type: arrow.LargeListOf(arrow.PrimitiveTypes.Int32), Nullable: true},
+	}, nil)
+
+	b := array.NewRecordBuilder(mem, sc)
+	defer b.Release()
+
+	lb := b.Field(0).(*array.LargeListBuilder)
+	vb := lb.ValueBuilder().(*array.Int32Builder)
+	lb.Append(true)
+	vb.AppendValues([]int32{1, 2, 3}, nil)
+	lb.AppendNull()
+	lb.Append(true) // empty
+	lb.Append(true)
+	vb.AppendValues([]int32{4, 5}, nil)
+	rec := b.NewRecordBatch()
+	defer rec.Release()
+
+	var buf bytes.Buffer
+	props := parquet.NewWriterProperties()
+	arrowProps := pqarrow.NewArrowWriterProperties(pqarrow.WithStoreSchema())
+
+	pw, err := pqarrow.NewFileWriter(sc, &buf, props, arrowProps)
+	require.NoError(t, err)
+	require.NoError(t, pw.Write(rec))
+	require.NoError(t, pw.Close())
+
+	pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer pf.Close()
+
+	fr, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{}, mem)
+	require.NoError(t, err)
+
+	tbl, err := fr.ReadTable(context.Background())
+	require.NoError(t, err)
+	defer tbl.Release()
+
+	require.EqualValues(t, 4, tbl.NumRows())
+	require.Equal(t, arrow.LARGE_LIST, tbl.Schema().Field(0).Type.ID())
+	require.Equal(t, arrow.Field{
+		Name: "x",
+		Type: arrow.LargeListOfField(arrow.Field{
+			Name:     "element",
+			Type:     arrow.PrimitiveTypes.Int32,
+			Nullable: true,
+			Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"-1"}),
+		}),
+		Nullable: true,
+		Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"-1"}),
+	}, tbl.Schema().Field(0))
 }
 
 func TestParquetArrowIO(t *testing.T) {
@@ -2648,7 +2746,7 @@ func TestReadWriteShreddedVariant(t *testing.T) {
 			{"event_type": "text", "event_ts": "1970-01-21 00:29:54.954163Z"},
 			{"event_type": "list", "event_ts": "1970-01-21 00:29:54.240241Z"},
 			"text",
-			{"event_type": "object", "event_ts": "1970-01-21 00:29:54.146402Z"},			
+			{"event_type": "object", "event_ts": "1970-01-21 00:29:54.146402Z"},
 			null
 		]`
 

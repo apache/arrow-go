@@ -488,6 +488,18 @@ func (lr *listReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
 		buffers[0] = validityBuffer
 	}
 
+	if lr.field.Type.ID() == arrow.LARGE_LIST {
+		// for large lists, expand to int64 offsets
+		largeOffsetsBuffer := memory.NewResizableBuffer(lr.rctx.mem)
+		largeOffsetsBuffer.Resize(arrow.Int64Traits.BytesRequired(int(validityIO.Read) + 1))
+		defer largeOffsetsBuffer.Release()
+		largeOffsets := arrow.Int64Traits.CastFromBytes(largeOffsetsBuffer.Bytes())
+		for i := int64(0); i <= validityIO.Read; i++ {
+			largeOffsets[i] = int64(offsetData[i])
+		}
+		buffers[1] = largeOffsetsBuffer
+	}
+
 	data := array.NewData(lr.field.Type, int(validityIO.Read), buffers, []arrow.ArrayData{item}, int(validityIO.NullCount), 0)
 	defer data.Release()
 	if lr.field.Type.ID() == arrow.FIXED_SIZE_LIST {
