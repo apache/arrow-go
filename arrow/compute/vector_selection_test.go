@@ -1820,14 +1820,9 @@ func TestMapPreservesValueNullable(t *testing.T) {
 		"Map struct child type not preserved:\nwant: %s\n got: %s", wantChildType, gotChildType)
 }
 
-// TestDictionarySelectionTypeCoverage exercises Take and Filter on dictionary
-// arrays across several index types and value types (utf8, int64, float64,
-// struct, list). Inputs are built with array.DictArrayFromJSON (separate indices
-// and dictionary JSON) rather than array.FromJSON, which has no dictionary builder
-// for nested value types. Take and Filter only reorder/select the indices and keep
-// the dictionary unchanged, so results are verified by deconstructing the resulting
-// dictionary into its indices and shared dictionary and comparing each part. The
-// uint16_index_float64_value case carries a null index that must be preserved.
+// TestDictionarySelectionTypeCoverage exercises Take and Filter on dictionary arrays
+//
+// It uses varied index types and value types.
 func TestDictionarySelectionTypeCoverage(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -1981,7 +1976,7 @@ func TestDictionarySelectionLengthAndBounds(t *testing.T) {
 			name string
 			sel  string
 		}{
-			{"too_big", `[0, 4]`},   // 4 is past the last valid index (3)
+			{"too_big", `[0, 4]`},    // 4 is past the last valid index (3)
 			{"too_small", `[0, -1]`}, // negative index
 		} {
 			t.Run(c.name, func(t *testing.T) {

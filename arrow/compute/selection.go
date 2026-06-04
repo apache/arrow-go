@@ -487,7 +487,8 @@ func structFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResul
 
 // dictionaryFilter is a special case for filtering a dictionary array
 //
-// The implementation uses the 'dictionaryTake' implementation.
+// The shared dictionary is reused as-is and never compacted, so the result may retain values
+// that are no longer referenced by any index.
 func dictionaryFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 	// convert the filter (boolean array) to indices to take from the dictionary array.
 	indices, err := kernels.GetTakeIndices(exec.GetAllocator(ctx.Ctx),
@@ -554,7 +555,8 @@ func structTake(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult)
 
 // dictionaryTake is a special case for taking from a dictionary array.
 //
-// We can run 'take' only on the indices, without updating the mapping from indices to values.
+// The shared dictionary is reused as-is and never compacted, so the result may retain values
+// that are no longer referenced by any index.
 func dictionaryTake(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 	dictArr := batch.Values[0].Array.MakeArray().(*array.Dictionary)
 	defer dictArr.Release()
