@@ -1820,6 +1820,182 @@ func TestMapPreservesValueNullable(t *testing.T) {
 		"Map struct child type not preserved:\nwant: %s\n got: %s", wantChildType, gotChildType)
 }
 
+// TestDictionarySelectionTypeCoverage exercises Take and Filter on dictionary
+// arrays across several index types and value types (utf8, int64, float64,
+// struct, list). Inputs are built with array.DictArrayFromJSON (separate indices
+// and dictionary JSON) rather than array.FromJSON, which has no dictionary builder
+// for nested value types. Take and Filter only reorder/select the indices and keep
+// the dictionary unchanged, so results are verified by deconstructing the resulting
+// dictionary into its indices and shared dictionary and comparing each part. The
+// uint16_index_float64_value case carries a null index that must be preserved.
+func TestDictionarySelectionTypeCoverage(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.TODO(), mem)
+
+	type tc struct {
+		name         string
+		dt           *arrow.DictionaryType
+		lookupValues string // distinct dictionary lookup values
+		inputIdx     string // indices of the input array
+		takeSel      string // selection indices for Take
+		wantTakeIdx  string // expected indices after Take
+		filter       string // boolean mask for Filter
+		wantFiltIdx  string // expected indices after Filter
+	}
+	cases := []tc{
+		{
+			name:         "int32_index_utf8_value",
+			dt:           &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String},
+			lookupValues: `["a", "b", "c"]`,
+			inputIdx:     `[2, 0, 1, 2, 1, 0]`,
+			takeSel:      `[5, 0, 3, 1]`, wantTakeIdx: `[0, 2, 2, 0]`,
+			filter: `[true, false, true, false, true, true]`, wantFiltIdx: `[2, 1, 1, 0]`,
+		},
+		{
+			name:         "int8_index_int64_value",
+			dt:           &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.PrimitiveTypes.Int64},
+			lookupValues: `[10, 20, 30, 40]`,
+			inputIdx:     `[3, 0, 2]`,
+			takeSel:      `[2, 0]`, wantTakeIdx: `[2, 3]`,
+			filter: `[false, true, true]`, wantFiltIdx: `[0, 2]`,
+		},
+		{
+			// null index in the input that must survive both Take and Filter.
+			name:         "uint16_index_float64_value",
+			dt:           &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint16, ValueType: arrow.PrimitiveTypes.Float64},
+			lookupValues: `[1.5, 2.5, 4.0]`,
+			inputIdx:     `[2, null, 0]`,
+			takeSel:      `[1, 2, 0]`, wantTakeIdx: `[null, 0, 2]`,
+			filter: `[true, true, false]`, wantFiltIdx: `[2, null]`,
+		},
+		{
+			name: "int8_index_struct_value",
+			dt: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.StructOf(
+				arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+				arrow.Field{Name: "b", Type: arrow.BinaryTypes.String, Nullable: true},
+			)},
+			lookupValues: `[{"a": 1, "b": "x"}, {"a": null, "b": null}, {"a": 3, "b": "z"}]`,
+			inputIdx:     `[2, 0, 1]`,
+			takeSel:      `[2, 0]`, wantTakeIdx: `[1, 2]`,
+			filter: `[true, false, true]`, wantFiltIdx: `[2, 1]`,
+		},
+		{
+			name:         "uint16_index_list_int32_value",
+			dt:           &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint16, ValueType: arrow.ListOf(arrow.PrimitiveTypes.Int32)},
+			lookupValues: `[[], [1, 2], [3]]`,
+			inputIdx:     `[1, 0, 2]`,
+			takeSel:      `[2, 0]`, wantTakeIdx: `[2, 1]`,
+			filter: `[true, false, true]`, wantFiltIdx: `[1, 2]`,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			input, err := array.DictArrayFromJSON(mem, c.dt, c.inputIdx, c.lookupValues)
+			require.NoError(t, err)
+			defer input.Release()
+
+			// assertDict asserts that the dictionary indices equal wantIdxJSON and
+			// that the dictionary lookup values are left unchanged.
+			assertDict := func(wantIdxJSON string, got arrow.Array) {
+				gotDict, ok := got.(*array.Dictionary)
+				require.Truef(t, ok, "expected *array.Dictionary, got %T", got)
+
+				wantIdx, _, err := array.FromJSON(mem, c.dt.IndexType, strings.NewReader(wantIdxJSON))
+				require.NoError(t, err)
+				defer wantIdx.Release()
+
+				// Build a fresh, independent copy of the expected lookup values from
+				// the source JSON.
+				originalLookupValues, _, err := array.FromJSON(mem, c.dt.ValueType, strings.NewReader(c.lookupValues))
+				require.NoError(t, err)
+				defer originalLookupValues.Release()
+
+				assert.Truef(t, array.Equal(wantIdx, gotDict.Indices()),
+					"indices mismatch\nwant: %s\n got: %s", wantIdx, gotDict.Indices())
+				assert.Truef(t, array.Equal(originalLookupValues, gotDict.Dictionary()),
+					"lookup values mismatch\nwant: %s\n got: %s", originalLookupValues, gotDict.Dictionary())
+			}
+
+			takeSel, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(c.takeSel))
+			require.NoError(t, err)
+			defer takeSel.Release()
+
+			gotTake, err := compute.TakeArray(ctx, input, takeSel)
+			require.NoError(t, err)
+			defer gotTake.Release()
+			assertDict(c.wantTakeIdx, gotTake)
+
+			filter, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(c.filter))
+			require.NoError(t, err)
+			defer filter.Release()
+
+			gotFilter, err := compute.FilterArray(ctx, input, filter, *compute.DefaultFilterOptions())
+			require.NoError(t, err)
+			defer gotFilter.Release()
+			assertDict(c.wantFiltIdx, gotFilter)
+		})
+	}
+}
+
+// TestDictionarySelectionLengthAndBounds checks the error paths of Filter and
+// Take on a dictionary array (int8 index -> utf8 value):
+//   - Filter requires the boolean mask to be the same length as the values;
+//     both a too-short and a too-long mask must fail with arrow.ErrInvalid.
+//   - Take must reject out-of-range selection indices with arrow.ErrIndex,
+//     both an index past the end and a negative index.
+func TestDictionarySelectionLengthAndBounds(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.TODO(), mem)
+
+	dt := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+
+	// values has 4 elements; valid indices are 0..3.
+	values, err := array.DictArrayFromJSON(mem, dt, `[2, 0, 1, 0]`, `["a", "b", "c"]`)
+	require.NoError(t, err)
+	defer values.Release()
+
+	t.Run("filter_length_mismatch", func(t *testing.T) {
+		for _, c := range []struct {
+			name string
+			mask string
+		}{
+			{"too_short", `[true, false]`},
+			{"too_long", `[true, false, true, false, true]`},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				filter, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(c.mask))
+				require.NoError(t, err)
+				defer filter.Release()
+
+				_, err = compute.FilterArray(ctx, values, filter, *compute.DefaultFilterOptions())
+				assert.ErrorIs(t, err, arrow.ErrInvalid)
+			})
+		}
+	})
+
+	t.Run("take_out_of_bounds", func(t *testing.T) {
+		for _, c := range []struct {
+			name string
+			sel  string
+		}{
+			{"too_big", `[0, 4]`},   // 4 is past the last valid index (3)
+			{"too_small", `[0, -1]`}, // negative index
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				sel, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(c.sel))
+				require.NoError(t, err)
+				defer sel.Release()
+
+				_, err = compute.TakeArray(ctx, values, sel)
+				assert.ErrorIs(t, err, arrow.ErrIndex)
+			})
+		}
+	})
+}
+
 func TestTakeKernels(t *testing.T) {
 	suite.Run(t, new(TakeKernelTest))
 	for _, dt := range numericTypes {

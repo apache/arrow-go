@@ -485,7 +485,6 @@ func structFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResul
 	return nil
 }
 
-
 // dictionaryFilter is a special case for filtering a dictionary array
 //
 // The implementation uses the 'dictionaryTake' implementation.
@@ -552,7 +551,6 @@ func structTake(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult)
 
 	return eg.Wait()
 }
-
 
 // dictionaryTake is a special case for taking from a dictionary array.
 //
