@@ -65,9 +65,12 @@ func TestValueSizeLargeObject(t *testing.T) {
 	require.NoError(t, b.FinishObject(start, fields))
 
 	raw := b.BuildWithoutMeta()
-	got := valueSize(raw)
 
-	// Object should have a valid non-zero size
-	assert.Greater(t, got, 0, "valueSize should return positive size for object")
-	assert.LessOrEqual(t, got, len(raw), "valueSize should not exceed buffer length")
+	// Verify the header has is_large set at the correct bit position for objects (bit 4).
+	typeInfo := (raw[0] >> basicTypeBits) & typeInfoMask
+	isLarge := ((typeInfo >> 4) & 0x1) == 1
+	assert.True(t, isLarge, "expected is_large=true for 300-field object")
+
+	got := valueSize(raw)
+	assert.Equal(t, len(raw), got, "valueSize should return the full object size")
 }
