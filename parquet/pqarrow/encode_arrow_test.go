@@ -2027,7 +2027,9 @@ func (ps *ParquetIOTestSuite) TestLargeListRoundTrip() {
 	cnk := arrow.NewChunked(field.Type, []arrow.Array{arr})
 	defer arr.Release()
 
-	tbl := array.NewTable(arrow.NewSchema([]arrow.Field{field}, nil), []arrow.Column{*arrow.NewColumn(field, cnk)}, -1)
+	col := arrow.NewColumn(field, cnk)
+	defer col.Release()
+	tbl := array.NewTable(arrow.NewSchema([]arrow.Field{field}, nil), []arrow.Column{*col}, -1)
 	defer cnk.Release()
 	defer tbl.Release()
 

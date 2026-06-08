@@ -452,12 +452,26 @@ func (lr *listReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
 		validityIO.ValidBits = validityBuffer.Bytes()
 	}
 	offsetsBuffer := memory.NewResizableBuffer(lr.rctx.mem)
-	offsetsBuffer.Resize(arrow.Int32Traits.BytesRequired(int(lenBound) + 1))
+	if lr.field.Type.ID() == arrow.LARGE_LIST {
+		offsetsBuffer.Resize(arrow.Int64Traits.BytesRequired(int(lenBound) + 1))
+	} else {
+		offsetsBuffer.Resize(arrow.Int32Traits.BytesRequired(int(lenBound) + 1))
+	}
 	defer offsetsBuffer.Release()
 
-	offsetData := arrow.Int32Traits.CastFromBytes(offsetsBuffer.Bytes())
-	if err = file.DefRepLevelsToListInfo(defLevels, repLevels, lr.info, &validityIO, offsetData); err != nil {
-		return nil, err
+	var boundedLen int64
+	if lr.field.Type.ID() == arrow.LARGE_LIST {
+		offsetData := arrow.Int64Traits.CastFromBytes(offsetsBuffer.Bytes())
+		if err = file.DefRepLevelsToListInfo(defLevels, repLevels, lr.info, &validityIO, offsetData); err != nil {
+			return nil, err
+		}
+		boundedLen = offsetData[int(validityIO.Read)]
+	} else {
+		offsetData := arrow.Int32Traits.CastFromBytes(offsetsBuffer.Bytes())
+		if err = file.DefRepLevelsToListInfo(defLevels, repLevels, lr.info, &validityIO, offsetData); err != nil {
+			return nil, err
+		}
+		boundedLen = int64(offsetData[int(validityIO.Read)])
 	}
 
 	// if the parent (itemRdr) has nulls and is a nested type like list
@@ -465,14 +479,18 @@ func (lr *listReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
 	// definition levels when building out the bitmap. So the upper bound
 	// to make sure we have the space for is the worst case scenario,
 	// the upper bound is the value of the last offset + the nullcount
-	arr, err := lr.itemRdr.BuildArray(int64(offsetData[int(validityIO.Read)]) + validityIO.NullCount)
+	arr, err := lr.itemRdr.BuildArray(boundedLen)
 	if err != nil {
 		return nil, err
 	}
 	defer arr.Release()
 
 	// resize to actual number of elems returned
-	offsetsBuffer.Resize(arrow.Int32Traits.BytesRequired(int(validityIO.Read) + 1))
+	if lr.field.Type.ID() == arrow.LARGE_LIST {
+		offsetsBuffer.Resize(arrow.Int64Traits.BytesRequired(int(validityIO.Read) + 1))
+	} else {
+		offsetsBuffer.Resize(arrow.Int32Traits.BytesRequired(int(validityIO.Read) + 1))
+	}
 	if validityBuffer != nil {
 		validityBuffer.Resize(int(bitutil.BytesForBits(validityIO.Read)))
 	}
@@ -488,22 +506,11 @@ func (lr *listReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
 		buffers[0] = validityBuffer
 	}
 
-	if lr.field.Type.ID() == arrow.LARGE_LIST {
-		// for large lists, expand to int64 offsets
-		largeOffsetsBuffer := memory.NewResizableBuffer(lr.rctx.mem)
-		largeOffsetsBuffer.Resize(arrow.Int64Traits.BytesRequired(int(validityIO.Read) + 1))
-		defer largeOffsetsBuffer.Release()
-		largeOffsets := arrow.Int64Traits.CastFromBytes(largeOffsetsBuffer.Bytes())
-		for i := int64(0); i <= validityIO.Read; i++ {
-			largeOffsets[i] = int64(offsetData[i])
-		}
-		buffers[1] = largeOffsetsBuffer
-	}
-
 	data := array.NewData(lr.field.Type, int(validityIO.Read), buffers, []arrow.ArrayData{item}, int(validityIO.NullCount), 0)
 	defer data.Release()
 	if lr.field.Type.ID() == arrow.FIXED_SIZE_LIST {
 		defer data.Buffers()[1].Release()
+		offsetData := arrow.Int32Traits.CastFromBytes(offsetsBuffer.Bytes())
 		listSize := lr.field.Type.(*arrow.FixedSizeListType).Len()
 		for x := 1; x < data.Len(); x++ {
 			size := offsetData[x] - offsetData[x-1]
