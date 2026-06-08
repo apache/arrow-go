@@ -57,6 +57,9 @@ func (a *String) Reset(data arrow.ArrayData) {
 
 // Value returns the slice at index i. This value should not be mutated.
 func (a *String) Value(i int) string {
+	if i < 0 || i >= a.data.length {
+		panic("arrow/array: index out of range")
+	}
 	i = i + a.data.offset
 	return a.values[a.offsets[i]:a.offsets[i+1]]
 }
