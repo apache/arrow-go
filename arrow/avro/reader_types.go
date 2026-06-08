@@ -921,7 +921,15 @@ func appendTimestampData(b *array.TimestampBuilder, data interface{}) {
 			b.Append(arrow.Timestamp(v))
 		}
 	case time.Time:
-		v, err := arrow.TimestampFromTime(dt, b.Type().(*arrow.TimestampType).Unit)
+		tt := b.Type().(*arrow.TimestampType)
+		// hamba decodes a local-timestamp logical type into a time.Time whose wall-clock
+		// fields hold the intended value but whose instant is offset by the decoder's local
+		// zone. Arrow stores local (zone-less) timestamps as the wall clock read in UTC, so
+		// reinterpret the fields in UTC to keep the value zone-independent.
+		if tt.TimeZone == "" {
+			dt = time.Date(dt.Year(), dt.Month(), dt.Day(), dt.Hour(), dt.Minute(), dt.Second(), dt.Nanosecond(), time.UTC)
+		}
+		v, err := arrow.TimestampFromTime(dt, tt.Unit)
 		if err != nil {
 			panic(err)
 		}

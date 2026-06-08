@@ -145,6 +145,14 @@ func TestSchemaStringEqual(t *testing.T) {
 					Type: arrow.FixedWidthTypes.Timestamp_us,
 				},
 				{
+					Name: "localtimestampmillis",
+					Type: &arrow.TimestampType{Unit: arrow.Millisecond},
+				},
+				{
+					Name: "localtimestampmicros",
+					Type: &arrow.TimestampType{Unit: arrow.Microsecond},
+				},
+				{
 					Name: "duration",
 					Type: arrow.FixedWidthTypes.MonthDayNanoInterval,
 				},
