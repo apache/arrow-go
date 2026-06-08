@@ -405,7 +405,7 @@ func (v ObjectValue) ValueByKey(key string) (ObjectField, error) {
 				Key:   key,
 				Value: Value{value: v.value[v.dataStart+offset:], meta: v.meta}}, nil
 		case 1:
-			j = mid - 1
+			j = mid
 		}
 	}
 

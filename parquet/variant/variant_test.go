@@ -18,6 +18,7 @@ package variant_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -807,4 +808,28 @@ func TestVariantJSONRoundTrip(t *testing.T) {
 		panic(err)
 	}
 	assert.JSONEq(t, string(jsonBytes), variantFromJSON.String())
+}
+
+func TestObjectBinarySearch(t *testing.T) {
+	var b variant.Builder
+	start := b.Offset()
+	fields := make([]variant.FieldEntry, 32)
+	for i := 0; i < 32; i++ {
+		key := fmt.Sprintf("key%02d", i)
+		fields[i] = b.NextField(start, key)
+		require.NoError(t, b.AppendInt(int64(i)))
+	}
+	require.NoError(t, b.FinishObject(start, fields))
+	v, err := b.Build()
+	require.NoError(t, err)
+
+	obj := v.Value().(variant.ObjectValue)
+	assert.EqualValues(t, 32, obj.NumElements())
+
+	for i := 0; i < 32; i++ {
+		key := fmt.Sprintf("key%02d", i)
+		field, err := obj.ValueByKey(key)
+		require.NoError(t, err, "failed to find key: %s", key)
+		assert.Equal(t, int8(i), field.Value.Value())
+	}
 }
