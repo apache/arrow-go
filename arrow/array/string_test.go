@@ -145,6 +145,144 @@ func TestStringArray(t *testing.T) {
 	}
 }
 
+func TestStringSliceOutOfBounds(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	values := []string{"a", "bc", "def", "g", "hijk", "lm", "n", "opq", "rs", "tu"}
+
+	b := array.NewStringBuilder(mem)
+	defer b.Release()
+
+	for _, v := range values {
+		b.AppendString(v)
+	}
+
+	arr := b.NewArray().(*array.String)
+	defer arr.Release()
+
+	slice := array.NewSlice(arr, 3, 8).(*array.String)
+	defer slice.Release()
+
+	tests := []struct {
+		index int
+		panic bool
+	}{
+		{
+			index: -1,
+			panic: true,
+		},
+		{
+			index: 5,
+			panic: true,
+		},
+		{
+			index: 0,
+			panic: false,
+		},
+		{
+			index: 4,
+			panic: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run("", func(t *testing.T) {
+
+			var val string
+
+			if tc.panic {
+				defer func() {
+					e := recover()
+					if e == nil {
+						t.Fatalf("this should have panicked, but did not; slice value %q", val)
+					}
+					if got, want := e.(string), "arrow/array: index out of range"; got != want {
+						t.Fatalf("invalid error. got=%q, want=%q", got, want)
+					}
+				}()
+			} else {
+				defer func() {
+					if e := recover(); e != nil {
+						t.Fatalf("unexpected panic: %v", e)
+					}
+				}()
+			}
+
+			val = slice.Value(tc.index)
+		})
+	}
+}
+
+func TestLargeStringSliceOutOfBounds(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	values := []string{"a", "bc", "def", "g", "hijk", "lm", "n", "opq", "rs", "tu"}
+
+	b := array.NewLargeStringBuilder(mem)
+	defer b.Release()
+
+	for _, v := range values {
+		b.Append(v)
+	}
+
+	arr := b.NewArray().(*array.LargeString)
+	defer arr.Release()
+
+	slice := array.NewSlice(arr, 3, 8).(*array.LargeString)
+	defer slice.Release()
+
+	tests := []struct {
+		index int
+		panic bool
+	}{
+		{
+			index: -1,
+			panic: true,
+		},
+		{
+			index: 5,
+			panic: true,
+		},
+		{
+			index: 0,
+			panic: false,
+		},
+		{
+			index: 4,
+			panic: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run("", func(t *testing.T) {
+
+			var val string
+
+			if tc.panic {
+				defer func() {
+					e := recover()
+					if e == nil {
+						t.Fatalf("this should have panicked, but did not; slice value %q", val)
+					}
+					if got, want := e.(string), "arrow/array: index out of range"; got != want {
+						t.Fatalf("invalid error. got=%q, want=%q", got, want)
+					}
+				}()
+			} else {
+				defer func() {
+					if e := recover(); e != nil {
+						t.Fatalf("unexpected panic: %v", e)
+					}
+				}()
+			}
+
+			val = slice.Value(tc.index)
+		})
+	}
+}
+
 func TestStringBuilder_Empty(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
