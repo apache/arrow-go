@@ -2024,12 +2024,8 @@ func (ps *ParquetIOTestSuite) TestLargeListRoundTrip() {
 		Nullable: true,
 		Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"-1"}),
 	}
-	cnk := arrow.NewChunked(field.Type, []arrow.Array{arr})
-	defer arr.Release()
 
-	tbl := array.NewTable(arrow.NewSchema([]arrow.Field{field}, nil), []arrow.Column{*arrow.NewColumn(field, cnk)}, -1)
-	// N.B. no need to release the Column above since we directly release cnk here
-	defer cnk.Release()
+	tbl := array.NewTableFromSlice(arrow.NewSchema([]arrow.Field{field}, nil), [][]arrow.Array{{arr}})
 	defer tbl.Release()
 
 	ps.roundTripTable(mem, tbl, true)
