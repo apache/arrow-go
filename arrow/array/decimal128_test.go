@@ -17,6 +17,7 @@
 package array_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -168,7 +169,7 @@ func TestDecimal128Slice(t *testing.T) {
 		t.Fatalf("could not type-assert to array.String")
 	}
 
-	if got, want := v.String(), `[(null) {4 -4}]`; got != want {
+	if got, want := v.String(), `[(null) -7.378697629e+18]`; got != want {
 		t.Fatalf("got=%q, want=%q", got, want)
 	}
 	assert.Equal(t, array.NullValueStr, v.ValueStr(0))
@@ -280,4 +281,39 @@ func TestDecimal128GetOneForMarshal(t *testing.T) {
 	for i := range cases {
 		assert.Equalf(t, cases[i].want, arr.GetOneForMarshal(i), "unexpected value at index %d", i)
 	}
+}
+
+// TestDecimal128StringScaled is a regression test for apache/arrow-go#848:
+// Array.String() (and RecordBatch printing) must use the type's scale like
+// ValueStr, not the raw unscaled decimal128.Num struct.
+func TestDecimal128StringScaled(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	typ := &arrow.Decimal128Type{Precision: 5, Scale: 2}
+
+	b := array.NewDecimal128Builder(mem, typ)
+	defer b.Release()
+
+	value, err := decimal128.FromString("19.99", typ.Precision, typ.Scale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Append(value)
+	b.AppendNull()
+
+	arr := b.NewDecimal128Array()
+	defer arr.Release()
+
+	assert.Equal(t, "19.99", arr.ValueStr(0))
+	assert.Equal(t, "[19.99 (null)]", arr.String())
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "price", Type: typ}}, nil)
+	rec := array.NewRecordBatch(schema, []arrow.Array{arr}, int64(arr.Len()))
+	defer rec.Release()
+
+	out := fmt.Sprintf("%v", rec)
+	assert.Contains(t, out, "[19.99 (null)]")
+	// 1999 is the raw unscaled value that must never leak into output.
+	assert.NotContains(t, out, "1999")
 }

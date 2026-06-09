@@ -71,7 +71,7 @@ func (a *baseDecimal[T]) String() string {
 		case a.IsNull(i):
 			o.WriteString(NullValueStr)
 		default:
-			fmt.Fprintf(o, "%v", a.Value(i))
+			fmt.Fprintf(o, "%v", a.ValueStr(i))
 		}
 	}
 	o.WriteString("]")
