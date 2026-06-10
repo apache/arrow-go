@@ -300,3 +300,39 @@ func TestAppendBinaryAndStringDataUnexpectedTypes(t *testing.T) {
 	assert.ErrorContains(t, appendStringData(sb, map[string]any{"string": 42}), "unexpected type int")
 	assert.Equal(t, 4, sb.Len())
 }
+
+// loadDatum must surface appender errors from nested paths (map values,
+// list items), not only from top-level and struct fields.
+func TestLoadDatumPropagatesNestedAppendErrors(t *testing.T) {
+	newLoader := func(t *testing.T, avroSchema string) (*dataLoader, *array.RecordBuilder) {
+		t.Helper()
+		schema, err := hamba.Parse(avroSchema)
+		assert.NoError(t, err)
+		arrowSchema, err := ArrowSchemaFromAvro(schema)
+		assert.NoError(t, err)
+		bld := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+		pos := newFieldPos()
+		ldr := newDataLoader()
+		for idx, fb := range bld.Fields() {
+			mapFieldBuilders(fb, arrowSchema.Field(idx), pos)
+		}
+		ldr.drawTree(pos)
+		return ldr, bld
+	}
+
+	t.Run("map value", func(t *testing.T) {
+		ldr, bld := newLoader(t, `{"type":"record","name":"r","fields":[
+			{"name":"m","type":{"type":"map","values":"bytes"}}]}`)
+		defer bld.Release()
+		assert.NoError(t, ldr.loadDatum(map[string]any{"m": map[string]any{"k": []byte{0x01}}}))
+		assert.ErrorContains(t, ldr.loadDatum(map[string]any{"m": map[string]any{"k": 42}}), "unexpected type int")
+	})
+
+	t.Run("list item", func(t *testing.T) {
+		ldr, bld := newLoader(t, `{"type":"record","name":"r","fields":[
+			{"name":"l","type":{"type":"array","items":"bytes"}}]}`)
+		defer bld.Release()
+		assert.NoError(t, ldr.loadDatum(map[string]any{"l": []any{[]byte{0x01}}}))
+		assert.ErrorContains(t, ldr.loadDatum(map[string]any{"l": []any{42}}), "unexpected type int")
+	})
+}
