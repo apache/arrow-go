@@ -109,8 +109,8 @@ func (a *Timestamp) ValueStr(i int) string {
 	return toTime(a.values[i]).Format(layout)
 }
 
-func (a *Timestamp) GetOneForMarshal(i int) interface{} {
-	if val := a.ValueStr(i); val != NullValueStr {
+func (a *Timestamp) GetOneForMarshal(i int, nullable bool) interface{} {
+	if val := a.ValueStr(i); !nullable || val != NullValueStr {
 		return val
 	}
 	return nil
@@ -119,15 +119,15 @@ func (a *Timestamp) GetOneForMarshal(i int) interface{} {
 func (a *Timestamp) MarshalJSON() ([]byte, error) {
 	vals := make([]interface{}, a.Len())
 	for i := range a.values {
-		vals[i] = a.GetOneForMarshal(i)
+		vals[i] = a.GetOneForMarshal(i, true)
 	}
 
 	return json.Marshal(vals)
 }
 
-func arrayEqualTimestamp(left, right *Timestamp) bool {
+func arrayEqualTimestamp(left, right *Timestamp, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if left.Value(i) != right.Value(i) {

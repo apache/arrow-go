@@ -287,24 +287,24 @@ func (d *Dictionary) GetValueIndex(i int) int {
 	return -1
 }
 
-func (d *Dictionary) GetOneForMarshal(i int) interface{} {
-	if d.IsNull(i) {
+func (d *Dictionary) GetOneForMarshal(i int, nullable bool) interface{} {
+	if nullable && d.IsNull(i) {
 		return nil
 	}
 	vidx := d.GetValueIndex(i)
-	return d.Dictionary().GetOneForMarshal(vidx)
+	return d.Dictionary().GetOneForMarshal(vidx, nullable)
 }
 
 func (d *Dictionary) MarshalJSON() ([]byte, error) {
 	vals := make([]any, d.Len())
 	for i := range d.Len() {
-		vals[i] = d.GetOneForMarshal(i)
+		vals[i] = d.GetOneForMarshal(i, true)
 	}
 	return json.Marshal(vals)
 }
 
-func arrayEqualDict(l, r *Dictionary) bool {
-	return Equal(l.Dictionary(), r.Dictionary()) && Equal(l.indices, r.indices)
+func arrayEqualDict(l, r *Dictionary, opt equalOption) bool {
+	return equal(l.Dictionary(), r.Dictionary(), opt) && equal(l.indices, r.indices, opt)
 }
 
 func arrayApproxEqualDict(l, r *Dictionary, opt equalOption) bool {

@@ -51,7 +51,7 @@ func (a *FixedSizeList) ValueStr(i int) string {
 	if a.IsNull(i) {
 		return NullValueStr
 	}
-	return string(a.GetOneForMarshal(i).(json.RawMessage))
+	return string(a.GetOneForMarshal(i, true).(json.RawMessage))
 }
 
 func (a *FixedSizeList) String() string {
@@ -84,9 +84,9 @@ func (a *FixedSizeList) setData(data *Data) {
 	a.values = MakeFromData(data.childData[0])
 }
 
-func arrayEqualFixedSizeList(left, right *FixedSizeList) bool {
+func arrayEqualFixedSizeList(left, right *FixedSizeList, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -94,7 +94,7 @@ func arrayEqualFixedSizeList(left, right *FixedSizeList) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return Equal(l, r)
+			return equal(l, r, opt)
 		}()
 		if !o {
 			return false
@@ -123,8 +123,8 @@ func (a *FixedSizeList) Release() {
 	a.values.Release()
 }
 
-func (a *FixedSizeList) GetOneForMarshal(i int) interface{} {
-	if a.IsNull(i) {
+func (a *FixedSizeList) GetOneForMarshal(i int, nullable bool) interface{} {
+	if nullable && a.IsNull(i) {
 		return nil
 	}
 	slice := a.newListValue(i)

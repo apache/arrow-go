@@ -61,7 +61,7 @@ func (a *List) ValueStr(i int) string {
 	if !a.IsValid(i) {
 		return NullValueStr
 	}
-	return string(a.GetOneForMarshal(i).(json.RawMessage))
+	return string(a.GetOneForMarshal(i, true).(json.RawMessage))
 }
 
 func (a *List) String() string {
@@ -98,8 +98,8 @@ func (a *List) setData(data *Data) {
 	a.values = MakeFromData(data.childData[0])
 }
 
-func (a *List) GetOneForMarshal(i int) interface{} {
-	if a.IsNull(i) {
+func (a *List) GetOneForMarshal(i int, nullable bool) interface{} {
+	if nullable && a.IsNull(i) {
 		return nil
 	}
 
@@ -121,7 +121,7 @@ func (a *List) MarshalJSON() ([]byte, error) {
 		if i != 0 {
 			buf.WriteByte(',')
 		}
-		if err := enc.Encode(a.GetOneForMarshal(i)); err != nil {
+		if err := enc.Encode(a.GetOneForMarshal(i, true)); err != nil {
 			return nil, err
 		}
 	}
@@ -129,9 +129,9 @@ func (a *List) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func arrayEqualList(left, right *List) bool {
+func arrayEqualList(left, right *List, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -139,7 +139,7 @@ func arrayEqualList(left, right *List) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return Equal(l, r)
+			return equal(l, r, opt)
 		}()
 		if !o {
 			return false
@@ -193,7 +193,7 @@ func (a *LargeList) ValueStr(i int) string {
 	if !a.IsValid(i) {
 		return NullValueStr
 	}
-	return string(a.GetOneForMarshal(i).(json.RawMessage))
+	return string(a.GetOneForMarshal(i, true).(json.RawMessage))
 }
 
 func (a *LargeList) String() string {
@@ -230,8 +230,8 @@ func (a *LargeList) setData(data *Data) {
 	a.values = MakeFromData(data.childData[0])
 }
 
-func (a *LargeList) GetOneForMarshal(i int) interface{} {
-	if a.IsNull(i) {
+func (a *LargeList) GetOneForMarshal(i int, nullable bool) interface{} {
+	if nullable && a.IsNull(i) {
 		return nil
 	}
 
@@ -253,7 +253,7 @@ func (a *LargeList) MarshalJSON() ([]byte, error) {
 		if i != 0 {
 			buf.WriteByte(',')
 		}
-		if err := enc.Encode(a.GetOneForMarshal(i)); err != nil {
+		if err := enc.Encode(a.GetOneForMarshal(i, true)); err != nil {
 			return nil, err
 		}
 	}
@@ -261,9 +261,9 @@ func (a *LargeList) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func arrayEqualLargeList(left, right *LargeList) bool {
+func arrayEqualLargeList(left, right *LargeList, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -271,7 +271,7 @@ func arrayEqualLargeList(left, right *LargeList) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return Equal(l, r)
+			return equal(l, r, opt)
 		}()
 		if !o {
 			return false
@@ -664,7 +664,7 @@ func (a *ListView) ValueStr(i int) string {
 	if !a.IsValid(i) {
 		return NullValueStr
 	}
-	return string(a.GetOneForMarshal(i).(json.RawMessage))
+	return string(a.GetOneForMarshal(i, true).(json.RawMessage))
 }
 
 func (a *ListView) String() string {
@@ -705,8 +705,8 @@ func (a *ListView) setData(data *Data) {
 	a.values = MakeFromData(data.childData[0])
 }
 
-func (a *ListView) GetOneForMarshal(i int) interface{} {
-	if a.IsNull(i) {
+func (a *ListView) GetOneForMarshal(i int, nullable bool) interface{} {
+	if nullable && a.IsNull(i) {
 		return nil
 	}
 
@@ -728,7 +728,7 @@ func (a *ListView) MarshalJSON() ([]byte, error) {
 		if i != 0 {
 			buf.WriteByte(',')
 		}
-		if err := enc.Encode(a.GetOneForMarshal(i)); err != nil {
+		if err := enc.Encode(a.GetOneForMarshal(i, true)); err != nil {
 			return nil, err
 		}
 	}
@@ -736,9 +736,9 @@ func (a *ListView) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func arrayEqualListView(left, right *ListView) bool {
+func arrayEqualListView(left, right *ListView, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -746,7 +746,7 @@ func arrayEqualListView(left, right *ListView) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return Equal(l, r)
+			return equal(l, r, opt)
 		}()
 		if !o {
 			return false
@@ -811,7 +811,7 @@ func (a *LargeListView) ValueStr(i int) string {
 	if !a.IsValid(i) {
 		return NullValueStr
 	}
-	return string(a.GetOneForMarshal(i).(json.RawMessage))
+	return string(a.GetOneForMarshal(i, true).(json.RawMessage))
 }
 
 func (a *LargeListView) String() string {
@@ -852,8 +852,8 @@ func (a *LargeListView) setData(data *Data) {
 	a.values = MakeFromData(data.childData[0])
 }
 
-func (a *LargeListView) GetOneForMarshal(i int) interface{} {
-	if a.IsNull(i) {
+func (a *LargeListView) GetOneForMarshal(i int, nullable bool) interface{} {
+	if nullable && a.IsNull(i) {
 		return nil
 	}
 
@@ -875,7 +875,7 @@ func (a *LargeListView) MarshalJSON() ([]byte, error) {
 		if i != 0 {
 			buf.WriteByte(',')
 		}
-		if err := enc.Encode(a.GetOneForMarshal(i)); err != nil {
+		if err := enc.Encode(a.GetOneForMarshal(i, true)); err != nil {
 			return nil, err
 		}
 	}
@@ -883,9 +883,9 @@ func (a *LargeListView) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func arrayEqualLargeListView(left, right *LargeListView) bool {
+func arrayEqualLargeListView(left, right *LargeListView, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -893,7 +893,7 @@ func arrayEqualLargeListView(left, right *LargeListView) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return Equal(l, r)
+			return equal(l, r, opt)
 		}()
 		if !o {
 			return false

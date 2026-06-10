@@ -455,9 +455,20 @@ func (b *RecordBuilder) UnmarshalOne(dec *json.Decoder) error {
 			}
 			continue
 		}
+		idx := indices[0]
 
-		if err := b.fields[indices[0]].UnmarshalOne(dec); err != nil {
+		var next json.RawMessage
+		if err := dec.Decode(&next); err != nil {
 			return err
+		}
+
+		if json.IsNullMessage(next) && !b.schema.Field(idx).Nullable {
+			b.fields[idx].AppendEmptyValue()
+		} else {
+			sub := json.NewDecoder(bytes.NewReader(next))
+			if err := b.fields[idx].UnmarshalOne(sub); err != nil {
+				return err
+			}
 		}
 	}
 

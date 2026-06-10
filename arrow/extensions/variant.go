@@ -560,8 +560,8 @@ func (v *VariantArray) MarshalJSON() ([]byte, error) {
 	return json.Marshal(values)
 }
 
-func (v *VariantArray) GetOneForMarshal(i int) any {
-	if v.IsNull(i) {
+func (v *VariantArray) GetOneForMarshal(i int, nullable bool) any {
+	if nullable && v.IsNull(i) {
 		return nil
 	}
 

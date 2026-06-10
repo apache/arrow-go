@@ -94,8 +94,8 @@ func (a *MonthInterval) setData(data *Data) {
 	}
 }
 
-func (a *MonthInterval) GetOneForMarshal(i int) interface{} {
-	if a.IsValid(i) {
+func (a *MonthInterval) GetOneForMarshal(i int, nullable bool) interface{} {
+	if !nullable || a.IsValid(i) {
 		return a.values[i]
 	}
 	return nil
@@ -120,9 +120,9 @@ func (a *MonthInterval) MarshalJSON() ([]byte, error) {
 	return json.Marshal(vals)
 }
 
-func arrayEqualMonthInterval(left, right *MonthInterval) bool {
+func arrayEqualMonthInterval(left, right *MonthInterval, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if left.Value(i) != right.Value(i) {
@@ -361,7 +361,7 @@ func (a *DayTimeInterval) ValueStr(i int) string {
 	if a.IsNull(i) {
 		return NullValueStr
 	}
-	data, err := json.Marshal(a.GetOneForMarshal(i))
+	data, err := json.Marshal(a.GetOneForMarshal(i, true))
 	if err != nil {
 		panic(err)
 	}
@@ -399,8 +399,8 @@ func (a *DayTimeInterval) setData(data *Data) {
 	}
 }
 
-func (a *DayTimeInterval) GetOneForMarshal(i int) interface{} {
-	if a.IsValid(i) {
+func (a *DayTimeInterval) GetOneForMarshal(i int, nullable bool) interface{} {
+	if !nullable || a.IsValid(i) {
 		return a.values[i]
 	}
 	return nil
@@ -423,9 +423,9 @@ func (a *DayTimeInterval) MarshalJSON() ([]byte, error) {
 	return json.Marshal(vals)
 }
 
-func arrayEqualDayTimeInterval(left, right *DayTimeInterval) bool {
+func arrayEqualDayTimeInterval(left, right *DayTimeInterval, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if left.Value(i) != right.Value(i) {
@@ -663,7 +663,7 @@ func (a *MonthDayNanoInterval) ValueStr(i int) string {
 	if a.IsNull(i) {
 		return NullValueStr
 	}
-	data, err := json.Marshal(a.GetOneForMarshal(i))
+	data, err := json.Marshal(a.GetOneForMarshal(i, true))
 	if err != nil {
 		panic(err)
 	}
@@ -703,8 +703,8 @@ func (a *MonthDayNanoInterval) setData(data *Data) {
 	}
 }
 
-func (a *MonthDayNanoInterval) GetOneForMarshal(i int) interface{} {
-	if a.IsValid(i) {
+func (a *MonthDayNanoInterval) GetOneForMarshal(i int, nullable bool) interface{} {
+	if !nullable || a.IsValid(i) {
 		return a.values[i]
 	}
 	return nil
@@ -727,9 +727,9 @@ func (a *MonthDayNanoInterval) MarshalJSON() ([]byte, error) {
 	return json.Marshal(vals)
 }
 
-func arrayEqualMonthDayNanoInterval(left, right *MonthDayNanoInterval) bool {
+func arrayEqualMonthDayNanoInterval(left, right *MonthDayNanoInterval, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if left.Value(i) != right.Value(i) {

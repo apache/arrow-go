@@ -486,6 +486,12 @@ func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 			panic:     false,
 			want:      `{[(null)] [3] {[(null)] [(null)] ["test"]}}`,
 		},
+		{
+			name:      "explicit null in required field",
+			jsonInput: `[{"f2": 3, "f3": {"f3_3": null}}]`,
+			panic:     false,
+			want:      `{[(null)] [3] {[(null)] [(null)] [""]}}`,
+		},
 	}
 
 	for _, tc := range tests {

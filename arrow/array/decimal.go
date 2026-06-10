@@ -55,7 +55,7 @@ func (a *baseDecimal[T]) ValueStr(i int) string {
 	if a.IsNull(i) {
 		return NullValueStr
 	}
-	return a.GetOneForMarshal(i).(string)
+	return a.GetOneForMarshal(i, true).(string)
 }
 
 func (a *baseDecimal[T]) Values() []T { return a.values }
@@ -89,8 +89,8 @@ func (a *baseDecimal[T]) setData(data *Data) {
 	}
 }
 
-func (a *baseDecimal[T]) GetOneForMarshal(i int) any {
-	if a.IsNull(i) {
+func (a *baseDecimal[T]) GetOneForMarshal(i int, nullable bool) any {
+	if nullable && a.IsNull(i) {
 		return nil
 	}
 
@@ -102,7 +102,7 @@ func (a *baseDecimal[T]) GetOneForMarshal(i int) any {
 func (a *baseDecimal[T]) MarshalJSON() ([]byte, error) {
 	vals := make([]any, a.Len())
 	for i := 0; i < a.Len(); i++ {
-		vals[i] = a.GetOneForMarshal(i)
+		vals[i] = a.GetOneForMarshal(i, true)
 	}
 	return json.Marshal(vals)
 }
@@ -110,9 +110,9 @@ func (a *baseDecimal[T]) MarshalJSON() ([]byte, error) {
 func arrayEqualDecimal[T interface {
 	decimal.DecimalTypes
 	decimal.Num[T]
-}](left, right *baseDecimal[T]) bool {
+}](left, right *baseDecimal[T], opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 

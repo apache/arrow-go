@@ -190,13 +190,13 @@ func (a *UUIDArray) ValueStr(i int) string {
 func (a *UUIDArray) MarshalJSON() ([]byte, error) {
 	vals := make([]any, a.Len())
 	for i := range vals {
-		vals[i] = a.GetOneForMarshal(i)
+		vals[i] = a.GetOneForMarshal(i, true)
 	}
 	return json.Marshal(vals)
 }
 
-func (a *UUIDArray) GetOneForMarshal(i int) interface{} {
-	if a.IsValid(i) {
+func (a *UUIDArray) GetOneForMarshal(i int, nullable bool) interface{} {
+	if !nullable || a.IsValid(i) {
 		return a.Value(i)
 	}
 	return nil

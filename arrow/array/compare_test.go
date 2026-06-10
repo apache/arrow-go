@@ -391,6 +391,49 @@ func TestArrayApproxEqualFloats(t *testing.T) {
 	}
 }
 
+func TestArrayEqualNonNullable(t *testing.T) {
+	for name, recs := range arrdata.Records {
+		t.Run(name, func(t *testing.T) {
+			rec := recs[0]
+
+			// Clone the schema and make everything non-nullable
+			fields := rec.Schema().Fields()
+			meta := rec.Schema().Metadata()
+			for i := range fields {
+				fields[i].Nullable = false
+			}
+			schema := arrow.NewSchema(fields, &meta)
+
+			for i, rawCol := range rec.Columns() {
+				// make a clone of the column with NullN=0
+				col := array.MakeFromData(array.NewData(
+					rawCol.DataType(),
+					rawCol.Len(),
+					rawCol.Data().Buffers(),
+					rawCol.Data().Children(),
+					0,
+					0,
+				))
+				t.Run(schema.Field(i).Name, func(t *testing.T) {
+					arr := col
+					if !array.Equal(arr, arr, array.WithNullable(false)) {
+						t.Fatalf("identical arrays should compare equal:\narray=%v", arr)
+					}
+					sub1 := array.NewSlice(arr, 1, int64(arr.Len()))
+					defer sub1.Release()
+
+					sub2 := array.NewSlice(arr, 0, int64(arr.Len()-1))
+					defer sub2.Release()
+
+					if array.Equal(sub1, sub2) && name != "nulls" {
+						t.Fatalf("non-identical arrays should not compare equal:\nsub1=%v\nsub2=%v\narrf=%v\n", sub1, sub2, arr)
+					}
+				})
+			}
+		})
+	}
+}
+
 func testStringMap(mem memory.Allocator, m map[string]string, keys []string) *array.Map {
 	dt := arrow.MapOf(arrow.BinaryTypes.String, arrow.BinaryTypes.String)
 	builder := array.NewMapBuilderWithType(mem, dt)

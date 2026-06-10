@@ -17,6 +17,7 @@
 package array_test
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 	"strings"
@@ -25,6 +26,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/internal/json"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -485,9 +487,9 @@ func TestRecordBuilder(t *testing.T) {
 	mapDt.SetItemNullable(false)
 	schema := arrow.NewSchema(
 		[]arrow.Field{
-			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32},
-			{Name: "f2-f64", Type: arrow.PrimitiveTypes.Float64},
-			{Name: "map", Type: mapDt},
+			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			{Name: "f2-f64-notnull", Type: arrow.PrimitiveTypes.Float64, Nullable: false},
+			{Name: "map", Type: mapDt, Nullable: true},
 		},
 		nil,
 	)
@@ -498,11 +500,14 @@ func TestRecordBuilder(t *testing.T) {
 	b.Retain()
 	b.Release()
 
-	b.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2, 3}, nil)
+	b.Field(0).(*array.Int32Builder).AppendNull()
+	b.Field(0).(*array.Int32Builder).AppendValues([]int32{2, 3}, nil)
 	b.Field(0).(*array.Int32Builder).AppendValues([]int32{4, 5}, nil)
-	b.Field(1).(*array.Float64Builder).AppendValues([]float64{1, 2, 3, 4, 5}, nil)
+
+	b.Field(1).(*array.Float64Builder).AppendValues([]float64{1.1, 2.2, 3.3, 4.4, 5.5}, nil)
+
 	mb := b.Field(2).(*array.MapBuilder)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		mb.Append(true)
 
 		if i%3 == 0 {
@@ -511,6 +516,12 @@ func TestRecordBuilder(t *testing.T) {
 		}
 	}
 
+	err := b.UnmarshalJSON([]byte(`{"f1-i32": 6, "f2-f64-notnull": 6.6, "map": [{"key": "4": "value": "d"}]}`))
+	assert.NoError(t, err)
+
+	err = b.UnmarshalJSON([]byte(`{"f1-i32": null, "f2-f64-notnull": null, "map": null}`))
+	assert.NoError(t, err)
+
 	rec := b.NewRecordBatch()
 	defer rec.Release()
 
@@ -518,7 +529,7 @@ func TestRecordBuilder(t *testing.T) {
 		t.Fatalf("invalid schema: got=%#v, want=%#v", got, want)
 	}
 
-	if got, want := rec.NumRows(), int64(5); got != want {
+	if got, want := rec.NumRows(), int64(7); got != want {
 		t.Fatalf("invalid number of rows: got=%d, want=%d", got, want)
 	}
 	if got, want := rec.NumCols(), int64(3); got != want {
@@ -527,9 +538,27 @@ func TestRecordBuilder(t *testing.T) {
 	if got, want := rec.ColumnName(0), schema.Field(0).Name; got != want {
 		t.Fatalf("invalid column name: got=%q, want=%q", got, want)
 	}
-	if got, want := rec.Column(2).String(), `[{["0" "2" "3"] ["a" "b" "c"]} {[] []} {[] []} {["3" "2" "3"] ["a" "b" "c"]} {[] []}]`; got != want {
-		t.Fatalf("invalid column name: got=%q, want=%q", got, want)
+
+	if got, want := rec.Column(0).String(), `[(null) 2 3 4 5 6 (null)]`; got != want {
+		t.Fatalf("invalid column values: got=%q, want=%q", got, want)
 	}
+	if got, want := rec.Column(1).String(), `[1.1 2.2 3.3 4.4 5.5 6.6 0]`; got != want {
+		t.Fatalf("invalid column values: got=%q, want=%q", got, want)
+	}
+	if got, want := rec.Column(2).String(), `[{["0" "2" "3"] ["a" "b" "c"]} {[] []} {[] []} {["3" "2" "3"] ["a" "b" "c"]} {[] []} {["4"] ["d"]} (null)]`; got != want {
+		t.Fatalf("invalid column values: got=%q, want=%q", got, want)
+	}
+
+	// roundtripping from JSON with array.FromJSON should work
+	arr := array.RecordToStructArray(rec)
+	defer arr.Release()
+	jsonStr, err := json.Marshal(arr)
+	assert.NoError(t, err)
+
+	roundtripped, _, err := array.FromJSON(mem, arr.DataType(), bytes.NewReader(jsonStr))
+	defer roundtripped.Release()
+	assert.NoError(t, err)
+	assert.Truef(t, array.Equal(arr, roundtripped), "JSON round trip returns different array: got=%q, want=%d", arr, roundtripped)
 }
 
 func TestRecordBuilderResize(t *testing.T) {

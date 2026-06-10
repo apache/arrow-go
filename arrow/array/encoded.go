@@ -219,13 +219,13 @@ func (r *RunEndEncoded) String() string {
 			buf.WriteByte(',')
 		}
 
-		value := r.values.GetOneForMarshal(i)
+		value := r.values.GetOneForMarshal(i, true)
 		if byts, ok := value.(json.RawMessage); ok {
 			value = string(byts)
 		}
 
 		var runEnd int
-		switch e := r.ends.GetOneForMarshal(i).(type) {
+		switch e := r.ends.GetOneForMarshal(i, true).(type) {
 		case int16:
 			runEnd = int(e) - r.data.offset
 		case int32:
@@ -240,8 +240,8 @@ func (r *RunEndEncoded) String() string {
 	return buf.String()
 }
 
-func (r *RunEndEncoded) GetOneForMarshal(i int) interface{} {
-	return r.values.GetOneForMarshal(r.GetPhysicalIndex(i))
+func (r *RunEndEncoded) GetOneForMarshal(i int, nullable bool) interface{} {
+	return r.values.GetOneForMarshal(r.GetPhysicalIndex(i), nullable)
 }
 
 func (r *RunEndEncoded) MarshalJSON() ([]byte, error) {
@@ -252,7 +252,7 @@ func (r *RunEndEncoded) MarshalJSON() ([]byte, error) {
 		if i != 0 {
 			buf.WriteByte(',')
 		}
-		if err := enc.Encode(r.GetOneForMarshal(i)); err != nil {
+		if err := enc.Encode(r.GetOneForMarshal(i, true)); err != nil {
 			return nil, err
 		}
 	}
@@ -260,14 +260,14 @@ func (r *RunEndEncoded) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func arrayRunEndEncodedEqual(l, r *RunEndEncoded) bool {
+func arrayRunEndEncodedEqual(l, r *RunEndEncoded, opt equalOption) bool {
 	// types were already checked before getting here, so we know
 	// the encoded types are equal
 	mr := encoded.NewMergedRuns([2]arrow.Array{l, r})
 	for mr.Next() {
 		lIndex := mr.IndexIntoArray(0)
 		rIndex := mr.IndexIntoArray(1)
-		if !SliceEqual(l.values, lIndex, lIndex+1, r.values, rIndex, rIndex+1) {
+		if !sliceEqual(l.values, lIndex, lIndex+1, r.values, rIndex, rIndex+1, opt) {
 			return false
 		}
 	}
