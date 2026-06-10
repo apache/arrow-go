@@ -1058,6 +1058,10 @@ func getNestedFactory(origin, inferred arrow.DataType) func(fieldList []arrow.Fi
 			return func(list []arrow.Field) arrow.DataType {
 				return arrow.FixedSizeListOfField(sz, list[0])
 			}
+		case arrow.LARGE_LIST:
+			return func(list []arrow.Field) arrow.DataType {
+				return arrow.LargeListOfField(list[0])
+			}
 		}
 	case arrow.MAP:
 		if origin.ID() == arrow.MAP {

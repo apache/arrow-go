@@ -57,6 +57,14 @@ func (v varRangeSelector) GetRange(idx int64) elemRange {
 	return elemRange{int64(v.offsets[idx]), int64(v.offsets[idx+1])}
 }
 
+type largeVarRangeSelector struct {
+	offsets []int64
+}
+
+func (v largeVarRangeSelector) GetRange(idx int64) elemRange {
+	return elemRange{v.offsets[idx], v.offsets[idx+1]}
+}
+
 type fixedSizeRangeSelector struct {
 	listSize int32
 }
@@ -403,6 +411,12 @@ func (p *pathBuilder) Visit(arr arrow.Array) error {
 		}
 		return p.visitListLike(arr,
 			varRangeSelector{larr.Offsets()[larr.Data().Offset():]},
+			-1, // defLevelIfEmpty = maxDefLevel - 1 (after all increments)
+			larr.ListValues())
+	case arrow.LARGE_LIST:
+		larr := arr.(*array.LargeList)
+		return p.visitListLike(arr,
+			largeVarRangeSelector{larr.Offsets()[larr.Data().Offset():]},
 			-1, // defLevelIfEmpty = maxDefLevel - 1 (after all increments)
 			larr.ListValues())
 	case arrow.FIXED_SIZE_LIST:

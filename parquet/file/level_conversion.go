@@ -19,7 +19,6 @@ package file
 import (
 	"errors"
 	"fmt"
-	"math"
 	"math/bits"
 	"unsafe"
 
@@ -186,7 +185,9 @@ func DefLevelsToBitmap(defLevels []int16, info LevelInfo, out *ValidityBitmapInp
 
 // DefRepLevelsToListInfo takes in the definition and repetition levels in order to populate the validity bitmap
 // and properly handle nested lists and update the offsets for them.
-func DefRepLevelsToListInfo(defLevels, repLevels []int16, info LevelInfo, out *ValidityBitmapInputOutput, offsets []int32) error {
+func DefRepLevelsToListInfo[OffsetType int32 | int64](defLevels, repLevels []int16, info LevelInfo, out *ValidityBitmapInputOutput, offsets []OffsetType) error {
+	bits := unsafe.Sizeof(OffsetType(0)) * 8
+	maxOffset := OffsetType(uint64(1)<<(bits-1) - 1)
 	var wr utils.BitmapWriter
 	if out.ValidBits != nil {
 		wr = utils.NewFirstTimeBitmapWriter(out.ValidBits, out.ValidBitsOffset, out.ReadUpperBound)
@@ -203,7 +204,7 @@ func DefRepLevelsToListInfo(defLevels, repLevels []int16, info LevelInfo, out *V
 			// continuation of an existing list.
 			// offsets can be null for structs with repeated children
 			if offsetPos < len(offsets) {
-				if offsets[offsetPos] == math.MaxInt32 {
+				if offsets[offsetPos] == maxOffset {
 					return errors.New("list index overflow")
 				}
 				offsets[offsetPos]++
@@ -223,7 +224,7 @@ func DefRepLevelsToListInfo(defLevels, repLevels []int16, info LevelInfo, out *V
 				// cumulative and subtract when validating fixed size lists
 				offsets[offsetPos] = offsets[offsetPos-1]
 				if defLevels[idx] >= info.DefLevel {
-					if offsets[offsetPos] == math.MaxInt32 {
+					if offsets[offsetPos] == maxOffset {
 						return errors.New("list index overflow")
 					}
 					offsets[offsetPos]++
@@ -261,5 +262,5 @@ func DefRepLevelsToListInfo(defLevels, repLevels []int16, info LevelInfo, out *V
 func DefRepLevelsToBitmap(defLevels, repLevels []int16, info LevelInfo, out *ValidityBitmapInputOutput) error {
 	info.RepLevel++
 	info.DefLevel++
-	return DefRepLevelsToListInfo(defLevels, repLevels, info, out, nil)
+	return DefRepLevelsToListInfo[int32](defLevels, repLevels, info, out, nil)
 }

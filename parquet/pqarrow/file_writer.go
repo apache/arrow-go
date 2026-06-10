@@ -47,6 +47,13 @@ func normalizeFieldForParquet(f arrow.Field) (arrow.Field, error) {
 		}
 		elem.Name = "element"
 		return arrow.Field{Name: f.Name, Type: arrow.ListOfField(elem), Nullable: f.Nullable, Metadata: f.Metadata}, nil
+	case *arrow.LargeListType:
+		elem, err := normalizeFieldForParquet(dt.ElemField())
+		if err != nil {
+			return arrow.Field{}, err
+		}
+		elem.Name = "element"
+		return arrow.Field{Name: f.Name, Type: arrow.LargeListOfField(elem), Nullable: f.Nullable, Metadata: f.Metadata}, nil
 	case *arrow.FixedSizeListType:
 		elem, err := normalizeFieldForParquet(dt.ElemField())
 		if err != nil {
