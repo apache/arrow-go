@@ -295,6 +295,8 @@ func TestAppendBinaryAndStringDataUnexpectedTypes(t *testing.T) {
 	assert.NoError(t, appendStringData(sb, "ok"))
 	assert.NoError(t, appendStringData(sb, []byte("ok")))
 	assert.NoError(t, appendStringData(sb, nil))
+	assert.NoError(t, appendStringData(sb, map[string]any{"string": "ok"}))
 	assert.ErrorContains(t, appendStringData(sb, 42), "unexpected type int")
-	assert.Equal(t, 3, sb.Len())
+	assert.ErrorContains(t, appendStringData(sb, map[string]any{"string": 42}), "unexpected type int")
+	assert.Equal(t, 4, sb.Len())
 }

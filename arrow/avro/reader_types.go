@@ -870,6 +870,8 @@ func appendStringData(b *array.StringBuilder, data interface{}) error {
 			b.AppendNull()
 		case string:
 			b.Append(v)
+		default:
+			return fmt.Errorf("unexpected type %T for avro string union value", v)
 		}
 	default:
 		return fmt.Errorf("unexpected type %T for avro string value", data)
