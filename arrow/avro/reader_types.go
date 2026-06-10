@@ -92,10 +92,21 @@ func (d *dataLoader) drawTree(field *fieldPos) {
 // Since array.StructBuilder.AppendNull() will recursively append null to all of the
 // struct's fields, in the case of nil being passed to a struct's builderFunc it will
 // return a ErrNullStructData error to signal that all its sub-fields can be skipped.
+// filterNullStruct drops ErrNullStructData, which signals a null struct
+// whose sub-fields can be skipped rather than a failure.
+func filterNullStruct(err error) error {
+	if err == ErrNullStructData {
+		return nil
+	}
+	return err
+}
+
 func (d *dataLoader) loadDatum(data any) error {
 	if d.list == nil && d.mapField == nil {
 		if d.mapValue != nil {
-			d.mapValue.appendFunc(data)
+			if err := filterNullStruct(d.mapValue.appendFunc(data)); err != nil {
+				return err
+			}
 		}
 		var NullParent *fieldPos
 		for _, f := range d.fields {
@@ -136,7 +147,9 @@ func (d *dataLoader) loadDatum(data any) error {
 						}
 					} else {
 						for _, e := range dt {
-							d.children[0].loadDatum(e)
+							if err := d.children[0].loadDatum(e); err != nil {
+								return err
+							}
 						}
 					}
 				case map[string]any:
@@ -154,16 +167,24 @@ func (d *dataLoader) loadDatum(data any) error {
 		}
 		for _, c := range d.children {
 			if c.list != nil {
-				c.loadDatum(c.list.getValue(data))
+				if err := c.loadDatum(c.list.getValue(data)); err != nil {
+					return err
+				}
 			}
 			if c.mapField != nil {
 				switch dt := data.(type) {
 				case nil:
-					c.loadDatum(dt)
+					if err := c.loadDatum(dt); err != nil {
+						return err
+					}
 				case map[string]any:
-					c.loadDatum(c.mapField.getValue(dt))
+					if err := c.loadDatum(c.mapField.getValue(dt)); err != nil {
+						return err
+					}
 				default:
-					c.loadDatum(c.mapField.getValue(data))
+					if err := c.loadDatum(c.mapField.getValue(data)); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -171,12 +192,18 @@ func (d *dataLoader) loadDatum(data any) error {
 		if d.list != nil {
 			switch dt := data.(type) {
 			case nil:
-				d.list.appendFunc(dt)
+				if err := filterNullStruct(d.list.appendFunc(dt)); err != nil {
+					return err
+				}
 			case []any:
-				d.list.appendFunc(dt)
+				if err := filterNullStruct(d.list.appendFunc(dt)); err != nil {
+					return err
+				}
 				for _, e := range dt {
 					if d.item != nil {
-						d.item.appendFunc(e)
+						if err := filterNullStruct(d.item.appendFunc(e)); err != nil {
+							return err
+						}
 					}
 					var NullParent *fieldPos
 					for _, f := range d.fields {
@@ -194,18 +221,26 @@ func (d *dataLoader) loadDatum(data any) error {
 					}
 					for _, c := range d.children {
 						if c.list != nil {
-							c.loadDatum(c.list.getValue(e))
+							if err := c.loadDatum(c.list.getValue(e)); err != nil {
+								return err
+							}
 						}
 						if c.mapField != nil {
-							c.loadDatum(c.mapField.getValue(e))
+							if err := c.loadDatum(c.mapField.getValue(e)); err != nil {
+								return err
+							}
 						}
 					}
 				}
 			case map[string]any:
-				d.list.appendFunc(dt["array"])
+				if err := filterNullStruct(d.list.appendFunc(dt["array"])); err != nil {
+					return err
+				}
 				for _, e := range dt["array"].([]any) {
 					if d.item != nil {
-						d.item.appendFunc(e)
+						if err := filterNullStruct(d.item.appendFunc(e)); err != nil {
+							return err
+						}
 					}
 					var NullParent *fieldPos
 					for _, f := range d.fields {
@@ -222,27 +257,40 @@ func (d *dataLoader) loadDatum(data any) error {
 						}
 					}
 					for _, c := range d.children {
-						c.loadDatum(c.list.getValue(e))
+						if err := c.loadDatum(c.list.getValue(e)); err != nil {
+							return err
+						}
 					}
 				}
 			default:
-				d.list.appendFunc(data)
-				d.item.appendFunc(dt)
+				if err := filterNullStruct(d.list.appendFunc(data)); err != nil {
+					return err
+				}
+				if err := filterNullStruct(d.item.appendFunc(dt)); err != nil {
+					return err
+				}
 			}
 		}
 		if d.mapField != nil {
 			switch dt := data.(type) {
 			case nil:
-				d.mapField.appendFunc(dt)
+				if err := filterNullStruct(d.mapField.appendFunc(dt)); err != nil {
+					return err
+				}
 			case map[string]any:
-
-				d.mapField.appendFunc(dt)
+				if err := filterNullStruct(d.mapField.appendFunc(dt)); err != nil {
+					return err
+				}
 				for k, v := range dt {
-					d.mapKey.appendFunc(k)
+					if err := filterNullStruct(d.mapKey.appendFunc(k)); err != nil {
+						return err
+					}
 					if d.mapValue != nil {
-						d.mapValue.appendFunc(v)
-					} else {
-						d.children[0].loadDatum(v)
+						if err := filterNullStruct(d.mapValue.appendFunc(v)); err != nil {
+							return err
+						}
+					} else if err := d.children[0].loadDatum(v); err != nil {
+						return err
 					}
 				}
 			}
@@ -397,8 +445,7 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 	switch bt := b.(type) {
 	case *array.BinaryBuilder:
 		f.appendFunc = func(data interface{}) error {
-			appendBinaryData(bt, data)
-			return nil
+			return appendBinaryData(bt, data)
 		}
 	case *array.BinaryDictionaryBuilder:
 		// has metadata for Avro enum symbols
@@ -551,8 +598,7 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 		}
 	case *array.StringBuilder:
 		f.appendFunc = func(data interface{}) error {
-			appendStringData(bt, data)
-			return nil
+			return appendStringData(bt, data)
 		}
 	case *array.StructBuilder:
 		// has metadata for Avro Union named types
@@ -590,20 +636,25 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 	}
 }
 
-func appendBinaryData(b *array.BinaryBuilder, data interface{}) {
+func appendBinaryData(b *array.BinaryBuilder, data interface{}) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
+	case []byte:
+		b.Append(dt)
 	case map[string]any:
 		switch ct := dt["bytes"].(type) {
 		case nil:
 			b.AppendNull()
+		case []byte:
+			b.Append(ct)
 		default:
-			b.Append(ct.([]byte))
+			return fmt.Errorf("unexpected type %T for avro bytes union value", ct)
 		}
 	default:
-		b.Append(fmt.Append([]byte{}, data))
+		return fmt.Errorf("unexpected type %T for avro bytes value", data)
 	}
+	return nil
 }
 
 func appendBinaryDictData(b *array.BinaryDictionaryBuilder, data interface{}) {
@@ -853,22 +904,27 @@ func appendInt64Data(b *array.Int64Builder, data interface{}) {
 	}
 }
 
-func appendStringData(b *array.StringBuilder, data interface{}) {
+func appendStringData(b *array.StringBuilder, data interface{}) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
 	case string:
 		b.Append(dt)
+	case []byte:
+		b.Append(string(dt))
 	case map[string]any:
 		switch v := dt["string"].(type) {
 		case nil:
 			b.AppendNull()
 		case string:
 			b.Append(v)
+		default:
+			return fmt.Errorf("unexpected type %T for avro string union value", v)
 		}
 	default:
-		b.Append(fmt.Sprint(data))
+		return fmt.Errorf("unexpected type %T for avro string value", data)
 	}
+	return nil
 }
 
 func appendTime32Data(b *array.Time32Builder, data interface{}) {

@@ -25,8 +25,11 @@ import (
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/avro/testdata"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	hamba "github.com/hamba/avro/v2"
+	"github.com/hamba/avro/v2/ocf"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -226,4 +229,110 @@ func TestReader(t *testing.T) {
 			assert.Equal(t, jsonParsed, avroParsed[0])
 		})
 	}
+}
+
+// TestOCFReaderBytesValues exercises avro `bytes` fields, both plain and as a
+// ["null","bytes"] union: hamba hands the decoded value to the appenders as a
+// bare []byte, which previously fell into appendBinaryData's fmt fallback and
+// appended the formatted text (e.g. "[1 2 3]") instead of the payload.
+func TestOCFReaderBytesValues(t *testing.T) {
+	schema := `{
+		"type": "record",
+		"name": "rec",
+		"fields": [
+			{"name": "plain", "type": "bytes"},
+			{"name": "nullable", "type": ["null", "bytes"]}
+		]
+	}`
+	payload := []byte{0x00, 0x01, 0xfe, 0xff}
+
+	var buf bytes.Buffer
+	enc, err := ocf.NewEncoder(schema, &buf)
+	assert.NoError(t, err)
+	assert.NoError(t, enc.Encode(map[string]any{
+		"plain":    payload,
+		"nullable": map[string]any{"bytes": payload},
+	}))
+	assert.NoError(t, enc.Encode(map[string]any{
+		"plain":    []byte{},
+		"nullable": nil,
+	}))
+	assert.NoError(t, enc.Close())
+
+	ar, err := NewOCFReader(bytes.NewReader(buf.Bytes()), WithChunk(-1))
+	assert.NoError(t, err)
+	defer ar.Close()
+
+	assert.True(t, ar.Next())
+	assert.NoError(t, ar.Err())
+	rec := ar.RecordBatch()
+
+	plain := rec.Column(0).(*array.Binary)
+	assert.Equal(t, payload, plain.Value(0))
+	assert.Equal(t, []byte{}, plain.Value(1))
+
+	nullable := rec.Column(1).(*array.Binary)
+	assert.Equal(t, payload, nullable.Value(0))
+	assert.True(t, nullable.IsNull(1))
+}
+
+// Types outside what the hamba decoder produces must error rather than append
+// a fmt-formatted rendering of the value.
+func TestAppendBinaryAndStringDataUnexpectedTypes(t *testing.T) {
+	bb := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+	defer bb.Release()
+
+	assert.NoError(t, appendBinaryData(bb, []byte{0x01}))
+	assert.NoError(t, appendBinaryData(bb, nil))
+	assert.NoError(t, appendBinaryData(bb, map[string]any{"bytes": []byte{0x02}}))
+	assert.ErrorContains(t, appendBinaryData(bb, 42), "unexpected type int")
+	assert.ErrorContains(t, appendBinaryData(bb, map[string]any{"bytes": "text"}), "unexpected type string")
+	assert.Equal(t, 3, bb.Len())
+
+	sb := array.NewStringBuilder(memory.DefaultAllocator)
+	defer sb.Release()
+
+	assert.NoError(t, appendStringData(sb, "ok"))
+	assert.NoError(t, appendStringData(sb, []byte("ok")))
+	assert.NoError(t, appendStringData(sb, nil))
+	assert.NoError(t, appendStringData(sb, map[string]any{"string": "ok"}))
+	assert.ErrorContains(t, appendStringData(sb, 42), "unexpected type int")
+	assert.ErrorContains(t, appendStringData(sb, map[string]any{"string": 42}), "unexpected type int")
+	assert.Equal(t, 4, sb.Len())
+}
+
+// loadDatum must surface appender errors from nested paths (map values,
+// list items), not only from top-level and struct fields.
+func TestLoadDatumPropagatesNestedAppendErrors(t *testing.T) {
+	newLoader := func(t *testing.T, avroSchema string) (*dataLoader, *array.RecordBuilder) {
+		t.Helper()
+		schema, err := hamba.Parse(avroSchema)
+		assert.NoError(t, err)
+		arrowSchema, err := ArrowSchemaFromAvro(schema)
+		assert.NoError(t, err)
+		bld := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+		pos := newFieldPos()
+		ldr := newDataLoader()
+		for idx, fb := range bld.Fields() {
+			mapFieldBuilders(fb, arrowSchema.Field(idx), pos)
+		}
+		ldr.drawTree(pos)
+		return ldr, bld
+	}
+
+	t.Run("map value", func(t *testing.T) {
+		ldr, bld := newLoader(t, `{"type":"record","name":"r","fields":[
+			{"name":"m","type":{"type":"map","values":"bytes"}}]}`)
+		defer bld.Release()
+		assert.NoError(t, ldr.loadDatum(map[string]any{"m": map[string]any{"k": []byte{0x01}}}))
+		assert.ErrorContains(t, ldr.loadDatum(map[string]any{"m": map[string]any{"k": 42}}), "unexpected type int")
+	})
+
+	t.Run("list item", func(t *testing.T) {
+		ldr, bld := newLoader(t, `{"type":"record","name":"r","fields":[
+			{"name":"l","type":{"type":"array","items":"bytes"}}]}`)
+		defer bld.Release()
+		assert.NoError(t, ldr.loadDatum(map[string]any{"l": []any{[]byte{0x01}}}))
+		assert.ErrorContains(t, ldr.loadDatum(map[string]any{"l": []any{42}}), "unexpected type int")
+	})
 }
