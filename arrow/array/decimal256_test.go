@@ -169,7 +169,7 @@ func TestDecimal256Slice(t *testing.T) {
 		t.Fatalf("could not type-assert to array.String")
 	}
 
-	if got, want := v.String(), `[(null) {[4 4 4 4]}]`; got != want {
+	if got, want := v.String(), `[(null) 2.510840694e+57]`; got != want {
 		t.Fatalf("got=%q, want=%q", got, want)
 	}
 	assert.Equal(t, array.NullValueStr, v.ValueStr(0))
