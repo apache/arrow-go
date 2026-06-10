@@ -42,9 +42,7 @@ const (
 type ByteArray []byte
 
 func (b ByteArray) MarshalJSON() ([]byte, error) {
-	s := fmt.Sprint(b)
-	encoded := base64.StdEncoding.EncodeToString([]byte(s))
-	return json.Marshal(encoded)
+	return json.Marshal(base64.StdEncoding.EncodeToString(b))
 }
 
 type TimestampMicros int64

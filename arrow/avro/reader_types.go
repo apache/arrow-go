@@ -594,6 +594,10 @@ func appendBinaryData(b *array.BinaryBuilder, data interface{}) {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
+	case []byte:
+		b.Append(dt)
+	case string:
+		b.Append([]byte(dt))
 	case map[string]any:
 		switch ct := dt["bytes"].(type) {
 		case nil:
@@ -859,6 +863,8 @@ func appendStringData(b *array.StringBuilder, data interface{}) {
 		b.AppendNull()
 	case string:
 		b.Append(dt)
+	case []byte:
+		b.Append(string(dt))
 	case map[string]any:
 		switch v := dt["string"].(type) {
 		case nil:

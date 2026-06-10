@@ -25,8 +25,10 @@ import (
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/avro/testdata"
 	hamba "github.com/hamba/avro/v2"
+	"github.com/hamba/avro/v2/ocf"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -226,4 +228,49 @@ func TestReader(t *testing.T) {
 			assert.Equal(t, jsonParsed, avroParsed[0])
 		})
 	}
+}
+
+// TestOCFReaderBytesValues exercises avro `bytes` fields, both plain and as a
+// ["null","bytes"] union: hamba hands the decoded value to the appenders as a
+// bare []byte, which previously fell into appendBinaryData's fmt fallback and
+// appended the formatted text (e.g. "[1 2 3]") instead of the payload.
+func TestOCFReaderBytesValues(t *testing.T) {
+	schema := `{
+		"type": "record",
+		"name": "rec",
+		"fields": [
+			{"name": "plain", "type": "bytes"},
+			{"name": "nullable", "type": ["null", "bytes"]}
+		]
+	}`
+	payload := []byte{0x00, 0x01, 0xfe, 0xff}
+
+	var buf bytes.Buffer
+	enc, err := ocf.NewEncoder(schema, &buf)
+	assert.NoError(t, err)
+	assert.NoError(t, enc.Encode(map[string]any{
+		"plain":    payload,
+		"nullable": map[string]any{"bytes": payload},
+	}))
+	assert.NoError(t, enc.Encode(map[string]any{
+		"plain":    []byte{},
+		"nullable": nil,
+	}))
+	assert.NoError(t, enc.Close())
+
+	ar, err := NewOCFReader(bytes.NewReader(buf.Bytes()), WithChunk(-1))
+	assert.NoError(t, err)
+	defer ar.Close()
+
+	assert.True(t, ar.Next())
+	assert.NoError(t, ar.Err())
+	rec := ar.RecordBatch()
+
+	plain := rec.Column(0).(*array.Binary)
+	assert.Equal(t, payload, plain.Value(0))
+	assert.Equal(t, []byte{}, plain.Value(1))
+
+	nullable := rec.Column(1).(*array.Binary)
+	assert.Equal(t, payload, nullable.Value(0))
+	assert.True(t, nullable.IsNull(1))
 }
