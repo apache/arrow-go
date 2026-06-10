@@ -397,8 +397,7 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 	switch bt := b.(type) {
 	case *array.BinaryBuilder:
 		f.appendFunc = func(data interface{}) error {
-			appendBinaryData(bt, data)
-			return nil
+			return appendBinaryData(bt, data)
 		}
 	case *array.BinaryDictionaryBuilder:
 		// has metadata for Avro enum symbols
@@ -551,8 +550,7 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 		}
 	case *array.StringBuilder:
 		f.appendFunc = func(data interface{}) error {
-			appendStringData(bt, data)
-			return nil
+			return appendStringData(bt, data)
 		}
 	case *array.StructBuilder:
 		// has metadata for Avro Union named types
@@ -590,24 +588,25 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 	}
 }
 
-func appendBinaryData(b *array.BinaryBuilder, data interface{}) {
+func appendBinaryData(b *array.BinaryBuilder, data interface{}) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
 	case []byte:
 		b.Append(dt)
-	case string:
-		b.Append([]byte(dt))
 	case map[string]any:
 		switch ct := dt["bytes"].(type) {
 		case nil:
 			b.AppendNull()
+		case []byte:
+			b.Append(ct)
 		default:
-			b.Append(ct.([]byte))
+			return fmt.Errorf("unexpected type %T for avro bytes union value", ct)
 		}
 	default:
-		b.Append(fmt.Append([]byte{}, data))
+		return fmt.Errorf("unexpected type %T for avro bytes value", data)
 	}
+	return nil
 }
 
 func appendBinaryDictData(b *array.BinaryDictionaryBuilder, data interface{}) {
@@ -857,7 +856,7 @@ func appendInt64Data(b *array.Int64Builder, data interface{}) {
 	}
 }
 
-func appendStringData(b *array.StringBuilder, data interface{}) {
+func appendStringData(b *array.StringBuilder, data interface{}) error {
 	switch dt := data.(type) {
 	case nil:
 		b.AppendNull()
@@ -873,8 +872,9 @@ func appendStringData(b *array.StringBuilder, data interface{}) {
 			b.Append(v)
 		}
 	default:
-		b.Append(fmt.Sprint(data))
+		return fmt.Errorf("unexpected type %T for avro string value", data)
 	}
+	return nil
 }
 
 func appendTime32Data(b *array.Time32Builder, data interface{}) {

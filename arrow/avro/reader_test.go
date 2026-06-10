@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/avro/testdata"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	hamba "github.com/hamba/avro/v2"
 	"github.com/hamba/avro/v2/ocf"
 	"github.com/stretchr/testify/assert"
@@ -273,4 +274,27 @@ func TestOCFReaderBytesValues(t *testing.T) {
 	nullable := rec.Column(1).(*array.Binary)
 	assert.Equal(t, payload, nullable.Value(0))
 	assert.True(t, nullable.IsNull(1))
+}
+
+// Types outside what the hamba decoder produces must error rather than append
+// a fmt-formatted rendering of the value.
+func TestAppendBinaryAndStringDataUnexpectedTypes(t *testing.T) {
+	bb := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+	defer bb.Release()
+
+	assert.NoError(t, appendBinaryData(bb, []byte{0x01}))
+	assert.NoError(t, appendBinaryData(bb, nil))
+	assert.NoError(t, appendBinaryData(bb, map[string]any{"bytes": []byte{0x02}}))
+	assert.ErrorContains(t, appendBinaryData(bb, 42), "unexpected type int")
+	assert.ErrorContains(t, appendBinaryData(bb, map[string]any{"bytes": "text"}), "unexpected type string")
+	assert.Equal(t, 3, bb.Len())
+
+	sb := array.NewStringBuilder(memory.DefaultAllocator)
+	defer sb.Release()
+
+	assert.NoError(t, appendStringData(sb, "ok"))
+	assert.NoError(t, appendStringData(sb, []byte("ok")))
+	assert.NoError(t, appendStringData(sb, nil))
+	assert.ErrorContains(t, appendStringData(sb, 42), "unexpected type int")
+	assert.Equal(t, 3, sb.Len())
 }
