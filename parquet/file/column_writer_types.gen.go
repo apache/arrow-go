@@ -1637,6 +1637,42 @@ func (w *BooleanColumnChunkWriter) WriteBitmapBatchSpaced(bitmap []byte, bitmapO
 	})
 }
 
+// WriteBitmapBatchSpacedWithError behaves like WriteBitmapBatchSpaced but
+// reports a write failure as an error instead of panicking or silently
+// discarding it, mirroring the error handling of WriteBatch. Prefer this
+// method on write paths whose sink may fail.
+func (w *BooleanColumnChunkWriter) WriteBitmapBatchSpacedWithError(bitmap []byte, bitmapOffset int64, numValues int, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) (valueOffset int64, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = utils.FormatRecoveredError("unknown error type", r)
+		}
+	}()
+	length := len(defLevels)
+	if defLevels == nil {
+		length = numValues
+	}
+
+	doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
+		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
+
+		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+
+		if w.bitsBuffer != nil {
+			w.writeBitmapValuesSpaced(bitmap, bitmapOffset+valueOffset, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
+		} else {
+			w.writeBitmapValuesSpaced(bitmap, bitmapOffset+valueOffset, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
+		}
+
+		if err := w.commitWriteAndCheckPageLimit(batch, info.numSpaced()); err != nil {
+			panic(err)
+		}
+		valueOffset += info.numSpaced()
+
+		w.checkDictionarySizeLimit()
+	})
+	return
+}
+
 func (w *BooleanColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels, repLevels []int16) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
