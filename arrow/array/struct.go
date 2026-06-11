@@ -207,9 +207,14 @@ func (a *Struct) GetOneForMarshal(i int) interface{} {
 	}
 
 	tmp := make(map[string]interface{})
-	fieldList := a.data.dtype.(*arrow.StructType).Fields()
+	dtype := a.data.dtype.(*arrow.StructType)
+	fieldList := dtype.Fields()
 	for j, d := range a.fields {
-		tmp[fieldList[j].Name] = d.GetOneForMarshal(i)
+		if dtype.Field(j).Nullable && a.IsNull(i) {
+			tmp[fieldList[j].Name] = nil
+		} else {
+			tmp[fieldList[j].Name] = d.GetOneForMarshal(i)
+		}
 	}
 	return tmp
 }
@@ -467,19 +472,27 @@ func (b *StructBuilder) UnmarshalOne(dec *json.Decoder) error {
 			if keylist[key] {
 				return fmt.Errorf("key %s is specified twice", key)
 			}
-
 			keylist[key] = true
 
-			idx, ok := b.dtype.(*arrow.StructType).FieldIdx(key)
+			var next json.RawMessage
+			if err := dec.Decode(&next); err != nil {
+				return err
+			}
+
+			dtype := b.dtype.(*arrow.StructType)
+
+			idx, ok := dtype.FieldIdx(key)
 			if !ok {
-				var extra interface{}
-				if err := dec.Decode(&extra); err != nil {
-					return err
-				}
 				continue
 			}
 
-			if err := b.fields[idx].UnmarshalOne(dec); err != nil {
+			if bytes.Equal(next, []byte("null")) && !dtype.Field(idx).Nullable {
+				return fmt.Errorf("field '%s' is non-nullable but got null", dtype.Field(idx).Name)
+			}
+
+			valDec := json.NewDecoder(bytes.NewReader(next))
+			valDec.UseNumber()
+			if err := b.fields[idx].UnmarshalOne(valDec); err != nil {
 				return err
 			}
 		}
