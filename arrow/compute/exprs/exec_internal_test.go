@@ -117,12 +117,8 @@ func TestMakeExecBatch(t *testing.T) {
 }
 
 func TestLiteralToDatumIntervalYearToMonth(t *testing.T) {
-	// memory.NewCheckedAllocator with AssertSize would fail here:
-	// *scalar.Extension does not implement Release() (see
-	// arrow/scalar/scalar.go), so an extension scalar's underlying
-	// storage is never released even when the wrapping Datum is.
-	// This will be fixable once https://github.com/apache/arrow-go/issues/827 is addressed.
-	mem := memory.DefaultAllocator
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	extSet := NewExtensionSetDefault(
 		expr.NewEmptyExtensionRegistry(extensions.GetDefaultCollectionWithNoError()))

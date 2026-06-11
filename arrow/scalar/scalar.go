@@ -399,6 +399,18 @@ type Extension struct {
 	Value Scalar
 }
 
+func (s *Extension) Retain() {
+	if r, ok := s.Value.(Releasable); ok {
+		r.Retain()
+	}
+}
+
+func (s *Extension) Release() {
+	if r, ok := s.Value.(Releasable); ok {
+		r.Release()
+	}
+}
+
 func (s *Extension) value() interface{} { return s.Value }
 func (s *Extension) equals(rhs Scalar) bool {
 	return Equals(s.Value, rhs.(*Extension).Value)
