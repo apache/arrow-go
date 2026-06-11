@@ -76,6 +76,8 @@ func hasNestedDict(data arrow.ArrayData) bool {
 
 // Writer is an Arrow stream writer.
 type Writer struct {
+	mu sync.Mutex
+
 	w io.Writer
 
 	mem memory.Allocator
@@ -127,7 +129,12 @@ func NewWriter(w io.Writer, opts ...Option) *Writer {
 	}
 }
 
+// Close flushes any remaining payloads and releases retained dictionaries.
+// Close is safe to call concurrently with Write; the two are serialized.
 func (w *Writer) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	if !w.started {
 		err := w.start()
 		if err != nil {
@@ -152,7 +159,14 @@ func (w *Writer) Close() error {
 	return nil
 }
 
+// Write writes a record batch to the stream, writing the schema first if it
+// has not been written yet. Write is safe to call concurrently with itself and
+// with Close: calls are serialized, so records are written in the order in
+// which the lock is acquired.
 func (w *Writer) Write(rec arrow.RecordBatch) (err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	defer func() {
 		if pErr := recover(); pErr != nil {
 			err = utils.FormatRecoveredError("arrow/ipc: unknown error while writing", pErr)
