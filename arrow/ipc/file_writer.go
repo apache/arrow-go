@@ -356,6 +356,9 @@ func (f *FileWriter) checkStarted() error {
 }
 
 func (f *FileWriter) start() error {
+	if f.schema == nil {
+		return errNoSchema
+	}
 	f.headerStarted = true
 	err := f.pw.Start()
 	if err != nil {

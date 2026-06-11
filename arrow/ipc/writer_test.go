@@ -192,6 +192,25 @@ func TestWriteAfterClose(t *testing.T) {
 	})
 }
 
+// TestCloseWithoutSchema verifies that closing a writer that was never given a
+// schema (and never written to) returns an error instead of panicking on a nil
+// schema in start(). This guards the concurrent ordering where Close acquires
+// the lock before the first schema-inferring Write.
+func TestCloseWithoutSchema(t *testing.T) {
+	t.Run("stream", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := NewWriter(&buf)
+		require.ErrorIs(t, w.Close(), errNoSchema)
+	})
+
+	t.Run("file", func(t *testing.T) {
+		var buf bytes.Buffer
+		w, err := NewFileWriter(&buf)
+		require.NoError(t, err)
+		require.ErrorIs(t, w.Close(), errNoSchema)
+	})
+}
+
 func TestNewTruncatedBitmap(t *testing.T) {
 	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer alloc.AssertSize(t, 0)

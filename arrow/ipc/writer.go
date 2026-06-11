@@ -290,6 +290,9 @@ func writeDictionaryPayloads(mem memory.Allocator, batch arrow.RecordBatch, isFi
 }
 
 func (w *Writer) start() error {
+	if w.schema == nil {
+		return errNoSchema
+	}
 	w.started = true
 
 	w.mapper.ImportSchema(w.schema)
