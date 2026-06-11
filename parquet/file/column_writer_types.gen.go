@@ -142,6 +142,44 @@ func (w *Int32ColumnChunkWriter) WriteBatchSpaced(values []int32, defLevels, rep
 	})
 }
 
+// WriteBatchSpacedWithError behaves like WriteBatchSpaced but reports a write
+// failure as an error instead of panicking or silently discarding it,
+// mirroring the error handling of WriteBatch. Prefer this method on write
+// paths whose sink may fail (for example a network-attached writer).
+func (w *Int32ColumnChunkWriter) WriteBatchSpacedWithError(values []int32, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) (valueOffset int64, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = utils.FormatRecoveredError("unknown error type", r)
+		}
+	}()
+	length := len(defLevels)
+	if defLevels == nil {
+		length = len(values)
+	}
+	doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
+		var vals []int32
+		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
+
+		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		if values != nil {
+			vals = values[valueOffset : valueOffset+info.numSpaced()]
+		}
+
+		if w.bitsBuffer != nil {
+			w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
+		} else {
+			w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
+		}
+		if err := w.commitWriteAndCheckPageLimit(batch, info.numSpaced()); err != nil {
+			panic(err)
+		}
+		valueOffset += info.numSpaced()
+
+		w.checkDictionarySizeLimit()
+	})
+	return
+}
+
 func (w *Int32ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels, repLevels []int16) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -381,6 +419,44 @@ func (w *Int64ColumnChunkWriter) WriteBatchSpaced(values []int64, defLevels, rep
 
 		w.checkDictionarySizeLimit()
 	})
+}
+
+// WriteBatchSpacedWithError behaves like WriteBatchSpaced but reports a write
+// failure as an error instead of panicking or silently discarding it,
+// mirroring the error handling of WriteBatch. Prefer this method on write
+// paths whose sink may fail (for example a network-attached writer).
+func (w *Int64ColumnChunkWriter) WriteBatchSpacedWithError(values []int64, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) (valueOffset int64, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = utils.FormatRecoveredError("unknown error type", r)
+		}
+	}()
+	length := len(defLevels)
+	if defLevels == nil {
+		length = len(values)
+	}
+	doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
+		var vals []int64
+		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
+
+		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		if values != nil {
+			vals = values[valueOffset : valueOffset+info.numSpaced()]
+		}
+
+		if w.bitsBuffer != nil {
+			w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
+		} else {
+			w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
+		}
+		if err := w.commitWriteAndCheckPageLimit(batch, info.numSpaced()); err != nil {
+			panic(err)
+		}
+		valueOffset += info.numSpaced()
+
+		w.checkDictionarySizeLimit()
+	})
+	return
 }
 
 func (w *Int64ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels, repLevels []int16) (err error) {
@@ -624,6 +700,44 @@ func (w *Int96ColumnChunkWriter) WriteBatchSpaced(values []parquet.Int96, defLev
 	})
 }
 
+// WriteBatchSpacedWithError behaves like WriteBatchSpaced but reports a write
+// failure as an error instead of panicking or silently discarding it,
+// mirroring the error handling of WriteBatch. Prefer this method on write
+// paths whose sink may fail (for example a network-attached writer).
+func (w *Int96ColumnChunkWriter) WriteBatchSpacedWithError(values []parquet.Int96, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) (valueOffset int64, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = utils.FormatRecoveredError("unknown error type", r)
+		}
+	}()
+	length := len(defLevels)
+	if defLevels == nil {
+		length = len(values)
+	}
+	doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
+		var vals []parquet.Int96
+		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
+
+		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		if values != nil {
+			vals = values[valueOffset : valueOffset+info.numSpaced()]
+		}
+
+		if w.bitsBuffer != nil {
+			w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
+		} else {
+			w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
+		}
+		if err := w.commitWriteAndCheckPageLimit(batch, info.numSpaced()); err != nil {
+			panic(err)
+		}
+		valueOffset += info.numSpaced()
+
+		w.checkDictionarySizeLimit()
+	})
+	return
+}
+
 func (w *Int96ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels, repLevels []int16) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -865,6 +979,44 @@ func (w *Float32ColumnChunkWriter) WriteBatchSpaced(values []float32, defLevels,
 	})
 }
 
+// WriteBatchSpacedWithError behaves like WriteBatchSpaced but reports a write
+// failure as an error instead of panicking or silently discarding it,
+// mirroring the error handling of WriteBatch. Prefer this method on write
+// paths whose sink may fail (for example a network-attached writer).
+func (w *Float32ColumnChunkWriter) WriteBatchSpacedWithError(values []float32, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) (valueOffset int64, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = utils.FormatRecoveredError("unknown error type", r)
+		}
+	}()
+	length := len(defLevels)
+	if defLevels == nil {
+		length = len(values)
+	}
+	doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
+		var vals []float32
+		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
+
+		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		if values != nil {
+			vals = values[valueOffset : valueOffset+info.numSpaced()]
+		}
+
+		if w.bitsBuffer != nil {
+			w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
+		} else {
+			w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
+		}
+		if err := w.commitWriteAndCheckPageLimit(batch, info.numSpaced()); err != nil {
+			panic(err)
+		}
+		valueOffset += info.numSpaced()
+
+		w.checkDictionarySizeLimit()
+	})
+	return
+}
+
 func (w *Float32ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels, repLevels []int16) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -1104,6 +1256,44 @@ func (w *Float64ColumnChunkWriter) WriteBatchSpaced(values []float64, defLevels,
 
 		w.checkDictionarySizeLimit()
 	})
+}
+
+// WriteBatchSpacedWithError behaves like WriteBatchSpaced but reports a write
+// failure as an error instead of panicking or silently discarding it,
+// mirroring the error handling of WriteBatch. Prefer this method on write
+// paths whose sink may fail (for example a network-attached writer).
+func (w *Float64ColumnChunkWriter) WriteBatchSpacedWithError(values []float64, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) (valueOffset int64, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = utils.FormatRecoveredError("unknown error type", r)
+		}
+	}()
+	length := len(defLevels)
+	if defLevels == nil {
+		length = len(values)
+	}
+	doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
+		var vals []float64
+		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
+
+		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		if values != nil {
+			vals = values[valueOffset : valueOffset+info.numSpaced()]
+		}
+
+		if w.bitsBuffer != nil {
+			w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
+		} else {
+			w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
+		}
+		if err := w.commitWriteAndCheckPageLimit(batch, info.numSpaced()); err != nil {
+			panic(err)
+		}
+		valueOffset += info.numSpaced()
+
+		w.checkDictionarySizeLimit()
+	})
+	return
 }
 
 func (w *Float64ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels, repLevels []int16) (err error) {
@@ -1348,6 +1538,44 @@ func (w *BooleanColumnChunkWriter) WriteBatchSpaced(values []bool, defLevels, re
 
 		w.checkDictionarySizeLimit()
 	})
+}
+
+// WriteBatchSpacedWithError behaves like WriteBatchSpaced but reports a write
+// failure as an error instead of panicking or silently discarding it,
+// mirroring the error handling of WriteBatch. Prefer this method on write
+// paths whose sink may fail (for example a network-attached writer).
+func (w *BooleanColumnChunkWriter) WriteBatchSpacedWithError(values []bool, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) (valueOffset int64, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = utils.FormatRecoveredError("unknown error type", r)
+		}
+	}()
+	length := len(defLevels)
+	if defLevels == nil {
+		length = len(values)
+	}
+	doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
+		var vals []bool
+		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
+
+		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		if values != nil {
+			vals = values[valueOffset : valueOffset+info.numSpaced()]
+		}
+
+		if w.bitsBuffer != nil {
+			w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
+		} else {
+			w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
+		}
+		if err := w.commitWriteAndCheckPageLimit(batch, info.numSpaced()); err != nil {
+			panic(err)
+		}
+		valueOffset += info.numSpaced()
+
+		w.checkDictionarySizeLimit()
+	})
+	return
 }
 
 // WriteBitmapBatch writes boolean values directly from a bitmap without converting to []bool.
@@ -1786,6 +2014,69 @@ func (w *ByteArrayColumnChunkWriter) WriteBatchSpaced(values []parquet.ByteArray
 	}
 }
 
+// WriteBatchSpacedWithError behaves like WriteBatchSpaced but reports a write
+// failure as an error instead of panicking or silently discarding it,
+// mirroring the error handling of WriteBatch. Prefer this method on write
+// paths whose sink may fail (for example a network-attached writer).
+func (w *ByteArrayColumnChunkWriter) WriteBatchSpacedWithError(values []parquet.ByteArray, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) (valueOffset int64, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = utils.FormatRecoveredError("unknown error type", r)
+		}
+	}()
+	length := len(defLevels)
+	if defLevels == nil {
+		length = len(values)
+	}
+	const maxSafeBatchDataSize int64 = 1 << 30 // 1GB
+
+	batchSize := w.props.WriteBatchSize()
+	levelOffset := int64(0)
+	n := int64(length)
+
+	for levelOffset < n {
+		remaining := n - levelOffset
+		batch := min(remaining, batchSize)
+
+		if values != nil {
+			var cumDataSize int64
+			for vi := int64(0); vi < batch && valueOffset+vi < int64(len(values)); vi++ {
+				valSize := int64(len(values[valueOffset+vi])) + 4
+				if cumDataSize+valSize > maxSafeBatchDataSize && vi > 0 {
+					batch = vi
+					break
+				}
+				cumDataSize += valSize
+			}
+		}
+		if batch < 1 {
+			batch = 1
+		}
+
+		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, levelOffset, batch), batch)
+
+		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, levelOffset, batch), levelSliceOrNil(repLevels, levelOffset, batch))
+		var vals []parquet.ByteArray
+		if values != nil {
+			vals = values[valueOffset : valueOffset+info.numSpaced()]
+		}
+
+		if w.bitsBuffer != nil {
+			w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
+		} else {
+			w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
+		}
+		if err := w.commitWriteAndCheckPageLimit(batch, info.numSpaced()); err != nil {
+			panic(err)
+		}
+		valueOffset += info.numSpaced()
+
+		w.checkDictionarySizeLimit()
+		levelOffset += batch
+	}
+	return
+}
+
 func (w *ByteArrayColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels, repLevels []int16) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -2098,6 +2389,69 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatchSpaced(values []parquet.F
 		w.checkDictionarySizeLimit()
 		levelOffset += batch
 	}
+}
+
+// WriteBatchSpacedWithError behaves like WriteBatchSpaced but reports a write
+// failure as an error instead of panicking or silently discarding it,
+// mirroring the error handling of WriteBatch. Prefer this method on write
+// paths whose sink may fail (for example a network-attached writer).
+func (w *FixedLenByteArrayColumnChunkWriter) WriteBatchSpacedWithError(values []parquet.FixedLenByteArray, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) (valueOffset int64, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = utils.FormatRecoveredError("unknown error type", r)
+		}
+	}()
+	length := len(defLevels)
+	if defLevels == nil {
+		length = len(values)
+	}
+	const maxSafeBatchDataSize int64 = 1 << 30 // 1GB
+
+	batchSize := w.props.WriteBatchSize()
+	levelOffset := int64(0)
+	n := int64(length)
+
+	for levelOffset < n {
+		remaining := n - levelOffset
+		batch := min(remaining, batchSize)
+
+		if values != nil {
+			var cumDataSize int64
+			for vi := int64(0); vi < batch && valueOffset+vi < int64(len(values)); vi++ {
+				valSize := int64(w.descr.TypeLength()) + 4
+				if cumDataSize+valSize > maxSafeBatchDataSize && vi > 0 {
+					batch = vi
+					break
+				}
+				cumDataSize += valSize
+			}
+		}
+		if batch < 1 {
+			batch = 1
+		}
+
+		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, levelOffset, batch), batch)
+
+		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, levelOffset, batch), levelSliceOrNil(repLevels, levelOffset, batch))
+		var vals []parquet.FixedLenByteArray
+		if values != nil {
+			vals = values[valueOffset : valueOffset+info.numSpaced()]
+		}
+
+		if w.bitsBuffer != nil {
+			w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
+		} else {
+			w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
+		}
+		if err := w.commitWriteAndCheckPageLimit(batch, info.numSpaced()); err != nil {
+			panic(err)
+		}
+		valueOffset += info.numSpaced()
+
+		w.checkDictionarySizeLimit()
+		levelOffset += batch
+	}
+	return
 }
 
 func (w *FixedLenByteArrayColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels, repLevels []int16) (err error) {

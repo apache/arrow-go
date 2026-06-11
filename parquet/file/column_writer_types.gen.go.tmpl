@@ -269,6 +269,97 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBatchSpaced(values []{{.name}}, defLev
 {{- end}}
 }
 
+// WriteBatchSpacedWithError behaves like WriteBatchSpaced but reports a write
+// failure as an error instead of panicking or silently discarding it,
+// mirroring the error handling of WriteBatch. Prefer this method on write
+// paths whose sink may fail (for example a network-attached writer).
+func (w *{{.Name}}ColumnChunkWriter) WriteBatchSpacedWithError(values []{{.name}}, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) (valueOffset int64, err error) {
+  defer func() {
+    if r := recover(); r != nil {
+      err = utils.FormatRecoveredError("unknown error type", r)
+    }
+  }()
+  length := len(defLevels)
+  if defLevels == nil {
+    length = len(values)
+  }
+{{- if .isByteArray}}
+  const maxSafeBatchDataSize int64 = 1 << 30 // 1GB
+
+  batchSize := w.props.WriteBatchSize()
+  levelOffset := int64(0)
+  n := int64(length)
+
+  for levelOffset < n {
+    remaining := n - levelOffset
+    batch := min(remaining, batchSize)
+
+    if values != nil {
+      var cumDataSize int64
+      for vi := int64(0); vi < batch && valueOffset+vi < int64(len(values)); vi++ {
+{{- if eq .Name "ByteArray"}}
+        valSize := int64(len(values[valueOffset+vi])) + 4
+{{- else}}
+        valSize := int64(w.descr.TypeLength()) + 4
+{{- end}}
+        if cumDataSize+valSize > maxSafeBatchDataSize && vi > 0 {
+          batch = vi
+          break
+        }
+        cumDataSize += valSize
+      }
+    }
+    if batch < 1 {
+      batch = 1
+    }
+
+    info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, levelOffset, batch), batch)
+
+    w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, levelOffset, batch), levelSliceOrNil(repLevels, levelOffset, batch))
+    var vals []{{.name}}
+    if values != nil {
+      vals = values[valueOffset : valueOffset+info.numSpaced()]
+    }
+
+    if w.bitsBuffer != nil {
+      w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
+    } else {
+      w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
+    }
+    if err := w.commitWriteAndCheckPageLimit(batch, info.numSpaced()); err != nil {
+      panic(err)
+    }
+    valueOffset += info.numSpaced()
+
+    w.checkDictionarySizeLimit()
+    levelOffset += batch
+  }
+{{- else}}
+  doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
+    var vals []{{.name}}
+    info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
+
+    w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+    if values != nil {
+      vals = values[valueOffset:valueOffset+info.numSpaced()]
+    }
+
+    if w.bitsBuffer != nil {
+      w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
+    } else {
+      w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
+    }
+    if err := w.commitWriteAndCheckPageLimit(batch, info.numSpaced()); err != nil {
+      panic(err)
+    }
+    valueOffset += info.numSpaced()
+
+    w.checkDictionarySizeLimit()
+  })
+{{- end}}
+  return
+}
+
 {{if eq .Name "Boolean"}}
 // WriteBitmapBatch writes boolean values directly from a bitmap without converting to []bool.
 // This avoids the 8x memory overhead and provides significant performance improvements.
