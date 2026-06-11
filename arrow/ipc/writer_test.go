@@ -158,6 +158,40 @@ func TestFileWriterConcurrentWrite(t *testing.T) {
 	require.Equal(t, n, r.NumRecords())
 }
 
+// TestWriteAfterClose verifies that a Write ordered after Close is rejected with
+// an error instead of writing past the finalized output. For FileWriter this
+// would otherwise silently append a record batch after the file footer.
+func TestWriteAfterClose(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	schema := arrow.NewSchema([]arrow.Field{{Name: "i32", Type: arrow.PrimitiveTypes.Int32}}, nil)
+
+	b := array.NewRecordBuilder(mem, schema)
+	defer b.Release()
+	b.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2, 3}, nil)
+	rec := b.NewRecordBatch()
+	defer rec.Release()
+
+	t.Run("stream", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := NewWriter(&buf, WithSchema(schema), WithAllocator(mem))
+		require.NoError(t, w.Write(rec))
+		require.NoError(t, w.Close())
+		require.ErrorIs(t, w.Write(rec), errClosedWriter)
+	})
+
+	t.Run("file", func(t *testing.T) {
+		var buf bytes.Buffer
+		w, err := NewFileWriter(&buf, WithSchema(schema), WithAllocator(mem))
+		require.NoError(t, err)
+		require.NoError(t, w.Write(rec))
+		require.NoError(t, w.Close())
+
+		lenAfterClose := buf.Len()
+		require.ErrorIs(t, w.Write(rec), errClosedWriter)
+		require.Equal(t, lenAfterClose, buf.Len(), "rejected write must not append past the footer")
+	})
+}
+
 func TestNewTruncatedBitmap(t *testing.T) {
 	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer alloc.AssertSize(t, 0)

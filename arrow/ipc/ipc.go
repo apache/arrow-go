@@ -29,6 +29,7 @@ const (
 	errNotArrowFile             = errString("arrow/ipc: not an Arrow file")
 	errInconsistentFileMetadata = errString("arrow/ipc: file is smaller than indicated metadata size")
 	errInconsistentSchema       = errString("arrow/ipc: tried to write record batch with different schema")
+	errClosedWriter             = errString("arrow/ipc: tried to write record batch to a closed writer")
 	errMaxRecursion             = errString("arrow/ipc: max recursion depth reached")
 	errBigArray                 = errString("arrow/ipc: array larger than 2^31-1 in length")
 

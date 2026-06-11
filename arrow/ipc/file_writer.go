@@ -307,10 +307,15 @@ func (f *FileWriter) Close() error {
 // Write writes a record batch to the file, writing the header first if it has
 // not been written yet. Write is safe to call concurrently with itself and with
 // Close: calls are serialized, so records are written in the order in which the
-// lock is acquired.
+// lock is acquired. A Write ordered after Close returns an error rather than
+// appending a record batch after the file footer.
 func (f *FileWriter) Write(rec arrow.RecordBatch) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	if f.footerWritten {
+		return errClosedWriter
+	}
 
 	schema := rec.Schema()
 	if schema == nil || !schema.Equal(f.schema) {

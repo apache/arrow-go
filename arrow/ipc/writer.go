@@ -162,7 +162,8 @@ func (w *Writer) Close() error {
 // Write writes a record batch to the stream, writing the schema first if it
 // has not been written yet. Write is safe to call concurrently with itself and
 // with Close: calls are serialized, so records are written in the order in
-// which the lock is acquired.
+// which the lock is acquired. A Write ordered after Close returns an error
+// rather than writing past the end of the stream.
 func (w *Writer) Write(rec arrow.RecordBatch) (err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -172,6 +173,10 @@ func (w *Writer) Write(rec arrow.RecordBatch) (err error) {
 			err = utils.FormatRecoveredError("arrow/ipc: unknown error while writing", pErr)
 		}
 	}()
+
+	if w.pw == nil {
+		return errClosedWriter
+	}
 
 	incomingSchema := rec.Schema()
 
