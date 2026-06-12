@@ -26,13 +26,12 @@ import (
 /// Data structures for dense tensors
 /// Shape data for a single axis in a tensor
 type TensorDim struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsTensorDim(buf []byte, offset flatbuffers.UOffsetT) *TensorDim {
+func GetRootAsTensorDim(buf []byte, offset flatbuffers.UOffsetT) (x TensorDim) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &TensorDim{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -40,10 +39,9 @@ func FinishTensorDimBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOff
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsTensorDim(buf []byte, offset flatbuffers.UOffsetT) *TensorDim {
+func GetSizePrefixedRootAsTensorDim(buf []byte, offset flatbuffers.UOffsetT) (x TensorDim) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &TensorDim{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -52,33 +50,29 @@ func FinishSizePrefixedTensorDimBuffer(builder *flatbuffers.Builder, offset flat
 }
 
 func (rcv *TensorDim) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *TensorDim) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 /// Length of dimension
 func (rcv *TensorDim) Size() int64 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return rcv._tab.GetInt64(o + rcv._tab.Pos)
+		return rcv.GetInt64(o + rcv.Pos)
 	}
 	return 0
 }
 
 /// Length of dimension
 func (rcv *TensorDim) MutateSize(n int64) bool {
-	return rcv._tab.MutateInt64Slot(4, n)
+	return rcv.MutateInt64Slot(4, n)
 }
 
 /// Name of the dimension, optional
 func (rcv *TensorDim) Name() []byte {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		return rcv._tab.ByteVector(o + rcv._tab.Pos)
+		return rcv.ByteVector(o + rcv.Pos)
 	}
 	return nil
 }

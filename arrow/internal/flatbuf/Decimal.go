@@ -27,13 +27,12 @@ import (
 /// 128-bit (16-byte) and 256-bit (32-byte) integers are used.
 /// The representation uses the endianness indicated in the Schema.
 type Decimal struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsDecimal(buf []byte, offset flatbuffers.UOffsetT) *Decimal {
+func GetRootAsDecimal(buf []byte, offset flatbuffers.UOffsetT) (x Decimal) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Decimal{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -41,10 +40,9 @@ func FinishDecimalBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffse
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsDecimal(buf []byte, offset flatbuffers.UOffsetT) *Decimal {
+func GetSizePrefixedRootAsDecimal(buf []byte, offset flatbuffers.UOffsetT) (x Decimal) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &Decimal{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -53,48 +51,44 @@ func FinishSizePrefixedDecimalBuffer(builder *flatbuffers.Builder, offset flatbu
 }
 
 func (rcv *Decimal) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Decimal) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 /// Total number of decimal digits
 func (rcv *Decimal) Precision() int32 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return rcv._tab.GetInt32(o + rcv._tab.Pos)
+		return rcv.GetInt32(o + rcv.Pos)
 	}
 	return 0
 }
 
 /// Total number of decimal digits
 func (rcv *Decimal) MutatePrecision(n int32) bool {
-	return rcv._tab.MutateInt32Slot(4, n)
+	return rcv.MutateInt32Slot(4, n)
 }
 
 /// Number of digits after the decimal point "."
 func (rcv *Decimal) Scale() int32 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		return rcv._tab.GetInt32(o + rcv._tab.Pos)
+		return rcv.GetInt32(o + rcv.Pos)
 	}
 	return 0
 }
 
 /// Number of digits after the decimal point "."
 func (rcv *Decimal) MutateScale(n int32) bool {
-	return rcv._tab.MutateInt32Slot(6, n)
+	return rcv.MutateInt32Slot(6, n)
 }
 
 /// Number of bits per value. The accepted widths are 32, 64, 128 and 256.
 /// We use bitWidth for consistency with Int::bitWidth.
 func (rcv *Decimal) BitWidth() int32 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
-		return rcv._tab.GetInt32(o + rcv._tab.Pos)
+		return rcv.GetInt32(o + rcv.Pos)
 	}
 	return 128
 }
@@ -102,7 +96,7 @@ func (rcv *Decimal) BitWidth() int32 {
 /// Number of bits per value. The accepted widths are 32, 64, 128 and 256.
 /// We use bitWidth for consistency with Int::bitWidth.
 func (rcv *Decimal) MutateBitWidth(n int32) bool {
-	return rcv._tab.MutateInt32Slot(8, n)
+	return rcv.MutateInt32Slot(8, n)
 }
 
 func DecimalStart(builder *flatbuffers.Builder) {

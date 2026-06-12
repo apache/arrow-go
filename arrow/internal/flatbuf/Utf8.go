@@ -24,13 +24,12 @@ import (
 
 /// Unicode with UTF-8 encoding
 type Utf8 struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsUtf8(buf []byte, offset flatbuffers.UOffsetT) *Utf8 {
+func GetRootAsUtf8(buf []byte, offset flatbuffers.UOffsetT) (x Utf8) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Utf8{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -38,10 +37,9 @@ func FinishUtf8Buffer(builder *flatbuffers.Builder, offset flatbuffers.UOffsetT)
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsUtf8(buf []byte, offset flatbuffers.UOffsetT) *Utf8 {
+func GetSizePrefixedRootAsUtf8(buf []byte, offset flatbuffers.UOffsetT) (x Utf8) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &Utf8{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -50,12 +48,8 @@ func FinishSizePrefixedUtf8Buffer(builder *flatbuffers.Builder, offset flatbuffe
 }
 
 func (rcv *Utf8) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Utf8) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func Utf8Start(builder *flatbuffers.Builder) {

@@ -25,27 +25,23 @@ import (
 /// ----------------------------------------------------------------------
 /// A Buffer represents a single contiguous memory segment
 type Buffer struct {
-	_tab flatbuffers.Struct
+	flatbuffers.Struct
 }
 
 func (rcv *Buffer) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Buffer) Table() flatbuffers.Table {
-	return rcv._tab.Table
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 /// The relative offset into the shared memory page where the bytes for this
 /// buffer starts
 func (rcv *Buffer) Offset() int64 {
-	return rcv._tab.GetInt64(rcv._tab.Pos + flatbuffers.UOffsetT(0))
+	return rcv.GetInt64(rcv.Pos + flatbuffers.UOffsetT(0))
 }
 /// The relative offset into the shared memory page where the bytes for this
 /// buffer starts
 func (rcv *Buffer) MutateOffset(n int64) bool {
-	return rcv._tab.MutateInt64(rcv._tab.Pos+flatbuffers.UOffsetT(0), n)
+	return rcv.MutateInt64(rcv.Pos+flatbuffers.UOffsetT(0), n)
 }
 
 /// The absolute length (in bytes) of the memory buffer. The memory is found
@@ -54,7 +50,7 @@ func (rcv *Buffer) MutateOffset(n int64) bool {
 /// after a buffer, but such padding bytes do not need to be accounted for in
 /// the size here.
 func (rcv *Buffer) Length() int64 {
-	return rcv._tab.GetInt64(rcv._tab.Pos + flatbuffers.UOffsetT(8))
+	return rcv.GetInt64(rcv.Pos + flatbuffers.UOffsetT(8))
 }
 /// The absolute length (in bytes) of the memory buffer. The memory is found
 /// from offset (inclusive) to offset + length (non-inclusive). When building
@@ -62,7 +58,7 @@ func (rcv *Buffer) Length() int64 {
 /// after a buffer, but such padding bytes do not need to be accounted for in
 /// the size here.
 func (rcv *Buffer) MutateLength(n int64) bool {
-	return rcv._tab.MutateInt64(rcv._tab.Pos+flatbuffers.UOffsetT(8), n)
+	return rcv.MutateInt64(rcv.Pos+flatbuffers.UOffsetT(8), n)
 }
 
 func CreateBuffer(builder *flatbuffers.Builder, offset int64, length int64) flatbuffers.UOffsetT {

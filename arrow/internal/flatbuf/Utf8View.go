@@ -30,13 +30,12 @@ import (
 /// Since it uses a variable number of data buffers, each Field with this type
 /// must have a corresponding entry in `variadicBufferCounts`.
 type Utf8View struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsUtf8View(buf []byte, offset flatbuffers.UOffsetT) *Utf8View {
+func GetRootAsUtf8View(buf []byte, offset flatbuffers.UOffsetT) (x Utf8View) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &Utf8View{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -44,10 +43,9 @@ func FinishUtf8ViewBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOffs
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsUtf8View(buf []byte, offset flatbuffers.UOffsetT) *Utf8View {
+func GetSizePrefixedRootAsUtf8View(buf []byte, offset flatbuffers.UOffsetT) (x Utf8View) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &Utf8View{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -56,12 +54,8 @@ func FinishSizePrefixedUtf8ViewBuffer(builder *flatbuffers.Builder, offset flatb
 }
 
 func (rcv *Utf8View) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *Utf8View) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func Utf8ViewStart(builder *flatbuffers.Builder) {
