@@ -23,6 +23,7 @@ import (
 	"io"
 	"math"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -65,6 +66,148 @@ func TestSliceAndWrite(t *testing.T) {
 		for i := 0; i < 2; i++ {
 			sliceAndWrite(rec, schema)
 		}
+	})
+}
+
+// TestWriterConcurrentWrite is a regression test for #55: concurrent Write
+// calls on a single stream Writer must not race on the started flag or the
+// lastWrittenDicts map, and must produce exactly one schema message followed by
+// one record batch per Write. Run with -race to exercise the data-race check.
+func TestWriterConcurrentWrite(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	schema := arrow.NewSchema([]arrow.Field{{Name: "i32", Type: arrow.PrimitiveTypes.Int32}}, nil)
+
+	b := array.NewRecordBuilder(mem, schema)
+	defer b.Release()
+	b.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2, 3}, nil)
+	rec := b.NewRecordBatch()
+	defer rec.Release()
+
+	const n = 16
+	var buf bytes.Buffer
+	w := NewWriter(&buf, WithSchema(schema), WithAllocator(mem))
+
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := w.Write(rec); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	require.NoError(t, w.Close())
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	r, err := NewReader(&buf, WithAllocator(mem))
+	require.NoError(t, err)
+	defer r.Release()
+	require.True(t, r.Schema().Equal(schema))
+	count := 0
+	for r.Next() {
+		count++
+	}
+	require.NoError(t, r.Err())
+	require.Equal(t, n, count)
+}
+
+// TestFileWriterConcurrentWrite is the FileWriter counterpart to
+// TestWriterConcurrentWrite for #55. Run with -race.
+func TestFileWriterConcurrentWrite(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	schema := arrow.NewSchema([]arrow.Field{{Name: "i32", Type: arrow.PrimitiveTypes.Int32}}, nil)
+
+	b := array.NewRecordBuilder(mem, schema)
+	defer b.Release()
+	b.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2, 3}, nil)
+	rec := b.NewRecordBatch()
+	defer rec.Release()
+
+	const n = 16
+	var buf bytes.Buffer
+	w, err := NewFileWriter(&buf, WithSchema(schema), WithAllocator(mem))
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := w.Write(rec); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	require.NoError(t, w.Close())
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	r, err := NewFileReader(bytes.NewReader(buf.Bytes()), WithSchema(schema), WithAllocator(mem))
+	require.NoError(t, err)
+	defer r.Close()
+	require.Equal(t, n, r.NumRecords())
+}
+
+// TestWriteAfterClose verifies that a Write ordered after Close is rejected with
+// an error instead of writing past the finalized output. For FileWriter this
+// would otherwise silently append a record batch after the file footer.
+func TestWriteAfterClose(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	schema := arrow.NewSchema([]arrow.Field{{Name: "i32", Type: arrow.PrimitiveTypes.Int32}}, nil)
+
+	b := array.NewRecordBuilder(mem, schema)
+	defer b.Release()
+	b.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2, 3}, nil)
+	rec := b.NewRecordBatch()
+	defer rec.Release()
+
+	t.Run("stream", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := NewWriter(&buf, WithSchema(schema), WithAllocator(mem))
+		require.NoError(t, w.Write(rec))
+		require.NoError(t, w.Close())
+		require.ErrorIs(t, w.Write(rec), errClosedWriter)
+	})
+
+	t.Run("file", func(t *testing.T) {
+		var buf bytes.Buffer
+		w, err := NewFileWriter(&buf, WithSchema(schema), WithAllocator(mem))
+		require.NoError(t, err)
+		require.NoError(t, w.Write(rec))
+		require.NoError(t, w.Close())
+
+		lenAfterClose := buf.Len()
+		require.ErrorIs(t, w.Write(rec), errClosedWriter)
+		require.Equal(t, lenAfterClose, buf.Len(), "rejected write must not append past the footer")
+	})
+}
+
+// TestCloseWithoutSchema verifies that closing a writer that was never given a
+// schema (and never written to) returns an error instead of panicking on a nil
+// schema in start(). This guards the concurrent ordering where Close acquires
+// the lock before the first schema-inferring Write.
+func TestCloseWithoutSchema(t *testing.T) {
+	t.Run("stream", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := NewWriter(&buf)
+		require.ErrorIs(t, w.Close(), errNoSchema)
+	})
+
+	t.Run("file", func(t *testing.T) {
+		var buf bytes.Buffer
+		w, err := NewFileWriter(&buf)
+		require.NoError(t, err)
+		require.ErrorIs(t, w.Close(), errNoSchema)
 	})
 }
 

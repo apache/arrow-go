@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
@@ -233,6 +234,8 @@ func (ps payloads) Release() {
 
 // FileWriter is an Arrow file writer.
 type FileWriter struct {
+	mu sync.Mutex
+
 	w io.Writer
 
 	mem memory.Allocator
@@ -277,7 +280,12 @@ func NewFileWriter(w io.Writer, opts ...Option) (*FileWriter, error) {
 	return &f, err
 }
 
+// Close writes the file footer and closes the writer. Close is safe to call
+// concurrently with Write; the two are serialized.
 func (f *FileWriter) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
 	err := f.checkStarted()
 	if err != nil {
 		return fmt.Errorf("arrow/ipc: could not write empty file: %w", err)
@@ -296,7 +304,19 @@ func (f *FileWriter) Close() error {
 	return nil
 }
 
+// Write writes a record batch to the file, writing the header first if it has
+// not been written yet. Write is safe to call concurrently with itself and with
+// Close: calls are serialized, so records are written in the order in which the
+// lock is acquired. A Write ordered after Close returns an error rather than
+// appending a record batch after the file footer.
 func (f *FileWriter) Write(rec arrow.RecordBatch) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.footerWritten {
+		return errClosedWriter
+	}
+
 	schema := rec.Schema()
 	if schema == nil || !schema.Equal(f.schema) {
 		return errInconsistentSchema
@@ -336,6 +356,9 @@ func (f *FileWriter) checkStarted() error {
 }
 
 func (f *FileWriter) start() error {
+	if f.schema == nil {
+		return errNoSchema
+	}
 	f.headerStarted = true
 	err := f.pw.Start()
 	if err != nil {
