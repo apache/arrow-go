@@ -844,6 +844,89 @@ func TestWriteDataFailure(t *testing.T) {
 	assert.Equal(t, int64(0), wr.TotalBytesWritten())
 }
 
+// TestWriteBatchSpacedWithErrorPropagatesWriteFailure verifies the new
+// error-returning variant surfaces a write failure, while the legacy
+// WriteBatchSpaced preserves its original non-error-returning behavior.
+func TestWriteBatchSpacedWithErrorPropagatesWriteFailure(t *testing.T) {
+	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.Must(schema.NewPrimitiveNode("column", parquet.Repetitions.Optional, parquet.Types.Int32, -1, -1)),
+	}, -1)))
+	descr := sc.Column(0)
+	failureErr := errors.New("mock error from WriteDataPage")
+
+	newWriter := func() (*file.Int32ColumnChunkWriter, *mockpagewriter) {
+		props := parquet.NewWriterProperties(
+			parquet.WithStats(true),
+			parquet.WithVersion(parquet.V1_0),
+			parquet.WithDataPageVersion(parquet.DataPageV1),
+			parquet.WithDictionaryDefault(false), // write pages eagerly instead of buffering
+			parquet.WithDataPageSize(1),          // tiny page size forces a flush on the first commit
+		)
+		md := metadata.NewColumnChunkMetaDataBuilder(props, descr)
+		pager := new(mockpagewriter)
+		pager.On("HasCompressor").Return(false)
+		pager.On("WriteDataPage", mock.Anything).Return(0, failureErr)
+		return file.NewColumnChunkWriter(md, pager, props).(*file.Int32ColumnChunkWriter), pager
+	}
+
+	values := []int32{10, 20, 30, 40}
+	defLevels := []int16{1, 1, 1, 1}
+	validBits := []byte{0x0f}
+
+	wr, pager := newWriter()
+	defer pager.AssertExpectations(t)
+	_, err := wr.WriteBatchSpacedWithError(values, defLevels, nil, validBits, 0)
+	assert.ErrorIs(t, err, failureErr)
+
+	wrLegacy, pagerLegacy := newWriter()
+	defer pagerLegacy.AssertExpectations(t)
+	assert.NotPanics(t, func() {
+		wrLegacy.WriteBatchSpaced(values, defLevels, nil, validBits, 0)
+	})
+}
+
+// TestWriteBitmapBatchSpacedWithErrorPropagatesWriteFailure verifies the new
+// error-returning variant surfaces a write failure, while the legacy
+// WriteBitmapBatchSpaced preserves its original non-error-returning behavior.
+func TestWriteBitmapBatchSpacedWithErrorPropagatesWriteFailure(t *testing.T) {
+	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.Must(schema.NewPrimitiveNode("column", parquet.Repetitions.Optional, parquet.Types.Boolean, -1, -1)),
+	}, -1)))
+	descr := sc.Column(0)
+	failureErr := errors.New("mock error from WriteDataPage")
+
+	newWriter := func() (*file.BooleanColumnChunkWriter, *mockpagewriter) {
+		props := parquet.NewWriterProperties(
+			parquet.WithStats(true),
+			parquet.WithVersion(parquet.V1_0),
+			parquet.WithDataPageVersion(parquet.DataPageV1),
+			// no dictionary + tiny page size forces a page flush (WriteDataPage) mid-call
+			parquet.WithDictionaryDefault(false),
+			parquet.WithDataPageSize(1),
+		)
+		md := metadata.NewColumnChunkMetaDataBuilder(props, descr)
+		pager := new(mockpagewriter)
+		pager.On("HasCompressor").Return(false)
+		pager.On("WriteDataPage", mock.Anything).Return(0, failureErr)
+		return file.NewColumnChunkWriter(md, pager, props).(*file.BooleanColumnChunkWriter), pager
+	}
+
+	bitmap := []byte{0x0a}
+	defLevels := []int16{1, 1, 1, 1}
+	validBits := []byte{0x0f}
+
+	wr, pager := newWriter()
+	defer pager.AssertExpectations(t)
+	_, err := wr.WriteBitmapBatchSpacedWithError(bitmap, 0, 4, defLevels, nil, validBits, 0)
+	assert.ErrorIs(t, err, failureErr)
+
+	wrLegacy, pagerLegacy := newWriter()
+	defer pagerLegacy.AssertExpectations(t)
+	assert.NotPanics(t, func() {
+		wrLegacy.WriteBitmapBatchSpaced(bitmap, 0, 4, defLevels, nil, validBits, 0)
+	})
+}
+
 func (b *BooleanValueWriterSuite) TestWriteBitmapBatch() {
 	b.SetupSchema(parquet.Repetitions.Required, 1)
 	writer := b.buildWriter(SmallSize, parquet.DefaultColumnProperties(), parquet.WithVersion(parquet.V1_0)).(*file.BooleanColumnChunkWriter)
