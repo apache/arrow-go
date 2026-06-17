@@ -313,7 +313,9 @@ func NewFileMetaData(data []byte, fileDecryptor encryption.FileDecryptor) (*File
 		FileDecryptor: fileDecryptor,
 	}
 
-	f.initSchema()
+	if err := f.initSchema(); err != nil {
+		return nil, err
+	}
 	f.initColumnOrders()
 
 	return f, nil
@@ -361,8 +363,8 @@ func (f *FileMetaData) initSchema() error {
 	if err != nil {
 		return err
 	}
-	f.Schema = schema.NewSchema(root.(*schema.GroupNode))
-	return nil
+	f.Schema, err = schema.NewSchemaChecked(root.(*schema.GroupNode))
+	return err
 }
 
 func (f *FileMetaData) initColumnOrders() {

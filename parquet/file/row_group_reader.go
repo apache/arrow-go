@@ -85,6 +85,29 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 	if err != nil {
 		return nil, err
 	}
+	// parentRows scopes row-ordinal seek bounds to VECTOR columns only. A VECTOR
+	// leaf stores parent_row_count*vector_length physical values, so its page
+	// stream's num_values count is not the parent-row count and a row ordinal
+	// must be bounded by the row-group row count instead. For every other column
+	// parentRows stays 0 and the page reader keeps its num_values-based bound:
+	// using the row count there would be a looser bound that could admit
+	// out-of-range seeks for optional/repeated columns whose num_values differs
+	// from the row count (the no-offset-index page scan advances by num_values).
+	var parentRows int64
+	if descr := r.fileMetadata.Schema.Column(i); descr.InVectorColumn() {
+		vectorLen := int64(descr.EffectiveVectorLength())
+		if col.NumValues()%vectorLen != 0 {
+			return nil, fmt.Errorf("parquet: VECTOR column %q has %d values, not a multiple of vector length %d", descr.Path(), col.NumValues(), vectorLen)
+		}
+		wantValues, ok := utils.Mul64(r.rgMetadata.NumRows(), vectorLen)
+		if !ok {
+			return nil, fmt.Errorf("parquet: VECTOR column %q row count overflows vector length %d", descr.Path(), vectorLen)
+		}
+		if col.NumValues() != wantValues {
+			return nil, fmt.Errorf("parquet: VECTOR column %q has %d values for %d rows and vector length %d", descr.Path(), col.NumValues(), r.rgMetadata.NumRows(), vectorLen)
+		}
+		parentRows = r.rgMetadata.NumRows()
+	}
 
 	rgIdxRdr, err := r.rgPageIndexReader()
 	if err != nil {
@@ -128,6 +151,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 			pgIndexReader:     rgIdxRdr,
 			maxPageHeaderSize: defaultMaxPageHeaderSize,
 			nrows:             col.NumValues(),
+			parentRows:        parentRows,
 			mem:               r.props.Allocator(),
 		}
 		return pr, pr.init(col.Compression(), nil)
@@ -157,6 +181,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 			pgIndexReader:     rgIdxRdr,
 			maxPageHeaderSize: defaultMaxPageHeaderSize,
 			nrows:             col.NumValues(),
+			parentRows:        parentRows,
 			mem:               r.props.Allocator(),
 			cryptoCtx:         ctx,
 		}
@@ -181,6 +206,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 		pgIndexReader:     rgIdxRdr,
 		maxPageHeaderSize: defaultMaxPageHeaderSize,
 		nrows:             col.NumValues(),
+		parentRows:        parentRows,
 		mem:               r.props.Allocator(),
 		cryptoCtx:         ctx,
 	}

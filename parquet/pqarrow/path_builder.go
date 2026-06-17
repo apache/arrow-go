@@ -310,6 +310,17 @@ type pathBuilder struct {
 	paths            []pathInfo
 	nullableInParent bool
 
+	// writeFixedSizeListAsVector mirrors ArrowWriterProperties: when set, an
+	// eligible top-level FixedSizeList column is encoded as Parquet VECTOR
+	// (Option B) instead of the standard LIST encoding. Must use the same
+	// eligibility predicate as ToParquet so the schema and the generated levels
+	// agree.
+	writeFixedSizeListAsVector bool
+	// atRoot is true only for the very first Visit (the top-level column field).
+	// Phase 1 encodes VECTOR only for top-level FixedSizeList columns, so the
+	// flag is consumed once and cleared as soon as we descend into any child.
+	atRoot bool
+
 	refCount *atomic.Int64
 }
 
@@ -403,6 +414,8 @@ func (p *pathBuilder) visitListLike(arr arrow.Array, selector rangeSelector, def
 }
 
 func (p *pathBuilder) Visit(arr arrow.Array) error {
+	atRoot := p.atRoot
+	p.atRoot = false
 	switch arr.DataType().ID() {
 	case arrow.LIST, arrow.MAP:
 		larr, ok := arr.(*array.List)
@@ -421,9 +434,16 @@ func (p *pathBuilder) Visit(arr arrow.Array) error {
 			larr.ListValues())
 	case arrow.FIXED_SIZE_LIST:
 		larr := arr.(*array.FixedSizeList)
-		listSize := larr.DataType().(*arrow.FixedSizeListType).Len()
+		fslType := larr.DataType().(*arrow.FixedSizeListType)
+		// Option B: encode an eligible top-level FixedSizeList column as VECTOR.
+		// This must match the schema decision in ToParquet (top-level only,
+		// non-nullable value and element, positive length, fixed-width primitive
+		// element) so the parquet schema and the generated def/rep levels agree.
+		if atRoot && p.writeFixedSizeListAsVector && isVectorEligibleFixedSizeList(p.nullableInParent, fslType) {
+			return p.visitVector(larr, fslType)
+		}
 		return p.visitListLike(arr,
-			fixedSizeRangeSelector{listSize},
+			fixedSizeRangeSelector{fslType.Len()},
 			0, // defLevelIfEmpty = maxDefLevel (after all increments)
 			larr.ListValues())
 	case arrow.DICTIONARY:
@@ -461,6 +481,27 @@ func (p *pathBuilder) Visit(arr arrow.Array) error {
 		p.addTerminalInfo(arr)
 		return nil
 	}
+}
+
+// visitVector handles the Option B dense VECTOR case: a non-nullable
+// FixedSizeList with a non-nullable element contributes exactly fslType.Len()
+// leaf values per row and no definition or repetition levels. The fixed-size
+// child is flattened to the leaf (accounting for the array's slice offset).
+func (p *pathBuilder) visitVector(larr *array.FixedSizeList, fslType *arrow.FixedSizeListType) error {
+	if larr.NullN() > 0 {
+		return fmt.Errorf("parquet: VECTOR column %s is non-nullable but contains null vector values", larr.DataType())
+	}
+	listSize := int64(fslType.Len())
+	start, _ := larr.ValueOffsets(0)
+	values := array.NewSlice(larr.ListValues(), start, start+int64(larr.Len())*listSize)
+	defer values.Release()
+	if values.NullN() > 0 {
+		return fmt.Errorf("parquet: VECTOR column %s has non-nullable elements but contains null element values", larr.DataType())
+	}
+
+	p.nullableInParent = false
+	p.addTerminalInfo(values)
+	return nil
 }
 
 func (p *pathBuilder) addTerminalInfo(arr arrow.Array) {
@@ -529,11 +570,21 @@ func (m *multipathLevelBuilder) Release() {
 }
 
 func newMultipathLevelBuilder(arr arrow.Array, fieldNullable bool) (*multipathLevelBuilder, error) {
+	return newMultipathLevelBuilderWithVector(arr, fieldNullable, false)
+}
+
+func newMultipathLevelBuilderWithVector(arr arrow.Array, fieldNullable, writeFixedSizeListAsVector bool) (*multipathLevelBuilder, error) {
 	ret := &multipathLevelBuilder{
 		refCount:  utils.NewRefCount(1),
 		rootRange: elemRange{int64(0), int64(arr.Data().Len())},
 		data:      arr.Data(),
-		builder:   pathBuilder{nullableInParent: fieldNullable, paths: make([]pathInfo, 0), refCount: utils.NewRefCount(1)},
+		builder: pathBuilder{
+			nullableInParent:           fieldNullable,
+			paths:                      make([]pathInfo, 0),
+			refCount:                   utils.NewRefCount(1),
+			writeFixedSizeListAsVector: writeFixedSizeListAsVector,
+			atRoot:                     true,
+		},
 	}
 	if err := ret.builder.Visit(arr); err != nil {
 		return nil, err

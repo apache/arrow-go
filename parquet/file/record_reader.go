@@ -460,18 +460,31 @@ func (rr *recordReader) ResetValues() {
 	rr.recordReaderImpl.ResetValues()
 }
 
-func (rr *recordReader) SeekToRow(recordIdx int64) error {
-	if err := rr.recordReaderImpl.SeekToRow(recordIdx); err != nil {
-		return err
-	}
-
+func (rr *recordReader) resetAfterSeek() {
 	rr.atRecStart = true
 	rr.recordsRead = 0
 	// force re-reading the definition/repetition levels
 	// calling SeekToRow on the underlying column reader will ensure that
 	// the next reads will pull from the correct row
 	rr.levelsPos, rr.levelsWritten = 0, 0
+}
 
+func (rr *recordReader) SeekToRow(recordIdx int64) error {
+	if err := rr.recordReaderImpl.SeekToRow(recordIdx); err != nil {
+		return err
+	}
+	rr.resetAfterSeek()
+	return nil
+}
+
+// SeekToRowWithValueStride seeks by row ordinal but positions the decoder at a
+// fixed multiple of primitive values per row. This is used by leaf-only VECTOR
+// columns where one logical row contributes valueStride physical leaf values.
+func (rr *recordReader) SeekToRowWithValueStride(recordIdx, valueStride int64) error {
+	if err := rr.seekToRowWithValueStride(recordIdx, valueStride); err != nil {
+		return err
+	}
+	rr.resetAfterSeek()
 	return nil
 }
 

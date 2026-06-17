@@ -83,7 +83,7 @@ type arrowColumnWriter struct {
 //
 // Using an arrow column writer is a convenience to avoid having to process the arrow array yourself
 // and determine the correct definition and repetition levels manually.
-func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *SchemaManifest, rgw file.RowGroupWriter, leafColIdx int) (arrowColumnWriter, error) {
+func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *SchemaManifest, rgw file.RowGroupWriter, leafColIdx int, writeFixedSizeListAsVector bool) (arrowColumnWriter, error) {
 	if data.Len() == 0 {
 		return arrowColumnWriter{leafCount: calcLeafCount(data.DataType()), rgw: rgw}, nil
 	}
@@ -138,9 +138,9 @@ func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *Sch
 		defer arrToWrite.Release()
 
 		if arrToWrite.Len() > 0 {
-			bldr, err := newMultipathLevelBuilder(arrToWrite, isNullable)
+			bldr, err := newMultipathLevelBuilderWithVector(arrToWrite, isNullable, writeFixedSizeListAsVector)
 			if err != nil {
-				return arrowColumnWriter{}, nil
+				return arrowColumnWriter{}, err
 			}
 			if leafCount != bldr.leafCount() {
 				return arrowColumnWriter{}, fmt.Errorf("data type leaf_count != builder leaf_count: %d - %d", leafCount, bldr.leafCount())

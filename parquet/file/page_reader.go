@@ -353,10 +353,14 @@ type serializedPageReader struct {
 	colIdx        int
 	pgIndexReader *metadata.RowGroupPageIndexReader
 
-	nrows    int64
-	rowsSeen int64
-	mem      memory.Allocator
-	codec    compress.Codec
+	// nrows is the physical leaf-value count used to know when the page stream is
+	// exhausted. parentRows, when set by file readers, is the row-group parent row
+	// count used for row-ordinal seek bounds.
+	nrows      int64
+	parentRows int64
+	rowsSeen   int64
+	mem        memory.Allocator
+	codec      compress.Codec
 
 	curPageHdr        *format.PageHeader
 	pageOrd           int16
@@ -687,7 +691,7 @@ func (p *serializedPageReader) readPageHeader(rd parquet.BufferedReader, hdr *fo
 }
 
 func (p *serializedPageReader) SeekToPageWithRow(rowIdx int64) error {
-	if rowIdx < 0 || rowIdx >= p.nrows {
+	if rowIdx < 0 || (p.parentRows > 0 && rowIdx >= p.parentRows) || (p.parentRows <= 0 && rowIdx >= p.nrows) {
 		return fmt.Errorf("parquet: cannot seek column reader to row index %d", rowIdx)
 	}
 

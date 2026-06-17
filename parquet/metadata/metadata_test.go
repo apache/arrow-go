@@ -17,6 +17,7 @@
 package metadata_test
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -25,6 +26,8 @@ import (
 
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
+	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
+	"github.com/apache/arrow-go/v18/parquet/internal/thrift"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
@@ -80,6 +83,38 @@ func assertStats(t *testing.T, m *metadata.ColumnChunkMetaData) metadata.TypedSt
 	assert.NoError(t, err)
 	assert.NotNil(t, s)
 	return s
+}
+
+func TestNewFileMetaDataRejectsInvalidVectorSchema(t *testing.T) {
+	rootChildren := int32(1)
+	optionalChildren := int32(1)
+	vectorLen := int32(4)
+	fileMeta := format.NewFileMetaData()
+	fileMeta.Schema = []*format.SchemaElement{
+		{
+			Name:           "schema",
+			RepetitionType: format.FieldRepetitionTypePtr(format.FieldRepetitionType_REQUIRED),
+			NumChildren:    &rootChildren,
+		},
+		{
+			Name:           "optional_parent",
+			RepetitionType: format.FieldRepetitionTypePtr(format.FieldRepetitionType_OPTIONAL),
+			NumChildren:    &optionalChildren,
+		},
+		{
+			Name:           "v",
+			RepetitionType: format.FieldRepetitionTypePtr(format.FieldRepetitionType_VECTOR),
+			Type:           format.TypePtr(format.Type_FLOAT),
+			VectorLength:   &vectorLen,
+		},
+	}
+
+	var buf bytes.Buffer
+	_, err := thrift.NewThriftSerializer().Serialize(fileMeta, &buf, nil)
+	require.NoError(t, err)
+
+	_, err = metadata.NewFileMetaData(buf.Bytes(), nil)
+	require.ErrorContains(t, err, "VECTOR columns must be non-nullable")
 }
 
 func TestBuildAccess(t *testing.T) {

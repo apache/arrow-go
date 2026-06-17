@@ -76,27 +76,48 @@ func FromParquet(elems []*format.SchemaElement) (Node, error) {
 	}
 
 	// We don't check that the root node is repeated since this is not
-	// consistently set by implementations
+	// consistently set by implementations. The root repetition also does not
+	// contribute levels, matching NewSchema/buildTree.
 	var (
 		pos      = 0
-		nextNode func() (Node, error)
+		nextNode func(isRoot bool, maxDefLvl, maxRepLvl int16) (Node, error)
 	)
 
-	nextNode = func() (Node, error) {
+	nextNode = func(isRoot bool, maxDefLvl, maxRepLvl int16) (Node, error) {
 		if pos == len(elems) {
 			return nil, errors.New("parquet: malformed schema: not enough elements")
 		}
 
 		elem := elems[pos]
 		pos++
+		repetition := parquet.Repetition(elem.GetRepetitionType())
 
 		if elem.GetNumChildren() == 0 {
+			if repetition == parquet.Repetitions.Vector {
+				if err := validateVectorColumnLevels(maxDefLvl, maxRepLvl); err != nil {
+					return nil, err
+				}
+			}
 			return PrimitiveNodeFromThrift(elem)
+		}
+
+		childMaxDefLvl, childMaxRepLvl := maxDefLvl, maxRepLvl
+		if !isRoot {
+			switch repetition {
+			case parquet.Repetitions.Repeated:
+				childMaxRepLvl++
+				fallthrough
+			case parquet.Repetitions.Optional:
+				childMaxDefLvl++
+			case parquet.Repetitions.Vector:
+				// GroupNodeFromThrift rejects VECTOR groups; keep level accounting a
+				// no-op here to mirror buildTree until that error is returned below.
+			}
 		}
 
 		fields := make([]Node, 0, elem.GetNumChildren())
 		for i := 0; i < int(elem.GetNumChildren()); i++ {
-			n, err := nextNode()
+			n, err := nextNode(false, childMaxDefLvl, childMaxRepLvl)
 			if err != nil {
 				return nil, err
 			}
@@ -106,7 +127,7 @@ func FromParquet(elems []*format.SchemaElement) (Node, error) {
 		return GroupNodeFromThrift(elem, fields)
 	}
 
-	return nextNode()
+	return nextNode(true, 0, 0)
 }
 
 // Root returns the group node that is the root of this schema
@@ -136,26 +157,48 @@ func (s *Schema) Equals(rhs *Schema) bool {
 	return true
 }
 
-func (s *Schema) buildTree(n Node, maxDefLvl, maxRepLvl int16, base Node) {
+func validateVectorColumnLevels(maxDefLvl, maxRepLvl int16) error {
+	if maxDefLvl != 0 || maxRepLvl != 0 {
+		return errors.New("parquet: VECTOR columns must be non-nullable and must not have repeated ancestors")
+	}
+	return nil
+}
+
+func (s *Schema) buildTree(n Node, maxDefLvl, maxRepLvl int16, base Node) error {
 	switch n.RepetitionType() {
 	case parquet.Repetitions.Repeated:
 		maxRepLvl++
 		fallthrough
 	case parquet.Repetitions.Optional:
 		maxDefLvl++
+	case parquet.Repetitions.Vector:
+		if err := validateVectorColumnLevels(maxDefLvl, maxRepLvl); err != nil {
+			return err
+		}
+		// VECTOR fields (Option B) repeat a fixed number of times per parent
+		// value without increasing the maximum definition or repetition level:
+		// the fixed multiplicity is recovered from the schema's vector_length,
+		// so no per-element levels are written. Intentionally a no-op.
 	}
 
 	switch n := n.(type) {
 	case *GroupNode:
 		for _, f := range n.fields {
-			s.buildTree(f, maxDefLvl, maxRepLvl, base)
+			if err := s.buildTree(f, maxDefLvl, maxRepLvl, base); err != nil {
+				return err
+			}
 		}
 	case *PrimitiveNode:
+		col, err := NewColumnChecked(n, maxDefLvl, maxRepLvl)
+		if err != nil {
+			return err
+		}
 		s.nodeToLeaf[n] = len(s.leaves)
-		s.leaves = append(s.leaves, NewColumn(n, maxDefLvl, maxRepLvl))
+		s.leaves = append(s.leaves, col)
 		s.leafToBase[len(s.leaves)-1] = base
 		s.leafToIndex.Add(n.Path(), len(s.leaves)-1)
 	}
+	return nil
 }
 
 // Column returns the (0-indexed) column of the provided index.
@@ -226,6 +269,16 @@ func (s *Schema) String() string {
 //
 // Any fields with a field-id of -1 will be given an appropriate field number based on their order.
 func NewSchema(root *GroupNode) *Schema {
+	s, err := NewSchemaChecked(root)
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+
+// NewSchemaChecked is like NewSchema, but returns an error instead of panicking
+// when schema invariants are violated.
+func NewSchemaChecked(root *GroupNode) (*Schema, error) {
 	s := &Schema{
 		root,
 		make([]*Column, 0),
@@ -235,9 +288,11 @@ func NewSchema(root *GroupNode) *Schema {
 	}
 
 	for _, f := range root.fields {
-		s.buildTree(f, 0, 0, f)
+		if err := s.buildTree(f, 0, 0, f); err != nil {
+			return nil, err
+		}
 	}
-	return s
+	return s, nil
 }
 
 type schemaColumnOrderUpdater struct {

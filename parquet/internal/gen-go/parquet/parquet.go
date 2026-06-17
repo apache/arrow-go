@@ -227,6 +227,7 @@ const (
 	FieldRepetitionType_REQUIRED FieldRepetitionType = 0
 	FieldRepetitionType_OPTIONAL FieldRepetitionType = 1
 	FieldRepetitionType_REPEATED FieldRepetitionType = 2
+	FieldRepetitionType_VECTOR FieldRepetitionType = 3
 )
 
 func (p FieldRepetitionType) String() string {
@@ -234,6 +235,7 @@ func (p FieldRepetitionType) String() string {
 	case FieldRepetitionType_REQUIRED: return "REQUIRED"
 	case FieldRepetitionType_OPTIONAL: return "OPTIONAL"
 	case FieldRepetitionType_REPEATED: return "REPEATED"
+	case FieldRepetitionType_VECTOR: return "VECTOR"
 	}
 	return "<UNSET>"
 }
@@ -243,6 +245,7 @@ func FieldRepetitionTypeFromString(s string) (FieldRepetitionType, error) {
 	case "REQUIRED": return FieldRepetitionType_REQUIRED, nil
 	case "OPTIONAL": return FieldRepetitionType_OPTIONAL, nil
 	case "REPEATED": return FieldRepetitionType_REPEATED, nil
+	case "VECTOR": return FieldRepetitionType_VECTOR, nil
 	}
 	return FieldRepetitionType(0), fmt.Errorf("not a valid FieldRepetitionType string")
 }
@@ -5853,6 +5856,9 @@ type SchemaElement struct {
 	Precision *int32 `thrift:"precision,8" db:"precision" json:"precision,omitempty"`
 	FieldID *int32 `thrift:"field_id,9" db:"field_id" json:"field_id,omitempty"`
 	LogicalType *LogicalType `thrift:"logicalType,10" db:"logicalType" json:"logicalType,omitempty"`
+	// EXPERIMENTAL: The fixed number of times the field repeats per parent
+	// value when repetition_type is VECTOR.
+	VectorLength *int32 `thrift:"vector_length,11" db:"vector_length" json:"vector_length,omitempty"`
 }
 
 func NewSchemaElement() *SchemaElement {
@@ -5946,6 +5952,15 @@ func (p *SchemaElement) GetLogicalType() *LogicalType {
 	return p.LogicalType
 }
 
+var SchemaElement_VectorLength_DEFAULT int32
+
+func (p *SchemaElement) GetVectorLength() int32 {
+	if !p.IsSetVectorLength() {
+		return SchemaElement_VectorLength_DEFAULT
+	}
+	return *p.VectorLength
+}
+
 func (p *SchemaElement) IsSetType() bool {
 	return p.Type != nil
 }
@@ -5980,6 +5995,10 @@ func (p *SchemaElement) IsSetFieldID() bool {
 
 func (p *SchemaElement) IsSetLogicalType() bool {
 	return p.LogicalType != nil
+}
+
+func (p *SchemaElement) IsSetVectorLength() bool {
+	return p.VectorLength != nil
 }
 
 func (p *SchemaElement) Read(ctx context.Context, iprot thrift.TProtocol) error {
@@ -6099,6 +6118,16 @@ func (p *SchemaElement) Read(ctx context.Context, iprot thrift.TProtocol) error 
 					return err
 				}
 			}
+		case 11:
+			if fieldTypeId == thrift.I32 {
+				if err := p.ReadField11(ctx, iprot); err != nil {
+					return err
+				}
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
 		default:
 			if err := iprot.Skip(ctx, fieldTypeId); err != nil {
 				return err
@@ -6209,6 +6238,15 @@ func (p *SchemaElement) ReadField10(ctx context.Context, iprot thrift.TProtocol)
 	return nil
 }
 
+func (p *SchemaElement) ReadField11(ctx context.Context, iprot thrift.TProtocol) error {
+	if v, err := iprot.ReadI32(ctx); err != nil {
+		return thrift.PrependError("error reading field 11: ", err)
+	} else {
+		p.VectorLength = &v
+	}
+	return nil
+}
+
 func (p *SchemaElement) Write(ctx context.Context, oprot thrift.TProtocol) error {
 	if err := oprot.WriteStructBegin(ctx, "SchemaElement"); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
@@ -6224,6 +6262,7 @@ func (p *SchemaElement) Write(ctx context.Context, oprot thrift.TProtocol) error
 		if err := p.writeField8(ctx, oprot); err != nil { return err }
 		if err := p.writeField9(ctx, oprot); err != nil { return err }
 		if err := p.writeField10(ctx, oprot); err != nil { return err }
+		if err := p.writeField11(ctx, oprot); err != nil { return err }
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -6382,6 +6421,21 @@ func (p *SchemaElement) writeField10(ctx context.Context, oprot thrift.TProtocol
 	return err
 }
 
+func (p *SchemaElement) writeField11(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if p.IsSetVectorLength() {
+		if err := oprot.WriteFieldBegin(ctx, "vector_length", thrift.I32, 11); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 11:vector_length: ", p), err)
+		}
+		if err := oprot.WriteI32(ctx, int32(*p.VectorLength)); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T.vector_length (11) field write error: ", p), err)
+		}
+		if err := oprot.WriteFieldEnd(ctx); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 11:vector_length: ", p), err)
+		}
+	}
+	return err
+}
+
 func (p *SchemaElement) Equals(other *SchemaElement) bool {
 	if p == other {
 		return true
@@ -6438,6 +6492,12 @@ func (p *SchemaElement) Equals(other *SchemaElement) bool {
 		if (*p.FieldID) != (*other.FieldID) { return false }
 	}
 	if !p.LogicalType.Equals(other.LogicalType) { return false }
+	if p.VectorLength != other.VectorLength {
+		if p.VectorLength == nil || other.VectorLength == nil {
+			return false
+		}
+		if (*p.VectorLength) != (*other.VectorLength) { return false }
+	}
 	return true
 }
 

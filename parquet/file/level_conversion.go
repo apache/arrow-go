@@ -108,6 +108,11 @@ func (l *LevelInfo) Increment(n schema.Node) {
 		l.IncrementRepeated()
 	case parquet.Repetitions.Optional:
 		l.IncrementOptional()
+	case parquet.Repetitions.Vector:
+		// VECTOR fields (Option B) repeat a fixed number of times per parent
+		// value without adding a definition or repetition level; the fixed
+		// multiplicity is carried by the schema's vector_length. Intentionally
+		// a no-op, mirroring schema.buildTree.
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -170,6 +171,22 @@ func (lr *leafReader) SeekToRow(rowIdx int64) error {
 
 	lr.recordRdr.SetPageReader(pr)
 	return lr.recordRdr.SeekToRow(offset)
+}
+
+func (lr *leafReader) SeekToRowWithValueStride(rowIdx, valueStride int64) error {
+	pr, offset, err := lr.input.FindChunkForRow(rowIdx)
+	if err != nil {
+		return err
+	}
+
+	lr.recordRdr.SetPageReader(pr)
+	seeker, ok := lr.recordRdr.(interface {
+		SeekToRowWithValueStride(int64, int64) error
+	})
+	if !ok {
+		return errors.New("parquet: record reader does not support value-stride seeking")
+	}
+	return seeker.SeekToRowWithValueStride(offset, valueStride)
 }
 
 // nextRowGroup advances to the next row group. remainingRows is the number of
@@ -540,6 +557,111 @@ func newFixedSizeListReader(rctx *readerCtx, field *arrow.Field, info file.Level
 			&lr,
 		},
 	}
+}
+
+func mulVectorLen(value int64, listSize int32) (int64, error) {
+	if listSize <= 0 {
+		return 0, fmt.Errorf("VECTOR FixedSizeList must have a positive list size, got %d", listSize)
+	}
+	if value > math.MaxInt64/int64(listSize) {
+		return 0, errors.New("VECTOR FixedSizeList length overflow")
+	}
+	return value * int64(listSize), nil
+}
+
+// vectorFixedSizeListReader reads a Parquet VECTOR column (Option B) into an
+// Arrow FixedSizeList. In this phase only dense (non-nullable) vectors are
+// supported: the column has no per-element repetition or definition levels, so
+// the child leaf holds exactly listSize values per row and is reshaped into a
+// FixedSizeList without consulting any levels.
+type vectorFixedSizeListReader struct {
+	rctx     *readerCtx
+	field    *arrow.Field
+	info     file.LevelInfo
+	itemRdr  *ColumnReader
+	listSize int32
+	refCount atomic.Int64
+}
+
+func newVectorFixedSizeListReader(rctx *readerCtx, field *arrow.Field, info file.LevelInfo, listSize int32, childRdr *ColumnReader) *ColumnReader {
+	childRdr.Retain()
+	lr := &vectorFixedSizeListReader{rctx: rctx, field: field, info: info, itemRdr: childRdr, listSize: listSize}
+	lr.refCount.Add(1)
+	return &ColumnReader{lr}
+}
+
+func (lr *vectorFixedSizeListReader) Retain() { lr.refCount.Add(1) }
+
+func (lr *vectorFixedSizeListReader) Release() {
+	if lr.refCount.Add(-1) == 0 {
+		if lr.itemRdr != nil {
+			lr.itemRdr.Release()
+			lr.itemRdr = nil
+		}
+	}
+}
+
+func (lr *vectorFixedSizeListReader) GetDefLevels() ([]int16, error) {
+	return lr.itemRdr.GetDefLevels()
+}
+func (lr *vectorFixedSizeListReader) GetRepLevels() ([]int16, error) {
+	return lr.itemRdr.GetRepLevels()
+}
+func (lr *vectorFixedSizeListReader) Field() *arrow.Field        { return lr.field }
+func (lr *vectorFixedSizeListReader) IsOrHasRepeatedChild() bool { return false }
+
+func (lr *vectorFixedSizeListReader) SeekToRow(rowIdx int64) error {
+	seeker, ok := lr.itemRdr.colReaderImpl.(interface {
+		SeekToRowWithValueStride(int64, int64) error
+	})
+	if !ok {
+		return errors.New("parquet: VECTOR child reader does not support value-stride seeking")
+	}
+	return seeker.SeekToRowWithValueStride(rowIdx, int64(lr.listSize))
+}
+
+func (lr *vectorFixedSizeListReader) LoadBatch(nrecords int64) error {
+	// Each parent record contributes listSize leaf slots and there are no
+	// per-element levels, so the child reads nrecords*listSize values.
+	childRecords, err := mulVectorLen(nrecords, lr.listSize)
+	if err != nil {
+		return err
+	}
+	return lr.itemRdr.LoadBatch(childRecords)
+}
+
+func (lr *vectorFixedSizeListReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
+	if lr.field.Nullable || lr.info.HasNullableValues() {
+		return nil, fmt.Errorf("%w: reading nullable VECTOR columns is not supported yet", arrow.ErrNotImplemented)
+	}
+
+	childBound, err := mulVectorLen(lenBound, lr.listSize)
+	if err != nil {
+		return nil, err
+	}
+	childChunked, err := lr.itemRdr.BuildArray(childBound)
+	if err != nil {
+		return nil, err
+	}
+	defer childChunked.Release()
+
+	childData, err := chunksToSingle(childChunked, lr.rctx.mem)
+	if err != nil {
+		return nil, err
+	}
+	defer childData.Release()
+
+	if childData.Len()%int(lr.listSize) != 0 {
+		return nil, fmt.Errorf("VECTOR FixedSizeList child length %d is not divisible by list size %d",
+			childData.Len(), lr.listSize)
+	}
+	outRows := childData.Len() / int(lr.listSize)
+
+	data := array.NewData(lr.field.Type, outRows, []*memory.Buffer{nil}, []arrow.ArrayData{childData}, 0, 0)
+	defer data.Release()
+	out := array.MakeFromData(data)
+	defer out.Release()
+	return arrow.NewChunked(lr.field.Type, []arrow.Array{out}), nil
 }
 
 // helper function to combine chunks into a single array.

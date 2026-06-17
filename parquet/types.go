@@ -323,15 +323,23 @@ var (
 
 	// Repetitions contains the constants for Field Repetition Types
 	Repetitions = struct {
-		Required  Repetition
-		Optional  Repetition
-		Repeated  Repetition
-		Undefined Repetition // convenience value
+		Required Repetition
+		Optional Repetition
+		Repeated Repetition
+		// Vector is the EXPERIMENTAL fixed-size repetition: the field repeats
+		// exactly SchemaElement.vector_length times per parent value without
+		// increasing the maximum definition or repetition level. Used to encode
+		// Arrow FixedSizeList as Parquet VECTOR (Option B).
+		Vector Repetition
+		// Undefined is a convenience sentinel outside the parquet-format enum.
+		// It is intentionally greater than every known repetition value.
+		Undefined Repetition
 	}{
 		Required:  Repetition(format.FieldRepetitionType_REQUIRED),
 		Optional:  Repetition(format.FieldRepetitionType_OPTIONAL),
 		Repeated:  Repetition(format.FieldRepetitionType_REPEATED),
-		Undefined: Repetition(format.FieldRepetitionType_REPEATED + 1),
+		Vector:    Repetition(format.FieldRepetitionType_VECTOR),
+		Undefined: Repetition(format.FieldRepetitionType_VECTOR + 1),
 	}
 )
 

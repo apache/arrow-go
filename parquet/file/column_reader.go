@@ -118,6 +118,11 @@ type ColumnChunkReader interface {
 	Err() error
 
 	SeekToRow(rowIdx int64) error
+	// seekToRowWithValueStride seeks to rowIdx using row-group row ordinals but
+	// positions the value decoder at rowIdx*valueStride physical values. This is
+	// used by leaf-only VECTOR columns where one logical row contributes a fixed
+	// number of primitive leaf values.
+	seekToRowWithValueStride(rowIdx, valueStride int64) error
 
 	// Skip buffered values
 	consumeBufferedValues(int64)
@@ -579,7 +584,7 @@ func (c *columnChunkReader) determineNumToRead(batchLen int64, defLvls, repLvls 
 // finds the page that contains the desired row index, and the Column Chunk
 // reader will discard values until it reaches the desired row index according
 // to the definition and repetition levels.
-func (c *columnChunkReader) SeekToRow(rowIdx int64) error {
+func (c *columnChunkReader) seekToPageForRow(rowIdx int64) error {
 	if err := c.pager().SeekToPageWithRow(rowIdx); err != nil {
 		return err
 	}
@@ -591,17 +596,131 @@ func (c *columnChunkReader) SeekToRow(rowIdx int64) error {
 		return c.err
 	}
 
-	gotDataPage, err := c.processPage()
-	if err != nil {
-		c.err = err
-		return err
+	// A seek rewinds to the start of the column chunk (SeekToPageWithRow), which
+	// re-streams the dictionary page. The dictionary is configured once per
+	// chunk, so an already-configured dictionary page is skipped here rather than
+	// re-read (configureDict would reject it as a second dictionary); readNewPage
+	// then advances to the first data page. The "more than one dictionary" guard
+	// still applies on the normal forward-read path through readNewPage.
+	gotDataPage := false
+	if _, isDict := c.curPage.(*DictionaryPage); !isDict || c.dictState == dictNotRead {
+		var err error
+		if gotDataPage, err = c.processPage(); err != nil {
+			c.err = err
+			return err
+		}
 	}
 
 	if !gotDataPage {
 		c.readNewPage()
 	}
+	return c.err
+}
 
+func (c *columnChunkReader) SeekToRow(rowIdx int64) error {
+	if c.descr.InVectorColumn() {
+		// VECTOR columns (Option B) contribute EffectiveVectorLength leaf values
+		// per row and carry no per-element levels, so a row ordinal maps to a
+		// fixed value stride. skipRows would otherwise treat one leaf slot as one
+		// row and undershoot the seek by a factor of the vector length.
+		return c.seekToRowWithValueStride(rowIdx, int64(c.descr.EffectiveVectorLength()))
+	}
+	if err := c.seekToPageForRow(rowIdx); err != nil {
+		return err
+	}
 	return c.skipRows(rowIdx - c.curPage.(DataPage).FirstRowIndex())
+}
+
+func (c *columnChunkReader) hasOffsetIndex() bool {
+	spr, ok := c.rdr.(*serializedPageReader)
+	if !ok || spr.pgIndexReader == nil {
+		return false
+	}
+	oidx, err := spr.pgIndexReader.GetOffsetIndex(spr.colIdx)
+	return err == nil && oidx != nil
+}
+
+func (c *columnChunkReader) seekToRowWithValueStride(rowIdx, valueStride int64) error {
+	if rowIdx < 0 {
+		return fmt.Errorf("parquet: cannot seek column reader to row index %d", rowIdx)
+	}
+	if valueStride <= 0 {
+		return fmt.Errorf("parquet: invalid value stride %d", valueStride)
+	}
+	valuesToSkip, ok := utils.Mul64(rowIdx, valueStride)
+	if !ok {
+		return errors.New("parquet: seek value offset overflow")
+	}
+	if spr, ok := c.rdr.(*serializedPageReader); ok {
+		if spr.nrows%valueStride != 0 {
+			return fmt.Errorf("parquet: VECTOR column chunk has %d values, not a multiple of vector length %d", spr.nrows, valueStride)
+		}
+		if spr.parentRows > 0 {
+			if rowIdx >= spr.parentRows {
+				return fmt.Errorf("parquet: cannot seek column reader to row index %d", rowIdx)
+			}
+		} else if valuesToSkip < 0 || valuesToSkip >= spr.nrows {
+			return fmt.Errorf("parquet: cannot seek column reader to row index %d", rowIdx)
+		}
+	}
+
+	// Use page-level seeking when page row ordinals are known to be parent rows:
+	// DataPageV2 stores num_rows, and V1 is reliable when an offset index supplies
+	// first_row_index. V1 pages without an offset index only expose num_values
+	// (leaf slots), so fall back to row-group-local value skipping below.
+	if err := c.seekToPageForRow(rowIdx); err != nil {
+		return err
+	}
+	page := c.curPage.(DataPage)
+	pageFirstRow := page.FirstRowIndex()
+	if _, ok := page.(*DataPageV2); ok || c.hasOffsetIndex() {
+		if pageFirstRow <= rowIdx {
+			pageValuesToSkip, ok := utils.Mul64(rowIdx-pageFirstRow, valueStride)
+			if !ok {
+				return errors.New("parquet: seek page value offset overflow")
+			}
+			return c.skipValues(pageValuesToSkip)
+		}
+	}
+
+	// The caller has already selected the row group by parent row. Reset to the
+	// start of that row group before skipping leaf values. This is the universally
+	// correct path for V1 pages without an offset index.
+	if err := c.seekToPageForRow(0); err != nil {
+		return err
+	}
+	return c.skipValues(valuesToSkip)
+}
+
+func (c *columnChunkReader) skipValues(nvalues int64) error {
+	toSkip := nvalues
+	for c.HasNext() && toSkip > 0 {
+		available := c.numBuffered - c.numDecoded
+		if available <= 0 {
+			continue
+		}
+		if toSkip >= available {
+			toSkip -= available
+			c.consumeBufferedValues(available)
+			continue
+		}
+
+		skipped, err := c.curDecoder.Discard(int(toSkip))
+		if err != nil {
+			c.err = err
+			return err
+		}
+		if skipped <= 0 {
+			c.err = errors.New("parquet: decoder did not discard any values")
+			return c.err
+		}
+		toSkip -= int64(skipped)
+		c.consumeBufferedValues(int64(skipped))
+	}
+	if toSkip > 0 {
+		return fmt.Errorf("parquet: cannot seek past end of column chunk, %d values remaining", toSkip)
+	}
+	return c.err
 }
 
 func (c *columnChunkReader) skipRows(nrows int64) error {

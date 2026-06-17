@@ -103,6 +103,9 @@ type node struct {
 	logicalType   LogicalType
 	convertedType ConvertedType
 	colPath       parquet.ColumnPath
+	// vectorLength is the fixed multiplicity for VECTOR-repeated nodes and -1
+	// for all other nodes. See parquet.Repetitions.Vector.
+	vectorLength int32
 }
 
 func (n *node) toThrift() *format.SchemaElement    { return nil }
@@ -112,6 +115,7 @@ func (n *node) RepetitionType() parquet.Repetition { return n.repetition }
 func (n *node) ConvertedType() ConvertedType       { return n.convertedType }
 func (n *node) LogicalType() LogicalType           { return n.logicalType }
 func (n *node) FieldID() int32                     { return n.fieldID }
+func (n *node) VectorLength() int32                { return n.vectorLength }
 func (n *node) Parent() Node                       { return n.parent }
 func (n *node) SetParent(p Node)                   { n.parent = p }
 func (n *node) Path() string {
@@ -124,13 +128,42 @@ func (n *node) columnPath() parquet.ColumnPath {
 	return n.colPath
 }
 
+func nodeVectorLength(n Node) int32 {
+	if v, ok := n.(interface{ VectorLength() int32 }); ok {
+		return v.VectorLength()
+	}
+	return -1
+}
+
 func (n *node) Equals(rhs Node) bool {
 	return n.typ == rhs.Type() &&
 		n.Name() == rhs.Name() &&
 		n.RepetitionType() == rhs.RepetitionType() &&
 		n.ConvertedType() == rhs.ConvertedType() &&
 		n.FieldID() == rhs.FieldID() &&
+		n.VectorLength() == nodeVectorLength(rhs) &&
 		n.LogicalType().Equals(rhs.LogicalType())
+}
+
+// validateVectorProperties enforces the VECTOR repetition invariants shared by
+// all node constructors: in this reduced Option B implementation VECTOR
+// repetition is only valid on primitive leaf nodes and requires a positive
+// vector_length, and no other node may carry a vector_length (its sentinel is
+// -1).
+func validateVectorProperties(typ NodeType, repetition parquet.Repetition, vectorLength int32) error {
+	if repetition == parquet.Repetitions.Vector {
+		if typ != Primitive {
+			return errors.New("parquet: VECTOR repetition is only allowed on primitive leaf nodes")
+		}
+		if vectorLength <= 0 {
+			return errors.New("parquet: VECTOR nodes must specify a positive vector_length")
+		}
+		return nil
+	}
+	if vectorLength != -1 {
+		return errors.New("parquet: only VECTOR nodes may specify vector_length")
+	}
+	return nil
 }
 
 func (n *node) Visit(v Visitor) {}
@@ -151,10 +184,28 @@ type PrimitiveNode struct {
 // NewPrimitiveNodeLogical constructs a Primitive node using the provided logical type for a given
 // physical type and typelength.
 func NewPrimitiveNodeLogical(name string, repetition parquet.Repetition, logicalType LogicalType, physicalType parquet.Type, typeLen int, id int32) (*PrimitiveNode, error) {
+	return newPrimitiveNodeLogical(name, repetition, logicalType, physicalType, typeLen, id, -1)
+}
+
+// NewPrimitiveNodeLogicalVector constructs a primitive VECTOR leaf node using
+// the provided logical type for a given physical type and typelength.
+// vectorLength must be positive.
+func NewPrimitiveNodeLogicalVector(name string, logicalType LogicalType, physicalType parquet.Type, typeLen int, vectorLength int32, id int32) (*PrimitiveNode, error) {
+	return newPrimitiveNodeLogical(name, parquet.Repetitions.Vector, logicalType, physicalType, typeLen, id, vectorLength)
+}
+
+func newPrimitiveNodeLogical(name string, repetition parquet.Repetition, logicalType LogicalType, physicalType parquet.Type, typeLen int, id int32, vectorLength int32) (*PrimitiveNode, error) {
 	n := &PrimitiveNode{
-		node:         node{typ: Primitive, name: name, repetition: repetition, logicalType: logicalType, fieldID: id},
+		node:         node{typ: Primitive, name: name, repetition: repetition, logicalType: logicalType, fieldID: id, vectorLength: vectorLength},
 		physicalType: physicalType,
 		typeLen:      typeLen,
+	}
+
+	if err := validateVectorProperties(Primitive, repetition, n.vectorLength); err != nil {
+		return nil, err
+	}
+	if repetition == parquet.Repetitions.Vector && physicalType == parquet.Types.ByteArray {
+		return nil, errors.New("parquet: VECTOR primitive nodes do not support variable-width BYTE_ARRAY elements")
 	}
 
 	if logicalType != nil {
@@ -185,10 +236,21 @@ func NewPrimitiveNodeLogical(name string, repetition parquet.Repetition, logical
 // NewPrimitiveNodeConverted constructs a primitive node from the given physical type and converted type,
 // determining the logical type from the converted type.
 func NewPrimitiveNodeConverted(name string, repetition parquet.Repetition, typ parquet.Type, converted ConvertedType, typeLen, precision, scale int, id int32) (*PrimitiveNode, error) {
+	return newPrimitiveNodeConverted(name, repetition, typ, converted, typeLen, precision, scale, id, -1)
+}
+
+func newPrimitiveNodeConverted(name string, repetition parquet.Repetition, typ parquet.Type, converted ConvertedType, typeLen, precision, scale int, id int32, vectorLength int32) (*PrimitiveNode, error) {
 	n := &PrimitiveNode{
-		node:         node{typ: Primitive, name: name, repetition: repetition, convertedType: converted, fieldID: id},
+		node:         node{typ: Primitive, name: name, repetition: repetition, convertedType: converted, fieldID: id, vectorLength: vectorLength},
 		physicalType: typ,
 		typeLen:      -1,
+	}
+
+	if err := validateVectorProperties(Primitive, repetition, n.vectorLength); err != nil {
+		return nil, err
+	}
+	if repetition == parquet.Repetitions.Vector && typ == parquet.Types.ByteArray {
+		return nil, errors.New("parquet: VECTOR primitive nodes do not support variable-width BYTE_ARRAY elements")
 	}
 
 	switch converted {
@@ -268,16 +330,27 @@ func PrimitiveNodeFromThrift(elem *format.SchemaElement) (*PrimitiveNode, error)
 		fieldID = elem.GetFieldID()
 	}
 
-	if elem.IsSetLogicalType() {
-		return NewPrimitiveNodeLogical(elem.GetName(), parquet.Repetition(elem.GetRepetitionType()),
-			getLogicalType(elem.GetLogicalType()), parquet.Type(elem.GetType()), int(elem.GetTypeLength()),
-			fieldID)
-	} else if elem.IsSetConvertedType() {
-		return NewPrimitiveNodeConverted(elem.GetName(), parquet.Repetition(elem.GetRepetitionType()),
-			parquet.Type(elem.GetType()), ConvertedType(elem.GetConvertedType()),
-			int(elem.GetTypeLength()), int(elem.GetPrecision()), int(elem.GetScale()), fieldID)
+	repetition := parquet.Repetition(elem.GetRepetitionType())
+	vectorLength := int32(-1)
+	if repetition == parquet.Repetitions.Vector {
+		if !elem.IsSetVectorLength() {
+			return nil, errors.New("parquet: VECTOR primitive nodes must specify vector_length")
+		}
+		vectorLength = elem.GetVectorLength()
+	} else if elem.IsSetVectorLength() {
+		return nil, errors.New("parquet: only VECTOR nodes may specify vector_length")
 	}
-	return NewPrimitiveNodeLogical(elem.GetName(), parquet.Repetition(elem.GetRepetitionType()), NoLogicalType{}, parquet.Type(elem.GetType()), int(elem.GetTypeLength()), fieldID)
+
+	if elem.IsSetLogicalType() {
+		return newPrimitiveNodeLogical(elem.GetName(), repetition,
+			getLogicalType(elem.GetLogicalType()), parquet.Type(elem.GetType()), int(elem.GetTypeLength()),
+			fieldID, vectorLength)
+	} else if elem.IsSetConvertedType() {
+		return newPrimitiveNodeConverted(elem.GetName(), repetition,
+			parquet.Type(elem.GetType()), ConvertedType(elem.GetConvertedType()),
+			int(elem.GetTypeLength()), int(elem.GetPrecision()), int(elem.GetScale()), fieldID, vectorLength)
+	}
+	return newPrimitiveNodeLogical(elem.GetName(), repetition, NoLogicalType{}, parquet.Type(elem.GetType()), int(elem.GetTypeLength()), fieldID, vectorLength)
 }
 
 // NewPrimitiveNode constructs a primitive node with the ConvertedType of None and no logical type.
@@ -360,6 +433,9 @@ func (p *PrimitiveNode) toThrift() *format.SchemaElement {
 	if p.physicalType == parquet.Types.FixedLenByteArray {
 		elem.TypeLength = thrift.Int32Ptr(int32(p.typeLen))
 	}
+	if p.RepetitionType() == parquet.Repetitions.Vector {
+		elem.VectorLength = thrift.Int32Ptr(p.vectorLength)
+	}
 	if p.decimalMetaData.IsSet {
 		elem.Precision = &p.decimalMetaData.Precision
 		elem.Scale = &p.decimalMetaData.Scale
@@ -384,8 +460,11 @@ type GroupNode struct {
 // determining the logical type from that converted type.
 func NewGroupNodeConverted(name string, repetition parquet.Repetition, fields FieldList, converted ConvertedType, id int32) (n *GroupNode, err error) {
 	n = &GroupNode{
-		node:   node{typ: Group, name: name, repetition: repetition, convertedType: converted, fieldID: id},
+		node:   node{typ: Group, name: name, repetition: repetition, convertedType: converted, fieldID: id, vectorLength: -1},
 		fields: fields,
+	}
+	if err = validateVectorProperties(Group, repetition, n.vectorLength); err != nil {
+		return
 	}
 	n.logicalType = n.convertedType.ToLogicalType(DecimalMetadata{})
 	if !(n.logicalType != nil && (n.logicalType.IsNested() || n.logicalType.IsNone()) && n.logicalType.IsCompatible(n.convertedType, DecimalMetadata{})) {
@@ -405,8 +484,12 @@ func NewGroupNodeConverted(name string, repetition parquet.Repetition, fields Fi
 // determining the converted type from the provided logical type.
 func NewGroupNodeLogical(name string, repetition parquet.Repetition, fields FieldList, logical LogicalType, id int32) (n *GroupNode, err error) {
 	n = &GroupNode{
-		node:   node{typ: Group, name: name, repetition: repetition, logicalType: logical, fieldID: id},
+		node:   node{typ: Group, name: name, repetition: repetition, logicalType: logical, fieldID: id, vectorLength: -1},
 		fields: fields,
+	}
+
+	if err = validateVectorProperties(Group, repetition, n.vectorLength); err != nil {
+		return
 	}
 
 	if logical != nil {
@@ -471,6 +554,13 @@ func GroupNodeFromThrift(elem *format.SchemaElement, fields FieldList) (*GroupNo
 	id := int32(-1)
 	if elem.IsSetFieldID() {
 		id = elem.GetFieldID()
+	}
+
+	if parquet.Repetition(elem.GetRepetitionType()) == parquet.Repetitions.Vector {
+		return nil, errors.New("parquet: VECTOR repetition is only allowed on primitive leaf nodes")
+	}
+	if elem.IsSetVectorLength() {
+		return nil, errors.New("parquet: only VECTOR nodes may specify vector_length")
 	}
 
 	if elem.IsSetLogicalType() {
