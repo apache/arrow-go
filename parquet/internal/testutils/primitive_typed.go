@@ -201,25 +201,29 @@ func (p *PrimitiveTypedTest) WriteBatchSubset(batch, offset int, writer file.Col
 }
 
 func (p *PrimitiveTypedTest) WriteBatchValuesSpaced(writer file.ColumnChunkWriter, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
+	var err error
 	switch w := writer.(type) {
 	case *file.Int32ColumnChunkWriter:
-		w.WriteBatchSpaced(p.Values.([]int32), defLevels, repLevels, validBits, validBitsOffset)
+		_, err = w.WriteBatchSpacedWithError(p.Values.([]int32), defLevels, repLevels, validBits, validBitsOffset)
 	case *file.Int64ColumnChunkWriter:
-		w.WriteBatchSpaced(p.Values.([]int64), defLevels, repLevels, validBits, validBitsOffset)
+		_, err = w.WriteBatchSpacedWithError(p.Values.([]int64), defLevels, repLevels, validBits, validBitsOffset)
 	case *file.Float32ColumnChunkWriter:
-		w.WriteBatchSpaced(p.Values.([]float32), defLevels, repLevels, validBits, validBitsOffset)
+		_, err = w.WriteBatchSpacedWithError(p.Values.([]float32), defLevels, repLevels, validBits, validBitsOffset)
 	case *file.Float64ColumnChunkWriter:
-		w.WriteBatchSpaced(p.Values.([]float64), defLevels, repLevels, validBits, validBitsOffset)
+		_, err = w.WriteBatchSpacedWithError(p.Values.([]float64), defLevels, repLevels, validBits, validBitsOffset)
 	case *file.Int96ColumnChunkWriter:
-		w.WriteBatchSpaced(p.Values.([]parquet.Int96), defLevels, repLevels, validBits, validBitsOffset)
+		_, err = w.WriteBatchSpacedWithError(p.Values.([]parquet.Int96), defLevels, repLevels, validBits, validBitsOffset)
 	case *file.ByteArrayColumnChunkWriter:
-		w.WriteBatchSpaced(p.Values.([]parquet.ByteArray), defLevels, repLevels, validBits, validBitsOffset)
+		_, err = w.WriteBatchSpacedWithError(p.Values.([]parquet.ByteArray), defLevels, repLevels, validBits, validBitsOffset)
 	case *file.BooleanColumnChunkWriter:
-		w.WriteBatchSpaced(p.Values.([]bool), defLevels, repLevels, validBits, validBitsOffset)
+		_, err = w.WriteBatchSpacedWithError(p.Values.([]bool), defLevels, repLevels, validBits, validBitsOffset)
 	case *file.FixedLenByteArrayColumnChunkWriter:
-		w.WriteBatchSpaced(p.Values.([]parquet.FixedLenByteArray), defLevels, repLevels, validBits, validBitsOffset)
+		_, err = w.WriteBatchSpacedWithError(p.Values.([]parquet.FixedLenByteArray), defLevels, repLevels, validBits, validBitsOffset)
 	default:
 		panic("unimplemented")
+	}
+	if err != nil {
+		panic(err)
 	}
 }
 
