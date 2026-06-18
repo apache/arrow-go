@@ -115,31 +115,14 @@ func (w *Int32ColumnChunkWriter) WriteBatch(values []int32, defLevels, repLevels
 // in the lowest nesting level_ is equal to the number of non-null values. If the
 // inner-most schema node is optional, the _number of rows in the lowest nesting level_
 // also includes all values with definition_level == (max_definition_level - 1).
+//
+// Deprecated: WriteBatchSpaced reports a write failure by panicking. Use
+// [Int32ColumnChunkWriter.WriteBatchSpacedWithError] instead, which returns
+// the failure as an error.
 func (w *Int32ColumnChunkWriter) WriteBatchSpaced(values []int32, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
-	valueOffset := int64(0)
-	length := len(defLevels)
-	if defLevels == nil {
-		length = len(values)
+	if _, err := w.WriteBatchSpacedWithError(values, defLevels, repLevels, validBits, validBitsOffset); err != nil {
+		panic(err)
 	}
-	doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
-		var vals []int32
-		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
-
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
-		if values != nil {
-			vals = values[valueOffset : valueOffset+info.numSpaced()]
-		}
-
-		if w.bitsBuffer != nil {
-			w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
-		} else {
-			w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
-		}
-		w.commitWriteAndCheckPageLimit(batch, info.numSpaced())
-		valueOffset += info.numSpaced()
-
-		w.checkDictionarySizeLimit()
-	})
 }
 
 // WriteBatchSpacedWithError behaves like WriteBatchSpaced but reports a write
@@ -394,31 +377,14 @@ func (w *Int64ColumnChunkWriter) WriteBatch(values []int64, defLevels, repLevels
 // in the lowest nesting level_ is equal to the number of non-null values. If the
 // inner-most schema node is optional, the _number of rows in the lowest nesting level_
 // also includes all values with definition_level == (max_definition_level - 1).
+//
+// Deprecated: WriteBatchSpaced reports a write failure by panicking. Use
+// [Int64ColumnChunkWriter.WriteBatchSpacedWithError] instead, which returns
+// the failure as an error.
 func (w *Int64ColumnChunkWriter) WriteBatchSpaced(values []int64, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
-	valueOffset := int64(0)
-	length := len(defLevels)
-	if defLevels == nil {
-		length = len(values)
+	if _, err := w.WriteBatchSpacedWithError(values, defLevels, repLevels, validBits, validBitsOffset); err != nil {
+		panic(err)
 	}
-	doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
-		var vals []int64
-		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
-
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
-		if values != nil {
-			vals = values[valueOffset : valueOffset+info.numSpaced()]
-		}
-
-		if w.bitsBuffer != nil {
-			w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
-		} else {
-			w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
-		}
-		w.commitWriteAndCheckPageLimit(batch, info.numSpaced())
-		valueOffset += info.numSpaced()
-
-		w.checkDictionarySizeLimit()
-	})
 }
 
 // WriteBatchSpacedWithError behaves like WriteBatchSpaced but reports a write
@@ -673,31 +639,14 @@ func (w *Int96ColumnChunkWriter) WriteBatch(values []parquet.Int96, defLevels, r
 // in the lowest nesting level_ is equal to the number of non-null values. If the
 // inner-most schema node is optional, the _number of rows in the lowest nesting level_
 // also includes all values with definition_level == (max_definition_level - 1).
+//
+// Deprecated: WriteBatchSpaced reports a write failure by panicking. Use
+// [Int96ColumnChunkWriter.WriteBatchSpacedWithError] instead, which returns
+// the failure as an error.
 func (w *Int96ColumnChunkWriter) WriteBatchSpaced(values []parquet.Int96, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
-	valueOffset := int64(0)
-	length := len(defLevels)
-	if defLevels == nil {
-		length = len(values)
+	if _, err := w.WriteBatchSpacedWithError(values, defLevels, repLevels, validBits, validBitsOffset); err != nil {
+		panic(err)
 	}
-	doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
-		var vals []parquet.Int96
-		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
-
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
-		if values != nil {
-			vals = values[valueOffset : valueOffset+info.numSpaced()]
-		}
-
-		if w.bitsBuffer != nil {
-			w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
-		} else {
-			w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
-		}
-		w.commitWriteAndCheckPageLimit(batch, info.numSpaced())
-		valueOffset += info.numSpaced()
-
-		w.checkDictionarySizeLimit()
-	})
 }
 
 // WriteBatchSpacedWithError behaves like WriteBatchSpaced but reports a write
@@ -952,31 +901,14 @@ func (w *Float32ColumnChunkWriter) WriteBatch(values []float32, defLevels, repLe
 // in the lowest nesting level_ is equal to the number of non-null values. If the
 // inner-most schema node is optional, the _number of rows in the lowest nesting level_
 // also includes all values with definition_level == (max_definition_level - 1).
+//
+// Deprecated: WriteBatchSpaced reports a write failure by panicking. Use
+// [Float32ColumnChunkWriter.WriteBatchSpacedWithError] instead, which returns
+// the failure as an error.
 func (w *Float32ColumnChunkWriter) WriteBatchSpaced(values []float32, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
-	valueOffset := int64(0)
-	length := len(defLevels)
-	if defLevels == nil {
-		length = len(values)
+	if _, err := w.WriteBatchSpacedWithError(values, defLevels, repLevels, validBits, validBitsOffset); err != nil {
+		panic(err)
 	}
-	doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
-		var vals []float32
-		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
-
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
-		if values != nil {
-			vals = values[valueOffset : valueOffset+info.numSpaced()]
-		}
-
-		if w.bitsBuffer != nil {
-			w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
-		} else {
-			w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
-		}
-		w.commitWriteAndCheckPageLimit(batch, info.numSpaced())
-		valueOffset += info.numSpaced()
-
-		w.checkDictionarySizeLimit()
-	})
 }
 
 // WriteBatchSpacedWithError behaves like WriteBatchSpaced but reports a write
@@ -1231,31 +1163,14 @@ func (w *Float64ColumnChunkWriter) WriteBatch(values []float64, defLevels, repLe
 // in the lowest nesting level_ is equal to the number of non-null values. If the
 // inner-most schema node is optional, the _number of rows in the lowest nesting level_
 // also includes all values with definition_level == (max_definition_level - 1).
+//
+// Deprecated: WriteBatchSpaced reports a write failure by panicking. Use
+// [Float64ColumnChunkWriter.WriteBatchSpacedWithError] instead, which returns
+// the failure as an error.
 func (w *Float64ColumnChunkWriter) WriteBatchSpaced(values []float64, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
-	valueOffset := int64(0)
-	length := len(defLevels)
-	if defLevels == nil {
-		length = len(values)
+	if _, err := w.WriteBatchSpacedWithError(values, defLevels, repLevels, validBits, validBitsOffset); err != nil {
+		panic(err)
 	}
-	doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
-		var vals []float64
-		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
-
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
-		if values != nil {
-			vals = values[valueOffset : valueOffset+info.numSpaced()]
-		}
-
-		if w.bitsBuffer != nil {
-			w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
-		} else {
-			w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
-		}
-		w.commitWriteAndCheckPageLimit(batch, info.numSpaced())
-		valueOffset += info.numSpaced()
-
-		w.checkDictionarySizeLimit()
-	})
 }
 
 // WriteBatchSpacedWithError behaves like WriteBatchSpaced but reports a write
@@ -1513,31 +1428,14 @@ func (w *BooleanColumnChunkWriter) WriteBatch(values []bool, defLevels, repLevel
 // in the lowest nesting level_ is equal to the number of non-null values. If the
 // inner-most schema node is optional, the _number of rows in the lowest nesting level_
 // also includes all values with definition_level == (max_definition_level - 1).
+//
+// Deprecated: WriteBatchSpaced reports a write failure by panicking. Use
+// [BooleanColumnChunkWriter.WriteBatchSpacedWithError] instead, which returns
+// the failure as an error.
 func (w *BooleanColumnChunkWriter) WriteBatchSpaced(values []bool, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
-	valueOffset := int64(0)
-	length := len(defLevels)
-	if defLevels == nil {
-		length = len(values)
+	if _, err := w.WriteBatchSpacedWithError(values, defLevels, repLevels, validBits, validBitsOffset); err != nil {
+		panic(err)
 	}
-	doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
-		var vals []bool
-		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
-
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
-		if values != nil {
-			vals = values[valueOffset : valueOffset+info.numSpaced()]
-		}
-
-		if w.bitsBuffer != nil {
-			w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
-		} else {
-			w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
-		}
-		w.commitWriteAndCheckPageLimit(batch, info.numSpaced())
-		valueOffset += info.numSpaced()
-
-		w.checkDictionarySizeLimit()
-	})
 }
 
 // WriteBatchSpacedWithError behaves like WriteBatchSpaced but reports a write
@@ -1612,29 +1510,14 @@ func (w *BooleanColumnChunkWriter) WriteBitmapBatch(bitmap []byte, bitmapOffset 
 
 // WriteBitmapBatchSpaced writes boolean values from a bitmap with validity information.
 // numValues specifies the total number of values (including nulls) to process.
+//
+// Deprecated: WriteBitmapBatchSpaced reports a write failure by panicking. Use
+// [BooleanColumnChunkWriter.WriteBitmapBatchSpacedWithError] instead, which
+// returns the failure as an error.
 func (w *BooleanColumnChunkWriter) WriteBitmapBatchSpaced(bitmap []byte, bitmapOffset int64, numValues int, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
-	valueOffset := int64(0)
-	length := len(defLevels)
-	if defLevels == nil {
-		length = numValues
+	if _, err := w.WriteBitmapBatchSpacedWithError(bitmap, bitmapOffset, numValues, defLevels, repLevels, validBits, validBitsOffset); err != nil {
+		panic(err)
 	}
-
-	doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
-		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
-
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
-
-		if w.bitsBuffer != nil {
-			w.writeBitmapValuesSpaced(bitmap, bitmapOffset+valueOffset, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
-		} else {
-			w.writeBitmapValuesSpaced(bitmap, bitmapOffset+valueOffset, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
-		}
-
-		w.commitWriteAndCheckPageLimit(batch, info.numSpaced())
-		valueOffset += info.numSpaced()
-
-		w.checkDictionarySizeLimit()
-	})
 }
 
 // WriteBitmapBatchSpacedWithError behaves like WriteBitmapBatchSpaced but
@@ -1993,60 +1876,13 @@ func (w *ByteArrayColumnChunkWriter) WriteBatch(values []parquet.ByteArray, defL
 // in the lowest nesting level_ is equal to the number of non-null values. If the
 // inner-most schema node is optional, the _number of rows in the lowest nesting level_
 // also includes all values with definition_level == (max_definition_level - 1).
+//
+// Deprecated: WriteBatchSpaced reports a write failure by panicking. Use
+// [ByteArrayColumnChunkWriter.WriteBatchSpacedWithError] instead, which returns
+// the failure as an error.
 func (w *ByteArrayColumnChunkWriter) WriteBatchSpaced(values []parquet.ByteArray, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
-	valueOffset := int64(0)
-	length := len(defLevels)
-	if defLevels == nil {
-		length = len(values)
-	}
-	// For variable-length types, use adaptive batch sizing to keep encoded
-	// data within int32 range per page.
-	const maxSafeBatchDataSize int64 = 1 << 30 // 1GB
-
-	batchSize := w.props.WriteBatchSize()
-	levelOffset := int64(0)
-	n := int64(length)
-
-	for levelOffset < n {
-		remaining := n - levelOffset
-		batch := min(remaining, batchSize)
-
-		// Conservative scan: estimate data size from values starting at valueOffset
-		if values != nil {
-			var cumDataSize int64
-			for vi := int64(0); vi < batch && valueOffset+vi < int64(len(values)); vi++ {
-				valSize := int64(len(values[valueOffset+vi])) + 4
-				if cumDataSize+valSize > maxSafeBatchDataSize && vi > 0 {
-					batch = vi
-					break
-				}
-				cumDataSize += valSize
-			}
-		}
-		if batch < 1 {
-			batch = 1
-		}
-
-		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, levelOffset, batch), batch)
-
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, levelOffset, batch), levelSliceOrNil(repLevels, levelOffset, batch))
-		var vals []parquet.ByteArray
-		if values != nil {
-			vals = values[valueOffset : valueOffset+info.numSpaced()]
-		}
-
-		if w.bitsBuffer != nil {
-			w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
-		} else {
-			w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
-		}
-		if err := w.commitWriteAndCheckPageLimit(batch, info.numSpaced()); err != nil {
-			panic(err)
-		}
-		valueOffset += info.numSpaced()
-
-		w.checkDictionarySizeLimit()
-		levelOffset += batch
+	if _, err := w.WriteBatchSpacedWithError(values, defLevels, repLevels, validBits, validBitsOffset); err != nil {
+		panic(err)
 	}
 }
 
@@ -2370,60 +2206,13 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatch(values []parquet.FixedLe
 // in the lowest nesting level_ is equal to the number of non-null values. If the
 // inner-most schema node is optional, the _number of rows in the lowest nesting level_
 // also includes all values with definition_level == (max_definition_level - 1).
+//
+// Deprecated: WriteBatchSpaced reports a write failure by panicking. Use
+// [FixedLenByteArrayColumnChunkWriter.WriteBatchSpacedWithError] instead, which returns
+// the failure as an error.
 func (w *FixedLenByteArrayColumnChunkWriter) WriteBatchSpaced(values []parquet.FixedLenByteArray, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
-	valueOffset := int64(0)
-	length := len(defLevels)
-	if defLevels == nil {
-		length = len(values)
-	}
-	// For variable-length types, use adaptive batch sizing to keep encoded
-	// data within int32 range per page.
-	const maxSafeBatchDataSize int64 = 1 << 30 // 1GB
-
-	batchSize := w.props.WriteBatchSize()
-	levelOffset := int64(0)
-	n := int64(length)
-
-	for levelOffset < n {
-		remaining := n - levelOffset
-		batch := min(remaining, batchSize)
-
-		// Conservative scan: estimate data size from values starting at valueOffset
-		if values != nil {
-			var cumDataSize int64
-			for vi := int64(0); vi < batch && valueOffset+vi < int64(len(values)); vi++ {
-				valSize := int64(w.descr.TypeLength()) + 4
-				if cumDataSize+valSize > maxSafeBatchDataSize && vi > 0 {
-					batch = vi
-					break
-				}
-				cumDataSize += valSize
-			}
-		}
-		if batch < 1 {
-			batch = 1
-		}
-
-		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, levelOffset, batch), batch)
-
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, levelOffset, batch), levelSliceOrNil(repLevels, levelOffset, batch))
-		var vals []parquet.FixedLenByteArray
-		if values != nil {
-			vals = values[valueOffset : valueOffset+info.numSpaced()]
-		}
-
-		if w.bitsBuffer != nil {
-			w.writeValuesSpaced(vals, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
-		} else {
-			w.writeValuesSpaced(vals, info.batchNum, batch, validBits, validBitsOffset+valueOffset)
-		}
-		if err := w.commitWriteAndCheckPageLimit(batch, info.numSpaced()); err != nil {
-			panic(err)
-		}
-		valueOffset += info.numSpaced()
-
-		w.checkDictionarySizeLimit()
-		levelOffset += batch
+	if _, err := w.WriteBatchSpacedWithError(values, defLevels, repLevels, validBits, validBitsOffset); err != nil {
+		panic(err)
 	}
 }
 

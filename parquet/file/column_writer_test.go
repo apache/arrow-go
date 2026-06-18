@@ -844,9 +844,24 @@ func TestWriteDataFailure(t *testing.T) {
 	assert.Equal(t, int64(0), wr.TotalBytesWritten())
 }
 
+func panicErr(t *testing.T, fn func()) error {
+	t.Helper()
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		fn()
+	}()
+	err, ok := recovered.(error)
+	if !ok {
+		t.Fatalf("expected a panic with an error, got %v", recovered)
+	}
+	return err
+}
+
 // TestWriteBatchSpacedWithErrorPropagatesWriteFailure verifies the new
-// error-returning variant surfaces a write failure, while the legacy
-// WriteBatchSpaced preserves its original non-error-returning behavior.
+// error-returning variant surfaces a write failure, and that the deprecated
+// WriteBatchSpaced now surfaces that failure by panicking instead of silently
+// discarding it.
 func TestWriteBatchSpacedWithErrorPropagatesWriteFailure(t *testing.T) {
 	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
 		schema.Must(schema.NewPrimitiveNode("column", parquet.Repetitions.Optional, parquet.Types.Int32, -1, -1)),
@@ -880,14 +895,16 @@ func TestWriteBatchSpacedWithErrorPropagatesWriteFailure(t *testing.T) {
 
 	wrLegacy, pagerLegacy := newWriter()
 	defer pagerLegacy.AssertExpectations(t)
-	assert.NotPanics(t, func() {
+	legacyErr := panicErr(t, func() {
 		wrLegacy.WriteBatchSpaced(values, defLevels, nil, validBits, 0)
 	})
+	assert.ErrorIs(t, legacyErr, failureErr)
 }
 
 // TestWriteBitmapBatchSpacedWithErrorPropagatesWriteFailure verifies the new
-// error-returning variant surfaces a write failure, while the legacy
-// WriteBitmapBatchSpaced preserves its original non-error-returning behavior.
+// error-returning variant surfaces a write failure, and that the deprecated
+// WriteBitmapBatchSpaced now surfaces that failure by panicking instead of
+// silently discarding it.
 func TestWriteBitmapBatchSpacedWithErrorPropagatesWriteFailure(t *testing.T) {
 	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
 		schema.Must(schema.NewPrimitiveNode("column", parquet.Repetitions.Optional, parquet.Types.Boolean, -1, -1)),
@@ -922,9 +939,10 @@ func TestWriteBitmapBatchSpacedWithErrorPropagatesWriteFailure(t *testing.T) {
 
 	wrLegacy, pagerLegacy := newWriter()
 	defer pagerLegacy.AssertExpectations(t)
-	assert.NotPanics(t, func() {
+	legacyErr := panicErr(t, func() {
 		wrLegacy.WriteBitmapBatchSpaced(bitmap, 0, 4, defLevels, nil, validBits, 0)
 	})
+	assert.ErrorIs(t, legacyErr, failureErr)
 }
 
 func (b *BooleanValueWriterSuite) TestWriteBitmapBatch() {
