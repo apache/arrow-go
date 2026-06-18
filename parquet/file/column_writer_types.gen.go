@@ -121,7 +121,7 @@ func (w *Int32ColumnChunkWriter) WriteBatch(values []int32, defLevels, repLevels
 // the failure as an error.
 func (w *Int32ColumnChunkWriter) WriteBatchSpaced(values []int32, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
 	if _, err := w.WriteBatchSpacedWithError(values, defLevels, repLevels, validBits, validBitsOffset); err != nil {
-		panic(err)
+		panicCause(err)
 	}
 }
 
@@ -383,7 +383,7 @@ func (w *Int64ColumnChunkWriter) WriteBatch(values []int64, defLevels, repLevels
 // the failure as an error.
 func (w *Int64ColumnChunkWriter) WriteBatchSpaced(values []int64, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
 	if _, err := w.WriteBatchSpacedWithError(values, defLevels, repLevels, validBits, validBitsOffset); err != nil {
-		panic(err)
+		panicCause(err)
 	}
 }
 
@@ -645,7 +645,7 @@ func (w *Int96ColumnChunkWriter) WriteBatch(values []parquet.Int96, defLevels, r
 // the failure as an error.
 func (w *Int96ColumnChunkWriter) WriteBatchSpaced(values []parquet.Int96, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
 	if _, err := w.WriteBatchSpacedWithError(values, defLevels, repLevels, validBits, validBitsOffset); err != nil {
-		panic(err)
+		panicCause(err)
 	}
 }
 
@@ -907,7 +907,7 @@ func (w *Float32ColumnChunkWriter) WriteBatch(values []float32, defLevels, repLe
 // the failure as an error.
 func (w *Float32ColumnChunkWriter) WriteBatchSpaced(values []float32, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
 	if _, err := w.WriteBatchSpacedWithError(values, defLevels, repLevels, validBits, validBitsOffset); err != nil {
-		panic(err)
+		panicCause(err)
 	}
 }
 
@@ -1169,7 +1169,7 @@ func (w *Float64ColumnChunkWriter) WriteBatch(values []float64, defLevels, repLe
 // the failure as an error.
 func (w *Float64ColumnChunkWriter) WriteBatchSpaced(values []float64, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
 	if _, err := w.WriteBatchSpacedWithError(values, defLevels, repLevels, validBits, validBitsOffset); err != nil {
-		panic(err)
+		panicCause(err)
 	}
 }
 
@@ -1434,7 +1434,7 @@ func (w *BooleanColumnChunkWriter) WriteBatch(values []bool, defLevels, repLevel
 // the failure as an error.
 func (w *BooleanColumnChunkWriter) WriteBatchSpaced(values []bool, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
 	if _, err := w.WriteBatchSpacedWithError(values, defLevels, repLevels, validBits, validBitsOffset); err != nil {
-		panic(err)
+		panicCause(err)
 	}
 }
 
@@ -1516,7 +1516,7 @@ func (w *BooleanColumnChunkWriter) WriteBitmapBatch(bitmap []byte, bitmapOffset 
 // returns the failure as an error.
 func (w *BooleanColumnChunkWriter) WriteBitmapBatchSpaced(bitmap []byte, bitmapOffset int64, numValues int, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
 	if _, err := w.WriteBitmapBatchSpacedWithError(bitmap, bitmapOffset, numValues, defLevels, repLevels, validBits, validBitsOffset); err != nil {
-		panic(err)
+		panicCause(err)
 	}
 }
 
@@ -1882,7 +1882,7 @@ func (w *ByteArrayColumnChunkWriter) WriteBatch(values []parquet.ByteArray, defL
 // the failure as an error.
 func (w *ByteArrayColumnChunkWriter) WriteBatchSpaced(values []parquet.ByteArray, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
 	if _, err := w.WriteBatchSpacedWithError(values, defLevels, repLevels, validBits, validBitsOffset); err != nil {
-		panic(err)
+		panicCause(err)
 	}
 }
 
@@ -2212,7 +2212,7 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatch(values []parquet.FixedLe
 // the failure as an error.
 func (w *FixedLenByteArrayColumnChunkWriter) WriteBatchSpaced(values []parquet.FixedLenByteArray, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
 	if _, err := w.WriteBatchSpacedWithError(values, defLevels, repLevels, validBits, validBitsOffset); err != nil {
-		panic(err)
+		panicCause(err)
 	}
 }
 

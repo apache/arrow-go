@@ -192,7 +192,7 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBatch(values []{{.name}}, defLevels, r
 // the failure as an error.
 func (w *{{.Name}}ColumnChunkWriter) WriteBatchSpaced(values []{{.name}}, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
   if _, err := w.WriteBatchSpacedWithError(values, defLevels, repLevels, validBits, validBitsOffset); err != nil {
-    panic(err)
+    panicCause(err)
   }
 }
 
@@ -328,7 +328,7 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBitmapBatch(bitmap []byte, bitmapOffse
 // returns the failure as an error.
 func (w *{{.Name}}ColumnChunkWriter) WriteBitmapBatchSpaced(bitmap []byte, bitmapOffset int64, numValues int, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) {
   if _, err := w.WriteBitmapBatchSpacedWithError(bitmap, bitmapOffset, numValues, defLevels, repLevels, validBits, validBitsOffset); err != nil {
-    panic(err)
+    panicCause(err)
   }
 }
 

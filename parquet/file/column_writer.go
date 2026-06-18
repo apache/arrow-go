@@ -19,6 +19,7 @@ package file
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -710,6 +711,16 @@ func levelSliceOrNil(rep []int16, offset, batch int64) []int16 {
 		return nil
 	}
 	return rep[offset : batch+offset]
+}
+
+// panicCause re-panics with the unwrapped cause of err (falling back to err
+// itself), preserving the original panic value the deprecated spaced-write
+// methods raised before they delegated to their *WithError variants.
+func panicCause(err error) {
+	if cause := errors.Unwrap(err); cause != nil {
+		panic(cause)
+	}
+	panic(err)
 }
 
 //lint:ignore U1000 maybeReplaceValidity
