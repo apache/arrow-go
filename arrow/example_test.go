@@ -463,7 +463,7 @@ func Example_record() {
 
 	schema := arrow.NewSchema(
 		[]arrow.Field{
-			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32},
+			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
 			{Name: "f2-f64", Type: arrow.PrimitiveTypes.Float64},
 		},
 		nil,
@@ -493,7 +493,7 @@ func Example_recordReader() {
 
 	schema := arrow.NewSchema(
 		[]arrow.Field{
-			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32},
+			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
 			{Name: "f2-f64", Type: arrow.PrimitiveTypes.Float64},
 		},
 		nil,
@@ -542,7 +542,7 @@ func Example_table() {
 
 	schema := arrow.NewSchema(
 		[]arrow.Field{
-			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32},
+			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
 			{Name: "f2-f64", Type: arrow.PrimitiveTypes.Float64},
 		},
 		nil,

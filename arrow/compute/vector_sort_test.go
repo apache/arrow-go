@@ -1373,8 +1373,8 @@ func TestVectorSortIndicesCppRecordBatchParity(t *testing.T) {
 
 	t.Run("Null", func(t *testing.T) {
 		schema := arrow.NewSchema([]arrow.Field{
-			{Name: "a", Type: arrow.PrimitiveTypes.Uint8},
-			{Name: "b", Type: arrow.PrimitiveTypes.Uint32},
+			{Name: "a", Type: arrow.PrimitiveTypes.Uint8, Nullable: true},
+			{Name: "b", Type: arrow.PrimitiveTypes.Uint32, Nullable: true},
 		}, nil)
 		jsonRows := `[
 			{"a": null, "b": 5},
@@ -1460,8 +1460,8 @@ func TestVectorSortIndicesCppRecordBatchParity(t *testing.T) {
 
 	t.Run("Boolean", func(t *testing.T) {
 		schema := arrow.NewSchema([]arrow.Field{
-			{Name: "a", Type: arrow.FixedWidthTypes.Boolean},
-			{Name: "b", Type: arrow.FixedWidthTypes.Boolean},
+			{Name: "a", Type: arrow.FixedWidthTypes.Boolean, Nullable: true},
+			{Name: "b", Type: arrow.FixedWidthTypes.Boolean, Nullable: true},
 		}, nil)
 		jsonRows := `[
 			{"a": true,  "b": null},
@@ -1536,7 +1536,7 @@ func TestVectorSortIndicesCppRecordBatchParity(t *testing.T) {
 		d256 := &arrow.Decimal256Type{Precision: 4, Scale: 2}
 		schema := arrow.NewSchema([]arrow.Field{
 			{Name: "a", Type: d128},
-			{Name: "b", Type: d256},
+			{Name: "b", Type: d256, Nullable: true},
 		}, nil)
 		jsonRows := `[
 			{"a": "12.3", "b": "12.34"},
@@ -1610,8 +1610,8 @@ func TestVectorSortIndicesCppTableParity(t *testing.T) {
 	ctx := context.Background()
 
 	schemaAB := arrow.NewSchema([]arrow.Field{
-		{Name: "a", Type: arrow.PrimitiveTypes.Uint8},
-		{Name: "b", Type: arrow.PrimitiveTypes.Uint32},
+		{Name: "a", Type: arrow.PrimitiveTypes.Uint8, Nullable: true},
+		{Name: "b", Type: arrow.PrimitiveTypes.Uint32, Nullable: true},
 	}, nil)
 
 	t.Run("EmptyTable", func(t *testing.T) {

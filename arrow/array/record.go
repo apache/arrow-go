@@ -231,6 +231,28 @@ func (rec *simpleRecord) validate() error {
 	return nil
 }
 
+// nullCountInRows returns the number of top-level nulls among the first nrows
+// rows of arr. It does not recurse into child arrays, so a nullable struct whose
+// non-nullable children carry nulls in null parent slots is not flagged; only a
+// field's own top-level nullability is enforced. Run-end-encoded logical nulls,
+// held in the values child rather than a top-level bitmap, are not counted.
+func nullCountInRows(arr arrow.Array, nrows int64) int {
+	if arr == nil || nrows <= 0 {
+		return 0
+	}
+	n := int(nrows)
+	if n >= arr.Len() {
+		return arr.NullN()
+	}
+	count := 0
+	for i := 0; i < n; i++ {
+		if arr.IsNull(i) {
+			count++
+		}
+	}
+	return count
+}
+
 // Retain increases the reference count by 1.
 // Retain may be called simultaneously from multiple goroutines.
 func (rec *simpleRecord) Retain() {
@@ -385,11 +407,26 @@ func (b *RecordBuilder) Resize(n int) {
 //
 // The returned RecordBatch must be Release()'d after use.
 //
-// NewRecordBatch panics if the fields' builder do not have the same length.
+// NewRecordBatch panics if the fields' builders do not have the same length or if
+// a non-nullable field contains nulls. Use NewRecordBatchChecked for an error.
 func (b *RecordBuilder) NewRecordBatch() arrow.RecordBatch {
+	rec, err := b.newRecordBatch()
+	if err != nil {
+		panic(err)
+	}
+	return rec
+}
+
+// NewRecordBatchChecked is like NewRecordBatch but returns an error instead of
+// panicking when the record is invalid.
+func (b *RecordBuilder) NewRecordBatchChecked() (arrow.RecordBatch, error) {
+	return b.newRecordBatch()
+}
+
+func (b *RecordBuilder) newRecordBatch() (arrow.RecordBatch, error) {
 	lower, upper := b.columnLenRange()
 	if lower != upper {
-		panic(fmt.Errorf("arrow/array: some fields have excessive number of rows (want at most %d, have %d)", lower, upper))
+		return nil, fmt.Errorf("arrow/array: some fields have excessive number of rows (want at most %d, have %d)", lower, upper)
 	}
 
 	cols := make([]arrow.Array, len(b.fields))
@@ -407,7 +444,16 @@ func (b *RecordBuilder) NewRecordBatch() arrow.RecordBatch {
 		cols[i] = f.NewArray()
 	}
 
-	return NewRecordBatch(b.schema, cols, int64(lower))
+	for i := range cols {
+		f := b.schema.Field(i)
+		if !f.Nullable {
+			if n := nullCountInRows(cols[i], int64(lower)); n > 0 {
+				return nil, fmt.Errorf("arrow/array: field %q is declared non-nullable but contains %d null value(s)", f.Name, n)
+			}
+		}
+	}
+
+	return NewRecordBatch(b.schema, cols, int64(lower)), nil
 }
 
 // Deprecated: Use [NewRecordBatch] instead.

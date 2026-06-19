@@ -26,6 +26,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRecord(t *testing.T) {
@@ -474,6 +475,106 @@ func TestRecordBuilderRespectsFixedSizeArrayNullability(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRecordBuilderNonNullableNulls(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	t.Run("non-nullable field with nulls returns error", func(t *testing.T) {
+		schema := arrow.NewSchema([]arrow.Field{
+			{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: false},
+		}, nil)
+		b := array.NewRecordBuilder(mem, schema)
+		defer b.Release()
+
+		ib := b.Field(0).(*array.Int32Builder)
+		ib.Append(1)
+		ib.AppendNull()
+
+		rec, err := b.NewRecordBatchChecked()
+		assert.Nil(t, rec)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `field "a" is declared non-nullable`)
+	})
+
+	t.Run("non-nullable field with nulls panics", func(t *testing.T) {
+		schema := arrow.NewSchema([]arrow.Field{
+			{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: false},
+		}, nil)
+		b := array.NewRecordBuilder(mem, schema)
+		defer b.Release()
+
+		b.Field(0).(*array.Int32Builder).Append(1)
+		b.Field(0).(*array.Int32Builder).AppendNull()
+
+		assert.Panics(t, func() {
+			b.NewRecordBatch().Release()
+		})
+	})
+
+	t.Run("nullable field with nulls is allowed", func(t *testing.T) {
+		schema := arrow.NewSchema([]arrow.Field{
+			{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		}, nil)
+		b := array.NewRecordBuilder(mem, schema)
+		defer b.Release()
+
+		b.Field(0).(*array.Int32Builder).Append(1)
+		b.Field(0).(*array.Int32Builder).AppendNull()
+
+		rec, err := b.NewRecordBatchChecked()
+		require.NoError(t, err)
+		defer rec.Release()
+		assert.EqualValues(t, 2, rec.NumRows())
+	})
+
+	t.Run("non-nullable field without nulls is allowed", func(t *testing.T) {
+		schema := arrow.NewSchema([]arrow.Field{
+			{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: false},
+		}, nil)
+		b := array.NewRecordBuilder(mem, schema)
+		defer b.Release()
+
+		b.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2, 3}, nil)
+
+		rec, err := b.NewRecordBatchChecked()
+		require.NoError(t, err)
+		defer rec.Release()
+		assert.EqualValues(t, 3, rec.NumRows())
+	})
+
+	t.Run("nullable struct with non-nullable child is allowed", func(t *testing.T) {
+		structType := arrow.StructOf(arrow.Field{Name: "x", Type: arrow.PrimitiveTypes.Int32, Nullable: false})
+		schema := arrow.NewSchema([]arrow.Field{
+			{Name: "s", Type: structType, Nullable: true},
+		}, nil)
+		b := array.NewRecordBuilder(mem, schema)
+		defer b.Release()
+
+		sb := b.Field(0).(*array.StructBuilder)
+		sb.Append(true)
+		sb.FieldBuilder(0).(*array.Int32Builder).Append(10)
+		sb.AppendNull()
+
+		rec, err := b.NewRecordBatchChecked()
+		require.NoError(t, err)
+		defer rec.Release()
+		assert.EqualValues(t, 2, rec.NumRows())
+	})
+
+	t.Run("empty builder is allowed", func(t *testing.T) {
+		schema := arrow.NewSchema([]arrow.Field{
+			{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: false},
+		}, nil)
+		b := array.NewRecordBuilder(mem, schema)
+		defer b.Release()
+
+		rec, err := b.NewRecordBatchChecked()
+		require.NoError(t, err)
+		defer rec.Release()
+		assert.EqualValues(t, 0, rec.NumRows())
+	})
 }
 
 func TestRecordBuilder(t *testing.T) {
