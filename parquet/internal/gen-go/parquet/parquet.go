@@ -357,6 +357,7 @@ const (
 	Encoding_DELTA_BYTE_ARRAY Encoding = 7
 	Encoding_RLE_DICTIONARY Encoding = 8
 	Encoding_BYTE_STREAM_SPLIT Encoding = 9
+	Encoding_ALP Encoding = 10
 )
 
 func (p Encoding) String() string {
@@ -370,6 +371,7 @@ func (p Encoding) String() string {
 	case Encoding_DELTA_BYTE_ARRAY: return "DELTA_BYTE_ARRAY"
 	case Encoding_RLE_DICTIONARY: return "RLE_DICTIONARY"
 	case Encoding_BYTE_STREAM_SPLIT: return "BYTE_STREAM_SPLIT"
+	case Encoding_ALP: return "ALP"
 	}
 	return "<UNSET>"
 }
@@ -385,6 +387,7 @@ func EncodingFromString(s string) (Encoding, error) {
 	case "DELTA_BYTE_ARRAY": return Encoding_DELTA_BYTE_ARRAY, nil
 	case "RLE_DICTIONARY": return Encoding_RLE_DICTIONARY, nil
 	case "BYTE_STREAM_SPLIT": return Encoding_BYTE_STREAM_SPLIT, nil
+	case "ALP": return Encoding_ALP, nil
 	}
 	return Encoding(0), fmt.Errorf("not a valid Encoding string")
 }

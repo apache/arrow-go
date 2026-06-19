@@ -24,6 +24,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path"
 	"testing"
@@ -939,5 +940,62 @@ func TestListColumns(t *testing.T) {
 				require.Equal(t, records[j][i], vals.ValueStr(j))
 			}
 		}
+	}
+}
+
+func TestAlpEncodingFileRead(t *testing.T) {
+	testFile := os.Getenv("ALP_TEST_FILE")
+	if testFile == "" {
+		t.Skip("ALP_TEST_FILE not set, skipping")
+	}
+	if _, err := os.Stat(testFile); os.IsNotExist(err) {
+		t.Skipf("ALP_TEST_FILE not found: %s", testFile)
+	}
+
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	fileReader, err := file.OpenParquetFile(testFile, false, file.WithReadProps(props))
+	require.NoError(t, err)
+	defer fileReader.Close()
+
+	nRows := 1024
+	require.Equal(t, 1, fileReader.NumRowGroups())
+	meta := fileReader.MetaData()
+	require.EqualValues(t, nRows, meta.GetNumRows())
+	require.Equal(t, 1, meta.Schema.NumColumns())
+	require.Equal(t, "value_f64", meta.Schema.Column(0).Name())
+	require.Equal(t, parquet.Types.Double, meta.Schema.Column(0).PhysicalType())
+
+	rgr := fileReader.RowGroup(0)
+	require.EqualValues(t, nRows, rgr.NumRows())
+
+	rdr, err := rgr.Column(0)
+	require.NoError(t, err)
+
+	f64Reader, ok := rdr.(*file.Float64ColumnChunkReader)
+	require.True(t, ok)
+
+	values := make([]float64, nRows)
+	total, read, err := f64Reader.ReadBatch(int64(nRows), values, nil, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, nRows, total)
+	require.EqualValues(t, nRows, read)
+
+	md, err := rgr.MetaData().ColumnChunk(0)
+	require.NoError(t, err)
+	encodings := md.Encodings()
+	found := false
+	for _, enc := range encodings {
+		if enc == parquet.Encodings.ALP {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "expected ALP encoding in column chunk metadata, got %v", encodings)
+
+	for i := 0; i < nRows; i++ {
+		expected := 0.125 + float64(i)*0.25
+		assert.Equal(t, math.Float64bits(expected), math.Float64bits(values[i]),
+			"value[%d]: got %v (bits %016x), want %v (bits %016x)",
+			i, values[i], math.Float64bits(values[i]), expected, math.Float64bits(expected))
 	}
 }
