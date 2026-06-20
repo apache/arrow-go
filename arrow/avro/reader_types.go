@@ -567,6 +567,8 @@ func appendUUIDData(b *extensions.UUIDBuilder, data any, fieldName string) error
 		switch len(dt) {
 		case 16:
 			b.AppendBytes([16]byte(dt))
+		// 36 bytes is the canonical hex-dash UUID text form
+		// (e.g. "550e8400-e29b-41d4-a716-446655440000") arriving as raw bytes.
 		case 36:
 			return b.AppendValueFromString(string(dt))
 		default:
