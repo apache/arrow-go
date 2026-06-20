@@ -49,12 +49,24 @@ type schemaNode struct {
 	nullable   bool
 	childrens  []*schemaNode
 	arrowField arrow.Field
+	// namedCache holds record/enum/fixed definitions keyed by full name
+	// (namespace.name, or the bare name when no namespace is present).
 	namedCache map[string]avro.SchemaNode
-	index      int32
+	// bareToFull maps a short name to its sole full name, and ambiguousBare
+	// flags short names defined under more than one namespace so that a bare
+	// reference to them can be rejected instead of silently picking one.
+	bareToFull    map[string]string
+	ambiguousBare map[string]struct{}
+	index         int32
 }
 
 func newSchemaNode() *schemaNode {
-	return &schemaNode{index: -1, namedCache: map[string]avro.SchemaNode{}}
+	return &schemaNode{
+		index:         -1,
+		namedCache:    map[string]avro.SchemaNode{},
+		bareToFull:    map[string]string{},
+		ambiguousBare: map[string]struct{}{},
+	}
 }
 
 func (node *schemaNode) schemaPath() string {
@@ -69,11 +81,13 @@ func (node *schemaNode) schemaPath() string {
 
 func (node *schemaNode) newChild(n string, s avro.SchemaNode) *schemaNode {
 	child := &schemaNode{
-		name:       n,
-		parent:     node,
-		node:       s,
-		namedCache: node.namedCache,
-		index:      int32(len(node.childrens)),
+		name:          n,
+		parent:        node,
+		node:          s,
+		namedCache:    node.namedCache,
+		bareToFull:    node.bareToFull,
+		ambiguousBare: node.ambiguousBare,
+		index:         int32(len(node.childrens)),
 	}
 	node.childrens = append(node.childrens, child)
 	return child
@@ -81,33 +95,53 @@ func (node *schemaNode) newChild(n string, s avro.SchemaNode) *schemaNode {
 func (node *schemaNode) children() []*schemaNode { return node.childrens }
 
 // rememberNamed adds a record/enum/fixed SchemaNode to the named-type cache
-// under both its short name and (if a namespace is present) its full name,
-// so later references like {"type": "Address"} or {"type": "ns.Address"}
-// resolve back to the original definition.
+// keyed by its full name (namespace.name, or the bare name when no namespace
+// is present), so a later {"type": "ns.Address"} reference resolves back to the
+// original definition. It also records the short name so an unqualified
+// {"type": "Address"} reference can resolve when unambiguous; if the same short
+// name is defined under more than one namespace it is flagged as ambiguous and
+// resolveRef will reject bare references to it.
 func (node *schemaNode) rememberNamed(s avro.SchemaNode) {
 	if s.Name == "" {
 		return
 	}
-	node.namedCache[s.Name] = s
+	full := s.Name
 	if s.Namespace != "" {
-		node.namedCache[s.Namespace+"."+s.Name] = s
+		full = s.Namespace + "." + s.Name
+	}
+	node.namedCache[full] = s
+	if existing, ok := node.bareToFull[s.Name]; ok && existing != full {
+		node.ambiguousBare[s.Name] = struct{}{}
+	} else {
+		node.bareToFull[s.Name] = full
 	}
 }
 
 // resolveRef replaces s with its inline definition if s.Type is a named-type
 // reference rather than a builtin Avro type. atField, when non-empty, names
 // the field this reference appears in and is included in the panic so the
-// user can locate the offending entry.
+// user can locate the offending entry. A bare reference whose short name is
+// defined under multiple namespaces is rejected rather than resolved to an
+// arbitrary definition.
 func (node *schemaNode) resolveRef(s avro.SchemaNode, atField string) avro.SchemaNode {
 	if _, ok := builtinAvroTypes[s.Type]; ok {
 		return s
 	}
-	if def, ok := node.namedCache[s.Type]; ok {
-		return def
-	}
 	loc := node.schemaPath()
 	if atField != "" {
 		loc += "." + atField
+	}
+	// An exact full-name match always wins.
+	if def, ok := node.namedCache[s.Type]; ok {
+		return def
+	}
+	// Otherwise treat s.Type as a short name, resolving it only when it is
+	// unambiguous across namespaces.
+	if full, ok := node.bareToFull[s.Type]; ok {
+		if _, ambiguous := node.ambiguousBare[s.Type]; ambiguous {
+			panic(fmt.Errorf("ambiguous named type %q referenced at %s: defined in multiple namespaces; use a fully-qualified name", s.Type, loc))
+		}
+		return node.namedCache[full]
 	}
 	panic(fmt.Errorf("unknown named type %q referenced at %s", s.Type, loc))
 }
@@ -142,6 +176,12 @@ func arrowSchemaFromAvroInternal(schema *avro.Schema) (s *arrow.Schema, err erro
 		}
 	}()
 	root := schema.Root()
+	// OCF requires the top-level schema to be a record; reject anything else up
+	// front instead of producing a degenerate or empty Arrow schema. (The parser
+	// already guarantees a record has a non-empty name.)
+	if root.Type != "record" {
+		panic(fmt.Errorf("avro schema root must be a record, got type %q", root.Type))
+	}
 	n := newSchemaNode()
 	n.node = root
 	c := n.newChild(root.Name, root)
@@ -347,8 +387,7 @@ func nullableBranch(s avro.SchemaNode) (avro.SchemaNode, bool) {
 		return avro.SchemaNode{}, false
 	}
 	var nonNull *avro.SchemaNode
-	for i := range s.Branches {
-		b := s.Branches[i]
+	for _, b := range s.Branches {
 		if b.Type == "null" {
 			continue
 		}

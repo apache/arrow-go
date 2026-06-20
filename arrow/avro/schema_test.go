@@ -18,12 +18,14 @@ package avro
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/avro/testdata"
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	hambaAvro "github.com/hamba/avro/v2"
+	avro "github.com/twmb/avro"
 )
 
 func TestSchemaStringEqual(t *testing.T) {
@@ -221,4 +223,83 @@ func TestArrowSchemaFromAvro_Deprecated_PreservesLogicalTypesOnFixed(t *testing.
 	if got.String() != want.String() {
 		t.Fatalf("schema mismatch:\n got = %s\nwant = %s", got.String(), want.String())
 	}
+}
+
+// OCF requires a record at the top level. Non-record roots are rejected by our
+// own guard, while a record with an empty name is rejected earlier by the avro
+// parser; both must surface an error rather than produce a degenerate schema.
+func TestArrowSchemaFromAvroJSON_RejectsInvalidRoot(t *testing.T) {
+	tests := []struct {
+		name       string
+		schemaJSON string
+		wantErr    string // caught by our guard
+		wantParse  bool   // caught by the avro parser before our guard
+	}{
+		{name: "string root", schemaJSON: `"string"`, wantErr: "must be a record"},
+		{name: "array root", schemaJSON: `{"type":"array","items":"int"}`, wantErr: "must be a record"},
+		{name: "empty record name", schemaJSON: `{"type":"record","name":"","fields":[{"name":"x","type":"int"}]}`, wantParse: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ArrowSchemaFromAvroJSON(tt.schemaJSON)
+			if err == nil {
+				t.Fatalf("expected error for %s", tt.schemaJSON)
+			}
+			if tt.wantParse {
+				// The parser rejects it before our guard runs, so the error is
+				// not wrapped as an invalid avro schema by arrowSchemaFromAvroInternal.
+				if strings.Contains(err.Error(), "must be a record") {
+					t.Fatalf("expected parser error, got our guard's error: %v", err)
+				}
+				return
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("unexpected error for %s: %v", tt.schemaJSON, err)
+			}
+		})
+	}
+}
+
+// A named record referenced again by name resolves back to the same definition.
+func TestArrowSchemaFromAvroJSON_ReusedNamedReference(t *testing.T) {
+	const schemaJSON = `{"type":"record","name":"Root","fields":[
+		{"name":"a","type":{"type":"record","name":"Foo","fields":[{"name":"x","type":"int"}]}},
+		{"name":"b","type":"Foo"}]}`
+	s, err := ArrowSchemaFromAvroJSON(schemaJSON)
+	if err != nil {
+		t.Fatalf("ArrowSchemaFromAvroJSON: %v", err)
+	}
+	if s.NumFields() != 2 {
+		t.Fatalf("got %d fields, want 2", s.NumFields())
+	}
+	if a, b := s.Field(0).Type.String(), s.Field(1).Type.String(); a != b {
+		t.Fatalf("reused reference resolved to a different type:\n a = %s\n b = %s", a, b)
+	}
+}
+
+// Two records sharing a short name across namespaces are kept distinct by full
+// name, and an unqualified reference to that short name is rejected instead of
+// silently resolving to one of them (restoring hamba's erroring behavior).
+func TestResolveRefAmbiguousBareName(t *testing.T) {
+	n := newSchemaNode()
+	n.rememberNamed(avro.SchemaNode{Name: "Foo", Namespace: "a"})
+	n.rememberNamed(avro.SchemaNode{Name: "Foo", Namespace: "b"})
+
+	got := n.resolveRef(avro.SchemaNode{Type: "a.Foo"}, "")
+	if got.Namespace != "a" {
+		t.Fatalf("a.Foo resolved to namespace %q, want a", got.Namespace)
+	}
+
+	func() {
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatalf("expected panic for ambiguous bare reference")
+			}
+			if !strings.Contains(fmt.Sprint(r), "ambiguous named type") {
+				t.Fatalf("unexpected panic: %v", r)
+			}
+		}()
+		n.resolveRef(avro.SchemaNode{Type: "Foo"}, "field")
+	}()
 }
