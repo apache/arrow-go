@@ -1637,3 +1637,138 @@ func TestShreddedVariantNested(t *testing.T) {
 
 	assert.Truef(t, arrow.TypeEqual(vt.Storage, s), "expected %s, got %s", s, vt.Storage)
 }
+
+func TestUnshredVariant(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	appendVal := func(bldr *extensions.VariantBuilder, raw any) {
+		var b variant.Builder
+		require.NoError(t, b.Append(raw))
+		v, err := b.Build()
+		require.NoError(t, err)
+		bldr.Append(v)
+	}
+
+	rowJSON := func(t *testing.T, a *extensions.VariantArray, i int) string {
+		t.Helper()
+		v, err := a.Value(i)
+		require.NoError(t, err)
+		j, err := v.MarshalJSON()
+		require.NoError(t, err)
+
+		return string(j)
+	}
+
+	// unshred reassembles a shredded array, checks the result is non-shredded and
+	// preserves each row's null-ness, and returns it for value assertions. The
+	// caller releases the result.
+	unshred := func(t *testing.T, shreddedArr *extensions.VariantArray) *extensions.VariantArray {
+		t.Helper()
+		require.True(t, shreddedArr.IsShredded())
+
+		out, err := extensions.UnshredVariant(shreddedArr, mem)
+		require.NoError(t, err)
+		assert.False(t, out.IsShredded())
+		require.Equal(t, shreddedArr.Len(), out.Len())
+		for i := 0; i < shreddedArr.Len(); i++ {
+			assert.Equalf(t, shreddedArr.Storage().IsNull(i), out.Storage().IsNull(i), "row %d null-ness", i)
+		}
+
+		return out
+	}
+
+	t.Run("scalar primitive", func(t *testing.T) {
+		bldr := extensions.NewVariantBuilder(mem, extensions.NewShreddedVariantType(arrow.PrimitiveTypes.Int64))
+		defer bldr.Release()
+		appendVal(bldr, int64(7))
+		bldr.AppendNull()
+		appendVal(bldr, int64(-3))
+		arr := bldr.NewArray().(*extensions.VariantArray)
+		defer arr.Release()
+
+		out := unshred(t, arr)
+		defer out.Release()
+		assert.JSONEq(t, `7`, rowJSON(t, out, 0))
+		assert.True(t, out.Storage().IsNull(1))
+		assert.JSONEq(t, `-3`, rowJSON(t, out, 2))
+	})
+
+	t.Run("list", func(t *testing.T) {
+		bldr := extensions.NewVariantBuilder(mem, extensions.NewShreddedVariantType(arrow.ListOf(arrow.BinaryTypes.String)))
+		defer bldr.Release()
+		appendVal(bldr, []any{"comedy", "drama"})
+		arr := bldr.NewArray().(*extensions.VariantArray)
+		defer arr.Release()
+
+		out := unshred(t, arr)
+		defer out.Release()
+		assert.JSONEq(t, `["comedy","drama"]`, rowJSON(t, out, 0))
+	})
+
+	t.Run("nested object", func(t *testing.T) {
+		bldr := extensions.NewVariantBuilder(mem, extensions.NewShreddedVariantType(arrow.StructOf(
+			arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int64},
+			arrow.Field{Name: "c", Type: arrow.StructOf(arrow.Field{Name: "x", Type: arrow.PrimitiveTypes.Int64})},
+		)))
+		defer bldr.Release()
+		appendVal(bldr, map[string]any{"a": int64(1), "c": map[string]any{"x": int64(9)}})
+		arr := bldr.NewArray().(*extensions.VariantArray)
+		defer arr.Release()
+
+		out := unshred(t, arr)
+		defer out.Release()
+		assert.JSONEq(t, `{"a":1,"c":{"x":9}}`, rowJSON(t, out, 0))
+	})
+
+	t.Run("scalar falling to residual", func(t *testing.T) {
+		// a string in an int64-shredded column does not match typed_value, so it
+		// lands entirely in the residual value column with typed_value null.
+		bldr := extensions.NewVariantBuilder(mem, extensions.NewShreddedVariantType(arrow.PrimitiveTypes.Int64))
+		defer bldr.Release()
+		appendVal(bldr, "hello")
+		arr := bldr.NewArray().(*extensions.VariantArray)
+		defer arr.Release()
+
+		out := unshred(t, arr)
+		defer out.Release()
+		assert.JSONEq(t, `"hello"`, rowJSON(t, out, 0))
+	})
+
+	t.Run("object with residual and nulls", func(t *testing.T) {
+		bldr := extensions.NewVariantBuilder(mem, extensions.NewShreddedVariantType(arrow.StructOf(
+			arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int64},
+		)))
+		defer bldr.Release()
+		appendVal(bldr, map[string]any{"a": int64(7), "extra": "x"}) // extra lands in residual value
+		bldr.AppendNull()                                            // physical null
+		appendVal(bldr, nil)                                         // present variant-null
+		arr := bldr.NewArray().(*extensions.VariantArray)
+		defer arr.Release()
+
+		out := unshred(t, arr)
+		defer out.Release()
+		// row 0: the shredded field and the residual field are both present.
+		assert.JSONEq(t, `{"a":7,"extra":"x"}`, rowJSON(t, out, 0))
+		// row 1 is a physical null; row 2 is a present variant-null, not collapsed.
+		assert.True(t, out.Storage().IsNull(1))
+		assert.False(t, out.Storage().IsNull(2))
+		v2, err := out.Value(2)
+		require.NoError(t, err)
+		assert.Equal(t, variant.Null, v2.Type())
+	})
+
+	t.Run("already non-shredded returns same array", func(t *testing.T) {
+		bldr := extensions.NewVariantBuilder(mem, extensions.NewDefaultVariantType())
+		defer bldr.Release()
+		appendVal(bldr, map[string]any{"a": int64(1)})
+		arr := bldr.NewArray().(*extensions.VariantArray)
+		defer arr.Release()
+
+		out, err := extensions.UnshredVariant(arr, mem)
+		require.NoError(t, err)
+		defer out.Release()
+		assert.Same(t, arr, out)
+		assert.False(t, out.IsShredded())
+	})
+}
