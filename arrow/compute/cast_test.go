@@ -721,6 +721,22 @@ func (c *CastSuite) TestDecimal128ToInt() {
 		opts.AllowDecimalTruncate = true
 		c.checkCastArr(negScale, arrow.PrimitiveTypes.Int64, `[1234567890000, -120000]`, *opts)
 	})
+
+	c.Run("int64 bounds inclusive", func() {
+		opts.AllowIntOverflow = false
+		opts.AllowDecimalTruncate = false
+
+		atBounds, _, _ := array.FromJSON(c.mem, &arrow.Decimal128Type{Precision: 38, Scale: 0},
+			strings.NewReader(`["9223372036854775807", "-9223372036854775808", null]`))
+		defer atBounds.Release()
+		c.checkCastArr(atBounds, arrow.PrimitiveTypes.Int64,
+			`[9223372036854775807, -9223372036854775808, null]`, *opts)
+
+		beyondBounds, _, _ := array.FromJSON(c.mem, &arrow.Decimal128Type{Precision: 38, Scale: 0},
+			strings.NewReader(`["9223372036854775808", "-9223372036854775809"]`))
+		defer beyondBounds.Release()
+		checkCastFails(c.T(), beyondBounds, *opts)
+	})
 }
 
 func (c *CastSuite) TestDecimal256ToInt() {
@@ -827,6 +843,22 @@ func (c *CastSuite) TestDecimal256ToInt() {
 		opts.AllowIntOverflow = true
 		opts.AllowDecimalTruncate = true
 		c.checkCastArr(negScale, arrow.PrimitiveTypes.Int64, `[1234567890000, -120000]`, *opts)
+	})
+
+	c.Run("int64 bounds inclusive", func() {
+		opts.AllowIntOverflow = false
+		opts.AllowDecimalTruncate = false
+
+		atBounds, _, _ := array.FromJSON(c.mem, &arrow.Decimal256Type{Precision: 40, Scale: 0},
+			strings.NewReader(`["9223372036854775807", "-9223372036854775808", null]`))
+		defer atBounds.Release()
+		c.checkCastArr(atBounds, arrow.PrimitiveTypes.Int64,
+			`[9223372036854775807, -9223372036854775808, null]`, *opts)
+
+		beyondBounds, _, _ := array.FromJSON(c.mem, &arrow.Decimal256Type{Precision: 40, Scale: 0},
+			strings.NewReader(`["9223372036854775808", "-9223372036854775809"]`))
+		defer beyondBounds.Release()
+		checkCastFails(c.T(), beyondBounds, *opts)
 	})
 }
 
