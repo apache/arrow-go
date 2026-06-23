@@ -231,28 +231,6 @@ func (rec *simpleRecord) validate() error {
 	return nil
 }
 
-// nullCountInRows returns the number of top-level nulls among the first nrows
-// rows of arr. It does not recurse into child arrays, so a nullable struct whose
-// non-nullable children carry nulls in null parent slots is not flagged; only a
-// field's own top-level nullability is enforced. Run-end-encoded logical nulls,
-// held in the values child rather than a top-level bitmap, are not counted.
-func nullCountInRows(arr arrow.Array, nrows int64) int {
-	if arr == nil || nrows <= 0 {
-		return 0
-	}
-	n := int(nrows)
-	if n >= arr.Len() {
-		return arr.NullN()
-	}
-	count := 0
-	for i := 0; i < n; i++ {
-		if arr.IsNull(i) {
-			count++
-		}
-	}
-	return count
-}
-
 // Retain increases the reference count by 1.
 // Retain may be called simultaneously from multiple goroutines.
 func (rec *simpleRecord) Retain() {
@@ -444,12 +422,13 @@ func (b *RecordBuilder) newRecordBatch() (arrow.RecordBatch, error) {
 		cols[i] = f.NewArray()
 	}
 
+	// Only each field's own top-level nullability is enforced; we do not recurse
+	// into children, so a non-nullable child of a nullable struct keeps its
+	// legitimate nulls in null parent slots. Run-end-encoded logical nulls live
+	// in the values child rather than a top-level bitmap, so they are not flagged.
 	for i := range cols {
-		f := b.schema.Field(i)
-		if !f.Nullable {
-			if n := nullCountInRows(cols[i], int64(lower)); n > 0 {
-				return nil, fmt.Errorf("arrow/array: field %q is declared non-nullable but contains %d null value(s)", f.Name, n)
-			}
+		if f := b.schema.Field(i); !f.Nullable && cols[i].NullN() > 0 {
+			return nil, fmt.Errorf("arrow/array: field %q is declared non-nullable but contains nulls", f.Name)
 		}
 	}
 
