@@ -416,8 +416,7 @@ func (b *RecordBuilder) NewRecord() arrow.Record {
 }
 
 // UnmarshalOne reads one row (a JSON object) from the supplied decoder and
-// appends a value to each field in the RecordBuilder. Missing fields are
-// appended as nulls and unrecognized keys are silently ignored.
+// appends a value to each field in the RecordBuilder.
 //
 // Unlike UnmarshalJSON, this method receives an already-configured
 // json.Decoder, so options such as UseNumber set by the caller are honored
@@ -434,7 +433,8 @@ func (b *RecordBuilder) UnmarshalOne(dec *json.Decoder) error {
 		return fmt.Errorf("record should start with '{', not %s", t)
 	}
 
-	keylist := make(map[string]bool)
+	// consume one row checking for duplicates and nulls
+	keylist := make(map[string]json.RawMessage)
 	for dec.More() {
 		keyTok, err := dec.Token()
 		if err != nil {
@@ -442,23 +442,27 @@ func (b *RecordBuilder) UnmarshalOne(dec *json.Decoder) error {
 		}
 
 		key := keyTok.(string)
-		if keylist[key] {
+		if _, ok := keylist[key]; ok {
 			return fmt.Errorf("key %s shows up twice in row to be decoded", key)
 		}
-		keylist[key] = true
+
+		var val json.RawMessage
+		if err := dec.Decode(&val); err != nil {
+			return err
+		}
 
 		indices := b.schema.FieldIndices(key)
 		if len(indices) == 0 {
-			var extra interface{}
-			if err := dec.Decode(&extra); err != nil {
-				return err
-			}
 			continue
 		}
 
-		if err := b.fields[indices[0]].UnmarshalOne(dec); err != nil {
-			return err
+		idx := indices[0]
+
+		if bytes.Equal(val, []byte("null")) && !b.schema.Field(idx).Nullable {
+			return fmt.Errorf("field '%s' is non-nullable but got null", key)
 		}
+
+		keylist[key] = val
 	}
 
 	// consume the closing '}'
@@ -466,11 +470,32 @@ func (b *RecordBuilder) UnmarshalOne(dec *json.Decoder) error {
 		return err
 	}
 
+	// check that all non-nullable fields were specified
 	for i := 0; i < b.schema.NumFields(); i++ {
-		if !keylist[b.schema.Field(i).Name] {
+		f := b.schema.Field(i)
+		if _, ok := keylist[f.Name]; !ok && !f.Nullable {
+			return fmt.Errorf("field '%s' is required but no value was given", f.Name)
+		}
+	}
+
+	// at this point we know there are no integrity errors, append values to field builders
+	for key, val := range keylist {
+		valDec := json.NewDecoder(bytes.NewReader(val))
+		valDec.UseNumber()
+
+		indices := b.schema.FieldIndices(key)
+		if err := b.fields[indices[0]].UnmarshalOne(valDec); err != nil {
+			return err
+		}
+	}
+
+	// append nulls to nullable fields if values were not present
+	for i := 0; i < b.schema.NumFields(); i++ {
+		if _, ok := keylist[b.schema.Field(i).Name]; !ok {
 			b.fields[i].AppendNull()
 		}
 	}
+
 	return nil
 }
 

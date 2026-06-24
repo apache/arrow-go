@@ -17,6 +17,8 @@
 package array_test
 
 import (
+	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -472,52 +474,48 @@ func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 		name      string
 		jsonInput string
 		want      string
-		panic     bool
+		panicErr  error
 	}{
 		{
 			name:      "missing required field",
 			jsonInput: `[{"f2": 3, "f3": {"f3_1": "test"}}]`,
-			panic:     true,
+			panicErr:  errors.New("arrow/array: index out of range"),
 			want:      "",
 		},
 		{
 			name:      "missing optional fields",
 			jsonInput: `[{"f2": 3, "f3": {"f3_3": "test"}}]`,
-			panic:     false,
+			panicErr:  nil,
 			want:      `{[(null)] [3] {[(null)] [(null)] ["test"]}}`,
+		},
+		{
+			name:      "explicit null in required field",
+			jsonInput: `[{"f2": 3, "f3": {"f3_3": null}}]`,
+			panicErr:  errors.New("field 'f3_3' is non-nullable but got null"),
+			want:      "",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(
 			tc.name, func(t *testing.T) {
-
-				var val bool
-
 				sb := array.NewStructBuilder(pool, dtype)
 				defer sb.Release()
 
-				if tc.panic {
-					defer func() {
-						e := recover()
-						if e == nil {
-							t.Fatalf("this should have panicked, but did not; slice value %v", val)
-						}
-						if got, want := e.(string), "arrow/array: index out of range"; got != want {
-							t.Fatalf("invalid error. got=%q, want=%q", got, want)
-						}
-					}()
-				} else {
-					defer func() {
-						if e := recover(); e != nil {
-							t.Fatalf("unexpected panic: %v", e)
-						}
-					}()
-				}
+				defer func() {
+					e := recover()
+					if e == nil && tc.panicErr != nil {
+						t.Fatalf("did not panic, expected panic: %v", tc.panicErr)
+					} else if e != nil && tc.panicErr == nil {
+						t.Fatalf("unexpected panic: %v", e)
+					} else if e != nil && tc.panicErr != nil && fmt.Errorf("%s", e).Error() != tc.panicErr.Error() {
+						t.Fatalf("invalid error. got=%v, want=%v", e, tc.panicErr.Error())
+					}
+				}()
 
 				err := sb.UnmarshalJSON([]byte(tc.jsonInput))
 				if err != nil {
-					t.Fatal(err)
+					panic(err)
 				}
 
 				arr := sb.NewArray().(*array.Struct)
