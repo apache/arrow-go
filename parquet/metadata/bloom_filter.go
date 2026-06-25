@@ -56,6 +56,11 @@ var (
 	defaultCompression  = format.BloomFilterCompression{UNCOMPRESSED: &format.Uncompressed{}}
 )
 
+var (
+	headerPool = make(chan []byte, 512)
+	filterPool = make(chan *memory.Buffer, 512)
+)
+
 func optimalNumBytes(ndv uint32, fpp float64) uint32 {
 	optimalBits := optimalNumBits(ndv, fpp)
 	debug.Assert(bitutil.IsMultipleOf8(int64(optimalBits)), "optimal bits should be multiple of 8")
@@ -292,6 +297,13 @@ func (b *blockSplitBloomFilter) WriteTo(w io.Writer, enc encryption.Encryptor) (
 	return w.Write(b.data.Bytes())
 }
 
+func (b *blockSplitBloomFilter) Close() {
+	if b.cancelCleanup != nil {
+		b.cancelCleanup()
+		b.cancelCleanup = nil
+	}
+}
+
 func NewBloomFilter(numBytes, maxBytes uint32, mem memory.Allocator) BloomFilterBuilder {
 	if numBytes < minimumBloomFilterBytes {
 		numBytes = minimumBloomFilterBytes
@@ -360,6 +372,7 @@ type BloomFilter interface {
 	Hasher() Hasher
 	CheckHash(hash uint64) bool
 	Size() int64
+	Close()
 }
 
 type TypedBloomFilter[T parquet.ColumnTypes] struct {
@@ -456,6 +469,7 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 
 	sectionRdr := io.NewSectionReader(r.input, offset, r.sourceFileSize-offset)
 	cryptoMetadata := col.CryptoMetadata()
+
 	if cryptoMetadata != nil {
 		decryptor, err = encryption.GetColumnMetaDecryptor(cryptoMetadata, r.fileDecryptor)
 		if err != nil {
@@ -491,24 +505,39 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 		}, nil
 	}
 
-	headerBuf := r.bufferPool.Get().(*memory.Buffer)
-	headerBuf.ResizeNoShrink(int(bloomFilterReadSize))
+	var headerBytes []byte
+
+	select {
+	case buf := <-headerPool:
+		if len(buf) < int(bloomFilterReadSize) {
+			buf = make([]byte, bloomFilterReadSize)
+		}
+		headerBytes = buf
+	default:
+		headerBytes = make([]byte, bloomFilterReadSize)
+	}
+
+	capturedHeader := headerBytes
+
 	defer func() {
-		if headerBuf != nil {
-			headerBuf.ResizeNoShrink(0)
-			r.bufferPool.Put(headerBuf)
+		if capturedHeader != nil {
+			select {
+			case headerPool <- capturedHeader:
+			default:
+			}
 		}
 	}()
 
-	if _, err = sectionRdr.Read(headerBuf.Bytes()); err != nil {
+	if _, err = sectionRdr.Read(headerBytes[:bloomFilterReadSize]); err != nil {
 		return nil, err
 	}
 
-	remaining, err := thrift.DeserializeThrift(&header, headerBuf.Bytes())
+	remaining, err := thrift.DeserializeThrift(&header, headerBytes[:bloomFilterReadSize])
 	if err != nil {
 		return nil, err
 	}
-	headerSize := len(headerBuf.Bytes()) - int(remaining)
+
+	headerSize := int(bloomFilterReadSize) - int(remaining)
 
 	if err = validateBloomFilterHeader(&header); err != nil {
 		return nil, err
@@ -516,36 +545,68 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 
 	bloomFilterSz := header.NumBytes
 	var bitset []byte
-	if int(bloomFilterSz)+headerSize <= len(headerBuf.Bytes()) {
-		// bloom filter data is entirely contained in the buffer we just read
-		bitset = headerBuf.Bytes()[headerSize : headerSize+int(bloomFilterSz)]
-	} else {
-		buf := r.bufferPool.Get().(*memory.Buffer)
+	var finalDataBuf *memory.Buffer
+
+	select {
+	case buf := <-filterPool:
+		if buf.Cap() < int(bloomFilterSz) {
+			buf.ResizeNoShrink(int(bloomFilterSz))
+		} else {
+			buf.Reset(buf.Buf()[:bloomFilterSz])
+		}
+		finalDataBuf = buf
+	default:
+		buf := memory.NewResizableBuffer(memory.DefaultAllocator)
 		buf.ResizeNoShrink(int(bloomFilterSz))
-		filterBytesInHeader := headerBuf.Len() - headerSize
+		finalDataBuf = buf
+	}
+
+	if int(bloomFilterSz)+headerSize <= int(bloomFilterReadSize) {
+		bitset = headerBytes[headerSize : headerSize+int(bloomFilterSz)]
+		copy(finalDataBuf.Bytes(), bitset)
+		bitset = finalDataBuf.Bytes()
+	} else {
+		filterBytesInHeader := int(bloomFilterReadSize) - headerSize
 		if filterBytesInHeader > 0 {
-			copy(buf.Bytes(), headerBuf.Bytes()[headerSize:])
+			copy(finalDataBuf.Bytes(), headerBytes[headerSize:bloomFilterReadSize])
 		}
 
-		if _, err = sectionRdr.Read(buf.Bytes()[filterBytesInHeader:]); err != nil {
+		if _, err = sectionRdr.Read(finalDataBuf.Bytes()[filterBytesInHeader:bloomFilterSz]); err != nil {
+			finalDataBuf.Reset(finalDataBuf.Buf()[:0])
+			select {
+			case filterPool <- finalDataBuf:
+			default:
+				finalDataBuf.Release()
+			}
 			return nil, err
 		}
-		bitset = buf.Bytes()
-		headerBuf.ResizeNoShrink(0)
-		r.bufferPool.Put(headerBuf)
-		headerBuf = buf
+		bitset = finalDataBuf.Bytes()
 	}
 
 	bf := &blockSplitBloomFilter{
-		data:         headerBuf,
+		data:         finalDataBuf,
 		bitset32:     arrow.GetData[uint32](bitset),
 		hasher:       xxhasher{},
 		algorithm:    *header.Algorithm,
 		hashStrategy: *header.Hash,
 		compression:  *header.Compression,
 	}
-	headerBuf = nil
-	addCleanup(bf, r.bufferPool)
+
+	capturedFilterBuf := bf.data
+
+	bf.cancelCleanup = func() {
+		if capturedFilterBuf != nil {
+			capturedFilterBuf.Reset(capturedFilterBuf.Buf()[:cap(capturedFilterBuf.Buf())])
+
+			select {
+			case filterPool <- capturedFilterBuf:
+			default:
+				capturedFilterBuf.Release()
+			}
+			capturedFilterBuf = nil
+		}
+	}
+
 	return bf, nil
 }
 
