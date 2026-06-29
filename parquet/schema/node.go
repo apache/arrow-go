@@ -146,10 +146,9 @@ func (n *node) Equals(rhs Node) bool {
 }
 
 // validateVectorProperties enforces the VECTOR repetition invariants shared by
-// all node constructors: in this reduced Option B implementation VECTOR
-// repetition is only valid on primitive leaf nodes and requires a positive
-// vector_length, and no other node may carry a vector_length (its sentinel is
-// -1).
+// all node constructors: in this reduced implementation VECTOR repetition is only
+// valid on primitive leaf nodes and requires a positive vector_length, and no
+// other node may carry a vector_length (its sentinel is -1).
 func validateVectorProperties(typ NodeType, repetition parquet.Repetition, vectorLength int32) error {
 	if repetition == parquet.Repetitions.Vector {
 		if typ != Primitive {

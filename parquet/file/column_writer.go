@@ -656,9 +656,9 @@ func (w *columnWriter) Close() (err error) {
 }
 
 // rowsForLeafValues converts a count of physical leaf values (slots) to the
-// number of parent rows they represent. For VECTOR columns (Option B) each row
-// contributes effectiveVectorLength leaf slots; for every other column each leaf
-// value is exactly one row at this nesting level. VECTOR page/column statistics
+// number of parent rows they represent. For VECTOR columns each row contributes
+// effectiveVectorLength leaf slots; for every other column each leaf value is
+// exactly one row at this nesting level. VECTOR page/column statistics
 // intentionally remain flattened element-level statistics, not vector-level or
 // lexicographic-vector ordering statistics.
 func (w *columnWriter) rowsForLeafValues(numLeafValues int64) int {
@@ -669,9 +669,9 @@ func (w *columnWriter) rowsForLeafValues(numLeafValues int64) int {
 }
 
 // ErrVectorBatchMisaligned is returned by the typed column writers when a VECTOR
-// column (Option B) is handed a batch whose physical leaf-value count is not a
-// whole multiple of the column's vector_length. A vector value must be written
-// in one piece, so partial vectors are rejected up front.
+// column is handed a batch whose physical leaf-value count is not a whole
+// multiple of the column's vector_length. A vector value must be written in one
+// piece, so partial vectors are rejected up front.
 var ErrVectorBatchMisaligned = errors.New("parquet: VECTOR columns must be written in whole-vector batches")
 
 // validateVectorBatch checks, before any values are written, that n physical

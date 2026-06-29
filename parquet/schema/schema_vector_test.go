@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// vectorRoot builds a root group containing the reduced Option B vector leaf:
+// vectorRoot builds a root group containing vector leaf:
 //
 //	vector float embedding [listSize];
 func vectorRoot(t *testing.T, listSize int32) *schema.GroupNode {

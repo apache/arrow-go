@@ -36,7 +36,7 @@ import (
 )
 
 // vectorColumnDescr builds the leaf Column for a non-nullable
-// FixedSizeList<float, vectorLen> encoded as a reduced Option B VECTOR leaf.
+// FixedSizeList<float, vectorLen> encoded as a reduced VECTOR leaf.
 func vectorColumnDescr(t *testing.T, vectorLen int32) *schema.Column {
 	t.Helper()
 	return vectorPrimitiveColumnDescr(t, parquet.Types.Float, -1, vectorLen)

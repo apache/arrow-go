@@ -43,8 +43,8 @@ type Column struct {
 	// cached path string to avoid repeated string building
 	path string
 	// effectiveVectorLength is the fixed number of leaf values contributed per
-	// parent record when this column is part of a VECTOR-repeated subtree
-	// (Option B), and -1 otherwise. See effectiveVectorLength.
+	// parent record when this column is part of a VECTOR-repeated subtree,
+	// and -1 otherwise. See effectiveVectorLength.
 	effectiveVectorLength int32
 }
 
@@ -125,7 +125,7 @@ func (c *Column) MaxRepetitionLevel() int16 { return c.maxRepLvl }
 func (c *Column) EffectiveVectorLength() int32 { return c.effectiveVectorLength }
 
 // InVectorColumn reports whether this column belongs to a VECTOR-repeated
-// subtree (Option B), in which case leaf values are written without per-element
+// subtree, in which case leaf values are written without per-element
 // repetition levels.
 func (c *Column) InVectorColumn() bool { return c.effectiveVectorLength > 0 }
 

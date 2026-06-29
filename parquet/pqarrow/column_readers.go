@@ -569,7 +569,7 @@ func mulVectorLen(value int64, listSize int32) (int64, error) {
 	return value * int64(listSize), nil
 }
 
-// vectorFixedSizeListReader reads a Parquet VECTOR column (Option B) into an
+// vectorFixedSizeListReader reads a Parquet VECTOR column into an
 // Arrow FixedSizeList. In this phase only dense (non-nullable) vectors are
 // supported: the column has no per-element repetition or definition levels, so
 // the child leaf holds exactly listSize values per row and is reshaped into a
@@ -632,7 +632,7 @@ func (lr *vectorFixedSizeListReader) LoadBatch(nrecords int64) error {
 
 func (lr *vectorFixedSizeListReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
 	if lr.field.Nullable || lr.info.HasNullableValues() {
-		return nil, fmt.Errorf("%w: reading nullable VECTOR columns is not supported yet", arrow.ErrNotImplemented)
+		return nil, fmt.Errorf("%w: reading nullable VECTOR columns is not supported", arrow.ErrNotImplemented)
 	}
 
 	childBound, err := mulVectorLen(lenBound, lr.listSize)

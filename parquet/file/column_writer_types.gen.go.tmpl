@@ -102,7 +102,7 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBatch(values []{{.name}}, defLevels, r
   maxDefLevel := w.descr.MaxDefinitionLevel()
   isV2WithRep := w.props.DataPageVersion() != parquet.DataPageV1 &&
     repLevels != nil && w.descr.MaxRepetitionLevel() > 0
-  // VECTOR columns (Option B) contribute a fixed number of leaf slots per row
+  // VECTOR columns contribute a fixed number of leaf slots per row
   // and carry no per-element levels. Every batch must cover whole vectors so a
   // vector value is never split across data pages and rowsForLeafValues only
   // ever sees whole-vector counts. vectorLen is 0 for non-VECTOR columns, which

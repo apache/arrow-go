@@ -312,13 +312,12 @@ type pathBuilder struct {
 
 	// writeFixedSizeListAsVector mirrors ArrowWriterProperties: when set, an
 	// eligible top-level FixedSizeList column is encoded as Parquet VECTOR
-	// (Option B) instead of the standard LIST encoding. Must use the same
-	// eligibility predicate as ToParquet so the schema and the generated levels
-	// agree.
+	// instead of the standard LIST encoding. Must use the same eligibility
+	// predicate as ToParquet so the schema and the generated levels agree.
 	writeFixedSizeListAsVector bool
 	// atRoot is true only for the very first Visit (the top-level column field).
-	// Phase 1 encodes VECTOR only for top-level FixedSizeList columns, so the
-	// flag is consumed once and cleared as soon as we descend into any child.
+	// We allow VECTOR only for top-level FixedSizeList columns, so the flag is
+	// consumed once and cleared as soon as we descend into any child.
 	atRoot bool
 
 	refCount *atomic.Int64
@@ -435,7 +434,7 @@ func (p *pathBuilder) Visit(arr arrow.Array) error {
 	case arrow.FIXED_SIZE_LIST:
 		larr := arr.(*array.FixedSizeList)
 		fslType := larr.DataType().(*arrow.FixedSizeListType)
-		// Option B: encode an eligible top-level FixedSizeList column as VECTOR.
+		// Encode an eligible top-level FixedSizeList column as VECTOR.
 		// This must match the schema decision in ToParquet (top-level only,
 		// non-nullable value and element, positive length, fixed-width primitive
 		// element) so the parquet schema and the generated def/rep levels agree.
@@ -483,10 +482,10 @@ func (p *pathBuilder) Visit(arr arrow.Array) error {
 	}
 }
 
-// visitVector handles the Option B dense VECTOR case: a non-nullable
-// FixedSizeList with a non-nullable element contributes exactly fslType.Len()
-// leaf values per row and no definition or repetition levels. The fixed-size
-// child is flattened to the leaf (accounting for the array's slice offset).
+// visitVector handles the dense VECTOR case: a non-nullable FixedSizeList with
+// a non-nullable element contributes exactly fslType.Len() leaf values per row
+// and no definition or repetition levels. The fixed-size child is flattened to
+// the leaf (accounting for the array's slice offset).
 func (p *pathBuilder) visitVector(larr *array.FixedSizeList, fslType *arrow.FixedSizeListType) error {
 	if larr.NullN() > 0 {
 		return fmt.Errorf("parquet: VECTOR column %s is non-nullable but contains null vector values", larr.DataType())

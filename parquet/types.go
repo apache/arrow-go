@@ -329,7 +329,7 @@ var (
 		// Vector is the EXPERIMENTAL fixed-size repetition: the field repeats
 		// exactly SchemaElement.vector_length times per parent value without
 		// increasing the maximum definition or repetition level. Used to encode
-		// Arrow FixedSizeList as Parquet VECTOR (Option B).
+		// Arrow FixedSizeList as Parquet VECTOR.
 		Vector Repetition
 		// Undefined is a convenience sentinel outside the parquet-format enum.
 		// It is intentionally greater than every known repetition value.

@@ -36,8 +36,7 @@ func TestVectorThriftRoundTrip(t *testing.T) {
 		t.Fatalf("FieldRepetitionTypeFromString(VECTOR) = %v, %v", v, err)
 	}
 
-	// Reduced Option B uses a VECTOR-repeated primitive leaf carrying
-	// vector_length.
+	// Uses VECTOR-repeated primitive leaf carrying vector_length.
 	vecRep := format.FieldRepetitionType_VECTOR
 	phys := format.Type_FLOAT
 	vlen := int32(768)

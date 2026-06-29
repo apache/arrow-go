@@ -113,7 +113,7 @@ func TestVectorValidationErrors(t *testing.T) {
 	})
 }
 
-// Full reduced Option B vector leaf round-trips through thrift:
+// Full vector leaf round-trips through thrift:
 //
 //	vector float embedding [768];
 func TestVectorLeafRoundTrip(t *testing.T) {

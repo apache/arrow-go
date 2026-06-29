@@ -121,9 +121,9 @@ func WithNoMapLogicalType() WriterOption {
 }
 
 // WithVectorEncoding is EXPERIMENTAL. It enables encoding supported Arrow
-// FixedSizeList columns as the Parquet VECTOR repetition type (Option B)
-// instead of the standard 3-level LIST encoding, eliminating per-element
-// repetition levels for fixed-shape data.
+// FixedSizeList columns as the Parquet VECTOR repetition type instead of the
+// standard 3-level LIST encoding, eliminating per-element repetition levels for
+// fixed-shape data.
 //
 // In this initial form only top-level, non-nullable FixedSizeList values with a
 // positive list size and a fixed-width primitive element are encoded as VECTOR;

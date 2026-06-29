@@ -46,8 +46,8 @@ type SchemaField struct {
 	LevelInfo file.LevelInfo
 
 	// IsVector is true when this field is backed by a Parquet VECTOR leaf
-	// (Option B), i.e. an Arrow FixedSizeList encoded without per-element
-	// repetition levels.
+	// i.e. an Arrow FixedSizeList encoded without per-element repetition
+	// levels.
 	IsVector bool
 }
 
@@ -247,10 +247,10 @@ func repFromNullable(isnullable bool) parquet.Repetition {
 }
 
 // isSupportedVectorElementType reports whether an Arrow FixedSizeList element
-// type is encodable as a Parquet VECTOR element in this initial (Phase 1)
-// implementation: only fixed-width primitive elements qualify. Nested,
-// variable-width, dictionary, extension, and null elements fall back to the
-// standard LIST encoding.
+// type is encodable as a Parquet VECTOR element in initial implementation:
+// only fixed-width primitive elements qualify. Nested, variable-width,
+// dictionary, extension, and null elements fall back to the standard LIST
+// encoding.
 func isSupportedVectorElementType(dt arrow.DataType) bool {
 	switch dt.ID() {
 	case arrow.DICTIONARY, arrow.EXTENSION, arrow.NULL:
@@ -267,14 +267,14 @@ func isVectorEligibleFixedSizeList(fieldNullable bool, fsl *arrow.FixedSizeListT
 	return !fieldNullable && fsl.Len() > 0 && !fsl.ElemField().Nullable && isSupportedVectorElementType(fsl.Elem())
 }
 
-// fixedSizeListToNode builds the reduced Option B Parquet VECTOR leaf for an
-// Arrow FixedSizeList field:
+// fixedSizeListToNode builds the Parquet VECTOR leaf for an Arrow
+// FixedSizeList field:
 //
 //	vector <element-physical-type> <name> [N]
 //
 // It returns ok=false (and a nil node) when the field is not a VECTOR-eligible
 // FixedSizeList for the current phase, signaling the caller to fall back to the
-// standard LIST encoding. Phase 1 only encodes dense vectors: the list value
+// standard LIST encoding. This only encodes dense vectors: the list value
 // and its element must both be non-nullable, the list size positive, and the
 // element a fixed-width primitive.
 func fixedSizeListToNode(name string, field arrow.Field, props *parquet.WriterProperties, arrprops ArrowWriterProperties) (schema.Node, bool, error) {
@@ -442,11 +442,11 @@ func ToParquet(sc *arrow.Schema, props *parquet.WriterProperties, arrprops Arrow
 
 	nodes := make(schema.FieldList, 0, sc.NumFields())
 	for _, f := range sc.Fields() {
-		// EXPERIMENTAL (Option B): encode eligible top-level FixedSizeList
-		// columns as Parquet VECTOR. The decision is made here, at the top
-		// level, so Phase 1 only ever produces dense (no nullable/repeated
-		// ancestor) vectors; nested FixedSizeLists go through the normal
-		// fieldToNode path and use the standard LIST encoding.
+		// EXPERIMENTAL: encode eligible top-level FixedSizeList columns as
+		// Parquet VECTOR. The decision is made here, at the top level, so
+		// this only produces dense (no nullable/repeated ancestor) vectors;
+		// nested FixedSizeLists go through the normal fieldToNode path and
+		// use the standard LIST encoding.
 		if arrprops.writeFixedSizeListAsVector && f.Type.ID() == arrow.FIXED_SIZE_LIST {
 			n, ok, err := fixedSizeListToNode(f.Name, f, props, arrprops)
 			if err != nil {
@@ -991,11 +991,11 @@ func markVectorSubtree(field *SchemaField) {
 }
 
 // vectorPrimitiveToSchemaField reconstructs an Arrow FixedSizeList from a
-// reduced Option B Parquet VECTOR primitive leaf:
+// reduced Parquet VECTOR primitive leaf:
 //
 //	vector <element-physical-type> <name> [N]
 //
-// Phase 1 supports non-nullable fixed-width primitive elements only.
+// Supports non-nullable fixed-width primitive elements only.
 func vectorPrimitiveToSchemaField(primitive *schema.PrimitiveNode, currentLevels file.LevelInfo, ctx *schemaTree, parent, out *SchemaField) error {
 	if primitive.VectorLength() <= 0 {
 		return errors.New("VECTOR primitive nodes must have a positive vector_length")
@@ -1198,8 +1198,8 @@ func getNestedFactory(origin, inferred arrow.DataType) func(fieldList []arrow.Fi
 			}
 		}
 	case arrow.FIXED_SIZE_LIST:
-		// A VECTOR column (Option B) is reconstructed directly as a
-		// FixedSizeList (see vectorPrimitiveToSchemaField), so its inferred id is
+		// A VECTOR column is reconstructed directly as a FixedSizeList
+		// (see vectorPrimitiveToSchemaField), so its inferred id is
 		// FIXED_SIZE_LIST rather than LIST. Without this case getNestedFactory
 		// returns nil and applyOriginalStorageMetadata bails out before applying
 		// the stored Arrow element type/metadata (e.g. a timestamp's timezone or

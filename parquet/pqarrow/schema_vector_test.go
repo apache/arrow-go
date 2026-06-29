@@ -115,8 +115,8 @@ func TestToParquetFixedSizeListVector(t *testing.T) {
 }
 
 // A FixedSizeList nested inside a (top-level) struct must NOT become a VECTOR in
-// Phase 1: only top-level FixedSizeList columns are eligible, so nested ones use
-// the standard LIST encoding.
+// Only top-level FixedSizeList columns are eligible, so nested ones use the
+// standard LIST encoding.
 func TestToParquetNestedFixedSizeListStaysList(t *testing.T) {
 	inner := fslField("emb", arrow.PrimitiveTypes.Float32, 16, false, false)
 	cases := []arrow.Field{
@@ -125,7 +125,7 @@ func TestToParquetNestedFixedSizeListStaysList(t *testing.T) {
 	}
 	for _, field := range cases {
 		ps := toParquetVector(t, field, true /* enableVector */)
-		assert.False(t, treeHasVector(ps.Root().Field(0)), "nested FixedSizeList must not be encoded as VECTOR in Phase 1")
+		assert.False(t, treeHasVector(ps.Root().Field(0)), "nested FixedSizeList must not be encoded as VECTOR")
 	}
 }
 

@@ -175,10 +175,10 @@ func (s *Schema) buildTree(n Node, maxDefLvl, maxRepLvl int16, base Node) error 
 		if err := validateVectorColumnLevels(maxDefLvl, maxRepLvl); err != nil {
 			return err
 		}
-		// VECTOR fields (Option B) repeat a fixed number of times per parent
-		// value without increasing the maximum definition or repetition level:
-		// the fixed multiplicity is recovered from the schema's vector_length,
-		// so no per-element levels are written. Intentionally a no-op.
+		// VECTOR fields repeat a fixed number of times per parent value without
+		// increasing the maximum definition or repetition level: the fixed
+		// multiplicity is recovered from the schema's vector_length, so no
+		// per-element levels are written. Intentionally a no-op.
 	}
 
 	switch n := n.(type) {

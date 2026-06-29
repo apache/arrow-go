@@ -33,8 +33,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// End-to-end WRITE path for Phase 1: a non-nullable FixedSizeList<float32, N>
-// written with WithVectorEncoding produces a VECTOR primitive leaf on disk that
+// End-to-end WRITE path: a non-nullable FixedSizeList<float32, N> written
+// with WithVectorEncoding produces a VECTOR primitive leaf on disk that
 // holds the flattened values with no inner levels, and the row count is the
 // number of vectors (not leaf slots).
 func TestWriteFixedSizeListAsVector(t *testing.T) {
@@ -534,8 +534,8 @@ func TestVectorColumnReaderSeekToRowWithOffsetIndex(t *testing.T) {
 }
 
 // assertColumnIsVector opens the written parquet bytes and asserts the single
-// top-level column was actually encoded as a VECTOR leaf (Option B), not as a
-// LIST fallback, so the round-trip really exercises the VECTOR write/read path.
+// top-level column was actually encoded as a VECTOR leaf, not as a LIST
+// fallback, so the round-trip really exercises the VECTOR write/read path.
 func assertColumnIsVector(t *testing.T, b []byte, vectorLen int32) {
 	t.Helper()
 	rdr, err := file.NewParquetReader(bytes.NewReader(b))

@@ -576,14 +576,9 @@ func (c *columnChunkReader) determineNumToRead(batchLen int64, defLvls, repLvls 
 	return
 }
 
-// SeekToRow will seek to the row index provided in the column chunk. If
-// the metadata contains an OffsetIndex for skipping pages based on row indexes
-// then the pager will use that to skip to the correct page.
-//
-// If there is no OffsetIndex, then the pager will read each page until it
-// finds the page that contains the desired row index, and the Column Chunk
-// reader will discard values until it reaches the desired row index according
-// to the definition and repetition levels.
+// seekToPageForRow seeks the page reader to the page containing rowIdx and
+// initializes the current data page. If seeking replays an already-read
+// dictionary page, it skips reconfiguration and advances to the next data page.
 func (c *columnChunkReader) seekToPageForRow(rowIdx int64) error {
 	if err := c.pager().SeekToPageWithRow(rowIdx); err != nil {
 		return err
@@ -596,12 +591,6 @@ func (c *columnChunkReader) seekToPageForRow(rowIdx int64) error {
 		return c.err
 	}
 
-	// A seek rewinds to the start of the column chunk (SeekToPageWithRow), which
-	// re-streams the dictionary page. The dictionary is configured once per
-	// chunk, so an already-configured dictionary page is skipped here rather than
-	// re-read (configureDict would reject it as a second dictionary); readNewPage
-	// then advances to the first data page. The "more than one dictionary" guard
-	// still applies on the normal forward-read path through readNewPage.
 	gotDataPage := false
 	if _, isDict := c.curPage.(*DictionaryPage); !isDict || c.dictState == dictNotRead {
 		var err error
@@ -617,9 +606,17 @@ func (c *columnChunkReader) seekToPageForRow(rowIdx int64) error {
 	return c.err
 }
 
+// SeekToRow will seek to the row index provided in the column chunk. If
+// the metadata contains an OffsetIndex for skipping pages based on row indexes
+// then the pager will use that to skip to the correct page.
+//
+// If there is no OffsetIndex, then the pager will read each page until it
+// finds the page that contains the desired row index, and the Column Chunk
+// reader will discard values until it reaches the desired row index according
+// to the definition and repetition levels.
 func (c *columnChunkReader) SeekToRow(rowIdx int64) error {
 	if c.descr.InVectorColumn() {
-		// VECTOR columns (Option B) contribute EffectiveVectorLength leaf values
+		// VECTOR columns contribute EffectiveVectorLength leaf values
 		// per row and carry no per-element levels, so a row ordinal maps to a
 		// fixed value stride. skipRows would otherwise treat one leaf slot as one
 		// row and undershoot the seek by a factor of the vector length.
