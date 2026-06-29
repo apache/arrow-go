@@ -26,23 +26,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// vectorRoot builds a root group containing vector leaf:
+// vectorRoot builds a root group containing the canonical 3-level vector form:
 //
-//	vector float embedding [listSize];
+//	required group embedding (VECTOR) {
+//	  vector group list [listSize] {
+//	    required float element;
+//	  }
+//	}
 func vectorRoot(t *testing.T, listSize int32) *schema.GroupNode {
 	t.Helper()
-	leaf := schema.MustPrimitive(schema.NewPrimitiveNodeLogicalVector("embedding", nil, parquet.Types.Float, -1, listSize, -1))
-	return schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{leaf}, -1))
+	element := schema.MustPrimitive(schema.NewPrimitiveNode("element", parquet.Repetitions.Required, parquet.Types.Float, -1, -1))
+	list := schema.MustGroup(schema.NewGroupNodeVector("list", schema.FieldList{element}, listSize, -1))
+	embedding := schema.MustGroup(schema.NewGroupNodeLogical("embedding", parquet.Repetitions.Required, schema.FieldList{list}, schema.VectorLogicalType{}, -1))
+	return schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{embedding}, -1))
 }
 
 // VECTOR repetition must not increase the leaf's max definition or repetition
-// level; the fixed multiplicity is carried by vector_length on the leaf.
+// level; the fixed multiplicity is carried by vector_length on the middle group.
 func TestVectorBuildTreeLevels(t *testing.T) {
 	sc := schema.NewSchema(vectorRoot(t, 128))
 	require.Equal(t, 1, sc.NumColumns())
 	col := sc.Column(0)
-	assert.Equal(t, "embedding", col.Name())
-	assert.Equal(t, "embedding", col.Path())
+	assert.Equal(t, "element", col.Name())
+	assert.Equal(t, "embedding.list.element", col.Path())
 	assert.Equal(t, parquet.Types.Float, col.PhysicalType())
 	assert.EqualValues(t, 0, col.MaxDefinitionLevel(), "max definition level")
 	assert.EqualValues(t, 0, col.MaxRepetitionLevel(), "max repetition level")
@@ -50,25 +56,55 @@ func TestVectorBuildTreeLevels(t *testing.T) {
 	assert.EqualValues(t, 128, col.EffectiveVectorLength())
 }
 
-// The flattened schema must carry VECTOR repetition and vector_length directly
-// on the primitive leaf, and reconstruct losslessly via FromParquet.
+func TestVectorRejectsNullableOuterLevel(t *testing.T) {
+	element := schema.MustPrimitive(schema.NewPrimitiveNode("element", parquet.Repetitions.Required, parquet.Types.Float, -1, -1))
+	list := schema.MustGroup(schema.NewGroupNodeVector("list", schema.FieldList{element}, 8, -1))
+	embedding := schema.MustGroup(schema.NewGroupNodeLogical("embedding", parquet.Repetitions.Optional, schema.FieldList{list}, schema.VectorLogicalType{}, -1))
+	root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{embedding}, -1))
+	_, err := schema.NewSchemaChecked(root)
+	assert.ErrorContains(t, err, "nullable VECTOR columns")
+	assert.Panics(t, func() { schema.NewSchema(root) })
+	_, err = schema.FromParquet(schema.ToThrift(root))
+	assert.ErrorContains(t, err, "nullable VECTOR columns")
+}
+
+func TestVectorRejectsNullableElement(t *testing.T) {
+	element := schema.MustPrimitive(schema.NewPrimitiveNode("element", parquet.Repetitions.Optional, parquet.Types.Float, -1, -1))
+	list := schema.MustGroup(schema.NewGroupNodeVector("list", schema.FieldList{element}, 8, -1))
+	embedding := schema.MustGroup(schema.NewGroupNodeLogical("embedding", parquet.Repetitions.Required, schema.FieldList{list}, schema.VectorLogicalType{}, -1))
+	root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{embedding}, -1))
+	_, err := schema.NewSchemaChecked(root)
+	assert.ErrorContains(t, err, "nullable VECTOR elements")
+	assert.Panics(t, func() { schema.NewSchema(root) })
+	_, err = schema.FromParquet(schema.ToThrift(root))
+	assert.ErrorContains(t, err, "nullable VECTOR elements")
+}
+
+// The flattened schema must carry VECTOR logical type on the outer group and
+// VECTOR repetition/vector_length on the middle group, and reconstruct
+// losslessly via FromParquet.
 func TestVectorSchemaThriftRoundTrip(t *testing.T) {
 	root := vectorRoot(t, 128)
 	sc := schema.NewSchema(root)
 
 	elems := schema.ToThrift(root)
 
-	var sawVectorRep bool
+	var sawVectorLogical, sawVectorRep bool
 	for _, e := range elems {
+		if e.IsSetLogicalType() && e.GetLogicalType().IsSetVECTOR() {
+			sawVectorLogical = true
+			assert.Equal(t, format.FieldRepetitionType_REQUIRED, e.GetRepetitionType())
+		}
 		if e.GetRepetitionType() == format.FieldRepetitionType_VECTOR {
 			sawVectorRep = true
-			require.True(t, e.IsSetVectorLength(), "VECTOR leaf must carry vector_length")
+			require.True(t, e.IsSetVectorLength(), "VECTOR group must carry vector_length")
 			assert.EqualValues(t, 128, e.GetVectorLength())
-			assert.False(t, e.IsSetLogicalType(), "VECTOR leaf must not carry a VECTOR logical type")
-			assert.True(t, e.IsSetType(), "VECTOR leaf must be primitive")
+			assert.False(t, e.IsSetLogicalType(), "VECTOR-repeated middle group must not carry a logical type")
+			assert.False(t, e.IsSetType(), "VECTOR-repeated middle group must be a group")
 		}
 	}
-	assert.True(t, sawVectorRep, "expected a VECTOR-repeated primitive leaf")
+	assert.True(t, sawVectorLogical, "expected a VECTOR logical outer group")
+	assert.True(t, sawVectorRep, "expected a VECTOR-repeated middle group")
 
 	recon, err := schema.FromParquet(elems)
 	require.NoError(t, err)
@@ -79,27 +115,104 @@ func TestVectorSchemaThriftRoundTrip(t *testing.T) {
 	assert.True(t, reconSchema.Column(0).InVectorColumn())
 }
 
-func TestVectorRejectsNullableOrRepeatedAncestors(t *testing.T) {
-	leaf := schema.MustPrimitive(schema.NewPrimitiveNodeLogicalVector("embedding", nil, parquet.Types.Float, -1, 8, -1))
+func TestVectorRejectsRepeatedAncestors(t *testing.T) {
+	element := schema.MustPrimitive(schema.NewPrimitiveNode("element", parquet.Repetitions.Required, parquet.Types.Float, -1, -1))
+	list := schema.MustGroup(schema.NewGroupNodeVector("list", schema.FieldList{element}, 8, -1))
+	embedding := schema.MustGroup(schema.NewGroupNodeLogical("embedding", parquet.Repetitions.Required, schema.FieldList{list}, schema.VectorLogicalType{}, -1))
+	rep := schema.MustGroup(schema.NewGroupNode("rep", parquet.Repetitions.Repeated, schema.FieldList{embedding}, -1))
+	root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{rep}, -1))
+	_, err := schema.NewSchemaChecked(root)
+	assert.Error(t, err)
+	assert.Panics(t, func() { schema.NewSchema(root) })
+	_, err = schema.FromParquet(schema.ToThrift(root))
+	assert.Error(t, err)
+}
 
-	t.Run("optional ancestor", func(t *testing.T) {
-		opt := schema.MustGroup(schema.NewGroupNode("opt", parquet.Repetitions.Optional, schema.FieldList{leaf}, -1))
-		root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{opt}, -1))
+func TestVectorRejectsMalformedCanonicalShape(t *testing.T) {
+	element := schema.MustPrimitive(schema.NewPrimitiveNode("element", parquet.Repetitions.Required, parquet.Types.Float, -1, -1))
+
+	t.Run("bare VECTOR-repeated group", func(t *testing.T) {
+		list := schema.MustGroup(schema.NewGroupNodeVector("list", schema.FieldList{element}, 8, -1))
+		root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{list}, -1))
 		_, err := schema.NewSchemaChecked(root)
-		assert.Error(t, err)
-		assert.Panics(t, func() { schema.NewSchema(root) })
+		assert.ErrorContains(t, err, "single child of a group annotated")
 		_, err = schema.FromParquet(schema.ToThrift(root))
-		assert.Error(t, err)
+		assert.ErrorContains(t, err, "single child of a group annotated")
 	})
 
-	t.Run("repeated ancestor", func(t *testing.T) {
-		rep := schema.MustGroup(schema.NewGroupNode("rep", parquet.Repetitions.Repeated, schema.FieldList{leaf}, -1))
-		root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{rep}, -1))
+	t.Run("logical VECTOR without VECTOR child", func(t *testing.T) {
+		embedding := schema.MustGroup(schema.NewGroupNodeLogical("embedding", parquet.Repetitions.Required, schema.FieldList{element}, schema.VectorLogicalType{}, -1))
+		root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{embedding}, -1))
 		_, err := schema.NewSchemaChecked(root)
-		assert.Error(t, err)
-		assert.Panics(t, func() { schema.NewSchema(root) })
+		assert.ErrorContains(t, err, "VECTOR-repeated group child")
 		_, err = schema.FromParquet(schema.ToThrift(root))
-		assert.Error(t, err)
+		assert.ErrorContains(t, err, "VECTOR-repeated group child")
+	})
+
+	t.Run("nested VECTOR logical group", func(t *testing.T) {
+		list := schema.MustGroup(schema.NewGroupNodeVector("list", schema.FieldList{element}, 8, -1))
+		embedding := schema.MustGroup(schema.NewGroupNodeLogical("embedding", parquet.Repetitions.Required, schema.FieldList{list}, schema.VectorLogicalType{}, -1))
+		wrapper := schema.MustGroup(schema.NewGroupNode("wrapper", parquet.Repetitions.Required, schema.FieldList{embedding}, -1))
+		root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{wrapper}, -1))
+		_, err := schema.NewSchemaChecked(root)
+		assert.ErrorContains(t, err, "top-level fields")
+		_, err = schema.FromParquet(schema.ToThrift(root))
+		assert.ErrorContains(t, err, "top-level fields")
+	})
+
+	t.Run("middle group name", func(t *testing.T) {
+		items := schema.MustGroup(schema.NewGroupNodeVector("items", schema.FieldList{element}, 8, -1))
+		embedding := schema.MustGroup(schema.NewGroupNodeLogical("embedding", parquet.Repetitions.Required, schema.FieldList{items}, schema.VectorLogicalType{}, -1))
+		root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{embedding}, -1))
+		_, err := schema.NewSchemaChecked(root)
+		assert.ErrorContains(t, err, "must be named list")
+		_, err = schema.FromParquet(schema.ToThrift(root))
+		assert.ErrorContains(t, err, "must be named list")
+	})
+
+	t.Run("element name", func(t *testing.T) {
+		item := schema.MustPrimitive(schema.NewPrimitiveNode("item", parquet.Repetitions.Required, parquet.Types.Float, -1, -1))
+		list := schema.MustGroup(schema.NewGroupNodeVector("list", schema.FieldList{item}, 8, -1))
+		embedding := schema.MustGroup(schema.NewGroupNodeLogical("embedding", parquet.Repetitions.Required, schema.FieldList{list}, schema.VectorLogicalType{}, -1))
+		root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{embedding}, -1))
+		_, err := schema.NewSchemaChecked(root)
+		assert.ErrorContains(t, err, "must be named element")
+		_, err = schema.FromParquet(schema.ToThrift(root))
+		assert.ErrorContains(t, err, "must be named element")
+	})
+
+	t.Run("non-primitive element", func(t *testing.T) {
+		x := schema.MustPrimitive(schema.NewPrimitiveNode("x", parquet.Repetitions.Required, parquet.Types.Float, -1, -1))
+		groupElement := schema.MustGroup(schema.NewGroupNode("element", parquet.Repetitions.Required, schema.FieldList{x}, -1))
+		list := schema.MustGroup(schema.NewGroupNodeVector("list", schema.FieldList{groupElement}, 8, -1))
+		embedding := schema.MustGroup(schema.NewGroupNodeLogical("embedding", parquet.Repetitions.Required, schema.FieldList{list}, schema.VectorLogicalType{}, -1))
+		root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{embedding}, -1))
+		_, err := schema.NewSchemaChecked(root)
+		assert.ErrorContains(t, err, "elements must be primitive")
+		_, err = schema.FromParquet(schema.ToThrift(root))
+		assert.ErrorContains(t, err, "elements must be primitive")
+	})
+
+	t.Run("variable-width element", func(t *testing.T) {
+		binary := schema.MustPrimitive(schema.NewPrimitiveNode("element", parquet.Repetitions.Required, parquet.Types.ByteArray, -1, -1))
+		list := schema.MustGroup(schema.NewGroupNodeVector("list", schema.FieldList{binary}, 8, -1))
+		embedding := schema.MustGroup(schema.NewGroupNodeLogical("embedding", parquet.Repetitions.Required, schema.FieldList{list}, schema.VectorLogicalType{}, -1))
+		root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{embedding}, -1))
+		_, err := schema.NewSchemaChecked(root)
+		assert.ErrorContains(t, err, "fixed-width primitive")
+		_, err = schema.FromParquet(schema.ToThrift(root))
+		assert.ErrorContains(t, err, "fixed-width primitive")
+	})
+
+	t.Run("repeated descendant", func(t *testing.T) {
+		repeated := schema.MustPrimitive(schema.NewPrimitiveNode("element", parquet.Repetitions.Repeated, parquet.Types.Float, -1, -1))
+		list := schema.MustGroup(schema.NewGroupNodeVector("list", schema.FieldList{repeated}, 8, -1))
+		embedding := schema.MustGroup(schema.NewGroupNodeLogical("embedding", parquet.Repetitions.Required, schema.FieldList{list}, schema.VectorLogicalType{}, -1))
+		root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{embedding}, -1))
+		_, err := schema.NewSchemaChecked(root)
+		assert.ErrorContains(t, err, "repeated fields inside VECTOR")
+		_, err = schema.FromParquet(schema.ToThrift(root))
+		assert.ErrorContains(t, err, "repeated fields inside VECTOR")
 	})
 }
 

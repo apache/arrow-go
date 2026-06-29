@@ -40,8 +40,9 @@ func toParquetVector(t *testing.T, field arrow.Field, enableVector bool) *schema
 	return ps
 }
 
-func isVectorLeaf(n schema.Node) bool {
-	return n.Type() == schema.Primitive && n.RepetitionType() == parquet.Repetitions.Vector
+func isVectorField(n schema.Node) bool {
+	g, ok := n.(*schema.GroupNode)
+	return ok && g.LogicalType().Equals(schema.VectorLogicalType{})
 }
 
 func treeHasVector(n schema.Node) bool {
@@ -96,12 +97,17 @@ func TestToParquetFixedSizeListVector(t *testing.T) {
 				return
 			}
 
-			require.True(t, isVectorLeaf(top), "top-level field should be a VECTOR primitive leaf")
-			elem := top.(*schema.PrimitiveNode)
-			assert.Equal(t, parquet.Repetitions.Vector, elem.RepetitionType())
-			assert.Equal(t, tc.wantLen, elem.VectorLength())
+			require.True(t, isVectorField(top), "top-level field should be a VECTOR logical group")
+			outer := top.(*schema.GroupNode)
+			assert.Equal(t, tc.field.Name, outer.Name())
+			require.Equal(t, 1, outer.NumFields())
+			vec := outer.Field(0).(*schema.GroupNode)
+			assert.Equal(t, parquet.Repetitions.Vector, vec.RepetitionType())
+			assert.Equal(t, tc.wantLen, vec.VectorLength())
+			require.Equal(t, 1, vec.NumFields())
+			elem := vec.Field(0).(*schema.PrimitiveNode)
 			assert.Equal(t, tc.wantPhysical, elem.PhysicalType())
-			assert.Equal(t, tc.field.Name, elem.Name())
+			assert.Equal(t, "element", elem.Name())
 
 			// The leaf column carries the effective vector length and no inner levels.
 			require.Equal(t, 1, ps.NumColumns())
@@ -129,7 +135,7 @@ func TestToParquetNestedFixedSizeListStaysList(t *testing.T) {
 	}
 }
 
-// The read-side schema manifest reconstructs a VECTOR primitive leaf into an
+// The read-side schema manifest reconstructs a VECTOR logical group into an
 // Arrow FixedSizeList (with IsVector set) without needing a stored Arrow schema.
 func TestVectorSchemaManifestReconstruction(t *testing.T) {
 	field := fslField("emb", arrow.PrimitiveTypes.Float32, 128, false, false)
@@ -159,35 +165,13 @@ func TestVectorSchemaManifestReconstruction(t *testing.T) {
 	assert.False(t, leaf.Field.Nullable)
 }
 
-func TestVectorSchemaManifestRejectsNullableOrRepeatedVector(t *testing.T) {
-	makeLeaf := func() *schema.PrimitiveNode {
-		return schema.MustPrimitive(schema.NewPrimitiveNodeLogicalVector("emb", nil, parquet.Types.Float, -1, 128, -1))
-	}
-
-	cases := []struct {
-		name string
-		node func() schema.Node
-	}{
-		{
-			name: "optional parent",
-			node: func() schema.Node {
-				return schema.MustGroup(schema.NewGroupNode("s", parquet.Repetitions.Optional, schema.FieldList{makeLeaf()}, -1))
-			},
-		},
-		{
-			name: "repeated parent",
-			node: func() schema.Node {
-				return schema.MustGroup(schema.NewGroupNode("items", parquet.Repetitions.Repeated, schema.FieldList{makeLeaf()}, -1))
-			},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{tc.node()}, -1))
-			require.Panics(t, func() { schema.NewSchema(root) })
-		})
-	}
+func TestVectorSchemaManifestRejectsRepeatedVectorAncestor(t *testing.T) {
+	element := schema.MustPrimitive(schema.NewPrimitiveNode("element", parquet.Repetitions.Required, parquet.Types.Float, -1, -1))
+	vec := schema.MustGroup(schema.NewGroupNodeVector("list", schema.FieldList{element}, 128, -1))
+	field := schema.MustGroup(schema.NewGroupNodeLogical("emb", parquet.Repetitions.Required, schema.FieldList{vec}, schema.VectorLogicalType{}, -1))
+	repeated := schema.MustGroup(schema.NewGroupNode("items", parquet.Repetitions.Repeated, schema.FieldList{field}, -1))
+	root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{repeated}, -1))
+	require.Panics(t, func() { schema.NewSchema(root) })
 }
 
 // Without the vector flag the same FixedSizeList is a LIST on disk and the

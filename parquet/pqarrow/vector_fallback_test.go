@@ -66,7 +66,7 @@ func columnIsVector(t *testing.T, data []byte, i int) bool {
 
 // TestVectorFallbackRoundTrips checks that, with WithVectorEncoding enabled, a
 // FixedSizeList that is NOT VECTOR-eligible is transparently written as the
-// standard LIST encoding (no VECTOR leaf on disk) and still round-trips
+// standard LIST encoding (no VECTOR column on disk) and still round-trips
 // losslessly through pqarrow.
 func TestVectorFallbackRoundTrips(t *testing.T) {
 	mem := memory.DefaultAllocator

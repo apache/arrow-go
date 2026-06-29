@@ -36,20 +36,22 @@ import (
 )
 
 // vectorColumnDescr builds the leaf Column for a non-nullable
-// FixedSizeList<float, vectorLen> encoded as a reduced VECTOR leaf.
+// FixedSizeList<float, vectorLen> encoded in the canonical 3-level VECTOR form.
 func vectorColumnDescr(t *testing.T, vectorLen int32) *schema.Column {
 	t.Helper()
 	return vectorPrimitiveColumnDescr(t, parquet.Types.Float, -1, vectorLen)
 }
 
 // vectorPrimitiveColumnDescr builds the leaf Column for a non-nullable
-// FixedSizeList<primitive, vectorLen> VECTOR leaf of the given physical type.
+// FixedSizeList<primitive, vectorLen> VECTOR field of the given physical type.
 // (FixedLenByteArray, written by FixedLenByteArrayColumnChunkWriter's custom
 // batching loop, is reached by passing parquet.Types.FixedLenByteArray.)
 func vectorPrimitiveColumnDescr(t *testing.T, physical parquet.Type, typeLen int, vectorLen int32) *schema.Column {
 	t.Helper()
-	leaf := schema.MustPrimitive(schema.NewPrimitiveNodeLogicalVector("v", nil, physical, typeLen, vectorLen, -1))
-	root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{leaf}, -1))
+	leaf := schema.MustPrimitive(schema.NewPrimitiveNodeLogical("element", parquet.Repetitions.Required, nil, physical, typeLen, -1))
+	list := schema.MustGroup(schema.NewGroupNodeVector("list", schema.FieldList{leaf}, vectorLen, -1))
+	outer := schema.MustGroup(schema.NewGroupNodeLogical("v", parquet.Repetitions.Required, schema.FieldList{list}, schema.VectorLogicalType{}, -1))
+	root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Repeated, schema.FieldList{outer}, -1))
 	return schema.NewSchema(root).Column(0)
 }
 
@@ -313,17 +315,18 @@ func TestVectorColumnWriterRejectsPartialVector(t *testing.T) {
 	assert.NotContains(t, err.Error(), "unknown error type")
 }
 
-// A VECTOR-repeated leaf contributes no definition or repetition level, so
+// A VECTOR-repeated group contributes no definition or repetition level, so
 // LevelInfo.Increment must leave the running level info unchanged, and the leaf
 // column of a non-nullable vector has no inner levels at all.
 func TestVectorLevelInfoNoOp(t *testing.T) {
 	const vectorLen = 4
-	leaf := schema.MustPrimitive(schema.NewPrimitiveNodeLogicalVector("v", nil, parquet.Types.Float, -1, vectorLen, -1))
+	leaf := schema.MustPrimitive(schema.NewPrimitiveNode("element", parquet.Repetitions.Required, parquet.Types.Float, -1, -1))
+	vec := schema.MustGroup(schema.NewGroupNodeVector("list", schema.FieldList{leaf}, vectorLen, -1))
 
-	// Increment over the VECTOR leaf is a no-op.
+	// Increment over the VECTOR group is a no-op.
 	before := file.LevelInfo{DefLevel: 2, RepLevel: 1, RepeatedAncestorDefLevel: 1}
 	after := before
-	after.Increment(leaf)
+	after.Increment(vec)
 	assert.Equal(t, before, after)
 
 	// Sanity: an optional group still increments the definition level.
@@ -528,8 +531,10 @@ func TestVectorRowGroupReaderRejectsMalformedNumValues(t *testing.T) {
 	const vectorLen = 3
 	const numRows = 4
 
-	leaf := schema.MustPrimitive(schema.NewPrimitiveNodeLogicalVector("v", nil, parquet.Types.Float, -1, vectorLen, -1))
-	root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{leaf}, -1))
+	leaf := schema.MustPrimitive(schema.NewPrimitiveNode("element", parquet.Repetitions.Required, parquet.Types.Float, -1, -1))
+	list := schema.MustGroup(schema.NewGroupNodeVector("list", schema.FieldList{leaf}, vectorLen, -1))
+	outer := schema.MustGroup(schema.NewGroupNodeLogical("v", parquet.Repetitions.Required, schema.FieldList{list}, schema.VectorLogicalType{}, -1))
+	root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{outer}, -1))
 	props := parquet.NewWriterProperties(parquet.WithDictionaryDefault(false))
 
 	var buf bytes.Buffer

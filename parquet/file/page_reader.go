@@ -452,7 +452,7 @@ func NewPageReader(r parquet.BufferedReader, nrows int64, compressType compress.
 }
 
 func (p *serializedPageReader) Reset(r parquet.BufferedReader, nrows int64, compressType compress.Compression, ctx *CryptoContext) {
-	p.rowsSeen, p.pageOrd, p.nrows = 0, 0, nrows
+	p.rowsSeen, p.pageOrd, p.nrows, p.parentRows = 0, 0, nrows, 0
 	p.curPageHdr, p.curPage, p.err = nil, nil, nil
 	p.r = r
 

@@ -17,16 +17,18 @@
 package thrift_test
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/thrift"
+	apachethrift "github.com/apache/thrift/lib/go/thrift"
 )
 
-// Verifies the hand-applied VECTOR repetition / vector_length additions to the
-// generated parquet.go round-trip through the Thrift compact protocol that
-// Parquet uses on disk.
+// Verifies the hand-applied VECTOR repetition / logical type / vector_length
+// additions to the generated parquet.go round-trip through the Thrift compact
+// protocol that Parquet uses on disk.
 func TestVectorThriftRoundTrip(t *testing.T) {
 	// Enum surface.
 	if got := format.FieldRepetitionType_VECTOR.String(); got != "VECTOR" {
@@ -36,32 +38,41 @@ func TestVectorThriftRoundTrip(t *testing.T) {
 		t.Fatalf("FieldRepetitionTypeFromString(VECTOR) = %v, %v", v, err)
 	}
 
-	// Uses VECTOR-repeated primitive leaf carrying vector_length.
-	vecRep := format.FieldRepetitionType_VECTOR
-	phys := format.Type_FLOAT
-	vlen := int32(768)
-	leaf := &format.SchemaElement{
+	// Canonical VECTOR uses an outer group annotated with LogicalType.VECTOR and
+	// a VECTOR-repeated middle group carrying vector_length.
+	outerRep := format.FieldRepetitionType_REQUIRED
+	childCount := int32(1)
+	outer := &format.SchemaElement{
 		Name:           "embedding",
-		Type:           &phys,
+		RepetitionType: &outerRep,
+		NumChildren:    &childCount,
+		LogicalType:    &format.LogicalType{VECTOR: format.NewVectorType()},
+	}
+	vecRep := format.FieldRepetitionType_VECTOR
+	vlen := int32(768)
+	middle := &format.SchemaElement{
+		Name:           "list",
 		RepetitionType: &vecRep,
+		NumChildren:    &childCount,
 		VectorLength:   &vlen,
 	}
 
 	ser := thrift.NewThriftSerializer()
-	b, err := ser.Write(context.Background(), leaf)
-	if err != nil {
-		t.Fatalf("serialize %q: %v", leaf.Name, err)
-	}
-	gotLeaf := format.NewSchemaElement()
-	if _, err := thrift.DeserializeThrift(gotLeaf, b); err != nil {
-		t.Fatalf("deserialize %q: %v", leaf.Name, err)
-	}
-	if !leaf.Equals(gotLeaf) {
-		t.Fatalf("round-trip mismatch for %q:\n have %s\n want %s", leaf.Name, gotLeaf, leaf)
+	for _, elem := range []*format.SchemaElement{outer, middle} {
+		b, err := ser.Write(context.Background(), elem)
+		if err != nil {
+			t.Fatalf("serialize %q: %v", elem.Name, err)
+		}
+		got := format.NewSchemaElement()
+		if _, err := thrift.DeserializeThrift(got, b); err != nil {
+			t.Fatalf("deserialize %q: %v", elem.Name, err)
+		}
+		if !elem.Equals(got) {
+			t.Fatalf("round-trip mismatch for %q:\n have %s\n want %s", elem.Name, got, elem)
+		}
 	}
 
-	// Specifically confirm vector_length (field 11) survived the wire.
-	b, err = ser.Write(context.Background(), leaf)
+	b, err := ser.Write(context.Background(), middle)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +86,30 @@ func TestVectorThriftRoundTrip(t *testing.T) {
 	if got.GetRepetitionType() != format.FieldRepetitionType_VECTOR {
 		t.Fatalf("repetition_type not preserved: %v", got.GetRepetitionType())
 	}
-	if got.GetType() != format.Type_FLOAT {
-		t.Fatalf("physical type not preserved: %v", got.GetType())
+
+	// Binary protocol exposes field ids directly; make sure vector_length uses
+	// SchemaElement field id 11.
+	buf := apachethrift.NewTMemoryBuffer()
+	bin := apachethrift.NewTBinaryProtocolConf(buf, nil)
+	if err := middle.Write(context.Background(), bin); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte{byte(apachethrift.I32), 0x00, 0x0b}) {
+		t.Fatalf("vector_length field id 11 not found in binary thrift: %x", buf.Bytes())
+	}
+	if bytes.Contains(buf.Bytes(), []byte{byte(apachethrift.I32), 0x00, 0x0c}) {
+		t.Fatalf("unexpected vector_length field id 12 found in binary thrift: %x", buf.Bytes())
+	}
+
+	b, err = ser.Write(context.Background(), outer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = format.NewSchemaElement()
+	if _, err := thrift.DeserializeThrift(got, b); err != nil {
+		t.Fatal(err)
+	}
+	if !got.IsSetLogicalType() || !got.GetLogicalType().IsSetVECTOR() {
+		t.Fatalf("VECTOR logical type not preserved: %v", got.GetLogicalType())
 	}
 }

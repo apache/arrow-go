@@ -86,7 +86,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 		return nil, err
 	}
 	// parentRows scopes row-ordinal seek bounds to VECTOR columns only. A VECTOR
-	// leaf stores parent_row_count*vector_length physical values, so its page
+	// column stores parent_row_count*vector_length leaf slots, so its page
 	// stream's num_values count is not the parent-row count and a row ordinal
 	// must be bounded by the row-group row count instead. For every other column
 	// parentRows stays 0 and the page reader keeps its num_values-based bound:

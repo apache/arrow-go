@@ -631,7 +631,8 @@ func (lr *vectorFixedSizeListReader) LoadBatch(nrecords int64) error {
 }
 
 func (lr *vectorFixedSizeListReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
-	if lr.field.Nullable || lr.info.HasNullableValues() {
+	fslType := lr.field.Type.(*arrow.FixedSizeListType)
+	if lr.field.Nullable || lr.info.HasNullableValues() || fslType.ElemField().Nullable {
 		return nil, fmt.Errorf("%w: reading nullable VECTOR columns is not supported", arrow.ErrNotImplemented)
 	}
 

@@ -310,10 +310,10 @@ type pathBuilder struct {
 	paths            []pathInfo
 	nullableInParent bool
 
-	// writeFixedSizeListAsVector mirrors ArrowWriterProperties: when set, an
-	// eligible top-level FixedSizeList column is encoded as Parquet VECTOR
-	// instead of the standard LIST encoding. Must use the same eligibility
-	// predicate as ToParquet so the schema and the generated levels agree.
+	// writeFixedSizeListAsVector is set from the schema manifest when this
+	// top-level FixedSizeList column is encoded as Parquet VECTOR instead of the
+	// standard LIST encoding. Must use the same eligibility predicate as
+	// ToParquet so the schema and generated levels agree.
 	writeFixedSizeListAsVector bool
 	// atRoot is true only for the very first Visit (the top-level column field).
 	// We allow VECTOR only for top-level FixedSizeList columns, so the flag is

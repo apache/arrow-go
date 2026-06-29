@@ -45,9 +45,8 @@ type SchemaField struct {
 	ColIndex  int
 	LevelInfo file.LevelInfo
 
-	// IsVector is true when this field is backed by a Parquet VECTOR leaf
-	// i.e. an Arrow FixedSizeList encoded without per-element repetition
-	// levels.
+	// IsVector is true when this field is backed by a Parquet VECTOR column,
+	// i.e. an Arrow FixedSizeList encoded without per-element repetition levels.
 	IsVector bool
 }
 
@@ -267,10 +266,14 @@ func isVectorEligibleFixedSizeList(fieldNullable bool, fsl *arrow.FixedSizeListT
 	return !fieldNullable && fsl.Len() > 0 && !fsl.ElemField().Nullable && isSupportedVectorElementType(fsl.Elem())
 }
 
-// fixedSizeListToNode builds the Parquet VECTOR leaf for an Arrow
+// fixedSizeListToNode builds the canonical Parquet VECTOR group for an Arrow
 // FixedSizeList field:
 //
-//	vector <element-physical-type> <name> [N]
+//	required group <name> (VECTOR) {
+//	  vector group list [N] {
+//	    required <element-physical-type> element;
+//	  }
+//	}
 //
 // It returns ok=false (and a nil node) when the field is not a VECTOR-eligible
 // FixedSizeList for the current phase, signaling the caller to fall back to the
@@ -291,7 +294,15 @@ func fixedSizeListToNode(name string, field arrow.Field, props *parquet.WriterPr
 	if err != nil {
 		return nil, false, err
 	}
-	n, err := schema.NewPrimitiveNodeLogicalVector(name, logicalType, typ, length, fsl.Len(), fieldIDFromMeta(field.Metadata))
+	element, err := schema.NewPrimitiveNodeLogical("element", repFromNullable(elemField.Nullable), logicalType, typ, length, fieldIDFromMeta(elemField.Metadata))
+	if err != nil {
+		return nil, false, err
+	}
+	vector, err := schema.NewGroupNodeVector("list", schema.FieldList{element}, fsl.Len(), -1)
+	if err != nil {
+		return nil, false, err
+	}
+	n, err := schema.NewGroupNodeLogical(name, repFromNullable(field.Nullable), schema.FieldList{vector}, schema.VectorLogicalType{}, fieldIDFromMeta(field.Metadata))
 	if err != nil {
 		return nil, false, err
 	}
@@ -990,19 +1001,55 @@ func markVectorSubtree(field *SchemaField) {
 	}
 }
 
-// vectorPrimitiveToSchemaField reconstructs an Arrow FixedSizeList from a
-// reduced Parquet VECTOR primitive leaf:
+func isVectorLogicalGroup(n *schema.GroupNode) bool {
+	return n.LogicalType().Equals(schema.VectorLogicalType{})
+}
+
+// vectorToSchemaField reconstructs an Arrow FixedSizeList from the canonical
+// Parquet VECTOR group form:
 //
-//	vector <element-physical-type> <name> [N]
+//	<required|optional> group <name> (VECTOR) {
+//	  vector group list [N] {
+//	    <required|optional> <element-type> element;
+//	  }
+//	}
 //
-// Supports non-nullable fixed-width primitive elements only.
-func vectorPrimitiveToSchemaField(primitive *schema.PrimitiveNode, currentLevels file.LevelInfo, ctx *schemaTree, parent, out *SchemaField) error {
-	if primitive.VectorLength() <= 0 {
-		return errors.New("VECTOR primitive nodes must have a positive vector_length")
+// This implementation supports required vectors with required fixed-width
+// primitive elements.
+func vectorToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *schemaTree, parent, out *SchemaField) error {
+	if n.RepetitionType() != parquet.Repetitions.Required {
+		return errors.New("nullable or repeated VECTOR logical groups are not supported")
 	}
-	if currentLevels.DefLevel != 0 || currentLevels.RepLevel != 0 || currentLevels.RepeatedAncestorDefLevel != 0 {
-		return errors.New("VECTOR columns must be non-nullable and must not have repeated ancestors")
+	if n.NumFields() != 1 {
+		return errors.New("VECTOR groups must have a single VECTOR-repeated child")
 	}
+
+	currentLevels.Increment(n)
+	vectorLevel := currentLevels
+	child := n.Field(0)
+	if child.RepetitionType() != parquet.Repetitions.Vector || child.Type() != schema.Group {
+		return errors.New("VECTOR groups must contain a VECTOR-repeated group child")
+	}
+	vectorGroup := child.(*schema.GroupNode)
+	if vectorGroup.VectorLength() <= 0 {
+		return errors.New("VECTOR-repeated groups must have positive vector_length")
+	}
+	if vectorGroup.NumFields() != 1 {
+		return errors.New("VECTOR-repeated groups must have a single element child")
+	}
+	if !vectorGroup.LogicalType().IsNone() {
+		return errors.New("VECTOR-repeated groups must not have a logical type")
+	}
+
+	element := vectorGroup.Field(0)
+	if element.Type() != schema.Primitive {
+		return fmt.Errorf("%w: reading VECTOR columns with non-primitive elements is not supported", arrow.ErrNotImplemented)
+	}
+	primitive := element.(*schema.PrimitiveNode)
+	if primitive.RepetitionType() != parquet.Repetitions.Required {
+		return errors.New("nullable or repeated VECTOR elements are not supported")
+	}
+
 	colIndex := ctx.schema.ColumnIndexByNode(primitive)
 	arrowType, err := getArrowType(primitive.PhysicalType(), primitive.LogicalType(), primitive.TypeLength())
 	if err != nil {
@@ -1015,37 +1062,44 @@ func vectorPrimitiveToSchemaField(primitive *schema.PrimitiveNode, currentLevels
 		arrowType = &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrowType}
 	}
 
+	currentLevels.Increment(primitive)
 	out.Children = makeSchemaFields(1)
 	childField := &out.Children[0]
 	ctx.LinkParent(out, parent)
 	ctx.LinkParent(childField, out)
 
-	itemField := arrow.Field{Name: "element", Type: arrowType, Nullable: false}
+	var itemMetadata arrow.Metadata
+	if primitive.FieldID() >= 0 {
+		itemMetadata = createFieldMeta(int(primitive.FieldID()))
+	}
+	itemField := arrow.Field{Name: primitive.Name(), Type: arrowType, Nullable: primitive.RepetitionType() == parquet.Repetitions.Optional, Metadata: itemMetadata}
 	populateLeaf(colIndex, &itemField, currentLevels, ctx, out, childField)
 	markVectorSubtree(childField)
 
 	out.Field = &arrow.Field{
-		Name:     primitive.Name(),
-		Type:     arrow.FixedSizeListOfField(primitive.VectorLength(), *childField.Field),
-		Nullable: false,
-		Metadata: createFieldMeta(int(primitive.FieldID())),
+		Name:     n.Name(),
+		Type:     arrow.FixedSizeListOfField(vectorGroup.VectorLength(), *childField.Field),
+		Nullable: n.RepetitionType() == parquet.Repetitions.Optional,
+		Metadata: createFieldMeta(int(n.FieldID())),
 	}
-	out.LevelInfo = currentLevels
+	out.LevelInfo = vectorLevel
 	out.IsVector = true
 	return nil
 }
 
 func groupToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *schemaTree, parent, out *SchemaField) error {
+	if isVectorLogicalGroup(n) {
+		return vectorToSchemaField(n, currentLevels, ctx, parent, out)
+	}
+	if n.RepetitionType() == parquet.Repetitions.Vector {
+		return errors.New("VECTOR-repeated groups must be the single child of a group annotated with the VECTOR logical type")
+	}
 	if n.LogicalType().Equals(schema.NewListLogicalType()) {
 		return listToSchemaField(n, currentLevels, ctx, parent, out)
 	} else if n.LogicalType().Equals(schema.MapLogicalType{}) {
 		return mapToSchemaField(n, currentLevels, ctx, parent, out)
 	} else if n.LogicalType().Equals(schema.VariantLogicalType{}) {
 		return variantToSchemaField(n, currentLevels, ctx, parent, out)
-	}
-
-	if n.RepetitionType() == parquet.Repetitions.Vector {
-		return errors.New("VECTOR repetition is only supported on primitive leaf nodes")
 	}
 
 	if n.RepetitionType() == parquet.Repetitions.Repeated {
@@ -1115,7 +1169,7 @@ func nodeToSchemaField(n schema.Node, currentLevels file.LevelInfo, ctx *schemaT
 	}
 
 	if primitive.RepetitionType() == parquet.Repetitions.Vector {
-		return vectorPrimitiveToSchemaField(primitive, currentLevels, ctx, parent, out)
+		return errors.New("VECTOR repetition on primitive nodes is not supported; vectors must use the 3-level VECTOR group structure")
 	}
 
 	if primitive.RepetitionType() == parquet.Repetitions.Repeated {
@@ -1199,11 +1253,11 @@ func getNestedFactory(origin, inferred arrow.DataType) func(fieldList []arrow.Fi
 		}
 	case arrow.FIXED_SIZE_LIST:
 		// A VECTOR column is reconstructed directly as a FixedSizeList
-		// (see vectorPrimitiveToSchemaField), so its inferred id is
-		// FIXED_SIZE_LIST rather than LIST. Without this case getNestedFactory
-		// returns nil and applyOriginalStorageMetadata bails out before applying
-		// the stored Arrow element type/metadata (e.g. a timestamp's timezone or
-		// user field metadata), unlike the standard LIST-encoded path.
+		// (see vectorToSchemaField), so its inferred id is FIXED_SIZE_LIST rather
+		// than LIST. Without this case getNestedFactory returns nil and
+		// applyOriginalStorageMetadata bails out before applying the stored Arrow
+		// element type/metadata (e.g. a timestamp's timezone or user field
+		// metadata), unlike the standard LIST-encoded path.
 		if origin.ID() == arrow.FIXED_SIZE_LIST {
 			sz := origin.(*arrow.FixedSizeListType).Len()
 			return func(list []arrow.Field) arrow.DataType {

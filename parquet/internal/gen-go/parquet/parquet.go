@@ -4807,6 +4807,86 @@ func (p *GeographyType) Validate() error {
 	return nil
 }
 
+// VectorType annotates the outer group of a fixed-size vector field.
+type VectorType struct {
+}
+
+func NewVectorType() *VectorType {
+	return &VectorType{}
+}
+
+func (p *VectorType) Read(ctx context.Context, iprot thrift.TProtocol) error {
+	if _, err := iprot.ReadStructBegin(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
+	}
+
+	for {
+		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
+		if err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T field %d read error: ", p, fieldId), err)
+		}
+		if fieldTypeId == thrift.STOP { break }
+		if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+			return err
+		}
+		if err := iprot.ReadFieldEnd(ctx); err != nil {
+			return err
+		}
+	}
+	if err := iprot.ReadStructEnd(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
+	}
+	return nil
+}
+
+func (p *VectorType) Write(ctx context.Context, oprot thrift.TProtocol) error {
+	if err := oprot.WriteStructBegin(ctx, "VectorType"); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
+	}
+	if p != nil {
+	}
+	if err := oprot.WriteFieldStop(ctx); err != nil {
+		return thrift.PrependError("write field stop error: ", err)
+	}
+	if err := oprot.WriteStructEnd(ctx); err != nil {
+		return thrift.PrependError("write struct stop error: ", err)
+	}
+	return nil
+}
+
+func (p *VectorType) Equals(other *VectorType) bool {
+	if p == other {
+		return true
+	} else if p == nil || other == nil {
+		return false
+	}
+	return true
+}
+
+func (p *VectorType) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("VectorType(%+v)", *p)
+}
+
+func (p *VectorType) LogValue() slog.Value {
+	if p == nil {
+		return slog.AnyValue(nil)
+	}
+	v := thrift.SlogTStructWrapper{
+		Type: "*parquet.VectorType",
+		Value: p,
+	}
+	return slog.AnyValue(v)
+}
+
+var _ slog.LogValuer = (*VectorType)(nil)
+
+func (p *VectorType) Validate() error {
+	return nil
+}
+
 // LogicalType annotations to replace ConvertedType.
 // 
 // To maintain compatibility, implementations using LogicalType for a
@@ -4831,6 +4911,7 @@ func (p *GeographyType) Validate() error {
 //  - VARIANT
 //  - GEOMETRY
 //  - GEOGRAPHY
+//  - VECTOR
 // 
 type LogicalType struct {
 	STRING *StringType `thrift:"STRING,1" db:"STRING" json:"STRING,omitempty"`
@@ -4851,6 +4932,7 @@ type LogicalType struct {
 	VARIANT *VariantType `thrift:"VARIANT,16" db:"VARIANT" json:"VARIANT,omitempty"`
 	GEOMETRY *GeometryType `thrift:"GEOMETRY,17" db:"GEOMETRY" json:"GEOMETRY,omitempty"`
 	GEOGRAPHY *GeographyType `thrift:"GEOGRAPHY,18" db:"GEOGRAPHY" json:"GEOGRAPHY,omitempty"`
+	VECTOR *VectorType `thrift:"VECTOR,19" db:"VECTOR" json:"VECTOR,omitempty"`
 }
 
 func NewLogicalType() *LogicalType {
@@ -5010,6 +5092,15 @@ func (p *LogicalType) GetGEOGRAPHY() *GeographyType {
 	return p.GEOGRAPHY
 }
 
+var LogicalType_VECTOR_DEFAULT *VectorType
+
+func (p *LogicalType) GetVECTOR() *VectorType {
+	if !p.IsSetVECTOR() {
+		return LogicalType_VECTOR_DEFAULT
+	}
+	return p.VECTOR
+}
+
 func (p *LogicalType) CountSetFieldsLogicalType() int {
 	count := 0
 	if (p.IsSetSTRING()) {
@@ -5061,6 +5152,9 @@ func (p *LogicalType) CountSetFieldsLogicalType() int {
 		count++
 	}
 	if (p.IsSetGEOGRAPHY()) {
+		count++
+	}
+	if (p.IsSetVECTOR()) {
 		count++
 	}
 	return count
@@ -5133,6 +5227,10 @@ func (p *LogicalType) IsSetGEOMETRY() bool {
 
 func (p *LogicalType) IsSetGEOGRAPHY() bool {
 	return p.GEOGRAPHY != nil
+}
+
+func (p *LogicalType) IsSetVECTOR() bool {
+	return p.VECTOR != nil
 }
 
 func (p *LogicalType) Read(ctx context.Context, iprot thrift.TProtocol) error {
@@ -5320,6 +5418,16 @@ func (p *LogicalType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 					return err
 				}
 			}
+		case 19:
+			if fieldTypeId == thrift.STRUCT {
+				if err := p.ReadField19(ctx, iprot); err != nil {
+					return err
+				}
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
 		default:
 			if err := iprot.Skip(ctx, fieldTypeId); err != nil {
 				return err
@@ -5471,6 +5579,14 @@ func (p *LogicalType) ReadField18(ctx context.Context, iprot thrift.TProtocol) e
 	return nil
 }
 
+func (p *LogicalType) ReadField19(ctx context.Context, iprot thrift.TProtocol) error {
+	p.VECTOR = &VectorType{}
+	if err := p.VECTOR.Read(ctx, iprot); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", p.VECTOR), err)
+	}
+	return nil
+}
+
 func (p *LogicalType) Write(ctx context.Context, oprot thrift.TProtocol) error {
 	if c := p.CountSetFieldsLogicalType(); c != 1 {
 		return fmt.Errorf("%T write union: exactly one field must be set (%d set)", p, c)
@@ -5496,6 +5612,7 @@ func (p *LogicalType) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		if err := p.writeField16(ctx, oprot); err != nil { return err }
 		if err := p.writeField17(ctx, oprot); err != nil { return err }
 		if err := p.writeField18(ctx, oprot); err != nil { return err }
+		if err := p.writeField19(ctx, oprot); err != nil { return err }
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -5761,6 +5878,21 @@ func (p *LogicalType) writeField18(ctx context.Context, oprot thrift.TProtocol) 
 	return err
 }
 
+func (p *LogicalType) writeField19(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if p.IsSetVECTOR() {
+		if err := oprot.WriteFieldBegin(ctx, "VECTOR", thrift.STRUCT, 19); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 19:VECTOR: ", p), err)
+		}
+		if err := p.VECTOR.Write(ctx, oprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error writing struct: ", p.VECTOR), err)
+		}
+		if err := oprot.WriteFieldEnd(ctx); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 19:VECTOR: ", p), err)
+		}
+	}
+	return err
+}
+
 func (p *LogicalType) Equals(other *LogicalType) bool {
 	if p == other {
 		return true
@@ -5784,6 +5916,7 @@ func (p *LogicalType) Equals(other *LogicalType) bool {
 	if !p.VARIANT.Equals(other.VARIANT) { return false }
 	if !p.GEOMETRY.Equals(other.GEOMETRY) { return false }
 	if !p.GEOGRAPHY.Equals(other.GEOGRAPHY) { return false }
+	if !p.VECTOR.Equals(other.VECTOR) { return false }
 	return true
 }
 
@@ -5856,7 +5989,7 @@ type SchemaElement struct {
 	Precision *int32 `thrift:"precision,8" db:"precision" json:"precision,omitempty"`
 	FieldID *int32 `thrift:"field_id,9" db:"field_id" json:"field_id,omitempty"`
 	LogicalType *LogicalType `thrift:"logicalType,10" db:"logicalType" json:"logicalType,omitempty"`
-	// EXPERIMENTAL: The fixed number of times the field repeats per parent
+	// EXPERIMENTAL: The fixed number of times the group repeats per parent
 	// value when repetition_type is VECTOR.
 	VectorLength *int32 `thrift:"vector_length,11" db:"vector_length" json:"vector_length,omitempty"`
 }

@@ -1892,11 +1892,11 @@ func (w *ByteArrayColumnChunkWriter) WriteBatch(values []parquet.ByteArray, defL
 	maxDefLevel := w.descr.MaxDefinitionLevel()
 	isV2WithRep := w.props.DataPageVersion() != parquet.DataPageV1 &&
 		repLevels != nil && w.descr.MaxRepetitionLevel() > 0
-	// VECTOR columns contribute a fixed number of leaf slots per row and carry no
-	// per-element levels. Every batch must cover whole vectors so a vector value
-	// is never split across data pages and rowsForLeafValues only ever sees
-	// whole-vector counts. vectorLen is 0 for non-VECTOR columns, which leaves
-	// the batching below unchanged.
+	// VECTOR columns contribute a fixed number of leaf slots per row
+	// and carry no per-element levels. Every batch must cover whole vectors so a
+	// vector value is never split across data pages and rowsForLeafValues only
+	// ever sees whole-vector counts. vectorLen is 0 for non-VECTOR columns, which
+	// leaves the batching below unchanged.
 	vectorLen := w.vectorLengthForBatch(n)
 	batchSize = alignBatchToVector(batchSize, vectorLen)
 	levelOffset := int64(0)
@@ -2248,11 +2248,11 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatch(values []parquet.FixedLe
 	maxDefLevel := w.descr.MaxDefinitionLevel()
 	isV2WithRep := w.props.DataPageVersion() != parquet.DataPageV1 &&
 		repLevels != nil && w.descr.MaxRepetitionLevel() > 0
-	// VECTOR columns contribute a fixed number of leaf slots per row and carry no
-	// per-element levels. Every batch must cover whole vectors so a vector value
-	// is never split across data pages and rowsForLeafValues only ever sees
-	// whole-vector counts. vectorLen is 0 for non-VECTOR columns, which leaves
-	// the batching below unchanged.
+	// VECTOR columns contribute a fixed number of leaf slots per row
+	// and carry no per-element levels. Every batch must cover whole vectors so a
+	// vector value is never split across data pages and rowsForLeafValues only
+	// ever sees whole-vector counts. vectorLen is 0 for non-VECTOR columns, which
+	// leaves the batching below unchanged.
 	vectorLen := w.vectorLengthForBatch(n)
 	batchSize = alignBatchToVector(batchSize, vectorLen)
 	levelOffset := int64(0)

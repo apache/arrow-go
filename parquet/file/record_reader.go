@@ -478,8 +478,8 @@ func (rr *recordReader) SeekToRow(recordIdx int64) error {
 }
 
 // SeekToRowWithValueStride seeks by row ordinal but positions the decoder at a
-// fixed multiple of primitive values per row. This is used by leaf-only VECTOR
-// columns where one logical row contributes valueStride physical leaf values.
+// fixed multiple of primitive values per row. This is used by VECTOR columns
+// where one logical row contributes valueStride physical leaf values.
 func (rr *recordReader) SeekToRowWithValueStride(recordIdx, valueStride int64) error {
 	if err := rr.seekToRowWithValueStride(recordIdx, valueStride); err != nil {
 		return err

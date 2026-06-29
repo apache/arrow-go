@@ -25,25 +25,45 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewPrimitiveNodeVector(t *testing.T) {
-	leaf, err := NewPrimitiveNodeLogicalVector("embedding", nil, parquet.Types.Float, -1, 768, -1)
-	require.NoError(t, err)
+func vectorGroupNode(t *testing.T, vectorLen int32) (*GroupNode, *PrimitiveNode) {
+	t.Helper()
+	elem := MustPrimitive(NewPrimitiveNode("element", parquet.Repetitions.Required, parquet.Types.Float, -1, -1))
+	vec := MustGroup(NewGroupNodeVector("list", FieldList{elem}, vectorLen, -1))
+	return vec, elem
+}
 
-	assert.Equal(t, parquet.Repetitions.Vector, leaf.RepetitionType())
-	assert.EqualValues(t, 768, leaf.VectorLength())
-	assert.True(t, leaf.LogicalType().IsNone())
+func TestNewGroupNodeVector(t *testing.T) {
+	vec, _ := vectorGroupNode(t, 768)
 
-	// toThrift emits repetition VECTOR and vector_length on the primitive leaf.
-	se := leaf.toThrift()
+	assert.Equal(t, parquet.Repetitions.Vector, vec.RepetitionType())
+	assert.EqualValues(t, 768, vec.VectorLength())
+	assert.True(t, vec.LogicalType().IsNone())
+
+	// toThrift emits repetition VECTOR and vector_length on the middle group.
+	se := vec.toThrift()
 	assert.Equal(t, format.FieldRepetitionType_VECTOR, se.GetRepetitionType())
 	require.True(t, se.IsSetVectorLength())
 	assert.EqualValues(t, 768, se.GetVectorLength())
 
-	// Round-trip the vector leaf node through thrift.
-	leaf2, err := PrimitiveNodeFromThrift(se)
+	// Round-trip the vector group node through thrift.
+	vec2, err := GroupNodeFromThrift(se, FieldList{vec.Field(0)})
 	require.NoError(t, err)
-	assert.True(t, leaf.Equals(leaf2))
-	assert.EqualValues(t, 768, leaf2.VectorLength())
+	assert.True(t, vec.Equals(vec2))
+	assert.EqualValues(t, 768, vec2.VectorLength())
+}
+
+func TestVectorLogicalTypeRoundTrip(t *testing.T) {
+	vec, _ := vectorGroupNode(t, 3)
+	outer := MustGroup(NewGroupNodeLogical("embedding", parquet.Repetitions.Optional, FieldList{vec}, VectorLogicalType{}, -1))
+
+	se := outer.toThrift()
+	require.True(t, se.IsSetLogicalType())
+	require.True(t, se.GetLogicalType().IsSetVECTOR())
+
+	roundtripped, err := GroupNodeFromThrift(se, FieldList{vec})
+	require.NoError(t, err)
+	assert.True(t, roundtripped.LogicalType().Equals(VectorLogicalType{}))
+	assert.True(t, outer.Equals(roundtripped))
 }
 
 func TestVectorLengthDefaultIsNegativeOne(t *testing.T) {
@@ -58,24 +78,19 @@ func TestVectorValidationErrors(t *testing.T) {
 	elem := MustPrimitive(NewPrimitiveNode("element", parquet.Repetitions.Required, parquet.Types.Float, -1, -1))
 
 	t.Run("non-positive vector_length", func(t *testing.T) {
-		_, err := NewPrimitiveNodeLogicalVector("embedding", nil, parquet.Types.Float, -1, 0, -1)
+		_, err := NewGroupNodeVector("list", FieldList{elem}, 0, -1)
 		assert.Error(t, err)
-		_, err = NewPrimitiveNodeLogicalVector("embedding", nil, parquet.Types.Float, -1, -3, -1)
+		_, err = NewGroupNodeVector("list", FieldList{elem}, -3, -1)
 		assert.Error(t, err)
 	})
 
-	t.Run("VECTOR repetition on a primitive without vector_length", func(t *testing.T) {
+	t.Run("VECTOR repetition on a primitive", func(t *testing.T) {
 		_, err := NewPrimitiveNode("p", parquet.Repetitions.Vector, parquet.Types.Float, -1, -1)
 		assert.Error(t, err)
 	})
 
-	t.Run("VECTOR repetition on a group", func(t *testing.T) {
+	t.Run("VECTOR repetition on a group without vector_length", func(t *testing.T) {
 		_, err := NewGroupNode("g", parquet.Repetitions.Vector, FieldList{elem}, -1)
-		assert.Error(t, err)
-	})
-
-	t.Run("VECTOR primitive with variable-width BYTE_ARRAY", func(t *testing.T) {
-		_, err := NewPrimitiveNodeLogicalVector("embedding", nil, parquet.Types.ByteArray, -1, 8, -1)
 		assert.Error(t, err)
 	})
 
@@ -96,37 +111,32 @@ func TestVectorValidationErrors(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("VECTOR group thrift", func(t *testing.T) {
+	t.Run("VECTOR group with logical type", func(t *testing.T) {
+		_, err := newGroupNodeLogical("list", parquet.Repetitions.Vector, FieldList{elem}, NewListLogicalType(), -1, 8)
+		assert.Error(t, err)
+	})
+
+	t.Run("VECTOR group thrift without vector_length", func(t *testing.T) {
 		rep := format.FieldRepetitionType_VECTOR
-		vlen := int32(8)
-		se := &format.SchemaElement{Name: "list", RepetitionType: &rep, VectorLength: &vlen}
+		se := &format.SchemaElement{Name: "list", RepetitionType: &rep}
 		_, err := GroupNodeFromThrift(se, FieldList{elem})
 		assert.Error(t, err)
 	})
 
-	t.Run("VECTOR primitive thrift without vector_length", func(t *testing.T) {
+	t.Run("VECTOR group thrift with logical type", func(t *testing.T) {
+		rep := format.FieldRepetitionType_VECTOR
+		vlen := int32(8)
+		se := &format.SchemaElement{Name: "list", RepetitionType: &rep, VectorLength: &vlen, LogicalType: &format.LogicalType{LIST: format.NewListType()}}
+		_, err := GroupNodeFromThrift(se, FieldList{elem})
+		assert.Error(t, err)
+	})
+
+	t.Run("VECTOR primitive thrift", func(t *testing.T) {
 		rep := format.FieldRepetitionType_VECTOR
 		typ := format.Type_FLOAT
-		se := &format.SchemaElement{Name: "embedding", RepetitionType: &rep, Type: &typ}
+		vlen := int32(8)
+		se := &format.SchemaElement{Name: "embedding", RepetitionType: &rep, Type: &typ, VectorLength: &vlen}
 		_, err := PrimitiveNodeFromThrift(se)
 		assert.Error(t, err)
 	})
-}
-
-// Full vector leaf round-trips through thrift:
-//
-//	vector float embedding [768];
-func TestVectorLeafRoundTrip(t *testing.T) {
-	leaf := MustPrimitive(NewPrimitiveNodeLogicalVector("embedding", nil, parquet.Types.Float, -1, 768, -1))
-
-	leafSE := leaf.toThrift()
-	assert.Equal(t, format.FieldRepetitionType_VECTOR, leafSE.GetRepetitionType())
-	assert.True(t, leafSE.IsSetVectorLength())
-	assert.EqualValues(t, 768, leafSE.GetVectorLength())
-
-	leaf2, err := PrimitiveNodeFromThrift(leafSE)
-	require.NoError(t, err)
-
-	assert.True(t, leaf.Equals(leaf2))
-	assert.EqualValues(t, 768, leaf2.VectorLength())
 }

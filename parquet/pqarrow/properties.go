@@ -121,9 +121,8 @@ func WithNoMapLogicalType() WriterOption {
 }
 
 // WithVectorEncoding is EXPERIMENTAL. It enables encoding supported Arrow
-// FixedSizeList columns as the Parquet VECTOR repetition type instead of the
-// standard 3-level LIST encoding, eliminating per-element repetition levels for
-// fixed-shape data.
+// FixedSizeList columns as Parquet VECTOR instead of the standard LIST encoding,
+// eliminating per-element repetition levels for fixed-shape data.
 //
 // In this initial form only top-level, non-nullable FixedSizeList values with a
 // positive list size and a fixed-width primitive element are encoded as VECTOR;
@@ -135,19 +134,21 @@ func WithNoMapLogicalType() WriterOption {
 // error.
 //
 // VECTOR is not yet part of apache/parquet-format and is identified on disk by
-// FieldRepetitionType.VECTOR (= 3) plus SchemaElement.vector_length. A reader
-// that predates VECTOR support does not necessarily fail loudly: lacking a case
+// LogicalType.VECTOR on the outer group plus FieldRepetitionType.VECTOR (= 3)
+// and SchemaElement.vector_length on the middle group. A reader that predates
+// VECTOR support does not necessarily fail loudly: lacking a case
 // for the new repetition type, it may silently misread the column as a flat
 // required column with vector_length times too many values and the wrong row
 // count. Treat VECTOR as non-portable and only write it for consumers known to
 // understand it, until the repetition type is standardized.
 //
 // Without WithStoreSchema, a VECTOR column read back through pqarrow names its
-// element field "element" and carries no field-level metadata. WithStoreSchema
-// restores the FixedSizeList field's own metadata and the element type (for
-// example a timestamp's timezone); as with the standard LIST encoding it does
-// not restore user metadata attached to the inner element field. The element
-// values, element type, list size, and shape always round-trip either way.
+// element field "element" and does not preserve user field metadata.
+// WithStoreSchema restores the FixedSizeList field's own metadata and the
+// element type (for example a timestamp's timezone); as with the standard LIST
+// encoding it does not restore user metadata attached to the inner element
+// field. The element values, element type, list size, and shape always
+// round-trip either way.
 func WithVectorEncoding() WriterOption {
 	return func(c *config) {
 		c.props.writeFixedSizeListAsVector = true

@@ -86,26 +86,36 @@ func assertStats(t *testing.T, m *metadata.ColumnChunkMetaData) metadata.TypedSt
 }
 
 func TestNewFileMetaDataRejectsInvalidVectorSchema(t *testing.T) {
-	rootChildren := int32(1)
-	optionalChildren := int32(1)
+	oneChild := int32(1)
 	vectorLen := int32(4)
 	fileMeta := format.NewFileMetaData()
 	fileMeta.Schema = []*format.SchemaElement{
 		{
 			Name:           "schema",
 			RepetitionType: format.FieldRepetitionTypePtr(format.FieldRepetitionType_REQUIRED),
-			NumChildren:    &rootChildren,
+			NumChildren:    &oneChild,
 		},
 		{
-			Name:           "optional_parent",
-			RepetitionType: format.FieldRepetitionTypePtr(format.FieldRepetitionType_OPTIONAL),
-			NumChildren:    &optionalChildren,
+			Name:           "repeated_parent",
+			RepetitionType: format.FieldRepetitionTypePtr(format.FieldRepetitionType_REPEATED),
+			NumChildren:    &oneChild,
 		},
 		{
 			Name:           "v",
+			RepetitionType: format.FieldRepetitionTypePtr(format.FieldRepetitionType_REQUIRED),
+			NumChildren:    &oneChild,
+			LogicalType:    &format.LogicalType{VECTOR: format.NewVectorType()},
+		},
+		{
+			Name:           "list",
 			RepetitionType: format.FieldRepetitionTypePtr(format.FieldRepetitionType_VECTOR),
-			Type:           format.TypePtr(format.Type_FLOAT),
+			NumChildren:    &oneChild,
 			VectorLength:   &vectorLen,
+		},
+		{
+			Name:           "element",
+			RepetitionType: format.FieldRepetitionTypePtr(format.FieldRepetitionType_REQUIRED),
+			Type:           format.TypePtr(format.Type_FLOAT),
 		},
 	}
 
@@ -114,7 +124,7 @@ func TestNewFileMetaDataRejectsInvalidVectorSchema(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = metadata.NewFileMetaData(buf.Bytes(), nil)
-	require.ErrorContains(t, err, "VECTOR columns must be non-nullable")
+	require.ErrorContains(t, err, "VECTOR columns with repeated ancestors")
 }
 
 func TestBuildAccess(t *testing.T) {

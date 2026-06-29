@@ -93,12 +93,13 @@ func FromParquet(elems []*format.SchemaElement) (Node, error) {
 		repetition := parquet.Repetition(elem.GetRepetitionType())
 
 		if elem.GetNumChildren() == 0 {
-			if repetition == parquet.Repetitions.Vector {
-				if err := validateVectorColumnLevels(maxDefLvl, maxRepLvl); err != nil {
-					return nil, err
-				}
-			}
 			return PrimitiveNodeFromThrift(elem)
+		}
+
+		if repetition == parquet.Repetitions.Vector {
+			if err := validateVectorColumnLevels(maxDefLvl, maxRepLvl); err != nil {
+				return nil, err
+			}
 		}
 
 		childMaxDefLvl, childMaxRepLvl := maxDefLvl, maxRepLvl
@@ -110,8 +111,8 @@ func FromParquet(elems []*format.SchemaElement) (Node, error) {
 			case parquet.Repetitions.Optional:
 				childMaxDefLvl++
 			case parquet.Repetitions.Vector:
-				// GroupNodeFromThrift rejects VECTOR groups; keep level accounting a
-				// no-op here to mirror buildTree until that error is returned below.
+				// VECTOR groups repeat a fixed number of values per parent but do not
+				// contribute definition or repetition levels.
 			}
 		}
 
@@ -127,7 +128,16 @@ func FromParquet(elems []*format.SchemaElement) (Node, error) {
 		return GroupNodeFromThrift(elem, fields)
 	}
 
-	return nextNode(true, 0, 0)
+	root, err := nextNode(true, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	if g, ok := root.(*GroupNode); ok {
+		if _, err := NewSchemaChecked(g); err != nil {
+			return nil, err
+		}
+	}
+	return root, nil
 }
 
 // Root returns the group node that is the root of this schema
@@ -159,7 +169,85 @@ func (s *Schema) Equals(rhs *Schema) bool {
 
 func validateVectorColumnLevels(maxDefLvl, maxRepLvl int16) error {
 	if maxDefLvl != 0 || maxRepLvl != 0 {
-		return errors.New("parquet: VECTOR columns must be non-nullable and must not have repeated ancestors")
+		return errors.New("parquet: nullable VECTOR columns and VECTOR columns with repeated ancestors are not supported")
+	}
+	return nil
+}
+
+func isVectorLogicalNode(n Node) bool {
+	g, ok := n.(*GroupNode)
+	return ok && g.LogicalType().Equals(VectorLogicalType{})
+}
+
+func validateVectorElement(n Node) error {
+	if n.Name() != "element" {
+		return errors.New("parquet: VECTOR element child must be named element")
+	}
+	switch n.RepetitionType() {
+	case parquet.Repetitions.Required:
+	case parquet.Repetitions.Optional:
+		return errors.New("parquet: nullable VECTOR elements are not supported")
+	case parquet.Repetitions.Repeated:
+		return errors.New("parquet: repeated fields inside VECTOR columns are not supported")
+	case parquet.Repetitions.Vector:
+		return errors.New("parquet: nested VECTOR columns are not supported")
+	}
+
+	primitive, ok := n.(*PrimitiveNode)
+	if !ok {
+		return errors.New("parquet: VECTOR elements must be primitive")
+	}
+	if primitive.PhysicalType() == parquet.Types.ByteArray {
+		return errors.New("parquet: VECTOR elements must be fixed-width primitive types")
+	}
+	return nil
+}
+
+func validateVectorStructure(n Node) error {
+	return validateVectorStructureAt(n, true, false)
+}
+
+func validateVectorStructureAt(n Node, isRoot, topLevel bool) error {
+	if isVectorLogicalNode(n) {
+		if !topLevel {
+			return errors.New("parquet: VECTOR logical groups must be top-level fields")
+		}
+		g := n.(*GroupNode)
+		if g.RepetitionType() != parquet.Repetitions.Required {
+			return errors.New("parquet: nullable VECTOR columns are not supported")
+		}
+		if g.NumFields() != 1 {
+			return errors.New("parquet: VECTOR logical groups must have a single VECTOR-repeated child")
+		}
+		child := g.Field(0)
+		vectorGroup, ok := child.(*GroupNode)
+		if !ok || child.RepetitionType() != parquet.Repetitions.Vector {
+			return errors.New("parquet: VECTOR logical groups must contain a VECTOR-repeated group child")
+		}
+		if vectorGroup.Name() != "list" {
+			return errors.New("parquet: VECTOR-repeated group must be named list")
+		}
+		if !vectorGroup.LogicalType().IsNone() || vectorGroup.ConvertedType() != ConvertedTypes.None {
+			return errors.New("parquet: VECTOR-repeated groups must not have a logical or converted type")
+		}
+		if vectorGroup.NumFields() != 1 {
+			return errors.New("parquet: VECTOR-repeated groups must have a single element child")
+		}
+		return validateVectorElement(vectorGroup.Field(0))
+	}
+
+	if n.RepetitionType() == parquet.Repetitions.Vector {
+		return errors.New("parquet: VECTOR-repeated groups must be the single child of a group annotated with the VECTOR logical type")
+	}
+
+	g, ok := n.(*GroupNode)
+	if !ok {
+		return nil
+	}
+	for _, f := range g.fields {
+		if err := validateVectorStructureAt(f, false, isRoot); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -279,6 +367,10 @@ func NewSchema(root *GroupNode) *Schema {
 // NewSchemaChecked is like NewSchema, but returns an error instead of panicking
 // when schema invariants are violated.
 func NewSchemaChecked(root *GroupNode) (*Schema, error) {
+	if err := validateVectorStructure(root); err != nil {
+		return nil, err
+	}
+
 	s := &Schema{
 		root,
 		make([]*Column, 0),

@@ -83,7 +83,7 @@ type arrowColumnWriter struct {
 //
 // Using an arrow column writer is a convenience to avoid having to process the arrow array yourself
 // and determine the correct definition and repetition levels manually.
-func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *SchemaManifest, rgw file.RowGroupWriter, leafColIdx int, writeFixedSizeListAsVector bool) (arrowColumnWriter, error) {
+func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *SchemaManifest, rgw file.RowGroupWriter, leafColIdx int) (arrowColumnWriter, error) {
 	if data.Len() == 0 {
 		return arrowColumnWriter{leafCount: calcLeafCount(data.DataType()), rgw: rgw}, nil
 	}
@@ -125,6 +125,7 @@ func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *Sch
 		return arrowColumnWriter{}, err
 	}
 	isNullable = nullableRoot(manifest, schemaField)
+	writeFixedSizeListAsVector := schemaField.IsVector
 
 	builders := make([]*multipathLevelBuilder, 0)
 	for values < size {

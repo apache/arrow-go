@@ -34,7 +34,7 @@ import (
 )
 
 // End-to-end WRITE path: a non-nullable FixedSizeList<float32, N> written
-// with WithVectorEncoding produces a VECTOR primitive leaf on disk that
+// with WithVectorEncoding produces a VECTOR logical group on disk whose leaf
 // holds the flattened values with no inner levels, and the row count is the
 // number of vectors (not leaf slots).
 func TestWriteFixedSizeListAsVector(t *testing.T) {
@@ -88,7 +88,7 @@ func TestWriteFixedSizeListAsVector(t *testing.T) {
 	assert.EqualValues(t, listSize, descr.EffectiveVectorLength())
 	assert.EqualValues(t, 0, descr.MaxDefinitionLevel())
 	assert.EqualValues(t, 0, descr.MaxRepetitionLevel())
-	assert.Equal(t, "emb", descr.Path())
+	assert.Equal(t, "emb.list.element", descr.Path())
 	assert.Equal(t, parquet.Types.Float, descr.PhysicalType())
 
 	rgr := rdr.RowGroup(0)
@@ -534,8 +534,8 @@ func TestVectorColumnReaderSeekToRowWithOffsetIndex(t *testing.T) {
 }
 
 // assertColumnIsVector opens the written parquet bytes and asserts the single
-// top-level column was actually encoded as a VECTOR leaf, not as a LIST
-// fallback, so the round-trip really exercises the VECTOR write/read path.
+// top-level column was actually encoded as VECTOR, not as a LIST fallback, so
+// the round-trip really exercises the VECTOR write/read path.
 func assertColumnIsVector(t *testing.T, b []byte, vectorLen int32) {
 	t.Helper()
 	rdr, err := file.NewParquetReader(bytes.NewReader(b))

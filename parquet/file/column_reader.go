@@ -120,8 +120,8 @@ type ColumnChunkReader interface {
 	SeekToRow(rowIdx int64) error
 	// seekToRowWithValueStride seeks to rowIdx using row-group row ordinals but
 	// positions the value decoder at rowIdx*valueStride physical values. This is
-	// used by leaf-only VECTOR columns where one logical row contributes a fixed
-	// number of primitive leaf values.
+	// used by VECTOR columns where one logical row contributes a fixed number of
+	// primitive leaf values.
 	seekToRowWithValueStride(rowIdx, valueStride int64) error
 
 	// Skip buffered values

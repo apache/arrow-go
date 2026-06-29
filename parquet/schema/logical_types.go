@@ -73,6 +73,8 @@ func getLogicalType(l *format.LogicalType) LogicalType {
 		return Float16LogicalType{}
 	case l.IsSetVARIANT():
 		return VariantLogicalType{}
+	case l.IsSetVECTOR():
+		return VectorLogicalType{}
 	case l == nil:
 		return NoLogicalType{}
 	default:
@@ -297,6 +299,41 @@ func (ListLogicalType) toThrift() *format.LogicalType {
 
 func (ListLogicalType) Equals(rhs LogicalType) bool {
 	_, ok := rhs.(ListLogicalType)
+	return ok
+}
+
+// VectorLogicalType annotates the outer group of a fixed-size vector field.
+// The annotated group contains one VECTOR-repeated child group carrying the
+// vector_length and exactly one element child, mirroring the canonical LIST
+// structure.
+type VectorLogicalType struct{ baseLogicalType }
+
+func (VectorLogicalType) SortOrder() SortOrder { return SortUNKNOWN }
+
+func (VectorLogicalType) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]string{"Type": VectorLogicalType{}.String()})
+}
+
+func (VectorLogicalType) String() string { return "Vector" }
+
+func (VectorLogicalType) IsNested() bool { return true }
+
+func (VectorLogicalType) ToConvertedType() (ConvertedType, DecimalMetadata) {
+	return ConvertedTypes.None, DecimalMetadata{}
+}
+
+func (VectorLogicalType) IsCompatible(t ConvertedType, dec DecimalMetadata) bool {
+	return t == ConvertedTypes.None && !dec.IsSet
+}
+
+func (VectorLogicalType) IsApplicable(parquet.Type, int32) bool { return false }
+
+func (VectorLogicalType) toThrift() *format.LogicalType {
+	return &format.LogicalType{VECTOR: format.NewVectorType()}
+}
+
+func (VectorLogicalType) Equals(rhs LogicalType) bool {
+	_, ok := rhs.(VectorLogicalType)
 	return ok
 }
 
