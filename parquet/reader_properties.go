@@ -44,6 +44,8 @@ type ReaderProperties struct {
 	// this to true can optimize memory usage for the reader. Additionally, this can decrease
 	// the amount of data retrieved when only needs to access small portions of the parquet file.
 	BufferedStreamEnabled bool
+
+	bfPools *BloomFilterPools
 }
 
 type BufferedReader interface {
@@ -62,11 +64,23 @@ func NewReaderProperties(alloc memory.Allocator) *ReaderProperties {
 	if alloc == nil {
 		alloc = memory.DefaultAllocator
 	}
-	return &ReaderProperties{alloc, DefaultBufSize, nil, false}
+	return &ReaderProperties{alloc: alloc, BufferSize: DefaultBufSize}
 }
 
 // Allocator returns the allocator that the properties were initialized with
 func (r *ReaderProperties) Allocator() memory.Allocator { return r.alloc }
+
+func (r *ReaderProperties) BFPools() *BloomFilterPools {
+	return r.bfPools
+}
+
+type ReaderPropertiesOption func(*ReaderProperties)
+
+func WithSharedBloomFilterPools(pools *BloomFilterPools) ReaderPropertiesOption {
+	return func(p *ReaderProperties) {
+		p.bfPools = pools
+	}
+}
 
 // GetStream returns a section of the underlying reader based on whether or not BufferedStream is enabled.
 //
@@ -87,4 +101,16 @@ func (r *ReaderProperties) GetStream(source io.ReaderAt, start, nbytes int64) (B
 	}
 
 	return utils.NewByteReader(data), nil
+}
+
+type BloomFilterPools struct {
+	HeaderPool chan []byte
+	FilterPool chan *memory.Buffer
+}
+
+func NewBloomFilterPools(size int) *BloomFilterPools {
+	return &BloomFilterPools{
+		HeaderPool: make(chan []byte, size),
+		FilterPool: make(chan *memory.Buffer, size),
+	}
 }

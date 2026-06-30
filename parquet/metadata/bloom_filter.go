@@ -427,7 +427,7 @@ func (r *BloomFilterReader) RowGroup(i int) (*RowGroupBloomFilterReader, error) 
 		rgMeta:         rgMeta,
 		fileDecryptor:  r.FileDecryptor,
 		rgOrdinal:      int16(i),
-		bufferPool:     r.BufferPool,
+		props:          r.Props,
 		sourceFileSize: r.FileMetadata.sourceFileSize,
 	}, nil
 }
@@ -438,8 +438,7 @@ type RowGroupBloomFilterReader struct {
 	fileDecryptor  encryption.FileDecryptor
 	rgOrdinal      int16
 	sourceFileSize int64
-
-	bufferPool *sync.Pool
+	props          *parquet.ReaderProperties
 }
 
 func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, error) {
@@ -469,7 +468,6 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 
 	sectionRdr := io.NewSectionReader(r.input, offset, r.sourceFileSize-offset)
 	cryptoMetadata := col.CryptoMetadata()
-
 	if cryptoMetadata != nil {
 		decryptor, err = encryption.GetColumnMetaDecryptor(cryptoMetadata, r.fileDecryptor)
 		if err != nil {
@@ -505,10 +503,25 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 		}, nil
 	}
 
-	var headerBytes []byte
+	var (
+		hPool chan []byte
+		fPool chan *memory.Buffer
+	)
+	if r.props != nil && r.props.BFPools() != nil {
+		hPool = r.props.BFPools().HeaderPool
+		fPool = r.props.BFPools().FilterPool
+	}
 
+	if hPool == nil {
+		hPool = make(chan []byte, 128)
+	}
+	if fPool == nil {
+		fPool = make(chan *memory.Buffer, 128)
+	}
+
+	var headerBytes []byte
 	select {
-	case buf := <-headerPool:
+	case buf := <-hPool:
 		if len(buf) < int(bloomFilterReadSize) {
 			buf = make([]byte, bloomFilterReadSize)
 		}
@@ -522,7 +535,7 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 	defer func() {
 		if capturedHeader != nil {
 			select {
-			case headerPool <- capturedHeader:
+			case hPool <- capturedHeader:
 			default:
 			}
 		}
@@ -536,7 +549,6 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 	if err != nil {
 		return nil, err
 	}
-
 	headerSize := int(bloomFilterReadSize) - int(remaining)
 
 	if err = validateBloomFilterHeader(&header); err != nil {
@@ -548,7 +560,7 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 	var finalDataBuf *memory.Buffer
 
 	select {
-	case buf := <-filterPool:
+	case buf := <-fPool:
 		if buf.Cap() < int(bloomFilterSz) {
 			buf.ResizeNoShrink(int(bloomFilterSz))
 		} else {
@@ -556,7 +568,11 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 		}
 		finalDataBuf = buf
 	default:
-		buf := memory.NewResizableBuffer(memory.DefaultAllocator)
+		var currentAlloc = memory.DefaultAllocator
+		if r.props != nil && r.props.Allocator() != nil {
+			currentAlloc = r.props.Allocator()
+		}
+		buf := memory.NewResizableBuffer(currentAlloc)
 		buf.ResizeNoShrink(int(bloomFilterSz))
 		finalDataBuf = buf
 	}
@@ -574,7 +590,7 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 		if _, err = sectionRdr.Read(finalDataBuf.Bytes()[filterBytesInHeader:bloomFilterSz]); err != nil {
 			finalDataBuf.Reset(finalDataBuf.Buf()[:0])
 			select {
-			case filterPool <- finalDataBuf:
+			case fPool <- finalDataBuf:
 			default:
 				finalDataBuf.Release()
 			}
@@ -599,7 +615,7 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 			capturedFilterBuf.Reset(capturedFilterBuf.Buf()[:cap(capturedFilterBuf.Buf())])
 
 			select {
-			case filterPool <- capturedFilterBuf:
+			case fPool <- capturedFilterBuf:
 			default:
 				capturedFilterBuf.Release()
 			}
