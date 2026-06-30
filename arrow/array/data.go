@@ -229,7 +229,7 @@ func (d *Data) SizeInBytes() uint64 {
 // NewSliceData panics if the slice is outside the valid range of the input Data.
 // NewSliceData panics if j < i.
 func NewSliceData(data arrow.ArrayData, i, j int64) arrow.ArrayData {
-	if j > int64(data.Len()) || i > j || data.Offset()+int(i) > data.Offset()+data.Len() {
+	if i < 0 || j < 0 || j > int64(data.Len()) || i > j || data.Offset()+int(i) > data.Offset()+data.Len() {
 		panic("arrow/array: index out of range")
 	}
 
