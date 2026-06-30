@@ -74,6 +74,32 @@ func TestNewSliceDataInvalidBounds(t *testing.T) {
 	}
 }
 
+func TestDataResetClearsDictionary(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+
+	values := memory.NewResizableBuffer(mem)
+	values.Resize(16)
+
+	dictData := NewData(arrow.PrimitiveTypes.Int32, 4, []*memory.Buffer{nil, values}, nil, 0, 0)
+	values.Release()
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.PrimitiveTypes.Int32,
+	}
+	data := NewDataWithDictionary(dictType, 0, []*memory.Buffer{nil, nil}, 0, 0, dictData)
+	defer data.Release()
+
+	assert.NotNil(t, data.Dictionary())
+
+	data.Reset(arrow.PrimitiveTypes.Int8, 0, []*memory.Buffer{nil, nil}, nil, 0, 0)
+
+	assert.Nil(t, data.Dictionary())
+
+	dictData.Release()
+	mem.AssertSize(t, 0)
+}
+
 func TestSizeInBytes(t *testing.T) {
 	var buffers1 = make([]*memory.Buffer, 0, 3)
 
