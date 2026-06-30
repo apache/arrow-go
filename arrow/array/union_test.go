@@ -457,6 +457,20 @@ func (s *UnionFactorySuite) TestMakeDenseUnions() {
 		defer result.Release()
 		s.Error(result.ValidateFull())
 	})
+
+	s.Run("mismatched type ids and offset lengths", func() {
+		shortOffsets := s.offsetsFromSlice(0, 0, 0, 1, 1, 0, 1, 2, 1)
+		defer shortOffsets.Release()
+		result, err := array.NewDenseUnionFromArrays(s.typeIDs, shortOffsets, children)
+		s.Nil(result)
+		s.EqualError(err, "arrow/array: union typeIDs and offsets must have the same length")
+
+		longOffsets := s.offsetsFromSlice(0, 0, 0, 1, 1, 0, 1, 2, 1, 2, 0)
+		defer longOffsets.Release()
+		result, err = array.NewDenseUnionFromArrays(s.typeIDs, longOffsets, children)
+		s.Nil(result)
+		s.EqualError(err, "arrow/array: union typeIDs and offsets must have the same length")
+	})
 }
 
 func (s *UnionFactorySuite) TestDenseUnionStringRoundTrip() {

@@ -549,6 +549,8 @@ func NewDenseUnionFromArraysWithFieldCodes(typeIDs, offsets arrow.Array, childre
 		return nil, errors.New("arrow/array: union typeIDs may not have nulls")
 	case offsets.NullN() != 0:
 		return nil, errors.New("arrow/array: nulls are not allowed in offsets for NewDenseUnionFromArrays*")
+	case typeIDs.Len() != offsets.Len():
+		return nil, errors.New("arrow/array: union typeIDs and offsets must have the same length")
 	case len(fields) > 0 && len(fields) != len(children):
 		return nil, errors.New("arrow/array: fields must be the same length as children")
 	case len(codes) > 0 && len(codes) != len(children):
