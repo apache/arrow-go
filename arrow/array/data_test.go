@@ -51,6 +51,29 @@ func TestDataReset(t *testing.T) {
 	}
 }
 
+func TestNewSliceDataInvalidBounds(t *testing.T) {
+	data := NewData(&arrow.Int64Type{}, 3, nil, nil, 0, 0)
+	defer data.Release()
+
+	tests := []struct {
+		name string
+		i, j int64
+	}{
+		{name: "negative start", i: -1, j: 0},
+		{name: "negative end", i: -2, j: -1},
+		{name: "end beyond length", i: 0, j: 4},
+		{name: "start after end", i: 2, j: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.PanicsWithValue(t, "arrow/array: index out of range", func() {
+				NewSliceData(data, tt.i, tt.j)
+			})
+		})
+	}
+}
+
 func TestSizeInBytes(t *testing.T) {
 	var buffers1 = make([]*memory.Buffer, 0, 3)
 
