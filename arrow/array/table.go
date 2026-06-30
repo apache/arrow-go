@@ -46,7 +46,7 @@ func NewColumnSlice(col *arrow.Column, i, j int64) *arrow.Column {
 // NewSlice panics if the slice is outside the valid range of the input array.
 // NewSlice panics if j < i.
 func NewChunkedSlice(a *arrow.Chunked, i, j int64) *arrow.Chunked {
-	if j > int64(a.Len()) || i > j || i > int64(a.Len()) {
+	if i < 0 || j < 0 || j > int64(a.Len()) || i > j || i > int64(a.Len()) {
 		panic("arrow/array: index out of range")
 	}
 
