@@ -1011,14 +1011,14 @@ func (p *serializedPageReader) Next() bool {
 
 			if p.pageCanStream(dataHeader.GetEncoding()) {
 				// V2: rep/def levels are uncompressed and precede the (separately
-				// compressed) value region. Read the level bytes raw into buf, then
-				// wrap the remaining value bytes as the streaming source.
+				// compressed) value region. Read the raw levels off the limited
+				// compressed stream, then take the values from what remains.
+				limit := io.LimitReader(p.r, int64(lenCompressed))
 				levelBuf := make([]byte, levelsBytelen)
-				if _, err := io.ReadFull(p.r, levelBuf); err != nil {
+				if _, err := io.ReadFull(limit, levelBuf); err != nil {
 					p.err = err
 					return false
 				}
-				limit := io.LimitReader(p.r, int64(lenCompressed-levelsBytelen))
 				var valReader io.Reader = limit
 				var closer io.Closer
 				if compressed {
