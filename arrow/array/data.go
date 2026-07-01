@@ -122,6 +122,11 @@ func (d *Data) Reset(dtype arrow.DataType, length int, buffers []*memory.Buffer,
 	}
 	d.childData = childData
 
+	if d.dictionary != nil {
+		d.dictionary.Release()
+		d.dictionary = nil
+	}
+
 	d.dtype = dtype
 	d.length = length
 	d.nulls = nulls
