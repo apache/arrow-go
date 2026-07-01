@@ -102,6 +102,15 @@ func (p *page) Encoding() format.Encoding { return p.encoding }
 // ValueSource returns the streaming value source for a streaming page.
 func (p *page) ValueSource() streaming.ValueBuffer { return p.valueSource }
 
+// setStreamingValues wires a streaming page: buf holds the materialized rep+def
+// level region, and the values are read from valReader. On release the compressed
+// region (limit) is drained and closer, if any, is closed so the file reader lands
+// on the next page header. V1 and V2 differ only in how these are obtained.
+func (p *page) setStreamingValues(levelBuf []byte, valReader, limit io.Reader, closer io.Closer) {
+	p.buf = memory.NewBufferBytes(levelBuf)
+	p.valueSource = streaming.NewStreamBuffer(valReader, drainAndClose(limit, closer))
+}
+
 // releaseValueStream closes a streaming page's value source (draining + closing its
 // underlying compressed stream so the file reader lands on the next page header even
 // when values were skipped). It is a no-op for materialized pages.
@@ -946,8 +955,7 @@ func (p *serializedPageReader) Next() bool {
 					p.err = err
 					return false
 				}
-				dp.buf = memory.NewBufferBytes(levelBuf)
-				dp.valueSource = streaming.NewStreamBuffer(dec, drainAndClose(limit, dec))
+				dp.setStreamingValues(levelBuf, dec, limit, dec)
 			} else {
 				p.dataPageBuffer.ResizeNoShrink(lenUncompressed)
 				buf := memory.NewBufferBytes(p.dataPageBuffer.Bytes())
@@ -1017,8 +1025,7 @@ func (p *serializedPageReader) Next() bool {
 					dec := p.codec.(compress.StreamingCodec).NewReader(limit)
 					valReader, closer = dec, dec
 				}
-				dp.buf = memory.NewBufferBytes(levelBuf)
-				dp.valueSource = streaming.NewStreamBuffer(valReader, drainAndClose(limit, closer))
+				dp.setStreamingValues(levelBuf, valReader, limit, closer)
 			} else {
 				p.dataPageBuffer.ResizeNoShrink(lenUncompressed)
 				buf := memory.NewBufferBytes(p.dataPageBuffer.Bytes())
