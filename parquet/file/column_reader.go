@@ -347,25 +347,27 @@ func (c *columnChunkReader) configureDict(page *DictionaryPage) error {
 }
 
 func (c *columnChunkReader) processPage() (bool, error) {
+	var (
+		err        error
+		lvlByteLen int64
+	)
 	switch p := c.curPage.(type) {
 	case *DictionaryPage:
 		return false, c.configureDict(p)
 	case *DataPageV1:
-		lvlByteLen, err := c.initLevelDecodersV1(p, p.repLvlEncoding, p.defLvlEncoding)
-		if err != nil {
-			return true, err
-		}
-		return true, c.initDataDecoder(&p.dataPageBase, lvlByteLen)
+		lvlByteLen, err = c.initLevelDecodersV1(p, p.repLvlEncoding, p.defLvlEncoding)
 	case *DataPageV2:
-		lvlByteLen, err := c.initLevelDecodersV2(p)
-		if err != nil {
-			return true, err
-		}
-		return true, c.initDataDecoder(&p.dataPageBase, lvlByteLen)
+		lvlByteLen, err = c.initLevelDecodersV2(p)
 	default:
 		// we can skip non-data pages
 		return false, nil
 	}
+
+	if err != nil {
+		return true, err
+	}
+
+	return true, c.initDataDecoder(c.curPage.(DataPage), lvlByteLen)
 }
 
 // read a new page from the page reader
@@ -455,7 +457,7 @@ func (c *columnChunkReader) initLevelDecodersV1(page *DataPageV1, repLvlEncoding
 	return levelsByteLen, nil
 }
 
-func (c *columnChunkReader) initDataDecoder(page *dataPageBase, lvlByteLen int64) error {
+func (c *columnChunkReader) initDataDecoder(page DataPage, lvlByteLen int64) error {
 	encoding := page.Encoding()
 
 	if isDictIndexEncoding(encoding) {
@@ -494,7 +496,7 @@ func (c *columnChunkReader) initDataDecoder(page *dataPageBase, lvlByteLen int64
 	return c.setDecoderData(page, lvlByteLen)
 }
 
-func (c *columnChunkReader) setDecoderData(page *dataPageBase, lvlByteLen int64) error {
+func (c *columnChunkReader) setDecoderData(page DataPage, lvlByteLen int64) error {
 	if src := page.valueBuffer(); src != nil {
 		sd, ok := c.curDecoder.(streaming.Decoder)
 		if !ok {

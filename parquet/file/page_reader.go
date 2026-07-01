@@ -144,6 +144,12 @@ type DataPage interface {
 	// FirstRowIndex returns the row ordinal within the row group
 	// to the first row in the data page, or -1 if not set.
 	FirstRowIndex() int64
+
+	// valueBuffer returns the streaming value source, or nil when the page is
+	// materialized. It is unexported so only the built-in data pages implement
+	// it; DataPage already cannot be implemented outside this package because
+	// Page.Encoding returns an internal type.
+	valueBuffer() streaming.ValueBuffer
 }
 
 // Create some pools to use for reusing the data page objects themselves so that
