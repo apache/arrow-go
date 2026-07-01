@@ -39,8 +39,7 @@ import (
 type PlainByteArrayDecoder struct {
 	decoder
 
-	// src is non-nil only on the streaming path (EnablePageStreaming); when set,
-	// Decode/Discard dispatch to the streaming variants below.
+	// src drives the streaming path (EnablePageStreaming) when non-nil.
 	src streaming.ValueBuffer
 }
 
