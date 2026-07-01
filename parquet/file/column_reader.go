@@ -347,27 +347,25 @@ func (c *columnChunkReader) configureDict(page *DictionaryPage) error {
 }
 
 func (c *columnChunkReader) processPage() (bool, error) {
-	var (
-		err        error
-		lvlByteLen int64
-	)
 	switch p := c.curPage.(type) {
 	case *DictionaryPage:
 		return false, c.configureDict(p)
 	case *DataPageV1:
-		lvlByteLen, err = c.initLevelDecodersV1(p, p.repLvlEncoding, p.defLvlEncoding)
+		lvlByteLen, err := c.initLevelDecodersV1(p, p.repLvlEncoding, p.defLvlEncoding)
+		if err != nil {
+			return true, err
+		}
+		return true, c.initDataDecoder(&p.dataPageBase, lvlByteLen)
 	case *DataPageV2:
-		lvlByteLen, err = c.initLevelDecodersV2(p)
+		lvlByteLen, err := c.initLevelDecodersV2(p)
+		if err != nil {
+			return true, err
+		}
+		return true, c.initDataDecoder(&p.dataPageBase, lvlByteLen)
 	default:
 		// we can skip non-data pages
 		return false, nil
 	}
-
-	if err != nil {
-		return true, err
-	}
-
-	return true, c.initDataDecoder(c.curPage, lvlByteLen)
 }
 
 // read a new page from the page reader
@@ -457,7 +455,7 @@ func (c *columnChunkReader) initLevelDecodersV1(page *DataPageV1, repLvlEncoding
 	return levelsByteLen, nil
 }
 
-func (c *columnChunkReader) initDataDecoder(page Page, lvlByteLen int64) error {
+func (c *columnChunkReader) initDataDecoder(page *dataPageBase, lvlByteLen int64) error {
 	encoding := page.Encoding()
 
 	if isDictIndexEncoding(encoding) {
@@ -496,23 +494,14 @@ func (c *columnChunkReader) initDataDecoder(page Page, lvlByteLen int64) error {
 	return c.setDecoderData(page, lvlByteLen)
 }
 
-// streamingPage is implemented by the built-in data pages that expose an
-// incremental value source. It is unexported so ValueSource stays off the public
-// DataPage interface (adding a method there would break external implementations).
-type streamingPage interface {
-	ValueSource() streaming.ValueBuffer
-}
-
-func (c *columnChunkReader) setDecoderData(page Page, lvlByteLen int64) error {
-	if sp, ok := page.(streamingPage); ok {
-		if src := sp.ValueSource(); src != nil {
-			sd, ok := c.curDecoder.(streaming.Decoder)
-			if !ok {
-				return fmt.Errorf("parquet: streaming page but %s decoder does not support streaming", c.descr.PhysicalType())
-			}
-			sd.SetSource(int(c.numBuffered), src)
-			return nil
+func (c *columnChunkReader) setDecoderData(page *dataPageBase, lvlByteLen int64) error {
+	if src := page.valueBuffer(); src != nil {
+		sd, ok := c.curDecoder.(streaming.Decoder)
+		if !ok {
+			return fmt.Errorf("parquet: streaming page but %s decoder does not support streaming", c.descr.PhysicalType())
 		}
+		sd.SetSource(int(c.numBuffered), src)
+		return nil
 	}
 
 	buf := page.Data()

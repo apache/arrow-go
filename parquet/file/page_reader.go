@@ -88,10 +88,6 @@ type page struct {
 
 	nvals    int32
 	encoding format.Encoding
-
-	// valueSource is only set for streaming mode to read value incrementally.
-	// In such mode, buf only holds the rep+def level region.
-	valueSource streaming.ValueBuffer
 }
 
 func (p *page) Type() PageType            { return p.typ }
@@ -99,20 +95,32 @@ func (p *page) Data() []byte              { return p.buf.Bytes() }
 func (p *page) NumValues() int32          { return p.nvals }
 func (p *page) Encoding() format.Encoding { return p.encoding }
 
-func (p *page) ValueSource() streaming.ValueBuffer { return p.valueSource }
+// dataPageBase holds the members shared by DataPageV1/V2 but not dictionary
+// pages: the rep/def level buffer accessor and, in streaming mode, the
+// incremental value source.
+type dataPageBase struct {
+	page
 
-func (p *page) setStreamingValues(levelBuf []byte, valReader, limit io.Reader, closer io.Closer) {
-	p.buf = memory.NewBufferBytes(levelBuf)
-	p.valueSource = streaming.NewStreamBuffer(valReader, drainAndClose(limit, closer))
+	// valueBuf is only set for streaming mode to read values incrementally.
+	// In such mode, buf only holds the rep+def level region.
+	valueBuf streaming.ValueBuffer
+}
+
+func (d *dataPageBase) valueBuffer() streaming.ValueBuffer { return d.valueBuf }
+func (d *dataPageBase) levelBuffer() []byte                { return d.buf.Bytes() }
+
+func (d *dataPageBase) setStreamingValues(levelBuf []byte, valReader, limit io.Reader, closer io.Closer) {
+	d.buf = memory.NewBufferBytes(levelBuf)
+	d.valueBuf = streaming.NewStreamBuffer(valReader, drainAndClose(limit, closer))
 }
 
 // releaseValueStream closes a streaming page's value source (draining + closing its
 // underlying compressed stream so the file reader lands on the next page header even
 // when values were skipped). It is a no-op for materialized pages.
-func (p *page) releaseValueStream() {
-	if p.valueSource != nil {
-		_ = p.valueSource.Close()
-		p.valueSource = nil
+func (d *dataPageBase) releaseValueStream() {
+	if d.valueBuf != nil {
+		_ = d.valueBuf.Close()
+		d.valueBuf = nil
 	}
 }
 
@@ -158,7 +166,7 @@ var dictPagePool = sync.Pool{
 
 // DataPageV1 represents a DataPage version 1 from the parquet.thrift file
 type DataPageV1 struct {
-	page
+	dataPageBase
 
 	defLvlEncoding   format.Encoding
 	repLvlEncoding   format.Encoding
@@ -177,7 +185,7 @@ func NewDataPageV1(buffer *memory.Buffer, num int32, encoding, defEncoding, repE
 	dp := dataPageV1Pool.Get().(*DataPageV1)
 	if dp == nil {
 		return &DataPageV1{
-			page:             page{buf: buffer, typ: format.PageType_DATA_PAGE, nvals: num, encoding: format.Encoding(encoding)},
+			dataPageBase:     dataPageBase{page: page{buf: buffer, typ: format.PageType_DATA_PAGE, nvals: num, encoding: format.Encoding(encoding)}},
 			defLvlEncoding:   format.Encoding(defEncoding),
 			repLvlEncoding:   format.Encoding(repEncoding),
 			uncompressedSize: uncompressedSize,
@@ -240,11 +248,9 @@ func (d *DataPageV1) RepetitionLevelEncoding() parquet.Encoding {
 	return parquet.Encoding(d.repLvlEncoding)
 }
 
-func (d *DataPageV1) levelBuffer() []byte { return d.buf.Bytes() }
-
 // DataPageV2 is the representation of the V2 data page from the parquet.thrift spec
 type DataPageV2 struct {
-	page
+	dataPageBase
 
 	nulls            int32
 	nrows            int32
@@ -262,7 +268,7 @@ func NewDataPageV2(buffer *memory.Buffer, numValues, numNulls, numRows int32, en
 	dp := dataPageV2Pool.Get().(*DataPageV2)
 	if dp == nil {
 		return &DataPageV2{
-			page:             page{buf: buffer, typ: format.PageType_DATA_PAGE_V2, nvals: numValues, encoding: format.Encoding(encoding)},
+			dataPageBase:     dataPageBase{page: page{buf: buffer, typ: format.PageType_DATA_PAGE_V2, nvals: numValues, encoding: format.Encoding(encoding)}},
 			nulls:            numNulls,
 			nrows:            numRows,
 			defLvlByteLen:    defLvlsByteLen,
@@ -319,8 +325,6 @@ func (d *DataPageV2) UncompressedSize() int32 { return d.uncompressedSize }
 
 // Statistics are the encoded statistics in the data page
 func (d *DataPageV2) Statistics() metadata.EncodedStatistics { return d.statistics }
-
-func (d *DataPageV2) levelBuffer() []byte { return d.buf.Bytes() }
 
 // NumNulls is the reported number of nulls in this datapage
 func (d *DataPageV2) NumNulls() int32 { return d.nulls }
@@ -940,11 +944,11 @@ func (p *serializedPageReader) Next() bool {
 			p.rowsSeen += int64(dataHeader.GetNumValues())
 
 			dp := &DataPageV1{
-				page: page{
+				dataPageBase: dataPageBase{page: page{
 					typ:      p.curPageHdr.Type,
 					nvals:    dataHeader.GetNumValues(),
 					encoding: dataHeader.GetEncoding(),
-				},
+				}},
 				defLvlEncoding:   dataHeader.GetDefinitionLevelEncoding(),
 				repLvlEncoding:   dataHeader.GetRepetitionLevelEncoding(),
 				uncompressedSize: int32(lenUncompressed),
@@ -1003,11 +1007,11 @@ func (p *serializedPageReader) Next() bool {
 			}
 
 			dp := &DataPageV2{
-				page: page{
+				dataPageBase: dataPageBase{page: page{
 					typ:      p.curPageHdr.Type,
 					nvals:    dataHeader.GetNumValues(),
 					encoding: dataHeader.GetEncoding(),
-				},
+				}},
 				nulls:            dataHeader.GetNumNulls(),
 				nrows:            dataHeader.GetNumRows(),
 				defLvlByteLen:    dataHeader.GetDefinitionLevelsByteLength(),
