@@ -23,11 +23,17 @@ import (
 
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/internal/encoding/streaming"
 )
 
 // PlainFixedLenByteArrayDecoder is a plain encoding decoder for Fixed Length Byte Arrays
 type PlainFixedLenByteArrayDecoder struct {
 	decoder
+
+	// src is non-nil only on the streaming path (EnablePageStreaming); see
+	// streaming_decoder.go. When set, Decode/Discard dispatch to the streaming
+	// variants and the materialized []byte path below is untouched.
+	src streaming.ValueBuffer
 }
 
 // Type returns the physical type this decoder operates on, FixedLength Byte Arrays
@@ -35,7 +41,59 @@ func (PlainFixedLenByteArrayDecoder) Type() parquet.Type {
 	return parquet.Types.FixedLenByteArray
 }
 
+// SetSource switches the decoder to the streaming path (EnablePageStreaming).
+func (pflba *PlainFixedLenByteArrayDecoder) SetSource(nvals int, src streaming.ValueBuffer) {
+	pflba.src, pflba.nvals = src, nvals
+}
+
+// SetData feeds a fully-materialized buffer and reverts to the materialized path.
+func (pflba *PlainFixedLenByteArrayDecoder) SetData(nvals int, data []byte) error {
+	pflba.src = nil
+	return pflba.decoder.SetData(nvals, data)
+}
+
+func (pflba *PlainFixedLenByteArrayDecoder) decodeStreaming(out []parquet.FixedLenByteArray) (int, error) {
+	max := utils.Min(len(out), pflba.nvals)
+	w := pflba.typeLen
+	buf := pflba.src.Bytes()
+	pos := 0
+	for i := 0; i < max; i++ {
+		if len(buf)-pos < w {
+			var err error
+			if buf, err = pflba.src.Fill(pos, w); err != nil {
+				return i, errors.New("parquet: eof exception")
+			}
+			pos = 0
+		}
+		v := make([]byte, w)
+		copy(v, buf[pos:pos+w])
+		out[i] = v
+		pos += w
+	}
+	if _, err := pflba.src.Fill(pos, 0); err != nil {
+		return max, err
+	}
+	pflba.nvals -= max
+	return max, nil
+}
+
+func (pflba *PlainFixedLenByteArrayDecoder) discardStreaming(n int) (int, error) {
+	n = min(n, pflba.nvals)
+	need := n * pflba.typeLen
+	if _, err := pflba.src.Fill(0, need); err != nil {
+		return 0, errors.New("parquet: eof exception")
+	}
+	if _, err := pflba.src.Fill(need, 0); err != nil {
+		return 0, err
+	}
+	pflba.nvals -= n
+	return n, nil
+}
+
 func (pflba *PlainFixedLenByteArrayDecoder) Discard(n int) (int, error) {
+	if pflba.src != nil {
+		return pflba.discardStreaming(n)
+	}
 	n = min(n, pflba.nvals)
 	numBytesNeeded := n * pflba.typeLen
 	if numBytesNeeded > len(pflba.data) || numBytesNeeded > math.MaxInt32 {
@@ -51,6 +109,10 @@ func (pflba *PlainFixedLenByteArrayDecoder) Discard(n int) (int, error) {
 // values to decode or the length of out has been filled. Then returns the total number of values
 // that were decoded.
 func (pflba *PlainFixedLenByteArrayDecoder) Decode(out []parquet.FixedLenByteArray) (int, error) {
+	if pflba.src != nil {
+		return pflba.decodeStreaming(out)
+	}
+
 	max := utils.Min(len(out), pflba.nvals)
 	numBytesNeeded := max * pflba.typeLen
 	if numBytesNeeded > len(pflba.data) || numBytesNeeded > math.MaxInt32 {

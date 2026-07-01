@@ -25,6 +25,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/internal/encoding/streaming"
 	pqutils "github.com/apache/arrow-go/v18/parquet/internal/utils"
 )
 
@@ -37,6 +38,11 @@ import (
 // bytes being the raw data of the byte array.
 type PlainByteArrayDecoder struct {
 	decoder
+
+	// src is non-nil only on the streaming path (EnablePageStreaming); see
+	// streaming_decoder.go. When set, Decode/Discard dispatch to the streaming
+	// variants and the materialized []byte path below is untouched.
+	src streaming.ValueBuffer
 }
 
 // Type returns parquet.Types.ByteArray for this decoder
@@ -44,7 +50,92 @@ func (PlainByteArrayDecoder) Type() parquet.Type {
 	return parquet.Types.ByteArray
 }
 
+// SetSource switches the decoder to the streaming path (EnablePageStreaming),
+// reading values incrementally from src instead of a materialized []byte.
+func (pbad *PlainByteArrayDecoder) SetSource(nvals int, src streaming.ValueBuffer) {
+	pbad.src, pbad.nvals = src, nvals
+}
+
+// SetData feeds a fully-materialized buffer and reverts to the materialized path.
+func (pbad *PlainByteArrayDecoder) SetData(nvals int, data []byte) error {
+	pbad.src = nil
+	return pbad.decoder.SetData(nvals, data)
+}
+
+func (pbad *PlainByteArrayDecoder) decodeStreaming(out []parquet.ByteArray) (int, error) {
+	max := utils.Min(len(out), pbad.nvals)
+	buf := pbad.src.Bytes()
+	pos := 0
+	for i := 0; i < max; i++ {
+		if len(buf)-pos < 4 {
+			var err error
+			if buf, err = pbad.src.Fill(pos, 4); err != nil {
+				return i, errors.New("parquet: eof reading bytearray")
+			}
+			pos = 0
+		}
+		byteLen := int(int32(binary.LittleEndian.Uint32(buf[pos : pos+4])))
+		if byteLen < 0 {
+			return i, errors.New("parquet: invalid BYTE_ARRAY value")
+		}
+		if len(buf)-pos < 4+byteLen {
+			var err error
+			if buf, err = pbad.src.Fill(pos, 4+byteLen); err != nil {
+				return i, errors.New("parquet: eof reading bytearray")
+			}
+			pos = 0
+		}
+		// The streaming buffer slides on Fill, so copy the value out; make (not
+		// slicing) keeps an empty value a non-nil empty slice, matching the
+		// materialized path and distinguishing "" from null.
+		v := make([]byte, byteLen)
+		copy(v, buf[pos+4:pos+4+byteLen])
+		out[i] = v
+		pos += 4 + byteLen
+	}
+	if _, err := pbad.src.Fill(pos, 0); err != nil {
+		return max, err
+	}
+	pbad.nvals -= max
+	return max, nil
+}
+
+func (pbad *PlainByteArrayDecoder) discardStreaming(n int) (int, error) {
+	n = min(n, pbad.nvals)
+	buf := pbad.src.Bytes()
+	pos := 0
+	for i := 0; i < n; i++ {
+		if len(buf)-pos < 4 {
+			var err error
+			if buf, err = pbad.src.Fill(pos, 4); err != nil {
+				return i, errors.New("parquet: eof skipping bytearray values")
+			}
+			pos = 0
+		}
+		valueLen := int(int32(binary.LittleEndian.Uint32(buf[pos : pos+4])))
+		if valueLen < 0 {
+			return i, errors.New("parquet: invalid BYTE_ARRAY value")
+		}
+		if len(buf)-pos < 4+valueLen {
+			var err error
+			if buf, err = pbad.src.Fill(pos, 4+valueLen); err != nil {
+				return i, errors.New("parquet: eof skipping bytearray values")
+			}
+			pos = 0
+		}
+		pos += 4 + valueLen
+	}
+	if _, err := pbad.src.Fill(pos, 0); err != nil {
+		return n, err
+	}
+	pbad.nvals -= n
+	return n, nil
+}
+
 func (pbad *PlainByteArrayDecoder) Discard(n int) (int, error) {
+	if pbad.src != nil {
+		return pbad.discardStreaming(n)
+	}
 	n = min(n, pbad.nvals)
 	// we have to skip the length of each value by first checking
 	// the length of the value and then skipping that many bytes
@@ -74,6 +165,10 @@ func (pbad *PlainByteArrayDecoder) Discard(n int) (int, error) {
 //
 // Returns the number of values that were decoded.
 func (pbad *PlainByteArrayDecoder) Decode(out []parquet.ByteArray) (int, error) {
+	if pbad.src != nil {
+		return pbad.decodeStreaming(out)
+	}
+
 	max := utils.Min(len(out), pbad.nvals)
 
 	for i := 0; i < max; i++ {
