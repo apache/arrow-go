@@ -85,19 +85,21 @@ func (s *streamBuffer) Fill(need int) ([]byte, error) {
 		s.buf = grown
 	}
 
-	// Read until at least need bytes are buffered.
-	for s.n < need {
+	// Fill the whole buffer, not just need: batches reads into ~buffer-sized
+	// chunks regardless of the underlying reader's chunk size. Bounded because
+	// the value stream is a finite page region.
+	for s.n < len(s.buf) {
 		m, err := s.r.Read(s.buf[s.n:])
 		s.n += m
 		if err != nil {
-			if s.n >= need {
-				break
-			}
 			if err == io.EOF {
-				return nil, io.ErrUnexpectedEOF
+				break
 			}
 			return nil, err
 		}
+	}
+	if s.n-s.off < need {
+		return nil, io.ErrUnexpectedEOF
 	}
 	return s.buf[s.off:s.n], nil
 }
