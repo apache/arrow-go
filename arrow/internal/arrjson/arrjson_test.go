@@ -1957,7 +1957,7 @@ func makeStringsWantJSONs() string {
         "type": {
           "name": "utf8"
         },
-        "nullable": false,
+        "nullable": true,
         "children": []
       },
       {
@@ -1965,7 +1965,7 @@ func makeStringsWantJSONs() string {
         "type": {
           "name": "binary"
         },
-        "nullable": false,
+        "nullable": true,
         "children": []
       }
     ]

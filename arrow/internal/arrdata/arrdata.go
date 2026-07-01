@@ -433,8 +433,8 @@ func makeFixedSizeListsRecords() []arrow.RecordBatch {
 func makeStringsRecords() []arrow.RecordBatch {
 	mem := memory.NewGoAllocator()
 	schema := arrow.NewSchema([]arrow.Field{
-		{Name: "strings", Type: arrow.BinaryTypes.String},
-		{Name: "bytes", Type: arrow.BinaryTypes.Binary},
+		{Name: "strings", Type: arrow.BinaryTypes.String, Nullable: true},
+		{Name: "bytes", Type: arrow.BinaryTypes.Binary, Nullable: true},
 	}, nil)
 
 	mask := []bool{true, false, false, true, true}
