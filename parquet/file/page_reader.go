@@ -101,6 +101,11 @@ func (p *page) Encoding() format.Encoding { return p.encoding }
 
 func (p *page) ValueSource() streaming.ValueBuffer { return p.valueSource }
 
+// LevelBuffer returns the bytes holding this page's rep/def level region. For a
+// materialized page that is the whole page (levels sit at the front); for a
+// streaming page it is only the level region, with values read from ValueSource.
+func (p *page) LevelBuffer() []byte { return p.buf.Bytes() }
+
 func (p *page) setStreamingValues(levelBuf []byte, valReader, limit io.Reader, closer io.Closer) {
 	p.buf = memory.NewBufferBytes(levelBuf)
 	p.valueSource = streaming.NewStreamBuffer(valReader, drainAndClose(limit, closer))
