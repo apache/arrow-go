@@ -21,17 +21,13 @@ package streaming
 
 import "io"
 
-// ValueBuffer is the incremental byte source a streaming decoder reads from, over
-// one data page's value stream. A decoder indexes Bytes() directly, calls Advance
-// as it consumes, and Fill only when short; the page Closes it when done.
+// ValueBuffer is the incremental byte source a streaming decoder reads over one
+// data page's value stream.
 type ValueBuffer interface {
-	// Bytes returns the currently available bytes, valid until the next Fill.
-	Bytes() []byte
 	// Advance marks the first n bytes of the current window as consumed.
 	Advance(n int)
-	// Fill ensures at least need contiguous bytes are available (growing to fit an
-	// oversized value), returning a window valid only until the next call, or
-	// io.ErrUnexpectedEOF if fewer remain. Use it when skipping values.
+	// Fill ensures at least need contiguous bytes, returning a window valid only
+	// until the next call (io.ErrUnexpectedEOF if fewer remain). Use when skipping.
 	Fill(need int) ([]byte, error)
 	// FillOwned is like Fill but the returned bytes stay valid after later calls,
 	// so a decoder can alias them instead of copying.
@@ -39,8 +35,8 @@ type ValueBuffer interface {
 	io.Closer
 }
 
-// Decoder is implemented by the PLAIN decoders that can read incrementally from a
-// ValueBuffer via SetSource, alongside the []byte-based SetData.
+// Decoder is implemented by the PLAIN decoders that read from a ValueBuffer via
+// SetSource, alongside the []byte-based SetData.
 type Decoder interface {
 	SetSource(nvals int, src ValueBuffer)
 }
@@ -52,18 +48,15 @@ type streamBuffer struct {
 	onClose func() error
 	buf     []byte
 	off, n  int
-	// shared is set once buf has been handed out via FillOwned: it may back values
-	// a caller still aliases, so buf must not be overwritten (slid) again.
+	// shared: buf was handed out via FillOwned and may back live aliases, so it
+	// must not be slid/overwritten.
 	shared bool
 }
 
-// NewStreamBuffer returns a streaming ValueBuffer over r. onClose, if non-nil, runs
-// on Close (the caller uses it to drain + close the underlying stream).
+// NewStreamBuffer returns a ValueBuffer over r; onClose, if non-nil, runs on Close.
 func NewStreamBuffer(r io.Reader, onClose func() error) ValueBuffer {
 	return &streamBuffer{r: r, onClose: onClose, buf: make([]byte, defaultStreamBufferSize)}
 }
-
-func (s *streamBuffer) Bytes() []byte { return s.buf[s.off:s.n] }
 
 func (s *streamBuffer) Advance(n int) { s.off += n }
 
@@ -85,8 +78,7 @@ func (s *streamBuffer) fill(need int, owned bool) ([]byte, error) {
 
 	switch {
 	case s.shared || len(s.buf) < need:
-		// buf may back live aliases (shared) or is too small: move the unconsumed
-		// tail to a fresh buffer. The old buffer stays alive through its aliases.
+		// buf is shared (live aliases) or too small: move the tail to a fresh one.
 		size := len(s.buf)
 		if size < need {
 			size = need
@@ -95,14 +87,12 @@ func (s *streamBuffer) fill(need int, owned bool) ([]byte, error) {
 		s.n = copy(fresh, s.buf[s.off:s.n])
 		s.off, s.buf = 0, fresh
 	case s.off > 0:
-		// reuse: slide the unconsumed tail to the front.
-		s.n = copy(s.buf, s.buf[s.off:s.n])
+		s.n = copy(s.buf, s.buf[s.off:s.n]) // reuse: slide to the front
 		s.off = 0
 	}
 
-	// Fill the whole buffer, not just need: batches reads into ~buffer-sized
-	// chunks regardless of the underlying reader's chunk size. Bounded because
-	// the value stream is a finite page region.
+	// Fill the whole buffer, batching reads regardless of the reader's chunking;
+	// bounded because the value stream is a finite page region.
 	for s.n < len(s.buf) {
 		m, err := s.r.Read(s.buf[s.n:])
 		s.n += m

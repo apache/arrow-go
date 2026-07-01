@@ -98,7 +98,7 @@ func (pbad *PlainByteArrayDecoder) decodeStreaming(out []parquet.ByteArray) (int
 
 func (pbad *PlainByteArrayDecoder) discardStreaming(n int) (int, error) {
 	n = min(n, pbad.nvals)
-	buf := pbad.src.Bytes()
+	var buf []byte
 	pos := 0
 	for i := 0; i < n; i++ {
 		if len(buf)-pos < 4 {
