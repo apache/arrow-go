@@ -30,9 +30,8 @@ import (
 type PlainFixedLenByteArrayDecoder struct {
 	decoder
 
-	// src is non-nil only on the streaming path (EnablePageStreaming); see
-	// streaming_decoder.go. When set, Decode/Discard dispatch to the streaming
-	// variants and the materialized []byte path below is untouched.
+	// src is non-nil only on the streaming path (EnablePageStreaming); when set,
+	// Decode/Discard dispatch to the streaming variants below.
 	src streaming.ValueBuffer
 }
 

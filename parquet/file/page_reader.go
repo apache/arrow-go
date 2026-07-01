@@ -99,7 +99,6 @@ func (p *page) Data() []byte              { return p.buf.Bytes() }
 func (p *page) NumValues() int32          { return p.nvals }
 func (p *page) Encoding() format.Encoding { return p.encoding }
 
-// ValueSource returns the streaming value source for a streaming page.
 func (p *page) ValueSource() streaming.ValueBuffer { return p.valueSource }
 
 func (p *page) setStreamingValues(levelBuf []byte, valReader, limit io.Reader, closer io.Closer) {
