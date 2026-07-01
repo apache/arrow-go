@@ -492,12 +492,7 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 	}
 
 	headerBuf := r.bufferPool.Get().(*memory.Buffer)
-	if headerBuf.Cap() < int(bloomFilterReadSize) {
-		headerBuf.ResizeNoShrink(int(bloomFilterReadSize))
-	} else {
-		headerBuf.Reset(headerBuf.Buf()[:bloomFilterReadSize])
-	}
-
+	headerBuf.ResizeNoShrink(int(bloomFilterReadSize))
 	defer func() {
 		if headerBuf != nil {
 			headerBuf.Reset(headerBuf.Buf()[:cap(headerBuf.Buf())])
@@ -521,18 +516,12 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 
 	bloomFilterSz := header.NumBytes
 	var bitset []byte
-
 	if int(bloomFilterSz)+headerSize <= len(headerBuf.Bytes()) {
+		// bloom filter data is entirely contained in the buffer we just read
 		bitset = headerBuf.Bytes()[headerSize : headerSize+int(bloomFilterSz)]
 	} else {
 		buf := r.bufferPool.Get().(*memory.Buffer)
-
-		if buf.Cap() < int(bloomFilterSz) {
-			buf.ResizeNoShrink(int(bloomFilterSz))
-		} else {
-			buf.Reset(buf.Buf()[:bloomFilterSz])
-		}
-
+		buf.ResizeNoShrink(int(bloomFilterSz))
 		filterBytesInHeader := headerBuf.Len() - headerSize
 		if filterBytesInHeader > 0 {
 			copy(buf.Bytes(), headerBuf.Bytes()[headerSize:])
@@ -544,10 +533,8 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 			return nil, err
 		}
 		bitset = buf.Bytes()
-
-		headerBuf.Reset(headerBuf.Buf()[:cap(headerBuf.Buf())])
+		headerBuf.ResizeNoShrink(0)
 		r.bufferPool.Put(headerBuf)
-
 		headerBuf = buf
 	}
 
@@ -559,9 +546,7 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 		hashStrategy: *header.Hash,
 		compression:  *header.Compression,
 	}
-
 	headerBuf = nil
-
 	addCleanup(bf, r.bufferPool)
 	return bf, nil
 }
