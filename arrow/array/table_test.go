@@ -207,6 +207,8 @@ func TestChunkedSliceInvalid(t *testing.T) {
 	for _, tc := range []struct {
 		i, j int64
 	}{
+		{i: -1, j: 0},
+		{i: -2, j: -1},
 		{i: 2, j: 1},
 		{i: 10, j: 11},
 		{i: 11, j: 11},
