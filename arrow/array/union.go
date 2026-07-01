@@ -289,7 +289,15 @@ func NewSparseUnionFromArraysWithFieldCodes(typeIDs arrow.Array, children []arro
 		return nil, errors.New("arrow/array: type codes must have same length as children")
 	}
 
-	buffers := []*memory.Buffer{nil, typeIDs.Data().Buffers()[1]}
+	typeIDBuffer := typeIDs.Data().Buffers()[1]
+	if typeIDBuffer != nil {
+		typeIDBuffer = memory.SliceBuffer(typeIDBuffer,
+			arrow.Int8Traits.BytesRequired(typeIDs.Data().Offset()),
+			arrow.Int8Traits.BytesRequired(typeIDs.Len()))
+		defer typeIDBuffer.Release()
+	}
+
+	buffers := []*memory.Buffer{nil, typeIDBuffer}
 	ty := arrow.SparseUnionFromArrays(children, fields, codes)
 
 	childData := make([]arrow.ArrayData, len(children))
@@ -300,7 +308,7 @@ func NewSparseUnionFromArraysWithFieldCodes(typeIDs arrow.Array, children []arro
 		}
 	}
 
-	data := NewData(ty, typeIDs.Len(), buffers, childData, 0, typeIDs.Data().Offset())
+	data := NewData(ty, typeIDs.Len(), buffers, childData, 0, 0)
 	defer data.Release()
 	return NewSparseUnionData(data), nil
 }
