@@ -62,13 +62,13 @@ func (pbad *PlainByteArrayDecoder) SetData(nvals int, data []byte) error {
 
 func (pbad *PlainByteArrayDecoder) decodeStreaming(out []parquet.ByteArray) (int, error) {
 	max := utils.Min(len(out), pbad.nvals)
-	buf := pbad.src.Bytes()
+	var buf []byte // nil forces the first FillOwned, so every alias is stable
 	pos := 0
 	for i := 0; i < max; i++ {
 		if len(buf)-pos < 4 {
 			var err error
 			pbad.src.Advance(pos)
-			if buf, err = pbad.src.Fill(4); err != nil {
+			if buf, err = pbad.src.FillOwned(4); err != nil {
 				return i, errors.New("parquet: eof reading bytearray")
 			}
 			pos = 0
@@ -80,17 +80,15 @@ func (pbad *PlainByteArrayDecoder) decodeStreaming(out []parquet.ByteArray) (int
 		if len(buf)-pos < 4+byteLen {
 			var err error
 			pbad.src.Advance(pos)
-			if buf, err = pbad.src.Fill(4 + byteLen); err != nil {
+			if buf, err = pbad.src.FillOwned(4 + byteLen); err != nil {
 				return i, errors.New("parquet: eof reading bytearray")
 			}
 			pos = 0
 		}
-		// The streaming buffer slides on Fill, so copy the value out; make (not
-		// slicing) keeps an empty value a non-nil empty slice, matching the
-		// materialized path and distinguishing "" from null.
-		v := make([]byte, byteLen)
-		copy(v, buf[pos+4:pos+4+byteLen])
-		out[i] = v
+		// FillOwned keeps the bytes stable, so alias instead of copying. The
+		// 3-index cap stops appends bleeding into the next value, and a zero-length
+		// slice of a non-nil buffer stays non-nil (empty value != null).
+		out[i] = buf[pos+4 : pos+4+byteLen : pos+4+byteLen]
 		pos += 4 + byteLen
 	}
 	pbad.src.Advance(pos)

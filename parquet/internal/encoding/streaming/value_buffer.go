@@ -30,8 +30,12 @@ type ValueBuffer interface {
 	// Advance marks the first n bytes of the current window as consumed.
 	Advance(n int)
 	// Fill ensures at least need contiguous bytes are available (growing to fit an
-	// oversized value), returning the window or io.ErrUnexpectedEOF if fewer remain.
+	// oversized value), returning a window valid only until the next call, or
+	// io.ErrUnexpectedEOF if fewer remain. Use it when skipping values.
 	Fill(need int) ([]byte, error)
+	// FillOwned is like Fill but the returned bytes stay valid after later calls,
+	// so a decoder can alias them instead of copying.
+	FillOwned(need int) ([]byte, error)
 	io.Closer
 }
 
@@ -48,6 +52,9 @@ type streamBuffer struct {
 	onClose func() error
 	buf     []byte
 	off, n  int
+	// shared is set once buf has been handed out via FillOwned: it may back values
+	// a caller still aliases, so buf must not be overwritten (slid) again.
+	shared bool
 }
 
 // NewStreamBuffer returns a streaming ValueBuffer over r. onClose, if non-nil, runs
@@ -67,22 +74,30 @@ func (s *streamBuffer) Close() error {
 	return nil
 }
 
-func (s *streamBuffer) Fill(need int) ([]byte, error) {
+func (s *streamBuffer) Fill(need int) ([]byte, error)      { return s.fill(need, false) }
+func (s *streamBuffer) FillOwned(need int) ([]byte, error) { return s.fill(need, true) }
+
+func (s *streamBuffer) fill(need int, owned bool) ([]byte, error) {
 	if s.n-s.off >= need {
+		s.shared = s.shared || owned
 		return s.buf[s.off:s.n], nil
 	}
 
-	// Slide the unconsumed tail to the front.
-	if s.off > 0 {
+	switch {
+	case s.shared || len(s.buf) < need:
+		// buf may back live aliases (shared) or is too small: move the unconsumed
+		// tail to a fresh buffer. The old buffer stays alive through its aliases.
+		size := len(s.buf)
+		if size < need {
+			size = need
+		}
+		fresh := make([]byte, size)
+		s.n = copy(fresh, s.buf[s.off:s.n])
+		s.off, s.buf = 0, fresh
+	case s.off > 0:
+		// reuse: slide the unconsumed tail to the front.
 		s.n = copy(s.buf, s.buf[s.off:s.n])
 		s.off = 0
-	}
-
-	// Grow the backing storage if it cannot hold a single value of size need.
-	if len(s.buf) < need {
-		grown := make([]byte, need)
-		copy(grown, s.buf[:s.n])
-		s.buf = grown
 	}
 
 	// Fill the whole buffer, not just need: batches reads into ~buffer-sized
@@ -101,5 +116,6 @@ func (s *streamBuffer) Fill(need int) ([]byte, error) {
 	if s.n-s.off < need {
 		return nil, io.ErrUnexpectedEOF
 	}
+	s.shared = owned
 	return s.buf[s.off:s.n], nil
 }

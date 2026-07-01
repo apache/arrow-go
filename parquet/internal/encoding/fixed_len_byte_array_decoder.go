@@ -53,20 +53,19 @@ func (pflba *PlainFixedLenByteArrayDecoder) SetData(nvals int, data []byte) erro
 func (pflba *PlainFixedLenByteArrayDecoder) decodeStreaming(out []parquet.FixedLenByteArray) (int, error) {
 	max := utils.Min(len(out), pflba.nvals)
 	w := pflba.typeLen
-	buf := pflba.src.Bytes()
+	var buf []byte // nil forces the first FillOwned, so every alias is stable
 	pos := 0
 	for i := 0; i < max; i++ {
 		if len(buf)-pos < w {
 			var err error
 			pflba.src.Advance(pos)
-			if buf, err = pflba.src.Fill(w); err != nil {
+			if buf, err = pflba.src.FillOwned(w); err != nil {
 				return i, errors.New("parquet: eof exception")
 			}
 			pos = 0
 		}
-		v := make([]byte, w)
-		copy(v, buf[pos:pos+w])
-		out[i] = v
+		// FillOwned keeps the bytes stable, so alias instead of copying.
+		out[i] = buf[pos : pos+w : pos+w]
 		pos += w
 	}
 	pflba.src.Advance(pos)
