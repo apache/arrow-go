@@ -14,9 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package streaming provides the incremental value source used to read large
-// Parquet data pages without materializing the whole uncompressed page
-// (EnablePageStreaming). See apache/arrow-go#865.
 package streaming
 
 import "io"
@@ -35,8 +32,7 @@ type ValueBuffer interface {
 	io.Closer
 }
 
-// Decoder is implemented by the PLAIN decoders that read from a ValueBuffer via
-// SetSource, alongside the []byte-based SetData.
+// Decoder is a decoder that can read from a ValueBuffer via SetSource.
 type Decoder interface {
 	SetSource(nvals int, src ValueBuffer)
 }
@@ -53,7 +49,7 @@ type streamBuffer struct {
 	shared bool
 }
 
-// NewStreamBuffer returns a ValueBuffer over r; onClose, if non-nil, runs on Close.
+// NewStreamBuffer returns a ValueBuffer over r.
 func NewStreamBuffer(r io.Reader, onClose func() error) ValueBuffer {
 	return &streamBuffer{r: r, onClose: onClose, buf: make([]byte, defaultStreamBufferSize)}
 }
@@ -87,12 +83,10 @@ func (s *streamBuffer) fill(need int, owned bool) ([]byte, error) {
 		s.n = copy(fresh, s.buf[s.off:s.n])
 		s.off, s.buf = 0, fresh
 	case s.off > 0:
-		s.n = copy(s.buf, s.buf[s.off:s.n]) // reuse: slide to the front
+		s.n = copy(s.buf, s.buf[s.off:s.n])
 		s.off = 0
 	}
 
-	// Fill the whole buffer, batching reads regardless of the reader's chunking;
-	// bounded because the value stream is a finite page region.
 	for s.n < len(s.buf) {
 		m, err := s.r.Read(s.buf[s.n:])
 		s.n += m

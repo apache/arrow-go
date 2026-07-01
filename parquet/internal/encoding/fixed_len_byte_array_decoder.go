@@ -39,12 +39,10 @@ func (PlainFixedLenByteArrayDecoder) Type() parquet.Type {
 	return parquet.Types.FixedLenByteArray
 }
 
-// SetSource switches the decoder to the streaming path (EnablePageStreaming).
 func (pflba *PlainFixedLenByteArrayDecoder) SetSource(nvals int, src streaming.ValueBuffer) {
 	pflba.src, pflba.nvals = src, nvals
 }
 
-// SetData feeds a fully-materialized buffer and reverts to the materialized path.
 func (pflba *PlainFixedLenByteArrayDecoder) SetData(nvals int, data []byte) error {
 	pflba.src = nil
 	return pflba.decoder.SetData(nvals, data)

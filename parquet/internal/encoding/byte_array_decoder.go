@@ -48,13 +48,10 @@ func (PlainByteArrayDecoder) Type() parquet.Type {
 	return parquet.Types.ByteArray
 }
 
-// SetSource switches the decoder to the streaming path (EnablePageStreaming),
-// reading values incrementally from src instead of a materialized []byte.
 func (pbad *PlainByteArrayDecoder) SetSource(nvals int, src streaming.ValueBuffer) {
 	pbad.src, pbad.nvals = src, nvals
 }
 
-// SetData feeds a fully-materialized buffer and reverts to the materialized path.
 func (pbad *PlainByteArrayDecoder) SetData(nvals int, data []byte) error {
 	pbad.src = nil
 	return pbad.decoder.SetData(nvals, data)
