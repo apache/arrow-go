@@ -131,11 +131,12 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 			nrows:             col.NumValues(),
 			mem:               r.props.Allocator(),
 			// Streaming (EnablePageStreaming) inputs; only the unencrypted path is
-			// ever streaming-eligible.
-			streamEnabled: r.props.EnablePageStreaming,
-			physicalType:  descr.PhysicalType(),
-			maxRepLevel:   descr.MaxRepetitionLevel(),
-			maxDefLevel:   descr.MaxDefinitionLevel(),
+			// ever streaming-eligible, so canStream is left false elsewhere.
+			canStream: r.props.EnablePageStreaming &&
+				streamablePhysicalType(descr.PhysicalType()) &&
+				streamableCodec(col.Compression()),
+			maxRepLevel: descr.MaxRepetitionLevel(),
+			maxDefLevel: descr.MaxDefinitionLevel(),
 		}
 		return pr, pr.init(col.Compression(), nil)
 	}

@@ -89,10 +89,8 @@ type page struct {
 	nvals    int32
 	encoding format.Encoding
 
-	// valueSource is set only for streaming data pages (EnablePageStreaming): buf
-	// holds only the rep+def level region and the encoded values are read
-	// incrementally from valueSource, which owns the underlying compressed stream and
-	// drains + closes it on Close so the file reader lands on the next page header.
+	// valueSource is only set for streaming mode to read value incrementally.
+	// In such mode, buf only holds the rep+def level region.
 	valueSource streaming.ValueBuffer
 }
 
@@ -101,25 +99,17 @@ func (p *page) Data() []byte              { return p.buf.Bytes() }
 func (p *page) NumValues() int32          { return p.nvals }
 func (p *page) Encoding() format.Encoding { return p.encoding }
 
-// LevelData returns the bytes the repetition/definition level decoders read from:
-// for a materialized page this is the whole page (levels are its prefix); for a
-// streaming page it is the separately materialized rep+def region.
-func (p *page) LevelData() []byte { return p.buf.Bytes() }
-
-// ValueSource returns the streaming value source for a streaming page (positioned
-// at the first value byte), or nil for a materialized page (whose values are read
-// from Data() the usual way).
+// ValueSource returns the streaming value source for a streaming page.
 func (p *page) ValueSource() streaming.ValueBuffer { return p.valueSource }
 
 // releaseValueStream closes a streaming page's value source (draining + closing its
 // underlying compressed stream so the file reader lands on the next page header even
 // when values were skipped). It is a no-op for materialized pages.
 func (p *page) releaseValueStream() {
-	if p.valueSource == nil {
-		return
+	if p.valueSource != nil {
+		_ = p.valueSource.Close()
+		p.valueSource = nil
 	}
-	_ = p.valueSource.Close()
-	p.valueSource = nil
 }
 
 // DataPageConfig is a struct for passing configuration params to data page creation
@@ -142,8 +132,6 @@ type DataPage interface {
 	// FirstRowIndex returns the row ordinal within the row group
 	// to the first row in the data page, or -1 if not set.
 	FirstRowIndex() int64
-	// LevelData returns the bytes the rep/def level decoders read from.
-	LevelData() []byte
 	// ValueSource returns the streaming value source for a streaming page, or nil
 	// for a materialized page.
 	ValueSource() streaming.ValueBuffer
@@ -391,17 +379,17 @@ type serializedPageReader struct {
 	colIdx        int
 	pgIndexReader *metadata.RowGroupPageIndexReader
 
-	nrows        int64
-	rowsSeen     int64
-	mem          memory.Allocator
-	codec        compress.Codec
-	compressType compress.Compression
+	nrows    int64
+	rowsSeen int64
+	mem      memory.Allocator
+	codec    compress.Codec
 
-	// Streaming (EnablePageStreaming) inputs, threaded from the schema/properties.
-	streamEnabled bool
-	physicalType  parquet.Type
-	maxRepLevel   int16
-	maxDefLevel   int16
+	// Streaming (EnablePageStreaming) inputs from schema/properties. canStream folds
+	// the chunk-constant eligibility (property + physical type + codec allowlist);
+	// maxRepLevel/maxDefLevel drive the V1 level peel.
+	canStream   bool
+	maxRepLevel int16
+	maxDefLevel int16
 
 	curPageHdr        *format.PageHeader
 	pageOrd           int16
@@ -443,7 +431,6 @@ func (p *serializedPageReader) init(compressType compress.Compression, ctx *Cryp
 		return err
 	}
 	p.codec = codec
-	p.compressType = compressType
 
 	if ctx != nil {
 		p.cryptoCtx = *ctx
@@ -502,7 +489,6 @@ func (p *serializedPageReader) Reset(r parquet.BufferedReader, nrows int64, comp
 	if p.err != nil {
 		return
 	}
-	p.compressType = compressType
 	if ctx != nil {
 		p.cryptoCtx = *ctx
 		p.initDecryption()
@@ -801,22 +787,31 @@ func drainAndClose(limit io.Reader, closer io.Closer) func() error {
 // use the incremental streaming path (EnablePageStreaming). Ineligible pages fall
 // back to the materialized path.
 func (p *serializedPageReader) streamingEligible(enc format.Encoding) bool {
-	if !p.streamEnabled || enc != format.Encoding_PLAIN {
+	// canStream folds the chunk-constant conditions (property + physical type + codec
+	// allowlist). enc is per-page; encryption operates on whole buffers so is excluded.
+	return p.canStream && enc == format.Encoding_PLAIN && p.cryptoCtx.DataDecryptor == nil
+}
+
+// streamablePhysicalType reports whether values of t use the streaming decode path.
+func streamablePhysicalType(t parquet.Type) bool {
+	switch t {
+	case parquet.Types.ByteArray, parquet.Types.FixedLenByteArray:
+		return true
+	default:
 		return false
 	}
-	if p.cryptoCtx.DataDecryptor != nil {
-		return false // decryption operates on whole buffers
-	}
-	switch p.physicalType {
-	case parquet.Types.ByteArray, parquet.Types.FixedLenByteArray:
-	default:
-		return false // only byte_array and fixed_len_byte_array are in scope
-	}
-	switch p.compressType {
+}
+
+// streamableCodec reports whether c can be read as a stream. Snappy is a raw block
+// (its NewReader is the framed format) and lz4-raw has no streaming reader, so both
+// are excluded for now.
+func streamableCodec(c compress.Compression) bool {
+	switch c {
 	case compress.Codecs.Uncompressed, compress.Codecs.Gzip, compress.Codecs.Brotli, compress.Codecs.Zstd:
 		return true
+	default:
+		return false
 	}
-	return false // snappy (raw-block) and lz4_raw are not stream-safe yet
 }
 
 // readLevelData peels the V1 rep+def level region off the decompressed stream r
