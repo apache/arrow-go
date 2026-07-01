@@ -937,8 +937,6 @@ func (p *serializedPageReader) Next() bool {
 			}
 
 			if p.pageCanStream(dataHeader.GetEncoding()) {
-				// rep|def|values share one compressed stream: peel the levels off it
-				// into buf and expose the rest as the value source.
 				limit := io.LimitReader(p.r, int64(lenCompressed))
 				dec := p.codec.(compress.StreamingCodec).NewReader(limit)
 				levelBuf, err := p.readLevelData(dec, dataHeader.GetRepetitionLevelEncoding(),
