@@ -28,13 +28,12 @@ import (
 /// each corresponding index in the values child array ends.
 /// Like list/struct types, the value array can be of any type.
 type RunEndEncoded struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsRunEndEncoded(buf []byte, offset flatbuffers.UOffsetT) *RunEndEncoded {
+func GetRootAsRunEndEncoded(buf []byte, offset flatbuffers.UOffsetT) (x RunEndEncoded) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &RunEndEncoded{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -42,10 +41,9 @@ func FinishRunEndEncodedBuffer(builder *flatbuffers.Builder, offset flatbuffers.
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsRunEndEncoded(buf []byte, offset flatbuffers.UOffsetT) *RunEndEncoded {
+func GetSizePrefixedRootAsRunEndEncoded(buf []byte, offset flatbuffers.UOffsetT) (x RunEndEncoded) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &RunEndEncoded{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -54,12 +52,8 @@ func FinishSizePrefixedRunEndEncodedBuffer(builder *flatbuffers.Builder, offset 
 }
 
 func (rcv *RunEndEncoded) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *RunEndEncoded) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func RunEndEncodedStart(builder *flatbuffers.Builder) {

@@ -26,13 +26,12 @@ import (
 /// batch. Some systems call this a "row batch" internally and others a "record
 /// batch".
 type RecordBatch struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsRecordBatch(buf []byte, offset flatbuffers.UOffsetT) *RecordBatch {
+func GetRootAsRecordBatch(buf []byte, offset flatbuffers.UOffsetT) (x RecordBatch) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &RecordBatch{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -40,10 +39,9 @@ func FinishRecordBatchBuffer(builder *flatbuffers.Builder, offset flatbuffers.UO
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsRecordBatch(buf []byte, offset flatbuffers.UOffsetT) *RecordBatch {
+func GetSizePrefixedRootAsRecordBatch(buf []byte, offset flatbuffers.UOffsetT) (x RecordBatch) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &RecordBatch{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -52,20 +50,16 @@ func FinishSizePrefixedRecordBatchBuffer(builder *flatbuffers.Builder, offset fl
 }
 
 func (rcv *RecordBatch) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *RecordBatch) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 /// number of records / rows. The arrays in the batch should all have this
 /// length
 func (rcv *RecordBatch) Length() int64 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return rcv._tab.GetInt64(o + rcv._tab.Pos)
+		return rcv.GetInt64(o + rcv.Pos)
 	}
 	return 0
 }
@@ -73,25 +67,25 @@ func (rcv *RecordBatch) Length() int64 {
 /// number of records / rows. The arrays in the batch should all have this
 /// length
 func (rcv *RecordBatch) MutateLength(n int64) bool {
-	return rcv._tab.MutateInt64Slot(4, n)
+	return rcv.MutateInt64Slot(4, n)
 }
 
 /// Nodes correspond to the pre-ordered flattened logical schema
-func (rcv *RecordBatch) Nodes(obj *FieldNode, j int) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+func (rcv *RecordBatch) Nodes(j int) (obj FieldNode, ok bool) {
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		x := rcv._tab.Vector(o)
+		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 16
-		obj.Init(rcv._tab.Bytes, x)
-		return true
+		obj.Init(rcv.Bytes, x)
+		ok = true
 	}
-	return false
+	return
 }
 
 func (rcv *RecordBatch) NodesLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }
@@ -103,21 +97,21 @@ func (rcv *RecordBatch) NodesLength() int {
 /// example, most primitive arrays will have 2 buffers, 1 for the validity
 /// bitmap and 1 for the values. For struct arrays, there will only be a
 /// single buffer for the validity (nulls) bitmap
-func (rcv *RecordBatch) Buffers(obj *Buffer, j int) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+func (rcv *RecordBatch) Buffers(j int) (obj Buffer, ok bool) {
+	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
-		x := rcv._tab.Vector(o)
+		x := rcv.Vector(o)
 		x += flatbuffers.UOffsetT(j) * 16
-		obj.Init(rcv._tab.Bytes, x)
-		return true
+		obj.Init(rcv.Bytes, x)
+		ok = true
 	}
-	return false
+	return
 }
 
 func (rcv *RecordBatch) BuffersLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }
@@ -129,17 +123,14 @@ func (rcv *RecordBatch) BuffersLength() int {
 /// bitmap and 1 for the values. For struct arrays, there will only be a
 /// single buffer for the validity (nulls) bitmap
 /// Optional compression of the message body
-func (rcv *RecordBatch) Compression(obj *BodyCompression) *BodyCompression {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
+func (rcv *RecordBatch) Compression() (obj BodyCompression, ok bool) {
+	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
-		x := rcv._tab.Indirect(o + rcv._tab.Pos)
-		if obj == nil {
-			obj = new(BodyCompression)
-		}
-		obj.Init(rcv._tab.Bytes, x)
-		return obj
+		x := rcv.Indirect(o + rcv.Pos)
+		obj.Init(rcv.Bytes, x)
+		ok = true
 	}
-	return nil
+	return
 }
 
 /// Optional compression of the message body
@@ -158,18 +149,18 @@ func (rcv *RecordBatch) Compression(obj *BodyCompression) *BodyCompression {
 /// This field may be omitted if and only if the schema contains no Fields with
 /// a variable number of buffers, such as BinaryView and Utf8View.
 func (rcv *RecordBatch) VariadicBufferCounts(j int) int64 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	o := flatbuffers.UOffsetT(rcv.Offset(12))
 	if o != 0 {
-		a := rcv._tab.Vector(o)
-		return rcv._tab.GetInt64(a + flatbuffers.UOffsetT(j*8))
+		a := rcv.Vector(o)
+		return rcv.GetInt64(a + flatbuffers.UOffsetT(j*8))
 	}
 	return 0
 }
 
 func (rcv *RecordBatch) VariadicBufferCountsLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	o := flatbuffers.UOffsetT(rcv.Offset(12))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }
@@ -189,10 +180,10 @@ func (rcv *RecordBatch) VariadicBufferCountsLength() int {
 /// This field may be omitted if and only if the schema contains no Fields with
 /// a variable number of buffers, such as BinaryView and Utf8View.
 func (rcv *RecordBatch) MutateVariadicBufferCounts(j int, n int64) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	o := flatbuffers.UOffsetT(rcv.Offset(12))
 	if o != 0 {
-		a := rcv._tab.Vector(o)
-		return rcv._tab.MutateInt64(a+flatbuffers.UOffsetT(j*8), n)
+		a := rcv.Vector(o)
+		return rcv.MutateInt64(a+flatbuffers.UOffsetT(j*8), n)
 	}
 	return false
 }
