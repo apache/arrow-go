@@ -384,12 +384,10 @@ type serializedPageReader struct {
 	mem      memory.Allocator
 	codec    compress.Codec
 
-	// Streaming (EnablePageStreaming) inputs from schema/properties. canStream folds
-	// the chunk-constant eligibility (property + physical type + codec allowlist);
-	// maxRepLevel/maxDefLevel drive the V1 level peel.
-	canStream   bool
-	maxRepLevel int16
-	maxDefLevel int16
+	// Streaming (EnablePageStreaming) inputs from schema/properties.
+	columnCanStream bool
+	maxRepLevel     int16
+	maxDefLevel     int16
 
 	curPageHdr        *format.PageHeader
 	pageOrd           int16
@@ -771,8 +769,7 @@ func (p *serializedPageReader) SeekToPageWithRow(rowIdx int64) error {
 }
 
 // drainAndClose returns the cleanup a streaming ValueBuffer runs on Close: consume
-// any unread compressed bytes from limit (so the underlying reader lands on the next
-// page header even when values were skipped) and close the decompressor, if any.
+// any unread compressed bytes for the current page and close the decompressor.
 func drainAndClose(limit io.Reader, closer io.Closer) func() error {
 	return func() error {
 		_, _ = io.Copy(io.Discard, limit)
@@ -783,16 +780,13 @@ func drainAndClose(limit io.Reader, closer io.Closer) func() error {
 	}
 }
 
-// streamingEligible reports whether a data page with the given value encoding can
+// pageCanStream reports whether a data page with the given value encoding can
 // use the incremental streaming path (EnablePageStreaming). Ineligible pages fall
 // back to the materialized path.
-func (p *serializedPageReader) streamingEligible(enc format.Encoding) bool {
-	// canStream folds the chunk-constant conditions (property + physical type + codec
-	// allowlist). enc is per-page; encryption operates on whole buffers so is excluded.
-	return p.canStream && enc == format.Encoding_PLAIN && p.cryptoCtx.DataDecryptor == nil
+func (p *serializedPageReader) pageCanStream(enc format.Encoding) bool {
+	return p.columnCanStream && enc == format.Encoding_PLAIN && p.cryptoCtx.DataDecryptor == nil
 }
 
-// streamablePhysicalType reports whether values of t use the streaming decode path.
 func streamablePhysicalType(t parquet.Type) bool {
 	switch t {
 	case parquet.Types.ByteArray, parquet.Types.FixedLenByteArray:
@@ -802,9 +796,6 @@ func streamablePhysicalType(t parquet.Type) bool {
 	}
 }
 
-// streamableCodec reports whether c can be read as a stream. Snappy is a raw block
-// (its NewReader is the framed format) and lz4-raw has no streaming reader, so both
-// are excluded for now.
 func streamableCodec(c compress.Compression) bool {
 	switch c {
 	case compress.Codecs.Uncompressed, compress.Codecs.Gzip, compress.Codecs.Brotli, compress.Codecs.Zstd:
@@ -935,7 +926,7 @@ func (p *serializedPageReader) Next() bool {
 			firstRowIdx := p.rowsSeen
 			p.rowsSeen += int64(dataHeader.GetNumValues())
 
-			if p.streamingEligible(dataHeader.GetEncoding()) {
+			if p.pageCanStream(dataHeader.GetEncoding()) {
 				// Streaming path: rep|def|values share one compressed stream. Peel the
 				// levels off the decompressor into a small buffer, leaving it positioned
 				// at the first value byte to serve as the value source.
@@ -1014,7 +1005,7 @@ func (p *serializedPageReader) Next() bool {
 				return false
 			}
 
-			if p.streamingEligible(dataHeader.GetEncoding()) {
+			if p.pageCanStream(dataHeader.GetEncoding()) {
 				// V2: rep/def levels are uncompressed and precede the (separately
 				// compressed) value region. Read the level bytes raw, then wrap the
 				// remaining value bytes as the streaming source.
