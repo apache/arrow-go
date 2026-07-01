@@ -40,15 +40,12 @@ type Decoder interface {
 	SetSource(nvals int, src ValueBuffer)
 }
 
-const defaultStreamBufferSize = 4096
+const defaultStreamBufferSize = 1<<20
 
-// streamBuffer reads incrementally from r (a decompressor over the page's
-// compressed value region) into a buffer that slides as values are consumed and
-// grows to fit an oversized value.
 type streamBuffer struct {
 	r       io.Reader
-	onClose func() error // run on Close; may be nil
-	buf     []byte       // valid window is buf[off:n]
+	onClose func() error
+	buf     []byte
 	off, n  int
 }
 

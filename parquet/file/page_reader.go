@@ -102,10 +102,6 @@ func (p *page) Encoding() format.Encoding { return p.encoding }
 // ValueSource returns the streaming value source for a streaming page.
 func (p *page) ValueSource() streaming.ValueBuffer { return p.valueSource }
 
-// setStreamingValues wires a streaming page: buf holds the materialized rep+def
-// level region, and the values are read from valReader. On release the compressed
-// region (limit) is drained and closer, if any, is closed so the file reader lands
-// on the next page header. V1 and V2 differ only in how these are obtained.
 func (p *page) setStreamingValues(levelBuf []byte, valReader, limit io.Reader, closer io.Closer) {
 	p.buf = memory.NewBufferBytes(levelBuf)
 	p.valueSource = streaming.NewStreamBuffer(valReader, drainAndClose(limit, closer))
@@ -777,6 +773,14 @@ func (p *serializedPageReader) SeekToPageWithRow(rowIdx int64) error {
 	return p.err
 }
 
+func (p *serializedPageReader) valueStream(limit io.Reader, compressed bool) (io.Reader, io.Closer) {
+	if compressed {
+		dec := p.codec.(compress.StreamingCodec).NewReader(limit)
+		return dec, dec
+	}
+	return limit, nil
+}
+
 // drainAndClose returns the cleanup a streaming ValueBuffer runs on Close: consume
 // any unread compressed bytes for the current page and close the decompressor.
 func drainAndClose(limit io.Reader, closer io.Closer) func() error {
@@ -789,9 +793,6 @@ func drainAndClose(limit io.Reader, closer io.Closer) func() error {
 	}
 }
 
-// pageCanStream reports whether a data page with the given value encoding can
-// use the incremental streaming path (EnablePageStreaming). Ineligible pages fall
-// back to the materialized path.
 func (p *serializedPageReader) pageCanStream(enc format.Encoding) bool {
 	return p.columnCanStream && enc == format.Encoding_PLAIN && p.cryptoCtx.DataDecryptor == nil
 }
@@ -947,15 +948,19 @@ func (p *serializedPageReader) Next() bool {
 
 			if p.pageCanStream(dataHeader.GetEncoding()) {
 				limit := io.LimitReader(p.r, int64(lenCompressed))
-				dec := p.codec.(compress.StreamingCodec).NewReader(limit)
-				levelBuf, err := p.readLevelData(dec, dataHeader.GetRepetitionLevelEncoding(),
+				// V1 compresses the whole body, so the levels are read through the
+				// codec too (a no-op passthrough for an uncompressed column).
+				valReader, closer := p.valueStream(limit, true)
+				levelBuf, err := p.readLevelData(valReader, dataHeader.GetRepetitionLevelEncoding(),
 					dataHeader.GetDefinitionLevelEncoding(), int(dataHeader.GetNumValues()))
 				if err != nil {
-					_ = dec.Close()
+					if closer != nil {
+						_ = closer.Close()
+					}
 					p.err = err
 					return false
 				}
-				dp.setStreamingValues(levelBuf, dec, limit, dec)
+				dp.setStreamingValues(levelBuf, valReader, limit, closer)
 			} else {
 				p.dataPageBuffer.ResizeNoShrink(lenUncompressed)
 				buf := memory.NewBufferBytes(p.dataPageBuffer.Bytes())
@@ -1019,12 +1024,7 @@ func (p *serializedPageReader) Next() bool {
 					p.err = err
 					return false
 				}
-				var valReader io.Reader = limit
-				var closer io.Closer
-				if compressed {
-					dec := p.codec.(compress.StreamingCodec).NewReader(limit)
-					valReader, closer = dec, dec
-				}
+				valReader, closer := p.valueStream(limit, compressed)
 				dp.setStreamingValues(levelBuf, valReader, limit, closer)
 			} else {
 				p.dataPageBuffer.ResizeNoShrink(lenUncompressed)
