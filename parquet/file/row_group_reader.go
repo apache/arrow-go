@@ -121,6 +121,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 
 	cryptoMetadata := col.CryptoMetadata()
 	if cryptoMetadata == nil {
+		descr := r.fileMetadata.Schema.Column(i)
 		pr := &serializedPageReader{
 			r:                 stream,
 			chunk:             col,
@@ -129,6 +130,12 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 			maxPageHeaderSize: defaultMaxPageHeaderSize,
 			nrows:             col.NumValues(),
 			mem:               r.props.Allocator(),
+			// Streaming (EnablePageStreaming) inputs; only the unencrypted path is
+			// ever streaming-eligible.
+			streamEnabled: r.props.EnablePageStreaming,
+			physicalType:  descr.PhysicalType(),
+			maxRepLevel:   descr.MaxRepetitionLevel(),
+			maxDefLevel:   descr.MaxDefinitionLevel(),
 		}
 		return pr, pr.init(col.Compression(), nil)
 	}

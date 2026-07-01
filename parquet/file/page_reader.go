@@ -17,16 +17,20 @@
 package file
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"math/bits"
 	"sort"
 	"sync"
 
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/compress"
+	"github.com/apache/arrow-go/v18/parquet/internal/encoding/streaming"
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/thrift"
@@ -84,12 +88,39 @@ type page struct {
 
 	nvals    int32
 	encoding format.Encoding
+
+	// valueSource is set only for streaming data pages (EnablePageStreaming): buf
+	// holds only the rep+def level region and the encoded values are read
+	// incrementally from valueSource, which owns the underlying compressed stream and
+	// drains + closes it on Close so the file reader lands on the next page header.
+	valueSource streaming.ValueBuffer
 }
 
 func (p *page) Type() PageType            { return p.typ }
 func (p *page) Data() []byte              { return p.buf.Bytes() }
 func (p *page) NumValues() int32          { return p.nvals }
 func (p *page) Encoding() format.Encoding { return p.encoding }
+
+// LevelData returns the bytes the repetition/definition level decoders read from:
+// for a materialized page this is the whole page (levels are its prefix); for a
+// streaming page it is the separately materialized rep+def region.
+func (p *page) LevelData() []byte { return p.buf.Bytes() }
+
+// ValueSource returns the streaming value source for a streaming page (positioned
+// at the first value byte), or nil for a materialized page (whose values are read
+// from Data() the usual way).
+func (p *page) ValueSource() streaming.ValueBuffer { return p.valueSource }
+
+// releaseValueStream closes a streaming page's value source (draining + closing its
+// underlying compressed stream so the file reader lands on the next page header even
+// when values were skipped). It is a no-op for materialized pages.
+func (p *page) releaseValueStream() {
+	if p.valueSource == nil {
+		return
+	}
+	_ = p.valueSource.Close()
+	p.valueSource = nil
+}
 
 // DataPageConfig is a struct for passing configuration params to data page creation
 // which can be expanded in the future without causing any breaking changes.
@@ -111,6 +142,11 @@ type DataPage interface {
 	// FirstRowIndex returns the row ordinal within the row group
 	// to the first row in the data page, or -1 if not set.
 	FirstRowIndex() int64
+	// LevelData returns the bytes the rep/def level decoders read from.
+	LevelData() []byte
+	// ValueSource returns the streaming value source for a streaming page, or nil
+	// for a materialized page.
+	ValueSource() streaming.ValueBuffer
 }
 
 // Create some pools to use for reusing the data page objects themselves so that
@@ -191,6 +227,7 @@ func NewDataPageV1WithConfig(buffer *memory.Buffer, defEncoding, repEncoding par
 // After calling this function, the object should not be utilized anymore, otherwise
 // conflicts can arise.
 func (d *DataPageV1) Release() {
+	d.releaseValueStream()
 	d.buf.Release()
 	d.buf = nil
 	dataPageV1Pool.Put(d)
@@ -277,6 +314,7 @@ func NewDataPageV2WithConfig(buffer *memory.Buffer, numNulls, numRows int32, def
 // After calling this function, the object should not be utilized anymore, otherwise
 // conflicts can arise.
 func (d *DataPageV2) Release() {
+	d.releaseValueStream()
 	d.buf.Release()
 	d.buf = nil
 	dataPageV2Pool.Put(d)
@@ -353,10 +391,17 @@ type serializedPageReader struct {
 	colIdx        int
 	pgIndexReader *metadata.RowGroupPageIndexReader
 
-	nrows    int64
-	rowsSeen int64
-	mem      memory.Allocator
-	codec    compress.Codec
+	nrows        int64
+	rowsSeen     int64
+	mem          memory.Allocator
+	codec        compress.Codec
+	compressType compress.Compression
+
+	// Streaming (EnablePageStreaming) inputs, threaded from the schema/properties.
+	streamEnabled bool
+	physicalType  parquet.Type
+	maxRepLevel   int16
+	maxDefLevel   int16
 
 	curPageHdr        *format.PageHeader
 	pageOrd           int16
@@ -398,6 +443,7 @@ func (p *serializedPageReader) init(compressType compress.Compression, ctx *Cryp
 		return err
 	}
 	p.codec = codec
+	p.compressType = compressType
 
 	if ctx != nil {
 		p.cryptoCtx = *ctx
@@ -456,6 +502,7 @@ func (p *serializedPageReader) Reset(r parquet.BufferedReader, nrows int64, comp
 	if p.err != nil {
 		return
 	}
+	p.compressType = compressType
 	if ctx != nil {
 		p.cryptoCtx = *ctx
 		p.initDecryption()
@@ -737,6 +784,88 @@ func (p *serializedPageReader) SeekToPageWithRow(rowIdx int64) error {
 	return p.err
 }
 
+// drainAndClose returns the cleanup a streaming ValueBuffer runs on Close: consume
+// any unread compressed bytes from limit (so the underlying reader lands on the next
+// page header even when values were skipped) and close the decompressor, if any.
+func drainAndClose(limit io.Reader, closer io.Closer) func() error {
+	return func() error {
+		_, _ = io.Copy(io.Discard, limit)
+		if closer != nil {
+			return closer.Close()
+		}
+		return nil
+	}
+}
+
+// streamingEligible reports whether a data page with the given value encoding can
+// use the incremental streaming path (EnablePageStreaming). Ineligible pages fall
+// back to the materialized path.
+func (p *serializedPageReader) streamingEligible(enc format.Encoding) bool {
+	if !p.streamEnabled || enc != format.Encoding_PLAIN {
+		return false
+	}
+	if p.cryptoCtx.DataDecryptor != nil {
+		return false // decryption operates on whole buffers
+	}
+	switch p.physicalType {
+	case parquet.Types.ByteArray, parquet.Types.FixedLenByteArray:
+	default:
+		return false // only byte_array and fixed_len_byte_array are in scope
+	}
+	switch p.compressType {
+	case compress.Codecs.Uncompressed, compress.Codecs.Gzip, compress.Codecs.Brotli, compress.Codecs.Zstd:
+		return true
+	}
+	return false // snappy (raw-block) and lz4_raw are not stream-safe yet
+}
+
+// readLevelData peels the V1 rep+def level region off the decompressed stream r
+// into a buffer, using the same length rules LevelDecoder.SetData applies, leaving
+// r positioned at the first value byte. The rep region (if present) precedes the
+// def region, matching the layout initLevelDecodersV1 expects.
+func (p *serializedPageReader) readLevelData(r io.Reader, repEnc, defEnc format.Encoding, numValues int) ([]byte, error) {
+	var buf []byte
+	readOne := func(enc format.Encoding, maxLvl int16) error {
+		switch enc {
+		case format.Encoding_RLE:
+			var hdr [4]byte
+			if _, err := io.ReadFull(r, hdr[:]); err != nil {
+				return err
+			}
+			n := int(binary.LittleEndian.Uint32(hdr[:]))
+			start := len(buf)
+			buf = append(buf, hdr[:]...)
+			buf = append(buf, make([]byte, n)...)
+			if _, err := io.ReadFull(r, buf[start+4:]); err != nil {
+				return err
+			}
+		case format.Encoding_BIT_PACKED:
+			bitWidth := bits.Len64(uint64(maxLvl))
+			n := int(bitutil.BytesForBits(int64(numValues) * int64(bitWidth)))
+			start := len(buf)
+			buf = append(buf, make([]byte, n)...)
+			if _, err := io.ReadFull(r, buf[start:]); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("parquet: unsupported V1 level encoding %s for streaming", enc)
+		}
+		return nil
+	}
+
+	if p.maxRepLevel > 0 {
+		if err := readOne(repEnc, p.maxRepLevel); err != nil {
+			return nil, err
+		}
+	}
+	if p.maxDefLevel > 0 {
+		if err := readOne(defEnc, p.maxDefLevel); err != nil {
+			return nil, err
+		}
+	}
+	return buf, nil
+}
+
 func (p *serializedPageReader) Next() bool {
 	// Loop here because there may be unhandled page types that we skip until
 	// finding a page that we do know what to do with
@@ -808,11 +937,42 @@ func (p *serializedPageReader) Next() bool {
 				return false
 			}
 
+			firstRowIdx := p.rowsSeen
+			p.rowsSeen += int64(dataHeader.GetNumValues())
+
+			if p.streamingEligible(dataHeader.GetEncoding()) {
+				// Streaming path: rep|def|values share one compressed stream. Peel the
+				// levels off the decompressor into a small buffer, leaving it positioned
+				// at the first value byte to serve as the value source.
+				limit := io.LimitReader(p.r, int64(lenCompressed))
+				dec := p.codec.(compress.StreamingCodec).NewReader(limit)
+				levelBuf, err := p.readLevelData(dec, dataHeader.GetRepetitionLevelEncoding(),
+					dataHeader.GetDefinitionLevelEncoding(), int(dataHeader.GetNumValues()))
+				if err != nil {
+					_ = dec.Close()
+					p.err = err
+					return false
+				}
+				p.curPage = &DataPageV1{
+					page: page{
+						buf:         memory.NewBufferBytes(levelBuf),
+						typ:         p.curPageHdr.Type,
+						nvals:       dataHeader.GetNumValues(),
+						encoding:    dataHeader.GetEncoding(),
+						valueSource: streaming.NewStreamBuffer(dec, drainAndClose(limit, dec)),
+					},
+					defLvlEncoding:   dataHeader.GetDefinitionLevelEncoding(),
+					repLvlEncoding:   dataHeader.GetRepetitionLevelEncoding(),
+					uncompressedSize: int32(lenUncompressed),
+					statistics:       extractStats(dataHeader),
+					firstRowIndex:    firstRowIdx,
+				}
+				return true
+			}
+
 			p.dataPageBuffer.ResizeNoShrink(lenUncompressed)
 			buf := memory.NewBufferBytes(p.dataPageBuffer.Bytes())
 
-			firstRowIdx := p.rowsSeen
-			p.rowsSeen += int64(dataHeader.GetNumValues())
 			data, err := p.decompress(p.r, lenCompressed, buf.Bytes())
 			if err != nil {
 				p.err = err
@@ -850,11 +1010,7 @@ func (p *serializedPageReader) Next() bool {
 				return false
 			}
 
-			p.dataPageBuffer.ResizeNoShrink(lenUncompressed)
-			buf := memory.NewBufferBytes(p.dataPageBuffer.Bytes())
-
 			compressed := dataHeader.GetIsCompressed()
-			// extract stats
 			firstRowIdx := p.rowsSeen
 			p.rowsSeen += int64(dataHeader.GetNumRows())
 			levelsBytelen, ok := utils.Add(int(dataHeader.GetDefinitionLevelsByteLength()), int(dataHeader.GetRepetitionLevelsByteLength()))
@@ -862,6 +1018,45 @@ func (p *serializedPageReader) Next() bool {
 				p.err = errors.New("parquet: levels size too large (corrupt file?)")
 				return false
 			}
+
+			if p.streamingEligible(dataHeader.GetEncoding()) {
+				// V2: rep/def levels are uncompressed and precede the (separately
+				// compressed) value region. Read the level bytes raw, then wrap the
+				// remaining value bytes as the streaming source.
+				levelBuf := make([]byte, levelsBytelen)
+				if _, err := io.ReadFull(p.r, levelBuf); err != nil {
+					p.err = err
+					return false
+				}
+				limit := io.LimitReader(p.r, int64(lenCompressed-levelsBytelen))
+				var valReader io.Reader = limit
+				var closer io.Closer
+				if compressed {
+					dec := p.codec.(compress.StreamingCodec).NewReader(limit)
+					valReader, closer = dec, dec
+				}
+				p.curPage = &DataPageV2{
+					page: page{
+						buf:         memory.NewBufferBytes(levelBuf),
+						typ:         p.curPageHdr.Type,
+						nvals:       dataHeader.GetNumValues(),
+						encoding:    dataHeader.GetEncoding(),
+						valueSource: streaming.NewStreamBuffer(valReader, drainAndClose(limit, closer)),
+					},
+					nulls:            dataHeader.GetNumNulls(),
+					nrows:            dataHeader.GetNumRows(),
+					defLvlByteLen:    dataHeader.GetDefinitionLevelsByteLength(),
+					repLvlByteLen:    dataHeader.GetRepetitionLevelsByteLength(),
+					compressed:       compressed,
+					uncompressedSize: int32(lenUncompressed),
+					statistics:       extractStats(dataHeader),
+					firstRowIndex:    firstRowIdx,
+				}
+				return true
+			}
+
+			p.dataPageBuffer.ResizeNoShrink(lenUncompressed)
+			buf := memory.NewBufferBytes(p.dataPageBuffer.Bytes())
 
 			if p.cryptoCtx.DataDecryptor != nil {
 				if err := p.readV2Encrypted(p.r, lenCompressed, levelsBytelen, compressed, buf.Bytes()); err != nil {

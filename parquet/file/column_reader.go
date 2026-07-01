@@ -25,6 +25,7 @@ import (
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
+	"github.com/apache/arrow-go/v18/parquet/internal/encoding/streaming"
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/schema"
@@ -366,7 +367,9 @@ func (c *columnChunkReader) processPage() (bool, error) {
 		return true, err
 	}
 
-	return true, c.initDataDecoder(c.curPage, lvlByteLen)
+	// curPage is a *DataPageV1/*DataPageV2 here (the switch above returned for the
+	// other cases), so it always satisfies DataPage.
+	return true, c.initDataDecoder(c.curPage.(DataPage), lvlByteLen)
 }
 
 // read a new page from the page reader
@@ -456,15 +459,8 @@ func (c *columnChunkReader) initLevelDecodersV1(page *DataPageV1, repLvlEncoding
 	return levelsByteLen, nil
 }
 
-func (c *columnChunkReader) initDataDecoder(page Page, lvlByteLen int64) error {
-	buf := page.Data()
-	if int64(len(buf)) < lvlByteLen {
-		return errors.New("parquet: page smaller than size of encoded levels")
-	}
-
-	buf = buf[lvlByteLen:]
+func (c *columnChunkReader) initDataDecoder(page DataPage, lvlByteLen int64) error {
 	encoding := page.Encoding()
-
 	if isDictIndexEncoding(encoding) {
 		// if we're seeking or otherwise skipping pages, we may not have read
 		// the dictionary page in yet, so let's ensure we got it if one exists
@@ -498,8 +494,25 @@ func (c *columnChunkReader) initDataDecoder(page Page, lvlByteLen int64) error {
 	}
 
 	c.curEncoding = encoding
-	c.curDecoder.SetData(int(c.numBuffered), buf)
-	return nil
+	return c.setDecoderData(page, lvlByteLen)
+}
+
+// setDecoderData feeds the current decoder the page's values. A streaming page
+// (EnablePageStreaming) exposes its values as a ValueBuffer read incrementally via
+// SetSource; a materialized page hands the sub-slice after the encoded levels to
+// SetData. The same cached PLAIN decoder serves both. Eligibility guarantees a
+// streaming page's decoder implements streaming.Decoder.
+func (c *columnChunkReader) setDecoderData(page DataPage, lvlByteLen int64) error {
+	if src := page.ValueSource(); src != nil {
+		c.curDecoder.(streaming.Decoder).SetSource(int(c.numBuffered), src)
+		return nil
+	}
+
+	buf := page.Data()
+	if int64(len(buf)) < lvlByteLen {
+		return errors.New("parquet: page smaller than size of encoded levels")
+	}
+	return c.curDecoder.SetData(int(c.numBuffered), buf[lvlByteLen:])
 }
 
 // readDefinitionLevels decodes the definition levels from the page and returns
