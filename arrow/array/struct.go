@@ -169,8 +169,14 @@ func (a *Struct) String() string {
 func (a *Struct) newStructFieldWithParentValidityMask(fieldIndex int) arrow.Array {
 	field := a.Field(fieldIndex)
 	nullBitmapBytes := field.NullBitmapBytes()
-	maskedNullBitmapBytes := make([]byte, len(nullBitmapBytes))
-	copy(maskedNullBitmapBytes, nullBitmapBytes)
+	var maskedNullBitmapBytes []byte
+	if len(nullBitmapBytes) == 0 {
+		maskedNullBitmapBytes = make([]byte, int(bitutil.BytesForBits(int64(field.Len()))))
+		bitutil.SetBitsTo(maskedNullBitmapBytes, 0, int64(field.Len()), true)
+	} else {
+		maskedNullBitmapBytes = make([]byte, len(nullBitmapBytes))
+		copy(maskedNullBitmapBytes, nullBitmapBytes)
+	}
 	for i := 0; i < field.Len(); i++ {
 		if a.IsNull(i) {
 			bitutil.ClearBit(maskedNullBitmapBytes, i)
@@ -180,7 +186,9 @@ func (a *Struct) newStructFieldWithParentValidityMask(fieldIndex int) arrow.Arra
 	defer data.Release()
 	bufs := make([]*memory.Buffer, len(data.Buffers()))
 	copy(bufs, data.buffers)
-	bufs[0].Release()
+	if bufs[0] != nil {
+		bufs[0].Release()
+	}
 	bufs[0] = memory.NewBufferBytes(maskedNullBitmapBytes)
 	data.buffers = bufs
 	maskedField := MakeFromData(data)

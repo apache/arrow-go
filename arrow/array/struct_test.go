@@ -448,6 +448,33 @@ func TestStructArrayNullBitmap(t *testing.T) {
 	}
 }
 
+func TestStructArrayStringerMasksRequiredChildWithoutNullBitmap(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer pool.AssertSize(t, 0)
+
+	childData := array.NewData(arrow.PrimitiveTypes.Int32, 3, []*memory.Buffer{
+		nil,
+		memory.NewBufferBytes(arrow.Int32Traits.CastToBytes([]int32{1, 2, 3})),
+	}, nil, 0, 0)
+	defer childData.Release()
+	child := array.MakeFromData(childData)
+	defer child.Release()
+	require.Empty(t, child.NullBitmapBytes())
+
+	fields := []arrow.Field{
+		{Name: "f1", Type: arrow.PrimitiveTypes.Int32, Nullable: false},
+	}
+	nullBitmap := memory.NewBufferBytes([]byte{0x05})
+
+	arr, err := array.NewStructArrayWithFieldsAndNulls([]arrow.Array{child}, fields, nullBitmap, 1, 0)
+	require.NoError(t, err)
+	defer arr.Release()
+
+	assert.NotPanics(t, func() {
+		assert.Equal(t, "{[1 (null) 3]}", arr.String())
+	})
+}
+
 func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 	pool := memory.NewGoAllocator()
 
