@@ -132,38 +132,6 @@ func TestPageStreamingByteArrayRoundTrip(t *testing.T) {
 	}
 }
 
-// TestPageStreamingPublicPageReaderMaterializes verifies that the public
-// GetColumnPageReader path never produces streaming pages even when
-// EnablePageStreaming is set, so Page.Data() keeps returning the whole page.
-func TestPageStreamingPublicPageReaderMaterializes(t *testing.T) {
-	values := makeStreamTestValues([]int{65, 5000, 200, 9000})
-	data := writeStreamTestColumn(t, values, parquet.DataPageV1, compress.Codecs.Zstd)
-
-	props := parquet.NewReaderProperties(memory.DefaultAllocator)
-	props.EnablePageStreaming = true
-	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
-	require.NoError(t, err)
-	defer rdr.Close()
-
-	pr, err := rdr.RowGroup(0).GetColumnPageReader(0)
-	require.NoError(t, err)
-
-	sawData := false
-	for pr.Next() {
-		dp, ok := pr.Page().(file.DataPage)
-		if !ok {
-			continue
-		}
-		sawData = true
-		// A materialized page's Data() is the whole page; a streaming page would
-		// only hold the (empty, required-column) level region.
-		require.Equal(t, int(dp.UncompressedSize()), len(dp.Data()),
-			"public GetColumnPageReader must materialize the full page")
-	}
-	require.NoError(t, pr.Err())
-	require.True(t, sawData, "expected at least one data page")
-}
-
 func writeNullableStreamColumn(t *testing.T, values []parquet.ByteArray, defLevels []int16, ver parquet.DataPageVersion, codec compress.Compression) []byte {
 	t.Helper()
 	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{

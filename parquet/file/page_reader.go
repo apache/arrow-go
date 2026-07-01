@@ -492,8 +492,6 @@ func (p *serializedPageReader) Reset(r parquet.BufferedReader, nrows int64, comp
 	p.rowsSeen, p.pageOrd, p.nrows = 0, 0, nrows
 	p.curPageHdr, p.curPage, p.err = nil, nil, nil
 	p.r = r
-	// Reset does not receive the column schema, so it lacks the level info
-	// streaming needs; fall back to the materialized path.
 	p.columnCanStream = false
 
 	p.codec, p.err = compress.GetCodec(compressType)

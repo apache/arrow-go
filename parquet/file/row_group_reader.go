@@ -67,7 +67,7 @@ func (r *RowGroupReader) Column(i int) (ColumnChunkReader, error) {
 	}
 
 	descr := r.fileMetadata.Schema.Column(i)
-	pageRdr, err := r.getColumnPageReader(i, true)
+	pageRdr, err := r.GetColumnPageReader(i)
 	if err != nil {
 		return nil, fmt.Errorf("parquet: unable to initialize page reader: %w", err)
 	}
@@ -80,14 +80,7 @@ func (r *RowGroupReader) Column(i int) (ColumnChunkReader, error) {
 	}), nil
 }
 
-// GetColumnPageReader returns a page reader for the requested column. Pages it
-// produces are always fully materialized (Data() returns the whole page), so page
-// streaming is only enabled for the internal Column() path via getColumnPageReader.
 func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
-	return r.getColumnPageReader(i, false)
-}
-
-func (r *RowGroupReader) getColumnPageReader(i int, allowStreaming bool) (PageReader, error) {
 	col, err := r.rgMetadata.ColumnChunk(i)
 	if err != nil {
 		return nil, err
@@ -137,10 +130,9 @@ func (r *RowGroupReader) getColumnPageReader(i int, allowStreaming bool) (PageRe
 			maxPageHeaderSize: defaultMaxPageHeaderSize,
 			nrows:             col.NumValues(),
 			mem:               r.props.Allocator(),
-			// Streaming (EnablePageStreaming) inputs; only the internal Column() path
-			// (allowStreaming) and the unencrypted branch are ever eligible, so
-			// columnCanStream is left false elsewhere.
-			columnCanStream: allowStreaming && r.props.EnablePageStreaming &&
+			// Streaming (EnablePageStreaming) inputs; only the unencrypted path is
+			// ever streaming-eligible, so columnCanStream is left false elsewhere.
+			columnCanStream: r.props.EnablePageStreaming &&
 				streamablePhysicalType(descr.PhysicalType()) &&
 				streamableCodec(col.Compression()),
 			maxRepLevel: descr.MaxRepetitionLevel(),
