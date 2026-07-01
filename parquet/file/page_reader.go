@@ -412,10 +412,6 @@ type serializedPageReader struct {
 }
 
 func (p *serializedPageReader) Close() error {
-	if p.curPage != nil {
-		p.curPage.Release()
-		p.curPage = nil
-	}
 	if p.decompressBuffer != nil {
 		p.decompressBuffer.Release()
 		p.dictPageBuffer.Release()
