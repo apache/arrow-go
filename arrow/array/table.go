@@ -204,7 +204,7 @@ func (tbl *simpleTable) AddColumn(i int, field arrow.Field, column arrow.Column)
 	if int64(column.Len()) != tbl.rows {
 		return nil, fmt.Errorf("arrow/array: column length mismatch: %d != %d", column.Len(), tbl.rows)
 	}
-	if field.Type != column.DataType() {
+	if !arrow.TypeEqual(field.Type, column.DataType()) {
 		return nil, fmt.Errorf("arrow/array: column type mismatch: %v != %v", field.Type, column.DataType())
 	}
 	newSchema, err := tbl.schema.AddField(i, field)
