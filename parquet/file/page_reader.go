@@ -101,11 +101,6 @@ func (p *page) Encoding() format.Encoding { return p.encoding }
 
 func (p *page) ValueSource() streaming.ValueBuffer { return p.valueSource }
 
-// LevelBuffer returns the bytes holding this page's rep/def level region. For a
-// materialized page that is the whole page (levels sit at the front); for a
-// streaming page it is only the level region, with values read from ValueSource.
-func (p *page) LevelBuffer() []byte { return p.buf.Bytes() }
-
 func (p *page) setStreamingValues(levelBuf []byte, valReader, limit io.Reader, closer io.Closer) {
 	p.buf = memory.NewBufferBytes(levelBuf)
 	p.valueSource = streaming.NewStreamBuffer(valReader, drainAndClose(limit, closer))
@@ -245,6 +240,8 @@ func (d *DataPageV1) RepetitionLevelEncoding() parquet.Encoding {
 	return parquet.Encoding(d.repLvlEncoding)
 }
 
+func (d *DataPageV1) levelBuffer() []byte { return d.buf.Bytes() }
+
 // DataPageV2 is the representation of the V2 data page from the parquet.thrift spec
 type DataPageV2 struct {
 	page
@@ -322,6 +319,8 @@ func (d *DataPageV2) UncompressedSize() int32 { return d.uncompressedSize }
 
 // Statistics are the encoded statistics in the data page
 func (d *DataPageV2) Statistics() metadata.EncodedStatistics { return d.statistics }
+
+func (d *DataPageV2) levelBuffer() []byte { return d.buf.Bytes() }
 
 // NumNulls is the reported number of nulls in this datapage
 func (d *DataPageV2) NumNulls() int32 { return d.nulls }

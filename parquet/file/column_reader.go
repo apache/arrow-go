@@ -399,7 +399,7 @@ func (c *columnChunkReader) readNewPage() bool {
 func (c *columnChunkReader) initLevelDecodersV2(page *DataPageV2) (int64, error) {
 	c.numBuffered = int64(page.nvals)
 	c.numDecoded = 0
-	buf := page.LevelBuffer()
+	buf := page.levelBuffer()
 	totalLvlLen := int64(page.repLvlByteLen) + int64(page.defLvlByteLen)
 
 	if totalLvlLen > int64(len(buf)) {
@@ -429,7 +429,7 @@ func (c *columnChunkReader) initLevelDecodersV1(page *DataPageV1, repLvlEncoding
 	c.numBuffered = int64(page.nvals)
 	c.numDecoded = 0
 
-	buf := page.LevelBuffer()
+	buf := page.levelBuffer()
 	maxSize := len(buf)
 	levelsByteLen := int64(0)
 
