@@ -367,8 +367,7 @@ func (c *columnChunkReader) processPage() (bool, error) {
 		return true, err
 	}
 
-	// curPage is a DataPage here.
-	return true, c.initDataDecoder(c.curPage.(DataPage), lvlByteLen)
+	return true, c.initDataDecoder(c.curPage, lvlByteLen)
 }
 
 // read a new page from the page reader
@@ -458,7 +457,7 @@ func (c *columnChunkReader) initLevelDecodersV1(page *DataPageV1, repLvlEncoding
 	return levelsByteLen, nil
 }
 
-func (c *columnChunkReader) initDataDecoder(page DataPage, lvlByteLen int64) error {
+func (c *columnChunkReader) initDataDecoder(page Page, lvlByteLen int64) error {
 	encoding := page.Encoding()
 
 	if isDictIndexEncoding(encoding) {
@@ -497,10 +496,19 @@ func (c *columnChunkReader) initDataDecoder(page DataPage, lvlByteLen int64) err
 	return c.setDecoderData(page, lvlByteLen)
 }
 
-func (c *columnChunkReader) setDecoderData(page DataPage, lvlByteLen int64) error {
-	if src := page.ValueSource(); src != nil {
-		c.curDecoder.(streaming.Decoder).SetSource(int(c.numBuffered), src)
-		return nil
+// streamingPage is implemented by the built-in data pages that expose an
+// incremental value source. It is unexported so ValueSource stays off the public
+// DataPage interface (adding a method there would break external implementations).
+type streamingPage interface {
+	ValueSource() streaming.ValueBuffer
+}
+
+func (c *columnChunkReader) setDecoderData(page Page, lvlByteLen int64) error {
+	if sp, ok := page.(streamingPage); ok {
+		if src := sp.ValueSource(); src != nil {
+			c.curDecoder.(streaming.Decoder).SetSource(int(c.numBuffered), src)
+			return nil
+		}
 	}
 
 	buf := page.Data()

@@ -136,9 +136,6 @@ type DataPage interface {
 	// FirstRowIndex returns the row ordinal within the row group
 	// to the first row in the data page, or -1 if not set.
 	FirstRowIndex() int64
-	// ValueSource returns the streaming value source for a streaming page, or nil
-	// for a materialized page.
-	ValueSource() streaming.ValueBuffer
 }
 
 // Create some pools to use for reusing the data page objects themselves so that
