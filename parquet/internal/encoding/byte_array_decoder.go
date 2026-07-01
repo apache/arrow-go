@@ -67,7 +67,8 @@ func (pbad *PlainByteArrayDecoder) decodeStreaming(out []parquet.ByteArray) (int
 	for i := 0; i < max; i++ {
 		if len(buf)-pos < 4 {
 			var err error
-			if buf, err = pbad.src.Fill(pos, 4); err != nil {
+			pbad.src.Advance(pos)
+			if buf, err = pbad.src.Fill(4); err != nil {
 				return i, errors.New("parquet: eof reading bytearray")
 			}
 			pos = 0
@@ -78,7 +79,8 @@ func (pbad *PlainByteArrayDecoder) decodeStreaming(out []parquet.ByteArray) (int
 		}
 		if len(buf)-pos < 4+byteLen {
 			var err error
-			if buf, err = pbad.src.Fill(pos, 4+byteLen); err != nil {
+			pbad.src.Advance(pos)
+			if buf, err = pbad.src.Fill(4 + byteLen); err != nil {
 				return i, errors.New("parquet: eof reading bytearray")
 			}
 			pos = 0
@@ -91,9 +93,7 @@ func (pbad *PlainByteArrayDecoder) decodeStreaming(out []parquet.ByteArray) (int
 		out[i] = v
 		pos += 4 + byteLen
 	}
-	if _, err := pbad.src.Fill(pos, 0); err != nil {
-		return max, err
-	}
+	pbad.src.Advance(pos)
 	pbad.nvals -= max
 	return max, nil
 }
@@ -105,7 +105,8 @@ func (pbad *PlainByteArrayDecoder) discardStreaming(n int) (int, error) {
 	for i := 0; i < n; i++ {
 		if len(buf)-pos < 4 {
 			var err error
-			if buf, err = pbad.src.Fill(pos, 4); err != nil {
+			pbad.src.Advance(pos)
+			if buf, err = pbad.src.Fill(4); err != nil {
 				return i, errors.New("parquet: eof skipping bytearray values")
 			}
 			pos = 0
@@ -116,16 +117,15 @@ func (pbad *PlainByteArrayDecoder) discardStreaming(n int) (int, error) {
 		}
 		if len(buf)-pos < 4+valueLen {
 			var err error
-			if buf, err = pbad.src.Fill(pos, 4+valueLen); err != nil {
+			pbad.src.Advance(pos)
+			if buf, err = pbad.src.Fill(4 + valueLen); err != nil {
 				return i, errors.New("parquet: eof skipping bytearray values")
 			}
 			pos = 0
 		}
 		pos += 4 + valueLen
 	}
-	if _, err := pbad.src.Fill(pos, 0); err != nil {
-		return n, err
-	}
+	pbad.src.Advance(pos)
 	pbad.nvals -= n
 	return n, nil
 }

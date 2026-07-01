@@ -22,15 +22,16 @@ package streaming
 import "io"
 
 // ValueBuffer is the incremental byte source a streaming decoder reads from, over
-// one data page's value stream. A decoder indexes Bytes() directly and calls Fill
-// only when short; the page Closes it when done.
+// one data page's value stream. A decoder indexes Bytes() directly, calls Advance
+// as it consumes, and Fill only when short; the page Closes it when done.
 type ValueBuffer interface {
 	// Bytes returns the currently available bytes, valid until the next Fill.
 	Bytes() []byte
-	// Fill drops the first consumed bytes, then ensures at least need contiguous
-	// bytes are available (growing to fit an oversized value), returning the new
-	// window or io.ErrUnexpectedEOF if fewer than need remain.
-	Fill(consumed, need int) ([]byte, error)
+	// Advance marks the first n bytes of the current window as consumed.
+	Advance(n int)
+	// Fill ensures at least need contiguous bytes are available (growing to fit an
+	// oversized value), returning the window or io.ErrUnexpectedEOF if fewer remain.
+	Fill(need int) ([]byte, error)
 	io.Closer
 }
 
@@ -40,7 +41,7 @@ type Decoder interface {
 	SetSource(nvals int, src ValueBuffer)
 }
 
-const defaultStreamBufferSize = 1<<20
+const defaultStreamBufferSize = 1 << 20
 
 type streamBuffer struct {
 	r       io.Reader
@@ -57,6 +58,8 @@ func NewStreamBuffer(r io.Reader, onClose func() error) ValueBuffer {
 
 func (s *streamBuffer) Bytes() []byte { return s.buf[s.off:s.n] }
 
+func (s *streamBuffer) Advance(n int) { s.off += n }
+
 func (s *streamBuffer) Close() error {
 	if s.onClose != nil {
 		return s.onClose()
@@ -64,8 +67,7 @@ func (s *streamBuffer) Close() error {
 	return nil
 }
 
-func (s *streamBuffer) Fill(consumed, need int) ([]byte, error) {
-	s.off += consumed
+func (s *streamBuffer) Fill(need int) ([]byte, error) {
 	if s.n-s.off >= need {
 		return s.buf[s.off:s.n], nil
 	}

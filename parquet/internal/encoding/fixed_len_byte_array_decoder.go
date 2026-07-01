@@ -58,7 +58,8 @@ func (pflba *PlainFixedLenByteArrayDecoder) decodeStreaming(out []parquet.FixedL
 	for i := 0; i < max; i++ {
 		if len(buf)-pos < w {
 			var err error
-			if buf, err = pflba.src.Fill(pos, w); err != nil {
+			pflba.src.Advance(pos)
+			if buf, err = pflba.src.Fill(w); err != nil {
 				return i, errors.New("parquet: eof exception")
 			}
 			pos = 0
@@ -68,9 +69,7 @@ func (pflba *PlainFixedLenByteArrayDecoder) decodeStreaming(out []parquet.FixedL
 		out[i] = v
 		pos += w
 	}
-	if _, err := pflba.src.Fill(pos, 0); err != nil {
-		return max, err
-	}
+	pflba.src.Advance(pos)
 	pflba.nvals -= max
 	return max, nil
 }
@@ -78,12 +77,10 @@ func (pflba *PlainFixedLenByteArrayDecoder) decodeStreaming(out []parquet.FixedL
 func (pflba *PlainFixedLenByteArrayDecoder) discardStreaming(n int) (int, error) {
 	n = min(n, pflba.nvals)
 	need := n * pflba.typeLen
-	if _, err := pflba.src.Fill(0, need); err != nil {
+	if _, err := pflba.src.Fill(need); err != nil {
 		return 0, errors.New("parquet: eof exception")
 	}
-	if _, err := pflba.src.Fill(need, 0); err != nil {
-		return 0, err
-	}
+	pflba.src.Advance(need)
 	pflba.nvals -= n
 	return n, nil
 }

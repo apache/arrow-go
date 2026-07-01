@@ -30,17 +30,19 @@ func TestStreamBuffer(t *testing.T) {
 	data := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
 	vb := streaming.NewStreamBuffer(bytes.NewReader(data), nil)
 
-	buf, err := vb.Fill(0, 4)
+	buf, err := vb.Fill(4)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(buf), 4)
 	assert.Equal(t, []byte{0, 1, 2, 3}, buf[:4])
 
-	buf, err = vb.Fill(4, 4)
+	vb.Advance(4)
+	buf, err = vb.Fill(4)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(buf), 4)
 	assert.Equal(t, []byte{4, 5, 6, 7}, buf[:4])
 
-	_, err = vb.Fill(4, 4)
+	vb.Advance(4)
+	_, err = vb.Fill(4)
 	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
 }
 
@@ -48,7 +50,7 @@ func TestStreamBufferGrowsForOversizedValue(t *testing.T) {
 	data := bytes.Repeat([]byte{0xAB}, 1<<20) // 1 MiB > default buffer
 	vb := streaming.NewStreamBuffer(bytes.NewReader(data), nil)
 
-	buf, err := vb.Fill(0, len(data))
+	buf, err := vb.Fill(len(data))
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(buf), len(data))
 	assert.Equal(t, data, buf[:len(data)])
