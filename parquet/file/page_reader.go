@@ -408,6 +408,10 @@ type serializedPageReader struct {
 }
 
 func (p *serializedPageReader) Close() error {
+	if p.curPage != nil {
+		p.curPage.Release()
+		p.curPage = nil
+	}
 	if p.decompressBuffer != nil {
 		p.decompressBuffer.Release()
 		p.dictPageBuffer.Release()
@@ -430,6 +434,11 @@ func (p *serializedPageReader) init(compressType compress.Compression, ctx *Cryp
 		return err
 	}
 	p.codec = codec
+	if _, ok := codec.(compress.StreamingCodec); !ok {
+		// A codec registered via compress.RegisterCodec need not implement
+		// streaming; fall back to the materialized path in that case.
+		p.columnCanStream = false
+	}
 
 	if ctx != nil {
 		p.cryptoCtx = *ctx
@@ -483,6 +492,9 @@ func (p *serializedPageReader) Reset(r parquet.BufferedReader, nrows int64, comp
 	p.rowsSeen, p.pageOrd, p.nrows = 0, 0, nrows
 	p.curPageHdr, p.curPage, p.err = nil, nil, nil
 	p.r = r
+	// Reset does not receive the column schema, so it lacks the level info
+	// streaming needs; fall back to the materialized path.
+	p.columnCanStream = false
 
 	p.codec, p.err = compress.GetCodec(compressType)
 	if p.err != nil {
@@ -950,9 +962,7 @@ func (p *serializedPageReader) Next() bool {
 				levelBuf, err := p.readLevelData(valReader, dataHeader.GetRepetitionLevelEncoding(),
 					dataHeader.GetDefinitionLevelEncoding(), int(dataHeader.GetNumValues()))
 				if err != nil {
-					if closer != nil {
-						_ = closer.Close()
-					}
+					_ = drainAndClose(limit, closer)()
 					p.err = err
 					return false
 				}

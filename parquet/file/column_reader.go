@@ -506,7 +506,11 @@ type streamingPage interface {
 func (c *columnChunkReader) setDecoderData(page Page, lvlByteLen int64) error {
 	if sp, ok := page.(streamingPage); ok {
 		if src := sp.ValueSource(); src != nil {
-			c.curDecoder.(streaming.Decoder).SetSource(int(c.numBuffered), src)
+			sd, ok := c.curDecoder.(streaming.Decoder)
+			if !ok {
+				return fmt.Errorf("parquet: streaming page but %s decoder does not support streaming", c.descr.PhysicalType())
+			}
+			sd.SetSource(int(c.numBuffered), src)
 			return nil
 		}
 	}
