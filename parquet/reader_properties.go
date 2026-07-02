@@ -44,6 +44,13 @@ type ReaderProperties struct {
 	// this to true can optimize memory usage for the reader. Additionally, this can decrease
 	// the amount of data retrieved when only needs to access small portions of the parquet file.
 	BufferedStreamEnabled bool
+	// EnablePageStreaming, when true, decodes eligible data pages incrementally instead
+	// of materializing the full uncompressed page, keeping peak memory near the batch
+	// size plus the level buffers. Eligible pages are PLAIN-encoded V1/V2 data pages of a
+	// streaming-capable, unencrypted codec (UNCOMPRESSED/GZIP/BROTLI/ZSTD) for a supported
+	// physical type; every other page falls back silently to the materialized path.
+	// Default false (no behavior change).
+	EnablePageStreaming bool
 }
 
 type BufferedReader interface {
@@ -62,7 +69,7 @@ func NewReaderProperties(alloc memory.Allocator) *ReaderProperties {
 	if alloc == nil {
 		alloc = memory.DefaultAllocator
 	}
-	return &ReaderProperties{alloc, DefaultBufSize, nil, false}
+	return &ReaderProperties{alloc: alloc, BufferSize: DefaultBufSize}
 }
 
 // Allocator returns the allocator that the properties were initialized with
