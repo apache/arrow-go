@@ -138,7 +138,7 @@ func chunkedEqual(left, right *arrow.Chunked, opt equalOption) bool {
 		return true
 	case left.Len() != right.Len():
 		return false
-	case opt.nullable && left.NullN() != right.NullN():
+	case opt.nullable && hasTopLevelValidityBitmap(left.DataType().ID()) && left.NullN() != right.NullN():
 		return false
 	case !arrow.TypeEqual(left.DataType(), right.DataType()):
 		return false
@@ -165,7 +165,7 @@ func chunkedApproxEqual(left, right *arrow.Chunked, opt equalOption) bool {
 		return true
 	case left.Len() != right.Len():
 		return false
-	case opt.nullable && left.NullN() != right.NullN():
+	case opt.nullable && hasTopLevelValidityBitmap(left.DataType().ID()) && left.NullN() != right.NullN():
 		return false
 	case !arrow.TypeEqual(left.DataType(), right.DataType()):
 		return false

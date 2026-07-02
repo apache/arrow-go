@@ -130,6 +130,7 @@ func (a *List) MarshalJSON() ([]byte, error) {
 }
 
 func arrayEqualList(left, right *List, opt equalOption) bool {
+	childOpt := withNullable(opt, left.DataType().(arrow.ListLikeType).ElemField().Nullable)
 	for i := 0; i < left.Len(); i++ {
 		if opt.nullable && left.IsNull(i) {
 			continue
@@ -139,7 +140,7 @@ func arrayEqualList(left, right *List, opt equalOption) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return equal(l, r, opt)
+			return equal(l, r, childOpt)
 		}()
 		if !o {
 			return false
@@ -262,6 +263,7 @@ func (a *LargeList) MarshalJSON() ([]byte, error) {
 }
 
 func arrayEqualLargeList(left, right *LargeList, opt equalOption) bool {
+	childOpt := withNullable(opt, left.DataType().(arrow.ListLikeType).ElemField().Nullable)
 	for i := 0; i < left.Len(); i++ {
 		if opt.nullable && left.IsNull(i) {
 			continue
@@ -271,7 +273,7 @@ func arrayEqualLargeList(left, right *LargeList, opt equalOption) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return equal(l, r, opt)
+			return equal(l, r, childOpt)
 		}()
 		if !o {
 			return false
@@ -737,6 +739,7 @@ func (a *ListView) MarshalJSON() ([]byte, error) {
 }
 
 func arrayEqualListView(left, right *ListView, opt equalOption) bool {
+	childOpt := withNullable(opt, left.DataType().(arrow.ListLikeType).ElemField().Nullable)
 	for i := 0; i < left.Len(); i++ {
 		if opt.nullable && left.IsNull(i) {
 			continue
@@ -746,7 +749,7 @@ func arrayEqualListView(left, right *ListView, opt equalOption) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return equal(l, r, opt)
+			return equal(l, r, childOpt)
 		}()
 		if !o {
 			return false
@@ -884,6 +887,7 @@ func (a *LargeListView) MarshalJSON() ([]byte, error) {
 }
 
 func arrayEqualLargeListView(left, right *LargeListView, opt equalOption) bool {
+	childOpt := withNullable(opt, left.DataType().(arrow.ListLikeType).ElemField().Nullable)
 	for i := 0; i < left.Len(); i++ {
 		if opt.nullable && left.IsNull(i) {
 			continue
@@ -893,7 +897,7 @@ func arrayEqualLargeListView(left, right *LargeListView, opt equalOption) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return equal(l, r, opt)
+			return equal(l, r, childOpt)
 		}()
 		if !o {
 			return false
