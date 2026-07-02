@@ -685,10 +685,22 @@ func (w *columnWriter) doBatches(total int64, repLevels []int16, action func(off
 	)
 	for batchStart = 0; batchStart+batchSize < int64(len(repLevels)); batchStart += batch {
 		// check one past the last value of the batch for if it's a new row
-		// if it's not, shrink the batch and feel back to the beginning of a
-		// previous row boundary to end on
+		// if it's not, shrink the batch back to the beginning of a previous
+		// row boundary to end on.
 		batch = batchSize
-		for ; repLevels[batchStart+batch] != 0; batch-- {
+		for batch > 0 && repLevels[batchStart+batch] != 0 {
+			batch--
+		}
+		// if the batch shrank all the way to zero there is no row boundary
+		// at or before the requested split (a single row is wider than the
+		// batch size). growing forward to the next row boundary keeps the
+		// whole row in one batch rather than looping forever on a zero-length
+		// batch.
+		if batch == 0 {
+			batch = batchSize
+			for batchStart+batch < int64(len(repLevels)) && repLevels[batchStart+batch] != 0 {
+				batch++
+			}
 		}
 		// batchStart <--> batch now begins and ends on a row boundary!
 		action(batchStart, batch)
