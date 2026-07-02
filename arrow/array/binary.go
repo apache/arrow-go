@@ -152,8 +152,8 @@ func (a *Binary) setData(data *Data) {
 	}
 }
 
-func (a *Binary) GetOneForMarshal(i int) interface{} {
-	if a.IsNull(i) {
+func (a *Binary) GetOneForMarshal(i int, nullable bool) interface{} {
+	if nullable && a.IsNull(i) {
 		return nil
 	}
 	return a.Value(i)
@@ -162,7 +162,7 @@ func (a *Binary) GetOneForMarshal(i int) interface{} {
 func (a *Binary) MarshalJSON() ([]byte, error) {
 	vals := make([]interface{}, a.Len())
 	for i := 0; i < a.Len(); i++ {
-		vals[i] = a.GetOneForMarshal(i)
+		vals[i] = a.GetOneForMarshal(i, true)
 	}
 	// golang marshal standard says that []byte will be marshalled
 	// as a base64-encoded string
@@ -223,9 +223,9 @@ func (a *Binary) ValidateFull() error {
 	return nil
 }
 
-func arrayEqualBinary(left, right *Binary) bool {
+func arrayEqualBinary(left, right *Binary, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if !bytes.Equal(left.Value(i), right.Value(i)) {
@@ -346,8 +346,8 @@ func (a *LargeBinary) setData(data *Data) {
 	}
 }
 
-func (a *LargeBinary) GetOneForMarshal(i int) interface{} {
-	if a.IsNull(i) {
+func (a *LargeBinary) GetOneForMarshal(i int, nullable bool) interface{} {
+	if nullable && a.IsNull(i) {
 		return nil
 	}
 	return a.Value(i)
@@ -356,7 +356,7 @@ func (a *LargeBinary) GetOneForMarshal(i int) interface{} {
 func (a *LargeBinary) MarshalJSON() ([]byte, error) {
 	vals := make([]interface{}, a.Len())
 	for i := 0; i < a.Len(); i++ {
-		vals[i] = a.GetOneForMarshal(i)
+		vals[i] = a.GetOneForMarshal(i, true)
 	}
 	// golang marshal standard says that []byte will be marshalled
 	// as a base64-encoded string
@@ -417,9 +417,9 @@ func (a *LargeBinary) ValidateFull() error {
 	return nil
 }
 
-func arrayEqualLargeBinary(left, right *LargeBinary) bool {
+func arrayEqualLargeBinary(left, right *LargeBinary, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if !bytes.Equal(left.Value(i), right.Value(i)) {
@@ -522,8 +522,8 @@ func (a *BinaryView) ValueStr(i int) string {
 	return base64.StdEncoding.EncodeToString(a.Value(i))
 }
 
-func (a *BinaryView) GetOneForMarshal(i int) interface{} {
-	if a.IsNull(i) {
+func (a *BinaryView) GetOneForMarshal(i int, nullable bool) interface{} {
+	if nullable && a.IsNull(i) {
 		return nil
 	}
 	return a.Value(i)
@@ -532,17 +532,17 @@ func (a *BinaryView) GetOneForMarshal(i int) interface{} {
 func (a *BinaryView) MarshalJSON() ([]byte, error) {
 	vals := make([]interface{}, a.Len())
 	for i := 0; i < a.Len(); i++ {
-		vals[i] = a.GetOneForMarshal(i)
+		vals[i] = a.GetOneForMarshal(i, true)
 	}
 	// golang marshal standard says that []byte will be marshalled
 	// as a base64-encoded string
 	return json.Marshal(vals)
 }
 
-func arrayEqualBinaryView(left, right *BinaryView) bool {
+func arrayEqualBinaryView(left, right *BinaryView, opt equalOption) bool {
 	leftBufs, rightBufs := left.dataBuffers, right.dataBuffers
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if !left.ValueHeader(i).Equals(leftBufs, right.ValueHeader(i), rightBufs) {

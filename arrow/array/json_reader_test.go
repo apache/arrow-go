@@ -253,7 +253,7 @@ func recordBatchToNDJSON(t *testing.T, rec arrow.RecordBatch) string {
 	defer arr.Release()
 
 	for pos := range arr.Len() {
-		s, err := json.Marshal(arr.GetOneForMarshal(pos))
+		s, err := json.Marshal(arr.GetOneForMarshal(pos, true))
 		assert.NoError(t, err)
 		sb.Write(s)
 		sb.WriteByte('\n')

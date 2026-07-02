@@ -26,7 +26,11 @@ import (
 )
 
 // RecordEqual reports whether the two provided records are equal.
-func RecordEqual(left, right arrow.RecordBatch) bool {
+func RecordEqual(left, right arrow.RecordBatch, opts ...EqualOption) bool {
+	return recordEqual(left, right, newEqualOption(opts...))
+}
+
+func recordEqual(left, right arrow.RecordBatch, opt equalOption) bool {
 	switch {
 	case left.NumCols() != right.NumCols():
 		return false
@@ -35,9 +39,17 @@ func RecordEqual(left, right arrow.RecordBatch) bool {
 	}
 
 	for i := range left.Columns() {
+		lf := left.Schema().Field(i)
+		rf := left.Schema().Field(i)
+		if !lf.Equal(rf) {
+			return false
+		}
+
+		opt.nullable = lf.Nullable
+
 		lc := left.Column(i)
 		rc := right.Column(i)
-		if !Equal(lc, rc) {
+		if !equal(lc, rc, opt) {
 			return false
 		}
 	}
@@ -47,6 +59,10 @@ func RecordEqual(left, right arrow.RecordBatch) bool {
 // RecordApproxEqual reports whether the two provided records are approximately equal.
 // For non-floating point columns, it is equivalent to RecordEqual.
 func RecordApproxEqual(left, right arrow.RecordBatch, opts ...EqualOption) bool {
+	return recordApproxEqual(left, right, newEqualOption(opts...))
+}
+
+func recordApproxEqual(left, right arrow.RecordBatch, opt equalOption) bool {
 	switch {
 	case left.NumCols() != right.NumCols():
 		return false
@@ -54,9 +70,15 @@ func RecordApproxEqual(left, right arrow.RecordBatch, opts ...EqualOption) bool 
 		return false
 	}
 
-	opt := newEqualOption(opts...)
-
 	for i := range left.Columns() {
+		lf := left.Schema().Field(i)
+		rf := left.Schema().Field(i)
+		if !lf.Equal(rf) {
+			return false
+		}
+
+		opt.nullable = lf.Nullable
+
 		lc := left.Column(i)
 		rc := right.Column(i)
 		if !arrayApproxEqual(lc, rc, opt) {
@@ -106,13 +128,17 @@ func chunkedBinaryApply(left, right *arrow.Chunked, fn func(left arrow.Array, lb
 }
 
 // ChunkedEqual reports whether two chunked arrays are equal regardless of their chunkings
-func ChunkedEqual(left, right *arrow.Chunked) bool {
+func ChunkedEqual(left, right *arrow.Chunked, opts ...EqualOption) bool {
+	return chunkedEqual(left, right, newEqualOption(opts...))
+}
+
+func chunkedEqual(left, right *arrow.Chunked, opt equalOption) bool {
 	switch {
 	case left == right:
 		return true
 	case left.Len() != right.Len():
 		return false
-	case left.NullN() != right.NullN():
+	case opt.nullable && hasTopLevelValidityBitmap(left.DataType().ID()) && left.NullN() != right.NullN():
 		return false
 	case !arrow.TypeEqual(left.DataType(), right.DataType()):
 		return false
@@ -120,7 +146,7 @@ func ChunkedEqual(left, right *arrow.Chunked) bool {
 
 	var isequal = true
 	chunkedBinaryApply(left, right, func(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64) bool {
-		isequal = SliceEqual(left, lbeg, lend, right, rbeg, rend)
+		isequal = sliceEqual(left, lbeg, lend, right, rbeg, rend, opt)
 		return isequal
 	})
 
@@ -130,12 +156,16 @@ func ChunkedEqual(left, right *arrow.Chunked) bool {
 // ChunkedApproxEqual reports whether two chunked arrays are approximately equal regardless of their chunkings
 // for non-floating point arrays, this is equivalent to ChunkedEqual
 func ChunkedApproxEqual(left, right *arrow.Chunked, opts ...EqualOption) bool {
+	return chunkedApproxEqual(left, right, newEqualOption(opts...))
+}
+
+func chunkedApproxEqual(left, right *arrow.Chunked, opt equalOption) bool {
 	switch {
 	case left == right:
 		return true
 	case left.Len() != right.Len():
 		return false
-	case left.NullN() != right.NullN():
+	case opt.nullable && hasTopLevelValidityBitmap(left.DataType().ID()) && left.NullN() != right.NullN():
 		return false
 	case !arrow.TypeEqual(left.DataType(), right.DataType()):
 		return false
@@ -143,7 +173,7 @@ func ChunkedApproxEqual(left, right *arrow.Chunked, opts ...EqualOption) bool {
 
 	var isequal = true
 	chunkedBinaryApply(left, right, func(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64) bool {
-		isequal = SliceApproxEqual(left, lbeg, lend, right, rbeg, rend, opts...)
+		isequal = sliceApproxEqual(left, lbeg, lend, right, rbeg, rend, opt)
 		return isequal
 	})
 
@@ -151,7 +181,11 @@ func ChunkedApproxEqual(left, right *arrow.Chunked, opts ...EqualOption) bool {
 }
 
 // TableEqual returns if the two tables have the same data in the same schema
-func TableEqual(left, right arrow.Table) bool {
+func TableEqual(left, right arrow.Table, opts ...EqualOption) bool {
+	return tableEqual(left, right, newEqualOption(opts...))
+}
+
+func tableEqual(left, right arrow.Table, opt equalOption) bool {
 	switch {
 	case left.NumCols() != right.NumCols():
 		return false
@@ -160,21 +194,29 @@ func TableEqual(left, right arrow.Table) bool {
 	}
 
 	for i := 0; int64(i) < left.NumCols(); i++ {
-		lc := left.Column(i)
-		rc := right.Column(i)
-		if !lc.Field().Equal(rc.Field()) {
+		lf := left.Schema().Field(i)
+		rf := left.Schema().Field(i)
+		if !lf.Equal(rf) {
 			return false
 		}
 
-		if !ChunkedEqual(lc.Data(), rc.Data()) {
+		opt.nullable = lf.Nullable
+
+		lc := left.Column(i)
+		rc := right.Column(i)
+		if !chunkedEqual(lc.Data(), rc.Data(), opt) {
 			return false
 		}
 	}
 	return true
 }
 
-// TableEqual returns if the two tables have the approximately equal data in the same schema
+// TableApproxEqual returns if the two tables have the approximately equal data in the same schema
 func TableApproxEqual(left, right arrow.Table, opts ...EqualOption) bool {
+	return tableApproxEqual(left, right, newEqualOption(opts...))
+}
+
+func tableApproxEqual(left, right arrow.Table, opt equalOption) bool {
 	switch {
 	case left.NumCols() != right.NumCols():
 		return false
@@ -183,13 +225,17 @@ func TableApproxEqual(left, right arrow.Table, opts ...EqualOption) bool {
 	}
 
 	for i := 0; int64(i) < left.NumCols(); i++ {
-		lc := left.Column(i)
-		rc := right.Column(i)
-		if !lc.Field().Equal(rc.Field()) {
+		lf := left.Schema().Field(i)
+		rf := left.Schema().Field(i)
+		if !lf.Equal(rf) {
 			return false
 		}
 
-		if !ChunkedApproxEqual(lc.Data(), rc.Data(), opts...) {
+		opt.nullable = lf.Nullable
+
+		lc := left.Column(i)
+		rc := right.Column(i)
+		if !chunkedApproxEqual(lc.Data(), rc.Data(), opt) {
 			return false
 		}
 	}
@@ -197,13 +243,17 @@ func TableApproxEqual(left, right arrow.Table, opts ...EqualOption) bool {
 }
 
 // Equal reports whether the two provided arrays are equal.
-func Equal(left, right arrow.Array) bool {
+func Equal(left, right arrow.Array, opts ...EqualOption) bool {
+	return equal(left, right, newEqualOption(opts...))
+}
+
+func equal(left, right arrow.Array, opt equalOption) bool {
 	switch {
-	case !baseArrayEqual(left, right):
+	case !baseArrayEqual(left, right, opt):
 		return false
 	case left.Len() == 0:
 		return true
-	case left.NullN() == left.Len():
+	case opt.nullable && hasTopLevelValidityBitmap(left.DataType().ID()) && left.NullN() == left.Len():
 		return true
 	}
 
@@ -216,127 +266,127 @@ func Equal(left, right arrow.Array) bool {
 		return true
 	case *Boolean:
 		r := right.(*Boolean)
-		return arrayEqualBoolean(l, r)
+		return arrayEqualBoolean(l, r, opt)
 	case *FixedSizeBinary:
 		r := right.(*FixedSizeBinary)
-		return arrayEqualFixedSizeBinary(l, r)
+		return arrayEqualFixedSizeBinary(l, r, opt)
 	case *Binary:
 		r := right.(*Binary)
-		return arrayEqualBinary(l, r)
+		return arrayEqualBinary(l, r, opt)
 	case *String:
 		r := right.(*String)
-		return arrayEqualString(l, r)
+		return arrayEqualString(l, r, opt)
 	case *LargeBinary:
 		r := right.(*LargeBinary)
-		return arrayEqualLargeBinary(l, r)
+		return arrayEqualLargeBinary(l, r, opt)
 	case *LargeString:
 		r := right.(*LargeString)
-		return arrayEqualLargeString(l, r)
+		return arrayEqualLargeString(l, r, opt)
 	case *BinaryView:
 		r := right.(*BinaryView)
-		return arrayEqualBinaryView(l, r)
+		return arrayEqualBinaryView(l, r, opt)
 	case *StringView:
 		r := right.(*StringView)
-		return arrayEqualStringView(l, r)
+		return arrayEqualStringView(l, r, opt)
 	case *Int8:
 		r := right.(*Int8)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Int16:
 		r := right.(*Int16)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Int32:
 		r := right.(*Int32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Int64:
 		r := right.(*Int64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Uint8:
 		r := right.(*Uint8)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Uint16:
 		r := right.(*Uint16)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Uint32:
 		r := right.(*Uint32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Uint64:
 		r := right.(*Uint64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Float16:
 		r := right.(*Float16)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Float32:
 		r := right.(*Float32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Float64:
 		r := right.(*Float64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Decimal32:
 		r := right.(*Decimal32)
-		return arrayEqualDecimal(l, r)
+		return arrayEqualDecimal(l, r, opt)
 	case *Decimal64:
 		r := right.(*Decimal64)
-		return arrayEqualDecimal(l, r)
+		return arrayEqualDecimal(l, r, opt)
 	case *Decimal128:
 		r := right.(*Decimal128)
-		return arrayEqualDecimal(l, r)
+		return arrayEqualDecimal(l, r, opt)
 	case *Decimal256:
 		r := right.(*Decimal256)
-		return arrayEqualDecimal(l, r)
+		return arrayEqualDecimal(l, r, opt)
 	case *Date32:
 		r := right.(*Date32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Date64:
 		r := right.(*Date64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Time32:
 		r := right.(*Time32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Time64:
 		r := right.(*Time64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Timestamp:
 		r := right.(*Timestamp)
-		return arrayEqualTimestamp(l, r)
+		return arrayEqualTimestamp(l, r, opt)
 	case *List:
 		r := right.(*List)
-		return arrayEqualList(l, r)
+		return arrayEqualList(l, r, opt)
 	case *LargeList:
 		r := right.(*LargeList)
-		return arrayEqualLargeList(l, r)
+		return arrayEqualLargeList(l, r, opt)
 	case *ListView:
 		r := right.(*ListView)
-		return arrayEqualListView(l, r)
+		return arrayEqualListView(l, r, opt)
 	case *LargeListView:
 		r := right.(*LargeListView)
-		return arrayEqualLargeListView(l, r)
+		return arrayEqualLargeListView(l, r, opt)
 	case *FixedSizeList:
 		r := right.(*FixedSizeList)
-		return arrayEqualFixedSizeList(l, r)
+		return arrayEqualFixedSizeList(l, r, opt)
 	case *Struct:
 		r := right.(*Struct)
-		return arrayEqualStruct(l, r)
+		return arrayEqualStruct(l, r, opt)
 	case *MonthInterval:
 		r := right.(*MonthInterval)
-		return arrayEqualMonthInterval(l, r)
+		return arrayEqualMonthInterval(l, r, opt)
 	case *DayTimeInterval:
 		r := right.(*DayTimeInterval)
-		return arrayEqualDayTimeInterval(l, r)
+		return arrayEqualDayTimeInterval(l, r, opt)
 	case *MonthDayNanoInterval:
 		r := right.(*MonthDayNanoInterval)
-		return arrayEqualMonthDayNanoInterval(l, r)
+		return arrayEqualMonthDayNanoInterval(l, r, opt)
 	case *Duration:
 		r := right.(*Duration)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Map:
 		r := right.(*Map)
-		return arrayEqualMap(l, r)
+		return arrayEqualMap(l, r, opt)
 	case ExtensionArray:
 		r := right.(ExtensionArray)
-		return arrayEqualExtension(l, r)
+		return arrayEqualExtension(l, r, opt)
 	case *Dictionary:
 		r := right.(*Dictionary)
-		return arrayEqualDict(l, r)
+		return arrayEqualDict(l, r, opt)
 	case *SparseUnion:
 		r := right.(*SparseUnion)
 		return arraySparseUnionEqual(l, r)
@@ -345,26 +395,29 @@ func Equal(left, right arrow.Array) bool {
 		return arrayDenseUnionEqual(l, r)
 	case *RunEndEncoded:
 		r := right.(*RunEndEncoded)
-		return arrayRunEndEncodedEqual(l, r)
+		return arrayRunEndEncodedEqual(l, r, opt)
 	default:
 		panic(fmt.Errorf("arrow/array: unknown array type %T", l))
 	}
 }
 
 // SliceEqual reports whether slices left[lbeg:lend] and right[rbeg:rend] are equal.
-func SliceEqual(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64) bool {
+func SliceEqual(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64, opts ...EqualOption) bool {
+	return sliceEqual(left, lbeg, lend, right, rbeg, rend, newEqualOption(opts...))
+}
+
+func sliceEqual(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64, opt equalOption) bool {
 	l := NewSlice(left, lbeg, lend)
 	defer l.Release()
 	r := NewSlice(right, rbeg, rend)
 	defer r.Release()
 
-	return Equal(l, r)
+	return equal(l, r, opt)
 }
 
 // SliceApproxEqual reports whether slices left[lbeg:lend] and right[rbeg:rend] are approximately equal.
 func SliceApproxEqual(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64, opts ...EqualOption) bool {
-	opt := newEqualOption(opts...)
-	return sliceApproxEqual(left, lbeg, lend, right, rbeg, rend, opt)
+	return sliceApproxEqual(left, lbeg, lend, right, rbeg, rend, newEqualOption(opts...))
 }
 
 func sliceApproxEqual(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64, opt equalOption) bool {
@@ -382,6 +435,7 @@ type equalOption struct {
 	atol             float64 // absolute tolerance
 	nansEq           bool    // whether NaNs are considered equal.
 	unorderedMapKeys bool    // whether maps are allowed to have different entries order
+	nullable         bool    // whether the fields being compared are considered nullable
 }
 
 func (eq equalOption) f16(f1, f2 float16.Num) bool {
@@ -417,8 +471,9 @@ func (eq equalOption) f64(v1, v2 float64) bool {
 
 func newEqualOption(opts ...EqualOption) equalOption {
 	eq := equalOption{
-		atol:   defaultAbsoluteTolerance,
-		nansEq: false,
+		atol:     defaultAbsoluteTolerance,
+		nansEq:   false,
+		nullable: true,
 	}
 	for _, opt := range opts {
 		opt(&eq)
@@ -452,20 +507,27 @@ func WithUnorderedMapKeys(v bool) EqualOption {
 	}
 }
 
+// WithNullable sets whether the comparison function will consider both fields as nullable. If they're non-nullable, their
+// valids buffer will be ignored for comparison and the underlying values will be used instead
+func WithNullable(v bool) EqualOption {
+	return func(o *equalOption) {
+		o.nullable = v
+	}
+}
+
 // ApproxEqual reports whether the two provided arrays are approximately equal.
 // For non-floating point arrays, it is equivalent to Equal.
 func ApproxEqual(left, right arrow.Array, opts ...EqualOption) bool {
-	opt := newEqualOption(opts...)
-	return arrayApproxEqual(left, right, opt)
+	return arrayApproxEqual(left, right, newEqualOption(opts...))
 }
 
 func arrayApproxEqual(left, right arrow.Array, opt equalOption) bool {
 	switch {
-	case !baseArrayEqual(left, right):
+	case !baseArrayEqual(left, right, opt):
 		return false
 	case left.Len() == 0:
 		return true
-	case left.NullN() == left.Len():
+	case opt.nullable && hasTopLevelValidityBitmap(left.DataType().ID()) && left.NullN() == left.Len():
 		return true
 	}
 
@@ -478,52 +540,52 @@ func arrayApproxEqual(left, right arrow.Array, opt equalOption) bool {
 		return true
 	case *Boolean:
 		r := right.(*Boolean)
-		return arrayEqualBoolean(l, r)
+		return arrayEqualBoolean(l, r, opt)
 	case *FixedSizeBinary:
 		r := right.(*FixedSizeBinary)
-		return arrayEqualFixedSizeBinary(l, r)
+		return arrayEqualFixedSizeBinary(l, r, opt)
 	case *Binary:
 		r := right.(*Binary)
-		return arrayEqualBinary(l, r)
+		return arrayEqualBinary(l, r, opt)
 	case *String:
 		r := right.(*String)
-		return arrayApproxEqualString(l, r)
+		return arrayApproxEqualString(l, r, opt)
 	case *LargeBinary:
 		r := right.(*LargeBinary)
-		return arrayEqualLargeBinary(l, r)
+		return arrayEqualLargeBinary(l, r, opt)
 	case *LargeString:
 		r := right.(*LargeString)
-		return arrayApproxEqualLargeString(l, r)
+		return arrayApproxEqualLargeString(l, r, opt)
 	case *BinaryView:
 		r := right.(*BinaryView)
-		return arrayEqualBinaryView(l, r)
+		return arrayEqualBinaryView(l, r, opt)
 	case *StringView:
 		r := right.(*StringView)
-		return arrayApproxEqualStringView(l, r)
+		return arrayApproxEqualStringView(l, r, opt)
 	case *Int8:
 		r := right.(*Int8)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Int16:
 		r := right.(*Int16)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Int32:
 		r := right.(*Int32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Int64:
 		r := right.(*Int64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Uint8:
 		r := right.(*Uint8)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Uint16:
 		r := right.(*Uint16)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Uint32:
 		r := right.(*Uint32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Uint64:
 		r := right.(*Uint64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Float16:
 		r := right.(*Float16)
 		return arrayApproxEqualFloat16(l, r, opt)
@@ -535,31 +597,31 @@ func arrayApproxEqual(left, right arrow.Array, opt equalOption) bool {
 		return arrayApproxEqualFloat64(l, r, opt)
 	case *Decimal32:
 		r := right.(*Decimal32)
-		return arrayEqualDecimal(l, r)
+		return arrayEqualDecimal(l, r, opt)
 	case *Decimal64:
 		r := right.(*Decimal64)
-		return arrayEqualDecimal(l, r)
+		return arrayEqualDecimal(l, r, opt)
 	case *Decimal128:
 		r := right.(*Decimal128)
-		return arrayEqualDecimal(l, r)
+		return arrayEqualDecimal(l, r, opt)
 	case *Decimal256:
 		r := right.(*Decimal256)
-		return arrayEqualDecimal(l, r)
+		return arrayEqualDecimal(l, r, opt)
 	case *Date32:
 		r := right.(*Date32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Date64:
 		r := right.(*Date64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Time32:
 		r := right.(*Time32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Time64:
 		r := right.(*Time64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Timestamp:
 		r := right.(*Timestamp)
-		return arrayEqualTimestamp(l, r)
+		return arrayEqualTimestamp(l, r, opt)
 	case *List:
 		r := right.(*List)
 		return arrayApproxEqualList(l, r, opt)
@@ -580,16 +642,16 @@ func arrayApproxEqual(left, right arrow.Array, opt equalOption) bool {
 		return arrayApproxEqualStruct(l, r, opt)
 	case *MonthInterval:
 		r := right.(*MonthInterval)
-		return arrayEqualMonthInterval(l, r)
+		return arrayEqualMonthInterval(l, r, opt)
 	case *DayTimeInterval:
 		r := right.(*DayTimeInterval)
-		return arrayEqualDayTimeInterval(l, r)
+		return arrayEqualDayTimeInterval(l, r, opt)
 	case *MonthDayNanoInterval:
 		r := right.(*MonthDayNanoInterval)
-		return arrayEqualMonthDayNanoInterval(l, r)
+		return arrayEqualMonthDayNanoInterval(l, r, opt)
 	case *Duration:
 		r := right.(*Duration)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidth(l, r, opt)
 	case *Map:
 		r := right.(*Map)
 		if opt.unorderedMapKeys {
@@ -616,15 +678,35 @@ func arrayApproxEqual(left, right arrow.Array, opt equalOption) bool {
 	}
 }
 
-func baseArrayEqual(left, right arrow.Array) bool {
+func withNullable(opt equalOption, nullable bool) equalOption {
+	opt.nullable = nullable
+	return opt
+}
+
+// hasTopLevelValidityBitmap reports whether arrays of the given type id carry
+// their own top-level validity bitmap. Union and run-end-encoded arrays do not:
+// their nullness is encoded entirely in their children, so top-level null-count
+// and validity comparisons are not meaningful for them and can legitimately
+// differ between logically-equal arrays (e.g. built from JSON vs. read from IPC).
+func hasTopLevelValidityBitmap(id arrow.Type) bool {
+	switch id {
+	case arrow.SPARSE_UNION, arrow.DENSE_UNION, arrow.RUN_END_ENCODED:
+		return false
+	}
+	return true
+}
+
+func baseArrayEqual(left, right arrow.Array, opt equalOption) bool {
 	switch {
 	case left.Len() != right.Len():
 		return false
-	case left.NullN() != right.NullN():
-		return false
 	case !arrow.TypeEqual(left.DataType(), right.DataType()): // We do not check for metadata as in the C++ implementation.
 		return false
-	case !validityBitmapEqual(left, right):
+	case !hasTopLevelValidityBitmap(left.DataType().ID()):
+		return true
+	case opt.nullable && left.NullN() != right.NullN():
+		return false
+	case opt.nullable && !validityBitmapEqual(left, right):
 		return false
 	}
 	return true
@@ -644,9 +726,9 @@ func validityBitmapEqual(left, right arrow.Array) bool {
 	return true
 }
 
-func arrayApproxEqualString(left, right *String) bool {
+func arrayApproxEqualString(left, right *String, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if stripNulls(left.Value(i)) != stripNulls(right.Value(i)) {
@@ -656,9 +738,9 @@ func arrayApproxEqualString(left, right *String) bool {
 	return true
 }
 
-func arrayApproxEqualLargeString(left, right *LargeString) bool {
+func arrayApproxEqualLargeString(left, right *LargeString, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if stripNulls(left.Value(i)) != stripNulls(right.Value(i)) {
@@ -668,9 +750,9 @@ func arrayApproxEqualLargeString(left, right *LargeString) bool {
 	return true
 }
 
-func arrayApproxEqualStringView(left, right *StringView) bool {
+func arrayApproxEqualStringView(left, right *StringView, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if stripNulls(left.Value(i)) != stripNulls(right.Value(i)) {
@@ -682,7 +764,7 @@ func arrayApproxEqualStringView(left, right *StringView) bool {
 
 func arrayApproxEqualFloat16(left, right *Float16, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if !opt.f16(left.Value(i), right.Value(i)) {
@@ -694,7 +776,7 @@ func arrayApproxEqualFloat16(left, right *Float16, opt equalOption) bool {
 
 func arrayApproxEqualFloat32(left, right *Float32, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if !opt.f32(left.Value(i), right.Value(i)) {
@@ -706,7 +788,7 @@ func arrayApproxEqualFloat32(left, right *Float32, opt equalOption) bool {
 
 func arrayApproxEqualFloat64(left, right *Float64, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if !opt.f64(left.Value(i), right.Value(i)) {
@@ -717,8 +799,9 @@ func arrayApproxEqualFloat64(left, right *Float64, opt equalOption) bool {
 }
 
 func arrayApproxEqualList(left, right *List, opt equalOption) bool {
+	childOpt := withNullable(opt, left.DataType().(arrow.ListLikeType).ElemField().Nullable)
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -726,7 +809,7 @@ func arrayApproxEqualList(left, right *List, opt equalOption) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return arrayApproxEqual(l, r, opt)
+			return arrayApproxEqual(l, r, childOpt)
 		}()
 		if !o {
 			return false
@@ -736,8 +819,9 @@ func arrayApproxEqualList(left, right *List, opt equalOption) bool {
 }
 
 func arrayApproxEqualLargeList(left, right *LargeList, opt equalOption) bool {
+	childOpt := withNullable(opt, left.DataType().(arrow.ListLikeType).ElemField().Nullable)
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -745,7 +829,7 @@ func arrayApproxEqualLargeList(left, right *LargeList, opt equalOption) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return arrayApproxEqual(l, r, opt)
+			return arrayApproxEqual(l, r, childOpt)
 		}()
 		if !o {
 			return false
@@ -755,8 +839,9 @@ func arrayApproxEqualLargeList(left, right *LargeList, opt equalOption) bool {
 }
 
 func arrayApproxEqualListView(left, right *ListView, opt equalOption) bool {
+	childOpt := withNullable(opt, left.DataType().(arrow.ListLikeType).ElemField().Nullable)
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -764,7 +849,7 @@ func arrayApproxEqualListView(left, right *ListView, opt equalOption) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return arrayApproxEqual(l, r, opt)
+			return arrayApproxEqual(l, r, childOpt)
 		}()
 		if !o {
 			return false
@@ -774,8 +859,9 @@ func arrayApproxEqualListView(left, right *ListView, opt equalOption) bool {
 }
 
 func arrayApproxEqualLargeListView(left, right *LargeListView, opt equalOption) bool {
+	childOpt := withNullable(opt, left.DataType().(arrow.ListLikeType).ElemField().Nullable)
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -783,7 +869,7 @@ func arrayApproxEqualLargeListView(left, right *LargeListView, opt equalOption) 
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return arrayApproxEqual(l, r, opt)
+			return arrayApproxEqual(l, r, childOpt)
 		}()
 		if !o {
 			return false
@@ -793,8 +879,9 @@ func arrayApproxEqualLargeListView(left, right *LargeListView, opt equalOption) 
 }
 
 func arrayApproxEqualFixedSizeList(left, right *FixedSizeList, opt equalOption) bool {
+	childOpt := withNullable(opt, left.DataType().(arrow.ListLikeType).ElemField().Nullable)
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		o := func() bool {
@@ -802,7 +889,7 @@ func arrayApproxEqualFixedSizeList(left, right *FixedSizeList, opt equalOption) 
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return arrayApproxEqual(l, r, opt)
+			return arrayApproxEqual(l, r, childOpt)
 		}()
 		if !o {
 			return false
@@ -812,17 +899,23 @@ func arrayApproxEqualFixedSizeList(left, right *FixedSizeList, opt equalOption) 
 }
 
 func arrayApproxEqualStruct(left, right *Struct, opt equalOption) bool {
-	return bitutils.VisitSetBitRuns(
-		left.NullBitmapBytes(),
-		int64(left.Offset()), int64(left.Len()),
-		approxEqualStructRun(left, right, opt),
-	) == nil
+	visitFn := approxEqualStructRun(left, right, opt)
+	if opt.nullable {
+		return bitutils.VisitSetBitRuns(
+			left.NullBitmapBytes(),
+			int64(left.Offset()), int64(left.Len()),
+			visitFn,
+		) == nil
+	}
+	return visitFn(0, int64(left.Len())) == nil
 }
 
 func approxEqualStructRun(left, right *Struct, opt equalOption) bitutils.VisitFn {
+	st := left.DataType().(*arrow.StructType)
 	return func(pos int64, length int64) error {
 		for i := range left.fields {
-			if !sliceApproxEqual(left.fields[i], pos, pos+length, right.fields[i], pos, pos+length, opt) {
+			childOpt := withNullable(opt, st.Field(i).Nullable)
+			if !sliceApproxEqual(left.fields[i], pos, pos+length, right.fields[i], pos, pos+length, childOpt) {
 				return arrow.ErrInvalid
 			}
 		}
@@ -833,7 +926,7 @@ func approxEqualStructRun(left, right *Struct, opt equalOption) bitutils.VisitFn
 // arrayApproxEqualMap doesn't care about the order of keys (in Go map traversal order is undefined)
 func arrayApproxEqualMap(left, right *Map, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 		if !arrayApproxEqualSingleMapEntry(left.newListValue(i).(*Struct), right.newListValue(i).(*Struct), opt) {
@@ -854,7 +947,7 @@ func arrayApproxEqualSingleMapEntry(left, right *Struct, opt equalOption) bool {
 	switch {
 	case left.Len() != right.Len():
 		return false
-	case left.NullN() != right.NullN():
+	case opt.nullable && left.NullN() != right.NullN():
 		return false
 	case !arrow.TypeEqual(left.DataType(), right.DataType()): // We do not check for metadata as in the C++ implementation.
 		return false
@@ -862,9 +955,13 @@ func arrayApproxEqualSingleMapEntry(left, right *Struct, opt equalOption) bool {
 		return true
 	}
 
+	st := left.DataType().(*arrow.StructType)
+	keyOpt := withNullable(opt, st.Field(0).Nullable)
+	valOpt := withNullable(opt, st.Field(1).Nullable)
+
 	used := make(map[int]bool, right.Len())
 	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
+		if opt.nullable && left.IsNull(i) {
 			continue
 		}
 
@@ -874,7 +971,7 @@ func arrayApproxEqualSingleMapEntry(left, right *Struct, opt equalOption) bool {
 			if used[j] {
 				continue
 			}
-			if right.IsNull(j) {
+			if opt.nullable && right.IsNull(j) {
 				used[j] = true
 				continue
 			}
@@ -882,12 +979,12 @@ func arrayApproxEqualSingleMapEntry(left, right *Struct, opt equalOption) bool {
 			rBeg, rEnd := int64(j), int64(j+1)
 
 			// check keys (field 0)
-			if !sliceApproxEqual(left.Field(0), lBeg, lEnd, right.Field(0), rBeg, rEnd, opt) {
+			if !sliceApproxEqual(left.Field(0), lBeg, lEnd, right.Field(0), rBeg, rEnd, keyOpt) {
 				continue
 			}
 
 			// only now check the values
-			if sliceApproxEqual(left.Field(1), lBeg, lEnd, right.Field(1), rBeg, rEnd, opt) {
+			if sliceApproxEqual(left.Field(1), lBeg, lEnd, right.Field(1), rBeg, rEnd, valOpt) {
 				found = true
 				used[j] = true
 				break

@@ -288,6 +288,6 @@ func TestDecimal256GetOneForMarshal(t *testing.T) {
 	}
 
 	for i := range cases {
-		assert.Equalf(t, cases[i].want, arr.GetOneForMarshal(i), "unexpected value at index %d", i)
+		assert.Equalf(t, cases[i].want, arr.GetOneForMarshal(i, true), "unexpected value at index %d", i)
 	}
 }

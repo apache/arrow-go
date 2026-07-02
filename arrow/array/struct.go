@@ -130,7 +130,7 @@ func (a *Struct) ValueStr(i int) string {
 		return NullValueStr
 	}
 
-	data, err := json.Marshal(a.GetOneForMarshal(i))
+	data, err := json.Marshal(a.GetOneForMarshal(i, true))
 	if err != nil {
 		panic(err)
 	}
@@ -209,15 +209,16 @@ func (a *Struct) setData(data *Data) {
 	}
 }
 
-func (a *Struct) GetOneForMarshal(i int) interface{} {
-	if a.IsNull(i) {
+func (a *Struct) GetOneForMarshal(i int, nullable bool) interface{} {
+	if nullable && a.IsNull(i) {
 		return nil
 	}
 
 	tmp := make(map[string]interface{})
-	fieldList := a.data.dtype.(*arrow.StructType).Fields()
+	dtype := a.data.dtype.(*arrow.StructType)
+	fieldList := dtype.Fields()
 	for j, d := range a.fields {
-		tmp[fieldList[j].Name] = d.GetOneForMarshal(i)
+		tmp[fieldList[j].Name] = d.GetOneForMarshal(i, dtype.Field(j).Nullable)
 	}
 	return tmp
 }
@@ -231,7 +232,7 @@ func (a *Struct) MarshalJSON() ([]byte, error) {
 		if i != 0 {
 			buf.WriteByte(',')
 		}
-		if err := enc.Encode(a.GetOneForMarshal(i)); err != nil {
+		if err := enc.Encode(a.GetOneForMarshal(i, true)); err != nil {
 			return nil, err
 		}
 	}
@@ -239,10 +240,11 @@ func (a *Struct) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func arrayEqualStruct(left, right *Struct) bool {
+func arrayEqualStruct(left, right *Struct, opt equalOption) bool {
 	for i, lf := range left.fields {
 		rf := right.fields[i]
-		if !Equal(lf, rf) {
+		opt.nullable = left.data.dtype.(*arrow.StructType).Field(i).Nullable
+		if !equal(lf, rf, opt) {
 			return false
 		}
 	}
@@ -487,8 +489,19 @@ func (b *StructBuilder) UnmarshalOne(dec *json.Decoder) error {
 				continue
 			}
 
-			if err := b.fields[idx].UnmarshalOne(dec); err != nil {
+			var next json.RawMessage
+			if err := dec.Decode(&next); err != nil {
 				return err
+			}
+
+			if json.IsNullMessage(next) && !b.dtype.(*arrow.StructType).Field(idx).Nullable {
+				b.fields[idx].AppendEmptyValue()
+			} else {
+				sub := json.NewDecoder(bytes.NewReader(next))
+				sub.UseNumber()
+				if err := b.fields[idx].UnmarshalOne(sub); err != nil {
+					return err
+				}
 			}
 		}
 

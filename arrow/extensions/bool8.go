@@ -114,8 +114,8 @@ func (a *Bool8Array) MarshalJSON() ([]byte, error) {
 	return json.Marshal(values)
 }
 
-func (a *Bool8Array) GetOneForMarshal(i int) interface{} {
-	if a.IsNull(i) {
+func (a *Bool8Array) GetOneForMarshal(i int, nullable bool) interface{} {
+	if nullable && a.IsNull(i) {
 		return nil
 	}
 	return a.Value(i)
