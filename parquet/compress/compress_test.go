@@ -91,6 +91,28 @@ func TestCompressDataOneShot(t *testing.T) {
 	}
 }
 
+func TestBrotliCompressBound(t *testing.T) {
+	codec, err := compress.GetCodec(compress.Codecs.Brotli)
+	assert.NoError(t, err)
+
+	tests := []struct {
+		name string
+		len  int64
+		want int64
+	}{
+		{"empty", 0, 2},
+		{"small", 1, 7},
+		{"before 16k boundary", 16*1024 - 1, 16*1024 + 5},
+		{"at 16k boundary", 16 * 1024, 16*1024 + 10},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, codec.CompressBound(tt.len))
+		})
+	}
+}
+
 func TestCompressReaderWriter(t *testing.T) {
 	tests := []struct {
 		c compress.Compression
