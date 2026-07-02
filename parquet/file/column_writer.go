@@ -684,25 +684,8 @@ func (w *columnWriter) doBatches(total int64, repLevels []int16, action func(off
 		batchStart, batch int64
 	)
 	for batchStart = 0; batchStart+batchSize < int64(len(repLevels)); batchStart += batch {
-		// check one past the last value of the batch for if it's a new row
-		// if it's not, shrink the batch back to the beginning of a previous
-		// row boundary to end on.
-		batch = batchSize
-		for batch > 0 && repLevels[batchStart+batch] != 0 {
-			batch--
-		}
-		// if the batch shrank all the way to zero there is no row boundary
-		// at or before the requested split (a single row is wider than the
-		// batch size). growing forward to the next row boundary keeps the
-		// whole row in one batch rather than looping forever on a zero-length
-		// batch.
-		if batch == 0 {
-			batch = batchSize
-			for batchStart+batch < int64(len(repLevels)) && repLevels[batchStart+batch] != 0 {
-				batch++
-			}
-		}
 		// batchStart <--> batch now begins and ends on a row boundary!
+		batch = alignBatchToRowBoundary(repLevels, batchStart, batchSize)
 		action(batchStart, batch)
 	}
 	action(batchStart, int64(len(repLevels))-batchStart)
@@ -716,6 +699,30 @@ func doBatches(total, batchSize int64, action func(offset, batch int64)) {
 	if total%batchSize > 0 {
 		action(numBatches*batchSize, total%batchSize)
 	}
+}
+
+// alignBatchToRowBoundary adjusts batch so that repLevels[offset+batch] lands on
+// a row boundary (repetition level 0) or the end of the level slice. A repeated
+// row must never span a DataPageV2 page boundary, so it first shrinks toward the
+// previous boundary. If there is no boundary at or before the requested split -
+// the current row is wider than batch - it grows forward to the next one so the
+// whole row stays in a single batch and the caller keeps making progress rather
+// than looping on a zero-length batch. offset must already sit on a boundary.
+func alignBatchToRowBoundary(repLevels []int16, offset, batch int64) int64 {
+	n := int64(len(repLevels))
+	if offset+batch >= n {
+		return batch
+	}
+	b := batch
+	for b > 0 && repLevels[offset+b] != 0 {
+		b--
+	}
+	if b > 0 {
+		return b
+	}
+	for b = batch; offset+b < n && repLevels[offset+b] != 0; b++ {
+	}
+	return b
 }
 
 func levelSliceOrNil(rep []int16, offset, batch int64) []int16 {

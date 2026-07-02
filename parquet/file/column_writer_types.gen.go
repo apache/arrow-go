@@ -1833,21 +1833,11 @@ func (w *ByteArrayColumnChunkWriter) WriteBatch(values []parquet.ByteArray, defL
 			}
 		}
 
-		// V2 row-boundary alignment: a repeated row must not span a page
-		// boundary. Shrink the batch back to the previous rep_level == 0; if
-		// there is no row boundary at or before the requested split (a single
-		// row is wider than the batch), grow forward to the next one so the
-		// whole row lands in one batch instead of looping without progress.
-		if isV2WithRep && levelOffset+batch < n {
-			for batch > 0 && repLevels[levelOffset+batch] != 0 {
-				batch--
-			}
-			if batch == 0 {
-				batch = batchSize
-				for levelOffset+batch < n && repLevels[levelOffset+batch] != 0 {
-					batch++
-				}
-			}
+		// V2 row-boundary alignment: a repeated row must not span a page boundary,
+		// so snap the batch onto the nearest row boundary (or keep a single wide row
+		// whole). See alignBatchToRowBoundary in column_writer.go.
+		if isV2WithRep {
+			batch = alignBatchToRowBoundary(repLevels, levelOffset, batch)
 		}
 		if batch < 1 {
 			batch = 1
@@ -1934,21 +1924,11 @@ func (w *ByteArrayColumnChunkWriter) WriteBatchSpacedWithError(values []parquet.
 			}
 		}
 
-		// V2 row-boundary alignment: a repeated row must not span a page
-		// boundary. Shrink the batch back to the previous rep_level == 0; if
-		// there is no row boundary at or before the requested split (a single
-		// row is wider than the batch), grow forward to the next one so the
-		// whole row lands in one batch instead of looping without progress.
-		if isV2WithRep && levelOffset+batch < n {
-			for batch > 0 && repLevels[levelOffset+batch] != 0 {
-				batch--
-			}
-			if batch == 0 {
-				batch = batchSize
-				for levelOffset+batch < n && repLevels[levelOffset+batch] != 0 {
-					batch++
-				}
-			}
+		// V2 row-boundary alignment: a repeated row must not span a page boundary,
+		// so snap the batch onto the nearest row boundary (or keep a single wide row
+		// whole). See alignBatchToRowBoundary in column_writer.go.
+		if isV2WithRep {
+			batch = alignBatchToRowBoundary(repLevels, levelOffset, batch)
 		}
 		if batch < 1 {
 			batch = 1
@@ -2192,21 +2172,11 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatch(values []parquet.FixedLe
 			}
 		}
 
-		// V2 row-boundary alignment: a repeated row must not span a page
-		// boundary. Shrink the batch back to the previous rep_level == 0; if
-		// there is no row boundary at or before the requested split (a single
-		// row is wider than the batch), grow forward to the next one so the
-		// whole row lands in one batch instead of looping without progress.
-		if isV2WithRep && levelOffset+batch < n {
-			for batch > 0 && repLevels[levelOffset+batch] != 0 {
-				batch--
-			}
-			if batch == 0 {
-				batch = batchSize
-				for levelOffset+batch < n && repLevels[levelOffset+batch] != 0 {
-					batch++
-				}
-			}
+		// V2 row-boundary alignment: a repeated row must not span a page boundary,
+		// so snap the batch onto the nearest row boundary (or keep a single wide row
+		// whole). See alignBatchToRowBoundary in column_writer.go.
+		if isV2WithRep {
+			batch = alignBatchToRowBoundary(repLevels, levelOffset, batch)
 		}
 		if batch < 1 {
 			batch = 1
@@ -2293,21 +2263,11 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatchSpacedWithError(values []
 			}
 		}
 
-		// V2 row-boundary alignment: a repeated row must not span a page
-		// boundary. Shrink the batch back to the previous rep_level == 0; if
-		// there is no row boundary at or before the requested split (a single
-		// row is wider than the batch), grow forward to the next one so the
-		// whole row lands in one batch instead of looping without progress.
-		if isV2WithRep && levelOffset+batch < n {
-			for batch > 0 && repLevels[levelOffset+batch] != 0 {
-				batch--
-			}
-			if batch == 0 {
-				batch = batchSize
-				for levelOffset+batch < n && repLevels[levelOffset+batch] != 0 {
-					batch++
-				}
-			}
+		// V2 row-boundary alignment: a repeated row must not span a page boundary,
+		// so snap the batch onto the nearest row boundary (or keep a single wide row
+		// whole). See alignBatchToRowBoundary in column_writer.go.
+		if isV2WithRep {
+			batch = alignBatchToRowBoundary(repLevels, levelOffset, batch)
 		}
 		if batch < 1 {
 			batch = 1
