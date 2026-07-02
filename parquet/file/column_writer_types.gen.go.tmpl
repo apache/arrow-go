@@ -214,6 +214,8 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBatchSpacedWithError(values []{{.name}
   const maxSafeBatchDataSize int64 = 1 << 30 // 1GB
 
   batchSize := w.props.WriteBatchSize()
+  isV2WithRep := w.props.DataPageVersion() != parquet.DataPageV1 &&
+    repLevels != nil && w.descr.MaxRepetitionLevel() > 0
   levelOffset := int64(0)
   n := int64(length)
 
@@ -234,6 +236,14 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBatchSpacedWithError(values []{{.name}
           break
         }
         cumDataSize += valSize
+      }
+    }
+
+    // V2 row-boundary alignment: a repeated row must not span a page
+    // boundary, so shrink the batch back to the previous rep_level == 0.
+    if isV2WithRep && levelOffset+batch < n {
+      for batch > 1 && repLevels[levelOffset+batch] != 0 {
+        batch--
       }
     }
     if batch < 1 {
@@ -262,7 +272,7 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBatchSpacedWithError(values []{{.name}
     levelOffset += batch
   }
 {{- else}}
-  doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
+  w.doBatches(int64(length), repLevels, func(offset, batch int64) {
     var vals []{{.name}}
     info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
 
@@ -347,7 +357,7 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBitmapBatchSpacedWithError(bitmap []by
     length = numValues
   }
 
-  doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
+  w.doBatches(int64(length), repLevels, func(offset, batch int64) {
     info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
 
     w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
@@ -384,7 +394,7 @@ func (w *{{.Name}}ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLe
 
   dictEncoder := w.currentEncoder.(encoding.DictEncoder)
 
-  doBatches(int64(length), w.props.WriteBatchSize(), func(offset, batch int64) {
+  w.doBatches(int64(length), repLevels, func(offset, batch int64) {
     info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
     w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
