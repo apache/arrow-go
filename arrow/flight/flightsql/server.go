@@ -155,6 +155,9 @@ type ActionCreatePreparedStatementResult struct {
 	Handle          []byte
 	DatasetSchema   *arrow.Schema
 	ParameterSchema *arrow.Schema
+	// IsUpdate indicates whether the prepared statement should be executed
+	// as an update (true) or query (false). If nil, the client can choose.
+	IsUpdate *bool
 }
 
 type ActionBeginTransactionRequest interface{}
@@ -1251,6 +1254,7 @@ func (f *flightSqlServer) DoAction(cmd *flight.Action, stream flight.FlightServi
 		if output.ParameterSchema != nil {
 			result.ParameterSchema = flight.SerializeSchema(output.ParameterSchema, f.mem)
 		}
+		result.IsUpdate = output.IsUpdate
 
 		if err := anycmd.MarshalFrom(&result); err != nil {
 			return status.Errorf(codes.Internal, "unable to marshal final response: %s", err.Error())
@@ -1286,6 +1290,7 @@ func (f *flightSqlServer) DoAction(cmd *flight.Action, stream flight.FlightServi
 		if output.ParameterSchema != nil {
 			result.ParameterSchema = flight.SerializeSchema(output.ParameterSchema, f.mem)
 		}
+		// is_update is not relevant for prepared substrait plans
 
 		if err := anycmd.MarshalFrom(&result); err != nil {
 			return status.Errorf(codes.Internal, "unable to marshal final response: %s", err.Error())
