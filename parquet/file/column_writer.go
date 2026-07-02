@@ -657,7 +657,12 @@ func (w *columnWriter) Close() (err error) {
 func (w *columnWriter) doBatches(total int64, repLevels []int16, action func(offset, batch int64)) {
 	batchSize := w.props.WriteBatchSize()
 	// if we're writing V1 data pages, have no replevels or the max replevel is 0 then just
-	// use the regular doBatches function
+	// use the regular doBatches function.
+	//
+	// NOTE: the spec also requires row-aligned pages for V1 when an OffsetIndex
+	// is present (PageIndexEnabled). That gap predates this change and also
+	// affects the WriteBatch path, so it is tracked separately rather than
+	// widened into this DataPageV2 fix.
 	if w.props.DataPageVersion() == parquet.DataPageV1 || repLevels == nil || w.descr.MaxRepetitionLevel() == 0 {
 		doBatches(total, batchSize, action)
 		return
@@ -675,6 +680,17 @@ func (w *columnWriter) doBatches(total int64, repLevels []int16, action func(off
 		panic("columnwriter: not enough repetition levels for batch to write")
 	}
 
+	// nothing to write: a non-nil but empty repLevels slice would index
+	// repLevels[0] below and panic (recovered as an opaque error).
+	if total == 0 {
+		return
+	}
+
+	// drive the loop over exactly the number of levels we were asked to write.
+	// a caller passing a repLevels slice longer than total must not spill the
+	// extra levels into the column.
+	repLevels = repLevels[:total]
+
 	if repLevels[0] != 0 {
 		panic("columnwriter: batch writing for V2 data pages must start at a row boundary")
 	}
@@ -688,7 +704,11 @@ func (w *columnWriter) doBatches(total int64, repLevels []int16, action func(off
 		batch = alignBatchToRowBoundary(repLevels, batchStart, batchSize)
 		action(batchStart, batch)
 	}
-	action(batchStart, int64(len(repLevels))-batchStart)
+	// a grow-to-end alignment on an oversized final row can leave batchStart
+	// already at len(repLevels); skip the trailing zero-length action.
+	if batchStart < int64(len(repLevels)) {
+		action(batchStart, int64(len(repLevels))-batchStart)
+	}
 }
 
 func doBatches(total, batchSize int64, action func(offset, batch int64)) {

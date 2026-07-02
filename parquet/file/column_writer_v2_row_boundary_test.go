@@ -18,12 +18,14 @@ package file_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/compress"
@@ -185,16 +187,19 @@ func TestWriteSpacedV2NullableListRowBoundary(t *testing.T) {
 	}
 }
 
-// TestWriteSpacedV2NullableListWideRow covers punkeel's long-list case: a single
-// nullable list whose length (20001) exceeds the write-batch size (20000). There
-// is no row boundary before the requested split, so the fix must grow the batch
-// forward to keep the whole row in one page rather than shrinking to zero and
-// looping without progress. A fixed-width element type is used because it makes
-// the pre-fix failure deterministic: the batch shrinks to zero and the writer
-// hangs (a byte-array element would instead silently clamp to one, which the
-// timeout would not catch). Only one row exists, so it can never be split: it
-// must round-trip and occupy exactly one DataPageV2 that starts at a row
-// boundary.
+// TestWriteSpacedV2NullableListWideRow is primarily a hang guard for punkeel's
+// long-list case: a single nullable list whose length (20001) exceeds the
+// write-batch size (20000). There is no row boundary before the requested split,
+// so the fix must grow the batch forward to keep the whole row in one page rather
+// than shrinking to zero and looping without progress. A fixed-width element type
+// makes the pre-fix failure deterministic: the batch shrinks to zero and the
+// writer hangs (a byte-array element would instead silently clamp to one, which
+// the timeout would not catch), so the 30s timeout in
+// writeNullableListV2WithinTimeout is the real regression guard here. With only
+// one row the page-boundary assertions below cannot themselves detect a mid-row
+// split (a single row can never be split) and pass even with the fix reverted;
+// they exist only to confirm the wide row still produces a single valid
+// DataPageV2 once the write completes.
 func TestWriteSpacedV2NullableListWideRow(t *testing.T) {
 	const (
 		listLen = 20001
@@ -233,7 +238,10 @@ func TestWriteSpacedV2NullableListWideRow(t *testing.T) {
 // the leaf writer takes the WriteBatchSpaced path), writes it as DataPageV2 with
 // the given batch and page sizes, and returns the parquet bytes. The write runs
 // under a timeout so that a regression to the no-progress batching loop (#882)
-// fails the test instead of hanging the whole suite.
+// fails the test instead of hanging the whole suite. On a hang the write
+// goroutine is left spinning: the parquet writer exposes no cancellation hook
+// into the batching loop, and once the timeout has failed the test the process
+// exits, so the leak is bounded to the failing run.
 func writeNullableListV2WithinTimeout(t *testing.T, elemType arrow.DataType, listNullable bool, rowWidths []int, batchSize, pageSize int64, timeout time.Duration) []byte {
 	t.Helper()
 
@@ -321,4 +329,194 @@ func elemAppender(vb array.Builder) func(int) {
 	default:
 		panic(fmt.Sprintf("unsupported element builder %T", vb))
 	}
+}
+
+// TestWriteBitmapBatchSpacedV2RowBoundary covers the boolean bitmap spaced path,
+// which WriteBitmapBatchSpacedWithError now routes through the rep-aware
+// columnWriter.doBatches. Like the Int32 case, a repeated boolean column written
+// with a batch size that is not a multiple of the row width would, before the
+// fix, split a data page mid-row. Reverting alignBatchToRowBoundary to
+// `return batch` makes this fail with "starts mid-row".
+func TestWriteBitmapBatchSpacedV2RowBoundary(t *testing.T) {
+	const (
+		numRows    = 2000
+		valsPerRow = 4
+		total      = numRows * valsPerRow
+		batchSize  = 7 // not a multiple of valsPerRow: a fixed split lands mid-row
+		// A small page size relative to the batch stride keeps page flushes from
+		// coincidentally landing on row boundaries; with the fix reverted this
+		// produces 12 of 16 pages starting mid-row.
+		pageSize = 64
+	)
+
+	root, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewBooleanNode("v", parquet.Repetitions.Repeated, -1),
+	}, -1)
+	require.NoError(t, err)
+
+	bitmap := make([]byte, bitutil.BytesForBits(total))
+	validBits := make([]byte, bitutil.BytesForBits(total))
+	defLevels := make([]int16, total)
+	repLevels := make([]int16, total)
+	for i := 0; i < total; i++ {
+		defLevels[i] = 1 // present
+		bitutil.SetBit(validBits, i)
+		if i%3 == 0 {
+			bitutil.SetBit(bitmap, i)
+		}
+		if i%valsPerRow == 0 {
+			repLevels[i] = 0
+		} else {
+			repLevels[i] = 1
+		}
+	}
+
+	props := parquet.NewWriterProperties(
+		parquet.WithVersion(parquet.V2_LATEST),
+		parquet.WithDataPageVersion(parquet.DataPageV2),
+		parquet.WithDictionaryDefault(false),
+		parquet.WithBatchSize(batchSize),
+		parquet.WithDataPageSize(pageSize),
+		parquet.WithCompression(compress.Codecs.Uncompressed),
+	)
+
+	var buf bytes.Buffer
+	w := file.NewParquetWriter(&buf, root, file.WithWriterProps(props))
+	rgw := w.AppendRowGroup()
+	cw, err := rgw.NextColumn()
+	require.NoError(t, err)
+	_, err = cw.(*file.BooleanColumnChunkWriter).WriteBitmapBatchSpacedWithError(bitmap, 0, total, defLevels, repLevels, validBits, 0)
+	require.NoError(t, err)
+	require.NoError(t, cw.Close())
+	require.NoError(t, rgw.Close())
+	require.NoError(t, w.Close())
+
+	assertPagesStartOnRowBoundary(t, buf.Bytes())
+}
+
+// TestWriteDictIndicesV2RowBoundary covers the dictionary path: WriteDictIndices
+// is now routed through the rep-aware doBatches too. A repeated int32 column with
+// low-cardinality values keeps the dictionary (no fallback to plain), while a
+// small data page size and many rows force several data pages so a mid-row split
+// is possible. The values also round-trip, guarding the variable batch sizes the
+// fix introduces against a value-cursor slip.
+func TestWriteDictIndicesV2RowBoundary(t *testing.T) {
+	const (
+		numRows    = 4000
+		valsPerRow = 3
+		// A high dictionary page-size limit keeps the column dictionary-encoded;
+		// a small data page size forces the indices across many data pages.
+		batchSize = 5 // not a multiple of valsPerRow
+		pageSize  = 512
+	)
+
+	mem := memory.NewGoAllocator()
+	listType := arrow.ListOf(arrow.PrimitiveTypes.Int32)
+	arrowSchema := arrow.NewSchema([]arrow.Field{{Name: "l", Type: listType, Nullable: false}}, nil)
+
+	lb := array.NewBuilder(mem, listType).(*array.ListBuilder)
+	defer lb.Release()
+	vb := lb.ValueBuilder().(*array.Int32Builder)
+	for r := 0; r < numRows; r++ {
+		lb.Append(true)
+		for k := 0; k < valsPerRow; k++ {
+			vb.Append(int32((r + k) % 8)) // only 8 distinct values: dictionary stays
+		}
+	}
+	arr := lb.NewArray()
+	defer arr.Release()
+
+	rec := array.NewRecordBatch(arrowSchema, []arrow.Array{arr}, int64(numRows))
+	defer rec.Release()
+
+	raw := writeRecordV2(t, rec, true, batchSize, pageSize)
+	assertPagesStartOnRowBoundary(t, raw)
+	requireRecordRoundTrips(t, arrowSchema, rec, raw)
+}
+
+// TestWriteSpacedV2NestedListRoundTrip locks in a value round-trip for a
+// maxRep=2 column (list<list<int32>>) written through the spaced path under
+// DataPageV2 with small pages, the deepest-nesting case punkeel and zeroshade
+// flagged. Because the fix makes batch sizes variable, this guards against a
+// value cursor drifting out of step with the levels.
+func TestWriteSpacedV2NestedListRoundTrip(t *testing.T) {
+	const (
+		numRows   = 500
+		batchSize = 7
+		pageSize  = 512
+	)
+
+	mem := memory.NewGoAllocator()
+	innerType := arrow.ListOf(arrow.PrimitiveTypes.Int32)
+	outerType := arrow.ListOf(innerType)
+	// Nullable inner element so the leaf takes the WriteBatchSpaced path.
+	arrowSchema := arrow.NewSchema([]arrow.Field{{Name: "l", Type: outerType, Nullable: true}}, nil)
+
+	ob := array.NewBuilder(mem, outerType).(*array.ListBuilder)
+	defer ob.Release()
+	ib := ob.ValueBuilder().(*array.ListBuilder)
+	vb := ib.ValueBuilder().(*array.Int32Builder)
+	n := 0
+	for r := 0; r < numRows; r++ {
+		ob.Append(true)
+		for i := 0; i < 3; i++ {
+			ib.Append(true)
+			for k := 0; k < 4; k++ {
+				if k == 3 {
+					vb.AppendNull() // an actual null element (spaced trigger)
+				} else {
+					vb.Append(int32(n))
+				}
+				n++
+			}
+		}
+	}
+	arr := ob.NewArray()
+	defer arr.Release()
+
+	rec := array.NewRecordBatch(arrowSchema, []arrow.Array{arr}, int64(numRows))
+	defer rec.Release()
+
+	raw := writeRecordV2(t, rec, false, batchSize, pageSize)
+	assertPagesStartOnRowBoundary(t, raw)
+	requireRecordRoundTrips(t, arrowSchema, rec, raw)
+}
+
+// writeRecordV2 writes a single record batch as DataPageV2 with the given batch
+// and page sizes, optionally keeping dictionary encoding on, and returns the
+// parquet bytes.
+func writeRecordV2(t *testing.T, rec arrow.RecordBatch, dictionary bool, batchSize, pageSize int64) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	props := parquet.NewWriterProperties(
+		parquet.WithVersion(parquet.V2_LATEST),
+		parquet.WithDataPageVersion(parquet.DataPageV2),
+		parquet.WithDictionaryDefault(dictionary),
+		parquet.WithBatchSize(batchSize),
+		parquet.WithDataPageSize(pageSize),
+		parquet.WithCompression(compress.Codecs.Uncompressed),
+	)
+	pqw, err := pqarrow.NewFileWriter(rec.Schema(), &buf, props, pqarrow.NewArrowWriterProperties())
+	require.NoError(t, err)
+	require.NoError(t, pqw.Write(rec))
+	require.NoError(t, pqw.Close())
+	return buf.Bytes()
+}
+
+// requireRecordRoundTrips reads the parquet bytes back through pqarrow and
+// requires the single column to equal the source record's column.
+func requireRecordRoundTrips(t *testing.T, arrowSchema *arrow.Schema, rec arrow.RecordBatch, raw []byte) {
+	t.Helper()
+	tbl, err := pqarrow.ReadTable(context.Background(), bytes.NewReader(raw), nil, pqarrow.ArrowReadProperties{}, memory.NewGoAllocator())
+	require.NoError(t, err)
+	defer tbl.Release()
+
+	require.EqualValues(t, rec.NumRows(), tbl.NumRows())
+	want := rec.Column(0)
+
+	// Concatenate the read-back chunks and equate with the source column.
+	merged, err := array.Concatenate(tbl.Column(0).Data().Chunks(), memory.NewGoAllocator())
+	require.NoError(t, err)
+	defer merged.Release()
+	require.Truef(t, array.Equal(want, merged), "round-trip mismatch\n want: %v\n got:  %v", want, merged)
 }
