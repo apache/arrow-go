@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/apache/arrow-go/v18/parquet/compress"
+	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
 )
@@ -87,6 +88,48 @@ func TestCompressDataOneShot(t *testing.T) {
 			assert.Same(t, &out[0], &uncompressed[0])
 
 			assert.Exactly(t, data, uncompressed)
+		})
+	}
+}
+
+func TestGzipCompressBound(t *testing.T) {
+	codec, err := compress.GetCodec(compress.Codecs.Gzip)
+	assert.NoError(t, err)
+
+	payloads := []struct {
+		name string
+		data []byte
+	}{
+		{"empty", nil},
+		{"one byte", []byte{0xab}},
+		{"small", []byte("gzip")},
+		{"incompressible", makeRandomData(128)},
+	}
+
+	levels := []struct {
+		name  string
+		level int
+	}{
+		{"default", gzip.DefaultCompression},
+		{"no compression", gzip.NoCompression},
+		{"best speed", gzip.BestSpeed},
+		{"best compression", gzip.BestCompression},
+		{"huffman only", gzip.HuffmanOnly},
+		{"stateless", gzip.StatelessCompression},
+	}
+
+	for _, payload := range payloads {
+		t.Run(payload.name, func(t *testing.T) {
+			bound := codec.CompressBound(int64(len(payload.data)))
+			for _, level := range levels {
+				t.Run(level.name, func(t *testing.T) {
+					compressed := codec.EncodeLevel(make([]byte, 0, bound), payload.data, level.level)
+					assert.LessOrEqual(t, int64(len(compressed)), bound)
+
+					uncompressed := codec.Decode(nil, compressed)
+					assert.Equal(t, payload.data, append([]byte(nil), uncompressed...))
+				})
+			}
 		})
 	}
 }
