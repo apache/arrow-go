@@ -20,8 +20,10 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"runtime"
+	"sync"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -720,4 +722,24 @@ func TestGetSpacedHashesFromBitmap(t *testing.T) {
 
 		assert.Equal(t, int(numValid), trueCount+falseCount, "all hashes should be true or false")
 	})
+}
+
+func TestRecycleEncryptedPathPool(t *testing.T) {
+	pool := &sync.Pool{New: func() any { return memory.NewResizableBuffer(memory.NewGoAllocator()) }}
+	r := &RowGroupBloomFilterReader{bufferPool: pool}
+
+	bitset := make([]byte, 1024)
+	bf := &blockSplitBloomFilter{
+		data:     memory.NewBufferBytes(bitset),
+		bitset32: arrow.Uint32Traits.CastFromBytes(bitset),
+	}
+
+	r.recycle(bf)
+
+	got := pool.Get().(*memory.Buffer)
+	if got.Mutable() {
+		return
+	}
+
+	got.ResizeNoShrink(2 * 1024 * 1024)
 }
