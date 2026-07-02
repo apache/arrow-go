@@ -435,6 +435,19 @@ func (b *TimestampWithOffsetBuilder) NewExtensionArray() array.ExtensionArray {
 	return arr
 }
 
+// AppendNull resets the run-end-encoding tracker: the embedded struct builder
+// appends a null offset run, so a following value must start a new run instead
+// of continuing the null run.
+func (b *TimestampWithOffsetBuilder) AppendNull() {
+	b.ExtensionBuilder.AppendNull()
+	b.lastOffset = noLastOffset
+}
+
+func (b *TimestampWithOffsetBuilder) AppendNulls(n int) {
+	b.ExtensionBuilder.AppendNulls(n)
+	b.lastOffset = noLastOffset
+}
+
 func (b *TimestampWithOffsetBuilder) Append(v time.Time) {
 	timestamp, offsetMinutes := fieldValuesFromTime(v, b.unit)
 	offsetMinutes16 := int16(offsetMinutes)

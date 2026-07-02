@@ -386,6 +386,30 @@ func TestTimestampWithOffsetBuilderReuseAfterNewArray(t *testing.T) {
 	}
 }
 
+func TestTimestampWithOffsetBuilderAppendNullBetweenEqualOffsets(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	builder, err := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, ree(arrow.PrimitiveTypes.Int16))
+	require.NoError(t, err)
+
+	// AppendNull appends a null offset run; the following value repeats the
+	// pre-null offset and must start its own run instead of being folded into
+	// the null run (which would decode the trailing value's offset as null).
+	builder.Append(testDate1)
+	builder.AppendNull()
+	builder.Append(testDate1)
+
+	arr := builder.NewArray()
+	defer arr.Release()
+	typedArr := arr.(*extensions.TimestampWithOffsetArray)
+
+	require.Equal(t, 3, arr.Data().Len())
+	assert.Equal(t, testDate1, typedArr.Value(0))
+	assert.True(t, typedArr.IsNull(1))
+	assert.Equal(t, testDate1, typedArr.Value(2))
+}
+
 func TestTimestampWithOffsetExtensionRecordBuilder(t *testing.T) {
 	for name, offsetType := range allAllowedOffsetTypes {
 		t.Run(name, func(t *testing.T) {
