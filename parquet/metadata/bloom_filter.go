@@ -495,7 +495,7 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 	headerBuf.ResizeNoShrink(int(bloomFilterReadSize))
 	defer func() {
 		if headerBuf != nil {
-			headerBuf.ResizeNoShrink(0)
+			headerBuf.Reset(headerBuf.Buf()[:cap(headerBuf.Buf())])
 			r.bufferPool.Put(headerBuf)
 		}
 	}()
@@ -528,6 +528,8 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 		}
 
 		if _, err = sectionRdr.Read(buf.Bytes()[filterBytesInHeader:]); err != nil {
+			buf.Reset(buf.Buf()[:cap(buf.Buf())])
+			r.bufferPool.Put(buf)
 			return nil, err
 		}
 		bitset = buf.Bytes()
@@ -547,6 +549,44 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 	headerBuf = nil
 	addCleanup(bf, r.bufferPool)
 	return bf, nil
+}
+
+// VisitColumnBloomFilter invokes fn for the BloomFilter of the column at index i.
+//
+// Lifetime contract: The BloomFilter passed to fn (and its backing bitset)
+// is recycled immediately after fn returns. Callers must not retain, store,
+// or use the BloomFilter or its data outside the scope of the fn function.
+func (r *RowGroupBloomFilterReader) VisitColumnBloomFilter(i int, fn func(BloomFilter) error) error {
+	bf, err := r.GetColumnBloomFilter(i)
+	if err != nil || bf == nil {
+		return err
+	}
+
+	defer r.recycle(bf)
+
+	return fn(bf)
+}
+
+func (r *RowGroupBloomFilterReader) recycle(bf BloomFilter) {
+	if bf == nil {
+		return
+	}
+
+	b, ok := bf.(*blockSplitBloomFilter)
+	if !ok {
+		return
+	}
+
+	b.bitset32 = nil
+
+	if r.bufferPool != nil && b.cancelCleanup != nil {
+		r.bufferPool.Put(b.data)
+		b.cancelCleanup = nil
+	} else if b.data != nil {
+		b.data.Release()
+	}
+
+	b.data = nil
 }
 
 type FileBloomFilterBuilder struct {
