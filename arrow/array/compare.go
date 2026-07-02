@@ -40,7 +40,7 @@ func recordEqual(left, right arrow.RecordBatch, opt equalOption) bool {
 
 	for i := range left.Columns() {
 		lf := left.Schema().Field(i)
-		rf := left.Schema().Field(i)
+		rf := right.Schema().Field(i)
 		if !lf.Equal(rf) {
 			return false
 		}
@@ -72,7 +72,7 @@ func recordApproxEqual(left, right arrow.RecordBatch, opt equalOption) bool {
 
 	for i := range left.Columns() {
 		lf := left.Schema().Field(i)
-		rf := left.Schema().Field(i)
+		rf := right.Schema().Field(i)
 		if !lf.Equal(rf) {
 			return false
 		}
@@ -195,7 +195,7 @@ func tableEqual(left, right arrow.Table, opt equalOption) bool {
 
 	for i := 0; int64(i) < left.NumCols(); i++ {
 		lf := left.Schema().Field(i)
-		rf := left.Schema().Field(i)
+		rf := right.Schema().Field(i)
 		if !lf.Equal(rf) {
 			return false
 		}
@@ -226,7 +226,7 @@ func tableApproxEqual(left, right arrow.Table, opt equalOption) bool {
 
 	for i := 0; int64(i) < left.NumCols(); i++ {
 		lf := left.Schema().Field(i)
-		rf := left.Schema().Field(i)
+		rf := right.Schema().Field(i)
 		if !lf.Equal(rf) {
 			return false
 		}
