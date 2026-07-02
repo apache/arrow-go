@@ -320,17 +320,18 @@ func (a *SparseUnion) setData(data *Data) {
 	debug.Assert(a.data.buffers[0] == nil, "arrow/array: validity bitmap for sparse unions should be nil")
 }
 
-func (a *SparseUnion) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *SparseUnion) GetOneForMarshal(i int, nullable bool) any {
 	typeID := a.RawTypeCodes()[i]
 
 	childID := a.ChildID(i)
 	data := a.Field(childID)
 
-	if nullable && data.IsNull(i) {
-		return nil
+	childNullable := a.unionType.Fields()[childID].Nullable
+	if childNullable && data.IsNull(i) {
+		return []any{typeID, nil}
 	}
 
-	return []interface{}{typeID, data.GetOneForMarshal(i, nullable)}
+	return []any{typeID, data.GetOneForMarshal(i, childNullable)}
 }
 
 func (a *SparseUnion) MarshalJSON() ([]byte, error) {
@@ -471,8 +472,9 @@ func arraySparseUnionApproxEqual(l, r *SparseUnion, opt equalOption) bool {
 		}
 
 		childNum := childIDs[typeID]
+		childOpt := withNullable(opt, l.unionType.Fields()[childNum].Nullable)
 		eq := sliceApproxEqual(l.children[childNum], int64(i+l.data.offset), int64(i+l.data.offset+1),
-			r.children[childNum], int64(i+r.data.offset), int64(i+r.data.offset+1), opt)
+			r.children[childNum], int64(i+r.data.offset), int64(i+r.data.offset+1), childOpt)
 		if !eq {
 			return false
 		}
@@ -613,18 +615,19 @@ func (a *DenseUnion) setData(data *Data) {
 	}
 }
 
-func (a *DenseUnion) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *DenseUnion) GetOneForMarshal(i int, nullable bool) any {
 	typeID := a.RawTypeCodes()[i]
 
 	childID := a.ChildID(i)
 	data := a.Field(childID)
 
 	offset := int(a.RawValueOffsets()[i])
-	if nullable && data.IsNull(offset) {
-		return nil
+	childNullable := a.unionType.Fields()[childID].Nullable
+	if childNullable && data.IsNull(offset) {
+		return []any{typeID, nil}
 	}
 
-	return []interface{}{typeID, data.GetOneForMarshal(offset, nullable)}
+	return []any{typeID, data.GetOneForMarshal(offset, childNullable)}
 }
 
 func (a *DenseUnion) MarshalJSON() ([]byte, error) {
@@ -715,8 +718,9 @@ func arrayDenseUnionApproxEqual(l, r *DenseUnion, opt equalOption) bool {
 		}
 
 		childNum := childIDs[typeID]
+		childOpt := withNullable(opt, l.unionType.Fields()[childNum].Nullable)
 		eq := sliceApproxEqual(l.children[childNum], int64(leftOffsets[i]), int64(leftOffsets[i]+1),
-			r.children[childNum], int64(rightOffsets[i]), int64(rightOffsets[i]+1), opt)
+			r.children[childNum], int64(rightOffsets[i]), int64(rightOffsets[i]+1), childOpt)
 		if !eq {
 			return false
 		}
