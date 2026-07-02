@@ -322,25 +322,39 @@ func TestTimestampWithOffsetBuilderAppendValuesNilValids(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
+	// nil and empty validity slices must both be treated as all-valid so the
+	// parent struct and its child builders stay the same length.
+	validsVariants := map[string][]bool{"nil": nil, "empty": {}}
+
 	for name, offsetType := range allAllowedOffsetTypes {
-		t.Run(name, func(t *testing.T) {
-			builder, err := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, offsetType)
-			require.NoError(t, err)
+		for validsName, valids := range validsVariants {
+			t.Run(name+"/"+validsName, func(t *testing.T) {
+				builder, err := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, offsetType)
+				require.NoError(t, err)
 
-			// nil validity must be treated as all-valid so the parent struct and
-			// its child builders stay the same length.
-			builder.AppendValues([]time.Time{testDate0, testDate1, testDate2}, nil)
+				builder.AppendValues([]time.Time{testDate0, testDate1, testDate2}, valids)
 
-			arr := builder.NewArray()
-			defer arr.Release()
-			typedArr := arr.(*extensions.TimestampWithOffsetArray)
+				arr := builder.NewArray()
+				defer arr.Release()
+				typedArr := arr.(*extensions.TimestampWithOffsetArray)
 
-			require.Equal(t, 3, arr.Data().Len())
-			assert.Equal(t, testDate0, typedArr.Value(0))
-			assert.Equal(t, testDate1, typedArr.Value(1))
-			assert.Equal(t, testDate2, typedArr.Value(2))
-		})
+				require.Equal(t, 3, arr.Data().Len())
+				assert.Equal(t, testDate0, typedArr.Value(0))
+				assert.Equal(t, testDate1, typedArr.Value(1))
+				assert.Equal(t, testDate2, typedArr.Value(2))
+			})
+		}
 	}
+}
+
+func TestTimestampWithOffsetBuilderAppendValuesMismatchedValidsPanics(t *testing.T) {
+	builder, err := extensions.NewTimestampWithOffsetBuilder(memory.DefaultAllocator, testTimeUnit, arrow.PrimitiveTypes.Int16)
+	require.NoError(t, err)
+	defer builder.Release()
+
+	assert.Panics(t, func() {
+		builder.AppendValues([]time.Time{testDate0, testDate1}, []bool{true})
+	})
 }
 
 func TestTimestampWithOffsetBuilderReuseAfterNewArray(t *testing.T) {

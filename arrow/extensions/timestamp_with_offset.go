@@ -480,7 +480,10 @@ func (b *TimestampWithOffsetBuilder) AppendValueFromString(s string) error {
 }
 
 func (b *TimestampWithOffsetBuilder) AppendValues(values []time.Time, valids []bool) {
-	if valids == nil {
+	if len(valids) != len(values) && len(valids) != 0 {
+		panic("len(values) != len(valids) && len(valids) != 0")
+	}
+	if len(valids) == 0 {
 		valids = make([]bool, len(values))
 		for i := range valids {
 			valids[i] = true
