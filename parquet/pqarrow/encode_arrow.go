@@ -125,6 +125,7 @@ func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *Sch
 		return arrowColumnWriter{}, err
 	}
 	isNullable = nullableRoot(manifest, schemaField)
+	writeFixedSizeListAsVector := schemaField.IsVector
 
 	builders := make([]*multipathLevelBuilder, 0)
 	for values < size {
@@ -138,9 +139,9 @@ func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *Sch
 		defer arrToWrite.Release()
 
 		if arrToWrite.Len() > 0 {
-			bldr, err := newMultipathLevelBuilder(arrToWrite, isNullable)
+			bldr, err := newMultipathLevelBuilderWithVector(arrToWrite, isNullable, writeFixedSizeListAsVector)
 			if err != nil {
-				return arrowColumnWriter{}, nil
+				return arrowColumnWriter{}, err
 			}
 			if leafCount != bldr.leafCount() {
 				return arrowColumnWriter{}, fmt.Errorf("data type leaf_count != builder leaf_count: %d - %d", leafCount, bldr.leafCount())
