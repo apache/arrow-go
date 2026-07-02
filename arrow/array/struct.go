@@ -498,6 +498,7 @@ func (b *StructBuilder) UnmarshalOne(dec *json.Decoder) error {
 				b.fields[idx].AppendEmptyValue()
 			} else {
 				sub := json.NewDecoder(bytes.NewReader(next))
+				sub.UseNumber()
 				if err := b.fields[idx].UnmarshalOne(sub); err != nil {
 					return err
 				}

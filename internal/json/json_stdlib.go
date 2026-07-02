@@ -20,6 +20,7 @@
 package json
 
 import (
+	"bytes"
 	"io"
 
 	"encoding/json"
@@ -48,4 +49,8 @@ func NewDecoder(r io.Reader) *Decoder {
 
 func NewEncoder(w io.Writer) *Encoder {
 	return json.NewEncoder(w)
+}
+
+func IsNullMessage(m RawMessage) bool {
+	return bytes.Equal(m, []byte("null"))
 }
