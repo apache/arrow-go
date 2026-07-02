@@ -467,11 +467,15 @@ func (b *BinaryViewBuilder) Resize(n int) {
 	b.rawData = arrow.ViewHeaderTraits.CastFromBytes(b.data.Bytes())
 }
 
-func (b *BinaryViewBuilder) ReserveData(length int) {
-	if int32(length) > viewValueSizeLimit {
+func checkBinaryViewValueSize(length int) {
+	if length > int(viewValueSizeLimit) {
 		panic(fmt.Errorf("%w: BinaryView or StringView elements cannot reference strings larger than 2GB",
 			arrow.ErrInvalid))
 	}
+}
+
+func (b *BinaryViewBuilder) ReserveData(length int) {
+	checkBinaryViewValueSize(length)
 	b.blockBuilder.Reserve(int(length))
 }
 
@@ -480,9 +484,7 @@ func (b *BinaryViewBuilder) Reserve(n int) {
 }
 
 func (b *BinaryViewBuilder) Append(v []byte) {
-	if int32(len(v)) > viewValueSizeLimit {
-		panic(fmt.Errorf("%w: BinaryView or StringView elements cannot reference strings larger than 2GB", arrow.ErrInvalid))
-	}
+	checkBinaryViewValueSize(len(v))
 
 	if !arrow.IsViewInline(len(v)) {
 		b.ReserveData(len(v))
