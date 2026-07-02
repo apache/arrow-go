@@ -558,14 +558,30 @@ func NewDenseUnionFromArraysWithFieldCodes(typeIDs, offsets arrow.Array, childre
 	}
 
 	ty := arrow.DenseUnionFromArrays(children, fields, codes)
-	buffers := []*memory.Buffer{nil, typeIDs.Data().Buffers()[1], offsets.Data().Buffers()[1]}
+	typeIDBuffer := typeIDs.Data().Buffers()[1]
+	if typeIDBuffer != nil {
+		typeIDBuffer = memory.SliceBuffer(typeIDBuffer,
+			arrow.Int8Traits.BytesRequired(typeIDs.Data().Offset()),
+			arrow.Int8Traits.BytesRequired(typeIDs.Len()))
+		defer typeIDBuffer.Release()
+	}
+
+	offsetBuffer := offsets.Data().Buffers()[1]
+	if offsetBuffer != nil {
+		offsetBuffer = memory.SliceBuffer(offsetBuffer,
+			arrow.Int32Traits.BytesRequired(offsets.Data().Offset()),
+			arrow.Int32Traits.BytesRequired(offsets.Len()))
+		defer offsetBuffer.Release()
+	}
+
+	buffers := []*memory.Buffer{nil, typeIDBuffer, offsetBuffer}
 
 	childData := make([]arrow.ArrayData, len(children))
 	for i, c := range children {
 		childData[i] = c.Data()
 	}
 
-	data := NewData(ty, typeIDs.Len(), buffers, childData, 0, typeIDs.Data().Offset())
+	data := NewData(ty, typeIDs.Len(), buffers, childData, 0, 0)
 	defer data.Release()
 	return NewDenseUnionData(data), nil
 }
