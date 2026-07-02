@@ -32,6 +32,10 @@ func TestStripComments(t *testing.T) {
 		{name: "single-line, block comment at end", in: `[1,2,3] /* /* // */`, exp: `[1,2,3] `},
 		{name: "single-line, block comment in middle", in: `[1,/* foo bar */2,3]`, exp: `[1,2,3]`},
 		{name: "single-line, block comment in string", in: `[1,"/* foo bar */"]`, exp: `[1,"/* foo bar */"]`},
+		{name: "single-line, escaped backslashes in string", in: `{"path":"C:\\tmp\\file"} // keep escapes`, exp: `{"path":"C:\\tmp\\file"} `},
+		{name: "single-line, escaped quote in string", in: `{"quote":"\"// not a comment\""} // comment`, exp: `{"quote":"\"// not a comment\""} `},
+		{name: "single-line, escaped slash in string", in: `{"url":"https:\/\/example.com\/data"} /* comment */`, exp: `{"url":"https:\/\/example.com\/data"} `},
+		{name: "single-line, escaped newline in string", in: `{"line":"first\nsecond"} // comment`, exp: `{"line":"first\nsecond"} `},
 		{name: "single-line, malformed block comment", in: `[1,2,/*]`, exp: `[1,2,/*]`},
 		{name: "single-line, malformed JSON", in: `[1,2,/]`, exp: `[1,2,/]`},
 
