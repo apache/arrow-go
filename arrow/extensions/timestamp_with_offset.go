@@ -420,6 +420,21 @@ func NewTimestampWithOffsetBuilder(mem memory.Allocator, unit arrow.TimeUnit, of
 	}, nil
 }
 
+// NewArray must route through this type's NewExtensionArray (not the embedded
+// ExtensionBuilder's) so that the run-end-encoding tracker is reset on reuse.
+func (b *TimestampWithOffsetBuilder) NewArray() arrow.Array {
+	return b.NewExtensionArray()
+}
+
+// NewExtensionArray finalizes the current array and resets lastOffset so a
+// reused builder starts a fresh run instead of continuing a run that belonged
+// to the array just finalized (the underlying REE builder is reset too).
+func (b *TimestampWithOffsetBuilder) NewExtensionArray() array.ExtensionArray {
+	arr := b.ExtensionBuilder.NewExtensionArray()
+	b.lastOffset = noLastOffset
+	return arr
+}
+
 func (b *TimestampWithOffsetBuilder) Append(v time.Time) {
 	timestamp, offsetMinutes := fieldValuesFromTime(v, b.unit)
 	offsetMinutes16 := int16(offsetMinutes)
@@ -465,6 +480,13 @@ func (b *TimestampWithOffsetBuilder) AppendValueFromString(s string) error {
 }
 
 func (b *TimestampWithOffsetBuilder) AppendValues(values []time.Time, valids []bool) {
+	if valids == nil {
+		valids = make([]bool, len(values))
+		for i := range valids {
+			valids[i] = true
+		}
+	}
+
 	structBuilder := b.Builder.(*array.StructBuilder)
 	timestamps := structBuilder.FieldBuilder(0).(*array.TimestampBuilder)
 
@@ -499,7 +521,7 @@ func (b *TimestampWithOffsetBuilder) AppendValues(values []time.Time, valids []b
 			// values child and produce an invalid run-end encoded array. lastOffset
 			// is only updated when a new run starts, so a null row never splits a
 			// contiguous run into two adjacent runs sharing the same value.
-			valid := valids == nil || valids[i]
+			valid := valids[i]
 			if b.lastOffset == noLastOffset || (valid && offsetMinutes != b.lastOffset) {
 				offsets.Append(1)
 				offsetValuesBuilder.Append(offsetMinutes)

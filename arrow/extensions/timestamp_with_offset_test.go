@@ -318,6 +318,60 @@ func TestTimestampWithOffsetBuilderRunEndEncodedNullContinuesRun(t *testing.T) {
 	assert.Equal(t, testDate1, typedArr.Value(2))
 }
 
+func TestTimestampWithOffsetBuilderAppendValuesNilValids(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	for name, offsetType := range allAllowedOffsetTypes {
+		t.Run(name, func(t *testing.T) {
+			builder, err := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, offsetType)
+			require.NoError(t, err)
+
+			// nil validity must be treated as all-valid so the parent struct and
+			// its child builders stay the same length.
+			builder.AppendValues([]time.Time{testDate0, testDate1, testDate2}, nil)
+
+			arr := builder.NewArray()
+			defer arr.Release()
+			typedArr := arr.(*extensions.TimestampWithOffsetArray)
+
+			require.Equal(t, 3, arr.Data().Len())
+			assert.Equal(t, testDate0, typedArr.Value(0))
+			assert.Equal(t, testDate1, typedArr.Value(1))
+			assert.Equal(t, testDate2, typedArr.Value(2))
+		})
+	}
+}
+
+func TestTimestampWithOffsetBuilderReuseAfterNewArray(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	for name, offsetType := range allAllowedOffsetTypes {
+		t.Run(name, func(t *testing.T) {
+			builder, err := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, offsetType)
+			require.NoError(t, err)
+
+			builder.Append(testDate1)
+			arr1 := builder.NewArray()
+			defer arr1.Release()
+
+			// Reusing the builder must start a fresh run even when the first value
+			// repeats the previous array's offset; otherwise a run-end-encoded
+			// offset is continued on a freshly reset (empty) builder.
+			builder.Append(testDate1)
+			builder.Append(testDate2)
+			arr2 := builder.NewArray()
+			defer arr2.Release()
+
+			typedArr := arr2.(*extensions.TimestampWithOffsetArray)
+			require.Equal(t, 2, arr2.Data().Len())
+			assert.Equal(t, testDate1, typedArr.Value(0))
+			assert.Equal(t, testDate2, typedArr.Value(1))
+		})
+	}
+}
+
 func TestTimestampWithOffsetExtensionRecordBuilder(t *testing.T) {
 	for name, offsetType := range allAllowedOffsetTypes {
 		t.Run(name, func(t *testing.T) {
