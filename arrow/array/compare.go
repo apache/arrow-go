@@ -253,7 +253,7 @@ func equal(left, right arrow.Array, opt equalOption) bool {
 		return false
 	case left.Len() == 0:
 		return true
-	case opt.nullable && left.NullN() == left.Len():
+	case opt.nullable && hasTopLevelValidityBitmap(left.DataType().ID()) && left.NullN() == left.Len():
 		return true
 	}
 
@@ -527,7 +527,7 @@ func arrayApproxEqual(left, right arrow.Array, opt equalOption) bool {
 		return false
 	case left.Len() == 0:
 		return true
-	case opt.nullable && left.NullN() == left.Len():
+	case opt.nullable && hasTopLevelValidityBitmap(left.DataType().ID()) && left.NullN() == left.Len():
 		return true
 	}
 
@@ -678,13 +678,33 @@ func arrayApproxEqual(left, right arrow.Array, opt equalOption) bool {
 	}
 }
 
+func withNullable(opt equalOption, nullable bool) equalOption {
+	opt.nullable = nullable
+	return opt
+}
+
+// hasTopLevelValidityBitmap reports whether arrays of the given type id carry
+// their own top-level validity bitmap. Union and run-end-encoded arrays do not:
+// their nullness is encoded entirely in their children, so top-level null-count
+// and validity comparisons are not meaningful for them and can legitimately
+// differ between logically-equal arrays (e.g. built from JSON vs. read from IPC).
+func hasTopLevelValidityBitmap(id arrow.Type) bool {
+	switch id {
+	case arrow.SPARSE_UNION, arrow.DENSE_UNION, arrow.RUN_END_ENCODED:
+		return false
+	}
+	return true
+}
+
 func baseArrayEqual(left, right arrow.Array, opt equalOption) bool {
 	switch {
 	case left.Len() != right.Len():
 		return false
-	case opt.nullable && left.NullN() != right.NullN():
-		return false
 	case !arrow.TypeEqual(left.DataType(), right.DataType()): // We do not check for metadata as in the C++ implementation.
+		return false
+	case !hasTopLevelValidityBitmap(left.DataType().ID()):
+		return true
+	case opt.nullable && left.NullN() != right.NullN():
 		return false
 	case opt.nullable && !validityBitmapEqual(left, right):
 		return false
@@ -779,6 +799,7 @@ func arrayApproxEqualFloat64(left, right *Float64, opt equalOption) bool {
 }
 
 func arrayApproxEqualList(left, right *List, opt equalOption) bool {
+	childOpt := withNullable(opt, left.DataType().(arrow.ListLikeType).ElemField().Nullable)
 	for i := 0; i < left.Len(); i++ {
 		if opt.nullable && left.IsNull(i) {
 			continue
@@ -788,7 +809,7 @@ func arrayApproxEqualList(left, right *List, opt equalOption) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return arrayApproxEqual(l, r, opt)
+			return arrayApproxEqual(l, r, childOpt)
 		}()
 		if !o {
 			return false
@@ -798,6 +819,7 @@ func arrayApproxEqualList(left, right *List, opt equalOption) bool {
 }
 
 func arrayApproxEqualLargeList(left, right *LargeList, opt equalOption) bool {
+	childOpt := withNullable(opt, left.DataType().(arrow.ListLikeType).ElemField().Nullable)
 	for i := 0; i < left.Len(); i++ {
 		if opt.nullable && left.IsNull(i) {
 			continue
@@ -807,7 +829,7 @@ func arrayApproxEqualLargeList(left, right *LargeList, opt equalOption) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return arrayApproxEqual(l, r, opt)
+			return arrayApproxEqual(l, r, childOpt)
 		}()
 		if !o {
 			return false
@@ -817,6 +839,7 @@ func arrayApproxEqualLargeList(left, right *LargeList, opt equalOption) bool {
 }
 
 func arrayApproxEqualListView(left, right *ListView, opt equalOption) bool {
+	childOpt := withNullable(opt, left.DataType().(arrow.ListLikeType).ElemField().Nullable)
 	for i := 0; i < left.Len(); i++ {
 		if opt.nullable && left.IsNull(i) {
 			continue
@@ -826,7 +849,7 @@ func arrayApproxEqualListView(left, right *ListView, opt equalOption) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return arrayApproxEqual(l, r, opt)
+			return arrayApproxEqual(l, r, childOpt)
 		}()
 		if !o {
 			return false
@@ -836,6 +859,7 @@ func arrayApproxEqualListView(left, right *ListView, opt equalOption) bool {
 }
 
 func arrayApproxEqualLargeListView(left, right *LargeListView, opt equalOption) bool {
+	childOpt := withNullable(opt, left.DataType().(arrow.ListLikeType).ElemField().Nullable)
 	for i := 0; i < left.Len(); i++ {
 		if opt.nullable && left.IsNull(i) {
 			continue
@@ -845,7 +869,7 @@ func arrayApproxEqualLargeListView(left, right *LargeListView, opt equalOption) 
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return arrayApproxEqual(l, r, opt)
+			return arrayApproxEqual(l, r, childOpt)
 		}()
 		if !o {
 			return false
@@ -855,6 +879,7 @@ func arrayApproxEqualLargeListView(left, right *LargeListView, opt equalOption) 
 }
 
 func arrayApproxEqualFixedSizeList(left, right *FixedSizeList, opt equalOption) bool {
+	childOpt := withNullable(opt, left.DataType().(arrow.ListLikeType).ElemField().Nullable)
 	for i := 0; i < left.Len(); i++ {
 		if opt.nullable && left.IsNull(i) {
 			continue
@@ -864,7 +889,7 @@ func arrayApproxEqualFixedSizeList(left, right *FixedSizeList, opt equalOption) 
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return arrayApproxEqual(l, r, opt)
+			return arrayApproxEqual(l, r, childOpt)
 		}()
 		if !o {
 			return false
@@ -886,9 +911,11 @@ func arrayApproxEqualStruct(left, right *Struct, opt equalOption) bool {
 }
 
 func approxEqualStructRun(left, right *Struct, opt equalOption) bitutils.VisitFn {
+	st := left.DataType().(*arrow.StructType)
 	return func(pos int64, length int64) error {
 		for i := range left.fields {
-			if !sliceApproxEqual(left.fields[i], pos, pos+length, right.fields[i], pos, pos+length, opt) {
+			childOpt := withNullable(opt, st.Field(i).Nullable)
+			if !sliceApproxEqual(left.fields[i], pos, pos+length, right.fields[i], pos, pos+length, childOpt) {
 				return arrow.ErrInvalid
 			}
 		}
@@ -928,6 +955,10 @@ func arrayApproxEqualSingleMapEntry(left, right *Struct, opt equalOption) bool {
 		return true
 	}
 
+	st := left.DataType().(*arrow.StructType)
+	keyOpt := withNullable(opt, st.Field(0).Nullable)
+	valOpt := withNullable(opt, st.Field(1).Nullable)
+
 	used := make(map[int]bool, right.Len())
 	for i := 0; i < left.Len(); i++ {
 		if opt.nullable && left.IsNull(i) {
@@ -948,12 +979,12 @@ func arrayApproxEqualSingleMapEntry(left, right *Struct, opt equalOption) bool {
 			rBeg, rEnd := int64(j), int64(j+1)
 
 			// check keys (field 0)
-			if !sliceApproxEqual(left.Field(0), lBeg, lEnd, right.Field(0), rBeg, rEnd, opt) {
+			if !sliceApproxEqual(left.Field(0), lBeg, lEnd, right.Field(0), rBeg, rEnd, keyOpt) {
 				continue
 			}
 
 			// only now check the values
-			if sliceApproxEqual(left.Field(1), lBeg, lEnd, right.Field(1), rBeg, rEnd, opt) {
+			if sliceApproxEqual(left.Field(1), lBeg, lEnd, right.Field(1), rBeg, rEnd, valOpt) {
 				found = true
 				used[j] = true
 				break
