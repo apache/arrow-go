@@ -622,6 +622,24 @@ func (s *UnionFactorySuite) TestMakeSparse() {
 		s.Error(result.ValidateFull())
 	})
 
+	s.Run("sliced type ids", func() {
+		expected, err := array.NewSparseUnionFromArrays(s.typeIDs, children)
+		s.NoError(err)
+		defer expected.Release()
+
+		baseTypeIDs := s.typeidsFromSlice(3, 0, 1, 2, 0, 1, 3, 2, 0, 2, 1)
+		defer baseTypeIDs.Release()
+		slicedTypeIDs := array.NewSlice(baseTypeIDs, 1, int64(baseTypeIDs.Len()))
+		defer slicedTypeIDs.Release()
+
+		result, err := array.NewSparseUnionFromArrays(slicedTypeIDs, children)
+		s.NoError(err)
+		defer result.Release()
+		s.Zero(result.Data().Offset())
+		s.NoError(result.ValidateFull())
+		s.True(array.Equal(expected, result))
+	})
+
 	s.Run("invalid child length", func() {
 		children[3], _, _ = array.FromJSON(s.mem, arrow.PrimitiveTypes.Int8,
 			strings.NewReader(`[0, 0, 0, 0, 0, -12, 0, 0, 0]`))
