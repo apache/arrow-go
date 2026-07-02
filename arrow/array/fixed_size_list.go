@@ -85,6 +85,7 @@ func (a *FixedSizeList) setData(data *Data) {
 }
 
 func arrayEqualFixedSizeList(left, right *FixedSizeList, opt equalOption) bool {
+	childOpt := withNullable(opt, left.DataType().(arrow.ListLikeType).ElemField().Nullable)
 	for i := 0; i < left.Len(); i++ {
 		if opt.nullable && left.IsNull(i) {
 			continue
@@ -94,7 +95,7 @@ func arrayEqualFixedSizeList(left, right *FixedSizeList, opt equalOption) bool {
 			defer l.Release()
 			r := right.newListValue(i)
 			defer r.Release()
-			return equal(l, r, opt)
+			return equal(l, r, childOpt)
 		}()
 		if !o {
 			return false
