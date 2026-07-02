@@ -382,6 +382,12 @@ func (a *TimestampWithOffsetArray) GetOneForMarshal(i int) interface{} {
 	return a.Value(i)
 }
 
+// noLastOffset is the sentinel value for TimestampWithOffsetBuilder.lastOffset
+// indicating that no run-end-encoded run has been started yet. It is deliberately
+// outside the range of valid timezone offsets in minutes (roughly [-720, 840]) so
+// it can never compare equal to a real offset.
+const noLastOffset int16 = math.MaxInt16
+
 // TimestampWithOffsetBuilder is a convenience builder for the TimestampWithOffset extension type,
 // allowing arrays to be built with boolean values rather than the underlying storage type.
 type TimestampWithOffsetBuilder struct {
@@ -391,7 +397,9 @@ type TimestampWithOffsetBuilder struct {
 	Layout     string
 	unit       arrow.TimeUnit
 	offsetType arrow.DataType
-	// lastOffset is only used to determine when to start new runs with run-end encoded offsets
+	// lastOffset tracks the offset of the current run when the offsets are run-end
+	// encoded, so we know when to start a new run. It is initialized to noLastOffset
+	// to signal that no run has been started yet.
 	lastOffset int16
 }
 
@@ -406,7 +414,7 @@ func NewTimestampWithOffsetBuilder(mem memory.Allocator, unit arrow.TimeUnit, of
 	return &TimestampWithOffsetBuilder{
 		unit:             unit,
 		offsetType:       offsetType,
-		lastOffset:       math.MaxInt16,
+		lastOffset:       noLastOffset,
 		Layout:           time.RFC3339,
 		ExtensionBuilder: array.NewExtensionBuilder(mem, dataType),
 	}, nil
@@ -483,15 +491,22 @@ func (b *TimestampWithOffsetBuilder) AppendValues(values []time.Time, valids []b
 		for i, v := range values {
 			timestamp, offsetMinutes := fieldValuesFromTime(v, b.unit)
 			timestamps.UnsafeAppend(timestamp)
-			offsetMinutes16 := int16(offsetMinutes)
-			// If value at i is null, simply continue the run to maximize compression
-			if valids[i] && offsetMinutes != b.lastOffset {
+
+			// A null row's offset is masked by the struct validity bitmap, so we
+			// continue the current run to maximize compression. A run must still be
+			// started when none exists yet (e.g. leading null rows), otherwise
+			// ContinueRun would advance the run-ends without a matching entry in the
+			// values child and produce an invalid run-end encoded array. lastOffset
+			// is only updated when a new run starts, so a null row never splits a
+			// contiguous run into two adjacent runs sharing the same value.
+			valid := valids == nil || valids[i]
+			if b.lastOffset == noLastOffset || (valid && offsetMinutes != b.lastOffset) {
 				offsets.Append(1)
-				offsetValuesBuilder.Append(offsetMinutes16)
+				offsetValuesBuilder.Append(offsetMinutes)
+				b.lastOffset = offsetMinutes
 			} else {
 				offsets.ContinueRun(1)
 			}
-			b.lastOffset = offsetMinutes16
 		}
 	}
 }

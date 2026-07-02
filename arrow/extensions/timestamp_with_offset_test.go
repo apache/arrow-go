@@ -267,6 +267,57 @@ func TestTimestampWithOffsetExtensionBuilder(t *testing.T) {
 	}
 }
 
+func TestTimestampWithOffsetBuilderAppendValuesLeadingNull(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	for name, offsetType := range allAllowedOffsetTypes {
+		t.Run(name, func(t *testing.T) {
+			builder, err := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, offsetType)
+			require.NoError(t, err)
+
+			// A leading null as the very first operation on a fresh builder must not
+			// corrupt the offsets. Reading every value below would panic on a
+			// run-end encoded array whose run-ends and values children fell out of
+			// sync (which happened when a run was continued before one existed).
+			builder.AppendValues([]time.Time{epoch, testDate1, testDate2}, []bool{false, true, true})
+
+			arr := builder.NewArray()
+			defer arr.Release()
+			typedArr := arr.(*extensions.TimestampWithOffsetArray)
+
+			require.Equal(t, 3, arr.Data().Len())
+			assert.True(t, typedArr.IsNull(0))
+			assert.Equal(t, testDate1, typedArr.Value(1))
+			assert.Equal(t, testDate2, typedArr.Value(2))
+		})
+	}
+}
+
+func TestTimestampWithOffsetBuilderRunEndEncodedNullContinuesRun(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	builder, err := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, ree(arrow.PrimitiveTypes.Int16))
+	require.NoError(t, err)
+
+	// The same offset surrounds a null. The null must continue the current run
+	// rather than reset the tracked offset, otherwise one logical run is split
+	// into two adjacent runs that share the same value.
+	builder.AppendValues([]time.Time{testDate1, epoch, testDate1}, []bool{true, false, true})
+
+	arr := builder.NewArray()
+	defer arr.Release()
+	typedArr := arr.(*extensions.TimestampWithOffsetArray)
+
+	offsets := typedArr.Storage().(*array.Struct).Field(1).(*array.RunEndEncoded)
+	assert.Equal(t, 1, offsets.Values().Len())
+
+	assert.Equal(t, testDate1, typedArr.Value(0))
+	assert.True(t, typedArr.IsNull(1))
+	assert.Equal(t, testDate1, typedArr.Value(2))
+}
+
 func TestTimestampWithOffsetExtensionRecordBuilder(t *testing.T) {
 	for name, offsetType := range allAllowedOffsetTypes {
 		t.Run(name, func(t *testing.T) {
