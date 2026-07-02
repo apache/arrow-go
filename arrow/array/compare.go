@@ -146,7 +146,7 @@ func chunkedEqual(left, right *arrow.Chunked, opt equalOption) bool {
 
 	var isequal = true
 	chunkedBinaryApply(left, right, func(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64) bool {
-		isequal = SliceEqual(left, lbeg, lend, right, rbeg, rend)
+		isequal = sliceEqual(left, lbeg, lend, right, rbeg, rend, opt)
 		return isequal
 	})
 
