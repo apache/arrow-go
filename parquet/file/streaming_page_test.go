@@ -160,6 +160,27 @@ func TestPageStreamingAllocatorBalance(t *testing.T) {
 	require.NoError(t, cr.Close())
 }
 
+func TestPageStreamingIneligibleCodecFallback(t *testing.T) {
+	values := makeStreamTestValues([]int{65, 5000, 200, 9000, 50})
+
+	for _, codec := range []compress.Compression{compress.Codecs.Snappy, compress.Codecs.Lz4Raw} {
+		for _, ver := range []parquet.DataPageVersion{parquet.DataPageV1, parquet.DataPageV2} {
+			data := writeStreamTestColumn(t, values, ver, codec)
+
+			// EnablePageStreaming is set, but Snappy/LZ4_RAW are not in the allowlist,
+			// so pages must fall back to whole-page reads and match materialized.
+			materialized := readStreamTestColumn(t, data, false)
+			streamed := readStreamTestColumn(t, data, true)
+
+			require.Len(t, streamed, len(values))
+			for i := range values {
+				require.Truef(t, bytes.Equal(values[i], streamed[i]), "codec %v ver %v value %d", codec, ver, i)
+				require.Truef(t, bytes.Equal(materialized[i], streamed[i]), "codec %v ver %v value %d: streamed != materialized", codec, ver, i)
+			}
+		}
+	}
+}
+
 func writeNullableStreamColumn(t *testing.T, values []parquet.ByteArray, defLevels []int16, ver parquet.DataPageVersion, codec compress.Compression) []byte {
 	t.Helper()
 	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
@@ -255,6 +276,159 @@ func TestPageStreamingByteArrayNullable(t *testing.T) {
 			for i := range values {
 				require.Truef(t, bytes.Equal(mVals[i], sVals[i]), "value %d differs streaming vs materialized", i)
 				require.Truef(t, bytes.Equal(values[i], sVals[i]), "streamed value %d wrong", i)
+			}
+		})
+	}
+}
+
+func readStreamTestColumnSkip(t *testing.T, data []byte, streaming bool, skip int64) []parquet.ByteArray {
+	t.Helper()
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	props.EnablePageStreaming = streaming
+
+	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	cr, err := rdr.RowGroup(0).Column(0)
+	require.NoError(t, err)
+	bar := cr.(*file.ByteArrayColumnChunkReader)
+
+	skipped, err := bar.Skip(skip)
+	require.NoError(t, err)
+	require.Equal(t, skip, skipped)
+
+	n := int(rdr.NumRows()) - int(skip)
+	out := make([]parquet.ByteArray, n)
+	total := 0
+	for total < n {
+		_, nv, err := bar.ReadBatch(int64(n-total), out[total:], nil, nil)
+		require.NoError(t, err)
+		if nv == 0 {
+			break
+		}
+		total += nv
+	}
+	require.Equal(t, n, total)
+	return out
+}
+
+// TestPageStreamingByteArraySkip exercises the streaming skip path (discardStreaming
+// via Skip), asserting it agrees with the materialized read.
+func TestPageStreamingByteArraySkip(t *testing.T) {
+	// several small values share a page so the skip discards within a streaming page,
+	// with some large values spanning pages too.
+	values := makeStreamTestValues([]int{40, 50, 60, 70, 80, 90, 5000, 100, 9000, 40, 55, 66})
+	const skip = int64(3)
+
+	cases := []struct {
+		name  string
+		ver   parquet.DataPageVersion
+		codec compress.Compression
+	}{
+		{"v1-zstd", parquet.DataPageV1, compress.Codecs.Zstd},
+		{"v2-gzip", parquet.DataPageV2, compress.Codecs.Gzip},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := writeStreamTestColumn(t, values, tc.ver, tc.codec)
+
+			materialized := readStreamTestColumnSkip(t, data, false, skip)
+			streamed := readStreamTestColumnSkip(t, data, true, skip)
+
+			require.Len(t, streamed, len(values)-int(skip))
+			for i := range streamed {
+				require.Truef(t, bytes.Equal(values[int(skip)+i], streamed[i]), "value %d after skip", i)
+				require.Truef(t, bytes.Equal(materialized[i], streamed[i]), "value %d streamed != materialized", i)
+			}
+		})
+	}
+}
+
+func writeRepeatedStreamColumn(t *testing.T, values []parquet.ByteArray, defLevels, repLevels []int16, ver parquet.DataPageVersion, codec compress.Compression) []byte {
+	t.Helper()
+	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.Must(schema.NewPrimitiveNode("data", parquet.Repetitions.Repeated, parquet.Types.ByteArray, -1, -1)),
+	}, -1)))
+	props := parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(false),
+		parquet.WithDataPageVersion(ver),
+		parquet.WithCompression(codec),
+		parquet.WithDataPageSize(1024),
+	)
+	out := &bytes.Buffer{}
+	w := file.NewParquetWriter(out, sc.Root(), file.WithWriterProps(props))
+	rgw := w.AppendRowGroup()
+	cw, err := rgw.NextColumn()
+	require.NoError(t, err)
+	_, err = cw.(*file.ByteArrayColumnChunkWriter).WriteBatch(values, defLevels, repLevels)
+	require.NoError(t, err)
+	require.NoError(t, cw.Close())
+	require.NoError(t, rgw.Close())
+	require.NoError(t, w.Close())
+	return out.Bytes()
+}
+
+func readRepeatedStreamColumn(t *testing.T, data []byte, streaming bool) (defLevels, repLevels []int16, values []parquet.ByteArray) {
+	t.Helper()
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	props.EnablePageStreaming = streaming
+	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	cr, err := rdr.RowGroup(0).Column(0)
+	require.NoError(t, err)
+	bar := cr.(*file.ByteArrayColumnChunkReader)
+
+	const cap = 64
+	for {
+		vbuf := make([]parquet.ByteArray, cap)
+		dbuf := make([]int16, cap)
+		rbuf := make([]int16, cap)
+		total, nv, err := bar.ReadBatch(cap, vbuf, dbuf, rbuf)
+		require.NoError(t, err)
+		if total == 0 {
+			break
+		}
+		defLevels = append(defLevels, dbuf[:total]...)
+		repLevels = append(repLevels, rbuf[:total]...)
+		values = append(values, vbuf[:nv]...)
+	}
+	return defLevels, repLevels, values
+}
+
+// TestPageStreamingRepeated covers a repeated column (maxRepLevel > 0), exercising
+// the V1 rep-level peel in readLevelData.
+func TestPageStreamingRepeated(t *testing.T) {
+	// lists: [v0 v1 v2] [v3] [v4 v5]; rep levels mark list boundaries.
+	values := makeStreamTestValues([]int{40, 5000, 60, 9000, 70, 80})
+	repLevels := []int16{0, 1, 1, 0, 0, 1}
+	defLevels := []int16{1, 1, 1, 1, 1, 1}
+
+	cases := []struct {
+		name  string
+		ver   parquet.DataPageVersion
+		codec compress.Compression
+	}{
+		{"v1-zstd", parquet.DataPageV1, compress.Codecs.Zstd},
+		{"v2-gzip", parquet.DataPageV2, compress.Codecs.Gzip},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := writeRepeatedStreamColumn(t, values, defLevels, repLevels, tc.ver, tc.codec)
+
+			mDef, mRep, mVals := readRepeatedStreamColumn(t, data, false)
+			sDef, sRep, sVals := readRepeatedStreamColumn(t, data, true)
+
+			require.Equal(t, defLevels, sDef)
+			require.Equal(t, repLevels, sRep)
+			require.Equal(t, mDef, sDef)
+			require.Equal(t, mRep, sRep)
+			require.Len(t, sVals, len(values))
+			for i := range values {
+				require.Truef(t, bytes.Equal(values[i], sVals[i]), "value %d", i)
+				require.Truef(t, bytes.Equal(mVals[i], sVals[i]), "value %d streamed != materialized", i)
 			}
 		})
 	}

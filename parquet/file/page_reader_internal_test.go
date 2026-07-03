@@ -39,3 +39,13 @@ func TestReadLevelDataRLELengthBound(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, out, 12)
 }
+
+func TestReadLevelDataBitPacked(t *testing.T) {
+	p := &serializedPageReader{maxDefLevel: 1}
+
+	// maxDef 1 -> bitWidth 1; 8 values -> BytesForBits(8) = 1 byte, no length prefix
+	data := []byte{0b10110100}
+	out, err := p.readLevelData(bytes.NewReader(data), format.Encoding_RLE, format.Encoding_BIT_PACKED, 8, 1024)
+	require.NoError(t, err)
+	require.Equal(t, data, out)
+}
