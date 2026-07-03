@@ -27,8 +27,8 @@ import (
 type ValueBuffer interface {
 	// Advance marks the first n bytes of the current window as consumed.
 	Advance(n int)
-	// Fill ensures at least need contiguous bytes, returning a window valid only
-	// until the next call (io.ErrUnexpectedEOF if fewer remain). Use when skipping.
+	// Fill ensures at least need contiguous bytes and returns them; the window is only
+	// valid until the next Fill/FillOwned/Advance (io.ErrUnexpectedEOF if fewer remain).
 	Fill(need int) ([]byte, error)
 	// FillOwned is like Fill but the returned bytes stay valid after later calls,
 	// so a decoder can alias them instead of copying.
@@ -56,10 +56,10 @@ type streamBuffer struct {
 }
 
 // NewStreamBuffer returns a ValueBuffer over r.
-func NewStreamBuffer(mem memory.Allocator, r io.Reader, maxSize int, onClose func() error) ValueBuffer {
+func NewStreamBuffer(mem memory.Allocator, r io.Reader, sizeHint int, onClose func() error) ValueBuffer {
 	size := defaultStreamBufferSize
-	if maxSize > 0 && maxSize < size {
-		size = maxSize
+	if sizeHint > 0 && sizeHint < size {
+		size = sizeHint
 	}
 	buf := mem.Allocate(size)
 	return &streamBuffer{mem: mem, r: r, onClose: onClose, buf: buf, bufs: [][]byte{buf}}

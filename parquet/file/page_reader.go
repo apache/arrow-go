@@ -113,9 +113,9 @@ type dataPageBase struct {
 func (d *dataPageBase) valueBuffer() streaming.ValueBuffer { return d.valueBuf }
 func (d *dataPageBase) levelBuffer() []byte                { return d.buf.Bytes() }
 
-func (d *dataPageBase) setStreamingValues(mem memory.Allocator, maxSize int, levelBuf []byte, valReader, limit io.Reader, closer io.Closer) {
+func (d *dataPageBase) setStreamingValues(mem memory.Allocator, sizeHint int, levelBuf []byte, valReader, rawSrc io.Reader, closer io.Closer) {
 	d.buf = memory.NewBufferBytes(levelBuf)
-	d.valueBuf = streaming.NewStreamBuffer(mem, valReader, maxSize, drainAndClose(limit, closer))
+	d.valueBuf = streaming.NewStreamBuffer(mem, valReader, sizeHint, drainAndClose(rawSrc, closer))
 }
 
 // releaseValueStream closes a streaming page's value source (draining + closing its
@@ -800,9 +800,9 @@ func (p *serializedPageReader) valueStream(limit io.Reader, compressed bool) (io
 
 // drainAndClose returns the cleanup a streaming ValueBuffer runs on Close: consume
 // any unread compressed bytes for the current page and close the decompressor.
-func drainAndClose(limit io.Reader, closer io.Closer) func() error {
+func drainAndClose(rawSrc io.Reader, closer io.Closer) func() error {
 	return func() error {
-		_, _ = io.Copy(io.Discard, limit)
+		_, _ = io.Copy(io.Discard, rawSrc)
 		if closer != nil {
 			return closer.Close()
 		}
@@ -812,24 +812,6 @@ func drainAndClose(limit io.Reader, closer io.Closer) func() error {
 
 func (p *serializedPageReader) pageCanStream(enc format.Encoding) bool {
 	return p.columnCanStream && enc == format.Encoding_PLAIN && p.cryptoCtx.DataDecryptor == nil
-}
-
-func streamablePhysicalType(t parquet.Type) bool {
-	switch t {
-	case parquet.Types.ByteArray, parquet.Types.FixedLenByteArray:
-		return true
-	default:
-		return false
-	}
-}
-
-func streamableCodec(c compress.Compression) bool {
-	switch c {
-	case compress.Codecs.Uncompressed, compress.Codecs.Gzip, compress.Codecs.Brotli, compress.Codecs.Zstd:
-		return true
-	default:
-		return false
-	}
 }
 
 // readLevelData reads the V1 rep+def level region, capped at maxBytes (the
@@ -1041,9 +1023,9 @@ func (p *serializedPageReader) Next() bool {
 			}
 
 			if p.pageCanStream(dataHeader.GetEncoding()) {
-				// V2: rep/def levels are uncompressed and precede the (separately
-				// compressed) value region. Read the raw levels off the limited
-				// compressed stream, then take the values from what remains.
+				// V2: rep/def levels are uncompressed and precede the separately
+				// compressed value region. Read the level bytes directly off the front,
+				// then stream the values from what remains.
 				limit := io.LimitReader(p.r, int64(lenCompressed))
 				levelBuf := make([]byte, levelsBytelen)
 				if _, err := io.ReadFull(limit, levelBuf); err != nil {

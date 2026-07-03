@@ -42,8 +42,8 @@ func plainByteArrayBytes(vals []parquet.ByteArray) []byte {
 	return raw.Bytes()
 }
 
-// The materialized PlainByteArrayDecoder must dispatch to the streaming path when
-// fed a ValueBuffer via SetSource, decoding the same values.
+// PlainByteArrayDecoder must dispatch to the streaming path when fed a ValueBuffer
+// via SetSource, decoding the same values as the []byte path.
 func TestPlainByteArrayDecoderSetSource(t *testing.T) {
 	vals := []parquet.ByteArray{[]byte("hello"), []byte(""), []byte("world!!"), bytes.Repeat([]byte("x"), 5000)}
 

@@ -47,7 +47,7 @@ type ReaderProperties struct {
 	// EnablePageStreaming, when true, decodes eligible data pages incrementally instead
 	// of decoding the whole uncompressed page at once. Peak memory is then roughly the
 	// batch plus, per active page, a stream buffer (min(1 MiB, page size)), the largest
-	// single value, and the level buffers — not just the batch. Eligible pages are
+	// single value, and the level buffers. Eligible pages are
 	// PLAIN-encoded V1/V2 data pages of a streaming-capable, unencrypted codec
 	// (UNCOMPRESSED/GZIP/BROTLI/ZSTD) for a supported physical type; every other page is
 	// read whole as before. Default false (no behavior change).

@@ -381,12 +381,12 @@ func readRepeatedStreamColumn(t *testing.T, data []byte, streaming bool) (defLev
 	require.NoError(t, err)
 	bar := cr.(*file.ByteArrayColumnChunkReader)
 
-	const cap = 64
+	const batchSize = 64
 	for {
-		vbuf := make([]parquet.ByteArray, cap)
-		dbuf := make([]int16, cap)
-		rbuf := make([]int16, cap)
-		total, nv, err := bar.ReadBatch(cap, vbuf, dbuf, rbuf)
+		vbuf := make([]parquet.ByteArray, batchSize)
+		dbuf := make([]int16, batchSize)
+		rbuf := make([]int16, batchSize)
+		total, nv, err := bar.ReadBatch(batchSize, vbuf, dbuf, rbuf)
 		require.NoError(t, err)
 		if total == 0 {
 			break

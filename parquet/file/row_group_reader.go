@@ -23,6 +23,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
@@ -193,4 +194,22 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 		cryptoCtx:         ctx,
 	}
 	return pr, pr.init(col.Compression(), &ctx)
+}
+
+func streamablePhysicalType(t parquet.Type) bool {
+	switch t {
+	case parquet.Types.ByteArray, parquet.Types.FixedLenByteArray:
+		return true
+	default:
+		return false
+	}
+}
+
+func streamableCodec(c compress.Compression) bool {
+	switch c {
+	case compress.Codecs.Uncompressed, compress.Codecs.Gzip, compress.Codecs.Brotli, compress.Codecs.Zstd:
+		return true
+	default:
+		return false
+	}
 }
