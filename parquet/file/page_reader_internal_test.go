@@ -1,0 +1,50 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package file
+
+import (
+	"bytes"
+	"encoding/binary"
+	"testing"
+
+	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
+	"github.com/stretchr/testify/require"
+)
+
+// TestReadLevelDataRejectsOversizedRLELength verifies the V1 streaming level peel
+// bounds the RLE length prefix, so a corrupt page can't drive a huge allocation.
+// The bytes are present, so only the bound (not EOF) can reject it.
+func TestReadLevelDataRejectsOversizedRLELength(t *testing.T) {
+	p := &serializedPageReader{maxDefLevel: 1}
+
+	// Prefix claims 100 level bytes, but maxBytes (uncompressed page size) is 8.
+	data := make([]byte, 4+100)
+	binary.LittleEndian.PutUint32(data[:4], 100)
+	_, err := p.readLevelData(bytes.NewReader(data), format.Encoding_RLE, format.Encoding_RLE, 4, 8)
+	require.Error(t, err)
+}
+
+// TestReadLevelDataAcceptsValidRLELength checks a legitimate length still reads.
+func TestReadLevelDataAcceptsValidRLELength(t *testing.T) {
+	p := &serializedPageReader{maxDefLevel: 1}
+
+	data := make([]byte, 4+8)
+	binary.LittleEndian.PutUint32(data[:4], 8)
+	out, err := p.readLevelData(bytes.NewReader(data), format.Encoding_RLE, format.Encoding_RLE, 4, 1024)
+	require.NoError(t, err)
+	require.Len(t, out, 12) // 4-byte prefix + 8 level bytes
+}

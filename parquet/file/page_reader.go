@@ -828,8 +828,10 @@ func streamableCodec(c compress.Compression) bool {
 	}
 }
 
-// readLevelData reads the V1 rep+def level region into a buffer.
-func (p *serializedPageReader) readLevelData(r io.Reader, repEnc, defEnc format.Encoding, numValues int) ([]byte, error) {
+// readLevelData reads the V1 rep+def level region into a buffer. maxBytes bounds
+// the region (the uncompressed page size) so an untrusted RLE length prefix can't
+// drive an unbounded allocation.
+func (p *serializedPageReader) readLevelData(r io.Reader, repEnc, defEnc format.Encoding, numValues, maxBytes int) ([]byte, error) {
 	buf := make([]byte, 0, 4096)
 	readOne := func(enc format.Encoding, maxLvl int16) error {
 		switch enc {
@@ -839,6 +841,9 @@ func (p *serializedPageReader) readLevelData(r io.Reader, repEnc, defEnc format.
 				return err
 			}
 			n := int(binary.LittleEndian.Uint32(hdr[:]))
+			if n < 0 || len(buf)+4+n > maxBytes {
+				return fmt.Errorf("parquet: invalid V1 level region length %d", n)
+			}
 			start := len(buf)
 			buf = append(buf, hdr[:]...)
 			buf = append(buf, make([]byte, n)...)
@@ -848,6 +853,9 @@ func (p *serializedPageReader) readLevelData(r io.Reader, repEnc, defEnc format.
 		case format.Encoding_BIT_PACKED:
 			bitWidth := bits.Len64(uint64(maxLvl))
 			n := int(bitutil.BytesForBits(int64(numValues) * int64(bitWidth)))
+			if n < 0 || len(buf)+n > maxBytes {
+				return fmt.Errorf("parquet: invalid V1 level region length %d", n)
+			}
 			start := len(buf)
 			buf = append(buf, make([]byte, n)...)
 			if _, err := io.ReadFull(r, buf[start:]); err != nil {
@@ -965,7 +973,7 @@ func (p *serializedPageReader) Next() bool {
 				// codec too (a no-op passthrough for an uncompressed column).
 				valReader, closer := p.valueStream(limit, true)
 				levelBuf, err := p.readLevelData(valReader, dataHeader.GetRepetitionLevelEncoding(),
-					dataHeader.GetDefinitionLevelEncoding(), int(dataHeader.GetNumValues()))
+					dataHeader.GetDefinitionLevelEncoding(), int(dataHeader.GetNumValues()), lenUncompressed)
 				if err != nil {
 					_ = drainAndClose(limit, closer)()
 					p.err = err
