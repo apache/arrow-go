@@ -328,9 +328,9 @@ func (s *FlightSqlServerSuite) TestExecute() {
 		for i := 0; i < data.Len(); i++ {
 			switch n {
 			case 0:
-				s.Assert().Equal(true, data.IsNull(i))
+				s.True(data.IsNull(i))
 			case 1:
-				s.Assert().Equal(false, data.IsNull(i))
+				s.False(data.IsNull(i))
 				s.Assert().Equal(int16(1), data.Value(i))
 			}
 			n++
@@ -362,7 +362,7 @@ func (s *FlightSqlServerSuite) TestExecutePreparedStatementQuery() {
 
 	val, ok := prep.IsUpdate()
 	s.Require().True(ok)
-	s.Assert().Equal(false, val)
+	s.False(val)
 
 	fi, err := prep.Execute(context.TODO())
 	s.Require().NoError(err)
@@ -394,9 +394,9 @@ func (s *FlightSqlServerSuite) TestExecutePreparedStatementQuery() {
 		for i := 0; i < data.Len(); i++ {
 			switch n {
 			case 0:
-				s.Assert().Equal(true, data.IsNull(i))
+				s.True(data.IsNull(i))
 			case 1:
-				s.Assert().Equal(false, data.IsNull(i))
+				s.False(data.IsNull(i))
 				s.Assert().Equal(int16(1), data.Value(i))
 			}
 			n++
@@ -411,7 +411,7 @@ func (s *FlightSqlServerSuite) TestExecutePreparedStatementUpdate() {
 
 	val, ok := prep.IsUpdate()
 	s.Require().True(ok)
-	s.Assert().Equal(true, val)
+	s.True(val)
 
 	nrecords, err := prep.ExecuteUpdate(context.TODO())
 	s.Require().NoError(err)
