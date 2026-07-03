@@ -466,8 +466,9 @@ func (s *FlightSqlClientSuite) TestPreparedStatementExecuteWithIsUpdateFalse() {
 	defer prepared.Close(context.TODO(), s.callOpts...)
 
 	s.Equal(string(prepared.Handle()), query)
-	s.NotNil(prepared.IsUpdate())
-	s.False(*prepared.IsUpdate())
+	val, ok := prepared.IsUpdate()
+	s.True(ok)
+	s.False(val)
 
 	info, err := prepared.Execute(context.TODO(), s.callOpts...)
 	s.NoError(err)
@@ -529,8 +530,9 @@ func (s *FlightSqlClientSuite) TestPreparedStatementExecuteUpdateWithIsUpdateTru
 	defer prepared.Close(context.TODO(), s.callOpts...)
 
 	s.Equal(string(prepared.Handle()), query)
-	s.NotNil(prepared.IsUpdate())
-	s.True(*prepared.IsUpdate())
+	val, ok := prepared.IsUpdate()
+	s.True(ok)
+	s.True(val)
 
 	// Execute as update
 	num, err := prepared.ExecuteUpdate(context.TODO(), s.callOpts...)
