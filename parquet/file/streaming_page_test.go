@@ -574,3 +574,108 @@ func TestPageStreamingPageReaderCloseFreesStream(t *testing.T) {
 	require.True(t, pr.Next()) // advance to a streaming data page
 	require.NoError(t, pr.Close())
 }
+
+func makeFLBAValues(count, width int) []parquet.FixedLenByteArray {
+	vals := make([]parquet.FixedLenByteArray, count)
+	for i := range vals {
+		b := make([]byte, width)
+		b[0] = byte(i)
+		for j := 1; j < width; j++ {
+			b[j] = byte(i*13 + j)
+		}
+		vals[i] = b
+	}
+	return vals
+}
+
+func writeFLBAStreamColumn(t *testing.T, values []parquet.FixedLenByteArray, width int, ver parquet.DataPageVersion, codec compress.Compression) []byte {
+	t.Helper()
+	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.Must(schema.NewPrimitiveNode("data", parquet.Repetitions.Required, parquet.Types.FixedLenByteArray, -1, int32(width))),
+	}, -1)))
+	props := parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(false),
+		parquet.WithDataPageVersion(ver),
+		parquet.WithCompression(codec),
+		parquet.WithDataPageSize(1024),
+	)
+	out := &bytes.Buffer{}
+	w := file.NewParquetWriter(out, sc.Root(), file.WithWriterProps(props))
+	rgw := w.AppendRowGroup()
+	cw, err := rgw.NextColumn()
+	require.NoError(t, err)
+	_, err = cw.(*file.FixedLenByteArrayColumnChunkWriter).WriteBatch(values, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, cw.Close())
+	require.NoError(t, rgw.Close())
+	require.NoError(t, w.Close())
+	return out.Bytes()
+}
+
+func readFLBAStreamColumnSkip(t *testing.T, data []byte, streaming bool, skip int64) []parquet.FixedLenByteArray {
+	t.Helper()
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	props.EnablePageStreaming = streaming
+	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	cr, err := rdr.RowGroup(0).Column(0)
+	require.NoError(t, err)
+	bar := cr.(*file.FixedLenByteArrayColumnChunkReader)
+	if skip > 0 {
+		skipped, err := bar.Skip(skip)
+		require.NoError(t, err)
+		require.Equal(t, skip, skipped)
+	}
+	n := int(rdr.NumRows()) - int(skip)
+	out := make([]parquet.FixedLenByteArray, n)
+	total := 0
+	for total < n {
+		_, nv, err := bar.ReadBatch(int64(n-total), out[total:], nil, nil)
+		require.NoError(t, err)
+		if nv == 0 {
+			break
+		}
+		total += nv
+	}
+	require.Equal(t, n, total)
+	return out
+}
+
+// TestPageStreamingFLBASkip covers FLBA streaming: full round-trip and skip
+// (discardStreaming) across page boundaries, versus the materialized read.
+func TestPageStreamingFLBASkip(t *testing.T) {
+	const width = 24
+	values := makeFLBAValues(80, width) // multiple 1 KiB pages
+
+	cases := []struct {
+		name  string
+		ver   parquet.DataPageVersion
+		codec compress.Compression
+	}{
+		{"v1-zstd", parquet.DataPageV1, compress.Codecs.Zstd},
+		{"v2-gzip", parquet.DataPageV2, compress.Codecs.Gzip},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := writeFLBAStreamColumn(t, values, width, tc.ver, tc.codec)
+
+			full := readFLBAStreamColumnSkip(t, data, true, 0)
+			require.Len(t, full, len(values))
+			for i := range values {
+				require.Truef(t, bytes.Equal(values[i], full[i]), "roundtrip value %d", i)
+			}
+
+			for _, skip := range []int64{5, 50} { // 50 crosses a page boundary
+				mat := readFLBAStreamColumnSkip(t, data, false, skip)
+				str := readFLBAStreamColumnSkip(t, data, true, skip)
+				require.Len(t, str, len(values)-int(skip))
+				for i := range str {
+					require.Truef(t, bytes.Equal(values[int(skip)+i], str[i]), "skip %d value %d", skip, i)
+					require.Truef(t, bytes.Equal(mat[i], str[i]), "skip %d value %d streamed != materialized", skip, i)
+				}
+			}
+		})
+	}
+}

@@ -73,11 +73,17 @@ func (pflba *PlainFixedLenByteArrayDecoder) decodeStreaming(out []parquet.FixedL
 
 func (pflba *PlainFixedLenByteArrayDecoder) discardStreaming(n int) (int, error) {
 	n = min(n, pflba.nvals)
-	need := n * pflba.typeLen
-	if _, err := pflba.src.Fill(need); err != nil {
-		return 0, errors.New("parquet: eof exception")
+	// Avoid Fill(n*typeLen) allocating the whole skipped region; discard in chunks.
+	remaining := n * pflba.typeLen
+	for remaining > 0 {
+		buf, err := pflba.src.Fill(1)
+		if err != nil {
+			return (n*pflba.typeLen - remaining) / pflba.typeLen, errors.New("parquet: eof exception")
+		}
+		skip := min(len(buf), remaining)
+		pflba.src.Advance(skip)
+		remaining -= skip
 	}
-	pflba.src.Advance(need)
 	pflba.nvals -= n
 	return n, nil
 }
