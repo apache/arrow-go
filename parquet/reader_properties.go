@@ -52,8 +52,9 @@ type ReaderProperties struct {
 	// (UNCOMPRESSED/GZIP/BROTLI/ZSTD) for a supported physical type; every other page is
 	// read whole as before. Default false (no behavior change).
 	//
-	// Note: with this on, a streaming page's raw Page.Data() returns only its level
-	// region — decode values through a column or record reader.
+	// Note: this only affects the low-level GetColumnPageReader path — a streaming
+	// page's Page.Data() then returns just its level region. Reading via
+	// RowGroup.Column()/ReadBatch is unaffected.
 	EnablePageStreaming bool
 }
 
