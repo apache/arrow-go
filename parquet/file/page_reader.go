@@ -231,6 +231,9 @@ func NewDataPageV1WithConfig(buffer *memory.Buffer, defEncoding, repEncoding par
 // After calling this function, the object should not be utilized anymore, otherwise
 // conflicts can arise.
 func (d *DataPageV1) Release() {
+	if d.buf == nil {
+		return
+	}
 	d.releaseValueStream()
 	d.buf.Release()
 	d.buf = nil
@@ -318,6 +321,9 @@ func NewDataPageV2WithConfig(buffer *memory.Buffer, numNulls, numRows int32, def
 // After calling this function, the object should not be utilized anymore, otherwise
 // conflicts can arise.
 func (d *DataPageV2) Release() {
+	if d.buf == nil {
+		return
+	}
 	d.releaseValueStream()
 	d.buf.Release()
 	d.buf = nil
@@ -423,6 +429,11 @@ type serializedPageReader struct {
 }
 
 func (p *serializedPageReader) Close() error {
+	if p.curPage != nil {
+		// free a direct PageReader user's streaming value stream
+		p.curPage.Release()
+		p.curPage = nil
+	}
 	if p.decompressBuffer != nil {
 		p.decompressBuffer.Release()
 		p.dictPageBuffer.Release()
@@ -742,6 +753,13 @@ func (p *serializedPageReader) readPageHeader(rd parquet.BufferedReader, hdr *fo
 func (p *serializedPageReader) SeekToPageWithRow(rowIdx int64) error {
 	if rowIdx < 0 || rowIdx >= p.nrows {
 		return fmt.Errorf("parquet: cannot seek column reader to row index %d", rowIdx)
+	}
+
+	// Release before repositioning p.r: a streaming page's drain-on-release would
+	// otherwise read from the new offset.
+	if p.curPage != nil {
+		p.curPage.Release()
+		p.curPage = nil
 	}
 
 	var (

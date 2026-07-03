@@ -319,7 +319,6 @@ func TestPageStreamingByteArraySkip(t *testing.T) {
 	// several small values share a page so the skip discards within a streaming page,
 	// with some large values spanning pages too.
 	values := makeStreamTestValues([]int{40, 50, 60, 70, 80, 90, 5000, 100, 9000, 40, 55, 66})
-	const skip = int64(3)
 
 	cases := []struct {
 		name  string
@@ -333,13 +332,15 @@ func TestPageStreamingByteArraySkip(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			data := writeStreamTestColumn(t, values, tc.ver, tc.codec)
 
-			materialized := readStreamTestColumnSkip(t, data, false, skip)
-			streamed := readStreamTestColumnSkip(t, data, true, skip)
+			for _, skip := range []int64{3, 8} { // 3 within page 1; 8 crosses page boundaries
+				materialized := readStreamTestColumnSkip(t, data, false, skip)
+				streamed := readStreamTestColumnSkip(t, data, true, skip)
 
-			require.Len(t, streamed, len(values)-int(skip))
-			for i := range streamed {
-				require.Truef(t, bytes.Equal(values[int(skip)+i], streamed[i]), "value %d after skip", i)
-				require.Truef(t, bytes.Equal(materialized[i], streamed[i]), "value %d streamed != materialized", i)
+				require.Len(t, streamed, len(values)-int(skip))
+				for i := range streamed {
+					require.Truef(t, bytes.Equal(values[int(skip)+i], streamed[i]), "skip %d value %d", skip, i)
+					require.Truef(t, bytes.Equal(materialized[i], streamed[i]), "skip %d value %d streamed != materialized", skip, i)
+				}
 			}
 		})
 	}
@@ -432,4 +433,144 @@ func TestPageStreamingRepeated(t *testing.T) {
 			}
 		})
 	}
+}
+
+func readStreamTestColumnSeekAfterRead(t *testing.T, data []byte, streaming bool, preRead int, seekRow int64) []parquet.ByteArray {
+	t.Helper()
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	props.EnablePageStreaming = streaming
+
+	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	cr, err := rdr.RowGroup(0).Column(0)
+	require.NoError(t, err)
+	bar := cr.(*file.ByteArrayColumnChunkReader)
+
+	// Read a few values first so a streaming page is current and partially consumed
+	// when the seek repositions the underlying reader.
+	if preRead > 0 {
+		pre := make([]parquet.ByteArray, preRead)
+		_, _, err := bar.ReadBatch(int64(preRead), pre, nil, nil)
+		require.NoError(t, err)
+	}
+	require.NoError(t, bar.SeekToRow(seekRow))
+
+	n := int(rdr.NumRows()) - int(seekRow)
+	out := make([]parquet.ByteArray, n)
+	total := 0
+	for total < n {
+		_, nv, err := bar.ReadBatch(int64(n-total), out[total:], nil, nil)
+		require.NoError(t, err)
+		if nv == 0 {
+			break
+		}
+		total += nv
+	}
+	require.Equal(t, n, total)
+	return out
+}
+
+// TestPageStreamingSeekAfterRead checks SeekToRow parity with a streaming page
+// current (small pages; the large-page drain case is covered separately).
+func TestPageStreamingSeekAfterRead(t *testing.T) {
+	values := makeStreamTestValues([]int{40, 50, 60, 70, 5000, 90, 9000, 40, 55, 66, 77, 88})
+	const (
+		preRead = 2
+		seekRow = int64(8)
+	)
+
+	cases := []struct {
+		name  string
+		ver   parquet.DataPageVersion
+		codec compress.Compression
+	}{
+		{"v1-zstd", parquet.DataPageV1, compress.Codecs.Zstd},
+		{"v2-gzip", parquet.DataPageV2, compress.Codecs.Gzip},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := writeStreamTestColumn(t, values, tc.ver, tc.codec)
+
+			mat := readStreamTestColumnSeekAfterRead(t, data, false, preRead, seekRow)
+			str := readStreamTestColumnSeekAfterRead(t, data, true, preRead, seekRow)
+
+			require.Len(t, str, len(values)-int(seekRow))
+			for i := range str {
+				require.Truef(t, bytes.Equal(values[int(seekRow)+i], str[i]), "value %d after seek", i)
+				require.Truef(t, bytes.Equal(mat[i], str[i]), "value %d streamed != materialized", i)
+			}
+		})
+	}
+}
+
+func writeStreamTestColumnPaged(t *testing.T, values []parquet.ByteArray, ver parquet.DataPageVersion, codec compress.Compression, pageSize int64) []byte {
+	t.Helper()
+	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.Must(schema.NewPrimitiveNode("data", parquet.Repetitions.Required, parquet.Types.ByteArray, -1, -1)),
+	}, -1)))
+	props := parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(false),
+		parquet.WithDataPageVersion(ver),
+		parquet.WithCompression(codec),
+		parquet.WithDataPageSize(pageSize),
+	)
+	out := &bytes.Buffer{}
+	w := file.NewParquetWriter(out, sc.Root(), file.WithWriterProps(props))
+	rgw := w.AppendRowGroup()
+	cw, err := rgw.NextColumn()
+	require.NoError(t, err)
+	_, err = cw.(*file.ByteArrayColumnChunkWriter).WriteBatch(values, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, cw.Close())
+	require.NoError(t, rgw.Close())
+	require.NoError(t, w.Close())
+	return out.Bytes()
+}
+
+// TestPageStreamingSeekLargePagePartial is the case that actually exercises the seek
+// drain fix: pages larger than the 1 MiB stream buffer, partially read, so a later
+// streaming page still has undrained bytes when SeekToRow repositions the reader.
+func TestPageStreamingSeekLargePagePartial(t *testing.T) {
+	sizes := make([]int, 40)
+	for i := range sizes {
+		sizes[i] = 64 << 10 // 64 KiB -> ~16 values per >1 MiB page
+	}
+	values := makeStreamTestValues(sizes)
+	data := writeStreamTestColumnPaged(t, values, parquet.DataPageV1, compress.Codecs.Uncompressed, 1<<20)
+
+	const (
+		preRead = 20 // into page 2
+		seekRow = int64(35)
+	)
+	mat := readStreamTestColumnSeekAfterRead(t, data, false, preRead, seekRow)
+	str := readStreamTestColumnSeekAfterRead(t, data, true, preRead, seekRow)
+
+	require.Len(t, str, len(values)-int(seekRow))
+	for i := range str {
+		require.Truef(t, bytes.Equal(values[int(seekRow)+i], str[i]), "value %d after seek", i)
+		require.Truef(t, bytes.Equal(mat[i], str[i]), "value %d streamed != materialized", i)
+	}
+}
+
+// TestPageStreamingPageReaderCloseFreesStream checks a direct PageReader user's
+// Close frees the streaming value stream (allocator balance).
+func TestPageStreamingPageReaderCloseFreesStream(t *testing.T) {
+	values := makeStreamTestValues([]int{65, 5000, 200})
+	data := writeStreamTestColumn(t, values, parquet.DataPageV1, compress.Codecs.Zstd)
+
+	checked := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer checked.AssertSize(t, 0)
+
+	props := parquet.NewReaderProperties(checked)
+	props.EnablePageStreaming = true
+	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	pr, err := rdr.RowGroup(0).GetColumnPageReader(0)
+	require.NoError(t, err)
+	require.True(t, pr.Next()) // advance to a streaming data page
+	require.NoError(t, pr.Close())
 }
