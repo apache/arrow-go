@@ -42,8 +42,6 @@ func plainByteArrayBytes(vals []parquet.ByteArray) []byte {
 	return raw.Bytes()
 }
 
-// PlainByteArrayDecoder must dispatch to the streaming path when fed a ValueBuffer
-// via SetSource, decoding the same values as the []byte path.
 func TestPlainByteArrayDecoderSetSource(t *testing.T) {
 	vals := []parquet.ByteArray{[]byte("hello"), []byte(""), []byte("world!!"), bytes.Repeat([]byte("x"), 5000)}
 
@@ -84,8 +82,6 @@ func TestPlainFixedLenByteArrayDecoderSetSource(t *testing.T) {
 	}
 }
 
-// The fixed-width PLAIN decoder is out of the streaming scope and must not
-// implement streaming.Decoder.
 func TestFixedWidthDecoderNotStreaming(t *testing.T) {
 	dec := encoding.NewDecoder(parquet.Types.Int64, parquet.Encodings.Plain, nil, memory.DefaultAllocator)
 	_, ok := dec.(streaming.Decoder)
