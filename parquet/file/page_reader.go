@@ -828,9 +828,8 @@ func streamableCodec(c compress.Compression) bool {
 	}
 }
 
-// readLevelData reads the V1 rep+def level region into a buffer. maxBytes bounds
-// the region (the uncompressed page size) so an untrusted RLE length prefix can't
-// drive an unbounded allocation.
+// readLevelData reads the V1 rep+def level region, capped at maxBytes (the
+// uncompressed page size) so a bogus length prefix can't force a huge allocation.
 func (p *serializedPageReader) readLevelData(r io.Reader, repEnc, defEnc format.Encoding, numValues, maxBytes int) ([]byte, error) {
 	buf := make([]byte, 0, 4096)
 	readOne := func(enc format.Encoding, maxLvl int16) error {
@@ -852,7 +851,11 @@ func (p *serializedPageReader) readLevelData(r io.Reader, repEnc, defEnc format.
 			}
 		case format.Encoding_BIT_PACKED:
 			bitWidth := bits.Len64(uint64(maxLvl))
-			n := int(bitutil.BytesForBits(int64(numValues) * int64(bitWidth)))
+			nbits, ok := utils.Mul(numValues, bitWidth)
+			if !ok {
+				return fmt.Errorf("parquet: V1 level count %d too large (corrupt page?)", numValues)
+			}
+			n := int(bitutil.BytesForBits(int64(nbits)))
 			if n < 0 || len(buf)+n > maxBytes {
 				return fmt.Errorf("parquet: invalid V1 level region length %d", n)
 			}
