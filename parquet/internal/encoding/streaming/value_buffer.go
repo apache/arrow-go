@@ -16,7 +16,11 @@
 
 package streaming
 
-import "io"
+import (
+	"io"
+
+	"github.com/apache/arrow-go/v18/arrow/memory"
+)
 
 // ValueBuffer is the incremental byte source a streaming decoder reads over one
 // data page's value stream.
@@ -42,7 +46,9 @@ const defaultStreamBufferSize = 1 << 20
 type streamBuffer struct {
 	r       io.Reader
 	onClose func() error
-	buf     []byte
+	mem     memory.Allocator
+	bufs    [][]byte // freed on Close
+	buf     []byte   // current window
 	off, n  int
 	// shared: buf was handed out via FillOwned and may back live aliases, so it
 	// must not be slid/overwritten.
@@ -50,13 +56,22 @@ type streamBuffer struct {
 }
 
 // NewStreamBuffer returns a ValueBuffer over r.
-func NewStreamBuffer(r io.Reader, onClose func() error) ValueBuffer {
-	return &streamBuffer{r: r, onClose: onClose, buf: make([]byte, defaultStreamBufferSize)}
+func NewStreamBuffer(mem memory.Allocator, r io.Reader, maxSize int, onClose func() error) ValueBuffer {
+	size := defaultStreamBufferSize
+	if maxSize > 0 && maxSize < size {
+		size = maxSize
+	}
+	buf := mem.Allocate(size)
+	return &streamBuffer{mem: mem, r: r, onClose: onClose, buf: buf, bufs: [][]byte{buf}}
 }
 
 func (s *streamBuffer) Advance(n int) { s.off += n }
 
 func (s *streamBuffer) Close() error {
+	for _, b := range s.bufs {
+		s.mem.Free(b)
+	}
+	s.bufs, s.buf = nil, nil
 	if s.onClose != nil {
 		return s.onClose()
 	}
@@ -79,9 +94,10 @@ func (s *streamBuffer) fill(need int, owned bool) ([]byte, error) {
 		if size < need {
 			size = need
 		}
-		fresh := make([]byte, size)
+		fresh := s.mem.Allocate(size)
 		s.n = copy(fresh, s.buf[s.off:s.n])
 		s.off, s.buf = 0, fresh
+		s.bufs = append(s.bufs, fresh)
 	case s.off > 0:
 		s.n = copy(s.buf, s.buf[s.off:s.n])
 		s.off = 0

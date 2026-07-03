@@ -132,6 +132,34 @@ func TestPageStreamingByteArrayRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPageStreamingAllocatorBalance(t *testing.T) {
+	values := makeStreamTestValues([]int{65, 5000, 200, 9000, 50})
+	data := writeStreamTestColumn(t, values, parquet.DataPageV1, compress.Codecs.Zstd)
+
+	checked := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer checked.AssertSize(t, 0)
+
+	props := parquet.NewReaderProperties(checked)
+	props.EnablePageStreaming = true
+	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	cr, err := rdr.RowGroup(0).Column(0)
+	require.NoError(t, err)
+	n := int(rdr.NumRows())
+	out := make([]parquet.ByteArray, n)
+	for total := 0; total < n; {
+		_, nv, err := cr.(*file.ByteArrayColumnChunkReader).ReadBatch(int64(n-total), out[total:], nil, nil)
+		require.NoError(t, err)
+		if nv == 0 {
+			break
+		}
+		total += nv
+	}
+	require.NoError(t, cr.Close())
+}
+
 func writeNullableStreamColumn(t *testing.T, values []parquet.ByteArray, defLevels []int16, ver parquet.DataPageVersion, codec compress.Compression) []byte {
 	t.Helper()
 	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{

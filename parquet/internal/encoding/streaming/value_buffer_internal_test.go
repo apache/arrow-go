@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +28,8 @@ import (
 // newTestBuffer builds a streamBuffer with an undersized backing buffer so a
 // few small values force the slide/fresh-buffer paths.
 func newTestBuffer(data []byte, size int) *streamBuffer {
-	return &streamBuffer{r: bytes.NewReader(data), buf: make([]byte, size)}
+	buf := memory.DefaultAllocator.Allocate(size)
+	return &streamBuffer{mem: memory.DefaultAllocator, r: bytes.NewReader(data), buf: buf, bufs: [][]byte{buf}}
 }
 
 // TestFillOwnedStaysValidAcrossRefill checks that bytes handed out by FillOwned
@@ -72,6 +74,24 @@ func TestFillAfterFillOwnedPreservesAliases(t *testing.T) {
 	_, err = s.Fill(4) // reuse mode, but must not clobber the shared buffer
 	require.NoError(t, err)
 	assert.Equal(t, []byte{0, 1, 2, 3}, v1, "Fill overwrote FillOwned-aliased bytes")
+}
+
+func TestStreamBufferFreesBuffersOnClose(t *testing.T) {
+	checked := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	data := bytes.Repeat([]byte{1}, 64)
+
+	buf := checked.Allocate(8) // tiny buffer forces fresh allocations on each refill
+	s := &streamBuffer{mem: checked, r: bytes.NewReader(data), buf: buf, bufs: [][]byte{buf}}
+	for {
+		b, err := s.FillOwned(8)
+		if err != nil {
+			break
+		}
+		s.Advance(len(b)) // consume fully so the next FillOwned allocates fresh
+	}
+	require.NoError(t, s.Close())
+
+	checked.AssertSize(t, 0)
 }
 
 // TestFillReusesBufferWhenNotShared checks the fast path: without an outstanding

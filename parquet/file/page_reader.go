@@ -109,14 +109,14 @@ type dataPageBase struct {
 func (d *dataPageBase) valueBuffer() streaming.ValueBuffer { return d.valueBuf }
 func (d *dataPageBase) levelBuffer() []byte                { return d.buf.Bytes() }
 
-func (d *dataPageBase) setStreamingValues(levelBuf []byte, valReader, limit io.Reader, closer io.Closer) {
+func (d *dataPageBase) setStreamingValues(mem memory.Allocator, maxSize int, levelBuf []byte, valReader, limit io.Reader, closer io.Closer) {
 	d.buf = memory.NewBufferBytes(levelBuf)
-	d.valueBuf = streaming.NewStreamBuffer(valReader, drainAndClose(limit, closer))
+	d.valueBuf = streaming.NewStreamBuffer(mem, valReader, maxSize, drainAndClose(limit, closer))
 }
 
 // releaseValueStream closes a streaming page's value source (draining + closing its
 // underlying compressed stream so the file reader lands on the next page header even
-// when values were skipped). It is a no-op for materialized pages.
+// when values were skipped). It is a no-op for non-streaming pages.
 func (d *dataPageBase) releaseValueStream() {
 	if d.valueBuf != nil {
 		_ = d.valueBuf.Close()
@@ -145,7 +145,7 @@ type DataPage interface {
 	// to the first row in the data page, or -1 if not set.
 	FirstRowIndex() int64
 
-	// valueBuffer returns the streaming value source, or nil when materialized.
+	// valueBuffer returns the streaming value source, or nil for a non-streaming page.
 	valueBuffer() streaming.ValueBuffer
 }
 
@@ -443,7 +443,7 @@ func (p *serializedPageReader) init(compressType compress.Compression, ctx *Cryp
 	p.codec = codec
 	if _, ok := codec.(compress.StreamingCodec); !ok {
 		// A codec registered via compress.RegisterCodec need not implement
-		// streaming; fall back to the materialized path in that case.
+		// streaming; disable streaming for this column in that case.
 		p.columnCanStream = false
 	}
 
@@ -982,7 +982,7 @@ func (p *serializedPageReader) Next() bool {
 					p.err = err
 					return false
 				}
-				dp.setStreamingValues(levelBuf, valReader, limit, closer)
+				dp.setStreamingValues(p.mem, lenUncompressed, levelBuf, valReader, limit, closer)
 			} else {
 				p.dataPageBuffer.ResizeNoShrink(lenUncompressed)
 				buf := memory.NewBufferBytes(p.dataPageBuffer.Bytes())
@@ -1047,7 +1047,7 @@ func (p *serializedPageReader) Next() bool {
 					return false
 				}
 				valReader, closer := p.valueStream(limit, compressed)
-				dp.setStreamingValues(levelBuf, valReader, limit, closer)
+				dp.setStreamingValues(p.mem, lenUncompressed, levelBuf, valReader, limit, closer)
 			} else {
 				p.dataPageBuffer.ResizeNoShrink(lenUncompressed)
 				buf := memory.NewBufferBytes(p.dataPageBuffer.Bytes())
