@@ -659,10 +659,10 @@ func (w *columnWriter) doBatches(total int64, repLevels []int16, action func(off
 	// if we're writing V1 data pages, have no replevels or the max replevel is 0 then just
 	// use the regular doBatches function.
 	//
-	// NOTE: the spec also requires row-aligned pages for V1 when an OffsetIndex
-	// is present (PageIndexEnabled). That gap predates this change and also
-	// affects the WriteBatch path, so it is tracked separately rather than
-	// widened into this DataPageV2 fix.
+	// The spec also requires row-aligned pages for V1 when an OffsetIndex is
+	// present (PageIndexEnabled). That gap is on the WriteBatch path and is
+	// out of scope for the DataPageV2 row alignment here; it is tracked in
+	// https://github.com/apache/arrow-go/issues/887.
 	if w.props.DataPageVersion() == parquet.DataPageV1 || repLevels == nil || w.descr.MaxRepetitionLevel() == 0 {
 		doBatches(total, batchSize, action)
 		return
