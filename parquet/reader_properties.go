@@ -51,6 +51,9 @@ type ReaderProperties struct {
 	// PLAIN-encoded V1/V2 data pages of a streaming-capable, unencrypted codec
 	// (UNCOMPRESSED/GZIP/BROTLI/ZSTD) for a supported physical type; every other page is
 	// read whole as before. Default false (no behavior change).
+	//
+	// Note: with this on, a streaming page's raw Page.Data() returns only its level
+	// region — decode values through a column or record reader.
 	EnablePageStreaming bool
 }
 
