@@ -25,26 +25,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestReadLevelDataRejectsOversizedRLELength verifies the V1 streaming level peel
-// bounds the RLE length prefix, so a corrupt page can't drive a huge allocation.
-// The bytes are present, so only the bound (not EOF) can reject it.
-func TestReadLevelDataRejectsOversizedRLELength(t *testing.T) {
+func TestReadLevelDataRLELengthBound(t *testing.T) {
 	p := &serializedPageReader{maxDefLevel: 1}
 
-	// Prefix claims 100 level bytes, but maxBytes (uncompressed page size) is 8.
-	data := make([]byte, 4+100)
-	binary.LittleEndian.PutUint32(data[:4], 100)
-	_, err := p.readLevelData(bytes.NewReader(data), format.Encoding_RLE, format.Encoding_RLE, 4, 8)
-	require.Error(t, err)
-}
-
-// TestReadLevelDataAcceptsValidRLELength checks a legitimate length still reads.
-func TestReadLevelDataAcceptsValidRLELength(t *testing.T) {
-	p := &serializedPageReader{maxDefLevel: 1}
-
+	// a complete 8-byte RLE level region, so the reject below is the bound, not EOF
 	data := make([]byte, 4+8)
 	binary.LittleEndian.PutUint32(data[:4], 8)
+
+	_, err := p.readLevelData(bytes.NewReader(data), format.Encoding_RLE, format.Encoding_RLE, 4, 8)
+	require.Error(t, err)
+
 	out, err := p.readLevelData(bytes.NewReader(data), format.Encoding_RLE, format.Encoding_RLE, 4, 1024)
 	require.NoError(t, err)
-	require.Len(t, out, 12) // 4-byte prefix + 8 level bytes
+	require.Len(t, out, 12)
 }
