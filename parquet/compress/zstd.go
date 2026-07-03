@@ -112,20 +112,14 @@ func (zstdCodec) Decode(dst, src []byte) []byte {
 	return dst
 }
 
-// globalDecoderPool reuses streaming decoders across pages so EnablePageStreaming
-// doesn't allocate a fresh zstd.Decoder per data page.
 var globalDecoderPool = sync.Pool{
 	New: func() interface{} {
-		// Concurrency 1: streaming reads are sequential, so avoid the goroutines the
-		// default spawns (which would stay alive while the decoder sits in the pool).
 		dec, _ := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1))
 		return dec
 	},
 }
 
 func (z *zstdcloser) Close() error {
-	// Return the decoder to the pool instead of freeing it; Reset(nil) drops the
-	// page's reader (Close would make the decoder unusable).
 	_ = z.Decoder.Reset(nil)
 	globalDecoderPool.Put(z.Decoder)
 	z.Decoder = nil
