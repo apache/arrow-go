@@ -1351,10 +1351,16 @@ func (p *PreparedStatement) DatasetSchema() *arrow.Schema { return p.datasetSche
 // the prepared statement.
 func (p *PreparedStatement) ParameterSchema() *arrow.Schema { return p.paramSchema }
 
-// IsUpdate returns the server's hint about whether this prepared statement
-// should be executed as an update (true) or query (false). If nil, the server
-// did not provide a hint and the client can choose how to execute the statement.
-func (p *PreparedStatement) IsUpdate() *bool { return p.isUpdate }
+// IsUpdate reports the server's hint for how to execute this prepared statement.
+// val is true if the server indicated an update, false if it indicated a query.
+// ok is false if the server did not provide a hint, in which case the client
+// can choose how to execute the statement.
+func (p *PreparedStatement) IsUpdate() (val bool, ok bool) {
+	if p.isUpdate == nil {
+		return false, false
+	}
+	return *p.isUpdate, true
+}
 
 // The handle associated with this PreparedStatement
 func (p *PreparedStatement) Handle() []byte { return p.handle }

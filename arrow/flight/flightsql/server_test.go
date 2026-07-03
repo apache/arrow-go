@@ -360,8 +360,9 @@ func (s *FlightSqlServerSuite) TestExecutePreparedStatementQuery() {
 	s.Require().NoError(err)
 	defer prep.Close(context.TODO())
 
-	s.Require().NotNil(prep.IsUpdate())
-	s.Assert().Equal(false, *prep.IsUpdate())
+	val, ok := prep.IsUpdate()
+	s.Require().True(ok)
+	s.Assert().Equal(false, val)
 
 	fi, err := prep.Execute(context.TODO())
 	s.Require().NoError(err)
@@ -408,8 +409,9 @@ func (s *FlightSqlServerSuite) TestExecutePreparedStatementUpdate() {
 	s.Require().NoError(err)
 	defer prep.Close(context.TODO())
 
-	s.Require().NotNil(prep.IsUpdate())
-	s.Assert().Equal(true, *prep.IsUpdate())
+	val, ok := prep.IsUpdate()
+	s.Require().True(ok)
+	s.Assert().Equal(true, val)
 
 	nrecords, err := prep.ExecuteUpdate(context.TODO())
 	s.Require().NoError(err)
