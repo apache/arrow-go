@@ -135,7 +135,6 @@ func (*testServer) DoGetStatement(ctx context.Context, ticket flightsql.Statemen
 
 func (*testServer) CreatePreparedStatement(ctx context.Context, req flightsql.ActionCreatePreparedStatementRequest) (result flightsql.ActionCreatePreparedStatementResult, err error) {
 	query := req.GetQuery()
-	var isUpdate *bool
 	result.Handle = []byte(query)
 	switch query {
 	case "prepared query":
@@ -146,9 +145,6 @@ func (*testServer) CreatePreparedStatement(ctx context.Context, req flightsql.Ac
 		result.IsUpdate = &isUpdate
 	default:
 		err = fmt.Errorf("unknown query: %s", query)
-	}
-	if isUpdate != nil {
-		result.IsUpdate = isUpdate
 	}
 	return
 }
