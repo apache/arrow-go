@@ -641,7 +641,12 @@ func (fr *FileReader) getReader(ctx context.Context, field *SchemaField, arrowFi
 		case *arrow.ListType, *arrow.LargeListType:
 			out = newListReader(&rctx, &arrowField, field.LevelInfo, childReader, fr.Props)
 		case *arrow.FixedSizeListType:
-			out = newFixedSizeListReader(&rctx, &arrowField, field.LevelInfo, childReader, fr.Props)
+			if field.IsVector {
+				out = newVectorFixedSizeListReader(&rctx, &arrowField, field.LevelInfo,
+					arrowField.Type.(*arrow.FixedSizeListType).Len(), childReader)
+			} else {
+				out = newFixedSizeListReader(&rctx, &arrowField, field.LevelInfo, childReader, fr.Props)
+			}
 		default:
 			return nil, fmt.Errorf("unknown list type: %s", field.Field.String())
 		}

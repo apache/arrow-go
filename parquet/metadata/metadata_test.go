@@ -17,6 +17,7 @@
 package metadata_test
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -25,6 +26,8 @@ import (
 
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
+	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
+	"github.com/apache/arrow-go/v18/parquet/internal/thrift"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
@@ -80,6 +83,48 @@ func assertStats(t *testing.T, m *metadata.ColumnChunkMetaData) metadata.TypedSt
 	assert.NoError(t, err)
 	assert.NotNil(t, s)
 	return s
+}
+
+func TestNewFileMetaDataRejectsInvalidVectorSchema(t *testing.T) {
+	oneChild := int32(1)
+	vectorLen := int32(4)
+	fileMeta := format.NewFileMetaData()
+	fileMeta.Schema = []*format.SchemaElement{
+		{
+			Name:           "schema",
+			RepetitionType: format.FieldRepetitionTypePtr(format.FieldRepetitionType_REQUIRED),
+			NumChildren:    &oneChild,
+		},
+		{
+			Name:           "repeated_parent",
+			RepetitionType: format.FieldRepetitionTypePtr(format.FieldRepetitionType_REPEATED),
+			NumChildren:    &oneChild,
+		},
+		{
+			Name:           "v",
+			RepetitionType: format.FieldRepetitionTypePtr(format.FieldRepetitionType_REQUIRED),
+			NumChildren:    &oneChild,
+			LogicalType:    &format.LogicalType{VECTOR: format.NewVectorType()},
+		},
+		{
+			Name:           "list",
+			RepetitionType: format.FieldRepetitionTypePtr(format.FieldRepetitionType_VECTOR),
+			NumChildren:    &oneChild,
+			VectorLength:   &vectorLen,
+		},
+		{
+			Name:           "element",
+			RepetitionType: format.FieldRepetitionTypePtr(format.FieldRepetitionType_REQUIRED),
+			Type:           format.TypePtr(format.Type_FLOAT),
+		},
+	}
+
+	var buf bytes.Buffer
+	_, err := thrift.NewThriftSerializer().Serialize(fileMeta, &buf, nil)
+	require.NoError(t, err)
+
+	_, err = metadata.NewFileMetaData(buf.Bytes(), nil)
+	require.ErrorContains(t, err, "VECTOR columns with repeated ancestors")
 }
 
 func TestBuildAccess(t *testing.T) {
