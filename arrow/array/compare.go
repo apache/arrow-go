@@ -25,13 +25,15 @@ import (
 	"github.com/apache/arrow-go/v18/internal/bitutils"
 )
 
-// fieldEqualIgnoringMetadata reports whether two fields describe the same column
-// for record/table equality: same name, nullability, and type. Field and type
-// metadata are intentionally ignored so records that differ only in metadata
+// schemaFieldEqual reports whether two fields agree on the schema-level
+// attributes that record/table equality must match between the two sides: name
+// and nullability. The field type and values are validated per column by the
+// array comparison (baseArrayEqual), so they are not re-checked here, and field
+// metadata is intentionally not compared so records that differ only in metadata
 // (for example a PARQUET:field_id attached during a round-trip) still compare as
-// equal, preserving the pre-existing behavior of these comparison APIs.
-func fieldEqualIgnoringMetadata(l, r arrow.Field) bool {
-	return l.Name == r.Name && l.Nullable == r.Nullable && arrow.TypeEqual(l.Type, r.Type)
+// equal, matching the pre-existing behavior of these comparison APIs.
+func schemaFieldEqual(l, r arrow.Field) bool {
+	return l.Name == r.Name && l.Nullable == r.Nullable
 }
 
 // RecordEqual reports whether the two provided records are equal.
@@ -50,7 +52,7 @@ func recordEqual(left, right arrow.RecordBatch, opt equalOption) bool {
 	for i := range left.Columns() {
 		lf := left.Schema().Field(i)
 		rf := right.Schema().Field(i)
-		if !fieldEqualIgnoringMetadata(lf, rf) {
+		if !schemaFieldEqual(lf, rf) {
 			return false
 		}
 
@@ -82,7 +84,7 @@ func recordApproxEqual(left, right arrow.RecordBatch, opt equalOption) bool {
 	for i := range left.Columns() {
 		lf := left.Schema().Field(i)
 		rf := right.Schema().Field(i)
-		if !fieldEqualIgnoringMetadata(lf, rf) {
+		if !schemaFieldEqual(lf, rf) {
 			return false
 		}
 
@@ -205,7 +207,7 @@ func tableEqual(left, right arrow.Table, opt equalOption) bool {
 	for i := 0; int64(i) < left.NumCols(); i++ {
 		lf := left.Schema().Field(i)
 		rf := right.Schema().Field(i)
-		if !fieldEqualIgnoringMetadata(lf, rf) {
+		if !schemaFieldEqual(lf, rf) {
 			return false
 		}
 
@@ -236,7 +238,7 @@ func tableApproxEqual(left, right arrow.Table, opt equalOption) bool {
 	for i := 0; int64(i) < left.NumCols(); i++ {
 		lf := left.Schema().Field(i)
 		rf := right.Schema().Field(i)
-		if !fieldEqualIgnoringMetadata(lf, rf) {
+		if !schemaFieldEqual(lf, rf) {
 			return false
 		}
 
