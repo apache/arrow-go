@@ -72,7 +72,11 @@ const (
 type Page interface {
 	// Returns which kind of page this is
 	Type() PageType
-	// Get the raw bytes of this page
+	// Get the raw bytes of this page.
+	//
+	// Note: with EnablePageStreaming, a streaming data page's Data holds only the
+	// rep/def level region, not the whole page; decode values through a column or
+	// record reader instead.
 	Data() []byte
 	// return the encoding used for this page, Plain/RLE, etc.
 	Encoding() format.Encoding
