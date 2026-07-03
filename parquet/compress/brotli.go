@@ -85,17 +85,17 @@ func (brotliCodec) Decode(dst, src []byte) []byte {
 // BrotliEncoderMaxCompressedSize
 func (brotliCodec) CompressBound(len int64) int64 {
 	// [window bits / empty metadata] + N * [uncompressed] + [last empty]
+	if len == 0 {
+		return 2
+	}
 	debug.Assert(len > 0, "brotli compressbound should be > 0")
 	nlarge := len >> 14
 	overhead := 2 + (4 * nlarge) + 3 + 1
 	result := len + overhead
-	if len == 0 {
-		return 2
-	}
 	if result < len {
 		return 0
 	}
-	return len
+	return result
 }
 
 func (brotliCodec) NewWriter(w io.Writer) io.WriteCloser {
