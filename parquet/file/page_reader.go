@@ -133,6 +133,7 @@ func (d *dataPageBase) releaseValueStream() {
 		_ = d.valueBuf.Close()
 		d.valueBuf = nil
 	}
+	d.clip = 0
 }
 
 // DataPageConfig is a struct for passing configuration params to data page creation
@@ -520,6 +521,9 @@ func NewPageReader(r parquet.BufferedReader, nrows int64, compressType compress.
 }
 
 func (p *serializedPageReader) Reset(r parquet.BufferedReader, nrows int64, compressType compress.Compression, ctx *CryptoContext) {
+	if p.curPage != nil {
+		p.curPage.Release()
+	}
 	p.rowsSeen, p.pageOrd, p.nrows = 0, 0, nrows
 	p.curPageHdr, p.curPage, p.err = nil, nil, nil
 	p.r = r
@@ -1034,6 +1038,10 @@ func (p *serializedPageReader) Next() bool {
 			levelsBytelen, ok := utils.Add(int(dataHeader.GetDefinitionLevelsByteLength()), int(dataHeader.GetRepetitionLevelsByteLength()))
 			if !ok {
 				p.err = errors.New("parquet: levels size too large (corrupt file?)")
+				return false
+			}
+			if levelsBytelen > lenCompressed {
+				p.err = fmt.Errorf("parquet: V2 level region %d exceeds page body %d (corrupt page?)", levelsBytelen, lenCompressed)
 				return false
 			}
 
