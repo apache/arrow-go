@@ -200,6 +200,7 @@ func CastBinaryToBinaryView(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec
 	appendBinaryValues(arr, getVal, ba)
 
 	result := ba.bldr.NewArray()
+	defer result.Release()
 	out.TakeOwnership(result.Data())
 	return nil
 }
@@ -253,6 +254,7 @@ func CastBinaryViewToBinary[OutOffsetT int32 | int64](ctx *exec.KernelCtx, batch
 	appendBinaryValues(arr, getVal, ba)
 
 	result := ba.bldr.NewArray()
+	defer result.Release()
 	out.TakeOwnership(result.Data())
 	return nil
 }
