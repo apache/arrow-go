@@ -18,7 +18,6 @@ package array_test
 
 import (
 	"bytes"
-	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -26,6 +25,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/internal/json"
 	"github.com/stretchr/testify/assert"
 )
 
