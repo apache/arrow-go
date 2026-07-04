@@ -803,7 +803,7 @@ func (b *StringViewBuilder) UnmarshalJSON(data []byte) error {
 	}
 
 	if delim, ok := t.(json.Delim); !ok || delim != '[' {
-		return fmt.Errorf("binary view builder must unpack from json array, found %s", delim)
+		return fmt.Errorf("string view builder must unpack from json array, found %s", delim)
 	}
 
 	return b.Unmarshal(dec)
