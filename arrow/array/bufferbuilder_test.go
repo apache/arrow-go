@@ -29,10 +29,13 @@ func TestMultiBufferBuilderUnsafeAppendPanicsOnTruncatedCopy(t *testing.T) {
 	builder.Retain()
 	defer builder.Release()
 
-	builder.Reserve(4)
+	buf := memory.NewResizableBuffer(builder.mem)
+	buf.ResizeNoShrink(1)
+	builder.blocks = []*memory.Buffer{buf}
+	builder.currentOutBuffer = 0
 
 	var hdr arrow.ViewHeader
 	assert.Panics(t, func() {
-		builder.UnsafeAppend(&hdr, []byte("abcdefghi"))
+		builder.UnsafeAppend(&hdr, make([]byte, 64))
 	})
 }
