@@ -476,6 +476,9 @@ func checkBinaryViewValueSize(length int64) {
 
 func (b *BinaryViewBuilder) ReserveData(length int) {
 	checkBinaryViewValueSize(int64(length))
+	if length == 0 {
+		return
+	}
 	b.blockBuilder.Reserve(int(length))
 }
 

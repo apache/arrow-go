@@ -732,6 +732,13 @@ func TestBinaryViewBuilderRejectsOversizedValues(t *testing.T) {
 	})
 }
 
+func TestBinaryViewBuilderReserveData0DoesNotAllocate(t *testing.T) {
+	b := NewBinaryViewBuilder(binaryViewNoAllocAllocator{})
+	defer b.Release()
+
+	b.ReserveData(0)
+}
+
 func TestBinaryViewStringRoundTrip(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
