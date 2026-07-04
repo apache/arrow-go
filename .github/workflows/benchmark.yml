@@ -52,7 +52,7 @@ jobs:
           check-latest: false
       - name: Run Benchmarks
         if: github.event_name != 'push'
-        run: bash ci/scripts/bench.sh $(pwd) --json
+        run: bash ci/scripts/bench.sh $(pwd) -json
       - name: Upload results
         if: github.event_name == 'push' && github.repository == 'apache/arrow-go' && github.ref_name == 'main'
         env:

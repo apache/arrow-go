@@ -17,8 +17,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# this will output the benchmarks to STDOUT but if `-json` is passed
-# as the second argument, it will create a file "bench_stats.json"
+# this will output the benchmarks to STDOUT but if `-json` or `--json` is
+# passed as an argument, it will create a file "bench_stats.json"
 # in the directory this is called from containing a json representation
 
 set -ex
@@ -30,6 +30,15 @@ if [ -z "$1" ]; then
 fi
 
 source_dir="$1"
+json_requested=false
+
+for arg in "$@"; do
+	case "$arg" in
+	-json|--json)
+		json_requested=true
+		;;
+	esac
+done
 
 PARQUET_TEST_DATA="${source_dir}/parquet-testing/data"
 export PARQUET_TEST_DATA
@@ -43,8 +52,8 @@ go test -bench=. -benchmem -timeout 40m -run=^$ ./... | tee bench_stat.dat
 
 popd
 
-if [[ "$2" = "-json" ]]; then
-  go install go.bobheadxi.dev/gobenchdata@latest
+if [[ "${json_requested}" == "true" ]]; then
+  go install go.bobheadxi.dev/gobenchdata@v1.3.1
   PATH=$(go env GOPATH)/bin:$PATH
   export PATH
   cat "${source_dir}"/bench_*.dat | gobenchdata --json bench_stats.json
