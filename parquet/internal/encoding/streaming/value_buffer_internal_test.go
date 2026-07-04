@@ -18,6 +18,7 @@ package streaming
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -25,88 +26,96 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newTestBuffer builds a streamBuffer with an undersized backing buffer so a
-// few small values force the slide/fresh-buffer paths.
-func newTestBuffer(data []byte, size int) *streamBuffer {
-	buf := memory.DefaultAllocator.Allocate(size)
-	return &streamBuffer{mem: memory.DefaultAllocator, r: bytes.NewReader(data), buf: buf, bufs: [][]byte{buf}}
+// newTestBuffer builds a streamBuffer with a small chunk so a few reads force the
+// rotate/oversized paths.
+func newTestBuffer(mem memory.Allocator, data []byte, chunkSize int) *streamBuffer {
+	return &streamBuffer{mem: mem, r: bytes.NewReader(data), chunkSize: chunkSize, cur: mem.Allocate(chunkSize), remaining: len(data)}
 }
 
-// TestFillOwnedStaysValidAcrossRefill checks that bytes handed out by FillOwned
-// survive a later refill: the refill must move to a fresh buffer rather than
-// slide the one the caller still aliases.
-func TestFillOwnedStaysValidAcrossRefill(t *testing.T) {
-	data := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
-	s := newTestBuffer(data, 8)
-
-	b, err := s.FillOwned(4)
+// fillValue reads the next need bytes as a value: Fill then Advance, returning the
+// aliased slice.
+func fillValue(t *testing.T, s *streamBuffer, need int) []byte {
+	t.Helper()
+	b, err := s.Fill(need)
 	require.NoError(t, err)
-	v1 := b[0:4]
-	assert.Equal(t, []byte{0, 1, 2, 3}, v1)
-	s.Advance(4)
-
-	b, err = s.FillOwned(4)
-	require.NoError(t, err)
-	v2 := b[0:4]
-	assert.Equal(t, []byte{4, 5, 6, 7}, v2)
-	s.Advance(4)
-
-	// Buffer is exhausted and shared: this refill must allocate a fresh buffer.
-	b, err = s.FillOwned(4)
-	require.NoError(t, err)
-	assert.Equal(t, []byte{8, 9, 10, 11}, b[0:4])
-
-	assert.Equal(t, []byte{0, 1, 2, 3}, v1, "aliased value corrupted by refill")
-	assert.Equal(t, []byte{4, 5, 6, 7}, v2, "aliased value corrupted by refill")
+	v := b[:need:need]
+	s.Advance(need)
+	return v
 }
 
-// TestFillAfterFillOwnedPreservesAliases checks that a plain (reuse) Fill after a
-// FillOwned does not overwrite the shared buffer.
-func TestFillAfterFillOwnedPreservesAliases(t *testing.T) {
+// TestStreamBufferAliasesStableUntilRecycle checks that values aliased across a chunk
+// rotation stay valid until Recycle: the filled chunk is set aside, not overwritten.
+func TestStreamBufferAliasesStableUntilRecycle(t *testing.T) {
 	data := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
-	s := newTestBuffer(data, 8)
+	s := newTestBuffer(memory.DefaultAllocator, data, 8)
 
-	b, err := s.FillOwned(4)
-	require.NoError(t, err)
-	v1 := b[0:4]
-	s.Advance(8) // consume the whole shared window
+	v1 := fillValue(t, s, 4) // [0..3]
+	v2 := fillValue(t, s, 4) // [4..7], fills the chunk
+	v3 := fillValue(t, s, 4) // [8..11], forces a fresh chunk
 
-	_, err = s.Fill(4) // reuse mode, but must not clobber the shared buffer
-	require.NoError(t, err)
-	assert.Equal(t, []byte{0, 1, 2, 3}, v1, "Fill overwrote FillOwned-aliased bytes")
-}
+	assert.Equal(t, []byte{0, 1, 2, 3}, v1, "aliased value corrupted by rotation")
+	assert.Equal(t, []byte{4, 5, 6, 7}, v2, "aliased value corrupted by rotation")
+	assert.Equal(t, []byte{8, 9, 10, 11}, v3)
 
-func TestStreamBufferFreesBuffersOnClose(t *testing.T) {
-	checked := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	data := bytes.Repeat([]byte{1}, 64)
-
-	buf := checked.Allocate(8) // tiny buffer forces fresh allocations on each refill
-	s := &streamBuffer{mem: checked, r: bytes.NewReader(data), buf: buf, bufs: [][]byte{buf}}
-	for {
-		b, err := s.FillOwned(8)
-		if err != nil {
-			break
-		}
-		s.Advance(len(b)) // consume fully so the next FillOwned allocates fresh
-	}
 	require.NoError(t, s.Close())
-
-	checked.AssertSize(t, 0)
 }
 
-// TestFillReusesBufferWhenNotShared checks the fast path: without an outstanding
-// FillOwned, a refill slides in place rather than allocating.
-func TestFillReusesBufferWhenNotShared(t *testing.T) {
-	data := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
-	s := newTestBuffer(data, 8)
+// TestStreamBufferOversizedValue checks that a value larger than the chunk allocates a
+// fresh chunk to hold it, and Recycle swaps back to the steady-state size.
+func TestStreamBufferOversizedValue(t *testing.T) {
+	big := bytes.Repeat([]byte{0xAB}, 20)
+	data := append([]byte{1, 2, 3, 4}, big...)
+	s := newTestBuffer(memory.DefaultAllocator, data, 8)
 
-	_, err := s.Fill(4)
-	require.NoError(t, err)
-	require.False(t, s.shared)
-	backing := &s.buf[0]
-	s.Advance(8)
+	assert.Equal(t, []byte{1, 2, 3, 4}, fillValue(t, s, 4))
+	assert.Equal(t, big, fillValue(t, s, 20))
+	assert.Greater(t, len(s.cur), 8, "buffer should grow for the oversized value")
 
-	_, err = s.Fill(4)
-	require.NoError(t, err)
-	assert.Same(t, backing, &s.buf[0], "expected in-place reuse, got a fresh buffer")
+	s.Recycle()
+	assert.Equal(t, 8, len(s.cur), "buffer should shrink back to the steady-state size")
+
+	require.NoError(t, s.Close())
+}
+
+// TestStreamBufferSkip checks Skip discards both buffered and not-yet-read bytes.
+func TestStreamBufferSkip(t *testing.T) {
+	data := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+	s := newTestBuffer(memory.DefaultAllocator, data, 8)
+
+	assert.Equal(t, []byte{0, 1}, fillValue(t, s, 2))
+	require.NoError(t, s.Skip(6)) // 2 buffered + 4 straight from the reader
+	assert.Equal(t, []byte{8, 9}, fillValue(t, s, 2))
+
+	require.NoError(t, s.Close())
+}
+
+// TestStreamBufferRejectsOversizedNeed checks a need past the value region (a corrupt
+// length prefix) is rejected before allocating.
+func TestStreamBufferRejectsOversizedNeed(t *testing.T) {
+	checked := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	s := newTestBuffer(checked, make([]byte, 10), 8)
+
+	_, err := s.Fill(1 << 30)
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+
+	require.NoError(t, s.Close())
+	checked.AssertSize(t, 0) // the 1 GiB was never allocated
+}
+
+// TestStreamBufferRecycleReclaims checks that repeated Recycle keeps memory bounded and
+// frees the extra chunks a rotation created, so nothing leaks across Decodes.
+func TestStreamBufferRecycleReclaims(t *testing.T) {
+	checked := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	s := newTestBuffer(checked, bytes.Repeat([]byte{1}, 1000), 8)
+
+	for i := 0; i < 50; i++ {
+		fillValue(t, s, 5) // off=5
+		fillValue(t, s, 5) // forces a rotation: old chunk goes to live
+		require.NotEmpty(t, s.live)
+		s.Recycle() // must free the retired chunk
+		require.Empty(t, s.live)
+	}
+
+	require.NoError(t, s.Close())
+	checked.AssertSize(t, 0)
 }

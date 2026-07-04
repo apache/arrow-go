@@ -48,41 +48,29 @@ func (pflba *PlainFixedLenByteArrayDecoder) SetData(nvals int, data []byte) erro
 	return pflba.decoder.SetData(nvals, data)
 }
 
+// decodeStreaming aliases each value in the buffer; see the byte-array decoder for the
+// Recycle/alias lifetime.
 func (pflba *PlainFixedLenByteArrayDecoder) decodeStreaming(out []parquet.FixedLenByteArray) (int, error) {
+	pflba.src.Recycle()
 	max := utils.Min(len(out), pflba.nvals)
 	w := pflba.typeLen
-	var buf []byte // nil forces the first FillOwned, so every alias is stable
-	pos := 0
 	for i := 0; i < max; i++ {
-		if len(buf)-pos < w {
-			var err error
-			pflba.src.Advance(pos)
-			if buf, err = pflba.src.FillOwned(w); err != nil {
-				return i, errors.New("parquet: eof exception")
-			}
-			pos = 0
+		val, err := pflba.src.Fill(w)
+		if err != nil {
+			return i, errors.New("parquet: eof exception")
 		}
-		// FillOwned keeps the bytes stable, so alias instead of copying.
-		out[i] = buf[pos : pos+w : pos+w]
-		pos += w
+		out[i] = val[:w:w]
+		pflba.src.Advance(w)
 	}
-	pflba.src.Advance(pos)
 	pflba.nvals -= max
 	return max, nil
 }
 
 func (pflba *PlainFixedLenByteArrayDecoder) discardStreaming(n int) (int, error) {
 	n = min(n, pflba.nvals)
-	// Avoid Fill(n*typeLen) allocating the whole skipped region; discard in chunks.
-	remaining := n * pflba.typeLen
-	for remaining > 0 {
-		buf, err := pflba.src.Fill(1)
-		if err != nil {
-			return (n*pflba.typeLen - remaining) / pflba.typeLen, errors.New("parquet: eof exception")
-		}
-		skip := min(len(buf), remaining)
-		pflba.src.Advance(skip)
-		remaining -= skip
+	pflba.src.Recycle()
+	if err := pflba.src.Skip(n * pflba.typeLen); err != nil {
+		return 0, errors.New("parquet: eof exception")
 	}
 	pflba.nvals -= n
 	return n, nil

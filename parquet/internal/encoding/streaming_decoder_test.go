@@ -45,10 +45,11 @@ func plainByteArrayBytes(vals []parquet.ByteArray) []byte {
 func TestPlainByteArrayDecoderSetSource(t *testing.T) {
 	vals := []parquet.ByteArray{[]byte("hello"), []byte(""), []byte("world!!"), bytes.Repeat([]byte("x"), 5000)}
 
+	raw := plainByteArrayBytes(vals)
 	dec := encoding.NewDecoder(parquet.Types.ByteArray, parquet.Encodings.Plain, nil, memory.DefaultAllocator)
 	sd, ok := dec.(streaming.Decoder)
 	require.True(t, ok, "PlainByteArrayDecoder must implement streaming.Decoder")
-	sd.SetSource(len(vals), streaming.NewStreamBuffer(memory.DefaultAllocator, iotest.OneByteReader(bytes.NewReader(plainByteArrayBytes(vals))), 0, nil))
+	sd.SetSource(len(vals), streaming.NewStreamBuffer(memory.DefaultAllocator, iotest.OneByteReader(bytes.NewReader(raw)), len(raw), nil))
 
 	out := make([]parquet.ByteArray, len(vals))
 	n, err := dec.(encoding.ByteArrayDecoder).Decode(out)
@@ -71,7 +72,7 @@ func TestPlainFixedLenByteArrayDecoderSetSource(t *testing.T) {
 	dec := encoding.NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.Plain, descr, memory.DefaultAllocator)
 	sd, ok := dec.(streaming.Decoder)
 	require.True(t, ok, "PlainFixedLenByteArrayDecoder must implement streaming.Decoder")
-	sd.SetSource(len(vals), streaming.NewStreamBuffer(memory.DefaultAllocator, iotest.OneByteReader(bytes.NewReader(raw)), 0, nil))
+	sd.SetSource(len(vals), streaming.NewStreamBuffer(memory.DefaultAllocator, iotest.OneByteReader(bytes.NewReader(raw)), len(raw), nil))
 
 	out := make([]parquet.FixedLenByteArray, len(vals))
 	n, err := dec.(encoding.FixedLenByteArrayDecoder).Decode(out)
@@ -91,7 +92,7 @@ func TestFixedWidthDecoderNotStreaming(t *testing.T) {
 func TestStreamingByteArrayDecodeErrors(t *testing.T) {
 	decode := func(raw []byte) error {
 		dec := encoding.NewDecoder(parquet.Types.ByteArray, parquet.Encodings.Plain, nil, memory.DefaultAllocator)
-		dec.(streaming.Decoder).SetSource(1, streaming.NewStreamBuffer(memory.DefaultAllocator, bytes.NewReader(raw), 0, nil))
+		dec.(streaming.Decoder).SetSource(1, streaming.NewStreamBuffer(memory.DefaultAllocator, bytes.NewReader(raw), len(raw), nil))
 		_, err := dec.(encoding.ByteArrayDecoder).Decode(make([]parquet.ByteArray, 1))
 		return err
 	}
@@ -111,8 +112,9 @@ func TestStreamingByteArrayDecodeErrors(t *testing.T) {
 func TestStreamingFixedLenByteArrayDecodeTruncated(t *testing.T) {
 	const w = 4
 	descr := schema.NewColumn(schema.NewFixedLenByteArrayNode("f", parquet.Repetitions.Required, w, -1), 0, 0)
+	raw := []byte{0x01, 0x02} // 2 of 4 bytes
 	dec := encoding.NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.Plain, descr, memory.DefaultAllocator)
-	dec.(streaming.Decoder).SetSource(1, streaming.NewStreamBuffer(memory.DefaultAllocator, bytes.NewReader([]byte{0x01, 0x02}), 0, nil)) // 2 of 4 bytes
+	dec.(streaming.Decoder).SetSource(1, streaming.NewStreamBuffer(memory.DefaultAllocator, bytes.NewReader(raw), len(raw), nil))
 	_, err := dec.(encoding.FixedLenByteArrayDecoder).Decode(make([]parquet.FixedLenByteArray, 1))
 	require.Error(t, err)
 }

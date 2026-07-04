@@ -57,70 +57,53 @@ func (pbad *PlainByteArrayDecoder) SetData(nvals int, data []byte) error {
 	return pbad.decoder.SetData(nvals, data)
 }
 
+// decodeStreaming fills out by aliasing each value in the buffer (no copy). Recycle at
+// entry reclaims the previous batch, so the returned slices are valid only until the
+// next Decode call; callers consume or copy them before then.
 func (pbad *PlainByteArrayDecoder) decodeStreaming(out []parquet.ByteArray) (int, error) {
+	pbad.src.Recycle()
 	max := utils.Min(len(out), pbad.nvals)
-	var buf []byte // nil forces the first FillOwned, so every alias is stable
-	pos := 0
 	for i := 0; i < max; i++ {
-		if len(buf)-pos < 4 {
-			var err error
-			pbad.src.Advance(pos)
-			if buf, err = pbad.src.FillOwned(4); err != nil {
-				return i, errors.New("parquet: eof reading bytearray")
-			}
-			pos = 0
+		hdr, err := pbad.src.Fill(4)
+		if err != nil {
+			return i, errors.New("parquet: eof reading bytearray")
 		}
-		byteLen := int(int32(binary.LittleEndian.Uint32(buf[pos : pos+4])))
+		byteLen := int(int32(binary.LittleEndian.Uint32(hdr[:4])))
 		if byteLen < 0 {
 			return i, errors.New("parquet: invalid BYTE_ARRAY value")
 		}
-		if len(buf)-pos < 4+byteLen {
-			var err error
-			pbad.src.Advance(pos)
-			if buf, err = pbad.src.FillOwned(4 + byteLen); err != nil {
-				return i, errors.New("parquet: eof reading bytearray")
-			}
-			pos = 0
+		pbad.src.Advance(4)
+		// Fill rejects a byteLen past the value region before allocating.
+		val, err := pbad.src.Fill(byteLen)
+		if err != nil {
+			return i, errors.New("parquet: eof reading bytearray")
 		}
-		// FillOwned keeps the bytes stable, so alias instead of copying. The
-		// 3-index cap stops appends bleeding into the next value, and a zero-length
-		// slice of a non-nil buffer stays non-nil (empty value != null).
-		out[i] = buf[pos+4 : pos+4+byteLen : pos+4+byteLen]
-		pos += 4 + byteLen
+		// 3-index cap stops appends bleeding into the next value; a zero-length slice
+		// of the non-nil buffer stays non-nil (empty value != null).
+		out[i] = val[:byteLen:byteLen]
+		pbad.src.Advance(byteLen)
 	}
-	pbad.src.Advance(pos)
 	pbad.nvals -= max
 	return max, nil
 }
 
 func (pbad *PlainByteArrayDecoder) discardStreaming(n int) (int, error) {
 	n = min(n, pbad.nvals)
-	var buf []byte
-	pos := 0
 	for i := 0; i < n; i++ {
-		if len(buf)-pos < 4 {
-			var err error
-			pbad.src.Advance(pos)
-			if buf, err = pbad.src.Fill(4); err != nil {
-				return i, errors.New("parquet: eof skipping bytearray values")
-			}
-			pos = 0
+		pbad.src.Recycle()
+		buf, err := pbad.src.Fill(4)
+		if err != nil {
+			return i, errors.New("parquet: eof skipping bytearray values")
 		}
-		valueLen := int(int32(binary.LittleEndian.Uint32(buf[pos : pos+4])))
+		valueLen := int(int32(binary.LittleEndian.Uint32(buf[:4])))
 		if valueLen < 0 {
 			return i, errors.New("parquet: invalid BYTE_ARRAY value")
 		}
-		if len(buf)-pos < 4+valueLen {
-			var err error
-			pbad.src.Advance(pos)
-			if buf, err = pbad.src.Fill(4 + valueLen); err != nil {
-				return i, errors.New("parquet: eof skipping bytearray values")
-			}
-			pos = 0
+		pbad.src.Advance(4)
+		if err := pbad.src.Skip(valueLen); err != nil {
+			return i, errors.New("parquet: eof skipping bytearray values")
 		}
-		pos += 4 + valueLen
 	}
-	pbad.src.Advance(pos)
 	pbad.nvals -= n
 	return n, nil
 }

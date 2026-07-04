@@ -731,6 +731,11 @@ func (c *columnChunkReader) readBatchInPage(batchSize int64, totalRead int64, de
 		return 0, 0, c.err
 	}
 
+	// Streaming holds a whole batch's aliased values at once; clip it near the buffer size.
+	if clip := c.curPage.(DataPage).valueClip(); clip > 0 && batchSize > clip {
+		batchSize = clip
+	}
+
 	ndefs, toRead, err := c.determineNumToRead(batchSize, defLvls, repLvls)
 	if err != nil {
 		return 0, 0, err

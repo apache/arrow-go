@@ -45,16 +45,20 @@ type ReaderProperties struct {
 	// the amount of data retrieved when only needs to access small portions of the parquet file.
 	BufferedStreamEnabled bool
 	// EnablePageStreaming, when true, decodes eligible data pages incrementally instead
-	// of decoding the whole uncompressed page at once. Peak memory is then roughly the
-	// batch plus, per active page, a stream buffer (min(1 MiB, page size)), the largest
-	// single value, and the level buffers. Eligible pages are
-	// PLAIN-encoded V1/V2 data pages of a streaming-capable, unencrypted codec
+	// of decoding the whole uncompressed page at once. A decode aliases the batch's
+	// values directly in a reusable stream buffer (min(1 MiB, page size)) rather than
+	// materializing the page, so the read batch is clipped toward the average value
+	// width to keep one decode's values near the buffer size. Peak memory is then
+	// best-effort roughly that buffer plus the largest single value, the caller's batch
+	// and the level buffers; skewed value sizes may overshoot the target. Eligible pages
+	// are PLAIN-encoded V1/V2 data pages larger than 1 MiB (smaller pages fit in a single
+	// buffer, so streaming only adds overhead), of a streaming-capable, unencrypted codec
 	// (UNCOMPRESSED/GZIP/BROTLI/ZSTD) for a supported physical type; every other page is
-	// read whole as before. Default false (no behavior change).
+	// read whole as before. Default false (no behavior change to decoded values).
 	//
-	// Note: this only affects the low-level GetColumnPageReader path — a streaming
-	// page's Page.Data() then returns just its level region. Reading via
-	// RowGroup.Column()/ReadBatch is unaffected.
+	// Note: a streaming page's raw Page.Data() (via GetColumnPageReader) returns just its
+	// level region; the decoded values read through RowGroup.Column()/ReadBatch are the
+	// same as without streaming.
 	EnablePageStreaming bool
 }
 

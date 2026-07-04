@@ -18,8 +18,11 @@ package file_test
 
 import (
 	"bytes"
+	"os"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/compress"
@@ -27,6 +30,13 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/require"
 )
+
+// TestMain lowers the streaming page-size threshold so the streaming tests exercise
+// the streaming path on their small (fast) pages.
+func TestMain(m *testing.M) {
+	*file.StreamingThreshold = 0
+	os.Exit(m.Run())
+}
 
 func makeStreamTestValues(sizes []int) []parquet.ByteArray {
 	values := make([]parquet.ByteArray, len(sizes))
@@ -593,6 +603,280 @@ func TestPageStreamingFLBASkip(t *testing.T) {
 					require.Truef(t, bytes.Equal(values[int(skip)+i], str[i]), "skip %d value %d", skip, i)
 					require.Truef(t, bytes.Equal(mat[i], str[i]), "skip %d value %d streamed != materialized", skip, i)
 				}
+			}
+		})
+	}
+}
+
+// TestPageStreamingPeakMemoryBounded is the core memory-goal check: a single page
+// far larger than the stream buffer, read in small batches, must keep the
+// allocator footprint near the buffer, not grow to the whole page.
+func TestPageStreamingPeakMemoryBounded(t *testing.T) {
+	sizes := make([]int, 2000)
+	for i := range sizes {
+		sizes[i] = 2048 // ~4 MiB of values in one page
+	}
+	values := makeStreamTestValues(sizes)
+	data := writeByteArrayStream(t, values, nil, nil, parquet.Repetitions.Required, parquet.DataPageV1, compress.Codecs.Zstd, 8<<20)
+
+	checked := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer checked.AssertSize(t, 0)
+	props := parquet.NewReaderProperties(checked)
+	props.EnablePageStreaming = true
+	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	cr, err := rdr.RowGroup(0).Column(0)
+	require.NoError(t, err)
+	bar := cr.(*file.ByteArrayColumnChunkReader)
+
+	const batch = 64
+	out := make([]parquet.ByteArray, batch)
+	peak, total := 0, 0
+	for {
+		_, nv, err := bar.ReadBatch(batch, out, nil, nil)
+		require.NoError(t, err)
+		if nv == 0 {
+			break
+		}
+		total += nv
+		if a := checked.CurrentAlloc(); a > peak {
+			peak = a
+		}
+	}
+	require.NoError(t, bar.Close())
+	require.Equal(t, len(values), total)
+
+	t.Logf("peak allocator use: %d bytes (page ~%d bytes)", peak, len(values)*2048)
+	require.Less(t, peak, 2<<20, "streaming peak should stay near the buffer, not the page")
+}
+
+func readInPage(t *testing.T, data []byte, batch int64) (defLevels, repLevels []int16, values []parquet.ByteArray) {
+	t.Helper()
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	props.EnablePageStreaming = true
+	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	cr, err := rdr.RowGroup(0).Column(0)
+	require.NoError(t, err)
+	bar := cr.(*file.ByteArrayColumnChunkReader)
+
+	dbuf := make([]int16, batch)
+	rbuf := make([]int16, batch)
+	vbuf := make([]parquet.ByteArray, batch)
+	for {
+		total, nv, err := bar.ReadBatchInPage(batch, vbuf, dbuf, rbuf)
+		require.NoError(t, err)
+		if total == 0 {
+			break
+		}
+		defLevels = append(defLevels, dbuf[:total]...)
+		repLevels = append(repLevels, rbuf[:total]...)
+		for i := 0; i < nv; i++ {
+			values = append(values, append([]byte(nil), vbuf[i]...)) // clone the alias
+		}
+	}
+	return defLevels, repLevels, values
+}
+
+// TestPageStreamingReadBatchInPageNullable exercises the zero-copy ReadBatchInPage
+// streaming path with large values that force DecodeStreaming short-returns (so the
+// pending-level FIFO is used) against a nullable column.
+func TestPageStreamingReadBatchInPageNullable(t *testing.T) {
+	const numRows = 60
+	defLevels := make([]int16, numRows)
+	var values []parquet.ByteArray
+	for i := 0; i < numRows; i++ {
+		if i%3 == 0 {
+			continue // null
+		}
+		defLevels[i] = 1
+		sz := 80 << 10 // 80 KiB: several per 1 MiB window, so DecodeStreaming returns short
+		b := make([]byte, sz)
+		b[0] = byte(i)
+		for j := 1; j < sz; j++ {
+			b[j] = byte(i*7 + j)
+		}
+		values = append(values, b)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		ver   parquet.DataPageVersion
+		codec compress.Compression
+	}{
+		{"v1-zstd", parquet.DataPageV1, compress.Codecs.Zstd},
+		{"v2-gzip", parquet.DataPageV2, compress.Codecs.Gzip},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := writeByteArrayStream(t, values, defLevels, nil, parquet.Repetitions.Optional, tc.ver, tc.codec, 8<<20)
+			for _, batch := range []int64{7, 64} {
+				gotDef, _, gotVals := readInPage(t, data, batch)
+				require.Equalf(t, defLevels, gotDef, "batch %d def levels", batch)
+				require.Lenf(t, gotVals, len(values), "batch %d value count", batch)
+				for i := range values {
+					require.Truef(t, bytes.Equal(values[i], gotVals[i]), "batch %d value %d", batch, i)
+				}
+			}
+		})
+	}
+}
+
+func TestPageStreamingReadBatchInPageRequired(t *testing.T) {
+	sizes := make([]int, 40)
+	for i := range sizes {
+		sizes[i] = 80 << 10 // large, so DecodeStreaming returns short against the window
+	}
+	values := makeStreamTestValues(sizes)
+	data := writeByteArrayStream(t, values, nil, nil, parquet.Repetitions.Required, parquet.DataPageV1, compress.Codecs.Zstd, 8<<20)
+
+	for _, batch := range []int64{5, 64} {
+		_, _, got := readInPage(t, data, batch)
+		require.Lenf(t, got, len(values), "batch %d value count", batch)
+		for i := range values {
+			require.Truef(t, bytes.Equal(values[i], got[i]), "batch %d value %d", batch, i)
+		}
+	}
+}
+
+func TestPageStreamingReadBatchInPageRepeated(t *testing.T) {
+	sizes := make([]int, 30)
+	for i := range sizes {
+		sizes[i] = 80 << 10
+	}
+	values := makeStreamTestValues(sizes)
+	defLevels := make([]int16, len(values))
+	repLevels := make([]int16, len(values))
+	for i := range values {
+		defLevels[i] = 1
+		if i%3 != 0 {
+			repLevels[i] = 1 // 0 starts a new list, 1 continues it
+		}
+	}
+	data := writeByteArrayStream(t, values, defLevels, repLevels, parquet.Repetitions.Repeated, parquet.DataPageV1, compress.Codecs.Zstd, 8<<20)
+
+	for _, batch := range []int64{7, 64} {
+		gotDef, gotRep, gotVals := readInPage(t, data, batch)
+		require.Equalf(t, defLevels, gotDef, "batch %d def levels", batch)
+		require.Equalf(t, repLevels, gotRep, "batch %d rep levels", batch)
+		require.Lenf(t, gotVals, len(values), "batch %d value count", batch)
+		for i := range values {
+			require.Truef(t, bytes.Equal(values[i], gotVals[i]), "batch %d value %d", batch, i)
+		}
+	}
+}
+
+// TestPageStreamingThreshold verifies streamingThreshold gates streaming: a page below
+// the threshold falls back to a whole-page read.
+func TestPageStreamingThreshold(t *testing.T) {
+	values := makeStreamTestValues([]int{65, 5000, 200}) // small page, well under 1 MiB
+	data := writeStreamTestColumn(t, values, parquet.DataPageV1, compress.Codecs.Zstd)
+
+	firstPageDataLen := func(threshold int64) int {
+		defer func(old int64) { *file.StreamingThreshold = old }(*file.StreamingThreshold)
+		*file.StreamingThreshold = threshold
+
+		props := parquet.NewReaderProperties(memory.DefaultAllocator)
+		props.EnablePageStreaming = true
+		rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
+		require.NoError(t, err)
+		defer rdr.Close()
+
+		pr, err := rdr.RowGroup(0).GetColumnPageReader(0)
+		require.NoError(t, err)
+		defer pr.Close()
+		require.True(t, pr.Next())
+		return len(pr.Page().Data())
+	}
+
+	require.NotZero(t, firstPageDataLen(1<<20), "small page must not stream at the 1 MiB threshold")
+	require.Zero(t, firstPageDataLen(0), "with threshold 0 the small page streams (empty level region)")
+}
+
+// TestPageStreamingRecordReader drives the record reader (the pqarrow read path) over a
+// streaming column in small batches, so a Decode's aliased values must survive until the
+// builder copies them and be reclaimed by the next Decode's Recycle. Large values force
+// chunk rotation, so a broken alias contract would corrupt the output.
+func TestPageStreamingRecordReader(t *testing.T) {
+	cases := []struct {
+		name     string
+		rep      parquet.Repetition
+		defLevel int16
+	}{
+		{"required", parquet.Repetitions.Required, 0},
+		{"optional", parquet.Repetitions.Optional, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			const nrows = 300
+			var (
+				sizes     []int
+				defLevels []int16
+				wantNull  []bool
+			)
+			for i := 0; i < nrows; i++ {
+				if tc.defLevel == 1 && i%5 == 0 {
+					defLevels = append(defLevels, 0)
+					wantNull = append(wantNull, true)
+					continue
+				}
+				sizes = append(sizes, 3000) // large enough to force chunk rotation
+				defLevels = append(defLevels, tc.defLevel)
+				wantNull = append(wantNull, false)
+			}
+			values := makeStreamTestValues(sizes)
+			var dl []int16
+			if tc.defLevel == 1 {
+				dl = defLevels
+			}
+			data := writeByteArrayStream(t, values, dl, nil, tc.rep, parquet.DataPageV1, compress.Codecs.Zstd, 8<<20)
+
+			props := parquet.NewReaderProperties(memory.DefaultAllocator)
+			props.EnablePageStreaming = true
+			rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
+			require.NoError(t, err)
+			defer rdr.Close()
+
+			pr, err := rdr.RowGroup(0).GetColumnPageReader(0)
+			require.NoError(t, err)
+			descr := rdr.MetaData().Schema.Column(0)
+
+			rr := file.NewRecordReader(descr, file.LevelInfo{NullSlotUsage: 1, DefLevel: tc.defLevel}, arrow.BinaryTypes.Binary, memory.DefaultAllocator, rdr.BufferPool())
+			defer rr.Release()
+			rr.SetPageReader(pr)
+			rr.Reset()
+			require.NoError(t, rr.Reserve(nrows))
+			for rr.HasMore() {
+				read, err := rr.ReadRecords(37) // small batch => many Decode/Recycle boundaries
+				require.NoError(t, err)
+				if read == 0 {
+					break
+				}
+			}
+
+			var got []parquet.ByteArray
+			var gotNull []bool
+			for _, chunk := range rr.(file.BinaryRecordReader).GetBuilderChunks() {
+				bin := chunk.(*array.Binary)
+				for i := 0; i < bin.Len(); i++ {
+					gotNull = append(gotNull, bin.IsNull(i))
+					got = append(got, bin.Value(i))
+				}
+				chunk.Release()
+			}
+
+			require.Equal(t, nrows, len(got))
+			require.Equal(t, wantNull, gotNull)
+			vi := 0
+			for i := 0; i < nrows; i++ {
+				if wantNull[i] {
+					continue
+				}
+				require.Truef(t, bytes.Equal(values[vi], got[i]), "value at row %d corrupted", i)
+				vi++
 			}
 		})
 	}

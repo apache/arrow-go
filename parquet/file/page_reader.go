@@ -108,14 +108,21 @@ type dataPageBase struct {
 	// valueBuf is only set for streaming mode to read values incrementally.
 	// In such mode, buf only holds the rep+def level region.
 	valueBuf streaming.ValueBuffer
+	// clip bounds a read's batch to keep one Decode's aliased values near the buffer
+	// size; 0 for non-streaming pages.
+	clip int64
 }
 
 func (d *dataPageBase) valueBuffer() streaming.ValueBuffer { return d.valueBuf }
 func (d *dataPageBase) levelBuffer() []byte                { return d.buf.Bytes() }
 
-func (d *dataPageBase) setStreamingValues(mem memory.Allocator, sizeHint int, levelBuf []byte, valReader, rawSrc io.Reader, closer io.Closer) {
+func (d *dataPageBase) valueClip() int64 { return d.clip }
+
+func (d *dataPageBase) setStreamingValues(mem memory.Allocator, lenUncompressed int, levelBuf []byte, valReader, rawSrc io.Reader, closer io.Closer) {
 	d.buf = memory.NewBufferBytes(levelBuf)
-	d.valueBuf = streaming.NewStreamBuffer(mem, valReader, sizeHint, drainAndClose(rawSrc, closer))
+	valueBytes := lenUncompressed - len(levelBuf)
+	d.valueBuf = streaming.NewStreamBuffer(mem, valReader, valueBytes, drainAndClose(rawSrc, closer))
+	d.clip = streaming.ClipBatch(valueBytes, int(d.nvals))
 }
 
 // releaseValueStream closes a streaming page's value source (draining + closing its
@@ -151,6 +158,8 @@ type DataPage interface {
 
 	// valueBuffer returns the streaming value source, or nil for a non-streaming page.
 	valueBuffer() streaming.ValueBuffer
+	// valueClip bounds a read's batch on a streaming page, or 0 for a non-streaming page.
+	valueClip() int64
 }
 
 // Create some pools to use for reusing the data page objects themselves so that
@@ -828,8 +837,12 @@ func drainAndClose(rawSrc io.Reader, closer io.Closer) func() error {
 	}
 }
 
-func (p *serializedPageReader) pageCanStream(enc format.Encoding) bool {
-	return p.columnCanStream && enc == format.Encoding_PLAIN && p.cryptoCtx.DataDecryptor == nil
+// streamingThreshold is the smallest data-page size worth streaming (var so tests can lower it).
+var streamingThreshold = int64(1 << 20)
+
+func (p *serializedPageReader) pageCanStream(enc format.Encoding, lenUncompressed int) bool {
+	return p.columnCanStream && enc == format.Encoding_PLAIN && p.cryptoCtx.DataDecryptor == nil &&
+		int64(lenUncompressed) > streamingThreshold
 }
 
 // readLevelData reads the V1 rep+def level region, capped at maxBytes (the
@@ -974,7 +987,7 @@ func (p *serializedPageReader) Next() bool {
 				firstRowIndex:    firstRowIdx,
 			}
 
-			if p.pageCanStream(dataHeader.GetEncoding()) {
+			if p.pageCanStream(dataHeader.GetEncoding(), lenUncompressed) {
 				limit := io.LimitReader(p.r, int64(lenCompressed))
 				// V1 compresses the whole body, so the levels are read through the
 				// codec too (a no-op passthrough for an uncompressed column).
@@ -1040,7 +1053,7 @@ func (p *serializedPageReader) Next() bool {
 				firstRowIndex:    firstRowIdx,
 			}
 
-			if p.pageCanStream(dataHeader.GetEncoding()) {
+			if p.pageCanStream(dataHeader.GetEncoding(), lenUncompressed) {
 				// V2: rep/def levels are uncompressed and precede the separately
 				// compressed value region. Read the level bytes directly off the front,
 				// then stream the values from what remains.

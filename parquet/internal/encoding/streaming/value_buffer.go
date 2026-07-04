@@ -22,17 +22,19 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
-// ValueBuffer is the incremental byte source a streaming decoder reads over one
-// data page's value stream.
+// ValueBuffer is the byte source a streaming decoder reads; bytes from Fill stay valid
+// until the next Recycle, so a decoder can alias them instead of copying.
 type ValueBuffer interface {
-	// Advance marks the first n bytes of the current window as consumed.
-	Advance(n int)
-	// Fill ensures at least need contiguous bytes and returns them; the window is only
-	// valid until the next Fill/FillOwned/Advance (io.ErrUnexpectedEOF if fewer remain).
+	// Fill returns >= need contiguous bytes from the cursor, valid until the next Recycle;
+	// io.ErrUnexpectedEOF if fewer remain (incl. a need past the value region).
 	Fill(need int) ([]byte, error)
-	// FillOwned is like Fill but the returned bytes stay valid after later calls,
-	// so a decoder can alias them instead of copying.
-	FillOwned(need int) ([]byte, error)
+	// Advance marks the first n bytes from the cursor as consumed.
+	Advance(n int)
+	// Skip discards the next n bytes without buffering them, for the discard/seek path.
+	Skip(n int) error
+	// Recycle reclaims everything handed out since the last Recycle; the caller must be
+	// done with the previous batch's aliases. A decoder calls it when entering Decode.
+	Recycle()
 	io.Closer
 }
 
@@ -41,70 +43,82 @@ type Decoder interface {
 	SetSource(nvals int, src ValueBuffer)
 }
 
-const defaultStreamBufferSize = 1 << 20
+// DefaultBufferSize is the steady-state chunk size and the clip target.
+const DefaultBufferSize = 1 << 20
 
+// streamBuffer serves the value stream from reusable chunks; aliases stay valid until Recycle.
 type streamBuffer struct {
-	r       io.Reader
-	onClose func() error
-	mem     memory.Allocator
-	bufs    [][]byte // freed on Close
-	buf     []byte   // current window
-	off, n  int
-	// shared: buf was handed out via FillOwned and may back live aliases, so it
-	// must not be slid/overwritten.
-	shared bool
+	r         io.Reader
+	onClose   func() error
+	mem       memory.Allocator
+	chunkSize int
+	cur       []byte   // chunk currently being filled (off == n on Fill entry)
+	off, n    int      // consumed cursor / filled end within cur
+	live      [][]byte // earlier chunks still backing this Decode's aliases
+	remaining int      // value-region bytes not yet consumed; bounds Fill vs corrupt lengths
 }
 
-// NewStreamBuffer returns a ValueBuffer over r.
-func NewStreamBuffer(mem memory.Allocator, r io.Reader, sizeHint int, onClose func() error) ValueBuffer {
-	size := defaultStreamBufferSize
-	if sizeHint > 0 && sizeHint < size {
-		size = sizeHint
+// NewStreamBuffer returns a ValueBuffer over r, bounded to valueBytes (the value region).
+func NewStreamBuffer(mem memory.Allocator, r io.Reader, valueBytes int, onClose func() error) ValueBuffer {
+	size := DefaultBufferSize
+	if valueBytes > 0 && valueBytes < size {
+		size = valueBytes
 	}
-	buf := mem.Allocate(size)
-	return &streamBuffer{mem: mem, r: r, onClose: onClose, buf: buf, bufs: [][]byte{buf}}
+	return &streamBuffer{mem: mem, r: r, onClose: onClose, chunkSize: size, cur: mem.Allocate(size), remaining: valueBytes}
 }
 
-func (s *streamBuffer) Advance(n int) { s.off += n }
-
-func (s *streamBuffer) Close() error {
-	for _, b := range s.bufs {
-		s.mem.Free(b)
+// ClipBatch estimates rows per Decode that keep a batch's aliased values near the buffer
+// size, for a page whose value region exceeds it. Row count is a conservative proxy for
+// value count; skewed sizes may overshoot. Returns nvals (no clip) when the whole region
+// already fits one buffer.
+func ClipBatch(valueBytes, nvals int) int64 {
+	if valueBytes <= DefaultBufferSize || nvals <= 0 {
+		return int64(nvals)
 	}
-	s.bufs, s.buf = nil, nil
-	if s.onClose != nil {
-		return s.onClose()
+	avg := valueBytes / nvals
+	if avg < 1 {
+		avg = 1
 	}
-	return nil
+	if clip := int64(DefaultBufferSize / avg); clip > 1 {
+		return clip
+	}
+	return 1
 }
 
-func (s *streamBuffer) Fill(need int) ([]byte, error)      { return s.fill(need, false) }
-func (s *streamBuffer) FillOwned(need int) ([]byte, error) { return s.fill(need, true) }
+func (s *streamBuffer) Advance(n int) {
+	s.off += n
+	s.remaining -= n
+}
 
-func (s *streamBuffer) fill(need int, owned bool) ([]byte, error) {
+func (s *streamBuffer) Skip(n int) error {
+	if n > s.remaining {
+		return io.ErrUnexpectedEOF
+	}
+	s.remaining -= n
+	buffered := s.n - s.off
+	if buffered >= n {
+		s.off += n
+		return nil
+	}
+	n -= buffered
+	// Nothing here is aliased, so drop the cursor and discard the rest from the reader.
+	s.off, s.n = 0, 0
+	_, err := io.CopyN(io.Discard, s.r, int64(n))
+	return err
+}
+
+func (s *streamBuffer) Fill(need int) ([]byte, error) {
 	if s.n-s.off >= need {
-		s.shared = s.shared || owned
-		return s.buf[s.off:s.n], nil
+		return s.cur[s.off:s.n], nil
 	}
-
-	switch {
-	case s.shared || len(s.buf) < need:
-		// buf is shared (live aliases) or too small: move the tail to a fresh one.
-		size := len(s.buf)
-		if size < need {
-			size = need
-		}
-		fresh := s.mem.Allocate(size)
-		s.n = copy(fresh, s.buf[s.off:s.n])
-		s.off, s.buf = 0, fresh
-		s.bufs = append(s.bufs, fresh)
-	case s.off > 0:
-		s.n = copy(s.buf, s.buf[s.off:s.n])
-		s.off = 0
+	if need > s.remaining {
+		return nil, io.ErrUnexpectedEOF
 	}
-
-	for s.n < len(s.buf) {
-		m, err := s.r.Read(s.buf[s.n:])
+	if need > len(s.cur)-s.off {
+		s.rotate(need)
+	}
+	for s.n-s.off < need {
+		m, err := s.r.Read(s.cur[s.n : s.off+need])
 		s.n += m
 		if err != nil {
 			if err == io.EOF {
@@ -116,6 +130,42 @@ func (s *streamBuffer) fill(need int, owned bool) ([]byte, error) {
 	if s.n-s.off < need {
 		return nil, io.ErrUnexpectedEOF
 	}
-	s.shared = owned
-	return s.buf[s.off:s.n], nil
+	return s.cur[s.off:s.n], nil
+}
+
+// rotate retires the full chunk (still backing aliases) and starts fresh; no tail since off == n.
+func (s *streamBuffer) rotate(need int) {
+	s.live = append(s.live, s.cur)
+	size := s.chunkSize
+	if need > size {
+		size = need
+	}
+	s.cur, s.off, s.n = s.mem.Allocate(size), 0, 0
+}
+
+func (s *streamBuffer) Recycle() {
+	for _, b := range s.live {
+		s.mem.Free(b)
+	}
+	s.live = s.live[:0]
+	// Rewind the primary chunk; swap out an oversized one so steady state stays small.
+	if len(s.cur) != s.chunkSize {
+		s.mem.Free(s.cur)
+		s.cur = s.mem.Allocate(s.chunkSize)
+	}
+	s.off, s.n = 0, 0
+}
+
+func (s *streamBuffer) Close() error {
+	for _, b := range s.live {
+		s.mem.Free(b)
+	}
+	if s.cur != nil {
+		s.mem.Free(s.cur)
+	}
+	s.live, s.cur = nil, nil
+	if s.onClose != nil {
+		return s.onClose()
+	}
+	return nil
 }
