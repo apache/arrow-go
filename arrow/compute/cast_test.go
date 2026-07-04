@@ -1680,29 +1680,27 @@ func (c *CastSuite) TestBinaryViewToBinaryLike() {
 }
 
 func (c *CastSuite) TestBinaryToBinaryViewReleasesTemporaryResult() {
+	scope := memory.NewCheckedAllocatorScope(c.mem)
+
 	in, _, err := array.FromJSON(c.mem, arrow.BinaryTypes.Binary, strings.NewReader(`["aGk=", "dGhpcyBpcyB0aGUgZmlyc3QgdGVzdCE=", null]`))
 	c.Require().NoError(err)
-
-	scope := memory.NewCheckedAllocatorScope(c.mem)
 
 	out, err := compute.CastArray(context.Background(), in, compute.SafeCastOptions(arrow.BinaryTypes.BinaryView))
 	c.Require().NoError(err)
 	out.Release()
-	in.Release()
-
 	scope.CheckSize(c.T())
+	in.Release()
 }
 
 func (c *CastSuite) TestBinaryViewToBinaryReleasesTemporaryResult() {
-	in := c.buildStringViewArray([]string{"a", "short", "this is a longer cast value"}, nil)
 	scope := memory.NewCheckedAllocatorScope(c.mem)
+	in := c.buildStringViewArray([]string{"a", "short", "this is a longer cast value"}, nil)
 
 	out, err := compute.CastArray(context.Background(), in, compute.SafeCastOptions(arrow.BinaryTypes.LargeBinary))
 	c.Require().NoError(err)
 	out.Release()
-	in.Release()
-
 	scope.CheckSize(c.T())
+	in.Release()
 }
 
 // TestBinaryViewToBinaryView covers cross-view casts (binary_view <->
