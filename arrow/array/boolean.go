@@ -90,11 +90,15 @@ func (a *Boolean) setData(data *Data) {
 	}
 }
 
-func (a *Boolean) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *Boolean) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	if !nullable || a.IsValid(i) {
 		return a.Value(i)
 	}
 	return nil
+}
+
+func (a *Boolean) GetOneForMarshal(i int) interface{} {
+	return a.GetOneForMarshalNullable(i, true)
 }
 
 func (a *Boolean) MarshalJSON() ([]byte, error) {

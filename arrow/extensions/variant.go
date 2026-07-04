@@ -599,7 +599,7 @@ func (v *VariantArray) MarshalJSON() ([]byte, error) {
 	return json.Marshal(values)
 }
 
-func (v *VariantArray) GetOneForMarshal(i int, nullable bool) any {
+func (v *VariantArray) GetOneForMarshalNullable(i int, nullable bool) any {
 	if nullable && v.IsNull(i) {
 		return nil
 	}
@@ -610,6 +610,10 @@ func (v *VariantArray) GetOneForMarshal(i int, nullable bool) any {
 	}
 
 	return val.Value()
+}
+
+func (v *VariantArray) GetOneForMarshal(i int) any {
+	return v.GetOneForMarshalNullable(i, true)
 }
 
 type variantReader interface {

@@ -94,11 +94,15 @@ func (a *MonthInterval) setData(data *Data) {
 	}
 }
 
-func (a *MonthInterval) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *MonthInterval) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	if !nullable || a.IsValid(i) {
 		return a.values[i]
 	}
 	return nil
+}
+
+func (a *MonthInterval) GetOneForMarshal(i int) interface{} {
+	return a.GetOneForMarshalNullable(i, true)
 }
 
 // MarshalJSON will create a json array out of a MonthInterval array,
@@ -361,7 +365,7 @@ func (a *DayTimeInterval) ValueStr(i int) string {
 	if a.IsNull(i) {
 		return NullValueStr
 	}
-	data, err := json.Marshal(a.GetOneForMarshal(i, true))
+	data, err := json.Marshal(a.GetOneForMarshal(i))
 	if err != nil {
 		panic(err)
 	}
@@ -399,11 +403,15 @@ func (a *DayTimeInterval) setData(data *Data) {
 	}
 }
 
-func (a *DayTimeInterval) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *DayTimeInterval) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	if !nullable || a.IsValid(i) {
 		return a.values[i]
 	}
 	return nil
+}
+
+func (a *DayTimeInterval) GetOneForMarshal(i int) interface{} {
+	return a.GetOneForMarshalNullable(i, true)
 }
 
 // MarshalJSON will marshal this array to JSON as an array of objects,
@@ -663,7 +671,7 @@ func (a *MonthDayNanoInterval) ValueStr(i int) string {
 	if a.IsNull(i) {
 		return NullValueStr
 	}
-	data, err := json.Marshal(a.GetOneForMarshal(i, true))
+	data, err := json.Marshal(a.GetOneForMarshal(i))
 	if err != nil {
 		panic(err)
 	}
@@ -703,11 +711,15 @@ func (a *MonthDayNanoInterval) setData(data *Data) {
 	}
 }
 
-func (a *MonthDayNanoInterval) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *MonthDayNanoInterval) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	if !nullable || a.IsValid(i) {
 		return a.values[i]
 	}
 	return nil
+}
+
+func (a *MonthDayNanoInterval) GetOneForMarshal(i int) interface{} {
+	return a.GetOneForMarshalNullable(i, true)
 }
 
 // MarshalJSON will marshal this array to a JSON array with elements

@@ -284,13 +284,41 @@ func RecordToJSON(rec arrow.RecordBatch, w io.Writer) error {
 	cols := make(map[string]interface{})
 	for i := 0; int64(i) < rec.NumRows(); i++ {
 		for j, c := range rec.Columns() {
-			cols[fields[j].Name] = c.GetOneForMarshal(i, rec.Schema().Field(j).Nullable)
+			cols[fields[j].Name] = getOneForMarshalNullable(c, i, rec.Schema().Field(j).Nullable)
 		}
 		if err := enc.Encode(cols); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// getOneForMarshalNullable dispatches to an Array's field-local-nullability-aware
+// marshaler when it implements arrow.NullableMarshaler, otherwise it falls back to
+// the plain GetOneForMarshal (which decides null purely from the validity bitmap).
+// This lets containers propagate a field's Nullable flag without every Array having
+// to implement the optional interface.
+func getOneForMarshalNullable(a arrow.Array, i int, nullable bool) interface{} {
+	if nm, ok := a.(arrow.NullableMarshaler); ok {
+		return nm.GetOneForMarshalNullable(i, nullable)
+	}
+
+	// ExtensionArrayBase intentionally does not implement arrow.NullableMarshaler
+	// (see extension.go), so extension arrays reach here. Preserve the extension's
+	// own logical JSON by default; the only field-local nullability we can safely
+	// add is that a null slot in a non-nullable field must not serialize as null.
+	// Ask the extension first (honoring any custom GetOneForMarshal override); only
+	// if it would emit null do we fall back to the storage value. Plain wrapper
+	// extensions (e.g. Parametric*Array) return nil at a null slot and thus round
+	// trip through storage, without bypassing a custom representation.
+	if ext, ok := a.(ExtensionArray); ok && !nullable && a.IsNull(i) {
+		if v := a.GetOneForMarshal(i); v != nil {
+			return v
+		}
+		return getOneForMarshalNullable(ext.Storage(), i, false)
+	}
+
+	return a.GetOneForMarshal(i)
 }
 
 func TableFromJSON(mem memory.Allocator, sc *arrow.Schema, recJSON []string, opt ...FromJSONOption) (arrow.Table, error) {

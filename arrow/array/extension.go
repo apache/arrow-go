@@ -116,8 +116,13 @@ func (e *ExtensionArrayBase) String() string {
 	return fmt.Sprintf("(%s)%s", e.data.dtype, e.storage)
 }
 
-func (e *ExtensionArrayBase) GetOneForMarshal(i int, nullable bool) interface{} {
-	return e.storage.GetOneForMarshal(i, nullable)
+// GetOneForMarshal returns the value at i from the underlying storage array.
+// ExtensionArrayBase deliberately does not implement arrow.NullableMarshaler:
+// doing so would promote a nullable-aware method onto every embedding extension
+// array and bypass a concrete type's own GetOneForMarshal override. Field-local
+// nullability for plain extension arrays is handled by the marshaling helper.
+func (e *ExtensionArrayBase) GetOneForMarshal(i int) interface{} {
+	return e.storage.GetOneForMarshal(i)
 }
 
 func (e *ExtensionArrayBase) MarshalJSON() ([]byte, error) {

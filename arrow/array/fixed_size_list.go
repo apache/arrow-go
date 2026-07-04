@@ -51,7 +51,7 @@ func (a *FixedSizeList) ValueStr(i int) string {
 	if a.IsNull(i) {
 		return NullValueStr
 	}
-	return string(a.GetOneForMarshal(i, true).(json.RawMessage))
+	return string(a.GetOneForMarshal(i).(json.RawMessage))
 }
 
 func (a *FixedSizeList) String() string {
@@ -124,7 +124,7 @@ func (a *FixedSizeList) Release() {
 	a.values.Release()
 }
 
-func (a *FixedSizeList) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *FixedSizeList) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	if nullable && a.IsNull(i) {
 		return nil
 	}
@@ -136,6 +136,10 @@ func (a *FixedSizeList) GetOneForMarshal(i int, nullable bool) interface{} {
 	}
 
 	return json.RawMessage(v)
+}
+
+func (a *FixedSizeList) GetOneForMarshal(i int) interface{} {
+	return a.GetOneForMarshalNullable(i, true)
 }
 
 func (a *FixedSizeList) MarshalJSON() ([]byte, error) {

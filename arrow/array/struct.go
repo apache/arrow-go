@@ -130,7 +130,7 @@ func (a *Struct) ValueStr(i int) string {
 		return NullValueStr
 	}
 
-	data, err := json.Marshal(a.GetOneForMarshal(i, true))
+	data, err := json.Marshal(a.GetOneForMarshal(i))
 	if err != nil {
 		panic(err)
 	}
@@ -209,7 +209,7 @@ func (a *Struct) setData(data *Data) {
 	}
 }
 
-func (a *Struct) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *Struct) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	if nullable && a.IsNull(i) {
 		return nil
 	}
@@ -218,9 +218,13 @@ func (a *Struct) GetOneForMarshal(i int, nullable bool) interface{} {
 	dtype := a.data.dtype.(*arrow.StructType)
 	fieldList := dtype.Fields()
 	for j, d := range a.fields {
-		tmp[fieldList[j].Name] = d.GetOneForMarshal(i, dtype.Field(j).Nullable)
+		tmp[fieldList[j].Name] = getOneForMarshalNullable(d, i, dtype.Field(j).Nullable)
 	}
 	return tmp
+}
+
+func (a *Struct) GetOneForMarshal(i int) interface{} {
+	return a.GetOneForMarshalNullable(i, true)
 }
 
 func (a *Struct) MarshalJSON() ([]byte, error) {
@@ -232,7 +236,7 @@ func (a *Struct) MarshalJSON() ([]byte, error) {
 		if i != 0 {
 			buf.WriteByte(',')
 		}
-		if err := enc.Encode(a.GetOneForMarshal(i, true)); err != nil {
+		if err := enc.Encode(a.GetOneForMarshal(i)); err != nil {
 			return nil, err
 		}
 	}

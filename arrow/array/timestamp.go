@@ -109,17 +109,21 @@ func (a *Timestamp) ValueStr(i int) string {
 	return toTime(a.values[i]).Format(layout)
 }
 
-func (a *Timestamp) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *Timestamp) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	if val := a.ValueStr(i); !nullable || val != NullValueStr {
 		return val
 	}
 	return nil
 }
 
+func (a *Timestamp) GetOneForMarshal(i int) interface{} {
+	return a.GetOneForMarshalNullable(i, true)
+}
+
 func (a *Timestamp) MarshalJSON() ([]byte, error) {
 	vals := make([]interface{}, a.Len())
 	for i := range a.values {
-		vals[i] = a.GetOneForMarshal(i, true)
+		vals[i] = a.GetOneForMarshal(i)
 	}
 
 	return json.Marshal(vals)

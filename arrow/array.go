@@ -111,7 +111,7 @@ type Array interface {
 	ValueStr(i int) string
 
 	// Get single value to be marshalled with `json.Marshal`
-	GetOneForMarshal(i int, nullable bool) interface{}
+	GetOneForMarshal(i int) interface{}
 
 	Data() ArrayData
 
@@ -126,6 +126,21 @@ type Array interface {
 	// Release may be called simultaneously from multiple goroutines.
 	// When the reference count goes to zero, the memory is freed.
 	Release()
+}
+
+// NullableMarshaler is an optional interface an Array may implement to control
+// whether a value is rendered as JSON null based on the field-local nullability
+// from the schema, rather than solely on the array's own validity bitmap.
+//
+// It exists so containers (struct/union/dictionary/run-end-encoded/extension)
+// and RecordToJSON can propagate each field's Nullable flag down to its values
+// without a breaking change to the Array interface. Arrays that do not implement
+// it fall back to GetOneForMarshal, preserving the previous validity-based behavior.
+type NullableMarshaler interface {
+	// GetOneForMarshalNullable returns the value at i for json.Marshal. When
+	// nullable is false, a value is returned even if the array's validity bitmap
+	// marks it null (a non-nullable field must not serialize as null).
+	GetOneForMarshalNullable(i int, nullable bool) interface{}
 }
 
 // ValueType is a generic constraint for valid Arrow primitive types

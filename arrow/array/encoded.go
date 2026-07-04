@@ -219,13 +219,13 @@ func (r *RunEndEncoded) String() string {
 			buf.WriteByte(',')
 		}
 
-		value := r.values.GetOneForMarshal(i, true)
+		value := r.values.GetOneForMarshal(i)
 		if byts, ok := value.(json.RawMessage); ok {
 			value = string(byts)
 		}
 
 		var runEnd int
-		switch e := r.ends.GetOneForMarshal(i, true).(type) {
+		switch e := r.ends.GetOneForMarshal(i).(type) {
 		case int16:
 			runEnd = int(e) - r.data.offset
 		case int32:
@@ -239,9 +239,16 @@ func (r *RunEndEncoded) String() string {
 	buf.WriteByte(']')
 	return buf.String()
 }
+func (r *RunEndEncoded) GetOneForMarshalNullable(i int, nullable bool) interface{} {
+	// The values child may serialize as JSON null only when both the outer REE
+	// field and the REE values child (ValueNullable) are nullable; a non-nullable
+	// outer field must never emit null even if the values child is nullable.
+	nullable = nullable && r.data.dtype.(*arrow.RunEndEncodedType).ValueNullable
+	return getOneForMarshalNullable(r.values, r.GetPhysicalIndex(i), nullable)
+}
 
-func (r *RunEndEncoded) GetOneForMarshal(i int, nullable bool) interface{} {
-	return r.values.GetOneForMarshal(r.GetPhysicalIndex(i), nullable)
+func (r *RunEndEncoded) GetOneForMarshal(i int) interface{} {
+	return r.GetOneForMarshalNullable(i, true)
 }
 
 func (r *RunEndEncoded) MarshalJSON() ([]byte, error) {
@@ -252,7 +259,7 @@ func (r *RunEndEncoded) MarshalJSON() ([]byte, error) {
 		if i != 0 {
 			buf.WriteByte(',')
 		}
-		if err := enc.Encode(r.GetOneForMarshal(i, true)); err != nil {
+		if err := enc.Encode(r.GetOneForMarshal(i)); err != nil {
 			return nil, err
 		}
 	}

@@ -320,7 +320,7 @@ func (a *SparseUnion) setData(data *Data) {
 	debug.Assert(a.data.buffers[0] == nil, "arrow/array: validity bitmap for sparse unions should be nil")
 }
 
-func (a *SparseUnion) GetOneForMarshal(i int, nullable bool) any {
+func (a *SparseUnion) GetOneForMarshalNullable(i int, nullable bool) any {
 	typeID := a.RawTypeCodes()[i]
 
 	childID := a.ChildID(i)
@@ -331,7 +331,11 @@ func (a *SparseUnion) GetOneForMarshal(i int, nullable bool) any {
 		return []any{typeID, nil}
 	}
 
-	return []any{typeID, data.GetOneForMarshal(i, childNullable)}
+	return []any{typeID, getOneForMarshalNullable(data, i, childNullable)}
+}
+
+func (a *SparseUnion) GetOneForMarshal(i int) any {
+	return a.GetOneForMarshalNullable(i, true)
 }
 
 func (a *SparseUnion) MarshalJSON() ([]byte, error) {
@@ -343,7 +347,7 @@ func (a *SparseUnion) MarshalJSON() ([]byte, error) {
 		if i != 0 {
 			buf.WriteByte(',')
 		}
-		if err := enc.Encode(a.GetOneForMarshal(i, true)); err != nil {
+		if err := enc.Encode(a.GetOneForMarshal(i)); err != nil {
 			return nil, err
 		}
 	}
@@ -356,7 +360,7 @@ func (a *SparseUnion) ValueStr(i int) string {
 		return NullValueStr
 	}
 
-	val := a.GetOneForMarshal(i, true)
+	val := a.GetOneForMarshal(i)
 	if val == nil {
 		// child is nil
 		return NullValueStr
@@ -381,7 +385,7 @@ func (a *SparseUnion) String() string {
 
 		field := fieldList[a.ChildID(i)]
 		f := a.Field(a.ChildID(i))
-		fmt.Fprintf(&b, "{%s=%v}", field.Name, f.GetOneForMarshal(i, true))
+		fmt.Fprintf(&b, "{%s=%v}", field.Name, f.GetOneForMarshal(i))
 	}
 	b.WriteByte(']')
 	return b.String()
@@ -615,7 +619,7 @@ func (a *DenseUnion) setData(data *Data) {
 	}
 }
 
-func (a *DenseUnion) GetOneForMarshal(i int, nullable bool) any {
+func (a *DenseUnion) GetOneForMarshalNullable(i int, nullable bool) any {
 	typeID := a.RawTypeCodes()[i]
 
 	childID := a.ChildID(i)
@@ -627,7 +631,11 @@ func (a *DenseUnion) GetOneForMarshal(i int, nullable bool) any {
 		return []any{typeID, nil}
 	}
 
-	return []any{typeID, data.GetOneForMarshal(offset, childNullable)}
+	return []any{typeID, getOneForMarshalNullable(data, offset, childNullable)}
+}
+
+func (a *DenseUnion) GetOneForMarshal(i int) any {
+	return a.GetOneForMarshalNullable(i, true)
 }
 
 func (a *DenseUnion) MarshalJSON() ([]byte, error) {
@@ -639,7 +647,7 @@ func (a *DenseUnion) MarshalJSON() ([]byte, error) {
 		if i != 0 {
 			buf.WriteByte(',')
 		}
-		if err := enc.Encode(a.GetOneForMarshal(i, true)); err != nil {
+		if err := enc.Encode(a.GetOneForMarshal(i)); err != nil {
 			return nil, err
 		}
 	}
@@ -652,7 +660,7 @@ func (a *DenseUnion) ValueStr(i int) string {
 		return NullValueStr
 	}
 
-	val := a.GetOneForMarshal(i, true)
+	val := a.GetOneForMarshal(i)
 	if val == nil {
 		// child in nil
 		return NullValueStr
@@ -679,7 +687,7 @@ func (a *DenseUnion) String() string {
 
 		field := fieldList[a.ChildID(i)]
 		f := a.Field(a.ChildID(i))
-		fmt.Fprintf(&b, "{%s=%v}", field.Name, f.GetOneForMarshal(int(offsets[i]), true))
+		fmt.Fprintf(&b, "{%s=%v}", field.Name, f.GetOneForMarshal(int(offsets[i])))
 	}
 	b.WriteByte(']')
 	return b.String()

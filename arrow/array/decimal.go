@@ -55,7 +55,7 @@ func (a *baseDecimal[T]) ValueStr(i int) string {
 	if a.IsNull(i) {
 		return NullValueStr
 	}
-	return a.GetOneForMarshal(i, true).(string)
+	return a.GetOneForMarshal(i).(string)
 }
 
 func (a *baseDecimal[T]) Values() []T { return a.values }
@@ -89,7 +89,7 @@ func (a *baseDecimal[T]) setData(data *Data) {
 	}
 }
 
-func (a *baseDecimal[T]) GetOneForMarshal(i int, nullable bool) any {
+func (a *baseDecimal[T]) GetOneForMarshalNullable(i int, nullable bool) any {
 	if nullable && a.IsNull(i) {
 		return nil
 	}
@@ -99,10 +99,14 @@ func (a *baseDecimal[T]) GetOneForMarshal(i int, nullable bool) any {
 	return n.ToBigFloat(scale).Text('g', int(typ.GetPrecision()))
 }
 
+func (a *baseDecimal[T]) GetOneForMarshal(i int) any {
+	return a.GetOneForMarshalNullable(i, true)
+}
+
 func (a *baseDecimal[T]) MarshalJSON() ([]byte, error) {
 	vals := make([]any, a.Len())
 	for i := 0; i < a.Len(); i++ {
-		vals[i] = a.GetOneForMarshal(i, true)
+		vals[i] = a.GetOneForMarshal(i)
 	}
 	return json.Marshal(vals)
 }

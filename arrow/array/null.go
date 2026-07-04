@@ -80,8 +80,12 @@ func (a *Null) setData(data *Data) {
 	a.data.nulls = a.data.length
 }
 
-func (a *Null) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *Null) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	return nil
+}
+
+func (a *Null) GetOneForMarshal(i int) interface{} {
+	return a.GetOneForMarshalNullable(i, true)
 }
 
 func (a *Null) MarshalJSON() ([]byte, error) {

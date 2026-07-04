@@ -286,19 +286,22 @@ func (d *Dictionary) GetValueIndex(i int) int {
 	debug.Assert(false, "unreachable dictionary index")
 	return -1
 }
-
-func (d *Dictionary) GetOneForMarshal(i int, nullable bool) interface{} {
+func (d *Dictionary) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	if nullable && d.IsNull(i) {
 		return nil
 	}
 	vidx := d.GetValueIndex(i)
-	return d.Dictionary().GetOneForMarshal(vidx, nullable)
+	return getOneForMarshalNullable(d.Dictionary(), vidx, nullable)
+}
+
+func (d *Dictionary) GetOneForMarshal(i int) interface{} {
+	return d.GetOneForMarshalNullable(i, true)
 }
 
 func (d *Dictionary) MarshalJSON() ([]byte, error) {
 	vals := make([]any, d.Len())
 	for i := range d.Len() {
-		vals[i] = d.GetOneForMarshal(i, true)
+		vals[i] = d.GetOneForMarshal(i)
 	}
 	return json.Marshal(vals)
 }

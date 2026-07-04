@@ -118,7 +118,7 @@ func (a *JSONArray) ValueBytes(i int) []byte {
 
 func (a *JSONArray) valueJSON(i int, nullable bool) json.RawMessage {
 	var val json.RawMessage
-	if a.IsValid(i) {
+	if !nullable || a.IsValid(i) {
 		val = json.RawMessage(a.Storage().(array.StringLike).Value(i))
 	}
 	return val
@@ -142,8 +142,12 @@ func (a *JSONArray) MarshalJSON() ([]byte, error) {
 }
 
 // GetOneForMarshal implements arrow.Array.
-func (a *JSONArray) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *JSONArray) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	return a.valueJSON(i, nullable)
+}
+
+func (a *JSONArray) GetOneForMarshal(i int) interface{} {
+	return a.GetOneForMarshalNullable(i, true)
 }
 
 var (

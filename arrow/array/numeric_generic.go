@@ -83,12 +83,16 @@ func (a *numericArray[T]) ValueStr(i int) string {
 	return fmt.Sprintf("%v", a.values[i])
 }
 
-func (a *numericArray[T]) GetOneForMarshal(i int, nullable bool) any {
+func (a *numericArray[T]) GetOneForMarshalNullable(i int, nullable bool) any {
 	if nullable && a.IsNull(i) {
 		return nil
 	}
 
 	return a.values[i]
+}
+
+func (a *numericArray[T]) GetOneForMarshal(i int) any {
+	return a.GetOneForMarshalNullable(i, true)
 }
 
 func (a *numericArray[T]) MarshalJSON() ([]byte, error) {
@@ -107,12 +111,16 @@ type oneByteArrs[T int8 | uint8] struct {
 	numericArray[T]
 }
 
-func (a *oneByteArrs[T]) GetOneForMarshal(i int, nullable bool) any {
+func (a *oneByteArrs[T]) GetOneForMarshalNullable(i int, nullable bool) any {
 	if nullable && a.IsNull(i) {
 		return nil
 	}
 
 	return float64(a.values[i]) // prevent uint8/int8 from being seen as binary data
+}
+
+func (a *oneByteArrs[T]) GetOneForMarshal(i int) any {
+	return a.GetOneForMarshalNullable(i, true)
 }
 
 func (a *oneByteArrs[T]) MarshalJSON() ([]byte, error) {
@@ -141,7 +149,7 @@ func (a *floatArray[T]) ValueStr(i int) string {
 	return strconv.FormatFloat(float64(a.Value(i)), 'g', -1, bitWidth)
 }
 
-func (a *floatArray[T]) GetOneForMarshal(i int, nullable bool) any {
+func (a *floatArray[T]) GetOneForMarshalNullable(i int, nullable bool) any {
 	if nullable && a.IsNull(i) {
 		return nil
 	}
@@ -157,10 +165,14 @@ func (a *floatArray[T]) GetOneForMarshal(i int, nullable bool) any {
 	}
 }
 
+func (a *floatArray[T]) GetOneForMarshal(i int) any {
+	return a.GetOneForMarshalNullable(i, true)
+}
+
 func (a *floatArray[T]) MarshalJSON() ([]byte, error) {
 	vals := make([]any, a.Len())
 	for i := range a.values {
-		vals[i] = a.GetOneForMarshal(i, true)
+		vals[i] = a.GetOneForMarshal(i)
 	}
 	return json.Marshal(vals)
 }
@@ -176,7 +188,7 @@ type dateArray[T interface {
 func (d *dateArray[T]) MarshalJSON() ([]byte, error) {
 	vals := make([]any, d.Len())
 	for i := range d.values {
-		vals[i] = d.GetOneForMarshal(i, true)
+		vals[i] = d.GetOneForMarshal(i)
 	}
 	return json.Marshal(vals)
 }
@@ -189,12 +201,16 @@ func (d *dateArray[T]) ValueStr(i int) string {
 	return d.values[i].FormattedString()
 }
 
-func (d *dateArray[T]) GetOneForMarshal(i int, nullable bool) interface{} {
+func (d *dateArray[T]) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	if nullable && d.IsNull(i) {
 		return nil
 	}
 
 	return d.values[i].FormattedString()
+}
+
+func (d *dateArray[T]) GetOneForMarshal(i int) interface{} {
+	return d.GetOneForMarshalNullable(i, true)
 }
 
 type timeType interface {
@@ -212,7 +228,7 @@ type timeArray[T interface {
 func (a *timeArray[T]) MarshalJSON() ([]byte, error) {
 	vals := make([]any, a.Len())
 	for i := range a.values {
-		vals[i] = a.GetOneForMarshal(i, true)
+		vals[i] = a.GetOneForMarshal(i)
 	}
 	return json.Marshal(vals)
 }
@@ -225,12 +241,16 @@ func (a *timeArray[T]) ValueStr(i int) string {
 	return a.values[i].FormattedString(a.DataType().(timeType).TimeUnit())
 }
 
-func (a *timeArray[T]) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *timeArray[T]) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	if nullable && a.IsNull(i) {
 		return nil
 	}
 
 	return a.values[i].ToTime(a.DataType().(timeType).TimeUnit()).Format("15:04:05.999999999")
+}
+
+func (a *timeArray[T]) GetOneForMarshal(i int) interface{} {
+	return a.GetOneForMarshalNullable(i, true)
 }
 
 type Duration struct {
@@ -248,7 +268,7 @@ func (a *Duration) DurationValues() []arrow.Duration { return a.Values() }
 func (a *Duration) MarshalJSON() ([]byte, error) {
 	vals := make([]any, a.Len())
 	for i := range a.values {
-		vals[i] = a.GetOneForMarshal(i, true)
+		vals[i] = a.GetOneForMarshal(i)
 	}
 	return json.Marshal(vals)
 }
@@ -261,11 +281,15 @@ func (a *Duration) ValueStr(i int) string {
 	return fmt.Sprintf("%d%s", a.values[i], a.DataType().(timeType).TimeUnit())
 }
 
-func (a *Duration) GetOneForMarshal(i int, nullable bool) any {
+func (a *Duration) GetOneForMarshalNullable(i int, nullable bool) any {
 	if nullable && a.IsNull(i) {
 		return nil
 	}
 	return fmt.Sprintf("%d%s", a.values[i], a.DataType().(timeType).TimeUnit())
+}
+
+func (a *Duration) GetOneForMarshal(i int) any {
+	return a.GetOneForMarshalNullable(i, true)
 }
 
 type Int64 struct {

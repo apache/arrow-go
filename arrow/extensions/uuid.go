@@ -190,16 +190,20 @@ func (a *UUIDArray) ValueStr(i int) string {
 func (a *UUIDArray) MarshalJSON() ([]byte, error) {
 	vals := make([]any, a.Len())
 	for i := range vals {
-		vals[i] = a.GetOneForMarshal(i, true)
+		vals[i] = a.GetOneForMarshal(i)
 	}
 	return json.Marshal(vals)
 }
 
-func (a *UUIDArray) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *UUIDArray) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	if !nullable || a.IsValid(i) {
 		return a.Value(i)
 	}
 	return nil
+}
+
+func (a *UUIDArray) GetOneForMarshal(i int) interface{} {
+	return a.GetOneForMarshalNullable(i, true)
 }
 
 // UUIDType is a simple extension type that represents a FixedSizeBinary(16)

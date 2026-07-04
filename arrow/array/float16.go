@@ -77,11 +77,15 @@ func (a *Float16) setData(data *Data) {
 	}
 }
 
-func (a *Float16) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *Float16) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	if !nullable || a.IsValid(i) {
 		return a.values[i].Float32()
 	}
 	return nil
+}
+
+func (a *Float16) GetOneForMarshal(i int) interface{} {
+	return a.GetOneForMarshalNullable(i, true)
 }
 
 func (a *Float16) MarshalJSON() ([]byte, error) {

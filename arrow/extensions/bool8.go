@@ -114,11 +114,15 @@ func (a *Bool8Array) MarshalJSON() ([]byte, error) {
 	return json.Marshal(values)
 }
 
-func (a *Bool8Array) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *Bool8Array) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	if nullable && a.IsNull(i) {
 		return nil
 	}
 	return a.Value(i)
+}
+
+func (a *Bool8Array) GetOneForMarshal(i int) interface{} {
+	return a.GetOneForMarshalNullable(i, true)
 }
 
 // boolToInt8 performs the simple scalar conversion of bool to the canonical int8

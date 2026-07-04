@@ -152,17 +152,21 @@ func (a *Binary) setData(data *Data) {
 	}
 }
 
-func (a *Binary) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *Binary) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	if nullable && a.IsNull(i) {
 		return nil
 	}
 	return a.Value(i)
 }
 
+func (a *Binary) GetOneForMarshal(i int) interface{} {
+	return a.GetOneForMarshalNullable(i, true)
+}
+
 func (a *Binary) MarshalJSON() ([]byte, error) {
 	vals := make([]interface{}, a.Len())
 	for i := 0; i < a.Len(); i++ {
-		vals[i] = a.GetOneForMarshal(i, true)
+		vals[i] = a.GetOneForMarshal(i)
 	}
 	// golang marshal standard says that []byte will be marshalled
 	// as a base64-encoded string
@@ -346,17 +350,21 @@ func (a *LargeBinary) setData(data *Data) {
 	}
 }
 
-func (a *LargeBinary) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *LargeBinary) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	if nullable && a.IsNull(i) {
 		return nil
 	}
 	return a.Value(i)
 }
 
+func (a *LargeBinary) GetOneForMarshal(i int) interface{} {
+	return a.GetOneForMarshalNullable(i, true)
+}
+
 func (a *LargeBinary) MarshalJSON() ([]byte, error) {
 	vals := make([]interface{}, a.Len())
 	for i := 0; i < a.Len(); i++ {
-		vals[i] = a.GetOneForMarshal(i, true)
+		vals[i] = a.GetOneForMarshal(i)
 	}
 	// golang marshal standard says that []byte will be marshalled
 	// as a base64-encoded string
@@ -522,17 +530,21 @@ func (a *BinaryView) ValueStr(i int) string {
 	return base64.StdEncoding.EncodeToString(a.Value(i))
 }
 
-func (a *BinaryView) GetOneForMarshal(i int, nullable bool) interface{} {
+func (a *BinaryView) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 	if nullable && a.IsNull(i) {
 		return nil
 	}
 	return a.Value(i)
 }
 
+func (a *BinaryView) GetOneForMarshal(i int) interface{} {
+	return a.GetOneForMarshalNullable(i, true)
+}
+
 func (a *BinaryView) MarshalJSON() ([]byte, error) {
 	vals := make([]interface{}, a.Len())
 	for i := 0; i < a.Len(); i++ {
-		vals[i] = a.GetOneForMarshal(i, true)
+		vals[i] = a.GetOneForMarshal(i)
 	}
 	// golang marshal standard says that []byte will be marshalled
 	// as a base64-encoded string
