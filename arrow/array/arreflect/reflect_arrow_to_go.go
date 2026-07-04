@@ -161,52 +161,92 @@ func setPrimitiveValue(v reflect.Value, arr arrow.Array, i int) error {
 		if !isIntKind(v.Kind()) {
 			return fmt.Errorf("cannot set int8 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
-		v.SetInt(int64(arr.(*array.Int8).Value(i)))
+		val := int64(arr.(*array.Int8).Value(i))
+		if v.OverflowInt(val) {
+			return fmt.Errorf("cannot set int8 value %d into %s: %w", val, v.Type(), ErrTypeMismatch)
+		}
+		v.SetInt(val)
 	case arrow.INT16:
 		if !isIntKind(v.Kind()) {
 			return fmt.Errorf("cannot set int16 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
-		v.SetInt(int64(arr.(*array.Int16).Value(i)))
+		val := int64(arr.(*array.Int16).Value(i))
+		if v.OverflowInt(val) {
+			return fmt.Errorf("cannot set int16 value %d into %s: %w", val, v.Type(), ErrTypeMismatch)
+		}
+		v.SetInt(val)
 	case arrow.INT32:
 		if !isIntKind(v.Kind()) {
 			return fmt.Errorf("cannot set int32 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
-		v.SetInt(int64(arr.(*array.Int32).Value(i)))
+		val := int64(arr.(*array.Int32).Value(i))
+		if v.OverflowInt(val) {
+			return fmt.Errorf("cannot set int32 value %d into %s: %w", val, v.Type(), ErrTypeMismatch)
+		}
+		v.SetInt(val)
 	case arrow.INT64:
 		if !isIntKind(v.Kind()) {
 			return fmt.Errorf("cannot set int64 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
-		v.SetInt(arr.(*array.Int64).Value(i))
+		val := arr.(*array.Int64).Value(i)
+		if v.OverflowInt(val) {
+			return fmt.Errorf("cannot set int64 value %d into %s: %w", val, v.Type(), ErrTypeMismatch)
+		}
+		v.SetInt(val)
 	case arrow.UINT8:
 		if !isUintKind(v.Kind()) {
 			return fmt.Errorf("cannot set uint8 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
-		v.SetUint(uint64(arr.(*array.Uint8).Value(i)))
+		val := uint64(arr.(*array.Uint8).Value(i))
+		if v.OverflowUint(val) {
+			return fmt.Errorf("cannot set uint8 value %d into %s: %w", val, v.Type(), ErrTypeMismatch)
+		}
+		v.SetUint(val)
 	case arrow.UINT16:
 		if !isUintKind(v.Kind()) {
 			return fmt.Errorf("cannot set uint16 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
-		v.SetUint(uint64(arr.(*array.Uint16).Value(i)))
+		val := uint64(arr.(*array.Uint16).Value(i))
+		if v.OverflowUint(val) {
+			return fmt.Errorf("cannot set uint16 value %d into %s: %w", val, v.Type(), ErrTypeMismatch)
+		}
+		v.SetUint(val)
 	case arrow.UINT32:
 		if !isUintKind(v.Kind()) {
 			return fmt.Errorf("cannot set uint32 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
-		v.SetUint(uint64(arr.(*array.Uint32).Value(i)))
+		val := uint64(arr.(*array.Uint32).Value(i))
+		if v.OverflowUint(val) {
+			return fmt.Errorf("cannot set uint32 value %d into %s: %w", val, v.Type(), ErrTypeMismatch)
+		}
+		v.SetUint(val)
 	case arrow.UINT64:
 		if !isUintKind(v.Kind()) {
 			return fmt.Errorf("cannot set uint64 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
-		v.SetUint(arr.(*array.Uint64).Value(i))
+		val := arr.(*array.Uint64).Value(i)
+		if v.OverflowUint(val) {
+			return fmt.Errorf("cannot set uint64 value %d into %s: %w", val, v.Type(), ErrTypeMismatch)
+		}
+		v.SetUint(val)
 	case arrow.FLOAT32:
 		if !isFloatKind(v.Kind()) {
 			return fmt.Errorf("cannot set float32 into %s: %w", v.Type(), ErrTypeMismatch)
+		}
+		val := float64(arr.(*array.Float32).Value(i))
+		if v.OverflowFloat(val) {
+			return fmt.Errorf("cannot set float32 value %f into %s: %w", val, v.Type(), ErrTypeMismatch)
 		}
 		v.SetFloat(float64(arr.(*array.Float32).Value(i)))
 	case arrow.FLOAT64:
 		if !isFloatKind(v.Kind()) {
 			return fmt.Errorf("cannot set float64 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
-		v.SetFloat(arr.(*array.Float64).Value(i))
+		val := arr.(*array.Float64).Value(i)
+		if v.OverflowFloat(val) {
+			return fmt.Errorf("cannot set float64 value %f into %s: %w", val, v.Type(), ErrTypeMismatch)
+		}
+		v.SetFloat(val)
 	default:
 		return fmt.Errorf("unsupported primitive type %v: %w", arr.DataType(), ErrUnsupportedType)
 	}
