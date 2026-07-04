@@ -244,6 +244,9 @@ func TestMapBuilder_SetNull(t *testing.T) {
 
 	bldr.SetNull(0)
 	bldr.SetNull(3)
+	assert.Equal(t, 2, bldr.NullN())
+	bldr.SetNull(3)
+	assert.Equal(t, 2, bldr.NullN())
 
 	arr = bldr.NewMapArray()
 	defer arr.Release()
@@ -251,4 +254,5 @@ func TestMapBuilder_SetNull(t *testing.T) {
 	assert.True(t, arr.IsNull(0))
 	assert.True(t, arr.IsValid(1))
 	assert.True(t, arr.IsNull(3))
+	assert.Equal(t, 2, arr.NullN())
 }

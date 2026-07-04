@@ -112,6 +112,18 @@ func TestBuilder_SetNull(t *testing.T) {
 			b.SetNull(i)
 		}
 	}
+	assert.Equal(t, n/2, b.nulls)
+	assert.Equal(t, n/2, b.NullN())
+
+	b.SetNull(0)
+	assert.Equal(t, n/2, b.nulls)
+	assert.Equal(t, n/2, b.NullN())
+	b.SetNull(1)
+	assert.Equal(t, n/2+1, b.nulls)
+	assert.Equal(t, n/2+1, b.NullN())
+	b.SetNull(1)
+	assert.Equal(t, n/2+1, b.nulls)
+	assert.Equal(t, n/2+1, b.NullN())
 
 	for i := 0; i < n; i++ {
 		if i%2 == 0 {
@@ -120,4 +132,5 @@ func TestBuilder_SetNull(t *testing.T) {
 			assert.False(t, b.IsNull(i))
 		}
 	}
+	assert.True(t, b.IsNull(1))
 }
