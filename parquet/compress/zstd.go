@@ -120,6 +120,9 @@ var globalDecoderPool = sync.Pool{
 }
 
 func (z *zstdcloser) Close() error {
+	if z.Decoder == nil {
+		return nil
+	}
 	_ = z.Decoder.Reset(nil)
 	globalDecoderPool.Put(z.Decoder)
 	z.Decoder = nil

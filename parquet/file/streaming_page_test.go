@@ -135,6 +135,31 @@ func TestPageStreamingByteArrayRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPageStreamingEngaged guards against eligibility silently falling back to the
+// whole-page read: a required column's streaming page holds only the (empty) level
+// region, while the materialized page's Data() is the full uncompressed page.
+func TestPageStreamingEngaged(t *testing.T) {
+	values := makeStreamTestValues([]int{65, 5000, 200, 9000, 50})
+	data := writeStreamTestColumn(t, values, parquet.DataPageV1, compress.Codecs.Zstd)
+
+	firstPageDataLen := func(streaming bool) int {
+		props := parquet.NewReaderProperties(memory.DefaultAllocator)
+		props.EnablePageStreaming = streaming
+		rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
+		require.NoError(t, err)
+		defer rdr.Close()
+
+		pr, err := rdr.RowGroup(0).GetColumnPageReader(0)
+		require.NoError(t, err)
+		defer pr.Close()
+		require.True(t, pr.Next())
+		return len(pr.Page().Data())
+	}
+
+	require.Zero(t, firstPageDataLen(true), "streaming page Data() should hold only the empty level region")
+	require.NotZero(t, firstPageDataLen(false), "materialized page Data() should be the whole page")
+}
+
 func TestPageStreamingAllocatorBalance(t *testing.T) {
 	values := makeStreamTestValues([]int{65, 5000, 200, 9000, 50})
 	data := writeStreamTestColumn(t, values, parquet.DataPageV1, compress.Codecs.Zstd)

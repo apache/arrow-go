@@ -87,3 +87,32 @@ func TestFixedWidthDecoderNotStreaming(t *testing.T) {
 	_, ok := dec.(streaming.Decoder)
 	assert.False(t, ok)
 }
+
+func TestStreamingByteArrayDecodeErrors(t *testing.T) {
+	decode := func(raw []byte) error {
+		dec := encoding.NewDecoder(parquet.Types.ByteArray, parquet.Encodings.Plain, nil, memory.DefaultAllocator)
+		dec.(streaming.Decoder).SetSource(1, streaming.NewStreamBuffer(memory.DefaultAllocator, bytes.NewReader(raw), 0, nil))
+		_, err := dec.(encoding.ByteArrayDecoder).Decode(make([]parquet.ByteArray, 1))
+		return err
+	}
+
+	t.Run("truncated value", func(t *testing.T) {
+		var prefix [4]byte
+		binary.LittleEndian.PutUint32(prefix[:], 100) // claims 100 bytes
+		require.Error(t, decode(append(prefix[:], bytes.Repeat([]byte{0xAB}, 30)...)))
+	})
+	t.Run("negative length", func(t *testing.T) {
+		var prefix [4]byte
+		binary.LittleEndian.PutUint32(prefix[:], 0xFFFFFFFF) // -1 as int32
+		require.Error(t, decode(prefix[:]))
+	})
+}
+
+func TestStreamingFixedLenByteArrayDecodeTruncated(t *testing.T) {
+	const w = 4
+	descr := schema.NewColumn(schema.NewFixedLenByteArrayNode("f", parquet.Repetitions.Required, w, -1), 0, 0)
+	dec := encoding.NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.Plain, descr, memory.DefaultAllocator)
+	dec.(streaming.Decoder).SetSource(1, streaming.NewStreamBuffer(memory.DefaultAllocator, bytes.NewReader([]byte{0x01, 0x02}), 0, nil)) // 2 of 4 bytes
+	_, err := dec.(encoding.FixedLenByteArrayDecoder).Decode(make([]parquet.FixedLenByteArray, 1))
+	require.Error(t, err)
+}
