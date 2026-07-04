@@ -18,6 +18,7 @@ package array_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -900,6 +901,24 @@ func TestStringViewBuilder_Empty(t *testing.T) {
 	a = ab.NewStringViewArray()
 	assert.Equal(t, want, stringValues(a))
 	a.Release()
+}
+
+func TestStringViewBuilderUnmarshalOneWrongType(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewStringViewBuilder(mem)
+	defer bldr.Release()
+
+	dec := json.NewDecoder(bytes.NewReader([]byte(`1`)))
+	err := bldr.UnmarshalOne(dec)
+
+	assert.Error(t, err)
+	var ute *json.UnmarshalTypeError
+	assert.ErrorAs(t, err, &ute)
+	if assert.NotNil(t, ute) {
+		assert.Equal(t, reflect.TypeOf(""), ute.Type)
+	}
 }
 
 // TestStringReset tests the Reset() method on the String type by creating two different Strings and then
