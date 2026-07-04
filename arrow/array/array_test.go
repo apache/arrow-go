@@ -133,6 +133,7 @@ func TestMakeFromData(t *testing.T) {
 
 		// invalid types
 		{name: "invalid(-1)", d: &testDataType{arrow.Type(-1)}, expPanic: true, expError: "invalid data type: Type(-1)"},
+		{name: "invalid(64)", d: &testDataType{arrow.Type(64)}, expPanic: true, expError: "invalid data type: Type(64)"},
 		{name: "invalid(63)", d: &testDataType{arrow.Type(63)}, expPanic: true, expError: "invalid data type: Type(63)"},
 	}
 	for _, test := range tests {
