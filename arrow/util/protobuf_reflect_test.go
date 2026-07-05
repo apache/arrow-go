@@ -19,6 +19,7 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -494,4 +495,48 @@ func TestAppendValueOrNull(t *testing.T) {
 	got := pmfr.AppendValueOrNull(recordBuilder.Field(0), mem)
 	want := "not able to appendValueOrNull for type TIME32"
 	assert.EqualErrorf(t, got, want, "Error is: %v, want: %v", got, want)
+}
+
+func TestGetMapKeyRejectsUnsupportedType(t *testing.T) {
+	_, err := getMapKey(reflect.ValueOf(struct{}{}))
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unsupported map key kind")
+}
+
+func TestMapAppendReturnsContextualErrorForUnsupportedKey(t *testing.T) {
+	msg := util_message.AllTheTypesNoAny{}
+	pmr := NewProtobufMessageReflection(&msg)
+
+	var field *ProtobufMessageFieldReflection
+	for i := range pmr.fields {
+		if pmr.fields[i].name() == "simple_map" {
+			field = &pmr.fields[i]
+			break
+		}
+	}
+	require.NotNil(t, field)
+
+	badMapReflection := &protobufMapReflection{
+		ProtobufFieldReflection: ProtobufFieldReflection{
+			parent:        field.parent,
+			descriptor:    field.descriptor,
+			prValue:       field.protoreflectValue(),
+			rValue:        reflect.ValueOf(map[struct{}]string{struct{}{}: "value"}),
+			schemaOptions: field.schemaOptions,
+		},
+	}
+	badField := ProtobufMessageFieldReflection{
+		parent:             field.parent,
+		protobufReflection: badMapReflection,
+		Field:              field.Field,
+	}
+
+	schema := arrow.NewSchema([]arrow.Field{badField.Field}, nil)
+	mem := memory.NewGoAllocator()
+	recordBuilder := array.NewRecordBuilder(mem, schema)
+
+	err := badField.AppendValueOrNull(recordBuilder.Field(0), mem)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "failed to append map field")
+	assert.ErrorContains(t, err, "simple_map")
 }

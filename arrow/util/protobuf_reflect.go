@@ -366,7 +366,10 @@ func (pfr *ProtobufFieldReflection) asMap() protobufMapReflection {
 
 func (pmr protobufMapReflection) getDataType() arrow.DataType {
 	for kvp := range pmr.generateKeyValuePairs() {
-		return kvp.getDataType()
+		if kvp.err != nil {
+			continue
+		}
+		return kvp.kvp.getDataType()
 	}
 	return protobufMapKeyValuePairReflection{
 		k: ProtobufFieldReflection{
@@ -387,12 +390,17 @@ type protobufMapKeyValuePairReflection struct {
 	v ProtobufFieldReflection
 }
 
+type protobufMapKeyValuePairResult struct {
+	kvp protobufMapKeyValuePairReflection
+	err error
+}
+
 func (pmr protobufMapKeyValuePairReflection) getDataType() arrow.DataType {
 	return arrow.MapOf(pmr.k.getDataType(), pmr.v.getDataType())
 }
 
-func (pmr protobufMapReflection) generateKeyValuePairs() chan protobufMapKeyValuePairReflection {
-	out := make(chan protobufMapKeyValuePairReflection)
+func (pmr protobufMapReflection) generateKeyValuePairs() chan protobufMapKeyValuePairResult {
+	out := make(chan protobufMapKeyValuePairResult)
 
 	go func() {
 		defer close(out)
@@ -409,45 +417,50 @@ func (pmr protobufMapReflection) generateKeyValuePairs() chan protobufMapKeyValu
 					schemaOptions: pmr.schemaOptions,
 				},
 			}
-			out <- kvp
+			out <- protobufMapKeyValuePairResult{kvp: kvp}
 			return
 		}
 		for _, k := range pmr.rValue.MapKeys() {
+			mapKey, err := getMapKey(k)
+			if err != nil {
+				out <- protobufMapKeyValuePairResult{err: err}
+				continue
+			}
 			kvp := protobufMapKeyValuePairReflection{
 				k: ProtobufFieldReflection{
 					parent:        pmr.parent,
 					descriptor:    pmr.descriptor.MapKey(),
-					prValue:       getMapKey(k),
+					prValue:       mapKey,
 					rValue:        k,
 					schemaOptions: pmr.schemaOptions,
 				},
 				v: ProtobufFieldReflection{
 					parent:        pmr.parent,
 					descriptor:    pmr.descriptor.MapValue(),
-					prValue:       pmr.prValue.Map().Get(protoreflect.MapKey(getMapKey(k))),
+					prValue:       pmr.prValue.Map().Get(protoreflect.MapKey(mapKey)),
 					rValue:        pmr.rValue.MapIndex(k),
 					schemaOptions: pmr.schemaOptions,
 				},
 			}
-			out <- kvp
+			out <- protobufMapKeyValuePairResult{kvp: kvp}
 		}
 	}()
 
 	return out
 }
 
-func getMapKey(v reflect.Value) protoreflect.Value {
+func getMapKey(v reflect.Value) (protoreflect.Value, error) {
 	switch v.Kind() {
 	case reflect.String:
-		return protoreflect.ValueOf(v.String())
+		return protoreflect.ValueOf(v.String()), nil
 	case reflect.Int32, reflect.Int64:
-		return protoreflect.ValueOf(v.Int())
+		return protoreflect.ValueOf(v.Int()), nil
 	case reflect.Bool:
-		return protoreflect.ValueOf(v.Bool())
+		return protoreflect.ValueOf(v.Bool()), nil
 	case reflect.Uint32, reflect.Uint64:
-		return protoreflect.ValueOf(v.Uint())
+		return protoreflect.ValueOf(v.Uint()), nil
 	default:
-		panic("Unmapped protoreflect map key type")
+		return protoreflect.Value{}, fmt.Errorf("unsupported map key kind %s", v.Type())
 	}
 }
 
@@ -858,12 +871,16 @@ func (f ProtobufMessageFieldReflection) AppendValueOrNull(b array.Builder, mem m
 			Field:  f.Field.Type.(*arrow.MapType).ItemField(),
 		}
 		for kvp := range f.asMap().generateKeyValuePairs() {
-			k.protobufReflection = &kvp.k
+			if kvp.err != nil {
+				return fmt.Errorf("failed to append map field %q (%s): %w", f.name(), f.getDataType(), kvp.err)
+			}
+
+			k.protobufReflection = &kvp.kvp.k
 			err := k.AppendValueOrNull(mb.KeyBuilder(), mem)
 			if err != nil {
 				return err
 			}
-			v.protobufReflection = &kvp.v
+			v.protobufReflection = &kvp.kvp.v
 			err = v.AppendValueOrNull(mb.ItemBuilder(), mem)
 			if err != nil {
 				return err
