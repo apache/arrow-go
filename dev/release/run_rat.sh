@@ -24,7 +24,7 @@ RELEASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RAT_VERSION=0.16.1
 
 RAT_JAR="${RELEASE_DIR}/apache-rat-${RAT_VERSION}.jar"
-RAT_SHA_FILE="${RELEASE_DIR}/apache-rat-${RAT_VERSION}.jar.sha512"
+RAT_SHA512="23047a236abcc182a0b3ecb42941f2c4d6307bf3b15c2b765863e33ec9040db6dd0466df0563d039622f503b87931948b5d6b8f729cbefb0f062c5bc67fcaa35"
 if [ ! -f "${RAT_JAR}" ]; then
   curl \
     --fail \
@@ -34,25 +34,19 @@ if [ ! -f "${RAT_JAR}" ]; then
     https://repo1.maven.org/maven2/org/apache/rat/apache-rat/${RAT_VERSION}/apache-rat-${RAT_VERSION}.jar
 fi
 
-if [ ! -f "${RAT_SHA_FILE}" ]; then
-  echo "Missing RAT checksum file: ${RAT_SHA_FILE}" >&2
-  exit 1
-fi
-
-if ! ${PYTHON:-python3} - <<'PY' "${RAT_JAR}" "${RAT_SHA_FILE}"
+if ! ${PYTHON:-python3} - "${RAT_JAR}" "${RAT_SHA512}" <<'PY'; then
 import hashlib
 import pathlib
 import sys
 
 actual = hashlib.sha512(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest()
-expected = pathlib.Path(sys.argv[2]).read_text().strip().split()[0]
+expected = sys.argv[2].strip()
 if actual != expected:
     print(f"checksum mismatch for RAT jar {sys.argv[1]}")
     print(f"expected: {expected}")
     print(f"actual:   {actual}")
     raise SystemExit(1)
 PY
-then
   echo "checksum verification failed for ${RAT_JAR}" >&2
   exit 1
 fi
