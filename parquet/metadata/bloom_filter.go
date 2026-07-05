@@ -495,7 +495,7 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 	headerBuf.ResizeNoShrink(int(bloomFilterReadSize))
 	defer func() {
 		if headerBuf != nil {
-			headerBuf.Reset(headerBuf.Buf()[:cap(headerBuf.Buf())])
+			headerBuf.ResizeNoShrink(0)
 			r.bufferPool.Put(headerBuf)
 		}
 	}()
@@ -528,7 +528,7 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 		}
 
 		if _, err = sectionRdr.Read(buf.Bytes()[filterBytesInHeader:]); err != nil {
-			buf.Reset(buf.Buf()[:cap(buf.Buf())])
+			buf.ResizeNoShrink(0)
 			r.bufferPool.Put(buf)
 			return nil, err
 		}
