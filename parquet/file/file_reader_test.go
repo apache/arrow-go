@@ -220,7 +220,7 @@ func (p *PageSerdeSuite) TestDataPageV2CorruptDecodedLength() {
 	codec, err := compress.GetCodec(compress.Codecs.Snappy)
 	p.NoError(err)
 
-	buffer := make([]byte, codec.CompressBound(len(rawData)))
+	buffer := make([]byte, int(codec.CompressBound(int64(len(rawData)))))
 	compressed := codec.Encode(buffer, rawData)
 
 	p.dataPageHdrV2 = *format.NewDataPageHeaderV2()
