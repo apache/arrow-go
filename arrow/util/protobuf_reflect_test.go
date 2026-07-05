@@ -504,7 +504,7 @@ func TestGetMapKeyRejectsUnsupportedType(t *testing.T) {
 }
 
 func TestMapAppendReturnsContextualErrorForUnsupportedKey(t *testing.T) {
-	msg := util_message.AllTheTypesNoAny{}
+	msg := util_message.AllTheTypesNoAny{SimpleMap: map[int32]string{1: "value"}}
 	pmr := NewProtobufMessageReflection(&msg)
 
 	var field *ProtobufMessageFieldReflection
@@ -515,14 +515,15 @@ func TestMapAppendReturnsContextualErrorForUnsupportedKey(t *testing.T) {
 		}
 	}
 	require.NotNil(t, field)
+	fr := field.protobufReflection.(*ProtobufFieldReflection)
 
 	badMapReflection := &protobufMapReflection{
 		ProtobufFieldReflection: ProtobufFieldReflection{
-			parent:        field.parent,
-			descriptor:    field.descriptor,
-			prValue:       field.protoreflectValue(),
+			parent:        fr.parent,
+			descriptor:    fr.descriptor,
+			prValue:       fr.prValue,
 			rValue:        reflect.ValueOf(map[struct{}]string{struct{}{}: "value"}),
-			schemaOptions: field.schemaOptions,
+			schemaOptions: fr.schemaOptions,
 		},
 	}
 	badField := ProtobufMessageFieldReflection{

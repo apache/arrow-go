@@ -872,7 +872,7 @@ func (f ProtobufMessageFieldReflection) AppendValueOrNull(b array.Builder, mem m
 		}
 		for kvp := range f.asMap().generateKeyValuePairs() {
 			if kvp.err != nil {
-				return fmt.Errorf("failed to append map field %q (%s): %w", f.name(), f.getDataType(), kvp.err)
+				return fmt.Errorf("failed to append map field %q (%s): %w", f.name(), f.Field.Type, kvp.err)
 			}
 
 			k.protobufReflection = &kvp.kvp.k
