@@ -251,10 +251,19 @@ func (pfr *ProtobufFieldReflection) asUnion() protobufUnionReflection {
 }
 
 func (pur protobufUnionReflection) isThisOne() bool {
-	for pur.rValue.Kind() == reflect.Ptr || pur.rValue.Kind() == reflect.Interface {
-		pur.rValue = pur.rValue.Elem()
+	rValue := pur.rValue
+	for rValue.IsValid() && (rValue.Kind() == reflect.Ptr || rValue.Kind() == reflect.Interface) {
+		if rValue.IsNil() {
+			return false
+		}
+		rValue = rValue.Elem()
 	}
-	return pur.rValue.Field(0).String() == pur.prValue.String()
+
+	if !rValue.IsValid() || !pur.prValue.IsValid() || rValue.Kind() != reflect.Struct || rValue.NumField() == 0 {
+		return false
+	}
+
+	return rValue.Field(0).String() == pur.prValue.String()
 }
 
 func (pur protobufUnionReflection) whichOne() arrow.UnionTypeCode {
@@ -533,14 +542,20 @@ func (psr ProtobufMessageReflection) getFieldByName(n string) *ProtobufFieldRefl
 	if fv.IsValid() {
 		if !fv.IsZero() {
 			for fv.Kind() == reflect.Ptr || fv.Kind() == reflect.Interface {
+				if fv.IsNil() {
+					fv = reflect.Value{}
+					break
+				}
 				fv = fv.Elem()
 			}
-			if fd.ContainingOneof() != nil {
-				n = string(fd.ContainingOneof().Name())
-			}
-			fv = fv.FieldByName(strcase.UpperCamelCase(n))
-			for fv.Kind() == reflect.Ptr {
-				fv = fv.Elem()
+			if fv.IsValid() {
+				if fd.ContainingOneof() != nil {
+					n = string(fd.ContainingOneof().Name())
+				}
+				fv = fv.FieldByName(strcase.UpperCamelCase(n))
+				for fv.Kind() == reflect.Ptr {
+					fv = fv.Elem()
+				}
 			}
 		}
 	}

@@ -541,3 +541,40 @@ func TestMapAppendReturnsContextualErrorForUnsupportedKey(t *testing.T) {
 	assert.ErrorContains(t, err, "failed to append map field")
 	assert.ErrorContains(t, err, "simple_map")
 }
+
+func TestUnionReflectionHandlesUnsetAndNilOneofValues(t *testing.T) {
+	tests := []struct {
+		name           string
+		msg            proto.Message
+		expectedActive arrow.UnionTypeCode
+	}{
+		{"unset", &util_message.AllTheTypes{}, -1},
+		{"nil pointer", &util_message.AllTheTypes{Oneof: (*util_message.AllTheTypes_Oneofmessage)(nil)}, -1},
+		{"valid", &util_message.AllTheTypes{Oneof: &util_message.AllTheTypes_Oneofstring{Oneofstring: "value"}}, 0},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pmr := NewProtobufMessageReflection(test.msg, WithOneOfHandler(OneOfDenseUnion))
+			var field *ProtobufMessageFieldReflection
+			for i := range pmr.fields {
+				if pmr.fields[i].name() == "oneof" {
+					field = &pmr.fields[i]
+					break
+				}
+			}
+			require.NotNil(t, field)
+
+			fr := field.protobufReflection.(*ProtobufFieldReflection)
+			assert.NotPanics(t, func() {
+				gotActive := fr.asUnion().whichOne()
+				assert.Equal(t, test.expectedActive, gotActive)
+				if test.expectedActive == -1 {
+					assert.Nil(t, fr.asUnion().getField())
+				} else {
+					assert.NotNil(t, fr.asUnion().getField())
+				}
+			})
+		})
+	}
+}
