@@ -580,8 +580,10 @@ func (r *RowGroupBloomFilterReader) recycle(bf BloomFilter) {
 	b.bitset32 = nil
 
 	if r.bufferPool != nil && b.cancelCleanup != nil {
-		r.bufferPool.Put(b.data)
+		// Stop the GC cleanup so it can't return b.data to the pool a second time.
+		b.cancelCleanup()
 		b.cancelCleanup = nil
+		r.bufferPool.Put(b.data)
 	} else if b.data != nil {
 		b.data.Release()
 	}
