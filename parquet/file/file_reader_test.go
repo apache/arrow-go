@@ -215,6 +215,84 @@ func (p *PageSerdeSuite) TestDataPageV2() {
 	p.alloc.AssertSize(p.T(), 0)
 }
 
+func (p *PageSerdeSuite) TestDataPageV2CorruptDecodedLength() {
+	rawData := bytes.Repeat([]byte{0x42}, 128)
+	codec, err := compress.GetCodec(compress.Codecs.Snappy)
+	p.NoError(err)
+
+	buffer := make([]byte, codec.CompressBound(len(rawData)))
+	compressed := codec.Encode(buffer, rawData)
+
+	p.dataPageHdrV2 = *format.NewDataPageHeaderV2()
+	p.dataPageHdrV2.NumValues = 1
+	p.dataPageHdrV2.NumRows = 1
+	p.dataPageHdrV2.Encoding = format.Encoding_PLAIN
+
+	p.WriteDataPageHeaderV2(1024, int32(len(rawData)+1), int32(len(compressed)))
+	_, err = p.sink.Write(compressed)
+	p.NoError(err)
+
+	p.InitSerializedPageReader(1, compress.Codecs.Snappy)
+	p.False(p.pageReader.Next())
+	p.ErrorContains(p.pageReader.Err(), "metadata said 129 bytes uncompressed data page, got 128 bytes")
+	p.NoError(p.pageReader.Close())
+	p.alloc.AssertSize(p.T(), 0)
+}
+
+type mockDecryptor struct {
+	decrypt func([]byte) []byte
+
+	aad []byte
+	mem memory.Allocator
+}
+
+func (m *mockDecryptor) FileAad() string { return "" }
+
+func (m *mockDecryptor) Allocator() memory.Allocator {
+	if m.mem == nil {
+		return memory.DefaultAllocator
+	}
+
+	return m.mem
+}
+
+func (m *mockDecryptor) CiphertextSizeDelta() int { return 0 }
+
+func (m *mockDecryptor) Decrypt(src []byte) []byte { return m.decrypt(src) }
+
+func (m *mockDecryptor) DecryptFrom(r io.Reader) []byte {
+	decrypted, _ := io.ReadAll(r)
+	return m.Decrypt(decrypted)
+}
+
+func (m *mockDecryptor) UpdateAad(aad string) { m.aad = []byte(aad) }
+
+func (p *PageSerdeSuite) TestDataPageV2EncryptedUncompressedLengthMismatch() {
+	p.dataPageHdrV2 = *format.NewDataPageHeaderV2()
+	p.dataPageHdrV2.NumValues = 1
+	p.dataPageHdrV2.NumRows = 1
+	p.dataPageHdrV2.Encoding = format.Encoding_PLAIN
+	p.dataPageHdrV2.IsCompressed = false
+
+	payload := bytes.Repeat([]byte{0xaa}, 4)
+	decryptedPayload := []byte{0xaa}
+
+	p.WriteDataPageHeaderV2(1024, int32(len(payload)), int32(len(payload)))
+	_, err := p.sink.Write(payload)
+	p.NoError(err)
+
+	p.EndStream()
+	p.alloc = memory.NewCheckedAllocator(memory.NewGoAllocator())
+	p.pageReader, _ = file.NewPageReader(utils.NewByteReader(p.buffer.Bytes()), 1, compress.Codecs.Uncompressed, p.alloc, &file.CryptoContext{
+		DataDecryptor: &mockDecryptor{decrypt: func([]byte) []byte { return decryptedPayload }},
+	})
+
+	p.False(p.pageReader.Next())
+	p.ErrorContains(p.pageReader.Err(), "metadata said 4 bytes uncompressed data page, got 1 bytes")
+	p.NoError(p.pageReader.Close())
+	p.alloc.AssertSize(p.T(), 0)
+}
+
 func (p *PageSerdeSuite) TestLargePageHeaders() {
 	const (
 		statsSize     = 256 * 1024 // 256KB
