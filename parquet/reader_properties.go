@@ -90,7 +90,7 @@ func (r *ReaderProperties) Allocator() memory.Allocator { return r.alloc }
 // into a buffer in memory and return a bytes.NewReader for that buffer.
 func (r *ReaderProperties) GetStream(source io.ReaderAt, start, nbytes int64) (BufferedReader, error) {
 	if r.BufferedStreamEnabled {
-		return utils.NewBufferedReader(io.NewSectionReader(source, start, nbytes), int(r.BufferSize)), nil
+		return utils.NewBufferedReader(io.NewSectionReader(source, start, nbytes), int(min(r.BufferSize, nbytes))), nil
 	}
 
 	data := make([]byte, nbytes)
