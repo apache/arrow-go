@@ -131,9 +131,9 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 			maxPageHeaderSize: defaultMaxPageHeaderSize,
 			nrows:             col.NumValues(),
 			mem:               r.props.Allocator(),
-			// Streaming (EnablePageStreaming) inputs; only the unencrypted path is
+			// Streaming (PageStreamingEnabled) inputs; only the unencrypted path is
 			// ever streaming-eligible, so columnCanStream is left false elsewhere.
-			columnCanStream: r.props.EnablePageStreaming &&
+			columnCanStream: r.props.PageStreamingEnabled &&
 				streamablePhysicalType(descr.PhysicalType()) &&
 				streamableCodec(col.Compression()),
 			maxRepLevel: descr.MaxRepetitionLevel(),

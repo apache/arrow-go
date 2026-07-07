@@ -100,7 +100,7 @@ func collectByteArray(t *testing.T, bar *file.ByteArrayColumnChunkReader, n int)
 func readStreamTestColumn(t *testing.T, data []byte, streaming bool) []parquet.ByteArray {
 	t.Helper()
 	props := parquet.NewReaderProperties(memory.DefaultAllocator)
-	props.EnablePageStreaming = streaming
+	props.PageStreamingEnabled = streaming
 
 	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
 	require.NoError(t, err)
@@ -154,7 +154,7 @@ func TestPageStreamingEngaged(t *testing.T) {
 
 	firstPageDataLen := func(streaming bool) int {
 		props := parquet.NewReaderProperties(memory.DefaultAllocator)
-		props.EnablePageStreaming = streaming
+		props.PageStreamingEnabled = streaming
 		rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
 		require.NoError(t, err)
 		defer rdr.Close()
@@ -178,7 +178,7 @@ func TestPageStreamingAllocatorBalance(t *testing.T) {
 	defer checked.AssertSize(t, 0)
 
 	props := parquet.NewReaderProperties(checked)
-	props.EnablePageStreaming = true
+	props.PageStreamingEnabled = true
 	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
 	require.NoError(t, err)
 	defer rdr.Close()
@@ -205,7 +205,7 @@ func TestPageStreamingIneligibleCodecFallback(t *testing.T) {
 		for _, ver := range []parquet.DataPageVersion{parquet.DataPageV1, parquet.DataPageV2} {
 			data := writeStreamTestColumn(t, values, ver, codec)
 
-			// EnablePageStreaming is set, but Snappy/LZ4_RAW are not in the allowlist,
+			// PageStreamingEnabled is set, but Snappy/LZ4_RAW are not in the allowlist,
 			// so pages must fall back to whole-page reads and match materialized.
 			materialized := readStreamTestColumn(t, data, false)
 			streamed := readStreamTestColumn(t, data, true)
@@ -222,7 +222,7 @@ func TestPageStreamingIneligibleCodecFallback(t *testing.T) {
 func readNullableStreamColumn(t *testing.T, data []byte, streaming bool, numRows int) (defLevels []int16, values []parquet.ByteArray) {
 	t.Helper()
 	props := parquet.NewReaderProperties(memory.DefaultAllocator)
-	props.EnablePageStreaming = streaming
+	props.PageStreamingEnabled = streaming
 	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
 	require.NoError(t, err)
 	defer rdr.Close()
@@ -295,7 +295,7 @@ func TestPageStreamingByteArrayNullable(t *testing.T) {
 func readStreamTestColumnSkip(t *testing.T, data []byte, streaming bool, skip int64) []parquet.ByteArray {
 	t.Helper()
 	props := parquet.NewReaderProperties(memory.DefaultAllocator)
-	props.EnablePageStreaming = streaming
+	props.PageStreamingEnabled = streaming
 
 	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
 	require.NoError(t, err)
@@ -346,7 +346,7 @@ func TestPageStreamingByteArraySkip(t *testing.T) {
 func readRepeatedStreamColumn(t *testing.T, data []byte, streaming bool) (defLevels, repLevels []int16, values []parquet.ByteArray) {
 	t.Helper()
 	props := parquet.NewReaderProperties(memory.DefaultAllocator)
-	props.EnablePageStreaming = streaming
+	props.PageStreamingEnabled = streaming
 	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
 	require.NoError(t, err)
 	defer rdr.Close()
@@ -409,7 +409,7 @@ func TestPageStreamingRepeated(t *testing.T) {
 func readStreamTestColumnSeekAfterRead(t *testing.T, data []byte, streaming bool, preRead int, seekRow int64) []parquet.ByteArray {
 	t.Helper()
 	props := parquet.NewReaderProperties(memory.DefaultAllocator)
-	props.EnablePageStreaming = streaming
+	props.PageStreamingEnabled = streaming
 
 	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
 	require.NoError(t, err)
@@ -494,7 +494,7 @@ func TestPageStreamingPageReaderCloseFreesStream(t *testing.T) {
 	defer checked.AssertSize(t, 0)
 
 	props := parquet.NewReaderProperties(checked)
-	props.EnablePageStreaming = true
+	props.PageStreamingEnabled = true
 	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
 	require.NoError(t, err)
 	defer rdr.Close()
@@ -545,7 +545,7 @@ func writeFLBAStreamColumn(t *testing.T, values []parquet.FixedLenByteArray, wid
 func readFLBAStreamColumnSkip(t *testing.T, data []byte, streaming bool, skip int64) []parquet.FixedLenByteArray {
 	t.Helper()
 	props := parquet.NewReaderProperties(memory.DefaultAllocator)
-	props.EnablePageStreaming = streaming
+	props.PageStreamingEnabled = streaming
 	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
 	require.NoError(t, err)
 	defer rdr.Close()
@@ -622,7 +622,7 @@ func TestPageStreamingPeakMemoryBounded(t *testing.T) {
 	checked := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer checked.AssertSize(t, 0)
 	props := parquet.NewReaderProperties(checked)
-	props.EnablePageStreaming = true
+	props.PageStreamingEnabled = true
 	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
 	require.NoError(t, err)
 	defer rdr.Close()
@@ -655,7 +655,7 @@ func TestPageStreamingPeakMemoryBounded(t *testing.T) {
 func readInPage(t *testing.T, data []byte, batch int64) (defLevels, repLevels []int16, values []parquet.ByteArray) {
 	t.Helper()
 	props := parquet.NewReaderProperties(memory.DefaultAllocator)
-	props.EnablePageStreaming = true
+	props.PageStreamingEnabled = true
 	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
 	require.NoError(t, err)
 	defer rdr.Close()
@@ -780,7 +780,7 @@ func TestPageStreamingThreshold(t *testing.T) {
 		*file.StreamingThreshold = threshold
 
 		props := parquet.NewReaderProperties(memory.DefaultAllocator)
-		props.EnablePageStreaming = true
+		props.PageStreamingEnabled = true
 		rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
 		require.NoError(t, err)
 		defer rdr.Close()
@@ -835,7 +835,7 @@ func TestPageStreamingRecordReader(t *testing.T) {
 			data := writeByteArrayStream(t, values, dl, nil, tc.rep, parquet.DataPageV1, compress.Codecs.Zstd, 8<<20)
 
 			props := parquet.NewReaderProperties(memory.DefaultAllocator)
-			props.EnablePageStreaming = true
+			props.PageStreamingEnabled = true
 			rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
 			require.NoError(t, err)
 			defer rdr.Close()

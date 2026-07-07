@@ -44,7 +44,7 @@ type ReaderProperties struct {
 	// this to true can optimize memory usage for the reader. Additionally, this can decrease
 	// the amount of data retrieved when only needs to access small portions of the parquet file.
 	BufferedStreamEnabled bool
-	// EnablePageStreaming, when true, decodes eligible data pages incrementally instead
+	// PageStreamingEnabled, when true, decodes eligible data pages incrementally instead
 	// of decoding the whole uncompressed page at once. A decode aliases the batch's
 	// values directly in a reusable stream buffer (min(1 MiB, page size)) rather than
 	// materializing the page, so the read batch is clipped toward the average value
@@ -59,7 +59,7 @@ type ReaderProperties struct {
 	// Note: a streaming page's raw Page.Data() (via GetColumnPageReader) returns just its
 	// level region; the decoded values read through RowGroup.Column()/ReadBatch are the
 	// same as without streaming.
-	EnablePageStreaming bool
+	PageStreamingEnabled bool
 }
 
 type BufferedReader interface {

@@ -74,7 +74,7 @@ type Page interface {
 	Type() PageType
 	// Get the raw bytes of this page.
 	//
-	// Note: with EnablePageStreaming, a streaming data page's Data holds only the
+	// Note: with PageStreamingEnabled, a streaming data page's Data holds only the
 	// rep/def level region, not the whole page; decode values through a column or
 	// record reader instead.
 	Data() []byte
@@ -416,7 +416,7 @@ type serializedPageReader struct {
 	mem      memory.Allocator
 	codec    compress.Codec
 
-	// Streaming (EnablePageStreaming) inputs from schema/properties.
+	// Streaming (PageStreamingEnabled) inputs from schema/properties.
 	columnCanStream bool
 	maxRepLevel     int16
 	maxDefLevel     int16

@@ -30,7 +30,7 @@ import (
 type PlainFixedLenByteArrayDecoder struct {
 	decoder
 
-	// src drives the streaming path (EnablePageStreaming) when non-nil.
+	// src drives the streaming path (PageStreamingEnabled) when non-nil.
 	src streaming.ValueBuffer
 }
 

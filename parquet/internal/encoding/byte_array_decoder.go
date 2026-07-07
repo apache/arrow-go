@@ -19,6 +19,7 @@ package encoding
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -39,7 +40,7 @@ import (
 type PlainByteArrayDecoder struct {
 	decoder
 
-	// src drives the streaming path (EnablePageStreaming) when non-nil.
+	// src drives the streaming path (PageStreamingEnabled) when non-nil.
 	src streaming.ValueBuffer
 }
 
@@ -66,7 +67,7 @@ func (pbad *PlainByteArrayDecoder) decodeStreaming(out []parquet.ByteArray) (int
 	for i := 0; i < max; i++ {
 		hdr, err := pbad.src.Fill(4)
 		if err != nil {
-			return i, errors.New("parquet: eof reading bytearray")
+			return i, fmt.Errorf("parquet: reading bytearray: %w", err)
 		}
 		byteLen := int(int32(binary.LittleEndian.Uint32(hdr[:4])))
 		if byteLen < 0 {
@@ -76,7 +77,7 @@ func (pbad *PlainByteArrayDecoder) decodeStreaming(out []parquet.ByteArray) (int
 		// Fill rejects a byteLen past the value region before allocating.
 		val, err := pbad.src.Fill(byteLen)
 		if err != nil {
-			return i, errors.New("parquet: eof reading bytearray")
+			return i, fmt.Errorf("parquet: reading bytearray: %w", err)
 		}
 		// 3-index cap stops appends bleeding into the next value; a zero-length slice
 		// of the non-nil buffer stays non-nil (empty value != null).
@@ -93,7 +94,7 @@ func (pbad *PlainByteArrayDecoder) discardStreaming(n int) (int, error) {
 		pbad.src.Recycle()
 		buf, err := pbad.src.Fill(4)
 		if err != nil {
-			return i, errors.New("parquet: eof skipping bytearray values")
+			return i, fmt.Errorf("parquet: skipping bytearray: %w", err)
 		}
 		valueLen := int(int32(binary.LittleEndian.Uint32(buf[:4])))
 		if valueLen < 0 {
@@ -101,7 +102,7 @@ func (pbad *PlainByteArrayDecoder) discardStreaming(n int) (int, error) {
 		}
 		pbad.src.Advance(4)
 		if err := pbad.src.Skip(valueLen); err != nil {
-			return i, errors.New("parquet: eof skipping bytearray values")
+			return i, fmt.Errorf("parquet: skipping bytearray: %w", err)
 		}
 	}
 	pbad.nvals -= n
