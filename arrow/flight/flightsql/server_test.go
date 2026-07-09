@@ -857,6 +857,105 @@ func TestBaseServer(t *testing.T) {
 	suite.Run(t, &FlightSqlServerSessionSuite{sessionManager: session.NewStatelessServerSessionManager()})
 }
 
+// earlyCloseServer models a Flight SQL server whose DoPutPreparedStatementQuery
+// handler returns before consuming the client's bound-parameter stream. gRPC
+// tears the request stream down as soon as the handler returns, so the client's
+// in-flight parameter send races that teardown and observes a bare io.EOF. Per
+// gRPC's contract that io.EOF only signals "the stream ended -- receive to learn
+// why", so the client must recover the real server status rather than surfacing
+// the uninformative EOF (which otherwise reaches callers as "EOF (Unknown)").
+type earlyCloseServer struct {
+	flightsql.BaseServer
+}
+
+func (*earlyCloseServer) CreatePreparedStatement(ctx context.Context, req flightsql.ActionCreatePreparedStatementRequest) (flightsql.ActionCreatePreparedStatementResult, error) {
+	return flightsql.ActionCreatePreparedStatementResult{
+		Handle: []byte("early-close"),
+		ParameterSchema: arrow.NewSchema([]arrow.Field{
+			{Name: "n", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		}, nil),
+	}, nil
+}
+
+func (*earlyCloseServer) DoPutPreparedStatementQuery(ctx context.Context, cmd flightsql.PreparedStatementQuery, reader flight.MessageReader, writer flight.MetadataWriter) ([]byte, error) {
+	// Deliberately return without draining reader so the request stream is torn
+	// down while the client is still sending its parameters.
+	return nil, status.Error(codes.InvalidArgument, "boom")
+}
+
+func (*earlyCloseServer) DoPutPreparedStatementUpdate(ctx context.Context, cmd flightsql.PreparedStatementUpdate, reader flight.MessageReader) (int64, error) {
+	// Same as the query handler: return without draining reader so the client's
+	// parameter send observes the teardown (the ExecuteUpdate path).
+	return 0, status.Error(codes.InvalidArgument, "boom")
+}
+
+func (*earlyCloseServer) ClosePreparedStatement(ctx context.Context, req flightsql.ActionClosePreparedStatementRequest) error {
+	return nil
+}
+
+// TestPreparedStatementDoPutEarlyClose is a regression test for a prepared
+// statement whose bound-parameter DoPut is torn down early by the server: the
+// client must surface the server's real error instead of a bare io.EOF. Both
+// the query path (Execute -> bindParameters) and the sibling update path
+// (ExecuteUpdate) carry the same fix, so each is exercised as a subtest.
+func TestPreparedStatementDoPutEarlyClose(t *testing.T) {
+	srv := flight.NewServerWithMiddleware(nil)
+	srv.RegisterFlightService(flightsql.NewFlightServer(&earlyCloseServer{}))
+	require.NoError(t, srv.Init("localhost:0"))
+	go func() { _ = srv.Serve() }()
+	defer srv.Shutdown()
+
+	cl, err := flightsql.NewClient(srv.Addr().String(), nil, nil, dialOpts...)
+	require.NoError(t, err)
+	defer cl.Close()
+
+	ctx := context.Background()
+
+	// run prepares a statement, binds a deliberately large parameter set (well
+	// beyond gRPC's flow-control window) and drives exec. Because the server
+	// returns without reading, the window never opens, so the client's
+	// parameter send blocks and then observes the stream teardown as a bare
+	// io.EOF -- deterministically exercising the path that previously leaked
+	// "EOF (Unknown)" to the caller. The server's real status must surface.
+	run := func(t *testing.T, exec func(*flightsql.PreparedStatement) error) {
+		prep, err := cl.Prepare(ctx, "SELECT 1")
+		require.NoError(t, err)
+		defer prep.Close(ctx)
+
+		bldr := array.NewRecordBuilder(memory.DefaultAllocator, prep.ParameterSchema())
+		defer bldr.Release()
+		fb := bldr.Field(0).(*array.Int32Builder)
+		fb.Reserve(1 << 21)
+		for i := 0; i < 1<<21; i++ {
+			fb.Append(int32(i))
+		}
+		rec := bldr.NewRecordBatch()
+		defer rec.Release()
+		prep.SetParameters(rec)
+
+		err = exec(prep)
+		require.Error(t, err)
+		st := status.Convert(err)
+		require.Equalf(t, codes.InvalidArgument, st.Code(),
+			"expected the server's status to be surfaced, not a bare EOF; got: %v", err)
+		require.Contains(t, st.Message(), "boom")
+	}
+
+	t.Run("Execute", func(t *testing.T) {
+		run(t, func(p *flightsql.PreparedStatement) error {
+			_, err := p.Execute(ctx)
+			return err
+		})
+	})
+
+	t.Run("ExecuteUpdate", func(t *testing.T) {
+		run(t, func(p *flightsql.PreparedStatement) error {
+			_, err := p.ExecuteUpdate(ctx)
+			return err
+		})
+	})
+}
+
 func TestStatefulServerSessionCookies(t *testing.T) {
 	// Generate session IDs deterministically
 	sessionIDGenerator := func(ids []string) func() string {
