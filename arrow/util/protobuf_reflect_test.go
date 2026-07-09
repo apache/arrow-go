@@ -522,7 +522,7 @@ func TestMapAppendReturnsContextualErrorForUnsupportedKey(t *testing.T) {
 			parent:        fr.parent,
 			descriptor:    fr.descriptor,
 			prValue:       fr.prValue,
-			rValue:        reflect.ValueOf(map[struct{}]string{struct{}{}: "value"}),
+			rValue:        reflect.ValueOf(map[struct{}]string{{}: "value"}),
 			schemaOptions: fr.schemaOptions,
 		},
 	}
