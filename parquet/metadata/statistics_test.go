@@ -21,6 +21,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -753,4 +755,29 @@ func TestFloat16StatisticsDoesNotAliasInput(t *testing.T) {
 	copy(mutable, float16.New(9.5).ToLEBytes())
 	assert.Equal(t, []byte(want), []byte(stats.Min()), "min must not alias the input buffer")
 	assert.Equal(t, []byte(want), []byte(stats.Max()), "max must not alias the input buffer")
+}
+
+// TestFixedLenByteArrayStatisticsUpdateFromArrowMax is a regression test for a
+// separate pre-existing bug in FixedLenByteArray.UpdateFromArrow: it computed
+// the running max against the running min instead of the running max, producing
+// an incorrect maximum for FIXED_LEN_BYTE_ARRAY columns updated from Arrow.
+func TestFixedLenByteArrayStatisticsUpdateFromArrowMax(t *testing.T) {
+	mem := memory.DefaultAllocator
+	n, err := schema.NewPrimitiveNode("flba", parquet.Repetitions.Required, parquet.Types.FixedLenByteArray, -1, 3)
+	require.NoError(t, err)
+	descr := schema.NewColumn(n, 0, 0)
+	stats := metadata.NewStatistics(descr, mem).(*metadata.FixedLenByteArrayStatistics)
+
+	bldr := array.NewFixedSizeBinaryBuilder(mem, &arrow.FixedSizeBinaryType{ByteWidth: 3})
+	defer bldr.Release()
+	for _, v := range []string{"bbb", "aaa", "ccc", "abc"} {
+		bldr.Append([]byte(v))
+	}
+	arr := bldr.NewArray()
+	defer arr.Release()
+
+	require.NoError(t, stats.UpdateFromArrow(arr, true))
+	require.True(t, stats.HasMinMax())
+	assert.Equal(t, "aaa", string(stats.Min()))
+	assert.Equal(t, "ccc", string(stats.Max()), "max must be computed against the running max, not the running min")
 }

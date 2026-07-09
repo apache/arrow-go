@@ -2421,7 +2421,7 @@ func (s *FixedLenByteArrayStatistics) UpdateFromArrow(values arrow.Array, update
 	for i := 0; i < values.Len(); i++ {
 		v := data[i*width : (i+1)*width]
 		min = s.minval(min, v)
-		max = s.maxval(min, v)
+		max = s.maxval(max, v)
 	}
 
 	s.SetMinMax(min, max)
