@@ -6186,8 +6186,7 @@ func makeViewTypesWantJSONs() string {
               "SIZE": 1,
               "INLINED": "35"
             }
-          ],
-          "VARIADIC_DATA_BUFFERS": [""]
+          ]
         },
         {
           "name": "string_view",
@@ -6220,8 +6219,7 @@ func makeViewTypesWantJSONs() string {
               "SIZE": 1,
               "INLINED": "5"
             }
-          ],
-          "VARIADIC_DATA_BUFFERS": [""]
+          ]
         }
       ]
     },
@@ -6259,8 +6257,7 @@ func makeViewTypesWantJSONs() string {
               "SIZE": 4,
               "INLINED": "35353535"
             }
-          ],
-          "VARIADIC_DATA_BUFFERS": [""]
+          ]
         },
         {
           "name": "string_view",
@@ -6378,8 +6375,7 @@ func makeViewTypesWantJSONs() string {
               "SIZE": 2,
               "INLINED": "55"
             }
-          ],
-          "VARIADIC_DATA_BUFFERS": [""]
+          ]
         }
       ]
     }
