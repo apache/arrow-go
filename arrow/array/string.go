@@ -778,7 +778,7 @@ func (b *StringViewBuilder) UnmarshalOne(dec *json.Decoder) error {
 	default:
 		return &json.UnmarshalTypeError{
 			Value:  fmt.Sprint(t),
-			Type:   reflect.TypeOf([]byte{}),
+			Type:   reflect.TypeOf(string("")),
 			Offset: dec.InputOffset(),
 		}
 	}
