@@ -520,3 +520,136 @@ func requireRecordRoundTrips(t *testing.T, arrowSchema *arrow.Schema, rec arrow.
 	defer merged.Release()
 	require.Truef(t, array.Equal(want, merged), "round-trip mismatch\n want: %v\n got:  %v", want, merged)
 }
+
+// TestWriteBatchByteArrayV2OversizedRepLevels is a regression test for the
+// byte-array and fixed-len-byte-array counterpart of #883's DataPageV2
+// row-boundary alignment. Those writers run their own adaptive batching loop and
+// passed the caller's full repLevels slice to alignBatchToRowBoundary, while the
+// write length n is derived from defLevels/values. When repLevels is longer than
+// n - which the low-level typed-writer API permits, and which
+// columnWriter.doBatches already clamps against for the numeric/boolean paths -
+// the alignment of a wide final row could grow the last batch past n, slicing
+// defLevels/values out of range (recovered as an opaque error) or spilling extra
+// levels into the column. The byte-array paths must clamp repLevels to n too.
+func TestWriteBatchByteArrayV2OversizedRepLevels(t *testing.T) {
+	const batchSize = 3
+
+	// n = 6 requested levels. repLevels is deliberately longer (8) and its final
+	// row is wide, so unclamped alignment would grow the last batch past n.
+	// Clamped to repLevels[:6] = {0,1,1,0,1,1} the data is two rows of three.
+	defLevels := []int16{1, 1, 1, 1, 1, 1}
+	repLevels := []int16{0, 1, 1, 0, 1, 1, 1, 0}
+	validBits := []byte{0xFF}
+	wantVals := []string{"a", "b", "c", "d", "e", "f"}
+	const wantRows = 2
+
+	byteArrayVals := []parquet.ByteArray{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f")}
+	flbaVals := []parquet.FixedLenByteArray{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f")}
+
+	props := parquet.NewWriterProperties(
+		parquet.WithVersion(parquet.V2_LATEST),
+		parquet.WithDataPageVersion(parquet.DataPageV2),
+		parquet.WithDictionaryDefault(false),
+		parquet.WithBatchSize(batchSize),
+		parquet.WithCompression(compress.Codecs.Uncompressed),
+	)
+
+	cases := []struct {
+		name  string
+		node  *schema.PrimitiveNode
+		write func(cw file.ColumnChunkWriter) (int64, error)
+		read  func(t *testing.T, ccr file.ColumnChunkReader) []string
+	}{
+		{
+			name: "ByteArray/WriteBatch",
+			node: schema.NewByteArrayNode("v", parquet.Repetitions.Repeated, -1),
+			write: func(cw file.ColumnChunkWriter) (int64, error) {
+				return cw.(*file.ByteArrayColumnChunkWriter).WriteBatch(byteArrayVals, defLevels, repLevels)
+			},
+			read: readByteArrayValues,
+		},
+		{
+			name: "ByteArray/WriteBatchSpaced",
+			node: schema.NewByteArrayNode("v", parquet.Repetitions.Repeated, -1),
+			write: func(cw file.ColumnChunkWriter) (int64, error) {
+				return cw.(*file.ByteArrayColumnChunkWriter).WriteBatchSpacedWithError(byteArrayVals, defLevels, repLevels, validBits, 0)
+			},
+			read: readByteArrayValues,
+		},
+		{
+			name: "FixedLenByteArray/WriteBatch",
+			node: schema.NewFixedLenByteArrayNode("v", parquet.Repetitions.Repeated, 1, -1),
+			write: func(cw file.ColumnChunkWriter) (int64, error) {
+				return cw.(*file.FixedLenByteArrayColumnChunkWriter).WriteBatch(flbaVals, defLevels, repLevels)
+			},
+			read: readFixedLenByteArrayValues,
+		},
+		{
+			name: "FixedLenByteArray/WriteBatchSpaced",
+			node: schema.NewFixedLenByteArrayNode("v", parquet.Repetitions.Repeated, 1, -1),
+			write: func(cw file.ColumnChunkWriter) (int64, error) {
+				return cw.(*file.FixedLenByteArrayColumnChunkWriter).WriteBatchSpacedWithError(flbaVals, defLevels, repLevels, validBits, 0)
+			},
+			read: readFixedLenByteArrayValues,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{tc.node}, -1)
+			require.NoError(t, err)
+
+			var buf bytes.Buffer
+			w := file.NewParquetWriter(&buf, root, file.WithWriterProps(props))
+			rgw := w.AppendRowGroup()
+			cw, err := rgw.NextColumn()
+			require.NoError(t, err)
+
+			valueOffset, err := tc.write(cw)
+			require.NoError(t, err, "oversized repLevels must not fail the write")
+			require.EqualValues(t, len(wantVals), valueOffset, "must write exactly the requested values, no spill past n")
+			require.NoError(t, cw.Close())
+			require.NoError(t, rgw.Close())
+			require.NoError(t, w.Close())
+
+			r, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+			require.NoError(t, err)
+			defer r.Close()
+
+			require.EqualValues(t, wantRows, r.NumRows())
+			cc, err := r.MetaData().RowGroup(0).ColumnChunk(0)
+			require.NoError(t, err)
+			require.EqualValues(t, len(wantVals), cc.NumValues(), "column must hold exactly the requested values, no spill")
+
+			ccr, err := r.RowGroup(0).Column(0)
+			require.NoError(t, err)
+			require.Equal(t, wantVals, tc.read(t, ccr))
+		})
+	}
+}
+
+func readByteArrayValues(t *testing.T, ccr file.ColumnChunkReader) []string {
+	t.Helper()
+	r := ccr.(*file.ByteArrayColumnChunkReader)
+	vals := make([]parquet.ByteArray, 16)
+	_, read, err := r.ReadBatch(int64(len(vals)), vals, nil, nil)
+	require.NoError(t, err)
+	out := make([]string, read)
+	for i := 0; i < read; i++ {
+		out[i] = string(vals[i])
+	}
+	return out
+}
+
+func readFixedLenByteArrayValues(t *testing.T, ccr file.ColumnChunkReader) []string {
+	t.Helper()
+	r := ccr.(*file.FixedLenByteArrayColumnChunkReader)
+	vals := make([]parquet.FixedLenByteArray, 16)
+	_, read, err := r.ReadBatch(int64(len(vals)), vals, nil, nil)
+	require.NoError(t, err)
+	out := make([]string, read)
+	for i := 0; i < read; i++ {
+		out[i] = string(vals[i])
+	}
+	return out
+}
