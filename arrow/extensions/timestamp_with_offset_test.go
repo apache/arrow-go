@@ -410,6 +410,45 @@ func TestTimestampWithOffsetBuilderAppendNullBetweenEqualOffsets(t *testing.T) {
 	assert.Equal(t, testDate1, typedArr.Value(2))
 }
 
+func TestTimestampWithOffsetRunEndEncodedSliced(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	for _, runEnds := range []arrow.DataType{
+		arrow.PrimitiveTypes.Int16, arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int64,
+	} {
+		t.Run(runEnds.String(), func(t *testing.T) {
+			builder, err := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, ree(runEnds))
+			require.NoError(t, err)
+
+			// Offsets [0,0,-510,-510,-510,660,0] give run-ends [2,5,6,7], so a
+			// slice starting at index 3 begins inside a later run: the case where
+			// an offset-unaware physical index decodes the wrong run.
+			values := []time.Time{testDate0, testDate0, testDate1, testDate1, testDate1, testDate2, epoch}
+			builder.AppendValues(values, nil)
+			arr := builder.NewArray().(*extensions.TimestampWithOffsetArray)
+			defer arr.Release()
+
+			want := arr.Values()
+
+			for start := 0; start < arr.Len(); start++ {
+				for end := start; end <= arr.Len(); end++ {
+					sliced := array.NewSlice(arr, int64(start), int64(end)).(*extensions.TimestampWithOffsetArray)
+					got := sliced.Values()
+					require.Equalf(t, end-start, len(got), "slice [%d:%d]", start, end)
+					for k := 0; k < end-start; k++ {
+						require.Truef(t, want[start+k].Equal(got[k]), "slice [%d:%d] row %d instant: want %s got %s", start, end, k, want[start+k], got[k])
+						_, wantOff := want[start+k].Zone()
+						_, gotOff := got[k].Zone()
+						require.Equalf(t, wantOff, gotOff, "slice [%d:%d] row %d offset", start, end, k)
+					}
+					sliced.Release()
+				}
+			}
+		})
+	}
+}
+
 func TestTimestampWithOffsetExtensionRecordBuilder(t *testing.T) {
 	for name, offsetType := range allAllowedOffsetTypes {
 		t.Run(name, func(t *testing.T) {

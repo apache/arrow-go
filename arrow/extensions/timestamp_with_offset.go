@@ -294,7 +294,11 @@ func (a *TimestampWithOffsetArray) iterValues() iter.Seq2[time.Time, bool] {
 			timestamps := timestampField.(*array.Timestamp)
 
 			offsetValues := reeOffsets.Values().(*array.Int16)
-			offsetPhysicalIdx := 0
+			// Run-ends are absolute over the unsliced offsets child, so a sliced
+			// array must begin at the physical run covering its logical offset and
+			// advance using absolute positions (logicalOffset + i).
+			logicalOffset := reeOffsets.Offset()
+			offsetPhysicalIdx := reeOffsets.GetPhysicalOffset()
 
 			var getRunEnd (func(int) int)
 			switch arr := reeOffsets.RunEndsArr().(type) {
@@ -307,7 +311,7 @@ func (a *TimestampWithOffsetArray) iterValues() iter.Seq2[time.Time, bool] {
 			}
 
 			for i := 0; i < a.Len(); i++ {
-				if i >= getRunEnd(offsetPhysicalIdx) {
+				if logicalOffset+i >= getRunEnd(offsetPhysicalIdx) {
 					offsetPhysicalIdx += 1
 				}
 
