@@ -244,6 +244,10 @@ func TestMapBuilder_SetNull(t *testing.T) {
 
 	bldr.SetNull(0)
 	bldr.SetNull(3)
+	assert.EqualValues(t, 2, bldr.NullN())
+
+	bldr.SetNull(3) // idempotent
+	assert.EqualValues(t, 2, bldr.NullN())
 
 	arr = bldr.NewMapArray()
 	defer arr.Release()
