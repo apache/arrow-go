@@ -1899,11 +1899,13 @@ func NewByteArrayStatisticsFromEncoded(descr *schema.Column, mem memory.Allocato
 
 	encodedMin := encoded.GetMin()
 	if encodedMin != nil && len(encodedMin) > 0 {
-		ret.min = ret.plainDecode(encodedMin)
+		// Copy into a statistics-owned buffer so the stored min does not alias the
+		// encoded metadata buffer; SetMinMax reuses this buffer on later updates.
+		ret.min = append(ret.min[:0], ret.plainDecode(encodedMin)...)
 	}
 	encodedMax := encoded.GetMax()
 	if encodedMax != nil && len(encodedMax) > 0 {
-		ret.max = ret.plainDecode(encodedMax)
+		ret.max = append(ret.max[:0], ret.plainDecode(encodedMax)...)
 	}
 	ret.hasMinMax = encoded.IsSetMax() || encoded.IsSetMin()
 	return ret
@@ -2219,11 +2221,13 @@ func NewFixedLenByteArrayStatisticsFromEncoded(descr *schema.Column, mem memory.
 
 	encodedMin := encoded.GetMin()
 	if encodedMin != nil && len(encodedMin) > 0 {
-		ret.min = ret.plainDecode(encodedMin)
+		// Copy into a statistics-owned buffer so the stored min does not alias the
+		// encoded metadata buffer; SetMinMax reuses this buffer on later updates.
+		ret.min = append(ret.min[:0], ret.plainDecode(encodedMin)...)
 	}
 	encodedMax := encoded.GetMax()
 	if encodedMax != nil && len(encodedMax) > 0 {
-		ret.max = ret.plainDecode(encodedMax)
+		ret.max = append(ret.max[:0], ret.plainDecode(encodedMax)...)
 	}
 	ret.hasMinMax = encoded.IsSetMax() || encoded.IsSetMin()
 	return ret
@@ -2549,11 +2553,13 @@ func NewFloat16StatisticsFromEncoded(descr *schema.Column, mem memory.Allocator,
 
 	encodedMin := encoded.GetMin()
 	if encodedMin != nil && len(encodedMin) > 0 {
-		ret.min = ret.plainDecode(encodedMin)
+		// Copy into a statistics-owned buffer so the stored min does not alias the
+		// encoded metadata buffer; SetMinMax reuses this buffer on later updates.
+		ret.min = append(ret.min[:0], ret.plainDecode(encodedMin)...)
 	}
 	encodedMax := encoded.GetMax()
 	if encodedMax != nil && len(encodedMax) > 0 {
-		ret.max = ret.plainDecode(encodedMax)
+		ret.max = append(ret.max[:0], ret.plainDecode(encodedMax)...)
 	}
 	ret.hasMinMax = encoded.IsSetMax() || encoded.IsSetMin()
 	return ret

@@ -87,11 +87,21 @@ func New{{.Name}}StatisticsFromEncoded(descr *schema.Column, mem memory.Allocato
 
   encodedMin := encoded.GetMin()
   if encodedMin != nil && len(encodedMin) > 0 {
+{{- if or (eq .name "parquet.ByteArray") (eq .name "parquet.FixedLenByteArray")}}
+    // Copy into a statistics-owned buffer so the stored min does not alias the
+    // encoded metadata buffer; SetMinMax reuses this buffer on later updates.
+    ret.min = append(ret.min[:0], ret.plainDecode(encodedMin)...)
+{{- else}}
     ret.min = ret.plainDecode(encodedMin)
+{{- end}}
   }
   encodedMax := encoded.GetMax()
   if encodedMax != nil && len(encodedMax) > 0 {
+{{- if or (eq .name "parquet.ByteArray") (eq .name "parquet.FixedLenByteArray")}}
+    ret.max = append(ret.max[:0], ret.plainDecode(encodedMax)...)
+{{- else}}
     ret.max = ret.plainDecode(encodedMax)
+{{- end}}
   }
   ret.hasMinMax = encoded.IsSetMax() || encoded.IsSetMin()
   return ret

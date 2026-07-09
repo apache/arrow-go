@@ -781,3 +781,42 @@ func TestFixedLenByteArrayStatisticsUpdateFromArrowMax(t *testing.T) {
 	assert.Equal(t, "aaa", string(stats.Min()))
 	assert.Equal(t, "ccc", string(stats.Max()), "max must be computed against the running max, not the running min")
 }
+
+type encodedStatProvider struct {
+	min, max []byte
+}
+
+func (e *encodedStatProvider) GetMin() []byte           { return e.min }
+func (e *encodedStatProvider) GetMax() []byte           { return e.max }
+func (e *encodedStatProvider) GetNullCount() int64      { return 0 }
+func (e *encodedStatProvider) GetDistinctCount() int64  { return 0 }
+func (e *encodedStatProvider) IsSetMax() bool           { return e.max != nil }
+func (e *encodedStatProvider) IsSetMin() bool           { return e.min != nil }
+func (e *encodedStatProvider) IsSetNullCount() bool     { return false }
+func (e *encodedStatProvider) IsSetDistinctCount() bool { return false }
+
+// TestByteArrayStatisticsFromEncodedOwnsMinMax is a regression test for a review
+// finding on the use-after-free fix: statistics built from encoded metadata via
+// New*StatisticsFromEncoded stored min/max slices aliasing the caller's metadata
+// buffer. Because SetMinMax now reuses those buffers on update, a later update
+// could write through and corrupt the caller's metadata, so the decoded min/max
+// must be copied into statistics-owned buffers.
+func TestByteArrayStatisticsFromEncodedOwnsMinMax(t *testing.T) {
+	descr := schema.NewColumn(schema.NewByteArrayNode("ba", parquet.Repetitions.Required, -1), 0, 0)
+
+	encMin := []byte("bbb")
+	encMax := []byte("yyy")
+	stats := metadata.NewStatisticsFromEncoded(descr, memory.DefaultAllocator, 4,
+		&encodedStatProvider{min: encMin, max: encMax}).(*metadata.ByteArrayStatistics)
+	require.True(t, stats.HasMinMax())
+	require.Equal(t, "bbb", string(stats.Min()))
+	require.Equal(t, "yyy", string(stats.Max()))
+
+	// Updating with new extremes must not write through into the encoded source
+	// buffers, which would happen if the stored min/max still aliased them.
+	stats.Update([]parquet.ByteArray{parquet.ByteArray("aaa"), parquet.ByteArray("zzz")}, 0)
+	assert.Equal(t, "bbb", string(encMin), "encoded min source buffer must not be overwritten")
+	assert.Equal(t, "yyy", string(encMax), "encoded max source buffer must not be overwritten")
+	assert.Equal(t, "aaa", string(stats.Min()))
+	assert.Equal(t, "zzz", string(stats.Max()))
+}
