@@ -321,6 +321,22 @@ func getOneForMarshalNullable(a arrow.Array, i int, nullable bool) interface{} {
 	return a.GetOneForMarshal(i)
 }
 
+// marshalListElemsNullable marshals a single list element's child slice
+// element-by-element, honoring the element field's nullability so a
+// non-nullable element field serializes underlying values instead of JSON
+// null at null child slots (matching struct/record field-local behavior).
+func marshalListElemsNullable(slice arrow.Array, elemNullable bool) json.RawMessage {
+	vals := make([]interface{}, slice.Len())
+	for k := 0; k < slice.Len(); k++ {
+		vals[k] = getOneForMarshalNullable(slice, k, elemNullable)
+	}
+	v, err := json.Marshal(vals)
+	if err != nil {
+		panic(err)
+	}
+	return json.RawMessage(v)
+}
+
 func TableFromJSON(mem memory.Allocator, sc *arrow.Schema, recJSON []string, opt ...FromJSONOption) (arrow.Table, error) {
 	batches := make([]arrow.RecordBatch, len(recJSON))
 	for i, batchJSON := range recJSON {

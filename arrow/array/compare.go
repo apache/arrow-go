@@ -400,10 +400,10 @@ func equal(left, right arrow.Array, opt equalOption) bool {
 		return arrayEqualDict(l, r, opt)
 	case *SparseUnion:
 		r := right.(*SparseUnion)
-		return arraySparseUnionEqual(l, r)
+		return arraySparseUnionEqual(l, r, opt)
 	case *DenseUnion:
 		r := right.(*DenseUnion)
-		return arrayDenseUnionEqual(l, r)
+		return arrayDenseUnionEqual(l, r, opt)
 	case *RunEndEncoded:
 		r := right.(*RunEndEncoded)
 		return arrayRunEndEncodedEqual(l, r, opt)

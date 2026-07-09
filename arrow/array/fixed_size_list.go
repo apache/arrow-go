@@ -130,12 +130,7 @@ func (a *FixedSizeList) GetOneForMarshalNullable(i int, nullable bool) interface
 	}
 	slice := a.newListValue(i)
 	defer slice.Release()
-	v, err := json.Marshal(slice)
-	if err != nil {
-		panic(err)
-	}
-
-	return json.RawMessage(v)
+	return marshalListElemsNullable(slice, a.DataType().(arrow.ListLikeType).ElemField().Nullable)
 }
 
 func (a *FixedSizeList) GetOneForMarshal(i int) interface{} {

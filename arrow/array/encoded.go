@@ -270,11 +270,12 @@ func (r *RunEndEncoded) MarshalJSON() ([]byte, error) {
 func arrayRunEndEncodedEqual(l, r *RunEndEncoded, opt equalOption) bool {
 	// types were already checked before getting here, so we know
 	// the encoded types are equal
+	childOpt := withNullable(opt, opt.nullable && l.DataType().(*arrow.RunEndEncodedType).ValueNullable)
 	mr := encoded.NewMergedRuns([2]arrow.Array{l, r})
 	for mr.Next() {
 		lIndex := mr.IndexIntoArray(0)
 		rIndex := mr.IndexIntoArray(1)
-		if !sliceEqual(l.values, lIndex, lIndex+1, r.values, rIndex, rIndex+1, opt) {
+		if !sliceEqual(l.values, lIndex, lIndex+1, r.values, rIndex, rIndex+1, childOpt) {
 			return false
 		}
 	}
@@ -284,11 +285,12 @@ func arrayRunEndEncodedEqual(l, r *RunEndEncoded, opt equalOption) bool {
 func arrayRunEndEncodedApproxEqual(l, r *RunEndEncoded, opt equalOption) bool {
 	// types were already checked before getting here, so we know
 	// the encoded types are equal
+	childOpt := withNullable(opt, opt.nullable && l.DataType().(*arrow.RunEndEncodedType).ValueNullable)
 	mr := encoded.NewMergedRuns([2]arrow.Array{l, r})
 	for mr.Next() {
 		lIndex := mr.IndexIntoArray(0)
 		rIndex := mr.IndexIntoArray(1)
-		if !sliceApproxEqual(l.values, lIndex, lIndex+1, r.values, rIndex, rIndex+1, opt) {
+		if !sliceApproxEqual(l.values, lIndex, lIndex+1, r.values, rIndex, rIndex+1, childOpt) {
 			return false
 		}
 	}

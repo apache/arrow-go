@@ -445,7 +445,7 @@ func (a *SparseUnion) GetFlattenedField(mem memory.Allocator, index int) (arrow.
 	return MakeFromData(childData), nil
 }
 
-func arraySparseUnionEqual(l, r *SparseUnion) bool {
+func arraySparseUnionEqual(l, r *SparseUnion, opt equalOption) bool {
 	childIDs := l.unionType.ChildIDs()
 	leftCodes, rightCodes := l.RawTypeCodes(), r.RawTypeCodes()
 
@@ -456,8 +456,9 @@ func arraySparseUnionEqual(l, r *SparseUnion) bool {
 		}
 
 		childNum := childIDs[typeID]
-		eq := SliceEqual(l.children[childNum], int64(i), int64(i+1),
-			r.children[childNum], int64(i), int64(i+1))
+		childOpt := withNullable(opt, l.unionType.Fields()[childNum].Nullable)
+		eq := sliceEqual(l.children[childNum], int64(i), int64(i+1),
+			r.children[childNum], int64(i), int64(i+1), childOpt)
 		if !eq {
 			return false
 		}
@@ -693,7 +694,7 @@ func (a *DenseUnion) String() string {
 	return b.String()
 }
 
-func arrayDenseUnionEqual(l, r *DenseUnion) bool {
+func arrayDenseUnionEqual(l, r *DenseUnion, opt equalOption) bool {
 	childIDs := l.unionType.ChildIDs()
 	leftCodes, rightCodes := l.RawTypeCodes(), r.RawTypeCodes()
 	leftOffsets, rightOffsets := l.RawValueOffsets(), r.RawValueOffsets()
@@ -705,8 +706,9 @@ func arrayDenseUnionEqual(l, r *DenseUnion) bool {
 		}
 
 		childNum := childIDs[typeID]
-		eq := SliceEqual(l.children[childNum], int64(leftOffsets[i]), int64(leftOffsets[i]+1),
-			r.children[childNum], int64(rightOffsets[i]), int64(rightOffsets[i]+1))
+		childOpt := withNullable(opt, l.unionType.Fields()[childNum].Nullable)
+		eq := sliceEqual(l.children[childNum], int64(leftOffsets[i]), int64(leftOffsets[i]+1),
+			r.children[childNum], int64(rightOffsets[i]), int64(rightOffsets[i]+1), childOpt)
 		if !eq {
 			return false
 		}

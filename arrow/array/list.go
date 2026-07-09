@@ -105,11 +105,7 @@ func (a *List) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 
 	slice := a.newListValue(i)
 	defer slice.Release()
-	v, err := json.Marshal(slice)
-	if err != nil {
-		panic(err)
-	}
-	return json.RawMessage(v)
+	return marshalListElemsNullable(slice, a.DataType().(arrow.ListLikeType).ElemField().Nullable)
 }
 
 func (a *List) GetOneForMarshal(i int) interface{} {
@@ -242,11 +238,7 @@ func (a *LargeList) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 
 	slice := a.newListValue(i)
 	defer slice.Release()
-	v, err := json.Marshal(slice)
-	if err != nil {
-		panic(err)
-	}
-	return json.RawMessage(v)
+	return marshalListElemsNullable(slice, a.DataType().(arrow.ListLikeType).ElemField().Nullable)
 }
 
 func (a *LargeList) GetOneForMarshal(i int) interface{} {
@@ -722,11 +714,7 @@ func (a *ListView) GetOneForMarshalNullable(i int, nullable bool) interface{} {
 
 	slice := a.newListValue(i)
 	defer slice.Release()
-	v, err := json.Marshal(slice)
-	if err != nil {
-		panic(err)
-	}
-	return json.RawMessage(v)
+	return marshalListElemsNullable(slice, a.DataType().(arrow.ListLikeType).ElemField().Nullable)
 }
 
 func (a *ListView) GetOneForMarshal(i int) interface{} {
@@ -874,11 +862,7 @@ func (a *LargeListView) GetOneForMarshalNullable(i int, nullable bool) interface
 
 	slice := a.newListValue(i)
 	defer slice.Release()
-	v, err := json.Marshal(slice)
-	if err != nil {
-		panic(err)
-	}
-	return json.RawMessage(v)
+	return marshalListElemsNullable(slice, a.DataType().(arrow.ListLikeType).ElemField().Nullable)
 }
 
 func (a *LargeListView) GetOneForMarshal(i int) interface{} {
