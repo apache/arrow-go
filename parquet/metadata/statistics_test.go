@@ -692,18 +692,20 @@ func TestByteArrayStatisticsDoesNotAliasInput(t *testing.T) {
 
 	t.Run("Merge copies min/max", func(t *testing.T) {
 		src := metadata.NewStatistics(descr, memory.DefaultAllocator).(*metadata.ByteArrayStatistics)
-		buf := []byte("kkkkk")
-		src.Update([]parquet.ByteArray{parquet.ByteArray(buf)}, 0)
+		src.Update([]parquet.ByteArray{parquet.ByteArray("kkkkk")}, 0)
 
 		dst := metadata.NewStatistics(descr, memory.DefaultAllocator).(*metadata.ByteArrayStatistics)
 		dst.Merge(src)
 		require.Equal(t, "kkkkk", string(dst.Min()))
 		require.Equal(t, "kkkkk", string(dst.Max()))
 
-		// Mutating the merge source's backing buffer must not affect the merged stats.
-		copy(buf, "aaaaa")
-		assert.Equal(t, "kkkkk", string(dst.Min()), "merged min must be an independent copy")
-		assert.Equal(t, "kkkkk", string(dst.Max()), "merged max must be an independent copy")
+		// Updating src overwrites its statistics-owned min/max buffers in place. If
+		// Merge had aliased src's buffers instead of copying, this would corrupt dst.
+		src.Update([]parquet.ByteArray{parquet.ByteArray("aaaaa"), parquet.ByteArray("zzzzz")}, 0)
+		require.Equal(t, "aaaaa", string(src.Min()))
+		require.Equal(t, "zzzzz", string(src.Max()))
+		assert.Equal(t, "kkkkk", string(dst.Min()), "merged min must be independent of src")
+		assert.Equal(t, "kkkkk", string(dst.Max()), "merged max must be independent of src")
 	})
 
 	t.Run("encoded min/max survive freeing the source", func(t *testing.T) {
