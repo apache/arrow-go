@@ -593,7 +593,7 @@ func (p *serializedPageReader) readV2Unencrypted(rd io.Reader, lenCompressed int
 		return decodedLen, err
 	}
 	decodedLen += len(values)
-	if len(values) != lenUncompressed-decodedLen {
+	if decodedLen != lenUncompressed {
 		return decodedLen, fmt.Errorf("parquet: metadata said %d bytes uncompressed data page, got %d bytes", lenUncompressed, decodedLen)
 	}
 	return decodedLen, nil

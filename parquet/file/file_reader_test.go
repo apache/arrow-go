@@ -239,6 +239,30 @@ func (p *PageSerdeSuite) TestDataPageV2CorruptDecodedLength() {
 	p.alloc.AssertSize(p.T(), 0)
 }
 
+func (p *PageSerdeSuite) TestDataPageV2Compressed() {
+	rawData := bytes.Repeat([]byte{0x42}, 128)
+	codec, err := compress.GetCodec(compress.Codecs.Snappy)
+	p.NoError(err)
+
+	buffer := make([]byte, int(codec.CompressBound(int64(len(rawData)))))
+	compressed := codec.Encode(buffer, rawData)
+
+	p.dataPageHdrV2 = *format.NewDataPageHeaderV2()
+	p.dataPageHdrV2.NumValues = 1
+	p.dataPageHdrV2.NumRows = 1
+	p.dataPageHdrV2.Encoding = format.Encoding_PLAIN
+
+	p.WriteDataPageHeaderV2(1024, int32(len(rawData)), int32(len(compressed)))
+	_, err = p.sink.Write(compressed)
+	p.NoError(err)
+
+	p.InitSerializedPageReader(1, compress.Codecs.Snappy)
+	p.True(p.pageReader.Next())
+	p.Equal(rawData, p.pageReader.Page().Data())
+	p.NoError(p.pageReader.Close())
+	p.alloc.AssertSize(p.T(), 0)
+}
+
 type mockDecryptor struct {
 	decrypt func([]byte) []byte
 
