@@ -299,8 +299,24 @@ func (s *{{.Name}}Statistics) getMinMaxSpaced(values []{{.name}}, validBits []by
   return
 }
 
+{{if or (eq .name "parquet.ByteArray") (eq .name "parquet.FixedLenByteArray")}}
+// Min returns the current minimum value.
+//
+// The returned slice references a statistics-owned buffer that is reused on
+// subsequent updates, so it is only valid until the next update that replaces
+// the minimum. Copy it if you need to retain it.
+func (s *{{.Name}}Statistics) Min() {{.name}} { return s.min }
+
+// Max returns the current maximum value.
+//
+// The returned slice references a statistics-owned buffer that is reused on
+// subsequent updates, so it is only valid until the next update that replaces
+// the maximum. Copy it if you need to retain it.
+func (s *{{.Name}}Statistics) Max() {{.name}} { return s.max }
+{{else}}
 func (s *{{.Name}}Statistics) Min() {{.name}} { return s.min }
 func (s *{{.Name}}Statistics) Max() {{.name}} { return s.max }
+{{end}}
 
 // Merge merges the stats from other into this stat object, updating
 // the null count, distinct count, number of values and the min/max if
@@ -501,6 +517,13 @@ func (s *{{.Name}}Statistics) getMinMaxFromBitmap(bitmap []byte, bitmapOffset in
 
 // SetMinMax updates the min and max values only if they are not currently set
 // or if argMin is less than the current min / argMax is greater than the current max
+{{- if or (eq .name "parquet.ByteArray") (eq .name "parquet.FixedLenByteArray")}}
+//
+// The min and max are copied into statistics-owned buffers rather than retaining
+// the provided slices. Those slices typically alias the source column data (e.g.
+// an Arrow value buffer) which may be released before the statistics are
+// serialized during Close, so aliasing them would leave dangling references.
+{{- end}}
 func (s *{{.Name}}Statistics) SetMinMax(argMin, argMax {{.name}}) {
   maybeMinMax := s.cleanStat([2]{{.name}}{argMin, argMax})
   if maybeMinMax == nil {
@@ -512,14 +535,27 @@ func (s *{{.Name}}Statistics) SetMinMax(argMin, argMax {{.name}}) {
 
   if !s.hasMinMax {
     s.hasMinMax = true
+{{- if or (eq .name "parquet.ByteArray") (eq .name "parquet.FixedLenByteArray")}}
+    s.min = append(s.min[:0], min...)
+    s.max = append(s.max[:0], max...)
+{{- else}}
     s.min = min
     s.max = max
+{{- end}}
   } else {
     if !s.less(s.min, min) {
+{{- if or (eq .name "parquet.ByteArray") (eq .name "parquet.FixedLenByteArray")}}
+      s.min = append(s.min[:0], min...)
+{{- else}}
       s.min = min
+{{- end}}
     }
     if s.less(s.max, max) {
+{{- if or (eq .name "parquet.ByteArray") (eq .name "parquet.FixedLenByteArray")}}
+      s.max = append(s.max[:0], max...)
+{{- else}}
       s.max = max
+{{- end}}
     }
   }
 }

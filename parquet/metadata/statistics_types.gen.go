@@ -2007,7 +2007,18 @@ func (s *ByteArrayStatistics) getMinMaxSpaced(values []parquet.ByteArray, validB
 	return
 }
 
+// Min returns the current minimum value.
+//
+// The returned slice references a statistics-owned buffer that is reused on
+// subsequent updates, so it is only valid until the next update that replaces
+// the minimum. Copy it if you need to retain it.
 func (s *ByteArrayStatistics) Min() parquet.ByteArray { return s.min }
+
+// Max returns the current maximum value.
+//
+// The returned slice references a statistics-owned buffer that is reused on
+// subsequent updates, so it is only valid until the next update that replaces
+// the maximum. Copy it if you need to retain it.
 func (s *ByteArrayStatistics) Max() parquet.ByteArray { return s.max }
 
 // Merge merges the stats from other into this stat object, updating
@@ -2093,6 +2104,11 @@ func (s *ByteArrayStatistics) UpdateFromArrow(values arrow.Array, updateCounts b
 
 // SetMinMax updates the min and max values only if they are not currently set
 // or if argMin is less than the current min / argMax is greater than the current max
+//
+// The min and max are copied into statistics-owned buffers rather than retaining
+// the provided slices. Those slices typically alias the source column data (e.g.
+// an Arrow value buffer) which may be released before the statistics are
+// serialized during Close, so aliasing them would leave dangling references.
 func (s *ByteArrayStatistics) SetMinMax(argMin, argMax parquet.ByteArray) {
 	maybeMinMax := s.cleanStat([2]parquet.ByteArray{argMin, argMax})
 	if maybeMinMax == nil {
@@ -2104,14 +2120,14 @@ func (s *ByteArrayStatistics) SetMinMax(argMin, argMax parquet.ByteArray) {
 
 	if !s.hasMinMax {
 		s.hasMinMax = true
-		s.min = min
-		s.max = max
+		s.min = append(s.min[:0], min...)
+		s.max = append(s.max[:0], max...)
 	} else {
 		if !s.less(s.min, min) {
-			s.min = min
+			s.min = append(s.min[:0], min...)
 		}
 		if s.less(s.max, max) {
-			s.max = max
+			s.max = append(s.max[:0], max...)
 		}
 	}
 }
@@ -2323,7 +2339,18 @@ func (s *FixedLenByteArrayStatistics) getMinMaxSpaced(values []parquet.FixedLenB
 	return
 }
 
+// Min returns the current minimum value.
+//
+// The returned slice references a statistics-owned buffer that is reused on
+// subsequent updates, so it is only valid until the next update that replaces
+// the minimum. Copy it if you need to retain it.
 func (s *FixedLenByteArrayStatistics) Min() parquet.FixedLenByteArray { return s.min }
+
+// Max returns the current maximum value.
+//
+// The returned slice references a statistics-owned buffer that is reused on
+// subsequent updates, so it is only valid until the next update that replaces
+// the maximum. Copy it if you need to retain it.
 func (s *FixedLenByteArrayStatistics) Max() parquet.FixedLenByteArray { return s.max }
 
 // Merge merges the stats from other into this stat object, updating
@@ -2403,6 +2430,11 @@ func (s *FixedLenByteArrayStatistics) UpdateFromArrow(values arrow.Array, update
 
 // SetMinMax updates the min and max values only if they are not currently set
 // or if argMin is less than the current min / argMax is greater than the current max
+//
+// The min and max are copied into statistics-owned buffers rather than retaining
+// the provided slices. Those slices typically alias the source column data (e.g.
+// an Arrow value buffer) which may be released before the statistics are
+// serialized during Close, so aliasing them would leave dangling references.
 func (s *FixedLenByteArrayStatistics) SetMinMax(argMin, argMax parquet.FixedLenByteArray) {
 	maybeMinMax := s.cleanStat([2]parquet.FixedLenByteArray{argMin, argMax})
 	if maybeMinMax == nil {
@@ -2414,14 +2446,14 @@ func (s *FixedLenByteArrayStatistics) SetMinMax(argMin, argMax parquet.FixedLenB
 
 	if !s.hasMinMax {
 		s.hasMinMax = true
-		s.min = min
-		s.max = max
+		s.min = append(s.min[:0], min...)
+		s.max = append(s.max[:0], max...)
 	} else {
 		if !s.less(s.min, min) {
-			s.min = min
+			s.min = append(s.min[:0], min...)
 		}
 		if s.less(s.max, max) {
-			s.max = max
+			s.max = append(s.max[:0], max...)
 		}
 	}
 }
@@ -2644,7 +2676,18 @@ func (s *Float16Statistics) getMinMaxSpaced(values []parquet.FixedLenByteArray, 
 	return
 }
 
+// Min returns the current minimum value.
+//
+// The returned slice references a statistics-owned buffer that is reused on
+// subsequent updates, so it is only valid until the next update that replaces
+// the minimum. Copy it if you need to retain it.
 func (s *Float16Statistics) Min() parquet.FixedLenByteArray { return s.min }
+
+// Max returns the current maximum value.
+//
+// The returned slice references a statistics-owned buffer that is reused on
+// subsequent updates, so it is only valid until the next update that replaces
+// the maximum. Copy it if you need to retain it.
 func (s *Float16Statistics) Max() parquet.FixedLenByteArray { return s.max }
 
 // Merge merges the stats from other into this stat object, updating
@@ -2704,6 +2747,11 @@ func (s *Float16Statistics) UpdateFromArrow(values arrow.Array, updateCounts boo
 
 // SetMinMax updates the min and max values only if they are not currently set
 // or if argMin is less than the current min / argMax is greater than the current max
+//
+// The min and max are copied into statistics-owned buffers rather than retaining
+// the provided slices. Those slices typically alias the source column data (e.g.
+// an Arrow value buffer) which may be released before the statistics are
+// serialized during Close, so aliasing them would leave dangling references.
 func (s *Float16Statistics) SetMinMax(argMin, argMax parquet.FixedLenByteArray) {
 	maybeMinMax := s.cleanStat([2]parquet.FixedLenByteArray{argMin, argMax})
 	if maybeMinMax == nil {
@@ -2715,14 +2763,14 @@ func (s *Float16Statistics) SetMinMax(argMin, argMax parquet.FixedLenByteArray) 
 
 	if !s.hasMinMax {
 		s.hasMinMax = true
-		s.min = min
-		s.max = max
+		s.min = append(s.min[:0], min...)
+		s.max = append(s.max[:0], max...)
 	} else {
 		if !s.less(s.min, min) {
-			s.min = min
+			s.min = append(s.min[:0], min...)
 		}
 		if s.less(s.max, max) {
-			s.max = max
+			s.max = append(s.max[:0], max...)
 		}
 	}
 }

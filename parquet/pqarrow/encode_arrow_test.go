@@ -2780,3 +2780,70 @@ func TestReadWriteShreddedVariant(t *testing.T) {
 	assert.Truef(t, array.Equal(arr, tbl.Column(0).Data().Chunk(0)),
 		"expected: %s\ngot: %s", arr, tbl.Column(0).Data().Chunk(0))
 }
+
+// poisonOnFreeAllocator overwrites every buffer with 0xFF as it is freed so that
+// any lingering alias into released memory becomes observable. This gives a
+// deterministic reproduction of the adbc-drivers/bigquery#229 use-after-free
+// instead of depending on the Go runtime to reuse the freed pages.
+type poisonOnFreeAllocator struct {
+	memory.Allocator
+}
+
+func (p poisonOnFreeAllocator) Free(b []byte) {
+	for i := range b {
+		b[i] = 0xff
+	}
+	p.Allocator.Free(b)
+}
+
+// TestByteArrayStatisticsStreamingReleaseBetweenBatches reproduces
+// adbc-drivers/bigquery#229 end to end. With statistics enabled (the default)
+// and dictionary encoding disabled (so the dense Arrow write path runs), a
+// streaming writer releases each batch before writing the next. The ByteArray
+// column statistics must copy their min/max, so the round-tripped values stay
+// correct even though batch 1's buffer was poisoned when it was released before
+// batch 2's write compared against the stored min/max.
+func TestByteArrayStatisticsStreamingReleaseBetweenBatches(t *testing.T) {
+	checked := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer checked.AssertSize(t, 0)
+	mem := poisonOnFreeAllocator{checked}
+
+	sc := arrow.NewSchema([]arrow.Field{{Name: "s", Type: arrow.BinaryTypes.String}}, nil)
+
+	newBatch := func(vals ...string) arrow.RecordBatch {
+		bldr := array.NewRecordBuilder(mem, sc)
+		defer bldr.Release()
+		bldr.Field(0).(*array.StringBuilder).AppendValues(vals, nil)
+		return bldr.NewRecordBatch()
+	}
+
+	var buf bytes.Buffer
+	w, err := pqarrow.NewFileWriter(sc, &buf,
+		parquet.NewWriterProperties(parquet.WithDictionaryDefault(false)),
+		pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem)))
+	require.NoError(t, err)
+
+	batch1 := newBatch("mmm", "zzz")
+	require.NoError(t, w.WriteBuffered(batch1))
+	batch1.Release()
+
+	batch2 := newBatch("aaa", "nnn")
+	require.NoError(t, w.WriteBuffered(batch2))
+	batch2.Release()
+
+	require.NoError(t, w.Close())
+
+	rdr, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	md := rdr.MetaData()
+	require.Equal(t, 1, len(md.RowGroups))
+	col, err := md.RowGroup(0).ColumnChunk(0)
+	require.NoError(t, err)
+	stats, err := col.Statistics()
+	require.NoError(t, err)
+	require.True(t, stats.HasMinMax())
+	assert.Equal(t, "aaa", string(stats.EncodeMin()), "min corrupted by released batch buffer")
+	assert.Equal(t, "zzz", string(stats.EncodeMax()), "max corrupted by released batch buffer")
+}
