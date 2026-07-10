@@ -1231,7 +1231,10 @@ func (p *PreparedStatement) ExecuteUpdate(ctx context.Context, opts ...grpc.Call
 	}
 	if p.hasBindParameters() {
 		wr, err = p.writeBindParametersToStream(pstream, desc)
-		if err != nil {
+		// A bare io.EOF from a send means the server has already closed the
+		// stream; the authoritative status is delivered by the Recv below, so
+		// don't bail out early here (see bindParameters for the full rationale).
+		if err != nil && !errors.Is(err, io.EOF) {
 			return
 		}
 	} else {
@@ -1239,17 +1242,21 @@ func (p *PreparedStatement) ExecuteUpdate(ctx context.Context, opts ...grpc.Call
 		wr = flight.NewRecordWriter(pstream, ipc.WithSchema(schema))
 		wr.SetFlightDescriptor(desc)
 		rec := array.NewRecordBatch(schema, []arrow.Array{}, 0)
-		if err = wr.Write(rec); err != nil {
+		if err = wr.Write(rec); err != nil && !errors.Is(err, io.EOF) {
 			return
 		}
 	}
 
-	if err = wr.Close(); err != nil {
-		return
+	// wr is nil only when writeBindParametersToStream returned an error above
+	// (e.g. a send failed); otherwise it is the writer to flush and close.
+	if wr != nil {
+		if err = wr.Close(); err != nil && !errors.Is(err, io.EOF) {
+			return
+		}
 	}
-	if err = pstream.CloseSend(); err != nil {
-		return
-	}
+	// Ignore CloseSend's error: if the server already tore the stream down the
+	// send side is gone, and the authoritative status is delivered by Recv.
+	_ = pstream.CloseSend()
 	if res, err = pstream.Recv(); err != nil {
 		return
 	}
@@ -1272,11 +1279,21 @@ func (p *PreparedStatement) bindParameters(ctx context.Context, desc *pb.FlightD
 			return nil, err
 		}
 		wr, err := p.writeBindParametersToStream(pstream, desc)
-		if err != nil {
+		// gRPC hands back a bare io.EOF from a send once the server has closed
+		// the stream; its contract is that the real outcome -- a genuine error,
+		// or a response the server produced before closing -- must then be
+		// recovered with a receive. Fall through to captureDoPutPreparedStatementHandle
+		// (which performs that receive) rather than surfacing the uninformative
+		// EOF, which otherwise reaches the caller as "EOF (Unknown)".
+		if err != nil && !errors.Is(err, io.EOF) {
 			return nil, err
 		}
-		if err = wr.Close(); err != nil {
-			return nil, err
+		// wr is nil when writeBindParametersToStream returned an error above
+		// (e.g. a send failed); otherwise it is the writer to flush and close.
+		if wr != nil {
+			if err = wr.Close(); err != nil && !errors.Is(err, io.EOF) {
+				return nil, err
+			}
 		}
 		pstream.CloseSend()
 		if err = p.captureDoPutPreparedStatementHandle(pstream); err != nil {
