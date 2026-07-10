@@ -262,13 +262,9 @@ func (c *columnChunkReader) setPageReader(rdr PageReader) {
 
 // Close closes the page raeder and the page if set.
 func (c *columnChunkReader) Close() error {
-	// c.rdr owns curPage and releases it on Close; releasing c.curPage here too
-	// would double-free (c.curPage == c.rdr.Page()).
+	// c.rdr owns curPage (c.curPage == c.rdr.Page()) and releases it on Close.
 	if c.rdr != nil {
 		return c.rdr.Close()
-	}
-	if c.curPage != nil {
-		c.curPage.Release()
 	}
 	return nil
 }
