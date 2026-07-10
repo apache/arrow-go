@@ -207,6 +207,8 @@ func TestChunkedSliceInvalid(t *testing.T) {
 	for _, tc := range []struct {
 		i, j int64
 	}{
+		{i: -1, j: 0},
+		{i: -2, j: -1},
 		{i: 2, j: 1},
 		{i: 10, j: 11},
 		{i: 11, j: 11},
@@ -610,6 +612,32 @@ func TestTable(t *testing.T) {
 				t.Fatalf("invalid number of rows: got=%d, want=%d", got, want)
 			}
 		})
+	}
+}
+
+func TestTableAddColumnWithEqualDataType(t *testing.T) {
+	columnType := arrow.ListOf(arrow.PrimitiveTypes.Int32)
+	chunk := arrow.NewChunked(columnType, nil)
+	defer chunk.Release()
+
+	column := arrow.NewColumn(arrow.Field{Name: "items", Type: columnType}, chunk)
+	defer column.Release()
+
+	tbl := array.NewTable(arrow.NewSchema(nil, nil), nil, 0)
+	defer tbl.Release()
+
+	field := arrow.Field{Name: "items", Type: arrow.ListOf(arrow.PrimitiveTypes.Int32)}
+	got, err := tbl.AddColumn(0, field, *column)
+	if err != nil {
+		t.Fatalf("could not add column: %+v", err)
+	}
+	defer got.Release()
+
+	if gotField := got.Schema().Field(0); !gotField.Equal(field) {
+		t.Fatalf("invalid field: got=%v, want=%v", gotField, field)
+	}
+	if gotType := got.Column(0).DataType(); !arrow.TypeEqual(gotType, field.Type) {
+		t.Fatalf("invalid type: got=%v, want=%v", gotType, field.Type)
 	}
 }
 

@@ -26,6 +26,12 @@ import (
 
 type gzipCodec struct{}
 
+const (
+	gzipHeaderSize              = 10
+	gzipTrailerSize             = 8
+	gzipStatelessCloseBlockSize = 5
+)
+
 func (gzipCodec) NewReader(r io.Reader) io.ReadCloser {
 	ret, err := gzip.NewReader(r)
 	if err != nil {
@@ -81,7 +87,8 @@ func (g gzipCodec) Encode(dst, src []byte) []byte {
 }
 
 func (gzipCodec) CompressBound(len int64) int64 {
-	return len + ((len + 7) >> 3) + ((len + 63) >> 6) + 5
+	return len + ((len + 7) >> 3) + ((len + 63) >> 6) + 5 +
+		gzipHeaderSize + gzipTrailerSize + gzipStatelessCloseBlockSize
 }
 
 func (gzipCodec) NewWriter(w io.Writer) io.WriteCloser {

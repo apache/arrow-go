@@ -71,12 +71,21 @@ type EncodedStatistics struct {
 // the rationale is that some engines may use the minimum value in the page
 // as the true minimum for aggregations and there is no way to mark that
 // a value has been truncated and is a lower bound and not in the page
+//
+// Excluded values are also cleared here (not just flagged via Has*), since this
+// EncodedStatistics is stored as-is in the column chunk's persistent metadata by
+// ColumnChunkMetaDataBuilder.SetStats and retained until the file is closed. Leaving Max/Min
+// populated after excluding them means the writer keeps a live reference to a full copy of every
+// oversized value, once per row group, for the file's entire lifetime -- Has*=false alone only
+// affects what gets serialized, not what's retained in memory in the meantime.
 func (e *EncodedStatistics) ApplyStatSizeLimits(length int) {
 	if len(e.Max) > length {
 		e.HasMax = false
+		e.Max = nil
 	}
 	if len(e.Min) > length {
 		e.HasMin = false
+		e.Min = nil
 	}
 }
 

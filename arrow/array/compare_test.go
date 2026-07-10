@@ -822,6 +822,16 @@ func TestChunkedApproxEqual(t *testing.T) {
 	assert.True(t, array.ChunkedApproxEqual(c1, c2))
 }
 
+func TestChunkedApproxEqualEmpty(t *testing.T) {
+	c1 := arrow.NewChunked(arrow.PrimitiveTypes.Float64, nil)
+	defer c1.Release()
+	c2 := arrow.NewChunked(arrow.PrimitiveTypes.Float64, nil)
+	defer c2.Release()
+
+	assert.True(t, array.ChunkedEqual(c1, c2))
+	assert.True(t, array.ChunkedApproxEqual(c1, c2))
+}
+
 func TestTableEqual(t *testing.T) {
 	for name, recs := range arrdata.Records {
 		t.Run(name, func(t *testing.T) {

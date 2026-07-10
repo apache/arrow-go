@@ -22,6 +22,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/internal/utils/maphash"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -49,6 +50,139 @@ func TestDataReset(t *testing.T) {
 		// before old ones are released.)
 		data.Reset(&arrow.Int64Type{}, 5, data.Buffers(), nil, 1, 2)
 	}
+}
+
+func TestNewSliceDataInvalidBounds(t *testing.T) {
+	data := NewData(&arrow.Int64Type{}, 3, nil, nil, 0, 0)
+	defer data.Release()
+
+	tests := []struct {
+		name string
+		i, j int64
+	}{
+		{name: "negative start", i: -1, j: 0},
+		{name: "negative end", i: -2, j: -1},
+		{name: "end beyond length", i: 0, j: 4},
+		{name: "start after end", i: 2, j: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.PanicsWithValue(t, "arrow/array: index out of range", func() {
+				NewSliceData(data, tt.i, tt.j)
+			})
+		})
+	}
+}
+
+func TestDataResetClearsDictionary(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+
+	values := memory.NewResizableBuffer(mem)
+	values.Resize(16)
+
+	dictData := NewData(arrow.PrimitiveTypes.Int32, 4, []*memory.Buffer{nil, values}, nil, 0, 0)
+	values.Release()
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.PrimitiveTypes.Int32,
+	}
+	data := NewDataWithDictionary(dictType, 0, []*memory.Buffer{nil, nil}, 0, 0, dictData)
+	defer data.Release()
+
+	assert.NotNil(t, data.Dictionary())
+
+	data.Reset(arrow.PrimitiveTypes.Int8, 0, []*memory.Buffer{nil, nil}, nil, 0, 0)
+
+	assert.Nil(t, data.Dictionary())
+
+	dictData.Release()
+	mem.AssertSize(t, 0)
+}
+
+func TestHashIncludesDataMetadataAndBuffers(t *testing.T) {
+	seed := maphash.MakeSeed()
+	hash := func(data arrow.ArrayData) uint64 {
+		var h maphash.MapHash
+		h.SetSeed(seed)
+		Hash(&h, data)
+		return h.Sum64()
+	}
+
+	base := NewData(arrow.PrimitiveTypes.Int32, 2, []*memory.Buffer{
+		nil,
+		memory.NewBufferBytes([]byte{1, 0, 0, 0, 2, 0, 0, 0}),
+	}, nil, 0, 0)
+	defer base.Release()
+	baseHash := hash(base)
+
+	t.Run("value buffers", func(t *testing.T) {
+		other := NewData(arrow.PrimitiveTypes.Int32, 2, []*memory.Buffer{
+			nil,
+			memory.NewBufferBytes([]byte{3, 0, 0, 0, 4, 0, 0, 0}),
+		}, nil, 0, 0)
+		defer other.Release()
+
+		assert.NotEqual(t, baseHash, hash(other))
+	})
+
+	t.Run("data type", func(t *testing.T) {
+		other := NewData(arrow.PrimitiveTypes.Uint32, 2, base.Buffers(), nil, 0, 0)
+		defer other.Release()
+
+		assert.NotEqual(t, baseHash, hash(other))
+	})
+
+	t.Run("offset", func(t *testing.T) {
+		other := NewData(arrow.PrimitiveTypes.Int32, 2, base.Buffers(), nil, 0, 1)
+		defer other.Release()
+
+		assert.NotEqual(t, baseHash, hash(other))
+	})
+
+	t.Run("children", func(t *testing.T) {
+		childA := NewData(arrow.PrimitiveTypes.Int32, 1, []*memory.Buffer{
+			nil,
+			memory.NewBufferBytes([]byte{1, 0, 0, 0}),
+		}, nil, 0, 0)
+		defer childA.Release()
+		childB := NewData(arrow.PrimitiveTypes.Int32, 1, []*memory.Buffer{
+			nil,
+			memory.NewBufferBytes([]byte{2, 0, 0, 0}),
+		}, nil, 0, 0)
+		defer childB.Release()
+
+		offsets := memory.NewBufferBytes([]byte{0, 0, 0, 0, 1, 0, 0, 0})
+		left := NewData(arrow.ListOf(arrow.PrimitiveTypes.Int32), 1, []*memory.Buffer{nil, offsets}, []arrow.ArrayData{childA}, 0, 0)
+		defer left.Release()
+		right := NewData(arrow.ListOf(arrow.PrimitiveTypes.Int32), 1, []*memory.Buffer{nil, offsets}, []arrow.ArrayData{childB}, 0, 0)
+		defer right.Release()
+
+		assert.NotEqual(t, hash(left), hash(right))
+	})
+
+	t.Run("dictionary", func(t *testing.T) {
+		dictA := NewData(arrow.PrimitiveTypes.Int32, 1, []*memory.Buffer{
+			nil,
+			memory.NewBufferBytes([]byte{1, 0, 0, 0}),
+		}, nil, 0, 0)
+		defer dictA.Release()
+		dictB := NewData(arrow.PrimitiveTypes.Int32, 1, []*memory.Buffer{
+			nil,
+			memory.NewBufferBytes([]byte{2, 0, 0, 0}),
+		}, nil, 0, 0)
+		defer dictB.Release()
+
+		dt := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint8, ValueType: arrow.PrimitiveTypes.Int32}
+		indices := []*memory.Buffer{nil, memory.NewBufferBytes([]byte{0})}
+		left := NewDataWithDictionary(dt, 1, indices, 0, 0, dictA)
+		defer left.Release()
+		right := NewDataWithDictionary(dt, 1, indices, 0, 0, dictB)
+		defer right.Release()
+
+		assert.NotEqual(t, hash(left), hash(right))
+	})
 }
 
 func TestSizeInBytes(t *testing.T) {

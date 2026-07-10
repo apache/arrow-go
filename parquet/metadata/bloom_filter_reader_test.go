@@ -18,6 +18,7 @@ package metadata_test
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"runtime"
 	"sync"
@@ -34,6 +35,57 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
+
+// shortReadAtSeeker deliberately returns short successful ReadAt calls to
+// exercise callers that must keep reading until their requested buffer is full.
+type shortReadAtSeeker struct {
+	data   []byte
+	offset int64
+	max    int
+}
+
+func (r *shortReadAtSeeker) ReadAt(p []byte, off int64) (int, error) {
+	return r.readAt(p, off)
+}
+
+func (r *shortReadAtSeeker) Seek(offset int64, whence int) (int64, error) {
+	var next int64
+	switch whence {
+	case io.SeekStart:
+		next = offset
+	case io.SeekCurrent:
+		next = r.offset + offset
+	case io.SeekEnd:
+		next = int64(len(r.data)) + offset
+	default:
+		return 0, os.ErrInvalid
+	}
+	if next < 0 {
+		return 0, os.ErrInvalid
+	}
+	r.offset = next
+	return next, nil
+}
+
+func (r *shortReadAtSeeker) readAt(p []byte, off int64) (int, error) {
+	if off >= int64(len(r.data)) {
+		return 0, io.EOF
+	}
+
+	n := len(p)
+	if r.max > 0 && n > r.max {
+		n = r.max
+	}
+	if remaining := len(r.data) - int(off); n > remaining {
+		n = remaining
+	}
+	start := int(off)
+	copy(p, r.data[start:start+n])
+	if n < len(p) && int(off)+n >= len(r.data) {
+		return n, io.EOF
+	}
+	return n, nil
+}
 
 type BloomFilterBuilderSuite struct {
 	suite.Suite
@@ -281,6 +333,91 @@ func (suite *EncryptedBloomFilterBuilderSuite) TestEncryptedBloomFilters() {
 func TestBloomFilterRoundTrip(t *testing.T) {
 	suite.Run(t, new(BloomFilterBuilderSuite))
 	suite.Run(t, new(EncryptedBloomFilterBuilderSuite))
+}
+
+func TestBloomFilterReaderHandlesShortReads(t *testing.T) {
+	data, fileMeta, insertedHash := makeBloomFilterReaderTestData(t, 1024)
+
+	t.Run("with bloom filter length", func(t *testing.T) {
+		bf := readBloomFilterWithShortReads(t, data, fileMeta, 7)
+		assert.True(t, bf.CheckHash(insertedHash))
+	})
+
+	t.Run("without bloom filter length", func(t *testing.T) {
+		data, fileMeta, insertedHash := makeBloomFilterReaderTestData(t, 1024)
+		fileMeta.RowGroups[0].Columns[0].MetaData.BloomFilterLength = nil
+
+		bf := readBloomFilterWithShortReads(t, data, fileMeta, 256)
+		assert.True(t, bf.CheckHash(insertedHash))
+	})
+
+	t.Run("without bloom filter length and small section", func(t *testing.T) {
+		data, fileMeta, insertedHash := makeBloomFilterReaderTestData(t, 32)
+		fileMeta.RowGroups[0].Columns[0].MetaData.BloomFilterLength = nil
+
+		bf := readBloomFilterWithShortReads(t, data, fileMeta, 7)
+		assert.True(t, bf.CheckHash(insertedHash))
+	})
+}
+
+func makeBloomFilterReaderTestData(t *testing.T, filterSize uint32) ([]byte, *metadata.FileMetaData, uint64) {
+	t.Helper()
+
+	sc := schema.NewSchema(schema.MustGroup(
+		schema.NewGroupNode("schema", parquet.Repetitions.Repeated,
+			schema.FieldList{
+				schema.NewByteArrayNode("c1", parquet.Repetitions.Optional, -1),
+			}, -1)))
+
+	props := parquet.NewWriterProperties()
+	bldr := metadata.FileBloomFilterBuilder{Schema: sc}
+	metaBldr := metadata.NewFileMetadataBuilder(sc, props, nil)
+	rgMeta := metaBldr.AppendRowGroup()
+	filterMap := make(map[string]metadata.BloomFilterBuilder)
+	bldr.AppendRowGroup(rgMeta, filterMap)
+
+	bf := metadata.NewBloomFilter(filterSize, filterSize, memory.NewGoAllocator())
+	insertedHash := (uint64(^uint32(0)) << 32) | 1
+	bf.InsertHash(insertedHash)
+	filterMap["c1"] = bf
+
+	rgMeta.NextColumnChunk()
+	require.NoError(t, rgMeta.Finish(0, 0))
+
+	var buf bytes.Buffer
+	wr := &utils.TellWrapper{Writer: &buf}
+	_, err := wr.Write([]byte("PAR1"))
+	require.NoError(t, err)
+	require.NoError(t, bldr.WriteTo(wr))
+
+	fileMeta, err := metaBldr.Finish()
+	require.NoError(t, err)
+	fileMeta.SetSourceFileSize(int64(buf.Len()))
+
+	return buf.Bytes(), fileMeta, insertedHash
+}
+
+func readBloomFilterWithShortReads(t *testing.T, data []byte, fileMeta *metadata.FileMetaData, maxRead int) metadata.BloomFilter {
+	t.Helper()
+
+	rdr := metadata.BloomFilterReader{
+		Input:        &shortReadAtSeeker{data: data, max: maxRead},
+		FileMetadata: fileMeta,
+		BufferPool: &sync.Pool{
+			New: func() interface{} {
+				return memory.NewResizableBuffer(memory.DefaultAllocator)
+			},
+		},
+	}
+
+	rg, err := rdr.RowGroup(0)
+	require.NoError(t, err)
+	require.NotNil(t, rg)
+
+	bf, err := rg.GetColumnBloomFilter(0)
+	require.NoError(t, err)
+	require.NotNil(t, bf)
+	return bf
 }
 
 func TestReadBloomFilter(t *testing.T) {

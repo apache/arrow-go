@@ -493,6 +493,9 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 
 	headerBuf := r.bufferPool.Get().(*memory.Buffer)
 	headerBuf.ResizeNoShrink(int(bloomFilterReadSize))
+	if sectionSize := sectionRdr.Size(); sectionSize < int64(headerBuf.Len()) {
+		headerBuf.ResizeNoShrink(int(sectionSize))
+	}
 	defer func() {
 		if headerBuf != nil {
 			headerBuf.ResizeNoShrink(0)
@@ -500,7 +503,7 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 		}
 	}()
 
-	if _, err = sectionRdr.Read(headerBuf.Bytes()); err != nil {
+	if _, err = io.ReadFull(sectionRdr, headerBuf.Bytes()); err != nil {
 		return nil, err
 	}
 
@@ -527,7 +530,7 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 			copy(buf.Bytes(), headerBuf.Bytes()[headerSize:])
 		}
 
-		if _, err = sectionRdr.Read(buf.Bytes()[filterBytesInHeader:]); err != nil {
+		if _, err = io.ReadFull(sectionRdr, buf.Bytes()[filterBytesInHeader:]); err != nil {
 			return nil, err
 		}
 		bitset = buf.Bytes()

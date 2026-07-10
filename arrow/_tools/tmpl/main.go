@@ -234,21 +234,29 @@ func StripComments(raw []byte) []byte {
 			continue
 		}
 
-		if esc {
-			esc = false
-			continue
-		}
-
-		if b == '\\' && quoted {
-			esc = true
+		if quoted {
+			buf.WriteByte(b)
+			if esc {
+				esc = false
+				continue
+			}
+			if b == '\\' {
+				esc = true
+				continue
+			}
+			if b == '"' || b == '\'' {
+				quoted = false
+			}
 			continue
 		}
 
 		if b == '"' || b == '\'' {
-			quoted = !quoted
+			quoted = true
+			buf.WriteByte(b)
+			continue
 		}
 
-		if b == '/' && !quoted {
+		if b == '/' {
 			comment = true
 			continue
 		}
