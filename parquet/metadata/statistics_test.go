@@ -21,6 +21,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -639,4 +641,184 @@ func TestNewStatisticsDistinctCountUnset(t *testing.T) {
 			assert.Equal(t, int64(3), enc.DistinctCount)
 		})
 	}
+}
+
+// TestByteArrayStatisticsDoesNotAliasInput is a regression test for
+// adbc-drivers/bigquery#229: ByteArrayStatistics stored the min/max as slices
+// aliasing the caller's value buffer (e.g. an Arrow array value buffer) instead
+// of copying the bytes. When a streaming writer released a batch before the
+// statistics were serialized during Close, the lazily-accessed min/max pointed
+// at freed memory and bytes.Compare in less() segfaulted. SetMinMax must copy
+// the min/max into statistics-owned memory so they remain valid after the
+// source buffer is released.
+func TestByteArrayStatisticsDoesNotAliasInput(t *testing.T) {
+	descr := schema.NewColumn(schema.NewByteArrayNode("ba", parquet.Repetitions.Required, -1), 0, 0)
+
+	t.Run("Update copies min/max", func(t *testing.T) {
+		stats := metadata.NewStatistics(descr, memory.DefaultAllocator).(*metadata.ByteArrayStatistics)
+
+		buf := []byte("mmmmm")
+		stats.Update([]parquet.ByteArray{parquet.ByteArray(buf)}, 0)
+		require.True(t, stats.HasMinMax())
+		require.Equal(t, "mmmmm", string(stats.Min()))
+		require.Equal(t, "mmmmm", string(stats.Max()))
+
+		// Simulate the source buffer being freed/reused after the batch is written.
+		copy(buf, "zzzzz")
+		assert.Equal(t, "mmmmm", string(stats.Min()), "min must not alias the input buffer")
+		assert.Equal(t, "mmmmm", string(stats.Max()), "max must not alias the input buffer")
+	})
+
+	t.Run("stored min/max survive freeing a prior batch", func(t *testing.T) {
+		// Mirrors the crash flow directly: batch N establishes min/max, its buffer
+		// is released, then batch N+1's SetMinMax compares new values against the
+		// stored (previously dangling) min/max via less().
+		stats := metadata.NewStatistics(descr, memory.DefaultAllocator).(*metadata.ByteArrayStatistics)
+
+		batch1 := []byte("aaazzz")
+		stats.UpdateSpaced([]parquet.ByteArray{batch1[0:3], batch1[3:6]}, []byte{0x3}, 0, 0)
+		require.Equal(t, "aaa", string(stats.Min()))
+		require.Equal(t, "zzz", string(stats.Max()))
+
+		// Batch 1's buffer is released and its memory reused for other data.
+		copy(batch1, "######")
+
+		batch2 := []byte("mmm")
+		stats.UpdateSpaced([]parquet.ByteArray{parquet.ByteArray(batch2)}, []byte{0x1}, 0, 0)
+
+		assert.Equal(t, "aaa", string(stats.Min()), "min from a released batch must survive")
+		assert.Equal(t, "zzz", string(stats.Max()), "max from a released batch must survive")
+	})
+
+	t.Run("Merge copies min/max", func(t *testing.T) {
+		src := metadata.NewStatistics(descr, memory.DefaultAllocator).(*metadata.ByteArrayStatistics)
+		src.Update([]parquet.ByteArray{parquet.ByteArray("kkkkk")}, 0)
+
+		dst := metadata.NewStatistics(descr, memory.DefaultAllocator).(*metadata.ByteArrayStatistics)
+		dst.Merge(src)
+		require.Equal(t, "kkkkk", string(dst.Min()))
+		require.Equal(t, "kkkkk", string(dst.Max()))
+
+		// Updating src overwrites its statistics-owned min/max buffers in place. If
+		// Merge had aliased src's buffers instead of copying, this would corrupt dst.
+		src.Update([]parquet.ByteArray{parquet.ByteArray("aaaaa"), parquet.ByteArray("zzzzz")}, 0)
+		require.Equal(t, "aaaaa", string(src.Min()))
+		require.Equal(t, "zzzzz", string(src.Max()))
+		assert.Equal(t, "kkkkk", string(dst.Min()), "merged min must be independent of src")
+		assert.Equal(t, "kkkkk", string(dst.Max()), "merged max must be independent of src")
+	})
+
+	t.Run("encoded min/max survive freeing the source", func(t *testing.T) {
+		stats := metadata.NewStatistics(descr, memory.DefaultAllocator).(*metadata.ByteArrayStatistics)
+		buf := []byte("hello")
+		stats.Update([]parquet.ByteArray{parquet.ByteArray(buf)}, 0)
+
+		copy(buf, "world")
+		assert.Equal(t, []byte("hello"), stats.EncodeMin())
+		assert.Equal(t, []byte("hello"), stats.EncodeMax())
+	})
+}
+
+// TestFixedLenByteArrayStatisticsDoesNotAliasInput is the FIXED_LEN_BYTE_ARRAY
+// counterpart to TestByteArrayStatisticsDoesNotAliasInput (adbc-drivers/bigquery#229).
+func TestFixedLenByteArrayStatisticsDoesNotAliasInput(t *testing.T) {
+	n, err := schema.NewPrimitiveNode("flba", parquet.Repetitions.Required, parquet.Types.FixedLenByteArray, -1, 3)
+	require.NoError(t, err)
+	descr := schema.NewColumn(n, 0, 0)
+
+	stats := metadata.NewStatistics(descr, memory.DefaultAllocator).(*metadata.FixedLenByteArrayStatistics)
+
+	buf := []byte("mmm")
+	stats.Update([]parquet.FixedLenByteArray{parquet.FixedLenByteArray(buf)}, 0)
+	require.True(t, stats.HasMinMax())
+	require.Equal(t, "mmm", string(stats.Min()))
+	require.Equal(t, "mmm", string(stats.Max()))
+
+	// Simulate the source buffer being freed/reused after the batch is written.
+	copy(buf, "zzz")
+	assert.Equal(t, "mmm", string(stats.Min()), "min must not alias the input buffer")
+	assert.Equal(t, "mmm", string(stats.Max()), "max must not alias the input buffer")
+}
+
+// TestFloat16StatisticsDoesNotAliasInput covers the FLOAT16 logical type, which
+// is backed by parquet.FixedLenByteArray and shares the copy-on-store fix
+// (adbc-drivers/bigquery#229).
+func TestFloat16StatisticsDoesNotAliasInput(t *testing.T) {
+	descr := schema.NewColumn(newFloat16Node("f16", parquet.Repetitions.Required, -1), 0, 0)
+	stats := metadata.NewStatistics(descr, memory.DefaultAllocator).(*metadata.Float16Statistics)
+
+	want := float16.New(1.5).ToLEBytes()
+	mutable := float16.New(1.5).ToLEBytes()
+	stats.Update([]parquet.FixedLenByteArray{parquet.FixedLenByteArray(mutable)}, 0)
+	require.True(t, stats.HasMinMax())
+	require.Equal(t, []byte(want), []byte(stats.Min()))
+
+	// Overwrite the source buffer to model it being freed/reused after the batch.
+	copy(mutable, float16.New(9.5).ToLEBytes())
+	assert.Equal(t, []byte(want), []byte(stats.Min()), "min must not alias the input buffer")
+	assert.Equal(t, []byte(want), []byte(stats.Max()), "max must not alias the input buffer")
+}
+
+// TestFixedLenByteArrayStatisticsUpdateFromArrowMax is a regression test for a
+// separate pre-existing bug in FixedLenByteArray.UpdateFromArrow: it computed
+// the running max against the running min instead of the running max, producing
+// an incorrect maximum for FIXED_LEN_BYTE_ARRAY columns updated from Arrow.
+func TestFixedLenByteArrayStatisticsUpdateFromArrowMax(t *testing.T) {
+	mem := memory.DefaultAllocator
+	n, err := schema.NewPrimitiveNode("flba", parquet.Repetitions.Required, parquet.Types.FixedLenByteArray, -1, 3)
+	require.NoError(t, err)
+	descr := schema.NewColumn(n, 0, 0)
+	stats := metadata.NewStatistics(descr, mem).(*metadata.FixedLenByteArrayStatistics)
+
+	bldr := array.NewFixedSizeBinaryBuilder(mem, &arrow.FixedSizeBinaryType{ByteWidth: 3})
+	defer bldr.Release()
+	for _, v := range []string{"bbb", "aaa", "ccc", "abc"} {
+		bldr.Append([]byte(v))
+	}
+	arr := bldr.NewArray()
+	defer arr.Release()
+
+	require.NoError(t, stats.UpdateFromArrow(arr, true))
+	require.True(t, stats.HasMinMax())
+	assert.Equal(t, "aaa", string(stats.Min()))
+	assert.Equal(t, "ccc", string(stats.Max()), "max must be computed against the running max, not the running min")
+}
+
+type encodedStatProvider struct {
+	min, max []byte
+}
+
+func (e *encodedStatProvider) GetMin() []byte           { return e.min }
+func (e *encodedStatProvider) GetMax() []byte           { return e.max }
+func (e *encodedStatProvider) GetNullCount() int64      { return 0 }
+func (e *encodedStatProvider) GetDistinctCount() int64  { return 0 }
+func (e *encodedStatProvider) IsSetMax() bool           { return e.max != nil }
+func (e *encodedStatProvider) IsSetMin() bool           { return e.min != nil }
+func (e *encodedStatProvider) IsSetNullCount() bool     { return false }
+func (e *encodedStatProvider) IsSetDistinctCount() bool { return false }
+
+// TestByteArrayStatisticsFromEncodedOwnsMinMax is a regression test for a review
+// finding on the use-after-free fix: statistics built from encoded metadata via
+// New*StatisticsFromEncoded stored min/max slices aliasing the caller's metadata
+// buffer. Because SetMinMax now reuses those buffers on update, a later update
+// could write through and corrupt the caller's metadata, so the decoded min/max
+// must be copied into statistics-owned buffers.
+func TestByteArrayStatisticsFromEncodedOwnsMinMax(t *testing.T) {
+	descr := schema.NewColumn(schema.NewByteArrayNode("ba", parquet.Repetitions.Required, -1), 0, 0)
+
+	encMin := []byte("bbb")
+	encMax := []byte("yyy")
+	stats := metadata.NewStatisticsFromEncoded(descr, memory.DefaultAllocator, 4,
+		&encodedStatProvider{min: encMin, max: encMax}).(*metadata.ByteArrayStatistics)
+	require.True(t, stats.HasMinMax())
+	require.Equal(t, "bbb", string(stats.Min()))
+	require.Equal(t, "yyy", string(stats.Max()))
+
+	// Updating with new extremes must not write through into the encoded source
+	// buffers, which would happen if the stored min/max still aliased them.
+	stats.Update([]parquet.ByteArray{parquet.ByteArray("aaa"), parquet.ByteArray("zzz")}, 0)
+	assert.Equal(t, "bbb", string(encMin), "encoded min source buffer must not be overwritten")
+	assert.Equal(t, "yyy", string(encMax), "encoded max source buffer must not be overwritten")
+	assert.Equal(t, "aaa", string(stats.Min()))
+	assert.Equal(t, "zzz", string(stats.Max()))
 }
