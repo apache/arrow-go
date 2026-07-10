@@ -210,6 +210,7 @@ func streamableCodec(c compress.Compression) bool {
 	case compress.Codecs.Uncompressed, compress.Codecs.Gzip, compress.Codecs.Brotli, compress.Codecs.Zstd:
 		return true
 	default:
+		// Snappy/LZ4_RAW register as StreamingCodecs but use block framing, not a spec-compliant stream.
 		return false
 	}
 }

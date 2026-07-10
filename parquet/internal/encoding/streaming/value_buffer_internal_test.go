@@ -119,3 +119,18 @@ func TestStreamBufferRecycleReclaims(t *testing.T) {
 	require.NoError(t, s.Close())
 	checked.AssertSize(t, 0)
 }
+
+func TestStreamBufferRotateCarriesTail(t *testing.T) {
+	data := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+	s := newTestBuffer(memory.DefaultAllocator, data, 8)
+	defer s.Close()
+
+	b, err := s.Fill(6)
+	require.NoError(t, err)
+	assert.Equal(t, data[:6], b[:6])
+	s.Advance(2) // leave an unconsumed tail so the next Fill rotates with off != n
+
+	b, err = s.Fill(7)
+	require.NoError(t, err)
+	assert.Equal(t, data[2:9], b[:7])
+}

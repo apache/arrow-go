@@ -133,14 +133,17 @@ func (s *streamBuffer) Fill(need int) ([]byte, error) {
 	return s.cur[s.off:s.n], nil
 }
 
-// rotate retires the full chunk (still backing aliases) and starts fresh; no tail since off == n.
+// rotate retires the full chunk (still backing aliases) and starts fresh, carrying any unconsumed tail.
 func (s *streamBuffer) rotate(need int) {
+	tail := s.n - s.off
 	s.live = append(s.live, s.cur)
 	size := s.chunkSize
 	if need > size {
 		size = need
 	}
-	s.cur, s.off, s.n = s.mem.Allocate(size), 0, 0
+	nc := s.mem.Allocate(size)
+	copy(nc, s.cur[s.off:s.n])
+	s.cur, s.off, s.n = nc, 0, tail
 }
 
 func (s *streamBuffer) Recycle() {
