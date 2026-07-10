@@ -725,7 +725,7 @@ func TestGetSpacedHashesFromBitmap(t *testing.T) {
 }
 
 func TestRecycleEncryptedPathPool(t *testing.T) {
-	pool := &sync.Pool{New: func() any { return memory.NewResizableBuffer(memory.NewGoAllocator()) }}
+	pool := &sync.Pool{}
 	r := &RowGroupBloomFilterReader{bufferPool: pool}
 
 	bitset := make([]byte, 1024)
@@ -736,10 +736,39 @@ func TestRecycleEncryptedPathPool(t *testing.T) {
 
 	r.recycle(bf)
 
-	got := pool.Get().(*memory.Buffer)
-	if got.Mutable() {
-		return
+	got := pool.Get()
+	if got != nil {
+		t.Fatalf("encrypted buffer should not be recycled into the pool, but got: %v", got)
+	}
+}
+
+func TestRecycleUnencryptedPathPool(t *testing.T) {
+	pool := &sync.Pool{
+		New: func() any {
+			return memory.NewResizableBuffer(memory.NewGoAllocator())
+		},
+	}
+	r := &RowGroupBloomFilterReader{bufferPool: pool}
+
+	buf := pool.Get().(*memory.Buffer)
+	buf.ResizeNoShrink(1024)
+
+	bf := &blockSplitBloomFilter{
+		data:     buf,
+		bitset32: arrow.Uint32Traits.CastFromBytes(buf.Bytes()),
 	}
 
-	got.ResizeNoShrink(2 * 1024 * 1024)
+	addCleanup(bf, r.bufferPool)
+
+	r.recycle(bf)
+
+	runtime.GC()
+	runtime.GC()
+
+	got1 := pool.Get().(*memory.Buffer)
+	got2 := pool.Get().(*memory.Buffer)
+
+	if got1 == got2 {
+		t.Fatalf("Pool pollution detected! The same buffer instance was put into the pool twice.")
+	}
 }

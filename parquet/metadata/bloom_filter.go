@@ -531,6 +531,8 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 		}
 
 		if _, err = io.ReadFull(sectionRdr, buf.Bytes()[filterBytesInHeader:]); err != nil {
+			buf.ResizeNoShrink(0)
+			r.bufferPool.Put(buf)
 			return nil, err
 		}
 		bitset = buf.Bytes()
