@@ -1810,6 +1810,23 @@ func (w *ByteArrayColumnChunkWriter) WriteBatch(values []parquet.ByteArray, defL
 		repLevels != nil && w.descr.MaxRepetitionLevel() > 0
 	levelOffset := int64(0)
 
+	// Repeated DataPageV2 writes align batches on row boundaries using repLevels
+	// below. n comes from defLevels/values, not repLevels, so clamp repLevels to n
+	// to stop an oversized slice from growing a batch past n (spilling extra levels
+	// or reading out of range). Mirrors columnWriter.doBatches.
+	if isV2WithRep {
+		if int64(len(repLevels)) < n {
+			panic("columnwriter: not enough repetition levels for batch to write")
+		}
+		if n == 0 {
+			return
+		}
+		repLevels = repLevels[:n]
+		if repLevels[0] != 0 {
+			panic("columnwriter: batch writing for V2 data pages must start at a row boundary")
+		}
+	}
+
 	for levelOffset < n {
 		remaining := n - levelOffset
 		batch := min(remaining, batchSize)
@@ -1907,6 +1924,20 @@ func (w *ByteArrayColumnChunkWriter) WriteBatchSpacedWithError(values []parquet.
 		repLevels != nil && w.descr.MaxRepetitionLevel() > 0
 	levelOffset := int64(0)
 	n := int64(length)
+
+	// Clamp repLevels to n; see WriteBatch. Mirrors columnWriter.doBatches.
+	if isV2WithRep {
+		if int64(len(repLevels)) < n {
+			panic("columnwriter: not enough repetition levels for batch to write")
+		}
+		if n == 0 {
+			return
+		}
+		repLevels = repLevels[:n]
+		if repLevels[0] != 0 {
+			panic("columnwriter: batch writing for V2 data pages must start at a row boundary")
+		}
+	}
 
 	for levelOffset < n {
 		remaining := n - levelOffset
@@ -2149,6 +2180,23 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatch(values []parquet.FixedLe
 		repLevels != nil && w.descr.MaxRepetitionLevel() > 0
 	levelOffset := int64(0)
 
+	// Repeated DataPageV2 writes align batches on row boundaries using repLevels
+	// below. n comes from defLevels/values, not repLevels, so clamp repLevels to n
+	// to stop an oversized slice from growing a batch past n (spilling extra levels
+	// or reading out of range). Mirrors columnWriter.doBatches.
+	if isV2WithRep {
+		if int64(len(repLevels)) < n {
+			panic("columnwriter: not enough repetition levels for batch to write")
+		}
+		if n == 0 {
+			return
+		}
+		repLevels = repLevels[:n]
+		if repLevels[0] != 0 {
+			panic("columnwriter: batch writing for V2 data pages must start at a row boundary")
+		}
+	}
+
 	for levelOffset < n {
 		remaining := n - levelOffset
 		batch := min(remaining, batchSize)
@@ -2246,6 +2294,20 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatchSpacedWithError(values []
 		repLevels != nil && w.descr.MaxRepetitionLevel() > 0
 	levelOffset := int64(0)
 	n := int64(length)
+
+	// Clamp repLevels to n; see WriteBatch. Mirrors columnWriter.doBatches.
+	if isV2WithRep {
+		if int64(len(repLevels)) < n {
+			panic("columnwriter: not enough repetition levels for batch to write")
+		}
+		if n == 0 {
+			return
+		}
+		repLevels = repLevels[:n]
+		if repLevels[0] != 0 {
+			panic("columnwriter: batch writing for V2 data pages must start at a row boundary")
+		}
+	}
 
 	for levelOffset < n {
 		remaining := n - levelOffset
