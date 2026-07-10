@@ -234,10 +234,7 @@ func setPrimitiveValue(v reflect.Value, arr arrow.Array, i int) error {
 			return fmt.Errorf("cannot set float32 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		val := float64(arr.(*array.Float32).Value(i))
-		if v.OverflowFloat(val) {
-			return fmt.Errorf("cannot set float32 value %f into %s: %w", val, v.Type(), ErrTypeMismatch)
-		}
-		v.SetFloat(float64(arr.(*array.Float32).Value(i)))
+		v.SetFloat(val)
 	case arrow.FLOAT64:
 		if !isFloatKind(v.Kind()) {
 			return fmt.Errorf("cannot set float64 into %s: %w", v.Type(), ErrTypeMismatch)
