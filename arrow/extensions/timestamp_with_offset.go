@@ -232,10 +232,10 @@ func timeFromFieldValues(utcTimestamp arrow.Timestamp, offsetMinutes int16, unit
 	// with magnitude below one hour and so cannot carry a negative sign (e.g.
 	// -30 minutes must format as "UTC-00:30", not "UTC+00:30").
 	sign := "+"
-	abs := offsetMinutes
-	if offsetMinutes < 0 {
+	abs := int(offsetMinutes)
+	if abs < 0 {
 		sign = "-"
-		abs = -offsetMinutes
+		abs = -abs
 	}
 
 	name := fmt.Sprintf("UTC%s%02d:%02d", sign, abs/60, abs%60)
