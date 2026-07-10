@@ -20,8 +20,10 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"runtime"
+	"sync"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -720,4 +722,53 @@ func TestGetSpacedHashesFromBitmap(t *testing.T) {
 
 		assert.Equal(t, int(numValid), trueCount+falseCount, "all hashes should be true or false")
 	})
+}
+
+func TestRecycleEncryptedPathPool(t *testing.T) {
+	pool := &sync.Pool{}
+	r := &RowGroupBloomFilterReader{bufferPool: pool}
+
+	bitset := make([]byte, 1024)
+	bf := &blockSplitBloomFilter{
+		data:     memory.NewBufferBytes(bitset),
+		bitset32: arrow.Uint32Traits.CastFromBytes(bitset),
+	}
+
+	r.recycle(bf)
+
+	got := pool.Get()
+	if got != nil {
+		t.Fatalf("encrypted buffer should not be recycled into the pool, but got: %v", got)
+	}
+}
+
+func TestRecycleUnencryptedPathPool(t *testing.T) {
+	pool := &sync.Pool{
+		New: func() any {
+			return memory.NewResizableBuffer(memory.NewGoAllocator())
+		},
+	}
+	r := &RowGroupBloomFilterReader{bufferPool: pool}
+
+	buf := pool.Get().(*memory.Buffer)
+	buf.ResizeNoShrink(1024)
+
+	bf := &blockSplitBloomFilter{
+		data:     buf,
+		bitset32: arrow.Uint32Traits.CastFromBytes(buf.Bytes()),
+	}
+
+	addCleanup(bf, r.bufferPool)
+
+	r.recycle(bf)
+
+	runtime.GC()
+	runtime.GC()
+
+	got1 := pool.Get().(*memory.Buffer)
+	got2 := pool.Get().(*memory.Buffer)
+
+	if got1 == got2 {
+		t.Fatalf("Pool pollution detected! The same buffer instance was put into the pool twice.")
+	}
 }
