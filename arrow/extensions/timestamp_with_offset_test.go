@@ -449,6 +449,23 @@ func TestTimestampWithOffsetRunEndEncodedSliced(t *testing.T) {
 	}
 }
 
+func TestTimestampWithOffsetSubHourNegativeZone(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	// A negative offset smaller than one hour must keep its sign in the zone
+	// name (regression: -30 minutes formatted as "UTC+00:30" instead of "UTC-00:30").
+	b, err := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, arrow.PrimitiveTypes.Int16)
+	require.NoError(t, err)
+	b.Append(testDate0.In(time.FixedZone("UTC-00:30", -30*60)))
+	arr := b.NewArray().(*extensions.TimestampWithOffsetArray)
+	defer arr.Release()
+
+	name, off := arr.Value(0).Zone()
+	require.Equal(t, -30*60, off)
+	require.Equal(t, "UTC-00:30", name)
+}
+
 func TestTimestampWithOffsetExtensionRecordBuilder(t *testing.T) {
 	for name, offsetType := range allAllowedOffsetTypes {
 		t.Run(name, func(t *testing.T) {

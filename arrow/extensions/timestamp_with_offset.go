@@ -228,13 +228,18 @@ func (a *TimestampWithOffsetArray) String() string {
 }
 
 func timeFromFieldValues(utcTimestamp arrow.Timestamp, offsetMinutes int16, unit arrow.TimeUnit) time.Time {
-	hours := offsetMinutes / 60
-	minutes := offsetMinutes % 60
-	if minutes < 0 {
-		minutes = -minutes
+	// Derive the sign from the whole offset: integer hours is 0 for any offset
+	// with magnitude below one hour and so cannot carry a negative sign (e.g.
+	// -30 minutes must format as "UTC-00:30", not "UTC+00:30").
+	sign := "+"
+	abs := offsetMinutes
+	if offsetMinutes < 0 {
+		sign = "-"
+		abs = -offsetMinutes
 	}
 
-	loc := time.FixedZone(fmt.Sprintf("UTC%+03d:%02d", hours, minutes), int(offsetMinutes)*60)
+	name := fmt.Sprintf("UTC%s%02d:%02d", sign, abs/60, abs%60)
+	loc := time.FixedZone(name, int(offsetMinutes)*60)
 	return utcTimestamp.ToTime(unit).In(loc)
 }
 
@@ -348,8 +353,8 @@ func (a *TimestampWithOffsetArray) iterValues() iter.Seq2[time.Time, bool] {
 
 func (a *TimestampWithOffsetArray) Values() []time.Time {
 	return slices.Collect(func(yield func(time.Time) bool) {
-		for time := range a.iterValues() {
-			if !yield(time) {
+		for t := range a.iterValues() {
+			if !yield(t) {
 				return
 			}
 		}
@@ -372,7 +377,7 @@ func (a *TimestampWithOffsetArray) MarshalJSON() ([]byte, error) {
 		if !valid {
 			values[i] = nil
 		} else {
-			values[i] = &ts
+			values[i] = ts
 		}
 		i += 1
 	}
