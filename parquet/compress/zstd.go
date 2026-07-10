@@ -123,7 +123,7 @@ func (z *zstdcloser) Close() error {
 	if z.Decoder == nil {
 		return nil
 	}
-	_ = z.Decoder.Reset(nil)
+	_ = z.Reset(nil)
 	globalDecoderPool.Put(z.Decoder)
 	z.Decoder = nil
 	return nil
