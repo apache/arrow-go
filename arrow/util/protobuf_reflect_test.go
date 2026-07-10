@@ -19,6 +19,7 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -494,4 +495,86 @@ func TestAppendValueOrNull(t *testing.T) {
 	got := pmfr.AppendValueOrNull(recordBuilder.Field(0), mem)
 	want := "not able to appendValueOrNull for type TIME32"
 	assert.EqualErrorf(t, got, want, "Error is: %v, want: %v", got, want)
+}
+
+func TestGetMapKeyRejectsUnsupportedType(t *testing.T) {
+	_, err := getMapKey(reflect.ValueOf(struct{}{}))
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unsupported map key kind")
+}
+
+func TestMapAppendReturnsContextualErrorForUnsupportedKey(t *testing.T) {
+	msg := util_message.AllTheTypesNoAny{SimpleMap: map[int32]string{1: "value"}}
+	pmr := NewProtobufMessageReflection(&msg)
+
+	var field *ProtobufMessageFieldReflection
+	for i := range pmr.fields {
+		if pmr.fields[i].name() == "simple_map" {
+			field = &pmr.fields[i]
+			break
+		}
+	}
+	require.NotNil(t, field)
+	fr := field.protobufReflection.(*ProtobufFieldReflection)
+
+	badMapReflection := &protobufMapReflection{
+		ProtobufFieldReflection: ProtobufFieldReflection{
+			parent:        fr.parent,
+			descriptor:    fr.descriptor,
+			prValue:       fr.prValue,
+			rValue:        reflect.ValueOf(map[struct{}]string{{}: "value"}),
+			schemaOptions: fr.schemaOptions,
+		},
+	}
+	badField := ProtobufMessageFieldReflection{
+		parent:             field.parent,
+		protobufReflection: badMapReflection,
+		Field:              field.Field,
+	}
+
+	schema := arrow.NewSchema([]arrow.Field{badField.Field}, nil)
+	mem := memory.NewGoAllocator()
+	recordBuilder := array.NewRecordBuilder(mem, schema)
+
+	err := badField.AppendValueOrNull(recordBuilder.Field(0), mem)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "failed to append map field")
+	assert.ErrorContains(t, err, "simple_map")
+}
+
+func TestUnionReflectionHandlesUnsetAndNilOneofValues(t *testing.T) {
+	tests := []struct {
+		name           string
+		msg            proto.Message
+		expectedActive arrow.UnionTypeCode
+	}{
+		{"unset", &util_message.AllTheTypes{}, -1},
+		{"nil pointer", &util_message.AllTheTypes{Oneof: (*util_message.AllTheTypes_Oneofmessage)(nil)}, -1},
+		{"valid", &util_message.AllTheTypes{Oneof: &util_message.AllTheTypes_Oneofstring{Oneofstring: "value"}}, 0},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pmr := NewProtobufMessageReflection(test.msg, WithOneOfHandler(OneOfDenseUnion))
+			var field *ProtobufMessageFieldReflection
+			for i := range pmr.fields {
+				if pmr.fields[i].name() == "oneof" {
+					field = &pmr.fields[i]
+					break
+				}
+			}
+			require.NotNil(t, field)
+
+			fr := field.protobufReflection.(*ProtobufFieldReflection)
+			assert.NotPanics(t, func() {
+				gotActive := fr.asUnion().whichOne()
+				assert.Equal(t, test.expectedActive, gotActive)
+				if test.expectedActive == -1 {
+					assert.Nil(t, fr.asUnion().getField())
+				} else {
+					assert.NotNil(t, fr.asUnion().getField())
+				}
+			})
+		})
+	}
 }
