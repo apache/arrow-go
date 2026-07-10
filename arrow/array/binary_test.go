@@ -18,6 +18,7 @@ package array
 
 import (
 	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -25,6 +26,12 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
 )
+
+type binaryViewNoAllocAllocator struct{}
+
+func (binaryViewNoAllocAllocator) Allocate(int) []byte           { panic("unexpected allocation") }
+func (binaryViewNoAllocAllocator) Reallocate(int, []byte) []byte { panic("unexpected allocation") }
+func (binaryViewNoAllocAllocator) Free([]byte)                   {}
 
 func TestBinary(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
@@ -699,6 +706,30 @@ func TestBinaryStringRoundTrip(t *testing.T) {
 	defer arr1.Release()
 
 	assert.True(t, Equal(arr, arr1))
+}
+
+func TestBinaryViewBuilderRejectsOversizedValues(t *testing.T) {
+	const expected = "invalid: BinaryView or StringView elements cannot reference strings larger than 2GB"
+	oversizedLen := int64(viewValueSizeLimit) + 1
+
+	t.Run("size guard", func(t *testing.T) {
+		assert.PanicsWithError(t, expected, func() {
+			checkBinaryViewValueSize(oversizedLen)
+		})
+	})
+
+	t.Run("ReserveData", func(t *testing.T) {
+		if strconv.IntSize == 32 {
+			t.Skip("oversized int requires 64-bit int")
+		}
+
+		b := NewBinaryViewBuilder(binaryViewNoAllocAllocator{})
+		defer b.Release()
+
+		assert.PanicsWithError(t, expected, func() {
+			b.ReserveData(int(oversizedLen))
+		})
+	})
 }
 
 func TestBinaryViewStringRoundTrip(t *testing.T) {

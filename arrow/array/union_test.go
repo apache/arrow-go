@@ -457,6 +457,64 @@ func (s *UnionFactorySuite) TestMakeDenseUnions() {
 		defer result.Release()
 		s.Error(result.ValidateFull())
 	})
+
+	s.Run("mismatched type ids and offset lengths", func() {
+		shortOffsets := s.offsetsFromSlice(0, 0, 0, 1, 1, 0, 1, 2, 1)
+		defer shortOffsets.Release()
+		result, err := array.NewDenseUnionFromArrays(s.typeIDs, shortOffsets, children)
+		s.Nil(result)
+		s.EqualError(err, "arrow/array: union typeIDs and offsets must have the same length")
+
+		longOffsets := s.offsetsFromSlice(0, 0, 0, 1, 1, 0, 1, 2, 1, 2, 0)
+		defer longOffsets.Release()
+		result, err = array.NewDenseUnionFromArrays(s.typeIDs, longOffsets, children)
+		s.Nil(result)
+		s.EqualError(err, "arrow/array: union typeIDs and offsets must have the same length")
+	})
+
+	s.Run("mismatched type id and offset data offsets", func() {
+		expected, err := array.NewDenseUnionFromArrays(s.typeIDs, offsets, children)
+		s.NoError(err)
+		defer expected.Release()
+
+		baseTypeIDs := s.typeidsFromSlice(3, 0, 1, 2, 0, 1, 3, 2, 0, 2, 1)
+		defer baseTypeIDs.Release()
+		slicedTypeIDs := array.NewSlice(baseTypeIDs, 1, int64(baseTypeIDs.Len()))
+		defer slicedTypeIDs.Release()
+
+		result, err := array.NewDenseUnionFromArrays(slicedTypeIDs, offsets, children)
+		s.NoError(err)
+		defer result.Release()
+		s.Zero(result.Data().Offset())
+		s.NoError(result.ValidateFull())
+		s.True(array.Equal(expected, result))
+
+		baseOffsets := s.offsetsFromSlice(99, 0, 0, 0, 1, 1, 0, 1, 2, 1, 2)
+		defer baseOffsets.Release()
+		slicedOffsets := array.NewSlice(baseOffsets, 1, int64(baseOffsets.Len()))
+		defer slicedOffsets.Release()
+
+		result, err = array.NewDenseUnionFromArrays(s.typeIDs, slicedOffsets, children)
+		s.NoError(err)
+		defer result.Release()
+		s.Zero(result.Data().Offset())
+		s.NoError(result.ValidateFull())
+		s.True(array.Equal(expected, result))
+
+		baseOffsets = s.offsetsFromSlice(-1, -1, 0, 0, 0, 1, 1, 0, 1, 2, 1, 2)
+		defer baseOffsets.Release()
+		slicedOffsets = array.NewSlice(baseOffsets, 2, int64(baseOffsets.Len()))
+		defer slicedOffsets.Release()
+		s.Equal(1, slicedTypeIDs.Data().Offset())
+		s.Equal(2, slicedOffsets.Data().Offset())
+
+		result, err = array.NewDenseUnionFromArrays(slicedTypeIDs, slicedOffsets, children)
+		s.NoError(err)
+		defer result.Release()
+		s.Zero(result.Data().Offset())
+		s.NoError(result.ValidateFull())
+		s.True(array.Equal(expected, result))
+	})
 }
 
 func (s *UnionFactorySuite) TestDenseUnionStringRoundTrip() {
@@ -562,6 +620,24 @@ func (s *UnionFactorySuite) TestMakeSparse() {
 		s.NoError(err)
 		defer result.Release()
 		s.Error(result.ValidateFull())
+	})
+
+	s.Run("sliced type ids", func() {
+		expected, err := array.NewSparseUnionFromArrays(s.typeIDs, children)
+		s.NoError(err)
+		defer expected.Release()
+
+		baseTypeIDs := s.typeidsFromSlice(3, 0, 1, 2, 0, 1, 3, 2, 0, 2, 1)
+		defer baseTypeIDs.Release()
+		slicedTypeIDs := array.NewSlice(baseTypeIDs, 1, int64(baseTypeIDs.Len()))
+		defer slicedTypeIDs.Release()
+
+		result, err := array.NewSparseUnionFromArrays(slicedTypeIDs, children)
+		s.NoError(err)
+		defer result.Release()
+		s.Zero(result.Data().Offset())
+		s.NoError(result.ValidateFull())
+		s.True(array.Equal(expected, result))
 	})
 
 	s.Run("invalid child length", func() {

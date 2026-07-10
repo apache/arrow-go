@@ -112,6 +112,11 @@ func TestBuilder_SetNull(t *testing.T) {
 			b.SetNull(i)
 		}
 	}
+	assert.Equal(t, n/2, b.NullN())
+
+	// idempotent SetNull
+	b.SetNull(0)
+	assert.Equal(t, n/2, b.NullN())
 
 	for i := 0; i < n; i++ {
 		if i%2 == 0 {

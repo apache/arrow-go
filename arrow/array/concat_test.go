@@ -594,6 +594,60 @@ func TestConcatDictionaryNullSlots(t *testing.T) {
 	assert.Truef(t, array.Equal(actual, expected), "got: %s, expected: %s", actual, expected)
 }
 
+func TestConcatDictionaryNullIndexRunsPreserveWideIndices(t *testing.T) {
+	tests := []arrow.DataType{
+		arrow.PrimitiveTypes.Int16,
+		arrow.PrimitiveTypes.Uint16,
+		arrow.PrimitiveTypes.Int32,
+		arrow.PrimitiveTypes.Uint32,
+		arrow.PrimitiveTypes.Int64,
+		arrow.PrimitiveTypes.Uint64,
+	}
+
+	for _, indexType := range tests {
+		t.Run(indexType.Name(), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			dt := &arrow.DictionaryType{IndexType: indexType, ValueType: arrow.BinaryTypes.String}
+
+			indices1, _, err := array.FromJSON(mem, indexType, strings.NewReader(`[256, null, 1]`))
+			require.NoError(t, err)
+			defer indices1.Release()
+			indices2, _, err := array.FromJSON(mem, indexType, strings.NewReader(`[0]`))
+			require.NoError(t, err)
+			defer indices2.Release()
+
+			dictBuilder := array.NewStringBuilder(mem)
+			defer dictBuilder.Release()
+			for i := 0; i <= 256; i++ {
+				dictBuilder.Append(fmt.Sprintf("v%03d", i))
+			}
+			dict1 := dictBuilder.NewStringArray()
+			defer dict1.Release()
+
+			dictBuilder.Append("other")
+			dict2 := dictBuilder.NewStringArray()
+			defer dict2.Release()
+
+			arr1 := array.NewDictionaryArray(dt, indices1, dict1)
+			defer arr1.Release()
+			arr2 := array.NewDictionaryArray(dt, indices2, dict2)
+			defer arr2.Release()
+
+			actual, err := array.Concatenate([]arrow.Array{arr1, arr2}, mem)
+			require.NoError(t, err)
+			defer actual.Release()
+
+			dict := actual.(*array.Dictionary)
+			assert.Equal(t, "v256", dict.ValueStr(0))
+			assert.True(t, dict.IsNull(1))
+			assert.Equal(t, "v001", dict.ValueStr(2))
+			assert.Equal(t, "other", dict.ValueStr(3))
+		})
+	}
+}
+
 func TestConcatRunEndEncoded(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

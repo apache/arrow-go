@@ -778,7 +778,7 @@ func (b *StringViewBuilder) UnmarshalOne(dec *json.Decoder) error {
 	default:
 		return &json.UnmarshalTypeError{
 			Value:  fmt.Sprint(t),
-			Type:   reflect.TypeOf([]byte{}),
+			Type:   reflect.TypeOf(string("")),
 			Offset: dec.InputOffset(),
 		}
 	}
@@ -803,7 +803,7 @@ func (b *StringViewBuilder) UnmarshalJSON(data []byte) error {
 	}
 
 	if delim, ok := t.(json.Delim); !ok || delim != '[' {
-		return fmt.Errorf("binary view builder must unpack from json array, found %s", delim)
+		return fmt.Errorf("string view builder must unpack from json array, found %s", delim)
 	}
 
 	return b.Unmarshal(dec)
