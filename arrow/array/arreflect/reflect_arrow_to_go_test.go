@@ -17,6 +17,7 @@
 package arreflect
 
 import (
+	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -217,6 +218,19 @@ func TestSetPrimitiveValue(t *testing.T) {
 		assert.ErrorIs(t, setPrimitiveValue(reflect.ValueOf(&bad).Elem(), arr, 0), ErrTypeMismatch)
 	})
 
+	t.Run("int64 overflow into int8 returns error", func(t *testing.T) {
+		b := array.NewInt64Builder(mem)
+		defer b.Release()
+		b.Append(int64(300))
+		arr := b.NewArray().(*array.Int64)
+		defer arr.Release()
+
+		got := int8(7)
+		err := setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0)
+		assert.ErrorIs(t, err, ErrTypeMismatch)
+		assert.Equal(t, int8(7), got)
+	})
+
 	t.Run("uint16", func(t *testing.T) {
 		b := array.NewUint16Builder(mem)
 		defer b.Release()
@@ -230,6 +244,19 @@ func TestSetPrimitiveValue(t *testing.T) {
 
 		var bad int32
 		assert.ErrorIs(t, setPrimitiveValue(reflect.ValueOf(&bad).Elem(), arr, 0), ErrTypeMismatch)
+	})
+
+	t.Run("uint64 overflow into uint8 returns error", func(t *testing.T) {
+		b := array.NewUint64Builder(mem)
+		defer b.Release()
+		b.Append(300)
+		arr := b.NewArray().(*array.Uint64)
+		defer arr.Release()
+
+		got := uint8(7)
+		err := setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0)
+		assert.ErrorIs(t, err, ErrTypeMismatch)
+		assert.Equal(t, uint8(7), got)
 	})
 
 	t.Run("uint32", func(t *testing.T) {
@@ -286,6 +313,19 @@ func TestSetPrimitiveValue(t *testing.T) {
 
 		var bad int32
 		assert.ErrorIs(t, setPrimitiveValue(reflect.ValueOf(&bad).Elem(), arr, 0), ErrTypeMismatch)
+	})
+
+	t.Run("float64 overflow into float32 returns error", func(t *testing.T) {
+		b := array.NewFloat64Builder(mem)
+		defer b.Release()
+		b.Append(math.MaxFloat64)
+		arr := b.NewArray().(*array.Float64)
+		defer arr.Release()
+
+		got := float32(1)
+		err := setPrimitiveValue(reflect.ValueOf(&got).Elem(), arr, 0)
+		assert.ErrorIs(t, err, ErrTypeMismatch)
+		assert.Equal(t, float32(1), got)
 	})
 
 	t.Run("float64 mismatch", func(t *testing.T) {
