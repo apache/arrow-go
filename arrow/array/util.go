@@ -74,6 +74,29 @@ func WithUseNumber() FromJSONOption {
 	}
 }
 
+func seekJSONStartOffset(r io.Reader, offset int64) error {
+	if offset < 0 {
+		return fmt.Errorf("seek JSON start offset must be non-negative: %d", offset)
+	}
+	if offset == 0 {
+		return nil
+	}
+
+	seeker, ok := r.(io.ReadSeeker)
+	if !ok {
+		return errors.New("using StartOffset option requires reader to be a ReadSeeker, cannot seek")
+	}
+
+	pos, err := seeker.Seek(offset, io.SeekStart)
+	if err != nil {
+		return fmt.Errorf("seek JSON start offset %d: %w", offset, err)
+	}
+	if pos != offset {
+		return fmt.Errorf("seek JSON start offset: got %d, want %d", pos, offset)
+	}
+	return nil
+}
+
 // FromJSON creates an arrow.Array from a corresponding JSON stream and defined data type. If the types in the
 // json do not match the type provided, it will return errors. This is *not* the integration test format
 // and should not be used as such. This intended to be used by consumers more similarly to the current exposing of
@@ -133,13 +156,8 @@ func FromJSON(mem memory.Allocator, dt arrow.DataType, r io.Reader, opts ...From
 		o(&cfg)
 	}
 
-	if cfg.startOffset != 0 {
-		seeker, ok := r.(io.ReadSeeker)
-		if !ok {
-			return nil, 0, errors.New("using StartOffset option requires reader to be a ReadSeeker, cannot seek")
-		}
-
-		seeker.Seek(cfg.startOffset, io.SeekStart)
+	if err = seekJSONStartOffset(r, cfg.startOffset); err != nil {
+		return nil, 0, err
 	}
 
 	bldr := NewBuilder(mem, dt)
@@ -219,14 +237,8 @@ func RecordFromJSON(mem memory.Allocator, schema *arrow.Schema, r io.Reader, opt
 		o(&cfg)
 	}
 
-	if cfg.startOffset != 0 {
-		seeker, ok := r.(io.ReadSeeker)
-		if !ok {
-			return nil, 0, errors.New("using StartOffset option requires reader to be a ReadSeeker, cannot seek")
-		}
-		if _, err := seeker.Seek(cfg.startOffset, io.SeekStart); err != nil {
-			return nil, 0, fmt.Errorf("failed to seek to start offset %d: %w", cfg.startOffset, err)
-		}
+	if err := seekJSONStartOffset(r, cfg.startOffset); err != nil {
+		return nil, 0, err
 	}
 
 	if mem == nil {

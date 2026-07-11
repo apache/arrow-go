@@ -19,6 +19,7 @@ package array_test
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -99,6 +100,89 @@ func TestIntegerArrsJSON(t *testing.T) {
 
 			_, _, err = array.FromJSON(memory.DefaultAllocator, tt, strings.NewReader("[[0]]"))
 			assert.EqualError(t, err, "json: cannot unmarshal [ into Go value of type "+tt.Name())
+		})
+	}
+}
+
+type fromJSONSeekReader struct {
+	*bytes.Reader
+	seekFn     func(offset int64, whence int) (int64, error)
+	seekCalled bool
+}
+
+func (r *fromJSONSeekReader) Seek(offset int64, whence int) (int64, error) {
+	r.seekCalled = true
+	if r.seekFn != nil {
+		return r.seekFn(offset, whence)
+	}
+	return r.Reader.Seek(offset, whence)
+}
+
+func TestFromJSONStartOffsetSeekValidation(t *testing.T) {
+	seekErr := errors.New("seek failed")
+	tests := []struct {
+		name            string
+		reader          *fromJSONSeekReader
+		offset          int64
+		wantErr         error
+		wantErrContains string
+		wantSeek        bool
+	}{
+		{
+			name:     "seek error",
+			offset:   1,
+			wantErr:  seekErr,
+			wantSeek: true,
+			reader: &fromJSONSeekReader{
+				Reader: bytes.NewReader([]byte("[1]")),
+				seekFn: func(int64, int) (int64, error) { return 0, seekErr },
+			},
+		},
+		{
+			name:            "wrong position",
+			offset:          1,
+			wantErrContains: "got 2, want 1",
+			wantSeek:        true,
+			reader: &fromJSONSeekReader{
+				Reader: bytes.NewReader([]byte("[1]")),
+				seekFn: func(offset int64, _ int) (int64, error) { return offset + 1, nil },
+			},
+		},
+		{
+			name:            "negative offset",
+			offset:          -1,
+			wantErrContains: "non-negative",
+			reader:          &fromJSONSeekReader{Reader: bytes.NewReader([]byte("[1]"))},
+		},
+		{
+			name:     "successful seek",
+			offset:   4,
+			wantSeek: true,
+			reader:   &fromJSONSeekReader{Reader: bytes.NewReader([]byte("skip[1, 2]"))},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			arr, _, err := array.FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32, tt.reader,
+				array.WithStartOffset(tt.offset))
+			if tt.name == "successful seek" {
+				require.NoError(t, err)
+				defer arr.Release()
+				assert.Equal(t, 2, arr.Len())
+				assert.Equal(t, int32(1), arr.(*array.Int32).Value(0))
+				assert.Equal(t, int32(2), arr.(*array.Int32).Value(1))
+				assert.True(t, tt.reader.seekCalled)
+				return
+			}
+
+			require.Error(t, err)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+			} else if tt.wantErrContains != "" {
+				assert.ErrorContains(t, err, tt.wantErrContains)
+			}
+			assert.Equal(t, tt.wantSeek, tt.reader.seekCalled)
 		})
 	}
 }
