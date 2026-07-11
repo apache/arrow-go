@@ -18,6 +18,7 @@ package file_test
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"testing"
 
@@ -196,6 +197,66 @@ func TestPageStreamingAllocatorBalance(t *testing.T) {
 		total += nv
 	}
 	require.NoError(t, cr.Close())
+}
+
+func TestPageStreamingLeveledAllocatorBalance(t *testing.T) {
+	nullDef := make([]int16, 40)
+	var nullVals []parquet.ByteArray
+	for i := 0; i < 40; i++ {
+		if i%3 == 0 {
+			continue
+		}
+		nullDef[i] = 1
+		buf := make([]byte, 40+i*120)
+		for j := range buf {
+			buf[j] = byte(i*7 + j)
+		}
+		nullVals = append(nullVals, buf)
+	}
+
+	cases := []struct {
+		name      string
+		rep       parquet.Repetition
+		values    []parquet.ByteArray
+		defLevels []int16
+		repLevels []int16
+	}{
+		{"nullable", parquet.Repetitions.Optional, nullVals, nullDef, nil},
+		{"repeated", parquet.Repetitions.Repeated,
+			makeStreamTestValues([]int{40, 5000, 60, 9000, 70, 80}),
+			[]int16{1, 1, 1, 1, 1, 1}, []int16{0, 1, 1, 0, 0, 1}},
+	}
+	for _, tc := range cases {
+		for _, ver := range []parquet.DataPageVersion{parquet.DataPageV1, parquet.DataPageV2} {
+			t.Run(fmt.Sprintf("%s/v%d", tc.name, ver+1), func(t *testing.T) {
+				data := writeByteArrayStream(t, tc.values, tc.defLevels, tc.repLevels, tc.rep, ver, compress.Codecs.Zstd, 1024)
+
+				checked := memory.NewCheckedAllocator(memory.DefaultAllocator)
+				defer checked.AssertSize(t, 0)
+
+				props := parquet.NewReaderProperties(checked)
+				props.PageStreamingEnabled = true
+				rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
+				require.NoError(t, err)
+				defer rdr.Close()
+
+				cr, err := rdr.RowGroup(0).Column(0)
+				require.NoError(t, err)
+				bar := cr.(*file.ByteArrayColumnChunkReader)
+				vbuf := make([]parquet.ByteArray, 64)
+				dbuf := make([]int16, 64)
+				rbuf := make([]int16, 64)
+				for {
+					total, _, err := bar.ReadBatch(64, vbuf, dbuf, rbuf)
+					require.NoError(t, err)
+					if total == 0 {
+						break
+					}
+				}
+				require.NoError(t, cr.Close())
+			})
+		}
+	}
 }
 
 func TestPageStreamingIneligibleCodecFallback(t *testing.T) {

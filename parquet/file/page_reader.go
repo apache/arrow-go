@@ -118,9 +118,9 @@ func (d *dataPageBase) levelBuffer() []byte                { return d.buf.Bytes(
 
 func (d *dataPageBase) valueClip() int64 { return d.clip }
 
-func (d *dataPageBase) setStreamingValues(mem memory.Allocator, lenUncompressed int, levelBuf []byte, valReader, rawSrc io.Reader, closer io.Closer) {
-	d.buf = memory.NewBufferBytes(levelBuf)
-	valueBytes := lenUncompressed - len(levelBuf)
+func (d *dataPageBase) setStreamingValues(mem memory.Allocator, lenUncompressed int, levelBuf *memory.Buffer, valReader, rawSrc io.Reader, closer io.Closer) {
+	d.buf = levelBuf
+	valueBytes := lenUncompressed - levelBuf.Len()
 	d.valueBuf = streaming.NewStreamBuffer(mem, valReader, valueBytes, drainAndClose(rawSrc, closer))
 	d.clip = streaming.ClipBatch(valueBytes, int(d.nvals))
 }
@@ -883,8 +883,9 @@ func (p *serializedPageReader) pageCanStream(enc format.Encoding, lenUncompresse
 
 // readLevelData reads the V1 rep+def level region, capped at maxBytes (the
 // uncompressed page size) so a bogus length prefix can't force a huge allocation.
-func (p *serializedPageReader) readLevelData(r io.Reader, repEnc, defEnc format.Encoding, numValues, maxBytes int) ([]byte, error) {
-	buf := make([]byte, 0, 4096)
+func (p *serializedPageReader) readLevelData(r io.Reader, repEnc, defEnc format.Encoding, numValues, maxBytes int) (*memory.Buffer, error) {
+	buf := memory.NewResizableBuffer(p.mem)
+	pos := 0
 	readOne := func(enc format.Encoding, maxLvl int16) error {
 		switch enc {
 		case format.Encoding_RLE:
@@ -893,15 +894,15 @@ func (p *serializedPageReader) readLevelData(r io.Reader, repEnc, defEnc format.
 				return err
 			}
 			n := int(binary.LittleEndian.Uint32(hdr[:]))
-			if n < 0 || len(buf)+4+n > maxBytes {
+			if n < 0 || pos+4+n > maxBytes {
 				return fmt.Errorf("parquet: invalid V1 level region length %d", n)
 			}
-			start := len(buf)
-			buf = append(buf, hdr[:]...)
-			buf = append(buf, make([]byte, n)...)
-			if _, err := io.ReadFull(r, buf[start+4:]); err != nil {
+			buf.Resize(pos + 4 + n)
+			copy(buf.Bytes()[pos:], hdr[:])
+			if _, err := io.ReadFull(r, buf.Bytes()[pos+4:pos+4+n]); err != nil {
 				return err
 			}
+			pos += 4 + n
 		case format.Encoding_BIT_PACKED:
 			bitWidth := bits.Len64(uint64(maxLvl))
 			nbits, ok := utils.Mul(numValues, bitWidth)
@@ -909,14 +910,14 @@ func (p *serializedPageReader) readLevelData(r io.Reader, repEnc, defEnc format.
 				return fmt.Errorf("parquet: V1 level count %d too large (corrupt page?)", numValues)
 			}
 			n := int(bitutil.BytesForBits(int64(nbits)))
-			if n < 0 || len(buf)+n > maxBytes {
+			if n < 0 || pos+n > maxBytes {
 				return fmt.Errorf("parquet: invalid V1 level region length %d", n)
 			}
-			start := len(buf)
-			buf = append(buf, make([]byte, n)...)
-			if _, err := io.ReadFull(r, buf[start:]); err != nil {
+			buf.Resize(pos + n)
+			if _, err := io.ReadFull(r, buf.Bytes()[pos:pos+n]); err != nil {
 				return err
 			}
+			pos += n
 		default:
 			return fmt.Errorf("parquet: unsupported V1 level encoding %s for streaming", enc)
 		}
@@ -925,11 +926,13 @@ func (p *serializedPageReader) readLevelData(r io.Reader, repEnc, defEnc format.
 
 	if p.maxRepLevel > 0 {
 		if err := readOne(repEnc, p.maxRepLevel); err != nil {
+			buf.Release()
 			return nil, err
 		}
 	}
 	if p.maxDefLevel > 0 {
 		if err := readOne(defEnc, p.maxDefLevel); err != nil {
+			buf.Release()
 			return nil, err
 		}
 	}
@@ -1098,8 +1101,10 @@ func (p *serializedPageReader) Next() bool {
 				// compressed value region. Read the level bytes directly off the front,
 				// then stream the values from what remains.
 				limit := io.LimitReader(p.r, int64(lenCompressed))
-				levelBuf := make([]byte, levelsBytelen)
-				if _, err := io.ReadFull(limit, levelBuf); err != nil {
+				levelBuf := memory.NewResizableBuffer(p.mem)
+				levelBuf.Resize(levelsBytelen)
+				if _, err := io.ReadFull(limit, levelBuf.Bytes()); err != nil {
+					levelBuf.Release()
 					p.err = err
 					return false
 				}
