@@ -40,6 +40,7 @@ func (testDataType) Layout() arrow.DataTypeLayout { return arrow.DataTypeLayout{
 func (testDataType) String() string               { return "" }
 
 func TestMakeFromData(t *testing.T) {
+	const veryLargeTypeID arrow.Type = 1 << 30
 	tests := []struct {
 		name     string
 		d        arrow.DataType
@@ -134,6 +135,10 @@ func TestMakeFromData(t *testing.T) {
 		// invalid types
 		{name: "invalid(-1)", d: &testDataType{arrow.Type(-1)}, expPanic: true, expError: "invalid data type: Type(-1)"},
 		{name: "invalid(63)", d: &testDataType{arrow.Type(63)}, expPanic: true, expError: "invalid data type: Type(63)"},
+		{name: "invalid(64)", d: &testDataType{arrow.Type(64)}, expPanic: true, expError: "invalid data type: Type(64)"},
+		{name: "invalid(65)", d: &testDataType{arrow.Type(65)}, expPanic: true, expError: "invalid data type: Type(65)"},
+		{name: "invalid(127)", d: &testDataType{arrow.Type(127)}, expPanic: true, expError: "invalid data type: Type(127)"},
+		{name: "invalid(very large)", d: &testDataType{veryLargeTypeID}, expPanic: true, expError: "invalid data type: Type(1073741824)"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
