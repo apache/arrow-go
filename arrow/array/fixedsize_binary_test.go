@@ -113,6 +113,33 @@ func TestFixedSizeBinarySlice(t *testing.T) {
 	}
 }
 
+func TestFixedSizeBinaryValueBounds(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dtype := &arrow.FixedSizeBinaryType{ByteWidth: 4}
+	b := array.NewFixedSizeBinaryBuilder(mem, dtype)
+	b.AppendValues([][]byte{
+		[]byte("ABCD"),
+		[]byte("1234"),
+		[]byte("AZER"),
+	}, nil)
+	arr := b.NewFixedSizeBinaryArray()
+	defer arr.Release()
+	b.Release()
+
+	slice := array.NewSlice(arr, 1, 2).(*array.FixedSizeBinary)
+	defer slice.Release()
+
+	assert.Equal(t, []byte("1234"), slice.Value(0))
+	assert.PanicsWithValue(t, "arrow/array: index out of range", func() {
+		slice.Value(-1)
+	})
+	assert.PanicsWithValue(t, "arrow/array: index out of range", func() {
+		slice.Value(1)
+	})
+}
+
 func TestFixedSizeBinary_MarshalUnmarshalJSON(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
