@@ -127,6 +127,24 @@ func freeCArray(arr *CArrowArray) {
 	C.free(unsafe.Pointer(arr))
 }
 
+func setCArrayLength(arr *CArrowArray, length int64) {
+	arr.length = C.int64_t(length)
+}
+
+func setCArrayCounts(arr *CArrowArray, nBuffers, nChildren int64) {
+	arr.n_buffers = C.int64_t(nBuffers)
+	arr.n_children = C.int64_t(nChildren)
+}
+
+func setCArrayBuffers(arr *CArrowArray, n int) {
+	arr.buffers = (*unsafe.Pointer)(C.calloc(C.size_t(n), C.size_t(unsafe.Sizeof(uintptr(0)))))
+}
+
+func freeCArrayBuffers(arr *CArrowArray) {
+	C.free(unsafe.Pointer(arr.buffers))
+	arr.buffers = nil
+}
+
 func isReleased(arr *CArrowArray) bool {
 	return C.ArrowArrayIsReleased(arr) == 1
 }
