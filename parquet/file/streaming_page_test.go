@@ -743,9 +743,7 @@ func readInPage(t *testing.T, data []byte, batch int64) (defLevels, repLevels []
 	return defLevels, repLevels, values
 }
 
-// TestPageStreamingReadBatchInPageNullable exercises the zero-copy ReadBatchInPage
-// streaming path with large values that force DecodeStreaming short-returns (so the
-// pending-level FIFO is used) against a nullable column.
+// Large values force per-page batch clipping (multiple Decodes) on a nullable column.
 func TestPageStreamingReadBatchInPageNullable(t *testing.T) {
 	const numRows = 60
 	defLevels := make([]int16, numRows)
