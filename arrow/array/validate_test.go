@@ -17,6 +17,7 @@
 package array
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -208,4 +209,69 @@ func TestTopLevelValidate(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "column 1 (bad)")
 	})
+}
+
+func TestTopLevelValidateFullRecursesThroughNestedChildren(t *testing.T) {
+	badString := makeStringArrayRaw(t, []int32{0, 5, 3, 5}, "hello", 3, 0)
+	defer badString.Release()
+
+	inner, err := NewStructArrayWithFields([]arrow.Array{badString}, []arrow.Field{
+		{Name: "name", Type: arrow.BinaryTypes.String, Nullable: true},
+	})
+	require.NoError(t, err)
+	defer inner.Release()
+
+	offsets := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes([]int32{0, 3}))
+	data := NewData(arrow.ListOf(inner.DataType()), 1,
+		[]*memory.Buffer{nil, offsets}, []arrow.ArrayData{inner.Data()}, 0, 0)
+	offsets.Release()
+	list := NewListData(data)
+	data.Release()
+	defer list.Release()
+
+	outer, err := NewStructArrayWithFields([]arrow.Array{list}, []arrow.Field{
+		{Name: "orders", Type: list.DataType(), Nullable: true},
+	})
+	require.NoError(t, err)
+	defer outer.Release()
+
+	err = ValidateFull(outer)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `field "orders" -> list values -> field "name"`)
+}
+
+func TestListValidateFullChecksOffsets(t *testing.T) {
+	values, _, err := FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2]`))
+	require.NoError(t, err)
+	defer values.Release()
+
+	offsets := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes([]int32{0, 2, 1}))
+	data := NewData(arrow.ListOf(arrow.PrimitiveTypes.Int32), 2,
+		[]*memory.Buffer{nil, offsets}, []arrow.ArrayData{values.Data()}, 0, 0)
+	offsets.Release()
+	list := NewListData(data)
+	data.Release()
+	defer list.Release()
+
+	assert.NoError(t, list.Validate())
+	err = list.ValidateFull()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not monotonically non-decreasing")
+}
+
+func TestTopLevelValidateFullRecursesDictionaryValues(t *testing.T) {
+	badDictionary := makeStringArrayRaw(t, []int32{0, 5, 3, 5}, "hello", 3, 0)
+	defer badDictionary.Release()
+	indices, _, err := FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int8, strings.NewReader(`[0]`))
+	require.NoError(t, err)
+	defer indices.Release()
+
+	dt := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	dict := NewDictionaryArray(dt, indices, badDictionary)
+	defer dict.Release()
+
+	err = ValidateFull(dict)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dictionary")
+	assert.Contains(t, err.Error(), "not monotonically non-decreasing")
 }
