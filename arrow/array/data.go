@@ -187,13 +187,22 @@ func (d *Data) Dictionary() arrow.ArrayData { return d.dictionary }
 
 // SetDictionary allows replacing the dictionary for this particular Data object
 func (d *Data) SetDictionary(dict arrow.ArrayData) {
-	if d.dictionary != nil {
-		d.dictionary.Release()
-		d.dictionary = nil
+	var newDict *Data
+	if dict != nil {
+		var ok bool
+		newDict, ok = dict.(*Data)
+		if !ok {
+			panic("arrow/array: dictionary data must be *array.Data")
+		}
 	}
-	if dict.(*Data) != nil {
-		dict.Retain()
-		d.dictionary = dict.(*Data)
+
+	if newDict != nil {
+		newDict.Retain()
+	}
+	oldDict := d.dictionary
+	d.dictionary = newDict
+	if oldDict != nil {
+		oldDict.Release()
 	}
 }
 

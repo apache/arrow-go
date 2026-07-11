@@ -24,6 +24,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils/maphash"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDataReset(t *testing.T) {
@@ -99,6 +100,33 @@ func TestDataResetClearsDictionary(t *testing.T) {
 
 	dictData.Release()
 	mem.AssertSize(t, 0)
+}
+
+func TestDataSetDictionaryWithSamePointerRetainsDictionary(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	values := memory.NewResizableBuffer(mem)
+	values.Resize(4)
+	copy(values.Bytes(), arrow.Int32Traits.CastToBytes([]int32{42}))
+	dictData := NewData(arrow.PrimitiveTypes.Int32, 1, []*memory.Buffer{nil, values}, nil, 0, 0)
+	values.Release()
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.PrimitiveTypes.Int32,
+	}
+	data := NewDataWithDictionary(dictType, 1, []*memory.Buffer{nil, memory.NewBufferBytes([]byte{0})}, 0, 0, dictData)
+	defer data.Release()
+	dictData.Release()
+
+	data.SetDictionary(dictData)
+	require.Same(t, dictData, data.Dictionary())
+	require.NotNil(t, dictData.Buffers()[1])
+
+	valuesArray := NewInt32Data(dictData)
+	defer valuesArray.Release()
+	require.Equal(t, int32(42), valuesArray.Value(0))
 }
 
 func TestHashIncludesDataMetadataAndBuffers(t *testing.T) {
