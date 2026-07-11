@@ -1166,6 +1166,84 @@ func TestDictionaryScalarValidateErrors(t *testing.T) {
 	}
 }
 
+func TestDictionaryScalarIndexBounds(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	valueType := arrow.BinaryTypes.String
+	dict, _, _ := array.FromJSON(mem, valueType, strings.NewReader(`["alpha", "beta", "gamma"]`))
+	defer dict.Release()
+
+	for _, indexType := range dictIndexTypes {
+		t.Run(fmt.Sprint(indexType), func(t *testing.T) {
+			bits := indexType.(arrow.FixedWidthDataType).BitWidth()
+			newIndex := func(signed int64, unsigned uint64) scalar.Scalar {
+				if arrow.IsUnsignedInteger(indexType.ID()) {
+					idx, err := scalar.MakeUnsignedIntegerScalar(unsigned, bits)
+					require.NoError(t, err)
+					return idx
+				}
+
+				idx, err := scalar.MakeIntegerScalar(signed, bits)
+				require.NoError(t, err)
+				return idx
+			}
+			checkValid := func(signed int64, unsigned uint64) {
+				idx := newIndex(signed, unsigned)
+				value := scalar.NewDictScalar(idx, dict)
+				defer value.Release()
+
+				assert.NoError(t, value.ValidateFull())
+				encoded, err := value.GetEncodedValue()
+				assert.NoError(t, err)
+				assert.NoError(t, encoded.ValidateFull())
+			}
+			checkInvalid := func(signed int64, unsigned uint64) {
+				idx := newIndex(signed, unsigned)
+				value := scalar.NewDictScalar(idx, dict)
+				defer value.Release()
+
+				assert.Error(t, value.ValidateFull())
+				_, err := value.GetEncodedValue()
+				assert.Error(t, err)
+			}
+
+			checkValid(0, 0)
+			checkValid(2, 2)
+			checkInvalid(3, 3)
+
+			if arrow.IsUnsignedInteger(indexType.ID()) {
+				var max uint64
+				switch bits {
+				case 8:
+					max = uint64(^uint8(0))
+				case 16:
+					max = uint64(^uint16(0))
+				case 32:
+					max = uint64(^uint32(0))
+				case 64:
+					max = ^uint64(0)
+				}
+				checkInvalid(0, max)
+			} else {
+				checkInvalid(-1, 0)
+				var max int64
+				switch bits {
+				case 8:
+					max = int64(^uint8(0) >> 1)
+				case 16:
+					max = int64(^uint16(0) >> 1)
+				case 32:
+					max = int64(^uint32(0) >> 1)
+				case 64:
+					max = int64(^uint64(0) >> 1)
+				}
+				checkInvalid(max, 0)
+			}
+		})
+	}
+}
+
 func checkGetValidUnionScalar(t *testing.T, arr arrow.Array, idx int, expected, expectedValue scalar.Scalar) {
 	s, err := scalar.GetScalar(arr, idx)
 	assert.NoError(t, err)
