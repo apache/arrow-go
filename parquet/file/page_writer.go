@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"sync"
 
@@ -505,15 +506,26 @@ func (bw *bufferedPageWriter) Close(hasDict, fallback bool) error {
 		DictEncodingStats: bw.pager.dictEncodingStats,
 		DataEncodingStats: bw.pager.dataEncodingStats,
 	}
-	bw.metadata.Finish(chunkInfo, hasDict, fallback, encodingStats)
+	if err := bw.metadata.Finish(chunkInfo, hasDict, fallback, encodingStats); err != nil {
+		return err
+	}
 	bw.pager.FinishPageIndexes(position)
 
-	bw.metadata.WriteTo(bw.inMemSink)
+	if _, err := bw.metadata.WriteTo(bw.inMemSink); err != nil {
+		return err
+	}
 
 	buf := bw.inMemSink.Finish()
 	defer buf.Release()
-	_, err := bw.finalSink.Write(buf.Bytes())
-	return err
+	data := buf.Bytes()
+	n, err := bw.finalSink.Write(data)
+	if err != nil {
+		return err
+	}
+	if n != len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 func (bw *bufferedPageWriter) WriteDataPage(page DataPage) (int64, error) {

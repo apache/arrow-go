@@ -53,5 +53,8 @@ func (w *TellWrapper) Tell() int64 { return w.pos }
 func (w *TellWrapper) Write(p []byte) (n int, err error) {
 	n, err = w.Writer.Write(p)
 	w.pos += int64(n)
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
 	return
 }

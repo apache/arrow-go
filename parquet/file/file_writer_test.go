@@ -1352,12 +1352,117 @@ func (f *flakyMagicSink) Write(p []byte) (int, error) {
 	return f.buf.Write(p)
 }
 
+type controlledSink struct {
+	buf       bytes.Buffer
+	failAfter int
+	failErr   error
+	short     bool
+}
+
+func (s *controlledSink) Write(p []byte) (int, error) {
+	if s.failAfter >= 0 {
+		if s.failAfter == 0 {
+			if s.short {
+				return len(p) - 1, nil
+			}
+			return 0, s.failErr
+		}
+		s.failAfter--
+	}
+	return s.buf.Write(p)
+}
+
 func newSingleColumnSchema(t *testing.T) *schema.GroupNode {
 	t.Helper()
 	fields := schema.FieldList{schema.NewInt32Node("col", parquet.Repetitions.Required, 1)}
 	sc, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, fields, 0)
 	require.NoError(t, err)
 	return sc
+}
+
+func newTwoColumnSchema(t *testing.T) *schema.GroupNode {
+	t.Helper()
+	fields := schema.FieldList{
+		schema.NewInt32Node("col0", parquet.Repetitions.Required, 1),
+		schema.NewInt32Node("col1", parquet.Repetitions.Required, 1),
+	}
+	sc, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, fields, 0)
+	require.NoError(t, err)
+	return sc
+}
+
+func TestAppendRowGroupCheckedPropagatesCloseError(t *testing.T) {
+	closeErr := errors.New("row group close failed")
+	sink := &controlledSink{failAfter: -1}
+	writer, err := file.NewParquetWriterWithError(sink, newSingleColumnSchema(t),
+		file.WithWriterProps(parquet.NewWriterProperties(parquet.WithDictionaryDefault(false))))
+	require.NoError(t, err)
+
+	rgw, err := writer.AppendRowGroupChecked()
+	require.NoError(t, err)
+	cw, err := rgw.NextColumn()
+	require.NoError(t, err)
+	_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch([]int32{1}, []int16{1}, nil)
+	require.NoError(t, err)
+
+	sink.failErr = closeErr
+	sink.failAfter = 0
+	_, err = writer.AppendRowGroupChecked()
+	require.ErrorIs(t, err, closeErr)
+	require.Zero(t, writer.NumRows())
+	require.ErrorIs(t, writer.Close(), closeErr)
+	_, err = file.NewParquetReader(bytes.NewReader(sink.buf.Bytes()))
+	require.Error(t, err)
+}
+
+func TestBufferedRowGroupPropagatesShortWrite(t *testing.T) {
+	sink := &controlledSink{failAfter: -1}
+	writer, err := file.NewParquetWriterWithError(sink, newSingleColumnSchema(t),
+		file.WithWriterProps(parquet.NewWriterProperties(parquet.WithDictionaryDefault(false))))
+	require.NoError(t, err)
+
+	rgw, err := writer.AppendBufferedRowGroupChecked()
+	require.NoError(t, err)
+	cw, err := rgw.Column(0)
+	require.NoError(t, err)
+	_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch([]int32{1}, []int16{1}, nil)
+	require.NoError(t, err)
+
+	sink.short = true
+	sink.failAfter = 0
+	require.ErrorIs(t, rgw.Close(), io.ErrShortWrite)
+	require.ErrorIs(t, writer.Close(), io.ErrShortWrite)
+	_, err = file.NewParquetReader(bytes.NewReader(sink.buf.Bytes()))
+	require.Error(t, err)
+}
+
+func TestFlushWithFooterPropagatesPageIndexWriteError(t *testing.T) {
+	pageIndexErr := errors.New("page index write failed")
+	sink := &controlledSink{failAfter: -1}
+	props := parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(false),
+		parquet.WithPageIndexEnabled(true),
+	)
+	writer, err := file.NewParquetWriterWithError(sink, newTwoColumnSchema(t), file.WithWriterProps(props))
+	require.NoError(t, err)
+
+	rgw, err := writer.AppendRowGroupChecked()
+	require.NoError(t, err)
+	for i := 0; i < 2; i++ {
+		cw, err := rgw.NextColumn()
+		require.NoError(t, err)
+		_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch([]int32{int32(i)}, []int16{1}, nil)
+		require.NoError(t, err)
+		require.NoError(t, cw.Close())
+	}
+	require.NoError(t, rgw.Close())
+
+	sink.failErr = pageIndexErr
+	sink.failAfter = 1
+	require.ErrorIs(t, writer.FlushWithFooter(), pageIndexErr)
+	require.ErrorIs(t, writer.Close(), pageIndexErr)
+	_, err = file.NewParquetReader(bytes.NewReader(sink.buf.Bytes()))
+	require.Error(t, err)
 }
 
 func TestNewParquetWriterWithError_Success(t *testing.T) {

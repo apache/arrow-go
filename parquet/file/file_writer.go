@@ -18,6 +18,7 @@ package file
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 
@@ -36,6 +37,7 @@ type Writer struct {
 	props            *parquet.WriterProperties
 	rowGroups        int
 	nrows            int
+	writeErr         error
 	metadata         metadata.FileMetaDataBuilder
 	fileEncryptor    encryption.FileEncryptor
 	rowGroupWriter   *rowGroupWriter
@@ -165,8 +167,26 @@ func (fw *Writer) TotalCompressedBytes() int64 {
 // is closed.
 //
 // When calling Close, all columns must have the same number of rows written.
+//
+// Deprecated: AppendBufferedRowGroup panics if closing the previous row group
+// or starting the new row group fails. Use AppendBufferedRowGroupChecked to
+// handle those errors explicitly.
 func (fw *Writer) AppendBufferedRowGroup() BufferedRowGroupWriter {
-	return fw.appendRowGroup(true)
+	rgw, err := fw.AppendBufferedRowGroupChecked()
+	if err != nil {
+		panic(err)
+	}
+	return rgw
+}
+
+// AppendBufferedRowGroupChecked is the error-returning form of
+// AppendBufferedRowGroup.
+func (fw *Writer) AppendBufferedRowGroupChecked() (BufferedRowGroupWriter, error) {
+	rgw, err := fw.appendRowGroup(true)
+	if err != nil {
+		return nil, fw.recordError(err)
+	}
+	return rgw, nil
 }
 
 // AppendRowGroup appends a row group to the file and returns a writer
@@ -174,26 +194,57 @@ func (fw *Writer) AppendBufferedRowGroup() BufferedRowGroupWriter {
 //
 // When calling NextColumn, the same number of rows need to have been written
 // to each column before moving on. Otherwise the rowgroup writer will panic.
+//
+// Deprecated: AppendRowGroup panics if closing the previous row group or
+// starting the new row group fails. Use AppendRowGroupChecked to handle those
+// errors explicitly.
 func (fw *Writer) AppendRowGroup() SerialRowGroupWriter {
-	return fw.appendRowGroup(false)
+	rgw, err := fw.AppendRowGroupChecked()
+	if err != nil {
+		panic(err)
+	}
+	return rgw
 }
 
-func (fw *Writer) appendRowGroup(buffered bool) *rowGroupWriter {
-	if fw.rowGroupWriter != nil {
-		fw.nrows += fw.rowGroupWriter.nrows
-		fw.rowGroupWriter.Close()
+// AppendRowGroupChecked is the error-returning form of AppendRowGroup.
+func (fw *Writer) AppendRowGroupChecked() (SerialRowGroupWriter, error) {
+	rgw, err := fw.appendRowGroup(false)
+	if err != nil {
+		return nil, fw.recordError(err)
 	}
-	fw.rowGroups++
-	fw.footerFlushed = false
-	rgMeta := fw.metadata.AppendRowGroup()
-	if fw.pageIndexBuilder != nil {
-		fw.pageIndexBuilder.AppendRowGroup()
+	return rgw, nil
+}
+
+func (fw *Writer) appendRowGroup(buffered bool) (*rowGroupWriter, error) {
+	if fw.writeErr != nil {
+		return nil, fw.writeErr
 	}
 
-	fw.rowGroupWriter = newRowGroupWriter(fw.sink, rgMeta, int16(fw.rowGroups)-1,
+	if fw.rowGroupWriter != nil {
+		if err := fw.rowGroupWriter.Close(); err != nil {
+			return nil, err
+		}
+		fw.nrows += fw.rowGroupWriter.nrows
+	}
+
+	if fw.pageIndexBuilder != nil {
+		if err := fw.pageIndexBuilder.AppendRowGroup(); err != nil {
+			return nil, err
+		}
+	}
+
+	rgMeta := fw.metadata.AppendRowGroup()
+	rgw, err := newRowGroupWriter(fw.sink, rgMeta, int16(fw.rowGroups),
 		fw.props, buffered, fw.fileEncryptor, fw.pageIndexBuilder)
-	fw.bloomFilters.AppendRowGroup(rgMeta, fw.rowGroupWriter.bloomFilters)
-	return fw.rowGroupWriter
+	if err != nil {
+		return nil, err
+	}
+
+	fw.rowGroups++
+	fw.footerFlushed = false
+	fw.rowGroupWriter = rgw
+	fw.bloomFilters.AppendRowGroup(rgMeta, rgw.bloomFilters)
+	return rgw, nil
 }
 
 func (fw *Writer) startFile() error {
@@ -228,11 +279,14 @@ func (fw *Writer) startFile() error {
 	}
 
 	n, err := fw.sink.Write(magic)
-	if err != nil {
+	if err != nil && !errors.Is(err, io.ErrShortWrite) {
 		return fmt.Errorf("parquet: failed to write magic number: %w", err)
 	}
 	if n != len(magic) {
 		return fmt.Errorf("parquet: short write of magic number: wrote %d of %d bytes", n, len(magic))
+	}
+	if err != nil {
+		return fmt.Errorf("parquet: failed to write magic number: %w", err)
 	}
 
 	if fw.props.PageIndexEnabled() {
@@ -244,20 +298,33 @@ func (fw *Writer) startFile() error {
 	return nil
 }
 
-func (fw *Writer) writePageIndex() {
+func (fw *Writer) writePageIndex() error {
 	if fw.pageIndexBuilder != nil {
 		// serialize page index after all row groups have been written and report
 		// location to the file metadata
 		fw.pageIndexBuilder.Finish()
 		var pageIndexLocation metadata.PageIndexLocation
-		fw.pageIndexBuilder.WriteTo(fw.sink, &pageIndexLocation)
+		if err := fw.pageIndexBuilder.WriteTo(fw.sink, &pageIndexLocation); err != nil {
+			return err
+		}
 		fw.metadata.SetPageIndexLocation(pageIndexLocation)
 	}
+	return nil
 }
 
 // AppendKeyValueMetadata appends a key/value pair to the existing key/value metadata
 func (fw *Writer) AppendKeyValueMetadata(key string, value string) error {
+	if fw.writeErr != nil {
+		return fw.writeErr
+	}
 	return fw.metadata.AppendKeyValueMetadata(key, value)
+}
+
+func (fw *Writer) recordError(err error) error {
+	if fw.writeErr == nil {
+		fw.writeErr = err
+	}
+	return fw.writeErr
 }
 
 // Close closes any open row group writer and writes the file footer. Subsequent
@@ -276,15 +343,22 @@ func (fw *Writer) Close() (err error) {
 				if ierr != nil {
 					err = fmt.Errorf("error on close:%w, %s", err, ierr)
 				}
+				fw.writeErr = err
 				return
 			}
 
 			err = ierr
+			if err != nil {
+				fw.writeErr = err
+			}
 		}()
 
 		err = fw.FlushWithFooter()
 	}
-	return
+	if err != nil {
+		return err
+	}
+	return fw.writeErr
 }
 
 // FileMetadata returns the current state of the FileMetadata that would be written
@@ -299,31 +373,39 @@ func (fw *Writer) FileMetadata() (*metadata.FileMetaData, error) {
 // calls to FlushWithFooter or Close will be cumulative, so that only the last footer
 // written need ever be read by a reader.
 func (fw *Writer) FlushWithFooter() error {
+	if fw.writeErr != nil {
+		return fw.writeErr
+	}
+
 	if !fw.footerFlushed {
 		if fw.rowGroupWriter != nil {
+			if err := fw.rowGroupWriter.Close(); err != nil {
+				return fw.recordError(err)
+			}
 			fw.nrows += fw.rowGroupWriter.nrows
-			fw.rowGroupWriter.Close()
+			fw.rowGroupWriter = nil
 		}
-		fw.rowGroupWriter = nil
 		if err := fw.bloomFilters.WriteTo(fw.sink); err != nil {
-			return err
+			return fw.recordError(err)
 		}
 
-		fw.writePageIndex()
+		if err := fw.writePageIndex(); err != nil {
+			return fw.recordError(err)
+		}
 
 		fileMetadata, err := fw.metadata.Snapshot()
 		if err != nil {
-			return err
+			return fw.recordError(err)
 		}
 
 		fileEncryptProps := fw.props.FileEncryptionProperties()
 		if fileEncryptProps == nil { // non encrypted file
 			if _, err = writeFileMetadata(fileMetadata, fw.sink); err != nil {
-				return err
+				return fw.recordError(err)
 			}
 		} else {
 			if err := fw.flushEncryptedFile(fileMetadata, fileEncryptProps); err != nil {
-				return err
+				return fw.recordError(err)
 			}
 		}
 
