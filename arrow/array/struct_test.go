@@ -475,6 +475,92 @@ func TestStructArrayStringerMasksRequiredChildWithoutNullBitmap(t *testing.T) {
 	})
 }
 
+func TestNewStructArrayWithNullsValidatesOffset(t *testing.T) {
+	builder := array.NewInt32Builder(memory.DefaultAllocator)
+	defer builder.Release()
+	builder.AppendValues([]int32{1, 2, 3}, nil)
+	child := builder.NewArray()
+	defer child.Release()
+
+	for _, test := range []struct {
+		name   string
+		offset int
+		length int
+	}{
+		{name: "zero", offset: 0, length: 3},
+		{name: "sliced", offset: 1, length: 2},
+		{name: "empty", offset: 3, length: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			arr, err := array.NewStructArrayWithNulls(
+				[]arrow.Array{child}, []string{"value"}, nil, 0, test.offset)
+			require.NoError(t, err)
+			defer arr.Release()
+			assert.Equal(t, test.length, arr.Len())
+			assert.Equal(t, test.length, arr.Field(0).Len())
+		})
+	}
+
+	for _, offset := range []int{-1, 4} {
+		arr, err := array.NewStructArrayWithNulls(
+			[]arrow.Array{child}, []string{"value"}, nil, 0, offset)
+		require.ErrorIs(t, err, arrow.ErrInvalid)
+		require.Nil(t, arr)
+	}
+
+	_, err := array.NewStructArrayWithNulls(
+		[]arrow.Array{child}, []string{"value"}, nil, 1, 0)
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+}
+
+func TestStructStringMasksParentValidityAtPhysicalOffset(t *testing.T) {
+	fields := []arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}
+	parentNulls := memory.NewBufferBytes([]byte{0x05})
+
+	t.Run("child validity bitmap", func(t *testing.T) {
+		values := make([]int32, 11)
+		for i := range values {
+			values[i] = int32(i)
+		}
+		validity := memory.NewBufferBytes([]byte{0xff, 0x07})
+		valueBuffer := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes(values))
+		childData := array.NewData(arrow.PrimitiveTypes.Int32, len(values), []*memory.Buffer{
+			validity, valueBuffer,
+		}, nil, 0, 0)
+		defer childData.Release()
+		child := array.MakeFromData(childData)
+		defer child.Release()
+		childSlice := array.NewSlice(child, 8, 11)
+		defer childSlice.Release()
+
+		arr, err := array.NewStructArrayWithFieldsAndNulls(
+			[]arrow.Array{childSlice}, fields, parentNulls, 1, 1)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, "{[(null) 10]}", arr.String())
+	})
+
+	t.Run("child without validity bitmap", func(t *testing.T) {
+		builder := array.NewInt32Builder(memory.DefaultAllocator)
+		defer builder.Release()
+		values := make([]int32, 11)
+		for i := range values {
+			values[i] = int32(i)
+		}
+		builder.AppendValues(values, nil)
+		child := builder.NewArray()
+		defer child.Release()
+		childSlice := array.NewSlice(child, 8, 11)
+		defer childSlice.Release()
+
+		arr, err := array.NewStructArrayWithFieldsAndNulls(
+			[]arrow.Array{childSlice}, fields, parentNulls, 1, 1)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, "{[(null) 10]}", arr.String())
+	})
+}
+
 func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 	pool := memory.NewGoAllocator()
 
