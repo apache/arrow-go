@@ -30,13 +30,12 @@ import (
 /// Since it uses a variable number of data buffers, each Field with this type
 /// must have a corresponding entry in `variadicBufferCounts`.
 type BinaryView struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsBinaryView(buf []byte, offset flatbuffers.UOffsetT) *BinaryView {
+func GetRootAsBinaryView(buf []byte, offset flatbuffers.UOffsetT) (x BinaryView) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &BinaryView{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -44,10 +43,9 @@ func FinishBinaryViewBuffer(builder *flatbuffers.Builder, offset flatbuffers.UOf
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsBinaryView(buf []byte, offset flatbuffers.UOffsetT) *BinaryView {
+func GetSizePrefixedRootAsBinaryView(buf []byte, offset flatbuffers.UOffsetT) (x BinaryView) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &BinaryView{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -56,12 +54,8 @@ func FinishSizePrefixedBinaryViewBuffer(builder *flatbuffers.Builder, offset fla
 }
 
 func (rcv *BinaryView) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *BinaryView) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func BinaryViewStart(builder *flatbuffers.Builder) {

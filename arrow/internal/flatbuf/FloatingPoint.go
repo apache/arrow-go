@@ -23,13 +23,12 @@ import (
 )
 
 type FloatingPoint struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsFloatingPoint(buf []byte, offset flatbuffers.UOffsetT) *FloatingPoint {
+func GetRootAsFloatingPoint(buf []byte, offset flatbuffers.UOffsetT) (x FloatingPoint) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &FloatingPoint{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -37,10 +36,9 @@ func FinishFloatingPointBuffer(builder *flatbuffers.Builder, offset flatbuffers.
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsFloatingPoint(buf []byte, offset flatbuffers.UOffsetT) *FloatingPoint {
+func GetSizePrefixedRootAsFloatingPoint(buf []byte, offset flatbuffers.UOffsetT) (x FloatingPoint) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &FloatingPoint{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -49,24 +47,20 @@ func FinishSizePrefixedFloatingPointBuffer(builder *flatbuffers.Builder, offset 
 }
 
 func (rcv *FloatingPoint) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *FloatingPoint) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 func (rcv *FloatingPoint) Precision() Precision {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		return Precision(rcv._tab.GetInt16(o + rcv._tab.Pos))
+		return Precision(rcv.GetInt16(o + rcv.Pos))
 	}
 	return 0
 }
 
 func (rcv *FloatingPoint) MutatePrecision(n Precision) bool {
-	return rcv._tab.MutateInt16Slot(4, int16(n))
+	return rcv.MutateInt16Slot(4, int16(n))
 }
 
 func FloatingPointStart(builder *flatbuffers.Builder) {

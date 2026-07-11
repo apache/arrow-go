@@ -55,13 +55,12 @@ import (
 /// (row-major order), and it does not have duplicated entries.  Otherwise,
 /// the indices may not be sorted, or may have duplicated entries.
 type SparseTensorIndexCOO struct {
-	_tab flatbuffers.Table
+	flatbuffers.Table
 }
 
-func GetRootAsSparseTensorIndexCOO(buf []byte, offset flatbuffers.UOffsetT) *SparseTensorIndexCOO {
+func GetRootAsSparseTensorIndexCOO(buf []byte, offset flatbuffers.UOffsetT) (x SparseTensorIndexCOO) {
 	n := flatbuffers.GetUOffsetT(buf[offset:])
-	x := &SparseTensorIndexCOO{}
-	x.Init(buf, n+offset)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset}
 	return x
 }
 
@@ -69,10 +68,9 @@ func FinishSparseTensorIndexCOOBuffer(builder *flatbuffers.Builder, offset flatb
 	builder.Finish(offset)
 }
 
-func GetSizePrefixedRootAsSparseTensorIndexCOO(buf []byte, offset flatbuffers.UOffsetT) *SparseTensorIndexCOO {
+func GetSizePrefixedRootAsSparseTensorIndexCOO(buf []byte, offset flatbuffers.UOffsetT) (x SparseTensorIndexCOO) {
 	n := flatbuffers.GetUOffsetT(buf[offset+flatbuffers.SizeUint32:])
-	x := &SparseTensorIndexCOO{}
-	x.Init(buf, n+offset+flatbuffers.SizeUint32)
+	x.Table = flatbuffers.Table{Bytes: buf, Pos: n+offset+flatbuffers.SizeUint32}
 	return x
 }
 
@@ -81,44 +79,37 @@ func FinishSizePrefixedSparseTensorIndexCOOBuffer(builder *flatbuffers.Builder, 
 }
 
 func (rcv *SparseTensorIndexCOO) Init(buf []byte, i flatbuffers.UOffsetT) {
-	rcv._tab.Bytes = buf
-	rcv._tab.Pos = i
-}
-
-func (rcv *SparseTensorIndexCOO) Table() flatbuffers.Table {
-	return rcv._tab
+	rcv.Bytes = buf
+	rcv.Pos = i
 }
 
 /// The type of values in indicesBuffer
-func (rcv *SparseTensorIndexCOO) IndicesType(obj *Int) *Int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
+func (rcv *SparseTensorIndexCOO) IndicesType() (obj Int, ok bool) {
+	o := flatbuffers.UOffsetT(rcv.Offset(4))
 	if o != 0 {
-		x := rcv._tab.Indirect(o + rcv._tab.Pos)
-		if obj == nil {
-			obj = new(Int)
-		}
-		obj.Init(rcv._tab.Bytes, x)
-		return obj
+		x := rcv.Indirect(o + rcv.Pos)
+		obj.Init(rcv.Bytes, x)
+		ok = true
 	}
-	return nil
+	return
 }
 
 /// The type of values in indicesBuffer
 /// Non-negative byte offsets to advance one value cell along each dimension
 /// If omitted, default to row-major order (C-like).
 func (rcv *SparseTensorIndexCOO) IndicesStrides(j int) int64 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		a := rcv._tab.Vector(o)
-		return rcv._tab.GetInt64(a + flatbuffers.UOffsetT(j*8))
+		a := rcv.Vector(o)
+		return rcv.GetInt64(a + flatbuffers.UOffsetT(j*8))
 	}
 	return 0
 }
 
 func (rcv *SparseTensorIndexCOO) IndicesStridesLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		return rcv._tab.VectorLen(o)
+		return rcv.VectorLen(o)
 	}
 	return 0
 }
@@ -126,26 +117,23 @@ func (rcv *SparseTensorIndexCOO) IndicesStridesLength() int {
 /// Non-negative byte offsets to advance one value cell along each dimension
 /// If omitted, default to row-major order (C-like).
 func (rcv *SparseTensorIndexCOO) MutateIndicesStrides(j int, n int64) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
+	o := flatbuffers.UOffsetT(rcv.Offset(6))
 	if o != 0 {
-		a := rcv._tab.Vector(o)
-		return rcv._tab.MutateInt64(a+flatbuffers.UOffsetT(j*8), n)
+		a := rcv.Vector(o)
+		return rcv.MutateInt64(a+flatbuffers.UOffsetT(j*8), n)
 	}
 	return false
 }
 
 /// The location and size of the indices matrix's data
-func (rcv *SparseTensorIndexCOO) IndicesBuffer(obj *Buffer) *Buffer {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+func (rcv *SparseTensorIndexCOO) IndicesBuffer() (obj Buffer, ok bool) {
+	o := flatbuffers.UOffsetT(rcv.Offset(8))
 	if o != 0 {
-		x := o + rcv._tab.Pos
-		if obj == nil {
-			obj = new(Buffer)
-		}
-		obj.Init(rcv._tab.Bytes, x)
-		return obj
+		x := o + rcv.Pos
+		obj.Init(rcv.Bytes, x)
+		ok = true
 	}
-	return nil
+	return
 }
 
 /// The location and size of the indices matrix's data
@@ -155,9 +143,9 @@ func (rcv *SparseTensorIndexCOO) IndicesBuffer(obj *Buffer) *Buffer {
 /// but it is inverse order of SciPy's canonical coo_matrix
 /// (SciPy employs column-major order for its coo_matrix).
 func (rcv *SparseTensorIndexCOO) IsCanonical() bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
+	o := flatbuffers.UOffsetT(rcv.Offset(10))
 	if o != 0 {
-		return rcv._tab.GetBool(o + rcv._tab.Pos)
+		return rcv.GetBool(o + rcv.Pos)
 	}
 	return false
 }
@@ -168,7 +156,7 @@ func (rcv *SparseTensorIndexCOO) IsCanonical() bool {
 /// but it is inverse order of SciPy's canonical coo_matrix
 /// (SciPy employs column-major order for its coo_matrix).
 func (rcv *SparseTensorIndexCOO) MutateIsCanonical(n bool) bool {
-	return rcv._tab.MutateBoolSlot(10, n)
+	return rcv.MutateBoolSlot(10, n)
 }
 
 func SparseTensorIndexCOOStart(builder *flatbuffers.Builder) {
