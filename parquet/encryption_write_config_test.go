@@ -102,10 +102,11 @@ func (en *EncryptionConfigTestSuite) encryptFile(configs *parquet.FileEncryption
 		)
 
 		if bufferedMode {
-			rgr = writer.AppendBufferedRowGroup()
+			rgr, err = writer.AppendBufferedRowGroupChecked()
 		} else {
-			rgr = writer.AppendRowGroup()
+			rgr, err = writer.AppendRowGroupChecked()
 		}
+		en.Require().NoError(err)
 
 		nextColumn := func() file.ColumnChunkWriter {
 			defer func() { colIndex++ }()
