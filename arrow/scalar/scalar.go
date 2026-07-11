@@ -995,6 +995,10 @@ func Hash(seed maphash.Seed, s Scalar) uint64 {
 		out ^= h.Sum64()
 		h.Reset()
 	}
+	hashUint64 := func(v uint64) {
+		binary.Write(&h, endian.Native, v)
+		hash()
+	}
 
 	valueHash := func(v interface{}) uint64 {
 		switch v := v.(type) {
@@ -1063,8 +1067,26 @@ func Hash(seed maphash.Seed, s Scalar) uint64 {
 	case TemporalScalar:
 		return valueHash(s.value())
 	case ListScalar:
-		array.Hash(&h, s.GetList().Data())
-		hash()
+		list := s.GetList()
+		hashUint64(uint64(list.Len()))
+		for i := 0; i < list.Len(); i++ {
+			if list.IsNull(i) {
+				h.Write([]byte{0})
+				hash()
+				continue
+			}
+
+			value, err := GetScalar(list, i)
+			if err != nil {
+				panic(err)
+			}
+			h.Write([]byte{1})
+			binary.Write(&h, endian.Native, Hash(seed, value))
+			hash()
+			if r, ok := value.(Releasable); ok {
+				r.Release()
+			}
+		}
 	case *Struct:
 		for _, c := range s.Value {
 			if c.IsValid() {

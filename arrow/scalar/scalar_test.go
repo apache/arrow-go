@@ -724,6 +724,70 @@ func TestListScalars(t *testing.T) {
 	suite.Run(t, ls)
 }
 
+func newInt32DataArray(values []int32, validity []byte, length, offset int) *array.Int32 {
+	validityBuffer := memory.NewBufferBytes(validity)
+	valuesBuffer := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes(values))
+	data := array.NewData(arrow.PrimitiveTypes.Int32, length,
+		[]*memory.Buffer{validityBuffer, valuesBuffer}, nil, array.UnknownNullCount, offset)
+	validityBuffer.Release()
+	valuesBuffer.Release()
+
+	arr := array.NewInt32Data(data)
+	data.Release()
+	return arr
+}
+
+func TestListScalarHashUsesLogicalValues(t *testing.T) {
+	seed := maphash.MakeSeed()
+	assertEqualAndSameHash := func(leftValues, rightValues arrow.Array) {
+		left := scalar.NewListScalar(leftValues)
+		right := scalar.NewListScalar(rightValues)
+		defer left.Release()
+		defer right.Release()
+
+		assert.True(t, scalar.Equals(left, right))
+		assert.Equal(t, scalar.Hash(seed, left), scalar.Hash(seed, right))
+	}
+
+	t.Run("different backing values and offsets", func(t *testing.T) {
+		leftValues := newInt32DataArray([]int32{1, 2, 3}, []byte{0x07}, 3, 0)
+		defer leftValues.Release()
+		rightValues := newInt32DataArray([]int32{9, 1, 2, 3, 8}, []byte{0xff}, 3, 1)
+		defer rightValues.Release()
+
+		assertEqualAndSameHash(leftValues, rightValues)
+	})
+
+	t.Run("different slices", func(t *testing.T) {
+		newArray := func(values []int32) *array.Int32 {
+			builder := array.NewInt32Builder(memory.DefaultAllocator)
+			defer builder.Release()
+			builder.AppendValues(values, nil)
+			return builder.NewInt32Array()
+		}
+
+		leftBase := newArray([]int32{0, 1, 2, 3, 4})
+		defer leftBase.Release()
+		leftValues := array.NewSlice(leftBase, 1, 4)
+		defer leftValues.Release()
+		rightBase := newArray([]int32{1, 2, 3, 4, 5})
+		defer rightBase.Release()
+		rightValues := array.NewSlice(rightBase, 0, 3)
+		defer rightValues.Release()
+
+		assertEqualAndSameHash(leftValues, rightValues)
+	})
+
+	t.Run("different null bitmap padding", func(t *testing.T) {
+		leftValues := newInt32DataArray([]int32{0, 1, 2, 3, 4}, []byte{0x1b}, 3, 1)
+		defer leftValues.Release()
+		rightValues := newInt32DataArray([]int32{1, 2, 3}, []byte{0xf5}, 3, 0)
+		defer rightValues.Release()
+
+		assertEqualAndSameHash(leftValues, rightValues)
+	})
+}
+
 func TestFixedSizeListScalarWrongNumber(t *testing.T) {
 	typ := arrow.FixedSizeListOf(3, arrow.PrimitiveTypes.Int16)
 	bld := array.NewInt16Builder(memory.DefaultAllocator)
