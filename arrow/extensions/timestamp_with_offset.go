@@ -178,6 +178,10 @@ func (e *TimestampWithOffsetType) MarshalJSON() ([]byte, error) {
 func (b *TimestampWithOffsetType) Serialize() string { return "" }
 
 func (b *TimestampWithOffsetType) Deserialize(storageType arrow.DataType, data string) (arrow.ExtensionType, error) {
+	if data != "" && data != "{}" {
+		return nil, fmt.Errorf("serialized metadata for TimestampWithOffset extension type must be '' or '{}', found: %s", data)
+	}
+
 	timeUnit, offsetType, ok := isDataTypeCompatible(storageType)
 	if !ok {
 		return nil, fmt.Errorf("invalid storage type for TimestampWithOffsetType: %s", storageType.Name())
@@ -447,6 +451,13 @@ func (b *TimestampWithOffsetBuilder) NewExtensionArray() array.ExtensionArray {
 // AppendNull resets the run-end-encoding tracker: the embedded struct builder
 // appends a null offset run, so a following value must start a new run instead
 // of continuing the null run.
+//
+// NOTE(#918): this writes a null into the non-nullable offset_minutes storage
+// field rather than a default value. This is intentional; comparison and JSON
+// round-trip parity for non-nullable inner struct fields is tracked separately
+// in https://github.com/apache/arrow-go/issues/918. Logical values (instant,
+// offset, validity) are preserved, but a full array.RecordEqual round-trip is
+// not guaranteed here.
 func (b *TimestampWithOffsetBuilder) AppendNull() {
 	b.ExtensionBuilder.AppendNull()
 	b.lastOffset = noLastOffset

@@ -110,6 +110,20 @@ func TestTimestampWithOffsetTypePrimitiveBasics(t *testing.T) {
 	assert.Equal(t, "extension<arrow.timestamp_with_offset>", typ.String())
 }
 
+func TestTimestampWithOffsetTypeDeserializeMetadata(t *testing.T) {
+	typ := extensions.NewTimestampWithOffsetType(testTimeUnit)
+	storage := typ.StorageType()
+
+	for _, data := range []string{"", "{}"} {
+		got, err := typ.Deserialize(storage, data)
+		assert.NoError(t, err)
+		assert.True(t, typ.ExtensionEquals(got))
+	}
+
+	_, err := typ.Deserialize(storage, "not-empty")
+	assert.Error(t, err)
+}
+
 func assertDictBasics[I extensions.DictIndexType](t *testing.T, indexType I) {
 	typ := extensions.NewTimestampWithOffsetTypeDictionaryEncoded(testTimeUnit, indexType)
 
