@@ -124,6 +124,45 @@ func TestTimestampWithOffsetTypeDeserializeMetadata(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestTimestampWithOffsetTypeDeserializeInvalidStorage(t *testing.T) {
+	base := extensions.NewTimestampWithOffsetType(testTimeUnit)
+
+	utcTS := &arrow.TimestampType{Unit: testTimeUnit, TimeZone: "UTC"}
+	tsField := arrow.Field{Name: "timestamp", Type: utcTS}
+	offField := arrow.Field{Name: "offset_minutes", Type: arrow.PrimitiveTypes.Int16}
+
+	badDict := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.PrimitiveTypes.Int32}
+	badREE := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32)
+
+	valid, err := base.Deserialize(base.StorageType(), "")
+	require.NoError(t, err)
+	require.NotNil(t, valid)
+
+	invalid := map[string]arrow.DataType{
+		"not a struct":                 arrow.PrimitiveTypes.Int16,
+		"too few fields":               arrow.StructOf(tsField),
+		"too many fields":              arrow.StructOf(tsField, offField, offField),
+		"timestamp wrong name":         arrow.StructOf(arrow.Field{Name: "ts", Type: utcTS}, offField),
+		"timestamp not a timestamp":    arrow.StructOf(arrow.Field{Name: "timestamp", Type: arrow.PrimitiveTypes.Int64}, offField),
+		"timestamp non-UTC zone":       arrow.StructOf(arrow.Field{Name: "timestamp", Type: &arrow.TimestampType{Unit: testTimeUnit, TimeZone: "America/New_York"}}, offField),
+		"timestamp empty zone":         arrow.StructOf(arrow.Field{Name: "timestamp", Type: &arrow.TimestampType{Unit: testTimeUnit}}, offField),
+		"timestamp nullable":           arrow.StructOf(arrow.Field{Name: "timestamp", Type: utcTS, Nullable: true}, offField),
+		"offset wrong name":            arrow.StructOf(tsField, arrow.Field{Name: "offset", Type: arrow.PrimitiveTypes.Int16}),
+		"offset wrong primitive type":  arrow.StructOf(tsField, arrow.Field{Name: "offset_minutes", Type: arrow.PrimitiveTypes.Int32}),
+		"offset nullable":              arrow.StructOf(tsField, arrow.Field{Name: "offset_minutes", Type: arrow.PrimitiveTypes.Int16, Nullable: true}),
+		"offset dict value not int16":  arrow.StructOf(tsField, arrow.Field{Name: "offset_minutes", Type: badDict}),
+		"offset ree encoded not int16": arrow.StructOf(tsField, arrow.Field{Name: "offset_minutes", Type: badREE}),
+		"fields swapped":               arrow.StructOf(offField, tsField),
+	}
+
+	for name, storage := range invalid {
+		t.Run(name, func(t *testing.T) {
+			_, err := base.Deserialize(storage, "")
+			assert.Error(t, err)
+		})
+	}
+}
+
 func assertDictBasics[I extensions.DictIndexType](t *testing.T, indexType I) {
 	typ := extensions.NewTimestampWithOffsetTypeDictionaryEncoded(testTimeUnit, indexType)
 
