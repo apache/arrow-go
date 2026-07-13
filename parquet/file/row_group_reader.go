@@ -23,6 +23,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
@@ -121,6 +122,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 
 	cryptoMetadata := col.CryptoMetadata()
 	if cryptoMetadata == nil {
+		descr := r.fileMetadata.Schema.Column(i)
 		pr := &serializedPageReader{
 			r:                 stream,
 			chunk:             col,
@@ -129,6 +131,13 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 			maxPageHeaderSize: defaultMaxPageHeaderSize,
 			nrows:             col.NumValues(),
 			mem:               r.props.Allocator(),
+			// Streaming (PageStreamingEnabled) inputs; only the unencrypted path is
+			// ever streaming-eligible, so columnCanStream is left false elsewhere.
+			columnCanStream: r.props.PageStreamingEnabled &&
+				streamablePhysicalType(descr.PhysicalType()) &&
+				streamableCodec(col.Compression()),
+			maxRepLevel: descr.MaxRepetitionLevel(),
+			maxDefLevel: descr.MaxDefinitionLevel(),
 		}
 		return pr, pr.init(col.Compression(), nil)
 	}
@@ -185,4 +194,23 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 		cryptoCtx:         ctx,
 	}
 	return pr, pr.init(col.Compression(), &ctx)
+}
+
+func streamablePhysicalType(t parquet.Type) bool {
+	switch t {
+	case parquet.Types.ByteArray, parquet.Types.FixedLenByteArray:
+		return true
+	default:
+		return false
+	}
+}
+
+func streamableCodec(c compress.Compression) bool {
+	switch c {
+	case compress.Codecs.Uncompressed, compress.Codecs.Gzip, compress.Codecs.Brotli, compress.Codecs.Zstd:
+		return true
+	default:
+		// Snappy/LZ4_RAW register as StreamingCodecs but use block framing, not a spec-compliant stream.
+		return false
+	}
 }

@@ -23,11 +23,15 @@ import (
 
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/internal/encoding/streaming"
 )
 
 // PlainFixedLenByteArrayDecoder is a plain encoding decoder for Fixed Length Byte Arrays
 type PlainFixedLenByteArrayDecoder struct {
 	decoder
+
+	// src drives the streaming path (PageStreamingEnabled) when non-nil.
+	src streaming.ValueBuffer
 }
 
 // Type returns the physical type this decoder operates on, FixedLength Byte Arrays
@@ -35,7 +39,47 @@ func (PlainFixedLenByteArrayDecoder) Type() parquet.Type {
 	return parquet.Types.FixedLenByteArray
 }
 
+func (pflba *PlainFixedLenByteArrayDecoder) SetSource(nvals int, src streaming.ValueBuffer) {
+	pflba.src, pflba.nvals = src, nvals
+}
+
+func (pflba *PlainFixedLenByteArrayDecoder) SetData(nvals int, data []byte) error {
+	pflba.src = nil
+	return pflba.decoder.SetData(nvals, data)
+}
+
+// decodeStreaming aliases each value in the buffer; see the byte-array decoder for the
+// Recycle/alias lifetime.
+func (pflba *PlainFixedLenByteArrayDecoder) decodeStreaming(out []parquet.FixedLenByteArray) (int, error) {
+	pflba.src.Recycle()
+	max := utils.Min(len(out), pflba.nvals)
+	w := pflba.typeLen
+	for i := 0; i < max; i++ {
+		val, err := pflba.src.Fill(w)
+		if err != nil {
+			return i, errors.New("parquet: eof exception")
+		}
+		out[i] = val[:w:w]
+		pflba.src.Advance(w)
+	}
+	pflba.nvals -= max
+	return max, nil
+}
+
+func (pflba *PlainFixedLenByteArrayDecoder) discardStreaming(n int) (int, error) {
+	n = min(n, pflba.nvals)
+	pflba.src.Recycle()
+	if err := pflba.src.Skip(n * pflba.typeLen); err != nil {
+		return 0, errors.New("parquet: eof exception")
+	}
+	pflba.nvals -= n
+	return n, nil
+}
+
 func (pflba *PlainFixedLenByteArrayDecoder) Discard(n int) (int, error) {
+	if pflba.src != nil {
+		return pflba.discardStreaming(n)
+	}
 	n = min(n, pflba.nvals)
 	numBytesNeeded := n * pflba.typeLen
 	if numBytesNeeded > len(pflba.data) || numBytesNeeded > math.MaxInt32 {
@@ -51,6 +95,10 @@ func (pflba *PlainFixedLenByteArrayDecoder) Discard(n int) (int, error) {
 // values to decode or the length of out has been filled. Then returns the total number of values
 // that were decoded.
 func (pflba *PlainFixedLenByteArrayDecoder) Decode(out []parquet.FixedLenByteArray) (int, error) {
+	if pflba.src != nil {
+		return pflba.decodeStreaming(out)
+	}
+
 	max := utils.Min(len(out), pflba.nvals)
 	numBytesNeeded := max * pflba.typeLen
 	if numBytesNeeded > len(pflba.data) || numBytesNeeded > math.MaxInt32 {

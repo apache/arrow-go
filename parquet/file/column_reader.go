@@ -25,6 +25,7 @@ import (
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
+	"github.com/apache/arrow-go/v18/parquet/internal/encoding/streaming"
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/schema"
@@ -261,9 +262,7 @@ func (c *columnChunkReader) setPageReader(rdr PageReader) {
 
 // Close closes the page raeder and the page if set.
 func (c *columnChunkReader) Close() error {
-	if c.curPage != nil {
-		c.curPage.Release()
-	}
+	// c.rdr owns curPage (c.curPage == c.rdr.Page()) and releases it on Close.
 	if c.rdr != nil {
 		return c.rdr.Close()
 	}
@@ -366,7 +365,7 @@ func (c *columnChunkReader) processPage() (bool, error) {
 		return true, err
 	}
 
-	return true, c.initDataDecoder(c.curPage, lvlByteLen)
+	return true, c.initDataDecoder(c.curPage.(DataPage), lvlByteLen)
 }
 
 // read a new page from the page reader
@@ -398,7 +397,7 @@ func (c *columnChunkReader) readNewPage() bool {
 func (c *columnChunkReader) initLevelDecodersV2(page *DataPageV2) (int64, error) {
 	c.numBuffered = int64(page.nvals)
 	c.numDecoded = 0
-	buf := page.Data()
+	buf := page.levelBuffer()
 	totalLvlLen := int64(page.repLvlByteLen) + int64(page.defLvlByteLen)
 
 	if totalLvlLen > int64(len(buf)) {
@@ -428,7 +427,7 @@ func (c *columnChunkReader) initLevelDecodersV1(page *DataPageV1, repLvlEncoding
 	c.numBuffered = int64(page.nvals)
 	c.numDecoded = 0
 
-	buf := page.Data()
+	buf := page.levelBuffer()
 	maxSize := len(buf)
 	levelsByteLen := int64(0)
 
@@ -456,13 +455,7 @@ func (c *columnChunkReader) initLevelDecodersV1(page *DataPageV1, repLvlEncoding
 	return levelsByteLen, nil
 }
 
-func (c *columnChunkReader) initDataDecoder(page Page, lvlByteLen int64) error {
-	buf := page.Data()
-	if int64(len(buf)) < lvlByteLen {
-		return errors.New("parquet: page smaller than size of encoded levels")
-	}
-
-	buf = buf[lvlByteLen:]
+func (c *columnChunkReader) initDataDecoder(page DataPage, lvlByteLen int64) error {
 	encoding := page.Encoding()
 
 	if isDictIndexEncoding(encoding) {
@@ -498,8 +491,24 @@ func (c *columnChunkReader) initDataDecoder(page Page, lvlByteLen int64) error {
 	}
 
 	c.curEncoding = encoding
-	c.curDecoder.SetData(int(c.numBuffered), buf)
-	return nil
+	return c.setDecoderData(page, lvlByteLen)
+}
+
+func (c *columnChunkReader) setDecoderData(page DataPage, lvlByteLen int64) error {
+	if src := page.valueBuffer(); src != nil {
+		sd, ok := c.curDecoder.(streaming.Decoder)
+		if !ok {
+			return fmt.Errorf("parquet: streaming page but %s decoder does not support streaming", c.descr.PhysicalType())
+		}
+		sd.SetSource(int(c.numBuffered), src)
+		return nil
+	}
+
+	buf := page.Data()
+	if int64(len(buf)) < lvlByteLen {
+		return errors.New("parquet: page smaller than size of encoded levels")
+	}
+	return c.curDecoder.SetData(int(c.numBuffered), buf[lvlByteLen:])
 }
 
 // readDefinitionLevels decodes the definition levels from the page and returns
@@ -718,6 +727,11 @@ func (c *columnChunkReader) readBatch(batchSize int64, defLvls, repLvls []int16,
 func (c *columnChunkReader) readBatchInPage(batchSize int64, totalRead int64, defLvls, repLvls []int16, readFn readerFunc) (lvls int64, read int, err error) {
 	if !c.HasNext() {
 		return 0, 0, c.err
+	}
+
+	// Streaming holds a whole batch's aliased values at once; clip it near the buffer size.
+	if clip := c.curPage.(DataPage).valueClip(); clip > 0 && batchSize > clip {
+		batchSize = clip
 	}
 
 	ndefs, toRead, err := c.determineNumToRead(batchSize, defLvls, repLvls)

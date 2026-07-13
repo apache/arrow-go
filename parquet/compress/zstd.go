@@ -112,14 +112,27 @@ func (zstdCodec) Decode(dst, src []byte) []byte {
 	return dst
 }
 
+var globalDecoderPool = sync.Pool{
+	New: func() interface{} {
+		dec, _ := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1))
+		return dec
+	},
+}
+
 func (z *zstdcloser) Close() error {
-	z.Decoder.Close()
+	if z.Decoder == nil {
+		return nil
+	}
+	_ = z.Reset(nil)
+	globalDecoderPool.Put(z.Decoder)
+	z.Decoder = nil
 	return nil
 }
 
 func (zstdCodec) NewReader(r io.Reader) io.ReadCloser {
-	ret, _ := zstd.NewReader(r)
-	return &zstdcloser{ret}
+	dec := globalDecoderPool.Get().(*zstd.Decoder)
+	_ = dec.Reset(r)
+	return &zstdcloser{dec}
 }
 
 func (zstdCodec) NewWriter(w io.Writer) io.WriteCloser {
