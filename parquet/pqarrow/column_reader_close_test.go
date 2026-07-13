@@ -49,7 +49,7 @@ func (r *pageReaderReplacementErrorRecordReader) SeekToRow(row int64) error {
 }
 
 func (r *pageReaderReplacementErrorRecordReader) Release() {
-	r.RecordReader.SetPageReader(nil)
+	r.SetPageReader(nil)
 	r.RecordReader.Release()
 }
 
