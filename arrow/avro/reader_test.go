@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -274,6 +275,92 @@ func TestOCFReaderBytesValues(t *testing.T) {
 	nullable := rec.Column(1).(*array.Binary)
 	assert.Equal(t, payload, nullable.Value(0))
 	assert.True(t, nullable.IsNull(1))
+}
+
+func TestOCFReaderNullableLocalTimestampMicros(t *testing.T) {
+	schema := `{
+		"type": "record",
+		"name": "event",
+		"fields": [{
+			"name": "started_at",
+			"type": [
+				"null",
+				{"type": "long", "logicalType": "local-timestamp-micros"}
+			]
+		}]
+	}`
+	wantWallClock := time.Date(2026, 7, 13, 14, 15, 16, 123456000, time.FixedZone("source", 3*60*60))
+
+	var buf bytes.Buffer
+	enc, err := ocf.NewEncoder(schema, &buf)
+	assert.NoError(t, err)
+	assert.NoError(t, enc.Encode(map[string]any{
+		"started_at": map[string]any{"long.local-timestamp-micros": wantWallClock},
+	}))
+	assert.NoError(t, enc.Encode(map[string]any{"started_at": nil}))
+	assert.NoError(t, enc.Close())
+
+	ar, err := NewOCFReader(bytes.NewReader(buf.Bytes()), WithChunk(-1))
+	assert.NoError(t, err)
+	defer ar.Close()
+
+	wantType := &arrow.TimestampType{Unit: arrow.Microsecond}
+	field := ar.Schema().Field(0)
+	assert.Equal(t, wantType, field.Type)
+	assert.True(t, field.Nullable)
+
+	assert.True(t, ar.Next())
+	assert.NoError(t, ar.Err())
+	values := ar.RecordBatch().Column(0).(*array.Timestamp)
+	assert.False(t, values.IsNull(0))
+	assert.True(t, values.IsNull(1))
+	assert.Equal(t, 1, values.NullN())
+
+	wantUTCWallClock := time.Date(2026, 7, 13, 14, 15, 16, 123456000, time.UTC)
+	wantValue, err := arrow.TimestampFromTime(wantUTCWallClock, arrow.Microsecond)
+	assert.NoError(t, err)
+	assert.Equal(t, wantValue, values.Value(0))
+	assert.Equal(t, wantUTCWallClock, values.Value(0).ToTime(arrow.Microsecond))
+}
+
+func TestAppendTimestampDataUnionBranches(t *testing.T) {
+	value := time.Date(2026, 7, 13, 14, 15, 16, 123456789, time.FixedZone("source", 3*60*60))
+	localValue := time.Date(2026, 7, 13, 14, 15, 16, 123456789, time.UTC)
+	tests := []struct {
+		name   string
+		branch string
+		typ    *arrow.TimestampType
+		want   time.Time
+	}{
+		{"timestamp-millis", "long.timestamp-millis", arrow.FixedWidthTypes.Timestamp_ms.(*arrow.TimestampType), value},
+		{"timestamp-micros", "long.timestamp-micros", arrow.FixedWidthTypes.Timestamp_us.(*arrow.TimestampType), value},
+		{"local-timestamp-millis", "long.local-timestamp-millis", &arrow.TimestampType{Unit: arrow.Millisecond}, localValue},
+		{"local-timestamp-micros", "long.local-timestamp-micros", &arrow.TimestampType{Unit: arrow.Microsecond}, localValue},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := array.NewTimestampBuilder(memory.DefaultAllocator, tt.typ)
+			defer b.Release()
+			appendTimestampData(b, map[string]any{tt.branch: value})
+
+			values := b.NewTimestampArray()
+			defer values.Release()
+			want, err := arrow.TimestampFromTime(tt.want, tt.typ.Unit)
+			assert.NoError(t, err)
+			assert.False(t, values.IsNull(0))
+			assert.Equal(t, want, values.Value(0))
+		})
+	}
+
+	b := array.NewTimestampBuilder(memory.DefaultAllocator, arrow.FixedWidthTypes.Timestamp_us.(*arrow.TimestampType))
+	defer b.Release()
+	appendTimestampData(b, map[string]any{"long": int64(42)})
+	appendTimestampData(b, nil)
+	values := b.NewTimestampArray()
+	defer values.Release()
+	assert.Equal(t, arrow.Timestamp(42), values.Value(0))
+	assert.True(t, values.IsNull(1))
 }
 
 // Types outside what the hamba decoder produces must error rather than append
