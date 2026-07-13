@@ -150,23 +150,33 @@ func validateArrayData(data *Data) error {
 	}
 
 	layout := data.dtype.Layout()
-	if len(data.buffers) < len(layout.Buffers) {
-		return fmt.Errorf("arrow/array: expected at least %d buffers for %s, got %d",
-			len(layout.Buffers), data.dtype, len(data.buffers))
+	// Union arrays reserve the first buffer slot for a validity bitmap, even
+	// though that slot must be nil and is not part of their type layout.
+	bufferOffset := 0
+	if data.dtype.ID() == arrow.SPARSE_UNION || data.dtype.ID() == arrow.DENSE_UNION {
+		bufferOffset = 1
 	}
-	if layout.VariadicSpec == nil && len(data.buffers) > len(layout.Buffers) {
+	bufferCount := len(data.buffers) - bufferOffset
+	if bufferCount < 0 {
+		bufferCount = 0
+	}
+	if bufferCount < len(layout.Buffers) {
+		return fmt.Errorf("arrow/array: expected at least %d buffers for %s, got %d",
+			len(layout.Buffers), data.dtype, bufferCount)
+	}
+	if layout.VariadicSpec == nil && bufferCount > len(layout.Buffers) {
 		return fmt.Errorf("arrow/array: expected at most %d buffers for %s, got %d",
-			len(layout.Buffers), data.dtype, len(data.buffers))
+			len(layout.Buffers), data.dtype, bufferCount)
 	}
 
 	for i, spec := range layout.Buffers {
-		if err := validateBuffer(data.buffers[i], spec, end, data.length, i); err != nil {
+		if err := validateBuffer(data.buffers[i+bufferOffset], spec, end, data.length, i+bufferOffset); err != nil {
 			return err
 		}
 	}
 	if layout.VariadicSpec != nil {
-		for i := len(layout.Buffers); i < len(data.buffers); i++ {
-			if err := validateBuffer(data.buffers[i], *layout.VariadicSpec, end, data.length, i); err != nil {
+		for i := len(layout.Buffers); i < bufferCount; i++ {
+			if err := validateBuffer(data.buffers[i+bufferOffset], *layout.VariadicSpec, end, data.length, i+bufferOffset); err != nil {
 				return err
 			}
 		}
@@ -247,6 +257,7 @@ func validateListArray(a *List, full bool) error {
 	if len(a.data.childData) != 1 || a.data.childData[0] == nil {
 		return fmt.Errorf("arrow/array: list array must have one non-nil child array")
 	}
+	// MAP uses the list-like entry layout; large-list variants have dedicated validators.
 	dt, ok := a.data.dtype.(arrow.ListLikeType)
 	if !ok || dt.ID() == arrow.LARGE_LIST || dt.ID() == arrow.LARGE_LIST_VIEW {
 		return fmt.Errorf("arrow/array: invalid datatype %s for list array", a.data.dtype)

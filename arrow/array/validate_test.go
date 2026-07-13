@@ -211,6 +211,58 @@ func TestTopLevelValidate(t *testing.T) {
 	})
 }
 
+func TestTopLevelValidateUnions(t *testing.T) {
+	type unionCase struct {
+		name string
+		arr  arrow.Array
+	}
+
+	typeIDs, _, err := FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int8, strings.NewReader(`[0, 1]`))
+	require.NoError(t, err)
+	defer typeIDs.Release()
+
+	sparseChild0, _, err := FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32, strings.NewReader(`[10, 20]`))
+	require.NoError(t, err)
+	defer sparseChild0.Release()
+	sparseChild1, _, err := FromJSON(memory.DefaultAllocator, arrow.BinaryTypes.String, strings.NewReader(`["one", "two"]`))
+	require.NoError(t, err)
+	defer sparseChild1.Release()
+
+	sparse, err := NewSparseUnionFromArrays(typeIDs, []arrow.Array{sparseChild0, sparseChild1})
+	require.NoError(t, err)
+	defer sparse.Release()
+
+	offsets, _, err := FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32, strings.NewReader(`[0, 0]`))
+	require.NoError(t, err)
+	defer offsets.Release()
+	denseChild0, _, err := FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32, strings.NewReader(`[10]`))
+	require.NoError(t, err)
+	defer denseChild0.Release()
+	denseChild1, _, err := FromJSON(memory.DefaultAllocator, arrow.BinaryTypes.String, strings.NewReader(`["two"]`))
+	require.NoError(t, err)
+	defer denseChild1.Release()
+
+	dense, err := NewDenseUnionFromArrays(typeIDs, offsets, []arrow.Array{denseChild0, denseChild1})
+	require.NoError(t, err)
+	defer dense.Release()
+
+	for _, tc := range []unionCase{{"sparse", sparse}, {"dense", dense}} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.NoError(t, Validate(tc.arr))
+			assert.NoError(t, ValidateFull(tc.arr))
+
+			nested, err := NewStructArrayWithFields([]arrow.Array{tc.arr}, []arrow.Field{
+				{Name: "value", Type: tc.arr.DataType(), Nullable: true},
+			})
+			require.NoError(t, err)
+			defer nested.Release()
+
+			assert.NoError(t, Validate(nested))
+			assert.NoError(t, ValidateFull(nested))
+		})
+	}
+}
+
 func TestTopLevelValidateFullRecursesThroughNestedChildren(t *testing.T) {
 	badString := makeStringArrayRaw(t, []int32{0, 5, 3, 5}, "hello", 3, 0)
 	defer badString.Release()
