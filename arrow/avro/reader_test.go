@@ -289,7 +289,7 @@ func TestOCFReaderNullableLocalTimestampMicros(t *testing.T) {
 			]
 		}]
 	}`
-	wantWallClock := time.Date(2026, 7, 13, 14, 15, 16, 123456000, time.FixedZone("source", 3*60*60))
+	wantWallClock := time.Date(2026, 7, 13, 14, 15, 16, 123456000, time.Local)
 
 	var buf bytes.Buffer
 	enc, err := ocf.NewEncoder(schema, &buf)
