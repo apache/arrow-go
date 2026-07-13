@@ -266,7 +266,7 @@ func (c *columnChunkReader) setPageReader(rdr PageReader) error {
 	return nil
 }
 
-// Close closes the page raeder and the page if set.
+// Close closes the page reader and the page if set.
 func (c *columnChunkReader) Close() error {
 	page := c.curPage
 	rdr := c.rdr
