@@ -21,12 +21,13 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/stretchr/testify/require"
 )
 
 func TestReadLevelDataRLELengthBound(t *testing.T) {
-	p := &serializedPageReader{maxDefLevel: 1}
+	p := &serializedPageReader{maxDefLevel: 1, mem: memory.DefaultAllocator}
 
 	// a complete 8-byte RLE level region, so the reject below is the bound, not EOF
 	data := make([]byte, 4+8)
@@ -37,15 +38,17 @@ func TestReadLevelDataRLELengthBound(t *testing.T) {
 
 	out, err := p.readLevelData(bytes.NewReader(data), format.Encoding_RLE, format.Encoding_RLE, 4, 1024)
 	require.NoError(t, err)
-	require.Len(t, out, 12)
+	require.Equal(t, 12, out.Len())
+	out.Release()
 }
 
 func TestReadLevelDataBitPacked(t *testing.T) {
-	p := &serializedPageReader{maxDefLevel: 1}
+	p := &serializedPageReader{maxDefLevel: 1, mem: memory.DefaultAllocator}
 
 	// maxDef 1 -> bitWidth 1; 8 values -> BytesForBits(8) = 1 byte, no length prefix
 	data := []byte{0b10110100}
 	out, err := p.readLevelData(bytes.NewReader(data), format.Encoding_RLE, format.Encoding_BIT_PACKED, 8, 1024)
 	require.NoError(t, err)
-	require.Equal(t, data, out)
+	require.Equal(t, data, out.Bytes())
+	out.Release()
 }
