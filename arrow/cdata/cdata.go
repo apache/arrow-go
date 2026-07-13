@@ -850,7 +850,7 @@ func (imp *cimporter) importBinaryViewLike() (err error) {
 
 	if len(buffers) > 2 {
 		if imp.cbuffers[len(buffers)] == nil {
-			return errors.New("invalid data buffer sizes")
+			return fmt.Errorf("%w: invalid data buffer sizes", arrow.ErrInvalid)
 		}
 		if _, err = checkedMul(int64(len(buffers)-2), int64(arrow.Int64SizeBytes)); err != nil {
 			return err
@@ -1014,6 +1014,8 @@ func (imp *cimporter) checkNumBuffers(n int64) error {
 }
 
 func (imp *cimporter) importBuffer(bufferID int, sz int64) (*memory.Buffer, error) {
+	// Buffer sizes come from foreign memory and cannot be independently verified;
+	// these checks only prevent invalid metadata from creating unsafe Go slices.
 	// this is not a copy, we're just having a slice which points at the data
 	// it's still owned by the C.ArrowArray object and its backing C++ object.
 	if bufferID < 0 || bufferID >= len(imp.cbuffers) {
@@ -1024,7 +1026,7 @@ func (imp *cimporter) importBuffer(bufferID int, sz int64) (*memory.Buffer, erro
 	}
 	if imp.cbuffers[bufferID] == nil || sz == 0 {
 		if sz != 0 {
-			return nil, errors.New("invalid buffer")
+			return nil, fmt.Errorf("%w: invalid buffer", arrow.ErrInvalid)
 		}
 		return memory.NewBufferBytes([]byte{}), nil
 	}
