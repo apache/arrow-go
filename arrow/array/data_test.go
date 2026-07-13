@@ -129,6 +129,30 @@ func TestDataSetDictionaryWithSamePointerRetainsDictionary(t *testing.T) {
 	require.Equal(t, int32(42), valuesArray.Value(0))
 }
 
+func TestDataSetDictionaryNilClearsDictionary(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	values := memory.NewResizableBuffer(mem)
+	values.Resize(4)
+	dictData := NewData(arrow.PrimitiveTypes.Int32, 1, []*memory.Buffer{nil, values}, nil, 0, 0)
+	values.Release()
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.PrimitiveTypes.Int32,
+	}
+	data := NewDataWithDictionary(dictType, 1, []*memory.Buffer{nil, memory.NewBufferBytes([]byte{0})}, 0, 0, dictData)
+	defer data.Release()
+	dictData.Release()
+
+	require.NotNil(t, data.Dictionary())
+
+	data.SetDictionary(nil)
+
+	require.Nil(t, data.Dictionary())
+}
+
 func TestHashIncludesDataMetadataAndBuffers(t *testing.T) {
 	seed := maphash.MakeSeed()
 	hash := func(data arrow.ArrayData) uint64 {
