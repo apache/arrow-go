@@ -511,6 +511,14 @@ func TestNewStructArrayWithNullsValidatesOffset(t *testing.T) {
 	_, err := array.NewStructArrayWithNulls(
 		[]arrow.Array{child}, []string{"value"}, nil, 1, 0)
 	require.ErrorIs(t, err, arrow.ErrInvalid)
+
+	fields := []arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}
+	for _, offset := range []int{-1, 4} {
+		arr, err := array.NewStructArrayWithFieldsAndNulls(
+			[]arrow.Array{child}, fields, nil, 0, offset)
+		require.ErrorIs(t, err, arrow.ErrInvalid)
+		require.Nil(t, arr)
+	}
 }
 
 func TestStructStringMasksParentValidityAtPhysicalOffset(t *testing.T) {
