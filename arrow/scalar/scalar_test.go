@@ -739,6 +739,12 @@ func newInt32DataArray(values []int32, validity []byte, length, offset int) *arr
 
 func TestListScalarHashUsesLogicalValues(t *testing.T) {
 	seed := maphash.MakeSeed()
+	newArray := func(values []int32, valid []bool) *array.Int32 {
+		builder := array.NewInt32Builder(memory.DefaultAllocator)
+		defer builder.Release()
+		builder.AppendValues(values, valid)
+		return builder.NewInt32Array()
+	}
 	assertEqualAndSameHash := func(leftValues, rightValues arrow.Array) {
 		left := scalar.NewListScalar(leftValues)
 		right := scalar.NewListScalar(rightValues)
@@ -747,6 +753,15 @@ func TestListScalarHashUsesLogicalValues(t *testing.T) {
 
 		assert.True(t, scalar.Equals(left, right))
 		assert.Equal(t, scalar.Hash(seed, left), scalar.Hash(seed, right))
+	}
+	assertDifferentHash := func(leftValues, rightValues arrow.Array) {
+		left := scalar.NewListScalar(leftValues)
+		right := scalar.NewListScalar(rightValues)
+		defer left.Release()
+		defer right.Release()
+
+		assert.False(t, scalar.Equals(left, right))
+		assert.NotEqual(t, scalar.Hash(seed, left), scalar.Hash(seed, right))
 	}
 
 	t.Run("different backing values and offsets", func(t *testing.T) {
@@ -759,18 +774,11 @@ func TestListScalarHashUsesLogicalValues(t *testing.T) {
 	})
 
 	t.Run("different slices", func(t *testing.T) {
-		newArray := func(values []int32) *array.Int32 {
-			builder := array.NewInt32Builder(memory.DefaultAllocator)
-			defer builder.Release()
-			builder.AppendValues(values, nil)
-			return builder.NewInt32Array()
-		}
-
-		leftBase := newArray([]int32{0, 1, 2, 3, 4})
+		leftBase := newArray([]int32{0, 1, 2, 3, 4}, nil)
 		defer leftBase.Release()
 		leftValues := array.NewSlice(leftBase, 1, 4)
 		defer leftValues.Release()
-		rightBase := newArray([]int32{1, 2, 3, 4, 5})
+		rightBase := newArray([]int32{1, 2, 3, 4, 5}, nil)
 		defer rightBase.Release()
 		rightValues := array.NewSlice(rightBase, 0, 3)
 		defer rightValues.Release()
@@ -785,6 +793,33 @@ func TestListScalarHashUsesLogicalValues(t *testing.T) {
 		defer rightValues.Release()
 
 		assertEqualAndSameHash(leftValues, rightValues)
+	})
+
+	t.Run("different element order produces different hashes", func(t *testing.T) {
+		leftValues := newArray([]int32{1, 2}, nil)
+		defer leftValues.Release()
+		rightValues := newArray([]int32{2, 1}, nil)
+		defer rightValues.Release()
+
+		assertDifferentHash(leftValues, rightValues)
+	})
+
+	t.Run("repeated values do not cancel", func(t *testing.T) {
+		leftValues := newArray([]int32{1, 1}, nil)
+		defer leftValues.Release()
+		rightValues := newArray([]int32{2, 2}, nil)
+		defer rightValues.Release()
+
+		assertDifferentHash(leftValues, rightValues)
+	})
+
+	t.Run("null positions affect the hash", func(t *testing.T) {
+		leftValues := newArray([]int32{0, 1}, []bool{false, true})
+		defer leftValues.Release()
+		rightValues := newArray([]int32{1, 0}, []bool{true, false})
+		defer rightValues.Release()
+
+		assertDifferentHash(leftValues, rightValues)
 	})
 }
 

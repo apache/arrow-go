@@ -1070,6 +1070,9 @@ func Hash(seed maphash.Seed, s Scalar) uint64 {
 		list := s.GetList()
 		hashUint64(uint64(list.Len()))
 		for i := 0; i < list.Len(); i++ {
+			// Include the logical position in the same chunk as the element so
+			// that list order affects the aggregate hash.
+			binary.Write(&h, endian.Native, uint64(i))
 			if list.IsNull(i) {
 				h.Write([]byte{0})
 				hash()
