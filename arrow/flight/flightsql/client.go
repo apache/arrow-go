@@ -1107,7 +1107,7 @@ func (tx *Txn) RollbackSavepoint(ctx context.Context, sp Savepoint, opts ...grpc
 // prepared statement handle.
 //
 // If the server returned the Dataset Schema or Parameter Binding schemas
-// or isUpdate at creation, they will also be accessible from this object. Close
+// or an IsUpdate hint at creation, they will also be accessible from this object. Close
 // should be called when no longer needed.
 type PreparedStatement struct {
 	client        *Client
@@ -1362,7 +1362,7 @@ func (p *PreparedStatement) IsUpdate() (val bool, ok bool) {
 	return *p.isUpdate, true
 }
 
-// The handle associated with this PreparedStatement
+// Handle returns the handle associated with this PreparedStatement.
 func (p *PreparedStatement) Handle() []byte { return p.handle }
 
 // GetSchema re-requests the schema of the result set of the prepared
