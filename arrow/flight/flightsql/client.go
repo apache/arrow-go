@@ -1362,7 +1362,7 @@ func (p *PreparedStatement) IsUpdate() (val bool, ok bool) {
 	return *p.isUpdate, true
 }
 
-// Handle returns the handle associated with this PreparedStatement.
+// The handle associated with this PreparedStatement
 func (p *PreparedStatement) Handle() []byte { return p.handle }
 
 // GetSchema re-requests the schema of the result set of the prepared
