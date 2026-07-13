@@ -187,6 +187,40 @@ func TestFromJSONStartOffsetSeekValidation(t *testing.T) {
 	}
 }
 
+func TestRecordFromJSONStartOffsetSeekValidation(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	seekErr := errors.New("seek failed")
+
+	t.Run("seek error", func(t *testing.T) {
+		reader := &fromJSONSeekReader{
+			Reader: bytes.NewReader([]byte(`[{"value": 1}]`)),
+			seekFn: func(int64, int) (int64, error) { return 0, seekErr },
+		}
+
+		record, _, err := array.RecordFromJSON(mem, schema, reader, array.WithStartOffset(1))
+		require.ErrorIs(t, err, seekErr)
+		require.Nil(t, record)
+		require.True(t, reader.seekCalled)
+	})
+
+	t.Run("successful seek", func(t *testing.T) {
+		reader := &fromJSONSeekReader{Reader: bytes.NewReader([]byte(`skip[{"value": 1}, {"value": 2}]`))}
+
+		record, _, err := array.RecordFromJSON(mem, schema, reader, array.WithStartOffset(4))
+		require.NoError(t, err)
+		defer record.Release()
+
+		require.EqualValues(t, 2, record.NumRows())
+		values := record.Column(0).(*array.Int32)
+		require.Equal(t, int32(1), values.Value(0))
+		require.Equal(t, int32(2), values.Value(1))
+		require.True(t, reader.seekCalled)
+	})
+}
+
 func TestStringsJSON(t *testing.T) {
 	tests := []struct {
 		jsonstring string
