@@ -1173,6 +1173,8 @@ func TestDictionaryScalarIndexBounds(t *testing.T) {
 	valueType := arrow.BinaryTypes.String
 	dict, _, _ := array.FromJSON(mem, valueType, strings.NewReader(`["alpha", "beta", "gamma"]`))
 	defer dict.Release()
+	emptyDict, _, _ := array.FromJSON(mem, valueType, strings.NewReader(`[]`))
+	defer emptyDict.Release()
 
 	for _, indexType := range dictIndexTypes {
 		t.Run(fmt.Sprint(indexType), func(t *testing.T) {
@@ -1240,6 +1242,12 @@ func TestDictionaryScalarIndexBounds(t *testing.T) {
 				}
 				checkInvalid(max, 0)
 			}
+
+			empty := scalar.NewDictScalar(newIndex(0, 0), emptyDict)
+			assert.Error(t, empty.ValidateFull())
+			_, err := empty.GetEncodedValue()
+			assert.Error(t, err)
+			empty.Release()
 		})
 	}
 }

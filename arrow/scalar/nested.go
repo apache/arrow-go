@@ -440,6 +440,7 @@ func (s *Dictionary) ValidateFull() (err error) {
 }
 
 func (s *Dictionary) physicalIndex() (int, error) {
+	dt := s.Type.(*arrow.DictionaryType)
 	length := s.Value.Dict.Len()
 	outOfBounds := func(idx interface{}) error {
 		return fmt.Errorf("%s scalar index value out of bounds: %d", s.DataType(), idx)
@@ -487,7 +488,7 @@ func (s *Dictionary) physicalIndex() (int, error) {
 		}
 		return int(idx), nil
 	default:
-		return 0, fmt.Errorf("unimplemented dictionary type %s", s.DataType())
+		return 0, fmt.Errorf("unimplemented dictionary type %s", dt.IndexType)
 	}
 }
 
