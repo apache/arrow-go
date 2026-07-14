@@ -53,7 +53,7 @@ type streamBuffer struct {
 	mem       memory.Allocator
 	chunkSize int
 	cur       []byte   // chunk currently being filled
-	off, n    int      // consumed cursor / filled end within cur
+	off, n    int      // consumed cursor / filled end; cur[off:n] is buffered read-ahead
 	live      [][]byte // earlier chunks still backing this Decode's aliases
 	remaining int      // value-region bytes not yet consumed; bounds Fill vs corrupt lengths
 }

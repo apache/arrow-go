@@ -79,12 +79,15 @@ func TestStreamBufferOversizedValue(t *testing.T) {
 
 // TestStreamBufferSkip checks Skip discards both buffered and not-yet-read bytes.
 func TestStreamBufferSkip(t *testing.T) {
-	data := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+	data := make([]byte, 16)
+	for i := range data {
+		data[i] = byte(i)
+	}
 	s := newTestBuffer(memory.DefaultAllocator, data, 8)
 
-	assert.Equal(t, []byte{0, 1}, fillValue(t, s, 2))
-	require.NoError(t, s.Skip(6)) // 2 buffered + 4 straight from the reader
-	assert.Equal(t, []byte{8, 9}, fillValue(t, s, 2))
+	assert.Equal(t, []byte{0, 1}, fillValue(t, s, 2)) // read-ahead buffers cur[0:8]
+	require.NoError(t, s.Skip(10))                     // 6 buffered + 4 discarded from the reader
+	assert.Equal(t, []byte{12, 13}, fillValue(t, s, 2))
 
 	require.NoError(t, s.Close())
 }
@@ -158,6 +161,19 @@ func TestStreamBufferReadAheadSurvivesRecycle(t *testing.T) {
 		got = append(got, fillValue(t, s, 4)...)
 	}
 	assert.Equal(t, data, got)
+}
+
+func TestStreamBufferReadAheadStopsAtRegion(t *testing.T) {
+	// the value region is the first 8 bytes; the rest stands in for the next page
+	data := []byte{0, 1, 2, 3, 4, 5, 6, 7, 100, 101, 102}
+	s := &streamBuffer{mem: memory.DefaultAllocator, r: bytes.NewReader(data), chunkSize: 16, cur: memory.DefaultAllocator.Allocate(16), remaining: 8}
+	defer s.Close()
+
+	for range 8 {
+		fillValue(t, s, 1)
+	}
+	rest, _ := io.ReadAll(s.r)
+	assert.Equal(t, []byte{100, 101, 102}, rest, "read-ahead over-read past the value region")
 }
 
 func TestStreamBufferMixedValueSizes(t *testing.T) {
