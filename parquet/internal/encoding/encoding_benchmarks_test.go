@@ -797,13 +797,19 @@ func BenchmarkMemoTableHighCardinality(b *testing.B) {
 
 	for _, tt := range tests {
 		b.Run(fmt.Sprintf("%d unique n %d", tt.nunique, tt.nvalues), func(b *testing.B) {
-			rag := testutils.NewRandomArrayGenerator(0)
-			dict := rag.Int32(int64(tt.nunique), 0, math.MaxInt32-1, 0)
-			indices := rag.Int32(tt.nvalues, 0, int32(tt.nunique)-1, 0)
-
+			// Random generation does not guarantee uniqueness, so seed the first
+			// nunique slots with distinct values (satisfying the exact
+			// tbl.Size() == nunique assertion) and back-fill the rest randomly.
 			values := make([]int32, tt.nvalues)
-			for idx := range values {
-				values[idx] = dict.Value(int(indices.Value(idx)))
+			for i := int32(0); i < tt.nunique; i++ {
+				values[i] = i
+			}
+			if extra := tt.nvalues - int64(tt.nunique); extra > 0 {
+				rag := testutils.NewRandomArrayGenerator(0)
+				indices := rag.Int32(extra, 0, tt.nunique-1, 0)
+				for i := int64(0); i < extra; i++ {
+					values[int64(tt.nunique)+i] = indices.Value(int(i))
+				}
 			}
 			b.ResetTimer()
 			b.Run("xxh3", func(b *testing.B) {

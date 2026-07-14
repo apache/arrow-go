@@ -21,7 +21,7 @@
 # as the second argument, it will create a file "bench_stats.json"
 # in the directory this is called from containing a json representation
 
-set -ex
+set -exo pipefail
 
 # Validate input arguments
 if [ -z "$1" ]; then

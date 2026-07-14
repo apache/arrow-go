@@ -51,3 +51,9 @@ func insertBulkGo(bitset32 []uint32, hash []uint64) {
 		insertHash(bitset32, h)
 	}
 }
+
+func checkBulkGo(bitset32 []uint32, hash []uint64, results []bool) {
+	for i, h := range hash {
+		results[i] = checkHash(bitset32, h)
+	}
+}
