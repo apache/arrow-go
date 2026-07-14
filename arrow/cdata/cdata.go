@@ -833,7 +833,7 @@ func (imp *cimporter) importBinaryViewLike() (err error) {
 	if err = imp.checkNoChildren(); err != nil {
 		return
 	}
-	if _, err = checkedMul(int64(imp.arr.n_buffers-3), int64(arrow.Int64SizeBytes)); err != nil {
+	if _, err = checkedMul(int64(imp.arr.n_buffers)-3, int64(arrow.Int64SizeBytes)); err != nil {
 		return err
 	}
 
