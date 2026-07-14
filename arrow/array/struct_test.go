@@ -567,6 +567,28 @@ func TestStructStringMasksParentValidityAtPhysicalOffset(t *testing.T) {
 		defer arr.Release()
 		assert.Equal(t, "{[(null) 10]}", arr.String())
 	})
+
+	t.Run("identical bitmap with different physical offsets", func(t *testing.T) {
+		values := []int32{10, 11, 12, 13}
+		validity := memory.NewBufferBytes([]byte{0x0d})
+		valueBuffer := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes(values))
+		childData := array.NewData(arrow.PrimitiveTypes.Int32, len(values), []*memory.Buffer{
+			validity, valueBuffer,
+		}, nil, 0, 0)
+		defer childData.Release()
+		child := array.MakeFromData(childData)
+		defer child.Release()
+		childSlice := array.NewSlice(child, 1, 4)
+		defer childSlice.Release()
+		parentNulls := memory.NewBufferBytes([]byte{0x0d})
+		defer parentNulls.Release()
+
+		arr, err := array.NewStructArrayWithFieldsAndNulls(
+			[]arrow.Array{childSlice}, fields, parentNulls, 1, 1)
+		require.NoError(t, err)
+		defer arr.Release()
+		assert.Equal(t, "{[(null) 13]}", arr.String())
+	})
 }
 
 func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {

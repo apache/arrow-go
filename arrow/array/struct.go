@@ -168,7 +168,7 @@ func (a *Struct) String() string {
 		if arrow.IsUnion(v.DataType().ID()) {
 			fmt.Fprintf(o, "%v", v)
 			continue
-		} else if !bytes.Equal(structBitmap, v.NullBitmapBytes()) {
+		} else if a.Offset() != v.Data().Offset() || !bytes.Equal(structBitmap, v.NullBitmapBytes()) {
 			masked := a.newStructFieldWithParentValidityMask(i)
 			fmt.Fprintf(o, "%v", masked)
 			masked.Release()
