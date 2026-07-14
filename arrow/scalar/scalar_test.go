@@ -1110,6 +1110,19 @@ func TestDictionaryScalarBasics(t *testing.T) {
 	}
 }
 
+func TestGetScalarIndexOutOfRange(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	arr, _, _ := array.FromJSON(mem, arrow.BinaryTypes.String, strings.NewReader(`["alpha", "beta"]`))
+	defer arr.Release()
+
+	_, err := scalar.GetScalar(arr, -1)
+	assert.ErrorIs(t, err, arrow.ErrIndex)
+	_, err = scalar.GetScalar(arr, 2)
+	assert.ErrorIs(t, err, arrow.ErrIndex)
+}
+
 func TestDictionaryScalarValidateErrors(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
