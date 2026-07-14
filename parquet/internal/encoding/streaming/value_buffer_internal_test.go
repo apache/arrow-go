@@ -134,3 +134,49 @@ func TestStreamBufferRotateCarriesTail(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, data[2:9], b[:7])
 }
+
+func TestStreamBufferReadsAhead(t *testing.T) {
+	s := newTestBuffer(memory.DefaultAllocator, make([]byte, 100), 16)
+	defer s.Close()
+
+	_, err := s.Fill(4)
+	require.NoError(t, err)
+	assert.Equal(t, 16, s.n, "Fill should read ahead to fill the chunk")
+}
+
+func TestStreamBufferReadAheadSurvivesRecycle(t *testing.T) {
+	data := make([]byte, 100)
+	for i := range data {
+		data[i] = byte(i)
+	}
+	s := newTestBuffer(memory.DefaultAllocator, data, 16)
+	defer s.Close()
+
+	var got []byte
+	for len(got) < len(data) {
+		s.Recycle()
+		got = append(got, fillValue(t, s, 4)...)
+	}
+	assert.Equal(t, data, got)
+}
+
+func TestStreamBufferMixedValueSizes(t *testing.T) {
+	lengths := []int{1, 50, 2, 3, 100, 1, 7, 30, 2, 16, 1, 64, 4, 9, 40, 1, 5, 25, 8, 33}
+	var data []byte
+	for k, n := range lengths {
+		for j := range n {
+			data = append(data, byte(k*7+j))
+		}
+	}
+	s := newTestBuffer(memory.DefaultAllocator, data, 16)
+	defer s.Close()
+
+	off := 0
+	for k, n := range lengths {
+		if k%2 == 0 {
+			s.Recycle()
+		}
+		assert.Equal(t, data[off:off+n], fillValue(t, s, n), "value %d (len %d)", k, n)
+		off += n
+	}
+}
