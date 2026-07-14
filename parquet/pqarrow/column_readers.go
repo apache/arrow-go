@@ -162,13 +162,32 @@ func (lr *leafReader) clearOut() (out *arrow.Chunked) {
 
 func (lr *leafReader) Field() *arrow.Field { return lr.field }
 
+func (lr *leafReader) setPageReader(pr file.PageReader) error {
+	rr, ok := lr.recordRdr.(file.RecordReaderWithError)
+	if !ok {
+		if pr != nil {
+			_ = pr.Close()
+		}
+		return errors.New("record reader does not support error-returning page reader replacement")
+	}
+	if err := rr.SetPageReaderWithError(pr); err != nil {
+		if pr != nil {
+			_ = pr.Close()
+		}
+		return err
+	}
+	return nil
+}
+
 func (lr *leafReader) SeekToRow(rowIdx int64) error {
 	pr, offset, err := lr.input.FindChunkForRow(rowIdx)
 	if err != nil {
 		return err
 	}
 
-	lr.recordRdr.SetPageReader(pr)
+	if err := lr.setPageReader(pr); err != nil {
+		return err
+	}
 	return lr.recordRdr.SeekToRow(offset)
 }
 
@@ -180,7 +199,9 @@ func (lr *leafReader) nextRowGroup(remainingRows int64) error {
 	if err != nil {
 		return err
 	}
-	lr.recordRdr.SetPageReader(pr)
+	if err := lr.setPageReader(pr); err != nil {
+		return err
+	}
 	lr.curRGUncompressedBytes = uncompressedBytes
 	lr.curRGNumRows = numRows
 	// When called mid-batch, extend the builder's data buffer for the new row group.

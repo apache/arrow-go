@@ -17,6 +17,7 @@
 package array
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -127,6 +128,18 @@ func TestLargeBinaryValidate(t *testing.T) {
 }
 
 func TestStringValidate(t *testing.T) {
+	t.Run("empty values allow a nil data buffer", func(t *testing.T) {
+		offsets := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes([]int32{0, 0, 0}))
+		data := NewData(arrow.BinaryTypes.String, 2, []*memory.Buffer{nil, offsets, nil}, nil, 0, 0)
+		offsets.Release()
+		arr := NewStringData(data)
+		data.Release()
+		defer arr.Release()
+
+		assert.NoError(t, arr.Validate())
+		assert.NoError(t, arr.ValidateFull())
+	})
+
 	t.Run("valid array passes", func(t *testing.T) {
 		arr := makeStringArrayRaw(t, []int32{0, 3, 5, 10}, "abcdeabcde", 3, 0)
 		assert.NoError(t, arr.Validate())
@@ -208,4 +221,139 @@ func TestTopLevelValidate(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "column 1 (bad)")
 	})
+}
+
+func TestTopLevelValidateUnions(t *testing.T) {
+	type unionCase struct {
+		name string
+		arr  arrow.Array
+	}
+
+	typeIDs, _, err := FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int8, strings.NewReader(`[0, 1]`))
+	require.NoError(t, err)
+	defer typeIDs.Release()
+
+	sparseChild0, _, err := FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32, strings.NewReader(`[10, 20]`))
+	require.NoError(t, err)
+	defer sparseChild0.Release()
+	sparseChild1, _, err := FromJSON(memory.DefaultAllocator, arrow.BinaryTypes.String, strings.NewReader(`["one", "two"]`))
+	require.NoError(t, err)
+	defer sparseChild1.Release()
+
+	sparse, err := NewSparseUnionFromArrays(typeIDs, []arrow.Array{sparseChild0, sparseChild1})
+	require.NoError(t, err)
+	defer sparse.Release()
+
+	offsets, _, err := FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32, strings.NewReader(`[0, 0]`))
+	require.NoError(t, err)
+	defer offsets.Release()
+	denseChild0, _, err := FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32, strings.NewReader(`[10]`))
+	require.NoError(t, err)
+	defer denseChild0.Release()
+	denseChild1, _, err := FromJSON(memory.DefaultAllocator, arrow.BinaryTypes.String, strings.NewReader(`["two"]`))
+	require.NoError(t, err)
+	defer denseChild1.Release()
+
+	dense, err := NewDenseUnionFromArrays(typeIDs, offsets, []arrow.Array{denseChild0, denseChild1})
+	require.NoError(t, err)
+	defer dense.Release()
+
+	for _, tc := range []unionCase{{"sparse", sparse}, {"dense", dense}} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.NoError(t, Validate(tc.arr))
+			assert.NoError(t, ValidateFull(tc.arr))
+
+			nested, err := NewStructArrayWithFields([]arrow.Array{tc.arr}, []arrow.Field{
+				{Name: "value", Type: tc.arr.DataType(), Nullable: true},
+			})
+			require.NoError(t, err)
+			defer nested.Release()
+
+			assert.NoError(t, Validate(nested))
+			assert.NoError(t, ValidateFull(nested))
+		})
+	}
+}
+
+func TestTopLevelValidateFullRecursesThroughNestedChildren(t *testing.T) {
+	badString := makeStringArrayRaw(t, []int32{0, 5, 3, 5}, "hello", 3, 0)
+	defer badString.Release()
+
+	inner, err := NewStructArrayWithFields([]arrow.Array{badString}, []arrow.Field{
+		{Name: "name", Type: arrow.BinaryTypes.String, Nullable: true},
+	})
+	require.NoError(t, err)
+	defer inner.Release()
+
+	offsets := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes([]int32{0, 3}))
+	data := NewData(arrow.ListOf(inner.DataType()), 1,
+		[]*memory.Buffer{nil, offsets}, []arrow.ArrayData{inner.Data()}, 0, 0)
+	offsets.Release()
+	list := NewListData(data)
+	data.Release()
+	defer list.Release()
+
+	outer, err := NewStructArrayWithFields([]arrow.Array{list}, []arrow.Field{
+		{Name: "orders", Type: list.DataType(), Nullable: true},
+	})
+	require.NoError(t, err)
+	defer outer.Release()
+
+	err = ValidateFull(outer)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `field "orders" -> list values -> field "name"`)
+}
+
+func TestListValidateFullChecksOffsets(t *testing.T) {
+	values, _, err := FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2]`))
+	require.NoError(t, err)
+	defer values.Release()
+
+	offsets := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes([]int32{0, 2, 1}))
+	data := NewData(arrow.ListOf(arrow.PrimitiveTypes.Int32), 2,
+		[]*memory.Buffer{nil, offsets}, []arrow.ArrayData{values.Data()}, 0, 0)
+	offsets.Release()
+	list := NewListData(data)
+	data.Release()
+	defer list.Release()
+
+	assert.NoError(t, list.Validate())
+	err = list.ValidateFull()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not monotonically non-decreasing")
+}
+
+func TestTopLevelValidateFullRecursesDictionaryValues(t *testing.T) {
+	badDictionary := makeStringArrayRaw(t, []int32{0, 5, 3, 5}, "hello", 3, 0)
+	defer badDictionary.Release()
+	indices, _, err := FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int8, strings.NewReader(`[0]`))
+	require.NoError(t, err)
+	defer indices.Release()
+
+	dt := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	dict := NewDictionaryArray(dt, indices, badDictionary)
+	defer dict.Release()
+
+	err = ValidateFull(dict)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dictionary")
+	assert.Contains(t, err.Error(), "not monotonically non-decreasing")
+}
+
+func TestDictionaryIndexBoundsOnlyRunDuringValidateFull(t *testing.T) {
+	indices, _, err := FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int8, strings.NewReader(`[0, 1]`))
+	require.NoError(t, err)
+	defer indices.Release()
+	values, _, err := FromJSON(memory.DefaultAllocator, arrow.BinaryTypes.String, strings.NewReader(`["only"]`))
+	require.NoError(t, err)
+	defer values.Release()
+
+	dt := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	dict := NewDictionaryArray(dt, indices, values)
+	defer dict.Release()
+
+	assert.NoError(t, Validate(dict))
+	err = ValidateFull(dict)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dictionary indices")
 }

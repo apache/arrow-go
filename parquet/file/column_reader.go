@@ -141,8 +141,10 @@ type ColumnChunkReader interface {
 	//
 	// This will clear any current error in the reader but does not
 	// automatically read the first page of the page reader passed in until
-	// HasNext which will read in the next page.
-	setPageReader(PageReader)
+	// HasNext which will read in the next page. An error is returned if the
+	// current page reader cannot be closed; in that case the new reader is not
+	// installed and the error is retained by the column reader.
+	setPageReader(PageReader) error
 	// Close releases the resources held by the column reader.
 	Close() error
 }
@@ -252,19 +254,31 @@ func (c *columnChunkReader) Descriptor() *schema.Column    { return c.descr }
 func (c *columnChunkReader) consumeBufferedValues(n int64) { c.numDecoded += n }
 func (c *columnChunkReader) numAvailValues() int64         { return c.numBuffered - c.numDecoded }
 func (c *columnChunkReader) pager() PageReader             { return c.rdr }
-func (c *columnChunkReader) setPageReader(rdr PageReader) {
-	c.Close()
+
+func (c *columnChunkReader) setPageReader(rdr PageReader) error {
+	if err := c.Close(); err != nil {
+		c.err = err
+		return err
+	}
 	c.rdr, c.err = rdr, nil
 	c.decoders = make(map[format.Encoding]encoding.TypedDecoder)
 	c.dictState = dictNotRead
 	c.numBuffered, c.numDecoded = 0, 0
+	return nil
 }
 
-// Close closes the page raeder and the page if set.
+// Close closes the page reader and the page if set.
 func (c *columnChunkReader) Close() error {
-	// c.rdr owns curPage (c.curPage == c.rdr.Page()) and releases it on Close.
-	if c.rdr != nil {
-		return c.rdr.Close()
+	page := c.curPage
+	rdr := c.rdr
+	c.curPage = nil
+	c.rdr = nil
+
+	if rdr != nil {
+		return rdr.Close()
+	}
+	if page != nil {
+		page.Release()
 	}
 	return nil
 }

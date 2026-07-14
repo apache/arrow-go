@@ -839,7 +839,8 @@ func (ps *ParquetIOTestSuite) makeTestFile(mem memory.Allocator, typ arrow.DataT
 	rowGroupSize := arr.Len() / numChunks
 
 	for i := 0; i < numChunks; i++ {
-		rgw := writer.AppendRowGroup()
+		rgw, err := writer.AppendRowGroupChecked()
+		ps.NoError(err)
 		cw, err := rgw.NextColumn()
 		ps.NoError(err)
 
@@ -1163,7 +1164,8 @@ func (ps *ParquetIOTestSuite) TestReadDecimals() {
 	defer sink.Release()
 	writer := file.NewParquetWriter(sink, sc)
 
-	rgw := writer.AppendRowGroup()
+	rgw, err := writer.AppendRowGroupChecked()
+	ps.NoError(err)
 	cw, _ := rgw.NextColumn()
 	cw.(*file.ByteArrayColumnChunkWriter).WriteBatch(bigEndian, nil, nil)
 	cw.Close()
@@ -1213,7 +1215,8 @@ func (ps *ParquetIOTestSuite) TestReadDecimal256() {
 	defer sink.Release()
 	writer := file.NewParquetWriter(sink, sc)
 
-	rgw := writer.AppendRowGroup()
+	rgw, err := writer.AppendRowGroupChecked()
+	ps.NoError(err)
 	cw, _ := rgw.NextColumn()
 	cw.(*file.ByteArrayColumnChunkWriter).WriteBatch(bigEndian, nil, nil)
 	cw.Close()
@@ -1298,7 +1301,8 @@ func (ps *ParquetIOTestSuite) TestReadDecimal256PartialWord() {
 				sink := encoding.NewBufferWriter(0, mem)
 				defer sink.Release()
 				writer := file.NewParquetWriter(sink, sc)
-				rgw := writer.AppendRowGroup()
+				rgw, err := writer.AppendRowGroupChecked()
+				ps.NoError(err)
 				cw, _ := rgw.NextColumn()
 				cw.(*file.ByteArrayColumnChunkWriter).WriteBatch(bigEndian, nil, nil)
 				cw.Close()
