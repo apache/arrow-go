@@ -24,7 +24,7 @@ import (
 
 func (r *OCFReader) decodeOCFToChan() {
 	defer close(r.avroChan)
-	for r.r.HasNext() {
+	for {
 		select {
 		case <-r.readerCtx.Done():
 			r.err = fmt.Errorf("avro decoding cancelled, %d records read", r.avroDatumCount)
@@ -34,7 +34,6 @@ func (r *OCFReader) decodeOCFToChan() {
 			err := r.r.Decode(&datum)
 			if err != nil {
 				if errors.Is(err, io.EOF) {
-					r.err = nil
 					return
 				}
 				r.err = err
