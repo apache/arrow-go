@@ -577,10 +577,12 @@ func TestTimestampWithOffsetExtensionRecordBuilder(t *testing.T) {
 			require.NoError(t, err)
 			defer roundtripped.Release()
 			require.Equal(t, schema, roundtripped.Schema())
-			// Avoid array.RecordEqual here: it compares the inner non-nullable
-			// struct child validity bitmaps, which differ between builder output and
-			// JSON reader output. That inner-nullability parity is decoupled from this
-			// type, so assert only what it guarantees: per-row instant, offset, validity.
+			// FIXME: ideally array.RecordEqual would succeed after roundtripping.
+			// It currently doesn't because it compares the inner non-nullable struct
+			// child validity bitmaps, which differ between builder output and JSON
+			// reader output. That inner-nullability parity is decoupled from this
+			// type (tracked in apache/arrow-go#918), so for now avoid RecordEqual and
+			// assert only what this type guarantees: per-row instant, offset, validity.
 			origArr := record.Column(0).(*extensions.TimestampWithOffsetArray)
 			gotArr := roundtripped.Column(0).(*extensions.TimestampWithOffsetArray)
 			require.Equal(t, origArr.Len(), gotArr.Len())
