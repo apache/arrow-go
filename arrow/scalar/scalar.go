@@ -1079,16 +1079,9 @@ func Hash(seed maphash.Seed, s Scalar) uint64 {
 				continue
 			}
 
-			value, err := GetScalar(list, i)
-			if err != nil {
-				panic(err)
-			}
 			h.Write([]byte{1})
-			binary.Write(&h, endian.Native, Hash(seed, value))
+			binary.Write(&h, endian.Native, hashListElement(seed, list, i))
 			hash()
-			if r, ok := value.(Releasable); ok {
-				r.Release()
-			}
 		}
 	case *Struct:
 		for _, c := range s.Value {
@@ -1099,4 +1092,29 @@ func Hash(seed maphash.Seed, s Scalar) uint64 {
 	}
 
 	return out
+}
+
+func hashListElement(seed maphash.Seed, list arrow.Array, index int) uint64 {
+	value, err := GetScalar(list, index)
+	if err == nil {
+		defer func() {
+			if r, ok := value.(Releasable); ok {
+				r.Release()
+			}
+		}()
+		return Hash(seed, value)
+	}
+
+	// Some valid array types do not have a scalar representation yet. ValueStr
+	// is their logical value representation and avoids making list hashing
+	// depend on GetScalar supporting every array type.
+	var h maphash.MapHash
+	h.SetSeed(seed)
+	binary.Write(&h, endian.Native, arrow.HashType(seed, list.DataType()))
+	out := h.Sum64()
+	h.Reset()
+	valueString := list.ValueStr(index)
+	binary.Write(&h, endian.Native, uint64(len(valueString)))
+	h.Write([]byte(valueString))
+	return out ^ h.Sum64()
 }

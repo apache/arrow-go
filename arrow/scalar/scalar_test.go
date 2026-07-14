@@ -28,6 +28,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -821,6 +822,90 @@ func TestListScalarHashUsesLogicalValues(t *testing.T) {
 
 		assertDifferentHash(leftValues, rightValues)
 	})
+}
+
+func TestListScalarHashSupportsChildArraysWithoutScalars(t *testing.T) {
+	seed := maphash.MakeSeed()
+	tests := []struct {
+		name      string
+		newValues func() arrow.Array
+	}{
+		{
+			name: "string view",
+			newValues: func() arrow.Array {
+				b := array.NewStringViewBuilder(memory.DefaultAllocator)
+				defer b.Release()
+				b.AppendValues([]string{"one", "two"}, nil)
+				return b.NewStringViewArray()
+			},
+		},
+		{
+			name: "binary view",
+			newValues: func() arrow.Array {
+				b := array.NewBinaryViewBuilder(memory.DefaultAllocator)
+				defer b.Release()
+				b.AppendValues([][]byte{[]byte("one"), []byte("two")}, nil)
+				return b.NewBinaryViewArray()
+			},
+		},
+		{
+			name: "decimal32",
+			newValues: func() arrow.Array {
+				b := array.NewDecimal32Builder(memory.DefaultAllocator, &arrow.Decimal32Type{Precision: 6, Scale: 2})
+				defer b.Release()
+				b.AppendValues([]decimal.Decimal32{123, 456}, nil)
+				return b.NewDecimalArray()
+			},
+		},
+		{
+			name: "decimal64",
+			newValues: func() arrow.Array {
+				b := array.NewDecimal64Builder(memory.DefaultAllocator, &arrow.Decimal64Type{Precision: 12, Scale: 2})
+				defer b.Release()
+				b.AppendValues([]decimal.Decimal64{123, 456}, nil)
+				return b.NewDecimalArray()
+			},
+		},
+		{
+			name: "list view",
+			newValues: func() arrow.Array {
+				b := array.NewListViewBuilder(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32)
+				defer b.Release()
+				b.ValueBuilder().(*array.Int32Builder).AppendValues([]int32{1, 2}, nil)
+				b.AppendDimensions(0, 2)
+				return b.NewListViewArray()
+			},
+		},
+		{
+			name: "large list view",
+			newValues: func() arrow.Array {
+				b := array.NewLargeListViewBuilder(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32)
+				defer b.Release()
+				b.ValueBuilder().(*array.Int32Builder).AppendValues([]int32{1, 2}, nil)
+				b.AppendDimensions(0, 2)
+				return b.NewLargeListViewArray()
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			leftValues := tt.newValues()
+			defer leftValues.Release()
+			rightValues := tt.newValues()
+			defer rightValues.Release()
+
+			left := scalar.NewListScalar(leftValues)
+			defer left.Release()
+			right := scalar.NewListScalar(rightValues)
+			defer right.Release()
+
+			assert.True(t, scalar.Equals(left, right))
+			assert.NotPanics(t, func() {
+				assert.Equal(t, scalar.Hash(seed, left), scalar.Hash(seed, right))
+			})
+		})
+	}
 }
 
 func TestFixedSizeListScalarWrongNumber(t *testing.T) {
