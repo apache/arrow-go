@@ -28,7 +28,7 @@ tool (
 
 require (
 	github.com/andybalholm/brotli v1.2.2
-	github.com/apache/thrift v0.22.0
+	github.com/apache/thrift v0.24.0
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/goccy/go-json v0.10.6
 	github.com/google/flatbuffers v25.12.19+incompatible
@@ -45,8 +45,8 @@ require (
 	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.1.0
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96
-	golang.org/x/sync v0.21.0
-	golang.org/x/sys v0.46.0
+	golang.org/x/sync v0.22.0
+	golang.org/x/sys v0.47.0
 	gonum.org/v1/gonum v0.17.0
 	google.golang.org/grpc v1.82.0
 	google.golang.org/protobuf v1.36.11
