@@ -72,6 +72,7 @@ type config struct {
 	noAutoSchema       bool
 	emitDictDeltas     bool
 	minSpaceSavings    float64
+	readCustomMetadata bool
 }
 
 func newConfig(opts ...Option) *config {
@@ -92,6 +93,13 @@ func newConfig(opts ...Option) *config {
 // Option is a functional option to configure opening or creating Arrow files
 // and streams.
 type Option func(*config)
+
+// WithCustomRecordBatchMetadata allows returning custom metadata for RecordBatch.
+func WithCustomRecordBatchMetadata(cm bool) Option {
+	return func(cfg *config) {
+		cfg.readCustomMetadata = cm
+	}
+}
 
 // WithFooterOffset specifies the Arrow footer position in bytes.
 func WithFooterOffset(offset int64) Option {
