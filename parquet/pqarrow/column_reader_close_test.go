@@ -37,9 +37,6 @@ type pageReaderReplacementErrorRecordReader struct {
 }
 
 func (r *pageReaderReplacementErrorRecordReader) SetPageReaderWithError(pr file.PageReader) error {
-	if pr != nil {
-		_ = pr.Close()
-	}
 	return r.err
 }
 
@@ -51,6 +48,16 @@ func (r *pageReaderReplacementErrorRecordReader) SeekToRow(row int64) error {
 func (r *pageReaderReplacementErrorRecordReader) Release() {
 	r.SetPageReader(nil)
 	r.RecordReader.Release()
+}
+
+type trackingPageReader struct {
+	file.PageReader
+	closed bool
+}
+
+func (r *trackingPageReader) Close() error {
+	r.closed = true
+	return nil
 }
 
 func TestLeafReaderSeekToRowPropagatesPageReaderReplacementError(t *testing.T) {
@@ -96,4 +103,8 @@ func TestLeafReaderSeekToRowPropagatesPageReaderReplacementError(t *testing.T) {
 
 	require.ErrorIs(t, columnReader.SeekToRow(0), closeErr)
 	require.Zero(t, wrapped.seekCalls)
+
+	replacement := &trackingPageReader{}
+	require.ErrorIs(t, leaf.setPageReader(replacement), closeErr)
+	require.True(t, replacement.closed)
 }

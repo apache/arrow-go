@@ -165,9 +165,18 @@ func (lr *leafReader) Field() *arrow.Field { return lr.field }
 func (lr *leafReader) setPageReader(pr file.PageReader) error {
 	rr, ok := lr.recordRdr.(file.RecordReaderWithError)
 	if !ok {
+		if pr != nil {
+			_ = pr.Close()
+		}
 		return errors.New("record reader does not support error-returning page reader replacement")
 	}
-	return rr.SetPageReaderWithError(pr)
+	if err := rr.SetPageReaderWithError(pr); err != nil {
+		if pr != nil {
+			_ = pr.Close()
+		}
+		return err
+	}
+	return nil
 }
 
 func (lr *leafReader) SeekToRow(rowIdx int64) error {
