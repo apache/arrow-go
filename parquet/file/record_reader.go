@@ -85,6 +85,14 @@ type RecordReader interface {
 	SeekToRow(int64) error
 }
 
+// RecordReaderWithError is implemented by record readers that expose failures
+// while replacing their page reader. It supplements RecordReader without
+// changing the existing no-error SetPageReader method.
+type RecordReaderWithError interface {
+	RecordReader
+	SetPageReaderWithError(PageReader) error
+}
+
 // BinaryRecordReader provides an extra GetBuilderChunks function above and beyond
 // the plain RecordReader to allow for efficiently building chunked arrays.
 type BinaryRecordReader interface {
@@ -112,6 +120,7 @@ type recordReaderImpl interface {
 	NullCount() int64
 	Values() []byte
 	SetPageReader(PageReader)
+	SetPageReaderWithError(PageReader) error
 	Retain()
 	Release()
 }
@@ -173,7 +182,11 @@ func (pr *primitiveRecordReader) Release() {
 }
 
 func (pr *primitiveRecordReader) SetPageReader(rdr PageReader) {
-	pr.setPageReader(rdr)
+	_ = pr.setPageReader(rdr)
+}
+
+func (pr *primitiveRecordReader) SetPageReaderWithError(rdr PageReader) error {
+	return pr.setPageReader(rdr)
 }
 
 func (pr *primitiveRecordReader) ReleaseValidBits() *memory.Buffer {
@@ -393,8 +406,12 @@ func (rr *recordReader) HasMore() bool {
 }
 
 func (rr *recordReader) SetPageReader(pr PageReader) {
+	_ = rr.SetPageReaderWithError(pr)
+}
+
+func (rr *recordReader) SetPageReaderWithError(pr PageReader) error {
 	rr.atRecStart = true
-	rr.recordReaderImpl.SetPageReader(pr)
+	return rr.recordReaderImpl.SetPageReaderWithError(pr)
 }
 
 func (rr *recordReader) ValuesWritten() int {
