@@ -37,6 +37,9 @@ type FixedSizeList struct {
 
 var _ ListLike = (*FixedSizeList)(nil)
 
+func (a *FixedSizeList) Validate() error     { return validateFixedSizeListArray(a) }
+func (a *FixedSizeList) ValidateFull() error { return validateFixedSizeListArray(a) }
+
 // NewFixedSizeListData returns a new List array value, from data.
 func NewFixedSizeListData(data arrow.ArrayData) *FixedSizeList {
 	a := &FixedSizeList{}
