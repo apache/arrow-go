@@ -39,6 +39,7 @@ func (p *closeTrackingPage) Release()                  { p.releaseCalls++ }
 type closeTrackingPageReader struct {
 	closeCalls int
 	closeErr   error
+	page       Page
 }
 
 func (r *closeTrackingPageReader) SetMaxPageHeaderSize(int) {}
@@ -51,12 +52,16 @@ func (r *closeTrackingPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 func (r *closeTrackingPageReader) SeekToPageWithRow(int64) error               { return nil }
 func (r *closeTrackingPageReader) Close() error {
 	r.closeCalls++
+	if r.page != nil {
+		r.page.Release()
+		r.page = nil
+	}
 	return r.closeErr
 }
 
 func TestColumnChunkReaderCloseIsIdempotent(t *testing.T) {
 	page := &closeTrackingPage{}
-	rdr := &closeTrackingPageReader{}
+	rdr := &closeTrackingPageReader{page: page}
 	reader := &columnChunkReader{curPage: page, rdr: rdr}
 
 	require.NoError(t, reader.Close())
@@ -69,7 +74,7 @@ func TestColumnChunkReaderCloseIsIdempotent(t *testing.T) {
 
 func TestColumnChunkReaderSetPageReaderReleasesBeforeReplacement(t *testing.T) {
 	page := &closeTrackingPage{}
-	oldRdr := &closeTrackingPageReader{}
+	oldRdr := &closeTrackingPageReader{page: page}
 	newRdr := &closeTrackingPageReader{}
 	reader := &columnChunkReader{curPage: page, rdr: oldRdr}
 
@@ -87,7 +92,7 @@ func TestColumnChunkReaderSetPageReaderReleasesBeforeReplacement(t *testing.T) {
 func TestColumnChunkReaderSetPageReaderPropagatesCloseError(t *testing.T) {
 	closeErr := errors.New("page reader close failed")
 	page := &closeTrackingPage{}
-	oldRdr := &closeTrackingPageReader{closeErr: closeErr}
+	oldRdr := &closeTrackingPageReader{closeErr: closeErr, page: page}
 	newRdr := &closeTrackingPageReader{}
 	reader := &columnChunkReader{curPage: page, rdr: oldRdr}
 

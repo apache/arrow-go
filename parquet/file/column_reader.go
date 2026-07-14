@@ -274,11 +274,11 @@ func (c *columnChunkReader) Close() error {
 	c.curPage = nil
 	c.rdr = nil
 
-	if page != nil {
-		page.Release()
-	}
 	if rdr != nil {
 		return rdr.Close()
+	}
+	if page != nil {
+		page.Release()
 	}
 	return nil
 }
