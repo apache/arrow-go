@@ -22,6 +22,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -832,4 +833,69 @@ func TestObjectBinarySearch(t *testing.T) {
 		require.NoError(t, err, "failed to find key: %s", key)
 		assert.Equal(t, int8(i), field.Value.Value())
 	}
+}
+
+func TestMetadataSizeBytes(t *testing.T) {
+	t.Run("empty metadata", func(t *testing.T) {
+		var b variant.Builder
+		require.NoError(t, b.AppendNull())
+		v, err := b.Build()
+		require.NoError(t, err)
+		m := v.Metadata()
+		assert.Equal(t, len(m.Bytes()), m.SizeBytes())
+		assert.Equal(t, len(variant.EmptyMetadataBytes), m.SizeBytes())
+	})
+
+	t.Run("object with keys", func(t *testing.T) {
+		var b variant.Builder
+		start := b.Offset()
+		fields := []variant.FieldEntry{
+			b.NextField(start, "a"),
+		}
+		require.NoError(t, b.AppendInt(1))
+		fields = append(fields, b.NextField(start, "longer_key"))
+		require.NoError(t, b.AppendString("hello"))
+		require.NoError(t, b.FinishObject(start, fields))
+		v, err := b.Build()
+		require.NoError(t, err)
+
+		m := v.Metadata()
+		assert.Equal(t, len(m.Bytes()), m.SizeBytes())
+
+		// Split a concatenated metadata++value buffer using SizeBytes.
+		concat := append(append([]byte{}, m.Bytes()...), v.Bytes()...)
+		parsed, err := variant.NewMetadata(concat)
+		require.NoError(t, err)
+		split := parsed.SizeBytes()
+		assert.Equal(t, m.Bytes(), concat[:split])
+		assert.Equal(t, v.Bytes(), concat[split:])
+
+		rt, err := variant.New(concat[:split], concat[split:])
+		require.NoError(t, err)
+		assert.Equal(t, v.Bytes(), rt.Bytes())
+	})
+}
+
+func TestMetadataSizeBytesMultiByteOffset(t *testing.T) {
+	// A long key forces the metadata offset width above 1 byte, exercising the
+	// offsetSize>1 arithmetic in SizeBytes.
+	longKey := strings.Repeat("k", 300)
+	var b variant.Builder
+	start := b.Offset()
+	fields := []variant.FieldEntry{b.NextField(start, longKey)}
+	require.NoError(t, b.AppendInt(7))
+	require.NoError(t, b.FinishObject(start, fields))
+	v, err := b.Build()
+	require.NoError(t, err)
+
+	m := v.Metadata()
+	require.Greater(t, m.OffsetSize(), uint8(1), "test must exercise multi-byte offsets")
+	assert.Equal(t, len(m.Bytes()), m.SizeBytes())
+
+	concat := append(append([]byte{}, m.Bytes()...), v.Bytes()...)
+	parsed, err := variant.NewMetadata(concat)
+	require.NoError(t, err)
+	split := parsed.SizeBytes()
+	assert.Equal(t, m.Bytes(), concat[:split])
+	assert.Equal(t, v.Bytes(), concat[split:])
 }
