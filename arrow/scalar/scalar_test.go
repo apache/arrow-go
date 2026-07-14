@@ -28,6 +28,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -722,6 +723,189 @@ func TestListScalars(t *testing.T) {
 	suite.Run(t, ls)
 	ls.typ = arrow.FixedSizeListOf(3, arrow.PrimitiveTypes.Int16)
 	suite.Run(t, ls)
+}
+
+func newInt32DataArray(values []int32, validity []byte, length, offset int) *array.Int32 {
+	validityBuffer := memory.NewBufferBytes(validity)
+	valuesBuffer := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes(values))
+	data := array.NewData(arrow.PrimitiveTypes.Int32, length,
+		[]*memory.Buffer{validityBuffer, valuesBuffer}, nil, array.UnknownNullCount, offset)
+	validityBuffer.Release()
+	valuesBuffer.Release()
+
+	arr := array.NewInt32Data(data)
+	data.Release()
+	return arr
+}
+
+func TestListScalarHashUsesLogicalValues(t *testing.T) {
+	seed := maphash.MakeSeed()
+	newArray := func(values []int32, valid []bool) *array.Int32 {
+		builder := array.NewInt32Builder(memory.DefaultAllocator)
+		defer builder.Release()
+		builder.AppendValues(values, valid)
+		return builder.NewInt32Array()
+	}
+	assertEqualAndSameHash := func(leftValues, rightValues arrow.Array) {
+		left := scalar.NewListScalar(leftValues)
+		right := scalar.NewListScalar(rightValues)
+		defer left.Release()
+		defer right.Release()
+
+		assert.True(t, scalar.Equals(left, right))
+		assert.Equal(t, scalar.Hash(seed, left), scalar.Hash(seed, right))
+	}
+	assertDifferentHash := func(leftValues, rightValues arrow.Array) {
+		left := scalar.NewListScalar(leftValues)
+		right := scalar.NewListScalar(rightValues)
+		defer left.Release()
+		defer right.Release()
+
+		assert.False(t, scalar.Equals(left, right))
+		assert.NotEqual(t, scalar.Hash(seed, left), scalar.Hash(seed, right))
+	}
+
+	t.Run("different backing values and offsets", func(t *testing.T) {
+		leftValues := newInt32DataArray([]int32{1, 2, 3}, []byte{0x07}, 3, 0)
+		defer leftValues.Release()
+		rightValues := newInt32DataArray([]int32{9, 1, 2, 3, 8}, []byte{0xff}, 3, 1)
+		defer rightValues.Release()
+
+		assertEqualAndSameHash(leftValues, rightValues)
+	})
+
+	t.Run("different slices", func(t *testing.T) {
+		leftBase := newArray([]int32{0, 1, 2, 3, 4}, nil)
+		defer leftBase.Release()
+		leftValues := array.NewSlice(leftBase, 1, 4)
+		defer leftValues.Release()
+		rightBase := newArray([]int32{1, 2, 3, 4, 5}, nil)
+		defer rightBase.Release()
+		rightValues := array.NewSlice(rightBase, 0, 3)
+		defer rightValues.Release()
+
+		assertEqualAndSameHash(leftValues, rightValues)
+	})
+
+	t.Run("different null bitmap padding", func(t *testing.T) {
+		leftValues := newInt32DataArray([]int32{0, 1, 2, 3, 4}, []byte{0x1b}, 3, 1)
+		defer leftValues.Release()
+		rightValues := newInt32DataArray([]int32{1, 2, 3}, []byte{0xf5}, 3, 0)
+		defer rightValues.Release()
+
+		assertEqualAndSameHash(leftValues, rightValues)
+	})
+
+	t.Run("different element order produces different hashes", func(t *testing.T) {
+		leftValues := newArray([]int32{1, 2}, nil)
+		defer leftValues.Release()
+		rightValues := newArray([]int32{2, 1}, nil)
+		defer rightValues.Release()
+
+		assertDifferentHash(leftValues, rightValues)
+	})
+
+	t.Run("repeated values do not cancel", func(t *testing.T) {
+		leftValues := newArray([]int32{1, 1}, nil)
+		defer leftValues.Release()
+		rightValues := newArray([]int32{2, 2}, nil)
+		defer rightValues.Release()
+
+		assertDifferentHash(leftValues, rightValues)
+	})
+
+	t.Run("null positions affect the hash", func(t *testing.T) {
+		leftValues := newArray([]int32{0, 1}, []bool{false, true})
+		defer leftValues.Release()
+		rightValues := newArray([]int32{1, 0}, []bool{true, false})
+		defer rightValues.Release()
+
+		assertDifferentHash(leftValues, rightValues)
+	})
+}
+
+func TestListScalarHashSupportsChildArraysWithoutScalars(t *testing.T) {
+	seed := maphash.MakeSeed()
+	tests := []struct {
+		name      string
+		newValues func() arrow.Array
+	}{
+		{
+			name: "string view",
+			newValues: func() arrow.Array {
+				b := array.NewStringViewBuilder(memory.DefaultAllocator)
+				defer b.Release()
+				b.AppendValues([]string{"one", "two"}, nil)
+				return b.NewStringViewArray()
+			},
+		},
+		{
+			name: "binary view",
+			newValues: func() arrow.Array {
+				b := array.NewBinaryViewBuilder(memory.DefaultAllocator)
+				defer b.Release()
+				b.AppendValues([][]byte{[]byte("one"), []byte("two")}, nil)
+				return b.NewBinaryViewArray()
+			},
+		},
+		{
+			name: "decimal32",
+			newValues: func() arrow.Array {
+				b := array.NewDecimal32Builder(memory.DefaultAllocator, &arrow.Decimal32Type{Precision: 6, Scale: 2})
+				defer b.Release()
+				b.AppendValues([]decimal.Decimal32{123, 456}, nil)
+				return b.NewDecimalArray()
+			},
+		},
+		{
+			name: "decimal64",
+			newValues: func() arrow.Array {
+				b := array.NewDecimal64Builder(memory.DefaultAllocator, &arrow.Decimal64Type{Precision: 12, Scale: 2})
+				defer b.Release()
+				b.AppendValues([]decimal.Decimal64{123, 456}, nil)
+				return b.NewDecimalArray()
+			},
+		},
+		{
+			name: "list view",
+			newValues: func() arrow.Array {
+				b := array.NewListViewBuilder(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32)
+				defer b.Release()
+				b.ValueBuilder().(*array.Int32Builder).AppendValues([]int32{1, 2}, nil)
+				b.AppendDimensions(0, 2)
+				return b.NewListViewArray()
+			},
+		},
+		{
+			name: "large list view",
+			newValues: func() arrow.Array {
+				b := array.NewLargeListViewBuilder(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32)
+				defer b.Release()
+				b.ValueBuilder().(*array.Int32Builder).AppendValues([]int32{1, 2}, nil)
+				b.AppendDimensions(0, 2)
+				return b.NewLargeListViewArray()
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			leftValues := tt.newValues()
+			defer leftValues.Release()
+			rightValues := tt.newValues()
+			defer rightValues.Release()
+
+			left := scalar.NewListScalar(leftValues)
+			defer left.Release()
+			right := scalar.NewListScalar(rightValues)
+			defer right.Release()
+
+			assert.True(t, scalar.Equals(left, right))
+			assert.NotPanics(t, func() {
+				assert.Equal(t, scalar.Hash(seed, left), scalar.Hash(seed, right))
+			})
+		})
+	}
 }
 
 func TestFixedSizeListScalarWrongNumber(t *testing.T) {
