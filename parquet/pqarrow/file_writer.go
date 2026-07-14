@@ -185,12 +185,28 @@ func NewFileWriter(arrschema *arrow.Schema, w io.Writer, props *parquet.WriterPr
 
 // NewRowGroup does what it says on the tin, creates a new row group in the underlying file.
 // Equivalent to `AppendRowGroup` on a file.Writer
+// It panics if closing the previous row group or starting the new row group fails.
+// Use NewRowGroupChecked to handle those errors explicitly.
 func (fw *FileWriter) NewRowGroup() {
-	if fw.rgw != nil {
-		fw.rgw.Close()
+	if err := fw.NewRowGroupChecked(); err != nil {
+		panic(err)
 	}
-	fw.rgw = fw.wr.AppendRowGroup()
+}
+
+// NewRowGroupChecked is the error-returning form of NewRowGroup.
+func (fw *FileWriter) NewRowGroupChecked() error {
+	if fw.rgw != nil {
+		if err := fw.rgw.Close(); err != nil {
+			return err
+		}
+	}
+	rgw, err := fw.wr.AppendRowGroupChecked()
+	if err != nil {
+		return err
+	}
+	fw.rgw = rgw
 	fw.colIdx = 0
+	return nil
 }
 
 // NewBufferedRowGroup starts a new memory Buffered Row Group to allow writing columns / records
@@ -198,12 +214,28 @@ func (fw *FileWriter) NewRowGroup() {
 // and decide where to break your row group based on the TotalBytesWritten rather than on the max
 // row group len. If using Records, this should be paired with WriteBuffered, while
 // Write will always write a new record as a row group in and of itself.
+// It panics if closing the previous row group or starting the new row group fails.
+// Use NewBufferedRowGroupChecked to handle those errors explicitly.
 func (fw *FileWriter) NewBufferedRowGroup() {
-	if fw.rgw != nil {
-		fw.rgw.Close()
+	if err := fw.NewBufferedRowGroupChecked(); err != nil {
+		panic(err)
 	}
-	fw.rgw = fw.wr.AppendBufferedRowGroup()
+}
+
+// NewBufferedRowGroupChecked is the error-returning form of NewBufferedRowGroup.
+func (fw *FileWriter) NewBufferedRowGroupChecked() error {
+	if fw.rgw != nil {
+		if err := fw.rgw.Close(); err != nil {
+			return err
+		}
+	}
+	rgw, err := fw.wr.AppendBufferedRowGroupChecked()
+	if err != nil {
+		return err
+	}
+	fw.rgw = rgw
 	fw.colIdx = 0
+	return nil
 }
 
 // TotalCompressedBytes returns the total number of bytes after compression
@@ -293,7 +325,9 @@ func (fw *FileWriter) WriteBuffered(rec arrow.RecordBatch) error {
 			return err
 		}
 	} else {
-		fw.NewBufferedRowGroup()
+		if err := fw.NewBufferedRowGroupChecked(); err != nil {
+			return err
+		}
 	}
 
 	if int64(curRows)+rec.NumRows() <= maxRows {
@@ -310,7 +344,9 @@ func (fw *FileWriter) WriteBuffered(rec arrow.RecordBatch) error {
 
 	for idx, r := range recList {
 		if idx > 0 {
-			fw.NewBufferedRowGroup()
+			if err := fw.NewBufferedRowGroupChecked(); err != nil {
+				return err
+			}
 		}
 		for i := 0; i < int(r.NumCols()); i++ {
 			if err := fw.WriteColumnData(r.Column(i)); err != nil {
@@ -353,7 +389,9 @@ func (fw *FileWriter) Write(rec arrow.RecordBatch) error {
 	}
 
 	for _, r := range recList {
-		fw.NewRowGroup()
+		if err := fw.NewRowGroupChecked(); err != nil {
+			return err
+		}
 		for i := 0; i < int(r.NumCols()); i++ {
 			if err := fw.WriteColumnData(r.Column(i)); err != nil {
 				fw.Close()
@@ -382,7 +420,9 @@ func (fw *FileWriter) WriteTable(tbl arrow.Table, chunkSize int64) error {
 	}
 
 	writeRowGroup := func(offset, size int64) error {
-		fw.NewRowGroup()
+		if err := fw.NewRowGroupChecked(); err != nil {
+			return err
+		}
 		for i := 0; i < int(tbl.NumCols()); i++ {
 			if err := fw.WriteColumnChunked(tbl.Column(i).Data(), offset, size); err != nil {
 				return err

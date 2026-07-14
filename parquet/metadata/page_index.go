@@ -810,6 +810,7 @@ type PageIndexBuilder struct {
 	colIndexBuilders    [][]ColumnIndexBuilder
 	offsetIndexBuilders [][]*OffsetIndexBuilder
 	finished            bool
+	writtenRowGroups    int
 }
 
 func (b *PageIndexBuilder) AppendRowGroup() error {
@@ -859,20 +860,38 @@ func (b *PageIndexBuilder) WriteTo(w utils.WriterTell, location *PageIndexLocati
 	if !b.finished {
 		return fmt.Errorf("%w: PageIndexBuilder is not finished", arrow.ErrInvalid)
 	}
+	return b.writePending(w, location)
+}
+
+// FlushTo writes page indexes for row groups that have not yet been flushed.
+// The builder remains appendable so callers can continue adding row groups.
+func (b *PageIndexBuilder) FlushTo(w utils.WriterTell, location *PageIndexLocation) error {
+	if b.finished {
+		return fmt.Errorf("%w: PageIndexBuilder is finished", arrow.ErrInvalid)
+	}
+	return b.writePending(w, location)
+}
+
+func (b *PageIndexBuilder) writePending(w utils.WriterTell, location *PageIndexLocation) error {
+	if b.writtenRowGroups > len(b.colIndexBuilders) {
+		return fmt.Errorf("%w: invalid flushed row group count", arrow.ErrInvalid)
+	}
 
 	location.ColIndexLocation = make(map[uint64][]*IndexLocation)
 	location.OffsetIndexLocation = make(map[uint64][]*IndexLocation)
+	start := b.writtenRowGroups
 
 	// serialize column index
-	if err := serializeIndex(b.Schema, b.colIndexBuilders, w, location.ColIndexLocation, encryption.ColumnIndexModule, b.getColumnMetaEncryptor); err != nil {
+	if err := serializeIndex(b.Schema, b.colIndexBuilders[start:], start, w, location.ColIndexLocation, encryption.ColumnIndexModule, b.getColumnMetaEncryptor); err != nil {
 		return err
 	}
 
 	// serialize offset index
-	if err := serializeIndex(b.Schema, b.offsetIndexBuilders, w, location.OffsetIndexLocation, encryption.OffsetIndexModule, b.getColumnMetaEncryptor); err != nil {
+	if err := serializeIndex(b.Schema, b.offsetIndexBuilders[start:], start, w, location.OffsetIndexLocation, encryption.OffsetIndexModule, b.getColumnMetaEncryptor); err != nil {
 		return err
 	}
 
+	b.writtenRowGroups = len(b.colIndexBuilders)
 	return nil
 }
 
@@ -909,7 +928,7 @@ func (b *PageIndexBuilder) getColumnMetaEncryptor(rgOrdinal, colOrdinal int, mod
 func serializeIndex[T interface {
 	comparable
 	WriteTo(io.Writer, encryption.Encryptor) (int, error)
-}](s *schema.Schema, bldrs [][]T, w utils.WriterTell, location map[uint64][]*IndexLocation, moduleType int8, encFn func(int, int, int8) encryption.Encryptor) error {
+}](s *schema.Schema, bldrs [][]T, rgOffset int, w utils.WriterTell, location map[uint64][]*IndexLocation, moduleType int8, encFn func(int, int, int8) encryption.Encryptor) error {
 	var (
 		z       T
 		numCols = s.NumColumns()
@@ -928,7 +947,7 @@ func serializeIndex[T interface {
 				continue
 			}
 
-			encryptor := encFn(rg, col, moduleType)
+			encryptor := encFn(rg+rgOffset, col, moduleType)
 			posBefore := w.Tell()
 
 			n, err := bldr.WriteTo(w, encryptor)
@@ -949,7 +968,7 @@ func serializeIndex[T interface {
 		}
 
 		if hasValidIndex {
-			location[uint64(rg)] = locations
+			location[uint64(rg+rgOffset)] = locations
 		}
 	}
 

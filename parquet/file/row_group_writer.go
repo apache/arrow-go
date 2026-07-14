@@ -73,6 +73,7 @@ type rowGroupWriter struct {
 	bytesWritten           int64
 	compressedBytesWritten int64
 	closed                 bool
+	closeErr               error
 	ordinal                int16
 	nextColumnIdx          int
 	nrows                  int
@@ -86,7 +87,7 @@ type rowGroupWriter struct {
 	bloomFilters map[string]metadata.BloomFilterBuilder
 }
 
-func newRowGroupWriter(sink utils.WriterTell, rgMeta *metadata.RowGroupMetaDataBuilder, ordinal int16, props *parquet.WriterProperties, buffered bool, fileEncryptor encryption.FileEncryptor, pageIdxBldr *metadata.PageIndexBuilder) *rowGroupWriter {
+func newRowGroupWriter(sink utils.WriterTell, rgMeta *metadata.RowGroupMetaDataBuilder, ordinal int16, props *parquet.WriterProperties, buffered bool, fileEncryptor encryption.FileEncryptor, pageIdxBldr *metadata.PageIndexBuilder) (*rowGroupWriter, error) {
 	ret := &rowGroupWriter{
 		sink:             sink,
 		metadata:         rgMeta,
@@ -99,11 +100,13 @@ func newRowGroupWriter(sink utils.WriterTell, rgMeta *metadata.RowGroupMetaDataB
 	}
 
 	if buffered {
-		ret.initColumns()
+		if err := ret.initColumns(); err != nil {
+			return nil, err
+		}
 	} else {
 		ret.columnWriters = []ColumnChunkWriter{nil}
 	}
-	return ret
+	return ret, nil
 }
 
 func (rg *rowGroupWriter) Buffered() bool { return rg.buffered }
@@ -234,12 +237,14 @@ func (rg *rowGroupWriter) Close() error {
 	if !rg.closed {
 		rg.closed = true
 		if err := rg.checkRowsWritten(); err != nil {
+			rg.closeErr = err
 			return err
 		}
 
 		for _, wr := range rg.columnWriters {
 			if wr != nil {
 				if err := wr.Close(); err != nil {
+					rg.closeErr = err
 					return err
 				}
 				rg.bytesWritten += wr.TotalBytesWritten()
@@ -249,9 +254,11 @@ func (rg *rowGroupWriter) Close() error {
 
 		rg.columnWriters = nil
 		rg.metadata.SetNumRows(rg.nrows)
-		rg.metadata.Finish(rg.bytesWritten, rg.ordinal)
+		if err := rg.metadata.Finish(rg.bytesWritten, rg.ordinal); err != nil {
+			rg.closeErr = err
+		}
 	}
-	return nil
+	return rg.closeErr
 }
 
 func (rg *rowGroupWriter) initColumns() error {
