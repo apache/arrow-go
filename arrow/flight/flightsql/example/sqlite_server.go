@@ -581,6 +581,18 @@ func scalarToIFace(s scalar.Scalar) (interface{}, error) {
 		return val.ToTime(), nil
 	case *scalar.DenseUnion:
 		return scalarToIFace(val.Value)
+	case *scalar.Dictionary:
+		if err := val.ValidateFull(); err != nil {
+			return nil, err
+		}
+		value, err := val.GetEncodedValue()
+		if err != nil {
+			return nil, err
+		}
+		if r, ok := value.(scalar.Releasable); ok {
+			defer r.Release()
+		}
+		return scalarToIFace(value)
 	default:
 		return nil, fmt.Errorf("unsupported type: %s", val)
 	}
