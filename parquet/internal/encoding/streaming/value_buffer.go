@@ -153,8 +153,8 @@ func (s *streamBuffer) Recycle() {
 		s.mem.Free(b)
 	}
 	s.live = s.live[:0]
-	// Compact once the consumed prefix passes half the chunk, so read-ahead keeps room
-	// without a rotate (peak = one chunk) and the copy stays rare.
+	// Compact once the consumed prefix passes half the chunk to preserve read-ahead
+	// room while keeping compactions and rotations rare.
 	if s.off*2 <= len(s.cur) {
 		return
 	}
