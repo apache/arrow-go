@@ -254,7 +254,9 @@ func (rg *rowGroupWriter) Close() error {
 
 		rg.columnWriters = nil
 		rg.metadata.SetNumRows(rg.nrows)
-		rg.metadata.Finish(rg.bytesWritten, rg.ordinal)
+		if err := rg.metadata.Finish(rg.bytesWritten, rg.ordinal); err != nil {
+			rg.closeErr = err
+		}
 	}
 	return rg.closeErr
 }

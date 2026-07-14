@@ -1465,6 +1465,55 @@ func TestFlushWithFooterPropagatesPageIndexWriteError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestRowGroupClosePropagatesMetadataFinishError(t *testing.T) {
+	var sink bytes.Buffer
+	writer, err := file.NewParquetWriterWithError(&sink, newSingleColumnSchema(t),
+		file.WithWriterProps(parquet.NewWriterProperties(parquet.WithDictionaryDefault(false))))
+	require.NoError(t, err)
+
+	rgw, err := writer.AppendRowGroupChecked()
+	require.NoError(t, err)
+
+	require.ErrorContains(t, rgw.Close(), "only -1 out of 1 columns are initialized")
+	require.ErrorContains(t, writer.Close(), "only -1 out of 1 columns are initialized")
+}
+
+func TestFlushWithFooterKeepsPageIndexBuilderAppendable(t *testing.T) {
+	var sink bytes.Buffer
+	props := parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(false),
+		parquet.WithPageIndexEnabled(true),
+	)
+	writer, err := file.NewParquetWriterWithError(&sink, newSingleColumnSchema(t), file.WithWriterProps(props))
+	require.NoError(t, err)
+
+	writeRowGroup := func(value int32) {
+		rgw, err := writer.AppendRowGroupChecked()
+		require.NoError(t, err)
+		cw, err := rgw.NextColumn()
+		require.NoError(t, err)
+		_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch([]int32{value}, []int16{1}, nil)
+		require.NoError(t, err)
+		require.NoError(t, rgw.Close())
+	}
+
+	writeRowGroup(1)
+	require.NoError(t, writer.FlushWithFooter())
+	writeRowGroup(2)
+	require.NoError(t, writer.Close())
+
+	reader, err := file.NewParquetReader(bytes.NewReader(sink.Bytes()))
+	require.NoError(t, err)
+	defer reader.Close()
+	require.Equal(t, 2, reader.NumRowGroups())
+	for i := 0; i < reader.NumRowGroups(); i++ {
+		colMeta, err := reader.MetaData().RowGroup(i).ColumnChunk(0)
+		require.NoError(t, err)
+		require.NotNil(t, colMeta.GetColumnIndexLocation())
+		require.NotNil(t, colMeta.GetOffsetIndexLocation())
+	}
+}
+
 func TestNewParquetWriterWithError_Success(t *testing.T) {
 	var buf bytes.Buffer
 	writer, err := file.NewParquetWriterWithError(&buf, newSingleColumnSchema(t))

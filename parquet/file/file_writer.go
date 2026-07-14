@@ -298,18 +298,25 @@ func (fw *Writer) startFile() error {
 	return nil
 }
 
-func (fw *Writer) writePageIndex() error {
-	if fw.pageIndexBuilder != nil {
-		// serialize page index after all row groups have been written and report
-		// location to the file metadata
-		fw.pageIndexBuilder.Finish()
-		var pageIndexLocation metadata.PageIndexLocation
-		if err := fw.pageIndexBuilder.WriteTo(fw.sink, &pageIndexLocation); err != nil {
-			return err
-		}
-		fw.metadata.SetPageIndexLocation(pageIndexLocation)
+func (fw *Writer) writePageIndex(final bool) error {
+	if fw.pageIndexBuilder == nil {
+		return nil
 	}
-	return nil
+
+	// Intermediate footers must leave the page-index builder appendable so
+	// subsequent row groups can be written. The final footer closes the builder.
+	var pageIndexLocation metadata.PageIndexLocation
+	var err error
+	if final {
+		fw.pageIndexBuilder.Finish()
+		err = fw.pageIndexBuilder.WriteTo(fw.sink, &pageIndexLocation)
+	} else {
+		err = fw.pageIndexBuilder.FlushTo(fw.sink, &pageIndexLocation)
+	}
+	if err != nil {
+		return err
+	}
+	return fw.metadata.SetPageIndexLocation(pageIndexLocation)
 }
 
 // AppendKeyValueMetadata appends a key/value pair to the existing key/value metadata
@@ -353,7 +360,7 @@ func (fw *Writer) Close() (err error) {
 			}
 		}()
 
-		err = fw.FlushWithFooter()
+		err = fw.flushWithFooter(true)
 	}
 	if err != nil {
 		return err
@@ -373,6 +380,10 @@ func (fw *Writer) FileMetadata() (*metadata.FileMetaData, error) {
 // calls to FlushWithFooter or Close will be cumulative, so that only the last footer
 // written need ever be read by a reader.
 func (fw *Writer) FlushWithFooter() error {
+	return fw.flushWithFooter(false)
+}
+
+func (fw *Writer) flushWithFooter(final bool) error {
 	if fw.writeErr != nil {
 		return fw.writeErr
 	}
@@ -389,7 +400,7 @@ func (fw *Writer) FlushWithFooter() error {
 			return fw.recordError(err)
 		}
 
-		if err := fw.writePageIndex(); err != nil {
+		if err := fw.writePageIndex(final); err != nil {
 			return fw.recordError(err)
 		}
 
