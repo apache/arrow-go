@@ -128,6 +128,18 @@ func TestLargeBinaryValidate(t *testing.T) {
 }
 
 func TestStringValidate(t *testing.T) {
+	t.Run("empty values allow a nil data buffer", func(t *testing.T) {
+		offsets := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes([]int32{0, 0, 0}))
+		data := NewData(arrow.BinaryTypes.String, 2, []*memory.Buffer{nil, offsets, nil}, nil, 0, 0)
+		offsets.Release()
+		arr := NewStringData(data)
+		data.Release()
+		defer arr.Release()
+
+		assert.NoError(t, arr.Validate())
+		assert.NoError(t, arr.ValidateFull())
+	})
+
 	t.Run("valid array passes", func(t *testing.T) {
 		arr := makeStringArrayRaw(t, []int32{0, 3, 5, 10}, "abcdeabcde", 3, 0)
 		assert.NoError(t, arr.Validate())
@@ -326,4 +338,22 @@ func TestTopLevelValidateFullRecursesDictionaryValues(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dictionary")
 	assert.Contains(t, err.Error(), "not monotonically non-decreasing")
+}
+
+func TestDictionaryIndexBoundsOnlyRunDuringValidateFull(t *testing.T) {
+	indices, _, err := FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int8, strings.NewReader(`[0, 1]`))
+	require.NoError(t, err)
+	defer indices.Release()
+	values, _, err := FromJSON(memory.DefaultAllocator, arrow.BinaryTypes.String, strings.NewReader(`["only"]`))
+	require.NoError(t, err)
+	defer values.Release()
+
+	dt := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	dict := NewDictionaryArray(dt, indices, values)
+	defer dict.Release()
+
+	assert.NoError(t, Validate(dict))
+	err = ValidateFull(dict)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dictionary indices")
 }

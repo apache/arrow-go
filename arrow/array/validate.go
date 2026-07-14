@@ -83,7 +83,7 @@ func validateArray(arr arrow.Array, full bool, path string) error {
 		}
 	}
 
-	if data.DataType().Layout().HasDict {
+	if full && data.DataType().Layout().HasDict {
 		dictData := data.dictionary
 		if dictData != nil {
 			dt := data.DataType().(*arrow.DictionaryType)
@@ -186,7 +186,7 @@ func validateArrayData(data *Data) error {
 
 func validateBuffer(buf *memory.Buffer, spec arrow.BufferSpec, end int64, length, index int) error {
 	if buf == nil {
-		if spec.Kind == arrow.KindFixedWidth || spec.Kind == arrow.KindVarWidth {
+		if spec.Kind == arrow.KindFixedWidth {
 			if length > 0 {
 				return fmt.Errorf("arrow/array: buffer %d is nil for non-empty layout kind %v", index, spec.Kind)
 			}
