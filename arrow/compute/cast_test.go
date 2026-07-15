@@ -410,9 +410,20 @@ func (c *CastSuite) TestCanCast() {
 }
 
 func (c *CastSuite) checkCastFails(dt arrow.DataType, input string, opts *compute.CastOptions) {
-	inArr, _, _ := array.FromJSON(c.mem, dt, strings.NewReader(input))
+	inArr, _, err := array.FromJSON(c.mem, dt, strings.NewReader(input))
+	require.NoError(c.T(), err)
 	defer inArr.Release()
 
+	checkCastFails(c.T(), inArr, *opts)
+}
+
+func (c *CastSuite) checkInvalidTimezoneCastFails(dt *arrow.TimestampType, opts *compute.CastOptions) {
+	bldr := array.NewTimestampBuilder(c.mem, dt)
+	defer bldr.Release()
+	bldr.Append(0)
+
+	inArr := bldr.NewArray()
+	defer inArr.Release()
 	checkCastFails(c.T(), inArr, *opts)
 }
 
@@ -2750,8 +2761,8 @@ func (c *CastSuite) TestZonedTimestampToDate() {
 	// invalid timezones
 	for _, u := range []arrow.TimeUnit{arrow.Second, arrow.Millisecond, arrow.Microsecond, arrow.Nanosecond} {
 		dt := &arrow.TimestampType{Unit: u, TimeZone: "Mars/Mariner_Valley"}
-		c.checkCastFails(dt, timestampSecondsJSON, compute.NewCastOptions(arrow.FixedWidthTypes.Date32, false))
-		c.checkCastFails(dt, timestampSecondsJSON, compute.NewCastOptions(arrow.FixedWidthTypes.Date64, false))
+		c.checkInvalidTimezoneCastFails(dt, compute.NewCastOptions(arrow.FixedWidthTypes.Date32, false))
+		c.checkInvalidTimezoneCastFails(dt, compute.NewCastOptions(arrow.FixedWidthTypes.Date64, false))
 	}
 }
 
@@ -2873,9 +2884,9 @@ func (c *CastSuite) TestTimestampToTime() {
 		dt := &arrow.TimestampType{Unit: u, TimeZone: "Mars/Mariner_Valley"}
 		switch u {
 		case arrow.Second, arrow.Millisecond:
-			c.checkCastFails(dt, timestampSecondsJSON, compute.NewCastOptions(&arrow.Time32Type{Unit: u}, false))
+			c.checkInvalidTimezoneCastFails(dt, compute.NewCastOptions(&arrow.Time32Type{Unit: u}, false))
 		default:
-			c.checkCastFails(dt, timestampSecondsJSON, compute.NewCastOptions(&arrow.Time64Type{Unit: u}, false))
+			c.checkInvalidTimezoneCastFails(dt, compute.NewCastOptions(&arrow.Time64Type{Unit: u}, false))
 		}
 	}
 }

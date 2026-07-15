@@ -17,6 +17,7 @@
 package array_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -258,6 +259,36 @@ func TestTimestampValueStr(t *testing.T) {
 
 	assert.Equal(t, "1968-11-30T13:30:45-07:00", arr.ValueStr(0))
 	assert.Equal(t, "2016-02-29T10:42:23-07:00", arr.ValueStr(1))
+}
+
+func TestTimestampBuilderUnmarshalRejectsInvalidTimezone(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		value     string
+		useNumber bool
+	}{
+		{name: "timestamp string", value: `"2024-01-01T00:00:00"`},
+		{name: "integer string", value: `"0"`},
+		{name: "json number", value: `0`, useNumber: true},
+		{name: "float64", value: `0`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
+			dt := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "not/a_timezone"}
+			b := array.NewTimestampBuilder(mem, dt)
+			defer b.Release()
+
+			dec := json.NewDecoder(strings.NewReader(tc.value))
+			if tc.useNumber {
+				dec.UseNumber()
+			}
+			err := b.UnmarshalOne(dec)
+			assert.ErrorContains(t, err, "could not find timezone location")
+			assert.Zero(t, b.Len())
+		})
+	}
 }
 
 func TestTimestampValueStrWithDeprecatedLayout(t *testing.T) {
