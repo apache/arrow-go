@@ -349,13 +349,147 @@ type cimporter struct {
 	alloc *importAllocator
 }
 
+const maxInt64Value = int64(1<<63 - 1)
+
 func (imp *cimporter) importChild(parent *cimporter, src *CArrowArray) error {
 	imp.parent, imp.arr, imp.alloc = parent, src, parent.alloc
 	return imp.doImport()
 }
 
+func validateCArrayHeader(arr *CArrowArray) error {
+	if arr == nil {
+		return fmt.Errorf("%w: nil ArrowArray", arrow.ErrInvalid)
+	}
+	length := int64(arr.length)
+	offset := int64(arr.offset)
+	nullCount := int64(arr.null_count)
+	nBuffers := int64(arr.n_buffers)
+	nChildren := int64(arr.n_children)
+
+	if length < 0 {
+		return fmt.Errorf("%w: ArrowArray length cannot be negative: %d", arrow.ErrInvalid, length)
+	}
+	if offset < 0 {
+		return fmt.Errorf("%w: ArrowArray offset cannot be negative: %d", arrow.ErrInvalid, offset)
+	}
+	if nullCount < -1 || nullCount > length {
+		return fmt.Errorf("%w: ArrowArray null_count %d is outside [-1, %d]", arrow.ErrInvalid, nullCount, length)
+	}
+	if nBuffers < 0 {
+		return fmt.Errorf("%w: ArrowArray n_buffers cannot be negative: %d", arrow.ErrInvalid, nBuffers)
+	}
+	if nChildren < 0 {
+		return fmt.Errorf("%w: ArrowArray n_children cannot be negative: %d", arrow.ErrInvalid, nChildren)
+	}
+	if nBuffers > maxIntValue() {
+		return fmt.Errorf("%w: ArrowArray n_buffers is too large: %d", arrow.ErrInvalid, nBuffers)
+	}
+	if nChildren > maxIntValue() {
+		return fmt.Errorf("%w: ArrowArray n_children is too large: %d", arrow.ErrInvalid, nChildren)
+	}
+	if _, err := checkedMul(nBuffers, int64(unsafe.Sizeof(uintptr(0)))); err != nil {
+		return fmt.Errorf("%w: ArrowArray buffers pointer array is too large", arrow.ErrInvalid)
+	}
+	if _, err := checkedMul(nChildren, int64(unsafe.Sizeof(uintptr(0)))); err != nil {
+		return fmt.Errorf("%w: ArrowArray children pointer array is too large", arrow.ErrInvalid)
+	}
+	if nBuffers > 0 && arr.buffers == nil {
+		return fmt.Errorf("%w: ArrowArray buffers is nil with n_buffers %d", arrow.ErrInvalid, nBuffers)
+	}
+	if nChildren > 0 && arr.children == nil {
+		return fmt.Errorf("%w: ArrowArray children is nil with n_children %d", arrow.ErrInvalid, nChildren)
+	}
+	if offset > maxInt64Value-length {
+		return fmt.Errorf("%w: ArrowArray length and offset overflow: length %d, offset %d", arrow.ErrInvalid, length, offset)
+	}
+	if length+offset > maxIntValue() {
+		return fmt.Errorf("%w: ArrowArray length and offset exceed native int: length %d, offset %d", arrow.ErrInvalid, length, offset)
+	}
+
+	return nil
+}
+
+func maxIntValue() int64 {
+	return int64(^uint(0) >> 1)
+}
+
+func checkedAdd(a, b int64) (int64, error) {
+	if a < 0 || b < 0 || a > maxInt64Value-b {
+		return 0, fmt.Errorf("%w: integer addition overflow: %d + %d", arrow.ErrInvalid, a, b)
+	}
+	return a + b, nil
+}
+
+func checkedMul(a, b int64) (int64, error) {
+	if a < 0 || b < 0 || (a != 0 && b > maxInt64Value/a) {
+		return 0, fmt.Errorf("%w: integer multiplication overflow: %d * %d", arrow.ErrInvalid, a, b)
+	}
+	return a * b, nil
+}
+
+func checkedBytesForBits(bits int64) (int64, error) {
+	bits, err := checkedAdd(bits, 7)
+	if err != nil {
+		return 0, err
+	}
+	return bits >> 3, nil
+}
+
+func (imp *cimporter) checkExpectedChildren() error {
+	var expected int64
+	switch imp.dt.ID() {
+	case arrow.LIST, arrow.LARGE_LIST, arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW, arrow.FIXED_SIZE_LIST, arrow.MAP:
+		expected = 1
+	case arrow.STRUCT:
+		expected = int64(len(imp.dt.(*arrow.StructType).Fields()))
+	case arrow.RUN_END_ENCODED:
+		expected = 2
+	case arrow.DENSE_UNION:
+		expected = int64(len(imp.dt.(*arrow.DenseUnionType).Fields()))
+	case arrow.SPARSE_UNION:
+		expected = int64(len(imp.dt.(*arrow.SparseUnionType).Fields()))
+	}
+	return imp.checkNumChildren(expected)
+}
+
+func (imp *cimporter) checkExpectedBuffers() error {
+	switch imp.dt.(type) {
+	case *arrow.NullType, *arrow.RunEndEncodedType:
+		return imp.checkNumBuffers(0)
+	case arrow.FixedWidthDataType:
+		return imp.checkNumBuffers(2)
+	case *arrow.StringType, *arrow.BinaryType, *arrow.LargeStringType, *arrow.LargeBinaryType:
+		return imp.checkNumBuffers(3)
+	case *arrow.StringViewType, *arrow.BinaryViewType:
+		if imp.arr.n_buffers < 3 {
+			return fmt.Errorf("%w: expected at least 3 buffers for imported type %s, ArrowArray has %d", arrow.ErrInvalid, imp.dt, imp.arr.n_buffers)
+		}
+	case *arrow.ListType, *arrow.LargeListType, *arrow.MapType:
+		return imp.checkNumBuffers(2)
+	case *arrow.ListViewType, *arrow.LargeListViewType:
+		return imp.checkNumBuffers(3)
+	case *arrow.FixedSizeListType, *arrow.StructType:
+		return imp.checkNumBuffers(1)
+	case *arrow.DenseUnionType:
+		if imp.arr.n_buffers != 2 && imp.arr.n_buffers != 3 {
+			return fmt.Errorf("%w: expected 2 or 3 buffers for imported type %s, ArrowArray has %d", arrow.ErrInvalid, imp.dt, imp.arr.n_buffers)
+		}
+	case *arrow.SparseUnionType:
+		if imp.arr.n_buffers != 1 && imp.arr.n_buffers != 2 {
+			return fmt.Errorf("%w: expected 1 or 2 buffers for imported type %s, ArrowArray has %d", arrow.ErrInvalid, imp.dt, imp.arr.n_buffers)
+		}
+	default:
+		return fmt.Errorf("unimplemented type %s", imp.dt)
+	}
+	return nil
+}
+
 // import any child arrays for lists, structs, and so on.
 func (imp *cimporter) doImportChildren() error {
+	if err := imp.checkExpectedChildren(); err != nil {
+		return err
+	}
+
 	var children []*CArrowArray
 	if imp.arr.n_children > 0 {
 		children = unsafe.Slice(imp.arr.children, imp.arr.n_children)
@@ -441,6 +575,9 @@ func (imp *cimporter) initarr() {
 }
 
 func (imp *cimporter) doImportArr(src *CArrowArray) error {
+	if err := validateCArrayHeader(src); err != nil {
+		return err
+	}
 	imp.arr = C.get_arr()
 	C.ArrowArrayMove(src, imp.arr)
 	if imp.alloc == nil {
@@ -468,6 +605,16 @@ func (imp *cimporter) doImportArr(src *CArrowArray) error {
 // import is called recursively as needed for importing an array and its children
 // in order to generate array.Data objects
 func (imp *cimporter) doImport() error {
+	if err := validateCArrayHeader(imp.arr); err != nil {
+		return err
+	}
+	if _, ok := imp.dt.(*arrow.DictionaryType); ok && imp.arr.dictionary == nil {
+		return fmt.Errorf("%w: dictionary ArrowArray has no dictionary", arrow.ErrInvalid)
+	}
+	if err := imp.checkExpectedBuffers(); err != nil {
+		return err
+	}
+
 	// import any children
 	if err := imp.doImportChildren(); err != nil {
 		for _, c := range imp.children {
@@ -686,6 +833,9 @@ func (imp *cimporter) importBinaryViewLike() (err error) {
 	if err = imp.checkNoChildren(); err != nil {
 		return
 	}
+	if _, err = checkedMul(int64(imp.arr.n_buffers)-3, int64(arrow.Int64SizeBytes)); err != nil {
+		return err
+	}
 
 	buffers := make([]*memory.Buffer, len(imp.cbuffers)-1)
 	defer memory.ReleaseBuffers(buffers)
@@ -699,6 +849,12 @@ func (imp *cimporter) importBinaryViewLike() (err error) {
 	}
 
 	if len(buffers) > 2 {
+		if imp.cbuffers[len(buffers)] == nil {
+			return fmt.Errorf("%w: invalid data buffer sizes", arrow.ErrInvalid)
+		}
+		if _, err = checkedMul(int64(len(buffers)-2), int64(arrow.Int64SizeBytes)); err != nil {
+			return err
+		}
 		dataBufferSizes := unsafe.Slice((*int64)(unsafe.Pointer(imp.cbuffers[len(buffers)])), len(buffers)-2)
 		for i, size := range dataBufferSizes {
 			if buffers[i+2], err = imp.importVariableValuesBuffer(i+2, 1, size); err != nil {
@@ -795,7 +951,12 @@ func (imp *cimporter) importFixedSizePrimitive() error {
 
 	fw := imp.dt.(arrow.FixedWidthDataType)
 	if bitutil.IsMultipleOf8(int64(fw.BitWidth())) {
-		values, err = imp.importFixedSizeBuffer(1, bitutil.BytesForBits(int64(fw.BitWidth())))
+		var byteWidth int64
+		byteWidth, err = checkedBytesForBits(int64(fw.BitWidth()))
+		if err != nil {
+			return err
+		}
+		values, err = imp.importFixedSizeBuffer(1, byteWidth)
 	} else {
 		if fw.BitWidth() != 1 {
 			return errors.New("invalid bitwidth")
@@ -853,11 +1014,19 @@ func (imp *cimporter) checkNumBuffers(n int64) error {
 }
 
 func (imp *cimporter) importBuffer(bufferID int, sz int64) (*memory.Buffer, error) {
+	// Buffer sizes come from foreign memory and cannot be independently verified;
+	// these checks only prevent invalid metadata from creating unsafe Go slices.
 	// this is not a copy, we're just having a slice which points at the data
 	// it's still owned by the C.ArrowArray object and its backing C++ object.
+	if bufferID < 0 || bufferID >= len(imp.cbuffers) {
+		return nil, fmt.Errorf("%w: invalid buffer index %d", arrow.ErrInvalid, bufferID)
+	}
+	if sz < 0 || sz > maxIntValue() {
+		return nil, fmt.Errorf("%w: invalid buffer size %d", arrow.ErrInvalid, sz)
+	}
 	if imp.cbuffers[bufferID] == nil || sz == 0 {
 		if sz != 0 {
-			return nil, errors.New("invalid buffer")
+			return nil, fmt.Errorf("%w: invalid buffer", arrow.ErrInvalid)
 		}
 		return memory.NewBufferBytes([]byte{}), nil
 	}
@@ -867,7 +1036,14 @@ func (imp *cimporter) importBuffer(bufferID int, sz int64) (*memory.Buffer, erro
 }
 
 func (imp *cimporter) importBitsBuffer(bufferID int) (*memory.Buffer, error) {
-	bufsize := bitutil.BytesForBits(int64(imp.arr.length) + int64(imp.arr.offset))
+	total, err := checkedAdd(int64(imp.arr.length), int64(imp.arr.offset))
+	if err != nil {
+		return nil, err
+	}
+	bufsize, err := checkedBytesForBits(total)
+	if err != nil {
+		return nil, err
+	}
 	return imp.importBuffer(bufferID, bufsize)
 }
 
@@ -884,18 +1060,39 @@ func (imp *cimporter) importNullBitmap(bufferID int) (*memory.Buffer, error) {
 }
 
 func (imp *cimporter) importFixedSizeBuffer(bufferID int, byteWidth int64) (*memory.Buffer, error) {
-	bufsize := byteWidth * int64(imp.arr.length+imp.arr.offset)
+	total, err := checkedAdd(int64(imp.arr.length), int64(imp.arr.offset))
+	if err != nil {
+		return nil, err
+	}
+	bufsize, err := checkedMul(byteWidth, total)
+	if err != nil {
+		return nil, err
+	}
 	return imp.importBuffer(bufferID, bufsize)
 }
 
 func (imp *cimporter) importOffsetsBuffer(bufferID int, offsetsize int64) (*memory.Buffer, error) {
-	bufsize := offsetsize * int64((imp.arr.length + imp.arr.offset + 1))
+	total, err := checkedAdd(int64(imp.arr.length), int64(imp.arr.offset))
+	if err != nil {
+		return nil, err
+	}
+	total, err = checkedAdd(total, 1)
+	if err != nil {
+		return nil, err
+	}
+	bufsize, err := checkedMul(offsetsize, total)
+	if err != nil {
+		return nil, err
+	}
 	return imp.importBuffer(bufferID, bufsize)
 }
 
 func (imp *cimporter) importVariableValuesBuffer(bufferID int, byteWidth, nvals int64) (*memory.Buffer, error) {
-	bufsize := byteWidth * nvals
-	return imp.importBuffer(bufferID, int64(bufsize))
+	bufsize, err := checkedMul(byteWidth, nvals)
+	if err != nil {
+		return nil, err
+	}
+	return imp.importBuffer(bufferID, bufsize)
 }
 
 func importCArrayAsType(arr *CArrowArray, dt arrow.DataType) (imp *cimporter, err error) {

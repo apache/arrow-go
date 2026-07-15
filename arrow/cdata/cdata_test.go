@@ -1102,6 +1102,207 @@ func TestEmptyUnionExport(t *testing.T) {
 	assert.NotEqualValues(t, unsafe.Pointer(nil), buffers[0])
 }
 
+func TestValidateCArrayHeader(t *testing.T) {
+	const maxInt64 = int64(1<<63 - 1)
+
+	tests := []struct {
+		name  string
+		setup func(*CArrowArray)
+	}{
+		{
+			name: "nil array",
+			setup: func(arr *CArrowArray) {
+				_ = arr
+			},
+		},
+		{
+			name:  "negative length",
+			setup: func(arr *CArrowArray) { arr.length = -1 },
+		},
+		{
+			name:  "negative offset",
+			setup: func(arr *CArrowArray) { arr.offset = -1 },
+		},
+		{
+			name:  "null count below unknown",
+			setup: func(arr *CArrowArray) { arr.null_count = -2 },
+		},
+		{
+			name:  "null count exceeds length",
+			setup: func(arr *CArrowArray) { arr.null_count = 2 },
+		},
+		{
+			name:  "negative buffer count",
+			setup: func(arr *CArrowArray) { arr.n_buffers = -1 },
+		},
+		{
+			name:  "negative child count",
+			setup: func(arr *CArrowArray) { arr.n_children = -1 },
+		},
+		{
+			name:  "huge buffer count",
+			setup: func(arr *CArrowArray) { setCArrayCounts(arr, maxInt64, 0) },
+		},
+		{
+			name:  "huge child count",
+			setup: func(arr *CArrowArray) { setCArrayCounts(arr, 0, maxInt64) },
+		},
+		{
+			name:  "missing buffers",
+			setup: func(arr *CArrowArray) { arr.n_buffers = 1 },
+		},
+		{
+			name:  "missing children",
+			setup: func(arr *CArrowArray) { arr.n_children = 1 },
+		},
+		{
+			name: "length and offset overflow",
+			setup: func(arr *CArrowArray) {
+				setCArrayLength(arr, maxInt64)
+				arr.offset = 1
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.name == "nil array" {
+				require.Error(t, validateCArrayHeader(nil))
+				return
+			}
+
+			arr := CArrowArray{}
+			arr.length = 1
+			tt.setup(&arr)
+			require.Error(t, validateCArrayHeader(&arr))
+		})
+	}
+}
+
+func TestCArrayImportValidatesHeaderBeforeNativeSlices(t *testing.T) {
+	const maxInt64 = int64(1<<63 - 1)
+
+	tests := []struct {
+		name   string
+		arr    CArrowArray
+		length int64
+		dt     arrow.DataType
+	}{
+		{
+			name: "missing child pointer",
+			arr: CArrowArray{
+				length:     1,
+				n_children: 1,
+			},
+			dt: arrow.ListOf(arrow.PrimitiveTypes.Int32),
+		},
+		{
+			name: "fixed width multiplication overflow",
+			arr: CArrowArray{
+				n_buffers: 2,
+			},
+			length: maxInt64/4 + 1,
+			dt:     arrow.PrimitiveTypes.Int32,
+		},
+		{
+			name: "offset multiplication overflow",
+			arr: CArrowArray{
+				n_buffers: 3,
+			},
+			length: maxInt64/4 + 1,
+			dt:     arrow.BinaryTypes.String,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			arr := tt.arr
+			if tt.length != 0 {
+				setCArrayLength(&arr, tt.length)
+			}
+			if arr.n_buffers > 0 {
+				setCArrayBuffers(&arr, int(arr.n_buffers))
+				defer freeCArrayBuffers(&arr)
+			}
+
+			imp := &cimporter{arr: &arr, dt: tt.dt}
+			require.NotPanics(t, func() {
+				require.Error(t, imp.doImport())
+			})
+		})
+	}
+}
+
+func TestImportCArrayRejectsInvalidRootHeaderBeforeMove(t *testing.T) {
+	arr := CArrowArray{}
+	arr.length = -1
+
+	require.NotPanics(t, func() {
+		_, err := importCArrayAsType(&arr, arrow.PrimitiveTypes.Int32)
+		require.Error(t, err)
+	})
+}
+
+func TestImportDictionaryArrayRequiresDictionary(t *testing.T) {
+	arr := CArrowArray{n_buffers: 2}
+	setCArrayBuffers(&arr, 2)
+	defer freeCArrayBuffers(&arr)
+
+	dt := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.PrimitiveTypes.Int32,
+	}
+	imp := &cimporter{arr: &arr, dt: dt}
+
+	require.ErrorIs(t, imp.doImport(), arrow.ErrInvalid)
+}
+
+func TestImportBinaryViewRequiresSizeMetadata(t *testing.T) {
+	arr := CArrowArray{n_buffers: 4}
+	setCArrayBuffers(&arr, 4)
+	defer freeCArrayBuffers(&arr)
+
+	imp := &cimporter{arr: &arr, dt: &arrow.BinaryViewType{}}
+
+	require.ErrorIs(t, imp.doImport(), arrow.ErrInvalid)
+}
+
+func TestImportNestedArraysRejectsUnexpectedCounts(t *testing.T) {
+	tests := []struct {
+		name      string
+		dt        arrow.DataType
+		nBuffers  int64
+		nChildren int64
+	}{
+		{
+			name:      "struct child count",
+			dt:        arrow.StructOf(arrow.Field{Name: "value", Type: arrow.PrimitiveTypes.Int32}),
+			nBuffers:  1,
+			nChildren: 0,
+		},
+		{
+			name:      "sparse union child count",
+			dt:        arrow.SparseUnionOf([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, []arrow.UnionTypeCode{0}),
+			nBuffers:  1,
+			nChildren: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			arr := CArrowArray{}
+			setCArrayCounts(&arr, tt.nBuffers, tt.nChildren)
+			if tt.nBuffers > 0 {
+				setCArrayBuffers(&arr, int(tt.nBuffers))
+				defer freeCArrayBuffers(&arr)
+			}
+
+			imp := &cimporter{arr: &arr, dt: tt.dt}
+			require.Error(t, imp.doImport())
+		})
+	}
+}
+
 func TestRecordReaderExport(t *testing.T) {
 	// Regression test for apache/arrow#33767
 	reclist := arrdata.Records["primitives"]
