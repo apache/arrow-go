@@ -298,7 +298,11 @@ func NewFileMetaData(data []byte, fileDecryptor encryption.FileDecryptor) (*File
 	meta := format.NewFileMetaData()
 	if fileDecryptor != nil {
 		footerDecryptor := fileDecryptor.GetFooterDecryptor()
-		data = footerDecryptor.Decrypt(data)
+		var err error
+		data, err = footerDecryptor.Decrypt(data)
+		if err != nil {
+			return nil, fmt.Errorf("decrypting file metadata: %w", err)
+		}
 	}
 
 	remain, err := thrift.DeserializeThrift(meta, data)

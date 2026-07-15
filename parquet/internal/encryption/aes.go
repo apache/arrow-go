@@ -193,36 +193,58 @@ func newAesDecryptor(alg parquet.Cipher, metadata bool) *aesDecryptor {
 // the length of the plaintext after decryption.
 func (a *aesDecryptor) CiphertextSizeDelta() int { return a.ciphertextSizeDelta }
 
-// DecryptFrom
-func (a *aesDecryptor) DecryptFrom(r io.Reader, key, aad []byte) []byte {
+// DecryptFrom decrypts a length-prefixed ciphertext read from r. maxCiphertext
+// limits the framed ciphertext payload before it is allocated.
+func (a *aesDecryptor) DecryptFrom(r io.Reader, key, aad []byte, maxCiphertext int64) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	var writtenCiphertextLen uint32
 	if err := binary.Read(r, binary.LittleEndian, &writtenCiphertextLen); err != nil {
-		panic(err)
+		return nil, fmt.Errorf("reading encrypted payload length: %w", err)
+	}
+	if int64(writtenCiphertextLen) > maxCiphertext {
+		return nil, fmt.Errorf("encrypted payload length %d exceeds limit %d", writtenCiphertextLen, maxCiphertext)
+	}
+	if err := a.validateCiphertextLength(int(writtenCiphertextLen)); err != nil {
+		return nil, err
 	}
 
 	cipherText := make([]byte, writtenCiphertextLen)
-	if n, err := io.ReadFull(r, cipherText); n != int(writtenCiphertextLen) || err != nil {
-		panic(err)
+	if _, err := io.ReadFull(r, cipherText); err != nil {
+		return nil, fmt.Errorf("reading encrypted payload: %w", err)
 	}
 
+	return a.decryptPayload(block, cipherText, aad)
+}
+
+func (a *aesDecryptor) validateCiphertextLength(length int) error {
+	minimum := NonceLength
+	if a.mode == gcmMode {
+		minimum += GcmTagLength
+	}
+	if length < minimum {
+		return fmt.Errorf("encrypted payload length %d is smaller than minimum %d", length, minimum)
+	}
+	return nil
+}
+
+func (a *aesDecryptor) decryptPayload(block cipher.Block, cipherText, aad []byte) ([]byte, error) {
 	nonce := cipherText[:NonceLength]
 	cipherText = cipherText[NonceLength:]
 	if a.mode == gcmMode {
 		aead, err := cipher.NewGCM(block)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
-		plain, err := aead.Open(cipherText[:0], nonce, cipherText, aad)
+		plain, err := aead.Open(nil, nonce, cipherText, aad)
 		if err != nil {
-			panic(err)
+			return nil, fmt.Errorf("decrypting encrypted payload: %w", err)
 		}
-		return plain
+		return plain, nil
 	}
 
 	// Parquet CTR IVs are comprised of a 12-byte nonce and a 4-byte initial
@@ -234,48 +256,47 @@ func (a *aesDecryptor) DecryptFrom(r io.Reader, key, aad []byte) []byte {
 	iv[ctrIVLen-1] = 1
 
 	stream := cipher.NewCTR(block, iv)
-	// dst := make([]byte, len(cipherText))
-	stream.XORKeyStream(cipherText, cipherText)
-	return cipherText
+	plain := make([]byte, len(cipherText))
+	stream.XORKeyStream(plain, cipherText)
+	return plain, nil
 }
 
 // Decrypt returns the plaintext version of the given ciphertext when decrypted
 // with the provided key and AAD security bytes.
-func (a *aesDecryptor) Decrypt(cipherText, key, aad []byte) []byte {
+func (a *aesDecryptor) Decrypt(cipherText, key, aad []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	writtenCiphertextLen := binary.LittleEndian.Uint32(cipherText)
-	cipherLen := writtenCiphertextLen + bufferSizeLength
-	nonce := cipherText[bufferSizeLength : bufferSizeLength+NonceLength]
-
-	if a.mode == gcmMode {
-		aead, err := cipher.NewGCM(block)
-		if err != nil {
-			panic(err)
-		}
-
-		plain, err := aead.Open(nil, nonce, cipherText[bufferSizeLength+NonceLength:cipherLen], aad)
-		if err != nil {
-			panic(err)
-		}
-		return plain
+	frame, err := FramedCiphertext(cipherText)
+	if err != nil {
+		return nil, err
 	}
+	if len(frame) != len(cipherText) {
+		return nil, fmt.Errorf("encrypted payload has %d trailing bytes", len(cipherText)-len(frame))
+	}
+	writtenCiphertextLen := len(frame) - bufferSizeLength
+	if err := a.validateCiphertextLength(int(writtenCiphertextLen)); err != nil {
+		return nil, err
+	}
+	return a.decryptPayload(block, frame[bufferSizeLength:], aad)
+}
 
-	// Parquet CTR IVs are comprised of a 12-byte nonce and a 4-byte initial
-	// counter field.
-	// The first 31 bits of the initial counter field are set to 0, the last bit
-	// is set to 1.
-	iv := make([]byte, ctrIVLen)
-	copy(iv, nonce)
-	iv[ctrIVLen-1] = 1
-
-	stream := cipher.NewCTR(block, iv)
-	dst := make([]byte, len(cipherText)-bufferSizeLength-NonceLength)
-	stream.XORKeyStream(dst, cipherText[bufferSizeLength+NonceLength:])
-	return dst
+// FramedCiphertext returns the complete first length-prefixed ciphertext frame
+// in src. Additional bytes are left out of the returned slice.
+func FramedCiphertext(src []byte) ([]byte, error) {
+	if len(src) < bufferSizeLength {
+		return nil, fmt.Errorf("encrypted payload is missing its %d-byte length prefix: %w",
+			bufferSizeLength, io.ErrUnexpectedEOF)
+	}
+	writtenCiphertextLen := binary.LittleEndian.Uint32(src)
+	frameLen := uint64(writtenCiphertextLen) + bufferSizeLength
+	if frameLen > uint64(len(src)) {
+		return nil, fmt.Errorf("encrypted payload length prefix is %d, available length is %d: %w",
+			writtenCiphertextLen, len(src)-bufferSizeLength, io.ErrUnexpectedEOF)
+	}
+	return src[:frameLen], nil
 }
 
 // CreateModuleAad creates the section AAD security bytes for the file, module, row group, column and page.

@@ -608,7 +608,10 @@ func (p *serializedPageReader) decompress(rd io.Reader, lenCompressed int, buf [
 
 	data := p.decompressBuffer.Bytes()[:lenCompressed]
 	if p.cryptoCtx.DataDecryptor != nil {
-		data = p.cryptoCtx.DataDecryptor.Decrypt(data)
+		data, err = p.cryptoCtx.DataDecryptor.Decrypt(data)
+		if err != nil {
+			return nil, fmt.Errorf("decrypting page data: %w", err)
+		}
 	}
 
 	decoded, err := compress.Decode(p.codec, buf, data)
@@ -630,7 +633,10 @@ func (p *serializedPageReader) readV2Encrypted(rd io.Reader, lenCompressed int, 
 		return n, fmt.Errorf("parquet: expected to read %d compressed bytes, got %d", lenCompressed, n)
 	}
 
-	data := p.cryptoCtx.DataDecryptor.Decrypt(p.decompressBuffer.Bytes()[:lenCompressed])
+	data, err := p.cryptoCtx.DataDecryptor.Decrypt(p.decompressBuffer.Bytes()[:lenCompressed])
+	if err != nil {
+		return n, fmt.Errorf("decrypting data page: %w", err)
+	}
 
 	// encrypted + uncompressed -> just copy the decrypted data to output buffer
 	if !compressed {
@@ -802,7 +808,21 @@ func (p *serializedPageReader) readPageHeader(rd parquet.BufferedReader, hdr *fo
 		extra := 0
 		if p.cryptoCtx.MetaDecryptor != nil {
 			p.updateDecryption(p.cryptoCtx.MetaDecryptor, encryption.DictPageHeaderModule, p.dataPageHeaderAad)
-			view = p.cryptoCtx.MetaDecryptor.Decrypt(view)
+			ciphertext, frameErr := encryption.FramedCiphertext(view)
+			if errors.Is(frameErr, io.ErrUnexpectedEOF) {
+				allowedPgSz *= 2
+				if allowedPgSz > p.maxPageHeaderSize {
+					return errors.New("parquet: deserializing page header failed")
+				}
+				continue
+			}
+			if frameErr != nil {
+				return fmt.Errorf("reading encrypted page header: %w", frameErr)
+			}
+			view, err = p.cryptoCtx.MetaDecryptor.Decrypt(ciphertext)
+			if err != nil {
+				return fmt.Errorf("decrypting page header: %w", err)
+			}
 			extra = p.cryptoCtx.MetaDecryptor.CiphertextSizeDelta()
 		}
 

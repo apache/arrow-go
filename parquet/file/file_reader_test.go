@@ -282,9 +282,9 @@ func (m *mockDecryptor) Allocator() memory.Allocator {
 
 func (m *mockDecryptor) CiphertextSizeDelta() int { return 0 }
 
-func (m *mockDecryptor) Decrypt(src []byte) []byte { return m.decrypt(src) }
+func (m *mockDecryptor) Decrypt(src []byte) ([]byte, error) { return m.decrypt(src), nil }
 
-func (m *mockDecryptor) DecryptFrom(r io.Reader) []byte {
+func (m *mockDecryptor) DecryptFrom(r io.Reader, _ int64) ([]byte, error) {
 	decrypted, _ := io.ReadAll(r)
 	return m.Decrypt(decrypted)
 }
