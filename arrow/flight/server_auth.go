@@ -150,16 +150,21 @@ type BasicAuthValidator interface {
 
 func createServerBearerTokenUnaryInterceptor(validator BasicAuthValidator) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		var auth string
+		var scheme, credential string
 		md, ok := metadata.FromIncomingContext(ctx)
 		if ok {
 			vals := md.Get(basicAuthHeader)
-			if len(vals) > 0 && strings.HasPrefix(vals[0], bearerTokenPrefix) {
-				auth = vals[0][len(bearerTokenPrefix)+1:]
+			if len(vals) > 0 {
+				scheme, credential, _ = strings.Cut(strings.TrimSpace(vals[0]), " ")
+				credential = strings.TrimLeft(credential, " ")
 			}
 		}
 
-		identity, err := validator.IsValid(auth)
+		if scheme != bearerTokenPrefix || credential == "" {
+			return nil, status.Error(codes.Unauthenticated, "must authenticate first")
+		}
+
+		identity, err := validator.IsValid(credential)
 		if err != nil {
 			return nil, err
 		}

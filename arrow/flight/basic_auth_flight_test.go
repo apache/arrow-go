@@ -151,6 +151,27 @@ func TestErrorAuths(t *testing.T) {
 			t.Fatal("should have errored")
 		}
 	})
+
+	for _, auth := range []string{"", "Bearer", "Bearer ", "BearerX token"} {
+		t.Run("malformed unary auth "+auth, func(t *testing.T) {
+			ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("authorization", auth))
+			_, err := client.GetSchema(ctx, &flight.FlightDescriptor{})
+			if status.Code(err) != codes.Unauthenticated {
+				t.Fatalf("expected unauthenticated error, got %v", err)
+			}
+		})
+	}
+
+	t.Run("unary auth with multiple spaces", func(t *testing.T) {
+		ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("authorization", "Bearer   "+validBearer))
+		result, err := client.GetSchema(ctx, &flight.FlightDescriptor{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := string(result.Schema), "carebears"; got != want {
+			t.Fatalf("unexpected schema: got %q, want %q", got, want)
+		}
+	})
 }
 
 func TestBasicAuthHelpers(t *testing.T) {
