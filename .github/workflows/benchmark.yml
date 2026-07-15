@@ -62,5 +62,5 @@ jobs:
           CONBENCH_REF: ${{ github.ref_name }}
           CONBENCH_MACHINE_INFO_NAME: ${{ matrix.arch }}-debian-12
         run: |
-          python3 -m pip install benchadapt@git+https://github.com/conbench/conbench.git@main#subdirectory=benchadapt/python
+          python3 -m pip install benchadapt@git+https://github.com/conbench/conbench.git@3af4a55206ad3918762cc8dd7d3012eadbe96a54#subdirectory=benchadapt/python
           python3 ci/scripts/bench_adapt.py

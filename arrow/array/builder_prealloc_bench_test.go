@@ -19,6 +19,7 @@ package array_test
 import (
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
@@ -220,7 +221,7 @@ func BenchmarkStringBuilder_NoReserveData(b *testing.B) {
 // BenchmarkBinaryBuilder_LargeData tests large binary data
 func BenchmarkBinaryBuilder_LargeData(b *testing.B) {
 	mem := memory.NewGoAllocator()
-	builder := array.NewBinaryBuilder(mem, nil)
+	builder := array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
 	defer builder.Release()
 
 	// 1MB per element
@@ -251,7 +252,7 @@ func BenchmarkBinaryBuilder_LargeData_WithReserve(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
-		builder := array.NewBinaryBuilder(mem, nil)
+		builder := array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
 		builder.Reserve(1)
 		builder.ReserveData(dataSize)
 		b.StartTimer()

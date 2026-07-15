@@ -412,8 +412,16 @@ func BenchmarkRunEndKernels(b *testing.B) {
 				b.Run("run_ends_type="+runEndType.dt.String(), func(b *testing.B) {
 					for _, valType := range append(numericTypes, arrow.BinaryTypes.String, arrow.FixedWidthTypes.Boolean) {
 						b.Run("value_type="+valType.String(), func(b *testing.B) {
-							benchRunEndEncode(b, sz, a.nullProb, runEndType.dt, valType)
-							benchRunEndDecode(b, sz, a.nullProb, runEndType.dt, valType)
+							vsz := sz
+							// String uses int32 value offsets; cap elements so a
+							// cache-sized run can't overflow them (was a panic).
+							if valType.ID() == arrow.STRING {
+								if maxElems := math.MaxInt32 / 32; vsz > maxElems {
+									vsz = maxElems
+								}
+							}
+							benchRunEndEncode(b, vsz, a.nullProb, runEndType.dt, valType)
+							benchRunEndDecode(b, vsz, a.nullProb, runEndType.dt, valType)
 						})
 					}
 				})

@@ -33,4 +33,6 @@ func init() {
 		checkHash = checkHashGo
 		insertHash, insertBulk = insertHashGo, insertBulkGo
 	}
+	// checkBulk has no vectorized variant; it wraps the selected checkHash.
+	checkBulk = checkBulkGo
 }

@@ -161,6 +161,27 @@ func BenchmarkFilterCheck(b *testing.B) {
 	b.SetBytes(bytesPerFilterBlock)
 }
 
+func TestBlockSplitBloomFilterCheckBulk(t *testing.T) {
+	bf := blockSplitBloomFilter{bitset32: make([]uint32, 99*bitsSetPerBlock)}
+	hashes := []uint64{1, 2, 3, 42, 99, 12345, 67890}
+	for _, h := range hashes {
+		bf.InsertHash(h)
+	}
+
+	got := bf.CheckBulk(hashes)
+	if len(got) != len(hashes) {
+		t.Fatalf("CheckBulk returned %d results, want %d", len(got), len(hashes))
+	}
+	for i, h := range hashes {
+		if !got[i] {
+			t.Errorf("CheckBulk reported inserted hash %d absent", h)
+		}
+		if got[i] != bf.CheckHash(h) {
+			t.Errorf("CheckBulk[%d]=%v disagrees with CheckHash=%v for hash %d", i, got[i], bf.CheckHash(h), h)
+		}
+	}
+}
+
 func BenchmarkFilterCheckBulk(b *testing.B) {
 	bf := blockSplitBloomFilter{bitset32: make([]uint32, 99*bitsSetPerBlock)}
 	x := make([]uint64, 16)
