@@ -170,7 +170,7 @@ func (r *RleDecoder) Next() bool {
 
 func (r *RleDecoder) GetValue() (uint64, bool) {
 	vals := make([]uint64, 1)
-	n := r.GetBatch(vals)
+	n, _ := r.GetBatch(vals)
 	return vals[0], n == 1
 }
 
@@ -201,7 +201,7 @@ func (r *RleDecoder) Discard(n int) int {
 	return read
 }
 
-func (r *RleDecoder) GetBatch(values []uint64) int {
+func (r *RleDecoder) GetBatch(values []uint64) (int, error) {
 	read := 0
 	size := len(values)
 
@@ -220,26 +220,28 @@ func (r *RleDecoder) GetBatch(values []uint64) int {
 			out = out[repbatch:]
 		} else if r.litCount > 0 {
 			litbatch := min(remain, int(r.litCount))
-			n, _ := r.r.GetBatch(uint(r.bitWidth), out[:litbatch])
-			if n != litbatch {
-				return read
+			n, err := r.r.GetBatch(uint(r.bitWidth), out[:litbatch])
+			r.litCount -= int32(n)
+			read += n
+			out = out[n:]
+			if err != nil {
+				return read, err
 			}
-
-			r.litCount -= int32(litbatch)
-			read += litbatch
-			out = out[litbatch:]
+			if n != litbatch {
+				return read, nil
+			}
 		} else {
 			if !r.Next() {
-				return read
+				return read, nil
 			}
 		}
 	}
-	return read
+	return read, nil
 }
 
 func (r *RleDecoder) GetBatchSpaced(vals []uint64, nullcount int, validBits []byte, validBitsOffset int64) (int, error) {
 	if nullcount == 0 {
-		return r.GetBatch(vals), nil
+		return r.GetBatch(vals)
 	}
 
 	converter := plainConverter[uint64]{}
@@ -259,7 +261,7 @@ func (r *RleDecoder) GetBatchSpaced(vals []uint64, nullcount int, validBits []by
 		}
 
 		if block.AllSet() {
-			processed = r.GetBatch(vals[:block.Len])
+			processed, err = r.GetBatch(vals[:block.Len])
 		} else if block.NoneSet() {
 			converter.FillZero(vals[:block.Len])
 			processed = int(block.Len)
@@ -271,6 +273,9 @@ func (r *RleDecoder) GetBatchSpaced(vals []uint64, nullcount int, validBits []by
 		}
 
 		totalProcessed += processed
+		if err != nil {
+			return totalProcessed, err
+		}
 		vals = vals[int(block.Len):]
 		validBitsOffset += int64(block.Len)
 

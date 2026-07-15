@@ -664,15 +664,26 @@ func (rr *recordReader) ReadRecords(numRecords int64) (int64, error) {
 			defLevels := rr.DefLevels()[int(rr.levelsWritten):]
 
 			levelsRead := 0
+			var err error
 			// not present for non-repeated fields
 			if rr.Descriptor().MaxRepetitionLevel() > 0 {
 				repLevels := rr.RepLevels()[int(rr.levelsWritten):]
-				levelsRead, _ = rr.readDefinitionLevels(defLevels[:batchSize])
-				if rr.readRepetitionLevels(repLevels[:batchSize]) != levelsRead {
+				levelsRead, _, err = rr.readDefinitionLevels(defLevels[:batchSize])
+				if err != nil {
+					return recordsRead, err
+				}
+				repetitionLevelsRead, err := rr.readRepetitionLevels(repLevels[:batchSize])
+				if err != nil {
+					return recordsRead, err
+				}
+				if repetitionLevelsRead != levelsRead {
 					return 0, errors.New("number of decoded rep/def levels did not match")
 				}
 			} else if rr.Descriptor().MaxDefinitionLevel() > 0 {
-				levelsRead, _ = rr.readDefinitionLevels(defLevels[:batchSize])
+				levelsRead, _, err = rr.readDefinitionLevels(defLevels[:batchSize])
+				if err != nil {
+					return recordsRead, err
+				}
 			}
 
 			if levelsRead == 0 {

@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math/bits"
 
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
@@ -252,13 +253,14 @@ func (l *LevelDecoder) SetDataV2(nbytes int32, maxLvl int16, nbuffered int, data
 // Decode decodes the bytes that were set with SetData into the slice of levels
 // returning the total number of levels that were decoded and the number of
 // values which had a level equal to the max level, indicating how many physical
-// values exist to be read.
-func (l *LevelDecoder) Decode(levels []int16) (int, int64) {
+// values exist to be read, along with any decoding error.
+func (l *LevelDecoder) Decode(levels []int16) (int, int64, error) {
 	var (
 		buf          [1024]uint64
 		totaldecoded int
 		decoded      int
 		valsToRead   int64
+		err          error
 	)
 
 	n := shared_utils.Min(int64(l.remaining), int64(len(levels)))
@@ -266,13 +268,13 @@ func (l *LevelDecoder) Decode(levels []int16) (int, int64) {
 		batch := shared_utils.Min(1024, n)
 		switch l.encoding {
 		case format.Encoding_RLE:
-			decoded = l.rle.GetBatch(buf[:batch])
+			decoded, err = l.rle.GetBatch(buf[:batch])
 		case format.Encoding_BIT_PACKED:
-			decoded, _ = l.bit.GetBatch(uint(l.bitWidth), buf[:batch])
+			decoded, err = l.bit.GetBatch(uint(l.bitWidth), buf[:batch])
 		}
 		l.remaining -= decoded
 		totaldecoded += decoded
-		n -= batch
+		n -= int64(decoded)
 
 		for idx, val := range buf[:decoded] {
 			lvl := int16(val)
@@ -282,7 +284,13 @@ func (l *LevelDecoder) Decode(levels []int16) (int, int64) {
 			}
 		}
 		levels = levels[decoded:]
+		if err != nil {
+			return totaldecoded, valsToRead, err
+		}
+		if decoded != int(batch) {
+			return totaldecoded, valsToRead, io.ErrUnexpectedEOF
+		}
 	}
 
-	return totaldecoded, valsToRead
+	return totaldecoded, valsToRead, nil
 }

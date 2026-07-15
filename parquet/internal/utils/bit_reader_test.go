@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
 	"math/bits"
 	"math/rand/v2"
@@ -147,6 +148,147 @@ func TestBitArrayVals(t *testing.T) {
 					}
 				})
 			}
+		})
+	}
+}
+
+func TestBitReaderRejectsTruncatedPackedBatches(t *testing.T) {
+	for width := 1; width <= 32; width++ {
+		for _, batchSize := range []int{32, 64} {
+			t.Run(fmt.Sprintf("width=%d/batch=%d", width, batchSize), func(t *testing.T) {
+				input := bytes.Repeat([]byte{0xFF}, width*batchSize/8-1)
+				expected := batchSize - 32
+				want := uint64(1<<uint(width)) - 1
+
+				values := make([]uint64, batchSize)
+				for i := range values {
+					values[i] = math.MaxUint64
+				}
+				reader := utils.NewBitReader(bytes.NewReader(input))
+				n, err := reader.GetBatch(uint(width), values)
+				assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+				assert.Equal(t, expected, n)
+				for _, got := range values[:n] {
+					assert.Equal(t, want, got)
+				}
+				for _, got := range values[n:] {
+					assert.Equal(t, uint64(math.MaxUint64), got)
+				}
+
+				indices := make([]utils.IndexType, batchSize)
+				for i := range indices {
+					indices[i] = math.MinInt32
+				}
+				reader = utils.NewBitReader(bytes.NewReader(input))
+				n, err = reader.GetBatchIndex(uint(width), indices)
+				assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+				assert.Equal(t, expected, n)
+				for _, got := range indices[:n] {
+					assert.Equal(t, int32(want), got)
+				}
+				for _, got := range indices[n:] {
+					assert.Equal(t, int32(math.MinInt32), got)
+				}
+			})
+		}
+	}
+}
+
+func TestBitReaderStopsAtPackedGroupBoundary(t *testing.T) {
+	for width := 1; width <= 32; width++ {
+		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
+			input := bytes.Repeat([]byte{0xFF}, width*4)
+
+			reader := utils.NewBitReader(bytes.NewReader(input))
+			values := make([]uint64, 64)
+			n, err := reader.GetBatch(uint(width), values)
+			assert.ErrorIs(t, err, io.EOF)
+			assert.Equal(t, 32, n)
+
+			reader = utils.NewBitReader(bytes.NewReader(input))
+			indices := make([]utils.IndexType, 64)
+			n, err = reader.GetBatchIndex(uint(width), indices)
+			assert.ErrorIs(t, err, io.EOF)
+			assert.Equal(t, 32, n)
+		})
+	}
+}
+
+type identityDictionaryConverter struct{}
+
+func (identityDictionaryConverter) Copy(out []uint64, indices []utils.IndexType) error {
+	for i, idx := range indices {
+		out[i] = uint64(idx)
+	}
+	return nil
+}
+
+func (identityDictionaryConverter) Fill(out []uint64, index utils.IndexType) error {
+	for i := range out {
+		out[i] = uint64(index)
+	}
+	return nil
+}
+
+func (identityDictionaryConverter) FillZero(out []uint64) {
+	clear(out)
+}
+
+func (identityDictionaryConverter) IsValid(...utils.IndexType) bool { return true }
+
+func (identityDictionaryConverter) IsValidSingle(utils.IndexType) bool { return true }
+
+func TestRleDecoderPropagatesTruncatedPackedRun(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload int
+		err     error
+	}{
+		{name: "partial group", payload: 7, err: io.ErrUnexpectedEOF},
+		{name: "group boundary", payload: 4, err: io.EOF},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := append([]byte{17}, bytes.Repeat([]byte{0xFF}, tc.payload)...)
+			decoder := utils.NewRleDecoder(bytes.NewReader(input), 1)
+
+			values := make([]uint64, 64)
+			n, err := decoder.GetBatch(values)
+			assert.ErrorIs(t, err, tc.err)
+			assert.Equal(t, 32, n)
+			for _, value := range values[:n] {
+				assert.Equal(t, uint64(1), value)
+			}
+		})
+	}
+}
+
+func TestTypedRleDecoderPropagatesTruncatedPackedRun(t *testing.T) {
+	converter := identityDictionaryConverter{}
+	for _, tc := range []struct {
+		name    string
+		payload int
+		err     error
+	}{
+		{name: "partial group", payload: 7, err: io.ErrUnexpectedEOF},
+		{name: "group boundary", payload: 4, err: io.EOF},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := append([]byte{17}, bytes.Repeat([]byte{0xFF}, tc.payload)...)
+
+			t.Run("unspaced", func(t *testing.T) {
+				decoder := utils.NewTypedRleDecoder[uint64](bytes.NewReader(input), 1)
+				_, err := decoder.GetBatchWithDict(converter, make([]uint64, 64))
+				assert.ErrorIs(t, err, tc.err)
+			})
+
+			t.Run("spaced", func(t *testing.T) {
+				decoder := utils.NewTypedRleDecoder[uint64](bytes.NewReader(input), 1)
+				validBits := bytes.Repeat([]byte{0xFF}, 9)
+				bitutil.ClearBit(validBits, 0)
+
+				_, err := decoder.GetBatchWithDictSpaced(converter, make([]uint64, 65), 1, validBits, 0)
+				assert.ErrorIs(t, err, tc.err)
+			})
 		})
 	}
 }
@@ -280,7 +422,9 @@ func (r *RLETestSuite) ValidateRle(vals []uint64, width int, expected []byte, ex
 	r.Run("decode batch read", func() {
 		dec := utils.NewRleDecoder(bytes.NewReader(buf), width)
 		check := make([]uint64, len(vals))
-		r.Equal(len(vals), dec.GetBatch(check))
+		n, err := dec.GetBatch(check)
+		r.NoError(err)
+		r.Equal(len(vals), n)
 		r.Equal(vals, check)
 	})
 }
@@ -502,7 +646,9 @@ func (r *RLERandomSuite) checkRoundTrip(vals []uint64, width int) bool {
 	res = res && r.Run("batch decode", func() {
 		dec := utils.NewRleDecoder(bytes.NewReader(buf[:encoded]), width)
 		read := make([]uint64, len(vals))
-		r.Require().Equal(len(vals), dec.GetBatch(read))
+		n, err := dec.GetBatch(read)
+		r.Require().NoError(err)
+		r.Require().Equal(len(vals), n)
 		r.Equal(vals, read)
 	})
 

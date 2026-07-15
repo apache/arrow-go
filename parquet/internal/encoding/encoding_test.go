@@ -18,7 +18,9 @@ package encoding_test
 
 import (
 	"bufio"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"reflect"
@@ -603,6 +605,24 @@ func TestDictEncoding(t *testing.T) {
 			suite.Run(t, &DictionaryEncodingTestSuite{BaseEncodingTestSuite{typ: tt.typ}})
 		})
 	}
+}
+
+func TestDictionaryDecoderRejectsTruncatedPackedLiteralRun(t *testing.T) {
+	column := schema.NewColumn(schema.NewInt32Node("int32", parquet.Repetitions.Required, -1), 0, 0)
+	dictionaryData := make([]byte, 8)
+	binary.LittleEndian.PutUint32(dictionaryData, 10)
+	binary.LittleEndian.PutUint32(dictionaryData[4:], 20)
+
+	dictionary := encoding.NewDecoder(parquet.Types.Int32, parquet.Encodings.Plain, column, memory.DefaultAllocator)
+	require.NoError(t, dictionary.SetData(2, dictionaryData))
+
+	decoder := encoding.NewDictDecoder(parquet.Types.Int32, column, memory.DefaultAllocator)
+	decoder.SetDict(dictionary)
+	indices := append([]byte{1, 17}, make([]byte, 7)...)
+	require.NoError(t, decoder.SetData(64, indices))
+
+	_, err := decoder.(encoding.Int32Decoder).Decode(make([]int32, 64))
+	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
 }
 
 func TestWriteDeltaBitPackedInt32(t *testing.T) {

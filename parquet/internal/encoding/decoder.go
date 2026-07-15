@@ -167,7 +167,7 @@ func (d *dictDecoder[T]) DecodeIndices(numValues int, bldr array.Builder) (int, 
 		d.idxScratchSpace = d.idxScratchSpace[:n]
 	}
 
-	n = d.idxDecoder.GetBatch(d.idxScratchSpace)
+	n, err := d.idxDecoder.GetBatch(d.idxScratchSpace)
 
 	toAppend := make([]int, n)
 	for i, v := range d.idxScratchSpace {
@@ -175,7 +175,7 @@ func (d *dictDecoder[T]) DecodeIndices(numValues int, bldr array.Builder) (int, 
 	}
 	bldr.(*array.BinaryDictionaryBuilder).AppendIndices(toAppend, nil)
 	d.nvals -= n
-	return n, nil
+	return n, err
 }
 
 func (d *dictDecoder[T]) DecodeIndicesSpaced(numValues, nullCount int, validBits []byte, offset int64, bldr array.Builder) (int, error) {

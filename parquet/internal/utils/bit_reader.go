@@ -287,9 +287,12 @@ func (b *BitReader) GetBatchIndex(bits uint, out []IndexType) (i int, err error)
 	b.reader.Seek(b.byteoffset, io.SeekStart)
 	// grab as many 32 byte chunks as possible in one shot
 	if i < length { // IndexType should be a 32 bit value so we can do quick unpacking right into the output
-		numUnpacked := unpack32(b.reader, (*(*[]uint32)(unsafe.Pointer(&out)))[i:], int(bits))
+		numUnpacked, unpackErr := unpack32(b.reader, (*(*[]uint32)(unsafe.Pointer(&out)))[i:], int(bits))
 		i += numUnpacked
 		b.byteoffset += int64(numUnpacked * int(bits) / 8)
+		if unpackErr != nil {
+			return i, unpackErr
+		}
 	}
 
 	// re-fill our buffer just in case.
@@ -404,16 +407,19 @@ func (b *BitReader) GetBatch(bits uint, out []uint64) (int, error) {
 	for i < length {
 		// unpack groups of 32 bytes at a time into a buffer since it's more efficient
 		unpackSize := utils.Min(buflen, length-i)
-		numUnpacked := unpack32(b.reader, b.unpackBuf[:unpackSize], int(bits))
-		if numUnpacked == 0 {
-			break
-		}
+		numUnpacked, err := unpack32(b.reader, b.unpackBuf[:unpackSize], int(bits))
 
 		for k := 0; k < numUnpacked; k++ {
 			out[i+k] = uint64(b.unpackBuf[k])
 		}
 		i += numUnpacked
 		b.byteoffset += int64(numUnpacked * int(bits) / 8)
+		if err != nil {
+			return i, err
+		}
+		if numUnpacked == 0 {
+			break
+		}
 	}
 
 	b.fillbuffer()

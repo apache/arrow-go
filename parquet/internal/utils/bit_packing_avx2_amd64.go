@@ -31,23 +31,30 @@ var bufferPool = sync.Pool{New: func() interface{} { return &bytes.Buffer{} }}
 //go:noescape
 func _unpack32_avx2(in, out unsafe.Pointer, batchSize, nbits int) (num int)
 
-func unpack32Avx2(in io.Reader, out []uint32, nbits int) int {
+func unpack32Avx2(in io.Reader, out []uint32, nbits int) (int, error) {
 	batch := len(out) / 32 * 32
 	n := batch * nbits / 8
 	if n <= 0 {
-		return 0
+		return 0, nil
 	}
 
 	buffer := bufferPool.Get().(*bytes.Buffer)
 	defer bufferPool.Put(buffer)
 	buffer.Reset()
 	buffer.Grow(n)
-	io.CopyN(buffer, in, int64(n))
+	nread, err := io.CopyN(buffer, in, int64(n))
+	if err == io.EOF && int(nread)%(nbits*4) != 0 {
+		err = io.ErrUnexpectedEOF
+	}
+	completeBatch := int(nread) * 8 / nbits / 32 * 32
+	if completeBatch == 0 {
+		return 0, err
+	}
 
 	var (
 		input  = unsafe.Pointer(&buffer.Bytes()[0])
 		output = unsafe.Pointer(&out[0])
 	)
 
-	return _unpack32_avx2(input, output, len(out), nbits)
+	return _unpack32_avx2(input, output, completeBatch, nbits), err
 }

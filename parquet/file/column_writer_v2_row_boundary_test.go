@@ -133,7 +133,8 @@ func assertPagesStartOnRowBoundary(t *testing.T, raw []byte) {
 		require.NoError(t, dec.SetDataV2(v2.RepetitionLevelByteLen(), maxRep, int(v2.NumValues()), v2.Data()))
 
 		levels := make([]int16, v2.NumValues())
-		n, _ := dec.Decode(levels)
+		n, _, err := dec.Decode(levels)
+		require.NoError(t, err)
 		require.Greater(t, n, 0, "page %d decoded zero repetition levels", v2Count)
 		require.Zerof(t, levels[0],
 			"DataPageV2 #%d starts mid-row (first repetition level = %d, want 0)", v2Count, levels[0])
@@ -225,7 +226,8 @@ func TestWriteSpacedV2NullableListWideRow(t *testing.T) {
 		var dec encoding.LevelDecoder
 		require.NoError(t, dec.SetDataV2(v2.RepetitionLevelByteLen(), maxRep, int(v2.NumValues()), v2.Data()))
 		levels := make([]int16, v2.NumValues())
-		n, _ := dec.Decode(levels)
+		n, _, err := dec.Decode(levels)
+		require.NoError(t, err)
 		require.Greater(t, n, 0)
 		require.Zero(t, levels[0], "wide row page starts mid-row")
 	}
