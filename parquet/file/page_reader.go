@@ -421,9 +421,11 @@ type serializedPageReader struct {
 	maxRepLevel     int16
 	maxDefLevel     int16
 
-	curPageHdr        *format.PageHeader
-	pageOrd           int16
-	maxPageHeaderSize int
+	curPageHdr              *format.PageHeader
+	pageOrd                 int16
+	maxPageHeaderSize       int
+	maxCompressedPageSize   int64
+	maxUncompressedPageSize int64
 
 	curPage           Page
 	cryptoCtx         CryptoContext
@@ -502,11 +504,13 @@ func NewPageReader(r parquet.BufferedReader, nrows int64, compressType compress.
 	}
 
 	rdr := &serializedPageReader{
-		r:                 r,
-		maxPageHeaderSize: defaultMaxPageHeaderSize,
-		nrows:             nrows,
-		mem:               mem,
-		codec:             codec,
+		r:                       r,
+		maxPageHeaderSize:       defaultMaxPageHeaderSize,
+		nrows:                   nrows,
+		mem:                     mem,
+		codec:                   codec,
+		maxCompressedPageSize:   parquet.DefaultMaxCompressedPageSize,
+		maxUncompressedPageSize: parquet.DefaultMaxUncompressedPageSize,
 
 		decompressBuffer: memory.NewResizableBuffer(mem),
 		dataPageBuffer:   memory.NewResizableBuffer(mem),
@@ -547,6 +551,21 @@ func (p *serializedPageReader) Err() error { return p.err }
 
 func (p *serializedPageReader) SetMaxPageHeaderSize(sz int) {
 	p.maxPageHeaderSize = sz
+}
+
+func (p *serializedPageReader) validatePageSizes(hdr *format.PageHeader) (int, int, error) {
+	compressed := int64(hdr.GetCompressedPageSize())
+	uncompressed := int64(hdr.GetUncompressedPageSize())
+	if compressed < 0 || uncompressed < 0 {
+		return 0, 0, errors.New("parquet: invalid page header (negative page size)")
+	}
+	if compressed > p.maxCompressedPageSize {
+		return 0, 0, fmt.Errorf("parquet: compressed page size %d exceeds configured limit %d", compressed, p.maxCompressedPageSize)
+	}
+	if uncompressed > p.maxUncompressedPageSize {
+		return 0, 0, fmt.Errorf("parquet: uncompressed page size %d exceeds configured limit %d", uncompressed, p.maxUncompressedPageSize)
+	}
+	return int(compressed), int(uncompressed), nil
 }
 
 func (p *serializedPageReader) initDecryption() {
@@ -726,10 +745,9 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 			p.updateDecryption(p.cryptoCtx.DataDecryptor, encryption.DictPageModule, p.dataPageAad)
 		}
 
-		lenCompressed := int(hdr.GetCompressedPageSize())
-		lenUncompressed := int(hdr.GetUncompressedPageSize())
-		if lenCompressed < 0 || lenUncompressed < 0 {
-			return nil, errors.New("parquet: invalid page header")
+		lenCompressed, lenUncompressed, err := p.validatePageSizes(hdr)
+		if err != nil {
+			return nil, err
 		}
 
 		p.cryptoCtx.StartDecryptWithDictionaryPage = false
@@ -958,10 +976,9 @@ func (p *serializedPageReader) Next() bool {
 			return false
 		}
 
-		lenCompressed := int(p.curPageHdr.GetCompressedPageSize())
-		lenUncompressed := int(p.curPageHdr.GetUncompressedPageSize())
-		if lenCompressed < 0 || lenUncompressed < 0 {
-			p.err = errors.New("parquet: invalid page header")
+		lenCompressed, lenUncompressed, err := p.validatePageSizes(p.curPageHdr)
+		if err != nil {
+			p.err = err
 			return false
 		}
 
