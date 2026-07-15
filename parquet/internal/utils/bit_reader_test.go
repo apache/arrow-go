@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
 	"math/bits"
 	"math/rand/v2"
@@ -76,6 +77,106 @@ func BenchmarkBitWriter(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		assert.True(b, bw.WriteVlqInt(uint64(1)))
 	}
+}
+
+type stalledReader struct {
+	*bytes.Reader
+}
+
+func (*stalledReader) Read([]byte) (int, error) { return 0, nil }
+
+func TestBitReaderGetBatchBools(t *testing.T) {
+	data := []byte{0xAA, 0xCC, 0xF0}
+	for length := 0; length <= 17; length++ {
+		t.Run(fmt.Sprintf("aligned/%d", length), func(t *testing.T) {
+			reader := utils.NewBitReader(bytes.NewReader(data))
+			out := make([]bool, length)
+			n, err := reader.GetBatchBools(out)
+			assert.NoError(t, err)
+			assert.Equal(t, length, n)
+			for i, got := range out {
+				assert.Equal(t, data[i/8]&(1<<uint(i%8)) != 0, got)
+			}
+		})
+
+		t.Run(fmt.Sprintf("unaligned/%d", length), func(t *testing.T) {
+			reader := utils.NewBitReader(bytes.NewReader(data))
+			_, ok := reader.GetValue(1)
+			assert.True(t, ok)
+
+			out := make([]bool, length)
+			n, err := reader.GetBatchBools(out)
+			assert.NoError(t, err)
+			assert.Equal(t, length, n)
+			for i, got := range out {
+				bit := i + 1
+				assert.Equal(t, data[bit/8]&(1<<uint(bit%8)) != 0, got)
+			}
+		})
+	}
+
+	t.Run("truncated", func(t *testing.T) {
+		reader := utils.NewBitReader(bytes.NewReader(data[:1]))
+		out := make([]bool, 16)
+		n, err := reader.GetBatchBools(out)
+		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		assert.Equal(t, 8, n)
+		for i, got := range out[:n] {
+			assert.Equal(t, data[0]&(1<<uint(i)) != 0, got)
+		}
+	})
+
+	t.Run("truncated remainder", func(t *testing.T) {
+		for _, tc := range []struct {
+			length, inputBytes, expected int
+		}{
+			{length: 1, inputBytes: 0, expected: 0},
+			{length: 7, inputBytes: 0, expected: 0},
+			{length: 9, inputBytes: 1, expected: 8},
+			{length: 15, inputBytes: 1, expected: 8},
+			{length: 17, inputBytes: 2, expected: 16},
+		} {
+			t.Run(fmt.Sprint(tc.length), func(t *testing.T) {
+				reader := utils.NewBitReader(bytes.NewReader(data[:tc.inputBytes]))
+				out := make([]bool, tc.length)
+				for i := range out {
+					out[i] = true
+				}
+
+				n, err := reader.GetBatchBools(out)
+				assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+				assert.Equal(t, tc.expected, n)
+				for i, got := range out[:n] {
+					assert.Equal(t, data[i/8]&(1<<uint(i%8)) != 0, got)
+				}
+				for _, got := range out[n:] {
+					assert.True(t, got)
+				}
+			})
+		}
+	})
+
+	t.Run("truncated unaligned", func(t *testing.T) {
+		reader := utils.NewBitReader(bytes.NewReader(data[:1]))
+		_, ok := reader.GetValue(1)
+		assert.True(t, ok)
+
+		out := make([]bool, 8)
+		n, err := reader.GetBatchBools(out)
+		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		assert.Equal(t, 7, n)
+		for i, got := range out[:n] {
+			bit := i + 1
+			assert.Equal(t, data[bit/8]&(1<<uint(bit%8)) != 0, got)
+		}
+	})
+
+	t.Run("no progress", func(t *testing.T) {
+		reader := utils.NewBitReader(&stalledReader{bytes.NewReader(nil)})
+		n, err := reader.GetBatchBools(make([]bool, 8))
+		assert.ErrorIs(t, err, io.ErrNoProgress)
+		assert.Zero(t, n)
+	})
 }
 
 func TestBitReader(t *testing.T) {
