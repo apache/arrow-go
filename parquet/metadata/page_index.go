@@ -102,7 +102,7 @@ func mustArg[T any](val T, err error) T {
 // TypedColumnIndex.
 func NewColumnIndex(descr *schema.Column, serializedIndex []byte, props *parquet.ReaderProperties, decryptor encryption.Decryptor) ColumnIndex {
 	if decryptor != nil {
-		serializedIndex = decryptor.Decrypt(serializedIndex)
+		serializedIndex = mustArg(decryptor.Decrypt(serializedIndex))
 	}
 
 	var colidx format.ColumnIndex
@@ -233,7 +233,7 @@ func (p PageIndexSelection) String() string {
 // optionally decrypting it if it was encrypted.
 func NewOffsetIndex(serializedIndex []byte, _ *parquet.ReaderProperties, decryptor encryption.Decryptor) OffsetIndex {
 	if decryptor != nil {
-		serializedIndex = decryptor.Decrypt(serializedIndex)
+		serializedIndex = mustArg(decryptor.Decrypt(serializedIndex))
 	}
 
 	var offsetIndex format.OffsetIndex
@@ -347,12 +347,18 @@ func (r *RowGroupPageIndexReader) GetColumnIndex(i int) (ColumnIndex, error) {
 		return nil, err
 	}
 
+	serializedIndex := r.colIndexBuffer[bufferOffset : bufferOffset+int64(colIndexLocation.Length)]
 	if decryptor != nil {
 		encryption.UpdateDecryptor(decryptor, int16(r.rgOrdinal),
 			int16(i), encryption.ColumnIndexModule)
+		decrypted, err := decryptor.Decrypt(serializedIndex)
+		if err != nil {
+			return nil, fmt.Errorf("decrypting column index: %w", err)
+		}
+		serializedIndex = decrypted
 	}
 
-	idx := NewColumnIndex(descr, r.colIndexBuffer[bufferOffset:], r.props, decryptor)
+	idx := NewColumnIndex(descr, serializedIndex, r.props, nil)
 	r.colIndexes[i] = idx
 	return idx, nil
 }
@@ -401,12 +407,18 @@ func (r *RowGroupPageIndexReader) GetOffsetIndex(i int) (OffsetIndex, error) {
 		return nil, err
 	}
 
+	serializedIndex := r.offsetIndexBuffer[bufferOffset : bufferOffset+int64(offsetIndexLocation.Length)]
 	if decryptor != nil {
 		encryption.UpdateDecryptor(decryptor, int16(r.rgOrdinal),
 			int16(i), encryption.OffsetIndexModule)
+		decrypted, err := decryptor.Decrypt(serializedIndex)
+		if err != nil {
+			return nil, fmt.Errorf("decrypting offset index: %w", err)
+		}
+		serializedIndex = decrypted
 	}
 
-	oidx := NewOffsetIndex(r.offsetIndexBuffer[bufferOffset:], r.props, decryptor)
+	oidx := NewOffsetIndex(serializedIndex, r.props, nil)
 	r.offsetIndices[i] = oidx
 	return oidx, nil
 }

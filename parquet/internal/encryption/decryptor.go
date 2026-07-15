@@ -245,9 +245,9 @@ type Decryptor interface {
 	// returns the CiphertextSizeDelta from the decryptor
 	CiphertextSizeDelta() int
 	// Decrypt just returns the decrypted plaintext from the src ciphertext
-	Decrypt(src []byte) []byte
+	Decrypt(src []byte) ([]byte, error)
 	// Decrypt just returns the decrypted plaintext from the src ciphertext
-	DecryptFrom(r io.Reader) []byte
+	DecryptFrom(r io.Reader, maxCiphertext int64) ([]byte, error)
 	// set the AAD bytes of the decryptor to the provided string
 	UpdateAad(string)
 }
@@ -264,11 +264,11 @@ func (d *decryptor) Allocator() memory.Allocator { return d.mem }
 func (d *decryptor) FileAad() string             { return string(d.fileAad) }
 func (d *decryptor) UpdateAad(aad string)        { d.aad = []byte(aad) }
 func (d *decryptor) CiphertextSizeDelta() int    { return d.decryptor.CiphertextSizeDelta() }
-func (d *decryptor) Decrypt(src []byte) []byte {
+func (d *decryptor) Decrypt(src []byte) ([]byte, error) {
 	return d.decryptor.Decrypt(src, d.key, d.aad)
 }
-func (d *decryptor) DecryptFrom(r io.Reader) []byte {
-	return d.decryptor.DecryptFrom(r, d.key, d.aad)
+func (d *decryptor) DecryptFrom(r io.Reader, maxCiphertext int64) ([]byte, error) {
+	return d.decryptor.DecryptFrom(r, d.key, d.aad, maxCiphertext)
 }
 
 func getColumnDecryptor(cryptoMetadata *format.ColumnCryptoMetaData, fileDecryptor FileDecryptor, metadata bool) (Decryptor, error) {

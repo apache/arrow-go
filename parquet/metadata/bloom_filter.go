@@ -464,7 +464,10 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 
 		encryption.UpdateDecryptor(decryptor, r.rgOrdinal, int16(i),
 			encryption.BloomFilterHeaderModule)
-		hdr := decryptor.DecryptFrom(sectionRdr)
+		hdr, err := decryptor.DecryptFrom(sectionRdr, maximumBloomFilterBytes)
+		if err != nil {
+			return nil, fmt.Errorf("decrypting bloom filter header: %w", err)
+		}
 		if _, err = thrift.DeserializeThrift(&header, hdr); err != nil {
 			return nil, err
 		}
@@ -475,7 +478,10 @@ func (r *RowGroupBloomFilterReader) GetColumnBloomFilter(i int) (BloomFilter, er
 
 		encryption.UpdateDecryptor(decryptor, r.rgOrdinal, int16(i),
 			encryption.BloomFilterBitsetModule)
-		bitset := decryptor.DecryptFrom(sectionRdr)
+		bitset, err := decryptor.DecryptFrom(sectionRdr, int64(header.NumBytes)+int64(decryptor.CiphertextSizeDelta()))
+		if err != nil {
+			return nil, fmt.Errorf("decrypting bloom filter bitset: %w", err)
+		}
 		if len(bitset) != int(header.NumBytes) {
 			return nil, fmt.Errorf("wrong length of decrypted bloom filter bitset: %d vs %d",
 				len(bitset), header.NumBytes)
