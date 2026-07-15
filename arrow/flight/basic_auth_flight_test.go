@@ -18,6 +18,7 @@ package flight_test
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"io"
 	"testing"
@@ -32,7 +33,7 @@ import (
 
 const (
 	validUsername   = "flight_username"
-	validPassword   = "flight_password"
+	validPassword   = "flight_password:with_colon"
 	invalidUsername = "invalid_flight_username"
 	invalidPassword = "invalid_flight_password"
 	validBearer     = "CAREBARESTARE"
@@ -268,5 +269,32 @@ func TestBasicAuthMissingCredential(t *testing.T) {
 	}
 	if got, want := st.Code(), codes.Unauthenticated; got != want {
 		t.Fatalf("unexpected code: got %v, want %v", got, want)
+	}
+}
+
+func TestBasicAuthMalformedCredentials(t *testing.T) {
+	s := flight.NewServerWithMiddleware([]flight.ServerMiddleware{flight.CreateServerBasicAuthMiddleware(&validator{})})
+	s.Init("localhost:0")
+	s.RegisterFlightService(&HeaderAuthTestFlight{})
+	go s.Serve()
+	defer s.Shutdown()
+
+	client, err := flight.NewFlightClient(s.Addr().String(), nil, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, credentials := range []string{"", "username-only", ":password", "username:"} {
+		t.Run(credentials, func(t *testing.T) {
+			encoded := base64.StdEncoding.EncodeToString([]byte(credentials))
+			ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("authorization", "Basic "+encoded))
+			stream, err := client.Handshake(ctx)
+			if err == nil {
+				_, err = stream.Recv()
+			}
+			if status.Code(err) != codes.Unauthenticated {
+				t.Fatalf("expected unauthenticated error, got %v", err)
+			}
+		})
 	}
 }
