@@ -24,6 +24,15 @@ import (
 	"github.com/apache/arrow-go/v18/internal/utils"
 )
 
+const (
+	// DefaultMaxCompressedPageSize is the largest compressed page body accepted
+	// by readers created with NewReaderProperties.
+	DefaultMaxCompressedPageSize int64 = 64 * 1024 * 1024
+	// DefaultMaxUncompressedPageSize is the largest uncompressed page body
+	// accepted by readers created with NewReaderProperties.
+	DefaultMaxUncompressedPageSize int64 = 256 * 1024 * 1024
+)
+
 // ReaderProperties are used to define how the file reader will handle buffering and allocating buffers
 type ReaderProperties struct {
 	alloc memory.Allocator
@@ -60,6 +69,12 @@ type ReaderProperties struct {
 	// level region; the decoded values read through RowGroup.Column()/ReadBatch are the
 	// same as without streaming.
 	PageStreamingEnabled bool
+	// MaxCompressedPageSize limits the compressed body size declared by a page
+	// header. Values less than or equal to zero use DefaultMaxCompressedPageSize.
+	MaxCompressedPageSize int64
+	// MaxUncompressedPageSize limits the uncompressed body size declared by a
+	// page header. Values less than or equal to zero use DefaultMaxUncompressedPageSize.
+	MaxUncompressedPageSize int64
 }
 
 type BufferedReader interface {
@@ -78,11 +93,32 @@ func NewReaderProperties(alloc memory.Allocator) *ReaderProperties {
 	if alloc == nil {
 		alloc = memory.DefaultAllocator
 	}
-	return &ReaderProperties{alloc: alloc, BufferSize: DefaultBufSize}
+	return &ReaderProperties{
+		alloc:                   alloc,
+		BufferSize:              DefaultBufSize,
+		MaxCompressedPageSize:   DefaultMaxCompressedPageSize,
+		MaxUncompressedPageSize: DefaultMaxUncompressedPageSize,
+	}
 }
 
 // Allocator returns the allocator that the properties were initialized with
 func (r *ReaderProperties) Allocator() memory.Allocator { return r.alloc }
+
+// GetMaxCompressedPageSize returns the configured compressed page limit.
+func (r *ReaderProperties) GetMaxCompressedPageSize() int64 {
+	if r.MaxCompressedPageSize <= 0 {
+		return DefaultMaxCompressedPageSize
+	}
+	return r.MaxCompressedPageSize
+}
+
+// GetMaxUncompressedPageSize returns the configured uncompressed page limit.
+func (r *ReaderProperties) GetMaxUncompressedPageSize() int64 {
+	if r.MaxUncompressedPageSize <= 0 {
+		return DefaultMaxUncompressedPageSize
+	}
+	return r.MaxUncompressedPageSize
+}
 
 // GetStream returns a section of the underlying reader based on whether or not BufferedStream is enabled.
 //

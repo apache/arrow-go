@@ -19,12 +19,43 @@ package file
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPageReaderRejectsOversizedPages(t *testing.T) {
+	p := &serializedPageReader{
+		maxCompressedPageSize:   64,
+		maxUncompressedPageSize: 128,
+	}
+
+	tests := []struct {
+		name         string
+		compressed   int32
+		uncompressed int32
+		match        string
+	}{
+		{"compressed", 65, 128, "compressed page size 65 exceeds configured limit 64"},
+		{"uncompressed", 1, 129, "uncompressed page size 129 exceeds configured limit 128"},
+		{"maximum int32", math.MaxInt32, math.MaxInt32, "exceeds configured limit"},
+		{"negative", -1, 1, "negative page size"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hdr := format.NewPageHeader()
+			hdr.CompressedPageSize = tt.compressed
+			hdr.UncompressedPageSize = tt.uncompressed
+
+			_, _, err := p.validatePageSizes(hdr)
+			require.ErrorContains(t, err, tt.match)
+		})
+	}
+}
 
 func TestReadLevelDataRLELengthBound(t *testing.T) {
 	p := &serializedPageReader{maxDefLevel: 1, mem: memory.DefaultAllocator}

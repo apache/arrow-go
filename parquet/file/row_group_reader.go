@@ -124,13 +124,15 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 	if cryptoMetadata == nil {
 		descr := r.fileMetadata.Schema.Column(i)
 		pr := &serializedPageReader{
-			r:                 stream,
-			chunk:             col,
-			colIdx:            i,
-			pgIndexReader:     rgIdxRdr,
-			maxPageHeaderSize: defaultMaxPageHeaderSize,
-			nrows:             col.NumValues(),
-			mem:               r.props.Allocator(),
+			r:                       stream,
+			chunk:                   col,
+			colIdx:                  i,
+			pgIndexReader:           rgIdxRdr,
+			maxPageHeaderSize:       defaultMaxPageHeaderSize,
+			nrows:                   col.NumValues(),
+			mem:                     r.props.Allocator(),
+			maxCompressedPageSize:   r.props.GetMaxCompressedPageSize(),
+			maxUncompressedPageSize: r.props.GetMaxUncompressedPageSize(),
 			// Streaming (PageStreamingEnabled) inputs; only the unencrypted path is
 			// ever streaming-eligible, so columnCanStream is left false elsewhere.
 			columnCanStream: r.props.PageStreamingEnabled &&
@@ -160,14 +162,16 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 			DataDecryptor:                  r.fileDecryptor.GetFooterDecryptorForColumnData(""),
 		}
 		pr := &serializedPageReader{
-			r:                 stream,
-			chunk:             col,
-			colIdx:            i,
-			pgIndexReader:     rgIdxRdr,
-			maxPageHeaderSize: defaultMaxPageHeaderSize,
-			nrows:             col.NumValues(),
-			mem:               r.props.Allocator(),
-			cryptoCtx:         ctx,
+			r:                       stream,
+			chunk:                   col,
+			colIdx:                  i,
+			pgIndexReader:           rgIdxRdr,
+			maxPageHeaderSize:       defaultMaxPageHeaderSize,
+			nrows:                   col.NumValues(),
+			mem:                     r.props.Allocator(),
+			maxCompressedPageSize:   r.props.GetMaxCompressedPageSize(),
+			maxUncompressedPageSize: r.props.GetMaxUncompressedPageSize(),
+			cryptoCtx:               ctx,
 		}
 		return pr, pr.init(col.Compression(), &ctx)
 	}
@@ -184,14 +188,16 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 		DataDecryptor:                  r.fileDecryptor.GetColumnDataDecryptor(parquet.ColumnPath(columnPath).String(), string(columnKeyMeta), ""),
 	}
 	pr := &serializedPageReader{
-		r:                 stream,
-		chunk:             col,
-		colIdx:            i,
-		pgIndexReader:     rgIdxRdr,
-		maxPageHeaderSize: defaultMaxPageHeaderSize,
-		nrows:             col.NumValues(),
-		mem:               r.props.Allocator(),
-		cryptoCtx:         ctx,
+		r:                       stream,
+		chunk:                   col,
+		colIdx:                  i,
+		pgIndexReader:           rgIdxRdr,
+		maxPageHeaderSize:       defaultMaxPageHeaderSize,
+		nrows:                   col.NumValues(),
+		mem:                     r.props.Allocator(),
+		maxCompressedPageSize:   r.props.GetMaxCompressedPageSize(),
+		maxUncompressedPageSize: r.props.GetMaxUncompressedPageSize(),
+		cryptoCtx:               ctx,
 	}
 	return pr, pr.init(col.Compression(), &ctx)
 }
