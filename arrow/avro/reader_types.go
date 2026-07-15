@@ -970,12 +970,18 @@ func appendTimestampData(b *array.TimestampBuilder, data interface{}) {
 	case int64:
 		b.Append(arrow.Timestamp(dt))
 	case map[string]any:
-		switch v := dt["long"].(type) {
-		case nil:
-			b.AppendNull()
-		case int64:
-			b.Append(arrow.Timestamp(v))
+		for branch, value := range dt {
+			switch branch {
+			case "long",
+				"long.timestamp-millis",
+				"long.timestamp-micros",
+				"long.local-timestamp-millis",
+				"long.local-timestamp-micros":
+				appendTimestampData(b, value)
+				return
+			}
 		}
+		b.AppendNull()
 	case time.Time:
 		tt := b.Type().(*arrow.TimestampType)
 		// hamba decodes a local-timestamp logical type into a time.Time whose wall-clock
