@@ -574,13 +574,13 @@ func init() {
 // GetScalar creates a scalar object from the value at a given index in the
 // passed in array, returns an error if unable to do so.
 func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
-	if arr.DataType().ID() != arrow.DICTIONARY && arr.IsNull(idx) {
-		return MakeNullScalar(arr.DataType()), nil
+	if idx < 0 || idx >= arr.Len() {
+		return nil, fmt.Errorf("%w: called GetScalar with index out of range",
+			arrow.ErrIndex)
 	}
 
-	if idx >= arr.Len() {
-		return nil, fmt.Errorf("%w: called GetScalar with index larger than array len",
-			arrow.ErrIndex)
+	if arr.DataType().ID() != arrow.DICTIONARY && arr.IsNull(idx) {
+		return MakeNullScalar(arr.DataType()), nil
 	}
 
 	switch arr := arr.(type) {
