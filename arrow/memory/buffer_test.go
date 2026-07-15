@@ -17,11 +17,25 @@
 package memory_test
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
 )
+
+type movingAllocator struct{}
+
+func (*movingAllocator) Allocate(size int) []byte { return make([]byte, size) }
+
+func (*movingAllocator) Reallocate(size int, old []byte) []byte {
+	next := make([]byte, size)
+	copy(next, old)
+	clear(old)
+	return next
+}
+
+func (*movingAllocator) Free([]byte) {}
 
 func TestNewResizableBuffer(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
@@ -49,11 +63,31 @@ func TestBufferReset(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	buf := memory.NewResizableBuffer(mem)
+	buf.Resize(64)
 
 	newBytes := []byte("some-new-bytes")
 	buf.Reset(newBytes)
 	assert.Equal(t, newBytes, buf.Bytes())
 	assert.Equal(t, len(newBytes), buf.Len())
+	assert.Equal(t, 64, mem.CurrentAlloc())
+
+	newBytes[0] = 'S'
+	assert.Equal(t, byte('s'), buf.Bytes()[0])
+
+	grownBytes := bytes.Repeat([]byte("g"), 96)
+	buf.Reset(grownBytes)
+	assert.Equal(t, grownBytes, buf.Bytes())
+	assert.Equal(t, 96, buf.Len())
+	assert.Equal(t, 128, mem.CurrentAlloc())
+
+	grownBytes[0] = 'G'
+	assert.Equal(t, byte('g'), buf.Bytes()[0])
+
+	buf.Reset(nil)
+	assert.Empty(t, buf.Bytes())
+	assert.Zero(t, mem.CurrentAlloc())
+
+	buf.Release()
 }
 
 func TestBufferSlice(t *testing.T) {
@@ -68,4 +102,19 @@ func TestBufferSlice(t *testing.T) {
 	buf.Release()
 	assert.Equal(t, 1024, mem.CurrentAlloc())
 	slice.Release()
+}
+
+func TestBufferResetFromOwnedSlice(t *testing.T) {
+	mem := memory.NewCheckedAllocator(&movingAllocator{})
+	defer mem.AssertSize(t, 0)
+
+	buf := memory.NewResizableBuffer(mem)
+	buf.Resize(128)
+	copy(buf.Bytes(), bytes.Repeat([]byte("0123456789abcdef"), 8))
+
+	want := bytes.Clone(buf.Bytes()[32:64])
+	buf.Reset(buf.Bytes()[32:64])
+	assert.Equal(t, want, buf.Bytes())
+
+	buf.Release()
 }
