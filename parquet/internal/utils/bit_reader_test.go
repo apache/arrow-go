@@ -171,6 +171,22 @@ func TestBitReaderGetBatchBools(t *testing.T) {
 		}
 	})
 
+	t.Run("unaligned across buffer", func(t *testing.T) {
+		data := bytes.Repeat([]byte{0xAA, 0xCC, 0xF0}, 4)
+		reader := utils.NewBitReader(bytes.NewReader(data))
+		_, ok := reader.GetValue(1)
+		assert.True(t, ok)
+
+		out := make([]bool, 80)
+		n, err := reader.GetBatchBools(out)
+		assert.NoError(t, err)
+		assert.Equal(t, len(out), n)
+		for i, got := range out {
+			bit := i + 1
+			assert.Equal(t, data[bit/8]&(1<<uint(bit%8)) != 0, got)
+		}
+	})
+
 	t.Run("no progress", func(t *testing.T) {
 		reader := utils.NewBitReader(&stalledReader{bytes.NewReader(nil)})
 		n, err := reader.GetBatchBools(make([]bool, 8))
@@ -199,6 +215,72 @@ func TestBitReader(t *testing.T) {
 			assert.EqualValues(t, 1, val)
 		}
 	}
+}
+
+func TestBitReaderRejectsMissingBits(t *testing.T) {
+	t.Run("single value", func(t *testing.T) {
+		reader := utils.NewBitReader(bytes.NewReader(nil))
+		_, ok := reader.GetValue(1)
+		assert.False(t, ok)
+	})
+
+	t.Run("partial batch", func(t *testing.T) {
+		reader := utils.NewBitReader(bytes.NewReader([]byte{0xAB}))
+		out := make([]uint64, 2)
+		n, err := reader.GetBatch(8, out)
+		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		assert.Equal(t, 1, n)
+		assert.Equal(t, uint64(0xAB), out[0])
+	})
+
+	t.Run("crosses buffer", func(t *testing.T) {
+		reader := utils.NewBitReader(bytes.NewReader(bytes.Repeat([]byte{0xFF}, 8)))
+		out := make([]uint64, 2)
+		n, err := reader.GetBatch(63, out)
+		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		assert.Equal(t, 1, n)
+	})
+
+	t.Run("discard", func(t *testing.T) {
+		reader := utils.NewBitReader(bytes.NewReader([]byte{0xFF}))
+		n, err := reader.Discard(1, 64)
+		assert.Error(t, err)
+		assert.Zero(t, n)
+	})
+}
+
+func TestBitReaderAvailableBits(t *testing.T) {
+	for width := 1; width <= 64; width++ {
+		for byteLen := 0; byteLen <= 16; byteLen++ {
+			t.Run(fmt.Sprintf("width=%d/bytes=%d", width, byteLen), func(t *testing.T) {
+				reader := utils.NewBitReader(bytes.NewReader(bytes.Repeat([]byte{0xFF}, byteLen)))
+				out := make([]uint64, 31)
+				n, err := reader.GetBatch(uint(width), out)
+
+				expected := min(len(out), byteLen*8/width)
+				assert.Equal(t, expected, n)
+				if expected < len(out) {
+					assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+				} else {
+					assert.NoError(t, err)
+				}
+
+				want := uint64(math.MaxUint64)
+				if width < 64 {
+					want = 1<<uint(width) - 1
+				}
+				for _, got := range out[:n] {
+					assert.Equal(t, want, got)
+				}
+			})
+		}
+	}
+
+	reader := utils.NewBitReader(bytes.NewReader(nil))
+	out := make([]uint64, 31)
+	n, err := reader.GetBatch(0, out)
+	assert.NoError(t, err)
+	assert.Equal(t, len(out), n)
 }
 
 func TestBitArrayVals(t *testing.T) {

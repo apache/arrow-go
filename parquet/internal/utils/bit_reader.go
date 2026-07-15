@@ -69,6 +69,7 @@ type BitReader struct {
 	buffer     uint64
 	byteoffset int64
 	bitoffset  uint
+	validBits  uint
 	raw        [8]byte
 
 	unpackBuf [buflen]uint32
@@ -92,6 +93,7 @@ func (b *BitReader) Reset(r reader) {
 	b.buffer = 0
 	b.byteoffset = 0
 	b.bitoffset = 0
+	b.validBits = 0
 }
 
 // GetVlqInt reads a Vlq encoded int from the stream. The encoded value must start
@@ -150,8 +152,7 @@ func (b *BitReader) getAlignedUint8(nbytes int, v *uint8) bool {
 
 	b.byteoffset += int64(nbytes)
 	b.bitoffset = 0
-	b.fillbuffer()
-	return true
+	return b.fillbuffer() == nil
 }
 
 // getAlignedUint16 reads nbytes from the underlying stream into the passed uint16 value.
@@ -177,8 +178,7 @@ func (b *BitReader) getAlignedUint16(nbytes int, v *uint16) bool {
 
 	b.byteoffset += int64(nbytes)
 	b.bitoffset = 0
-	b.fillbuffer()
-	return true
+	return b.fillbuffer() == nil
 }
 
 // getAlignedUint32 reads nbytes from the underlying stream into the passed uint32 value.
@@ -204,8 +204,7 @@ func (b *BitReader) getAlignedUint32(nbytes int, v *uint32) bool {
 
 	b.byteoffset += int64(nbytes)
 	b.bitoffset = 0
-	b.fillbuffer()
-	return true
+	return b.fillbuffer() == nil
 }
 
 // getAlignedUint64 reads nbytes from the underlying stream into the passed uint64 value.
@@ -231,16 +230,16 @@ func (b *BitReader) getAlignedUint64(nbytes int, v *uint64) bool {
 
 	b.byteoffset += int64(nbytes)
 	b.bitoffset = 0
-	b.fillbuffer()
-	return true
+	return b.fillbuffer() == nil
 }
 
 // fillbuffer fills the uint64 buffer with bytes from the underlying stream
 func (b *BitReader) fillbuffer() error {
 	n, err := b.reader.ReadAt(b.raw[:], b.byteoffset)
-	if err != nil && n == 0 && err != io.EOF {
+	if err != nil && err != io.EOF {
 		return err
 	}
+	b.validBits = uint(n * 8)
 	for i := n; i < 8; i++ {
 		b.raw[i] = 0
 	}
@@ -250,18 +249,64 @@ func (b *BitReader) fillbuffer() error {
 
 // next reads an integral value from the next bits in the buffer
 func (b *BitReader) next(bits uint) (v uint64, err error) {
-	v = trailingBits(b.buffer, b.bitoffset+bits) >> b.bitoffset
-	b.bitoffset += bits
-	// if we need more bits to get what was requested then refill the buffer
-	if b.bitoffset >= 64 {
+	if bits == 0 {
+		return 0, nil
+	}
+
+	if b.bitoffset == 64 {
 		b.byteoffset += 8
-		b.bitoffset -= 64
+		b.bitoffset = 0
 		if err = b.fillbuffer(); err != nil {
 			return 0, err
 		}
-		v |= trailingBits(b.buffer, b.bitoffset) << (bits - b.bitoffset)
 	}
-	return
+
+	end := b.bitoffset + bits
+	if end <= 64 {
+		if end > b.validBits {
+			return 0, io.ErrUnexpectedEOF
+		}
+		v = trailingBits(b.buffer, end) >> b.bitoffset
+		b.bitoffset = end
+		return v, nil
+	}
+
+	if b.validBits < 64 {
+		return 0, io.ErrUnexpectedEOF
+	}
+
+	firstBits := 64 - b.bitoffset
+	v = b.buffer >> b.bitoffset
+	b.byteoffset += 8
+	b.bitoffset = 0
+	if err = b.fillbuffer(); err != nil {
+		return 0, err
+	}
+
+	remaining := bits - firstBits
+	if remaining > b.validBits {
+		return 0, io.ErrUnexpectedEOF
+	}
+	v |= trailingBits(b.buffer, remaining) << firstBits
+	b.bitoffset = remaining
+	return v, nil
+}
+
+// nextBool reads one bit after the caller has verified that its byte is
+// available. GetBatchBools performs that check once per byte so its unaligned
+// and trailing reads do not pay the scalar validBits check for every value.
+func (b *BitReader) nextBool() (bool, error) {
+	if b.bitoffset == 64 {
+		b.byteoffset += 8
+		b.bitoffset = 0
+		if err := b.fillbuffer(); err != nil {
+			return false, err
+		}
+	}
+
+	v := b.buffer&(uint64(1)<<b.bitoffset) != 0
+	b.bitoffset++
+	return v, nil
 }
 
 // GetBatchIndex is like GetBatch but for IndexType (used for dictionary decoding)
@@ -284,7 +329,9 @@ func (b *BitReader) GetBatchIndex(bits uint, out []IndexType) (i int, err error)
 		}
 	}
 
-	b.reader.Seek(b.byteoffset, io.SeekStart)
+	if _, err = b.reader.Seek(b.byteoffset, io.SeekStart); err != nil {
+		return i, err
+	}
 	// grab as many 32 byte chunks as possible in one shot
 	if i < length { // IndexType should be a 32 bit value so we can do quick unpacking right into the output
 		numUnpacked, unpackErr := unpack32(b.reader, (*(*[]uint32)(unsafe.Pointer(&out)))[i:], int(bits))
@@ -296,7 +343,9 @@ func (b *BitReader) GetBatchIndex(bits uint, out []IndexType) (i int, err error)
 	}
 
 	// re-fill our buffer just in case.
-	b.fillbuffer()
+	if err = b.fillbuffer(); err != nil {
+		return i, err
+	}
 	// grab the remaining values that aren't 32 byte aligned
 	for ; i < length; i++ {
 		val, err = b.next(bits)
@@ -310,7 +359,6 @@ func (b *BitReader) GetBatchIndex(bits uint, out []IndexType) (i int, err error)
 
 // GetBatchBools is like GetBatch but optimized for reading bits as boolean values
 func (b *BitReader) GetBatchBools(out []bool) (int, error) {
-	bits := uint(1)
 	length := len(out)
 
 	i := 0
@@ -321,14 +369,16 @@ func (b *BitReader) GetBatchBools(out []bool) (int, error) {
 				return i, err
 			}
 		}
-		val, err := b.next(bits)
-		out[i] = val != 0
+		val, err := b.nextBool()
+		out[i] = val
 		if err != nil {
 			return i, err
 		}
 	}
 
-	b.reader.Seek(b.byteoffset, io.SeekStart)
+	if _, err := b.reader.Seek(b.byteoffset, io.SeekStart); err != nil {
+		return i, err
+	}
 	buf := arrow.Uint32Traits.CastToBytes(b.unpackBuf[:])
 	blen := buflen * 8
 	for length-i >= 8 {
@@ -378,8 +428,8 @@ func (b *BitReader) GetBatchBools(out []bool) (int, error) {
 				return i, err
 			}
 		}
-		val, err := b.next(bits)
-		out[i] = val != 0
+		val, err := b.nextBool()
+		out[i] = val
 		if err != nil {
 			return i, err
 		}
@@ -419,11 +469,22 @@ func (b *BitReader) Discard(bits uint, n int) (int, error) {
 		toSkip := (n - i) / 32 * 32
 
 		bytesToSkip := bitutil.BytesForBits(int64(toSkip * int(bits)))
+		if bytesToSkip > 0 {
+			var last [1]byte
+			if nread, err := b.reader.ReadAt(last[:], b.byteoffset+int64(bytesToSkip)-1); nread != 1 {
+				if err == nil {
+					err = io.ErrUnexpectedEOF
+				}
+				return i, err
+			}
+		}
 		b.byteoffset += int64(bytesToSkip)
 		i += toSkip
 	}
 
-	b.fillbuffer()
+	if err := b.fillbuffer(); err != nil {
+		return i, err
+	}
 	for ; i < n; i++ {
 		if _, err := b.next(bits); err != nil {
 			return i, err
@@ -454,7 +515,9 @@ func (b *BitReader) GetBatch(bits uint, out []uint64) (int, error) {
 		}
 	}
 
-	b.reader.Seek(b.byteoffset, io.SeekStart)
+	if _, err := b.reader.Seek(b.byteoffset, io.SeekStart); err != nil {
+		return i, err
+	}
 	for i < length {
 		// unpack groups of 32 bytes at a time into a buffer since it's more efficient
 		unpackSize := utils.Min(buflen, length-i)
@@ -473,7 +536,9 @@ func (b *BitReader) GetBatch(bits uint, out []uint64) (int, error) {
 		}
 	}
 
-	b.fillbuffer()
+	if err := b.fillbuffer(); err != nil {
+		return i, err
+	}
 	// and then the remaining trailing values
 	for ; i < length; i++ {
 		val, err := b.next(bits)
