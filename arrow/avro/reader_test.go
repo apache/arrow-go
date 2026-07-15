@@ -277,50 +277,67 @@ func TestOCFReaderBytesValues(t *testing.T) {
 	assert.True(t, nullable.IsNull(1))
 }
 
-func TestOCFReaderNullableLocalTimestampMicros(t *testing.T) {
-	schema := `{
-		"type": "record",
-		"name": "event",
-		"fields": [{
-			"name": "started_at",
-			"type": [
-				"null",
-				{"type": "long", "logicalType": "local-timestamp-micros"}
-			]
-		}]
-	}`
-	wantWallClock := time.Date(2026, 7, 13, 14, 15, 16, 123456000, time.Local)
+func TestOCFReaderNullableTimestamps(t *testing.T) {
+	tests := []struct {
+		logicalType string
+		branch      string
+		typ         *arrow.TimestampType
+	}{
+		{"timestamp-millis", "long.timestamp-millis", arrow.FixedWidthTypes.Timestamp_ms.(*arrow.TimestampType)},
+		{"timestamp-micros", "long.timestamp-micros", arrow.FixedWidthTypes.Timestamp_us.(*arrow.TimestampType)},
+		{"local-timestamp-millis", "long.local-timestamp-millis", &arrow.TimestampType{Unit: arrow.Millisecond}},
+		{"local-timestamp-micros", "long.local-timestamp-micros", &arrow.TimestampType{Unit: arrow.Microsecond}},
+	}
 
-	var buf bytes.Buffer
-	enc, err := ocf.NewEncoder(schema, &buf)
-	assert.NoError(t, err)
-	assert.NoError(t, enc.Encode(map[string]any{
-		"started_at": map[string]any{"long.local-timestamp-micros": wantWallClock},
-	}))
-	assert.NoError(t, enc.Encode(map[string]any{"started_at": nil}))
-	assert.NoError(t, enc.Close())
+	for _, tt := range tests {
+		t.Run(tt.logicalType, func(t *testing.T) {
+			schema := fmt.Sprintf(`{
+				"type": "record",
+				"name": "event",
+				"fields": [{
+					"name": "started_at",
+					"type": [
+						"null",
+						{"type": "long", "logicalType": %q}
+					]
+				}]
+			}`, tt.logicalType)
+			value := time.Date(2026, 7, 13, 14, 15, 16, 123456000, time.Local)
 
-	ar, err := NewOCFReader(bytes.NewReader(buf.Bytes()), WithChunk(-1))
-	assert.NoError(t, err)
-	defer ar.Close()
+			var buf bytes.Buffer
+			enc, err := ocf.NewEncoder(schema, &buf)
+			assert.NoError(t, err)
+			assert.NoError(t, enc.Encode(map[string]any{
+				"started_at": map[string]any{tt.branch: value},
+			}))
+			assert.NoError(t, enc.Encode(map[string]any{"started_at": nil}))
+			assert.NoError(t, enc.Close())
 
-	wantType := &arrow.TimestampType{Unit: arrow.Microsecond}
-	field := ar.Schema().Field(0)
-	assert.Equal(t, wantType, field.Type)
-	assert.True(t, field.Nullable)
+			ar, err := NewOCFReader(bytes.NewReader(buf.Bytes()), WithChunk(-1))
+			assert.NoError(t, err)
+			defer ar.Close()
 
-	assert.True(t, ar.Next())
-	assert.NoError(t, ar.Err())
-	values := ar.RecordBatch().Column(0).(*array.Timestamp)
-	assert.False(t, values.IsNull(0))
-	assert.True(t, values.IsNull(1))
-	assert.Equal(t, 1, values.NullN())
+			field := ar.Schema().Field(0)
+			assert.Equal(t, tt.typ, field.Type)
+			assert.True(t, field.Nullable)
 
-	wantUTCWallClock := time.Date(2026, 7, 13, 14, 15, 16, 123456000, time.UTC)
-	wantValue, err := arrow.TimestampFromTime(wantUTCWallClock, arrow.Microsecond)
-	assert.NoError(t, err)
-	assert.Equal(t, wantValue, values.Value(0))
-	assert.Equal(t, wantUTCWallClock, values.Value(0).ToTime(arrow.Microsecond))
+			assert.True(t, ar.Next())
+			assert.NoError(t, ar.Err())
+			values := ar.RecordBatch().Column(0).(*array.Timestamp)
+			assert.False(t, values.IsNull(0))
+			assert.True(t, values.IsNull(1))
+			assert.Equal(t, 1, values.NullN())
+
+			wantTime := value
+			if tt.typ.TimeZone == "" {
+				wantTime = time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(), value.Nanosecond(), time.UTC)
+			}
+			wantValue, err := arrow.TimestampFromTime(wantTime, tt.typ.Unit)
+			assert.NoError(t, err)
+			assert.Equal(t, wantValue, values.Value(0))
+			assert.Equal(t, wantValue.ToTime(tt.typ.Unit), values.Value(0).ToTime(tt.typ.Unit))
+		})
+	}
 }
 
 func TestAppendTimestampDataUnionBranches(t *testing.T) {
