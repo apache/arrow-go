@@ -592,7 +592,11 @@ func (p *serializedPageReader) decompress(rd io.Reader, lenCompressed int, buf [
 		data = p.cryptoCtx.DataDecryptor.Decrypt(data)
 	}
 
-	return p.codec.Decode(buf, data), nil
+	decoded, err := compress.Decode(p.codec, buf, data)
+	if err != nil {
+		return nil, fmt.Errorf("parquet: could not decompress page: %w", err)
+	}
+	return decoded, nil
 }
 
 func (p *serializedPageReader) readV2Encrypted(rd io.Reader, lenCompressed int, lenUncompressed int, levelsBytelen int, compressed bool, buf []byte) (int, error) {
@@ -633,7 +637,10 @@ func (p *serializedPageReader) readV2Encrypted(rd io.Reader, lenCompressed int, 
 		}
 		data = data[levelsBytelen:]
 	}
-	decoded := p.codec.Decode(buf[levelsBytelen:], data)
+	decoded, err := compress.Decode(p.codec, buf[levelsBytelen:], data)
+	if err != nil {
+		return n, fmt.Errorf("parquet: could not decompress data page: %w", err)
+	}
 	if len(decoded) != lenUncompressed-levelsBytelen {
 		return levelsBytelen + len(decoded), fmt.Errorf("parquet: metadata said %d bytes uncompressed data page, got %d bytes", lenUncompressed, levelsBytelen+len(decoded))
 	}

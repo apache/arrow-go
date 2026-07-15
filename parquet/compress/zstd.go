@@ -105,11 +105,16 @@ func getdecoder() *zstd.Decoder {
 }
 
 func (zstdCodec) Decode(dst, src []byte) []byte {
-	dst, err := getdecoder().DecodeAll(src, dst[:0])
+	dst, err := (zstdCodec{}).DecodeWithError(dst, src)
 	if err != nil {
 		panic(err)
 	}
 	return dst
+}
+
+func (zstdCodec) DecodeWithError(dst, src []byte) ([]byte, error) {
+	dst, err := getdecoder().DecodeAll(src, dst[:0])
+	return dst, err
 }
 
 var globalDecoderPool = sync.Pool{

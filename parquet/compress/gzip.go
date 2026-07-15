@@ -41,25 +41,41 @@ func (gzipCodec) NewReader(r io.Reader) io.ReadCloser {
 }
 
 func (gzipCodec) Decode(dst, src []byte) []byte {
-	rdr, err := gzip.NewReader(bytes.NewReader(src))
+	dst, err := (gzipCodec{}).DecodeWithError(dst, src)
 	if err != nil {
 		panic(err)
 	}
+	return dst
+}
+
+func (gzipCodec) DecodeWithError(dst, src []byte) ([]byte, error) {
+	rdr, err := gzip.NewReader(bytes.NewReader(src))
+	if err != nil {
+		return nil, err
+	}
+	defer rdr.Close()
 
 	if dst != nil {
 		n, err := io.ReadFull(rdr, dst)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
-		return dst[:n]
+		var extra [1]byte
+		if nExtra, err := rdr.Read(extra[:]); nExtra != 0 || err != io.EOF {
+			if err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("codec: gzip: decoded data exceeds destination size %d", len(dst))
+		}
+		return dst[:n], nil
 	}
 
 	dst, err = io.ReadAll(rdr)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	return dst
+	return dst, nil
 }
 
 func (g gzipCodec) EncodeLevel(dst, src []byte, level int) []byte {

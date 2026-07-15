@@ -18,6 +18,7 @@ package compress_test
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"math/rand"
 	"sync"
@@ -28,6 +29,10 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
 )
+
+type panickingCodec struct{ compress.Codec }
+
+func (panickingCodec) Decode([]byte, []byte) []byte { panic(errors.New("invalid block")) }
 
 const (
 	RandomDataSize       = 3 * 1024 * 1024
@@ -58,6 +63,29 @@ func TestErrorForUnimplemented(t *testing.T) {
 
 	_, err = compress.GetCodec(compress.Codecs.Lz4)
 	assert.Error(t, err)
+}
+
+func TestDecodeReturnsMalformedInputErrors(t *testing.T) {
+	for _, compression := range []compress.Compression{
+		compress.Codecs.Snappy,
+		compress.Codecs.Gzip,
+		compress.Codecs.Brotli,
+		compress.Codecs.Zstd,
+		compress.Codecs.Lz4Raw,
+	} {
+		t.Run(compression.String(), func(t *testing.T) {
+			codec, err := compress.GetCodec(compression)
+			assert.NoError(t, err)
+
+			_, err = compress.Decode(codec, make([]byte, 32), []byte("not compressed data"))
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestDecodeRecoversLegacyCodecPanic(t *testing.T) {
+	_, err := compress.Decode(panickingCodec{}, nil, nil)
+	assert.EqualError(t, err, "invalid block")
 }
 
 func TestCompressDataOneShot(t *testing.T) {
