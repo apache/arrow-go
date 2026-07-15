@@ -195,8 +195,11 @@ func createServerBearerTokenStreamInterceptor(validator BasicAuthValidator) grpc
 					}
 				}
 
-				creds := strings.SplitN(string(val), ":", 2)
-				token, err := validator.Validate(creds[0], creds[1])
+				username, password, found := strings.Cut(string(val), ":")
+				if !found {
+					return status.Error(codes.Unauthenticated, "invalid basic auth credentials")
+				}
+				token, err := validator.Validate(username, password)
 				if err != nil {
 					return err
 				}
