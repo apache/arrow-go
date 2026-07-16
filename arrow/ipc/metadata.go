@@ -114,6 +114,9 @@ func (blk fileBlock) NewMessage() (*Message, error) {
 		// messages produced prior to version 0.15.0
 		prefix = 4
 	}
+	if int(blk.meta)-prefix < 4 {
+		return nil, fmt.Errorf("arrow/ipc: invalid file block metadata length %d for prefix length %d", blk.meta, prefix)
+	}
 
 	// drop buf-size already known from blk.Meta
 	meta = memory.SliceBuffer(meta, prefix, int(blk.meta)-prefix)

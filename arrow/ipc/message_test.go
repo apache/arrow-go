@@ -18,14 +18,116 @@ package ipc
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
+	"math"
+	"strconv"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/internal/flatbuf"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	flatbuffers "github.com/google/flatbuffers/go"
+	"github.com/stretchr/testify/require"
 )
+
+type rejectingAllocator struct{}
+
+func (rejectingAllocator) Allocate(int) []byte {
+	panic("unexpected allocation")
+}
+
+func (rejectingAllocator) Reallocate(int, []byte) []byte {
+	panic("unexpected allocation")
+}
+
+func (rejectingAllocator) Free([]byte) {}
+
+func messageReaderInput(t *testing.T, bodyLen int64) *bytes.Buffer {
+	t.Helper()
+
+	b := flatbuffers.NewBuilder(0)
+	metadata := writeMessageFB(b, memory.DefaultAllocator, flatbuf.MessageHeaderNONE, 0, bodyLen, arrow.Metadata{})
+	defer metadata.Release()
+
+	var input bytes.Buffer
+	require.NoError(t, binary.Write(&input, binary.LittleEndian, uint32(kIPCContToken)))
+	require.NoError(t, binary.Write(&input, binary.LittleEndian, uint32(metadata.Len())))
+	_, err := input.Write(metadata.Bytes())
+	require.NoError(t, err)
+	return &input
+}
+
+func TestMessageReaderRejectsInvalidMetadataLengths(t *testing.T) {
+	for _, length := range []uint32{1, 3, 0x7fffffff, 0x80000000, 0xfffffffe} {
+		t.Run(fmt.Sprint(length), func(t *testing.T) {
+			var input bytes.Buffer
+			require.NoError(t, binary.Write(&input, binary.LittleEndian, length))
+
+			r := NewMessageReader(&input)
+			defer r.Release()
+			_, err := r.Message()
+			require.ErrorContains(t, err, "message metadata length")
+		})
+	}
+}
+
+func TestMessageReaderRejectsInvalidBodyLengths(t *testing.T) {
+	type testCase struct {
+		name    string
+		length  int64
+		message string
+	}
+	tests := []testCase{
+		{name: "negative", length: -1, message: "invalid message body length"},
+		{name: "over default limit", length: 1 << 30, message: "message body length 1073741824 exceeds limit 268435456"},
+	}
+	if strconv.IntSize == 32 {
+		tests = append(tests, testCase{
+			name: "over max int", length: int64(math.MaxInt32) + 1, message: "invalid message body length",
+		})
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := NewMessageReader(messageReaderInput(t, tt.length), WithAllocator(rejectingAllocator{}))
+			defer r.Release()
+
+			_, err := r.Message()
+			require.ErrorContains(t, err, tt.message)
+		})
+	}
+}
+
+func TestBodySizeLimitConfig(t *testing.T) {
+	require.Equal(t, defaultMaxBodySize, newConfig().maxBodySize)
+	require.Zero(t, newConfig(WithBodySizeLimit(0)).maxBodySize)
+	require.Equal(t, int64(1024), newConfig(WithBodySizeLimit(1024)).maxBodySize)
+}
+
+func TestValidateFileBlock(t *testing.T) {
+	tests := []struct {
+		name               string
+		offset, body, size int64
+		meta               int32
+	}{
+		{"negative offset", -1, 0, 16, 8},
+		{"short metadata", 0, 0, 16, 3},
+		{"negative body", 0, -1, 16, 8},
+		{"past end", 8, 9, 24, 8},
+		{"overflow", 1, math.MaxInt64, math.MaxInt64, 8},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Error(t, validateFileBlock(tt.offset, tt.meta, tt.body, tt.size, 0, 0))
+		})
+	}
+	require.NoError(t, validateFileBlock(8, 8, 8, 24, 0, 0))
+}
 
 func TestMessageReaderBodyInAllocator(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
