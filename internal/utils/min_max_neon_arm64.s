@@ -12,13 +12,7 @@ TEXT ·_int32_max_min_neon(SB), $0-32
 	MOVD    minout+16(FP), R2
 	MOVD    maxout+24(FP), R3
 
-	// The Go ABI saves the frame pointer register one word below the
-	// caller's frame. Make room so we don't overwrite it. Needs to stay
-	// 16-byte aligned
-	SUB $16, RSP
-	WORD $0xa9bf7bfd // stp    x29, x30, [sp, #-16]!
 	WORD $0x7100043f // cmp    w1, #1
-	WORD $0x910003fd // mov    x29, sp
 	BLT int32_early_exit
 
 	WORD $0x71001c3f // cmp    w1, #7
@@ -34,9 +28,6 @@ int32_early_exit:
 	WORD $0x52b0000b // mov    w11, #-2147483648
 	WORD $0xb900006b // str    w11, [x3]
 	WORD $0xb900004a // str    w10, [x2]
-	WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
-	// Put the stack pointer back where it was
-	ADD $16, RSP
 	RET
 int32_neon:
 	WORD $0x927d7109 // and    x9, x8, #0xfffffff8
@@ -78,9 +69,6 @@ int32_scalar_loop:
 int32_done:
 	WORD $0xb900006b // str    w11, [x3]
 	WORD $0xb900004a // str    w10, [x2]
-	WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
-	// Put the stack pointer back where it was
-	ADD $16, RSP
 	RET
 
 // func _uint32_max_min_neon(values unsafe.Pointer, length int, minout, maxout unsafe.Pointer)
@@ -91,13 +79,7 @@ TEXT ·_uint32_max_min_neon(SB), $0-32
 	MOVD    minout+16(FP), R2
 	MOVD    maxout+24(FP), R3
 
-	// The Go ABI saves the frame pointer register one word below the
-	// caller's frame. Make room so we don't overwrite it. Needs to stay
-	// 16-byte aligned
-	SUB $16, RSP
-	WORD $0xa9bf7bfd // stp    x29, x30, [sp, #-16]!
 	WORD $0x7100043f // cmp    w1, #1
-	WORD $0x910003fd // mov    x29, sp
 	BLT uint32_early_exit
 
 	WORD $0x71001c3f // cmp    w1, #7
@@ -113,9 +95,6 @@ uint32_early_exit:
 	WORD $0x1280000b // mov    w11, #-1
 	WORD $0xb900006a // str    w10, [x3]
 	WORD $0xb900004b // str    w11, [x2]
-	WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
-	// Put the stack pointer back where it was
-	ADD $16, RSP
 	RET
 uint32_neon:
 	WORD $0x927d7109 // and    x9, x8, #0xfffffff8
@@ -157,9 +136,6 @@ uint32_scalar_loop:
 uint32_done:
 	WORD $0xb900006a // str    w10, [x3]
 	WORD $0xb900004b // str    w11, [x2]
-	WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
-	// Put the stack pointer back where it was
-	ADD $16, RSP
 	RET
 
 // func _int64_max_min_neon(values unsafe.Pointer, length int, minout, maxout unsafe.Pointer)
@@ -170,13 +146,7 @@ TEXT ·_int64_max_min_neon(SB), $0-32
 	MOVD    minout+16(FP), R2
 	MOVD    maxout+24(FP), R3
 
-	// The Go ABI saves the frame pointer register one word below the
-	// caller's frame. Make room so we don't overwrite it. Needs to stay
-	// 16-byte aligned
-	SUB $16, RSP
-	WORD $0xa9bf7bfd // stp    x29, x30, [sp, #-16]!
 	WORD $0x7100043f // cmp    w1, #1
-	WORD $0x910003fd // mov    x29, sp
 	BLT int64_early_exit
 
 	WORD $0x2a0103e8 // mov    w8, w1
@@ -192,9 +162,6 @@ int64_early_exit:
 	WORD $0xd2f0000b // mov    x11, #-9223372036854775808
 	WORD $0xf900006b // str    x11, [x3]
 	WORD $0xf900004a // str    x10, [x2]
-	WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
-	// Put the stack pointer back where it was
-	ADD $16, RSP
 	RET
 int64_neon:
 	WORD $0x927e7509 // and    x9, x8, #0xfffffffc
@@ -246,9 +213,6 @@ int64_scalar_loop:
 int64_done:
 	WORD $0xf900006b // str    x11, [x3]
 	WORD $0xf900004a // str    x10, [x2]
-	WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
-	// Put the stack pointer back where it was
-	ADD $16, RSP
 	RET
 
 
@@ -260,13 +224,7 @@ TEXT ·_uint64_max_min_neon(SB), $0-32
 	MOVD    minout+16(FP), R2
 	MOVD    maxout+24(FP), R3
 
-	// The Go ABI saves the frame pointer register one word below the
-	// caller's frame. Make room so we don't overwrite it. Needs to stay
-	// 16-byte aligned
-	SUB $16, RSP
-	WORD $0xa9bf7bfd // stp    x29, x30, [sp, #-16]!
 	WORD $0x7100043f // cmp    w1, #1
-	WORD $0x910003fd // mov    x29, sp
 	BLT uint64_early_exit
 
 	WORD $0x71000c3f // cmp    w1, #3
@@ -282,9 +240,6 @@ uint64_early_exit:
 	WORD $0x9280000b // mov    x11, #-1
 	WORD $0xf900006a // str    x10, [x3]
 	WORD $0xf900004b // str    x11, [x2]
-	WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
-	// Put the stack pointer back where it was
-	ADD $16, RSP
 	RET
 uint64_neon:
 	WORD $0x927e7509 // and    x9, x8, #0xfffffffc
@@ -336,7 +291,4 @@ uint64_scalar_loop:
 uint64_done:
 	WORD $0xf900006a // str    x10, [x3]
 	WORD $0xf900004b // str    x11, [x2]
-	WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
-	// Put the stack pointer back where it was
-	ADD $16, RSP
 	RET
