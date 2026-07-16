@@ -174,6 +174,77 @@ func TestMapArrayBuildIntToInt(t *testing.T) {
 	assert.Equal(t, "[{[0 1 2 3 4 5] [1 1 2 3 5 8]} (null) {[0 1 2 3 4 5] [(null) (null) 0 1 (null) 2]} {[] []}]", arr.String())
 }
 
+func TestMapBuilderRejectsInvalidEntryLengths(t *testing.T) {
+	tests := []struct {
+		name      string
+		build     func(*array.MapBuilder)
+		panicText string
+	}{
+		{
+			name: "more keys than items",
+			build: func(b *array.MapBuilder) {
+				b.Append(true)
+				b.KeyBuilder().(*array.Int32Builder).Append(1)
+			},
+			panicText: "invalid: arrow/array: map key and item builders must have equal lengths (keys=1, items=0)",
+		},
+		{
+			name: "more items than keys",
+			build: func(b *array.MapBuilder) {
+				b.Append(true)
+				b.ItemBuilder().(*array.Int32Builder).Append(1)
+			},
+			panicText: "invalid: arrow/array: map key and item builders must have equal lengths (keys=0, items=1)",
+		},
+		{
+			name: "struct longer than entries",
+			build: func(b *array.MapBuilder) {
+				b.Append(true)
+				b.ValueBuilder().(*array.StructBuilder).Append(true)
+			},
+			panicText: "invalid: arrow/array: map struct builder length exceeds key and item length (struct=1, entries=0)",
+		},
+		{
+			name: "too few offsets",
+			build: func(b *array.MapBuilder) {
+				b.AppendValues(nil, []bool{true})
+			},
+			panicText: "invalid: arrow/array: map offset count must equal map length or map length plus one (offsets=0, maps=1)",
+		},
+		{
+			name: "too many offsets",
+			build: func(b *array.MapBuilder) {
+				b.AppendValues([]int32{0, 0, 0}, []bool{true})
+			},
+			panicText: "invalid: arrow/array: map offset count must equal map length or map length plus one (offsets=3, maps=1)",
+		},
+		{
+			name: "final offset exceeds entries",
+			build: func(b *array.MapBuilder) {
+				b.AppendValues([]int32{0, 2}, []bool{true})
+				b.KeyBuilder().(*array.Int32Builder).Append(1)
+				b.ItemBuilder().(*array.Int32Builder).Append(2)
+			},
+			panicText: "invalid: arrow/array: map final offset must match key and item length (offset=2, entries=1)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
+			b := array.NewMapBuilder(mem, arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32, false)
+			defer b.Release()
+			tt.build(b)
+
+			assert.PanicsWithError(t, tt.panicText, func() {
+				b.NewMapArray()
+			})
+		})
+	}
+}
+
 func TestMapStringRoundTrip(t *testing.T) {
 	// 1. create array
 	dt := arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32)
