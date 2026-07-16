@@ -313,6 +313,11 @@ func (b *BitReader) GetBatchBools(out []bool) (int, error) {
 	i := 0
 	// read until we are byte-aligned
 	for ; i < length && b.bitoffset != 0; i++ {
+		if i == 0 || b.bitoffset%8 == 0 {
+			if err := b.ensureBoolBitAvailable(); err != nil {
+				return i, err
+			}
+		}
 		val, err := b.next(bits)
 		out[i] = val != 0
 		if err != nil {
@@ -323,22 +328,53 @@ func (b *BitReader) GetBatchBools(out []bool) (int, error) {
 	b.reader.Seek(b.byteoffset, io.SeekStart)
 	buf := arrow.Uint32Traits.CastToBytes(b.unpackBuf[:])
 	blen := buflen * 8
-	for i < length {
+	for length-i >= 8 {
 		// grab byte-aligned bits in a loop since it's more efficient than going
 		// bit by bit when you can grab 8 bools at a time.
 		unpackSize := utils.Min(blen, length-i) / 8 * 8
-		n, err := b.reader.Read(buf[:bitutil.BytesForBits(int64(unpackSize))])
-		if err != nil {
-			return i, err
+		bytesToRead := int(bitutil.BytesForBits(int64(unpackSize)))
+		n := 0
+		for n < bytesToRead {
+			nread, err := b.reader.Read(buf[n:bytesToRead])
+			n += nread
+			if n == bytesToRead {
+				break
+			}
+			if err != nil {
+				if n > 0 {
+					BytesToBools(buf[:n], out[i:])
+				}
+				i += n * 8
+				b.byteoffset += int64(n)
+				if err == io.EOF && n > 0 {
+					err = io.ErrUnexpectedEOF
+				}
+				return i, err
+			}
+			if nread == 0 {
+				if n > 0 {
+					BytesToBools(buf[:n], out[i:])
+				}
+				i += n * 8
+				b.byteoffset += int64(n)
+				return i, io.ErrNoProgress
+			}
 		}
 		BytesToBools(buf[:n], out[i:])
-		i += unpackSize
+		i += n * 8
 		b.byteoffset += int64(n)
 	}
 
-	b.fillbuffer()
+	if err := b.fillbuffer(); err != nil {
+		return i, err
+	}
 	// grab the trailing bits
 	for ; i < length; i++ {
+		if b.bitoffset%8 == 0 {
+			if err := b.ensureBoolBitAvailable(); err != nil {
+				return i, err
+			}
+		}
 		val, err := b.next(bits)
 		out[i] = val != 0
 		if err != nil {
@@ -347,6 +383,21 @@ func (b *BitReader) GetBatchBools(out []bool) (int, error) {
 	}
 
 	return i, nil
+}
+
+func (b *BitReader) ensureBoolBitAvailable() error {
+	var probe [1]byte
+	n, err := b.reader.ReadAt(probe[:], b.byteoffset+int64(b.bitoffset/8))
+	if n == 1 {
+		return nil
+	}
+	if err == nil {
+		return io.ErrNoProgress
+	}
+	if errors.Is(err, io.EOF) {
+		return io.ErrUnexpectedEOF
+	}
+	return err
 }
 
 func (b *BitReader) Discard(bits uint, n int) (int, error) {
