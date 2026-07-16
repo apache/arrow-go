@@ -336,6 +336,11 @@ func (b *TimestampBuilder) AppendValueFromString(s string) error {
 }
 
 func (b *TimestampBuilder) UnmarshalOne(dec *json.Decoder) error {
+	loc, err := b.dtype.GetZone()
+	if err != nil {
+		return err
+	}
+
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -349,7 +354,6 @@ func (b *TimestampBuilder) UnmarshalOne(dec *json.Decoder) error {
 			b.Append(arrow.Timestamp(i))
 			break
 		}
-		loc, _ := b.dtype.GetZone()
 		tm, _, err := arrow.TimestampFromStringInLocation(v, b.dtype.Unit, loc)
 		if err != nil {
 			return &json.UnmarshalTypeError{
