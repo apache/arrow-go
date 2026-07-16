@@ -67,16 +67,21 @@ struct compare_primitive_arr_arr {
         const T* right = reinterpret_cast<const T*>(right_void);
         uint8_t* out_bitmap = reinterpret_cast<uint8_t*>(out_void);
         static constexpr int kBatchSize = 32;
-        int64_t num_batches = length / kBatchSize;
         uint32_t temp_output[kBatchSize];
 
         if (int prefix = offset % 8) {
-            for (int i = prefix; i < 8; ++i) {
-                set_bit_to(out_bitmap, i, Op::template Call<T>(*left++, *right++));
+            const int64_t prefix_length = length < 8 - prefix ? length : 8 - prefix;
+            for (int64_t i = 0; i < prefix_length; ++i) {
+                set_bit_to(out_bitmap, prefix + i, Op::template Call<T>(*left++, *right++));
+            }
+            length -= prefix_length;
+            if (length == 0) {
+                return;
             }
             out_bitmap++;
         }
 
+        int64_t num_batches = length / kBatchSize;
         for (int64_t j = 0; j < num_batches; ++j) {
             for (int i = 0; i < kBatchSize; ++i) {
                 temp_output[i] = Op::template Call<T>(*left++, *right++);
@@ -98,16 +103,21 @@ struct compare_primitive_arr_scalar {
         const T right = *reinterpret_cast<const T*>(right_void);
         uint8_t* out_bitmap = reinterpret_cast<uint8_t*>(out_void);
         static constexpr int kBatchSize = 32;
-        int64_t num_batches = length / kBatchSize;
         uint32_t temp_output[kBatchSize];
 
         if (int prefix = offset % 8) {
-            for (int i = prefix; i < 8; ++i) {
-                set_bit_to(out_bitmap, i, Op::template Call<T>(*left++, right));
+            const int64_t prefix_length = length < 8 - prefix ? length : 8 - prefix;
+            for (int64_t i = 0; i < prefix_length; ++i) {
+                set_bit_to(out_bitmap, prefix + i, Op::template Call<T>(*left++, right));
+            }
+            length -= prefix_length;
+            if (length == 0) {
+                return;
             }
             out_bitmap++;
         }
 
+        int64_t num_batches = length / kBatchSize;
         for (int64_t j = 0; j < num_batches; ++j) {
             for (int i = 0; i < kBatchSize; ++i) {
                 temp_output[i] = Op::template Call<T>(*left++, right);
@@ -129,16 +139,21 @@ struct compare_primitive_scalar_arr {
         const T* right = reinterpret_cast<const T*>(right_void);
         uint8_t* out_bitmap = reinterpret_cast<uint8_t*>(out_void);
         static constexpr int kBatchSize = 32;
-        int64_t num_batches = length / kBatchSize;
         uint32_t temp_output[kBatchSize];
 
         if (int prefix = offset % 8) {
-            for (int i = prefix; i < 8; ++i) {
-                set_bit_to(out_bitmap, i, Op::template Call<T>(left, *right++));
+            const int64_t prefix_length = length < 8 - prefix ? length : 8 - prefix;
+            for (int64_t i = 0; i < prefix_length; ++i) {
+                set_bit_to(out_bitmap, prefix + i, Op::template Call<T>(left, *right++));
+            }
+            length -= prefix_length;
+            if (length == 0) {
+                return;
             }
             out_bitmap++;
         }
 
+        int64_t num_batches = length / kBatchSize;
         for (int64_t j = 0; j < num_batches; ++j) {
             for (int i = 0; i < kBatchSize; ++i) {
                 temp_output[i] = Op::template Call<T>(left, *right++);
