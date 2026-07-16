@@ -235,16 +235,21 @@ func (dec *RleBooleanDecoder) Decode(out []bool) (int, error) {
 
 	for n > 0 {
 		batch := shared_utils.Min(len(buf), n)
-		decoded := dec.rleDec.GetBatch(buf[:batch])
-		if decoded != batch {
-			return max - n, io.ErrUnexpectedEOF
-		}
+		decoded, err := dec.rleDec.GetBatch(buf[:batch])
 
-		for i := 0; i < batch; i++ {
+		for i := 0; i < decoded; i++ {
 			out[i] = buf[i] != 0
 		}
-		n -= batch
-		out = out[batch:]
+		n -= decoded
+		out = out[decoded:]
+		if err != nil {
+			dec.nvals -= max - n
+			return max - n, err
+		}
+		if decoded != batch {
+			dec.nvals -= max - n
+			return max - n, io.ErrUnexpectedEOF
+		}
 	}
 
 	dec.nvals -= max

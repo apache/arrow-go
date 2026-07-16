@@ -18,6 +18,7 @@ package encoding_test
 
 import (
 	"encoding/binary"
+	"io"
 	"strconv"
 	"testing"
 
@@ -89,7 +90,8 @@ func verifyDecodingLvls(t *testing.T, enc parquet.Encoding, maxLvl int16, input 
 	// try multiple decoding on a single setdata call
 	for ct := 0; ct < decodeCount; ct++ {
 		offset := ct * numInnerLevels
-		lvlCount, _ = decoder.Decode(output[:numInnerLevels])
+		lvlCount, _, err = decoder.Decode(output[:numInnerLevels])
+		assert.NoError(t, err)
 		assert.Equal(t, numInnerLevels, lvlCount)
 		assert.Equal(t, input[offset:offset+numInnerLevels], output[:numInnerLevels])
 	}
@@ -101,12 +103,14 @@ func verifyDecodingLvls(t *testing.T, enc parquet.Encoding, maxLvl int16, input 
 	)
 
 	if remaining > 0 {
-		lvlCount, _ = decoder.Decode(output[:remaining])
+		lvlCount, _, err = decoder.Decode(output[:remaining])
+		assert.NoError(t, err)
 		assert.Equal(t, remaining, lvlCount)
 		assert.Equal(t, input[levelsCompleted:], output[:remaining])
 	}
 	// test decode zero values
-	lvlCount, _ = decoder.Decode(output[:1])
+	lvlCount, _, err = decoder.Decode(output[:1])
+	assert.NoError(t, err)
 	assert.Zero(t, lvlCount)
 }
 
@@ -124,7 +128,8 @@ func verifyDecodingMultipleSetData(t *testing.T, enc parquet.Encoding, max int16
 		assert.Len(t, output, numLevels)
 		_, err := decoder.SetData(enc, max, numLevels, buf[ct])
 		assert.NoError(t, err)
-		lvlCount, _ = decoder.Decode(output)
+		lvlCount, _, err = decoder.Decode(output)
+		assert.NoError(t, err)
 		assert.Equal(t, numLevels, lvlCount)
 		assert.Equal(t, input[offset:offset+numLevels], output)
 	}
@@ -165,6 +170,22 @@ func TestLevelsDecodeMultipleBitWidth(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLevelDecoderPropagatesTruncatedRleLiteralRun(t *testing.T) {
+	encoded := append([]byte{17}, make([]byte, 7)...)
+	data := make([]byte, 4, 4+len(encoded))
+	binary.LittleEndian.PutUint32(data, uint32(len(encoded)))
+	data = append(data, encoded...)
+
+	var decoder encoding.LevelDecoder
+	_, err := decoder.SetData(parquet.Encodings.RLE, 1, 64, data)
+	assert.NoError(t, err)
+
+	levels := make([]int16, 64)
+	n, _, err := decoder.Decode(levels)
+	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	assert.Equal(t, 32, n)
 }
 
 func TestLevelsDecodeMultipleSetData(t *testing.T) {
@@ -286,7 +307,8 @@ func TestEncodeDecodeLevels(t *testing.T) {
 	assert.NoError(t, err)
 
 	var levelOut [numToEncode]int16
-	total, vals := decoder.Decode(levelOut[:])
+	total, vals, err := decoder.Decode(levelOut[:])
+	assert.NoError(t, err)
 	assert.EqualValues(t, numToEncode, total)
 	assert.EqualValues(t, numones, vals)
 	assert.Equal(t, levels, levelOut[:])

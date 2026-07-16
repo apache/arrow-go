@@ -17,11 +17,12 @@
 package utils
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
 )
 
-var unpack32 func(io.Reader, []uint32, int) int = unpack32Default
+var unpack32 func(io.Reader, []uint32, int) (int, error) = unpack32Default
 
 type unpackFunc func(in io.Reader, out []uint32)
 
@@ -1860,7 +1861,7 @@ func nullunpack32(_ io.Reader, out []uint32) {
 	}
 }
 
-func unpack32Default(in io.Reader, out []uint32, nbits int) int {
+func unpack32Default(in io.Reader, out []uint32, nbits int) (int, error) {
 	batch := len(out) / 32 * 32
 	nloops := batch / 32
 
@@ -1933,11 +1934,16 @@ func unpack32Default(in io.Reader, out []uint32, nbits int) int {
 	case 32:
 		f = unpack32_32
 	default:
-		return 0
+		return 0, nil
 	}
 
+	var packed [128]byte
+	packedBytes := nbits * 4
 	for i := 0; i < nloops; i++ {
-		f(in, out[i*32:])
+		if _, err := io.ReadFull(in, packed[:packedBytes]); err != nil {
+			return i * 32, err
+		}
+		f(bytes.NewReader(packed[:packedBytes]), out[i*32:])
 	}
-	return batch
+	return batch, nil
 }

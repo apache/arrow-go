@@ -91,7 +91,10 @@ func consumeLiterals[T parquet.ColumnTypes | uint64](r *RleDecoder, dc Dictionar
 	batch := min(remain, int(r.litCount), len(buf))
 	buf = buf[:batch]
 
-	n, _ := r.r.GetBatchIndex(uint(r.bitWidth), buf)
+	n, err := r.r.GetBatchIndex(uint(r.bitWidth), buf)
+	if err != nil {
+		return 0, 0, run, err
+	}
 	if n != batch {
 		return 0, 0, run, errors.New("was not able to retrieve correct number of indexes")
 	}
@@ -163,7 +166,10 @@ func (r *TypedRleDecoder[T]) GetBatchWithDict(dc DictionaryConverter[T], vals []
 		case r.litCount > 0:
 			litbatch := min(remain, int(r.litCount), 1024)
 			buf := indexbuffer[:litbatch]
-			n, _ := r.r.GetBatchIndex(uint(r.bitWidth), buf)
+			n, err := r.r.GetBatchIndex(uint(r.bitWidth), buf)
+			if err != nil {
+				return read, err
+			}
 			if n != litbatch {
 				return read, nil
 			}
