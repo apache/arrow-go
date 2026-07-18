@@ -69,10 +69,15 @@ else:
 
 class GoAdapter(BenchmarkAdapter):
     result_file = "bench_stats.json"
-    command = ["bash", SCRIPTS_PATH / "bench.sh", ARROW_ROOT, "-json"]
 
     def __init__(self, *args, **kwargs) -> None:
-        super().__init__(command=self.command, *args, **kwargs)
+        # Reuse an existing results file (e.g. combined from the sharded
+        # benchmark jobs) rather than running the whole suite again.
+        if Path(self.result_file).exists():
+            command = ["true"]
+        else:
+            command = ["bash", SCRIPTS_PATH / "bench.sh", ARROW_ROOT, "-json"]
+        super().__init__(command=command, *args, **kwargs)
 
     def _transform_results(self) -> List[BenchmarkResult]:
         with open(self.result_file, "r") as f:

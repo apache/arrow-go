@@ -23,36 +23,81 @@ on:
     paths:
       - ".github/workflows/benchmark.yml"
       - "ci/scripts/bench.sh"
+      - "ci/scripts/bench_shard.sh"
       - "ci/scripts/bench_adapt.py"
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.shards.outputs.matrix }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.0
+      - name: Compute benchmark shards
+        id: shards
+        run: echo "matrix=$(bash ci/scripts/bench_shard.sh 6)" >> "$GITHUB_OUTPUT"
   benchmark:
+    needs: setup
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        go: ['1.26.1']
-        arch: ['amd64']
+        include: ${{ fromJson(needs.setup.outputs.matrix) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7.0.0
         with:
           submodules: recursive
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: '3.9'
-      - name: Install Go ${{ matrix.go }} for Benchmarks
+      - name: Install Go for Benchmarks
         uses: actions/setup-go@v6.5.0
         with:
-          go-version: ${{ matrix.go }}
+          go-version: '1.26.1'
           cache: true
           cache-dependency-path: go.sum
           check-latest: false
-      - name: Run Benchmarks
-        if: github.event_name != 'push'
-        run: bash ci/scripts/bench.sh $(pwd) --json
+      - name: Run benchmark shard ${{ matrix.id }}
+        run: bash ci/scripts/bench.sh "$(pwd)" --run --packages "${{ matrix.packages }}" --out "bench_stat_${{ matrix.id }}.dat"
+      - name: Upload shard results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-dat-${{ matrix.id }}
+          path: bench_stat_${{ matrix.id }}.dat
+          if-no-files-found: error
+          retention-days: 1
+  combine:
+    needs: benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.0
+      - name: Install Go for Benchmarks
+        uses: actions/setup-go@v6.5.0
+        with:
+          go-version: '1.26.1'
+          cache: true
+          cache-dependency-path: go.sum
+          check-latest: false
+      - name: Download shard results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bench-dat-*
+          path: bench-dat
+          merge-multiple: true
+      - name: Combine shard results
+        run: bash ci/scripts/bench.sh "$(pwd)" --aggregate --dat "bench-dat/bench_stat_*.dat" --json-out bench_stats.json
+      - name: Upload combined results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-stats-json
+          path: bench_stats.json
+      - name: Set up Python
+        if: github.event_name == 'push' && github.repository == 'apache/arrow-go' && github.ref_name == 'main'
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.9'
       - name: Upload results
         if: github.event_name == 'push' && github.repository == 'apache/arrow-go' && github.ref_name == 'main'
         env:
@@ -60,7 +105,7 @@ jobs:
           CONBENCH_EMAIL: ${{ secrets.CONBENCH_EMAIL }}
           CONBENCH_PASSWORD: ${{ secrets.CONBENCH_PASS }}
           CONBENCH_REF: ${{ github.ref_name }}
-          CONBENCH_MACHINE_INFO_NAME: ${{ matrix.arch }}-debian-12
+          CONBENCH_MACHINE_INFO_NAME: amd64-debian-12
         run: |
           python3 -m pip install benchadapt@git+https://github.com/conbench/conbench.git@3af4a55206ad3918762cc8dd7d3012eadbe96a54#subdirectory=benchadapt/python
           python3 ci/scripts/bench_adapt.py
