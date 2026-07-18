@@ -31,6 +31,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute"
+	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/internal/testing/gen"
@@ -1677,6 +1678,33 @@ func (c *CastSuite) TestBinaryViewToBinaryLike() {
 			compute.SafeCastOptions(arrow.BinaryTypes.String))
 		c.ErrorIs(err, arrow.ErrInvalid)
 	})
+}
+
+func (c *CastSuite) TestBinaryToBinaryViewReleasesTemporaryResult() {
+	in, _, err := array.FromJSON(c.mem, arrow.BinaryTypes.Binary, strings.NewReader(`["aGk=", "dGhpcyBpcyB0aGUgZmlyc3QgdGVzdCE=", null]`))
+	c.Require().NoError(err)
+
+	scope := memory.NewCheckedAllocatorScope(c.mem)
+	ctx := exec.WithAllocator(context.Background(), c.mem)
+
+	out, err := compute.CastArray(ctx, in, compute.SafeCastOptions(arrow.BinaryTypes.BinaryView))
+	c.Require().NoError(err)
+	out.Release()
+	scope.CheckSize(c.T())
+	in.Release()
+}
+
+func (c *CastSuite) TestBinaryViewToBinaryReleasesTemporaryResult() {
+	in := c.buildStringViewArray([]string{"a", "short", "this is a longer cast value"}, nil)
+
+	scope := memory.NewCheckedAllocatorScope(c.mem)
+	ctx := exec.WithAllocator(context.Background(), c.mem)
+
+	out, err := compute.CastArray(ctx, in, compute.SafeCastOptions(arrow.BinaryTypes.LargeBinary))
+	c.Require().NoError(err)
+	out.Release()
+	scope.CheckSize(c.T())
+	in.Release()
 }
 
 // TestBinaryViewToBinaryView covers cross-view casts (binary_view <->
