@@ -96,17 +96,19 @@ const (
 	TimeUnitUnknown
 )
 
+const defaultGeospatialCRS = "OGC:CRS84"
+
 // GeographyEdgeInterpolationAlgorithm describes how geography edges are
 // interpolated between points.
-type GeographyEdgeInterpolationAlgorithm int
+type GeographyEdgeInterpolationAlgorithm string
 
 // Constants for the GeographyEdgeInterpolationAlgorithm.
 const (
-	GeographyEdgeSpherical GeographyEdgeInterpolationAlgorithm = iota
-	GeographyEdgeVincenty
-	GeographyEdgeThomas
-	GeographyEdgeAndoyer
-	GeographyEdgeKarney
+	GeographyEdgeSpherical GeographyEdgeInterpolationAlgorithm = "spherical"
+	GeographyEdgeVincenty  GeographyEdgeInterpolationAlgorithm = "vincenty"
+	GeographyEdgeThomas    GeographyEdgeInterpolationAlgorithm = "thomas"
+	GeographyEdgeAndoyer   GeographyEdgeInterpolationAlgorithm = "andoyer"
+	GeographyEdgeKarney    GeographyEdgeInterpolationAlgorithm = "karney"
 )
 
 // LogicalType is the descriptor that defines the usage of a physical primitive
@@ -1269,9 +1271,12 @@ func (t GeometryLogicalType) geometryType() *format.GeometryType {
 	return t.typ
 }
 
-// CRS returns the coordinate reference system, or an empty string when unset.
+// CRS returns the coordinate reference system, or OGC:CRS84 when unset.
 func (t GeometryLogicalType) CRS() string {
-	return t.geometryType().GetCrs()
+	if !t.IsCRSSet() {
+		return defaultGeospatialCRS
+	}
+	return t.typ.GetCrs()
 }
 
 // IsCRSSet returns whether the coordinate reference system was explicitly set.
@@ -1369,9 +1374,12 @@ func (t GeographyLogicalType) geographyType() *format.GeographyType {
 	return t.typ
 }
 
-// CRS returns the coordinate reference system, or an empty string when unset.
+// CRS returns the coordinate reference system, or OGC:CRS84 when unset.
 func (t GeographyLogicalType) CRS() string {
-	return t.geographyType().GetCrs()
+	if !t.IsCRSSet() {
+		return defaultGeospatialCRS
+	}
+	return t.typ.GetCrs()
 }
 
 // IsCRSSet returns whether the coordinate reference system was explicitly set.
@@ -1476,5 +1484,14 @@ func geographyEdgeAlgorithmToThrift(alg GeographyEdgeInterpolationAlgorithm) for
 }
 
 func geographyEdgeAlgorithmToString(alg GeographyEdgeInterpolationAlgorithm) string {
-	return geographyEdgeAlgorithmToThrift(alg).String()
+	switch alg {
+	case GeographyEdgeVincenty,
+		GeographyEdgeThomas,
+		GeographyEdgeAndoyer,
+		GeographyEdgeKarney,
+		GeographyEdgeSpherical:
+		return string(alg)
+	default:
+		return string(GeographyEdgeSpherical)
+	}
 }

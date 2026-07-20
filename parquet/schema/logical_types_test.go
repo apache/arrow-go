@@ -466,7 +466,7 @@ func TestLogicalTypeRepresentation(t *testing.T) {
 		{"geometry", schema.NewGeometryLogicalType(), "Geometry", `{"Type": "Geometry"}`},
 		{"geometry crs", schema.NewGeometryLogicalType("EPSG:4326"), "Geometry(crs=EPSG:4326)", `{"Type": "Geometry", "crs": "EPSG:4326"}`},
 		{"geography", schema.NewGeographyLogicalType(), "Geography", `{"Type": "Geography"}`},
-		{"geography crs algorithm", schema.NewGeographyLogicalType(schema.WithGeographyCRS("OGC:CRS84"), schema.WithGeographyEdgeInterpolationAlgorithm(schema.GeographyEdgeKarney)), "Geography(crs=OGC:CRS84, algorithm=KARNEY)", `{"Type": "Geography", "crs": "OGC:CRS84", "algorithm": "KARNEY"}`},
+		{"geography crs algorithm", schema.NewGeographyLogicalType(schema.WithGeographyCRS("OGC:CRS84"), schema.WithGeographyEdgeInterpolationAlgorithm(schema.GeographyEdgeKarney)), "Geography(crs=OGC:CRS84, algorithm=karney)", `{"Type": "Geography", "crs": "OGC:CRS84", "algorithm": "karney"}`},
 		{"none", schema.NoLogicalType{}, "None", `{"Type": "None"}`},
 	}
 
@@ -478,6 +478,18 @@ func TestLogicalTypeRepresentation(t *testing.T) {
 			assert.JSONEq(t, tt.expjson, string(out))
 		})
 	}
+}
+
+func TestGeospatialLogicalTypeDefaults(t *testing.T) {
+	geometry := schema.NewGeometryLogicalType().(schema.GeometryLogicalType)
+	assert.False(t, geometry.IsCRSSet())
+	assert.Equal(t, "OGC:CRS84", geometry.CRS())
+
+	geography := schema.NewGeographyLogicalType().(schema.GeographyLogicalType)
+	assert.False(t, geography.IsCRSSet())
+	assert.Equal(t, "OGC:CRS84", geography.CRS())
+	assert.False(t, geography.IsEdgeInterpolationAlgorithmSet())
+	assert.Equal(t, schema.GeographyEdgeSpherical, geography.EdgeInterpolationAlgorithm())
 }
 
 func TestLogicalTypeSortOrder(t *testing.T) {
