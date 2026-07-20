@@ -1251,6 +1251,8 @@ func (NoLogicalType) IsNone() bool { return true }
 // GeometryLogicalType represents geospatial features in WKB format.
 type GeometryLogicalType struct {
 	baseLogicalType
+	// typ preserves the thrift payload, including optional CRS metadata, when
+	// reading and writing Parquet schema elements.
 	typ *format.GeometryType
 }
 
@@ -1335,6 +1337,8 @@ func (t GeometryLogicalType) toThrift() *format.LogicalType {
 // non-linear edge interpolation algorithm.
 type GeographyLogicalType struct {
 	baseLogicalType
+	// typ preserves the thrift payload, including optional CRS and edge
+	// interpolation metadata, when reading and writing Parquet schema elements.
 	typ *format.GeographyType
 }
 
