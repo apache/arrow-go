@@ -31,8 +31,6 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/schema"
 )
 
-//go:generate go run ../../../arrow/_tools/tmpl/main.go -i -data=physical_types.tmpldata plain_encoder_types.gen.go.tmpl typed_encoder.gen.go.tmpl
-
 // EncoderTraits is an interface for the different types to make it more
 // convenient to construct encoders for specific types.
 type EncoderTraits interface {
