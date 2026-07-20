@@ -501,8 +501,8 @@ func TestLogicalTypeSerializationRoundTrip(t *testing.T) {
 		{"bson", BSONLogicalType{}, parquet.Types.ByteArray, -1},
 		{"uuid", UUIDLogicalType{}, parquet.Types.FixedLenByteArray, 16},
 		{"float16", Float16LogicalType{}, parquet.Types.FixedLenByteArray, 2},
-		{"geometry", NewGeometryLogicalType("EPSG:4326"), parquet.Types.ByteArray, -1},
-		{"geography", NewGeographyLogicalType(WithGeographyCRS("OGC:CRS84"), WithGeographyEdgeInterpolationAlgorithm(GeographyEdgeKarney)), parquet.Types.ByteArray, -1},
+		{"geometry", GeometryLogicalType{Crs: "EPSG:4326"}, parquet.Types.ByteArray, -1},
+		{"geography", GeographyLogicalType{Crs: "OGC:CRS84", Algorithm: GeographyEdgeKarney}, parquet.Types.ByteArray, -1},
 		{"none", NoLogicalType{}, parquet.Types.Boolean, -1},
 	}
 

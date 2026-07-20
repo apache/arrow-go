@@ -463,10 +463,10 @@ func TestLogicalTypeRepresentation(t *testing.T) {
 		{"uuid", schema.UUIDLogicalType{}, "UUID", `{"Type": "UUID"}`},
 		{"float16", schema.Float16LogicalType{}, "Float16", `{"Type": "Float16"}`},
 		{"variant", schema.VariantLogicalType{}, "Variant", `{"Type": "Variant"}`},
-		{"geometry", schema.NewGeometryLogicalType(), "Geometry", `{"Type": "Geometry"}`},
-		{"geometry crs", schema.NewGeometryLogicalType("EPSG:4326"), "Geometry(crs=EPSG:4326)", `{"Type": "Geometry", "crs": "EPSG:4326"}`},
-		{"geography", schema.NewGeographyLogicalType(), "Geography", `{"Type": "Geography"}`},
-		{"geography crs algorithm", schema.NewGeographyLogicalType(schema.WithGeographyCRS("OGC:CRS84"), schema.WithGeographyEdgeInterpolationAlgorithm(schema.GeographyEdgeKarney)), "Geography(crs=OGC:CRS84, algorithm=karney)", `{"Type": "Geography", "crs": "OGC:CRS84", "algorithm": "karney"}`},
+		{"geometry", schema.GeometryLogicalType{}, "Geometry", `{"Type": "Geometry"}`},
+		{"geometry crs", schema.GeometryLogicalType{Crs: "EPSG:4326"}, "Geometry(crs=EPSG:4326)", `{"Type": "Geometry", "crs": "EPSG:4326"}`},
+		{"geography", schema.GeographyLogicalType{}, "Geography", `{"Type": "Geography"}`},
+		{"geography crs algorithm", schema.GeographyLogicalType{Crs: "OGC:CRS84", Algorithm: schema.GeographyEdgeKarney}, "Geography(crs=OGC:CRS84, algorithm=karney)", `{"Type": "Geography", "crs": "OGC:CRS84", "algorithm": "karney"}`},
 		{"none", schema.NoLogicalType{}, "None", `{"Type": "None"}`},
 	}
 
@@ -481,11 +481,11 @@ func TestLogicalTypeRepresentation(t *testing.T) {
 }
 
 func TestGeospatialLogicalTypeDefaults(t *testing.T) {
-	geometry := schema.NewGeometryLogicalType().(schema.GeometryLogicalType)
+	geometry := schema.GeometryLogicalType{}
 	assert.False(t, geometry.IsCRSSet())
 	assert.Equal(t, "OGC:CRS84", geometry.CRS())
 
-	geography := schema.NewGeographyLogicalType().(schema.GeographyLogicalType)
+	geography := schema.GeographyLogicalType{}
 	assert.False(t, geography.IsCRSSet())
 	assert.Equal(t, "OGC:CRS84", geography.CRS())
 	assert.False(t, geography.IsEdgeInterpolationAlgorithmSet())
