@@ -228,6 +228,8 @@ func TestLogicalTypeProperties(t *testing.T) {
 		{"uuid", schema.UUIDLogicalType{}, false, true, true},
 		{"float16", schema.Float16LogicalType{}, false, true, true},
 		{"variant", schema.VariantLogicalType{}, true, true, true},
+		{"geometry", schema.GeometryLogicalType{}, false, true, true},
+		{"geography", schema.GeographyLogicalType{}, false, true, true},
 		{"nological", schema.NoLogicalType{}, false, false, true},
 		{"unknown", schema.UnknownLogicalType{}, false, false, false},
 	}
@@ -277,6 +279,8 @@ func TestLogicalSingleTypeApplicability(t *testing.T) {
 		{"int64", schema.NewIntLogicalType(64 /* bitWidth */, true /* signed */), parquet.Types.Int64},
 		{"json", schema.JSONLogicalType{}, parquet.Types.ByteArray},
 		{"bson", schema.BSONLogicalType{}, parquet.Types.ByteArray},
+		{"geometry", schema.GeometryLogicalType{}, parquet.Types.ByteArray},
+		{"geography", schema.GeographyLogicalType{}, parquet.Types.ByteArray},
 	}
 
 	for _, tt := range tests {
@@ -459,6 +463,10 @@ func TestLogicalTypeRepresentation(t *testing.T) {
 		{"uuid", schema.UUIDLogicalType{}, "UUID", `{"Type": "UUID"}`},
 		{"float16", schema.Float16LogicalType{}, "Float16", `{"Type": "Float16"}`},
 		{"variant", schema.VariantLogicalType{}, "Variant", `{"Type": "Variant"}`},
+		{"geometry", schema.GeometryLogicalType{}, "Geometry", `{"Type": "Geometry"}`},
+		{"geometry crs", schema.GeometryLogicalType{Crs: "EPSG:4326"}, "Geometry(crs=EPSG:4326)", `{"Type": "Geometry", "crs": "EPSG:4326"}`},
+		{"geography", schema.GeographyLogicalType{}, "Geography", `{"Type": "Geography"}`},
+		{"geography crs algorithm", schema.GeographyLogicalType{Crs: "OGC:CRS84", Algorithm: schema.GeographyEdgeKarney}, "Geography(crs=OGC:CRS84, algorithm=karney)", `{"Type": "Geography", "crs": "OGC:CRS84", "algorithm": "karney"}`},
 		{"none", schema.NoLogicalType{}, "None", `{"Type": "None"}`},
 	}
 
@@ -470,6 +478,18 @@ func TestLogicalTypeRepresentation(t *testing.T) {
 			assert.JSONEq(t, tt.expjson, string(out))
 		})
 	}
+}
+
+func TestGeospatialLogicalTypeDefaults(t *testing.T) {
+	geometry := schema.GeometryLogicalType{}
+	assert.False(t, geometry.IsCRSSet())
+	assert.Equal(t, "OGC:CRS84", geometry.CRS())
+
+	geography := schema.GeographyLogicalType{}
+	assert.False(t, geography.IsCRSSet())
+	assert.Equal(t, "OGC:CRS84", geography.CRS())
+	assert.False(t, geography.IsEdgeInterpolationAlgorithmSet())
+	assert.Equal(t, schema.GeographyEdgeSpherical, geography.EdgeInterpolationAlgorithm())
 }
 
 func TestLogicalTypeSortOrder(t *testing.T) {
@@ -506,6 +526,8 @@ func TestLogicalTypeSortOrder(t *testing.T) {
 		{"uuid", schema.UUIDLogicalType{}, schema.SortUNSIGNED},
 		{"float16", schema.Float16LogicalType{}, schema.SortSIGNED},
 		{"variant", schema.VariantLogicalType{}, schema.SortUNKNOWN},
+		{"geometry", schema.GeometryLogicalType{}, schema.SortUNKNOWN},
+		{"geography", schema.GeographyLogicalType{}, schema.SortUNKNOWN},
 		{"none", schema.NoLogicalType{}, schema.SortUNKNOWN},
 	}
 
