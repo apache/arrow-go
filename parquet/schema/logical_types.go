@@ -96,21 +96,6 @@ const (
 	TimeUnitUnknown
 )
 
-const defaultGeospatialCRS = "OGC:CRS84"
-
-// GeographyEdgeInterpolationAlgorithm describes how geography edges are
-// interpolated between points.
-type GeographyEdgeInterpolationAlgorithm string
-
-// Constants for the GeographyEdgeInterpolationAlgorithm.
-const (
-	GeographyEdgeSpherical GeographyEdgeInterpolationAlgorithm = "spherical"
-	GeographyEdgeVincenty  GeographyEdgeInterpolationAlgorithm = "vincenty"
-	GeographyEdgeThomas    GeographyEdgeInterpolationAlgorithm = "thomas"
-	GeographyEdgeAndoyer   GeographyEdgeInterpolationAlgorithm = "andoyer"
-	GeographyEdgeKarney    GeographyEdgeInterpolationAlgorithm = "karney"
-)
-
 // LogicalType is the descriptor that defines the usage of a physical primitive
 // type in the schema, such as an Interval, Date, etc.
 type LogicalType interface {
@@ -1339,6 +1324,8 @@ type GeographyLogicalType struct {
 	Algorithm GeographyEdgeInterpolationAlgorithm
 }
 
+const defaultGeospatialCRS = "OGC:CRS84"
+
 func geographyLogicalTypeFromThrift(t *format.GeographyType) GeographyLogicalType {
 	if t == nil {
 		return GeographyLogicalType{}
@@ -1349,7 +1336,7 @@ func geographyLogicalTypeFromThrift(t *format.GeographyType) GeographyLogicalTyp
 		ret.Crs = t.GetCrs()
 	}
 	if t.IsSetAlgorithm() {
-		ret.Algorithm = GeographyEdgeInterpolationAlgorithm("").fromThrift(t.GetAlgorithm())
+		ret.Algorithm.fromThrift(t.GetAlgorithm())
 	}
 	return ret
 }
@@ -1440,20 +1427,33 @@ func (t GeographyLogicalType) toThrift() *format.LogicalType {
 	return &format.LogicalType{GEOGRAPHY: typ}
 }
 
-func (GeographyEdgeInterpolationAlgorithm) fromThrift(alg format.EdgeInterpolationAlgorithm) GeographyEdgeInterpolationAlgorithm {
-	switch alg {
+// GeographyEdgeInterpolationAlgorithm describes how geography edges are
+// interpolated between points.
+type GeographyEdgeInterpolationAlgorithm string
+
+// Constants for the GeographyEdgeInterpolationAlgorithm.
+const (
+	GeographyEdgeSpherical GeographyEdgeInterpolationAlgorithm = "spherical"
+	GeographyEdgeVincenty  GeographyEdgeInterpolationAlgorithm = "vincenty"
+	GeographyEdgeThomas    GeographyEdgeInterpolationAlgorithm = "thomas"
+	GeographyEdgeAndoyer   GeographyEdgeInterpolationAlgorithm = "andoyer"
+	GeographyEdgeKarney    GeographyEdgeInterpolationAlgorithm = "karney"
+)
+
+func (alg *GeographyEdgeInterpolationAlgorithm) fromThrift(thriftAlg format.EdgeInterpolationAlgorithm) {
+	switch thriftAlg {
 	case format.EdgeInterpolationAlgorithm_VINCENTY:
-		return GeographyEdgeVincenty
+		*alg = GeographyEdgeVincenty
 	case format.EdgeInterpolationAlgorithm_THOMAS:
-		return GeographyEdgeThomas
+		*alg = GeographyEdgeThomas
 	case format.EdgeInterpolationAlgorithm_ANDOYER:
-		return GeographyEdgeAndoyer
+		*alg = GeographyEdgeAndoyer
 	case format.EdgeInterpolationAlgorithm_KARNEY:
-		return GeographyEdgeKarney
+		*alg = GeographyEdgeKarney
 	case format.EdgeInterpolationAlgorithm_SPHERICAL:
 		fallthrough
 	default:
-		return GeographyEdgeSpherical
+		*alg = GeographyEdgeSpherical
 	}
 }
 
