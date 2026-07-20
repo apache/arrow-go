@@ -163,6 +163,14 @@ func (s *SchemaElementConstructionSuite) TestSimple() {
 			"float16", Float16LogicalType{}, parquet.Types.FixedLenByteArray, 2, false, ConvertedTypes.NA, true,
 			func(e *format.SchemaElement) bool { return e.LogicalType.IsSetFLOAT16() },
 		}, nil},
+		{"geometry", &schemaElementConstructArgs{
+			"geometry", GeometryLogicalType{}, parquet.Types.ByteArray, -1, false, ConvertedTypes.NA, true,
+			func(e *format.SchemaElement) bool { return e.LogicalType.IsSetGEOMETRY() },
+		}, nil},
+		{"geography", &schemaElementConstructArgs{
+			"geography", GeographyLogicalType{}, parquet.Types.ByteArray, -1, false, ConvertedTypes.NA, true,
+			func(e *format.SchemaElement) bool { return e.LogicalType.IsSetGEOGRAPHY() },
+		}, nil},
 		{"none", &schemaElementConstructArgs{
 			"none", NoLogicalType{}, parquet.Types.Int64, -1, false, ConvertedTypes.NA, false,
 			checkNone,
@@ -493,6 +501,8 @@ func TestLogicalTypeSerializationRoundTrip(t *testing.T) {
 		{"bson", BSONLogicalType{}, parquet.Types.ByteArray, -1},
 		{"uuid", UUIDLogicalType{}, parquet.Types.FixedLenByteArray, 16},
 		{"float16", Float16LogicalType{}, parquet.Types.FixedLenByteArray, 2},
+		{"geometry", NewGeometryLogicalType("EPSG:4326"), parquet.Types.ByteArray, -1},
+		{"geography", NewGeographyLogicalType(WithGeographyCRS("OGC:CRS84"), WithGeographyEdgeInterpolationAlgorithm(GeographyEdgeKarney)), parquet.Types.ByteArray, -1},
 		{"none", NoLogicalType{}, parquet.Types.Boolean, -1},
 	}
 
