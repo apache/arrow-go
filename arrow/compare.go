@@ -97,10 +97,7 @@ func TypeEqual(left, right DataType, opts ...TypeEqualOption) bool {
 		return true
 	case *StructType:
 		r := right.(*StructType)
-		switch {
-		case len(l.fields) != len(r.fields):
-			return false
-		case !reflect.DeepEqual(l.index, r.index):
+		if len(l.fields) != len(r.fields) {
 			return false
 		}
 		for i := range l.fields {
