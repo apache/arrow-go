@@ -23,6 +23,8 @@ on:
       - "!v*-rc*"
 permissions:
   contents: write
+  discussions: write
+
 env:
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 jobs:
@@ -46,7 +48,7 @@ jobs:
         run: |
           version=${GITHUB_REF_NAME#v}
           gh release create ${GITHUB_REF_NAME} \
-            --discussion-category announcements \
+            --discussion-category "General" \
             --generate-notes \
             --repo ${GITHUB_REPOSITORY} \
             --title "Apache Arrow Go ${version}" \
