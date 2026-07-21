@@ -148,7 +148,7 @@ latest_go_version() {
   curl \
     "${options[@]}" \
     https://api.github.com/repos/golang/go/git/matching-refs/tags/go |
-    jq -r ' .[] | .ref' |
+    jq -r '.[] | .ref | select(test("^refs/tags/go[0-9]+(\\.[0-9]+){1,2}$"))' |
     sort -V |
     tail -1 |
     sed 's,refs/tags/go,,g'
