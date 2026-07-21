@@ -40,6 +40,36 @@ ci: update CI environment
 feat(parquet): support new encoding type
 ```
 
+## Generating Thrift
+
+The generated Go definitions for Parquet Thrift live under
+`parquet/internal/gen-go`. If the upstream Parquet Thrift definitions change,
+or if you are updating code that depends on definitions others have changed,
+regenerate these files with the Thrift compiler before sending a PR.
+
+Install the `thrift` compiler locally, then download the current Parquet Thrift
+definition into the repository root:
+
+```sh
+curl -L -o parquet.thrift https://raw.githubusercontent.com/apache/parquet-format/master/src/main/thrift/parquet.thrift
+```
+
+Run generation from the repository root:
+
+```sh
+go generate ./parquet
+```
+
+The downloaded `parquet.thrift` file is only an input to generation. Do not add
+it to git; commit the generated Go changes instead.
+
+The generated package is internal on purpose. Public APIs should not expose the
+whole generated Thrift surface directly. When a generated enum, struct, or
+constant needs to be used outside the internal package, add or update the small
+public wrapper, alias, or conversion helper in the relevant `parquet` package
+instead. This keeps the exported API controlled while still making conversions
+to and from the generated Thrift types straightforward.
+
 ## Did you find a bug?
 
 The Arrow project uses GitHub as a bug tracker.  To report a bug, sign in 
