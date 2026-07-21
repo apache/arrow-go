@@ -17,6 +17,8 @@
 package pqarrow_test
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
 	"reflect"
 	"testing"
@@ -28,6 +30,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/apache/arrow-go/v18/parquet/schema"
@@ -83,6 +86,15 @@ func (*testGeometryType) ArrowTypeFromParquet(logical schema.LogicalType, storag
 		return nil, nil
 	}
 }
+
+func (t *testGeometryType) ParquetLogicalType() schema.LogicalType {
+	return t.logical
+}
+
+var (
+	_ pqarrow.ExtensionCustomParquetType  = (*testGeometryType)(nil)
+	_ pqarrow.ExtensionParquetLogicalType = (*testGeometryType)(nil)
+)
 
 func TestGetOriginSchemaBase64(t *testing.T) {
 	uuidType := extensions.NewUUIDType()
@@ -178,6 +190,80 @@ func TestFromParquetGeospatialRegisteredExtension(t *testing.T) {
 		assert.True(t, logical.Equals(extType.logical))
 		assert.True(t, arrow.TypeEqual(arrow.BinaryTypes.Binary, extType.StorageType()))
 	}
+}
+
+// TestReadWriteGeospatialRegisteredExtensionWithoutStoredSchema verifies that a
+// registered extension type can round trip using only the Parquet logical type.
+// Keeping StoreSchema disabled ensures the reader reconstructs the extension via
+// ExtensionParquetLogicalType interface logic instead of restoring it from
+// ARROW:schema metadata.
+func TestReadWriteGeospatialRegisteredExtensionWithoutStoredSchema(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	// Register the extension type so the reader can discover its Parquet mapping.
+	logical := schema.GeometryLogicalType{Crs: "EPSG:4326"}
+	geoType := newTestGeometryType(logical)
+	require.NoError(t, arrow.RegisterExtensionType(geoType))
+	defer func() {
+		require.NoError(t, arrow.UnregisterExtensionType(geoType.ExtensionName()))
+	}()
+
+	// Build an extension array whose storage is the byte array written to Parquet.
+	bldr := array.NewExtensionBuilder(mem, geoType)
+	defer bldr.Release()
+	binaryBldr := bldr.StorageBuilder().(*array.BinaryBuilder)
+	binaryBldr.AppendValues([][]byte{
+		{1, 2, 3},
+		nil,
+		{4, 5, 6, 7},
+	}, []bool{true, false, true})
+
+	arr := bldr.NewArray()
+	defer arr.Release()
+
+	field := arrow.Field{Name: "geometry", Type: geoType, Nullable: true}
+	col := arrow.NewColumnFromArr(field, arr)
+	defer col.Release()
+	tbl := array.NewTable(arrow.NewSchema([]arrow.Field{field}, nil), []arrow.Column{col}, -1)
+	defer tbl.Release()
+
+	var buf bytes.Buffer
+	arrowProps := pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem))
+	// Write without using WithStoreSchema so the file does not embed the original Arrow
+	// extension type in ARROW:schema metadata. This forces the read path to infer the
+	// extension from the Parquet logical type and the registered extension interface.
+	require.NoError(t, pqarrow.WriteTable(tbl, &buf, tbl.NumRows(),
+		parquet.NewWriterProperties(parquet.WithAllocator(mem)), arrowProps))
+
+	pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(parquet.NewReaderProperties(mem)))
+	require.NoError(t, err)
+	defer pf.Close()
+
+	// Confirm the extension type can be recovered from the Parquet logical type.
+	require.Nil(t, pf.MetaData().KeyValueMetadata().FindValue("ARROW:schema"))
+	require.True(t, pf.MetaData().Schema.Column(0).LogicalType().Equals(logical))
+
+	reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{}, mem)
+	require.NoError(t, err)
+
+	readTbl, err := reader.ReadTable(context.Background())
+	require.NoError(t, err)
+	defer readTbl.Release()
+
+	// Validate that the read path restored the extension type and preserved values.
+	require.Equal(t, tbl.NumRows(), readTbl.NumRows())
+	require.Equal(t, tbl.NumCols(), readTbl.NumCols())
+	require.Equal(t, arrow.EXTENSION, readTbl.Column(0).DataType().ID())
+
+	readType, ok := readTbl.Column(0).DataType().(*testGeometryType)
+	require.True(t, ok)
+	assert.True(t, logical.Equals(readType.logical))
+	assert.True(t, arrow.TypeEqual(arrow.BinaryTypes.Binary, readType.StorageType()))
+
+	expected := tbl.Column(0).Data().Chunk(0)
+	actual := readTbl.Column(0).Data().Chunk(0)
+	assert.Truef(t, array.Equal(expected, actual), "expected: %T %s\ngot: %T %s", expected, expected, actual, actual)
 }
 
 func TestToParquetWriterConfig(t *testing.T) {
