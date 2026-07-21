@@ -129,6 +129,13 @@ type ExtensionCustomParquetType interface {
 	ParquetLogicalType() schema.LogicalType
 }
 
+// ExtensionParquetLogicalType is an interface that Arrow ExtensionTypes may
+// implement to specify how a Parquet LogicalType maps back to an Arrow
+// ExtensionType when converting a Parquet schema to an Arrow schema.
+type ExtensionParquetLogicalType interface {
+	ArrowTypeFromParquet(logical schema.LogicalType, storageType arrow.DataType) (arrow.ExtensionType, error)
+}
+
 func isDictionaryReadSupported(dt arrow.DataType) bool {
 	return arrow.IsBinaryLike(dt.ID())
 }
@@ -531,6 +538,9 @@ func arrowFromByteArray(logical schema.LogicalType) (arrow.DataType, error) {
 		return arrow.BinaryTypes.String, nil
 	case schema.DecimalLogicalType:
 		return arrowDecimal(logtype), nil
+	case schema.GeometryLogicalType,
+		schema.GeographyLogicalType:
+		return arrowExtensionFromParquetLogicalType(logical, arrow.BinaryTypes.Binary)
 	case schema.NoLogicalType,
 		schema.EnumLogicalType,
 		schema.JSONLogicalType,
@@ -539,6 +549,27 @@ func arrowFromByteArray(logical schema.LogicalType) (arrow.DataType, error) {
 	default:
 		return nil, errors.New("unhandled logicaltype " + logical.String() + " for byte_array")
 	}
+}
+
+// arrowExtensionFromParquetLogicalType asks registered extension types whether
+// they can represent the provided Parquet logical type with the given storage
+// type, falling back to the storage type when none opt in.
+func arrowExtensionFromParquetLogicalType(logical schema.LogicalType, storageType arrow.DataType) (arrow.DataType, error) {
+	for _, extType := range arrow.RegisteredExtensionTypes() {
+		converter, ok := extType.(ExtensionParquetLogicalType)
+		if !ok {
+			continue
+		}
+
+		typ, err := converter.ArrowTypeFromParquet(logical, storageType)
+		if err != nil {
+			return nil, err
+		}
+		if typ != nil {
+			return typ, nil
+		}
+	}
+	return storageType, nil
 }
 
 func arrowFromFLBA(logical schema.LogicalType, length int) (arrow.DataType, error) {

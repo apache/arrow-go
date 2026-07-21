@@ -82,6 +82,18 @@ func GetExtensionType(typName string) ExtensionType {
 	return nil
 }
 
+// RegisteredExtensionTypes returns a snapshot of all registered extension types.
+// The returned types are in an unspecified order.
+func RegisteredExtensionTypes() []ExtensionType {
+	registry := getExtTypeRegistry()
+	var out []ExtensionType
+	registry.Range(func(_, value any) bool {
+		out = append(out, value.(ExtensionType))
+		return true
+	})
+	return out
+}
+
 // ExtensionType is an interface for handling user-defined types. They must be
 // DataTypes and must embed arrow.ExtensionBase in them in order to work properly
 // ensuring that they always have the expected base behavior.
