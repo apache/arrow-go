@@ -24,7 +24,6 @@ on:
 permissions:
   contents: write
   discussions: write
-
 env:
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 jobs:
