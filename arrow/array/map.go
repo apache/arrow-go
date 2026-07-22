@@ -259,6 +259,13 @@ func (b *MapBuilder) Reserve(n int) { b.listBuilder.Reserve(n) }
 // b.Cap(), additional memory will be allocated. If n is smaller, the allocated memory may be reduced.
 func (b *MapBuilder) Resize(n int) { b.listBuilder.Resize(n) }
 
+// Truncate reduces the length of the map builder to n elements by delegating to
+// the underlying list builder. No buffers are reallocated.
+func (b *MapBuilder) Truncate(n int) {
+	b.adjustStructBuilderLen()
+	b.listBuilder.Truncate(n)
+}
+
 // AppendValues is for bulk appending a group of elements with offsets provided
 // and validity booleans provided.
 func (b *MapBuilder) AppendValues(offsets []int32, valid []bool) {
