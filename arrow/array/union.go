@@ -945,6 +945,22 @@ func (b *SparseUnionBuilder) Resize(n int) {
 	b.typesBuilder.resize(n)
 }
 
+// Truncate reduces the length of the sparse union builder to n elements,
+// shrinking the types buffer and truncating every child builder to the same
+// length. No buffers are reallocated.
+func (b *SparseUnionBuilder) Truncate(n int) {
+	if n < 0 {
+		panic("arrow/array: cannot truncate to a negative length")
+	}
+	if n >= b.Len() {
+		return
+	}
+	b.typesBuilder.SetLength(n)
+	for _, c := range b.children {
+		c.Truncate(n)
+	}
+}
+
 // AppendNull will append a null to the first child and an empty value
 // (implementation-defined) to the rest of the children.
 func (b *SparseUnionBuilder) AppendNull() {
@@ -1184,6 +1200,21 @@ func (b *DenseUnionBuilder) Reserve(n int) {
 func (b *DenseUnionBuilder) Resize(n int) {
 	b.typesBuilder.resize(n)
 	b.offsetsBuilder.resize(n * arrow.Int32SizeBytes)
+}
+
+// Truncate reduces the length of the dense union builder to n elements,
+// shrinking the types and offsets buffers. The child builders are left
+// untouched; their extra elements simply become unreferenced. No buffers are
+// reallocated.
+func (b *DenseUnionBuilder) Truncate(n int) {
+	if n < 0 {
+		panic("arrow/array: cannot truncate to a negative length")
+	}
+	if n >= b.Len() {
+		return
+	}
+	b.typesBuilder.SetLength(n)
+	b.offsetsBuilder.SetLength(n * arrow.Int32SizeBytes)
 }
 
 // AppendNull will only append a null value arbitrarily to the first child
