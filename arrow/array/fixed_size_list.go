@@ -273,6 +273,17 @@ func (b *FixedSizeListBuilder) init(capacity int) {
 	b.builder.init(capacity)
 }
 
+// Truncate reduces the length of the fixed-size-list builder to n elements,
+// truncating the values builder to n * listSize elements. No buffers are
+// reallocated.
+func (b *FixedSizeListBuilder) Truncate(n int) {
+	if n >= b.length {
+		return
+	}
+	b.builder.Truncate(n)
+	b.values.Truncate(n * int(b.n))
+}
+
 // Reserve ensures there is enough space for appending n elements
 // by checking the capacity and calling Resize if necessary.
 func (b *FixedSizeListBuilder) Reserve(n int) {
