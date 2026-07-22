@@ -564,6 +564,46 @@ func TestRecordBuilder(t *testing.T) {
 	assert.Truef(t, array.Equal(arr, roundtripped), "JSON round trip returns different array: got=%q, want=%d", arr, roundtripped)
 }
 
+func TestRecordBuilderUnmarshalOneFieldErrorKeepsColumnsConsistent(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema(
+		[]arrow.Field{
+			{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			{Name: "b", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		},
+		nil,
+	)
+
+	b := array.NewRecordBuilder(mem, schema)
+	defer b.Release()
+
+	// Field "a" decodes fine and is appended, then field "b" fails to decode
+	// (a string is not a valid int32). The partially-appended row must be rolled
+	// back so all columns keep the same length.
+	err := b.UnmarshalJSON([]byte(`{"a": 1, "b": "not-an-int"}`))
+	assert.Error(t, err)
+
+	// A subsequent valid row and NewRecordBatch must not panic due to unequal
+	// column lengths.
+	err = b.UnmarshalJSON([]byte(`{"a": 2, "b": 3}`))
+	assert.NoError(t, err)
+
+	rec := b.NewRecordBatch()
+	defer rec.Release()
+
+	if got, want := rec.NumRows(), int64(1); got != want {
+		t.Fatalf("invalid number of rows: got=%d, want=%d", got, want)
+	}
+	if got, want := rec.Column(0).String(), `[2]`; got != want {
+		t.Fatalf("invalid column values: got=%q, want=%q", got, want)
+	}
+	if got, want := rec.Column(1).String(), `[3]`; got != want {
+		t.Fatalf("invalid column values: got=%q, want=%q", got, want)
+	}
+}
+
 func TestRecordBuilderResize(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
