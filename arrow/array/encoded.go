@@ -370,6 +370,50 @@ func (b *RunEndEncodedBuilder) finishRun() {
 
 func (b *RunEndEncodedBuilder) ValueBuilder() Builder { return b.values }
 
+func (b *RunEndEncodedBuilder) runEndValue(i int) int {
+	switch bldr := b.runEnds.(type) {
+	case *Int16Builder:
+		return int(bldr.Value(i))
+	case *Int32Builder:
+		return int(bldr.Value(i))
+	case *Int64Builder:
+		return int(bldr.Value(i))
+	}
+	return 0
+}
+
+// Truncate reduces the logical length of the run-end encoded builder to n
+// elements. It keeps only the runs needed to cover the first n elements and
+// leaves the final run pending so newData clamps its end to n. No buffers are
+// reallocated.
+func (b *RunEndEncodedBuilder) Truncate(n int) {
+	if n < 0 {
+		panic("arrow/array: cannot truncate to a negative length")
+	}
+	if n >= b.length {
+		return
+	}
+	// materialize the in-progress run so every run is represented in runEnds
+	b.finishRun()
+	keep, prev := 0, 0
+	for i := 0; i < b.runEnds.Len(); i++ {
+		if prev >= n {
+			break
+		}
+		prev = b.runEndValue(i)
+		keep = i + 1
+	}
+	// Keep `keep` values, but drop the last run end so it is treated as an
+	// in-progress run; newData's finishRun will append the clamped end (n).
+	b.values.Truncate(keep)
+	if keep > 0 {
+		b.runEnds.Truncate(keep - 1)
+	} else {
+		b.runEnds.Truncate(0)
+	}
+	b.length = n
+}
+
 func (b *RunEndEncodedBuilder) Append(n uint64) {
 	b.finishRun()
 	b.addLength(n)
