@@ -82,13 +82,19 @@ func GetExtensionType(typName string) ExtensionType {
 	return nil
 }
 
-// RegisteredExtensionTypes returns a snapshot of all registered extension types.
-// The returned types are in an unspecified order.
-func RegisteredExtensionTypes() []ExtensionType {
+// FindRegisteredExtensionType returns a registered extension type for
+// which the filter returns true. If no type matches, it returns nil.
+//
+// If multiple types match, which one is returned is unspecified.
+func FindRegisteredExtensionType(filter func(ExtensionType) bool) ExtensionType {
 	registry := getExtTypeRegistry()
-	var out []ExtensionType
+	var out ExtensionType
 	registry.Range(func(_, value any) bool {
-		out = append(out, value.(ExtensionType))
+		typ := value.(ExtensionType)
+		if filter(typ) {
+			out = typ
+			return false
+		}
 		return true
 	})
 	return out

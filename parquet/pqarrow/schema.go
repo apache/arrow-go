@@ -555,19 +555,27 @@ func arrowFromByteArray(logical schema.LogicalType) (arrow.DataType, error) {
 // they can represent the provided Parquet logical type with the given storage
 // type, falling back to the storage type when none opt in.
 func arrowExtensionFromParquetLogicalType(logical schema.LogicalType, storageType arrow.DataType) (arrow.DataType, error) {
-	for _, extType := range arrow.RegisteredExtensionTypes() {
+	var (
+		typ arrow.ExtensionType
+		err error
+	)
+	matchedType := arrow.FindRegisteredExtensionType(func(extType arrow.ExtensionType) bool {
 		converter, ok := extType.(ExtensionParquetLogicalType)
 		if !ok {
-			continue
+			return false
 		}
 
-		typ, err := converter.ArrowTypeFromParquet(logical, storageType)
+		typ, err = converter.ArrowTypeFromParquet(logical, storageType)
 		if err != nil {
-			return nil, err
+			return true
 		}
-		if typ != nil {
-			return typ, nil
-		}
+		return typ != nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if matchedType != nil {
+		return typ, nil
 	}
 	return storageType, nil
 }

@@ -71,6 +71,26 @@ func (e *ExtensionTypeTestSuite) TestExtensionType() {
 	e.False(arrow.TypeEqual(deserialized, &arrow.FixedSizeBinaryType{ByteWidth: 16}))
 }
 
+func (e *ExtensionTypeTestSuite) TestFindRegisteredExtensionType() {
+	found := arrow.FindRegisteredExtensionType(func(typ arrow.ExtensionType) bool {
+		return typ.ExtensionName() == "arrow.uuid"
+	})
+	e.Same(arrow.GetExtensionType("arrow.uuid"), found)
+
+	notFound := arrow.FindRegisteredExtensionType(func(typ arrow.ExtensionType) bool {
+		return typ.ExtensionName() == "uuid-unknown"
+	})
+	e.Nil(notFound)
+
+	calls := 0
+	found = arrow.FindRegisteredExtensionType(func(typ arrow.ExtensionType) bool {
+		calls++
+		return true
+	})
+	e.NotNil(found)
+	e.Equal(1, calls)
+}
+
 func TestExtensionTypes(t *testing.T) {
 	suite.Run(t, new(ExtensionTypeTestSuite))
 }
