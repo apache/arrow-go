@@ -418,6 +418,9 @@ func (b *RecordBuilder) NewRecord() arrow.Record {
 // UnmarshalOne reads one row (a JSON object) from the supplied decoder and
 // appends a value to each field in the RecordBuilder.
 //
+// Missing nullable fields get nulls. If an error is found while decoding
+// any field, the entire row gets discarded and the error is returned.
+//
 // Unlike UnmarshalJSON, this method receives an already-configured
 // json.Decoder, so options such as UseNumber set by the caller are honored
 // for nested field decoding. This is critical for preserving large integer
@@ -478,21 +481,20 @@ func (b *RecordBuilder) UnmarshalOne(dec *json.Decoder) error {
 		}
 	}
 
-	// at this point we know there are no integrity errors, append values to field builders
-	for key, val := range keylist {
+	// At this point we know there are no integrity errors, so append values to the
+	// field builders in schema order.
+	for i := 0; i < b.schema.NumFields(); i++ {
+		val, ok := keylist[b.schema.Field(i).Name]
+		if !ok {
+			b.fields[i].AppendNull()
+			continue
+		}
+
 		valDec := json.NewDecoder(bytes.NewReader(val))
 		valDec.UseNumber()
-
-		indices := b.schema.FieldIndices(key)
-		if err := b.fields[indices[0]].UnmarshalOne(valDec); err != nil {
+		if err := b.fields[i].UnmarshalOne(valDec); err != nil {
+			b.Resize(-1)
 			return err
-		}
-	}
-
-	// append nulls to nullable fields if values were not present
-	for i := 0; i < b.schema.NumFields(); i++ {
-		if _, ok := keylist[b.schema.Field(i).Name]; !ok {
-			b.fields[i].AppendNull()
 		}
 	}
 
@@ -501,7 +503,7 @@ func (b *RecordBuilder) UnmarshalOne(dec *json.Decoder) error {
 
 // Unmarshal reads multiple rows from the decoder, calling UnmarshalOne in a
 // loop until dec.More() reports there are no more values. Like UnmarshalOne,
-// this honors decoder configuration such as UseNumber set by the caller.
+// field values are always re-decoded with UseNumber enabled.
 func (b *RecordBuilder) Unmarshal(dec *json.Decoder) error {
 	for dec.More() {
 		if err := b.UnmarshalOne(dec); err != nil {
