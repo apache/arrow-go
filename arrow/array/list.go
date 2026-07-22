@@ -523,6 +523,30 @@ func (b *baseListBuilder) resizeHelper(n int) {
 	}
 }
 
+func (b *baseListBuilder) offsetAt(i int) int {
+	switch o := b.offsets.(type) {
+	case *Int32Builder:
+		return int(o.Value(i))
+	case *Int64Builder:
+		return int(o.Value(i))
+	}
+	return 0
+}
+
+// Truncate reduces the length of the list builder to n elements. It keeps the
+// first n+1 offsets (so the end boundary of the last kept list is preserved)
+// and truncates the values builder to that boundary. No buffers are
+// reallocated.
+func (b *baseListBuilder) Truncate(n int) {
+	if n >= b.length {
+		return
+	}
+	valueLen := b.offsetAt(n)
+	b.builder.Truncate(n)
+	b.offsets.Truncate(n + 1)
+	b.values.Truncate(valueLen)
+}
+
 func (b *baseListBuilder) ValueBuilder() Builder {
 	return b.values
 }
