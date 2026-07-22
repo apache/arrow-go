@@ -420,6 +420,18 @@ func (b *StructBuilder) resizeHelper(n int) {
 	}
 }
 
+// Truncate reduces the length of the struct builder to n elements, truncating
+// each of its field builders to the same length. No buffers are reallocated.
+func (b *StructBuilder) Truncate(n int) {
+	if n >= b.length {
+		return
+	}
+	b.builder.Truncate(n)
+	for _, f := range b.fields {
+		f.Truncate(n)
+	}
+}
+
 func (b *StructBuilder) NumField() int              { return len(b.fields) }
 func (b *StructBuilder) FieldBuilder(i int) Builder { return b.fields[i] }
 
