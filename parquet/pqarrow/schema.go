@@ -556,8 +556,8 @@ func arrowFromByteArray(logical schema.LogicalType) (arrow.DataType, error) {
 // type, falling back to the storage type when none opt in.
 func arrowExtensionFromParquetLogicalType(logical schema.LogicalType, storageType arrow.DataType) (arrow.DataType, error) {
 	var (
-		typ arrow.ExtensionType
-		err error
+		typ           arrow.ExtensionType
+		typeLookupErr error
 	)
 	matchedType := arrow.FindRegisteredExtensionType(func(extType arrow.ExtensionType) bool {
 		converter, ok := extType.(ExtensionParquetLogicalType)
@@ -565,17 +565,29 @@ func arrowExtensionFromParquetLogicalType(logical schema.LogicalType, storageTyp
 			return false
 		}
 
+		var err error
 		typ, err = converter.ArrowTypeFromParquet(logical, storageType)
 		if err != nil {
-			return true
+			// if there was a failure to match, store it as a potential error
+			// to return if nothing else matches, but don't return it yet.
+			// This lets one extension reject a column without blocking another
+			// extension, while still surfacing real converter failures when nothing
+			// handles the type.
+			if typeLookupErr == nil {
+				typeLookupErr = err
+			}
+			return false
 		}
 		return typ != nil
 	})
-	if err != nil {
-		return nil, err
-	}
 	if matchedType != nil {
 		return typ, nil
+	}
+
+	if typeLookupErr != nil {
+		// If we didn't match any type and there was a type lookup error,
+		// we can now return the error that we stored
+		return nil, typeLookupErr
 	}
 	return storageType, nil
 }

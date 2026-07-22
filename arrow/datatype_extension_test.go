@@ -39,6 +39,29 @@ func (BadExtensionType) Deserialize(_ arrow.DataType, _ string) (arrow.Extension
 	return nil, nil
 }
 
+type findExtensionType struct {
+	arrow.ExtensionBase
+	name string
+}
+
+func newFindExtensionType(name string) *findExtensionType {
+	return &findExtensionType{
+		ExtensionBase: arrow.ExtensionBase{Storage: arrow.Null},
+		name:          name,
+	}
+}
+
+func (*findExtensionType) ArrayType() reflect.Type { return nil }
+func (f *findExtensionType) ExtensionName() string { return f.name }
+func (*findExtensionType) Serialize() string       { return "" }
+func (f *findExtensionType) ExtensionEquals(other arrow.ExtensionType) bool {
+	rhs, ok := other.(*findExtensionType)
+	return ok && f.name == rhs.name
+}
+func (f *findExtensionType) Deserialize(_ arrow.DataType, _ string) (arrow.ExtensionType, error) {
+	return f, nil
+}
+
 func TestMustEmbedBase(t *testing.T) {
 	var ext interface{} = &BadExtensionType{}
 	assert.Panics(t, func() {
@@ -89,6 +112,27 @@ func (e *ExtensionTypeTestSuite) TestFindRegisteredExtensionType() {
 	})
 	e.NotNil(found)
 	e.Equal(1, calls)
+
+	// Register the higher name first so this assertion does not accidentally
+	// pass due to registration order.
+	lowNameType := newFindExtensionType("test.find.a")
+	highNameType := newFindExtensionType("test.find.z")
+	e.Require().NoError(arrow.RegisterExtensionType(highNameType))
+	defer func() {
+		e.NoError(arrow.UnregisterExtensionType(highNameType.ExtensionName()))
+	}()
+	e.Require().NoError(arrow.RegisterExtensionType(lowNameType))
+	defer func() {
+		e.NoError(arrow.UnregisterExtensionType(lowNameType.ExtensionName()))
+	}()
+
+	found = arrow.FindRegisteredExtensionType(func(typ arrow.ExtensionType) bool {
+		return typ.ExtensionName() == lowNameType.ExtensionName() ||
+			typ.ExtensionName() == highNameType.ExtensionName()
+	})
+	// When multiple registered types match, the lexicographically smallest
+	// registered extension name should win.
+	e.Same(lowNameType, found)
 }
 
 func TestExtensionTypes(t *testing.T) {

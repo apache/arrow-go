@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -47,6 +48,10 @@ type testGeometryArray struct {
 	array.ExtensionArrayBase
 }
 
+type testFailingGeometryType struct {
+	arrow.ExtensionBase
+}
+
 func newTestGeometryType(logical schema.LogicalType) *testGeometryType {
 	return &testGeometryType{
 		ExtensionBase: arrow.ExtensionBase{Storage: arrow.BinaryTypes.Binary},
@@ -54,7 +59,17 @@ func newTestGeometryType(logical schema.LogicalType) *testGeometryType {
 	}
 }
 
+func newTestFailingGeometryType() *testFailingGeometryType {
+	return &testFailingGeometryType{
+		ExtensionBase: arrow.ExtensionBase{Storage: arrow.BinaryTypes.Binary},
+	}
+}
+
 func (*testGeometryType) ArrayType() reflect.Type {
+	return reflect.TypeFor[testGeometryArray]()
+}
+
+func (*testFailingGeometryType) ArrayType() reflect.Type {
 	return reflect.TypeFor[testGeometryArray]()
 }
 
@@ -62,17 +77,34 @@ func (*testGeometryType) ExtensionName() string {
 	return "test.geospatial"
 }
 
+func (*testFailingGeometryType) ExtensionName() string {
+	return "test.failing_geospatial"
+}
+
 func (t *testGeometryType) ExtensionEquals(other arrow.ExtensionType) bool {
 	rhs, ok := other.(*testGeometryType)
 	return ok && t.ExtensionName() == rhs.ExtensionName() && t.logical.Equals(rhs.logical)
+}
+
+func (t *testFailingGeometryType) ExtensionEquals(other arrow.ExtensionType) bool {
+	_, ok := other.(*testFailingGeometryType)
+	return ok
 }
 
 func (*testGeometryType) Serialize() string {
 	return ""
 }
 
+func (*testFailingGeometryType) Serialize() string {
+	return ""
+}
+
 func (*testGeometryType) Deserialize(storageType arrow.DataType, data string) (arrow.ExtensionType, error) {
 	return newTestGeometryType(schema.GeometryLogicalType{}), nil
+}
+
+func (*testFailingGeometryType) Deserialize(storageType arrow.DataType, data string) (arrow.ExtensionType, error) {
+	return newTestFailingGeometryType(), nil
 }
 
 func (*testGeometryType) ArrowTypeFromParquet(logical schema.LogicalType, storageType arrow.DataType) (arrow.ExtensionType, error) {
@@ -87,6 +119,10 @@ func (*testGeometryType) ArrowTypeFromParquet(logical schema.LogicalType, storag
 	}
 }
 
+func (*testFailingGeometryType) ArrowTypeFromParquet(logical schema.LogicalType, storageType arrow.DataType) (arrow.ExtensionType, error) {
+	return nil, errors.New("not my geospatial logical type")
+}
+
 func (t *testGeometryType) ParquetLogicalType() schema.LogicalType {
 	return t.logical
 }
@@ -94,6 +130,7 @@ func (t *testGeometryType) ParquetLogicalType() schema.LogicalType {
 var (
 	_ pqarrow.ExtensionCustomParquetType  = (*testGeometryType)(nil)
 	_ pqarrow.ExtensionParquetLogicalType = (*testGeometryType)(nil)
+	_ pqarrow.ExtensionParquetLogicalType = (*testFailingGeometryType)(nil)
 )
 
 func TestGetOriginSchemaBase64(t *testing.T) {
@@ -190,6 +227,65 @@ func TestFromParquetGeospatialRegisteredExtension(t *testing.T) {
 		assert.True(t, logical.Equals(extType.logical))
 		assert.True(t, arrow.TypeEqual(arrow.BinaryTypes.Binary, extType.StorageType()))
 	}
+}
+
+func TestFromParquetGeospatialNoRegisteredExtensionFallsBackToBinary(t *testing.T) {
+	geometryLogical := schema.GeometryLogicalType{Crs: "EPSG:4326"}
+	geomNode := schema.Must(schema.NewPrimitiveNodeLogical("geometry", parquet.Repetitions.Optional,
+		geometryLogical, parquet.Types.ByteArray, -1, -1))
+	pqschema := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required,
+		schema.FieldList{geomNode}, -1)))
+
+	arrsc, err := pqarrow.FromParquet(pqschema, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, arrsc.NumFields())
+	assert.True(t, arrow.TypeEqual(arrow.BinaryTypes.Binary, arrsc.Field(0).Type))
+}
+
+func TestFromParquetGeospatialRegisteredExtensionContinuesAfterConverterError(t *testing.T) {
+	failingType := newTestFailingGeometryType()
+	require.NoError(t, arrow.RegisterExtensionType(failingType))
+	defer func() {
+		require.NoError(t, arrow.UnregisterExtensionType(failingType.ExtensionName()))
+	}()
+
+	geoType := newTestGeometryType(schema.GeometryLogicalType{})
+	require.NoError(t, arrow.RegisterExtensionType(geoType))
+	defer func() {
+		require.NoError(t, arrow.UnregisterExtensionType(geoType.ExtensionName()))
+	}()
+
+	geometryLogical := schema.GeometryLogicalType{Crs: "EPSG:4326"}
+	geomNode := schema.Must(schema.NewPrimitiveNodeLogical("geometry", parquet.Repetitions.Optional,
+		geometryLogical, parquet.Types.ByteArray, -1, -1))
+	pqschema := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required,
+		schema.FieldList{geomNode}, -1)))
+
+	arrsc, err := pqarrow.FromParquet(pqschema, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, arrsc.NumFields())
+
+	extType, ok := arrsc.Field(0).Type.(*testGeometryType)
+	require.True(t, ok)
+	assert.True(t, geometryLogical.Equals(extType.logical))
+}
+
+func TestFromParquetGeospatialRegisteredExtensionReturnsConverterErrorWhenNoMatch(t *testing.T) {
+	failingType := newTestFailingGeometryType()
+	require.NoError(t, arrow.RegisterExtensionType(failingType))
+	defer func() {
+		require.NoError(t, arrow.UnregisterExtensionType(failingType.ExtensionName()))
+	}()
+
+	geometryLogical := schema.GeometryLogicalType{Crs: "EPSG:4326"}
+	geomNode := schema.Must(schema.NewPrimitiveNodeLogical("geometry", parquet.Repetitions.Optional,
+		geometryLogical, parquet.Types.ByteArray, -1, -1))
+	pqschema := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required,
+		schema.FieldList{geomNode}, -1)))
+
+	_, err := pqarrow.FromParquet(pqschema, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not my geospatial logical type")
 }
 
 // TestReadWriteGeospatialRegisteredExtensionWithoutStoredSchema verifies that a

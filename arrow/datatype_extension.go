@@ -19,6 +19,7 @@ package arrow
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"sync"
 )
 
@@ -85,19 +86,33 @@ func GetExtensionType(typName string) ExtensionType {
 // FindRegisteredExtensionType returns a registered extension type for
 // which the filter returns true. If no type matches, it returns nil.
 //
-// If multiple types match, which one is returned is unspecified.
+// If multiple types match, the type with the lexicographically smallest
+// registered extension name is returned.
 func FindRegisteredExtensionType(filter func(ExtensionType) bool) ExtensionType {
 	registry := getExtTypeRegistry()
-	var out ExtensionType
-	registry.Range(func(_, value any) bool {
-		typ := value.(ExtensionType)
-		if filter(typ) {
-			out = typ
-			return false
-		}
+
+	// We first sort the types by name to ensure that we return the
+	// type with the lexicographically smallest name. We sort then filter
+	// to ensure that there are no side effects from filtering which would
+	// affect the determinism of the result.
+
+	types := make(map[string]ExtensionType)
+	var names []string
+	registry.Range(func(key, value any) bool {
+		name := key.(string)
+		types[name] = value.(ExtensionType)
+		names = append(names, name)
 		return true
 	})
-	return out
+
+	sort.Strings(names)
+	for _, name := range names {
+		typ := types[name]
+		if filter(typ) {
+			return typ
+		}
+	}
+	return nil
 }
 
 // ExtensionType is an interface for handling user-defined types. They must be
