@@ -522,7 +522,7 @@ func TestRecordBuilder(t *testing.T) {
 	err = b.UnmarshalJSON([]byte(`{"f1-i32": null, "map": null}`))
 	assert.Contains(t, err.Error(), "field 'f2-f64-notnull' is required but no value was given")
 
-	err = b.UnmarshalJSON([]byte(`{"f1-i32": 6, "f2-f64-notnull": 6.6, "map": [{"key": "4": "value": "d"}]}`))
+	err = b.UnmarshalJSON([]byte(`{"f1-i32": 6, "f2-f64-notnull": 6.6, "map": [{"key": "4", "value": "d"}]}`))
 	assert.NoError(t, err)
 
 	rec := b.NewRecordBatch()
