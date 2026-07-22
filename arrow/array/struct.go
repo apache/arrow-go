@@ -486,8 +486,11 @@ func (b *StructBuilder) UnmarshalOne(dec *json.Decoder) error {
 
 	switch t {
 	case json.Delim('{'):
-		b.Append(true)
-		keylist := make(map[string]bool)
+		dtype := b.dtype.(*arrow.StructType)
+
+		// Store each field's raw value and validate before appending anything so
+		// that a validation error does not leave the builder partially advanced.
+		keylist := make(map[string]json.RawMessage)
 		for dec.More() {
 			keyTok, err := dec.Token()
 			if err != nil {
@@ -499,17 +502,14 @@ func (b *StructBuilder) UnmarshalOne(dec *json.Decoder) error {
 				return errors.New("missing key")
 			}
 
-			if keylist[key] {
+			if _, dup := keylist[key]; dup {
 				return fmt.Errorf("key %s is specified twice", key)
 			}
-			keylist[key] = true
 
 			var next json.RawMessage
 			if err := dec.Decode(&next); err != nil {
 				return err
 			}
-
-			dtype := b.dtype.(*arrow.StructType)
 
 			idx, ok := dtype.FieldIdx(key)
 			if !ok {
@@ -520,27 +520,33 @@ func (b *StructBuilder) UnmarshalOne(dec *json.Decoder) error {
 				return fmt.Errorf("field '%s' is non-nullable but got null", dtype.Field(idx).Name)
 			}
 
-			valDec := json.NewDecoder(bytes.NewReader(next))
-			valDec.UseNumber()
-			if err := b.fields[idx].UnmarshalOne(valDec); err != nil {
-				return err
-			}
-		}
-
-		// Append null values to all optional fields that were not presented in the json input
-		for _, field := range b.dtype.(*arrow.StructType).Fields() {
-			if !field.Nullable {
-				continue
-			}
-			idx, _ := b.dtype.(*arrow.StructType).FieldIdx(field.Name)
-			if _, hasKey := keylist[field.Name]; !hasKey {
-				b.fields[idx].AppendNull()
-			}
+			keylist[key] = next
 		}
 
 		// consume '}'
-		_, err := dec.Token()
-		return err
+		if _, err := dec.Token(); err != nil {
+			return err
+		}
+
+		// All validation passed; append the struct entry and its child values.
+		b.Append(true)
+		for i, field := range dtype.Fields() {
+			next, hasKey := keylist[field.Name]
+			if !hasKey {
+				// Optional fields that were not present get a null.
+				if field.Nullable {
+					b.fields[i].AppendNull()
+				}
+				continue
+			}
+
+			valDec := json.NewDecoder(bytes.NewReader(next))
+			valDec.UseNumber()
+			if err := b.fields[i].UnmarshalOne(valDec); err != nil {
+				return err
+			}
+		}
+		return nil
 	case nil:
 		b.AppendNull()
 	default:
