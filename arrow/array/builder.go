@@ -70,6 +70,12 @@ type Builder interface {
 	// AppendValueFromString adds a new value from a string. Inverse of array.ValueStr(i int) string
 	AppendValueFromString(string) error
 
+	// Truncate reduces the length of the array being built to n elements,
+	// discarding any elements beyond the first n. It does not reallocate or
+	// shrink the underlying buffers. If n is greater than or equal to the
+	// current length, Truncate is a no-op.
+	Truncate(n int)
+
 	// Reserve ensures there is enough space for appending n elements
 	// by checking the capacity and calling Resize if necessary.
 	Reserve(n int)
@@ -246,6 +252,22 @@ func (b *builder) unsafeSetValid(length int) {
 	}
 
 	b.length = newLength
+}
+
+// Truncate reduces the length of the array being built to n elements and
+// recomputes the null count from the validity bitmap. The underlying buffers
+// are left untouched.
+func (b *builder) Truncate(n int) {
+	if n < 0 {
+		panic("arrow/array: cannot truncate to a negative length")
+	}
+	if n >= b.length {
+		return
+	}
+	b.length = n
+	if b.nullBitmap != nil {
+		b.nulls = n - bitutil.CountSetBits(b.nullBitmap.Bytes(), 0, n)
+	}
 }
 
 func (b *builder) UnsafeAppendBoolToBitmap(isValid bool) {
