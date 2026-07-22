@@ -272,6 +272,27 @@ func TestBitReaderAvailableBits(t *testing.T) {
 				for _, got := range out[:n] {
 					assert.Equal(t, want, got)
 				}
+
+				if width <= 32 {
+					reader = utils.NewBitReader(bytes.NewReader(bytes.Repeat([]byte{0xFF}, byteLen)))
+					indices := make([]utils.IndexType, len(out))
+					for i := range indices {
+						indices[i] = math.MinInt32
+					}
+					n, err = reader.GetBatchIndex(uint(width), indices)
+					assert.Equal(t, expected, n)
+					if expected < len(indices) {
+						assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+					} else {
+						assert.NoError(t, err)
+					}
+					for _, got := range indices[:n] {
+						assert.Equal(t, int32(want), got)
+					}
+					for _, got := range indices[n:] {
+						assert.Equal(t, int32(math.MinInt32), got)
+					}
+				}
 			})
 		}
 	}
@@ -281,6 +302,11 @@ func TestBitReaderAvailableBits(t *testing.T) {
 	n, err := reader.GetBatch(0, out)
 	assert.NoError(t, err)
 	assert.Equal(t, len(out), n)
+
+	indices := make([]utils.IndexType, len(out))
+	n, err = reader.GetBatchIndex(0, indices)
+	assert.NoError(t, err)
+	assert.Equal(t, len(indices), n)
 }
 
 func TestBitArrayVals(t *testing.T) {

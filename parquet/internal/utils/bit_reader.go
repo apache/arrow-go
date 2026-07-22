@@ -309,6 +309,45 @@ func (b *BitReader) nextBool() (bool, error) {
 	return v, nil
 }
 
+// getBatchIndexScalar decodes indexes from the buffered scalar path. It checks
+// availability once per buffer and decodes all complete values in that buffer
+// without repeating the validBits check for every index.
+func (b *BitReader) getBatchIndexScalar(bits uint, out []IndexType, stopAtBufferBoundary bool) (int, error) {
+	i := 0
+	for i < len(out) {
+		if stopAtBufferBoundary && (b.bitoffset == 0 || b.bitoffset == 64) {
+			if b.bitoffset == 64 {
+				b.byteoffset += 8
+				b.bitoffset = 0
+			}
+			return i, nil
+		}
+
+		if b.bitoffset < b.validBits {
+			available := int((b.validBits - b.bitoffset) / bits)
+			available = min(available, len(out)-i)
+			for range available {
+				end := b.bitoffset + bits
+				out[i] = IndexType(trailingBits(b.buffer, end) >> b.bitoffset)
+				b.bitoffset = end
+				i++
+			}
+			if available > 0 {
+				continue
+			}
+		}
+
+		val, err := b.next(bits)
+		if err != nil {
+			return i, err
+		}
+		out[i] = IndexType(val)
+		i++
+	}
+
+	return i, nil
+}
+
 // GetBatchIndex is like GetBatch but for IndexType (used for dictionary decoding)
 func (b *BitReader) GetBatchIndex(bits uint, out []IndexType) (i int, err error) {
 	// IndexType is a 32-bit value so bits must be less than 32 when unpacking
@@ -316,16 +355,22 @@ func (b *BitReader) GetBatchIndex(bits uint, out []IndexType) (i int, err error)
 	if bits > 32 {
 		return 0, errors.New("must be 32 bits or less per read")
 	}
-
-	var val uint64
+	if bits == 0 {
+		clear(out)
+		return len(out), nil
+	}
 
 	length := len(out)
-	// if we aren't currently byte-aligned, read bits until we are byte-aligned.
-	for ; i < length && b.bitoffset != 0; i++ {
-		val, err = b.next(bits)
-		out[i] = IndexType(val)
+	// If the buffer is partially consumed, read indexes until the next buffer boundary.
+	if b.bitoffset != 0 {
+		var n int
+		n, err = b.getBatchIndexScalar(bits, out, true)
+		i += n
 		if err != nil {
-			return
+			return i, err
+		}
+		if i == length {
+			return i, nil
 		}
 	}
 
@@ -347,14 +392,9 @@ func (b *BitReader) GetBatchIndex(bits uint, out []IndexType) (i int, err error)
 		return i, err
 	}
 	// grab the remaining values that aren't 32 byte aligned
-	for ; i < length; i++ {
-		val, err = b.next(bits)
-		out[i] = IndexType(val)
-		if err != nil {
-			break
-		}
-	}
-	return
+	n, err := b.getBatchIndexScalar(bits, out[i:], false)
+	i += n
+	return i, err
 }
 
 // GetBatchBools is like GetBatch but optimized for reading bits as boolean values
