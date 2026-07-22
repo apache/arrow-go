@@ -688,6 +688,21 @@ func (b *dictionaryBuilder) Resize(n int) {
 	b.length = b.idxBuilder.Len()
 }
 
+// Truncate reduces the length of the dictionary builder to n elements by
+// truncating the underlying index builder. The dictionary (memo table) is left
+// untouched. No buffers are reallocated.
+func (b *dictionaryBuilder) Truncate(n int) {
+	if n < 0 {
+		panic("arrow/array: cannot truncate to a negative length")
+	}
+	if n >= b.length {
+		return
+	}
+	b.idxBuilder.Truncate(n)
+	b.length = n
+	b.nulls = b.idxBuilder.NullN()
+}
+
 func (b *dictionaryBuilder) ResetFull() {
 	b.reset()
 	b.idxBuilder.NewArray().Release()
