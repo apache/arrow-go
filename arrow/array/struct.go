@@ -240,7 +240,7 @@ func (a *Struct) GetOneForMarshal(i int) interface{} {
 	dtype := a.data.dtype.(*arrow.StructType)
 	fieldList := dtype.Fields()
 	for j, d := range a.fields {
-		if dtype.Field(j).Nullable && a.IsNull(i) {
+		if dtype.Field(j).Nullable && d.IsNull(i) {
 			tmp[fieldList[j].Name] = nil
 		} else {
 			tmp[fieldList[j].Name] = d.GetOneForMarshal(i)
