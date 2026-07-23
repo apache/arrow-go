@@ -136,6 +136,7 @@ func (b *bufferedReader) Reset(rd Reader) {
 	b.resetBuffer()
 	b.rd = rd
 	b.r, b.w = 0, 0
+	b.err = nil
 }
 
 func (b *bufferedReader) resetBuffer() {
@@ -222,7 +223,7 @@ func (b *bufferedReader) Peek(n int) ([]byte, error) {
 		b.fill() // b.w-b.r < len(b.buf) => buffer is not full
 	}
 
-	return b.buf[b.r : b.r+n], b.readErr()
+	return b.buf[b.r : b.r+min(n, b.w-b.r)], b.readErr()
 }
 
 // Discard skips the next n bytes either by advancing the internal buffer
