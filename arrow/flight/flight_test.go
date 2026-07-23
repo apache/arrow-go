@@ -24,6 +24,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -633,6 +634,42 @@ func TestStreamChunksFromReader_OK(t *testing.T) {
 	require.Equal(t, 5, chunksReceived, "should receive all 5 batches")
 	require.True(t, rdr.released.Load(), "reader should be released")
 
+}
+
+type immediateErrorRecordReader struct {
+	err      error
+	released atomic.Bool
+}
+
+func (*immediateErrorRecordReader) Retain()                        {}
+func (r *immediateErrorRecordReader) Release()                     { r.released.Store(true) }
+func (*immediateErrorRecordReader) Schema() *arrow.Schema          { return nil }
+func (*immediateErrorRecordReader) Next() bool                     { return false }
+func (*immediateErrorRecordReader) RecordBatch() arrow.RecordBatch { return nil }
+func (*immediateErrorRecordReader) Record() arrow.RecordBatch      { return nil }
+func (r *immediateErrorRecordReader) Err() error                   { return r.err }
+
+func TestStreamChunksFromReader_CancellationWhileSendingError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	rdr := &immediateErrorRecordReader{err: errors.New("read failed")}
+	ch := make(chan flight.StreamChunk)
+	done := make(chan struct{})
+	go func() {
+		flight.StreamChunksFromReader(ctx, rdr, ch)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("StreamChunksFromReader blocked sending an error after cancellation")
+	}
+
+	if !rdr.released.Load() {
+		t.Fatal("reader was not released")
+	}
 }
 
 // TestStreamChunksFromReader_HandlesCancellation verifies that context cancellation
