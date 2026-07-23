@@ -25,6 +25,7 @@ import (
 	"math"
 	"strconv"
 	"testing"
+	"testing/iotest"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -100,6 +101,61 @@ func TestMessageReaderRejectsInvalidBodyLengths(t *testing.T) {
 			require.ErrorContains(t, err, tt.message)
 		})
 	}
+}
+
+func TestMessageReaderRejectsTruncatedMessages(t *testing.T) {
+	continuationToken := make([]byte, 4)
+	binary.LittleEndian.PutUint32(continuationToken, uint32(kIPCContToken))
+
+	metadataLength := append([]byte(nil), continuationToken...)
+	metadataLength = binary.LittleEndian.AppendUint32(metadataLength, 4)
+
+	tests := []struct {
+		name  string
+		input io.Reader
+	}{
+		{name: "message length", input: bytes.NewBuffer(continuationToken)},
+		{
+			name: "wrapped EOF after continuation token",
+			input: io.MultiReader(
+				bytes.NewReader(continuationToken),
+				iotest.ErrReader(fmt.Errorf("wrapped: %w", io.EOF)),
+			),
+		},
+		{name: "message metadata", input: bytes.NewBuffer(metadataLength)},
+		{name: "message body", input: messageReaderInput(t, 1)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := NewMessageReader(tt.input)
+			defer r.Release()
+
+			_, err := r.Message()
+			require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+			require.NotErrorIs(t, err, io.EOF)
+		})
+	}
+}
+
+func TestMessageReaderAllowsEndOfStreamAtMessageBoundary(t *testing.T) {
+	r := NewMessageReader(bytes.NewReader(nil))
+	defer r.Release()
+
+	_, err := r.Message()
+	require.ErrorIs(t, err, io.EOF)
+}
+
+func TestReaderReportsTruncatedMessage(t *testing.T) {
+	input := writeRecordsIntoBuffer(t, 0)
+	input.Truncate(input.Len() - 4)
+
+	r, err := NewReader(input)
+	require.NoError(t, err)
+	defer r.Release()
+
+	require.False(t, r.Next())
+	require.ErrorIs(t, r.Err(), io.ErrUnexpectedEOF)
 }
 
 func TestBodySizeLimitConfig(t *testing.T) {
