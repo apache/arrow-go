@@ -122,6 +122,22 @@ func TestBasicRead(t *testing.T) {
 	})
 }
 
+func TestMetadataEmptyKey(t *testing.T) {
+	var b variant.Builder
+	start := b.Offset()
+	fields := []variant.FieldEntry{b.NextField(start, "")}
+	require.NoError(t, b.AppendNull())
+	require.NoError(t, b.FinishObject(start, fields))
+	value, err := b.Build()
+	require.NoError(t, err)
+	metadata := value.Metadata()
+
+	key, err := metadata.KeyAt(0)
+	require.NoError(t, err)
+	assert.Empty(t, key)
+	assert.Equal(t, []uint32{0}, metadata.IdFor(""))
+}
+
 func loadVariant(t *testing.T, test string) variant.Value {
 	dir := getVariantDir()
 	if dir == "" {
