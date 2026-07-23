@@ -133,6 +133,45 @@ func TestRunEndEncodedValidate(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "strictly greater")
 	})
+
+	t.Run("unknown null counts without bitmaps still validate", func(t *testing.T) {
+		runEnds, _, _ := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 3]`))
+		values, _, _ := array.FromJSON(mem, arrow.BinaryTypes.String, strings.NewReader(`["a", "b"]`))
+		defer runEnds.Release()
+		defer values.Release()
+
+		runEndsData := runEnds.Data().(*array.Data).Copy()
+		runEndsData.SetNullN(array.UnknownNullCount)
+		defer runEndsData.Release()
+
+		valuesData := values.Data().(*array.Data).Copy()
+		defer valuesData.Release()
+
+		arr := makeRunEndEncodedArrayRaw(t, arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.BinaryTypes.String), 3, array.UnknownNullCount, 0,
+			[]*memory.Buffer{nil}, []arrow.ArrayData{runEndsData, valuesData})
+		defer arr.Release()
+
+		assert.NoError(t, arr.Validate())
+		assert.NoError(t, arr.ValidateFull())
+	})
+
+	t.Run("run ends with lazy null count fail Validate", func(t *testing.T) {
+		validity := memory.NewBufferBytes([]byte{0x01})
+		valuesBuf := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes([]int32{1, 3}))
+		runEndsData := array.NewData(arrow.PrimitiveTypes.Int32, 2, []*memory.Buffer{validity, valuesBuf}, nil, array.UnknownNullCount, 0)
+		defer runEndsData.Release()
+
+		values, _, _ := array.FromJSON(mem, arrow.BinaryTypes.String, strings.NewReader(`["a", "b"]`))
+		defer values.Release()
+
+		arr := makeRunEndEncodedArrayRaw(t, arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.BinaryTypes.String), 3, 0, 0,
+			[]*memory.Buffer{nil}, []arrow.ArrayData{runEndsData, values.Data()})
+		defer arr.Release()
+
+		err := arr.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "run ends array cannot contain nulls")
+	})
 }
 
 func TestRunLengthEncodedOffsetLength(t *testing.T) {

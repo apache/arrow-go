@@ -23,6 +23,7 @@ import (
 	"reflect"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/encoded"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -253,7 +254,7 @@ func validateRunEndEncoded(r *RunEndEncoded, full bool) error {
 	runEndsData := r.data.childData[0]
 	valuesData := r.data.childData[1]
 
-	if r.data.nulls != 0 {
+	if reeNullCount(r.data) != 0 {
 		return fmt.Errorf("arrow/array: run-end encoded array cannot contain nulls")
 	}
 	if !arrow.TypeEqual(runEndsData.DataType(), reeType.RunEnds()) {
@@ -262,7 +263,7 @@ func validateRunEndEncoded(r *RunEndEncoded, full bool) error {
 	if !arrow.TypeEqual(valuesData.DataType(), reeType.Encoded()) {
 		return fmt.Errorf("arrow/array: values array must match parent type %s, got %s", reeType.Encoded(), valuesData.DataType())
 	}
-	if runEndsData.NullN() != 0 {
+	if r.ends.NullN() != 0 {
 		return fmt.Errorf("arrow/array: run ends array cannot contain nulls")
 	}
 	if runEndsData.Len() > valuesData.Len() {
@@ -297,6 +298,16 @@ func validateRunEndEncoded(r *RunEndEncoded, full bool) error {
 		}
 	}
 	return nil
+}
+
+func reeNullCount(data *Data) int {
+	if data.nulls != UnknownNullCount {
+		return data.nulls
+	}
+	if len(data.buffers) > 0 && data.buffers[0] != nil {
+		return data.length - bitutil.CountSetBits(data.buffers[0].Bytes(), data.offset, data.length)
+	}
+	return 0
 }
 
 func runEndTypeLimit(id arrow.Type) int64 {
