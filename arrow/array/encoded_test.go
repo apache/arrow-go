@@ -29,6 +29,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func makeRunEndEncodedArrayRaw(t *testing.T, dt *arrow.RunEndEncodedType, logicalLength, nulls, offset int, buffers []*memory.Buffer, children []arrow.ArrayData) *array.RunEndEncoded {
+	t.Helper()
+	data := array.NewData(dt, logicalLength, buffers, children, nulls, offset)
+	arr := array.NewRunEndEncodedData(data)
+	data.Release()
+	return arr
+}
+
 var (
 	stringValues, _, _ = array.FromJSON(memory.DefaultAllocator, arrow.BinaryTypes.String, strings.NewReader(`["Hello", "World", null]`))
 	int32Values, _, _  = array.FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32, strings.NewReader(`[10, 20, 30]`))
@@ -74,6 +82,56 @@ func TestRLEFromRunEndsAndValues(t *testing.T) {
 	})
 	assert.PanicsWithError(t, "invalid: arrow/array: run ends array cannot contain nulls", func() {
 		array.NewRunEndEncodedArray(int32OnlyNull, int32Values, 3, 0)
+	})
+}
+
+func TestRunEndEncodedValidate(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	t.Run("valid array passes", func(t *testing.T) {
+		runEnds, _, _ := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 3]`))
+		values, _, _ := array.FromJSON(mem, arrow.BinaryTypes.String, strings.NewReader(`["a", "b"]`))
+		defer runEnds.Release()
+		defer values.Release()
+
+		arr := makeRunEndEncodedArrayRaw(t, arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.BinaryTypes.String), 3, 0, 0,
+			[]*memory.Buffer{nil}, []arrow.ArrayData{runEnds.Data(), values.Data()})
+		defer arr.Release()
+
+		assert.NoError(t, arr.Validate())
+		assert.NoError(t, arr.ValidateFull())
+	})
+
+	t.Run("last run end shorter than logical length fails Validate", func(t *testing.T) {
+		runEnds, _, _ := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2]`))
+		values, _, _ := array.FromJSON(mem, arrow.BinaryTypes.String, strings.NewReader(`["a", "b"]`))
+		defer runEnds.Release()
+		defer values.Release()
+
+		arr := makeRunEndEncodedArrayRaw(t, arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.BinaryTypes.String), 3, 0, 0,
+			[]*memory.Buffer{nil}, []arrow.ArrayData{runEnds.Data(), values.Data()})
+		defer arr.Release()
+
+		err := arr.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "last run end")
+	})
+
+	t.Run("duplicate run ends pass Validate but fail ValidateFull", func(t *testing.T) {
+		runEnds, _, _ := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[2, 2]`))
+		values, _, _ := array.FromJSON(mem, arrow.BinaryTypes.String, strings.NewReader(`["first", "second"]`))
+		defer runEnds.Release()
+		defer values.Release()
+
+		arr := makeRunEndEncodedArrayRaw(t, arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.BinaryTypes.String), 2, 0, 0,
+			[]*memory.Buffer{nil}, []arrow.ArrayData{runEnds.Data(), values.Data()})
+		defer arr.Release()
+
+		assert.NoError(t, arr.Validate())
+		err := arr.ValidateFull()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "strictly greater")
 	})
 }
 
