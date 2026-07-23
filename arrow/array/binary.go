@@ -573,7 +573,7 @@ func validateViewLayout(arr ViewLike, kind string) error {
 	}
 
 	expNumViews := data.offset + data.length
-	if len(arrow.ViewHeaderTraits.CastFromBytes(data.buffers[1].Bytes())) < expNumViews {
+	if len(data.buffers[1].Bytes())/arrow.ViewHeaderSizeBytes < expNumViews {
 		return fmt.Errorf("arrow/array: %s buffer must have at least %d view values", kind, expNumViews)
 	}
 	return nil
@@ -581,6 +581,7 @@ func validateViewLayout(arr ViewLike, kind string) error {
 
 func validateViewValues(arr ViewLike, dataBuffers []*memory.Buffer, validateValue func(int, []byte) error) error {
 	data := arr.Data().(*Data)
+	rawViews := data.buffers[1].Bytes()
 	for i := 0; i < data.length; i++ {
 		if arr.IsNull(i) {
 			continue
@@ -592,7 +593,8 @@ func validateViewValues(arr ViewLike, dataBuffers []*memory.Buffer, validateValu
 		}
 
 		if view.IsInline() {
-			raw := arrow.ViewHeaderTraits.CastToBytes([]arrow.ViewHeader{*view})
+			rawOffset := (data.offset + i) * arrow.ViewHeaderSizeBytes
+			raw := rawViews[rawOffset : rawOffset+arrow.ViewHeaderSizeBytes]
 			for _, b := range raw[4+view.Len():arrow.ViewHeaderSizeBytes] {
 				if b != 0 {
 					return fmt.Errorf("arrow/array: view at slot %d was inline with size %d but its padding bytes were not all zero", i, view.Len())

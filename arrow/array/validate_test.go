@@ -87,7 +87,9 @@ func makeBinaryViewArrayRaw(t *testing.T, headerBytes []byte, dataBuffers []*mem
 	viewBuf := memory.NewBufferBytes(headerBytes)
 	buffers := append([]*memory.Buffer{validityBuf, viewBuf}, dataBuffers...)
 	data := NewData(arrow.BinaryTypes.BinaryView, length, buffers, nil, nulls, offset)
-	return NewBinaryViewData(data)
+	arr := NewBinaryViewData(data)
+	data.Release()
+	return arr
 }
 
 func makeStringViewArrayRaw(t *testing.T, headerBytes []byte, dataBuffers []*memory.Buffer, validity []byte, nulls, length, offset int) *StringView {
@@ -99,7 +101,9 @@ func makeStringViewArrayRaw(t *testing.T, headerBytes []byte, dataBuffers []*mem
 	viewBuf := memory.NewBufferBytes(headerBytes)
 	buffers := append([]*memory.Buffer{validityBuf, viewBuf}, dataBuffers...)
 	data := NewData(arrow.BinaryTypes.StringView, length, buffers, nil, nulls, offset)
-	return NewStringViewData(data)
+	arr := NewStringViewData(data)
+	data.Release()
+	return arr
 }
 
 func TestBinaryValidate(t *testing.T) {
