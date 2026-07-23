@@ -344,6 +344,10 @@ func (r *SqlBatchReader) Next() bool {
 
 		rows++
 	}
+	if err := r.rows.Err(); err != nil {
+		r.err = err
+		return false
+	}
 
 	r.record = r.bldr.NewRecordBatch()
 	return rows > 0
