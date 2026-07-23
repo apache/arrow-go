@@ -258,7 +258,8 @@ func (m Metadata) KeyAt(id uint32) (string, error) {
 			id, len(m.keys))
 	}
 
-	return unsafe.String(&m.keys[id][0], len(m.keys[id])), nil
+	key := m.keys[id]
+	return unsafe.String(unsafe.SliceData(key), len(key)), nil
 }
 
 // IdFor returns the dictionary IDs for the given key.
