@@ -75,8 +75,8 @@ records: 4
 			name: "strings",
 			want: `schema:
   fields: 2
-    - strings: type=utf8
-    - bytes: type=binary
+    - strings: type=utf8, nullable
+    - bytes: type=binary, nullable
 records: 3
 `,
 		},

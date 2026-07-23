@@ -46,6 +46,16 @@ func (r *OCFReader) decodeOCFToChan() {
 	}
 }
 
+func (r *OCFReader) emitRecord() bool {
+	rec, err := r.bld.NewRecordBatchChecked()
+	if err != nil {
+		r.err = err
+		return false
+	}
+	r.recChan <- rec
+	return true
+}
+
 func (r *OCFReader) recordFactory() {
 	defer close(r.recChan)
 	r.primed = true
@@ -59,7 +69,9 @@ func (r *OCFReader) recordFactory() {
 				return
 			}
 		}
-		r.recChan <- r.bld.NewRecordBatch()
+		if !r.emitRecord() {
+			return
+		}
 		r.bldDone <- struct{}{}
 	case r.chunk >= 1:
 		for data := range r.avroChan {
@@ -73,12 +85,16 @@ func (r *OCFReader) recordFactory() {
 			}
 			recChunk++
 			if recChunk >= r.chunk {
-				r.recChan <- r.bld.NewRecordBatch()
+				if !r.emitRecord() {
+					return
+				}
 				recChunk = 0
 			}
 		}
 		if recChunk != 0 {
-			r.recChan <- r.bld.NewRecordBatch()
+			if !r.emitRecord() {
+				return
+			}
 		}
 		r.bldDone <- struct{}{}
 	}
