@@ -566,6 +566,7 @@ func (c *Client) LoadPreparedStatementFromResult(result *CreatePreparedStatement
 		handle:        result.PreparedStatementHandle,
 		datasetSchema: dsSchema,
 		paramSchema:   paramSchema,
+		isUpdate:      result.IsUpdate,
 	}, nil
 }
 
@@ -616,6 +617,7 @@ func parsePreparedStatementResponse(c *Client, mem memory.Allocator, results pb.
 		handle:        message.PreparedStatementHandle,
 		datasetSchema: dsSchema,
 		paramSchema:   paramSchema,
+		isUpdate:      message.IsUpdate,
 	}, nil
 }
 
@@ -1105,13 +1107,14 @@ func (tx *Txn) RollbackSavepoint(ctx context.Context, sp Savepoint, opts ...grpc
 // prepared statement handle.
 //
 // If the server returned the Dataset Schema or Parameter Binding schemas
-// at creation, they will also be accessible from this object. Close
+// or an IsUpdate hint at creation, they will also be accessible from this object. Close
 // should be called when no longer needed.
 type PreparedStatement struct {
 	client        *Client
 	handle        []byte
 	datasetSchema *arrow.Schema
 	paramSchema   *arrow.Schema
+	isUpdate      *bool
 	paramBinding  arrow.RecordBatch
 	streamBinding array.RecordReader
 	closed        bool
@@ -1364,6 +1367,17 @@ func (p *PreparedStatement) DatasetSchema() *arrow.Schema { return p.datasetSche
 // ParameterSchema may be nil if the server did not return it when creating
 // the prepared statement.
 func (p *PreparedStatement) ParameterSchema() *arrow.Schema { return p.paramSchema }
+
+// IsUpdate reports the server's hint for how to execute this prepared statement.
+// val is true if the server indicated an update, false if it indicated a query.
+// ok is false if the server did not provide a hint, in which case the client
+// can choose how to execute the statement.
+func (p *PreparedStatement) IsUpdate() (val bool, ok bool) {
+	if p.isUpdate == nil {
+		return false, false
+	}
+	return *p.isUpdate, true
+}
 
 // The handle associated with this PreparedStatement
 func (p *PreparedStatement) Handle() []byte { return p.handle }
