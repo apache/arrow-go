@@ -149,10 +149,15 @@ func NewTableFromSlice(schema *arrow.Schema, data [][]arrow.Array) arrow.Table {
 		chunked.Release()
 	}
 
+	var rows int64
+	if len(cols) > 0 {
+		rows = int64(cols[0].Len())
+	}
+
 	tbl := simpleTable{
 		schema: schema,
 		cols:   cols,
-		rows:   int64(cols[0].Len()),
+		rows:   rows,
 	}
 	tbl.refCount.Add(1)
 
@@ -178,6 +183,13 @@ func NewTableFromSlice(schema *arrow.Schema, data [][]arrow.Array) arrow.Table {
 func NewTableFromRecords(schema *arrow.Schema, recs []arrow.RecordBatch) arrow.Table {
 	arrs := make([]arrow.Array, len(recs))
 	cols := make([]arrow.Column, schema.NumFields())
+	rows := int64(-1)
+	if len(cols) == 0 {
+		rows = 0
+		for _, rec := range recs {
+			rows += rec.NumRows()
+		}
+	}
 
 	defer func(cols []arrow.Column) {
 		for i := range cols {
@@ -195,7 +207,7 @@ func NewTableFromRecords(schema *arrow.Schema, recs []arrow.RecordBatch) arrow.T
 		chunk.Release()
 	}
 
-	return NewTable(schema, cols, -1)
+	return NewTable(schema, cols, rows)
 }
 
 func (tbl *simpleTable) Schema() *arrow.Schema { return tbl.schema }
