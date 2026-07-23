@@ -248,8 +248,11 @@ func StreamChunksFromReader(ctx context.Context, rdr array.RecordReader, ch chan
 	}
 
 	if e, ok := rdr.(haserr); ok {
-		if e.Err() != nil {
-			ch <- StreamChunk{Err: e.Err()}
+		if err := e.Err(); err != nil {
+			select {
+			case ch <- StreamChunk{Err: err}:
+			case <-ctx.Done():
+			}
 		}
 	}
 }
