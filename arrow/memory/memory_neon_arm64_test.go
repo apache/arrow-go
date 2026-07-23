@@ -57,7 +57,7 @@ func TestNEONAssemblyTracebacks(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		traces, err = exec.Command("go", "tool", "pprof", "-traces", f.Name()).CombinedOutput()
+		traces, err = exec.Command("go", "tool", "pprof", "-symbolize=none", "-traces", f.Name()).CombinedOutput()
 		if err != nil {
 			t.Fatalf("go tool pprof -traces: %v\n%s", err, traces)
 		}
@@ -76,7 +76,7 @@ func TestNEONAssemblyTracebacks(t *testing.T) {
 		"github.com/apache/arrow-go/v18/arrow/memory.memory_memset_neon",
 		"github.com/apache/arrow-go/v18/arrow/memory.Set",
 		"github.com/apache/arrow-go/v18/arrow/memory_test.TestNEONAssemblyTracebacks",
-	}, "")
+	}, "\n")
 
 	for trace := range strings.SplitSeq(string(traces), "-----------") {
 		if !strings.Contains(trace, "memory._memset_neon") {
@@ -86,7 +86,7 @@ func TestNEONAssemblyTracebacks(t *testing.T) {
 		// pprof adds whitespace and marks inlined functions, neither of which is
 		// part of the call stack. Remove both before requiring adjacent frames.
 		trace = strings.ReplaceAll(trace, "(inline)", "")
-		trace = strings.Join(strings.Fields(trace), "")
+		trace = strings.Join(strings.Fields(trace), "\n")
 		if !strings.Contains(trace, want) {
 			t.Errorf("invalid _memset_neon traceback:\n%s", trace)
 		}
