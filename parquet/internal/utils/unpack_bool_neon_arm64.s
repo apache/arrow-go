@@ -11,13 +11,6 @@ TEXT ·_bytes_to_bools_neon(SB), $0-32
     MOVD out+16(FP), R2
     MOVD outlen+24(FP), R3
 
-    // The Go ABI saves the frame pointer register one word below the
-    // caller's frame. Make room so we don't overwrite it. Needs to stay
-    // 16-byte aligned
-    SUB $16, RSP
-    WORD $0xa9bf7bfd // stp    x29, x30, [sp, #-16]!
-    WORD $0x910003fd // mov    x29, sp
-
     WORD $0x7100043f // cmp    w1, #1
     BLT done
 
@@ -145,7 +138,4 @@ scalar_next:
     JMP scalar_loop
 
 done:
-    WORD $0xa8c17bfd // ldp    x29, x30, [sp], #16
-    // Put the stack pointer back where it was
-    ADD $16, RSP
     RET

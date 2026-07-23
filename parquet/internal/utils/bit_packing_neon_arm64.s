@@ -272,7 +272,7 @@
 #define LCPI0_196 $0xfffffffcfffffffe
 #define LCPI0_200 $0xfffffffeffffffff
 
-TEXT ·_unpack32_neon(SB), $0-40
+TEXT ·_unpack32_neon(SB), $496-40
 
 	MOVD in+0(FP), R0
 	MOVD out+8(FP), R1
@@ -281,19 +281,14 @@ TEXT ·_unpack32_neon(SB), $0-40
 	// LEAQ LCDATA1<>(SB), BP
 
 	// %bb.0:
-	// The Go ABI saves the frame pointer register one word below the 
-	// caller's frame. Make room so we don't overwrite it. Needs to stay 
-	// 16-byte aligned 
-	SUB $16, RSP
-	WORD $0xa9ba7bfd // stp    x29, x30, [sp, #-96]!
-	WORD $0xd10643e9 // sub    x9, sp, #400
-	WORD $0xa9016ffc // stp    x28, x27, [sp, #16]
-	WORD $0xa90267fa // stp    x26, x25, [sp, #32]
-	WORD $0x910003fd // mov    x29, sp
-	WORD $0xa9035ff8 // stp    x24, x23, [sp, #48]
-	WORD $0xa90457f6 // stp    x22, x21, [sp, #64]
-	WORD $0xa9054ff4 // stp    x20, x19, [sp, #80]
-	WORD $0x927df13f // and    sp, x9, #0xfffffffffffffff8
+	// TODO: do not use x28, x27, or x18 since they are reserved.
+	// It is probably unnecessary to save the rest of these registers since
+	// the ABI doesn't have callee saved registers
+	WORD $0xa91a6ffc // stp    x28, x27, [sp, #416]
+	WORD $0xa91b67fa // stp    x26, x25, [sp, #432]
+	WORD $0xa91c5ff8 // stp    x24, x23, [sp, #448]
+	WORD $0xa91d57f6 // stp    x22, x21, [sp, #464]
+	WORD $0xa91e4ff4 // stp    x20, x19, [sp, #480]
 	WORD $0x11007c48 // add    w8, w2, #31
 	WORD $0x7100005f // cmp    w2, #0
 	WORD $0x1a82b108 // csel    w8, w8, w2, lt
@@ -6919,14 +6914,13 @@ LBB0_158:
 
 LBB0_156:
 	WORD $0x531b6a60    // lsl    w0, w19, #5
-	WORD $0x910003bf    // mov    sp, x29
-	WORD $0xa9454ff4    // ldp    x20, x19, [sp, #80]
-	WORD $0xa94457f6    // ldp    x22, x21, [sp, #64]
-	WORD $0xa9435ff8    // ldp    x24, x23, [sp, #48]
-	WORD $0xa94267fa    // ldp    x26, x25, [sp, #32]
-	WORD $0xa9416ffc    // ldp    x28, x27, [sp, #16]
-	WORD $0xa8c67bfd    // ldp    x29, x30, [sp], #96
-	// Put the stack pointer back where it was 
-	ADD $16, RSP
+	WORD $0xa95e4ff4    // ldp    x20, x19, [sp, #480]
+	WORD $0xa95d57f6    // ldp    x22, x21, [sp, #464]
+	WORD $0xa95c5ff8    // ldp    x24, x23, [sp, #448]
+	WORD $0xa95b67fa    // ldp    x26, x25, [sp, #432]
+	WORD $0xa95a6ffc    // ldp    x28, x27, [sp, #416]
+	// The raw compiler-generated body uses x30 as a scratch register. The
+	// Go-generated prologue saved the return address at the bottom of the frame.
+	MOVD 0(RSP), R30
 	MOVD R0, num+32(FP)
 	RET
