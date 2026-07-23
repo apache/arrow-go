@@ -113,6 +113,36 @@ func TestChunked(t *testing.T) {
 	}
 }
 
+func TestTableFromSliceWithoutColumns(t *testing.T) {
+	schema := arrow.NewSchema(nil, nil)
+	tbl := array.NewTableFromSlice(schema, nil)
+	defer tbl.Release()
+
+	if got, want := tbl.NumRows(), int64(0); got != want {
+		t.Fatalf("NumRows = %d, want %d", got, want)
+	}
+}
+
+func TestTableFromRecordsWithoutColumns(t *testing.T) {
+	schema := arrow.NewSchema(nil, nil)
+	records := []arrow.RecordBatch{
+		array.NewRecordBatch(schema, nil, 2),
+		array.NewRecordBatch(schema, nil, 3),
+	}
+	defer func() {
+		for _, rec := range records {
+			rec.Release()
+		}
+	}()
+
+	tbl := array.NewTableFromRecords(schema, records)
+	defer tbl.Release()
+
+	if got, want := tbl.NumRows(), int64(5); got != want {
+		t.Fatalf("NumRows = %d, want %d", got, want)
+	}
+}
+
 func TestChunkedEqualDataType(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
