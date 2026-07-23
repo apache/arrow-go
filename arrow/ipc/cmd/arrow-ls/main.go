@@ -101,10 +101,13 @@ func processStream(w io.Writer, rin io.Reader) error {
 		for r.Next() {
 			nrecs++
 		}
-		fmt.Fprintf(w, "records: %d\n", nrecs)
+		err = r.Err()
 		r.Release()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "records: %d\n", nrecs)
 	}
-	return nil
 }
 
 func processFiles(w io.Writer, names []string) error {
