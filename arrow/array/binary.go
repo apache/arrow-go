@@ -482,6 +482,17 @@ func (a *BinaryView) ValueLen(i int) int {
 	return s.Len()
 }
 
+func (a *BinaryView) Validate() error {
+	return validateViewLayout(a, "binary view")
+}
+
+func (a *BinaryView) ValidateFull() error {
+	if err := a.Validate(); err != nil {
+		return err
+	}
+	return validateViewValues(a, a.dataBuffers, nil)
+}
+
 // ValueString returns the value at index i as a string instead of
 // a byte slice, without copying the underlying data.
 func (a *BinaryView) ValueString(i int) string {
@@ -550,6 +561,84 @@ func arrayEqualBinaryView(left, right *BinaryView) bool {
 		}
 	}
 	return true
+}
+
+func validateViewLayout(arr ViewLike, kind string) error {
+	data := arr.Data().(*Data)
+	if data.length == 0 {
+		return nil
+	}
+	if data.buffers[1] == nil {
+		return fmt.Errorf("arrow/array: non-empty %s array has no view buffer", kind)
+	}
+
+	expNumViews := data.offset + data.length
+	if len(arrow.ViewHeaderTraits.CastFromBytes(data.buffers[1].Bytes())) < expNumViews {
+		return fmt.Errorf("arrow/array: %s buffer must have at least %d view values", kind, expNumViews)
+	}
+	return nil
+}
+
+func validateViewValues(arr ViewLike, dataBuffers []*memory.Buffer, validateValue func(int, []byte) error) error {
+	data := arr.Data().(*Data)
+	for i := 0; i < data.length; i++ {
+		if arr.IsNull(i) {
+			continue
+		}
+
+		view := arr.ValueHeader(i)
+		if view.Len() < 0 {
+			return fmt.Errorf("arrow/array: view at slot %d has negative size %d", i, view.Len())
+		}
+
+		if view.IsInline() {
+			raw := arrow.ViewHeaderTraits.CastToBytes([]arrow.ViewHeader{*view})
+			for _, b := range raw[4+view.Len():arrow.ViewHeaderSizeBytes] {
+				if b != 0 {
+					return fmt.Errorf("arrow/array: view at slot %d was inline with size %d but its padding bytes were not all zero", i, view.Len())
+				}
+			}
+			if validateValue != nil {
+				if err := validateValue(i, view.InlineBytes()); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+
+		if view.BufferIndex() < 0 {
+			return fmt.Errorf("arrow/array: view at slot %d has negative buffer index %d", i, view.BufferIndex())
+		}
+		if view.BufferOffset() < 0 {
+			return fmt.Errorf("arrow/array: view at slot %d has negative offset %d", i, view.BufferOffset())
+		}
+		if int(view.BufferIndex()) >= len(dataBuffers) {
+			return fmt.Errorf("arrow/array: view at slot %d references buffer %d but there are only %d data buffers", i, view.BufferIndex(), len(dataBuffers))
+		}
+
+		buf := dataBuffers[view.BufferIndex()]
+		if buf == nil {
+			return fmt.Errorf("arrow/array: view at slot %d references nil data buffer %d", i, view.BufferIndex())
+		}
+
+		offset := int(view.BufferOffset())
+		end := offset + view.Len()
+		if end > buf.Len() {
+			return fmt.Errorf("arrow/array: view at slot %d references range %d-%d of buffer %d but that buffer is only %d bytes long", i, offset, end, view.BufferIndex(), buf.Len())
+		}
+
+		value := buf.Bytes()[offset:end]
+		prefix := view.Prefix()
+		if !bytes.Equal(value[:arrow.ViewPrefixLen], prefix[:]) {
+			return fmt.Errorf("arrow/array: view at slot %d has inlined prefix %x but the out-of-line data begins with %x", i, prefix, value[:arrow.ViewPrefixLen])
+		}
+		if validateValue != nil {
+			if err := validateValue(i, value); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 var (

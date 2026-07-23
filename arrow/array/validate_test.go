@@ -22,6 +22,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
+	"github.com/apache/arrow-go/v18/arrow/endian"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -75,6 +76,30 @@ func makeInt32ArrayRaw(t *testing.T, values []int32, validity []byte, nulls, len
 	arr := NewInt32Data(data)
 	data.Release()
 	return arr
+}
+
+func makeBinaryViewArrayRaw(t *testing.T, headerBytes []byte, dataBuffers []*memory.Buffer, validity []byte, nulls, length, offset int) *BinaryView {
+	t.Helper()
+	var validityBuf *memory.Buffer
+	if validity != nil {
+		validityBuf = memory.NewBufferBytes(validity)
+	}
+	viewBuf := memory.NewBufferBytes(headerBytes)
+	buffers := append([]*memory.Buffer{validityBuf, viewBuf}, dataBuffers...)
+	data := NewData(arrow.BinaryTypes.BinaryView, length, buffers, nil, nulls, offset)
+	return NewBinaryViewData(data)
+}
+
+func makeStringViewArrayRaw(t *testing.T, headerBytes []byte, dataBuffers []*memory.Buffer, validity []byte, nulls, length, offset int) *StringView {
+	t.Helper()
+	var validityBuf *memory.Buffer
+	if validity != nil {
+		validityBuf = memory.NewBufferBytes(validity)
+	}
+	viewBuf := memory.NewBufferBytes(headerBytes)
+	buffers := append([]*memory.Buffer{validityBuf, viewBuf}, dataBuffers...)
+	data := NewData(arrow.BinaryTypes.StringView, length, buffers, nil, nulls, offset)
+	return NewStringViewData(data)
 }
 
 func TestBinaryValidate(t *testing.T) {
@@ -198,6 +223,71 @@ func TestLargeStringValidate(t *testing.T) {
 		err := arr.ValidateFull()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "negative")
+	})
+}
+
+func TestBinaryViewValidate(t *testing.T) {
+	t.Run("valid array passes", func(t *testing.T) {
+		var headers [1]arrow.ViewHeader
+		headers[0].SetBytes([]byte("hello"))
+		arr := makeBinaryViewArrayRaw(t, arrow.ViewHeaderTraits.CastToBytes(headers[:]), nil, nil, 0, 1, 0)
+		defer arr.Release()
+
+		assert.NoError(t, arr.Validate())
+		assert.NoError(t, arr.ValidateFull())
+	})
+
+	t.Run("negative size passes Validate but fails ValidateFull", func(t *testing.T) {
+		headerBytes := make([]byte, arrow.ViewHeaderSizeBytes)
+		endian.Native.PutUint32(headerBytes[:4], ^uint32(0))
+		arr := makeBinaryViewArrayRaw(t, headerBytes, nil, nil, 0, 1, 0)
+		defer arr.Release()
+
+		assert.NoError(t, arr.Validate())
+		err := arr.ValidateFull()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "negative size")
+	})
+
+	t.Run("missing referenced buffer passes Validate but fails ValidateFull", func(t *testing.T) {
+		var headers [1]arrow.ViewHeader
+		headers[0].SetBytes([]byte("this is longer than twelve"))
+		headers[0].SetIndexOffset(0, 0)
+		arr := makeBinaryViewArrayRaw(t, arrow.ViewHeaderTraits.CastToBytes(headers[:]), nil, nil, 0, 1, 0)
+		defer arr.Release()
+
+		assert.NoError(t, arr.Validate())
+		err := arr.ValidateFull()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "references buffer 0")
+	})
+
+	t.Run("inline padding bytes fail ValidateFull", func(t *testing.T) {
+		var headers [1]arrow.ViewHeader
+		headers[0].SetBytes([]byte("x"))
+		headerBytes := append([]byte(nil), arrow.ViewHeaderTraits.CastToBytes(headers[:])...)
+		headerBytes[8] = 1
+		arr := makeBinaryViewArrayRaw(t, headerBytes, nil, nil, 0, 1, 0)
+		defer arr.Release()
+
+		assert.NoError(t, arr.Validate())
+		err := arr.ValidateFull()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "padding bytes were not all zero")
+	})
+}
+
+func TestStringViewValidate(t *testing.T) {
+	t.Run("invalid utf8 passes Validate but fails ValidateFull", func(t *testing.T) {
+		var headers [1]arrow.ViewHeader
+		headers[0].SetBytes([]byte{0xff})
+		arr := makeStringViewArrayRaw(t, arrow.ViewHeaderTraits.CastToBytes(headers[:]), nil, nil, 0, 1, 0)
+		defer arr.Release()
+
+		assert.NoError(t, arr.Validate())
+		err := arr.ValidateFull()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not valid utf8")
 	})
 }
 
