@@ -223,6 +223,34 @@ record 3...
 	}
 }
 
+func TestCatStreamReturnsRecordReadError(t *testing.T) {
+	rec := arrdata.Records["primitives"][0]
+
+	var schemaOnly bytes.Buffer
+	schemaWriter := ipc.NewWriter(&schemaOnly, ipc.WithSchema(rec.Schema()))
+	if err := schemaWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var full bytes.Buffer
+	writer := ipc.NewWriter(&full, ipc.WithSchema(rec.Schema()))
+	if err := writer.Write(rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	const eosSize = 8
+	schemaSize := schemaOnly.Len() - eosSize
+	// Keep the record framing and one metadata byte so the record read fails
+	// with io.ErrUnexpectedEOF instead of being treated as a clean stream end.
+	truncated := full.Bytes()[:schemaSize+eosSize+1]
+	if err := processStream(io.Discard, bytes.NewReader(truncated)); err == nil {
+		t.Fatal("processStream returned nil for a truncated record message")
+	}
+}
+
 func TestCatFile(t *testing.T) {
 	tempDir := t.TempDir()
 

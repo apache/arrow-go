@@ -105,7 +105,11 @@ func processStream(w io.Writer, rin io.Reader) error {
 				fmt.Fprintf(w, "  col[%d] %q: %v\n", i, rec.ColumnName(i), col)
 			}
 		}
+		err = r.Err()
 		r.Release()
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
