@@ -72,7 +72,9 @@ func makeInt32ArrayRaw(t *testing.T, values []int32, validity []byte, nulls, len
 		validityBuf = memory.NewBufferBytes(validity)
 	}
 	data := NewData(arrow.PrimitiveTypes.Int32, length, []*memory.Buffer{validityBuf, valueBuf}, nil, nulls, offset)
-	return NewInt32Data(data)
+	arr := NewInt32Data(data)
+	data.Release()
+	return arr
 }
 
 func TestBinaryValidate(t *testing.T) {
