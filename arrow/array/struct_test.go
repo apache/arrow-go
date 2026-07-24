@@ -17,7 +17,6 @@
 package array_test
 
 import (
-	"fmt"
 	"reflect"
 	"testing"
 
@@ -617,12 +616,11 @@ func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 		jsonInput string
 		want      string
 		wantErr   string
-		panicErr  string
 	}{
 		{
 			name:      "missing required field",
 			jsonInput: `[{"f2": 3, "f3": {"f3_1": "test"}}]`,
-			panicErr:  "arrow/array: index out of range",
+			wantErr:   "field 'f3_3' is required but no value was given",
 		},
 		{
 			name:      "missing optional fields",
@@ -641,18 +639,6 @@ func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 			tc.name, func(t *testing.T) {
 				sb := array.NewStructBuilder(pool, dtype)
 				defer sb.Release()
-
-				if tc.panicErr != "" {
-					defer func() {
-						e := recover()
-						if e == nil {
-							t.Fatalf("did not panic, expected panic: %v", tc.panicErr)
-						}
-						if got := fmt.Sprintf("%v", e); got != tc.panicErr {
-							t.Fatalf("invalid panic. got=%v, want=%v", got, tc.panicErr)
-						}
-					}()
-				}
 
 				err := sb.UnmarshalJSON([]byte(tc.jsonInput))
 				if tc.wantErr != "" {
