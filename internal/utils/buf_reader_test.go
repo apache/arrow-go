@@ -66,3 +66,25 @@ func TestBufferedReaderPeekReturnsAvailableBytesOnError(t *testing.T) {
 		t.Fatalf("Peek = %q, want %q", got, "a")
 	}
 }
+
+func TestByteReaderSeekErrorPreservesPosition(t *testing.T) {
+	r := NewByteReader([]byte("abc"))
+	buf := make([]byte, 1)
+	if n, err := r.Read(buf); n != 1 || err != nil {
+		t.Fatalf("Read = (%d, %v), want (1, nil)", n, err)
+	}
+
+	if _, err := r.Seek(0, -1); err == nil {
+		t.Fatal("Seek with invalid whence returned nil error")
+	}
+	if got, err := r.Peek(1); err != nil || string(got) != "b" {
+		t.Fatalf("Peek after failed seek = (%q, %v), want (%q, nil)", got, err, "b")
+	}
+}
+
+func TestByteReaderDiscardExactRemainingBytes(t *testing.T) {
+	r := NewByteReader([]byte("abc"))
+	if n, err := r.Discard(3); n != 3 || err != nil {
+		t.Fatalf("Discard = (%d, %v), want (3, nil)", n, err)
+	}
+}
