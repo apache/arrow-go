@@ -501,6 +501,22 @@ func (a *StringView) ValueLen(i int) int {
 	return s.Len()
 }
 
+func (a *StringView) Validate() error {
+	return validateViewLayout(a, "string view")
+}
+
+func (a *StringView) ValidateFull() error {
+	if err := a.Validate(); err != nil {
+		return err
+	}
+	return validateViewValues(a, a.dataBuffers, func(i int, value []byte) error {
+		if !utf8.Valid(value) {
+			return fmt.Errorf("arrow/array: string view at slot %d is not valid utf8", i)
+		}
+		return nil
+	})
+}
+
 func (a *StringView) String() string {
 	var o strings.Builder
 	o.WriteString("[")
