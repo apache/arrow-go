@@ -106,6 +106,14 @@ func makeStringViewArrayRaw(t *testing.T, headerBytes []byte, dataBuffers []*mem
 	return arr
 }
 
+func setViewHeaderBufferIndex(raw []byte, idx int32) {
+	endian.Native.PutUint32(raw[8:12], uint32(idx))
+}
+
+func setViewHeaderOffset(raw []byte, offset int32) {
+	endian.Native.PutUint32(raw[12:16], uint32(offset))
+}
+
 func TestBinaryValidate(t *testing.T) {
 	t.Run("valid array passes", func(t *testing.T) {
 		// offsets [0,3,6,9], data "abcdefghi" — 3 elements of 3 bytes each
@@ -231,6 +239,21 @@ func TestLargeStringValidate(t *testing.T) {
 }
 
 func TestBinaryViewValidate(t *testing.T) {
+	t.Run("empty arrays pass top level validation", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		binaryArr := NewBinaryViewBuilder(mem).NewBinaryViewArray()
+		defer binaryArr.Release()
+		stringArr := NewStringViewBuilder(mem).NewStringViewArray()
+		defer stringArr.Release()
+
+		assert.NoError(t, Validate(binaryArr))
+		assert.NoError(t, ValidateFull(binaryArr))
+		assert.NoError(t, Validate(stringArr))
+		assert.NoError(t, ValidateFull(stringArr))
+	})
+
 	t.Run("valid array passes", func(t *testing.T) {
 		var headers [1]arrow.ViewHeader
 		headers[0].SetBytes([]byte("hello"))
@@ -239,6 +262,30 @@ func TestBinaryViewValidate(t *testing.T) {
 
 		assert.NoError(t, arr.Validate())
 		assert.NoError(t, arr.ValidateFull())
+	})
+
+	t.Run("out of line values pass top level validation", func(t *testing.T) {
+		value := []byte("this payload is out of line")
+		var headers [1]arrow.ViewHeader
+		headers[0].SetBytes(value)
+		headers[0].SetIndexOffset(0, 0)
+		dataBuf := memory.NewBufferBytes(value)
+		arr := makeBinaryViewArrayRaw(t, arrow.ViewHeaderTraits.CastToBytes(headers[:]), []*memory.Buffer{dataBuf}, nil, 0, 1, 0)
+		defer arr.Release()
+
+		assert.NoError(t, Validate(arr))
+		assert.NoError(t, ValidateFull(arr))
+	})
+
+	t.Run("offset arrays use the correct view slot", func(t *testing.T) {
+		headers := [2]arrow.ViewHeader{}
+		headers[0].SetBytes([]byte("skip"))
+		headers[1].SetBytes([]byte("keep"))
+		arr := makeBinaryViewArrayRaw(t, arrow.ViewHeaderTraits.CastToBytes(headers[:]), nil, nil, 0, 1, 1)
+		defer arr.Release()
+
+		assert.NoError(t, Validate(arr))
+		assert.NoError(t, ValidateFull(arr))
 	})
 
 	t.Run("negative size passes Validate but fails ValidateFull", func(t *testing.T) {
@@ -264,6 +311,72 @@ func TestBinaryViewValidate(t *testing.T) {
 		err := arr.ValidateFull()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "references buffer 0")
+	})
+
+	t.Run("prefix mismatch passes Validate but fails ValidateFull", func(t *testing.T) {
+		value := []byte("this payload is out of line")
+		var headers [1]arrow.ViewHeader
+		headers[0].SetBytes(value)
+		headers[0].SetIndexOffset(0, 0)
+		headerBytes := append([]byte(nil), arrow.ViewHeaderTraits.CastToBytes(headers[:])...)
+		headerBytes[4] ^= 0xff
+		dataBuf := memory.NewBufferBytes(value)
+		arr := makeBinaryViewArrayRaw(t, headerBytes, []*memory.Buffer{dataBuf}, nil, 0, 1, 0)
+		defer arr.Release()
+
+		assert.NoError(t, Validate(arr))
+		err := ValidateFull(arr)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "out-of-line data begins with")
+	})
+
+	t.Run("negative buffer offset passes Validate but fails ValidateFull", func(t *testing.T) {
+		value := []byte("this payload is out of line")
+		var headers [1]arrow.ViewHeader
+		headers[0].SetBytes(value)
+		headers[0].SetIndexOffset(0, 0)
+		headerBytes := append([]byte(nil), arrow.ViewHeaderTraits.CastToBytes(headers[:])...)
+		setViewHeaderOffset(headerBytes, -1)
+		dataBuf := memory.NewBufferBytes(value)
+		arr := makeBinaryViewArrayRaw(t, headerBytes, []*memory.Buffer{dataBuf}, nil, 0, 1, 0)
+		defer arr.Release()
+
+		assert.NoError(t, Validate(arr))
+		err := ValidateFull(arr)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "negative offset")
+	})
+
+	t.Run("negative buffer index passes Validate but fails ValidateFull", func(t *testing.T) {
+		value := []byte("this payload is out of line")
+		var headers [1]arrow.ViewHeader
+		headers[0].SetBytes(value)
+		headers[0].SetIndexOffset(0, 0)
+		headerBytes := append([]byte(nil), arrow.ViewHeaderTraits.CastToBytes(headers[:])...)
+		setViewHeaderBufferIndex(headerBytes, -1)
+		dataBuf := memory.NewBufferBytes(value)
+		arr := makeBinaryViewArrayRaw(t, headerBytes, []*memory.Buffer{dataBuf}, nil, 0, 1, 0)
+		defer arr.Release()
+
+		assert.NoError(t, Validate(arr))
+		err := ValidateFull(arr)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "negative buffer index")
+	})
+
+	t.Run("referenced range beyond buffer length passes Validate but fails ValidateFull", func(t *testing.T) {
+		value := []byte("this payload is out of line")
+		var headers [1]arrow.ViewHeader
+		headers[0].SetBytes(value)
+		headers[0].SetIndexOffset(0, 2)
+		dataBuf := memory.NewBufferBytes(value)
+		arr := makeBinaryViewArrayRaw(t, arrow.ViewHeaderTraits.CastToBytes(headers[:]), []*memory.Buffer{dataBuf}, nil, 0, 1, 0)
+		defer arr.Release()
+
+		assert.NoError(t, Validate(arr))
+		err := ValidateFull(arr)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "references range")
 	})
 
 	t.Run("inline padding bytes fail ValidateFull", func(t *testing.T) {
