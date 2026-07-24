@@ -1771,4 +1771,6 @@ func TestRunEndEncodedNullScalar(t *testing.T) {
 	assert.False(t, sc.IsValid())
 	assert.Truef(t, arrow.TypeEqual(dt, sc.DataType()), "expected: %s\ngot: %s", dt, sc.DataType())
 	assert.IsType(t, (*scalar.RunEndEncoded)(nil), sc)
+	assert.NoError(t, sc.Validate())
+	assert.NoError(t, sc.ValidateFull())
 }
