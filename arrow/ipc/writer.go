@@ -486,7 +486,7 @@ func (w *recordEncoder) encode(p *Payload, rec arrow.RecordBatch) error {
 	}
 
 	if w.codec != -1 {
-		if w.minSpaceSavings < 0 || w.minSpaceSavings > 1 {
+		if math.IsNaN(w.minSpaceSavings) || w.minSpaceSavings < 0 || w.minSpaceSavings > 1 {
 			p.Release()
 			return fmt.Errorf("%w: minSpaceSavings not in range [0,1]. Provided %.05f",
 				arrow.ErrInvalid, w.minSpaceSavings)
