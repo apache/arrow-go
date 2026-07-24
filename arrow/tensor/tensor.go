@@ -171,6 +171,10 @@ func New(data arrow.ArrayData, shape, strides []int64, names []string) Interface
 }
 
 func newTensor(dtype arrow.DataType, data arrow.ArrayData, shape, strides []int64, names []string) *tensorBase {
+	if names == nil {
+		names = make([]string, len(shape))
+	}
+
 	tb := tensorBase{
 		dtype:   dtype,
 		bw:      int64(dtype.(arrow.FixedWidthDataType).BitWidth()) / 8,

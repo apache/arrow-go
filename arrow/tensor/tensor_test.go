@@ -164,3 +164,21 @@ func TestInvalidTensor(t *testing.T) {
 	})
 
 }
+
+func TestTensorWithNilDimensionNames(t *testing.T) {
+	bld := array.NewFloat64Builder(memory.DefaultAllocator)
+	defer bld.Release()
+	bld.AppendValues([]float64{1, 2}, nil)
+	arr := bld.NewFloat64Array()
+	defer arr.Release()
+
+	tsr := tensor.New(arr.Data(), []int64{2}, nil, nil)
+	defer tsr.Release()
+
+	if got, want := tsr.DimNames(), []string{""}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("invalid dim-names: got=%v, want=%v", got, want)
+	}
+	if got := tsr.DimName(0); got != "" {
+		t.Fatalf("invalid dim-name[0]: got=%q, want empty string", got)
+	}
+}
