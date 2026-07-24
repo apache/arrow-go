@@ -230,6 +230,18 @@ func TestInt64Builder_Resize(t *testing.T) {
 	assert.Equal(t, 5, ab.Len())
 }
 
+func TestInt64Builder_ResizeToZeroThenAppend(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	ab := array.NewInt64Builder(mem)
+	defer ab.Release()
+
+	ab.Append(0)
+	ab.Resize(0)
+	ab.Append(0)
+}
+
 func TestInt64BuilderUnmarshalJSON(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
@@ -455,6 +467,18 @@ func TestUint64Builder_Resize(t *testing.T) {
 
 	ab.Resize(32)
 	assert.Equal(t, 5, ab.Len())
+}
+
+func TestUint64Builder_ResizeToZeroThenAppend(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	ab := array.NewUint64Builder(mem)
+	defer ab.Release()
+
+	ab.Append(0)
+	ab.Resize(0)
+	ab.Append(0)
 }
 
 func TestUint64BuilderUnmarshalJSON(t *testing.T) {
@@ -684,6 +708,18 @@ func TestFloat64Builder_Resize(t *testing.T) {
 	assert.Equal(t, 5, ab.Len())
 }
 
+func TestFloat64Builder_ResizeToZeroThenAppend(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	ab := array.NewFloat64Builder(mem)
+	defer ab.Release()
+
+	ab.Append(0)
+	ab.Resize(0)
+	ab.Append(0)
+}
+
 func TestFloat64BuilderUnmarshalJSON(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
@@ -907,6 +943,18 @@ func TestInt32Builder_Resize(t *testing.T) {
 
 	ab.Resize(32)
 	assert.Equal(t, 5, ab.Len())
+}
+
+func TestInt32Builder_ResizeToZeroThenAppend(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	ab := array.NewInt32Builder(mem)
+	defer ab.Release()
+
+	ab.Append(0)
+	ab.Resize(0)
+	ab.Append(0)
 }
 
 func TestInt32BuilderUnmarshalJSON(t *testing.T) {
@@ -1136,6 +1184,18 @@ func TestUint32Builder_Resize(t *testing.T) {
 	assert.Equal(t, 5, ab.Len())
 }
 
+func TestUint32Builder_ResizeToZeroThenAppend(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	ab := array.NewUint32Builder(mem)
+	defer ab.Release()
+
+	ab.Append(0)
+	ab.Resize(0)
+	ab.Append(0)
+}
+
 func TestUint32BuilderUnmarshalJSON(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
@@ -1363,6 +1423,18 @@ func TestFloat32Builder_Resize(t *testing.T) {
 	assert.Equal(t, 5, ab.Len())
 }
 
+func TestFloat32Builder_ResizeToZeroThenAppend(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	ab := array.NewFloat32Builder(mem)
+	defer ab.Release()
+
+	ab.Append(0)
+	ab.Resize(0)
+	ab.Append(0)
+}
+
 func TestFloat32BuilderUnmarshalJSON(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
@@ -1586,6 +1658,18 @@ func TestInt16Builder_Resize(t *testing.T) {
 
 	ab.Resize(32)
 	assert.Equal(t, 5, ab.Len())
+}
+
+func TestInt16Builder_ResizeToZeroThenAppend(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	ab := array.NewInt16Builder(mem)
+	defer ab.Release()
+
+	ab.Append(0)
+	ab.Resize(0)
+	ab.Append(0)
 }
 
 func TestInt16BuilderUnmarshalJSON(t *testing.T) {
@@ -1815,6 +1899,18 @@ func TestUint16Builder_Resize(t *testing.T) {
 	assert.Equal(t, 5, ab.Len())
 }
 
+func TestUint16Builder_ResizeToZeroThenAppend(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	ab := array.NewUint16Builder(mem)
+	defer ab.Release()
+
+	ab.Append(0)
+	ab.Resize(0)
+	ab.Append(0)
+}
+
 func TestUint16BuilderUnmarshalJSON(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
@@ -2042,6 +2138,18 @@ func TestInt8Builder_Resize(t *testing.T) {
 	assert.Equal(t, 5, ab.Len())
 }
 
+func TestInt8Builder_ResizeToZeroThenAppend(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	ab := array.NewInt8Builder(mem)
+	defer ab.Release()
+
+	ab.Append(0)
+	ab.Resize(0)
+	ab.Append(0)
+}
+
 func TestInt8BuilderUnmarshalJSON(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
@@ -2267,6 +2375,18 @@ func TestUint8Builder_Resize(t *testing.T) {
 
 	ab.Resize(32)
 	assert.Equal(t, 5, ab.Len())
+}
+
+func TestUint8Builder_ResizeToZeroThenAppend(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	ab := array.NewUint8Builder(mem)
+	defer ab.Release()
+
+	ab.Append(0)
+	ab.Resize(0)
+	ab.Append(0)
 }
 
 func TestUint8BuilderUnmarshalJSON(t *testing.T) {
@@ -2499,6 +2619,19 @@ func TestTime32Builder_Resize(t *testing.T) {
 
 	ab.Resize(32)
 	assert.Equal(t, 5, ab.Len())
+}
+
+func TestTime32Builder_ResizeToZeroThenAppend(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dtype := &arrow.Time32Type{Unit: arrow.Second}
+	ab := array.NewTime32Builder(mem, dtype)
+	defer ab.Release()
+
+	ab.Append(0)
+	ab.Resize(0)
+	ab.Append(0)
 }
 
 func TestTime32BuilderUnmarshalJSON(t *testing.T) {
@@ -2734,6 +2867,19 @@ func TestTime64Builder_Resize(t *testing.T) {
 	assert.Equal(t, 5, ab.Len())
 }
 
+func TestTime64Builder_ResizeToZeroThenAppend(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dtype := &arrow.Time64Type{Unit: arrow.Second}
+	ab := array.NewTime64Builder(mem, dtype)
+	defer ab.Release()
+
+	ab.Append(0)
+	ab.Resize(0)
+	ab.Append(0)
+}
+
 func TestTime64BuilderUnmarshalJSON(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
@@ -2960,6 +3106,18 @@ func TestDate32Builder_Resize(t *testing.T) {
 
 	ab.Resize(32)
 	assert.Equal(t, 5, ab.Len())
+}
+
+func TestDate32Builder_ResizeToZeroThenAppend(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	ab := array.NewDate32Builder(mem)
+	defer ab.Release()
+
+	ab.Append(0)
+	ab.Resize(0)
+	ab.Append(0)
 }
 
 func TestDate32BuilderUnmarshalJSON(t *testing.T) {
@@ -3196,6 +3354,18 @@ func TestDate64Builder_Resize(t *testing.T) {
 	assert.Equal(t, 5, ab.Len())
 }
 
+func TestDate64Builder_ResizeToZeroThenAppend(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	ab := array.NewDate64Builder(mem)
+	defer ab.Release()
+
+	ab.Append(0)
+	ab.Resize(0)
+	ab.Append(0)
+}
+
 func TestDate64BuilderUnmarshalJSON(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
@@ -3426,6 +3596,19 @@ func TestDurationBuilder_Resize(t *testing.T) {
 
 	ab.Resize(32)
 	assert.Equal(t, 5, ab.Len())
+}
+
+func TestDurationBuilder_ResizeToZeroThenAppend(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dtype := &arrow.DurationType{Unit: arrow.Second}
+	ab := array.NewDurationBuilder(mem, dtype)
+	defer ab.Release()
+
+	ab.Append(0)
+	ab.Resize(0)
+	ab.Append(0)
 }
 
 func TestDurationBuilderUnmarshalJSON(t *testing.T) {
