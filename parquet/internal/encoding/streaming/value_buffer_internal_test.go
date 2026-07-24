@@ -79,12 +79,15 @@ func TestStreamBufferOversizedValue(t *testing.T) {
 
 // TestStreamBufferSkip checks Skip discards both buffered and not-yet-read bytes.
 func TestStreamBufferSkip(t *testing.T) {
-	data := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+	data := make([]byte, 16)
+	for i := range data {
+		data[i] = byte(i)
+	}
 	s := newTestBuffer(memory.DefaultAllocator, data, 8)
 
-	assert.Equal(t, []byte{0, 1}, fillValue(t, s, 2))
-	require.NoError(t, s.Skip(6)) // 2 buffered + 4 straight from the reader
-	assert.Equal(t, []byte{8, 9}, fillValue(t, s, 2))
+	assert.Equal(t, []byte{0, 1}, fillValue(t, s, 2)) // read-ahead buffers cur[0:8]
+	require.NoError(t, s.Skip(10))                     // 6 buffered + 4 discarded from the reader
+	assert.Equal(t, []byte{12, 13}, fillValue(t, s, 2))
 
 	require.NoError(t, s.Close())
 }
@@ -133,4 +136,63 @@ func TestStreamBufferRotateCarriesTail(t *testing.T) {
 	b, err = s.Fill(7)
 	require.NoError(t, err)
 	assert.Equal(t, data[2:9], b[:7])
+}
+
+func TestStreamBufferReadsAhead(t *testing.T) {
+	s := newTestBuffer(memory.DefaultAllocator, make([]byte, 100), 16)
+	defer s.Close()
+
+	_, err := s.Fill(4)
+	require.NoError(t, err)
+	assert.Equal(t, 16, s.n, "Fill should read ahead to fill the chunk")
+}
+
+func TestStreamBufferReadAheadSurvivesRecycle(t *testing.T) {
+	data := make([]byte, 100)
+	for i := range data {
+		data[i] = byte(i)
+	}
+	s := newTestBuffer(memory.DefaultAllocator, data, 16)
+	defer s.Close()
+
+	var got []byte
+	for len(got) < len(data) {
+		s.Recycle()
+		got = append(got, fillValue(t, s, 4)...)
+	}
+	assert.Equal(t, data, got)
+}
+
+func TestStreamBufferReadAheadStopsAtRegion(t *testing.T) {
+	// the value region is the first 8 bytes; the rest stands in for the next page
+	data := []byte{0, 1, 2, 3, 4, 5, 6, 7, 100, 101, 102}
+	s := &streamBuffer{mem: memory.DefaultAllocator, r: bytes.NewReader(data), chunkSize: 16, cur: memory.DefaultAllocator.Allocate(16), remaining: 8}
+	defer s.Close()
+
+	for range 8 {
+		fillValue(t, s, 1)
+	}
+	rest, _ := io.ReadAll(s.r)
+	assert.Equal(t, []byte{100, 101, 102}, rest, "read-ahead over-read past the value region")
+}
+
+func TestStreamBufferMixedValueSizes(t *testing.T) {
+	lengths := []int{1, 50, 2, 3, 100, 1, 7, 30, 2, 16, 1, 64, 4, 9, 40, 1, 5, 25, 8, 33}
+	var data []byte
+	for k, n := range lengths {
+		for j := range n {
+			data = append(data, byte(k*7+j))
+		}
+	}
+	s := newTestBuffer(memory.DefaultAllocator, data, 16)
+	defer s.Close()
+
+	off := 0
+	for k, n := range lengths {
+		if k%2 == 0 {
+			s.Recycle()
+		}
+		assert.Equal(t, data[off:off+n], fillValue(t, s, n), "value %d (len %d)", k, n)
+		off += n
+	}
 }

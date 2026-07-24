@@ -52,8 +52,8 @@ type streamBuffer struct {
 	onClose   func() error
 	mem       memory.Allocator
 	chunkSize int
-	cur       []byte   // chunk currently being filled (off == n on Fill entry)
-	off, n    int      // consumed cursor / filled end within cur
+	cur       []byte   // chunk currently being filled
+	off, n    int      // consumed cursor / filled end; cur[off:n] is buffered read-ahead
 	live      [][]byte // earlier chunks still backing this Decode's aliases
 	remaining int      // value-region bytes not yet consumed; bounds Fill vs corrupt lengths
 }
@@ -118,7 +118,9 @@ func (s *streamBuffer) Fill(need int) ([]byte, error) {
 		s.rotate(need)
 	}
 	for s.n-s.off < need {
-		m, err := s.r.Read(s.cur[s.n : s.off+need])
+		// Read ahead to the end of cur, bounded by the value region.
+		end := min(len(s.cur), s.off+s.remaining)
+		m, err := s.r.Read(s.cur[s.n:end])
 		s.n += m
 		if err != nil {
 			if err == io.EOF {
@@ -151,12 +153,23 @@ func (s *streamBuffer) Recycle() {
 		s.mem.Free(b)
 	}
 	s.live = s.live[:0]
-	// Rewind the primary chunk; swap out an oversized one so steady state stays small.
-	if len(s.cur) != s.chunkSize {
-		s.mem.Free(s.cur)
-		s.cur = s.mem.Allocate(s.chunkSize)
+	// Compact once the consumed prefix passes half the chunk to preserve read-ahead
+	// room while keeping compactions and rotations rare.
+	if s.off*2 <= len(s.cur) {
+		return
 	}
-	s.off, s.n = 0, 0
+	tail := s.n - s.off
+	if len(s.cur) != s.chunkSize && tail <= s.chunkSize {
+		// shrink the oversized chunk back to steady state
+		nc := s.mem.Allocate(s.chunkSize)
+		copy(nc, s.cur[s.off:s.n])
+		s.mem.Free(s.cur)
+		s.cur = nc
+	} else {
+		// compact in place
+		copy(s.cur, s.cur[s.off:s.n])
+	}
+	s.off, s.n = 0, tail
 }
 
 func (s *streamBuffer) Close() error {
