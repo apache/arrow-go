@@ -157,11 +157,7 @@ func RegisterCodec(compression Compression, codec Codec) {
 type nocodec struct{}
 
 func (nocodec) NewReader(r io.Reader) io.ReadCloser {
-	ret, ok := r.(io.ReadCloser)
-	if !ok {
-		return io.NopCloser(r)
-	}
-	return ret
+	return io.NopCloser(r)
 }
 
 func (nocodec) Decode(dst, src []byte) []byte {
@@ -194,11 +190,7 @@ func (nocodec) EncodeLevel(dst, src []byte, _ int) []byte {
 }
 
 func (nocodec) NewWriter(w io.Writer) io.WriteCloser {
-	ret, ok := w.(io.WriteCloser)
-	if !ok {
-		return writerNopCloser{w}
-	}
-	return ret
+	return writerNopCloser{w}
 }
 
 func (n nocodec) NewWriterLevel(w io.Writer, _ int) (io.WriteCloser, error) {
