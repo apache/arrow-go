@@ -528,6 +528,13 @@ func (b *StructBuilder) UnmarshalOne(dec *json.Decoder) error {
 			return err
 		}
 
+		// check that all non-nullable fields were specified
+		for _, field := range dtype.Fields() {
+			if _, ok := keylist[field.Name]; !ok && !field.Nullable {
+				return fmt.Errorf("field '%s' is required but no value was given", field.Name)
+			}
+		}
+
 		// All validation passed; append the struct entry and its child values.
 		b.Append(true)
 		for i, field := range dtype.Fields() {
