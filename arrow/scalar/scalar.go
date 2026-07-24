@@ -421,10 +421,16 @@ func (e *Extension) Validate() (err error) {
 	}
 
 	if !e.Valid {
-		if e.Value != nil {
-			err = fmt.Errorf("null %s scalar has storage value", e.Type)
+		if e.Value == nil {
+			return nil
 		}
-		return
+		if e.Value.IsValid() {
+			return fmt.Errorf("null %s scalar has non-null storage value", e.Type)
+		}
+		if err = e.Value.Validate(); err != nil {
+			return fmt.Errorf("%s scalar fails validation for storage value: %w", e.Type, err)
+		}
+		return nil
 	}
 
 	switch {
