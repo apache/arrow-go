@@ -282,7 +282,7 @@ func TestWriteColumnWithOffset(t *testing.T) {
 
 func TestIPCTable(t *testing.T) {
 	pool := memory.NewGoAllocator()
-	schema := arrow.NewSchema([]arrow.Field{{Name: "f1", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "f1", Type: arrow.PrimitiveTypes.Int32, Nullable: true}}, nil)
 	b := array.NewRecordBuilder(pool, schema)
 	defer b.Release()
 	b.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2, 3, 4}, []bool{true, true, false, true})
