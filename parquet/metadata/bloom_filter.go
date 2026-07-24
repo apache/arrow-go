@@ -69,7 +69,7 @@ func optimalNumBits(ndv uint32, fpp float64) uint32 {
 		numBits uint32
 	)
 
-	if m < 0 || m > maximumBloomFilterBytes>>3 {
+	if m < 0 || m > maximumBloomFilterBytes<<3 {
 		numBits = maximumBloomFilterBytes << 3
 	} else {
 		numBits = uint32(m)

@@ -122,9 +122,11 @@ func TestNewBloomFilter(t *testing.T) {
 	}{
 		{1, 0.09, 0, 0},
 		// cap at maximumBloomFilterBytes
-		{1024 * 1024 * 128, 0.9, maximumBloomFilterBytes + 1, maximumBloomFilterBytes},
+		{1 << 30, 0.9, maximumBloomFilterBytes + 1, maximumBloomFilterBytes},
 		// round to power of 2
 		{1024 * 1024, 0.01, maximumBloomFilterBytes, 1 << 21},
+		// keep values between 2MB and the maximum from being capped
+		{2_000_000, 0.01, maximumBloomFilterBytes, 4 << 20},
 	}
 
 	for _, tt := range tests {
