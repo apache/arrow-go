@@ -66,6 +66,8 @@ func TestExpressionToString(t *testing.T) {
 		{compute.NotEqual(compute.NewFieldRef("a"), compute.NewLiteral("a")), `(a != "a")`},
 		{compute.LessEqual(compute.NewFieldRef("a"), compute.NewLiteral("b")), `(a <= "b")`},
 		{compute.GreaterEqual(compute.NewFieldRef("a"), compute.NewLiteral("c")), `(a >= "c")`},
+		{compute.IsNull(compute.NewFieldRef("a"), false), "is_null(a, {nan_is_null=false})"},
+		{compute.IsValid(compute.NewFieldRef("a")), "is_not_null(a)"},
 		{compute.Project(
 			[]compute.Expression{
 				compute.NewFieldRef("a"), compute.NewFieldRef("a"), compute.NewLiteral(3), add,
