@@ -164,10 +164,11 @@ func (b *builder) resize(newBits int, init func(int)) {
 		return
 	}
 
-	newBytesN := bitutil.CeilByte(newBits) / 8
+	allocBits := max(newBits, minBuilderCapacity)
+	newBytesN := bitutil.CeilByte(allocBits) / 8
 	oldBytesN := b.nullBitmap.Len()
 	b.nullBitmap.Resize(newBytesN)
-	b.capacity = newBits
+	b.capacity = allocBits
 	if oldBytesN < newBytesN {
 		// TODO(sgc): necessary?
 		memory.Set(b.nullBitmap.Buf()[oldBytesN:], 0)
