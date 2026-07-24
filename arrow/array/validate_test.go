@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -61,6 +62,19 @@ func makeLargeStringArrayRaw(t *testing.T, offsets []int64, data string, length,
 	dataBuf := memory.NewBufferBytes([]byte(data))
 	d := NewData(arrow.BinaryTypes.LargeString, length, []*memory.Buffer{nil, offsetBuf, dataBuf}, nil, 0, offset)
 	return NewLargeStringData(d)
+}
+
+func makeInt32ArrayRaw(t *testing.T, values []int32, validity []byte, nulls, length, offset int) *Int32 {
+	t.Helper()
+	valueBuf := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes(values))
+	var validityBuf *memory.Buffer
+	if validity != nil {
+		validityBuf = memory.NewBufferBytes(validity)
+	}
+	data := NewData(arrow.PrimitiveTypes.Int32, length, []*memory.Buffer{validityBuf, valueBuf}, nil, nulls, offset)
+	arr := NewInt32Data(data)
+	data.Release()
+	return arr
 }
 
 func TestBinaryValidate(t *testing.T) {
@@ -193,6 +207,18 @@ func TestTopLevelValidate(t *testing.T) {
 		arr := makeStringArrayRaw(t, []int32{0, 5, 3, 5}, "hello", 3, 0)
 		assert.NoError(t, Validate(arr))
 		require.Error(t, ValidateFull(arr))
+	})
+
+	t.Run("known null count mismatch passes Validate but fails ValidateFull", func(t *testing.T) {
+		validity := make([]byte, bitutil.BytesForBits(2))
+		bitutil.SetBit(validity, 0)
+		arr := makeInt32ArrayRaw(t, []int32{10, 20}, validity, 0, 2, 0)
+		defer arr.Release()
+
+		assert.NoError(t, Validate(arr))
+		err := ValidateFull(arr)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not match actual number of nulls")
 	})
 
 	t.Run("Validate returns nil for non-Validator types", func(t *testing.T) {
