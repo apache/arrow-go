@@ -708,13 +708,13 @@ func (c *columnChunkReader) skipRows(nrows int64) error {
 				valuesToSkip = int64(levelsToSkip)
 			}
 
-			skipped, err := c.curDecoder.Discard(int(valuesToSkip))
+			_, err = c.curDecoder.Discard(int(valuesToSkip))
 			if err != nil {
 				c.err = err
 				return err
 			}
 
-			toSkip -= int64(skipped)
+			toSkip -= rowsSkipped
 			c.consumeBufferedValues(int64(levelsToSkip))
 		}
 	}

@@ -465,6 +465,46 @@ func (p *PrimitiveReaderSuite) TestInt32FlatRepeated() {
 	p.testDict(npages, levelsPerPage, d, reflect.TypeOf(int32(0)))
 }
 
+func TestSkipEmptyRepeatedRows(t *testing.T) {
+	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewInt32Node("values", parquet.Repetitions.Repeated, -1),
+	}, -1)))
+
+	var out bytes.Buffer
+	w := file.NewParquetWriter(&out, sc.Root(), file.WithWriterProps(
+		parquet.NewWriterProperties(parquet.WithDictionaryDefault(false))))
+	rg := w.AppendRowGroup()
+	cw, err := rg.NextColumn()
+	require.NoError(t, err)
+	_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch(
+		[]int32{42}, []int16{0, 0, 1}, []int16{0, 0, 0})
+	require.NoError(t, err)
+	require.NoError(t, cw.Close())
+	require.NoError(t, rg.Close())
+	require.NoError(t, w.Close())
+
+	r, err := file.NewParquetReader(bytes.NewReader(out.Bytes()))
+	require.NoError(t, err)
+	defer r.Close()
+
+	col, err := r.RowGroup(0).Column(0)
+	require.NoError(t, err)
+	typed := col.(*file.Int32ColumnChunkReader)
+	_, err = typed.Skip(2)
+	require.NoError(t, err)
+
+	values := make([]int32, 1)
+	defs := make([]int16, 1)
+	reps := make([]int16, 1)
+	levelsRead, valuesRead, err := typed.ReadBatch(1, values, defs, reps)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, levelsRead)
+	assert.Equal(t, 1, valuesRead)
+	assert.Equal(t, []int32{42}, values)
+	assert.Equal(t, []int16{1}, defs)
+	assert.Equal(t, []int16{0}, reps)
+}
+
 func (p *PrimitiveReaderSuite) TestReadBatchMultiPage() {
 	const (
 		levelsPerPage int = 100
