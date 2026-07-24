@@ -134,6 +134,22 @@ func TestRunEndEncodedValidate(t *testing.T) {
 		assert.Contains(t, err.Error(), "strictly greater")
 	})
 
+	t.Run("top level ValidateFull catches duplicate run ends", func(t *testing.T) {
+		runEnds, _, _ := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[2, 2]`))
+		values, _, _ := array.FromJSON(mem, arrow.BinaryTypes.String, strings.NewReader(`["first", "second"]`))
+		defer runEnds.Release()
+		defer values.Release()
+
+		arr := makeRunEndEncodedArrayRaw(t, arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.BinaryTypes.String), 2, 0, 0,
+			[]*memory.Buffer{nil}, []arrow.ArrayData{runEnds.Data(), values.Data()})
+		defer arr.Release()
+
+		assert.NoError(t, array.Validate(arr))
+		err := array.ValidateFull(arr)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "strictly greater")
+	})
+
 	t.Run("unknown null counts without bitmaps still validate", func(t *testing.T) {
 		runEnds, _, _ := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 3]`))
 		values, _, _ := array.FromJSON(mem, arrow.BinaryTypes.String, strings.NewReader(`["a", "b"]`))

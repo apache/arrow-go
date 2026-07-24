@@ -251,11 +251,14 @@ func (r *RunEndEncoded) String() string {
 
 func validateRunEndEncoded(r *RunEndEncoded, full bool) error {
 	reeType := r.data.dtype.(*arrow.RunEndEncodedType)
-	runEndsData := r.data.childData[0]
+	runEndsData := r.data.childData[0].(*Data)
 	valuesData := r.data.childData[1]
 
 	if reeNullCount(r.data) != 0 {
 		return fmt.Errorf("arrow/array: run-end encoded array cannot contain nulls")
+	}
+	if err := validateArrayData(runEndsData); err != nil {
+		return fmt.Errorf("arrow/array: run ends array invalid: %w", err)
 	}
 	if !arrow.TypeEqual(runEndsData.DataType(), reeType.RunEnds()) {
 		return fmt.Errorf("arrow/array: run ends array must match parent type %s, got %s", reeType.RunEnds(), runEndsData.DataType())
@@ -279,8 +282,8 @@ func validateRunEndEncoded(r *RunEndEncoded, full bool) error {
 		return fmt.Errorf("arrow/array: offset + length of a run-end encoded array must fit in the run end type %s", runEndsData.DataType())
 	}
 
-	runEnds := getRunEnds64(runEndsData)
-	lastRunEnd := runEnds[len(runEnds)-1]
+	runEnds := encoded.GetRunEnds(runEndsData)
+	lastRunEnd := runEnds(int64(runEndsData.Len() - 1))
 	if lastRunEnd < int64(r.data.offset+r.data.length) {
 		return fmt.Errorf("arrow/array: last run end is %d but it should cover %d", lastRunEnd, r.data.offset+r.data.length)
 	}
@@ -289,13 +292,17 @@ func validateRunEndEncoded(r *RunEndEncoded, full bool) error {
 		return nil
 	}
 
-	if runEnds[0] < 1 {
-		return fmt.Errorf("arrow/array: first run end must be greater than 0, got %d", runEnds[0])
+	firstRunEnd := runEnds(0)
+	if firstRunEnd < 1 {
+		return fmt.Errorf("arrow/array: first run end must be greater than 0, got %d", firstRunEnd)
 	}
-	for i := 1; i < len(runEnds); i++ {
-		if runEnds[i] <= runEnds[i-1] {
-			return fmt.Errorf("arrow/array: run end at position %d (%d) must be strictly greater than previous run end (%d)", i, runEnds[i], runEnds[i-1])
+	lastSeenRunEnd := firstRunEnd
+	for i := int64(1); i < int64(runEndsData.Len()); i++ {
+		runEnd := runEnds(i)
+		if runEnd <= lastSeenRunEnd {
+			return fmt.Errorf("arrow/array: run end at position %d (%d) must be strictly greater than previous run end (%d)", i, runEnd, lastSeenRunEnd)
 		}
+		lastSeenRunEnd = runEnd
 	}
 	return nil
 }
@@ -313,35 +320,11 @@ func reeNullCount(data *Data) int {
 func runEndTypeLimit(id arrow.Type) int64 {
 	switch id {
 	case arrow.INT16:
-		return 1<<15 - 1
+		return math.MaxInt16
 	case arrow.INT32:
 		return math.MaxInt32
 	default:
 		return math.MaxInt64
-	}
-}
-
-func getRunEnds64(data arrow.ArrayData) []int64 {
-	switch data.DataType().ID() {
-	case arrow.INT16:
-		runEnds := arrow.Int16Traits.CastFromBytes(data.Buffers()[1].Bytes())
-		runEnds = runEnds[data.Offset() : data.Offset()+data.Len()]
-		out := make([]int64, len(runEnds))
-		for i, v := range runEnds {
-			out[i] = int64(v)
-		}
-		return out
-	case arrow.INT32:
-		runEnds := arrow.Int32Traits.CastFromBytes(data.Buffers()[1].Bytes())
-		runEnds = runEnds[data.Offset() : data.Offset()+data.Len()]
-		out := make([]int64, len(runEnds))
-		for i, v := range runEnds {
-			out[i] = int64(v)
-		}
-		return out
-	default:
-		runEnds := arrow.Int64Traits.CastFromBytes(data.Buffers()[1].Bytes())
-		return runEnds[data.Offset() : data.Offset()+data.Len()]
 	}
 }
 
