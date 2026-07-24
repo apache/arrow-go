@@ -91,11 +91,9 @@ func GetExtensionType(typName string) ExtensionType {
 func FindRegisteredExtensionType(filter func(ExtensionType) bool) ExtensionType {
 	registry := getExtTypeRegistry()
 
-	// We first sort the types by name to ensure that we return the
-	// type with the lexicographically smallest name. We sort then filter
-	// to ensure that there are no side effects from filtering which would
-	// affect the determinism of the result.
-
+	// Snapshot and sort the registered names before invoking the filter so the
+	// result is deterministic (lexicographically smallest match), independent of
+	// sync.Map's unspecified Range order.
 	types := make(map[string]ExtensionType)
 	var names []string
 	registry.Range(func(key, value any) bool {
