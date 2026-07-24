@@ -129,6 +129,19 @@ type ExtensionCustomParquetType interface {
 	ParquetLogicalType() schema.LogicalType
 }
 
+// ExtensionParquetLogicalType is an interface that Arrow ExtensionTypes may
+// implement to specify how a Parquet LogicalType maps back to an Arrow
+// ExtensionType when converting a Parquet schema to an Arrow schema.
+//
+// ArrowTypeFromParquet should return (nil, nil) if the logical type does not
+// map to the extension type. It should return (nil, err) if the logical type is
+// recognized but cannot be converted into a valid extension type. If a
+// non-nil extension type is returned, that type is used and any previous
+// conversion errors from other extension types are ignored.
+type ExtensionParquetLogicalType interface {
+	ArrowTypeFromParquet(logical schema.LogicalType, storageType arrow.DataType) (arrow.ExtensionType, error)
+}
+
 func isDictionaryReadSupported(dt arrow.DataType) bool {
 	return arrow.IsBinaryLike(dt.ID())
 }
@@ -531,6 +544,9 @@ func arrowFromByteArray(logical schema.LogicalType) (arrow.DataType, error) {
 		return arrow.BinaryTypes.String, nil
 	case schema.DecimalLogicalType:
 		return arrowDecimal(logtype), nil
+	case schema.GeometryLogicalType,
+		schema.GeographyLogicalType:
+		return arrowExtensionFromParquetLogicalType(logical, arrow.BinaryTypes.Binary)
 	case schema.NoLogicalType,
 		schema.EnumLogicalType,
 		schema.JSONLogicalType,
@@ -539,6 +555,47 @@ func arrowFromByteArray(logical schema.LogicalType) (arrow.DataType, error) {
 	default:
 		return nil, errors.New("unhandled logicaltype " + logical.String() + " for byte_array")
 	}
+}
+
+// arrowExtensionFromParquetLogicalType asks registered extension types whether
+// they can represent the provided Parquet logical type with the given storage
+// type, falling back to the storage type when none opt in.
+func arrowExtensionFromParquetLogicalType(logical schema.LogicalType, storageType arrow.DataType) (arrow.DataType, error) {
+	var (
+		typ           arrow.ExtensionType
+		typeLookupErr error
+	)
+	matchedType := arrow.FindRegisteredExtensionType(func(extType arrow.ExtensionType) bool {
+		converter, ok := extType.(ExtensionParquetLogicalType)
+		if !ok {
+			return false
+		}
+
+		var err error
+		typ, err = converter.ArrowTypeFromParquet(logical, storageType)
+		if err != nil {
+			// if there was a failure to match, store it as a potential error
+			// to return if nothing else matches, but don't return it yet.
+			// This lets one extension reject a column without blocking another
+			// extension, while still surfacing real converter failures when nothing
+			// handles the type.
+			if typeLookupErr == nil {
+				typeLookupErr = err
+			}
+			return false
+		}
+		return typ != nil
+	})
+	if matchedType != nil {
+		return typ, nil
+	}
+
+	if typeLookupErr != nil {
+		// If we didn't match any type and there was a type lookup error,
+		// we can now return the error that we stored
+		return nil, typeLookupErr
+	}
+	return storageType, nil
 }
 
 func arrowFromFLBA(logical schema.LogicalType, length int) (arrow.DataType, error) {

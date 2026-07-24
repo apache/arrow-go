@@ -17,20 +17,120 @@
 package pqarrow_test
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
+	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/flight"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+)
+
+type testGeometryType struct {
+	arrow.ExtensionBase
+	logical schema.LogicalType
+}
+
+type testGeometryArray struct {
+	array.ExtensionArrayBase
+}
+
+type testFailingGeometryType struct {
+	arrow.ExtensionBase
+}
+
+func newTestGeometryType(logical schema.LogicalType) *testGeometryType {
+	return &testGeometryType{
+		ExtensionBase: arrow.ExtensionBase{Storage: arrow.BinaryTypes.Binary},
+		logical:       logical,
+	}
+}
+
+func newTestFailingGeometryType() *testFailingGeometryType {
+	return &testFailingGeometryType{
+		ExtensionBase: arrow.ExtensionBase{Storage: arrow.BinaryTypes.Binary},
+	}
+}
+
+func (*testGeometryType) ArrayType() reflect.Type {
+	return reflect.TypeFor[testGeometryArray]()
+}
+
+func (*testFailingGeometryType) ArrayType() reflect.Type {
+	return reflect.TypeFor[testGeometryArray]()
+}
+
+func (*testGeometryType) ExtensionName() string {
+	return "test.geospatial"
+}
+
+func (*testFailingGeometryType) ExtensionName() string {
+	return "test.failing_geospatial"
+}
+
+func (t *testGeometryType) ExtensionEquals(other arrow.ExtensionType) bool {
+	rhs, ok := other.(*testGeometryType)
+	return ok && t.ExtensionName() == rhs.ExtensionName() && t.logical.Equals(rhs.logical)
+}
+
+func (t *testFailingGeometryType) ExtensionEquals(other arrow.ExtensionType) bool {
+	_, ok := other.(*testFailingGeometryType)
+	return ok
+}
+
+func (*testGeometryType) Serialize() string {
+	return ""
+}
+
+func (*testFailingGeometryType) Serialize() string {
+	return ""
+}
+
+func (*testGeometryType) Deserialize(storageType arrow.DataType, data string) (arrow.ExtensionType, error) {
+	return newTestGeometryType(schema.GeometryLogicalType{}), nil
+}
+
+func (*testFailingGeometryType) Deserialize(storageType arrow.DataType, data string) (arrow.ExtensionType, error) {
+	return newTestFailingGeometryType(), nil
+}
+
+func (*testGeometryType) ArrowTypeFromParquet(logical schema.LogicalType, storageType arrow.DataType) (arrow.ExtensionType, error) {
+	if !arrow.TypeEqual(storageType, arrow.BinaryTypes.Binary) {
+		return nil, nil
+	}
+	switch logical.(type) {
+	case schema.GeometryLogicalType, schema.GeographyLogicalType:
+		return newTestGeometryType(logical), nil
+	default:
+		return nil, nil
+	}
+}
+
+func (*testFailingGeometryType) ArrowTypeFromParquet(logical schema.LogicalType, storageType arrow.DataType) (arrow.ExtensionType, error) {
+	return nil, errors.New("not my geospatial logical type")
+}
+
+func (t *testGeometryType) ParquetLogicalType() schema.LogicalType {
+	return t.logical
+}
+
+var (
+	_ pqarrow.ExtensionCustomParquetType  = (*testGeometryType)(nil)
+	_ pqarrow.ExtensionParquetLogicalType = (*testGeometryType)(nil)
+	_ pqarrow.ExtensionParquetLogicalType = (*testFailingGeometryType)(nil)
 )
 
 func TestGetOriginSchemaBase64(t *testing.T) {
@@ -95,6 +195,171 @@ func TestGetOriginSchemaUnregisteredExtension(t *testing.T) {
 	}, nil)
 
 	assert.Truef(t, expArrSc.Equal(arrsc), "expected: %s\ngot: %s", expArrSc, arrsc)
+}
+
+// TestFromParquetGeospatialRegisteredExtension verifies that Parquet Geometry and
+// Geography logical byte-array columns are mapped to a registered Arrow extension
+// type when the extension opts into Parquet logical type conversion.
+func TestFromParquetGeospatialRegisteredExtension(t *testing.T) {
+	geoType := newTestGeometryType(schema.GeometryLogicalType{})
+	require.NoError(t, arrow.RegisterExtensionType(geoType))
+	defer func() {
+		require.NoError(t, arrow.UnregisterExtensionType(geoType.ExtensionName()))
+	}()
+
+	geometryLogical := schema.GeometryLogicalType{Crs: "EPSG:4326"}
+	geographyLogical := schema.GeographyLogicalType{Crs: "OGC:CRS84", Algorithm: schema.GeographyEdgeKarney}
+	geomNode := schema.Must(schema.NewPrimitiveNodeLogical("geometry", parquet.Repetitions.Optional,
+		geometryLogical, parquet.Types.ByteArray, -1, -1))
+	geogNode := schema.Must(schema.NewPrimitiveNodeLogical("geography", parquet.Repetitions.Optional,
+		geographyLogical, parquet.Types.ByteArray, -1, -1))
+	pqschema := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required,
+		schema.FieldList{geomNode, geogNode}, -1)))
+
+	arrsc, err := pqarrow.FromParquet(pqschema, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, 2, arrsc.NumFields())
+
+	for i, logical := range []schema.LogicalType{geometryLogical, geographyLogical} {
+		require.Equal(t, arrow.EXTENSION, arrsc.Field(i).Type.ID())
+		extType, ok := arrsc.Field(i).Type.(*testGeometryType)
+		require.True(t, ok)
+		assert.True(t, logical.Equals(extType.logical))
+		assert.True(t, arrow.TypeEqual(arrow.BinaryTypes.Binary, extType.StorageType()))
+	}
+}
+
+func TestFromParquetGeospatialNoRegisteredExtensionFallsBackToBinary(t *testing.T) {
+	geometryLogical := schema.GeometryLogicalType{Crs: "EPSG:4326"}
+	geomNode := schema.Must(schema.NewPrimitiveNodeLogical("geometry", parquet.Repetitions.Optional,
+		geometryLogical, parquet.Types.ByteArray, -1, -1))
+	pqschema := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required,
+		schema.FieldList{geomNode}, -1)))
+
+	arrsc, err := pqarrow.FromParquet(pqschema, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, arrsc.NumFields())
+	assert.True(t, arrow.TypeEqual(arrow.BinaryTypes.Binary, arrsc.Field(0).Type))
+}
+
+func TestFromParquetGeospatialRegisteredExtensionContinuesAfterConverterError(t *testing.T) {
+	failingType := newTestFailingGeometryType()
+	require.NoError(t, arrow.RegisterExtensionType(failingType))
+	defer func() {
+		require.NoError(t, arrow.UnregisterExtensionType(failingType.ExtensionName()))
+	}()
+
+	geoType := newTestGeometryType(schema.GeometryLogicalType{})
+	require.NoError(t, arrow.RegisterExtensionType(geoType))
+	defer func() {
+		require.NoError(t, arrow.UnregisterExtensionType(geoType.ExtensionName()))
+	}()
+
+	geometryLogical := schema.GeometryLogicalType{Crs: "EPSG:4326"}
+	geomNode := schema.Must(schema.NewPrimitiveNodeLogical("geometry", parquet.Repetitions.Optional,
+		geometryLogical, parquet.Types.ByteArray, -1, -1))
+	pqschema := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required,
+		schema.FieldList{geomNode}, -1)))
+
+	arrsc, err := pqarrow.FromParquet(pqschema, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, arrsc.NumFields())
+
+	extType, ok := arrsc.Field(0).Type.(*testGeometryType)
+	require.True(t, ok)
+	assert.True(t, geometryLogical.Equals(extType.logical))
+}
+
+func TestFromParquetGeospatialRegisteredExtensionReturnsConverterErrorWhenNoMatch(t *testing.T) {
+	failingType := newTestFailingGeometryType()
+	require.NoError(t, arrow.RegisterExtensionType(failingType))
+	defer func() {
+		require.NoError(t, arrow.UnregisterExtensionType(failingType.ExtensionName()))
+	}()
+
+	geometryLogical := schema.GeometryLogicalType{Crs: "EPSG:4326"}
+	geomNode := schema.Must(schema.NewPrimitiveNodeLogical("geometry", parquet.Repetitions.Optional,
+		geometryLogical, parquet.Types.ByteArray, -1, -1))
+	pqschema := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required,
+		schema.FieldList{geomNode}, -1)))
+
+	_, err := pqarrow.FromParquet(pqschema, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not my geospatial logical type")
+}
+
+// TestReadWriteGeospatialRegisteredExtensionWithoutStoredSchema verifies that a
+// registered extension type can round trip using only the Parquet logical type.
+// Keeping StoreSchema disabled ensures the reader reconstructs the extension via
+// ExtensionParquetLogicalType interface logic instead of restoring it from
+// ARROW:schema metadata.
+func TestReadWriteGeospatialRegisteredExtensionWithoutStoredSchema(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	// Register the extension type so the reader can discover its Parquet mapping.
+	logical := schema.GeometryLogicalType{Crs: "EPSG:4326"}
+	geoType := newTestGeometryType(logical)
+	require.NoError(t, arrow.RegisterExtensionType(geoType))
+	defer func() {
+		require.NoError(t, arrow.UnregisterExtensionType(geoType.ExtensionName()))
+	}()
+
+	// Build an extension array whose storage is the byte array written to Parquet.
+	bldr := array.NewExtensionBuilder(mem, geoType)
+	defer bldr.Release()
+	binaryBldr := bldr.StorageBuilder().(*array.BinaryBuilder)
+	binaryBldr.AppendValues([][]byte{
+		{1, 2, 3},
+		nil,
+		{4, 5, 6, 7},
+	}, []bool{true, false, true})
+
+	arr := bldr.NewArray()
+	defer arr.Release()
+
+	field := arrow.Field{Name: "geometry", Type: geoType, Nullable: true}
+	col := arrow.NewColumnFromArr(field, arr)
+	defer col.Release()
+	tbl := array.NewTable(arrow.NewSchema([]arrow.Field{field}, nil), []arrow.Column{col}, -1)
+	defer tbl.Release()
+
+	var buf bytes.Buffer
+	arrowProps := pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem))
+	// Write without using WithStoreSchema so the file does not embed the original Arrow
+	// extension type in ARROW:schema metadata. This forces the read path to infer the
+	// extension from the Parquet logical type and the registered extension interface.
+	require.NoError(t, pqarrow.WriteTable(tbl, &buf, tbl.NumRows(),
+		parquet.NewWriterProperties(parquet.WithAllocator(mem)), arrowProps))
+
+	pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(parquet.NewReaderProperties(mem)))
+	require.NoError(t, err)
+	defer pf.Close()
+
+	// Confirm the extension type can be recovered from the Parquet logical type.
+	require.Nil(t, pf.MetaData().KeyValueMetadata().FindValue("ARROW:schema"))
+	require.True(t, pf.MetaData().Schema.Column(0).LogicalType().Equals(logical))
+
+	reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{}, mem)
+	require.NoError(t, err)
+
+	readTbl, err := reader.ReadTable(context.Background())
+	require.NoError(t, err)
+	defer readTbl.Release()
+
+	// Validate that the read path restored the extension type and preserved values.
+	require.Equal(t, tbl.NumRows(), readTbl.NumRows())
+	require.Equal(t, tbl.NumCols(), readTbl.NumCols())
+	require.Equal(t, arrow.EXTENSION, readTbl.Column(0).DataType().ID())
+
+	readType, ok := readTbl.Column(0).DataType().(*testGeometryType)
+	require.True(t, ok)
+	assert.True(t, logical.Equals(readType.logical))
+	assert.True(t, arrow.TypeEqual(arrow.BinaryTypes.Binary, readType.StorageType()))
+
+	expected := tbl.Column(0).Data().Chunk(0)
+	actual := readTbl.Column(0).Data().Chunk(0)
+	assert.Truef(t, array.Equal(expected, actual), "expected: %T %s\ngot: %T %s", expected, expected, actual, actual)
 }
 
 func TestToParquetWriterConfig(t *testing.T) {
