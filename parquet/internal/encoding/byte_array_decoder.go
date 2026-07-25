@@ -190,8 +190,12 @@ func (pbad *PlainByteArrayDecoder) DecodeSpaced(out []parquet.ByteArray, nullCou
 
 func (d *DictByteArrayDecoder) InsertDictionary(bldr array.Builder) error {
 	conv := d.dictValueDecoder.(*dictConverter[parquet.ByteArray])
-	dictLength := cap(conv.dict)
-	conv.ensure(pqutils.IndexType(dictLength))
+	dictLength := conv.dictLen
+	if dictLength > 0 {
+		if err := conv.ensure(pqutils.IndexType(dictLength - 1)); err != nil {
+			return err
+		}
+	}
 
 	byteArrayData := memory.NewResizableBuffer(d.mem)
 	defer byteArrayData.Release()

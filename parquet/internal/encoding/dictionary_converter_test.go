@@ -31,6 +31,7 @@ func TestDictionaryConverterBoundsGrowthByValuesLeft(t *testing.T) {
 	converter := NewDictConverter[int32](decoder).(*dictConverter[int32])
 
 	require.Zero(t, cap(converter.dict))
+	require.Equal(t, 1, converter.dictLen)
 	require.Error(t, converter.ensure(utils.IndexType(1<<30)))
 	require.Zero(t, cap(converter.dict))
 
