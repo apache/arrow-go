@@ -21,8 +21,6 @@ import (
 	"encoding/base64"
 	"encoding/csv"
 	"fmt"
-	"math"
-	"math/big"
 	"strconv"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -197,13 +195,10 @@ func (w *Writer) transformColToStringArr(typ arrow.DataType, col arrow.Array, st
 	case *arrow.Decimal128Type:
 		fieldType := typ.(*arrow.Decimal128Type)
 		scale := fieldType.Scale
-		precision := fieldType.Precision
 		arr := col.(*array.Decimal128)
 		for i := 0; i < arr.Len(); i++ {
 			if arr.IsValid(i) {
-				f := (&big.Float{}).SetInt(arr.Value(i).BigInt())
-				f.Quo(f, big.NewFloat(math.Pow10(int(scale))))
-				res[i] = f.Text('g', int(precision))
+				res[i] = arr.Value(i).ToString(scale)
 			} else {
 				res[i] = w.nullValue
 			}
@@ -211,13 +206,10 @@ func (w *Writer) transformColToStringArr(typ arrow.DataType, col arrow.Array, st
 	case *arrow.Decimal256Type:
 		fieldType := typ.(*arrow.Decimal256Type)
 		scale := fieldType.Scale
-		precision := fieldType.Precision
 		arr := col.(*array.Decimal256)
 		for i := 0; i < arr.Len(); i++ {
 			if arr.IsValid(i) {
-				f := (&big.Float{}).SetInt(arr.Value(i).BigInt())
-				f.Quo(f, big.NewFloat(math.Pow10(int(scale))))
-				res[i] = f.Text('g', int(precision))
+				res[i] = arr.Value(i).ToString(scale)
 			} else {
 				res[i] = w.nullValue
 			}
