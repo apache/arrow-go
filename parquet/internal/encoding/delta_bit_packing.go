@@ -84,6 +84,12 @@ func (d *deltaBitPackDecoder[T]) SetData(nvalues int, data []byte) error {
 	if !ok {
 		return errors.New("parquet: eof exception")
 	}
+	if d.blockSize == 0 {
+		return errors.New("parquet: cannot have zero values per block")
+	}
+	if d.blockSize > math.MaxUint32 || d.blockSize%128 != 0 {
+		return fmt.Errorf("parquet: values per block must be a multiple of 128, got %d", d.blockSize)
+	}
 
 	if d.miniBlocksPerBlock, ok = d.bitdecoder.GetVlqInt(); !ok {
 		return errors.New("parquet: eof exception")
@@ -91,16 +97,27 @@ func (d *deltaBitPackDecoder[T]) SetData(nvalues int, data []byte) error {
 	if d.miniBlocksPerBlock == 0 {
 		return errors.New("parquet: cannot have zero miniblock per block")
 	}
+	if d.miniBlocksPerBlock > math.MaxUint32 {
+		return fmt.Errorf("parquet: too many miniblocks per block: %d", d.miniBlocksPerBlock)
+	}
+
+	valuesPerMini := d.blockSize / d.miniBlocksPerBlock
+	if valuesPerMini == 0 || valuesPerMini%32 != 0 {
+		return fmt.Errorf("parquet: values per miniblock must be a nonzero multiple of 32, got %d", valuesPerMini)
+	}
 
 	if d.totalValues, ok = d.bitdecoder.GetVlqInt(); !ok {
 		return errors.New("parquet: eof exception")
+	}
+	if d.totalValues > math.MaxUint32 || nvalues < 0 || d.totalValues > uint64(nvalues) {
+		return fmt.Errorf("parquet: invalid delta value count %d for %d buffered values", d.totalValues, nvalues)
 	}
 
 	if d.lastVal, ok = d.bitdecoder.GetZigZagVlqInt(); !ok {
 		return errors.New("parquet: eof exception")
 	}
 
-	d.valsPerMini = uint32(d.blockSize / d.miniBlocksPerBlock)
+	d.valsPerMini = uint32(valuesPerMini)
 	d.usedFirst = false
 	d.nvals = int(d.totalValues)
 	return nil
@@ -137,6 +154,9 @@ func (d *deltaBitPackDecoder[T]) unpackNextMini() error {
 		d.miniBlockValues = d.miniBlockValues[:0]
 	}
 	d.deltaBitWidth = d.deltaBitWidths.Bytes()[int(d.miniBlockIdx)]
+	if d.deltaBitWidth > 64 {
+		return fmt.Errorf("parquet: delta bit width %d exceeds decoder width 64", d.deltaBitWidth)
+	}
 	d.currentMiniBlockVals = d.valsPerMini
 
 	n := int(d.valsPerMini)
