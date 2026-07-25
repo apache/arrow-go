@@ -94,7 +94,12 @@ func checkMakeNullScalar(t *testing.T, dt arrow.DataType) scalar.Scalar {
 }
 
 func TestMakeNullExtensionScalar(t *testing.T) {
-	checkMakeNullScalar(t, types.NewSmallintType())
+	dt := types.NewSmallintType()
+	sc := checkMakeNullScalar(t, dt)
+	ext := sc.(*scalar.Extension)
+	require.NotNil(t, ext.Value)
+	assert.False(t, ext.Value.IsValid())
+	assert.True(t, arrow.TypeEqual(dt.StorageType(), ext.Value.DataType()))
 }
 
 func TestMakeScalarUint(t *testing.T) {
