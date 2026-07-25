@@ -198,11 +198,11 @@ func (l *LevelDecoder) SetData(encoding parquet.Encoding, maxLvl int16, nbuffere
 		}
 
 		nbytes := int32(binary.LittleEndian.Uint32(data[:4]))
-		if nbytes < 0 || nbytes > int32(len(data)-4) {
+		if nbytes < 0 || int64(nbytes) > int64(len(data)-4) {
 			return 0, errors.New("parquet: received invalid number of bytes (corrupt data page?)")
 		}
 
-		buf := data[4:]
+		buf := data[4 : 4+int(nbytes)]
 		if l.rle == nil {
 			l.rle = utils.NewRleDecoder(bytes.NewReader(buf), l.bitWidth)
 		} else {
@@ -233,7 +233,7 @@ func (l *LevelDecoder) SetData(encoding parquet.Encoding, maxLvl int16, nbuffere
 // SetDataV2 is the same as SetData but only for DataPageV2 pages and only supports
 // run length encoding.
 func (l *LevelDecoder) SetDataV2(nbytes int32, maxLvl int16, nbuffered int, data []byte) error {
-	if nbytes < 0 {
+	if nbytes < 0 || int64(nbytes) > int64(len(data)) {
 		return errors.New("parquet: invalid page header (corrupt data page?)")
 	}
 
@@ -242,6 +242,7 @@ func (l *LevelDecoder) SetDataV2(nbytes int32, maxLvl int16, nbuffered int, data
 	l.remaining = nbuffered
 	l.bitWidth = bits.Len64(uint64(maxLvl))
 
+	data = data[:nbytes]
 	if l.rle == nil {
 		l.rle = utils.NewRleDecoder(bytes.NewReader(data), l.bitWidth)
 	} else {
