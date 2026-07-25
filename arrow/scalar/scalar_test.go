@@ -1134,6 +1134,17 @@ func TestMakeArrayFromScalar(t *testing.T) {
 	}
 }
 
+func TestMakeArrayFromScalarRejectsNegativeLength(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	for _, sc := range []scalar.Scalar{scalar.NewInt32Scalar(1), scalar.ScalarNull} {
+		arr, err := scalar.MakeArrayFromScalar(sc, -1, mem)
+		require.ErrorIs(t, err, arrow.ErrInvalid)
+		assert.Nil(t, arr)
+	}
+}
+
 type OptionListTest struct {
 	FieldNames []string          `compute:"field_names"`
 	FieldNulls []bool            `compute:"field_null"`

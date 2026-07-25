@@ -794,6 +794,10 @@ func MakeArrayOfNull(dt arrow.DataType, length int, mem memory.Allocator) arrow.
 // MakeArrayFromScalar returns an array filled with the scalar value repeated length times.
 // Not yet implemented for nested types such as Struct, List, extension and so on.
 func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Array, error) {
+	if length < 0 {
+		return nil, fmt.Errorf("%w: array length must be non-negative, got %d", arrow.ErrInvalid, length)
+	}
+
 	if !sc.IsValid() {
 		return MakeArrayOfNull(sc.DataType(), length, mem), nil
 	}
