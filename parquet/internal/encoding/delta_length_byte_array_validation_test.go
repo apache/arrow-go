@@ -49,3 +49,21 @@ func TestDeltaLengthByteArrayDecoderUsesEncodedLengthCount(t *testing.T) {
 	require.Equal(t, 1, values)
 	require.Zero(t, dec.ValuesLeft())
 }
+
+func TestDeltaByteArrayDecoderRejectsMismatchedStreamCounts(t *testing.T) {
+	prefixEncoder := NewEncoder(parquet.Types.Int32, parquet.Encodings.DeltaBinaryPacked, false, nil, memory.DefaultAllocator)
+	prefixEncoder.(Int32Encoder).Put([]int32{0, 1})
+	prefixes, err := prefixEncoder.FlushValues()
+	require.NoError(t, err)
+	defer prefixes.Release()
+
+	suffixEncoder := NewEncoder(parquet.Types.ByteArray, parquet.Encodings.DeltaLengthByteArray, false, nil, memory.DefaultAllocator)
+	suffixEncoder.(ByteArrayEncoder).Put([]parquet.ByteArray{[]byte("a")})
+	suffixes, err := suffixEncoder.FlushValues()
+	require.NoError(t, err)
+	defer suffixes.Release()
+
+	data := append(append([]byte(nil), prefixes.Bytes()...), suffixes.Bytes()...)
+	dec := NewDecoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray, nil, memory.DefaultAllocator)
+	require.Error(t, dec.SetData(2, data))
+}
