@@ -100,6 +100,9 @@ func (d *deltaBitPackDecoder[T]) SetData(nvalues int, data []byte) error {
 	if d.miniBlocksPerBlock > math.MaxUint32 {
 		return fmt.Errorf("parquet: too many miniblocks per block: %d", d.miniBlocksPerBlock)
 	}
+	if d.blockSize%d.miniBlocksPerBlock != 0 {
+		return fmt.Errorf("parquet: miniblocks per block must divide the block size, got %d miniblocks for %d values", d.miniBlocksPerBlock, d.blockSize)
+	}
 
 	valuesPerMini := d.blockSize / d.miniBlocksPerBlock
 	if valuesPerMini == 0 || valuesPerMini%32 != 0 {
@@ -116,6 +119,9 @@ func (d *deltaBitPackDecoder[T]) SetData(nvalues int, data []byte) error {
 	if d.lastVal, ok = d.bitdecoder.GetZigZagVlqInt(); !ok {
 		return errors.New("parquet: eof exception")
 	}
+	if d.Type() == parquet.Types.Int32 && (d.lastVal < math.MinInt32 || d.lastVal > math.MaxInt32) {
+		return fmt.Errorf("parquet: initial delta value %d exceeds INT32 range", d.lastVal)
+	}
 
 	d.valsPerMini = uint32(valuesPerMini)
 	d.usedFirst = false
@@ -129,6 +135,9 @@ func (d *deltaBitPackDecoder[T]) initBlock() error {
 	var ok bool
 	if d.minDelta, ok = d.bitdecoder.GetZigZagVlqInt(); !ok {
 		return errors.New("parquet: eof exception")
+	}
+	if d.Type() == parquet.Types.Int32 && (d.minDelta < math.MinInt32 || d.minDelta > math.MaxInt32) {
+		return fmt.Errorf("parquet: minimum delta %d exceeds INT32 range", d.minDelta)
 	}
 
 	// ensure we have enough space for our miniblocks to decode the widths
@@ -154,8 +163,12 @@ func (d *deltaBitPackDecoder[T]) unpackNextMini() error {
 		d.miniBlockValues = d.miniBlockValues[:0]
 	}
 	d.deltaBitWidth = d.deltaBitWidths.Bytes()[int(d.miniBlockIdx)]
-	if d.deltaBitWidth > 64 {
-		return fmt.Errorf("parquet: delta bit width %d exceeds decoder width 64", d.deltaBitWidth)
+	maxBitWidth := byte(64)
+	if d.Type() == parquet.Types.Int32 {
+		maxBitWidth = 32
+	}
+	if d.deltaBitWidth > maxBitWidth {
+		return fmt.Errorf("parquet: delta bit width %d exceeds decoder width %d", d.deltaBitWidth, maxBitWidth)
 	}
 	d.currentMiniBlockVals = d.valsPerMini
 
