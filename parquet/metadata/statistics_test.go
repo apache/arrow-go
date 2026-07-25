@@ -175,6 +175,42 @@ func TestCheckNaNs(t *testing.T) {
 	assertMinMaxAreSpaced(someNanStatsf16, someNansf16, validBitmap, f16Min, f16Max)
 }
 
+func TestFloatingPointInfinityStatistics(t *testing.T) {
+	f32Col := schema.NewColumn(schema.NewFloat32Node("f32", parquet.Repetitions.Required, -1), 0, 0)
+	f64Col := schema.NewColumn(schema.NewFloat64Node("f64", parquet.Repetitions.Required, -1), 0, 0)
+	f16Col := schema.NewColumn(newFloat16Node("f16", parquet.Repetitions.Required, -1), 0, 0)
+
+	t.Run("float32", func(t *testing.T) {
+		for _, value := range []float32{float32(math.Inf(1)), float32(math.Inf(-1))} {
+			stats := metadata.NewStatistics(f32Col, memory.DefaultAllocator).(*metadata.Float32Statistics)
+			stats.Update([]float32{value, value}, 0)
+			require.True(t, stats.HasMinMax())
+			assert.Equal(t, value, stats.Min())
+			assert.Equal(t, value, stats.Max())
+		}
+	})
+
+	t.Run("float64", func(t *testing.T) {
+		for _, value := range []float64{math.Inf(1), math.Inf(-1)} {
+			stats := metadata.NewStatistics(f64Col, memory.DefaultAllocator).(*metadata.Float64Statistics)
+			stats.Update([]float64{value, value}, 0)
+			require.True(t, stats.HasMinMax())
+			assert.Equal(t, value, stats.Min())
+			assert.Equal(t, value, stats.Max())
+		}
+	})
+
+	t.Run("float16", func(t *testing.T) {
+		for _, value := range []float16.Num{float16.Inf(), float16.Inf().Negate()} {
+			stats := metadata.NewStatistics(f16Col, memory.DefaultAllocator).(*metadata.Float16Statistics)
+			stats.Update([]parquet.FixedLenByteArray{value.ToLEBytes(), value.ToLEBytes()}, 0)
+			require.True(t, stats.HasMinMax())
+			assert.True(t, value.Equal(float16.FromLEBytes(stats.Min())))
+			assert.True(t, value.Equal(float16.FromLEBytes(stats.Max())))
+		}
+	})
+}
+
 func TestCheckNegativeZeroStats(t *testing.T) {
 	assertMinMaxZeroesSign := func(stats metadata.TypedStatistics, values interface{}) {
 		switch s := stats.(type) {
