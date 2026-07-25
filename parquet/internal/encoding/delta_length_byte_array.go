@@ -147,7 +147,7 @@ func (d *DeltaLengthByteArrayDecoder) SetData(nvalues int, data []byte) error {
 		totalLength += int(length)
 	}
 
-	return d.decoder.SetData(nvalues, payload)
+	return d.decoder.SetData(len(d.lengths), payload)
 }
 
 func (d *DeltaLengthByteArrayDecoder) Discard(n int) (int, error) {
@@ -176,7 +176,10 @@ func (d *DeltaLengthByteArrayDecoder) Decode(out []parquet.ByteArray) (int, erro
 // DecodeSpaced is like Decode, but for spaced data using the provided bitmap to determine where the nulls should be inserted.
 func (d *DeltaLengthByteArrayDecoder) DecodeSpaced(out []parquet.ByteArray, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
 	toread := len(out) - nullCount
-	values, _ := d.Decode(out[:toread])
+	values, err := d.Decode(out[:toread])
+	if err != nil {
+		return values, err
+	}
 	if values != toread {
 		return values, errors.New("parquet: number of values / definition levels read did not match")
 	}

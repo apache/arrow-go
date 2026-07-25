@@ -35,3 +35,17 @@ func TestDeltaLengthByteArrayDecoderRejectsInvalidLengths(t *testing.T) {
 		require.Error(t, dec.SetData(1, data))
 	}
 }
+
+func TestDeltaLengthByteArrayDecoderUsesEncodedLengthCount(t *testing.T) {
+	// The page has two logical positions but only one physical value. This is
+	// valid for an optional column whose other position is null.
+	data := []byte{128, 1, 4, 1, 0}
+	dec := NewDecoder(parquet.Types.ByteArray, parquet.Encodings.DeltaLengthByteArray, nil, memory.DefaultAllocator)
+	require.NoError(t, dec.SetData(2, data))
+	require.Equal(t, 1, dec.ValuesLeft())
+
+	values, err := dec.(ByteArrayDecoder).Decode(make([]parquet.ByteArray, 2))
+	require.NoError(t, err)
+	require.Equal(t, 1, values)
+	require.Zero(t, dec.ValuesLeft())
+}
