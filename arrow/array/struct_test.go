@@ -135,6 +135,26 @@ func TestStructArray(t *testing.T) {
 	}
 }
 
+func TestStructValidateFullRejectsShortField(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dt := arrow.StructOf(
+		arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32},
+		arrow.Field{Name: "b", Type: arrow.PrimitiveTypes.Int32},
+	)
+	b := array.NewStructBuilder(mem, dt)
+	defer b.Release()
+	b.Append(true)
+	b.FieldBuilder(0).(*array.Int32Builder).Append(1)
+
+	arr := b.NewStructArray()
+	defer arr.Release()
+	assert.NoError(t, arr.Validate())
+	assert.ErrorIs(t, arr.ValidateFull(), arrow.ErrInvalid)
+	assert.ErrorIs(t, array.ValidateFull(arr), arrow.ErrInvalid)
+}
+
 func TestStructStringRoundTrip(t *testing.T) {
 	// 1. create array
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
@@ -615,18 +635,18 @@ func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 		name      string
 		jsonInput string
 		want      string
-		panic     bool
+		invalid   bool
 	}{
 		{
 			name:      "missing required field",
 			jsonInput: `[{"f2": 3, "f3": {"f3_1": "test"}}]`,
-			panic:     true,
+			invalid:   true,
 			want:      "",
 		},
 		{
 			name:      "missing optional fields",
 			jsonInput: `[{"f2": 3, "f3": {"f3_3": "test"}}]`,
-			panic:     false,
+			invalid:   false,
 			want:      `{[(null)] [3] {[(null)] [(null)] ["test"]}}`,
 		},
 	}
@@ -634,29 +654,8 @@ func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(
 			tc.name, func(t *testing.T) {
-
-				var val bool
-
 				sb := array.NewStructBuilder(pool, dtype)
 				defer sb.Release()
-
-				if tc.panic {
-					defer func() {
-						e := recover()
-						if e == nil {
-							t.Fatalf("this should have panicked, but did not; slice value %v", val)
-						}
-						if got, want := e.(string), "arrow/array: index out of range"; got != want {
-							t.Fatalf("invalid error. got=%q, want=%q", got, want)
-						}
-					}()
-				} else {
-					defer func() {
-						if e := recover(); e != nil {
-							t.Fatalf("unexpected panic: %v", e)
-						}
-					}()
-				}
 
 				err := sb.UnmarshalJSON([]byte(tc.jsonInput))
 				if err != nil {
@@ -665,6 +664,11 @@ func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 
 				arr := sb.NewArray().(*array.Struct)
 				defer arr.Release()
+				if tc.invalid {
+					require.ErrorIs(t, array.ValidateFull(arr), arrow.ErrInvalid)
+					return
+				}
+				require.NoError(t, array.ValidateFull(arr))
 
 				got := arr.String()
 				if got != tc.want {

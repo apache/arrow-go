@@ -143,6 +143,18 @@ func NewStructData(data arrow.ArrayData) *Struct {
 func (a *Struct) NumField() int           { return len(a.fields) }
 func (a *Struct) Field(i int) arrow.Array { return a.fields[i] }
 
+func (a *Struct) Validate() error { return nil }
+
+func (a *Struct) ValidateFull() error {
+	for i, field := range a.fields {
+		if field.Len() < a.Len() {
+			return fmt.Errorf("%w: arrow/array: struct field %d length %d is smaller than struct length %d",
+				arrow.ErrInvalid, i, field.Len(), a.Len())
+		}
+	}
+	return nil
+}
+
 // ValueStr returns the string representation (as json) of the value at index i.
 func (a *Struct) ValueStr(i int) string {
 	if a.IsNull(i) {
@@ -222,9 +234,14 @@ func (a *Struct) setData(data *Data) {
 	a.fields = make([]arrow.Array, len(data.childData))
 	for i, child := range data.childData {
 		if data.offset != 0 || child.Len() != data.length {
-			sub := NewSliceData(child, int64(data.offset), int64(data.offset+data.length))
-			a.fields[i] = MakeFromData(sub)
-			sub.Release()
+			end := int64(data.offset) + int64(data.length)
+			if data.offset >= 0 && end >= int64(data.offset) && end <= int64(child.Len()) {
+				sub := NewSliceData(child, int64(data.offset), end)
+				a.fields[i] = MakeFromData(sub)
+				sub.Release()
+			} else {
+				a.fields[i] = MakeFromData(child)
+			}
 		} else {
 			a.fields[i] = MakeFromData(child)
 		}
