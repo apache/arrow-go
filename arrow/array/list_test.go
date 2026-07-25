@@ -346,6 +346,55 @@ func TestListArrayBulkAppend(t *testing.T) {
 	}
 }
 
+func TestListBuilderRejectsInvalidBulkOffsets(t *testing.T) {
+	for _, large := range []bool{false, true} {
+		name := "list"
+		if large {
+			name = "large_list"
+		}
+		t.Run(name, func(t *testing.T) {
+			tests := []struct {
+				name      string
+				offsets   []int64
+				valueLen  int
+				panicText string
+			}{
+				{name: "too few offsets", offsets: nil, panicText: "invalid: arrow/array: list offset count must equal list length or list length plus one (offsets=0, lists=1)"},
+				{name: "too many offsets", offsets: []int64{0, 0, 0}, panicText: "invalid: arrow/array: list offset count must equal list length or list length plus one (offsets=3, lists=1)"},
+				{name: "negative offset", offsets: []int64{-1, 0}, panicText: "invalid: arrow/array: list offset at index 0 is out of bounds: -1 not in [0, 0]"},
+				{name: "non-monotonic offsets", offsets: []int64{1, 0}, valueLen: 1, panicText: "invalid: arrow/array: list offsets are not monotonically non-decreasing at index 1: 0 < 1"},
+				{name: "final offset exceeds values", offsets: []int64{0, 2}, valueLen: 1, panicText: "invalid: arrow/array: list offset at index 1 is out of bounds: 2 not in [0, 1]"},
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+					defer mem.AssertSize(t, 0)
+
+					var b array.VarLenListLikeBuilder
+					if large {
+						lb := array.NewLargeListBuilder(mem, arrow.PrimitiveTypes.Int32)
+						lb.AppendValues(tt.offsets, []bool{true})
+						b = lb
+					} else {
+						lb := array.NewListBuilder(mem, arrow.PrimitiveTypes.Int32)
+						offsets := make([]int32, len(tt.offsets))
+						for i, offset := range tt.offsets {
+							offsets[i] = int32(offset)
+						}
+						lb.AppendValues(offsets, []bool{true})
+						b = lb
+					}
+					defer b.Release()
+					b.ValueBuilder().(*array.Int32Builder).AppendValues(make([]int32, tt.valueLen), nil)
+
+					assert.PanicsWithError(t, tt.panicText, func() { b.NewArray() })
+				})
+			}
+		})
+	}
+}
+
 func TestListViewArrayBulkAppend(t *testing.T) {
 	tests := []struct {
 		typeID  arrow.Type

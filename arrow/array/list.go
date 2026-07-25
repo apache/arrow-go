@@ -557,7 +557,36 @@ func (b *LargeListBuilder) NewLargeListArray() (a *LargeList) {
 	return
 }
 
+func (b *baseListBuilder) validateOffsets() {
+	count := b.offsets.Len()
+	if count != b.length && count != b.length+1 {
+		panic(fmt.Errorf("%w: arrow/array: list offset count must equal list length or list length plus one (offsets=%d, lists=%d)",
+			arrow.ErrInvalid, count, b.length))
+	}
+	valueLen := int64(b.values.Len())
+	var previous int64
+	for i := 0; i < count; i++ {
+		var offset int64
+		switch offsets := b.offsets.(type) {
+		case *Int32Builder:
+			offset = int64(offsets.Value(i))
+		case *Int64Builder:
+			offset = offsets.Value(i)
+		}
+		if offset < 0 || offset > valueLen {
+			panic(fmt.Errorf("%w: arrow/array: list offset at index %d is out of bounds: %d not in [0, %d]",
+				arrow.ErrInvalid, i, offset, valueLen))
+		}
+		if i > 0 && offset < previous {
+			panic(fmt.Errorf("%w: arrow/array: list offsets are not monotonically non-decreasing at index %d: %d < %d",
+				arrow.ErrInvalid, i, offset, previous))
+		}
+		previous = offset
+	}
+}
+
 func (b *baseListBuilder) newData() (data *Data) {
+	b.validateOffsets()
 	if b.offsets.Len() != b.length+1 {
 		b.appendNextOffset()
 	}
