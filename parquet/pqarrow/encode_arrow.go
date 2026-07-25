@@ -674,6 +674,12 @@ func writeCoerceTimestamps(arr *array.Timestamp, props *ArrowWriterProperties, o
 	vals := arr.TimestampValues()
 	multiply := func(factor int64) error {
 		for idx, val := range vals {
+			if !arr.IsValid(idx) {
+				continue
+			}
+			if int64(val) > math.MaxInt64/factor || int64(val) < math.MinInt64/factor {
+				return fmt.Errorf("%w: casting timestamp from %s to %s would overflow", arrow.ErrInvalid, source, target)
+			}
 			out[idx] = int64(val) * factor
 		}
 		return nil
