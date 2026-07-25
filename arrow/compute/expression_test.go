@@ -234,6 +234,7 @@ func TestExpressionSerializationRoundTrip(t *testing.T) {
 		{"is_in cast", compute.NewCall("is_in", []compute.Expression{
 			compute.NewCall("cast", []compute.Expression{compute.NewFieldRef("version")}, compute.NewCastOptions(arrow.PrimitiveTypes.Float64, true))},
 			&compute.SetLookupOptions{ValueSet: fltvalueset})},
+		{"is null", compute.IsNull(compute.NewFieldRef("validity"), true)},
 		{"is valid", compute.IsValid(compute.NewFieldRef("validity"))},
 		{"lots and", compute.And(
 			compute.And(
