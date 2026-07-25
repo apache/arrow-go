@@ -43,6 +43,11 @@ func TestLevelDecoderV2StopsAtDeclaredRLELength(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestLevelDecoderV2RejectsOversizedDeclaredLength(t *testing.T) {
+	var dec LevelDecoder
+	require.Error(t, dec.SetDataV2(3, 1, 1, []byte{2, 1}))
+}
+
 func TestRLEBooleanDecoderStopsAtDeclaredLength(t *testing.T) {
 	dec := NewDecoder(parquet.Types.Boolean, parquet.Encodings.RLE, nil, memory.DefaultAllocator)
 	require.NoError(t, dec.SetData(1, []byte{1, 0, 0, 0, 2, 1}))
