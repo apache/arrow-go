@@ -588,7 +588,9 @@ func TestFixedSizeListNullableElems(t *testing.T) {
 
 	vb := bldr.ValueBuilder().(*array.Int64Builder)
 	bldr.AppendValues([]bool{false, true, true, false})
+	vb.AppendNulls(2)
 	vb.AppendValues([]int64{2, 3, 4, 5}, nil)
+	vb.AppendNulls(2)
 
 	// produce: [null, [2, 3], [4, 5], null]
 
@@ -621,7 +623,9 @@ func TestFixedSizeListMissingMiddleTwoVisitedRanges(t *testing.T) {
 
 	vb := bldr.ValueBuilder().(*array.Int64Builder)
 	bldr.AppendValues([]bool{true, false, true})
-	vb.AppendValues([]int64{0, 1, 2, 3}, nil)
+	vb.AppendValues([]int64{0, 1}, nil)
+	vb.AppendNulls(2)
+	vb.AppendValues([]int64{2, 3}, nil)
 
 	// produce: [[0, 1], null, [2, 3]]
 

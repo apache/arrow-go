@@ -17,6 +17,7 @@
 package array_test
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -31,26 +32,22 @@ func TestFixedSizeListArray(t *testing.T) {
 	defer pool.AssertSize(t, 0)
 
 	var (
-		vs      = []int32{0, 1, 2, 3, 4, 5, 6}
-		lengths = []int{3, 0, 4}
+		vs      = []int32{0, 1, 2, 0, 0, 0, 3, 4, 5}
 		isValid = []bool{true, false, true}
 	)
 
-	lb := array.NewFixedSizeListBuilder(pool, int32(len(vs)), arrow.PrimitiveTypes.Int32)
+	lb := array.NewFixedSizeListBuilder(pool, 3, arrow.PrimitiveTypes.Int32)
 	defer lb.Release()
 
 	for i := 0; i < 10; i++ {
 		vb := lb.ValueBuilder().(*array.Int32Builder)
 		vb.Reserve(len(vs))
 
-		pos := 0
-		for i, length := range lengths {
-			lb.Append(isValid[i])
-			for j := 0; j < length; j++ {
-				vb.Append(vs[pos])
-				pos++
-			}
-		}
+		lb.Append(true)
+		vb.AppendValues(vs[:3], nil)
+		lb.AppendNull()
+		lb.Append(true)
+		vb.AppendValues(vs[6:], nil)
 
 		arr := lb.NewArray().(*array.FixedSizeList)
 		defer arr.Release()
@@ -66,11 +63,11 @@ func TestFixedSizeListArray(t *testing.T) {
 			t.Fatalf("got=%d, want=%d", got, want)
 		}
 
-		for i := range lengths {
+		for i := range isValid {
 			if got, want := arr.IsValid(i), isValid[i]; got != want {
 				t.Fatalf("got[%d]=%v, want[%d]=%v", i, got, i, want)
 			}
-			if got, want := arr.IsNull(i), lengths[i] == 0; got != want {
+			if got, want := arr.IsNull(i), !isValid[i]; got != want {
 				t.Fatalf("got[%d]=%v, want[%d]=%v", i, got, i, want)
 			}
 		}
@@ -100,12 +97,11 @@ func TestFixedSizeListArrayBulkAppend(t *testing.T) {
 	defer pool.AssertSize(t, 0)
 
 	var (
-		vs      = []int32{0, 1, 2, 3, 4, 5, 6}
-		lengths = []int{3, 0, 4}
+		vs      = []int32{0, 1, 2, 0, 0, 0, 3, 4, 5}
 		isValid = []bool{true, false, true}
 	)
 
-	lb := array.NewFixedSizeListBuilder(pool, int32(len(vs)), arrow.PrimitiveTypes.Int32)
+	lb := array.NewFixedSizeListBuilder(pool, 3, arrow.PrimitiveTypes.Int32)
 	defer lb.Release()
 	vb := lb.ValueBuilder().(*array.Int32Builder)
 	vb.Reserve(len(vs))
@@ -126,11 +122,11 @@ func TestFixedSizeListArrayBulkAppend(t *testing.T) {
 		t.Fatalf("got=%d, want=%d", got, want)
 	}
 
-	for i := range lengths {
+	for i := range isValid {
 		if got, want := arr.IsValid(i), isValid[i]; got != want {
 			t.Fatalf("got[%d]=%v, want[%d]=%v", i, got, i, want)
 		}
-		if got, want := arr.IsNull(i), lengths[i] == 0; got != want {
+		if got, want := arr.IsNull(i), !isValid[i]; got != want {
 			t.Fatalf("got[%d]=%v, want[%d]=%v", i, got, i, want)
 		}
 	}
@@ -214,6 +210,24 @@ func TestFixedSizeListArraySlice(t *testing.T) {
 	want = `[(null) [6 7 8]]`
 	if got, want := sub.String(), want; got != want {
 		t.Fatalf("got=%q, want=%q", got, want)
+	}
+}
+
+func TestFixedSizeListBuilderRejectsMismatchedValueLength(t *testing.T) {
+	for _, valueLen := range []int{1, 3} {
+		t.Run(fmt.Sprintf("values_%d", valueLen), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
+			b := array.NewFixedSizeListBuilder(mem, 2, arrow.PrimitiveTypes.Int32)
+			defer b.Release()
+			b.Append(true)
+			b.ValueBuilder().(*array.Int32Builder).AppendValues(make([]int32, valueLen), nil)
+
+			assert.PanicsWithError(t,
+				fmt.Sprintf("invalid: arrow/array: fixed-size list value count must equal list length times list size (values=%d, want=2)", valueLen),
+				func() { b.NewListArray() })
+		})
 	}
 }
 

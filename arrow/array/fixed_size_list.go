@@ -313,6 +313,11 @@ func (b *FixedSizeListBuilder) NewListArray() (a *FixedSizeList) {
 }
 
 func (b *FixedSizeListBuilder) newData() (data *Data) {
+	want := int64(b.length) * int64(b.n)
+	if int64(b.values.Len()) != want {
+		panic(fmt.Errorf("%w: arrow/array: fixed-size list value count must equal list length times list size (values=%d, want=%d)",
+			arrow.ErrInvalid, b.values.Len(), want))
+	}
 	values := b.values.NewArray()
 	defer values.Release()
 
