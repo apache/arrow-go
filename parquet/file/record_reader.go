@@ -522,7 +522,7 @@ func (rr *recordReader) Reset() {
 // process no more levels than necessary to delimit the indicated
 // number of logical records. updates internal state of recordreader
 // returns number of records delimited
-func (rr *recordReader) delimitRecords(numRecords int64) (recordsRead, valsToRead int64) {
+func (rr *recordReader) delimitRecords(numRecords int64) (recordsRead, valsToRead int64, err error) {
 	var (
 		curRep int16
 		curDef int16
@@ -533,6 +533,9 @@ func (rr *recordReader) delimitRecords(numRecords int64) (recordsRead, valsToRea
 
 	for rr.levelsPos < rr.levelsWritten {
 		curRep, repLevels = repLevels[0], repLevels[1:]
+		if rr.atRecStart && curRep != 0 {
+			return 0, 0, errors.New("parquet: record starts with a nonzero repetition level")
+		}
 		if curRep == 0 {
 			// if at record start, we are seeing the start of a record
 			// for the second time, such as after repeated calls to delimitrecords.
@@ -576,7 +579,10 @@ func (rr *recordReader) ReadRecordData(numRecords int64) (int64, error) {
 	)
 
 	if rr.Descriptor().MaxRepetitionLevel() > 0 {
-		recordsRead, valuesToRead = rr.delimitRecords(numRecords)
+		recordsRead, valuesToRead, err = rr.delimitRecords(numRecords)
+		if err != nil {
+			return 0, err
+		}
 	} else if rr.Descriptor().MaxDefinitionLevel() > 0 {
 		// no repetition levels, skip delimiting logic. each level
 		// represents null or not null entry
