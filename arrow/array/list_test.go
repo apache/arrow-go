@@ -346,60 +346,6 @@ func TestListArrayBulkAppend(t *testing.T) {
 	}
 }
 
-func TestListViewBuilderRejectsInvalidBulkDimensions(t *testing.T) {
-	for _, large := range []bool{false, true} {
-		name := "list_view"
-		if large {
-			name = "large_list_view"
-		}
-		t.Run(name, func(t *testing.T) {
-			tests := []struct {
-				name      string
-				offsets   []int64
-				sizes     []int64
-				valueLen  int
-				panicText string
-			}{
-				{name: "missing offset", sizes: []int64{0}, panicText: "invalid: arrow/array: list-view offset and size counts must be at least the list length (offsets=0, sizes=1, lists=1)"},
-				{name: "missing size", offsets: []int64{0}, panicText: "invalid: arrow/array: list-view offset and size counts must be at least the list length (offsets=1, sizes=0, lists=1)"},
-				{name: "negative size", offsets: []int64{0}, sizes: []int64{-1}, panicText: "invalid: arrow/array: list-view size at index 0 is negative: -1"},
-				{name: "negative offset", offsets: []int64{-1}, sizes: []int64{1}, valueLen: 1, panicText: "invalid: arrow/array: list-view offset at index 0 is negative: -1"},
-				{name: "range exceeds values", offsets: []int64{1}, sizes: []int64{2}, valueLen: 2, panicText: "invalid: arrow/array: list-view range at index 0 exceeds value length: 1 + 2 > 2"},
-			}
-
-			for _, tt := range tests {
-				t.Run(tt.name, func(t *testing.T) {
-					mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
-					defer mem.AssertSize(t, 0)
-
-					var b array.VarLenListLikeBuilder
-					if large {
-						lb := array.NewLargeListViewBuilder(mem, arrow.PrimitiveTypes.Int32)
-						lb.AppendValuesWithSizes(tt.offsets, tt.sizes, []bool{true})
-						b = lb
-					} else {
-						lb := array.NewListViewBuilder(mem, arrow.PrimitiveTypes.Int32)
-						offsets := make([]int32, len(tt.offsets))
-						sizes := make([]int32, len(tt.sizes))
-						for i := range tt.offsets {
-							offsets[i] = int32(tt.offsets[i])
-						}
-						for i := range tt.sizes {
-							sizes[i] = int32(tt.sizes[i])
-						}
-						lb.AppendValuesWithSizes(offsets, sizes, []bool{true})
-						b = lb
-					}
-					defer b.Release()
-					b.ValueBuilder().(*array.Int32Builder).AppendValues(make([]int32, tt.valueLen), nil)
-
-					assert.PanicsWithError(t, tt.panicText, func() { b.NewArray() })
-				})
-			}
-		})
-	}
-}
-
 func TestListViewArrayBulkAppend(t *testing.T) {
 	tests := []struct {
 		typeID  arrow.Type
@@ -479,6 +425,60 @@ func TestListViewArrayBulkAppend(t *testing.T) {
 			varr := arr.ListValues().(*array.Int32)
 			if got, want := varr.Int32Values(), vs; !reflect.DeepEqual(got, want) {
 				t.Fatalf("got=%v, want=%v", got, want)
+			}
+		})
+	}
+}
+
+func TestListViewBuilderRejectsInvalidBulkDimensions(t *testing.T) {
+	for _, large := range []bool{false, true} {
+		name := "list_view"
+		if large {
+			name = "large_list_view"
+		}
+		t.Run(name, func(t *testing.T) {
+			tests := []struct {
+				name      string
+				offsets   []int64
+				sizes     []int64
+				valueLen  int
+				panicText string
+			}{
+				{name: "missing offset", sizes: []int64{0}, panicText: "invalid: arrow/array: list-view offset and size counts must be at least the list length (offsets=0, sizes=1, lists=1)"},
+				{name: "missing size", offsets: []int64{0}, panicText: "invalid: arrow/array: list-view offset and size counts must be at least the list length (offsets=1, sizes=0, lists=1)"},
+				{name: "negative size", offsets: []int64{0}, sizes: []int64{-1}, panicText: "invalid: arrow/array: list-view size at index 0 is negative: -1"},
+				{name: "negative offset", offsets: []int64{-1}, sizes: []int64{1}, valueLen: 1, panicText: "invalid: arrow/array: list-view offset at index 0 is negative: -1"},
+				{name: "range exceeds values", offsets: []int64{1}, sizes: []int64{2}, valueLen: 2, panicText: "invalid: arrow/array: list-view range at index 0 exceeds value length: 1 + 2 > 2"},
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+					defer mem.AssertSize(t, 0)
+
+					var b array.VarLenListLikeBuilder
+					if large {
+						lb := array.NewLargeListViewBuilder(mem, arrow.PrimitiveTypes.Int32)
+						lb.AppendValuesWithSizes(tt.offsets, tt.sizes, []bool{true})
+						b = lb
+					} else {
+						lb := array.NewListViewBuilder(mem, arrow.PrimitiveTypes.Int32)
+						offsets := make([]int32, len(tt.offsets))
+						sizes := make([]int32, len(tt.sizes))
+						for i := range tt.offsets {
+							offsets[i] = int32(tt.offsets[i])
+						}
+						for i := range tt.sizes {
+							sizes[i] = int32(tt.sizes[i])
+						}
+						lb.AppendValuesWithSizes(offsets, sizes, []bool{true})
+						b = lb
+					}
+					defer b.Release()
+					b.ValueBuilder().(*array.Int32Builder).AppendValues(make([]int32, tt.valueLen), nil)
+
+					assert.PanicsWithError(t, tt.panicText, func() { b.NewArray() })
+				})
 			}
 		})
 	}
