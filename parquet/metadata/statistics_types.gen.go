@@ -79,11 +79,11 @@ func NewInt32StatisticsFromEncoded(descr *schema.Column, mem memory.Allocator, n
 	}
 
 	encodedMin := encoded.GetMin()
-	if encodedMin != nil && len(encodedMin) > 0 {
+	if encodedMin != nil {
 		ret.min = ret.plainDecode(encodedMin)
 	}
 	encodedMax := encoded.GetMax()
-	if encodedMax != nil && len(encodedMax) > 0 {
+	if encodedMax != nil {
 		ret.max = ret.plainDecode(encodedMax)
 	}
 	ret.hasMinMax = encoded.IsSetMax() || encoded.IsSetMin()
@@ -105,6 +105,15 @@ func (s *Int32Statistics) plainEncode(src int32) []byte {
 
 func (s *Int32Statistics) plainDecode(src []byte) int32 {
 	var buf [1]int32
+	width := s.descr.PhysicalType().ByteSize()
+	if s.descr.PhysicalType() == parquet.Types.FixedLenByteArray {
+		width = int(s.descr.TypeLength())
+	}
+	if len(src) < width {
+		padded := make([]byte, width)
+		copy(padded, src)
+		src = padded
+	}
 
 	decoder := encoding.NewDecoder(s.descr.PhysicalType(), parquet.Encodings.Plain, s.descr, s.mem)
 	decoder.SetData(1, src)
@@ -379,11 +388,11 @@ func NewInt64StatisticsFromEncoded(descr *schema.Column, mem memory.Allocator, n
 	}
 
 	encodedMin := encoded.GetMin()
-	if encodedMin != nil && len(encodedMin) > 0 {
+	if encodedMin != nil {
 		ret.min = ret.plainDecode(encodedMin)
 	}
 	encodedMax := encoded.GetMax()
-	if encodedMax != nil && len(encodedMax) > 0 {
+	if encodedMax != nil {
 		ret.max = ret.plainDecode(encodedMax)
 	}
 	ret.hasMinMax = encoded.IsSetMax() || encoded.IsSetMin()
@@ -405,6 +414,15 @@ func (s *Int64Statistics) plainEncode(src int64) []byte {
 
 func (s *Int64Statistics) plainDecode(src []byte) int64 {
 	var buf [1]int64
+	width := s.descr.PhysicalType().ByteSize()
+	if s.descr.PhysicalType() == parquet.Types.FixedLenByteArray {
+		width = int(s.descr.TypeLength())
+	}
+	if len(src) < width {
+		padded := make([]byte, width)
+		copy(padded, src)
+		src = padded
+	}
 
 	decoder := encoding.NewDecoder(s.descr.PhysicalType(), parquet.Encodings.Plain, s.descr, s.mem)
 	decoder.SetData(1, src)
@@ -679,11 +697,11 @@ func NewInt96StatisticsFromEncoded(descr *schema.Column, mem memory.Allocator, n
 	}
 
 	encodedMin := encoded.GetMin()
-	if encodedMin != nil && len(encodedMin) > 0 {
+	if encodedMin != nil {
 		ret.min = ret.plainDecode(encodedMin)
 	}
 	encodedMax := encoded.GetMax()
-	if encodedMax != nil && len(encodedMax) > 0 {
+	if encodedMax != nil {
 		ret.max = ret.plainDecode(encodedMax)
 	}
 	ret.hasMinMax = encoded.IsSetMax() || encoded.IsSetMin()
@@ -705,6 +723,15 @@ func (s *Int96Statistics) plainEncode(src parquet.Int96) []byte {
 
 func (s *Int96Statistics) plainDecode(src []byte) parquet.Int96 {
 	var buf [1]parquet.Int96
+	width := s.descr.PhysicalType().ByteSize()
+	if s.descr.PhysicalType() == parquet.Types.FixedLenByteArray {
+		width = int(s.descr.TypeLength())
+	}
+	if len(src) < width {
+		padded := make([]byte, width)
+		copy(padded, src)
+		src = padded
+	}
 
 	decoder := encoding.NewDecoder(s.descr.PhysicalType(), parquet.Encodings.Plain, s.descr, s.mem)
 	decoder.SetData(1, src)
@@ -957,11 +984,11 @@ func NewFloat32StatisticsFromEncoded(descr *schema.Column, mem memory.Allocator,
 	}
 
 	encodedMin := encoded.GetMin()
-	if encodedMin != nil && len(encodedMin) > 0 {
+	if encodedMin != nil {
 		ret.min = ret.plainDecode(encodedMin)
 	}
 	encodedMax := encoded.GetMax()
-	if encodedMax != nil && len(encodedMax) > 0 {
+	if encodedMax != nil {
 		ret.max = ret.plainDecode(encodedMax)
 	}
 	ret.hasMinMax = encoded.IsSetMax() || encoded.IsSetMin()
@@ -983,6 +1010,15 @@ func (s *Float32Statistics) plainEncode(src float32) []byte {
 
 func (s *Float32Statistics) plainDecode(src []byte) float32 {
 	var buf [1]float32
+	width := s.descr.PhysicalType().ByteSize()
+	if s.descr.PhysicalType() == parquet.Types.FixedLenByteArray {
+		width = int(s.descr.TypeLength())
+	}
+	if len(src) < width {
+		padded := make([]byte, width)
+		copy(padded, src)
+		src = padded
+	}
 
 	decoder := encoding.NewDecoder(s.descr.PhysicalType(), parquet.Encodings.Plain, s.descr, s.mem)
 	decoder.SetData(1, src)
@@ -1249,11 +1285,11 @@ func NewFloat64StatisticsFromEncoded(descr *schema.Column, mem memory.Allocator,
 	}
 
 	encodedMin := encoded.GetMin()
-	if encodedMin != nil && len(encodedMin) > 0 {
+	if encodedMin != nil {
 		ret.min = ret.plainDecode(encodedMin)
 	}
 	encodedMax := encoded.GetMax()
-	if encodedMax != nil && len(encodedMax) > 0 {
+	if encodedMax != nil {
 		ret.max = ret.plainDecode(encodedMax)
 	}
 	ret.hasMinMax = encoded.IsSetMax() || encoded.IsSetMin()
@@ -1275,6 +1311,15 @@ func (s *Float64Statistics) plainEncode(src float64) []byte {
 
 func (s *Float64Statistics) plainDecode(src []byte) float64 {
 	var buf [1]float64
+	width := s.descr.PhysicalType().ByteSize()
+	if s.descr.PhysicalType() == parquet.Types.FixedLenByteArray {
+		width = int(s.descr.TypeLength())
+	}
+	if len(src) < width {
+		padded := make([]byte, width)
+		copy(padded, src)
+		src = padded
+	}
 
 	decoder := encoding.NewDecoder(s.descr.PhysicalType(), parquet.Encodings.Plain, s.descr, s.mem)
 	decoder.SetData(1, src)
@@ -1541,11 +1586,11 @@ func NewBooleanStatisticsFromEncoded(descr *schema.Column, mem memory.Allocator,
 	}
 
 	encodedMin := encoded.GetMin()
-	if encodedMin != nil && len(encodedMin) > 0 {
+	if encodedMin != nil {
 		ret.min = ret.plainDecode(encodedMin)
 	}
 	encodedMax := encoded.GetMax()
-	if encodedMax != nil && len(encodedMax) > 0 {
+	if encodedMax != nil {
 		ret.max = ret.plainDecode(encodedMax)
 	}
 	ret.hasMinMax = encoded.IsSetMax() || encoded.IsSetMin()
@@ -1567,6 +1612,15 @@ func (s *BooleanStatistics) plainEncode(src bool) []byte {
 
 func (s *BooleanStatistics) plainDecode(src []byte) bool {
 	var buf [1]bool
+	width := s.descr.PhysicalType().ByteSize()
+	if s.descr.PhysicalType() == parquet.Types.FixedLenByteArray {
+		width = int(s.descr.TypeLength())
+	}
+	if len(src) < width {
+		padded := make([]byte, width)
+		copy(padded, src)
+		src = padded
+	}
 
 	decoder := encoding.NewDecoder(s.descr.PhysicalType(), parquet.Encodings.Plain, s.descr, s.mem)
 	decoder.SetData(1, src)
@@ -1898,13 +1952,13 @@ func NewByteArrayStatisticsFromEncoded(descr *schema.Column, mem memory.Allocato
 	}
 
 	encodedMin := encoded.GetMin()
-	if encodedMin != nil && len(encodedMin) > 0 {
+	if encodedMin != nil {
 		// Copy into a statistics-owned buffer so the stored min does not alias the
 		// encoded metadata buffer; SetMinMax reuses this buffer on later updates.
 		ret.min = append(ret.min[:0], ret.plainDecode(encodedMin)...)
 	}
 	encodedMax := encoded.GetMax()
-	if encodedMax != nil && len(encodedMax) > 0 {
+	if encodedMax != nil {
 		ret.max = append(ret.max[:0], ret.plainDecode(encodedMax)...)
 	}
 	ret.hasMinMax = encoded.IsSetMax() || encoded.IsSetMin()
@@ -2220,13 +2274,13 @@ func NewFixedLenByteArrayStatisticsFromEncoded(descr *schema.Column, mem memory.
 	}
 
 	encodedMin := encoded.GetMin()
-	if encodedMin != nil && len(encodedMin) > 0 {
+	if encodedMin != nil {
 		// Copy into a statistics-owned buffer so the stored min does not alias the
 		// encoded metadata buffer; SetMinMax reuses this buffer on later updates.
 		ret.min = append(ret.min[:0], ret.plainDecode(encodedMin)...)
 	}
 	encodedMax := encoded.GetMax()
-	if encodedMax != nil && len(encodedMax) > 0 {
+	if encodedMax != nil {
 		ret.max = append(ret.max[:0], ret.plainDecode(encodedMax)...)
 	}
 	ret.hasMinMax = encoded.IsSetMax() || encoded.IsSetMin()
@@ -2247,12 +2301,7 @@ func (s *FixedLenByteArrayStatistics) plainEncode(src parquet.FixedLenByteArray)
 }
 
 func (s *FixedLenByteArrayStatistics) plainDecode(src []byte) parquet.FixedLenByteArray {
-	var buf [1]parquet.FixedLenByteArray
-
-	decoder := encoding.NewDecoder(s.descr.PhysicalType(), parquet.Encodings.Plain, s.descr, s.mem)
-	decoder.SetData(1, src)
-	decoder.(encoding.FixedLenByteArrayDecoder).Decode(buf[:])
-	return buf[0]
+	return src
 }
 
 func (s *FixedLenByteArrayStatistics) minval(a, b parquet.FixedLenByteArray) parquet.FixedLenByteArray {
@@ -2552,13 +2601,13 @@ func NewFloat16StatisticsFromEncoded(descr *schema.Column, mem memory.Allocator,
 	}
 
 	encodedMin := encoded.GetMin()
-	if encodedMin != nil && len(encodedMin) > 0 {
+	if encodedMin != nil {
 		// Copy into a statistics-owned buffer so the stored min does not alias the
 		// encoded metadata buffer; SetMinMax reuses this buffer on later updates.
 		ret.min = append(ret.min[:0], ret.plainDecode(encodedMin)...)
 	}
 	encodedMax := encoded.GetMax()
-	if encodedMax != nil && len(encodedMax) > 0 {
+	if encodedMax != nil {
 		ret.max = append(ret.max[:0], ret.plainDecode(encodedMax)...)
 	}
 	ret.hasMinMax = encoded.IsSetMax() || encoded.IsSetMin()
@@ -2580,6 +2629,15 @@ func (s *Float16Statistics) plainEncode(src parquet.FixedLenByteArray) []byte {
 
 func (s *Float16Statistics) plainDecode(src []byte) parquet.FixedLenByteArray {
 	var buf [1]parquet.FixedLenByteArray
+	width := s.descr.PhysicalType().ByteSize()
+	if s.descr.PhysicalType() == parquet.Types.FixedLenByteArray {
+		width = int(s.descr.TypeLength())
+	}
+	if len(src) < width {
+		padded := make([]byte, width)
+		copy(padded, src)
+		src = padded
+	}
 
 	decoder := encoding.NewDecoder(s.descr.PhysicalType(), parquet.Encodings.Plain, s.descr, s.mem)
 	decoder.SetData(1, src)

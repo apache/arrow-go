@@ -606,6 +606,13 @@ func (FixedLenByteArrayStatistics) cleanStat(minMax minmaxPairFixedLenByteArray)
 }
 
 func GetStatValue(typ parquet.Type, val []byte) interface{} {
+	width := typ.ByteSize()
+	if width > 0 && len(val) < width {
+		padded := make([]byte, width)
+		copy(padded, val)
+		val = padded
+	}
+
 	switch typ {
 	case parquet.Types.Boolean:
 		return val[0] != 0

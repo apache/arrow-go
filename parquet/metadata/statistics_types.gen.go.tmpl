@@ -86,7 +86,7 @@ func New{{.Name}}StatisticsFromEncoded(descr *schema.Column, mem memory.Allocato
   }
 
   encodedMin := encoded.GetMin()
-  if encodedMin != nil && len(encodedMin) > 0 {
+  if encodedMin != nil {
 {{- if or (eq .name "parquet.ByteArray") (eq .name "parquet.FixedLenByteArray")}}
     // Copy into a statistics-owned buffer so the stored min does not alias the
     // encoded metadata buffer; SetMinMax reuses this buffer on later updates.
@@ -96,7 +96,7 @@ func New{{.Name}}StatisticsFromEncoded(descr *schema.Column, mem memory.Allocato
 {{- end}}
   }
   encodedMax := encoded.GetMax()
-  if encodedMax != nil && len(encodedMax) > 0 {
+  if encodedMax != nil {
 {{- if or (eq .name "parquet.ByteArray") (eq .name "parquet.FixedLenByteArray")}}
     ret.max = append(ret.max[:0], ret.plainDecode(encodedMax)...)
 {{- else}}
@@ -127,10 +127,19 @@ func (s *{{.Name}}Statistics) plainEncode(src {{.name}}) []byte {
 }
 
 func (s *{{.Name}}Statistics) plainDecode(src []byte) {{.name}} {
-{{- if eq .Name "ByteArray"}}
+{{- if or (eq .Name "ByteArray") (eq .Name "FixedLenByteArray")}}
   return src
 {{- else}}
   var buf [1]{{.name}}
+  width := s.descr.PhysicalType().ByteSize()
+  if s.descr.PhysicalType() == parquet.Types.FixedLenByteArray {
+    width = int(s.descr.TypeLength())
+  }
+  if len(src) < width {
+    padded := make([]byte, width)
+    copy(padded, src)
+    src = padded
+  }
 
   decoder := encoding.NewDecoder(s.descr.PhysicalType(), parquet.Encodings.Plain, s.descr, s.mem)
   decoder.SetData(1, src)
