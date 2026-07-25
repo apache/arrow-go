@@ -65,10 +65,39 @@ func TestDeltaByteArrayDecoderResetsBetweenPages(t *testing.T) {
 }
 
 func TestDeltaByteArrayDecoderRejectsInvalidPrefixes(t *testing.T) {
-	for _, prefixes := range [][]int32{{0, -1}, {0, 2}} {
-		dec := NewDecoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray, nil, memory.DefaultAllocator)
-		require.NoError(t, dec.SetData(2, deltaBytePage(t, prefixes, "a", "b")))
-		_, err := dec.(ByteArrayDecoder).Decode(make([]parquet.ByteArray, 2))
-		require.Error(t, err)
+	tests := []struct {
+		name     string
+		prefixes []int32
+	}{
+		{name: "nonzero first prefix", prefixes: []int32{1}},
+		{name: "negative prefix", prefixes: []int32{0, -1}},
+		{name: "prefix beyond previous value", prefixes: []int32{0, 2}},
+	}
+	operations := []struct {
+		name string
+		run  func(ByteArrayDecoder, int) error
+	}{
+		{name: "decode", run: func(dec ByteArrayDecoder, n int) error {
+			_, err := dec.Decode(make([]parquet.ByteArray, n))
+			return err
+		}},
+		{name: "discard", run: func(dec ByteArrayDecoder, n int) error {
+			_, err := dec.Discard(n)
+			return err
+		}},
+	}
+
+	for _, tt := range tests {
+		for _, op := range operations {
+			t.Run(tt.name+"/"+op.name, func(t *testing.T) {
+				suffixes := make([]string, len(tt.prefixes))
+				for i := range suffixes {
+					suffixes[i] = "a"
+				}
+				dec := NewDecoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray, nil, memory.DefaultAllocator)
+				require.NoError(t, dec.SetData(len(tt.prefixes), deltaBytePage(t, tt.prefixes, suffixes...)))
+				require.Error(t, op.run(dec.(ByteArrayDecoder), len(tt.prefixes)))
+			})
+		}
 	}
 }
