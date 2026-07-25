@@ -1332,7 +1332,42 @@ func (b *LargeListViewBuilder) NewLargeListViewArray() (a *LargeListView) {
 	return
 }
 
+func (b *baseListViewBuilder) validateDimensions() {
+	offsetCount, sizeCount := b.offsets.Len(), b.sizes.Len()
+	if offsetCount < b.length || sizeCount < b.length {
+		panic(fmt.Errorf("%w: arrow/array: list-view offset and size counts must be at least the list length (offsets=%d, sizes=%d, lists=%d)",
+			arrow.ErrInvalid, offsetCount, sizeCount, b.length))
+	}
+
+	valueLen := int64(b.values.Len())
+	for i := 0; i < b.length; i++ {
+		var offset, size int64
+		switch offsets := b.offsets.(type) {
+		case *Int32Builder:
+			offset = int64(offsets.Value(i))
+			size = int64(b.sizes.(*Int32Builder).Value(i))
+		case *Int64Builder:
+			offset = offsets.Value(i)
+			size = b.sizes.(*Int64Builder).Value(i)
+		}
+		if size < 0 {
+			panic(fmt.Errorf("%w: arrow/array: list-view size at index %d is negative: %d", arrow.ErrInvalid, i, size))
+		}
+		if size == 0 {
+			continue
+		}
+		if offset < 0 {
+			panic(fmt.Errorf("%w: arrow/array: list-view offset at index %d is negative: %d", arrow.ErrInvalid, i, offset))
+		}
+		if offset > valueLen || size > valueLen-offset {
+			panic(fmt.Errorf("%w: arrow/array: list-view range at index %d exceeds value length: %d + %d > %d",
+				arrow.ErrInvalid, i, offset, size, valueLen))
+		}
+	}
+}
+
 func (b *baseListViewBuilder) newData() (data *Data) {
+	b.validateDimensions()
 	values := b.values.NewArray()
 	defer values.Release()
 
