@@ -84,7 +84,10 @@ func (w *Writer) Write(record arrow.RecordBatch) error {
 	}
 
 	for j, col := range record.Columns() {
-		rows := w.transformColToStringArr(w.schema.Field(j).Type, col, w.stringReplacer)
+		rows, err := w.transformColToStringArr(w.schema.Field(j).Type, col, w.stringReplacer)
+		if err != nil {
+			return err
+		}
 		for i, row := range rows {
 			recs[i][j] = row
 		}
