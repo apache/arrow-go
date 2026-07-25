@@ -102,6 +102,14 @@ func TestMakeNullExtensionScalar(t *testing.T) {
 	assert.True(t, arrow.TypeEqual(dt.StorageType(), ext.Value.DataType()))
 }
 
+func TestNullExtensionScalarValidateRejectsNonNullStorage(t *testing.T) {
+	sc := scalar.NewExtensionScalar(scalar.NewInt16Scalar(1), types.NewSmallintType())
+	sc.Valid = false
+
+	assert.ErrorContains(t, sc.Validate(), "non-null storage value")
+	assert.ErrorContains(t, sc.ValidateFull(), "non-null storage value")
+}
+
 func TestMakeScalarUint(t *testing.T) {
 	three := scalar.MakeScalar(uint(3))
 	assert.NoError(t, three.ValidateFull())
