@@ -1774,3 +1774,11 @@ func TestRunEndEncodedNullScalar(t *testing.T) {
 	assert.NoError(t, sc.Validate())
 	assert.NoError(t, sc.ValidateFull())
 }
+
+func TestRunEndEncodedScalarValidateRejectsMissingNonNullValue(t *testing.T) {
+	sc := scalar.MakeNullScalar(arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int16, arrow.BinaryTypes.String)).(*scalar.RunEndEncoded)
+	sc.Valid = true
+
+	assert.ErrorContains(t, sc.Validate(), "has no value")
+	assert.ErrorContains(t, sc.ValidateFull(), "has no value")
+}
