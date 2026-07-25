@@ -501,8 +501,65 @@ func NewWithMetadata(meta Metadata, value []byte) (Value, error) {
 	if len(value) == 0 {
 		return Value{}, errors.New("invalid variant value: empty")
 	}
+	if err := validateScalarValue(value); err != nil {
+		return Value{}, err
+	}
 
 	return Value{value: value, meta: meta}, nil
+}
+
+func validateScalarValue(value []byte) error {
+	if basicTypeFromHeader(value[0]) == BasicShortString {
+		want := 1 + int(value[0]>>basicTypeBits)
+		if len(value) < want {
+			return fmt.Errorf("invalid variant value: short string requires %d bytes, got %d", want, len(value))
+		}
+		return nil
+	}
+	if basicTypeFromHeader(value[0]) != BasicPrimitive {
+		return nil
+	}
+
+	primitiveType := primitiveTypeFromHeader(value[0])
+	want := 0
+	switch primitiveType {
+	case PrimitiveNull, PrimitiveBoolTrue, PrimitiveBoolFalse:
+		want = 1
+	case PrimitiveInt8:
+		want = 2
+	case PrimitiveInt16:
+		want = 3
+	case PrimitiveInt32, PrimitiveDate, PrimitiveFloat:
+		want = 5
+	case PrimitiveInt64, PrimitiveDouble, PrimitiveTimeMicrosNTZ,
+		PrimitiveTimestampMicros, PrimitiveTimestampMicrosNTZ,
+		PrimitiveTimestampNanos, PrimitiveTimestampNanosNTZ:
+		want = 9
+	case PrimitiveDecimal4:
+		want = 6
+	case PrimitiveDecimal8:
+		want = 10
+	case PrimitiveDecimal16:
+		want = 18
+	case PrimitiveUUID:
+		want = 17
+	case PrimitiveBinary, PrimitiveString:
+		if len(value) < 5 {
+			return fmt.Errorf("invalid variant value: %s length prefix requires 5 bytes, got %d", primitiveType, len(value))
+		}
+		dataLen := uint64(binary.LittleEndian.Uint32(value[1:5]))
+		if dataLen > uint64(len(value)-5) {
+			return fmt.Errorf("invalid variant value: %s data requires %d bytes, got %d", primitiveType, dataLen, len(value)-5)
+		}
+		return nil
+	default:
+		return fmt.Errorf("invalid variant value: unknown primitive type %d", primitiveType)
+	}
+
+	if len(value) < want {
+		return fmt.Errorf("invalid variant value: %s requires %d bytes, got %d", primitiveType, want, len(value))
+	}
+	return nil
 }
 
 // New creates a Value by parsing both the metadata and value bytes.
