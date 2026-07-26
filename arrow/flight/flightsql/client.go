@@ -1106,9 +1106,9 @@ func (tx *Txn) RollbackSavepoint(ctx context.Context, sp Savepoint, opts ...grpc
 // and maintains a reference to the Client that created it along with the
 // prepared statement handle.
 //
-// If the server returned the Dataset Schema or Parameter Binding schemas
-// or an IsUpdate hint at creation, they will also be accessible from this object. Close
-// should be called when no longer needed.
+// If the server returned the Dataset Schema, Parameter Binding schemas,
+// or an IsUpdate hint at creation, they will also be accessible from this object.
+// Close should be called when no longer needed.
 type PreparedStatement struct {
 	client        *Client
 	handle        []byte
