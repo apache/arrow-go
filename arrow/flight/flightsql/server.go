@@ -1290,7 +1290,7 @@ func (f *flightSqlServer) DoAction(cmd *flight.Action, stream flight.FlightServi
 		if output.ParameterSchema != nil {
 			result.ParameterSchema = flight.SerializeSchema(output.ParameterSchema, f.mem)
 		}
-		// is_update is not relevant for prepared substrait plans
+		result.IsUpdate = output.IsUpdate
 
 		if err := anycmd.MarshalFrom(&result); err != nil {
 			return status.Errorf(codes.Internal, "unable to marshal final response: %s", err.Error())
