@@ -615,12 +615,12 @@ func GreaterEqual(lhs, rhs Expression) Expression {
 // IsNull creates an expression that returns true if the passed in expression is
 // null. Optionally treating NaN as null if desired.
 func IsNull(lhs Expression, nanIsNull bool) Expression {
-	return NewCall("less", []Expression{lhs}, &NullOptions{nanIsNull})
+	return NewCall("is_null", []Expression{lhs}, &NullOptions{nanIsNull})
 }
 
 // IsValid is the inverse of IsNull
 func IsValid(lhs Expression) Expression {
-	return NewCall("is_valid", []Expression{lhs}, nil)
+	return NewCall("is_not_null", []Expression{lhs}, nil)
 }
 
 type binop func(lhs, rhs Expression) Expression
