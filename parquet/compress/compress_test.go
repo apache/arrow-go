@@ -130,6 +130,19 @@ func TestCompressDataOneShot(t *testing.T) {
 	}
 }
 
+func TestUncompressedCodecAllocatesDestination(t *testing.T) {
+	codec, err := compress.GetCodec(compress.Codecs.Uncompressed)
+	assert.NoError(t, err)
+	src := []byte("arrow")
+
+	assert.Equal(t, src, codec.Encode(nil, src))
+	assert.Equal(t, src, codec.Encode(make([]byte, 1), src))
+	assert.Equal(t, src, codec.EncodeLevel(nil, src, 0))
+	assert.Equal(t, src, codec.EncodeLevel(make([]byte, 1), src, 0))
+	assert.Equal(t, src, codec.Decode(nil, src))
+	assert.Equal(t, src, codec.Decode(make([]byte, 1), src))
+}
+
 func TestGzipCompressBound(t *testing.T) {
 	codec, err := compress.GetCodec(compress.Codecs.Gzip)
 	assert.NoError(t, err)

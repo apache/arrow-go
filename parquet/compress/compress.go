@@ -161,10 +161,7 @@ func (nocodec) NewReader(r io.Reader) io.ReadCloser {
 }
 
 func (nocodec) Decode(dst, src []byte) []byte {
-	if dst != nil {
-		copy(dst, src)
-	}
-	return dst
+	return append(dst[:0], src...)
 }
 
 func (n nocodec) DecodeWithError(dst, src []byte) ([]byte, error) {
@@ -180,13 +177,11 @@ func (writerNopCloser) Close() error {
 }
 
 func (nocodec) Encode(dst, src []byte) []byte {
-	copy(dst, src)
-	return dst
+	return append(dst[:0], src...)
 }
 
 func (nocodec) EncodeLevel(dst, src []byte, _ int) []byte {
-	copy(dst, src)
-	return dst
+	return append(dst[:0], src...)
 }
 
 func (nocodec) NewWriter(w io.Writer) io.WriteCloser {
