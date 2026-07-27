@@ -573,6 +573,7 @@ func (b *StructBuilder) UnmarshalOne(dec *json.Decoder) error {
 			valDec := json.NewDecoder(bytes.NewReader(next))
 			valDec.UseNumber()
 			if err := b.fields[i].UnmarshalOne(valDec); err != nil {
+				b.Resize(-1)
 				return err
 			}
 		}
