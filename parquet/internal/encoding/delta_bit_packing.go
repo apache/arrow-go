@@ -402,9 +402,13 @@ func (enc *deltaBitPackEncoder[T]) Put(in []T) {
 
 	enc.totalVals += uint64(len(in))
 	for ; idx < len(in); idx++ {
-		val := int64(in[idx])
-		enc.deltas = append(enc.deltas, val-enc.currentVal)
-		enc.currentVal = val
+		// compute the delta at the physical type's width so that overflow wraps in
+		// two's complement, as the spec requires. Widening to int64 first would produce
+		// deltas (and miniblock bit-widths) beyond the type's width for INT32 columns,
+		// which other readers (parquet-cpp, arrow-rs) reject as corrupt.
+		delta := int64(in[idx] - T(enc.currentVal))
+		enc.deltas = append(enc.deltas, delta)
+		enc.currentVal = int64(in[idx])
 		if len(enc.deltas) == int(enc.blockSize) {
 			enc.flushBlock()
 		}

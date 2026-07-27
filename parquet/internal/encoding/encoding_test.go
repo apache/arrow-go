@@ -18,9 +18,11 @@ package encoding_test
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path"
 	"reflect"
@@ -34,6 +36,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
 	"github.com/apache/arrow-go/v18/parquet/internal/testutils"
+	"github.com/apache/arrow-go/v18/parquet/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -695,6 +698,148 @@ func TestWriteDeltaBitPackedInt32(t *testing.T) {
 				assert.Equalf(t, values[i:j], valueBuf, "indexes %d:%d", i, j)
 			}
 		}
+	})
+}
+
+// checkDeltaBitPackedWidths walks an encoded DELTA_BINARY_PACKED stream and asserts
+// that no miniblock bit-width exceeds the physical type's width. The spec requires
+// delta arithmetic to wrap at the type width, so a compliant INT32 stream can never
+// need more than 32 bits per delta; parquet-cpp and arrow-rs reject wider miniblocks.
+func checkDeltaBitPackedWidths(t *testing.T, data []byte, maxWidth byte) {
+	rdr := utils.NewBitReader(bytes.NewReader(data))
+
+	blockSize, ok := rdr.GetVlqInt()
+	require.True(t, ok)
+	numMini, ok := rdr.GetVlqInt()
+	require.True(t, ok)
+	totalValues, ok := rdr.GetVlqInt()
+	require.True(t, ok)
+	_, ok = rdr.GetZigZagVlqInt() // first value
+	require.True(t, ok)
+
+	valsPerMini := blockSize / numMini
+	batch := make([]uint64, valsPerMini)
+	remaining := int64(totalValues) - 1
+	for remaining > 0 {
+		_, ok = rdr.GetZigZagVlqInt() // min delta
+		require.True(t, ok)
+
+		widths := make([]byte, numMini)
+		for i := range widths {
+			w, err := rdr.ReadByte()
+			require.NoError(t, err)
+			widths[i] = w
+		}
+
+		for i := uint64(0); i < numMini && remaining > 0; i++ {
+			assert.LessOrEqualf(t, widths[i], maxWidth, "miniblock %d bit-width exceeds physical type width", i)
+			if widths[i] > 0 {
+				// miniblocks are always padded to full length
+				n, err := rdr.GetBatch(uint(widths[i]), batch)
+				require.NoError(t, err)
+				require.EqualValues(t, valsPerMini, n)
+			}
+			remaining -= min(int64(valsPerMini), remaining)
+		}
+	}
+}
+
+// Deltas between consecutive INT32 values can exceed the int32 range; the spec
+// requires them to wrap at the type width. Encoding them at int64 width instead
+// produces >32-bit miniblocks that only arrow-go itself can read back.
+func TestDeltaBitPackedDeltaOverflow(t *testing.T) {
+	t.Run("int32 alternating min max", func(t *testing.T) {
+		column := schema.NewColumn(schema.NewInt32Node("int32", parquet.Repetitions.Required, -1), 0, 0)
+		values := make([]int32, 1024)
+		for i := range values {
+			if i%2 == 0 {
+				values[i] = math.MinInt32
+			} else {
+				values[i] = math.MaxInt32
+			}
+		}
+
+		enc := encoding.NewEncoder(parquet.Types.Int32, parquet.Encodings.DeltaBinaryPacked, false, column, memory.DefaultAllocator)
+		enc.(encoding.Int32Encoder).Put(values)
+		buf, _ := enc.FlushValues()
+		defer buf.Release()
+
+		checkDeltaBitPackedWidths(t, buf.Bytes(), 32)
+
+		dec := encoding.NewDecoder(parquet.Types.Int32, parquet.Encodings.DeltaBinaryPacked, column, memory.DefaultAllocator)
+		require.NoError(t, dec.(encoding.Int32Decoder).SetData(len(values), buf.Bytes()))
+		out := make([]int32, len(values))
+		_, err := dec.(encoding.Int32Decoder).Decode(out)
+		require.NoError(t, err)
+		assert.Equal(t, values, out)
+	})
+
+	t.Run("int32 random full range", func(t *testing.T) {
+		column := schema.NewColumn(schema.NewInt32Node("int32", parquet.Repetitions.Required, -1), 0, 0)
+		values := make([]int32, 1000)
+		testutils.FillRandomInt32(0, values)
+
+		enc := encoding.NewEncoder(parquet.Types.Int32, parquet.Encodings.DeltaBinaryPacked, false, column, memory.DefaultAllocator)
+		enc.(encoding.Int32Encoder).Put(values)
+		buf, _ := enc.FlushValues()
+		defer buf.Release()
+
+		checkDeltaBitPackedWidths(t, buf.Bytes(), 32)
+
+		dec := encoding.NewDecoder(parquet.Types.Int32, parquet.Encodings.DeltaBinaryPacked, column, memory.DefaultAllocator)
+		require.NoError(t, dec.(encoding.Int32Decoder).SetData(len(values), buf.Bytes()))
+		out := make([]int32, len(values))
+		_, err := dec.(encoding.Int32Decoder).Decode(out)
+		require.NoError(t, err)
+		assert.Equal(t, values, out)
+	})
+
+	t.Run("int32 wrapped delta encoding", func(t *testing.T) {
+		// MaxInt32 -> MinInt32 wraps to a delta of +1, so the block encodes
+		// min_delta=1 with zero-width miniblocks.
+		column := schema.NewColumn(schema.NewInt32Node("int32", parquet.Repetitions.Required, -1), 0, 0)
+		values := []int32{math.MaxInt32, math.MinInt32}
+
+		enc := encoding.NewEncoder(parquet.Types.Int32, parquet.Encodings.DeltaBinaryPacked, false, column, memory.DefaultAllocator)
+		enc.(encoding.Int32Encoder).Put(values)
+		buf, _ := enc.FlushValues()
+		defer buf.Release()
+
+		expected := []byte{
+			128, 1, // block size 128
+			4,                      // 4 miniblocks per block
+			2,                      // 2 values
+			254, 255, 255, 255, 15, // first value zigzag(MaxInt32)
+			2,          // min delta zigzag(+1)
+			0, 0, 0, 0, // all-zero miniblock widths
+		}
+		assert.Equal(t, expected, buf.Bytes())
+	})
+
+	t.Run("int64 alternating min max", func(t *testing.T) {
+		column := schema.NewColumn(schema.NewInt64Node("int64", parquet.Repetitions.Required, -1), 0, 0)
+		values := make([]int64, 1024)
+		for i := range values {
+			if i%2 == 0 {
+				values[i] = math.MinInt64
+			} else {
+				values[i] = math.MaxInt64
+			}
+		}
+
+		enc := encoding.NewEncoder(parquet.Types.Int64, parquet.Encodings.DeltaBinaryPacked, false, column, memory.DefaultAllocator)
+		enc.(encoding.Int64Encoder).Put(values)
+		buf, _ := enc.FlushValues()
+		defer buf.Release()
+
+		checkDeltaBitPackedWidths(t, buf.Bytes(), 64)
+
+		dec := encoding.NewDecoder(parquet.Types.Int64, parquet.Encodings.DeltaBinaryPacked, column, memory.DefaultAllocator)
+		require.NoError(t, dec.(encoding.Int64Decoder).SetData(len(values), buf.Bytes()))
+		out := make([]int64, len(values))
+		_, err := dec.(encoding.Int64Decoder).Decode(out)
+		require.NoError(t, err)
+		assert.Equal(t, values, out)
 	})
 }
 
