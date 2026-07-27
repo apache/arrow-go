@@ -145,14 +145,14 @@ var (
 	fullData = [][]string{
 		{"bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32", "f64", "str", "large_str", "ts_s", "d32", "d64", "dec128", "dec256", "list(i64)", "large_list(i64)", "fixed_size_list(i64)", "binary", "large_binary", "fixed_size_binary", "uuid", "null"},
 		{"true", "-1", "-1", "-1", "-1", "0", "0", "0", "0", "0", "0", "0", "str-0", "str-0", "2014-07-28 15:04:05", "2017-05-18", "2028-04-26", "-123.45", "-123.45", "{1,2,3}", "{1,2,3}", "{1,2,3}", "AAEC", "AAEC", "AAEC", "00000000-0000-0000-0000-000000000001", nullVal},
-		{"false", "0", "0", "0", "0", "1", "1", "1", "1", "0.099975586", "0.1", "0.1", "str-1", "str-1", "2016-09-08 15:04:05", "2022-11-08", "2031-06-28", "0", "0", "{4,5,6}", "{4,5,6}", "{4,5,6}", "AwQF", "AwQF", "AwQF", "00000000-0000-0000-0000-000000000002", nullVal},
+		{"false", "0", "0", "0", "0", "1", "1", "1", "1", "0.099975586", "0.1", "0.1", "str-1", "str-1", "2016-09-08 15:04:05", "2022-11-08", "2031-06-28", "0.00", "0.00", "{4,5,6}", "{4,5,6}", "{4,5,6}", "AwQF", "AwQF", "AwQF", "00000000-0000-0000-0000-000000000002", nullVal},
 		{"true", "1", "1", "1", "1", "2", "2", "2", "2", "0.19995117", "0.2", "0.2", "str-2", "str-2", "2021-09-18 15:04:05", "2025-08-04", "2034-08-28", "123.45", "123.45", "{7,8,9}", "{7,8,9}", "{7,8,9}", "", "", "AAAA", "00000000-0000-0000-0000-000000000003", nullVal},
 		{nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal},
 	}
 	bananaData = [][]string{
 		{"bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32", "f64", "str", "large_str", "ts_s", "d32", "d64", "dec128", "dec256", "list(i64)", "large_list(i64)", "fixed_size_list(i64)", "binary", "large_binary", "fixed_size_binary", "uuid", "null"},
 		{"BANANA", "-1", "-1", "-1", "-1", "0", "0", "0", "0", "0", "0", "0", "str-0", "str-0", "2014-07-28 15:04:05", "2017-05-18", "2028-04-26", "-123.45", "-123.45", "{1,2,3}", "{1,2,3}", "{1,2,3}", "AAEC", "AAEC", "AAEC", "00000000-0000-0000-0000-000000000001", nullVal},
-		{"MANGO", "0", "0", "0", "0", "1", "1", "1", "1", "0.099975586", "0.1", "0.1", "str-1", "str-1", "2016-09-08 15:04:05", "2022-11-08", "2031-06-28", "0", "0", "{4,5,6}", "{4,5,6}", "{4,5,6}", "AwQF", "AwQF", "AwQF", "00000000-0000-0000-0000-000000000002", nullVal},
+		{"MANGO", "0", "0", "0", "0", "1", "1", "1", "1", "0.099975586", "0.1", "0.1", "str-1", "str-1", "2016-09-08 15:04:05", "2022-11-08", "2031-06-28", "0.00", "0.00", "{4,5,6}", "{4,5,6}", "{4,5,6}", "AwQF", "AwQF", "AwQF", "00000000-0000-0000-0000-000000000002", nullVal},
 		{"BANANA", "1", "1", "1", "1", "2", "2", "2", "2", "0.19995117", "0.2", "0.2", "str-2", "str-2", "2021-09-18 15:04:05", "2025-08-04", "2034-08-28", "123.45", "123.45", "{7,8,9}", "{7,8,9}", "{7,8,9}", "", "", "AAAA", "00000000-0000-0000-0000-000000000003", nullVal},
 		{nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal},
 	}
@@ -435,6 +435,32 @@ func BenchmarkWrite(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func TestCSVWriterPreservesDecimalScaleAndPrecision(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	type128 := &arrow.Decimal128Type{Precision: 38, Scale: 10}
+	type256 := &arrow.Decimal256Type{Precision: 76, Scale: -10}
+	builder := array.NewRecordBuilder(mem, arrow.NewSchema([]arrow.Field{
+		{Name: "decimal128", Type: type128},
+		{Name: "decimal256", Type: type256},
+	}, nil))
+	defer builder.Release()
+
+	value128 := decimal128.FromU64(12345678901234567890)
+	value256 := decimal256.FromU64(12345678901234567890)
+	builder.Field(0).(*array.Decimal128Builder).Append(value128)
+	builder.Field(1).(*array.Decimal256Builder).Append(value256)
+	record := builder.NewRecordBatch()
+	defer record.Release()
+
+	var output bytes.Buffer
+	writer := csv.NewWriter(&output, record.Schema())
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Flush())
+	assert.Equal(t, value128.ToString(type128.Scale)+","+value256.ToString(type256.Scale)+"\n", output.String())
 }
 
 // TestParquetTestingCSVWriter tests that the CSV writer successfully convert arrow/parquet-testing files to CSV
