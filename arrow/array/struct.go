@@ -395,6 +395,19 @@ func (b *StructBuilder) init(capacity int) {
 	b.builder.init(capacity)
 }
 
+func (b *StructBuilder) columnLenRange() (lower, upper int) {
+	if len(b.fields) > 0 {
+		lower = b.fields[0].Len()
+		upper = lower
+
+		for _, f := range b.fields[1:] {
+			lower = min(lower, f.Len())
+			upper = max(upper, f.Len())
+		}
+	}
+	return
+}
+
 // Reserve ensures there is enough space for appending n elements
 // by checking the capacity and calling Resize if necessary.
 func (b *StructBuilder) Reserve(n int) {
@@ -406,7 +419,17 @@ func (b *StructBuilder) Reserve(n int) {
 
 // Resize adjusts the space allocated by b to n elements. If n is greater than b.Cap(),
 // additional memory will be allocated. If n is smaller, the allocated memory may reduced.
+//
+// As a special case, if n equals to -1, all field builders will be resized
+// to the size of the shortest one.
 func (b *StructBuilder) Resize(n int) {
+	if n == -1 {
+		lower, upper := b.columnLenRange()
+		if lower != upper {
+			n = lower
+		}
+	}
+
 	b.resizeHelper(n)
 	for _, f := range b.fields {
 		f.Resize(n)
