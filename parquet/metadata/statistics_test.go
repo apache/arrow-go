@@ -858,3 +858,39 @@ func TestByteArrayStatisticsFromEncodedOwnsMinMax(t *testing.T) {
 	assert.Equal(t, "aaa", string(stats.Min()))
 	assert.Equal(t, "zzz", string(stats.Max()))
 }
+
+func TestMalformedFixedWidthStatisticsAreIgnored(t *testing.T) {
+	descr := schema.NewColumn(schema.NewInt32Node("i32", parquet.Repetitions.Required, -1), 0, 0)
+	stats := metadata.NewStatisticsFromEncoded(descr, memory.DefaultAllocator, 1,
+		&encodedStatProvider{min: []byte{0x34, 0x12}, max: []byte{0x78}}).(*metadata.Int32Statistics)
+
+	assert.False(t, stats.HasMinMax())
+	assert.Equal(t, []byte{0x34, 0x12}, metadata.GetStatValue(parquet.Types.Int32, []byte{0x34, 0x12}))
+	assert.Equal(t, []byte(nil), metadata.GetStatValue(parquet.Types.Boolean, nil))
+
+	for _, typ := range []parquet.Type{
+		parquet.Types.Boolean,
+		parquet.Types.Int32,
+		parquet.Types.Int64,
+		parquet.Types.Int96,
+		parquet.Types.Float,
+		parquet.Types.Double,
+	} {
+		assert.NotPanics(t, func() {
+			metadata.GetStatValue(typ, []byte{1})
+		})
+	}
+}
+
+func TestMalformedFixedLenByteArrayStatisticsAreIgnored(t *testing.T) {
+	descr := schema.NewColumn(schema.NewFixedLenByteArrayNode("flba", parquet.Repetitions.Required, 8, -1), 0, 0)
+	stats := metadata.NewStatisticsFromEncoded(descr, memory.DefaultAllocator, 1,
+		&encodedStatProvider{min: []byte("ab"), max: []byte("xy")}).(*metadata.FixedLenByteArrayStatistics)
+
+	assert.False(t, stats.HasMinMax())
+}
+
+func TestGetStatValuePreservesByteArrays(t *testing.T) {
+	assert.Equal(t, []byte("ab"), metadata.GetStatValue(parquet.Types.ByteArray, []byte("ab")))
+	assert.Equal(t, []byte("xy"), metadata.GetStatValue(parquet.Types.FixedLenByteArray, []byte("xy")))
+}

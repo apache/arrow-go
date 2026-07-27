@@ -605,7 +605,37 @@ func (FixedLenByteArrayStatistics) cleanStat(minMax minmaxPairFixedLenByteArray)
 	return &minMax
 }
 
+func fixedStatByteWidth(typ parquet.Type) (int, bool) {
+	switch typ {
+	case parquet.Types.Boolean:
+		return 1, true
+	case parquet.Types.Int32, parquet.Types.Float:
+		return 4, true
+	case parquet.Types.Int64, parquet.Types.Double:
+		return 8, true
+	case parquet.Types.Int96:
+		return 12, true
+	default:
+		return 0, false
+	}
+}
+
+func validEncodedStat(descr *schema.Column, val []byte) bool {
+	if descr.PhysicalType() == parquet.Types.ByteArray {
+		return true
+	}
+	if descr.PhysicalType() == parquet.Types.FixedLenByteArray {
+		return len(val) == int(descr.TypeLength())
+	}
+	width, ok := fixedStatByteWidth(descr.PhysicalType())
+	return ok && len(val) == width
+}
+
 func GetStatValue(typ parquet.Type, val []byte) interface{} {
+	if width, ok := fixedStatByteWidth(typ); ok && len(val) != width {
+		return val
+	}
+
 	switch typ {
 	case parquet.Types.Boolean:
 		return val[0] != 0
