@@ -315,27 +315,25 @@ func (d *typedDictDecoder[T]) DecodeSpaced(out []T, nullCount int, validBits []b
 
 type dictConverter[T parquet.ColumnTypes] struct {
 	valueDecoder Decoder[T]
+	dictLen      int
 	dict         []T
 	zeroVal      T
 }
 
 func (dc *dictConverter[T]) ensure(idx utils.IndexType) error {
+	if idx < 0 || int64(idx) >= int64(dc.dictLen) {
+		return fmt.Errorf("parquet: dictionary index %d is out of range", idx)
+	}
 	if len(dc.dict) <= int(idx) {
-		if cap(dc.dict) <= int(idx) {
-			val := make([]T, int(idx+1)-len(dc.dict))
-			n, err := dc.valueDecoder.Decode(val)
-			if err != nil {
-				return err
-			}
-			dc.dict = append(dc.dict, val[:n]...)
-		} else {
-			cur := len(dc.dict)
-			n, err := dc.valueDecoder.Decode(dc.dict[cur : idx+1])
-			if err != nil {
-				return err
-			}
-			dc.dict = dc.dict[:cur+n]
+		val := make([]T, int(idx)+1-len(dc.dict))
+		n, err := dc.valueDecoder.Decode(val)
+		if err != nil {
+			return err
 		}
+		if n != len(val) {
+			return errors.New("parquet: dictionary contains fewer values than declared")
+		}
+		dc.dict = append(dc.dict, val[:n]...)
 	}
 	return nil
 }
@@ -717,7 +715,7 @@ func (enc *DictFixedLenByteArrayEncoder) Type() parquet.Type {
 // NewDictConverter creates a dict converter of the appropriate type, using the passed in
 // decoder as the decoder to decode the dictionary index.
 func NewDictConverter[T parquet.ColumnTypes](dict TypedDecoder) utils.DictionaryConverter[T] {
-	return &dictConverter[T]{valueDecoder: dict.(Decoder[T]), dict: make([]T, 0, dict.ValuesLeft())}
+	return &dictConverter[T]{valueDecoder: dict.(Decoder[T]), dictLen: dict.ValuesLeft()}
 }
 
 var (
