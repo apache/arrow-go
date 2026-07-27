@@ -1201,6 +1201,10 @@ func (b *DenseUnionBuilder) AppendNull() {
 // for a DenseUnion this is more efficient than calling AppendNull multiple
 // times in a loop
 func (b *DenseUnionBuilder) AppendNulls(n int) {
+	if n <= 0 {
+		return
+	}
+
 	// only append 1 null to the child builder, use the same offset twice
 	firstChildCode := b.codes[0]
 	childBuilder := b.typeIDtoBuilder[firstChildCode]
@@ -1228,6 +1232,10 @@ func (b *DenseUnionBuilder) AppendEmptyValue() {
 // at that value using the offsets n times. That makes this more efficient
 // than calling AppendEmptyValue multiple times.
 func (b *DenseUnionBuilder) AppendEmptyValues(n int) {
+	if n <= 0 {
+		return
+	}
+
 	// only append 1 null to the child builder, use the same offset twice
 	firstChildCode := b.codes[0]
 	childBuilder := b.typeIDtoBuilder[firstChildCode]

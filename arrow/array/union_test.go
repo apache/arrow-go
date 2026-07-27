@@ -1148,6 +1148,30 @@ func TestUnions(t *testing.T) {
 	suite.Run(t, new(UnionBuilderSuite))
 }
 
+func TestDenseUnionBuilderZeroBulkAppendDoesNotMutateChildren(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	typ := arrow.DenseUnionOf(
+		[]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}},
+		[]arrow.UnionTypeCode{0},
+	)
+	builder := array.NewDenseUnionBuilder(mem, typ)
+	defer builder.Release()
+
+	builder.AppendNulls(0)
+	builder.AppendEmptyValues(0)
+	assert.Zero(t, builder.Len())
+	assert.Zero(t, builder.Child(0).Len())
+
+	builder.Append(0)
+	builder.Child(0).(*array.Int32Builder).Append(42)
+	result := builder.NewDenseUnionArray()
+	defer result.Release()
+	assert.EqualValues(t, 0, result.ValueOffset(0))
+	assert.EqualValues(t, 42, result.Field(0).(*array.Int32).Value(0))
+}
+
 func TestNestedUnionStructDict(t *testing.T) {
 	// ARROW-18274
 	dt1 := arrow.SparseUnionOf([]arrow.Field{
