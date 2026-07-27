@@ -132,6 +132,10 @@ type ExtensionCustomParquetType interface {
 // ExtensionCustomArrowReadType is an interface that Arrow ExtensionTypes may
 // implement to specify how a Parquet LogicalType maps back to an Arrow
 // ExtensionType when converting a Parquet schema to an Arrow schema on read.
+// The receiver is the registered extension type being asked whether it can
+// represent the Parquet logical type with the given storage type; callers must
+// use the returned extension type because it may be a distinct instance carrying
+// per-column parameters derived from the Parquet logical type.
 //
 // ArrowTypeFromParquet should return (nil, nil) if the logical type does not
 // map to the extension type. It should return (nil, err) if the logical type is
