@@ -135,9 +135,7 @@ type ExtensionCustomParquetType interface {
 //
 // ArrowTypeFromParquet should return (nil, nil) if the logical type does not
 // map to the extension type. It should return (nil, err) if the logical type is
-// recognized but cannot be converted into a valid extension type. If a
-// non-nil extension type is returned, that type is used and any previous
-// conversion errors from other extension types are ignored.
+// recognized but there was an issue converting into a valid extension type.
 type ExtensionCustomArrowReadType interface {
 	ArrowTypeFromParquet(logical schema.LogicalType, storageType arrow.DataType) (arrow.ExtensionType, error)
 }
@@ -560,6 +558,8 @@ func arrowFromByteArray(logical schema.LogicalType) (arrow.DataType, error) {
 // arrowExtensionFromParquetLogicalType asks registered extension types whether
 // they can represent the provided Parquet logical type with the given storage
 // type, falling back to the storage type when none opt in.
+// As long as one non-nil extension type is returned and maps without an error, that
+// type is used and any previous conversion errors from other extension types are ignored.
 func arrowExtensionFromParquetLogicalType(logical schema.LogicalType, storageType arrow.DataType) (arrow.DataType, error) {
 	var (
 		typ           arrow.ExtensionType
