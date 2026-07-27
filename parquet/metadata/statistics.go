@@ -388,8 +388,8 @@ var (
 	defaultMaxInt96  parquet.Int96
 	defaultMaxUInt96 parquet.Int96
 
-	defaultMinFloat16 parquet.FixedLenByteArray = float16.MaxNum.ToLEBytes()
-	defaultMaxFloat16 parquet.FixedLenByteArray = float16.MinNum.ToLEBytes()
+	defaultMinFloat16 parquet.FixedLenByteArray = float16.Inf().ToLEBytes()
+	defaultMaxFloat16 parquet.FixedLenByteArray = float16.Inf().Negate().ToLEBytes()
 )
 
 func init() {
@@ -432,10 +432,10 @@ func (Float16Statistics) defaultMax() parquet.FixedLenByteArray {
 	return defaultMaxFloat16
 }
 
-func (Float32Statistics) defaultMin() float32                             { return math.MaxFloat32 }
-func (Float32Statistics) defaultMax() float32                             { return -math.MaxFloat32 }
-func (Float64Statistics) defaultMin() float64                             { return math.MaxFloat64 }
-func (Float64Statistics) defaultMax() float64                             { return -math.MaxFloat64 }
+func (Float32Statistics) defaultMin() float32                             { return float32(math.Inf(1)) }
+func (Float32Statistics) defaultMax() float32                             { return float32(math.Inf(-1)) }
+func (Float64Statistics) defaultMin() float64                             { return math.Inf(1) }
+func (Float64Statistics) defaultMax() float64                             { return math.Inf(-1) }
 func (ByteArrayStatistics) defaultMin() parquet.ByteArray                 { return nil }
 func (ByteArrayStatistics) defaultMax() parquet.ByteArray                 { return nil }
 func (FixedLenByteArrayStatistics) defaultMin() parquet.FixedLenByteArray { return nil }
@@ -531,7 +531,7 @@ func (Float32Statistics) cleanStat(minMax minmaxPairFloat32) *minmaxPairFloat32 
 		return nil
 	}
 
-	if minMax[0] == math.MaxFloat32 && minMax[1] == -math.MaxFloat32 {
+	if minMax[0] > minMax[1] {
 		return nil
 	}
 
@@ -552,7 +552,7 @@ func (Float64Statistics) cleanStat(minMax minmaxPairFloat64) *minmaxPairFloat64 
 		return nil
 	}
 
-	if minMax[0] == math.MaxFloat64 && minMax[1] == -math.MaxFloat64 {
+	if minMax[0] > minMax[1] {
 		return nil
 	}
 
@@ -576,7 +576,7 @@ func (Float16Statistics) cleanStat(minMax minmaxPairFloat16) *minmaxPairFloat16 
 		return nil
 	}
 
-	if min.Equal(float16.MaxNum) && max.Equal(float16.MinNum) {
+	if min.Greater(max) {
 		return nil
 	}
 
@@ -864,9 +864,9 @@ func (c *floatComparator[T]) defaultMin() T {
 	var z T
 	switch any(z).(type) {
 	case float32:
-		return math.MaxFloat32
+		return T(math.Inf(1))
 	case float64:
-		v := math.MaxFloat64
+		v := math.Inf(1)
 		return T(v)
 	}
 	panic("unreachable")
