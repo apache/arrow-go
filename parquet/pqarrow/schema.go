@@ -121,7 +121,7 @@ func (sm *SchemaManifest) GetFieldIndices(indices []int) ([]int, error) {
 }
 
 // ExtensionCustomParquetType is an interface that Arrow ExtensionTypes may implement
-// to specify the target LogicalType to use when converting to Parquet.
+// to specify the target LogicalType to use when converting to Parquet on write.
 //
 // The PrimitiveType is not configurable, and is determined by a fixed mapping from
 // the extension's StorageType to a Parquet type (see getParquetType in pqarrow source).
@@ -129,16 +129,16 @@ type ExtensionCustomParquetType interface {
 	ParquetLogicalType() schema.LogicalType
 }
 
-// ExtensionParquetLogicalType is an interface that Arrow ExtensionTypes may
+// ExtensionCustomArrowReadType is an interface that Arrow ExtensionTypes may
 // implement to specify how a Parquet LogicalType maps back to an Arrow
-// ExtensionType when converting a Parquet schema to an Arrow schema.
+// ExtensionType when converting a Parquet schema to an Arrow schema on read.
 //
 // ArrowTypeFromParquet should return (nil, nil) if the logical type does not
 // map to the extension type. It should return (nil, err) if the logical type is
 // recognized but cannot be converted into a valid extension type. If a
 // non-nil extension type is returned, that type is used and any previous
 // conversion errors from other extension types are ignored.
-type ExtensionParquetLogicalType interface {
+type ExtensionCustomArrowReadType interface {
 	ArrowTypeFromParquet(logical schema.LogicalType, storageType arrow.DataType) (arrow.ExtensionType, error)
 }
 
@@ -566,7 +566,7 @@ func arrowExtensionFromParquetLogicalType(logical schema.LogicalType, storageTyp
 		typeLookupErr error
 	)
 	matchedType := arrow.FindRegisteredExtensionType(func(extType arrow.ExtensionType) bool {
-		converter, ok := extType.(ExtensionParquetLogicalType)
+		converter, ok := extType.(ExtensionCustomArrowReadType)
 		if !ok {
 			return false
 		}
