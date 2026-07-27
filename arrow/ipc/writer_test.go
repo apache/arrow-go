@@ -229,7 +229,7 @@ func TestWriteWithCompressionAndMinSavings(t *testing.T) {
 		payload.Release()
 		payload.body = payload.body[:0]
 
-		for _, outOfRange := range []float64{math.Nextafter(1.0, 2.0), math.Nextafter(0, -1)} {
+		for _, outOfRange := range []float64{math.Nextafter(1.0, 2.0), math.Nextafter(0, -1), math.NaN()} {
 			compressEncoder.minSpaceSavings = outOfRange
 			err := compressEncoder.encode(&payload, batch)
 			assert.ErrorIs(t, err, arrow.ErrInvalid)
