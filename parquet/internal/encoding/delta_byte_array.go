@@ -194,7 +194,13 @@ func (d *DeltaByteArrayDecoder) SetData(nvalues int, data []byte) error {
 	if offset < 0 || offset > int64(len(data)) {
 		return errors.New("parquet: invalid delta byte array suffix offset")
 	}
-	return d.DeltaLengthByteArrayDecoder.SetData(nvalues, data[offset:])
+	if err := d.DeltaLengthByteArrayDecoder.SetData(nvalues, data[offset:]); err != nil {
+		return err
+	}
+	if len(d.prefixLengths) != d.nvals {
+		return errors.New("parquet: delta prefix and suffix length counts do not match")
+	}
+	return nil
 }
 
 func (d *DeltaByteArrayDecoder) Discard(n int) (int, error) {

@@ -18,6 +18,7 @@ package encoding
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
@@ -118,10 +119,35 @@ func (d *DeltaLengthByteArrayDecoder) SetData(nvalues int, data []byte) error {
 	if err := dec.SetData(nvalues, data); err != nil {
 		return err
 	}
+	if dec.totalValues > uint64(nvalues) {
+		return fmt.Errorf("parquet: delta length count %d exceeds value count %d", dec.totalValues, nvalues)
+	}
 	d.lengths = make([]int32, dec.totalValues)
-	dec.Decode(d.lengths)
+	decoded, err := dec.Decode(d.lengths)
+	if err != nil {
+		return err
+	}
+	if decoded != len(d.lengths) {
+		return errors.New("parquet: not enough delta lengths")
+	}
 
-	return d.decoder.SetData(nvalues, data[int(dec.bytesRead()):])
+	offset := dec.bytesRead()
+	if offset < 0 || offset > int64(len(data)) {
+		return errors.New("parquet: invalid delta length payload offset")
+	}
+	payload := data[offset:]
+	totalLength := 0
+	for _, length := range d.lengths {
+		if length < 0 {
+			return fmt.Errorf("parquet: negative delta byte array length %d", length)
+		}
+		if int(length) > len(payload)-totalLength {
+			return errors.New("parquet: delta byte array lengths exceed payload size")
+		}
+		totalLength += int(length)
+	}
+
+	return d.decoder.SetData(len(d.lengths), payload)
 }
 
 func (d *DeltaLengthByteArrayDecoder) Discard(n int) (int, error) {
@@ -150,7 +176,10 @@ func (d *DeltaLengthByteArrayDecoder) Decode(out []parquet.ByteArray) (int, erro
 // DecodeSpaced is like Decode, but for spaced data using the provided bitmap to determine where the nulls should be inserted.
 func (d *DeltaLengthByteArrayDecoder) DecodeSpaced(out []parquet.ByteArray, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
 	toread := len(out) - nullCount
-	values, _ := d.Decode(out[:toread])
+	values, err := d.Decode(out[:toread])
+	if err != nil {
+		return values, err
+	}
 	if values != toread {
 		return values, errors.New("parquet: number of values / definition levels read did not match")
 	}
