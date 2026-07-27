@@ -55,7 +55,9 @@ func (r *byteReader) Read(buf []byte) (n int, err error) {
 
 func (r *byteReader) Seek(offset int64, whence int) (pos int64, err error) {
 	pos, err = r.r.Seek(offset, whence)
-	r.pos = int(pos)
+	if err == nil {
+		r.pos = int(pos)
+	}
 	return
 }
 
@@ -86,7 +88,7 @@ func (r *byteReader) Discard(n int) (int, error) {
 		newPos = r.pos + n
 	)
 
-	if newPos >= len(r.buf) {
+	if newPos > len(r.buf) {
 		newPos = len(r.buf)
 		n = newPos - r.pos
 		err = io.EOF
