@@ -620,6 +620,29 @@ func TestInvalidValue(t *testing.T) {
 	}
 }
 
+func TestInvalidPrimitiveValue(t *testing.T) {
+	tests := []struct {
+		name  string
+		value []byte
+	}{
+		{name: "unknown primitive", value: []byte{byte(63 << 2)}},
+		{name: "truncated int32", value: []byte{byte(variant.PrimitiveInt32 << 2)}},
+		{name: "truncated binary length", value: []byte{byte(variant.PrimitiveBinary << 2), 1}},
+		{name: "truncated binary data", value: []byte{byte(variant.PrimitiveBinary << 2), 2, 0, 0, 0, 1}},
+		{name: "truncated short string", value: []byte{byte(3<<2) | byte(variant.BasicShortString), 'a'}},
+	}
+
+	meta, err := variant.NewMetadata(variant.EmptyMetadataBytes[:])
+	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := variant.NewWithMetadata(meta, tt.value)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "invalid variant value")
+		})
+	}
+}
+
 func TestInvalidObjectAccess(t *testing.T) {
 	v := loadVariant(t, "object_primitive")
 	obj := v.Value().(variant.ObjectValue)
