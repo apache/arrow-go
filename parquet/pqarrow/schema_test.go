@@ -128,9 +128,9 @@ func (t *testGeometryType) ParquetLogicalType() schema.LogicalType {
 }
 
 var (
-	_ pqarrow.ExtensionCustomParquetType  = (*testGeometryType)(nil)
-	_ pqarrow.ExtensionParquetLogicalType = (*testGeometryType)(nil)
-	_ pqarrow.ExtensionParquetLogicalType = (*testFailingGeometryType)(nil)
+	_ pqarrow.ExtensionCustomParquetType   = (*testGeometryType)(nil)
+	_ pqarrow.ExtensionCustomArrowReadType = (*testGeometryType)(nil)
+	_ pqarrow.ExtensionCustomArrowReadType = (*testFailingGeometryType)(nil)
 )
 
 func TestGetOriginSchemaBase64(t *testing.T) {
@@ -291,7 +291,7 @@ func TestFromParquetGeospatialRegisteredExtensionReturnsConverterErrorWhenNoMatc
 // TestReadWriteGeospatialRegisteredExtensionWithoutStoredSchema verifies that a
 // registered extension type can round trip using only the Parquet logical type.
 // Keeping StoreSchema disabled ensures the reader reconstructs the extension via
-// ExtensionParquetLogicalType interface logic instead of restoring it from
+// ExtensionCustomArrowReadType interface logic instead of restoring it from
 // ARROW:schema metadata.
 func TestReadWriteGeospatialRegisteredExtensionWithoutStoredSchema(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)

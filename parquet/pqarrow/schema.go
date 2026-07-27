@@ -121,7 +121,7 @@ func (sm *SchemaManifest) GetFieldIndices(indices []int) ([]int, error) {
 }
 
 // ExtensionCustomParquetType is an interface that Arrow ExtensionTypes may implement
-// to specify the target LogicalType to use when converting to Parquet.
+// to specify the target LogicalType to use when converting to Parquet on write.
 //
 // The PrimitiveType is not configurable, and is determined by a fixed mapping from
 // the extension's StorageType to a Parquet type (see getParquetType in pqarrow source).
@@ -129,16 +129,18 @@ type ExtensionCustomParquetType interface {
 	ParquetLogicalType() schema.LogicalType
 }
 
-// ExtensionParquetLogicalType is an interface that Arrow ExtensionTypes may
+// ExtensionCustomArrowReadType is an interface that Arrow ExtensionTypes may
 // implement to specify how a Parquet LogicalType maps back to an Arrow
-// ExtensionType when converting a Parquet schema to an Arrow schema.
+// ExtensionType when converting a Parquet schema to an Arrow schema on read.
+// The receiver is the registered extension type being asked whether it can
+// represent the Parquet logical type with the given storage type; callers must
+// use the returned extension type because it may be a distinct instance carrying
+// per-column parameters derived from the Parquet logical type.
 //
 // ArrowTypeFromParquet should return (nil, nil) if the logical type does not
 // map to the extension type. It should return (nil, err) if the logical type is
-// recognized but cannot be converted into a valid extension type. If a
-// non-nil extension type is returned, that type is used and any previous
-// conversion errors from other extension types are ignored.
-type ExtensionParquetLogicalType interface {
+// recognized but there was an issue converting into a valid extension type.
+type ExtensionCustomArrowReadType interface {
 	ArrowTypeFromParquet(logical schema.LogicalType, storageType arrow.DataType) (arrow.ExtensionType, error)
 }
 
@@ -560,13 +562,15 @@ func arrowFromByteArray(logical schema.LogicalType) (arrow.DataType, error) {
 // arrowExtensionFromParquetLogicalType asks registered extension types whether
 // they can represent the provided Parquet logical type with the given storage
 // type, falling back to the storage type when none opt in.
+// As long as one non-nil extension type is returned and maps without an error, that
+// type is used and any previous conversion errors from other extension types are ignored.
 func arrowExtensionFromParquetLogicalType(logical schema.LogicalType, storageType arrow.DataType) (arrow.DataType, error) {
 	var (
 		typ           arrow.ExtensionType
 		typeLookupErr error
 	)
 	matchedType := arrow.FindRegisteredExtensionType(func(extType arrow.ExtensionType) bool {
-		converter, ok := extType.(ExtensionParquetLogicalType)
+		converter, ok := extType.(ExtensionCustomArrowReadType)
 		if !ok {
 			return false
 		}
