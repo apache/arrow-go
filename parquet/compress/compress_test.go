@@ -34,6 +34,16 @@ type panickingCodec struct{ compress.Codec }
 
 func (panickingCodec) Decode([]byte, []byte) []byte { panic(errors.New("invalid block")) }
 
+type closeTrackingBuffer struct {
+	bytes.Buffer
+	closed bool
+}
+
+func (b *closeTrackingBuffer) Close() error {
+	b.closed = true
+	return nil
+}
+
 const (
 	RandomDataSize       = 3 * 1024 * 1024
 	CompressibleDataSize = 8 * 1024 * 1024
@@ -232,6 +242,20 @@ func TestCompressReaderWriter(t *testing.T) {
 			assert.Exactly(t, data, out)
 		})
 	}
+}
+
+func TestUncompressedStreamCloseDoesNotCloseUnderlyingStream(t *testing.T) {
+	codec, err := compress.GetCodec(compress.Codecs.Uncompressed)
+	assert.NoError(t, err)
+	streamingCodec := codec.(compress.StreamingCodec)
+
+	source := &closeTrackingBuffer{}
+	assert.NoError(t, streamingCodec.NewReader(source).Close())
+	assert.False(t, source.closed)
+
+	sink := &closeTrackingBuffer{}
+	assert.NoError(t, streamingCodec.NewWriter(sink).Close())
+	assert.False(t, sink.closed)
 }
 
 var marshalTests = []struct {
