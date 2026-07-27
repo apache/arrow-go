@@ -524,7 +524,7 @@ func TestConvertArrowDecimals(t *testing.T) {
 	arrowFields = append(arrowFields, arrow.Field{Name: "decimal_20_4", Type: &arrow.Decimal128Type{Precision: 20, Scale: 4}})
 
 	parquetFields = append(parquetFields, schema.Must(schema.NewPrimitiveNodeLogical("decimal_77_4", parquet.Repetitions.Required,
-		schema.NewDecimalLogicalType(77, 4), parquet.Types.FixedLenByteArray, 34, -1)))
+		schema.NewDecimalLogicalType(77, 4), parquet.Types.FixedLenByteArray, 33, -1)))
 	arrowFields = append(arrowFields, arrow.Field{Name: "decimal_77_4", Type: &arrow.Decimal128Type{Precision: 77, Scale: 4}})
 
 	arrowSchema := arrow.NewSchema(arrowFields, nil)
@@ -535,6 +535,19 @@ func TestConvertArrowDecimals(t *testing.T) {
 	assert.True(t, parquetSchema.Equals(result))
 	for i := 0; i < parquetSchema.NumColumns(); i++ {
 		assert.Truef(t, parquetSchema.Column(i).Equals(result.Column(i)), "Column %d didn't match: %s", i, parquetSchema.Column(i).Name())
+	}
+}
+
+func TestDecimalSizeAboveDecimal256Precision(t *testing.T) {
+	for _, tt := range []struct {
+		precision int32
+		want      int32
+	}{
+		{precision: 77, want: 33},
+		{precision: 80, want: 34},
+		{precision: 100, want: 42},
+	} {
+		assert.Equal(t, tt.want, pqarrow.DecimalSize(tt.precision))
 	}
 }
 

@@ -246,7 +246,7 @@ func DecimalSize(precision int32) int32 {
 	if precision <= 76 {
 		return byteblock[precision]
 	}
-	return int32(math.Ceil(float64(precision)/8.0)*math.Log2(10) + 1)
+	return int32(math.Ceil((float64(precision)*math.Log2(10) + 1) / 8))
 }
 
 func repFromNullable(isnullable bool) parquet.Repetition {
