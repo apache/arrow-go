@@ -293,12 +293,9 @@ func (b *blockSplitBloomFilter) WriteTo(w io.Writer, enc encryption.Encryptor) (
 }
 
 func NewBloomFilter(numBytes, maxBytes uint32, mem memory.Allocator) BloomFilterBuilder {
+	maxBytes = max(minimumBloomFilterBytes, min(maximumBloomFilterBytes, maxBytes))
 	if numBytes < minimumBloomFilterBytes {
 		numBytes = minimumBloomFilterBytes
-	}
-
-	if maxBytes > maximumBloomFilterBytes {
-		maxBytes = maximumBloomFilterBytes
 	}
 
 	if numBytes > maxBytes {
@@ -325,23 +322,12 @@ func NewBloomFilter(numBytes, maxBytes uint32, mem memory.Allocator) BloomFilter
 }
 
 func NewBloomFilterFromNDVAndFPP(ndv uint32, fpp float64, maxBytes int64, mem memory.Allocator) BloomFilterBuilder {
+	if fpp <= 0 || fpp >= 1 || math.IsNaN(fpp) {
+		panic("parquet: bloom filter false-positive probability must be in (0, 1)")
+	}
+	maxBytes = max(minimumBloomFilterBytes, min(maximumBloomFilterBytes, maxBytes))
 	numBytes := optimalNumBytes(ndv, fpp)
-	if numBytes > uint32(maxBytes) {
-		numBytes = uint32(maxBytes)
-	}
-
-	buf := memory.NewResizableBuffer(mem)
-	buf.ResizeNoShrink(int(numBytes))
-	bf := &blockSplitBloomFilter{
-		data:         buf,
-		bitset32:     arrow.Uint32Traits.CastFromBytes(buf.Bytes()),
-		hasher:       xxhasher{},
-		algorithm:    format.BloomFilterAlgorithm{BLOCK: &format.SplitBlockAlgorithm{}},
-		hashStrategy: format.BloomFilterHash{XXHASH: &format.XxHash{}},
-		compression:  format.BloomFilterCompression{UNCOMPRESSED: &format.Uncompressed{}},
-	}
-	addCleanup(bf, nil)
-	return bf
+	return NewBloomFilter(numBytes, uint32(maxBytes), mem)
 }
 
 type BloomFilterBuilder interface {
