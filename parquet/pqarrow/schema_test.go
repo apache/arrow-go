@@ -291,7 +291,7 @@ func TestFromParquetGeospatialRegisteredExtensionReturnsConverterErrorWhenNoMatc
 // TestReadWriteGeospatialRegisteredExtensionWithoutStoredSchema verifies that a
 // registered extension type can round trip using only the Parquet logical type.
 // Keeping StoreSchema disabled ensures the reader reconstructs the extension via
-// ExtensionArrowReadType interface logic instead of restoring it from
+// ExtensionCustomArrowReadType interface logic instead of restoring it from
 // ARROW:schema metadata.
 func TestReadWriteGeospatialRegisteredExtensionWithoutStoredSchema(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
