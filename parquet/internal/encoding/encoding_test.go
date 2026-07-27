@@ -774,10 +774,25 @@ func TestDeltaBitPackedDeltaOverflow(t *testing.T) {
 		assert.Equal(t, values, out)
 	})
 
-	t.Run("int32 random full range", func(t *testing.T) {
+	t.Run("int32 boundary deltas", func(t *testing.T) {
 		column := schema.NewColumn(schema.NewInt32Node("int32", parquet.Repetitions.Required, -1), 0, 0)
-		values := make([]int32, 1000)
-		testutils.FillRandomInt32(0, values)
+		// every boundary of the wrapped 32-bit delta domain; comments show the
+		// two's-complement-wrapped delta from the previous value
+		values := []int32{
+			0,
+			math.MinInt32,     // -2^31 (most negative wrapped delta)
+			-1,                // +2^31-1 (most positive wrapped delta); with the previous delta this miniblock spans 2^32-1 -> width 32
+			math.MaxInt32,     // true delta +2^31 wraps to -2^31
+			-2,                // true delta -(2^31+1) wraps to +2^31-1
+			math.MaxInt32 - 1, // true delta +2^31 wraps to -2^31
+			math.MaxInt32 - 1, // 0 (zero delta alongside extreme deltas)
+			math.MinInt32 + 1, // true delta -(2^32-3) wraps to +3
+			0,                 // +2^31-1
+			1,                 // +1
+			math.MinInt32,     // true delta -(2^31+1) wraps to +2^31-1
+			math.MaxInt32,     // true delta +(2^32-1) wraps to -1
+			math.MinInt32,     // true delta -(2^32-1) wraps to +1
+		}
 
 		enc := encoding.NewEncoder(parquet.Types.Int32, parquet.Encodings.DeltaBinaryPacked, false, column, memory.DefaultAllocator)
 		enc.(encoding.Int32Encoder).Put(values)
