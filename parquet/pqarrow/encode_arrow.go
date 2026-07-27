@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"time"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -712,20 +711,27 @@ const (
 )
 
 func arrowTimestampToImpalaTimestamp(unit arrow.TimeUnit, t int64, out *parquet.Int96) {
-	var d time.Duration
+	var unitsPerDay, nanosPerUnit int64
 	switch unit {
 	case arrow.Second:
-		d = time.Duration(t) * time.Second
-	case arrow.Microsecond:
-		d = time.Duration(t) * time.Microsecond
+		unitsPerDay, nanosPerUnit = 24*60*60, 1000*1000*1000
 	case arrow.Millisecond:
-		d = time.Duration(t) * time.Millisecond
+		unitsPerDay, nanosPerUnit = 24*60*60*1000, 1000*1000
+	case arrow.Microsecond:
+		unitsPerDay, nanosPerUnit = 24*60*60*1000*1000, 1000
 	case arrow.Nanosecond:
-		d = time.Duration(t) * time.Nanosecond
+		unitsPerDay, nanosPerUnit = nanoSecondsPerDay, 1
 	}
 
-	julianDays := (int64(d.Hours()) / 24) + julianEpochOffsetDays
-	lastDayNanos := t % (nanoSecondsPerDay)
+	days := t / unitsPerDay
+	remainder := t % unitsPerDay
+	if remainder < 0 {
+		days--
+		remainder += unitsPerDay
+	}
+
+	julianDays := days + julianEpochOffsetDays
+	lastDayNanos := remainder * nanosPerUnit
 	binary.LittleEndian.PutUint64((*out)[:8], uint64(lastDayNanos))
 	binary.LittleEndian.PutUint32((*out)[8:], uint32(julianDays))
 }
