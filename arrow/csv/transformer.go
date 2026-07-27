@@ -27,11 +27,11 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 )
 
-func (w *Writer) transformColToStringArr(typ arrow.DataType, col arrow.Array, stringsReplacer func(string) string) []string {
+func (w *Writer) transformColToStringArr(typ arrow.DataType, col arrow.Array, stringsReplacer func(string) string) ([]string, error) {
 	if w.customTypeConverter != nil {
 		result, handled := w.customTypeConverter(typ, col)
 		if handled {
-			return result
+			return result, nil
 		}
 	}
 
@@ -185,9 +185,13 @@ func (w *Writer) transformColToStringArr(typ arrow.DataType, col arrow.Array, st
 	case *arrow.TimestampType:
 		arr := col.(*array.Timestamp)
 		t := typ.(*arrow.TimestampType)
+		toTime, err := t.GetToTimeFunc()
+		if err != nil {
+			return nil, fmt.Errorf("arrow/csv: invalid timestamp timezone: %w", err)
+		}
 		for i := 0; i < arr.Len(); i++ {
 			if arr.IsValid(i) {
-				res[i] = arr.Value(i).ToTime(t.Unit).Format("2006-01-02 15:04:05.999999999")
+				res[i] = toTime(arr.Value(i)).Format("2006-01-02 15:04:05.999999999")
 			} else {
 				res[i] = w.nullValue
 			}
@@ -227,7 +231,12 @@ func (w *Writer) transformColToStringArr(typ arrow.DataType, col arrow.Array, st
 			var b bytes.Buffer
 			b.Write([]byte{'{'})
 			writer := csv.NewWriter(&b)
-			writer.Write(w.transformColToStringArr(list.DataType(), list, stringsReplacer))
+			values, err := w.transformColToStringArr(list.DataType(), list, stringsReplacer)
+			if err != nil {
+				list.Release()
+				return nil, err
+			}
+			writer.Write(values)
 			writer.Flush()
 			b.Truncate(b.Len() - 1)
 			b.Write([]byte{'}'})
@@ -277,5 +286,5 @@ func (w *Writer) transformColToStringArr(typ arrow.DataType, col arrow.Array, st
 	default:
 		panic(fmt.Errorf("arrow/csv: field has unsupported data type %s", typ.String()))
 	}
-	return res
+	return res, nil
 }

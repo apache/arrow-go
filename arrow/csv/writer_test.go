@@ -664,3 +664,46 @@ func TestCustomTypeConversion(t *testing.T) {
 	require.Equal(t, expected, buf.String())
 
 }
+
+func TestCSVWriterUsesTimestampTimezone(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	timestampType := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/New_York"}
+	builder := array.NewTimestampBuilder(mem, timestampType)
+	builder.Append(0)
+	values := builder.NewTimestampArray()
+	builder.Release()
+	defer values.Release()
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "timestamp", Type: timestampType}}, nil)
+	record := array.NewRecordBatch(schema, []arrow.Array{values}, 1)
+	defer record.Release()
+
+	var output bytes.Buffer
+	writer := csv.NewWriter(&output, schema)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Flush())
+	assert.Equal(t, "1969-12-31 19:00:00\n", output.String())
+}
+
+func TestCSVWriterRejectsInvalidTimestampTimezone(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	timestampType := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "invalid/timezone"}
+	builder := array.NewTimestampBuilder(mem, timestampType)
+	builder.Append(0)
+	values := builder.NewTimestampArray()
+	builder.Release()
+	defer values.Release()
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "timestamp", Type: timestampType}}, nil)
+	record := array.NewRecordBatch(schema, []arrow.Array{values}, 1)
+	defer record.Release()
+
+	writer := csv.NewWriter(io.Discard, schema)
+	err := writer.Write(record)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "invalid timestamp timezone")
+}
