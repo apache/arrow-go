@@ -191,6 +191,20 @@ func (p *PrimitiveNodeTestSuite) TestEquals() {
 	p.False(flba1.Equals(flba5))
 }
 
+func (p *PrimitiveNodeTestSuite) TestSetTypeLengthRejectsInvalidLength() {
+	node := schema.NewFixedLenByteArrayNode("value", parquet.Repetitions.Required, 4, -1)
+
+	for _, length := range []int{0, -1} {
+		p.PanicsWithValue("parquet: fixed length byte array length must be positive", func() {
+			node.SetTypeLength(length)
+		})
+		p.Equal(4, node.TypeLength())
+	}
+
+	other := schema.NewInt32Node("value", parquet.Repetitions.Required, -1)
+	p.NotPanics(func() { other.SetTypeLength(0) })
+}
+
 func (p *PrimitiveNodeTestSuite) TestPhysicalLogicalMapping() {
 	tests := []struct {
 		typ       parquet.Type
