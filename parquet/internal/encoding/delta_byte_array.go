@@ -18,6 +18,7 @@ package encoding
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
@@ -163,6 +164,7 @@ func (d *DeltaByteArrayDecoder) Allocator() memory.Allocator { return d.mem }
 // SetData expects the passed in data to be the prefix lengths, followed by the
 // blocks of suffix data in order to initialize the decoder.
 func (d *DeltaByteArrayDecoder) SetData(nvalues int, data []byte) error {
+	d.lastVal = nil
 	prefixLenDec := DeltaBitPackInt32Decoder{
 		decoder: newDecoderBase(d.encoding, d.descr),
 		mem:     d.mem,
@@ -171,15 +173,28 @@ func (d *DeltaByteArrayDecoder) SetData(nvalues int, data []byte) error {
 	if err := prefixLenDec.SetData(nvalues, data); err != nil {
 		return err
 	}
+	if nvalues < 0 || prefixLenDec.totalValues > uint64(nvalues) {
+		return fmt.Errorf("parquet: delta prefix count %d exceeds value count %d", prefixLenDec.totalValues, nvalues)
+	}
 
 	d.prefixLengths = make([]int32, prefixLenDec.ValuesLeft())
 	// decode all the prefix lengths first so we know how many bytes it took to get the
 	// prefix lengths for nvalues
-	prefixLenDec.Decode(d.prefixLengths)
+	decoded, err := prefixLenDec.Decode(d.prefixLengths)
+	if err != nil {
+		return err
+	}
+	if decoded != len(d.prefixLengths) {
+		return errors.New("parquet: not enough delta byte array prefix lengths")
+	}
 
 	// now that we know how many bytes we needed for the prefix lengths, the rest are the
 	// delta length byte array encoding.
-	return d.DeltaLengthByteArrayDecoder.SetData(nvalues, data[int(prefixLenDec.bytesRead()):])
+	offset := prefixLenDec.bytesRead()
+	if offset < 0 || offset > int64(len(data)) {
+		return errors.New("parquet: invalid delta byte array suffix offset")
+	}
+	return d.DeltaLengthByteArrayDecoder.SetData(nvalues, data[offset:])
 }
 
 func (d *DeltaByteArrayDecoder) Discard(n int) (int, error) {
@@ -191,6 +206,9 @@ func (d *DeltaByteArrayDecoder) Discard(n int) (int, error) {
 	remaining := n
 	tmp := make([]parquet.ByteArray, 1)
 	if d.lastVal == nil {
+		if len(d.prefixLengths) == 0 || d.prefixLengths[0] != 0 {
+			return 0, errors.New("parquet: first delta byte array prefix length must be zero")
+		}
 		if _, err := d.DeltaLengthByteArrayDecoder.Decode(tmp); err != nil {
 			return 0, err
 		}
@@ -201,7 +219,13 @@ func (d *DeltaByteArrayDecoder) Discard(n int) (int, error) {
 
 	var prefixLen int32
 	for remaining > 0 {
+		if len(d.prefixLengths) == 0 {
+			return n - remaining, errors.New("parquet: not enough delta byte array prefix lengths")
+		}
 		prefixLen, d.prefixLengths = d.prefixLengths[0], d.prefixLengths[1:]
+		if prefixLen < 0 || int(prefixLen) > len(d.lastVal) {
+			return n - remaining, fmt.Errorf("parquet: invalid delta byte array prefix length %d", prefixLen)
+		}
 		prefix := d.lastVal[:prefixLen:prefixLen]
 
 		if _, err := d.DeltaLengthByteArrayDecoder.Decode(tmp); err != nil {
@@ -231,6 +255,9 @@ func (d *DeltaByteArrayDecoder) Decode(out []parquet.ByteArray) (int, error) {
 
 	var err error
 	if d.lastVal == nil {
+		if len(d.prefixLengths) == 0 || d.prefixLengths[0] != 0 {
+			return 0, errors.New("parquet: first delta byte array prefix length must be zero")
+		}
 		_, err = d.DeltaLengthByteArrayDecoder.Decode(out[:1])
 		if err != nil {
 			return 0, err
@@ -243,7 +270,13 @@ func (d *DeltaByteArrayDecoder) Decode(out []parquet.ByteArray) (int, error) {
 	var prefixLen int32
 	suffixHolder := make([]parquet.ByteArray, 1)
 	for len(out) > 0 {
+		if len(d.prefixLengths) == 0 {
+			return 0, errors.New("parquet: not enough delta byte array prefix lengths")
+		}
 		prefixLen, d.prefixLengths = d.prefixLengths[0], d.prefixLengths[1:]
+		if prefixLen < 0 || int(prefixLen) > len(d.lastVal) {
+			return 0, fmt.Errorf("parquet: invalid delta byte array prefix length %d", prefixLen)
+		}
 
 		prefix := d.lastVal[:prefixLen:prefixLen]
 		_, err = d.DeltaLengthByteArrayDecoder.Decode(suffixHolder)
