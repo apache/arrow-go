@@ -43,6 +43,9 @@ func (PlainBooleanDecoder) Type() parquet.Type {
 }
 
 func (dec *PlainBooleanDecoder) SetData(nvals int, data []byte) error {
+	if nvals < 0 {
+		return fmt.Errorf("parquet: invalid number of boolean values: %d", nvals)
+	}
 	if err := dec.decoder.SetData(nvals, data); err != nil {
 		return err
 	}
@@ -50,8 +53,19 @@ func (dec *PlainBooleanDecoder) SetData(nvals int, data []byte) error {
 	return nil
 }
 
+func (dec *PlainBooleanDecoder) ensureBitsAvailable(n int) error {
+	available := int64(len(dec.data))*8 - int64(dec.bitOffset)
+	if int64(n) > available {
+		return fmt.Errorf("parquet: boolean data has %d bits available, need %d: %w", available, n, io.ErrUnexpectedEOF)
+	}
+	return nil
+}
+
 func (dec *PlainBooleanDecoder) Discard(n int) (int, error) {
 	n = min(n, dec.nvals)
+	if err := dec.ensureBitsAvailable(n); err != nil {
+		return 0, err
+	}
 	dec.nvals -= n
 
 	if dec.bitOffset+n < 8 {
@@ -77,6 +91,9 @@ func (dec *PlainBooleanDecoder) Discard(n int) (int, error) {
 // Returns the number of values decoded
 func (dec *PlainBooleanDecoder) Decode(out []bool) (int, error) {
 	max := shared_utils.Min(len(out), dec.nvals)
+	if err := dec.ensureBitsAvailable(max); err != nil {
+		return 0, err
+	}
 
 	// attempts to read all remaining bool values from the current data byte
 	unalignedExtract := func(i int) int {
@@ -126,6 +143,9 @@ func (dec *PlainBooleanDecoder) DecodeToBitmap(out []byte, outOffset int64, leng
 	max := shared_utils.Min(length, dec.nvals)
 	if max == 0 {
 		return 0, nil
+	}
+	if err := dec.ensureBitsAvailable(max); err != nil {
+		return 0, err
 	}
 
 	// Check if we're aligned and can do a fast copy

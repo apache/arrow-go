@@ -1089,6 +1089,42 @@ func TestBooleanPlainDecoderAfterFlushing(t *testing.T) {
 	assert.Equal(t, decSlice[0], false)
 }
 
+func TestBooleanPlainDecoderRejectsTruncatedData(t *testing.T) {
+	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Required, -1), 0, 0)
+	type booleanBitmapDecoder interface {
+		encoding.BooleanDecoder
+		DecodeToBitmap([]byte, int64, int) (int, error)
+	}
+	newDecoder := func() booleanBitmapDecoder {
+		dec := encoding.NewDecoder(parquet.Types.Boolean, parquet.Encodings.Plain, descr, memory.DefaultAllocator).(booleanBitmapDecoder)
+		require.NoError(t, dec.SetData(9, []byte{0xff}))
+		return dec
+	}
+
+	dec := newDecoder()
+	n, err := dec.Decode(make([]bool, 9))
+	assert.Zero(t, n)
+	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+
+	dec = newDecoder()
+	n, err = dec.Discard(9)
+	assert.Zero(t, n)
+	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+
+	dec = newDecoder()
+	n, err = dec.DecodeToBitmap(make([]byte, 2), 0, 9)
+	assert.Zero(t, n)
+	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+
+	dec = encoding.NewDecoder(parquet.Types.Boolean, parquet.Encodings.Plain, descr, memory.DefaultAllocator).(booleanBitmapDecoder)
+	require.NoError(t, dec.SetData(100, []byte{0x0f}))
+	n, err = dec.Decode(make([]bool, 4))
+	assert.Equal(t, 4, n)
+	assert.NoError(t, err)
+
+	assert.Error(t, dec.SetData(-1, nil))
+}
+
 func TestBooleanPlainEncoderPutBitmap(t *testing.T) {
 	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Optional, -1), 0, 0)
 	enc := encoding.NewEncoder(parquet.Types.Boolean, parquet.Encodings.Plain, false, descr, memory.DefaultAllocator)
