@@ -845,6 +845,39 @@ func TestTableReader(t *testing.T) {
 	}
 }
 
+func TestTableReaderSkipsEmptyChunks(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	builder := array.NewInt32Builder(mem)
+	empty := builder.NewInt32Array()
+	defer empty.Release()
+	builder.AppendValues([]int32{1, 2}, nil)
+	values := builder.NewInt32Array()
+	defer values.Release()
+	builder.Release()
+
+	chunked := arrow.NewChunked(arrow.PrimitiveTypes.Int32, []arrow.Array{empty, values, empty})
+	defer chunked.Release()
+	field := arrow.Field{Name: "values", Type: arrow.PrimitiveTypes.Int32}
+	column := arrow.NewColumn(field, chunked)
+	defer column.Release()
+	table := array.NewTable(arrow.NewSchema([]arrow.Field{field}, nil), []arrow.Column{*column}, -1)
+	defer table.Release()
+
+	reader := array.NewTableReader(table, 10)
+	defer reader.Release()
+	if !reader.Next() {
+		t.Fatal("expected a record batch")
+	}
+	if got, want := reader.RecordBatch().NumRows(), int64(2); got != want {
+		t.Fatalf("invalid number of rows: got=%d, want=%d", got, want)
+	}
+	if reader.Next() {
+		t.Fatal("unexpected additional record batch")
+	}
+}
+
 func TestTableToString(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)

@@ -353,6 +353,11 @@ func (tr *TableReader) Next() bool {
 	for i := range chunks {
 		j := tr.slots[i]
 		chunk := tr.chunks[i].Chunk(j)
+		for chunk.Len() == 0 && j+1 < len(tr.chunks[i].Chunks()) {
+			j++
+			tr.slots[i] = j
+			chunk = tr.chunks[i].Chunk(j)
+		}
 		remain := int64(chunk.Len()) - tr.offsets[i]
 		if remain < chunksz {
 			chunksz = remain
