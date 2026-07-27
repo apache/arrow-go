@@ -204,11 +204,11 @@ func (dec *RleBooleanDecoder) SetData(nvals int, data []byte) error {
 
 	// load the first 4 bytes in little-endian which indicates the length
 	nbytes := binary.LittleEndian.Uint32(data[:4])
-	if nbytes > uint32(len(data)-4) {
+	if uint64(nbytes) > uint64(len(data)-4) {
 		return fmt.Errorf("received invalid number of bytes - %d (corrupt data page?)", nbytes)
 	}
 
-	dec.data = data[4:]
+	dec.data = data[4 : 4+int(nbytes)]
 	if dec.rleDec == nil {
 		dec.rleDec = utils.NewRleDecoder(bytes.NewReader(dec.data), 1)
 	} else {
