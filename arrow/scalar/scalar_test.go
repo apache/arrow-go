@@ -33,6 +33,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
+	"github.com/apache/arrow-go/v18/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -90,6 +91,23 @@ func checkMakeNullScalar(t *testing.T, dt arrow.DataType) scalar.Scalar {
 	assert.True(t, arrow.TypeEqual(s.DataType(), dt))
 	assert.False(t, s.IsValid())
 	return s
+}
+
+func TestMakeNullExtensionScalar(t *testing.T) {
+	dt := types.NewSmallintType()
+	sc := checkMakeNullScalar(t, dt)
+	ext := sc.(*scalar.Extension)
+	require.NotNil(t, ext.Value)
+	assert.False(t, ext.Value.IsValid())
+	assert.True(t, arrow.TypeEqual(dt.StorageType(), ext.Value.DataType()))
+}
+
+func TestNullExtensionScalarValidateRejectsNonNullStorage(t *testing.T) {
+	sc := scalar.NewExtensionScalar(scalar.NewInt16Scalar(1), types.NewSmallintType())
+	sc.Valid = false
+
+	assert.ErrorContains(t, sc.Validate(), "non-null storage value")
+	assert.ErrorContains(t, sc.ValidateFull(), "non-null storage value")
 }
 
 func TestMakeScalarUint(t *testing.T) {
