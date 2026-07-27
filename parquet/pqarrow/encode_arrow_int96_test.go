@@ -17,7 +17,6 @@
 package pqarrow
 
 import (
-	"encoding/binary"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -27,29 +26,26 @@ import (
 
 func TestArrowTimestampToImpalaTimestamp(t *testing.T) {
 	tests := []struct {
-		unit         arrow.TimeUnit
-		unitsPerDay  int64
-		nanosPerUnit int64
+		name  string
+		unit  arrow.TimeUnit
+		value arrow.Timestamp
 	}{
-		{arrow.Second, 86400, 1_000_000_000},
-		{arrow.Millisecond, 86_400_000, 1_000_000},
-		{arrow.Microsecond, 86_400_000_000, 1_000},
-		{arrow.Nanosecond, 86_400_000_000_000, 1},
+		{"seconds after epoch", arrow.Second, 946_684_801},
+		{"seconds before epoch", arrow.Second, -1},
+		{"milliseconds after epoch", arrow.Millisecond, 946_684_800_001},
+		{"milliseconds before epoch", arrow.Millisecond, -1},
+		{"microseconds after epoch", arrow.Microsecond, 946_684_800_000_001},
+		{"microseconds before epoch", arrow.Microsecond, -1},
+		{"nanoseconds after epoch", arrow.Nanosecond, 946_684_800_000_000_001},
+		{"nanoseconds before epoch", arrow.Nanosecond, -1},
 	}
 
 	for _, tt := range tests {
-		for _, value := range []int64{-tt.unitsPerDay - 1, -1, 0, 1, tt.unitsPerDay + 1} {
+		t.Run(tt.name, func(t *testing.T) {
 			var got parquet.Int96
-			arrowTimestampToImpalaTimestamp(tt.unit, value, &got)
+			arrowTimestampToImpalaTimestamp(tt.unit, int64(tt.value), &got)
 
-			days := value / tt.unitsPerDay
-			remainder := value % tt.unitsPerDay
-			if remainder < 0 {
-				days--
-				remainder += tt.unitsPerDay
-			}
-			assert.Equal(t, uint64(remainder*tt.nanosPerUnit), binary.LittleEndian.Uint64(got[:8]))
-			assert.Equal(t, uint32(days+julianEpochOffsetDays), binary.LittleEndian.Uint32(got[8:]))
-		}
+			assert.Equal(t, tt.value.ToTime(tt.unit), got.ToTime())
+		})
 	}
 }
