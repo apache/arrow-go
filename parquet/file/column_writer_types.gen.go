@@ -245,8 +245,9 @@ func (w *Int32ColumnChunkWriter) checkDictionarySizeLimit() {
 	// plus the encoded indices meet or exceed the raw input bytes, fall back
 	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
 	// case where a dict page stays in the file alongside PLAIN pages without
-	// any net compression win.
-	if !w.dictPageWritten && len(w.pages) == 0 {
+	// any net compression win. The comparison ignores page compression, so
+	// WithDictionaryCostFallback(false) lets callers opt out of it.
+	if !w.dictPageWritten && len(w.pages) == 0 && w.props.DictionaryCostFallbackEnabledFor(w.descr.Path()) {
 		rawSize := dictEnc.ObservedRawSize()
 		encodedSize := dictEnc.EstimatedDataEncodedSize()
 		dictSize := int64(dictEnc.DictEncodedSize())
@@ -507,8 +508,9 @@ func (w *Int64ColumnChunkWriter) checkDictionarySizeLimit() {
 	// plus the encoded indices meet or exceed the raw input bytes, fall back
 	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
 	// case where a dict page stays in the file alongside PLAIN pages without
-	// any net compression win.
-	if !w.dictPageWritten && len(w.pages) == 0 {
+	// any net compression win. The comparison ignores page compression, so
+	// WithDictionaryCostFallback(false) lets callers opt out of it.
+	if !w.dictPageWritten && len(w.pages) == 0 && w.props.DictionaryCostFallbackEnabledFor(w.descr.Path()) {
 		rawSize := dictEnc.ObservedRawSize()
 		encodedSize := dictEnc.EstimatedDataEncodedSize()
 		dictSize := int64(dictEnc.DictEncodedSize())
@@ -769,8 +771,9 @@ func (w *Int96ColumnChunkWriter) checkDictionarySizeLimit() {
 	// plus the encoded indices meet or exceed the raw input bytes, fall back
 	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
 	// case where a dict page stays in the file alongside PLAIN pages without
-	// any net compression win.
-	if !w.dictPageWritten && len(w.pages) == 0 {
+	// any net compression win. The comparison ignores page compression, so
+	// WithDictionaryCostFallback(false) lets callers opt out of it.
+	if !w.dictPageWritten && len(w.pages) == 0 && w.props.DictionaryCostFallbackEnabledFor(w.descr.Path()) {
 		rawSize := dictEnc.ObservedRawSize()
 		encodedSize := dictEnc.EstimatedDataEncodedSize()
 		dictSize := int64(dictEnc.DictEncodedSize())
@@ -1031,8 +1034,9 @@ func (w *Float32ColumnChunkWriter) checkDictionarySizeLimit() {
 	// plus the encoded indices meet or exceed the raw input bytes, fall back
 	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
 	// case where a dict page stays in the file alongside PLAIN pages without
-	// any net compression win.
-	if !w.dictPageWritten && len(w.pages) == 0 {
+	// any net compression win. The comparison ignores page compression, so
+	// WithDictionaryCostFallback(false) lets callers opt out of it.
+	if !w.dictPageWritten && len(w.pages) == 0 && w.props.DictionaryCostFallbackEnabledFor(w.descr.Path()) {
 		rawSize := dictEnc.ObservedRawSize()
 		encodedSize := dictEnc.EstimatedDataEncodedSize()
 		dictSize := int64(dictEnc.DictEncodedSize())
@@ -1293,8 +1297,9 @@ func (w *Float64ColumnChunkWriter) checkDictionarySizeLimit() {
 	// plus the encoded indices meet or exceed the raw input bytes, fall back
 	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
 	// case where a dict page stays in the file alongside PLAIN pages without
-	// any net compression win.
-	if !w.dictPageWritten && len(w.pages) == 0 {
+	// any net compression win. The comparison ignores page compression, so
+	// WithDictionaryCostFallback(false) lets callers opt out of it.
+	if !w.dictPageWritten && len(w.pages) == 0 && w.props.DictionaryCostFallbackEnabledFor(w.descr.Path()) {
 		rawSize := dictEnc.ObservedRawSize()
 		encodedSize := dictEnc.EstimatedDataEncodedSize()
 		dictSize := int64(dictEnc.DictEncodedSize())
@@ -1701,8 +1706,9 @@ func (w *BooleanColumnChunkWriter) checkDictionarySizeLimit() {
 	// plus the encoded indices meet or exceed the raw input bytes, fall back
 	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
 	// case where a dict page stays in the file alongside PLAIN pages without
-	// any net compression win.
-	if !w.dictPageWritten && len(w.pages) == 0 {
+	// any net compression win. The comparison ignores page compression, so
+	// WithDictionaryCostFallback(false) lets callers opt out of it.
+	if !w.dictPageWritten && len(w.pages) == 0 && w.props.DictionaryCostFallbackEnabledFor(w.descr.Path()) {
 		rawSize := dictEnc.ObservedRawSize()
 		encodedSize := dictEnc.EstimatedDataEncodedSize()
 		dictSize := int64(dictEnc.DictEncodedSize())
@@ -2073,8 +2079,9 @@ func (w *ByteArrayColumnChunkWriter) checkDictionarySizeLimit() {
 	// plus the encoded indices meet or exceed the raw input bytes, fall back
 	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
 	// case where a dict page stays in the file alongside PLAIN pages without
-	// any net compression win.
-	if !w.dictPageWritten && len(w.pages) == 0 {
+	// any net compression win. The comparison ignores page compression, so
+	// WithDictionaryCostFallback(false) lets callers opt out of it.
+	if !w.dictPageWritten && len(w.pages) == 0 && w.props.DictionaryCostFallbackEnabledFor(w.descr.Path()) {
 		rawSize := dictEnc.ObservedRawSize()
 		encodedSize := dictEnc.EstimatedDataEncodedSize()
 		dictSize := int64(dictEnc.DictEncodedSize())
@@ -2453,8 +2460,9 @@ func (w *FixedLenByteArrayColumnChunkWriter) checkDictionarySizeLimit() {
 	// plus the encoded indices meet or exceed the raw input bytes, fall back
 	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
 	// case where a dict page stays in the file alongside PLAIN pages without
-	// any net compression win.
-	if !w.dictPageWritten && len(w.pages) == 0 {
+	// any net compression win. The comparison ignores page compression, so
+	// WithDictionaryCostFallback(false) lets callers opt out of it.
+	if !w.dictPageWritten && len(w.pages) == 0 && w.props.DictionaryCostFallbackEnabledFor(w.descr.Path()) {
 		rawSize := dictEnc.ObservedRawSize()
 		encodedSize := dictEnc.EstimatedDataEncodedSize()
 		dictSize := int64(dictEnc.DictEncodedSize())

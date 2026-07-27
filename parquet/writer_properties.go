@@ -39,6 +39,10 @@ const (
 	// the fallback encoding (usually plain) instead of continuing to build the
 	// dictionary index.
 	DefaultDictionaryPageSizeLimit = DefaultDataPageSize
+	// Default is to discard the dictionary before the first data page of a chunk
+	// when it is not smaller than the raw values, use WithDictionaryCostFallback
+	// writer property to change that.
+	DefaultDictionaryCostFallbackEnabled = true
 	// In order to attempt to facilitate data page size limits for writing,
 	// data is written in batches. Increasing the batch size may improve performance
 	// but the larger the batch size, the easier it is to overshoot the datapage limit.
@@ -70,6 +74,7 @@ type ColumnProperties struct {
 	Encoding                   Encoding
 	Codec                      compress.Compression
 	DictionaryEnabled          bool
+	DictionaryCostFallback     bool
 	StatsEnabled               bool
 	PageIndexEnabled           bool
 	MaxStatsSize               int64
@@ -88,6 +93,7 @@ type ColumnProperties struct {
 // Encoding:                   Encodings.Plain
 // Codec:                      compress.Codecs.Uncompressed
 // DictionaryEnabled:	       DefaultDictionaryEnabled
+// DictionaryCostFallback:     DefaultDictionaryCostFallbackEnabled
 // StatsEnabled:               DefaultStatsEnabled
 // PageIndexEnabled:           DefaultPageIndexEnabled
 // MaxStatsSize:               DefaultMaxStatsSize
@@ -101,6 +107,7 @@ func DefaultColumnProperties() ColumnProperties {
 		Encoding:                   Encodings.Plain,
 		Codec:                      compress.Codecs.Uncompressed,
 		DictionaryEnabled:          DefaultDictionaryEnabled,
+		DictionaryCostFallback:     DefaultDictionaryCostFallbackEnabled,
 		StatsEnabled:               DefaultStatsEnabled,
 		PageIndexEnabled:           DefaultPageIndexEnabled,
 		MaxStatsSize:               DefaultMaxStatsSize,
@@ -121,6 +128,7 @@ type writerPropConfig struct {
 	codecs                     map[string]compress.Compression
 	compressLevel              map[string]int
 	dictEnabled                map[string]bool
+	dictCostFallback           map[string]bool
 	statsEnabled               map[string]bool
 	indexEnabled               map[string]bool
 	bloomFilterNDVs            map[string]int64
@@ -165,6 +173,33 @@ func WithDictionaryPageSizeLimit(limit int64) WriterProperty {
 	return func(cfg *writerPropConfig) {
 		cfg.wr.dictPagesize = limit
 	}
+}
+
+// WithDictionaryCostFallback controls the cost-based dictionary fallback: before the
+// first data page of a column chunk is cut, the writer discards the dictionary and
+// falls back to the plain encoding when the dictionary plus the encoded indices are
+// not smaller than the raw values (mirroring parquet-mr's shouldFallBack). That
+// comparison is done on uncompressed sizes, so it can discard dictionaries that would
+// have won after page compression — pass false to keep an explicitly requested
+// dictionary regardless. The DictionaryPageSizeLimit fallback always stays in effect.
+func WithDictionaryCostFallback(enabled bool) WriterProperty {
+	return func(cfg *writerPropConfig) {
+		cfg.wr.defColumnProps.DictionaryCostFallback = enabled
+	}
+}
+
+// WithDictionaryCostFallbackFor is like WithDictionaryCostFallback but for a
+// given column path string only.
+func WithDictionaryCostFallbackFor(path string, enabled bool) WriterProperty {
+	return func(cfg *writerPropConfig) {
+		cfg.dictCostFallback[path] = enabled
+	}
+}
+
+// WithDictionaryCostFallbackPath is like WithDictionaryCostFallbackFor, but takes
+// a ColumnPath type.
+func WithDictionaryCostFallbackPath(path ColumnPath, enabled bool) WriterProperty {
+	return WithDictionaryCostFallbackFor(path.String(), enabled)
 }
 
 // WithBatchSize specifies the number of rows to use for batch writes to columns
@@ -560,6 +595,7 @@ func NewWriterProperties(opts ...WriterProperty) *WriterProperties {
 		codecs:                     make(map[string]compress.Compression),
 		compressLevel:              make(map[string]int),
 		dictEnabled:                make(map[string]bool),
+		dictCostFallback:           make(map[string]bool),
 		statsEnabled:               make(map[string]bool),
 		indexEnabled:               make(map[string]bool),
 		bloomFilterNDVs:            make(map[string]int64),
@@ -596,6 +632,10 @@ func NewWriterProperties(opts ...WriterProperty) *WriterProperties {
 
 	for key, value := range cfg.dictEnabled {
 		get(key).DictionaryEnabled = value
+	}
+
+	for key, value := range cfg.dictCostFallback {
+		get(key).DictionaryCostFallback = value
 	}
 
 	for key, value := range cfg.statsEnabled {
@@ -635,13 +675,14 @@ func (w *WriterProperties) FileEncryptionProperties() *FileEncryptionProperties 
 	return w.encryptionProps
 }
 
-func (w *WriterProperties) Allocator() memory.Allocator      { return w.mem }
-func (w *WriterProperties) CreatedBy() string                { return w.createdBy }
-func (w *WriterProperties) RootName() string                 { return w.rootName }
-func (w *WriterProperties) RootRepetition() Repetition       { return w.rootRepetition }
-func (w *WriterProperties) WriteBatchSize() int64            { return w.batchSize }
-func (w *WriterProperties) DataPageSize() int64              { return w.pageSize }
-func (w *WriterProperties) DictionaryPageSizeLimit() int64   { return w.dictPagesize }
+func (w *WriterProperties) Allocator() memory.Allocator    { return w.mem }
+func (w *WriterProperties) CreatedBy() string              { return w.createdBy }
+func (w *WriterProperties) RootName() string               { return w.rootName }
+func (w *WriterProperties) RootRepetition() Repetition     { return w.rootRepetition }
+func (w *WriterProperties) WriteBatchSize() int64          { return w.batchSize }
+func (w *WriterProperties) DataPageSize() int64            { return w.pageSize }
+func (w *WriterProperties) DictionaryPageSizeLimit() int64 { return w.dictPagesize }
+
 func (w *WriterProperties) Version() Version                 { return w.parquetVersion }
 func (w *WriterProperties) DataPageVersion() DataPageVersion { return w.dataPageVersion }
 func (w *WriterProperties) MaxRowGroupLength() int64         { return w.maxRowGroupLen }
@@ -730,6 +771,16 @@ func (w *WriterProperties) DictionaryEnabledFor(path string) bool {
 		return p.DictionaryEnabled
 	}
 	return w.defColumnProps.DictionaryEnabled
+}
+
+// DictionaryCostFallbackEnabledFor returns whether the pre-first-page cost-based
+// dictionary fallback is active for the given column path, see
+// WithDictionaryCostFallback.
+func (w *WriterProperties) DictionaryCostFallbackEnabledFor(path string) bool {
+	if p, ok := w.columnProps[path]; ok {
+		return p.DictionaryCostFallback
+	}
+	return w.defColumnProps.DictionaryCostFallback
 }
 
 // DictionaryEnabledPath is the same as DictionaryEnabledFor but takes a ColumnPath object.
