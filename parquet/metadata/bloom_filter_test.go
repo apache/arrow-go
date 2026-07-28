@@ -18,6 +18,7 @@ package metadata
 
 import (
 	"fmt"
+	"math"
 	"math/rand/v2"
 	"runtime"
 	"sync"
@@ -120,7 +121,7 @@ func TestNewBloomFilter(t *testing.T) {
 		maxBytes      int64
 		expectedBytes int64
 	}{
-		{1, 0.09, 0, 0},
+		{1, 0.09, 0, minimumBloomFilterBytes},
 		// cap at maximumBloomFilterBytes
 		{1 << 30, 0.9, maximumBloomFilterBytes + 1, maximumBloomFilterBytes},
 		// round to power of 2
@@ -142,6 +143,20 @@ func TestNewBloomFilter(t *testing.T) {
 			runtime.GC() // force GC to run and do the cleanup routines
 		})
 	}
+}
+
+func TestNewBloomFilterFromNDVAndFPPValidatesOptions(t *testing.T) {
+	for _, fpp := range []float64{0, 1, -0.1, 2, math.NaN()} {
+		t.Run(fmt.Sprintf("fpp=%v", fpp), func(t *testing.T) {
+			assert.Panics(t, func() {
+				NewBloomFilterFromNDVAndFPP(1, fpp, 1024, memory.DefaultAllocator)
+			})
+		})
+	}
+
+	bf := NewBloomFilterFromNDVAndFPP(1, 0.01, 0, memory.DefaultAllocator)
+	assert.EqualValues(t, minimumBloomFilterBytes, bf.Size())
+	assert.NotPanics(t, func() { bf.InsertHash(42) })
 }
 
 func BenchmarkFilterInsert(b *testing.B) {
@@ -270,6 +285,27 @@ func TestAdaptiveBloomFilterEdgeCases(t *testing.T) {
 		// The bloom filter should still work after GC
 		for _, h := range hashes {
 			assert.Truef(t, bf.CheckHash(h), "hash %d not found after GC - potential GC safety issue", h)
+		}
+	})
+
+	t.Run("clamps maximum size to the minimum allocation", func(t *testing.T) {
+		bf := NewAdaptiveBlockSplitBloomFilter(0, 1, 0.01, col, mem).(*adaptiveBlockSplitBloomFilter)
+		defer func() {
+			for _, candidate := range bf.candidates {
+				candidate.bloomFilter.cancelCleanup()
+				candidate.bloomFilter.data.Release()
+			}
+		}()
+
+		assert.EqualValues(t, minimumBloomFilterBytes, bf.maxBytes)
+		assert.NotPanics(t, func() { bf.InsertHash(1) })
+	})
+
+	t.Run("rejects invalid false-positive probabilities", func(t *testing.T) {
+		for _, fpp := range []float64{-0.1, 0, 1, math.NaN()} {
+			assert.PanicsWithValue(t,
+				"parquet: bloom filter false-positive probability must be in (0, 1)",
+				func() { NewAdaptiveBlockSplitBloomFilter(1024, 1, fpp, col, mem) })
 		}
 	})
 }

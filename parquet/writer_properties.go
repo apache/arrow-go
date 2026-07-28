@@ -17,6 +17,8 @@
 package parquet
 
 import (
+	"math"
+
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet/compress"
@@ -58,6 +60,9 @@ const (
 	DefaultBloomFilterFPP             = 0.01
 	DefaultAdaptiveBloomFilterEnabled = false
 	DefaultBloomFilterCandidates      = 5
+
+	minimumBloomFilterBytes = 32
+	maximumBloomFilterBytes = 128 * 1024 * 1024
 )
 
 // ColumnProperties defines the encoding, codec, and so on for a given column.
@@ -366,6 +371,9 @@ func WithPageIndexEnabledPath(path ColumnPath, enabled bool) WriterProperty {
 // it is abandoned and not written to the file.
 func WithMaxBloomFilterBytes(nbytes int64) WriterProperty {
 	return func(cfg *writerPropConfig) {
+		if nbytes < minimumBloomFilterBytes || nbytes > maximumBloomFilterBytes {
+			panic("parquet: maximum bloom filter size must be between 32 bytes and 128 MiB")
+		}
 		cfg.wr.maxBloomFilterBytes = nbytes
 	}
 }
@@ -396,6 +404,7 @@ func WithBloomFilterEnabledPath(path ColumnPath, enabled bool) WriterProperty {
 // bloom filters.
 func WithBloomFilterFPP(fpp float64) WriterProperty {
 	return func(cfg *writerPropConfig) {
+		validateBloomFilterFPP(fpp)
 		cfg.wr.defColumnProps.BloomFilterFPP = fpp
 	}
 }
@@ -404,7 +413,14 @@ func WithBloomFilterFPP(fpp float64) WriterProperty {
 // for writing bloom filters.
 func WithBloomFilterFPPFor(path string, fpp float64) WriterProperty {
 	return func(cfg *writerPropConfig) {
+		validateBloomFilterFPP(fpp)
 		cfg.bloomFilterFPPs[path] = fpp
+	}
+}
+
+func validateBloomFilterFPP(fpp float64) {
+	if fpp <= 0 || fpp >= 1 || math.IsNaN(fpp) {
+		panic("parquet: bloom filter false-positive probability must be in (0, 1)")
 	}
 }
 

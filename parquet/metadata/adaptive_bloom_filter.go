@@ -18,6 +18,7 @@ package metadata
 
 import (
 	"io"
+	"math"
 	"slices"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -79,9 +80,13 @@ type adaptiveBlockSplitBloomFilter struct {
 }
 
 func NewAdaptiveBlockSplitBloomFilter(maxBytes uint32, numCandidates int, fpp float64, column *schema.Column, mem memory.Allocator) BloomFilterBuilder {
+	if fpp <= 0 || fpp >= 1 || math.IsNaN(fpp) {
+		panic("parquet: bloom filter false-positive probability must be in (0, 1)")
+	}
+	maxBytes = max(minimumBloomFilterBytes, min(maximumBloomFilterBytes, maxBytes))
 	ret := &adaptiveBlockSplitBloomFilter{
 		mem:             mem,
-		maxBytes:        min(maximumBloomFilterBytes, maxBytes),
+		maxBytes:        maxBytes,
 		minBytes:        minimumBloomFilterBytes,
 		minCandidateNDV: 16,
 		hasher:          xxhasher{},

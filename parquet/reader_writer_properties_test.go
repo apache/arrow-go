@@ -18,6 +18,7 @@ package parquet_test
 
 import (
 	"bytes"
+	"math"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -60,6 +61,27 @@ func TestWriterPropAdvanced(t *testing.T) {
 	assert.Equal(t, parquet.DataPageV2, props.DataPageVersion())
 	assert.Equal(t, "test2", props.RootName())
 	assert.Equal(t, parquet.Repetitions.Required, props.RootRepetition())
+}
+
+func TestBloomFilterPropertiesValidateOptions(t *testing.T) {
+	for _, fpp := range []float64{0, 1, -0.1, 2, math.NaN()} {
+		t.Run("invalid false-positive probability", func(t *testing.T) {
+			assert.Panics(t, func() {
+				parquet.NewWriterProperties(parquet.WithBloomFilterFPP(fpp))
+			})
+			assert.Panics(t, func() {
+				parquet.NewWriterProperties(parquet.WithBloomFilterFPPFor("column", fpp))
+			})
+		})
+	}
+
+	for _, maxBytes := range []int64{0, 31, 128*1024*1024 + 1} {
+		t.Run("invalid maximum size", func(t *testing.T) {
+			assert.Panics(t, func() {
+				parquet.NewWriterProperties(parquet.WithMaxBloomFilterBytes(maxBytes))
+			})
+		})
+	}
 }
 
 func TestReaderPropsGetStreamInsufficient(t *testing.T) {
