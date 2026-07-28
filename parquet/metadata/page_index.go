@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"runtime"
 	"sync"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -244,6 +245,32 @@ func NewOffsetIndex(serializedIndex []byte, _ *parquet.ReaderProperties, decrypt
 	return &offsetIndex
 }
 
+func deserializeColumnIndex(descr *schema.Column, serializedIndex []byte, props *parquet.ReaderProperties) (idx ColumnIndex, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if _, ok := recovered.(runtime.Error); ok {
+				panic(recovered)
+			}
+			err = fmt.Errorf("%w: %w", arrow.ErrInvalid,
+				shared_utils.FormatRecoveredError("invalid column index", recovered))
+		}
+	}()
+	return NewColumnIndex(descr, serializedIndex, props, nil), nil
+}
+
+func deserializeOffsetIndex(serializedIndex []byte, props *parquet.ReaderProperties) (idx OffsetIndex, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if _, ok := recovered.(runtime.Error); ok {
+				panic(recovered)
+			}
+			err = fmt.Errorf("%w: %w", arrow.ErrInvalid,
+				shared_utils.FormatRecoveredError("invalid offset index", recovered))
+		}
+	}()
+	return NewOffsetIndex(serializedIndex, props, nil), nil
+}
+
 type readRange struct {
 	Offset, Length int64
 }
@@ -358,7 +385,10 @@ func (r *RowGroupPageIndexReader) GetColumnIndex(i int) (ColumnIndex, error) {
 		serializedIndex = decrypted
 	}
 
-	idx := NewColumnIndex(descr, serializedIndex, r.props, nil)
+	idx, err := deserializeColumnIndex(descr, serializedIndex, r.props)
+	if err != nil {
+		return nil, err
+	}
 	r.colIndexes[i] = idx
 	return idx, nil
 }
@@ -418,7 +448,10 @@ func (r *RowGroupPageIndexReader) GetOffsetIndex(i int) (OffsetIndex, error) {
 		serializedIndex = decrypted
 	}
 
-	oidx := NewOffsetIndex(serializedIndex, r.props, nil)
+	oidx, err := deserializeOffsetIndex(serializedIndex, r.props)
+	if err != nil {
+		return nil, err
+	}
 	r.offsetIndices[i] = oidx
 	return oidx, nil
 }
