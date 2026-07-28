@@ -337,6 +337,9 @@ func (pw *serializedPageWriter) WriteDictionaryPage(page *DictionaryPage) (int64
 	if err != nil {
 		return 0, err
 	}
+	if written != len(data) {
+		return int64(written), io.ErrShortWrite
+	}
 
 	written += headerSize
 
@@ -399,6 +402,9 @@ func (pw *serializedPageWriter) WriteDataPage(page DataPage) (int64, error) {
 	written, err := pw.sink.Write(data)
 	if err != nil {
 		return int64(written), err
+	}
+	if written != len(data) {
+		return int64(written), io.ErrShortWrite
 	}
 	written += headerSize
 
