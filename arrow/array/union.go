@@ -801,7 +801,7 @@ func (b *unionBuilder) NumChildren() int {
 }
 
 func (b *unionBuilder) Child(idx int) Builder {
-	if idx < 0 || idx > len(b.children) {
+	if idx < 0 || idx >= len(b.children) {
 		panic("arrow/array: invalid child index for union builder")
 	}
 	return b.children[idx]

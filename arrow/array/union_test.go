@@ -42,6 +42,41 @@ func int32ArrFromSlice(offsets ...int32) arrow.Array {
 	return array.MakeFromData(data)
 }
 
+func TestUnionBuilderChildBounds(t *testing.T) {
+	fields := []arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}
+	codes := []arrow.UnionTypeCode{0}
+	tests := []struct {
+		name string
+		new  func() array.UnionBuilder
+	}{
+		{
+			name: "dense",
+			new: func() array.UnionBuilder {
+				return array.NewDenseUnionBuilder(memory.DefaultAllocator, arrow.DenseUnionOf(fields, codes))
+			},
+		},
+		{
+			name: "sparse",
+			new: func() array.UnionBuilder {
+				return array.NewSparseUnionBuilder(memory.DefaultAllocator, arrow.SparseUnionOf(fields, codes))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := tt.new()
+			defer builder.Release()
+
+			for _, index := range []int{-1, len(fields)} {
+				assert.PanicsWithValue(t, "arrow/array: invalid child index for union builder", func() {
+					builder.Child(index)
+				})
+			}
+		})
+	}
+}
+
 func TestUnionSliceEquals(t *testing.T) {
 	unionFields := []arrow.Field{
 		{Name: "u0", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
