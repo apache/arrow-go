@@ -72,10 +72,12 @@ func TestWriteColumnChunkedPropagatesLevelBuilderError(t *testing.T) {
 		parquet.NewWriterProperties(parquet.WithAllocator(mem)),
 		pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem)))
 	require.NoError(t, err)
+	require.NoError(t, writer.NewRowGroupChecked())
 
 	err = writer.WriteColumnChunked(values, 0, int64(values.Len()))
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, arrow.ErrNotImplemented))
+	require.NoError(t, writer.WriteColumnData(valid))
 	require.NoError(t, writer.Close())
 }
 
