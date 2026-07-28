@@ -157,8 +157,20 @@ func decodeCMetadata(md *C.char) arrow.Metadata {
 
 // convert a C.ArrowSchema to an arrow.Field to maintain metadata with the schema
 func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
+	if schema == nil {
+		return ret, fmt.Errorf("%w: nil ArrowSchema", arrow.ErrInvalid)
+	}
 	// always release, even on error
 	defer C.ArrowSchemaRelease(schema)
+	if schema.format == nil {
+		return ret, fmt.Errorf("%w: ArrowSchema format is nil", arrow.ErrInvalid)
+	}
+	if schema.n_children < 0 {
+		return ret, fmt.Errorf("%w: ArrowSchema n_children cannot be negative: %d", arrow.ErrInvalid, schema.n_children)
+	}
+	if schema.n_children > 0 && schema.children == nil {
+		return ret, fmt.Errorf("%w: ArrowSchema children is nil with n_children %d", arrow.ErrInvalid, schema.n_children)
+	}
 
 	var childFields []arrow.Field
 	if schema.n_children > 0 {
@@ -181,12 +193,18 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 
 	// copies the c-string here, but it's very small
 	f := C.GoString(schema.format)
+	if f == "" {
+		return ret, fmt.Errorf("%w: ArrowSchema format is empty", arrow.ErrInvalid)
+	}
 	// handle our non-parameterized simple types.
 	dt, ok := formatToSimpleType[f]
 	if ok {
 		ret.Type = dt
 
 		if schema.dictionary != nil {
+			if !arrow.IsInteger(ret.Type.ID()) {
+				return ret, fmt.Errorf("%w: dictionary index type must be an integer", arrow.ErrInvalid)
+			}
 			valueField, err := importSchema(schema.dictionary)
 			if err != nil {
 				return ret, err
@@ -215,7 +233,7 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 	case "w": // fixed size binary is "w:##" where ## is the byteWidth
 		byteWidth, err := strconv.Atoi(val)
 		if err != nil {
-			return ret, err
+			return ret, fmt.Errorf("%w: invalid fixed-size binary format %q: %v", arrow.ErrInvalid, f, err)
 		}
 		dt = &arrow.FixedSizeBinaryType{ByteWidth: byteWidth}
 	case "d": // decimal types are d:<precision>,<scale>[,<bitsize>] size is assumed 128 if left out
@@ -258,12 +276,24 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 	}
 
 	if f[0] == '+' { // types with children
+		if len(f) < 2 {
+			return ret, fmt.Errorf("%w: invalid nested type format %q", arrow.ErrInvalid, f)
+		}
 		switch f[1] {
 		case 'l': // list
+			if len(childFields) != 1 {
+				return ret, fmt.Errorf("%w: list type must have exactly 1 child", arrow.ErrInvalid)
+			}
 			dt = arrow.ListOfField(childFields[0])
 		case 'L': // large list
+			if len(childFields) != 1 {
+				return ret, fmt.Errorf("%w: large list type must have exactly 1 child", arrow.ErrInvalid)
+			}
 			dt = arrow.LargeListOfField(childFields[0])
 		case 'v': // list view/large list view
+			if len(f) < 3 || len(childFields) != 1 {
+				return ret, fmt.Errorf("%w: invalid list view type format %q or child count %d", arrow.ErrInvalid, f, len(childFields))
+			}
 			switch f[2] {
 			case 'l':
 				dt = arrow.ListViewOfField(childFields[0])
@@ -271,9 +301,16 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 				dt = arrow.LargeListViewOfField(childFields[0])
 			}
 		case 'w': // fixed size list is w:# where # is the list size.
-			listSize, err := strconv.Atoi(strings.Split(f, ":")[1])
+			if len(childFields) != 1 {
+				return ret, fmt.Errorf("%w: fixed-size list type must have exactly 1 child", arrow.ErrInvalid)
+			}
+			_, size, ok := strings.Cut(f, ":")
+			if !ok {
+				return ret, fmt.Errorf("%w: invalid fixed-size list format %q", arrow.ErrInvalid, f)
+			}
+			listSize, err := strconv.Atoi(size)
 			if err != nil {
-				return ret, err
+				return ret, fmt.Errorf("%w: invalid fixed-size list format %q: %v", arrow.ErrInvalid, f, err)
 			}
 
 			dt = arrow.FixedSizeListOfField(int32(listSize), childFields[0])
@@ -285,10 +322,19 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 			}
 			dt = arrow.RunEndEncodedOf(childFields[0].Type, childFields[1].Type)
 		case 'm': // map type is basically a list of structs.
-			st := childFields[0].Type.(*arrow.StructType)
+			if len(childFields) != 1 {
+				return ret, fmt.Errorf("%w: map type must have exactly 1 child", arrow.ErrInvalid)
+			}
+			st, ok := childFields[0].Type.(*arrow.StructType)
+			if !ok || st.NumFields() != 2 {
+				return ret, fmt.Errorf("%w: map child must be a struct with exactly 2 fields", arrow.ErrInvalid)
+			}
 			dt = arrow.MapOf(st.Field(0).Type, st.Field(1).Type)
 			dt.(*arrow.MapType).KeysSorted = (schema.flags & C.ARROW_FLAG_MAP_KEYS_SORTED) != 0
 		case 'u': // union
+			if len(f) < 3 {
+				return ret, fmt.Errorf("%w: invalid union type format %q", arrow.ErrInvalid, f)
+			}
 			var mode arrow.UnionMode
 			switch f[2] {
 			case 'd':

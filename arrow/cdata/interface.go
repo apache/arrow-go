@@ -22,6 +22,7 @@ package cdata
 import (
 	"context"
 	"errors"
+	"fmt"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -58,7 +59,12 @@ func ImportCArrowSchema(out *CArrowSchema) (*arrow.Schema, error) {
 		return nil, err
 	}
 
-	return arrow.NewSchema(ret.Type.(*arrow.StructType).Fields(), &ret.Metadata), nil
+	structType, ok := ret.Type.(*arrow.StructType)
+	if !ok {
+		return nil, fmt.Errorf("%w: record batch schema must have a top-level struct type", arrow.ErrInvalid)
+	}
+
+	return arrow.NewSchema(structType.Fields(), &ret.Metadata), nil
 }
 
 // ImportCArrayWithType takes a pointer to a C Data ArrowArray and interprets the values

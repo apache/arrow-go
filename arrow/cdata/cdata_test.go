@@ -106,6 +106,24 @@ func TestSimpleArrayAndSchema(t *testing.T) {
 	}
 }
 
+func TestImportSchemaRejectsMalformedFormats(t *testing.T) {
+	for _, format := range []string{"", "+", "+v", "+l", "+w", "+m", "+u"} {
+		t.Run(format, func(t *testing.T) {
+			schema := testPrimitive(format)
+			_, err := ImportCArrowField(&schema)
+			require.ErrorIs(t, err, arrow.ErrInvalid)
+			require.True(t, schemaIsReleased(&schema))
+		})
+	}
+}
+
+func TestImportCArrowSchemaRejectsPrimitiveTopLevel(t *testing.T) {
+	schema := testPrimitive("i")
+	_, err := ImportCArrowSchema(&schema)
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+	require.True(t, schemaIsReleased(&schema))
+}
+
 func TestPrimitiveSchemas(t *testing.T) {
 	tests := []struct {
 		typ arrow.DataType
