@@ -73,7 +73,7 @@ func (s *Duration) equals(rhs Scalar) bool {
 }
 
 func (s *Duration) Unit() arrow.TimeUnit {
-	return s.DataType().(*arrow.TimestampType).Unit
+	return s.DataType().(*arrow.DurationType).Unit
 }
 func (s *Duration) Data() []byte {
 	return (*[arrow.DurationSizeBytes]byte)(unsafe.Pointer(&s.Value))[:]

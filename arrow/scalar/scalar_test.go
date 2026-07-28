@@ -524,6 +524,16 @@ func TestDurationScalarBasics(t *testing.T) {
 	assert.False(t, scalar.Equals(tsNull, tsVal2))
 }
 
+func TestDurationScalarUnitConversions(t *testing.T) {
+	s := scalar.NewDurationScalar(1, arrow.FixedWidthTypes.Duration_s)
+	assert.Equal(t, arrow.Second, s.Unit())
+	assert.Equal(t, "1s", s.String())
+
+	converted, err := s.CastTo(arrow.FixedWidthTypes.Duration_ms)
+	require.NoError(t, err)
+	assert.Equal(t, arrow.Duration(1000), converted.(*scalar.Duration).Value)
+}
+
 func TestMonthIntervalScalarBasics(t *testing.T) {
 	typ1 := arrow.FixedWidthTypes.MonthInterval
 	typ2 := arrow.FixedWidthTypes.MonthInterval
