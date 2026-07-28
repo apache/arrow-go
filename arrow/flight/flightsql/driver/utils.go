@@ -102,6 +102,8 @@ func fromArrowType(arr arrow.Array, idx int) (interface{}, error) {
 		ts := arr.DataType().(*arrow.TimestampType)
 		v := c.Value(idx)
 		return v.ToTime(ts.TimeUnit()), nil
+	case *array.Date32:
+		return c.Value(idx).ToTime(), nil
 	case *array.Date64:
 		return c.Value(idx).ToTime(), nil
 	case *array.Duration:

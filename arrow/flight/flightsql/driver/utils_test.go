@@ -54,6 +54,7 @@ func Test_fromArrowType(t *testing.T) {
 		{Name: "f19-duration_ms", Type: arrow.FixedWidthTypes.Duration_ms},
 		{Name: "f20-duration_us", Type: arrow.FixedWidthTypes.Duration_us},
 		{Name: "f21-duration_ns", Type: arrow.FixedWidthTypes.Duration_ns},
+		{Name: "f22-d32", Type: arrow.FixedWidthTypes.Date32},
 	}
 
 	schema := arrow.NewSchema(fields, nil)
@@ -98,6 +99,8 @@ func Test_fromArrowType(t *testing.T) {
 	b.Field(18).(*array.DurationBuilder).Append(1)
 	b.Field(19).(*array.DurationBuilder).Append(1)
 	b.Field(20).(*array.DurationBuilder).Append(1)
+	testDate := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
+	b.Field(21).(*array.Date32Builder).Append(arrow.Date32FromTime(testDate))
 
 	rec := b.NewRecordBatch()
 	defer rec.Release()
@@ -135,4 +138,17 @@ func Test_fromArrowType(t *testing.T) {
 	tf(t, 18, time.Duration(1000000))                        // "f19-duration_ms"
 	tf(t, 19, time.Duration(1000))                           // "f20-duration_us"
 	tf(t, 20, time.Duration(1))                              // "f21-duration_ns"
+	tf(t, 21, testDate)                                      // "f22-d32"
+}
+
+func TestFromArrowTypeReturnsNilForNullDate32(t *testing.T) {
+	b := array.NewDate32Builder(memory.DefaultAllocator)
+	defer b.Release()
+	b.AppendNull()
+	arr := b.NewDate32Array()
+	defer arr.Release()
+
+	got, err := fromArrowType(arr, 0)
+	require.NoError(t, err)
+	require.Nil(t, got)
 }
