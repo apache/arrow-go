@@ -241,6 +241,85 @@ func TestReader(t *testing.T) {
 // A nullable logical timestamp must decode to a value rather than a null: the
 // union branch carries the logical type, so the reader has to honour it on the
 // branch and not just on a bare long.
+
+// TestOCFReaderBytesValues exercises avro `bytes` fields, both plain and as a
+// ["null","bytes"] union.
+func TestOCFReaderBytesValues(t *testing.T) {
+	schema := `{
+		"type": "record",
+		"name": "rec",
+		"fields": [
+			{"name": "plain", "type": "bytes"},
+			{"name": "nullable", "type": ["null", "bytes"]}
+		]
+	}`
+	payload := []byte{0x00, 0x01, 0xfe, 0xff}
+
+	var buf bytes.Buffer
+	enc, err := ocf.NewEncoder(schema, &buf)
+	assert.NoError(t, err)
+	assert.NoError(t, enc.Encode(map[string]any{
+		"plain":    payload,
+		"nullable": map[string]any{"bytes": payload},
+	}))
+	assert.NoError(t, enc.Encode(map[string]any{
+		"plain":    []byte{},
+		"nullable": nil,
+	}))
+	assert.NoError(t, enc.Close())
+
+	ar, err := NewOCFReader(bytes.NewReader(buf.Bytes()), WithChunk(-1))
+	assert.NoError(t, err)
+	defer ar.Close()
+
+	assert.True(t, ar.Next())
+	assert.NoError(t, ar.Err())
+	rec := ar.RecordBatch()
+
+	plain := rec.Column(0).(*array.Binary)
+	assert.Equal(t, payload, plain.Value(0))
+	assert.Equal(t, []byte{}, plain.Value(1))
+
+	nullable := rec.Column(1).(*array.Binary)
+	assert.Equal(t, payload, nullable.Value(0))
+	assert.True(t, nullable.IsNull(1))
+}
+
+func TestOCFReaderCloseUnblocksFullQueues(t *testing.T) {
+	const schema = `{"type":"record","name":"rec","fields":[{"name":"value","type":"long"}]}`
+	var buf bytes.Buffer
+	enc, err := ocf.NewEncoder(schema, &buf)
+	assert.NoError(t, err)
+	for i := 0; i < 100; i++ {
+		assert.NoError(t, enc.Encode(map[string]any{"value": int64(i)}))
+	}
+	assert.NoError(t, enc.Close())
+
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	reader, err := NewOCFReader(bytes.NewReader(buf.Bytes()), WithAllocator(mem),
+		WithReadCacheSize(1), WithRecordCacheSize(1), WithChunk(1))
+	assert.NoError(t, err)
+
+	deadline := time.Now().Add(time.Second)
+	for reader.OCFRecordsReadCount() < 3 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		reader.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Close blocked with full producer queues")
+	}
+
+	reader.Release()
+	mem.AssertSize(t, 0)
+}
+
 func TestOCFReaderNullableTimestamps(t *testing.T) {
 	tests := []struct {
 		logicalType string
