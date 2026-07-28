@@ -146,13 +146,21 @@ func TestStructValidateFullRejectsShortField(t *testing.T) {
 	b := array.NewStructBuilder(mem, dt)
 	defer b.Release()
 	b.Append(true)
+	b.Append(true)
 	b.FieldBuilder(0).(*array.Int32Builder).Append(1)
+	b.FieldBuilder(1).(*array.Int32Builder).AppendValues([]int32{2, 3}, nil)
 
 	arr := b.NewStructArray()
 	defer arr.Release()
-	assert.NoError(t, arr.Validate())
+	assert.ErrorIs(t, arr.Validate(), arrow.ErrInvalid)
 	assert.ErrorIs(t, arr.ValidateFull(), arrow.ErrInvalid)
 	assert.ErrorIs(t, array.ValidateFull(arr), arrow.ErrInvalid)
+
+	sliced := array.NewSlice(arr, 1, 2).(*array.Struct)
+	defer sliced.Release()
+	assert.Zero(t, sliced.Field(0).Len())
+	assert.ErrorIs(t, sliced.Validate(), arrow.ErrInvalid)
+	assert.ErrorIs(t, sliced.ValidateFull(), arrow.ErrInvalid)
 }
 
 func TestStructStringRoundTrip(t *testing.T) {
