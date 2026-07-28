@@ -17,8 +17,27 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestProcessReturnsOutputWriteError(t *testing.T) {
+	dir := t.TempDir()
+	tmpl := filepath.Join(dir, "input.txt.tmpl")
+	if err := os.WriteFile(tmpl, []byte("generated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := process(nil, []pathSpec{{in: tmpl, out: dir}})
+	if err == nil {
+		t.Fatal("process returned nil for an unwritable output path")
+	}
+	if !strings.Contains(err.Error(), dir) {
+		t.Errorf("error %q does not contain output path %q", err, dir)
+	}
+}
 
 func TestStripComments(t *testing.T) {
 	tests := []struct {
