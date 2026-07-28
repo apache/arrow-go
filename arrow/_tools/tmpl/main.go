@@ -114,7 +114,9 @@ func main() {
 	}
 
 	in.In = readData(*dataArg)
-	process(in, specs)
+	if err := process(in, specs); err != nil {
+		errExit("%s", err)
+	}
 }
 
 func mustReadAll(path string) []byte {
@@ -148,7 +150,7 @@ var funcs = template.FuncMap{
 	"upper": strings.ToUpper,
 }
 
-func process(data interface{}, specs []pathSpec) {
+func process(data interface{}, specs []pathSpec) error {
 	for _, spec := range specs {
 		var (
 			t   *template.Template
@@ -178,8 +180,11 @@ func process(data interface{}, specs []pathSpec) {
 			}
 		}
 
-		os.WriteFile(spec.out, generated, fileMode(spec.in))
+		if err := os.WriteFile(spec.out, generated, fileMode(spec.in)); err != nil {
+			return fmt.Errorf("error writing generated output %q: %w", spec.out, err)
+		}
 	}
+	return nil
 }
 
 var (
