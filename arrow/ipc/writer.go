@@ -157,7 +157,7 @@ func (w *Writer) Close() error {
 	w.pw = nil
 	w.releaseDictionaries()
 	if err != nil {
-		return fmt.Errorf("arrow/ipc: could not close payload writer: %w", err)
+		return w.fail(fmt.Errorf("arrow/ipc: could not close payload writer: %w", err))
 	}
 
 	return nil
@@ -180,7 +180,7 @@ func (w *Writer) fail(err error) error {
 func (w *Writer) Write(rec arrow.RecordBatch) (err error) {
 	defer func() {
 		if pErr := recover(); pErr != nil {
-			err = utils.FormatRecoveredError("arrow/ipc: unknown error while writing", pErr)
+			err = w.fail(utils.FormatRecoveredError("arrow/ipc: unknown error while writing", pErr))
 		}
 	}()
 	if w.err != nil {

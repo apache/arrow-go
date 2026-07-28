@@ -38,6 +38,7 @@ import (
 
 type failingPayloadWriter struct {
 	err       error
+	closeErr  error
 	payloads  int
 	closeCall int
 }
@@ -49,7 +50,18 @@ func (w *failingPayloadWriter) WritePayload(Payload) error {
 }
 func (w *failingPayloadWriter) Close() error {
 	w.closeCall++
-	return nil
+	return w.closeErr
+}
+
+func TestWriterCloseFailureIsTerminal(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	want := errors.New("close failed")
+	payloadWriter := &failingPayloadWriter{closeErr: want}
+	writer := NewWriterWithPayloadWriter(payloadWriter, WithSchema(schema))
+
+	require.ErrorIs(t, writer.Close(), want)
+	require.ErrorIs(t, writer.Close(), want)
+	require.Equal(t, 1, payloadWriter.closeCall)
 }
 
 func TestWriterSchemaFailureIsTerminal(t *testing.T) {
