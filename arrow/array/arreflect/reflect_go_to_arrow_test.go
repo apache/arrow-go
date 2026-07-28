@@ -312,6 +312,8 @@ func TestBuildStructArray(t *testing.T) {
 		sa := arr.(*array.Struct)
 		require.Equal(t, 3, sa.Len())
 		require.Equal(t, 3, sa.NumField(), "expected 3 promoted fields (Name, City, Zip)")
+		assert.True(t, sa.DataType().(*arrow.StructType).Field(1).Nullable)
+		assert.True(t, sa.DataType().(*arrow.StructType).Field(2).Nullable)
 
 		nameArr := sa.Field(0).(*array.String)
 		cityArr := sa.Field(1).(*array.String)

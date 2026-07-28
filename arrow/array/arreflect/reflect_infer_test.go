@@ -154,6 +154,23 @@ func TestInferStructType(t *testing.T) {
 		assert.True(t, st.Field(1).Nullable, "Label should be nullable")
 	})
 
+	t.Run("fields promoted through embedded pointers are nullable", func(t *testing.T) {
+		type Inner struct {
+			Value int32
+		}
+		type Middle struct {
+			*Inner
+		}
+		type Outer struct {
+			*Middle
+		}
+
+		st, err := inferStructType(reflect.TypeOf(Outer{}))
+		require.NoError(t, err)
+		require.Equal(t, 1, st.NumFields())
+		assert.True(t, st.Field(0).Nullable)
+	})
+
 	t.Run("arrow:\"-\" tagged field is excluded", func(t *testing.T) {
 		type S struct {
 			Keep   string

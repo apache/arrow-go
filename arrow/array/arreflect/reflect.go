@@ -143,9 +143,10 @@ func parseDecimalOpt(opts *tagOpts, token string) {
 }
 
 type bfsEntry struct {
-	t     reflect.Type
-	index []int
-	depth int
+	t        reflect.Type
+	index    []int
+	depth    int
+	nullable bool
 }
 
 type candidate struct {
@@ -214,20 +215,22 @@ func collectFieldCandidates(t reflect.Type) map[string][]candidate {
 
 			if sf.Anonymous && !hasTag {
 				ft := sf.Type
+				pathNullable := entry.nullable || ft.Kind() == reflect.Ptr
 				for ft.Kind() == reflect.Ptr {
 					ft = ft.Elem()
 				}
 				if ft.Kind() == reflect.Struct {
 					queue = append(queue, bfsEntry{
-						t:     ft,
-						index: fullIndex,
-						depth: entry.depth + 1,
+						t:        ft,
+						index:    fullIndex,
+						depth:    entry.depth + 1,
+						nullable: pathNullable,
 					})
 					continue
 				}
 			}
 
-			nullable := sf.Type.Kind() == reflect.Ptr
+			nullable := entry.nullable || sf.Type.Kind() == reflect.Ptr
 			tagged := hasTag && opts.Name != ""
 
 			meta := fieldMeta{
