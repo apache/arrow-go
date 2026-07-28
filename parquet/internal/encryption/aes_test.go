@@ -19,11 +19,41 @@ package encryption
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+type failingRandomReader struct {
+	err error
+}
+
+func (r failingRandomReader) Read([]byte) (int, error) { return 0, r.err }
+
+func TestAESEncryptRejectsNonceGenerationFailure(t *testing.T) {
+	originalReadRandom := readRandom
+	t.Cleanup(func() { readRandom = originalReadRandom })
+	failingReader := failingRandomReader{err: errors.New("entropy unavailable")}
+	readRandom = failingReader.Read
+
+	for _, tc := range []struct {
+		name string
+		alg  parquet.Cipher
+	}{
+		{name: "GCM", alg: parquet.AesGcm},
+		{name: "CTR", alg: parquet.AesCtr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			encryptor := NewAesEncryptor(tc.alg, false)
+			require.PanicsWithError(t,
+				"parquet: failed to generate encryption nonce: entropy unavailable",
+				func() { encryptor.Encrypt(&bytes.Buffer{}, []byte("data"), make([]byte, 16), nil) })
+		})
+	}
+}
 
 func TestAESDecryptRejectsMalformedCiphertext(t *testing.T) {
 	decryptor := newAesDecryptor(parquet.AesGcm, false)

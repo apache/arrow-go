@@ -43,6 +43,8 @@ const (
 	bufferSizeLength = 4
 )
 
+var readRandom = rand.Read
+
 // Module constants for constructing the AAD bytes, the order here is
 // important as the constants are set via iota.
 const (
@@ -125,7 +127,9 @@ func (a *aesEncryptor) Encrypt(w io.Writer, src, key, aad []byte) int {
 	}
 
 	nonce := make([]byte, NonceLength)
-	rand.Read(nonce)
+	if _, err := readRandom(nonce); err != nil {
+		panic(fmt.Errorf("parquet: failed to generate encryption nonce: %w", err))
+	}
 
 	if a.mode == gcmMode {
 		aead, err := cipher.NewGCM(block)
