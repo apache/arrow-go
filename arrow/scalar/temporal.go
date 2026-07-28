@@ -155,11 +155,19 @@ func castTemporal(from TemporalScalar, to arrow.DataType) (Scalar, error) {
 			return NewDate64Scalar(arrow.Date64(millis - millis%int64(millisecondsInDay))), nil
 		}
 	case TimeScalar:
+		var value int64
+		switch s := s.(type) {
+		case *Time32:
+			value = int64(s.Value)
+		case *Time64:
+			value = int64(s.Value)
+		}
+
 		switch to := to.(type) {
 		case *arrow.Time32Type:
-			return NewTime32Scalar(arrow.Time32(arrow.ConvertTimestampValue(s.Unit(), to.Unit, int64(s.value().(arrow.Time64)))), to), nil
+			return NewTime32Scalar(arrow.Time32(arrow.ConvertTimestampValue(s.Unit(), to.Unit, value)), to), nil
 		case *arrow.Time64Type:
-			return NewTime64Scalar(arrow.Time64(arrow.ConvertTimestampValue(s.Unit(), to.Unit, int64(s.value().(arrow.Time32)))), to), nil
+			return NewTime64Scalar(arrow.Time64(arrow.ConvertTimestampValue(s.Unit(), to.Unit, value)), to), nil
 		}
 
 	case *Duration:

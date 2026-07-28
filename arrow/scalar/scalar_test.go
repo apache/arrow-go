@@ -366,6 +366,48 @@ func TestTimeScalarsMakeScalar(t *testing.T) {
 	assert.Equal(t, "10:10:10.123456789", scalar.NewTime64Scalar(arrow.Time64(tententen), typ4).String())
 }
 
+func TestTimeScalarUnitConversions(t *testing.T) {
+	tests := []struct {
+		name string
+		from scalar.TimeScalar
+		to   arrow.DataType
+		want scalar.Scalar
+	}{
+		{
+			name: "time32 to time32",
+			from: scalar.NewTime32Scalar(2, arrow.FixedWidthTypes.Time32s),
+			to:   arrow.FixedWidthTypes.Time32ms,
+			want: scalar.NewTime32Scalar(2000, arrow.FixedWidthTypes.Time32ms),
+		},
+		{
+			name: "time32 to time64",
+			from: scalar.NewTime32Scalar(2, arrow.FixedWidthTypes.Time32s),
+			to:   arrow.FixedWidthTypes.Time64us,
+			want: scalar.NewTime64Scalar(2_000_000, arrow.FixedWidthTypes.Time64us),
+		},
+		{
+			name: "time64 to time32",
+			from: scalar.NewTime64Scalar(2_000_000, arrow.FixedWidthTypes.Time64us),
+			to:   arrow.FixedWidthTypes.Time32ms,
+			want: scalar.NewTime32Scalar(2000, arrow.FixedWidthTypes.Time32ms),
+		},
+		{
+			name: "time64 to time64",
+			from: scalar.NewTime64Scalar(2, arrow.FixedWidthTypes.Time64us),
+			to:   arrow.FixedWidthTypes.Time64ns,
+			want: scalar.NewTime64Scalar(2000, arrow.FixedWidthTypes.Time64ns),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.from.CastTo(tt.to)
+			require.NoError(t, err)
+			assert.True(t, scalar.Equals(tt.want, got))
+		})
+	}
+}
+
 func TestTimestampScalarBasics(t *testing.T) {
 	typ1 := arrow.FixedWidthTypes.Timestamp_ms
 	typ2 := arrow.FixedWidthTypes.Timestamp_s
