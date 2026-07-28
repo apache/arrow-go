@@ -320,9 +320,6 @@ func (pw *serializedPageWriter) WriteDictionaryPage(page *DictionaryPage) (int64
 	pageHdr.DataPageHeaderV2 = nil
 
 	startPos := pw.sink.Tell()
-	if pw.dictPageOffset == 0 {
-		pw.dictPageOffset = int64(startPos)
-	}
 
 	if pw.metaEncryptor != nil {
 		if err := pw.updateEncryption(encryption.DictPageHeaderModule); err != nil {
@@ -342,6 +339,9 @@ func (pw *serializedPageWriter) WriteDictionaryPage(page *DictionaryPage) (int64
 	}
 
 	written += headerSize
+	if pw.dictPageOffset == 0 {
+		pw.dictPageOffset = int64(startPos)
+	}
 
 	pw.totalUncompressed += int64(uncompressed + headerSize)
 	pw.totalCompressed = int64(written)
@@ -386,9 +386,6 @@ func (pw *serializedPageWriter) WriteDataPage(page DataPage) (int64, error) {
 	}
 
 	startPos := pw.sink.Tell()
-	if pw.pageOrdinal == 0 {
-		pw.dataPageOffset = int64(startPos)
-	}
 
 	if pw.metaEncryptor != nil {
 		if err := pw.updateEncryption(encryption.DataPageHeaderModule); err != nil {
@@ -407,6 +404,9 @@ func (pw *serializedPageWriter) WriteDataPage(page DataPage) (int64, error) {
 		return int64(written), io.ErrShortWrite
 	}
 	written += headerSize
+	if pw.pageOrdinal == 0 {
+		pw.dataPageOffset = int64(startPos)
+	}
 
 	// collect page index
 	if pw.columnIndexBuilder != nil {

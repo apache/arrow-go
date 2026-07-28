@@ -68,7 +68,7 @@ func TestSerializedPageWriterRejectsShortWrites(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sink := &shortPageSink{data: data}
+			sink := &shortPageSink{data: data, pos: 17}
 			writer, err := NewPageWriter(sink, compress.Codecs.Uncompressed,
 				compress.DefaultCompressionLevel, nil, -1, -1, memory.DefaultAllocator, false, nil, nil)
 			require.NoError(t, err)
@@ -78,7 +78,10 @@ func TestSerializedPageWriterRejectsShortWrites(t *testing.T) {
 			written, err := tt.write(writer, buf)
 			require.True(t, errors.Is(err, io.ErrShortWrite))
 			require.EqualValues(t, len(data)-1, written)
-			require.Zero(t, writer.(*serializedPageWriter).NumValues())
+			serialized := writer.(*serializedPageWriter)
+			require.Zero(t, serialized.NumValues())
+			require.Zero(t, serialized.DictionaryPageOffset())
+			require.Zero(t, serialized.DataPageoffset())
 		})
 	}
 }
