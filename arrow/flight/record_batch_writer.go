@@ -47,7 +47,9 @@ func (f *flightPayloadWriter) WritePayload(payload ipc.Payload) error {
 	payload.SerializeBody(&f.buf)
 	f.fd.DataBody = f.buf.Bytes()
 
-	return f.w.Send(&f.fd)
+	err := f.w.Send(&f.fd)
+	f.fd.FlightDescriptor = nil
+	return err
 }
 
 func (f *flightPayloadWriter) Close() error { return nil }
@@ -75,11 +77,6 @@ func (w *Writer) SetFlightDescriptor(descr *FlightDescriptor) {
 
 // Write writes a recordbatch payload and returns any error, implementing the arrio.Writer interface
 func (w *Writer) Write(rec arrow.RecordBatch) error {
-	if w.pw.fd.FlightDescriptor != nil {
-		defer func() {
-			w.pw.fd.FlightDescriptor = nil
-		}()
-	}
 	return w.Writer.Write(rec)
 }
 

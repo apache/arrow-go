@@ -481,6 +481,31 @@ func TestWriterInconsistentSchema(t *testing.T) {
 	require.NoError(t, w.Close())
 }
 
+func TestWriterFlightDescriptorOnlyAppliesToNextPayload(t *testing.T) {
+	recs, ok := arrdata.Records["primitives"]
+	require.True(t, ok)
+
+	fs := collectingFlightStreamWriter{}
+	w := flight.NewRecordWriter(&fs, ipc.WithSchema(recs[0].Schema()))
+	w.SetFlightDescriptor(&flight.FlightDescriptor{Path: []string{"dataset"}})
+	require.NoError(t, w.Write(recs[0]))
+	require.Greater(t, len(fs.hasDescriptor), 1)
+	require.True(t, fs.hasDescriptor[0])
+	for _, hasDescriptor := range fs.hasDescriptor[1:] {
+		require.False(t, hasDescriptor)
+	}
+	require.NoError(t, w.Close())
+}
+
+type collectingFlightStreamWriter struct {
+	hasDescriptor []bool
+}
+
+func (f *collectingFlightStreamWriter) Send(data *flight.FlightData) error {
+	f.hasDescriptor = append(f.hasDescriptor, data.FlightDescriptor != nil)
+	return nil
+}
+
 type flightStreamWriter struct{}
 
 // Send implements flight.DataStreamWriter.
