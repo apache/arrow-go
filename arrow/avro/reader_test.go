@@ -320,6 +320,40 @@ func TestOCFReaderCloseUnblocksFullQueues(t *testing.T) {
 	mem.AssertSize(t, 0)
 }
 
+func TestOCFReaderReuseWaitsForPreviousWorkers(t *testing.T) {
+	const schema = `{"type":"record","name":"rec","fields":[{"name":"value","type":"long"}]}`
+	encode := func(start int64) []byte {
+		var buf bytes.Buffer
+		enc, err := ocf.NewEncoder(schema, &buf)
+		assert.NoError(t, err)
+		for i := range int64(20) {
+			assert.NoError(t, enc.Encode(map[string]any{"value": start + i}))
+		}
+		assert.NoError(t, enc.Close())
+		return buf.Bytes()
+	}
+
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	reader, err := NewOCFReader(bytes.NewReader(encode(0)), WithAllocator(mem),
+		WithReadCacheSize(1), WithRecordCacheSize(1), WithChunk(1))
+	assert.NoError(t, err)
+	assert.True(t, reader.Next())
+
+	assert.NoError(t, reader.Reuse(bytes.NewReader(encode(100))))
+	var values []int64
+	for reader.Next() {
+		values = append(values, reader.RecordBatch().Column(0).(*array.Int64).Value(0))
+	}
+	assert.NoError(t, reader.Err())
+	assert.Len(t, values, 20)
+	for i, value := range values {
+		assert.Equal(t, int64(100+i), value)
+	}
+
+	reader.Release()
+	mem.AssertSize(t, 0)
+}
+
 func TestOCFReaderNullableTimestamps(t *testing.T) {
 	tests := []struct {
 		logicalType string
