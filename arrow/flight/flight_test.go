@@ -497,13 +497,47 @@ func TestWriterFlightDescriptorOnlyAppliesToNextPayload(t *testing.T) {
 	require.NoError(t, w.Close())
 }
 
+func TestReaderRetainsDescriptorForFirstRecordBatch(t *testing.T) {
+	recs, ok := arrdata.Records["primitives"]
+	require.True(t, ok)
+
+	descriptor := &flight.FlightDescriptor{Path: []string{"dataset"}}
+	fs := collectingFlightStreamWriter{}
+	w := flight.NewRecordWriter(&fs, ipc.WithSchema(recs[0].Schema()))
+	w.SetFlightDescriptor(descriptor)
+	require.NoError(t, w.Write(recs[0]))
+	require.NoError(t, w.Close())
+
+	r, err := flight.NewRecordReader(&fs)
+	require.NoError(t, err)
+	defer r.Release()
+	require.True(t, r.Next())
+	require.Equal(t, descriptor, r.Chunk().Desc)
+}
+
 type collectingFlightStreamWriter struct {
 	hasDescriptor []bool
+	payloads      []*flight.FlightData
+	next          int
 }
 
 func (f *collectingFlightStreamWriter) Send(data *flight.FlightData) error {
 	f.hasDescriptor = append(f.hasDescriptor, data.FlightDescriptor != nil)
+	f.payloads = append(f.payloads, &flight.FlightData{
+		FlightDescriptor: data.FlightDescriptor,
+		DataHeader:       append([]byte(nil), data.DataHeader...),
+		DataBody:         append([]byte(nil), data.DataBody...),
+	})
 	return nil
+}
+
+func (f *collectingFlightStreamWriter) Recv() (*flight.FlightData, error) {
+	if f.next == len(f.payloads) {
+		return nil, io.EOF
+	}
+	payload := f.payloads[f.next]
+	f.next++
+	return payload, nil
 }
 
 type flightStreamWriter struct{}

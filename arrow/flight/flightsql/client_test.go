@@ -474,7 +474,10 @@ func (s *FlightSqlClientSuite) TestPreparedStatementExecuteParamBinding() {
 	s.mockClient.On("DoPut", s.callOpts).Return(mockedPut, nil)
 	mockedPut.On("Send", mock.MatchedBy(func(fd *flight.FlightData) bool {
 		return proto.Equal(expectedDesc, fd.FlightDescriptor)
-	})).Return(nil).Twice() // first sends schema message, second sends data
+	})).Return(nil).Once()
+	mockedPut.On("Send", mock.MatchedBy(func(fd *flight.FlightData) bool {
+		return fd.FlightDescriptor == nil
+	})).Return(nil).Once()
 	mockedPut.On("CloseSend").Return(nil)
 	mockedPut.On("Recv").Return(putResult, nil)
 

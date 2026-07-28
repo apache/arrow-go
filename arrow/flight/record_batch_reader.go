@@ -75,7 +75,9 @@ func (d *dataMessageReader) Message() (*ipc.Message, error) {
 	}
 
 	d.lastAppMetadata = fd.AppMetadata
-	d.descr = fd.FlightDescriptor
+	if fd.FlightDescriptor != nil {
+		d.descr = fd.FlightDescriptor
+	}
 	d.msg = ipc.NewMessage(memory.NewBufferBytes(fd.DataHeader), memory.NewBufferBytes(fd.DataBody))
 	return d.msg, nil
 }
