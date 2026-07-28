@@ -19,6 +19,7 @@ package ipc
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -34,6 +35,49 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/internal/flatbuf"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
+
+type failingPayloadWriter struct {
+	err       error
+	payloads  int
+	closeCall int
+}
+
+func (w *failingPayloadWriter) Start() error { return nil }
+func (w *failingPayloadWriter) WritePayload(Payload) error {
+	w.payloads++
+	return w.err
+}
+func (w *failingPayloadWriter) Close() error {
+	w.closeCall++
+	return nil
+}
+
+func TestWriterSchemaFailureIsTerminal(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer builder.Release()
+	record := builder.NewRecordBatch()
+	defer record.Release()
+
+	want := errors.New("schema write failed")
+	payloadWriter := &failingPayloadWriter{err: want}
+	writer := NewWriterWithPayloadWriter(payloadWriter, WithSchema(schema))
+
+	require.ErrorIs(t, writer.Write(record), want)
+	require.ErrorIs(t, writer.Write(record), want)
+	require.Equal(t, 1, payloadWriter.payloads)
+	require.ErrorIs(t, writer.Close(), want)
+	require.Zero(t, payloadWriter.closeCall)
+}
+
+func TestWriterCloseWithoutSchemaReturnsError(t *testing.T) {
+	payloadWriter := &failingPayloadWriter{}
+	writer := NewWriterWithPayloadWriter(payloadWriter)
+
+	require.ErrorIs(t, writer.Close(), arrow.ErrInvalid)
+	require.Zero(t, payloadWriter.payloads)
+	require.Zero(t, payloadWriter.closeCall)
+}
 
 // reproducer from ARROW-13529
 func TestSliceAndWrite(t *testing.T) {
