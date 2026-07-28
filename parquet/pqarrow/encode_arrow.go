@@ -126,6 +126,11 @@ func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *Sch
 	isNullable = nullableRoot(manifest, schemaField)
 
 	builders := make([]*multipathLevelBuilder, 0)
+	releaseBuilders := func() {
+		for _, bldr := range builders {
+			bldr.Release()
+		}
+	}
 	for values < size {
 		chunk := data.Chunk(chunkIdx)
 		available := int64(chunk.Len() - int(chunkOffset))
@@ -134,17 +139,22 @@ func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *Sch
 		// the chunk offset will be 0 here except for possibly the first chunk
 		// because of the above advancing logic
 		arrToWrite := array.NewSlice(chunk, chunkOffset, chunkOffset+chunkWriteSize)
-		defer arrToWrite.Release()
 
 		if arrToWrite.Len() > 0 {
 			bldr, err := newMultipathLevelBuilder(arrToWrite, isNullable)
+			arrToWrite.Release()
 			if err != nil {
-				return arrowColumnWriter{}, nil
+				releaseBuilders()
+				return arrowColumnWriter{}, err
 			}
 			if leafCount != bldr.leafCount() {
+				bldr.Release()
+				releaseBuilders()
 				return arrowColumnWriter{}, fmt.Errorf("data type leaf_count != builder leaf_count: %d - %d", leafCount, bldr.leafCount())
 			}
 			builders = append(builders, bldr)
+		} else {
+			arrToWrite.Release()
 		}
 
 		if chunkWriteSize == available {
