@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"runtime"
 	"runtime/cgo"
 	"sync"
@@ -120,6 +121,14 @@ func TestImportSchemaRejectsMalformedFormats(t *testing.T) {
 func TestImportCArrowSchemaRejectsPrimitiveTopLevel(t *testing.T) {
 	schema := testPrimitive("i")
 	_, err := ImportCArrowSchema(&schema)
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+	require.True(t, schemaIsReleased(&schema))
+}
+
+func TestImportSchemaRejectsOversizedChildCount(t *testing.T) {
+	schema := testPrimitive("+s")
+	setCSchemaChildCount(&schema, math.MaxInt64)
+	_, err := ImportCArrowField(&schema)
 	require.ErrorIs(t, err, arrow.ErrInvalid)
 	require.True(t, schemaIsReleased(&schema))
 }

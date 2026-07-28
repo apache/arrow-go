@@ -168,6 +168,12 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 	if schema.n_children < 0 {
 		return ret, fmt.Errorf("%w: ArrowSchema n_children cannot be negative: %d", arrow.ErrInvalid, schema.n_children)
 	}
+	if int64(schema.n_children) > maxIntValue() {
+		return ret, fmt.Errorf("%w: ArrowSchema n_children is too large: %d", arrow.ErrInvalid, schema.n_children)
+	}
+	if _, err := checkedMul(int64(schema.n_children), int64(unsafe.Sizeof(uintptr(0)))); err != nil {
+		return ret, fmt.Errorf("%w: ArrowSchema children pointer array is too large", arrow.ErrInvalid)
+	}
 	if schema.n_children > 0 && schema.children == nil {
 		return ret, fmt.Errorf("%w: ArrowSchema children is nil with n_children %d", arrow.ErrInvalid, schema.n_children)
 	}
