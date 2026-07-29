@@ -615,53 +615,38 @@ func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 		name      string
 		jsonInput string
 		want      string
-		panic     bool
+		wantErr   string
 	}{
 		{
 			name:      "missing required field",
 			jsonInput: `[{"f2": 3, "f3": {"f3_1": "test"}}]`,
-			panic:     true,
-			want:      "",
+			wantErr:   "field 'f3_3' is required but no value was given",
 		},
 		{
 			name:      "missing optional fields",
 			jsonInput: `[{"f2": 3, "f3": {"f3_3": "test"}}]`,
-			panic:     false,
 			want:      `{[(null)] [3] {[(null)] [(null)] ["test"]}}`,
+		},
+		{
+			name:      "explicit null in required field",
+			jsonInput: `[{"f2": 3, "f3": {"f3_3": null}}]`,
+			wantErr:   "field 'f3_3' is non-nullable but got null",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(
 			tc.name, func(t *testing.T) {
-
-				var val bool
-
 				sb := array.NewStructBuilder(pool, dtype)
 				defer sb.Release()
 
-				if tc.panic {
-					defer func() {
-						e := recover()
-						if e == nil {
-							t.Fatalf("this should have panicked, but did not; slice value %v", val)
-						}
-						if got, want := e.(string), "arrow/array: index out of range"; got != want {
-							t.Fatalf("invalid error. got=%q, want=%q", got, want)
-						}
-					}()
-				} else {
-					defer func() {
-						if e := recover(); e != nil {
-							t.Fatalf("unexpected panic: %v", e)
-						}
-					}()
-				}
-
 				err := sb.UnmarshalJSON([]byte(tc.jsonInput))
-				if err != nil {
-					t.Fatal(err)
+				if tc.wantErr != "" {
+					require.Error(t, err)
+					assert.Contains(t, err.Error(), tc.wantErr)
+					return
 				}
+				require.NoError(t, err)
 
 				arr := sb.NewArray().(*array.Struct)
 				defer arr.Release()
