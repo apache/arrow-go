@@ -138,6 +138,11 @@ func (er *extensionReader) BuildArray(boundedLen int64) (*arrow.Chunked, error) 
 	for i, c := range chkd.Chunks() {
 		newChunks[i] = array.NewExtensionArrayWithStorage(extType, c)
 	}
+	defer func() {
+		for _, c := range newChunks {
+			c.Release()
+		}
+	}()
 
 	return arrow.NewChunked(extType, newChunks), nil
 }
