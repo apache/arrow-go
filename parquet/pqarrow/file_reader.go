@@ -262,6 +262,11 @@ func (fr *FileReader) GetFieldReaders(ctx context.Context, colIndices, rowGroups
 		})
 	}
 	if err = g.Wait(); err != nil {
+		for _, rdr := range out {
+			if rdr != nil {
+				rdr.Release()
+			}
+		}
 		return nil, nil, err
 	}
 
