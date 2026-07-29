@@ -317,7 +317,9 @@ func NewFileMetaData(data []byte, fileDecryptor encryption.FileDecryptor) (*File
 		FileDecryptor: fileDecryptor,
 	}
 
-	f.initSchema()
+	if err := f.initSchema(); err != nil {
+		return nil, err
+	}
 	f.initColumnOrders()
 
 	return f, nil
