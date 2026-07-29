@@ -19,9 +19,11 @@ package avro
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -29,6 +31,8 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
+	"github.com/twmb/avro"
+	"github.com/twmb/avro/ocf"
 )
 
 func TestReader(t *testing.T) {
@@ -222,6 +226,79 @@ func TestReader(t *testing.T) {
 			json.Unmarshal(j, &jsonParsed)
 
 			assert.Equal(t, jsonParsed, avroParsed[0])
+		})
+	}
+}
+
+// A nullable logical timestamp must decode to a value rather than a null: the
+// union branch carries the logical type, so the reader has to honour it on the
+// branch and not just on a bare long.
+func TestOCFReaderNullableTimestamps(t *testing.T) {
+	tests := []struct {
+		logicalType string
+		typ         *arrow.TimestampType
+	}{
+		{"timestamp-millis", arrow.FixedWidthTypes.Timestamp_ms.(*arrow.TimestampType)},
+		{"timestamp-micros", arrow.FixedWidthTypes.Timestamp_us.(*arrow.TimestampType)},
+		{"timestamp-nanos", arrow.FixedWidthTypes.Timestamp_ns.(*arrow.TimestampType)},
+		{"local-timestamp-millis", &arrow.TimestampType{Unit: arrow.Millisecond}},
+		{"local-timestamp-micros", &arrow.TimestampType{Unit: arrow.Microsecond}},
+		{"local-timestamp-nanos", &arrow.TimestampType{Unit: arrow.Nanosecond}},
+	}
+
+	// Decoding must not be influenced by the machine's zone: a local-timestamp
+	// carries no zone at all, so a non-UTC TZ must not shift the value the
+	// reader produces.
+	origLocal := time.Local
+	time.Local = time.FixedZone("test", 3*60*60)
+	t.Cleanup(func() { time.Local = origLocal })
+
+	for _, tt := range tests {
+		t.Run(tt.logicalType, func(t *testing.T) {
+			schemaJSON := fmt.Sprintf(`{
+				"type": "record",
+				"name": "event",
+				"fields": [{
+					"name": "started_at",
+					"type": ["null", {"type": "long", "logicalType": %q}]
+				}]
+			}`, tt.logicalType)
+			schema, err := avro.Parse(schemaJSON)
+			assert.NoError(t, err)
+
+			// The value is given in UTC so that the encoder's own
+			// normalisation is a no-op and the assertion below is about what
+			// the reader decodes, not about how twmb chose to write it.
+			value := time.Date(2026, 7, 13, 14, 15, 16, 123456789, time.UTC)
+
+			var buf bytes.Buffer
+			// WithSchema keeps the original JSON in the OCF header; the
+			// default is the parsing canonical form, which by spec drops the
+			// logical types this test is about.
+			w, err := ocf.NewWriter(&buf, schema, ocf.WithSchema(schemaJSON))
+			assert.NoError(t, err)
+			assert.NoError(t, w.Encode(map[string]any{"started_at": value}))
+			assert.NoError(t, w.Encode(map[string]any{"started_at": nil}))
+			assert.NoError(t, w.Close())
+
+			ar, err := NewOCFReader(bytes.NewReader(buf.Bytes()), WithChunk(-1))
+			assert.NoError(t, err)
+			defer ar.Close()
+
+			field := ar.Schema().Field(0)
+			assert.Equal(t, tt.typ, field.Type)
+			assert.True(t, field.Nullable)
+
+			assert.True(t, ar.Next())
+			assert.NoError(t, ar.Err())
+			values := ar.RecordBatch().Column(0).(*array.Timestamp)
+			assert.False(t, values.IsNull(0))
+			assert.True(t, values.IsNull(1))
+			assert.Equal(t, 1, values.NullN())
+
+			wantValue, err := arrow.TimestampFromTime(value, tt.typ.Unit)
+			assert.NoError(t, err)
+			assert.Equal(t, wantValue, values.Value(0))
 		})
 	}
 }
