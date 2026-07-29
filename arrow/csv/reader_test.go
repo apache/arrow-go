@@ -496,6 +496,22 @@ rec[2]["date64"]: [(null)]
 	}
 }
 
+func TestReaderReleaseFreesRecordBuilder(t *testing.T) {
+	for _, withHeader := range []bool{false, true} {
+		t.Run(fmt.Sprintf("header=%t", withHeader), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int64}}, nil)
+			r := csv.NewReader(strings.NewReader("value\n1\n"), schema,
+				csv.WithAllocator(mem), csv.WithHeader(withHeader))
+			if withHeader {
+				require.True(t, r.Next())
+			}
+			r.Release()
+			mem.AssertSize(t, 0)
+		})
+	}
+}
+
 func TestCSVReaderWithChunk(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)

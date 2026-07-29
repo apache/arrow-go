@@ -166,6 +166,7 @@ func (r *Reader) readHeader() error {
 
 		meta := r.schema.Metadata()
 		r.schema = arrow.NewSchema(fields, &meta)
+		r.bld.Release()
 		r.bld = array.NewRecordBuilder(r.mem, r.schema)
 		return nil
 	}
@@ -942,6 +943,10 @@ func (r *Reader) Release() {
 	if r.refs.Add(-1) == 0 {
 		if r.cur != nil {
 			r.cur.Release()
+		}
+		if r.bld != nil {
+			r.bld.Release()
+			r.bld = nil
 		}
 	}
 }
