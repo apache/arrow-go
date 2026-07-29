@@ -362,6 +362,81 @@ func TestReadWriteGeospatialRegisteredExtensionWithoutStoredSchema(t *testing.T)
 	assert.Truef(t, array.Equal(expected, actual), "expected: %T %s\ngot: %T %s", expected, expected, actual, actual)
 }
 
+// TestReadWriteGeospatialRegisteredExtensionWithStoredSchema verifies that a
+// file carrying both a stored ARROW:schema and a Parquet logical type reads
+// back successfully when the extension recovered from the logical type differs
+// from the one stored in ARROW:schema. The stored schema is authoritative, so
+// the reader must prefer it instead of reporting a storage type mismatch.
+func TestReadWriteGeospatialRegisteredExtensionWithStoredSchema(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	logical := schema.GeometryLogicalType{Crs: "EPSG:4326"}
+	geoType := newTestGeometryType(logical)
+	require.NoError(t, arrow.RegisterExtensionType(geoType))
+	defer func() {
+		require.NoError(t, arrow.UnregisterExtensionType(geoType.ExtensionName()))
+	}()
+
+	bldr := array.NewExtensionBuilder(mem, geoType)
+	defer bldr.Release()
+	binaryBldr := bldr.StorageBuilder().(*array.BinaryBuilder)
+	binaryBldr.AppendValues([][]byte{
+		{1, 2, 3},
+		nil,
+		{4, 5, 6, 7},
+	}, []bool{true, false, true})
+
+	arr := bldr.NewArray()
+	defer arr.Release()
+
+	// Field metadata makes the stored schema authoritative for this field, so the
+	// reader reconciles it against the type inferred from the Parquet logical type.
+	field := arrow.Field{
+		Name: "geometry", Type: geoType, Nullable: true,
+		Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"1"}),
+	}
+	col := arrow.NewColumnFromArr(field, arr)
+	defer col.Release()
+	tbl := array.NewTable(arrow.NewSchema([]arrow.Field{field}, nil), []arrow.Column{col}, -1)
+	defer tbl.Release()
+
+	var buf bytes.Buffer
+	// WithStoreSchema embeds the Arrow extension type in ARROW:schema. On read
+	// the extension is also inferred from the Parquet logical type, so the read
+	// path reconciles two distinct instances of the same extension.
+	arrowProps := pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem), pqarrow.WithStoreSchema())
+	require.NoError(t, pqarrow.WriteTable(tbl, &buf, tbl.NumRows(),
+		parquet.NewWriterProperties(parquet.WithAllocator(mem)), arrowProps))
+
+	pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(parquet.NewReaderProperties(mem)))
+	require.NoError(t, err)
+	defer pf.Close()
+
+	require.NotNil(t, pf.MetaData().KeyValueMetadata().FindValue("ARROW:schema"))
+
+	reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{}, mem)
+	require.NoError(t, err)
+
+	readTbl, err := reader.ReadTable(context.Background())
+	require.NoError(t, err)
+	defer readTbl.Release()
+
+	require.Equal(t, tbl.NumRows(), readTbl.NumRows())
+	require.Equal(t, arrow.EXTENSION, readTbl.Column(0).DataType().ID())
+
+	readType, ok := readTbl.Column(0).DataType().(*testGeometryType)
+	require.True(t, ok)
+	// The stored schema is authoritative: Deserialize yields an empty logical
+	// type, which must win over the CRS-bearing type inferred from Parquet.
+	assert.True(t, schema.GeometryLogicalType{}.Equals(readType.logical))
+	assert.True(t, arrow.TypeEqual(arrow.BinaryTypes.Binary, readType.StorageType()))
+
+	expected := tbl.Column(0).Data().Chunk(0).(array.ExtensionArray).Storage()
+	actual := readTbl.Column(0).Data().Chunk(0).(array.ExtensionArray).Storage()
+	assert.Truef(t, array.Equal(expected, actual), "expected: %T %s\ngot: %T %s", expected, expected, actual, actual)
+}
+
 func TestToParquetWriterConfig(t *testing.T) {
 	origSc := arrow.NewSchema([]arrow.Field{
 		{Name: "f1", Type: arrow.BinaryTypes.String},
