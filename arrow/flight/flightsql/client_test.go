@@ -1003,6 +1003,9 @@ func (s *FlightSqlClientSuite) TestPreparedStatementLoadFromResult() {
 	s.NoError(err)
 	defer datasetRec.Release()
 
+	_, ok := prepared.IsUpdate()
+	s.False(ok)
+
 	s.Equal(string(prepared.Handle()), "query")
 }
 
