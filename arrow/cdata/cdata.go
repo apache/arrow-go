@@ -305,6 +305,8 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 				dt = arrow.ListViewOfField(childFields[0])
 			case 'L':
 				dt = arrow.LargeListViewOfField(childFields[0])
+			default:
+				return ret, fmt.Errorf("%w: invalid list view type format %q", arrow.ErrInvalid, f)
 			}
 		case 'w': // fixed size list is w:# where # is the list size.
 			if len(childFields) != 1 {

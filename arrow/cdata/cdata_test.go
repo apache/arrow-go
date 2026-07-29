@@ -118,6 +118,16 @@ func TestImportSchemaRejectsMalformedFormats(t *testing.T) {
 	}
 }
 
+func TestImportSchemaRejectsInvalidListViewFormat(t *testing.T) {
+	schemas := testNested([]string{"+vx", "i"}, []string{"", "item"}, []bool{true})
+	defer freeMallocedSchemas(schemas)
+
+	top := (*[1]*CArrowSchema)(unsafe.Pointer(schemas))[0]
+	_, err := ImportCArrowField(top)
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+	require.True(t, schemaIsReleased(top))
+}
+
 func TestImportCArrowSchemaRejectsPrimitiveTopLevel(t *testing.T) {
 	schema := testPrimitive("i")
 	_, err := ImportCArrowSchema(&schema)
