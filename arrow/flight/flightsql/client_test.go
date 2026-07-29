@@ -406,6 +406,8 @@ func (s *FlightSqlClientSuite) TestPreparedStatementExecute() {
 	defer prepared.Close(context.TODO(), s.callOpts...)
 
 	s.Equal(string(prepared.Handle()), "query")
+	_, ok := prepared.IsUpdate()
+	s.False(ok)
 
 	info, err := prepared.Execute(context.TODO(), s.callOpts...)
 	s.NoError(err)
@@ -416,6 +418,9 @@ func (s *FlightSqlClientSuite) TestPreparedStatementExecute() {
 
 	secondPrepare := flightsql.NewPreparedStatement(&s.sqlClient, prepared.Handle())
 	s.Equal(string(secondPrepare.Handle()), "query")
+	_, ok = secondPrepare.IsUpdate()
+	s.False(ok)
+
 	defer secondPrepare.Close(context.TODO(), s.callOpts...)
 
 	info, err = secondPrepare.Execute(context.TODO(), s.callOpts...)
