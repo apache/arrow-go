@@ -223,7 +223,9 @@ func (r *Reader) getInitialDicts() bool {
 		}
 
 		if msg.Type() != MessageDictionaryBatch {
+			r.done = true
 			r.err = fmt.Errorf("arrow/ipc: IPC stream did not have the expected (%d) dictionaries at the start of the stream", numDicts)
+			return false
 		}
 		if _, err := readDictionary(&r.memo, msg.meta, msg.body, r.swapEndianness, r.mem); err != nil {
 			r.done = true
