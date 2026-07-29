@@ -287,17 +287,23 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 		}
 		switch f[1] {
 		case 'l': // list
+			if f != "+l" {
+				return ret, fmt.Errorf("%w: invalid list type format %q", arrow.ErrInvalid, f)
+			}
 			if len(childFields) != 1 {
 				return ret, fmt.Errorf("%w: list type must have exactly 1 child", arrow.ErrInvalid)
 			}
 			dt = arrow.ListOfField(childFields[0])
 		case 'L': // large list
+			if f != "+L" {
+				return ret, fmt.Errorf("%w: invalid large list type format %q", arrow.ErrInvalid, f)
+			}
 			if len(childFields) != 1 {
 				return ret, fmt.Errorf("%w: large list type must have exactly 1 child", arrow.ErrInvalid)
 			}
 			dt = arrow.LargeListOfField(childFields[0])
 		case 'v': // list view/large list view
-			if len(f) < 3 || len(childFields) != 1 {
+			if (f != "+vl" && f != "+vL") || len(childFields) != 1 {
 				return ret, fmt.Errorf("%w: invalid list view type format %q or child count %d", arrow.ErrInvalid, f, len(childFields))
 			}
 			switch f[2] {
@@ -323,13 +329,22 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 
 			dt = arrow.FixedSizeListOfField(int32(listSize), childFields[0])
 		case 's': // struct
+			if f != "+s" {
+				return ret, fmt.Errorf("%w: invalid struct type format %q", arrow.ErrInvalid, f)
+			}
 			dt = arrow.StructOf(childFields...)
 		case 'r': // run-end encoded
+			if f != "+r" {
+				return ret, fmt.Errorf("%w: invalid run-end encoded type format %q", arrow.ErrInvalid, f)
+			}
 			if len(childFields) != 2 {
 				return ret, fmt.Errorf("%w: run-end encoded arrays must have 2 children", arrow.ErrInvalid)
 			}
 			dt = arrow.RunEndEncodedOf(childFields[0].Type, childFields[1].Type)
 		case 'm': // map type is basically a list of structs.
+			if f != "+m" {
+				return ret, fmt.Errorf("%w: invalid map type format %q", arrow.ErrInvalid, f)
+			}
 			if len(childFields) != 1 {
 				return ret, fmt.Errorf("%w: map type must have exactly 1 child", arrow.ErrInvalid)
 			}
