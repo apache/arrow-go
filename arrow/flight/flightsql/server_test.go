@@ -143,6 +143,7 @@ func (*testServer) CreatePreparedStatement(ctx context.Context, req flightsql.Ac
 	case "prepared update":
 		isUpdate := true
 		result.IsUpdate = &isUpdate
+	case "prepared no hint":
 	default:
 		err = fmt.Errorf("unknown query: %s", query)
 	}
@@ -402,6 +403,15 @@ func (s *FlightSqlServerSuite) TestExecutePreparedStatementQuery() {
 			n++
 		}
 	}
+}
+
+func (s *FlightSqlServerSuite) TestExecutePreparedStatementNoHint() {
+	prep, err := s.cl.Prepare(context.TODO(), "prepared no hint")
+	s.Require().NoError(err)
+	defer prep.Close(context.TODO())
+
+	_, ok := prep.IsUpdate()
+	s.Require().False(ok)
 }
 
 func (s *FlightSqlServerSuite) TestExecutePreparedStatementUpdate() {
