@@ -1149,12 +1149,20 @@ func applyOriginalStorageMetadata(origin arrow.Field, inferred *SchemaField) (mo
 		}
 
 		if modified && !arrow.TypeEqual(extType, inferred.Field.Type) {
-			if !arrow.TypeEqual(extType.StorageType(), inferred.Field.Type) {
+			// The stored schema is authoritative for extension types. When the
+			// inferred type is already an extension of the same name (e.g.
+			// recovered from a Parquet logical type), adopt the origin's
+			// parameters instead of requiring the inferred type to be the bare
+			// storage type.
+			if inf, ok := inferred.Field.Type.(arrow.ExtensionType); ok &&
+				inf.ExtensionName() == extType.ExtensionName() {
+				inferred.Field.Type = extType
+			} else if !arrow.TypeEqual(extType.StorageType(), inferred.Field.Type) {
 				return modified, fmt.Errorf("%w: mismatch storage type '%s' for extension type '%s'",
 					arrow.ErrInvalid, inferred.Field.Type, extType)
+			} else {
+				inferred.Field.Type = extType
 			}
-
-			inferred.Field.Type = extType
 		}
 	case arrow.SPARSE_UNION, arrow.DENSE_UNION:
 		err = errors.New("unimplemented type")
