@@ -93,7 +93,9 @@ func (d *dataLoader) drawTree(field *fieldPos) {
 func (d *dataLoader) loadDatum(data any) error {
 	if d.list == nil && d.mapField == nil {
 		if d.mapValue != nil {
-			d.mapValue.appendFunc(data)
+			if err := appendValue(d.mapValue, data); err != nil {
+				return err
+			}
 		}
 		var NullParent *fieldPos
 		for _, f := range d.fields {
@@ -134,7 +136,9 @@ func (d *dataLoader) loadDatum(data any) error {
 						}
 					} else {
 						for _, e := range dt {
-							d.children[0].loadDatum(e)
+							if err := d.children[0].loadDatum(e); err != nil {
+								return err
+							}
 						}
 					}
 				case map[string]any:
@@ -152,16 +156,24 @@ func (d *dataLoader) loadDatum(data any) error {
 		}
 		for _, c := range d.children {
 			if c.list != nil {
-				c.loadDatum(c.list.getValue(data))
+				if err := c.loadDatum(c.list.getValue(data)); err != nil {
+					return err
+				}
 			}
 			if c.mapField != nil {
 				switch dt := data.(type) {
 				case nil:
-					c.loadDatum(dt)
+					if err := c.loadDatum(dt); err != nil {
+						return err
+					}
 				case map[string]any:
-					c.loadDatum(c.mapField.getValue(dt))
+					if err := c.loadDatum(c.mapField.getValue(dt)); err != nil {
+						return err
+					}
 				default:
-					c.loadDatum(c.mapField.getValue(data))
+					if err := c.loadDatum(c.mapField.getValue(data)); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -169,12 +181,18 @@ func (d *dataLoader) loadDatum(data any) error {
 		if d.list != nil {
 			switch dt := data.(type) {
 			case nil:
-				d.list.appendFunc(dt)
+				if err := appendValue(d.list, dt); err != nil {
+					return err
+				}
 			case []any:
-				d.list.appendFunc(dt)
+				if err := appendValue(d.list, dt); err != nil {
+					return err
+				}
 				for _, e := range dt {
 					if d.item != nil {
-						d.item.appendFunc(e)
+						if err := appendValue(d.item, e); err != nil {
+							return err
+						}
 					}
 					var NullParent *fieldPos
 					for _, f := range d.fields {
@@ -192,18 +210,26 @@ func (d *dataLoader) loadDatum(data any) error {
 					}
 					for _, c := range d.children {
 						if c.list != nil {
-							c.loadDatum(c.list.getValue(e))
+							if err := c.loadDatum(c.list.getValue(e)); err != nil {
+								return err
+							}
 						}
 						if c.mapField != nil {
-							c.loadDatum(c.mapField.getValue(e))
+							if err := c.loadDatum(c.mapField.getValue(e)); err != nil {
+								return err
+							}
 						}
 					}
 				}
 			case map[string]any:
-				d.list.appendFunc(dt["array"])
+				if err := appendValue(d.list, dt["array"]); err != nil {
+					return err
+				}
 				for _, e := range dt["array"].([]any) {
 					if d.item != nil {
-						d.item.appendFunc(e)
+						if err := appendValue(d.item, e); err != nil {
+							return err
+						}
 					}
 					var NullParent *fieldPos
 					for _, f := range d.fields {
@@ -220,31 +246,58 @@ func (d *dataLoader) loadDatum(data any) error {
 						}
 					}
 					for _, c := range d.children {
-						c.loadDatum(c.list.getValue(e))
+						if err := c.loadDatum(c.list.getValue(e)); err != nil {
+							return err
+						}
 					}
 				}
 			default:
-				d.list.appendFunc(data)
-				d.item.appendFunc(dt)
+				if err := appendValue(d.list, data); err != nil {
+					return err
+				}
+				if err := appendValue(d.item, dt); err != nil {
+					return err
+				}
 			}
 		}
 		if d.mapField != nil {
 			switch dt := data.(type) {
 			case nil:
-				d.mapField.appendFunc(dt)
+				if err := appendValue(d.mapField, dt); err != nil {
+					return err
+				}
 			case map[string]any:
-
-				d.mapField.appendFunc(dt)
+				if err := appendValue(d.mapField, dt); err != nil {
+					return err
+				}
 				for k, v := range dt {
-					d.mapKey.appendFunc(k)
+					if err := appendValue(d.mapKey, k); err != nil {
+						return err
+					}
 					if d.mapValue != nil {
-						d.mapValue.appendFunc(v)
+						if err := appendValue(d.mapValue, v); err != nil {
+							return err
+						}
 					} else {
-						d.children[0].loadDatum(v)
+						if err := d.children[0].loadDatum(v); err != nil {
+							return err
+						}
 					}
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// appendValue invokes the field's appendFunc and propagates any error, while
+// treating ErrNullStructData as a non-error signal. A struct builder returns
+// ErrNullStructData when it receives nil to indicate that its sub-fields have
+// already been null-filled and can be skipped; that is expected here and must
+// not abort the load.
+func appendValue(f *fieldPos, data any) error {
+	if err := f.appendFunc(data); err != nil && err != ErrNullStructData {
+		return err
 	}
 	return nil
 }
@@ -564,16 +617,10 @@ func appendUUIDData(b *extensions.UUIDBuilder, data any, fieldName string) error
 	case [16]byte:
 		b.AppendBytes(dt)
 	case []byte:
-		switch len(dt) {
-		case 16:
-			b.AppendBytes([16]byte(dt))
-		// 36 bytes is the canonical hex-dash UUID text form
-		// (e.g. "550e8400-e29b-41d4-a716-446655440000") arriving as raw bytes.
-		case 36:
-			return b.AppendValueFromString(string(dt))
-		default:
+		if len(dt) != 16 {
 			return fmt.Errorf("avro: %d-byte value cannot be a UUID for column %q", len(dt), fieldName)
 		}
+		b.AppendBytes([16]byte(dt))
 	default:
 		return fmt.Errorf("avro: unsupported value of type %T for UUID column %q", data, fieldName)
 	}

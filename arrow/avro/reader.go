@@ -17,6 +17,7 @@
 package avro
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -152,7 +153,15 @@ func (rr *OCFReader) Reuse(r io.Reader, opts ...Option) error {
 	if err != nil {
 		return fmt.Errorf("%w: could not parse avro header", arrow.ErrInvalid)
 	}
-	if rr.avroSchema != schema.String() {
+	// Compare the schemas by their parsing canonical form rather than the raw
+	// JSON so that semantically identical schemas differing only in
+	// whitespace, field ordering of non-essential attributes, or formatting
+	// are still accepted for reuse.
+	current, err := avro.Parse(rr.avroSchema)
+	if err != nil {
+		return fmt.Errorf("%w: could not parse current avro schema", arrow.ErrInvalid)
+	}
+	if !bytes.Equal(current.Canonical(), schema.Canonical()) {
 		return fmt.Errorf("%w: avro schema mismatch", arrow.ErrInvalid)
 	}
 

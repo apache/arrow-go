@@ -24,8 +24,10 @@ import (
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/avro/testdata"
 	"github.com/apache/arrow-go/v18/arrow/extensions"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -222,4 +224,38 @@ func TestReader(t *testing.T) {
 			assert.Equal(t, jsonParsed, avroParsed[0])
 		})
 	}
+}
+
+// loadDatum must surface appender errors from nested paths (map values and
+// list items), not just from top-level scalar fields.
+func TestLoadDatumPropagatesNestedAppendErrors(t *testing.T) {
+	newLoader := func(t *testing.T, avroSchema string) (*dataLoader, *array.RecordBuilder) {
+		t.Helper()
+		arrowSchema, err := ArrowSchemaFromAvroJSON(avroSchema)
+		assert.NoError(t, err)
+		bld := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+		pos := newFieldPos()
+		ldr := newDataLoader()
+		for idx, fb := range bld.Fields() {
+			mapFieldBuilders(fb, arrowSchema.Field(idx), pos)
+		}
+		ldr.drawTree(pos)
+		return ldr, bld
+	}
+
+	t.Run("map value", func(t *testing.T) {
+		ldr, bld := newLoader(t, `{"type":"record","name":"r","fields":[
+			{"name":"m","type":{"type":"map","values":"bytes"}}]}`)
+		defer bld.Release()
+		assert.NoError(t, ldr.loadDatum(map[string]any{"m": map[string]any{"k": []byte{0x01}}}))
+		assert.ErrorContains(t, ldr.loadDatum(map[string]any{"m": map[string]any{"k": 42}}), "unsupported value of type int")
+	})
+
+	t.Run("list item", func(t *testing.T) {
+		ldr, bld := newLoader(t, `{"type":"record","name":"r","fields":[
+			{"name":"l","type":{"type":"array","items":"bytes"}}]}`)
+		defer bld.Release()
+		assert.NoError(t, ldr.loadDatum(map[string]any{"l": []any{[]byte{0x01}}}))
+		assert.ErrorContains(t, ldr.loadDatum(map[string]any{"l": []any{42}}), "unsupported value of type int")
+	})
 }
