@@ -130,6 +130,8 @@ type Example struct {
 	TimestampMicros   time.Time     `avro:"timestampmicros"`
 	LocalTSMillis     time.Time     `avro:"localtimestampmillis"`
 	LocalTSMicros     time.Time     `avro:"localtimestampmicros"`
+	TimestampNanos    time.Time     `avro:"timestampnanos"`
+	LocalTSNanos      time.Time     `avro:"localtimestampnanos"`
 	Duration          avro.Duration `avro:"duration"`
 	Date              time.Time     `avro:"date"`
 }
@@ -170,6 +172,8 @@ func (e Example) MarshalJSON() ([]byte, error) {
 		TimestampMicros   TimestampJSON  `json:"timestampmicros"`
 		LocalTSMillis     TimestampJSON  `json:"localtimestampmillis"`
 		LocalTSMicros     TimestampJSON  `json:"localtimestampmicros"`
+		TimestampNanos    TimestampJSON  `json:"timestampnanos"`
+		LocalTSNanos      TimestampJSON  `json:"localtimestampnanos"`
 		Duration          DurationJSON   `json:"duration"`
 		Date              DateJSON       `json:"date"`
 	}{
@@ -194,6 +198,8 @@ func (e Example) MarshalJSON() ([]byte, error) {
 		TimestampMicros:   TimestampJSON(e.TimestampMicros),
 		LocalTSMillis:     TimestampJSON(e.LocalTSMillis),
 		LocalTSMicros:     TimestampJSON(e.LocalTSMicros),
+		TimestampNanos:    TimestampJSON(e.TimestampNanos),
+		LocalTSNanos:      TimestampJSON(e.LocalTSNanos),
 		Duration:          DurationJSON(e.Duration),
 		Date:              DateJSON(e.Date),
 	}
@@ -279,7 +285,8 @@ func AllTypesAvroSchema() (string, error) {
 
 func sampleData() Example {
 	now := time.Now().UTC()
-	// Truncate to micros so timestamp-millis/-micros round-trip exactly.
+	// Truncate per unit so each timestamp logical type round-trips exactly;
+	// nanos needs no truncation.
 	tsMillis := now.Truncate(time.Millisecond)
 	tsMicros := now.Truncate(time.Microsecond)
 	date := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
@@ -322,6 +329,8 @@ func sampleData() Example {
 		TimestampMicros: tsMicros,
 		LocalTSMillis:   tsMillis,
 		LocalTSMicros:   tsMicros,
+		TimestampNanos:  now,
+		LocalTSNanos:    now,
 		Duration:        avro.Duration{Months: 1, Days: 2, Milliseconds: 3},
 		Date:            date,
 	}

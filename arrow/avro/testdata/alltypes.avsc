@@ -216,6 +216,20 @@
       }
     },
     {
+      "name": "timestampnanos",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-nanos"
+      }
+    },
+    {
+      "name": "localtimestampnanos",
+      "type": {
+        "type": "long",
+        "logicalType": "local-timestamp-nanos"
+      }
+    },
+    {
       "name": "duration",
       "type": {
         "name": "duration",

@@ -161,6 +161,14 @@ func TestReader(t *testing.T) {
 					Type: &arrow.TimestampType{Unit: arrow.Microsecond},
 				},
 				{
+					Name: "timestampnanos",
+					Type: arrow.FixedWidthTypes.Timestamp_ns,
+				},
+				{
+					Name: "localtimestampnanos",
+					Type: &arrow.TimestampType{Unit: arrow.Nanosecond},
+				},
+				{
 					Name: "duration",
 					Type: arrow.FixedWidthTypes.MonthDayNanoInterval,
 				},
@@ -335,4 +343,180 @@ func TestLoadDatumPropagatesNestedAppendErrors(t *testing.T) {
 		assert.NoError(t, ldr.loadDatum(map[string]any{"l": []any{[]byte{0x01}}}))
 		assert.ErrorContains(t, ldr.loadDatum(map[string]any{"l": []any{42}}), "unsupported value of type int")
 	})
+}
+
+// writeOCF encodes data as an OCF file using schemaJSON verbatim in the
+// header, so logical-type annotations survive (the writer would otherwise
+// default to the parsing canonical form, which strips them).
+func writeOCF(t *testing.T, schemaJSON string, data ...any) []byte {
+	t.Helper()
+	schema, err := avro.Parse(schemaJSON)
+	assert.NoError(t, err)
+
+	var buf bytes.Buffer
+	w, err := ocf.NewWriter(&buf, schema, ocf.WithSchema(schemaJSON))
+	assert.NoError(t, err)
+	for _, d := range data {
+		assert.NoError(t, w.Encode(d))
+	}
+	assert.NoError(t, w.Close())
+	return buf.Bytes()
+}
+
+// Only ["null", T] unions map onto Arrow's nullability. Anything else has no
+// faithful representation, so it must be reported rather than silently
+// resolved to one of the branches.
+func TestUnsupportedUnionReportsError(t *testing.T) {
+	tests := []struct {
+		name  string
+		union string
+	}{
+		{"no null branch", `["int", "string"]`},
+		{"two non-null branches", `["null", "int", "string"]`},
+		{"named branches", `["null", {"type":"record","name":"A","fields":[]}, {"type":"record","name":"B","fields":[]}]`},
+		{"null only", `["null"]`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ArrowSchemaFromAvroJSON(fmt.Sprintf(
+				`{"type":"record","name":"r","fields":[{"name":"u","type":%s}]}`, tt.union))
+			assert.ErrorContains(t, err, "unsupported avro union")
+		})
+	}
+
+	t.Run("nested in array", func(t *testing.T) {
+		_, err := ArrowSchemaFromAvroJSON(`{"type":"record","name":"r","fields":[
+			{"name":"a","type":{"type":"array","items":["int","string"]}}]}`)
+		assert.ErrorContains(t, err, "unsupported avro union")
+	})
+}
+
+// Reuse accepts a second file whose schema is semantically identical, and
+// rejects one whose schema differs.
+func TestOCFReaderReuse(t *testing.T) {
+	const schemaJSON = `{"type":"record","name":"r","fields":[
+		{"name":"id","type":"int"},
+		{"name":"name","type":"string"}]}`
+	// Same schema, but reformatted and with a doc attribute: the parsing
+	// canonical form is unchanged, so this must still be reusable.
+	const equivalentJSON = `{"name":"r","type":"record","doc":"reformatted","fields":[{"name":"id","type":"int"},{"name":"name","type":"string"}]}`
+	const otherJSON = `{"type":"record","name":"r","fields":[{"name":"id","type":"long"}]}`
+
+	first := writeOCF(t, schemaJSON, map[string]any{"id": int32(1), "name": "one"})
+	second := writeOCF(t, equivalentJSON, map[string]any{"id": int32(2), "name": "two"})
+	other := writeOCF(t, otherJSON, map[string]any{"id": int64(3)})
+
+	readIDs := func(t *testing.T, ar *OCFReader) []int32 {
+		t.Helper()
+		var got []int32
+		for ar.Next() {
+			assert.NoError(t, ar.Err())
+			col := ar.RecordBatch().Column(0).(*array.Int32)
+			got = append(got, col.Int32Values()...)
+		}
+		assert.NoError(t, ar.Err())
+		return got
+	}
+
+	ar, err := NewOCFReader(bytes.NewReader(first), WithChunk(-1))
+	assert.NoError(t, err)
+	defer ar.Close()
+	assert.Equal(t, []int32{1}, readIDs(t, ar))
+
+	schemaBefore := ar.Schema()
+	assert.NoError(t, ar.Reuse(bytes.NewReader(second), WithChunk(-1)))
+	assert.Equal(t, []int32{2}, readIDs(t, ar))
+	// Reuse keeps the builders, so the Arrow schema must be untouched.
+	assert.Equal(t, schemaBefore, ar.Schema())
+
+	assert.ErrorContains(t, ar.Reuse(bytes.NewReader(other)), "avro schema mismatch")
+}
+
+// A positive chunk size splits the datums into batches of that many rows, with
+// a shorter final batch for the remainder.
+func TestOCFReaderWithChunk(t *testing.T) {
+	const schemaJSON = `{"type":"record","name":"r","fields":[{"name":"id","type":"int"}]}`
+	const rows = 7
+
+	data := make([]any, rows)
+	for i := range data {
+		data[i] = map[string]any{"id": int32(i)}
+	}
+	fixture := writeOCF(t, schemaJSON, data...)
+
+	for _, chunk := range []int{1, 3, rows, rows + 1} {
+		t.Run(fmt.Sprintf("chunk=%d", chunk), func(t *testing.T) {
+			ar, err := NewOCFReader(bytes.NewReader(fixture), WithChunk(chunk))
+			assert.NoError(t, err)
+			defer ar.Close()
+
+			var lens []int
+			var ids []int32
+			for ar.Next() {
+				assert.NoError(t, ar.Err())
+				rec := ar.RecordBatch()
+				lens = append(lens, int(rec.NumRows()))
+				ids = append(ids, rec.Column(0).(*array.Int32).Int32Values()...)
+			}
+			assert.NoError(t, ar.Err())
+
+			var want []int
+			for left := rows; left > 0; left -= chunk {
+				want = append(want, min(left, chunk))
+			}
+			assert.Equal(t, want, lens)
+			assert.Equal(t, []int32{0, 1, 2, 3, 4, 5, 6}, ids)
+			assert.Equal(t, int64(rows), ar.OCFRecordsReadCount())
+		})
+	}
+}
+
+// A record made up only of enum columns must come back as dictionary arrays
+// carrying the Avro symbols, including through a ["null", enum] union.
+func TestOCFReaderEnumOnlyColumns(t *testing.T) {
+	const schemaJSON = `{"type":"record","name":"r","fields":[
+		{"name":"suit","type":{"type":"enum","name":"Suit","symbols":["hearts","spades"]}},
+		{"name":"rank","type":["null",{"type":"enum","name":"Rank","symbols":["low","high"]}]}]}`
+
+	fixture := writeOCF(t, schemaJSON,
+		map[string]any{"suit": "spades", "rank": "high"},
+		map[string]any{"suit": "hearts", "rank": nil},
+	)
+
+	ar, err := NewOCFReader(bytes.NewReader(fixture), WithChunk(-1))
+	assert.NoError(t, err)
+	defer ar.Close()
+
+	suit := ar.Schema().Field(0)
+	assert.Equal(t, &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Uint8,
+		ValueType: arrow.BinaryTypes.String,
+	}, suit.Type)
+	assert.False(t, suit.Nullable)
+	symbols, ok := suit.Metadata.GetValue("1")
+	assert.True(t, ok)
+	assert.Equal(t, "spades", symbols)
+	assert.True(t, ar.Schema().Field(1).Nullable)
+
+	assert.True(t, ar.Next())
+	assert.NoError(t, ar.Err())
+	rec := ar.RecordBatch()
+	assert.Equal(t, int64(2), rec.NumRows())
+
+	values := func(col arrow.Array) []string {
+		d := col.(*array.Dictionary)
+		dict := d.Dictionary().(*array.String)
+		out := make([]string, d.Len())
+		for i := range out {
+			if d.IsNull(i) {
+				out[i] = "<null>"
+				continue
+			}
+			out[i] = dict.Value(d.GetValueIndex(i))
+		}
+		return out
+	}
+	assert.Equal(t, []string{"spades", "hearts"}, values(rec.Column(0)))
+	assert.Equal(t, []string{"high", "<null>"}, values(rec.Column(1)))
 }
