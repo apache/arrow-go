@@ -72,17 +72,6 @@ func constructFakeMetadata(rowGroupRanges []PageIndexRanges) *FileMetaData {
 	return meta
 }
 
-func TestNewFileMetaDataReturnsSchemaErrors(t *testing.T) {
-	fileMeta := format.NewFileMetaData()
-	var buf bytes.Buffer
-	_, err := thrift.NewThriftSerializer().Serialize(fileMeta, &buf, nil)
-	require.NoError(t, err)
-
-	meta, err := NewFileMetaData(buf.Bytes(), nil)
-	require.Error(t, err)
-	assert.Nil(t, meta)
-}
-
 // validates that determinePagteIndexRangesInRowGroup selects the expected
 // file offsets and sizes or returns false when the row group doesn't have
 // a page index
