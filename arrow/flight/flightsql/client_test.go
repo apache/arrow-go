@@ -43,6 +43,21 @@ type mockGrpcClientStream struct {
 	mock.Mock
 }
 
+type referenceCountingReader struct {
+	array.RecordReader
+	refs int
+}
+
+func (r *referenceCountingReader) Retain() {
+	r.refs++
+	r.RecordReader.Retain()
+}
+
+func (r *referenceCountingReader) Release() {
+	r.refs--
+	r.RecordReader.Release()
+}
+
 func (m *mockGrpcClientStream) Header() (metadata.MD, error)  { panic("unimplemented") }
 func (m *mockGrpcClientStream) Trailer() metadata.MD          { panic("unimplemented") }
 func (m *mockGrpcClientStream) CloseSend() error              { return m.Called().Error(0) }
@@ -566,7 +581,6 @@ func (s *FlightSqlClientSuite) TestPreparedStatementExecuteReaderBinding() {
 
 	prepared, err := s.sqlClient.Prepare(context.TODO(), query, s.callOpts...)
 	s.NoError(err)
-	defer prepared.Close(context.TODO(), s.callOpts...)
 
 	s.Equal(string(prepared.Handle()), "query")
 
@@ -575,13 +589,19 @@ func (s *FlightSqlClientSuite) TestPreparedStatementExecuteReaderBinding() {
 	s.NoError(err)
 	defer rec.Release()
 
-	rdr, err := array.NewRecordReader(rec.Schema(), []arrow.RecordBatch{rec, rec, rec})
+	baseReader, err := array.NewRecordReader(rec.Schema(), []arrow.RecordBatch{rec, rec, rec})
 	s.NoError(err)
+	rdr := &referenceCountingReader{RecordReader: baseReader, refs: 1}
+	defer rdr.Release()
 	prepared.SetRecordReader(rdr)
+	s.Equal(2, rdr.refs)
 
 	info, err := prepared.Execute(context.TODO(), s.callOpts...)
 	s.NoError(err)
 	s.Equal(&emptyFlightInfo, info)
+
+	s.NoError(prepared.Close(context.TODO(), s.callOpts...))
+	s.Equal(1, rdr.refs)
 }
 
 func (s *FlightSqlClientSuite) TestPreparedStatementClose() {
