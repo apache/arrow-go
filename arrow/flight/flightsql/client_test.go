@@ -1006,6 +1006,25 @@ func (s *FlightSqlClientSuite) TestPreparedStatementLoadFromResult() {
 	s.Equal(string(prepared.Handle()), "query")
 }
 
+func (s *FlightSqlClientSuite) TestPreparedStatementLoadFromResultWithIsUpdate() {
+	const query = "query"
+
+	isUpdate := true
+	result := &pb.ActionCreatePreparedStatementResult{
+		PreparedStatementHandle: []byte(query),
+		IsUpdate:                &isUpdate,
+	}
+
+	prepared, err := s.sqlClient.LoadPreparedStatementFromResult(result)
+	s.NoError(err)
+
+	s.Equal(string(prepared.Handle()), "query")
+
+	val, ok := prepared.IsUpdate()
+	s.True(ok)
+	s.True(val)
+}
+
 func TestFlightSqlClient(t *testing.T) {
 	suite.Run(t, new(FlightSqlClientSuite))
 }
