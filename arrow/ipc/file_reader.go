@@ -32,6 +32,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/internal/dictutils"
 	"github.com/apache/arrow-go/v18/arrow/internal/flatbuf"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/internal/utils"
 )
 
 type readerImpl interface {
@@ -467,7 +468,17 @@ func (f *FileReader) RecordBatchAt(i int) (arrow.RecordBatch, error) {
 		return nil, fmt.Errorf("arrow/ipc: message %d is not a RecordBatch", i)
 	}
 
-	return newRecordBatch(f.schema, &f.memo, msg.meta, msg.body, f.swapEndianness, f.mem), nil
+	return loadRecordBatch(f.schema, &f.memo, msg.meta, msg.body, f.swapEndianness, f.mem)
+}
+
+func loadRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta, body *memory.Buffer, swapEndianness bool, mem memory.Allocator) (rec arrow.RecordBatch, err error) {
+	defer func() {
+		if pErr := recover(); pErr != nil {
+			rec = nil
+			err = utils.FormatRecoveredError("arrow/ipc: error reading record batch", pErr)
+		}
+	}()
+	return newRecordBatch(schema, memo, meta, body, swapEndianness, mem), nil
 }
 
 // RecordAt returns the i-th record from the file. Ownership is transferred to the
