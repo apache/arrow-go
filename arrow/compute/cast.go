@@ -555,6 +555,37 @@ func CastFromExtension(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.Exec
 	return nil
 }
 
+// CastToExtension casts an extension array to another extension type by
+// casting the input's storage to the target's storage type and wrapping
+// the result as the target extension type. Re-typing between extension
+// types that share a storage type is zero-copy since the inner storage
+// cast is then a no-op.
+func CastToExtension(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+	opts := ctx.State.(kernels.CastState)
+
+	toType, ok := opts.ToType.(arrow.ExtensionType)
+	if !ok {
+		return fmt.Errorf("%w: cast target %s is not an extension type", arrow.ErrInvalid, opts.ToType)
+	}
+
+	arr := batch.Values[0].Array.MakeArray().(array.ExtensionArray)
+	defer arr.Release()
+
+	castOpts := CastOptions(opts)
+	castOpts.ToType = toType.StorageType()
+	storage, err := CastArray(ctx.Ctx, arr.Storage(), &castOpts)
+	if err != nil {
+		return err
+	}
+	defer storage.Release()
+
+	wrapped := array.NewExtensionArrayWithStorage(toType, storage)
+	defer wrapped.Release()
+
+	out.TakeOwnership(wrapped.Data())
+	return nil
+}
+
 func CastList[SrcOffsetT, DestOffsetT int32 | int64](ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 	var (
 		opts       = ctx.State.(kernels.CastState)
@@ -722,10 +753,12 @@ func initCastTable() {
 	addCastFuncs(getTemporalCasts())
 	addCastFuncs(getNestedCasts())
 
-	nullToExt := newCastFunction("cast_extension", arrow.EXTENSION)
-	nullToExt.AddNewTypeCast(arrow.NULL, []exec.InputType{exec.NewExactInput(arrow.Null)},
+	castExt := newCastFunction("cast_extension", arrow.EXTENSION)
+	castExt.AddNewTypeCast(arrow.NULL, []exec.InputType{exec.NewExactInput(arrow.Null)},
 		kernels.OutputTargetType, kernels.CastFromNull, exec.NullComputedNoPrealloc, exec.MemNoPrealloc)
-	castTable[arrow.EXTENSION] = nullToExt
+	castExt.AddNewTypeCast(arrow.EXTENSION, []exec.InputType{exec.NewIDInput(arrow.EXTENSION)},
+		kernels.OutputTargetType, CastToExtension, exec.NullComputedNoPrealloc, exec.MemNoPrealloc)
+	castTable[arrow.EXTENSION] = castExt
 }
 
 func getCastFunction(to arrow.DataType) (*castFunction, error) {

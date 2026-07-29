@@ -401,6 +401,8 @@ func (c *CastSuite) TestCanCast() {
 	canCast(types.NewSmallintType(), []arrow.DataType{arrow.PrimitiveTypes.Int16})
 	canCast(types.NewSmallintType(), numericTypes) // any cast which is valid for storage is supported
 	canCast(arrow.Null, []arrow.DataType{types.NewSmallintType()})
+	// extension -> extension is a cast between the storage types
+	canCast(types.NewSmallintType(), []arrow.DataType{types.NewParametric1Type(1)})
 
 	canCast(arrow.FixedWidthTypes.Date32, []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString})
 	canCast(arrow.FixedWidthTypes.Date64, []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString})
@@ -3744,6 +3746,97 @@ func (c *CastSuite) TestExtensionTypeToIntDowncast() {
 		opts.AllowIntOverflow = true
 		c.checkCastOpts(smallint, arrow.PrimitiveTypes.Uint8,
 			`[0, null, -1, 1, 3]`, `[0, null, 255, 1, 3]`, *opts)
+	})
+}
+
+func (c *CastSuite) extArrayFromJSON(dt arrow.ExtensionType, data string) arrow.Array {
+	storage, _, err := array.FromJSON(c.mem, dt.StorageType(), strings.NewReader(data))
+	c.Require().NoError(err)
+	defer storage.Release()
+	return array.NewExtensionArrayWithStorage(dt, storage)
+}
+
+func (c *CastSuite) TestExtensionToExtension() {
+	var (
+		param1   = types.NewParametric1Type(1)  // storage int32
+		param2   = types.NewParametric1Type(2)  // storage int32, differing metadata
+		smallint = types.NewSmallintType()      // storage int16
+		viewExt  = types.NewStringViewExtType() // storage string_view
+		ctx      = compute.WithAllocator(context.Background(), c.mem)
+	)
+
+	c.Run("same storage type is zero-copy", func() {
+		src := c.extArrayFromJSON(param1, `[1, 2, null, 4]`)
+		defer src.Release()
+
+		out, err := compute.CastArray(ctx, src, compute.SafeCastOptions(param2))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		c.Truef(arrow.TypeEqual(param2, out.DataType()), "expected %s, got %s", param2, out.DataType())
+		c.Require().Len(out.Data().Buffers(), len(src.Data().Buffers()))
+		for i := range out.Data().Buffers() {
+			assertBufferSame(c.T(), out, src, i)
+		}
+		assertArraysEqual(c.T(), src.(array.ExtensionArray).Storage(), out.(array.ExtensionArray).Storage())
+	})
+
+	c.Run("storage cast int32 to int16", func() {
+		src := c.extArrayFromJSON(param1, `[0, null, 100, -5]`)
+		defer src.Release()
+		exp := c.extArrayFromJSON(smallint, `[0, null, 100, -5]`)
+		defer exp.Release()
+
+		checkCast(c.T(), src, exp, *compute.DefaultCastOptions(true))
+	})
+
+	c.Run("storage cast options are propagated", func() {
+		src := c.extArrayFromJSON(param1, `[0, null, 100000]`)
+		defer src.Release()
+
+		opts := compute.SafeCastOptions(smallint)
+		checkCastFails(c.T(), src, *opts)
+
+		opts.AllowIntOverflow = true
+		exp := c.extArrayFromJSON(smallint, `[0, null, -31072]`)
+		defer exp.Release()
+		checkCast(c.T(), src, exp, *opts)
+	})
+
+	c.Run("all null", func() {
+		src := c.extArrayFromJSON(param1, `[null, null, null]`)
+		defer src.Release()
+
+		out, err := compute.CastArray(ctx, src, compute.SafeCastOptions(smallint))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		c.Equal(3, out.Len())
+		c.Equal(3, out.NullN())
+	})
+
+	c.Run("sliced input", func() {
+		src := c.extArrayFromJSON(param1, `[1, 2, null, 4, 5]`)
+		defer src.Release()
+		sliced := array.NewSlice(src, 1, 4)
+		defer sliced.Release()
+		exp := c.extArrayFromJSON(smallint, `[2, null, 4]`)
+		defer exp.Release()
+
+		out, err := compute.CastArray(ctx, sliced, compute.SafeCastOptions(smallint))
+		c.Require().NoError(err)
+		defer out.Release()
+
+		assertArraysEqual(c.T(), exp, out)
+	})
+
+	c.Run("unsupported storage cast", func() {
+		src := c.extArrayFromJSON(viewExt, `["1", "2"]`)
+		defer src.Release()
+
+		_, err := compute.CastArray(ctx, src, compute.SafeCastOptions(param1))
+		c.ErrorIs(err, arrow.ErrNotImplemented)
+		c.ErrorContains(err, "no kernel matching input types (string_view)")
 	})
 }
 
