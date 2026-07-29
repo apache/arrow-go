@@ -95,6 +95,38 @@ func TestJSONReaderAll(t *testing.T) {
 	assert.False(t, rdr.Next())
 }
 
+func TestJSONReaderReleaseBuilder(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	tests := []struct {
+		name    string
+		input   string
+		consume bool
+	}{
+		{name: "before reading", input: `{"value": 1}`},
+		{name: "after empty input", consume: true},
+		{name: "after reaching EOF", input: `{"value": 1}`, consume: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			rdr := array.NewJSONReader(strings.NewReader(tt.input), schema, array.WithAllocator(mem))
+
+			if tt.consume {
+				for rdr.Next() {
+				}
+				require.NoError(t, rdr.Err())
+			}
+
+			rdr.Release()
+			mem.AssertSize(t, 0)
+		})
+	}
+}
+
 func TestJSONReaderChunked(t *testing.T) {
 	schema := arrow.NewSchema([]arrow.Field{
 		{Name: "region", Type: arrow.BinaryTypes.String, Nullable: true},

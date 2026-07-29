@@ -146,9 +146,13 @@ func (r *JSONReader) Release() {
 	if r.refs.Add(-1) == 0 {
 		if r.cur != nil {
 			r.cur.Release()
-			r.bldr.Release()
-			r.r = nil
+			r.cur = nil
 		}
+		if r.bldr != nil {
+			r.bldr.Release()
+			r.bldr = nil
+		}
+		r.r = nil
 	}
 }
 
