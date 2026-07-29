@@ -562,6 +562,9 @@ func (r *PageIndexReader) WillNeed(rgIndices, colIndices []int32, selection Page
 	}
 
 	for _, ordinal := range rgIndices {
+		if ordinal < 0 || int(ordinal) >= r.FileMetadata.NumRowGroups() {
+			return fmt.Errorf("%w: row group ordinal %d out of range", arrow.ErrIndex, ordinal)
+		}
 		readRange, err := determinePageIndexRangesInRowGroup(r.FileMetadata.RowGroup(int(ordinal)), colIndices)
 		if err != nil {
 			return err

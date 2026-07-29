@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/parquet"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/thrift"
@@ -70,6 +71,16 @@ func constructFakeMetadata(rowGroupRanges []PageIndexRanges) *FileMetaData {
 
 	meta, _ := NewFileMetaData(buf.Bytes(), nil)
 	return meta
+}
+
+func TestPageIndexReaderWillNeedRejectsInvalidRowGroups(t *testing.T) {
+	meta := constructFakeMetadata([]PageIndexRanges{{-1, -1, -1, -1}})
+	reader := &PageIndexReader{FileMetadata: meta}
+
+	for _, ordinal := range []int32{-1, 1} {
+		err := reader.WillNeed([]int32{ordinal}, nil, PageIndexSelection{})
+		require.ErrorIs(t, err, arrow.ErrIndex)
+	}
 }
 
 // validates that determinePagteIndexRangesInRowGroup selects the expected
