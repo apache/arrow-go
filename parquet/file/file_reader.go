@@ -92,7 +92,11 @@ func OpenParquetFile(filename string, memoryMap bool, opts ...ReadOption) (*Read
 			return nil, err
 		}
 	}
-	return NewParquetReader(source, opts...)
+	rdr, err := NewParquetReader(source, opts...)
+	if err != nil {
+		return nil, errors.Join(err, source.(io.Closer).Close())
+	}
+	return rdr, nil
 }
 
 // NewParquetReader returns a FileReader instance that reads a parquet file which can be read from r.
