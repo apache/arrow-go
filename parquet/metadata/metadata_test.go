@@ -236,6 +236,12 @@ func TestBuildAccess(t *testing.T) {
 	sub, err := faccessor.Subset([]int{2, 0})
 	require.NoError(t, err)
 	assert.True(t, faccessor1.Equals(sub))
+
+	for _, rowGroups := range [][]int{{-1}, {0, -1}} {
+		sub, err := faccessor.Subset(rowGroups)
+		require.Error(t, err)
+		assert.Nil(t, sub)
+	}
 }
 
 func TestV1VersionMetadata(t *testing.T) {
