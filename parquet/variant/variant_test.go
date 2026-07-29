@@ -575,6 +575,26 @@ func TestInvalidMetadata(t *testing.T) {
 			errMsg:   "out of range",
 		},
 		{
+			name:     "truncated offset table",
+			metadata: []byte{0x01, 0x01, 0x00},
+			errMsg:   "offset table out of range",
+		},
+		{
+			name:     "dictionary size overflows offset table",
+			metadata: []byte{0xC1, 0xFF, 0xFF, 0xFF, 0xFF},
+			errMsg:   "offset table out of range",
+		},
+		{
+			name:     "nonzero first offset",
+			metadata: []byte{0x01, 0x01, 0x01, 0x01},
+			errMsg:   "first offset must be zero",
+		},
+		{
+			name:     "decreasing offsets",
+			metadata: []byte{0x01, 0x02, 0x00, 0x02, 0x01, 'a', 'b'},
+			errMsg:   "offsets are not monotonic",
+		},
+		{
 			name:     "string data out of range",
 			metadata: []byte{0x01, 0x01, 0x00, 0x05},
 			errMsg:   "string data out of range",

@@ -183,32 +183,38 @@ func (m *Metadata) loadDictionary(offsetSz uint8) error {
 	}
 
 	dictSize := readLEU32(m.data[hdrSizeBytes : hdrSizeBytes+offsetSz])
-	m.keys = make([][]byte, dictSize)
-
 	if dictSize == 0 {
+		m.keys = nil
 		return nil
 	}
 
-	// first offset is always 0
-	offsetStart, offsetPos := uint32(0), hdrSizeBytes+offsetSz
-	valuesStart := hdrSizeBytes + (dictSize+2)*uint32(offsetSz)
-	if hdrSizeBytes+int(dictSize+1)*int(offsetSz) > len(m.data) {
-		return fmt.Errorf("%w: offset out of range: %d > %d",
-			ErrInvalidMetadata, (dictSize+hdrSizeBytes)*uint32(offsetSz), len(m.data))
+	valuesStart := uint64(hdrSizeBytes) + (uint64(dictSize)+2)*uint64(offsetSz)
+	if valuesStart > uint64(len(m.data)) {
+		return fmt.Errorf("%w: offset table out of range: %d > %d",
+			ErrInvalidMetadata, valuesStart, len(m.data))
 	}
 
+	offsetPos := hdrSizeBytes + offsetSz
+	if first := readLEU32(m.data[offsetPos : offsetPos+offsetSz]); first != 0 {
+		return fmt.Errorf("%w: first offset must be zero: %d", ErrInvalidMetadata, first)
+	}
+
+	m.keys = make([][]byte, dictSize)
+	offsetStart := uint32(0)
 	for i := range dictSize {
 		offsetPos += offsetSz
 		end := readLEU32(m.data[offsetPos : offsetPos+offsetSz])
-
-		keySize := end - offsetStart
-		valStart := valuesStart + offsetStart
-		if valStart+keySize > uint32(len(m.data)) {
-			return fmt.Errorf("%w: string data out of range: %d + %d > %d",
-				ErrInvalidMetadata, valStart, keySize, len(m.data))
+		if end < offsetStart {
+			return fmt.Errorf("%w: offsets are not monotonic: %d < %d",
+				ErrInvalidMetadata, end, offsetStart)
 		}
-		m.keys[i] = m.data[valStart : valStart+keySize]
-		offsetStart += keySize
+		if valuesStart+uint64(end) > uint64(len(m.data)) {
+			return fmt.Errorf("%w: string data out of range: %d + %d > %d",
+				ErrInvalidMetadata, valuesStart, end, len(m.data))
+		}
+
+		m.keys[i] = m.data[valuesStart+uint64(offsetStart) : valuesStart+uint64(end)]
+		offsetStart = end
 	}
 
 	return nil
