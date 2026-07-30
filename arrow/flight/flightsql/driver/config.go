@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/google/uuid"
 )
 
@@ -67,12 +68,13 @@ func GetTLSConfig(name string) (*tls.Config, bool) {
 }
 
 type DriverConfig struct {
-	Address  string
-	Username string
-	Password string
-	Token    string
-	Timeout  time.Duration
-	Params   map[string]string
+	Address   string
+	Username  string
+	Password  string
+	Token     string
+	Timeout   time.Duration
+	Params    map[string]string
+	Allocator memory.Allocator
 
 	TLSEnabled    bool
 	TLSConfigName string

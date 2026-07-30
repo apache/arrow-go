@@ -314,7 +314,7 @@ func (s *Stmt) setParameters(args []driver.NamedValue) error {
 		schema = arrow.NewSchema(fields, nil)
 	}
 
-	recBuilder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	recBuilder := array.NewRecordBuilder(s.client.Alloc, schema)
 	defer recBuilder.Release()
 
 	for i, arg := range args {
@@ -388,9 +388,10 @@ func (d *Driver) OpenConnector(name string) (driver.Connector, error) {
 }
 
 type Connector struct {
-	addr    string
-	timeout time.Duration
-	options []grpc.DialOption
+	addr      string
+	timeout   time.Duration
+	options   []grpc.DialOption
+	allocator memory.Allocator
 }
 
 // Configure the driver with the corresponding config
@@ -398,6 +399,10 @@ func (c *Connector) Configure(config *DriverConfig) error {
 	// Set the driver properties
 	c.addr = config.Address
 	c.timeout = config.Timeout
+	c.allocator = config.Allocator
+	if c.allocator == nil {
+		c.allocator = memory.DefaultAllocator
+	}
 	c.options = []grpc.DialOption{}
 
 	// Create GRPC options necessary for the backend
@@ -434,6 +439,7 @@ func (c *Connector) Connect(ctx context.Context) (driver.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	client.Alloc = c.allocator
 
 	return &Connection{
 		client:  client,
