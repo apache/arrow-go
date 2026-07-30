@@ -28,6 +28,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,16 +46,16 @@ import (
 
 type recordingAllocator struct {
 	memory.Allocator
-	allocated bool
+	allocated atomic.Bool
 }
 
 func (a *recordingAllocator) Allocate(size int) []byte {
-	a.allocated = true
+	a.allocated.Store(true)
 	return a.Allocator.Allocate(size)
 }
 
 func (a *recordingAllocator) Reallocate(size int, b []byte) []byte {
-	a.allocated = true
+	a.allocated.Store(true)
 	return a.Allocator.Reallocate(size, b)
 }
 
@@ -1731,7 +1732,7 @@ func TestPreparedStatementSchema(t *testing.T) {
 	rows, err := stmt.Query("master")
 	require.NoError(t, err)
 	require.NotNil(t, rows)
-	require.True(t, alloc.allocated)
+	require.True(t, alloc.allocated.Load())
 }
 
 func TestPreparedStatementNoSchema(t *testing.T) {
