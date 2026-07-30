@@ -173,6 +173,17 @@ func TestErrorAuths(t *testing.T) {
 			t.Fatalf("unexpected schema: got %q, want %q", got, want)
 		}
 	})
+
+	t.Run("lowercase bearer scheme", func(t *testing.T) {
+		ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("authorization", "bearer "+validBearer))
+		result, err := client.GetSchema(ctx, &flight.FlightDescriptor{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := string(result.Schema), "carebears"; got != want {
+			t.Fatalf("unexpected schema: got %q, want %q", got, want)
+		}
+	})
 }
 
 func TestBasicAuthHelpers(t *testing.T) {
