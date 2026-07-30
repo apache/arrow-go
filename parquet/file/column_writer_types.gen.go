@@ -1806,15 +1806,16 @@ func (w *ByteArrayColumnChunkWriter) WriteBatch(values []parquet.ByteArray, defL
 
 	batchSize := w.props.WriteBatchSize()
 	maxDefLevel := w.descr.MaxDefinitionLevel()
-	isV2WithRep := w.props.DataPageVersion() != parquet.DataPageV1 &&
+	requiresRowAlignment := (w.props.DataPageVersion() != parquet.DataPageV1 ||
+		w.props.PageIndexEnabledFor(w.descr.Path())) &&
 		repLevels != nil && w.descr.MaxRepetitionLevel() > 0
 	levelOffset := int64(0)
 
-	// Repeated DataPageV2 writes align batches on row boundaries using repLevels
+	// Repeated writes that produce an offset index align batches on row boundaries
 	// below. n comes from defLevels/values, not repLevels, so clamp repLevels to n
 	// to stop an oversized slice from growing a batch past n (spilling extra levels
 	// or reading out of range). Mirrors columnWriter.doBatches.
-	if isV2WithRep {
+	if requiresRowAlignment {
 		if int64(len(repLevels)) < n {
 			panic("columnwriter: not enough repetition levels for batch to write")
 		}
@@ -1823,7 +1824,7 @@ func (w *ByteArrayColumnChunkWriter) WriteBatch(values []parquet.ByteArray, defL
 		}
 		repLevels = repLevels[:n]
 		if repLevels[0] != 0 {
-			panic("columnwriter: batch writing for V2 data pages must start at a row boundary")
+			panic("columnwriter: row-aligned batch writing must start at a row boundary")
 		}
 	}
 
@@ -1850,10 +1851,10 @@ func (w *ByteArrayColumnChunkWriter) WriteBatch(values []parquet.ByteArray, defL
 			}
 		}
 
-		// V2 row-boundary alignment: a repeated row must not span a page boundary,
+		// Row-boundary alignment: a repeated row must not span an indexed page boundary,
 		// so snap the batch onto the nearest row boundary (or keep a single wide row
 		// whole). See alignBatchToRowBoundary in column_writer.go.
-		if isV2WithRep {
+		if requiresRowAlignment {
 			batch = alignBatchToRowBoundary(repLevels, levelOffset, batch)
 		}
 		if batch < 1 {
@@ -1920,13 +1921,14 @@ func (w *ByteArrayColumnChunkWriter) WriteBatchSpacedWithError(values []parquet.
 	const maxSafeBatchDataSize int64 = 1 << 30 // 1GB
 
 	batchSize := w.props.WriteBatchSize()
-	isV2WithRep := w.props.DataPageVersion() != parquet.DataPageV1 &&
+	requiresRowAlignment := (w.props.DataPageVersion() != parquet.DataPageV1 ||
+		w.props.PageIndexEnabledFor(w.descr.Path())) &&
 		repLevels != nil && w.descr.MaxRepetitionLevel() > 0
 	levelOffset := int64(0)
 	n := int64(length)
 
 	// Clamp repLevels to n; see WriteBatch. Mirrors columnWriter.doBatches.
-	if isV2WithRep {
+	if requiresRowAlignment {
 		if int64(len(repLevels)) < n {
 			panic("columnwriter: not enough repetition levels for batch to write")
 		}
@@ -1935,7 +1937,7 @@ func (w *ByteArrayColumnChunkWriter) WriteBatchSpacedWithError(values []parquet.
 		}
 		repLevels = repLevels[:n]
 		if repLevels[0] != 0 {
-			panic("columnwriter: batch writing for V2 data pages must start at a row boundary")
+			panic("columnwriter: row-aligned batch writing must start at a row boundary")
 		}
 	}
 
@@ -1955,10 +1957,10 @@ func (w *ByteArrayColumnChunkWriter) WriteBatchSpacedWithError(values []parquet.
 			}
 		}
 
-		// V2 row-boundary alignment: a repeated row must not span a page boundary,
+		// Row-boundary alignment: a repeated row must not span an indexed page boundary,
 		// so snap the batch onto the nearest row boundary (or keep a single wide row
 		// whole). See alignBatchToRowBoundary in column_writer.go.
-		if isV2WithRep {
+		if requiresRowAlignment {
 			batch = alignBatchToRowBoundary(repLevels, levelOffset, batch)
 		}
 		if batch < 1 {
@@ -2176,15 +2178,16 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatch(values []parquet.FixedLe
 
 	batchSize := w.props.WriteBatchSize()
 	maxDefLevel := w.descr.MaxDefinitionLevel()
-	isV2WithRep := w.props.DataPageVersion() != parquet.DataPageV1 &&
+	requiresRowAlignment := (w.props.DataPageVersion() != parquet.DataPageV1 ||
+		w.props.PageIndexEnabledFor(w.descr.Path())) &&
 		repLevels != nil && w.descr.MaxRepetitionLevel() > 0
 	levelOffset := int64(0)
 
-	// Repeated DataPageV2 writes align batches on row boundaries using repLevels
+	// Repeated writes that produce an offset index align batches on row boundaries
 	// below. n comes from defLevels/values, not repLevels, so clamp repLevels to n
 	// to stop an oversized slice from growing a batch past n (spilling extra levels
 	// or reading out of range). Mirrors columnWriter.doBatches.
-	if isV2WithRep {
+	if requiresRowAlignment {
 		if int64(len(repLevels)) < n {
 			panic("columnwriter: not enough repetition levels for batch to write")
 		}
@@ -2193,7 +2196,7 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatch(values []parquet.FixedLe
 		}
 		repLevels = repLevels[:n]
 		if repLevels[0] != 0 {
-			panic("columnwriter: batch writing for V2 data pages must start at a row boundary")
+			panic("columnwriter: row-aligned batch writing must start at a row boundary")
 		}
 	}
 
@@ -2220,10 +2223,10 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatch(values []parquet.FixedLe
 			}
 		}
 
-		// V2 row-boundary alignment: a repeated row must not span a page boundary,
+		// Row-boundary alignment: a repeated row must not span an indexed page boundary,
 		// so snap the batch onto the nearest row boundary (or keep a single wide row
 		// whole). See alignBatchToRowBoundary in column_writer.go.
-		if isV2WithRep {
+		if requiresRowAlignment {
 			batch = alignBatchToRowBoundary(repLevels, levelOffset, batch)
 		}
 		if batch < 1 {
@@ -2290,13 +2293,14 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatchSpacedWithError(values []
 	const maxSafeBatchDataSize int64 = 1 << 30 // 1GB
 
 	batchSize := w.props.WriteBatchSize()
-	isV2WithRep := w.props.DataPageVersion() != parquet.DataPageV1 &&
+	requiresRowAlignment := (w.props.DataPageVersion() != parquet.DataPageV1 ||
+		w.props.PageIndexEnabledFor(w.descr.Path())) &&
 		repLevels != nil && w.descr.MaxRepetitionLevel() > 0
 	levelOffset := int64(0)
 	n := int64(length)
 
 	// Clamp repLevels to n; see WriteBatch. Mirrors columnWriter.doBatches.
-	if isV2WithRep {
+	if requiresRowAlignment {
 		if int64(len(repLevels)) < n {
 			panic("columnwriter: not enough repetition levels for batch to write")
 		}
@@ -2305,7 +2309,7 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatchSpacedWithError(values []
 		}
 		repLevels = repLevels[:n]
 		if repLevels[0] != 0 {
-			panic("columnwriter: batch writing for V2 data pages must start at a row boundary")
+			panic("columnwriter: row-aligned batch writing must start at a row boundary")
 		}
 	}
 
@@ -2325,10 +2329,10 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatchSpacedWithError(values []
 			}
 		}
 
-		// V2 row-boundary alignment: a repeated row must not span a page boundary,
+		// Row-boundary alignment: a repeated row must not span an indexed page boundary,
 		// so snap the batch onto the nearest row boundary (or keep a single wide row
 		// whole). See alignBatchToRowBoundary in column_writer.go.
-		if isV2WithRep {
+		if requiresRowAlignment {
 			batch = alignBatchToRowBoundary(repLevels, levelOffset, batch)
 		}
 		if batch < 1 {

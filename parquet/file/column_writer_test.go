@@ -222,6 +222,45 @@ func TestDataPageV2RowBoundaries(t *testing.T) {
 	wr.WriteBatch(values, defLevels, repLevels)
 }
 
+func TestDataPageV1OffsetIndexRowBoundaries(t *testing.T) {
+	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.Must(schema.ListOf(
+			schema.Must(schema.NewPrimitiveNode("column", parquet.Repetitions.Optional, parquet.Types.Int32, -1, -1)),
+			parquet.Repetitions.Optional, -1)),
+	}, -1)))
+	descr := sc.Column(0)
+	props := parquet.NewWriterProperties(
+		parquet.WithBatchSize(128),
+		parquet.WithDataPageSize(1024),
+		parquet.WithDataPageVersion(parquet.DataPageV1),
+		parquet.WithPageIndexEnabled(true),
+		parquet.WithDictionaryDefault(false))
+
+	metadata := metadata.NewColumnChunkMetaDataBuilder(props, descr)
+	pager := new(mockpagewriter)
+	defer pager.AssertExpectations(t)
+	pager.On("HasCompressor").Return(false)
+	wr := file.NewColumnChunkWriter(metadata, pager, props).(*file.Int32ColumnChunkWriter)
+
+	pager.On("WriteDataPage", mock.MatchedBy(func(page file.DataPage) bool {
+		pagev1, ok := page.(*file.DataPageV1)
+		return ok && pagev1.NumValues()%3 == 0
+	})).Return(10, nil)
+
+	values := make([]int32, 1024)
+	defLevels := make([]int16, 1024)
+	repLevels := make([]int16, 1024)
+	for i := range values {
+		values[i] = int32(i)
+		defLevels[i] = 3
+		if i%3 != 0 {
+			repLevels[i] = 1
+		}
+	}
+
+	wr.WriteBatch(values, defLevels, repLevels)
+}
+
 type PrimitiveWriterTestSuite struct {
 	testutils.PrimitiveTypedTest
 	suite.Suite

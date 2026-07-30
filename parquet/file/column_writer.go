@@ -656,14 +656,9 @@ func (w *columnWriter) Close() (err error) {
 
 func (w *columnWriter) doBatches(total int64, repLevels []int16, action func(offset, batch int64)) {
 	batchSize := w.props.WriteBatchSize()
-	// if we're writing V1 data pages, have no replevels or the max replevel is 0 then just
-	// use the regular doBatches function.
-	//
-	// The spec also requires row-aligned pages for V1 when an OffsetIndex is
-	// present (PageIndexEnabled). That gap is on the WriteBatch path and is
-	// out of scope for the DataPageV2 row alignment here; it is tracked in
-	// https://github.com/apache/arrow-go/issues/887.
-	if w.props.DataPageVersion() == parquet.DataPageV1 || repLevels == nil || w.descr.MaxRepetitionLevel() == 0 {
+	requiresRowAlignment := w.props.DataPageVersion() != parquet.DataPageV1 ||
+		w.props.PageIndexEnabledFor(w.descr.Path())
+	if !requiresRowAlignment || repLevels == nil || w.descr.MaxRepetitionLevel() == 0 {
 		doBatches(total, batchSize, action)
 		return
 	}
@@ -692,7 +687,7 @@ func (w *columnWriter) doBatches(total int64, repLevels []int16, action func(off
 	repLevels = repLevels[:total]
 
 	if repLevels[0] != 0 {
-		panic("columnwriter: batch writing for V2 data pages must start at a row boundary")
+		panic("columnwriter: row-aligned batch writing must start at a row boundary")
 	}
 
 	// loop by batchSize, but make sure we're ending/starting each batch on a row boundary
@@ -723,7 +718,7 @@ func doBatches(total, batchSize int64, action func(offset, batch int64)) {
 
 // alignBatchToRowBoundary adjusts batch so that repLevels[offset+batch] lands on
 // a row boundary (repetition level 0) or the end of the level slice. A repeated
-// row must never span a DataPageV2 page boundary, so it first shrinks toward the
+// row must never span a row-aligned page boundary, so it first shrinks toward the
 // previous boundary. If there is no boundary at or before the requested split -
 // the current row is wider than batch - it grows forward to the next one so the
 // whole row stays in a single batch and the caller keeps making progress rather
