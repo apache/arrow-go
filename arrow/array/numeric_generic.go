@@ -173,6 +173,19 @@ type dateArray[T interface {
 	numericArray[T]
 }
 
+func (d *dateArray[T]) String() string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i := range d.values {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(d.ValueStr(i))
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
 func (d *dateArray[T]) MarshalJSON() ([]byte, error) {
 	vals := make([]any, d.Len())
 	for i := range d.values {
