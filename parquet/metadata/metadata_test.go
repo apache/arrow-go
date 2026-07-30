@@ -75,6 +75,23 @@ func assertStatsSet(t *testing.T, m *metadata.ColumnChunkMetaData) {
 	assert.True(t, ok)
 }
 
+func TestRowGroupFinishReportsInitializedColumnCount(t *testing.T) {
+	fields := schema.FieldList{
+		schema.NewInt32Node("first", parquet.Repetitions.Required, -1),
+		schema.NewInt32Node("second", parquet.Repetitions.Required, -1),
+	}
+	root, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, fields, -1)
+	require.NoError(t, err)
+	builder := metadata.NewFileMetadataBuilder(schema.NewSchema(root), parquet.NewWriterProperties(), nil)
+	rowGroup := builder.AppendRowGroup()
+
+	err = rowGroup.Finish(0, 0)
+	require.EqualError(t, err, "parquet: only 0 out of 2 columns are initialized")
+	rowGroup.NextColumnChunk()
+	err = rowGroup.Finish(0, 0)
+	require.EqualError(t, err, "parquet: only 1 out of 2 columns are initialized")
+}
+
 func assertStats(t *testing.T, m *metadata.ColumnChunkMetaData) metadata.TypedStatistics {
 	s, err := m.Statistics()
 	assert.NoError(t, err)

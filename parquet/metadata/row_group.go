@@ -187,7 +187,7 @@ func (r *RowGroupMetaDataBuilder) NextColumnChunk() *ColumnChunkMetaDataBuilder 
 // being written. e.g. first row group should be 0, second is 1, and so on...
 func (r *RowGroupMetaDataBuilder) Finish(_ int64, ordinal int16) error {
 	if r.nextCol != r.NumColumns() {
-		return fmt.Errorf("parquet: only %d out of %d columns are initialized", r.nextCol-1, r.schema.NumColumns())
+		return fmt.Errorf("parquet: only %d out of %d columns are initialized", r.nextCol, r.schema.NumColumns())
 	}
 
 	var (
