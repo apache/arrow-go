@@ -109,7 +109,7 @@ func serverAuthUnaryInterceptor(ctx context.Context, req interface{}, srv *grpc.
 
 	peerIdentity, err := auth.IsValid(authTok)
 	if err != nil {
-		return nil, status.Errorf(codes.PermissionDenied, "auth-error: %s", err)
+		return nil, status.Errorf(codes.Unauthenticated, "auth-error: %s", err)
 	}
 
 	return handler(context.WithValue(ctx, authCtxKey{}, peerIdentity), req)
