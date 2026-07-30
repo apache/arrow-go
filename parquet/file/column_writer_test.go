@@ -246,10 +246,11 @@ func TestDataPageV1OffsetIndexRowBoundaries(t *testing.T) {
 		pagev1, ok := page.(*file.DataPageV1)
 		return ok && pagev1.NumValues()%3 == 0
 	})).Return(10, nil)
+	pager.On("Close", false, false).Return(nil).Once()
 
-	values := make([]int32, 1024)
-	defLevels := make([]int16, 1024)
-	repLevels := make([]int16, 1024)
+	values := make([]int32, 1023)
+	defLevels := make([]int16, 1023)
+	repLevels := make([]int16, 1023)
 	for i := range values {
 		values[i] = int32(i)
 		defLevels[i] = 3
@@ -259,6 +260,7 @@ func TestDataPageV1OffsetIndexRowBoundaries(t *testing.T) {
 	}
 
 	wr.WriteBatch(values, defLevels, repLevels)
+	assert.NoError(t, wr.Close())
 }
 
 type PrimitiveWriterTestSuite struct {
