@@ -179,11 +179,26 @@ func (r *JSONReader) readNext() bool {
 	return true
 }
 
+func (r *JSONReader) build() bool {
+	rec, err := r.bldr.NewRecordBatchChecked()
+	if err != nil {
+		if r.err == nil {
+			r.err = err
+		}
+		r.done = true
+		return false
+	}
+	r.cur = rec
+	return true
+}
+
 func (r *JSONReader) nextall() bool {
 	for r.readNext() {
 	}
 
-	r.cur = r.bldr.NewRecordBatch()
+	if !r.build() {
+		return false
+	}
 	return r.cur.NumRows() > 0
 }
 
@@ -192,8 +207,7 @@ func (r *JSONReader) next1() bool {
 		return false
 	}
 
-	r.cur = r.bldr.NewRecordBatch()
-	return true
+	return r.build()
 }
 
 func (r *JSONReader) nextn() bool {
@@ -206,9 +220,9 @@ func (r *JSONReader) nextn() bool {
 	}
 
 	if n > 0 {
-		r.cur = r.bldr.NewRecordBatch()
+		return r.build()
 	}
-	return n > 0
+	return false
 }
 
 var _ RecordReader = (*JSONReader)(nil)

@@ -385,11 +385,26 @@ func (b *RecordBuilder) Resize(n int) {
 //
 // The returned RecordBatch must be Release()'d after use.
 //
-// NewRecordBatch panics if the fields' builder do not have the same length.
+// NewRecordBatch panics if the fields' builders do not have the same length or if
+// a non-nullable field contains nulls. Use NewRecordBatchChecked for an error.
 func (b *RecordBuilder) NewRecordBatch() arrow.RecordBatch {
+	rec, err := b.newRecordBatch()
+	if err != nil {
+		panic(err)
+	}
+	return rec
+}
+
+// NewRecordBatchChecked is like NewRecordBatch but returns an error instead of
+// panicking when the record is invalid.
+func (b *RecordBuilder) NewRecordBatchChecked() (arrow.RecordBatch, error) {
+	return b.newRecordBatch()
+}
+
+func (b *RecordBuilder) newRecordBatch() (arrow.RecordBatch, error) {
 	lower, upper := b.columnLenRange()
 	if lower != upper {
-		panic(fmt.Errorf("arrow/array: some fields have excessive number of rows (want at most %d, have %d)", lower, upper))
+		return nil, fmt.Errorf("arrow/array: some fields have excessive number of rows (want at most %d, have %d)", lower, upper)
 	}
 
 	cols := make([]arrow.Array, len(b.fields))
@@ -407,7 +422,17 @@ func (b *RecordBuilder) NewRecordBatch() arrow.RecordBatch {
 		cols[i] = f.NewArray()
 	}
 
-	return NewRecordBatch(b.schema, cols, int64(lower))
+	// Only each field's own top-level nullability is enforced; we do not recurse
+	// into children, so a non-nullable child of a nullable struct keeps its
+	// legitimate nulls in null parent slots. Run-end-encoded logical nulls live
+	// in the values child rather than a top-level bitmap, so they are not flagged.
+	for i := range cols {
+		if f := b.schema.Field(i); !f.Nullable && cols[i].NullN() > 0 {
+			return nil, fmt.Errorf("arrow/array: field %q is declared non-nullable but contains nulls", f.Name)
+		}
+	}
+
+	return NewRecordBatch(b.schema, cols, int64(lower)), nil
 }
 
 // Deprecated: Use [NewRecordBatch] instead.

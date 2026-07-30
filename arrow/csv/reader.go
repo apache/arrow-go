@@ -267,6 +267,19 @@ func (r *Reader) Next() bool {
 	return r.next()
 }
 
+func (r *Reader) build() bool {
+	rec, err := r.bld.NewRecordBatchChecked()
+	if err != nil {
+		if r.err == nil {
+			r.err = err
+		}
+		r.done = true
+		return false
+	}
+	r.cur = rec
+	return true
+}
+
 // next1 reads one row from the CSV file and creates a single Record
 // from that row.
 func (r *Reader) next1() bool {
@@ -282,9 +295,8 @@ func (r *Reader) next1() bool {
 
 	r.validate(recs)
 	r.read(recs)
-	r.cur = r.bld.NewRecordBatch()
 
-	return true
+	return r.build()
 }
 
 // nextall reads the whole CSV file into memory and creates one single
@@ -305,9 +317,8 @@ func (r *Reader) nextall() bool {
 		r.validate(rec)
 		r.read(rec)
 	}
-	r.cur = r.bld.NewRecordBatch()
 
-	return true
+	return r.build()
 }
 
 // nextn reads n rows from the CSV file, where n is the chunk size, and creates
@@ -338,7 +349,9 @@ func (r *Reader) nextn() bool {
 		r.done = true
 	}
 
-	r.cur = r.bld.NewRecordBatch()
+	if !r.build() {
+		return false
+	}
 	return n > 0
 }
 

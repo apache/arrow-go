@@ -482,13 +482,13 @@ func TestWriteKeyValueMetadata(t *testing.T) {
 
 func TestWriteEmptyLists(t *testing.T) {
 	sc := arrow.NewSchema([]arrow.Field{
-		{Name: "f1", Type: arrow.ListOf(arrow.FixedWidthTypes.Date32)},
-		{Name: "f2", Type: arrow.ListOf(arrow.FixedWidthTypes.Date64)},
-		{Name: "f3", Type: arrow.ListOf(arrow.FixedWidthTypes.Timestamp_us)},
-		{Name: "f4", Type: arrow.ListOf(arrow.FixedWidthTypes.Timestamp_ms)},
-		{Name: "f5", Type: arrow.ListOf(arrow.FixedWidthTypes.Time32ms)},
-		{Name: "f6", Type: arrow.ListOf(arrow.FixedWidthTypes.Time64ns)},
-		{Name: "f7", Type: arrow.ListOf(arrow.FixedWidthTypes.Time64us)},
+		{Name: "f1", Type: arrow.ListOf(arrow.FixedWidthTypes.Date32), Nullable: true},
+		{Name: "f2", Type: arrow.ListOf(arrow.FixedWidthTypes.Date64), Nullable: true},
+		{Name: "f3", Type: arrow.ListOf(arrow.FixedWidthTypes.Timestamp_us), Nullable: true},
+		{Name: "f4", Type: arrow.ListOf(arrow.FixedWidthTypes.Timestamp_ms), Nullable: true},
+		{Name: "f5", Type: arrow.ListOf(arrow.FixedWidthTypes.Time32ms), Nullable: true},
+		{Name: "f6", Type: arrow.ListOf(arrow.FixedWidthTypes.Time64ns), Nullable: true},
+		{Name: "f7", Type: arrow.ListOf(arrow.FixedWidthTypes.Time64us), Nullable: true},
 	}, nil)
 	bldr := array.NewRecordBuilder(memory.DefaultAllocator, sc)
 	defer bldr.Release()
@@ -515,19 +515,19 @@ func TestWriteEmptyLists(t *testing.T) {
 func TestWriteAllNullsWithDeltaEncoding(t *testing.T) {
 	sc := arrow.NewSchema([]arrow.Field{
 		{Name: "f1", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
-		{Name: "f2", Type: arrow.ListOf(arrow.FixedWidthTypes.Date32)},
+		{Name: "f2", Type: arrow.ListOf(arrow.FixedWidthTypes.Date32), Nullable: true},
 		{Name: "f3", Type: arrow.BinaryTypes.String, Nullable: true},
-		{Name: "f4", Type: arrow.ListOf(arrow.BinaryTypes.String)},
+		{Name: "f4", Type: arrow.ListOf(arrow.BinaryTypes.String), Nullable: true},
 		{Name: "f5", Type: arrow.BinaryTypes.LargeString, Nullable: true},
-		{Name: "f6", Type: arrow.ListOf(arrow.BinaryTypes.LargeString)},
+		{Name: "f6", Type: arrow.ListOf(arrow.BinaryTypes.LargeString), Nullable: true},
 		{Name: "f7", Type: arrow.PrimitiveTypes.Float64, Nullable: true},
-		{Name: "f8", Type: arrow.ListOf(arrow.FixedWidthTypes.Date64)},
+		{Name: "f8", Type: arrow.ListOf(arrow.FixedWidthTypes.Date64), Nullable: true},
 		{Name: "f9", Type: arrow.BinaryTypes.String, Nullable: true},
-		{Name: "f10", Type: arrow.ListOf(arrow.BinaryTypes.LargeString)},
+		{Name: "f10", Type: arrow.ListOf(arrow.BinaryTypes.LargeString), Nullable: true},
 		{Name: "f11", Type: arrow.FixedWidthTypes.Boolean, Nullable: true},
-		{Name: "f12", Type: arrow.ListOf(arrow.FixedWidthTypes.Boolean)},
+		{Name: "f12", Type: arrow.ListOf(arrow.FixedWidthTypes.Boolean), Nullable: true},
 		{Name: "f13", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
-		{Name: "f14", Type: arrow.ListOf(arrow.PrimitiveTypes.Float32)},
+		{Name: "f14", Type: arrow.ListOf(arrow.PrimitiveTypes.Float32), Nullable: true},
 	}, nil)
 	bldr := array.NewRecordBuilder(memory.DefaultAllocator, sc)
 	defer bldr.Release()
