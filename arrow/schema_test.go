@@ -336,6 +336,19 @@ func TestSchema(t *testing.T) {
 	}
 }
 
+func TestSchemaFieldsByNameReturnsCopy(t *testing.T) {
+	schema := NewSchema([]Field{{Name: "id", Type: PrimitiveTypes.Int64}}, nil)
+	fields, ok := schema.FieldsByName("id")
+	if !ok {
+		t.Fatal("field not found")
+	}
+	fields[0].Name = "changed"
+
+	if got, want := schema.Field(0).Name, "id"; got != want {
+		t.Fatalf("schema field mutated through returned slice: got %q, want %q", got, want)
+	}
+}
+
 func TestSchemaAddField(t *testing.T) {
 	s := NewSchema([]Field{
 		{Name: "f1", Type: PrimitiveTypes.Int32},

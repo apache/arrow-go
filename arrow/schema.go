@@ -220,7 +220,7 @@ func (sc *Schema) FieldsByName(n string) ([]Field, bool) {
 		return nil, ok
 	}
 	if len(indices) == 1 {
-		return sc.fields[indices[0] : indices[0]+1], ok
+		return []Field{sc.fields[indices[0]]}, ok
 	} else if len(indices) > 1 {
 		fields := make([]Field, 0, len(indices))
 		for _, v := range indices {
