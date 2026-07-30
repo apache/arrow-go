@@ -24,6 +24,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
+	"github.com/stretchr/testify/require"
 )
 
 func TestVerifySignatureRejectsTruncatedSignature(t *testing.T) {
@@ -37,4 +38,7 @@ func TestVerifySignatureRejectsTruncatedSignature(t *testing.T) {
 			t.Fatalf("truncated signature of length %d was accepted", size)
 		}
 	}
+	require.NotPanics(t, func() {
+		require.False(t, meta.VerifySignature(make([]byte, encryption.NonceLength+encryption.GcmTagLength)))
+	})
 }
