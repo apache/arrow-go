@@ -32,8 +32,9 @@ func TestJSONReaderReleaseBuilderAfterPartialReadError(t *testing.T) {
 		{Name: "value", Type: arrow.PrimitiveTypes.Int64},
 	}, nil)
 
-	// The first value allocates builder buffers, then the duplicate key leaves
-	// the reader with no current record batch and a partially populated builder.
+	// The first value allocates builder buffers. Rejecting the duplicate key then
+	// fails before a record batch is created, leaving cur nil while the builder
+	// still owns those buffers.
 	rdr := array.NewJSONReader(
 		strings.NewReader(`{"value": 1, "value": 2}`),
 		schema,
