@@ -261,7 +261,11 @@ func main() {
 
 			if !config.NoMetadata {
 				fmt.Println("Column", c)
-				if set, _ := chunkMeta.StatsSet(); set {
+				set, err := chunkMeta.StatsSet()
+				if err != nil {
+					log.Fatalf("unable to read statistics for column=%d: %s", c, err)
+				}
+				if set {
 					stats, err := chunkMeta.Statistics()
 					if err != nil {
 						log.Fatal(err)
