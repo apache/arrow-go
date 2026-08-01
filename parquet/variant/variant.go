@@ -168,12 +168,14 @@ func NewMetadata(data []byte) (Metadata, error) {
 
 // Clone creates a deep copy of the metadata.
 func (m *Metadata) Clone() Metadata {
+	keys := make([][]byte, len(m.keys))
+	for i, key := range m.keys {
+		keys[i] = bytes.Clone(key)
+	}
+
 	return Metadata{
 		data: bytes.Clone(m.data),
-		// shallow copy of the values, but the slice is copied
-		// more efficient, and nothing should be mutating the keys
-		// so it's probably safe, but something we should keep in mind
-		keys: slices.Clone(m.keys),
+		keys: keys,
 	}
 }
 
