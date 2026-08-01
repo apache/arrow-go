@@ -268,15 +268,10 @@ func (s *Schema) AddField(i int, field Field) (*Schema, error) {
 		return nil, fmt.Errorf("arrow: invalid field index %d", i)
 	}
 
-	var fields []Field
-	if i == len(s.fields) {
-		fields = append(s.fields, field)
-	} else {
-		fields = make([]Field, len(s.fields)+1)
-		copy(fields[:i], s.fields[:i])
-		fields[i] = field
-		copy(fields[i+1:], s.fields[i:])
-	}
+	fields := make([]Field, len(s.fields)+1)
+	copy(fields[:i], s.fields[:i])
+	fields[i] = field
+	copy(fields[i+1:], s.fields[i:])
 
 	return newSchema(fields, &s.meta, s.endianness), nil
 }
