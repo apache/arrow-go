@@ -77,36 +77,37 @@ func createDumper(reader file.ColumnChunkReader) *Dumper {
 	}
 }
 
-func (dump *Dumper) readNextBatch() {
+func (dump *Dumper) readNextBatch() (err error) {
 	switch reader := dump.reader.(type) {
 	case *file.BooleanColumnChunkReader:
 		values := dump.valueBuffer.([]bool)
-		dump.levelsBuffered, dump.valuesBuffered, _ = reader.ReadBatch(dump.batchSize, values, dump.defLevels, dump.repLevels)
+		dump.levelsBuffered, dump.valuesBuffered, err = reader.ReadBatch(dump.batchSize, values, dump.defLevels, dump.repLevels)
 	case *file.Int32ColumnChunkReader:
 		values := dump.valueBuffer.([]int32)
-		dump.levelsBuffered, dump.valuesBuffered, _ = reader.ReadBatch(dump.batchSize, values, dump.defLevels, dump.repLevels)
+		dump.levelsBuffered, dump.valuesBuffered, err = reader.ReadBatch(dump.batchSize, values, dump.defLevels, dump.repLevels)
 	case *file.Int64ColumnChunkReader:
 		values := dump.valueBuffer.([]int64)
-		dump.levelsBuffered, dump.valuesBuffered, _ = reader.ReadBatch(dump.batchSize, values, dump.defLevels, dump.repLevels)
+		dump.levelsBuffered, dump.valuesBuffered, err = reader.ReadBatch(dump.batchSize, values, dump.defLevels, dump.repLevels)
 	case *file.Float32ColumnChunkReader:
 		values := dump.valueBuffer.([]float32)
-		dump.levelsBuffered, dump.valuesBuffered, _ = reader.ReadBatch(dump.batchSize, values, dump.defLevels, dump.repLevels)
+		dump.levelsBuffered, dump.valuesBuffered, err = reader.ReadBatch(dump.batchSize, values, dump.defLevels, dump.repLevels)
 	case *file.Float64ColumnChunkReader:
 		values := dump.valueBuffer.([]float64)
-		dump.levelsBuffered, dump.valuesBuffered, _ = reader.ReadBatch(dump.batchSize, values, dump.defLevels, dump.repLevels)
+		dump.levelsBuffered, dump.valuesBuffered, err = reader.ReadBatch(dump.batchSize, values, dump.defLevels, dump.repLevels)
 	case *file.Int96ColumnChunkReader:
 		values := dump.valueBuffer.([]parquet.Int96)
-		dump.levelsBuffered, dump.valuesBuffered, _ = reader.ReadBatch(dump.batchSize, values, dump.defLevels, dump.repLevels)
+		dump.levelsBuffered, dump.valuesBuffered, err = reader.ReadBatch(dump.batchSize, values, dump.defLevels, dump.repLevels)
 	case *file.ByteArrayColumnChunkReader:
 		values := dump.valueBuffer.([]parquet.ByteArray)
-		dump.levelsBuffered, dump.valuesBuffered, _ = reader.ReadBatch(dump.batchSize, values, dump.defLevels, dump.repLevels)
+		dump.levelsBuffered, dump.valuesBuffered, err = reader.ReadBatch(dump.batchSize, values, dump.defLevels, dump.repLevels)
 	case *file.FixedLenByteArrayColumnChunkReader:
 		values := dump.valueBuffer.([]parquet.FixedLenByteArray)
-		dump.levelsBuffered, dump.valuesBuffered, _ = reader.ReadBatch(dump.batchSize, values, dump.defLevels, dump.repLevels)
+		dump.levelsBuffered, dump.valuesBuffered, err = reader.ReadBatch(dump.batchSize, values, dump.defLevels, dump.repLevels)
 	}
 
 	dump.valueOffset = 0
 	dump.levelOffset = 0
+	return err
 }
 
 func (dump *Dumper) hasNext() bool {
@@ -157,14 +158,16 @@ func (dump *Dumper) FormatValue(val interface{}, width int) string {
 	}
 }
 
-func (dump *Dumper) Next() (interface{}, bool) {
+func (dump *Dumper) Next() (interface{}, bool, error) {
 	if dump.levelOffset == dump.levelsBuffered {
 		if !dump.hasNext() {
-			return nil, false
+			return nil, false, nil
 		}
-		dump.readNextBatch()
+		if err := dump.readNextBatch(); err != nil {
+			return nil, false, fmt.Errorf("reading column %s: %w", dump.reader.Descriptor().Path(), err)
+		}
 		if dump.levelsBuffered == 0 {
-			return nil, false
+			return nil, false, nil
 		}
 	}
 
@@ -173,14 +176,14 @@ func (dump *Dumper) Next() (interface{}, bool) {
 	dump.levelOffset++
 
 	if defLevel < dump.reader.Descriptor().MaxDefinitionLevel() {
-		return nil, true
+		return nil, true, nil
 	}
 
 	vb := reflect.ValueOf(dump.valueBuffer)
 	v := vb.Index(dump.valueOffset).Interface()
 	dump.valueOffset++
 
-	return v, true
+	return v, true, nil
 }
 
 func dumpColIdxImpl[T parquet.ColumnTypes](cidx *metadata.TypedColumnIndex[T]) {

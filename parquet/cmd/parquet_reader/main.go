@@ -329,7 +329,11 @@ func main() {
 				data := false
 				first := true
 				for idx, s := range scanners {
-					if val, ok := s.Next(); ok {
+					val, ok, err := s.Next()
+					if err != nil {
+						log.Fatal(err)
+					}
+					if ok {
 						if !data {
 							fmt.Fprint(dataOut, line)
 						}
@@ -387,7 +391,11 @@ func main() {
 							line += ","
 						}
 					}
-					if val, ok := s.Next(); ok {
+					val, ok, err := s.Next()
+					if err != nil {
+						log.Fatal(err)
+					}
+					if ok {
 						if !data {
 							fmt.Fprint(dataOut, line)
 						}
@@ -435,7 +443,11 @@ func main() {
 			for {
 				data := false
 				for _, s := range scanners {
-					if val, ok := s.Next(); ok {
+					val, ok, err := s.Next()
+					if err != nil {
+						log.Fatal(err)
+					}
+					if ok {
 						if !data {
 							fmt.Fprint(dataOut, line)
 						}
