@@ -228,6 +228,7 @@ func CheckSchema(t *testing.T, pmr *ProtobufMessageReflection, want string) {
 
 func CheckRecord(t *testing.T, pmr *ProtobufMessageReflection, jsonStr string) {
 	rec := pmr.Record(nil)
+	defer rec.Release()
 	got, err := json.Marshal(rec)
 	assert.NoError(t, err)
 	assert.JSONEq(t, jsonStr, string(got), "got: %s\nwant: %s", got, jsonStr)
@@ -351,6 +352,14 @@ func TestRecordFromProtobuf(t *testing.T) {
 	pmr = NewProtobufMessageReflection(f.msg, WithExclusionPolicy(onlyEnum), WithEnumHandler(EnumNumber))
 	jsonStr = `[ { "enum":1 } ]`
 	CheckRecord(t, pmr, jsonStr)
+}
+
+func TestRecordReleasesConstructionBuffers(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	pmr := NewProtobufMessageReflection(AllTheTypesNoAnyFixture().msg, WithEnumHandler(EnumNumber))
+	rec := pmr.Record(mem)
+	rec.Release()
+	mem.AssertSize(t, 0)
 }
 
 func TestNullRecordFromProtobuf(t *testing.T) {
