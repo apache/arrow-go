@@ -359,6 +359,7 @@ func (pdr protobufDictReflection) getDataType() arrow.DataType {
 func (pdr protobufDictReflection) getDictValues(mem memory.Allocator) arrow.Array {
 	enumValues := pdr.descriptor.Enum().Values()
 	bldr := array.NewStringBuilder(mem)
+	defer bldr.Release()
 	for i := 0; i < enumValues.Len(); i++ {
 		bldr.Append(string(enumValues.Get(i).Name()))
 	}
@@ -823,7 +824,9 @@ func (f ProtobufMessageFieldReflection) AppendValueOrNull(b array.Builder, mem m
 	case arrow.DICTIONARY:
 		pdr := f.asDictionary()
 		db := b.(*array.BinaryDictionaryBuilder)
-		err := db.InsertStringDictValues(pdr.getDictValues(mem).(*array.String))
+		dictValues := pdr.getDictValues(mem).(*array.String)
+		err := db.InsertStringDictValues(dictValues)
+		dictValues.Release()
 		if err != nil {
 			return err
 		}
