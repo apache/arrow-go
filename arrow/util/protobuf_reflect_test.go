@@ -387,6 +387,18 @@ func TestRecordReleasesConstructionBuffers(t *testing.T) {
 	pmr := NewProtobufMessageReflection(AllTheTypesNoAnyFixture().msg, WithEnumHandler(EnumNumber))
 	rec := pmr.Record(mem)
 	rec.Release()
+}
+
+func TestRecordWithErrorReportsFieldConversion(t *testing.T) {
+	msg := AllTheTypesNoAnyFixture().msg.(*util_message.AllTheTypesNoAny)
+	msg.Enum = util_message.AllTheTypesNoAny_ExampleEnum(999)
+	pmr := NewProtobufMessageReflection(msg)
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	rec, err := pmr.RecordWithError(mem)
+	assert.Nil(t, rec)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, `failed to append protobuf field "enum"`)
+	assert.ErrorContains(t, err, "enum value 999 is not defined")
 	mem.AssertSize(t, 0)
 }
 
