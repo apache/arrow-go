@@ -123,6 +123,42 @@ func TestTableFromSliceWithoutColumns(t *testing.T) {
 	}
 }
 
+func TestTableFromSliceReleasesPartialColumnsOnPanic(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	ib := array.NewInt32Builder(mem)
+	ib.Append(1)
+	first := ib.NewArray()
+	ib.Release()
+
+	lb := array.NewInt64Builder(mem)
+	lb.Append(2)
+	second := lb.NewArray()
+	lb.Release()
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "first", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "second", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	func() {
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatal("expected NewTableFromSlice to panic for mismatched types")
+			}
+			err, ok := r.(error)
+			if !ok || !errors.Is(err, arrow.ErrInvalid) {
+				t.Fatalf("expected ErrInvalid, got %v", r)
+			}
+		}()
+		array.NewTableFromSlice(schema, [][]arrow.Array{{first}, {second}})
+	}()
+
+	first.Release()
+	second.Release()
+}
+
 func TestTableFromRecordsWithoutColumns(t *testing.T) {
 	schema := arrow.NewSchema(nil, nil)
 	records := []arrow.RecordBatch{

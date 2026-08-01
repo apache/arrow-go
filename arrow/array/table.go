@@ -142,11 +142,22 @@ func NewTableFromSlice(schema *arrow.Schema, data [][]arrow.Array) arrow.Table {
 	}
 
 	cols := make([]arrow.Column, schema.NumFields())
+	constructed := 0
+	complete := false
+	defer func() {
+		if !complete {
+			for i := 0; i < constructed; i++ {
+				cols[i].Release()
+			}
+		}
+	}()
+
 	for i, arrs := range data {
 		field := schema.Field(i)
 		chunked := arrow.NewChunked(field.Type, arrs)
 		cols[i] = *arrow.NewColumn(field, chunked)
 		chunked.Release()
+		constructed++
 	}
 
 	var rows int64
@@ -161,18 +172,9 @@ func NewTableFromSlice(schema *arrow.Schema, data [][]arrow.Array) arrow.Table {
 	}
 	tbl.refCount.Add(1)
 
-	defer func() {
-		if r := recover(); r != nil {
-			// if validate panics, let's release the columns
-			// so that we don't leak them, then propagate the panic
-			for _, c := range cols {
-				c.Release()
-			}
-			panic(r)
-		}
-	}()
 	// validate the table and its constituents.
 	tbl.validate()
+	complete = true
 
 	return &tbl
 }
