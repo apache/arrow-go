@@ -149,7 +149,7 @@ func NewOCFReader(r io.Reader, opts ...Option) (*OCFReader, error) {
 // new Avro file has an identical schema.
 func (rr *OCFReader) Reuse(r io.Reader, opts ...Option) error {
 	rr.Close()
-	rr.setErr(nil)
+	rr.clearErr()
 	ocfr, err := ocf.NewReader(r)
 	if err != nil {
 		return fmt.Errorf("%w: could not create avro ocfreader", arrow.ErrInvalid)
@@ -223,8 +223,19 @@ func (r *OCFReader) Err() error {
 }
 
 func (r *OCFReader) setErr(err error) {
+	if err == nil {
+		return
+	}
 	r.errMu.Lock()
-	r.err = err
+	if r.err == nil {
+		r.err = err
+	}
+	r.errMu.Unlock()
+}
+
+func (r *OCFReader) clearErr() {
+	r.errMu.Lock()
+	r.err = nil
 	r.errMu.Unlock()
 }
 

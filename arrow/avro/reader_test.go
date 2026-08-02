@@ -19,6 +19,7 @@ package avro
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,10 +32,21 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/twmb/avro"
 	"github.com/twmb/avro/ocf"
-	"github.com/stretchr/testify/require"
 )
+
+func TestOCFReaderPreservesFirstError(t *testing.T) {
+	reader := &OCFReader{}
+	first := errors.New("first error")
+
+	reader.setErr(first)
+	reader.setErr(errors.New("later error"))
+	reader.setErr(nil)
+
+	require.ErrorIs(t, reader.Err(), first)
+}
 
 func TestReader(t *testing.T) {
 	tests := []struct {
@@ -257,7 +269,9 @@ func TestOCFReaderBytesValues(t *testing.T) {
 	payload := []byte{0x00, 0x01, 0xfe, 0xff}
 
 	var buf bytes.Buffer
-	enc, err := ocf.NewEncoder(schema, &buf)
+	avroSchema, err := avro.Parse(schema)
+	assert.NoError(t, err)
+	enc, err := ocf.NewWriter(&buf, avroSchema)
 	assert.NoError(t, err)
 	assert.NoError(t, enc.Encode(map[string]any{
 		"plain":    payload,
@@ -289,7 +303,9 @@ func TestOCFReaderBytesValues(t *testing.T) {
 func TestOCFReaderCloseUnblocksFullQueues(t *testing.T) {
 	const schema = `{"type":"record","name":"rec","fields":[{"name":"value","type":"long"}]}`
 	var buf bytes.Buffer
-	enc, err := ocf.NewEncoder(schema, &buf)
+	avroSchema, err := avro.Parse(schema)
+	assert.NoError(t, err)
+	enc, err := ocf.NewWriter(&buf, avroSchema)
 	assert.NoError(t, err)
 	for i := 0; i < 100; i++ {
 		assert.NoError(t, enc.Encode(map[string]any{"value": int64(i)}))
@@ -325,7 +341,9 @@ func TestOCFReaderReuseWaitsForPreviousWorkers(t *testing.T) {
 	const schema = `{"type":"record","name":"rec","fields":[{"name":"value","type":"long"}]}`
 	encode := func(start int64) []byte {
 		var buf bytes.Buffer
-		enc, err := ocf.NewEncoder(schema, &buf)
+		avroSchema, err := avro.Parse(schema)
+		assert.NoError(t, err)
+		enc, err := ocf.NewWriter(&buf, avroSchema)
 		assert.NoError(t, err)
 		for i := range int64(20) {
 			assert.NoError(t, enc.Encode(map[string]any{"value": start + i}))
@@ -359,7 +377,9 @@ func TestOCFReaderReuseDiscardsPartialBuilderState(t *testing.T) {
 	const schema = `{"type":"record","name":"rec","fields":[{"name":"value","type":"long"}]}`
 	encode := func(value int64) []byte {
 		var buf bytes.Buffer
-		enc, err := ocf.NewEncoder(schema, &buf)
+		avroSchema, err := avro.Parse(schema)
+		require.NoError(t, err)
+		enc, err := ocf.NewWriter(&buf, avroSchema)
 		require.NoError(t, err)
 		require.NoError(t, enc.Encode(map[string]any{"value": value}))
 		require.NoError(t, enc.Close())
