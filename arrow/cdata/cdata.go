@@ -241,6 +241,9 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 		if err != nil {
 			return ret, fmt.Errorf("%w: invalid fixed-size binary format %q: %v", arrow.ErrInvalid, f, err)
 		}
+		if byteWidth <= 0 {
+			return ret, fmt.Errorf("%w: fixed-size binary byte width must be positive: %d", arrow.ErrInvalid, byteWidth)
+		}
 		dt = &arrow.FixedSizeBinaryType{ByteWidth: byteWidth}
 	case "d": // decimal types are d:<precision>,<scale>[,<bitsize>] size is assumed 128 if left out
 		props := val
@@ -325,6 +328,9 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 			listSize, err := strconv.Atoi(size)
 			if err != nil {
 				return ret, fmt.Errorf("%w: invalid fixed-size list format %q: %v", arrow.ErrInvalid, f, err)
+			}
+			if listSize <= 0 || int64(listSize) > 1<<31-1 {
+				return ret, fmt.Errorf("%w: fixed-size list size must be in the range [1, %d]: %d", arrow.ErrInvalid, 1<<31-1, listSize)
 			}
 
 			dt = arrow.FixedSizeListOfField(int32(listSize), childFields[0])
