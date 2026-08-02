@@ -110,8 +110,14 @@ func (dump *Dumper) readNextBatch() (err error) {
 	return err
 }
 
-func (dump *Dumper) hasNext() bool {
-	return dump.levelOffset < dump.levelsBuffered || dump.reader.HasNext()
+func (dump *Dumper) hasNext() (bool, error) {
+	if dump.levelOffset < dump.levelsBuffered {
+		return true, nil
+	}
+	if dump.reader.HasNext() {
+		return true, nil
+	}
+	return false, dump.reader.Err()
 }
 
 const microSecondsPerDay = 24 * 3600e6
@@ -160,7 +166,11 @@ func (dump *Dumper) FormatValue(val interface{}, width int) string {
 
 func (dump *Dumper) Next() (interface{}, bool, error) {
 	if dump.levelOffset == dump.levelsBuffered {
-		if !dump.hasNext() {
+		hasNext, err := dump.hasNext()
+		if err != nil {
+			return nil, false, fmt.Errorf("reading column %s: %w", dump.reader.Descriptor().Path(), err)
+		}
+		if !hasNext {
 			return nil, false, nil
 		}
 		if err := dump.readNextBatch(); err != nil {
