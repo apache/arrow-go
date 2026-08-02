@@ -160,6 +160,17 @@ func TestMetadataCloneOwnsKeys(t *testing.T) {
 	assert.Equal(t, "key", key)
 	assert.Equal(t, []uint32{0}, clone.IdFor("key"))
 	assert.Equal(t, clonedBytes, clone.Bytes())
+
+	copy(metadata.Bytes()[keyOffset:], "key")
+	clone = metadata.Clone()
+	copy(clone.Bytes()[keyOffset:], "bad")
+	key, err = clone.KeyAt(0)
+	require.NoError(t, err)
+	assert.Equal(t, "bad", key)
+	assert.Equal(t, []uint32{0}, clone.IdFor("bad"))
+	key, err = metadata.KeyAt(0)
+	require.NoError(t, err)
+	assert.Equal(t, "key", key)
 }
 
 func loadVariant(t *testing.T, test string) variant.Value {
