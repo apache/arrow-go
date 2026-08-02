@@ -83,6 +83,15 @@ func TestPageIndexReaderWillNeedRejectsInvalidRowGroups(t *testing.T) {
 	}
 }
 
+func TestPageIndexReaderWillNeedDoesNotPartiallyMutateOnError(t *testing.T) {
+	meta := constructFakeMetadata([]PageIndexRanges{{-1, -1, -1, -1}})
+	reader := &PageIndexReader{FileMetadata: meta}
+
+	err := reader.WillNeed([]int32{0, 1}, nil, PageIndexSelection{})
+	require.ErrorIs(t, err, arrow.ErrIndex)
+	require.Empty(t, reader.idxReadRanges)
+}
+
 // validates that determinePagteIndexRangesInRowGroup selects the expected
 // file offsets and sizes or returns false when the row group doesn't have
 // a page index
