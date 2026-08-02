@@ -17,6 +17,7 @@
 package array_test
 
 import (
+	"math"
 	"reflect"
 	"testing"
 
@@ -161,6 +162,18 @@ func TestStructValidateFullRejectsShortField(t *testing.T) {
 	assert.Zero(t, sliced.Field(0).Len())
 	assert.ErrorIs(t, sliced.Validate(), arrow.ErrInvalid)
 	assert.ErrorIs(t, sliced.ValidateFull(), arrow.ErrInvalid)
+}
+
+func TestStructValidateRejectsOffsetLengthOverflow(t *testing.T) {
+	childData := array.NewData(arrow.PrimitiveTypes.Int32, 0, []*memory.Buffer{nil, nil}, nil, 0, 0)
+	defer childData.Release()
+	data := array.NewData(arrow.StructOf(arrow.Field{Name: "value", Type: arrow.PrimitiveTypes.Int32}),
+		math.MaxInt, nil, []arrow.ArrayData{childData}, 0, 1)
+	defer data.Release()
+
+	arr := array.NewStructData(data)
+	defer arr.Release()
+	require.ErrorIs(t, arr.Validate(), arrow.ErrInvalid)
 }
 
 func TestStructStringRoundTrip(t *testing.T) {

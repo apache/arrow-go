@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -144,6 +145,9 @@ func (a *Struct) NumField() int           { return len(a.fields) }
 func (a *Struct) Field(i int) arrow.Array { return a.fields[i] }
 
 func (a *Struct) Validate() error {
+	if a.data.offset < 0 || a.data.length < 0 || int64(a.data.offset) > math.MaxInt64-int64(a.data.length) {
+		return fmt.Errorf("%w: arrow/array: struct offset and length overflow", arrow.ErrInvalid)
+	}
 	expectedLength := a.data.offset + a.data.length
 	for i, child := range a.data.childData {
 		if child.Len() < expectedLength {
@@ -240,7 +244,17 @@ func (a *Struct) setData(data *Data) {
 			if start > childLen {
 				start = childLen
 			}
-			end := max(int64(data.offset)+int64(data.length), start)
+			var end int64
+			offset, length := int64(data.offset), int64(data.length)
+			switch {
+			case length > 0 && offset > math.MaxInt64-length:
+				end = math.MaxInt64
+			case length < 0 && offset < math.MinInt64-length:
+				end = math.MinInt64
+			default:
+				end = offset + length
+			}
+			end = max(end, start)
 			if end > childLen {
 				end = childLen
 			}
