@@ -29,19 +29,35 @@ import (
 )
 
 type shortPageSink struct {
-	data []byte
-	pos  int64
+	data        []byte
+	pos         int64
+	headerShort bool
 }
 
 func (s *shortPageSink) Tell() int64 { return s.pos }
 
 func (s *shortPageSink) Write(p []byte) (int, error) {
 	n := len(p)
-	if bytes.Equal(p, s.data) {
+	if s.headerShort || bytes.Equal(p, s.data) {
 		n--
 	}
 	s.pos += int64(n)
 	return n, nil
+}
+
+func TestSerializedPageWriterRejectsShortHeaderWrites(t *testing.T) {
+	sink := &shortPageSink{headerShort: true, pos: 17}
+	writer, err := NewPageWriter(sink, compress.Codecs.Uncompressed,
+		compress.DefaultCompressionLevel, nil, -1, -1, memory.DefaultAllocator, false, nil, nil)
+	require.NoError(t, err)
+
+	buf := memory.NewBufferBytes([]byte("page body"))
+	defer buf.Release()
+	_, err = writer.WriteDictionaryPage(NewDictionaryPage(buf, 1, parquet.Encodings.Plain))
+	require.ErrorIs(t, err, io.ErrShortWrite)
+	serialized := writer.(*serializedPageWriter)
+	require.Zero(t, serialized.NumValues())
+	require.Zero(t, serialized.DictionaryPageOffset())
 }
 
 func TestSerializedPageWriterRejectsShortWrites(t *testing.T) {

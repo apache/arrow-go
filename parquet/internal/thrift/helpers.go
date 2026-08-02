@@ -76,12 +76,23 @@ func (t *Serializer) Serialize(msg thrift.TStruct, w io.Writer, enc encryption.E
 	}
 
 	if enc == nil {
-		return w.Write(b)
+		n, err := w.Write(b)
+		if err != nil {
+			return n, err
+		}
+		if n != len(b) {
+			return n, io.ErrShortWrite
+		}
+		return n, nil
 	}
 
 	var cipherBuf bytes.Buffer
 	cipherBuf.Grow(enc.CiphertextSizeDelta() + len(b))
 	enc.Encrypt(&cipherBuf, b)
+	expected := cipherBuf.Len()
 	n, err := cipherBuf.WriteTo(w)
+	if err == nil && int(n) != expected {
+		err = io.ErrShortWrite
+	}
 	return int(n), err
 }
