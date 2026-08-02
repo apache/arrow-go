@@ -136,13 +136,7 @@ func NewOCFReader(r io.Reader, opts ...Option) (*OCFReader, error) {
 		rr.decodeOCFToChan()
 	}()
 
-	rr.bld = array.NewRecordBuilder(rr.mem, rr.schema)
-	rr.bldMap = newFieldPos()
-	rr.ldr = newDataLoader()
-	for idx, fb := range rr.bld.Fields() {
-		mapFieldBuilders(fb, rr.schema.Field(idx), rr.bldMap)
-	}
-	rr.ldr.drawTree(rr.bldMap)
+	rr.initBuilder()
 	rr.readWG.Add(1)
 	go func() {
 		defer rr.readWG.Done()
@@ -180,6 +174,10 @@ func (rr *OCFReader) Reuse(r io.Reader, opts ...Option) error {
 	for _, opt := range opts {
 		opt(rr)
 	}
+	if rr.bld != nil {
+		rr.bld.Release()
+	}
+	rr.initBuilder()
 
 	rr.maxOCF = 0
 	rr.maxRec = 0
@@ -201,6 +199,19 @@ func (rr *OCFReader) Reuse(r io.Reader, opts ...Option) error {
 		rr.recordFactory()
 	}()
 	return nil
+}
+
+func (rr *OCFReader) initBuilder() {
+	if rr.mem == nil {
+		rr.mem = memory.DefaultAllocator
+	}
+	rr.bld = array.NewRecordBuilder(rr.mem, rr.schema)
+	rr.bldMap = newFieldPos()
+	rr.ldr = newDataLoader()
+	for idx, fb := range rr.bld.Fields() {
+		mapFieldBuilders(fb, rr.schema.Field(idx), rr.bldMap)
+	}
+	rr.ldr.drawTree(rr.bldMap)
 }
 
 // Err returns the last error encountered during the iteration over the

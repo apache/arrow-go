@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/twmb/avro"
 	"github.com/twmb/avro/ocf"
+	"github.com/stretchr/testify/require"
 )
 
 func TestReader(t *testing.T) {
@@ -349,6 +350,36 @@ func TestOCFReaderReuseWaitsForPreviousWorkers(t *testing.T) {
 	for i, value := range values {
 		assert.Equal(t, int64(100+i), value)
 	}
+
+	reader.Release()
+	mem.AssertSize(t, 0)
+}
+
+func TestOCFReaderReuseDiscardsPartialBuilderState(t *testing.T) {
+	const schema = `{"type":"record","name":"rec","fields":[{"name":"value","type":"long"}]}`
+	encode := func(value int64) []byte {
+		var buf bytes.Buffer
+		enc, err := ocf.NewEncoder(schema, &buf)
+		require.NoError(t, err)
+		require.NoError(t, enc.Encode(map[string]any{"value": value}))
+		require.NoError(t, enc.Close())
+		return buf.Bytes()
+	}
+
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	reader, err := NewOCFReader(bytes.NewReader(encode(0)), WithAllocator(mem))
+	require.NoError(t, err)
+	reader.Close()
+
+	reader.bld.Field(0).(*array.Int64Builder).Append(999)
+
+	require.NoError(t, reader.Reuse(bytes.NewReader(encode(100))))
+	require.True(t, reader.Next())
+	record := reader.RecordBatch()
+	require.EqualValues(t, 1, record.NumRows())
+	require.EqualValues(t, 100, record.Column(0).(*array.Int64).Value(0))
+	require.False(t, reader.Next())
+	require.NoError(t, reader.Err())
 
 	reader.Release()
 	mem.AssertSize(t, 0)
