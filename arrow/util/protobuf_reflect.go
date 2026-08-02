@@ -665,6 +665,9 @@ func (msg ProtobufMessageReflection) Record(mem memory.Allocator) arrow.RecordBa
 	}
 
 	schema := msg.Schema()
+	if schema.NumFields() == 0 {
+		return array.NewRecordBatch(schema, nil, 1)
+	}
 
 	recordBuilder := array.NewRecordBuilder(mem, schema)
 	defer recordBuilder.Release()

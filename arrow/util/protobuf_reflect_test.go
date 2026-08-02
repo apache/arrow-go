@@ -484,6 +484,17 @@ func TestExcludedNested(t *testing.T) {
 	CheckRecord(t, pmr, jsonStr)
 }
 
+func TestRecordReturnsOneRowForZeroFieldSchema(t *testing.T) {
+	excludeAll := func(*ProtobufFieldReflection) bool { return true }
+	pmr := NewProtobufMessageReflection(&util_message.AllTheTypesNoAny{}, WithExclusionPolicy(excludeAll))
+
+	rec := pmr.Record(memory.DefaultAllocator)
+	require.NotNil(t, rec)
+	defer rec.Release()
+	require.EqualValues(t, 1, rec.NumRows())
+	require.EqualValues(t, 0, rec.NumCols())
+}
+
 type testProtobufReflection struct {
 	ProtobufFieldReflection
 }
