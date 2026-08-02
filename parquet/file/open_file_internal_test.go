@@ -19,6 +19,7 @@ package file
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,12 +27,23 @@ import (
 
 type closeTrackingReader struct {
 	*bytes.Reader
-	closed bool
+	closed   bool
+	closeErr error
 }
 
 func (r *closeTrackingReader) Close() error {
 	r.closed = true
-	return nil
+	return r.closeErr
+}
+
+func TestOpenParquetFileJoinsSourceCloseErrors(t *testing.T) {
+	closeErr := errors.New("close failed")
+	source := &closeTrackingReader{Reader: bytes.NewReader([]byte("invalid")), closeErr: closeErr}
+	rdr, err := newParquetReaderFromFile(source)
+	require.Error(t, err)
+	require.Nil(t, rdr)
+	require.ErrorIs(t, err, closeErr)
+	require.True(t, source.closed)
 }
 
 func TestOpenParquetFileClosesSourceOnError(t *testing.T) {

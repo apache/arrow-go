@@ -103,7 +103,10 @@ func OpenParquetFile(filename string, memoryMap bool, opts ...ReadOption) (*Read
 func newParquetReaderFromFile(source readerAtSeekerCloser, opts ...ReadOption) (*Reader, error) {
 	rdr, err := NewParquetReader(source, opts...)
 	if err != nil {
-		return nil, errors.Join(err, source.Close())
+		if closeErr := source.Close(); closeErr != nil {
+			return nil, errors.Join(err, closeErr)
+		}
+		return nil, err
 	}
 	return rdr, nil
 }
