@@ -43,6 +43,29 @@ type failingPayloadWriter struct {
 	closeCall int
 }
 
+type shortWriteWriter struct{}
+
+func (shortWriteWriter) Write(p []byte) (int, error) {
+	return len(p) - 1, nil
+}
+
+func TestPayloadWriteRejectsShortWrites(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewRecordBuilder(mem, arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int8}}, nil))
+	bldr.Field(0).(*array.Int8Builder).Append(1)
+	rec := bldr.NewRecordBatch()
+	defer rec.Release()
+
+	payload, err := GetRecordBatchPayload(rec, WithAllocator(mem))
+	require.NoError(t, err)
+	defer payload.Release()
+
+	_, err = payload.WritePayload(shortWriteWriter{})
+	require.ErrorIs(t, err, io.ErrShortWrite)
+}
+
 func (w *failingPayloadWriter) Start() error { return nil }
 func (w *failingPayloadWriter) WritePayload(Payload) error {
 	w.payloads++

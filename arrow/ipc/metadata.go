@@ -1286,7 +1286,7 @@ func writeMessage(msg *memory.Buffer, alignment int32, w io.Writer) (int, error)
 
 	// write continuation indicator, to address 8-byte alignment requirement from FlatBuffers.
 	binary.LittleEndian.PutUint32(tmp, kIPCContToken)
-	_, err = w.Write(tmp)
+	_, err = writeFull(w, tmp)
 	if err != nil {
 		return 0, fmt.Errorf("arrow/ipc: could not write continuation bit indicator: %w", err)
 	}
@@ -1297,13 +1297,13 @@ func writeMessage(msg *memory.Buffer, alignment int32, w io.Writer) (int, error)
 	// write the flatbuffer size prefix, including padding
 	sizeFB := paddedMsgLen - 8
 	binary.LittleEndian.PutUint32(tmp, uint32(sizeFB))
-	_, err = w.Write(tmp)
+	_, err = writeFull(w, tmp)
 	if err != nil {
 		return n, fmt.Errorf("arrow/ipc: could not write message flatbuffer size prefix: %w", err)
 	}
 
 	// write the flatbuffer
-	_, err = w.Write(msg.Bytes())
+	_, err = writeFull(w, msg.Bytes())
 	if err != nil {
 		return n, fmt.Errorf("arrow/ipc: could not write message flatbuffer: %w", err)
 	}
@@ -1311,7 +1311,7 @@ func writeMessage(msg *memory.Buffer, alignment int32, w io.Writer) (int, error)
 	// write any padding
 	padding := paddedMsgLen - int32(msg.Len()) - 8
 	if padding > 0 {
-		_, err = w.Write(paddingBytes[:padding])
+		_, err = writeFull(w, paddingBytes[:padding])
 		if err != nil {
 			return n, fmt.Errorf("arrow/ipc: could not write message padding bytes: %w", err)
 		}
