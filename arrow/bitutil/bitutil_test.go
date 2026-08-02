@@ -118,6 +118,32 @@ func TestSetBit(t *testing.T) {
 	assert.Equal(t, []byte{0xa1, 0xc2}, buf)
 }
 
+func TestSetBitSwap(t *testing.T) {
+	buf := make([]byte, 2)
+	buf[0] = 0xa1
+	buf[1] = 0xc2
+	exp := []bool{true, false, false, false, false, true, false, true, false, true, false, false, false, false, true, true}
+	var got []bool
+	for i := 0; i < 0x10; i++ {
+		got = append(got, bitutil.SetBitSwap(buf, i))
+	}
+	assert.Equal(t, exp, got)
+	assert.Equal(t, []byte{0xff, 0xff}, buf)
+}
+
+func TestClearBitSwap(t *testing.T) {
+	buf := make([]byte, 2)
+	buf[0] = 0xa1
+	buf[1] = 0xc2
+	exp := []bool{true, false, false, false, false, true, false, true, false, true, false, false, false, false, true, true}
+	var got []bool
+	for i := 0; i < 0x10; i++ {
+		got = append(got, bitutil.ClearBitSwap(buf, i))
+	}
+	assert.Equal(t, exp, got)
+	assert.Equal(t, []byte{0x00, 0x00}, buf)
+}
+
 func TestSetBitTo(t *testing.T) {
 	buf := make([]byte, 2)
 	for i, v := range []bool{true, false, false, false, false, true, false, true, false, true, false, false, false, false, true, true} {
