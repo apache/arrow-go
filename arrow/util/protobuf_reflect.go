@@ -677,7 +677,7 @@ func (msg ProtobufMessageReflection) RecordWithError(mem memory.Allocator) (arro
 
 	schema := msg.Schema()
 	if schema.NumFields() == 0 {
-		return array.NewRecordBatch(schema, nil, 1)
+		return array.NewRecordBatch(schema, nil, 1), nil
 	}
 
 	recordBuilder := array.NewRecordBuilder(mem, schema)
@@ -788,7 +788,11 @@ func (f ProtobufMessageFieldReflection) AppendValueOrNull(b array.Builder, mem m
 	switch b.Type().ID() {
 	case arrow.STRING:
 		if f.isEnum() {
-			b.(*array.StringBuilder).Append(string(fd.Enum().Values().ByNumber(pv.Enum()).Name()))
+			enumValue := fd.Enum().Values().ByNumber(pv.Enum())
+			if enumValue == nil {
+				return fmt.Errorf("enum value %d is not defined for %s", pv.Enum(), fd.Enum().FullName())
+			}
+			b.(*array.StringBuilder).Append(string(enumValue.Name()))
 		} else {
 			b.(*array.StringBuilder).Append(pv.String())
 		}
