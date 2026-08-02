@@ -1709,12 +1709,11 @@ func TestPreparedStatementSchema(t *testing.T) {
 	// Configure client
 	alloc := &recordingAllocator{Allocator: memory.DefaultAllocator}
 	cfg := driver.DriverConfig{
-		Timeout:   5 * time.Second,
-		Address:   server.Addr().String(),
-		Allocator: alloc,
+		Timeout: 5 * time.Second,
+		Address: server.Addr().String(),
 	}
 	connector := &driver.Connector{}
-	require.NoError(t, connector.Configure(&cfg))
+	require.NoError(t, connector.ConfigureWithAllocator(&cfg, alloc))
 	db := sql.OpenDB(connector)
 	defer db.Close()
 

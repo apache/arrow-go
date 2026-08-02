@@ -396,11 +396,21 @@ type Connector struct {
 
 // Configure the driver with the corresponding config
 func (c *Connector) Configure(config *DriverConfig) error {
+	return c.configure(config, nil)
+}
+
+// ConfigureWithAllocator configures the driver with a custom memory allocator.
+// DSN-based connections continue to use memory.DefaultAllocator.
+func (c *Connector) ConfigureWithAllocator(config *DriverConfig, allocator memory.Allocator) error {
+	return c.configure(config, allocator)
+}
+
+func (c *Connector) configure(config *DriverConfig, allocator memory.Allocator) error {
 	// Set the driver properties
 	c.addr = config.Address
 	c.timeout = config.Timeout
-	c.allocator = config.Allocator
-	if c.allocator == nil {
+	c.allocator = allocator
+	if allocator == nil {
 		c.allocator = memory.DefaultAllocator
 	}
 	c.options = []grpc.DialOption{}
