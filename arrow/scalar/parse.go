@@ -345,8 +345,8 @@ func fromListScalar(s ListScalar, v reflect.Value) error {
 			start := o
 			end := offsets[i+1]
 
-			metaKeys = make([]string, end-start)
-			metaValues = make([]string, end-start)
+			metaKeys = make([]string, 0, end-start)
+			metaValues = make([]string, 0, end-start)
 			for j := start; j < end; j++ {
 				metaKeys = append(metaKeys, keys.ValueString(int(j)))
 				metaValues = append(metaValues, values.ValueString(int(j)))
