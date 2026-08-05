@@ -802,12 +802,20 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 		return MakeArrayOfNull(sc.DataType(), length, mem), nil
 	}
 
-	createOffsets := func(valLength int32) *memory.Buffer {
+	createOffsets := func(valLength int64) *memory.Buffer {
 		buffer := memory.NewResizableBuffer(mem)
-		buffer.Resize(arrow.Int32Traits.BytesRequired(length + 1))
+		if sc.DataType().ID() == arrow.LARGE_BINARY || sc.DataType().ID() == arrow.LARGE_STRING {
+			buffer.Resize(arrow.Int64Traits.BytesRequired(length + 1))
+			out := arrow.Int64Traits.CastFromBytes(buffer.Bytes())
+			for i, offset := 0, int64(0); i < length+1; i, offset = i+1, offset+valLength {
+				out[i] = offset
+			}
+			return buffer
+		}
 
+		buffer.Resize(arrow.Int32Traits.BytesRequired(length + 1))
 		out := arrow.Int32Traits.CastFromBytes(buffer.Bytes())
-		for i, offset := 0, int32(0); i < length+1; i, offset = i+1, offset+valLength {
+		for i, offset := 0, int32(0); i < length+1; i, offset = i+1, offset+int32(valLength) {
 			out[i] = offset
 		}
 		return buffer
@@ -850,7 +858,7 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 		}
 
 		valuesBuf := createBuffer(s.Data())
-		offsetsBuf := createOffsets(int32(len(s.Data())))
+		offsetsBuf := createOffsets(int64(len(s.Data())))
 		data := array.NewData(sc.DataType(), length, []*memory.Buffer{nil, offsetsBuf, valuesBuf}, nil, 0, 0)
 		defer func() {
 			valuesBuf.Release()
@@ -882,7 +890,7 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 		}
 		defer valueArray.Release()
 
-		offsetsBuf := createOffsets(int32(s.Value.Len()))
+		offsetsBuf := createOffsets(int64(s.Value.Len()))
 		defer offsetsBuf.Release()
 		data := array.NewData(s.DataType(), length, []*memory.Buffer{nil, offsetsBuf}, []arrow.ArrayData{valueArray.Data()}, 0, 0)
 		defer data.Release()
@@ -937,7 +945,7 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 		}
 		defer valueArr.Release()
 
-		offsetsBuf := createOffsets(int32(structArr.Len()))
+		offsetsBuf := createOffsets(int64(structArr.Len()))
 		outStructArr := array.NewData(structArr.DataType(), keyArr.Len(), []*memory.Buffer{nil}, []arrow.ArrayData{keyArr.Data(), valueArr.Data()}, 0, 0)
 		data := array.NewData(s.DataType(), length, []*memory.Buffer{nil, offsetsBuf}, []arrow.ArrayData{outStructArr}, 0, 0)
 		defer func() {

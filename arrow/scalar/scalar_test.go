@@ -1186,6 +1186,61 @@ func TestMakeArrayFromScalar(t *testing.T) {
 	}
 }
 
+func TestMakeArrayFromScalarUsesCorrectBinaryOffsetWidth(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	buf := memory.NewBufferBytes([]byte("abc"))
+	defer buf.Release()
+
+	tests := []struct {
+		name    string
+		sc      scalar.Scalar
+		bytes   int
+		offsets []int64
+	}{
+		{name: "binary", sc: scalar.NewBinaryScalar(buf, arrow.BinaryTypes.Binary), bytes: 4, offsets: []int64{0, 3, 6, 9}},
+		{name: "string", sc: scalar.NewStringScalar("abc"), bytes: 4, offsets: []int64{0, 3, 6, 9}},
+		{name: "large binary", sc: scalar.NewLargeBinaryScalar(buf), bytes: 8, offsets: []int64{0, 3, 6, 9}},
+		{name: "large string", sc: scalar.NewLargeStringScalar("abc"), bytes: 8, offsets: []int64{0, 3, 6, 9}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if releasable, ok := tc.sc.(scalar.Releasable); ok {
+				defer releasable.Release()
+			}
+
+			arr, err := scalar.MakeArrayFromScalar(tc.sc, 3, mem)
+			require.NoError(t, err)
+			defer arr.Release()
+			require.NoError(t, array.ValidateFull(arr))
+			require.Len(t, arr.Data().Buffers()[1].Bytes(), 4*tc.bytes)
+
+			switch offsets := arr.(type) {
+			case *array.Binary:
+				assert.Equal(t, tc.offsets, slicesToInt64(offsets.ValueOffsets()))
+			case *array.String:
+				assert.Equal(t, tc.offsets, slicesToInt64(offsets.ValueOffsets()))
+			case *array.LargeBinary:
+				assert.Equal(t, tc.offsets, offsets.ValueOffsets())
+			case *array.LargeString:
+				assert.Equal(t, tc.offsets, offsets.ValueOffsets())
+			default:
+				t.Fatalf("unexpected array type %T", arr)
+			}
+		})
+	}
+}
+
+func slicesToInt64(values []int32) []int64 {
+	out := make([]int64, len(values))
+	for i, value := range values {
+		out[i] = int64(value)
+	}
+	return out
+}
+
 func TestMakeArrayFromScalarRejectsNegativeLength(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
