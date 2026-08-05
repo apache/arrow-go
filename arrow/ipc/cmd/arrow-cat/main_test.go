@@ -131,8 +131,8 @@ record 3...
   col[6] "timestamp_ms": [0 (null) (null) 3 4]
   col[7] "timestamp_us": [0 (null) (null) 3 4]
   col[8] "timestamp_ns": [0 (null) (null) 3 4]
-  col[9] "date32s": [-2 (null) (null) 1 2]
-  col[10] "date64s": [-2 (null) (null) 1 2]
+  col[9] "date32s": [1969-12-30 (null) (null) 1970-01-02 1970-01-03]
+  col[10] "date64s": [1970-01-01 (null) (null) 1970-01-01 1970-01-01]
 record 2...
   col[0] "float16s": [11 (null) (null) 14 15]
   col[1] "time32ms": [-12 (null) (null) 11 12]
@@ -143,8 +143,8 @@ record 2...
   col[6] "timestamp_ms": [10 (null) (null) 13 14]
   col[7] "timestamp_us": [10 (null) (null) 13 14]
   col[8] "timestamp_ns": [10 (null) (null) 13 14]
-  col[9] "date32s": [-12 (null) (null) 11 12]
-  col[10] "date64s": [-12 (null) (null) 11 12]
+  col[9] "date32s": [1969-12-20 (null) (null) 1970-01-12 1970-01-13]
+  col[10] "date64s": [1970-01-01 (null) (null) 1970-01-01 1970-01-01]
 record 3...
   col[0] "float16s": [21 (null) (null) 24 25]
   col[1] "time32ms": [-22 (null) (null) 21 22]
@@ -155,8 +155,8 @@ record 3...
   col[6] "timestamp_ms": [20 (null) (null) 23 24]
   col[7] "timestamp_us": [20 (null) (null) 23 24]
   col[8] "timestamp_ns": [20 (null) (null) 23 24]
-  col[9] "date32s": [-22 (null) (null) 21 22]
-  col[10] "date64s": [-22 (null) (null) 21 22]
+  col[9] "date32s": [1969-12-10 (null) (null) 1970-01-22 1970-01-23]
+  col[10] "date64s": [1970-01-01 (null) (null) 1970-01-01 1970-01-01]
 `,
 		},
 		{
@@ -448,8 +448,8 @@ record 3/3...
   col[6] "timestamp_ms": [0 (null) (null) 3 4]
   col[7] "timestamp_us": [0 (null) (null) 3 4]
   col[8] "timestamp_ns": [0 (null) (null) 3 4]
-  col[9] "date32s": [-2 (null) (null) 1 2]
-  col[10] "date64s": [-2 (null) (null) 1 2]
+  col[9] "date32s": [1969-12-30 (null) (null) 1970-01-02 1970-01-03]
+  col[10] "date64s": [1970-01-01 (null) (null) 1970-01-01 1970-01-01]
 record 2...
   col[0] "float16s": [11 (null) (null) 14 15]
   col[1] "time32ms": [-12 (null) (null) 11 12]
@@ -460,8 +460,8 @@ record 2...
   col[6] "timestamp_ms": [10 (null) (null) 13 14]
   col[7] "timestamp_us": [10 (null) (null) 13 14]
   col[8] "timestamp_ns": [10 (null) (null) 13 14]
-  col[9] "date32s": [-12 (null) (null) 11 12]
-  col[10] "date64s": [-12 (null) (null) 11 12]
+  col[9] "date32s": [1969-12-20 (null) (null) 1970-01-12 1970-01-13]
+  col[10] "date64s": [1970-01-01 (null) (null) 1970-01-01 1970-01-01]
 record 3...
   col[0] "float16s": [21 (null) (null) 24 25]
   col[1] "time32ms": [-22 (null) (null) 21 22]
@@ -472,8 +472,8 @@ record 3...
   col[6] "timestamp_ms": [20 (null) (null) 23 24]
   col[7] "timestamp_us": [20 (null) (null) 23 24]
   col[8] "timestamp_ns": [20 (null) (null) 23 24]
-  col[9] "date32s": [-22 (null) (null) 21 22]
-  col[10] "date64s": [-22 (null) (null) 21 22]
+  col[9] "date32s": [1969-12-10 (null) (null) 1970-01-22 1970-01-23]
+  col[10] "date64s": [1970-01-01 (null) (null) 1970-01-01 1970-01-01]
 `,
 		},
 		{
@@ -489,8 +489,8 @@ record 1/3...
   col[6] "timestamp_ms": [0 (null) (null) 3 4]
   col[7] "timestamp_us": [0 (null) (null) 3 4]
   col[8] "timestamp_ns": [0 (null) (null) 3 4]
-  col[9] "date32s": [-2 (null) (null) 1 2]
-  col[10] "date64s": [-2 (null) (null) 1 2]
+  col[9] "date32s": [1969-12-30 (null) (null) 1970-01-02 1970-01-03]
+  col[10] "date64s": [1970-01-01 (null) (null) 1970-01-01 1970-01-01]
 record 2/3...
   col[0] "float16s": [11 (null) (null) 14 15]
   col[1] "time32ms": [-12 (null) (null) 11 12]
@@ -501,8 +501,8 @@ record 2/3...
   col[6] "timestamp_ms": [10 (null) (null) 13 14]
   col[7] "timestamp_us": [10 (null) (null) 13 14]
   col[8] "timestamp_ns": [10 (null) (null) 13 14]
-  col[9] "date32s": [-12 (null) (null) 11 12]
-  col[10] "date64s": [-12 (null) (null) 11 12]
+  col[9] "date32s": [1969-12-20 (null) (null) 1970-01-12 1970-01-13]
+  col[10] "date64s": [1970-01-01 (null) (null) 1970-01-01 1970-01-01]
 record 3/3...
   col[0] "float16s": [21 (null) (null) 24 25]
   col[1] "time32ms": [-22 (null) (null) 21 22]
@@ -513,8 +513,8 @@ record 3/3...
   col[6] "timestamp_ms": [20 (null) (null) 23 24]
   col[7] "timestamp_us": [20 (null) (null) 23 24]
   col[8] "timestamp_ns": [20 (null) (null) 23 24]
-  col[9] "date32s": [-22 (null) (null) 21 22]
-  col[10] "date64s": [-22 (null) (null) 21 22]
+  col[9] "date32s": [1969-12-10 (null) (null) 1970-01-22 1970-01-23]
+  col[10] "date64s": [1970-01-01 (null) (null) 1970-01-01 1970-01-01]
 `,
 		},
 		{

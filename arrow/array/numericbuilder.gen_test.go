@@ -3012,7 +3012,7 @@ func TestNewDate32Builder(t *testing.T) {
 		t.Fatalf("could not type-assert to array.Date32")
 	}
 
-	if got, want := a.String(), `[1 2 (null) 4]`; got != want {
+	if got, want := a.String(), `[1970-01-02 1970-01-03 (null) 1970-01-05]`; got != want {
 		t.Fatalf("got=%q, want=%q", got, want)
 	}
 
@@ -3027,7 +3027,7 @@ func TestNewDate32Builder(t *testing.T) {
 		t.Fatalf("could not type-assert to array.Date32")
 	}
 
-	if got, want := v.String(), `[(null) 4]`; got != want {
+	if got, want := v.String(), `[(null) 1970-01-05]`; got != want {
 		t.Fatalf("got=%q, want=%q", got, want)
 	}
 
@@ -3258,7 +3258,7 @@ func TestNewDate64Builder(t *testing.T) {
 		t.Fatalf("could not type-assert to array.Date64")
 	}
 
-	if got, want := a.String(), `[1 2 (null) 4]`; got != want {
+	if got, want := a.String(), `[1970-01-01 1970-01-01 (null) 1970-01-01]`; got != want {
 		t.Fatalf("got=%q, want=%q", got, want)
 	}
 
@@ -3273,7 +3273,7 @@ func TestNewDate64Builder(t *testing.T) {
 		t.Fatalf("could not type-assert to array.Date64")
 	}
 
-	if got, want := v.String(), `[(null) 4]`; got != want {
+	if got, want := v.String(), `[(null) 1970-01-01]`; got != want {
 		t.Fatalf("got=%q, want=%q", got, want)
 	}
 
