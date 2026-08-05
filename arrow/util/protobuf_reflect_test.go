@@ -228,6 +228,7 @@ func CheckSchema(t *testing.T, pmr *ProtobufMessageReflection, want string) {
 
 func CheckRecord(t *testing.T, pmr *ProtobufMessageReflection, jsonStr string) {
 	rec := pmr.Record(nil)
+	defer rec.Release()
 	got, err := json.Marshal(rec)
 	assert.NoError(t, err)
 	assert.JSONEq(t, jsonStr, string(got), "got: %s\nwant: %s", got, jsonStr)
@@ -364,6 +365,14 @@ func TestRecordFromProtobuf(t *testing.T) {
 	CheckRecord(t, pmr, jsonStr)
 }
 
+func TestRecordReleasesConstructionBuffers(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	pmr := NewProtobufMessageReflection(AllTheTypesNoAnyFixture().msg, WithEnumHandler(EnumNumber))
+	rec := pmr.Record(mem)
+	rec.Release()
+	mem.AssertSize(t, 0)
+}
+
 func TestNullRecordFromProtobuf(t *testing.T) {
 	pmr := NewProtobufMessageReflection(&util_message.AllTheTypes{})
 	CheckRecord(t, pmr, `[{
@@ -484,6 +493,17 @@ func TestExcludedNested(t *testing.T) {
 	jsonStr = `[{ "simple_nested": null, "complex_nested": null }]`
 	CheckSchema(t, pmr, schema)
 	CheckRecord(t, pmr, jsonStr)
+}
+
+func TestRecordReturnsOneRowForZeroFieldSchema(t *testing.T) {
+	excludeAll := func(*ProtobufFieldReflection) bool { return true }
+	pmr := NewProtobufMessageReflection(&util_message.AllTheTypesNoAny{}, WithExclusionPolicy(excludeAll))
+
+	rec := pmr.Record(memory.DefaultAllocator)
+	require.NotNil(t, rec)
+	defer rec.Release()
+	require.EqualValues(t, 1, rec.NumRows())
+	require.EqualValues(t, 0, rec.NumCols())
 }
 
 type testProtobufReflection struct {

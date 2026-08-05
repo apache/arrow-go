@@ -659,24 +659,18 @@ func (msg ProtobufMessageReflection) Record(mem memory.Allocator) arrow.RecordBa
 	}
 
 	schema := msg.Schema()
+	if schema.NumFields() == 0 {
+		return array.NewRecordBatch(schema, nil, 1)
+	}
 
 	recordBuilder := array.NewRecordBuilder(mem, schema)
+	defer recordBuilder.Release()
 
-	var fieldNames []string
 	for i, f := range msg.fields {
 		f.AppendValueOrNull(recordBuilder.Field(i), mem)
-		fieldNames = append(fieldNames, f.name())
 	}
 
-	var arrays []arrow.Array
-	for _, bldr := range recordBuilder.Fields() {
-		a := bldr.NewArray()
-		arrays = append(arrays, a)
-	}
-
-	structArray, _ := array.NewStructArray(arrays, fieldNames)
-
-	return array.RecordFromStructArray(structArray, schema)
+	return recordBuilder.NewRecordBatch()
 }
 
 // NewProtobufMessageReflection initialises a ProtobufMessageReflection
