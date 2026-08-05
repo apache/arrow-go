@@ -415,6 +415,53 @@ func (b *RecordBuilder) NewRecord() arrow.Record {
 	return b.NewRecordBatch()
 }
 
+type builderCheckpoint struct {
+	builder  Builder
+	length   int
+	children []*builderCheckpoint
+}
+
+func newBuilderCheckpoint(builder Builder) *builderCheckpoint {
+	checkpoint := &builderCheckpoint{
+		builder: builder,
+		length:  builder.Len(),
+	}
+
+	switch builder := builder.(type) {
+	case *ListBuilder:
+		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.values))
+	case *LargeListBuilder:
+		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.values))
+	case *FixedSizeListBuilder:
+		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.values))
+	case *MapBuilder:
+		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.listBuilder))
+	case *StructBuilder:
+		for _, field := range builder.fields {
+			checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(field))
+		}
+	case *RunEndEncodedBuilder:
+		checkpoint.children = append(checkpoint.children,
+			newBuilderCheckpoint(builder.runEnds),
+			newBuilderCheckpoint(builder.values),
+		)
+	}
+
+	return checkpoint
+}
+
+func (checkpoint *builderCheckpoint) restore() {
+	for _, child := range checkpoint.children {
+		child.restore()
+	}
+
+	if builder, ok := checkpoint.builder.(*RunEndEncodedBuilder); ok {
+		builder.length = checkpoint.length
+		return
+	}
+	checkpoint.builder.Resize(checkpoint.length)
+}
+
 // UnmarshalOne reads one row (a JSON object) from the supplied decoder and
 // appends a value to each field in the RecordBuilder. Missing fields are
 // appended as nulls and unrecognized keys are silently ignored.
@@ -423,7 +470,19 @@ func (b *RecordBuilder) NewRecord() arrow.Record {
 // json.Decoder, so options such as UseNumber set by the caller are honored
 // for nested field decoding. This is critical for preserving large integer
 // values (>2^53) that cannot be represented exactly as float64.
-func (b *RecordBuilder) UnmarshalOne(dec *json.Decoder) error {
+func (b *RecordBuilder) UnmarshalOne(dec *json.Decoder) (err error) {
+	checkpoints := make([]*builderCheckpoint, len(b.fields))
+	for i, field := range b.fields {
+		checkpoints[i] = newBuilderCheckpoint(field)
+	}
+	defer func() {
+		if err != nil {
+			for _, checkpoint := range checkpoints {
+				checkpoint.restore()
+			}
+		}
+	}()
+
 	// should start with a '{'
 	t, err := dec.Token()
 	if err != nil {

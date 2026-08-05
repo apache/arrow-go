@@ -532,6 +532,34 @@ func TestRecordBuilder(t *testing.T) {
 	}
 }
 
+func TestRecordBuilderRollsBackRowsAfterDecodeError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "b", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	b := array.NewRecordBuilder(mem, schema)
+	defer b.Release()
+
+	err := b.UnmarshalJSON([]byte("{\"a\":1,\"b\":\"invalid\"}"))
+	if err == nil {
+		t.Fatal("expected a decode error")
+	}
+	assert.Equal(t, 0, b.Field(0).Len())
+	assert.Equal(t, 0, b.Field(1).Len())
+
+	err = b.UnmarshalJSON([]byte("{\"a\":2,\"b\":3}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := b.NewRecordBatch()
+	defer rec.Release()
+	assert.Equal(t, int64(1), rec.NumRows())
+
+}
+
 func TestRecordBuilderResize(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
