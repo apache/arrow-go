@@ -75,6 +75,38 @@ func (blk fileBlock) Offset() int64 { return blk.offset }
 func (blk fileBlock) Meta() int32   { return blk.meta }
 func (blk fileBlock) Body() int64   { return blk.body }
 
+func validateFileBlockMetadata(buf []byte, meta int32) (int, error) {
+	if len(buf) < 4 {
+		return 0, fmt.Errorf("arrow/ipc: file block metadata is too short: %d", len(buf))
+	}
+
+	var (
+		prefix int
+		length uint32
+	)
+	switch binary.LittleEndian.Uint32(buf) {
+	case 0:
+		return 0, errors.New("arrow/ipc: unexpected end-of-stream marker in file block")
+	case kIPCContToken:
+		prefix = 8
+		if len(buf) < prefix {
+			return 0, fmt.Errorf("arrow/ipc: file block metadata is too short for prefix length %d", prefix)
+		}
+		length = binary.LittleEndian.Uint32(buf[4:])
+	default:
+		prefix = 4
+		length = binary.LittleEndian.Uint32(buf)
+	}
+
+	if int(meta)-prefix < 4 {
+		return 0, fmt.Errorf("arrow/ipc: invalid file block metadata length %d for prefix length %d", meta, prefix)
+	}
+	if int64(length) != int64(meta)-int64(prefix) {
+		return 0, fmt.Errorf("arrow/ipc: file block metadata length prefix %d does not match footer length %d", length, int64(meta)-int64(prefix))
+	}
+	return prefix, nil
+}
+
 func fileBlocksToFB(b *flatbuffers.Builder, blocks []dataBlock, start startVecFunc) flatbuffers.UOffsetT {
 	start(b, len(blocks))
 	for i := len(blocks) - 1; i >= 0; i-- {
@@ -104,18 +136,9 @@ func (blk fileBlock) NewMessage() (*Message, error) {
 		return nil, fmt.Errorf("arrow/ipc: could not read message metadata: %w", err)
 	}
 
-	prefix := 0
-	switch binary.LittleEndian.Uint32(buf) {
-	case 0:
-	case kIPCContToken:
-		prefix = 8
-	default:
-		// ARROW-6314: backwards compatibility for reading old IPC
-		// messages produced prior to version 0.15.0
-		prefix = 4
-	}
-	if int(blk.meta)-prefix < 4 {
-		return nil, fmt.Errorf("arrow/ipc: invalid file block metadata length %d for prefix length %d", blk.meta, prefix)
+	prefix, err := validateFileBlockMetadata(buf, blk.meta)
+	if err != nil {
+		return nil, err
 	}
 
 	// drop buf-size already known from blk.Meta
@@ -131,7 +154,13 @@ func (blk fileBlock) NewMessage() (*Message, error) {
 		return nil, fmt.Errorf("arrow/ipc: could not read message body: %w", err)
 	}
 
-	return NewMessage(meta, body), nil
+	msg := NewMessage(meta, body)
+	messageBodyLen := msg.BodyLen()
+	if messageBodyLen != blk.body {
+		msg.Release()
+		return nil, fmt.Errorf("arrow/ipc: file block body length %d does not match message body length %d", blk.body, messageBodyLen)
+	}
+	return msg, nil
 }
 
 func (blk fileBlock) section() io.Reader {
