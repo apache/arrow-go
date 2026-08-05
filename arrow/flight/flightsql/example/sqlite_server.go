@@ -44,6 +44,7 @@ import (
 	"math/rand"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -58,6 +59,8 @@ import (
 	"google.golang.org/grpc/status"
 	_ "modernc.org/sqlite"
 )
+
+var dbSequence atomic.Uint64
 
 func genRandomString() []byte {
 	const length = 16
@@ -146,7 +149,8 @@ func prepareQueryForGetKeys(filter string) string {
 }
 
 func CreateDB() (*sql.DB, error) {
-	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
+	dsn := fmt.Sprintf("file:arrow-go-flightsql-%d?mode=memory&cache=shared", dbSequence.Add(1))
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
