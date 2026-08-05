@@ -134,6 +134,17 @@ func ToScalar(val interface{}, mem memory.Allocator) (Scalar, error) {
 	case reflect.Struct:
 		scalars := make([]Scalar, 0, v.Type().NumField())
 		fields := make([]string, 0, v.Type().NumField())
+		success := false
+		defer func() {
+			if success {
+				return
+			}
+			for _, child := range scalars {
+				if releasable, ok := child.(Releasable); ok {
+					releasable.Release()
+				}
+			}
+		}()
 		for i := 0; i < v.Type().NumField(); i++ {
 			fld := v.Type().Field(i)
 			tag := fld.Tag.Get("compute")
@@ -156,7 +167,12 @@ func ToScalar(val interface{}, mem memory.Allocator) (Scalar, error) {
 			fields = append(fields, "_type_name")
 		}
 
-		return NewStructScalarWithNames(scalars, fields)
+		out, err := NewStructScalarWithNames(scalars, fields)
+		if err != nil {
+			return nil, err
+		}
+		success = true
+		return out, nil
 	case reflect.Slice:
 		return createListScalar(v, mem)
 	default:
