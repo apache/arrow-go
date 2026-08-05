@@ -1220,6 +1220,13 @@ type OptionValTest struct {
 
 func (OptionValTest) TypeName() string { return "OptionValTest" }
 
+type typedNilFromScalar struct{}
+
+func (s *typedNilFromScalar) FromStructScalar(*scalar.Struct) error {
+	_ = *s
+	return nil
+}
+
 func TestToScalar(t *testing.T) {
 	ot := &OptionValTest{ToType: arrow.BinaryTypes.String, Allow: true}
 	sc, err := scalar.ToScalar(ot, memory.DefaultAllocator)
@@ -1285,6 +1292,8 @@ func TestFromScalarRejectsInvalidTargets(t *testing.T) {
 	assertErrorWithoutPanic(nil)
 	var typedNil *OptionValTest
 	assertErrorWithoutPanic(typedNil)
+	var typedNilCustom *typedNilFromScalar
+	assertErrorWithoutPanic(typedNilCustom)
 	value := 0
 	assertErrorWithoutPanic(&value)
 	values := []int{}
