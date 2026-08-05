@@ -46,7 +46,7 @@ func parseTimestamp(val string, dt *arrow.TimestampType) (arrow.Timestamp, error
 		return arrow.TimestampFromString(val, dt.Unit)
 	}
 
-	loc, err := time.LoadLocation(dt.TimeZone)
+	loc, err := dt.GetZone()
 	if err != nil {
 		return 0, err
 	}
