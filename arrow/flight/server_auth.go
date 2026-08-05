@@ -160,7 +160,7 @@ func createServerBearerTokenUnaryInterceptor(validator BasicAuthValidator) grpc.
 			}
 		}
 
-		if scheme != bearerTokenPrefix || credential == "" {
+		if !strings.EqualFold(scheme, bearerTokenPrefix) || credential == "" {
 			return nil, status.Error(codes.Unauthenticated, "must authenticate first")
 		}
 
@@ -191,7 +191,7 @@ func createServerBearerTokenStreamInterceptor(validator BasicAuthValidator) grpc
 		}
 
 		if strings.HasSuffix(info.FullMethod, "/Handshake") {
-			if scheme == basicAuthPrefix {
+			if strings.EqualFold(scheme, basicAuthPrefix) {
 				val, err := base64.RawStdEncoding.DecodeString(credential)
 				if err != nil {
 					val, err = base64.StdEncoding.DecodeString(credential)
@@ -217,7 +217,7 @@ func createServerBearerTokenStreamInterceptor(validator BasicAuthValidator) grpc
 			return status.Errorf(codes.Unauthenticated, "only Basic Auth implemented")
 		}
 
-		if scheme == bearerTokenPrefix {
+		if strings.EqualFold(scheme, bearerTokenPrefix) {
 			identity, err := validator.IsValid(credential)
 			if err != nil {
 				return err
