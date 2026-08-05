@@ -459,6 +459,19 @@ func TestTimestampScalarsMakeScalar(t *testing.T) {
 	assertParseScalar(t, typ4, epochPlus1s, scalar.NewTimestampScalar(arrow.Timestamp(1000*1000*1000), typ4))
 }
 
+func TestTimestampScalarsMakeScalarUsesTimezone(t *testing.T) {
+	typ := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "Europe/Berlin"}
+	value := "1970-01-01 01:00:00"
+
+	fromParam, err := scalar.MakeScalarParam(value, typ)
+	require.NoError(t, err)
+	fromParse, err := scalar.ParseScalar(typ, value)
+	require.NoError(t, err)
+
+	assertScalarsEqual(t, fromParam, fromParse)
+	assert.Equal(t, arrow.Timestamp(3600), fromParse.(*scalar.Timestamp).Value)
+}
+
 func TestTimestampScalarsCasting(t *testing.T) {
 	convert := func(in, out arrow.TimeUnit, val arrow.Timestamp) arrow.Timestamp {
 		s, err := scalar.NewTimestampScalar(val, &arrow.TimestampType{Unit: in}).CastTo(&arrow.TimestampType{Unit: out})
