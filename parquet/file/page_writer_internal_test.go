@@ -42,6 +42,9 @@ func (s *shortPageSink) Write(p []byte) (int, error) {
 		n--
 	}
 	s.pos += int64(n)
+	if n != len(p) {
+		return n, io.ErrShortWrite
+	}
 	return n, nil
 }
 
@@ -64,17 +67,20 @@ func TestSerializedPageWriterRejectsShortWrites(t *testing.T) {
 	data := []byte("page body")
 
 	tests := []struct {
-		name  string
-		write func(PageWriter, *memory.Buffer) (int64, error)
+		name        string
+		wantWritten int64
+		write       func(PageWriter, *memory.Buffer) (int64, error)
 	}{
 		{
-			name: "dictionary page",
+			name:        "dictionary page",
+			wantWritten: 0,
 			write: func(writer PageWriter, data *memory.Buffer) (int64, error) {
 				return writer.WriteDictionaryPage(NewDictionaryPage(data, 1, parquet.Encodings.Plain))
 			},
 		},
 		{
-			name: "data page",
+			name:        "data page",
+			wantWritten: int64(len(data) - 1),
 			write: func(writer PageWriter, data *memory.Buffer) (int64, error) {
 				return writer.WriteDataPage(NewDataPageV1(data, 1, parquet.Encodings.Plain,
 					parquet.Encodings.RLE, parquet.Encodings.RLE, int32(data.Len())))
@@ -93,7 +99,7 @@ func TestSerializedPageWriterRejectsShortWrites(t *testing.T) {
 			defer buf.Release()
 			written, err := tt.write(writer, buf)
 			require.True(t, errors.Is(err, io.ErrShortWrite))
-			require.EqualValues(t, len(data)-1, written)
+			require.Equal(t, tt.wantWritten, written)
 			serialized := writer.(*serializedPageWriter)
 			require.Zero(t, serialized.NumValues())
 			require.Zero(t, serialized.DictionaryPageOffset())
