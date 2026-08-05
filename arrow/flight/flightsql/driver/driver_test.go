@@ -28,6 +28,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -42,6 +43,21 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/flight/flightsql/example"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
+
+type recordingAllocator struct {
+	memory.Allocator
+	allocated atomic.Bool
+}
+
+func (a *recordingAllocator) Allocate(size int) []byte {
+	a.allocated.Store(true)
+	return a.Allocator.Allocate(size)
+}
+
+func (a *recordingAllocator) Reallocate(size int, b []byte) []byte {
+	a.allocated.Store(true)
+	return a.Allocator.Reallocate(size, b)
+}
 
 const defaultTableName = "drivertest"
 
@@ -1691,12 +1707,14 @@ func TestPreparedStatementSchema(t *testing.T) {
 	defer server.Shutdown()
 
 	// Configure client
+	alloc := &recordingAllocator{Allocator: memory.DefaultAllocator}
 	cfg := driver.DriverConfig{
 		Timeout: 5 * time.Second,
 		Address: server.Addr().String(),
 	}
-	db, err := sql.Open("flightsql", cfg.DSN())
-	require.NoError(t, err)
+	connector := &driver.Connector{}
+	require.NoError(t, connector.ConfigureWithAllocator(&cfg, alloc))
+	db := sql.OpenDB(connector)
 	defer db.Close()
 
 	// Do query
@@ -1713,6 +1731,7 @@ func TestPreparedStatementSchema(t *testing.T) {
 	rows, err := stmt.Query("master")
 	require.NoError(t, err)
 	require.NotNil(t, rows)
+	require.True(t, alloc.allocated.Load())
 }
 
 func TestPreparedStatementNoSchema(t *testing.T) {
