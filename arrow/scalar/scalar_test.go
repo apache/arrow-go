@@ -1268,6 +1268,35 @@ func TestToScalar(t *testing.T) {
 	assert.Equal(t, expected, sc.String())
 }
 
+func TestFromScalarRejectsInvalidTargets(t *testing.T) {
+	input, err := scalar.ToScalar(&OptionValTest{ToType: arrow.BinaryTypes.String, Allow: true}, memory.DefaultAllocator)
+	require.NoError(t, err)
+	structScalar := input.(*scalar.Struct)
+	defer structScalar.Release()
+
+	assertErrorWithoutPanic := func(target interface{}) {
+		var got error
+		assert.NotPanics(t, func() {
+			got = scalar.FromScalar(structScalar, target)
+		})
+		assert.Error(t, got)
+	}
+
+	assertErrorWithoutPanic(nil)
+	var typedNil *OptionValTest
+	assertErrorWithoutPanic(typedNil)
+	value := 0
+	assertErrorWithoutPanic(&value)
+	values := []int{}
+	assertErrorWithoutPanic(&values)
+	assertErrorWithoutPanic(OptionValTest{})
+
+	var output OptionValTest
+	require.NoError(t, scalar.FromScalar(structScalar, &output))
+	assert.Equal(t, arrow.BinaryTypes.String, output.ToType)
+	assert.True(t, output.Allow)
+}
+
 var dictIndexTypes = []arrow.DataType{
 	arrow.PrimitiveTypes.Int8,
 	arrow.PrimitiveTypes.Uint8,
