@@ -157,8 +157,26 @@ func decodeCMetadata(md *C.char) arrow.Metadata {
 
 // convert a C.ArrowSchema to an arrow.Field to maintain metadata with the schema
 func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
+	if schema == nil {
+		return ret, fmt.Errorf("%w: nil ArrowSchema", arrow.ErrInvalid)
+	}
 	// always release, even on error
 	defer C.ArrowSchemaRelease(schema)
+	if schema.format == nil {
+		return ret, fmt.Errorf("%w: ArrowSchema format is nil", arrow.ErrInvalid)
+	}
+	if schema.n_children < 0 {
+		return ret, fmt.Errorf("%w: ArrowSchema n_children cannot be negative: %d", arrow.ErrInvalid, schema.n_children)
+	}
+	if int64(schema.n_children) > maxIntValue() {
+		return ret, fmt.Errorf("%w: ArrowSchema n_children is too large: %d", arrow.ErrInvalid, schema.n_children)
+	}
+	if _, err := checkedMul(int64(schema.n_children), int64(unsafe.Sizeof(uintptr(0)))); err != nil {
+		return ret, fmt.Errorf("%w: ArrowSchema children pointer array is too large", arrow.ErrInvalid)
+	}
+	if schema.n_children > 0 && schema.children == nil {
+		return ret, fmt.Errorf("%w: ArrowSchema children is nil with n_children %d", arrow.ErrInvalid, schema.n_children)
+	}
 
 	var childFields []arrow.Field
 	if schema.n_children > 0 {
@@ -181,12 +199,18 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 
 	// copies the c-string here, but it's very small
 	f := C.GoString(schema.format)
+	if f == "" {
+		return ret, fmt.Errorf("%w: ArrowSchema format is empty", arrow.ErrInvalid)
+	}
 	// handle our non-parameterized simple types.
 	dt, ok := formatToSimpleType[f]
 	if ok {
 		ret.Type = dt
 
 		if schema.dictionary != nil {
+			if !arrow.IsInteger(ret.Type.ID()) {
+				return ret, fmt.Errorf("%w: dictionary index type must be an integer", arrow.ErrInvalid)
+			}
 			valueField, err := importSchema(schema.dictionary)
 			if err != nil {
 				return ret, err
@@ -215,7 +239,10 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 	case "w": // fixed size binary is "w:##" where ## is the byteWidth
 		byteWidth, err := strconv.Atoi(val)
 		if err != nil {
-			return ret, err
+			return ret, fmt.Errorf("%w: invalid fixed-size binary format %q: %v", arrow.ErrInvalid, f, err)
+		}
+		if byteWidth <= 0 {
+			return ret, fmt.Errorf("%w: fixed-size binary byte width must be positive: %d", arrow.ErrInvalid, byteWidth)
 		}
 		dt = &arrow.FixedSizeBinaryType{ByteWidth: byteWidth}
 	case "d": // decimal types are d:<precision>,<scale>[,<bitsize>] size is assumed 128 if left out
@@ -258,37 +285,85 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 	}
 
 	if f[0] == '+' { // types with children
+		if len(f) < 2 {
+			return ret, fmt.Errorf("%w: invalid nested type format %q", arrow.ErrInvalid, f)
+		}
 		switch f[1] {
 		case 'l': // list
+			if f != "+l" {
+				return ret, fmt.Errorf("%w: invalid list type format %q", arrow.ErrInvalid, f)
+			}
+			if len(childFields) != 1 {
+				return ret, fmt.Errorf("%w: list type must have exactly 1 child", arrow.ErrInvalid)
+			}
 			dt = arrow.ListOfField(childFields[0])
 		case 'L': // large list
+			if f != "+L" {
+				return ret, fmt.Errorf("%w: invalid large list type format %q", arrow.ErrInvalid, f)
+			}
+			if len(childFields) != 1 {
+				return ret, fmt.Errorf("%w: large list type must have exactly 1 child", arrow.ErrInvalid)
+			}
 			dt = arrow.LargeListOfField(childFields[0])
 		case 'v': // list view/large list view
+			if (f != "+vl" && f != "+vL") || len(childFields) != 1 {
+				return ret, fmt.Errorf("%w: invalid list view type format %q or child count %d", arrow.ErrInvalid, f, len(childFields))
+			}
 			switch f[2] {
 			case 'l':
 				dt = arrow.ListViewOfField(childFields[0])
 			case 'L':
 				dt = arrow.LargeListViewOfField(childFields[0])
+			default:
+				return ret, fmt.Errorf("%w: invalid list view type format %q", arrow.ErrInvalid, f)
 			}
 		case 'w': // fixed size list is w:# where # is the list size.
-			listSize, err := strconv.Atoi(strings.Split(f, ":")[1])
+			if len(childFields) != 1 {
+				return ret, fmt.Errorf("%w: fixed-size list type must have exactly 1 child", arrow.ErrInvalid)
+			}
+			_, size, ok := strings.Cut(f, ":")
+			if !ok {
+				return ret, fmt.Errorf("%w: invalid fixed-size list format %q", arrow.ErrInvalid, f)
+			}
+			listSize, err := strconv.Atoi(size)
 			if err != nil {
-				return ret, err
+				return ret, fmt.Errorf("%w: invalid fixed-size list format %q: %v", arrow.ErrInvalid, f, err)
+			}
+			if listSize <= 0 || int64(listSize) > 1<<31-1 {
+				return ret, fmt.Errorf("%w: fixed-size list size must be in the range [1, %d]: %d", arrow.ErrInvalid, 1<<31-1, listSize)
 			}
 
 			dt = arrow.FixedSizeListOfField(int32(listSize), childFields[0])
 		case 's': // struct
+			if f != "+s" {
+				return ret, fmt.Errorf("%w: invalid struct type format %q", arrow.ErrInvalid, f)
+			}
 			dt = arrow.StructOf(childFields...)
 		case 'r': // run-end encoded
+			if f != "+r" {
+				return ret, fmt.Errorf("%w: invalid run-end encoded type format %q", arrow.ErrInvalid, f)
+			}
 			if len(childFields) != 2 {
 				return ret, fmt.Errorf("%w: run-end encoded arrays must have 2 children", arrow.ErrInvalid)
 			}
 			dt = arrow.RunEndEncodedOf(childFields[0].Type, childFields[1].Type)
 		case 'm': // map type is basically a list of structs.
-			st := childFields[0].Type.(*arrow.StructType)
+			if f != "+m" {
+				return ret, fmt.Errorf("%w: invalid map type format %q", arrow.ErrInvalid, f)
+			}
+			if len(childFields) != 1 {
+				return ret, fmt.Errorf("%w: map type must have exactly 1 child", arrow.ErrInvalid)
+			}
+			st, ok := childFields[0].Type.(*arrow.StructType)
+			if !ok || st.NumFields() != 2 {
+				return ret, fmt.Errorf("%w: map child must be a struct with exactly 2 fields", arrow.ErrInvalid)
+			}
 			dt = arrow.MapOf(st.Field(0).Type, st.Field(1).Type)
 			dt.(*arrow.MapType).KeysSorted = (schema.flags & C.ARROW_FLAG_MAP_KEYS_SORTED) != 0
 		case 'u': // union
+			if len(f) < 3 {
+				return ret, fmt.Errorf("%w: invalid union type format %q", arrow.ErrInvalid, f)
+			}
 			var mode arrow.UnionMode
 			switch f[2] {
 			case 'd':

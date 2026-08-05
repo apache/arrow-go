@@ -109,6 +109,10 @@ func schemaIsReleased(s *CArrowSchema) bool {
 	return C.ArrowSchemaIsReleased(s) == 1
 }
 
+func setCSchemaChildCount(s *CArrowSchema, n int64) {
+	s.n_children = C.int64_t(n)
+}
+
 func getMetadataKeys() ([]string, []string) {
 	return []string{"key1", "key2"}, []string{"key"}
 }

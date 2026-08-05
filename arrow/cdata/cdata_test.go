@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"runtime"
 	"runtime/cgo"
 	"sync"
@@ -104,6 +105,62 @@ func TestSimpleArrayAndSchema(t *testing.T) {
 	for i, v := range vals {
 		assert.Equal(t, int32(i+1), v)
 	}
+}
+
+func TestImportSchemaRejectsMalformedFormats(t *testing.T) {
+	for _, format := range []string{"", "+", "+v", "+l", "+w", "+m", "+u"} {
+		t.Run(format, func(t *testing.T) {
+			schema := testPrimitive(format)
+			_, err := ImportCArrowField(&schema)
+			require.ErrorIs(t, err, arrow.ErrInvalid)
+			require.True(t, schemaIsReleased(&schema))
+		})
+	}
+}
+
+func TestImportSchemaRejectsInvalidNestedFormats(t *testing.T) {
+	for _, format := range []string{"+vx", "+vlx", "+vLx", "+lx", "+Lx", "+w:0", "+w:-1", "+w:2147483648"} {
+		t.Run(format, func(t *testing.T) {
+			schemas := testNested([]string{format, "i"}, []string{"", "item"}, []bool{true})
+			defer freeMallocedSchemas(schemas)
+
+			top := (*[1]*CArrowSchema)(unsafe.Pointer(schemas))[0]
+			_, err := ImportCArrowField(top)
+			require.ErrorIs(t, err, arrow.ErrInvalid)
+			require.True(t, schemaIsReleased(top))
+		})
+	}
+
+	schema := testPrimitive("+sx")
+	_, err := ImportCArrowField(&schema)
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+	require.True(t, schemaIsReleased(&schema))
+}
+
+func TestImportSchemaRejectsInvalidFixedSizeBinaryWidths(t *testing.T) {
+	for _, format := range []string{"w:0", "w:-1"} {
+		t.Run(format, func(t *testing.T) {
+			schema := testPrimitive(format)
+			_, err := ImportCArrowField(&schema)
+			require.ErrorIs(t, err, arrow.ErrInvalid)
+			require.True(t, schemaIsReleased(&schema))
+		})
+	}
+}
+
+func TestImportCArrowSchemaRejectsPrimitiveTopLevel(t *testing.T) {
+	schema := testPrimitive("i")
+	_, err := ImportCArrowSchema(&schema)
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+	require.True(t, schemaIsReleased(&schema))
+}
+
+func TestImportSchemaRejectsOversizedChildCount(t *testing.T) {
+	schema := testPrimitive("+s")
+	setCSchemaChildCount(&schema, math.MaxInt64)
+	_, err := ImportCArrowField(&schema)
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+	require.True(t, schemaIsReleased(&schema))
 }
 
 func TestPrimitiveSchemas(t *testing.T) {
