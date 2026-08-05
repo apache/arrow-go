@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"reflect"
 	"strconv"
 	"unsafe"
@@ -325,9 +324,7 @@ func (s *Decimal128) CastTo(to arrow.DataType) (Scalar, error) {
 		return NewDecimal256Scalar(newVal, to), nil
 	case arrow.STRING:
 		dt := s.Type.(*arrow.Decimal128Type)
-		scale := big.NewFloat(math.Pow10(int(dt.Scale)))
-		val := (&big.Float{}).SetInt(s.Value.BigInt())
-		return NewStringScalar(val.Quo(val, scale).Text('g', int(dt.Precision))), nil
+		return NewStringScalar(s.Value.ToBigFloat(dt.Scale).Text('g', int(dt.Precision))), nil
 	}
 
 	return nil, fmt.Errorf("cannot cast non-nil decimal128 scalar to type %s", to)
@@ -382,9 +379,7 @@ func (s *Decimal256) CastTo(to arrow.DataType) (Scalar, error) {
 		}
 		return NewDecimal256Scalar(newVal, to), nil
 	case arrow.STRING:
-		scale := big.NewFloat(math.Pow10(int(dt.Scale)))
-		val := (&big.Float{}).SetInt(s.Value.BigInt())
-		return NewStringScalar(val.Quo(val, scale).Text('g', int(dt.Precision))), nil
+		return NewStringScalar(s.Value.ToBigFloat(dt.Scale).Text('g', int(dt.Precision))), nil
 	}
 
 	return nil, fmt.Errorf("cannot cast non-nil decimal256 scalar to type %s", to)
