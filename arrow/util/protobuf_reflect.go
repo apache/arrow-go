@@ -18,6 +18,7 @@ package util
 
 import (
 	"fmt"
+	"iter"
 	"reflect"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -374,12 +375,6 @@ func (pfr *ProtobufFieldReflection) asMap() protobufMapReflection {
 }
 
 func (pmr protobufMapReflection) getDataType() arrow.DataType {
-	for kvp := range pmr.generateKeyValuePairs() {
-		if kvp.err != nil {
-			continue
-		}
-		return kvp.kvp.getDataType()
-	}
 	return protobufMapKeyValuePairReflection{
 		k: ProtobufFieldReflection{
 			parent:        pmr.parent,
@@ -408,11 +403,8 @@ func (pmr protobufMapKeyValuePairReflection) getDataType() arrow.DataType {
 	return arrow.MapOf(pmr.k.getDataType(), pmr.v.getDataType())
 }
 
-func (pmr protobufMapReflection) generateKeyValuePairs() chan protobufMapKeyValuePairResult {
-	out := make(chan protobufMapKeyValuePairResult)
-
-	go func() {
-		defer close(out)
+func (pmr protobufMapReflection) generateKeyValuePairs() iter.Seq[protobufMapKeyValuePairResult] {
+	return func(yield func(protobufMapKeyValuePairResult) bool) {
 		if !pmr.rValue.IsValid() {
 			kvp := protobufMapKeyValuePairReflection{
 				k: ProtobufFieldReflection{
@@ -426,13 +418,15 @@ func (pmr protobufMapReflection) generateKeyValuePairs() chan protobufMapKeyValu
 					schemaOptions: pmr.schemaOptions,
 				},
 			}
-			out <- protobufMapKeyValuePairResult{kvp: kvp}
+			yield(protobufMapKeyValuePairResult{kvp: kvp})
 			return
 		}
 		for _, k := range pmr.rValue.MapKeys() {
 			mapKey, err := getMapKey(k)
 			if err != nil {
-				out <- protobufMapKeyValuePairResult{err: err}
+				if !yield(protobufMapKeyValuePairResult{err: err}) {
+					return
+				}
 				continue
 			}
 			kvp := protobufMapKeyValuePairReflection{
@@ -451,11 +445,11 @@ func (pmr protobufMapReflection) generateKeyValuePairs() chan protobufMapKeyValu
 					schemaOptions: pmr.schemaOptions,
 				},
 			}
-			out <- protobufMapKeyValuePairResult{kvp: kvp}
+			if !yield(protobufMapKeyValuePairResult{kvp: kvp}) {
+				return
+			}
 		}
-	}()
-
-	return out
+	}
 }
 
 func getMapKey(v reflect.Value) (protoreflect.Value, error) {

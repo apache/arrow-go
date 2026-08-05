@@ -337,6 +337,17 @@ func TestGetSchema(t *testing.T) {
 	CheckSchema(t, pmr, want)
 }
 
+func TestMapSchemaDoesNotDependOnValues(t *testing.T) {
+	withValues := util_message.AllTheTypesNoAny{
+		SimpleMap: map[int32]string{1: "one", 2: "two"},
+	}
+	empty := util_message.AllTheTypesNoAny{}
+
+	withValuesSchema := NewProtobufMessageReflection(&withValues).Schema()
+	emptySchema := NewProtobufMessageReflection(&empty).Schema()
+	require.True(t, withValuesSchema.Equal(emptySchema))
+}
+
 func TestRecordFromProtobuf(t *testing.T) {
 	f := AllTheTypesFixture()
 
