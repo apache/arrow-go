@@ -550,6 +550,25 @@ func (lr *listReader) buildFixedSizeListArray(length int, offsets []int32, valid
 	nullCount int64, item arrow.Array) (*arrow.Chunked, error) {
 	listType := lr.field.Type.(*arrow.FixedSizeListType)
 	listSize := int(listType.Len())
+
+	if nullCount == 0 {
+		for idx := 0; idx < length; idx++ {
+			if size := offsets[idx+1] - offsets[idx]; size != int32(listSize) {
+				return nil, fmt.Errorf("expected all lists to be of size=%d, but index %d had size=%d", listSize, idx, size)
+			}
+		}
+		if offsets[0] < 0 || offsets[length] < offsets[0] || int64(offsets[length]) > int64(item.Len()) {
+			return nil, fmt.Errorf("fixed-size list offsets at index 0 exceed decoded child values")
+		}
+
+		data := array.NewData(lr.field.Type, length, []*memory.Buffer{nil},
+			[]arrow.ArrayData{item.Data()}, 0, 0)
+		defer data.Release()
+		out := array.MakeFromData(data)
+		defer out.Release()
+		return arrow.NewChunked(lr.field.Type, []arrow.Array{out}), nil
+	}
+
 	pieces := make([]arrow.Array, 0, length)
 	defer func() { releaseArrays(pieces) }()
 
