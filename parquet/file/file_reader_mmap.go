@@ -23,11 +23,10 @@ import (
 	"errors"
 	"io"
 
-	"github.com/apache/arrow-go/v18/parquet"
 	"golang.org/x/exp/mmap"
 )
 
-func mmapOpen(filename string) (parquet.ReaderAtSeeker, error) {
+func mmapOpen(filename string) (readerAtSeekerCloser, error) {
 	rdr, err := mmap.Open(filename)
 	if err != nil {
 		return nil, err

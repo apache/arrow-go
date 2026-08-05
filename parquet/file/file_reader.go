@@ -42,6 +42,11 @@ var (
 	errInconsistentFileMetadata = errors.New("parquet: file is smaller than indicated metadata size")
 )
 
+type readerAtSeekerCloser interface {
+	parquet.ReaderAtSeeker
+	io.Closer
+}
+
 // Reader is the main interface for reading a parquet file
 type Reader struct {
 	r                 parquet.ReaderAtSeeker
@@ -78,7 +83,7 @@ func WithMetadata(m *metadata.FileMetaData) ReadOption {
 // then the default ReaderProperties will be used. The WithMetadata option can be used to provide
 // a FileMetaData object rather than reading the file metadata from the file.
 func OpenParquetFile(filename string, memoryMap bool, opts ...ReadOption) (*Reader, error) {
-	var source parquet.ReaderAtSeeker
+	var source readerAtSeekerCloser
 
 	var err error
 	if memoryMap {
@@ -92,7 +97,15 @@ func OpenParquetFile(filename string, memoryMap bool, opts ...ReadOption) (*Read
 			return nil, err
 		}
 	}
-	return NewParquetReader(source, opts...)
+	return newParquetReaderFromFile(source, opts...)
+}
+
+func newParquetReaderFromFile(source readerAtSeekerCloser, opts ...ReadOption) (*Reader, error) {
+	rdr, err := NewParquetReader(source, opts...)
+	if err != nil {
+		return nil, errors.Join(err, source.Close())
+	}
+	return rdr, nil
 }
 
 // NewParquetReader returns a FileReader instance that reads a parquet file which can be read from r.

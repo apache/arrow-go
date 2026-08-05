@@ -19,12 +19,8 @@
 
 package file
 
-import (
-	"errors"
+import "errors"
 
-	"github.com/apache/arrow-go/v18/parquet"
-)
-
-func mmapOpen(_ string) (parquet.ReaderAtSeeker, error) {
+func mmapOpen(_ string) (readerAtSeekerCloser, error) {
 	return nil, errors.New("mmap not implemented on windows")
 }
