@@ -528,6 +528,24 @@ func TestAppendValueOrNull(t *testing.T) {
 	assert.EqualErrorf(t, got, want, "Error is: %v, want: %v", got, want)
 }
 
+func TestAppendEnumReleasesDictionaryValues(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	pmr := NewProtobufMessageReflection(AllTheTypesNoAnyFixture().msg)
+	var enumField *ProtobufMessageFieldReflection
+	for i := range pmr.fields {
+		if pmr.fields[i].Type.ID() == arrow.DICTIONARY {
+			enumField = &pmr.fields[i]
+			break
+		}
+	}
+	require.NotNil(t, enumField)
+
+	bldr := array.NewDictionaryBuilder(mem, enumField.Type.(*arrow.DictionaryType))
+	require.NoError(t, enumField.AppendValueOrNull(bldr, mem))
+	bldr.Release()
+	mem.AssertSize(t, 0)
+}
+
 func TestGetMapKeyRejectsUnsupportedType(t *testing.T) {
 	_, err := getMapKey(reflect.ValueOf(struct{}{}))
 	require.Error(t, err)
