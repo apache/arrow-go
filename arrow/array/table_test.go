@@ -683,6 +683,39 @@ func TestTable(t *testing.T) {
 	}
 }
 
+func TestNewTableDoesNotAliasColumnSlice(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	field := arrow.Field{Name: "value", Type: arrow.PrimitiveTypes.Int32}
+	schema := arrow.NewSchema([]arrow.Field{field}, nil)
+
+	makeColumn := func(value int32) arrow.Column {
+		builder := array.NewInt32Builder(mem)
+		defer builder.Release()
+		builder.Append(value)
+		arr := builder.NewArray()
+		defer arr.Release()
+		return arrow.NewColumnFromArr(field, arr)
+	}
+
+	original := makeColumn(1)
+	replacement := makeColumn(2)
+	cols := []arrow.Column{original}
+
+	tbl := array.NewTable(schema, cols, -1)
+	defer tbl.Release()
+
+	cols[0] = replacement
+	got := tbl.Column(0).Data().Chunk(0).(*array.Int32).Value(0)
+	if got != 1 {
+		t.Fatalf("table column changed after caller slice mutation: got=%d, want=1", got)
+	}
+
+	original.Release()
+	replacement.Release()
+}
+
 func TestTableAddColumnWithEqualDataType(t *testing.T) {
 	columnType := arrow.ListOf(arrow.PrimitiveTypes.Int32)
 	chunk := arrow.NewChunked(columnType, nil)
