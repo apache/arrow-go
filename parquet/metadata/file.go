@@ -425,7 +425,7 @@ func (f *FileMetaData) AppendRowGroups(other *FileMetaData) error {
 // row groups by index
 func (f *FileMetaData) Subset(rowGroups []int) (*FileMetaData, error) {
 	for _, i := range rowGroups {
-		if i < len(f.RowGroups) {
+		if i >= 0 && i < len(f.RowGroups) {
 			continue
 		}
 		return nil, fmt.Errorf("parquet: this file only has %d row groups, but requested a subset including row group: %d", len(f.RowGroups), i)
