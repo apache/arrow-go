@@ -1149,7 +1149,15 @@ func applyOriginalStorageMetadata(origin arrow.Field, inferred *SchemaField) (mo
 		}
 
 		if modified && !arrow.TypeEqual(extType, inferred.Field.Type) {
-			if !arrow.TypeEqual(extType.StorageType(), inferred.Field.Type) {
+			// The inferred type may itself be an extension (e.g. recovered from
+			// a Parquet logical type); compare storage types in that case and
+			// let the stored schema win.
+			inferredStorage := inferred.Field.Type
+			if inf, ok := inferredStorage.(arrow.ExtensionType); ok &&
+				inf.ExtensionName() == extType.ExtensionName() {
+				inferredStorage = inf.StorageType()
+			}
+			if !arrow.TypeEqual(extType.StorageType(), inferredStorage) {
 				return modified, fmt.Errorf("%w: mismatch storage type '%s' for extension type '%s'",
 					arrow.ErrInvalid, inferred.Field.Type, extType)
 			}
