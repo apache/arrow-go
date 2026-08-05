@@ -149,6 +149,11 @@ func NewWriter(w io.Writer, opts ...Option) *Writer {
 
 func (w *Writer) Close() error {
 	if w.err != nil {
+		if w.started && w.pw != nil {
+			if err := w.pw.Close(); err != nil {
+				w.err = errors.Join(w.err, err)
+			}
+		}
 		w.releaseDictionaries()
 		w.pw = nil
 		return w.err

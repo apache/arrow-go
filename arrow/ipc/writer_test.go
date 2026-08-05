@@ -39,6 +39,7 @@ import (
 type failingPayloadWriter struct {
 	err       error
 	closeErr  error
+	failAfter int
 	payloads  int
 	closeCall int
 }
@@ -69,7 +70,10 @@ func TestPayloadWriteRejectsShortWrites(t *testing.T) {
 func (w *failingPayloadWriter) Start() error { return nil }
 func (w *failingPayloadWriter) WritePayload(Payload) error {
 	w.payloads++
-	return w.err
+	if w.failAfter == 0 || w.payloads >= w.failAfter {
+		return w.err
+	}
+	return nil
 }
 func (w *failingPayloadWriter) Close() error {
 	w.closeCall++
@@ -103,6 +107,28 @@ func TestWriterSchemaFailureIsTerminal(t *testing.T) {
 	require.Equal(t, 1, payloadWriter.payloads)
 	require.ErrorIs(t, writer.Close(), want)
 	require.Zero(t, payloadWriter.closeCall)
+}
+
+func TestWriterPayloadFailureClosesStartedPayloadWriter(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer builder.Release()
+	record := builder.NewRecordBatch()
+	defer record.Release()
+
+	payloadErr := errors.New("payload failed")
+	closeErr := errors.New("close failed")
+	payloadWriter := &failingPayloadWriter{err: payloadErr, closeErr: closeErr, failAfter: 2}
+	writer := NewWriterWithPayloadWriter(payloadWriter, WithSchema(schema))
+
+	require.ErrorIs(t, writer.Write(record), payloadErr)
+	err := writer.Close()
+	require.ErrorIs(t, err, payloadErr)
+	require.ErrorIs(t, err, closeErr)
+	require.Equal(t, 2, payloadWriter.payloads)
+	require.Equal(t, 1, payloadWriter.closeCall)
+	require.ErrorIs(t, writer.Close(), payloadErr)
+	require.Equal(t, 1, payloadWriter.closeCall)
 }
 
 func TestWriterCloseWithoutSchemaReturnsError(t *testing.T) {
