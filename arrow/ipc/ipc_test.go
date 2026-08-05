@@ -132,6 +132,24 @@ func (r *testMessageReader) Message() (*ipc.Message, error) {
 func (r *testMessageReader) Release() {}
 func (r *testMessageReader) Retain()  {}
 
+type releaseCountingMessageReader struct {
+	releases int
+}
+
+func (r *releaseCountingMessageReader) Message() (*ipc.Message, error) {
+	return nil, errors.New("schema read failed")
+}
+
+func (r *releaseCountingMessageReader) Release() { r.releases++ }
+func (r *releaseCountingMessageReader) Retain()  {}
+
+func TestNewReaderFromMessageReaderReleasesOnSchemaError(t *testing.T) {
+	msgReader := &releaseCountingMessageReader{}
+	_, err := ipc.NewReaderFromMessageReader(msgReader)
+	require.Error(t, err)
+	assert.Equal(t, 1, msgReader.releases)
+}
+
 // Ensure that if the MessageReader errors, we get the error from Read
 func TestArrow14769(t *testing.T) {
 	reader, err := ipc.NewReaderFromMessageReader(&testMessageReader{})

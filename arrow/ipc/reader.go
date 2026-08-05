@@ -81,6 +81,7 @@ func NewReaderFromMessageReader(r MessageReader, opts ...Option) (reader *Reader
 
 	if !cfg.noAutoSchema {
 		if err := rr.readSchema(cfg.schema); err != nil {
+			rr.Release()
 			return nil, err
 		}
 	}
@@ -111,6 +112,7 @@ func NewReader(r io.Reader, opts ...Option) (rr *Reader, err error) {
 
 	if !cfg.noAutoSchema {
 		if err := rr.readSchema(cfg.schema); err != nil {
+			rr.Release()
 			return nil, err
 		}
 	}
