@@ -165,6 +165,29 @@ func TestInvalidTensor(t *testing.T) {
 
 }
 
+func TestTypedTensorRejectsMismatchedDataType(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	bld := array.NewInt64Builder(mem)
+	bld.Append(1)
+	arr := bld.NewInt64Array()
+	bld.Release()
+	defer arr.Release()
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected a panic")
+		}
+		if got := fmt.Sprint(r); got != "arrow/tensor: data type mismatch: got int64, want int8" {
+			t.Fatalf("unexpected panic: %s", got)
+		}
+	}()
+
+	tensor.NewInt8(arr.Data(), []int64{1}, nil, nil)
+}
+
 func TestTensorWithNilDimensionNames(t *testing.T) {
 	bld := array.NewFloat64Builder(memory.DefaultAllocator)
 	defer bld.Release()
