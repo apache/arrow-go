@@ -1422,7 +1422,6 @@ func (p *PreparedStatement) SetParameters(binding arrow.RecordBatch) {
 // PreparedStatement.
 func (p *PreparedStatement) SetRecordReader(binding array.RecordReader) {
 	p.clearParameters()
-	binding.Retain()
 	p.streamBinding = binding
 	p.streamBinding.Retain()
 }
