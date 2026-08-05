@@ -110,6 +110,11 @@ func TestNullExtensionScalarValidateRejectsNonNullStorage(t *testing.T) {
 	assert.ErrorContains(t, sc.ValidateFull(), "non-null storage value")
 }
 
+func TestExtensionScalarStringUsesStorageValue(t *testing.T) {
+	sc := scalar.NewExtensionScalar(scalar.NewInt16Scalar(42), types.NewSmallintType())
+	assert.Equal(t, "42", sc.String())
+}
+
 func TestMakeScalarUint(t *testing.T) {
 	three := scalar.MakeScalar(uint(3))
 	assert.NoError(t, three.ValidateFull())
