@@ -557,10 +557,13 @@ func (r *PageIndexReader) RowGroup(i int) (*RowGroupPageIndexReader, error) {
 }
 
 func (r *PageIndexReader) WillNeed(rgIndices, colIndices []int32, selection PageIndexSelection) error {
-	if r.idxReadRanges == nil {
-		r.idxReadRanges = make(map[int32]rgIndexReadRange)
+	for _, ordinal := range rgIndices {
+		if ordinal < 0 || int(ordinal) >= r.FileMetadata.NumRowGroups() {
+			return fmt.Errorf("%w: row group ordinal %d out of range", arrow.ErrIndex, ordinal)
+		}
 	}
 
+	ranges := make(map[int32]rgIndexReadRange, len(rgIndices))
 	for _, ordinal := range rgIndices {
 		readRange, err := determinePageIndexRangesInRowGroup(r.FileMetadata.RowGroup(int(ordinal)), colIndices)
 		if err != nil {
@@ -576,7 +579,14 @@ func (r *PageIndexReader) WillNeed(rgIndices, colIndices []int32, selection Page
 			// mark offset index as not requested
 			readRange.OffsetIndex = nil
 		}
-		r.idxReadRanges[int32(ordinal)] = readRange
+		ranges[int32(ordinal)] = readRange
+	}
+
+	if r.idxReadRanges == nil {
+		r.idxReadRanges = make(map[int32]rgIndexReadRange)
+	}
+	for ordinal, readRange := range ranges {
+		r.idxReadRanges[ordinal] = readRange
 	}
 	// TODO: possibly use read ranges to prefetch data of the input
 	return nil
