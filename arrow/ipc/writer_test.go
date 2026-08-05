@@ -386,12 +386,21 @@ func TestReaderRejectsRecordBatchBeforeInitialDictionary(t *testing.T) {
 	defer recordPayload.Release()
 	_, err = recordPayload.WritePayload(&stream)
 	require.NoError(t, err)
+	streamBytes := append([]byte(nil), stream.Bytes()...)
 
-	rdr, err := NewReader(&stream, WithAllocator(mem))
+	rdr, err := NewReader(bytes.NewReader(streamBytes), WithAllocator(mem))
 	require.NoError(t, err)
 	defer rdr.Release()
 	require.False(t, rdr.Next())
 	require.EqualError(t, rdr.Err(), "arrow/ipc: IPC stream did not have the expected (1) dictionaries at the start of the stream")
+
+	rdr, err = NewReader(bytes.NewReader(streamBytes), WithAllocator(mem))
+	require.NoError(t, err)
+	defer rdr.Release()
+	_, err = rdr.Read()
+	require.EqualError(t, err, "arrow/ipc: IPC stream did not have the expected (1) dictionaries at the start of the stream")
+	_, err = rdr.Read()
+	require.EqualError(t, err, "arrow/ipc: IPC stream did not have the expected (1) dictionaries at the start of the stream")
 }
 
 // TestVariadicCountsNotAccumulatedAcrossEncode verifies that variadicCounts

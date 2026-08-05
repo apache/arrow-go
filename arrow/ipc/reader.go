@@ -223,7 +223,6 @@ func (r *Reader) getInitialDicts() bool {
 		}
 
 		if msg.Type() != MessageDictionaryBatch {
-			r.done = true
 			r.err = fmt.Errorf("arrow/ipc: IPC stream did not have the expected (%d) dictionaries at the start of the stream", numDicts)
 			return false
 		}
@@ -243,6 +242,9 @@ func (r *Reader) next() bool {
 			r.err = utils.FormatRecoveredError("arrow/ipc: unknown error while reading", pErr)
 		}
 	}()
+	if r.err != nil || r.done {
+		return false
+	}
 	if r.schema == nil {
 		if err := r.readSchema(r.expectedSchema); err != nil {
 			r.err = fmt.Errorf("arrow/ipc: could not read schema from stream: %w", err)
