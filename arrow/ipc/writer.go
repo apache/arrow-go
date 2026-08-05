@@ -65,12 +65,12 @@ func (w *streamWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func writeFull(w io.Writer, p []byte) (int, error) {
+func writeFull(w io.Writer, p []byte) error {
 	n, err := w.Write(p)
 	if err == nil && n != len(p) {
 		err = io.ErrShortWrite
 	}
-	return n, err
+	return err
 }
 
 func hasNestedDict(data arrow.ArrayData) bool {
@@ -332,9 +332,9 @@ func (w *Writer) start() error {
 		if err != nil {
 			return w.fail(err)
 		}
+		w.started = true
 	}
 
-	w.started = true
 	return nil
 }
 

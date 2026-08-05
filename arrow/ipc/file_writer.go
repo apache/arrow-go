@@ -143,14 +143,14 @@ func writeIPCPayload(w io.Writer, p Payload) (int, error) {
 		}
 
 		if size > 0 {
-			_, err = writeFull(w, buf.Bytes())
+			err = writeFull(w, buf.Bytes())
 			if err != nil {
 				return n, fmt.Errorf("arrow/ipc: could not write payload message body: %w", err)
 			}
 		}
 
 		if padding > 0 {
-			_, err = writeFull(w, paddingBytes[:padding])
+			err = writeFull(w, paddingBytes[:padding])
 			if err != nil {
 				return n, fmt.Errorf("arrow/ipc: could not write payload message padding: %w", err)
 			}
@@ -189,12 +189,12 @@ func (p *Payload) SerializeBody(w io.Writer) error {
 		size := int64(data.Len())
 		padding := bitutil.CeilByte64(size) - size
 		if size > 0 {
-			if _, err := writeFull(w, data.Bytes()); err != nil {
+			if err := writeFull(w, data.Bytes()); err != nil {
 				return fmt.Errorf("arrow/ipc: could not write payload message body: %w", err)
 			}
 
 			if padding > 0 {
-				if _, err := writeFull(w, paddingBytes[:padding]); err != nil {
+				if err := writeFull(w, paddingBytes[:padding]); err != nil {
 					return fmt.Errorf("arrow/ipc: could not write payload message padding bytes: %w", err)
 				}
 			}
