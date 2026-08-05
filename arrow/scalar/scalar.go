@@ -174,6 +174,10 @@ func (s *Boolean) String() string {
 }
 
 func (s *Boolean) CastTo(dt arrow.DataType) (Scalar, error) {
+	if arrow.TypeEqual(s.DataType(), dt) {
+		return s, nil
+	}
+
 	if !s.Valid {
 		return MakeNullScalar(dt), nil
 	}
