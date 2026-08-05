@@ -373,6 +373,29 @@ func TestSchemaAddField(t *testing.T) {
 	}
 }
 
+func TestSchemaAddFieldDoesNotAliasParentStorage(t *testing.T) {
+	field := func(name string) Field {
+		return Field{Name: name, Type: PrimitiveTypes.Int32}
+	}
+
+	parent := NewSchema([]Field{field("f1")}, nil)
+	fields := make([]Field, len(parent.fields), len(parent.fields)+1)
+	copy(fields, parent.fields)
+	parent.fields = fields
+
+	first, err := parent.AddField(parent.NumFields(), field("first"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := parent.AddField(parent.NumFields(), field("second")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got, want := first.Field(1).Name, "first"; got != want {
+		t.Fatalf("derived schema field changed: got=%q, want=%q", got, want)
+	}
+}
+
 func TestSchemaEqual(t *testing.T) {
 	fields := []Field{
 		{Name: "f1", Type: PrimitiveTypes.Int32},
