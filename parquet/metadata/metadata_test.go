@@ -168,9 +168,11 @@ func TestBuildAccess(t *testing.T) {
 		rg1Col1, err := rg1Access.ColumnChunk(0)
 		assert.NoError(t, err)
 		assert.Equal(t, rg1Access.FileOffset(), rg1Col1.DictionaryPageOffset())
+		assert.Equal(t, rg1Col1.DictionaryPageOffset(), rg1Col1.FileOffset())
 
 		rg1Col2, err := rg1Access.ColumnChunk(1)
 		assert.NoError(t, err)
+		assert.Equal(t, rg1Col2.DictionaryPageOffset(), rg1Col2.FileOffset())
 		assertStatsSet(t, rg1Col1)
 		assertStatsSet(t, rg1Col2)
 		assert.Equal(t, statsInt.Min, assertStats(t, rg1Col1).EncodeMin())
@@ -208,6 +210,7 @@ func TestBuildAccess(t *testing.T) {
 		rg2Col1, err := rg2Access.ColumnChunk(0)
 		assert.NoError(t, err)
 		assert.Equal(t, rg2Access.FileOffset(), rg2Col1.DataPageOffset())
+		assert.Equal(t, rg2Col1.DataPageOffset(), rg2Col1.FileOffset())
 
 		rg2Col2, err := rg2Access.ColumnChunk(1)
 		assert.NoError(t, err)

@@ -372,6 +372,7 @@ func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFal
 	} else {
 		c.fileOffset = info.DataPageOffset
 	}
+	c.chunk.FileOffset = c.fileOffset
 
 	c.chunk.MetaData.NumValues = info.NumValues
 	if info.IndexPageOffset >= 0 {

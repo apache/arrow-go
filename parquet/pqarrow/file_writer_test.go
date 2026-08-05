@@ -172,7 +172,7 @@ func TestFileWriterTotalBytes(t *testing.T) {
 
 	// Verify total bytes & compressed bytes are correct
 	assert.Equal(t, int64(332), writer.TotalCompressedBytes())
-	assert.Equal(t, int64(783), writer.TotalBytesWritten())
+	assert.Equal(t, int64(786), writer.TotalBytesWritten())
 }
 
 func TestFileWriterTotalBytesBuffered(t *testing.T) {
@@ -206,7 +206,7 @@ func TestFileWriterTotalBytesBuffered(t *testing.T) {
 
 	// Verify total bytes & compressed bytes are correct
 	assert.Equal(t, int64(482), writer.TotalCompressedBytes())
-	assert.Equal(t, int64(1115), writer.TotalBytesWritten())
+	assert.Equal(t, int64(1120), writer.TotalBytesWritten())
 }
 
 func TestWriteOnClosedFileWriter(t *testing.T) {
