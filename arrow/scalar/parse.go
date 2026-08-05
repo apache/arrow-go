@@ -50,8 +50,14 @@ func parseTimestamp(val string, dt *arrow.TimestampType) (arrow.Timestamp, error
 	if err != nil {
 		return 0, err
 	}
-	ts, _, err := arrow.TimestampFromStringInLocation(val, dt.Unit, loc)
-	return ts, err
+	ts, zonePresent, err := arrow.TimestampFromStringInLocation(val, dt.Unit, loc)
+	if err != nil {
+		return 0, err
+	}
+	if !zonePresent {
+		return 0, fmt.Errorf("%w: timestamp value %q for type %s must include a zone offset", arrow.ErrInvalid, val, dt)
+	}
+	return ts, nil
 }
 
 type hasTypename interface {

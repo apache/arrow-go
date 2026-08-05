@@ -521,7 +521,7 @@ func TestTimestampScalarsMakeScalar(t *testing.T) {
 
 func TestTimestampScalarsMakeScalarUsesTimezone(t *testing.T) {
 	typ := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "Europe/Berlin"}
-	value := "1970-01-01 01:00:00"
+	value := "1970-01-01 01:00:00+01:00"
 
 	fromParam, err := scalar.MakeScalarParam(value, typ)
 	require.NoError(t, err)
@@ -529,12 +529,12 @@ func TestTimestampScalarsMakeScalarUsesTimezone(t *testing.T) {
 	require.NoError(t, err)
 
 	assertScalarsEqual(t, fromParam, fromParse)
-	assert.Equal(t, arrow.Timestamp(3600), fromParse.(*scalar.Timestamp).Value)
+	assert.Equal(t, arrow.Timestamp(0), fromParse.(*scalar.Timestamp).Value)
 }
 
 func TestTimestampScalarsMakeScalarUsesFixedTimezone(t *testing.T) {
 	typ := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "+02:00"}
-	value := "1970-01-01 01:00:00"
+	value := "1970-01-01 01:00:00+02:00"
 
 	fromParam, err := scalar.MakeScalarParam(value, typ)
 	require.NoError(t, err)
@@ -542,7 +542,23 @@ func TestTimestampScalarsMakeScalarUsesFixedTimezone(t *testing.T) {
 	require.NoError(t, err)
 
 	assertScalarsEqual(t, fromParam, fromParse)
-	assert.Equal(t, arrow.Timestamp(3600), fromParse.(*scalar.Timestamp).Value)
+	assert.Equal(t, arrow.Timestamp(-3600), fromParse.(*scalar.Timestamp).Value)
+}
+
+func TestTimestampScalarsRejectMissingTimezone(t *testing.T) {
+	value := "1970-01-01 01:00:00"
+	for _, typ := range []*arrow.TimestampType{
+		{Unit: arrow.Second, TimeZone: "Europe/Berlin"},
+		{Unit: arrow.Second, TimeZone: "+02:00"},
+	} {
+		t.Run(typ.TimeZone, func(t *testing.T) {
+			_, err := scalar.MakeScalarParam(value, typ)
+			require.ErrorIs(t, err, arrow.ErrInvalid)
+
+			_, err = scalar.ParseScalar(typ, value)
+			require.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
 }
 
 func TestTimestampScalarsParseScalarPreservesExplicitTimezone(t *testing.T) {
