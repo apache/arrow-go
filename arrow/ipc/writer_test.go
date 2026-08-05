@@ -106,7 +106,7 @@ func TestWriterSchemaFailureIsTerminal(t *testing.T) {
 	require.ErrorIs(t, writer.Write(record), want)
 	require.Equal(t, 1, payloadWriter.payloads)
 	require.ErrorIs(t, writer.Close(), want)
-	require.Zero(t, payloadWriter.closeCall)
+	require.Equal(t, 1, payloadWriter.closeCall)
 }
 
 func TestWriterPayloadFailureClosesStartedPayloadWriter(t *testing.T) {

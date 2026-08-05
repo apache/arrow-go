@@ -62,11 +62,6 @@ func (w *streamWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func writeFull(w io.Writer, p []byte) error {
-	_, err := w.Write(p)
-	return err
-}
-
 func hasNestedDict(data arrow.ArrayData) bool {
 	if data.DataType().ID() == arrow.DICTIONARY {
 		return true
@@ -324,12 +319,12 @@ func (w *Writer) start() error {
 	ps := payloadFromSchema(w.schema, w.mem, &w.mapper)
 	defer ps.Release()
 
+	w.started = true
 	for _, data := range ps {
 		err := w.pw.WritePayload(data)
 		if err != nil {
 			return w.fail(err)
 		}
-		w.started = true
 	}
 
 	return nil
