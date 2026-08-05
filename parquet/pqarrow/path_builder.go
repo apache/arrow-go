@@ -536,6 +536,7 @@ func newMultipathLevelBuilder(arr arrow.Array, fieldNullable bool) (*multipathLe
 		builder:   pathBuilder{nullableInParent: fieldNullable, paths: make([]pathInfo, 0), refCount: utils.NewRefCount(1)},
 	}
 	if err := ret.builder.Visit(arr); err != nil {
+		ret.builder.Release()
 		return nil, err
 	}
 	arr.Data().Retain()

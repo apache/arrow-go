@@ -21,6 +21,7 @@ package pqarrow_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -38,6 +39,47 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
+
+func TestWriteColumnChunkedPropagatesLevelBuilderError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}
+	validIndices, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[0]`))
+	require.NoError(t, err)
+	defer validIndices.Release()
+	validDictionary, _, err := array.FromJSON(mem, arrow.BinaryTypes.String, strings.NewReader(`["valid"]`))
+	require.NoError(t, err)
+	defer validDictionary.Release()
+	valid := array.NewDictionaryArray(dictType, validIndices, validDictionary)
+	defer valid.Release()
+
+	invalidIndices, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[0]`))
+	require.NoError(t, err)
+	defer invalidIndices.Release()
+	invalidDictionary, _, err := array.FromJSON(mem, arrow.BinaryTypes.String, strings.NewReader(`[null]`))
+	require.NoError(t, err)
+	defer invalidDictionary.Release()
+	invalid := array.NewDictionaryArray(dictType, invalidIndices, invalidDictionary)
+	defer invalid.Release()
+
+	values := arrow.NewChunked(dictType, []arrow.Array{valid, invalid})
+	defer values.Release()
+	schema := arrow.NewSchema([]arrow.Field{{Name: "values", Type: dictType, Nullable: true}}, nil)
+
+	var output bytes.Buffer
+	writer, err := pqarrow.NewFileWriter(schema, &output,
+		parquet.NewWriterProperties(parquet.WithAllocator(mem)),
+		pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem)))
+	require.NoError(t, err)
+	require.NoError(t, writer.NewRowGroupChecked())
+
+	err = writer.WriteColumnChunked(values, 0, int64(values.Len()))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, arrow.ErrNotImplemented))
+	require.NoError(t, writer.WriteColumnData(valid))
+	require.NoError(t, writer.Close())
+}
 
 func (ps *ParquetIOTestSuite) TestSingleColumnOptionalDictionaryWrite() {
 	for _, dt := range fullTypeList {
