@@ -478,6 +478,9 @@ func (f *FileMetaData) VerifySignature(signature []byte) bool {
 	if f.FileDecryptor == nil {
 		panic("decryption not set properly, cannot verify signature")
 	}
+	if len(signature) < encryption.NonceLength+encryption.GcmTagLength {
+		return false
+	}
 
 	serializer := thrift.NewThriftSerializer()
 	data, _ := serializer.Write(context.Background(), f.FileMetaData)
