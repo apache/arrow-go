@@ -62,13 +62,13 @@ func FromScalar(sc *Struct, val interface{}) error {
 	if v.IsNil() {
 		return errors.New("fromscalar must be given a non-nil pointer to an object to populate")
 	}
+	if v, ok := val.(TypeFromScalar); ok {
+		return v.FromStructScalar(sc)
+	}
+
 	value := v.Elem()
 	if value.Kind() != reflect.Struct {
 		return errors.New("fromscalar must be given a pointer to a struct to populate")
-	}
-
-	if v, ok := val.(TypeFromScalar); ok {
-		return v.FromStructScalar(sc)
 	}
 
 	for i := 0; i < value.Type().NumField(); i++ {
