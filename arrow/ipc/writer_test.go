@@ -359,6 +359,50 @@ func TestWritePayload(t *testing.T) {
 	require.True(t, msg.Type() == MessageRecordBatch)
 }
 
+func TestReaderRejectsRecordBatchBeforeInitialDictionary(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.BinaryTypes.String,
+	}
+	schema := arrow.NewSchema([]arrow.Field{{Name: "dict", Type: dictType}}, nil)
+	bldr := array.NewBuilder(mem, dictType)
+	defer bldr.Release()
+	require.NoError(t, bldr.UnmarshalJSON([]byte(`["value"]`)))
+	arr := bldr.NewArray()
+	defer arr.Release()
+	rec := array.NewRecordBatch(schema, []arrow.Array{arr}, 1)
+	defer rec.Release()
+
+	var stream bytes.Buffer
+	schemaPayload := GetSchemaPayload(schema, mem)
+	defer schemaPayload.Release()
+	_, err := schemaPayload.WritePayload(&stream)
+	require.NoError(t, err)
+	recordPayload, err := GetRecordBatchPayload(rec, WithAllocator(mem))
+	require.NoError(t, err)
+	defer recordPayload.Release()
+	_, err = recordPayload.WritePayload(&stream)
+	require.NoError(t, err)
+	streamBytes := append([]byte(nil), stream.Bytes()...)
+
+	rdr, err := NewReader(bytes.NewReader(streamBytes), WithAllocator(mem))
+	require.NoError(t, err)
+	defer rdr.Release()
+	require.False(t, rdr.Next())
+	require.EqualError(t, rdr.Err(), "arrow/ipc: IPC stream did not have the expected (1) dictionaries at the start of the stream")
+
+	rdr, err = NewReader(bytes.NewReader(streamBytes), WithAllocator(mem))
+	require.NoError(t, err)
+	defer rdr.Release()
+	_, err = rdr.Read()
+	require.EqualError(t, err, "arrow/ipc: IPC stream did not have the expected (1) dictionaries at the start of the stream")
+	_, err = rdr.Read()
+	require.EqualError(t, err, "arrow/ipc: IPC stream did not have the expected (1) dictionaries at the start of the stream")
+}
+
 // TestVariadicCountsNotAccumulatedAcrossEncode verifies that variadicCounts
 // does not accumulate across encode calls separated by reset(). Without this,
 // each batch's variadic counts would include counts from previous batches,
