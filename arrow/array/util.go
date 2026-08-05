@@ -370,7 +370,7 @@ func GetDictArrayData(mem memory.Allocator, valueType arrow.DataType, memoTable 
 		nullcount = 1
 		buffers[0].Resize(int(bitutil.BytesForBits(int64(dictLen))))
 		memory.Set(buffers[0].Bytes(), 0xFF)
-		bitutil.ClearBit(buffers[0].Bytes(), idx)
+		bitutil.ClearBit(buffers[0].Bytes(), idx-startOffset)
 	}
 
 	return NewData(valueType, dictLen, buffers, nil, nullcount, 0), nil

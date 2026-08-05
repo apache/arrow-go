@@ -32,10 +32,36 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/internal/arrdata"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/internal/hashing"
 	"github.com/apache/arrow-go/v18/internal/json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGetDictArrayDataNullInSuffix(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	memo := hashing.NewMemoTable[int32](0)
+	for _, value := range []int32{10, 20, 30, 40} {
+		_, _, err := memo.GetOrInsert(value)
+		require.NoError(t, err)
+	}
+	nullIndex, found := memo.GetOrInsertNull()
+	require.False(t, found)
+	require.Equal(t, 4, nullIndex)
+
+	data, err := array.GetDictArrayData(mem, arrow.PrimitiveTypes.Int32, memo, 3)
+	require.NoError(t, err)
+	defer data.Release()
+
+	dict := array.MakeFromData(data)
+	defer dict.Release()
+	require.Equal(t, 2, dict.Len())
+	require.Equal(t, 1, dict.NullN())
+	assert.False(t, dict.IsNull(0))
+	assert.True(t, dict.IsNull(1))
+}
 
 var typemap = map[arrow.DataType]reflect.Type{
 	arrow.PrimitiveTypes.Int8:   reflect.TypeOf(int8(0)),
