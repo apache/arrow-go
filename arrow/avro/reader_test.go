@@ -28,10 +28,11 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/avro/testdata"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	hamba "github.com/hamba/avro/v2"
-	"github.com/hamba/avro/v2/ocf"
 	"github.com/stretchr/testify/assert"
+	"github.com/twmb/avro"
+	"github.com/twmb/avro/ocf"
 )
 
 func TestReader(t *testing.T) {
@@ -132,6 +133,10 @@ func TestReader(t *testing.T) {
 					Type: arrow.BinaryTypes.String,
 				},
 				{
+					Name: "fixedUuidField",
+					Type: extensions.NewUUIDType(),
+				},
+				{
 					Name: "timemillis",
 					Type: arrow.FixedWidthTypes.Time32ms,
 				},
@@ -154,6 +159,14 @@ func TestReader(t *testing.T) {
 				{
 					Name: "localtimestampmicros",
 					Type: &arrow.TimestampType{Unit: arrow.Microsecond},
+				},
+				{
+					Name: "timestampnanos",
+					Type: arrow.FixedWidthTypes.Timestamp_ns,
+				},
+				{
+					Name: "localtimestampnanos",
+					Type: &arrow.TimestampType{Unit: arrow.Nanosecond},
 				},
 				{
 					Name: "duration",
@@ -179,20 +192,13 @@ func TestReader(t *testing.T) {
 				t.Fatal(err)
 			}
 			r := new(OCFReader)
-			r.avroSchema = schema.String()
+			r.avroSchema = schema
 			r.editAvroSchema(schemaEdit{method: "delete", path: "fields.0"})
-			schema, err = hamba.Parse(r.avroSchema)
+			got, err := ArrowSchemaFromAvroJSON(r.avroSchema)
 			if err != nil {
 				t.Fatalf("%v: could not parse modified avro schema", arrow.ErrInvalid)
 			}
-			got, err := ArrowSchemaFromAvro(schema)
-			if err != nil {
-				t.Fatalf("%v", err)
-			}
 			assert.Equal(t, want.String(), got.String())
-			if fmt.Sprintf("%+v", want.String()) != fmt.Sprintf("%+v", got.String()) {
-				t.Fatalf("got=%v,\n want=%v", got.String(), want.String())
-			}
 		})
 
 		t.Run("ShouldLoadExpectedRecords", func(t *testing.T) {
@@ -212,7 +218,7 @@ func TestReader(t *testing.T) {
 			exists := ar.Next()
 
 			if ar.Err() != nil {
-				t.Error("failed to read next record: %w", ar.Err())
+				t.Errorf("failed to read next record: %v", ar.Err())
 			}
 			if !exists {
 				t.Error("no record exists")
@@ -232,86 +238,56 @@ func TestReader(t *testing.T) {
 	}
 }
 
-// TestOCFReaderBytesValues exercises avro `bytes` fields, both plain and as a
-// ["null","bytes"] union: hamba hands the decoded value to the appenders as a
-// bare []byte, which previously fell into appendBinaryData's fmt fallback and
-// appended the formatted text (e.g. "[1 2 3]") instead of the payload.
-func TestOCFReaderBytesValues(t *testing.T) {
-	schema := `{
-		"type": "record",
-		"name": "rec",
-		"fields": [
-			{"name": "plain", "type": "bytes"},
-			{"name": "nullable", "type": ["null", "bytes"]}
-		]
-	}`
-	payload := []byte{0x00, 0x01, 0xfe, 0xff}
-
-	var buf bytes.Buffer
-	enc, err := ocf.NewEncoder(schema, &buf)
-	assert.NoError(t, err)
-	assert.NoError(t, enc.Encode(map[string]any{
-		"plain":    payload,
-		"nullable": map[string]any{"bytes": payload},
-	}))
-	assert.NoError(t, enc.Encode(map[string]any{
-		"plain":    []byte{},
-		"nullable": nil,
-	}))
-	assert.NoError(t, enc.Close())
-
-	ar, err := NewOCFReader(bytes.NewReader(buf.Bytes()), WithChunk(-1))
-	assert.NoError(t, err)
-	defer ar.Close()
-
-	assert.True(t, ar.Next())
-	assert.NoError(t, ar.Err())
-	rec := ar.RecordBatch()
-
-	plain := rec.Column(0).(*array.Binary)
-	assert.Equal(t, payload, plain.Value(0))
-	assert.Equal(t, []byte{}, plain.Value(1))
-
-	nullable := rec.Column(1).(*array.Binary)
-	assert.Equal(t, payload, nullable.Value(0))
-	assert.True(t, nullable.IsNull(1))
-}
-
+// A nullable logical timestamp must decode to a value rather than a null: the
+// union branch carries the logical type, so the reader has to honour it on the
+// branch and not just on a bare long.
 func TestOCFReaderNullableTimestamps(t *testing.T) {
 	tests := []struct {
 		logicalType string
-		branch      string
 		typ         *arrow.TimestampType
 	}{
-		{"timestamp-millis", "long.timestamp-millis", arrow.FixedWidthTypes.Timestamp_ms.(*arrow.TimestampType)},
-		{"timestamp-micros", "long.timestamp-micros", arrow.FixedWidthTypes.Timestamp_us.(*arrow.TimestampType)},
-		{"local-timestamp-millis", "long.local-timestamp-millis", &arrow.TimestampType{Unit: arrow.Millisecond}},
-		{"local-timestamp-micros", "long.local-timestamp-micros", &arrow.TimestampType{Unit: arrow.Microsecond}},
+		{"timestamp-millis", arrow.FixedWidthTypes.Timestamp_ms.(*arrow.TimestampType)},
+		{"timestamp-micros", arrow.FixedWidthTypes.Timestamp_us.(*arrow.TimestampType)},
+		{"timestamp-nanos", arrow.FixedWidthTypes.Timestamp_ns.(*arrow.TimestampType)},
+		{"local-timestamp-millis", &arrow.TimestampType{Unit: arrow.Millisecond}},
+		{"local-timestamp-micros", &arrow.TimestampType{Unit: arrow.Microsecond}},
+		{"local-timestamp-nanos", &arrow.TimestampType{Unit: arrow.Nanosecond}},
 	}
+
+	// Decoding must not be influenced by the machine's zone: a local-timestamp
+	// carries no zone at all, so a non-UTC TZ must not shift the value the
+	// reader produces.
+	origLocal := time.Local
+	time.Local = time.FixedZone("test", 3*60*60)
+	t.Cleanup(func() { time.Local = origLocal })
 
 	for _, tt := range tests {
 		t.Run(tt.logicalType, func(t *testing.T) {
-			schema := fmt.Sprintf(`{
+			schemaJSON := fmt.Sprintf(`{
 				"type": "record",
 				"name": "event",
 				"fields": [{
 					"name": "started_at",
-					"type": [
-						"null",
-						{"type": "long", "logicalType": %q}
-					]
+					"type": ["null", {"type": "long", "logicalType": %q}]
 				}]
 			}`, tt.logicalType)
-			value := time.Date(2026, 7, 13, 14, 15, 16, 123456000, time.Local)
+			schema, err := avro.Parse(schemaJSON)
+			assert.NoError(t, err)
+
+			// The value is given in UTC so that the encoder's own
+			// normalisation is a no-op and the assertion below is about what
+			// the reader decodes, not about how twmb chose to write it.
+			value := time.Date(2026, 7, 13, 14, 15, 16, 123456789, time.UTC)
 
 			var buf bytes.Buffer
-			enc, err := ocf.NewEncoder(schema, &buf)
+			// WithSchema keeps the original JSON in the OCF header; the
+			// default is the parsing canonical form, which by spec drops the
+			// logical types this test is about.
+			w, err := ocf.NewWriter(&buf, schema, ocf.WithSchema(schemaJSON))
 			assert.NoError(t, err)
-			assert.NoError(t, enc.Encode(map[string]any{
-				"started_at": map[string]any{tt.branch: value},
-			}))
-			assert.NoError(t, enc.Encode(map[string]any{"started_at": nil}))
-			assert.NoError(t, enc.Close())
+			assert.NoError(t, w.Encode(map[string]any{"started_at": value}))
+			assert.NoError(t, w.Encode(map[string]any{"started_at": nil}))
+			assert.NoError(t, w.Close())
 
 			ar, err := NewOCFReader(bytes.NewReader(buf.Bytes()), WithChunk(-1))
 			assert.NoError(t, err)
@@ -328,91 +304,19 @@ func TestOCFReaderNullableTimestamps(t *testing.T) {
 			assert.True(t, values.IsNull(1))
 			assert.Equal(t, 1, values.NullN())
 
-			wantTime := value
-			if tt.typ.TimeZone == "" {
-				wantTime = time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(), value.Nanosecond(), time.UTC)
-			}
-			wantValue, err := arrow.TimestampFromTime(wantTime, tt.typ.Unit)
+			wantValue, err := arrow.TimestampFromTime(value, tt.typ.Unit)
 			assert.NoError(t, err)
 			assert.Equal(t, wantValue, values.Value(0))
-			assert.Equal(t, wantValue.ToTime(tt.typ.Unit), values.Value(0).ToTime(tt.typ.Unit))
 		})
 	}
 }
 
-func TestAppendTimestampDataUnionBranches(t *testing.T) {
-	value := time.Date(2026, 7, 13, 14, 15, 16, 123456789, time.FixedZone("source", 3*60*60))
-	localValue := time.Date(2026, 7, 13, 14, 15, 16, 123456789, time.UTC)
-	tests := []struct {
-		name   string
-		branch string
-		typ    *arrow.TimestampType
-		want   time.Time
-	}{
-		{"timestamp-millis", "long.timestamp-millis", arrow.FixedWidthTypes.Timestamp_ms.(*arrow.TimestampType), value},
-		{"timestamp-micros", "long.timestamp-micros", arrow.FixedWidthTypes.Timestamp_us.(*arrow.TimestampType), value},
-		{"local-timestamp-millis", "long.local-timestamp-millis", &arrow.TimestampType{Unit: arrow.Millisecond}, localValue},
-		{"local-timestamp-micros", "long.local-timestamp-micros", &arrow.TimestampType{Unit: arrow.Microsecond}, localValue},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b := array.NewTimestampBuilder(memory.DefaultAllocator, tt.typ)
-			defer b.Release()
-			appendTimestampData(b, map[string]any{tt.branch: value})
-
-			values := b.NewTimestampArray()
-			defer values.Release()
-			want, err := arrow.TimestampFromTime(tt.want, tt.typ.Unit)
-			assert.NoError(t, err)
-			assert.False(t, values.IsNull(0))
-			assert.Equal(t, want, values.Value(0))
-		})
-	}
-
-	b := array.NewTimestampBuilder(memory.DefaultAllocator, arrow.FixedWidthTypes.Timestamp_us.(*arrow.TimestampType))
-	defer b.Release()
-	appendTimestampData(b, map[string]any{"long": int64(42)})
-	appendTimestampData(b, nil)
-	values := b.NewTimestampArray()
-	defer values.Release()
-	assert.Equal(t, arrow.Timestamp(42), values.Value(0))
-	assert.True(t, values.IsNull(1))
-}
-
-// Types outside what the hamba decoder produces must error rather than append
-// a fmt-formatted rendering of the value.
-func TestAppendBinaryAndStringDataUnexpectedTypes(t *testing.T) {
-	bb := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
-	defer bb.Release()
-
-	assert.NoError(t, appendBinaryData(bb, []byte{0x01}))
-	assert.NoError(t, appendBinaryData(bb, nil))
-	assert.NoError(t, appendBinaryData(bb, map[string]any{"bytes": []byte{0x02}}))
-	assert.ErrorContains(t, appendBinaryData(bb, 42), "unexpected type int")
-	assert.ErrorContains(t, appendBinaryData(bb, map[string]any{"bytes": "text"}), "unexpected type string")
-	assert.Equal(t, 3, bb.Len())
-
-	sb := array.NewStringBuilder(memory.DefaultAllocator)
-	defer sb.Release()
-
-	assert.NoError(t, appendStringData(sb, "ok"))
-	assert.NoError(t, appendStringData(sb, []byte("ok")))
-	assert.NoError(t, appendStringData(sb, nil))
-	assert.NoError(t, appendStringData(sb, map[string]any{"string": "ok"}))
-	assert.ErrorContains(t, appendStringData(sb, 42), "unexpected type int")
-	assert.ErrorContains(t, appendStringData(sb, map[string]any{"string": 42}), "unexpected type int")
-	assert.Equal(t, 4, sb.Len())
-}
-
-// loadDatum must surface appender errors from nested paths (map values,
-// list items), not only from top-level and struct fields.
+// loadDatum must surface appender errors from nested paths (map values and
+// list items), not just from top-level scalar fields.
 func TestLoadDatumPropagatesNestedAppendErrors(t *testing.T) {
 	newLoader := func(t *testing.T, avroSchema string) (*dataLoader, *array.RecordBuilder) {
 		t.Helper()
-		schema, err := hamba.Parse(avroSchema)
-		assert.NoError(t, err)
-		arrowSchema, err := ArrowSchemaFromAvro(schema)
+		arrowSchema, err := ArrowSchemaFromAvroJSON(avroSchema)
 		assert.NoError(t, err)
 		bld := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
 		pos := newFieldPos()
@@ -429,7 +333,7 @@ func TestLoadDatumPropagatesNestedAppendErrors(t *testing.T) {
 			{"name":"m","type":{"type":"map","values":"bytes"}}]}`)
 		defer bld.Release()
 		assert.NoError(t, ldr.loadDatum(map[string]any{"m": map[string]any{"k": []byte{0x01}}}))
-		assert.ErrorContains(t, ldr.loadDatum(map[string]any{"m": map[string]any{"k": 42}}), "unexpected type int")
+		assert.ErrorContains(t, ldr.loadDatum(map[string]any{"m": map[string]any{"k": 42}}), "unsupported value of type int")
 	})
 
 	t.Run("list item", func(t *testing.T) {
@@ -437,6 +341,182 @@ func TestLoadDatumPropagatesNestedAppendErrors(t *testing.T) {
 			{"name":"l","type":{"type":"array","items":"bytes"}}]}`)
 		defer bld.Release()
 		assert.NoError(t, ldr.loadDatum(map[string]any{"l": []any{[]byte{0x01}}}))
-		assert.ErrorContains(t, ldr.loadDatum(map[string]any{"l": []any{42}}), "unexpected type int")
+		assert.ErrorContains(t, ldr.loadDatum(map[string]any{"l": []any{42}}), "unsupported value of type int")
 	})
+}
+
+// writeOCF encodes data as an OCF file using schemaJSON verbatim in the
+// header, so logical-type annotations survive (the writer would otherwise
+// default to the parsing canonical form, which strips them).
+func writeOCF(t *testing.T, schemaJSON string, data ...any) []byte {
+	t.Helper()
+	schema, err := avro.Parse(schemaJSON)
+	assert.NoError(t, err)
+
+	var buf bytes.Buffer
+	w, err := ocf.NewWriter(&buf, schema, ocf.WithSchema(schemaJSON))
+	assert.NoError(t, err)
+	for _, d := range data {
+		assert.NoError(t, w.Encode(d))
+	}
+	assert.NoError(t, w.Close())
+	return buf.Bytes()
+}
+
+// Only ["null", T] unions map onto Arrow's nullability. Anything else has no
+// faithful representation, so it must be reported rather than silently
+// resolved to one of the branches.
+func TestUnsupportedUnionReportsError(t *testing.T) {
+	tests := []struct {
+		name  string
+		union string
+	}{
+		{"no null branch", `["int", "string"]`},
+		{"two non-null branches", `["null", "int", "string"]`},
+		{"named branches", `["null", {"type":"record","name":"A","fields":[]}, {"type":"record","name":"B","fields":[]}]`},
+		{"null only", `["null"]`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ArrowSchemaFromAvroJSON(fmt.Sprintf(
+				`{"type":"record","name":"r","fields":[{"name":"u","type":%s}]}`, tt.union))
+			assert.ErrorContains(t, err, "unsupported avro union")
+		})
+	}
+
+	t.Run("nested in array", func(t *testing.T) {
+		_, err := ArrowSchemaFromAvroJSON(`{"type":"record","name":"r","fields":[
+			{"name":"a","type":{"type":"array","items":["int","string"]}}]}`)
+		assert.ErrorContains(t, err, "unsupported avro union")
+	})
+}
+
+// Reuse accepts a second file whose schema is semantically identical, and
+// rejects one whose schema differs.
+func TestOCFReaderReuse(t *testing.T) {
+	const schemaJSON = `{"type":"record","name":"r","fields":[
+		{"name":"id","type":"int"},
+		{"name":"name","type":"string"}]}`
+	// Same schema, but reformatted and with a doc attribute: the parsing
+	// canonical form is unchanged, so this must still be reusable.
+	const equivalentJSON = `{"name":"r","type":"record","doc":"reformatted","fields":[{"name":"id","type":"int"},{"name":"name","type":"string"}]}`
+	const otherJSON = `{"type":"record","name":"r","fields":[{"name":"id","type":"long"}]}`
+
+	first := writeOCF(t, schemaJSON, map[string]any{"id": int32(1), "name": "one"})
+	second := writeOCF(t, equivalentJSON, map[string]any{"id": int32(2), "name": "two"})
+	other := writeOCF(t, otherJSON, map[string]any{"id": int64(3)})
+
+	readIDs := func(t *testing.T, ar *OCFReader) []int32 {
+		t.Helper()
+		var got []int32
+		for ar.Next() {
+			assert.NoError(t, ar.Err())
+			col := ar.RecordBatch().Column(0).(*array.Int32)
+			got = append(got, col.Int32Values()...)
+		}
+		assert.NoError(t, ar.Err())
+		return got
+	}
+
+	ar, err := NewOCFReader(bytes.NewReader(first), WithChunk(-1))
+	assert.NoError(t, err)
+	defer ar.Close()
+	assert.Equal(t, []int32{1}, readIDs(t, ar))
+
+	schemaBefore := ar.Schema()
+	assert.NoError(t, ar.Reuse(bytes.NewReader(second), WithChunk(-1)))
+	assert.Equal(t, []int32{2}, readIDs(t, ar))
+	// Reuse keeps the builders, so the Arrow schema must be untouched.
+	assert.Equal(t, schemaBefore, ar.Schema())
+
+	assert.ErrorContains(t, ar.Reuse(bytes.NewReader(other)), "avro schema mismatch")
+}
+
+// A positive chunk size splits the datums into batches of that many rows, with
+// a shorter final batch for the remainder.
+func TestOCFReaderWithChunk(t *testing.T) {
+	const schemaJSON = `{"type":"record","name":"r","fields":[{"name":"id","type":"int"}]}`
+	const rows = 7
+
+	data := make([]any, rows)
+	for i := range data {
+		data[i] = map[string]any{"id": int32(i)}
+	}
+	fixture := writeOCF(t, schemaJSON, data...)
+
+	for _, chunk := range []int{1, 3, rows, rows + 1} {
+		t.Run(fmt.Sprintf("chunk=%d", chunk), func(t *testing.T) {
+			ar, err := NewOCFReader(bytes.NewReader(fixture), WithChunk(chunk))
+			assert.NoError(t, err)
+			defer ar.Close()
+
+			var lens []int
+			var ids []int32
+			for ar.Next() {
+				assert.NoError(t, ar.Err())
+				rec := ar.RecordBatch()
+				lens = append(lens, int(rec.NumRows()))
+				ids = append(ids, rec.Column(0).(*array.Int32).Int32Values()...)
+			}
+			assert.NoError(t, ar.Err())
+
+			var want []int
+			for left := rows; left > 0; left -= chunk {
+				want = append(want, min(left, chunk))
+			}
+			assert.Equal(t, want, lens)
+			assert.Equal(t, []int32{0, 1, 2, 3, 4, 5, 6}, ids)
+			assert.Equal(t, int64(rows), ar.OCFRecordsReadCount())
+		})
+	}
+}
+
+// A record made up only of enum columns must come back as dictionary arrays
+// carrying the Avro symbols, including through a ["null", enum] union.
+func TestOCFReaderEnumOnlyColumns(t *testing.T) {
+	const schemaJSON = `{"type":"record","name":"r","fields":[
+		{"name":"suit","type":{"type":"enum","name":"Suit","symbols":["hearts","spades"]}},
+		{"name":"rank","type":["null",{"type":"enum","name":"Rank","symbols":["low","high"]}]}]}`
+
+	fixture := writeOCF(t, schemaJSON,
+		map[string]any{"suit": "spades", "rank": "high"},
+		map[string]any{"suit": "hearts", "rank": nil},
+	)
+
+	ar, err := NewOCFReader(bytes.NewReader(fixture), WithChunk(-1))
+	assert.NoError(t, err)
+	defer ar.Close()
+
+	suit := ar.Schema().Field(0)
+	assert.Equal(t, &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Uint8,
+		ValueType: arrow.BinaryTypes.String,
+	}, suit.Type)
+	assert.False(t, suit.Nullable)
+	symbols, ok := suit.Metadata.GetValue("1")
+	assert.True(t, ok)
+	assert.Equal(t, "spades", symbols)
+	assert.True(t, ar.Schema().Field(1).Nullable)
+
+	assert.True(t, ar.Next())
+	assert.NoError(t, ar.Err())
+	rec := ar.RecordBatch()
+	assert.Equal(t, int64(2), rec.NumRows())
+
+	values := func(col arrow.Array) []string {
+		d := col.(*array.Dictionary)
+		dict := d.Dictionary().(*array.String)
+		out := make([]string, d.Len())
+		for i := range out {
+			if d.IsNull(i) {
+				out[i] = "<null>"
+				continue
+			}
+			out[i] = dict.Value(d.GetValueIndex(i))
+		}
+		return out
+	}
+	assert.Equal(t, []string{"spades", "hearts"}, values(rec.Column(0)))
+	assert.Equal(t, []string{"high", "<null>"}, values(rec.Column(1)))
 }
