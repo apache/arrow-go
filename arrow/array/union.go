@@ -471,8 +471,8 @@ func arraySparseUnionApproxEqual(l, r *SparseUnion, opt equalOption) bool {
 		}
 
 		childNum := childIDs[typeID]
-		eq := sliceApproxEqual(l.children[childNum], int64(i+l.data.offset), int64(i+l.data.offset+1),
-			r.children[childNum], int64(i+r.data.offset), int64(i+r.data.offset+1), opt)
+		eq := sliceApproxEqual(l.children[childNum], int64(i), int64(i+1),
+			r.children[childNum], int64(i), int64(i+1), opt)
 		if !eq {
 			return false
 		}
