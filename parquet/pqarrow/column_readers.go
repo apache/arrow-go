@@ -451,6 +451,10 @@ func (lr *listReader) LoadBatch(nrecords int64) error {
 }
 
 func (lr *listReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
+	return lr.buildArray(lenBound, false)
+}
+
+func (lr *listReader) buildArray(lenBound int64, fixedSize bool) (*arrow.Chunked, error) {
 	var (
 		defLevels      []int16
 		repLevels      []int16
@@ -521,6 +525,14 @@ func (lr *listReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
 		return nil, err
 	}
 	defer item.Release()
+	itemArr := array.MakeFromData(item)
+	defer itemArr.Release()
+
+	if fixedSize {
+		offsetData := arrow.Int32Traits.CastFromBytes(offsetsBuffer.Bytes())
+		return lr.buildFixedSizeListArray(int(validityIO.Read), offsetData, validityBuffer,
+			validityIO.NullCount, itemArr)
+	}
 
 	buffers := []*memory.Buffer{nil, offsetsBuffer}
 	if validityIO.NullCount > 0 {
@@ -529,18 +541,65 @@ func (lr *listReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
 
 	data := array.NewData(lr.field.Type, int(validityIO.Read), buffers, []arrow.ArrayData{item}, int(validityIO.NullCount), 0)
 	defer data.Release()
-	if lr.field.Type.ID() == arrow.FIXED_SIZE_LIST {
-		defer data.Buffers()[1].Release()
-		offsetData := arrow.Int32Traits.CastFromBytes(offsetsBuffer.Bytes())
-		listSize := lr.field.Type.(*arrow.FixedSizeListType).Len()
-		for x := 1; x < data.Len(); x++ {
-			size := offsetData[x] - offsetData[x-1]
-			if size != listSize {
-				return nil, fmt.Errorf("expected all lists to be of size=%d, but index %d had size=%d", listSize, x, size)
+	out := array.MakeFromData(data)
+	defer out.Release()
+	return arrow.NewChunked(lr.field.Type, []arrow.Array{out}), nil
+}
+
+func (lr *listReader) buildFixedSizeListArray(length int, offsets []int32, validityBuffer *memory.Buffer,
+	nullCount int64, item arrow.Array) (*arrow.Chunked, error) {
+	listType := lr.field.Type.(*arrow.FixedSizeListType)
+	listSize := int(listType.Len())
+	pieces := make([]arrow.Array, 0, length)
+	defer func() { releaseArrays(pieces) }()
+
+	for i := 0; i < length; {
+		valid := !lr.field.Nullable || bitutil.BitIsSet(validityBuffer.Bytes(), i)
+		end := i + 1
+		for end < length {
+			nextValid := !lr.field.Nullable || bitutil.BitIsSet(validityBuffer.Bytes(), end)
+			if nextValid != valid {
+				break
 			}
+			end++
 		}
-		data.Buffers()[1] = nil
+
+		if valid {
+			for idx := i; idx < end; idx++ {
+				if size := offsets[idx+1] - offsets[idx]; size != int32(listSize) {
+					return nil, fmt.Errorf("expected all lists to be of size=%d, but index %d had size=%d", listSize, idx, size)
+				}
+			}
+			if offsets[i] < 0 || offsets[end] < offsets[i] || int64(offsets[end]) > int64(item.Len()) {
+				return nil, fmt.Errorf("fixed-size list offsets at index %d exceed decoded child values", i)
+			}
+			pieces = append(pieces, array.NewSlice(item, int64(offsets[i]), int64(offsets[end])))
+		} else {
+			for idx := i; idx < end; idx++ {
+				if size := offsets[idx+1] - offsets[idx]; size != 0 {
+					return nil, fmt.Errorf("null fixed-size list at index %d consumed %d child values", idx, size)
+				}
+			}
+			pieces = append(pieces, array.MakeArrayOfNull(lr.rctx.mem, listType.Elem(), (end-i)*listSize))
+		}
+		i = end
 	}
+
+	if len(pieces) == 0 {
+		pieces = append(pieces, array.MakeArrayOfNull(lr.rctx.mem, listType.Elem(), 0))
+	}
+	child, err := array.Concatenate(pieces, lr.rctx.mem)
+	if err != nil {
+		return nil, err
+	}
+	defer child.Release()
+
+	buffers := []*memory.Buffer{nil}
+	if nullCount > 0 {
+		buffers[0] = validityBuffer
+	}
+	data := array.NewData(lr.field.Type, length, buffers, []arrow.ArrayData{child.Data()}, int(nullCount), 0)
+	defer data.Release()
 	out := array.MakeFromData(data)
 	defer out.Release()
 	return arrow.NewChunked(lr.field.Type, []arrow.Array{out}), nil
@@ -561,6 +620,10 @@ func newFixedSizeListReader(rctx *readerCtx, field *arrow.Field, info file.Level
 			&lr,
 		},
 	}
+}
+
+func (lr *fixedSizeListReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
+	return lr.listReader.buildArray(lenBound, true)
 }
 
 // helper function to combine chunks into a single array.
