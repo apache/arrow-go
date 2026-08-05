@@ -198,6 +198,29 @@ func TestBinaryScalarValidateErrors(t *testing.T) {
 	assert.Error(t, sc.ValidateFull())
 }
 
+func TestBinaryScalarCastToBinaryUsesTargetType(t *testing.T) {
+	buf := memory.NewBufferBytes([]byte("abc"))
+	defer buf.Release()
+
+	scalars := []scalar.BinaryScalar{
+		scalar.NewBinaryScalar(buf, arrow.BinaryTypes.Binary),
+		scalar.NewLargeBinaryScalar(buf),
+		scalar.NewFixedSizeBinaryScalar(buf, &arrow.FixedSizeBinaryType{ByteWidth: 3}),
+	}
+	for _, src := range scalars {
+		t.Run(src.DataType().Name(), func(t *testing.T) {
+			defer src.Release()
+
+			got, err := src.CastTo(arrow.BinaryTypes.Binary)
+			require.NoError(t, err)
+			defer got.(scalar.Releasable).Release()
+			assert.IsType(t, &scalar.Binary{}, got)
+			assert.True(t, arrow.TypeEqual(arrow.BinaryTypes.Binary, got.DataType()))
+			assert.Equal(t, []byte("abc"), got.(scalar.BinaryScalar).Data())
+		})
+	}
+}
+
 func TestStringMakeScalar(t *testing.T) {
 	assertMakeScalar(t, scalar.NewStringScalar("three"), "three")
 	assertParseScalar(t, arrow.BinaryTypes.String, "three", scalar.NewStringScalar("three"))
