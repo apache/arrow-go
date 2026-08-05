@@ -1349,6 +1349,33 @@ func TestMakeArrayFromScalarUsesCorrectBinaryOffsetWidthForNulls(t *testing.T) {
 	}
 }
 
+func TestMakeArrayFromScalarSupportsZeroLength(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	for _, s := range getScalars(mem) {
+		t.Run(s.DataType().Name(), func(t *testing.T) {
+			if releasable, ok := s.(scalar.Releasable); ok {
+				defer releasable.Release()
+			}
+
+			arr, err := scalar.MakeArrayFromScalar(s, 0, mem)
+			require.NoError(t, err)
+			defer arr.Release()
+			assert.Equal(t, 0, arr.Len())
+			assert.Equal(t, 0, arr.NullN())
+			require.NoError(t, array.ValidateFull(arr))
+		})
+	}
+
+	nullArr, err := scalar.MakeArrayFromScalar(scalar.ScalarNull, 0, mem)
+	require.NoError(t, err)
+	defer nullArr.Release()
+	assert.Equal(t, 0, nullArr.Len())
+	assert.Equal(t, 0, nullArr.NullN())
+	require.NoError(t, array.ValidateFull(nullArr))
+}
+
 func TestMakeArrayFromScalarRejectsNegativeLength(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
