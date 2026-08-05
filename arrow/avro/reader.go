@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -60,6 +61,8 @@ type OCFReader struct {
 	ldr    *dataLoader
 	cur    arrow.RecordBatch
 	err    error
+	errMu  sync.RWMutex
+	readWG sync.WaitGroup
 
 	primed     bool
 	readerCtx  context.Context
@@ -68,7 +71,7 @@ type OCFReader struct {
 	maxRec     int
 
 	avroChan       chan any
-	avroDatumCount int64
+	avroDatumCount atomic.Int64
 	avroChanSize   int
 	recChan        chan arrow.RecordBatch
 
@@ -127,16 +130,18 @@ func NewOCFReader(r io.Reader, opts ...Option) (*OCFReader, error) {
 		rr.mem = memory.DefaultAllocator
 	}
 	rr.readerCtx, rr.readCancel = context.WithCancel(context.Background())
-	go rr.decodeOCFToChan()
+	rr.readWG.Add(1)
+	go func() {
+		defer rr.readWG.Done()
+		rr.decodeOCFToChan()
+	}()
 
-	rr.bld = array.NewRecordBuilder(rr.mem, rr.schema)
-	rr.bldMap = newFieldPos()
-	rr.ldr = newDataLoader()
-	for idx, fb := range rr.bld.Fields() {
-		mapFieldBuilders(fb, rr.schema.Field(idx), rr.bldMap)
-	}
-	rr.ldr.drawTree(rr.bldMap)
-	go rr.recordFactory()
+	rr.initBuilder()
+	rr.readWG.Add(1)
+	go func() {
+		defer rr.readWG.Done()
+		rr.recordFactory()
+	}()
 	return rr, nil
 }
 
@@ -144,7 +149,7 @@ func NewOCFReader(r io.Reader, opts ...Option) (*OCFReader, error) {
 // new Avro file has an identical schema.
 func (rr *OCFReader) Reuse(r io.Reader, opts ...Option) error {
 	rr.Close()
-	rr.err = nil
+	rr.clearErr()
 	ocfr, err := ocf.NewReader(r)
 	if err != nil {
 		return fmt.Errorf("%w: could not create avro ocfreader", arrow.ErrInvalid)
@@ -169,10 +174,14 @@ func (rr *OCFReader) Reuse(r io.Reader, opts ...Option) error {
 	for _, opt := range opts {
 		opt(rr)
 	}
+	if rr.bld != nil {
+		rr.bld.Release()
+	}
+	rr.initBuilder()
 
 	rr.maxOCF = 0
 	rr.maxRec = 0
-	rr.avroDatumCount = 0
+	rr.avroDatumCount.Store(0)
 	rr.primed = false
 
 	rr.avroChan = make(chan any, rr.avroChanSize)
@@ -180,14 +189,55 @@ func (rr *OCFReader) Reuse(r io.Reader, opts ...Option) error {
 	rr.bldDone = make(chan struct{})
 
 	rr.readerCtx, rr.readCancel = context.WithCancel(context.Background())
-	go rr.decodeOCFToChan()
-	go rr.recordFactory()
+	rr.readWG.Add(2)
+	go func() {
+		defer rr.readWG.Done()
+		rr.decodeOCFToChan()
+	}()
+	go func() {
+		defer rr.readWG.Done()
+		rr.recordFactory()
+	}()
 	return nil
+}
+
+func (rr *OCFReader) initBuilder() {
+	if rr.mem == nil {
+		rr.mem = memory.DefaultAllocator
+	}
+	rr.bld = array.NewRecordBuilder(rr.mem, rr.schema)
+	rr.bldMap = newFieldPos()
+	rr.ldr = newDataLoader()
+	for idx, fb := range rr.bld.Fields() {
+		mapFieldBuilders(fb, rr.schema.Field(idx), rr.bldMap)
+	}
+	rr.ldr.drawTree(rr.bldMap)
 }
 
 // Err returns the last error encountered during the iteration over the
 // underlying Avro file.
-func (r *OCFReader) Err() error { return r.err }
+func (r *OCFReader) Err() error {
+	r.errMu.RLock()
+	defer r.errMu.RUnlock()
+	return r.err
+}
+
+func (r *OCFReader) setErr(err error) {
+	if err == nil {
+		return
+	}
+	r.errMu.Lock()
+	if r.err == nil {
+		r.err = err
+	}
+	r.errMu.Unlock()
+}
+
+func (r *OCFReader) clearErr() {
+	r.errMu.Lock()
+	r.err = nil
+	r.errMu.Unlock()
+}
 
 // AvroSchema returns the Avro schema of the Avro OCF
 func (r *OCFReader) AvroSchema() string { return r.avroSchema }
@@ -214,13 +264,29 @@ func (r *OCFReader) Metrics() string {
 }
 
 // OCFRecordsReadCount returns the number of Avro datum that were read from the Avro file.
-func (r *OCFReader) OCFRecordsReadCount() int64 { return r.avroDatumCount }
+func (r *OCFReader) OCFRecordsReadCount() int64 { return r.avroDatumCount.Load() }
 
 // Close closes the OCFReader's Avro record read cache and converted Arrow record cache. OCFReader must
 // be closed if the Avro OCF's records have not been read to completion.
 func (r *OCFReader) Close() {
+	if r.readCancel == nil {
+		return
+	}
 	r.readCancel()
-	r.err = r.readerCtx.Err()
+	r.readWG.Wait()
+	if r.Err() == nil {
+		r.setErr(r.readerCtx.Err())
+	}
+	for rec := range r.recChan {
+		if rec != nil {
+			rec.Release()
+		}
+	}
+	if r.cur != nil {
+		r.cur.Release()
+		r.cur = nil
+	}
+	r.readCancel = nil
 }
 
 func (r *OCFReader) editAvroSchema(e schemaEdit) error {
@@ -263,7 +329,7 @@ func (r *OCFReader) Next() bool {
 			r.cur = <-r.recChan
 		}
 	}
-	if r.err != nil {
+	if r.Err() != nil {
 		return false
 	}
 
@@ -342,8 +408,10 @@ func (r *OCFReader) Release() {
 	debug.Assert(r.refs.Load() > 0, "too many releases")
 
 	if r.refs.Add(-1) == 0 {
-		if r.cur != nil {
-			r.cur.Release()
+		r.Close()
+		if r.bld != nil {
+			r.bld.Release()
+			r.bld = nil
 		}
 	}
 }

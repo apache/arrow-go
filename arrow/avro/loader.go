@@ -20,6 +20,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/apache/arrow-go/v18/arrow"
 )
 
 func (r *OCFReader) decodeOCFToChan() {
@@ -27,7 +29,7 @@ func (r *OCFReader) decodeOCFToChan() {
 	for {
 		select {
 		case <-r.readerCtx.Done():
-			r.err = fmt.Errorf("avro decoding cancelled, %d records read", r.avroDatumCount)
+			r.setErr(fmt.Errorf("avro decoding cancelled, %d records read", r.avroDatumCount.Load()))
 			return
 		default:
 			var datum any
@@ -36,17 +38,23 @@ func (r *OCFReader) decodeOCFToChan() {
 				if errors.Is(err, io.EOF) {
 					return
 				}
-				r.err = err
+				r.setErr(err)
 				return
 			}
-			r.avroChan <- datum
-			r.avroDatumCount++
+			select {
+			case r.avroChan <- datum:
+				r.avroDatumCount.Add(1)
+			case <-r.readerCtx.Done():
+				r.setErr(fmt.Errorf("avro decoding cancelled, %d records read", r.avroDatumCount.Load()))
+				return
+			}
 		}
 	}
 }
 
 func (r *OCFReader) recordFactory() {
 	defer close(r.recChan)
+	defer close(r.bldDone)
 	r.primed = true
 	recChunk := 0
 	switch {
@@ -54,12 +62,11 @@ func (r *OCFReader) recordFactory() {
 		for data := range r.avroChan {
 			err := r.ldr.loadDatum(data)
 			if err != nil {
-				r.err = err
+				r.setErr(err)
 				return
 			}
 		}
-		r.recChan <- r.bld.NewRecordBatch()
-		r.bldDone <- struct{}{}
+		r.sendRecord(r.bld.NewRecordBatch())
 	case r.chunk >= 1:
 		for data := range r.avroChan {
 			if recChunk == 0 {
@@ -67,18 +74,29 @@ func (r *OCFReader) recordFactory() {
 			}
 			err := r.ldr.loadDatum(data)
 			if err != nil {
-				r.err = err
+				r.setErr(err)
 				return
 			}
 			recChunk++
 			if recChunk >= r.chunk {
-				r.recChan <- r.bld.NewRecordBatch()
+				if !r.sendRecord(r.bld.NewRecordBatch()) {
+					return
+				}
 				recChunk = 0
 			}
 		}
 		if recChunk != 0 {
-			r.recChan <- r.bld.NewRecordBatch()
+			r.sendRecord(r.bld.NewRecordBatch())
 		}
-		r.bldDone <- struct{}{}
+	}
+}
+
+func (r *OCFReader) sendRecord(rec arrow.RecordBatch) bool {
+	select {
+	case r.recChan <- rec:
+		return true
+	case <-r.readerCtx.Done():
+		rec.Release()
+		return false
 	}
 }
