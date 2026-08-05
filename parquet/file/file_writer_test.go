@@ -1474,8 +1474,8 @@ func TestRowGroupClosePropagatesMetadataFinishError(t *testing.T) {
 	rgw, err := writer.AppendRowGroupChecked()
 	require.NoError(t, err)
 
-	require.ErrorContains(t, rgw.Close(), "only -1 out of 1 columns are initialized")
-	require.ErrorContains(t, writer.Close(), "only -1 out of 1 columns are initialized")
+	require.ErrorContains(t, rgw.Close(), "only 0 out of 1 columns are initialized")
+	require.ErrorContains(t, writer.Close(), "only 0 out of 1 columns are initialized")
 }
 
 func TestFlushWithFooterKeepsPageIndexBuilderAppendable(t *testing.T) {
