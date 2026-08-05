@@ -694,6 +694,11 @@ func (b *dictionaryBuilder) ResetFull() {
 	b.memoTable.Reset()
 }
 
+func (b *dictionaryBuilder) checkpoint() func() {
+	size := b.memoTable.Size()
+	return func() { b.memoTable.Truncate(size) }
+}
+
 func (b *dictionaryBuilder) Cap() int { return b.idxBuilder.Cap() }
 
 func (b *dictionaryBuilder) IsNull(i int) bool { return b.idxBuilder.IsNull(i) }

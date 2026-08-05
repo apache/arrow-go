@@ -42,6 +42,8 @@ type MemoTable interface {
 	TypeTraits() TypeTraits
 	// Reset drops everything in the table allowing it to be reused
 	Reset()
+	// Truncate removes values with an index greater than or equal to size.
+	Truncate(size int)
 	// Size returns the current number of unique values stored in
 	// the table, including whether or not a null value has been
 	// inserted via GetOrInsertNull.
@@ -165,6 +167,26 @@ func (s *BinaryMemoTable) Reset() {
 	s.builder.Reserve(int(32))
 	s.builder.ReserveData(int(32) * 4)
 	s.nullIdx = KeyNotFound
+}
+
+func (s *BinaryMemoTable) Truncate(size int) {
+	if size < 0 {
+		panic("cannot truncate a memo table to a negative size")
+	}
+	if size >= s.Size() {
+		return
+	}
+
+	dataLen := 0
+	for i := 0; i < size; i++ {
+		dataLen += len(s.builder.Value(i))
+	}
+	s.builder.Resize(size)
+	s.builder.ResizeData(dataLen)
+	s.tbl.Truncate(uint64(size))
+	if s.nullIdx >= size {
+		s.nullIdx = KeyNotFound
+	}
 }
 
 // GetNull returns the index of a null that has been inserted into the table or

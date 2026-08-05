@@ -560,6 +560,82 @@ func TestRecordBuilderRollsBackRowsAfterDecodeError(t *testing.T) {
 
 }
 
+func TestRecordBuilderRollsBackVariableWidthState(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: arrow.BinaryTypes.String},
+		{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	large := strings.Repeat("x", 1<<20)
+	if err := builder.UnmarshalJSON([]byte(fmt.Sprintf(`{"value":%q,"other":"invalid"}`, large))); err == nil {
+		t.Fatal("expected a decode error")
+	}
+	assert.Zero(t, builder.Field(0).(*array.StringBuilder).DataLen())
+
+	if err := builder.UnmarshalJSON([]byte(`{"value":"kept","other":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+	assert.Equal(t, "kept", rec.Column(0).(*array.String).Value(0))
+	assert.NoError(t, array.ValidateFull(rec.Column(0)))
+}
+
+func TestRecordBuilderRollsBackDictionaryState(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: dictType},
+		{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	if err := builder.UnmarshalJSON([]byte(`{"value":"discarded","other":"invalid"}`)); err == nil {
+		t.Fatal("expected a decode error")
+	}
+	if err := builder.UnmarshalJSON([]byte(`{"value":"kept","other":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+
+	dict := rec.Column(0).(*array.Dictionary)
+	defer dict.Dictionary().Release()
+	assert.Equal(t, 1, dict.Dictionary().Len())
+	assert.Equal(t, "kept", dict.Dictionary().(*array.String).Value(0))
+	assert.NoError(t, array.ValidateFull(dict))
+}
+
+func TestRecordBuilderRollsBackStringViewBlocks(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	typ := arrow.ListOf(arrow.BinaryTypes.StringView)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: typ}}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	if err := builder.UnmarshalJSON([]byte(`{"value":["long string",1]}`)); err == nil {
+		t.Fatal("expected a decode error")
+	}
+	if err := builder.UnmarshalJSON([]byte(`{"value":["kept"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+	list := rec.Column(0).(*array.List)
+	assert.Equal(t, "kept", list.ListValues().(*array.StringView).Value(0))
+	assert.NoError(t, array.ValidateFull(rec.Column(0)))
+}
+
 func TestRecordBuilderRollsBackNestedRowsAfterDecodeError(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)

@@ -237,6 +237,25 @@ func (b *multiBufferBuilder) Reset() {
 	}
 }
 
+func (b *multiBufferBuilder) checkpoint() func() {
+	blockLengths := make([]int, len(b.blocks))
+	for i, block := range b.blocks {
+		blockLengths[i] = block.Len()
+	}
+	currentOutBuffer := b.currentOutBuffer
+
+	return func() {
+		for _, block := range b.blocks[len(blockLengths):] {
+			block.Release()
+		}
+		b.blocks = b.blocks[:len(blockLengths)]
+		for i, length := range blockLengths {
+			b.blocks[i].Resize(length)
+		}
+		b.currentOutBuffer = currentOutBuffer
+	}
+}
+
 func (b *multiBufferBuilder) UnsafeAppend(hdr *arrow.ViewHeader, val []byte) {
 	buf := b.blocks[b.currentOutBuffer]
 	idx, offset := b.currentOutBuffer, buf.Len()

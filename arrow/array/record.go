@@ -415,10 +415,15 @@ func (b *RecordBuilder) NewRecord() arrow.Record {
 	return b.NewRecordBatch()
 }
 
+type checkpointableBuilder interface {
+	checkpoint() func()
+}
+
 type builderCheckpoint struct {
 	builder          Builder
 	length           int
 	children         []*builderCheckpoint
+	restoreState     func()
 	lastUnmarshalled interface{}
 	unmarshalled     bool
 	lastStr          *string
@@ -428,6 +433,9 @@ func newBuilderCheckpoint(builder Builder) *builderCheckpoint {
 	checkpoint := &builderCheckpoint{
 		builder: builder,
 		length:  builder.Len(),
+	}
+	if checkpointable, ok := builder.(checkpointableBuilder); ok {
+		checkpoint.restoreState = checkpointable.checkpoint()
 	}
 
 	switch builder := builder.(type) {
@@ -503,6 +511,9 @@ func (checkpoint *builderCheckpoint) restore() {
 	case *DenseUnionBuilder:
 		builder.typesBuilder.SetLength(checkpoint.length)
 		builder.offsetsBuilder.SetLength(checkpoint.length * arrow.Int32SizeBytes)
+	}
+	if checkpoint.restoreState != nil {
+		checkpoint.restoreState()
 	}
 }
 

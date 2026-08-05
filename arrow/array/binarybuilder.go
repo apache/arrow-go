@@ -227,6 +227,11 @@ func (b *BinaryBuilder) init(capacity int) {
 // DataLen returns the number of bytes in the data array.
 func (b *BinaryBuilder) DataLen() int { return b.values.length }
 
+func (b *BinaryBuilder) checkpoint() func() {
+	dataLen := b.DataLen()
+	return func() { b.ResizeData(dataLen) }
+}
+
 // DataCap returns the total number of bytes that can be stored
 // without allocating additional memory.
 func (b *BinaryBuilder) DataCap() int { return b.values.capacity }
@@ -424,6 +429,17 @@ func (b *BinaryViewBuilder) SetBlockSize(sz uint) {
 }
 
 func (b *BinaryViewBuilder) Type() arrow.DataType { return b.dtype }
+
+func (b *BinaryViewBuilder) checkpoint() func() {
+	length := b.length
+	blockState := b.blockBuilder.checkpoint()
+	return func() {
+		blockState()
+		for i := length; i < len(b.rawData); i++ {
+			b.rawData[i] = arrow.ViewHeader{}
+		}
+	}
+}
 
 func (b *BinaryViewBuilder) Release() {
 	debug.Assert(b.refCount.Load() > 0, "too many releases")
