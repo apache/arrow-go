@@ -59,17 +59,11 @@ func (w *streamWriter) WritePayload(p Payload) error {
 func (w *streamWriter) Write(p []byte) (int, error) {
 	n, err := w.w.Write(p)
 	w.pos += int64(n)
-	if err == nil && n != len(p) {
-		err = io.ErrShortWrite
-	}
 	return n, err
 }
 
 func writeFull(w io.Writer, p []byte) error {
-	n, err := w.Write(p)
-	if err == nil && n != len(p) {
-		err = io.ErrShortWrite
-	}
+	_, err := w.Write(p)
 	return err
 }
 

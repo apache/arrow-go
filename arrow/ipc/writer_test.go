@@ -47,7 +47,7 @@ type failingPayloadWriter struct {
 type shortWriteWriter struct{}
 
 func (shortWriteWriter) Write(p []byte) (int, error) {
-	return len(p) - 1, nil
+	return len(p) - 1, io.ErrShortWrite
 }
 
 func TestPayloadWriteRejectsShortWrites(t *testing.T) {
