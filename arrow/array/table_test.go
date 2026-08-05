@@ -203,8 +203,10 @@ func TestChunkedInvalid(t *testing.T) {
 		}
 	}()
 
+	// Keep a valid chunk before the mismatch so failed construction must not
+	// leave an extra reference to it.
 	c1 := arrow.NewChunked(arrow.PrimitiveTypes.Int32, []arrow.Array{
-		f1, f2,
+		f2, f1,
 	})
 	defer c1.Release()
 }
