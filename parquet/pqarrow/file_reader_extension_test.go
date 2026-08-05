@@ -35,6 +35,35 @@ type mismatchingExtensionArray struct {
 	array.ExtensionArrayBase
 }
 
+type stableExtensionType struct {
+	arrow.ExtensionBase
+}
+
+type stableExtensionArray struct {
+	array.ExtensionArrayBase
+}
+
+func (*stableExtensionType) StorageType() arrow.DataType { return arrow.PrimitiveTypes.Int32 }
+
+func (*stableExtensionType) ArrayType() reflect.Type {
+	return reflect.TypeFor[stableExtensionArray]()
+}
+
+func (*stableExtensionType) ExtensionName() string { return "test.stable" }
+
+func (*stableExtensionType) ExtensionEquals(other arrow.ExtensionType) bool {
+	_, ok := other.(*stableExtensionType)
+	return ok
+}
+
+func (*stableExtensionType) Serialize() string { return "" }
+
+func (*stableExtensionType) Deserialize(arrow.DataType, string) (arrow.ExtensionType, error) {
+	return &stableExtensionType{
+		ExtensionBase: arrow.ExtensionBase{Storage: arrow.PrimitiveTypes.Int32},
+	}, nil
+}
+
 func (t *mismatchingExtensionType) StorageType() arrow.DataType {
 	t.storageTypeCalls++
 	if t.storageTypeCalls > 2 {
@@ -98,4 +127,32 @@ func TestExtensionReaderBuildArrayReleasesPartialChunksOnPanic(t *testing.T) {
 		_, _ = r.BuildArray(0)
 	})
 	require.Zero(t, mem.CurrentAlloc())
+}
+
+func TestExtensionReaderBuildArrayReleasesChunks(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	b := array.NewInt32Builder(mem)
+	b.Append(1)
+	first := b.NewInt32Array()
+	b.Append(2)
+	second := b.NewInt32Array()
+	b.Release()
+
+	chunks := arrow.NewChunked(arrow.PrimitiveTypes.Int32, []arrow.Array{first, second})
+	first.Release()
+	second.Release()
+
+	extType := &stableExtensionType{
+		ExtensionBase: arrow.ExtensionBase{Storage: arrow.PrimitiveTypes.Int32},
+	}
+	r := extensionReader{
+		colReaderImpl: &chunkedColumnReader{chunks: chunks},
+		fieldWithExt:  arrow.Field{Name: "extension", Type: extType},
+	}
+
+	out, err := r.BuildArray(0)
+	require.NoError(t, err)
+	out.Release()
 }
