@@ -108,7 +108,7 @@ func (session *serverSession) GetSessionOption(name string) *flight.SessionOptio
 		return nil
 	}
 
-	return value
+	return proto.Clone(value).(*flight.SessionOptionValue)
 }
 
 func (session *serverSession) GetSessionOptions() map[string]*flight.SessionOptionValue {
@@ -131,7 +131,7 @@ func (session *serverSession) SetSessionOption(name string, value *flight.Sessio
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
-	session.options[name] = value
+	session.options[name] = proto.Clone(value).(*flight.SessionOptionValue)
 }
 
 func (session *serverSession) EraseSessionOption(name string) {
