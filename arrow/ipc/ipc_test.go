@@ -150,6 +150,21 @@ func TestNewReaderFromMessageReaderReleasesOnSchemaError(t *testing.T) {
 	assert.Equal(t, 1, msgReader.releases)
 }
 
+type panicMessageReader struct {
+	releases int
+}
+
+func (r *panicMessageReader) Message() (*ipc.Message, error) { panic("schema read panicked") }
+func (r *panicMessageReader) Release()                       { r.releases++ }
+func (r *panicMessageReader) Retain()                        {}
+
+func TestNewReaderFromMessageReaderReleasesOnSchemaPanic(t *testing.T) {
+	msgReader := &panicMessageReader{}
+	_, err := ipc.NewReaderFromMessageReader(msgReader)
+	require.Error(t, err)
+	assert.Equal(t, 1, msgReader.releases)
+}
+
 // Ensure that if the MessageReader errors, we get the error from Read
 func TestArrow14769(t *testing.T) {
 	reader, err := ipc.NewReaderFromMessageReader(&testMessageReader{})
