@@ -148,11 +148,27 @@ func castTemporal(from TemporalScalar, to arrow.DataType) (Scalar, error) {
 		case *arrow.TimestampType:
 			return NewTimestampScalar(arrow.Timestamp(arrow.ConvertTimestampValue(s.Unit(), to.Unit, int64(s.Value))), to), nil
 		case *arrow.Date32Type:
-			millis := arrow.ConvertTimestampValue(s.Unit(), arrow.Millisecond, int64(s.Value))
-			return NewDate32Scalar(arrow.Date32(millis / int64(millisecondsInDay))), nil
+			timestampType := s.DataType().(*arrow.TimestampType)
+			toTime, err := timestampType.GetToTimeFunc()
+			if err != nil {
+				return nil, err
+			}
+			tm := toTime(s.Value)
+			if _, offset := tm.Zone(); offset != 0 {
+				tm = tm.Add(time.Duration(offset) * time.Second).UTC()
+			}
+			return NewDate32Scalar(arrow.Date32FromTime(tm)), nil
 		case *arrow.Date64Type:
-			millis := arrow.ConvertTimestampValue(s.Unit(), arrow.Millisecond, int64(s.Value))
-			return NewDate64Scalar(arrow.Date64(millis - millis%int64(millisecondsInDay))), nil
+			timestampType := s.DataType().(*arrow.TimestampType)
+			toTime, err := timestampType.GetToTimeFunc()
+			if err != nil {
+				return nil, err
+			}
+			tm := toTime(s.Value)
+			if _, offset := tm.Zone(); offset != 0 {
+				tm = tm.Add(time.Duration(offset) * time.Second).UTC()
+			}
+			return NewDate64Scalar(arrow.Date64FromTime(tm)), nil
 		}
 	case TimeScalar:
 		var value int64
