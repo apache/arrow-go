@@ -496,6 +496,54 @@ rec[2]["date64"]: [(null)]
 	}
 }
 
+type releaseCountingBuilder struct {
+	array.Builder
+	releases *int
+}
+
+func (b *releaseCountingBuilder) Release() {
+	*b.releases++
+	b.Builder.Release()
+}
+
+type preallocatingUUIDType struct {
+	*extensions.UUIDType
+	releases *int
+}
+
+func (t *preallocatingUUIDType) NewBuilder(mem memory.Allocator) array.Builder {
+	b := extensions.NewUUIDBuilder(mem)
+	b.Reserve(1)
+	return &releaseCountingBuilder{Builder: b, releases: t.releases}
+}
+
+func TestReaderReleaseFreesRecordBuilders(t *testing.T) {
+	for _, withHeader := range []bool{false, true} {
+		t.Run(fmt.Sprintf("header=%t", withHeader), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			var releases int
+			extType := &preallocatingUUIDType{
+				UUIDType: extensions.NewUUIDType(),
+				releases: &releases,
+			}
+			schema := arrow.NewSchema([]arrow.Field{{Name: "uuid", Type: extType}}, nil)
+			r := csv.NewReader(strings.NewReader("uuid\n00000000-0000-0000-0000-000000000001\n"), schema,
+				csv.WithAllocator(mem), csv.WithHeader(withHeader))
+			if withHeader {
+				require.True(t, r.Next())
+			}
+			r.Release()
+
+			expectedReleases := 1
+			if withHeader {
+				expectedReleases = 2
+			}
+			require.Equal(t, expectedReleases, releases)
+			mem.AssertSize(t, 0)
+		})
+	}
+}
+
 func TestCSVReaderWithChunk(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
