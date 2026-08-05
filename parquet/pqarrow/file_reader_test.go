@@ -19,6 +19,7 @@ package pqarrow_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -189,6 +190,65 @@ func TestArrowReaderCanceledContext(t *testing.T) {
 
 	_, err = arrowRdr.ReadTable(ctx)
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+type failingReaderAt struct {
+	*bytes.Reader
+	failOffset int64
+	err        error
+}
+
+func (r *failingReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	if off == r.failOffset {
+		return 0, r.err
+	}
+	return r.Reader.ReadAt(p, off)
+}
+
+func TestGetFieldReadersReleasesPartialReadersOnError(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "first", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "second", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	record, _, err := array.RecordFromJSON(memory.DefaultAllocator, schema,
+		strings.NewReader(`[{"first": 1, "second": 2}]`))
+	require.NoError(t, err)
+	defer record.Release()
+
+	var buf bytes.Buffer
+	writer, err := pqarrow.NewFileWriter(schema, &buf, nil, pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+
+	readErr := errors.New("read second column")
+	source := &failingReaderAt{
+		Reader:     bytes.NewReader(buf.Bytes()),
+		failOffset: -1,
+		err:        readErr,
+	}
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	parquetReader, err := file.NewParquetReader(source,
+		file.WithReadProps(parquet.NewReaderProperties(mem)))
+	require.NoError(t, err)
+	defer parquetReader.Close()
+
+	column, err := parquetReader.MetaData().RowGroup(0).ColumnChunk(1)
+	require.NoError(t, err)
+	source.failOffset = column.DataPageOffset()
+	if column.HasDictionaryPage() && column.DictionaryPageOffset() > 0 {
+		source.failOffset = column.DictionaryPageOffset()
+	}
+
+	reader, err := pqarrow.NewFileReader(parquetReader, pqarrow.ArrowReadProperties{}, mem)
+	require.NoError(t, err)
+	readers, resultSchema, err := reader.GetFieldReaders(context.Background(), []int{0, 1}, []int{0})
+	require.ErrorIs(t, err, readErr)
+	require.Nil(t, readers)
+	require.Nil(t, resultSchema)
+	require.Zero(t, mem.CurrentAlloc())
 }
 
 func TestRecordReaderParallel(t *testing.T) {
