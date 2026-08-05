@@ -306,7 +306,7 @@ func getDecRounding[T decimal128.Num | decimal256.Num](mode RoundMode, opsImpl *
 		return func(val, remainder, _ T, scale int32) T {
 			scaled := opsImpl.reduceScale(val, scale, false)
 			if opsImpl.lowBits(scaled)%2 == 0 {
-				if opsImpl.Sign(remainder) != 0 {
+				if opsImpl.Sign(remainder) > 0 {
 					scaled = opsImpl.Add(scaled, one)
 				} else {
 					scaled = opsImpl.Add(scaled, neg)
