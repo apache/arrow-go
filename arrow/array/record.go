@@ -416,9 +416,12 @@ func (b *RecordBuilder) NewRecord() arrow.Record {
 }
 
 type builderCheckpoint struct {
-	builder  Builder
-	length   int
-	children []*builderCheckpoint
+	builder          Builder
+	length           int
+	children         []*builderCheckpoint
+	lastUnmarshalled interface{}
+	unmarshalled     bool
+	lastStr          *string
 }
 
 func newBuilderCheckpoint(builder Builder) *builderCheckpoint {
@@ -432,6 +435,10 @@ func newBuilderCheckpoint(builder Builder) *builderCheckpoint {
 		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.values))
 	case *LargeListBuilder:
 		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.values))
+	case *ListViewBuilder:
+		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.values))
+	case *LargeListViewBuilder:
+		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.values))
 	case *FixedSizeListBuilder:
 		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.values))
 	case *MapBuilder:
@@ -440,7 +447,20 @@ func newBuilderCheckpoint(builder Builder) *builderCheckpoint {
 		for _, field := range builder.fields {
 			checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(field))
 		}
+	case *SparseUnionBuilder:
+		for _, child := range builder.children {
+			checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(child))
+		}
+	case *DenseUnionBuilder:
+		for _, child := range builder.children {
+			checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(child))
+		}
+	case *ExtensionBuilder:
+		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.Builder))
 	case *RunEndEncodedBuilder:
+		checkpoint.lastUnmarshalled = builder.lastUnmarshalled
+		checkpoint.unmarshalled = builder.unmarshalled
+		checkpoint.lastStr = builder.lastStr
 		checkpoint.children = append(checkpoint.children,
 			newBuilderCheckpoint(builder.runEnds),
 			newBuilderCheckpoint(builder.values),
@@ -457,9 +477,33 @@ func (checkpoint *builderCheckpoint) restore() {
 
 	if builder, ok := checkpoint.builder.(*RunEndEncodedBuilder); ok {
 		builder.length = checkpoint.length
+		builder.lastUnmarshalled = checkpoint.lastUnmarshalled
+		builder.unmarshalled = checkpoint.unmarshalled
+		builder.lastStr = checkpoint.lastStr
 		return
 	}
 	checkpoint.builder.Resize(checkpoint.length)
+	switch builder := checkpoint.builder.(type) {
+	case *ListBuilder:
+		builder.builder.length = checkpoint.length
+	case *LargeListBuilder:
+		builder.builder.length = checkpoint.length
+	case *ListViewBuilder:
+		builder.builder.length = checkpoint.length
+	case *LargeListViewBuilder:
+		builder.builder.length = checkpoint.length
+	case *FixedSizeListBuilder:
+		builder.builder.length = checkpoint.length
+	case *MapBuilder:
+		builder.listBuilder.builder.length = checkpoint.length
+	case *StructBuilder:
+		builder.builder.length = checkpoint.length
+	case *SparseUnionBuilder:
+		builder.typesBuilder.SetLength(checkpoint.length)
+	case *DenseUnionBuilder:
+		builder.typesBuilder.SetLength(checkpoint.length)
+		builder.offsetsBuilder.SetLength(checkpoint.length * arrow.Int32SizeBytes)
+	}
 }
 
 // UnmarshalOne reads one row (a JSON object) from the supplied decoder and

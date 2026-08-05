@@ -560,6 +560,67 @@ func TestRecordBuilderRollsBackRowsAfterDecodeError(t *testing.T) {
 
 }
 
+func TestRecordBuilderRollsBackNestedRowsAfterDecodeError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	tests := []struct {
+		name  string
+		typ   arrow.DataType
+		value string
+	}{
+		{
+			name:  "list view",
+			typ:   arrow.ListViewOf(arrow.PrimitiveTypes.Int32),
+			value: `[1, "invalid"]`,
+		},
+		{
+			name:  "sparse union",
+			typ:   arrow.SparseUnionOf([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, []arrow.UnionTypeCode{0}),
+			value: `[0, "invalid"]`,
+		},
+		{
+			name:  "dense union",
+			typ:   arrow.DenseUnionOf([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, []arrow.UnionTypeCode{0}),
+			value: `[0, "invalid"]`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: tc.typ}}, nil)
+			builder := array.NewRecordBuilder(mem, schema)
+			defer builder.Release()
+
+			if err := builder.UnmarshalJSON([]byte(`{"value":` + tc.value + `}`)); err == nil {
+				t.Fatal("expected a decode error")
+			}
+			if got := builder.Field(0).Len(); got != 0 {
+				t.Fatalf("builder length = %d, want 0", got)
+			}
+		})
+	}
+}
+
+func TestRecordBuilderRollsBackRunEndStateAfterDecodeError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	typ := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int16, arrow.PrimitiveTypes.Int32)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: typ}}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	for i := 0; i < 2; i++ {
+		if err := builder.UnmarshalJSON([]byte(`{"value":"invalid"}`)); err == nil {
+			t.Fatal("expected a decode error")
+		}
+	}
+	if got := builder.Field(0).Len(); got != 0 {
+		t.Fatalf("builder length = %d, want 0", got)
+	}
+}
+
 func TestRecordBuilderResize(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
