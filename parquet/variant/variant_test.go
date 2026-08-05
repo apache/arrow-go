@@ -148,12 +148,14 @@ func TestMetadataCloneOwnsKeys(t *testing.T) {
 	value, err := b.Build()
 	require.NoError(t, err)
 
-	metadata := value.Metadata()
+	metadataBytes := bytes.Clone(value.Metadata().Bytes())
+	metadata, err := variant.NewMetadata(metadataBytes)
+	require.NoError(t, err)
 	clone := metadata.Clone()
 	clonedBytes := bytes.Clone(clone.Bytes())
-	keyOffset := bytes.Index(metadata.Bytes(), []byte("key"))
+	keyOffset := bytes.Index(metadataBytes, []byte("key"))
 	require.NotEqual(t, -1, keyOffset)
-	copy(metadata.Bytes()[keyOffset:], "bad")
+	copy(metadataBytes[keyOffset:], "bad")
 
 	key, err := clone.KeyAt(0)
 	require.NoError(t, err)
@@ -161,7 +163,7 @@ func TestMetadataCloneOwnsKeys(t *testing.T) {
 	assert.Equal(t, []uint32{0}, clone.IdFor("key"))
 	assert.Equal(t, clonedBytes, clone.Bytes())
 
-	copy(metadata.Bytes()[keyOffset:], "key")
+	copy(metadataBytes[keyOffset:], "key")
 	clone = metadata.Clone()
 	copy(clone.Bytes()[keyOffset:], "bad")
 	key, err = clone.KeyAt(0)
