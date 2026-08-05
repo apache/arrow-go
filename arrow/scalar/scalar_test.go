@@ -545,6 +545,48 @@ func TestTimestampScalarsMakeScalarUsesFixedTimezone(t *testing.T) {
 	assert.Equal(t, arrow.Timestamp(3600), fromParse.(*scalar.Timestamp).Value)
 }
 
+func TestTimestampScalarsParseScalarPreservesExplicitTimezone(t *testing.T) {
+	tests := []struct {
+		name  string
+		typ   *arrow.TimestampType
+		value string
+		want  arrow.Timestamp
+	}{
+		{
+			name:  "named timezone",
+			typ:   &arrow.TimestampType{Unit: arrow.Second, TimeZone: "Europe/Berlin"},
+			value: "1970-01-01 01:00:00+01:00",
+			want:  0,
+		},
+		{
+			name:  "fixed timezone",
+			typ:   &arrow.TimestampType{Unit: arrow.Second, TimeZone: "+02:00"},
+			value: "1970-01-01 01:00:00+02:00",
+			want:  -3600,
+		},
+		{
+			name:  "explicit utc",
+			typ:   &arrow.TimestampType{Unit: arrow.Second, TimeZone: "Europe/Berlin"},
+			value: "1970-01-01 01:00:00Z",
+			want:  3600,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := scalar.ParseScalar(tc.typ, tc.value)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got.(*scalar.Timestamp).Value)
+		})
+	}
+}
+
+func TestTimestampScalarsParseScalarRejectsInvalidTimezone(t *testing.T) {
+	typ := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "not/a_timezone"}
+	_, err := scalar.ParseScalar(typ, "1970-01-01 00:00:00")
+	assert.Error(t, err)
+}
+
 func TestTimestampScalarsCasting(t *testing.T) {
 	convert := func(in, out arrow.TimeUnit, val arrow.Timestamp) arrow.Timestamp {
 		s, err := scalar.NewTimestampScalar(val, &arrow.TimestampType{Unit: in}).CastTo(&arrow.TimestampType{Unit: out})
