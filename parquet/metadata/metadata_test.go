@@ -31,6 +31,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNewFileMetadataBuilderUsesDefaultProperties(t *testing.T) {
+	root, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewInt32Node("value", parquet.Repetitions.Required, -1),
+	}, -1)
+	require.NoError(t, err)
+
+	builder := metadata.NewFileMetadataBuilder(schema.NewSchema(root), nil, nil)
+	fileMeta, err := builder.Finish()
+	require.NoError(t, err)
+	assert.EqualValues(t, parquet.V2_LATEST, fileMeta.Version())
+	assert.Equal(t, parquet.DefaultCreatedBy, fileMeta.GetCreatedBy())
+}
+
 func generateTableMetaData(schema *schema.Schema, props *parquet.WriterProperties, nrows int, statsInt, statsFloat metadata.EncodedStatistics) (*metadata.FileMetaData, error) {
 	fbuilder := metadata.NewFileMetadataBuilder(schema, props, nil)
 	rg1Builder := fbuilder.AppendRowGroup()

@@ -54,6 +54,9 @@ type FileMetaDataBuilder struct {
 // NewFileMetadataBuilder will use the default writer properties if nil is passed for
 // the writer properties and nil is allowable for the key value metadata.
 func NewFileMetadataBuilder(schema *schema.Schema, props *parquet.WriterProperties, kvmeta KeyValueMetadata) *FileMetaDataBuilder {
+	if props == nil {
+		props = parquet.NewWriterProperties()
+	}
 	var crypto *format.FileCryptoMetaData
 	if props.FileEncryptionProperties() != nil && props.FileEncryptionProperties().EncryptedFooter() {
 		crypto = format.NewFileCryptoMetaData()
