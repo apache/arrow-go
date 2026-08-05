@@ -237,23 +237,38 @@ func (b *multiBufferBuilder) Reset() {
 	}
 }
 
-func (b *multiBufferBuilder) checkpoint() func() {
-	blockLengths := make([]int, len(b.blocks))
-	for i, block := range b.blocks {
-		blockLengths[i] = block.Len()
-	}
-	currentOutBuffer := b.currentOutBuffer
+type multiBufferCheckpoint struct {
+	builder       *multiBufferBuilder
+	blockLengths  []int
+	currentOutput int
+}
 
-	return func() {
-		for _, block := range b.blocks[len(blockLengths):] {
-			block.Release()
-		}
-		b.blocks = b.blocks[:len(blockLengths)]
-		for i, length := range blockLengths {
-			b.blocks[i].Resize(length)
-		}
-		b.currentOutBuffer = currentOutBuffer
+func (b *multiBufferBuilder) newCheckpoint() *multiBufferCheckpoint {
+	return &multiBufferCheckpoint{builder: b}
+}
+
+func (c *multiBufferCheckpoint) capture() {
+	n := len(c.builder.blocks)
+	if cap(c.blockLengths) < n {
+		c.blockLengths = make([]int, n)
+	} else {
+		c.blockLengths = c.blockLengths[:n]
 	}
+	for i, block := range c.builder.blocks {
+		c.blockLengths[i] = block.Len()
+	}
+	c.currentOutput = c.builder.currentOutBuffer
+}
+
+func (c *multiBufferCheckpoint) restore() {
+	for _, block := range c.builder.blocks[len(c.blockLengths):] {
+		block.Release()
+	}
+	c.builder.blocks = c.builder.blocks[:len(c.blockLengths)]
+	for i, length := range c.blockLengths {
+		c.builder.blocks[i].Resize(length)
+	}
+	c.builder.currentOutBuffer = c.currentOutput
 }
 
 func (b *multiBufferBuilder) UnsafeAppend(hdr *arrow.ViewHeader, val []byte) {

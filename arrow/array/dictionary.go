@@ -694,9 +694,21 @@ func (b *dictionaryBuilder) ResetFull() {
 	b.memoTable.Reset()
 }
 
-func (b *dictionaryBuilder) checkpoint() func() {
-	size := b.memoTable.Size()
-	return func() { b.memoTable.Truncate(size) }
+type dictionaryBuilderCheckpoint struct {
+	builder *dictionaryBuilder
+	size    int
+}
+
+func (c *dictionaryBuilderCheckpoint) capture() {
+	c.size = c.builder.memoTable.Size()
+}
+
+func (c *dictionaryBuilderCheckpoint) restore() {
+	c.builder.memoTable.Truncate(c.size)
+}
+
+func (b *dictionaryBuilder) newCheckpoint() checkpointState {
+	return &dictionaryBuilderCheckpoint{builder: b}
 }
 
 func (b *dictionaryBuilder) Cap() int { return b.idxBuilder.Cap() }

@@ -298,10 +298,11 @@ func (rec *simpleRecord) MarshalJSON() ([]byte, error) {
 // RecordBuilder eases the process of building a Record, iteratively, from
 // a known Schema.
 type RecordBuilder struct {
-	refCount atomic.Int64
-	mem      memory.Allocator
-	schema   *arrow.Schema
-	fields   []Builder
+	refCount    atomic.Int64
+	mem         memory.Allocator
+	schema      *arrow.Schema
+	fields      []Builder
+	checkpoints []*builderCheckpoint
 }
 
 // NewRecordBuilder returns a builder, using the provided memory allocator and a schema.
@@ -315,6 +316,10 @@ func NewRecordBuilder(mem memory.Allocator, schema *arrow.Schema) *RecordBuilder
 
 	for i := 0; i < schema.NumFields(); i++ {
 		b.fields[i] = NewBuilder(b.mem, schema.Field(i).Type)
+	}
+	b.checkpoints = make([]*builderCheckpoint, len(b.fields))
+	for i, field := range b.fields {
+		b.checkpoints[i] = newBuilderCheckpoint(field)
 	}
 
 	return b
@@ -335,6 +340,7 @@ func (b *RecordBuilder) Release() {
 			f.Release()
 		}
 		b.fields = nil
+		b.checkpoints = nil
 	}
 }
 
@@ -416,14 +422,19 @@ func (b *RecordBuilder) NewRecord() arrow.Record {
 }
 
 type checkpointableBuilder interface {
-	checkpoint() func()
+	newCheckpoint() checkpointState
+}
+
+type checkpointState interface {
+	capture()
+	restore()
 }
 
 type builderCheckpoint struct {
 	builder          Builder
 	length           int
 	children         []*builderCheckpoint
-	restoreState     func()
+	state            checkpointState
 	lastUnmarshalled interface{}
 	unmarshalled     bool
 	lastStr          *string
@@ -432,10 +443,9 @@ type builderCheckpoint struct {
 func newBuilderCheckpoint(builder Builder) *builderCheckpoint {
 	checkpoint := &builderCheckpoint{
 		builder: builder,
-		length:  builder.Len(),
 	}
 	if checkpointable, ok := builder.(checkpointableBuilder); ok {
-		checkpoint.restoreState = checkpointable.checkpoint()
+		checkpoint.state = checkpointable.newCheckpoint()
 	}
 
 	switch builder := builder.(type) {
@@ -466,16 +476,29 @@ func newBuilderCheckpoint(builder Builder) *builderCheckpoint {
 	case *ExtensionBuilder:
 		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.Builder))
 	case *RunEndEncodedBuilder:
-		checkpoint.lastUnmarshalled = builder.lastUnmarshalled
-		checkpoint.unmarshalled = builder.unmarshalled
-		checkpoint.lastStr = builder.lastStr
 		checkpoint.children = append(checkpoint.children,
 			newBuilderCheckpoint(builder.runEnds),
 			newBuilderCheckpoint(builder.values),
 		)
 	}
 
+	checkpoint.capture()
 	return checkpoint
+}
+
+func (checkpoint *builderCheckpoint) capture() {
+	checkpoint.length = checkpoint.builder.Len()
+	if checkpoint.state != nil {
+		checkpoint.state.capture()
+	}
+	if builder, ok := checkpoint.builder.(*RunEndEncodedBuilder); ok {
+		checkpoint.lastUnmarshalled = builder.lastUnmarshalled
+		checkpoint.unmarshalled = builder.unmarshalled
+		checkpoint.lastStr = builder.lastStr
+	}
+	for _, child := range checkpoint.children {
+		child.capture()
+	}
 }
 
 func (checkpoint *builderCheckpoint) restore() {
@@ -512,8 +535,8 @@ func (checkpoint *builderCheckpoint) restore() {
 		builder.typesBuilder.SetLength(checkpoint.length)
 		builder.offsetsBuilder.SetLength(checkpoint.length * arrow.Int32SizeBytes)
 	}
-	if checkpoint.restoreState != nil {
-		checkpoint.restoreState()
+	if checkpoint.state != nil {
+		checkpoint.state.restore()
 	}
 }
 
@@ -525,18 +548,20 @@ func (checkpoint *builderCheckpoint) restore() {
 // json.Decoder, so options such as UseNumber set by the caller are honored
 // for nested field decoding. This is critical for preserving large integer
 // values (>2^53) that cannot be represented exactly as float64.
-func (b *RecordBuilder) UnmarshalOne(dec *json.Decoder) (err error) {
-	checkpoints := make([]*builderCheckpoint, len(b.fields))
-	for i, field := range b.fields {
-		checkpoints[i] = newBuilderCheckpoint(field)
+func (b *RecordBuilder) UnmarshalOne(dec *json.Decoder) error {
+	for _, checkpoint := range b.checkpoints {
+		checkpoint.capture()
 	}
-	defer func() {
-		if err != nil {
-			for _, checkpoint := range checkpoints {
-				checkpoint.restore()
-			}
+	err := b.unmarshalOne(dec)
+	if err != nil {
+		for _, checkpoint := range b.checkpoints {
+			checkpoint.restore()
 		}
-	}()
+	}
+	return err
+}
+
+func (b *RecordBuilder) unmarshalOne(dec *json.Decoder) (err error) {
 
 	// should start with a '{'
 	t, err := dec.Token()

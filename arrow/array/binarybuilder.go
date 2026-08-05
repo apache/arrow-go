@@ -227,9 +227,21 @@ func (b *BinaryBuilder) init(capacity int) {
 // DataLen returns the number of bytes in the data array.
 func (b *BinaryBuilder) DataLen() int { return b.values.length }
 
-func (b *BinaryBuilder) checkpoint() func() {
-	dataLen := b.DataLen()
-	return func() { b.ResizeData(dataLen) }
+type binaryBuilderCheckpoint struct {
+	builder *BinaryBuilder
+	dataLen int
+}
+
+func (c *binaryBuilderCheckpoint) capture() {
+	c.dataLen = c.builder.DataLen()
+}
+
+func (c *binaryBuilderCheckpoint) restore() {
+	c.builder.ResizeData(c.dataLen)
+}
+
+func (b *BinaryBuilder) newCheckpoint() checkpointState {
+	return &binaryBuilderCheckpoint{builder: b}
 }
 
 // DataCap returns the total number of bytes that can be stored
@@ -430,14 +442,28 @@ func (b *BinaryViewBuilder) SetBlockSize(sz uint) {
 
 func (b *BinaryViewBuilder) Type() arrow.DataType { return b.dtype }
 
-func (b *BinaryViewBuilder) checkpoint() func() {
-	length := b.length
-	blockState := b.blockBuilder.checkpoint()
-	return func() {
-		blockState()
-		for i := length; i < len(b.rawData); i++ {
-			b.rawData[i] = arrow.ViewHeader{}
-		}
+type binaryViewBuilderCheckpoint struct {
+	builder    *BinaryViewBuilder
+	length     int
+	blockState *multiBufferCheckpoint
+}
+
+func (c *binaryViewBuilderCheckpoint) capture() {
+	c.length = c.builder.length
+	c.blockState.capture()
+}
+
+func (c *binaryViewBuilderCheckpoint) restore() {
+	c.blockState.restore()
+	for i := c.length; i < len(c.builder.rawData); i++ {
+		c.builder.rawData[i] = arrow.ViewHeader{}
+	}
+}
+
+func (b *BinaryViewBuilder) newCheckpoint() checkpointState {
+	return &binaryViewBuilderCheckpoint{
+		builder:    b,
+		blockState: b.blockBuilder.newCheckpoint(),
 	}
 }
 
