@@ -195,6 +195,9 @@ func NewTableFromRecords(schema *arrow.Schema, recs []arrow.RecordBatch) arrow.T
 
 	defer func(cols []arrow.Column) {
 		for i := range cols {
+			if cols[i].Data() == nil {
+				continue
+			}
 			cols[i].Release()
 		}
 	}(cols)
