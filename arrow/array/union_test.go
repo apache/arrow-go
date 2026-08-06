@@ -25,6 +25,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -149,6 +150,38 @@ func TestUnionSliceEquals(t *testing.T) {
 
 	checkUnion(batch.Column(0))
 	checkUnion(batch.Column(1))
+}
+
+func TestSparseUnionApproxEqualSlicesWithDifferentOffsets(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	leftChild, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Float64, strings.NewReader(`[0, 1, 2, 3, 4]`))
+	require.NoError(t, err)
+	defer leftChild.Release()
+	rightChild, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Float64, strings.NewReader(`[1, 2, 3, 4, 5]`))
+	require.NoError(t, err)
+	defer rightChild.Release()
+	leftIDs, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int8, strings.NewReader(`[0, 0, 0, 0, 0]`))
+	require.NoError(t, err)
+	defer leftIDs.Release()
+	rightIDs, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int8, strings.NewReader(`[0, 0, 0, 0, 0]`))
+	require.NoError(t, err)
+	defer rightIDs.Release()
+
+	left, err := array.NewSparseUnionFromArrays(leftIDs, []arrow.Array{leftChild})
+	require.NoError(t, err)
+	defer left.Release()
+	right, err := array.NewSparseUnionFromArrays(rightIDs, []arrow.Array{rightChild})
+	require.NoError(t, err)
+	defer right.Release()
+
+	leftSlice := array.NewSlice(left, 1, 3)
+	defer leftSlice.Release()
+	rightSlice := array.NewSlice(right, 0, 2)
+	defer rightSlice.Release()
+
+	assert.True(t, array.ApproxEqual(leftSlice, rightSlice))
 }
 
 func TestSparseUnionGetFlattenedField(t *testing.T) {
