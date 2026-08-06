@@ -830,9 +830,19 @@ func TestFileReaderRecordBatchIndexErrors(t *testing.T) {
 
 	_, err = reader.RecordBatchAt(-1)
 	require.ErrorIs(t, err, arrow.ErrIndex)
+	_, err = reader.RecordBatchAt(reader.NumRecords())
+	require.ErrorIs(t, err, arrow.ErrIndex)
 
+	_, err = reader.ReadAt(-1)
+	require.ErrorIs(t, err, arrow.ErrIndex)
 	_, err = reader.ReadAt(math.MaxInt64)
 	require.ErrorIs(t, err, arrow.ErrIndex)
+	_, err = reader.ReadAt(int64(reader.NumRecords()))
+	require.ErrorIs(t, err, arrow.ErrIndex)
+
+	batch, err := reader.RecordBatchAt(0)
+	require.NoError(t, err)
+	batch.Release()
 }
 
 func TestRecordBatchCustomMetadataInterop(t *testing.T) {
