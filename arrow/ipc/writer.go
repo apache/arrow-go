@@ -138,17 +138,12 @@ func NewWriter(w io.Writer, opts ...Option) *Writer {
 
 func (w *Writer) Close() error {
 	if w.err != nil {
-		if w.started && w.pw != nil {
-			w.err = errors.Join(w.err, w.pw.Close())
-		}
-		w.releaseDictionaries()
-		w.pw = nil
-		return w.err
+		return w.closeAfterFailure()
 	}
 	if !w.started {
 		err := w.start()
 		if err != nil {
-			return err
+			return w.closeAfterFailure()
 		}
 	}
 
@@ -164,6 +159,15 @@ func (w *Writer) Close() error {
 	}
 
 	return nil
+}
+
+func (w *Writer) closeAfterFailure() error {
+	if w.started && w.pw != nil {
+		w.err = errors.Join(w.err, w.pw.Close())
+	}
+	w.releaseDictionaries()
+	w.pw = nil
+	return w.err
 }
 
 func (w *Writer) releaseDictionaries() {
@@ -229,7 +233,7 @@ func (w *Writer) Write(rec arrow.RecordBatch) (err error) {
 
 	enc.reset()
 	if err := enc.Encode(&data, rec); err != nil {
-		return fmt.Errorf("arrow/ipc: could not encode record to payload: %w", err)
+		return w.fail(fmt.Errorf("arrow/ipc: could not encode record to payload: %w", err))
 	}
 
 	if err := w.pw.WritePayload(data); err != nil {

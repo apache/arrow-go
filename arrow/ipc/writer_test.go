@@ -109,6 +109,55 @@ func TestWriterSchemaFailureIsTerminal(t *testing.T) {
 	require.Equal(t, 1, payloadWriter.closeCall)
 }
 
+func TestWriterCloseSchemaFailureClosesStartedPayloadWriter(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	want := errors.New("schema write failed")
+	payloadWriter := &failingPayloadWriter{err: want}
+	writer := NewWriterWithPayloadWriter(payloadWriter, WithSchema(schema))
+
+	require.ErrorIs(t, writer.Close(), want)
+	require.Equal(t, 1, payloadWriter.payloads)
+	require.Equal(t, 1, payloadWriter.closeCall)
+}
+
+func TestWriterRecordEncodingFailureIsTerminal(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	deepType := arrow.PrimitiveTypes.Int32
+	for i := 0; i < kMaxNestingDepth+1; i++ {
+		deepType = arrow.ListOf(deepType)
+	}
+	jsonValue := strings.Repeat("[", kMaxNestingDepth+2) + "1" + strings.Repeat("]", kMaxNestingDepth+2)
+	deepArray, _, err := array.FromJSON(mem, deepType, strings.NewReader(jsonValue))
+	require.NoError(t, err)
+	defer deepArray.Release()
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	dictArray, _, err := array.FromJSON(mem, dictType, strings.NewReader(`["value"]`))
+	require.NoError(t, err)
+	defer dictArray.Release()
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "dict", Type: dictType},
+		{Name: "deep", Type: deepType},
+	}, nil)
+	record := array.NewRecordBatch(schema, []arrow.Array{dictArray, deepArray}, 1)
+	defer record.Release()
+
+	payloadWriter := &failingPayloadWriter{}
+	writer := NewWriterWithPayloadWriter(payloadWriter, WithSchema(schema))
+
+	firstErr := writer.Write(record)
+	require.Error(t, firstErr)
+	require.Equal(t, 2, payloadWriter.payloads)
+
+	secondErr := writer.Write(record)
+	require.EqualError(t, secondErr, firstErr.Error())
+	require.Equal(t, 2, payloadWriter.payloads)
+	require.Error(t, writer.Close())
+}
+
 func TestWriterPayloadFailureClosesStartedPayloadWriter(t *testing.T) {
 	schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int32}}, nil)
 	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
