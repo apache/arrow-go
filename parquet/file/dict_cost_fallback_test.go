@@ -22,6 +22,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
@@ -69,20 +70,26 @@ func writeAllDistinctInt64Chunk(t *testing.T, props *parquet.WriterProperties) *
 }
 
 func TestDictionaryCostFallback(t *testing.T) {
-	t.Run("enabled by default discards non-paying dictionary", func(t *testing.T) {
+	t.Run("uncompressed discards non-paying dictionary by default", func(t *testing.T) {
 		chunk := writeAllDistinctInt64Chunk(t, parquet.NewWriterProperties())
 		assert.False(t, chunk.HasDictionaryPage())
 	})
 
-	t.Run("disabled keeps explicitly requested dictionary", func(t *testing.T) {
+	t.Run("compressed keeps dictionary by default", func(t *testing.T) {
 		chunk := writeAllDistinctInt64Chunk(t, parquet.NewWriterProperties(
-			parquet.WithDictionaryFor("col", true),
-			parquet.WithDictionaryCostFallback(false),
+			parquet.WithCompression(compress.Codecs.Snappy),
 		))
 		assert.True(t, chunk.HasDictionaryPage())
 	})
 
-	t.Run("per-column disable keeps only that column's dictionary", func(t *testing.T) {
+	t.Run("per-column compression keeps that column's dictionary", func(t *testing.T) {
+		chunk := writeAllDistinctInt64Chunk(t, parquet.NewWriterProperties(
+			parquet.WithCompressionFor("col", compress.Codecs.Snappy),
+		))
+		assert.True(t, chunk.HasDictionaryPage())
+	})
+
+	t.Run("per-column disable keeps an uncompressed column's dictionary", func(t *testing.T) {
 		chunk := writeAllDistinctInt64Chunk(t, parquet.NewWriterProperties(
 			parquet.WithDictionaryFor("col", true),
 			parquet.WithDictionaryCostFallbackFor("col", false),
@@ -98,10 +105,18 @@ func TestDictionaryCostFallback(t *testing.T) {
 		assert.False(t, chunk.HasDictionaryPage())
 	})
 
-	t.Run("page size limit fallback still applies when disabled", func(t *testing.T) {
+	t.Run("per-column enable forces the check for a compressed column", func(t *testing.T) {
+		chunk := writeAllDistinctInt64Chunk(t, parquet.NewWriterProperties(
+			parquet.WithCompression(compress.Codecs.Snappy),
+			parquet.WithDictionaryCostFallbackFor("col", true),
+		))
+		assert.False(t, chunk.HasDictionaryPage())
+	})
+
+	t.Run("page size limit fallback still applies when the cost fallback is off", func(t *testing.T) {
 		chunk := writeAllDistinctInt64Chunk(t, parquet.NewWriterProperties(
 			parquet.WithDictionaryFor("col", true),
-			parquet.WithDictionaryCostFallback(false),
+			parquet.WithDictionaryCostFallbackFor("col", false),
 			parquet.WithDictionaryPageSizeLimit(512),
 		))
 		assert.False(t, chunk.HasDictionaryPage())

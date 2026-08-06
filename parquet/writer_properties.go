@@ -39,10 +39,6 @@ const (
 	// the fallback encoding (usually plain) instead of continuing to build the
 	// dictionary index.
 	DefaultDictionaryPageSizeLimit = DefaultDataPageSize
-	// Default is to discard the dictionary before the first data page of a chunk
-	// when it is not smaller than the raw values, use WithDictionaryCostFallback
-	// writer property to change that.
-	DefaultDictionaryCostFallbackEnabled = true
 	// In order to attempt to facilitate data page size limits for writing,
 	// data is written in batches. Increasing the batch size may improve performance
 	// but the larger the batch size, the easier it is to overshoot the datapage limit.
@@ -71,10 +67,14 @@ const (
 
 // ColumnProperties defines the encoding, codec, and so on for a given column.
 type ColumnProperties struct {
-	Encoding                   Encoding
-	Codec                      compress.Compression
-	DictionaryEnabled          bool
-	DictionaryCostFallback     bool
+	Encoding          Encoding
+	Codec             compress.Compression
+	DictionaryEnabled bool
+	// DictionaryCostFallback overrides the codec-based default of the
+	// pre-first-page cost-based dictionary fallback; nil keeps the default
+	// (enabled only for columns written without page compression). See
+	// WithDictionaryCostFallbackFor.
+	DictionaryCostFallback     *bool
 	StatsEnabled               bool
 	PageIndexEnabled           bool
 	MaxStatsSize               int64
@@ -93,7 +93,6 @@ type ColumnProperties struct {
 // Encoding:                   Encodings.Plain
 // Codec:                      compress.Codecs.Uncompressed
 // DictionaryEnabled:	       DefaultDictionaryEnabled
-// DictionaryCostFallback:     DefaultDictionaryCostFallbackEnabled
 // StatsEnabled:               DefaultStatsEnabled
 // PageIndexEnabled:           DefaultPageIndexEnabled
 // MaxStatsSize:               DefaultMaxStatsSize
@@ -107,7 +106,6 @@ func DefaultColumnProperties() ColumnProperties {
 		Encoding:                   Encodings.Plain,
 		Codec:                      compress.Codecs.Uncompressed,
 		DictionaryEnabled:          DefaultDictionaryEnabled,
-		DictionaryCostFallback:     DefaultDictionaryCostFallbackEnabled,
 		StatsEnabled:               DefaultStatsEnabled,
 		PageIndexEnabled:           DefaultPageIndexEnabled,
 		MaxStatsSize:               DefaultMaxStatsSize,
@@ -175,21 +173,17 @@ func WithDictionaryPageSizeLimit(limit int64) WriterProperty {
 	}
 }
 
-// WithDictionaryCostFallback controls the cost-based dictionary fallback: before the
-// first data page of a column chunk is cut, the writer discards the dictionary and
-// falls back to the plain encoding when the dictionary plus the encoded indices are
-// not smaller than the raw values (mirroring parquet-mr's shouldFallBack). That
-// comparison is done on uncompressed sizes, so it can discard dictionaries that would
-// have won after page compression — pass false to keep an explicitly requested
-// dictionary regardless. The DictionaryPageSizeLimit fallback always stays in effect.
-func WithDictionaryCostFallback(enabled bool) WriterProperty {
-	return func(cfg *writerPropConfig) {
-		cfg.wr.defColumnProps.DictionaryCostFallback = enabled
-	}
-}
-
-// WithDictionaryCostFallbackFor is like WithDictionaryCostFallback but for a
-// given column path string only.
+// WithDictionaryCostFallbackFor controls the cost-based dictionary fallback for the
+// given column path: before the first data page of a column chunk is cut, the writer
+// discards the dictionary and falls back to the plain encoding when the dictionary
+// plus the encoded indices are not smaller than the raw values (mirroring
+// parquet-mr's shouldFallBack). That comparison is done on uncompressed sizes, so by
+// default it only runs for columns written without page compression — for columns
+// with a codec configured the dictionary is kept, since near-incompressible
+// dictionary indices routinely beat plain pages that compress well. This option
+// overrides the codec-based default in either direction: false keeps an explicitly
+// requested dictionary for an uncompressed column, true forces the check for a
+// compressed one. The DictionaryPageSizeLimit fallback always stays in effect.
 func WithDictionaryCostFallbackFor(path string, enabled bool) WriterProperty {
 	return func(cfg *writerPropConfig) {
 		cfg.dictCostFallback[path] = enabled
@@ -635,7 +629,7 @@ func NewWriterProperties(opts ...WriterProperty) *WriterProperties {
 	}
 
 	for key, value := range cfg.dictCostFallback {
-		get(key).DictionaryCostFallback = value
+		get(key).DictionaryCostFallback = &value
 	}
 
 	for key, value := range cfg.statsEnabled {
@@ -774,13 +768,19 @@ func (w *WriterProperties) DictionaryEnabledFor(path string) bool {
 }
 
 // DictionaryCostFallbackEnabledFor returns whether the pre-first-page cost-based
-// dictionary fallback is active for the given column path, see
-// WithDictionaryCostFallback.
+// dictionary fallback applies for the given column path: an explicit per-column
+// WithDictionaryCostFallbackFor setting wins, otherwise the fallback is enabled
+// only when the column is written without page compression, since the cost
+// comparison is done on uncompressed sizes.
 func (w *WriterProperties) DictionaryCostFallbackEnabledFor(path string) bool {
-	if p, ok := w.columnProps[path]; ok {
-		return p.DictionaryCostFallback
+	p, ok := w.columnProps[path]
+	if !ok {
+		return w.defColumnProps.Codec == compress.Codecs.Uncompressed
 	}
-	return w.defColumnProps.DictionaryCostFallback
+	if p.DictionaryCostFallback != nil {
+		return *p.DictionaryCostFallback
+	}
+	return p.Codec == compress.Codecs.Uncompressed
 }
 
 // DictionaryEnabledPath is the same as DictionaryEnabledFor but takes a ColumnPath object.

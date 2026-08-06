@@ -245,8 +245,12 @@ func (w *Int32ColumnChunkWriter) checkDictionarySizeLimit() {
 	// plus the encoded indices meet or exceed the raw input bytes, fall back
 	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
 	// case where a dict page stays in the file alongside PLAIN pages without
-	// any net compression win. The comparison ignores page compression, so
-	// WithDictionaryCostFallback(false) lets callers opt out of it.
+	// any net compression win. The comparison uses uncompressed sizes, which
+	// is only meaningful when pages are stored uncompressed: with a codec
+	// configured, the near-incompressible dict indices routinely beat PLAIN
+	// pages that compress well. The check therefore runs only for columns
+	// written without page compression, unless overridden per column with
+	// WithDictionaryCostFallbackFor.
 	if !w.dictPageWritten && len(w.pages) == 0 && w.props.DictionaryCostFallbackEnabledFor(w.descr.Path()) {
 		rawSize := dictEnc.ObservedRawSize()
 		encodedSize := dictEnc.EstimatedDataEncodedSize()
@@ -508,8 +512,12 @@ func (w *Int64ColumnChunkWriter) checkDictionarySizeLimit() {
 	// plus the encoded indices meet or exceed the raw input bytes, fall back
 	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
 	// case where a dict page stays in the file alongside PLAIN pages without
-	// any net compression win. The comparison ignores page compression, so
-	// WithDictionaryCostFallback(false) lets callers opt out of it.
+	// any net compression win. The comparison uses uncompressed sizes, which
+	// is only meaningful when pages are stored uncompressed: with a codec
+	// configured, the near-incompressible dict indices routinely beat PLAIN
+	// pages that compress well. The check therefore runs only for columns
+	// written without page compression, unless overridden per column with
+	// WithDictionaryCostFallbackFor.
 	if !w.dictPageWritten && len(w.pages) == 0 && w.props.DictionaryCostFallbackEnabledFor(w.descr.Path()) {
 		rawSize := dictEnc.ObservedRawSize()
 		encodedSize := dictEnc.EstimatedDataEncodedSize()
@@ -771,8 +779,12 @@ func (w *Int96ColumnChunkWriter) checkDictionarySizeLimit() {
 	// plus the encoded indices meet or exceed the raw input bytes, fall back
 	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
 	// case where a dict page stays in the file alongside PLAIN pages without
-	// any net compression win. The comparison ignores page compression, so
-	// WithDictionaryCostFallback(false) lets callers opt out of it.
+	// any net compression win. The comparison uses uncompressed sizes, which
+	// is only meaningful when pages are stored uncompressed: with a codec
+	// configured, the near-incompressible dict indices routinely beat PLAIN
+	// pages that compress well. The check therefore runs only for columns
+	// written without page compression, unless overridden per column with
+	// WithDictionaryCostFallbackFor.
 	if !w.dictPageWritten && len(w.pages) == 0 && w.props.DictionaryCostFallbackEnabledFor(w.descr.Path()) {
 		rawSize := dictEnc.ObservedRawSize()
 		encodedSize := dictEnc.EstimatedDataEncodedSize()
@@ -1034,8 +1046,12 @@ func (w *Float32ColumnChunkWriter) checkDictionarySizeLimit() {
 	// plus the encoded indices meet or exceed the raw input bytes, fall back
 	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
 	// case where a dict page stays in the file alongside PLAIN pages without
-	// any net compression win. The comparison ignores page compression, so
-	// WithDictionaryCostFallback(false) lets callers opt out of it.
+	// any net compression win. The comparison uses uncompressed sizes, which
+	// is only meaningful when pages are stored uncompressed: with a codec
+	// configured, the near-incompressible dict indices routinely beat PLAIN
+	// pages that compress well. The check therefore runs only for columns
+	// written without page compression, unless overridden per column with
+	// WithDictionaryCostFallbackFor.
 	if !w.dictPageWritten && len(w.pages) == 0 && w.props.DictionaryCostFallbackEnabledFor(w.descr.Path()) {
 		rawSize := dictEnc.ObservedRawSize()
 		encodedSize := dictEnc.EstimatedDataEncodedSize()
@@ -1297,8 +1313,12 @@ func (w *Float64ColumnChunkWriter) checkDictionarySizeLimit() {
 	// plus the encoded indices meet or exceed the raw input bytes, fall back
 	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
 	// case where a dict page stays in the file alongside PLAIN pages without
-	// any net compression win. The comparison ignores page compression, so
-	// WithDictionaryCostFallback(false) lets callers opt out of it.
+	// any net compression win. The comparison uses uncompressed sizes, which
+	// is only meaningful when pages are stored uncompressed: with a codec
+	// configured, the near-incompressible dict indices routinely beat PLAIN
+	// pages that compress well. The check therefore runs only for columns
+	// written without page compression, unless overridden per column with
+	// WithDictionaryCostFallbackFor.
 	if !w.dictPageWritten && len(w.pages) == 0 && w.props.DictionaryCostFallbackEnabledFor(w.descr.Path()) {
 		rawSize := dictEnc.ObservedRawSize()
 		encodedSize := dictEnc.EstimatedDataEncodedSize()
@@ -1706,8 +1726,12 @@ func (w *BooleanColumnChunkWriter) checkDictionarySizeLimit() {
 	// plus the encoded indices meet or exceed the raw input bytes, fall back
 	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
 	// case where a dict page stays in the file alongside PLAIN pages without
-	// any net compression win. The comparison ignores page compression, so
-	// WithDictionaryCostFallback(false) lets callers opt out of it.
+	// any net compression win. The comparison uses uncompressed sizes, which
+	// is only meaningful when pages are stored uncompressed: with a codec
+	// configured, the near-incompressible dict indices routinely beat PLAIN
+	// pages that compress well. The check therefore runs only for columns
+	// written without page compression, unless overridden per column with
+	// WithDictionaryCostFallbackFor.
 	if !w.dictPageWritten && len(w.pages) == 0 && w.props.DictionaryCostFallbackEnabledFor(w.descr.Path()) {
 		rawSize := dictEnc.ObservedRawSize()
 		encodedSize := dictEnc.EstimatedDataEncodedSize()
@@ -2079,8 +2103,12 @@ func (w *ByteArrayColumnChunkWriter) checkDictionarySizeLimit() {
 	// plus the encoded indices meet or exceed the raw input bytes, fall back
 	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
 	// case where a dict page stays in the file alongside PLAIN pages without
-	// any net compression win. The comparison ignores page compression, so
-	// WithDictionaryCostFallback(false) lets callers opt out of it.
+	// any net compression win. The comparison uses uncompressed sizes, which
+	// is only meaningful when pages are stored uncompressed: with a codec
+	// configured, the near-incompressible dict indices routinely beat PLAIN
+	// pages that compress well. The check therefore runs only for columns
+	// written without page compression, unless overridden per column with
+	// WithDictionaryCostFallbackFor.
 	if !w.dictPageWritten && len(w.pages) == 0 && w.props.DictionaryCostFallbackEnabledFor(w.descr.Path()) {
 		rawSize := dictEnc.ObservedRawSize()
 		encodedSize := dictEnc.EstimatedDataEncodedSize()
@@ -2460,8 +2488,12 @@ func (w *FixedLenByteArrayColumnChunkWriter) checkDictionarySizeLimit() {
 	// plus the encoded indices meet or exceed the raw input bytes, fall back
 	// to PLAIN now and discard the dictionary — avoiding the mid-cardinality
 	// case where a dict page stays in the file alongside PLAIN pages without
-	// any net compression win. The comparison ignores page compression, so
-	// WithDictionaryCostFallback(false) lets callers opt out of it.
+	// any net compression win. The comparison uses uncompressed sizes, which
+	// is only meaningful when pages are stored uncompressed: with a codec
+	// configured, the near-incompressible dict indices routinely beat PLAIN
+	// pages that compress well. The check therefore runs only for columns
+	// written without page compression, unless overridden per column with
+	// WithDictionaryCostFallbackFor.
 	if !w.dictPageWritten && len(w.pages) == 0 && w.props.DictionaryCostFallbackEnabledFor(w.descr.Path()) {
 		rawSize := dictEnc.ObservedRawSize()
 		encodedSize := dictEnc.EstimatedDataEncodedSize()
