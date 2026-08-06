@@ -873,7 +873,11 @@ func InitRoundTemporalState(_ *exec.KernelCtx, args exec.KernelInitArgs) (exec.K
 	// Pre-calculate constants for this rounding operation
 	rs.unitNanos, rs.isSubDay = unitInNanos(rs.Unit)
 	if rs.isSubDay {
-		rs.roundingInterval = rs.unitNanos * rs.Multiple
+		var err error
+		rs.roundingInterval, err = checkedMulInt64(rs.unitNanos, rs.Multiple)
+		if err != nil {
+			return nil, err
+		}
 		rs.useCalendarOrigin = rs.CalendarBasedOrigin && rs.Unit <= RoundTemporalDay
 	}
 
@@ -912,14 +916,20 @@ func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts 
 
 	// Calendar units with variable duration (year, quarter, month, week) require date arithmetic
 	if !opts.isSubDay {
-		tsNanos := convertToNanos(ts, inputUnit)
+		tsNanos, err := convertToNanos(ts, inputUnit)
+		if err != nil {
+			return 0, err
+		}
 		return roundTimestampCalendar(tsNanos, inputUnit, tz, opts)
 	}
 
 	// Day rounding with timezone requires calendar arithmetic (days vary: 23/24/25 hours due to DST)
 	isUTC := tz == time.UTC || tz.String() == "UTC"
 	if !isUTC && opts.Unit == RoundTemporalDay {
-		tsNanos := convertToNanos(ts, inputUnit)
+		tsNanos, err := convertToNanos(ts, inputUnit)
+		if err != nil {
+			return 0, err
+		}
 		return roundTimestampCalendar(tsNanos, inputUnit, tz, opts)
 	}
 
@@ -927,12 +937,14 @@ func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts 
 	// Fast path: round directly in input unit if possible (no origin, compatible units)
 	if canRoundInInputUnit(inputUnit, opts.unitNanos) && !opts.useCalendarOrigin {
 		intervalInInputUnit := opts.roundingInterval / int64(inputUnit.Multiplier())
-		rounded := roundToMultipleInt64(ts, intervalInInputUnit, opts.mode, opts.CeilIsStrictlyGreater)
-		return rounded, nil
+		return roundToMultipleInt64(ts, intervalInInputUnit, opts.mode, opts.CeilIsStrictlyGreater)
 	}
 
 	// Slow path: convert to nanoseconds for calendar origin or incompatible units
-	tsNanos := convertToNanos(ts, inputUnit)
+	tsNanos, err := convertToNanos(ts, inputUnit)
+	if err != nil {
+		return 0, err
+	}
 
 	var origin int64 = 0
 	if opts.useCalendarOrigin {
@@ -940,15 +952,27 @@ func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts 
 		if tz != nil {
 			t := time.Unix(0, tsNanos).In(tz)
 			startOfDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, tz)
-			origin = startOfDay.UnixNano()
+			origin, err = timeToNanos(startOfDay)
+			if err != nil {
+				return 0, err
+			}
 		} else {
 			origin = tsNanos
 		}
 	}
 
-	adjusted := tsNanos - origin
-	rounded := roundToMultipleInt64(adjusted, opts.roundingInterval, opts.mode, opts.CeilIsStrictlyGreater)
-	result := origin + rounded
+	adjusted, err := checkedSubInt64(tsNanos, origin)
+	if err != nil {
+		return 0, err
+	}
+	rounded, err := roundToMultipleInt64(adjusted, opts.roundingInterval, opts.mode, opts.CeilIsStrictlyGreater)
+	if err != nil {
+		return 0, err
+	}
+	result, err := checkedAddInt64(origin, rounded)
+	if err != nil {
+		return 0, err
+	}
 
 	return convertFromNanos(result, inputUnit), nil
 }
@@ -959,9 +983,42 @@ func canRoundInInputUnit(inputUnit arrow.TimeUnit, roundingIntervalNanos int64) 
 	return roundingIntervalNanos%int64(inputUnit.Multiplier()) == 0
 }
 
-// convertToNanos converts a timestamp value to nanoseconds
-func convertToNanos(ts int64, unit arrow.TimeUnit) int64 {
-	return ts * int64(unit.Multiplier())
+func overflowError() error {
+	return fmt.Errorf("%w: temporal rounding overflow", arrow.ErrInvalid)
+}
+
+func checkedAddInt64(left, right int64) (int64, error) {
+	if (right > 0 && left > math.MaxInt64-right) || (right < 0 && left < math.MinInt64-right) {
+		return 0, overflowError()
+	}
+	return left + right, nil
+}
+
+func checkedSubInt64(left, right int64) (int64, error) {
+	if (right > 0 && left < math.MinInt64+right) || (right < 0 && left > math.MaxInt64+right) {
+		return 0, overflowError()
+	}
+	return left - right, nil
+}
+
+func checkedMulInt64(left, right int64) (int64, error) {
+	if left == 0 || right == 0 {
+		return 0, nil
+	}
+	if (left == math.MinInt64 && right == -1) || (right == math.MinInt64 && left == -1) {
+		return 0, overflowError()
+	}
+
+	result := left * right
+	if result/right != left {
+		return 0, overflowError()
+	}
+	return result, nil
+}
+
+// convertToNanos converts a timestamp value to nanoseconds.
+func convertToNanos(ts int64, unit arrow.TimeUnit) (int64, error) {
+	return checkedMulInt64(ts, int64(unit.Multiplier()))
 }
 
 // convertFromNanos converts a nanosecond timestamp to the specified unit
@@ -969,12 +1026,12 @@ func convertFromNanos(nanos int64, unit arrow.TimeUnit) int64 {
 	return nanos / int64(unit.Multiplier())
 }
 
-func roundToMultipleInt64(value, multiple int64, mode RoundMode, strictCeil bool) int64 {
+func roundToMultipleInt64(value, multiple int64, mode RoundMode, strictCeil bool) (int64, error) {
 	if multiple == 0 || value%multiple == 0 {
 		if strictCeil && mode == RoundUp {
-			return value + multiple
+			return checkedAddInt64(value, multiple)
 		}
-		return value
+		return value, nil
 	}
 
 	quotient := value / multiple
@@ -983,17 +1040,29 @@ func roundToMultipleInt64(value, multiple int64, mode RoundMode, strictCeil bool
 	switch mode {
 	case RoundDown:
 		if remainder < 0 {
-			return (quotient - 1) * multiple
+			quotient, err := checkedSubInt64(quotient, 1)
+			if err != nil {
+				return 0, err
+			}
+			return checkedMulInt64(quotient, multiple)
 		}
-		return quotient * multiple
+		return checkedMulInt64(quotient, multiple)
 	case RoundUp:
 		if remainder > 0 || (strictCeil && remainder == 0) {
-			return (quotient + 1) * multiple
+			quotient, err := checkedAddInt64(quotient, 1)
+			if err != nil {
+				return 0, err
+			}
+			return checkedMulInt64(quotient, multiple)
 		}
 		if remainder < 0 {
-			return quotient * multiple
+			return checkedMulInt64(quotient, multiple)
 		}
-		return (quotient + 1) * multiple
+		quotient, err := checkedAddInt64(quotient, 1)
+		if err != nil {
+			return 0, err
+		}
+		return checkedMulInt64(quotient, multiple)
 	case HalfUp, HalfDown, HalfToEven:
 		half := multiple / 2
 		absRemainder := remainder
@@ -1005,37 +1074,61 @@ func roundToMultipleInt64(value, multiple int64, mode RoundMode, strictCeil bool
 		// a remainder of 1 when rounding to multiples of 3 is closer to 0
 		// than to 3, so it must not be treated as a tie.
 		if absRemainder < half || (multiple%2 != 0 && absRemainder == half) {
-			return quotient * multiple
+			return checkedMulInt64(quotient, multiple)
 		} else if absRemainder > half {
 			if remainder > 0 {
-				return (quotient + 1) * multiple
+				quotient, err := checkedAddInt64(quotient, 1)
+				if err != nil {
+					return 0, err
+				}
+				return checkedMulInt64(quotient, multiple)
 			}
-			return (quotient - 1) * multiple
+			quotient, err := checkedSubInt64(quotient, 1)
+			if err != nil {
+				return 0, err
+			}
+			return checkedMulInt64(quotient, multiple)
 		} else {
 			// Exactly on the halfway point
 			switch mode {
 			case HalfDown:
 				if remainder > 0 {
-					return quotient * multiple
+					return checkedMulInt64(quotient, multiple)
 				}
-				return (quotient - 1) * multiple
+				quotient, err := checkedSubInt64(quotient, 1)
+				if err != nil {
+					return 0, err
+				}
+				return checkedMulInt64(quotient, multiple)
 			case HalfUp:
 				if remainder > 0 {
-					return (quotient + 1) * multiple
+					quotient, err := checkedAddInt64(quotient, 1)
+					if err != nil {
+						return 0, err
+					}
+					return checkedMulInt64(quotient, multiple)
 				}
-				return quotient * multiple
+				return checkedMulInt64(quotient, multiple)
 			case HalfToEven:
 				if quotient%2 == 0 {
-					return quotient * multiple
+					return checkedMulInt64(quotient, multiple)
 				}
 				if remainder > 0 {
-					return (quotient + 1) * multiple
+					quotient, err := checkedAddInt64(quotient, 1)
+					if err != nil {
+						return 0, err
+					}
+					return checkedMulInt64(quotient, multiple)
 				}
-				return (quotient - 1) * multiple
+				quotient, err := checkedSubInt64(quotient, 1)
+				if err != nil {
+					return 0, err
+				}
+				return checkedMulInt64(quotient, multiple)
 			}
 		}
 	}
-	return quotient * multiple
+	return checkedMulInt64(quotient, multiple)
 }
 
 // halfRoundPeriod performs half-rounding by finding the midpoint between period start and end
@@ -1201,8 +1294,34 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 	}
 
 	// Convert back to the input unit
-	roundedNanos := rounded.UnixNano()
+	roundedNanos, err := timeToNanos(rounded)
+	if err != nil {
+		return 0, err
+	}
 	return convertFromNanos(roundedNanos, inputUnit), nil
+}
+
+func timeToNanos(value time.Time) (int64, error) {
+	const nanosPerSecond int64 = 1_000_000_000
+
+	seconds := value.Unix()
+	nanos := int64(value.Nanosecond())
+	maxSeconds := math.MaxInt64 / nanosPerSecond
+	if seconds > maxSeconds || (seconds == maxSeconds && nanos > math.MaxInt64%nanosPerSecond) {
+		return 0, overflowError()
+	}
+
+	minSeconds := math.MinInt64 / nanosPerSecond
+	minRemainder := math.MinInt64 % nanosPerSecond
+	minNanos := nanosPerSecond + minRemainder
+	if seconds < minSeconds {
+		if seconds != minSeconds-1 || nanos < minNanos {
+			return 0, overflowError()
+		}
+		return math.MinInt64 + nanos - minNanos, nil
+	}
+
+	return seconds*nanosPerSecond + nanos, nil
 }
 
 // Kernel execution functions for temporal rounding
