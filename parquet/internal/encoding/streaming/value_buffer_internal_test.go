@@ -86,7 +86,7 @@ func TestStreamBufferSkip(t *testing.T) {
 	s := newTestBuffer(memory.DefaultAllocator, data, 8)
 
 	assert.Equal(t, []byte{0, 1}, fillValue(t, s, 2)) // read-ahead buffers cur[0:8]
-	require.NoError(t, s.Skip(10))                     // 6 buffered + 4 discarded from the reader
+	require.NoError(t, s.Skip(10))                    // 6 buffered + 4 discarded from the reader
 	assert.Equal(t, []byte{12, 13}, fillValue(t, s, 2))
 
 	require.NoError(t, s.Close())
