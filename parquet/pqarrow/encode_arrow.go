@@ -35,6 +35,7 @@ import (
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/schema"
 )
 
 // get the count of the number of leaf arrays for the type
@@ -109,6 +110,22 @@ func decimal256FitsInt64(val decimal256.Num) bool {
 	default:
 		return false
 	}
+}
+
+func targetDecimalPrecision(cw file.ColumnChunkWriter) (int32, bool) {
+	logical, ok := cw.Descr().LogicalType().(schema.DecimalLogicalType)
+	if !ok {
+		return 0, false
+	}
+	return logical.Precision(), true
+}
+
+func decimal128FitsTargetPrecision(val decimal128.Num, precision int32) bool {
+	return precision > 0 && precision <= decimal128.MaxPrecision && val.FitsInPrecision(precision)
+}
+
+func decimal256FitsTargetPrecision(val decimal256.Num, precision int32) bool {
+	return precision > 0 && precision <= decimal256.MaxPrecision && val.FitsInPrecision(precision)
 }
 
 // arrowColumnWriter is a convenience object for easily writing arrow data to a specific
@@ -395,16 +412,32 @@ func writeDenseArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, leafArr 
 					data[idx] = int32(val / 86400000) // coerce date64 values
 				}
 			case arrow.DECIMAL128:
-				for idx, val := range leafArr.(*array.Decimal128).Values() {
+				arr := leafArr.(*array.Decimal128)
+				precision, hasPrecision := targetDecimalPrecision(cw)
+				for idx, val := range arr.Values() {
+					if arr.IsNull(idx) {
+						continue
+					}
 					if !decimal128FitsInt32(val) {
-						return fmt.Errorf("%w: Decimal128 value does not fit in Parquet INT32", arrow.ErrInvalid)
+						return fmt.Errorf("%w: Decimal128 value at index %d does not fit in Parquet INT32", arrow.ErrInvalid, idx)
+					}
+					if hasPrecision && !decimal128FitsTargetPrecision(val, precision) {
+						return fmt.Errorf("%w: Decimal128 value at index %d does not fit Parquet DECIMAL precision %d", arrow.ErrInvalid, idx, precision)
 					}
 					data[idx] = int32(val.LowBits())
 				}
 			case arrow.DECIMAL256:
-				for idx, val := range leafArr.(*array.Decimal256).Values() {
+				arr := leafArr.(*array.Decimal256)
+				precision, hasPrecision := targetDecimalPrecision(cw)
+				for idx, val := range arr.Values() {
+					if arr.IsNull(idx) {
+						continue
+					}
 					if !decimal256FitsInt32(val) {
-						return fmt.Errorf("%w: Decimal256 value does not fit in Parquet INT32", arrow.ErrInvalid)
+						return fmt.Errorf("%w: Decimal256 value at index %d does not fit in Parquet INT32", arrow.ErrInvalid, idx)
+					}
+					if hasPrecision && !decimal256FitsTargetPrecision(val, precision) {
+						return fmt.Errorf("%w: Decimal256 value at index %d does not fit Parquet DECIMAL precision %d", arrow.ErrInvalid, idx, precision)
 					}
 					data[idx] = int32(val.LowBits())
 				}
@@ -480,18 +513,34 @@ func writeDenseArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, leafArr 
 		case arrow.DECIMAL128:
 			ctx.dataBuffer.ResizeNoShrink(arrow.Int64Traits.BytesRequired(leafArr.Len()))
 			data = arrow.Int64Traits.CastFromBytes(ctx.dataBuffer.Bytes())
-			for idx, val := range leafArr.(*array.Decimal128).Values() {
+			arr := leafArr.(*array.Decimal128)
+			precision, hasPrecision := targetDecimalPrecision(cw)
+			for idx, val := range arr.Values() {
+				if arr.IsNull(idx) {
+					continue
+				}
 				if !decimal128FitsInt64(val) {
-					return fmt.Errorf("%w: Decimal128 value does not fit in Parquet INT64", arrow.ErrInvalid)
+					return fmt.Errorf("%w: Decimal128 value at index %d does not fit in Parquet INT64", arrow.ErrInvalid, idx)
+				}
+				if hasPrecision && !decimal128FitsTargetPrecision(val, precision) {
+					return fmt.Errorf("%w: Decimal128 value at index %d does not fit Parquet DECIMAL precision %d", arrow.ErrInvalid, idx, precision)
 				}
 				data[idx] = int64(val.LowBits())
 			}
 		case arrow.DECIMAL256:
 			ctx.dataBuffer.ResizeNoShrink(arrow.Int64Traits.BytesRequired(leafArr.Len()))
 			data = arrow.Int64Traits.CastFromBytes(ctx.dataBuffer.Bytes())
-			for idx, val := range leafArr.(*array.Decimal256).Values() {
+			arr := leafArr.(*array.Decimal256)
+			precision, hasPrecision := targetDecimalPrecision(cw)
+			for idx, val := range arr.Values() {
+				if arr.IsNull(idx) {
+					continue
+				}
 				if !decimal256FitsInt64(val) {
-					return fmt.Errorf("%w: Decimal256 value does not fit in Parquet INT64", arrow.ErrInvalid)
+					return fmt.Errorf("%w: Decimal256 value at index %d does not fit in Parquet INT64", arrow.ErrInvalid, idx)
+				}
+				if hasPrecision && !decimal256FitsTargetPrecision(val, precision) {
+					return fmt.Errorf("%w: Decimal256 value at index %d does not fit Parquet DECIMAL precision %d", arrow.ErrInvalid, idx, precision)
 				}
 				data[idx] = int64(val.LowBits())
 			}
