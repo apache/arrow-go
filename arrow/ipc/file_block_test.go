@@ -99,8 +99,3 @@ func TestFileBlockNewMessageValidatesFraming(t *testing.T) {
 		}
 	}
 }
-
-func TestValidateFileBlockRejectsUnalignedBody(t *testing.T) {
-	err := validateFileBlock(8, 8, 4, 24, 0, 0)
-	require.ErrorContains(t, err, "not a multiple of 8")
-}

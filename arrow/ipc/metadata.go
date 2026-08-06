@@ -92,11 +92,12 @@ func validateFileBlockMetadata(buf []byte, meta int32) (int, error) {
 		if len(buf) < prefix {
 			return 0, fmt.Errorf("arrow/ipc: file block metadata is too short for prefix length %d", prefix)
 		}
-		length = binary.LittleEndian.Uint32(buf[4:])
 	default:
+		// ARROW-6314: backwards compatibility for reading old IPC
+		// messages produced prior to version 0.15.0
 		prefix = 4
-		length = binary.LittleEndian.Uint32(buf)
 	}
+	length = binary.LittleEndian.Uint32(buf[prefix-4:])
 
 	if int(meta)-prefix < 4 {
 		return 0, fmt.Errorf("arrow/ipc: invalid file block metadata length %d for prefix length %d", meta, prefix)

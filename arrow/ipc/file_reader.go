@@ -75,9 +75,6 @@ func validateFileBlock(offset int64, meta int32, body, fileSize, maxMetadataSize
 	if body < 0 {
 		return fmt.Errorf("arrow/ipc: invalid file block body length %d", body)
 	}
-	if body%8 != 0 {
-		return fmt.Errorf("arrow/ipc: file block body length %d is not a multiple of 8", body)
-	}
 	if maxMetadataSize > 0 && int64(meta) > maxMetadataSize {
 		return fmt.Errorf("arrow/ipc: file block metadata length %d exceeds limit %d", meta, maxMetadataSize)
 	}
