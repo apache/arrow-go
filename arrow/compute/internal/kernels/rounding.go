@@ -1302,26 +1302,11 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 }
 
 func timeToNanos(value time.Time) (int64, error) {
-	const nanosPerSecond int64 = 1_000_000_000
-
-	seconds := value.Unix()
-	nanos := int64(value.Nanosecond())
-	maxSeconds := math.MaxInt64 / nanosPerSecond
-	if seconds > maxSeconds || (seconds == maxSeconds && nanos > math.MaxInt64%nanosPerSecond) {
-		return 0, overflowError()
+	timestamp, err := arrow.TimestampFromTime(value, arrow.Nanosecond)
+	if err != nil {
+		return 0, err
 	}
-
-	minSeconds := math.MinInt64 / nanosPerSecond
-	minRemainder := math.MinInt64 % nanosPerSecond
-	minNanos := nanosPerSecond + minRemainder
-	if seconds < minSeconds {
-		if seconds != minSeconds-1 || nanos < minNanos {
-			return 0, overflowError()
-		}
-		return math.MinInt64 + nanos - minNanos, nil
-	}
-
-	return seconds*nanosPerSecond + nanos, nil
+	return int64(timestamp), nil
 }
 
 // Kernel execution functions for temporal rounding
