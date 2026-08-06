@@ -444,6 +444,23 @@ func (b *TimestampWithOffsetBuilder) Resize(n int) {
 	b.lastOffset = noLastOffset
 }
 
+type timestampWithOffsetCheckpoint struct {
+	builder    *TimestampWithOffsetBuilder
+	lastOffset int16
+}
+
+func (c *timestampWithOffsetCheckpoint) Capture() {
+	c.lastOffset = c.builder.lastOffset
+}
+
+func (c *timestampWithOffsetCheckpoint) Restore() {
+	c.builder.lastOffset = c.lastOffset
+}
+
+func (b *TimestampWithOffsetBuilder) NewCheckpoint() array.CheckpointState {
+	return &timestampWithOffsetCheckpoint{builder: b}
+}
+
 // NewExtensionArray finalizes the current array and resets lastOffset so a
 // reused builder starts a fresh run instead of continuing a run that belonged
 // to the array just finalized (the underlying REE builder is reset too).

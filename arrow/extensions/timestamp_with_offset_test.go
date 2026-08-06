@@ -613,7 +613,7 @@ func TestTimestampWithOffsetExtensionRecordBuilderRollsBackState(t *testing.T) {
 	builder := array.NewRecordBuilder(mem, schema)
 	defer builder.Release()
 
-	require.NoError(t, builder.UnmarshalJSON([]byte(`{"timestamp_with_offset":"2025-01-01T00:00:00Z","other":1}`)))
+	require.NoError(t, builder.UnmarshalJSON([]byte(`{"timestamp_with_offset":"2025-01-01T00:00:00+01:00","other":1}`)))
 	require.Error(t, builder.UnmarshalJSON([]byte(`{"timestamp_with_offset":"2025-01-01T00:00:00+01:00","other":"invalid"}`)))
 	require.NoError(t, builder.UnmarshalJSON([]byte(`{"timestamp_with_offset":"2025-01-01T00:00:00+01:00","other":2}`)))
 
@@ -623,9 +623,11 @@ func TestTimestampWithOffsetExtensionRecordBuilderRollsBackState(t *testing.T) {
 	values := rec.Column(0).(*extensions.TimestampWithOffsetArray)
 	require.Equal(t, 2, values.Len())
 	_, offset := values.Value(0).Zone()
-	require.Equal(t, 0, offset)
+	require.Equal(t, 60*60, offset)
 	_, offset = values.Value(1).Zone()
 	require.Equal(t, 60*60, offset)
+	offsets := values.Storage().(*array.Struct).Field(1).(*array.RunEndEncoded)
+	require.Equal(t, 1, offsets.RunEndsArr().Len())
 }
 
 func TestTimestampWithOffsetTypeBatchIPCRoundTrip(t *testing.T) {

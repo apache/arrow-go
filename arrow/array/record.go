@@ -430,6 +430,26 @@ type checkpointState interface {
 	restore()
 }
 
+// CheckpointState captures and restores builder state that is not represented by
+// the builder's length or storage builders.
+type CheckpointState interface {
+	Capture()
+	Restore()
+}
+
+// CheckpointableBuilder allows custom builders to participate in RecordBuilder
+// row rollback.
+type CheckpointableBuilder interface {
+	NewCheckpoint() CheckpointState
+}
+
+type checkpointStateAdapter struct {
+	state CheckpointState
+}
+
+func (s *checkpointStateAdapter) capture() { s.state.Capture() }
+func (s *checkpointStateAdapter) restore() { s.state.Restore() }
+
 type storageBuilder interface {
 	StorageBuilder() Builder
 }
@@ -450,6 +470,8 @@ func newBuilderCheckpoint(builder Builder) *builderCheckpoint {
 	}
 	if checkpointable, ok := builder.(checkpointableBuilder); ok {
 		checkpoint.state = checkpointable.newCheckpoint()
+	} else if checkpointable, ok := builder.(CheckpointableBuilder); ok {
+		checkpoint.state = &checkpointStateAdapter{state: checkpointable.NewCheckpoint()}
 	}
 
 	switch builder := builder.(type) {
