@@ -663,6 +663,20 @@ func TestInvalidPrimitiveValue(t *testing.T) {
 	}
 }
 
+func TestInvalidCompoundValue(t *testing.T) {
+	for _, input := range []string{`[1,2]`, `{"value":1}`} {
+		t.Run(input, func(t *testing.T) {
+			v, err := variant.ParseJSON(input, false)
+			require.NoError(t, err)
+
+			value := v.Bytes()
+			_, err = variant.NewWithMetadata(v.Metadata(), value[:len(value)-1])
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "invalid variant value")
+		})
+	}
+}
+
 func TestInvalidObjectAccess(t *testing.T) {
 	v := loadVariant(t, "object_primitive")
 	obj := v.Value().(variant.ObjectValue)
