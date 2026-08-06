@@ -613,6 +613,28 @@ func TestRecordBuilderRollsBackDictionaryState(t *testing.T) {
 	assert.NoError(t, array.ValidateFull(dict))
 }
 
+func TestRecordBuilderRollsBackDictionaryNullState(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: dictType},
+		{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	assert.Error(t, builder.UnmarshalJSON([]byte(`{"value":null,"other":"invalid"}`)))
+	assert.Zero(t, builder.Field(0).Len())
+	assert.Zero(t, builder.Field(0).NullN())
+
+	assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":"kept","other":1}`)))
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+	assert.Zero(t, rec.Column(0).NullN())
+}
+
 func TestRecordBuilderRollsBackExistingDictionaryState(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)

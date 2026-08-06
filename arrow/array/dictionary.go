@@ -686,6 +686,7 @@ func (b *dictionaryBuilder) Reserve(n int) {
 func (b *dictionaryBuilder) Resize(n int) {
 	b.idxBuilder.Resize(n)
 	b.length = b.idxBuilder.Len()
+	b.nulls = b.idxBuilder.NullN()
 }
 
 func (b *dictionaryBuilder) ResetFull() {
