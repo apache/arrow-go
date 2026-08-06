@@ -627,17 +627,26 @@ func TestFileReaderIndexValidation(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = arrowReader.GetFieldReader(context.Background(), -1, nil, []int{0})
-	require.Error(t, err)
+	require.ErrorIs(t, err, arrow.ErrIndex)
 	_, err = arrowReader.GetFieldReader(context.Background(), 1, nil, []int{0})
-	require.Error(t, err)
+	require.ErrorIs(t, err, arrow.ErrIndex)
 	_, err = arrowReader.GetFieldReader(context.Background(), 0, nil, []int{1})
-	require.Error(t, err)
+	require.ErrorIs(t, err, arrow.ErrIndex)
+	_, err = arrowReader.GetFieldReader(context.Background(), 0, nil, []int{-1})
+	require.ErrorIs(t, err, arrow.ErrIndex)
+
+	fieldReader, err := arrowReader.GetFieldReader(context.Background(), 0, map[int]bool{0: true}, []int{0})
+	require.NoError(t, err)
+	fieldReader.Release()
 
 	columnReader, err := arrowReader.GetColumn(context.Background(), 0)
 	require.NoError(t, err)
 	defer columnReader.Release()
 	_, err = arrowReader.ReadColumn([]int{1}, columnReader)
-	require.Error(t, err)
+	require.ErrorIs(t, err, arrow.ErrIndex)
+	chunked, err := arrowReader.ReadColumn([]int{0}, columnReader)
+	require.NoError(t, err)
+	chunked.Release()
 }
 
 func TestReadParquetFile(t *testing.T) {
