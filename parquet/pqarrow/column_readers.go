@@ -843,9 +843,7 @@ func transferInt96(rdr file.RecordReader, dt arrow.DataType) (arrow.ArrayData, e
 	out := arrow.Int64Traits.CastFromBytes(data)
 
 	for idx, val := range values[:length] {
-		if binary.LittleEndian.Uint32(val[8:]) == 0 {
-			out[idx] = 0
-		} else {
+		if bitmap == nil || bitutil.BitIsSet(bitmap.Bytes(), idx) {
 			timestamp, err := val.ToTimestamp()
 			if err != nil {
 				return nil, fmt.Errorf("parquet INT96 timestamp at index %d: %w", idx, err)

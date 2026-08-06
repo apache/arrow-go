@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -56,7 +57,40 @@ func TestArrowTimestampToImpalaTimestamp(t *testing.T) {
 	}
 }
 
-func TestReadInt96RejectsOutOfRangeTimestamp(t *testing.T) {
+func TestReadInt96RejectsInvalidTimestamp(t *testing.T) {
+	nanosPerDay := uint64(24 * time.Hour)
+	tests := []struct {
+		name    string
+		corrupt parquet.Int96
+	}{
+		{
+			name:    "zero value",
+			corrupt: parquet.NewInt96([3]uint32{0, 0, 0}),
+		},
+		{
+			name:    "julian day out of range",
+			corrupt: parquet.NewInt96([3]uint32{0, 0, ^uint32(0)}),
+		},
+		{
+			name: "nanoseconds at end of day",
+			corrupt: parquet.NewInt96([3]uint32{
+				uint32(nanosPerDay),
+				uint32(nanosPerDay >> 32),
+				0,
+			}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := readCorruptInt96(t, tt.corrupt)
+			require.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
+}
+
+func readCorruptInt96(t *testing.T, corrupt parquet.Int96) error {
+	t.Helper()
 	mem := memory.NewGoAllocator()
 	timestampType := &arrow.TimestampType{Unit: arrow.Nanosecond}
 	sc := arrow.NewSchema([]arrow.Field{{Name: "ts", Type: timestampType}}, nil)
@@ -82,7 +116,6 @@ func TestReadInt96RejectsOutOfRangeTimestamp(t *testing.T) {
 
 	var valid parquet.Int96
 	arrowTimestampToImpalaTimestamp(arrow.Nanosecond, 0, &valid)
-	corrupt := parquet.NewInt96([3]uint32{0, 0, ^uint32(0)})
 	encoded := buf.Bytes()
 	idx := bytes.Index(encoded, valid[:])
 	require.GreaterOrEqual(t, idx, 0)
@@ -99,5 +132,49 @@ func TestReadInt96RejectsOutOfRangeTimestamp(t *testing.T) {
 	defer columnReader.Release()
 
 	_, err = columnReader.NextBatch(1)
-	require.ErrorIs(t, err, arrow.ErrInvalid)
+	return err
+}
+
+func TestReadInt96SkipsNullPhysicalValues(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	timestampType := &arrow.TimestampType{Unit: arrow.Nanosecond}
+	sc := arrow.NewSchema([]arrow.Field{{Name: "ts", Type: timestampType, Nullable: true}}, nil)
+	builder := array.NewTimestampBuilder(mem, timestampType)
+	builder.AppendNull()
+	builder.Append(0)
+	record := array.NewRecordBatch(sc, []arrow.Array{builder.NewArray()}, 2)
+	builder.Release()
+	defer record.Release()
+
+	var buf bytes.Buffer
+	writer, err := NewFileWriter(
+		sc,
+		&buf,
+		parquet.NewWriterProperties(
+			parquet.WithDictionaryDefault(false),
+			parquet.WithEncodingFor("ts", parquet.Encodings.Plain),
+		),
+		NewArrowWriterProperties(WithDeprecatedInt96Timestamps(true)),
+	)
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+
+	fileReader, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer fileReader.Close()
+
+	arrowReader, err := NewFileReader(fileReader, ArrowReadProperties{}, mem)
+	require.NoError(t, err)
+	columnReader, err := arrowReader.GetColumn(context.Background(), 0)
+	require.NoError(t, err)
+	defer columnReader.Release()
+
+	chunked, err := columnReader.NextBatch(2)
+	require.NoError(t, err)
+	defer chunked.Release()
+
+	values := chunked.Chunk(0).(*array.Timestamp)
+	assert.True(t, values.IsNull(0))
+	assert.Equal(t, arrow.Timestamp(0), values.Value(1))
 }
