@@ -606,6 +606,40 @@ func TestFileReaderColumnChunkBoundsErrors(t *testing.T) {
 	}
 }
 
+func TestFileReaderIndexValidation(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	record, _, err := array.RecordFromJSON(memory.DefaultAllocator, schema,
+		strings.NewReader(`[{"value": 1}]`))
+	require.NoError(t, err)
+	defer record.Release()
+
+	var buf bytes.Buffer
+	writer, err := pqarrow.NewFileWriter(schema, &buf, nil, pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+
+	fileReader, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer fileReader.Close()
+
+	arrowReader, err := pqarrow.NewFileReader(fileReader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+	require.NoError(t, err)
+
+	_, err = arrowReader.GetFieldReader(context.Background(), -1, nil, []int{0})
+	require.Error(t, err)
+	_, err = arrowReader.GetFieldReader(context.Background(), 1, nil, []int{0})
+	require.Error(t, err)
+	_, err = arrowReader.GetFieldReader(context.Background(), 0, nil, []int{1})
+	require.Error(t, err)
+
+	columnReader, err := arrowReader.GetColumn(context.Background(), 0)
+	require.NoError(t, err)
+	defer columnReader.Release()
+	_, err = arrowReader.ReadColumn([]int{1}, columnReader)
+	require.Error(t, err)
+}
+
 func TestReadParquetFile(t *testing.T) {
 	dir := os.Getenv("PARQUET_TEST_BAD_DATA")
 	if dir == "" {

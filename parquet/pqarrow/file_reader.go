@@ -212,6 +212,13 @@ func (fr *FileReader) allRowGroupFactory() itrFactory {
 //
 // IncludedLeaves and RowGroups are used to specify precisely which leaf indexes and row groups to read a subset of.
 func (fr *FileReader) GetFieldReader(ctx context.Context, i int, includedLeaves map[int]bool, rowGroups []int) (*ColumnReader, error) {
+	if i < 0 || i >= len(fr.Manifest.Fields) {
+		return nil, fmt.Errorf("invalid field index chosen %d, there are only %d fields", i, len(fr.Manifest.Fields))
+	}
+	if err := fr.checkRowGroups(rowGroups); err != nil {
+		return nil, err
+	}
+
 	ctx = context.WithValue(ctx, rdrCtxKey{}, readerCtx{
 		rdr:            fr.rdr,
 		mem:            fr.mem,
@@ -280,6 +287,10 @@ func (fr *FileReader) RowGroup(idx int) RowGroupReader {
 
 // ReadColumn reads data to create a chunked array only from the requested row groups.
 func (fr *FileReader) ReadColumn(rowGroups []int, rdr *ColumnReader) (*arrow.Chunked, error) {
+	if err := fr.checkRowGroups(rowGroups); err != nil {
+		return nil, err
+	}
+
 	recs := int64(0)
 	for _, rg := range rowGroups {
 		recs += fr.rdr.MetaData().RowGroups[rg].GetNumRows()
