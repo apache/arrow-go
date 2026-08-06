@@ -219,6 +219,23 @@ func TestCSVReadInvalidFields(t *testing.T) {
 	}
 }
 
+func TestFixedSizeBinaryParseErrorAppendsNull(t *testing.T) {
+	schema := arrow.NewSchema(
+		[]arrow.Field{{Name: "value", Type: &arrow.FixedSizeBinaryType{ByteWidth: 3}}},
+		nil,
+	)
+	r := csv.NewReader(strings.NewReader("AQ==\n"), schema, csv.WithHeader(false))
+	defer r.Release()
+
+	require.True(t, r.Next())
+	require.ErrorIs(t, r.Err(), arrow.ErrInvalid)
+
+	record := r.RecordBatch()
+	require.EqualValues(t, 1, record.NumRows())
+	require.Equal(t, 1, record.Column(0).Len())
+	assert.True(t, record.Column(0).IsNull(0))
+}
+
 func TestCSVReaderParseError(t *testing.T) {
 	f := bytes.NewBufferString(`## a simple set of data: int64;float64;string
 0;0;str-0
