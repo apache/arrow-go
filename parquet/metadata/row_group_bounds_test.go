@@ -20,15 +20,35 @@ import (
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
-	"github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
+	"github.com/apache/arrow-go/v18/parquet"
+	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
+	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/require"
 )
 
 func TestRowGroupColumnIndexBounds(t *testing.T) {
+	columnIndexOffset, columnIndexLength := int64(100), int32(10)
+	offsetIndexOffset, offsetIndexLength := int64(200), int32(20)
+	primitive := schema.Must(schema.NewPrimitiveNode(
+		"value", parquet.Repetitions.Required, parquet.Types.Int32, -1, -1,
+	))
+	parquetSchema := schema.MustGroup(schema.NewGroupNode(
+		"schema", parquet.Repetitions.Required, schema.FieldList{primitive}, -1,
+	))
 	rowGroup := metadata.NewRowGroupMetaData(
-		&parquet.RowGroup{Columns: []*parquet.ColumnChunk{{}}},
-		nil,
+		&format.RowGroup{Columns: []*format.ColumnChunk{{
+			MetaData: &format.ColumnMetaData{
+				Type:         format.Type_INT32,
+				Encodings:    []format.Encoding{format.Encoding_PLAIN},
+				PathInSchema: []string{"value"},
+			},
+			ColumnIndexOffset: &columnIndexOffset,
+			ColumnIndexLength: &columnIndexLength,
+			OffsetIndexOffset: &offsetIndexOffset,
+			OffsetIndexLength: &offsetIndexLength,
+		}}},
+		schema.NewSchema(parquetSchema),
 		nil,
 		nil,
 	)
@@ -37,14 +57,23 @@ func TestRowGroupColumnIndexBounds(t *testing.T) {
 	require.ErrorIs(t, err, arrow.ErrIndex)
 	_, err = rowGroup.ColumnChunk(1)
 	require.ErrorIs(t, err, arrow.ErrIndex)
+	column, err := rowGroup.ColumnChunk(0)
+	require.NoError(t, err)
+	require.NotNil(t, column)
 
 	_, ok := rowGroup.ColumnIndexLocation(-1)
 	require.False(t, ok)
 	_, ok = rowGroup.ColumnIndexLocation(1)
 	require.False(t, ok)
+	location, ok := rowGroup.ColumnIndexLocation(0)
+	require.True(t, ok)
+	require.Equal(t, metadata.IndexLocation{Offset: columnIndexOffset, Length: columnIndexLength}, location)
 
 	_, ok = rowGroup.OffsetIndexLocation(-1)
 	require.False(t, ok)
 	_, ok = rowGroup.OffsetIndexLocation(1)
 	require.False(t, ok)
+	location, ok = rowGroup.OffsetIndexLocation(0)
+	require.True(t, ok)
+	require.Equal(t, metadata.IndexLocation{Offset: offsetIndexOffset, Length: offsetIndexLength}, location)
 }
