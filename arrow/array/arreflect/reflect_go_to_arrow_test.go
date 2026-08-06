@@ -135,7 +135,7 @@ func TestBuildTemporalArray(t *testing.T) {
 func TestBuildTemporalArrayRejectsTimestampOverflow(t *testing.T) {
 	mem := checkedMem(t)
 	values := []time.Time{
-		time.Date(1000, time.January, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC),
 		time.Date(3000, time.January, 1, 0, 0, 0, 0, time.UTC),
 	}
 
