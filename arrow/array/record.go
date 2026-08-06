@@ -528,41 +528,43 @@ func (checkpoint *builderCheckpoint) capture() {
 }
 
 func (checkpoint *builderCheckpoint) restore() {
-	for _, child := range checkpoint.children {
-		child.restore()
-	}
-
 	if builder, ok := checkpoint.builder.(*RunEndEncodedBuilder); ok {
 		builder.length = checkpoint.length
 		builder.lastUnmarshalled = checkpoint.lastUnmarshalled
 		builder.unmarshalled = checkpoint.unmarshalled
 		builder.lastStr = checkpoint.lastStr
-		return
-	}
-	checkpoint.builder.Resize(checkpoint.length)
-	switch builder := checkpoint.builder.(type) {
-	case *ListBuilder:
-		builder.length = checkpoint.length
-	case *LargeListBuilder:
-		builder.length = checkpoint.length
-	case *ListViewBuilder:
-		builder.length = checkpoint.length
-	case *LargeListViewBuilder:
-		builder.length = checkpoint.length
-	case *FixedSizeListBuilder:
-		builder.length = checkpoint.length
-	case *MapBuilder:
-		builder.listBuilder.length = checkpoint.length
-	case *StructBuilder:
-		builder.length = checkpoint.length
-	case *SparseUnionBuilder:
-		builder.typesBuilder.SetLength(checkpoint.length)
-	case *DenseUnionBuilder:
-		builder.typesBuilder.SetLength(checkpoint.length)
-		builder.offsetsBuilder.SetLength(checkpoint.length * arrow.Int32SizeBytes)
+	} else {
+		// Resize the parent before restoring children. Some parent builders resize
+		// their children as part of Resize, so restoring children first would
+		// overwrite their physical state again.
+		checkpoint.builder.Resize(checkpoint.length)
+		switch builder := checkpoint.builder.(type) {
+		case *ListBuilder:
+			builder.length = checkpoint.length
+		case *LargeListBuilder:
+			builder.length = checkpoint.length
+		case *ListViewBuilder:
+			builder.length = checkpoint.length
+		case *LargeListViewBuilder:
+			builder.length = checkpoint.length
+		case *FixedSizeListBuilder:
+			builder.length = checkpoint.length
+		case *MapBuilder:
+			builder.listBuilder.length = checkpoint.length
+		case *StructBuilder:
+			builder.length = checkpoint.length
+		case *SparseUnionBuilder:
+			builder.typesBuilder.SetLength(checkpoint.length)
+		case *DenseUnionBuilder:
+			builder.typesBuilder.SetLength(checkpoint.length)
+			builder.offsetsBuilder.SetLength(checkpoint.length * arrow.Int32SizeBytes)
+		}
 	}
 	if checkpoint.state != nil {
 		checkpoint.state.restore()
+	}
+	for _, child := range checkpoint.children {
+		child.restore()
 	}
 }
 

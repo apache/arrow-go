@@ -752,6 +752,39 @@ func TestRecordBuilderRollsBackRunEndStateAfterDecodeError(t *testing.T) {
 	}
 }
 
+func TestRecordBuilderRollsBackNestedRunEndStateAfterDecodeError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	typ := arrow.StructOf(
+		arrow.Field{Name: "value", Type: arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int16, arrow.BinaryTypes.String)},
+		arrow.Field{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+	)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "row", Type: typ}}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	if err := builder.UnmarshalJSON([]byte(`{"row":{"value":"a","other":1}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := builder.UnmarshalJSON([]byte(`{"row":{"value":"a","other":"invalid"}}`)); err == nil {
+		t.Fatal("expected a decode error")
+	}
+	if err := builder.UnmarshalJSON([]byte(`{"row":{"value":"a","other":2}}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+	row := rec.Column(0).(*array.Struct)
+	rle := row.Field(0).(*array.RunEndEncoded)
+	assert.Equal(t, 2, rle.Len())
+	assert.Equal(t, 1, rle.RunEndsArr().Len())
+	assert.Equal(t, 1, rle.Values().Len())
+	assert.Equal(t, "a", rle.ValueStr(0))
+	assert.Equal(t, "a", rle.ValueStr(1))
+}
+
 func TestRecordBuilderResize(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
