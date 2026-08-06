@@ -1241,6 +1241,30 @@ func slicesToInt64(values []int32) []int64 {
 	return out
 }
 
+func TestMakeArrayFromScalarUsesCorrectBinaryOffsetWidthForNulls(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	const length = 3
+	for _, dt := range []arrow.DataType{arrow.BinaryTypes.LargeBinary, arrow.BinaryTypes.LargeString} {
+		t.Run(dt.Name(), func(t *testing.T) {
+			sc := scalar.MakeNullScalar(dt)
+			if releasable, ok := sc.(scalar.Releasable); ok {
+				defer releasable.Release()
+			}
+
+			arr, err := scalar.MakeArrayFromScalar(sc, length, mem)
+			require.NoError(t, err)
+			defer arr.Release()
+
+			require.NoError(t, array.ValidateFull(arr))
+			assert.Equal(t, length, arr.Len())
+			assert.Equal(t, length, arr.NullN())
+			assert.Equal(t, arrow.Int64Traits.BytesRequired(length+1), arr.Data().Buffers()[1].Len())
+		})
+	}
+}
+
 func TestMakeArrayFromScalarRejectsNegativeLength(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)

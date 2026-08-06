@@ -758,37 +758,7 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 //
 // Deprecated: Use array.MakeArrayOfNull
 func MakeArrayOfNull(dt arrow.DataType, length int, mem memory.Allocator) arrow.Array {
-	var (
-		buffers  = []*memory.Buffer{nil}
-		children []arrow.ArrayData
-	)
-
-	buffers[0] = memory.NewResizableBuffer(mem)
-	buffers[0].Resize(int(bitutil.BytesForBits(int64(length))))
-	defer buffers[0].Release()
-
-	switch t := dt.(type) {
-	case arrow.NestedType:
-		fieldList := t.Fields()
-		children = make([]arrow.ArrayData, len(fieldList))
-		for i, f := range fieldList {
-			arr := MakeArrayOfNull(f.Type, length, mem)
-			defer arr.Release()
-			children[i] = arr.Data()
-		}
-	case arrow.FixedWidthDataType:
-		buffers = append(buffers, memory.NewResizableBuffer(mem))
-		buffers[1].Resize(int(bitutil.BytesForBits(int64(t.BitWidth()))) * length)
-		defer buffers[1].Release()
-	case arrow.BinaryDataType:
-		buffers = append(buffers, memory.NewResizableBuffer(mem), nil)
-		buffers[1].Resize(arrow.Int32Traits.BytesRequired(length + 1))
-		defer buffers[1].Release()
-	}
-
-	data := array.NewData(dt, length, buffers, children, length, 0)
-	defer data.Release()
-	return array.MakeFromData(data)
+	return array.MakeArrayOfNull(mem, dt, length)
 }
 
 // MakeArrayFromScalar returns an array filled with the scalar value repeated length times.
