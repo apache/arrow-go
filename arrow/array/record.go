@@ -430,6 +430,10 @@ type checkpointState interface {
 	restore()
 }
 
+type storageBuilder interface {
+	StorageBuilder() Builder
+}
+
 type builderCheckpoint struct {
 	builder          Builder
 	length           int
@@ -473,8 +477,8 @@ func newBuilderCheckpoint(builder Builder) *builderCheckpoint {
 		for _, child := range builder.children {
 			checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(child))
 		}
-	case *ExtensionBuilder:
-		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.Builder))
+	case storageBuilder:
+		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.StorageBuilder()))
 	case *RunEndEncodedBuilder:
 		checkpoint.children = append(checkpoint.children,
 			newBuilderCheckpoint(builder.runEnds),

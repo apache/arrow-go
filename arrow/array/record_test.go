@@ -608,9 +608,42 @@ func TestRecordBuilderRollsBackDictionaryState(t *testing.T) {
 	defer rec.Release()
 
 	dict := rec.Column(0).(*array.Dictionary)
-	defer dict.Dictionary().Release()
 	assert.Equal(t, 1, dict.Dictionary().Len())
 	assert.Equal(t, "kept", dict.Dictionary().(*array.String).Value(0))
+	assert.NoError(t, array.ValidateFull(dict))
+}
+
+func TestRecordBuilderRollsBackExistingDictionaryState(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: dictType},
+		{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":"existing","other":1}`)))
+	assert.Error(t, builder.UnmarshalJSON([]byte(`{"value":"discarded","other":"invalid"}`)))
+	assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":"existing","other":2}`)))
+	assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":"new","other":3}`)))
+
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+
+	dict := rec.Column(0).(*array.Dictionary)
+	dictValues := dict.Dictionary()
+	assert.Equal(t, 2, dictValues.Len())
+	assert.Equal(t, "existing", dictValues.(*array.String).Value(0))
+	assert.Equal(t, "new", dictValues.(*array.String).Value(1))
+	assert.Equal(t, 0, dict.GetValueIndex(0))
+	assert.Equal(t, 0, dict.GetValueIndex(1))
+	assert.Equal(t, 1, dict.GetValueIndex(2))
+	assert.Equal(t, "existing", dict.ValueStr(0))
+	assert.Equal(t, "existing", dict.ValueStr(1))
+	assert.Equal(t, "new", dict.ValueStr(2))
 	assert.NoError(t, array.ValidateFull(dict))
 }
 

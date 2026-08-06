@@ -439,6 +439,11 @@ func (b *TimestampWithOffsetBuilder) NewArray() arrow.Array {
 	return b.NewExtensionArray()
 }
 
+func (b *TimestampWithOffsetBuilder) Resize(n int) {
+	b.ExtensionBuilder.Resize(n)
+	b.lastOffset = noLastOffset
+}
+
 // NewExtensionArray finalizes the current array and resets lastOffset so a
 // reused builder starts a fresh run instead of continuing a run that belonged
 // to the array just finalized (the underlying REE builder is reset too).

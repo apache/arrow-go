@@ -183,7 +183,16 @@ func (s *BinaryMemoTable) Truncate(size int) {
 	}
 	s.builder.Resize(size)
 	s.builder.ResizeData(dataLen)
-	s.tbl.Truncate(uint64(size))
+
+	truncated := NewHashTable[int32](uint64(size))
+	s.tbl.VisitEntries(func(e *entry[int32]) {
+		if e.payload.val < 0 || uint64(e.payload.val) >= uint64(size) {
+			return
+		}
+		entry, _ := truncated.Lookup(e.h, func(int32) bool { return false })
+		truncated.Insert(entry, e.h, e.payload.val, -1)
+	})
+	s.tbl = truncated
 	if s.nullIdx >= size {
 		s.nullIdx = KeyNotFound
 	}

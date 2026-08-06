@@ -163,6 +163,7 @@ type multiBufferBuilder struct {
 	mem              memory.Allocator
 	blocks           []*memory.Buffer
 	currentOutBuffer int
+	checkpoint       *multiBufferCheckpoint
 }
 
 // Retain increases the reference count by 1.
@@ -239,32 +240,40 @@ func (b *multiBufferBuilder) Reset() {
 
 type multiBufferCheckpoint struct {
 	builder       *multiBufferBuilder
-	blockLengths  []int
+	blockCount    int
+	blockLengths  map[int]int
 	currentOutput int
 }
 
 func (b *multiBufferBuilder) newCheckpoint() *multiBufferCheckpoint {
-	return &multiBufferCheckpoint{builder: b}
+	checkpoint := &multiBufferCheckpoint{builder: b}
+	b.checkpoint = checkpoint
+	return checkpoint
 }
 
 func (c *multiBufferCheckpoint) capture() {
-	n := len(c.builder.blocks)
-	if cap(c.blockLengths) < n {
-		c.blockLengths = make([]int, n)
-	} else {
-		c.blockLengths = c.blockLengths[:n]
-	}
-	for i, block := range c.builder.blocks {
-		c.blockLengths[i] = block.Len()
-	}
+	c.blockCount = len(c.builder.blocks)
+	clear(c.blockLengths)
 	c.currentOutput = c.builder.currentOutBuffer
 }
 
+func (c *multiBufferCheckpoint) recordBlock(index, length int) {
+	if index >= c.blockCount {
+		return
+	}
+	if c.blockLengths == nil {
+		c.blockLengths = make(map[int]int)
+	}
+	if _, ok := c.blockLengths[index]; !ok {
+		c.blockLengths[index] = length
+	}
+}
+
 func (c *multiBufferCheckpoint) restore() {
-	for _, block := range c.builder.blocks[len(c.blockLengths):] {
+	for _, block := range c.builder.blocks[c.blockCount:] {
 		block.Release()
 	}
-	c.builder.blocks = c.builder.blocks[:len(c.blockLengths)]
+	c.builder.blocks = c.builder.blocks[:c.blockCount]
 	for i, length := range c.blockLengths {
 		c.builder.blocks[i].Resize(length)
 	}
@@ -274,6 +283,9 @@ func (c *multiBufferCheckpoint) restore() {
 func (b *multiBufferBuilder) UnsafeAppend(hdr *arrow.ViewHeader, val []byte) {
 	buf := b.blocks[b.currentOutBuffer]
 	idx, offset := b.currentOutBuffer, buf.Len()
+	if b.checkpoint != nil {
+		b.checkpoint.recordBlock(idx, offset)
+	}
 	hdr.SetIndexOffset(int32(idx), int32(offset))
 
 	n := copy(buf.Buf()[offset:], val)

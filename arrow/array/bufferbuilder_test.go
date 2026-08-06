@@ -39,3 +39,36 @@ func TestMultiBufferBuilderUnsafeAppendPanicsOnTruncatedCopy(t *testing.T) {
 		builder.UnsafeAppend(&hdr, make([]byte, 64))
 	})
 }
+
+func TestMultiBufferCheckpointRestoresTouchedBlocks(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	builder := multiBufferBuilder{mem: mem, blockSize: 4}
+	builder.refCount.Add(1)
+	defer builder.Release()
+
+	first := memory.NewResizableBuffer(mem)
+	first.ResizeNoShrink(4)
+	first.Resize(2)
+	second := memory.NewResizableBuffer(mem)
+	second.ResizeNoShrink(4)
+	builder.blocks = []*memory.Buffer{first, second}
+	builder.currentOutBuffer = 1
+
+	var hdr arrow.ViewHeader
+
+	checkpoint := builder.newCheckpoint()
+	checkpoint.capture()
+
+	builder.Reserve(2)
+	builder.UnsafeAppend(&hdr, []byte("gh"))
+	builder.Reserve(1)
+	builder.UnsafeAppend(&hdr, []byte("i"))
+
+	checkpoint.restore()
+	assert.Len(t, builder.blocks, 2)
+	assert.Equal(t, 2, builder.blocks[0].Len())
+	assert.Equal(t, 4, builder.blocks[1].Len())
+	assert.Equal(t, 1, builder.currentOutBuffer)
+}
