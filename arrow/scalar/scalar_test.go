@@ -159,19 +159,21 @@ func TestBasicDecimal256(t *testing.T) {
 }
 
 func TestDecimalScalarStringCastUsesExactScaling(t *testing.T) {
-	decimal128Type := &arrow.Decimal128Type{Precision: 38, Scale: 38}
-	decimal128Value := decimal128.FromI64(3141592653589793238)
+	decimal128Type := &arrow.Decimal128Type{Precision: 38, Scale: 20}
+	decimal128Value, err := decimal128.FromString("-123456789012345678.90123456789012345678", decimal128Type.Precision, decimal128Type.Scale)
+	require.NoError(t, err)
 	decimal128Scalar := scalar.NewDecimal128Scalar(decimal128Value, decimal128Type)
 	cast128, err := decimal128Scalar.CastTo(arrow.BinaryTypes.String)
 	require.NoError(t, err)
-	assert.Equal(t, decimal128Value.ToBigFloat(decimal128Type.Scale).Text('g', int(decimal128Type.Precision)), cast128.String())
+	assert.Equal(t, "-123456789012345678.90123456789012345678", cast128.String())
 
 	decimal256Type := &arrow.Decimal256Type{Precision: 76, Scale: 76}
-	decimal256Value := decimal256.FromI64(3141592653589793238)
+	decimal256Value, err := decimal256.FromString("-0.1234567812345678123456781234567812345678123456781234567812345678123456781234", decimal256Type.Precision, decimal256Type.Scale)
+	require.NoError(t, err)
 	decimal256Scalar := scalar.NewDecimal256Scalar(decimal256Value, decimal256Type)
 	cast256, err := decimal256Scalar.CastTo(arrow.BinaryTypes.String)
 	require.NoError(t, err)
-	assert.Equal(t, decimal256Value.ToBigFloat(decimal256Type.Scale).Text('g', int(decimal256Type.Precision)), cast256.String())
+	assert.Equal(t, "-0.1234567812345678123456781234567812345678123456781234567812345678123456781234", cast256.String())
 }
 
 func TestBinaryScalarBasics(t *testing.T) {
