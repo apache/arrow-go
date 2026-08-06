@@ -31,22 +31,76 @@ import (
 )
 
 func TestTemporalOddMultipleRounding(t *testing.T) {
-	builder := array.NewTimestampBuilder(memory.DefaultAllocator, &arrow.TimestampType{Unit: arrow.Second})
-	defer builder.Release()
-	builder.AppendValues([]arrow.Timestamp{1, 2, -1, -2}, nil)
+	tests := []struct {
+		name      string
+		unit      arrow.TimeUnit
+		roundUnit compute.RoundTemporalUnit
+		multiple  int64
+		values    []arrow.Timestamp
+		want      []arrow.Timestamp
+	}{
+		{
+			name:      "seconds multiple three",
+			unit:      arrow.Second,
+			roundUnit: compute.RoundTemporalSecond,
+			multiple:  3,
+			values:    []arrow.Timestamp{1, 2, -1, -2},
+			want:      []arrow.Timestamp{0, 3, 0, -3},
+		},
+		{
+			name:      "seconds multiple five",
+			unit:      arrow.Second,
+			roundUnit: compute.RoundTemporalSecond,
+			multiple:  5,
+			values:    []arrow.Timestamp{1, 2, 3, 4, -1, -2, -3, -4},
+			want:      []arrow.Timestamp{0, 0, 5, 5, 0, 0, -5, -5},
+		},
+		{
+			name:      "exact multiples and zero",
+			unit:      arrow.Second,
+			roundUnit: compute.RoundTemporalSecond,
+			multiple:  5,
+			values:    []arrow.Timestamp{0, 5, -5, 10, -10},
+			want:      []arrow.Timestamp{0, 5, -5, 10, -10},
+		},
+		{
+			name:      "multiple one",
+			unit:      arrow.Second,
+			roundUnit: compute.RoundTemporalSecond,
+			multiple:  1,
+			values:    []arrow.Timestamp{0, 1, -1, 2, -2},
+			want:      []arrow.Timestamp{0, 1, -1, 2, -2},
+		},
+		{
+			name:      "milliseconds",
+			unit:      arrow.Millisecond,
+			roundUnit: compute.RoundTemporalMillisecond,
+			multiple:  3,
+			values:    []arrow.Timestamp{1, 2, -1, -2},
+			want:      []arrow.Timestamp{0, 3, 0, -3},
+		},
+	}
 
-	input := builder.NewArray()
-	defer input.Release()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := array.NewTimestampBuilder(memory.DefaultAllocator, &arrow.TimestampType{Unit: tt.unit})
+			defer builder.Release()
+			builder.AppendValues(tt.values, nil)
 
-	result, err := compute.RoundTemporal(context.Background(), compute.RoundTemporalOptions{
-		Multiple: 3,
-		Unit:     compute.RoundTemporalSecond,
-	}, compute.NewDatum(input))
-	require.NoError(t, err)
-	defer result.Release()
+			input := builder.NewArray()
+			defer input.Release()
 
-	output := result.(*compute.ArrayDatum).MakeArray().(*array.Timestamp)
-	defer output.Release()
+			result, err := compute.RoundTemporal(context.Background(), compute.RoundTemporalOptions{
+				Multiple: tt.multiple,
+				Unit:     tt.roundUnit,
+			}, compute.NewDatum(input))
+			require.NoError(t, err)
+			defer result.Release()
 
-	assert.Equal(t, []arrow.Timestamp{0, 3, 0, -3}, output.Values())
+			output := result.(*compute.ArrayDatum).MakeArray().(*array.Timestamp)
+			defer output.Release()
+
+			assert.Equal(t, tt.want, output.Values())
+		})
+	}
 }
