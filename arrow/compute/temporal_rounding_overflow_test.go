@@ -22,6 +22,7 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -40,6 +41,18 @@ func TestTemporalRoundingOverflow(t *testing.T) {
 		{
 			name:  "input conversion",
 			unit:  arrow.Second,
+			value: arrow.Timestamp(math.MaxInt64),
+			opt:   compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalNanosecond},
+		},
+		{
+			name:  "millisecond input conversion",
+			unit:  arrow.Millisecond,
+			value: arrow.Timestamp(math.MaxInt64),
+			opt:   compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalNanosecond},
+		},
+		{
+			name:  "microsecond input conversion",
+			unit:  arrow.Microsecond,
 			value: arrow.Timestamp(math.MaxInt64),
 			opt:   compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalNanosecond},
 		},
@@ -67,6 +80,72 @@ func TestTemporalRoundingOverflow(t *testing.T) {
 
 			_, err := compute.RoundTemporal(context.Background(), tc.opt, compute.NewDatum(input))
 			require.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
+}
+
+func TestTemporalRoundingTimezonePaths(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		value    time.Time
+		unit     compute.RoundTemporalUnit
+		multiple int64
+		calendar bool
+		want     time.Time
+	}{
+		{
+			name:     "timezone input",
+			value:    time.Date(2024, time.January, 15, 10, 37, 0, 0, loc),
+			unit:     compute.RoundTemporalHour,
+			multiple: 2,
+			want:     time.Date(2024, time.January, 15, 9, 0, 0, 0, loc),
+		},
+		{
+			name:     "spring DST day",
+			value:    time.Date(2024, time.March, 10, 12, 0, 0, 0, loc),
+			unit:     compute.RoundTemporalDay,
+			multiple: 1,
+			want:     time.Date(2024, time.March, 10, 0, 0, 0, 0, loc),
+		},
+		{
+			name:     "UTC calendar origin",
+			value:    time.Date(2024, time.January, 15, 10, 37, 0, 0, time.UTC),
+			unit:     compute.RoundTemporalHour,
+			multiple: 2,
+			calendar: true,
+			want:     time.Date(2024, time.January, 15, 10, 0, 0, 0, time.UTC),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			value, err := arrow.TimestampFromTime(tc.value, arrow.Nanosecond)
+			require.NoError(t, err)
+			builder := array.NewTimestampBuilder(memory.DefaultAllocator, &arrow.TimestampType{
+				Unit:     arrow.Nanosecond,
+				TimeZone: loc.String(),
+			})
+			builder.Append(value)
+			input := builder.NewArray()
+			builder.Release()
+			defer input.Release()
+
+			result, err := compute.FloorTemporal(context.Background(), compute.RoundTemporalOptions{
+				Multiple:            tc.multiple,
+				Unit:                tc.unit,
+				CalendarBasedOrigin: tc.calendar,
+			}, compute.NewDatum(input))
+			require.NoError(t, err)
+			defer result.Release()
+
+			output := result.(*compute.ArrayDatum).MakeArray().(*array.Timestamp)
+			defer output.Release()
+			want, err := arrow.TimestampFromTime(tc.want, arrow.Nanosecond)
+			require.NoError(t, err)
+			require.Equal(t, want, output.Value(0))
 		})
 	}
 }
