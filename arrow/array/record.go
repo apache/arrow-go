@@ -516,19 +516,19 @@ func (checkpoint *builderCheckpoint) restore() {
 	checkpoint.builder.Resize(checkpoint.length)
 	switch builder := checkpoint.builder.(type) {
 	case *ListBuilder:
-		builder.builder.length = checkpoint.length
+		builder.length = checkpoint.length
 	case *LargeListBuilder:
-		builder.builder.length = checkpoint.length
+		builder.length = checkpoint.length
 	case *ListViewBuilder:
-		builder.builder.length = checkpoint.length
+		builder.length = checkpoint.length
 	case *LargeListViewBuilder:
-		builder.builder.length = checkpoint.length
+		builder.length = checkpoint.length
 	case *FixedSizeListBuilder:
-		builder.builder.length = checkpoint.length
+		builder.length = checkpoint.length
 	case *MapBuilder:
-		builder.listBuilder.builder.length = checkpoint.length
+		builder.listBuilder.length = checkpoint.length
 	case *StructBuilder:
-		builder.builder.length = checkpoint.length
+		builder.length = checkpoint.length
 	case *SparseUnionBuilder:
 		builder.typesBuilder.SetLength(checkpoint.length)
 	case *DenseUnionBuilder:
