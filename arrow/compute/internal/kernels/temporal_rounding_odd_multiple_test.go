@@ -33,7 +33,10 @@ func TestRoundToMultipleInt64OddMultipleAcrossModes(t *testing.T) {
 				{value: -1, want: 0},
 				{value: -2, want: -3},
 			} {
-				got := roundToMultipleInt64(tc.value, 3, mode, false)
+				got, err := roundToMultipleInt64(tc.value, 3, mode, false)
+				if err != nil {
+					t.Fatalf("roundToMultipleInt64(%d, 3, %s) returned an error: %v", tc.value, mode, err)
+				}
 				if got != tc.want {
 					t.Errorf("roundToMultipleInt64(%d, 3, %s) = %d, want %d", tc.value, mode, got, tc.want)
 				}
