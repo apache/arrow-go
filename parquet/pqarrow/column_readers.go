@@ -643,7 +643,7 @@ func newFixedSizeListReader(rctx *readerCtx, field *arrow.Field, info file.Level
 }
 
 func (lr *fixedSizeListReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
-	return lr.listReader.buildArray(lenBound, true)
+	return lr.buildArray(lenBound, true)
 }
 
 // helper function to combine chunks into a single array.
