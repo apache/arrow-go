@@ -129,3 +129,33 @@ func TestRoundToMultipleInt64OverflowBoundaries(t *testing.T) {
 		})
 	}
 }
+
+func TestRoundToMultipleInt64HalfModes(t *testing.T) {
+	tests := []struct {
+		name  string
+		mode  RoundMode
+		value int64
+		want  int64
+	}{
+		{name: "half down positive", mode: HalfDown, value: 2, want: 0},
+		{name: "half down negative", mode: HalfDown, value: -2, want: -4},
+		{name: "half up positive", mode: HalfUp, value: 2, want: 4},
+		{name: "half up negative", mode: HalfUp, value: -2, want: 0},
+		{name: "half to even lower", mode: HalfToEven, value: 2, want: 0},
+		{name: "half to even upper", mode: HalfToEven, value: 6, want: 8},
+		{name: "half to even negative lower", mode: HalfToEven, value: -2, want: 0},
+		{name: "half to even negative upper", mode: HalfToEven, value: -6, want: -8},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := roundToMultipleInt64(tc.value, 4, tc.mode, false)
+			if err != nil {
+				t.Fatalf("roundToMultipleInt64 returned an unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("roundToMultipleInt64(%d, 4, %s) = %d, want %d", tc.value, tc.mode, got, tc.want)
+			}
+		})
+	}
+}
