@@ -1726,6 +1726,32 @@ func (ds *DecimalUnaryArithmeticSuite) TestRound() {
 	}
 }
 
+func (ds *DecimalUnaryArithmeticSuite) TestRoundHalfToOddTies() {
+	for _, ty := range []arrow.DataType{
+		&arrow.Decimal128Type{Precision: 5, Scale: 2},
+		&arrow.Decimal256Type{Precision: 5, Scale: 2},
+	} {
+		ds.Run(ty.String(), func() {
+			options := compute.RoundOptions{NDigits: 0, Mode: compute.RoundHalfToOdd}
+			values := ds.getArr(ty, `["2.50", "-2.50", "3.50", "-3.50", null]`)
+			defer values.Release()
+
+			expected := ds.getArr(ty, `["3.00", "-3.00", "3.00", "-3.00", null]`)
+			defer expected.Release()
+			checkScalar(ds.T(), "round", []compute.Datum{&compute.ArrayDatum{values.Data()}},
+				&compute.ArrayDatum{expected.Data()}, options)
+
+			options.NDigits = 1
+			values = ds.getArr(ty, `["12.25", "-12.25"]`)
+			defer values.Release()
+			expected = ds.getArr(ty, `["12.30", "-12.30"]`)
+			defer expected.Release()
+			checkScalar(ds.T(), "round", []compute.Datum{&compute.ArrayDatum{values.Data()}},
+				&compute.ArrayDatum{expected.Data()}, options)
+		})
+	}
+}
+
 func (ds *DecimalUnaryArithmeticSuite) TestRoundTowardsInfinity() {
 	fn := "round"
 	options := compute.RoundOptions{NDigits: 0, Mode: compute.RoundTowardsInfinity}
