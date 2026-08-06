@@ -35,7 +35,6 @@ import (
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
-	"github.com/apache/arrow-go/v18/parquet/internal/debug"
 )
 
 // get the count of the number of leaf arrays for the type
@@ -64,6 +63,52 @@ func nullableRoot(manifest *SchemaManifest, field *SchemaField) bool {
 		curField = manifest.GetParent(curField)
 	}
 	return nullable
+}
+
+func decimal128FitsInt32(val decimal128.Num) bool {
+	switch val.HighBits() {
+	case 0:
+		return val.LowBits() <= math.MaxInt32
+	case -1:
+		return val.LowBits() >= uint64(0xffffffff80000000)
+	default:
+		return false
+	}
+}
+
+func decimal128FitsInt64(val decimal128.Num) bool {
+	switch val.HighBits() {
+	case 0:
+		return val.LowBits() <= math.MaxInt64
+	case -1:
+		return val.LowBits() >= uint64(0x8000000000000000)
+	default:
+		return false
+	}
+}
+
+func decimal256FitsInt32(val decimal256.Num) bool {
+	words := val.Array()
+	switch {
+	case words[1] == 0 && words[2] == 0 && words[3] == 0:
+		return words[0] <= math.MaxInt32
+	case words[1] == math.MaxUint64 && words[2] == math.MaxUint64 && words[3] == math.MaxUint64:
+		return words[0] >= uint64(0xffffffff80000000)
+	default:
+		return false
+	}
+}
+
+func decimal256FitsInt64(val decimal256.Num) bool {
+	words := val.Array()
+	switch {
+	case words[1] == 0 && words[2] == 0 && words[3] == 0:
+		return words[0] <= math.MaxInt64
+	case words[1] == math.MaxUint64 && words[2] == math.MaxUint64 && words[3] == math.MaxUint64:
+		return words[0] >= uint64(0x8000000000000000)
+	default:
+		return false
+	}
 }
 
 // arrowColumnWriter is a convenience object for easily writing arrow data to a specific
@@ -351,14 +396,16 @@ func writeDenseArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, leafArr 
 				}
 			case arrow.DECIMAL128:
 				for idx, val := range leafArr.(*array.Decimal128).Values() {
-					debug.Assert(val.HighBits() == 0 || val.HighBits() == -1, "casting Decimal128 greater than the value range; high bits must be 0 or -1")
-					debug.Assert(int64(val.LowBits()) <= math.MaxUint32, "casting Decimal128 to int32 when value > MaxUint32")
+					if !decimal128FitsInt32(val) {
+						return fmt.Errorf("%w: Decimal128 value does not fit in Parquet INT32", arrow.ErrInvalid)
+					}
 					data[idx] = int32(val.LowBits())
 				}
 			case arrow.DECIMAL256:
 				for idx, val := range leafArr.(*array.Decimal256).Values() {
-					debug.Assert(val.Array()[3] == 0 || val.Array()[3] == 0xFFFFFFFF, "casting Decimal128 greater than the value range; high bits must be 0 or -1")
-					debug.Assert(val.LowBits() <= math.MaxUint32, "casting Decimal128 to int32 when value > MaxUint32")
+					if !decimal256FitsInt32(val) {
+						return fmt.Errorf("%w: Decimal256 value does not fit in Parquet INT32", arrow.ErrInvalid)
+					}
 					data[idx] = int32(val.LowBits())
 				}
 			default:
@@ -434,14 +481,18 @@ func writeDenseArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, leafArr 
 			ctx.dataBuffer.ResizeNoShrink(arrow.Int64Traits.BytesRequired(leafArr.Len()))
 			data = arrow.Int64Traits.CastFromBytes(ctx.dataBuffer.Bytes())
 			for idx, val := range leafArr.(*array.Decimal128).Values() {
-				debug.Assert(val.HighBits() == 0 || val.HighBits() == -1, "trying to cast Decimal128 to int64 greater than range, high bits must be 0 or -1")
+				if !decimal128FitsInt64(val) {
+					return fmt.Errorf("%w: Decimal128 value does not fit in Parquet INT64", arrow.ErrInvalid)
+				}
 				data[idx] = int64(val.LowBits())
 			}
 		case arrow.DECIMAL256:
 			ctx.dataBuffer.ResizeNoShrink(arrow.Int64Traits.BytesRequired(leafArr.Len()))
 			data = arrow.Int64Traits.CastFromBytes(ctx.dataBuffer.Bytes())
 			for idx, val := range leafArr.(*array.Decimal256).Values() {
-				debug.Assert(val.Array()[3] == 0 || val.Array()[3] == 0xFFFFFFFF, "trying to cast Decimal128 to int64 greater than range, high bits must be 0 or -1")
+				if !decimal256FitsInt64(val) {
+					return fmt.Errorf("%w: Decimal256 value does not fit in Parquet INT64", arrow.ErrInvalid)
+				}
 				data[idx] = int64(val.LowBits())
 			}
 		default:
