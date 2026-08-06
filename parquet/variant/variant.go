@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"iter"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -520,17 +521,34 @@ func NewWithMetadata(meta Metadata, value []byte) (Value, error) {
 }
 
 func validateScalarValue(value []byte) error {
-	if basicTypeFromHeader(value[0]) == BasicShortString {
-		want := 1 + int(value[0]>>basicTypeBits)
-		if len(value) < want {
-			return fmt.Errorf("invalid variant value: short string requires %d bytes, got %d", want, len(value))
-		}
-		return nil
-	}
-	if basicTypeFromHeader(value[0]) != BasicPrimitive {
-		return nil
+	_, err := validateValue(value)
+	return err
+}
+
+func validateValue(value []byte) (int, error) {
+	if len(value) == 0 {
+		return 0, errors.New("invalid variant value: empty")
 	}
 
+	switch basicTypeFromHeader(value[0]) {
+	case BasicShortString:
+		want := 1 + int(value[0]>>basicTypeBits)
+		if len(value) < want {
+			return 0, fmt.Errorf("invalid variant value: short string requires %d bytes, got %d", want, len(value))
+		}
+		return want, nil
+	case BasicObject:
+		return validateObjectValue(value)
+	case BasicArray:
+		return validateArrayValue(value)
+	case BasicPrimitive:
+		return validatePrimitiveValue(value)
+	default:
+		return 0, fmt.Errorf("invalid variant value: unknown basic type %d", basicTypeFromHeader(value[0]))
+	}
+}
+
+func validatePrimitiveValue(value []byte) (int, error) {
 	primitiveType := primitiveTypeFromHeader(value[0])
 	want := 0
 	switch primitiveType {
@@ -556,21 +574,136 @@ func validateScalarValue(value []byte) error {
 		want = 17
 	case PrimitiveBinary, PrimitiveString:
 		if len(value) < 5 {
-			return fmt.Errorf("invalid variant value: %s length prefix requires 5 bytes, got %d", primitiveType, len(value))
+			return 0, fmt.Errorf("invalid variant value: %s length prefix requires 5 bytes, got %d", primitiveType, len(value))
 		}
 		dataLen := uint64(binary.LittleEndian.Uint32(value[1:5]))
 		if dataLen > uint64(len(value)-5) {
-			return fmt.Errorf("invalid variant value: %s data requires %d bytes, got %d", primitiveType, dataLen, len(value)-5)
+			return 0, fmt.Errorf("invalid variant value: %s data requires %d bytes, got %d", primitiveType, dataLen, len(value)-5)
 		}
-		return nil
+		return 5 + int(dataLen), nil
 	default:
-		return fmt.Errorf("invalid variant value: unknown primitive type %d", primitiveType)
+		return 0, fmt.Errorf("invalid variant value: unknown primitive type %d", primitiveType)
 	}
 
 	if len(value) < want {
-		return fmt.Errorf("invalid variant value: %s requires %d bytes, got %d", primitiveType, want, len(value))
+		return 0, fmt.Errorf("invalid variant value: %s requires %d bytes, got %d", primitiveType, want, len(value))
 	}
-	return nil
+	return want, nil
+}
+
+func validateArrayValue(value []byte) (int, error) {
+	typeInfo := value[0] >> basicTypeBits
+	offsetSize := uint8(typeInfo&0b11) + 1
+	isLarge := ((typeInfo >> 2) & 0x1) != 0
+
+	var (
+		numElements uint32
+		offsetStart uint64
+	)
+	if isLarge {
+		if len(value) < 5 {
+			return 0, fmt.Errorf("invalid variant value: array size requires 5 bytes, got %d", len(value))
+		}
+		numElements = readLEU32(value[1:5])
+		offsetStart = 5
+	} else {
+		if len(value) < 2 {
+			return 0, fmt.Errorf("invalid variant value: array size requires 2 bytes, got %d", len(value))
+		}
+		numElements = uint32(value[1])
+		offsetStart = 2
+	}
+
+	dataStart := offsetStart + (uint64(numElements)+1)*uint64(offsetSize)
+	if dataStart > uint64(len(value)) || dataStart > math.MaxUint32 {
+		return 0, fmt.Errorf("invalid variant value: array offset table ends at %d, got %d bytes", dataStart, len(value))
+	}
+
+	offsets := make([]uint32, int(numElements)+1)
+	for i := range offsets {
+		pos := offsetStart + uint64(i)*uint64(offsetSize)
+		offset := readLEU32(value[int(pos) : int(pos)+int(offsetSize)])
+		if i == 0 && offset != 0 {
+			return 0, fmt.Errorf("invalid variant value: array first offset must be zero, got %d", offset)
+		}
+		if i > 0 && offset < offsets[i-1] {
+			return 0, fmt.Errorf("invalid variant value: array offsets are not monotonic")
+		}
+		if dataStart+uint64(offset) > uint64(len(value)) || dataStart+uint64(offset) > math.MaxUint32 {
+			return 0, fmt.Errorf("invalid variant value: array offset %d is out of range", offset)
+		}
+		offsets[i] = offset
+	}
+
+	for i := 0; i < len(offsets)-1; i++ {
+		start := dataStart + uint64(offsets[i])
+		end := dataStart + uint64(offsets[i+1])
+		childSize, err := validateValue(value[int(start):int(end)])
+		if err != nil {
+			return 0, fmt.Errorf("invalid variant value: array element %d: %w", i, err)
+		}
+		if uint64(childSize) != end-start {
+			return 0, fmt.Errorf("invalid variant value: array element %d has trailing bytes", i)
+		}
+	}
+
+	return int(dataStart + uint64(offsets[len(offsets)-1])), nil
+}
+
+func validateObjectValue(value []byte) (int, error) {
+	typeInfo := value[0] >> basicTypeBits
+	offsetSize := uint8(typeInfo&0b11) + 1
+	idSize := uint8((typeInfo>>2)&0b11) + 1
+	isLarge := ((typeInfo >> 4) & 0x1) != 0
+
+	var (
+		numElements uint32
+		elementSize uint64 = 1
+	)
+	if isLarge {
+		elementSize = 4
+	}
+	if uint64(len(value)) < 1+elementSize {
+		return 0, fmt.Errorf("invalid variant value: object size requires %d bytes, got %d", 1+elementSize, len(value))
+	}
+	numElements = readLEU32(value[1 : 1+elementSize])
+
+	idStart := 1 + elementSize
+	offsetStart := idStart + uint64(numElements)*uint64(idSize)
+	dataStart := offsetStart + (uint64(numElements)+1)*uint64(offsetSize)
+	if dataStart > uint64(len(value)) || dataStart > math.MaxUint32 {
+		return 0, fmt.Errorf("invalid variant value: object offset table ends at %d, got %d bytes", dataStart, len(value))
+	}
+
+	offsets := make([]uint32, int(numElements)+1)
+	for i := range offsets {
+		pos := offsetStart + uint64(i)*uint64(offsetSize)
+		offset := readLEU32(value[int(pos) : int(pos)+int(offsetSize)])
+		if i == 0 && offset != 0 {
+			return 0, fmt.Errorf("invalid variant value: object first offset must be zero, got %d", offset)
+		}
+		if i > 0 && offset < offsets[i-1] {
+			return 0, fmt.Errorf("invalid variant value: object offsets are not monotonic")
+		}
+		if dataStart+uint64(offset) > uint64(len(value)) || dataStart+uint64(offset) > math.MaxUint32 {
+			return 0, fmt.Errorf("invalid variant value: object offset %d is out of range", offset)
+		}
+		offsets[i] = offset
+	}
+
+	for i := 0; i < len(offsets)-1; i++ {
+		start := dataStart + uint64(offsets[i])
+		end := dataStart + uint64(offsets[i+1])
+		childSize, err := validateValue(value[int(start):int(end)])
+		if err != nil {
+			return 0, fmt.Errorf("invalid variant value: object field %d: %w", i, err)
+		}
+		if uint64(childSize) != end-start {
+			return 0, fmt.Errorf("invalid variant value: object field %d has trailing bytes", i)
+		}
+	}
+
+	return int(dataStart + uint64(offsets[len(offsets)-1])), nil
 }
 
 // New creates a Value by parsing both the metadata and value bytes.
