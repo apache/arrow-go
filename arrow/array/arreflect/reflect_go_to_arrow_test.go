@@ -132,6 +132,18 @@ func TestBuildTemporalArray(t *testing.T) {
 	})
 }
 
+func TestBuildTemporalArrayRejectsTimestampOverflow(t *testing.T) {
+	mem := checkedMem(t)
+	values := []time.Time{
+		time.Date(1000, time.January, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(3000, time.January, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	arr, err := FromSlice(values, mem)
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+	require.Nil(t, arr)
+}
+
 func TestBuildDecimalArray(t *testing.T) {
 	mem := checkedMem(t)
 
