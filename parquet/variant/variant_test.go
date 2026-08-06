@@ -251,6 +251,30 @@ func primitiveHeader(p variant.PrimitiveType) uint8 {
 	return (uint8(p) << 2)
 }
 
+func objectValueLayout(value []byte) (offsetStart, offsetSize, dataStart int) {
+	typeInfo := value[0] >> 2
+	numElements := int(value[1])
+	idSize := int((typeInfo>>2)&0b11) + 1
+	offsetSize = int(typeInfo&0b11) + 1
+	offsetStart = 2 + numElements*idSize
+	dataStart = offsetStart + (numElements+1)*offsetSize
+	return
+}
+
+func twoFieldObject(t *testing.T) variant.Value {
+	t.Helper()
+	var b variant.Builder
+	start := b.Offset()
+	fields := []variant.FieldEntry{b.NextField(start, "a")}
+	require.NoError(t, b.AppendInt(1))
+	fields = append(fields, b.NextField(start, "b"))
+	require.NoError(t, b.AppendInt(2))
+	require.NoError(t, b.FinishObject(start, fields))
+	v, err := b.Build()
+	require.NoError(t, err)
+	return v
+}
+
 func TestNullValue(t *testing.T) {
 	emptyMeta := variant.EmptyMetadataBytes
 	nullChars := []byte{primitiveHeader(variant.PrimitiveNull)}
@@ -714,6 +738,130 @@ func TestInvalidCompoundValue(t *testing.T) {
 	}
 }
 
+func TestValidateObjectPhysicalOffsets(t *testing.T) {
+	var b variant.Builder
+	start := b.Offset()
+	fields := []variant.FieldEntry{b.NextField(start, "c")}
+	require.NoError(t, b.AppendInt(3))
+	fields = append(fields, b.NextField(start, "a"))
+	require.NoError(t, b.AppendInt(1))
+	fields = append(fields, b.NextField(start, "b"))
+	require.NoError(t, b.AppendInt(2))
+	require.NoError(t, b.FinishObject(start, fields))
+	v, err := b.Build()
+	require.NoError(t, err)
+
+	// The fields are sorted by key, but their values were appended as c, a, b.
+	// This produces offsets in key order of 2, 4, 0, which is valid Variant data.
+	parsed, err := variant.NewWithMetadata(v.Metadata(), v.Bytes())
+	require.NoError(t, err)
+	obj := parsed.Value().(variant.ObjectValue)
+	for _, tt := range []struct {
+		key   string
+		value int8
+	}{
+		{key: "a", value: 1},
+		{key: "b", value: 2},
+		{key: "c", value: 3},
+	} {
+		field, err := obj.ValueByKey(tt.key)
+		require.NoError(t, err)
+		assert.Equal(t, tt.value, field.Value.Value())
+	}
+}
+
+func TestValidateObjectMetadataAndRanges(t *testing.T) {
+	base := twoFieldObject(t)
+	offsetStart, offsetSize, dataStart := objectValueLayout(base.Bytes())
+
+	t.Run("invalid field ID", func(t *testing.T) {
+		value := append([]byte(nil), base.Bytes()...)
+		value[2] = 0xff
+		_, err := variant.NewWithMetadata(base.Metadata(), value)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid field ID")
+	})
+
+	t.Run("unsorted field names", func(t *testing.T) {
+		value := append([]byte(nil), base.Bytes()...)
+		value[2], value[3] = value[3], value[2]
+		_, err := variant.NewWithMetadata(base.Metadata(), value)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not strictly sorted")
+	})
+
+	t.Run("duplicate field names", func(t *testing.T) {
+		value := append([]byte(nil), base.Bytes()...)
+		value[3] = value[2]
+		_, err := variant.NewWithMetadata(base.Metadata(), value)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not strictly sorted")
+	})
+
+	t.Run("overlapping ranges", func(t *testing.T) {
+		value := append([]byte(nil), base.Bytes()...)
+		value[offsetStart+offsetSize] = 0
+		_, err := variant.NewWithMetadata(base.Metadata(), value)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "overlap")
+	})
+
+	t.Run("gap between ranges", func(t *testing.T) {
+		var b variant.Builder
+		start := b.Offset()
+		fields := []variant.FieldEntry{b.NextField(start, "a")}
+		require.NoError(t, b.AppendInt(1))
+		fields = append(fields, b.NextField(start, "b"))
+		require.NoError(t, b.AppendInt(2))
+		// Leave an otherwise valid value in the physical data region without
+		// assigning it to a field.
+		require.NoError(t, b.AppendInt(3))
+		require.NoError(t, b.FinishObject(start, fields))
+		v, err := b.Build()
+		require.NoError(t, err)
+
+		value := append([]byte(nil), v.Bytes()...)
+		offsetStart, offsetSize, _ := objectValueLayout(value)
+		value[offsetStart+offsetSize] = 4
+		_, err = variant.NewWithMetadata(v.Metadata(), value)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "gap")
+	})
+
+	t.Run("offset into another value", func(t *testing.T) {
+		value := append([]byte(nil), base.Bytes()...)
+		value[offsetStart+offsetSize] = 1
+		_, err := variant.NewWithMetadata(base.Metadata(), value)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "overlap")
+	})
+
+	t.Run("top-level trailing bytes", func(t *testing.T) {
+		value := append(append([]byte(nil), base.Bytes()...), 0)
+		_, err := variant.NewWithMetadata(base.Metadata(), value)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "trailing bytes")
+	})
+
+	assert.Greater(t, dataStart, offsetStart)
+}
+
+func TestValidateNestedDepth(t *testing.T) {
+	var nested any = int64(1)
+	for range 300 {
+		nested = []any{nested}
+	}
+
+	var b variant.Builder
+	require.NoError(t, b.Append(nested))
+	v, err := b.Build()
+	require.NoError(t, err)
+
+	_, err = variant.NewWithMetadata(v.Metadata(), v.Bytes())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "maximum nesting depth")
+}
+
 func TestInvalidObjectAccess(t *testing.T) {
 	v := loadVariant(t, "object_primitive")
 	obj := v.Value().(variant.ObjectValue)
@@ -737,17 +885,9 @@ func TestInvalidObjectAccess(t *testing.T) {
 		// Set field ID to an invalid value
 		corruptBytes[idPosition] = 0xFF
 
-		corrupt, err := variant.NewWithMetadata(v.Metadata(), corruptBytes)
-		require.NoError(t, err)
-
-		corruptObj := corrupt.Value().(variant.ObjectValue)
-		_, err = corruptObj.FieldAt(0)
+		_, err := variant.NewWithMetadata(v.Metadata(), corruptBytes)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "fieldID")
-
-		_, err = corruptObj.ValueByKey("int_field")
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "fieldID")
+		assert.Contains(t, err.Error(), "invalid field ID")
 	})
 }
 
