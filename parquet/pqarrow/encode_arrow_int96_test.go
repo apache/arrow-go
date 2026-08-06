@@ -17,11 +17,17 @@
 package pqarrow
 
 import (
+	"bytes"
+	"context"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestArrowTimestampToImpalaTimestamp(t *testing.T) {
@@ -48,4 +54,50 @@ func TestArrowTimestampToImpalaTimestamp(t *testing.T) {
 			assert.Equal(t, tt.value.ToTime(tt.unit), got.ToTime())
 		})
 	}
+}
+
+func TestReadInt96RejectsOutOfRangeTimestamp(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	timestampType := &arrow.TimestampType{Unit: arrow.Nanosecond}
+	sc := arrow.NewSchema([]arrow.Field{{Name: "ts", Type: timestampType}}, nil)
+	builder := array.NewTimestampBuilder(mem, timestampType)
+	builder.Append(0)
+	record := array.NewRecordBatch(sc, []arrow.Array{builder.NewArray()}, 1)
+	builder.Release()
+	defer record.Release()
+
+	var buf bytes.Buffer
+	writer, err := NewFileWriter(
+		sc,
+		&buf,
+		parquet.NewWriterProperties(
+			parquet.WithDictionaryDefault(false),
+			parquet.WithEncodingFor("ts", parquet.Encodings.Plain),
+		),
+		NewArrowWriterProperties(WithDeprecatedInt96Timestamps(true)),
+	)
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+
+	var valid parquet.Int96
+	arrowTimestampToImpalaTimestamp(arrow.Nanosecond, 0, &valid)
+	corrupt := parquet.NewInt96([3]uint32{0, 0, ^uint32(0)})
+	encoded := buf.Bytes()
+	idx := bytes.Index(encoded, valid[:])
+	require.GreaterOrEqual(t, idx, 0)
+	copy(encoded[idx:idx+parquet.Int96SizeBytes], corrupt[:])
+
+	fileReader, err := file.NewParquetReader(bytes.NewReader(encoded))
+	require.NoError(t, err)
+	defer fileReader.Close()
+
+	arrowReader, err := NewFileReader(fileReader, ArrowReadProperties{}, mem)
+	require.NoError(t, err)
+	columnReader, err := arrowReader.GetColumn(context.Background(), 0)
+	require.NoError(t, err)
+	defer columnReader.Release()
+
+	_, err = columnReader.NextBatch(1)
+	require.ErrorIs(t, err, arrow.ErrInvalid)
 }
