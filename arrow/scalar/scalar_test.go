@@ -1234,6 +1234,15 @@ func (v *customFromScalarTarget) FromStructScalar(*scalar.Struct) error {
 	return nil
 }
 
+type valueFromScalarTarget struct {
+	output *int
+}
+
+func (v valueFromScalarTarget) FromStructScalar(*scalar.Struct) error {
+	*v.output = 42
+	return nil
+}
+
 func TestToScalar(t *testing.T) {
 	ot := &OptionValTest{ToType: arrow.BinaryTypes.String, Allow: true}
 	sc, err := scalar.ToScalar(ot, memory.DefaultAllocator)
@@ -1310,6 +1319,10 @@ func TestFromScalarRejectsInvalidTargets(t *testing.T) {
 	var custom customFromScalarTarget
 	require.NoError(t, scalar.FromScalar(structScalar, &custom))
 	assert.Equal(t, customFromScalarTarget(42), custom)
+
+	valueOutput := 0
+	require.NoError(t, scalar.FromScalar(structScalar, valueFromScalarTarget{output: &valueOutput}))
+	assert.Equal(t, 42, valueOutput)
 
 	var output OptionValTest
 	require.NoError(t, scalar.FromScalar(structScalar, &output))
