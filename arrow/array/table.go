@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"sync/atomic"
 
@@ -102,7 +103,7 @@ type simpleTable struct {
 func NewTable(schema *arrow.Schema, cols []arrow.Column, rows int64) arrow.Table {
 	tbl := simpleTable{
 		rows:   rows,
-		cols:   cols,
+		cols:   slices.Clone(cols),
 		schema: schema,
 	}
 	tbl.refCount.Add(1)
