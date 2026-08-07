@@ -774,8 +774,9 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 
 	createOffsets := func(valLength int64) *memory.Buffer {
 		buffer := memory.NewResizableBuffer(mem)
-		if sc.DataType().ID() == arrow.LARGE_BINARY || sc.DataType().ID() == arrow.LARGE_STRING {
-			buffer.Resize(arrow.Int64Traits.BytesRequired(length + 1))
+		offsetTraits := sc.DataType().(arrow.OffsetsDataType).OffsetTypeTraits()
+		buffer.Resize(offsetTraits.BytesRequired(length + 1))
+		if offsetTraits.BytesRequired(1) == arrow.Int64SizeBytes {
 			out := arrow.Int64Traits.CastFromBytes(buffer.Bytes())
 			for i, offset := 0, int64(0); i < length+1; i, offset = i+1, offset+valLength {
 				out[i] = offset
@@ -783,7 +784,6 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 			return buffer
 		}
 
-		buffer.Resize(arrow.Int32Traits.BytesRequired(length + 1))
 		out := arrow.Int32Traits.CastFromBytes(buffer.Bytes())
 		for i, offset := 0, int32(0); i < length+1; i, offset = i+1, offset+int32(valLength) {
 			out[i] = offset
