@@ -91,6 +91,48 @@ func TestCumulativeSumNullsAndStart(t *testing.T) {
 
 }
 
+func TestCumulativeSumStartSafeCast(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	tests := []struct {
+		name  string
+		typ   arrow.DataType
+		start scalar.Scalar
+	}{
+		{name: "signed integer overflow", typ: arrow.PrimitiveTypes.Int8, start: scalar.NewInt64Scalar(128)},
+		{name: "signed integer underflow", typ: arrow.PrimitiveTypes.Int8, start: scalar.NewInt64Scalar(-129)},
+		{name: "unsigned integer underflow", typ: arrow.PrimitiveTypes.Uint8, start: scalar.NewInt64Scalar(-1)},
+		{name: "float truncation", typ: arrow.PrimitiveTypes.Int32, start: scalar.NewFloat64Scalar(1.5)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			input := cumulativeInput(t, mem, tc.typ, `[0]`)
+			defer input.Release()
+
+			result, err := compute.CumulativeSum(context.Background(), compute.CumulativeOptions{
+				Start: tc.start,
+			}, &compute.ArrayDatum{Value: input.Data()})
+			if result != nil {
+				result.Release()
+			}
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
+
+	input := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int8, `[0]`)
+	defer input.Release()
+	result, err := compute.CumulativeSum(context.Background(), compute.CumulativeOptions{
+		Start: scalar.NewInt64Scalar(127),
+	}, &compute.ArrayDatum{Value: input.Data()})
+	require.NoError(t, err)
+	defer result.Release()
+	actual := result.(*compute.ArrayDatum).MakeArray()
+	defer actual.Release()
+	assert.Equal(t, int8(127), actual.(*array.Int8).Value(0))
+}
+
 func TestCumulativeSumChunked(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -131,4 +173,42 @@ func TestCumulativeSumChecked(t *testing.T) {
 	_, err = compute.CumulativeSumChecked(context.Background(), compute.CumulativeOptions{}, &compute.ArrayDatum{Value: input.Data()})
 	assert.ErrorIs(t, err, arrow.ErrInvalid)
 
+}
+
+func TestCumulativeSumCheckedIntegerOverflow(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	tests := []struct {
+		name   string
+		typ    arrow.DataType
+		values string
+	}{
+		{name: "int8 positive", typ: arrow.PrimitiveTypes.Int8, values: `[127, 1]`},
+		{name: "int8 negative", typ: arrow.PrimitiveTypes.Int8, values: `[-128, -1]`},
+		{name: "int16 positive", typ: arrow.PrimitiveTypes.Int16, values: `[32767, 1]`},
+		{name: "int16 negative", typ: arrow.PrimitiveTypes.Int16, values: `[-32768, -1]`},
+		{name: "int32 positive", typ: arrow.PrimitiveTypes.Int32, values: `[2147483647, 1]`},
+		{name: "int32 negative", typ: arrow.PrimitiveTypes.Int32, values: `[-2147483648, -1]`},
+		{name: "int64 positive", typ: arrow.PrimitiveTypes.Int64, values: `[9223372036854775807, 1]`},
+		{name: "int64 negative", typ: arrow.PrimitiveTypes.Int64, values: `[-9223372036854775808, -1]`},
+		{name: "uint8", typ: arrow.PrimitiveTypes.Uint8, values: `[255, 1]`},
+		{name: "uint16", typ: arrow.PrimitiveTypes.Uint16, values: `[65535, 1]`},
+		{name: "uint32", typ: arrow.PrimitiveTypes.Uint32, values: `[4294967295, 1]`},
+		{name: "uint64", typ: arrow.PrimitiveTypes.Uint64, values: `[18446744073709551615, 1]`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			input := cumulativeInput(t, mem, tc.typ, tc.values)
+			defer input.Release()
+
+			result, err := compute.CumulativeSumChecked(context.Background(), compute.CumulativeOptions{},
+				&compute.ArrayDatum{Value: input.Data()})
+			if result != nil {
+				result.Release()
+			}
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
 }

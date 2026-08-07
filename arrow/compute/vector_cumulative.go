@@ -24,12 +24,20 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/compute/internal/kernels"
 )
 
-var cumulativeSumDoc = FunctionDoc{
-	Summary:     "Compute the cumulative sum of an array",
-	Description: "Return the cumulative sum of the input array",
-	ArgNames:    []string{"array"},
-	OptionsType: "CumulativeOptions",
-}
+var (
+	cumulativeSumDoc = FunctionDoc{
+		Summary:     "Compute the cumulative sum of an array",
+		Description: "Return the cumulative sum of the input array",
+		ArgNames:    []string{"array"},
+		OptionsType: "CumulativeOptions",
+	}
+	cumulativeSumCheckedDoc = FunctionDoc{
+		Summary:     "Compute the cumulative sum of an array with overflow checking",
+		Description: "Return the cumulative sum of the input array and report integer overflow",
+		ArgNames:    []string{"array"},
+		OptionsType: "CumulativeOptions",
+	}
+)
 
 type CumulativeOptions = kernels.CumulativeOptions
 
@@ -45,7 +53,7 @@ func RegisterVectorCumulative(reg FunctionRegistry) {
 	}
 	reg.AddFunction(sumFn, false)
 
-	checkedFn := NewVectorFunction("cumulative_sum_checked", Unary(), cumulativeSumDoc)
+	checkedFn := NewVectorFunction("cumulative_sum_checked", Unary(), cumulativeSumCheckedDoc)
 	checkedFn.SetDefaultOptions(&CumulativeOptions{})
 	for _, k := range checked {
 		if err := checkedFn.AddKernel(k); err != nil {
