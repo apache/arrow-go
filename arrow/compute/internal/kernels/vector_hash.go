@@ -176,13 +176,15 @@ func (a *dictionaryEncodeAction) ObserveNotFound(idx int) error {
 }
 
 func (a *dictionaryEncodeAction) ObserveNullFound(idx int) {
-	if a.nullEncoding == NullEncodingEncode {
+	if a.nullEncoding == NullEncodingMask {
+		a.appendIndex(0, false)
+	} else {
 		a.appendIndex(idx, true)
 	}
 }
 
 func (a *dictionaryEncodeAction) ObserveNullNotFound(idx int) error {
-	a.appendIndex(idx, a.nullEncoding == NullEncodingEncode)
+	a.ObserveNullFound(idx)
 	return a.err
 }
 
@@ -254,6 +256,7 @@ func doAppendBinary[OffsetT int32 | int64](action Action, memo hashing.MemoTable
 			idx, found := memo.GetOrInsertNull()
 			if found {
 				action.ObserveNullFound(idx)
+				return nil
 			}
 			return action.ObserveNullNotFound(idx)
 		})
@@ -285,6 +288,7 @@ func doAppendFixedSize(action Action, memo hashing.MemoTable, arr *exec.ArraySpa
 			idx, found := memo.GetOrInsertNull()
 			if found {
 				action.ObserveNullFound(idx)
+				return nil
 			}
 			return action.ObserveNullNotFound(idx)
 		})
@@ -312,6 +316,7 @@ func doAppendNumeric[T arrow.IntType | arrow.UintType | arrow.FloatType](action 
 			idx, found := memo.GetOrInsertNull()
 			if found {
 				action.ObserveNullFound(idx)
+				return nil
 			}
 			return action.ObserveNullNotFound(idx)
 		})
@@ -329,6 +334,7 @@ func (nhs *nullHashState) Allocator() memory.Allocator { return nhs.mem }
 func (nhs *nullHashState) ValueType() arrow.DataType { return nhs.typ }
 
 func (nhs *nullHashState) Reset() error {
+	nhs.seenNull = false
 	return nhs.action.Reset()
 }
 
@@ -355,7 +361,7 @@ func (nhs *nullHashState) FlushFinal(out *exec.ExecResult) error {
 
 func (nhs *nullHashState) GetDictionary() (arrow.ArrayData, error) {
 	var out arrow.Array
-	if nhs.seenNull {
+	if nhs.seenNull && nhs.action.ShouldEncodeNulls() {
 		out = array.NewNull(1)
 	} else {
 		out = array.NewNull(0)
@@ -364,6 +370,13 @@ func (nhs *nullHashState) GetDictionary() (arrow.ArrayData, error) {
 	data.Retain()
 	out.Release()
 	return data, nil
+}
+
+func dictionaryEncodeIdentity(_ *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+	data := batch.Values[0].Array.MakeData()
+	defer data.Release()
+	out.TakeOwnership(data)
+	return nil
 }
 
 type dictionaryHashState struct {
@@ -739,6 +752,13 @@ func GetVectorHashKernels() (unique, valueCounts, dictEncode []exec.VectorKernel
 	base.Finalize = dictionaryEncodeFinalize
 	base.OutputChunked = true
 	dictEncode = addHashKernels(base, initDictionaryEncode, outputDictionaryType)
+	dictEncode = append(dictEncode, exec.NewVectorKernelWithSig(
+		&exec.KernelSignature{
+			InputTypes: []exec.InputType{exec.NewIDInput(arrow.DICTIONARY)},
+			OutType:    OutputFirstType,
+		},
+		dictionaryEncodeIdentity,
+		nil))
 
 	return
 }
