@@ -1213,6 +1213,10 @@ type OptionListTest struct {
 	ValUint    []uint            `compute:"valuint"`
 }
 
+type MetadataScalarTest struct {
+	FieldMeta []*arrow.Metadata `compute:"field_metadata"`
+}
+
 type OptionValTest struct {
 	ToType arrow.DataType `compute:"type"`
 	Allow  bool           `compute:"allow"`
@@ -1266,6 +1270,24 @@ func TestToScalar(t *testing.T) {
 		`valuint:list<item: uint64, nullable> = [14 15 16]}`
 
 	assert.Equal(t, expected, sc.String())
+}
+
+func TestFromScalarMetadataDoesNotPrependEmptyEntries(t *testing.T) {
+	meta := arrow.NewMetadata(
+		[]string{"option", "captain", "souper"},
+		[]string{"val", "planet", "bowl"},
+	)
+	in := MetadataScalarTest{FieldMeta: []*arrow.Metadata{&meta}}
+
+	sc, err := scalar.ToScalar(in, memory.DefaultAllocator)
+	require.NoError(t, err)
+
+	var out MetadataScalarTest
+	require.NoError(t, scalar.FromScalar(sc.(*scalar.Struct), &out))
+	require.Len(t, out.FieldMeta, 1)
+	require.NotNil(t, out.FieldMeta[0])
+	assert.Equal(t, meta.Keys(), out.FieldMeta[0].Keys())
+	assert.Equal(t, meta.Values(), out.FieldMeta[0].Values())
 }
 
 var dictIndexTypes = []arrow.DataType{
