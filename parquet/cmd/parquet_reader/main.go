@@ -61,6 +61,24 @@ func printUsage(fs *flag.FlagSet) {
 	})
 }
 
+type columnChunkStats interface {
+	StatsSet() (bool, error)
+	Statistics() (metadata.TypedStatistics, error)
+}
+
+func readColumnStats(chunkMeta columnChunkStats) (metadata.TypedStatistics, bool, error) {
+	set, err := chunkMeta.StatsSet()
+	if err != nil {
+		return nil, false, err
+	}
+	if !set {
+		return nil, false, nil
+	}
+
+	stats, err := chunkMeta.Statistics()
+	return stats, true, err
+}
+
 func main() {
 	var config struct {
 		ColumnIndexes         bool
@@ -261,11 +279,11 @@ func main() {
 
 			if !config.NoMetadata {
 				fmt.Println("Column", c)
-				if set, _ := chunkMeta.StatsSet(); set {
-					stats, err := chunkMeta.Statistics()
-					if err != nil {
-						log.Fatal(err)
-					}
+				stats, set, err := readColumnStats(chunkMeta)
+				if err != nil {
+					log.Fatalf("unable to read statistics for column=%d: %s", c, err)
+				}
+				if set {
 					fmt.Printf(" Values: %d", chunkMeta.NumValues())
 					if stats.HasMinMax() {
 						fmt.Printf(", Min: %v, Max: %v",

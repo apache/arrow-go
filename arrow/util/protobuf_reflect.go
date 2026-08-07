@@ -194,11 +194,17 @@ type ProtobufMessageReflection struct {
 
 func (psr ProtobufMessageReflection) unmarshallAny() ProtobufMessageReflection {
 	if psr.descriptor.FullName() == "google.protobuf.Any" && psr.rValue.IsValid() {
-		for psr.rValue.Type().Kind() == reflect.Ptr {
-			psr.rValue = reflect.Indirect(psr.rValue)
+		if !psr.message.IsValid() {
+			return psr
 		}
-		fieldValueAsAny, _ := psr.rValue.Interface().(anypb.Any)
-		msg, _ := fieldValueAsAny.UnmarshalNew()
+		fieldValueAsAny, ok := psr.message.Interface().(*anypb.Any)
+		if !ok {
+			return psr
+		}
+		msg, err := fieldValueAsAny.UnmarshalNew()
+		if err != nil {
+			return psr
+		}
 
 		v := reflect.ValueOf(msg)
 		for v.Kind() == reflect.Ptr {

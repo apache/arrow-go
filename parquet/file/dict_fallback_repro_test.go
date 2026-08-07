@@ -66,6 +66,11 @@ func runDictFallbackNoDictPageCheck(t *testing.T, version parquet.Version, codec
 		dictPageSizeLimit: dictPageSizeLimit,
 		dataPageSize:      dataPageSize,
 		codec:             codec,
+		// The pre-first-page cost check is what discards the dictionary before
+		// any dict data page is cut here. It only runs by default for
+		// uncompressed columns, so force it for the compressed variants to keep
+		// exercising the orphan-discard path (parquet-mr parity) under a codec.
+		forceCostFallback: codec != compress.Codecs.Uncompressed,
 	}
 
 	knobsOn := knobs
@@ -243,6 +248,7 @@ type writerKnobs struct {
 	dictPageSizeLimit int64
 	dataPageSize      int64
 	codec             compress.Compression
+	forceCostFallback bool
 }
 
 type pageInfo struct {
@@ -293,6 +299,9 @@ func writeByteArrayColumn(t *testing.T, values []parquet.ByteArray, version parq
 	}
 	if version == parquet.V2_LATEST {
 		opts = append(opts, parquet.WithDataPageVersion(parquet.DataPageV2))
+	}
+	if knobs.forceCostFallback {
+		opts = append(opts, parquet.WithDictionaryCostFallbackFor("v", true))
 	}
 	props := parquet.NewWriterProperties(opts...)
 

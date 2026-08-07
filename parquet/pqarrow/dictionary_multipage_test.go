@@ -145,3 +145,58 @@ func TestArrowDictionaryTypeMultiplePages(t *testing.T) {
 	require.Equal(t, int64(numRows), totalRows, "Should read all rows")
 	t.Logf("Successfully read %d rows", totalRows)
 }
+
+func TestArrowDictionaryTypePreservesIndexType(t *testing.T) {
+	for _, indexType := range []arrow.DataType{
+		arrow.PrimitiveTypes.Int8,
+		arrow.PrimitiveTypes.Int16,
+		arrow.PrimitiveTypes.Int32,
+		arrow.PrimitiveTypes.Int64,
+		arrow.PrimitiveTypes.Uint8,
+		arrow.PrimitiveTypes.Uint16,
+		arrow.PrimitiveTypes.Uint32,
+		arrow.PrimitiveTypes.Uint64,
+	} {
+		t.Run(indexType.Name(), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			dictType := &arrow.DictionaryType{IndexType: indexType, ValueType: arrow.BinaryTypes.String}
+			sc := arrow.NewSchema([]arrow.Field{{Name: "dict_col", Type: dictType}}, nil)
+			builder := array.NewDictionaryBuilder(mem, dictType).(*array.BinaryDictionaryBuilder)
+			defer builder.Release()
+			for _, value := range []string{"a", "b", "a", "c"} {
+				require.NoError(t, builder.AppendString(value))
+			}
+			values := builder.NewDictionaryArray()
+			defer values.Release()
+
+			var buf bytes.Buffer
+			writer, err := pqarrow.NewFileWriter(sc, &buf,
+				parquet.NewWriterProperties(parquet.WithAllocator(mem)),
+				pqarrow.NewArrowWriterProperties(pqarrow.WithStoreSchema(), pqarrow.WithAllocator(mem)))
+			require.NoError(t, err)
+			rec := array.NewRecordBatch(sc, []arrow.Array{values}, int64(values.Len()))
+			require.NoError(t, writer.Write(rec))
+			require.NoError(t, writer.Close())
+			rec.Release()
+
+			pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()),
+				file.WithReadProps(parquet.NewReaderProperties(mem)))
+			require.NoError(t, err)
+			defer pf.Close()
+			reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{}, mem)
+			require.NoError(t, err)
+
+			readSchema, err := reader.Schema()
+			require.NoError(t, err)
+			require.True(t, arrow.TypeEqual(dictType, readSchema.Field(0).Type))
+
+			tbl, err := reader.ReadTable(context.Background())
+			require.NoError(t, err)
+			defer tbl.Release()
+			require.True(t, arrow.TypeEqual(dictType, tbl.Column(0).DataType()))
+			require.True(t, array.Equal(values, tbl.Column(0).Data().Chunk(0)))
+		})
+	}
+}

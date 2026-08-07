@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"reflect"
 	"strconv"
 	"unsafe"
@@ -174,6 +173,10 @@ func (s *Boolean) String() string {
 }
 
 func (s *Boolean) CastTo(dt arrow.DataType) (Scalar, error) {
+	if arrow.TypeEqual(s.DataType(), dt) {
+		return s, nil
+	}
+
 	if !s.Valid {
 		return MakeNullScalar(dt), nil
 	}
@@ -325,9 +328,7 @@ func (s *Decimal128) CastTo(to arrow.DataType) (Scalar, error) {
 		return NewDecimal256Scalar(newVal, to), nil
 	case arrow.STRING:
 		dt := s.Type.(*arrow.Decimal128Type)
-		scale := big.NewFloat(math.Pow10(int(dt.Scale)))
-		val := (&big.Float{}).SetInt(s.Value.BigInt())
-		return NewStringScalar(val.Quo(val, scale).Text('g', int(dt.Precision))), nil
+		return NewStringScalar(s.Value.ToBigFloat(dt.Scale).Text('g', int(dt.Precision))), nil
 	}
 
 	return nil, fmt.Errorf("cannot cast non-nil decimal128 scalar to type %s", to)
@@ -382,9 +383,7 @@ func (s *Decimal256) CastTo(to arrow.DataType) (Scalar, error) {
 		}
 		return NewDecimal256Scalar(newVal, to), nil
 	case arrow.STRING:
-		scale := big.NewFloat(math.Pow10(int(dt.Scale)))
-		val := (&big.Float{}).SetInt(s.Value.BigInt())
-		return NewStringScalar(val.Quo(val, scale).Text('g', int(dt.Precision))), nil
+		return NewStringScalar(s.Value.ToBigFloat(dt.Scale).Text('g', int(dt.Precision))), nil
 	}
 
 	return nil, fmt.Errorf("cannot cast non-nil decimal256 scalar to type %s", to)
@@ -473,11 +472,10 @@ func (s *Extension) String() string {
 	if !s.Valid {
 		return "null"
 	}
-	val, err := s.CastTo(arrow.BinaryTypes.String)
-	if err != nil {
+	if s.Value == nil {
 		return "..."
 	}
-	return string(val.(*String).Value.Bytes())
+	return s.Value.String()
 }
 
 func NewExtensionScalar(storage Scalar, typ arrow.DataType) *Extension {

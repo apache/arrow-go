@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type Fixture struct {
@@ -349,6 +350,22 @@ func TestMapSchemaDoesNotDependOnValues(t *testing.T) {
 	require.True(t, withValuesSchema.Equal(emptySchema))
 }
 
+func TestMalformedAnyUsesPhysicalFields(t *testing.T) {
+	msg := util_message.AllTheTypes{
+		Any: &anypb.Any{TypeUrl: "invalid.example/missing", Value: []byte{1, 2, 3}},
+	}
+
+	pmr := NewProtobufMessageReflection(&msg)
+	anyFields := pmr.Schema().Field(17).Type.(*arrow.StructType).Fields()
+	require.Len(t, anyFields, 2)
+	assert.Equal(t, "type_url", anyFields[0].Name)
+	assert.Equal(t, "value", anyFields[1].Name)
+
+	rec := pmr.Record(nil)
+	defer rec.Release()
+	assert.EqualValues(t, 1, rec.NumRows())
+}
+
 func TestRecordFromProtobuf(t *testing.T) {
 	f := AllTheTypesFixture()
 
@@ -371,6 +388,25 @@ func TestRecordReleasesConstructionBuffers(t *testing.T) {
 	rec := pmr.Record(mem)
 	rec.Release()
 	mem.AssertSize(t, 0)
+}
+
+func TestRecordWithAllFieldsExcluded(t *testing.T) {
+	pmr := NewProtobufMessageReflection(AllTheTypesNoAnyFixture().msg,
+		WithExclusionPolicy(func(*ProtobufFieldReflection) bool { return true }))
+	rec := pmr.Record(nil)
+	defer rec.Release()
+
+	assert.EqualValues(t, 1, rec.NumRows())
+	assert.Zero(t, rec.NumCols())
+}
+
+func TestRecordFromEmptyMessage(t *testing.T) {
+	pmr := NewProtobufMessageReflection(&emptypb.Empty{})
+	rec := pmr.Record(nil)
+	defer rec.Release()
+
+	assert.EqualValues(t, 1, rec.NumRows())
+	assert.Zero(t, rec.NumCols())
 }
 
 func TestNullRecordFromProtobuf(t *testing.T) {
