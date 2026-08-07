@@ -532,6 +532,371 @@ func TestRecordBuilder(t *testing.T) {
 	}
 }
 
+func TestRecordBuilderRollsBackRowsAfterDecodeError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "b", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	b := array.NewRecordBuilder(mem, schema)
+	defer b.Release()
+
+	err := b.UnmarshalJSON([]byte("{\"a\":1,\"b\":\"invalid\"}"))
+	if err == nil {
+		t.Fatal("expected a decode error")
+	}
+	assert.Equal(t, 0, b.Field(0).Len())
+	assert.Equal(t, 0, b.Field(1).Len())
+
+	err = b.UnmarshalJSON([]byte("{\"a\":2,\"b\":3}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := b.NewRecordBatch()
+	defer rec.Release()
+	assert.Equal(t, int64(1), rec.NumRows())
+
+}
+
+func TestRecordBuilderRollsBackVariableWidthState(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: arrow.BinaryTypes.String},
+		{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	large := strings.Repeat("x", 1<<20)
+	if err := builder.UnmarshalJSON([]byte(fmt.Sprintf(`{"value":%q,"other":"invalid"}`, large))); err == nil {
+		t.Fatal("expected a decode error")
+	}
+	assert.Zero(t, builder.Field(0).(*array.StringBuilder).DataLen())
+
+	if err := builder.UnmarshalJSON([]byte(`{"value":"kept","other":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+	assert.Equal(t, "kept", rec.Column(0).(*array.String).Value(0))
+	assert.NoError(t, array.ValidateFull(rec.Column(0)))
+}
+
+func TestRecordBuilderRollsBackVariableWidthData(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	for _, tc := range []struct {
+		name string
+		typ  arrow.DataType
+	}{
+		{name: "string", typ: arrow.BinaryTypes.String},
+		{name: "large string", typ: arrow.BinaryTypes.LargeString},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := arrow.NewSchema([]arrow.Field{
+				{Name: "value", Type: tc.typ},
+				{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+			}, nil)
+			builder := array.NewRecordBuilder(mem, schema)
+			defer builder.Release()
+
+			assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":"aaa","other":1}`)))
+			assert.Error(t, builder.UnmarshalJSON([]byte(`{"value":"bbb","other":"invalid"}`)))
+			assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":"ccc","other":2}`)))
+
+			rec := builder.NewRecordBatch()
+			defer rec.Release()
+			values := rec.Column(0).(array.StringLike)
+			assert.Equal(t, "aaa", values.Value(0))
+			assert.Equal(t, "ccc", values.Value(1))
+			assert.NoError(t, array.ValidateFull(rec.Column(0)))
+		})
+	}
+}
+
+func TestRecordBuilderRollsBackFixedSizeBinaryData(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: &arrow.FixedSizeBinaryType{ByteWidth: 3}},
+		{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":"YWFh","other":1}`)))
+	assert.Error(t, builder.UnmarshalJSON([]byte(`{"value":"YmJi","other":"invalid"}`)))
+	assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":"Y2Nj","other":2}`)))
+
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+	values := rec.Column(0).(*array.FixedSizeBinary)
+	assert.Equal(t, []byte("aaa"), values.Value(0))
+	assert.Equal(t, []byte("ccc"), values.Value(1))
+}
+
+func TestRecordBuilderRollsBackBooleanAndNullLengths(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	for _, tc := range []struct {
+		name string
+		typ  arrow.DataType
+	}{
+		{name: "boolean", typ: arrow.FixedWidthTypes.Boolean},
+		{name: "null", typ: arrow.Null},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := arrow.NewSchema([]arrow.Field{
+				{Name: "value", Type: tc.typ},
+				{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+			}, nil)
+			builder := array.NewRecordBuilder(mem, schema)
+			defer builder.Release()
+
+			value := "true"
+			if tc.name == "null" {
+				value = "null"
+			}
+			assert.Error(t, builder.UnmarshalJSON([]byte(fmt.Sprintf(`{"value":%s,"other":"invalid"}`, value))))
+			assert.NoError(t, builder.UnmarshalJSON([]byte(fmt.Sprintf(`{"value":%s,"other":1}`, value))))
+
+			rec := builder.NewRecordBatch()
+			defer rec.Release()
+			assert.Equal(t, int64(1), rec.NumRows())
+		})
+	}
+}
+
+func TestRecordBuilderRollsBackDiscardedValidityBits(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":10,"other":1}`)))
+	assert.Error(t, builder.UnmarshalJSON([]byte(`{"value":20,"other":"invalid"}`)))
+	assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":null,"other":2}`)))
+
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+	values := rec.Column(0).(*array.Int32)
+	assert.Equal(t, int32(10), values.Value(0))
+	assert.True(t, values.IsNull(1))
+	assert.Equal(t, 1, values.NullN())
+	assert.NoError(t, array.ValidateFull(values))
+}
+
+func TestRecordBuilderRollsBackDictionaryState(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: dictType},
+		{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	if err := builder.UnmarshalJSON([]byte(`{"value":"discarded","other":"invalid"}`)); err == nil {
+		t.Fatal("expected a decode error")
+	}
+	if err := builder.UnmarshalJSON([]byte(`{"value":"kept","other":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+
+	dict := rec.Column(0).(*array.Dictionary)
+	assert.Equal(t, 1, dict.Dictionary().Len())
+	assert.Equal(t, "kept", dict.Dictionary().(*array.String).Value(0))
+	assert.NoError(t, array.ValidateFull(dict))
+}
+
+func TestRecordBuilderRollsBackDictionaryNullState(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: dictType},
+		{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	assert.Error(t, builder.UnmarshalJSON([]byte(`{"value":null,"other":"invalid"}`)))
+	assert.Zero(t, builder.Field(0).Len())
+	assert.Zero(t, builder.Field(0).NullN())
+
+	assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":"kept","other":1}`)))
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+	assert.Zero(t, rec.Column(0).NullN())
+}
+
+func TestRecordBuilderRollsBackExistingDictionaryState(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: dictType},
+		{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":"existing","other":1}`)))
+	assert.Error(t, builder.UnmarshalJSON([]byte(`{"value":"discarded","other":"invalid"}`)))
+	assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":"existing","other":2}`)))
+	assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":"new","other":3}`)))
+
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+
+	dict := rec.Column(0).(*array.Dictionary)
+	dictValues := dict.Dictionary()
+	assert.Equal(t, 2, dictValues.Len())
+	assert.Equal(t, "existing", dictValues.(*array.String).Value(0))
+	assert.Equal(t, "new", dictValues.(*array.String).Value(1))
+	assert.Equal(t, 0, dict.GetValueIndex(0))
+	assert.Equal(t, 0, dict.GetValueIndex(1))
+	assert.Equal(t, 1, dict.GetValueIndex(2))
+	assert.Equal(t, "existing", dict.ValueStr(0))
+	assert.Equal(t, "existing", dict.ValueStr(1))
+	assert.Equal(t, "new", dict.ValueStr(2))
+	assert.NoError(t, array.ValidateFull(dict))
+}
+
+func TestRecordBuilderRollsBackStringViewBlocks(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	typ := arrow.ListOf(arrow.BinaryTypes.StringView)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: typ}}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	if err := builder.UnmarshalJSON([]byte(`{"value":["long string",1]}`)); err == nil {
+		t.Fatal("expected a decode error")
+	}
+	if err := builder.UnmarshalJSON([]byte(`{"value":["kept"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+	list := rec.Column(0).(*array.List)
+	assert.Equal(t, "kept", list.ListValues().(*array.StringView).Value(0))
+	assert.NoError(t, array.ValidateFull(rec.Column(0)))
+}
+
+func TestRecordBuilderRollsBackNestedRowsAfterDecodeError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	tests := []struct {
+		name  string
+		typ   arrow.DataType
+		value string
+	}{
+		{
+			name:  "list view",
+			typ:   arrow.ListViewOf(arrow.PrimitiveTypes.Int32),
+			value: `[1, "invalid"]`,
+		},
+		{
+			name:  "sparse union",
+			typ:   arrow.SparseUnionOf([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, []arrow.UnionTypeCode{0}),
+			value: `[0, "invalid"]`,
+		},
+		{
+			name:  "dense union",
+			typ:   arrow.DenseUnionOf([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, []arrow.UnionTypeCode{0}),
+			value: `[0, "invalid"]`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: tc.typ}}, nil)
+			builder := array.NewRecordBuilder(mem, schema)
+			defer builder.Release()
+
+			if err := builder.UnmarshalJSON([]byte(`{"value":` + tc.value + `}`)); err == nil {
+				t.Fatal("expected a decode error")
+			}
+			if got := builder.Field(0).Len(); got != 0 {
+				t.Fatalf("builder length = %d, want 0", got)
+			}
+		})
+	}
+}
+
+func TestRecordBuilderRollsBackRunEndStateAfterDecodeError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	typ := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int16, arrow.PrimitiveTypes.Int32)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: typ}}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	for i := 0; i < 2; i++ {
+		if err := builder.UnmarshalJSON([]byte(`{"value":"invalid"}`)); err == nil {
+			t.Fatal("expected a decode error")
+		}
+	}
+	if got := builder.Field(0).Len(); got != 0 {
+		t.Fatalf("builder length = %d, want 0", got)
+	}
+}
+
+func TestRecordBuilderRollsBackNestedRunEndStateAfterDecodeError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	typ := arrow.StructOf(
+		arrow.Field{Name: "value", Type: arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int16, arrow.BinaryTypes.String)},
+		arrow.Field{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+	)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "row", Type: typ}}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	if err := builder.UnmarshalJSON([]byte(`{"row":{"value":"a","other":1}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := builder.UnmarshalJSON([]byte(`{"row":{"value":"a","other":"invalid"}}`)); err == nil {
+		t.Fatal("expected a decode error")
+	}
+	if err := builder.UnmarshalJSON([]byte(`{"row":{"value":"a","other":2}}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+	row := rec.Column(0).(*array.Struct)
+	rle := row.Field(0).(*array.RunEndEncoded)
+	assert.Equal(t, 2, rle.Len())
+	assert.Equal(t, 1, rle.RunEndsArr().Len())
+	assert.Equal(t, 1, rle.Values().Len())
+	assert.Equal(t, "a", rle.ValueStr(0))
+	assert.Equal(t, "a", rle.ValueStr(1))
+}
+
 func TestRecordBuilderResize(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)

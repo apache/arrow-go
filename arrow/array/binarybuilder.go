@@ -227,6 +227,23 @@ func (b *BinaryBuilder) init(capacity int) {
 // DataLen returns the number of bytes in the data array.
 func (b *BinaryBuilder) DataLen() int { return b.values.length }
 
+type binaryBuilderCheckpoint struct {
+	builder *BinaryBuilder
+	dataLen int
+}
+
+func (c *binaryBuilderCheckpoint) capture() {
+	c.dataLen = c.builder.DataLen()
+}
+
+func (c *binaryBuilderCheckpoint) restore() {
+	c.builder.ResizeData(c.dataLen)
+}
+
+func (b *BinaryBuilder) newCheckpoint() checkpointState {
+	return &binaryBuilderCheckpoint{builder: b}
+}
+
 // DataCap returns the total number of bytes that can be stored
 // without allocating additional memory.
 func (b *BinaryBuilder) DataCap() int { return b.values.capacity }
@@ -248,11 +265,24 @@ func (b *BinaryBuilder) ReserveData(n int) {
 // Resize adjusts the space allocated by b to n elements. If n is greater than b.Cap(),
 // additional memory will be allocated. If n is smaller, the allocated memory may be reduced.
 func (b *BinaryBuilder) Resize(n int) {
+	if n < b.length {
+		b.truncate(n)
+	}
 	b.offsets.resize((n + 1) * b.offsetByteWidth)
-	if (n * b.offsetByteWidth) < b.offsets.Len() {
+	if n < b.offsets.Len() {
 		b.offsets.SetLength(n * b.offsetByteWidth)
 	}
 	b.resize(n, b.init)
+}
+
+func (b *BinaryBuilder) truncate(n int) {
+	dataLen := b.values.Len()
+	if n < b.offsets.Len() {
+		dataLen = b.getOffsetVal(n)
+	}
+	b.builder.truncate(n)
+	b.offsets.SetLength(n * b.offsetByteWidth)
+	b.values.SetLength(dataLen)
 }
 
 func (b *BinaryBuilder) ResizeData(n int) {
@@ -424,6 +454,31 @@ func (b *BinaryViewBuilder) SetBlockSize(sz uint) {
 }
 
 func (b *BinaryViewBuilder) Type() arrow.DataType { return b.dtype }
+
+type binaryViewBuilderCheckpoint struct {
+	builder    *BinaryViewBuilder
+	length     int
+	blockState *multiBufferCheckpoint
+}
+
+func (c *binaryViewBuilderCheckpoint) capture() {
+	c.length = c.builder.length
+	c.blockState.capture()
+}
+
+func (c *binaryViewBuilderCheckpoint) restore() {
+	c.blockState.restore()
+	for i := c.length; i < len(c.builder.rawData); i++ {
+		c.builder.rawData[i] = arrow.ViewHeader{}
+	}
+}
+
+func (b *BinaryViewBuilder) newCheckpoint() checkpointState {
+	return &binaryViewBuilderCheckpoint{
+		builder:    b,
+		blockState: b.blockBuilder.newCheckpoint(),
+	}
+}
 
 func (b *BinaryViewBuilder) Release() {
 	debug.Assert(b.refCount.Load() > 0, "too many releases")

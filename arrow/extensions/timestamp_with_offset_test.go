@@ -600,6 +600,36 @@ func TestTimestampWithOffsetExtensionRecordBuilder(t *testing.T) {
 	}
 }
 
+func TestTimestampWithOffsetExtensionRecordBuilderRollsBackState(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dataType, err := extensions.NewTimestampWithOffsetTypeCustomOffset(testTimeUnit, ree(arrow.PrimitiveTypes.Int16))
+	require.NoError(t, err)
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "timestamp_with_offset", Type: dataType},
+		{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	require.NoError(t, builder.UnmarshalJSON([]byte(`{"timestamp_with_offset":"2025-01-01T00:00:00+01:00","other":1}`)))
+	require.Error(t, builder.UnmarshalJSON([]byte(`{"timestamp_with_offset":"2025-01-01T00:00:00+01:00","other":"invalid"}`)))
+	require.NoError(t, builder.UnmarshalJSON([]byte(`{"timestamp_with_offset":"2025-01-01T00:00:00+01:00","other":2}`)))
+
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+
+	values := rec.Column(0).(*extensions.TimestampWithOffsetArray)
+	require.Equal(t, 2, values.Len())
+	_, offset := values.Value(0).Zone()
+	require.Equal(t, 60*60, offset)
+	_, offset = values.Value(1).Zone()
+	require.Equal(t, 60*60, offset)
+	offsets := values.Storage().(*array.Struct).Field(1).(*array.RunEndEncoded)
+	require.Equal(t, 1, offsets.RunEndsArr().Len())
+}
+
 func TestTimestampWithOffsetTypeBatchIPCRoundTrip(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

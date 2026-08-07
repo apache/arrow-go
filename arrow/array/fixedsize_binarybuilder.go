@@ -150,6 +150,11 @@ func (b *FixedSizeBinaryBuilder) Resize(n int) {
 	b.resize(n, b.init)
 }
 
+func (b *FixedSizeBinaryBuilder) truncate(n int) {
+	b.builder.truncate(n)
+	b.values.SetLength(n * b.dtype.ByteWidth)
+}
+
 // NewArray creates a FixedSizeBinary array from the memory buffers used by the
 // builder and resets the FixedSizeBinaryBuilder so it can be used to build a new array.
 func (b *FixedSizeBinaryBuilder) NewArray() arrow.Array {
