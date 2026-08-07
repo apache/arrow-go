@@ -44,14 +44,12 @@ type cumulativeSumState[T arrow.NumericType] struct {
 	skipNulls       bool
 	encounteredNull bool
 	checked         bool
+	add             func(T, T) (T, error)
 }
 
 func safeNumericCastScalar(start scalar.Scalar, typ arrow.DataType) (scalar.Scalar, error) {
 	sourceID := start.DataType().ID()
 	targetID := typ.ID()
-	if !arrow.IsInteger(sourceID) && !arrow.IsFloating(sourceID) {
-		return nil, fmt.Errorf("%w: cumulative sum start value must be numeric, got %s", arrow.ErrType, start.DataType())
-	}
 	if !arrow.IsInteger(targetID) && !arrow.IsFloating(targetID) {
 		return nil, fmt.Errorf("%w: cumulative sum input type must be numeric, got %s", arrow.ErrType, typ)
 	}
@@ -68,6 +66,13 @@ func safeNumericCastScalar(start scalar.Scalar, typ arrow.DataType) (scalar.Scal
 	// behavior, which does not reject precision loss. The other numeric casts
 	// use the same safe checks as the compute cast kernels.
 	if arrow.IsFloating(sourceID) && arrow.IsFloating(targetID) {
+		return casted, nil
+	}
+	if !arrow.IsInteger(sourceID) && !arrow.IsFloating(sourceID) {
+		// Non-numeric scalar types such as strings and booleans validate their
+		// conversion while producing the target scalar. Keep that behavior
+		// aligned with scalar safe-cast dispatch instead of rejecting them based
+		// only on their source type.
 		return casted, nil
 	}
 
@@ -139,66 +144,70 @@ func initCumulativeSum[T arrow.NumericType](checked bool) exec.KernelInitFn {
 			current:   start,
 			skipNulls: opts.SkipNulls,
 			checked:   checked,
+			add:       checkedAdder[T](),
 		}, nil
 	}
 }
 
-func checkedAdd[T arrow.NumericType](left, right T) (T, error) {
-	switch l := any(left).(type) {
+func checkedAddSigned[T arrow.IntType](left, right T) (T, error) {
+	if (right > 0 && left > MaxOf[T]()-right) || (right < 0 && left < MinOf[T]()-right) {
+		return 0, errOverflow
+	}
+	return left + right, nil
+}
+
+func checkedAddUnsigned[T arrow.UintType](left, right T) (T, error) {
+	if left > MaxOf[T]()-right {
+		return 0, errOverflow
+	}
+	return left + right, nil
+}
+
+func checkedAdder[T arrow.NumericType]() func(T, T) (T, error) {
+	var zero T
+	switch any(zero).(type) {
 	case int8:
-		r := any(right).(int8)
-		if (r > 0 && l > int8(127)-r) || (r < 0 && l < int8(-128)-r) {
-			return 0, fmt.Errorf("%w: cumulative sum overflow", arrow.ErrInvalid)
+		return func(left, right T) (T, error) {
+			value, err := checkedAddSigned(int8(left), int8(right))
+			return T(value), err
 		}
-		return T(l + r), nil
 	case int16:
-		r := any(right).(int16)
-		if (r > 0 && l > int16(32767)-r) || (r < 0 && l < int16(-32768)-r) {
-			return 0, fmt.Errorf("%w: cumulative sum overflow", arrow.ErrInvalid)
+		return func(left, right T) (T, error) {
+			value, err := checkedAddSigned(int16(left), int16(right))
+			return T(value), err
 		}
-		return T(l + r), nil
 	case int32:
-		r := any(right).(int32)
-		if (r > 0 && l > int32(2147483647)-r) || (r < 0 && l < int32(-2147483648)-r) {
-			return 0, fmt.Errorf("%w: cumulative sum overflow", arrow.ErrInvalid)
+		return func(left, right T) (T, error) {
+			value, err := checkedAddSigned(int32(left), int32(right))
+			return T(value), err
 		}
-		return T(l + r), nil
 	case int64:
-		r := any(right).(int64)
-		if (r > 0 && l > int64(9223372036854775807)-r) || (r < 0 && l < int64(-9223372036854775807-1)-r) {
-			return 0, fmt.Errorf("%w: cumulative sum overflow", arrow.ErrInvalid)
+		return func(left, right T) (T, error) {
+			value, err := checkedAddSigned(int64(left), int64(right))
+			return T(value), err
 		}
-		return T(l + r), nil
 	case uint8:
-		r := any(right).(uint8)
-		if l > ^uint8(0)-r {
-			return 0, fmt.Errorf("%w: cumulative sum overflow", arrow.ErrInvalid)
+		return func(left, right T) (T, error) {
+			value, err := checkedAddUnsigned(uint8(left), uint8(right))
+			return T(value), err
 		}
-		return T(l + r), nil
 	case uint16:
-		r := any(right).(uint16)
-		if l > ^uint16(0)-r {
-			return 0, fmt.Errorf("%w: cumulative sum overflow", arrow.ErrInvalid)
+		return func(left, right T) (T, error) {
+			value, err := checkedAddUnsigned(uint16(left), uint16(right))
+			return T(value), err
 		}
-		return T(l + r), nil
 	case uint32:
-		r := any(right).(uint32)
-		if l > ^uint32(0)-r {
-			return 0, fmt.Errorf("%w: cumulative sum overflow", arrow.ErrInvalid)
+		return func(left, right T) (T, error) {
+			value, err := checkedAddUnsigned(uint32(left), uint32(right))
+			return T(value), err
 		}
-		return T(l + r), nil
 	case uint64:
-		r := any(right).(uint64)
-		if l > ^uint64(0)-r {
-			return 0, fmt.Errorf("%w: cumulative sum overflow", arrow.ErrInvalid)
+		return func(left, right T) (T, error) {
+			value, err := checkedAddUnsigned(uint64(left), uint64(right))
+			return T(value), err
 		}
-		return T(l + r), nil
-	case float32:
-		return T(l + any(right).(float32)), nil
-	case float64:
-		return T(l + any(right).(float64)), nil
 	default:
-		panic("unsupported cumulative sum type")
+		return func(left, right T) (T, error) { return left + right, nil }
 	}
 }
 
@@ -214,6 +223,7 @@ func cumulativeSumExec[T arrow.NumericType](ctx *exec.KernelCtx, batch *exec.Exe
 	data := ctx.Allocate(int(input.Len) * arrow.GetDataType[T]().(arrow.FixedWidthDataType).Bytes())
 	out.Buffers[1].WrapBuffer(data)
 	values := exec.GetSpanValues[T](out, 1)
+	inputValues := exec.GetSpanValues[T](input, 1)
 
 	needsValidity := state.encounteredNull || input.MayHaveNulls()
 	if needsValidity {
@@ -240,10 +250,10 @@ func cumulativeSumExec[T arrow.NumericType](ctx *exec.KernelCtx, batch *exec.Exe
 		}
 
 		current := state.current
-		value := exec.GetSpanValues[T](input, 1)[i]
+		value := inputValues[i]
 		var err error
 		if state.checked {
-			current, err = checkedAdd(current, value)
+			current, err = state.add(current, value)
 		} else {
 			current += value
 		}
