@@ -184,11 +184,17 @@ func (r *JSONReader) readNext() bool {
 }
 
 func (r *JSONReader) nextall() bool {
+	n := 0
 	for r.readNext() {
+		n++
 	}
 
-	r.cur = r.bldr.NewRecordBatch()
-	return r.cur.NumRows() > 0
+	if r.schema.NumFields() == 0 {
+		r.cur = NewRecordBatch(r.schema, nil, int64(n))
+	} else {
+		r.cur = r.bldr.NewRecordBatch()
+	}
+	return n > 0
 }
 
 func (r *JSONReader) next1() bool {
@@ -196,7 +202,11 @@ func (r *JSONReader) next1() bool {
 		return false
 	}
 
-	r.cur = r.bldr.NewRecordBatch()
+	if r.schema.NumFields() == 0 {
+		r.cur = NewRecordBatch(r.schema, nil, 1)
+	} else {
+		r.cur = r.bldr.NewRecordBatch()
+	}
 	return true
 }
 
@@ -210,7 +220,11 @@ func (r *JSONReader) nextn() bool {
 	}
 
 	if n > 0 {
-		r.cur = r.bldr.NewRecordBatch()
+		if r.schema.NumFields() == 0 {
+			r.cur = NewRecordBatch(r.schema, nil, int64(n))
+		} else {
+			r.cur = r.bldr.NewRecordBatch()
+		}
 	}
 	return n > 0
 }
