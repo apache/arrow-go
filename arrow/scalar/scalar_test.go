@@ -1291,6 +1291,11 @@ type OptionValTest struct {
 
 func (OptionValTest) TypeName() string { return "OptionValTest" }
 
+type PartialScalarTest struct {
+	Good []string
+	Bad  []complex64
+}
+
 func TestToScalar(t *testing.T) {
 	ot := &OptionValTest{ToType: arrow.BinaryTypes.String, Allow: true}
 	sc, err := scalar.ToScalar(ot, memory.DefaultAllocator)
@@ -1337,6 +1342,17 @@ func TestToScalar(t *testing.T) {
 		`valuint:list<item: uint64, nullable> = [14 15 16]}`
 
 	assert.Equal(t, expected, sc.String())
+}
+
+func TestToScalarReleasesPartialStructOnError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	_, err := scalar.ToScalar(PartialScalarTest{
+		Good: []string{"retained before error"},
+		Bad:  []complex64{complex(1, 2)},
+	}, mem)
+	require.Error(t, err)
 }
 
 func TestFromScalarMetadataDoesNotPrependEmptyEntries(t *testing.T) {
