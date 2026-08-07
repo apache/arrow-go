@@ -103,6 +103,18 @@ type IntervalScalar interface {
 
 const millisecondsInDay = (time.Hour * 24) / time.Millisecond
 
+func timestampDate(s *Timestamp) (time.Time, error) {
+	timestampType := s.DataType().(*arrow.TimestampType)
+	toTime, err := timestampType.GetToTimeFunc()
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	tm := toTime(s.Value)
+	year, month, day := tm.Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC), nil
+}
+
 func castTemporal(from TemporalScalar, to arrow.DataType) (Scalar, error) {
 	if arrow.TypeEqual(from.DataType(), to) {
 		return from, nil
@@ -148,25 +160,15 @@ func castTemporal(from TemporalScalar, to arrow.DataType) (Scalar, error) {
 		case *arrow.TimestampType:
 			return NewTimestampScalar(arrow.Timestamp(arrow.ConvertTimestampValue(s.Unit(), to.Unit, int64(s.Value))), to), nil
 		case *arrow.Date32Type:
-			timestampType := s.DataType().(*arrow.TimestampType)
-			toTime, err := timestampType.GetToTimeFunc()
+			tm, err := timestampDate(s)
 			if err != nil {
 				return nil, err
-			}
-			tm := toTime(s.Value)
-			if _, offset := tm.Zone(); offset != 0 {
-				tm = tm.Add(time.Duration(offset) * time.Second).UTC()
 			}
 			return NewDate32Scalar(arrow.Date32FromTime(tm)), nil
 		case *arrow.Date64Type:
-			timestampType := s.DataType().(*arrow.TimestampType)
-			toTime, err := timestampType.GetToTimeFunc()
+			tm, err := timestampDate(s)
 			if err != nil {
 				return nil, err
-			}
-			tm := toTime(s.Value)
-			if _, offset := tm.Zone(); offset != 0 {
-				tm = tm.Add(time.Duration(offset) * time.Second).UTC()
 			}
 			return NewDate64Scalar(arrow.Date64FromTime(tm)), nil
 		}
