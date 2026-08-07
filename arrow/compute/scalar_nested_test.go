@@ -248,6 +248,97 @@ func TestListElementSingleIndexArrayThroughCallFunction(t *testing.T) {
 	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
 }
 
+func TestListElementRejectsMultipleIndicesIndependentOfExecutionSpans(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	input := listElementInput(t, mem, arrow.ListOf(arrow.PrimitiveTypes.Int32), `[[10, 11], [20, 21]]`)
+	defer input.Release()
+	index := listElementInput(t, mem, arrow.PrimitiveTypes.Int64, `[0, 1]`)
+	defer index.Release()
+
+	chunk0 := array.NewSlice(input, 0, 1)
+	defer chunk0.Release()
+	chunk1 := array.NewSlice(input, 1, 2)
+	defer chunk1.Release()
+	chunkedLists := arrow.NewChunked(input.DataType(), []arrow.Array{chunk0, chunk1})
+	defer chunkedLists.Release()
+
+	execCtx := compute.DefaultExecCtx()
+	execCtx.ChunkSize = 1
+
+	tests := []struct {
+		name  string
+		ctx   context.Context
+		lists compute.Datum
+	}{
+		{name: "regular execution span", ctx: context.Background(), lists: &compute.ArrayDatum{Value: input.Data()}},
+		{name: "chunk size one", ctx: compute.SetExecCtx(context.Background(), execCtx), lists: &compute.ArrayDatum{Value: input.Data()}},
+		{name: "chunked lists", ctx: context.Background(), lists: &compute.ChunkedDatum{Value: chunkedLists}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := compute.ListElement(
+				tc.ctx,
+				tc.lists,
+				&compute.ArrayDatum{Value: index.Data()},
+			)
+			if result != nil {
+				result.Release()
+			}
+			require.ErrorIs(t, err, arrow.ErrNotImplemented)
+		})
+	}
+}
+
+func TestListElementSingleIndexChunkedArray(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	input := listElementInput(t, mem, arrow.ListOf(arrow.PrimitiveTypes.Int32), `[[1, 2], [3, 4]]`)
+	defer input.Release()
+	index := listElementInput(t, mem, arrow.PrimitiveTypes.Int64, `[1]`)
+	defer index.Release()
+	chunkedIndex := arrow.NewChunked(index.DataType(), []arrow.Array{index})
+	defer chunkedIndex.Release()
+	expected := listElementInput(t, mem, arrow.PrimitiveTypes.Int32, `[2, 4]`)
+	defer expected.Release()
+
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ArrayDatum{Value: input.Data()},
+		&compute.ChunkedDatum{Value: chunkedIndex},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	actual := result.(*compute.ArrayDatum).MakeArray()
+	defer actual.Release()
+	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+}
+
+func TestListElementScalarList(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	values := listElementInput(t, mem, arrow.PrimitiveTypes.Int32, `[10, 20]`)
+	defer values.Release()
+	list := scalar.NewListScalar(values)
+	defer list.Release()
+
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ScalarDatum{Value: list},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(1)},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	actual := result.(*compute.ScalarDatum).Value
+	assert.True(t, scalar.Equals(scalar.NewInt32Scalar(20), actual), "expected: 20\ngot: %s", actual)
+}
+
 func TestListElementErrors(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -350,6 +441,64 @@ func TestListElementDenseUnionChild(t *testing.T) {
 	expectedBuilder.Child(1).(*array.StringBuilder).Append("a")
 	expectedBuilder.Append(0)
 	expectedBuilder.Child(0).(*array.Int32Builder).Append(20)
+	expected := expectedBuilder.NewArray()
+	expectedBuilder.Release()
+	defer expected.Release()
+
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ArrayDatum{Value: input.Data()},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(1)},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	actual := result.(*compute.ArrayDatum).MakeArray()
+	defer actual.Release()
+	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+}
+
+func TestListElementSparseUnionChild(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	unionType := arrow.SparseUnionOf(
+		[]arrow.Field{
+			{Name: "number", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			{Name: "text", Type: arrow.BinaryTypes.String, Nullable: true},
+		},
+		[]arrow.UnionTypeCode{0, 1},
+	)
+
+	builder := array.NewListBuilder(mem, unionType)
+	values := builder.ValueBuilder().(*array.SparseUnionBuilder)
+	appendValue := func(code arrow.UnionTypeCode, number int32, text string) {
+		values.Append(code)
+		if code == 0 {
+			values.Child(0).(*array.Int32Builder).Append(number)
+			values.Child(1).(*array.StringBuilder).AppendNull()
+		} else {
+			values.Child(0).(*array.Int32Builder).AppendNull()
+			values.Child(1).(*array.StringBuilder).Append(text)
+		}
+	}
+	builder.Append(true)
+	appendValue(0, 10, "")
+	appendValue(1, 0, "a")
+	builder.Append(true)
+	appendValue(1, 0, "b")
+	appendValue(0, 20, "")
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	expectedBuilder := array.NewSparseUnionBuilder(mem, unionType)
+	expectedBuilder.Append(1)
+	expectedBuilder.Child(0).(*array.Int32Builder).AppendNull()
+	expectedBuilder.Child(1).(*array.StringBuilder).Append("a")
+	expectedBuilder.Append(0)
+	expectedBuilder.Child(0).(*array.Int32Builder).Append(20)
+	expectedBuilder.Child(1).(*array.StringBuilder).AppendNull()
 	expected := expectedBuilder.NewArray()
 	expectedBuilder.Release()
 	defer expected.Release()
