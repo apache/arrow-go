@@ -151,6 +151,9 @@ func listElementExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 		out.TakeOwnership(empty.Data())
 		return nil
 	}
+	if !listElementTakeSupported(elemType.ID()) {
+		return listElementConcat(ctx, list, index, elemType, out)
+	}
 
 	indexBuilder := array.NewInt64Builder(exec.GetAllocator(ctx.Ctx))
 	defer indexBuilder.Release()
@@ -180,7 +183,15 @@ func listElementExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 	if handled, err := listElementTake(ctx, &list.Children[0], indices, out); handled {
 		return err
 	}
+	return listElementTakeFallback(ctx, &list.Children[0], indices, out)
+}
 
+func listElementTakeSupported(id arrow.Type) bool {
+	return id == arrow.NULL || arrow.IsPrimitive(id) || arrow.IsBinaryLike(id) ||
+		arrow.IsLargeBinaryLike(id) || arrow.IsFixedSizeBinary(id) || id == arrow.DENSE_UNION
+}
+
+func listElementConcat(ctx *exec.KernelCtx, list *exec.ArraySpan, index uint64, elemType arrow.DataType, out *exec.ExecResult) error {
 	values := list.Children[0].MakeArray()
 	defer values.Release()
 	pieces := make([]arrow.Array, 0, int(list.Len))
@@ -191,11 +202,23 @@ func listElementExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 	}()
 
 	for i := int64(0); i < list.Len; i++ {
-		if indices.IsNull(int(i)) {
+		if len(list.Buffers[0].Buf) != 0 && bitutil.BitIsNotSet(list.Buffers[0].Buf, int(list.Offset+i)) {
 			pieces = append(pieces, array.MakeArrayOfNull(exec.GetAllocator(ctx.Ctx), elemType, 1))
 			continue
 		}
-		selected := indices.(*array.Int64).Value(int(i))
+
+		start, end, err := listElementValueOffsets(list, i)
+		if err != nil {
+			return err
+		}
+		if end < start {
+			return fmt.Errorf("%w: list_element input has invalid value offsets", arrow.ErrInvalid)
+		}
+		length := uint64(end - start)
+		if index >= length {
+			return fmt.Errorf("%w: list_element index %d is out of bounds: should be in [0, %d)", arrow.ErrInvalid, index, length)
+		}
+		selected := start + int64(index)
 		pieces = append(pieces, array.NewSlice(values, selected, selected+1))
 	}
 
@@ -208,6 +231,71 @@ func listElementExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 	return nil
 }
 
+func listElementTakeFallback(ctx *exec.KernelCtx, values *exec.ArraySpan, indices arrow.Array, out *exec.ExecResult) error {
+	elemType := values.Type
+	valuesArray := values.MakeArray()
+	defer valuesArray.Release()
+	pieces := make([]arrow.Array, 0, indices.Len())
+	defer func() {
+		for _, piece := range pieces {
+			piece.Release()
+		}
+	}()
+
+	for i := 0; i < indices.Len(); i++ {
+		if indices.IsNull(i) {
+			pieces = append(pieces, array.MakeArrayOfNull(exec.GetAllocator(ctx.Ctx), elemType, 1))
+			continue
+		}
+		selected := indices.(*array.Int64).Value(i)
+		pieces = append(pieces, array.NewSlice(valuesArray, selected, selected+1))
+	}
+
+	result, err := array.Concatenate(pieces, exec.GetAllocator(ctx.Ctx))
+	if err != nil {
+		return err
+	}
+	defer result.Release()
+	out.TakeOwnership(result.Data())
+	return nil
+}
+
+func listElementDenseUnionTake(ctx *exec.KernelCtx, values *exec.ArraySpan, indices arrow.Array, out *exec.ExecResult) error {
+	var indexSpan exec.ArraySpan
+	indexSpan.SetMembers(indices.Data())
+	batch := &exec.ExecSpan{
+		Len: int64(indices.Len()),
+		Values: []exec.ExecValue{
+			{Array: *values},
+			{Array: indexSpan},
+		},
+	}
+	takeCtx := *ctx
+	takeCtx.State = TakeOptions{BoundsCheck: false}
+	if err := TakeExec(DenseUnionImpl)(&takeCtx, batch, out); err != nil {
+		return err
+	}
+
+	for i := range out.Children {
+		childIndices := out.Children[i].MakeArray()
+		childOut := &exec.ExecResult{Type: values.Children[i].Type}
+		handled, err := listElementTake(ctx, &values.Children[i], childIndices, childOut)
+		if err == nil && !handled {
+			err = listElementTakeFallback(ctx, &values.Children[i], childIndices, childOut)
+		}
+		childIndices.Release()
+		if err != nil {
+			childOut.Release()
+			return err
+		}
+
+		childData := childOut.MakeData()
+		out.Children[i].Release()
+		out.Children[i].TakeOwnership(childData)
+		childData.Release()
+	}
+	return nil
+}
 func listElementTake(ctx *exec.KernelCtx, values *exec.ArraySpan, indices arrow.Array, out *exec.ExecResult) (bool, error) {
 	var indexSpan exec.ArraySpan
 	indexSpan.SetMembers(indices.Data())
@@ -232,6 +320,8 @@ func listElementTake(ctx *exec.KernelCtx, values *exec.ArraySpan, indices arrow.
 		return true, TakeExec(VarBinaryImpl[int64])(&takeCtx, batch, out)
 	case arrow.IsFixedSizeBinary(id):
 		return true, TakeExec(FSBImpl)(&takeCtx, batch, out)
+	case id == arrow.DENSE_UNION:
+		return true, listElementDenseUnionTake(ctx, values, indices, out)
 	default:
 		return false, nil
 	}

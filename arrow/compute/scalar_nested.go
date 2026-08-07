@@ -32,29 +32,38 @@ var listElementDoc = FunctionDoc{
 }
 
 func RegisterScalarNested(reg FunctionRegistry) {
-	fn := NewScalarFunction("list_element", Binary(), listElementDoc)
+	kernelFn := NewScalarFunction("list_element", Binary(), listElementDoc)
 	for _, kernel := range kernels.GetListElementKernels() {
-		if err := fn.AddKernel(kernel); err != nil {
+		if err := kernelFn.AddKernel(kernel); err != nil {
 			panic(err)
 		}
 	}
+
+	// Normalize a one-element index array before scalar execution checks the
+	// argument lengths. This keeps the registered function consistent with the
+	// ListElement convenience wrapper.
+	fn := NewMetaFunction("list_element", Binary(), listElementDoc,
+		func(ctx context.Context, opts FunctionOptions, args ...Datum) (Datum, error) {
+			if indexArray, ok := args[1].(*ArrayDatum); ok && indexArray.Len() == 1 {
+				arr := indexArray.MakeArray()
+				defer arr.Release()
+
+				indexScalar, err := scalar.GetScalar(arr, 0)
+				if err != nil {
+					return nil, err
+				}
+				if releasable, ok := indexScalar.(scalar.Releasable); ok {
+					defer releasable.Release()
+				}
+
+				return kernelFn.Execute(ctx, opts, args[0], &ScalarDatum{Value: indexScalar})
+			}
+
+			return kernelFn.Execute(ctx, opts, args...)
+		})
 	reg.AddFunction(fn, false)
 }
 
 func ListElement(ctx context.Context, lists, index Datum) (Datum, error) {
-	if indexArray, ok := index.(*ArrayDatum); ok && indexArray.Len() == 1 {
-		arr := indexArray.MakeArray()
-		defer arr.Release()
-
-		indexScalar, err := scalar.GetScalar(arr, 0)
-		if err != nil {
-			return nil, err
-		}
-		if releasable, ok := indexScalar.(scalar.Releasable); ok {
-			defer releasable.Release()
-		}
-		return CallFunction(ctx, "list_element", nil, lists, &ScalarDatum{Value: indexScalar})
-	}
-
 	return CallFunction(ctx, "list_element", nil, lists, index)
 }

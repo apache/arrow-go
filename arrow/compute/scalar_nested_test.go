@@ -122,6 +122,7 @@ func TestListElementSlicedInputs(t *testing.T) {
 			actual := result.(*compute.ArrayDatum).MakeArray()
 			defer actual.Release()
 			assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+
 		})
 	}
 }
@@ -154,6 +155,21 @@ func TestListElementListViewUsesSizes(t *testing.T) {
 			actual := result.(*compute.ArrayDatum).MakeArray()
 			defer actual.Release()
 			assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+
+			sliced := array.NewSlice(tc.input, 1, int64(tc.input.Len()))
+			defer sliced.Release()
+			slicedExpected := listElementInput(t, mem, arrow.PrimitiveTypes.Int32, `[10, 12]`)
+			defer slicedExpected.Release()
+			slicedResult, err := compute.ListElement(
+				context.Background(),
+				&compute.ArrayDatum{Value: sliced.Data()},
+				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+			)
+			require.NoError(t, err)
+			defer slicedResult.Release()
+			slicedActual := slicedResult.(*compute.ArrayDatum).MakeArray()
+			defer slicedActual.Release()
+			assert.True(t, array.Equal(slicedExpected, slicedActual), "expected: %s\ngot: %s", slicedExpected, slicedActual)
 		})
 	}
 }
@@ -195,6 +211,32 @@ func TestListElementSingleIndexArray(t *testing.T) {
 
 	result, err := compute.ListElement(
 		context.Background(),
+		&compute.ArrayDatum{Value: input.Data()},
+		&compute.ArrayDatum{Value: index.Data()},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	actual := result.(*compute.ArrayDatum).MakeArray()
+	defer actual.Release()
+	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+}
+
+func TestListElementSingleIndexArrayThroughCallFunction(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	input := listElementInput(t, mem, arrow.ListOf(arrow.PrimitiveTypes.Int32), `[[1, 2], [3, 4]]`)
+	defer input.Release()
+	index := listElementInput(t, mem, arrow.PrimitiveTypes.Int64, `[1]`)
+	defer index.Release()
+	expected := listElementInput(t, mem, arrow.PrimitiveTypes.Int32, `[2, 4]`)
+	defer expected.Release()
+
+	result, err := compute.CallFunction(
+		context.Background(),
+		"list_element",
+		nil,
 		&compute.ArrayDatum{Value: input.Data()},
 		&compute.ArrayDatum{Value: index.Data()},
 	)
@@ -275,11 +317,84 @@ func TestListElementComplexChildren(t *testing.T) {
 	}
 }
 
+func TestListElementDenseUnionChild(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	unionType := arrow.DenseUnionOf(
+		[]arrow.Field{
+			{Name: "number", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			{Name: "text", Type: arrow.BinaryTypes.String, Nullable: true},
+		},
+		[]arrow.UnionTypeCode{0, 1},
+	)
+
+	builder := array.NewListBuilder(mem, unionType)
+	values := builder.ValueBuilder().(*array.DenseUnionBuilder)
+	builder.Append(true)
+	values.Append(0)
+	values.Child(0).(*array.Int32Builder).Append(10)
+	values.Append(1)
+	values.Child(1).(*array.StringBuilder).Append("a")
+	builder.Append(true)
+	values.Append(1)
+	values.Child(1).(*array.StringBuilder).Append("b")
+	values.Append(0)
+	values.Child(0).(*array.Int32Builder).Append(20)
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	expectedBuilder := array.NewDenseUnionBuilder(mem, unionType)
+	expectedBuilder.Append(1)
+	expectedBuilder.Child(1).(*array.StringBuilder).Append("a")
+	expectedBuilder.Append(0)
+	expectedBuilder.Child(0).(*array.Int32Builder).Append(20)
+	expected := expectedBuilder.NewArray()
+	expectedBuilder.Release()
+	defer expected.Release()
+
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ArrayDatum{Value: input.Data()},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(1)},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	actual := result.(*compute.ArrayDatum).MakeArray()
+	defer actual.Release()
+	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+}
+
 func BenchmarkListElement(b *testing.B) {
 	for _, size := range []int{1_000, 100_000, 1_000_000} {
 		b.Run(fmt.Sprintf("%d", size), func(b *testing.B) {
 			mem := memory.NewGoAllocator()
 			input := makeBenchmarkList(mem, size)
+			defer input.Release()
+			lists := &compute.ArrayDatum{Value: input.Data()}
+			index := &compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)}
+
+			b.ReportAllocs()
+			b.SetBytes(int64(size * 4))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result, err := compute.ListElement(context.Background(), lists, index)
+				if err != nil {
+					b.Fatal(err)
+				}
+				result.Release()
+			}
+		})
+	}
+}
+
+func BenchmarkListElementNested(b *testing.B) {
+	for _, size := range []int{1_000, 100_000} {
+		b.Run(fmt.Sprintf("%d", size), func(b *testing.B) {
+			mem := memory.NewGoAllocator()
+			input := makeBenchmarkNestedList(mem, size)
 			defer input.Release()
 			lists := &compute.ArrayDatum{Value: input.Data()}
 			index := &compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)}
@@ -309,5 +424,22 @@ func makeBenchmarkList(mem memory.Allocator, length int) arrow.Array {
 	}
 	result := builder.NewArray()
 	builder.Release()
+	return result
+}
+
+func makeBenchmarkNestedList(mem memory.Allocator, length int) arrow.Array {
+	outer := array.NewListBuilder(mem, arrow.ListOf(arrow.PrimitiveTypes.Int32))
+	inner := outer.ValueBuilder().(*array.ListBuilder)
+	values := inner.ValueBuilder().(*array.Int32Builder)
+	outer.Reserve(length)
+	inner.Reserve(length)
+	values.Reserve(length)
+	for i := 0; i < length; i++ {
+		outer.Append(true)
+		inner.Append(true)
+		values.Append(int32(i))
+	}
+	result := outer.NewArray()
+	outer.Release()
 	return result
 }
