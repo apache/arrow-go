@@ -533,6 +533,7 @@ var (
 	funcOptsTypes  = []FunctionOptions{
 		SetLookupOptions{}, ArithmeticOptions{}, CastOptions{},
 		FilterOptions{}, NullOptions{}, StrptimeOptions{}, MakeStructOptions{},
+		CumulativeOptions{},
 	}
 )
 
