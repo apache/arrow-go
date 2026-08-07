@@ -945,6 +945,10 @@ func (b *SparseUnionBuilder) Resize(n int) {
 	b.typesBuilder.resize(n)
 }
 
+func (b *SparseUnionBuilder) truncate(n int) {
+	b.typesBuilder.SetLength(n)
+}
+
 // AppendNull will append a null to the first child and an empty value
 // (implementation-defined) to the rest of the children.
 func (b *SparseUnionBuilder) AppendNull() {
@@ -1184,6 +1188,11 @@ func (b *DenseUnionBuilder) Reserve(n int) {
 func (b *DenseUnionBuilder) Resize(n int) {
 	b.typesBuilder.resize(n)
 	b.offsetsBuilder.resize(n * arrow.Int32SizeBytes)
+}
+
+func (b *DenseUnionBuilder) truncate(n int) {
+	b.typesBuilder.SetLength(n)
+	b.offsetsBuilder.SetLength(n * arrow.Int32SizeBytes)
 }
 
 // AppendNull will only append a null value arbitrarily to the first child

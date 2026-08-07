@@ -439,6 +439,8 @@ func (b *TimestampWithOffsetBuilder) NewArray() arrow.Array {
 	return b.NewExtensionArray()
 }
 
+// Resize adjusts the capacity of the builder and resets the current run-end
+// offset state.
 func (b *TimestampWithOffsetBuilder) Resize(n int) {
 	b.ExtensionBuilder.Resize(n)
 	b.lastOffset = noLastOffset
@@ -457,6 +459,7 @@ func (c *timestampWithOffsetCheckpoint) Restore() {
 	c.builder.lastOffset = c.lastOffset
 }
 
+// NewCheckpoint returns a checkpoint for the builder's run-end offset state.
 func (b *TimestampWithOffsetBuilder) NewCheckpoint() array.CheckpointState {
 	return &timestampWithOffsetCheckpoint{builder: b}
 }

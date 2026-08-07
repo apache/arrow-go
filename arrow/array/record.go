@@ -431,15 +431,20 @@ type checkpointState interface {
 }
 
 // CheckpointState captures and restores builder state that is not represented by
-// the builder's length or storage builders.
+// the builder's length or storage builders. RecordBuilder reuses the same
+// checkpoint for each row, calling Capture before decoding and Restore after a
+// failed decode.
 type CheckpointState interface {
+	// Capture records the current state of the builder.
 	Capture()
+	// Restore returns the builder to the last captured state.
 	Restore()
 }
 
 // CheckpointableBuilder allows custom builders to participate in RecordBuilder
-// row rollback.
+// row rollback. The returned checkpoint is reused for every row.
 type CheckpointableBuilder interface {
+	// NewCheckpoint returns a reusable checkpoint for the builder.
 	NewCheckpoint() CheckpointState
 }
 
@@ -534,31 +539,10 @@ func (checkpoint *builderCheckpoint) restore() {
 		builder.unmarshalled = checkpoint.unmarshalled
 		builder.lastStr = checkpoint.lastStr
 	} else {
-		// Resize the parent before restoring children. Some parent builders resize
-		// their children as part of Resize, so restoring children first would
-		// overwrite their physical state again.
-		checkpoint.builder.Resize(checkpoint.length)
-		switch builder := checkpoint.builder.(type) {
-		case *ListBuilder:
-			builder.length = checkpoint.length
-		case *LargeListBuilder:
-			builder.length = checkpoint.length
-		case *ListViewBuilder:
-			builder.length = checkpoint.length
-		case *LargeListViewBuilder:
-			builder.length = checkpoint.length
-		case *FixedSizeListBuilder:
-			builder.length = checkpoint.length
-		case *MapBuilder:
-			builder.listBuilder.length = checkpoint.length
-		case *StructBuilder:
-			builder.length = checkpoint.length
-		case *SparseUnionBuilder:
-			builder.typesBuilder.SetLength(checkpoint.length)
-		case *DenseUnionBuilder:
-			builder.typesBuilder.SetLength(checkpoint.length)
-			builder.offsetsBuilder.SetLength(checkpoint.length * arrow.Int32SizeBytes)
-		}
+		// Truncate the parent before restoring children. Some parent builders
+		// truncate their children as part of truncation, so restoring children
+		// first would overwrite their physical state again.
+		checkpoint.builder.truncate(checkpoint.length)
 	}
 	if checkpoint.state != nil {
 		checkpoint.state.restore()

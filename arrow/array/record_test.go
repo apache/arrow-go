@@ -586,6 +586,118 @@ func TestRecordBuilderRollsBackVariableWidthState(t *testing.T) {
 	assert.NoError(t, array.ValidateFull(rec.Column(0)))
 }
 
+func TestRecordBuilderRollsBackVariableWidthData(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	for _, tc := range []struct {
+		name string
+		typ  arrow.DataType
+	}{
+		{name: "string", typ: arrow.BinaryTypes.String},
+		{name: "large string", typ: arrow.BinaryTypes.LargeString},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := arrow.NewSchema([]arrow.Field{
+				{Name: "value", Type: tc.typ},
+				{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+			}, nil)
+			builder := array.NewRecordBuilder(mem, schema)
+			defer builder.Release()
+
+			assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":"aaa","other":1}`)))
+			assert.Error(t, builder.UnmarshalJSON([]byte(`{"value":"bbb","other":"invalid"}`)))
+			assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":"ccc","other":2}`)))
+
+			rec := builder.NewRecordBatch()
+			defer rec.Release()
+			values := rec.Column(0).(array.StringLike)
+			assert.Equal(t, "aaa", values.Value(0))
+			assert.Equal(t, "ccc", values.Value(1))
+			assert.NoError(t, array.ValidateFull(rec.Column(0)))
+		})
+	}
+}
+
+func TestRecordBuilderRollsBackFixedSizeBinaryData(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: &arrow.FixedSizeBinaryType{ByteWidth: 3}},
+		{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":"YWFh","other":1}`)))
+	assert.Error(t, builder.UnmarshalJSON([]byte(`{"value":"YmJi","other":"invalid"}`)))
+	assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":"Y2Nj","other":2}`)))
+
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+	values := rec.Column(0).(*array.FixedSizeBinary)
+	assert.Equal(t, []byte("aaa"), values.Value(0))
+	assert.Equal(t, []byte("ccc"), values.Value(1))
+}
+
+func TestRecordBuilderRollsBackBooleanAndNullLengths(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	for _, tc := range []struct {
+		name string
+		typ  arrow.DataType
+	}{
+		{name: "boolean", typ: arrow.FixedWidthTypes.Boolean},
+		{name: "null", typ: arrow.Null},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := arrow.NewSchema([]arrow.Field{
+				{Name: "value", Type: tc.typ},
+				{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+			}, nil)
+			builder := array.NewRecordBuilder(mem, schema)
+			defer builder.Release()
+
+			value := "true"
+			if tc.name == "null" {
+				value = "null"
+			}
+			assert.Error(t, builder.UnmarshalJSON([]byte(fmt.Sprintf(`{"value":%s,"other":"invalid"}`, value))))
+			assert.NoError(t, builder.UnmarshalJSON([]byte(fmt.Sprintf(`{"value":%s,"other":1}`, value))))
+
+			rec := builder.NewRecordBatch()
+			defer rec.Release()
+			assert.Equal(t, int64(1), rec.NumRows())
+		})
+	}
+}
+
+func TestRecordBuilderRollsBackDiscardedValidityBits(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":10,"other":1}`)))
+	assert.Error(t, builder.UnmarshalJSON([]byte(`{"value":20,"other":"invalid"}`)))
+	assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":null,"other":2}`)))
+
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+	values := rec.Column(0).(*array.Int32)
+	assert.Equal(t, int32(10), values.Value(0))
+	assert.True(t, values.IsNull(1))
+	assert.Equal(t, 1, values.NullN())
+	assert.NoError(t, array.ValidateFull(values))
+}
+
 func TestRecordBuilderRollsBackDictionaryState(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)

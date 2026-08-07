@@ -689,6 +689,12 @@ func (b *dictionaryBuilder) Resize(n int) {
 	b.nulls = b.idxBuilder.NullN()
 }
 
+func (b *dictionaryBuilder) truncate(n int) {
+	b.idxBuilder.truncate(n)
+	b.length = b.idxBuilder.Len()
+	b.nulls = b.idxBuilder.NullN()
+}
+
 func (b *dictionaryBuilder) ResetFull() {
 	b.reset()
 	b.idxBuilder.NewArray().Release()

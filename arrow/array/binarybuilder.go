@@ -265,11 +265,24 @@ func (b *BinaryBuilder) ReserveData(n int) {
 // Resize adjusts the space allocated by b to n elements. If n is greater than b.Cap(),
 // additional memory will be allocated. If n is smaller, the allocated memory may be reduced.
 func (b *BinaryBuilder) Resize(n int) {
+	if n < b.length {
+		b.truncate(n)
+	}
 	b.offsets.resize((n + 1) * b.offsetByteWidth)
-	if (n * b.offsetByteWidth) < b.offsets.Len() {
+	if n < b.offsets.Len() {
 		b.offsets.SetLength(n * b.offsetByteWidth)
 	}
 	b.resize(n, b.init)
+}
+
+func (b *BinaryBuilder) truncate(n int) {
+	dataLen := b.values.Len()
+	if n < b.offsets.Len() {
+		dataLen = b.getOffsetVal(n)
+	}
+	b.builder.truncate(n)
+	b.offsets.SetLength(n * b.offsetByteWidth)
+	b.values.SetLength(dataLen)
 }
 
 func (b *BinaryBuilder) ResizeData(n int) {
