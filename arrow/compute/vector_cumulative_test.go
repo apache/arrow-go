@@ -186,6 +186,7 @@ func TestCumulativeSumStartSafeCast(t *testing.T) {
 func TestCumulativeSumStartScalarConversions(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
 
 	input := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1]`)
 	defer input.Release()
@@ -198,13 +199,25 @@ func TestCumulativeSumStartScalarConversions(t *testing.T) {
 		{name: "string", start: scalar.NewStringScalar("10"), want: `[11]`},
 		{name: "boolean", start: scalar.NewBooleanScalar(true), want: `[2]`},
 	}
+	binaryBuffer := memory.NewBufferBytes([]byte("10"))
+	tests = append(tests, struct {
+		name  string
+		start scalar.Scalar
+		want  string
+	}{name: "binary", start: scalar.NewBinaryScalar(binaryBuffer, arrow.BinaryTypes.Binary), want: `[11]`})
+	binaryBuffer.Release()
+	for _, tc := range tests {
+		if releasable, ok := tc.start.(scalar.Releasable); ok {
+			defer releasable.Release()
+		}
+	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			expected := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, tc.want)
 			defer expected.Release()
 
-			result, err := compute.CumulativeSum(context.Background(), compute.CumulativeOptions{
+			result, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{
 				Start: tc.start,
 			}, &compute.ArrayDatum{Value: input.Data()})
 			require.NoError(t, err)
@@ -213,13 +226,78 @@ func TestCumulativeSumStartScalarConversions(t *testing.T) {
 		})
 	}
 
-	result, err := compute.CumulativeSum(context.Background(), compute.CumulativeOptions{
-		Start: scalar.NewStringScalar("not a number"),
+	invalidStart := scalar.NewStringScalar("not a number")
+	defer invalidStart.Release()
+	result, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{
+		Start: invalidStart,
 	}, &compute.ArrayDatum{Value: input.Data()})
 	if result != nil {
 		result.Release()
 	}
 	assert.ErrorIs(t, err, arrow.ErrInvalid)
+}
+
+func TestCumulativeSumDecimalStarts(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	decimalType := &arrow.Decimal128Type{Precision: 10, Scale: 0}
+	decimalStart, err := scalar.ParseScalar(decimalType, "10")
+	require.NoError(t, err)
+
+	intInput := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1]`)
+	defer intInput.Release()
+	result, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{
+		Start: decimalStart,
+	}, &compute.ArrayDatum{Value: intInput.Data()})
+	require.NoError(t, err)
+	defer result.Release()
+	actual := result.(*compute.ArrayDatum).MakeArray()
+	defer actual.Release()
+	assert.Equal(t, int32(11), actual.(*array.Int32).Value(0))
+
+	floatInput := cumulativeInput(t, mem, arrow.PrimitiveTypes.Float64, `[1.5]`)
+	defer floatInput.Release()
+	result, err = compute.CumulativeSum(ctx, compute.CumulativeOptions{
+		Start: decimalStart,
+	}, &compute.ArrayDatum{Value: floatInput.Data()})
+	require.NoError(t, err)
+	defer result.Release()
+	actual = result.(*compute.ArrayDatum).MakeArray()
+	defer actual.Release()
+	assert.Equal(t, 11.5, actual.(*array.Float64).Value(0))
+
+	fractionalStart, err := scalar.ParseScalar(&arrow.Decimal128Type{Precision: 10, Scale: 1}, "1.5")
+	require.NoError(t, err)
+	result, err = compute.CumulativeSum(ctx, compute.CumulativeOptions{
+		Start: fractionalStart,
+	}, &compute.ArrayDatum{Value: intInput.Data()})
+	if result != nil {
+		result.Release()
+	}
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
+}
+
+func TestCumulativeOptionsSerialization(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	expr := compute.NewCall("cumulative_sum", []compute.Expression{compute.NewFieldRef("values")},
+		&compute.CumulativeOptions{
+			Start:     scalar.NewInt32Scalar(10),
+			SkipNulls: true,
+		})
+	defer expr.Release()
+
+	serialized, err := compute.SerializeExpr(expr, mem)
+	require.NoError(t, err)
+	defer serialized.Release()
+
+	roundTripped, err := compute.DeserializeExpr(mem, serialized)
+	require.NoError(t, err)
+	defer roundTripped.Release()
+	assert.True(t, expr.Equals(roundTripped))
 }
 
 func TestCumulativeSumChunked(t *testing.T) {

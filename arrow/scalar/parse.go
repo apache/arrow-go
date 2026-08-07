@@ -48,6 +48,7 @@ type hasTypename interface {
 var (
 	hasTypenameType = reflect.TypeOf((*hasTypename)(nil)).Elem()
 	dataTypeType    = reflect.TypeOf((*arrow.DataType)(nil)).Elem()
+	scalarType      = reflect.TypeOf((*Scalar)(nil)).Elem()
 )
 
 func FromScalar(sc *Struct, val interface{}) error {
@@ -85,6 +86,20 @@ func FromScalar(sc *Struct, val interface{}) error {
 }
 
 func setFromScalar(s Scalar, v reflect.Value) error {
+	if v.Type() == scalarType {
+		if !s.IsValid() && s.DataType().ID() == arrow.NULL {
+			v.Set(reflect.Zero(v.Type()))
+			return nil
+		}
+
+		clone, err := cloneScalar(s, memory.DefaultAllocator)
+		if err != nil {
+			return err
+		}
+		v.Set(reflect.ValueOf(clone))
+		return nil
+	}
+
 	if v.Type() == dataTypeType {
 		v.Set(reflect.ValueOf(s.DataType()))
 		return nil
@@ -122,11 +137,17 @@ func setFromScalar(s Scalar, v reflect.Value) error {
 }
 
 func ToScalar(val interface{}, mem memory.Allocator) (Scalar, error) {
+	if val == nil {
+		return ScalarNull, nil
+	}
+
 	switch v := val.(type) {
 	case arrow.DataType:
 		return MakeScalar(v), nil
 	case TypeToScalar:
 		return v.ToScalar()
+	case Scalar:
+		return cloneScalar(v, mem)
 	}
 
 	v := reflect.Indirect(reflect.ValueOf(val))
@@ -162,6 +183,15 @@ func ToScalar(val interface{}, mem memory.Allocator) (Scalar, error) {
 	default:
 		return MakeScalar(val), nil
 	}
+}
+
+func cloneScalar(val Scalar, mem memory.Allocator) (Scalar, error) {
+	arr, err := MakeArrayFromScalar(val, 1, mem)
+	if err != nil {
+		return nil, err
+	}
+	defer arr.Release()
+	return GetScalar(arr, 0)
 }
 
 func createListScalar(sliceval reflect.Value, mem memory.Allocator) (Scalar, error) {
