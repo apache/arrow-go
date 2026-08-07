@@ -556,6 +556,23 @@ func TestTimestampScalarsCasting(t *testing.T) {
 	tms, err = scalar.NewDate32Scalar(arrow.Date32(1024)).CastTo(arrow.FixedWidthTypes.Timestamp_ms)
 	assert.NoError(t, err)
 	assert.True(t, scalar.Equals(tms, scalar.NewTimestampScalar(arrow.Timestamp(1024*millisInDay), arrow.FixedWidthTypes.Timestamp_ms)))
+
+	negativeDate32, err := scalar.NewTimestampScalar(-1, arrow.FixedWidthTypes.Timestamp_ms).CastTo(arrow.FixedWidthTypes.Date32)
+	assert.NoError(t, err)
+	assert.Equal(t, arrow.Date32(-1), negativeDate32.(*scalar.Date32).Value)
+
+	negativeDate64, err := scalar.NewTimestampScalar(-1, arrow.FixedWidthTypes.Timestamp_ms).CastTo(arrow.FixedWidthTypes.Date64)
+	assert.NoError(t, err)
+	assert.Equal(t, arrow.Date64(-millisInDay), negativeDate64.(*scalar.Date64).Value)
+
+	localTimestamp := &arrow.TimestampType{Unit: arrow.Millisecond, TimeZone: "America/Los_Angeles"}
+	localDate, err := scalar.NewTimestampScalar(0, localTimestamp).CastTo(arrow.FixedWidthTypes.Date32)
+	assert.NoError(t, err)
+	assert.Equal(t, arrow.Date32(-1), localDate.(*scalar.Date32).Value)
+
+	localDate64, err := scalar.NewTimestampScalar(0, localTimestamp).CastTo(arrow.FixedWidthTypes.Date64)
+	assert.NoError(t, err)
+	assert.Equal(t, arrow.Date64(-millisInDay), localDate64.(*scalar.Date64).Value)
 }
 
 func TestDurationScalarBasics(t *testing.T) {
