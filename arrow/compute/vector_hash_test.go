@@ -515,3 +515,79 @@ func TestDictionaryUnique(t *testing.T) {
 		})
 	}
 }
+
+func TestDictionaryEncode(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	values, _, err := array.FromJSON(mem, arrow.BinaryTypes.String,
+		strings.NewReader(`["foo", "bar", "foo", null, "bar", null]`))
+	require.NoError(t, err)
+	defer values.Release()
+
+	out, err := compute.DictionaryEncode(context.TODO(), compute.DictionaryEncodeOptions{},
+		&compute.ArrayDatum{Value: values.Data()})
+	require.NoError(t, err)
+	defer out.Release()
+
+	result := out.(*compute.ArrayDatum).MakeArray().(*array.Dictionary)
+	defer result.Release()
+
+	require.Equal(t, &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int32,
+		ValueType: arrow.BinaryTypes.String,
+	}, result.DataType())
+	require.Equal(t, 2, result.Dictionary().Len())
+	require.Equal(t, "foo", result.Dictionary().ValueStr(0))
+	require.Equal(t, "bar", result.Dictionary().ValueStr(1))
+	assert.Equal(t, []int32{0, 1, 0, 0, 1, 0},
+		arrow.Int32Traits.CastFromBytes(result.Indices().Data().Buffers()[1].Bytes()))
+	assert.True(t, result.IsNull(3))
+
+	encoded, err := compute.DictionaryEncode(context.TODO(), compute.DictionaryEncodeOptions{
+		NullEncoding: compute.NullEncodingEncode,
+	}, &compute.ArrayDatum{Value: values.Data()})
+	require.NoError(t, err)
+	defer encoded.Release()
+
+	encodedResult := encoded.(*compute.ArrayDatum).MakeArray().(*array.Dictionary)
+	defer encodedResult.Release()
+
+	assert.Equal(t, 0, encodedResult.NullN())
+	assert.Equal(t, 1, encodedResult.Dictionary().NullN())
+	for i := 0; i < values.Len(); i++ {
+		idx := encodedResult.GetValueIndex(i)
+		if values.IsNull(i) {
+			assert.True(t, encodedResult.Dictionary().IsNull(idx))
+		} else {
+			assert.Equal(t, values.ValueStr(i), encodedResult.Dictionary().ValueStr(idx))
+		}
+	}
+}
+
+func TestDictionaryEncodeChunked(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	first, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2, 1]`))
+	require.NoError(t, err)
+	defer first.Release()
+	second, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[2, 3, null]`))
+	require.NoError(t, err)
+	defer second.Release()
+
+	input := arrow.NewChunked(arrow.PrimitiveTypes.Int32, []arrow.Array{first, second})
+	defer input.Release()
+
+	out, err := compute.DictionaryEncode(context.TODO(), compute.DictionaryEncodeOptions{},
+		&compute.ChunkedDatum{Value: input})
+	require.NoError(t, err)
+	defer out.Release()
+
+	result := out.(*compute.ChunkedDatum).Value
+	require.Len(t, result.Chunks(), 2)
+	for _, chunk := range result.Chunks() {
+		encoded := chunk.(*array.Dictionary)
+		assert.True(t, array.Equal(encoded.Dictionary(), result.Chunk(0).(*array.Dictionary).Dictionary()))
+	}
+}

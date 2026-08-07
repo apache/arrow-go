@@ -23,6 +23,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -77,6 +78,117 @@ func (emptyAction) ObserveNullNotFound(int) error     { return nil }
 func (emptyAction) ShouldEncodeNulls() bool           { return true }
 
 type uniqueAction = emptyAction
+
+type NullEncodingBehavior int8
+
+const (
+	NullEncodingMask NullEncodingBehavior = iota
+	NullEncodingEncode
+)
+
+type DictionaryEncodeOptions struct {
+	NullEncoding NullEncodingBehavior `compute:"null_encoding"`
+}
+
+func (DictionaryEncodeOptions) TypeName() string { return "DictionaryEncodeOptions" }
+
+type dictionaryEncodeAction struct {
+	mem           memory.Allocator
+	nullEncoding  NullEncodingBehavior
+	indices       []int32
+	nullPositions []int
+	err           error
+}
+
+func (a *dictionaryEncodeAction) Reset() error {
+	a.indices = a.indices[:0]
+	a.nullPositions = a.nullPositions[:0]
+	a.err = nil
+	return nil
+}
+
+func (a *dictionaryEncodeAction) Reserve(n int) error {
+	if cap(a.indices)-len(a.indices) < n {
+		indices := make([]int32, len(a.indices), len(a.indices)+n)
+		copy(indices, a.indices)
+		a.indices = indices
+	}
+	return nil
+}
+
+func (a *dictionaryEncodeAction) appendIndex(idx int, valid bool) {
+	if !valid {
+		idx = 0
+	}
+	if idx < 0 || int64(idx) > int64(1<<31-1) {
+		if a.err == nil {
+			a.err = fmt.Errorf("%w: dictionary index %d does not fit in int32", arrow.ErrInvalid, idx)
+		}
+		return
+	}
+
+	a.indices = append(a.indices, int32(idx))
+	if !valid {
+		a.nullPositions = append(a.nullPositions, len(a.indices)-1)
+	}
+}
+
+func (a *dictionaryEncodeAction) Flush(out *exec.ExecResult) error {
+	if a.err != nil {
+		return a.err
+	}
+
+	out.Len = int64(len(a.indices))
+	out.Nulls = int64(len(a.nullPositions))
+	if len(a.indices) != 0 {
+		data := memory.NewResizableBuffer(a.mem)
+		data.Resize(len(a.indices) * arrow.Int32SizeBytes)
+		copy(data.Bytes(), arrow.Int32Traits.CastToBytes(a.indices))
+		out.Buffers[1].WrapBuffer(data)
+	}
+
+	if len(a.nullPositions) != 0 {
+		validity := memory.NewResizableBuffer(a.mem)
+		validity.Resize(int(bitutil.BytesForBits(int64(len(a.indices)))))
+		memory.Set(validity.Bytes(), 0xFF)
+		for _, pos := range a.nullPositions {
+			bitutil.ClearBit(validity.Bytes(), pos)
+		}
+		out.Buffers[0].WrapBuffer(validity)
+	}
+
+	a.indices = a.indices[:0]
+	a.nullPositions = a.nullPositions[:0]
+	return nil
+}
+
+func (a *dictionaryEncodeAction) FlushFinal(out *exec.ExecResult) error {
+	return a.Flush(out)
+}
+
+func (a *dictionaryEncodeAction) ObserveFound(idx int) {
+	a.appendIndex(idx, true)
+}
+
+func (a *dictionaryEncodeAction) ObserveNotFound(idx int) error {
+	a.appendIndex(idx, true)
+	return a.err
+}
+
+func (a *dictionaryEncodeAction) ObserveNullFound(idx int) {
+	if a.nullEncoding == NullEncodingEncode {
+		a.appendIndex(idx, true)
+	}
+}
+
+func (a *dictionaryEncodeAction) ObserveNullNotFound(idx int) error {
+	a.appendIndex(idx, a.nullEncoding == NullEncodingEncode)
+	return a.err
+}
+
+func (a *dictionaryEncodeAction) ShouldEncodeNulls() bool {
+	return a.nullEncoding == NullEncodingEncode
+}
 
 type regularHashState struct {
 	mem       memory.Allocator
@@ -329,10 +441,14 @@ func (dhs *dictionaryHashState) Append(ctx *exec.KernelCtx, arr *exec.ArraySpan)
 func nullHashInit(actionInit initAction) exec.KernelInitFn {
 	return func(ctx *exec.KernelCtx, args exec.KernelInitArgs) (exec.KernelState, error) {
 		mem := exec.GetAllocator(ctx.Ctx)
+		action, err := actionInit(args.Inputs[0], args.Options, mem)
+		if err != nil {
+			return nil, err
+		}
 		ret := &nullHashState{
 			mem:    mem,
 			typ:    args.Inputs[0],
-			action: actionInit(args.Inputs[0], args.Options, mem),
+			action: action,
 		}
 		ret.Reset()
 		return ret, nil
@@ -371,12 +487,16 @@ func regularHashInit(dt arrow.DataType, actionInit initAction, appendFn func(Act
 		if err != nil {
 			return nil, err
 		}
+		action, err := actionInit(args.Inputs[0], args.Options, mem)
+		if err != nil {
+			return nil, err
+		}
 
 		ret := &regularHashState{
 			mem:       mem,
 			typ:       args.Inputs[0],
 			memoTable: memoTable,
-			action:    actionInit(args.Inputs[0], args.Options, mem),
+			action:    action,
 			doAppend:  appendFn,
 		}
 		ret.Reset()
@@ -415,7 +535,7 @@ func dictionaryHashInit(actionInit initAction) exec.KernelInitFn {
 	}
 }
 
-type initAction func(arrow.DataType, any, memory.Allocator) Action
+type initAction func(arrow.DataType, any, memory.Allocator) (Action, error)
 
 func getHashInit(typeID arrow.Type, actionInit initAction) exec.KernelInitFn {
 	switch typeID {
@@ -538,8 +658,62 @@ func addHashKernels(base exec.VectorKernel, actionInit initAction, outTy exec.Ou
 	return kernels
 }
 
-func initUnique(dt arrow.DataType, _ any, mem memory.Allocator) Action {
-	return uniqueAction{mem: mem, dt: dt}
+func initUnique(dt arrow.DataType, _ any, mem memory.Allocator) (Action, error) {
+	return uniqueAction{mem: mem, dt: dt}, nil
+}
+
+func initDictionaryEncode(dt arrow.DataType, options any, mem memory.Allocator) (Action, error) {
+	opts := DictionaryEncodeOptions{}
+	switch v := options.(type) {
+	case nil:
+	case DictionaryEncodeOptions:
+		opts = v
+	case *DictionaryEncodeOptions:
+		if v != nil {
+			opts = *v
+		}
+	default:
+		return nil, fmt.Errorf("%w: expected DictionaryEncodeOptions, got %T", arrow.ErrInvalid, options)
+	}
+
+	if opts.NullEncoding != NullEncodingMask && opts.NullEncoding != NullEncodingEncode {
+		return nil, fmt.Errorf("%w: invalid null encoding behavior %d", arrow.ErrInvalid, opts.NullEncoding)
+	}
+
+	return &dictionaryEncodeAction{
+		mem:          mem,
+		nullEncoding: opts.NullEncoding,
+	}, nil
+}
+
+var outputDictionaryType = exec.NewComputedOutputType(func(_ *exec.KernelCtx, args []arrow.DataType) (arrow.DataType, error) {
+	if len(args) != 1 {
+		return nil, fmt.Errorf("%w: dictionary_encode expects one input type", arrow.ErrInvalid)
+	}
+	return &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int32,
+		ValueType: args[0],
+	}, nil
+})
+
+func dictionaryEncodeFinalize(ctx *exec.KernelCtx, results []*exec.ArraySpan) ([]*exec.ArraySpan, error) {
+	impl, ok := ctx.State.(HashState)
+	if !ok {
+		return nil, fmt.Errorf("%w: HashState in invalid state", arrow.ErrInvalid)
+	}
+
+	dict, err := impl.GetDictionary()
+	if err != nil {
+		return nil, err
+	}
+	defer dict.Release()
+
+	for _, result := range results {
+		var dictSpan exec.ArraySpan
+		dictSpan.TakeOwnership(dict)
+		result.SetDictionary(&dictSpan)
+	}
+	return results, nil
 }
 
 func GetVectorHashKernels() (unique, valueCounts, dictEncode []exec.VectorKernel) {
@@ -560,6 +734,11 @@ func GetVectorHashKernels() (unique, valueCounts, dictEncode []exec.VectorKernel
 		OutType:    OutputFirstType,
 	}
 	unique = append(unique, base)
+
+	// dictionary encode
+	base.Finalize = dictionaryEncodeFinalize
+	base.OutputChunked = true
+	dictEncode = addHashKernels(base, initDictionaryEncode, outputDictionaryType)
 
 	return
 }

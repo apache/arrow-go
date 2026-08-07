@@ -31,7 +31,22 @@ var (
 		Description: "Return an array with distinct values. Nulls in the input are ignored",
 		ArgNames:    []string{"array"},
 	}
+	dictionaryEncodeDoc = FunctionDoc{
+		Summary:     "Dictionary encode an array",
+		Description: "Return a dictionary-encoded array with the distinct values in the dictionary",
+		ArgNames:    []string{"array"},
+		OptionsType: "DictionaryEncodeOptions",
+	}
 )
+
+type NullEncodingBehavior = kernels.NullEncodingBehavior
+
+const (
+	NullEncodingMask   = kernels.NullEncodingMask
+	NullEncodingEncode = kernels.NullEncodingEncode
+)
+
+type DictionaryEncodeOptions = kernels.DictionaryEncodeOptions
 
 func Unique(ctx context.Context, values Datum) (Datum, error) {
 	return CallFunction(ctx, "unique", nil, values)
@@ -47,8 +62,13 @@ func UniqueArray(ctx context.Context, values arrow.Array) (arrow.Array, error) {
 	return out.(*ArrayDatum).MakeArray(), nil
 }
 
+// DictionaryEncode returns a dictionary-encoded version of values.
+func DictionaryEncode(ctx context.Context, opts DictionaryEncodeOptions, values Datum) (Datum, error) {
+	return CallFunction(ctx, "dictionary_encode", &opts, values)
+}
+
 func RegisterVectorHash(reg FunctionRegistry) {
-	unique, _, _ := kernels.GetVectorHashKernels()
+	unique, _, dictEncode := kernels.GetVectorHashKernels()
 	uniqFn := NewVectorFunction("unique", Unary(), uniqueDoc)
 	for _, vd := range unique {
 		if err := uniqFn.AddKernel(vd); err != nil {
@@ -56,4 +76,13 @@ func RegisterVectorHash(reg FunctionRegistry) {
 		}
 	}
 	reg.AddFunction(uniqFn, false)
+
+	dictFn := NewVectorFunction("dictionary_encode", Unary(), dictionaryEncodeDoc)
+	dictFn.SetDefaultOptions(&DictionaryEncodeOptions{})
+	for _, vd := range dictEncode {
+		if err := dictFn.AddKernel(vd); err != nil {
+			panic(err)
+		}
+	}
+	reg.AddFunction(dictFn, false)
 }
