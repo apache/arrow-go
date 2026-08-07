@@ -380,7 +380,7 @@ func (s *FlightSqlServerSuite) TestExecutePreparedStatementQuery() {
 
 	val, ok := prep.IsUpdate()
 	s.Require().True(ok)
-	s.False(val)
+	s.Require().False(val)
 
 	fi, err := prep.Execute(context.TODO())
 	s.Require().NoError(err)
@@ -438,7 +438,7 @@ func (s *FlightSqlServerSuite) TestExecutePreparedStatementUpdate() {
 
 	val, ok := prep.IsUpdate()
 	s.Require().True(ok)
-	s.True(val)
+	s.Require().True(val)
 
 	nrecords, err := prep.ExecuteUpdate(context.TODO())
 	s.Require().NoError(err)
@@ -452,7 +452,7 @@ func (s *FlightSqlServerSuite) TestExecutePreparedSubstraitQuery() {
 
 	val, ok := prep.IsUpdate()
 	s.Require().True(ok)
-	s.False(val)
+	s.Require().False(val)
 }
 
 func (s *FlightSqlServerSuite) TestExecutePreparedSubstraitUpdate() {
@@ -462,7 +462,7 @@ func (s *FlightSqlServerSuite) TestExecutePreparedSubstraitUpdate() {
 
 	val, ok := prep.IsUpdate()
 	s.Require().True(ok)
-	s.True(val)
+	s.Require().True(val)
 }
 
 func (s *FlightSqlServerSuite) TestExecutePreparedSubstraitNoHint() {
@@ -471,7 +471,7 @@ func (s *FlightSqlServerSuite) TestExecutePreparedSubstraitNoHint() {
 	defer prep.Close(context.TODO())
 
 	_, ok := prep.IsUpdate()
-	s.False(ok)
+	s.Require().False(ok)
 }
 
 func (s *FlightSqlServerSuite) TestExecutePoll() {
