@@ -618,6 +618,7 @@ func TestMonthIntervalScalarBasics(t *testing.T) {
 	assert.False(t, scalar.Equals(tsVal1, tsVal2))
 	assert.False(t, scalar.Equals(tsVal1, tsNull))
 	assert.False(t, scalar.Equals(tsNull, tsVal2))
+	assert.Equal(t, "1", tsVal1.String())
 }
 
 func TestDayTimeIntervalScalarBasics(t *testing.T) {
@@ -643,6 +644,7 @@ func TestDayTimeIntervalScalarBasics(t *testing.T) {
 	assert.False(t, scalar.Equals(tsVal1, tsVal2))
 	assert.False(t, scalar.Equals(tsVal1, tsNull))
 	assert.False(t, scalar.Equals(tsNull, tsVal2))
+	assert.Equal(t, "{\"days\":1,\"milliseconds\":1}", tsVal1.String())
 }
 
 func TestMonthDayNanoIntervalScalarBasics(t *testing.T) {
@@ -668,6 +670,11 @@ func TestMonthDayNanoIntervalScalarBasics(t *testing.T) {
 	assert.False(t, scalar.Equals(tsVal1, tsVal2))
 	assert.False(t, scalar.Equals(tsVal1, tsNull))
 	assert.False(t, scalar.Equals(tsNull, tsVal2))
+}
+
+func TestMonthDayNanoIntervalScalarString(t *testing.T) {
+	s := scalar.NewMonthDayNanoIntervalScalar(arrow.MonthDayNanoInterval{Months: 1, Days: 2, Nanoseconds: 3000})
+	assert.Equal(t, "{\"months\":1,\"days\":2,\"nanoseconds\":3000}", s.String())
 }
 
 func TestNumericScalarCasts(t *testing.T) {
