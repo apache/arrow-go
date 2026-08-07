@@ -46,6 +46,52 @@ type cumulativeSumState[T arrow.NumericType] struct {
 	checked         bool
 }
 
+func safeNumericCastScalar(start scalar.Scalar, typ arrow.DataType) (scalar.Scalar, error) {
+	sourceID := start.DataType().ID()
+	targetID := typ.ID()
+	if !arrow.IsInteger(sourceID) && !arrow.IsFloating(sourceID) {
+		return nil, fmt.Errorf("%w: cumulative sum start value must be numeric, got %s", arrow.ErrType, start.DataType())
+	}
+	if !arrow.IsInteger(targetID) && !arrow.IsFloating(targetID) {
+		return nil, fmt.Errorf("%w: cumulative sum input type must be numeric, got %s", arrow.ErrType, typ)
+	}
+	if sourceID == targetID {
+		return start, nil
+	}
+
+	casted, err := start.CastTo(typ)
+	if err != nil {
+		return nil, fmt.Errorf("%w: cannot cast cumulative sum start value to %s: %v", arrow.ErrInvalid, typ, err)
+	}
+
+	// Floating-point to floating-point casts follow the existing compute cast
+	// behavior, which does not reject precision loss. The other numeric casts
+	// use the same safe checks as the compute cast kernels.
+	if arrow.IsFloating(sourceID) && arrow.IsFloating(targetID) {
+		return casted, nil
+	}
+
+	var sourceSpan exec.ArraySpan
+	sourceSpan.FillFromScalar(start)
+	var checkErr error
+	switch {
+	case arrow.IsInteger(sourceID) && arrow.IsInteger(targetID):
+		checkErr = intsCanFit(&sourceSpan, targetID)
+	case arrow.IsInteger(sourceID) && arrow.IsFloating(targetID):
+		checkErr = checkIntToFloatTrunc(&sourceSpan, targetID)
+	case arrow.IsFloating(sourceID) && arrow.IsInteger(targetID):
+		var roundTrip scalar.Scalar
+		roundTrip, checkErr = casted.CastTo(start.DataType())
+		if checkErr == nil && !scalar.Equals(start, roundTrip) {
+			checkErr = fmt.Errorf("%w: float value %s was truncated converting to %s", arrow.ErrInvalid, start, typ)
+		}
+	}
+	if checkErr != nil {
+		return nil, fmt.Errorf("%w: cannot safely cast cumulative sum start value to %s: %v", arrow.ErrInvalid, typ, checkErr)
+	}
+	return casted, nil
+}
+
 func cumulativeStartValue[T arrow.NumericType](start scalar.Scalar, typ arrow.DataType) (T, error) {
 	var zero T
 	if start == nil {
@@ -55,9 +101,9 @@ func cumulativeStartValue[T arrow.NumericType](start scalar.Scalar, typ arrow.Da
 		return zero, fmt.Errorf("%w: cumulative sum start value must be valid", arrow.ErrInvalid)
 	}
 
-	casted, err := start.CastTo(typ)
+	casted, err := safeNumericCastScalar(start, typ)
 	if err != nil {
-		return zero, fmt.Errorf("%w: cannot cast cumulative sum start value to %s: %v", arrow.ErrInvalid, typ, err)
+		return zero, err
 	}
 	if releasable, ok := casted.(scalar.Releasable); ok {
 		defer releasable.Release()
