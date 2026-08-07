@@ -2366,6 +2366,29 @@ func BenchmarkTakeStringPartitionPattern(b *testing.B) {
 	b.ReportMetric(float64(numRows*b.N)/b.Elapsed().Seconds(), "rows/sec")
 }
 
+func TestFilterRejectsNonArrayLikeFilter(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	values, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader("[1]"))
+	require.NoError(t, err)
+	defer values.Release()
+
+	valuesDatum := compute.NewDatum(values)
+	defer valuesDatum.Release()
+	filterRecord := array.NewRecordBatch(
+		arrow.NewSchema([]arrow.Field{{Name: "filter", Type: arrow.PrimitiveTypes.Int32}}, nil),
+		[]arrow.Array{values},
+		1,
+	)
+	defer filterRecord.Release()
+	filterDatum := compute.NewDatum(filterRecord)
+	defer filterDatum.Release()
+
+	_, err = compute.Filter(context.Background(), valuesDatum, filterDatum, compute.FilterOptions{})
+	require.ErrorIs(t, err, arrow.ErrNotImplemented)
+}
+
 func BenchmarkTakeMultiColumn(b *testing.B) {
 	// Benchmark Take on a record batch with multiple string columns
 	// to simulate real-world use cases (e.g., CloudFront logs with 20+ string columns)
