@@ -22,6 +22,7 @@ import (
 	"math/bits"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -41,12 +42,22 @@ type TypeFromScalar interface {
 }
 
 func parseTimestamp(val string, dt *arrow.TimestampType) (arrow.Timestamp, error) {
+	if dt.TimeZone == "" || strings.EqualFold(dt.TimeZone, "utc") {
+		return arrow.TimestampFromString(val, dt.Unit)
+	}
+
 	loc, err := dt.GetZone()
 	if err != nil {
 		return 0, err
 	}
-	ts, _, err := arrow.TimestampFromStringInLocation(val, dt.Unit, loc)
-	return ts, err
+	ts, zonePresent, err := arrow.TimestampFromStringInLocation(val, dt.Unit, loc)
+	if err != nil {
+		return 0, err
+	}
+	if !zonePresent {
+		return 0, fmt.Errorf("%w: timestamp value %q for type %s must include a zone offset", arrow.ErrInvalid, val, dt)
+	}
+	return ts, nil
 }
 
 type hasTypename interface {
