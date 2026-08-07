@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type Fixture struct {
@@ -371,6 +372,25 @@ func TestRecordReleasesConstructionBuffers(t *testing.T) {
 	rec := pmr.Record(mem)
 	rec.Release()
 	mem.AssertSize(t, 0)
+}
+
+func TestRecordWithAllFieldsExcluded(t *testing.T) {
+	pmr := NewProtobufMessageReflection(AllTheTypesNoAnyFixture().msg,
+		WithExclusionPolicy(func(*ProtobufFieldReflection) bool { return true }))
+	rec := pmr.Record(nil)
+	defer rec.Release()
+
+	assert.EqualValues(t, 1, rec.NumRows())
+	assert.Zero(t, rec.NumCols())
+}
+
+func TestRecordFromEmptyMessage(t *testing.T) {
+	pmr := NewProtobufMessageReflection(&emptypb.Empty{})
+	rec := pmr.Record(nil)
+	defer rec.Release()
+
+	assert.EqualValues(t, 1, rec.NumRows())
+	assert.Zero(t, rec.NumCols())
 }
 
 func TestNullRecordFromProtobuf(t *testing.T) {
