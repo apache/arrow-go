@@ -179,6 +179,47 @@ func TestTableFromRecordsWithoutColumns(t *testing.T) {
 	}
 }
 
+func TestTableFromRecordsReleasesPartialColumnsOnPanic(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	firstBuilder := array.NewInt32Builder(mem)
+	firstBuilder.Append(1)
+	first := firstBuilder.NewArray()
+	firstBuilder.Release()
+
+	secondBuilder := array.NewInt64Builder(mem)
+	secondBuilder.Append(2)
+	second := secondBuilder.NewArray()
+	secondBuilder.Release()
+
+	recordSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "first", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "second", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+	rec := array.NewRecordBatch(recordSchema, []arrow.Array{first, second}, -1)
+	first.Release()
+	second.Release()
+	defer rec.Release()
+
+	tableSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "first", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "second", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected NewTableFromRecords to panic")
+		}
+		err, ok := r.(error)
+		if !ok || !errors.Is(err, arrow.ErrInvalid) {
+			t.Fatalf("expected ErrInvalid, got %v", r)
+		}
+	}()
+	array.NewTableFromRecords(tableSchema, []arrow.RecordBatch{rec})
+}
+
 func TestChunkedEqualDataType(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
