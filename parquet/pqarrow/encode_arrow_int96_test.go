@@ -19,6 +19,7 @@ package pqarrow
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"testing"
 	"time"
 
@@ -57,8 +58,12 @@ func TestArrowTimestampToImpalaTimestamp(t *testing.T) {
 	}
 }
 
-func TestReadInt96RejectsInvalidTimestamp(t *testing.T) {
+func TestReadInt96RejectsOutOfRangeTimestamp(t *testing.T) {
 	nanosPerDay := uint64(24 * time.Hour)
+	var epoch parquet.Int96
+	arrowTimestampToImpalaTimestamp(arrow.Nanosecond, 0, &epoch)
+	nanosecondsAtEndOfDay := epoch
+	binary.LittleEndian.PutUint64(nanosecondsAtEndOfDay[:8], nanosPerDay)
 	tests := []struct {
 		name    string
 		corrupt parquet.Int96
@@ -72,12 +77,8 @@ func TestReadInt96RejectsInvalidTimestamp(t *testing.T) {
 			corrupt: parquet.NewInt96([3]uint32{0, 0, ^uint32(0)}),
 		},
 		{
-			name: "nanoseconds at end of day",
-			corrupt: parquet.NewInt96([3]uint32{
-				uint32(nanosPerDay),
-				uint32(nanosPerDay >> 32),
-				0,
-			}),
+			name:    "nanoseconds at end of day",
+			corrupt: nanosecondsAtEndOfDay,
 		},
 	}
 

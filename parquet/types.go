@@ -87,9 +87,8 @@ func (i96 Int96) ToTime() time.Time {
 	nanos := binary.LittleEndian.Uint64(i96[:8])
 	jdays := binary.LittleEndian.Uint32(i96[8:])
 
-	days := int64(jdays) - julianUnixEpoch
-	seconds := days*86400 + int64(nanos/1_000_000_000)
-	t := time.Unix(seconds, int64(nanos%1_000_000_000))
+	nanos = (uint64(jdays)-uint64(julianUnixEpoch))*uint64(nanosPerDay) + nanos
+	t := time.Unix(0, int64(nanos))
 	return t.UTC()
 }
 
@@ -109,6 +108,8 @@ func (i96 Int96) ToTimestamp() (arrow.Timestamp, error) {
 	minDays := math.MinInt64 / nanosPerDay
 	minRemainder := math.MinInt64 % nanosPerDay
 	minNanos := nanosPerDay + minRemainder
+	// Go division truncates toward zero, so the minimum timestamp can fall on
+	// the day before minDays with a positive nanoseconds-of-day remainder.
 	if days < minDays {
 		if days != minDays-1 || int64(nanosOfDay) < minNanos {
 			return 0, fmt.Errorf("%w: INT96 timestamp is outside the Arrow nanosecond range", arrow.ErrInvalid)
