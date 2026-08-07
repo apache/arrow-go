@@ -156,6 +156,52 @@ func TestChunksToSingle(t *testing.T) {
 	})
 }
 
+func TestBuildFixedSizeListArrayRequiresExactChildSpan(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	tests := []struct {
+		name      string
+		length    int
+		offsets   []int32
+		nullCount int64
+		validity  byte
+		itemLen   int
+	}{
+		{name: "nonzero first offset", length: 1, offsets: []int32{1, 3}, itemLen: 3},
+		{name: "trailing child values", length: 1, offsets: []int32{0, 2}, itemLen: 3},
+		{name: "final offset beyond child values", length: 1, offsets: []int32{0, 3}, itemLen: 2},
+		{name: "nullable trailing child values", length: 2, offsets: []int32{0, 2, 2}, nullCount: 1, validity: 0x01, itemLen: 3},
+		{name: "all-null parent with child values", length: 2, offsets: []int32{0, 0, 0}, nullCount: 2, itemLen: 1},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			listType := arrow.FixedSizeListOf(2, arrow.PrimitiveTypes.Int32)
+			field := arrow.Field{Type: listType, Nullable: true}
+			lr := &listReader{rctx: &readerCtx{mem: mem}, field: &field}
+
+			builder := array.NewInt32Builder(mem)
+			builder.AppendValues(make([]int32, tc.itemLen), nil)
+			item := builder.NewArray()
+			defer item.Release()
+			builder.Release()
+
+			var validity *memory.Buffer
+			if tc.nullCount > 0 {
+				validity = memory.NewBufferBytes([]byte{tc.validity})
+				defer validity.Release()
+			}
+
+			out, err := lr.buildFixedSizeListArray(tc.length, tc.offsets, validity, tc.nullCount, item)
+			if out != nil {
+				out.Release()
+			}
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestChunkedTableRoundTrip(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
