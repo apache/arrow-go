@@ -1207,6 +1207,32 @@ func TestDictionaryFromArrays(t *testing.T) {
 	}
 }
 
+func TestValidatedDictionaryAllowsSignedIndexAtTypeLimit(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	indicesBuilder := array.NewInt8Builder(mem)
+	indicesBuilder.Append(127)
+	indices := indicesBuilder.NewArray()
+	indicesBuilder.Release()
+	defer indices.Release()
+
+	dictBuilder := array.NewStringBuilder(mem)
+	for i := 0; i < 128; i++ {
+		dictBuilder.AppendString(fmt.Sprintf("value-%d", i))
+	}
+	dict := dictBuilder.NewArray()
+	dictBuilder.Release()
+	defer dict.Release()
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	result, err := array.NewValidatedDictionaryArray(dictType, indices, dict)
+	assert.NoError(t, err)
+	if result != nil {
+		defer result.Release()
+	}
+}
+
 func TestListOfDictionary(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
