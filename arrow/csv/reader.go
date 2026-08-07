@@ -914,6 +914,7 @@ func (r *Reader) parseFixedSizeBinaryType(field array.Builder, str string, byteW
 		field.(*array.FixedSizeBinaryBuilder).Append(decodedVal)
 	} else {
 		r.err = fmt.Errorf("%w: the length of fixed size binary value should match the fixed size binary byte width, expected %d, got %d", arrow.ErrInvalid, byteWidth, len(decodedVal))
+		field.AppendNull()
 	}
 }
 
