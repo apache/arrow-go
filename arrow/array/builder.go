@@ -133,10 +133,9 @@ func (b *builder) SetNull(i int) {
 	if i < 0 || i >= b.length {
 		panic("arrow/array: index out of range")
 	}
-	if bitutil.BitIsSet(b.nullBitmap.Bytes(), i) {
+	if bitutil.ClearBitSwap(b.nullBitmap.Bytes(), i) {
 		b.nulls++
 	}
-	bitutil.ClearBit(b.nullBitmap.Bytes(), i)
 }
 
 func (b *builder) init(capacity int) {

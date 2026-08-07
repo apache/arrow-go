@@ -110,6 +110,11 @@ func TestNullExtensionScalarValidateRejectsNonNullStorage(t *testing.T) {
 	assert.ErrorContains(t, sc.ValidateFull(), "non-null storage value")
 }
 
+func TestExtensionScalarStringUsesStorageValue(t *testing.T) {
+	sc := scalar.NewExtensionScalar(scalar.NewInt16Scalar(42), types.NewSmallintType())
+	assert.Equal(t, "42", sc.String())
+}
+
 func TestMakeScalarUint(t *testing.T) {
 	three := scalar.MakeScalar(uint(3))
 	assert.NoError(t, three.ValidateFull())
@@ -158,6 +163,24 @@ func TestBasicDecimal256(t *testing.T) {
 	assert.False(t, scalar.Equals(pi, pi2))
 }
 
+func TestDecimalScalarStringCastUsesExactScaling(t *testing.T) {
+	decimal128Type := &arrow.Decimal128Type{Precision: 38, Scale: 20}
+	decimal128Value, err := decimal128.FromString("-123456789012345678.90123456789012345678", decimal128Type.Precision, decimal128Type.Scale)
+	require.NoError(t, err)
+	decimal128Scalar := scalar.NewDecimal128Scalar(decimal128Value, decimal128Type)
+	cast128, err := decimal128Scalar.CastTo(arrow.BinaryTypes.String)
+	require.NoError(t, err)
+	assert.Equal(t, "-123456789012345678.90123456789012345678", cast128.String())
+
+	decimal256Type := &arrow.Decimal256Type{Precision: 76, Scale: 76}
+	decimal256Value, err := decimal256.FromString("-0.1234567812345678123456781234567812345678123456781234567812345678123456781234", decimal256Type.Precision, decimal256Type.Scale)
+	require.NoError(t, err)
+	decimal256Scalar := scalar.NewDecimal256Scalar(decimal256Value, decimal256Type)
+	cast256, err := decimal256Scalar.CastTo(arrow.BinaryTypes.String)
+	require.NoError(t, err)
+	assert.Equal(t, "-0.1234567812345678123456781234567812345678123456781234567812345678123456781234", cast256.String())
+}
+
 func TestBinaryScalarBasics(t *testing.T) {
 	data := "test data"
 	buf := memory.NewBufferBytes([]byte(data))
@@ -186,6 +209,20 @@ func TestBinaryScalarBasics(t *testing.T) {
 	assert.True(t, scalar.Equals(value2, value3))
 }
 
+func TestBooleanScalarIdentityCast(t *testing.T) {
+	for _, value := range []bool{false, true} {
+		src := scalar.NewBooleanScalar(value)
+		got, err := src.CastTo(arrow.FixedWidthTypes.Boolean)
+		require.NoError(t, err)
+		assert.Same(t, src, got)
+	}
+
+	null := scalar.MakeNullScalar(arrow.FixedWidthTypes.Boolean)
+	got, err := null.CastTo(arrow.FixedWidthTypes.Boolean)
+	require.NoError(t, err)
+	assert.Same(t, null, got)
+}
+
 func TestBinaryScalarValidateErrors(t *testing.T) {
 	sc := scalar.NewBinaryScalar(memory.NewBufferBytes([]byte("xxx")), arrow.BinaryTypes.Binary)
 	sc.Valid = false
@@ -196,6 +233,29 @@ func TestBinaryScalarValidateErrors(t *testing.T) {
 	nullScalar.(*scalar.Binary).Valid = true
 	assert.Error(t, sc.Validate())
 	assert.Error(t, sc.ValidateFull())
+}
+
+func TestBinaryScalarCastToBinaryUsesTargetType(t *testing.T) {
+	buf := memory.NewBufferBytes([]byte("abc"))
+	defer buf.Release()
+
+	scalars := []scalar.BinaryScalar{
+		scalar.NewBinaryScalar(buf, arrow.BinaryTypes.Binary),
+		scalar.NewLargeBinaryScalar(buf),
+		scalar.NewFixedSizeBinaryScalar(buf, &arrow.FixedSizeBinaryType{ByteWidth: 3}),
+	}
+	for _, src := range scalars {
+		t.Run(src.DataType().Name(), func(t *testing.T) {
+			defer src.Release()
+
+			got, err := src.CastTo(arrow.BinaryTypes.Binary)
+			require.NoError(t, err)
+			defer got.(scalar.Releasable).Release()
+			assert.IsType(t, &scalar.Binary{}, got)
+			assert.True(t, arrow.TypeEqual(arrow.BinaryTypes.Binary, got.DataType()))
+			assert.Equal(t, []byte("abc"), got.(scalar.BinaryScalar).Data())
+		})
+	}
 }
 
 func TestStringMakeScalar(t *testing.T) {
@@ -558,6 +618,7 @@ func TestMonthIntervalScalarBasics(t *testing.T) {
 	assert.False(t, scalar.Equals(tsVal1, tsVal2))
 	assert.False(t, scalar.Equals(tsVal1, tsNull))
 	assert.False(t, scalar.Equals(tsNull, tsVal2))
+	assert.Equal(t, "1", tsVal1.String())
 }
 
 func TestDayTimeIntervalScalarBasics(t *testing.T) {
@@ -583,6 +644,7 @@ func TestDayTimeIntervalScalarBasics(t *testing.T) {
 	assert.False(t, scalar.Equals(tsVal1, tsVal2))
 	assert.False(t, scalar.Equals(tsVal1, tsNull))
 	assert.False(t, scalar.Equals(tsNull, tsVal2))
+	assert.Equal(t, "{\"days\":1,\"milliseconds\":1}", tsVal1.String())
 }
 
 func TestMonthDayNanoIntervalScalarBasics(t *testing.T) {
@@ -608,6 +670,11 @@ func TestMonthDayNanoIntervalScalarBasics(t *testing.T) {
 	assert.False(t, scalar.Equals(tsVal1, tsVal2))
 	assert.False(t, scalar.Equals(tsVal1, tsNull))
 	assert.False(t, scalar.Equals(tsNull, tsVal2))
+}
+
+func TestMonthDayNanoIntervalScalarString(t *testing.T) {
+	s := scalar.NewMonthDayNanoIntervalScalar(arrow.MonthDayNanoInterval{Months: 1, Days: 2, Nanoseconds: 3000})
+	assert.Equal(t, "{\"months\":1,\"days\":2,\"nanoseconds\":3000}", s.String())
 }
 
 func TestNumericScalarCasts(t *testing.T) {
@@ -1213,6 +1280,10 @@ type OptionListTest struct {
 	ValUint    []uint            `compute:"valuint"`
 }
 
+type MetadataScalarTest struct {
+	FieldMeta []*arrow.Metadata `compute:"field_metadata"`
+}
+
 type OptionValTest struct {
 	ToType arrow.DataType `compute:"type"`
 	Allow  bool           `compute:"allow"`
@@ -1328,6 +1399,24 @@ func TestFromScalarRejectsInvalidTargets(t *testing.T) {
 	require.NoError(t, scalar.FromScalar(structScalar, &output))
 	assert.Equal(t, arrow.BinaryTypes.String, output.ToType)
 	assert.True(t, output.Allow)
+}
+
+func TestFromScalarMetadataDoesNotPrependEmptyEntries(t *testing.T) {
+	meta := arrow.NewMetadata(
+		[]string{"option", "captain", "souper"},
+		[]string{"val", "planet", "bowl"},
+	)
+	in := MetadataScalarTest{FieldMeta: []*arrow.Metadata{&meta}}
+
+	sc, err := scalar.ToScalar(in, memory.DefaultAllocator)
+	require.NoError(t, err)
+
+	var out MetadataScalarTest
+	require.NoError(t, scalar.FromScalar(sc.(*scalar.Struct), &out))
+	require.Len(t, out.FieldMeta, 1)
+	require.NotNil(t, out.FieldMeta[0])
+	assert.Equal(t, meta.Keys(), out.FieldMeta[0].Keys())
+	assert.Equal(t, meta.Values(), out.FieldMeta[0].Values())
 }
 
 var dictIndexTypes = []arrow.DataType{

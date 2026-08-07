@@ -17,6 +17,7 @@
 package pqarrow
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -29,6 +30,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
+	"github.com/apache/arrow-go/v18/arrow/compute"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -120,7 +122,7 @@ func (lr *leafReader) LoadBatch(nrecords int64) (err error) {
 			}
 		}
 	}
-	lr.out, err = transferColumnData(lr.recordRdr, lr.field.Type, lr.descr)
+	lr.out, err = transferColumnData(lr.recordRdr, lr.field.Type, lr.descr, lr.rctx.mem)
 	return
 }
 
@@ -587,7 +589,7 @@ func chunksToSingle(chunked *arrow.Chunked, mem memory.Allocator) (arrow.ArrayDa
 }
 
 // create a chunked arrow array from the raw record data
-func transferColumnData(rdr file.RecordReader, valueType arrow.DataType, descr *schema.Column) (*arrow.Chunked, error) {
+func transferColumnData(rdr file.RecordReader, valueType arrow.DataType, descr *schema.Column, mem memory.Allocator) (*arrow.Chunked, error) {
 	dt := valueType
 	if valueType.ID() == arrow.EXTENSION {
 		dt = valueType.(arrow.ExtensionType).StorageType()
@@ -596,7 +598,7 @@ func transferColumnData(rdr file.RecordReader, valueType arrow.DataType, descr *
 	var data arrow.ArrayData
 	switch dt.ID() {
 	case arrow.DICTIONARY:
-		return transferDictionary(rdr, valueType), nil
+		return transferDictionary(rdr, valueType, mem)
 	case arrow.NULL:
 		return arrow.NewChunked(arrow.Null, []arrow.Array{array.NewNull(rdr.ValuesWritten())}), nil
 	case arrow.INT32, arrow.INT64, arrow.FLOAT32, arrow.FLOAT64:
@@ -616,7 +618,7 @@ func transferColumnData(rdr file.RecordReader, valueType arrow.DataType, descr *
 	case arrow.DATE64:
 		data = transferDate64(rdr, valueType)
 	case arrow.FIXED_SIZE_BINARY, arrow.BINARY, arrow.STRING, arrow.LARGE_BINARY, arrow.LARGE_STRING:
-		return transferBinary(rdr, valueType), nil
+		return transferBinary(rdr, valueType, mem)
 	case arrow.DECIMAL, arrow.DECIMAL256:
 		switch descr.PhysicalType() {
 		case parquet.Types.Int32, parquet.Types.Int64:
@@ -647,7 +649,7 @@ func transferColumnData(rdr file.RecordReader, valueType arrow.DataType, descr *
 		if len := arrow.Float16SizeBytes; descr.TypeLength() != len {
 			return nil, fmt.Errorf("fixed len byte array length for float16 must be %d", len)
 		}
-		return transferBinary(rdr, valueType), nil
+		return transferBinary(rdr, valueType, mem)
 	default:
 		return nil, fmt.Errorf("no support for reading columns of type: %s", valueType.Name())
 	}
@@ -675,10 +677,10 @@ func transferZeroCopy(rdr file.RecordReader, dt arrow.DataType) arrow.ArrayData 
 		nil, int(rdr.NullCount()), 0)
 }
 
-func transferBinary(rdr file.RecordReader, dt arrow.DataType) *arrow.Chunked {
+func transferBinary(rdr file.RecordReader, dt arrow.DataType, mem memory.Allocator) (*arrow.Chunked, error) {
 	brdr := rdr.(file.BinaryRecordReader)
 	if brdr.ReadDictionary() {
-		return transferDictionary(brdr, &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: dt})
+		return transferDictionary(brdr, &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: dt}, mem)
 	}
 	chunks := brdr.GetBuilderChunks()
 	defer releaseArrays(chunks)
@@ -703,7 +705,7 @@ func transferBinary(rdr file.RecordReader, dt arrow.DataType) *arrow.Chunked {
 			chunk.Release()
 		}
 	}
-	return arrow.NewChunked(dt, chunks)
+	return arrow.NewChunked(dt, chunks), nil
 }
 
 func transferInt(rdr file.RecordReader, dt arrow.DataType) arrow.ArrayData {
@@ -1080,9 +1082,34 @@ func transferDecimalBytes(rdr file.BinaryRecordReader, dt arrow.DataType) (*arro
 	return arrow.NewChunked(dt, chunks), nil
 }
 
-func transferDictionary(rdr file.RecordReader, logicalValueType arrow.DataType) *arrow.Chunked {
+func transferDictionary(rdr file.RecordReader, logicalValueType arrow.DataType, mem memory.Allocator) (*arrow.Chunked, error) {
 	brdr := rdr.(file.BinaryRecordReader)
 	chunks := brdr.GetBuilderChunks()
 	defer releaseArrays(chunks)
-	return arrow.NewChunked(logicalValueType, chunks)
+
+	dictType, ok := logicalValueType.(*arrow.DictionaryType)
+	if !ok || dictType.IndexType.ID() == arrow.INT32 {
+		return arrow.NewChunked(logicalValueType, chunks), nil
+	}
+
+	ctx := compute.WithAllocator(context.Background(), mem)
+	for idx, chunk := range chunks {
+		dictArr, ok := chunk.(*array.Dictionary)
+		if !ok {
+			return nil, fmt.Errorf("expected dictionary array, got %T", chunk)
+		}
+
+		indices, err := compute.CastArray(ctx, dictArr.Indices(), compute.SafeCastOptions(dictType.IndexType))
+		if err != nil {
+			return nil, err
+		}
+		converted, err := array.NewValidatedDictionaryArray(dictType, indices, dictArr.Dictionary())
+		indices.Release()
+		if err != nil {
+			return nil, err
+		}
+		chunk.Release()
+		chunks[idx] = converted
+	}
+	return arrow.NewChunked(logicalValueType, chunks), nil
 }

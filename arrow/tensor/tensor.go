@@ -171,6 +171,10 @@ func New(data arrow.ArrayData, shape, strides []int64, names []string) Interface
 }
 
 func newTensor(dtype arrow.DataType, data arrow.ArrayData, shape, strides []int64, names []string) *tensorBase {
+	if !arrow.TypeEqual(dtype, data.DataType()) {
+		panic(fmt.Errorf("arrow/tensor: data type mismatch: got %s, want %s", data.DataType(), dtype))
+	}
+
 	if names == nil {
 		names = make([]string, len(shape))
 	}
