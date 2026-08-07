@@ -1344,7 +1344,12 @@ func roundTemporalExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.Exec
 				return 0
 			}
 			// Convert back to days
-			return int32(result / 86400)
+			daysResult := result / 86400
+			if daysResult < math.MinInt32 || daysResult > math.MaxInt32 {
+				*e = overflowError()
+				return 0
+			}
+			return int32(daysResult)
 		}
 		return ScalarUnaryNotNull(fn)(ctx, batch, out)
 

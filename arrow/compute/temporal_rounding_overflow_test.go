@@ -84,6 +84,48 @@ func TestTemporalRoundingOverflow(t *testing.T) {
 	}
 }
 
+func TestTemporalRoundingDate32Overflow(t *testing.T) {
+	tests := []struct {
+		name  string
+		value arrow.Date32
+		fn    func(context.Context, compute.RoundTemporalOptions, compute.Datum) (compute.Datum, error)
+		opts  compute.RoundTemporalOptions
+	}{
+		{
+			name:  "ceiling past maximum",
+			value: math.MaxInt32,
+			fn:    compute.CeilTemporal,
+			opts: compute.RoundTemporalOptions{
+				Multiple:              1,
+				Unit:                  compute.RoundTemporalDay,
+				CeilIsStrictlyGreater: true,
+			},
+		},
+		{
+			name:  "floor below minimum",
+			value: math.MinInt32,
+			fn:    compute.FloorTemporal,
+			opts: compute.RoundTemporalOptions{
+				Multiple: 3,
+				Unit:     compute.RoundTemporalDay,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			builder := array.NewDate32Builder(memory.DefaultAllocator)
+			builder.Append(tc.value)
+			input := builder.NewArray()
+			builder.Release()
+			defer input.Release()
+
+			_, err := tc.fn(context.Background(), tc.opts, compute.NewDatum(input))
+			require.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
+}
+
 func TestTemporalRoundingTimezonePaths(t *testing.T) {
 	loc, err := time.LoadLocation("America/New_York")
 	require.NoError(t, err)
