@@ -74,16 +74,20 @@ func TypeEqual(left, right DataType, opts ...TypeEqualOption) bool {
 		}
 		return l.n == right.(*FixedSizeListType).n && l.elem.Nullable == right.(*FixedSizeListType).elem.Nullable
 	case *MapType:
-		if !TypeEqual(l.KeyType(), right.(*MapType).KeyType(), opts...) {
+		r := right.(*MapType)
+		if !TypeEqual(l.KeyType(), r.KeyType(), opts...) {
 			return false
 		}
-		if !TypeEqual(l.ItemType(), right.(*MapType).ItemType(), opts...) {
+		if !TypeEqual(l.ItemType(), r.ItemType(), opts...) {
 			return false
 		}
-		if l.KeyField().Nullable != right.(*MapType).KeyField().Nullable {
+		if l.KeysSorted != r.KeysSorted {
 			return false
 		}
-		if l.ItemField().Nullable != right.(*MapType).ItemField().Nullable {
+		if l.KeyField().Nullable != r.KeyField().Nullable {
+			return false
+		}
+		if l.ItemField().Nullable != r.ItemField().Nullable {
 			return false
 		}
 		if cfg.metadata {

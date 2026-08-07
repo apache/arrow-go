@@ -395,3 +395,18 @@ func TestTypeEqual(t *testing.T) {
 		})
 	}
 }
+
+func TestTypeEqualMapKeysSorted(t *testing.T) {
+	unsorted := MapOf(BinaryTypes.String, PrimitiveTypes.Int32)
+	sorted := MapOf(BinaryTypes.String, PrimitiveTypes.Int32)
+	sorted.KeysSorted = true
+
+	if TypeEqual(unsorted, sorted) {
+		t.Fatal("map types with different KeysSorted values should not be equal")
+	}
+
+	unsorted.KeysSorted = true
+	if !TypeEqual(unsorted, sorted) {
+		t.Fatal("map types with the same KeysSorted value should be equal")
+	}
+}
