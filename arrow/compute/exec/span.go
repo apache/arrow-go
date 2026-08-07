@@ -586,6 +586,8 @@ func getNumBuffers(dt arrow.DataType) int {
 		// within a single block (the default 32KB allocation in the
 		// builder is sufficient for most use cases).
 		return 3
+	case arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW:
+		return 3
 	case arrow.EXTENSION:
 		return getNumBuffers(dt.(arrow.ExtensionType).StorageType())
 	default:

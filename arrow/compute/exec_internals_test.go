@@ -31,6 +31,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/internal/testing/gen"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -578,6 +579,24 @@ func (e *ExecSpanItrSuite) TestZeroLengthInput() {
 	carr = e.getInt32Chunked([]int64{0})
 	input.Values = []Datum{&ChunkedDatum{carr}}
 	checkArgs(input)
+}
+
+func TestFillZeroLengthListView(t *testing.T) {
+	for _, dt := range []arrow.DataType{
+		arrow.ListViewOf(arrow.PrimitiveTypes.Int32),
+		arrow.LargeListViewOf(arrow.PrimitiveTypes.Int32),
+	} {
+		t.Run(dt.Name(), func(t *testing.T) {
+			var span exec.ArraySpan
+			exec.FillZeroLength(dt, &span)
+
+			assert.Equal(t, 3, span.NumBuffers())
+			for i := 0; i < span.NumBuffers(); i++ {
+				assert.NotNil(t, span.Buffers[i].Buf)
+				assert.Empty(t, span.Buffers[i].Buf)
+			}
+		})
+	}
 }
 
 func TestExecSpanIterator(t *testing.T) {
