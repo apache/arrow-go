@@ -54,6 +54,7 @@ func GetFunctionRegistry() FunctionRegistry {
 		RegisterScalarArithmetic(registry)
 		RegisterScalarComparisons(registry)
 		RegisterVectorHash(registry)
+		RegisterVectorCumulative(registry)
 		RegisterVectorRunEndFuncs(registry)
 		RegisterScalarSetLookup(registry)
 	})
