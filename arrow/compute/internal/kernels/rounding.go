@@ -1001,7 +1001,10 @@ func roundToMultipleInt64(value, multiple int64, mode RoundMode, strictCeil bool
 			absRemainder = -absRemainder
 		}
 
-		if absRemainder < half {
+		// Odd multiples do not have an exact halfway point. For example,
+		// a remainder of 1 when rounding to multiples of 3 is closer to 0
+		// than to 3, so it must not be treated as a tie.
+		if absRemainder < half || (multiple%2 != 0 && absRemainder == half) {
 			return quotient * multiple
 		} else if absRemainder > half {
 			if remainder > 0 {
