@@ -361,7 +361,7 @@ func (nhs *nullHashState) FlushFinal(out *exec.ExecResult) error {
 
 func (nhs *nullHashState) GetDictionary() (arrow.ArrayData, error) {
 	var out arrow.Array
-	if nhs.seenNull && nhs.action.ShouldEncodeNulls() {
+	if nhs.seenNull {
 		out = array.NewNull(1)
 	} else {
 		out = array.NewNull(0)
@@ -714,6 +714,7 @@ func dictionaryEncodeFinalize(ctx *exec.KernelCtx, results []*exec.ArraySpan) ([
 	if !ok {
 		return nil, fmt.Errorf("%w: HashState in invalid state", arrow.ErrInvalid)
 	}
+	defer releaseHashMemo(impl)
 
 	dict, err := impl.GetDictionary()
 	if err != nil {
@@ -727,6 +728,14 @@ func dictionaryEncodeFinalize(ctx *exec.KernelCtx, results []*exec.ArraySpan) ([
 		result.SetDictionary(&dictSpan)
 	}
 	return results, nil
+}
+
+func releaseHashMemo(hash HashState) {
+	if state, ok := hash.(*regularHashState); ok {
+		if memo, ok := state.memoTable.(*hashing.BinaryMemoTable); ok {
+			memo.Release()
+		}
+	}
 }
 
 func GetVectorHashKernels() (unique, valueCounts, dictEncode []exec.VectorKernel) {
@@ -751,6 +760,8 @@ func GetVectorHashKernels() (unique, valueCounts, dictEncode []exec.VectorKernel
 	// dictionary encode
 	base.Finalize = dictionaryEncodeFinalize
 	base.OutputChunked = true
+	base.NullHandling = exec.NullComputedNoPrealloc
+	base.MemAlloc = exec.MemNoPrealloc
 	dictEncode = addHashKernels(base, initDictionaryEncode, outputDictionaryType)
 	dictEncode = append(dictEncode, exec.NewVectorKernelWithSig(
 		&exec.KernelSignature{
