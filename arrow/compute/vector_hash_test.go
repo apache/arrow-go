@@ -672,3 +672,28 @@ func TestDictionaryEncodeDictionaryInput(t *testing.T) {
 	require.Equal(t, input.Len(), result.Len())
 	assert.True(t, array.Equal(input, result))
 }
+
+func TestDictionaryEncodeDictionaryInputRejectsInvalidOptions(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.BinaryTypes.String,
+	}
+	input, err := array.DictArrayFromJSON(mem, dictType, `[0, 1]`, `["foo", "bar"]`)
+	require.NoError(t, err)
+	defer input.Release()
+
+	_, err = compute.DictionaryEncode(ctx, compute.DictionaryEncodeOptions{
+		NullEncoding: compute.NullEncodingBehavior(99),
+	}, &compute.ArrayDatum{Value: input.Data()})
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+}
+
+func TestDictionaryEncodeFunctionValidation(t *testing.T) {
+	fn, ok := compute.GetFunctionRegistry().GetFunction("dictionary_encode")
+	require.True(t, ok)
+	require.NoError(t, fn.Validate())
+}

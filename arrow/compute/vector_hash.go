@@ -32,8 +32,9 @@ var (
 		ArgNames:    []string{"array"},
 	}
 	dictionaryEncodeDoc = FunctionDoc{
-		Summary:     "Dictionary encode an array",
-		Description: "Return a dictionary-encoded array with the distinct values in the dictionary. If the input is already dictionary encoded, it is returned unchanged.",
+		Summary: "Dictionary encode an array",
+		Description: "Return a dictionary-encoded array with the distinct values in the dictionary.\n" +
+			"If the input is already dictionary encoded, it is returned unchanged.",
 		ArgNames:    []string{"array"},
 		OptionsType: "DictionaryEncodeOptions",
 	}

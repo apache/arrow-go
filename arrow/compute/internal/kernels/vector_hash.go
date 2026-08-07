@@ -379,6 +379,11 @@ func dictionaryEncodeIdentity(_ *exec.KernelCtx, batch *exec.ExecSpan, out *exec
 	return nil
 }
 
+func initDictionaryEncodeIdentity(_ *exec.KernelCtx, args exec.KernelInitArgs) (exec.KernelState, error) {
+	_, err := parseDictionaryEncodeOptions(args.Options)
+	return nil, err
+}
+
 type dictionaryHashState struct {
 	indicesKernel HashState
 	dictionary    arrow.Array
@@ -675,7 +680,7 @@ func initUnique(dt arrow.DataType, _ any, mem memory.Allocator) (Action, error) 
 	return uniqueAction{mem: mem, dt: dt}, nil
 }
 
-func initDictionaryEncode(dt arrow.DataType, options any, mem memory.Allocator) (Action, error) {
+func parseDictionaryEncodeOptions(options any) (DictionaryEncodeOptions, error) {
 	opts := DictionaryEncodeOptions{}
 	switch v := options.(type) {
 	case nil:
@@ -686,11 +691,19 @@ func initDictionaryEncode(dt arrow.DataType, options any, mem memory.Allocator) 
 			opts = *v
 		}
 	default:
-		return nil, fmt.Errorf("%w: expected DictionaryEncodeOptions, got %T", arrow.ErrInvalid, options)
+		return opts, fmt.Errorf("%w: expected DictionaryEncodeOptions, got %T", arrow.ErrInvalid, options)
 	}
 
 	if opts.NullEncoding != NullEncodingMask && opts.NullEncoding != NullEncodingEncode {
-		return nil, fmt.Errorf("%w: invalid null encoding behavior %d", arrow.ErrInvalid, opts.NullEncoding)
+		return opts, fmt.Errorf("%w: invalid null encoding behavior %d", arrow.ErrInvalid, opts.NullEncoding)
+	}
+	return opts, nil
+}
+
+func initDictionaryEncode(_ arrow.DataType, options any, mem memory.Allocator) (Action, error) {
+	opts, err := parseDictionaryEncodeOptions(options)
+	if err != nil {
+		return nil, err
 	}
 
 	return &dictionaryEncodeAction{
@@ -769,7 +782,7 @@ func GetVectorHashKernels() (unique, valueCounts, dictEncode []exec.VectorKernel
 			OutType:    OutputFirstType,
 		},
 		dictionaryEncodeIdentity,
-		nil))
+		initDictionaryEncodeIdentity))
 
 	return
 }
