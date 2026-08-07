@@ -26,14 +26,17 @@ import (
 
 var (
 	cumulativeSumDoc = FunctionDoc{
-		Summary:     "Compute the cumulative sum of an array",
-		Description: "Return the cumulative sum of the input array",
+		Summary: "Compute the cumulative sum of an array",
+		Description: `Return the cumulative sum of the input array. Integer values
+wrap on overflow; nulls stop the remaining output unless SkipNulls is enabled.
+A nil Start uses zero.`,
 		ArgNames:    []string{"array"},
 		OptionsType: "CumulativeOptions",
 	}
 	cumulativeSumCheckedDoc = FunctionDoc{
-		Summary:     "Compute the cumulative sum of an array with overflow checking",
-		Description: "Return the cumulative sum of the input array and report integer overflow",
+		Summary: "Compute the cumulative sum of an array with overflow checking",
+		Description: `Return the cumulative sum of the input array and report
+integer overflow. Null handling and Start follow CumulativeOptions.`,
 		ArgNames:    []string{"array"},
 		OptionsType: "CumulativeOptions",
 	}
