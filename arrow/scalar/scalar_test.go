@@ -186,6 +186,20 @@ func TestBinaryScalarBasics(t *testing.T) {
 	assert.True(t, scalar.Equals(value2, value3))
 }
 
+func TestBooleanScalarIdentityCast(t *testing.T) {
+	for _, value := range []bool{false, true} {
+		src := scalar.NewBooleanScalar(value)
+		got, err := src.CastTo(arrow.FixedWidthTypes.Boolean)
+		require.NoError(t, err)
+		assert.Same(t, src, got)
+	}
+
+	null := scalar.MakeNullScalar(arrow.FixedWidthTypes.Boolean)
+	got, err := null.CastTo(arrow.FixedWidthTypes.Boolean)
+	require.NoError(t, err)
+	assert.Same(t, null, got)
+}
+
 func TestBinaryScalarValidateErrors(t *testing.T) {
 	sc := scalar.NewBinaryScalar(memory.NewBufferBytes([]byte("xxx")), arrow.BinaryTypes.Binary)
 	sc.Valid = false
