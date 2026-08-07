@@ -188,7 +188,8 @@ func listElementExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 
 func listElementTakeSupported(id arrow.Type) bool {
 	return id == arrow.NULL || arrow.IsPrimitive(id) || arrow.IsBinaryLike(id) ||
-		arrow.IsLargeBinaryLike(id) || arrow.IsFixedSizeBinary(id) || id == arrow.DENSE_UNION
+		arrow.IsLargeBinaryLike(id) || arrow.IsFixedSizeBinary(id) ||
+		id == arrow.SPARSE_UNION || id == arrow.DENSE_UNION
 }
 
 func listElementConcat(ctx *exec.KernelCtx, list *exec.ArraySpan, index uint64, elemType arrow.DataType, out *exec.ExecResult) error {
@@ -296,6 +297,69 @@ func listElementDenseUnionTake(ctx *exec.KernelCtx, values *exec.ArraySpan, indi
 	}
 	return nil
 }
+
+func listElementSparseUnionTake(ctx *exec.KernelCtx, values *exec.ArraySpan, indices arrow.Array, out *exec.ExecResult) error {
+	valuesArray := values.MakeArray()
+	defer valuesArray.Release()
+
+	unionType := values.Type.(*arrow.SparseUnionType)
+	builder := array.NewSparseUnionBuilder(exec.GetAllocator(ctx.Ctx), unionType)
+	defer builder.Release()
+	builder.Reserve(indices.Len())
+	for i := 0; i < builder.NumChildren(); i++ {
+		builder.Child(i).Reserve(indices.Len())
+	}
+
+	indexArray := indices.(*array.Int64)
+	for i := 0; i < indices.Len(); i++ {
+		var value scalar.Scalar
+		if indices.IsNull(i) {
+			value = scalar.MakeNullScalar(unionType)
+		} else {
+			var err error
+			value, err = scalar.GetScalar(valuesArray, int(indexArray.Value(i)))
+			if err != nil {
+				return err
+			}
+		}
+
+		if err := listElementAppendSparseUnionValue(builder, value.(*scalar.SparseUnion)); err != nil {
+			if releasable, ok := value.(scalar.Releasable); ok {
+				releasable.Release()
+			}
+			return err
+		}
+		if releasable, ok := value.(scalar.Releasable); ok {
+			releasable.Release()
+		}
+	}
+
+	result := builder.NewArray()
+	defer result.Release()
+	out.TakeOwnership(result.Data())
+	return nil
+}
+
+func listElementAppendSparseUnionValue(builder *array.SparseUnionBuilder, value *scalar.SparseUnion) error {
+	builder.Append(value.TypeCode)
+	for i := 0; i < builder.NumChildren(); i++ {
+		child := builder.Child(i)
+		if i != value.ChildID {
+			child.AppendEmptyValue()
+			continue
+		}
+
+		if !value.IsValid() {
+			child.AppendNull()
+			continue
+		}
+		if err := scalar.Append(child, value.Value[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func listElementTake(ctx *exec.KernelCtx, values *exec.ArraySpan, indices arrow.Array, out *exec.ExecResult) (bool, error) {
 	var indexSpan exec.ArraySpan
 	indexSpan.SetMembers(indices.Data())
@@ -320,6 +384,8 @@ func listElementTake(ctx *exec.KernelCtx, values *exec.ArraySpan, indices arrow.
 		return true, TakeExec(VarBinaryImpl[int64])(&takeCtx, batch, out)
 	case arrow.IsFixedSizeBinary(id):
 		return true, TakeExec(FSBImpl)(&takeCtx, batch, out)
+	case id == arrow.SPARSE_UNION:
+		return true, listElementSparseUnionTake(ctx, values, indices, out)
 	case id == arrow.DENSE_UNION:
 		return true, listElementDenseUnionTake(ctx, values, indices, out)
 	default:

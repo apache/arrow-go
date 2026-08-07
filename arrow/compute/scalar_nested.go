@@ -20,15 +20,54 @@ package compute
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute/internal/kernels"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 )
 
 var listElementDoc = FunctionDoc{
 	Summary:     "Compute elements using nested list values and an index",
-	Description: "For each list value, return the element at the requested index",
+	Description: "For each list value, return the element at the requested index. The index must be a scalar or a one-element array-like datum.",
 	ArgNames:    []string{"lists", "index"},
+}
+
+func listElementIndexScalar(index Datum) (scalar.Scalar, bool, error) {
+	switch index.Kind() {
+	case KindScalar:
+		return nil, false, nil
+	case KindArray:
+		if index.Len() == 0 {
+			return nil, false, fmt.Errorf("%w: list_element index array is empty", arrow.ErrInvalid)
+		}
+		if index.Len() > 1 {
+			return nil, false, fmt.Errorf("%w: list_element does not support arrays of list indices", arrow.ErrNotImplemented)
+		}
+
+		arr := index.(*ArrayDatum).MakeArray()
+		defer arr.Release()
+		value, err := scalar.GetScalar(arr, 0)
+		return value, true, err
+	case KindChunked:
+		if index.Len() == 0 {
+			return nil, false, fmt.Errorf("%w: list_element index array is empty", arrow.ErrInvalid)
+		}
+		if index.Len() > 1 {
+			return nil, false, fmt.Errorf("%w: list_element does not support arrays of list indices", arrow.ErrNotImplemented)
+		}
+
+		for _, chunk := range index.(*ChunkedDatum).Chunks() {
+			if chunk.Len() == 0 {
+				continue
+			}
+			value, err := scalar.GetScalar(chunk, 0)
+			return value, true, err
+		}
+		return nil, false, fmt.Errorf("%w: list_element index array is empty", arrow.ErrInvalid)
+	default:
+		return nil, false, nil
+	}
 }
 
 func RegisterScalarNested(reg FunctionRegistry) {
@@ -39,24 +78,19 @@ func RegisterScalarNested(reg FunctionRegistry) {
 		}
 	}
 
-	// Normalize a one-element index array before scalar execution checks the
-	// argument lengths. This keeps the registered function consistent with the
-	// ListElement convenience wrapper.
+	// Normalize the index before scalar execution splits arguments into spans.
+	// The index contract is defined by the original Datum, not by the length of
+	// an execution span.
 	fn := NewMetaFunction("list_element", Binary(), listElementDoc,
 		func(ctx context.Context, opts FunctionOptions, args ...Datum) (Datum, error) {
-			if indexArray, ok := args[1].(*ArrayDatum); ok && indexArray.Len() == 1 {
-				arr := indexArray.MakeArray()
-				defer arr.Release()
-
-				indexScalar, err := scalar.GetScalar(arr, 0)
-				if err != nil {
-					return nil, err
-				}
-				if releasable, ok := indexScalar.(scalar.Releasable); ok {
-					defer releasable.Release()
-				}
-
-				return kernelFn.Execute(ctx, opts, args[0], &ScalarDatum{Value: indexScalar})
+			indexScalar, normalized, err := listElementIndexScalar(args[1])
+			if err != nil {
+				return nil, err
+			}
+			if normalized {
+				indexDatum := &ScalarDatum{Value: indexScalar}
+				defer indexDatum.Release()
+				return kernelFn.Execute(ctx, opts, args[0], indexDatum)
 			}
 
 			return kernelFn.Execute(ctx, opts, args...)
