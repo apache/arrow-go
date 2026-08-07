@@ -406,6 +406,8 @@ func (s *FlightSqlClientSuite) TestPreparedStatementExecute() {
 	defer prepared.Close(context.TODO(), s.callOpts...)
 
 	s.Equal(string(prepared.Handle()), "query")
+	_, ok := prepared.IsUpdate()
+	s.False(ok)
 
 	info, err := prepared.Execute(context.TODO(), s.callOpts...)
 	s.NoError(err)
@@ -416,11 +418,131 @@ func (s *FlightSqlClientSuite) TestPreparedStatementExecute() {
 
 	secondPrepare := flightsql.NewPreparedStatement(&s.sqlClient, prepared.Handle())
 	s.Equal(string(secondPrepare.Handle()), "query")
+	_, ok = secondPrepare.IsUpdate()
+	s.False(ok)
+
 	defer secondPrepare.Close(context.TODO(), s.callOpts...)
 
 	info, err = secondPrepare.Execute(context.TODO(), s.callOpts...)
 	s.NoError(err)
 	s.Equal(&emptyFlightInfo, info)
+}
+
+func (s *FlightSqlClientSuite) TestPreparedStatementExecuteWithIsUpdateFalse() {
+	const query = "query"
+
+	cmd := &pb.ActionCreatePreparedStatementRequest{Query: query}
+	action := getAction(cmd)
+	action.Type = flightsql.CreatePreparedStatementActionType
+	closeAct := getAction(&pb.ActionClosePreparedStatementRequest{PreparedStatementHandle: []byte(query)})
+	closeAct.Type = flightsql.ClosePreparedStatementActionType
+
+	isUpdate := false
+	result := &pb.ActionCreatePreparedStatementResult{
+		PreparedStatementHandle: []byte(query), // handle is the query string for simplicity
+		IsUpdate:                &isUpdate,
+	}
+	var out anypb.Any
+	out.MarshalFrom(result)
+	data, _ := proto.Marshal(&out)
+
+	createRsp := &mockDoActionClient{}
+	defer createRsp.AssertExpectations(s.T())
+	createRsp.On("Recv").Return(&pb.Result{Body: data}, nil).Once()
+	createRsp.On("Recv").Return(&pb.Result{}, io.EOF).Once()
+	createRsp.On("CloseSend").Return(nil).Once()
+
+	closeRsp := &mockDoActionClient{}
+	defer closeRsp.AssertExpectations(s.T())
+	closeRsp.On("Recv").Return(&pb.Result{}, io.EOF)
+	closeRsp.On("CloseSend").Return(nil)
+
+	s.mockClient.On("DoAction", flightsql.CreatePreparedStatementActionType, action.Body, s.callOpts).
+		Return(createRsp, nil).Once()
+	s.mockClient.On("DoAction", flightsql.ClosePreparedStatementActionType, closeAct.Body, s.callOpts).
+		Return(closeRsp, nil)
+
+	infoCmd := &pb.CommandPreparedStatementQuery{PreparedStatementHandle: []byte(query)}
+	desc := getDesc(infoCmd)
+	s.mockClient.On("GetFlightInfo", desc.Type, desc.Cmd, s.callOpts).Return(&emptyFlightInfo, nil).Once()
+
+	prepared, err := s.sqlClient.Prepare(context.TODO(), query, s.callOpts...)
+	s.NoError(err)
+	defer prepared.Close(context.TODO(), s.callOpts...)
+
+	s.Equal(string(prepared.Handle()), query)
+	val, ok := prepared.IsUpdate()
+	s.Require().True(ok)
+	s.Require().False(val)
+
+	info, err := prepared.Execute(context.TODO(), s.callOpts...)
+	s.NoError(err)
+	s.Equal(&emptyFlightInfo, info)
+}
+
+func (s *FlightSqlClientSuite) TestPreparedStatementExecuteUpdateWithIsUpdateTrue() {
+	const query = "DML query"
+
+	cmd := &pb.ActionCreatePreparedStatementRequest{Query: query}
+	action := getAction(cmd)
+	action.Type = flightsql.CreatePreparedStatementActionType
+	closeAct := getAction(&pb.ActionClosePreparedStatementRequest{PreparedStatementHandle: []byte(query)})
+	closeAct.Type = flightsql.ClosePreparedStatementActionType
+
+	// Set is_update to true
+	isUpdate := true
+	result := &pb.ActionCreatePreparedStatementResult{
+		PreparedStatementHandle: []byte(query),
+		IsUpdate:                &isUpdate,
+	}
+	var out anypb.Any
+	out.MarshalFrom(result)
+	data, _ := proto.Marshal(&out)
+
+	createRsp := &mockDoActionClient{}
+	defer createRsp.AssertExpectations(s.T())
+	createRsp.On("Recv").Return(&pb.Result{Body: data}, nil).Once()
+	createRsp.On("Recv").Return(&pb.Result{}, io.EOF).Once()
+	createRsp.On("CloseSend").Return(nil).Once()
+
+	closeRsp := &mockDoActionClient{}
+	defer closeRsp.AssertExpectations(s.T())
+	closeRsp.On("Recv").Return(&pb.Result{}, io.EOF)
+	closeRsp.On("CloseSend").Return(nil)
+
+	s.mockClient.On("DoAction", flightsql.CreatePreparedStatementActionType, action.Body, s.callOpts).
+		Return(createRsp, nil).Once()
+	s.mockClient.On("DoAction", flightsql.ClosePreparedStatementActionType, closeAct.Body, s.callOpts).
+		Return(closeRsp, nil)
+
+	// Mock DoPut for ExecuteUpdate
+	updateCmd := &pb.CommandPreparedStatementUpdate{PreparedStatementHandle: []byte(query)}
+	updateDesc := getDesc(updateCmd)
+	updateResult := &pb.DoPutUpdateResult{RecordCount: 1}
+	resdata, _ := proto.Marshal(updateResult)
+
+	mockedPut := &mockDoPutClient{}
+	defer mockedPut.AssertExpectations(s.T())
+	mockedPut.On("Send", mock.MatchedBy(func(fd *flight.FlightData) bool {
+		return proto.Equal(updateDesc, fd.FlightDescriptor)
+	})).Return(nil)
+	mockedPut.On("CloseSend").Return(nil)
+	mockedPut.On("Recv").Return(&pb.PutResult{AppMetadata: resdata}, nil)
+	s.mockClient.On("DoPut", s.callOpts).Return(mockedPut, nil)
+
+	prepared, err := s.sqlClient.Prepare(context.TODO(), query, s.callOpts...)
+	s.NoError(err)
+	defer prepared.Close(context.TODO(), s.callOpts...)
+
+	s.Equal(string(prepared.Handle()), query)
+	val, ok := prepared.IsUpdate()
+	s.Require().True(ok)
+	s.Require().True(val)
+
+	// Execute as update
+	num, err := prepared.ExecuteUpdate(context.TODO(), s.callOpts...)
+	s.NoError(err)
+	s.EqualValues(1, num)
 }
 
 func (s *FlightSqlClientSuite) TestPreparedStatementExecuteParamBinding() {
@@ -881,7 +1003,29 @@ func (s *FlightSqlClientSuite) TestPreparedStatementLoadFromResult() {
 	s.NoError(err)
 	defer datasetRec.Release()
 
+	_, ok := prepared.IsUpdate()
+	s.False(ok)
+
 	s.Equal(string(prepared.Handle()), "query")
+}
+
+func (s *FlightSqlClientSuite) TestPreparedStatementLoadFromResultWithIsUpdate() {
+	const query = "query"
+
+	isUpdate := true
+	result := &pb.ActionCreatePreparedStatementResult{
+		PreparedStatementHandle: []byte(query),
+		IsUpdate:                &isUpdate,
+	}
+
+	prepared, err := s.sqlClient.LoadPreparedStatementFromResult(result)
+	s.NoError(err)
+
+	s.Equal(string(prepared.Handle()), "query")
+
+	val, ok := prepared.IsUpdate()
+	s.True(ok)
+	s.True(val)
 }
 
 func TestFlightSqlClient(t *testing.T) {
