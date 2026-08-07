@@ -340,6 +340,11 @@ func TestExecuteFieldRef(t *testing.T) {
 	}
 }
 
+func TestGetRefFieldEmptySchema(t *testing.T) {
+	_, err := exprs.GetRefField(expr.NewStructFieldRef(0), nil)
+	assert.ErrorIs(t, err, compute.ErrNoChildren)
+}
+
 func TestExecuteScalarFuncCall(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	fromJSON := func(ty arrow.DataType, json string) arrow.Array {
