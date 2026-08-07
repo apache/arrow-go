@@ -1291,6 +1291,29 @@ type OptionValTest struct {
 
 func (OptionValTest) TypeName() string { return "OptionValTest" }
 
+type typedNilFromScalar struct{}
+
+func (s *typedNilFromScalar) FromStructScalar(*scalar.Struct) error {
+	_ = *s
+	return nil
+}
+
+type customFromScalarTarget int
+
+func (v *customFromScalarTarget) FromStructScalar(*scalar.Struct) error {
+	*v = 42
+	return nil
+}
+
+type valueFromScalarTarget struct {
+	output *int
+}
+
+func (v valueFromScalarTarget) FromStructScalar(*scalar.Struct) error {
+	*v.output = 42
+	return nil
+}
+
 func TestToScalar(t *testing.T) {
 	ot := &OptionValTest{ToType: arrow.BinaryTypes.String, Allow: true}
 	sc, err := scalar.ToScalar(ot, memory.DefaultAllocator)
@@ -1337,6 +1360,45 @@ func TestToScalar(t *testing.T) {
 		`valuint:list<item: uint64, nullable> = [14 15 16]}`
 
 	assert.Equal(t, expected, sc.String())
+}
+
+func TestFromScalarRejectsInvalidTargets(t *testing.T) {
+	input, err := scalar.ToScalar(&OptionValTest{ToType: arrow.BinaryTypes.String, Allow: true}, memory.DefaultAllocator)
+	require.NoError(t, err)
+	structScalar := input.(*scalar.Struct)
+	defer structScalar.Release()
+
+	assertErrorWithoutPanic := func(target interface{}) {
+		var got error
+		assert.NotPanics(t, func() {
+			got = scalar.FromScalar(structScalar, target)
+		})
+		assert.Error(t, got)
+	}
+
+	assertErrorWithoutPanic(nil)
+	var typedNil *OptionValTest
+	assertErrorWithoutPanic(typedNil)
+	var typedNilCustom *typedNilFromScalar
+	assertErrorWithoutPanic(typedNilCustom)
+	value := 0
+	assertErrorWithoutPanic(&value)
+	values := []int{}
+	assertErrorWithoutPanic(&values)
+	assertErrorWithoutPanic(OptionValTest{})
+
+	var custom customFromScalarTarget
+	require.NoError(t, scalar.FromScalar(structScalar, &custom))
+	assert.Equal(t, customFromScalarTarget(42), custom)
+
+	valueOutput := 0
+	require.NoError(t, scalar.FromScalar(structScalar, valueFromScalarTarget{output: &valueOutput}))
+	assert.Equal(t, 42, valueOutput)
+
+	var output OptionValTest
+	require.NoError(t, scalar.FromScalar(structScalar, &output))
+	assert.Equal(t, arrow.BinaryTypes.String, output.ToType)
+	assert.True(t, output.Allow)
 }
 
 func TestFromScalarMetadataDoesNotPrependEmptyEntries(t *testing.T) {
