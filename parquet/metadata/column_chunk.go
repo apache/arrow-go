@@ -87,9 +87,10 @@ type ColumnChunkMetaData struct {
 // this is primarily used internally or between the subpackages. ColumnChunkMetaDataBuilder should
 // be used by consumers instead of using this directly.
 func NewColumnChunkMetaData(column *format.ColumnChunk, descr *schema.Column, writerVersion *AppVersion, rowGroupOrdinal, columnOrdinal int16, fileDecryptor encryption.FileDecryptor) (*ColumnChunkMetaData, error) {
+	columnMeta := column.GetMetaData()
 	c := &ColumnChunkMetaData{
 		column:        column,
-		columnMeta:    column.GetMetaData(),
+		columnMeta:    columnMeta,
 		descr:         descr,
 		writerVersion: writerVersion,
 		mem:           memory.DefaultAllocator,
@@ -116,6 +117,9 @@ func NewColumnChunkMetaData(column *format.ColumnChunk, descr *schema.Column, wr
 				return nil, errors.New("cannot decrypt column metadata. file decryption not setup correctly")
 			}
 		}
+	}
+	if c.columnMeta == nil {
+		return nil, errors.New("column chunk metadata is missing")
 	}
 	for _, enc := range c.columnMeta.Encodings {
 		c.encodings = append(c.encodings, parquet.Encoding(enc))
