@@ -152,18 +152,12 @@ func listElementExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 		return nil
 	}
 
-	values := list.Children[0].MakeArray()
-	defer values.Release()
-	pieces := make([]arrow.Array, 0, int(list.Len))
-	defer func() {
-		for _, piece := range pieces {
-			piece.Release()
-		}
-	}()
-
+	indexBuilder := array.NewInt64Builder(exec.GetAllocator(ctx.Ctx))
+	defer indexBuilder.Release()
+	indexBuilder.Reserve(int(list.Len))
 	for i := int64(0); i < list.Len; i++ {
 		if len(list.Buffers[0].Buf) != 0 && bitutil.BitIsNotSet(list.Buffers[0].Buf, int(list.Offset+i)) {
-			pieces = append(pieces, array.MakeArrayOfNull(exec.GetAllocator(ctx.Ctx), elemType, 1))
+			indexBuilder.AppendNull()
 			continue
 		}
 
@@ -178,8 +172,31 @@ func listElementExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 		if index >= length {
 			return fmt.Errorf("%w: list_element index %d is out of bounds: should be in [0, %d)", arrow.ErrInvalid, index, length)
 		}
+		indexBuilder.Append(start + int64(index))
+	}
 
-		pieces = append(pieces, array.NewSlice(values, start+int64(index), start+int64(index)+1))
+	indices := indexBuilder.NewArray()
+	defer indices.Release()
+	if handled, err := listElementTake(ctx, &list.Children[0], indices, out); handled {
+		return err
+	}
+
+	values := list.Children[0].MakeArray()
+	defer values.Release()
+	pieces := make([]arrow.Array, 0, int(list.Len))
+	defer func() {
+		for _, piece := range pieces {
+			piece.Release()
+		}
+	}()
+
+	for i := int64(0); i < list.Len; i++ {
+		if indices.IsNull(int(i)) {
+			pieces = append(pieces, array.MakeArrayOfNull(exec.GetAllocator(ctx.Ctx), elemType, 1))
+			continue
+		}
+		selected := indices.(*array.Int64).Value(int(i))
+		pieces = append(pieces, array.NewSlice(values, selected, selected+1))
 	}
 
 	result, err := array.Concatenate(pieces, exec.GetAllocator(ctx.Ctx))
@@ -189,6 +206,35 @@ func listElementExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 	defer result.Release()
 	out.TakeOwnership(result.Data())
 	return nil
+}
+
+func listElementTake(ctx *exec.KernelCtx, values *exec.ArraySpan, indices arrow.Array, out *exec.ExecResult) (bool, error) {
+	var indexSpan exec.ArraySpan
+	indexSpan.SetMembers(indices.Data())
+	batch := &exec.ExecSpan{
+		Len: int64(indices.Len()),
+		Values: []exec.ExecValue{
+			{Array: *values},
+			{Array: indexSpan},
+		},
+	}
+	takeCtx := *ctx
+	takeCtx.State = TakeOptions{BoundsCheck: false}
+
+	switch id := values.Type.ID(); {
+	case id == arrow.NULL:
+		return true, NullTake(&takeCtx, batch, out)
+	case arrow.IsPrimitive(id):
+		return true, PrimitiveTake(&takeCtx, batch, out)
+	case arrow.IsBinaryLike(id):
+		return true, TakeExec(VarBinaryImpl[int32])(&takeCtx, batch, out)
+	case arrow.IsLargeBinaryLike(id):
+		return true, TakeExec(VarBinaryImpl[int64])(&takeCtx, batch, out)
+	case arrow.IsFixedSizeBinary(id):
+		return true, TakeExec(FSBImpl)(&takeCtx, batch, out)
+	default:
+		return false, nil
+	}
 }
 
 func GetListElementKernels() []exec.ScalarKernel {
