@@ -477,11 +477,10 @@ func (s *Extension) String() string {
 	if !s.Valid {
 		return "null"
 	}
-	val, err := s.CastTo(arrow.BinaryTypes.String)
-	if err != nil {
+	if s.Value == nil {
 		return "..."
 	}
-	return string(val.(*String).Value.Bytes())
+	return s.Value.String()
 }
 
 func NewExtensionScalar(storage Scalar, typ arrow.DataType) *Extension {
