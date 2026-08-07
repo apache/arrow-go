@@ -1388,6 +1388,30 @@ func TestGetScalarIndexOutOfRange(t *testing.T) {
 	assert.ErrorIs(t, err, arrow.ErrIndex)
 }
 
+func TestGetScalarReleasesPartialStructChildrenOnError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dt := arrow.StructOf(
+		arrow.Field{Name: "values", Type: arrow.ListOf(arrow.PrimitiveTypes.Int32)},
+		arrow.Field{Name: "view", Type: arrow.BinaryTypes.StringView},
+	)
+	builder := array.NewStructBuilder(mem, dt)
+	defer builder.Release()
+
+	builder.Append(true)
+	listBuilder := builder.FieldBuilder(0).(*array.ListBuilder)
+	listBuilder.Append(true)
+	listBuilder.ValueBuilder().(*array.Int32Builder).Append(1)
+	builder.FieldBuilder(1).(*array.StringViewBuilder).Append("unsupported")
+
+	arr := builder.NewStructArray()
+	defer arr.Release()
+
+	_, err := scalar.GetScalar(arr, 0)
+	require.Error(t, err)
+}
+
 func TestDictionaryScalarValidateErrors(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
