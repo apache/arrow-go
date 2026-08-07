@@ -150,6 +150,23 @@ func (*testServer) CreatePreparedStatement(ctx context.Context, req flightsql.Ac
 	return
 }
 
+func (*testServer) CreatePreparedSubstraitPlan(ctx context.Context, req flightsql.ActionCreatePreparedSubstraitPlanRequest) (result flightsql.ActionCreatePreparedStatementResult, err error) {
+	plan := string(req.GetPlan().Plan)
+	result.Handle = req.GetPlan().Plan
+	switch plan {
+	case "substrait query plan":
+		isUpdate := false
+		result.IsUpdate = &isUpdate
+	case "substrait update plan":
+		isUpdate := true
+		result.IsUpdate = &isUpdate
+	case "substrait no hint plan":
+	default:
+		err = fmt.Errorf("unknown substrait plan: %s", plan)
+	}
+	return
+}
+
 func (*testServer) GetFlightInfoPreparedStatement(ctx context.Context, q flightsql.PreparedStatementQuery, fd *flight.FlightDescriptor) (*flight.FlightInfo, error) {
 	return &flight.FlightInfo{
 		FlightDescriptor: fd,
@@ -426,6 +443,35 @@ func (s *FlightSqlServerSuite) TestExecutePreparedStatementUpdate() {
 	nrecords, err := prep.ExecuteUpdate(context.TODO())
 	s.Require().NoError(err)
 	s.Assert().Equal(int64(2), nrecords)
+}
+
+func (s *FlightSqlServerSuite) TestExecutePreparedSubstraitQuery() {
+	prep, err := s.cl.PrepareSubstrait(context.TODO(), flightsql.SubstraitPlan{Plan: []byte("substrait query plan")})
+	s.Require().NoError(err)
+	defer prep.Close(context.TODO())
+
+	val, ok := prep.IsUpdate()
+	s.Require().True(ok)
+	s.False(val)
+}
+
+func (s *FlightSqlServerSuite) TestExecutePreparedSubstraitUpdate() {
+	prep, err := s.cl.PrepareSubstrait(context.TODO(), flightsql.SubstraitPlan{Plan: []byte("substrait update plan")})
+	s.Require().NoError(err)
+	defer prep.Close(context.TODO())
+
+	val, ok := prep.IsUpdate()
+	s.Require().True(ok)
+	s.True(val)
+}
+
+func (s *FlightSqlServerSuite) TestExecutePreparedSubstraitNoHint() {
+	prep, err := s.cl.PrepareSubstrait(context.TODO(), flightsql.SubstraitPlan{Plan: []byte("substrait no hint plan")})
+	s.Require().NoError(err)
+	defer prep.Close(context.TODO())
+
+	_, ok := prep.IsUpdate()
+	s.False(ok)
 }
 
 func (s *FlightSqlServerSuite) TestExecutePoll() {
