@@ -495,11 +495,15 @@ func (b *RunEndEncodedBuilder) NullN() int {
 }
 
 func (b *RunEndEncodedBuilder) AppendEmptyValue() {
-	b.AppendNull()
+	b.finishRun()
+	b.values.AppendEmptyValue()
+	b.addLength(1)
 }
 
 func (b *RunEndEncodedBuilder) AppendEmptyValues(n int) {
-	b.AppendNulls(n)
+	for i := 0; i < n; i++ {
+		b.AppendEmptyValue()
+	}
 }
 
 func (b *RunEndEncodedBuilder) Reserve(n int) {
