@@ -151,7 +151,7 @@ func listElementExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 		out.TakeOwnership(empty.Data())
 		return nil
 	}
-	if !listElementTakeSupported(elemType.ID()) {
+	if !listElementTakeSupported(elemType) {
 		return listElementConcat(ctx, list, index, elemType, out)
 	}
 
@@ -186,10 +186,29 @@ func listElementExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 	return listElementTakeFallback(ctx, &list.Children[0], indices, out)
 }
 
-func listElementTakeSupported(id arrow.Type) bool {
-	return id == arrow.NULL || arrow.IsPrimitive(id) || arrow.IsBinaryLike(id) ||
-		arrow.IsLargeBinaryLike(id) || arrow.IsFixedSizeBinary(id) ||
-		id == arrow.SPARSE_UNION || id == arrow.DENSE_UNION
+func listElementTakeSupported(typ arrow.DataType) bool {
+	id := typ.ID()
+	if id == arrow.NULL || arrow.IsBinaryLike(id) || arrow.IsLargeBinaryLike(id) ||
+		arrow.IsFixedSizeBinary(id) || id == arrow.SPARSE_UNION || id == arrow.DENSE_UNION {
+		return true
+	}
+	if !arrow.IsPrimitive(id) {
+		return false
+	}
+
+	// PrimitiveTake has specialized implementations for these widths only.
+	// In particular, INTERVAL_MONTH_DAY_NANO is a primitive 128-bit type and
+	// must use the generic concatenation fallback below.
+	fixed, ok := typ.(arrow.FixedWidthDataType)
+	if !ok {
+		return false
+	}
+	switch fixed.BitWidth() {
+	case 1, 8, 16, 32, 64:
+		return true
+	default:
+		return false
+	}
 }
 
 func listElementConcat(ctx *exec.KernelCtx, list *exec.ArraySpan, index uint64, elemType arrow.DataType, out *exec.ExecResult) error {
