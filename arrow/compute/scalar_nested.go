@@ -24,59 +24,35 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute/internal/kernels"
-	"github.com/apache/arrow-go/v18/arrow/scalar"
 )
 
 var listElementDoc = FunctionDoc{
-	Summary:     "Compute elements using nested list values and an index",
-	Description: "For each list value, return the element at the requested index. The index must be a scalar or a one-element array-like datum.",
-	ArgNames:    []string{"lists", "index"},
+	Summary: "Compute elements using nested list values and an index",
+	Description: "For each list value, return the element at the requested index.\n" +
+		"The index must be an integral scalar or a one-element array-like datum.",
+	ArgNames: []string{"lists", "index"},
 }
 
-func listElementIndexScalar(index Datum) (scalar.Scalar, bool, error) {
+func validateListElementIndex(index Datum) error {
 	switch index.Kind() {
-	case KindScalar:
-		return nil, false, nil
-	case KindArray:
+	case KindArray, KindChunked:
 		if index.Len() == 0 {
-			return nil, false, fmt.Errorf("%w: list_element index array is empty", arrow.ErrInvalid)
+			return fmt.Errorf("%w: list_element index array is empty", arrow.ErrInvalid)
 		}
 		if index.Len() > 1 {
-			return nil, false, fmt.Errorf("%w: list_element does not support arrays of list indices", arrow.ErrNotImplemented)
+			return fmt.Errorf("%w: list_element does not support arrays of list indices", arrow.ErrNotImplemented)
 		}
-
-		arr := index.(*ArrayDatum).MakeArray()
-		defer arr.Release()
-		value, err := scalar.GetScalar(arr, 0)
-		return value, true, err
-	case KindChunked:
-		if index.Len() == 0 {
-			return nil, false, fmt.Errorf("%w: list_element index array is empty", arrow.ErrInvalid)
-		}
-		if index.Len() > 1 {
-			return nil, false, fmt.Errorf("%w: list_element does not support arrays of list indices", arrow.ErrNotImplemented)
-		}
-
-		for _, chunk := range index.(*ChunkedDatum).Chunks() {
-			if chunk.Len() == 0 {
-				continue
-			}
-			value, err := scalar.GetScalar(chunk, 0)
-			return value, true, err
-		}
-		return nil, false, fmt.Errorf("%w: list_element index array is empty", arrow.ErrInvalid)
-	default:
-		return nil, false, nil
 	}
+	return nil
 }
 
 type listElementFunction struct {
 	ScalarFunction
 }
 
-// Normalize the index before scalar execution splits arguments into spans.
-// The index contract is defined by the original Datum, not by the length of
-// an execution span.
+// Validate the index before scalar execution splits arguments into spans. The
+// index contract is defined by the original Datum, not by the length of an
+// execution span.
 func (fn *listElementFunction) Execute(ctx context.Context, opts FunctionOptions, args ...Datum) (Datum, error) {
 	if err := fn.checkArity(len(args)); err != nil {
 		return nil, err
@@ -85,14 +61,8 @@ func (fn *listElementFunction) Execute(ctx context.Context, opts FunctionOptions
 		return nil, err
 	}
 
-	indexScalar, normalized, err := listElementIndexScalar(args[1])
-	if err != nil {
+	if err := validateListElementIndex(args[1]); err != nil {
 		return nil, err
-	}
-	if normalized {
-		indexDatum := &ScalarDatum{Value: indexScalar}
-		defer indexDatum.Release()
-		return fn.ScalarFunction.Execute(ctx, opts, args[0], indexDatum)
 	}
 
 	return fn.ScalarFunction.Execute(ctx, opts, args...)

@@ -202,11 +202,11 @@ func TestListElementSingleIndexArray(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
-	input := listElementInput(t, mem, arrow.ListOf(arrow.PrimitiveTypes.Int32), `[[1, 2], [3, 4]]`)
+	input := listElementInput(t, mem, arrow.ListOf(arrow.PrimitiveTypes.Int32), `[[1, 2]]`)
 	defer input.Release()
 	index := listElementInput(t, mem, arrow.PrimitiveTypes.Int64, `[1]`)
 	defer index.Release()
-	expected := listElementInput(t, mem, arrow.PrimitiveTypes.Int32, `[2, 4]`)
+	expected := listElementInput(t, mem, arrow.PrimitiveTypes.Int32, `[2]`)
 	defer expected.Release()
 
 	result, err := compute.ListElement(
@@ -222,7 +222,7 @@ func TestListElementSingleIndexArray(t *testing.T) {
 	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
 }
 
-func TestListElementSingleIndexArrayThroughCallFunction(t *testing.T) {
+func TestListElementSingleIndexArrayRejectsMismatchedLengths(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
@@ -230,9 +230,6 @@ func TestListElementSingleIndexArrayThroughCallFunction(t *testing.T) {
 	defer input.Release()
 	index := listElementInput(t, mem, arrow.PrimitiveTypes.Int64, `[1]`)
 	defer index.Release()
-	expected := listElementInput(t, mem, arrow.PrimitiveTypes.Int32, `[2, 4]`)
-	defer expected.Release()
-
 	result, err := compute.CallFunction(
 		context.Background(),
 		"list_element",
@@ -240,12 +237,10 @@ func TestListElementSingleIndexArrayThroughCallFunction(t *testing.T) {
 		&compute.ArrayDatum{Value: input.Data()},
 		&compute.ArrayDatum{Value: index.Data()},
 	)
-	require.NoError(t, err)
-	defer result.Release()
-
-	actual := result.(*compute.ArrayDatum).MakeArray()
-	defer actual.Release()
-	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+	if result != nil {
+		result.Release()
+	}
+	require.ErrorIs(t, err, arrow.ErrInvalid)
 }
 
 func TestListElementDispatchBest(t *testing.T) {
@@ -253,6 +248,12 @@ func TestListElementDispatchBest(t *testing.T) {
 	CheckDispatchBest(t, "list_element",
 		[]arrow.DataType{listType, arrow.PrimitiveTypes.Int64},
 		[]arrow.DataType{listType, arrow.PrimitiveTypes.Int64})
+}
+
+func TestListElementFunctionDoc(t *testing.T) {
+	fn, ok := compute.GetFunctionRegistry().GetFunction("list_element")
+	require.True(t, ok)
+	require.NoError(t, fn.Validate())
 }
 
 func TestListElementRejectsMultipleIndicesIndependentOfExecutionSpans(t *testing.T) {
@@ -303,13 +304,13 @@ func TestListElementSingleIndexChunkedArray(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
-	input := listElementInput(t, mem, arrow.ListOf(arrow.PrimitiveTypes.Int32), `[[1, 2], [3, 4]]`)
+	input := listElementInput(t, mem, arrow.ListOf(arrow.PrimitiveTypes.Int32), `[[1, 2]]`)
 	defer input.Release()
 	index := listElementInput(t, mem, arrow.PrimitiveTypes.Int64, `[1]`)
 	defer index.Release()
 	chunkedIndex := arrow.NewChunked(index.DataType(), []arrow.Array{index})
 	defer chunkedIndex.Release()
-	expected := listElementInput(t, mem, arrow.PrimitiveTypes.Int32, `[2, 4]`)
+	expected := listElementInput(t, mem, arrow.PrimitiveTypes.Int32, `[2]`)
 	defer expected.Release()
 
 	result, err := compute.ListElement(
@@ -320,9 +321,11 @@ func TestListElementSingleIndexChunkedArray(t *testing.T) {
 	require.NoError(t, err)
 	defer result.Release()
 
-	actual := result.(*compute.ArrayDatum).MakeArray()
-	defer actual.Release()
-	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+	chunkedResult, ok := result.(*compute.ChunkedDatum)
+	require.True(t, ok)
+	require.Len(t, chunkedResult.Value.Chunks(), 1)
+	assert.True(t, array.Equal(expected, chunkedResult.Value.Chunk(0)),
+		"expected: %s\ngot: %s", expected, chunkedResult.Value.Chunk(0))
 }
 
 func TestListElementScalarList(t *testing.T) {
@@ -344,6 +347,34 @@ func TestListElementScalarList(t *testing.T) {
 
 	actual := result.(*compute.ScalarDatum).Value
 	assert.True(t, scalar.Equals(scalar.NewInt32Scalar(20), actual), "expected: 20\ngot: %s", actual)
+}
+
+func TestListElementScalarListWithArrayIndex(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	values := listElementInput(t, mem, arrow.PrimitiveTypes.Int32, `[10, 20]`)
+	defer values.Release()
+	list := scalar.NewListScalar(values)
+	defer list.Release()
+	index := listElementInput(t, mem, arrow.PrimitiveTypes.Int64, `[1]`)
+	defer index.Release()
+	expected := listElementInput(t, mem, arrow.PrimitiveTypes.Int32, `[20]`)
+	defer expected.Release()
+
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ScalarDatum{Value: list},
+		&compute.ArrayDatum{Value: index.Data()},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	arrayResult, ok := result.(*compute.ArrayDatum)
+	require.True(t, ok)
+	actual := arrayResult.MakeArray()
+	defer actual.Release()
+	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
 }
 
 func TestListElementErrors(t *testing.T) {
