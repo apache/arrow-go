@@ -463,12 +463,12 @@ func getMaxBufferLen(dt arrow.DataType, length int) int {
 			bufferLen = maxOf(getMaxBufferLen(f.Type, 1))
 		}
 		return bufferLen
-	case arrow.OffsetsDataType:
-		return maxOf(dt.OffsetTypeTraits().BytesRequired(length + 1))
 	case *arrow.ListViewType:
 		return maxOf(dt.OffsetTypeTraits().BytesRequired(length))
 	case *arrow.LargeListViewType:
 		return maxOf(dt.OffsetTypeTraits().BytesRequired(length))
+	case arrow.OffsetsDataType:
+		return maxOf(dt.OffsetTypeTraits().BytesRequired(length + 1))
 	case arrow.BinaryViewDataType:
 		return maxOf(arrow.ViewHeaderSizeBytes * length)
 	case *arrow.FixedSizeListType:
