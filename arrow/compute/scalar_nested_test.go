@@ -248,6 +248,13 @@ func TestListElementSingleIndexArrayThroughCallFunction(t *testing.T) {
 	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
 }
 
+func TestListElementDispatchBest(t *testing.T) {
+	listType := arrow.ListOf(arrow.PrimitiveTypes.Int32)
+	CheckDispatchBest(t, "list_element",
+		[]arrow.DataType{listType, arrow.PrimitiveTypes.Int64},
+		[]arrow.DataType{listType, arrow.PrimitiveTypes.Int64})
+}
+
 func TestListElementRejectsMultipleIndicesIndependentOfExecutionSpans(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -406,6 +413,31 @@ func TestListElementComplexChildren(t *testing.T) {
 			assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
 		})
 	}
+}
+
+func TestListElementMonthDayNanoIntervalChild(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	typ := arrow.ListOf(arrow.FixedWidthTypes.MonthDayNanoInterval)
+	input := listElementInput(t, mem, typ,
+		`[[{"months": 1, "days": 2, "nanoseconds": 3}, {"months": 4, "days": 5, "nanoseconds": 6}], [{"months": 7, "days": 8, "nanoseconds": 9}, {"months": 10, "days": 11, "nanoseconds": 12}]]`)
+	defer input.Release()
+	expected := listElementInput(t, mem, arrow.FixedWidthTypes.MonthDayNanoInterval,
+		`[{"months": 4, "days": 5, "nanoseconds": 6}, {"months": 10, "days": 11, "nanoseconds": 12}]`)
+	defer expected.Release()
+
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ArrayDatum{Value: input.Data()},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(1)},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	actual := result.(*compute.ArrayDatum).MakeArray()
+	defer actual.Release()
+	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
 }
 
 func TestListElementDenseUnionChild(t *testing.T) {

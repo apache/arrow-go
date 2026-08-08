@@ -70,31 +70,42 @@ func listElementIndexScalar(index Datum) (scalar.Scalar, bool, error) {
 	}
 }
 
+type listElementFunction struct {
+	ScalarFunction
+}
+
+// Normalize the index before scalar execution splits arguments into spans.
+// The index contract is defined by the original Datum, not by the length of
+// an execution span.
+func (fn *listElementFunction) Execute(ctx context.Context, opts FunctionOptions, args ...Datum) (Datum, error) {
+	if err := fn.checkArity(len(args)); err != nil {
+		return nil, err
+	}
+	if err := checkOptions(fn, opts); err != nil {
+		return nil, err
+	}
+
+	indexScalar, normalized, err := listElementIndexScalar(args[1])
+	if err != nil {
+		return nil, err
+	}
+	if normalized {
+		indexDatum := &ScalarDatum{Value: indexScalar}
+		defer indexDatum.Release()
+		return fn.ScalarFunction.Execute(ctx, opts, args[0], indexDatum)
+	}
+
+	return fn.ScalarFunction.Execute(ctx, opts, args...)
+}
+
 func RegisterScalarNested(reg FunctionRegistry) {
-	kernelFn := NewScalarFunction("list_element", Binary(), listElementDoc)
+	fn := &listElementFunction{ScalarFunction: *NewScalarFunction("list_element", Binary(), listElementDoc)}
 	for _, kernel := range kernels.GetListElementKernels() {
-		if err := kernelFn.AddKernel(kernel); err != nil {
+		if err := fn.AddKernel(kernel); err != nil {
 			panic(err)
 		}
 	}
 
-	// Normalize the index before scalar execution splits arguments into spans.
-	// The index contract is defined by the original Datum, not by the length of
-	// an execution span.
-	fn := NewMetaFunction("list_element", Binary(), listElementDoc,
-		func(ctx context.Context, opts FunctionOptions, args ...Datum) (Datum, error) {
-			indexScalar, normalized, err := listElementIndexScalar(args[1])
-			if err != nil {
-				return nil, err
-			}
-			if normalized {
-				indexDatum := &ScalarDatum{Value: indexScalar}
-				defer indexDatum.Release()
-				return kernelFn.Execute(ctx, opts, args[0], indexDatum)
-			}
-
-			return kernelFn.Execute(ctx, opts, args...)
-		})
 	reg.AddFunction(fn, false)
 }
 
