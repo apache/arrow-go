@@ -957,6 +957,31 @@ func TestInferringSchema(t *testing.T) {
 	assert.False(t, r.Next())
 }
 
+func TestInferringSchemaWithoutHeaderPreservesFirstRow(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	r := csv.NewInferringReader(strings.NewReader("1,a\n2,b\n"),
+		csv.WithAllocator(mem), csv.WithHeader(false))
+	defer r.Release()
+
+	var (
+		values  []int64
+		strings []string
+	)
+	for r.Next() {
+		rec := r.RecordBatch()
+		values = append(values, rec.Column(0).(*array.Int64).Value(0))
+		strings = append(strings, rec.Column(1).(*array.String).Value(0))
+	}
+
+	require.NoError(t, r.Err())
+	require.Equal(t, []int64{1, 2}, values)
+	require.Equal(t, []string{"a", "b"}, strings)
+	require.Equal(t, "f0", r.Schema().Field(0).Name)
+	require.Equal(t, "f1", r.Schema().Field(1).Name)
+}
+
 func TestInferCSVOptions(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
