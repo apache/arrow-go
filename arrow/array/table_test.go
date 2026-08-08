@@ -957,6 +957,35 @@ func TestTableReader(t *testing.T) {
 	}
 }
 
+func TestTableReaderDoesNotExceedTableRowCount(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	field := arrow.Field{Name: "values", Type: arrow.PrimitiveTypes.Int32}
+	builder := array.NewInt32Builder(mem)
+	builder.AppendValues([]int32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, nil)
+	values := builder.NewInt32Array()
+	builder.Release()
+	defer values.Release()
+
+	column := arrow.NewColumnFromArr(field, values)
+	defer column.Release()
+	table := array.NewTable(arrow.NewSchema([]arrow.Field{field}, nil), []arrow.Column{column}, 5)
+	defer table.Release()
+
+	reader := array.NewTableReader(table, 3)
+	defer reader.Release()
+
+	var rows int64
+	for reader.Next() {
+		rows += reader.RecordBatch().NumRows()
+	}
+
+	if got, want := rows, int64(5); got != want {
+		t.Fatalf("invalid number of rows iterated over: got=%d, want=%d", got, want)
+	}
+}
+
 func TestTableReaderSkipsEmptyChunks(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
