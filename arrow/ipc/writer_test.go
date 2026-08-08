@@ -46,6 +46,18 @@ type failingPayloadWriter struct {
 
 type shortWriteWriter struct{}
 
+type failingCompressor struct {
+	err error
+}
+
+func (failingCompressor) MaxCompressedLen(n int) int  { return n }
+func (failingCompressor) Reset(io.Writer)             {}
+func (f failingCompressor) Write([]byte) (int, error) { return 0, f.err }
+func (failingCompressor) Close() error                { return nil }
+func (failingCompressor) Type() flatbuf.CompressionType {
+	return flatbuf.CompressionTypeZSTD
+}
+
 func (shortWriteWriter) Write(p []byte) (int, error) {
 	return len(p) - 1, io.ErrShortWrite
 }
@@ -323,6 +335,26 @@ func TestWriterMemCompression(t *testing.T) {
 	defer w.Close()
 
 	require.NoError(t, w.Write(rec))
+}
+
+func TestRecordEncoderReturnsCompressionError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int8}}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+	builder.Field(0).(*array.Int8Builder).Append(1)
+	record := builder.NewRecordBatch()
+	defer record.Release()
+
+	want := errors.New("compression failed")
+	encoder := newRecordEncoder(mem, 0, kMaxNestingDepth, true,
+		flatbuf.CompressionTypeZSTD, 1, 0, []compressor{failingCompressor{err: want}})
+	var payload Payload
+	defer payload.Release()
+
+	require.ErrorIs(t, encoder.encode(&payload, record), want)
 }
 
 func TestWriteWithCompressionAndMinSavings(t *testing.T) {

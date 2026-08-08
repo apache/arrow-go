@@ -435,9 +435,11 @@ func (w *recordEncoder) compressBodyBuffers(p *Payload) error {
 
 		n, err := codec.Write(p.body[idx].Bytes())
 		if err != nil {
+			buf.Release()
 			return err
 		}
 		if err := codec.Close(); err != nil {
+			buf.Release()
 			return err
 		}
 
@@ -527,7 +529,9 @@ func (w *recordEncoder) encode(p *Payload, rec arrow.RecordBatch) error {
 			return fmt.Errorf("%w: minSpaceSavings not in range [0,1]. Provided %.05f",
 				arrow.ErrInvalid, w.minSpaceSavings)
 		}
-		w.compressBodyBuffers(p)
+		if err := w.compressBodyBuffers(p); err != nil {
+			return err
+		}
 	}
 
 	// position for the start of a buffer relative to the passed frame of reference.
