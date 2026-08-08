@@ -436,9 +436,11 @@ func (w *recordEncoder) compressBodyBuffers(p *Payload) error {
 
 		n, err := codec.Write(p.body[idx].Bytes())
 		if err != nil {
+			buf.Release()
 			return err
 		}
 		if err := codec.Close(); err != nil {
+			buf.Release()
 			return err
 		}
 
@@ -471,7 +473,7 @@ func (w *recordEncoder) compressBodyBuffers(p *Payload) error {
 	var (
 		wg          sync.WaitGroup
 		ch          = make(chan int)
-		errch       = make(chan error)
+		errch       = make(chan error, 1)
 		ctx, cancel = context.WithCancel(context.Background())
 	)
 	defer cancel()
@@ -490,7 +492,10 @@ func (w *recordEncoder) compressBodyBuffers(p *Payload) error {
 					}
 
 					if err := compress(idx, codec); err != nil {
-						errch <- err
+						select {
+						case errch <- err:
+						default:
+						}
 						cancel()
 						return
 					}
@@ -502,15 +507,24 @@ func (w *recordEncoder) compressBodyBuffers(p *Payload) error {
 		}(workerID)
 	}
 
+send:
 	for idx := range p.body {
-		ch <- idx
+		select {
+		case ch <- idx:
+		case <-ctx.Done():
+			break send
+		}
 	}
 
 	close(ch)
 	wg.Wait()
-	close(errch)
 
-	return <-errch
+	select {
+	case err := <-errch:
+		return err
+	default:
+		return nil
+	}
 }
 
 func (w *recordEncoder) encode(p *Payload, rec arrow.RecordBatch) error {
