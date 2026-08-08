@@ -490,6 +490,98 @@ func TestListElementDenseUnionChild(t *testing.T) {
 	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
 }
 
+func TestListElementDenseUnionWithUnusedGenericChild(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	unionType := arrow.DenseUnionOf(
+		[]arrow.Field{
+			{Name: "number", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			{Name: "values", Type: arrow.ListOf(arrow.PrimitiveTypes.Int32), Nullable: true},
+		},
+		[]arrow.UnionTypeCode{0, 1},
+	)
+
+	builder := array.NewListBuilder(mem, unionType)
+	values := builder.ValueBuilder().(*array.DenseUnionBuilder)
+	builder.Append(true)
+	values.Append(0)
+	values.Child(0).(*array.Int32Builder).Append(10)
+	builder.Append(true)
+	values.Append(0)
+	values.Child(0).(*array.Int32Builder).Append(20)
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	expectedBuilder := array.NewDenseUnionBuilder(mem, unionType)
+	expectedBuilder.Append(0)
+	expectedBuilder.Child(0).(*array.Int32Builder).Append(10)
+	expectedBuilder.Append(0)
+	expectedBuilder.Child(0).(*array.Int32Builder).Append(20)
+	expected := expectedBuilder.NewArray()
+	expectedBuilder.Release()
+	defer expected.Release()
+
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ArrayDatum{Value: input.Data()},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	actual := result.(*compute.ArrayDatum).MakeArray()
+	defer actual.Release()
+	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+}
+
+func TestListElementDenseUnionMonthDayNanoIntervalChild(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	unionType := arrow.DenseUnionOf(
+		[]arrow.Field{
+			{Name: "interval", Type: arrow.FixedWidthTypes.MonthDayNanoInterval, Nullable: true},
+			{Name: "number", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		},
+		[]arrow.UnionTypeCode{0, 1},
+	)
+
+	builder := array.NewListBuilder(mem, unionType)
+	values := builder.ValueBuilder().(*array.DenseUnionBuilder)
+	builder.Append(true)
+	values.Append(0)
+	values.Child(0).(*array.MonthDayNanoIntervalBuilder).Append(arrow.MonthDayNanoInterval{Months: 1, Days: 2, Nanoseconds: 3})
+	builder.Append(true)
+	values.Append(0)
+	values.Child(0).(*array.MonthDayNanoIntervalBuilder).Append(arrow.MonthDayNanoInterval{Months: 4, Days: 5, Nanoseconds: 6})
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	expectedBuilder := array.NewDenseUnionBuilder(mem, unionType)
+	expectedBuilder.Append(0)
+	expectedBuilder.Child(0).(*array.MonthDayNanoIntervalBuilder).Append(arrow.MonthDayNanoInterval{Months: 1, Days: 2, Nanoseconds: 3})
+	expectedBuilder.Append(0)
+	expectedBuilder.Child(0).(*array.MonthDayNanoIntervalBuilder).Append(arrow.MonthDayNanoInterval{Months: 4, Days: 5, Nanoseconds: 6})
+	expected := expectedBuilder.NewArray()
+	expectedBuilder.Release()
+	defer expected.Release()
+
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ArrayDatum{Value: input.Data()},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	actual := result.(*compute.ArrayDatum).MakeArray()
+	defer actual.Release()
+	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+}
+
 func TestListElementSparseUnionChild(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

@@ -180,10 +180,7 @@ func listElementExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 
 	indices := indexBuilder.NewArray()
 	defer indices.Release()
-	if handled, err := listElementTake(ctx, &list.Children[0], indices, out); handled {
-		return err
-	}
-	return listElementTakeFallback(ctx, &list.Children[0], indices, out)
+	return listElementTakeOrFallback(ctx, &list.Children[0], indices, out)
 }
 
 func listElementTakeSupported(typ arrow.DataType) bool {
@@ -255,6 +252,13 @@ func listElementTakeFallback(ctx *exec.KernelCtx, values *exec.ArraySpan, indice
 	elemType := values.Type
 	valuesArray := values.MakeArray()
 	defer valuesArray.Release()
+	if indices.Len() == 0 {
+		empty := array.NewSlice(valuesArray, 0, 0)
+		defer empty.Release()
+		out.TakeOwnership(empty.Data())
+		return nil
+	}
+
 	pieces := make([]arrow.Array, 0, indices.Len())
 	defer func() {
 		for _, piece := range pieces {
@@ -267,7 +271,10 @@ func listElementTakeFallback(ctx *exec.KernelCtx, values *exec.ArraySpan, indice
 			pieces = append(pieces, array.MakeArrayOfNull(exec.GetAllocator(ctx.Ctx), elemType, 1))
 			continue
 		}
-		selected := indices.(*array.Int64).Value(i)
+		selected, err := listElementTakeIndex(indices, i)
+		if err != nil {
+			return err
+		}
 		pieces = append(pieces, array.NewSlice(valuesArray, selected, selected+1))
 	}
 
@@ -278,6 +285,27 @@ func listElementTakeFallback(ctx *exec.KernelCtx, values *exec.ArraySpan, indice
 	defer result.Release()
 	out.TakeOwnership(result.Data())
 	return nil
+}
+
+func listElementTakeIndex(indices arrow.Array, i int) (int64, error) {
+	switch indexArray := indices.(type) {
+	case *array.Int32:
+		return int64(indexArray.Value(i)), nil
+	case *array.Int64:
+		return indexArray.Value(i), nil
+	default:
+		return 0, fmt.Errorf("%w: list_element fallback received unsupported index type %s", arrow.ErrType, indices.DataType())
+	}
+}
+
+func listElementTakeOrFallback(ctx *exec.KernelCtx, values *exec.ArraySpan, indices arrow.Array, out *exec.ExecResult) error {
+	if indices.Len() == 0 {
+		return listElementTakeFallback(ctx, values, indices, out)
+	}
+	if handled, err := listElementTake(ctx, values, indices, out); handled {
+		return err
+	}
+	return listElementTakeFallback(ctx, values, indices, out)
 }
 
 func listElementDenseUnionTake(ctx *exec.KernelCtx, values *exec.ArraySpan, indices arrow.Array, out *exec.ExecResult) error {
@@ -299,10 +327,7 @@ func listElementDenseUnionTake(ctx *exec.KernelCtx, values *exec.ArraySpan, indi
 	for i := range out.Children {
 		childIndices := out.Children[i].MakeArray()
 		childOut := &exec.ExecResult{Type: values.Children[i].Type}
-		handled, err := listElementTake(ctx, &values.Children[i], childIndices, childOut)
-		if err == nil && !handled {
-			err = listElementTakeFallback(ctx, &values.Children[i], childIndices, childOut)
-		}
+		err := listElementTakeOrFallback(ctx, &values.Children[i], childIndices, childOut)
 		childIndices.Release()
 		if err != nil {
 			childOut.Release()
@@ -329,14 +354,16 @@ func listElementSparseUnionTake(ctx *exec.KernelCtx, values *exec.ArraySpan, ind
 		builder.Child(i).Reserve(indices.Len())
 	}
 
-	indexArray := indices.(*array.Int64)
 	for i := 0; i < indices.Len(); i++ {
 		var value scalar.Scalar
 		if indices.IsNull(i) {
 			value = scalar.MakeNullScalar(unionType)
 		} else {
-			var err error
-			value, err = scalar.GetScalar(valuesArray, int(indexArray.Value(i)))
+			selected, err := listElementTakeIndex(indices, i)
+			if err != nil {
+				return err
+			}
+			value, err = scalar.GetScalar(valuesArray, int(selected))
 			if err != nil {
 				return err
 			}
@@ -380,6 +407,10 @@ func listElementAppendSparseUnionValue(builder *array.SparseUnionBuilder, value 
 }
 
 func listElementTake(ctx *exec.KernelCtx, values *exec.ArraySpan, indices arrow.Array, out *exec.ExecResult) (bool, error) {
+	if !listElementTakeSupported(values.Type) {
+		return false, nil
+	}
+
 	var indexSpan exec.ArraySpan
 	indexSpan.SetMembers(indices.Data())
 	batch := &exec.ExecSpan{
