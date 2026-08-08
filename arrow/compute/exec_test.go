@@ -19,15 +19,19 @@
 package compute
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -113,6 +117,51 @@ func ExecAddInt32(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResul
 		outValues[i] = left[i] + right[i]
 	}
 	return nil
+}
+
+func TestCallFunctionPreservesCallerCancellation(t *testing.T) {
+	started := make(chan struct{})
+
+	fn := NewScalarFunction("test_preserve_caller_cancellation", Unary(), EmptyFuncDoc)
+	kernel := exec.NewScalarKernel(
+		[]exec.InputType{exec.NewExactInput(arrow.PrimitiveTypes.Int32)},
+		exec.NewOutputType(arrow.PrimitiveTypes.Int32),
+		func(ctx *exec.KernelCtx, _ *exec.ExecSpan, _ *exec.ExecResult) error {
+			close(started)
+			<-ctx.Ctx.Done()
+			return ctx.Ctx.Err()
+		}, nil)
+	require.NoError(t, fn.AddKernel(kernel))
+	require.True(t, GetFunctionRegistry().AddFunction(fn, false))
+
+	input, _, err := array.FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1]`))
+	require.NoError(t, err)
+	defer input.Release()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	var (
+		result  Datum
+		callErr error
+	)
+	go func() {
+		result, callErr = CallFunction(ctx, fn.Name(), nil, &ArrayDatum{Value: input.Data()})
+		close(done)
+	}()
+
+	<-started
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("CallFunction did not stop after caller cancellation")
+	}
+	if result != nil {
+		result.Release()
+	}
+	require.ErrorIs(t, callErr, context.Canceled)
 }
 
 type CallScalarFuncSuite struct {
