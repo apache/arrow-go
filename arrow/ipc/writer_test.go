@@ -325,6 +325,14 @@ func TestWriterMemCompression(t *testing.T) {
 	require.NoError(t, w.Write(rec))
 }
 
+func TestNewWriterWithMinSpaceSavings(t *testing.T) {
+	const minSpaceSavings = 0.5
+
+	writer := NewWriter(io.Discard, WithMinSpaceSavings(minSpaceSavings))
+
+	assert.Equal(t, minSpaceSavings, writer.minSpaceSavings)
+}
+
 func TestWriteWithCompressionAndMinSavings(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
