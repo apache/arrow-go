@@ -303,7 +303,6 @@ func newCumulativeSumKernel[T arrow.NumericType](typ arrow.DataType, checked boo
 		initCumulativeSum[T](checked, cast))
 	kernel.Parallelizable = false
 	kernel.CanExecuteChunkWise = false
-	kernel.OutputChunked = false
 	kernel.ExecChunked = cumulativeSumExecChunked[T]
 	return kernel
 }
