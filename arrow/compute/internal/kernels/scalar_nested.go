@@ -134,7 +134,13 @@ func listElementValueOffsets(list *exec.ArraySpan, i int64) (int64, int64, error
 }
 
 func listElementExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
-	list := &batch.Values[0].Array
+	var listSpan exec.ArraySpan
+	if batch.Values[0].IsScalar() {
+		listSpan.FillFromScalar(batch.Values[0].Scalar)
+	} else {
+		listSpan = batch.Values[0].Array
+	}
+	list := &listSpan
 	if len(list.Children) == 0 {
 		return fmt.Errorf("%w: list_element input has no values child", arrow.ErrInvalid)
 	}
@@ -335,7 +341,6 @@ func listElementDenseUnionTake(ctx *exec.KernelCtx, values *exec.ArraySpan, indi
 		}
 
 		childData := childOut.MakeData()
-		out.Children[i].Release()
 		out.Children[i].TakeOwnership(childData)
 		childData.Release()
 	}
