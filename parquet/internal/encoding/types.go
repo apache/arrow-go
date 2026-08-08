@@ -340,13 +340,21 @@ func (b *BufferWriter) SetOffset(offset int) {
 	b.offset = offset
 }
 
+func (b *BufferWriter) ensureOffset() {
+	if b.buffer.Len() < b.offset {
+		b.buffer.ResizeNoShrink(b.offset)
+	}
+}
+
 // Bytes returns the current bytes slice of slice Len
 func (b *BufferWriter) Bytes() []byte {
+	b.ensureOffset()
 	return b.buffer.Bytes()[b.offset:]
 }
 
 // Len provides the current Length of the byte slice
 func (b *BufferWriter) Len() int {
+	b.ensureOffset()
 	return b.buffer.Len() - b.offset
 }
 
@@ -406,8 +414,8 @@ func (b *BufferWriter) Reserve(nbytes int) {
 		b.buffer = memory.NewResizableBuffer(b.mem)
 	}
 	newCap := utils.Max(b.buffer.Cap(), 256)
-	for newCap < b.pos+nbytes {
-		newCap = bitutil.NextPowerOf2(b.pos + nbytes)
+	for newCap < b.offset+b.pos+nbytes {
+		newCap = bitutil.NextPowerOf2(b.offset + b.pos + nbytes)
 	}
 	b.buffer.Reserve(newCap)
 }
@@ -423,7 +431,7 @@ func (b *BufferWriter) WriteAt(p []byte, offset int64) (n int, err error) {
 	need := int(offset) + len(p)
 
 	if need >= b.buffer.Cap() {
-		b.Reserve(need - b.pos)
+		b.Reserve(need - b.offset - b.pos)
 	}
 	copy(b.buffer.Buf()[offset:], p)
 
@@ -449,13 +457,16 @@ func (b *BufferWriter) Write(buf []byte) (int, error) {
 
 func (b *BufferWriter) UnsafeWriteCopy(ncopies int, pattern []byte) (int, error) {
 	nbytes := len(pattern) * ncopies
-	slc := b.buffer.Buf()[b.pos : b.pos+nbytes]
+	start := b.pos + b.offset
+	slc := b.buffer.Buf()[start : start+nbytes]
 	copy(slc, pattern)
 	for j := len(pattern); j < len(slc); j *= 2 {
 		copy(slc[j:], slc[:j])
 	}
 	b.pos += nbytes
-	b.buffer.ResizeNoShrink(b.pos)
+	if b.buffer.Len() < b.pos+b.offset {
+		b.buffer.ResizeNoShrink(b.pos + b.offset)
+	}
 	return nbytes, nil
 }
 
@@ -463,7 +474,9 @@ func (b *BufferWriter) UnsafeWriteCopy(ncopies int, pattern []byte) (int, error)
 func (b *BufferWriter) UnsafeWrite(buf []byte) (int, error) {
 	copy(b.buffer.Buf()[b.pos+b.offset:], buf)
 	b.pos += len(buf)
-	b.buffer.ResizeNoShrink(b.pos)
+	if b.buffer.Len() < b.pos+b.offset {
+		b.buffer.ResizeNoShrink(b.pos + b.offset)
+	}
 	return len(buf), nil
 }
 
@@ -471,14 +484,13 @@ func (b *BufferWriter) UnsafeWrite(buf []byte) (int, error) {
 // whence must be io.SeekStart, io.SeekCurrent or io.SeekEnd or it will be ignored.
 func (b *BufferWriter) Seek(offset int64, whence int) (int64, error) {
 	newPos, offs := 0, int(offset)
-	offs += b.offset
 	switch whence {
 	case io.SeekStart:
 		newPos = offs
 	case io.SeekCurrent:
 		newPos = b.pos + offs
 	case io.SeekEnd:
-		newPos = b.buffer.Len() + offs
+		newPos = b.Len() + offs
 	}
 	if newPos < 0 {
 		return 0, errors.New("negative result pos")
