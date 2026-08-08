@@ -414,6 +414,14 @@ type KernelExecutor interface {
 	Clear()
 }
 
+func releaseRemainingResults(out <-chan Datum) {
+	for datum := range out {
+		if datum != nil {
+			datum.Release()
+		}
+	}
+}
+
 // the base implementation for executing non-aggregate kernels.
 type nonAggExecImpl struct {
 	ctx              *exec.KernelCtx
@@ -543,9 +551,11 @@ func (s *scalarExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 	// get first output
 	select {
 	case <-ctx.Done():
+		releaseRemainingResults(out)
 		return nil
 	case output = <-out:
 		if output == nil {
+			releaseRemainingResults(out)
 			return nil
 		}
 		// if the inputs contained at least one chunked array
@@ -558,9 +568,9 @@ func (s *scalarExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 	for {
 		select {
 		case <-ctx.Done():
-			// context is done, either cancelled or a timeout.
-			// either way, we end early and return what we've got so far.
+			// Execution was cancelled, so release any partial results and return no output.
 			releasePartial()
+			releaseRemainingResults(out)
 			return nil
 		case o, ok := <-out:
 			if !ok { // channel closed, wrap it up
@@ -996,8 +1006,13 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 		var output Datum
 		select {
 		case <-ctx.Done():
+			releaseRemainingResults(out)
 			return nil
 		case output = <-out:
+			if output == nil {
+				releaseRemainingResults(out)
+				return nil
+			}
 		}
 
 		// we got an output datum, but let's wait for the channel to
@@ -1005,8 +1020,15 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 		select {
 		case <-ctx.Done():
 			output.Release()
+			releaseRemainingResults(out)
 			return nil
-		case <-out:
+		case extra, ok := <-out:
+			if ok {
+				if extra != nil {
+					extra.Release()
+				}
+				releaseRemainingResults(out)
+			}
 			return output
 		}
 	}
@@ -1044,10 +1066,12 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 	// get first output
 	select {
 	case <-ctx.Done():
+		releaseRemainingResults(out)
 		return nil
 	case output = <-out:
 		if output == nil || ctx.Err() != nil {
 			releasePartial()
+			releaseRemainingResults(out)
 			return nil
 		}
 
@@ -1061,9 +1085,9 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 	for {
 		select {
 		case <-ctx.Done():
-			// context is done, either cancelled or a timeout.
-			// either way, we end early and return what we've got so far.
+			// Execution was cancelled, so release any partial results and return no output.
 			releasePartial()
+			releaseRemainingResults(out)
 			return nil
 		case o, ok := <-out:
 			if !ok { // channel closed, wrap it up

@@ -488,6 +488,25 @@ func TestCumulativeSumCheckedOverflowAfterEmittedSpan(t *testing.T) {
 	assert.ErrorIs(t, err, arrow.ErrInvalid)
 }
 
+func TestCumulativeSumCheckedOverflowDrainsBufferedResults(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	execCtx := compute.DefaultExecCtx()
+	execCtx.ChunkSize = 1
+	execCtx.ExecChannelSize = 1
+	ctx := compute.WithAllocator(context.Background(), mem)
+	ctx = compute.SetExecCtx(ctx, execCtx)
+
+	input := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int8, `[1, 2, 127]`)
+	defer input.Release()
+
+	result, err := compute.CumulativeSumChecked(ctx, compute.CumulativeOptions{},
+		&compute.ArrayDatum{Value: input.Data()})
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
+}
+
 func TestCumulativeSumChecked(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
