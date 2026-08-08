@@ -1374,6 +1374,41 @@ func TestMakeArrayFromScalarSupportsZeroLength(t *testing.T) {
 	assert.Equal(t, 0, nullArr.Len())
 	assert.Equal(t, 0, nullArr.NullN())
 	require.NoError(t, array.ValidateFull(nullArr))
+func TestMakeArrayFromDictionaryScalar(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictValues, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int64, strings.NewReader(`[10, 20]`))
+	require.NoError(t, err)
+	defer dictValues.Release()
+	dictIndices, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int8, strings.NewReader(`[0, 1]`))
+	require.NoError(t, err)
+	defer dictIndices.Release()
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.PrimitiveTypes.Int64,
+	}
+	dictArray := array.NewDictionaryArray(dictType, dictIndices, dictValues)
+	defer dictArray.Release()
+
+	dictScalar, err := scalar.GetScalar(dictArray, 0)
+	require.NoError(t, err)
+
+	result, err := scalar.MakeArrayFromScalar(dictScalar, 2, mem)
+	require.NoError(t, err)
+	defer result.Release()
+
+	actual, err := scalar.GetScalar(result, 1)
+	require.NoError(t, err)
+	defer actual.(scalar.Releasable).Release()
+	assert.True(t, scalar.Equals(dictScalar, actual))
+
+	structScalar, err := scalar.NewStructScalarWithNames([]scalar.Scalar{dictScalar}, []string{"value"})
+	require.NoError(t, err)
+	defer structScalar.Release()
+	structArray, err := scalar.MakeArrayFromScalar(structScalar, 2, mem)
+	require.NoError(t, err)
+	defer structArray.Release()
 }
 
 func TestMakeArrayFromScalarRejectsNegativeLength(t *testing.T) {
@@ -1425,6 +1460,11 @@ type scalarFieldWithUnsupportedSlice struct {
 	Unsupported []float64     `compute:"unsupported"`
 }
 
+type scalarFieldWithLaterListFailure struct {
+	Value   scalar.Scalar `compute:"value"`
+	Invalid bool          `compute:"invalid"`
+}
+
 type zeroingAllocator struct{}
 
 func (*zeroingAllocator) Allocate(size int) []byte { return make([]byte, size) }
@@ -1473,6 +1513,31 @@ func TestToScalarReleasesFieldsWhenLaterFieldFails(t *testing.T) {
 	}, mem)
 	require.Error(t, err)
 	original.Release()
+}
+
+func TestFromScalarWithAllocatorReleasesFieldsWhenLaterFieldFails(t *testing.T) {
+	mem := memory.NewCheckedAllocator(&zeroingAllocator{})
+	defer mem.AssertSize(t, 0)
+
+	data := mem.Allocate(2)
+	copy(data, []byte("10"))
+	buffer := memory.NewBufferWithAllocator(data, mem)
+	value := scalar.NewBinaryScalar(buffer, arrow.BinaryTypes.Binary)
+	buffer.Release()
+
+	listValues, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1]`))
+	require.NoError(t, err)
+	defer listValues.Release()
+	invalid := scalar.NewListScalar(listValues)
+	encoded, err := scalar.NewStructScalarWithNames(
+		[]scalar.Scalar{value, invalid}, []string{"value", "invalid"})
+	require.NoError(t, err)
+	defer encoded.Release()
+
+	var decoded scalarFieldWithLaterListFailure
+	err = scalar.FromScalarWithAllocator(encoded, &decoded, mem)
+	require.Error(t, err)
+	assert.Nil(t, decoded.Value)
 }
 
 func TestGetScalarBinaryValueOwnsArrayBytes(t *testing.T) {

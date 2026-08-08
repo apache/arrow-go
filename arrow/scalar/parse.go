@@ -58,6 +58,17 @@ func FromScalar(sc *Struct, val interface{}) error {
 // FromScalarWithAllocator populates val from a Struct scalar, allocating any
 // cloned scalar fields with mem.
 func FromScalarWithAllocator(sc *Struct, val interface{}, mem memory.Allocator) error {
+	var rollbacks []func()
+	err := fromScalarWithAllocator(sc, val, mem, &rollbacks)
+	if err != nil {
+		for i := len(rollbacks) - 1; i >= 0; i-- {
+			rollbacks[i]()
+		}
+	}
+	return err
+}
+
+func fromScalarWithAllocator(sc *Struct, val interface{}, mem memory.Allocator, rollbacks *[]func()) error {
 	if sc == nil || len(sc.Value) == 0 {
 		return nil
 	}
@@ -89,7 +100,7 @@ func FromScalarWithAllocator(sc *Struct, val interface{}, mem memory.Allocator) 
 		if err != nil {
 			return err
 		}
-		if err := setFromScalar(fldVal, value.Field(i), mem); err != nil {
+		if err := setFromScalar(fldVal, value.Field(i), mem, rollbacks); err != nil {
 			return err
 		}
 	}
@@ -97,7 +108,7 @@ func FromScalarWithAllocator(sc *Struct, val interface{}, mem memory.Allocator) 
 	return nil
 }
 
-func setFromScalar(s Scalar, v reflect.Value, mem memory.Allocator) error {
+func setFromScalar(s Scalar, v reflect.Value, mem memory.Allocator, rollbacks *[]func()) error {
 	if v.Type() == scalarType {
 		if !s.IsValid() && s.DataType().ID() == arrow.NULL {
 			v.Set(reflect.Zero(v.Type()))
@@ -109,6 +120,12 @@ func setFromScalar(s Scalar, v reflect.Value, mem memory.Allocator) error {
 			return err
 		}
 		v.Set(reflect.ValueOf(clone))
+		*rollbacks = append(*rollbacks, func() {
+			if releasable, ok := clone.(interface{ Release() }); ok {
+				releasable.Release()
+			}
+			v.Set(reflect.Zero(v.Type()))
+		})
 		return nil
 	}
 
@@ -137,7 +154,7 @@ func setFromScalar(s Scalar, v reflect.Value, mem memory.Allocator) error {
 	case ListScalar:
 		return fromListScalar(s, v)
 	case *Struct:
-		return FromScalarWithAllocator(s, v.Interface(), mem)
+		return fromScalarWithAllocator(s, v.Interface(), mem, rollbacks)
 	default:
 		if v.Type() == reflect.TypeOf(arrow.TimeUnit(0)) {
 			v.Set(reflect.ValueOf(arrow.TimeUnit(s.value().(uint32))))
