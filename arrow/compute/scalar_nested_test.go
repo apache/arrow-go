@@ -21,6 +21,7 @@ package compute_test
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -32,6 +33,40 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type denseUnionExtensionArray struct {
+	array.ExtensionArrayBase
+}
+
+func (a denseUnionExtensionArray) ValueStr(i int) string {
+	if a.IsNull(i) {
+		return array.NullValueStr
+	}
+	return "dense_union"
+}
+
+type denseUnionExtensionType struct {
+	arrow.ExtensionBase
+}
+
+func (denseUnionExtensionType) ArrayType() reflect.Type {
+	return reflect.TypeOf(denseUnionExtensionArray{})
+}
+
+func (denseUnionExtensionType) ExtensionName() string {
+	return "compute-test.dense-union"
+}
+
+func (t *denseUnionExtensionType) ExtensionEquals(other arrow.ExtensionType) bool {
+	rhs, ok := other.(*denseUnionExtensionType)
+	return ok && arrow.TypeEqual(t.StorageType(), rhs.StorageType())
+}
+
+func (denseUnionExtensionType) Serialize() string { return "" }
+
+func (t *denseUnionExtensionType) Deserialize(storage arrow.DataType, _ string) (arrow.ExtensionType, error) {
+	return &denseUnionExtensionType{ExtensionBase: arrow.ExtensionBase{Storage: storage}}, nil
+}
 
 func listElementInput(t *testing.T, mem memory.Allocator, typ arrow.DataType, values string) arrow.Array {
 	arr, _, err := array.FromJSON(mem, typ, strings.NewReader(values))
@@ -576,6 +611,62 @@ func TestListElementDenseUnionChild(t *testing.T) {
 
 	actual := result.(*compute.ArrayDatum).MakeArray()
 	defer actual.Release()
+	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+}
+
+func TestListElementDenseUnionExtensionChild(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	unionType := arrow.DenseUnionOf(
+		[]arrow.Field{
+			{Name: "number", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			{Name: "text", Type: arrow.BinaryTypes.String, Nullable: true},
+		},
+		[]arrow.UnionTypeCode{0, 1},
+	)
+	extType := &denseUnionExtensionType{ExtensionBase: arrow.ExtensionBase{Storage: unionType}}
+
+	builder := array.NewListBuilder(mem, extType)
+	values := builder.ValueBuilder().(*array.ExtensionBuilder).StorageBuilder().(*array.DenseUnionBuilder)
+	builder.Append(true)
+	values.Append(0)
+	values.Child(0).(*array.Int32Builder).Append(10)
+	values.Append(1)
+	values.Child(1).(*array.StringBuilder).Append("a")
+	builder.Append(true)
+	values.Append(1)
+	values.Child(1).(*array.StringBuilder).Append("b")
+	values.Append(0)
+	values.Child(0).(*array.Int32Builder).Append(20)
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	expectedBuilder := array.NewDenseUnionBuilder(mem, unionType)
+	expectedBuilder.Append(1)
+	expectedBuilder.Child(1).(*array.StringBuilder).Append("a")
+	expectedBuilder.Append(0)
+	expectedBuilder.Child(0).(*array.Int32Builder).Append(20)
+	expectedStorage := expectedBuilder.NewArray()
+	expectedBuilder.Release()
+	expected := array.NewExtensionArrayWithStorage(extType, expectedStorage)
+	expectedStorage.Release()
+	defer expected.Release()
+
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ArrayDatum{Value: input.Data()},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(1)},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	actual := result.(*compute.ArrayDatum).MakeArray()
+	defer actual.Release()
+	require.True(t, arrow.TypeEqual(extType, actual.DataType()))
+	storage := actual.(array.ExtensionArray).Storage()
+	require.NoError(t, array.ValidateFull(storage))
 	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
 }
 
