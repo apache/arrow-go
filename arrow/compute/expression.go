@@ -41,8 +41,6 @@ import (
 
 var hashSeed = maphash.MakeSeed()
 
-var scalarInterfaceType = reflect.TypeOf((*scalar.Scalar)(nil)).Elem()
-
 // Expression is an interface for mapping one datum to another. An expression
 // is one of:
 //
@@ -383,39 +381,39 @@ func (c *Call) Equals(other Expression) bool {
 }
 
 func equalFunctionOptions(lhs, rhs FunctionOptions) bool {
+	if left, ok := cumulativeOptions(lhs); ok {
+		right, ok := cumulativeOptions(rhs)
+		if !ok {
+			return false
+		}
+		if left == nil || right == nil {
+			return left == nil && right == nil
+		}
+		return left.SkipNulls == right.SkipNulls && equalOptionalScalar(left.Start, right.Start)
+	}
+
 	if lhs == nil || rhs == nil {
 		return lhs == nil && rhs == nil
 	}
-	if reflect.TypeOf(lhs) != reflect.TypeOf(rhs) {
-		return false
-	}
+	return reflect.DeepEqual(lhs, rhs)
+}
 
-	left := reflect.Indirect(reflect.ValueOf(lhs))
-	right := reflect.Indirect(reflect.ValueOf(rhs))
-	if !left.IsValid() || left.Kind() != reflect.Struct {
-		return reflect.DeepEqual(lhs, rhs)
+func cumulativeOptions(opts FunctionOptions) (*CumulativeOptions, bool) {
+	switch opts := opts.(type) {
+	case CumulativeOptions:
+		return &opts, true
+	case *CumulativeOptions:
+		return opts, true
+	default:
+		return nil, false
 	}
+}
 
-	for i := 0; i < left.NumField(); i++ {
-		leftField := left.Field(i)
-		rightField := right.Field(i)
-		if leftField.Type() == scalarInterfaceType {
-			leftScalar, leftOK := leftField.Interface().(scalar.Scalar)
-			rightScalar, rightOK := rightField.Interface().(scalar.Scalar)
-			if leftOK != rightOK {
-				return false
-			}
-			if leftOK && !scalar.Equals(leftScalar, rightScalar) {
-				return false
-			}
-			continue
-		}
-
-		if !reflect.DeepEqual(leftField.Interface(), rightField.Interface()) {
-			return false
-		}
+func equalOptionalScalar(lhs, rhs scalar.Scalar) bool {
+	if lhs == nil || rhs == nil {
+		return lhs == nil && rhs == nil
 	}
-	return true
+	return scalar.Equals(lhs, rhs)
 }
 
 func (c *Call) Release() {
