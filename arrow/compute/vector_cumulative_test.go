@@ -302,6 +302,29 @@ func TestCumulativeSumStartScalarConversions(t *testing.T) {
 	assert.ErrorIs(t, err, arrow.ErrInvalid)
 }
 
+func TestCumulativeSumDoesNotTakeStartOwnership(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	data := mem.Allocate(2)
+	copy(data, "10")
+	buffer := memory.NewBufferWithAllocator(data, mem)
+	start := scalar.NewBinaryScalar(buffer, arrow.BinaryTypes.Binary)
+	buffer.Release()
+
+	input := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1]`)
+	defer input.Release()
+
+	result, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{Start: start},
+		&compute.ArrayDatum{Value: input.Data()})
+	require.NoError(t, err)
+	result.Release()
+
+	assert.Equal(t, "10", string(start.Data()))
+	start.Release()
+}
+
 func TestCumulativeSumDecimalStarts(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -645,6 +668,40 @@ func TestCumulativeSumCheckedIntegerOverflow(t *testing.T) {
 				result.Release()
 			}
 			assert.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
+}
+
+func TestCumulativeSumCheckedIntegerBoundaries(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	tests := []struct {
+		name     string
+		typ      arrow.DataType
+		input    string
+		expected string
+	}{
+		{name: "int8 positive", typ: arrow.PrimitiveTypes.Int8, input: `[126, 1]`, expected: `[126, 127]`},
+		{name: "int8 negative", typ: arrow.PrimitiveTypes.Int8, input: `[-127, -1]`, expected: `[-127, -128]`},
+		{name: "int64 negative", typ: arrow.PrimitiveTypes.Int64, input: `[-9223372036854775807, -1]`, expected: `[-9223372036854775807, -9223372036854775808]`},
+		{name: "uint8", typ: arrow.PrimitiveTypes.Uint8, input: `[254, 1]`, expected: `[254, 255]`},
+		{name: "uint64", typ: arrow.PrimitiveTypes.Uint64, input: `[18446744073709551614, 1]`, expected: `[18446744073709551614, 18446744073709551615]`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			input := cumulativeInput(t, mem, tc.typ, tc.input)
+			defer input.Release()
+			expected := cumulativeInput(t, mem, tc.typ, tc.expected)
+			defer expected.Release()
+
+			result, err := compute.CumulativeSumChecked(ctx, compute.CumulativeOptions{},
+				&compute.ArrayDatum{Value: input.Data()})
+			require.NoError(t, err)
+			defer result.Release()
+			assertDatumsEqual(t, &compute.ArrayDatum{Value: expected.Data()}, result, nil, nil)
 		})
 	}
 }

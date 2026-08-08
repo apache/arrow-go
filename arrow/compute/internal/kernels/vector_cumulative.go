@@ -211,23 +211,52 @@ func prepareCumulativeOutput[T arrow.NumericType](ctx *exec.KernelCtx, out *exec
 	}
 }
 
-func cumulativeSumSpans[T arrow.NumericType](ctx *exec.KernelCtx, state *cumulativeSumState[T], inputs []*exec.ArraySpan, out *exec.ExecResult, needsValidity bool) error {
-	prepareCumulativeOutput[T](ctx, out, needsValidity)
-	values := exec.GetSpanValues[T](out, 1)
+func cumulativeSumNoNulls[T arrow.NumericType](state *cumulativeSumState[T], inputs []*exec.ArraySpan, values []T) {
+	var outputOffset int64
+	current := state.current
+	for _, input := range inputs {
+		inputValues := exec.GetSpanValues[T](input, 1)
+		for i := int64(0); i < input.Len; i++ {
+			current += inputValues[i]
+			values[outputOffset+i] = current
+		}
+		outputOffset += input.Len
+	}
+	state.current = current
+}
 
+func cumulativeSumNoNullsChecked[T arrow.NumericType](state *cumulativeSumState[T], inputs []*exec.ArraySpan, values []T) error {
+	var outputOffset int64
+	current := state.current
+	for _, input := range inputs {
+		inputValues := exec.GetSpanValues[T](input, 1)
+		for i := int64(0); i < input.Len; i++ {
+			var err error
+			current, err = state.add(current, inputValues[i])
+			if err != nil {
+				return err
+			}
+			values[outputOffset+i] = current
+		}
+		outputOffset += input.Len
+	}
+	state.current = current
+	return nil
+}
+
+func cumulativeSumWithNulls[T arrow.NumericType](state *cumulativeSumState[T], inputs []*exec.ArraySpan, values []T, validity []byte) int64 {
 	var (
 		nulls        int64
 		outputOffset int64
 	)
+	current := state.current
 	for _, input := range inputs {
 		inputValues := exec.GetSpanValues[T](input, 1)
 		for i := int64(0); i < input.Len; i++ {
 			valid := len(input.Buffers[0].Buf) == 0 || bitutil.BitIsSet(input.Buffers[0].Buf, int(input.Offset+i))
 			outputIndex := outputOffset + i
 			if !valid || state.encounteredNull {
-				if needsValidity {
-					bitutil.ClearBit(out.Buffers[0].Buf, int(outputIndex))
-				}
+				bitutil.ClearBit(validity, int(outputIndex))
 				nulls++
 				if !valid && !state.skipNulls {
 					state.encounteredNull = true
@@ -235,25 +264,77 @@ func cumulativeSumSpans[T arrow.NumericType](ctx *exec.KernelCtx, state *cumulat
 				continue
 			}
 
-			current := state.current
-			value := inputValues[i]
-			var err error
-			if state.checked {
-				current, err = state.add(current, value)
-			} else {
-				current += value
-			}
-			if err != nil {
-				out.Release()
-				return err
-			}
-
-			state.current = current
+			current += inputValues[i]
 			values[outputIndex] = current
 		}
 		outputOffset += input.Len
 	}
+	state.current = current
+	return nulls
+}
 
+func cumulativeSumWithNullsChecked[T arrow.NumericType](state *cumulativeSumState[T], inputs []*exec.ArraySpan, values []T, validity []byte) (int64, error) {
+	var (
+		nulls        int64
+		outputOffset int64
+	)
+	current := state.current
+	for _, input := range inputs {
+		inputValues := exec.GetSpanValues[T](input, 1)
+		for i := int64(0); i < input.Len; i++ {
+			valid := len(input.Buffers[0].Buf) == 0 || bitutil.BitIsSet(input.Buffers[0].Buf, int(input.Offset+i))
+			outputIndex := outputOffset + i
+			if !valid || state.encounteredNull {
+				bitutil.ClearBit(validity, int(outputIndex))
+				nulls++
+				if !valid && !state.skipNulls {
+					state.encounteredNull = true
+				}
+				continue
+			}
+
+			var err error
+			current, err = state.add(current, inputValues[i])
+			if err != nil {
+				return nulls, err
+			}
+			values[outputIndex] = current
+		}
+		outputOffset += input.Len
+	}
+	state.current = current
+	return nulls, nil
+}
+
+func cumulativeSumSpans[T arrow.NumericType](ctx *exec.KernelCtx, state *cumulativeSumState[T], inputs []*exec.ArraySpan, out *exec.ExecResult, needsValidity bool) error {
+	prepareCumulativeOutput[T](ctx, out, needsValidity)
+	values := exec.GetSpanValues[T](out, 1)
+
+	if !needsValidity && !state.encounteredNull {
+		if state.checked {
+			if err := cumulativeSumNoNullsChecked(state, inputs, values); err != nil {
+				out.Release()
+				return err
+			}
+		} else {
+			cumulativeSumNoNulls(state, inputs, values)
+		}
+		return nil
+	}
+
+	var (
+		nulls int64
+		err   error
+	)
+	if state.checked {
+		nulls, err = cumulativeSumWithNullsChecked(state, inputs, values, out.Buffers[0].Buf)
+	} else {
+		nulls = cumulativeSumWithNulls(state, inputs, values, out.Buffers[0].Buf)
+	}
+	if err != nil {
+		out.Release()
+		return err
+	}
 	out.Nulls = nulls
 	return nil
 }
