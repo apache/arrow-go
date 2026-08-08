@@ -34,7 +34,7 @@ var (
 		Description: `Return the cumulative sum of the input array. Integer values
 wrap on overflow; nulls stop the remaining output unless SkipNulls is enabled.
 A nil Start uses zero. For chunked input, accumulation continues across all
-chunks and the result is returned as one array.`,
+chunks and the result is returned as a chunked array.`,
 		ArgNames:    []string{"values"},
 		OptionsType: "CumulativeOptions",
 	}
@@ -43,7 +43,7 @@ chunks and the result is returned as one array.`,
 		Description: `Return the cumulative sum of the input array and report
 integer overflow. Null handling and Start follow CumulativeOptions. For
 chunked input, accumulation continues across all chunks and the result is
-returned as one array.`,
+returned as a chunked array.`,
 		ArgNames:    []string{"values"},
 		OptionsType: "CumulativeOptions",
 	}

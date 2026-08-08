@@ -355,6 +355,38 @@ func TestCumulativeOptionsSerialization(t *testing.T) {
 	}
 }
 
+func TestCumulativeOptionsDictionarySerialization(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictValues := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int64, `[10]`)
+	defer dictValues.Release()
+	dictIndices := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int8, `[0]`)
+	defer dictIndices.Release()
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.PrimitiveTypes.Int64,
+	}
+	dict := array.NewDictionaryArray(dictType, dictIndices, dictValues)
+	defer dict.Release()
+
+	start, err := scalar.GetScalar(dict, 0)
+	require.NoError(t, err)
+	expr := compute.NewCall("cumulative_sum", []compute.Expression{compute.NewFieldRef("values")},
+		&compute.CumulativeOptions{Start: start})
+	defer expr.Release()
+
+	serialized, err := compute.SerializeExpr(expr, mem)
+	require.NoError(t, err)
+	defer serialized.Release()
+
+	roundTripped, err := compute.DeserializeExpr(mem, serialized)
+	require.NoError(t, err)
+	defer roundTripped.Release()
+
+	assert.True(t, expr.Equals(roundTripped))
+}
+
 func TestCumulativeSumChunked(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -366,14 +398,16 @@ func TestCumulativeSumChunked(t *testing.T) {
 	defer first.Release()
 	defer second.Release()
 
-	expected := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1, 3, 6, 10]`)
+	expectedArray := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1, 3, 6, 10]`)
+	defer expectedArray.Release()
+	expected := arrow.NewChunked(arrow.PrimitiveTypes.Int32, []arrow.Array{expectedArray})
 	defer expected.Release()
 
 	result, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{}, &compute.ChunkedDatum{Value: input})
 	require.NoError(t, err)
 	defer result.Release()
-	require.Equal(t, compute.KindArray, result.Kind())
-	assertDatumsEqual(t, &compute.ArrayDatum{Value: expected.Data()}, result, nil, nil)
+	require.Equal(t, compute.KindChunked, result.Kind())
+	assertDatumsEqual(t, &compute.ChunkedDatum{Value: expected}, result, nil, nil)
 
 }
 
@@ -395,13 +429,15 @@ func TestCumulativeSumChunkedOutputIgnoresChunkSizeAndEmptyChunks(t *testing.T) 
 	ctx := compute.SetExecCtx(context.Background(), execCtx)
 	ctx = compute.WithAllocator(ctx, mem)
 
-	expected := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1, 3, 6, 10]`)
+	expectedArray := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1, 3, 6, 10]`)
+	defer expectedArray.Release()
+	expected := arrow.NewChunked(arrow.PrimitiveTypes.Int32, []arrow.Array{expectedArray})
 	defer expected.Release()
 	result, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{}, &compute.ChunkedDatum{Value: input})
 	require.NoError(t, err)
 	defer result.Release()
-	require.Equal(t, compute.KindArray, result.Kind())
-	assertDatumsEqual(t, &compute.ArrayDatum{Value: expected.Data()}, result, nil, nil)
+	require.Equal(t, compute.KindChunked, result.Kind())
+	assertDatumsEqual(t, &compute.ChunkedDatum{Value: expected}, result, nil, nil)
 }
 
 func TestCumulativeSumStateAcrossChunks(t *testing.T) {
@@ -425,14 +461,16 @@ func TestCumulativeSumStateAcrossChunks(t *testing.T) {
 		{name: "skip nulls", opts: compute.CumulativeOptions{SkipNulls: true}, expected: `[1, null, 3, 6]`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			expected := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, tc.expected)
+			expectedArray := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, tc.expected)
+			defer expectedArray.Release()
+			expected := arrow.NewChunked(arrow.PrimitiveTypes.Int32, []arrow.Array{expectedArray})
 			defer expected.Release()
 
 			result, err := compute.CumulativeSum(ctx, tc.opts, &compute.ChunkedDatum{Value: input})
 			require.NoError(t, err)
 			defer result.Release()
-			require.Equal(t, compute.KindArray, result.Kind())
-			assertDatumsEqual(t, &compute.ArrayDatum{Value: expected.Data()}, result, nil, nil)
+			require.Equal(t, compute.KindChunked, result.Kind())
+			assertDatumsEqual(t, &compute.ChunkedDatum{Value: expected}, result, nil, nil)
 		})
 	}
 }
