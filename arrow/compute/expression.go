@@ -377,7 +377,43 @@ func (c *Call) Equals(other Expression) bool {
 	if opt, ok := c.options.(FunctionOptionsEqual); ok {
 		return opt.Equals(rhs.options)
 	}
-	return reflect.DeepEqual(c.options, rhs.options)
+	return equalFunctionOptions(c.options, rhs.options)
+}
+
+func equalFunctionOptions(lhs, rhs FunctionOptions) bool {
+	if left, ok := cumulativeOptions(lhs); ok {
+		right, ok := cumulativeOptions(rhs)
+		if !ok {
+			return false
+		}
+		if left == nil || right == nil {
+			return left == nil && right == nil
+		}
+		return left.SkipNulls == right.SkipNulls && equalOptionalScalar(left.Start, right.Start)
+	}
+
+	if lhs == nil || rhs == nil {
+		return lhs == nil && rhs == nil
+	}
+	return reflect.DeepEqual(lhs, rhs)
+}
+
+func cumulativeOptions(opts FunctionOptions) (*CumulativeOptions, bool) {
+	switch opts := opts.(type) {
+	case CumulativeOptions:
+		return &opts, true
+	case *CumulativeOptions:
+		return opts, true
+	default:
+		return nil, false
+	}
+}
+
+func equalOptionalScalar(lhs, rhs scalar.Scalar) bool {
+	if lhs == nil || rhs == nil {
+		return lhs == nil && rhs == nil
+	}
+	return scalar.Equals(lhs, rhs)
 }
 
 func (c *Call) Release() {
@@ -533,6 +569,7 @@ var (
 	funcOptsTypes  = []FunctionOptions{
 		SetLookupOptions{}, ArithmeticOptions{}, CastOptions{},
 		FilterOptions{}, NullOptions{}, StrptimeOptions{}, MakeStructOptions{},
+		CumulativeOptions{},
 	}
 )
 
@@ -880,7 +917,7 @@ func DeserializeExpr(mem memory.Allocator, buf *memory.Buffer) (Expression, erro
 						}
 
 						optionsVal := reflect.New(funcOptionsMap[string(typname.(*scalar.Binary).Data())]).Interface()
-						if err := scalar.FromScalar(optsScalar.(*scalar.Struct), optionsVal); err != nil {
+						if err := scalar.FromScalarWithAllocator(optsScalar.(*scalar.Struct), optionsVal, mem); err != nil {
 							return nil, err
 						}
 						opts = optionsVal.(FunctionOptions)

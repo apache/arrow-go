@@ -48,9 +48,27 @@ type hasTypename interface {
 var (
 	hasTypenameType = reflect.TypeOf((*hasTypename)(nil)).Elem()
 	dataTypeType    = reflect.TypeOf((*arrow.DataType)(nil)).Elem()
+	scalarType      = reflect.TypeOf((*Scalar)(nil)).Elem()
 )
 
 func FromScalar(sc *Struct, val interface{}) error {
+	return FromScalarWithAllocator(sc, val, memory.DefaultAllocator)
+}
+
+// FromScalarWithAllocator populates val from a Struct scalar, allocating any
+// cloned scalar fields with mem.
+func FromScalarWithAllocator(sc *Struct, val interface{}, mem memory.Allocator) error {
+	var rollbacks []func()
+	err := fromScalarWithAllocator(sc, val, mem, &rollbacks)
+	if err != nil {
+		for i := len(rollbacks) - 1; i >= 0; i-- {
+			rollbacks[i]()
+		}
+	}
+	return err
+}
+
+func fromScalarWithAllocator(sc *Struct, val interface{}, mem memory.Allocator, rollbacks *[]func()) error {
 	if sc == nil || len(sc.Value) == 0 {
 		return nil
 	}
@@ -76,7 +94,7 @@ func FromScalar(sc *Struct, val interface{}) error {
 		if err != nil {
 			return err
 		}
-		if err := setFromScalar(fldVal, value.Field(i)); err != nil {
+		if err := setFromScalar(fldVal, value.Field(i), mem, rollbacks); err != nil {
 			return err
 		}
 	}
@@ -84,7 +102,27 @@ func FromScalar(sc *Struct, val interface{}) error {
 	return nil
 }
 
-func setFromScalar(s Scalar, v reflect.Value) error {
+func setFromScalar(s Scalar, v reflect.Value, mem memory.Allocator, rollbacks *[]func()) error {
+	if v.Type() == scalarType {
+		if !s.IsValid() && s.DataType().ID() == arrow.NULL {
+			v.Set(reflect.Zero(v.Type()))
+			return nil
+		}
+
+		clone, err := cloneScalar(s, mem)
+		if err != nil {
+			return err
+		}
+		v.Set(reflect.ValueOf(clone))
+		*rollbacks = append(*rollbacks, func() {
+			if releasable, ok := clone.(interface{ Release() }); ok {
+				releasable.Release()
+			}
+			v.Set(reflect.Zero(v.Type()))
+		})
+		return nil
+	}
+
 	if v.Type() == dataTypeType {
 		v.Set(reflect.ValueOf(s.DataType()))
 		return nil
@@ -110,7 +148,7 @@ func setFromScalar(s Scalar, v reflect.Value) error {
 	case ListScalar:
 		return fromListScalar(s, v)
 	case *Struct:
-		return FromScalar(s, v.Interface())
+		return fromScalarWithAllocator(s, v.Interface(), mem, rollbacks)
 	default:
 		if v.Type() == reflect.TypeOf(arrow.TimeUnit(0)) {
 			v.Set(reflect.ValueOf(arrow.TimeUnit(s.value().(uint32))))
@@ -122,11 +160,17 @@ func setFromScalar(s Scalar, v reflect.Value) error {
 }
 
 func ToScalar(val interface{}, mem memory.Allocator) (Scalar, error) {
+	if val == nil {
+		return ScalarNull, nil
+	}
+
 	switch v := val.(type) {
 	case arrow.DataType:
 		return MakeScalar(v), nil
 	case TypeToScalar:
 		return v.ToScalar()
+	case Scalar:
+		return cloneScalar(v, mem)
 	}
 
 	v := reflect.Indirect(reflect.ValueOf(val))
@@ -134,6 +178,13 @@ func ToScalar(val interface{}, mem memory.Allocator) (Scalar, error) {
 	case reflect.Struct:
 		scalars := make([]Scalar, 0, v.Type().NumField())
 		fields := make([]string, 0, v.Type().NumField())
+		releaseScalars := func() {
+			for _, s := range scalars {
+				if releasable, ok := s.(Releasable); ok {
+					releasable.Release()
+				}
+			}
+		}
 		for i := 0; i < v.Type().NumField(); i++ {
 			fld := v.Type().Field(i)
 			tag := fld.Tag.Get("compute")
@@ -144,6 +195,7 @@ func ToScalar(val interface{}, mem memory.Allocator) (Scalar, error) {
 			fldVal := v.Field(i)
 			s, err := ToScalar(fldVal.Interface(), mem)
 			if err != nil {
+				releaseScalars()
 				return nil, err
 			}
 			scalars = append(scalars, s)
@@ -156,12 +208,50 @@ func ToScalar(val interface{}, mem memory.Allocator) (Scalar, error) {
 			fields = append(fields, "_type_name")
 		}
 
-		return NewStructScalarWithNames(scalars, fields)
+		result, err := NewStructScalarWithNames(scalars, fields)
+		if err != nil {
+			releaseScalars()
+			return nil, err
+		}
+		return result, nil
 	case reflect.Slice:
 		return createListScalar(v, mem)
 	default:
 		return MakeScalar(val), nil
 	}
+}
+
+func cloneScalar(val Scalar, mem memory.Allocator) (Scalar, error) {
+	if !val.IsValid() {
+		return MakeNullScalar(val.DataType()), nil
+	}
+
+	if binary, ok := val.(BinaryScalar); ok {
+		data := mem.Allocate(len(binary.Data()))
+		copy(data, binary.Data())
+		buf := memory.NewBufferWithAllocator(data, mem)
+		defer buf.Release()
+
+		switch val.(type) {
+		case *String:
+			return NewStringScalarFromBuffer(buf), nil
+		case *LargeString:
+			return NewLargeStringScalarFromBuffer(buf), nil
+		case *LargeBinary:
+			return NewLargeBinaryScalar(buf), nil
+		case *FixedSizeBinary:
+			return NewFixedSizeBinaryScalar(buf, val.DataType()), nil
+		default:
+			return NewBinaryScalar(buf, val.DataType()), nil
+		}
+	}
+
+	arr, err := MakeArrayFromScalar(val, 1, mem)
+	if err != nil {
+		return nil, err
+	}
+	defer arr.Release()
+	return GetScalar(arr, 0)
 }
 
 func createListScalar(sliceval reflect.Value, mem memory.Allocator) (Scalar, error) {

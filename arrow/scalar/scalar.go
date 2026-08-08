@@ -589,11 +589,11 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 
 	switch arr := arr.(type) {
 	case *array.Binary:
-		buf := memory.NewBufferBytes(arr.Value(idx))
+		buf := memory.NewBufferBytes(append([]byte(nil), arr.Value(idx)...))
 		defer buf.Release()
 		return NewBinaryScalar(buf, arr.DataType()), nil
 	case *array.LargeBinary:
-		buf := memory.NewBufferBytes(arr.Value(idx))
+		buf := memory.NewBufferBytes(append([]byte(nil), arr.Value(idx)...))
 		defer buf.Release()
 		return NewLargeBinaryScalar(buf), nil
 	case *array.Boolean:
@@ -617,7 +617,7 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 		}
 		return NewExtensionScalar(storage, arr.DataType()), nil
 	case *array.FixedSizeBinary:
-		buf := memory.NewBufferBytes(arr.Value(idx))
+		buf := memory.NewBufferBytes(append([]byte(nil), arr.Value(idx)...))
 		defer buf.Release()
 		return NewFixedSizeBinaryScalar(buf, arr.DataType()), nil
 	case *array.FixedSizeList:
@@ -864,6 +864,26 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 		data := finishFixedWidth(arrow.Decimal256Traits.CastToBytes([]decimal256.Num{s.Value}))
 		defer data.Release()
 		return array.MakeFromData(data), nil
+	case *Dictionary:
+		if err := s.Validate(); err != nil {
+			return nil, err
+		}
+
+		indices, err := MakeArrayFromScalar(s.Value.Index, length, mem)
+		if err != nil {
+			return nil, err
+		}
+		defer indices.Release()
+
+		// Copy the dictionary values as well as the indices so the resulting
+		// scalar does not retain memory owned by the source dictionary.
+		dict, err := array.Concatenate([]arrow.Array{s.Value.Dict}, mem)
+		if err != nil {
+			return nil, err
+		}
+		defer dict.Release()
+
+		return array.NewDictionaryArray(s.DataType(), indices, dict), nil
 	case PrimitiveScalar:
 		data := finishFixedWidth(s.Data())
 		defer data.Release()
