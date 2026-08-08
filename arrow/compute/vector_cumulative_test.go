@@ -103,6 +103,33 @@ func TestCumulativeSumAdditionalInputs(t *testing.T) {
 	require.NoError(t, err)
 	defer result.Release()
 	assertDatumsEqual(t, &compute.ArrayDatum{Value: slicedExpected.Data()}, result, nil, nil)
+
+	t.Run("sliced nulls", func(t *testing.T) {
+		fullInput := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[9, null, 2, 3, 99]`)
+		defer fullInput.Release()
+		slicedInput := array.NewSlice(fullInput, 1, 4)
+		defer slicedInput.Release()
+
+		tests := []struct {
+			name string
+			opts compute.CumulativeOptions
+			want string
+		}{
+			{name: "propagate nulls", want: `[null, null, null]`},
+			{name: "skip nulls", opts: compute.CumulativeOptions{SkipNulls: true}, want: `[null, 2, 5]`},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				expected := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, tc.want)
+				defer expected.Release()
+
+				result, err := compute.CumulativeSum(ctx, tc.opts, &compute.ArrayDatum{Value: slicedInput.Data()})
+				require.NoError(t, err)
+				defer result.Release()
+				assertDatumsEqual(t, &compute.ArrayDatum{Value: expected.Data()}, result, nil, nil)
+			})
+		}
+	})
 }
 
 func TestCumulativeSumNullsAndStart(t *testing.T) {
