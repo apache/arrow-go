@@ -571,6 +571,81 @@ func TestDictionaryEncode(t *testing.T) {
 			assert.Equal(t, values.ValueStr(i), encodedResult.Dictionary().ValueStr(idx))
 		}
 	}
+
+	_, err = compute.DictionaryEncode(ctx, compute.DictionaryEncodeOptions{
+		NullEncoding: compute.NullEncodingBehavior(99),
+	}, &compute.ArrayDatum{Value: values.Data()})
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+}
+
+func TestDictionaryEncodeArraySlicedInput(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	values, _, err := array.FromJSON(mem, arrow.BinaryTypes.String,
+		strings.NewReader(`["ignored", "foo", null, "bar", "foo", "ignored"]`))
+	require.NoError(t, err)
+	defer values.Release()
+
+	input := array.NewSlice(values, 1, 5)
+	defer input.Release()
+
+	result, err := compute.DictionaryEncodeArray(ctx, compute.DictionaryEncodeOptions{}, input)
+	require.NoError(t, err)
+	defer result.Release()
+
+	encoded := result.(*array.Dictionary)
+	require.Equal(t, 4, encoded.Len())
+	require.Equal(t, 2, encoded.Dictionary().Len())
+	assert.Equal(t, "foo", encoded.Dictionary().ValueStr(0))
+	assert.Equal(t, "bar", encoded.Dictionary().ValueStr(1))
+	assert.Equal(t, []int32{0, 0, 1, 0},
+		arrow.Int32Traits.CastFromBytes(encoded.Indices().Data().Buffers()[1].Bytes()))
+	assert.True(t, encoded.IsNull(1))
+}
+
+func TestDictionaryEncodePreservesTimestampType(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	dt := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "UTC"}
+	builder := array.NewTimestampBuilder(mem, dt)
+	builder.AppendValues([]arrow.Timestamp{1, 2, 1}, nil)
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	result, err := compute.DictionaryEncodeArray(ctx, compute.DictionaryEncodeOptions{}, input)
+	require.NoError(t, err)
+	defer result.Release()
+
+	encoded := result.(*array.Dictionary)
+	require.True(t, arrow.TypeEqual(dt, encoded.Dictionary().DataType()))
+	require.Equal(t, 2, encoded.Dictionary().Len())
+}
+
+func TestDictionaryEncodeZeroChunkedArray(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	input := arrow.NewChunked(arrow.BinaryTypes.String, nil)
+	defer input.Release()
+
+	out, err := compute.DictionaryEncode(ctx, compute.DictionaryEncodeOptions{},
+		&compute.ChunkedDatum{Value: input})
+	require.NoError(t, err)
+	defer out.Release()
+
+	result := out.(*compute.ChunkedDatum).Value
+	assert.Equal(t, 0, result.Len())
+	assert.Empty(t, result.Chunks())
+	assert.True(t, arrow.TypeEqual(&arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int32,
+		ValueType: arrow.BinaryTypes.String,
+	}, result.DataType()))
 }
 
 func TestDictionaryEncodeChunked(t *testing.T) {

@@ -23,7 +23,6 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
-	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -93,26 +92,24 @@ type DictionaryEncodeOptions struct {
 func (DictionaryEncodeOptions) TypeName() string { return "DictionaryEncodeOptions" }
 
 type dictionaryEncodeAction struct {
-	mem           memory.Allocator
-	nullEncoding  NullEncodingBehavior
-	indices       []int32
-	nullPositions []int
-	err           error
+	nullEncoding NullEncodingBehavior
+	indices      *bufferBuilder[int32]
+	validity     validityBuilder
+	length       int
+	nulls        int
+	err          error
 }
 
 func (a *dictionaryEncodeAction) Reset() error {
-	a.indices = a.indices[:0]
-	a.nullPositions = a.nullPositions[:0]
+	a.length = 0
+	a.nulls = 0
 	a.err = nil
 	return nil
 }
 
 func (a *dictionaryEncodeAction) Reserve(n int) error {
-	if cap(a.indices)-len(a.indices) < n {
-		indices := make([]int32, len(a.indices), len(a.indices)+n)
-		copy(indices, a.indices)
-		a.indices = indices
-	}
+	a.indices.reserve(n)
+	a.validity.Reserve(int64(n))
 	return nil
 }
 
@@ -127,9 +124,11 @@ func (a *dictionaryEncodeAction) appendIndex(idx int, valid bool) {
 		return
 	}
 
-	a.indices = append(a.indices, int32(idx))
+	a.indices.unsafeAppend(int32(idx))
+	a.validity.UnsafeAppend(valid)
+	a.length++
 	if !valid {
-		a.nullPositions = append(a.nullPositions, len(a.indices)-1)
+		a.nulls++
 	}
 }
 
@@ -138,27 +137,23 @@ func (a *dictionaryEncodeAction) Flush(out *exec.ExecResult) error {
 		return a.err
 	}
 
-	out.Len = int64(len(a.indices))
-	out.Nulls = int64(len(a.nullPositions))
-	if len(a.indices) != 0 {
-		data := memory.NewResizableBuffer(a.mem)
-		data.Resize(len(a.indices) * arrow.Int32SizeBytes)
-		copy(data.Bytes(), arrow.Int32Traits.CastToBytes(a.indices))
-		out.Buffers[1].WrapBuffer(data)
+	out.Len = int64(a.length)
+	out.Nulls = int64(a.nulls)
+	if a.length != 0 {
+		out.Buffers[1].WrapBuffer(a.indices.finish())
+	} else {
+		a.indices.finish().Release()
 	}
 
-	if len(a.nullPositions) != 0 {
-		validity := memory.NewResizableBuffer(a.mem)
-		validity.Resize(int(bitutil.BytesForBits(int64(len(a.indices)))))
-		memory.Set(validity.Bytes(), 0xFF)
-		for _, pos := range a.nullPositions {
-			bitutil.ClearBit(validity.Bytes(), pos)
-		}
+	validity := a.validity.Finish()
+	if a.nulls != 0 {
 		out.Buffers[0].WrapBuffer(validity)
+	} else if validity != nil {
+		validity.Release()
 	}
 
-	a.indices = a.indices[:0]
-	a.nullPositions = a.nullPositions[:0]
+	a.length = 0
+	a.nulls = 0
 	return nil
 }
 
@@ -228,6 +223,10 @@ func (rhs *regularHashState) GetDictionary() (arrow.ArrayData, error) {
 }
 
 func doAppendBinary[OffsetT int32 | int64](action Action, memo hashing.MemoTable, arr *exec.ArraySpan) error {
+	if arr.Len == 0 {
+		return nil
+	}
+
 	var (
 		bitmap            = arr.Buffers[0].Buf
 		offsets           = exec.GetSpanOffsets[OffsetT](arr, 1)
@@ -501,11 +500,11 @@ func newMemoTable(mem memory.Allocator, dt arrow.Type) (hashing.MemoTable, error
 func regularHashInit(dt arrow.DataType, actionInit initAction, appendFn func(Action, hashing.MemoTable, *exec.ArraySpan) error) exec.KernelInitFn {
 	return func(ctx *exec.KernelCtx, args exec.KernelInitArgs) (exec.KernelState, error) {
 		mem := exec.GetAllocator(ctx.Ctx)
-		memoTable, err := newMemoTable(mem, dt.ID())
+		action, err := actionInit(args.Inputs[0], args.Options, mem)
 		if err != nil {
 			return nil, err
 		}
-		action, err := actionInit(args.Inputs[0], args.Options, mem)
+		memoTable, err := newMemoTable(mem, dt.ID())
 		if err != nil {
 			return nil, err
 		}
@@ -707,8 +706,9 @@ func initDictionaryEncode(_ arrow.DataType, options any, mem memory.Allocator) (
 	}
 
 	return &dictionaryEncodeAction{
-		mem:          mem,
 		nullEncoding: opts.NullEncoding,
+		indices:      newBufferBuilder[int32](mem),
+		validity:     validityBuilder{mem: mem},
 	}, nil
 }
 

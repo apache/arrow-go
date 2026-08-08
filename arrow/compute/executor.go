@@ -1009,6 +1009,8 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 		for _, o := range out {
 			if o.Len() > 0 {
 				acc = append(acc, o)
+			} else if output.Kind() == KindArray {
+				o.Release()
 			}
 		}
 		if output.Kind() != KindChunked {

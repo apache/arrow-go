@@ -883,7 +883,7 @@ func (bldr *execBufBuilder) finish() (buf *memory.Buffer) {
 	}
 	bldr.buffer.Resize(bldr.sz)
 	buf = bldr.buffer
-	bldr.buffer, bldr.sz = nil, 0
+	bldr.buffer, bldr.data, bldr.sz = nil, nil, 0
 	return
 }
 

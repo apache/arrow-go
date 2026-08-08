@@ -68,6 +68,16 @@ func DictionaryEncode(ctx context.Context, opts DictionaryEncodeOptions, values 
 	return CallFunction(ctx, "dictionary_encode", &opts, values)
 }
 
+func DictionaryEncodeArray(ctx context.Context, opts DictionaryEncodeOptions, values arrow.Array) (arrow.Array, error) {
+	out, err := DictionaryEncode(ctx, opts, &ArrayDatum{Value: values.Data()})
+	if err != nil {
+		return nil, err
+	}
+	defer out.Release()
+
+	return out.(*ArrayDatum).MakeArray(), nil
+}
+
 func RegisterVectorHash(reg FunctionRegistry) {
 	unique, _, dictEncode := kernels.GetVectorHashKernels()
 	uniqFn := NewVectorFunction("unique", Unary(), uniqueDoc)
