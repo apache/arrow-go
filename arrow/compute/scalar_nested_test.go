@@ -198,6 +198,64 @@ func makeLargeListViewWithOutOfOrderOffsets(mem memory.Allocator) arrow.Array {
 	return result
 }
 
+func TestListElementNestedListViewChild(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	tests := []struct {
+		name    string
+		build   func(memory.Allocator) arrow.Array
+		elemTyp arrow.DataType
+	}{
+		{"list view", func(mem memory.Allocator) arrow.Array {
+			outer := array.NewListBuilder(mem, arrow.ListViewOf(arrow.PrimitiveTypes.Int32))
+			inner := outer.ValueBuilder().(*array.ListViewBuilder)
+			values := inner.ValueBuilder().(*array.Int32Builder)
+			outer.Append(true)
+			values.AppendValues([]int32{10, 11, 20, 21}, nil)
+			inner.AppendDimensions(0, 2)
+			inner.AppendDimensions(2, 2)
+			result := outer.NewArray()
+			outer.Release()
+			return result
+		}, arrow.ListViewOf(arrow.PrimitiveTypes.Int32)},
+		{"large list view", func(mem memory.Allocator) arrow.Array {
+			outer := array.NewListBuilder(mem, arrow.LargeListViewOf(arrow.PrimitiveTypes.Int32))
+			inner := outer.ValueBuilder().(*array.LargeListViewBuilder)
+			values := inner.ValueBuilder().(*array.Int32Builder)
+			outer.Append(true)
+			values.AppendValues([]int32{10, 11, 20, 21}, nil)
+			inner.AppendDimensions(0, 2)
+			inner.AppendDimensions(2, 2)
+			result := outer.NewArray()
+			outer.Release()
+			return result
+		}, arrow.LargeListViewOf(arrow.PrimitiveTypes.Int32)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			input := tc.build(mem)
+			defer input.Release()
+			expected := listElementInput(t, mem, tc.elemTyp, `[[20, 21]]`)
+			defer expected.Release()
+
+			result, err := compute.ListElement(
+				context.Background(),
+				&compute.ArrayDatum{Value: input.Data()},
+				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(1)},
+			)
+			require.NoError(t, err)
+			defer result.Release()
+
+			actual := result.(*compute.ArrayDatum).MakeArray()
+			defer actual.Release()
+			require.NoError(t, array.ValidateFull(actual))
+			assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+		})
+	}
+}
+
 func TestListElementSingleIndexArray(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
