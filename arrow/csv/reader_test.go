@@ -901,6 +901,36 @@ func benchRead(b *testing.B, raw []byte, rows, cols, chunks int) {
 	}
 }
 
+func TestCSVReaderAppendsNullAfterPreviousParseError(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "int8", Type: arrow.PrimitiveTypes.Int8},
+		{Name: "int16", Type: arrow.PrimitiveTypes.Int16},
+		{Name: "int32", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "int64", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "uint8", Type: arrow.PrimitiveTypes.Uint8},
+		{Name: "uint16", Type: arrow.PrimitiveTypes.Uint16},
+		{Name: "uint32", Type: arrow.PrimitiveTypes.Uint32},
+		{Name: "uint64", Type: arrow.PrimitiveTypes.Uint64},
+		{Name: "float16", Type: arrow.FixedWidthTypes.Float16},
+		{Name: "float32", Type: arrow.PrimitiveTypes.Float32},
+		{Name: "float64", Type: arrow.PrimitiveTypes.Float64},
+		{Name: "timestamp", Type: arrow.FixedWidthTypes.Timestamp_ms},
+		{Name: "date32", Type: arrow.PrimitiveTypes.Date32},
+		{Name: "date64", Type: arrow.PrimitiveTypes.Date64},
+		{Name: "decimal128", Type: &arrow.Decimal128Type{Precision: 10, Scale: 2}},
+		{Name: "decimal256", Type: &arrow.Decimal256Type{Precision: 10, Scale: 2}},
+	}, nil)
+
+	r := csv.NewReader(strings.NewReader(strings.Repeat("bad,", schema.NumFields()-1)+"bad\n"), schema)
+	defer r.Release()
+
+	require.True(t, r.Next())
+	require.Error(t, r.Err())
+	for i, col := range r.RecordBatch().Columns() {
+		require.Truef(t, col.IsNull(0), "column %d (%s) should be null", i, col.DataType())
+	}
+}
+
 func TestInferringSchema(t *testing.T) {
 	var b bytes.Buffer
 	wr := stdcsv.NewWriter(&b)

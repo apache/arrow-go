@@ -385,6 +385,12 @@ func (r *Reader) isNull(val string) bool {
 	return false
 }
 
+func (r *Reader) setParseError(err error) {
+	if r.err == nil {
+		r.err = err
+	}
+}
+
 func (r *Reader) read(recs []string) {
 	for i, str := range recs {
 		r.fieldConverter[i](str)
@@ -532,7 +538,7 @@ func (r *Reader) parseBool(field array.Builder, str string) {
 
 	v, err := strconv.ParseBool(str)
 	if err != nil {
-		r.err = fmt.Errorf("%w: unrecognized boolean: %s", err, str)
+		r.setParseError(fmt.Errorf("%w: unrecognized boolean: %s", err, str))
 		field.AppendNull()
 		return
 	}
@@ -547,8 +553,8 @@ func (r *Reader) parseInt8(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseInt(str, 10, 8)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -563,8 +569,8 @@ func (r *Reader) parseInt16(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseInt(str, 10, 16)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -579,8 +585,8 @@ func (r *Reader) parseInt32(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseInt(str, 10, 32)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -595,8 +601,8 @@ func (r *Reader) parseInt64(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseInt(str, 10, 64)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -611,8 +617,8 @@ func (r *Reader) parseUint8(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseUint(str, 10, 8)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -627,8 +633,8 @@ func (r *Reader) parseUint16(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseUint(str, 10, 16)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -643,8 +649,8 @@ func (r *Reader) parseUint32(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseUint(str, 10, 32)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -659,8 +665,8 @@ func (r *Reader) parseUint64(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseUint(str, 10, 64)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -675,8 +681,8 @@ func (r *Reader) parseFloat16(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseFloat(str, 32)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -690,8 +696,8 @@ func (r *Reader) parseFloat32(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseFloat(str, 32)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -705,8 +711,8 @@ func (r *Reader) parseFloat64(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseFloat(str, 64)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -721,8 +727,8 @@ func (r *Reader) parseTimestamp(field array.Builder, str string, unit arrow.Time
 	}
 
 	v, err := arrow.TimestampFromString(str, unit)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -737,8 +743,8 @@ func (r *Reader) parseDate32(field array.Builder, str string) {
 	}
 
 	tm, err := time.Parse("2006-01-02", str)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -752,8 +758,8 @@ func (r *Reader) parseDate64(field array.Builder, str string) {
 	}
 
 	tm, err := time.Parse("2006-01-02", str)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -767,8 +773,8 @@ func (r *Reader) parseTime32(field array.Builder, str string, unit arrow.TimeUni
 	}
 
 	val, err := arrow.Time32FromString(str, unit)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -782,8 +788,8 @@ func (r *Reader) parseDecimal128(field array.Builder, str string, prec, scale in
 	}
 
 	val, err := decimal128.FromString(str, prec, scale)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -797,8 +803,8 @@ func (r *Reader) parseDecimal256(field array.Builder, str string, prec, scale in
 	}
 
 	val, err := decimal256.FromString(str, prec, scale)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
