@@ -25,6 +25,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 )
 
@@ -38,10 +39,7 @@ func listElementOutputType(_ *exec.KernelCtx, inputTypes []arrow.DataType) (arro
 
 func getListElementIndex(value *exec.ExecValue) (uint64, error) {
 	if value.IsScalar() {
-		if !value.Scalar.IsValid() {
-			return 0, fmt.Errorf("%w: list_element index must not be null", arrow.ErrInvalid)
-		}
-		return scalarIndex(value.Scalar)
+		return listElementScalarIndex(value.Scalar)
 	}
 
 	if value.Array.Len == 0 {
@@ -74,6 +72,18 @@ func getListElementIndex(value *exec.ExecValue) (uint64, error) {
 	default:
 		return 0, fmt.Errorf("%w: invalid list_element index type %s", arrow.ErrType, value.Array.Type)
 	}
+}
+
+func ValidateListElementScalarIndex(value scalar.Scalar) error {
+	_, err := listElementScalarIndex(value)
+	return err
+}
+
+func listElementScalarIndex(value scalar.Scalar) (uint64, error) {
+	if !value.IsValid() {
+		return 0, fmt.Errorf("%w: list_element index must not be null", arrow.ErrInvalid)
+	}
+	return scalarIndex(value)
 }
 
 func scalarIndex(value scalar.Scalar) (uint64, error) {
@@ -226,7 +236,7 @@ func listElementConcat(ctx *exec.KernelCtx, list *exec.ArraySpan, index uint64, 
 
 	for i := int64(0); i < list.Len; i++ {
 		if len(list.Buffers[0].Buf) != 0 && bitutil.BitIsNotSet(list.Buffers[0].Buf, int(list.Offset+i)) {
-			pieces = append(pieces, array.MakeArrayOfNull(exec.GetAllocator(ctx.Ctx), elemType, 1))
+			pieces = append(pieces, listElementMakeNullLike(ctx, values, elemType))
 			continue
 		}
 
@@ -254,6 +264,40 @@ func listElementConcat(ctx *exec.KernelCtx, list *exec.ArraySpan, index uint64, 
 	return nil
 }
 
+func listElementMakeNullLike(ctx *exec.KernelCtx, values arrow.Array, elemType arrow.DataType) arrow.Array {
+	mem := exec.GetAllocator(ctx.Ctx)
+	if elemType.ID() == arrow.RUN_END_ENCODED {
+		runEndType := elemType.(*arrow.RunEndEncodedType)
+		builder := array.NewRunEndEncodedBuilder(mem, runEndType.RunEnds(), runEndType.Encoded())
+		builder.AppendNull()
+		result := builder.NewArray()
+		builder.Release()
+		return result
+	}
+	if values.Len() == 0 || len(values.Data().Buffers()) == 0 ||
+		elemType.ID() == arrow.NULL || arrow.IsUnion(elemType.ID()) {
+		return array.MakeArrayOfNull(mem, elemType, 1)
+	}
+
+	source := array.NewSlice(values, 0, 1)
+	defer source.Release()
+
+	sourceData := source.Data()
+	validity := memory.NewResizableBuffer(mem)
+	validity.Resize(int(bitutil.BytesForBits(int64(sourceData.Offset() + 1))))
+	memory.Set(validity.Bytes(), 0)
+	defer validity.Release()
+
+	buffers := append([]*memory.Buffer(nil), sourceData.Buffers()...)
+	buffers[0] = validity
+	data := array.NewData(sourceData.DataType(), 1, buffers, sourceData.Children(), 1, sourceData.Offset())
+	if dictionary := sourceData.Dictionary(); dictionary != nil {
+		data.SetDictionary(dictionary)
+	}
+	defer data.Release()
+	return array.MakeFromData(data)
+}
+
 func listElementTakeFallback(ctx *exec.KernelCtx, values *exec.ArraySpan, indices arrow.Array, out *exec.ExecResult) error {
 	elemType := values.Type
 	valuesArray := values.MakeArray()
@@ -274,7 +318,7 @@ func listElementTakeFallback(ctx *exec.KernelCtx, values *exec.ArraySpan, indice
 
 	for i := 0; i < indices.Len(); i++ {
 		if indices.IsNull(i) {
-			pieces = append(pieces, array.MakeArrayOfNull(exec.GetAllocator(ctx.Ctx), elemType, 1))
+			pieces = append(pieces, listElementMakeNullLike(ctx, valuesArray, elemType))
 			continue
 		}
 		selected, err := listElementTakeIndex(indices, i)
@@ -332,6 +376,7 @@ func listElementDenseUnionTake(ctx *exec.KernelCtx, values *exec.ArraySpan, indi
 
 	for i := range out.Children {
 		childIndices := out.Children[i].MakeArray()
+		out.Children[i] = exec.ArraySpan{}
 		childOut := &exec.ExecResult{Type: values.Children[i].Type}
 		err := listElementTakeOrFallback(ctx, &values.Children[i], childIndices, childOut)
 		childIndices.Release()
@@ -352,62 +397,52 @@ func listElementSparseUnionTake(ctx *exec.KernelCtx, values *exec.ArraySpan, ind
 	defer valuesArray.Release()
 
 	unionType := values.Type.(*arrow.SparseUnionType)
-	builder := array.NewSparseUnionBuilder(exec.GetAllocator(ctx.Ctx), unionType)
-	defer builder.Release()
-	builder.Reserve(indices.Len())
-	for i := 0; i < builder.NumChildren(); i++ {
-		builder.Child(i).Reserve(indices.Len())
-	}
+	typeIDBuilder := array.NewInt8Builder(exec.GetAllocator(ctx.Ctx))
+	defer typeIDBuilder.Release()
+	typeIDBuilder.Reserve(indices.Len())
 
 	for i := 0; i < indices.Len(); i++ {
-		var value scalar.Scalar
 		if indices.IsNull(i) {
-			value = scalar.MakeNullScalar(unionType)
+			typeIDBuilder.Append(unionType.TypeCodes()[0])
 		} else {
 			selected, err := listElementTakeIndex(indices, i)
 			if err != nil {
 				return err
 			}
-			value, err = scalar.GetScalar(valuesArray, int(selected))
-			if err != nil {
-				return err
-			}
-		}
-
-		if err := listElementAppendSparseUnionValue(builder, value.(*scalar.SparseUnion)); err != nil {
-			if releasable, ok := value.(scalar.Releasable); ok {
-				releasable.Release()
-			}
-			return err
-		}
-		if releasable, ok := value.(scalar.Releasable); ok {
-			releasable.Release()
+			typeIDBuilder.Append(valuesArray.(*array.SparseUnion).TypeCode(int(selected)))
 		}
 	}
 
-	result := builder.NewArray()
+	typeIDs := typeIDBuilder.NewArray()
+	defer typeIDs.Release()
+
+	children := make([]arrow.Array, len(values.Children))
+	defer func() {
+		for _, child := range children {
+			if child != nil {
+				child.Release()
+			}
+		}
+	}()
+	for i := range values.Children {
+		childOut := &exec.ExecResult{Type: values.Children[i].Type}
+		if err := listElementTakeOrFallback(ctx, &values.Children[i], indices, childOut); err != nil {
+			childOut.Release()
+			return err
+		}
+		children[i] = childOut.MakeArray()
+	}
+
+	childData := make([]arrow.ArrayData, len(children))
+	for i, child := range children {
+		childData[i] = child.Data()
+	}
+	data := array.NewData(unionType, indices.Len(),
+		[]*memory.Buffer{nil, typeIDs.Data().Buffers()[1]}, childData, 0, 0)
+	result := array.NewSparseUnionData(data)
+	data.Release()
 	defer result.Release()
 	out.TakeOwnership(result.Data())
-	return nil
-}
-
-func listElementAppendSparseUnionValue(builder *array.SparseUnionBuilder, value *scalar.SparseUnion) error {
-	builder.Append(value.TypeCode)
-	for i := 0; i < builder.NumChildren(); i++ {
-		child := builder.Child(i)
-		if i != value.ChildID {
-			child.AppendEmptyValue()
-			continue
-		}
-
-		if !value.IsValid() {
-			child.AppendNull()
-			continue
-		}
-		if err := scalar.Append(child, value.Value[i]); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 

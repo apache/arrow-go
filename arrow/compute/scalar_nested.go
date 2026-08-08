@@ -35,6 +35,8 @@ var listElementDoc = FunctionDoc{
 
 func validateListElementIndex(index Datum) error {
 	switch index.Kind() {
+	case KindScalar:
+		return kernels.ValidateListElementScalarIndex(index.(*ScalarDatum).Value)
 	case KindArray, KindChunked:
 		if index.Len() == 0 {
 			return fmt.Errorf("%w: list_element index array is empty", arrow.ErrInvalid)

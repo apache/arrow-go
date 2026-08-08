@@ -671,6 +671,276 @@ func TestListElementSparseUnionChild(t *testing.T) {
 	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
 }
 
+func TestListElementSparseUnionPreservesUnusualChildren(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictionaryType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.BinaryTypes.String,
+	}
+	encodedType := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.BinaryTypes.String)
+	unionType := arrow.SparseUnionOf(
+		[]arrow.Field{
+			{Name: "number", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			{Name: "dictionary", Type: dictionaryType, Nullable: true},
+			{Name: "encoded", Type: encodedType, Nullable: true},
+		},
+		[]arrow.UnionTypeCode{5, 42, 100},
+	)
+
+	builder := array.NewListBuilder(mem, unionType)
+	values := builder.ValueBuilder().(*array.SparseUnionBuilder)
+	numbers := values.Child(0).(*array.Int32Builder)
+	dictionaries := values.Child(1).(*array.BinaryDictionaryBuilder)
+	encoded := values.Child(2).(*array.RunEndEncodedBuilder)
+	encodedValues := encoded.ValueBuilder().(*array.StringBuilder)
+	appendValue := func(code arrow.UnionTypeCode, number int32, dictionary, encodedValue string) {
+		values.Append(code)
+		if code == 5 {
+			numbers.Append(number)
+		} else {
+			numbers.AppendNull()
+		}
+		if code == 42 {
+			require.NoError(t, dictionaries.AppendString(dictionary))
+		} else {
+			dictionaries.AppendNull()
+		}
+		encoded.Append(1)
+		if encodedValue == "" {
+			encodedValues.AppendNull()
+		} else {
+			encodedValues.Append(encodedValue)
+		}
+	}
+
+	builder.Append(true)
+	appendValue(5, 10, "", "")
+	appendValue(42, 0, "a", "")
+	builder.Append(true)
+	appendValue(100, 0, "", "inactive")
+	appendValue(5, 20, "", "")
+	builder.Append(false)
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	expectedBuilder := array.NewSparseUnionBuilder(mem, unionType)
+	expectedNumbers := expectedBuilder.Child(0).(*array.Int32Builder)
+	expectedDictionaries := expectedBuilder.Child(1).(*array.BinaryDictionaryBuilder)
+	expectedEncoded := expectedBuilder.Child(2).(*array.RunEndEncodedBuilder)
+	expectedEncodedValues := expectedEncoded.ValueBuilder().(*array.StringBuilder)
+	expectedBuilder.Append(42)
+	expectedNumbers.AppendNull()
+	require.NoError(t, expectedDictionaries.AppendString("a"))
+	expectedEncoded.Append(1)
+	expectedEncodedValues.AppendNull()
+	expectedBuilder.Append(5)
+	expectedNumbers.Append(20)
+	expectedDictionaries.AppendNull()
+	expectedEncoded.Append(1)
+	expectedEncodedValues.AppendNull()
+	expectedBuilder.Append(5)
+	expectedNumbers.AppendNull()
+	expectedDictionaries.AppendNull()
+	expectedEncoded.Append(1)
+	expectedEncodedValues.AppendNull()
+	expected := expectedBuilder.NewArray()
+	expectedBuilder.Release()
+	defer expected.Release()
+
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ArrayDatum{Value: input.Data()},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(1)},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	actual := result.(*compute.ArrayDatum).MakeArray()
+	defer actual.Release()
+	require.NoError(t, array.ValidateFull(actual))
+	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+
+	sliced := array.NewSlice(input, 1, 3)
+	defer sliced.Release()
+	slicedResult, err := compute.ListElement(
+		context.Background(),
+		&compute.ArrayDatum{Value: sliced.Data()},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(1)},
+	)
+	require.NoError(t, err)
+	defer slicedResult.Release()
+	slicedActual := slicedResult.(*compute.ArrayDatum).MakeArray()
+	defer slicedActual.Release()
+	require.NoError(t, array.ValidateFull(slicedActual))
+	slicedUnion := slicedActual.(*array.SparseUnion)
+	assert.Equal(t, []arrow.UnionTypeCode{5, 5}, slicedUnion.RawTypeCodes())
+	assert.Equal(t, int32(20), slicedUnion.Field(0).(*array.Int32).Value(0))
+	assert.True(t, slicedUnion.Field(0).IsNull(1))
+}
+
+func TestListElementNestedDictionaryWithNullParent(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictionaryType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.ListOf(arrow.PrimitiveTypes.Int32),
+	}
+	dictionaryValuesBuilder := array.NewListBuilder(mem, arrow.PrimitiveTypes.Int32)
+	dictionaryValuesBuilder.Append(true)
+	dictionaryValuesBuilder.ValueBuilder().(*array.Int32Builder).Append(7)
+	dictionaryValues := dictionaryValuesBuilder.NewArray()
+	dictionaryValuesBuilder.Release()
+	defer dictionaryValues.Release()
+
+	dictionaryIndicesBuilder := array.NewInt8Builder(mem)
+	dictionaryIndicesBuilder.Append(0)
+	dictionaryIndices := dictionaryIndicesBuilder.NewArray()
+	dictionaryIndicesBuilder.Release()
+	dictionary := array.NewDictionaryArray(dictionaryType, dictionaryIndices, dictionaryValues)
+	dictionaryIndices.Release()
+	defer dictionary.Release()
+
+	offsetsBuilder := array.NewInt32Builder(mem)
+	offsetsBuilder.Append(0)
+	offsetsBuilder.Append(1)
+	offsetsBuilder.Append(1)
+	offsets := offsetsBuilder.NewArray()
+	offsetsBuilder.Release()
+	defer offsets.Release()
+
+	validity := memory.NewResizableBuffer(mem)
+	validity.Resize(1)
+	validity.Bytes()[0] = 0x01
+	data := array.NewData(
+		arrow.ListOf(dictionaryType),
+		2,
+		[]*memory.Buffer{validity, offsets.Data().Buffers()[1]},
+		[]arrow.ArrayData{dictionary.Data()},
+		1,
+		0,
+	)
+	validity.Release()
+	input := array.NewListData(data)
+	data.Release()
+	defer input.Release()
+
+	expectedIndicesBuilder := array.NewInt8Builder(mem)
+	expectedIndicesBuilder.Append(0)
+	expectedIndicesBuilder.AppendNull()
+	expectedIndices := expectedIndicesBuilder.NewArray()
+	expectedIndicesBuilder.Release()
+	defer expectedIndices.Release()
+	expected := array.NewDictionaryArray(dictionaryType, expectedIndices, dictionaryValues)
+	defer expected.Release()
+
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ArrayDatum{Value: input.Data()},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	actual := result.(*compute.ArrayDatum).MakeArray()
+	defer actual.Release()
+	require.NoError(t, array.ValidateFull(actual))
+	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+	assert.True(t, array.Equal(dictionaryValues, actual.(*array.Dictionary).Dictionary()))
+}
+
+func TestListElementDenseUnionRecursiveErrorReleasesTemporaryIndices(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	sparseType := arrow.SparseUnionOf(
+		[]arrow.Field{
+			{Name: "number", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			{Name: "text", Type: arrow.BinaryTypes.String, Nullable: true},
+		},
+		[]arrow.UnionTypeCode{0, 1},
+	)
+	structType := arrow.StructOf(arrow.Field{Name: "union", Type: sparseType, Nullable: true})
+	denseType := arrow.DenseUnionOf(
+		[]arrow.Field{{Name: "struct", Type: structType, Nullable: true}},
+		[]arrow.UnionTypeCode{0},
+	)
+
+	builder := array.NewListBuilder(mem, denseType)
+	values := builder.ValueBuilder().(*array.DenseUnionBuilder)
+	structBuilder := values.Child(0).(*array.StructBuilder)
+	unionBuilder := structBuilder.FieldBuilder(0).(*array.SparseUnionBuilder)
+	for i := 0; i < 2; i++ {
+		builder.Append(true)
+		values.Append(0)
+		structBuilder.Append(true)
+		unionBuilder.Append(0)
+		unionBuilder.Child(0).(*array.Int32Builder).Append(int32(i))
+		unionBuilder.Child(1).(*array.StringBuilder).AppendNull()
+	}
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	for i := 0; i < 20; i++ {
+		result, err := compute.ListElement(
+			context.Background(),
+			&compute.ArrayDatum{Value: input.Data()},
+			&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+		)
+		if result != nil {
+			result.Release()
+		}
+		require.Error(t, err)
+	}
+}
+
+func TestListElementValidatesScalarIndexForEmptyInputs(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	empty := listElementInput(t, mem, arrow.ListOf(arrow.PrimitiveTypes.Int32), `[]`)
+	defer empty.Release()
+	chunked := arrow.NewChunked(empty.DataType(), []arrow.Array{empty})
+	defer chunked.Release()
+
+	tests := []struct {
+		name    string
+		index   scalar.Scalar
+		wantErr bool
+	}{
+		{name: "null scalar", index: scalar.MakeNullScalar(arrow.PrimitiveTypes.Int64), wantErr: true},
+		{name: "negative scalar", index: scalar.NewInt64Scalar(-1), wantErr: true},
+		{name: "zero scalar", index: scalar.NewInt64Scalar(0)},
+		{name: "large unsigned scalar", index: scalar.NewUint64Scalar(^uint64(0))},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, lists := range []compute.Datum{
+				&compute.ArrayDatum{Value: empty.Data()},
+				&compute.ChunkedDatum{Value: chunked},
+			} {
+				result, err := compute.ListElement(
+					context.Background(),
+					lists,
+					&compute.ScalarDatum{Value: tc.index},
+				)
+				if result != nil {
+					result.Release()
+				}
+				if tc.wantErr {
+					assert.ErrorIs(t, err, arrow.ErrInvalid)
+				} else {
+					assert.NoError(t, err)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkListElement(b *testing.B) {
 	for _, size := range []int{1_000, 100_000, 1_000_000} {
 		b.Run(fmt.Sprintf("%d", size), func(b *testing.B) {
