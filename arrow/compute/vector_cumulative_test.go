@@ -411,6 +411,26 @@ func TestCumulativeSumChunked(t *testing.T) {
 
 }
 
+func TestCumulativeSumEmptyChunkedInput(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	input := arrow.NewChunked(arrow.PrimitiveTypes.Int32, nil)
+	defer input.Release()
+
+	result, err := compute.CumulativeSum(
+		context.Background(),
+		compute.CumulativeOptions{},
+		&compute.ChunkedDatum{Value: input},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	chunked, ok := result.(*compute.ChunkedDatum)
+	require.True(t, ok)
+	assert.Empty(t, chunked.Value.Chunks())
+	assert.Equal(t, int64(0), result.Len())
+}
+
 func TestCumulativeSumChunkedOutputIgnoresChunkSizeAndEmptyChunks(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

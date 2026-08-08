@@ -39,7 +39,7 @@ type CumulativeOptions struct {
 
 func (CumulativeOptions) TypeName() string { return "CumulativeOptions" }
 
-func (opts *CumulativeOptions) Release() {
+func (opts CumulativeOptions) Release() {
 	if opts.Start == nil {
 		return
 	}
@@ -47,7 +47,6 @@ func (opts *CumulativeOptions) Release() {
 	if releasable, ok := opts.Start.(interface{ Release() }); ok {
 		releasable.Release()
 	}
-	opts.Start = nil
 }
 
 type cumulativeSumState[T arrow.NumericType] struct {
