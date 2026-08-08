@@ -624,6 +624,10 @@ func (c *Connection) Begin() (driver.Tx, error) {
 }
 
 func (c *Connection) BeginTx(ctx context.Context, opts sql.TxOptions) (driver.Tx, error) {
+	if opts.Isolation != sql.LevelDefault || opts.ReadOnly {
+		return nil, fmt.Errorf("%w: transaction options are not supported", ErrNotSupported)
+	}
+
 	tx, err := c.client.BeginTransaction(ctx)
 	if err != nil {
 		return nil, err
