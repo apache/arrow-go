@@ -52,6 +52,30 @@ type listElementFunction struct {
 	ScalarFunction
 }
 
+func listElementScalarResultSupported(typ arrow.DataType) bool {
+	switch typ.ID() {
+	case arrow.BINARY_VIEW, arrow.STRING_VIEW, arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW:
+		return false
+	case arrow.EXTENSION:
+		return listElementScalarResultSupported(typ.(arrow.ExtensionType).StorageType())
+	case arrow.STRUCT:
+		for _, field := range typ.(*arrow.StructType).Fields() {
+			if !listElementScalarResultSupported(field.Type) {
+				return false
+			}
+		}
+	case arrow.SPARSE_UNION, arrow.DENSE_UNION:
+		for _, field := range typ.(arrow.UnionType).Fields() {
+			if !listElementScalarResultSupported(field.Type) {
+				return false
+			}
+		}
+	case arrow.RUN_END_ENCODED:
+		return listElementScalarResultSupported(typ.(*arrow.RunEndEncodedType).Encoded())
+	}
+	return true
+}
+
 // Validate the index before scalar execution splits arguments into spans. The
 // index contract is defined by the original Datum, not by the length of an
 // execution span.
@@ -65,6 +89,12 @@ func (fn *listElementFunction) Execute(ctx context.Context, opts FunctionOptions
 
 	if err := validateListElementIndex(args[1]); err != nil {
 		return nil, err
+	}
+	if args[0].Kind() == KindScalar && args[1].Kind() == KindScalar {
+		if listType, ok := args[0].(ArrayLikeDatum).Type().(arrow.ListLikeType); ok &&
+			!listElementScalarResultSupported(listType.Elem()) {
+			return nil, fmt.Errorf("%w: list_element scalar output type %s is not supported", arrow.ErrNotImplemented, listType.Elem())
+		}
 	}
 
 	return fn.ScalarFunction.Execute(ctx, opts, args...)

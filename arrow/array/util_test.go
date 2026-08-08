@@ -63,6 +63,26 @@ func TestGetDictArrayDataNullInSuffix(t *testing.T) {
 	assert.True(t, dict.IsNull(1))
 }
 
+func TestMakeArrayOfNullListViews(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	for _, typ := range []arrow.DataType{
+		arrow.ListViewOf(arrow.PrimitiveTypes.Int32),
+		arrow.LargeListViewOf(arrow.PrimitiveTypes.Int32),
+	} {
+		t.Run(typ.String(), func(t *testing.T) {
+			for _, length := range []int{0, 1} {
+				arr := array.MakeArrayOfNull(mem, typ, length)
+				require.Equal(t, length, arr.Len())
+				require.Equal(t, length, arr.NullN())
+				require.NoError(t, array.ValidateFull(arr))
+				arr.Release()
+			}
+		})
+	}
+}
+
 var typemap = map[arrow.DataType]reflect.Type{
 	arrow.PrimitiveTypes.Int8:   reflect.TypeOf(int8(0)),
 	arrow.PrimitiveTypes.Uint8:  reflect.TypeOf(uint8(0)),

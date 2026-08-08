@@ -162,7 +162,9 @@ func listElementExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 
 	elemType := list.Type.(arrow.ListLikeType).Elem()
 	if list.Len == 0 {
-		empty := array.MakeArrayOfNull(exec.GetAllocator(ctx.Ctx), elemType, 0)
+		values := list.Children[0].MakeArray()
+		defer values.Release()
+		empty := array.NewSlice(values, 0, 0)
 		defer empty.Release()
 		out.TakeOwnership(empty.Data())
 		return nil
@@ -267,6 +269,16 @@ func listElementConcat(ctx *exec.KernelCtx, list *exec.ArraySpan, index uint64, 
 
 func listElementMakeNullLike(ctx *exec.KernelCtx, values arrow.Array, elemType arrow.DataType) arrow.Array {
 	mem := exec.GetAllocator(ctx.Ctx)
+	if extType, ok := elemType.(arrow.ExtensionType); ok {
+		storageValues := values
+		if extValues, ok := values.(array.ExtensionArray); ok {
+			storageValues = extValues.Storage()
+		}
+		storage := listElementMakeNullLike(ctx, storageValues, extType.StorageType())
+		result := array.NewExtensionArrayWithStorage(extType, storage)
+		storage.Release()
+		return result
+	}
 	if elemType.ID() == arrow.RUN_END_ENCODED {
 		runEndType := elemType.(*arrow.RunEndEncodedType)
 		builder := array.NewRunEndEncodedBuilder(mem, runEndType.RunEnds(), runEndType.Encoded())

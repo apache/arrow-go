@@ -68,6 +68,37 @@ func (t *denseUnionExtensionType) Deserialize(storage arrow.DataType, _ string) 
 	return &denseUnionExtensionType{ExtensionBase: arrow.ExtensionBase{Storage: storage}}, nil
 }
 
+type runEndExtensionArray struct {
+	array.ExtensionArrayBase
+}
+
+func (a runEndExtensionArray) ValueStr(i int) string {
+	return a.Storage().ValueStr(i)
+}
+
+type runEndExtensionType struct {
+	arrow.ExtensionBase
+}
+
+func (runEndExtensionType) ArrayType() reflect.Type {
+	return reflect.TypeOf(runEndExtensionArray{})
+}
+
+func (runEndExtensionType) ExtensionName() string {
+	return "compute-test.run-end"
+}
+
+func (t *runEndExtensionType) ExtensionEquals(other arrow.ExtensionType) bool {
+	rhs, ok := other.(*runEndExtensionType)
+	return ok && arrow.TypeEqual(t.StorageType(), rhs.StorageType())
+}
+
+func (runEndExtensionType) Serialize() string { return "" }
+
+func (t *runEndExtensionType) Deserialize(storage arrow.DataType, _ string) (arrow.ExtensionType, error) {
+	return &runEndExtensionType{ExtensionBase: arrow.ExtensionBase{Storage: storage}}, nil
+}
+
 func listElementInput(t *testing.T, mem memory.Allocator, typ arrow.DataType, values string) arrow.Array {
 	arr, _, err := array.FromJSON(mem, typ, strings.NewReader(values))
 	require.NoError(t, err)
@@ -287,6 +318,97 @@ func TestListElementNestedListViewChild(t *testing.T) {
 			defer actual.Release()
 			require.NoError(t, array.ValidateFull(actual))
 			assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+		})
+	}
+}
+
+func TestListElementEmptyNestedListViews(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	for _, elemType := range []arrow.DataType{
+		arrow.ListViewOf(arrow.PrimitiveTypes.Int32),
+		arrow.LargeListViewOf(arrow.PrimitiveTypes.Int32),
+	} {
+		t.Run(elemType.String(), func(t *testing.T) {
+			builder := array.NewListBuilder(mem, elemType)
+			input := builder.NewArray()
+			builder.Release()
+			defer input.Release()
+
+			result, err := compute.ListElement(
+				context.Background(),
+				&compute.ArrayDatum{Value: input.Data()},
+				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+			)
+			require.NoError(t, err)
+			defer result.Release()
+
+			actual := result.(*compute.ArrayDatum).MakeArray()
+			defer actual.Release()
+			require.Equal(t, 0, actual.Len())
+			require.True(t, arrow.TypeEqual(elemType, actual.DataType()))
+			require.NoError(t, array.ValidateFull(actual))
+		})
+	}
+}
+
+func TestListElementNullParentEmptyListViews(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	for _, elemType := range []arrow.DataType{
+		arrow.ListViewOf(arrow.PrimitiveTypes.Int32),
+		arrow.LargeListViewOf(arrow.PrimitiveTypes.Int32),
+	} {
+		t.Run(elemType.String(), func(t *testing.T) {
+			builder := array.NewListBuilder(mem, elemType)
+			builder.AppendNull()
+			input := builder.NewArray()
+			builder.Release()
+			defer input.Release()
+
+			result, err := compute.ListElement(
+				context.Background(),
+				&compute.ArrayDatum{Value: input.Data()},
+				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+			)
+			require.NoError(t, err)
+			defer result.Release()
+
+			actual := result.(*compute.ArrayDatum).MakeArray()
+			defer actual.Release()
+			require.Equal(t, 1, actual.Len())
+			require.Equal(t, 1, actual.NullN())
+			require.True(t, actual.IsNull(0))
+			require.True(t, arrow.TypeEqual(elemType, actual.DataType()))
+			require.NoError(t, array.ValidateFull(actual))
+		})
+	}
+}
+
+func TestListElementScalarListWithViewElement(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	for _, values := range []arrow.Array{
+		makeListViewWithOutOfOrderOffsets(mem),
+		makeLargeListViewWithOutOfOrderOffsets(mem),
+	} {
+		t.Run(values.DataType().String(), func(t *testing.T) {
+			defer values.Release()
+			lists := scalar.NewListScalar(values)
+			defer lists.Release()
+
+			result, err := compute.ListElement(
+				context.Background(),
+				&compute.ScalarDatum{Value: lists},
+				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+			)
+			if result != nil {
+				result.Release()
+			}
+			require.ErrorIs(t, err, arrow.ErrNotImplemented)
 		})
 	}
 }
@@ -668,6 +790,36 @@ func TestListElementDenseUnionExtensionChild(t *testing.T) {
 	storage := actual.(array.ExtensionArray).Storage()
 	require.NoError(t, array.ValidateFull(storage))
 	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+}
+
+func TestListElementExtensionRunEndEncodedNullParent(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	storageType := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32)
+	extType := &runEndExtensionType{ExtensionBase: arrow.ExtensionBase{Storage: storageType}}
+
+	builder := array.NewListBuilder(mem, extType)
+	builder.AppendNull()
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ArrayDatum{Value: input.Data()},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	actual := result.(*compute.ArrayDatum).MakeArray()
+	defer actual.Release()
+	require.True(t, arrow.TypeEqual(extType, actual.DataType()))
+	require.NoError(t, array.ValidateFull(actual))
+	storage := actual.(array.ExtensionArray).Storage()
+	require.True(t, storage.(*array.RunEndEncoded).Values().IsNull(0))
+	require.NoError(t, array.ValidateFull(storage))
 }
 
 func TestListElementDenseUnionWithUnusedGenericChild(t *testing.T) {
