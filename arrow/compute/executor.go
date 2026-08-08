@@ -1006,16 +1006,20 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 	toChunked := func() {
 		out := output.(ArrayLikeDatum).Chunks()
 		acc = make([]arrow.Array, 0, len(out))
+		isChunked := output.Kind() == KindChunked
 		for _, o := range out {
 			if o.Len() > 0 {
+				if isChunked {
+					// ChunkedDatum.Chunks returns borrowed references.
+					o.Retain()
+				}
 				acc = append(acc, o)
-			} else if output.Kind() == KindArray {
+			} else if !isChunked {
+				// ArrayDatum.Chunks creates an owned array.
 				o.Release()
 			}
 		}
-		if output.Kind() != KindChunked {
-			output.Release()
-		}
+		output.Release()
 		output = nil
 	}
 
