@@ -62,6 +62,17 @@ func TestJSONTypeBasics(t *testing.T) {
 	assert.Equal(t, "extension<arrow.json[storage_type=string_view]>", typView.String())
 }
 
+func TestJSONTypeAcceptsSemanticallyEqualStorageType(t *testing.T) {
+	var holder struct {
+		_       byte
+		storage arrow.StringType
+	}
+
+	typ, err := extensions.NewJSONType(&holder.storage)
+	require.NoError(t, err)
+	require.True(t, arrow.TypeEqual(arrow.BinaryTypes.String, typ.StorageType()))
+}
+
 var jsonTestCases = []struct {
 	Name           string
 	StorageType    arrow.DataType
