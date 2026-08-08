@@ -158,7 +158,7 @@ func execInternal(ctx context.Context, fn Function, opts FunctionOptions, passed
 
 	ectx := GetExecCtx(ctx)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	ch := make(chan Datum, ectx.ExecChannelSize)
@@ -170,7 +170,14 @@ func execInternal(ctx context.Context, fn Function, opts FunctionOptions, passed
 	}()
 
 	result = executor.WrapResults(ctx, ch, haveChunkedArray(input.Values))
-	if err == nil {
+	if ctx.Err() != nil {
+		for value := range ch {
+			if value != nil {
+				value.Release()
+			}
+		}
+	}
+	if err == nil && result != nil {
 		debug.Assert(executor.CheckResultType(result) == nil, "invalid result type")
 	}
 
