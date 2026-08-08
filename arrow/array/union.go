@@ -761,6 +761,45 @@ type unionBuilder struct {
 	typesBuilder *int8BufferBuilder
 }
 
+func unionTypeCodeFromJSON(dec *json.Decoder, typeID any, typ arrow.DataType) (arrow.UnionTypeCode, error) {
+	var id int64
+	switch tid := typeID.(type) {
+	case json.Number:
+		var err error
+		id, err = tid.Int64()
+		if err != nil {
+			return 0, err
+		}
+	case float64:
+		if tid != math.Trunc(tid) || tid < 0 || tid > float64(arrow.MaxUnionTypeCode) {
+			return 0, &json.UnmarshalTypeError{
+				Offset: dec.InputOffset(),
+				Type:   reflect.TypeOf(int8(0)),
+				Struct: fmt.Sprint(typ),
+				Value:  "float",
+			}
+		}
+		id = int64(tid)
+	default:
+		return 0, &json.UnmarshalTypeError{
+			Offset: dec.InputOffset(),
+			Type:   reflect.TypeOf(int8(0)),
+			Struct: fmt.Sprint(typ),
+			Value:  "union type code",
+		}
+	}
+
+	if id < 0 || id > int64(arrow.MaxUnionTypeCode) {
+		return 0, &json.UnmarshalTypeError{
+			Offset: dec.InputOffset(),
+			Type:   reflect.TypeOf(int8(0)),
+			Struct: fmt.Sprint(typ),
+			Value:  "integer",
+		}
+	}
+	return arrow.UnionTypeCode(id), nil
+}
+
 func newUnionBuilder(mem memory.Allocator, children []Builder, typ arrow.UnionType) *unionBuilder {
 	if children == nil {
 		children = make([]Builder, 0)
@@ -1068,25 +1107,9 @@ func (b *SparseUnionBuilder) UnmarshalOne(dec *json.Decoder) error {
 			return err
 		}
 
-		var typeCode int8
-
-		switch tid := typeID.(type) {
-		case json.Number:
-			id, err := tid.Int64()
-			if err != nil {
-				return err
-			}
-			typeCode = int8(id)
-		case float64:
-			if tid != float64(int64(tid)) {
-				return &json.UnmarshalTypeError{
-					Offset: dec.InputOffset(),
-					Type:   reflect.TypeOf(int8(0)),
-					Struct: fmt.Sprint(b.Type()),
-					Value:  "float",
-				}
-			}
-			typeCode = int8(tid)
+		typeCode, err := unionTypeCodeFromJSON(dec, typeID, b.Type())
+		if err != nil {
+			return err
 		}
 
 		childNum := b.typeIDtoChildID[typeCode]
@@ -1336,25 +1359,9 @@ func (b *DenseUnionBuilder) UnmarshalOne(dec *json.Decoder) error {
 			return err
 		}
 
-		var typeCode int8
-
-		switch tid := typeID.(type) {
-		case json.Number:
-			id, err := tid.Int64()
-			if err != nil {
-				return err
-			}
-			typeCode = int8(id)
-		case float64:
-			if tid != float64(int64(tid)) {
-				return &json.UnmarshalTypeError{
-					Offset: dec.InputOffset(),
-					Type:   reflect.TypeOf(int8(0)),
-					Struct: fmt.Sprint(b.Type()),
-					Value:  "float",
-				}
-			}
-			typeCode = int8(tid)
+		typeCode, err := unionTypeCodeFromJSON(dec, typeID, b.Type())
+		if err != nil {
+			return err
 		}
 
 		childNum := b.typeIDtoChildID[typeCode]
