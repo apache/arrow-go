@@ -296,6 +296,27 @@ func TestHashKernels(t *testing.T) {
 	suite.Run(t, &BinaryTypeHashKernelSuite[[]byte]{dt: arrow.BinaryTypes.LargeBinary})
 }
 
+func TestUniqueBoolean(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	input, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean,
+		strings.NewReader(`[false, null, true, false, null, true]`))
+	require.NoError(t, err)
+	defer input.Release()
+	expected, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean,
+		strings.NewReader(`[false, null, true]`))
+	require.NoError(t, err)
+	defer expected.Release()
+
+	result, err := compute.UniqueArray(ctx, input)
+	require.NoError(t, err)
+	defer result.Release()
+
+	assert.True(t, array.Equal(expected, result))
+}
+
 func TestUniqueTimeTimestamp(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -673,6 +694,103 @@ func TestDictionaryEncodeBoolean(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDictionaryEncodeBooleanSlicedInput(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	values, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean,
+		strings.NewReader(`[true, false, true, null, true, false, true]`))
+	require.NoError(t, err)
+	defer values.Release()
+
+	input := array.NewSlice(values, 1, 6)
+	defer input.Release()
+	require.Equal(t, 1, input.Data().Offset())
+
+	tests := []struct {
+		name      string
+		nullMode  compute.NullEncodingBehavior
+		dict      []bool
+		dictLen   int
+		indices   []int32
+		nullCount int
+	}{
+		{
+			name:      "masked nulls",
+			nullMode:  compute.NullEncodingMask,
+			dict:      []bool{false, true},
+			dictLen:   2,
+			indices:   []int32{0, 1, 0, 1, 0},
+			nullCount: 1,
+		},
+		{
+			name:      "encoded nulls",
+			nullMode:  compute.NullEncodingEncode,
+			dict:      []bool{false, true},
+			dictLen:   3,
+			indices:   []int32{0, 1, 2, 1, 0},
+			nullCount: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := compute.DictionaryEncodeArray(ctx, compute.DictionaryEncodeOptions{
+				NullEncoding: tc.nullMode,
+			}, input)
+			require.NoError(t, err)
+			defer result.Release()
+
+			encoded := result.(*array.Dictionary)
+			dict := encoded.Dictionary().(*array.Boolean)
+			require.Equal(t, tc.dictLen, dict.Len())
+			for i, value := range tc.dict {
+				assert.Equal(t, value, dict.Value(i))
+			}
+			assert.Equal(t, tc.indices,
+				arrow.Int32Traits.CastFromBytes(encoded.Indices().Data().Buffers()[1].Bytes()))
+			assert.Equal(t, tc.nullCount, encoded.NullN())
+			if tc.nullMode == compute.NullEncodingMask {
+				assert.True(t, encoded.IsNull(2))
+			} else {
+				assert.True(t, encoded.IsValid(2))
+				assert.True(t, dict.IsNull(len(tc.dict)))
+				assert.True(t, dict.IsNull(encoded.GetValueIndex(2)))
+			}
+		})
+	}
+}
+
+func TestDictionaryEncodeResizesMemoTable(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	inputValues := make([]int32, 200)
+	for i := range inputValues {
+		inputValues[i] = int32(i % 100)
+	}
+
+	builder := array.NewInt32Builder(mem)
+	builder.AppendValues(inputValues, nil)
+	input := builder.NewInt32Array()
+	builder.Release()
+	defer input.Release()
+
+	result, err := compute.DictionaryEncodeArray(ctx, compute.DictionaryEncodeOptions{}, input)
+	require.NoError(t, err)
+	defer result.Release()
+
+	encoded := result.(*array.Dictionary)
+	dictionary := encoded.Dictionary().(*array.Int32)
+	indices := encoded.Indices().(*array.Int32)
+
+	expectedDictionary := inputValues[:100]
+	require.Equal(t, expectedDictionary, dictionary.Int32Values())
+	require.Equal(t, inputValues, indices.Int32Values())
 }
 
 func TestDictionaryEncodeArraySlicedInput(t *testing.T) {
