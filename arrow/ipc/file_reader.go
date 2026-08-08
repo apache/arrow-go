@@ -242,6 +242,7 @@ func NewMappedFileReader(data []byte, opts ...Option) (*FileReader, error) {
 	)
 
 	if err := f.init(cfg); err != nil {
+		_ = f.Close()
 		return nil, err
 	}
 	return &f, nil
@@ -263,6 +264,7 @@ func NewFileReader(r ReadAtSeeker, opts ...Option) (*FileReader, error) {
 	)
 
 	if err := f.init(cfg); err != nil {
+		_ = f.Close()
 		return nil, err
 	}
 	return &f, nil

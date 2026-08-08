@@ -1587,6 +1587,54 @@ type PartialScalarTest struct {
 	Bad  []complex64
 }
 
+func TestGetScalarBinaryValueOwnsAllBinaryArrayBytes(t *testing.T) {
+	mem := memory.NewCheckedAllocator(&zeroingAllocator{})
+	defer mem.AssertSize(t, 0)
+
+	tests := []struct {
+		name  string
+		build func() arrow.Array
+		want  string
+	}{
+		{
+			name: "large binary",
+			build: func() arrow.Array {
+				bldr := array.NewBinaryBuilder(mem, arrow.BinaryTypes.LargeBinary)
+				bldr.Append([]byte("large"))
+				arr := bldr.NewArray()
+				bldr.Release()
+				return arr
+			},
+			want: "large",
+		},
+		{
+			name: "fixed size binary",
+			build: func() arrow.Array {
+				typ := &arrow.FixedSizeBinaryType{ByteWidth: 5}
+				bldr := array.NewFixedSizeBinaryBuilder(mem, typ)
+				bldr.Append([]byte("fixed"))
+				arr := bldr.NewArray()
+				bldr.Release()
+				return arr
+			},
+			want: "fixed",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			arr := tc.build()
+			value, err := scalar.GetScalar(arr, 0)
+			require.NoError(t, err)
+			arr.Release()
+
+			binaryValue, ok := value.(scalar.BinaryScalar)
+			require.True(t, ok)
+			assert.Equal(t, tc.want, string(binaryValue.Data()))
+			binaryValue.Release()
+		})
+	}
+
 func TestToScalar(t *testing.T) {
 	ot := &OptionValTest{ToType: arrow.BinaryTypes.String, Allow: true}
 	sc, err := scalar.ToScalar(ot, memory.DefaultAllocator)

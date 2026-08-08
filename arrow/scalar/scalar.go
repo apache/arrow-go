@@ -589,11 +589,11 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 
 	switch arr := arr.(type) {
 	case *array.Binary:
-		buf := memory.NewBufferBytes(append([]byte(nil), arr.Value(idx)...))
+		buf := scalarValueBuffer(arr.Data().Buffers()[2], arr.ValueOffset(idx), arr.ValueLen(idx))
 		defer buf.Release()
 		return NewBinaryScalar(buf, arr.DataType()), nil
 	case *array.LargeBinary:
-		buf := memory.NewBufferBytes(append([]byte(nil), arr.Value(idx)...))
+		buf := scalarValueBuffer(arr.Data().Buffers()[2], int(arr.ValueOffset(idx)), arr.ValueLen(idx))
 		defer buf.Release()
 		return NewLargeBinaryScalar(buf), nil
 	case *array.Boolean:
@@ -617,7 +617,8 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 		}
 		return NewExtensionScalar(storage, arr.DataType()), nil
 	case *array.FixedSizeBinary:
-		buf := memory.NewBufferBytes(append([]byte(nil), arr.Value(idx)...))
+		width := arr.DataType().(*arrow.FixedSizeBinaryType).ByteWidth
+		buf := scalarValueBuffer(arr.Data().Buffers()[1], (arr.Data().Offset()+idx)*width, width)
 		defer buf.Release()
 		return NewFixedSizeBinaryScalar(buf, arr.DataType()), nil
 	case *array.FixedSizeList:
@@ -755,6 +756,13 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 	}
 
 	return nil, fmt.Errorf("cannot create scalar from array of type %s", arr.DataType())
+}
+
+func scalarValueBuffer(values *memory.Buffer, offset, length int) *memory.Buffer {
+	if values == nil {
+		return memory.NewBufferBytes(nil)
+	}
+	return memory.SliceBuffer(values, offset, length)
 }
 
 // MakeArrayOfNull creates an array of size length which is all null of the given data type.
