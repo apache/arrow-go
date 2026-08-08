@@ -589,11 +589,11 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 
 	switch arr := arr.(type) {
 	case *array.Binary:
-		buf := memory.NewBufferBytes(arr.Value(idx))
+		buf := memory.NewBufferBytes(append([]byte(nil), arr.Value(idx)...))
 		defer buf.Release()
 		return NewBinaryScalar(buf, arr.DataType()), nil
 	case *array.LargeBinary:
-		buf := memory.NewBufferBytes(arr.Value(idx))
+		buf := memory.NewBufferBytes(append([]byte(nil), arr.Value(idx)...))
 		defer buf.Release()
 		return NewLargeBinaryScalar(buf), nil
 	case *array.Boolean:
@@ -617,7 +617,7 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 		}
 		return NewExtensionScalar(storage, arr.DataType()), nil
 	case *array.FixedSizeBinary:
-		buf := memory.NewBufferBytes(arr.Value(idx))
+		buf := memory.NewBufferBytes(append([]byte(nil), arr.Value(idx)...))
 		defer buf.Release()
 		return NewFixedSizeBinaryScalar(buf, arr.DataType()), nil
 	case *array.FixedSizeList:

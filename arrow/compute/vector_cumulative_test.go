@@ -41,12 +41,13 @@ func cumulativeInput(t *testing.T, mem memory.Allocator, typ arrow.DataType, val
 func TestCumulativeSum(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
 	input := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1, 2, 3, 4]`)
 	defer input.Release()
 	expected := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1, 3, 6, 10]`)
 	defer expected.Release()
 
-	result, err := compute.CumulativeSum(context.Background(), compute.CumulativeOptions{}, &compute.ArrayDatum{Value: input.Data()})
+	result, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{}, &compute.ArrayDatum{Value: input.Data()})
 	require.NoError(t, err)
 	defer result.Release()
 	assertDatumsEqual(t, &compute.ArrayDatum{Value: expected.Data()}, result, nil, nil)
@@ -56,6 +57,7 @@ func TestCumulativeSum(t *testing.T) {
 func TestCumulativeSumAdditionalInputs(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
 
 	tests := []struct {
 		name string
@@ -77,7 +79,7 @@ func TestCumulativeSumAdditionalInputs(t *testing.T) {
 			expected := cumulativeInput(t, mem, tc.typ, tc.want)
 			defer expected.Release()
 
-			result, err := compute.CumulativeSum(context.Background(), compute.CumulativeOptions{}, &compute.ArrayDatum{Value: input.Data()})
+			result, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{}, &compute.ArrayDatum{Value: input.Data()})
 			require.NoError(t, err)
 			defer result.Release()
 			assertDatumsEqual(t, &compute.ArrayDatum{Value: expected.Data()}, result, nil, nil)
@@ -86,7 +88,7 @@ func TestCumulativeSumAdditionalInputs(t *testing.T) {
 
 	expected := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[3]`)
 	defer expected.Release()
-	result, err := compute.CumulativeSum(context.Background(), compute.CumulativeOptions{}, compute.NewDatum(int32(3)))
+	result, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{}, compute.NewDatum(int32(3)))
 	require.NoError(t, err)
 	defer result.Release()
 	assertDatumsEqual(t, &compute.ArrayDatum{Value: expected.Data()}, result, nil, nil)
@@ -97,7 +99,7 @@ func TestCumulativeSumAdditionalInputs(t *testing.T) {
 	defer slicedInput.Release()
 	slicedExpected := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1, 3]`)
 	defer slicedExpected.Release()
-	result, err = compute.CumulativeSum(context.Background(), compute.CumulativeOptions{}, &compute.ArrayDatum{Value: slicedInput.Data()})
+	result, err = compute.CumulativeSum(ctx, compute.CumulativeOptions{}, &compute.ArrayDatum{Value: slicedInput.Data()})
 	require.NoError(t, err)
 	defer result.Release()
 	assertDatumsEqual(t, &compute.ArrayDatum{Value: slicedExpected.Data()}, result, nil, nil)
@@ -106,13 +108,14 @@ func TestCumulativeSumAdditionalInputs(t *testing.T) {
 func TestCumulativeSumNullsAndStart(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
 	input := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1, null, 2, null, 3]`)
 	defer input.Release()
 
 	t.Run("propagate nulls", func(t *testing.T) {
 		expected := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1, null, null, null, null]`)
 		defer expected.Release()
-		result, err := compute.CumulativeSum(context.Background(), compute.CumulativeOptions{}, &compute.ArrayDatum{Value: input.Data()})
+		result, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{}, &compute.ArrayDatum{Value: input.Data()})
 		require.NoError(t, err)
 		defer result.Release()
 		assertDatumsEqual(t, &compute.ArrayDatum{Value: expected.Data()}, result, nil, nil)
@@ -121,7 +124,7 @@ func TestCumulativeSumNullsAndStart(t *testing.T) {
 	t.Run("skip nulls", func(t *testing.T) {
 		expected := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1, null, 3, null, 6]`)
 		defer expected.Release()
-		result, err := compute.CumulativeSum(context.Background(), compute.CumulativeOptions{SkipNulls: true}, &compute.ArrayDatum{Value: input.Data()})
+		result, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{SkipNulls: true}, &compute.ArrayDatum{Value: input.Data()})
 		require.NoError(t, err)
 		defer result.Release()
 		assertDatumsEqual(t, &compute.ArrayDatum{Value: expected.Data()}, result, nil, nil)
@@ -130,7 +133,7 @@ func TestCumulativeSumNullsAndStart(t *testing.T) {
 	t.Run("start value", func(t *testing.T) {
 		expected := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[11, null, 13, null, 16]`)
 		defer expected.Release()
-		result, err := compute.CumulativeSum(context.Background(), compute.CumulativeOptions{
+		result, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{
 			Start:     scalar.NewInt64Scalar(10),
 			SkipNulls: true,
 		}, &compute.ArrayDatum{Value: input.Data()})
@@ -144,6 +147,7 @@ func TestCumulativeSumNullsAndStart(t *testing.T) {
 func TestCumulativeSumStartSafeCast(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
 
 	tests := []struct {
 		name  string
@@ -161,7 +165,7 @@ func TestCumulativeSumStartSafeCast(t *testing.T) {
 			input := cumulativeInput(t, mem, tc.typ, `[0]`)
 			defer input.Release()
 
-			result, err := compute.CumulativeSum(context.Background(), compute.CumulativeOptions{
+			result, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{
 				Start: tc.start,
 			}, &compute.ArrayDatum{Value: input.Data()})
 			if result != nil {
@@ -173,7 +177,7 @@ func TestCumulativeSumStartSafeCast(t *testing.T) {
 
 	input := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int8, `[0]`)
 	defer input.Release()
-	result, err := compute.CumulativeSum(context.Background(), compute.CumulativeOptions{
+	result, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{
 		Start: scalar.NewInt64Scalar(127),
 	}, &compute.ArrayDatum{Value: input.Data()})
 	require.NoError(t, err)
@@ -181,6 +185,40 @@ func TestCumulativeSumStartSafeCast(t *testing.T) {
 	actual := result.(*compute.ArrayDatum).MakeArray()
 	defer actual.Release()
 	assert.Equal(t, int8(127), actual.(*array.Int8).Value(0))
+}
+
+func TestCumulativeSumStartSafeCastDictionary(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	dictValues := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int64, `[10]`)
+	defer dictValues.Release()
+	dictIndices := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int8, `[0]`)
+	defer dictIndices.Release()
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.PrimitiveTypes.Int64,
+	}
+	dict := array.NewDictionaryArray(dictType, dictIndices, dictValues)
+	defer dict.Release()
+
+	start, err := scalar.GetScalar(dict, 0)
+	require.NoError(t, err)
+	if releasable, ok := start.(scalar.Releasable); ok {
+		defer releasable.Release()
+	}
+
+	input := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1]`)
+	defer input.Release()
+	expected := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[11]`)
+	defer expected.Release()
+
+	result, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{Start: start},
+		&compute.ArrayDatum{Value: input.Data()})
+	require.NoError(t, err)
+	defer result.Release()
+	assertDatumsEqual(t, &compute.ArrayDatum{Value: expected.Data()}, result, nil, nil)
 }
 
 func TestCumulativeSumStartScalarConversions(t *testing.T) {
@@ -283,26 +321,44 @@ func TestCumulativeOptionsSerialization(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
-	expr := compute.NewCall("cumulative_sum", []compute.Expression{compute.NewFieldRef("values")},
-		&compute.CumulativeOptions{
-			Start:     scalar.NewInt32Scalar(10),
-			SkipNulls: true,
+	binaryBuffer := memory.NewBufferBytes([]byte("10"))
+	binaryStart := scalar.NewBinaryScalar(binaryBuffer, arrow.BinaryTypes.Binary)
+	binaryBuffer.Release()
+
+	tests := []struct {
+		name  string
+		start scalar.Scalar
+	}{
+		{name: "nil", start: nil},
+		{name: "int32", start: scalar.NewInt32Scalar(10)},
+		{name: "string", start: scalar.NewStringScalar("10")},
+		{name: "binary", start: binaryStart},
+		{name: "typed null", start: scalar.MakeNullScalar(arrow.PrimitiveTypes.Int32)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			expr := compute.NewCall("cumulative_sum", []compute.Expression{compute.NewFieldRef("values")},
+				&compute.CumulativeOptions{Start: tc.start, SkipNulls: true})
+
+			serialized, err := compute.SerializeExpr(expr, mem)
+			require.NoError(t, err)
+			roundTripped, err := compute.DeserializeExpr(mem, serialized)
+			serialized.Release()
+			require.NoError(t, err)
+
+			assert.True(t, expr.Equals(roundTripped))
+			assert.NotEmpty(t, roundTripped.String())
+			roundTripped.Release()
+			expr.Release()
 		})
-	defer expr.Release()
-
-	serialized, err := compute.SerializeExpr(expr, mem)
-	require.NoError(t, err)
-	defer serialized.Release()
-
-	roundTripped, err := compute.DeserializeExpr(mem, serialized)
-	require.NoError(t, err)
-	defer roundTripped.Release()
-	assert.True(t, expr.Equals(roundTripped))
+	}
 }
 
 func TestCumulativeSumChunked(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
 	first := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1, 2]`)
 	second := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[3, 4]`)
 	input := arrow.NewChunked(arrow.PrimitiveTypes.Int32, []arrow.Array{first, second})
@@ -317,7 +373,7 @@ func TestCumulativeSumChunked(t *testing.T) {
 	defer expectedFirst.Release()
 	defer expectedSecond.Release()
 
-	result, err := compute.CumulativeSum(context.Background(), compute.CumulativeOptions{}, &compute.ChunkedDatum{Value: input})
+	result, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{}, &compute.ChunkedDatum{Value: input})
 	require.NoError(t, err)
 	defer result.Release()
 	assertDatumsEqual(t, &compute.ChunkedDatum{Value: expected}, result, nil, nil)
@@ -327,6 +383,7 @@ func TestCumulativeSumChunked(t *testing.T) {
 func TestCumulativeSumStateAcrossChunks(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
 
 	first := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1, null]`)
 	second := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[2, 3]`)
@@ -351,7 +408,7 @@ func TestCumulativeSumStateAcrossChunks(t *testing.T) {
 			defer expectedFirst.Release()
 			defer expectedSecond.Release()
 
-			result, err := compute.CumulativeSum(context.Background(), tc.opts, &compute.ChunkedDatum{Value: input})
+			result, err := compute.CumulativeSum(ctx, tc.opts, &compute.ChunkedDatum{Value: input})
 			require.NoError(t, err)
 			defer result.Release()
 			assertDatumsEqual(t, &compute.ChunkedDatum{Value: expected}, result, nil, nil)
@@ -368,7 +425,8 @@ func TestCumulativeSumStateAcrossExecutorSpans(t *testing.T) {
 
 	execCtx := compute.DefaultExecCtx()
 	execCtx.ChunkSize = 1
-	ctx := compute.SetExecCtx(context.Background(), execCtx)
+	ctx := compute.WithAllocator(context.Background(), mem)
+	ctx = compute.SetExecCtx(ctx, execCtx)
 
 	tests := []struct {
 		name     string
@@ -411,20 +469,40 @@ func TestCumulativeSumStateAcrossExecutorSpans(t *testing.T) {
 	assert.ErrorIs(t, err, arrow.ErrInvalid)
 }
 
-func TestCumulativeSumChecked(t *testing.T) {
+func TestCumulativeSumCheckedOverflowAfterEmittedSpan(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
+
+	execCtx := compute.DefaultExecCtx()
+	execCtx.ChunkSize = 1
+	execCtx.ExecChannelSize = 0
+	ctx := compute.WithAllocator(context.Background(), mem)
+	ctx = compute.SetExecCtx(ctx, execCtx)
+
 	input := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int8, `[127, 1]`)
 	defer input.Release()
 
-	unchecked, err := compute.CumulativeSum(context.Background(), compute.CumulativeOptions{}, &compute.ArrayDatum{Value: input.Data()})
+	result, err := compute.CumulativeSumChecked(ctx, compute.CumulativeOptions{},
+		&compute.ArrayDatum{Value: input.Data()})
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
+}
+
+func TestCumulativeSumChecked(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+	input := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int8, `[127, 1]`)
+	defer input.Release()
+
+	unchecked, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{}, &compute.ArrayDatum{Value: input.Data()})
 	require.NoError(t, err)
 	defer unchecked.Release()
 	uncheckedArray := unchecked.(*compute.ArrayDatum).MakeArray()
 	defer uncheckedArray.Release()
 	assert.Equal(t, int8(-128), uncheckedArray.(*array.Int8).Value(1))
 
-	_, err = compute.CumulativeSumChecked(context.Background(), compute.CumulativeOptions{}, &compute.ArrayDatum{Value: input.Data()})
+	_, err = compute.CumulativeSumChecked(ctx, compute.CumulativeOptions{}, &compute.ArrayDatum{Value: input.Data()})
 	assert.ErrorIs(t, err, arrow.ErrInvalid)
 
 }
@@ -432,6 +510,7 @@ func TestCumulativeSumChecked(t *testing.T) {
 func TestCumulativeSumCheckedIntegerOverflow(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
 
 	tests := []struct {
 		name   string
@@ -457,7 +536,7 @@ func TestCumulativeSumCheckedIntegerOverflow(t *testing.T) {
 			input := cumulativeInput(t, mem, tc.typ, tc.values)
 			defer input.Release()
 
-			result, err := compute.CumulativeSumChecked(context.Background(), compute.CumulativeOptions{},
+			result, err := compute.CumulativeSumChecked(ctx, compute.CumulativeOptions{},
 				&compute.ArrayDatum{Value: input.Data()})
 			if result != nil {
 				result.Release()

@@ -41,6 +41,8 @@ import (
 
 var hashSeed = maphash.MakeSeed()
 
+var scalarInterfaceType = reflect.TypeOf((*scalar.Scalar)(nil)).Elem()
+
 // Expression is an interface for mapping one datum to another. An expression
 // is one of:
 //
@@ -377,7 +379,43 @@ func (c *Call) Equals(other Expression) bool {
 	if opt, ok := c.options.(FunctionOptionsEqual); ok {
 		return opt.Equals(rhs.options)
 	}
-	return reflect.DeepEqual(c.options, rhs.options)
+	return equalFunctionOptions(c.options, rhs.options)
+}
+
+func equalFunctionOptions(lhs, rhs FunctionOptions) bool {
+	if lhs == nil || rhs == nil {
+		return lhs == nil && rhs == nil
+	}
+	if reflect.TypeOf(lhs) != reflect.TypeOf(rhs) {
+		return false
+	}
+
+	left := reflect.Indirect(reflect.ValueOf(lhs))
+	right := reflect.Indirect(reflect.ValueOf(rhs))
+	if !left.IsValid() || left.Kind() != reflect.Struct {
+		return reflect.DeepEqual(lhs, rhs)
+	}
+
+	for i := 0; i < left.NumField(); i++ {
+		leftField := left.Field(i)
+		rightField := right.Field(i)
+		if leftField.Type() == scalarInterfaceType {
+			leftScalar, leftOK := leftField.Interface().(scalar.Scalar)
+			rightScalar, rightOK := rightField.Interface().(scalar.Scalar)
+			if leftOK != rightOK {
+				return false
+			}
+			if leftOK && !scalar.Equals(leftScalar, rightScalar) {
+				return false
+			}
+			continue
+		}
+
+		if !reflect.DeepEqual(leftField.Interface(), rightField.Interface()) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Call) Release() {
@@ -881,7 +919,7 @@ func DeserializeExpr(mem memory.Allocator, buf *memory.Buffer) (Expression, erro
 						}
 
 						optionsVal := reflect.New(funcOptionsMap[string(typname.(*scalar.Binary).Data())]).Interface()
-						if err := scalar.FromScalar(optsScalar.(*scalar.Struct), optionsVal); err != nil {
+						if err := scalar.FromScalarWithAllocator(optsScalar.(*scalar.Struct), optionsVal, mem); err != nil {
 							return nil, err
 						}
 						opts = optionsVal.(FunctionOptions)

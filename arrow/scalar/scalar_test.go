@@ -1291,6 +1291,63 @@ type OptionValTest struct {
 
 func (OptionValTest) TypeName() string { return "OptionValTest" }
 
+type scalarFieldOption struct {
+	Value scalar.Scalar `compute:"value"`
+}
+
+func (scalarFieldOption) TypeName() string { return "scalarFieldOption" }
+
+type zeroingAllocator struct{}
+
+func (*zeroingAllocator) Allocate(size int) []byte { return make([]byte, size) }
+
+func (*zeroingAllocator) Reallocate(size int, old []byte) []byte {
+	next := make([]byte, size)
+	copy(next, old)
+	clear(old)
+	return next
+}
+
+func (*zeroingAllocator) Free(buf []byte) { clear(buf) }
+
+func TestScalarFieldCloneOwnsBinaryValue(t *testing.T) {
+	mem := memory.NewCheckedAllocator(&zeroingAllocator{})
+	defer mem.AssertSize(t, 0)
+
+	original := scalar.NewStringScalar("10")
+	encoded, err := scalar.ToScalar(scalarFieldOption{Value: original}, mem)
+	require.NoError(t, err)
+	original.Release()
+
+	var decoded scalarFieldOption
+	require.NoError(t, scalar.FromScalarWithAllocator(encoded.(*scalar.Struct), &decoded, mem))
+	encoded.(*scalar.Struct).Release()
+
+	value, ok := decoded.Value.(scalar.BinaryScalar)
+	require.True(t, ok)
+	assert.Equal(t, "10", string(value.Data()))
+	value.Release()
+}
+
+func TestGetScalarBinaryValueOwnsArrayBytes(t *testing.T) {
+	mem := memory.NewCheckedAllocator(&zeroingAllocator{})
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
+	bldr.Append([]byte("10"))
+	arr := bldr.NewArray()
+	bldr.Release()
+
+	value, err := scalar.GetScalar(arr, 0)
+	require.NoError(t, err)
+	arr.Release()
+
+	binaryValue, ok := value.(scalar.BinaryScalar)
+	require.True(t, ok)
+	assert.Equal(t, "10", string(binaryValue.Data()))
+	binaryValue.Release()
+}
+
 func TestToScalar(t *testing.T) {
 	ot := &OptionValTest{ToType: arrow.BinaryTypes.String, Allow: true}
 	sc, err := scalar.ToScalar(ot, memory.DefaultAllocator)
