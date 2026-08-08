@@ -465,6 +465,10 @@ func getMaxBufferLen(dt arrow.DataType, length int) int {
 		return bufferLen
 	case arrow.OffsetsDataType:
 		return maxOf(dt.OffsetTypeTraits().BytesRequired(length + 1))
+	case *arrow.ListViewType:
+		return maxOf(dt.OffsetTypeTraits().BytesRequired(length))
+	case *arrow.LargeListViewType:
+		return maxOf(dt.OffsetTypeTraits().BytesRequired(length))
 	case arrow.BinaryViewDataType:
 		return maxOf(arrow.ViewHeaderSizeBytes * length)
 	case *arrow.FixedSizeListType:
@@ -520,6 +524,14 @@ func (n *nullArrayFactory) create() *Data {
 		bufs = append(bufs, n.buf)
 	case arrow.BinaryDataType:
 		bufs = append(bufs, n.buf, n.buf)
+	case *arrow.ListViewType:
+		bufs = append(bufs, n.buf, n.buf)
+		childData[0] = n.createChild(dt, 0, 0)
+		defer childData[0].Release()
+	case *arrow.LargeListViewType:
+		bufs = append(bufs, n.buf, n.buf)
+		childData[0] = n.createChild(dt, 0, 0)
+		defer childData[0].Release()
 	case arrow.OffsetsDataType:
 		bufs = append(bufs, n.buf)
 		childData[0] = n.createChild(dt, 0, 0)
