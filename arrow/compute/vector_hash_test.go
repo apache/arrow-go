@@ -864,6 +864,29 @@ func TestDictionaryEncodeZeroChunkedArray(t *testing.T) {
 	}, result.DataType()))
 }
 
+func TestDictionaryEncodeZeroChunkedDictionaryInput(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.BinaryTypes.String,
+	}
+	input := arrow.NewChunked(dictType, nil)
+	defer input.Release()
+
+	out, err := compute.DictionaryEncode(ctx, compute.DictionaryEncodeOptions{},
+		&compute.ChunkedDatum{Value: input})
+	require.NoError(t, err)
+	defer out.Release()
+
+	result := out.(*compute.ChunkedDatum).Value
+	require.Equal(t, 0, result.Len())
+	require.Empty(t, result.Chunks())
+	require.True(t, arrow.TypeEqual(dictType, result.DataType()))
+}
+
 func TestDictionaryEncodeChunked(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -1175,7 +1198,11 @@ func TestDictionaryEncodeDictionaryInputRejectsInvalidOptions(t *testing.T) {
 }
 
 func TestDictionaryEncodeFunctionValidation(t *testing.T) {
-	fn, ok := compute.GetFunctionRegistry().GetFunction("dictionary_encode")
-	require.True(t, ok)
-	require.NoError(t, fn.Validate())
+	for _, name := range []string{"unique", "dictionary_encode"} {
+		t.Run(name, func(t *testing.T) {
+			fn, ok := compute.GetFunctionRegistry().GetFunction(name)
+			require.True(t, ok)
+			require.NoError(t, fn.Validate())
+		})
+	}
 }

@@ -426,6 +426,12 @@ func dictionaryEncodeIdentityChunked(_ *exec.KernelCtx, batch []*arrow.Chunked, 
 	}
 
 	chunks := batch[0].Chunks()
+	if len(chunks) == 0 {
+		result := &exec.ExecResult{}
+		exec.FillZeroLength(batch[0].DataType(), result)
+		return []*exec.ExecResult{result}, nil
+	}
+
 	results := make([]*exec.ExecResult, 0, len(chunks))
 	for _, chunk := range chunks {
 		result := &exec.ExecResult{}
