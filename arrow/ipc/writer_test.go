@@ -25,6 +25,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,6 +46,18 @@ type failingPayloadWriter struct {
 }
 
 type shortWriteWriter struct{}
+
+type failingCompressor struct {
+	err error
+}
+
+func (failingCompressor) MaxCompressedLen(n int) int  { return n }
+func (failingCompressor) Reset(io.Writer)             {}
+func (f failingCompressor) Write([]byte) (int, error) { return 0, f.err }
+func (failingCompressor) Close() error                { return nil }
+func (failingCompressor) Type() flatbuf.CompressionType {
+	return flatbuf.CompressionTypeZSTD
+}
 
 func (shortWriteWriter) Write(p []byte) (int, error) {
 	return len(p) - 1, io.ErrShortWrite
@@ -323,6 +336,34 @@ func TestWriterMemCompression(t *testing.T) {
 	defer w.Close()
 
 	require.NoError(t, w.Write(rec))
+}
+
+func TestRecordEncoderCompressionErrorDoesNotDeadlock(t *testing.T) {
+	want := errors.New("compression failed")
+	body := make([]*memory.Buffer, 64)
+	for i := range body {
+		body[i] = memory.NewBufferBytes([]byte("payload"))
+	}
+	payload := Payload{body: body}
+	defer payload.Release()
+
+	encoder := newRecordEncoder(memory.DefaultAllocator, 0, kMaxNestingDepth, true,
+		flatbuf.CompressionTypeZSTD, 2, 0, []compressor{
+			failingCompressor{err: want},
+			failingCompressor{err: want},
+		})
+
+	result := make(chan error, 1)
+	go func() {
+		result <- encoder.compressBodyBuffers(&payload)
+	}()
+
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, want)
+	case <-time.After(time.Second):
+		t.Fatal("compression did not return after timeout")
+	}
 }
 
 func TestWriteWithCompressionAndMinSavings(t *testing.T) {
