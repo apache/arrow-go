@@ -39,6 +39,17 @@ type CumulativeOptions struct {
 
 func (CumulativeOptions) TypeName() string { return "CumulativeOptions" }
 
+func (opts *CumulativeOptions) Release() {
+	if opts.Start == nil {
+		return
+	}
+
+	if releasable, ok := opts.Start.(interface{ Release() }); ok {
+		releasable.Release()
+	}
+	opts.Start = nil
+}
+
 type cumulativeSumState[T arrow.NumericType] struct {
 	current         T
 	skipNulls       bool
@@ -47,70 +58,9 @@ type cumulativeSumState[T arrow.NumericType] struct {
 	add             func(T, T) (T, error)
 }
 
-func safeCastKernels(typ arrow.DataType) []exec.ScalarKernel {
-	switch typ.ID() {
-	case arrow.INT8:
-		return GetCastToInteger[int8](typ)
-	case arrow.INT16:
-		return GetCastToInteger[int16](typ)
-	case arrow.INT32:
-		return GetCastToInteger[int32](typ)
-	case arrow.INT64:
-		return GetCastToInteger[int64](typ)
-	case arrow.UINT8:
-		return GetCastToInteger[uint8](typ)
-	case arrow.UINT16:
-		return GetCastToInteger[uint16](typ)
-	case arrow.UINT32:
-		return GetCastToInteger[uint32](typ)
-	case arrow.UINT64:
-		return GetCastToInteger[uint64](typ)
-	case arrow.FLOAT32:
-		return GetCastToFloating[float32](typ)
-	case arrow.FLOAT64:
-		return GetCastToFloating[float64](typ)
-	default:
-		return nil
-	}
-}
+type ScalarCastFn func(*exec.KernelCtx, scalar.Scalar, arrow.DataType) (scalar.Scalar, error)
 
-func safeCastScalar(ctx *exec.KernelCtx, start scalar.Scalar, typ arrow.DataType) (scalar.Scalar, error) {
-	kernels := safeCastKernels(typ)
-	var castKernel *exec.ScalarKernel
-	for i := range kernels {
-		if kernels[i].GetSig().MatchesInputs([]arrow.DataType{start.DataType()}) {
-			castKernel = &kernels[i]
-			break
-		}
-	}
-	if castKernel == nil {
-		return nil, fmt.Errorf("%w: cannot safely cast cumulative sum start value from %s to %s",
-			arrow.ErrInvalid, start.DataType(), typ)
-	}
-
-	input := exec.ArraySpan{}
-	input.FillFromScalar(start)
-	output := exec.ArraySpan{Type: typ, Len: 1}
-	output.Buffers[1].WrapBuffer(ctx.Allocate(typ.(arrow.FixedWidthDataType).Bytes()))
-
-	castCtx := *ctx
-	castCtx.Kernel = castKernel
-	castCtx.State = CastOptions{ToType: typ}
-	batch := &exec.ExecSpan{
-		Len:    1,
-		Values: []exec.ExecValue{{Array: input}},
-	}
-	if err := castKernel.Exec(&castCtx, batch, &output); err != nil {
-		output.Release()
-		return nil, err
-	}
-
-	arr := output.MakeArray()
-	defer arr.Release()
-	return scalar.GetScalar(arr, 0)
-}
-
-func safeNumericCastScalar(ctx *exec.KernelCtx, start scalar.Scalar, typ arrow.DataType) (scalar.Scalar, error) {
+func safeNumericCastScalar(ctx *exec.KernelCtx, cast ScalarCastFn, start scalar.Scalar, typ arrow.DataType) (scalar.Scalar, error) {
 	targetID := typ.ID()
 	if !arrow.IsInteger(targetID) && !arrow.IsFloating(targetID) {
 		return nil, fmt.Errorf("%w: cumulative sum input type must be numeric, got %s", arrow.ErrType, typ)
@@ -119,14 +69,18 @@ func safeNumericCastScalar(ctx *exec.KernelCtx, start scalar.Scalar, typ arrow.D
 		return start, nil
 	}
 
-	casted, err := safeCastScalar(ctx, start, typ)
+	if cast == nil {
+		return nil, fmt.Errorf("%w: cumulative sum start value caster is not configured", arrow.ErrInvalid)
+	}
+
+	casted, err := cast(ctx, start, typ)
 	if err != nil {
 		return nil, fmt.Errorf("%w: cannot cast cumulative sum start value to %s: %v", arrow.ErrInvalid, typ, err)
 	}
 	return casted, nil
 }
 
-func cumulativeStartValue[T arrow.NumericType](ctx *exec.KernelCtx, start scalar.Scalar, typ arrow.DataType) (T, error) {
+func cumulativeStartValue[T arrow.NumericType](ctx *exec.KernelCtx, cast ScalarCastFn, start scalar.Scalar, typ arrow.DataType) (T, error) {
 	var zero T
 	if start == nil {
 		return zero, nil
@@ -135,7 +89,7 @@ func cumulativeStartValue[T arrow.NumericType](ctx *exec.KernelCtx, start scalar
 		return zero, fmt.Errorf("%w: cumulative sum start value must be valid", arrow.ErrInvalid)
 	}
 
-	casted, err := safeNumericCastScalar(ctx, start, typ)
+	casted, err := safeNumericCastScalar(ctx, cast, start, typ)
 	if err != nil {
 		return zero, err
 	}
@@ -153,7 +107,7 @@ func cumulativeStartValue[T arrow.NumericType](ctx *exec.KernelCtx, start scalar
 	return exec.GetSpanValues[T](span, 1)[0], nil
 }
 
-func initCumulativeSum[T arrow.NumericType](checked bool) exec.KernelInitFn {
+func initCumulativeSum[T arrow.NumericType](checked bool, cast ScalarCastFn) exec.KernelInitFn {
 	return func(ctx *exec.KernelCtx, args exec.KernelInitArgs) (exec.KernelState, error) {
 		opts := &CumulativeOptions{}
 		if args.Options != nil {
@@ -164,7 +118,7 @@ func initCumulativeSum[T arrow.NumericType](checked bool) exec.KernelInitFn {
 			}
 		}
 
-		start, err := cumulativeStartValue[T](ctx, opts.Start, args.Inputs[0])
+		start, err := cumulativeStartValue[T](ctx, cast, opts.Start, args.Inputs[0])
 		if err != nil {
 			return nil, err
 		}
@@ -299,31 +253,31 @@ func cumulativeSumExec[T arrow.NumericType](ctx *exec.KernelCtx, batch *exec.Exe
 	return nil
 }
 
-func newCumulativeSumKernel[T arrow.NumericType](typ arrow.DataType, checked bool) exec.VectorKernel {
+func newCumulativeSumKernel[T arrow.NumericType](typ arrow.DataType, checked bool, cast ScalarCastFn) exec.VectorKernel {
 	kernel := exec.NewVectorKernel(
 		[]exec.InputType{exec.NewExactInput(typ)},
 		exec.NewOutputType(typ),
 		cumulativeSumExec[T],
-		initCumulativeSum[T](checked))
+		initCumulativeSum[T](checked, cast))
 	kernel.Parallelizable = false
 	return kernel
 }
 
-func cumulativeSumKernels(checked bool) []exec.VectorKernel {
+func cumulativeSumKernels(checked bool, cast ScalarCastFn) []exec.VectorKernel {
 	return []exec.VectorKernel{
-		newCumulativeSumKernel[int8](arrow.PrimitiveTypes.Int8, checked),
-		newCumulativeSumKernel[int16](arrow.PrimitiveTypes.Int16, checked),
-		newCumulativeSumKernel[int32](arrow.PrimitiveTypes.Int32, checked),
-		newCumulativeSumKernel[int64](arrow.PrimitiveTypes.Int64, checked),
-		newCumulativeSumKernel[uint8](arrow.PrimitiveTypes.Uint8, checked),
-		newCumulativeSumKernel[uint16](arrow.PrimitiveTypes.Uint16, checked),
-		newCumulativeSumKernel[uint32](arrow.PrimitiveTypes.Uint32, checked),
-		newCumulativeSumKernel[uint64](arrow.PrimitiveTypes.Uint64, checked),
-		newCumulativeSumKernel[float32](arrow.PrimitiveTypes.Float32, checked),
-		newCumulativeSumKernel[float64](arrow.PrimitiveTypes.Float64, checked),
+		newCumulativeSumKernel[int8](arrow.PrimitiveTypes.Int8, checked, cast),
+		newCumulativeSumKernel[int16](arrow.PrimitiveTypes.Int16, checked, cast),
+		newCumulativeSumKernel[int32](arrow.PrimitiveTypes.Int32, checked, cast),
+		newCumulativeSumKernel[int64](arrow.PrimitiveTypes.Int64, checked, cast),
+		newCumulativeSumKernel[uint8](arrow.PrimitiveTypes.Uint8, checked, cast),
+		newCumulativeSumKernel[uint16](arrow.PrimitiveTypes.Uint16, checked, cast),
+		newCumulativeSumKernel[uint32](arrow.PrimitiveTypes.Uint32, checked, cast),
+		newCumulativeSumKernel[uint64](arrow.PrimitiveTypes.Uint64, checked, cast),
+		newCumulativeSumKernel[float32](arrow.PrimitiveTypes.Float32, checked, cast),
+		newCumulativeSumKernel[float64](arrow.PrimitiveTypes.Float64, checked, cast),
 	}
 }
 
-func GetVectorCumulativeKernels() (sum, checked []exec.VectorKernel) {
-	return cumulativeSumKernels(false), cumulativeSumKernels(true)
+func GetVectorCumulativeKernels(cast ScalarCastFn) (sum, checked []exec.VectorKernel) {
+	return cumulativeSumKernels(false, cast), cumulativeSumKernels(true, cast)
 }

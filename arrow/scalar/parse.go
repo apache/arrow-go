@@ -52,6 +52,12 @@ var (
 )
 
 func FromScalar(sc *Struct, val interface{}) error {
+	return FromScalarWithAllocator(sc, val, memory.DefaultAllocator)
+}
+
+// FromScalarWithAllocator populates val from a Struct scalar, allocating any
+// cloned scalar fields with mem.
+func FromScalarWithAllocator(sc *Struct, val interface{}, mem memory.Allocator) error {
 	if sc == nil || len(sc.Value) == 0 {
 		return nil
 	}
@@ -83,7 +89,7 @@ func FromScalar(sc *Struct, val interface{}) error {
 		if err != nil {
 			return err
 		}
-		if err := setFromScalar(fldVal, value.Field(i)); err != nil {
+		if err := setFromScalar(fldVal, value.Field(i), mem); err != nil {
 			return err
 		}
 	}
@@ -91,14 +97,14 @@ func FromScalar(sc *Struct, val interface{}) error {
 	return nil
 }
 
-func setFromScalar(s Scalar, v reflect.Value) error {
+func setFromScalar(s Scalar, v reflect.Value, mem memory.Allocator) error {
 	if v.Type() == scalarType {
 		if !s.IsValid() && s.DataType().ID() == arrow.NULL {
 			v.Set(reflect.Zero(v.Type()))
 			return nil
 		}
 
-		clone, err := cloneScalar(s, memory.DefaultAllocator)
+		clone, err := cloneScalar(s, mem)
 		if err != nil {
 			return err
 		}
@@ -131,7 +137,7 @@ func setFromScalar(s Scalar, v reflect.Value) error {
 	case ListScalar:
 		return fromListScalar(s, v)
 	case *Struct:
-		return FromScalar(s, v.Interface())
+		return FromScalarWithAllocator(s, v.Interface(), mem)
 	default:
 		if v.Type() == reflect.TypeOf(arrow.TimeUnit(0)) {
 			v.Set(reflect.ValueOf(arrow.TimeUnit(s.value().(uint32))))
@@ -208,6 +214,30 @@ func ToScalar(val interface{}, mem memory.Allocator) (Scalar, error) {
 }
 
 func cloneScalar(val Scalar, mem memory.Allocator) (Scalar, error) {
+	if !val.IsValid() {
+		return MakeNullScalar(val.DataType()), nil
+	}
+
+	if binary, ok := val.(BinaryScalar); ok {
+		data := mem.Allocate(len(binary.Data()))
+		copy(data, binary.Data())
+		buf := memory.NewBufferWithAllocator(data, mem)
+		defer buf.Release()
+
+		switch val.(type) {
+		case *String:
+			return NewStringScalarFromBuffer(buf), nil
+		case *LargeString:
+			return NewLargeStringScalarFromBuffer(buf), nil
+		case *LargeBinary:
+			return NewLargeBinaryScalar(buf), nil
+		case *FixedSizeBinary:
+			return NewFixedSizeBinaryScalar(buf, val.DataType()), nil
+		default:
+			return NewBinaryScalar(buf, val.DataType()), nil
+		}
+	}
+
 	arr, err := MakeArrayFromScalar(val, 1, mem)
 	if err != nil {
 		return nil, err

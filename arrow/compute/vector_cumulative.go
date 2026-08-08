@@ -20,32 +20,58 @@ package compute
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/compute/internal/kernels"
+	"github.com/apache/arrow-go/v18/arrow/scalar"
 )
 
 var (
 	cumulativeSumDoc = FunctionDoc{
-		Summary: "Compute the cumulative sum of an array",
+		Summary: "Compute the cumulative sum of numeric input",
 		Description: `Return the cumulative sum of the input array. Integer values
 wrap on overflow; nulls stop the remaining output unless SkipNulls is enabled.
-A nil Start uses zero.`,
-		ArgNames:    []string{"array"},
+A nil Start uses zero. For chunked input, output chunks preserve the input
+boundaries while accumulation continues across chunks.`,
+		ArgNames:    []string{"values"},
 		OptionsType: "CumulativeOptions",
 	}
 	cumulativeSumCheckedDoc = FunctionDoc{
-		Summary: "Compute the cumulative sum of an array with overflow checking",
+		Summary: "Compute cumulative sum of numeric input with overflow checking",
 		Description: `Return the cumulative sum of the input array and report
-integer overflow. Null handling and Start follow CumulativeOptions.`,
-		ArgNames:    []string{"array"},
+integer overflow. Null handling and Start follow CumulativeOptions. For
+chunked input, output chunks preserve input boundaries while accumulation
+continues across chunks.`,
+		ArgNames:    []string{"values"},
 		OptionsType: "CumulativeOptions",
 	}
 )
 
 type CumulativeOptions = kernels.CumulativeOptions
 
+func safeCastScalar(ctx *exec.KernelCtx, start scalar.Scalar, typ arrow.DataType) (scalar.Scalar, error) {
+	input := NewDatumWithoutOwning(start)
+	result, err := CastDatum(ctx.Ctx, input, SafeCastOptions(typ))
+	if err != nil {
+		return nil, err
+	}
+
+	casted, ok := result.(*ScalarDatum)
+	if !ok {
+		result.Release()
+		return nil, fmt.Errorf("%w: safe cast of cumulative sum start value returned %T", arrow.ErrInvalid, result)
+	}
+
+	value := casted.Value
+	casted.Value = nil
+	result.Release()
+	return value, nil
+}
+
 func RegisterVectorCumulative(reg FunctionRegistry) {
-	sum, checked := kernels.GetVectorCumulativeKernels()
+	sum, checked := kernels.GetVectorCumulativeKernels(safeCastScalar)
 
 	sumFn := NewVectorFunction("cumulative_sum", Unary(), cumulativeSumDoc)
 	sumFn.SetDefaultOptions(&CumulativeOptions{})

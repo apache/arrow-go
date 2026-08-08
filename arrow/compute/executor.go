@@ -523,6 +523,16 @@ func (s *scalarExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 		output Datum
 		acc    []arrow.Array
 	)
+	releasePartial := func() {
+		if output != nil {
+			output.Release()
+			output = nil
+		}
+		for _, c := range acc {
+			c.Release()
+		}
+		acc = nil
+	}
 
 	toChunked := func() {
 		acc = output.(ArrayLikeDatum).Chunks()
@@ -535,6 +545,9 @@ func (s *scalarExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 	case <-ctx.Done():
 		return nil
 	case output = <-out:
+		if output == nil {
+			return nil
+		}
 		// if the inputs contained at least one chunked array
 		// then we want to return chunked output
 		if hasChunked {
@@ -547,7 +560,8 @@ func (s *scalarExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 		case <-ctx.Done():
 			// context is done, either cancelled or a timeout.
 			// either way, we end early and return what we've got so far.
-			return output
+			releasePartial()
+			return nil
 		case o, ok := <-out:
 			if !ok { // channel closed, wrap it up
 				if output != nil {
@@ -1002,6 +1016,16 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 		output Datum
 		acc    []arrow.Array
 	)
+	releasePartial := func() {
+		if output != nil {
+			output.Release()
+			output = nil
+		}
+		for _, c := range acc {
+			c.Release()
+		}
+		acc = nil
+	}
 
 	toChunked := func() {
 		out := output.(ArrayLikeDatum).Chunks()
@@ -1023,6 +1047,7 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 		return nil
 	case output = <-out:
 		if output == nil || ctx.Err() != nil {
+			releasePartial()
 			return nil
 		}
 
@@ -1038,7 +1063,8 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 		case <-ctx.Done():
 			// context is done, either cancelled or a timeout.
 			// either way, we end early and return what we've got so far.
-			return output
+			releasePartial()
+			return nil
 		case o, ok := <-out:
 			if !ok { // channel closed, wrap it up
 				if output != nil {

@@ -176,6 +176,7 @@ func execInternal(ctx context.Context, fn Function, opts FunctionOptions, passed
 
 	if ctx.Err() == context.Canceled && result != nil {
 		result.Release()
+		result = nil
 	}
 
 	return
