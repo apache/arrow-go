@@ -34,19 +34,24 @@ var (
 	dictionaryEncodeDoc = FunctionDoc{
 		Summary: "Dictionary encode an array",
 		Description: "Return a dictionary-encoded array with the distinct values in the dictionary.\n" +
-			"If the input is already dictionary encoded, it is returned unchanged.",
+			"If the input is already dictionary encoded, it is returned unchanged.\n" +
+			"Dictionary indices use int32.",
 		ArgNames:    []string{"array"},
 		OptionsType: "DictionaryEncodeOptions",
 	}
 )
 
+// NullEncodingBehavior controls how null input values are represented.
 type NullEncodingBehavior = kernels.NullEncodingBehavior
 
 const (
-	NullEncodingMask   = kernels.NullEncodingMask
+	// NullEncodingMask keeps null input values null in the indices array.
+	NullEncodingMask = kernels.NullEncodingMask
+	// NullEncodingEncode adds null input values to the dictionary as a regular entry.
 	NullEncodingEncode = kernels.NullEncodingEncode
 )
 
+// DictionaryEncodeOptions controls dictionary encoding behavior.
 type DictionaryEncodeOptions = kernels.DictionaryEncodeOptions
 
 func Unique(ctx context.Context, values Datum) (Datum, error) {
@@ -63,11 +68,13 @@ func UniqueArray(ctx context.Context, values arrow.Array) (arrow.Array, error) {
 	return out.(*ArrayDatum).MakeArray(), nil
 }
 
-// DictionaryEncode returns a dictionary-encoded version of values.
+// DictionaryEncode returns a dictionary-encoded version of values. The dictionary
+// indices use int32, and nulls are masked unless NullEncodingEncode is selected.
 func DictionaryEncode(ctx context.Context, opts DictionaryEncodeOptions, values Datum) (Datum, error) {
 	return CallFunction(ctx, "dictionary_encode", &opts, values)
 }
 
+// DictionaryEncodeArray returns a dictionary-encoded version of values.
 func DictionaryEncodeArray(ctx context.Context, opts DictionaryEncodeOptions, values arrow.Array) (arrow.Array, error) {
 	out, err := DictionaryEncode(ctx, opts, &ArrayDatum{Value: values.Data()})
 	if err != nil {

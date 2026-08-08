@@ -23,6 +23,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -81,11 +82,14 @@ type uniqueAction = emptyAction
 type NullEncodingBehavior int8
 
 const (
+	// NullEncodingMask keeps null input values null in the indices array.
 	NullEncodingMask NullEncodingBehavior = iota
+	// NullEncodingEncode adds null input values to the dictionary as a regular entry.
 	NullEncodingEncode
 )
 
 type DictionaryEncodeOptions struct {
+	// NullEncoding controls how null input values are represented.
 	NullEncoding NullEncodingBehavior `compute:"null_encoding"`
 }
 
@@ -101,6 +105,8 @@ type dictionaryEncodeAction struct {
 }
 
 func (a *dictionaryEncodeAction) Reset() error {
+	a.indices.reset()
+	a.validity.reset()
 	a.length = 0
 	a.nulls = 0
 	a.err = nil
@@ -157,8 +163,8 @@ func (a *dictionaryEncodeAction) Flush(out *exec.ExecResult) error {
 	return nil
 }
 
-func (a *dictionaryEncodeAction) FlushFinal(out *exec.ExecResult) error {
-	return a.Flush(out)
+func (a *dictionaryEncodeAction) FlushFinal(*exec.ExecResult) error {
+	return nil
 }
 
 func (a *dictionaryEncodeAction) ObserveFound(idx int) {
@@ -299,6 +305,42 @@ func doAppendNumeric[T arrow.IntType | arrow.UintType | arrow.FloatType](action 
 	return bitutils.VisitBitBlocksShort(arr.Buffers[0].Buf, arr.Offset, arr.Len,
 		func(pos int64) error {
 			idx, found, err := memo.GetOrInsert(arrData[pos])
+			if err != nil {
+				return err
+			}
+			if found {
+				action.ObserveFound(idx)
+				return nil
+			}
+			return action.ObserveNotFound(idx)
+		}, func() error {
+			if !shouldEncodeNulls {
+				return action.ObserveNullNotFound(-1)
+			}
+
+			idx, found := memo.GetOrInsertNull()
+			if found {
+				action.ObserveNullFound(idx)
+				return nil
+			}
+			return action.ObserveNullNotFound(idx)
+		})
+}
+
+func doAppendBoolean(action Action, memo hashing.MemoTable, arr *exec.ArraySpan) error {
+	if arr.Len == 0 {
+		return nil
+	}
+
+	values := arr.Buffers[1].Buf
+	shouldEncodeNulls := action.ShouldEncodeNulls()
+	return bitutils.VisitBitBlocksShort(arr.Buffers[0].Buf, arr.Offset, arr.Len,
+		func(pos int64) error {
+			value := uint8(0)
+			if bitutil.BitIsSet(values, int(arr.Offset+pos)) {
+				value = 1
+			}
+			idx, found, err := memo.GetOrInsert(value)
 			if err != nil {
 				return err
 			}
@@ -474,7 +516,7 @@ func nullHashInit(actionInit initAction) exec.KernelInitFn {
 
 func newMemoTable(mem memory.Allocator, dt arrow.Type) (hashing.MemoTable, error) {
 	switch dt {
-	case arrow.INT8, arrow.UINT8:
+	case arrow.BOOL, arrow.INT8, arrow.UINT8:
 		return hashing.NewMemoTable[uint8](0), nil
 	case arrow.INT16, arrow.UINT16:
 		return hashing.NewMemoTable[uint16](0), nil
@@ -558,6 +600,8 @@ func getHashInit(typeID arrow.Type, actionInit initAction) exec.KernelInitFn {
 	switch typeID {
 	case arrow.NULL:
 		return nullHashInit(actionInit)
+	case arrow.BOOL:
+		return regularHashInit(arrow.FixedWidthTypes.Boolean, actionInit, doAppendBoolean)
 	case arrow.INT8, arrow.UINT8:
 		return regularHashInit(arrow.PrimitiveTypes.Uint8, actionInit, doAppendNumeric[uint8])
 	case arrow.INT16, arrow.UINT16:
@@ -651,6 +695,13 @@ func uniqueFinalizeDictionary(ctx *exec.KernelCtx, result []*exec.ArraySpan) (ou
 
 func addHashKernels(base exec.VectorKernel, actionInit initAction, outTy exec.OutputType) []exec.VectorKernel {
 	kernels := make([]exec.VectorKernel, 0)
+	base.Init = getHashInit(arrow.BOOL, actionInit)
+	base.Signature = &exec.KernelSignature{
+		InputTypes: []exec.InputType{exec.NewExactInput(arrow.FixedWidthTypes.Boolean)},
+		OutType:    outTy,
+	}
+	kernels = append(kernels, base)
+
 	for _, ty := range primitiveTypes {
 		base.Init = getHashInit(ty.ID(), actionInit)
 		base.Signature = &exec.KernelSignature{

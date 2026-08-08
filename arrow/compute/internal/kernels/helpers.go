@@ -851,6 +851,10 @@ func (v *validityBuilder) Finish() (buf *memory.Buffer) {
 	return
 }
 
+func (v *validityBuilder) reset() {
+	v.bitLength, v.falseCount = 0, 0
+}
+
 type execBufBuilder struct {
 	mem    memory.Allocator
 	buffer *memory.Buffer
@@ -874,6 +878,10 @@ func (bldr *execBufBuilder) reserve(additional int) {
 func (bldr *execBufBuilder) unsafeAppend(data []byte) {
 	copy(bldr.data[bldr.sz:], data)
 	bldr.sz += len(data)
+}
+
+func (bldr *execBufBuilder) reset() {
+	bldr.sz = 0
 }
 
 func (bldr *execBufBuilder) finish() (buf *memory.Buffer) {
