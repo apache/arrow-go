@@ -202,7 +202,8 @@ func listElementExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 func listElementTakeSupported(typ arrow.DataType) bool {
 	id := typ.ID()
 	if id == arrow.NULL || arrow.IsBinaryLike(id) || arrow.IsLargeBinaryLike(id) ||
-		arrow.IsFixedSizeBinary(id) || id == arrow.SPARSE_UNION || id == arrow.DENSE_UNION {
+		arrow.IsFixedSizeBinary(id) || id == arrow.SPARSE_UNION || id == arrow.DENSE_UNION ||
+		id == arrow.EXTENSION {
 		return true
 	}
 	if !arrow.IsPrimitive(id) {
@@ -478,6 +479,18 @@ func listElementTake(ctx *exec.KernelCtx, values *exec.ArraySpan, indices arrow.
 		return true, listElementSparseUnionTake(ctx, values, indices, out)
 	case id == arrow.DENSE_UNION:
 		return true, listElementDenseUnionTake(ctx, values, indices, out)
+	case id == arrow.EXTENSION:
+		extType := values.Type.(arrow.ExtensionType)
+		storage := *values
+		storage.Type = extType.StorageType()
+		handled, err := listElementTake(ctx, &storage, indices, out)
+		if handled {
+			// The storage take produces the physical buffers and children. Restore
+			// the logical extension type so ArraySpan.MakeData reconstructs an
+			// ExtensionArray around them.
+			out.Type = values.Type
+		}
+		return handled, err
 	default:
 		return false, nil
 	}
