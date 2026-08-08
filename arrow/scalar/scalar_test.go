@@ -1297,6 +1297,11 @@ type scalarFieldOption struct {
 
 func (scalarFieldOption) TypeName() string { return "scalarFieldOption" }
 
+type scalarFieldWithUnsupportedSlice struct {
+	Value       scalar.Scalar `compute:"value"`
+	Unsupported []float64     `compute:"unsupported"`
+}
+
 type zeroingAllocator struct{}
 
 func (*zeroingAllocator) Allocate(size int) []byte { return make([]byte, size) }
@@ -1327,6 +1332,24 @@ func TestScalarFieldCloneOwnsBinaryValue(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "10", string(value.Data()))
 	value.Release()
+}
+
+func TestToScalarReleasesFieldsWhenLaterFieldFails(t *testing.T) {
+	mem := memory.NewCheckedAllocator(&zeroingAllocator{})
+	defer mem.AssertSize(t, 0)
+
+	data := mem.Allocate(2)
+	copy(data, []byte("10"))
+	buffer := memory.NewBufferWithAllocator(data, mem)
+	original := scalar.NewBinaryScalar(buffer, arrow.BinaryTypes.Binary)
+	buffer.Release()
+
+	_, err := scalar.ToScalar(scalarFieldWithUnsupportedSlice{
+		Value:       original,
+		Unsupported: []float64{1},
+	}, mem)
+	require.Error(t, err)
+	original.Release()
 }
 
 func TestGetScalarBinaryValueOwnsArrayBytes(t *testing.T) {
