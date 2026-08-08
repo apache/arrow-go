@@ -578,6 +578,40 @@ func TestDictionaryEncode(t *testing.T) {
 	require.ErrorIs(t, err, arrow.ErrInvalid)
 }
 
+func TestDictionaryEncodeArrayWithSmallExecChunkSize(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	values, _, err := array.FromJSON(
+		mem,
+		arrow.PrimitiveTypes.Int32,
+		strings.NewReader(`[1, 2, 1, 3, 2]`),
+	)
+	require.NoError(t, err)
+	defer values.Release()
+
+	execCtx := compute.DefaultExecCtx()
+	execCtx.ChunkSize = 2
+	ctx := compute.SetExecCtx(
+		compute.WithAllocator(context.Background(), mem),
+		execCtx,
+	)
+
+	result, err := compute.DictionaryEncodeArray(
+		ctx,
+		compute.DictionaryEncodeOptions{},
+		values,
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	encoded := result.(*array.Dictionary)
+	require.Equal(t, values.Len(), encoded.Len())
+	require.Equal(t, 3, encoded.Dictionary().Len())
+	assert.Equal(t, []int32{0, 1, 0, 2, 1},
+		arrow.Int32Traits.CastFromBytes(encoded.Indices().Data().Buffers()[1].Bytes()))
+}
+
 func TestDictionaryEncodeBoolean(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -889,6 +923,37 @@ func TestDictionaryEncodeDictionaryInput(t *testing.T) {
 	defer result.Release()
 	require.True(t, arrow.TypeEqual(dictType, result.DataType()))
 	require.Equal(t, input.Len(), result.Len())
+	assert.True(t, array.Equal(input, result))
+}
+
+func TestDictionaryEncodeArrayDictionaryInputWithSmallExecChunkSize(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.BinaryTypes.String,
+	}
+	input, err := array.DictArrayFromJSON(mem, dictType, `[0, 1, 0, null, 1]`, `["foo", "bar"]`)
+	require.NoError(t, err)
+	defer input.Release()
+
+	execCtx := compute.DefaultExecCtx()
+	execCtx.ChunkSize = 2
+	ctx := compute.SetExecCtx(
+		compute.WithAllocator(context.Background(), mem),
+		execCtx,
+	)
+
+	result, err := compute.DictionaryEncodeArray(
+		ctx,
+		compute.DictionaryEncodeOptions{},
+		input,
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	require.True(t, arrow.TypeEqual(dictType, result.DataType()))
 	assert.True(t, array.Equal(input, result))
 }
 

@@ -20,8 +20,10 @@ package compute
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/compute/internal/kernels"
 )
 
@@ -34,8 +36,9 @@ var (
 	dictionaryEncodeDoc = FunctionDoc{
 		Summary: "Dictionary encode an array",
 		Description: "Return a dictionary-encoded array with the distinct values in the dictionary.\n" +
-			"If the input is already dictionary encoded, it is returned unchanged.\n" +
-			"Dictionary indices use int32.",
+			"If the input is already dictionary encoded, it is returned unchanged,\n" +
+			"including its index type.\n" +
+			"Newly encoded arrays use int32 dictionary indices.",
 		ArgNames:    []string{"array"},
 		OptionsType: "DictionaryEncodeOptions",
 	}
@@ -68,21 +71,33 @@ func UniqueArray(ctx context.Context, values arrow.Array) (arrow.Array, error) {
 	return out.(*ArrayDatum).MakeArray(), nil
 }
 
-// DictionaryEncode returns a dictionary-encoded version of values. The dictionary
-// indices use int32, and nulls are masked unless NullEncodingEncode is selected.
+// DictionaryEncode returns a dictionary-encoded version of values.
+// Newly encoded arrays use int32 indices. Existing dictionary arrays are
+// returned unchanged. Nulls are masked unless NullEncodingEncode is selected.
 func DictionaryEncode(ctx context.Context, opts DictionaryEncodeOptions, values Datum) (Datum, error) {
 	return CallFunction(ctx, "dictionary_encode", &opts, values)
 }
 
 // DictionaryEncodeArray returns a dictionary-encoded version of values.
 func DictionaryEncodeArray(ctx context.Context, opts DictionaryEncodeOptions, values arrow.Array) (arrow.Array, error) {
-	out, err := DictionaryEncode(ctx, opts, &ArrayDatum{Value: values.Data()})
+	datum, err := DictionaryEncode(ctx, opts, &ArrayDatum{Value: values.Data()})
 	if err != nil {
 		return nil, err
 	}
-	defer out.Release()
+	defer datum.Release()
 
-	return out.(*ArrayDatum).MakeArray(), nil
+	switch out := datum.(type) {
+	case *ArrayDatum:
+		return out.MakeArray(), nil
+	case *ChunkedDatum:
+		return array.Concatenate(out.Chunks(), GetAllocator(ctx))
+	default:
+		return nil, fmt.Errorf(
+			"%w: dictionary_encode returned unexpected datum kind %s",
+			arrow.ErrInvalid,
+			datum.Kind(),
+		)
+	}
 }
 
 func RegisterVectorHash(reg FunctionRegistry) {
