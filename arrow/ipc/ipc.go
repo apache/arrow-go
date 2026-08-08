@@ -74,6 +74,7 @@ type config struct {
 	minSpaceSavings    float64
 	maxMetadataSize    int64
 	maxBodySize        int64
+	compressors        []compressor
 }
 
 const (
@@ -84,6 +85,12 @@ const (
 // Option is a functional option to configure opening or creating Arrow files
 // and streams.
 type Option func(*config)
+
+func withCompressors(compressors ...compressor) Option {
+	return func(cfg *config) {
+		cfg.compressors = compressors
+	}
+}
 
 func newConfig(opts ...Option) *config {
 	cfg := &config{

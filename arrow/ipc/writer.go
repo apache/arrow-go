@@ -1153,6 +1153,8 @@ func needTruncate(offset int64, buf *memory.Buffer, minLength int64) bool {
 // method after it is no longer needed.
 func GetRecordBatchPayload(batch arrow.RecordBatch, opts ...Option) (Payload, error) {
 	cfg := newConfig(opts...)
+	compressors := make([]compressor, cfg.compressNP)
+	copy(compressors, cfg.compressors)
 	var (
 		data = Payload{msg: MessageRecordBatch}
 		enc  = newRecordEncoder(
@@ -1163,7 +1165,7 @@ func GetRecordBatchPayload(batch arrow.RecordBatch, opts ...Option) (Payload, er
 			cfg.codec,
 			cfg.compressNP,
 			cfg.minSpaceSavings,
-			make([]compressor, cfg.compressNP),
+			compressors,
 		)
 	)
 
