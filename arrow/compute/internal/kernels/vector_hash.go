@@ -90,7 +90,7 @@ const (
 
 type DictionaryEncodeOptions struct {
 	// NullEncoding controls how null input values are represented.
-	NullEncoding NullEncodingBehavior `compute:"null_encoding"`
+	NullEncoding NullEncodingBehavior `compute:"null_encoding_behavior"`
 }
 
 func (DictionaryEncodeOptions) TypeName() string { return "DictionaryEncodeOptions" }
@@ -418,6 +418,21 @@ func dictionaryEncodeIdentity(_ *exec.KernelCtx, batch *exec.ExecSpan, out *exec
 	defer data.Release()
 	out.TakeOwnership(data)
 	return nil
+}
+
+func dictionaryEncodeIdentityChunked(_ *exec.KernelCtx, batch []*arrow.Chunked, _ *exec.ExecResult) ([]*exec.ExecResult, error) {
+	if len(batch) != 1 {
+		return nil, fmt.Errorf("%w: dictionary_encode expects one input", arrow.ErrInvalid)
+	}
+
+	chunks := batch[0].Chunks()
+	results := make([]*exec.ExecResult, 0, len(chunks))
+	for _, chunk := range chunks {
+		result := &exec.ExecResult{}
+		result.TakeOwnership(chunk.Data())
+		results = append(results, result)
+	}
+	return results, nil
 }
 
 func initDictionaryEncodeIdentity(_ *exec.KernelCtx, args exec.KernelInitArgs) (exec.KernelState, error) {
@@ -827,13 +842,16 @@ func GetVectorHashKernels() (unique, valueCounts, dictEncode []exec.VectorKernel
 	base.NullHandling = exec.NullComputedNoPrealloc
 	base.MemAlloc = exec.MemNoPrealloc
 	dictEncode = addHashKernels(base, initDictionaryEncode, outputDictionaryType)
-	dictEncode = append(dictEncode, exec.NewVectorKernelWithSig(
+	identity := exec.NewVectorKernelWithSig(
 		&exec.KernelSignature{
 			InputTypes: []exec.InputType{exec.NewIDInput(arrow.DICTIONARY)},
 			OutType:    OutputFirstType,
 		},
 		dictionaryEncodeIdentity,
-		initDictionaryEncodeIdentity))
+		initDictionaryEncodeIdentity)
+	identity.CanExecuteChunkWise = false
+	identity.ExecChunked = dictionaryEncodeIdentityChunked
+	dictEncode = append(dictEncode, identity)
 
 	return
 }
