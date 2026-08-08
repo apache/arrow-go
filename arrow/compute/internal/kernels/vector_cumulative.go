@@ -194,6 +194,71 @@ func checkedAdder[T arrow.NumericType]() func(T, T) (T, error) {
 	}
 }
 
+func prepareCumulativeOutput[T arrow.NumericType](ctx *exec.KernelCtx, out *exec.ExecResult, needsValidity bool) {
+	if out.Len == 0 {
+		return
+	}
+
+	data := ctx.Allocate(int(out.Len) * arrow.GetDataType[T]().(arrow.FixedWidthDataType).Bytes())
+	out.Buffers[1].WrapBuffer(data)
+
+	if needsValidity {
+		validity := ctx.AllocateBitmap(out.Len)
+		validityBytes := validity.Bytes()
+		for i := range validityBytes {
+			validityBytes[i] = 0xFF
+		}
+		out.Buffers[0].WrapBuffer(validity)
+	}
+}
+
+func cumulativeSumSpans[T arrow.NumericType](ctx *exec.KernelCtx, state *cumulativeSumState[T], inputs []*exec.ArraySpan, out *exec.ExecResult, needsValidity bool) error {
+	prepareCumulativeOutput[T](ctx, out, needsValidity)
+	values := exec.GetSpanValues[T](out, 1)
+
+	var (
+		nulls        int64
+		outputOffset int64
+	)
+	for _, input := range inputs {
+		inputValues := exec.GetSpanValues[T](input, 1)
+		for i := int64(0); i < input.Len; i++ {
+			valid := len(input.Buffers[0].Buf) == 0 || bitutil.BitIsSet(input.Buffers[0].Buf, int(input.Offset+i))
+			outputIndex := outputOffset + i
+			if !valid || state.encounteredNull {
+				if needsValidity {
+					bitutil.ClearBit(out.Buffers[0].Buf, int(outputIndex))
+				}
+				nulls++
+				if !valid && !state.skipNulls {
+					state.encounteredNull = true
+				}
+				continue
+			}
+
+			current := state.current
+			value := inputValues[i]
+			var err error
+			if state.checked {
+				current, err = state.add(current, value)
+			} else {
+				current += value
+			}
+			if err != nil {
+				out.Release()
+				return err
+			}
+
+			state.current = current
+			values[outputIndex] = current
+		}
+		outputOffset += input.Len
+	}
+
+	out.Nulls = nulls
+	return nil
+}
+
 func cumulativeSumExec[T arrow.NumericType](ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 	state := ctx.State.(*cumulativeSumState[T])
 	input := &batch.Values[0].Array
@@ -203,54 +268,31 @@ func cumulativeSumExec[T arrow.NumericType](ctx *exec.KernelCtx, batch *exec.Exe
 		return nil
 	}
 
-	data := ctx.Allocate(int(input.Len) * arrow.GetDataType[T]().(arrow.FixedWidthDataType).Bytes())
-	out.Buffers[1].WrapBuffer(data)
-	values := exec.GetSpanValues[T](out, 1)
-	inputValues := exec.GetSpanValues[T](input, 1)
+	return cumulativeSumSpans(ctx, state, []*exec.ArraySpan{input}, out, state.encounteredNull || input.MayHaveNulls())
+}
 
-	needsValidity := state.encounteredNull || input.MayHaveNulls()
-	if needsValidity {
-		validity := ctx.AllocateBitmap(input.Len)
-		validityBytes := validity.Bytes()
-		for i := range validityBytes {
-			validityBytes[i] = 0xFF
-		}
-		out.Buffers[0].WrapBuffer(validity)
+func cumulativeSumExecChunked[T arrow.NumericType](ctx *exec.KernelCtx, batch []*arrow.Chunked, out *exec.ExecResult) ([]*exec.ExecResult, error) {
+	state := ctx.State.(*cumulativeSumState[T])
+	input := batch[0]
+	out.Len = int64(input.Len())
+	if out.Len == 0 {
+		return []*exec.ExecResult{out}, nil
 	}
 
-	var nulls int64
-	for i := int64(0); i < input.Len; i++ {
-		valid := len(input.Buffers[0].Buf) == 0 || bitutil.BitIsSet(input.Buffers[0].Buf, int(input.Offset+i))
-		if !valid || state.encounteredNull {
-			if needsValidity {
-				bitutil.ClearBit(out.Buffers[0].Buf, int(i))
-			}
-			nulls++
-			if !valid && !state.skipNulls {
-				state.encounteredNull = true
-			}
-			continue
-		}
-
-		current := state.current
-		value := inputValues[i]
-		var err error
-		if state.checked {
-			current, err = state.add(current, value)
-		} else {
-			current += value
-		}
-		if err != nil {
-			out.Release()
-			return err
-		}
-
-		state.current = current
-		values[i] = current
+	chunks := input.Chunks()
+	spans := make([]exec.ArraySpan, len(chunks))
+	inputs := make([]*exec.ArraySpan, len(chunks))
+	needsValidity := state.encounteredNull || input.NullN() != 0
+	for i, chunk := range chunks {
+		spans[i].SetMembers(chunk.Data())
+		inputs[i] = &spans[i]
+		needsValidity = needsValidity || spans[i].MayHaveNulls()
 	}
 
-	out.Nulls = nulls
-	return nil
+	if err := cumulativeSumSpans(ctx, state, inputs, out, needsValidity); err != nil {
+		return nil, err
+	}
+	return []*exec.ExecResult{out}, nil
 }
 
 func newCumulativeSumKernel[T arrow.NumericType](typ arrow.DataType, checked bool, cast ScalarCastFn) exec.VectorKernel {
@@ -260,6 +302,9 @@ func newCumulativeSumKernel[T arrow.NumericType](typ arrow.DataType, checked boo
 		cumulativeSumExec[T],
 		initCumulativeSum[T](checked, cast))
 	kernel.Parallelizable = false
+	kernel.CanExecuteChunkWise = false
+	kernel.OutputChunked = false
+	kernel.ExecChunked = cumulativeSumExecChunked[T]
 	return kernel
 }
 

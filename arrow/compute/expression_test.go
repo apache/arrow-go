@@ -213,11 +213,20 @@ func TestCumulativeOptionsEquality(t *testing.T) {
 		})
 	}
 
-	left := compute.NewCall("cumulative_sum", nil, compute.CumulativeOptions{Start: scalar.NewInt32Scalar(10)})
-	right := compute.NewCall("cumulative_sum", nil, &compute.CumulativeOptions{Start: scalar.NewInt32Scalar(10)})
-	defer left.Release()
-	defer right.Release()
-	assert.True(t, left.Equals(right))
+}
+
+func TestCumulativeOptionsRelease(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	data := mem.Allocate(2)
+	copy(data, []byte("10"))
+	buffer := memory.NewBufferWithAllocator(data, mem)
+	start := scalar.NewBinaryScalar(buffer, arrow.BinaryTypes.Binary)
+	buffer.Release()
+
+	expr := compute.NewCall("cumulative_sum", nil, &compute.CumulativeOptions{Start: start})
+	expr.Release()
 }
 
 func TestExpressionHashing(t *testing.T) {

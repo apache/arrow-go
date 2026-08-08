@@ -400,8 +400,6 @@ func equalFunctionOptions(lhs, rhs FunctionOptions) bool {
 
 func cumulativeOptions(opts FunctionOptions) (*CumulativeOptions, bool) {
 	switch opts := opts.(type) {
-	case CumulativeOptions:
-		return &opts, true
 	case *CumulativeOptions:
 		return opts, true
 	default:
