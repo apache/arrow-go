@@ -367,6 +367,27 @@ func TestRunEndEncodedBuilder(t *testing.T) {
 	assert.Equal(t, "Hello", strValues.ValueStr(0))
 }
 
+func TestRunEndEncodedBuilderEmptyValues(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewRunEndEncodedBuilder(mem, arrow.PrimitiveTypes.Int16, arrow.BinaryTypes.String)
+	defer bldr.Release()
+
+	bldr.AppendEmptyValue()
+	bldr.AppendEmptyValues(2)
+
+	arr := bldr.NewRunEndEncodedArray()
+	defer arr.Release()
+
+	values := arr.Values().(*array.String)
+	assert.Equal(t, 3, values.Len())
+	for i := 0; i < values.Len(); i++ {
+		assert.False(t, values.IsNull(i))
+		assert.Empty(t, values.Value(i))
+	}
+}
+
 func TestRunEndEncodedStringRoundTrip(t *testing.T) {
 	// 1. create array
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
