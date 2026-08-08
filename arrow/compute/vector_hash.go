@@ -30,7 +30,7 @@ import (
 var (
 	uniqueDoc = FunctionDoc{
 		Summary:     "Compute unique elements",
-		Description: "Return an array with distinct values. Nulls in the input are ignored",
+		Description: "Return an array with distinct values. Nulls in the input are considered a distinct value",
 		ArgNames:    []string{"array"},
 	}
 	dictionaryEncodeDoc = FunctionDoc{
