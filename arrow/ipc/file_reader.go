@@ -333,8 +333,10 @@ func (f *FileReader) readSchema(ensureNativeEndian bool) error {
 		if err != nil {
 			return err
 		}
-
-		kind, err = readDictionary(&f.memo, msg.meta, msg.body, f.swapEndianness, f.mem)
+		kind, err = func() (dictutils.Kind, error) {
+			defer msg.Release()
+			return readDictionary(&f.memo, msg.meta, msg.body, f.swapEndianness, f.mem)
+		}()
 		if err != nil {
 			return err
 		}
@@ -411,6 +413,7 @@ func (f *FileReader) Close() error {
 		f.record.Release()
 		f.record = nil
 	}
+	f.memo.Clear()
 	return nil
 }
 

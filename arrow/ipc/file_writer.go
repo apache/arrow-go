@@ -285,6 +285,8 @@ func NewFileWriter(w io.Writer, opts ...Option) (*FileWriter, error) {
 }
 
 func (f *FileWriter) Close() error {
+	defer f.releaseDictionaries()
+
 	err := f.checkStarted()
 	if err != nil {
 		return fmt.Errorf("arrow/ipc: could not write empty file: %w", err)
@@ -301,6 +303,13 @@ func (f *FileWriter) Close() error {
 	f.footerWritten = true
 
 	return nil
+}
+
+func (f *FileWriter) releaseDictionaries() {
+	for _, d := range f.lastWrittenDicts {
+		d.Release()
+	}
+	f.lastWrittenDicts = nil
 }
 
 func (f *FileWriter) Write(rec arrow.RecordBatch) error {

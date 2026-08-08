@@ -867,6 +867,26 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 		data := finishFixedWidth(arrow.Decimal256Traits.CastToBytes([]decimal256.Num{s.Value}))
 		defer data.Release()
 		return array.MakeFromData(data), nil
+	case *Dictionary:
+		if err := s.Validate(); err != nil {
+			return nil, err
+		}
+
+		indices, err := MakeArrayFromScalar(s.Value.Index, length, mem)
+		if err != nil {
+			return nil, err
+		}
+		defer indices.Release()
+
+		// Copy the dictionary values as well as the indices so the resulting
+		// scalar does not retain memory owned by the source dictionary.
+		dict, err := array.Concatenate([]arrow.Array{s.Value.Dict}, mem)
+		if err != nil {
+			return nil, err
+		}
+		defer dict.Release()
+
+		return array.NewDictionaryArray(s.DataType(), indices, dict), nil
 	case PrimitiveScalar:
 		data := finishFixedWidth(s.Data())
 		defer data.Release()

@@ -215,6 +215,18 @@ func TestCumulativeOptionsEquality(t *testing.T) {
 
 }
 
+func TestCumulativeOptionsValueAndPointerEquality(t *testing.T) {
+	value := compute.CumulativeOptions{Start: scalar.NewInt32Scalar(10)}
+	pointer := &compute.CumulativeOptions{Start: scalar.NewInt32Scalar(10)}
+
+	left := compute.NewCall("cumulative_sum", []compute.Expression{compute.NewFieldRef("values")}, value)
+	right := compute.NewCall("cumulative_sum", []compute.Expression{compute.NewFieldRef("values")}, pointer)
+	defer left.Release()
+	defer right.Release()
+
+	assert.True(t, left.Equals(right))
+}
+
 func TestCumulativeOptionsRelease(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
