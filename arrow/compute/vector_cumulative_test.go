@@ -132,6 +132,72 @@ func TestCumulativeSumAdditionalInputs(t *testing.T) {
 	})
 }
 
+func TestCumulativeSumNullScalarInput(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	types := []arrow.DataType{
+		arrow.PrimitiveTypes.Int8,
+		arrow.PrimitiveTypes.Int16,
+		arrow.PrimitiveTypes.Int32,
+		arrow.PrimitiveTypes.Int64,
+		arrow.PrimitiveTypes.Uint8,
+		arrow.PrimitiveTypes.Uint16,
+		arrow.PrimitiveTypes.Uint32,
+		arrow.PrimitiveTypes.Uint64,
+		arrow.PrimitiveTypes.Float32,
+		arrow.PrimitiveTypes.Float64,
+	}
+	functions := []struct {
+		name string
+		run  func(context.Context, compute.CumulativeOptions, compute.Datum) (compute.Datum, error)
+	}{
+		{name: "unchecked", run: compute.CumulativeSum},
+		{name: "checked", run: compute.CumulativeSumChecked},
+	}
+	options := []struct {
+		name  string
+		start bool
+		skip  bool
+	}{
+		{name: "no_start_no_skip"},
+		{name: "no_start_skip", skip: true},
+		{name: "start_no_skip", start: true},
+		{name: "start_skip", start: true, skip: true},
+	}
+
+	for _, typ := range types {
+		start, err := scalar.ParseScalar(typ, "10")
+		require.NoError(t, err)
+		if releasable, ok := start.(scalar.Releasable); ok {
+			defer releasable.Release()
+		}
+
+		for _, fn := range functions {
+			for _, tc := range options {
+				t.Run(typ.Name()+"/"+fn.name+"/"+tc.name, func(t *testing.T) {
+					input := compute.NewDatum(scalar.MakeNullScalar(typ))
+					defer input.Release()
+
+					opts := compute.CumulativeOptions{SkipNulls: tc.skip}
+					if tc.start {
+						opts.Start = start
+					}
+
+					result, err := fn.run(ctx, opts, input)
+					require.NoError(t, err)
+					defer result.Release()
+
+					expected := cumulativeInput(t, mem, typ, `[null]`)
+					defer expected.Release()
+					assertDatumsEqual(t, &compute.ArrayDatum{Value: expected.Data()}, result, nil, nil)
+				})
+			}
+		}
+	}
+}
+
 func TestCumulativeSumNullsAndStart(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -169,6 +235,32 @@ func TestCumulativeSumNullsAndStart(t *testing.T) {
 		assertDatumsEqual(t, &compute.ArrayDatum{Value: expected.Data()}, result, nil, nil)
 	})
 
+}
+
+func TestCumulativeSumRejectsTypedNullStart(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+	input := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1]`)
+	defer input.Release()
+
+	for _, tc := range []struct {
+		name string
+		run  func(context.Context, compute.CumulativeOptions, compute.Datum) (compute.Datum, error)
+	}{
+		{name: "unchecked", run: compute.CumulativeSum},
+		{name: "checked", run: compute.CumulativeSumChecked},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := tc.run(ctx, compute.CumulativeOptions{
+				Start: scalar.MakeNullScalar(arrow.PrimitiveTypes.Int32),
+			}, &compute.ArrayDatum{Value: input.Data()})
+			if result != nil {
+				result.Release()
+			}
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
 }
 
 func TestCumulativeSumStartSafeCast(t *testing.T) {
@@ -401,6 +493,9 @@ func TestCumulativeOptionsSerialization(t *testing.T) {
 			assert.NotEmpty(t, roundTripped.String())
 			roundTripped.Release()
 			expr.Release()
+			if releasable, ok := tc.start.(scalar.Releasable); ok {
+				releasable.Release()
+			}
 		})
 	}
 }
@@ -422,6 +517,7 @@ func TestCumulativeOptionsDictionarySerialization(t *testing.T) {
 
 	start, err := scalar.GetScalar(dict, 0)
 	require.NoError(t, err)
+	defer start.(scalar.Releasable).Release()
 	expr := compute.NewCall("cumulative_sum", []compute.Expression{compute.NewFieldRef("values")},
 		&compute.CumulativeOptions{Start: start})
 	defer expr.Release()

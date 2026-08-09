@@ -602,9 +602,34 @@ func NewFieldRef(field string) Expression {
 }
 
 // NewCall constructs an expression that represents a specific function call with
-// the given arguments and options.
+// the given arguments and options. Cumulative start scalars are retained for
+// the lifetime of the expression.
 func NewCall(name string, args []Expression, opts FunctionOptions) Expression {
-	return &Call{funcName: name, args: args, options: opts}
+	return &Call{funcName: name, args: args, options: cloneExpressionOptions(opts)}
+}
+
+func cloneExpressionOptions(opts FunctionOptions) FunctionOptions {
+	switch opts := opts.(type) {
+	case CumulativeOptions:
+		opts.Start = retainExpressionScalar(opts.Start)
+		return opts
+	case *CumulativeOptions:
+		if opts == nil {
+			return nil
+		}
+		cloned := *opts
+		cloned.Start = retainExpressionScalar(cloned.Start)
+		return cloned
+	default:
+		return opts
+	}
+}
+
+func retainExpressionScalar(value scalar.Scalar) scalar.Scalar {
+	if releasable, ok := value.(scalar.Releasable); ok {
+		releasable.Retain()
+	}
+	return value
 }
 
 // Project is shorthand for `make_struct` to produce a record batch output
@@ -923,7 +948,13 @@ func DeserializeExpr(mem memory.Allocator, buf *memory.Buffer) (Expression, erro
 						opts = optionsVal.(FunctionOptions)
 					}
 					index += 2
-					return NewCall(val, args, opts), nil
+					expr := NewCall(val, args, opts)
+					if _, ok := cumulativeOptions(opts); ok {
+						if r, ok := opts.(releasable); ok {
+							r.Release()
+						}
+					}
+					return expr, nil
 				}
 
 				arg, err := getone()

@@ -241,14 +241,20 @@ func TestCumulativeOptionsRelease(t *testing.T) {
 	}
 
 	t.Run("pointer options", func(t *testing.T) {
+		start := newStart()
 		expr := compute.NewCall("cumulative_sum", nil,
-			&compute.CumulativeOptions{Start: newStart()})
+			&compute.CumulativeOptions{Start: start})
 		expr.Release()
+		assert.Equal(t, "10", string(start.(scalar.BinaryScalar).Data()))
+		start.(scalar.Releasable).Release()
 	})
 	t.Run("value options", func(t *testing.T) {
+		start := newStart()
 		expr := compute.NewCall("cumulative_sum", nil,
-			compute.CumulativeOptions{Start: newStart()})
+			compute.CumulativeOptions{Start: start})
 		expr.Release()
+		assert.Equal(t, "10", string(start.(scalar.BinaryScalar).Data()))
+		start.(scalar.Releasable).Release()
 	})
 }
 

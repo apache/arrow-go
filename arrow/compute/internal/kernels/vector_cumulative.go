@@ -30,7 +30,7 @@ import (
 // CumulativeOptions controls cumulative operations.
 type CumulativeOptions struct {
 	// Start is the initial value. A nil value uses the zero value for the
-	// input type.
+	// input type. A non-nil null scalar is invalid.
 	Start scalar.Scalar `compute:"start"`
 	// SkipNulls controls whether a null input stops the cumulative operation.
 	// Null positions are still null in the output when this is true.

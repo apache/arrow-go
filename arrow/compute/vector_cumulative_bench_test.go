@@ -97,6 +97,11 @@ func BenchmarkCumulativeSum(b *testing.B) {
 
 	for _, tc := range tests {
 		b.Run(tc.name, func(b *testing.B) {
+			if input, ok := tc.input.(compute.ArrayLikeDatum); ok {
+				if typ, ok := input.Type().(arrow.FixedWidthDataType); ok {
+					b.SetBytes(int64(input.Len()) * int64(typ.Bytes()))
+				}
+			}
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
