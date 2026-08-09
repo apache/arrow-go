@@ -395,3 +395,19 @@ func TestTypeEqual(t *testing.T) {
 		})
 	}
 }
+
+func TestTypeEqualRunEndEncodedValueNullability(t *testing.T) {
+	nullable := RunEndEncodedOf(PrimitiveTypes.Int16, BinaryTypes.String)
+	nonNullable := RunEndEncodedOf(PrimitiveTypes.Int16, BinaryTypes.String)
+	nonNullable.ValueNullable = false
+
+	if TypeEqual(nullable, nonNullable) {
+		t.Fatal("run-end encoded types with different value nullability compared equal")
+	}
+	if TypeEqual(nonNullable, nullable) {
+		t.Fatal("run-end encoded type equality was not symmetric")
+	}
+	if nullable.Fingerprint() == nonNullable.Fingerprint() {
+		t.Fatal("run-end encoded types with different value nullability had identical fingerprints")
+	}
+}

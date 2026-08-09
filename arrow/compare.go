@@ -146,7 +146,8 @@ func TypeEqual(left, right DataType, opts ...TypeEqualOption) bool {
 	case *RunEndEncodedType:
 		r := right.(*RunEndEncodedType)
 		return TypeEqual(l.Encoded(), r.Encoded(), opts...) &&
-			TypeEqual(l.runEnds, r.runEnds, opts...)
+			TypeEqual(l.runEnds, r.runEnds, opts...) &&
+			l.ValueNullable == r.ValueNullable
 	case *ListViewType:
 		return l.elem.Equal(right.(*ListViewType).elem)
 	default:
