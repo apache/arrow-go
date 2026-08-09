@@ -526,3 +526,32 @@ func TestNarrowestDecimalType(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, arrow.ErrInvalid)
 }
+
+func TestNewDecimalTypeValidatesPrecision(t *testing.T) {
+	tests := []struct {
+		id           arrow.Type
+		maxPrecision int32
+	}{
+		{arrow.DECIMAL32, 9},
+		{arrow.DECIMAL64, 18},
+		{arrow.DECIMAL128, 38},
+		{arrow.DECIMAL256, 76},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.id.String(), func(t *testing.T) {
+			for _, precision := range []int32{1, tt.maxPrecision} {
+				typ, err := arrow.NewDecimalType(tt.id, precision, 2)
+				require.NoError(t, err)
+				assert.Equal(t, precision, typ.GetPrecision())
+				assert.Equal(t, int32(2), typ.GetScale())
+			}
+
+			for _, precision := range []int32{-1, 0, tt.maxPrecision + 1} {
+				typ, err := arrow.NewDecimalType(tt.id, precision, 2)
+				assert.Nil(t, typ)
+				assert.ErrorIs(t, err, arrow.ErrInvalid)
+			}
+		})
+	}
+}
