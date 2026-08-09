@@ -336,6 +336,17 @@ func TestStructField(t *testing.T) {
 	assert.Equal(t, ty.FieldIndices("f3"), []int(nil))
 }
 
+func TestStructTypeFieldIndicesReturnsCopy(t *testing.T) {
+	typeWithDuplicates := StructOf(
+		Field{Name: "id", Type: PrimitiveTypes.Int32},
+		Field{Name: "id", Type: PrimitiveTypes.Int64},
+	)
+	indices := typeWithDuplicates.FieldIndices("id")
+	indices[0] = 99
+
+	assert.Equal(t, []int{0, 1}, typeWithDuplicates.FieldIndices("id"))
+}
+
 func TestFieldEqual(t *testing.T) {
 	for _, tc := range []struct {
 		a, b Field

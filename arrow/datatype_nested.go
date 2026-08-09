@@ -19,6 +19,7 @@ package arrow
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -501,9 +502,9 @@ func (t *StructType) FieldsByName(n string) ([]Field, bool) {
 	return fields, ok
 }
 
-// FieldIndices returns indices of all fields with the given name, or nil.
+// FieldIndices returns a copy of the indices of all fields with the given name, or nil.
 func (t *StructType) FieldIndices(name string) []int {
-	return t.index[name]
+	return slices.Clone(t.index[name])
 }
 
 func (t *StructType) Fingerprint() string {
