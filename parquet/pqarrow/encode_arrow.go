@@ -121,11 +121,58 @@ func targetDecimalPrecision(cw file.ColumnChunkWriter) (int32, bool) {
 }
 
 func decimal128FitsTargetPrecision(val decimal128.Num, precision int32) bool {
-	return precision > 0 && precision <= decimal128.MaxPrecision && val.FitsInPrecision(precision)
+	if precision <= 0 || precision > decimal128.MaxPrecision {
+		return false
+	}
+	// Abs overflows for the minimum two's-complement value.
+	if val.Sign() < 0 && val.Negate() == val {
+		return false
+	}
+	return val.FitsInPrecision(precision)
 }
 
 func decimal256FitsTargetPrecision(val decimal256.Num, precision int32) bool {
-	return precision > 0 && precision <= decimal256.MaxPrecision && val.FitsInPrecision(precision)
+	if precision <= 0 || precision > decimal256.MaxPrecision {
+		return false
+	}
+	// Abs overflows for the minimum two's-complement value.
+	if val.Sign() < 0 && val.Negate() == val {
+		return false
+	}
+	return val.FitsInPrecision(precision)
+}
+
+// validatePresentDecimalValues visits only values represented by a definition
+// level. Values below the repeated ancestor definition level are list
+// placeholders and do not have a corresponding entry in arr.
+func validatePresentDecimalValues(arr arrow.Array, defLevels []int16, levelInfo file.LevelInfo, validate func(int) error) error {
+	if len(defLevels) == 0 {
+		for idx := 0; idx < arr.Len(); idx++ {
+			if arr.IsValid(idx) {
+				if err := validate(idx); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+
+	valueIdx := 0
+	for _, defLevel := range defLevels {
+		if defLevel < levelInfo.RepeatedAncestorDefLevel {
+			continue
+		}
+		if valueIdx >= arr.Len() {
+			break
+		}
+		if defLevel == levelInfo.DefLevel && arr.IsValid(valueIdx) {
+			if err := validate(valueIdx); err != nil {
+				return err
+			}
+		}
+		valueIdx++
+	}
+	return nil
 }
 
 // arrowColumnWriter is a convenience object for easily writing arrow data to a specific
@@ -414,31 +461,37 @@ func writeDenseArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, leafArr 
 			case arrow.DECIMAL128:
 				arr := leafArr.(*array.Decimal128)
 				precision, hasPrecision := targetDecimalPrecision(cw)
-				for idx, val := range arr.Values() {
-					if arr.IsNull(idx) {
-						continue
-					}
+				if err := validatePresentDecimalValues(arr, defLevels, cw.LevelInfo(), func(idx int) error {
+					val := arr.Value(idx)
 					if !decimal128FitsInt32(val) {
 						return fmt.Errorf("%w: Decimal128 value at index %d does not fit in Parquet INT32", arrow.ErrInvalid, idx)
 					}
 					if hasPrecision && !decimal128FitsTargetPrecision(val, precision) {
 						return fmt.Errorf("%w: Decimal128 value at index %d does not fit Parquet DECIMAL precision %d", arrow.ErrInvalid, idx, precision)
 					}
+					return nil
+				}); err != nil {
+					return err
+				}
+				for idx, val := range arr.Values() {
 					data[idx] = int32(val.LowBits())
 				}
 			case arrow.DECIMAL256:
 				arr := leafArr.(*array.Decimal256)
 				precision, hasPrecision := targetDecimalPrecision(cw)
-				for idx, val := range arr.Values() {
-					if arr.IsNull(idx) {
-						continue
-					}
+				if err := validatePresentDecimalValues(arr, defLevels, cw.LevelInfo(), func(idx int) error {
+					val := arr.Value(idx)
 					if !decimal256FitsInt32(val) {
 						return fmt.Errorf("%w: Decimal256 value at index %d does not fit in Parquet INT32", arrow.ErrInvalid, idx)
 					}
 					if hasPrecision && !decimal256FitsTargetPrecision(val, precision) {
 						return fmt.Errorf("%w: Decimal256 value at index %d does not fit Parquet DECIMAL precision %d", arrow.ErrInvalid, idx, precision)
 					}
+					return nil
+				}); err != nil {
+					return err
+				}
+				for idx, val := range arr.Values() {
 					data[idx] = int32(val.LowBits())
 				}
 			default:
@@ -515,16 +568,19 @@ func writeDenseArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, leafArr 
 			data = arrow.Int64Traits.CastFromBytes(ctx.dataBuffer.Bytes())
 			arr := leafArr.(*array.Decimal128)
 			precision, hasPrecision := targetDecimalPrecision(cw)
-			for idx, val := range arr.Values() {
-				if arr.IsNull(idx) {
-					continue
-				}
+			if err := validatePresentDecimalValues(arr, defLevels, cw.LevelInfo(), func(idx int) error {
+				val := arr.Value(idx)
 				if !decimal128FitsInt64(val) {
 					return fmt.Errorf("%w: Decimal128 value at index %d does not fit in Parquet INT64", arrow.ErrInvalid, idx)
 				}
 				if hasPrecision && !decimal128FitsTargetPrecision(val, precision) {
 					return fmt.Errorf("%w: Decimal128 value at index %d does not fit Parquet DECIMAL precision %d", arrow.ErrInvalid, idx, precision)
 				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			for idx, val := range arr.Values() {
 				data[idx] = int64(val.LowBits())
 			}
 		case arrow.DECIMAL256:
@@ -532,16 +588,19 @@ func writeDenseArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, leafArr 
 			data = arrow.Int64Traits.CastFromBytes(ctx.dataBuffer.Bytes())
 			arr := leafArr.(*array.Decimal256)
 			precision, hasPrecision := targetDecimalPrecision(cw)
-			for idx, val := range arr.Values() {
-				if arr.IsNull(idx) {
-					continue
-				}
+			if err := validatePresentDecimalValues(arr, defLevels, cw.LevelInfo(), func(idx int) error {
+				val := arr.Value(idx)
 				if !decimal256FitsInt64(val) {
 					return fmt.Errorf("%w: Decimal256 value at index %d does not fit in Parquet INT64", arrow.ErrInvalid, idx)
 				}
 				if hasPrecision && !decimal256FitsTargetPrecision(val, precision) {
 					return fmt.Errorf("%w: Decimal256 value at index %d does not fit Parquet DECIMAL precision %d", arrow.ErrInvalid, idx, precision)
 				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			for idx, val := range arr.Values() {
 				data[idx] = int64(val.LowBits())
 			}
 		default:

@@ -309,6 +309,171 @@ func TestWriteArrowCols(t *testing.T) {
 	}
 }
 
+func TestWriteDecimalRejectsValuesOutsidePrecision(t *testing.T) {
+	tests := []struct {
+		name      string
+		dtype     arrow.DecimalType
+		value     string
+		valuePrec int32
+	}{
+		{"decimal128_int32", &arrow.Decimal128Type{Precision: 9}, "3000000000", 10},
+		{"decimal128_int64", &arrow.Decimal128Type{Precision: 18}, "10000000000000000000", 20},
+		{"decimal256_int32", &arrow.Decimal256Type{Precision: 9}, "3000000000", 10},
+		{"decimal256_int64", &arrow.Decimal256Type{Precision: 18}, "10000000000000000000", 20},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			var values arrow.Array
+			switch dtype := tt.dtype.(type) {
+			case *arrow.Decimal128Type:
+				value, err := decimal128.FromString(tt.value, tt.valuePrec, 0)
+				require.NoError(t, err)
+				builder := array.NewDecimal128Builder(mem, dtype)
+				builder.Append(value)
+				values = builder.NewDecimal128Array()
+				builder.Release()
+			case *arrow.Decimal256Type:
+				value, err := decimal256.FromString(tt.value, tt.valuePrec, 0)
+				require.NoError(t, err)
+				builder := array.NewDecimal256Builder(mem, dtype)
+				builder.Append(value)
+				values = builder.NewDecimal256Array()
+				builder.Release()
+			}
+			defer values.Release()
+
+			sc := arrow.NewSchema([]arrow.Field{{Name: "decimal", Type: tt.dtype}}, nil)
+			rec := array.NewRecordBatch(sc, []arrow.Array{values}, int64(values.Len()))
+			defer rec.Release()
+
+			var sink bytes.Buffer
+			writer, err := pqarrow.NewFileWriter(sc, &sink,
+				parquet.NewWriterProperties(parquet.WithStoreDecimalAsInteger(true)),
+				pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem)))
+			require.NoError(t, err)
+			err = writer.Write(rec)
+			require.ErrorIs(t, err, arrow.ErrInvalid)
+			assert.ErrorContains(t, err, "does not fit")
+			require.NoError(t, writer.Close())
+		})
+	}
+}
+
+func TestWriteDecimalRejectsTwoComplementMinimum(t *testing.T) {
+	tests := []struct {
+		name  string
+		dtype arrow.DecimalType
+		value any
+	}{
+		{"decimal128_int32", &arrow.Decimal128Type{Precision: 9}, decimal128.New(-1<<63, 0)},
+		{"decimal128_int64", &arrow.Decimal128Type{Precision: 18}, decimal128.New(-1<<63, 0)},
+		{"decimal256_int32", &arrow.Decimal256Type{Precision: 9}, decimal256.New(1<<63, 0, 0, 0)},
+		{"decimal256_int64", &arrow.Decimal256Type{Precision: 18}, decimal256.New(1<<63, 0, 0, 0)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			var values arrow.Array
+			switch dtype := tt.dtype.(type) {
+			case *arrow.Decimal128Type:
+				builder := array.NewDecimal128Builder(mem, dtype)
+				builder.Append(tt.value.(decimal128.Num))
+				values = builder.NewDecimal128Array()
+				builder.Release()
+			case *arrow.Decimal256Type:
+				builder := array.NewDecimal256Builder(mem, dtype)
+				builder.Append(tt.value.(decimal256.Num))
+				values = builder.NewDecimal256Array()
+				builder.Release()
+			}
+			defer values.Release()
+
+			sc := arrow.NewSchema([]arrow.Field{{Name: "decimal", Type: tt.dtype}}, nil)
+			rec := array.NewRecordBatch(sc, []arrow.Array{values}, int64(values.Len()))
+			defer rec.Release()
+
+			var sink bytes.Buffer
+			writer, err := pqarrow.NewFileWriter(sc, &sink,
+				parquet.NewWriterProperties(parquet.WithStoreDecimalAsInteger(true)),
+				pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem)))
+			require.NoError(t, err)
+			err = writer.Write(rec)
+			require.ErrorIs(t, err, arrow.ErrInvalid)
+			require.NoError(t, writer.Close())
+		})
+	}
+}
+
+func TestWriteDecimalIgnoresValuesUnderNullParent(t *testing.T) {
+	tests := []struct {
+		name      string
+		dtype     arrow.DecimalType
+		value     string
+		valuePrec int32
+	}{
+		{"decimal128_int32", &arrow.Decimal128Type{Precision: 9}, "3000000000", 10},
+		{"decimal128_int64", &arrow.Decimal128Type{Precision: 18}, "10000000000000000000", 20},
+		{"decimal256_int32", &arrow.Decimal256Type{Precision: 9}, "3000000000", 10},
+		{"decimal256_int64", &arrow.Decimal256Type{Precision: 18}, "10000000000000000000", 20},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			var values arrow.Array
+			switch dtype := tt.dtype.(type) {
+			case *arrow.Decimal128Type:
+				value, err := decimal128.FromString(tt.value, tt.valuePrec, 0)
+				require.NoError(t, err)
+				builder := array.NewDecimal128Builder(mem, dtype)
+				builder.Append(value)
+				builder.Append(decimal128.FromI64(1))
+				values = builder.NewDecimal128Array()
+				builder.Release()
+			case *arrow.Decimal256Type:
+				value, err := decimal256.FromString(tt.value, tt.valuePrec, 0)
+				require.NoError(t, err)
+				builder := array.NewDecimal256Builder(mem, dtype)
+				builder.Append(value)
+				builder.Append(decimal256.FromI64(1))
+				values = builder.NewDecimal256Array()
+				builder.Release()
+			}
+			defer values.Release()
+
+			childField := arrow.Field{Name: "decimal", Type: tt.dtype}
+			structField := arrow.Field{Name: "parent", Type: arrow.StructOf(childField), Nullable: true}
+			validity := memory.NewBufferBytes([]byte{0x02})
+			defer validity.Release()
+			structData := array.NewData(structField.Type, 2, []*memory.Buffer{validity}, []arrow.ArrayData{values.Data()}, 1, 0)
+			defer structData.Release()
+			structArray := array.NewStructData(structData)
+			defer structArray.Release()
+
+			sc := arrow.NewSchema([]arrow.Field{structField}, nil)
+			rec := array.NewRecordBatch(sc, []arrow.Array{structArray}, 2)
+			defer rec.Release()
+
+			var sink bytes.Buffer
+			writer, err := pqarrow.NewFileWriter(sc, &sink,
+				parquet.NewWriterProperties(parquet.WithStoreDecimalAsInteger(true)),
+				pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem)))
+			require.NoError(t, err)
+			require.NoError(t, writer.Write(rec))
+			require.NoError(t, writer.Close())
+		})
+	}
+}
+
 func TestWriteArrowInt96(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
