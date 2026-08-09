@@ -29,6 +29,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type signalChunkedDatum struct {
+	*ChunkedDatum
+	chunksCalled chan struct{}
+}
+
+func (d *signalChunkedDatum) Chunks() []arrow.Array {
+	close(d.chunksCalled)
+	return d.Value.Chunks()
+}
+
 func TestVectorExecutorWrapResultsReleasesEmptyChunkedOutput(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -64,4 +74,43 @@ func TestVectorExecutorWrapResultsReleasesEmptyChunkedOutput(t *testing.T) {
 	require.Len(t, resultChunked.Chunks(), 1)
 	require.Equal(t, int32(42), resultChunked.Chunk(0).(*array.Int32).Value(0))
 	result.Release()
+}
+
+func TestVectorExecutorWrapResultsReleasesChunkedOutputOnCancellation(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	builder := array.NewInt32Builder(mem)
+	builder.Append(42)
+	value := builder.NewInt32Array()
+	builder.Release()
+	defer value.Release()
+
+	chunked := arrow.NewChunked(value.DataType(), []arrow.Array{value})
+	output := make(chan Datum)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	executor := &vectorExecutor{
+		nonAggExecImpl: nonAggExecImpl{
+			kernel:  &exec.VectorKernel{OutputChunked: true},
+			outType: value.DataType(),
+		},
+	}
+
+	datum := &signalChunkedDatum{
+		ChunkedDatum: &ChunkedDatum{Value: chunked},
+		chunksCalled: make(chan struct{}),
+	}
+	result := make(chan Datum, 1)
+	go func() {
+		result <- executor.WrapResults(ctx, output, true)
+	}()
+
+	output <- datum
+	<-datum.chunksCalled
+	cancel()
+
+	require.Nil(t, <-result)
+	close(output)
 }

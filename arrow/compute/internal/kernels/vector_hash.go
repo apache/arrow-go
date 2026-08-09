@@ -97,6 +97,26 @@ type DictionaryEncodeOptions struct {
 
 func (DictionaryEncodeOptions) TypeName() string { return "DictionaryEncodeOptions" }
 
+func (opts DictionaryEncodeOptions) ToScalar() (scalar.Scalar, error) {
+	var encoded uint32
+	switch opts.NullEncoding {
+	case NullEncodingEncode:
+		encoded = 0
+	case NullEncodingMask:
+		encoded = 1
+	default:
+		return nil, fmt.Errorf("%w: invalid null encoding behavior %d", arrow.ErrInvalid, opts.NullEncoding)
+	}
+
+	return scalar.NewStructScalarWithNames(
+		[]scalar.Scalar{
+			scalar.NewUint32Scalar(encoded),
+			scalar.NewBinaryScalar(memory.NewBufferBytes([]byte(opts.TypeName())), arrow.BinaryTypes.Binary),
+		},
+		[]string{"null_encoding_behavior", "_type_name"},
+	)
+}
+
 func (opts *DictionaryEncodeOptions) FromStructScalar(sc *scalar.Struct) error {
 	value, err := sc.Field("null_encoding_behavior")
 	if err != nil {
@@ -108,9 +128,14 @@ func (opts *DictionaryEncodeOptions) FromStructScalar(sc *scalar.Struct) error {
 		return fmt.Errorf("%w: null_encoding_behavior must be a valid uint32 scalar", arrow.ErrInvalid)
 	}
 
-	behavior := NullEncodingBehavior(encoded.Value)
-	if behavior != NullEncodingMask && behavior != NullEncodingEncode {
-		return fmt.Errorf("%w: invalid null encoding behavior %d", arrow.ErrInvalid, behavior)
+	var behavior NullEncodingBehavior
+	switch encoded.Value {
+	case 0:
+		behavior = NullEncodingEncode
+	case 1:
+		behavior = NullEncodingMask
+	default:
+		return fmt.Errorf("%w: invalid null encoding behavior %d", arrow.ErrInvalid, encoded.Value)
 	}
 
 	opts.NullEncoding = behavior

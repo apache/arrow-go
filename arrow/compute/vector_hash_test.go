@@ -1069,40 +1069,81 @@ func TestDictionaryEncodeDictionaryInput(t *testing.T) {
 }
 
 func TestDictionaryEncodeOptionsUseCanonicalFieldName(t *testing.T) {
-	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer mem.AssertSize(t, 0)
+	for _, tt := range []struct {
+		name     string
+		behavior compute.NullEncodingBehavior
+		encoded  uint32
+	}{
+		{name: "encode", behavior: compute.NullEncodingEncode, encoded: 0},
+		{name: "mask", behavior: compute.NullEncodingMask, encoded: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
 
-	encoded, err := scalar.ToScalar(compute.DictionaryEncodeOptions{
-		NullEncoding: compute.NullEncodingEncode,
-	}, mem)
-	require.NoError(t, err)
-	if releasable, ok := encoded.(interface{ Release() }); ok {
-		defer releasable.Release()
+			encoded, err := scalar.ToScalar(compute.DictionaryEncodeOptions{
+				NullEncoding: tt.behavior,
+			}, mem)
+			require.NoError(t, err)
+			if releasable, ok := encoded.(interface{ Release() }); ok {
+				defer releasable.Release()
+			}
+
+			options := encoded.(*scalar.Struct)
+			field, err := options.Field("null_encoding_behavior")
+			require.NoError(t, err)
+			assert.Equal(t, tt.encoded, field.(*scalar.Uint32).Value)
+			_, err = options.Field("null_encoding")
+			assert.Error(t, err)
+		})
 	}
+}
 
-	options := encoded.(*scalar.Struct)
-	field, err := options.Field("null_encoding_behavior")
+func TestDictionaryEncodeOptionsDecodeCanonicalValues(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		encoded  uint32
+		behavior compute.NullEncodingBehavior
+	}{
+		{name: "encode", encoded: 0, behavior: compute.NullEncodingEncode},
+		{name: "mask", encoded: 1, behavior: compute.NullEncodingMask},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded, err := scalar.NewStructScalarWithNames(
+				[]scalar.Scalar{scalar.NewUint32Scalar(tt.encoded)},
+				[]string{"null_encoding_behavior"},
+			)
+			require.NoError(t, err)
+			defer encoded.Release()
+
+			var options compute.DictionaryEncodeOptions
+			require.NoError(t, scalar.FromScalar(encoded, &options))
+			assert.Equal(t, tt.behavior, options.NullEncoding)
+		})
+	}
+}
+
+func TestDictionaryEncodeOptionsRejectInvalidCanonicalValue(t *testing.T) {
+	encoded, err := scalar.NewStructScalarWithNames(
+		[]scalar.Scalar{scalar.NewUint32Scalar(2)},
+		[]string{"null_encoding_behavior"},
+	)
 	require.NoError(t, err)
-	assert.Equal(t, uint32(compute.NullEncodingEncode), field.(*scalar.Uint32).Value)
-	_, err = options.Field("null_encoding")
-	assert.Error(t, err)
+	defer encoded.Release()
+
+	var options compute.DictionaryEncodeOptions
+	err = scalar.FromScalar(encoded, &options)
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
 }
 
 func TestDictionaryEncodeOptionsRejectInvalidSerialization(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
-	encoded, err := scalar.ToScalar(compute.DictionaryEncodeOptions{
+	_, err := scalar.ToScalar(compute.DictionaryEncodeOptions{
 		NullEncoding: compute.NullEncodingBehavior(42),
 	}, mem)
-	require.NoError(t, err)
-	if releasable, ok := encoded.(interface{ Release() }); ok {
-		defer releasable.Release()
-	}
-
-	var options compute.DictionaryEncodeOptions
-	err = scalar.FromScalar(encoded.(*scalar.Struct), &options)
-	require.ErrorIs(t, err, arrow.ErrInvalid)
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
 }
 
 func TestDictionaryEncodeDictionaryInputWithEmptyIndices(t *testing.T) {
