@@ -108,13 +108,17 @@ func cumulativeStartValue[T arrow.NumericType](ctx *exec.KernelCtx, cast ScalarC
 
 func initCumulativeSum[T arrow.NumericType](checked bool, cast ScalarCastFn) exec.KernelInitFn {
 	return func(ctx *exec.KernelCtx, args exec.KernelInitArgs) (exec.KernelState, error) {
-		opts := &CumulativeOptions{}
-		if args.Options != nil {
-			var ok bool
-			opts, ok = args.Options.(*CumulativeOptions)
-			if !ok {
-				return nil, fmt.Errorf("%w: attempted to initialize cumulative sum from invalid function options", arrow.ErrInvalid)
+		opts := CumulativeOptions{}
+		switch value := args.Options.(type) {
+		case nil:
+		case CumulativeOptions:
+			opts = value
+		case *CumulativeOptions:
+			if value != nil {
+				opts = *value
 			}
+		default:
+			return nil, fmt.Errorf("%w: attempted to initialize cumulative sum from invalid function options", arrow.ErrInvalid)
 		}
 
 		start, err := cumulativeStartValue[T](ctx, cast, opts.Start, args.Inputs[0])
