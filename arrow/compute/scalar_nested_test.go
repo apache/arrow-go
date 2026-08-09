@@ -868,6 +868,83 @@ func TestListElementDenseUnionWithUnusedGenericChild(t *testing.T) {
 	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
 }
 
+func TestListElementDenseUnionScalarWithUnusedUnsupportedChild(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	unionType := arrow.DenseUnionOf(
+		[]arrow.Field{
+			{Name: "number", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			{Name: "values", Type: arrow.ListViewOf(arrow.PrimitiveTypes.Int32), Nullable: true},
+		},
+		[]arrow.UnionTypeCode{0, 1},
+	)
+
+	builder := array.NewListBuilder(mem, unionType)
+	values := builder.ValueBuilder().(*array.DenseUnionBuilder)
+	builder.Append(true)
+	values.Append(0)
+	values.Child(0).(*array.Int32Builder).Append(42)
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	listValue, err := scalar.GetScalar(input, 0)
+	require.NoError(t, err)
+	defer listValue.(scalar.Releasable).Release()
+
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ScalarDatum{Value: listValue},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	actual := result.(*compute.ScalarDatum).Value
+	require.Equal(t, arrow.DENSE_UNION, actual.DataType().ID())
+	assert.Equal(t, int32(42), actual.(scalar.Union).ChildValue().(*scalar.Int32).Value)
+}
+
+func TestListElementDenseUnionExtensionScalarWithUnusedUnsupportedChild(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	unionType := arrow.DenseUnionOf(
+		[]arrow.Field{
+			{Name: "number", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			{Name: "values", Type: arrow.ListViewOf(arrow.PrimitiveTypes.Int32), Nullable: true},
+		},
+		[]arrow.UnionTypeCode{0, 1},
+	)
+	extType := &denseUnionExtensionType{ExtensionBase: arrow.ExtensionBase{Storage: unionType}}
+
+	builder := array.NewListBuilder(mem, extType)
+	values := builder.ValueBuilder().(*array.ExtensionBuilder).StorageBuilder().(*array.DenseUnionBuilder)
+	builder.Append(true)
+	values.Append(0)
+	values.Child(0).(*array.Int32Builder).Append(42)
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	listValue, err := scalar.GetScalar(input, 0)
+	require.NoError(t, err)
+	defer listValue.(scalar.Releasable).Release()
+
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ScalarDatum{Value: listValue},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	actual := result.(*compute.ScalarDatum).Value
+	require.True(t, arrow.TypeEqual(extType, actual.DataType()))
+	assert.Equal(t, int32(42), actual.(*scalar.Extension).Value.(scalar.Union).ChildValue().(*scalar.Int32).Value)
+}
+
 func TestListElementDenseUnionMonthDayNanoIntervalChild(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

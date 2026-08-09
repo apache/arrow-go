@@ -64,12 +64,14 @@ func listElementScalarResultSupported(typ arrow.DataType) bool {
 				return false
 			}
 		}
-	case arrow.SPARSE_UNION, arrow.DENSE_UNION:
+	case arrow.SPARSE_UNION:
 		for _, field := range typ.(arrow.UnionType).Fields() {
 			if !listElementScalarResultSupported(field.Type) {
 				return false
 			}
 		}
+	case arrow.DENSE_UNION:
+		return true
 	case arrow.RUN_END_ENCODED:
 		return listElementScalarResultSupported(typ.(*arrow.RunEndEncodedType).Encoded())
 	}
