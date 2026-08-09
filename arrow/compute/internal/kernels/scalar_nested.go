@@ -409,6 +409,7 @@ func listElementSparseUnionTake(ctx *exec.KernelCtx, values *exec.ArraySpan, ind
 	valuesArray := values.MakeArray()
 	defer valuesArray.Release()
 
+	union := valuesArray.(*array.SparseUnion)
 	unionType := values.Type.(*arrow.SparseUnionType)
 	typeIDBuilder := array.NewInt8Builder(exec.GetAllocator(ctx.Ctx))
 	defer typeIDBuilder.Release()
@@ -422,7 +423,7 @@ func listElementSparseUnionTake(ctx *exec.KernelCtx, values *exec.ArraySpan, ind
 			if err != nil {
 				return err
 			}
-			typeIDBuilder.Append(valuesArray.(*array.SparseUnion).TypeCode(int(selected)))
+			typeIDBuilder.Append(union.TypeCode(int(selected)))
 		}
 	}
 
@@ -438,8 +439,11 @@ func listElementSparseUnionTake(ctx *exec.KernelCtx, values *exec.ArraySpan, ind
 		}
 	}()
 	for i := range values.Children {
-		childOut := &exec.ExecResult{Type: values.Children[i].Type}
-		if err := listElementTakeOrFallback(ctx, &values.Children[i], indices, childOut); err != nil {
+		field := union.Field(i)
+		var childSpan exec.ArraySpan
+		childSpan.SetMembers(field.Data())
+		childOut := &exec.ExecResult{Type: childSpan.Type}
+		if err := listElementTakeOrFallback(ctx, &childSpan, indices, childOut); err != nil {
 			childOut.Release()
 			return err
 		}

@@ -972,6 +972,78 @@ func TestListElementSparseUnionChild(t *testing.T) {
 	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
 }
 
+func TestListElementSparseUnionSlicedValuesChild(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	typeIDsBuilder := array.NewInt8Builder(mem)
+	typeIDsBuilder.AppendValues([]int8{0, 1, 0}, nil)
+	typeIDs := typeIDsBuilder.NewArray()
+	typeIDsBuilder.Release()
+	defer typeIDs.Release()
+
+	numbersBuilder := array.NewInt32Builder(mem)
+	numbersBuilder.Append(10)
+	numbersBuilder.AppendNull()
+	numbersBuilder.Append(20)
+	numbers := numbersBuilder.NewArray()
+	numbersBuilder.Release()
+	defer numbers.Release()
+
+	textBuilder := array.NewStringBuilder(mem)
+	textBuilder.AppendNull()
+	textBuilder.Append("a")
+	textBuilder.AppendNull()
+	texts := textBuilder.NewArray()
+	textBuilder.Release()
+	defer texts.Release()
+
+	union, err := array.NewSparseUnionFromArraysWithFieldCodes(
+		typeIDs,
+		[]arrow.Array{numbers, texts},
+		[]string{"number", "text"},
+		[]arrow.UnionTypeCode{0, 1},
+	)
+	require.NoError(t, err)
+	defer union.Release()
+
+	slicedUnion := array.NewSlice(union, 1, 3)
+	defer slicedUnion.Release()
+
+	offsetsBuilder := array.NewInt32Builder(mem)
+	offsetsBuilder.AppendValues([]int32{0, 2}, nil)
+	offsets := offsetsBuilder.NewArray()
+	offsetsBuilder.Release()
+	defer offsets.Release()
+
+	data := array.NewData(
+		arrow.ListOf(union.DataType()),
+		1,
+		[]*memory.Buffer{nil, offsets.Data().Buffers()[1]},
+		[]arrow.ArrayData{slicedUnion.Data()},
+		0,
+		0,
+	)
+	input := array.NewListData(data)
+	data.Release()
+	defer input.Release()
+
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ArrayDatum{Value: input.Data()},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	actual := result.(*compute.ArrayDatum).MakeArray().(*array.SparseUnion)
+	defer actual.Release()
+	require.NoError(t, array.ValidateFull(actual))
+	require.Equal(t, []arrow.UnionTypeCode{1}, actual.RawTypeCodes())
+	require.True(t, actual.Field(0).IsNull(0))
+	require.Equal(t, "a", actual.Field(1).(*array.String).Value(0))
+}
+
 func TestListElementSparseUnionPreservesUnusualChildren(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
