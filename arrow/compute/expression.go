@@ -712,6 +712,11 @@ func SerializeExpr(expr Expression, mem memory.Allocator) (*memory.Buffer, error
 		metaValue []string
 		visit     func(Expression) error
 	)
+	defer func() {
+		for _, col := range cols {
+			col.Release()
+		}
+	}()
 
 	addScalar := func(s scalar.Scalar) (string, error) {
 		ret := len(cols)
@@ -747,7 +752,9 @@ func SerializeExpr(expr Expression, mem memory.Allocator) (*memory.Buffer, error
 			metaValue = append(metaValue, e.funcName)
 
 			for _, arg := range e.args {
-				visit(arg)
+				if err := visit(arg); err != nil {
+					return err
+				}
 			}
 
 			if e.options != nil {
@@ -783,7 +790,6 @@ func SerializeExpr(expr Expression, mem memory.Allocator) (*memory.Buffer, error
 	fields := make([]arrow.Field, len(cols))
 	for i, c := range cols {
 		fields[i].Type = c.DataType()
-		defer c.Release()
 	}
 
 	metadata := arrow.NewMetadata(metaKey, metaValue)
