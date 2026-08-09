@@ -29,7 +29,9 @@ import (
 var listElementDoc = FunctionDoc{
 	Summary: "Compute elements using nested list values and an index",
 	Description: "For each list value, return the element at the requested index.\n" +
-		"The index must be an integral scalar or a one-element array-like datum.",
+		"Use an integral scalar for broadcast selection. A one-element array-like\n" +
+		"index is accepted only for a matching one-element execution and is not\n" +
+		"broadcast over longer input.",
 	ArgNames: []string{"lists", "index"},
 }
 
