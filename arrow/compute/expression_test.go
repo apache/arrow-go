@@ -20,6 +20,7 @@
 package compute_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -28,7 +29,12 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+type unknownFunctionOptions struct{}
+
+func (unknownFunctionOptions) TypeName() string { return "UnknownFunctionOptions" }
 
 func TestExpressionToString(t *testing.T) {
 	ts, _ := scalar.MakeScalar("1990-10-23 10:23:33.123456").CastTo(arrow.FixedWidthTypes.Timestamp_ns)
@@ -259,4 +265,51 @@ func TestExpressionSerializationRoundTrip(t *testing.T) {
 			assert.Truef(t, tt.expr.Equals(roundTripped), "started with: %s, got: %s", tt.expr, roundTripped)
 		})
 	}
+}
+
+func TestDictionaryEncodeOptionsSerializationRoundTrip(t *testing.T) {
+	for _, behavior := range []compute.NullEncodingBehavior{
+		compute.NullEncodingMask,
+		compute.NullEncodingEncode,
+	} {
+		t.Run(fmt.Sprintf("null encoding %d", behavior), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
+			expr := compute.NewCall(
+				"dictionary_encode",
+				[]compute.Expression{compute.NewFieldRef("values")},
+				&compute.DictionaryEncodeOptions{NullEncoding: behavior},
+			)
+			defer expr.Release()
+
+			serialized, err := compute.SerializeExpr(expr, mem)
+			require.NoError(t, err)
+			defer serialized.Release()
+
+			roundTripped, err := compute.DeserializeExpr(mem, serialized)
+			require.NoError(t, err)
+			defer roundTripped.Release()
+			require.True(t, expr.Equals(roundTripped))
+		})
+	}
+}
+
+func TestDeserializeExprRejectsUnknownOptions(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	expr := compute.NewCall(
+		"dictionary_encode",
+		[]compute.Expression{compute.NewFieldRef("values")},
+		unknownFunctionOptions{},
+	)
+	defer expr.Release()
+
+	serialized, err := compute.SerializeExpr(expr, mem)
+	require.NoError(t, err)
+	defer serialized.Release()
+
+	_, err = compute.DeserializeExpr(mem, serialized)
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
 }

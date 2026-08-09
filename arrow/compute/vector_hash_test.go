@@ -1088,6 +1088,23 @@ func TestDictionaryEncodeOptionsUseCanonicalFieldName(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestDictionaryEncodeOptionsRejectInvalidSerialization(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	encoded, err := scalar.ToScalar(compute.DictionaryEncodeOptions{
+		NullEncoding: compute.NullEncodingBehavior(42),
+	}, mem)
+	require.NoError(t, err)
+	if releasable, ok := encoded.(interface{ Release() }); ok {
+		defer releasable.Release()
+	}
+
+	var options compute.DictionaryEncodeOptions
+	err = scalar.FromScalar(encoded.(*scalar.Struct), &options)
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+}
+
 func TestDictionaryEncodeDictionaryInputWithEmptyIndices(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

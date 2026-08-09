@@ -533,6 +533,7 @@ var (
 	funcOptsTypes  = []FunctionOptions{
 		SetLookupOptions{}, ArithmeticOptions{}, CastOptions{},
 		FilterOptions{}, NullOptions{}, StrptimeOptions{}, MakeStructOptions{},
+		DictionaryEncodeOptions{},
 	}
 )
 
@@ -879,7 +880,13 @@ func DeserializeExpr(mem memory.Allocator, buf *memory.Buffer) (Expression, erro
 							return nil, errors.New("options scalar typename must be binary")
 						}
 
-						optionsVal := reflect.New(funcOptionsMap[string(typname.(*scalar.Binary).Data())]).Interface()
+						typeName := string(typname.(*scalar.Binary).Data())
+						optionsType, ok := funcOptionsMap[typeName]
+						if !ok {
+							return nil, fmt.Errorf("%w: unknown function options type %q", arrow.ErrInvalid, typeName)
+						}
+
+						optionsVal := reflect.New(optionsType).Interface()
 						if err := scalar.FromScalar(optsScalar.(*scalar.Struct), optionsVal); err != nil {
 							return nil, err
 						}

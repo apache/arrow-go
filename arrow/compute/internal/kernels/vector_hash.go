@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
 	"github.com/apache/arrow-go/v18/internal/hashing"
 )
@@ -94,6 +95,26 @@ type DictionaryEncodeOptions struct {
 }
 
 func (DictionaryEncodeOptions) TypeName() string { return "DictionaryEncodeOptions" }
+
+func (opts *DictionaryEncodeOptions) FromStructScalar(sc *scalar.Struct) error {
+	value, err := sc.Field("null_encoding_behavior")
+	if err != nil {
+		return err
+	}
+
+	encoded, ok := value.(*scalar.Uint32)
+	if !ok || !encoded.IsValid() {
+		return fmt.Errorf("%w: null_encoding_behavior must be a valid uint32 scalar", arrow.ErrInvalid)
+	}
+
+	behavior := NullEncodingBehavior(encoded.Value)
+	if behavior != NullEncodingMask && behavior != NullEncodingEncode {
+		return fmt.Errorf("%w: invalid null encoding behavior %d", arrow.ErrInvalid, behavior)
+	}
+
+	opts.NullEncoding = behavior
+	return nil
+}
 
 type dictionaryEncodeAction struct {
 	nullEncoding NullEncodingBehavior
