@@ -84,6 +84,7 @@ type NullEncodingBehavior int8
 
 const (
 	// NullEncodingMask keeps null input values null in the indices array.
+	// It is the zero value and default behavior.
 	NullEncodingMask NullEncodingBehavior = iota
 	// NullEncodingEncode adds null input values to the dictionary as a regular entry.
 	NullEncodingEncode
@@ -215,10 +216,11 @@ func (a *dictionaryEncodeAction) ShouldEncodeNulls() bool {
 }
 
 type regularHashState struct {
-	mem       memory.Allocator
-	typ       arrow.DataType
-	memoTable hashing.MemoTable
-	action    Action
+	mem          memory.Allocator
+	typ          arrow.DataType
+	memoTable    hashing.MemoTable
+	action       Action
+	memoReleased bool
 
 	doAppend func(Action, hashing.MemoTable, *exec.ArraySpan) error
 }
@@ -228,7 +230,16 @@ func (rhs *regularHashState) Allocator() memory.Allocator { return rhs.mem }
 func (rhs *regularHashState) ValueType() arrow.DataType { return rhs.typ }
 
 func (rhs *regularHashState) Reset() error {
-	rhs.memoTable.Reset()
+	if rhs.memoReleased {
+		memoTable, err := newMemoTable(rhs.mem, rhs.typ.ID())
+		if err != nil {
+			return err
+		}
+		rhs.memoTable = memoTable
+		rhs.memoReleased = false
+	} else {
+		rhs.memoTable.Reset()
+	}
 	return rhs.action.Reset()
 }
 
@@ -838,8 +849,9 @@ func dictionaryEncodeFinalize(ctx *exec.KernelCtx, results []*exec.ArraySpan) ([
 
 func releaseHashMemo(hash HashState) {
 	if state, ok := hash.(*regularHashState); ok {
-		if memo, ok := state.memoTable.(*hashing.BinaryMemoTable); ok {
+		if memo, ok := state.memoTable.(*hashing.BinaryMemoTable); ok && !state.memoReleased {
 			memo.Release()
+			state.memoReleased = true
 		}
 	}
 }
