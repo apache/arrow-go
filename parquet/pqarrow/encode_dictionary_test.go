@@ -34,6 +34,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/internal/testutils"
+	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -79,6 +80,52 @@ func TestWriteColumnChunkedPropagatesLevelBuilderError(t *testing.T) {
 	assert.True(t, errors.Is(err, arrow.ErrNotImplemented))
 	require.NoError(t, writer.WriteColumnData(valid))
 	require.NoError(t, writer.Close())
+}
+
+func TestDictionaryArrayBloomFilter(t *testing.T) {
+	mem := memory.DefaultAllocator
+
+	dictionary, _, err := array.FromJSON(mem, arrow.BinaryTypes.String,
+		strings.NewReader(`["unused", "alpha", "beta"]`))
+	require.NoError(t, err)
+	defer dictionary.Release()
+	indices, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32,
+		strings.NewReader(`[1, null, 1, 2, 1]`))
+	require.NoError(t, err)
+	defer indices.Release()
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}
+	values := array.NewDictionaryArray(dictType, indices, dictionary)
+	defer values.Release()
+	sc := arrow.NewSchema([]arrow.Field{{Name: "values", Type: dictType, Nullable: true}}, nil)
+
+	var output bytes.Buffer
+	writer, err := pqarrow.NewFileWriter(sc, &output, parquet.NewWriterProperties(
+		parquet.WithAllocator(mem),
+		parquet.WithDictionaryDefault(true),
+		parquet.WithStats(false),
+		parquet.WithDataPageSize(1),
+		parquet.WithBatchSize(2),
+		parquet.WithBloomFilterEnabledFor("values", true),
+		parquet.WithBloomFilterNDVFor("values", 2),
+	), pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem)))
+	require.NoError(t, err)
+	require.NoError(t, writer.NewRowGroupChecked())
+	require.NoError(t, writer.WriteColumnData(values))
+	require.NoError(t, writer.Close())
+
+	reader, err := file.NewParquetReader(bytes.NewReader(output.Bytes()))
+	require.NoError(t, err)
+	defer reader.Close()
+	bloomReader := reader.GetBloomFilterReader()
+	rowGroupBloom, err := bloomReader.RowGroup(0)
+	require.NoError(t, err)
+	require.NoError(t, rowGroupBloom.VisitColumnBloomFilter(0, func(filter metadata.BloomFilter) error {
+		typedFilter := metadata.TypedBloomFilter[parquet.ByteArray]{BloomFilter: filter}
+		assert.True(t, typedFilter.Check(parquet.ByteArray("alpha")))
+		assert.True(t, typedFilter.Check(parquet.ByteArray("beta")))
+		return nil
+	}))
 }
 
 func (ps *ParquetIOTestSuite) TestSingleColumnOptionalDictionaryWrite() {

@@ -17,6 +17,7 @@
 package encoding
 
 import (
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func assertTypedDictEncoderPut[T int32 | int64 | float32 | float64](t *testing.T, values, expectedDict []T, expectedIndices []int32) {
@@ -86,4 +88,29 @@ func TestPutDictionary(t *testing.T) {
 
 	err := enc.PutDictionary(arr)
 	assert.NoError(t, err)
+}
+
+func TestDictionaryReferenceTracking(t *testing.T) {
+	dictionary, _, err := array.FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32,
+		strings.NewReader(`[10, 20, 30]`))
+	require.NoError(t, err)
+	defer dictionary.Release()
+
+	indices, _, err := array.FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32,
+		strings.NewReader(`[2, null, 2, 1]`))
+	require.NoError(t, err)
+	defer indices.Release()
+
+	typ := schema.NewInt32Node("a", parquet.Repetitions.Required, -1)
+	descr := schema.NewColumn(typ, 0, 0)
+	enc := &typedDictEncoder[int32]{newDictEncoderBase(descr, NewDictionary[int32](), memory.DefaultAllocator)}
+	defer enc.Release()
+	enc.EnableDictionaryReferenceTracking()
+
+	require.NoError(t, enc.PutDictionary(dictionary))
+	require.NoError(t, enc.PutIndices(indices))
+	assert.Equal(t, []int32{2, 1}, enc.ReferencedDictionaryIndices())
+	assert.False(t, enc.DictionaryIndexReferenced(0))
+	assert.True(t, enc.DictionaryIndexReferenced(1))
+	assert.True(t, enc.DictionaryIndexReferenced(2))
 }

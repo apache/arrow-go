@@ -107,10 +107,13 @@ func (e *encoder) Reset() { e.sink.Reset(0) }
 type dictEncoder struct {
 	encoder
 
-	dictEncodedSize int
-	idxBuffer       *memory.Buffer
-	idxValues       []int32
-	memo            MemoTable
+	dictEncodedSize   int
+	idxBuffer         *memory.Buffer
+	idxValues         []int32
+	memo              MemoTable
+	trackReferences   bool
+	referencedBitmap  []byte
+	referencedIndices []int32
 
 	// rawDataSize is the number of bytes of input values observed since
 	// the last page flush. Mirrors parquet-mr's rawDataByteSize and is
@@ -140,10 +143,44 @@ func (d *dictEncoder) Reset() {
 	d.idxValues = d.idxValues[:0]
 	d.idxBuffer.ResizeNoShrink(0)
 	d.rawDataSize = 0
+	clear(d.referencedBitmap)
+	d.referencedIndices = d.referencedIndices[:0]
 	d.memo.Reset()
 	if d.preservedDict != nil {
 		d.preservedDict.Release()
 		d.preservedDict = nil
+	}
+}
+
+func (d *dictEncoder) EnableDictionaryReferenceTracking() {
+	d.trackReferences = true
+}
+
+func (d *dictEncoder) ReferencedDictionaryIndices() []int32 {
+	return d.referencedIndices
+}
+
+func (d *dictEncoder) DictionaryIndexReferenced(index int) bool {
+	if index < 0 || index>>3 >= len(d.referencedBitmap) {
+		return false
+	}
+	return d.referencedBitmap[index>>3]&(1<<uint(index&7)) != 0
+}
+
+func (d *dictEncoder) recordDictionaryReference(index int32) {
+	if !d.trackReferences || index < 0 {
+		return
+	}
+
+	byteIndex := int(index) >> 3
+	if byteIndex >= len(d.referencedBitmap) {
+		d.referencedBitmap = append(d.referencedBitmap,
+			make([]byte, byteIndex-len(d.referencedBitmap)+1)...)
+	}
+	mask := byte(1 << uint(index&7))
+	if d.referencedBitmap[byteIndex]&mask == 0 {
+		d.referencedBitmap[byteIndex] |= mask
+		d.referencedIndices = append(d.referencedIndices, index)
 	}
 }
 
@@ -196,7 +233,9 @@ func (d *dictEncoder) PutIndices(data arrow.Array) error {
 			int64(data.Data().Offset()), int64(data.Len()),
 			func(pos, length int64) {
 				for i := int64(0); i < length; i++ {
-					d.idxValues[curPos] = int32(values[i+pos])
+					index := int32(values[i+pos])
+					d.idxValues[curPos] = index
+					d.recordDictionaryReference(index)
 					curPos++
 				}
 			})
@@ -206,7 +245,9 @@ func (d *dictEncoder) PutIndices(data arrow.Array) error {
 			int64(data.Data().Offset()), int64(data.Len()),
 			func(pos, length int64) {
 				for i := int64(0); i < length; i++ {
-					d.idxValues[curPos] = int32(values[i+pos])
+					index := int32(values[i+pos])
+					d.idxValues[curPos] = index
+					d.recordDictionaryReference(index)
 					curPos++
 				}
 			})
@@ -216,7 +257,9 @@ func (d *dictEncoder) PutIndices(data arrow.Array) error {
 			int64(data.Data().Offset()), int64(data.Len()),
 			func(pos, length int64) {
 				for i := int64(0); i < length; i++ {
-					d.idxValues[curPos] = int32(values[i+pos])
+					index := int32(values[i+pos])
+					d.idxValues[curPos] = index
+					d.recordDictionaryReference(index)
 					curPos++
 				}
 			})
@@ -226,7 +269,9 @@ func (d *dictEncoder) PutIndices(data arrow.Array) error {
 			int64(data.Data().Offset()), int64(data.Len()),
 			func(pos, length int64) {
 				for i := int64(0); i < length; i++ {
-					d.idxValues[curPos] = int32(values[i+pos])
+					index := int32(values[i+pos])
+					d.idxValues[curPos] = index
+					d.recordDictionaryReference(index)
 					curPos++
 				}
 			})
@@ -242,6 +287,7 @@ func (d *dictEncoder) addIndex(idx int) {
 	curLen := len(d.idxValues)
 	d.expandBuffer(curLen + 1)
 	d.idxValues = append(d.idxValues, int32(idx))
+	d.recordDictionaryReference(int32(idx))
 }
 
 // FlushValues dumps all the currently buffered indexes that would become the data page to a buffer and
