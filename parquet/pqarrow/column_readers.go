@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -708,64 +707,58 @@ func transferBinary(rdr file.RecordReader, dt arrow.DataType, mem memory.Allocat
 	return arrow.NewChunked(dt, chunks), nil
 }
 
-func transferInt(rdr file.RecordReader, dt arrow.DataType) arrow.ArrayData {
-	var output reflect.Value
+type parquetInteger interface {
+	~int32 | ~int64
+}
 
-	signed := true
+type arrowInteger interface {
+	~int8 | ~uint8 | ~int16 | ~uint16 | ~int32 | ~uint32 | ~int64 | ~uint64
+}
+
+func convertIntegerValues[Out arrowInteger, In parquetInteger](out []Out, values []In) {
+	for i, value := range values {
+		out[i] = Out(value)
+	}
+}
+
+func transferIntegerValues[In parquetInteger](values []In, data []byte, dt arrow.Type) {
+	switch dt {
+	case arrow.INT8:
+		convertIntegerValues(arrow.Int8Traits.CastFromBytes(data), values)
+	case arrow.UINT8:
+		convertIntegerValues(arrow.Uint8Traits.CastFromBytes(data), values)
+	case arrow.INT16:
+		convertIntegerValues(arrow.Int16Traits.CastFromBytes(data), values)
+	case arrow.UINT16:
+		convertIntegerValues(arrow.Uint16Traits.CastFromBytes(data), values)
+	case arrow.UINT32:
+		convertIntegerValues(arrow.Uint32Traits.CastFromBytes(data), values)
+	case arrow.UINT64:
+		convertIntegerValues(arrow.Uint64Traits.CastFromBytes(data), values)
+	case arrow.DATE32:
+		convertIntegerValues(arrow.Date32Traits.CastFromBytes(data), values)
+	case arrow.TIME32:
+		convertIntegerValues(arrow.Time32Traits.CastFromBytes(data), values)
+	case arrow.TIME64:
+		convertIntegerValues(arrow.Time64Traits.CastFromBytes(data), values)
+	}
+}
+
+func transferInt(rdr file.RecordReader, dt arrow.DataType) arrow.ArrayData {
 	// create buffer for proper type since parquet only has int32 and int64
 	// physical representations, but we want the correct type representation
 	// for Arrow's in memory buffer.
 	data := make([]byte, rdr.ValuesWritten()*int(bitutil.BytesForBits(int64(dt.(arrow.FixedWidthDataType).BitWidth()))))
-	switch dt.ID() {
-	case arrow.INT8:
-		output = reflect.ValueOf(arrow.Int8Traits.CastFromBytes(data))
-	case arrow.UINT8:
-		signed = false
-		output = reflect.ValueOf(arrow.Uint8Traits.CastFromBytes(data))
-	case arrow.INT16:
-		output = reflect.ValueOf(arrow.Int16Traits.CastFromBytes(data))
-	case arrow.UINT16:
-		signed = false
-		output = reflect.ValueOf(arrow.Uint16Traits.CastFromBytes(data))
-	case arrow.UINT32:
-		signed = false
-		output = reflect.ValueOf(arrow.Uint32Traits.CastFromBytes(data))
-	case arrow.UINT64:
-		signed = false
-		output = reflect.ValueOf(arrow.Uint64Traits.CastFromBytes(data))
-	case arrow.DATE32:
-		output = reflect.ValueOf(arrow.Date32Traits.CastFromBytes(data))
-	case arrow.TIME32:
-		output = reflect.ValueOf(arrow.Time32Traits.CastFromBytes(data))
-	case arrow.TIME64:
-		output = reflect.ValueOf(arrow.Time64Traits.CastFromBytes(data))
-	}
 
 	length := rdr.ValuesWritten()
 	// copy the values semantically with the correct types
 	switch rdr.Type() {
 	case parquet.Types.Int32:
-		values := arrow.Int32Traits.CastFromBytes(rdr.Values())
-		if signed {
-			for idx, v := range values[:length] {
-				output.Index(idx).SetInt(int64(v))
-			}
-		} else {
-			for idx, v := range values[:length] {
-				output.Index(idx).SetUint(uint64(v))
-			}
-		}
+		values := arrow.Int32Traits.CastFromBytes(rdr.Values())[:length]
+		transferIntegerValues(values, data, dt.ID())
 	case parquet.Types.Int64:
-		values := arrow.Int64Traits.CastFromBytes(rdr.Values())
-		if signed {
-			for idx, v := range values[:length] {
-				output.Index(idx).SetInt(v)
-			}
-		} else {
-			for idx, v := range values[:length] {
-				output.Index(idx).SetUint(uint64(v))
-			}
-		}
+		values := arrow.Int64Traits.CastFromBytes(rdr.Values())[:length]
+		transferIntegerValues(values, data, dt.ID())
 	}
 
 	bitmap := rdr.ReleaseValidBits()
@@ -851,31 +844,37 @@ func transferInt96(rdr file.RecordReader, dt arrow.DataType) arrow.ArrayData {
 }
 
 // convert physical integer storage of a decimal logical type to a decimal128 typed array
+func transferDecimalIntegerValues[In parquetInteger](values []In, dt arrow.Type) []byte {
+	switch dt {
+	case arrow.DECIMAL128:
+		data := make([]byte, arrow.Decimal128Traits.BytesRequired(len(values)))
+		out := arrow.Decimal128Traits.CastFromBytes(data)
+		for i, value := range values {
+			out[i] = decimal128.FromI64(int64(value))
+		}
+		return data
+	case arrow.DECIMAL256:
+		data := make([]byte, arrow.Decimal256Traits.BytesRequired(len(values)))
+		out := arrow.Decimal256Traits.CastFromBytes(data)
+		for i, value := range values {
+			out[i] = decimal256.FromI64(int64(value))
+		}
+		return data
+	}
+	return nil
+}
+
 func transferDecimalInteger(rdr file.RecordReader, dt arrow.DataType) arrow.ArrayData {
 	length := rdr.ValuesWritten()
 
-	var values reflect.Value
+	var data []byte
 	switch rdr.Type() {
 	case parquet.Types.Int32:
-		values = reflect.ValueOf(arrow.Int32Traits.CastFromBytes(rdr.Values())[:length])
+		values := arrow.Int32Traits.CastFromBytes(rdr.Values())[:length]
+		data = transferDecimalIntegerValues(values, dt.ID())
 	case parquet.Types.Int64:
-		values = reflect.ValueOf(arrow.Int64Traits.CastFromBytes(rdr.Values())[:length])
-	}
-
-	var data []byte
-	switch dt.ID() {
-	case arrow.DECIMAL128:
-		data = make([]byte, arrow.Decimal128Traits.BytesRequired(length))
-		out := arrow.Decimal128Traits.CastFromBytes(data)
-		for i := 0; i < values.Len(); i++ {
-			out[i] = decimal128.FromI64(values.Index(i).Int())
-		}
-	case arrow.DECIMAL256:
-		data = make([]byte, arrow.Decimal256Traits.BytesRequired(length))
-		out := arrow.Decimal256Traits.CastFromBytes(data)
-		for i := 0; i < values.Len(); i++ {
-			out[i] = decimal256.FromI64(values.Index(i).Int())
-		}
+		values := arrow.Int64Traits.CastFromBytes(rdr.Values())[:length]
+		data = transferDecimalIntegerValues(values, dt.ID())
 	}
 
 	var nullmap *memory.Buffer
