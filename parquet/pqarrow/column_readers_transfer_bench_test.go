@@ -80,7 +80,7 @@ func BenchmarkTransferDecimalInteger(b *testing.B) {
 		size := tc.size
 		values := make([]int64, size)
 		for i := range values {
-			values[i] = int64(i)*6364136223846793005 - 1
+			values[i] = int64(i%1_000_000) - 500_000
 		}
 		rdr := &integerTransferRecordReader{
 			physicalType: parquet.Types.Int64,
@@ -93,7 +93,7 @@ func BenchmarkTransferDecimalInteger(b *testing.B) {
 			b.SetBytes(int64(len(values) * arrow.Int64SizeBytes))
 			b.ResetTimer()
 			for range b.N {
-				data := transferDecimalInteger(rdr, &arrow.Decimal128Type{Precision: 19})
+				data := transferDecimalInteger(rdr, &arrow.Decimal128Type{Precision: 18})
 				data.Release()
 			}
 		})
@@ -103,7 +103,7 @@ func BenchmarkTransferDecimalInteger(b *testing.B) {
 			b.SetBytes(int64(len(values) * arrow.Int64SizeBytes))
 			b.ResetTimer()
 			for range b.N {
-				data := transferDecimalInteger(rdr, &arrow.Decimal256Type{Precision: 19})
+				data := transferDecimalInteger(rdr, &arrow.Decimal256Type{Precision: 18})
 				data.Release()
 			}
 		})

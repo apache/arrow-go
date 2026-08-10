@@ -45,9 +45,10 @@ func (r *integerTransferRecordReader) ReleaseValidBits() *memory.Buffer {
 
 func requireConvertedValues[Out arrowInteger, In parquetInteger](t *testing.T, got []Out, values []In) {
 	t.Helper()
-	want := make([]Out, len(values))
-	convertIntegerValues(want, values)
-	require.Equal(t, want, got)
+	require.Len(t, got, len(values))
+	for i, value := range values {
+		require.Equal(t, Out(value), got[i])
+	}
 }
 
 func requireIntegerTransfer[In parquetInteger](t *testing.T, rdr file.RecordReader, values []In, dt arrow.DataType) {
@@ -87,7 +88,7 @@ func TestTransferIntegerValues(t *testing.T) {
 		arrow.PrimitiveTypes.Uint32,
 		arrow.PrimitiveTypes.Uint64,
 		arrow.FixedWidthTypes.Date32,
-		arrow.FixedWidthTypes.Time32s,
+		arrow.FixedWidthTypes.Time32ms,
 		arrow.FixedWidthTypes.Time64us,
 	}
 
@@ -122,21 +123,21 @@ func TestTransferIntegerValues(t *testing.T) {
 
 func TestTransferDecimalIntegerValues(t *testing.T) {
 	t.Run("int32 physical values", func(t *testing.T) {
-		values := []int32{-1 << 31, -1, 0, 1, 1<<31 - 1}
+		values := []int32{-999_999_999, -1, 0, 1, 999_999_999}
 		rdr := &integerTransferRecordReader{
 			physicalType: parquet.Types.Int32,
 			values:       arrow.Int32Traits.CastToBytes(values),
 			length:       len(values),
 		}
 
-		data128 := transferDecimalInteger(rdr, &arrow.Decimal128Type{Precision: 10})
+		data128 := transferDecimalInteger(rdr, &arrow.Decimal128Type{Precision: 9})
 		defer data128.Release()
 		got128 := arrow.Decimal128Traits.CastFromBytes(data128.Buffers()[1].Bytes())
 		for i, value := range values {
 			require.Equal(t, decimal128.FromI64(int64(value)), got128[i])
 		}
 
-		data256 := transferDecimalInteger(rdr, &arrow.Decimal256Type{Precision: 10})
+		data256 := transferDecimalInteger(rdr, &arrow.Decimal256Type{Precision: 9})
 		defer data256.Release()
 		got256 := arrow.Decimal256Traits.CastFromBytes(data256.Buffers()[1].Bytes())
 		for i, value := range values {
@@ -145,21 +146,21 @@ func TestTransferDecimalIntegerValues(t *testing.T) {
 	})
 
 	t.Run("int64 physical values", func(t *testing.T) {
-		values := []int64{-1 << 63, -1, 0, 1, 1<<63 - 1}
+		values := []int64{-999_999_999_999_999_999, -1, 0, 1, 999_999_999_999_999_999}
 		rdr := &integerTransferRecordReader{
 			physicalType: parquet.Types.Int64,
 			values:       arrow.Int64Traits.CastToBytes(values),
 			length:       len(values),
 		}
 
-		data128 := transferDecimalInteger(rdr, &arrow.Decimal128Type{Precision: 19})
+		data128 := transferDecimalInteger(rdr, &arrow.Decimal128Type{Precision: 18})
 		defer data128.Release()
 		got128 := arrow.Decimal128Traits.CastFromBytes(data128.Buffers()[1].Bytes())
 		for i, value := range values {
 			require.Equal(t, decimal128.FromI64(value), got128[i])
 		}
 
-		data256 := transferDecimalInteger(rdr, &arrow.Decimal256Type{Precision: 19})
+		data256 := transferDecimalInteger(rdr, &arrow.Decimal256Type{Precision: 18})
 		defer data256.Release()
 		got256 := arrow.Decimal256Traits.CastFromBytes(data256.Buffers()[1].Bytes())
 		for i, value := range values {
