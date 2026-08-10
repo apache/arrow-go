@@ -451,10 +451,10 @@ func (lr *listReader) LoadBatch(nrecords int64) error {
 }
 
 func (lr *listReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
-	return lr.buildArray(lenBound, false)
+	return lr.buildArray(lenBound)
 }
 
-func (lr *listReader) buildArray(lenBound int64, fixedSize bool) (*arrow.Chunked, error) {
+func (lr *listReader) buildArray(lenBound int64) (*arrow.Chunked, error) {
 	var (
 		defLevels      []int16
 		repLevels      []int16
@@ -528,7 +528,7 @@ func (lr *listReader) buildArray(lenBound int64, fixedSize bool) (*arrow.Chunked
 	itemArr := array.MakeFromData(item)
 	defer itemArr.Release()
 
-	if fixedSize {
+	if lr.field.Type.ID() == arrow.FIXED_SIZE_LIST {
 		offsetData := arrow.Int32Traits.CastFromBytes(offsetsBuffer.Bytes())
 		return lr.buildFixedSizeListArray(int(validityIO.Read), offsetData, validityBuffer,
 			validityIO.NullCount, itemArr)
@@ -573,6 +573,8 @@ func (lr *listReader) buildFixedSizeListArray(length int, offsets []int32, valid
 		return arrow.NewChunked(lr.field.Type, []arrow.Array{out}), nil
 	}
 
+	// Each validity run becomes one piece. Alternating valid and null parents
+	// create O(length) temporary arrays before concatenation.
 	pieces := make([]arrow.Array, 0, length)
 	defer func() { releaseArrays(pieces) }()
 
@@ -625,25 +627,8 @@ func (lr *listReader) buildFixedSizeListArray(length int, offsets []int32, valid
 	return arrow.NewChunked(lr.field.Type, []arrow.Array{out}), nil
 }
 
-// column reader logic for fixed size lists instead of variable length ones.
-type fixedSizeListReader struct {
-	*listReader
-}
-
 func newFixedSizeListReader(rctx *readerCtx, field *arrow.Field, info file.LevelInfo, childRdr *ColumnReader, props ArrowReadProperties) *ColumnReader {
-	childRdr.Retain()
-	lr := listReader{rctx: rctx, field: field, info: info, itemRdr: childRdr, props: props}
-	lr.refCount.Add(1)
-
-	return &ColumnReader{
-		&fixedSizeListReader{
-			&lr,
-		},
-	}
-}
-
-func (lr *fixedSizeListReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
-	return lr.buildArray(lenBound, true)
+	return newListReader(rctx, field, info, childRdr, props)
 }
 
 // helper function to combine chunks into a single array.
