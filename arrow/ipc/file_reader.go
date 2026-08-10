@@ -445,7 +445,7 @@ func (f *FileReader) Record(i int) (arrow.Record, error) {
 // call concurrently.
 func (f *FileReader) RecordBatchAt(i int) (arrow.RecordBatch, error) {
 	if i < 0 || i >= f.NumRecords() {
-		panic("arrow/ipc: record index out of bounds")
+		return nil, fmt.Errorf("%w: record index %d out of bounds", arrow.ErrIndex, i)
 	}
 
 	blk, err := f.r.block(f.mem, &f.footer, i)
@@ -509,6 +509,9 @@ func (f *FileReader) Read() (rec arrow.RecordBatch, err error) {
 
 // ReadAt reads the i-th record batch from the underlying stream and an error, if any.
 func (f *FileReader) ReadAt(i int64) (arrow.RecordBatch, error) {
+	if i < 0 || i >= int64(f.NumRecords()) {
+		return nil, fmt.Errorf("%w: record index %d out of bounds", arrow.ErrIndex, i)
+	}
 	return f.RecordBatch(int(i))
 }
 
