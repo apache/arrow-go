@@ -69,21 +69,18 @@ func (a *CheckedAllocator) Reallocate(size int, b []byte) []byte {
 	a.sz.Add(int64(size - len(b)))
 
 	var oldptr uintptr
-	if cap(b) > 0 {
-		oldptr = uintptr(unsafe.Pointer(&b[:1][0]))
+	if len(b) > 0 {
+		oldptr = uintptr(unsafe.Pointer(unsafe.SliceData(b)))
 	}
 	out := a.mem.Reallocate(size, b)
+	if oldptr != 0 {
+		a.allocs.Delete(oldptr)
+	}
 	if size == 0 {
-		if oldptr != 0 {
-			a.allocs.Delete(oldptr)
-		}
 		return out
 	}
 
 	newptr := uintptr(unsafe.Pointer(&out[0]))
-	if oldptr != 0 {
-		a.allocs.Delete(oldptr)
-	}
 	pcs := make([]uintptr, maxRetainedFrames)
 
 	// For historical reasons the meaning of the skip argument
