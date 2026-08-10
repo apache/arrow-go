@@ -587,6 +587,8 @@ func getNumBuffers(dt arrow.DataType) int {
 		// builder is sufficient for most use cases).
 		return 3
 	case arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW:
+		// validity + offsets + sizes. Unlike the view types above, this
+		// count is exact rather than a cap on variadic data buffers.
 		return 3
 	case arrow.EXTENSION:
 		return getNumBuffers(dt.(arrow.ExtensionType).StorageType())
