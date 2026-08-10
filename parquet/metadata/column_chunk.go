@@ -87,10 +87,9 @@ type ColumnChunkMetaData struct {
 // this is primarily used internally or between the subpackages. ColumnChunkMetaDataBuilder should
 // be used by consumers instead of using this directly.
 func NewColumnChunkMetaData(column *format.ColumnChunk, descr *schema.Column, writerVersion *AppVersion, rowGroupOrdinal, columnOrdinal int16, fileDecryptor encryption.FileDecryptor) (*ColumnChunkMetaData, error) {
-	columnMeta := column.GetMetaData()
 	c := &ColumnChunkMetaData{
 		column:        column,
-		columnMeta:    columnMeta,
+		columnMeta:    column.GetMetaData(),
 		descr:         descr,
 		writerVersion: writerVersion,
 		mem:           memory.DefaultAllocator,
