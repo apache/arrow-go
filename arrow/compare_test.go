@@ -22,6 +22,12 @@ import (
 )
 
 func TestTypeEqual(t *testing.T) {
+	mapType := func(keysSorted bool) DataType {
+		typ := MapOf(BinaryTypes.String, PrimitiveTypes.Int32)
+		typ.KeysSorted = keysSorted
+		return typ
+	}
+
 	tests := []struct {
 		left, right   DataType
 		want          bool
@@ -333,6 +339,16 @@ func TestTypeEqual(t *testing.T) {
 			true, false,
 		},
 		{
+			mapType(false),
+			mapType(true),
+			false, false,
+		},
+		{
+			mapType(true),
+			mapType(true),
+			true, false,
+		},
+		{
 			MapOf(PrimitiveTypes.Int32, FixedWidthTypes.Timestamp_ns),
 			MapOf(PrimitiveTypes.Int32, FixedWidthTypes.Timestamp_ns),
 			true, false,
@@ -393,20 +409,5 @@ func TestTypeEqual(t *testing.T) {
 				t.Fatalf("TypeEqual(%v, %v, %v): got=%v, want=%v", test.left, test.right, test.checkMetadata, got, test.want)
 			}
 		})
-	}
-}
-
-func TestTypeEqualMapKeysSorted(t *testing.T) {
-	unsorted := MapOf(BinaryTypes.String, PrimitiveTypes.Int32)
-	sorted := MapOf(BinaryTypes.String, PrimitiveTypes.Int32)
-	sorted.KeysSorted = true
-
-	if TypeEqual(unsorted, sorted) {
-		t.Fatal("map types with different KeysSorted values should not be equal")
-	}
-
-	unsorted.KeysSorted = true
-	if !TypeEqual(unsorted, sorted) {
-		t.Fatal("map types with the same KeysSorted value should be equal")
 	}
 }

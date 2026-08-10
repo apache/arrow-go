@@ -91,10 +91,10 @@ func TypeEqual(left, right DataType, opts ...TypeEqualOption) bool {
 			return false
 		}
 		if cfg.metadata {
-			if !l.KeyField().Metadata.Equal(right.(*MapType).KeyField().Metadata) {
+			if !l.KeyField().Metadata.Equal(r.KeyField().Metadata) {
 				return false
 			}
-			if !l.ItemField().Metadata.Equal(right.(*MapType).ItemField().Metadata) {
+			if !l.ItemField().Metadata.Equal(r.ItemField().Metadata) {
 				return false
 			}
 		}
