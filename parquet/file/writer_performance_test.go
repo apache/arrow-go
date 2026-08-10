@@ -18,12 +18,92 @@ package file_test
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 )
+
+func BenchmarkWriteDictionaryBloomFilter(b *testing.B) {
+	const numValues = 100_000
+
+	tests := []struct {
+		name        string
+		cardinality int
+	}{
+		{name: "cardinality=1", cardinality: 1},
+		{name: "cardinality=10", cardinality: 10},
+		{name: "cardinality=100", cardinality: 100},
+		{name: "cardinality=1000", cardinality: 1_000},
+		{name: "cardinality=10000", cardinality: 10_000},
+	}
+
+	for _, tt := range tests {
+		b.Run("int32/"+tt.name, func(b *testing.B) {
+			values := make([]int32, numValues)
+			for i := range values {
+				values[i] = int32(i % tt.cardinality)
+			}
+			sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+				schema.NewInt32Node("values", parquet.Repetitions.Required, -1),
+			}, -1)))
+			props := parquet.NewWriterProperties(
+				parquet.WithDictionaryDefault(true),
+				parquet.WithStats(false),
+				parquet.WithBloomFilterEnabledFor("values", true),
+				parquet.WithBloomFilterNDVFor("values", int64(tt.cardinality)),
+			)
+
+			b.ReportAllocs()
+			b.SetBytes(int64(numValues * arrow.Int32SizeBytes))
+			for range b.N {
+				var output bytes.Buffer
+				writer := file.NewParquetWriter(&output, sc.Root(), file.WithWriterProps(props))
+				rowGroup := writer.AppendRowGroup()
+				column, _ := rowGroup.NextColumn()
+				_, _ = column.(*file.Int32ColumnChunkWriter).WriteBatch(values, nil, nil)
+				_ = column.Close()
+				_ = rowGroup.Close()
+				_ = writer.Close()
+			}
+		})
+
+		b.Run("byte_array/"+tt.name, func(b *testing.B) {
+			dictionary := make([]parquet.ByteArray, tt.cardinality)
+			for i := range dictionary {
+				dictionary[i] = parquet.ByteArray(fmt.Sprintf("value-%08d", i))
+			}
+			values := make([]parquet.ByteArray, numValues)
+			for i := range values {
+				values[i] = dictionary[i%tt.cardinality]
+			}
+			sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+				schema.NewByteArrayNode("values", parquet.Repetitions.Required, -1),
+			}, -1)))
+			props := parquet.NewWriterProperties(
+				parquet.WithDictionaryDefault(true),
+				parquet.WithStats(false),
+				parquet.WithBloomFilterEnabledFor("values", true),
+				parquet.WithBloomFilterNDVFor("values", int64(tt.cardinality)),
+			)
+
+			b.ReportAllocs()
+			for range b.N {
+				var output bytes.Buffer
+				writer := file.NewParquetWriter(&output, sc.Root(), file.WithWriterProps(props))
+				rowGroup := writer.AppendRowGroup()
+				column, _ := rowGroup.NextColumn()
+				_, _ = column.(*file.ByteArrayColumnChunkWriter).WriteBatch(values, nil, nil)
+				_ = column.Close()
+				_ = rowGroup.Close()
+				_ = writer.Close()
+			}
+		})
+	}
+}
 
 // Benchmark writing small ByteArray values (typical case)
 // This tests the common scenario where values are small (< 1KB)
