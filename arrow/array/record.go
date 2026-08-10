@@ -479,6 +479,8 @@ func newBuilderCheckpoint(builder Builder) *builderCheckpoint {
 		checkpoint.state = &checkpointStateAdapter{state: checkpointable.NewCheckpoint()}
 	}
 
+	// Keep this switch in sync with builder types that own children. An omitted
+	// nested builder would restore its own state but leave its children changed.
 	switch builder := builder.(type) {
 	case *ListBuilder:
 		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.values))

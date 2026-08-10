@@ -371,6 +371,23 @@ func TestTimestampWithOffsetBuilderRunEndEncodedNullContinuesRun(t *testing.T) {
 	assert.Equal(t, testDate1, typedArr.Value(2))
 }
 
+func TestTimestampWithOffsetBuilderRunEndEncodedResizeContinuesRun(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	builder, err := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, ree(arrow.PrimitiveTypes.Int16))
+	require.NoError(t, err)
+
+	builder.Append(testDate1)
+	builder.Resize(builder.Cap() * 2)
+	builder.Append(testDate1)
+
+	arr := builder.NewArray()
+	defer arr.Release()
+	offsets := arr.(*extensions.TimestampWithOffsetArray).Storage().(*array.Struct).Field(1).(*array.RunEndEncoded)
+	assert.Equal(t, 1, offsets.Values().Len())
+}
+
 func TestTimestampWithOffsetBuilderAppendValuesNilValids(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
