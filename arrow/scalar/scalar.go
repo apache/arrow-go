@@ -677,6 +677,11 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 		for i := range children {
 			child, err := GetScalar(arr.Field(i), idx)
 			if err != nil {
+				for _, child := range children[:i] {
+					if releasable, ok := child.(Releasable); ok {
+						releasable.Release()
+					}
+				}
 				return nil, err
 			}
 			children[i] = child
