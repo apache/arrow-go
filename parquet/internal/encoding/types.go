@@ -84,6 +84,16 @@ type TypedEncoder interface {
 // encoding.
 type DictEncoder interface {
 	TypedEncoder
+	// EnableDictionaryReferenceTracking records which dictionary entries are
+	// referenced by encoded values. Tracking is disabled by default so writers
+	// that do not need it do not pay its per-value cost.
+	EnableDictionaryReferenceTracking()
+	// ReferencedDictionaryIndices returns dictionary indices in the order they
+	// were first referenced. The returned slice is owned by the encoder and must
+	// not be modified.
+	ReferencedDictionaryIndices() []int32
+	// DictionaryIndexReferenced reports whether an entry has been referenced.
+	DictionaryIndexReferenced(index int) bool
 	// WriteIndices populates the byte slice with the final indexes of data and returns
 	// the number of bytes written
 	WriteIndices(out []byte) (int, error)

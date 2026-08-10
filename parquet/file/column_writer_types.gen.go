@@ -45,6 +45,9 @@ type Int32ColumnChunkWriter struct {
 func NewInt32ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *Int32ColumnChunkWriter {
 	ret := &Int32ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.Int32EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	if useDict && ret.bloomFilter != nil {
+		ret.currentEncoder.(encoding.DictEncoder).EnableDictionaryReferenceTracking()
+	}
 	return ret
 }
 
@@ -206,8 +209,7 @@ func (w *Int32ColumnChunkWriter) writeValues(values []int32, numNulls int64) {
 	if w.pageStatistics != nil {
 		w.pageStatistics.(*metadata.Int32Statistics).Update(values, numNulls)
 	}
-	if w.bloomFilter != nil {
-		// TODO: optimize for Dictionary Encoding case
+	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
 	}
 }
@@ -222,8 +224,7 @@ func (w *Int32ColumnChunkWriter) writeValuesSpaced(spacedValues []int32, numRead
 		nulls := numValues - numRead
 		w.pageStatistics.(*metadata.Int32Statistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
 	}
-	if w.bloomFilter != nil {
-		// TODO: optimize for Dictionary Encoding case
+	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
 	}
 }
@@ -285,6 +286,8 @@ func (w *Int32ColumnChunkWriter) FallbackToPlain() {
 		if err := w.drainBufferedDataPages(); err != nil {
 			panic(err)
 		}
+	} else if err := w.populateBloomFilterFromEncoder(dictEnc); err != nil {
+		panic(err)
 	}
 
 	if err := dictEnc.FallBackTo(plainEnc); err != nil {
@@ -312,6 +315,9 @@ type Int64ColumnChunkWriter struct {
 func NewInt64ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *Int64ColumnChunkWriter {
 	ret := &Int64ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.Int64EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	if useDict && ret.bloomFilter != nil {
+		ret.currentEncoder.(encoding.DictEncoder).EnableDictionaryReferenceTracking()
+	}
 	return ret
 }
 
@@ -473,8 +479,7 @@ func (w *Int64ColumnChunkWriter) writeValues(values []int64, numNulls int64) {
 	if w.pageStatistics != nil {
 		w.pageStatistics.(*metadata.Int64Statistics).Update(values, numNulls)
 	}
-	if w.bloomFilter != nil {
-		// TODO: optimize for Dictionary Encoding case
+	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
 	}
 }
@@ -489,8 +494,7 @@ func (w *Int64ColumnChunkWriter) writeValuesSpaced(spacedValues []int64, numRead
 		nulls := numValues - numRead
 		w.pageStatistics.(*metadata.Int64Statistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
 	}
-	if w.bloomFilter != nil {
-		// TODO: optimize for Dictionary Encoding case
+	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
 	}
 }
@@ -552,6 +556,8 @@ func (w *Int64ColumnChunkWriter) FallbackToPlain() {
 		if err := w.drainBufferedDataPages(); err != nil {
 			panic(err)
 		}
+	} else if err := w.populateBloomFilterFromEncoder(dictEnc); err != nil {
+		panic(err)
 	}
 
 	if err := dictEnc.FallBackTo(plainEnc); err != nil {
@@ -579,6 +585,9 @@ type Int96ColumnChunkWriter struct {
 func NewInt96ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *Int96ColumnChunkWriter {
 	ret := &Int96ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.Int96EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	if useDict && ret.bloomFilter != nil {
+		ret.currentEncoder.(encoding.DictEncoder).EnableDictionaryReferenceTracking()
+	}
 	return ret
 }
 
@@ -740,8 +749,7 @@ func (w *Int96ColumnChunkWriter) writeValues(values []parquet.Int96, numNulls in
 	if w.pageStatistics != nil {
 		w.pageStatistics.(*metadata.Int96Statistics).Update(values, numNulls)
 	}
-	if w.bloomFilter != nil {
-		// TODO: optimize for Dictionary Encoding case
+	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
 	}
 }
@@ -756,8 +764,7 @@ func (w *Int96ColumnChunkWriter) writeValuesSpaced(spacedValues []parquet.Int96,
 		nulls := numValues - numRead
 		w.pageStatistics.(*metadata.Int96Statistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
 	}
-	if w.bloomFilter != nil {
-		// TODO: optimize for Dictionary Encoding case
+	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
 	}
 }
@@ -819,6 +826,8 @@ func (w *Int96ColumnChunkWriter) FallbackToPlain() {
 		if err := w.drainBufferedDataPages(); err != nil {
 			panic(err)
 		}
+	} else if err := w.populateBloomFilterFromEncoder(dictEnc); err != nil {
+		panic(err)
 	}
 
 	if err := dictEnc.FallBackTo(plainEnc); err != nil {
@@ -846,6 +855,9 @@ type Float32ColumnChunkWriter struct {
 func NewFloat32ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *Float32ColumnChunkWriter {
 	ret := &Float32ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.Float32EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	if useDict && ret.bloomFilter != nil {
+		ret.currentEncoder.(encoding.DictEncoder).EnableDictionaryReferenceTracking()
+	}
 	return ret
 }
 
@@ -1007,8 +1019,7 @@ func (w *Float32ColumnChunkWriter) writeValues(values []float32, numNulls int64)
 	if w.pageStatistics != nil {
 		w.pageStatistics.(*metadata.Float32Statistics).Update(values, numNulls)
 	}
-	if w.bloomFilter != nil {
-		// TODO: optimize for Dictionary Encoding case
+	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
 	}
 }
@@ -1023,8 +1034,7 @@ func (w *Float32ColumnChunkWriter) writeValuesSpaced(spacedValues []float32, num
 		nulls := numValues - numRead
 		w.pageStatistics.(*metadata.Float32Statistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
 	}
-	if w.bloomFilter != nil {
-		// TODO: optimize for Dictionary Encoding case
+	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
 	}
 }
@@ -1086,6 +1096,8 @@ func (w *Float32ColumnChunkWriter) FallbackToPlain() {
 		if err := w.drainBufferedDataPages(); err != nil {
 			panic(err)
 		}
+	} else if err := w.populateBloomFilterFromEncoder(dictEnc); err != nil {
+		panic(err)
 	}
 
 	if err := dictEnc.FallBackTo(plainEnc); err != nil {
@@ -1113,6 +1125,9 @@ type Float64ColumnChunkWriter struct {
 func NewFloat64ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *Float64ColumnChunkWriter {
 	ret := &Float64ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.Float64EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	if useDict && ret.bloomFilter != nil {
+		ret.currentEncoder.(encoding.DictEncoder).EnableDictionaryReferenceTracking()
+	}
 	return ret
 }
 
@@ -1274,8 +1289,7 @@ func (w *Float64ColumnChunkWriter) writeValues(values []float64, numNulls int64)
 	if w.pageStatistics != nil {
 		w.pageStatistics.(*metadata.Float64Statistics).Update(values, numNulls)
 	}
-	if w.bloomFilter != nil {
-		// TODO: optimize for Dictionary Encoding case
+	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
 	}
 }
@@ -1290,8 +1304,7 @@ func (w *Float64ColumnChunkWriter) writeValuesSpaced(spacedValues []float64, num
 		nulls := numValues - numRead
 		w.pageStatistics.(*metadata.Float64Statistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
 	}
-	if w.bloomFilter != nil {
-		// TODO: optimize for Dictionary Encoding case
+	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
 	}
 }
@@ -1353,6 +1366,8 @@ func (w *Float64ColumnChunkWriter) FallbackToPlain() {
 		if err := w.drainBufferedDataPages(); err != nil {
 			panic(err)
 		}
+	} else if err := w.populateBloomFilterFromEncoder(dictEnc); err != nil {
+		panic(err)
 	}
 
 	if err := dictEnc.FallBackTo(plainEnc); err != nil {
@@ -1383,6 +1398,9 @@ func NewBooleanColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, page
 	}
 	ret := &BooleanColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.BooleanEncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	if useDict && ret.bloomFilter != nil {
+		ret.currentEncoder.(encoding.DictEncoder).EnableDictionaryReferenceTracking()
+	}
 	return ret
 }
 
@@ -1624,8 +1642,7 @@ func (w *BooleanColumnChunkWriter) writeValues(values []bool, numNulls int64) {
 	if w.pageStatistics != nil {
 		w.pageStatistics.(*metadata.BooleanStatistics).Update(values, numNulls)
 	}
-	if w.bloomFilter != nil {
-		// TODO: optimize for Dictionary Encoding case
+	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
 	}
 }
@@ -1640,8 +1657,7 @@ func (w *BooleanColumnChunkWriter) writeValuesSpaced(spacedValues []bool, numRea
 		nulls := numValues - numRead
 		w.pageStatistics.(*metadata.BooleanStatistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
 	}
-	if w.bloomFilter != nil {
-		// TODO: optimize for Dictionary Encoding case
+	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
 	}
 }
@@ -1766,6 +1782,8 @@ func (w *BooleanColumnChunkWriter) FallbackToPlain() {
 		if err := w.drainBufferedDataPages(); err != nil {
 			panic(err)
 		}
+	} else if err := w.populateBloomFilterFromEncoder(dictEnc); err != nil {
+		panic(err)
 	}
 
 	if err := dictEnc.FallBackTo(plainEnc); err != nil {
@@ -1793,6 +1811,9 @@ type ByteArrayColumnChunkWriter struct {
 func NewByteArrayColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *ByteArrayColumnChunkWriter {
 	ret := &ByteArrayColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.ByteArrayEncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	if useDict && ret.bloomFilter != nil {
+		ret.currentEncoder.(encoding.DictEncoder).EnableDictionaryReferenceTracking()
+	}
 	return ret
 }
 
@@ -2064,8 +2085,7 @@ func (w *ByteArrayColumnChunkWriter) writeValues(values []parquet.ByteArray, num
 	if w.pageStatistics != nil {
 		w.pageStatistics.(*metadata.ByteArrayStatistics).Update(values, numNulls)
 	}
-	if w.bloomFilter != nil {
-		// TODO: optimize for Dictionary Encoding case
+	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
 	}
 }
@@ -2080,8 +2100,7 @@ func (w *ByteArrayColumnChunkWriter) writeValuesSpaced(spacedValues []parquet.By
 		nulls := numValues - numRead
 		w.pageStatistics.(*metadata.ByteArrayStatistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
 	}
-	if w.bloomFilter != nil {
-		// TODO: optimize for Dictionary Encoding case
+	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
 	}
 }
@@ -2143,6 +2162,8 @@ func (w *ByteArrayColumnChunkWriter) FallbackToPlain() {
 		if err := w.drainBufferedDataPages(); err != nil {
 			panic(err)
 		}
+	} else if err := w.populateBloomFilterFromEncoder(dictEnc); err != nil {
+		panic(err)
 	}
 
 	if err := dictEnc.FallBackTo(plainEnc); err != nil {
@@ -2170,6 +2191,9 @@ type FixedLenByteArrayColumnChunkWriter struct {
 func NewFixedLenByteArrayColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *FixedLenByteArrayColumnChunkWriter {
 	ret := &FixedLenByteArrayColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.FixedLenByteArrayEncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	if useDict && ret.bloomFilter != nil {
+		ret.currentEncoder.(encoding.DictEncoder).EnableDictionaryReferenceTracking()
+	}
 	return ret
 }
 
@@ -2445,8 +2469,7 @@ func (w *FixedLenByteArrayColumnChunkWriter) writeValues(values []parquet.FixedL
 			w.pageStatistics.(*metadata.FixedLenByteArrayStatistics).Update(values, numNulls)
 		}
 	}
-	if w.bloomFilter != nil {
-		// TODO: optimize for Dictionary Encoding case
+	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
 	}
 }
@@ -2465,8 +2488,7 @@ func (w *FixedLenByteArrayColumnChunkWriter) writeValuesSpaced(spacedValues []pa
 			w.pageStatistics.(*metadata.FixedLenByteArrayStatistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
 		}
 	}
-	if w.bloomFilter != nil {
-		// TODO: optimize for Dictionary Encoding case
+	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
 	}
 }
@@ -2528,6 +2550,8 @@ func (w *FixedLenByteArrayColumnChunkWriter) FallbackToPlain() {
 		if err := w.drainBufferedDataPages(); err != nil {
 			panic(err)
 		}
+	} else if err := w.populateBloomFilterFromEncoder(dictEnc); err != nil {
+		panic(err)
 	}
 
 	if err := dictEnc.FallBackTo(plainEnc); err != nil {
