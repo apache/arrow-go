@@ -17,6 +17,7 @@
 package metadata
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -29,8 +30,36 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/schema"
+	"github.com/cespare/xxhash/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+type recordingHasher struct {
+	inputs [][]byte
+}
+
+func (h *recordingHasher) Sum64(value []byte) uint64 {
+	h.inputs = append(h.inputs, bytes.Clone(value))
+	return xxhash.Sum64(value)
+}
+
+func (h *recordingHasher) Sum64s(values [][]byte) []uint64 {
+	hashes := make([]uint64, len(values))
+	for i, value := range values {
+		hashes[i] = h.Sum64(value)
+	}
+	return hashes
+}
+
+type expectedHashBloomFilter struct {
+	hasher   Hasher
+	expected uint64
+}
+
+func (b expectedHashBloomFilter) Hasher() Hasher             { return b.hasher }
+func (b expectedHashBloomFilter) CheckHash(hash uint64) bool { return hash == b.expected }
+func (expectedHashBloomFilter) Size() int64                  { return 0 }
 
 func TestSplitBlockFilter(t *testing.T) {
 	const N = 1000
@@ -112,6 +141,38 @@ func TestGetHashes(t *testing.T) {
 	testHash(t, h, valsBA)
 	testHash(t, h, valsFLBA)
 	testHash(t, h, valsI32)
+}
+
+func assertPlainEncodedBloomHash[T parquet.ColumnTypes](t *testing.T, value T, expected []byte) {
+	t.Helper()
+
+	expectedHash := xxhash.Sum64(expected)
+	hasher := &recordingHasher{}
+	assert.Equal(t, expectedHash, GetHash[T](hasher, value))
+	require.Equal(t, [][]byte{expected}, hasher.inputs)
+
+	hasher.inputs = nil
+	assert.Equal(t, []uint64{expectedHash}, GetHashes(hasher, []T{value}))
+	require.Equal(t, [][]byte{expected}, hasher.inputs)
+
+	hasher.inputs = nil
+	assert.Equal(t, []uint64{expectedHash}, GetSpacedHashes(hasher, 1, []T{value}, []byte{1}, 0))
+	require.Equal(t, [][]byte{expected}, hasher.inputs)
+
+	hasher.inputs = nil
+	filter := TypedBloomFilter[T]{BloomFilter: expectedHashBloomFilter{hasher: hasher, expected: expectedHash}}
+	assert.True(t, filter.Check(value))
+	require.Equal(t, [][]byte{expected}, hasher.inputs)
+}
+
+func TestBloomHashesUsePlainEncoding(t *testing.T) {
+	assertPlainEncodedBloomHash(t, int32(0x01020304), []byte{0x04, 0x03, 0x02, 0x01})
+	assertPlainEncodedBloomHash(t, int64(0x0102030405060708), []byte{0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01})
+	assertPlainEncodedBloomHash(t, math.Float32frombits(0x01020304), []byte{0x04, 0x03, 0x02, 0x01})
+	assertPlainEncodedBloomHash(t, math.Float64frombits(0x0102030405060708), []byte{0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01})
+	assertPlainEncodedBloomHash(t, parquet.Int96{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11})
+	assertPlainEncodedBloomHash(t, parquet.ByteArray("plain"), []byte("plain"))
+	assertPlainEncodedBloomHash(t, parquet.FixedLenByteArray("fixed"), []byte("fixed"))
 }
 
 func TestNewBloomFilter(t *testing.T) {
