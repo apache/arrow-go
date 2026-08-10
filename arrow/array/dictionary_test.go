@@ -1227,10 +1227,9 @@ func TestValidatedDictionaryAllowsSignedIndexAtTypeLimit(t *testing.T) {
 
 	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
 	result, err := array.NewValidatedDictionaryArray(dictType, indices, dict)
-	assert.NoError(t, err)
-	if result != nil {
-		defer result.Release()
-	}
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	defer result.Release()
 }
 
 func TestListOfDictionary(t *testing.T) {
