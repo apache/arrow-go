@@ -128,6 +128,73 @@ func TestDictionaryArrayBloomFilter(t *testing.T) {
 	}))
 }
 
+func BenchmarkDictionaryArrayBloomFilter(b *testing.B) {
+	tests := []struct {
+		name              string
+		dictionaryEntries int
+		referencedEntries int
+	}{
+		{name: "dictionary=100k/referenced=10", dictionaryEntries: 100_000, referencedEntries: 10},
+		{name: "dictionary=1m/referenced=100", dictionaryEntries: 1_000_000, referencedEntries: 100},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			const numRows = 100_000
+			mem := memory.DefaultAllocator
+
+			dictionaryBuilder := array.NewStringBuilder(mem)
+			dictionaryBuilder.Reserve(tt.dictionaryEntries)
+			for i := 0; i < tt.dictionaryEntries; i++ {
+				dictionaryBuilder.Append(fmt.Sprintf("value-%08d", i))
+			}
+			dictionary := dictionaryBuilder.NewArray()
+			dictionaryBuilder.Release()
+			defer dictionary.Release()
+
+			indicesBuilder := array.NewInt32Builder(mem)
+			indicesBuilder.Reserve(numRows)
+			for i := 0; i < numRows; i++ {
+				indicesBuilder.Append(int32(i % tt.referencedEntries))
+			}
+			indices := indicesBuilder.NewArray()
+			indicesBuilder.Release()
+			defer indices.Release()
+
+			dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}
+			values := array.NewDictionaryArray(dictType, indices, dictionary)
+			defer values.Release()
+			sc := arrow.NewSchema([]arrow.Field{{Name: "values", Type: dictType}}, nil)
+			props := parquet.NewWriterProperties(
+				parquet.WithDictionaryDefault(true),
+				parquet.WithStats(false),
+				parquet.WithBloomFilterEnabledFor("values", true),
+				parquet.WithBloomFilterNDVFor("values", int64(tt.referencedEntries)),
+			)
+			arrowProps := pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem))
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var output bytes.Buffer
+				writer, err := pqarrow.NewFileWriter(sc, &output, props, arrowProps)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if err := writer.NewRowGroupChecked(); err != nil {
+					b.Fatal(err)
+				}
+				if err := writer.WriteColumnData(values); err != nil {
+					b.Fatal(err)
+				}
+				if err := writer.Close(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func (ps *ParquetIOTestSuite) TestSingleColumnOptionalDictionaryWrite() {
 	for _, dt := range fullTypeList {
 		// skip tests for bool as we don't do dictionaries for it

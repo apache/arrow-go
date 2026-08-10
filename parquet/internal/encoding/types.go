@@ -119,9 +119,8 @@ type DictEncoder interface {
 	// from PutDictionary or nil.
 	PreservedDictionary() arrow.Array
 	// PutIndices adds the indices from the passed in integral array to
-	// the column data. It is assumed that the indices are within the bounds
-	// of [0,dictSize) and is not validated. Returns an error if a non-integral
-	// array is passed.
+	// the column data. Returns an error if an index is outside [0, dictSize)
+	// or a non-integral array is passed.
 	PutIndices(arrow.Array) error
 	// NormalizeDict takes an arrow array and normalizes it to a parquet
 	// native type. e.g. a dictionary of type int8 will be cast to an int32

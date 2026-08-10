@@ -219,64 +219,115 @@ func (d *dictEncoder) expandBuffer(newCap int) {
 	d.idxValues = arrow.Int32Traits.CastFromBytes(d.idxBuffer.Buf())[: curLen : d.idxBuffer.Len()/arrow.Int32SizeBytes]
 }
 
+type signedDictionaryIndex interface {
+	int8 | int16 | int32 | int64
+}
+
+type unsignedDictionaryIndex interface {
+	uint8 | uint16 | uint32 | uint64
+}
+
+const maxDictionaryIndex = uint64(1<<31 - 1)
+
+func (d *dictEncoder) invalidDictionaryIndex(index any) error {
+	return fmt.Errorf("%w: dictionary index %v out of bounds for dictionary of length %d",
+		arrow.ErrInvalid, index, d.NumEntries())
+}
+
+func putSignedDictionaryIndices[T signedDictionaryIndex](d *dictEncoder, data arrow.Array, values []T, start int) error {
+	dictSize := uint64(d.NumEntries())
+	curPos := start
+	return bitutils.VisitSetBitRuns(data.NullBitmapBytes(),
+		int64(data.Data().Offset()), int64(data.Len()),
+		func(pos, length int64) error {
+			for i := int64(0); i < length; i++ {
+				index := values[i+pos]
+				if index < 0 || uint64(index) >= dictSize || uint64(index) > maxDictionaryIndex {
+					return d.invalidDictionaryIndex(index)
+				}
+				d.idxValues[curPos] = int32(index)
+				d.recordDictionaryReference(int32(index))
+				curPos++
+			}
+			return nil
+		})
+}
+
+func putUnsignedDictionaryIndices[T unsignedDictionaryIndex](d *dictEncoder, data arrow.Array, values []T, start int) error {
+	dictSize := uint64(d.NumEntries())
+	curPos := start
+	return bitutils.VisitSetBitRuns(data.NullBitmapBytes(),
+		int64(data.Data().Offset()), int64(data.Len()),
+		func(pos, length int64) error {
+			for i := int64(0); i < length; i++ {
+				index := values[i+pos]
+				if uint64(index) >= dictSize || uint64(index) > maxDictionaryIndex {
+					return d.invalidDictionaryIndex(index)
+				}
+				d.idxValues[curPos] = int32(index)
+				d.recordDictionaryReference(int32(index))
+				curPos++
+			}
+			return nil
+		})
+}
+
+func (d *dictEncoder) rollbackDictionaryReferences(start, bitmapLen int) {
+	for _, index := range d.referencedIndices[start:] {
+		d.referencedBitmap[index>>3] &^= byte(1 << uint(index&7))
+	}
+	d.referencedIndices = d.referencedIndices[:start]
+	d.referencedBitmap = d.referencedBitmap[:bitmapLen]
+}
+
 func (d *dictEncoder) PutIndices(data arrow.Array) error {
+	switch data.DataType().ID() {
+	case arrow.INT8, arrow.UINT8, arrow.INT16, arrow.UINT16,
+		arrow.INT32, arrow.UINT32, arrow.INT64, arrow.UINT64:
+	default:
+		return fmt.Errorf("%w: passed non-integer array to PutIndices", arrow.ErrInvalid)
+	}
+
 	newValues := data.Len() - data.NullN()
 	curPos := len(d.idxValues)
 	newLen := newValues + curPos
 	d.expandBuffer(newLen)
 	d.idxValues = d.idxValues[:newLen:cap(d.idxValues)]
 
+	referenceStart := len(d.referencedIndices)
+	bitmapLen := len(d.referencedBitmap)
+	valueOffset := data.Data().Offset()
+	var err error
 	switch data.DataType().ID() {
-	case arrow.UINT8, arrow.INT8:
-		values := arrow.Uint8Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[data.Data().Offset():]
-		bitutils.VisitSetBitRunsNoErr(data.NullBitmapBytes(),
-			int64(data.Data().Offset()), int64(data.Len()),
-			func(pos, length int64) {
-				for i := int64(0); i < length; i++ {
-					index := int32(values[i+pos])
-					d.idxValues[curPos] = index
-					d.recordDictionaryReference(index)
-					curPos++
-				}
-			})
-	case arrow.UINT16, arrow.INT16:
-		values := arrow.Uint16Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[data.Data().Offset():]
-		bitutils.VisitSetBitRunsNoErr(data.NullBitmapBytes(),
-			int64(data.Data().Offset()), int64(data.Len()),
-			func(pos, length int64) {
-				for i := int64(0); i < length; i++ {
-					index := int32(values[i+pos])
-					d.idxValues[curPos] = index
-					d.recordDictionaryReference(index)
-					curPos++
-				}
-			})
-	case arrow.UINT32, arrow.INT32:
-		values := arrow.Uint32Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[data.Data().Offset():]
-		bitutils.VisitSetBitRunsNoErr(data.NullBitmapBytes(),
-			int64(data.Data().Offset()), int64(data.Len()),
-			func(pos, length int64) {
-				for i := int64(0); i < length; i++ {
-					index := int32(values[i+pos])
-					d.idxValues[curPos] = index
-					d.recordDictionaryReference(index)
-					curPos++
-				}
-			})
-	case arrow.UINT64, arrow.INT64:
-		values := arrow.Uint64Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[data.Data().Offset():]
-		bitutils.VisitSetBitRunsNoErr(data.NullBitmapBytes(),
-			int64(data.Data().Offset()), int64(data.Len()),
-			func(pos, length int64) {
-				for i := int64(0); i < length; i++ {
-					index := int32(values[i+pos])
-					d.idxValues[curPos] = index
-					d.recordDictionaryReference(index)
-					curPos++
-				}
-			})
-	default:
-		return fmt.Errorf("%w: passed non-integer array to PutIndices", arrow.ErrInvalid)
+	case arrow.INT8:
+		values := arrow.Int8Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[valueOffset:]
+		err = putSignedDictionaryIndices(d, data, values, curPos)
+	case arrow.UINT8:
+		values := arrow.Uint8Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[valueOffset:]
+		err = putUnsignedDictionaryIndices(d, data, values, curPos)
+	case arrow.INT16:
+		values := arrow.Int16Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[valueOffset:]
+		err = putSignedDictionaryIndices(d, data, values, curPos)
+	case arrow.UINT16:
+		values := arrow.Uint16Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[valueOffset:]
+		err = putUnsignedDictionaryIndices(d, data, values, curPos)
+	case arrow.INT32:
+		values := arrow.Int32Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[valueOffset:]
+		err = putSignedDictionaryIndices(d, data, values, curPos)
+	case arrow.UINT32:
+		values := arrow.Uint32Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[valueOffset:]
+		err = putUnsignedDictionaryIndices(d, data, values, curPos)
+	case arrow.INT64:
+		values := arrow.Int64Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[valueOffset:]
+		err = putSignedDictionaryIndices(d, data, values, curPos)
+	case arrow.UINT64:
+		values := arrow.Uint64Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[valueOffset:]
+		err = putUnsignedDictionaryIndices(d, data, values, curPos)
+	}
+	if err != nil {
+		d.idxValues = d.idxValues[:curPos]
+		d.rollbackDictionaryReferences(referenceStart, bitmapLen)
+		return err
 	}
 
 	return nil
