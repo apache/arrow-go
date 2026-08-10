@@ -235,7 +235,6 @@ func TestFixedSizeBinaryParseErrorAppendsNull(t *testing.T) {
 	require.ErrorIs(t, r.Err(), arrow.ErrInvalid)
 
 	record := r.RecordBatch()
-	defer record.Release()
 	require.EqualValues(t, 1, record.NumRows())
 	for i := 0; i < int(record.NumCols()); i++ {
 		assert.Equal(t, 1, record.Column(i).Len())
