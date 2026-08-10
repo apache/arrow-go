@@ -114,7 +114,7 @@ func (a *ArraySpan) UpdateNullCount() int64 {
 	if curNulls != array.UnknownNullCount {
 		return curNulls
 	}
-	if a.Buffers[0].Buf == nil {
+	if len(a.Buffers[0].Buf) == 0 {
 		atomic.StoreInt64(&a.Nulls, 0)
 		return 0
 	}
