@@ -93,7 +93,7 @@ func (b *FixedSizeBinaryBuilder) AppendNulls(n int) {
 	}
 	b.Reserve(n)
 	b.values.Advance(n * b.dtype.ByteWidth)
-	b.builder.unsafeAppendNulls(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *FixedSizeBinaryBuilder) AppendEmptyValue() {

@@ -206,7 +206,7 @@ func (b *TimestampBuilder) AppendNulls(n int) {
 		return
 	}
 	b.Reserve(n)
-	b.builder.unsafeAppendNulls(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *TimestampBuilder) AppendEmptyValue() {

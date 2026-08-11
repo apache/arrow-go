@@ -87,7 +87,7 @@ func (b *BooleanBuilder) AppendNulls(n int) {
 		return
 	}
 	b.Reserve(n)
-	b.builder.unsafeAppendNulls(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *BooleanBuilder) AppendEmptyValue() {

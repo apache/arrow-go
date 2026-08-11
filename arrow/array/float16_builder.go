@@ -88,7 +88,7 @@ func (b *Float16Builder) AppendNulls(n int) {
 		return
 	}
 	b.Reserve(n)
-	b.builder.unsafeAppendNulls(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *Float16Builder) AppendEmptyValue() {
