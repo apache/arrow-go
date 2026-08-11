@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -38,7 +39,7 @@ func (g grpcCredentials) GetRequestMetadata(ctx context.Context, uri ...string) 
 	md := make(map[string]string, len(g.params)+1)
 
 	for k, v := range g.params {
-		md[k] = v
+		md[strings.ToLower(k)] = v
 	}
 
 	switch {

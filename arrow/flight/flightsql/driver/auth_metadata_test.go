@@ -18,19 +18,72 @@ package driver
 
 import (
 	"context"
+	"net"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 )
 
 func TestRequestMetadataKeepsConfiguredAuthorization(t *testing.T) {
 	credentials := grpcCredentials{
 		token:  "trusted",
-		params: map[string]string{"authorization": "Bearer attacker", "database": "analytics"},
+		params: map[string]string{"Authorization": "Bearer attacker", "Database": "analytics"},
 	}
 
 	metadata, err := credentials.GetRequestMetadata(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, "Bearer trusted", metadata["authorization"])
-	require.Equal(t, "analytics", metadata["database"])
+	require.Equal(t, map[string]string{
+		"authorization": "Bearer trusted",
+		"database":      "analytics",
+	}, metadata)
+}
+
+func TestRequestMetadataKeepsConfiguredAuthorizationOnTransport(t *testing.T) {
+	listener := bufconn.Listen(1024 * 1024)
+	server := grpc.NewServer(grpc.UnaryInterceptor(
+		func(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+			authorization := metadata.ValueFromIncomingContext(ctx, "authorization")
+			if len(authorization) != 1 || authorization[0] != "Bearer trusted" {
+				return nil, status.Errorf(codes.Unauthenticated, "unexpected authorization metadata: %q", authorization)
+			}
+			return handler(ctx, req)
+		},
+	))
+	healthpb.RegisterHealthServer(server, health.NewServer())
+	go func() {
+		_ = server.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		server.Stop()
+		require.NoError(t, listener.Close())
+	})
+
+	credentials := grpcCredentials{
+		token:  "trusted",
+		params: map[string]string{"Authorization": "Bearer attacker"},
+	}
+	conn, err := grpc.NewClient(
+		"passthrough:///bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return listener.Dial()
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithPerRPCCredentials(credentials),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+
+	client := healthpb.NewHealthClient(conn)
+	for i := 0; i < 100; i++ {
+		_, err = client.Check(context.Background(), &healthpb.HealthCheckRequest{})
+		require.NoErrorf(t, err, "request %d", i+1)
+	}
 }
