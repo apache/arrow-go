@@ -125,14 +125,15 @@ func NewWriterWithPayloadWriter(pw PayloadWriter, opts ...Option) *Writer {
 func NewWriter(w io.Writer, opts ...Option) *Writer {
 	cfg := newConfig(opts...)
 	return &Writer{
-		w:              w,
-		mem:            cfg.alloc,
-		pw:             &streamWriter{w: w},
-		schema:         cfg.schema,
-		codec:          cfg.codec,
-		emitDictDeltas: cfg.emitDictDeltas,
-		compressNP:     cfg.compressNP,
-		compressors:    make([]compressor, cfg.compressNP),
+		w:               w,
+		mem:             cfg.alloc,
+		pw:              &streamWriter{w: w},
+		schema:          cfg.schema,
+		codec:           cfg.codec,
+		emitDictDeltas:  cfg.emitDictDeltas,
+		compressNP:      cfg.compressNP,
+		minSpaceSavings: cfg.minSpaceSavings,
+		compressors:     make([]compressor, cfg.compressNP),
 	}
 }
 
