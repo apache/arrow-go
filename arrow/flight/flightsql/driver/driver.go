@@ -117,6 +117,9 @@ func (r *Rows) Close() error {
 	r.currentRow = 0
 
 	r.releaseRecord()
+	for record := range r.recordChan {
+		record.Release()
+	}
 
 	return nil
 }

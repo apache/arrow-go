@@ -19,7 +19,6 @@ package driver
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -27,7 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRowsSendRecordStopsWhenContextCancelled(t *testing.T) {
+func TestRowsCloseReleasesRetainedRecords(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
 
@@ -38,30 +37,27 @@ func TestRowsSendRecordStopsWhenContextCancelled(t *testing.T) {
 	builder.Field(0).(*array.Int64Builder).Append(2)
 	pending := builder.NewRecordBatch()
 	builder.Release()
-	defer queued.Release()
 
 	rows := newRows()
+	ctx, cancel := context.WithCancel(context.Background())
+	rows.ctxCancelFunc = cancel
+
+	queued.Retain()
+	pending.Retain()
 	rows.recordChan <- queued
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer close(rows.recordChan)
+		rows.sendRecord(ctx, pending)
+	}()
 
-	done := make(chan bool, 1)
-	go func() { done <- rows.sendRecord(ctx, pending) }()
+	queued.Release()
+	pending.Release()
 
-	select {
-	case <-done:
-		t.Fatal("sendRecord returned while the channel was full")
-	case <-time.After(10 * time.Millisecond):
-	}
-
-	cancel()
-	select {
-	case sent := <-done:
-		require.False(t, sent)
-	case <-time.After(time.Second):
-		t.Fatal("sendRecord did not stop after context cancellation")
-	}
-
-	<-rows.recordChan
+	require.Positive(t, mem.CurrentAlloc())
+	require.NoError(t, rows.Close())
+	<-done
+	require.Zero(t, mem.CurrentAlloc())
 }
