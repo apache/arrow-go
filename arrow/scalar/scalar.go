@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"reflect"
 	"strconv"
 	"unsafe"
@@ -174,6 +173,10 @@ func (s *Boolean) String() string {
 }
 
 func (s *Boolean) CastTo(dt arrow.DataType) (Scalar, error) {
+	if arrow.TypeEqual(s.DataType(), dt) {
+		return s, nil
+	}
+
 	if !s.Valid {
 		return MakeNullScalar(dt), nil
 	}
@@ -325,9 +328,7 @@ func (s *Decimal128) CastTo(to arrow.DataType) (Scalar, error) {
 		return NewDecimal256Scalar(newVal, to), nil
 	case arrow.STRING:
 		dt := s.Type.(*arrow.Decimal128Type)
-		scale := big.NewFloat(math.Pow10(int(dt.Scale)))
-		val := (&big.Float{}).SetInt(s.Value.BigInt())
-		return NewStringScalar(val.Quo(val, scale).Text('g', int(dt.Precision))), nil
+		return NewStringScalar(s.Value.ToBigFloat(dt.Scale).Text('g', int(dt.Precision))), nil
 	}
 
 	return nil, fmt.Errorf("cannot cast non-nil decimal128 scalar to type %s", to)
@@ -382,9 +383,7 @@ func (s *Decimal256) CastTo(to arrow.DataType) (Scalar, error) {
 		}
 		return NewDecimal256Scalar(newVal, to), nil
 	case arrow.STRING:
-		scale := big.NewFloat(math.Pow10(int(dt.Scale)))
-		val := (&big.Float{}).SetInt(s.Value.BigInt())
-		return NewStringScalar(val.Quo(val, scale).Text('g', int(dt.Precision))), nil
+		return NewStringScalar(s.Value.ToBigFloat(dt.Scale).Text('g', int(dt.Precision))), nil
 	}
 
 	return nil, fmt.Errorf("cannot cast non-nil decimal256 scalar to type %s", to)
@@ -473,11 +472,10 @@ func (s *Extension) String() string {
 	if !s.Valid {
 		return "null"
 	}
-	val, err := s.CastTo(arrow.BinaryTypes.String)
-	if err != nil {
+	if s.Value == nil {
 		return "..."
 	}
-	return string(val.(*String).Value.Bytes())
+	return s.Value.String()
 }
 
 func NewExtensionScalar(storage Scalar, typ arrow.DataType) *Extension {
@@ -679,6 +677,11 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 		for i := range children {
 			child, err := GetScalar(arr.Field(i), idx)
 			if err != nil {
+				for _, child := range children[:i] {
+					if releasable, ok := child.(Releasable); ok {
+						releasable.Release()
+					}
+				}
 				return nil, err
 			}
 			children[i] = child
@@ -758,37 +761,7 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 //
 // Deprecated: Use array.MakeArrayOfNull
 func MakeArrayOfNull(dt arrow.DataType, length int, mem memory.Allocator) arrow.Array {
-	var (
-		buffers  = []*memory.Buffer{nil}
-		children []arrow.ArrayData
-	)
-
-	buffers[0] = memory.NewResizableBuffer(mem)
-	buffers[0].Resize(int(bitutil.BytesForBits(int64(length))))
-	defer buffers[0].Release()
-
-	switch t := dt.(type) {
-	case arrow.NestedType:
-		fieldList := t.Fields()
-		children = make([]arrow.ArrayData, len(fieldList))
-		for i, f := range fieldList {
-			arr := MakeArrayOfNull(f.Type, length, mem)
-			defer arr.Release()
-			children[i] = arr.Data()
-		}
-	case arrow.FixedWidthDataType:
-		buffers = append(buffers, memory.NewResizableBuffer(mem))
-		buffers[1].Resize(int(bitutil.BytesForBits(int64(t.BitWidth()))) * length)
-		defer buffers[1].Release()
-	case arrow.BinaryDataType:
-		buffers = append(buffers, memory.NewResizableBuffer(mem), nil)
-		buffers[1].Resize(arrow.Int32Traits.BytesRequired(length + 1))
-		defer buffers[1].Release()
-	}
-
-	data := array.NewData(dt, length, buffers, children, length, 0)
-	defer data.Release()
-	return array.MakeFromData(data)
+	return array.MakeArrayOfNull(mem, dt, length)
 }
 
 // MakeArrayFromScalar returns an array filled with the scalar value repeated length times.
@@ -802,12 +775,20 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 		return MakeArrayOfNull(sc.DataType(), length, mem), nil
 	}
 
-	createOffsets := func(valLength int32) *memory.Buffer {
+	createOffsets := func(valLength int64) *memory.Buffer {
 		buffer := memory.NewResizableBuffer(mem)
-		buffer.Resize(arrow.Int32Traits.BytesRequired(length + 1))
+		offsetTraits := sc.DataType().(arrow.OffsetsDataType).OffsetTypeTraits()
+		buffer.Resize(offsetTraits.BytesRequired(length + 1))
+		if offsetTraits.BytesRequired(1) == arrow.Int64SizeBytes {
+			out := arrow.Int64Traits.CastFromBytes(buffer.Bytes())
+			for i, offset := 0, int64(0); i < length+1; i, offset = i+1, offset+valLength {
+				out[i] = offset
+			}
+			return buffer
+		}
 
 		out := arrow.Int32Traits.CastFromBytes(buffer.Bytes())
-		for i, offset := 0, int32(0); i < length+1; i, offset = i+1, offset+valLength {
+		for i, offset := 0, int32(0); i < length+1; i, offset = i+1, offset+int32(valLength) {
 			out[i] = offset
 		}
 		return buffer
@@ -850,7 +831,7 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 		}
 
 		valuesBuf := createBuffer(s.Data())
-		offsetsBuf := createOffsets(int32(len(s.Data())))
+		offsetsBuf := createOffsets(int64(len(s.Data())))
 		data := array.NewData(sc.DataType(), length, []*memory.Buffer{nil, offsetsBuf, valuesBuf}, nil, 0, 0)
 		defer func() {
 			valuesBuf.Release()
@@ -882,7 +863,7 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 		}
 		defer valueArray.Release()
 
-		offsetsBuf := createOffsets(int32(s.Value.Len()))
+		offsetsBuf := createOffsets(int64(s.Value.Len()))
 		defer offsetsBuf.Release()
 		data := array.NewData(s.DataType(), length, []*memory.Buffer{nil, offsetsBuf}, []arrow.ArrayData{valueArray.Data()}, 0, 0)
 		defer data.Release()
@@ -937,7 +918,7 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 		}
 		defer valueArr.Release()
 
-		offsetsBuf := createOffsets(int32(structArr.Len()))
+		offsetsBuf := createOffsets(int64(structArr.Len()))
 		outStructArr := array.NewData(structArr.DataType(), keyArr.Len(), []*memory.Buffer{nil}, []arrow.ArrayData{keyArr.Data(), valueArr.Data()}, 0, 0)
 		data := array.NewData(s.DataType(), length, []*memory.Buffer{nil, offsetsBuf}, []arrow.ArrayData{outStructArr}, 0, 0)
 		defer func() {

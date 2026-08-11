@@ -135,6 +135,13 @@ func (er *extensionReader) BuildArray(boundedLen int64) (*arrow.Chunked, error) 
 	extType := er.fieldWithExt.Type.(arrow.ExtensionType)
 
 	newChunks := make([]arrow.Array, len(chkd.Chunks()))
+	defer func() {
+		for _, c := range newChunks {
+			if c != nil {
+				c.Release()
+			}
+		}
+	}()
 	for i, c := range chkd.Chunks() {
 		newChunks[i] = array.NewExtensionArrayWithStorage(extType, c)
 	}

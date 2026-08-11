@@ -15,30 +15,29 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package metadata
+//go:build go1.18
 
-import (
-	"bytes"
-	"testing"
+package kernels
 
-	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
-	"github.com/apache/arrow-go/v18/parquet/internal/thrift"
-	"github.com/stretchr/testify/require"
-)
+import "testing"
 
-func TestNewFileMetaDataReturnsSchemaErrors(t *testing.T) {
-	fileMeta := format.NewFileMetaData()
-	var buf bytes.Buffer
-	_, err := thrift.NewThriftSerializer().Serialize(fileMeta, &buf, nil)
-	require.NoError(t, err)
-
-	meta, err := NewFileMetaData(buf.Bytes(), nil)
-	require.Error(t, err)
-	require.Nil(t, meta)
-}
-
-func TestNewColumnChunkMetaDataReturnsErrorForMissingMetadata(t *testing.T) {
-	meta, err := NewColumnChunkMetaData(&format.ColumnChunk{}, nil, nil, 0, 0, nil)
-	require.EqualError(t, err, "column chunk metadata is missing")
-	require.Nil(t, meta)
+func TestRoundToMultipleInt64OddMultipleAcrossModes(t *testing.T) {
+	for _, mode := range []RoundMode{HalfDown, HalfUp, HalfToEven} {
+		t.Run(mode.String(), func(t *testing.T) {
+			for _, tc := range []struct {
+				value int64
+				want  int64
+			}{
+				{value: 1, want: 0},
+				{value: 2, want: 3},
+				{value: -1, want: 0},
+				{value: -2, want: -3},
+			} {
+				got := roundToMultipleInt64(tc.value, 3, mode, false)
+				if got != tc.want {
+					t.Errorf("roundToMultipleInt64(%d, 3, %s) = %d, want %d", tc.value, mode, got, tc.want)
+				}
+			}
+		})
+	}
 }

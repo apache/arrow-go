@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type Fixture struct {
@@ -349,6 +350,22 @@ func TestMapSchemaDoesNotDependOnValues(t *testing.T) {
 	require.True(t, withValuesSchema.Equal(emptySchema))
 }
 
+func TestMalformedAnyUsesPhysicalFields(t *testing.T) {
+	msg := util_message.AllTheTypes{
+		Any: &anypb.Any{TypeUrl: "invalid.example/missing", Value: []byte{1, 2, 3}},
+	}
+
+	pmr := NewProtobufMessageReflection(&msg)
+	anyFields := pmr.Schema().Field(17).Type.(*arrow.StructType).Fields()
+	require.Len(t, anyFields, 2)
+	assert.Equal(t, "type_url", anyFields[0].Name)
+	assert.Equal(t, "value", anyFields[1].Name)
+
+	rec := pmr.Record(nil)
+	defer rec.Release()
+	assert.EqualValues(t, 1, rec.NumRows())
+}
+
 func TestRecordFromProtobuf(t *testing.T) {
 	f := AllTheTypesFixture()
 
@@ -371,6 +388,65 @@ func TestRecordReleasesConstructionBuffers(t *testing.T) {
 	rec := pmr.Record(mem)
 	rec.Release()
 	mem.AssertSize(t, 0)
+}
+
+func TestRecordWithErrorReportsFieldConversion(t *testing.T) {
+	msg := AllTheTypesNoAnyFixture().msg.(*util_message.AllTheTypesNoAny)
+	msg.Enum = util_message.AllTheTypesNoAny_ExampleEnum(999)
+	pmr := NewProtobufMessageReflection(msg)
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	rec, err := pmr.RecordWithError(mem)
+	assert.Nil(t, rec)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, `failed to append protobuf field "enum"`)
+	assert.ErrorContains(t, err, "enum value 999 is not defined")
+	mem.AssertSize(t, 0)
+}
+
+func TestRecordWithAllFieldsExcluded(t *testing.T) {
+	pmr := NewProtobufMessageReflection(AllTheTypesNoAnyFixture().msg,
+		WithExclusionPolicy(func(*ProtobufFieldReflection) bool { return true }))
+	rec := pmr.Record(nil)
+	defer rec.Release()
+
+	assert.EqualValues(t, 1, rec.NumRows())
+	assert.Zero(t, rec.NumCols())
+}
+
+func TestRecordWithErrorReportsUnknownEnumValueForEnumValueHandler(t *testing.T) {
+	msg := AllTheTypesNoAnyFixture().msg.(*util_message.AllTheTypesNoAny)
+	msg.Enum = util_message.AllTheTypesNoAny_ExampleEnum(999)
+	onlyEnum := func(pfr *ProtobufFieldReflection) bool { return !pfr.isEnum() }
+	pmr := NewProtobufMessageReflection(msg, WithExclusionPolicy(onlyEnum), WithEnumHandler(EnumValue))
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+
+	rec, err := pmr.RecordWithError(mem)
+	assert.Nil(t, rec)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, `failed to append protobuf field "enum"`)
+	assert.ErrorContains(t, err, "enum value 999 is not defined")
+	mem.AssertSize(t, 0)
+}
+
+func TestRecordWithErrorReturnsOneRowForZeroFieldSchema(t *testing.T) {
+	excludeAll := func(*ProtobufFieldReflection) bool { return true }
+	pmr := NewProtobufMessageReflection(&util_message.AllTheTypesNoAny{}, WithExclusionPolicy(excludeAll))
+
+	rec, err := pmr.RecordWithError(memory.DefaultAllocator)
+	require.NoError(t, err)
+	require.NotNil(t, rec)
+	defer rec.Release()
+	require.EqualValues(t, 1, rec.NumRows())
+	require.EqualValues(t, 0, rec.NumCols())
+}
+
+func TestRecordFromEmptyMessage(t *testing.T) {
+	pmr := NewProtobufMessageReflection(&emptypb.Empty{})
+	rec := pmr.Record(nil)
+	defer rec.Release()
+
+	assert.EqualValues(t, 1, rec.NumRows())
+	assert.Zero(t, rec.NumCols())
 }
 
 func TestNullRecordFromProtobuf(t *testing.T) {

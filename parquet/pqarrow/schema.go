@@ -1240,7 +1240,7 @@ func applyOriginalStorageMetadata(origin arrow.Field, inferred *SchemaField) (mo
 		// direct dictionary reads are only supported for a few primitive types
 		// so no need to recurse on value types
 		dictOriginType := origin.Type.(*arrow.DictionaryType)
-		inferred.Field.Type = &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32,
+		inferred.Field.Type = &arrow.DictionaryType{IndexType: dictOriginType.IndexType,
 			ValueType: inferred.Field.Type, Ordered: dictOriginType.Ordered}
 		modified = true
 	case arrow.DECIMAL256:

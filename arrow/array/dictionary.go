@@ -110,7 +110,7 @@ func checkIndexBounds(indices *Data, upperlimit uint64) error {
 	case arrow.INT8:
 		data := arrow.Int8Traits.CastFromBytes(indices.buffers[1].Bytes())
 		min, max := utils.GetMinMaxInt8(data[start:end])
-		if min < 0 || max >= int8(upperlimit) {
+		if min < 0 || uint64(max) >= upperlimit {
 			return fmt.Errorf("contains out of bounds index: min: %d, max: %d", min, max)
 		}
 	case arrow.UINT8:
@@ -122,7 +122,7 @@ func checkIndexBounds(indices *Data, upperlimit uint64) error {
 	case arrow.INT16:
 		data := arrow.Int16Traits.CastFromBytes(indices.buffers[1].Bytes())
 		min, max := utils.GetMinMaxInt16(data[start:end])
-		if min < 0 || max >= int16(upperlimit) {
+		if min < 0 || uint64(max) >= upperlimit {
 			return fmt.Errorf("contains out of bounds index: min: %d, max: %d", min, max)
 		}
 	case arrow.UINT16:
@@ -134,7 +134,7 @@ func checkIndexBounds(indices *Data, upperlimit uint64) error {
 	case arrow.INT32:
 		data := arrow.Int32Traits.CastFromBytes(indices.buffers[1].Bytes())
 		min, max := utils.GetMinMaxInt32(data[start:end])
-		if min < 0 || max >= int32(upperlimit) {
+		if min < 0 || uint64(max) >= upperlimit {
 			return fmt.Errorf("contains out of bounds index: min: %d, max: %d", min, max)
 		}
 	case arrow.UINT32:
@@ -146,7 +146,7 @@ func checkIndexBounds(indices *Data, upperlimit uint64) error {
 	case arrow.INT64:
 		data := arrow.Int64Traits.CastFromBytes(indices.buffers[1].Bytes())
 		min, max := utils.GetMinMaxInt64(data[start:end])
-		if min < 0 || max >= int64(upperlimit) {
+		if min < 0 || uint64(max) >= upperlimit {
 			return fmt.Errorf("contains out of bounds index: min: %d, max: %d", min, max)
 		}
 	case arrow.UINT64:
