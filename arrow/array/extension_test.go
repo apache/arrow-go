@@ -23,6 +23,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/types"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -79,6 +80,24 @@ func (e *ExtensionTypeTestSuite) TestParametricArrays() {
 	defer rb.Release()
 
 	e.True(array.RecordEqual(rb, rb))
+}
+
+func TestNewExtensionArrayWithStorageReleasesAllReferences(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+
+	builder := array.NewInt32Builder(mem)
+	builder.Append(42)
+	storage := builder.NewInt32Array()
+	builder.Release()
+
+	ext := array.NewExtensionArrayWithStorage(types.NewParametric1Type(6), storage)
+	require.IsType(t, &types.Parametric1Array{}, ext)
+	require.Equal(t, 1, ext.Len())
+	require.Equal(t, "42", ext.ValueStr(0))
+
+	ext.Release()
+	storage.Release()
+	mem.AssertSize(t, 0)
 }
 
 func TestExtensionTypes(t *testing.T) {

@@ -90,6 +90,7 @@ type Writer struct {
 	pw  PayloadWriter
 
 	started         bool
+	err             error
 	schema          *arrow.Schema
 	mapper          dictutils.Mapper
 	codec           flatbuf.CompressionType
@@ -124,22 +125,26 @@ func NewWriterWithPayloadWriter(pw PayloadWriter, opts ...Option) *Writer {
 func NewWriter(w io.Writer, opts ...Option) *Writer {
 	cfg := newConfig(opts...)
 	return &Writer{
-		w:              w,
-		mem:            cfg.alloc,
-		pw:             &streamWriter{w: w},
-		schema:         cfg.schema,
-		codec:          cfg.codec,
-		emitDictDeltas: cfg.emitDictDeltas,
-		compressNP:     cfg.compressNP,
-		compressors:    make([]compressor, cfg.compressNP),
+		w:               w,
+		mem:             cfg.alloc,
+		pw:              &streamWriter{w: w},
+		schema:          cfg.schema,
+		codec:           cfg.codec,
+		emitDictDeltas:  cfg.emitDictDeltas,
+		compressNP:      cfg.compressNP,
+		minSpaceSavings: cfg.minSpaceSavings,
+		compressors:     make([]compressor, cfg.compressNP),
 	}
 }
 
 func (w *Writer) Close() error {
+	if w.err != nil {
+		return w.closeAfterFailure()
+	}
 	if !w.started {
 		err := w.start()
 		if err != nil {
-			return err
+			return w.closeAfterFailure()
 		}
 	}
 
@@ -148,24 +153,47 @@ func (w *Writer) Close() error {
 	}
 
 	err := w.pw.Close()
-	if err != nil {
-		return fmt.Errorf("arrow/ipc: could not close payload writer: %w", err)
-	}
 	w.pw = nil
-
-	for _, d := range w.lastWrittenDicts {
-		d.Release()
+	w.releaseDictionaries()
+	if err != nil {
+		return w.fail(fmt.Errorf("arrow/ipc: could not close payload writer: %w", err))
 	}
 
 	return nil
 }
 
+func (w *Writer) closeAfterFailure() error {
+	if w.started && w.pw != nil {
+		w.err = errors.Join(w.err, w.pw.Close())
+	}
+	w.releaseDictionaries()
+	w.pw = nil
+	return w.err
+}
+
+func (w *Writer) releaseDictionaries() {
+	for _, d := range w.lastWrittenDicts {
+		d.Release()
+	}
+	w.lastWrittenDicts = nil
+}
+
+func (w *Writer) fail(err error) error {
+	if w.err == nil {
+		w.err = err
+	}
+	return w.err
+}
+
 func (w *Writer) Write(rec arrow.RecordBatch) (err error) {
 	defer func() {
 		if pErr := recover(); pErr != nil {
-			err = utils.FormatRecoveredError("arrow/ipc: unknown error while writing", pErr)
+			err = w.fail(utils.FormatRecoveredError("arrow/ipc: unknown error while writing", pErr))
 		}
 	}()
+	if w.err != nil {
+		return w.err
+	}
 
 	incomingSchema := rec.Schema()
 
@@ -201,15 +229,18 @@ func (w *Writer) Write(rec arrow.RecordBatch) (err error) {
 
 	err = writeDictionaryPayloads(w.mem, rec, false, w.emitDictDeltas, &w.mapper, w.lastWrittenDicts, w.pw, enc)
 	if err != nil {
-		return fmt.Errorf("arrow/ipc: failure writing dictionary batches: %w", err)
+		return w.fail(fmt.Errorf("arrow/ipc: failure writing dictionary batches: %w", err))
 	}
 
 	enc.reset()
 	if err := enc.Encode(&data, rec); err != nil {
-		return fmt.Errorf("arrow/ipc: could not encode record to payload: %w", err)
+		return w.fail(fmt.Errorf("arrow/ipc: could not encode record to payload: %w", err))
 	}
 
-	return w.pw.WritePayload(data)
+	if err := w.pw.WritePayload(data); err != nil {
+		return w.fail(err)
+	}
+	return nil
 }
 
 func writeDictionaryPayloads(mem memory.Allocator, batch arrow.RecordBatch, isFileFormat bool, emitDictDeltas bool, mapper *dictutils.Mapper, lastWrittenDicts map[int64]arrow.Array, pw PayloadWriter, encoder *recordEncoder) error {
@@ -279,7 +310,12 @@ func writeDictionaryPayloads(mem memory.Allocator, batch arrow.RecordBatch, isFi
 }
 
 func (w *Writer) start() error {
-	w.started = true
+	if w.err != nil {
+		return w.err
+	}
+	if w.schema == nil {
+		return w.fail(fmt.Errorf("%w: cannot write IPC stream without a schema", arrow.ErrInvalid))
+	}
 
 	w.mapper.ImportSchema(w.schema)
 	w.lastWrittenDicts = make(map[int64]arrow.Array)
@@ -288,10 +324,11 @@ func (w *Writer) start() error {
 	ps := payloadFromSchema(w.schema, w.mem, &w.mapper)
 	defer ps.Release()
 
+	w.started = true
 	for _, data := range ps {
 		err := w.pw.WritePayload(data)
 		if err != nil {
-			return err
+			return w.fail(err)
 		}
 	}
 

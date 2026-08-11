@@ -49,6 +49,9 @@ func GetRefField(ref expr.ReferenceSegment, fields []arrow.Field) (*arrow.Field,
 
 	for ref != nil {
 		if len(fields) == 0 {
+			if out == nil {
+				return nil, compute.ErrNoChildren
+			}
 			return nil, fmt.Errorf("%w: %s", compute.ErrNoChildren, out.Type)
 		}
 

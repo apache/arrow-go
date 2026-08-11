@@ -17,6 +17,7 @@
 package variant_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -136,6 +137,42 @@ func TestMetadataEmptyKey(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, key)
 	assert.Equal(t, []uint32{0}, metadata.IdFor(""))
+}
+
+func TestMetadataCloneOwnsKeys(t *testing.T) {
+	var b variant.Builder
+	start := b.Offset()
+	fields := []variant.FieldEntry{b.NextField(start, "key")}
+	require.NoError(t, b.AppendNull())
+	require.NoError(t, b.FinishObject(start, fields))
+	value, err := b.Build()
+	require.NoError(t, err)
+
+	metadataBytes := bytes.Clone(value.Metadata().Bytes())
+	metadata, err := variant.NewMetadata(metadataBytes)
+	require.NoError(t, err)
+	clone := metadata.Clone()
+	clonedBytes := bytes.Clone(clone.Bytes())
+	keyOffset := bytes.Index(metadataBytes, []byte("key"))
+	require.NotEqual(t, -1, keyOffset)
+	copy(metadataBytes[keyOffset:], "bad")
+
+	key, err := clone.KeyAt(0)
+	require.NoError(t, err)
+	assert.Equal(t, "key", key)
+	assert.Equal(t, []uint32{0}, clone.IdFor("key"))
+	assert.Equal(t, clonedBytes, clone.Bytes())
+
+	copy(metadataBytes[keyOffset:], "key")
+	clone = metadata.Clone()
+	copy(clone.Bytes()[keyOffset:], "bad")
+	key, err = clone.KeyAt(0)
+	require.NoError(t, err)
+	assert.Equal(t, "bad", key)
+	assert.Equal(t, []uint32{0}, clone.IdFor("bad"))
+	key, err = metadata.KeyAt(0)
+	require.NoError(t, err)
+	assert.Equal(t, "key", key)
 }
 
 func loadVariant(t *testing.T, test string) variant.Value {

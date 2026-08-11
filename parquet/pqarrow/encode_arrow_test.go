@@ -1967,6 +1967,39 @@ func (ps *ParquetIOTestSuite) TestFixedSizeList() {
 	ps.roundTripTable(mem, tbl, true)
 }
 
+func (ps *ParquetIOTestSuite) TestFixedSizeListNullableValues() {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(ps.T(), 0)
+
+	bldr := array.NewFixedSizeListBuilder(mem, 3, arrow.PrimitiveTypes.Int16)
+	defer bldr.Release()
+	vb := bldr.ValueBuilder().(*array.Int16Builder)
+
+	bldr.AppendNull()
+	bldr.Append(true)
+	vb.AppendValues([]int16{1, 2, 3}, nil)
+	bldr.AppendNull()
+
+	data := bldr.NewArray()
+	defer data.Release()
+	field := arrow.Field{Name: "root", Type: data.DataType(), Nullable: true}
+	tbl := array.NewTableFromSlice(arrow.NewSchema([]arrow.Field{field}, nil), [][]arrow.Array{{data}})
+	defer tbl.Release()
+
+	ps.roundTripTable(mem, tbl, true)
+
+	allNullBuilder := array.NewFixedSizeListBuilder(mem, 3, arrow.PrimitiveTypes.Int16)
+	defer allNullBuilder.Release()
+	allNullBuilder.AppendNulls(2)
+	allNull := allNullBuilder.NewArray()
+	defer allNull.Release()
+	allNullField := arrow.Field{Name: "root", Type: allNull.DataType(), Nullable: true}
+	allNullTable := array.NewTableFromSlice(arrow.NewSchema([]arrow.Field{allNullField}, nil), [][]arrow.Array{{allNull}})
+	defer allNullTable.Release()
+
+	ps.roundTripTable(mem, allNullTable, true)
+}
+
 // TestFixedSizeListNullableElements verifies that FixedSizeList with nullable
 // element type correctly round-trips non-null values through Parquet.
 // This is a regression test for https://github.com/apache/arrow-go/issues/584

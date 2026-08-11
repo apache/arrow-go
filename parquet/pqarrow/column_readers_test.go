@@ -24,6 +24,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/compress"
@@ -153,6 +154,115 @@ func TestChunksToSingle(t *testing.T) {
 		defer resultArr.Release()
 		assert.Equal(t, "hello", resultArr.Value(0))
 		assert.Equal(t, "parquet", resultArr.Value(3))
+	})
+}
+
+func TestBuildFixedSizeListArrayRequiresExactChildSpan(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	tests := []struct {
+		name        string
+		length      int
+		offsets     []int32
+		nullCount   int64
+		validity    byte
+		itemLen     int
+		errContains string
+	}{
+		{name: "nonzero first offset", length: 1, offsets: []int32{1, 3}, itemLen: 3,
+			errContains: "first offset must be zero"},
+		{name: "trailing child values", length: 1, offsets: []int32{0, 2}, itemLen: 3,
+			errContains: "final offset 2 does not match decoded child length 3"},
+		{name: "final offset beyond child values", length: 1, offsets: []int32{0, 3}, itemLen: 2,
+			errContains: "final offset 3 does not match decoded child length 2"},
+		{name: "nullable trailing child values", length: 2, offsets: []int32{0, 2, 2}, nullCount: 1, validity: 0x01, itemLen: 3,
+			errContains: "final offset 2 does not match decoded child length 3"},
+		{name: "valid parent with wrong child span", length: 2, offsets: []int32{0, 1, 2}, itemLen: 2,
+			errContains: "index 0 had size=1"},
+		{name: "null parent consumes child values", length: 2, offsets: []int32{0, 1, 1}, nullCount: 2, itemLen: 1,
+			errContains: "null fixed-size list at index 0 consumed 1 child values"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			listType := arrow.FixedSizeListOf(2, arrow.PrimitiveTypes.Int32)
+			field := arrow.Field{Type: listType, Nullable: true}
+			lr := &listReader{rctx: &readerCtx{mem: mem}, field: &field}
+
+			builder := array.NewInt32Builder(mem)
+			builder.AppendValues(make([]int32, tc.itemLen), nil)
+			item := builder.NewArray()
+			defer item.Release()
+			builder.Release()
+
+			var validity *memory.Buffer
+			if tc.nullCount > 0 {
+				validity = memory.NewBufferBytes([]byte{tc.validity})
+				defer validity.Release()
+			}
+
+			out, err := lr.buildFixedSizeListArray(tc.length, tc.offsets, validity, tc.nullCount, item)
+			if out != nil {
+				out.Release()
+			}
+			require.ErrorContains(t, err, tc.errContains)
+		})
+	}
+}
+
+func TestBuildFixedSizeListArrayConcatenatesSpecializedChildren(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	build := func(t *testing.T, item arrow.Array) arrow.Array {
+		t.Helper()
+		listType := arrow.FixedSizeListOf(2, item.DataType())
+		field := arrow.Field{Type: listType, Nullable: true}
+		lr := &listReader{rctx: &readerCtx{mem: mem}, field: &field}
+		validity := memory.NewBufferBytes([]byte{0x01})
+		defer validity.Release()
+
+		out, err := lr.buildFixedSizeListArray(2, []int32{0, 2, 2}, validity, 1, item)
+		require.NoError(t, err)
+		t.Cleanup(out.Release)
+
+		list := out.Chunk(0).(*array.FixedSizeList)
+		assert.False(t, list.IsNull(0))
+		assert.True(t, list.IsNull(1))
+		require.Equal(t, 4, list.ListValues().Len())
+		return list.ListValues()
+	}
+
+	t.Run("dictionary", func(t *testing.T) {
+		dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+		item, err := array.DictArrayFromJSON(mem, dictType, `[0, 1]`, `["one", "two"]`)
+		require.NoError(t, err)
+		defer item.Release()
+
+		values := build(t, item).(*array.Dictionary)
+		assert.Equal(t, "one", values.ValueStr(0))
+		assert.Equal(t, "two", values.ValueStr(1))
+		assert.True(t, values.IsNull(2))
+		assert.True(t, values.IsNull(3))
+	})
+
+	t.Run("extension", func(t *testing.T) {
+		extType, err := extensions.NewJSONType(arrow.BinaryTypes.String)
+		require.NoError(t, err)
+		builder := array.NewExtensionBuilder(mem, extType)
+		defer builder.Release()
+		builder.StorageBuilder().(*array.StringBuilder).AppendValues([]string{`{"one": 1}`, `{"two": 2}`}, nil)
+		item := builder.NewArray()
+		defer item.Release()
+
+		values := build(t, item).(array.ExtensionArray)
+		assert.True(t, arrow.TypeEqual(extType, values.DataType()))
+		storage := values.Storage().(*array.String)
+		assert.Equal(t, `{"one": 1}`, storage.Value(0))
+		assert.Equal(t, `{"two": 2}`, storage.Value(1))
+		assert.True(t, storage.IsNull(2))
+		assert.True(t, storage.IsNull(3))
 	})
 }
 

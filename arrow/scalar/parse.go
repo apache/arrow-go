@@ -55,15 +55,21 @@ func FromScalar(sc *Struct, val interface{}) error {
 		return nil
 	}
 
+	v := reflect.ValueOf(val)
+	if v.Kind() == reflect.Ptr && v.IsNil() {
+		return errors.New("fromscalar must be given a non-nil pointer to an object to populate")
+	}
 	if v, ok := val.(TypeFromScalar); ok {
 		return v.FromStructScalar(sc)
 	}
 
-	v := reflect.ValueOf(val)
 	if v.Kind() != reflect.Ptr {
 		return errors.New("fromscalar must be given a pointer to an object to populate")
 	}
-	value := reflect.Indirect(v)
+	value := v.Elem()
+	if value.Kind() != reflect.Struct {
+		return errors.New("fromscalar must be given a pointer to a struct to populate")
+	}
 
 	for i := 0; i < value.Type().NumField(); i++ {
 		fld := value.Type().Field(i)
@@ -134,6 +140,17 @@ func ToScalar(val interface{}, mem memory.Allocator) (Scalar, error) {
 	case reflect.Struct:
 		scalars := make([]Scalar, 0, v.Type().NumField())
 		fields := make([]string, 0, v.Type().NumField())
+		success := false
+		defer func() {
+			if success {
+				return
+			}
+			for _, child := range scalars {
+				if releasable, ok := child.(Releasable); ok {
+					releasable.Release()
+				}
+			}
+		}()
 		for i := 0; i < v.Type().NumField(); i++ {
 			fld := v.Type().Field(i)
 			tag := fld.Tag.Get("compute")
@@ -156,7 +173,12 @@ func ToScalar(val interface{}, mem memory.Allocator) (Scalar, error) {
 			fields = append(fields, "_type_name")
 		}
 
-		return NewStructScalarWithNames(scalars, fields)
+		out, err := NewStructScalarWithNames(scalars, fields)
+		if err != nil {
+			return nil, err
+		}
+		success = true
+		return out, nil
 	case reflect.Slice:
 		return createListScalar(v, mem)
 	default:
@@ -345,8 +367,8 @@ func fromListScalar(s ListScalar, v reflect.Value) error {
 			start := o
 			end := offsets[i+1]
 
-			metaKeys = make([]string, end-start)
-			metaValues = make([]string, end-start)
+			metaKeys = make([]string, 0, end-start)
+			metaValues = make([]string, 0, end-start)
 			for j := start; j < end; j++ {
 				metaKeys = append(metaKeys, keys.ValueString(int(j)))
 				metaValues = append(metaValues, values.ValueString(int(j)))
