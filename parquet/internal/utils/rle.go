@@ -239,6 +239,48 @@ func (r *RleDecoder) GetBatch(values []uint64) (int, error) {
 	return read, nil
 }
 
+// GetBatchLevels decodes levels directly into values and returns the number
+// equal to maxLevel.
+func (r *RleDecoder) GetBatchLevels(values []int16, maxLevel int16) (int, int64, error) {
+	read := 0
+	var maxCount int64
+	out := values
+	for read < len(values) {
+		remain := len(values) - read
+
+		if r.repCount > 0 {
+			repbatch := min(remain, int(r.repCount))
+			level := int16(r.curVal)
+			for i := range out[:repbatch] {
+				out[i] = level
+			}
+			if level == maxLevel {
+				maxCount += int64(repbatch)
+			}
+
+			r.repCount -= int32(repbatch)
+			read += repbatch
+			out = out[repbatch:]
+		} else if r.litCount > 0 {
+			litbatch := min(remain, int(r.litCount))
+			n, count, err := r.r.GetBatchLevels(uint(r.bitWidth), out[:litbatch], maxLevel)
+			r.litCount -= int32(n)
+			read += n
+			maxCount += count
+			out = out[n:]
+			if err != nil {
+				return read, maxCount, err
+			}
+			if n != litbatch {
+				return read, maxCount, nil
+			}
+		} else if !r.Next() {
+			return read, maxCount, nil
+		}
+	}
+	return read, maxCount, nil
+}
+
 func (r *RleDecoder) GetBatchSpaced(vals []uint64, nullcount int, validBits []byte, validBitsOffset int64) (int, error) {
 	if nullcount == 0 {
 		return r.GetBatch(vals)
