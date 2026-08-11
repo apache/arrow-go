@@ -240,7 +240,7 @@ func (b *baseDecimalBuilder[T]) AppendNulls(n int) {
 		return
 	}
 	b.Reserve(n)
-	b.builder.unsafeAppendNulls(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *baseDecimalBuilder[T]) AppendEmptyValue() {

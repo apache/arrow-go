@@ -191,7 +191,7 @@ func (b *MonthIntervalBuilder) AppendNulls(n int) {
 		return
 	}
 	b.Reserve(n)
-	b.builder.unsafeAppendNulls(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *MonthIntervalBuilder) AppendEmptyValue() {
@@ -513,7 +513,7 @@ func (b *DayTimeIntervalBuilder) AppendNulls(n int) {
 		return
 	}
 	b.Reserve(n)
-	b.builder.unsafeAppendNulls(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *DayTimeIntervalBuilder) AppendEmptyValue() {
@@ -838,7 +838,7 @@ func (b *MonthDayNanoIntervalBuilder) AppendNulls(n int) {
 		return
 	}
 	b.Reserve(n)
-	b.builder.unsafeAppendNulls(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *MonthDayNanoIntervalBuilder) AppendEmptyValue() {
