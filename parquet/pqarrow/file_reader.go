@@ -463,7 +463,7 @@ func (fr *FileReader) ReadRowGroups(ctx context.Context, indices, rowGroups []in
 
 func (fr *FileReader) getColumnReader(ctx context.Context, i int, colFactory itrFactory) (*ColumnReader, error) {
 	if i < 0 || i >= len(fr.Manifest.Fields) {
-		return nil, fmt.Errorf("invalid column index chosen %d, there are only %d columns", i, len(fr.Manifest.Fields))
+		return nil, fmt.Errorf("%w: invalid column index chosen %d, there are only %d columns", arrow.ErrIndex, i, len(fr.Manifest.Fields))
 	}
 
 	ctx = context.WithValue(ctx, rdrCtxKey{}, readerCtx{

@@ -639,6 +639,8 @@ func TestFileReaderIndexValidation(t *testing.T) {
 	require.NoError(t, err)
 	fieldReader.Release()
 
+	_, err = arrowReader.GetColumn(context.Background(), -1)
+	require.ErrorIs(t, err, arrow.ErrIndex)
 	columnReader, err := arrowReader.GetColumn(context.Background(), 0)
 	require.NoError(t, err)
 	defer columnReader.Release()
