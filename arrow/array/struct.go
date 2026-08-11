@@ -280,6 +280,18 @@ func (a *Struct) GetOneForMarshal(i int) interface{} {
 	return tmp
 }
 
+func (a *Struct) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+	tmp := make(map[string]any)
+	fieldList := a.data.dtype.(*arrow.StructType).Fields()
+	for j, d := range a.fields {
+		tmp[fieldList[j].Name] = d.ValueAsAny(i)
+	}
+	return tmp
+}
+
 func (a *Struct) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

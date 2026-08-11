@@ -101,6 +101,13 @@ func (a *MonthInterval) GetOneForMarshal(i int) interface{} {
 	return nil
 }
 
+func (a *MonthInterval) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+	return a.Value(i)
+}
+
 // MarshalJSON will create a json array out of a MonthInterval array,
 // each value will be an object of the form {"months": #} where
 // # is the numeric value of that index
@@ -406,6 +413,13 @@ func (a *DayTimeInterval) GetOneForMarshal(i int) interface{} {
 	return nil
 }
 
+func (a *DayTimeInterval) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+	return a.Value(i)
+}
+
 // MarshalJSON will marshal this array to JSON as an array of objects,
 // consisting of the form {"days": #, "milliseconds": #} for each element.
 func (a *DayTimeInterval) MarshalJSON() ([]byte, error) {
@@ -708,6 +722,13 @@ func (a *MonthDayNanoInterval) GetOneForMarshal(i int) interface{} {
 		return a.values[i]
 	}
 	return nil
+}
+
+func (a *MonthDayNanoInterval) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+	return a.Value(i)
 }
 
 // MarshalJSON will marshal this array to a JSON array with elements

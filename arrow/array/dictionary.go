@@ -295,6 +295,13 @@ func (d *Dictionary) GetOneForMarshal(i int) interface{} {
 	return d.Dictionary().GetOneForMarshal(vidx)
 }
 
+func (d *Dictionary) ValueAsAny(i int) any {
+	if d.IsNull(i) {
+		return nil
+	}
+	return d.Dictionary().ValueAsAny(d.GetValueIndex(i))
+}
+
 func (d *Dictionary) MarshalJSON() ([]byte, error) {
 	vals := make([]any, d.Len())
 	for i := range d.Len() {

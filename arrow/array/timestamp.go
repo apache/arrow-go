@@ -116,6 +116,13 @@ func (a *Timestamp) GetOneForMarshal(i int) interface{} {
 	return nil
 }
 
+func (a *Timestamp) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+	return a.Value(i)
+}
+
 func (a *Timestamp) MarshalJSON() ([]byte, error) {
 	vals := make([]interface{}, a.Len())
 	for i := range a.values {

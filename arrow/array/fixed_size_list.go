@@ -140,6 +140,10 @@ func (a *FixedSizeList) GetOneForMarshal(i int) interface{} {
 	return json.RawMessage(v)
 }
 
+func (a *FixedSizeList) ValueAsAny(i int) any {
+	return valueAsAnyFromListLike(a, i)
+}
+
 func (a *FixedSizeList) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

@@ -332,6 +332,13 @@ func (r *RunEndEncoded) GetOneForMarshal(i int) interface{} {
 	return r.values.GetOneForMarshal(r.GetPhysicalIndex(i))
 }
 
+func (r *RunEndEncoded) ValueAsAny(i int) any {
+	if r.IsNull(i) {
+		return nil
+	}
+	return r.values.ValueAsAny(r.GetPhysicalIndex(i))
+}
+
 func (r *RunEndEncoded) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
