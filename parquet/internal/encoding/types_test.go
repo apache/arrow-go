@@ -29,6 +29,7 @@ func TestBufferWriterOffset(t *testing.T) {
 	defer writer.Release()
 
 	writer.SetOffset(1024)
+	require.Zero(t, writer.Cap())
 	require.Zero(t, writer.Len())
 
 	n, err := writer.Write([]byte("hello"))

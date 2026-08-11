@@ -360,6 +360,7 @@ func (b *BufferWriter) Len() int {
 
 // Cap returns the current capacity of the underlying buffer
 func (b *BufferWriter) Cap() int {
+	b.ensureOffset()
 	return b.buffer.Cap() - b.offset
 }
 
