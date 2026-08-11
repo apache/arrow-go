@@ -42,17 +42,18 @@ func unpack32Avx2(in io.Reader, out []uint32, nbits int) (int, error) {
 	defer bufferPool.Put(buffer)
 	buffer.Reset()
 	buffer.Grow(n)
-	nread, err := io.CopyN(buffer, in, int64(n))
-	if err == io.EOF && int(nread)%(nbits*4) != 0 {
-		err = io.ErrUnexpectedEOF
+	packed := buffer.AvailableBuffer()[:n]
+	nread, err := io.ReadFull(in, packed)
+	if err == io.ErrUnexpectedEOF && nread%(nbits*4) == 0 {
+		err = io.EOF
 	}
-	completeBatch := int(nread) * 8 / nbits / 32 * 32
+	completeBatch := nread * 8 / nbits / 32 * 32
 	if completeBatch == 0 {
 		return 0, err
 	}
 
 	var (
-		input  = unsafe.Pointer(&buffer.Bytes()[0])
+		input  = unsafe.Pointer(&packed[0])
 		output = unsafe.Pointer(&out[0])
 	)
 

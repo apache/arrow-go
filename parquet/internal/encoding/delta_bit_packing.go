@@ -181,22 +181,22 @@ func (d *deltaBitPackDecoder[T]) unpackNextMini() error {
 			d.miniBlockValues = append(d.miniBlockValues, T(d.lastVal))
 		}
 	} else {
-		if cap(d.deltaBuf) < 1 {
-			d.deltaBuf = make([]uint64, 1)
+		if cap(d.deltaBuf) < n {
+			d.deltaBuf = make([]uint64, n)
 		}
-		d.deltaBuf = d.deltaBuf[:1]
+		d.deltaBuf = d.deltaBuf[:n]
 		minDelta := d.minDelta
 
-		for j := 0; j < n; j++ {
-			nread, err := d.bitdecoder.GetBatch(width, d.deltaBuf)
-			if err != nil {
-				return err
-			}
-			if nread != 1 {
-				return errors.New("parquet: eof exception")
-			}
+		nread, err := d.bitdecoder.GetBatch(width, d.deltaBuf)
+		if err != nil {
+			return err
+		}
+		if nread != n {
+			return errors.New("parquet: eof exception")
+		}
 
-			d.lastVal += int64(d.deltaBuf[0]) + minDelta
+		for _, delta := range d.deltaBuf {
+			d.lastVal += int64(delta) + minDelta
 			d.miniBlockValues = append(d.miniBlockValues, T(d.lastVal))
 		}
 	}
