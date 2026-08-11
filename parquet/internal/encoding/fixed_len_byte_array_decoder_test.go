@@ -1,0 +1,164 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package encoding
+
+import (
+	"fmt"
+	"testing"
+	"unsafe"
+
+	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/schema"
+	"github.com/stretchr/testify/require"
+)
+
+func TestByteStreamSplitFixedLenByteArrayDecoderContiguousOutput(t *testing.T) {
+	for _, width := range []int{2, 4, 8, 16, 32} {
+		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
+			values := makeFixedLenByteArrayValues(8, width, 0)
+			decoder := newByteStreamSplitFixedLenByteArrayDecoder(t, width, values)
+
+			out := make([]parquet.FixedLenByteArray, len(values))
+			decoded, err := decoder.Decode(out)
+			require.NoError(t, err)
+			require.Equal(t, len(values), decoded)
+			require.Equal(t, values, out)
+
+			for idx := range out {
+				require.Equal(t, width, cap(out[idx]))
+				if idx > 0 {
+					previous := uintptr(unsafe.Pointer(&out[idx-1][0]))
+					current := uintptr(unsafe.Pointer(&out[idx][0]))
+					require.Equal(t, uintptr(width), current-previous)
+				}
+			}
+		})
+	}
+}
+
+func TestByteStreamSplitFixedLenByteArrayDecoderReusesProvidedOutput(t *testing.T) {
+	const width = 16
+	values := makeFixedLenByteArrayValues(4, width, 0)
+	decoder := newByteStreamSplitFixedLenByteArrayDecoder(t, width, values)
+
+	out := []parquet.FixedLenByteArray{
+		make([]byte, 0, width+4),
+		nil,
+		make([]byte, width),
+		nil,
+	}
+	firstPtr := unsafe.Pointer(unsafe.SliceData(out[0]))
+	thirdPtr := unsafe.Pointer(unsafe.SliceData(out[2]))
+
+	decoded, err := decoder.Decode(out)
+	require.NoError(t, err)
+	require.Equal(t, len(values), decoded)
+	require.Equal(t, values, out)
+	require.Equal(t, firstPtr, unsafe.Pointer(unsafe.SliceData(out[0])))
+	require.Equal(t, thirdPtr, unsafe.Pointer(unsafe.SliceData(out[2])))
+	require.Equal(t, uintptr(width),
+		uintptr(unsafe.Pointer(&out[3][0]))-uintptr(unsafe.Pointer(&out[1][0])))
+}
+
+func TestByteStreamSplitFixedLenByteArrayDecoderKeepsPreviousOutput(t *testing.T) {
+	const width = 16
+	firstValues := makeFixedLenByteArrayValues(4, width, 0)
+	decoder := newByteStreamSplitFixedLenByteArrayDecoder(t, width, firstValues)
+
+	firstOut := make([]parquet.FixedLenByteArray, len(firstValues))
+	_, err := decoder.Decode(firstOut)
+	require.NoError(t, err)
+
+	secondValues := makeFixedLenByteArrayValues(4, width, 100)
+	require.NoError(t, decoder.SetData(len(secondValues), encodeByteStreamSplitFixedLenByteArray(secondValues, width)))
+	secondOut := make([]parquet.FixedLenByteArray, len(secondValues))
+	_, err = decoder.Decode(secondOut)
+	require.NoError(t, err)
+
+	require.Equal(t, firstValues, firstOut)
+	require.Equal(t, secondValues, secondOut)
+}
+
+func TestByteStreamSplitFixedLenByteArrayDecoderPartialOutput(t *testing.T) {
+	const width = 8
+	values := makeFixedLenByteArrayValues(3, width, 0)
+	decoder := newByteStreamSplitFixedLenByteArrayDecoder(t, width, values)
+
+	sentinel := parquet.FixedLenByteArray("sentinel")
+	out := make([]parquet.FixedLenByteArray, 5)
+	out[3] = sentinel
+	out[4] = sentinel
+
+	decoded, err := decoder.Decode(out)
+	require.NoError(t, err)
+	require.Equal(t, len(values), decoded)
+	require.Equal(t, values, out[:decoded])
+	require.Equal(t, unsafe.Pointer(&sentinel[0]), unsafe.Pointer(&out[3][0]))
+	require.Equal(t, unsafe.Pointer(&sentinel[0]), unsafe.Pointer(&out[4][0]))
+}
+
+func TestByteStreamSplitFixedLenByteArrayDecoderSpacedOutput(t *testing.T) {
+	const width = 8
+	values := makeFixedLenByteArrayValues(3, width, 0)
+	decoder := newByteStreamSplitFixedLenByteArrayDecoder(t, width, values)
+	out := make([]parquet.FixedLenByteArray, 5)
+
+	decoded, err := decoder.DecodeSpaced(out, 2, []byte{0b00010101}, 0)
+	require.NoError(t, err)
+	require.Equal(t, len(out), decoded)
+	require.Equal(t, values[0], out[0])
+	require.Equal(t, values[1], out[2])
+	require.Equal(t, values[2], out[4])
+
+	first := uintptr(unsafe.Pointer(&out[0][0]))
+	second := uintptr(unsafe.Pointer(&out[2][0]))
+	third := uintptr(unsafe.Pointer(&out[4][0]))
+	require.Equal(t, uintptr(width), second-first)
+	require.Equal(t, uintptr(width), third-second)
+}
+
+func newByteStreamSplitFixedLenByteArrayDecoder(t *testing.T, width int, values []parquet.FixedLenByteArray) FixedLenByteArrayDecoder {
+	t.Helper()
+
+	node := schema.NewFixedLenByteArrayNode("value", parquet.Repetitions.Required, int32(width), -1)
+	column := schema.NewColumn(node, 0, 0)
+	decoder := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.ByteStreamSplit, column, memory.DefaultAllocator).(FixedLenByteArrayDecoder)
+	require.NoError(t, decoder.SetData(len(values), encodeByteStreamSplitFixedLenByteArray(values, width)))
+	return decoder
+}
+
+func makeFixedLenByteArrayValues(length, width int, offset byte) []parquet.FixedLenByteArray {
+	values := make([]parquet.FixedLenByteArray, length)
+	for valueIdx := range values {
+		values[valueIdx] = make(parquet.FixedLenByteArray, width)
+		for byteIdx := range values[valueIdx] {
+			values[valueIdx][byteIdx] = offset + byte(valueIdx*width+byteIdx)
+		}
+	}
+	return values
+}
+
+func encodeByteStreamSplitFixedLenByteArray(values []parquet.FixedLenByteArray, width int) []byte {
+	data := make([]byte, len(values)*width)
+	for valueIdx, value := range values {
+		for byteIdx, valueByte := range value {
+			data[byteIdx*len(values)+valueIdx] = valueByte
+		}
+	}
+	return data
+}

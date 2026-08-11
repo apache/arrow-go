@@ -635,6 +635,46 @@ func BenchmarkByteStreamSplitDecodingFixedLenByteArray(b *testing.B) {
 	}
 }
 
+func BenchmarkByteStreamSplitDecodingFixedLenByteArrayColdOutput(b *testing.B) {
+	for _, width := range []int{2, 4, 8, 16, 32} {
+		for _, size := range []int{MINSIZE, MAXSIZE} {
+			b.Run(fmt.Sprintf("width %d/len %d", width, size), func(b *testing.B) {
+				values := make([]parquet.FixedLenByteArray, size)
+				for idx := range values {
+					values[idx] = make(parquet.FixedLenByteArray, width)
+					for byteIdx := range values[idx] {
+						values[idx][byteIdx] = byte(idx + byteIdx)
+					}
+				}
+
+				col := schema.NewColumn(schema.NewFixedLenByteArrayNode("fixedlenbytearray", parquet.Repetitions.Required, int32(width), -1), 0, 0)
+				encoder := encoding.NewEncoder(parquet.Types.FixedLenByteArray, parquet.Encodings.ByteStreamSplit,
+					false, col, memory.DefaultAllocator).(encoding.FixedLenByteArrayEncoder)
+				encoder.Put(values)
+				buf, err := encoder.FlushValues()
+				if err != nil {
+					b.Fatal(err)
+				}
+				defer buf.Release()
+
+				decoder := encoding.NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.ByteStreamSplit, col, memory.DefaultAllocator)
+				b.ReportAllocs()
+				b.SetBytes(int64(size * width))
+				b.ResetTimer()
+				for b.Loop() {
+					output := make([]parquet.FixedLenByteArray, size)
+					if err := decoder.SetData(size, buf.Bytes()); err != nil {
+						b.Fatal(err)
+					}
+					if _, err := decoder.(encoding.FixedLenByteArrayDecoder).Decode(output); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
+	}
+}
+
 func BenchmarkDeltaBinaryPackedEncodingInt32(b *testing.B) {
 	for sz := MINSIZE; sz < MAXSIZE+1; sz *= 2 {
 		b.Run(fmt.Sprintf("len %d", sz), func(b *testing.B) {

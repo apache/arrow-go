@@ -173,11 +173,18 @@ func (dec *ByteStreamSplitFixedLenByteArrayDecoder) Decode(out []parquet.FixedLe
 		return 0, errors.New("parquet: eof exception")
 	}
 
-	for i := range out {
-		if cap(out[i]) < dec.typeLen {
-			out[i] = make(parquet.FixedLenByteArray, dec.typeLen)
+	output := out[:toRead]
+	// Lazily allocate one backing buffer while continuing to reuse caller-provided storage.
+	var storage []byte
+	for idx := range output {
+		if cap(output[idx]) < dec.typeLen {
+			if storage == nil {
+				storage = make([]byte, (len(output)-idx)*dec.typeLen)
+			}
+			output[idx] = storage[:dec.typeLen:dec.typeLen]
+			storage = storage[dec.typeLen:]
 		} else {
-			out[i] = out[i][:dec.typeLen]
+			output[idx] = output[idx][:dec.typeLen]
 		}
 	}
 
