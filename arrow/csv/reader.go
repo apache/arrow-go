@@ -61,6 +61,7 @@ type Reader struct {
 	columnFilter   []string
 	columnTypes    map[string]arrow.DataType
 	conversions    []conversionColumn
+	pendingRecord  []string
 
 	stringsCanBeNull bool
 	nulls            []string
@@ -214,6 +215,9 @@ func (r *Reader) readHeader() error {
 		r.columnFilter = nil
 	}
 	r.columnTypes = nil
+	if !r.header {
+		r.pendingRecord = append([]string(nil), records...)
+	}
 	return nil
 }
 
@@ -272,7 +276,7 @@ func (r *Reader) Next() bool {
 // from that row.
 func (r *Reader) next1() bool {
 	var recs []string
-	recs, r.err = r.r.Read()
+	recs, r.err = r.readRecord()
 	if r.err != nil {
 		r.done = true
 		if errors.Is(r.err, io.EOF) {
@@ -296,11 +300,17 @@ func (r *Reader) nextall() bool {
 	}()
 
 	var recs [][]string
+	if r.pendingRecord != nil {
+		recs = append(recs, r.pendingRecord)
+		r.pendingRecord = nil
+	}
 
-	recs, r.err = r.r.ReadAll()
+	var remaining [][]string
+	remaining, r.err = r.r.ReadAll()
 	if r.err != nil {
 		return false
 	}
+	recs = append(recs, remaining...)
 
 	for _, rec := range recs {
 		r.validate(rec)
@@ -321,7 +331,7 @@ func (r *Reader) nextn() bool {
 	)
 
 	for i := 0; i < r.chunk && !r.done; i++ {
-		recs, err = r.r.Read()
+		recs, err = r.readRecord()
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
 				r.err = err
@@ -341,6 +351,15 @@ func (r *Reader) nextn() bool {
 
 	r.cur = r.bld.NewRecordBatch()
 	return n > 0
+}
+
+func (r *Reader) readRecord() ([]string, error) {
+	if r.pendingRecord != nil {
+		record := r.pendingRecord
+		r.pendingRecord = nil
+		return record, nil
+	}
+	return r.r.Read()
 }
 
 func (r *Reader) validate(recs []string) {
