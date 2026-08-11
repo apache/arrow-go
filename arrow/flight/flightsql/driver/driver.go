@@ -471,6 +471,8 @@ type Connection struct {
 	timeout time.Duration
 }
 
+var _ driver.ConnBeginTx = (*Connection)(nil)
+
 // Prepare returns a prepared statement, bound to this connection.
 func (c *Connection) Prepare(query string) (driver.Stmt, error) {
 	return c.PrepareContext(context.Background(), query)
@@ -620,11 +622,11 @@ func (c *Connection) Close() error {
 
 // Begin starts and returns a new transaction.
 func (c *Connection) Begin() (driver.Tx, error) {
-	return c.BeginTx(context.Background(), sql.TxOptions{})
+	return c.BeginTx(context.Background(), driver.TxOptions{})
 }
 
-func (c *Connection) BeginTx(ctx context.Context, opts sql.TxOptions) (driver.Tx, error) {
-	if opts.Isolation != sql.LevelDefault || opts.ReadOnly {
+func (c *Connection) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	if opts.Isolation != driver.IsolationLevel(sql.LevelDefault) || opts.ReadOnly {
 		return nil, fmt.Errorf("%w: transaction options are not supported", ErrNotSupported)
 	}
 

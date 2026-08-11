@@ -19,20 +19,34 @@ package driver_test
 import (
 	"context"
 	"database/sql"
+	sqldriver "database/sql/driver"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/flight/flightsql/driver"
 	"github.com/stretchr/testify/require"
 )
 
+type connectionConnector struct{}
+
+func (connectionConnector) Connect(context.Context) (sqldriver.Conn, error) {
+	return &driver.Connection{}, nil
+}
+
+func (connectionConnector) Driver() sqldriver.Driver {
+	return &driver.Driver{}
+}
+
 func TestBeginTxRejectsUnsupportedOptions(t *testing.T) {
-	conn := &driver.Connection{}
+	db := sql.OpenDB(connectionConnector{})
+	t.Cleanup(func() {
+		require.NoError(t, db.Close())
+	})
 
 	for _, opts := range []sql.TxOptions{
 		{Isolation: sql.LevelSerializable},
 		{ReadOnly: true},
 	} {
-		_, err := conn.BeginTx(context.Background(), opts)
+		_, err := db.BeginTx(context.Background(), &opts)
 		require.ErrorIs(t, err, driver.ErrNotSupported)
 	}
 }
