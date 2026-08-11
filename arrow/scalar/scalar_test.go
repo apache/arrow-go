@@ -1410,6 +1410,11 @@ func (v valueFromScalarTarget) FromStructScalar(*scalar.Struct) error {
 	return nil
 }
 
+type PartialScalarTest struct {
+	Good []string
+	Bad  []complex64
+}
+
 func TestToScalar(t *testing.T) {
 	ot := &OptionValTest{ToType: arrow.BinaryTypes.String, Allow: true}
 	sc, err := scalar.ToScalar(ot, memory.DefaultAllocator)
@@ -1513,6 +1518,17 @@ func TestFromScalarMetadataDoesNotPrependEmptyEntries(t *testing.T) {
 	require.NotNil(t, out.FieldMeta[0])
 	assert.Equal(t, meta.Keys(), out.FieldMeta[0].Keys())
 	assert.Equal(t, meta.Values(), out.FieldMeta[0].Values())
+}
+
+func TestToScalarReleasesPartialStructOnError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	_, err := scalar.ToScalar(PartialScalarTest{
+		Good: []string{"retained before error"},
+		Bad:  []complex64{complex(1, 2)},
+	}, mem)
+	require.Error(t, err)
 }
 
 var dictIndexTypes = []arrow.DataType{
