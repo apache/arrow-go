@@ -354,7 +354,7 @@ func (tr *TableReader) Next() bool {
 	}
 
 	// determine the minimum contiguous slice across all columns
-	chunksz := imin64(tr.max, tr.chksz)
+	chunksz := imin64(tr.max-tr.cur, tr.chksz)
 	chunks := make([]arrow.Array, len(tr.chunks))
 	for i := range chunks {
 		j := tr.slots[i]
