@@ -613,6 +613,52 @@ func TestArrayEqualBaseArray(t *testing.T) {
 	}
 }
 
+func TestArrayEqualFloatingPointSemantics(t *testing.T) {
+	negativeZero := math.Copysign(0, -1)
+	tests := []struct {
+		name  string
+		left  interface{}
+		right interface{}
+		want  bool
+	}{
+		{"float16 signed zero", []float16.Num{float16.New(0)}, []float16.Num{float16.New(float32(negativeZero))}, false},
+		{"float16 NaN", []float16.Num{float16.New(float32(math.NaN()))}, []float16.Num{float16.New(float32(math.NaN()))}, true},
+		{"float32 signed zero", []float32{0}, []float32{float32(negativeZero)}, true},
+		{"float32 NaN", []float32{float32(math.NaN())}, []float32{float32(math.NaN())}, false},
+		{"float64 signed zero", []float64{0}, []float64{negativeZero}, true},
+		{"float64 NaN", []float64{math.NaN()}, []float64{math.NaN()}, false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			left := arrayOf(nil, test.left, nil)
+			defer left.Release()
+			right := arrayOf(nil, test.right, nil)
+			defer right.Release()
+
+			assert.Equal(t, test.want, array.Equal(left, right))
+		})
+	}
+}
+
+func TestArrayEqualFixedWidthIgnoresNullValues(t *testing.T) {
+	valid := []bool{true, false, true}
+
+	leftBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+	defer leftBuilder.Release()
+	leftBuilder.AppendValues([]int64{1, 111, 3}, valid)
+	left := leftBuilder.NewInt64Array()
+	defer left.Release()
+
+	rightBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+	defer rightBuilder.Release()
+	rightBuilder.AppendValues([]int64{1, 222, 3}, valid)
+	right := rightBuilder.NewInt64Array()
+	defer right.Release()
+
+	assert.True(t, array.Equal(left, right))
+}
+
 func TestArrayEqualNull(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)

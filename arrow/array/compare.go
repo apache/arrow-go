@@ -21,6 +21,7 @@ import (
 	"math"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
 )
@@ -264,13 +265,13 @@ func Equal(left, right arrow.Array) bool {
 		return arrayEqualFixedWidth(l, r)
 	case *Float16:
 		r := right.(*Float16)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidthScalar(l, r)
 	case *Float32:
 		r := right.(*Float32)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidthScalar(l, r)
 	case *Float64:
 		r := right.(*Float64)
-		return arrayEqualFixedWidth(l, r)
+		return arrayEqualFixedWidthScalar(l, r)
 	case *Decimal32:
 		r := right.(*Decimal32)
 		return arrayEqualDecimal(l, r)
@@ -631,17 +632,28 @@ func baseArrayEqual(left, right arrow.Array) bool {
 }
 
 func validityBitmapEqual(left, right arrow.Array) bool {
-	// TODO(alexandreyc): make it faster by comparing byte slices of the validity bitmap?
-	n := left.Len()
-	if n != right.Len() {
+	if left.Len() != right.Len() {
 		return false
 	}
-	for i := 0; i < n; i++ {
-		if left.IsNull(i) != right.IsNull(i) {
-			return false
-		}
+	if left.NullN() == 0 {
+		return true
 	}
-	return true
+
+	leftBitmap := left.NullBitmapBytes()
+	rightBitmap := right.NullBitmapBytes()
+	if len(leftBitmap) == 0 || len(rightBitmap) == 0 {
+		for i := range left.Len() {
+			if left.IsNull(i) != right.IsNull(i) {
+				return false
+			}
+		}
+		return true
+	}
+
+	return bitutil.BitmapEquals(
+		leftBitmap, rightBitmap,
+		int64(left.Data().Offset()), int64(right.Data().Offset()), int64(left.Len()),
+	)
 }
 
 func arrayApproxEqualString(left, right *String) bool {
