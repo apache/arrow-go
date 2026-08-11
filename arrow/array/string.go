@@ -232,15 +232,21 @@ func (a *String) ValidateFull() error {
 }
 
 func arrayEqualString(left, right *String) bool {
-	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
-			continue
+	if useScalarVariableWidthEquality(left) {
+		for i := range left.Len() {
+			if !left.IsNull(i) && left.Value(i) != right.Value(i) {
+				return false
+			}
 		}
-		if left.Value(i) != right.Value(i) {
-			return false
-		}
+		return true
 	}
-	return true
+	return arrayEqualVariableWidth(
+		left.offsets, right.offsets,
+		left.values, right.values,
+		left.Offset(), right.Offset(), left.Len(),
+		left.NullN(), left.NullBitmapBytes(),
+		equalStrings,
+	)
 }
 
 // String represents an immutable sequence of variable-length UTF-8 strings.
@@ -436,15 +442,25 @@ func (a *LargeString) ValidateFull() error {
 }
 
 func arrayEqualLargeString(left, right *LargeString) bool {
-	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
-			continue
+	if useScalarVariableWidthEquality(left) {
+		for i := range left.Len() {
+			if !left.IsNull(i) && left.Value(i) != right.Value(i) {
+				return false
+			}
 		}
-		if left.Value(i) != right.Value(i) {
-			return false
-		}
+		return true
 	}
-	return true
+	return arrayEqualVariableWidth(
+		left.offsets, right.offsets,
+		left.values, right.values,
+		left.Offset(), right.Offset(), left.Len(),
+		left.NullN(), left.NullBitmapBytes(),
+		equalStrings,
+	)
+}
+
+func equalStrings(left, right string) bool {
+	return left == right
 }
 
 type StringView struct {

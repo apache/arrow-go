@@ -25,6 +25,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/internal/bitutils"
 	"github.com/apache/arrow-go/v18/internal/json"
 )
 
@@ -224,15 +225,21 @@ func (a *Binary) ValidateFull() error {
 }
 
 func arrayEqualBinary(left, right *Binary) bool {
-	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
-			continue
+	if useScalarVariableWidthEquality(left) {
+		for i := range left.Len() {
+			if !left.IsNull(i) && !bytes.Equal(left.Value(i), right.Value(i)) {
+				return false
+			}
 		}
-		if !bytes.Equal(left.Value(i), right.Value(i)) {
-			return false
-		}
+		return true
 	}
-	return true
+	return arrayEqualVariableWidth(
+		left.valueOffsets, right.valueOffsets,
+		left.valueBytes, right.valueBytes,
+		left.Offset(), right.Offset(), left.Len(),
+		left.NullN(), left.NullBitmapBytes(),
+		bytes.Equal,
+	)
 }
 
 type LargeBinary struct {
@@ -418,15 +425,115 @@ func (a *LargeBinary) ValidateFull() error {
 }
 
 func arrayEqualLargeBinary(left, right *LargeBinary) bool {
-	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
-			continue
+	if useScalarVariableWidthEquality(left) {
+		for i := range left.Len() {
+			if !left.IsNull(i) && !bytes.Equal(left.Value(i), right.Value(i)) {
+				return false
+			}
 		}
-		if !bytes.Equal(left.Value(i), right.Value(i)) {
+		return true
+	}
+	return arrayEqualVariableWidth(
+		left.valueOffsets, right.valueOffsets,
+		left.valueBytes, right.valueBytes,
+		left.Offset(), right.Offset(), left.Len(),
+		left.NullN(), left.NullBitmapBytes(),
+		bytes.Equal,
+	)
+}
+
+type binaryOffset interface {
+	~int32 | ~int64
+}
+
+func useScalarVariableWidthEquality(values arrow.Array) bool {
+	if values.NullN() == 0 {
+		return false
+	}
+
+	// Very short validity runs cost more to set up than direct value comparisons.
+	// Sample a few runs and retain the scalar path when they average under four values.
+	const (
+		sampleRuns          = 8
+		minAverageRunLength = 4
+	)
+	runs := bitutils.NewSetBitRunReader(
+		values.NullBitmapBytes(), int64(values.Data().Offset()), int64(values.Len()),
+	)
+	validValues := int64(0)
+	for range sampleRuns {
+		run := runs.NextRun()
+		if run.Length == 0 {
+			return false
+		}
+		validValues += run.Length
+	}
+	return validValues < sampleRuns*minAverageRunLength
+}
+
+func arrayEqualVariableWidth[T binaryOffset, V ~[]byte | ~string](
+	leftOffsets, rightOffsets []T,
+	leftValues, rightValues V,
+	leftOffset, rightOffset, length, nulls int,
+	validity []byte,
+	equalValues func(V, V) bool,
+) bool {
+	if nulls == 0 {
+		return arrayEqualVariableWidthRun(
+			leftOffsets, rightOffsets,
+			leftValues, rightValues,
+			leftOffset, rightOffset, length,
+			equalValues,
+		)
+	}
+
+	runs := bitutils.NewSetBitRunReader(validity, int64(leftOffset), int64(length))
+	for {
+		run := runs.NextRun()
+		if run.Length == 0 {
+			return true
+		}
+		if !arrayEqualVariableWidthRun(
+			leftOffsets, rightOffsets,
+			leftValues, rightValues,
+			leftOffset+int(run.Pos), rightOffset+int(run.Pos), int(run.Length),
+			equalValues,
+		) {
+			return false
+		}
+	}
+}
+
+func arrayEqualVariableWidthRun[T binaryOffset, V ~[]byte | ~string](
+	leftOffsets, rightOffsets []T,
+	leftValues, rightValues V,
+	leftOffset, rightOffset, length int,
+	equalValues func(V, V) bool,
+) bool {
+	leftStart, leftEnd := leftOffsets[leftOffset], leftOffsets[leftOffset+length]
+	rightStart, rightEnd := rightOffsets[rightOffset], rightOffsets[rightOffset+length]
+	if leftEnd-leftStart != rightEnd-rightStart ||
+		!equalValues(
+			sliceBinaryValues(leftValues, leftStart, leftEnd),
+			sliceBinaryValues(rightValues, rightStart, rightEnd),
+		) {
+		return false
+	}
+	if length == 1 {
+		return true
+	}
+
+	for i := range length {
+		if leftOffsets[leftOffset+i+1]-leftOffsets[leftOffset+i] !=
+			rightOffsets[rightOffset+i+1]-rightOffsets[rightOffset+i] {
 			return false
 		}
 	}
 	return true
+}
+
+func sliceBinaryValues[T binaryOffset, V ~[]byte | ~string](values V, start, end T) V {
+	return values[start:end]
 }
 
 type ViewLike interface {
