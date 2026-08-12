@@ -246,6 +246,7 @@ type FileWriter struct {
 
 	headerStarted bool
 	footerWritten bool
+	closed        bool
 
 	pw PayloadWriter
 
@@ -285,6 +286,10 @@ func NewFileWriter(w io.Writer, opts ...Option) (*FileWriter, error) {
 }
 
 func (f *FileWriter) Close() error {
+	if f.closed {
+		return nil
+	}
+	f.closed = true
 	defer f.releaseDictionaries()
 
 	err := f.checkStarted()
@@ -313,6 +318,10 @@ func (f *FileWriter) releaseDictionaries() {
 }
 
 func (f *FileWriter) Write(rec arrow.RecordBatch) error {
+	if f.closed {
+		return errFileWriterClosed
+	}
+
 	schema := rec.Schema()
 	if schema == nil || !schema.Equal(f.schema) {
 		return errInconsistentSchema

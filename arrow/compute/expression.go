@@ -410,10 +410,19 @@ func cumulativeOptions(opts FunctionOptions) (*CumulativeOptions, bool) {
 }
 
 func equalOptionalScalar(lhs, rhs scalar.Scalar) bool {
-	if lhs == nil || rhs == nil {
-		return lhs == nil && rhs == nil
+	if isNilScalar(lhs) || isNilScalar(rhs) {
+		return isNilScalar(lhs) && isNilScalar(rhs)
 	}
 	return scalar.Equals(lhs, rhs)
+}
+
+func isNilScalar(value scalar.Scalar) bool {
+	if value == nil {
+		return true
+	}
+
+	reflected := reflect.ValueOf(value)
+	return reflected.Kind() == reflect.Ptr && reflected.IsNil()
 }
 
 func (c *Call) Release() {
@@ -626,6 +635,10 @@ func cloneExpressionOptions(opts FunctionOptions) FunctionOptions {
 }
 
 func retainExpressionScalar(value scalar.Scalar) scalar.Scalar {
+	if isNilScalar(value) {
+		return nil
+	}
+
 	if releasable, ok := value.(scalar.Releasable); ok {
 		releasable.Retain()
 	}

@@ -20,6 +20,7 @@ package kernels
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
@@ -40,7 +41,7 @@ type CumulativeOptions struct {
 func (CumulativeOptions) TypeName() string { return "CumulativeOptions" }
 
 func (opts CumulativeOptions) Release() {
-	if opts.Start == nil {
+	if isNilScalar(opts.Start) {
 		return
 	}
 
@@ -58,6 +59,15 @@ type cumulativeSumState[T arrow.NumericType] struct {
 }
 
 type ScalarCastFn func(*exec.KernelCtx, scalar.Scalar, arrow.DataType) (scalar.Scalar, error)
+
+func isNilScalar(value scalar.Scalar) bool {
+	if value == nil {
+		return true
+	}
+
+	reflected := reflect.ValueOf(value)
+	return reflected.Kind() == reflect.Ptr && reflected.IsNil()
+}
 
 func safeNumericCastScalar(ctx *exec.KernelCtx, cast ScalarCastFn, start scalar.Scalar, typ arrow.DataType) (scalar.Scalar, error) {
 	targetID := typ.ID()
@@ -81,7 +91,7 @@ func safeNumericCastScalar(ctx *exec.KernelCtx, cast ScalarCastFn, start scalar.
 
 func cumulativeStartValue[T arrow.NumericType](ctx *exec.KernelCtx, cast ScalarCastFn, start scalar.Scalar, typ arrow.DataType) (T, error) {
 	var zero T
-	if start == nil {
+	if isNilScalar(start) {
 		return zero, nil
 	}
 	if !start.IsValid() {

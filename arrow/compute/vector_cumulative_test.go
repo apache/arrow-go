@@ -74,6 +74,23 @@ func TestCumulativeSumValueOptions(t *testing.T) {
 	assertDatumsEqual(t, &compute.ArrayDatum{Value: expected.Data()}, result, nil, nil)
 }
 
+func TestCumulativeSumTypedNilStart(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+	input := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1, 2, 3]`)
+	defer input.Release()
+	expected := cumulativeInput(t, mem, arrow.PrimitiveTypes.Int32, `[1, 3, 6]`)
+	defer expected.Release()
+
+	var start *scalar.Int32
+	result, err := compute.CumulativeSum(ctx, compute.CumulativeOptions{Start: start},
+		&compute.ArrayDatum{Value: input.Data()})
+	require.NoError(t, err)
+	defer result.Release()
+	assertDatumsEqual(t, &compute.ArrayDatum{Value: expected.Data()}, result, nil, nil)
+}
+
 func TestCumulativeSumAdditionalInputs(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

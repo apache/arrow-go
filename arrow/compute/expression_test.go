@@ -258,6 +258,17 @@ func TestCumulativeOptionsRelease(t *testing.T) {
 	})
 }
 
+func TestCumulativeOptionsTypedNilStart(t *testing.T) {
+	var start *scalar.Binary
+	opts := compute.CumulativeOptions{Start: start}
+
+	assert.NotPanics(t, func() { opts.Release() })
+	assert.NotPanics(t, func() {
+		expr := compute.NewCall("cumulative_sum", nil, &opts)
+		expr.Release()
+	})
+}
+
 func TestExpressionHashing(t *testing.T) {
 	set := make(map[uint64]compute.Expression)
 
