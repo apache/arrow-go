@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package driver_test
+package driver
 
 import (
 	"context"
@@ -22,18 +22,17 @@ import (
 	sqldriver "database/sql/driver"
 	"testing"
 
-	"github.com/apache/arrow-go/v18/arrow/flight/flightsql/driver"
 	"github.com/stretchr/testify/require"
 )
 
 type connectionConnector struct{}
 
 func (connectionConnector) Connect(context.Context) (sqldriver.Conn, error) {
-	return &driver.Connection{}, nil
+	return &connBeginTx{Connection: &Connection{}}, nil
 }
 
 func (connectionConnector) Driver() sqldriver.Driver {
-	return &driver.Driver{}
+	return &Driver{}
 }
 
 func TestBeginTxRejectsUnsupportedOptions(t *testing.T) {
@@ -47,6 +46,6 @@ func TestBeginTxRejectsUnsupportedOptions(t *testing.T) {
 		{ReadOnly: true},
 	} {
 		_, err := db.BeginTx(context.Background(), &opts)
-		require.ErrorIs(t, err, driver.ErrNotSupported)
+		require.ErrorIs(t, err, ErrNotSupported)
 	}
 }
