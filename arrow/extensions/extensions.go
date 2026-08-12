@@ -25,6 +25,7 @@ var canonicalExtensionTypes = []arrow.ExtensionType{
 	&OpaqueType{},
 	&TimestampWithOffsetType{},
 	&VariantType{},
+	NewBigDecimalType(),
 	NewBool8Type(),
 	NewUUIDType(),
 }
