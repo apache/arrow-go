@@ -137,6 +137,78 @@ func TestFixedSizeListArrayBulkAppend(t *testing.T) {
 	}
 }
 
+func TestFixedSizeListArrayBulkAppendNullsAndEmptyValues(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer pool.AssertSize(t, 0)
+
+	lb := array.NewFixedSizeListBuilder(pool, 3, arrow.PrimitiveTypes.Int32)
+	defer lb.Release()
+	vb := lb.ValueBuilder().(*array.Int32Builder)
+
+	lb.Append(true)
+	vb.AppendValues([]int32{1, 2, 3}, nil)
+	lb.AppendNulls(5)
+	lb.AppendEmptyValues(4)
+	lb.Append(true)
+	vb.AppendValues([]int32{4, 5, 6}, nil)
+
+	arr := lb.NewListArray()
+	defer arr.Release()
+	assert.Equal(t, 11, arr.Len())
+	assert.Equal(t, 5, arr.NullN())
+	valid := []bool{true, false, false, false, false, false, true, true, true, true, true}
+	for i, want := range valid {
+		assert.Equal(t, want, arr.IsValid(i), "list value %d", i)
+	}
+
+	values := arr.ListValues().(*array.Int32)
+	assert.Equal(t, 33, values.Len())
+	assert.Equal(t, 15, values.NullN())
+	assert.Equal(t, []int32{1, 2, 3}, values.Int32Values()[:3])
+	for i := 3; i < 18; i++ {
+		assert.True(t, values.IsNull(i), "child value %d", i)
+	}
+	for i := 18; i < 30; i++ {
+		assert.True(t, values.IsValid(i), "child value %d", i)
+		assert.Zero(t, values.Value(i), "child value %d", i)
+	}
+	assert.Equal(t, []int32{4, 5, 6}, values.Int32Values()[30:])
+}
+
+func BenchmarkFixedSizeListBuilderBulkAppend(b *testing.B) {
+	for _, rows := range []int{1024, 65536} {
+		for _, width := range []int32{4, 16, 64} {
+			name := fmt.Sprintf("rows=%d/width=%d", rows, width)
+			b.Run("nulls/"+name, func(b *testing.B) {
+				benchmarkFixedSizeListBuilderBulkAppend(b, rows, width, false)
+			})
+			b.Run("empty/"+name, func(b *testing.B) {
+				benchmarkFixedSizeListBuilderBulkAppend(b, rows, width, true)
+			})
+		}
+	}
+}
+
+func benchmarkFixedSizeListBuilderBulkAppend(b *testing.B, rows int, width int32, empty bool) {
+	bldr := array.NewFixedSizeListBuilder(memory.DefaultAllocator, width, arrow.PrimitiveTypes.Int32)
+	defer bldr.Release()
+	b.ReportAllocs()
+	b.StopTimer()
+
+	for i := 0; i < b.N; i++ {
+		b.StartTimer()
+		if empty {
+			bldr.AppendEmptyValues(rows)
+		} else {
+			bldr.AppendNulls(rows)
+		}
+		b.StopTimer()
+
+		arr := bldr.NewListArray()
+		arr.Release()
+	}
+}
+
 func TestFixedSizeListArrayStringer(t *testing.T) {
 	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer pool.AssertSize(t, 0)
