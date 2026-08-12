@@ -803,29 +803,142 @@ func TestRecordBuilderRollsBackStringViewBlocks(t *testing.T) {
 	assert.NoError(t, array.ValidateFull(rec.Column(0)))
 }
 
+func TestRecordBuilderRollsBackAfterNewRecordBatch(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	typ := arrow.StructOf(arrow.Field{
+		Name: "items",
+		Type: arrow.ListOf(arrow.BinaryTypes.StringView),
+	})
+	schema := arrow.NewSchema([]arrow.Field{{Name: "row", Type: typ}}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	if err := builder.UnmarshalJSON([]byte(`{"row":{"items":["first retained value","second retained value"]}}`)); err != nil {
+		t.Fatal(err)
+	}
+	first := builder.NewRecordBatch()
+	defer first.Release()
+	firstBefore := first.Column(0).String()
+	if err := array.ValidateFull(first.Column(0)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := builder.UnmarshalJSON([]byte(`{"row":{"items":["discarded retained value",1]}}`)); err == nil {
+		t.Fatal("expected a decode error")
+	}
+	if err := builder.UnmarshalJSON([]byte(`{"row":{"items":["replacement retained value"]}}`)); err != nil {
+		t.Fatal(err)
+	}
+	second := builder.NewRecordBatch()
+	defer second.Release()
+
+	if err := array.ValidateFull(first.Column(0)); err != nil {
+		t.Fatal(err)
+	}
+	if err := array.ValidateFull(second.Column(0)); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, firstBefore, first.Column(0).String())
+
+	firstRow := first.Column(0).(*array.Struct)
+	firstItems := firstRow.Field(0).(*array.List)
+	firstValues := firstItems.ListValues().(*array.StringView)
+	assert.Equal(t, 1, firstItems.Len())
+	assert.Equal(t, 2, firstValues.Len())
+	assert.Equal(t, "first retained value", firstValues.Value(0))
+	assert.Equal(t, "second retained value", firstValues.Value(1))
+
+	secondRow := second.Column(0).(*array.Struct)
+	secondItems := secondRow.Field(0).(*array.List)
+	secondValues := secondItems.ListValues().(*array.StringView)
+	assert.Equal(t, 1, secondItems.Len())
+	assert.Equal(t, 1, secondValues.Len())
+	assert.Equal(t, "replacement retained value", secondValues.Value(0))
+}
+
 func TestRecordBuilderRollsBackNestedRowsAfterDecodeError(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
 
 	tests := []struct {
-		name  string
-		typ   arrow.DataType
-		value string
+		name      string
+		typ       arrow.DataType
+		badValue  string
+		goodValue string
+		check     func(*testing.T, arrow.Array)
 	}{
 		{
-			name:  "list view",
-			typ:   arrow.ListViewOf(arrow.PrimitiveTypes.Int32),
-			value: `[1, "invalid"]`,
+			name:      "list view",
+			typ:       arrow.ListViewOf(arrow.PrimitiveTypes.Int32),
+			badValue:  `[1, "invalid"]`,
+			goodValue: `[7]`,
+			check: func(t *testing.T, value arrow.Array) {
+				list := value.(*array.ListView)
+				assert.Equal(t, 1, list.Len())
+				assert.Equal(t, int32(7), list.ListValues().(*array.Int32).Value(0))
+			},
 		},
 		{
-			name:  "sparse union",
-			typ:   arrow.SparseUnionOf([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, []arrow.UnionTypeCode{0}),
-			value: `[0, "invalid"]`,
+			name:      "large list",
+			typ:       arrow.LargeListOf(arrow.PrimitiveTypes.Int32),
+			badValue:  `[1, "invalid"]`,
+			goodValue: `[8, 9]`,
+			check: func(t *testing.T, value arrow.Array) {
+				list := value.(*array.LargeList)
+				assert.Equal(t, 1, list.Len())
+				values := list.ListValues().(*array.Int32)
+				assert.Equal(t, int32(8), values.Value(0))
+				assert.Equal(t, int32(9), values.Value(1))
+			},
 		},
 		{
-			name:  "dense union",
-			typ:   arrow.DenseUnionOf([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, []arrow.UnionTypeCode{0}),
-			value: `[0, "invalid"]`,
+			name:      "fixed size list",
+			typ:       arrow.FixedSizeListOf(2, arrow.PrimitiveTypes.Int32),
+			badValue:  `[1, "invalid"]`,
+			goodValue: `[10, 11]`,
+			check: func(t *testing.T, value arrow.Array) {
+				list := value.(*array.FixedSizeList)
+				assert.Equal(t, 1, list.Len())
+				values := list.ListValues().(*array.Int32)
+				assert.Equal(t, int32(10), values.Value(0))
+				assert.Equal(t, int32(11), values.Value(1))
+			},
+		},
+		{
+			name:      "map",
+			typ:       arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32),
+			badValue:  `[{"key":"discarded","value":1},{"key":"invalid","value":"invalid"}]`,
+			goodValue: `[{"key":"kept","value":12}]`,
+			check: func(t *testing.T, value arrow.Array) {
+				m := value.(*array.Map)
+				assert.Equal(t, 1, m.Len())
+				assert.Equal(t, "kept", m.Keys().(*array.String).Value(0))
+				assert.Equal(t, int32(12), m.Items().(*array.Int32).Value(0))
+			},
+		},
+		{
+			name:      "sparse union",
+			typ:       arrow.SparseUnionOf([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, []arrow.UnionTypeCode{0}),
+			badValue:  `[0, "invalid"]`,
+			goodValue: `[0, 13]`,
+			check: func(t *testing.T, value arrow.Array) {
+				union := value.(*array.SparseUnion)
+				assert.Equal(t, 1, union.Len())
+				assert.Equal(t, int32(13), union.Field(0).(*array.Int32).Value(0))
+			},
+		},
+		{
+			name:      "dense union",
+			typ:       arrow.DenseUnionOf([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, []arrow.UnionTypeCode{0}),
+			badValue:  `[0, "invalid"]`,
+			goodValue: `[0, 14]`,
+			check: func(t *testing.T, value arrow.Array) {
+				union := value.(*array.DenseUnion)
+				assert.Equal(t, 1, union.Len())
+				assert.Equal(t, int32(14), union.Field(0).(*array.Int32).Value(0))
+			},
 		},
 	}
 
@@ -835,12 +948,18 @@ func TestRecordBuilderRollsBackNestedRowsAfterDecodeError(t *testing.T) {
 			builder := array.NewRecordBuilder(mem, schema)
 			defer builder.Release()
 
-			if err := builder.UnmarshalJSON([]byte(`{"value":` + tc.value + `}`)); err == nil {
+			if err := builder.UnmarshalJSON([]byte(`{"value":` + tc.badValue + `}`)); err == nil {
 				t.Fatal("expected a decode error")
 			}
-			if got := builder.Field(0).Len(); got != 0 {
-				t.Fatalf("builder length = %d, want 0", got)
+			if err := builder.UnmarshalJSON([]byte(`{"value":` + tc.goodValue + `}`)); err != nil {
+				t.Fatal(err)
 			}
+			rec := builder.NewRecordBatch()
+			defer rec.Release()
+			if err := array.ValidateFull(rec.Column(0)); err != nil {
+				t.Fatal(err)
+			}
+			tc.check(t, rec.Column(0))
 		})
 	}
 }
