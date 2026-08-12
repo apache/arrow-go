@@ -41,6 +41,8 @@ type DeltaByteArrayEncoder struct {
 	lastVal parquet.ByteArray
 }
 
+const deltaByteArrayBatchSize = 256
+
 func (enc *DeltaByteArrayEncoder) EstimatedDataEncodedSize() int64 {
 	prefixEstimatedSize := int64(0)
 	if enc.prefixEncoder != nil {
@@ -74,39 +76,39 @@ func (enc *DeltaByteArrayEncoder) Put(in []parquet.ByteArray) {
 		return
 	}
 
-	var suf parquet.ByteArray
 	if enc.prefixEncoder == nil { // initialize our encoders if we haven't yet
 		enc.initEncoders()
-		enc.prefixEncoder.Put([]int32{0})
-		suf = in[0]
-		enc.lastVal = in[0]
-		enc.suffixEncoder.Put([]parquet.ByteArray{suf})
-		in = in[1:]
 	}
 
-	// for each value, figure out the common prefix with the previous value
-	// and then write the prefix length and the suffix.
-	for _, val := range in {
-		l1 := enc.lastVal.Len()
-		l2 := val.Len()
-		j := 0
-		for j < l1 && j < l2 {
-			if enc.lastVal[j] != val[j] {
-				break
+	lastVal := enc.lastVal
+	var prefixLengths [deltaByteArrayBatchSize]int32
+	var suffixes [deltaByteArrayBatchSize]parquet.ByteArray
+	for i := 0; i < len(in); i += deltaByteArrayBatchSize {
+		batchSize := min(deltaByteArrayBatchSize, len(in)-i)
+		for j := 0; j < batchSize; j++ {
+			val := in[i+j]
+			commonPrefixLength := 0
+			maximumCommonPrefixLength := min(lastVal.Len(), val.Len())
+			for commonPrefixLength < maximumCommonPrefixLength {
+				if lastVal[commonPrefixLength] != val[commonPrefixLength] {
+					break
+				}
+				commonPrefixLength++
 			}
-			j++
+
+			lastVal = val
+			prefixLengths[j] = int32(commonPrefixLength)
+			suffixes[j] = val[commonPrefixLength:]
 		}
-		enc.prefixEncoder.Put([]int32{int32(j)})
-		suf = val[j:]
-		enc.suffixEncoder.Put([]parquet.ByteArray{suf})
-		enc.lastVal = val
+		enc.suffixEncoder.Put(suffixes[:batchSize])
+		enc.prefixEncoder.Put(prefixLengths[:batchSize])
 	}
 
 	// do the memcpy after the loops to keep a copy of the lastVal
 	// we do a copy here so that we only copy and keep a reference
 	// to the suffix, and aren't forcing the *entire* value to stay
 	// in memory while we have this reference to just the suffix.
-	enc.lastVal = append([]byte{}, enc.lastVal...)
+	enc.lastVal = append([]byte{}, lastVal...)
 }
 
 // PutSpaced is like Put, but assumes the data is already spaced for nulls and uses the bitmap provided and offset
