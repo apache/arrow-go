@@ -118,6 +118,10 @@ func TestArraySpan_UpdateNullCount(t *testing.T) {
 		want   int64
 	}{
 		{"known", fields{Nulls: 25}, 25},
+		{"unknown without validity", fields{
+			Nulls: array.UnknownNullCount,
+			Len:   8,
+		}, 0},
 		{"unknown", fields{
 			Nulls:   array.UnknownNullCount,
 			Len:     8, // 0b01101101

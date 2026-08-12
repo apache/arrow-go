@@ -114,6 +114,10 @@ func (a *ArraySpan) UpdateNullCount() int64 {
 	if curNulls != array.UnknownNullCount {
 		return curNulls
 	}
+	if len(a.Buffers[0].Buf) == 0 {
+		atomic.StoreInt64(&a.Nulls, 0)
+		return 0
+	}
 
 	newNulls := a.Len - int64(bitutil.CountSetBits(a.Buffers[0].Buf, int(a.Offset), int(a.Len)))
 	atomic.StoreInt64(&a.Nulls, newNulls)
