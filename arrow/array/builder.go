@@ -180,7 +180,7 @@ func (b *builder) resize(newBits int, init func(int)) {
 
 func (b *builder) reserve(elements int, resize func(int)) {
 	if b.length+elements > b.capacity {
-		newCap := bitutil.NextPowerOf2(b.length + elements)
+		newCap := bitutil.NextPowerOf2(b.length + elements - 1)
 		resize(newCap)
 	}
 	if b.nullBitmap == nil {
