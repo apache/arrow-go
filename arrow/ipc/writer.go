@@ -906,29 +906,14 @@ func (w *recordEncoder) getZeroBasedValueOffsets(arr arrow.Array) *memory.Buffer
 
 	dataTypeWidth := arr.DataType().Layout().Buffers[1].ByteWidth
 
-	// if we have a non-zero offset, then the value offsets do not start at
-	// zero. we must a) create a new offsets array with shifted offsets and
-	// b) slice the values array accordingly
-	hasNonZeroOffset := data.Offset() != 0
-
-	// or if there are more value offsets than values (the array has been sliced)
-	// we need to trim off the trailing offsets
-	hasMoreOffsetsThanValues := offsetBytesNeeded < voffsets.Len()
-
-	// or if the offsets do not start from the zero index, we need to shift them
-	// and slice the values array
 	var firstOffset int64
 	if dataTypeWidth == 8 {
-		firstOffset = arrow.Int64Traits.CastFromBytes(voffsets.Bytes())[0]
+		firstOffset = arrow.Int64Traits.CastFromBytes(voffsets.Bytes())[data.Offset()]
 	} else {
-		firstOffset = int64(arrow.Int32Traits.CastFromBytes(voffsets.Bytes())[0])
+		firstOffset = int64(arrow.Int32Traits.CastFromBytes(voffsets.Bytes())[data.Offset()])
 	}
-	offsetsDoNotStartFromZero := firstOffset != 0
 
-	// determine whether the offsets array should be shifted
-	needsTruncateAndShift := hasNonZeroOffset || hasMoreOffsetsThanValues || offsetsDoNotStartFromZero
-
-	if needsTruncateAndShift {
+	if firstOffset != 0 {
 		shiftedOffsets := memory.NewResizableBuffer(w.mem)
 		shiftedOffsets.Resize(offsetBytesNeeded)
 
@@ -954,6 +939,8 @@ func (w *recordEncoder) getZeroBasedValueOffsets(arr arrow.Array) *memory.Buffer
 		}
 
 		voffsets = shiftedOffsets
+	} else if data.Offset() != 0 || offsetBytesNeeded < voffsets.Len() {
+		voffsets = memory.SliceBuffer(voffsets, data.Offset()*dataTypeWidth, offsetBytesNeeded)
 	} else {
 		voffsets.Retain()
 	}
