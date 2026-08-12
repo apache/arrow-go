@@ -904,6 +904,7 @@ func benchRead(b *testing.B, raw []byte, rows, cols, chunks int) {
 func TestCSVReaderAppendsNullAfterPreviousParseError(t *testing.T) {
 	schema := arrow.NewSchema([]arrow.Field{
 		{Name: "int8", Type: arrow.PrimitiveTypes.Int8},
+		{Name: "bool", Type: arrow.FixedWidthTypes.Boolean},
 		{Name: "int16", Type: arrow.PrimitiveTypes.Int16},
 		{Name: "int32", Type: arrow.PrimitiveTypes.Int32},
 		{Name: "int64", Type: arrow.PrimitiveTypes.Int64},
@@ -928,6 +929,39 @@ func TestCSVReaderAppendsNullAfterPreviousParseError(t *testing.T) {
 	require.Error(t, r.Err())
 	for i, col := range r.RecordBatch().Columns() {
 		require.Truef(t, col.IsNull(0), "column %d (%s) should be null", i, col.DataType())
+	}
+}
+
+func TestCSVReaderAppendsNullAfterCompositeParseError(t *testing.T) {
+	tests := []struct {
+		name  string
+		typ   arrow.DataType
+		value string
+	}{
+		{name: "list format", typ: arrow.ListOf(arrow.PrimitiveTypes.Int8), value: "bad"},
+		{name: "fixed size list format", typ: arrow.FixedSizeListOf(2, arrow.PrimitiveTypes.Int8), value: "bad"},
+		{name: "fixed size list length", typ: arrow.FixedSizeListOf(2, arrow.PrimitiveTypes.Int8), value: "{1}"},
+		{name: "binary", typ: arrow.BinaryTypes.Binary, value: "%%%"},
+		{name: "large binary", typ: arrow.BinaryTypes.LargeBinary, value: "%%%"},
+		{name: "fixed size binary format", typ: &arrow.FixedSizeBinaryType{ByteWidth: 3}, value: "%%%"},
+		{name: "fixed size binary", typ: &arrow.FixedSizeBinaryType{ByteWidth: 3}, value: "AQ=="},
+		{name: "extension", typ: extensions.NewUUIDType(), value: "bad"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := arrow.NewSchema([]arrow.Field{
+				{Name: "int8", Type: arrow.PrimitiveTypes.Int8},
+				{Name: "value", Type: tc.typ},
+			}, nil)
+			r := csv.NewReader(strings.NewReader("bad;"+tc.value+"\n"), schema, csv.WithComma(';'))
+			defer r.Release()
+
+			require.True(t, r.Next())
+			require.ErrorContains(t, r.Err(), "strconv.ParseInt")
+			require.True(t, r.RecordBatch().Column(0).IsNull(0))
+			require.True(t, r.RecordBatch().Column(1).IsNull(0))
+		})
 	}
 }
 

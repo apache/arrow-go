@@ -817,23 +817,26 @@ func (r *Reader) parseListLike(field array.ListLikeBuilder, str string) {
 		return
 	}
 	if !strings.HasPrefix(str, "{") || !strings.HasSuffix(str, "}") {
-		r.err = errors.New("invalid list format. should start with '{' and end with '}'")
+		r.setParseError(errors.New("invalid list format. should start with '{' and end with '}'"))
+		field.AppendNull()
 		return
 	}
 	str = strings.Trim(str, "{}")
-	field.Append(true)
 	if len(str) == 0 {
 		// we don't want to create the csv reader if we already know the
 		// string is empty
+		field.Append(true)
 		return
 	}
-	valueBldr := field.ValueBuilder()
 	reader := csv.NewReader(strings.NewReader(str))
 	items, err := reader.Read()
 	if err != nil {
-		r.err = err
+		r.setParseError(err)
+		field.AppendNull()
 		return
 	}
+	field.Append(true)
+	valueBldr := field.ValueBuilder()
 	for _, str := range items {
 		r.initFieldConverter(valueBldr)(str)
 	}
@@ -845,29 +848,39 @@ func (r *Reader) parseFixedSizeList(field *array.FixedSizeListBuilder, str strin
 		return
 	}
 	if !strings.HasPrefix(str, "{") || !strings.HasSuffix(str, "}") {
-		r.err = errors.New("invalid list format. should start with '{' and end with '}'")
+		r.setParseError(errors.New("invalid list format. should start with '{' and end with '}'"))
+		field.AppendNull()
 		return
 	}
 	str = strings.Trim(str, "{}")
-	field.Append(true)
 	if len(str) == 0 {
 		// we don't want to create the csv reader if we already know the
 		// string is empty
+		if n != 0 {
+			r.setParseError(fmt.Errorf("%w: fixed size list items should match the fixed size list length, expected %d, got 0", arrow.ErrInvalid, n))
+			field.AppendNull()
+			return
+		}
+		field.Append(true)
 		return
 	}
 	valueBldr := field.ValueBuilder()
 	reader := csv.NewReader(strings.NewReader(str))
 	items, err := reader.Read()
 	if err != nil {
-		r.err = err
+		r.setParseError(err)
+		field.AppendNull()
 		return
 	}
-	if len(items) == n {
-		for _, str := range items {
-			r.initFieldConverter(valueBldr)(str)
-		}
-	} else {
-		r.err = fmt.Errorf("%w: fixed size list items should match the fixed size list length, expected %d, got %d", arrow.ErrInvalid, n, len(items))
+	if len(items) != n {
+		r.setParseError(fmt.Errorf("%w: fixed size list items should match the fixed size list length, expected %d, got %d", arrow.ErrInvalid, n, len(items)))
+		field.AppendNull()
+		return
+	}
+
+	field.Append(true)
+	for _, str := range items {
+		r.initFieldConverter(valueBldr)(str)
 	}
 }
 
@@ -879,7 +892,7 @@ func (r *Reader) parseBinaryType(field array.Builder, str string) {
 	}
 	decodedVal, err := base64.StdEncoding.DecodeString(str)
 	if err != nil {
-		r.err = fmt.Errorf("cannot decode base64 string %s", str)
+		r.setParseError(fmt.Errorf("cannot decode base64 string %s", str))
 		field.AppendNull()
 		return
 	}
@@ -895,7 +908,7 @@ func (r *Reader) parseLargeBinaryType(field array.Builder, str string) {
 	}
 	decodedVal, err := base64.StdEncoding.DecodeString(str)
 	if err != nil {
-		r.err = fmt.Errorf("cannot decode base64 string %s", str)
+		r.setParseError(fmt.Errorf("cannot decode base64 string %s", str))
 		field.AppendNull()
 		return
 	}
@@ -911,7 +924,7 @@ func (r *Reader) parseFixedSizeBinaryType(field array.Builder, str string, byteW
 	}
 	decodedVal, err := base64.StdEncoding.DecodeString(str)
 	if err != nil {
-		r.err = fmt.Errorf("cannot decode base64 string %s", str)
+		r.setParseError(fmt.Errorf("cannot decode base64 string %s", str))
 		field.AppendNull()
 		return
 	}
@@ -919,7 +932,8 @@ func (r *Reader) parseFixedSizeBinaryType(field array.Builder, str string, byteW
 	if len(decodedVal) == byteWidth {
 		field.(*array.FixedSizeBinaryBuilder).Append(decodedVal)
 	} else {
-		r.err = fmt.Errorf("%w: the length of fixed size binary value should match the fixed size binary byte width, expected %d, got %d", arrow.ErrInvalid, byteWidth, len(decodedVal))
+		r.setParseError(fmt.Errorf("%w: the length of fixed size binary value should match the fixed size binary byte width, expected %d, got %d", arrow.ErrInvalid, byteWidth, len(decodedVal)))
+		field.AppendNull()
 	}
 }
 
@@ -929,7 +943,8 @@ func (r *Reader) parseExtension(field array.Builder, str string) {
 		return
 	}
 	if err := field.AppendValueFromString(str); err != nil {
-		r.err = err
+		r.setParseError(err)
+		field.AppendNull()
 		return
 	}
 }
