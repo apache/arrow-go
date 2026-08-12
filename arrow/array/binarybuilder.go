@@ -25,6 +25,7 @@ import (
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/json"
@@ -127,9 +128,15 @@ func (b *BinaryBuilder) AppendNull() {
 }
 
 func (b *BinaryBuilder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+
+	b.Reserve(n)
+	b.appendCurrentOffsets(n)
+	bitutil.SetBitsTo(b.nullBitmap.Bytes(), int64(b.length), int64(n), false)
+	b.length += n
+	b.nulls += n
 }
 
 func (b *BinaryBuilder) AppendEmptyValue() {
@@ -139,9 +146,13 @@ func (b *BinaryBuilder) AppendEmptyValue() {
 }
 
 func (b *BinaryBuilder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+
+	b.Reserve(n)
+	b.appendCurrentOffsets(n)
+	b.unsafeAppendBoolsToBitmap(nil, n)
 }
 
 // AppendValues will append the values in the v slice. The valid slice determines which values
@@ -316,6 +327,25 @@ func (b *BinaryBuilder) appendNextOffset() {
 	numBytes := b.values.Len()
 	debug.Assert(uint64(numBytes) <= b.maxCapacity, "exceeded maximum capacity of binary array")
 	b.appendOffsetVal(numBytes)
+}
+
+func (b *BinaryBuilder) appendCurrentOffsets(n int) {
+	numBytes := b.values.Len()
+	debug.Assert(uint64(numBytes) <= b.maxCapacity, "exceeded maximum capacity of binary array")
+	start := b.offsets.Len() * b.offsetByteWidth
+	b.offsets.Advance(n * b.offsetByteWidth)
+	switch b.offsetByteWidth {
+	case arrow.Int32SizeBytes:
+		offsets := arrow.Int32Traits.CastFromBytes(b.offsets.Bytes()[start:])
+		for i := range offsets {
+			offsets[i] = int32(numBytes)
+		}
+	case arrow.Int64SizeBytes:
+		offsets := arrow.Int64Traits.CastFromBytes(b.offsets.Bytes()[start:])
+		for i := range offsets {
+			offsets[i] = int64(numBytes)
+		}
+	}
 }
 
 func (b *BinaryBuilder) AppendValueFromString(s string) error {
