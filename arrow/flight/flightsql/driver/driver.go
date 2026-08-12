@@ -100,6 +100,16 @@ func (r *Rows) releaseRecord() {
 	}
 }
 
+func (r *Rows) sendRecord(ctx context.Context, record arrow.RecordBatch) bool {
+	select {
+	case r.recordChan <- record:
+		return true
+	case <-ctx.Done():
+		record.Release()
+		return false
+	}
+}
+
 // Close closes the rows iterator.
 func (r *Rows) Close() error {
 	r.ctxCancelFunc() // interrupting data streaming.
@@ -107,6 +117,9 @@ func (r *Rows) Close() error {
 	r.currentRow = 0
 
 	r.releaseRecord()
+	for record := range r.recordChan {
+		record.Release()
+	}
 
 	return nil
 }
@@ -587,7 +600,9 @@ func (r *Rows) streamRecordset(ctx context.Context, c *flightsql.Client, endpoin
 					continue
 				}
 
-				r.recordChan <- record
+				if !r.sendRecord(ctx, record) {
+					return
+				}
 
 				go initializeOnceOnly.Do(func() { r.initializedChan <- true })
 			}
