@@ -114,6 +114,7 @@ func (b *bufferBuilder) Advance(length int) {
 		newCapacity := bitutil.NextPowerOf2(b.length + length)
 		b.resize(newCapacity)
 	}
+	memory.Set(b.bytes[b.length:b.length+length], 0)
 	b.length += length
 }
 

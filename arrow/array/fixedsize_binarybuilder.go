@@ -96,9 +96,16 @@ func (b *FixedSizeBinaryBuilder) AppendEmptyValue() {
 }
 
 func (b *FixedSizeBinaryBuilder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.values.Advance(n * b.dtype.ByteWidth)
+	b.unsafeSetValid(n)
 }
 
 func (b *FixedSizeBinaryBuilder) UnsafeAppend(v []byte) {

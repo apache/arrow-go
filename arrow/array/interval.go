@@ -193,9 +193,15 @@ func (b *MonthIntervalBuilder) AppendEmptyValue() {
 }
 
 func (b *MonthIntervalBuilder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.MonthIntervalTraits.BytesRequired(1), n)
 }
 
 func (b *MonthIntervalBuilder) UnsafeAppend(v arrow.MonthInterval) {
@@ -503,9 +509,15 @@ func (b *DayTimeIntervalBuilder) AppendEmptyValue() {
 }
 
 func (b *DayTimeIntervalBuilder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.DayTimeIntervalTraits.BytesRequired(1), n)
 }
 
 func (b *DayTimeIntervalBuilder) UnsafeAppend(v arrow.DayTimeInterval) {
@@ -816,9 +828,15 @@ func (b *MonthDayNanoIntervalBuilder) AppendEmptyValue() {
 }
 
 func (b *MonthDayNanoIntervalBuilder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.MonthDayNanoIntervalTraits.BytesRequired(1), n)
 }
 
 func (b *MonthDayNanoIntervalBuilder) UnsafeAppend(v arrow.MonthDayNanoInterval) {

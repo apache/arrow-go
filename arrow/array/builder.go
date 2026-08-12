@@ -314,6 +314,16 @@ func (b *builder) unsafeSetValid(length int) {
 	b.length = newLength
 }
 
+func (b *builder) unsafeAppendEmptyValues(data []byte, valueSize, length int) {
+	if length <= 0 {
+		return
+	}
+
+	start := b.length * valueSize
+	memory.Set(data[start:start+length*valueSize], 0)
+	b.unsafeSetValid(length)
+}
+
 func (b *builder) UnsafeAppendBoolToBitmap(isValid bool) {
 	if isValid {
 		bitutil.SetBit(b.nullBitmap.Bytes(), b.length)

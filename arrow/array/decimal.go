@@ -243,9 +243,15 @@ func (b *baseDecimalBuilder[T]) AppendEmptyValue() {
 }
 
 func (b *baseDecimalBuilder[T]) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), b.traits.BytesRequired(1), n)
 }
 
 func (b *baseDecimalBuilder[T]) UnsafeAppendBoolToBitmap(isValid bool) {
