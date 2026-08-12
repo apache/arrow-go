@@ -664,6 +664,12 @@ func TestTimestampScalarParsingMatchesTimestampBuilder(t *testing.T) {
 			value: "1970-01-01 01:00:00+05:00",
 			want:  -14400,
 		},
+		{
+			name:  "timezone-less mixed-case UTC",
+			typ:   &arrow.TimestampType{Unit: arrow.Second, TimeZone: "Utc"},
+			value: "1970-01-01 00:00:00",
+			want:  0,
+		},
 	}
 
 	for _, tc := range tests {
