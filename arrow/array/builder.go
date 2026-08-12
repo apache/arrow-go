@@ -18,6 +18,7 @@ package array
 
 import (
 	"fmt"
+	"math/bits"
 	"sync/atomic"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -196,32 +197,78 @@ func (b *builder) unsafeAppendBoolsToBitmap(valid []bool, length int) {
 		return
 	}
 
+	validLength := len(valid)
 	byteOffset := b.length / 8
-	bitOffset := byte(b.length % 8)
 	nullBitmap := b.nullBitmap.Bytes()
-	bitSet := nullBitmap[byteOffset]
-
-	for _, v := range valid {
-		if bitOffset == 8 {
-			bitOffset = 0
-			nullBitmap[byteOffset] = bitSet
-			byteOffset++
-			bitSet = nullBitmap[byteOffset]
-		}
-
-		if v {
-			bitSet |= bitutil.BitMask[bitOffset]
-		} else {
-			bitSet &= bitutil.FlippedBitMask[bitOffset]
-			b.nulls++
-		}
-		bitOffset++
-	}
+	bitOffset := b.length % 8
 
 	if bitOffset != 0 {
+		bitSet := nullBitmap[byteOffset]
+		prefixLength := min(8-bitOffset, len(valid))
+		for i, v := range valid[:prefixLength] {
+			if v {
+				bitSet |= bitutil.BitMask[bitOffset+i]
+			} else {
+				bitSet &= bitutil.FlippedBitMask[bitOffset+i]
+				b.nulls++
+			}
+		}
+		nullBitmap[byteOffset] = bitSet
+		valid = valid[prefixLength:]
+		byteOffset++
+	}
+
+	for len(valid) >= 8 {
+		bitSet := packValidityByte(valid)
+		nullBitmap[byteOffset] = bitSet
+		b.nulls += 8 - bits.OnesCount8(bitSet)
+		valid = valid[8:]
+		byteOffset++
+	}
+
+	if len(valid) != 0 {
+		bitSet := nullBitmap[byteOffset]
+		for i, v := range valid {
+			if v {
+				bitSet |= bitutil.BitMask[i]
+			} else {
+				bitSet &= bitutil.FlippedBitMask[i]
+				b.nulls++
+			}
+		}
 		nullBitmap[byteOffset] = bitSet
 	}
-	b.length += len(valid)
+	b.length += validLength
+}
+
+func packValidityByte(valid []bool) byte {
+	valid = valid[:8]
+	var packed byte
+	if valid[0] {
+		packed |= 1 << 0
+	}
+	if valid[1] {
+		packed |= 1 << 1
+	}
+	if valid[2] {
+		packed |= 1 << 2
+	}
+	if valid[3] {
+		packed |= 1 << 3
+	}
+	if valid[4] {
+		packed |= 1 << 4
+	}
+	if valid[5] {
+		packed |= 1 << 5
+	}
+	if valid[6] {
+		packed |= 1 << 6
+	}
+	if valid[7] {
+		packed |= 1 << 7
+	}
+	return packed
 }
 
 // unsafeSetValid sets the next length bits to valid in the validity bitmap.
