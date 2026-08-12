@@ -85,6 +85,139 @@ func TestArraySliceEqual(t *testing.T) {
 	}
 }
 
+func TestListEqualByValidRuns(t *testing.T) {
+	for _, dt := range []arrow.DataType{
+		arrow.ListOf(arrow.PrimitiveTypes.Int32),
+		arrow.LargeListOf(arrow.PrimitiveTypes.Int32),
+	} {
+		t.Run(dt.ID().String(), func(t *testing.T) {
+			tests := []struct {
+				name        string
+				left, right [][]int32
+				valid       []bool
+				want        bool
+			}{
+				{
+					name:  "equal",
+					left:  [][]int32{{1, 2}, {3}, {4, 5, 6}},
+					right: [][]int32{{1, 2}, {3}, {4, 5, 6}},
+					valid: []bool{true, true, true},
+					want:  true,
+				},
+				{
+					name:  "different list lengths with equal child values",
+					left:  [][]int32{{1}, {2, 3}},
+					right: [][]int32{{1, 2}, {3}},
+					valid: []bool{true, true},
+					want:  false,
+				},
+				{
+					name:  "ignore null list payloads",
+					left:  [][]int32{{1}, {99}, {3, 4}},
+					right: [][]int32{{1}, {100, 101}, {3, 4}},
+					valid: []bool{true, false, true},
+					want:  true,
+				},
+				{
+					name:  "different valid child values",
+					left:  [][]int32{{1}, {99}, {3, 4}},
+					right: [][]int32{{1}, {100}, {3, 5}},
+					valid: []bool{true, false, true},
+					want:  false,
+				},
+			}
+
+			for _, tc := range tests {
+				t.Run(tc.name, func(t *testing.T) {
+					mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+					left := makeListEqualTestArray(mem, dt, tc.left, tc.valid)
+					right := makeListEqualTestArray(mem, dt, tc.right, tc.valid)
+					assert.Equal(t, tc.want, array.Equal(left, right))
+					left.Release()
+					right.Release()
+					mem.AssertSize(t, 0)
+				})
+			}
+
+			t.Run("sliced parents", func(t *testing.T) {
+				mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+				left := makeListEqualTestArray(mem, dt,
+					[][]int32{{9}, {1, 2}, {3}, {4, 5}}, []bool{true, true, false, true})
+				right := makeListEqualTestArray(mem, dt,
+					[][]int32{{7}, {8, 8}, {1, 2}, {99}, {4, 5}}, []bool{true, true, true, false, true})
+				leftSlice := array.NewSlice(left, 1, 4)
+				rightSlice := array.NewSlice(right, 2, 5)
+				assert.True(t, array.Equal(leftSlice, rightSlice))
+				leftSlice.Release()
+				rightSlice.Release()
+				left.Release()
+				right.Release()
+				mem.AssertSize(t, 0)
+			})
+		})
+	}
+}
+
+func TestFixedSizeListEqualByValidRuns(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	dt := arrow.FixedSizeListOf(2, arrow.PrimitiveTypes.Int32)
+
+	left := makeListEqualTestArray(mem, dt,
+		[][]int32{{1, 2}, {99, 98}, {3, 4}}, []bool{true, false, true})
+	right := makeListEqualTestArray(mem, dt,
+		[][]int32{{1, 2}, {100, 101}, {3, 4}}, []bool{true, false, true})
+	assert.True(t, array.Equal(left, right))
+
+	different := makeListEqualTestArray(mem, dt,
+		[][]int32{{1, 2}, {100, 101}, {3, 5}}, []bool{true, false, true})
+	assert.False(t, array.Equal(left, different))
+
+	leftWithPrefix := makeListEqualTestArray(mem, dt,
+		[][]int32{{9, 9}, {1, 2}, {99, 98}, {3, 4}}, []bool{true, true, false, true})
+	rightWithPrefix := makeListEqualTestArray(mem, dt,
+		[][]int32{{7, 7}, {8, 8}, {1, 2}, {100, 101}, {3, 4}}, []bool{true, true, true, false, true})
+	leftSlice := array.NewSlice(leftWithPrefix, 1, 4)
+	rightSlice := array.NewSlice(rightWithPrefix, 2, 5)
+	assert.True(t, array.Equal(leftSlice, rightSlice))
+
+	left.Release()
+	right.Release()
+	different.Release()
+	leftSlice.Release()
+	rightSlice.Release()
+	leftWithPrefix.Release()
+	rightWithPrefix.Release()
+	mem.AssertSize(t, 0)
+}
+
+func makeListEqualTestArray(mem memory.Allocator, dt arrow.DataType, values [][]int32, valid []bool) arrow.Array {
+	switch dt.ID() {
+	case arrow.LIST, arrow.LARGE_LIST:
+		bldr := array.NewBuilder(mem, dt).(array.VarLenListLikeBuilder)
+		child := bldr.ValueBuilder().(*array.Int32Builder)
+		for i, value := range values {
+			bldr.AppendWithSize(valid[i], len(value))
+			child.AppendValues(value, nil)
+		}
+		out := bldr.NewArray()
+		bldr.Release()
+		return out
+	case arrow.FIXED_SIZE_LIST:
+		listSize := dt.(*arrow.FixedSizeListType).Len()
+		bldr := array.NewFixedSizeListBuilder(mem, listSize, arrow.PrimitiveTypes.Int32)
+		child := bldr.ValueBuilder().(*array.Int32Builder)
+		for i, value := range values {
+			bldr.Append(valid[i])
+			child.AppendValues(value, nil)
+		}
+		out := bldr.NewArray()
+		bldr.Release()
+		return out
+	default:
+		panic("unsupported list type")
+	}
+}
+
 func TestArrayApproxEqual(t *testing.T) {
 	for name, recs := range arrdata.Records {
 		t.Run(name, func(t *testing.T) {

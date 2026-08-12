@@ -137,22 +137,8 @@ func (a *List) MarshalJSON() ([]byte, error) {
 }
 
 func arrayEqualList(left, right *List) bool {
-	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
-			continue
-		}
-		o := func() bool {
-			l := left.newListValue(i)
-			defer l.Release()
-			r := right.newListValue(i)
-			defer r.Release()
-			return Equal(l, r)
-		}()
-		if !o {
-			return false
-		}
-	}
-	return true
+	return arrayEqualListOffsets(left.values, right.values, left.offsets, right.offsets,
+		left.data.offset, right.data.offset, left.Len(), left.NullBitmapBytes())
 }
 
 // Len returns the number of elements in the array.
@@ -276,22 +262,8 @@ func (a *LargeList) MarshalJSON() ([]byte, error) {
 }
 
 func arrayEqualLargeList(left, right *LargeList) bool {
-	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
-			continue
-		}
-		o := func() bool {
-			l := left.newListValue(i)
-			defer l.Release()
-			r := right.newListValue(i)
-			defer r.Release()
-			return Equal(l, r)
-		}()
-		if !o {
-			return false
-		}
-	}
-	return true
+	return arrayEqualListOffsets(left.values, right.values, left.offsets, right.offsets,
+		left.data.offset, right.data.offset, left.Len(), left.NullBitmapBytes())
 }
 
 // Len returns the number of elements in the array.
