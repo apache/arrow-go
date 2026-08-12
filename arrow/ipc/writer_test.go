@@ -59,8 +59,16 @@ func (failingCompressor) Type() flatbuf.CompressionType {
 	return flatbuf.CompressionTypeZSTD
 }
 
+type failingWriter struct {
+	err error
+}
+
 func (shortWriteWriter) Write(p []byte) (int, error) {
 	return len(p) - 1, io.ErrShortWrite
+}
+
+func (w failingWriter) Write([]byte) (int, error) {
+	return 0, w.err
 }
 
 func TestPayloadWriteRejectsShortWrites(t *testing.T) {
@@ -102,6 +110,16 @@ func TestWriterCloseFailureIsTerminal(t *testing.T) {
 	require.ErrorIs(t, writer.Close(), want)
 	require.ErrorIs(t, writer.Close(), want)
 	require.Equal(t, 1, payloadWriter.closeCall)
+}
+
+func TestFileWriterCloseFailureIsTerminal(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	want := errors.New("write failed")
+	writer, err := NewFileWriter(failingWriter{err: want}, WithSchema(schema))
+	require.NoError(t, err)
+
+	require.ErrorIs(t, writer.Close(), want)
+	require.ErrorIs(t, writer.Close(), want)
 }
 
 func TestWriterSchemaFailureIsTerminal(t *testing.T) {

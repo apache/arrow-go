@@ -1374,6 +1374,8 @@ func TestMakeArrayFromScalarSupportsZeroLength(t *testing.T) {
 	assert.Equal(t, 0, nullArr.Len())
 	assert.Equal(t, 0, nullArr.NullN())
 	require.NoError(t, array.ValidateFull(nullArr))
+}
+
 func TestMakeArrayFromDictionaryScalar(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -1634,6 +1636,7 @@ func TestGetScalarBinaryValueOwnsAllBinaryArrayBytes(t *testing.T) {
 			binaryValue.Release()
 		})
 	}
+}
 
 func TestToScalar(t *testing.T) {
 	ot := &OptionValTest{ToType: arrow.BinaryTypes.String, Allow: true}
