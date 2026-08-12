@@ -25,7 +25,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -847,26 +846,15 @@ func transferInt(rdr file.RecordReader, dt arrow.DataType) arrow.ArrayData {
 }
 
 func transferBool(rdr file.RecordReader) arrow.ArrayData {
-	// TODO(mtopol): optimize this so we don't convert bitmap to []bool back to bitmap
 	length := rdr.ValuesWritten()
-	data := make([]byte, int(bitutil.BytesForBits(int64(length))))
-	bytedata := rdr.Values()
-	values := *(*[]bool)(unsafe.Pointer(&bytedata))
-
-	for idx, v := range values[:length] {
-		if v {
-			bitutil.SetBit(data, idx)
-		}
-	}
-
 	bitmap := rdr.ReleaseValidBits()
 	if bitmap != nil {
 		defer bitmap.Release()
 	}
-	bb := memory.NewBufferBytes(data)
-	defer bb.Release()
+	values := rdr.ReleaseValues()
+	defer values.Release()
 	return array.NewData(&arrow.BooleanType{}, length, []*memory.Buffer{
-		bitmap, bb,
+		bitmap, values,
 	}, nil, int(rdr.NullCount()), 0)
 }
 

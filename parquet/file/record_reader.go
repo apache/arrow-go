@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -229,6 +228,9 @@ func (pr *primitiveRecordReader) ResetValues() {
 }
 
 func (pr *primitiveRecordReader) numBytesForValues(nitems int64) (num int64, err error) {
+	if pr.Descriptor().PhysicalType() == parquet.Types.Boolean {
+		return bitutil.BytesForBits(nitems), nil
+	}
 	typeSize := int64(pr.Descriptor().PhysicalType().ByteSize())
 	var ok bool
 	if num, ok = utils.Mul64(nitems, typeSize); !ok {
@@ -264,9 +266,8 @@ func (pr *primitiveRecordReader) ReserveValues(extra int64, hasNullable bool) er
 func (pr *primitiveRecordReader) ReadValuesDense(toRead int64) (err error) {
 	switch cr := pr.ColumnChunkReader.(type) {
 	case *BooleanColumnChunkReader:
-		data := pr.values.Bytes()[int(pr.valuesWritten):]
-		values := *(*[]bool)(unsafe.Pointer(&data))
-		_, err = cr.curDecoder.(encoding.BooleanDecoder).Decode(values[:toRead])
+		_, err = cr.curDecoder.(encoding.BooleanBitmapDecoder).DecodeToBitmap(
+			pr.values.Bytes(), pr.valuesWritten, int(toRead))
 	case *Int32ColumnChunkReader:
 		values := arrow.Int32Traits.CastFromBytes(pr.values.Bytes())[int(pr.valuesWritten):]
 		_, err = cr.curDecoder.(encoding.Int32Decoder).Decode(values[:toRead])
@@ -300,9 +301,8 @@ func (pr *primitiveRecordReader) ReadValuesSpaced(valuesWithNulls, nullCount int
 
 	switch cr := pr.ColumnChunkReader.(type) {
 	case *BooleanColumnChunkReader:
-		data := pr.values.Bytes()[int(pr.valuesWritten):]
-		values := *(*[]bool)(unsafe.Pointer(&data))
-		_, err = cr.curDecoder.(encoding.BooleanDecoder).DecodeSpaced(values[:int(valuesWithNulls)], int(nullCount), validBits, offset)
+		_, err = cr.curDecoder.(encoding.BooleanBitmapDecoder).DecodeSpacedToBitmap(
+			pr.values.Bytes(), offset, int(valuesWithNulls), int(nullCount), validBits, offset)
 	case *Int32ColumnChunkReader:
 		values := arrow.Int32Traits.CastFromBytes(pr.values.Bytes())[int(pr.valuesWritten):]
 		_, err = cr.curDecoder.(encoding.Int32Decoder).DecodeSpaced(values[:int(valuesWithNulls)], int(nullCount), validBits, offset)

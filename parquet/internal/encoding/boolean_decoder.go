@@ -169,7 +169,8 @@ func (dec *PlainBooleanDecoder) DecodeToBitmap(out []byte, outOffset int64, leng
 			dstSlice[fullBytes] = (dstSlice[fullBytes] &^ mask) | (lastByte & mask)
 		}
 
-		dec.data = dec.data[bytesToCopy:]
+		dec.data = dec.data[fullBytes:]
+		dec.bitOffset = trailingBits
 		dec.nvals -= max
 		return max, nil
 	}
@@ -203,6 +204,39 @@ func (dec *PlainBooleanDecoder) DecodeSpaced(out []bool, nullCount int, validBit
 		return spacedExpand(out, nullCount, validBits, validBitsOffset), nil
 	}
 	return dec.Decode(out)
+}
+
+func decodeSpacedToBitmap(dec BooleanBitmapDecoder, out []byte, outOffset int64,
+	length, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
+	if nullCount == 0 {
+		return dec.DecodeToBitmap(out, outOffset, length)
+	}
+
+	valuesToRead := length - nullCount
+	valuesRead, err := dec.DecodeToBitmap(out, outOffset, valuesToRead)
+	if err != nil {
+		return valuesRead, err
+	}
+	if valuesRead != valuesToRead {
+		return valuesRead, errors.New("parquet: boolean decoder: number of values / definition levels read did not match")
+	}
+
+	// Expand the packed physical values backwards into their logical positions.
+	// Copying backwards keeps unread compact values from being overwritten.
+	physicalIndex := valuesToRead - 1
+	for logicalIndex := length - 1; logicalIndex >= 0 && physicalIndex >= 0; logicalIndex-- {
+		if bitutil.BitIsSet(validBits, int(validBitsOffset)+logicalIndex) {
+			value := bitutil.BitIsSet(out, int(outOffset)+physicalIndex)
+			bitutil.SetBitTo(out, int(outOffset)+logicalIndex, value)
+			physicalIndex--
+		}
+	}
+	return length, nil
+}
+
+func (dec *PlainBooleanDecoder) DecodeSpacedToBitmap(out []byte, outOffset int64,
+	length, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
+	return decodeSpacedToBitmap(dec, out, outOffset, length, nullCount, validBits, validBitsOffset)
 }
 
 type RleBooleanDecoder struct {
@@ -276,6 +310,43 @@ func (dec *RleBooleanDecoder) Decode(out []bool) (int, error) {
 	return max, nil
 }
 
+func (dec *RleBooleanDecoder) DecodeToBitmap(out []byte, outOffset int64, length int) (int, error) {
+	max := shared_utils.Min(length, dec.nvals)
+	writer := bitutil.NewBitmapWriter(out, int(outOffset), max)
+
+	var (
+		buf [1024]uint64
+		n   = max
+	)
+	for n > 0 {
+		batch := shared_utils.Min(len(buf), n)
+		decoded, err := dec.rleDec.GetBatch(buf[:batch])
+		for _, value := range buf[:decoded] {
+			if value != 0 {
+				writer.Set()
+			} else {
+				writer.Clear()
+			}
+			writer.Next()
+		}
+		n -= decoded
+		if err != nil {
+			writer.Finish()
+			dec.nvals -= max - n
+			return max - n, err
+		}
+		if decoded != batch {
+			writer.Finish()
+			dec.nvals -= max - n
+			return max - n, io.ErrUnexpectedEOF
+		}
+	}
+
+	writer.Finish()
+	dec.nvals -= max
+	return max, nil
+}
+
 func (dec *RleBooleanDecoder) DecodeSpaced(out []bool, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
 	if nullCount > 0 {
 		toRead := len(out) - nullCount
@@ -289,4 +360,9 @@ func (dec *RleBooleanDecoder) DecodeSpaced(out []bool, nullCount int, validBits 
 		return spacedExpand(out, nullCount, validBits, validBitsOffset), nil
 	}
 	return dec.Decode(out)
+}
+
+func (dec *RleBooleanDecoder) DecodeSpacedToBitmap(out []byte, outOffset int64,
+	length, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
+	return decodeSpacedToBitmap(dec, out, outOffset, length, nullCount, validBits, validBitsOffset)
 }
