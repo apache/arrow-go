@@ -28,8 +28,9 @@ import (
 
 func BenchmarkPlainBooleanEncoderPutSpacedBitmap(b *testing.B) {
 	patterns := []struct {
-		name  string
-		valid func(int) bool
+		name         string
+		bitmapOffset int
+		valid        func(int) bool
 	}{
 		{name: "all_valid", valid: func(int) bool { return true }},
 		{name: "one_percent_null", valid: func(i int) bool { return i%100 != 0 }},
@@ -37,14 +38,32 @@ func BenchmarkPlainBooleanEncoderPutSpacedBitmap(b *testing.B) {
 		{name: "fifty_percent_null", valid: func(i int) bool { return i%2 != 0 }},
 		{name: "ninety_percent_null", valid: func(i int) bool { return i%10 == 0 }},
 		{name: "clustered", valid: func(i int) bool { return i%1024 >= 256 }},
+		{
+			name:  "eight_valid_eight_null_aligned",
+			valid: func(i int) bool { return i%16 < 8 },
+		},
+		{
+			name:         "eight_valid_eight_null_unaligned",
+			bitmapOffset: 1,
+			valid:        func(i int) bool { return i%16 < 8 },
+		},
+		{
+			name:  "twenty_four_valid_eight_null_aligned",
+			valid: func(i int) bool { return i%32 < 24 },
+		},
+		{
+			name:         "twenty_four_valid_eight_null_unaligned",
+			bitmapOffset: 1,
+			valid:        func(i int) bool { return i%32 < 24 },
+		},
 	}
 
 	for _, length := range []int{1024, 64 * 1024, 1024 * 1024} {
 		b.Run(fmt.Sprintf("length_%d", length), func(b *testing.B) {
-			bitmap := makeBooleanBitmap(length, func(i int) bool { return i%3 != 0 })
 			for _, pattern := range patterns {
 				b.Run(pattern.name, func(b *testing.B) {
-					validity := makeBooleanBitmap(length, pattern.valid)
+					bitmap := makeBooleanBitmap(length, pattern.bitmapOffset, func(i int) bool { return i%3 != 0 })
+					validity := makeBooleanBitmap(length, 0, pattern.valid)
 					expectedValid := int64(bitutil.CountSetBits(validity, 0, length))
 					encoder := encoding.NewEncoder(
 						parquet.Types.Boolean, parquet.Encodings.Plain,
@@ -56,7 +75,7 @@ func BenchmarkPlainBooleanEncoderPutSpacedBitmap(b *testing.B) {
 					b.SetBytes(int64(length))
 					b.ResetTimer()
 					for b.Loop() {
-						if actual := spaced.PutSpacedBitmap(bitmap, 0, int64(length), validity, 0); actual != expectedValid {
+						if actual := spaced.PutSpacedBitmap(bitmap, int64(pattern.bitmapOffset), int64(length), validity, 0); actual != expectedValid {
 							b.Fatalf("expected %d valid values, got %d", expectedValid, actual)
 						}
 						buf, err := encoder.FlushValues()
@@ -71,11 +90,11 @@ func BenchmarkPlainBooleanEncoderPutSpacedBitmap(b *testing.B) {
 	}
 }
 
-func makeBooleanBitmap(length int, value func(int) bool) []byte {
-	bitmap := make([]byte, bitutil.BytesForBits(int64(length)))
+func makeBooleanBitmap(length, offset int, value func(int) bool) []byte {
+	bitmap := make([]byte, bitutil.BytesForBits(int64(length+offset)))
 	for i := range length {
 		if value(i) {
-			bitutil.SetBit(bitmap, i)
+			bitutil.SetBit(bitmap, offset+i)
 		}
 	}
 	return bitmap

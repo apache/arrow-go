@@ -133,12 +133,27 @@ func (enc *PlainBooleanEncoder) PutSpacedBitmap(bitmap []byte, bitmapOffset int6
 		if run.Length == 0 {
 			break
 		}
-		// Bitmap copies need word readers for unaligned ranges. For short runs,
-		// writing the bits directly avoids that setup and its allocations.
-		if run.Length < scalarBitmapRunLimit {
-			enc.putBitmapScalar(bitmap, bitmapOffset+run.Pos, run.Length)
-		} else {
-			enc.PutBitmap(bitmap, bitmapOffset+run.Pos, run.Length)
+		// Bitmap copies need word readers for unaligned ranges. Keep the
+		// scalar path for short runs unless the run is an exact byte multiple:
+		// when both ranges are byte-aligned, PutBitmap uses a cheaper byte copy.
+		switch run.Length {
+		case 8, 16, 24:
+			srcOffset := bitmapOffset + run.Pos
+			dstOffset := int64(0)
+			if enc.wr != nil {
+				dstOffset = int64(enc.wr.Pos())
+			}
+			if srcOffset%8 != 0 || dstOffset%8 != 0 {
+				enc.putBitmapScalar(bitmap, srcOffset, run.Length)
+			} else {
+				enc.PutBitmap(bitmap, srcOffset, run.Length)
+			}
+		default:
+			if run.Length < scalarBitmapRunLimit {
+				enc.putBitmapScalar(bitmap, bitmapOffset+run.Pos, run.Length)
+			} else {
+				enc.PutBitmap(bitmap, bitmapOffset+run.Pos, run.Length)
+			}
 		}
 		numValid += run.Length
 	}

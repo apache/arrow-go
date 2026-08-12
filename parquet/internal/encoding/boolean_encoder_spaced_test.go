@@ -17,6 +17,7 @@
 package encoding_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
@@ -56,6 +57,54 @@ func TestPlainBooleanEncoderPutSpacedBitmapOffsetsAndBoundaries(t *testing.T) {
 			actual := encodeSpacedBooleanBitmap(
 				t, bitmap, int64(test.bitmapOffset), int64(test.length),
 				validity, int64(test.validityOffset),
+			)
+			assert.Equal(t, expected, actual)
+		})
+	}
+}
+
+func TestPlainBooleanEncoderPutSpacedBitmapMixedRunLengths(t *testing.T) {
+	const length = 129
+	bitmapOffset := 3
+	validityOffset := 5
+	bitmap, validity, expected := makeSpacedBooleanInput(
+		length, bitmapOffset, validityOffset,
+		func(i int) bool {
+			switch {
+			case i < 17:
+				return true
+			case i < 20:
+				return false
+			case i < 84:
+				return true
+			case i < 89:
+				return false
+			case i < 96:
+				return true
+			default:
+				return false
+			}
+		},
+	)
+
+	actual := encodeSpacedBooleanBitmap(
+		t, bitmap, int64(bitmapOffset), length,
+		validity, int64(validityOffset),
+	)
+	assert.Equal(t, expected, actual)
+}
+
+func TestPlainBooleanEncoderPutSpacedBitmapShortRunBoundary(t *testing.T) {
+	for _, length := range []int{31, 32, 33} {
+		t.Run(fmt.Sprintf("valid_run_%d", length), func(t *testing.T) {
+			bitmapOffset := 1
+			validityOffset := 2
+			bitmap, validity, expected := makeSpacedBooleanInput(
+				length, bitmapOffset, validityOffset, func(int) bool { return true },
+			)
+			actual := encodeSpacedBooleanBitmap(
+				t, bitmap, int64(bitmapOffset), int64(length),
+				validity, int64(validityOffset),
 			)
 			assert.Equal(t, expected, actual)
 		})
