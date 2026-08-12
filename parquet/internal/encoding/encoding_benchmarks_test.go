@@ -17,6 +17,7 @@
 package encoding_test
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"testing"
@@ -465,6 +466,40 @@ func BenchmarkEncodeDictNumeric(b *testing.B) {
 		col := schema.NewColumn(schema.NewFloat64Node("float64", parquet.Repetitions.Required, -1), 0, 0)
 		benchmarkEncodeDictNumeric[float64](b, parquet.Types.Double, col, int64(arrow.Float64SizeBytes))
 	})
+}
+
+func BenchmarkEncodePlainByteArray(b *testing.B) {
+	const nvalues = 1 << 20
+	validBits := bytes.Repeat([]byte{0xff}, nvalues/8)
+
+	for _, width := range []int{4, 16, 64} {
+		value := bytes.Repeat([]byte{'a'}, width)
+		values := make([]parquet.ByteArray, nvalues)
+		for i := range values {
+			values[i] = value
+		}
+
+		for _, tc := range []struct {
+			name string
+			put  func(encoding.ByteArrayEncoder)
+		}{
+			{name: "Put", put: func(enc encoding.ByteArrayEncoder) { enc.Put(values) }},
+			{name: "PutSpaced", put: func(enc encoding.ByteArrayEncoder) { enc.PutSpaced(values, validBits, 0) }},
+		} {
+			b.Run(fmt.Sprintf("width=%d/%s", width, tc.name), func(b *testing.B) {
+				b.SetBytes(int64(nvalues * (width + arrow.Uint32SizeBytes)))
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					enc := encoding.NewEncoder(parquet.Types.ByteArray, parquet.Encodings.Plain, false, nil, memory.DefaultAllocator).(encoding.ByteArrayEncoder)
+					tc.put(enc)
+					if got, want := enc.EstimatedDataEncodedSize(), int64(nvalues*(width+arrow.Uint32SizeBytes)); got != want {
+						b.Fatalf("encoded size = %d, want %d", got, want)
+					}
+					enc.Release()
+				}
+			})
+		}
+	}
 }
 
 func BenchmarkDecodeDictByteArray(b *testing.B) {
