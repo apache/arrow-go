@@ -374,6 +374,26 @@ func TestRecordEncoderCompressionErrorDoesNotDeadlock(t *testing.T) {
 	}
 }
 
+func TestRecordEncoderReturnsCompressionError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int8}}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+	builder.Field(0).(*array.Int8Builder).Append(1)
+	record := builder.NewRecordBatch()
+	defer record.Release()
+
+	want := errors.New("compression failed")
+	encoder := newRecordEncoder(mem, 0, kMaxNestingDepth, true,
+		flatbuf.CompressionTypeZSTD, 1, 0, []compressor{failingCompressor{err: want}})
+	var payload Payload
+	defer payload.Release()
+
+	require.ErrorIs(t, encoder.Encode(&payload, record), want)
+}
+
 func TestWriteWithCompressionAndMinSavings(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
