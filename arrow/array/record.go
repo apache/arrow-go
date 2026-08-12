@@ -563,6 +563,18 @@ func (checkpoint *builderCheckpoint) restore() {
 // for nested field decoding. This is critical for preserving large integer
 // values (>2^53) that cannot be represented exactly as float64.
 func (b *RecordBuilder) UnmarshalOne(dec *json.Decoder) error {
+	if len(b.checkpoints) != len(b.fields) {
+		b.checkpoints = make([]*builderCheckpoint, len(b.fields))
+		for i, field := range b.fields {
+			b.checkpoints[i] = newBuilderCheckpoint(field)
+		}
+	} else {
+		for i, checkpoint := range b.checkpoints {
+			if checkpoint.builder != b.fields[i] {
+				b.checkpoints[i] = newBuilderCheckpoint(b.fields[i])
+			}
+		}
+	}
 	for _, checkpoint := range b.checkpoints {
 		checkpoint.capture()
 	}

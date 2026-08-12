@@ -983,6 +983,37 @@ func TestRecordBuilderRollsBackRunEndStateAfterDecodeError(t *testing.T) {
 	}
 }
 
+func TestRecordBuilderRefreshesCheckpointsAfterFieldReplacement(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	fields := builder.Fields()
+	old := fields[0]
+	fields[0] = array.NewInt32Builder(mem)
+	old.Release()
+
+	if err := builder.UnmarshalJSON([]byte(`{"value":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := builder.UnmarshalJSON([]byte(`{"value":"invalid"}`)); err == nil {
+		t.Fatal("expected a decode error")
+	}
+	if err := builder.UnmarshalJSON([]byte(`{"value":2}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+	values := rec.Column(0).(*array.Int32)
+	assert.Equal(t, 2, values.Len())
+	assert.Equal(t, int32(1), values.Value(0))
+	assert.Equal(t, int32(2), values.Value(1))
+}
+
 func TestRecordBuilderRollsBackNestedRunEndStateAfterDecodeError(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)

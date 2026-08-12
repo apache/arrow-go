@@ -18,6 +18,7 @@ package hashing_test
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -64,6 +65,21 @@ func TestMemoTableTruncate(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, found)
 	assert.Equal(t, 0, idx)
+}
+
+func TestMemoTableTruncateNoOp(t *testing.T) {
+	table := hashing.NewMemoTable[int32](0)
+
+	idx, found, err := table.GetOrInsert(int32(7))
+	assert.NoError(t, err)
+	assert.False(t, found)
+	assert.Equal(t, 0, idx)
+
+	table.Truncate(1)
+	table.Truncate(math.MaxInt)
+
+	assert.Equal(t, 1, table.Size())
+	assertGetMemoValue(t, table, int32(7), 0)
 }
 
 func assertGetMemoValue(t *testing.T, table *hashing.Table[int32], value int32, want int) {

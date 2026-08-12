@@ -206,6 +206,9 @@ func (t *Table[T]) Truncate(size int) {
 	if size < 0 {
 		panic("cannot truncate a memo table to a negative size")
 	}
+	if size >= t.Size() {
+		return
+	}
 	t.tbl.Truncate(uint64(size))
 	if t.nullIdx >= int32(size) {
 		t.nullIdx = KeyNotFound
