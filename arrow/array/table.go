@@ -308,6 +308,7 @@ type TableReader struct {
 	chunks  []*arrow.Chunked
 	slots   []int   // chunk indices
 	offsets []int64 // chunk offsets
+	batch   []arrow.Array
 }
 
 // NewTableReader returns a new TableReader to iterate over the (possibly chunked) Table.
@@ -322,6 +323,7 @@ func NewTableReader(tbl arrow.Table, chunkSize int64) *TableReader {
 		chunks:  make([]*arrow.Chunked, ncols),
 		slots:   make([]int, ncols),
 		offsets: make([]int64, ncols),
+		batch:   make([]arrow.Array, ncols),
 	}
 	tr.refCount.Add(1)
 	tr.tbl.Retain()
@@ -355,8 +357,7 @@ func (tr *TableReader) Next() bool {
 
 	// determine the minimum contiguous slice across all columns
 	chunksz := imin64(tr.max-tr.cur, tr.chksz)
-	chunks := make([]arrow.Array, len(tr.chunks))
-	for i := range chunks {
+	for i := range tr.chunks {
 		j := tr.slots[i]
 		chunk := tr.chunks[i].Chunk(j)
 		for chunk.Len() == 0 && j+1 < len(tr.chunks[i].Chunks()) {
@@ -369,12 +370,11 @@ func (tr *TableReader) Next() bool {
 			chunksz = remain
 		}
 
-		chunks[i] = chunk
 	}
 
 	// slice the chunks, advance each chunk slot as appropriate.
-	batch := make([]arrow.Array, len(tr.chunks))
-	for i, chunk := range chunks {
+	for i := range tr.chunks {
+		chunk := tr.chunks[i].Chunk(tr.slots[i])
 		var slice arrow.Array
 		offset := tr.offsets[i]
 		switch int64(chunk.Len()) - offset {
@@ -393,13 +393,13 @@ func (tr *TableReader) Next() bool {
 			tr.offsets[i] += chunksz
 			slice = NewSlice(chunk, offset, offset+chunksz)
 		}
-		batch[i] = slice
+		tr.batch[i] = slice
 	}
 
 	tr.cur += chunksz
-	tr.rec = NewRecordBatch(tr.tbl.Schema(), batch, chunksz)
+	tr.rec = NewRecordBatch(tr.tbl.Schema(), tr.batch, chunksz)
 
-	for _, arr := range batch {
+	for _, arr := range tr.batch {
 		arr.Release()
 	}
 
@@ -430,6 +430,7 @@ func (tr *TableReader) Release() {
 		tr.chunks = nil
 		tr.slots = nil
 		tr.offsets = nil
+		tr.batch = nil
 	}
 }
 func (tr *TableReader) Err() error { return nil }
