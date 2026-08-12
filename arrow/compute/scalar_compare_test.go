@@ -490,10 +490,16 @@ func (c *CompareTimestampSuite) TestBasics() {
 	var (
 		example1JSON = `["1970-01-01", "2000-02-29", "1900-02-28"]`
 		example2JSON = `["1970-01-02", "2000-02-01", "1900-02-28"]`
+		zoned1JSON   = `["1970-01-01T00:00:00Z", "2000-02-29T00:00:00Z", "1900-02-28T00:00:00Z"]`
+		zoned2JSON   = `["1970-01-02T00:00:00Z", "2000-02-01T00:00:00Z", "1900-02-28T00:00:00Z"]`
 	)
 
 	checkCase := func(dt arrow.DataType, op kernels.CompareOperator, expected string) {
-		c.validateCompare(op, dt, example1JSON, example2JSON, expected)
+		input1, input2 := example1JSON, example2JSON
+		if dt.(*arrow.TimestampType).TimeZone != "" {
+			input1, input2 = zoned1JSON, zoned2JSON
+		}
+		c.validateCompare(op, dt, input1, input2, expected)
 	}
 
 	seconds := arrow.FixedWidthTypes.Timestamp_s
@@ -533,8 +539,12 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 		{"greater_equal", `[false, true, true]`},
 	}
 
-	const lhsJSON = `["1970-01-01", "2000-02-29", "1900-02-28"]`
-	const rhsJSON = `["1970-01-02", "2000-02-01", "1900-02-28"]`
+	const (
+		lhsJSON      = `["1970-01-01", "2000-02-29", "1900-02-28"]`
+		rhsJSON      = `["1970-01-02", "2000-02-01", "1900-02-28"]`
+		zonedLHSJSON = `["1970-01-01T00:00:00Z", "2000-02-29T00:00:00Z", "1900-02-28T00:00:00Z"]`
+		zonedRHSJSON = `["1970-01-02T00:00:00Z", "2000-02-01T00:00:00Z", "1900-02-28T00:00:00Z"]`
+	)
 
 	for _, op := range cases {
 		c.Run(op.fn, func() {
@@ -551,9 +561,9 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()}, expected, nil)
 			})
 			c.Run("diff time zones", func() {
-				lhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/New_York"}, lhsJSON)
+				lhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/New_York"}, zonedLHSJSON)
 				defer lhs.Release()
-				rhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/Phoenix"}, rhsJSON)
+				rhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/Phoenix"}, zonedRHSJSON)
 				defer rhs.Release()
 
 				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()}, expected, nil)
@@ -561,14 +571,14 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 			c.Run("native to zoned", func() {
 				lhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second}, lhsJSON)
 				defer lhs.Release()
-				rhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/Phoenix"}, rhsJSON)
+				rhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/Phoenix"}, zonedRHSJSON)
 				defer rhs.Release()
 
 				_, err := compute.CallFunction(c.ctx, op.fn, nil, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()})
 				c.ErrorIs(err, arrow.ErrInvalid)
 				c.ErrorContains(err, "cannot compare timestamp with timezone to timestamp without timezone")
 
-				lhs = c.getArr(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/New_York"}, lhsJSON)
+				lhs = c.getArr(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/New_York"}, zonedLHSJSON)
 				defer lhs.Release()
 				rhs = c.getArr(&arrow.TimestampType{Unit: arrow.Second}, rhsJSON)
 				defer rhs.Release()
@@ -582,13 +592,25 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 }
 
 func (c *CompareTimestampSuite) TestScalarArray() {
-	const scalarStr = "1970-01-02"
-	const arrayJSON = `["1970-01-02", "2000-02-01", null, "1900-02-28"]`
+	const (
+		scalarStr      = "1970-01-02"
+		scalarZonedStr = "1970-01-02T00:00:00Z"
+		arrayJSON      = `["1970-01-02", "2000-02-01", null, "1900-02-28"]`
+		arrayZonedJSON = `["1970-01-02T00:00:00Z", "2000-02-01T00:00:00Z", null, "1900-02-28T00:00:00Z"]`
+	)
 
 	checkArrCase := func(scType, arrayType arrow.DataType, op kernels.CompareOperator, expectedJSON, flipExpectedJSON string) {
-		scalarSide, err := scalar.MakeScalarParam(scalarStr, scType)
+		scalarValue := scalarStr
+		arrayValue := arrayJSON
+		if scType.(*arrow.TimestampType).TimeZone != "" {
+			scalarValue = scalarZonedStr
+		}
+		if arrayType.(*arrow.TimestampType).TimeZone != "" {
+			arrayValue = arrayZonedJSON
+		}
+		scalarSide, err := scalar.MakeScalarParam(scalarValue, scType)
 		c.Require().NoError(err)
-		arraySide := c.getArr(arrayType, arrayJSON)
+		arraySide := c.getArr(arrayType, arrayValue)
 		defer arraySide.Release()
 
 		expected := c.getArr(arrow.FixedWidthTypes.Boolean, expectedJSON)
