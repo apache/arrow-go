@@ -500,6 +500,12 @@ func (r *Reader) initFieldConverter(bldr array.Builder) func(string) {
 			}
 		}
 	case *arrow.TimestampType:
+		if _, err := dt.GetZone(); err != nil {
+			if r.err == nil {
+				r.err = err
+			}
+			return func(string) {}
+		}
 		return func(str string) {
 			r.parseTimestamp(bldr, str)
 		}

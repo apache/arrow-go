@@ -776,7 +776,65 @@ func TestCSVWriterUsesTimestampTimezone(t *testing.T) {
 	writer := csv.NewWriter(&output, schema)
 	require.NoError(t, writer.Write(record))
 	require.NoError(t, writer.Flush())
-	assert.Equal(t, "1969-12-31 19:00:00\n", output.String())
+	assert.Equal(t, "1969-12-31 19:00:00-05:00\n", output.String())
+}
+
+func TestCSVWriterReaderTimestampRoundTrip(t *testing.T) {
+	tests := []struct {
+		name    string
+		typ     *arrow.TimestampType
+		value   arrow.Timestamp
+		wantCSV string
+	}{
+		{
+			name:    "timezone-less",
+			typ:     &arrow.TimestampType{Unit: arrow.Second},
+			value:   1234,
+			wantCSV: "1970-01-01 00:20:34\n",
+		},
+		{
+			name:    "UTC",
+			typ:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "UTC"},
+			value:   0,
+			wantCSV: "1970-01-01 00:00:00Z\n",
+		},
+		{
+			name:    "named timezone",
+			typ:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/New_York"},
+			value:   0,
+			wantCSV: "1969-12-31 19:00:00-05:00\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
+			builder := array.NewTimestampBuilder(mem, tc.typ)
+			builder.Append(tc.value)
+			values := builder.NewTimestampArray()
+			builder.Release()
+			defer values.Release()
+
+			schema := arrow.NewSchema([]arrow.Field{{Name: "timestamp", Type: tc.typ}}, nil)
+			record := array.NewRecordBatch(schema, []arrow.Array{values}, 1)
+			defer record.Release()
+
+			var output bytes.Buffer
+			writer := csv.NewWriter(&output, schema)
+			require.NoError(t, writer.Write(record))
+			require.NoError(t, writer.Flush())
+			assert.Equal(t, tc.wantCSV, output.String())
+
+			reader := csv.NewReader(strings.NewReader(output.String()), schema)
+			defer reader.Release()
+			require.True(t, reader.Next())
+			require.NoError(t, reader.Err())
+			got := reader.RecordBatch().Column(0).(*array.Timestamp)
+			assert.Equal(t, tc.value, got.Value(0))
+		})
+	}
 }
 
 func TestCSVWriterRejectsInvalidTimestampTimezone(t *testing.T) {

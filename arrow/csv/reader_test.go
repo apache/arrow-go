@@ -365,6 +365,39 @@ func TestReadCSVTimestampTimezonePresence(t *testing.T) {
 	}
 }
 
+func TestCSVReaderInvalidTimestampTimezoneDoesNotPanic(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{
+			Name:     "ts",
+			Type:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "not/a_timezone"},
+			Nullable: true,
+		},
+		{Name: "value", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+	}, nil)
+	r := csv.NewReader(strings.NewReader("1970-01-01T00:00:00Z,1\n"), schema)
+	defer r.Release()
+
+	assert.NotPanics(t, func() {
+		assert.False(t, r.Next())
+	})
+	assert.ErrorContains(t, r.Err(), "could not find timezone location")
+}
+
+func TestCSVReaderInvalidTimestampTimezoneWithNullValue(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{
+		Name:     "ts",
+		Type:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "not/a_timezone"},
+		Nullable: true,
+	}}, nil)
+	r := csv.NewReader(strings.NewReader("NULL\n"), schema, csv.WithNullReader(true, "NULL"))
+	defer r.Release()
+
+	assert.NotPanics(t, func() {
+		assert.False(t, r.Next())
+	})
+	assert.ErrorContains(t, r.Err(), "could not find timezone location")
+}
+
 func TestCSVReader(t *testing.T) {
 	tests := []struct {
 		Name             string

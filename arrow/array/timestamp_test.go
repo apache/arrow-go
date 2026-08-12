@@ -309,6 +309,21 @@ func TestTimestampValueStrWithDeprecatedLayout(t *testing.T) {
 	assert.Equal(t, "2016-02-29 10:42:23-0700", arr.ValueStr(1))
 }
 
+func TestTimestampValueStrWithEmptyCustomLayout(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dt := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "UTC"}
+	b := array.NewTimestampBuilderWithValueStrLayout(mem, dt, "")
+	defer b.Release()
+
+	b.Append(0)
+	arr := b.NewArray()
+	defer arr.Release()
+
+	assert.Empty(t, arr.ValueStr(0))
+}
+
 func TestTimestampEquality(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
