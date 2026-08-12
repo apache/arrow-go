@@ -19,11 +19,13 @@ package pqarrow
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -264,6 +266,121 @@ func TestBuildFixedSizeListArrayConcatenatesSpecializedChildren(t *testing.T) {
 		assert.True(t, storage.IsNull(2))
 		assert.True(t, storage.IsNull(3))
 	})
+}
+
+func TestBuildFixedSizeListArrayDirectChildren(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	const (
+		length   = 2048
+		listSize = 2
+	)
+	validityBytes := make([]byte, bitutil.BytesForBits(length))
+	offsets := make([]int32, length+1)
+	validCount := 0
+	for i := 0; i < length; i++ {
+		offsets[i] = int32(validCount * listSize)
+		if i%2 == 0 {
+			bitutil.SetBit(validityBytes, i)
+			validCount++
+		}
+	}
+	offsets[length] = int32(validCount * listSize)
+
+	builder := array.NewInt32Builder(mem)
+	values := make([]int32, validCount*listSize)
+	for i := range values {
+		values[i] = int32(i)
+	}
+	builder.AppendValues(values, nil)
+	item := builder.NewArray()
+	builder.Release()
+	defer item.Release()
+
+	validity := memory.NewBufferBytes(validityBytes)
+	defer validity.Release()
+	listType := arrow.FixedSizeListOf(listSize, arrow.PrimitiveTypes.Int32)
+	field := arrow.Field{Type: listType, Nullable: true}
+	lr := &listReader{rctx: &readerCtx{mem: mem}, field: &field}
+
+	out, err := lr.buildFixedSizeListArray(length, offsets, validity, length/2, item)
+	require.NoError(t, err)
+	defer out.Release()
+
+	list := out.Chunk(0).(*array.FixedSizeList)
+	valuesArray := list.ListValues().(*array.Int32)
+	require.Equal(t, length*listSize, valuesArray.Len())
+	for i := 0; i < length; i++ {
+		if i%2 == 0 {
+			assert.True(t, list.IsValid(i))
+			assert.Equal(t, int32((i/2)*listSize), valuesArray.Value(i*listSize))
+		} else {
+			assert.True(t, list.IsNull(i))
+			assert.True(t, valuesArray.IsNull(i*listSize))
+		}
+	}
+}
+
+func BenchmarkBuildFixedSizeListArray(b *testing.B) {
+	const (
+		length   = 1 << 16
+		listSize = 4
+	)
+
+	tests := []struct {
+		name  string
+		valid func(int) bool
+	}{
+		{name: "no_nulls", valid: func(int) bool { return true }},
+		{name: "ten_percent_nulls", valid: func(i int) bool { return i%10 != 0 }},
+		{name: "clustered_half_null", valid: func(i int) bool { return i < length/2 }},
+		{name: "alternating", valid: func(i int) bool { return i%2 == 0 }},
+	}
+
+	for _, tt := range tests {
+		b.Run(fmt.Sprintf("%s/length=%d", tt.name, length), func(b *testing.B) {
+			mem := memory.NewGoAllocator()
+			offsets := make([]int32, length+1)
+			validityBytes := make([]byte, bitutil.BytesForBits(length))
+			validCount := 0
+			for i := 0; i < length; i++ {
+				offsets[i] = int32(validCount * listSize)
+				if tt.valid(i) {
+					bitutil.SetBit(validityBytes, i)
+					validCount++
+				}
+			}
+			offsets[length] = int32(validCount * listSize)
+
+			builder := array.NewInt32Builder(mem)
+			builder.AppendValues(make([]int32, validCount*listSize), nil)
+			item := builder.NewArray()
+			builder.Release()
+			defer item.Release()
+
+			var validity *memory.Buffer
+			nullCount := int64(length - validCount)
+			if nullCount > 0 {
+				validity = memory.NewBufferBytes(validityBytes)
+				defer validity.Release()
+			}
+
+			listType := arrow.FixedSizeListOf(listSize, arrow.PrimitiveTypes.Int32)
+			field := arrow.Field{Type: listType, Nullable: true}
+			lr := &listReader{rctx: &readerCtx{mem: mem}, field: &field}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				out, err := lr.buildFixedSizeListArray(length, offsets, validity, nullCount, item)
+				if err != nil {
+					b.Fatal(err)
+				}
+				out.Release()
+			}
+		})
+	}
 }
 
 func TestChunkedTableRoundTrip(t *testing.T) {
