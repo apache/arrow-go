@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -389,9 +390,10 @@ func (t *TimestampType) ClearCachedLocation() {
 }
 
 // GetZone returns a *time.Location that represents the current TimeZone member
-// of the TimestampType. If it is "", "UTC", or "utc", you'll get time.UTC.
-// Otherwise it must either be a valid tzdata string such as "America/New_York"
-// or of the format +HH:MM or -HH:MM indicating an absolute offset.
+// of the TimestampType. If it is empty or any case-insensitive spelling of
+// "UTC", you'll get time.UTC. Otherwise it must either be a valid tzdata string
+// such as "America/New_York" or of the format +HH:MM or -HH:MM indicating an
+// absolute offset.
 //
 // The location object will be cached in the TimestampType for subsequent calls
 // so if you change the value of TimeZone after calling this, make sure to call
@@ -417,7 +419,7 @@ func (t *TimestampType) GetZone() (*time.Location, error) {
 	//
 	// As such we have two methods we can try, first we'll try LoadLocation
 	// and if that fails, we'll test for an absolute offset.
-	if t.TimeZone == "" || t.TimeZone == "UTC" || t.TimeZone == "utc" {
+	if t.TimeZone == "" || strings.EqualFold(t.TimeZone, "utc") {
 		t.loc = time.UTC
 		return time.UTC, nil
 	}

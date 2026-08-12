@@ -22,7 +22,6 @@ import (
 	"math/bits"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -42,10 +41,8 @@ type TypeFromScalar interface {
 }
 
 func parseTimestamp(val string, dt *arrow.TimestampType) (arrow.Timestamp, error) {
-	if dt.TimeZone != "" && !strings.EqualFold(dt.TimeZone, "utc") {
-		if _, err := dt.GetZone(); err != nil {
-			return 0, err
-		}
+	if _, err := dt.GetZone(); err != nil {
+		return 0, err
 	}
 
 	return arrow.TimestampFromString(val, dt.Unit)
