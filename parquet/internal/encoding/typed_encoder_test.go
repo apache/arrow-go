@@ -18,6 +18,7 @@ package encoding
 
 import (
 	"testing"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -26,6 +27,49 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
 )
+
+func assertTypedDictEncoderPut[T int32 | int64 | float32 | float64](t *testing.T, values, expectedDict []T, expectedIndices []int32) {
+	t.Helper()
+	enc := &typedDictEncoder[T]{newDictEncoderBase(nil, NewDictionary[T](), memory.DefaultAllocator)}
+	defer enc.Release()
+
+	split := len(values) / 2
+	enc.Put(values[:split])
+	enc.Put(values[split:])
+
+	assert.Equal(t, expectedIndices, enc.idxValues)
+	actualDict := make([]T, len(expectedDict))
+	enc.memo.CopyValues(actualDict)
+	assert.Equal(t, expectedDict, actualDict)
+	assert.Equal(t, len(expectedDict)*int(unsafe.Sizeof(T(0))), enc.DictEncodedSize())
+}
+
+func TestTypedDictEncoderPut(t *testing.T) {
+	t.Run("int32", func(t *testing.T) {
+		assertTypedDictEncoderPut(t,
+			[]int32{1, 2, 1, 4, 2},
+			[]int32{1, 2, 4},
+			[]int32{0, 1, 0, 2, 1})
+	})
+	t.Run("int64", func(t *testing.T) {
+		assertTypedDictEncoderPut(t,
+			[]int64{-1, 2, -1, 3, 2},
+			[]int64{-1, 2, 3},
+			[]int32{0, 1, 0, 2, 1})
+	})
+	t.Run("float32", func(t *testing.T) {
+		assertTypedDictEncoderPut(t,
+			[]float32{1.5, 2.5, 1.5, 3.5, 2.5},
+			[]float32{1.5, 2.5, 3.5},
+			[]int32{0, 1, 0, 2, 1})
+	})
+	t.Run("float64", func(t *testing.T) {
+		assertTypedDictEncoderPut(t,
+			[]float64{1.5, 2.5, 1.5, 3.5, 2.5},
+			[]float64{1.5, 2.5, 3.5},
+			[]int32{0, 1, 0, 2, 1})
+	})
+}
 
 func TestPutDictionary(t *testing.T) {
 	exp := []int32{1, 2, 4, 8, 16}
