@@ -464,9 +464,11 @@ func (c *Connector) Connect(ctx context.Context) (driver.Conn, error) {
 	}
 	client.Alloc = c.allocator
 
-	return &Connection{
-		client:  client,
-		timeout: c.timeout,
+	return &connBeginTx{
+		Connection: &Connection{
+			client:  client,
+			timeout: c.timeout,
+		},
 	}, nil
 }
 
@@ -482,6 +484,19 @@ type Connection struct {
 	txn    *flightsql.Txn
 
 	timeout time.Duration
+}
+
+type connBeginTx struct {
+	*Connection
+}
+
+var _ driver.ConnBeginTx = (*connBeginTx)(nil)
+
+func (c *connBeginTx) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	return c.Connection.BeginTx(ctx, sql.TxOptions{
+		Isolation: sql.IsolationLevel(opts.Isolation),
+		ReadOnly:  opts.ReadOnly,
+	})
 }
 
 // Prepare returns a prepared statement, bound to this connection.
@@ -639,6 +654,10 @@ func (c *Connection) Begin() (driver.Tx, error) {
 }
 
 func (c *Connection) BeginTx(ctx context.Context, opts sql.TxOptions) (driver.Tx, error) {
+	if opts.Isolation != sql.LevelDefault || opts.ReadOnly {
+		return nil, fmt.Errorf("%w: transaction options are not supported", ErrNotSupported)
+	}
+
 	tx, err := c.client.BeginTransaction(ctx)
 	if err != nil {
 		return nil, err
