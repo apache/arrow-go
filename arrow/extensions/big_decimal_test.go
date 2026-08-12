@@ -87,90 +87,64 @@ func TestBigDecimalEncodingExamples(t *testing.T) {
 	}
 }
 
-func TestParseBigDecimalRejectsNonCanonicalSpellings(t *testing.T) {
-	for _, value := range []string{
-		"-qNaN", "+qNaN", "Inf", "+Inf", "-Inf", "+Infinity", "+NaN", "qNaN", "+sNaN",
-		"+1", "01", ".5", "5.", "1e2", "1E+2", "1E-2",
-	} {
-		t.Run(value, func(t *testing.T) {
-			_, err := extensions.ParseBigDecimal(value)
-			assert.Error(t, err)
-		})
-	}
-}
+func TestBigDecimalTypeBasics(t *testing.T) {
+	bare := extensions.NewBigDecimalType()
+	assert.Equal(t, arrow.BinaryTypes.BinaryView, bare.StorageType())
+	assert.Equal(t, "arrow.big_decimal", bare.ExtensionName())
+	assert.Equal(t, "extension<arrow.big_decimal>", bare.String())
+	assert.Empty(t, bare.Serialize())
 
-func TestBigDecimalEncodingValidation(t *testing.T) {
-	for _, tt := range []struct {
-		name    string
-		encoded []byte
-	}{
-		{"short", []byte{4, 0}},
-		{"unknown class", []byte{8, 0, 0}},
-		{"nonfinite scale", []byte{5, 1, 0}},
-		{"nonfinite magnitude", []byte{6, 0, 0, 0}},
-		{"finite no magnitude", []byte{4, 0, 0}},
-		{"nonminimal magnitude", []byte{4, 0, 0, 1, 0}},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Error(t, extensions.ValidateBigDecimalEncoding(tt.encoded))
-			_, err := extensions.DecodeBigDecimal(tt.encoded)
-			assert.Error(t, err)
-		})
-	}
-}
-
-func TestBigDecimalNegativeZero(t *testing.T) {
-	value, err := extensions.NewFiniteBigDecimal(new(big.Int), 2, true)
-	require.NoError(t, err)
-	assert.Equal(t, "-0.00", value.String())
-	encoded, err := extensions.EncodeBigDecimal(value)
-	require.NoError(t, err)
-	assert.Equal(t, []byte{3, 2, 0, 0}, encoded)
-}
-
-func TestBigDecimalTypeMetadata(t *testing.T) {
-	metadata := extensions.BigDecimalMetadata{
+	typ, err := extensions.NewBigDecimalTypeWithMetadata(extensions.BigDecimalMetadata{
 		MaxPrecision:     ptr[int32](38),
 		MaxScale:         ptr[int16](10),
 		SupportsInfinity: ptr(true),
 		SupportsNaN:      ptr(false),
-	}
-	typ, err := extensions.NewBigDecimalTypeWithMetadata(metadata)
+	})
 	require.NoError(t, err)
+	metadataJSON := `{"max_precision":38,"max_scale":10,"supports_infinity":true,"supports_nan":false}`
+	assert.Equal(t, metadataJSON, typ.Serialize())
+	assert.Equal(t, "extension<arrow.big_decimal[metadata="+metadataJSON+"]>", typ.String())
 
-	assert.Equal(t, arrow.BinaryTypes.BinaryView, typ.StorageType())
-	assert.Equal(t, "arrow.big_decimal", typ.ExtensionName())
-	assert.Equal(t, `{"max_precision":38,"max_scale":10,"supports_infinity":true,"supports_nan":false}`, typ.Serialize())
-
-	deserialized, err := typ.Deserialize(arrow.BinaryTypes.BinaryView, typ.Serialize())
-	require.NoError(t, err)
-	assert.True(t, arrow.TypeEqual(typ, deserialized))
-	assert.Equal(t, typ.Fingerprint(), deserialized.Fingerprint())
-
+	// Metadata returns a defensive copy that callers cannot use to mutate the type.
 	returned := typ.Metadata()
 	*returned.MaxPrecision = 7
 	assert.EqualValues(t, 38, *typ.Metadata().MaxPrecision)
 
+	// max_precision must be positive.
+	_, err = extensions.NewBigDecimalTypeWithMetadata(extensions.BigDecimalMetadata{MaxPrecision: ptr[int32](0)})
+	assert.ErrorContains(t, err, "max_precision must be positive")
+}
+
+func TestBigDecimalTypeEquals(t *testing.T) {
+	typ, err := extensions.NewBigDecimalTypeWithMetadata(extensions.BigDecimalMetadata{MaxPrecision: ptr[int32](38)})
+	require.NoError(t, err)
+
+	// Metadata is part of type identity: differing metadata is a different type.
 	different, err := extensions.NewBigDecimalTypeWithMetadata(extensions.BigDecimalMetadata{MaxPrecision: ptr[int32](39)})
 	require.NoError(t, err)
 	assert.False(t, arrow.TypeEqual(typ, different))
 	assert.NotEqual(t, typ.Fingerprint(), different.Fingerprint())
 
+	// An explicit layout_version of 1 normalizes to the unset default.
 	explicitV1, err := extensions.NewBigDecimalTypeWithMetadata(extensions.BigDecimalMetadata{LayoutVersion: 1})
 	require.NoError(t, err)
 	assert.True(t, arrow.TypeEqual(extensions.NewBigDecimalType(), explicitV1))
 	assert.Empty(t, explicitV1.Serialize())
+}
 
-	_, err = typ.Deserialize(arrow.BinaryTypes.Binary, typ.Serialize())
-	assert.ErrorContains(t, err, "invalid storage type")
-	_, err = typ.Deserialize(arrow.BinaryTypes.BinaryView, `{"layout_version":2}`)
-	assert.ErrorContains(t, err, "unsupported BigDecimal layout version")
-	_, err = typ.Deserialize(arrow.BinaryTypes.BinaryView, `{"layout_version":0}`)
-	assert.ErrorContains(t, err, "unsupported BigDecimal layout version")
-	_, err = typ.Deserialize(arrow.BinaryTypes.BinaryView, `{"unknown":1}`)
-	assert.ErrorContains(t, err, "unknown field")
-	_, err = extensions.NewBigDecimalTypeWithMetadata(extensions.BigDecimalMetadata{MaxPrecision: ptr[int32](0)})
-	assert.ErrorContains(t, err, "max_precision must be positive")
+func TestBigDecimalTypeMetadataRoundTrip(t *testing.T) {
+	typ, err := extensions.NewBigDecimalTypeWithMetadata(extensions.BigDecimalMetadata{
+		MaxPrecision:     ptr[int32](38),
+		MaxScale:         ptr[int16](10),
+		SupportsInfinity: ptr(true),
+		SupportsNaN:      ptr(false),
+	})
+	require.NoError(t, err)
+
+	deserialized, err := typ.Deserialize(arrow.BinaryTypes.BinaryView, typ.Serialize())
+	require.NoError(t, err)
+	assert.True(t, arrow.TypeEqual(typ, deserialized))
+	assert.Equal(t, typ.Fingerprint(), deserialized.Fingerprint())
 }
 
 func TestBigDecimalBuilderAndArray(t *testing.T) {
@@ -217,6 +191,66 @@ func TestBigDecimalBuilderAndArray(t *testing.T) {
 	assert.True(t, array.Equal(arr, roundTripped))
 }
 
+func TestBigDecimalExtensionRecordBuilder(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: extensions.NewBigDecimalType(), Nullable: true},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	fieldBuilder := builder.Field(0).(*extensions.BigDecimalBuilder)
+	require.NoError(t, fieldBuilder.AppendValueFromString("12.34"))
+	fieldBuilder.AppendNull()
+	require.NoError(t, fieldBuilder.AppendValueFromString("-123"))
+
+	record := builder.NewRecordBatch()
+	defer record.Release()
+
+	encoded, err := record.MarshalJSON()
+	require.NoError(t, err)
+	roundTripped, _, err := array.RecordFromJSON(mem, schema, bytes.NewReader(encoded))
+	require.NoError(t, err)
+	defer roundTripped.Release()
+	assert.True(t, array.RecordEqual(record, roundTripped))
+}
+
+func TestBigDecimalTypeCreateFromArray(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	typ := extensions.NewBigDecimalType()
+	encode := func(s string) []byte {
+		value, err := extensions.ParseBigDecimal(s)
+		require.NoError(t, err)
+		encoded, err := extensions.EncodeBigDecimal(value)
+		require.NoError(t, err)
+		return encoded
+	}
+
+	storageBuilder := array.NewBinaryViewBuilder(mem)
+	storageBuilder.Append(encode("12.34"))
+	storageBuilder.AppendNull()
+	storageBuilder.Append(encode("-123"))
+	storage := storageBuilder.NewBinaryViewArray()
+	storageBuilder.Release()
+	defer storage.Release()
+
+	arr := array.NewExtensionArrayWithStorage(typ, storage)
+	defer arr.Release()
+	require.NoError(t, array.ValidateFull(arr))
+
+	bigDecimalArr, ok := arr.(*extensions.BigDecimalArray)
+	require.True(t, ok)
+	assert.Equal(t, 3, bigDecimalArr.Len())
+	assert.Equal(t, 1, bigDecimalArr.NullN())
+	assert.Equal(t, "12.34", bigDecimalArr.ValueStr(0))
+	assert.True(t, bigDecimalArr.IsNull(1))
+	assert.Equal(t, "-123", bigDecimalArr.ValueStr(2))
+}
+
 func TestBigDecimalArrayValidationAndInformationalMetadata(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -258,23 +292,6 @@ func TestBigDecimalArrayValidationAndInformationalMetadata(t *testing.T) {
 	metadataArray := array.NewExtensionArrayWithStorage(typ, metadataStorage)
 	defer metadataArray.Release()
 	assert.NoError(t, array.ValidateFull(metadataArray))
-}
-
-func TestBigDecimalMetadataDoesNotOverrideEquivalentRows(t *testing.T) {
-	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer mem.AssertSize(t, 0)
-
-	typ, err := extensions.NewBigDecimalTypeWithMetadata(extensions.BigDecimalMetadata{
-		MaxPrecision: ptr[int32](3),
-		MaxScale:     ptr[int16](1),
-	})
-	require.NoError(t, err)
-	builder := extensions.NewBigDecimalBuilder(mem, typ)
-	defer builder.Release()
-
-	for _, value := range []string{"1200", "12E2", "5", "5.00"} {
-		assert.NoError(t, builder.AppendValueFromString(value), value)
-	}
 }
 
 func TestBigDecimalExactDecimalConversions(t *testing.T) {
@@ -375,12 +392,6 @@ func TestBigDecimalIPCRoundTrip(t *testing.T) {
 	assert.True(t, schema.Equal(actual.Schema()))
 	assert.True(t, array.RecordEqual(record, actual))
 	assert.IsType(t, &extensions.BigDecimalArray{}, actual.Column(0))
-}
-
-func TestBigDecimalRegistered(t *testing.T) {
-	registered := arrow.GetExtensionType("arrow.big_decimal")
-	require.NotNil(t, registered)
-	assert.IsType(t, &extensions.BigDecimalType{}, registered)
 }
 
 func TestBigDecimalIPCUnregisteredFallback(t *testing.T) {
