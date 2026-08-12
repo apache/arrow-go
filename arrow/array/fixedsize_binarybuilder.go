@@ -162,6 +162,7 @@ func (b *FixedSizeBinaryBuilder) Reserve(n int) {
 // additional memory will be allocated. If n is smaller, the allocated memory may reduced.
 func (b *FixedSizeBinaryBuilder) Resize(n int) {
 	b.resize(n, b.init)
+	b.values.resize(b.capacity * b.dtype.ByteWidth)
 }
 
 func (b *FixedSizeBinaryBuilder) truncate(n int) {

@@ -101,3 +101,24 @@ func TestFixedWidthBuilderAppendNullsClearsReusedValidity(t *testing.T) {
 		require.True(t, result.IsNull(idx))
 	}
 }
+
+func TestFixedSizeBinaryBuilderAppendNullsAcrossGrowthBoundary(t *testing.T) {
+	const (
+		count    = 1 << 16
+		byteSize = 16
+	)
+
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	builder := array.NewFixedSizeBinaryBuilder(mem, &arrow.FixedSizeBinaryType{ByteWidth: byteSize})
+	builder.AppendNulls(count)
+	builder.AppendNulls(count)
+
+	result := builder.NewFixedSizeBinaryArray()
+	require.Equal(t, count*2, result.Len())
+	require.Equal(t, count*2, result.NullN())
+	require.Equal(t, count*2*byteSize, result.Data().Buffers()[1].Cap())
+	result.Release()
+	builder.Release()
+}
