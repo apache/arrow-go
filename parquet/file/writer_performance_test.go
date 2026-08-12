@@ -19,10 +19,12 @@ package file_test
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 )
@@ -100,6 +102,58 @@ func BenchmarkWriteDictionaryBloomFilter(b *testing.B) {
 				_ = column.Close()
 				_ = rowGroup.Close()
 				_ = writer.Close()
+			}
+		})
+	}
+}
+
+func BenchmarkWriteDataPageV2Eager(b *testing.B) {
+	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.Must(schema.NewPrimitiveNode("data", parquet.Repetitions.Required, parquet.Types.Int64, -1, -1)),
+	}, -1)))
+
+	const (
+		pageSize = 64 * 1024
+		numPages = 64
+	)
+	values := make([]int64, pageSize/arrow.Int64SizeBytes*numPages)
+	for i := range values {
+		values[i] = int64(i)
+	}
+
+	for _, codec := range []compress.Compression{compress.Codecs.Uncompressed, compress.Codecs.Snappy} {
+		b.Run(codec.String(), func(b *testing.B) {
+			props := parquet.NewWriterProperties(
+				parquet.WithStats(false),
+				parquet.WithDataPageVersion(parquet.DataPageV2),
+				parquet.WithDictionaryDefault(false),
+				parquet.WithCompression(codec),
+				parquet.WithBatchSize(int64(pageSize/arrow.Int64SizeBytes)),
+				parquet.WithDataPageSize(pageSize),
+			)
+
+			b.SetBytes(int64(len(values) * arrow.Int64SizeBytes))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				writer := file.NewParquetWriter(io.Discard, sc.Root(), file.WithWriterProps(props))
+				rgw := writer.AppendRowGroup()
+				colWriter, err := rgw.NextColumn()
+				if err != nil {
+					b.Fatal(err)
+				}
+				if _, err := colWriter.(*file.Int64ColumnChunkWriter).WriteBatch(values, nil, nil); err != nil {
+					b.Fatal(err)
+				}
+				if err := colWriter.Close(); err != nil {
+					b.Fatal(err)
+				}
+				if err := rgw.Close(); err != nil {
+					b.Fatal(err)
+				}
+				if err := writer.Close(); err != nil {
+					b.Fatal(err)
+				}
 			}
 		})
 	}

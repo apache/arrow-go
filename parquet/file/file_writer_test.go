@@ -312,7 +312,11 @@ func TestBufferedMultiPageDisabledDictionary(t *testing.T) {
 	)
 	var (
 		sink  = encoding.NewBufferWriter(0, memory.DefaultAllocator)
-		props = parquet.NewWriterProperties(parquet.WithDictionaryDefault(false), parquet.WithDataPageSize(pageSize))
+		props = parquet.NewWriterProperties(
+			parquet.WithDictionaryDefault(false),
+			parquet.WithDataPageVersion(parquet.DataPageV2),
+			parquet.WithDataPageSize(pageSize),
+		)
 		sc, _ = schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
 			schema.NewInt32Node("col", parquet.Repetitions.Required, -1),
 		}, -1)
