@@ -41,11 +41,24 @@ type TypeFromScalar interface {
 }
 
 func parseTimestamp(val string, dt *arrow.TimestampType) (arrow.Timestamp, error) {
-	if _, err := dt.GetZone(); err != nil {
+	loc, err := dt.GetZone()
+	if err != nil {
 		return 0, err
 	}
 
-	return arrow.TimestampFromString(val, dt.Unit)
+	ts, zonePresent, err := arrow.TimestampFromStringInLocation(val, dt.Unit, loc)
+	if err != nil {
+		return 0, err
+	}
+
+	if zonePresent != (dt.TimeZone != "") {
+		if dt.TimeZone != "" {
+			return 0, fmt.Errorf("%w: timestamp value %q for type %s must include a zone offset", arrow.ErrInvalid, val, dt)
+		}
+		return 0, fmt.Errorf("%w: timestamp value %q for type %s must not include a zone offset", arrow.ErrInvalid, val, dt)
+	}
+
+	return ts, nil
 }
 
 type hasTypename interface {

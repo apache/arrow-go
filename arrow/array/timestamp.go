@@ -38,9 +38,11 @@ type Timestamp struct {
 	layout string
 }
 
+const timestampNoTimezoneLayout = "2006-01-02T15:04:05.999999999"
+
 // NewTimestampData creates a new Timestamp from Data.
 func NewTimestampData(data arrow.ArrayData) *Timestamp {
-	return NewTimestampDataWithValueStrLayout(data, time.RFC3339Nano)
+	return NewTimestampDataWithValueStrLayout(data, "")
 }
 
 // NewTimestampDataWithValueStrLayout creates a new Timestamp from Data with a custom ValueStr layout.
@@ -101,10 +103,14 @@ func (a *Timestamp) ValueStr(i int) string {
 		return NullValueStr
 	}
 
-	toTime, _ := a.DataType().(*arrow.TimestampType).GetToTimeFunc()
+	typ := a.DataType().(*arrow.TimestampType)
+	toTime, _ := typ.GetToTimeFunc()
 	layout := a.layout
 	if layout == "" {
 		layout = time.RFC3339Nano
+		if typ.TimeZone == "" {
+			layout = timestampNoTimezoneLayout
+		}
 	}
 	return toTime(a.values[i]).Format(layout)
 }
@@ -146,7 +152,7 @@ type TimestampBuilder struct {
 }
 
 func NewTimestampBuilder(mem memory.Allocator, dtype *arrow.TimestampType) *TimestampBuilder {
-	return NewTimestampBuilderWithValueStrLayout(mem, dtype, time.RFC3339Nano)
+	return NewTimestampBuilderWithValueStrLayout(mem, dtype, "")
 }
 
 // NewTimestampBuilderWithValueStrLayout creates a new TimestampBuilder with a custom ValueStr layout.
@@ -316,6 +322,11 @@ func (b *TimestampBuilder) newData() (data *Data) {
 }
 
 func (b *TimestampBuilder) AppendValueFromString(s string) error {
+	loc, err := b.dtype.GetZone()
+	if err != nil {
+		return err
+	}
+
 	if s == NullValueStr {
 		b.AppendNull()
 		return nil
@@ -326,16 +337,20 @@ func (b *TimestampBuilder) AppendValueFromString(s string) error {
 		return nil
 	}
 
-	loc, err := b.dtype.GetZone()
-	if err != nil {
-		return err
-	}
-
-	v, _, err := arrow.TimestampFromStringInLocation(s, b.dtype.Unit, loc)
+	v, zonePresent, err := arrow.TimestampFromStringInLocation(s, b.dtype.Unit, loc)
 	if err != nil {
 		b.AppendNull()
 		return err
 	}
+
+	if zonePresent != (b.dtype.TimeZone != "") {
+		b.AppendNull()
+		if b.dtype.TimeZone != "" {
+			return fmt.Errorf("%w: timestamp value %q for type %s must include a zone offset", arrow.ErrInvalid, s, b.dtype)
+		}
+		return fmt.Errorf("%w: timestamp value %q for type %s must not include a zone offset", arrow.ErrInvalid, s, b.dtype)
+	}
+
 	b.Append(v)
 	return nil
 }
@@ -359,8 +374,15 @@ func (b *TimestampBuilder) UnmarshalOne(dec *json.Decoder) error {
 			b.Append(arrow.Timestamp(i))
 			break
 		}
-		tm, _, err := arrow.TimestampFromStringInLocation(v, b.dtype.Unit, loc)
+		tm, zonePresent, err := arrow.TimestampFromStringInLocation(v, b.dtype.Unit, loc)
 		if err != nil {
+			return &json.UnmarshalTypeError{
+				Value:  v,
+				Type:   reflect.TypeOf(arrow.Timestamp(0)),
+				Offset: dec.InputOffset(),
+			}
+		}
+		if zonePresent != (b.dtype.TimeZone != "") {
 			return &json.UnmarshalTypeError{
 				Value:  v,
 				Type:   reflect.TypeOf(arrow.Timestamp(0)),

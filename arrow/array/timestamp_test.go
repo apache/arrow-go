@@ -334,9 +334,8 @@ func TestTimestampEquality(t *testing.T) {
 	}
 
 	// No timezone, "wall clock" semantics
-	// These timestamps have no actual timezone, but we still represent as UTC per Go conventions
-	assert.Equal(t, "1968-11-30T20:30:45Z", arrs[0].ValueStr(0))
-	assert.Equal(t, "2016-02-29T17:42:23Z", arrs[0].ValueStr(1))
+	assert.Equal(t, "1968-11-30T20:30:45", arrs[0].ValueStr(0))
+	assert.Equal(t, "2016-02-29T17:42:23", arrs[0].ValueStr(1))
 
 	// UTC timezone, "instant" semantics
 	assert.Equal(t, "1968-11-30T20:30:45Z", arrs[1].ValueStr(0))

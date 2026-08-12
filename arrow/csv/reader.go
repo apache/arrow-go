@@ -501,7 +501,7 @@ func (r *Reader) initFieldConverter(bldr array.Builder) func(string) {
 		}
 	case *arrow.TimestampType:
 		return func(str string) {
-			r.parseTimestamp(bldr, str, dt.Unit)
+			r.parseTimestamp(bldr, str)
 		}
 	case *arrow.Date32Type:
 		return func(str string) {
@@ -741,21 +741,15 @@ func (r *Reader) parseFloat64(field array.Builder, str string) {
 	field.(*array.Float64Builder).Append(v)
 }
 
-// parses timestamps using millisecond precision
-func (r *Reader) parseTimestamp(field array.Builder, str string, unit arrow.TimeUnit) {
+func (r *Reader) parseTimestamp(field array.Builder, str string) {
 	if r.isNull(str) {
 		field.AppendNull()
 		return
 	}
 
-	v, err := arrow.TimestampFromString(str, unit)
-	if err != nil {
+	if err := field.(*array.TimestampBuilder).AppendValueFromString(str); err != nil {
 		r.setParseError(err)
-		field.AppendNull()
-		return
 	}
-
-	field.(*array.TimestampBuilder).Append(v)
 }
 
 func (r *Reader) parseDate32(field array.Builder, str string) {
