@@ -242,9 +242,13 @@ func (b *FixedSizeListBuilder) AppendNulls(n int) {
 	}
 
 	b.Reserve(n)
-	bitutil.SetBitsTo(b.nullBitmap.Bytes(), int64(b.length), int64(n), false)
-	b.length += n
-	b.nulls += n
+	if n == 1 {
+		b.unsafeAppendBoolToBitmap(false)
+	} else {
+		bitutil.SetBitsTo(b.nullBitmap.Bytes(), int64(b.length), int64(n), false)
+		b.length += n
+		b.nulls += n
+	}
 	b.values.AppendNulls(n * int(b.n))
 }
 
@@ -261,7 +265,11 @@ func (b *FixedSizeListBuilder) AppendEmptyValues(n int) {
 	}
 
 	b.Reserve(n)
-	b.unsafeAppendBoolsToBitmap(nil, n)
+	if n == 1 {
+		b.unsafeAppendBoolToBitmap(true)
+	} else {
+		b.unsafeAppendBoolsToBitmap(nil, n)
+	}
 	b.values.AppendEmptyValues(n * int(b.n))
 }
 

@@ -175,9 +175,41 @@ func TestFixedSizeListArrayBulkAppendNullsAndEmptyValues(t *testing.T) {
 	assert.Equal(t, []int32{4, 5, 6}, values.Int32Values()[30:])
 }
 
+func TestFixedSizeListArrayBulkAppendNested(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer pool.AssertSize(t, 0)
+
+	lb := array.NewFixedSizeListBuilder(pool, 2, arrow.FixedSizeListOf(3, arrow.PrimitiveTypes.Int32))
+	defer lb.Release()
+
+	lb.AppendNulls(2)
+	lb.AppendEmptyValues(2)
+
+	arr := lb.NewListArray()
+	defer arr.Release()
+	assert.NoError(t, arr.ValidateFull())
+	assert.Equal(t, 4, arr.Len())
+	assert.Equal(t, 2, arr.NullN())
+
+	children := arr.ListValues().(*array.FixedSizeList)
+	assert.Equal(t, 8, children.Len())
+	assert.Equal(t, 4, children.NullN())
+
+	values := children.ListValues().(*array.Int32)
+	assert.Equal(t, 24, values.Len())
+	assert.Equal(t, 12, values.NullN())
+	for i := 0; i < 12; i++ {
+		assert.True(t, values.IsNull(i), "child value %d", i)
+	}
+	for i := 12; i < 24; i++ {
+		assert.True(t, values.IsValid(i), "child value %d", i)
+		assert.Zero(t, values.Value(i), "child value %d", i)
+	}
+}
+
 func BenchmarkFixedSizeListBuilderBulkAppend(b *testing.B) {
-	for _, rows := range []int{1024, 65536} {
-		for _, width := range []int32{4, 16, 64} {
+	for _, rows := range []int{1, 8, 64, 1024, 65536} {
+		for _, width := range []int32{1, 4, 16, 64} {
 			name := fmt.Sprintf("rows=%d/width=%d", rows, width)
 			b.Run("nulls/"+name, func(b *testing.B) {
 				benchmarkFixedSizeListBuilderBulkAppend(b, rows, width, false)
