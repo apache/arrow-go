@@ -41,13 +41,13 @@ func TestValueAsAnyPrimitives(t *testing.T) {
 		arr := b.NewArray()
 		defer arr.Release()
 
-		assert.Equal(t, int8(1), arr.ValueAsAny(0))
-		assert.Equal(t, int8(-2), arr.ValueAsAny(1))
-		assert.Nil(t, arr.ValueAsAny(2))
+		assert.Equal(t, int8(1), array.ValueAsAny(arr, 0))
+		assert.Equal(t, int8(-2), array.ValueAsAny(arr, 1))
+		assert.Nil(t, array.ValueAsAny(arr, 2))
 
 		// GetOneForMarshal widens int8 to float64 for JSON safety.
 		assert.Equal(t, float64(1), arr.GetOneForMarshal(0))
-		assert.NotEqual(t, arr.GetOneForMarshal(0), arr.ValueAsAny(0))
+		assert.NotEqual(t, arr.GetOneForMarshal(0), array.ValueAsAny(arr, 0))
 	})
 
 	t.Run("uint8 native vs marshal", func(t *testing.T) {
@@ -57,7 +57,7 @@ func TestValueAsAnyPrimitives(t *testing.T) {
 		arr := b.NewArray()
 		defer arr.Release()
 
-		assert.Equal(t, uint8(255), arr.ValueAsAny(0))
+		assert.Equal(t, uint8(255), array.ValueAsAny(arr, 0))
 		assert.Equal(t, float64(255), arr.GetOneForMarshal(0))
 	})
 
@@ -68,8 +68,8 @@ func TestValueAsAnyPrimitives(t *testing.T) {
 		arr := b.NewArray()
 		defer arr.Release()
 
-		assert.Equal(t, int64(42), arr.ValueAsAny(0))
-		assert.Nil(t, arr.ValueAsAny(1))
+		assert.Equal(t, int64(42), array.ValueAsAny(arr, 0))
+		assert.Nil(t, array.ValueAsAny(arr, 1))
 	})
 
 	t.Run("boolean", func(t *testing.T) {
@@ -79,8 +79,8 @@ func TestValueAsAnyPrimitives(t *testing.T) {
 		arr := b.NewArray()
 		defer arr.Release()
 
-		assert.Equal(t, true, arr.ValueAsAny(0))
-		assert.Nil(t, arr.ValueAsAny(1))
+		assert.Equal(t, true, array.ValueAsAny(arr, 0))
+		assert.Nil(t, array.ValueAsAny(arr, 1))
 	})
 
 	t.Run("float64 keeps NaN", func(t *testing.T) {
@@ -91,9 +91,9 @@ func TestValueAsAnyPrimitives(t *testing.T) {
 		arr := b.NewArray()
 		defer arr.Release()
 
-		got := arr.ValueAsAny(0).(float64)
+		got := array.ValueAsAny(arr, 0).(float64)
 		assert.True(t, math.IsNaN(got))
-		assert.Equal(t, math.Inf(1), arr.ValueAsAny(1))
+		assert.Equal(t, math.Inf(1), array.ValueAsAny(arr, 1))
 		assert.Equal(t, "NaN", arr.GetOneForMarshal(0))
 		assert.Equal(t, "+Inf", arr.GetOneForMarshal(1))
 	})
@@ -105,15 +105,15 @@ func TestValueAsAnyPrimitives(t *testing.T) {
 		sb.AppendNull()
 		sarr := sb.NewArray()
 		defer sarr.Release()
-		assert.Equal(t, "hello", sarr.ValueAsAny(0))
-		assert.Nil(t, sarr.ValueAsAny(1))
+		assert.Equal(t, "hello", array.ValueAsAny(sarr, 0))
+		assert.Nil(t, array.ValueAsAny(sarr, 1))
 
 		bb := array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
 		defer bb.Release()
 		bb.Append([]byte{0x01, 0x02})
 		barr := bb.NewArray()
 		defer barr.Release()
-		assert.Equal(t, []byte{0x01, 0x02}, barr.ValueAsAny(0))
+		assert.Equal(t, []byte{0x01, 0x02}, array.ValueAsAny(barr, 0))
 	})
 
 	t.Run("float16", func(t *testing.T) {
@@ -123,7 +123,7 @@ func TestValueAsAnyPrimitives(t *testing.T) {
 		arr := b.NewArray()
 		defer arr.Release()
 
-		got, ok := arr.ValueAsAny(0).(float16.Num)
+		got, ok := array.ValueAsAny(arr, 0).(float16.Num)
 		require.True(t, ok)
 		assert.Equal(t, float32(1.5), got.Float32())
 		assert.Equal(t, float32(1.5), arr.GetOneForMarshal(0))
@@ -143,8 +143,8 @@ func TestValueAsAnyTemporalAndDecimal(t *testing.T) {
 		arr := b.NewArray()
 		defer arr.Release()
 
-		assert.Equal(t, arrow.Timestamp(1_700_000_000), arr.ValueAsAny(0))
-		assert.Nil(t, arr.ValueAsAny(1))
+		assert.Equal(t, arrow.Timestamp(1_700_000_000), array.ValueAsAny(arr, 0))
+		assert.Nil(t, array.ValueAsAny(arr, 1))
 		_, isString := arr.GetOneForMarshal(0).(string)
 		assert.True(t, isString)
 	})
@@ -156,7 +156,7 @@ func TestValueAsAnyTemporalAndDecimal(t *testing.T) {
 		arr := b.NewArray()
 		defer arr.Release()
 
-		assert.Equal(t, arrow.Date32(10), arr.ValueAsAny(0))
+		assert.Equal(t, arrow.Date32(10), array.ValueAsAny(arr, 0))
 		_, isString := arr.GetOneForMarshal(0).(string)
 		assert.True(t, isString)
 	})
@@ -168,7 +168,7 @@ func TestValueAsAnyTemporalAndDecimal(t *testing.T) {
 		arr := b.NewArray()
 		defer arr.Release()
 
-		assert.Equal(t, arrow.Duration(250), arr.ValueAsAny(0))
+		assert.Equal(t, arrow.Duration(250), array.ValueAsAny(arr, 0))
 		assert.Equal(t, "250ms", arr.GetOneForMarshal(0))
 	})
 
@@ -183,8 +183,8 @@ func TestValueAsAnyTemporalAndDecimal(t *testing.T) {
 		arr := b.NewArray()
 		defer arr.Release()
 
-		assert.Equal(t, n, arr.ValueAsAny(0))
-		assert.Nil(t, arr.ValueAsAny(1))
+		assert.Equal(t, n, array.ValueAsAny(arr, 0))
+		assert.Nil(t, array.ValueAsAny(arr, 1))
 		_, isString := arr.GetOneForMarshal(0).(string)
 		assert.True(t, isString)
 	})
@@ -208,9 +208,9 @@ func TestValueAsAnyNested(t *testing.T) {
 		arr := b.NewArray()
 		defer arr.Release()
 
-		assert.Equal(t, []any{int8(1), int8(2)}, arr.ValueAsAny(0))
-		assert.Nil(t, arr.ValueAsAny(1))
-		assert.Equal(t, []any{int8(3)}, arr.ValueAsAny(2))
+		assert.Equal(t, []any{int8(1), int8(2)}, array.ValueAsAny(arr, 0))
+		assert.Nil(t, array.ValueAsAny(arr, 1))
+		assert.Equal(t, []any{int8(3)}, array.ValueAsAny(arr, 2))
 	})
 
 	t.Run("struct", func(t *testing.T) {
@@ -233,15 +233,35 @@ func TestValueAsAnyNested(t *testing.T) {
 		arr := b.NewArray()
 		defer arr.Release()
 
-		assert.Equal(t, map[string]any{"n": int8(7), "s": "x"}, arr.ValueAsAny(0))
-		assert.Nil(t, arr.ValueAsAny(1))
+		assert.Equal(t, []any{[]any{"n", int8(7)}, []any{"s", "x"}}, array.ValueAsAny(arr, 0))
+		assert.Nil(t, array.ValueAsAny(arr, 1))
+	})
+
+	t.Run("struct duplicate field names", func(t *testing.T) {
+		fields := []arrow.Field{
+			{Name: "dup", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			{Name: "dup", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+		}
+		b := array.NewStructBuilder(mem, arrow.StructOf(fields...))
+		defer b.Release()
+		i32 := b.FieldBuilder(0).(*array.Int32Builder)
+		i64 := b.FieldBuilder(1).(*array.Int64Builder)
+
+		b.Append(true)
+		i32.Append(11)
+		i64.Append(22)
+
+		arr := b.NewArray()
+		defer arr.Release()
+
+		assert.Equal(t, []any{[]any{"dup", int32(11)}, []any{"dup", int64(22)}}, array.ValueAsAny(arr, 0))
 	})
 
 	t.Run("null array", func(t *testing.T) {
 		arr := array.NewNull(3)
 		defer arr.Release()
-		assert.Nil(t, arr.ValueAsAny(0))
-		assert.Nil(t, arr.ValueAsAny(2))
+		assert.Nil(t, array.ValueAsAny(arr, 0))
+		assert.Nil(t, array.ValueAsAny(arr, 2))
 	})
 
 	t.Run("dictionary", func(t *testing.T) {
@@ -258,9 +278,56 @@ func TestValueAsAnyNested(t *testing.T) {
 		arr := b.NewArray()
 		defer arr.Release()
 
-		assert.Equal(t, "a", arr.ValueAsAny(0))
-		assert.Equal(t, "b", arr.ValueAsAny(1))
-		assert.Nil(t, arr.ValueAsAny(2))
-		assert.Equal(t, "a", arr.ValueAsAny(3))
+		assert.Equal(t, "a", array.ValueAsAny(arr, 0))
+		assert.Equal(t, "b", array.ValueAsAny(arr, 1))
+		assert.Nil(t, array.ValueAsAny(arr, 2))
+		assert.Equal(t, "a", array.ValueAsAny(arr, 3))
+	})
+}
+
+func TestValueAsAnyUnionKeepsTypeIDWhenChildNull(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	fields := []arrow.Field{
+		{Name: "i8", Type: arrow.PrimitiveTypes.Int8, Nullable: true},
+		{Name: "str", Type: arrow.BinaryTypes.String, Nullable: true},
+	}
+	codes := []arrow.UnionTypeCode{0, 1}
+
+	t.Run("sparse", func(t *testing.T) {
+		b := array.NewSparseUnionBuilder(mem, arrow.SparseUnionOf(fields, codes))
+		defer b.Release()
+		i8b := b.Child(0).(*array.Int8Builder)
+		strb := b.Child(1).(*array.StringBuilder)
+
+		b.Append(0)
+		i8b.Append(5)
+		strb.AppendEmptyValue()
+
+		b.AppendNull()
+
+		arr := b.NewArray()
+		defer arr.Release()
+
+		assert.Equal(t, []any{arrow.UnionTypeCode(0), int8(5)}, array.ValueAsAny(arr, 0))
+		assert.Equal(t, []any{arrow.UnionTypeCode(0), nil}, array.ValueAsAny(arr, 1))
+	})
+
+	t.Run("dense", func(t *testing.T) {
+		b := array.NewDenseUnionBuilder(mem, arrow.DenseUnionOf(fields, codes))
+		defer b.Release()
+		i8b := b.Child(0).(*array.Int8Builder)
+
+		b.Append(0)
+		i8b.Append(5)
+
+		b.AppendNull()
+
+		arr := b.NewArray()
+		defer arr.Release()
+
+		assert.Equal(t, []any{arrow.UnionTypeCode(0), int8(5)}, array.ValueAsAny(arr, 0))
+		assert.Equal(t, []any{arrow.UnionTypeCode(0), nil}, array.ValueAsAny(arr, 1))
 	})
 }

@@ -16,6 +16,34 @@
 
 package array
 
+import (
+	"fmt"
+
+	"github.com/apache/arrow-go/v18/arrow"
+)
+
+// ValueAsAnyer is an optional interface for arrays that can return a native
+// Go value for a slot. Built-in array types implement it. It is not part of
+// arrow.Array so that adding this capability is not a source-incompatible
+// change for downstream Array implementations.
+type ValueAsAnyer interface {
+	ValueAsAny(i int) any
+}
+
+// ValueAsAny returns the native Go value at index i, or nil if the slot is null.
+// Unlike GetOneForMarshal, values are not converted for JSON encoding
+// (for example int8 stays int8, timestamps stay arrow.Timestamp, lists are
+// []any of native values, and structs are []any of [name, value] pairs so
+// field order and duplicate names are preserved).
+//
+// If arr does not implement ValueAsAnyer, ValueAsAny panics.
+func ValueAsAny(arr arrow.Array, i int) any {
+	if v, ok := arr.(ValueAsAnyer); ok {
+		return v.ValueAsAny(i)
+	}
+	panic(fmt.Sprintf("arrow/array: %T does not implement ValueAsAny", arr))
+}
+
 // valueAsAnyFromListLike builds a []any of native child values for one list slot.
 func valueAsAnyFromListLike(a ListLike, i int) any {
 	if a.IsNull(i) {
@@ -26,7 +54,7 @@ func valueAsAnyFromListLike(a ListLike, i int) any {
 	vals := a.ListValues()
 	out := make([]any, end-start)
 	for j := start; j < end; j++ {
-		out[j-start] = vals.ValueAsAny(int(j))
+		out[j-start] = ValueAsAny(vals, int(j))
 	}
 	return out
 }

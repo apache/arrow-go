@@ -284,12 +284,12 @@ func (a *Struct) ValueAsAny(i int) any {
 	if a.IsNull(i) {
 		return nil
 	}
-	tmp := make(map[string]any)
 	fieldList := a.data.dtype.(*arrow.StructType).Fields()
+	out := make([]any, len(a.fields))
 	for j, d := range a.fields {
-		tmp[fieldList[j].Name] = d.ValueAsAny(i)
+		out[j] = []any{fieldList[j].Name, ValueAsAny(d, i)}
 	}
-	return tmp
+	return out
 }
 
 func (a *Struct) MarshalJSON() ([]byte, error) {

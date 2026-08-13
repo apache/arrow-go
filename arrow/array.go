@@ -110,12 +110,6 @@ type Array interface {
 	// ValueStr returns the value at index as a string.
 	ValueStr(i int) string
 
-	// ValueAsAny returns the native Go value at index i, or nil if the slot is null.
-	// Unlike GetOneForMarshal, values are not converted for JSON encoding
-	// (for example int8 stays int8, timestamps stay arrow.Timestamp, and
-	// nested values are []any / map[string]any of native values).
-	ValueAsAny(i int) any
-
 	// Get single value to be marshalled with `json.Marshal`
 	GetOneForMarshal(i int) interface{}
 

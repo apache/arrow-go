@@ -618,7 +618,7 @@ func (v *VariantArray) ValueAsAny(i int) any {
 	}
 	val, err := v.Value(i)
 	if err != nil {
-		return nil
+		return err
 	}
 	return val.Value()
 }

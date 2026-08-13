@@ -335,15 +335,9 @@ func (a *SparseUnion) GetOneForMarshal(i int) interface{} {
 
 func (a *SparseUnion) ValueAsAny(i int) any {
 	typeID := a.RawTypeCodes()[i]
-
 	childID := a.ChildID(i)
 	data := a.Field(childID)
-
-	if data.IsNull(i) {
-		return nil
-	}
-
-	return []any{typeID, data.ValueAsAny(i)}
+	return []any{typeID, ValueAsAny(data, i)}
 }
 
 func (a *SparseUnion) MarshalJSON() ([]byte, error) {
@@ -642,16 +636,10 @@ func (a *DenseUnion) GetOneForMarshal(i int) interface{} {
 
 func (a *DenseUnion) ValueAsAny(i int) any {
 	typeID := a.RawTypeCodes()[i]
-
 	childID := a.ChildID(i)
 	data := a.Field(childID)
-
 	offset := int(a.RawValueOffsets()[i])
-	if data.IsNull(offset) {
-		return nil
-	}
-
-	return []any{typeID, data.ValueAsAny(offset)}
+	return []any{typeID, ValueAsAny(data, offset)}
 }
 
 func (a *DenseUnion) MarshalJSON() ([]byte, error) {

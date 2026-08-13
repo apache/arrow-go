@@ -336,7 +336,7 @@ func (r *RunEndEncoded) ValueAsAny(i int) any {
 	if r.IsNull(i) {
 		return nil
 	}
-	return r.values.ValueAsAny(r.GetPhysicalIndex(i))
+	return ValueAsAny(r.values, r.GetPhysicalIndex(i))
 }
 
 func (r *RunEndEncoded) MarshalJSON() ([]byte, error) {

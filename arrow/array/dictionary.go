@@ -299,7 +299,7 @@ func (d *Dictionary) ValueAsAny(i int) any {
 	if d.IsNull(i) {
 		return nil
 	}
-	return d.Dictionary().ValueAsAny(d.GetValueIndex(i))
+	return ValueAsAny(d.Dictionary(), d.GetValueIndex(i))
 }
 
 func (d *Dictionary) MarshalJSON() ([]byte, error) {
