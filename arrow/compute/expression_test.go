@@ -260,3 +260,24 @@ func TestExpressionSerializationRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+func TestExpressionSerializationPropagatesNestedLiteralError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	builder := array.NewInt32Builder(mem)
+	defer builder.Release()
+	builder.Append(1)
+	values := builder.NewArray()
+	defer values.Release()
+
+	expr := compute.NewCall("test", []compute.Expression{
+		compute.NewLiteral(1),
+		compute.NewLiteral(values),
+	}, nil)
+	defer expr.Release()
+
+	serialized, err := compute.SerializeExpr(expr, mem)
+	assert.Nil(t, serialized)
+	assert.ErrorContains(t, err, "serialization of non-scalar literals")
+}
