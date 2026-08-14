@@ -90,7 +90,11 @@ func (a *FixedSizeList) setData(data *Data) {
 
 func arrayEqualFixedSizeList(left, right *FixedSizeList) bool {
 	listSize := int64(left.n)
-	return bitutils.VisitSetBitRuns(left.NullBitmapBytes(), int64(left.Offset()), int64(left.Len()),
+	validBits := left.NullBitmapBytes()
+	if len(validBits) == 0 {
+		validBits = nil
+	}
+	return bitutils.VisitSetBitRuns(validBits, int64(left.Offset()), int64(left.Len()),
 		func(pos, length int64) error {
 			leftStart := (int64(left.Offset()) + pos) * listSize
 			rightStart := (int64(right.Offset()) + pos) * listSize

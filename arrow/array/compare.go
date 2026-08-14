@@ -367,6 +367,9 @@ type listOffset interface {
 
 func arrayEqualListOffsets[T listOffset](leftValues, rightValues arrow.Array,
 	leftOffsets, rightOffsets []T, leftOffset, rightOffset, length int, validBits []byte) bool {
+	if len(validBits) == 0 {
+		validBits = nil
+	}
 	return bitutils.VisitSetBitRuns(validBits, int64(leftOffset), int64(length),
 		func(pos, runLength int64) error {
 			leftIndex := leftOffset + int(pos)

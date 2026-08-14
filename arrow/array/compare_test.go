@@ -190,6 +190,29 @@ func TestFixedSizeListEqualByValidRuns(t *testing.T) {
 	mem.AssertSize(t, 0)
 }
 
+func TestListEqualWithEmptyValidityBuffer(t *testing.T) {
+	for _, dt := range []arrow.DataType{
+		arrow.ListOf(arrow.PrimitiveTypes.Int32),
+		arrow.LargeListOf(arrow.PrimitiveTypes.Int32),
+		arrow.FixedSizeListOf(2, arrow.PrimitiveTypes.Int32),
+	} {
+		t.Run(dt.ID().String(), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			values := [][]int32{{1, 2}, {3, 4}}
+			valid := makeListEqualTestArray(mem, dt, values, []bool{true, true})
+			emptyValidity := makeListEqualTestArrayWithEmptyValidity(mem, dt, values)
+
+			assert.NotNil(t, emptyValidity.NullBitmapBytes())
+			assert.True(t, array.Equal(emptyValidity, valid))
+			assert.True(t, array.Equal(valid, emptyValidity))
+
+			emptyValidity.Release()
+			valid.Release()
+			mem.AssertSize(t, 0)
+		})
+	}
+}
+
 func makeListEqualTestArray(mem memory.Allocator, dt arrow.DataType, values [][]int32, valid []bool) arrow.Array {
 	switch dt.ID() {
 	case arrow.LIST, arrow.LARGE_LIST:
@@ -216,6 +239,18 @@ func makeListEqualTestArray(mem memory.Allocator, dt arrow.DataType, values [][]
 	default:
 		panic("unsupported list type")
 	}
+}
+
+func makeListEqualTestArrayWithEmptyValidity(mem memory.Allocator, dt arrow.DataType, values [][]int32) arrow.Array {
+	arr := makeListEqualTestArray(mem, dt, values, []bool{true, true})
+	data := arr.Data()
+	buffers := append([]*memory.Buffer(nil), data.Buffers()...)
+	buffers[0] = memory.NewBufferBytes([]byte{})
+	emptyValidityData := array.NewData(data.DataType(), data.Len(), buffers, data.Children(), data.NullN(), data.Offset())
+	out := array.MakeFromData(emptyValidityData)
+	emptyValidityData.Release()
+	arr.Release()
+	return out
 }
 
 func TestArrayApproxEqual(t *testing.T) {
