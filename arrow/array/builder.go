@@ -79,6 +79,9 @@ type Builder interface {
 	// additional memory will be allocated. If n is smaller, the allocated memory may reduced.
 	Resize(n int)
 
+	// truncate removes elements from the end of the builder without changing its capacity.
+	truncate(n int)
+
 	// NewArray creates a new array from the memory buffers used
 	// by the builder and resets the Builder so it can be used to build
 	// a new array.
@@ -174,9 +177,25 @@ func (b *builder) resize(newBits int, init func(int)) {
 		memory.Set(b.nullBitmap.Buf()[oldBytesN:], 0)
 	}
 	if newBits < b.length {
-		b.length = newBits
-		b.nulls = newBits - bitutil.CountSetBits(b.nullBitmap.Buf(), 0, newBits)
+		b.truncate(newBits)
 	}
+}
+
+func (b *builder) truncate(n int) {
+	if n < 0 || n > b.length {
+		panic("arrow/array: invalid builder truncation length")
+	}
+	if n == b.length {
+		return
+	}
+
+	if b.nullBitmap != nil {
+		bitutil.SetBitsTo(b.nullBitmap.Buf(), int64(n), int64(b.length-n), false)
+		b.nulls = n - bitutil.CountSetBits(b.nullBitmap.Buf(), 0, n)
+	} else if b.nulls > n {
+		b.nulls = n
+	}
+	b.length = n
 }
 
 func (b *builder) reserve(elements int, resize func(int)) {

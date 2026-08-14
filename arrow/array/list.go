@@ -511,6 +511,13 @@ func (b *baseListBuilder) Resize(n int) {
 	b.offsets.Resize(n)
 }
 
+func (b *baseListBuilder) truncate(n int) {
+	b.builder.truncate(n)
+	if b.offsets != nil {
+		b.offsets.truncate(n)
+	}
+}
+
 func (b *baseListBuilder) resizeHelper(n int) {
 	if n < minBuilderCapacity {
 		n = minBuilderCapacity
@@ -1284,6 +1291,12 @@ func (b *baseListViewBuilder) Resize(n int) {
 	b.resizeHelper(n)
 	b.offsets.Resize(n)
 	b.sizes.Resize(n)
+}
+
+func (b *baseListViewBuilder) truncate(n int) {
+	b.builder.truncate(n)
+	b.offsets.truncate(n)
+	b.sizes.truncate(n)
 }
 
 func (b *baseListViewBuilder) resizeHelper(n int) {
