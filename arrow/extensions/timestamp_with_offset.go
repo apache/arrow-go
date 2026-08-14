@@ -395,6 +395,13 @@ func (a *TimestampWithOffsetArray) GetOneForMarshal(i int) interface{} {
 	return a.Value(i)
 }
 
+func (a *TimestampWithOffsetArray) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+	return a.Value(i)
+}
+
 // noLastOffset is the sentinel value for TimestampWithOffsetBuilder.lastOffset
 // indicating that no run-end-encoded run has been started yet. It is deliberately
 // outside the range of valid timezone offsets in minutes (roughly [-720, 840]) so

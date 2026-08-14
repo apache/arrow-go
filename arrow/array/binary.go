@@ -159,6 +159,13 @@ func (a *Binary) GetOneForMarshal(i int) interface{} {
 	return a.Value(i)
 }
 
+func (a *Binary) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+	return a.Value(i)
+}
+
 func (a *Binary) MarshalJSON() ([]byte, error) {
 	vals := make([]interface{}, a.Len())
 	for i := 0; i < a.Len(); i++ {
@@ -353,6 +360,13 @@ func (a *LargeBinary) GetOneForMarshal(i int) interface{} {
 	return a.Value(i)
 }
 
+func (a *LargeBinary) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+	return a.Value(i)
+}
+
 func (a *LargeBinary) MarshalJSON() ([]byte, error) {
 	vals := make([]interface{}, a.Len())
 	for i := 0; i < a.Len(); i++ {
@@ -534,6 +548,13 @@ func (a *BinaryView) ValueStr(i int) string {
 }
 
 func (a *BinaryView) GetOneForMarshal(i int) interface{} {
+	if a.IsNull(i) {
+		return nil
+	}
+	return a.Value(i)
+}
+
+func (a *BinaryView) ValueAsAny(i int) any {
 	if a.IsNull(i) {
 		return nil
 	}

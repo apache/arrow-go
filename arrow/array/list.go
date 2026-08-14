@@ -112,6 +112,10 @@ func (a *List) GetOneForMarshal(i int) interface{} {
 	return json.RawMessage(v)
 }
 
+func (a *List) ValueAsAny(i int) any {
+	return valueAsAnyFromListLike(a, i)
+}
+
 func (a *List) Validate() error     { return validateListArray(a, false) }
 func (a *List) ValidateFull() error { return validateListArray(a, true) }
 
@@ -245,6 +249,10 @@ func (a *LargeList) GetOneForMarshal(i int) interface{} {
 		panic(err)
 	}
 	return json.RawMessage(v)
+}
+
+func (a *LargeList) ValueAsAny(i int) any {
+	return valueAsAnyFromListLike(a, i)
 }
 
 func (a *LargeList) Validate() error     { return validateLargeListArray(a, false) }
@@ -732,6 +740,10 @@ func (a *ListView) GetOneForMarshal(i int) interface{} {
 	return json.RawMessage(v)
 }
 
+func (a *ListView) ValueAsAny(i int) any {
+	return valueAsAnyFromListLike(a, i)
+}
+
 func (a *ListView) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -877,6 +889,10 @@ func (a *LargeListView) GetOneForMarshal(i int) interface{} {
 		panic(err)
 	}
 	return json.RawMessage(v)
+}
+
+func (a *LargeListView) ValueAsAny(i int) any {
+	return valueAsAnyFromListLike(a, i)
 }
 
 func (a *LargeListView) MarshalJSON() ([]byte, error) {

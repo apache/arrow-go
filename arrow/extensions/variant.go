@@ -612,6 +612,17 @@ func (v *VariantArray) GetOneForMarshal(i int) any {
 	return val.Value()
 }
 
+func (v *VariantArray) ValueAsAny(i int) any {
+	if v.IsNull(i) {
+		return nil
+	}
+	val, err := v.Value(i)
+	if err != nil {
+		return err
+	}
+	return val.Value()
+}
+
 type variantReader interface {
 	IsNull(i int) bool
 	Value(i int) (variant.Value, error)
