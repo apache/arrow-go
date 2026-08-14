@@ -215,9 +215,15 @@ func (b *TimestampBuilder) AppendEmptyValue() {
 }
 
 func (b *TimestampBuilder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.TimestampTraits.BytesRequired(1), n)
 }
 
 func (b *TimestampBuilder) UnsafeAppend(v arrow.Timestamp) {

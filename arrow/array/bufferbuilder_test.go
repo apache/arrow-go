@@ -72,3 +72,17 @@ func TestMultiBufferCheckpointRestoresTouchedBlocks(t *testing.T) {
 	assert.Equal(t, 4, builder.blocks[1].Len())
 	assert.Equal(t, 1, builder.currentOutBuffer)
 }
+
+func TestBufferBuilderAdvanceZeroesReusedStorage(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	builder := newByteBufferBuilder(mem)
+	defer builder.Release()
+
+	builder.Append([]byte{1, 2, 3, 4})
+	builder.SetLength(0)
+	builder.Advance(4)
+
+	assert.Equal(t, []byte{0, 0, 0, 0}, builder.Bytes())
+}
