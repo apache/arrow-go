@@ -25,6 +25,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/internal/bitutils"
 	"github.com/apache/arrow-go/v18/internal/json"
 )
 
@@ -88,22 +89,21 @@ func (a *FixedSizeList) setData(data *Data) {
 }
 
 func arrayEqualFixedSizeList(left, right *FixedSizeList) bool {
-	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
-			continue
-		}
-		o := func() bool {
-			l := left.newListValue(i)
-			defer l.Release()
-			r := right.newListValue(i)
-			defer r.Release()
-			return Equal(l, r)
-		}()
-		if !o {
-			return false
-		}
+	listSize := int64(left.n)
+	validBits := left.NullBitmapBytes()
+	if len(validBits) == 0 {
+		validBits = nil
 	}
-	return true
+	return bitutils.VisitSetBitRuns(validBits, int64(left.Offset()), int64(left.Len()),
+		func(pos, length int64) error {
+			leftStart := (int64(left.Offset()) + pos) * listSize
+			rightStart := (int64(right.Offset()) + pos) * listSize
+			if !SliceEqual(left.values, leftStart, leftStart+length*listSize,
+				right.values, rightStart, rightStart+length*listSize) {
+				return arrow.ErrInvalid
+			}
+			return nil
+		}) == nil
 }
 
 // Len returns the number of elements in the array.
