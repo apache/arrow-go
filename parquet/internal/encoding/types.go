@@ -84,6 +84,16 @@ type TypedEncoder interface {
 // encoding.
 type DictEncoder interface {
 	TypedEncoder
+	// EnableDictionaryReferenceTracking records which dictionary entries are
+	// referenced by encoded values. Tracking is disabled by default so writers
+	// that do not need it do not pay its per-value cost.
+	EnableDictionaryReferenceTracking()
+	// ReferencedDictionaryIndices returns dictionary indices in the order they
+	// were first referenced. The returned slice is owned by the encoder and must
+	// not be modified.
+	ReferencedDictionaryIndices() []int32
+	// DictionaryIndexReferenced reports whether an entry has been referenced.
+	DictionaryIndexReferenced(index int) bool
 	// WriteIndices populates the byte slice with the final indexes of data and returns
 	// the number of bytes written
 	WriteIndices(out []byte) (int, error)
@@ -109,9 +119,8 @@ type DictEncoder interface {
 	// from PutDictionary or nil.
 	PreservedDictionary() arrow.Array
 	// PutIndices adds the indices from the passed in integral array to
-	// the column data. It is assumed that the indices are within the bounds
-	// of [0,dictSize) and is not validated. Returns an error if a non-integral
-	// array is passed.
+	// the column data. Returns an error if an index is outside [0, dictSize)
+	// or a non-integral array is passed.
 	PutIndices(arrow.Array) error
 	// NormalizeDict takes an arrow array and normalizes it to a parquet
 	// native type. e.g. a dictionary of type int8 will be cast to an int32
