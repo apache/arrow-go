@@ -19,6 +19,7 @@
 package compute_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -47,6 +48,15 @@ func TestArityBasics(t *testing.T) {
 	varargs := compute.VarArgs(2)
 	assert.Equal(t, 2, varargs.NArgs)
 	assert.True(t, varargs.IsVarArgs)
+}
+
+func TestNewMetaFunctionKind(t *testing.T) {
+	fn := compute.NewMetaFunction("test_meta", compute.Nullary(), compute.EmptyFuncDoc,
+		func(context.Context, compute.FunctionOptions, ...compute.Datum) (compute.Datum, error) {
+			return nil, nil
+		})
+
+	assert.Equal(t, compute.FuncMeta, fn.Kind())
 }
 
 func CheckDispatchBest(t *testing.T, funcName string, originalTypes, expected []arrow.DataType) {
