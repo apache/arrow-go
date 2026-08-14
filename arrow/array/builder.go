@@ -200,7 +200,7 @@ func (b *builder) truncate(n int) {
 
 func (b *builder) reserve(elements int, resize func(int)) {
 	if b.length+elements > b.capacity {
-		newCap := bitutil.NextPowerOf2(b.length + elements)
+		newCap := bitutil.NextPowerOf2(b.length + elements - 1)
 		resize(newCap)
 	}
 	if b.nullBitmap == nil {
@@ -312,6 +312,20 @@ func (b *builder) unsafeSetValid(length int) {
 	}
 
 	b.length = newLength
+}
+
+func (b *builder) unsafeAppendNulls(n int) {
+	if n <= 0 {
+		return
+	}
+
+	if n == 1 {
+		bitutil.ClearBit(b.nullBitmap.Bytes(), b.length)
+	} else {
+		bitutil.SetBitsTo(b.nullBitmap.Bytes(), int64(b.length), int64(n), false)
+	}
+	b.length += n
+	b.nulls += n
 }
 
 func (b *builder) UnsafeAppendBoolToBitmap(isValid bool) {

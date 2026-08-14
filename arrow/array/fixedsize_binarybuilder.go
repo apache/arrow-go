@@ -84,9 +84,16 @@ func (b *FixedSizeBinaryBuilder) AppendNull() {
 }
 
 func (b *FixedSizeBinaryBuilder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendNull()
+		return
+	}
+	b.Reserve(n)
+	b.values.Advance(n * b.dtype.ByteWidth)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *FixedSizeBinaryBuilder) AppendEmptyValue() {
@@ -148,6 +155,7 @@ func (b *FixedSizeBinaryBuilder) Reserve(n int) {
 // additional memory will be allocated. If n is smaller, the allocated memory may reduced.
 func (b *FixedSizeBinaryBuilder) Resize(n int) {
 	b.resize(n, b.init)
+	b.values.resize(b.capacity * b.dtype.ByteWidth)
 }
 
 func (b *FixedSizeBinaryBuilder) truncate(n int) {

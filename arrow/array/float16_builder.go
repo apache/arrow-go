@@ -80,9 +80,15 @@ func (b *Float16Builder) AppendNull() {
 }
 
 func (b *Float16Builder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendNull()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *Float16Builder) AppendEmptyValue() {

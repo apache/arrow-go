@@ -78,9 +78,15 @@ func (b *Int64Builder) AppendNull() {
 }
 
 func (b *Int64Builder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendNull()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *Int64Builder) AppendEmptyValue() {
@@ -402,9 +408,15 @@ func (b *Uint64Builder) AppendNull() {
 }
 
 func (b *Uint64Builder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendNull()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *Uint64Builder) AppendEmptyValue() {
@@ -730,9 +742,15 @@ func (b *Float64Builder) AppendNull() {
 }
 
 func (b *Float64Builder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendNull()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *Float64Builder) AppendEmptyValue() {
@@ -972,9 +990,15 @@ func (b *Int32Builder) AppendNull() {
 }
 
 func (b *Int32Builder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendNull()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *Int32Builder) AppendEmptyValue() {
@@ -1280,9 +1304,15 @@ func (b *Uint32Builder) AppendNull() {
 }
 
 func (b *Uint32Builder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendNull()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *Uint32Builder) AppendEmptyValue() {
@@ -1588,9 +1618,15 @@ func (b *Float32Builder) AppendNull() {
 }
 
 func (b *Float32Builder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendNull()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *Float32Builder) AppendEmptyValue() {
@@ -1830,9 +1866,15 @@ func (b *Int16Builder) AppendNull() {
 }
 
 func (b *Int16Builder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendNull()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *Int16Builder) AppendEmptyValue() {
@@ -2138,9 +2180,15 @@ func (b *Uint16Builder) AppendNull() {
 }
 
 func (b *Uint16Builder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendNull()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *Uint16Builder) AppendEmptyValue() {
@@ -2446,9 +2494,15 @@ func (b *Int8Builder) AppendNull() {
 }
 
 func (b *Int8Builder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendNull()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *Int8Builder) AppendEmptyValue() {
@@ -2754,9 +2808,15 @@ func (b *Uint8Builder) AppendNull() {
 }
 
 func (b *Uint8Builder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendNull()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *Uint8Builder) AppendEmptyValue() {
@@ -3063,9 +3123,15 @@ func (b *Time32Builder) AppendNull() {
 }
 
 func (b *Time32Builder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendNull()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *Time32Builder) AppendEmptyValue() {
@@ -3323,9 +3389,15 @@ func (b *Time64Builder) AppendNull() {
 }
 
 func (b *Time64Builder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendNull()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *Time64Builder) AppendEmptyValue() {
@@ -3573,9 +3645,15 @@ func (b *Date32Builder) AppendNull() {
 }
 
 func (b *Date32Builder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendNull()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *Date32Builder) AppendEmptyValue() {
@@ -3832,9 +3910,15 @@ func (b *Date64Builder) AppendNull() {
 }
 
 func (b *Date64Builder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendNull()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *Date64Builder) AppendEmptyValue() {
@@ -4083,9 +4167,15 @@ func (b *DurationBuilder) AppendNull() {
 }
 
 func (b *DurationBuilder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendNull()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendNulls(n)
 }
 
 func (b *DurationBuilder) AppendEmptyValue() {
