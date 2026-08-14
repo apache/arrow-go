@@ -46,7 +46,7 @@ func Example_reader() {
 		{Name: "c7", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
 		{Name: "c8", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
 		{Name: "c9", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
-		{Name: "c10", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+		{Name: "c10", Type: arrow.PrimitiveTypes.Uint64, Nullable: true},
 		{Name: "c11", Type: arrow.PrimitiveTypes.Float64, Nullable: true},
 		{Name: "c12", Type: arrow.PrimitiveTypes.Float64, Nullable: true},
 		{Name: "c13", Type: arrow.BinaryTypes.String, Nullable: true},
@@ -64,6 +64,10 @@ func Example_reader() {
 		fmt.Println("No records found")
 		return
 	}
+	if err := reader.Err(); err != nil {
+		fmt.Printf("Error reading CSV: %v\n", err)
+		return
+	}
 
 	// Get the record but don't release it - the reader will handle that
 	record := reader.RecordBatch()
@@ -73,7 +77,7 @@ func Example_reader() {
 	fmt.Println()
 
 	fmt.Println("Basic statistics for numeric columns:")
-	for i := 1; i < 10; i++ { // cols c2 through c10 are Int64
+	for i := 1; i < 9; i++ { // cols c2 through c9 are Int64
 		col := record.Column(i).(*array.Int64)
 		var sum int64
 		for j := 0; j < col.Len(); j++ {
@@ -82,6 +86,13 @@ func Example_reader() {
 		avg := float64(sum) / float64(col.Len())
 		fmt.Printf("Column c%d: Average = %.2f\n", i+1, avg)
 	}
+
+	col := record.Column(9).(*array.Uint64)
+	var sum float64
+	for j := 0; j < col.Len(); j++ {
+		sum += float64(col.Value(j))
+	}
+	fmt.Printf("Column c10: Average = %.2f\n", sum/float64(col.Len()))
 
 	for i := 10; i < 12; i++ { // cols c11 and c12 are Float64
 		col := record.Column(i).(*array.Float64)
@@ -106,7 +117,7 @@ func Example_reader() {
 	// Column c7: Average = 130.60
 	// Column c8: Average = 30176.41
 	// Column c9: Average = 2220897700.60
-	// Column c10: Average = -86834033398685392.00
+	// Column c10: Average = 8652627809237404672.00
 	// Column c11: Average = 0.4793
 	// Column c12: Average = 0.5090
 }
