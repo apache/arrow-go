@@ -246,6 +246,8 @@ type FileWriter struct {
 
 	headerStarted bool
 	footerWritten bool
+	closed        bool
+	closeErr      error
 
 	pw PayloadWriter
 
@@ -285,9 +287,16 @@ func NewFileWriter(w io.Writer, opts ...Option) (*FileWriter, error) {
 }
 
 func (f *FileWriter) Close() error {
+	if f.closed {
+		return f.closeErr
+	}
+	f.closed = true
+	defer f.releaseDictionaries()
+
 	err := f.checkStarted()
 	if err != nil {
-		return fmt.Errorf("arrow/ipc: could not write empty file: %w", err)
+		f.closeErr = fmt.Errorf("arrow/ipc: could not write empty file: %w", err)
+		return f.closeErr
 	}
 
 	if f.footerWritten {
@@ -296,14 +305,26 @@ func (f *FileWriter) Close() error {
 
 	err = f.pw.Close()
 	if err != nil {
-		return fmt.Errorf("arrow/ipc: could not close payload writer: %w", err)
+		f.closeErr = fmt.Errorf("arrow/ipc: could not close payload writer: %w", err)
+		return f.closeErr
 	}
 	f.footerWritten = true
 
 	return nil
 }
 
+func (f *FileWriter) releaseDictionaries() {
+	for _, d := range f.lastWrittenDicts {
+		d.Release()
+	}
+	f.lastWrittenDicts = nil
+}
+
 func (f *FileWriter) Write(rec arrow.RecordBatch) error {
+	if f.closed {
+		return errFileWriterClosed
+	}
+
 	schema := rec.Schema()
 	if schema == nil || !schema.Equal(f.schema) {
 		return errInconsistentSchema

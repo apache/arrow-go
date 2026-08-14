@@ -377,7 +377,52 @@ func (c *Call) Equals(other Expression) bool {
 	if opt, ok := c.options.(FunctionOptionsEqual); ok {
 		return opt.Equals(rhs.options)
 	}
-	return reflect.DeepEqual(c.options, rhs.options)
+	return equalFunctionOptions(c.options, rhs.options)
+}
+
+func equalFunctionOptions(lhs, rhs FunctionOptions) bool {
+	if left, ok := cumulativeOptions(lhs); ok {
+		right, ok := cumulativeOptions(rhs)
+		if !ok {
+			return false
+		}
+		if left == nil || right == nil {
+			return left == nil && right == nil
+		}
+		return left.SkipNulls == right.SkipNulls && equalOptionalScalar(left.Start, right.Start)
+	}
+
+	if lhs == nil || rhs == nil {
+		return lhs == nil && rhs == nil
+	}
+	return reflect.DeepEqual(lhs, rhs)
+}
+
+func cumulativeOptions(opts FunctionOptions) (*CumulativeOptions, bool) {
+	switch opts := opts.(type) {
+	case CumulativeOptions:
+		return &opts, true
+	case *CumulativeOptions:
+		return opts, true
+	default:
+		return nil, false
+	}
+}
+
+func equalOptionalScalar(lhs, rhs scalar.Scalar) bool {
+	if isNilScalar(lhs) || isNilScalar(rhs) {
+		return isNilScalar(lhs) && isNilScalar(rhs)
+	}
+	return scalar.Equals(lhs, rhs)
+}
+
+func isNilScalar(value scalar.Scalar) bool {
+	if value == nil {
+		return true
+	}
+
+	reflected := reflect.ValueOf(value)
+	return reflected.Kind() == reflect.Ptr && reflected.IsNil()
 }
 
 func (c *Call) Release() {
@@ -533,6 +578,7 @@ var (
 	funcOptsTypes  = []FunctionOptions{
 		SetLookupOptions{}, ArithmeticOptions{}, CastOptions{},
 		FilterOptions{}, NullOptions{}, StrptimeOptions{}, MakeStructOptions{},
+		CumulativeOptions{},
 	}
 )
 
@@ -565,9 +611,38 @@ func NewFieldRef(field string) Expression {
 }
 
 // NewCall constructs an expression that represents a specific function call with
-// the given arguments and options.
+// the given arguments and options. Cumulative start scalars are retained for
+// the lifetime of the expression.
 func NewCall(name string, args []Expression, opts FunctionOptions) Expression {
-	return &Call{funcName: name, args: args, options: opts}
+	return &Call{funcName: name, args: args, options: cloneExpressionOptions(opts)}
+}
+
+func cloneExpressionOptions(opts FunctionOptions) FunctionOptions {
+	switch opts := opts.(type) {
+	case CumulativeOptions:
+		opts.Start = retainExpressionScalar(opts.Start)
+		return opts
+	case *CumulativeOptions:
+		if opts == nil {
+			return nil
+		}
+		cloned := *opts
+		cloned.Start = retainExpressionScalar(cloned.Start)
+		return cloned
+	default:
+		return opts
+	}
+}
+
+func retainExpressionScalar(value scalar.Scalar) scalar.Scalar {
+	if isNilScalar(value) {
+		return nil
+	}
+
+	if releasable, ok := value.(scalar.Releasable); ok {
+		releasable.Retain()
+	}
+	return value
 }
 
 // Project is shorthand for `make_struct` to produce a record batch output
@@ -880,13 +955,19 @@ func DeserializeExpr(mem memory.Allocator, buf *memory.Buffer) (Expression, erro
 						}
 
 						optionsVal := reflect.New(funcOptionsMap[string(typname.(*scalar.Binary).Data())]).Interface()
-						if err := scalar.FromScalar(optsScalar.(*scalar.Struct), optionsVal); err != nil {
+						if err := scalar.FromScalarWithAllocator(optsScalar.(*scalar.Struct), optionsVal, mem); err != nil {
 							return nil, err
 						}
 						opts = optionsVal.(FunctionOptions)
 					}
 					index += 2
-					return NewCall(val, args, opts), nil
+					expr := NewCall(val, args, opts)
+					if _, ok := cumulativeOptions(opts); ok {
+						if r, ok := opts.(releasable); ok {
+							r.Release()
+						}
+					}
+					return expr, nil
 				}
 
 				arg, err := getone()
