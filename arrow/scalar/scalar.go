@@ -771,6 +771,26 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 		return nil, fmt.Errorf("%w: array length must be non-negative, got %d", arrow.ErrInvalid, length)
 	}
 
+	if length == 0 {
+		if dt, ok := sc.DataType().(*arrow.RunEndEncodedType); ok {
+			runEndsBuilder := array.NewBuilder(mem, dt.RunEnds())
+			defer runEndsBuilder.Release()
+			runEnds := runEndsBuilder.NewArray()
+			defer runEnds.Release()
+
+			valuesBuilder := array.NewBuilder(mem, dt.Encoded())
+			defer valuesBuilder.Release()
+			values := valuesBuilder.NewArray()
+			defer values.Release()
+
+			return array.NewRunEndEncodedArray(runEnds, values, 0, 0), nil
+		}
+
+		builder := array.NewBuilder(mem, sc.DataType())
+		defer builder.Release()
+		return builder.NewArray(), nil
+	}
+
 	if !sc.IsValid() {
 		return MakeArrayOfNull(sc.DataType(), length, mem), nil
 	}
