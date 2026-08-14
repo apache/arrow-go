@@ -27,44 +27,10 @@ import (
 )
 
 const (
-	boolBufSize = 1024
-	boolsInBuf  = boolBufSize * 8
+	boolBufSize          = 1024
+	boolsInBuf           = boolBufSize * 8
+	scalarBitmapRunLimit = 32
 )
-
-// compressBitmapWithValidity extracts only the valid bits from a source bitmap,
-// compressing it into a contiguous destination bitmap. Uses SetBitRunReader for
-// efficient iteration over valid runs.
-func compressBitmapWithValidity(
-	srcBitmap []byte,
-	srcOffset int64,
-	numValues int64,
-	validBits []byte,
-	validBitsOffset int64,
-	numValid int64,
-) []byte {
-	if numValid == 0 {
-		return []byte{}
-	}
-
-	// Allocate destination bitmap to hold only valid bits
-	dstBitmap := make([]byte, bitutil.BytesForBits(numValid))
-	dstWriter := utils.NewBitmapWriter(dstBitmap, 0, int(numValid))
-
-	// Use SetBitRunReader to efficiently iterate over valid runs
-	reader := bitutils.NewSetBitRunReader(validBits, validBitsOffset, numValues)
-	for {
-		run := reader.NextRun()
-		if run.Length == 0 {
-			break
-		}
-
-		// Copy this run of valid bits from source to destination
-		dstWriter.AppendBitmap(srcBitmap, srcOffset+run.Pos, run.Length)
-	}
-
-	dstWriter.Finish()
-	return dstBitmap
-}
 
 // PlainBooleanEncoder encodes bools as a bitmap as per the Plain Encoding
 type PlainBooleanEncoder struct {
@@ -80,12 +46,7 @@ func (PlainBooleanEncoder) Type() parquet.Type {
 
 // Put encodes the contents of in into the underlying data buffer.
 func (enc *PlainBooleanEncoder) Put(in []bool) {
-	if enc.bitsBuffer == nil {
-		enc.bitsBuffer = make([]byte, boolBufSize)
-	}
-	if enc.wr == nil {
-		enc.wr = utils.NewBitmapWriter(enc.bitsBuffer, 0, boolsInBuf)
-	}
+	enc.initBitmapWriter()
 	if len(in) == 0 {
 		return
 	}
@@ -100,15 +61,19 @@ func (enc *PlainBooleanEncoder) Put(in []bool) {
 	}
 }
 
-// PutBitmap encodes boolean values directly from a bitmap without converting to []bool.
-// This avoids the 8x memory overhead of bool slices.
-func (enc *PlainBooleanEncoder) PutBitmap(bitmap []byte, offset int64, length int64) {
+func (enc *PlainBooleanEncoder) initBitmapWriter() {
 	if enc.bitsBuffer == nil {
 		enc.bitsBuffer = make([]byte, boolBufSize)
 	}
 	if enc.wr == nil {
 		enc.wr = utils.NewBitmapWriter(enc.bitsBuffer, 0, boolsInBuf)
 	}
+}
+
+// PutBitmap encodes boolean values directly from a bitmap without converting to []bool.
+// This avoids the 8x memory overhead of bool slices.
+func (enc *PlainBooleanEncoder) PutBitmap(bitmap []byte, offset int64, length int64) {
+	enc.initBitmapWriter()
 	if length == 0 {
 		return
 	}
@@ -127,6 +92,24 @@ func (enc *PlainBooleanEncoder) PutBitmap(bitmap []byte, offset int64, length in
 	}
 }
 
+func (enc *PlainBooleanEncoder) putBitmapScalar(bitmap []byte, offset, length int64) {
+	enc.initBitmapWriter()
+	for i := int64(0); i < length; i++ {
+		if enc.wr.Pos() == boolsInBuf {
+			enc.wr.Finish()
+			enc.append(enc.bitsBuffer)
+			enc.wr.Reset(0, boolsInBuf)
+		}
+		if bitutil.BitIsSet(bitmap, int(offset+i)) {
+			enc.wr.Set()
+		} else {
+			enc.wr.Clear()
+		}
+		enc.wr.Next()
+	}
+	enc.wr.Finish()
+}
+
 // PutSpaced will use the validBits bitmap to determine which values are nulls
 // and can be left out from the slice, and the encoded without those nulls.
 func (enc *PlainBooleanEncoder) PutSpaced(in []bool, validBits []byte, validBitsOffset int64) {
@@ -137,23 +120,43 @@ func (enc *PlainBooleanEncoder) PutSpaced(in []bool, validBits []byte, validBits
 
 // PutSpacedBitmap encodes boolean values directly from a bitmap with validity information,
 // without converting to []bool. This avoids the 8x memory overhead of bool slices.
-// It compresses the bitmap by extracting only valid (non-null) bits.
+// It appends valid runs directly to the encoder bitmap.
 func (enc *PlainBooleanEncoder) PutSpacedBitmap(bitmap []byte, bitmapOffset int64, numValues int64, validBits []byte, validBitsOffset int64) int64 {
 	if numValues == 0 {
 		return 0
 	}
 
-	// Count the number of valid values to pre-allocate destination bitmap
-	numValid := int64(bitutil.CountSetBits(validBits, int(validBitsOffset), int(numValues)))
-	if numValid == 0 {
-		return 0
+	numValid := int64(0)
+	reader := bitutils.NewSetBitRunReader(validBits, validBitsOffset, numValues)
+	for {
+		run := reader.NextRun()
+		if run.Length == 0 {
+			break
+		}
+		// Bitmap copies need word readers for unaligned ranges. Keep the
+		// scalar path for short runs unless the run is an exact byte multiple:
+		// when both ranges are byte-aligned, PutBitmap uses a cheaper byte copy.
+		switch run.Length {
+		case 8, 16, 24:
+			srcOffset := bitmapOffset + run.Pos
+			dstOffset := int64(0)
+			if enc.wr != nil {
+				dstOffset = int64(enc.wr.Pos())
+			}
+			if srcOffset%8 != 0 || dstOffset%8 != 0 {
+				enc.putBitmapScalar(bitmap, srcOffset, run.Length)
+			} else {
+				enc.PutBitmap(bitmap, srcOffset, run.Length)
+			}
+		default:
+			if run.Length < scalarBitmapRunLimit {
+				enc.putBitmapScalar(bitmap, bitmapOffset+run.Pos, run.Length)
+			} else {
+				enc.PutBitmap(bitmap, bitmapOffset+run.Pos, run.Length)
+			}
+		}
+		numValid += run.Length
 	}
-
-	// Compress bitmap: extract only valid bits
-	compressedBitmap := compressBitmapWithValidity(bitmap, bitmapOffset, numValues, validBits, validBitsOffset, numValid)
-
-	// Encode the compressed bitmap
-	enc.PutBitmap(compressedBitmap, 0, numValid)
 
 	return numValid
 }
