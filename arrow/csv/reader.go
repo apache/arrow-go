@@ -341,6 +341,9 @@ func (r *Reader) nextn() bool {
 		}
 
 		r.validate(recs)
+		if n == 0 && r.err == nil {
+			r.bld.Reserve(r.chunk)
+		}
 		r.read(recs)
 		n++
 	}
