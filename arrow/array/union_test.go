@@ -78,6 +78,45 @@ func TestUnionBuilderChildBounds(t *testing.T) {
 	}
 }
 
+func TestUnionBuilderRejectsInvalidJSONTypeCodes(t *testing.T) {
+	fields := []arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}
+	cases := []struct {
+		name string
+		new  func() array.UnionBuilder
+	}{
+		{
+			name: "dense",
+			new: func() array.UnionBuilder {
+				return array.NewDenseUnionBuilder(memory.DefaultAllocator, arrow.DenseUnionOf(fields, []arrow.UnionTypeCode{0}))
+			},
+		},
+		{
+			name: "sparse",
+			new: func() array.UnionBuilder {
+				return array.NewSparseUnionBuilder(memory.DefaultAllocator, arrow.SparseUnionOf(fields, []arrow.UnionTypeCode{0}))
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, typeCode := range []string{"256", "-1", "null"} {
+				builder := tc.new()
+				err := func() (err error) {
+					defer func() {
+						if r := recover(); r != nil {
+							err = fmt.Errorf("panic while decoding type code %s: %v", typeCode, r)
+						}
+					}()
+					return builder.UnmarshalJSON([]byte("[[" + typeCode + ", 1]]"))
+				}()
+				builder.Release()
+				assert.Error(t, err, typeCode)
+			}
+		})
+	}
+}
+
 func TestUnionSliceEquals(t *testing.T) {
 	unionFields := []arrow.Field{
 		{Name: "u0", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
