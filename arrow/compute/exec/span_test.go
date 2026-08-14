@@ -205,6 +205,7 @@ func TestArraySpan_NumBuffers(t *testing.T) {
 		{"null", fields{Type: arrow.Null}, 1},
 		{"struct", fields{Type: arrow.StructOf()}, 1},
 		{"fixed size list", fields{Type: arrow.FixedSizeListOf(4, arrow.PrimitiveTypes.Int32)}, 1},
+		{"run end encoded", fields{Type: arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32)}, 1},
 		{"binary", fields{Type: arrow.BinaryTypes.Binary}, 3},
 		{"large binary", fields{Type: arrow.BinaryTypes.LargeBinary}, 3},
 		{"string", fields{Type: arrow.BinaryTypes.String}, 3},
@@ -228,6 +229,50 @@ func TestArraySpan_NumBuffers(t *testing.T) {
 			if got := a.NumBuffers(); got != tt.want {
 				t.Errorf("ArraySpan.NumBuffers() = %v, want %v", got, tt.want)
 			}
+		})
+	}
+}
+
+func TestArraySpan_MakeArrayPreservesListViewBuffers(t *testing.T) {
+	tests := []struct {
+		name  string
+		build func(memory.Allocator) arrow.Array
+	}{
+		{"list view", func(mem memory.Allocator) arrow.Array {
+			builder := array.NewListViewBuilder(mem, arrow.PrimitiveTypes.Int32)
+			values := builder.ValueBuilder().(*array.Int32Builder)
+			values.AppendValues([]int32{10, 11, 12}, nil)
+			builder.AppendDimensions(1, 2)
+			result := builder.NewArray()
+			builder.Release()
+			return result
+		}},
+		{"large list view", func(mem memory.Allocator) arrow.Array {
+			builder := array.NewLargeListViewBuilder(mem, arrow.PrimitiveTypes.Int32)
+			values := builder.ValueBuilder().(*array.Int32Builder)
+			values.AppendValues([]int32{10, 11, 12}, nil)
+			builder.AppendDimensions(1, 2)
+			result := builder.NewArray()
+			builder.Release()
+			return result
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			input := tt.build(mem)
+			defer input.Release()
+
+			var span exec.ArraySpan
+			span.SetMembers(input.Data())
+			actual := span.MakeArray()
+			defer actual.Release()
+
+			assert.NoError(t, array.ValidateFull(actual))
+			assert.True(t, array.Equal(input, actual), "expected: %s\ngot: %s", input, actual)
 		})
 	}
 }
