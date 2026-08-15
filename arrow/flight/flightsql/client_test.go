@@ -525,7 +525,10 @@ func (s *FlightSqlClientSuite) TestPreparedStatementExecuteUpdateWithIsUpdateTru
 	defer mockedPut.AssertExpectations(s.T())
 	mockedPut.On("Send", mock.MatchedBy(func(fd *flight.FlightData) bool {
 		return proto.Equal(updateDesc, fd.FlightDescriptor)
-	})).Return(nil)
+	})).Return(nil).Once()
+	mockedPut.On("Send", mock.MatchedBy(func(fd *flight.FlightData) bool {
+		return fd.FlightDescriptor == nil
+	})).Return(nil).Once()
 	mockedPut.On("CloseSend").Return(nil)
 	mockedPut.On("Recv").Return(&pb.PutResult{AppMetadata: resdata}, nil)
 	s.mockClient.On("DoPut", s.callOpts).Return(mockedPut, nil)
