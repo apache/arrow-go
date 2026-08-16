@@ -1470,85 +1470,96 @@ func (b *shreddedPrimitiveBuilder) tryTyped(v variant.Value) (residual []byte) {
 		return v.Bytes()
 	}
 
-	switch bldr := b.typedBldr.(type) {
+	if appendVariantToTypedBuilder(b.typedBldr, v) {
+		return nil
+	}
+
+	b.typedBldr.AppendNull()
+	return v.Bytes()
+}
+
+// appendVariantToTypedBuilder appends v to a typed primitive builder when v's type
+// fits the builder, reporting whether it did. Shared by the shredding writer and VariantGet.
+func appendVariantToTypedBuilder(target array.Builder, v variant.Value) bool {
+	switch bldr := target.(type) {
 	case *array.Int8Builder:
 		if appendNumericToTarget(bldr, v) {
-			return nil
+			return true
 		}
 	case *array.Uint8Builder:
 		if appendNumericToTarget(bldr, v) {
-			return nil
+			return true
 		}
 	case *array.Int16Builder:
 		if appendNumericToTarget(bldr, v) {
-			return nil
+			return true
 		}
 	case *array.Uint16Builder:
 		if appendNumericToTarget(bldr, v) {
-			return nil
+			return true
 		}
 	case *array.Int32Builder:
 		if appendNumericToTarget(bldr, v) {
-			return nil
+			return true
 		}
 	case *array.Uint32Builder:
 		if appendNumericToTarget(bldr, v) {
-			return nil
+			return true
 		}
 	case *array.Int64Builder:
 		if appendNumericToTarget(bldr, v) {
-			return nil
+			return true
 		}
 	case *array.Float32Builder:
 		switch v.Type() {
 		case variant.Float:
 			bldr.Append(v.Value().(float32))
-			return nil
+			return true
 		case variant.Double:
 			val := v.Value().(float64)
 			if val >= -math.MaxFloat32 && val <= math.MaxFloat32 {
 				bldr.Append(float32(val))
-				return nil
+				return true
 			}
 		}
 	case *array.Float64Builder:
 		switch v.Type() {
 		case variant.Float:
 			bldr.Append(float64(v.Value().(float32)))
-			return nil
+			return true
 		case variant.Double:
 			bldr.Append(v.Value().(float64))
-			return nil
+			return true
 		}
 	case *array.BooleanBuilder:
 		if v.Type() == variant.Bool {
 			bldr.Append(v.Value().(bool))
-			return nil
+			return true
 		}
 	case array.StringLikeBuilder:
 		if v.Type() == variant.String {
 			bldr.Append(v.Value().(string))
-			return nil
+			return true
 		}
 	case array.BinaryLikeBuilder:
 		if v.Type() == variant.Binary {
 			bldr.Append(v.Value().([]byte))
-			return nil
+			return true
 		}
 	case *array.Date32Builder:
 		if v.Type() == variant.Date {
 			bldr.Append(v.Value().(arrow.Date32))
-			return nil
+			return true
 		}
 	case *array.Time64Builder:
 		if v.Type() == variant.Time && bldr.Type().(*arrow.Time64Type).Unit == arrow.Microsecond {
 			bldr.Append(v.Value().(arrow.Time64))
-			return nil
+			return true
 		}
 	case *UUIDBuilder:
 		if v.Type() == variant.UUID {
 			bldr.Append(v.Value().(uuid.UUID))
-			return nil
+			return true
 		}
 	case *array.TimestampBuilder:
 		tsType := bldr.Type().(*arrow.TimestampType)
@@ -1561,10 +1572,10 @@ func (b *shreddedPrimitiveBuilder) tryTyped(v variant.Value) (residual []byte) {
 			switch tsType.Unit {
 			case arrow.Microsecond:
 				bldr.Append(v.Value().(arrow.Timestamp))
-				return nil
+				return true
 			case arrow.Nanosecond:
 				bldr.Append(v.Value().(arrow.Timestamp) * 1000)
-				return nil
+				return true
 			}
 		case variant.TimestampMicrosNTZ:
 			if tsType.TimeZone != "" {
@@ -1574,20 +1585,20 @@ func (b *shreddedPrimitiveBuilder) tryTyped(v variant.Value) (residual []byte) {
 			switch tsType.Unit {
 			case arrow.Microsecond:
 				bldr.Append(v.Value().(arrow.Timestamp))
-				return nil
+				return true
 			case arrow.Nanosecond:
 				bldr.Append(v.Value().(arrow.Timestamp) * 1000)
-				return nil
+				return true
 			}
 		case variant.TimestampNanos:
 			if tsType.TimeZone == "UTC" && tsType.Unit == arrow.Nanosecond {
 				bldr.Append(v.Value().(arrow.Timestamp))
-				return nil
+				return true
 			}
 		case variant.TimestampNanosNTZ:
 			if tsType.TimeZone == "" && tsType.Unit == arrow.Nanosecond {
 				bldr.Append(v.Value().(arrow.Timestamp))
-				return nil
+				return true
 			}
 		}
 	case *array.Decimal32Builder:
@@ -1596,17 +1607,17 @@ func (b *shreddedPrimitiveBuilder) tryTyped(v variant.Value) (residual []byte) {
 		case variant.DecimalValue[decimal.Decimal32]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(val.Value.(decimal.Decimal32))
-				return nil
+				return true
 			}
 		case variant.DecimalValue[decimal.Decimal64]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(decimal.Decimal32(val.Value.(decimal.Decimal64)))
-				return nil
+				return true
 			}
 		case variant.DecimalValue[decimal.Decimal128]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(decimal.Decimal32(val.Value.(decimal.Decimal128).LowBits()))
-				return nil
+				return true
 			}
 		}
 	case *array.Decimal64Builder:
@@ -1615,17 +1626,17 @@ func (b *shreddedPrimitiveBuilder) tryTyped(v variant.Value) (residual []byte) {
 		case variant.DecimalValue[decimal.Decimal32]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(decimal.Decimal64(val.Value.(decimal.Decimal32)))
-				return nil
+				return true
 			}
 		case variant.DecimalValue[decimal.Decimal64]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(val.Value.(decimal.Decimal64))
-				return nil
+				return true
 			}
 		case variant.DecimalValue[decimal.Decimal128]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(decimal.Decimal64(val.Value.(decimal.Decimal128).LowBits()))
-				return nil
+				return true
 			}
 		}
 	case *array.Decimal128Builder:
@@ -1634,23 +1645,22 @@ func (b *shreddedPrimitiveBuilder) tryTyped(v variant.Value) (residual []byte) {
 		case variant.DecimalValue[decimal.Decimal32]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(decimal128.FromI64(int64(val.Value.(decimal.Decimal32))))
-				return nil
+				return true
 			}
 		case variant.DecimalValue[decimal.Decimal64]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(decimal128.FromI64(int64(val.Value.(decimal.Decimal64))))
-				return nil
+				return true
 			}
 		case variant.DecimalValue[decimal.Decimal128]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(val.Value.(decimal.Decimal128))
-				return nil
+				return true
 			}
 		}
 	}
 
-	b.typedBldr.AppendNull()
-	return v.Bytes()
+	return false
 }
 
 type shreddedFieldBuilder struct {
