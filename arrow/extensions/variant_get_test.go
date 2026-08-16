@@ -257,7 +257,54 @@ func TestVariantGetRejectsNonVariant(t *testing.T) {
 	require.ErrorIs(t, err, arrow.ErrInvalid)
 }
 
-// TestVariantGetDictMetadata guards against the panic from asserting TypedArray[[]byte]
+// TestVariantGetStrictVsDefaultCast covers the cast-outcome axis: an uncastable
+// value nulls by default (mirrors arrow-rs) and errors under Strict.
+func TestVariantGetStrictVsDefaultCast(t *testing.T) {
+	mem := memory.DefaultAllocator
+	arr := nonShreddedVariants(t, mem, map[string]any{"a": "not-a-number"})
+	defer arr.Release()
+	path := extensions.VariantPath{extensions.VariantPathField("a")}
+
+	// Default (Strict false): uncastable string -> Int64 becomes null.
+	out, err := extensions.VariantGet(arr, extensions.GetOptions{Path: path, AsType: arrow.PrimitiveTypes.Int64})
+	require.NoError(t, err)
+	defer out.Release()
+	assert.True(t, out.(*array.Int64).IsNull(0))
+
+	// Strict: the same cast returns an error.
+	_, err = extensions.VariantGet(arr, extensions.GetOptions{Path: path, AsType: arrow.PrimitiveTypes.Int64, Strict: true})
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+}
+
+// TestVariantGetValuelessLayout guards against the Field(-1) panic on a shredded
+// layout that has no residual value column.
+func TestVariantGetValuelessLayout(t *testing.T) {
+	mem := memory.DefaultAllocator
+	s := arrow.StructOf(
+		arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary},
+		arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Int64, Nullable: true})
+	b := array.NewStructBuilder(mem, s)
+	defer b.Release()
+	mb := b.FieldBuilder(0).(*array.BinaryBuilder)
+	tv := b.FieldBuilder(1).(*array.Int64Builder)
+	b.Append(true)
+	mb.Append(variant.EmptyMetadataBytes[:])
+	tv.AppendNull()
+	st := b.NewArray()
+	defer st.Release()
+
+	vt, err := extensions.NewVariantType(s)
+	require.NoError(t, err)
+	arr := array.NewExtensionArrayWithStorage(vt, st).(*extensions.VariantArray)
+	defer arr.Release()
+
+	// AsType mismatch (Int32 vs Int64) forces the per-row fallback over a value-less target.
+	out, err := extensions.VariantGet(arr, extensions.GetOptions{AsType: arrow.PrimitiveTypes.Int32})
+	require.NoError(t, err)
+	defer out.Release()
+	assert.True(t, out.(*array.Int32).IsNull(0))
+}
+
 // on a dictionary-encoded metadata column, which is spec-legal.
 func TestVariantGetDictMetadata(t *testing.T) {
 	mem := memory.DefaultAllocator

@@ -513,6 +513,11 @@ func (v *VariantArray) IsNull(i int) bool {
 		}
 	}
 
+	if vt.valueFieldIdx == -1 {
+		// No residual value column: a null typed_value means the value is missing.
+		return true
+	}
+
 	valArr := v.Storage().(*array.Struct).Field(vt.valueFieldIdx)
 	b := valArr.(arrow.TypedArray[[]byte]).Value(i)
 	return len(b) == 1 && b[0] == 0 // variant null

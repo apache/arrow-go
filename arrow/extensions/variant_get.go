@@ -55,8 +55,9 @@ type GetOptions struct {
 	// When set, the extracted value is cast to this type. Nested (struct/list) types
 	// are not yet supported and yield arrow.ErrNotImplemented.
 	AsType arrow.DataType
-	// Safe makes cast failures produce null; when false a failure returns an error.
-	Safe bool
+	// Strict makes a cast failure return an error. The default (false) mirrors
+	// arrow-rs: a cast failure produces null.
+	Strict bool
 	// Mem is the allocator for output arrays; nil uses memory.DefaultAllocator.
 	Mem memory.Allocator
 }
@@ -269,13 +270,11 @@ func shredBasicVariant(target *VariantArray, remaining VariantPath, opts GetOpti
 			continue
 		}
 
-		if opts.Safe {
-			bldr.AppendNull()
-
-			continue
+		if opts.Strict {
+			return nil, fmt.Errorf("%w: cannot cast variant %v to %s", arrow.ErrInvalid, leaf.Type(), opts.AsType)
 		}
 
-		return nil, fmt.Errorf("%w: cannot cast variant %v to %s", arrow.ErrInvalid, leaf.Type(), opts.AsType)
+		bldr.AppendNull()
 	}
 
 	return bldr.NewArray(), nil
