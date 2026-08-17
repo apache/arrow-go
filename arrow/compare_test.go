@@ -22,6 +22,12 @@ import (
 )
 
 func TestTypeEqual(t *testing.T) {
+	mapType := func(keysSorted bool) DataType {
+		typ := MapOf(BinaryTypes.String, PrimitiveTypes.Int32)
+		typ.KeysSorted = keysSorted
+		return typ
+	}
+
 	tests := []struct {
 		left, right   DataType
 		want          bool
@@ -330,6 +336,16 @@ func TestTypeEqual(t *testing.T) {
 		{
 			MapOf(BinaryTypes.String, PrimitiveTypes.Int32),
 			MapOf(BinaryTypes.String, PrimitiveTypes.Int32),
+			true, false,
+		},
+		{
+			mapType(false),
+			mapType(true),
+			false, false,
+		},
+		{
+			mapType(true),
+			mapType(true),
 			true, false,
 		},
 		{

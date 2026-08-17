@@ -61,6 +61,7 @@ type Reader struct {
 	columnFilter   []string
 	columnTypes    map[string]arrow.DataType
 	conversions    []conversionColumn
+	pendingRecord  []string
 
 	stringsCanBeNull bool
 	nulls            []string
@@ -214,6 +215,9 @@ func (r *Reader) readHeader() error {
 		r.columnFilter = nil
 	}
 	r.columnTypes = nil
+	if !r.header {
+		r.pendingRecord = append([]string(nil), records...)
+	}
 	return nil
 }
 
@@ -272,7 +276,7 @@ func (r *Reader) Next() bool {
 // from that row.
 func (r *Reader) next1() bool {
 	var recs []string
-	recs, r.err = r.r.Read()
+	recs, r.err = r.readRecord()
 	if r.err != nil {
 		r.done = true
 		if errors.Is(r.err, io.EOF) {
@@ -296,11 +300,17 @@ func (r *Reader) nextall() bool {
 	}()
 
 	var recs [][]string
+	if r.pendingRecord != nil {
+		recs = append(recs, r.pendingRecord)
+		r.pendingRecord = nil
+	}
 
-	recs, r.err = r.r.ReadAll()
+	var remaining [][]string
+	remaining, r.err = r.r.ReadAll()
 	if r.err != nil {
 		return false
 	}
+	recs = append(recs, remaining...)
 
 	for _, rec := range recs {
 		r.validate(rec)
@@ -321,7 +331,7 @@ func (r *Reader) nextn() bool {
 	)
 
 	for i := 0; i < r.chunk && !r.done; i++ {
-		recs, err = r.r.Read()
+		recs, err = r.readRecord()
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
 				r.err = err
@@ -331,6 +341,9 @@ func (r *Reader) nextn() bool {
 		}
 
 		r.validate(recs)
+		if n == 0 && r.err == nil {
+			r.bld.Reserve(r.chunk)
+		}
 		r.read(recs)
 		n++
 	}
@@ -341,6 +354,15 @@ func (r *Reader) nextn() bool {
 
 	r.cur = r.bld.NewRecordBatch()
 	return n > 0
+}
+
+func (r *Reader) readRecord() ([]string, error) {
+	if r.pendingRecord != nil {
+		record := r.pendingRecord
+		r.pendingRecord = nil
+		return record, nil
+	}
+	return r.r.Read()
 }
 
 func (r *Reader) validate(recs []string) {
@@ -383,6 +405,12 @@ func (r *Reader) isNull(val string) bool {
 		}
 	}
 	return false
+}
+
+func (r *Reader) setParseError(err error) {
+	if r.err == nil {
+		r.err = err
+	}
 }
 
 func (r *Reader) read(recs []string) {
@@ -532,7 +560,7 @@ func (r *Reader) parseBool(field array.Builder, str string) {
 
 	v, err := strconv.ParseBool(str)
 	if err != nil {
-		r.err = fmt.Errorf("%w: unrecognized boolean: %s", err, str)
+		r.setParseError(fmt.Errorf("%w: unrecognized boolean: %s", err, str))
 		field.AppendNull()
 		return
 	}
@@ -547,8 +575,8 @@ func (r *Reader) parseInt8(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseInt(str, 10, 8)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -563,8 +591,8 @@ func (r *Reader) parseInt16(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseInt(str, 10, 16)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -579,8 +607,8 @@ func (r *Reader) parseInt32(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseInt(str, 10, 32)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -595,8 +623,8 @@ func (r *Reader) parseInt64(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseInt(str, 10, 64)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -611,8 +639,8 @@ func (r *Reader) parseUint8(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseUint(str, 10, 8)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -627,8 +655,8 @@ func (r *Reader) parseUint16(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseUint(str, 10, 16)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -643,8 +671,8 @@ func (r *Reader) parseUint32(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseUint(str, 10, 32)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -659,8 +687,8 @@ func (r *Reader) parseUint64(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseUint(str, 10, 64)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -675,8 +703,8 @@ func (r *Reader) parseFloat16(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseFloat(str, 32)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -690,8 +718,8 @@ func (r *Reader) parseFloat32(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseFloat(str, 32)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -705,8 +733,8 @@ func (r *Reader) parseFloat64(field array.Builder, str string) {
 	}
 
 	v, err := strconv.ParseFloat(str, 64)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -721,8 +749,8 @@ func (r *Reader) parseTimestamp(field array.Builder, str string, unit arrow.Time
 	}
 
 	v, err := arrow.TimestampFromString(str, unit)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -737,8 +765,8 @@ func (r *Reader) parseDate32(field array.Builder, str string) {
 	}
 
 	tm, err := time.Parse("2006-01-02", str)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -752,8 +780,8 @@ func (r *Reader) parseDate64(field array.Builder, str string) {
 	}
 
 	tm, err := time.Parse("2006-01-02", str)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -767,8 +795,8 @@ func (r *Reader) parseTime32(field array.Builder, str string, unit arrow.TimeUni
 	}
 
 	val, err := arrow.Time32FromString(str, unit)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -782,8 +810,8 @@ func (r *Reader) parseDecimal128(field array.Builder, str string, prec, scale in
 	}
 
 	val, err := decimal128.FromString(str, prec, scale)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -797,8 +825,8 @@ func (r *Reader) parseDecimal256(field array.Builder, str string, prec, scale in
 	}
 
 	val, err := decimal256.FromString(str, prec, scale)
-	if err != nil && r.err == nil {
-		r.err = err
+	if err != nil {
+		r.setParseError(err)
 		field.AppendNull()
 		return
 	}
@@ -811,23 +839,26 @@ func (r *Reader) parseListLike(field array.ListLikeBuilder, str string) {
 		return
 	}
 	if !strings.HasPrefix(str, "{") || !strings.HasSuffix(str, "}") {
-		r.err = errors.New("invalid list format. should start with '{' and end with '}'")
+		r.setParseError(errors.New("invalid list format. should start with '{' and end with '}'"))
+		field.AppendNull()
 		return
 	}
 	str = strings.Trim(str, "{}")
-	field.Append(true)
 	if len(str) == 0 {
 		// we don't want to create the csv reader if we already know the
 		// string is empty
+		field.Append(true)
 		return
 	}
-	valueBldr := field.ValueBuilder()
 	reader := csv.NewReader(strings.NewReader(str))
 	items, err := reader.Read()
 	if err != nil {
-		r.err = err
+		r.setParseError(err)
+		field.AppendNull()
 		return
 	}
+	field.Append(true)
+	valueBldr := field.ValueBuilder()
 	for _, str := range items {
 		r.initFieldConverter(valueBldr)(str)
 	}
@@ -839,29 +870,39 @@ func (r *Reader) parseFixedSizeList(field *array.FixedSizeListBuilder, str strin
 		return
 	}
 	if !strings.HasPrefix(str, "{") || !strings.HasSuffix(str, "}") {
-		r.err = errors.New("invalid list format. should start with '{' and end with '}'")
+		r.setParseError(errors.New("invalid list format. should start with '{' and end with '}'"))
+		field.AppendNull()
 		return
 	}
 	str = strings.Trim(str, "{}")
-	field.Append(true)
 	if len(str) == 0 {
 		// we don't want to create the csv reader if we already know the
 		// string is empty
+		if n != 0 {
+			r.setParseError(fmt.Errorf("%w: fixed size list items should match the fixed size list length, expected %d, got 0", arrow.ErrInvalid, n))
+			field.AppendNull()
+			return
+		}
+		field.Append(true)
 		return
 	}
 	valueBldr := field.ValueBuilder()
 	reader := csv.NewReader(strings.NewReader(str))
 	items, err := reader.Read()
 	if err != nil {
-		r.err = err
+		r.setParseError(err)
+		field.AppendNull()
 		return
 	}
-	if len(items) == n {
-		for _, str := range items {
-			r.initFieldConverter(valueBldr)(str)
-		}
-	} else {
-		r.err = fmt.Errorf("%w: fixed size list items should match the fixed size list length, expected %d, got %d", arrow.ErrInvalid, n, len(items))
+	if len(items) != n {
+		r.setParseError(fmt.Errorf("%w: fixed size list items should match the fixed size list length, expected %d, got %d", arrow.ErrInvalid, n, len(items)))
+		field.AppendNull()
+		return
+	}
+
+	field.Append(true)
+	for _, str := range items {
+		r.initFieldConverter(valueBldr)(str)
 	}
 }
 
@@ -873,7 +914,7 @@ func (r *Reader) parseBinaryType(field array.Builder, str string) {
 	}
 	decodedVal, err := base64.StdEncoding.DecodeString(str)
 	if err != nil {
-		r.err = fmt.Errorf("cannot decode base64 string %s", str)
+		r.setParseError(fmt.Errorf("cannot decode base64 string %s", str))
 		field.AppendNull()
 		return
 	}
@@ -889,7 +930,7 @@ func (r *Reader) parseLargeBinaryType(field array.Builder, str string) {
 	}
 	decodedVal, err := base64.StdEncoding.DecodeString(str)
 	if err != nil {
-		r.err = fmt.Errorf("cannot decode base64 string %s", str)
+		r.setParseError(fmt.Errorf("cannot decode base64 string %s", str))
 		field.AppendNull()
 		return
 	}
@@ -905,7 +946,7 @@ func (r *Reader) parseFixedSizeBinaryType(field array.Builder, str string, byteW
 	}
 	decodedVal, err := base64.StdEncoding.DecodeString(str)
 	if err != nil {
-		r.err = fmt.Errorf("cannot decode base64 string %s", str)
+		r.setParseError(fmt.Errorf("cannot decode base64 string %s", str))
 		field.AppendNull()
 		return
 	}
@@ -913,7 +954,8 @@ func (r *Reader) parseFixedSizeBinaryType(field array.Builder, str string, byteW
 	if len(decodedVal) == byteWidth {
 		field.(*array.FixedSizeBinaryBuilder).Append(decodedVal)
 	} else {
-		r.err = fmt.Errorf("%w: the length of fixed size binary value should match the fixed size binary byte width, expected %d, got %d", arrow.ErrInvalid, byteWidth, len(decodedVal))
+		r.setParseError(fmt.Errorf("%w: the length of fixed size binary value should match the fixed size binary byte width, expected %d, got %d", arrow.ErrInvalid, byteWidth, len(decodedVal)))
+		field.AppendNull()
 	}
 }
 
@@ -923,7 +965,8 @@ func (r *Reader) parseExtension(field array.Builder, str string) {
 		return
 	}
 	if err := field.AppendValueFromString(str); err != nil {
-		r.err = err
+		r.setParseError(err)
+		field.AppendNull()
 		return
 	}
 }

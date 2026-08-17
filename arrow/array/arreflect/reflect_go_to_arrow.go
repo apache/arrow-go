@@ -308,7 +308,11 @@ func appendTemporalValue(b array.Builder, v reflect.Value) error {
 		if err != nil {
 			return err
 		}
-		tb.Append(arrow.Timestamp(t.UnixNano() / int64(unit.Multiplier())))
+		timestamp, err := arrow.TimestampFromTime(t, unit)
+		if err != nil {
+			return err
+		}
+		tb.Append(timestamp)
 	case *array.Date32Builder:
 		t, err := asTime(v)
 		if err != nil {

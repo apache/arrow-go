@@ -117,6 +117,9 @@ func NewColumnChunkMetaData(column *format.ColumnChunk, descr *schema.Column, wr
 			}
 		}
 	}
+	if c.columnMeta == nil {
+		return nil, errors.New("column chunk metadata is missing")
+	}
 	for _, enc := range c.columnMeta.Encodings {
 		c.encodings = append(c.encodings, parquet.Encoding(enc))
 	}

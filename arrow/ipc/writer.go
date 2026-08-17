@@ -125,14 +125,15 @@ func NewWriterWithPayloadWriter(pw PayloadWriter, opts ...Option) *Writer {
 func NewWriter(w io.Writer, opts ...Option) *Writer {
 	cfg := newConfig(opts...)
 	return &Writer{
-		w:              w,
-		mem:            cfg.alloc,
-		pw:             &streamWriter{w: w},
-		schema:         cfg.schema,
-		codec:          cfg.codec,
-		emitDictDeltas: cfg.emitDictDeltas,
-		compressNP:     cfg.compressNP,
-		compressors:    make([]compressor, cfg.compressNP),
+		w:               w,
+		mem:             cfg.alloc,
+		pw:              &streamWriter{w: w},
+		schema:          cfg.schema,
+		codec:           cfg.codec,
+		emitDictDeltas:  cfg.emitDictDeltas,
+		compressNP:      cfg.compressNP,
+		minSpaceSavings: cfg.minSpaceSavings,
+		compressors:     make([]compressor, cfg.compressNP),
 	}
 }
 
@@ -435,9 +436,11 @@ func (w *recordEncoder) compressBodyBuffers(p *Payload) error {
 
 		n, err := codec.Write(p.body[idx].Bytes())
 		if err != nil {
+			buf.Release()
 			return err
 		}
 		if err := codec.Close(); err != nil {
+			buf.Release()
 			return err
 		}
 
@@ -470,7 +473,7 @@ func (w *recordEncoder) compressBodyBuffers(p *Payload) error {
 	var (
 		wg          sync.WaitGroup
 		ch          = make(chan int)
-		errch       = make(chan error)
+		errch       = make(chan error, 1)
 		ctx, cancel = context.WithCancel(context.Background())
 	)
 	defer cancel()
@@ -489,7 +492,10 @@ func (w *recordEncoder) compressBodyBuffers(p *Payload) error {
 					}
 
 					if err := compress(idx, codec); err != nil {
-						errch <- err
+						select {
+						case errch <- err:
+						default:
+						}
 						cancel()
 						return
 					}
@@ -501,15 +507,24 @@ func (w *recordEncoder) compressBodyBuffers(p *Payload) error {
 		}(workerID)
 	}
 
+send:
 	for idx := range p.body {
-		ch <- idx
+		select {
+		case ch <- idx:
+		case <-ctx.Done():
+			break send
+		}
 	}
 
 	close(ch)
 	wg.Wait()
-	close(errch)
 
-	return <-errch
+	select {
+	case err := <-errch:
+		return err
+	default:
+		return nil
+	}
 }
 
 func (w *recordEncoder) encode(p *Payload, rec arrow.RecordBatch) error {
@@ -527,7 +542,9 @@ func (w *recordEncoder) encode(p *Payload, rec arrow.RecordBatch) error {
 			return fmt.Errorf("%w: minSpaceSavings not in range [0,1]. Provided %.05f",
 				arrow.ErrInvalid, w.minSpaceSavings)
 		}
-		w.compressBodyBuffers(p)
+		if err := w.compressBodyBuffers(p); err != nil {
+			return err
+		}
 	}
 
 	// position for the start of a buffer relative to the passed frame of reference.
@@ -1136,6 +1153,8 @@ func needTruncate(offset int64, buf *memory.Buffer, minLength int64) bool {
 // method after it is no longer needed.
 func GetRecordBatchPayload(batch arrow.RecordBatch, opts ...Option) (Payload, error) {
 	cfg := newConfig(opts...)
+	compressors := make([]compressor, cfg.compressNP)
+	copy(compressors, cfg.compressors)
 	var (
 		data = Payload{msg: MessageRecordBatch}
 		enc  = newRecordEncoder(
@@ -1146,12 +1165,13 @@ func GetRecordBatchPayload(batch arrow.RecordBatch, opts ...Option) (Payload, er
 			cfg.codec,
 			cfg.compressNP,
 			cfg.minSpaceSavings,
-			make([]compressor, cfg.compressNP),
+			compressors,
 		)
 	)
 
 	err := enc.Encode(&data, batch)
 	if err != nil {
+		data.Release()
 		return Payload{}, err
 	}
 

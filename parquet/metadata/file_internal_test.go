@@ -36,3 +36,9 @@ func TestNewFileMetaDataReturnsSchemaErrors(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, meta)
 }
+
+func TestNewColumnChunkMetaDataReturnsErrorForMissingMetadata(t *testing.T) {
+	meta, err := NewColumnChunkMetaData(&format.ColumnChunk{}, nil, nil, 0, 0, nil)
+	require.EqualError(t, err, "column chunk metadata is missing")
+	require.Nil(t, meta)
+}

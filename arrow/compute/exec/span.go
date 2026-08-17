@@ -114,6 +114,10 @@ func (a *ArraySpan) UpdateNullCount() int64 {
 	if curNulls != array.UnknownNullCount {
 		return curNulls
 	}
+	if len(a.Buffers[0].Buf) == 0 {
+		atomic.StoreInt64(&a.Nulls, 0)
+		return 0
+	}
 
 	newNulls := a.Len - int64(bitutil.CountSetBits(a.Buffers[0].Buf, int(a.Offset), int(a.Len)))
 	atomic.StoreInt64(&a.Nulls, newNulls)
@@ -585,6 +589,10 @@ func getNumBuffers(dt arrow.DataType) int {
 		// so callers producing multi-buffer views must keep their data
 		// within a single block (the default 32KB allocation in the
 		// builder is sufficient for most use cases).
+		return 3
+	case arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW:
+		// validity + offsets + sizes. Unlike the view types above, this
+		// count is exact rather than a cap on variadic data buffers.
 		return 3
 	case arrow.EXTENSION:
 		return getNumBuffers(dt.(arrow.ExtensionType).StorageType())

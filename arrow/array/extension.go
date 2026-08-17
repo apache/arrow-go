@@ -124,6 +124,10 @@ func (e *ExtensionArrayBase) GetOneForMarshal(i int) interface{} {
 	return e.storage.GetOneForMarshal(i)
 }
 
+func (e *ExtensionArrayBase) ValueAsAny(i int) any {
+	return ValueAsAny(e.storage, i)
+}
+
 func (e *ExtensionArrayBase) MarshalJSON() ([]byte, error) {
 	return json.Marshal(e.storage)
 }

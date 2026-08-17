@@ -333,6 +333,13 @@ func (a *SparseUnion) GetOneForMarshal(i int) interface{} {
 	return []interface{}{typeID, data.GetOneForMarshal(i)}
 }
 
+func (a *SparseUnion) ValueAsAny(i int) any {
+	typeID := a.RawTypeCodes()[i]
+	childID := a.ChildID(i)
+	data := a.Field(childID)
+	return []any{typeID, ValueAsAny(data, i)}
+}
+
 func (a *SparseUnion) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -625,6 +632,14 @@ func (a *DenseUnion) GetOneForMarshal(i int) interface{} {
 	}
 
 	return []interface{}{typeID, data.GetOneForMarshal(offset)}
+}
+
+func (a *DenseUnion) ValueAsAny(i int) any {
+	typeID := a.RawTypeCodes()[i]
+	childID := a.ChildID(i)
+	data := a.Field(childID)
+	offset := int(a.RawValueOffsets()[i])
+	return []any{typeID, ValueAsAny(data, offset)}
 }
 
 func (a *DenseUnion) MarshalJSON() ([]byte, error) {
@@ -945,6 +960,10 @@ func (b *SparseUnionBuilder) Resize(n int) {
 	b.typesBuilder.resize(n)
 }
 
+func (b *SparseUnionBuilder) truncate(n int) {
+	b.typesBuilder.SetLength(n)
+}
+
 // AppendNull will append a null to the first child and an empty value
 // (implementation-defined) to the rest of the children.
 func (b *SparseUnionBuilder) AppendNull() {
@@ -1184,6 +1203,11 @@ func (b *DenseUnionBuilder) Reserve(n int) {
 func (b *DenseUnionBuilder) Resize(n int) {
 	b.typesBuilder.resize(n)
 	b.offsetsBuilder.resize(n * arrow.Int32SizeBytes)
+}
+
+func (b *DenseUnionBuilder) truncate(n int) {
+	b.typesBuilder.SetLength(n)
+	b.offsetsBuilder.SetLength(n * arrow.Int32SizeBytes)
 }
 
 // AppendNull will only append a null value arbitrarily to the first child

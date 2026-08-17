@@ -110,7 +110,7 @@ func checkIndexBounds(indices *Data, upperlimit uint64) error {
 	case arrow.INT8:
 		data := arrow.Int8Traits.CastFromBytes(indices.buffers[1].Bytes())
 		min, max := utils.GetMinMaxInt8(data[start:end])
-		if min < 0 || max >= int8(upperlimit) {
+		if min < 0 || uint64(max) >= upperlimit {
 			return fmt.Errorf("contains out of bounds index: min: %d, max: %d", min, max)
 		}
 	case arrow.UINT8:
@@ -122,7 +122,7 @@ func checkIndexBounds(indices *Data, upperlimit uint64) error {
 	case arrow.INT16:
 		data := arrow.Int16Traits.CastFromBytes(indices.buffers[1].Bytes())
 		min, max := utils.GetMinMaxInt16(data[start:end])
-		if min < 0 || max >= int16(upperlimit) {
+		if min < 0 || uint64(max) >= upperlimit {
 			return fmt.Errorf("contains out of bounds index: min: %d, max: %d", min, max)
 		}
 	case arrow.UINT16:
@@ -134,7 +134,7 @@ func checkIndexBounds(indices *Data, upperlimit uint64) error {
 	case arrow.INT32:
 		data := arrow.Int32Traits.CastFromBytes(indices.buffers[1].Bytes())
 		min, max := utils.GetMinMaxInt32(data[start:end])
-		if min < 0 || max >= int32(upperlimit) {
+		if min < 0 || uint64(max) >= upperlimit {
 			return fmt.Errorf("contains out of bounds index: min: %d, max: %d", min, max)
 		}
 	case arrow.UINT32:
@@ -146,7 +146,7 @@ func checkIndexBounds(indices *Data, upperlimit uint64) error {
 	case arrow.INT64:
 		data := arrow.Int64Traits.CastFromBytes(indices.buffers[1].Bytes())
 		min, max := utils.GetMinMaxInt64(data[start:end])
-		if min < 0 || max >= int64(upperlimit) {
+		if min < 0 || uint64(max) >= upperlimit {
 			return fmt.Errorf("contains out of bounds index: min: %d, max: %d", min, max)
 		}
 	case arrow.UINT64:
@@ -293,6 +293,13 @@ func (d *Dictionary) GetOneForMarshal(i int) interface{} {
 	}
 	vidx := d.GetValueIndex(i)
 	return d.Dictionary().GetOneForMarshal(vidx)
+}
+
+func (d *Dictionary) ValueAsAny(i int) any {
+	if d.IsNull(i) {
+		return nil
+	}
+	return ValueAsAny(d.Dictionary(), d.GetValueIndex(i))
 }
 
 func (d *Dictionary) MarshalJSON() ([]byte, error) {
@@ -686,12 +693,36 @@ func (b *dictionaryBuilder) Reserve(n int) {
 func (b *dictionaryBuilder) Resize(n int) {
 	b.idxBuilder.Resize(n)
 	b.length = b.idxBuilder.Len()
+	b.nulls = b.idxBuilder.NullN()
+}
+
+func (b *dictionaryBuilder) truncate(n int) {
+	b.idxBuilder.truncate(n)
+	b.length = b.idxBuilder.Len()
+	b.nulls = b.idxBuilder.NullN()
 }
 
 func (b *dictionaryBuilder) ResetFull() {
 	b.reset()
 	b.idxBuilder.NewArray().Release()
 	b.memoTable.Reset()
+}
+
+type dictionaryBuilderCheckpoint struct {
+	builder *dictionaryBuilder
+	size    int
+}
+
+func (c *dictionaryBuilderCheckpoint) capture() {
+	c.size = c.builder.memoTable.Size()
+}
+
+func (c *dictionaryBuilderCheckpoint) restore() {
+	c.builder.memoTable.Truncate(c.size)
+}
+
+func (b *dictionaryBuilder) newCheckpoint() checkpointState {
+	return &dictionaryBuilderCheckpoint{builder: b}
 }
 
 func (b *dictionaryBuilder) Cap() int { return b.idxBuilder.Cap() }
