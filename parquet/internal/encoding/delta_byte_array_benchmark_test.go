@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package encoding_test
+package encoding
 
 import (
 	"fmt"
@@ -22,8 +22,48 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
-	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
 )
+
+func encodeDeltaByteArrayUnbatched(values []parquet.ByteArray) (Buffer, error) {
+	prefixEncoder := NewEncoder(parquet.Types.Int32, parquet.Encodings.DeltaBinaryPacked,
+		false, nil, memory.DefaultAllocator).(Int32Encoder)
+	suffixEncoder := NewEncoder(parquet.Types.ByteArray, parquet.Encodings.DeltaLengthByteArray,
+		false, nil, memory.DefaultAllocator).(ByteArrayEncoder)
+	defer prefixEncoder.Release()
+	defer suffixEncoder.Release()
+
+	var lastVal parquet.ByteArray
+	for _, val := range values {
+		prefixLength := 0
+		for prefixLength < lastVal.Len() && prefixLength < val.Len() {
+			if lastVal[prefixLength] != val[prefixLength] {
+				break
+			}
+			prefixLength++
+		}
+		prefixEncoder.Put([]int32{int32(prefixLength)})
+		suffixEncoder.Put([]parquet.ByteArray{val[prefixLength:]})
+		lastVal = val
+	}
+
+	prefixBuf, err := prefixEncoder.FlushValues()
+	if err != nil {
+		return nil, err
+	}
+	defer prefixBuf.Release()
+
+	suffixBuf, err := suffixEncoder.FlushValues()
+	if err != nil {
+		return nil, err
+	}
+	defer suffixBuf.Release()
+
+	ret := bufferPool.Get().(*memory.Buffer)
+	ret.ResizeNoShrink(prefixBuf.Len() + suffixBuf.Len())
+	copy(ret.Bytes(), prefixBuf.Bytes())
+	copy(ret.Bytes()[prefixBuf.Len():], suffixBuf.Bytes())
+	return poolBuffer{ret}, nil
+}
 
 func BenchmarkDeltaByteArrayEncoding(b *testing.B) {
 	for _, test := range []struct {
@@ -52,18 +92,30 @@ func BenchmarkDeltaByteArrayEncoding(b *testing.B) {
 				inputBytes += int64(values[i].Len())
 			}
 
-			b.SetBytes(inputBytes)
-			b.ReportAllocs()
-			for b.Loop() {
-				enc := encoding.NewEncoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray,
-					false, nil, memory.DefaultAllocator).(encoding.ByteArrayEncoder)
-				enc.Put(values)
-				buf, err := enc.FlushValues()
-				if err != nil {
-					b.Fatal(err)
-				}
-				buf.Release()
-				enc.Release()
+			for _, benchmark := range []struct {
+				name   string
+				encode func([]parquet.ByteArray) (Buffer, error)
+			}{
+				{name: "before", encode: encodeDeltaByteArrayUnbatched},
+				{name: "after", encode: func(values []parquet.ByteArray) (Buffer, error) {
+					enc := NewEncoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray,
+						false, nil, memory.DefaultAllocator).(ByteArrayEncoder)
+					defer enc.Release()
+					enc.Put(values)
+					return enc.FlushValues()
+				}},
+			} {
+				b.Run(benchmark.name, func(b *testing.B) {
+					b.SetBytes(inputBytes)
+					b.ReportAllocs()
+					for b.Loop() {
+						buf, err := benchmark.encode(values)
+						if err != nil {
+							b.Fatal(err)
+						}
+						buf.Release()
+					}
+				})
 			}
 		})
 	}

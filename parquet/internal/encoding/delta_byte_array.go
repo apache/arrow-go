@@ -43,6 +43,16 @@ type DeltaByteArrayEncoder struct {
 
 const deltaByteArrayBatchSize = 256
 
+func commonPrefixLength(left, right parquet.ByteArray) int {
+	maximum := min(left.Len(), right.Len())
+	for i := 0; i < maximum; i++ {
+		if left[i] != right[i] {
+			return i
+		}
+	}
+	return maximum
+}
+
 func (enc *DeltaByteArrayEncoder) EstimatedDataEncodedSize() int64 {
 	prefixEstimatedSize := int64(0)
 	if enc.prefixEncoder != nil {
@@ -83,22 +93,13 @@ func (enc *DeltaByteArrayEncoder) Put(in []parquet.ByteArray) {
 	lastVal := enc.lastVal
 	var prefixLengths [deltaByteArrayBatchSize]int32
 	var suffixes [deltaByteArrayBatchSize]parquet.ByteArray
-	for i := 0; i < len(in); i += deltaByteArrayBatchSize {
-		batchSize := min(deltaByteArrayBatchSize, len(in)-i)
-		for j := 0; j < batchSize; j++ {
-			val := in[i+j]
-			commonPrefixLength := 0
-			maximumCommonPrefixLength := min(lastVal.Len(), val.Len())
-			for commonPrefixLength < maximumCommonPrefixLength {
-				if lastVal[commonPrefixLength] != val[commonPrefixLength] {
-					break
-				}
-				commonPrefixLength++
-			}
-
+	for offset := 0; offset < len(in); offset += deltaByteArrayBatchSize {
+		batchSize := min(deltaByteArrayBatchSize, len(in)-offset)
+		for i, val := range in[offset : offset+batchSize] {
+			prefixLength := commonPrefixLength(lastVal, val)
 			lastVal = val
-			prefixLengths[j] = int32(commonPrefixLength)
-			suffixes[j] = val[commonPrefixLength:]
+			prefixLengths[i] = int32(prefixLength)
+			suffixes[i] = val[prefixLength:]
 		}
 		enc.suffixEncoder.Put(suffixes[:batchSize])
 		enc.prefixEncoder.Put(prefixLengths[:batchSize])

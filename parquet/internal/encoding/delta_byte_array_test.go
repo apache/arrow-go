@@ -53,10 +53,16 @@ func TestDeltaByteArrayEncoderPreservesLastValueAcrossBatches(t *testing.T) {
 	for i := range values {
 		values[i] = parquet.ByteArray(fmt.Sprintf("partition-%03d/value-%03d", i/7, i%7))
 	}
+	values[0] = parquet.ByteArray{}
+	values[deltaByteArrayBatchSize-1] = parquet.ByteArray("boundary/repeated")
+	values[deltaByteArrayBatchSize] = parquet.ByteArray("boundary/repeated")
+	values[deltaByteArrayBatchSize+1] = parquet.ByteArray("boundary")
+	values[deltaByteArrayBatchSize*2] = parquet.ByteArray("boundary")
 
 	encode := func(batches ...[]parquet.ByteArray) []byte {
 		t.Helper()
 		enc := NewEncoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray, false, nil, memory.DefaultAllocator).(ByteArrayEncoder)
+		defer enc.Release()
 		for _, batch := range batches {
 			enc.Put(batch)
 		}
@@ -67,15 +73,22 @@ func TestDeltaByteArrayEncoderPreservesLastValueAcrossBatches(t *testing.T) {
 	}
 
 	want := encode(values)
-	split := deltaByteArrayBatchSize - 1
-	got := encode(values[:split], values[split:])
-	require.Equal(t, want, got)
+	for _, split := range []int{0, 1, deltaByteArrayBatchSize - 1, deltaByteArrayBatchSize,
+		deltaByteArrayBatchSize + 1, deltaByteArrayBatchSize*2 - 1, deltaByteArrayBatchSize * 2,
+		len(values) - 1, len(values)} {
+		t.Run(fmt.Sprintf("split-%d", split), func(t *testing.T) {
+			got := encode(values[:split], values[split:])
+			require.Equal(t, want, got)
 
-	dec := NewDecoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray, nil, memory.DefaultAllocator).(ByteArrayDecoder)
-	require.NoError(t, dec.SetData(len(values), got))
-	out := make([]parquet.ByteArray, len(values))
-	decoded, err := dec.Decode(out)
-	require.NoError(t, err)
-	require.Equal(t, len(values), decoded)
-	assert.Equal(t, values, out)
+			dec := NewDecoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray, nil, memory.DefaultAllocator).(ByteArrayDecoder)
+			require.NoError(t, dec.SetData(len(values), got))
+			out := make([]parquet.ByteArray, len(values))
+			decoded, err := dec.Decode(out)
+			require.NoError(t, err)
+			require.Equal(t, len(values), decoded)
+			for i := range values {
+				assert.Equal(t, string(values[i]), string(out[i]), "value %d", i)
+			}
+		})
+	}
 }
