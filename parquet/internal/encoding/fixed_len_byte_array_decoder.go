@@ -173,12 +173,13 @@ func (dec *ByteStreamSplitFixedLenByteArrayDecoder) Decode(out []parquet.FixedLe
 		return 0, errors.New("parquet: eof exception")
 	}
 
-	for i := range out {
-		if cap(out[i]) < dec.typeLen {
-			out[i] = make(parquet.FixedLenByteArray, dec.typeLen)
-		} else {
-			out[i] = out[i][:dec.typeLen]
+	output := out[:toRead]
+	for idx := range output {
+		if cap(output[idx]) < dec.typeLen {
+			dec.prepareOutput(output[idx:])
+			break
 		}
+		output[idx] = output[idx][:dec.typeLen]
 	}
 
 	switch dec.typeLen {
@@ -195,6 +196,27 @@ func (dec *ByteStreamSplitFixedLenByteArrayDecoder) Decode(out []parquet.FixedLe
 	dec.nvals -= toRead
 	dec.data = dec.data[toRead:]
 	return toRead, nil
+}
+
+// prepareOutput allocates storage for the entries in out that do not have enough
+// capacity, while continuing to reuse the entries that do.
+func (dec *ByteStreamSplitFixedLenByteArrayDecoder) prepareOutput(out []parquet.FixedLenByteArray) {
+	missing := 0
+	for idx := range out {
+		if cap(out[idx]) < dec.typeLen {
+			missing++
+		}
+	}
+
+	storage := make([]byte, missing*dec.typeLen)
+	for idx := range out {
+		if cap(out[idx]) < dec.typeLen {
+			out[idx] = storage[:dec.typeLen:dec.typeLen]
+			storage = storage[dec.typeLen:]
+		} else {
+			out[idx] = out[idx][:dec.typeLen]
+		}
+	}
 }
 
 func (dec *ByteStreamSplitFixedLenByteArrayDecoder) DecodeSpaced(out []parquet.FixedLenByteArray, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
