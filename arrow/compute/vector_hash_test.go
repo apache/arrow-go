@@ -29,6 +29,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -296,6 +297,27 @@ func TestHashKernels(t *testing.T) {
 	suite.Run(t, &BinaryTypeHashKernelSuite[[]byte]{dt: arrow.BinaryTypes.LargeBinary})
 }
 
+func TestUniqueBoolean(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	input, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean,
+		strings.NewReader(`[false, null, true, false, null, true]`))
+	require.NoError(t, err)
+	defer input.Release()
+	expected, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean,
+		strings.NewReader(`[false, null, true]`))
+	require.NoError(t, err)
+	defer expected.Release()
+
+	result, err := compute.UniqueArray(ctx, input)
+	require.NoError(t, err)
+	defer result.Release()
+
+	assert.True(t, array.Equal(expected, result))
+}
+
 func TestUniqueTimeTimestamp(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -512,6 +534,733 @@ func TestDictionaryUnique(t *testing.T) {
 
 				checkDictionaryUnique(t, &compute.ArrayDatum{Value: input.Data()}, exUniques)
 			})
+		})
+	}
+}
+
+func TestDictionaryEncode(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	values, _, err := array.FromJSON(mem, arrow.BinaryTypes.String,
+		strings.NewReader(`["foo", "bar", "foo", null, "bar", null]`))
+	require.NoError(t, err)
+	defer values.Release()
+
+	out, err := compute.DictionaryEncode(ctx, compute.DictionaryEncodeOptions{},
+		&compute.ArrayDatum{Value: values.Data()})
+	require.NoError(t, err)
+	defer out.Release()
+
+	result := out.(*compute.ArrayDatum).MakeArray().(*array.Dictionary)
+	defer result.Release()
+
+	require.Equal(t, values.Len(), result.Len())
+	require.Equal(t, &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int32,
+		ValueType: arrow.BinaryTypes.String,
+	}, result.DataType())
+	require.Equal(t, 2, result.Dictionary().Len())
+	require.Equal(t, "foo", result.Dictionary().ValueStr(0))
+	require.Equal(t, "bar", result.Dictionary().ValueStr(1))
+	assert.Equal(t, []int32{0, 1, 0, 0, 1, 0},
+		arrow.Int32Traits.CastFromBytes(result.Indices().Data().Buffers()[1].Bytes()))
+	assert.True(t, result.IsNull(3))
+	assert.True(t, result.IsNull(5))
+
+	encoded, err := compute.DictionaryEncode(ctx, compute.DictionaryEncodeOptions{
+		NullEncoding: compute.NullEncodingEncode,
+	}, &compute.ArrayDatum{Value: values.Data()})
+	require.NoError(t, err)
+	defer encoded.Release()
+
+	encodedResult := encoded.(*compute.ArrayDatum).MakeArray().(*array.Dictionary)
+	defer encodedResult.Release()
+
+	require.Equal(t, values.Len(), encodedResult.Len())
+	assert.Equal(t, 0, encodedResult.NullN())
+	require.Equal(t, 3, encodedResult.Dictionary().Len())
+	assert.Equal(t, 1, encodedResult.Dictionary().NullN())
+	assert.Equal(t, []int32{0, 1, 0, 2, 1, 2},
+		arrow.Int32Traits.CastFromBytes(encodedResult.Indices().Data().Buffers()[1].Bytes()))
+	for i := 0; i < values.Len(); i++ {
+		assert.True(t, encodedResult.IsValid(i))
+		idx := encodedResult.GetValueIndex(i)
+		if values.IsNull(i) {
+			assert.True(t, encodedResult.Dictionary().IsNull(idx))
+		} else {
+			assert.Equal(t, values.ValueStr(i), encodedResult.Dictionary().ValueStr(idx))
+		}
+	}
+
+	_, err = compute.DictionaryEncode(ctx, compute.DictionaryEncodeOptions{
+		NullEncoding: compute.NullEncodingBehavior(99),
+	}, &compute.ArrayDatum{Value: values.Data()})
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+}
+
+func TestDictionaryEncodeArrayWithSmallExecChunkSize(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	values, _, err := array.FromJSON(
+		mem,
+		arrow.PrimitiveTypes.Int32,
+		strings.NewReader(`[1, 2, 1, 3, 2]`),
+	)
+	require.NoError(t, err)
+	defer values.Release()
+
+	execCtx := compute.DefaultExecCtx()
+	execCtx.ChunkSize = 2
+	ctx := compute.SetExecCtx(
+		compute.WithAllocator(context.Background(), mem),
+		execCtx,
+	)
+
+	result, err := compute.DictionaryEncodeArray(
+		ctx,
+		compute.DictionaryEncodeOptions{},
+		values,
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	encoded := result.(*array.Dictionary)
+	require.Equal(t, values.Len(), encoded.Len())
+	require.Equal(t, 3, encoded.Dictionary().Len())
+	assert.Equal(t, []int32{0, 1, 0, 2, 1},
+		arrow.Int32Traits.CastFromBytes(encoded.Indices().Data().Buffers()[1].Bytes()))
+}
+
+func TestDictionaryEncodeBoolean(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	values, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean,
+		strings.NewReader(`[false, true, false, null, true]`))
+	require.NoError(t, err)
+	defer values.Release()
+
+	tests := []struct {
+		name      string
+		nullMode  compute.NullEncodingBehavior
+		dict      []bool
+		dictLen   int
+		indices   []int32
+		nullCount int
+	}{
+		{
+			name:      "masked nulls",
+			nullMode:  compute.NullEncodingMask,
+			dict:      []bool{false, true},
+			dictLen:   2,
+			indices:   []int32{0, 1, 0, 0, 1},
+			nullCount: 1,
+		},
+		{
+			name:      "encoded nulls",
+			nullMode:  compute.NullEncodingEncode,
+			dict:      []bool{false, true},
+			dictLen:   3,
+			indices:   []int32{0, 1, 0, 2, 1},
+			nullCount: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := compute.DictionaryEncodeArray(ctx, compute.DictionaryEncodeOptions{
+				NullEncoding: tc.nullMode,
+			}, values)
+			require.NoError(t, err)
+			defer result.Release()
+
+			encoded := result.(*array.Dictionary)
+			dict := encoded.Dictionary().(*array.Boolean)
+			require.Equal(t, tc.dictLen, dict.Len())
+			for i, value := range tc.dict {
+				assert.Equal(t, value, dict.Value(i))
+			}
+			assert.Equal(t, tc.indices,
+				arrow.Int32Traits.CastFromBytes(encoded.Indices().Data().Buffers()[1].Bytes()))
+			assert.Equal(t, tc.nullCount, encoded.NullN())
+			if tc.nullMode == compute.NullEncodingMask {
+				assert.True(t, encoded.IsNull(3))
+			} else {
+				assert.True(t, encoded.IsValid(3))
+				assert.True(t, dict.IsNull(encoded.GetValueIndex(3)))
+			}
+		})
+	}
+}
+
+func TestDictionaryEncodeBooleanSlicedInput(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	values, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean,
+		strings.NewReader(`[true, false, true, null, true, false, true]`))
+	require.NoError(t, err)
+	defer values.Release()
+
+	input := array.NewSlice(values, 1, 6)
+	defer input.Release()
+	require.Equal(t, 1, input.Data().Offset())
+
+	tests := []struct {
+		name      string
+		nullMode  compute.NullEncodingBehavior
+		dict      []bool
+		dictLen   int
+		indices   []int32
+		nullCount int
+	}{
+		{
+			name:      "masked nulls",
+			nullMode:  compute.NullEncodingMask,
+			dict:      []bool{false, true},
+			dictLen:   2,
+			indices:   []int32{0, 1, 0, 1, 0},
+			nullCount: 1,
+		},
+		{
+			name:      "encoded nulls",
+			nullMode:  compute.NullEncodingEncode,
+			dict:      []bool{false, true},
+			dictLen:   3,
+			indices:   []int32{0, 1, 2, 1, 0},
+			nullCount: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := compute.DictionaryEncodeArray(ctx, compute.DictionaryEncodeOptions{
+				NullEncoding: tc.nullMode,
+			}, input)
+			require.NoError(t, err)
+			defer result.Release()
+
+			encoded := result.(*array.Dictionary)
+			dict := encoded.Dictionary().(*array.Boolean)
+			require.Equal(t, tc.dictLen, dict.Len())
+			for i, value := range tc.dict {
+				assert.Equal(t, value, dict.Value(i))
+			}
+			assert.Equal(t, tc.indices,
+				arrow.Int32Traits.CastFromBytes(encoded.Indices().Data().Buffers()[1].Bytes()))
+			assert.Equal(t, tc.nullCount, encoded.NullN())
+			if tc.nullMode == compute.NullEncodingMask {
+				assert.True(t, encoded.IsNull(2))
+			} else {
+				assert.True(t, encoded.IsValid(2))
+				assert.True(t, dict.IsNull(len(tc.dict)))
+				assert.True(t, dict.IsNull(encoded.GetValueIndex(2)))
+			}
+		})
+	}
+}
+
+func TestDictionaryEncodeResizesMemoTable(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	inputValues := make([]int32, 200)
+	for i := range inputValues {
+		inputValues[i] = int32(i % 100)
+	}
+
+	builder := array.NewInt32Builder(mem)
+	builder.AppendValues(inputValues, nil)
+	input := builder.NewInt32Array()
+	builder.Release()
+	defer input.Release()
+
+	result, err := compute.DictionaryEncodeArray(ctx, compute.DictionaryEncodeOptions{}, input)
+	require.NoError(t, err)
+	defer result.Release()
+
+	encoded := result.(*array.Dictionary)
+	dictionary := encoded.Dictionary().(*array.Int32)
+	indices := encoded.Indices().(*array.Int32)
+
+	expectedDictionary := inputValues[:100]
+	require.Equal(t, expectedDictionary, dictionary.Int32Values())
+	require.Equal(t, inputValues, indices.Int32Values())
+}
+
+func TestDictionaryEncodeArraySlicedInput(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	values, _, err := array.FromJSON(mem, arrow.BinaryTypes.String,
+		strings.NewReader(`["ignored", "foo", null, "bar", "foo", "ignored"]`))
+	require.NoError(t, err)
+	defer values.Release()
+
+	input := array.NewSlice(values, 1, 5)
+	defer input.Release()
+
+	result, err := compute.DictionaryEncodeArray(ctx, compute.DictionaryEncodeOptions{}, input)
+	require.NoError(t, err)
+	defer result.Release()
+
+	encoded := result.(*array.Dictionary)
+	require.Equal(t, 4, encoded.Len())
+	require.Equal(t, 2, encoded.Dictionary().Len())
+	assert.Equal(t, "foo", encoded.Dictionary().ValueStr(0))
+	assert.Equal(t, "bar", encoded.Dictionary().ValueStr(1))
+	assert.Equal(t, []int32{0, 0, 1, 0},
+		arrow.Int32Traits.CastFromBytes(encoded.Indices().Data().Buffers()[1].Bytes()))
+	assert.True(t, encoded.IsNull(1))
+}
+
+func TestDictionaryEncodePreservesTimestampType(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	dt := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "UTC"}
+	builder := array.NewTimestampBuilder(mem, dt)
+	builder.AppendValues([]arrow.Timestamp{1, 2, 1}, nil)
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	result, err := compute.DictionaryEncodeArray(ctx, compute.DictionaryEncodeOptions{}, input)
+	require.NoError(t, err)
+	defer result.Release()
+
+	encoded := result.(*array.Dictionary)
+	require.True(t, arrow.TypeEqual(dt, encoded.Dictionary().DataType()))
+	require.Equal(t, 2, encoded.Dictionary().Len())
+}
+
+func TestDictionaryEncodeZeroChunkedArray(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	input := arrow.NewChunked(arrow.BinaryTypes.String, nil)
+	defer input.Release()
+
+	out, err := compute.DictionaryEncode(ctx, compute.DictionaryEncodeOptions{},
+		&compute.ChunkedDatum{Value: input})
+	require.NoError(t, err)
+	defer out.Release()
+
+	result := out.(*compute.ChunkedDatum).Value
+	assert.Equal(t, 0, result.Len())
+	assert.Empty(t, result.Chunks())
+	assert.True(t, arrow.TypeEqual(&arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int32,
+		ValueType: arrow.BinaryTypes.String,
+	}, result.DataType()))
+}
+
+func TestDictionaryEncodeZeroChunkedDictionaryInput(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.BinaryTypes.String,
+	}
+	input := arrow.NewChunked(dictType, nil)
+	defer input.Release()
+
+	out, err := compute.DictionaryEncode(ctx, compute.DictionaryEncodeOptions{},
+		&compute.ChunkedDatum{Value: input})
+	require.NoError(t, err)
+	defer out.Release()
+
+	result := out.(*compute.ChunkedDatum).Value
+	require.Equal(t, 0, result.Len())
+	require.Empty(t, result.Chunks())
+	require.True(t, arrow.TypeEqual(dictType, result.DataType()))
+}
+
+func TestDictionaryEncodeChunked(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	first, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2, 1]`))
+	require.NoError(t, err)
+	defer first.Release()
+	second, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[2, 3, null]`))
+	require.NoError(t, err)
+	defer second.Release()
+
+	input := arrow.NewChunked(arrow.PrimitiveTypes.Int32, []arrow.Array{first, second})
+	defer input.Release()
+
+	out, err := compute.DictionaryEncode(ctx, compute.DictionaryEncodeOptions{},
+		&compute.ChunkedDatum{Value: input})
+	require.NoError(t, err)
+	defer out.Release()
+
+	result := out.(*compute.ChunkedDatum).Value
+	require.Len(t, result.Chunks(), 2)
+	require.Equal(t, first.Len(), result.Chunk(0).Len())
+	require.Equal(t, second.Len(), result.Chunk(1).Len())
+	assert.Equal(t, []int32{0, 1, 0},
+		arrow.Int32Traits.CastFromBytes(result.Chunk(0).(*array.Dictionary).Indices().Data().Buffers()[1].Bytes()))
+	assert.Equal(t, []int32{1, 2, 0},
+		arrow.Int32Traits.CastFromBytes(result.Chunk(1).(*array.Dictionary).Indices().Data().Buffers()[1].Bytes()))
+	assert.True(t, result.Chunk(1).IsNull(2))
+	for _, chunk := range result.Chunks() {
+		encoded := chunk.(*array.Dictionary)
+		assert.True(t, array.Equal(encoded.Dictionary(), result.Chunk(0).(*array.Dictionary).Dictionary()))
+	}
+}
+
+func TestDictionaryEncodeChunkedBinary(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	types := []struct {
+		name string
+		typ  arrow.DataType
+	}{
+		{name: "string", typ: arrow.BinaryTypes.String},
+		{name: "large string", typ: arrow.BinaryTypes.LargeString},
+	}
+	modes := []struct {
+		name      string
+		nullMode  compute.NullEncodingBehavior
+		dict      []string
+		indices   [][]int32
+		nullCount []int
+	}{
+		{
+			name:      "masked nulls",
+			nullMode:  compute.NullEncodingMask,
+			dict:      []string{"a", "b", "c"},
+			indices:   [][]int32{{0, 1, 0, 0}, {1, 2, 0, 0}},
+			nullCount: []int{1, 1},
+		},
+		{
+			name:      "encoded nulls",
+			nullMode:  compute.NullEncodingEncode,
+			dict:      []string{"a", "b", "(null)", "c"},
+			indices:   [][]int32{{0, 1, 2, 0}, {1, 3, 2, 0}},
+			nullCount: []int{0, 0},
+		},
+	}
+
+	for _, typ := range types {
+		for _, mode := range modes {
+			t.Run(typ.name+"/"+mode.name, func(t *testing.T) {
+				first, _, err := array.FromJSON(mem, typ.typ, strings.NewReader(`["a", "b", null, "a"]`))
+				require.NoError(t, err)
+				defer first.Release()
+				second, _, err := array.FromJSON(mem, typ.typ, strings.NewReader(`["b", "c", null, "a"]`))
+				require.NoError(t, err)
+				defer second.Release()
+
+				input := arrow.NewChunked(typ.typ, []arrow.Array{first, second})
+				defer input.Release()
+
+				out, err := compute.DictionaryEncode(ctx, compute.DictionaryEncodeOptions{
+					NullEncoding: mode.nullMode,
+				}, &compute.ChunkedDatum{Value: input})
+				require.NoError(t, err)
+				defer out.Release()
+
+				result := out.(*compute.ChunkedDatum).Value
+				require.Len(t, result.Chunks(), 2)
+				require.True(t, arrow.TypeEqual(result.DataType(), &arrow.DictionaryType{
+					IndexType: arrow.PrimitiveTypes.Int32,
+					ValueType: typ.typ,
+				}))
+				for i, chunk := range result.Chunks() {
+					encoded := chunk.(*array.Dictionary)
+					require.Equal(t, len(mode.dict), encoded.Dictionary().Len())
+					for j, value := range mode.dict {
+						assert.Equal(t, value, encoded.Dictionary().ValueStr(j))
+					}
+					assert.Equal(t, mode.indices[i],
+						arrow.Int32Traits.CastFromBytes(encoded.Indices().Data().Buffers()[1].Bytes()))
+					assert.Equal(t, mode.nullCount[i], encoded.NullN())
+					if mode.nullMode == compute.NullEncodingMask {
+						assert.True(t, encoded.IsNull(2))
+					} else {
+						assert.True(t, encoded.IsValid(2))
+						assert.True(t, encoded.Dictionary().IsNull(encoded.GetValueIndex(2)))
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestDictionaryEncodeNullArray(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	input := array.NewNull(3)
+	defer input.Release()
+
+	tests := []struct {
+		name         string
+		nullEncoding compute.NullEncodingBehavior
+		dictLen      int
+		nullCount    int
+	}{
+		{name: "masked", nullEncoding: compute.NullEncodingMask, dictLen: 1, nullCount: 3},
+		{name: "encoded", nullEncoding: compute.NullEncodingEncode, dictLen: 1, nullCount: 0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := compute.DictionaryEncode(ctx, compute.DictionaryEncodeOptions{
+				NullEncoding: tc.nullEncoding,
+			}, &compute.ArrayDatum{Value: input.Data()})
+			require.NoError(t, err)
+			defer out.Release()
+
+			result := out.(*compute.ArrayDatum).MakeArray().(*array.Dictionary)
+			defer result.Release()
+			require.Equal(t, input.Len(), result.Len())
+			assert.Equal(t, tc.dictLen, result.Dictionary().Len())
+			assert.Equal(t, tc.nullCount, result.NullN())
+			if tc.nullEncoding == compute.NullEncodingEncode {
+				for i := 0; i < result.Len(); i++ {
+					assert.True(t, result.IsValid(i))
+				}
+			}
+		})
+	}
+}
+
+func TestDictionaryEncodeDictionaryInput(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.BinaryTypes.String,
+	}
+	input, err := array.DictArrayFromJSON(mem, dictType, `[0, null, 1]`, `["foo", "bar"]`)
+	require.NoError(t, err)
+	defer input.Release()
+
+	out, err := compute.DictionaryEncode(ctx, compute.DictionaryEncodeOptions{},
+		&compute.ArrayDatum{Value: input.Data()})
+	require.NoError(t, err)
+	defer out.Release()
+
+	result := out.(*compute.ArrayDatum).MakeArray().(*array.Dictionary)
+	defer result.Release()
+	require.True(t, arrow.TypeEqual(dictType, result.DataType()))
+	require.Equal(t, input.Len(), result.Len())
+	assert.True(t, array.Equal(input, result))
+}
+
+func TestDictionaryEncodeOptionsUseCanonicalFieldName(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		behavior compute.NullEncodingBehavior
+		encoded  uint32
+	}{
+		{name: "encode", behavior: compute.NullEncodingEncode, encoded: 0},
+		{name: "mask", behavior: compute.NullEncodingMask, encoded: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			encoded, err := scalar.ToScalar(compute.DictionaryEncodeOptions{
+				NullEncoding: tt.behavior,
+			}, mem)
+			require.NoError(t, err)
+			if releasable, ok := encoded.(interface{ Release() }); ok {
+				defer releasable.Release()
+			}
+
+			options := encoded.(*scalar.Struct)
+			field, err := options.Field("null_encoding_behavior")
+			require.NoError(t, err)
+			assert.Equal(t, tt.encoded, field.(*scalar.Uint32).Value)
+			_, err = options.Field("null_encoding")
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestDictionaryEncodeOptionsDecodeCanonicalValues(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		encoded  uint32
+		behavior compute.NullEncodingBehavior
+	}{
+		{name: "encode", encoded: 0, behavior: compute.NullEncodingEncode},
+		{name: "mask", encoded: 1, behavior: compute.NullEncodingMask},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded, err := scalar.NewStructScalarWithNames(
+				[]scalar.Scalar{scalar.NewUint32Scalar(tt.encoded)},
+				[]string{"null_encoding_behavior"},
+			)
+			require.NoError(t, err)
+			defer encoded.Release()
+
+			var options compute.DictionaryEncodeOptions
+			require.NoError(t, scalar.FromScalar(encoded, &options))
+			assert.Equal(t, tt.behavior, options.NullEncoding)
+		})
+	}
+}
+
+func TestDictionaryEncodeOptionsRejectInvalidCanonicalValue(t *testing.T) {
+	encoded, err := scalar.NewStructScalarWithNames(
+		[]scalar.Scalar{scalar.NewUint32Scalar(2)},
+		[]string{"null_encoding_behavior"},
+	)
+	require.NoError(t, err)
+	defer encoded.Release()
+
+	var options compute.DictionaryEncodeOptions
+	err = scalar.FromScalar(encoded, &options)
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
+}
+
+func TestDictionaryEncodeOptionsRejectInvalidSerialization(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	_, err := scalar.ToScalar(compute.DictionaryEncodeOptions{
+		NullEncoding: compute.NullEncodingBehavior(42),
+	}, mem)
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
+}
+
+func TestDictionaryEncodeDictionaryInputWithEmptyIndices(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.BinaryTypes.String,
+	}
+	input, err := array.DictArrayFromJSON(mem, dictType, `[]`, `["foo", "bar"]`)
+	require.NoError(t, err)
+	defer input.Release()
+
+	out, err := compute.DictionaryEncode(ctx, compute.DictionaryEncodeOptions{},
+		&compute.ArrayDatum{Value: input.Data()})
+	require.NoError(t, err)
+	defer out.Release()
+
+	result := out.(*compute.ArrayDatum).MakeArray().(*array.Dictionary)
+	defer result.Release()
+	require.Equal(t, 0, result.Len())
+	require.True(t, arrow.TypeEqual(dictType, result.DataType()))
+	require.Equal(t, 2, result.Dictionary().Len())
+	assert.Equal(t, "foo", result.Dictionary().ValueStr(0))
+	assert.Equal(t, "bar", result.Dictionary().ValueStr(1))
+}
+
+func TestDictionaryEncodeChunkedDictionaryInput(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.BinaryTypes.String,
+	}
+	first, err := array.DictArrayFromJSON(mem, dictType, `[0, 1]`, `["foo", "bar"]`)
+	require.NoError(t, err)
+	defer first.Release()
+	second, err := array.DictArrayFromJSON(mem, dictType, `[0, 1]`, `["bar", "baz"]`)
+	require.NoError(t, err)
+	defer second.Release()
+
+	input := arrow.NewChunked(dictType, []arrow.Array{first, second})
+	defer input.Release()
+
+	out, err := compute.DictionaryEncode(ctx, compute.DictionaryEncodeOptions{},
+		&compute.ChunkedDatum{Value: input})
+	require.NoError(t, err)
+	defer out.Release()
+
+	result := out.(*compute.ChunkedDatum).Value
+	require.Len(t, result.Chunks(), 2)
+	assert.True(t, array.Equal(first, result.Chunk(0)))
+	assert.True(t, array.Equal(second, result.Chunk(1)))
+	assert.Equal(t, "foo", result.Chunk(0).(*array.Dictionary).Dictionary().ValueStr(0))
+	assert.Equal(t, "baz", result.Chunk(1).(*array.Dictionary).Dictionary().ValueStr(1))
+}
+
+func TestDictionaryEncodeArrayDictionaryInputWithSmallExecChunkSize(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.BinaryTypes.String,
+	}
+	input, err := array.DictArrayFromJSON(mem, dictType, `[0, 1, 0, null, 1]`, `["foo", "bar"]`)
+	require.NoError(t, err)
+	defer input.Release()
+
+	execCtx := compute.DefaultExecCtx()
+	execCtx.ChunkSize = 2
+	ctx := compute.SetExecCtx(
+		compute.WithAllocator(context.Background(), mem),
+		execCtx,
+	)
+
+	result, err := compute.DictionaryEncodeArray(
+		ctx,
+		compute.DictionaryEncodeOptions{},
+		input,
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	require.True(t, arrow.TypeEqual(dictType, result.DataType()))
+	assert.True(t, array.Equal(input, result))
+}
+
+func TestDictionaryEncodeDictionaryInputRejectsInvalidOptions(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.BinaryTypes.String,
+	}
+	input, err := array.DictArrayFromJSON(mem, dictType, `[0, 1]`, `["foo", "bar"]`)
+	require.NoError(t, err)
+	defer input.Release()
+
+	_, err = compute.DictionaryEncode(ctx, compute.DictionaryEncodeOptions{
+		NullEncoding: compute.NullEncodingBehavior(99),
+	}, &compute.ArrayDatum{Value: input.Data()})
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+}
+
+func TestDictionaryEncodeFunctionValidation(t *testing.T) {
+	for _, name := range []string{"unique", "dictionary_encode"} {
+		t.Run(name, func(t *testing.T) {
+			fn, ok := compute.GetFunctionRegistry().GetFunction(name)
+			require.True(t, ok)
+			require.NoError(t, fn.Validate())
 		})
 	}
 }

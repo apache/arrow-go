@@ -1772,3 +1772,34 @@ func TestUnshredVariant(t *testing.T) {
 		assert.False(t, out.IsShredded())
 	})
 }
+
+func TestVariantValueAsAnyInvalidMetadata(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	vt := extensions.NewDefaultVariantType()
+	bldr := array.NewStructBuilder(mem, vt.StorageType().(*arrow.StructType))
+	defer bldr.Release()
+	metaBldr := bldr.FieldBuilder(0).(*array.BinaryBuilder)
+	valueBldr := bldr.FieldBuilder(1).(*array.BinaryBuilder)
+
+	bldr.Append(true)
+	metaBldr.Append([]byte{0x01}) // too short to be valid variant metadata
+	vbytes, err := variant.Encode(int8(1))
+	require.NoError(t, err)
+	valueBldr.Append(vbytes)
+
+	storage := bldr.NewArray()
+	defer storage.Release()
+
+	variantArr := array.NewExtensionArrayWithStorage(vt, storage)
+	defer variantArr.Release()
+	varr := variantArr.(*extensions.VariantArray)
+
+	require.False(t, varr.IsNull(0))
+	got := varr.ValueAsAny(0)
+	require.NotNil(t, got)
+	gotErr, ok := got.(error)
+	require.True(t, ok)
+	assert.ErrorIs(t, gotErr, variant.ErrInvalidMetadata)
+}

@@ -327,9 +327,18 @@ func GetDictArrayData(mem memory.Allocator, valueType arrow.DataType, memoTable 
 
 	switch tbl := memoTable.(type) {
 	case hashing.NumericMemoTable:
-		nbytes := tbl.TypeTraits().BytesRequired(dictLen)
-		buffers[1].Resize(nbytes)
-		tbl.WriteOutSubset(startOffset, buffers[1].Bytes())
+		if valueType.ID() == arrow.BOOL {
+			values := make([]uint8, dictLen)
+			tbl.CopyValuesSubset(startOffset, values)
+			buffers[1].Resize(int(bitutil.BytesForBits(int64(dictLen))))
+			for i, value := range values {
+				bitutil.SetBitTo(buffers[1].Bytes(), i, value != 0)
+			}
+		} else {
+			nbytes := tbl.TypeTraits().BytesRequired(dictLen)
+			buffers[1].Resize(nbytes)
+			tbl.WriteOutSubset(startOffset, buffers[1].Bytes())
+		}
 	case *hashing.BinaryMemoTable:
 		switch valueType.ID() {
 		case arrow.BINARY, arrow.STRING:

@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -37,17 +38,15 @@ type grpcCredentials struct {
 func (g grpcCredentials) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
 	md := make(map[string]string, len(g.params)+1)
 
-	// Authentication parameters
+	for k, v := range g.params {
+		md[strings.ToLower(k)] = v
+	}
+
 	switch {
 	case g.token != "":
 		md["authorization"] = "Bearer " + g.token
 	case g.username != "":
-
 		md["authorization"] = "Basic " + base64.StdEncoding.EncodeToString([]byte(g.username+":"+g.password))
-	}
-
-	for k, v := range g.params {
-		md[k] = v
 	}
 
 	return md, nil

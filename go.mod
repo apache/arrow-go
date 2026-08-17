@@ -39,7 +39,7 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.28
 	github.com/pterm/pterm v0.12.83
 	github.com/stoewer/go-strcase v1.3.1
-	github.com/stretchr/testify v1.11.1
+	github.com/stretchr/testify v1.12.0
 	github.com/substrait-io/substrait-go/v8 v8.1.1
 	github.com/substrait-io/substrait-protobuf/go v0.85.0
 	github.com/tidwall/sjson v1.2.5
@@ -50,7 +50,7 @@ require (
 	golang.org/x/sys v0.47.0
 	gonum.org/v1/gonum v0.17.0
 	google.golang.org/grpc v1.83.0
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.12
 	modernc.org/sqlite v1.56.0
 )
 
@@ -80,9 +80,8 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
-	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/stretchr/objx v0.5.2 // indirect
+	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/substrait-io/substrait v0.87.0 // indirect
 	github.com/tidwall/gjson v1.14.2 // indirect
 	github.com/tidwall/match v1.1.1 // indirect

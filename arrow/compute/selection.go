@@ -40,7 +40,12 @@ are handled based on FilterOptions.`,
 	}
 	filterMetaFunc = NewMetaFunction("filter", Binary(), filterDoc,
 		func(ctx context.Context, opts FunctionOptions, args ...Datum) (Datum, error) {
-			if args[1].(ArrayLikeDatum).Type().ID() != arrow.BOOL {
+			filter, ok := args[1].(ArrayLikeDatum)
+			if !ok {
+				return nil, fmt.Errorf("%w: filter should be array-like", arrow.ErrNotImplemented)
+			}
+
+			if filter.Type().ID() != arrow.BOOL {
 				return nil, fmt.Errorf("%w: filter argument must be boolean type",
 					arrow.ErrNotImplemented)
 			}
