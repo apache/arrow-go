@@ -657,7 +657,7 @@ func BenchmarkByteStreamSplitDecodingFixedLenByteArrayColdOutput(b *testing.B) {
 				}
 				defer buf.Release()
 
-				decoder := encoding.NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.ByteStreamSplit, col, memory.DefaultAllocator)
+				decoder := encoding.NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.ByteStreamSplit, col, memory.DefaultAllocator).(encoding.FixedLenByteArrayDecoder)
 				b.ReportAllocs()
 				b.SetBytes(int64(size * width))
 				b.ResetTimer()
@@ -666,8 +666,12 @@ func BenchmarkByteStreamSplitDecodingFixedLenByteArrayColdOutput(b *testing.B) {
 					if err := decoder.SetData(size, buf.Bytes()); err != nil {
 						b.Fatal(err)
 					}
-					if _, err := decoder.(encoding.FixedLenByteArrayDecoder).Decode(output); err != nil {
+					decoded, err := decoder.Decode(output)
+					if err != nil {
 						b.Fatal(err)
+					}
+					if decoded != size {
+						b.Fatalf("decoded %d values, want %d", decoded, size)
 					}
 				}
 			})
