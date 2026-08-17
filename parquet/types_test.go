@@ -19,6 +19,7 @@ package parquet
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/stretchr/testify/require"
@@ -78,6 +79,38 @@ func TestInt96ToTimestamp(t *testing.T) {
 
 			require.NoError(t, err)
 			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestInt96ToTime(t *testing.T) {
+	wideDate := time.Date(3000, time.January, 1, 0, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name  string
+		value Int96
+		want  time.Time
+	}{
+		{
+			name:  "unix epoch",
+			value: newInt96Timestamp(0, 0),
+			want:  time.Unix(0, 0).UTC(),
+		},
+		{
+			name:  "before unix epoch",
+			value: newInt96Timestamp(-1, nanosPerDay-1),
+			want:  time.Unix(0, -1).UTC(),
+		},
+		{
+			name:  "wide date",
+			value: newInt96Timestamp(wideDate.Unix()/86400, 0),
+			want:  wideDate,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, tt.value.ToTime())
+			require.Equal(t, tt.want.String(), tt.value.String())
 		})
 	}
 }

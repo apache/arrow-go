@@ -87,8 +87,9 @@ func (i96 Int96) ToTime() time.Time {
 	nanos := binary.LittleEndian.Uint64(i96[:8])
 	jdays := binary.LittleEndian.Uint32(i96[8:])
 
-	nanos = (uint64(jdays)-uint64(julianUnixEpoch))*uint64(nanosPerDay) + nanos
-	t := time.Unix(0, int64(nanos))
+	days := int64(jdays) - julianUnixEpoch
+	seconds := days*86400 + int64(nanos/1_000_000_000)
+	t := time.Unix(seconds, int64(nanos%1_000_000_000))
 	return t.UTC()
 }
 
