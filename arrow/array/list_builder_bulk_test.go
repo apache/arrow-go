@@ -114,6 +114,108 @@ func TestListBuilderBulkAppendNullsAndEmptyValues(t *testing.T) {
 	}
 }
 
+func TestListBuilderBulkAppendMatchesScalar(t *testing.T) {
+	starts := []int{0, 1, 7, 8, 9, 15, 16, 17}
+	batchSizes := []int{-1, 0, 1, 2, 7, 8, 9, 16, 17}
+	operations := []struct {
+		name   string
+		bulk   func(array.VarLenListLikeBuilder, int)
+		scalar func(array.VarLenListLikeBuilder, int)
+	}{
+		{
+			name: "nulls",
+			bulk: func(builder array.VarLenListLikeBuilder, n int) {
+				builder.AppendNulls(n)
+			},
+			scalar: func(builder array.VarLenListLikeBuilder, n int) {
+				for i := 0; i < n; i++ {
+					builder.AppendNull()
+				}
+			},
+		},
+		{
+			name: "empty_values",
+			bulk: func(builder array.VarLenListLikeBuilder, n int) {
+				builder.AppendEmptyValues(n)
+			},
+			scalar: func(builder array.VarLenListLikeBuilder, n int) {
+				for i := 0; i < n; i++ {
+					builder.AppendEmptyValue()
+				}
+			},
+		},
+	}
+
+	for _, factory := range listBuilderFactories {
+		t.Run(factory.name, func(t *testing.T) {
+			for operationIndex, operation := range operations {
+				t.Run(operation.name, func(t *testing.T) {
+					reuseOperation := operations[1-operationIndex]
+					for _, start := range starts {
+						for _, batchSize := range batchSizes {
+							t.Run(fmt.Sprintf("start_%d_batch_%d", start, batchSize), func(t *testing.T) {
+								mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+								defer mem.AssertSize(t, 0)
+
+								bulk := factory.new(mem)
+								defer bulk.Release()
+								scalar := factory.new(mem)
+								defer scalar.Release()
+
+								appendListBuilderPrefix(bulk, start)
+								appendListBuilderPrefix(scalar, start)
+								operation.bulk(bulk, batchSize)
+								operation.scalar(scalar, batchSize)
+								assertBuilderArrayParity(t, bulk, scalar)
+
+								appendListBuilderPrefix(bulk, start)
+								appendListBuilderPrefix(scalar, start)
+								reuseOperation.bulk(bulk, 9)
+								reuseOperation.scalar(scalar, 9)
+								assertBuilderArrayParity(t, bulk, scalar)
+							})
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func appendListBuilderPrefix(builder array.VarLenListLikeBuilder, n int) {
+	values := builder.ValueBuilder().(*array.Int32Builder)
+	for i := 0; i < n; i++ {
+		switch i % 4 {
+		case 0:
+			builder.AppendWithSize(true, 2)
+			values.AppendValues([]int32{int32(i), int32(i + 100)}, nil)
+		case 1:
+			builder.AppendNull()
+		case 2:
+			builder.AppendEmptyValue()
+		case 3:
+			builder.AppendWithSize(true, 1)
+			values.Append(int32(i + 1000))
+		}
+	}
+}
+
+func assertBuilderArrayParity(t *testing.T, bulk, scalar array.Builder) {
+	t.Helper()
+
+	assert.Equal(t, scalar.Len(), bulk.Len())
+	assert.Equal(t, scalar.NullN(), bulk.NullN())
+
+	bulkArray := bulk.NewArray()
+	defer bulkArray.Release()
+	scalarArray := scalar.NewArray()
+	defer scalarArray.Release()
+
+	require.NoError(t, bulkArray.(interface{ ValidateFull() error }).ValidateFull())
+	require.NoError(t, scalarArray.(interface{ ValidateFull() error }).ValidateFull())
+	assert.True(t, array.Equal(bulkArray, scalarArray))
+}
+
 func BenchmarkListBuilderBulkAppend(b *testing.B) {
 	for _, tc := range listBuilderFactories {
 		b.Run(tc.name, func(b *testing.B) {

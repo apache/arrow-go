@@ -233,9 +233,12 @@ func (b *MapBuilder) AppendNull() {
 
 // AppendNulls adds null map entry to the array.
 func (b *MapBuilder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+
+	b.adjustStructBuilderLen()
+	b.listBuilder.AppendNulls(n)
 }
 
 func (b *MapBuilder) SetNull(i int) {
@@ -247,9 +250,12 @@ func (b *MapBuilder) AppendEmptyValue() {
 }
 
 func (b *MapBuilder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+
+	b.adjustStructBuilderLen()
+	b.listBuilder.AppendEmptyValues(n)
 }
 
 // Reserve enough space for n maps
