@@ -1298,19 +1298,19 @@ func TestBooleanPlainDecoderDecodeToBitmapConsecutiveCalls(t *testing.T) {
 	require.NoError(t, dec.SetData(len(expected), buf.Buf()))
 	bdec := dec.(encoding.BooleanBitmapDecoder)
 
-	out := make([]byte, bitutil.BytesForBits(12))
-	n, err := bdec.DecodeToBitmap(out, 1, 3)
+	out := make([]byte, bitutil.BytesForBits(16))
+	n, err := bdec.DecodeToBitmap(out, 0, 3)
 	require.NoError(t, err)
 	require.Equal(t, 3, n)
-	n, err = bdec.DecodeToBitmap(out, 4, 7)
+	n, err = bdec.DecodeToBitmap(out, 8, 7)
 	require.NoError(t, err)
 	require.Equal(t, 7, n)
 
 	for i, value := range expected[:3] {
-		assert.Equal(t, value, bitutil.BitIsSet(out, i+1))
+		assert.Equal(t, value, bitutil.BitIsSet(out, i))
 	}
 	for i, value := range expected[3:] {
-		assert.Equal(t, value, bitutil.BitIsSet(out, i+4))
+		assert.Equal(t, value, bitutil.BitIsSet(out, i+8))
 	}
 }
 
