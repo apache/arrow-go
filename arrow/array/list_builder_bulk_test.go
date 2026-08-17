@@ -59,10 +59,18 @@ func TestListBuilderBulkAppendNullsAndEmptyValues(t *testing.T) {
 			defer builder.Release()
 			values := builder.ValueBuilder().(*array.Int32Builder)
 
+			builder.AppendNulls(0)
+			builder.AppendEmptyValues(0)
+			builder.AppendNulls(-1)
+			builder.AppendEmptyValues(-1)
+			require.Zero(t, builder.Len())
+			require.Zero(t, builder.Cap())
+			require.Zero(t, builder.NullN())
+
 			builder.AppendWithSize(true, 2)
 			values.AppendValues([]int32{10, 20}, nil)
-			builder.AppendNulls(5)
 			builder.AppendEmptyValues(4)
+			builder.AppendNulls(5)
 			builder.AppendWithSize(true, 1)
 			values.Append(30)
 
@@ -73,7 +81,7 @@ func TestListBuilderBulkAppendNullsAndEmptyValues(t *testing.T) {
 			assert.Equal(t, 11, arr.Len())
 			assert.Equal(t, 5, arr.NullN())
 			for i := range arr.Len() {
-				assert.Equal(t, i == 0 || i >= 6, arr.IsValid(i), "list value %d", i)
+				assert.Equal(t, i < 5 || i == 10, arr.IsValid(i), "list value %d", i)
 				start, end := arr.ValueOffsets(i)
 				switch i {
 				case 0:

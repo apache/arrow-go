@@ -422,13 +422,17 @@ func (b *baseListBuilder) appendNextOffset() {
 func unsafeAppendRepeatedInt(builder Builder, value, n int) {
 	switch builder := builder.(type) {
 	case *Int32Builder:
-		for range n {
-			builder.UnsafeAppend(int32(value))
+		end := builder.length + n
+		for i := builder.length; i < end; i++ {
+			builder.rawData[i] = int32(value)
 		}
+		builder.unsafeAppendBoolsToBitmap(nil, n)
 	case *Int64Builder:
-		for range n {
-			builder.UnsafeAppend(int64(value))
+		end := builder.length + n
+		for i := builder.length; i < end; i++ {
+			builder.rawData[i] = int64(value)
 		}
+		builder.unsafeAppendBoolsToBitmap(nil, n)
 	default:
 		panic(fmt.Sprintf("arrow/array: unsupported list dimension builder %T", builder))
 	}
