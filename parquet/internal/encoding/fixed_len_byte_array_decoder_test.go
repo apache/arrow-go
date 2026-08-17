@@ -75,6 +75,28 @@ func TestByteStreamSplitFixedLenByteArrayDecoderReusesProvidedOutput(t *testing.
 		uintptr(unsafe.Pointer(&out[3][0]))-uintptr(unsafe.Pointer(&out[1][0])))
 }
 
+func TestByteStreamSplitFixedLenByteArrayDecoderMixedOutputAllocations(t *testing.T) {
+	const width = 16
+	values := makeFixedLenByteArrayValues(4, width, 0)
+	data := encodeByteStreamSplitFixedLenByteArray(values, width)
+	decoder := newByteStreamSplitFixedLenByteArrayDecoder(t, width, values)
+
+	out := []parquet.FixedLenByteArray{
+		make([]byte, width),
+		nil,
+		make([]byte, width),
+		nil,
+	}
+	allocs := testing.AllocsPerRun(100, func() {
+		out[1] = nil
+		out[3] = nil
+		require.NoError(t, decoder.SetData(len(values), data))
+		_, err := decoder.Decode(out)
+		require.NoError(t, err)
+	})
+	require.Equal(t, float64(1), allocs)
+}
+
 func TestByteStreamSplitFixedLenByteArrayDecoderKeepsPreviousOutput(t *testing.T) {
 	const width = 16
 	firstValues := makeFixedLenByteArrayValues(4, width, 0)
