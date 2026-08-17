@@ -1002,18 +1002,30 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 		output Datum
 		acc    []arrow.Array
 	)
+	releaseAccumulated := func() {
+		for _, c := range acc {
+			c.Release()
+		}
+		acc = nil
+	}
 
 	toChunked := func() {
 		out := output.(ArrayLikeDatum).Chunks()
 		acc = make([]arrow.Array, 0, len(out))
+		isChunked := output.Kind() == KindChunked
 		for _, o := range out {
 			if o.Len() > 0 {
+				if isChunked {
+					// ChunkedDatum.Chunks returns borrowed references.
+					o.Retain()
+				}
 				acc = append(acc, o)
+			} else if !isChunked {
+				// ArrayDatum.Chunks creates an owned array.
+				o.Release()
 			}
 		}
-		if output.Kind() != KindChunked {
-			output.Release()
-		}
+		output.Release()
 		output = nil
 	}
 
@@ -1023,6 +1035,9 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 		return nil
 	case output = <-out:
 		if output == nil || ctx.Err() != nil {
+			if output != nil {
+				output.Release()
+			}
 			return nil
 		}
 
@@ -1038,6 +1053,10 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 		case <-ctx.Done():
 			// context is done, either cancelled or a timeout.
 			// either way, we end early and return what we've got so far.
+			if output == nil {
+				releaseAccumulated()
+				return nil
+			}
 			return output
 		case o, ok := <-out:
 			if !ok { // channel closed, wrap it up
@@ -1045,9 +1064,7 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 					return output
 				}
 
-				for _, c := range acc {
-					defer c.Release()
-				}
+				defer releaseAccumulated()
 
 				chkd := arrow.NewChunked(v.outType, acc)
 				defer chkd.Release()
