@@ -31,6 +31,9 @@ func (w *Writer) transformColToStringArr(typ arrow.DataType, col arrow.Array, st
 	if w.customTypeConverter != nil {
 		result, handled := w.customTypeConverter(typ, col)
 		if handled {
+			if len(result) != col.Len() {
+				return nil, fmt.Errorf("%w: custom type converter returned %d values for column with %d rows", arrow.ErrInvalid, len(result), col.Len())
+			}
 			return result, nil
 		}
 	}

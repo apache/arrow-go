@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"os"
 	"strconv"
@@ -131,6 +132,39 @@ func (r *testMessageReader) Message() (*ipc.Message, error) {
 }
 func (r *testMessageReader) Release() {}
 func (r *testMessageReader) Retain()  {}
+
+type releaseCountingMessageReader struct {
+	releases int
+}
+
+func (r *releaseCountingMessageReader) Message() (*ipc.Message, error) {
+	return nil, errors.New("schema read failed")
+}
+
+func (r *releaseCountingMessageReader) Release() { r.releases++ }
+func (r *releaseCountingMessageReader) Retain()  {}
+
+func TestNewReaderFromMessageReaderReleasesOnSchemaError(t *testing.T) {
+	msgReader := &releaseCountingMessageReader{}
+	_, err := ipc.NewReaderFromMessageReader(msgReader)
+	require.Error(t, err)
+	assert.Equal(t, 1, msgReader.releases)
+}
+
+type panicMessageReader struct {
+	releases int
+}
+
+func (r *panicMessageReader) Message() (*ipc.Message, error) { panic("schema read panicked") }
+func (r *panicMessageReader) Release()                       { r.releases++ }
+func (r *panicMessageReader) Retain()                        {}
+
+func TestNewReaderFromMessageReaderReleasesOnSchemaPanic(t *testing.T) {
+	msgReader := &panicMessageReader{}
+	_, err := ipc.NewReaderFromMessageReader(msgReader)
+	require.Error(t, err)
+	assert.Equal(t, 1, msgReader.releases)
+}
 
 // Ensure that if the MessageReader errors, we get the error from Read
 func TestArrow14769(t *testing.T) {
@@ -394,6 +428,29 @@ func TestDictionary(t *testing.T) {
 	require.JSONEq(t, string(expectedJson), string(json))
 	require.NoError(t, ipcReader.Err())
 	ipcReader.Release()
+}
+
+func TestFileWriterRejectsWriteAfterClose(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer pool.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "field", Type: &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.BinaryTypes.String,
+	}}}, nil)
+	bldr := array.NewBuilder(pool, schema.Field(0).Type)
+	defer bldr.Release()
+	require.NoError(t, bldr.UnmarshalJSON([]byte(`["value"]`)))
+	arr := bldr.NewArray()
+	defer arr.Release()
+	record := array.NewRecordBatch(schema, []arrow.Array{arr}, 1)
+	defer record.Release()
+
+	writer, err := ipc.NewFileWriter(&bytes.Buffer{}, ipc.WithSchema(schema), ipc.WithAllocator(pool))
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+	require.ErrorContains(t, writer.Write(record), "already closed")
 }
 
 // ARROW-18326
@@ -767,6 +824,48 @@ func TestRecordBatchCustomMetadataFileRoundtrip(t *testing.T) {
 
 	require.Equal(t, meta.Keys(), rm.Metadata().Keys())
 	require.Equal(t, meta.Values(), rm.Metadata().Values())
+}
+
+func TestFileReaderRecordBatchIndexErrors(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	schema := arrow.NewSchema(
+		[]arrow.Field{{Name: "x", Type: arrow.PrimitiveTypes.Int32}},
+		nil,
+	)
+
+	builder := array.NewInt32Builder(mem)
+	builder.Append(1)
+	column := builder.NewArray()
+	builder.Release()
+	record := array.NewRecordBatch(schema, []arrow.Array{column}, 1)
+	column.Release()
+
+	var buf bytes.Buffer
+	writer, err := ipc.NewFileWriter(&buf, ipc.WithSchema(schema))
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+	record.Release()
+
+	reader, err := ipc.NewFileReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer reader.Close()
+
+	_, err = reader.RecordBatchAt(-1)
+	require.ErrorIs(t, err, arrow.ErrIndex)
+	_, err = reader.RecordBatchAt(reader.NumRecords())
+	require.ErrorIs(t, err, arrow.ErrIndex)
+
+	_, err = reader.ReadAt(-1)
+	require.ErrorIs(t, err, arrow.ErrIndex)
+	_, err = reader.ReadAt(math.MaxInt64)
+	require.ErrorIs(t, err, arrow.ErrIndex)
+	_, err = reader.ReadAt(int64(reader.NumRecords()))
+	require.ErrorIs(t, err, arrow.ErrIndex)
+
+	batch, err := reader.RecordBatchAt(0)
+	require.NoError(t, err)
+	batch.Release()
 }
 
 func TestRecordBatchCustomMetadataInterop(t *testing.T) {

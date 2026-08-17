@@ -112,6 +112,10 @@ func (a *List) GetOneForMarshal(i int) interface{} {
 	return json.RawMessage(v)
 }
 
+func (a *List) ValueAsAny(i int) any {
+	return valueAsAnyFromListLike(a, i)
+}
+
 func (a *List) Validate() error     { return validateListArray(a, false) }
 func (a *List) ValidateFull() error { return validateListArray(a, true) }
 
@@ -133,22 +137,8 @@ func (a *List) MarshalJSON() ([]byte, error) {
 }
 
 func arrayEqualList(left, right *List) bool {
-	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
-			continue
-		}
-		o := func() bool {
-			l := left.newListValue(i)
-			defer l.Release()
-			r := right.newListValue(i)
-			defer r.Release()
-			return Equal(l, r)
-		}()
-		if !o {
-			return false
-		}
-	}
-	return true
+	return arrayEqualListOffsets(left.values, right.values, left.offsets, right.offsets,
+		left.data.offset, right.data.offset, left.Len(), left.NullBitmapBytes())
 }
 
 // Len returns the number of elements in the array.
@@ -247,6 +237,10 @@ func (a *LargeList) GetOneForMarshal(i int) interface{} {
 	return json.RawMessage(v)
 }
 
+func (a *LargeList) ValueAsAny(i int) any {
+	return valueAsAnyFromListLike(a, i)
+}
+
 func (a *LargeList) Validate() error     { return validateLargeListArray(a, false) }
 func (a *LargeList) ValidateFull() error { return validateLargeListArray(a, true) }
 
@@ -268,22 +262,8 @@ func (a *LargeList) MarshalJSON() ([]byte, error) {
 }
 
 func arrayEqualLargeList(left, right *LargeList) bool {
-	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
-			continue
-		}
-		o := func() bool {
-			l := left.newListValue(i)
-			defer l.Release()
-			r := right.newListValue(i)
-			defer r.Release()
-			return Equal(l, r)
-		}()
-		if !o {
-			return false
-		}
-	}
-	return true
+	return arrayEqualListOffsets(left.values, right.values, left.offsets, right.offsets,
+		left.data.offset, right.data.offset, left.Len(), left.NullBitmapBytes())
 }
 
 // Len returns the number of elements in the array.
@@ -511,6 +491,13 @@ func (b *baseListBuilder) Resize(n int) {
 	b.offsets.Resize(n)
 }
 
+func (b *baseListBuilder) truncate(n int) {
+	b.builder.truncate(n)
+	if b.offsets != nil {
+		b.offsets.truncate(n)
+	}
+}
+
 func (b *baseListBuilder) resizeHelper(n int) {
 	if n < minBuilderCapacity {
 		n = minBuilderCapacity
@@ -725,6 +712,10 @@ func (a *ListView) GetOneForMarshal(i int) interface{} {
 	return json.RawMessage(v)
 }
 
+func (a *ListView) ValueAsAny(i int) any {
+	return valueAsAnyFromListLike(a, i)
+}
+
 func (a *ListView) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -870,6 +861,10 @@ func (a *LargeListView) GetOneForMarshal(i int) interface{} {
 		panic(err)
 	}
 	return json.RawMessage(v)
+}
+
+func (a *LargeListView) ValueAsAny(i int) any {
+	return valueAsAnyFromListLike(a, i)
 }
 
 func (a *LargeListView) MarshalJSON() ([]byte, error) {
@@ -1284,6 +1279,12 @@ func (b *baseListViewBuilder) Resize(n int) {
 	b.resizeHelper(n)
 	b.offsets.Resize(n)
 	b.sizes.Resize(n)
+}
+
+func (b *baseListViewBuilder) truncate(n int) {
+	b.builder.truncate(n)
+	b.offsets.truncate(n)
+	b.sizes.truncate(n)
 }
 
 func (b *baseListViewBuilder) resizeHelper(n int) {

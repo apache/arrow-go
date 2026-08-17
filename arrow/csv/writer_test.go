@@ -144,16 +144,16 @@ func Example_writer() {
 var (
 	fullData = [][]string{
 		{"bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32", "f64", "str", "large_str", "ts_s", "d32", "d64", "dec128", "dec256", "list(i64)", "large_list(i64)", "fixed_size_list(i64)", "binary", "large_binary", "fixed_size_binary", "uuid", "null"},
-		{"true", "-1", "-1", "-1", "-1", "0", "0", "0", "0", "0", "0", "0", "str-0", "str-0", "2014-07-28 15:04:05", "2017-05-18", "2028-04-26", "-123.45", "-123.45", "{1,2,3}", "{1,2,3}", "{1,2,3}", "AAEC", "AAEC", "AAEC", "00000000-0000-0000-0000-000000000001", nullVal},
-		{"false", "0", "0", "0", "0", "1", "1", "1", "1", "0.099975586", "0.1", "0.1", "str-1", "str-1", "2016-09-08 15:04:05", "2022-11-08", "2031-06-28", "0.00", "0.00", "{4,5,6}", "{4,5,6}", "{4,5,6}", "AwQF", "AwQF", "AwQF", "00000000-0000-0000-0000-000000000002", nullVal},
-		{"true", "1", "1", "1", "1", "2", "2", "2", "2", "0.19995117", "0.2", "0.2", "str-2", "str-2", "2021-09-18 15:04:05", "2025-08-04", "2034-08-28", "123.45", "123.45", "{7,8,9}", "{7,8,9}", "{7,8,9}", "", "", "AAAA", "00000000-0000-0000-0000-000000000003", nullVal},
+		{"true", "-1", "-1", "-1", "-1", "0", "0", "0", "0", "0", "0", "0", "str-0", "str-0", "2014-07-28 15:04:05Z", "2017-05-18", "2028-04-26", "-123.45", "-123.45", "{1,2,3}", "{1,2,3}", "{1,2,3}", "AAEC", "AAEC", "AAEC", "00000000-0000-0000-0000-000000000001", nullVal},
+		{"false", "0", "0", "0", "0", "1", "1", "1", "1", "0.099975586", "0.1", "0.1", "str-1", "str-1", "2016-09-08 15:04:05Z", "2022-11-08", "2031-06-28", "0.00", "0.00", "{4,5,6}", "{4,5,6}", "{4,5,6}", "AwQF", "AwQF", "AwQF", "00000000-0000-0000-0000-000000000002", nullVal},
+		{"true", "1", "1", "1", "1", "2", "2", "2", "2", "0.19995117", "0.2", "0.2", "str-2", "str-2", "2021-09-18 15:04:05Z", "2025-08-04", "2034-08-28", "123.45", "123.45", "{7,8,9}", "{7,8,9}", "{7,8,9}", "", "", "AAAA", "00000000-0000-0000-0000-000000000003", nullVal},
 		{nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal},
 	}
 	bananaData = [][]string{
 		{"bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32", "f64", "str", "large_str", "ts_s", "d32", "d64", "dec128", "dec256", "list(i64)", "large_list(i64)", "fixed_size_list(i64)", "binary", "large_binary", "fixed_size_binary", "uuid", "null"},
-		{"BANANA", "-1", "-1", "-1", "-1", "0", "0", "0", "0", "0", "0", "0", "str-0", "str-0", "2014-07-28 15:04:05", "2017-05-18", "2028-04-26", "-123.45", "-123.45", "{1,2,3}", "{1,2,3}", "{1,2,3}", "AAEC", "AAEC", "AAEC", "00000000-0000-0000-0000-000000000001", nullVal},
-		{"MANGO", "0", "0", "0", "0", "1", "1", "1", "1", "0.099975586", "0.1", "0.1", "str-1", "str-1", "2016-09-08 15:04:05", "2022-11-08", "2031-06-28", "0.00", "0.00", "{4,5,6}", "{4,5,6}", "{4,5,6}", "AwQF", "AwQF", "AwQF", "00000000-0000-0000-0000-000000000002", nullVal},
-		{"BANANA", "1", "1", "1", "1", "2", "2", "2", "2", "0.19995117", "0.2", "0.2", "str-2", "str-2", "2021-09-18 15:04:05", "2025-08-04", "2034-08-28", "123.45", "123.45", "{7,8,9}", "{7,8,9}", "{7,8,9}", "", "", "AAAA", "00000000-0000-0000-0000-000000000003", nullVal},
+		{"BANANA", "-1", "-1", "-1", "-1", "0", "0", "0", "0", "0", "0", "0", "str-0", "str-0", "2014-07-28 15:04:05Z", "2017-05-18", "2028-04-26", "-123.45", "-123.45", "{1,2,3}", "{1,2,3}", "{1,2,3}", "AAEC", "AAEC", "AAEC", "00000000-0000-0000-0000-000000000001", nullVal},
+		{"MANGO", "0", "0", "0", "0", "1", "1", "1", "1", "0.099975586", "0.1", "0.1", "str-1", "str-1", "2016-09-08 15:04:05Z", "2022-11-08", "2031-06-28", "0.00", "0.00", "{4,5,6}", "{4,5,6}", "{4,5,6}", "AwQF", "AwQF", "AwQF", "00000000-0000-0000-0000-000000000002", nullVal},
+		{"BANANA", "1", "1", "1", "1", "2", "2", "2", "2", "0.19995117", "0.2", "0.2", "str-2", "str-2", "2021-09-18 15:04:05Z", "2025-08-04", "2034-08-28", "123.45", "123.45", "{7,8,9}", "{7,8,9}", "{7,8,9}", "", "", "AAAA", "00000000-0000-0000-0000-000000000003", nullVal},
 		{nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal},
 	}
 )
@@ -463,6 +463,30 @@ func TestCSVWriterPreservesDecimalScaleAndPrecision(t *testing.T) {
 	assert.Equal(t, value128.ToString(type128.Scale)+","+value256.ToString(type256.Scale)+"\n", output.String())
 }
 
+func TestCustomTypeConverterValidatesRowCount(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	builder.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2}, nil)
+	record := builder.NewRecordBatch()
+	builder.Release()
+	defer record.Release()
+
+	for name, result := range map[string][]string{
+		"too few":  {"one"},
+		"too many": {"one", "two", "three"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			writer := csv.NewWriter(io.Discard, schema, csv.WithCustomTypeConverter(func(arrow.DataType, arrow.Array) ([]string, bool) {
+				return result, true
+			}))
+			require.ErrorIs(t, writer.Write(record), arrow.ErrInvalid)
+		})
+	}
+}
+
 // TestParquetTestingCSVWriter tests that the CSV writer successfully convert arrow/parquet-testing files to CSV
 func TestParquetTestingCSVWriter(t *testing.T) {
 	dir := os.Getenv("PARQUET_TEST_DATA")
@@ -504,14 +528,14 @@ func TestParquetTestingCSVWriter(t *testing.T) {
 		require.NoError(t, csvWriter.Flush())
 
 		expected := `id,bool_col,tinyint_col,smallint_col,int_col,bigint_col,float_col,double_col,date_string_col,string_col,timestamp_col
-4,true,0,0,0,0,0,0,MDMvMDEvMDk=,MA==,2009-03-01 00:00:00
-5,false,1,1,1,10,1.1,10.1,MDMvMDEvMDk=,MQ==,2009-03-01 00:01:00
-6,true,0,0,0,0,0,0,MDQvMDEvMDk=,MA==,2009-04-01 00:00:00
-7,false,1,1,1,10,1.1,10.1,MDQvMDEvMDk=,MQ==,2009-04-01 00:01:00
-2,true,0,0,0,0,0,0,MDIvMDEvMDk=,MA==,2009-02-01 00:00:00
-3,false,1,1,1,10,1.1,10.1,MDIvMDEvMDk=,MQ==,2009-02-01 00:01:00
-0,true,0,0,0,0,0,0,MDEvMDEvMDk=,MA==,2009-01-01 00:00:00
-1,false,1,1,1,10,1.1,10.1,MDEvMDEvMDk=,MQ==,2009-01-01 00:01:00
+4,true,0,0,0,0,0,0,MDMvMDEvMDk=,MA==,2009-03-01 00:00:00Z
+5,false,1,1,1,10,1.1,10.1,MDMvMDEvMDk=,MQ==,2009-03-01 00:01:00Z
+6,true,0,0,0,0,0,0,MDQvMDEvMDk=,MA==,2009-04-01 00:00:00Z
+7,false,1,1,1,10,1.1,10.1,MDQvMDEvMDk=,MQ==,2009-04-01 00:01:00Z
+2,true,0,0,0,0,0,0,MDIvMDEvMDk=,MA==,2009-02-01 00:00:00Z
+3,false,1,1,1,10,1.1,10.1,MDIvMDEvMDk=,MQ==,2009-02-01 00:01:00Z
+0,true,0,0,0,0,0,0,MDEvMDEvMDk=,MA==,2009-01-01 00:00:00Z
+1,false,1,1,1,10,1.1,10.1,MDEvMDEvMDk=,MQ==,2009-01-01 00:01:00Z
 `
 
 		require.Equal(t, expected, buf.String())

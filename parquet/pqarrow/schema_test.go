@@ -166,6 +166,39 @@ func TestGetOriginSchemaBase64(t *testing.T) {
 	}
 }
 
+func TestRestoreDurationFromStoredSchema(t *testing.T) {
+	pqNode := schema.MustPrimitive(schema.NewPrimitiveNode(
+		"duration", parquet.Repetitions.Optional, parquet.Types.Int64, -1, -1,
+	))
+	pqSchema := schema.NewSchema(schema.MustGroup(schema.NewGroupNode(
+		"schema", parquet.Repetitions.Required, schema.FieldList{pqNode}, -1,
+	)))
+
+	for _, unit := range []arrow.TimeUnit{
+		arrow.Second,
+		arrow.Millisecond,
+		arrow.Microsecond,
+		arrow.Nanosecond,
+	} {
+		t.Run(unit.String(), func(t *testing.T) {
+			origin := arrow.NewSchema([]arrow.Field{{
+				Name:     "duration",
+				Type:     &arrow.DurationType{Unit: unit},
+				Nullable: true,
+			}}, nil)
+			serialized := flight.SerializeSchema(origin, memory.DefaultAllocator)
+			kv := metadata.NewKeyValueMetadata()
+			kv.Append("ARROW:schema", base64.StdEncoding.EncodeToString(serialized))
+
+			got, err := pqarrow.FromParquet(pqSchema, nil, kv)
+			require.NoError(t, err)
+			require.Equal(t, 1, got.NumFields())
+			assert.True(t, arrow.TypeEqual(origin.Field(0).Type, got.Field(0).Type),
+				"expected %s, got %s", origin.Field(0).Type, got.Field(0).Type)
+		})
+	}
+}
+
 func TestGetOriginSchemaUnregisteredExtension(t *testing.T) {
 	uuidType := extensions.NewUUIDType()
 	md := arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"-1"})

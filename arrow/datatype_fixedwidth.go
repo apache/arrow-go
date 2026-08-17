@@ -20,6 +20,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -204,14 +205,36 @@ func TimestampFromTime(val time.Time, unit TimeUnit) (Timestamp, error) {
 	case Second:
 		return Timestamp(val.Unix()), nil
 	case Millisecond:
-		return Timestamp(val.Unix()*1e3 + int64(val.Nanosecond())/1e6), nil
+		return timestampFromTime(val, 1e3, 1e6, unit)
 	case Microsecond:
-		return Timestamp(val.Unix()*1e6 + int64(val.Nanosecond())/1e3), nil
+		return timestampFromTime(val, 1e6, 1e3, unit)
 	case Nanosecond:
-		return Timestamp(val.UnixNano()), nil
+		return timestampFromTime(val, 1e9, 1, unit)
 	default:
 		return 0, fmt.Errorf("%w: unexpected timestamp unit: %s", ErrInvalid, unit)
 	}
+}
+
+func timestampFromTime(val time.Time, multiplier, divisor int64, unit TimeUnit) (Timestamp, error) {
+	seconds := val.Unix()
+	fraction := int64(val.Nanosecond()) / divisor
+	maxSeconds := math.MaxInt64 / multiplier
+	if seconds > maxSeconds || (seconds == maxSeconds && fraction > math.MaxInt64%multiplier) {
+		return 0, fmt.Errorf("%w: timestamp value is out of range for %s", ErrInvalid, unit)
+	}
+
+	minSeconds := math.MinInt64 / multiplier
+	minRemainder := math.MinInt64 % multiplier
+	minFraction := multiplier + minRemainder
+	if seconds < minSeconds {
+		if minSeconds == math.MinInt64 || seconds != minSeconds-1 || fraction < minFraction {
+			return 0, fmt.Errorf("%w: timestamp value is out of range for %s", ErrInvalid, unit)
+		}
+		return Timestamp(math.MinInt64 + fraction - minFraction), nil
+	}
+
+	timestamp := seconds * multiplier
+	return Timestamp(timestamp + fraction), nil
 }
 
 // Time32FromString parses a string to return a Time32 value in the given unit,

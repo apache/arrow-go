@@ -340,6 +340,23 @@ func TestExecuteFieldRef(t *testing.T) {
 	}
 }
 
+func TestGetRefFieldEmptySchema(t *testing.T) {
+	_, err := exprs.GetRefField(expr.NewStructFieldRef(0), nil)
+	assert.ErrorIs(t, err, compute.ErrNoChildren)
+}
+
+func TestGetRefFieldNestedNoChildren(t *testing.T) {
+	ref := &expr.StructFieldRef{
+		Field: 0,
+		Child: expr.NewStructFieldRef(0),
+	}
+	fields := []arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}
+
+	_, err := exprs.GetRefField(ref, fields)
+	assert.ErrorIs(t, err, compute.ErrNoChildren)
+	assert.EqualError(t, err, compute.ErrNoChildren.Error()+": int32")
+}
+
 func TestExecuteScalarFuncCall(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	fromJSON := func(ty arrow.DataType, json string) arrow.Array {

@@ -423,6 +423,50 @@ func BenchmarkEncodeDictByteArray(b *testing.B) {
 	}
 }
 
+func benchmarkEncodeDictNumeric[T int32 | int64 | float32 | float64](b *testing.B, typ parquet.Type, col *schema.Column, valueSize int64) {
+	const (
+		nunique = 100
+		nvalues = 65535
+	)
+
+	values := make([]T, nvalues)
+	for idx := range values {
+		values[idx] = T(idx % nunique)
+	}
+
+	b.SetBytes(int64(len(values)) * valueSize)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		enc := encoding.NewEncoder(typ, parquet.Encodings.PlainDict, true, col, memory.DefaultAllocator).(encoding.Encoder[T])
+		enc.Put(values)
+		buf, err := enc.FlushValues()
+		if err != nil {
+			b.Fatal(err)
+		}
+		buf.Release()
+		enc.Release()
+	}
+}
+
+func BenchmarkEncodeDictNumeric(b *testing.B) {
+	b.Run("int32", func(b *testing.B) {
+		col := schema.NewColumn(schema.NewInt32Node("int32", parquet.Repetitions.Required, -1), 0, 0)
+		benchmarkEncodeDictNumeric[int32](b, parquet.Types.Int32, col, int64(arrow.Int32SizeBytes))
+	})
+	b.Run("int64", func(b *testing.B) {
+		col := schema.NewColumn(schema.NewInt64Node("int64", parquet.Repetitions.Required, -1), 0, 0)
+		benchmarkEncodeDictNumeric[int64](b, parquet.Types.Int64, col, int64(arrow.Int64SizeBytes))
+	})
+	b.Run("float32", func(b *testing.B) {
+		col := schema.NewColumn(schema.NewFloat32Node("float32", parquet.Repetitions.Required, -1), 0, 0)
+		benchmarkEncodeDictNumeric[float32](b, parquet.Types.Float, col, int64(arrow.Float32SizeBytes))
+	})
+	b.Run("float64", func(b *testing.B) {
+		col := schema.NewColumn(schema.NewFloat64Node("float64", parquet.Repetitions.Required, -1), 0, 0)
+		benchmarkEncodeDictNumeric[float64](b, parquet.Types.Double, col, int64(arrow.Float64SizeBytes))
+	})
+}
+
 func BenchmarkDecodeDictByteArray(b *testing.B) {
 	const (
 		nunique = 100

@@ -734,10 +734,15 @@ func (t *unionType) validate(fields []Field, typeCodes []UnionTypeCode, _ UnionM
 		return errors.New("arrow: union types should have the same number of fields as type codes")
 	}
 
+	var seen [int(MaxUnionTypeCode) + 1]bool
 	for _, c := range typeCodes {
 		if c < 0 || c > MaxUnionTypeCode {
 			return errors.New("arrow: union type code out of bounds")
 		}
+		if seen[c] {
+			return errors.New("arrow: union type codes must be unique")
+		}
+		seen[c] = true
 	}
 	return nil
 }

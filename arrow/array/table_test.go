@@ -179,6 +179,47 @@ func TestTableFromRecordsWithoutColumns(t *testing.T) {
 	}
 }
 
+func TestTableFromRecordsReleasesPartialColumnsOnPanic(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	firstBuilder := array.NewInt32Builder(mem)
+	firstBuilder.Append(1)
+	first := firstBuilder.NewArray()
+	firstBuilder.Release()
+
+	secondBuilder := array.NewInt64Builder(mem)
+	secondBuilder.Append(2)
+	second := secondBuilder.NewArray()
+	secondBuilder.Release()
+
+	recordSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "first", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "second", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+	rec := array.NewRecordBatch(recordSchema, []arrow.Array{first, second}, -1)
+	first.Release()
+	second.Release()
+	defer rec.Release()
+
+	tableSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "first", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "second", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected NewTableFromRecords to panic")
+		}
+		err, ok := r.(error)
+		if !ok || !errors.Is(err, arrow.ErrInvalid) {
+			t.Fatalf("expected ErrInvalid, got %v", r)
+		}
+	}()
+	array.NewTableFromRecords(tableSchema, []arrow.RecordBatch{rec})
+}
+
 func TestChunkedEqualDataType(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
@@ -683,6 +724,39 @@ func TestTable(t *testing.T) {
 	}
 }
 
+func TestNewTableDoesNotAliasColumnSlice(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	field := arrow.Field{Name: "value", Type: arrow.PrimitiveTypes.Int32}
+	schema := arrow.NewSchema([]arrow.Field{field}, nil)
+
+	makeColumn := func(value int32) arrow.Column {
+		builder := array.NewInt32Builder(mem)
+		defer builder.Release()
+		builder.Append(value)
+		arr := builder.NewArray()
+		defer arr.Release()
+		return arrow.NewColumnFromArr(field, arr)
+	}
+
+	original := makeColumn(1)
+	replacement := makeColumn(2)
+	cols := []arrow.Column{original}
+
+	tbl := array.NewTable(schema, cols, -1)
+	defer tbl.Release()
+
+	cols[0] = replacement
+	got := tbl.Column(0).Data().Chunk(0).(*array.Int32).Value(0)
+	if got != 1 {
+		t.Fatalf("table column changed after caller slice mutation: got=%d, want=1", got)
+	}
+
+	original.Release()
+	replacement.Release()
+}
+
 func TestTableAddColumnWithEqualDataType(t *testing.T) {
 	columnType := arrow.ListOf(arrow.PrimitiveTypes.Int32)
 	chunk := arrow.NewChunked(columnType, nil)
@@ -880,6 +954,35 @@ func TestTableReader(t *testing.T) {
 				t.Fatalf("invalid number of rows iterated over: got=%d, want=%d", sum, tbl.NumRows())
 			}
 		})
+	}
+}
+
+func TestTableReaderDoesNotExceedTableRowCount(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	field := arrow.Field{Name: "values", Type: arrow.PrimitiveTypes.Int32}
+	builder := array.NewInt32Builder(mem)
+	builder.AppendValues([]int32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, nil)
+	values := builder.NewInt32Array()
+	builder.Release()
+	defer values.Release()
+
+	column := arrow.NewColumnFromArr(field, values)
+	defer column.Release()
+	table := array.NewTable(arrow.NewSchema([]arrow.Field{field}, nil), []arrow.Column{column}, 5)
+	defer table.Release()
+
+	reader := array.NewTableReader(table, 3)
+	defer reader.Release()
+
+	var rows int64
+	for reader.Next() {
+		rows += reader.RecordBatch().NumRows()
+	}
+
+	if got, want := rows, int64(5); got != want {
+		t.Fatalf("invalid number of rows iterated over: got=%d, want=%d", got, want)
 	}
 }
 

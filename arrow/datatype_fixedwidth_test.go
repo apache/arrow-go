@@ -17,6 +17,7 @@
 package arrow_test
 
 import (
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -503,6 +504,83 @@ func TestDateFromTime(t *testing.T) {
 	wantD64 := time.Date(2024, time.January, 17, 0, 0, 0, 0, time.UTC).UnixMilli()
 	assert.EqualValues(t, wantD64, arrow.Date64FromTime(tm))
 	assert.EqualValues(t, wantD32, arrow.Date32FromTime(tm))
+}
+
+func timestampBoundaryTime(value arrow.Timestamp, unit arrow.TimeUnit) time.Time {
+	nanosPerUnit := int64(unit.Multiplier())
+	unitsPerSecond := int64(time.Second) / nanosPerUnit
+	seconds := int64(value) / unitsPerSecond
+	remainder := int64(value) % unitsPerSecond
+	if remainder < 0 {
+		seconds--
+		remainder += unitsPerSecond
+	}
+	return time.Unix(seconds, remainder*nanosPerUnit).UTC()
+}
+
+func TestTimestampFromTimeBoundaries(t *testing.T) {
+	for _, unit := range arrow.TimeUnitValues {
+		t.Run(unit.String(), func(t *testing.T) {
+			maxTime := timestampBoundaryTime(arrow.Timestamp(math.MaxInt64), unit)
+			got, err := arrow.TimestampFromTime(maxTime, unit)
+			require.NoError(t, err)
+			assert.Equal(t, arrow.Timestamp(math.MaxInt64), got)
+
+			minTime := timestampBoundaryTime(arrow.Timestamp(math.MinInt64), unit)
+			got, err = arrow.TimestampFromTime(minTime, unit)
+			require.NoError(t, err)
+			assert.Equal(t, arrow.Timestamp(math.MinInt64), got)
+
+			if unit != arrow.Second {
+				_, err = arrow.TimestampFromTime(maxTime.Add(unit.Multiplier()), unit)
+				assert.ErrorIs(t, err, arrow.ErrInvalid)
+
+				_, err = arrow.TimestampFromTime(minTime.Add(-unit.Multiplier()), unit)
+				assert.ErrorIs(t, err, arrow.ErrInvalid)
+			}
+		})
+	}
+}
+
+func TestTimestampFromTimeFractionalSeconds(t *testing.T) {
+	tests := []struct {
+		unit arrow.TimeUnit
+		want arrow.Timestamp
+	}{
+		{unit: arrow.Second, want: -1},
+		{unit: arrow.Millisecond, want: -500},
+		{unit: arrow.Microsecond, want: -500_000},
+		{unit: arrow.Nanosecond, want: -500_000_000},
+	}
+
+	value := time.Date(1969, time.December, 31, 23, 59, 59, 500_000_000, time.UTC)
+	for _, tc := range tests {
+		t.Run(tc.unit.String(), func(t *testing.T) {
+			got, err := arrow.TimestampFromTime(value, tc.unit)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	positive := time.Date(1970, time.January, 1, 0, 0, 0, 500_000_000, time.UTC)
+	for _, tc := range []struct {
+		unit arrow.TimeUnit
+		want arrow.Timestamp
+	}{
+		{unit: arrow.Second, want: 0},
+		{unit: arrow.Millisecond, want: 500},
+		{unit: arrow.Microsecond, want: 500_000},
+		{unit: arrow.Nanosecond, want: 500_000_000},
+	} {
+		t.Run("positive_"+tc.unit.String(), func(t *testing.T) {
+			got, err := arrow.TimestampFromTime(positive, tc.unit)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	_, err := arrow.TimestampFromTime(value, arrow.TimeUnit(99))
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
 }
 
 func TestNarrowestDecimalType(t *testing.T) {

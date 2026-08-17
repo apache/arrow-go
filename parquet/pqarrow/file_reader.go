@@ -135,6 +135,13 @@ func (er *extensionReader) BuildArray(boundedLen int64) (*arrow.Chunked, error) 
 	extType := er.fieldWithExt.Type.(arrow.ExtensionType)
 
 	newChunks := make([]arrow.Array, len(chkd.Chunks()))
+	defer func() {
+		for _, c := range newChunks {
+			if c != nil {
+				c.Release()
+			}
+		}
+	}()
 	for i, c := range chkd.Chunks() {
 		newChunks[i] = array.NewExtensionArrayWithStorage(extType, c)
 	}
@@ -212,6 +219,13 @@ func (fr *FileReader) allRowGroupFactory() itrFactory {
 //
 // IncludedLeaves and RowGroups are used to specify precisely which leaf indexes and row groups to read a subset of.
 func (fr *FileReader) GetFieldReader(ctx context.Context, i int, includedLeaves map[int]bool, rowGroups []int) (*ColumnReader, error) {
+	if i < 0 || i >= len(fr.Manifest.Fields) {
+		return nil, fmt.Errorf("%w: invalid field index chosen %d, there are only %d fields", arrow.ErrIndex, i, len(fr.Manifest.Fields))
+	}
+	if err := fr.checkRowGroups(rowGroups); err != nil {
+		return nil, err
+	}
+
 	ctx = context.WithValue(ctx, rdrCtxKey{}, readerCtx{
 		rdr:            fr.rdr,
 		mem:            fr.mem,
@@ -280,6 +294,10 @@ func (fr *FileReader) RowGroup(idx int) RowGroupReader {
 
 // ReadColumn reads data to create a chunked array only from the requested row groups.
 func (fr *FileReader) ReadColumn(rowGroups []int, rdr *ColumnReader) (*arrow.Chunked, error) {
+	if err := fr.checkRowGroups(rowGroups); err != nil {
+		return nil, err
+	}
+
 	recs := int64(0)
 	for _, rg := range rowGroups {
 		recs += fr.rdr.MetaData().RowGroups[rg].GetNumRows()
@@ -305,7 +323,7 @@ func (fr *FileReader) ReadTable(ctx context.Context) (arrow.Table, error) {
 func (fr *FileReader) checkCols(indices []int) (err error) {
 	for _, col := range indices {
 		if col < 0 || col >= fr.rdr.MetaData().Schema.NumColumns() {
-			err = fmt.Errorf("invalid column index specified %d out of %d", col, fr.rdr.MetaData().Schema.NumColumns())
+			err = fmt.Errorf("%w: invalid column index specified %d out of %d", arrow.ErrIndex, col, fr.rdr.MetaData().Schema.NumColumns())
 			break
 		}
 	}
@@ -315,7 +333,7 @@ func (fr *FileReader) checkCols(indices []int) (err error) {
 func (fr *FileReader) checkRowGroups(indices []int) (err error) {
 	for _, rg := range indices {
 		if rg < 0 || rg >= fr.rdr.NumRowGroups() {
-			err = fmt.Errorf("invalid row group specified: %d, file only has %d row groups", rg, fr.rdr.NumRowGroups())
+			err = fmt.Errorf("%w: invalid row group specified: %d, file only has %d row groups", arrow.ErrIndex, rg, fr.rdr.NumRowGroups())
 			break
 		}
 	}
@@ -445,7 +463,7 @@ func (fr *FileReader) ReadRowGroups(ctx context.Context, indices, rowGroups []in
 
 func (fr *FileReader) getColumnReader(ctx context.Context, i int, colFactory itrFactory) (*ColumnReader, error) {
 	if i < 0 || i >= len(fr.Manifest.Fields) {
-		return nil, fmt.Errorf("invalid column index chosen %d, there are only %d columns", i, len(fr.Manifest.Fields))
+		return nil, fmt.Errorf("%w: invalid column index chosen %d, there are only %d columns", arrow.ErrIndex, i, len(fr.Manifest.Fields))
 	}
 
 	ctx = context.WithValue(ctx, rdrCtxKey{}, readerCtx{

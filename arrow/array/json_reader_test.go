@@ -95,6 +95,34 @@ func TestJSONReaderAll(t *testing.T) {
 	assert.False(t, rdr.Next())
 }
 
+func TestJSONReaderPreservesRowsForEmptySchema(t *testing.T) {
+	schema := arrow.NewSchema(nil, nil)
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	t.Run("one row per batch", func(t *testing.T) {
+		rdr := array.NewJSONReader(strings.NewReader("{} {}"), schema, array.WithAllocator(mem))
+		defer rdr.Release()
+
+		assert.True(t, rdr.Next())
+		assert.EqualValues(t, 1, rdr.RecordBatch().NumRows())
+		assert.True(t, rdr.Next())
+		assert.EqualValues(t, 1, rdr.RecordBatch().NumRows())
+		assert.False(t, rdr.Next())
+		assert.NoError(t, rdr.Err())
+	})
+
+	t.Run("all rows in one batch", func(t *testing.T) {
+		rdr := array.NewJSONReader(strings.NewReader("{} {}"), schema, array.WithAllocator(mem), array.WithChunk(-1))
+		defer rdr.Release()
+
+		assert.True(t, rdr.Next())
+		assert.EqualValues(t, 2, rdr.RecordBatch().NumRows())
+		assert.False(t, rdr.Next())
+		assert.NoError(t, rdr.Err())
+	})
+}
+
 func TestJSONReaderChunked(t *testing.T) {
 	schema := arrow.NewSchema([]arrow.Field{
 		{Name: "region", Type: arrow.BinaryTypes.String, Nullable: true},
