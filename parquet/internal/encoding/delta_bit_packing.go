@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"math/bits"
 
@@ -29,6 +30,8 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/utils"
 )
+
+const deltaBitPackScratchSize = 1024
 
 // see the deltaBitPack encoder for a description of the encoding format that is
 // used for delta-bitpacking.
@@ -181,23 +184,31 @@ func (d *deltaBitPackDecoder[T]) unpackNextMini() error {
 			d.miniBlockValues = append(d.miniBlockValues, T(d.lastVal))
 		}
 	} else {
-		if cap(d.deltaBuf) < n {
-			d.deltaBuf = make([]uint64, n)
+		scratchSize := min(n, deltaBitPackScratchSize)
+		if cap(d.deltaBuf) < scratchSize {
+			d.deltaBuf = make([]uint64, scratchSize)
 		}
-		d.deltaBuf = d.deltaBuf[:n]
+		d.deltaBuf = d.deltaBuf[:scratchSize]
 		minDelta := d.minDelta
 
-		nread, err := d.bitdecoder.GetBatch(width, d.deltaBuf)
-		if err != nil {
-			return err
-		}
-		if nread != n {
-			return errors.New("parquet: eof exception")
-		}
+		for remaining := n; remaining > 0; {
+			batchSize := min(remaining, len(d.deltaBuf))
+			nread, err := d.bitdecoder.GetBatch(width, d.deltaBuf[:batchSize])
+			if nread != batchSize {
+				if err == nil || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+					return io.ErrUnexpectedEOF
+				}
+				return err
+			}
+			if err != nil {
+				return err
+			}
 
-		for _, delta := range d.deltaBuf {
-			d.lastVal += int64(delta) + minDelta
-			d.miniBlockValues = append(d.miniBlockValues, T(d.lastVal))
+			for _, delta := range d.deltaBuf[:nread] {
+				d.lastVal += int64(delta) + minDelta
+				d.miniBlockValues = append(d.miniBlockValues, T(d.lastVal))
+			}
+			remaining -= batchSize
 		}
 	}
 	d.miniBlockIdx++
