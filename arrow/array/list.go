@@ -419,6 +419,25 @@ func (b *baseListBuilder) appendNextOffset() {
 	b.appendOffsetVal(b.values.Len())
 }
 
+func unsafeAppendRepeatedInt(builder Builder, value, n int) {
+	switch builder := builder.(type) {
+	case *Int32Builder:
+		end := builder.length + n
+		for i := builder.length; i < end; i++ {
+			builder.rawData[i] = int32(value)
+		}
+		builder.unsafeAppendBoolsToBitmap(nil, n)
+	case *Int64Builder:
+		end := builder.length + n
+		for i := builder.length; i < end; i++ {
+			builder.rawData[i] = int64(value)
+		}
+		builder.unsafeAppendBoolsToBitmap(nil, n)
+	default:
+		panic(fmt.Sprintf("arrow/array: unsupported list dimension builder %T", builder))
+	}
+}
+
 func (b *baseListBuilder) Append(v bool) {
 	b.Reserve(1)
 	b.unsafeAppendBoolToBitmap(v)
@@ -436,9 +455,15 @@ func (b *baseListBuilder) AppendNull() {
 }
 
 func (b *baseListBuilder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+
+	b.Reserve(n)
+	bitutil.SetBitsTo(b.nullBitmap.Bytes(), int64(b.length), int64(n), false)
+	b.length += n
+	b.nulls += n
+	unsafeAppendRepeatedInt(b.offsets, b.values.Len(), n)
 }
 
 func (b *baseListBuilder) AppendEmptyValue() {
@@ -446,9 +471,13 @@ func (b *baseListBuilder) AppendEmptyValue() {
 }
 
 func (b *baseListBuilder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+
+	b.Reserve(n)
+	b.unsafeAppendBoolsToBitmap(nil, n)
+	unsafeAppendRepeatedInt(b.offsets, b.values.Len(), n)
 }
 
 func (b *ListBuilder) AppendValues(offsets []int32, valid []bool) {
@@ -1221,9 +1250,15 @@ func (b *baseListViewBuilder) AppendNull() {
 }
 
 func (b *baseListViewBuilder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+
+	b.Reserve(n)
+	bitutil.SetBitsTo(b.nullBitmap.Bytes(), int64(b.length), int64(n), false)
+	b.length += n
+	b.nulls += n
+	b.unsafeAppendEmptyDimensions(n)
 }
 
 func (b *baseListViewBuilder) AppendEmptyValue() {
@@ -1231,9 +1266,18 @@ func (b *baseListViewBuilder) AppendEmptyValue() {
 }
 
 func (b *baseListViewBuilder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+
+	b.Reserve(n)
+	b.unsafeAppendBoolsToBitmap(nil, n)
+	b.unsafeAppendEmptyDimensions(n)
+}
+
+func (b *baseListViewBuilder) unsafeAppendEmptyDimensions(n int) {
+	unsafeAppendRepeatedInt(b.offsets, b.values.Len(), n)
+	unsafeAppendRepeatedInt(b.sizes, 0, n)
 }
 
 func (b *ListViewBuilder) AppendValuesWithSizes(offsets []int32, sizes []int32, valid []bool) {
