@@ -765,6 +765,34 @@ func TestArrayEqualFixedWidthEmptyNullBitmap(t *testing.T) {
 	})
 }
 
+func TestArrayEqualValidityBitmapWithZeroNullCount(t *testing.T) {
+	newInt64 := func(validity []byte) *array.Int64 {
+		validityBuffer := memory.NewBufferBytes(validity)
+		valuesBuffer := memory.NewBufferBytes(make([]byte, 8*8))
+		data := array.NewData(
+			arrow.PrimitiveTypes.Int64,
+			8,
+			[]*memory.Buffer{validityBuffer, valuesBuffer},
+			nil,
+			0,
+			0,
+		)
+		validityBuffer.Release()
+		valuesBuffer.Release()
+
+		result := array.NewInt64Data(data)
+		data.Release()
+		return result
+	}
+
+	left := newInt64([]byte{0xff})
+	defer left.Release()
+	right := newInt64([]byte{0xfe})
+	defer right.Release()
+
+	assert.False(t, array.Equal(left, right))
+}
+
 func TestArrayEqualNull(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)

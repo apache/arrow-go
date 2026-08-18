@@ -635,12 +635,13 @@ func validityBitmapEqual(left, right arrow.Array) bool {
 	if left.Len() != right.Len() {
 		return false
 	}
-	if left.NullN() == 0 {
-		return true
-	}
 
 	leftBitmap := left.NullBitmapBytes()
 	rightBitmap := right.NullBitmapBytes()
+	if left.NullN() == 0 && len(leftBitmap) == 0 && len(rightBitmap) == 0 {
+		return true
+	}
+
 	if len(leftBitmap) == 0 || len(rightBitmap) == 0 {
 		for i := range left.Len() {
 			if left.IsNull(i) != right.IsNull(i) {
