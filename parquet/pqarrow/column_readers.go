@@ -662,7 +662,10 @@ func transferColumnData(rdr file.RecordReader, valueType arrow.DataType, descr *
 		dt = valueType.(arrow.ExtensionType).StorageType()
 	}
 
-	var data arrow.ArrayData
+	var (
+		data arrow.ArrayData
+		err  error
+	)
 	switch dt.ID() {
 	case arrow.DICTIONARY:
 		return transferDictionary(rdr, valueType, mem)
@@ -702,7 +705,10 @@ func transferColumnData(rdr file.RecordReader, valueType arrow.DataType, descr *
 			data = transferZeroCopy(rdr, valueType)
 		case arrow.Nanosecond:
 			if descr.PhysicalType() == parquet.Types.Int96 {
-				data = transferInt96(rdr, valueType)
+				data, err = transferInt96(rdr, valueType)
+				if err != nil {
+					return nil, err
+				}
 			} else {
 				data = transferZeroCopy(rdr, valueType)
 			}
@@ -887,28 +893,31 @@ func transferDate64(rdr file.RecordReader, dt arrow.DataType) arrow.ArrayData {
 }
 
 // coerce int96 to nanosecond timestamp
-func transferInt96(rdr file.RecordReader, dt arrow.DataType) arrow.ArrayData {
+func transferInt96(rdr file.RecordReader, dt arrow.DataType) (arrow.ArrayData, error) {
 	length := rdr.ValuesWritten()
 	values := parquet.Int96Traits.CastFromBytes(rdr.Values())
-
-	data := make([]byte, arrow.Int64SizeBytes*length)
-	out := arrow.Int64Traits.CastFromBytes(data)
-
-	for idx, val := range values[:length] {
-		if binary.LittleEndian.Uint32(val[8:]) == 0 {
-			out[idx] = 0
-		} else {
-			out[idx] = val.ToTime().UnixNano()
-		}
-	}
 
 	bitmap := rdr.ReleaseValidBits()
 	if bitmap != nil {
 		defer bitmap.Release()
 	}
+
+	data := make([]byte, arrow.Int64SizeBytes*length)
+	out := arrow.Int64Traits.CastFromBytes(data)
+
+	for idx, val := range values[:length] {
+		if bitmap == nil || bitutil.BitIsSet(bitmap.Bytes(), idx) {
+			timestamp, err := val.ToTimestamp()
+			if err != nil {
+				return nil, fmt.Errorf("parquet INT96 timestamp at index %d: %w", idx, err)
+			}
+			out[idx] = int64(timestamp)
+		}
+	}
+
 	return array.NewData(dt, length, []*memory.Buffer{
 		bitmap, memory.NewBufferBytes(data),
-	}, nil, int(rdr.NullCount()), 0)
+	}, nil, int(rdr.NullCount()), 0), nil
 }
 
 // convert physical integer storage of a decimal logical type to a decimal128 typed array
