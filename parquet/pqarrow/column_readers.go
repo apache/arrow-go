@@ -573,44 +573,97 @@ func (lr *listReader) buildFixedSizeListArray(length int, offsets []int32, valid
 		return arrow.NewChunked(lr.field.Type, []arrow.Array{out}), nil
 	}
 
-	// Each validity run becomes one piece. Alternating valid and null parents
-	// create O(length) temporary arrays before concatenation.
-	pieces := make([]arrow.Array, 0, length)
-	defer func() { releaseArrays(pieces) }()
-
-	for i := 0; i < length; {
-		valid := !lr.field.Nullable || bitutil.BitIsSet(validityBuffer.Bytes(), i)
-		end := i + 1
-		for end < length {
-			nextValid := !lr.field.Nullable || bitutil.BitIsSet(validityBuffer.Bytes(), end)
-			if nextValid != valid {
-				break
-			}
-			end++
-		}
-
+	validity := validityBuffer.Bytes()
+	runCount := 0
+	previousValid := false
+	for idx := 0; idx < length; idx++ {
+		valid := !lr.field.Nullable || bitutil.BitIsSet(validity, idx)
 		if valid {
-			for idx := i; idx < end; idx++ {
-				if size := offsets[idx+1] - offsets[idx]; size != int32(listSize) {
-					return nil, fmt.Errorf("expected all lists to be of size=%d, but index %d had size=%d", listSize, idx, size)
-				}
+			if size := offsets[idx+1] - offsets[idx]; size != int32(listSize) {
+				return nil, fmt.Errorf("expected all lists to be of size=%d, but index %d had size=%d", listSize, idx, size)
 			}
-			pieces = append(pieces, array.NewSlice(item, int64(offsets[i]), int64(offsets[end])))
 		} else {
-			for idx := i; idx < end; idx++ {
-				if size := offsets[idx+1] - offsets[idx]; size != 0 {
-					return nil, fmt.Errorf("null fixed-size list at index %d consumed %d child values", idx, size)
-				}
+			if size := offsets[idx+1] - offsets[idx]; size != 0 {
+				return nil, fmt.Errorf("null fixed-size list at index %d consumed %d child values", idx, size)
 			}
-			pieces = append(pieces, array.MakeArrayOfNull(lr.rctx.mem, listType.Elem(), (end-i)*listSize))
 		}
-		i = end
+		if idx == 0 || valid != previousValid {
+			runCount++
+		}
+		previousValid = valid
 	}
 
-	if len(pieces) == 0 {
-		pieces = append(pieces, array.MakeArrayOfNull(lr.rctx.mem, listType.Elem(), 0))
+	var child arrow.Array
+	var err error
+	// For a small number of runs, concatenating slices avoids materializing
+	// indices. Once the run count is high, the temporary arrays dominate.
+	const minRunsForTake = 1024
+	if runCount < minRunsForTake {
+		pieces := make([]arrow.Array, 0, runCount)
+		defer func() { releaseArrays(pieces) }()
+		for i := 0; i < length; {
+			valid := !lr.field.Nullable || bitutil.BitIsSet(validity, i)
+			end := i + 1
+			for end < length {
+				nextValid := !lr.field.Nullable || bitutil.BitIsSet(validity, end)
+				if nextValid != valid {
+					break
+				}
+				end++
+			}
+			if valid {
+				pieces = append(pieces, array.NewSlice(item, int64(offsets[i]), int64(offsets[end])))
+			} else {
+				pieces = append(pieces, array.MakeArrayOfNull(lr.rctx.mem, listType.Elem(), (end-i)*listSize))
+			}
+			i = end
+		}
+		if len(pieces) == 0 {
+			pieces = append(pieces, array.MakeArrayOfNull(lr.rctx.mem, listType.Elem(), 0))
+		}
+		child, err = array.Concatenate(pieces, lr.rctx.mem)
+	} else {
+		childLength := length * listSize
+		indicesBuffer := memory.NewResizableBuffer(lr.rctx.mem)
+		defer indicesBuffer.Release()
+		indicesBuffer.Resize(arrow.Int32Traits.BytesRequired(childLength))
+		indices := arrow.Int32Traits.CastFromBytes(indicesBuffer.Bytes())
+
+		indicesValidity := memory.NewResizableBuffer(lr.rctx.mem)
+		defer indicesValidity.Release()
+		indicesValidity.Resize(int(bitutil.BytesForBits(int64(childLength))))
+		clear(indicesValidity.Bytes())
+
+		for i := 0; i < length; {
+			valid := !lr.field.Nullable || bitutil.BitIsSet(validity, i)
+			end := i + 1
+			for end < length {
+				nextValid := !lr.field.Nullable || bitutil.BitIsSet(validity, end)
+				if nextValid != valid {
+					break
+				}
+				end++
+			}
+			if valid {
+				childStart := i * listSize
+				runChildLength := (end - i) * listSize
+				bitutil.SetBitsTo(indicesValidity.Bytes(), int64(childStart), int64(runChildLength), true)
+				for idx := 0; idx < runChildLength; idx++ {
+					indices[childStart+idx] = offsets[i] + int32(idx)
+				}
+			}
+			i = end
+		}
+
+		indicesData := array.NewData(arrow.PrimitiveTypes.Int32, childLength,
+			[]*memory.Buffer{indicesValidity, indicesBuffer}, nil, int(nullCount)*listSize, 0)
+		defer indicesData.Release()
+		indicesArr := array.NewInt32Data(indicesData)
+		defer indicesArr.Release()
+
+		ctx := compute.WithAllocator(context.Background(), lr.rctx.mem)
+		child, err = compute.TakeArrayOpts(ctx, item, indicesArr, compute.TakeOptions{BoundsCheck: false})
 	}
-	child, err := array.Concatenate(pieces, lr.rctx.mem)
 	if err != nil {
 		return nil, err
 	}
