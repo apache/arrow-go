@@ -956,6 +956,42 @@ func TestWriteDeltaBitPackedInt64(t *testing.T) {
 	})
 }
 
+func TestDeltaBitPackedInt64DecodeAfterDiscard(t *testing.T) {
+	column := schema.NewColumn(schema.NewInt64Node("int64", parquet.Repetitions.Required, -1), 0, 0)
+	values := make([]int64, 257)
+	for idx := 1; idx < len(values); idx++ {
+		delta := int64(1<<40) + int64(idx%17)
+		if idx%2 != 0 {
+			delta = -delta
+		}
+		values[idx] = values[idx-1] + delta
+	}
+
+	enc := encoding.NewEncoder(parquet.Types.Int64, parquet.Encodings.DeltaBinaryPacked, false, column, memory.DefaultAllocator)
+	enc.(encoding.Int64Encoder).Put(values)
+	buf, err := enc.FlushValues()
+	require.NoError(t, err)
+	defer buf.Release()
+
+	for _, discard := range []int{0, 1, 31, 32, 33, 127, 128, 129, 256} {
+		t.Run(fmt.Sprintf("discard=%d", discard), func(t *testing.T) {
+			dec := encoding.NewDecoder(parquet.Types.Int64, parquet.Encodings.DeltaBinaryPacked, column, memory.DefaultAllocator)
+			int64Dec := dec.(encoding.Int64Decoder)
+			require.NoError(t, int64Dec.SetData(len(values), buf.Bytes()))
+
+			n, err := int64Dec.Discard(discard)
+			require.NoError(t, err)
+			require.Equal(t, discard, n)
+
+			out := make([]int64, len(values)-discard)
+			n, err = int64Dec.Decode(out)
+			require.NoError(t, err)
+			require.Equal(t, len(out), n)
+			assert.Equal(t, values[discard:], out)
+		})
+	}
+}
+
 func TestDeltaLengthByteArrayEncoding(t *testing.T) {
 	column := schema.NewColumn(schema.NewByteArrayNode("bytearray", parquet.Repetitions.Required, -1), 0, 0)
 
