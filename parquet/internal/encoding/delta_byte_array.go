@@ -38,7 +38,22 @@ type DeltaByteArrayEncoder struct {
 	prefixEncoder *DeltaBitPackInt32Encoder
 	suffixEncoder *DeltaLengthByteArrayEncoder
 
+	prefixLengths [deltaByteArrayBatchSize]int32
+	suffixes      [deltaByteArrayBatchSize]parquet.ByteArray
+
 	lastVal parquet.ByteArray
+}
+
+const deltaByteArrayBatchSize = 256
+
+func commonPrefixLength(left, right parquet.ByteArray) int {
+	maximum := min(left.Len(), right.Len())
+	for i := 0; i < maximum; i++ {
+		if left[i] != right[i] {
+			return i
+		}
+	}
+	return maximum
 }
 
 func (enc *DeltaByteArrayEncoder) EstimatedDataEncodedSize() int64 {
@@ -58,8 +73,8 @@ func (enc *DeltaByteArrayEncoder) initEncoders() {
 		encoder: newEncoderBase(enc.encoding, nil, enc.mem),
 	}
 	enc.suffixEncoder = &DeltaLengthByteArrayEncoder{
-		newEncoderBase(enc.encoding, nil, enc.mem),
-		&DeltaBitPackInt32Encoder{
+		encoder: newEncoderBase(enc.encoding, nil, enc.mem),
+		lengthEncoder: &DeltaBitPackInt32Encoder{
 			encoder: newEncoderBase(enc.encoding, nil, enc.mem),
 		},
 	}
@@ -74,39 +89,29 @@ func (enc *DeltaByteArrayEncoder) Put(in []parquet.ByteArray) {
 		return
 	}
 
-	var suf parquet.ByteArray
 	if enc.prefixEncoder == nil { // initialize our encoders if we haven't yet
 		enc.initEncoders()
-		enc.prefixEncoder.Put([]int32{0})
-		suf = in[0]
-		enc.lastVal = in[0]
-		enc.suffixEncoder.Put([]parquet.ByteArray{suf})
-		in = in[1:]
 	}
 
-	// for each value, figure out the common prefix with the previous value
-	// and then write the prefix length and the suffix.
-	for _, val := range in {
-		l1 := enc.lastVal.Len()
-		l2 := val.Len()
-		j := 0
-		for j < l1 && j < l2 {
-			if enc.lastVal[j] != val[j] {
-				break
-			}
-			j++
+	lastVal := enc.lastVal
+	for offset := 0; offset < len(in); offset += deltaByteArrayBatchSize {
+		batchSize := min(deltaByteArrayBatchSize, len(in)-offset)
+		for i, val := range in[offset : offset+batchSize] {
+			prefixLength := commonPrefixLength(lastVal, val)
+			lastVal = val
+			enc.prefixLengths[i] = int32(prefixLength)
+			enc.suffixes[i] = val[prefixLength:]
 		}
-		enc.prefixEncoder.Put([]int32{int32(j)})
-		suf = val[j:]
-		enc.suffixEncoder.Put([]parquet.ByteArray{suf})
-		enc.lastVal = val
+		enc.suffixEncoder.Put(enc.suffixes[:batchSize])
+		enc.prefixEncoder.Put(enc.prefixLengths[:batchSize])
+		clear(enc.suffixes[:batchSize])
 	}
 
 	// do the memcpy after the loops to keep a copy of the lastVal
 	// we do a copy here so that we only copy and keep a reference
 	// to the suffix, and aren't forcing the *entire* value to stay
 	// in memory while we have this reference to just the suffix.
-	enc.lastVal = append([]byte{}, enc.lastVal...)
+	enc.lastVal = append([]byte{}, lastVal...)
 }
 
 // PutSpaced is like Put, but assumes the data is already spaced for nulls and uses the bitmap provided and offset
@@ -143,6 +148,7 @@ func (enc *DeltaByteArrayEncoder) FlushValues() (Buffer, error) {
 	ret.ResizeNoShrink(prefixBuf.Len() + suffixBuf.Len())
 	copy(ret.Bytes(), prefixBuf.Bytes())
 	copy(ret.Bytes()[prefixBuf.Len():], suffixBuf.Bytes())
+	enc.lastVal = nil
 	return poolBuffer{ret}, nil
 }
 
