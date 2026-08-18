@@ -148,6 +148,7 @@ func (enc *DeltaByteArrayEncoder) FlushValues() (Buffer, error) {
 	ret.ResizeNoShrink(prefixBuf.Len() + suffixBuf.Len())
 	copy(ret.Bytes(), prefixBuf.Bytes())
 	copy(ret.Bytes()[prefixBuf.Len():], suffixBuf.Bytes())
+	enc.lastVal = nil
 	return poolBuffer{ret}, nil
 }
 

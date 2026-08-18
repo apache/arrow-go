@@ -64,6 +64,29 @@ func TestDeltaByteArrayDecoderResetsBetweenPages(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestDeltaByteArrayEncoderResetsBetweenPages(t *testing.T) {
+	enc := NewEncoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray, false, nil, memory.DefaultAllocator).(ByteArrayEncoder)
+	defer enc.Release()
+
+	enc.Put([]parquet.ByteArray{parquet.ByteArray("prefix/old")})
+	first, err := enc.FlushValues()
+	require.NoError(t, err)
+	first.Release()
+
+	enc.Put([]parquet.ByteArray{parquet.ByteArray("prefix/new")})
+	second, err := enc.FlushValues()
+	require.NoError(t, err)
+	defer second.Release()
+
+	dec := NewDecoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray, nil, memory.DefaultAllocator).(ByteArrayDecoder)
+	require.NoError(t, dec.SetData(1, second.Bytes()))
+	out := make([]parquet.ByteArray, 1)
+	decoded, err := dec.Decode(out)
+	require.NoError(t, err)
+	require.Equal(t, 1, decoded)
+	require.Equal(t, parquet.ByteArray("prefix/new"), out[0])
+}
+
 func TestDeltaByteArrayDecoderRejectsInvalidPrefixes(t *testing.T) {
 	tests := []struct {
 		name     string
