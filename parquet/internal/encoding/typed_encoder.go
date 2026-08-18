@@ -56,6 +56,15 @@ type Decoder[T parquet.ColumnTypes] interface {
 }
 
 type BooleanDecoder = Decoder[bool]
+
+// BooleanBitmapDecoder decodes boolean values directly into a packed bitmap.
+type BooleanBitmapDecoder interface {
+	BooleanDecoder
+	DecodeToBitmap(out []byte, outOffset int64, length int) (int, error)
+	DecodeSpacedToBitmap(out []byte, outOffset int64, length, nullCount int,
+		validBits []byte, validBitsOffset int64) (int, error)
+}
+
 type Int32Decoder = Decoder[int32]
 type Int64Decoder = Decoder[int64]
 type Int96Decoder = Decoder[parquet.Int96]

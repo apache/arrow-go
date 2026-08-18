@@ -24,7 +24,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -846,26 +845,28 @@ func transferInt(rdr file.RecordReader, dt arrow.DataType) arrow.ArrayData {
 }
 
 func transferBool(rdr file.RecordReader) arrow.ArrayData {
-	// TODO(mtopol): optimize this so we don't convert bitmap to []bool back to bitmap
 	length := rdr.ValuesWritten()
-	data := make([]byte, int(bitutil.BytesForBits(int64(length))))
-	bytedata := rdr.Values()
-	values := *(*[]bool)(unsafe.Pointer(&bytedata))
-
-	for idx, v := range values[:length] {
-		if v {
-			bitutil.SetBit(data, idx)
-		}
-	}
-
 	bitmap := rdr.ReleaseValidBits()
 	if bitmap != nil {
 		defer bitmap.Release()
 	}
-	bb := memory.NewBufferBytes(data)
-	defer bb.Release()
+	var values *memory.Buffer
+	if boolReader, ok := rdr.(file.BooleanRecordReader); ok {
+		values = boolReader.ReleaseValueBitmap()
+	} else {
+		// Keep the bridge compatible with RecordReader implementations that do
+		// not expose the packed Boolean fast path.
+		data := make([]byte, int(bitutil.BytesForBits(int64(length))))
+		for idx, value := range rdr.Values()[:length] {
+			if value != 0 {
+				bitutil.SetBit(data, idx)
+			}
+		}
+		values = memory.NewBufferBytes(data)
+	}
+	defer values.Release()
 	return array.NewData(&arrow.BooleanType{}, length, []*memory.Buffer{
-		bitmap, bb,
+		bitmap, values,
 	}, nil, int(rdr.NullCount()), 0)
 }
 
