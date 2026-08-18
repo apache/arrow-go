@@ -380,15 +380,14 @@ func (b *BinaryMemoTable) CopyOffsetsSubset(start int, out []int32) {
 		return
 	}
 
-	first := b.findOffset(0)
-	delta := b.findOffset(start)
 	sz := b.Size()
+	offset := 0
 	for i := start; i < sz; i++ {
-		offset := int32(b.findOffset(i) - delta)
-		out[i-start] = offset
+		out[i-start] = int32(offset)
+		offset += len(b.builder.Value(i))
 	}
 
-	out[sz-start] = int32(b.builder.DataLen() - (int(delta) - int(first)))
+	out[sz-start] = int32(offset)
 }
 
 // CopyLargeOffsets copies the list of offsets into the passed in slice, the offsets
@@ -405,15 +404,14 @@ func (b *BinaryMemoTable) CopyLargeOffsetsSubset(start int, out []int64) {
 		return
 	}
 
-	first := b.findOffset(0)
-	delta := b.findOffset(start)
 	sz := b.Size()
+	offset := 0
 	for i := start; i < sz; i++ {
-		offset := int64(b.findOffset(i) - delta)
-		out[i-start] = offset
+		out[i-start] = int64(offset)
+		offset += len(b.builder.Value(i))
 	}
 
-	out[sz-start] = int64(b.builder.DataLen() - (int(delta) - int(first)))
+	out[sz-start] = int64(offset)
 }
 
 // CopyValues copies the raw binary data bytes out, out should be a []byte
