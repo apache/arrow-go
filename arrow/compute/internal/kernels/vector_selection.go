@@ -1227,6 +1227,37 @@ func ChunkedPrimitiveTake(ctx *exec.KernelCtx, batch []*arrow.Chunked, out *exec
 	}
 }
 
+func binaryTakeMaxOffset[OffsetT int32 | int64]() int64 {
+	var zero OffsetT
+	switch any(zero).(type) {
+	case int32:
+		return math.MaxInt32
+	case int64:
+		return math.MaxInt64
+	default:
+		panic("unsupported binary offset type")
+	}
+}
+
+func binaryTakeOffsetBytes[OffsetT int32 | int64]() int {
+	var zero OffsetT
+	switch any(zero).(type) {
+	case int32:
+		return 4
+	case int64:
+		return 8
+	default:
+		panic("unsupported binary offset type")
+	}
+}
+
+func checkBinaryTakeOffset[OffsetT int32 | int64](offset OffsetT, valueLen int64) error {
+	if offset < 0 || valueLen < 0 || valueLen > binaryTakeMaxOffset[OffsetT]()-int64(offset) {
+		return fmt.Errorf("%w: binary output offset overflow", arrow.ErrInvalid)
+	}
+	return nil
+}
+
 func takeChunkedBinaryImpl[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec.KernelCtx, indices *exec.ArraySpan, values binaryGetter, out *exec.ExecResult) error {
 	var (
 		indicesValues   = exec.GetSpanValues[IdxT](indices, 1)
@@ -1240,33 +1271,81 @@ func takeChunkedBinaryImpl[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec
 		offset          OffsetT
 	)
 
+	maxInt := int(^uint(0) >> 1)
+	if indices.Len >= int64(maxInt) || indices.Len > math.MaxInt64-7 {
+		return fmt.Errorf("%w: binary take input length exceeds capacity", arrow.ErrInvalid)
+	}
+	offsetElements := int(indices.Len) + 1
+	offsetSize := binaryTakeOffsetBytes[OffsetT]()
+	if offsetElements > maxInt/offsetSize {
+		return fmt.Errorf("%w: binary take offset buffer exceeds capacity", arrow.ErrInvalid)
+	}
+
+	defer func() {
+		if validityBuilder.buffer != nil {
+			validityBuilder.buffer.Release()
+		}
+		if offsetBuilder.buffer != nil {
+			offsetBuilder.buffer.Release()
+		}
+		if dataBuilder.buffer != nil {
+			dataBuilder.buffer.Release()
+		}
+	}()
+
 	validityBuilder.Reserve(indices.Len)
-	offsetBuilder.reserve(int(indices.Len) + 1)
-	if values.Len() > 0 {
-		meanValueLen := float64(values.DataLen()) / float64(values.Len())
-		estimatedTotalSize := min(int(meanValueLen*float64(indices.Len)), 16777216)
-		dataBuilder.reserve(estimatedTotalSize)
+	offsetBuilder.reserve(offsetElements)
+	if values.Len() > 0 && values.DataLen() > 0 && indices.Len > 0 {
+		const maxPrealloc = int64(16777216)
+		meanValueLen := values.DataLen() / values.Len()
+		estimatedTotalSize := int64(0)
+		if meanValueLen > 0 {
+			if meanValueLen >= maxPrealloc || indices.Len > maxPrealloc/meanValueLen {
+				estimatedTotalSize = maxPrealloc
+			} else {
+				estimatedTotalSize = meanValueLen * indices.Len
+			}
+		}
+		dataBuilder.reserve(int(estimatedTotalSize))
 	}
 
 	spaceAvail := dataBuilder.cap()
-	appendValue := func(idx int64) {
-		offsetBuilder.unsafeAppend(offset)
+	appendValue := func(idx int64) error {
 		value := values.GetValue(idx)
+		valueLen := int64(len(value))
+		if err := checkBinaryTakeOffset(offset, valueLen); err != nil {
+			return err
+		}
+
+		dataLen := dataBuilder.len()
+		if len(value) > maxInt-dataLen {
+			return fmt.Errorf("%w: binary output size exceeds capacity", arrow.ErrInvalid)
+		}
+
+		offsetBuilder.unsafeAppend(offset)
 		if len(value) > spaceAvail {
-			needed := dataBuilder.len() + len(value)
+			needed := dataLen + len(value)
 			newCap := dataBuilder.cap()
+			if newCap < dataLen {
+				newCap = dataLen
+			}
 			if newCap == 0 {
 				newCap = len(value)
 			}
 			for newCap < needed {
+				if newCap > maxInt/2 {
+					newCap = needed
+					break
+				}
 				newCap *= 2
 			}
-			dataBuilder.reserve(newCap - dataBuilder.len())
+			dataBuilder.reserve(newCap - dataLen)
 			spaceAvail = dataBuilder.cap() - dataBuilder.len()
 		}
 		dataBuilder.unsafeAppendSlice(value)
 		spaceAvail -= len(value)
-		offset += OffsetT(len(value))
+		offset += OffsetT(valueLen)
+		return nil
 	}
 	appendNull := func() {
 		offsetBuilder.unsafeAppend(offset)
@@ -1279,7 +1358,9 @@ func takeChunkedBinaryImpl[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec
 		case !indicesHaveNulls && !valuesHaveNulls:
 			validityBuilder.UnsafeAppendN(int64(block.Len), true)
 			for i := 0; i < int(block.Len); i++ {
-				appendValue(int64(indicesValues[pos]))
+				if err := appendValue(int64(indicesValues[pos])); err != nil {
+					return err
+				}
 				pos++
 			}
 		case block.Popcnt > 0:
@@ -1287,7 +1368,9 @@ func takeChunkedBinaryImpl[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec
 				idxValid := !indicesHaveNulls || indicesIsValid.GetBit(int(pos))
 				if idxValid && (!valuesHaveNulls || values.IsValid(int64(indicesValues[pos]))) {
 					validityBuilder.UnsafeAppend(true)
-					appendValue(int64(indicesValues[pos]))
+					if err := appendValue(int64(indicesValues[pos])); err != nil {
+						return err
+					}
 				} else {
 					validityBuilder.UnsafeAppend(false)
 					appendNull()

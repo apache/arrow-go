@@ -1006,14 +1006,20 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 	toChunked := func() {
 		out := output.(ArrayLikeDatum).Chunks()
 		acc = make([]arrow.Array, 0, len(out))
+		isChunked := output.Kind() == KindChunked
 		for _, o := range out {
 			if o.Len() > 0 {
+				if isChunked {
+					// ChunkedDatum.Chunks returns borrowed references.
+					o.Retain()
+				}
 				acc = append(acc, o)
+			} else if !isChunked {
+				// ArrayDatum.Chunks creates an owned array.
+				o.Release()
 			}
 		}
-		if output.Kind() != KindChunked {
-			output.Release()
-		}
+		output.Release()
 		output = nil
 	}
 
@@ -1120,8 +1126,9 @@ func (v *vectorExecutor) execChunked(batch *ExecBatch, out chan<- Datum) error {
 	}
 
 	if len(result) == 0 {
-		empty := output.MakeArray()
+		empty := array.MakeArrayOfNull(exec.GetAllocator(v.ctx.Ctx), output.Type, 0)
 		defer empty.Release()
+		output.Release()
 		out <- &ChunkedDatum{Value: arrow.NewChunked(output.Type, []arrow.Array{empty})}
 		return nil
 	}
