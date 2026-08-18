@@ -257,8 +257,6 @@ func expandSpacedBitmapPerBit(out []byte, outOffset int64, length, nullCount int
 			value := bitutil.BitIsSet(out, physicalOffset+physicalIndex)
 			bitutil.SetBitTo(out, destination, value)
 			physicalIndex++
-		} else {
-			bitutil.ClearBit(out, destination)
 		}
 	}
 }
@@ -302,7 +300,6 @@ func decodeSpacedToBitmap(dec BooleanBitmapDecoder, out []byte, outOffset int64,
 			int(outOffset+run.Pos), int(run.Length))
 		physicalIndex += run.Length
 	}
-	bitutil.BitmapAnd(out, validBits, outOffset, validBitsOffset, out, outOffset, int64(length))
 	return length, nil
 }
 

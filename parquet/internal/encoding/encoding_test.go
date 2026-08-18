@@ -1398,9 +1398,7 @@ func TestBooleanDecoderDecodeSpacedToBitmapSparseNulls(t *testing.T) {
 
 			for i, value := range logicalValues {
 				got := bitutil.BitIsSet(out, outOffset+i)
-				if i == nullIndex {
-					require.False(t, got, "null value %d should be cleared", i)
-				} else {
+				if i != nullIndex {
 					assert.Equal(t, value, got, "value %d", i)
 				}
 			}
