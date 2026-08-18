@@ -148,6 +148,13 @@ func (a *JSONArray) GetOneForMarshal(i int) interface{} {
 	return a.ValueJSON(i)
 }
 
+func (a *JSONArray) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+	return a.Value(i)
+}
+
 var (
 	_ arrow.ExtensionType  = (*JSONType)(nil)
 	_ array.ExtensionArray = (*JSONArray)(nil)

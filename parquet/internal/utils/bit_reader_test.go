@@ -360,6 +360,70 @@ func TestBitArrayVals(t *testing.T) {
 	}
 }
 
+func TestBitReaderGetBatchWideValues(t *testing.T) {
+	for width := uint(33); width <= 64; width++ {
+		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
+			const nvalues = 32
+			values := make([]uint64, nvalues)
+			mask := uint64(math.MaxUint64)
+			if width < 64 {
+				mask = 1<<width - 1
+			}
+			for idx := range values {
+				values[idx] = uint64(idx) * 0x9e3779b97f4a7c15 & mask
+			}
+
+			buf := make([]byte, bitutil.BytesForBits(int64(width*nvalues)))
+			writer := utils.NewBitWriter(utils.NewWriterAtBuffer(buf))
+			for _, value := range values {
+				assert.NoError(t, writer.WriteValue(value, width))
+			}
+			writer.Flush(false)
+
+			reader := utils.NewBitReader(bytes.NewReader(buf))
+			actual := make([]uint64, nvalues)
+			n, err := reader.GetBatch(width, actual)
+			assert.NoError(t, err)
+			assert.Equal(t, nvalues, n)
+			assert.Equal(t, values, actual)
+		})
+	}
+}
+
+func TestBitReaderGetBatchKeepsFollowingValues(t *testing.T) {
+	for width := uint(1); width <= 64; width++ {
+		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
+			const nvalues = 65
+			values := make([]uint64, nvalues)
+			mask := uint64(math.MaxUint64)
+			if width < 64 {
+				mask = 1<<width - 1
+			}
+			for idx := range values {
+				values[idx] = (uint64(idx)*0x9e3779b97f4a7c15 + uint64(idx/3)) & mask
+			}
+
+			buf := make([]byte, bitutil.BytesForBits(int64(width*nvalues)))
+			writer := utils.NewBitWriter(utils.NewWriterAtBuffer(buf))
+			for _, value := range values {
+				assert.NoError(t, writer.WriteValue(value, width))
+			}
+			writer.Flush(false)
+
+			reader := utils.NewBitReader(bytes.NewReader(buf))
+			actual := make([]uint64, nvalues-1)
+			n, err := reader.GetBatch(width, actual)
+			assert.NoError(t, err)
+			assert.Equal(t, nvalues-1, n)
+			assert.Equal(t, values[:nvalues-1], actual)
+
+			value, ok := reader.GetValue(int(width))
+			assert.True(t, ok)
+			assert.Equal(t, values[nvalues-1], value)
+		})
+	}
+}
+
 func TestBitReaderRejectsTruncatedPackedBatches(t *testing.T) {
 	for width := 1; width <= 32; width++ {
 		for _, batchSize := range []int{32, 64} {

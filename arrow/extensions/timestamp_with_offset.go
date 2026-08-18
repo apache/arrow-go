@@ -395,6 +395,13 @@ func (a *TimestampWithOffsetArray) GetOneForMarshal(i int) interface{} {
 	return a.Value(i)
 }
 
+func (a *TimestampWithOffsetArray) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+	return a.Value(i)
+}
+
 // noLastOffset is the sentinel value for TimestampWithOffsetBuilder.lastOffset
 // indicating that no run-end-encoded run has been started yet. It is deliberately
 // outside the range of valid timezone offsets in minutes (roughly [-720, 840]) so
@@ -437,6 +444,24 @@ func NewTimestampWithOffsetBuilder(mem memory.Allocator, unit arrow.TimeUnit, of
 // ExtensionBuilder's) so that the run-end-encoding tracker is reset on reuse.
 func (b *TimestampWithOffsetBuilder) NewArray() arrow.Array {
 	return b.NewExtensionArray()
+}
+
+type timestampWithOffsetCheckpoint struct {
+	builder    *TimestampWithOffsetBuilder
+	lastOffset int16
+}
+
+func (c *timestampWithOffsetCheckpoint) Capture() {
+	c.lastOffset = c.builder.lastOffset
+}
+
+func (c *timestampWithOffsetCheckpoint) Restore() {
+	c.builder.lastOffset = c.lastOffset
+}
+
+// NewCheckpoint returns a checkpoint for the builder's run-end offset state.
+func (b *TimestampWithOffsetBuilder) NewCheckpoint() array.CheckpointState {
+	return &timestampWithOffsetCheckpoint{builder: b}
 }
 
 // NewExtensionArray finalizes the current array and resets lastOffset so a

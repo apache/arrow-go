@@ -66,6 +66,43 @@ func TestVectorExecutorWrapResultsReleasesEmptyArrayOutput(t *testing.T) {
 	empty.Release()
 }
 
+func TestVectorExecutorWrapResultsReleasesEmptyChunkedOutput(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	builder := array.NewInt32Builder(mem)
+	builder.Append(42)
+	value := builder.NewInt32Array()
+	builder.Release()
+	defer value.Release()
+
+	empty := array.NewSlice(value, 0, 0)
+	defer empty.Release()
+	nonEmpty := array.NewSlice(value, 0, 1)
+	defer nonEmpty.Release()
+
+	chunked := arrow.NewChunked(value.DataType(), []arrow.Array{empty, nonEmpty})
+	output := make(chan Datum, 1)
+	output <- &ChunkedDatum{Value: chunked}
+	close(output)
+
+	executor := &vectorExecutor{
+		nonAggExecImpl: nonAggExecImpl{
+			kernel:  &exec.VectorKernel{OutputChunked: true},
+			outType: value.DataType(),
+		},
+	}
+
+	result := executor.WrapResults(context.Background(), output, true)
+	require.NotNil(t, result)
+	require.Equal(t, KindChunked, result.Kind())
+
+	resultChunked := result.(*ChunkedDatum).Value
+	require.Len(t, resultChunked.Chunks(), 1)
+	require.Equal(t, int32(42), resultChunked.Chunk(0).(*array.Int32).Value(0))
+	result.Release()
+}
+
 func TestVectorExecutorWrapResultsReleasesChunkedOutputOnCancellation(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

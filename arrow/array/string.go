@@ -161,6 +161,13 @@ func (a *String) GetOneForMarshal(i int) interface{} {
 	return nil
 }
 
+func (a *String) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+	return a.Value(i)
+}
+
 func (a *String) MarshalJSON() ([]byte, error) {
 	vals := make([]interface{}, a.Len())
 	for i := 0; i < a.Len(); i++ {
@@ -369,6 +376,13 @@ func (a *LargeString) GetOneForMarshal(i int) interface{} {
 	return nil
 }
 
+func (a *LargeString) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+	return a.Value(i)
+}
+
 func (a *LargeString) MarshalJSON() ([]byte, error) {
 	vals := make([]interface{}, a.Len())
 	for i := 0; i < a.Len(); i++ {
@@ -543,6 +557,13 @@ func (a *StringView) ValueStr(i int) string {
 }
 
 func (a *StringView) GetOneForMarshal(i int) interface{} {
+	if a.IsNull(i) {
+		return nil
+	}
+	return a.Value(i)
+}
+
+func (a *StringView) ValueAsAny(i int) any {
 	if a.IsNull(i) {
 		return nil
 	}

@@ -463,6 +463,30 @@ func TestCSVWriterPreservesDecimalScaleAndPrecision(t *testing.T) {
 	assert.Equal(t, value128.ToString(type128.Scale)+","+value256.ToString(type256.Scale)+"\n", output.String())
 }
 
+func TestCustomTypeConverterValidatesRowCount(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	builder.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2}, nil)
+	record := builder.NewRecordBatch()
+	builder.Release()
+	defer record.Release()
+
+	for name, result := range map[string][]string{
+		"too few":  {"one"},
+		"too many": {"one", "two", "three"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			writer := csv.NewWriter(io.Discard, schema, csv.WithCustomTypeConverter(func(arrow.DataType, arrow.Array) ([]string, bool) {
+				return result, true
+			}))
+			require.ErrorIs(t, writer.Write(record), arrow.ErrInvalid)
+		})
+	}
+}
+
 // TestParquetTestingCSVWriter tests that the CSV writer successfully convert arrow/parquet-testing files to CSV
 func TestParquetTestingCSVWriter(t *testing.T) {
 	dir := os.Getenv("PARQUET_TEST_DATA")
