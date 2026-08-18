@@ -38,6 +38,9 @@ type DeltaByteArrayEncoder struct {
 	prefixEncoder *DeltaBitPackInt32Encoder
 	suffixEncoder *DeltaLengthByteArrayEncoder
 
+	prefixLengths [deltaByteArrayBatchSize]int32
+	suffixes      [deltaByteArrayBatchSize]parquet.ByteArray
+
 	lastVal parquet.ByteArray
 }
 
@@ -70,8 +73,8 @@ func (enc *DeltaByteArrayEncoder) initEncoders() {
 		encoder: newEncoderBase(enc.encoding, nil, enc.mem),
 	}
 	enc.suffixEncoder = &DeltaLengthByteArrayEncoder{
-		newEncoderBase(enc.encoding, nil, enc.mem),
-		&DeltaBitPackInt32Encoder{
+		encoder: newEncoderBase(enc.encoding, nil, enc.mem),
+		lengthEncoder: &DeltaBitPackInt32Encoder{
 			encoder: newEncoderBase(enc.encoding, nil, enc.mem),
 		},
 	}
@@ -91,18 +94,17 @@ func (enc *DeltaByteArrayEncoder) Put(in []parquet.ByteArray) {
 	}
 
 	lastVal := enc.lastVal
-	var prefixLengths [deltaByteArrayBatchSize]int32
-	var suffixes [deltaByteArrayBatchSize]parquet.ByteArray
 	for offset := 0; offset < len(in); offset += deltaByteArrayBatchSize {
 		batchSize := min(deltaByteArrayBatchSize, len(in)-offset)
 		for i, val := range in[offset : offset+batchSize] {
 			prefixLength := commonPrefixLength(lastVal, val)
 			lastVal = val
-			prefixLengths[i] = int32(prefixLength)
-			suffixes[i] = val[prefixLength:]
+			enc.prefixLengths[i] = int32(prefixLength)
+			enc.suffixes[i] = val[prefixLength:]
 		}
-		enc.suffixEncoder.Put(suffixes[:batchSize])
-		enc.prefixEncoder.Put(prefixLengths[:batchSize])
+		enc.suffixEncoder.Put(enc.suffixes[:batchSize])
+		enc.prefixEncoder.Put(enc.prefixLengths[:batchSize])
+		clear(enc.suffixes[:batchSize])
 	}
 
 	// do the memcpy after the loops to keep a copy of the lastVal

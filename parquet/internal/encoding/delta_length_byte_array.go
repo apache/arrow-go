@@ -38,19 +38,19 @@ type DeltaLengthByteArrayEncoder struct {
 	encoder
 
 	lengthEncoder *DeltaBitPackInt32Encoder
+	lengths       [deltaByteArrayBatchSize]int32
 }
 
 // Put writes the provided slice of byte arrays to the encoder
 func (enc *DeltaLengthByteArrayEncoder) Put(in []parquet.ByteArray) {
-	var lengths [deltaByteArrayBatchSize]int32
 	totalLen := 0
 	for i := 0; i < len(in); i += deltaByteArrayBatchSize {
 		batchSize := min(deltaByteArrayBatchSize, len(in)-i)
 		for j, val := range in[i : i+batchSize] {
-			lengths[j] = int32(val.Len())
+			enc.lengths[j] = int32(val.Len())
 			totalLen += val.Len()
 		}
-		enc.lengthEncoder.Put(lengths[:batchSize])
+		enc.lengthEncoder.Put(enc.lengths[:batchSize])
 	}
 	enc.sink.Reserve(totalLen)
 	for _, val := range in {
