@@ -30,6 +30,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/internal/bitutils"
 	"github.com/apache/arrow-go/v18/internal/hashing"
 	"github.com/apache/arrow-go/v18/internal/json"
 	"github.com/apache/arrow-go/v18/internal/utils"
@@ -57,6 +58,72 @@ type Dictionary struct {
 
 	indices arrow.Array
 	dict    arrow.Array
+}
+
+const maxDictionaryIndexValidRuns = 8
+
+type dictionaryIndexValidRuns struct {
+	runs       [maxDictionaryIndexValidRuns]bitutils.SetBitRun
+	count      int
+	fragmented bool
+}
+
+func findDictionaryIndexValidRuns(validBits []byte, offset, length int) dictionaryIndexValidRuns {
+	var result dictionaryIndexValidRuns
+	reader := bitutils.NewSetBitRunReader(validBits, int64(offset), int64(length))
+	for i := range result.runs {
+		run := reader.NextRun()
+		if run.AtEnd() {
+			result.count = i
+			return result
+		}
+		result.runs[i] = run
+	}
+
+	result.count = len(result.runs)
+	result.fragmented = !reader.NextRun().AtEnd()
+	return result
+}
+
+func getMinMaxRuns[T arrow.IntType | arrow.UintType](
+	values []T, offset int, runs []bitutils.SetBitRun, getMinMax func([]T) (T, T),
+) (min, max T, hasValues bool) {
+	for _, run := range runs {
+		start := offset + int(run.Pos)
+		runMin, runMax := getMinMax(values[start : start+int(run.Length)])
+		if !hasValues {
+			min, max, hasValues = runMin, runMax, true
+			continue
+		}
+		if runMin < min {
+			min = runMin
+		}
+		if runMax > max {
+			max = runMax
+		}
+	}
+	return
+}
+
+func getMinMaxValid[T arrow.IntType | arrow.UintType](
+	values []T, validBits []byte, offset, length int, getMinMax func([]T) (T, T),
+) (min, max T, hasValues bool) {
+	visitRun := func(pos, runLength int64) {
+		start := offset + int(pos)
+		runMin, runMax := getMinMax(values[start : start+int(runLength)])
+		if !hasValues {
+			min, max, hasValues = runMin, runMax, true
+			return
+		}
+		if runMin < min {
+			min = runMin
+		}
+		if runMax > max {
+			max = runMax
+		}
+	}
+	bitutils.VisitSetBitRunsNoErr(validBits, int64(offset), int64(length), visitRun)
+	return
 }
 
 // NewDictionaryArray constructs a dictionary array with the provided indices
@@ -103,55 +170,181 @@ func checkIndexBounds(indices *Data, upperlimit uint64) error {
 	start := indices.offset
 	end := indices.offset + indices.length
 
-	// TODO(ARROW-15950): lift BitSetRunReader from parquet to utils
-	// and use it here for performance improvement.
+	var validBits []byte
+	var validRuns dictionaryIndexValidRuns
+	if indices.buffers[0] != nil && indices.nulls != 0 {
+		validBits = indices.buffers[0].Bytes()
+		// Run-based min/max is useful for clustered validity. Fragmented
+		// bitmaps retain the whole-slice fast path below.
+		validRuns = findDictionaryIndexValidRuns(validBits, start, indices.length)
+	}
 
 	switch indices.dtype.ID() {
 	case arrow.INT8:
 		data := arrow.Int8Traits.CastFromBytes(indices.buffers[1].Bytes())
-		min, max := utils.GetMinMaxInt8(data[start:end])
+		min, max := int8(0), int8(0)
+		hasValues := true
+		if validBits == nil {
+			min, max = utils.GetMinMaxInt8(data[start:end])
+		} else if !validRuns.fragmented {
+			min, max, hasValues = getMinMaxRuns(data, start, validRuns.runs[:validRuns.count], utils.GetMinMaxInt8)
+		} else {
+			min, max = utils.GetMinMaxInt8(data[start:end])
+			if min >= 0 && uint64(max) < upperlimit {
+				return nil
+			}
+			min, max, hasValues = getMinMaxValid(data, validBits, start, indices.length, utils.GetMinMaxInt8)
+		}
+		if !hasValues {
+			return nil
+		}
 		if min < 0 || uint64(max) >= upperlimit {
 			return fmt.Errorf("contains out of bounds index: min: %d, max: %d", min, max)
 		}
 	case arrow.UINT8:
 		data := arrow.Uint8Traits.CastFromBytes(indices.buffers[1].Bytes())
-		_, max := utils.GetMinMaxUint8(data[start:end])
+		max := uint8(0)
+		hasValues := true
+		if validBits == nil {
+			_, max = utils.GetMinMaxUint8(data[start:end])
+		} else if !validRuns.fragmented {
+			_, max, hasValues = getMinMaxRuns(data, start, validRuns.runs[:validRuns.count], utils.GetMinMaxUint8)
+		} else {
+			_, max = utils.GetMinMaxUint8(data[start:end])
+			if uint64(max) < upperlimit {
+				return nil
+			}
+			_, max, hasValues = getMinMaxValid(data, validBits, start, indices.length, utils.GetMinMaxUint8)
+		}
+		if !hasValues {
+			return nil
+		}
 		if max >= uint8(upperlimit) {
 			return fmt.Errorf("contains out of bounds index: max: %d", max)
 		}
 	case arrow.INT16:
 		data := arrow.Int16Traits.CastFromBytes(indices.buffers[1].Bytes())
-		min, max := utils.GetMinMaxInt16(data[start:end])
+		min, max := int16(0), int16(0)
+		hasValues := true
+		if validBits == nil {
+			min, max = utils.GetMinMaxInt16(data[start:end])
+		} else if !validRuns.fragmented {
+			min, max, hasValues = getMinMaxRuns(data, start, validRuns.runs[:validRuns.count], utils.GetMinMaxInt16)
+		} else {
+			min, max = utils.GetMinMaxInt16(data[start:end])
+			if min >= 0 && uint64(max) < upperlimit {
+				return nil
+			}
+			min, max, hasValues = getMinMaxValid(data, validBits, start, indices.length, utils.GetMinMaxInt16)
+		}
+		if !hasValues {
+			return nil
+		}
 		if min < 0 || uint64(max) >= upperlimit {
 			return fmt.Errorf("contains out of bounds index: min: %d, max: %d", min, max)
 		}
 	case arrow.UINT16:
 		data := arrow.Uint16Traits.CastFromBytes(indices.buffers[1].Bytes())
-		_, max := utils.GetMinMaxUint16(data[start:end])
+		max := uint16(0)
+		hasValues := true
+		if validBits == nil {
+			_, max = utils.GetMinMaxUint16(data[start:end])
+		} else if !validRuns.fragmented {
+			_, max, hasValues = getMinMaxRuns(data, start, validRuns.runs[:validRuns.count], utils.GetMinMaxUint16)
+		} else {
+			_, max = utils.GetMinMaxUint16(data[start:end])
+			if uint64(max) < upperlimit {
+				return nil
+			}
+			_, max, hasValues = getMinMaxValid(data, validBits, start, indices.length, utils.GetMinMaxUint16)
+		}
+		if !hasValues {
+			return nil
+		}
 		if max >= uint16(upperlimit) {
 			return fmt.Errorf("contains out of bounds index: max: %d", max)
 		}
 	case arrow.INT32:
 		data := arrow.Int32Traits.CastFromBytes(indices.buffers[1].Bytes())
-		min, max := utils.GetMinMaxInt32(data[start:end])
+		min, max := int32(0), int32(0)
+		hasValues := true
+		if validBits == nil {
+			min, max = utils.GetMinMaxInt32(data[start:end])
+		} else if !validRuns.fragmented {
+			min, max, hasValues = getMinMaxRuns(data, start, validRuns.runs[:validRuns.count], utils.GetMinMaxInt32)
+		} else {
+			min, max = utils.GetMinMaxInt32(data[start:end])
+			if min >= 0 && uint64(max) < upperlimit {
+				return nil
+			}
+			min, max, hasValues = getMinMaxValid(data, validBits, start, indices.length, utils.GetMinMaxInt32)
+		}
+		if !hasValues {
+			return nil
+		}
 		if min < 0 || uint64(max) >= upperlimit {
 			return fmt.Errorf("contains out of bounds index: min: %d, max: %d", min, max)
 		}
 	case arrow.UINT32:
 		data := arrow.Uint32Traits.CastFromBytes(indices.buffers[1].Bytes())
-		_, max := utils.GetMinMaxUint32(data[start:end])
+		max := uint32(0)
+		hasValues := true
+		if validBits == nil {
+			_, max = utils.GetMinMaxUint32(data[start:end])
+		} else if !validRuns.fragmented {
+			_, max, hasValues = getMinMaxRuns(data, start, validRuns.runs[:validRuns.count], utils.GetMinMaxUint32)
+		} else {
+			_, max = utils.GetMinMaxUint32(data[start:end])
+			if uint64(max) < upperlimit {
+				return nil
+			}
+			_, max, hasValues = getMinMaxValid(data, validBits, start, indices.length, utils.GetMinMaxUint32)
+		}
+		if !hasValues {
+			return nil
+		}
 		if max >= uint32(upperlimit) {
 			return fmt.Errorf("contains out of bounds index: max: %d", max)
 		}
 	case arrow.INT64:
 		data := arrow.Int64Traits.CastFromBytes(indices.buffers[1].Bytes())
-		min, max := utils.GetMinMaxInt64(data[start:end])
+		min, max := int64(0), int64(0)
+		hasValues := true
+		if validBits == nil {
+			min, max = utils.GetMinMaxInt64(data[start:end])
+		} else if !validRuns.fragmented {
+			min, max, hasValues = getMinMaxRuns(data, start, validRuns.runs[:validRuns.count], utils.GetMinMaxInt64)
+		} else {
+			min, max = utils.GetMinMaxInt64(data[start:end])
+			if min >= 0 && uint64(max) < upperlimit {
+				return nil
+			}
+			min, max, hasValues = getMinMaxValid(data, validBits, start, indices.length, utils.GetMinMaxInt64)
+		}
+		if !hasValues {
+			return nil
+		}
 		if min < 0 || uint64(max) >= upperlimit {
 			return fmt.Errorf("contains out of bounds index: min: %d, max: %d", min, max)
 		}
 	case arrow.UINT64:
 		data := arrow.Uint64Traits.CastFromBytes(indices.buffers[1].Bytes())
-		_, max := utils.GetMinMaxUint64(data[indices.offset : indices.offset+indices.length])
+		max := uint64(0)
+		hasValues := true
+		if validBits == nil {
+			_, max = utils.GetMinMaxUint64(data[start:end])
+		} else if !validRuns.fragmented {
+			_, max, hasValues = getMinMaxRuns(data, start, validRuns.runs[:validRuns.count], utils.GetMinMaxUint64)
+		} else {
+			_, max = utils.GetMinMaxUint64(data[start:end])
+			if max < upperlimit {
+				return nil
+			}
+			_, max, hasValues = getMinMaxValid(data, validBits, start, indices.length, utils.GetMinMaxUint64)
+		}
+		if !hasValues {
+			return nil
+		}
 		if max >= upperlimit {
 			return fmt.Errorf("contains out of bounds value: max: %d", max)
 		}
