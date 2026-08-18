@@ -641,34 +641,79 @@ func TestArrayEqualFloatingPointSemantics(t *testing.T) {
 	}
 }
 
-func TestArrayEqualFixedWidthIgnoresNullValues(t *testing.T) {
-	const sliceLength = 72
-	valid := make([]bool, sliceLength)
+const fixedWidthEqualityTestLength = 72
+
+func fixedWidthEqualityValidity() []bool {
+	valid := make([]bool, fixedWidthEqualityTestLength)
 	for i := range valid {
 		valid[i] = true
 	}
 	for _, i := range []int{0, 11, 30, 60, 68} {
 		valid[i] = false
 	}
+	return valid
+}
 
-	newSlicedInt64 := func(values []int64, offset int) arrow.Array {
-		baseValues := make([]int64, offset+len(values)+1)
-		baseValid := make([]bool, len(baseValues))
-		for i := range baseValid {
-			baseValid[i] = true
-		}
-		copy(baseValues[offset:], values)
-		copy(baseValid[offset:], valid)
-
-		builder := array.NewInt64Builder(memory.DefaultAllocator)
-		builder.AppendValues(baseValues, baseValid)
-		base := builder.NewInt64Array()
-		builder.Release()
-
-		sliced := array.NewSlice(base, int64(offset), int64(offset+len(values)))
-		base.Release()
-		return sliced
+func makeSlicedInt64EqualityArray(values []int64, valid []bool, offset int) *array.Int64 {
+	baseValues := make([]int64, offset+len(values)+1)
+	baseValid := make([]bool, len(baseValues))
+	for i := range baseValid {
+		baseValid[i] = true
 	}
+	copy(baseValues[offset:], values)
+	copy(baseValid[offset:], valid)
+
+	builder := array.NewInt64Builder(memory.DefaultAllocator)
+	builder.AppendValues(baseValues, baseValid)
+	base := builder.NewInt64Array()
+	builder.Release()
+
+	sliced := array.NewSlice(base, int64(offset), int64(offset+len(values))).(*array.Int64)
+	base.Release()
+	return sliced
+}
+
+func makeSlicedTimestampEqualityArray(values []arrow.Timestamp, valid []bool, offset int) *array.Timestamp {
+	baseValues := make([]arrow.Timestamp, offset+len(values)+1)
+	baseValid := make([]bool, len(baseValues))
+	for i := range baseValid {
+		baseValid[i] = true
+	}
+	copy(baseValues[offset:], values)
+	copy(baseValid[offset:], valid)
+
+	builder := array.NewTimestampBuilder(memory.DefaultAllocator, arrow.FixedWidthTypes.Timestamp_ms.(*arrow.TimestampType))
+	builder.AppendValues(baseValues, baseValid)
+	base := builder.NewTimestampArray()
+	builder.Release()
+
+	sliced := array.NewSlice(base, int64(offset), int64(offset+len(values))).(*array.Timestamp)
+	base.Release()
+	return sliced
+}
+
+func makeInt64EqualityArrayWithValidity(validity []byte, nulls int) *array.Int64 {
+	validityBuffer := memory.NewBufferBytes(validity)
+	valuesBuffer := memory.NewBufferBytes(make([]byte, 8*8))
+	data := array.NewData(
+		arrow.PrimitiveTypes.Int64,
+		8,
+		[]*memory.Buffer{validityBuffer, valuesBuffer},
+		nil,
+		nulls,
+		0,
+	)
+	validityBuffer.Release()
+	valuesBuffer.Release()
+
+	result := array.NewInt64Data(data)
+	data.Release()
+	return result
+}
+
+func TestArrayEqualFixedWidthIgnoresNullValues(t *testing.T) {
+	const sliceLength = fixedWidthEqualityTestLength
+	valid := fixedWidthEqualityValidity()
 
 	leftValues := make([]int64, sliceLength)
 	rightValues := make([]int64, sliceLength)
@@ -680,9 +725,9 @@ func TestArrayEqualFixedWidthIgnoresNullValues(t *testing.T) {
 		}
 	}
 
-	left := newSlicedInt64(leftValues, 3)
+	left := makeSlicedInt64EqualityArray(leftValues, valid, 3)
 	defer left.Release()
-	right := newSlicedInt64(rightValues, 5)
+	right := makeSlicedInt64EqualityArray(rightValues, valid, 5)
 	defer right.Release()
 
 	assert.Equal(t, 3, left.Data().Offset())
@@ -690,39 +735,14 @@ func TestArrayEqualFixedWidthIgnoresNullValues(t *testing.T) {
 	assert.True(t, array.Equal(left, right))
 
 	rightValues[5]++
-	different := newSlicedInt64(rightValues, 5)
+	different := makeSlicedInt64EqualityArray(rightValues, valid, 5)
 	defer different.Release()
 	assert.False(t, array.Equal(left, different))
 }
 
 func TestArrayEqualFixedWidthTimestamp(t *testing.T) {
-	const length = 72
-	valid := make([]bool, length)
-	for i := range valid {
-		valid[i] = true
-	}
-	for _, i := range []int{0, 11, 30, 60, 68} {
-		valid[i] = false
-	}
-
-	newSlicedTimestamp := func(values []arrow.Timestamp, offset int) arrow.Array {
-		baseValues := make([]arrow.Timestamp, offset+len(values)+1)
-		baseValid := make([]bool, len(baseValues))
-		for i := range baseValid {
-			baseValid[i] = true
-		}
-		copy(baseValues[offset:], values)
-		copy(baseValid[offset:], valid)
-
-		builder := array.NewTimestampBuilder(memory.DefaultAllocator, arrow.FixedWidthTypes.Timestamp_ms.(*arrow.TimestampType))
-		builder.AppendValues(baseValues, baseValid)
-		base := builder.NewTimestampArray()
-		builder.Release()
-
-		sliced := array.NewSlice(base, int64(offset), int64(offset+len(values)))
-		base.Release()
-		return sliced
-	}
+	const length = fixedWidthEqualityTestLength
+	valid := fixedWidthEqualityValidity()
 
 	leftValues := make([]arrow.Timestamp, length)
 	rightValues := make([]arrow.Timestamp, length)
@@ -734,60 +754,30 @@ func TestArrayEqualFixedWidthTimestamp(t *testing.T) {
 		}
 	}
 
-	left := newSlicedTimestamp(leftValues, 3)
+	left := makeSlicedTimestampEqualityArray(leftValues, valid, 3)
 	defer left.Release()
-	right := newSlicedTimestamp(rightValues, 5)
+	right := makeSlicedTimestampEqualityArray(rightValues, valid, 5)
 	defer right.Release()
 
 	assert.True(t, array.Equal(left, right))
 }
 
 func TestArrayEqualFixedWidthEmptyNullBitmap(t *testing.T) {
-	validity := memory.NewBufferBytes(nil)
-	values := memory.NewBufferBytes(make([]byte, 8*8))
-	data := array.NewData(
-		arrow.PrimitiveTypes.Int64,
-		8,
-		[]*memory.Buffer{validity, values},
-		nil,
-		1,
-		0,
-	)
-	validity.Release()
-	values.Release()
-
-	malformed := array.NewInt64Data(data)
-	data.Release()
-	defer malformed.Release()
+	left := makeInt64EqualityArrayWithValidity(nil, 1)
+	defer left.Release()
+	right := makeInt64EqualityArrayWithValidity(nil, 1)
+	defer right.Release()
 
 	assert.NotPanics(t, func() {
-		assert.True(t, array.Equal(malformed, malformed))
+		assert.True(t, array.Equal(left, right))
+		assert.True(t, array.Equal(right, left))
 	})
 }
 
 func TestArrayEqualValidityBitmapWithZeroNullCount(t *testing.T) {
-	newInt64 := func(validity []byte) *array.Int64 {
-		validityBuffer := memory.NewBufferBytes(validity)
-		valuesBuffer := memory.NewBufferBytes(make([]byte, 8*8))
-		data := array.NewData(
-			arrow.PrimitiveTypes.Int64,
-			8,
-			[]*memory.Buffer{validityBuffer, valuesBuffer},
-			nil,
-			0,
-			0,
-		)
-		validityBuffer.Release()
-		valuesBuffer.Release()
-
-		result := array.NewInt64Data(data)
-		data.Release()
-		return result
-	}
-
-	left := newInt64([]byte{0xff})
+	left := makeInt64EqualityArrayWithValidity([]byte{0xff}, 0)
 	defer left.Release()
-	right := newInt64([]byte{0xfe})
+	right := makeInt64EqualityArrayWithValidity([]byte{0xfe}, 0)
 	defer right.Release()
 
 	assert.False(t, array.Equal(left, right))
