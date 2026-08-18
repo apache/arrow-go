@@ -1227,32 +1227,21 @@ func ChunkedPrimitiveTake(ctx *exec.KernelCtx, batch []*arrow.Chunked, out *exec
 	}
 }
 
-func binaryTakeMaxOffset[OffsetT int32 | int64]() int64 {
+func binaryTakeOffsetLimits[OffsetT int32 | int64]() (int64, int) {
 	var zero OffsetT
 	switch any(zero).(type) {
 	case int32:
-		return math.MaxInt32
+		return math.MaxInt32, 4
 	case int64:
-		return math.MaxInt64
-	default:
-		panic("unsupported binary offset type")
-	}
-}
-
-func binaryTakeOffsetBytes[OffsetT int32 | int64]() int {
-	var zero OffsetT
-	switch any(zero).(type) {
-	case int32:
-		return 4
-	case int64:
-		return 8
+		return math.MaxInt64, 8
 	default:
 		panic("unsupported binary offset type")
 	}
 }
 
 func checkBinaryTakeOffset[OffsetT int32 | int64](offset OffsetT, valueLen int64) error {
-	if offset < 0 || valueLen < 0 || valueLen > binaryTakeMaxOffset[OffsetT]()-int64(offset) {
+	maxOffset, _ := binaryTakeOffsetLimits[OffsetT]()
+	if offset < 0 || valueLen < 0 || valueLen > maxOffset-int64(offset) {
 		return fmt.Errorf("%w: binary output offset overflow", arrow.ErrInvalid)
 	}
 	return nil
@@ -1276,7 +1265,7 @@ func takeChunkedBinaryImpl[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec
 		return fmt.Errorf("%w: binary take input length exceeds capacity", arrow.ErrInvalid)
 	}
 	offsetElements := int(indices.Len) + 1
-	offsetSize := binaryTakeOffsetBytes[OffsetT]()
+	_, offsetSize := binaryTakeOffsetLimits[OffsetT]()
 	if offsetElements > maxInt/offsetSize {
 		return fmt.Errorf("%w: binary take offset buffer exceeds capacity", arrow.ErrInvalid)
 	}

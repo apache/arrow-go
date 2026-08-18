@@ -26,10 +26,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTakeChunkedBinaryRejectsInt32OffsetOverflow(t *testing.T) {
+func TestTakeChunkedBinaryOffsetLimits(t *testing.T) {
+	maxOffset, offsetBytes := binaryTakeOffsetLimits[int32]()
+	require.Equal(t, int64(math.MaxInt32), maxOffset)
+	require.Equal(t, 4, offsetBytes)
 	require.NoError(t, checkBinaryTakeOffset[int32](0, math.MaxInt32))
 	require.ErrorIs(t,
 		checkBinaryTakeOffset[int32](0, int64(math.MaxInt32)+1),
 		arrow.ErrInvalid)
+
+	maxOffset, offsetBytes = binaryTakeOffsetLimits[int64]()
+	require.Equal(t, int64(math.MaxInt64), maxOffset)
+	require.Equal(t, 8, offsetBytes)
 	require.NoError(t, checkBinaryTakeOffset[int64](0, int64(math.MaxInt32)+1))
 }

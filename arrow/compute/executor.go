@@ -1002,6 +1002,12 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 		output Datum
 		acc    []arrow.Array
 	)
+	releaseAccumulated := func() {
+		for _, c := range acc {
+			c.Release()
+		}
+		acc = nil
+	}
 
 	toChunked := func() {
 		out := output.(ArrayLikeDatum).Chunks()
@@ -1029,6 +1035,9 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 		return nil
 	case output = <-out:
 		if output == nil || ctx.Err() != nil {
+			if output != nil {
+				output.Release()
+			}
 			return nil
 		}
 
@@ -1044,6 +1053,10 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 		case <-ctx.Done():
 			// context is done, either cancelled or a timeout.
 			// either way, we end early and return what we've got so far.
+			if output == nil {
+				releaseAccumulated()
+				return nil
+			}
 			return output
 		case o, ok := <-out:
 			if !ok { // channel closed, wrap it up
@@ -1051,9 +1064,7 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 					return output
 				}
 
-				for _, c := range acc {
-					defer c.Release()
-				}
+				defer releaseAccumulated()
 
 				chkd := arrow.NewChunked(v.outType, acc)
 				defer chkd.Release()
@@ -1126,10 +1137,11 @@ func (v *vectorExecutor) execChunked(batch *ExecBatch, out chan<- Datum) error {
 	}
 
 	if len(result) == 0 {
-		empty := array.MakeArrayOfNull(exec.GetAllocator(v.ctx.Ctx), output.Type, 0)
+		outType := output.Type
+		empty := array.MakeArrayOfNull(exec.GetAllocator(v.ctx.Ctx), outType, 0)
 		defer empty.Release()
 		output.Release()
-		out <- &ChunkedDatum{Value: arrow.NewChunked(output.Type, []arrow.Array{empty})}
+		out <- &ChunkedDatum{Value: arrow.NewChunked(outType, []arrow.Array{empty})}
 		return nil
 	}
 

@@ -58,11 +58,11 @@ func TestChunkedBinaryTakeIndexTypes(t *testing.T) {
 
 			for _, indexType := range chunkedTakeIndexTypes {
 				t.Run(indexType.String(), func(t *testing.T) {
-					indices0Full := makeChunkedTakeIndexArray(mem, indexType,
+					indices0Full := makeChunkedTakeIndexArray(t, mem, indexType,
 						[]string{"77", "0", "5", "99", "3", "77"},
 						[]bool{true, true, true, false, true, true})
 					indices0 := array.NewSlice(indices0Full, 1, 5)
-					indices1Full := makeChunkedTakeIndexArray(mem, indexType,
+					indices1Full := makeChunkedTakeIndexArray(t, mem, indexType,
 						[]string{"77", "2", "1", "77"}, nil)
 					indices1 := array.NewSlice(indices1Full, 1, 3)
 
@@ -128,7 +128,7 @@ func TestChunkedBinaryTakeBoundsChecks(t *testing.T) {
 
 				for _, tc := range cases {
 					t.Run(indexType.String()+"/"+tc.name, func(t *testing.T) {
-						indices := makeChunkedTakeIndexArray(mem, indexType, []string{tc.value}, nil)
+						indices := makeChunkedTakeIndexArray(t, mem, indexType, []string{tc.value}, nil)
 						defer indices.Release()
 
 						_, err := compute.Take(ctx, *compute.DefaultTakeOptions(),
@@ -183,7 +183,7 @@ func TestChunkedBinaryTakeEmptyIndexChunks(t *testing.T) {
 						t.Run(tc.name, func(t *testing.T) {
 							chunks := make([]arrow.Array, len(tc.chunkedValues))
 							for i, chunkValues := range tc.chunkedValues {
-								chunks[i] = makeChunkedTakeIndexArray(mem, indexType, chunkValues, nil)
+								chunks[i] = makeChunkedTakeIndexArray(t, mem, indexType, chunkValues, nil)
 							}
 							indices := arrow.NewChunked(indexType, chunks)
 							for _, chunk := range chunks {
@@ -230,19 +230,18 @@ func makeChunkedTakeValues(mem memory.Allocator, typ arrow.DataType) *arrow.Chun
 	return values
 }
 
-func makeChunkedTakeIndexArray(mem memory.Allocator, typ arrow.DataType, values []string, valid []bool) arrow.Array {
+func makeChunkedTakeIndexArray(t testing.TB, mem memory.Allocator, typ arrow.DataType, values []string, valid []bool) arrow.Array {
+	t.Helper()
 	bldr := array.NewBuilder(mem, typ)
+	defer bldr.Release()
 	bldr.Reserve(len(values))
 	for i, value := range values {
 		if len(valid) != 0 && !valid[i] {
 			bldr.AppendNull()
 			continue
 		}
-		if err := bldr.AppendValueFromString(value); err != nil {
-			panic("failed to build take index: " + err.Error())
-		}
+		require.NoError(t, bldr.AppendValueFromString(value))
 	}
 	result := bldr.NewArray()
-	bldr.Release()
 	return result
 }
