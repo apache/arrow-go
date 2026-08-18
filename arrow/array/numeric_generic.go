@@ -17,6 +17,7 @@
 package array
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ import (
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/internal/bitutils"
 	"github.com/apache/arrow-go/v18/internal/json"
 )
 
@@ -497,7 +499,49 @@ func NewDate64Data(data arrow.ArrayData) *Date64 {
 
 func (a *Date64) Date64Values() []arrow.Date64 { return a.Values() }
 
-func arrayEqualFixedWidth[T arrow.FixedWidthType](left, right arrow.TypedArray[T]) bool {
+type fixedWidthArray[T arrow.FixedWidthType] interface {
+	arrow.TypedArray[T]
+	Values() []T
+}
+
+func arrayEqualFixedWidth[T arrow.FixedWidthType](left, right fixedWidthArray[T]) bool {
+	// Avoid the fixed cost of bytes.Equal for very small arrays.
+	if left.Len() < 8 {
+		return arrayEqualFixedWidthScalar(left, right)
+	}
+
+	leftValues := left.Values()
+	rightValues := right.Values()
+	if left.NullN() == 0 {
+		return bytes.Equal(arrow.GetBytes(leftValues), arrow.GetBytes(rightValues))
+	}
+
+	leftBitmap := left.NullBitmapBytes()
+	if len(leftBitmap) == 0 {
+		return arrayEqualFixedWidthScalar(left, right)
+	}
+
+	runs := bitutils.NewSetBitRunReader(
+		leftBitmap, int64(left.Data().Offset()), int64(left.Len()),
+	)
+	for {
+		run := runs.NextRun()
+		if run.Length == 0 {
+			return true
+		}
+
+		start := int(run.Pos)
+		end := start + int(run.Length)
+		if !bytes.Equal(
+			arrow.GetBytes(leftValues[start:end]),
+			arrow.GetBytes(rightValues[start:end]),
+		) {
+			return false
+		}
+	}
+}
+
+func arrayEqualFixedWidthScalar[T arrow.FixedWidthType](left, right arrow.TypedArray[T]) bool {
 	for i := range left.Len() {
 		if left.IsNull(i) {
 			continue
