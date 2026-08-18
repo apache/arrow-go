@@ -468,8 +468,13 @@ func arrayEqualFixedWidth[T arrow.FixedWidthType](left, right fixedWidthArray[T]
 		return bytes.Equal(arrow.GetBytes(leftValues), arrow.GetBytes(rightValues))
 	}
 
+	leftBitmap := left.NullBitmapBytes()
+	if len(leftBitmap) == 0 {
+		return arrayEqualFixedWidthScalar(left, right)
+	}
+
 	runs := bitutils.NewSetBitRunReader(
-		left.NullBitmapBytes(), int64(left.Data().Offset()), int64(left.Len()),
+		leftBitmap, int64(left.Data().Offset()), int64(left.Len()),
 	)
 	for {
 		run := runs.NextRun()
