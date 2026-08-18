@@ -257,10 +257,10 @@ func (l *LevelDecoder) SetDataV2(nbytes int32, maxLvl int16, nbuffered int, data
 // values exist to be read, along with any decoding error.
 func (l *LevelDecoder) Decode(levels []int16) (int, int64, error) {
 	var (
-		buf          [1024]uint64
 		totaldecoded int
 		decoded      int
 		valsToRead   int64
+		maxCount     int64
 		err          error
 	)
 
@@ -269,21 +269,14 @@ func (l *LevelDecoder) Decode(levels []int16) (int, int64, error) {
 		batch := shared_utils.Min(1024, n)
 		switch l.encoding {
 		case format.Encoding_RLE:
-			decoded, err = l.rle.GetBatch(buf[:batch])
+			decoded, maxCount, err = l.rle.GetBatchLevels(levels[:batch], l.maxLvl)
 		case format.Encoding_BIT_PACKED:
-			decoded, err = l.bit.GetBatch(uint(l.bitWidth), buf[:batch])
+			decoded, maxCount, err = l.bit.GetBatchLevels(uint(l.bitWidth), levels[:batch], l.maxLvl)
 		}
 		l.remaining -= decoded
 		totaldecoded += decoded
 		n -= int64(decoded)
-
-		for idx, val := range buf[:decoded] {
-			lvl := int16(val)
-			levels[idx] = lvl
-			if lvl == l.maxLvl {
-				valsToRead++
-			}
-		}
+		valsToRead += maxCount
 		levels = levels[decoded:]
 		if err != nil {
 			return totaldecoded, valsToRead, err
