@@ -114,6 +114,8 @@ func BenchmarkBooleanBitmapRead(b *testing.B) {
 		nullEvery int
 	}{
 		{name: "dense"},
+		{name: "nullable-1pct", nullEvery: 100},
+		{name: "nullable-5pct", nullEvery: 20},
 		{name: "nullable-10pct", nullEvery: 10},
 		{name: "nullable-50pct", nullEvery: 2},
 	}

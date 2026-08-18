@@ -84,6 +84,16 @@ type RecordReader interface {
 	SeekToRow(int64) error
 }
 
+// BooleanRecordReader provides access to the packed value bitmap used for
+// Boolean columns. The existing Values and ReleaseValues methods continue to
+// return one byte per value for compatibility.
+type BooleanRecordReader interface {
+	RecordReader
+	// ReleaseValueBitmap transfers the packed Boolean value bitmap to the
+	// caller. A new buffer will be allocated on subsequent reads.
+	ReleaseValueBitmap() *memory.Buffer
+}
+
 // RecordReaderWithError is implemented by record readers that expose failures
 // while replacing their page reader. It supplements RecordReader without
 // changing the existing no-error SetPageReader method.
@@ -139,6 +149,7 @@ type primitiveRecordReader struct {
 	valuesCap     int64
 	nullCount     int64
 	values        *memory.Buffer
+	legacyValues  *memory.Buffer
 	validBits     *memory.Buffer
 	mem           memory.Allocator
 
@@ -173,6 +184,10 @@ func (pr *primitiveRecordReader) Release() {
 			pr.values.Release()
 			pr.values = nil
 		}
+		if pr.legacyValues != nil {
+			pr.legacyValues.Release()
+			pr.legacyValues = nil
+		}
 		if pr.validBits != nil {
 			pr.validBits.Release()
 			pr.validBits = nil
@@ -195,8 +210,50 @@ func (pr *primitiveRecordReader) ReleaseValidBits() *memory.Buffer {
 	return res
 }
 
+func (pr *primitiveRecordReader) ReleaseValueBitmap() *memory.Buffer {
+	res := pr.values
+	res.Resize(int(bitutil.BytesForBits(pr.valuesWritten)))
+	pr.values = memory.NewResizableBuffer(pr.mem)
+	pr.valuesCap = 0
+	if pr.legacyValues != nil {
+		pr.legacyValues.ResizeNoShrink(0)
+	}
+	return res
+}
+
+func (pr *primitiveRecordReader) booleanValues() *memory.Buffer {
+	if pr.legacyValues == nil {
+		pr.legacyValues = memory.NewResizableBuffer(pr.mem)
+	}
+
+	pr.legacyValues.Resize(int(pr.valuesWritten))
+	values := pr.legacyValues.Bytes()
+	bitmap := pr.values.Bytes()
+	if len(bitmap) < int(bitutil.BytesForBits(pr.valuesWritten)) {
+		pr.legacyValues.Resize(0)
+		return pr.legacyValues
+	}
+	for i := range values {
+		if bitutil.BitIsSet(bitmap, i) {
+			values[i] = 1
+		} else {
+			values[i] = 0
+		}
+	}
+	return pr.legacyValues
+}
+
 func (pr *primitiveRecordReader) ReleaseValues() (res *memory.Buffer) {
 	res = pr.values
+	if pr.Descriptor().PhysicalType() == parquet.Types.Boolean {
+		res = pr.booleanValues()
+		pr.legacyValues = memory.NewResizableBuffer(pr.mem)
+		pr.values.Release()
+		pr.values = memory.NewResizableBuffer(pr.mem)
+		pr.valuesCap = 0
+		return
+	}
+
 	nbytes, err := pr.numBytesForValues(pr.valuesWritten)
 	if err != nil {
 		panic(err)
@@ -216,10 +273,18 @@ func (pr *primitiveRecordReader) IncrementWritten(w, n int64) {
 }
 func (pr *primitiveRecordReader) GetValidBits() []byte { return pr.validBits.Bytes() }
 func (pr *primitiveRecordReader) ValuesWritten() int64 { return pr.valuesWritten }
-func (pr *primitiveRecordReader) Values() []byte       { return pr.values.Bytes() }
+func (pr *primitiveRecordReader) Values() []byte {
+	if pr.Descriptor().PhysicalType() == parquet.Types.Boolean {
+		return pr.booleanValues().Bytes()
+	}
+	return pr.values.Bytes()
+}
 func (pr *primitiveRecordReader) ResetValues() {
 	if pr.valuesWritten > 0 {
 		pr.values.ResizeNoShrink(0)
+		if pr.legacyValues != nil {
+			pr.legacyValues.ResizeNoShrink(0)
+		}
 		pr.validBits.ResizeNoShrink(0)
 		pr.valuesWritten = 0
 		pr.valuesCap = 0
@@ -364,6 +429,14 @@ func (b *binaryRecordReader) ReserveData(nbytes int64) {
 	b.recordReaderImpl.(binaryRecordReaderImpl).ReserveData(nbytes)
 }
 
+type booleanRecordReader struct {
+	*recordReader
+}
+
+func (b *booleanRecordReader) ReleaseValueBitmap() *memory.Buffer {
+	return b.recordReaderImpl.(*primitiveRecordReader).ReleaseValueBitmap()
+}
+
 func newRecordReader(descr *schema.Column, info LevelInfo, mem memory.Allocator, bufferPool *sync.Pool) RecordReader {
 	if mem == nil {
 		mem = memory.DefaultAllocator
@@ -376,6 +449,9 @@ func newRecordReader(descr *schema.Column, info LevelInfo, mem memory.Allocator,
 		repLevels:        memory.NewResizableBuffer(mem),
 	}
 	rr.refCount.Add(1)
+	if descr.PhysicalType() == parquet.Types.Boolean {
+		return &booleanRecordReader{recordReader: rr}
+	}
 	return rr
 }
 

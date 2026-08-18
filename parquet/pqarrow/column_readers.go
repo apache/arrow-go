@@ -851,7 +851,20 @@ func transferBool(rdr file.RecordReader) arrow.ArrayData {
 	if bitmap != nil {
 		defer bitmap.Release()
 	}
-	values := rdr.ReleaseValues()
+	var values *memory.Buffer
+	if boolReader, ok := rdr.(file.BooleanRecordReader); ok {
+		values = boolReader.ReleaseValueBitmap()
+	} else {
+		// Keep the bridge compatible with RecordReader implementations that do
+		// not expose the packed Boolean fast path.
+		data := make([]byte, int(bitutil.BytesForBits(int64(length))))
+		for idx, value := range rdr.Values()[:length] {
+			if value != 0 {
+				bitutil.SetBit(data, idx)
+			}
+		}
+		values = memory.NewBufferBytes(data)
+	}
 	defer values.Release()
 	return array.NewData(&arrow.BooleanType{}, length, []*memory.Buffer{
 		bitmap, values,

@@ -32,38 +32,100 @@ import (
 )
 
 func TestBooleanBitmapReadAcrossPages(t *testing.T) {
+	const numValues = 128
+	for _, tc := range []struct {
+		name     string
+		encoding parquet.Encoding
+	}{
+		{name: "plain", encoding: parquet.Encodings.Plain},
+		{name: "rle", encoding: parquet.Encodings.RLE},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			schema := arrow.NewSchema([]arrow.Field{{
+				Name:     "bools",
+				Type:     arrow.FixedWidthTypes.Boolean,
+				Nullable: true,
+			}}, nil)
+
+			bldr := array.NewBooleanBuilder(mem)
+			defer bldr.Release()
+			for i := 0; i < numValues; i++ {
+				if i%5 == 0 {
+					bldr.AppendNull()
+				} else {
+					bldr.Append(i%2 == 0)
+				}
+			}
+			expected := bldr.NewBooleanArray()
+			defer expected.Release()
+
+			var buf bytes.Buffer
+			writer, err := NewFileWriter(schema, &buf,
+				parquet.NewWriterProperties(
+					parquet.WithCompression(compress.Codecs.Uncompressed),
+					parquet.WithDataPageSize(1),
+					parquet.WithEncoding(tc.encoding),
+				),
+				NewArrowWriterProperties(WithAllocator(mem)),
+			)
+			require.NoError(t, err)
+
+			record := array.NewRecordBatch(schema, []arrow.Array{expected}, numValues)
+			require.NoError(t, writer.WriteBuffered(record))
+			record.Release()
+			require.NoError(t, writer.Close())
+
+			parquetReader, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()),
+				file.WithReadProps(parquet.NewReaderProperties(mem)))
+			require.NoError(t, err)
+			defer parquetReader.Close()
+
+			reader, err := NewFileReader(parquetReader, ArrowReadProperties{}, mem)
+			require.NoError(t, err)
+
+			column, err := reader.GetColumn(context.Background(), 0)
+			require.NoError(t, err)
+			defer column.Release()
+
+			got, err := column.NextBatch(numValues)
+			require.NoError(t, err)
+			defer got.Release()
+
+			require.Len(t, got.Chunks(), 1)
+			require.True(t, array.Equal(expected, got.Chunk(0)))
+		})
+	}
+}
+
+func TestBooleanRecordReaderValuesRemainByteEncoded(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
-	const numValues = 128
+	const numValues = 10
 	schema := arrow.NewSchema([]arrow.Field{{
 		Name:     "bools",
 		Type:     arrow.FixedWidthTypes.Boolean,
-		Nullable: true,
+		Nullable: false,
 	}}, nil)
+	want := []byte{1, 0, 1, 1, 0, 0, 1, 0, 1, 1}
 
 	bldr := array.NewBooleanBuilder(mem)
 	defer bldr.Release()
-	for i := 0; i < numValues; i++ {
-		if i%5 == 0 {
-			bldr.AppendNull()
-		} else {
-			bldr.Append(i%2 == 0)
-		}
+	for _, value := range want {
+		bldr.Append(value != 0)
 	}
 	expected := bldr.NewBooleanArray()
 	defer expected.Release()
 
 	var buf bytes.Buffer
 	writer, err := NewFileWriter(schema, &buf,
-		parquet.NewWriterProperties(
-			parquet.WithCompression(compress.Codecs.Uncompressed),
-			parquet.WithDataPageSize(1),
-		),
+		parquet.NewWriterProperties(parquet.WithCompression(compress.Codecs.Uncompressed)),
 		NewArrowWriterProperties(WithAllocator(mem)),
 	)
 	require.NoError(t, err)
-
 	record := array.NewRecordBatch(schema, []arrow.Array{expected}, numValues)
 	require.NoError(t, writer.WriteBuffered(record))
 	record.Release()
@@ -74,17 +136,20 @@ func TestBooleanBitmapReadAcrossPages(t *testing.T) {
 	require.NoError(t, err)
 	defer parquetReader.Close()
 
-	reader, err := NewFileReader(parquetReader, ArrowReadProperties{}, mem)
+	pageReader, err := parquetReader.RowGroup(0).GetColumnPageReader(0)
 	require.NoError(t, err)
-
-	column, err := reader.GetColumn(context.Background(), 0)
+	rr := file.NewRecordReader(
+		parquetReader.MetaData().Schema.Column(0),
+		file.LevelInfo{}, arrow.FixedWidthTypes.Boolean, mem, parquetReader.BufferPool())
+	defer rr.Release()
+	rr.SetPageReader(pageReader)
+	require.NoError(t, rr.Reserve(numValues))
+	read, err := rr.ReadRecords(numValues)
 	require.NoError(t, err)
-	defer column.Release()
+	require.EqualValues(t, numValues, read)
 
-	got, err := column.NextBatch(numValues)
-	require.NoError(t, err)
-	defer got.Release()
-
-	require.Len(t, got.Chunks(), 1)
-	require.True(t, array.Equal(expected, got.Chunk(0)))
+	require.Equal(t, want, rr.Values())
+	values := rr.ReleaseValues()
+	defer values.Release()
+	require.Equal(t, want, values.Bytes())
 }

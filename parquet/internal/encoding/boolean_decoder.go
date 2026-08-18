@@ -24,6 +24,7 @@ import (
 	"io"
 
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
+	"github.com/apache/arrow-go/v18/internal/bitutils"
 	shared_utils "github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/utils"
@@ -206,6 +207,62 @@ func (dec *PlainBooleanDecoder) DecodeSpaced(out []bool, nullCount int, validBit
 	return dec.Decode(out)
 }
 
+func copyBitmapChunk(buf []byte, srcOffset, dstOffset, length int) {
+	srcByte, srcBit := srcOffset/8, srcOffset%8
+	value := uint16(buf[srcByte]) >> srcBit
+	if srcBit+length > 8 {
+		value |= uint16(buf[srcByte+1]) << (8 - srcBit)
+	}
+	value &= uint16(1<<length) - 1
+
+	dstByte, dstBit := dstOffset/8, dstOffset%8
+	first := min(length, 8-dstBit)
+	firstMask := byte((1<<first)-1) << dstBit
+	buf[dstByte] = (buf[dstByte] &^ firstMask) | (byte(value) << dstBit & firstMask)
+	if first < length {
+		remaining := length - first
+		secondMask := byte((1 << remaining) - 1)
+		buf[dstByte+1] = (buf[dstByte+1] &^ secondMask) | (byte(value>>first) & secondMask)
+	}
+}
+
+func copyBitmapWithinBuffer(buf []byte, srcOffset, dstOffset, length int) {
+	if length == 0 || srcOffset == dstOffset {
+		return
+	}
+
+	if dstOffset < srcOffset {
+		for copied := 0; copied < length; {
+			n := min(length-copied, 8)
+			copyBitmapChunk(buf, srcOffset+copied, dstOffset+copied, n)
+			copied += n
+		}
+		return
+	}
+
+	for copied := length; copied > 0; {
+		n := min(copied, 8)
+		copied -= n
+		copyBitmapChunk(buf, srcOffset+copied, dstOffset+copied, n)
+	}
+}
+
+func expandSpacedBitmapPerBit(out []byte, outOffset int64, length, nullCount int,
+	validBits []byte, validBitsOffset int64) {
+	physicalIndex := 0
+	physicalOffset := int(outOffset) + nullCount
+	for logicalIndex := 0; logicalIndex < length; logicalIndex++ {
+		destination := int(outOffset) + logicalIndex
+		if bitutil.BitIsSet(validBits, int(validBitsOffset)+logicalIndex) {
+			value := bitutil.BitIsSet(out, physicalOffset+physicalIndex)
+			bitutil.SetBitTo(out, destination, value)
+			physicalIndex++
+		} else {
+			bitutil.ClearBit(out, destination)
+		}
+	}
+}
+
 func decodeSpacedToBitmap(dec BooleanBitmapDecoder, out []byte, outOffset int64,
 	length, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
 	if nullCount == 0 {
@@ -213,24 +270,39 @@ func decodeSpacedToBitmap(dec BooleanBitmapDecoder, out []byte, outOffset int64,
 	}
 
 	valuesToRead := length - nullCount
-	valuesRead, err := dec.DecodeToBitmap(out, outOffset, valuesToRead)
+	valuesRead, err := dec.DecodeToBitmap(out, outOffset+int64(nullCount), valuesToRead)
 	if err != nil {
 		return valuesRead, err
 	}
 	if valuesRead != valuesToRead {
 		return valuesRead, errors.New("parquet: boolean decoder: number of values / definition levels read did not match")
 	}
-
-	// Expand the packed physical values backwards into their logical positions.
-	// Copying backwards keeps unread compact values from being overwritten.
-	physicalIndex := valuesToRead - 1
-	for logicalIndex := length - 1; logicalIndex >= 0 && physicalIndex >= 0; logicalIndex-- {
-		if bitutil.BitIsSet(validBits, int(validBitsOffset)+logicalIndex) {
-			value := bitutil.BitIsSet(out, int(outOffset)+physicalIndex)
-			bitutil.SetBitTo(out, int(outOffset)+logicalIndex, value)
-			physicalIndex--
-		}
+	perBitThreshold := length / 8
+	if length%8 != 0 {
+		perBitThreshold++
 	}
+	if nullCount >= perBitThreshold {
+		expandSpacedBitmapPerBit(out, outOffset, length, nullCount, validBits, validBitsOffset)
+		return length, nil
+	}
+
+	// Expand the packed physical values into their logical positions.
+	// Decoding after the null slots means each destination run is at or before
+	// its source run, so bitmap copies remain safe while the buffers overlap.
+	physicalIndex := int64(0)
+	runs := bitutils.NewSetBitRunReader(validBits, validBitsOffset, int64(length))
+	for {
+		run := runs.NextRun()
+		if run.Length == 0 {
+			break
+		}
+
+		copyBitmapWithinBuffer(out,
+			int(outOffset+int64(nullCount)+physicalIndex),
+			int(outOffset+run.Pos), int(run.Length))
+		physicalIndex += run.Length
+	}
+	bitutil.BitmapAnd(out, validBits, outOffset, validBitsOffset, out, outOffset, int64(length))
 	return length, nil
 }
 

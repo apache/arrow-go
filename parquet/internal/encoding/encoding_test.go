@@ -1359,6 +1359,61 @@ func TestBooleanDecoderDecodeSpacedToBitmap(t *testing.T) {
 	}
 }
 
+func TestBooleanDecoderDecodeSpacedToBitmapSparseNulls(t *testing.T) {
+	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Optional, -1), 0, 0)
+	const (
+		validBitsOffset = 3
+		length          = 32
+		nullIndex       = 11
+		outOffset       = 2
+	)
+
+	logicalValues := make([]bool, length)
+	validBits := make([]byte, bitutil.BytesForBits(validBitsOffset+length))
+	physicalValues := make([]bool, 0, length-1)
+	for i := range logicalValues {
+		logicalValues[i] = i%3 == 0
+		if i != nullIndex {
+			bitutil.SetBit(validBits, validBitsOffset+i)
+			physicalValues = append(physicalValues, logicalValues[i])
+		}
+	}
+
+	for _, encodingType := range []parquet.Encoding{parquet.Encodings.Plain, parquet.Encodings.RLE} {
+		t.Run(encodingType.String(), func(t *testing.T) {
+			enc := encoding.NewEncoder(parquet.Types.Boolean, encodingType, false, descr, memory.DefaultAllocator)
+			enc.(encoding.BooleanEncoder).Put(physicalValues)
+			buf, err := enc.FlushValues()
+			require.NoError(t, err)
+
+			dec := encoding.NewDecoder(parquet.Types.Boolean, encodingType, descr, memory.DefaultAllocator)
+			require.NoError(t, dec.SetData(len(physicalValues), buf.Buf()))
+			bdec := dec.(encoding.BooleanBitmapDecoder)
+
+			out := []byte{0xa5, 0xa5, 0xa5, 0xa5, 0xa5}
+			before := append([]byte(nil), out...)
+			n, err := bdec.DecodeSpacedToBitmap(out, outOffset, length, 1, validBits, validBitsOffset)
+			require.NoError(t, err)
+			require.Equal(t, length, n)
+
+			for i, value := range logicalValues {
+				got := bitutil.BitIsSet(out, outOffset+i)
+				if i == nullIndex {
+					require.False(t, got, "null value %d should be cleared", i)
+				} else {
+					assert.Equal(t, value, got, "value %d", i)
+				}
+			}
+			for i := 0; i < outOffset; i++ {
+				assert.Equal(t, bitutil.BitIsSet(before, i), bitutil.BitIsSet(out, i), "prefix bit %d", i)
+			}
+			for i := outOffset + length; i < len(out)*8; i++ {
+				assert.Equal(t, bitutil.BitIsSet(before, i), bitutil.BitIsSet(out, i), "suffix bit %d", i)
+			}
+		})
+	}
+}
+
 func TestPlainBooleanEncoderPutSpacedBitmapBasic(t *testing.T) {
 	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Optional, -1), 0, 0)
 	enc := encoding.NewEncoder(parquet.Types.Boolean, parquet.Encodings.Plain, false, descr, memory.DefaultAllocator)
