@@ -39,6 +39,33 @@ func (d *signalChunkedDatum) Chunks() []arrow.Array {
 	return d.Value.Chunks()
 }
 
+func TestVectorExecutorWrapResultsReleasesEmptyArrayOutput(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	builder := array.NewBinaryBuilder(mem, arrow.BinaryTypes.String)
+	empty := builder.NewArray()
+	builder.Release()
+
+	output := make(chan Datum, 1)
+	output <- NewDatum(empty)
+	close(output)
+
+	executor := &vectorExecutor{
+		nonAggExecImpl: nonAggExecImpl{
+			kernel:  &exec.VectorKernel{OutputChunked: true},
+			outType: arrow.BinaryTypes.String,
+		},
+	}
+
+	result := executor.WrapResults(context.Background(), output, true)
+	require.NotNil(t, result)
+	require.Equal(t, KindChunked, result.Kind())
+	require.Empty(t, result.(*ChunkedDatum).Value.Chunks())
+	result.Release()
+	empty.Release()
+}
+
 func TestVectorExecutorWrapResultsReleasesEmptyChunkedOutput(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

@@ -1137,9 +1137,11 @@ func (v *vectorExecutor) execChunked(batch *ExecBatch, out chan<- Datum) error {
 	}
 
 	if len(result) == 0 {
-		empty := output.MakeArray()
+		outType := output.Type
+		empty := array.MakeArrayOfNull(exec.GetAllocator(v.ctx.Ctx), outType, 0)
 		defer empty.Release()
-		out <- &ChunkedDatum{Value: arrow.NewChunked(output.Type, []arrow.Array{empty})}
+		output.Release()
+		out <- &ChunkedDatum{Value: arrow.NewChunked(outType, []arrow.Array{empty})}
 		return nil
 	}
 
