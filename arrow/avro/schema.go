@@ -183,8 +183,8 @@ func arrowSchemaFromAvroInternal(schema *avro.Schema) (s *arrow.Schema, err erro
 		panic(fmt.Errorf("avro schema root must be a record, got type %q", root.Type))
 	}
 	n := newSchemaNode()
-	n.node = root
-	c := n.newChild(root.Name, root)
+	n.node = *root
+	c := n.newChild(root.Name, *root)
 	arrowSchemafromAvro(c)
 	var fields []arrow.Field
 	for _, g := range c.children() {
