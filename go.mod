@@ -43,7 +43,7 @@ require (
 	github.com/substrait-io/substrait-go/v8 v8.1.1
 	github.com/substrait-io/substrait-protobuf/go v0.85.0
 	github.com/tidwall/sjson v1.2.5
-	github.com/twmb/avro v1.7.2
+	github.com/twmb/avro v1.8.0
 	github.com/zeebo/xxh3 v1.1.0
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96
 	golang.org/x/sync v0.22.0
