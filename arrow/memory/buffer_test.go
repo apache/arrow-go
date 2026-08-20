@@ -58,6 +58,17 @@ func TestNewResizableBuffer(t *testing.T) {
 	assert.Zero(t, buf.Len())
 }
 
+func TestCheckedAllocatorReallocate(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	buf := mem.Reallocate(16, nil)
+	assert.Len(t, buf, 16)
+
+	buf = mem.Reallocate(0, buf)
+	assert.Empty(t, buf)
+}
+
 func TestBufferReset(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)

@@ -555,24 +555,26 @@ func (b *BitReader) GetBatch(bits uint, out []uint64) (int, error) {
 		}
 	}
 
-	if _, err := b.reader.Seek(b.byteoffset, io.SeekStart); err != nil {
-		return i, err
-	}
-	for i < length {
-		// unpack groups of 32 bytes at a time into a buffer since it's more efficient
-		unpackSize := utils.Min(buflen, length-i)
-		numUnpacked, err := unpack32(b.reader, b.unpackBuf[:unpackSize], int(bits))
-
-		for k := 0; k < numUnpacked; k++ {
-			out[i+k] = uint64(b.unpackBuf[k])
-		}
-		i += numUnpacked
-		b.byteoffset += int64(numUnpacked * int(bits) / 8)
-		if err != nil {
+	if bits <= 32 {
+		if _, err := b.reader.Seek(b.byteoffset, io.SeekStart); err != nil {
 			return i, err
 		}
-		if numUnpacked == 0 {
-			break
+		for i < length {
+			// unpack groups of 32 bytes at a time into a buffer since it's more efficient
+			unpackSize := utils.Min(buflen, length-i)
+			numUnpacked, err := unpack32(b.reader, b.unpackBuf[:unpackSize], int(bits))
+
+			for k := 0; k < numUnpacked; k++ {
+				out[i+k] = uint64(b.unpackBuf[k])
+			}
+			i += numUnpacked
+			b.byteoffset += int64(numUnpacked * int(bits) / 8)
+			if err != nil {
+				return i, err
+			}
+			if numUnpacked == 0 {
+				break
+			}
 		}
 	}
 

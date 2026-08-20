@@ -17,6 +17,7 @@
 package encoding
 
 import (
+	"io"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -73,4 +74,46 @@ func TestDeltaBitPackDecoderValidatesUsedBitWidth(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestDeltaBitPackDecoderRejectsTruncatedPackedMiniblock(t *testing.T) {
+	// Header: 1024 values/block, 1 miniblock, 1025 values, first value 0.
+	// The miniblock has a one-bit width, but only its first 32 packed values are
+	// present. The missing values must not be reported as a clean EOF.
+	data := []byte{
+		128, 8, // block size
+		1,      // miniblocks per block
+		129, 8, // total values
+		0, // first value
+		0, // minimum delta
+		1, // first miniblock bit width
+		0, 0, 0, 0,
+	}
+
+	dec := NewDecoder(parquet.Types.Int64, parquet.Encodings.DeltaBinaryPacked, nil, memory.DefaultAllocator)
+	require.NoError(t, dec.SetData(1025, data))
+
+	_, err := dec.Discard(1025)
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+}
+
+func TestDeltaBitPackDecoderBoundsPackedScratch(t *testing.T) {
+	// A malformed header can declare a large miniblock without providing any
+	// packed values. The reusable packed-value scratch must stay bounded instead
+	// of growing to the attacker-controlled miniblock size.
+	data := []byte{
+		128, 32, // block size: 4096 values
+		1,       // miniblocks per block
+		129, 32, // total values: first value plus one block
+		0, // first value
+		0, // minimum delta
+		1, // first miniblock bit width
+	}
+
+	dec := NewDecoder(parquet.Types.Int64, parquet.Encodings.DeltaBinaryPacked, nil, memory.DefaultAllocator).(*deltaBitPackDecoder[int64])
+	require.NoError(t, dec.SetData(4097, data))
+
+	_, err := dec.Discard(2)
+	require.Error(t, err)
+	require.LessOrEqual(t, cap(dec.deltaBuf), deltaBitPackScratchSize)
 }

@@ -118,6 +118,10 @@ func TestArraySpan_UpdateNullCount(t *testing.T) {
 		want   int64
 	}{
 		{"known", fields{Nulls: 25}, 25},
+		{"unknown without validity", fields{
+			Nulls: array.UnknownNullCount,
+			Len:   8,
+		}, 0},
 		{"unknown", fields{
 			Nulls:   array.UnknownNullCount,
 			Len:     8, // 0b01101101
@@ -205,6 +209,8 @@ func TestArraySpan_NumBuffers(t *testing.T) {
 		{"large binary", fields{Type: arrow.BinaryTypes.LargeBinary}, 3},
 		{"string", fields{Type: arrow.BinaryTypes.String}, 3},
 		{"large string", fields{Type: arrow.BinaryTypes.LargeString}, 3},
+		{"list view", fields{Type: arrow.ListViewOf(arrow.PrimitiveTypes.Int32)}, 3},
+		{"large list view", fields{Type: arrow.LargeListViewOf(arrow.PrimitiveTypes.Int32)}, 3},
 		{"extension", fields{Type: extensions.NewUUIDType()}, 2},
 		{"int32", fields{Type: arrow.PrimitiveTypes.Int32}, 2},
 	}

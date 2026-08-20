@@ -20,6 +20,7 @@
 package compute_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -28,7 +29,18 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+type unknownFunctionOptions struct{}
+
+func (unknownFunctionOptions) TypeName() string { return "UnknownFunctionOptions" }
+
+type privateFunctionOptions struct {
+	value int
+}
+
+func (privateFunctionOptions) TypeName() string { return "privateFunctionOptions" }
 
 func TestExpressionToString(t *testing.T) {
 	ts, _ := scalar.MakeScalar("1990-10-23 10:23:33.123456").CastTo(arrow.FixedWidthTypes.Timestamp_ns)
@@ -113,6 +125,154 @@ func TestExpressionEquality(t *testing.T) {
 			assert.Equal(t, tt.equal, tt.exp1.Equals(tt.exp2))
 		})
 	}
+}
+
+func TestExpressionEqualityWithPrivateFunctionOptions(t *testing.T) {
+	left := compute.NewCall("test", nil, privateFunctionOptions{value: 1})
+	right := compute.NewCall("test", nil, privateFunctionOptions{value: 1})
+	different := compute.NewCall("test", nil, privateFunctionOptions{value: 2})
+	defer left.Release()
+	defer right.Release()
+	defer different.Release()
+
+	assert.NotPanics(t, func() {
+		assert.True(t, left.Equals(right))
+		assert.False(t, left.Equals(different))
+	})
+}
+
+func TestCumulativeOptionsEquality(t *testing.T) {
+	newBinaryStart := func() scalar.Scalar {
+		buf := memory.NewBufferBytes([]byte("10"))
+		defer buf.Release()
+		return scalar.NewBinaryScalar(buf, arrow.BinaryTypes.Binary)
+	}
+
+	tests := []struct {
+		name                  string
+		leftStart, rightStart func() scalar.Scalar
+		leftSkip, rightSkip   bool
+		want                  bool
+	}{
+		{
+			name:       "both nil",
+			leftStart:  func() scalar.Scalar { return nil },
+			rightStart: func() scalar.Scalar { return nil },
+			want:       true,
+		},
+		{
+			name:       "one nil",
+			leftStart:  func() scalar.Scalar { return nil },
+			rightStart: func() scalar.Scalar { return scalar.NewInt32Scalar(10) },
+			want:       false,
+		},
+		{
+			name:       "equal numeric scalars",
+			leftStart:  func() scalar.Scalar { return scalar.NewInt32Scalar(10) },
+			rightStart: func() scalar.Scalar { return scalar.NewInt32Scalar(10) },
+			want:       true,
+		},
+		{
+			name:       "equal string scalars",
+			leftStart:  func() scalar.Scalar { return scalar.NewStringScalar("10") },
+			rightStart: func() scalar.Scalar { return scalar.NewStringScalar("10") },
+			want:       true,
+		},
+		{
+			name:       "equal binary scalars",
+			leftStart:  newBinaryStart,
+			rightStart: newBinaryStart,
+			want:       true,
+		},
+		{
+			name:       "different scalar values",
+			leftStart:  func() scalar.Scalar { return scalar.NewInt32Scalar(10) },
+			rightStart: func() scalar.Scalar { return scalar.NewInt32Scalar(11) },
+			want:       false,
+		},
+		{
+			name:       "different scalar types",
+			leftStart:  func() scalar.Scalar { return scalar.NewInt32Scalar(10) },
+			rightStart: func() scalar.Scalar { return scalar.NewInt64Scalar(10) },
+			want:       false,
+		},
+		{
+			name:       "different skip nulls",
+			leftStart:  func() scalar.Scalar { return nil },
+			rightStart: func() scalar.Scalar { return nil },
+			leftSkip:   false,
+			rightSkip:  true,
+			want:       false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			left := compute.NewCall("cumulative_sum", []compute.Expression{compute.NewFieldRef("values")},
+				&compute.CumulativeOptions{Start: tc.leftStart(), SkipNulls: tc.leftSkip})
+			right := compute.NewCall("cumulative_sum", []compute.Expression{compute.NewFieldRef("values")},
+				&compute.CumulativeOptions{Start: tc.rightStart(), SkipNulls: tc.rightSkip})
+			defer left.Release()
+			defer right.Release()
+
+			assert.Equal(t, tc.want, left.Equals(right))
+		})
+	}
+
+}
+
+func TestCumulativeOptionsValueAndPointerEquality(t *testing.T) {
+	value := compute.CumulativeOptions{Start: scalar.NewInt32Scalar(10)}
+	pointer := &compute.CumulativeOptions{Start: scalar.NewInt32Scalar(10)}
+
+	left := compute.NewCall("cumulative_sum", []compute.Expression{compute.NewFieldRef("values")}, value)
+	right := compute.NewCall("cumulative_sum", []compute.Expression{compute.NewFieldRef("values")}, pointer)
+	defer left.Release()
+	defer right.Release()
+
+	assert.True(t, left.Equals(right))
+}
+
+func TestCumulativeOptionsRelease(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	newStart := func() scalar.Scalar {
+		data := mem.Allocate(2)
+		copy(data, []byte("10"))
+		buffer := memory.NewBufferWithAllocator(data, mem)
+		start := scalar.NewBinaryScalar(buffer, arrow.BinaryTypes.Binary)
+		buffer.Release()
+		return start
+	}
+
+	t.Run("pointer options", func(t *testing.T) {
+		start := newStart()
+		expr := compute.NewCall("cumulative_sum", nil,
+			&compute.CumulativeOptions{Start: start})
+		expr.Release()
+		assert.Equal(t, "10", string(start.(scalar.BinaryScalar).Data()))
+		start.(scalar.Releasable).Release()
+	})
+	t.Run("value options", func(t *testing.T) {
+		start := newStart()
+		expr := compute.NewCall("cumulative_sum", nil,
+			compute.CumulativeOptions{Start: start})
+		expr.Release()
+		assert.Equal(t, "10", string(start.(scalar.BinaryScalar).Data()))
+		start.(scalar.Releasable).Release()
+	})
+}
+
+func TestCumulativeOptionsTypedNilStart(t *testing.T) {
+	var start *scalar.Binary
+	opts := compute.CumulativeOptions{Start: start}
+
+	assert.NotPanics(t, func() { opts.Release() })
+	assert.NotPanics(t, func() {
+		expr := compute.NewCall("cumulative_sum", nil, &opts)
+		expr.Release()
+	})
 }
 
 func TestExpressionHashing(t *testing.T) {
@@ -259,4 +419,51 @@ func TestExpressionSerializationRoundTrip(t *testing.T) {
 			assert.Truef(t, tt.expr.Equals(roundTripped), "started with: %s, got: %s", tt.expr, roundTripped)
 		})
 	}
+}
+
+func TestDictionaryEncodeOptionsSerializationRoundTrip(t *testing.T) {
+	for _, behavior := range []compute.NullEncodingBehavior{
+		compute.NullEncodingMask,
+		compute.NullEncodingEncode,
+	} {
+		t.Run(fmt.Sprintf("null encoding %d", behavior), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
+			expr := compute.NewCall(
+				"dictionary_encode",
+				[]compute.Expression{compute.NewFieldRef("values")},
+				&compute.DictionaryEncodeOptions{NullEncoding: behavior},
+			)
+			defer expr.Release()
+
+			serialized, err := compute.SerializeExpr(expr, mem)
+			require.NoError(t, err)
+			defer serialized.Release()
+
+			roundTripped, err := compute.DeserializeExpr(mem, serialized)
+			require.NoError(t, err)
+			defer roundTripped.Release()
+			require.True(t, expr.Equals(roundTripped))
+		})
+	}
+}
+
+func TestDeserializeExprRejectsUnknownOptions(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	expr := compute.NewCall(
+		"dictionary_encode",
+		[]compute.Expression{compute.NewFieldRef("values")},
+		unknownFunctionOptions{},
+	)
+	defer expr.Release()
+
+	serialized, err := compute.SerializeExpr(expr, mem)
+	require.NoError(t, err)
+	defer serialized.Release()
+
+	_, err = compute.DeserializeExpr(mem, serialized)
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
 }

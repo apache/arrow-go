@@ -48,9 +48,19 @@ func (enc *PlainByteArrayEncoder) PutByteArray(val parquet.ByteArray) {
 
 // Put writes out all of the values in this slice to the encoding sink
 func (enc *PlainByteArrayEncoder) Put(in []parquet.ByteArray) {
+	encodedSize := 0
 	for _, val := range in {
-		enc.PutByteArray(val)
+		encodedSize += val.Len() + arrow.Uint32SizeBytes
 	}
+	enc.sink.Reserve(encodedSize)
+
+	out := enc.sink.buf.Buf()[enc.sink.pos : enc.sink.pos+encodedSize]
+	for _, val := range in {
+		binary.LittleEndian.PutUint32(out, uint32(val.Len()))
+		copy(out[arrow.Uint32SizeBytes:], val)
+		out = out[arrow.Uint32SizeBytes+val.Len():]
+	}
+	enc.sink.pos += encodedSize
 }
 
 // PutSpaced uses the bitmap of validBits to leave out anything that is null according
