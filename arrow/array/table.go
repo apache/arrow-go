@@ -308,7 +308,8 @@ type TableReader struct {
 	chunks  []*arrow.Chunked
 	slots   []int   // chunk indices
 	offsets []int64 // chunk offsets
-	batch   []arrow.Array
+	// batch is reused as scratch input; NewRecordBatch copies the slice.
+	batch []arrow.Array
 }
 
 // NewTableReader returns a new TableReader to iterate over the (possibly chunked) Table.
@@ -371,7 +372,6 @@ func (tr *TableReader) Next() bool {
 		}
 
 	}
-
 	// slice the chunks, advance each chunk slot as appropriate.
 	for i := range tr.chunks {
 		chunk := tr.chunks[i].Chunk(tr.slots[i])
