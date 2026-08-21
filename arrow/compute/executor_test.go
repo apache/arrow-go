@@ -39,6 +39,62 @@ func (d *signalChunkedDatum) Chunks() []arrow.Array {
 	return d.Value.Chunks()
 }
 
+type signalArrayDatum struct {
+	*ArrayDatum
+	chunksCalled chan struct{}
+}
+
+func (d *signalArrayDatum) Chunks() []arrow.Array {
+	close(d.chunksCalled)
+	return d.ArrayDatum.Chunks()
+}
+
+func TestScalarExecutorWrapResultsReleasesAccumulatedOutputOnCancellation(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	builder := array.NewInt32Builder(mem)
+	builder.Append(42)
+	value := builder.NewInt32Array()
+	builder.Release()
+	defer value.Release()
+
+	output := make(chan Datum)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	executor := &scalarExecutor{
+		nonAggExecImpl: nonAggExecImpl{outType: value.DataType()},
+	}
+
+	datum := &signalArrayDatum{
+		ArrayDatum:   NewDatum(value).(*ArrayDatum),
+		chunksCalled: make(chan struct{}),
+	}
+	result := make(chan Datum, 1)
+	go func() {
+		result <- executor.WrapResults(ctx, output, true)
+	}()
+
+	output <- datum
+	<-datum.chunksCalled
+	cancel()
+
+	require.Nil(t, <-result)
+	close(output)
+}
+
+func TestScalarExecutorWrapResultsHandlesClosedOutput(t *testing.T) {
+	output := make(chan Datum)
+	close(output)
+
+	executor := &scalarExecutor{
+		nonAggExecImpl: nonAggExecImpl{outType: arrow.PrimitiveTypes.Int32},
+	}
+
+	require.Nil(t, executor.WrapResults(context.Background(), output, false))
+}
+
 func TestVectorExecutorWrapResultsReleasesEmptyArrayOutput(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
