@@ -668,13 +668,27 @@ func (b *dictionaryBuilder) AppendNulls(n int) {
 }
 
 func (b *dictionaryBuilder) AppendEmptyValue() {
-	b.length += 1
-	b.idxBuilder.AppendEmptyValue()
+	b.AppendEmptyValues(1)
 }
 
 func (b *dictionaryBuilder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
+	}
+
+	if b.dt.ValueType.ID() == arrow.NULL {
+		b.AppendNulls(n)
+		return
+	}
+
+	valueBuilder := NewBuilder(b.mem, b.dt.ValueType)
+	defer valueBuilder.Release()
+	valueBuilder.AppendEmptyValues(n)
+
+	values := valueBuilder.NewArray()
+	defer values.Release()
+	if err := b.AppendArray(values); err != nil {
+		panic(err)
 	}
 }
 

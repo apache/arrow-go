@@ -392,9 +392,10 @@ type RunEndEncodedBuilder struct {
 	maxRunEnd uint64
 
 	// currently, mixing AppendValueFromString & UnmarshalOne is unsupported
-	lastUnmarshalled interface{}
-	unmarshalled     bool // tracks if Unmarshal was called (in case lastUnmarshalled is nil)
-	lastStr          *string
+	lastUnmarshalled  interface{}
+	unmarshalled      bool // tracks if Unmarshal was called (in case lastUnmarshalled is nil)
+	lastValueWasEmpty bool
+	lastStr           *string
 }
 
 func NewRunEndEncodedBuilder(mem memory.Allocator, runEnds, encoded arrow.DataType) *RunEndEncodedBuilder {
@@ -449,6 +450,7 @@ func (b *RunEndEncodedBuilder) finishRun() {
 	b.lastUnmarshalled = nil
 	b.lastStr = nil
 	b.unmarshalled = false
+	b.lastValueWasEmpty = false
 	if b.length == 0 {
 		return
 	}
@@ -505,6 +507,7 @@ func (b *RunEndEncodedBuilder) AppendEmptyValue() {
 	b.finishRun()
 	b.values.AppendEmptyValue()
 	b.addLength(1)
+	b.lastValueWasEmpty = true
 }
 
 func (b *RunEndEncodedBuilder) AppendEmptyValues(n int) {
@@ -589,7 +592,7 @@ func (b *RunEndEncodedBuilder) UnmarshalOne(dec *json.Decoder) error {
 	// make sure we add a new run instead. We can detect that case by
 	// checking that the number of runEnds matches the number of values
 	// we have, which means no matter what we have to start a new run
-	if reflect.DeepEqual(value, b.lastUnmarshalled) && (value != nil || b.runEnds.Len() != b.values.Len()) {
+	if !b.lastValueWasEmpty && reflect.DeepEqual(value, b.lastUnmarshalled) && (value != nil || b.runEnds.Len() != b.values.Len()) {
 		b.ContinueRun(1)
 		return nil
 	}

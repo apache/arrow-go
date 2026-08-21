@@ -388,6 +388,49 @@ func TestRunEndEncodedBuilderEmptyValues(t *testing.T) {
 	}
 }
 
+func TestRunEndEncodedBuilderEmptyValueBeforeUnmarshalNull(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewRunEndEncodedBuilder(mem, arrow.PrimitiveTypes.Int16, arrow.BinaryTypes.String)
+	defer bldr.Release()
+
+	bldr.AppendEmptyValue()
+	dec := json.NewDecoder(strings.NewReader("null"))
+	require.NoError(t, bldr.UnmarshalOne(dec))
+
+	arr := bldr.NewRunEndEncodedArray()
+	defer arr.Release()
+
+	assert.Equal(t, []int16{1, 2}, arr.RunEndsArr().(*array.Int16).Int16Values())
+	values := arr.Values().(*array.String)
+	assert.False(t, values.IsNull(0))
+	assert.Empty(t, values.Value(0))
+	assert.True(t, values.IsNull(1))
+}
+
+func TestRunEndEncodedBuilderDictionaryEmptyValue(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	encoded := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.BinaryTypes.String,
+	}
+	bldr := array.NewRunEndEncodedBuilder(mem, arrow.PrimitiveTypes.Int16, encoded)
+	defer bldr.Release()
+
+	bldr.AppendEmptyValue()
+
+	arr := bldr.NewRunEndEncodedArray()
+	defer arr.Release()
+
+	values := arr.Values().(*array.Dictionary)
+	assert.Equal(t, 1, values.Dictionary().Len())
+	assert.Equal(t, 0, values.GetValueIndex(0))
+	assert.Equal(t, "", arr.GetOneForMarshal(0))
+}
+
 func TestRunEndEncodedStringRoundTrip(t *testing.T) {
 	// 1. create array
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
