@@ -22,6 +22,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -122,6 +124,8 @@ func ExecAddInt32(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResul
 
 func TestCallFunctionPreservesCallerCancellation(t *testing.T) {
 	started := make(chan struct{})
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	fn := NewScalarFunction("test_preserve_caller_cancellation", Unary(), EmptyFuncDoc)
 	kernel := exec.NewScalarKernel(
@@ -138,12 +142,13 @@ func TestCallFunctionPreservesCallerCancellation(t *testing.T) {
 	execCtx.Registry = NewChildRegistry(execCtx.Registry)
 	require.True(t, execCtx.Registry.AddFunction(fn, false))
 
-	input, _, err := array.FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1]`))
+	input, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1]`))
 	require.NoError(t, err)
 	defer input.Release()
 
 	cancellationErr := errors.New("caller canceled")
 	ctx, cancel := context.WithCancelCause(context.Background())
+	ctx = WithAllocator(ctx, mem)
 	ctx = SetExecCtx(ctx, execCtx)
 	defer cancel(nil)
 
@@ -163,6 +168,207 @@ func TestCallFunctionPreservesCallerCancellation(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("CallFunction did not stop after caller cancellation")
+	}
+	require.Nil(t, result)
+	require.ErrorIs(t, callErr, cancellationErr)
+}
+
+func TestCallFunctionReleasesPartialResultOnCallerCancellation(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	secondSpanStarted := make(chan struct{})
+	fn := NewScalarFunction("test_release_partial_result_on_cancellation", Unary(), EmptyFuncDoc)
+	calls := 0
+	kernel := exec.NewScalarKernel(
+		[]exec.InputType{exec.NewExactInput(arrow.PrimitiveTypes.Int32)},
+		exec.NewOutputType(arrow.PrimitiveTypes.Int32),
+		func(ctx *exec.KernelCtx, _ *exec.ExecSpan, _ *exec.ExecResult) error {
+			calls++
+			if calls == 2 {
+				close(secondSpanStarted)
+				<-ctx.Ctx.Done()
+			}
+			return nil
+		}, nil)
+	require.NoError(t, fn.AddKernel(kernel))
+
+	execCtx := DefaultExecCtx()
+	execCtx.ChunkSize = 1
+	execCtx.ExecChannelSize = 0
+	execCtx.PreallocContiguous = false
+	execCtx.Registry = NewChildRegistry(execCtx.Registry)
+	require.True(t, execCtx.Registry.AddFunction(fn, false))
+
+	input, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2]`))
+	require.NoError(t, err)
+	defer input.Release()
+
+	cancellationErr := errors.New("caller canceled after partial output")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	ctx = WithAllocator(ctx, mem)
+	ctx = SetExecCtx(ctx, execCtx)
+	defer cancel(nil)
+
+	done := make(chan struct{})
+	var (
+		result  Datum
+		callErr error
+	)
+	go func() {
+		result, callErr = CallFunction(ctx, fn.Name(), nil, &ArrayDatum{Value: input.Data()})
+		close(done)
+	}()
+
+	<-secondSpanStarted
+	cancel(cancellationErr)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("CallFunction did not stop after caller cancellation")
+	}
+
+	require.Nil(t, result)
+	require.ErrorIs(t, callErr, cancellationErr)
+}
+
+func TestCallFunctionDrainsResultsAfterCallerCancellation(t *testing.T) {
+	const numChunks = 2
+
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	chunks := make([]arrow.Array, numChunks)
+	for i := range chunks {
+		builder := array.NewInt32Builder(mem)
+		builder.Append(int32(i))
+		chunks[i] = builder.NewInt32Array()
+		builder.Release()
+		defer chunks[i].Release()
+	}
+	chunked := arrow.NewChunked(arrow.PrimitiveTypes.Int32, chunks)
+	defer chunked.Release()
+
+	started := make(chan struct{})
+	secondStarted := make(chan struct{})
+	allowFinish := make(chan struct{})
+	var allowFinishOnce sync.Once
+	releaseSecond := func() {
+		allowFinishOnce.Do(func() { close(allowFinish) })
+	}
+	defer releaseSecond()
+
+	var calls atomic.Int32
+	fn := NewScalarFunction("test_drain_results_after_cancellation", Unary(), EmptyFuncDoc)
+	kernel := exec.NewScalarKernel(
+		[]exec.InputType{exec.NewExactInput(arrow.PrimitiveTypes.Int32)},
+		exec.NewOutputType(arrow.PrimitiveTypes.Int32),
+		func(ctx *exec.KernelCtx, _ *exec.ExecSpan, _ *exec.ExecResult) error {
+			switch calls.Add(1) {
+			case 1:
+				close(started)
+				<-ctx.Ctx.Done()
+			case 2:
+				close(secondStarted)
+				<-allowFinish
+			}
+			return nil
+		}, nil)
+	require.NoError(t, fn.AddKernel(kernel))
+
+	execCtx := DefaultExecCtx()
+	execCtx.Registry = NewChildRegistry(execCtx.Registry)
+	require.True(t, execCtx.Registry.AddFunction(fn, false))
+
+	cancellationErr := errors.New("caller canceled")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	ctx = WithAllocator(ctx, mem)
+	ctx = SetExecCtx(ctx, execCtx)
+	defer cancel(nil)
+
+	done := make(chan struct{})
+	var (
+		result  Datum
+		callErr error
+	)
+	go func() {
+		result, callErr = CallFunction(ctx, fn.Name(), nil, &ChunkedDatum{Value: chunked})
+		close(done)
+	}()
+
+	<-started
+	cancel(cancellationErr)
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		releaseSecond()
+		<-done
+		t.Fatal("execution did not continue after caller cancellation")
+	}
+
+	select {
+	case <-done:
+		releaseSecond()
+		t.Fatal("CallFunction returned before execution finished")
+	default:
+	}
+
+	releaseSecond()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("CallFunction did not finish after execution was released")
+	}
+	require.Nil(t, result)
+	require.ErrorIs(t, callErr, cancellationErr)
+}
+
+func TestCallFunctionPreservesCallerCancellationForVectorFunction(t *testing.T) {
+	started := make(chan struct{})
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	fn := NewVectorFunction("test_vector_preserve_caller_cancellation", Unary(), EmptyFuncDoc)
+	kernel := exec.NewVectorKernel(
+		[]exec.InputType{exec.NewExactInput(arrow.PrimitiveTypes.Int32)},
+		exec.NewOutputType(arrow.PrimitiveTypes.Int32),
+		func(ctx *exec.KernelCtx, _ *exec.ExecSpan, _ *exec.ExecResult) error {
+			close(started)
+			<-ctx.Ctx.Done()
+			return nil
+		}, nil)
+	require.NoError(t, fn.AddKernel(kernel))
+
+	execCtx := DefaultExecCtx()
+	execCtx.Registry = NewChildRegistry(execCtx.Registry)
+	require.True(t, execCtx.Registry.AddFunction(fn, false))
+
+	input, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1]`))
+	require.NoError(t, err)
+	defer input.Release()
+
+	cancellationErr := errors.New("caller canceled")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	ctx = WithAllocator(ctx, mem)
+	ctx = SetExecCtx(ctx, execCtx)
+	defer cancel(nil)
+
+	done := make(chan struct{})
+	var (
+		result  Datum
+		callErr error
+	)
+	go func() {
+		result, callErr = CallFunction(ctx, fn.Name(), nil, &ArrayDatum{Value: input.Data()})
+		close(done)
+	}()
+
+	<-started
+	cancel(cancellationErr)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("vector CallFunction did not stop after caller cancellation")
 	}
 	require.Nil(t, result)
 	require.ErrorIs(t, callErr, cancellationErr)

@@ -522,6 +522,7 @@ func (s *scalarExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 	var (
 		output Datum
 		acc    []arrow.Array
+		ok     bool
 	)
 	releaseAccumulated := func() {
 		for _, c := range acc {
@@ -540,8 +541,8 @@ func (s *scalarExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 	select {
 	case <-ctx.Done():
 		return nil
-	case output = <-out:
-		if output == nil || ctx.Err() != nil {
+	case output, ok = <-out:
+		if !ok || output == nil || ctx.Err() != nil {
 			if output != nil {
 				output.Release()
 			}

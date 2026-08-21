@@ -84,6 +84,17 @@ func TestScalarExecutorWrapResultsReleasesAccumulatedOutputOnCancellation(t *tes
 	close(output)
 }
 
+func TestScalarExecutorWrapResultsHandlesClosedOutput(t *testing.T) {
+	output := make(chan Datum)
+	close(output)
+
+	executor := &scalarExecutor{
+		nonAggExecImpl: nonAggExecImpl{outType: arrow.PrimitiveTypes.Int32},
+	}
+
+	require.Nil(t, executor.WrapResults(context.Background(), output, false))
+}
+
 func TestVectorExecutorWrapResultsReleasesEmptyArrayOutput(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
