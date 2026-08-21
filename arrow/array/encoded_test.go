@@ -409,6 +409,31 @@ func TestRunEndEncodedBuilderEmptyValueBeforeUnmarshalNull(t *testing.T) {
 	assert.True(t, values.IsNull(1))
 }
 
+func TestRunEndEncodedBuilderEmptyValuesBeforeUnmarshalNulls(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewRunEndEncodedBuilder(mem, arrow.PrimitiveTypes.Int16, arrow.BinaryTypes.String)
+	defer bldr.Release()
+
+	bldr.AppendEmptyValues(2)
+	dec := json.NewDecoder(strings.NewReader("null null"))
+	require.NoError(t, bldr.UnmarshalOne(dec))
+	require.NoError(t, bldr.UnmarshalOne(dec))
+
+	arr := bldr.NewRunEndEncodedArray()
+	defer arr.Release()
+
+	assert.Equal(t, []int16{1, 2, 4}, arr.RunEndsArr().(*array.Int16).Int16Values())
+	values := arr.Values().(*array.String)
+	assert.Equal(t, 3, values.Len())
+	assert.False(t, values.IsNull(0))
+	assert.Empty(t, values.Value(0))
+	assert.False(t, values.IsNull(1))
+	assert.Empty(t, values.Value(1))
+	assert.True(t, values.IsNull(2))
+}
+
 func TestRunEndEncodedBuilderDictionaryEmptyValue(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
