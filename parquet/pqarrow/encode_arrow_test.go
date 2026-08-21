@@ -474,6 +474,39 @@ func TestWriteDecimalIgnoresValuesUnderNullParent(t *testing.T) {
 	}
 }
 
+func TestWriteDecimalRejectsOverflowAfterEmptyList(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dtype := &arrow.Decimal128Type{Precision: 4, Scale: 0}
+	listBuilder := array.NewListBuilder(mem, dtype)
+	valueBuilder := listBuilder.ValueBuilder().(*array.Decimal128Builder)
+
+	listBuilder.Append(true)
+	listBuilder.Append(true)
+	valueBuilder.Append(decimal128.FromI64(99999))
+	listBuilder.Append(true)
+	valueBuilder.Append(decimal128.FromI64(1))
+	lists := listBuilder.NewListArray()
+	listBuilder.Release()
+	defer lists.Release()
+
+	sc := arrow.NewSchema([]arrow.Field{{Name: "decimal", Type: lists.DataType()}}, nil)
+	rec := array.NewRecordBatch(sc, []arrow.Array{lists}, int64(lists.Len()))
+	defer rec.Release()
+
+	var sink bytes.Buffer
+	writer, err := pqarrow.NewFileWriter(sc, &sink,
+		parquet.NewWriterProperties(parquet.WithStoreDecimalAsInteger(true)),
+		pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem)))
+	require.NoError(t, err)
+
+	err = writer.Write(rec)
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+	assert.ErrorContains(t, err, "does not fit")
+	require.NoError(t, writer.Close())
+}
+
 func TestWriteArrowInt96(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
