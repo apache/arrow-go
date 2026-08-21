@@ -20,6 +20,7 @@ package compute
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -129,17 +130,22 @@ func TestCallFunctionPreservesCallerCancellation(t *testing.T) {
 		func(ctx *exec.KernelCtx, _ *exec.ExecSpan, _ *exec.ExecResult) error {
 			close(started)
 			<-ctx.Ctx.Done()
-			return ctx.Ctx.Err()
+			return nil
 		}, nil)
 	require.NoError(t, fn.AddKernel(kernel))
-	require.True(t, GetFunctionRegistry().AddFunction(fn, false))
+
+	execCtx := DefaultExecCtx()
+	execCtx.Registry = NewChildRegistry(execCtx.Registry)
+	require.True(t, execCtx.Registry.AddFunction(fn, false))
 
 	input, _, err := array.FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1]`))
 	require.NoError(t, err)
 	defer input.Release()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	cancellationErr := errors.New("caller canceled")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	ctx = SetExecCtx(ctx, execCtx)
+	defer cancel(nil)
 
 	done := make(chan struct{})
 	var (
@@ -152,16 +158,14 @@ func TestCallFunctionPreservesCallerCancellation(t *testing.T) {
 	}()
 
 	<-started
-	cancel()
+	cancel(cancellationErr)
 	select {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("CallFunction did not stop after caller cancellation")
 	}
-	if result != nil {
-		result.Release()
-	}
-	require.ErrorIs(t, callErr, context.Canceled)
+	require.Nil(t, result)
+	require.ErrorIs(t, callErr, cancellationErr)
 }
 
 type CallScalarFuncSuite struct {

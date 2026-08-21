@@ -176,13 +176,16 @@ func execInternal(ctx context.Context, fn Function, opts FunctionOptions, passed
 				value.Release()
 			}
 		}
+		if err == nil {
+			err = context.Cause(ctx)
+		}
+		if result != nil {
+			result.Release()
+			result = nil
+		}
 	}
 	if err == nil && result != nil {
 		debug.Assert(executor.CheckResultType(result) == nil, "invalid result type")
-	}
-
-	if ctx.Err() == context.Canceled && result != nil {
-		result.Release()
 	}
 
 	return
