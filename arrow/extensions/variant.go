@@ -458,6 +458,11 @@ func (v *VariantArray) IsShredded() bool {
 	return v.ExtensionType().(*VariantType).typedValueFieldIdx != -1
 }
 
+// VariantType returns the array's extension type without the ExtensionType cast.
+func (v *VariantArray) VariantType() *VariantType {
+	return v.ExtensionType().(*VariantType)
+}
+
 // UnshredVariant returns an equivalent VariantArray in the non-shredded layout
 // (a struct of metadata and value), reassembling each row's value from the
 // shredded typed_value and value columns. If the array is already non-shredded
@@ -1475,96 +1480,85 @@ func (b *shreddedPrimitiveBuilder) tryTyped(v variant.Value) (residual []byte) {
 		return v.Bytes()
 	}
 
-	if appendVariantToTypedBuilder(b.typedBldr, v) {
-		return nil
-	}
-
-	b.typedBldr.AppendNull()
-	return v.Bytes()
-}
-
-// appendVariantToTypedBuilder appends v to a typed primitive builder when v's type
-// fits the builder, reporting whether it did. Shared by the shredding writer and VariantGet.
-func appendVariantToTypedBuilder(target array.Builder, v variant.Value) bool {
-	switch bldr := target.(type) {
+	switch bldr := b.typedBldr.(type) {
 	case *array.Int8Builder:
 		if appendNumericToTarget(bldr, v) {
-			return true
+			return nil
 		}
 	case *array.Uint8Builder:
 		if appendNumericToTarget(bldr, v) {
-			return true
+			return nil
 		}
 	case *array.Int16Builder:
 		if appendNumericToTarget(bldr, v) {
-			return true
+			return nil
 		}
 	case *array.Uint16Builder:
 		if appendNumericToTarget(bldr, v) {
-			return true
+			return nil
 		}
 	case *array.Int32Builder:
 		if appendNumericToTarget(bldr, v) {
-			return true
+			return nil
 		}
 	case *array.Uint32Builder:
 		if appendNumericToTarget(bldr, v) {
-			return true
+			return nil
 		}
 	case *array.Int64Builder:
 		if appendNumericToTarget(bldr, v) {
-			return true
+			return nil
 		}
 	case *array.Float32Builder:
 		switch v.Type() {
 		case variant.Float:
 			bldr.Append(v.Value().(float32))
-			return true
+			return nil
 		case variant.Double:
 			val := v.Value().(float64)
 			if val >= -math.MaxFloat32 && val <= math.MaxFloat32 {
 				bldr.Append(float32(val))
-				return true
+				return nil
 			}
 		}
 	case *array.Float64Builder:
 		switch v.Type() {
 		case variant.Float:
 			bldr.Append(float64(v.Value().(float32)))
-			return true
+			return nil
 		case variant.Double:
 			bldr.Append(v.Value().(float64))
-			return true
+			return nil
 		}
 	case *array.BooleanBuilder:
 		if v.Type() == variant.Bool {
 			bldr.Append(v.Value().(bool))
-			return true
+			return nil
 		}
 	case array.StringLikeBuilder:
 		if v.Type() == variant.String {
 			bldr.Append(v.Value().(string))
-			return true
+			return nil
 		}
 	case array.BinaryLikeBuilder:
 		if v.Type() == variant.Binary {
 			bldr.Append(v.Value().([]byte))
-			return true
+			return nil
 		}
 	case *array.Date32Builder:
 		if v.Type() == variant.Date {
 			bldr.Append(v.Value().(arrow.Date32))
-			return true
+			return nil
 		}
 	case *array.Time64Builder:
 		if v.Type() == variant.Time && bldr.Type().(*arrow.Time64Type).Unit == arrow.Microsecond {
 			bldr.Append(v.Value().(arrow.Time64))
-			return true
+			return nil
 		}
 	case *UUIDBuilder:
 		if v.Type() == variant.UUID {
 			bldr.Append(v.Value().(uuid.UUID))
-			return true
+			return nil
 		}
 	case *array.TimestampBuilder:
 		tsType := bldr.Type().(*arrow.TimestampType)
@@ -1577,10 +1571,10 @@ func appendVariantToTypedBuilder(target array.Builder, v variant.Value) bool {
 			switch tsType.Unit {
 			case arrow.Microsecond:
 				bldr.Append(v.Value().(arrow.Timestamp))
-				return true
+				return nil
 			case arrow.Nanosecond:
 				bldr.Append(v.Value().(arrow.Timestamp) * 1000)
-				return true
+				return nil
 			}
 		case variant.TimestampMicrosNTZ:
 			if tsType.TimeZone != "" {
@@ -1590,20 +1584,20 @@ func appendVariantToTypedBuilder(target array.Builder, v variant.Value) bool {
 			switch tsType.Unit {
 			case arrow.Microsecond:
 				bldr.Append(v.Value().(arrow.Timestamp))
-				return true
+				return nil
 			case arrow.Nanosecond:
 				bldr.Append(v.Value().(arrow.Timestamp) * 1000)
-				return true
+				return nil
 			}
 		case variant.TimestampNanos:
 			if tsType.TimeZone == "UTC" && tsType.Unit == arrow.Nanosecond {
 				bldr.Append(v.Value().(arrow.Timestamp))
-				return true
+				return nil
 			}
 		case variant.TimestampNanosNTZ:
 			if tsType.TimeZone == "" && tsType.Unit == arrow.Nanosecond {
 				bldr.Append(v.Value().(arrow.Timestamp))
-				return true
+				return nil
 			}
 		}
 	case *array.Decimal32Builder:
@@ -1612,17 +1606,17 @@ func appendVariantToTypedBuilder(target array.Builder, v variant.Value) bool {
 		case variant.DecimalValue[decimal.Decimal32]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(val.Value.(decimal.Decimal32))
-				return true
+				return nil
 			}
 		case variant.DecimalValue[decimal.Decimal64]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(decimal.Decimal32(val.Value.(decimal.Decimal64)))
-				return true
+				return nil
 			}
 		case variant.DecimalValue[decimal.Decimal128]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(decimal.Decimal32(val.Value.(decimal.Decimal128).LowBits()))
-				return true
+				return nil
 			}
 		}
 	case *array.Decimal64Builder:
@@ -1631,17 +1625,17 @@ func appendVariantToTypedBuilder(target array.Builder, v variant.Value) bool {
 		case variant.DecimalValue[decimal.Decimal32]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(decimal.Decimal64(val.Value.(decimal.Decimal32)))
-				return true
+				return nil
 			}
 		case variant.DecimalValue[decimal.Decimal64]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(val.Value.(decimal.Decimal64))
-				return true
+				return nil
 			}
 		case variant.DecimalValue[decimal.Decimal128]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(decimal.Decimal64(val.Value.(decimal.Decimal128).LowBits()))
-				return true
+				return nil
 			}
 		}
 	case *array.Decimal128Builder:
@@ -1650,22 +1644,23 @@ func appendVariantToTypedBuilder(target array.Builder, v variant.Value) bool {
 		case variant.DecimalValue[decimal.Decimal32]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(decimal128.FromI64(int64(val.Value.(decimal.Decimal32))))
-				return true
+				return nil
 			}
 		case variant.DecimalValue[decimal.Decimal64]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(decimal128.FromI64(int64(val.Value.(decimal.Decimal64))))
-				return true
+				return nil
 			}
 		case variant.DecimalValue[decimal.Decimal128]:
 			if decimalCanFit(dt, val) {
 				bldr.Append(val.Value.(decimal.Decimal128))
-				return true
+				return nil
 			}
 		}
 	}
 
-	return false
+	b.typedBldr.AppendNull()
+	return v.Bytes()
 }
 
 type shreddedFieldBuilder struct {
