@@ -84,6 +84,42 @@ func TestTemporalRoundingOverflow(t *testing.T) {
 	}
 }
 
+func TestTemporalRoundingCalendarMultipleOverflow(t *testing.T) {
+	value, err := arrow.TimestampFromTime(time.Date(2024, time.January, 15, 10, 37, 0, 0, time.UTC), arrow.Nanosecond)
+	require.NoError(t, err)
+
+	builder := array.NewTimestampBuilder(memory.DefaultAllocator, &arrow.TimestampType{Unit: arrow.Nanosecond})
+	builder.Append(value)
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	tests := []struct {
+		name string
+		fn   func(context.Context, compute.RoundTemporalOptions, compute.Datum) (compute.Datum, error)
+		unit compute.RoundTemporalUnit
+	}{
+		{name: "year ceiling", fn: compute.CeilTemporal, unit: compute.RoundTemporalYear},
+		{name: "year half-rounding", fn: compute.RoundTemporal, unit: compute.RoundTemporalYear},
+		{name: "quarter ceiling", fn: compute.CeilTemporal, unit: compute.RoundTemporalQuarter},
+		{name: "quarter half-rounding", fn: compute.RoundTemporal, unit: compute.RoundTemporalQuarter},
+		{name: "month ceiling", fn: compute.CeilTemporal, unit: compute.RoundTemporalMonth},
+		{name: "month half-rounding", fn: compute.RoundTemporal, unit: compute.RoundTemporalMonth},
+		{name: "week ceiling", fn: compute.CeilTemporal, unit: compute.RoundTemporalWeek},
+		{name: "week half-rounding", fn: compute.RoundTemporal, unit: compute.RoundTemporalWeek},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.fn(context.Background(), compute.RoundTemporalOptions{
+				Multiple: math.MaxInt64,
+				Unit:     tc.unit,
+			}, compute.NewDatum(input))
+			require.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
+}
+
 func TestTemporalRoundingDate32Overflow(t *testing.T) {
 	tests := []struct {
 		name  string

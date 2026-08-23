@@ -1016,6 +1016,55 @@ func checkedMulInt64(left, right int64) (int64, error) {
 	return result, nil
 }
 
+func checkedInt64ToInt(value int64) (int, error) {
+	result := int(value)
+	if int64(result) != value {
+		return 0, overflowError()
+	}
+	return result, nil
+}
+
+// Nanosecond timestamps can only represent dates in this year range. Keep
+// calendar arithmetic inside it before constructing a time.Time so large
+// options cannot wrap inside the time package.
+const (
+	minNanosecondTimestampYear = 1677
+	maxNanosecondTimestampYear = 2262
+	maxCalendarDayOffset       = (maxNanosecondTimestampYear - minNanosecondTimestampYear + 1) * 366
+)
+
+func checkedCalendarDate(year, month int64, tz *time.Location) (time.Time, error) {
+	if year < minNanosecondTimestampYear || year > maxNanosecondTimestampYear {
+		return time.Time{}, overflowError()
+	}
+
+	dateYear, err := checkedInt64ToInt(year)
+	if err != nil {
+		return time.Time{}, err
+	}
+	dateMonth, err := checkedInt64ToInt(month)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Date(dateYear, time.Month(dateMonth), 1, 0, 0, 0, 0, tz), nil
+}
+
+func checkedCalendarAddDays(value time.Time, days int64) (time.Time, error) {
+	if days < -maxCalendarDayOffset || days > maxCalendarDayOffset {
+		return time.Time{}, overflowError()
+	}
+
+	dayOffset, err := checkedInt64ToInt(days)
+	if err != nil {
+		return time.Time{}, err
+	}
+	result := value.AddDate(0, 0, dayOffset)
+	if result.Year() < minNanosecondTimestampYear || result.Year() > maxNanosecondTimestampYear {
+		return time.Time{}, overflowError()
+	}
+	return result, nil
+}
+
 // convertToNanos converts a timestamp value to nanoseconds.
 func convertToNanos(ts int64, unit arrow.TimeUnit) (int64, error) {
 	return checkedMulInt64(ts, int64(unit.Multiplier()))
@@ -1149,90 +1198,164 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 	t := time.Unix(secs, nanos).In(tz)
 
 	var rounded time.Time
+	var err error
+	multiple := opts.Multiple
 
 	switch opts.Unit {
 	case RoundTemporalYear:
-		year := t.Year()
-		roundedYear := (year / int(opts.Multiple)) * int(opts.Multiple)
+		year := int64(t.Year())
+		roundedYear, err := checkedMulInt64(year/multiple, multiple)
+		if err != nil {
+			return 0, err
+		}
 		switch opts.mode {
 		case RoundDown:
-			rounded = time.Date(roundedYear, 1, 1, 0, 0, 0, 0, tz)
+			rounded, err = checkedCalendarDate(roundedYear, 1, tz)
 		case RoundUp:
-			periodStart := time.Date(roundedYear, 1, 1, 0, 0, 0, 0, tz)
+			periodStart, dateErr := checkedCalendarDate(roundedYear, 1, tz)
+			if dateErr != nil {
+				return 0, dateErr
+			}
 			if opts.CeilIsStrictlyGreater || !t.Equal(periodStart) {
-				roundedYear += int(opts.Multiple)
-				rounded = time.Date(roundedYear, 1, 1, 0, 0, 0, 0, tz)
+				roundedYear, err = checkedAddInt64(roundedYear, multiple)
+				if err != nil {
+					return 0, err
+				}
+				rounded, err = checkedCalendarDate(roundedYear, 1, tz)
 			} else {
 				rounded = periodStart
 			}
 		default:
-			yearStart := time.Date(roundedYear, 1, 1, 0, 0, 0, 0, tz)
-			nextYear := roundedYear + int(opts.Multiple)
-			yearEnd := time.Date(nextYear, 1, 1, 0, 0, 0, 0, tz)
+			yearStart, dateErr := checkedCalendarDate(roundedYear, 1, tz)
+			if dateErr != nil {
+				return 0, dateErr
+			}
+			nextYear, dateErr := checkedAddInt64(roundedYear, multiple)
+			if dateErr != nil {
+				return 0, dateErr
+			}
+			yearEnd, dateErr := checkedCalendarDate(nextYear, 1, tz)
+			if dateErr != nil {
+				return 0, dateErr
+			}
 			rounded = halfRoundPeriod(t, yearStart, yearEnd)
 		}
 
 	case RoundTemporalQuarter:
 		// Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec
-		month := int(t.Month())
-		year := t.Year()
-		totalQuarters := year*4 + (month-1)/3
-		roundedQuarters := (totalQuarters / int(opts.Multiple)) * int(opts.Multiple)
+		month := int64(t.Month())
+		year := int64(t.Year())
+		totalQuarters, err := checkedMulInt64(year, 4)
+		if err != nil {
+			return 0, err
+		}
+		totalQuarters, err = checkedAddInt64(totalQuarters, (month-1)/3)
+		if err != nil {
+			return 0, err
+		}
+		roundedQuarters, err := checkedMulInt64(totalQuarters/multiple, multiple)
+		if err != nil {
+			return 0, err
+		}
 		roundedYear := roundedQuarters / 4
 		roundedQuarter := roundedQuarters % 4
 		roundedMonth := roundedQuarter*3 + 1 // First month of the quarter
 
 		switch opts.mode {
 		case RoundDown:
-			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
+			rounded, err = checkedCalendarDate(roundedYear, roundedMonth, tz)
 		case RoundUp:
-			periodStart := time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
+			periodStart, dateErr := checkedCalendarDate(roundedYear, roundedMonth, tz)
+			if dateErr != nil {
+				return 0, dateErr
+			}
 			if opts.CeilIsStrictlyGreater || !t.Equal(periodStart) {
-				roundedQuarters += int(opts.Multiple)
+				roundedQuarters, err = checkedAddInt64(roundedQuarters, multiple)
+				if err != nil {
+					return 0, err
+				}
 				roundedYear = roundedQuarters / 4
 				roundedQuarter = roundedQuarters % 4
 				roundedMonth = roundedQuarter*3 + 1
-				rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
+				rounded, err = checkedCalendarDate(roundedYear, roundedMonth, tz)
 			} else {
 				rounded = periodStart
 			}
 		default:
-			quarterStart := time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
-			nextQuarterNum := roundedQuarters + int(opts.Multiple)
+			quarterStart, dateErr := checkedCalendarDate(roundedYear, roundedMonth, tz)
+			if dateErr != nil {
+				return 0, dateErr
+			}
+			nextQuarterNum, dateErr := checkedAddInt64(roundedQuarters, multiple)
+			if dateErr != nil {
+				return 0, dateErr
+			}
 			nextYear := nextQuarterNum / 4
 			nextQuarter := nextQuarterNum % 4
 			nextMonth := nextQuarter*3 + 1
-			quarterEnd := time.Date(nextYear, time.Month(nextMonth), 1, 0, 0, 0, 0, tz)
+			quarterEnd, dateErr := checkedCalendarDate(nextYear, nextMonth, tz)
+			if dateErr != nil {
+				return 0, dateErr
+			}
 			rounded = halfRoundPeriod(t, quarterStart, quarterEnd)
 		}
 
 	case RoundTemporalMonth:
-		month := int(t.Month())
-		year := t.Year()
-		totalMonths := year*12 + month - 1
-		roundedMonths := (totalMonths / int(opts.Multiple)) * int(opts.Multiple)
+		month := int64(t.Month())
+		year := int64(t.Year())
+		totalMonths, err := checkedMulInt64(year, 12)
+		if err != nil {
+			return 0, err
+		}
+		totalMonths, err = checkedAddInt64(totalMonths, month)
+		if err != nil {
+			return 0, err
+		}
+		totalMonths, err = checkedSubInt64(totalMonths, 1)
+		if err != nil {
+			return 0, err
+		}
+		roundedMonths, err := checkedMulInt64(totalMonths/multiple, multiple)
+		if err != nil {
+			return 0, err
+		}
 		roundedYear := roundedMonths / 12
 		roundedMonth := (roundedMonths % 12) + 1
 
 		switch opts.mode {
 		case RoundDown:
-			rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
+			rounded, err = checkedCalendarDate(roundedYear, roundedMonth, tz)
 		case RoundUp:
-			periodStart := time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
+			periodStart, dateErr := checkedCalendarDate(roundedYear, roundedMonth, tz)
+			if dateErr != nil {
+				return 0, dateErr
+			}
 			if opts.CeilIsStrictlyGreater || !t.Equal(periodStart) {
-				roundedMonths += int(opts.Multiple)
+				roundedMonths, err = checkedAddInt64(roundedMonths, multiple)
+				if err != nil {
+					return 0, err
+				}
 				roundedYear = roundedMonths / 12
 				roundedMonth = (roundedMonths % 12) + 1
-				rounded = time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
+				rounded, err = checkedCalendarDate(roundedYear, roundedMonth, tz)
 			} else {
 				rounded = periodStart
 			}
 		default:
-			monthStart := time.Date(roundedYear, time.Month(roundedMonth), 1, 0, 0, 0, 0, tz)
-			nextMonthNum := roundedMonths + int(opts.Multiple)
+			monthStart, dateErr := checkedCalendarDate(roundedYear, roundedMonth, tz)
+			if dateErr != nil {
+				return 0, dateErr
+			}
+			nextMonthNum, dateErr := checkedAddInt64(roundedMonths, multiple)
+			if dateErr != nil {
+				return 0, dateErr
+			}
 			nextYear := nextMonthNum / 12
 			nextMonth := (nextMonthNum % 12) + 1
-			monthEnd := time.Date(nextYear, time.Month(nextMonth), 1, 0, 0, 0, 0, tz)
+			monthEnd, dateErr := checkedCalendarDate(nextYear, nextMonth, tz)
+			if dateErr != nil {
+				return 0, dateErr
+			}
 			rounded = halfRoundPeriod(t, monthStart, monthEnd)
 		}
 
@@ -1253,22 +1376,54 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 		epochWeekStart := epochInTz.AddDate(0, 0, -epochWeekday)
 		epochWeekStart = time.Date(epochWeekStart.Year(), epochWeekStart.Month(), epochWeekStart.Day(), 0, 0, 0, 0, tz)
 
-		daysSinceEpochWeek := int(startOfWeek.Sub(epochWeekStart).Hours() / 24)
+		daysSinceEpochWeek := int64(startOfWeek.Sub(epochWeekStart).Hours() / 24)
 		weeksSinceEpoch := daysSinceEpochWeek / 7
-		roundedWeeks := (weeksSinceEpoch / int(opts.Multiple)) * int(opts.Multiple)
-		roundedWeekStart := epochWeekStart.AddDate(0, 0, roundedWeeks*7)
+		roundedWeeks, err := checkedMulInt64(weeksSinceEpoch/multiple, multiple)
+		if err != nil {
+			return 0, err
+		}
+		roundedWeekDays, err := checkedMulInt64(roundedWeeks, 7)
+		if err != nil {
+			return 0, err
+		}
+		roundedWeekStart, err := checkedCalendarAddDays(epochWeekStart, roundedWeekDays)
+		if err != nil {
+			return 0, err
+		}
 
 		switch opts.mode {
 		case RoundDown:
 			rounded = roundedWeekStart
 		case RoundUp:
 			if opts.CeilIsStrictlyGreater || !t.Equal(roundedWeekStart) {
-				rounded = roundedWeekStart.AddDate(0, 0, 7*int(opts.Multiple))
+				nextWeeks, dateErr := checkedAddInt64(roundedWeeks, multiple)
+				if dateErr != nil {
+					return 0, dateErr
+				}
+				nextWeekDays, dateErr := checkedMulInt64(nextWeeks, 7)
+				if dateErr != nil {
+					return 0, dateErr
+				}
+				rounded, err = checkedCalendarAddDays(epochWeekStart, nextWeekDays)
+				if err != nil {
+					return 0, err
+				}
 			} else {
 				rounded = roundedWeekStart
 			}
 		default:
-			weekEnd := roundedWeekStart.AddDate(0, 0, 7*int(opts.Multiple))
+			nextWeeks, dateErr := checkedAddInt64(roundedWeeks, multiple)
+			if dateErr != nil {
+				return 0, dateErr
+			}
+			nextWeekDays, dateErr := checkedMulInt64(nextWeeks, 7)
+			if dateErr != nil {
+				return 0, dateErr
+			}
+			weekEnd, dateErr := checkedCalendarAddDays(epochWeekStart, nextWeekDays)
+			if dateErr != nil {
+				return 0, dateErr
+			}
 			rounded = halfRoundPeriod(t, roundedWeekStart, weekEnd)
 		}
 
@@ -1280,17 +1435,23 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 			rounded = startOfDay
 		case RoundUp:
 			if opts.CeilIsStrictlyGreater || !t.Equal(startOfDay) {
-				rounded = startOfDay.AddDate(0, 0, 1)
+				rounded, err = checkedCalendarAddDays(startOfDay, 1)
 			} else {
 				rounded = startOfDay
 			}
 		default:
-			nextDay := startOfDay.AddDate(0, 0, 1)
+			nextDay, dateErr := checkedCalendarAddDays(startOfDay, 1)
+			if dateErr != nil {
+				return 0, dateErr
+			}
 			rounded = halfRoundPeriod(t, startOfDay, nextDay)
 		}
 
 	default:
 		return 0, fmt.Errorf("%w: unsupported calendar unit", arrow.ErrNotImplemented)
+	}
+	if err != nil {
+		return 0, err
 	}
 
 	// Convert back to the input unit
