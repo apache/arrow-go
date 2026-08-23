@@ -1210,7 +1210,11 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 		}
 		switch opts.mode {
 		case RoundDown:
-			rounded, err = checkedCalendarDate(roundedYear, 1, tz)
+			var dateErr error
+			rounded, dateErr = checkedCalendarDate(roundedYear, 1, tz)
+			if dateErr != nil {
+				return 0, dateErr
+			}
 		case RoundUp:
 			periodStart, dateErr := checkedCalendarDate(roundedYear, 1, tz)
 			if dateErr != nil {
@@ -1221,7 +1225,10 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 				if err != nil {
 					return 0, err
 				}
-				rounded, err = checkedCalendarDate(roundedYear, 1, tz)
+				rounded, dateErr = checkedCalendarDate(roundedYear, 1, tz)
+				if dateErr != nil {
+					return 0, dateErr
+				}
 			} else {
 				rounded = periodStart
 			}
@@ -1263,7 +1270,11 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 
 		switch opts.mode {
 		case RoundDown:
-			rounded, err = checkedCalendarDate(roundedYear, roundedMonth, tz)
+			var dateErr error
+			rounded, dateErr = checkedCalendarDate(roundedYear, roundedMonth, tz)
+			if dateErr != nil {
+				return 0, dateErr
+			}
 		case RoundUp:
 			periodStart, dateErr := checkedCalendarDate(roundedYear, roundedMonth, tz)
 			if dateErr != nil {
@@ -1277,7 +1288,10 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 				roundedYear = roundedQuarters / 4
 				roundedQuarter = roundedQuarters % 4
 				roundedMonth = roundedQuarter*3 + 1
-				rounded, err = checkedCalendarDate(roundedYear, roundedMonth, tz)
+				rounded, dateErr = checkedCalendarDate(roundedYear, roundedMonth, tz)
+				if dateErr != nil {
+					return 0, dateErr
+				}
 			} else {
 				rounded = periodStart
 			}
@@ -1324,7 +1338,11 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 
 		switch opts.mode {
 		case RoundDown:
-			rounded, err = checkedCalendarDate(roundedYear, roundedMonth, tz)
+			var dateErr error
+			rounded, dateErr = checkedCalendarDate(roundedYear, roundedMonth, tz)
+			if dateErr != nil {
+				return 0, dateErr
+			}
 		case RoundUp:
 			periodStart, dateErr := checkedCalendarDate(roundedYear, roundedMonth, tz)
 			if dateErr != nil {
@@ -1337,7 +1355,10 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 				}
 				roundedYear = roundedMonths / 12
 				roundedMonth = (roundedMonths % 12) + 1
-				rounded, err = checkedCalendarDate(roundedYear, roundedMonth, tz)
+				rounded, dateErr = checkedCalendarDate(roundedYear, roundedMonth, tz)
+				if dateErr != nil {
+					return 0, dateErr
+				}
 			} else {
 				rounded = periodStart
 			}
