@@ -168,6 +168,7 @@ func (enc *typedDictEncoder[T]) Put(in []T) {
 			enc.dictEncodedSize += int(unsafe.Sizeof(T(0)))
 		}
 		enc.idxValues[curPos+i] = int32(memoIdx)
+		enc.recordDictionaryReference(int32(memoIdx))
 	}
 	enc.AddRawSize(int64(len(in)) * int64(unsafe.Sizeof(T(0))))
 }
