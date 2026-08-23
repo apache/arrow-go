@@ -407,7 +407,7 @@ func (r *RleEncoder) flushLiteral(updateIndicator bool) (err error) {
 }
 
 func (r *RleEncoder) flushRepeated() (ret bool) {
-	indicator := r.repCount << 1
+	indicator := uint64(r.repCount) << 1
 
 	ret = r.w.WriteVlqInt(uint64(indicator))
 	ret = ret && r.w.WriteAligned(r.curVal, int(bitutil.BytesForBits(int64(r.BitWidth))))
@@ -475,7 +475,7 @@ func (r *RleEncoder) PutBatchLevels(values []int16) (int, error) {
 				if r.litCount != 0 {
 					r.repCount = 8
 					if err := r.flushLiteral(true); err != nil {
-						return encoded + 7, err
+						return encoded, err
 					}
 					encoded += 8
 				}
