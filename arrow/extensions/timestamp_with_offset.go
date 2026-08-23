@@ -44,12 +44,9 @@ func isOffsetTypeOk(offsetType arrow.DataType) bool {
 	case *arrow.DictionaryType:
 		return arrow.TypeEqual(offsetType.ValueType, arrow.PrimitiveTypes.Int16)
 	case *arrow.RunEndEncodedType:
-		return offsetType.ValidRunEndsType(offsetType.RunEnds()) &&
+		return !offsetType.ValueNullable &&
+			offsetType.ValidRunEndsType(offsetType.RunEnds()) &&
 			arrow.TypeEqual(offsetType.Encoded(), arrow.PrimitiveTypes.Int16)
-		// FIXME: Technically this should be non-nullable, but a Arrow IPC does not deserialize
-		// ValueNullable properly, so enforcing this here would always fail when reading from an IPC
-		// stream
-		// !offsetType.ValueNullable
 	default:
 		return false
 	}
@@ -153,6 +150,7 @@ func NewTimestampWithOffsetTypeDictionaryEncoded[I DictIndexType](unit arrow.Tim
 // valid run-ends type.
 func NewTimestampWithOffsetTypeRunEndEncoded[E RunEndsType](unit arrow.TimeUnit, runEnds E) *TimestampWithOffsetType {
 	offsetType := arrow.RunEndEncodedOf(arrow.DataType(runEnds), arrow.PrimitiveTypes.Int16)
+	offsetType.ValueNullable = false
 
 	v, _ := NewTimestampWithOffsetTypeCustomOffset(unit, offsetType)
 	// SAFETY: This should never error as RunEndsType always a valid run ends type

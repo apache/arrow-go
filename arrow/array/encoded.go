@@ -42,7 +42,15 @@ type RunEndEncoded struct {
 }
 
 func NewRunEndEncodedArray(runEnds, values arrow.Array, logicalLength, offset int) *RunEndEncoded {
-	data := NewData(arrow.RunEndEncodedOf(runEnds.DataType(), values.DataType()), logicalLength,
+	return NewRunEndEncodedArrayWithType(
+		arrow.RunEndEncodedOf(runEnds.DataType(), values.DataType()),
+		runEnds, values, logicalLength, offset)
+}
+
+// NewRunEndEncodedArrayWithType constructs a run-end encoded array with the
+// provided type.
+func NewRunEndEncodedArrayWithType(dt *arrow.RunEndEncodedType, runEnds, values arrow.Array, logicalLength, offset int) *RunEndEncoded {
+	data := NewData(dt, logicalLength,
 		[]*memory.Buffer{nil}, []arrow.ArrayData{runEnds.Data(), values.Data()}, 0, offset)
 	defer data.Release()
 	return NewRunEndEncodedData(data)
@@ -399,7 +407,11 @@ type RunEndEncodedBuilder struct {
 }
 
 func NewRunEndEncodedBuilder(mem memory.Allocator, runEnds, encoded arrow.DataType) *RunEndEncodedBuilder {
-	dt := arrow.RunEndEncodedOf(runEnds, encoded)
+	return newRunEndEncodedBuilder(mem, arrow.RunEndEncodedOf(runEnds, encoded))
+}
+
+func newRunEndEncodedBuilder(mem memory.Allocator, dt *arrow.RunEndEncodedType) *RunEndEncodedBuilder {
+	runEnds, encoded := dt.RunEnds(), dt.Encoded()
 	if !dt.ValidRunEndsType(runEnds) {
 		panic("arrow/ree: invalid runEnds type for run length encoded array")
 	}

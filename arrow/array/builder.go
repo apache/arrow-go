@@ -451,7 +451,7 @@ func NewBuilder(mem memory.Allocator, dtype arrow.DataType) Builder {
 		return NewDurationBuilder(mem, typ)
 	case arrow.RUN_END_ENCODED:
 		typ := dtype.(*arrow.RunEndEncodedType)
-		return NewRunEndEncodedBuilder(mem, typ.RunEnds(), typ.Encoded())
+		return newRunEndEncodedBuilder(mem, typ)
 	case arrow.BINARY_VIEW:
 		return NewBinaryViewBuilder(mem)
 	case arrow.STRING_VIEW:

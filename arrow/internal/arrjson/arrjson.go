@@ -541,6 +541,7 @@ func typeFromJSON(typ json.RawMessage, children []FieldWrapper) (arrowType arrow
 			return
 		}
 		arrowType = arrow.RunEndEncodedOf(children[0].arrowType, children[1].arrowType)
+		arrowType.(*arrow.RunEndEncodedType).ValueNullable = children[1].Nullable
 	}
 
 	if arrowType == nil {

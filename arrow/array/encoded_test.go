@@ -456,6 +456,59 @@ func TestRunEndEncodedBuilderDictionaryEmptyValue(t *testing.T) {
 	assert.Equal(t, "", arr.GetOneForMarshal(0))
 }
 
+func TestRunEndEncodedBuilderPreservesValueNullability(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dt := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int16, arrow.BinaryTypes.String)
+	dt.ValueNullable = false
+	bldr := array.NewBuilder(mem, dt)
+	defer bldr.Release()
+
+	assert.False(t, bldr.Type().(*arrow.RunEndEncodedType).ValueNullable)
+	arr := bldr.NewArray()
+	defer arr.Release()
+	assert.False(t, arr.DataType().(*arrow.RunEndEncodedType).ValueNullable)
+}
+
+func TestRunEndEncodedArrayWithTypePreservesValueNullability(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dt := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int16, arrow.PrimitiveTypes.Int32)
+	dt.ValueNullable = false
+
+	newArray := func(runEndsJSON, valuesJSON string) *array.RunEndEncoded {
+		runEnds, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int16, strings.NewReader(runEndsJSON))
+		require.NoError(t, err)
+		values, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(valuesJSON))
+		require.NoError(t, err)
+		defer runEnds.Release()
+		defer values.Release()
+
+		return array.NewRunEndEncodedArrayWithType(dt, runEnds, values, 2, 0)
+	}
+
+	first := newArray(`[1, 2]`, `[10, 20]`)
+	defer first.Release()
+	second := newArray(`[1, 2]`, `[30, 40]`)
+	defer second.Release()
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "values", Type: dt}}, nil)
+	record := array.NewRecordBatch(schema, []arrow.Array{first}, -1)
+	defer record.Release()
+
+	assert.False(t, first.DataType().(*arrow.RunEndEncodedType).ValueNullable)
+
+	concatenated, err := array.Concatenate([]arrow.Array{first, second}, mem)
+	require.NoError(t, err)
+	defer concatenated.Release()
+
+	assert.True(t, arrow.TypeEqual(dt, concatenated.DataType()))
+	assert.False(t, concatenated.DataType().(*arrow.RunEndEncodedType).ValueNullable)
+	assert.NoError(t, array.ValidateFull(concatenated))
+}
+
 func TestRunEndEncodedStringRoundTrip(t *testing.T) {
 	// 1. create array
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
