@@ -1131,6 +1131,13 @@ func (b *SparseUnionBuilder) UnmarshalOne(dec *json.Decoder) error {
 			return err
 		}
 
+		if int(typeCode) >= len(b.typeIDtoChildID) {
+			return &json.UnmarshalTypeError{
+				Offset: dec.InputOffset(),
+				Value:  "invalid type code",
+			}
+		}
+
 		childNum := b.typeIDtoChildID[typeCode]
 		if childNum == arrow.InvalidUnionChildID {
 			return &json.UnmarshalTypeError{
@@ -1386,6 +1393,13 @@ func (b *DenseUnionBuilder) UnmarshalOne(dec *json.Decoder) error {
 		typeCode, err := unionTypeCodeFromJSON(dec, typeID, b.Type())
 		if err != nil {
 			return err
+		}
+
+		if int(typeCode) >= len(b.typeIDtoChildID) {
+			return &json.UnmarshalTypeError{
+				Offset: dec.InputOffset(),
+				Value:  "invalid type code",
+			}
 		}
 
 		childNum := b.typeIDtoChildID[typeCode]

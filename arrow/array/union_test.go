@@ -100,7 +100,7 @@ func TestUnionBuilderRejectsInvalidJSONTypeCodes(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, typeCode := range []string{"256", "-1", "null"} {
+			for _, typeCode := range []string{"256", "-1", "127", "1.5", "null"} {
 				builder := tc.new()
 				err := func() (err error) {
 					defer func() {
