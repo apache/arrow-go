@@ -142,6 +142,7 @@ func getTakeIndices[T arrow.IntType | arrow.UintType](mem memory.Allocator, filt
 			// true OR NOT valid
 			selectedOrNullBlock := filterCounter.NextOrNotWord()
 			if selectedOrNullBlock.NoneSet() {
+				isValidCounter.NextWord()
 				pos += T(selectedOrNullBlock.Len)
 				posWithOffset += int64(selectedOrNullBlock.Len)
 				continue
