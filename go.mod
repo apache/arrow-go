@@ -36,7 +36,7 @@ require (
 	github.com/hamba/avro/v2 v2.31.0
 	github.com/klauspost/compress v1.19.2
 	github.com/klauspost/cpuid/v2 v2.4.0
-	github.com/pierrec/lz4/v4 v4.1.28
+	github.com/pierrec/lz4/v4 v4.1.29
 	github.com/pterm/pterm v0.12.83
 	github.com/stoewer/go-strcase v1.3.1
 	github.com/stretchr/testify v1.12.0
