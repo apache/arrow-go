@@ -703,6 +703,32 @@ func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 	}
 }
 
+func TestStructBuilderRollsBackRowAfterNestedDecodeError(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer pool.AssertSize(t, 0)
+
+	dtype := arrow.StructOf(
+		arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32},
+		arrow.Field{Name: "b", Type: arrow.ListOf(arrow.PrimitiveTypes.Int32)},
+	)
+
+	sb := array.NewStructBuilder(pool, dtype)
+	defer sb.Release()
+
+	require.Error(t, sb.UnmarshalJSON([]byte(`[{"a":1,"b":[2,"bad"]}]`)))
+	assert.Zero(t, sb.Len())
+	assert.Zero(t, sb.FieldBuilder(0).Len())
+	assert.Zero(t, sb.FieldBuilder(1).Len())
+
+	require.NoError(t, sb.UnmarshalJSON([]byte(`[{"a":1,"b":[2,3]}]`)))
+
+	arr := sb.NewArray().(*array.Struct)
+	defer arr.Release()
+	require.NoError(t, array.ValidateFull(arr))
+	assert.Equal(t, 1, arr.Len())
+	assert.Equal(t, `{[1] [[2 3]]}`, arr.String())
+}
+
 func TestCreateStructWithNulls(t *testing.T) {
 	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer pool.AssertSize(t, 0)

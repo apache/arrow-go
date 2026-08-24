@@ -341,8 +341,9 @@ func (a *Struct) Release() {
 type StructBuilder struct {
 	builder
 
-	dtype  arrow.DataType
-	fields []Builder
+	dtype      arrow.DataType
+	fields     []Builder
+	checkpoint *builderCheckpoint
 }
 
 // NewStructBuilder returns a builder, using the provided memory allocator.
@@ -383,6 +384,7 @@ func (b *StructBuilder) Release() {
 		for _, f := range b.fields {
 			f.Release()
 		}
+		b.checkpoint = nil
 	}
 }
 
@@ -541,6 +543,19 @@ func (b *StructBuilder) AppendValueFromString(s string) error {
 }
 
 func (b *StructBuilder) UnmarshalOne(dec *json.Decoder) error {
+	if b.checkpoint == nil {
+		b.checkpoint = newBuilderCheckpoint(b)
+	}
+	b.checkpoint.capture()
+
+	if err := b.unmarshalOne(dec); err != nil {
+		b.checkpoint.restore()
+		return err
+	}
+	return nil
+}
+
+func (b *StructBuilder) unmarshalOne(dec *json.Decoder) error {
 	t, err := dec.Token()
 	if err != nil {
 		return err
