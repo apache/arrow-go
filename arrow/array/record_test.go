@@ -730,7 +730,7 @@ func TestRecordBuilderRollsBackBooleanAndNullLengths(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			schema := arrow.NewSchema([]arrow.Field{
-				{Name: "value", Type: tc.typ},
+				{Name: "value", Type: tc.typ, Nullable: true},
 				{Name: "other", Type: arrow.PrimitiveTypes.Int32},
 			}, nil)
 			builder := array.NewRecordBuilder(mem, schema)
@@ -755,7 +755,7 @@ func TestRecordBuilderRollsBackDiscardedValidityBits(t *testing.T) {
 	defer mem.AssertSize(t, 0)
 
 	schema := arrow.NewSchema([]arrow.Field{
-		{Name: "value", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "value", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
 		{Name: "other", Type: arrow.PrimitiveTypes.Int32},
 	}, nil)
 	builder := array.NewRecordBuilder(mem, schema)
