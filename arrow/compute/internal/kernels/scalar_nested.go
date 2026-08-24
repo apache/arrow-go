@@ -20,6 +20,7 @@ package kernels
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -79,6 +80,10 @@ func ValidateListElementScalarIndex(value scalar.Scalar) error {
 	return err
 }
 
+func ListElementScalarIndex(value scalar.Scalar) (uint64, error) {
+	return listElementScalarIndex(value)
+}
+
 func listElementScalarIndex(value scalar.Scalar) (uint64, error) {
 	if !value.IsValid() {
 		return 0, fmt.Errorf("%w: list_element index must not be null", arrow.ErrInvalid)
@@ -117,27 +122,42 @@ func unsignedIndex[T arrow.IntType](value T) (uint64, error) {
 }
 
 func listElementValueOffsets(list *exec.ArraySpan, i int64) (int64, int64, error) {
+	check := func(start, end int64) (int64, int64, error) {
+		if start < 0 || end < start || end > list.Children[0].Len {
+			return 0, 0, fmt.Errorf("%w: list_element input has invalid value offsets", arrow.ErrInvalid)
+		}
+		return start, end, nil
+	}
+
 	switch list.Type.ID() {
 	case arrow.LIST:
 		offsets := exec.GetSpanOffsets[int32](list, 1)
-		return int64(offsets[i]), int64(offsets[i+1]), nil
+		return check(int64(offsets[i]), int64(offsets[i+1]))
 	case arrow.LARGE_LIST:
 		offsets := exec.GetSpanOffsets[int64](list, 1)
-		return offsets[i], offsets[i+1], nil
+		return check(offsets[i], offsets[i+1])
 	case arrow.LIST_VIEW:
 		offsets := exec.GetSpanValues[int32](list, 1)
 		sizes := exec.GetSpanValues[int32](list, 2)
 		start := int64(offsets[i])
-		return start, start + int64(sizes[i]), nil
+		size := int64(sizes[i])
+		if size < 0 {
+			return 0, 0, fmt.Errorf("%w: list_element input has invalid value offsets", arrow.ErrInvalid)
+		}
+		return check(start, start+size)
 	case arrow.LARGE_LIST_VIEW:
 		offsets := exec.GetSpanValues[int64](list, 1)
 		sizes := exec.GetSpanValues[int64](list, 2)
 		start := offsets[i]
-		return start, start + sizes[i], nil
+		size := sizes[i]
+		if start < 0 || size < 0 || size > math.MaxInt64-start {
+			return 0, 0, fmt.Errorf("%w: list_element input has invalid value offsets", arrow.ErrInvalid)
+		}
+		return check(start, start+size)
 	case arrow.FIXED_SIZE_LIST:
 		size := int64(list.Type.(*arrow.FixedSizeListType).Len())
 		start := (list.Offset + i) * size
-		return start, start + size, nil
+		return check(start, start+size)
 	default:
 		return 0, 0, fmt.Errorf("%w: unsupported list_element input type %s", arrow.ErrType, list.Type)
 	}

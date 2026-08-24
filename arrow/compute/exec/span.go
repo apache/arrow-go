@@ -582,7 +582,7 @@ func getNumBuffers(dt arrow.DataType) int {
 	case arrow.NULL, arrow.STRUCT, arrow.FIXED_SIZE_LIST:
 		return 1
 	case arrow.BINARY, arrow.LARGE_BINARY, arrow.STRING, arrow.LARGE_STRING,
-		arrow.DENSE_UNION, arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW:
+		arrow.DENSE_UNION:
 		return 3
 	case arrow.BINARY_VIEW, arrow.STRING_VIEW:
 		// bitmap + view-header buffer + a single overflow data buffer.

@@ -23,7 +23,9 @@ import (
 	"fmt"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/compute/internal/kernels"
+	"github.com/apache/arrow-go/v18/arrow/scalar"
 )
 
 var listElementDoc = FunctionDoc{
@@ -80,6 +82,44 @@ func listElementScalarResultSupported(typ arrow.DataType) bool {
 	return true
 }
 
+func listElementScalarArrayValueSupported(values arrow.Array, index int) bool {
+	if values.DataType().ID() != arrow.DICTIONARY && values.IsNull(index) {
+		return true
+	}
+
+	switch values := values.(type) {
+	case *array.BinaryView, *array.StringView, *array.ListView, *array.LargeListView:
+		return false
+	case array.ExtensionArray:
+		return listElementScalarArrayValueSupported(values.Storage(), index)
+	case *array.Struct:
+		for i := 0; i < values.NumField(); i++ {
+			if !listElementScalarArrayValueSupported(values.Field(i), index) {
+				return false
+			}
+		}
+	case *array.SparseUnion:
+		for i := 0; i < values.NumFields(); i++ {
+			if !listElementScalarArrayValueSupported(values.Field(i), index) {
+				return false
+			}
+		}
+	case *array.DenseUnion:
+		child := values.Field(values.ChildID(index))
+		if child == nil {
+			return false
+		}
+		offset := values.ValueOffset(index)
+		if offset < 0 || int64(offset) >= int64(child.Len()) {
+			return false
+		}
+		return listElementScalarArrayValueSupported(child, int(offset))
+	case *array.RunEndEncoded:
+		return listElementScalarArrayValueSupported(values.Values(), values.GetPhysicalIndex(index))
+	}
+	return true
+}
+
 // Validate the index before scalar execution splits arguments into spans. The
 // index contract is defined by the original Datum, not by the length of an
 // execution span.
@@ -98,6 +138,18 @@ func (fn *listElementFunction) Execute(ctx context.Context, opts FunctionOptions
 		if listType, ok := args[0].(ArrayLikeDatum).Type().(arrow.ListLikeType); ok &&
 			!listElementScalarResultSupported(listType.Elem()) {
 			return nil, fmt.Errorf("%w: list_element scalar output type %s is not supported", arrow.ErrNotImplemented, listType.Elem())
+		}
+
+		listValue := args[0].(*ScalarDatum).Value.(scalar.ListScalar)
+		if listValue.IsValid() && listValue.GetList() != nil {
+			index, err := kernels.ListElementScalarIndex(args[1].(*ScalarDatum).Value)
+			if err != nil {
+				return nil, err
+			}
+			values := listValue.GetList()
+			if index < uint64(values.Len()) && !listElementScalarArrayValueSupported(values, int(index)) {
+				return nil, fmt.Errorf("%w: list_element scalar output value %s is not supported", arrow.ErrNotImplemented, values.DataType())
+			}
 		}
 	}
 

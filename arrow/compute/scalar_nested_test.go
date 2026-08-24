@@ -240,6 +240,73 @@ func TestListElementListViewUsesSizes(t *testing.T) {
 	}
 }
 
+func TestListElementRejectsInvalidListViewOffsets(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	tests := []struct {
+		name  string
+		build func(memory.Allocator) arrow.Array
+	}{
+		{"list view negative offset", func(mem memory.Allocator) arrow.Array {
+			builder := array.NewListViewBuilder(mem, arrow.PrimitiveTypes.Int32)
+			builder.ValueBuilder().(*array.Int32Builder).Append(7)
+			builder.AppendDimensions(-1, 1)
+			result := builder.NewArray()
+			builder.Release()
+			return result
+		}},
+		{"list view child overflow", func(mem memory.Allocator) arrow.Array {
+			builder := array.NewListViewBuilder(mem, arrow.PrimitiveTypes.Int32)
+			builder.ValueBuilder().(*array.Int32Builder).Append(7)
+			builder.AppendDimensions(1, 1)
+			result := builder.NewArray()
+			builder.Release()
+			return result
+		}},
+		{"large list view negative offset", func(mem memory.Allocator) arrow.Array {
+			builder := array.NewLargeListViewBuilder(mem, arrow.PrimitiveTypes.Int32)
+			builder.ValueBuilder().(*array.Int32Builder).Append(7)
+			builder.AppendDimensions(-1, 1)
+			result := builder.NewArray()
+			builder.Release()
+			return result
+		}},
+		{"large list view child overflow", func(mem memory.Allocator) arrow.Array {
+			builder := array.NewLargeListViewBuilder(mem, arrow.PrimitiveTypes.Int32)
+			builder.ValueBuilder().(*array.Int32Builder).Append(7)
+			builder.AppendDimensions(1, 1)
+			result := builder.NewArray()
+			builder.Release()
+			return result
+		}},
+		{"large list view offset overflow", func(mem memory.Allocator) arrow.Array {
+			builder := array.NewLargeListViewBuilder(mem, arrow.PrimitiveTypes.Int32)
+			builder.AppendDimensions(int(^uint(0)>>1), 1)
+			result := builder.NewArray()
+			builder.Release()
+			return result
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			input := tc.build(mem)
+			defer input.Release()
+
+			result, err := compute.ListElement(
+				context.Background(),
+				&compute.ArrayDatum{Value: input.Data()},
+				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+			)
+			if result != nil {
+				result.Release()
+			}
+			require.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
+}
+
 func makeListViewWithOutOfOrderOffsets(mem memory.Allocator) arrow.Array {
 	builder := array.NewListViewBuilder(mem, arrow.PrimitiveTypes.Int32)
 	values := builder.ValueBuilder().(*array.Int32Builder)
@@ -904,6 +971,38 @@ func TestListElementDenseUnionScalarWithUnusedUnsupportedChild(t *testing.T) {
 	actual := result.(*compute.ScalarDatum).Value
 	require.Equal(t, arrow.DENSE_UNION, actual.DataType().ID())
 	assert.Equal(t, int32(42), actual.(scalar.Union).ChildValue().(*scalar.Int32).Value)
+}
+
+func TestListElementDenseUnionScalarWithActiveUnsupportedChild(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	unionType := arrow.DenseUnionOf(
+		[]arrow.Field{{Name: "values", Type: arrow.ListViewOf(arrow.PrimitiveTypes.Int32), Nullable: true}},
+		[]arrow.UnionTypeCode{0},
+	)
+	builder := array.NewListBuilder(mem, unionType)
+	values := builder.ValueBuilder().(*array.DenseUnionBuilder)
+	listBuilder := values.Child(0).(*array.ListViewBuilder)
+	builder.Append(true)
+	values.Append(0)
+	listBuilder.ValueBuilder().(*array.Int32Builder).Append(9)
+	listBuilder.AppendDimensions(0, 1)
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	listValue := scalar.NewListScalar(input.(*array.List).ListValues())
+	defer listValue.Release()
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ScalarDatum{Value: listValue},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+	)
+	if result != nil {
+		result.Release()
+	}
+	require.ErrorIs(t, err, arrow.ErrNotImplemented)
 }
 
 func TestListElementDenseUnionExtensionScalarWithUnusedUnsupportedChild(t *testing.T) {
