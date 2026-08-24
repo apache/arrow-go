@@ -59,6 +59,16 @@ func TestNewMetaFunctionKind(t *testing.T) {
 	assert.Equal(t, compute.FuncMeta, fn.Kind())
 }
 
+func TestRegisteredMetaFunctionKinds(t *testing.T) {
+	for _, name := range []string{"cast", "filter", "take", "sort", "sort_indices"} {
+		t.Run(name, func(t *testing.T) {
+			fn, ok := compute.GetFunctionRegistry().GetFunction(name)
+			require.True(t, ok)
+			assert.Equal(t, compute.FuncMeta, fn.Kind())
+		})
+	}
+}
+
 func CheckDispatchBest(t *testing.T, funcName string, originalTypes, expected []arrow.DataType) {
 	fn, exists := compute.GetFunctionRegistry().GetFunction(funcName)
 	require.True(t, exists)
