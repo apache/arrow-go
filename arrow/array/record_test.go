@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/json"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRecord(t *testing.T) {
@@ -556,12 +557,12 @@ func TestRecordBuilder(t *testing.T) {
 	arr := array.RecordToStructArray(rec)
 	defer arr.Release()
 	jsonStr, err := json.Marshal(arr)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	roundtripped, _, err := array.FromJSON(mem, arr.DataType(), bytes.NewReader(jsonStr))
+	require.NoError(t, err)
 	defer roundtripped.Release()
-	assert.NoError(t, err)
-	assert.Truef(t, array.Equal(arr, roundtripped), "JSON round trip returns different array: got=%q, want=%d", arr, roundtripped)
+	assert.Truef(t, array.Equal(arr, roundtripped), "JSON round trip returns different array: got=%q, want=%q", roundtripped, arr)
 }
 
 func TestRecordBuilderRollsBackRowsAfterDecodeError(t *testing.T) {
