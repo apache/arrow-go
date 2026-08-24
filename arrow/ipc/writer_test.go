@@ -353,6 +353,28 @@ func TestGetZeroBasedValueOffsets(t *testing.T) {
 	defer offsets.Release()
 	assert.Same(t, sl.Data().Buffers()[1], offsets.Parent())
 	assert.Equal(t, []int64{0, 1, 2, 3, 4}, arrow.Int64Traits.CastFromBytes(offsets.Bytes()))
+
+	sl = array.NewSlice(large, 2, 6)
+	defer sl.Release()
+
+	offsets = env.getZeroBasedValueOffsets(sl)
+	defer offsets.Release()
+	assert.Nil(t, offsets.Parent(), "rebase int64 offsets when the first logical offset is non-zero")
+	assert.Equal(t, []int64{0, 1, 2, 3, 4}, arrow.Int64Traits.CastFromBytes(offsets.Bytes()))
+
+	largeEmptyPrefixBuilder := array.NewLargeStringBuilder(alloc)
+	largeEmptyPrefixBuilder.AppendValues([]string{"", "", "a"}, nil)
+	largeEmptyPrefix := largeEmptyPrefixBuilder.NewArray()
+	largeEmptyPrefixBuilder.Release()
+	defer largeEmptyPrefix.Release()
+
+	sl = array.NewSlice(largeEmptyPrefix, 1, 3)
+	defer sl.Release()
+
+	offsets = env.getZeroBasedValueOffsets(sl)
+	defer offsets.Release()
+	assert.Same(t, sl.Data().Buffers()[1], offsets.Parent())
+	assert.Equal(t, []int64{0, 0, 1}, arrow.Int64Traits.CastFromBytes(offsets.Bytes()))
 }
 
 func BenchmarkGetZeroBasedValueOffsets(b *testing.B) {
