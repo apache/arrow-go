@@ -141,6 +141,55 @@ func BenchmarkConcatenateFixedWidth(b *testing.B) {
 	}
 }
 
+func TestConcatenateFixedWidthSlices(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	tests := []struct {
+		name  string
+		build func(memory.Allocator) arrow.Array
+	}{
+		{"int32", func(mem memory.Allocator) arrow.Array {
+			builder := array.NewInt32Builder(mem)
+			builder.AppendValues([]int32{10, 20, 30, 40, 50}, nil)
+			result := builder.NewInt32Array()
+			builder.Release()
+			return result
+		}},
+		{"int64", func(mem memory.Allocator) arrow.Array {
+			builder := array.NewInt64Builder(mem)
+			builder.AppendValues([]int64{10, 20, 30, 40, 50}, nil)
+			result := builder.NewInt64Array()
+			builder.Release()
+			return result
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			backing := tt.build(mem)
+			defer backing.Release()
+
+			inputs := []arrow.Array{
+				array.NewSlice(backing, 1, 1),
+				array.NewSlice(backing, 2, 4),
+				array.NewSlice(backing, 4, 5),
+			}
+			for _, input := range inputs {
+				defer input.Release()
+			}
+
+			result, err := array.Concatenate(inputs, mem)
+			require.NoError(t, err)
+			defer result.Release()
+
+			expected := array.NewSlice(backing, 2, 5)
+			defer expected.Release()
+			assert.True(t, array.Equal(expected, result))
+		})
+	}
+}
+
 type ConcatTestSuite struct {
 	suite.Suite
 
