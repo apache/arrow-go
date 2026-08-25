@@ -472,7 +472,11 @@ func avroLogicalToArrowField(n *schemaNode) {
 		if n.node.Precision > decimal128.MaxPrecision {
 			id = arrow.DECIMAL256
 		}
-		dt, _ = arrow.NewDecimalType(id, int32(n.node.Precision), int32(n.node.Scale))
+		var err error
+		dt, err = arrow.NewDecimalType(id, int32(n.node.Precision), int32(n.node.Scale))
+		if err != nil {
+			panic(err)
+		}
 
 	// The uuid logical type represents a random generated universally unique identifier (UUID).
 	// A uuid logical type annotates an Avro string. The string has to conform with RFC-4122
