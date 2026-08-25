@@ -631,6 +631,18 @@ func TestListElementScalarList(t *testing.T) {
 	assert.True(t, scalar.Equals(scalar.NewInt32Scalar(20), actual), "expected: 20\ngot: %s", actual)
 }
 
+func TestListElementRejectsNonListScalar(t *testing.T) {
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ScalarDatum{Value: scalar.NewInt32Scalar(7)},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+	)
+	if result != nil {
+		result.Release()
+	}
+	require.ErrorIs(t, err, arrow.ErrType)
+}
+
 func TestListElementScalarListWithArrayIndex(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

@@ -135,12 +135,23 @@ func (fn *listElementFunction) Execute(ctx context.Context, opts FunctionOptions
 		return nil, err
 	}
 	if args[0].Kind() == KindScalar && args[1].Kind() == KindScalar {
-		if listType, ok := args[0].(ArrayLikeDatum).Type().(arrow.ListLikeType); ok &&
-			!listElementScalarResultSupported(listType.Elem()) {
+		listDatum, ok := args[0].(*ScalarDatum)
+		if !ok {
+			return nil, fmt.Errorf("%w: list_element requires a list-like input", arrow.ErrType)
+		}
+
+		listType, ok := listDatum.Type().(arrow.ListLikeType)
+		if !ok {
+			return nil, fmt.Errorf("%w: list_element requires a list-like input", arrow.ErrType)
+		}
+		if !listElementScalarResultSupported(listType.Elem()) {
 			return nil, fmt.Errorf("%w: list_element scalar output type %s is not supported", arrow.ErrNotImplemented, listType.Elem())
 		}
 
-		listValue := args[0].(*ScalarDatum).Value.(scalar.ListScalar)
+		listValue, ok := listDatum.Value.(scalar.ListScalar)
+		if !ok {
+			return nil, fmt.Errorf("%w: list_element requires a list-like scalar input", arrow.ErrType)
+		}
 		if listValue.IsValid() && listValue.GetList() != nil {
 			index, err := kernels.ListElementScalarIndex(args[1].(*ScalarDatum).Value)
 			if err != nil {
