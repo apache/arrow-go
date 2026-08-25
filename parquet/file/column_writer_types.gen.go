@@ -183,7 +183,6 @@ func (w *Int32ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels
 
 	w.doBatches(int64(length), repLevels, func(offset, batch int64) {
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		writeableIndices := array.NewSlice(indices, valueOffset, valueOffset+info.numSpaced())
 		defer writeableIndices.Release()
@@ -193,6 +192,8 @@ func (w *Int32ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels
 		if err := dictEncoder.PutIndices(writeableIndices); err != nil {
 			panic(err) // caught above
 		}
+
+		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
 			panic(err)
@@ -453,7 +454,6 @@ func (w *Int64ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels
 
 	w.doBatches(int64(length), repLevels, func(offset, batch int64) {
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		writeableIndices := array.NewSlice(indices, valueOffset, valueOffset+info.numSpaced())
 		defer writeableIndices.Release()
@@ -463,6 +463,8 @@ func (w *Int64ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels
 		if err := dictEncoder.PutIndices(writeableIndices); err != nil {
 			panic(err) // caught above
 		}
+
+		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
 			panic(err)
@@ -723,7 +725,6 @@ func (w *Int96ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels
 
 	w.doBatches(int64(length), repLevels, func(offset, batch int64) {
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		writeableIndices := array.NewSlice(indices, valueOffset, valueOffset+info.numSpaced())
 		defer writeableIndices.Release()
@@ -733,6 +734,8 @@ func (w *Int96ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels
 		if err := dictEncoder.PutIndices(writeableIndices); err != nil {
 			panic(err) // caught above
 		}
+
+		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
 			panic(err)
@@ -993,7 +996,6 @@ func (w *Float32ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLeve
 
 	w.doBatches(int64(length), repLevels, func(offset, batch int64) {
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		writeableIndices := array.NewSlice(indices, valueOffset, valueOffset+info.numSpaced())
 		defer writeableIndices.Release()
@@ -1003,6 +1005,8 @@ func (w *Float32ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLeve
 		if err := dictEncoder.PutIndices(writeableIndices); err != nil {
 			panic(err) // caught above
 		}
+
+		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
 			panic(err)
@@ -1263,7 +1267,6 @@ func (w *Float64ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLeve
 
 	w.doBatches(int64(length), repLevels, func(offset, batch int64) {
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		writeableIndices := array.NewSlice(indices, valueOffset, valueOffset+info.numSpaced())
 		defer writeableIndices.Release()
@@ -1273,6 +1276,8 @@ func (w *Float64ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLeve
 		if err := dictEncoder.PutIndices(writeableIndices); err != nil {
 			panic(err) // caught above
 		}
+
+		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
 			panic(err)
@@ -1616,7 +1621,6 @@ func (w *BooleanColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLeve
 
 	w.doBatches(int64(length), repLevels, func(offset, batch int64) {
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		writeableIndices := array.NewSlice(indices, valueOffset, valueOffset+info.numSpaced())
 		defer writeableIndices.Release()
@@ -1626,6 +1630,8 @@ func (w *BooleanColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLeve
 		if err := dictEncoder.PutIndices(writeableIndices); err != nil {
 			panic(err) // caught above
 		}
+
+		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
 			panic(err)
@@ -2059,7 +2065,6 @@ func (w *ByteArrayColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLe
 
 	w.doBatches(int64(length), repLevels, func(offset, batch int64) {
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		writeableIndices := array.NewSlice(indices, valueOffset, valueOffset+info.numSpaced())
 		defer writeableIndices.Release()
@@ -2069,6 +2074,8 @@ func (w *ByteArrayColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLe
 		if err := dictEncoder.PutIndices(writeableIndices); err != nil {
 			panic(err) // caught above
 		}
+
+		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
 			panic(err)
@@ -2439,7 +2446,6 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteDictIndices(indices arrow.Arra
 
 	w.doBatches(int64(length), repLevels, func(offset, batch int64) {
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		writeableIndices := array.NewSlice(indices, valueOffset, valueOffset+info.numSpaced())
 		defer writeableIndices.Release()
@@ -2449,6 +2455,8 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteDictIndices(indices arrow.Arra
 		if err := dictEncoder.PutIndices(writeableIndices); err != nil {
 			panic(err) // caught above
 		}
+
+		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
 			panic(err)

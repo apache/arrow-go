@@ -431,7 +431,6 @@ func (w *{{.Name}}ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLe
 
   w.doBatches(int64(length), repLevels, func(offset, batch int64) {
     info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
-    w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
     writeableIndices := array.NewSlice(indices, valueOffset, valueOffset+info.numSpaced())
     defer writeableIndices.Release()
@@ -441,6 +440,8 @@ func (w *{{.Name}}ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLe
     if err := dictEncoder.PutIndices(writeableIndices); err != nil {
       panic(err) // caught above
     }
+
+    w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
     if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
       panic(err)

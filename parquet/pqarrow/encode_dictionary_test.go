@@ -128,6 +128,37 @@ func TestDictionaryArrayBloomFilter(t *testing.T) {
 	}))
 }
 
+func TestWriteColumnDataRejectsOutOfBoundsDictionaryIndex(t *testing.T) {
+	mem := memory.DefaultAllocator
+
+	dictionary, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32,
+		strings.NewReader(`[10, 20]`))
+	require.NoError(t, err)
+	defer dictionary.Release()
+	indices, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int8,
+		strings.NewReader(`[2]`))
+	require.NoError(t, err)
+	defer indices.Release()
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.PrimitiveTypes.Int32}
+	values := array.NewDictionaryArray(dictType, indices, dictionary)
+	defer values.Release()
+	sc := arrow.NewSchema([]arrow.Field{{Name: "values", Type: dictType, Nullable: false}}, nil)
+
+	var output bytes.Buffer
+	writer, err := pqarrow.NewFileWriter(sc, &output, parquet.NewWriterProperties(
+		parquet.WithAllocator(mem),
+		parquet.WithDictionaryDefault(true),
+		parquet.WithStats(true),
+	), pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem)))
+	require.NoError(t, err)
+	require.NoError(t, writer.NewRowGroupChecked())
+
+	err = writer.WriteColumnData(values)
+	require.ErrorIs(t, err, arrow.ErrIndex)
+	require.NoError(t, writer.Close())
+}
+
 func BenchmarkDictionaryArrayBloomFilter(b *testing.B) {
 	tests := []struct {
 		name              string
