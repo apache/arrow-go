@@ -1240,6 +1240,68 @@ func TestListElementDenseUnionScalarWithActiveUnsupportedDecimalChild(t *testing
 	}
 }
 
+func TestListElementDenseUnionScalarWithActiveNullUnsupportedChild(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	for _, tc := range []struct {
+		name string
+		typ  arrow.DataType
+	}{
+		{
+			name: "binary_view",
+			typ:  arrow.BinaryTypes.BinaryView,
+		},
+		{
+			name: "string_view",
+			typ:  arrow.BinaryTypes.StringView,
+		},
+		{
+			name: "decimal32",
+			typ:  &arrow.Decimal32Type{Precision: 6, Scale: 2},
+		},
+		{
+			name: "decimal64",
+			typ:  &arrow.Decimal64Type{Precision: 12, Scale: 2},
+		},
+		{
+			name: "list_view",
+			typ:  arrow.ListViewOf(arrow.PrimitiveTypes.Int32),
+		},
+		{
+			name: "large_list_view",
+			typ:  arrow.LargeListViewOf(arrow.PrimitiveTypes.Int32),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			unionType := arrow.DenseUnionOf(
+				[]arrow.Field{{Name: "value", Type: tc.typ, Nullable: true}},
+				[]arrow.UnionTypeCode{0},
+			)
+			builder := array.NewListBuilder(mem, unionType)
+			values := builder.ValueBuilder().(*array.DenseUnionBuilder)
+			builder.Append(true)
+			values.Append(0)
+			values.Child(0).AppendNull()
+			input := builder.NewArray()
+			builder.Release()
+			defer input.Release()
+
+			listValue := scalar.NewListScalar(input.(*array.List).ListValues())
+			defer listValue.Release()
+			result, err := compute.ListElement(
+				context.Background(),
+				&compute.ScalarDatum{Value: listValue},
+				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+			)
+			if result != nil {
+				result.Release()
+			}
+			require.ErrorIs(t, err, arrow.ErrNotImplemented)
+		})
+	}
+}
+
 func TestListElementDenseUnionExtensionScalarWithUnusedUnsupportedChild(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

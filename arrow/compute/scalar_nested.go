@@ -88,10 +88,6 @@ func listElementScalarResultSupported(typ arrow.DataType) bool {
 }
 
 func listElementScalarArrayValueSupported(values arrow.Array, index int) bool {
-	if values.DataType().ID() != arrow.DICTIONARY && values.IsNull(index) {
-		return true
-	}
-
 	switch values := values.(type) {
 	case *array.BinaryView, *array.StringView, *array.ListView, *array.LargeListView,
 		*array.Decimal32, *array.Decimal64:
