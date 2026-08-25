@@ -534,6 +534,68 @@ func TestListElementScalarListWithViewElement(t *testing.T) {
 	}
 }
 
+func TestListElementDecimalArrayChildren(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	tests := []struct {
+		name string
+		typ  arrow.DataType
+		add  func(array.Builder, int32)
+	}{
+		{
+			name: "decimal32",
+			typ:  &arrow.Decimal32Type{Precision: 6, Scale: 2},
+			add: func(builder array.Builder, value int32) {
+				builder.(*array.Decimal32Builder).Append(decimal.Decimal32(value))
+			},
+		},
+		{
+			name: "decimal64",
+			typ:  &arrow.Decimal64Type{Precision: 12, Scale: 2},
+			add: func(builder array.Builder, value int32) {
+				builder.(*array.Decimal64Builder).Append(decimal.Decimal64(value))
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			listBuilder := array.NewListBuilder(mem, tc.typ)
+			values := listBuilder.ValueBuilder()
+			for _, row := range [][]int32{{1, 2}, {3, 4}} {
+				listBuilder.Append(true)
+				for _, value := range row {
+					tc.add(values, value)
+				}
+			}
+			input := listBuilder.NewArray()
+			listBuilder.Release()
+			defer input.Release()
+
+			expectedBuilder := array.NewBuilder(mem, tc.typ)
+			tc.add(expectedBuilder, 2)
+			tc.add(expectedBuilder, 4)
+			expected := expectedBuilder.NewArray()
+			expectedBuilder.Release()
+			defer expected.Release()
+
+			result, err := compute.ListElement(
+				context.Background(),
+				&compute.ArrayDatum{Value: input.Data()},
+				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(1)},
+			)
+			require.NoError(t, err)
+			defer result.Release()
+
+			actual := result.(*compute.ArrayDatum).MakeArray()
+			defer actual.Release()
+			require.NoError(t, array.ValidateFull(actual))
+			assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+		})
+	}
+}
+
 func TestListElementScalarListWithUnsupportedDecimalValues(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -1123,6 +1185,59 @@ func TestListElementDenseUnionScalarWithActiveUnsupportedChild(t *testing.T) {
 		result.Release()
 	}
 	require.ErrorIs(t, err, arrow.ErrNotImplemented)
+}
+
+func TestListElementDenseUnionScalarWithActiveUnsupportedDecimalChild(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	for _, tc := range []struct {
+		name string
+		typ  arrow.DataType
+		add  func(array.Builder)
+	}{
+		{
+			name: "decimal32",
+			typ:  &arrow.Decimal32Type{Precision: 6, Scale: 2},
+			add: func(builder array.Builder) {
+				builder.(*array.Decimal32Builder).Append(decimal.Decimal32(123))
+			},
+		},
+		{
+			name: "decimal64",
+			typ:  &arrow.Decimal64Type{Precision: 12, Scale: 2},
+			add: func(builder array.Builder) {
+				builder.(*array.Decimal64Builder).Append(decimal.Decimal64(123))
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			unionType := arrow.DenseUnionOf(
+				[]arrow.Field{{Name: "value", Type: tc.typ, Nullable: true}},
+				[]arrow.UnionTypeCode{0},
+			)
+			builder := array.NewListBuilder(mem, unionType)
+			values := builder.ValueBuilder().(*array.DenseUnionBuilder)
+			builder.Append(true)
+			values.Append(0)
+			tc.add(values.Child(0))
+			input := builder.NewArray()
+			builder.Release()
+			defer input.Release()
+
+			listValue := scalar.NewListScalar(input.(*array.List).ListValues())
+			defer listValue.Release()
+			result, err := compute.ListElement(
+				context.Background(),
+				&compute.ScalarDatum{Value: listValue},
+				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+			)
+			if result != nil {
+				result.Release()
+			}
+			require.ErrorIs(t, err, arrow.ErrNotImplemented)
+		})
+	}
 }
 
 func TestListElementDenseUnionExtensionScalarWithUnusedUnsupportedChild(t *testing.T) {

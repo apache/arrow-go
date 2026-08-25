@@ -93,7 +93,8 @@ func listElementScalarArrayValueSupported(values arrow.Array, index int) bool {
 	}
 
 	switch values := values.(type) {
-	case *array.BinaryView, *array.StringView, *array.ListView, *array.LargeListView:
+	case *array.BinaryView, *array.StringView, *array.ListView, *array.LargeListView,
+		*array.Decimal32, *array.Decimal64:
 		return false
 	case array.ExtensionArray:
 		return listElementScalarArrayValueSupported(values.Storage(), index)
