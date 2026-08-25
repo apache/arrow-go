@@ -139,6 +139,133 @@ func TestListElement(t *testing.T) {
 	}
 }
 
+func TestListElementAllIntegerIndexTypes(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	listTypes := []arrow.DataType{
+		arrow.ListOf(arrow.PrimitiveTypes.Int32),
+		arrow.LargeListOf(arrow.PrimitiveTypes.Int32),
+		arrow.ListViewOf(arrow.PrimitiveTypes.Int32),
+		arrow.LargeListViewOf(arrow.PrimitiveTypes.Int32),
+		arrow.FixedSizeListOf(2, arrow.PrimitiveTypes.Int32),
+	}
+	indexes := []struct {
+		name   string
+		typ    arrow.DataType
+		scalar scalar.Scalar
+	}{
+		{name: "int8", typ: arrow.PrimitiveTypes.Int8, scalar: scalar.NewInt8Scalar(1)},
+		{name: "int16", typ: arrow.PrimitiveTypes.Int16, scalar: scalar.NewInt16Scalar(1)},
+		{name: "int32", typ: arrow.PrimitiveTypes.Int32, scalar: scalar.NewInt32Scalar(1)},
+		{name: "int64", typ: arrow.PrimitiveTypes.Int64, scalar: scalar.NewInt64Scalar(1)},
+		{name: "uint8", typ: arrow.PrimitiveTypes.Uint8, scalar: scalar.NewUint8Scalar(1)},
+		{name: "uint16", typ: arrow.PrimitiveTypes.Uint16, scalar: scalar.NewUint16Scalar(1)},
+		{name: "uint32", typ: arrow.PrimitiveTypes.Uint32, scalar: scalar.NewUint32Scalar(1)},
+		{name: "uint64", typ: arrow.PrimitiveTypes.Uint64, scalar: scalar.NewUint64Scalar(1)},
+	}
+
+	for _, listType := range listTypes {
+		t.Run(listType.String(), func(t *testing.T) {
+			input := listElementInput(t, mem, listType, `[[10, 20], null]`)
+			defer input.Release()
+			expected := listElementInput(t, mem, arrow.PrimitiveTypes.Int32, `[20, null]`)
+			defer expected.Release()
+
+			for _, tc := range indexes {
+				tc := tc
+				t.Run(tc.name+" scalar", func(t *testing.T) {
+					result, err := compute.ListElement(
+						context.Background(),
+						&compute.ArrayDatum{Value: input.Data()},
+						&compute.ScalarDatum{Value: tc.scalar},
+					)
+					require.NoError(t, err)
+					defer result.Release()
+
+					actual := result.(*compute.ArrayDatum).MakeArray()
+					defer actual.Release()
+					require.NoError(t, array.ValidateFull(actual))
+					assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+				})
+
+				t.Run(tc.name+" array", func(t *testing.T) {
+					singleInput := listElementInput(t, mem, listType, `[[10, 20]]`)
+					defer singleInput.Release()
+					index := listElementInput(t, mem, tc.typ, `[1]`)
+					defer index.Release()
+					expectedSingle := listElementInput(t, mem, arrow.PrimitiveTypes.Int32, `[20]`)
+					defer expectedSingle.Release()
+
+					result, err := compute.ListElement(
+						context.Background(),
+						&compute.ArrayDatum{Value: singleInput.Data()},
+						&compute.ArrayDatum{Value: index.Data()},
+					)
+					require.NoError(t, err)
+					defer result.Release()
+
+					actual := result.(*compute.ArrayDatum).MakeArray()
+					defer actual.Release()
+					require.NoError(t, array.ValidateFull(actual))
+					assert.True(t, array.Equal(expectedSingle, actual), "expected: %s\ngot: %s", expectedSingle, actual)
+				})
+			}
+		})
+	}
+}
+
+func TestListElementNumericChildren(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	childTypes := []arrow.DataType{
+		arrow.PrimitiveTypes.Int8,
+		arrow.PrimitiveTypes.Int16,
+		arrow.PrimitiveTypes.Int32,
+		arrow.PrimitiveTypes.Int64,
+		arrow.PrimitiveTypes.Uint8,
+		arrow.PrimitiveTypes.Uint16,
+		arrow.PrimitiveTypes.Uint32,
+		arrow.PrimitiveTypes.Uint64,
+		arrow.FixedWidthTypes.Float16,
+		arrow.PrimitiveTypes.Float32,
+		arrow.PrimitiveTypes.Float64,
+	}
+	for _, childType := range childTypes {
+		t.Run(childType.String(), func(t *testing.T) {
+			listTypes := []arrow.DataType{
+				arrow.ListOf(childType),
+				arrow.LargeListOf(childType),
+				arrow.ListViewOf(childType),
+				arrow.LargeListViewOf(childType),
+				arrow.FixedSizeListOf(2, childType),
+			}
+			for _, listType := range listTypes {
+				t.Run(listType.String(), func(t *testing.T) {
+					input := listElementInput(t, mem, listType, `[[1, 2], [3, 4], null, [5, 6]]`)
+					defer input.Release()
+					expected := listElementInput(t, mem, childType, `[2, 4, null, 6]`)
+					defer expected.Release()
+
+					result, err := compute.ListElement(
+						context.Background(),
+						&compute.ArrayDatum{Value: input.Data()},
+						&compute.ScalarDatum{Value: scalar.NewInt64Scalar(1)},
+					)
+					require.NoError(t, err)
+					defer result.Release()
+
+					actual := result.(*compute.ArrayDatum).MakeArray()
+					defer actual.Release()
+					require.NoError(t, array.ValidateFull(actual))
+					assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+				})
+			}
+		})
+	}
+}
+
 func TestListElementPreservesChildNulls(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
