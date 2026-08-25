@@ -40,7 +40,11 @@ var listElementDoc = FunctionDoc{
 func validateListElementIndex(index Datum) error {
 	switch index.Kind() {
 	case KindScalar:
-		return kernels.ValidateListElementScalarIndex(index.(*ScalarDatum).Value)
+		value, ok := index.(*ScalarDatum)
+		if !ok || value.Value == nil {
+			return fmt.Errorf("%w: list_element requires a scalar index datum", arrow.ErrType)
+		}
+		return kernels.ValidateListElementScalarIndex(value.Value)
 	case KindArray, KindChunked:
 		if index.Len() == 0 {
 			return fmt.Errorf("%w: list_element index array is empty", arrow.ErrInvalid)
@@ -58,7 +62,8 @@ type listElementFunction struct {
 
 func listElementScalarResultSupported(typ arrow.DataType) bool {
 	switch typ.ID() {
-	case arrow.BINARY_VIEW, arrow.STRING_VIEW, arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW:
+	case arrow.BINARY_VIEW, arrow.STRING_VIEW, arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW,
+		arrow.DECIMAL32, arrow.DECIMAL64:
 		return false
 	case arrow.EXTENSION:
 		return listElementScalarResultSupported(typ.(arrow.ExtensionType).StorageType())
@@ -135,9 +140,16 @@ func (fn *listElementFunction) Execute(ctx context.Context, opts FunctionOptions
 		return nil, err
 	}
 	if args[0].Kind() == KindScalar && args[1].Kind() == KindScalar {
+		indexDatum, ok := args[1].(*ScalarDatum)
+		if !ok {
+			return nil, fmt.Errorf("%w: list_element requires a scalar index datum", arrow.ErrType)
+		}
 		listDatum, ok := args[0].(*ScalarDatum)
 		if !ok {
 			return nil, fmt.Errorf("%w: list_element requires a list-like input", arrow.ErrType)
+		}
+		if listDatum.Value == nil {
+			return nil, fmt.Errorf("%w: list_element requires a list-like scalar input", arrow.ErrType)
 		}
 
 		listType, ok := listDatum.Type().(arrow.ListLikeType)
@@ -153,7 +165,7 @@ func (fn *listElementFunction) Execute(ctx context.Context, opts FunctionOptions
 			return nil, fmt.Errorf("%w: list_element requires a list-like scalar input", arrow.ErrType)
 		}
 		if listValue.IsValid() && listValue.GetList() != nil {
-			index, err := kernels.ListElementScalarIndex(args[1].(*ScalarDatum).Value)
+			index, err := kernels.ListElementScalarIndex(indexDatum.Value)
 			if err != nil {
 				return nil, err
 			}

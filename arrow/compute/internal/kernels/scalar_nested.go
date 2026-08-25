@@ -156,7 +156,17 @@ func listElementValueOffsets(list *exec.ArraySpan, i int64) (int64, int64, error
 		return check(start, start+size)
 	case arrow.FIXED_SIZE_LIST:
 		size := int64(list.Type.(*arrow.FixedSizeListType).Len())
-		start := (list.Offset + i) * size
+		if list.Offset < 0 || i < 0 || i > math.MaxInt64-list.Offset {
+			return 0, 0, fmt.Errorf("%w: list_element input has invalid value offsets", arrow.ErrInvalid)
+		}
+		position := list.Offset + i
+		if size < 0 || (size > 0 && position > math.MaxInt64/size) {
+			return 0, 0, fmt.Errorf("%w: list_element input has invalid value offsets", arrow.ErrInvalid)
+		}
+		start := position * size
+		if size > math.MaxInt64-start {
+			return 0, 0, fmt.Errorf("%w: list_element input has invalid value offsets", arrow.ErrInvalid)
+		}
 		return check(start, start+size)
 	default:
 		return 0, 0, fmt.Errorf("%w: unsupported list_element input type %s", arrow.ErrType, list.Type)

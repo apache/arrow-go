@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/compute"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/stretchr/testify/assert"
@@ -307,6 +308,34 @@ func TestListElementRejectsInvalidListViewOffsets(t *testing.T) {
 	}
 }
 
+func TestListElementRejectsFixedSizeListOffsetOverflow(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	valuesBuilder := array.NewInt32Builder(mem)
+	valuesBuilder.AppendValues([]int32{10, 20, 30, 40}, nil)
+	values := valuesBuilder.NewArray()
+	valuesBuilder.Release()
+	defer values.Release()
+
+	const offset = int64(6148914691236517205)
+	typ := arrow.FixedSizeListOf(3, arrow.PrimitiveTypes.Int32)
+	data := array.NewData(typ, 1, []*memory.Buffer{nil}, []arrow.ArrayData{values.Data()}, 0, int(offset))
+	input := array.NewFixedSizeListData(data)
+	data.Release()
+	defer input.Release()
+
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ArrayDatum{Value: input.Data()},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+	)
+	if result != nil {
+		result.Release()
+	}
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+}
+
 func makeListViewWithOutOfOrderOffsets(mem memory.Allocator) arrow.Array {
 	builder := array.NewListViewBuilder(mem, arrow.PrimitiveTypes.Int32)
 	values := builder.ValueBuilder().(*array.Int32Builder)
@@ -420,6 +449,31 @@ func TestListElementEmptyNestedListViews(t *testing.T) {
 	}
 }
 
+func TestListElementEmptyRunEndEncodedChild(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	elemType := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32)
+	builder := array.NewListBuilder(mem, elemType)
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	result, err := compute.ListElement(
+		context.Background(),
+		&compute.ArrayDatum{Value: input.Data()},
+		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+	)
+	require.NoError(t, err)
+	defer result.Release()
+
+	actual := result.(*compute.ArrayDatum).MakeArray()
+	defer actual.Release()
+	require.Equal(t, 0, actual.Len())
+	require.True(t, arrow.TypeEqual(elemType, actual.DataType()))
+	require.NoError(t, array.ValidateFull(actual))
+}
+
 func TestListElementNullParentEmptyListViews(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -470,6 +524,48 @@ func TestListElementScalarListWithViewElement(t *testing.T) {
 			result, err := compute.ListElement(
 				context.Background(),
 				&compute.ScalarDatum{Value: lists},
+				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+			)
+			if result != nil {
+				result.Release()
+			}
+			require.ErrorIs(t, err, arrow.ErrNotImplemented)
+		})
+	}
+}
+
+func TestListElementScalarListWithUnsupportedDecimalValues(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	tests := []struct {
+		name string
+		typ  arrow.DataType
+	}{
+		{name: "decimal32", typ: &arrow.Decimal32Type{Precision: 6, Scale: 2}},
+		{name: "decimal64", typ: &arrow.Decimal64Type{Precision: 12, Scale: 2}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			builder := array.NewBuilder(mem, tc.typ)
+			switch b := builder.(type) {
+			case *array.Decimal32Builder:
+				b.Append(decimal.Decimal32(123))
+			case *array.Decimal64Builder:
+				b.Append(decimal.Decimal64(123))
+			default:
+				t.Fatalf("unexpected builder type %T", builder)
+			}
+			values := builder.NewArray()
+			builder.Release()
+			defer values.Release()
+
+			list := scalar.NewListScalar(values)
+			defer list.Release()
+			result, err := compute.ListElement(
+				context.Background(),
+				&compute.ScalarDatum{Value: list},
 				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
 			)
 			if result != nil {
@@ -636,6 +732,18 @@ func TestListElementRejectsNonListScalar(t *testing.T) {
 		context.Background(),
 		&compute.ScalarDatum{Value: scalar.NewInt32Scalar(7)},
 		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+	)
+	if result != nil {
+		result.Release()
+	}
+	require.ErrorIs(t, err, arrow.ErrType)
+}
+
+func TestListElementRejectsNilScalarIndex(t *testing.T) {
+	result, err := compute.ListElement(
+		context.Background(),
+		compute.EmptyDatum{},
+		&compute.ScalarDatum{},
 	)
 	if result != nil {
 		result.Release()

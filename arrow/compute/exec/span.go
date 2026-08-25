@@ -183,6 +183,9 @@ func (a *ArraySpan) MakeData() arrow.ArrayData {
 	} else if dt.ID() == arrow.DENSE_UNION || dt.ID() == arrow.SPARSE_UNION {
 		bufs[0] = nil
 		nulls = 0
+	} else if dt.ID() == arrow.RUN_END_ENCODED {
+		bufs[0] = nil
+		nulls = 0
 	}
 
 	if len(a.Children) > 0 {

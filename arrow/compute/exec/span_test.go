@@ -34,6 +34,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/apache/arrow-go/v18/internal/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBufferSpan_SetBuffer(t *testing.T) {
@@ -231,6 +232,16 @@ func TestArraySpan_NumBuffers(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestArraySpanFillZeroLengthRunEndEncoded(t *testing.T) {
+	typ := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32)
+	var span exec.ArraySpan
+	exec.FillZeroLength(typ, &span)
+
+	actual := span.MakeArray()
+	defer actual.Release()
+	require.NoError(t, array.ValidateFull(actual))
 }
 
 func TestArraySpan_MakeArrayPreservesListViewBuffers(t *testing.T) {

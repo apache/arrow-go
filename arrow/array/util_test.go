@@ -83,6 +83,65 @@ func TestMakeArrayOfNullListViews(t *testing.T) {
 	}
 }
 
+func TestMakeArrayOfNullRunEndEncoded(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	typ := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32)
+	for _, length := range []int{0, 1, 4} {
+		t.Run(fmt.Sprintf("length-%d", length), func(t *testing.T) {
+			arr := array.MakeArrayOfNull(mem, typ, length)
+			defer arr.Release()
+
+			require.Equal(t, length, arr.Len())
+			require.Equal(t, 0, arr.NullN())
+			require.NoError(t, array.ValidateFull(arr))
+
+			rle := arr.(*array.RunEndEncoded)
+			if length == 0 {
+				require.Zero(t, rle.RunEndsArr().Len())
+				require.Zero(t, rle.Values().Len())
+			} else {
+				require.Equal(t, 1, rle.RunEndsArr().Len())
+				require.Equal(t, 1, rle.Values().Len())
+				require.True(t, rle.Values().IsNull(0))
+			}
+		})
+	}
+}
+
+func TestMakeArrayOfNullUnions(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	types := []arrow.DataType{
+		arrow.SparseUnionOf(
+			[]arrow.Field{
+				{Name: "number", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+				{Name: "text", Type: arrow.BinaryTypes.String, Nullable: true},
+			},
+			[]arrow.UnionTypeCode{5, 42},
+		),
+		arrow.DenseUnionOf(
+			[]arrow.Field{
+				{Name: "number", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+				{Name: "text", Type: arrow.BinaryTypes.String, Nullable: true},
+			},
+			[]arrow.UnionTypeCode{5, 42},
+		),
+	}
+
+	for _, typ := range types {
+		t.Run(typ.String(), func(t *testing.T) {
+			arr := array.MakeArrayOfNull(mem, typ, 1)
+			defer arr.Release()
+
+			require.Equal(t, 0, arr.NullN())
+			require.NoError(t, array.ValidateFull(arr))
+		})
+	}
+}
+
 var typemap = map[arrow.DataType]reflect.Type{
 	arrow.PrimitiveTypes.Int8:   reflect.TypeOf(int8(0)),
 	arrow.PrimitiveTypes.Uint8:  reflect.TypeOf(uint8(0)),
