@@ -1109,10 +1109,12 @@ func (b *SparseUnionBuilder) AppendValueFromString(s string) error {
 		return nil
 	}
 	dec := json.NewDecoder(strings.NewReader(s))
+	dec.UseNumber()
 	return b.UnmarshalOne(dec)
 }
 
 func (b *SparseUnionBuilder) UnmarshalOne(dec *json.Decoder) error {
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -1373,10 +1375,12 @@ func (d *DenseUnionBuilder) AppendValueFromString(s string) error {
 		return nil
 	}
 	dec := json.NewDecoder(strings.NewReader(s))
+	dec.UseNumber()
 	return d.UnmarshalOne(dec)
 }
 
 func (b *DenseUnionBuilder) UnmarshalOne(dec *json.Decoder) error {
+	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err

@@ -24,6 +24,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	internaljson "github.com/apache/arrow-go/v18/internal/json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -78,6 +79,35 @@ func TestUnionBuilderChildBounds(t *testing.T) {
 	}
 }
 
+type unionJSONDecoder struct {
+	name  string
+	apply func(array.UnionBuilder, string) error
+}
+
+func unionJSONDecoders() []unionJSONDecoder {
+	return []unionJSONDecoder{
+		{
+			name: "UnmarshalJSON",
+			apply: func(builder array.UnionBuilder, typeCode string) error {
+				return builder.UnmarshalJSON([]byte("[[" + typeCode + ", 1]]"))
+			},
+		},
+		{
+			name: "AppendValueFromString",
+			apply: func(builder array.UnionBuilder, typeCode string) error {
+				return builder.AppendValueFromString("[" + typeCode + ", 1]")
+			},
+		},
+		{
+			name: "UnmarshalOne",
+			apply: func(builder array.UnionBuilder, typeCode string) error {
+				dec := internaljson.NewDecoder(strings.NewReader("[" + typeCode + ", 1]"))
+				return builder.UnmarshalOne(dec)
+			},
+		},
+	}
+}
+
 func TestUnionBuilderRejectsInvalidJSONTypeCodes(t *testing.T) {
 	fields := []arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}
 	cases := []struct {
@@ -100,18 +130,49 @@ func TestUnionBuilderRejectsInvalidJSONTypeCodes(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, typeCode := range []string{"256", "-1", "127", "1.5", "null"} {
-				builder := tc.new()
-				err := func() (err error) {
-					defer func() {
-						if r := recover(); r != nil {
-							err = fmt.Errorf("panic while decoding type code %s: %v", typeCode, r)
-						}
-					}()
-					return builder.UnmarshalJSON([]byte("[[" + typeCode + ", 1]]"))
-				}()
-				builder.Release()
-				assert.Error(t, err, typeCode)
+			for _, decoder := range unionJSONDecoders() {
+				t.Run(decoder.name, func(t *testing.T) {
+					for _, typeCode := range []string{"256", "-1", "127", "1.5", "null", "-1e-400", "127.00000000000000001"} {
+						t.Run(typeCode, func(t *testing.T) {
+							builder := tc.new()
+							defer builder.Release()
+							assert.Error(t, decoder.apply(builder, typeCode))
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestUnionBuilderRejectsRoundedJSONTypeCodes(t *testing.T) {
+	fields := []arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}
+	cases := []struct {
+		name string
+		new  func() array.UnionBuilder
+	}{
+		{
+			name: "dense",
+			new: func() array.UnionBuilder {
+				return array.NewDenseUnionBuilder(memory.DefaultAllocator, arrow.DenseUnionOf(fields, []arrow.UnionTypeCode{127}))
+			},
+		},
+		{
+			name: "sparse",
+			new: func() array.UnionBuilder {
+				return array.NewSparseUnionBuilder(memory.DefaultAllocator, arrow.SparseUnionOf(fields, []arrow.UnionTypeCode{127}))
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, decoder := range unionJSONDecoders() {
+				t.Run(decoder.name, func(t *testing.T) {
+					builder := tc.new()
+					defer builder.Release()
+					assert.Error(t, decoder.apply(builder, "127.00000000000000001"))
+				})
 			}
 		})
 	}
