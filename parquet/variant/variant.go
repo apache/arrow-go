@@ -342,11 +342,7 @@ func (v ArrayValue) Values() iter.Seq[Value] {
 			idx := uint32(v.offsetStart) + i*uint32(v.offsetSize)
 			offset := readLEU32(v.value[idx : idx+uint32(v.offsetSize)])
 
-			val := v.value[v.dataStart+offset:]
-			sz := valueSize(val)
-			val = val[:sz] // trim to actual size
-
-			if !yield(Value{value: val, meta: v.meta}) {
+			if !yield(trimValue(v.meta, v.value[v.dataStart+offset:])) {
 				return
 			}
 		}
@@ -364,7 +360,7 @@ func (v ArrayValue) Value(i uint32) (Value, error) {
 	idx := uint32(v.offsetStart) + i*uint32(v.offsetSize)
 	offset := readLEU32(v.value[idx : idx+uint32(v.offsetSize)])
 
-	return Value{meta: v.meta, value: v.value[v.dataStart+offset:]}, nil
+	return trimValue(v.meta, v.value[v.dataStart+offset:]), nil
 }
 
 // ObjectValue represents an object (map/dictionary) of key-value pairs.
@@ -410,7 +406,7 @@ func (v ObjectValue) ValueByKey(key string) (ObjectField, error) {
 				offset := readLEU32(v.value[idx : idx+uint32(v.offsetSize)])
 				return ObjectField{
 					Key:   key,
-					Value: Value{value: v.value[v.dataStart+offset:], meta: v.meta}}, nil
+					Value: trimValue(v.meta, v.value[v.dataStart+offset:])}, nil
 			}
 		}
 		return ObjectField{}, arrow.ErrNotFound
@@ -435,7 +431,7 @@ func (v ObjectValue) ValueByKey(key string) (ObjectField, error) {
 
 			return ObjectField{
 				Key:   key,
-				Value: Value{value: v.value[v.dataStart+offset:], meta: v.meta}}, nil
+				Value: trimValue(v.meta, v.value[v.dataStart+offset:])}, nil
 		case 1:
 			j = mid
 		}
@@ -464,7 +460,7 @@ func (v ObjectValue) FieldAt(i uint32) (ObjectField, error) {
 
 	return ObjectField{
 		Key:   k,
-		Value: Value{value: v.value[v.dataStart+offset:], meta: v.meta}}, nil
+		Value: trimValue(v.meta, v.value[v.dataStart+offset:])}, nil
 }
 
 // Values returns an iterator over all key-value pairs in the object.
@@ -481,9 +477,7 @@ func (v ObjectValue) Values() iter.Seq2[string, Value] {
 			offsetIdx := uint32(v.offsetStart) + i*uint32(v.offsetSize)
 			offset := readLEU32(v.value[offsetIdx : offsetIdx+uint32(v.offsetSize)])
 
-			value := v.value[v.dataStart+offset:]
-			sz := valueSize(value)
-			if !yield(k, Value{value: value[:sz], meta: v.meta}) {
+			if !yield(k, trimValue(v.meta, v.value[v.dataStart+offset:])) {
 				return
 			}
 		}
@@ -506,6 +500,10 @@ var NullValue = Value{meta: Metadata{data: EmptyMetadataBytes[:]}, value: []byte
 type Value struct {
 	value []byte
 	meta  Metadata
+}
+
+func trimValue(meta Metadata, value []byte) Value {
+	return Value{value: value[:valueSize(value)], meta: meta}
 }
 
 // NewWithMetadata creates a Value with the provided metadata and value bytes.
@@ -574,13 +572,6 @@ func validatePrimitiveValue(value []byte) (int, error) {
 	return want, nil
 }
 
-type validationChild struct {
-	value        []byte
-	index        int
-	start        uint64
-	expectedSize uint64
-}
-
 type validationRange struct {
 	start uint64
 	end   uint64
@@ -588,23 +579,40 @@ type validationRange struct {
 }
 
 type validationFrame struct {
-	value       []byte
-	kind        BasicType
-	size        int
-	dataSize    uint64
-	children    []validationChild
-	ranges      []validationRange
-	nextChild   int
-	pending     validationChild
-	initialized bool
-	compound    bool
+	value               []byte
+	kind                BasicType
+	size                int
+	dataSize            uint64
+	dataStart           uint64
+	offsetStart         uint64
+	offsetSize          uint8
+	numChildren         uint32
+	nextChild           uint32
+	pendingIndex        int
+	pendingStart        uint64
+	pendingExpectedSize uint64
+	rangeStart          int
+	initialized         bool
+	compound            bool
 }
+
+const (
+	validationStackInlineCapacity = 32
+	validationRangeInlineCapacity = 64
+)
 
 // validateValue walks compound values with an explicit stack so valid values
 // are not limited by the Go call stack or an implementation-defined nesting
 // depth.
 func validateValue(meta Metadata, value []byte) (int, error) {
-	stack := []validationFrame{{value: value}}
+	var stackStorage [validationStackInlineCapacity]validationFrame
+	stack := stackStorage[:1]
+	stack[0].value = value
+
+	var rangeStorage [validationRangeInlineCapacity]validationRange
+	ranges := rangeStorage[:0]
+	rangeTop := 0
+
 	var (
 		resultSize int
 		resultErr  error
@@ -614,15 +622,14 @@ func validateValue(meta Metadata, value []byte) (int, error) {
 	for len(stack) > 0 {
 		frame := &stack[len(stack)-1]
 		if hasResult {
-			child := frame.pending
 			hasResult = false
 
 			if resultErr != nil {
 				switch frame.kind {
 				case BasicArray:
-					return 0, fmt.Errorf("invalid variant value: array element %d: %w", child.index, resultErr)
+					return 0, fmt.Errorf("invalid variant value: array element %d: %w", frame.pendingIndex, resultErr)
 				case BasicObject:
-					return 0, fmt.Errorf("invalid variant value: object field %d: %w", child.index, resultErr)
+					return 0, fmt.Errorf("invalid variant value: object field %d: %w", frame.pendingIndex, resultErr)
 				default:
 					return 0, resultErr
 				}
@@ -630,19 +637,28 @@ func validateValue(meta Metadata, value []byte) (int, error) {
 
 			switch frame.kind {
 			case BasicArray:
-				if uint64(resultSize) != child.expectedSize {
-					return 0, fmt.Errorf("invalid variant value: array element %d has trailing bytes", child.index)
+				if uint64(resultSize) != frame.pendingExpectedSize {
+					return 0, fmt.Errorf("invalid variant value: array element %d has trailing bytes", frame.pendingIndex)
 				}
 			case BasicObject:
-				end := child.start + uint64(resultSize)
+				end := frame.pendingStart + uint64(resultSize)
 				if end > frame.dataSize {
-					return 0, fmt.Errorf("invalid variant value: object field %d extends beyond data", child.index)
+					return 0, fmt.Errorf("invalid variant value: object field %d extends beyond data", frame.pendingIndex)
 				}
-				frame.ranges = append(frame.ranges, validationRange{
-					start: child.start,
-					end:   end,
-					field: child.index,
-				})
+				if rangeTop < len(ranges) {
+					ranges[rangeTop] = validationRange{
+						start: frame.pendingStart,
+						end:   end,
+						field: frame.pendingIndex,
+					}
+				} else {
+					ranges = append(ranges, validationRange{
+						start: frame.pendingStart,
+						end:   end,
+						field: frame.pendingIndex,
+					})
+				}
+				rangeTop++
 			}
 			continue
 		}
@@ -658,18 +674,36 @@ func validateValue(meta Metadata, value []byte) (int, error) {
 				hasResult = true
 				continue
 			}
+			if frame.kind == BasicObject {
+				frame.rangeStart = rangeTop
+			}
 		}
 
 		if frame.compound {
-			if frame.nextChild < len(frame.children) {
-				child := frame.children[frame.nextChild]
+			if frame.nextChild < frame.numChildren {
+				child, index, start, expectedSize, err := nextValidationChild(frame)
+				if err != nil {
+					stack = stack[:len(stack)-1]
+					if len(stack) == 0 {
+						return 0, err
+					}
+					resultErr = err
+					hasResult = true
+					continue
+				}
+
 				frame.nextChild++
-				frame.pending = child
-				stack = append(stack, validationFrame{value: child.value})
+				frame.pendingIndex = index
+				frame.pendingStart = start
+				frame.pendingExpectedSize = expectedSize
+				stack = append(stack, validationFrame{value: child})
 				continue
 			}
 
-			if err := finishValidationFrame(frame); err != nil {
+			if err := finishValidationFrame(frame, ranges[frame.rangeStart:rangeTop]); err != nil {
+				if frame.kind == BasicObject {
+					rangeTop = frame.rangeStart
+				}
 				stack = stack[:len(stack)-1]
 				if len(stack) == 0 {
 					return 0, err
@@ -677,6 +711,9 @@ func validateValue(meta Metadata, value []byte) (int, error) {
 				resultErr = err
 				hasResult = true
 				continue
+			}
+			if frame.kind == BasicObject {
+				rangeTop = frame.rangeStart
 			}
 		}
 
@@ -691,12 +728,12 @@ func validateValue(meta Metadata, value []byte) (int, error) {
 	return 0, errors.New("invalid variant value: validation stack exhausted")
 }
 
-func finishValidationFrame(frame *validationFrame) error {
+func finishValidationFrame(frame *validationFrame, ranges []validationRange) error {
 	if frame.kind != BasicObject {
 		return nil
 	}
 
-	slices.SortFunc(frame.ranges, func(a, b validationRange) int {
+	slices.SortFunc(ranges, func(a, b validationRange) int {
 		switch {
 		case a.start < b.start:
 			return -1
@@ -711,7 +748,7 @@ func finishValidationFrame(frame *validationFrame) error {
 		next          uint64
 		previousField int
 	)
-	for _, child := range frame.ranges {
+	for _, child := range ranges {
 		switch {
 		case child.start < next:
 			return fmt.Errorf("invalid variant value: object fields %d and %d overlap", previousField, child.field)
@@ -785,34 +822,27 @@ func prepareArrayValidationFrame(frame *validationFrame) error {
 		return fmt.Errorf("invalid variant value: array offset table ends at %d, got %d bytes", dataStart, len(value))
 	}
 
-	offsets := make([]uint32, int(numElements)+1)
-	for i := range offsets {
+	var previousOffset uint32
+	for i := uint64(0); i <= uint64(numElements); i++ {
 		pos := offsetStart + uint64(i)*uint64(offsetSize)
 		offset := readLEU32(value[int(pos) : int(pos)+int(offsetSize)])
 		if i == 0 && offset != 0 {
 			return fmt.Errorf("invalid variant value: array first offset must be zero, got %d", offset)
 		}
-		if i > 0 && offset < offsets[i-1] {
+		if i > 0 && offset < previousOffset {
 			return fmt.Errorf("invalid variant value: array offsets are not monotonic")
 		}
 		if dataStart+uint64(offset) > uint64(len(value)) || dataStart+uint64(offset) > math.MaxUint32 {
 			return fmt.Errorf("invalid variant value: array offset %d is out of range", offset)
 		}
-		offsets[i] = offset
+		previousOffset = offset
 	}
 
-	frame.children = make([]validationChild, 0, len(offsets)-1)
-	for i := 0; i < len(offsets)-1; i++ {
-		start := dataStart + uint64(offsets[i])
-		end := dataStart + uint64(offsets[i+1])
-		frame.children = append(frame.children, validationChild{
-			value:        value[int(start):int(end)],
-			index:        i,
-			expectedSize: end - start,
-		})
-	}
-
-	frame.size = int(dataStart + uint64(offsets[len(offsets)-1]))
+	frame.dataStart = dataStart
+	frame.offsetStart = offsetStart
+	frame.offsetSize = offsetSize
+	frame.numChildren = numElements
+	frame.size = int(dataStart + uint64(previousOffset))
 	return nil
 }
 
@@ -841,8 +871,12 @@ func prepareObjectValidationFrame(meta Metadata, frame *validationFrame) error {
 	if dataStart > uint64(len(value)) || dataStart > math.MaxUint32 {
 		return fmt.Errorf("invalid variant value: object offset table ends at %d, got %d bytes", dataStart, len(value))
 	}
+	finalOffsetPos := offsetStart + uint64(numElements)*uint64(offsetSize)
+	dataSize := readLEU32(value[int(finalOffsetPos) : int(finalOffsetPos)+int(offsetSize)])
+	if dataStart+uint64(dataSize) > uint64(len(value)) || dataStart+uint64(dataSize) > math.MaxUint32 {
+		return fmt.Errorf("invalid variant value: object data ends at %d, got %d bytes", dataStart+uint64(dataSize), len(value))
+	}
 
-	fieldOffsets := make([]uint32, int(numElements))
 	var previousKey string
 	for i := range numElements {
 		idPos := idStart + uint64(i)*uint64(idSize)
@@ -857,32 +891,38 @@ func prepareObjectValidationFrame(meta Metadata, frame *validationFrame) error {
 		previousKey = key
 
 		offsetPos := offsetStart + uint64(i)*uint64(offsetSize)
-		fieldOffsets[i] = readLEU32(value[int(offsetPos) : int(offsetPos)+int(offsetSize)])
-	}
-
-	finalOffsetPos := offsetStart + uint64(numElements)*uint64(offsetSize)
-	dataSize := readLEU32(value[int(finalOffsetPos) : int(finalOffsetPos)+int(offsetSize)])
-	if dataStart+uint64(dataSize) > uint64(len(value)) || dataStart+uint64(dataSize) > math.MaxUint32 {
-		return fmt.Errorf("invalid variant value: object data ends at %d, got %d bytes", dataStart+uint64(dataSize), len(value))
-	}
-
-	frame.children = make([]validationChild, 0, len(fieldOffsets))
-	for i, offset := range fieldOffsets {
+		offset := readLEU32(value[int(offsetPos) : int(offsetPos)+int(offsetSize)])
 		if uint64(offset) > uint64(dataSize) {
 			return fmt.Errorf("invalid variant value: object field %d offset %d is out of range", i, offset)
 		}
-
-		start := dataStart + uint64(offset)
-		frame.children = append(frame.children, validationChild{
-			value: value[int(start):],
-			index: i,
-			start: uint64(offset),
-		})
 	}
 
+	frame.dataStart = dataStart
+	frame.offsetStart = offsetStart
+	frame.offsetSize = offsetSize
+	frame.numChildren = numElements
 	frame.dataSize = uint64(dataSize)
 	frame.size = int(dataStart + uint64(dataSize))
 	return nil
+}
+
+func nextValidationChild(frame *validationFrame) ([]byte, int, uint64, uint64, error) {
+	index := int(frame.nextChild)
+	position := frame.offsetStart + uint64(frame.nextChild)*uint64(frame.offsetSize)
+	offset := readLEU32(frame.value[int(position) : int(position)+int(frame.offsetSize)])
+	start := frame.dataStart + uint64(offset)
+
+	if frame.kind == BasicArray {
+		nextPosition := position + uint64(frame.offsetSize)
+		nextOffset := readLEU32(frame.value[int(nextPosition) : int(nextPosition)+int(frame.offsetSize)])
+		end := frame.dataStart + uint64(nextOffset)
+		return frame.value[int(start):int(end)], index, 0, end - start, nil
+	}
+
+	if uint64(offset) > frame.dataSize {
+		return nil, index, 0, 0, fmt.Errorf("invalid variant value: object field %d offset %d is out of range", index, offset)
+	}
+	return frame.value[int(start):], index, uint64(offset), 0, nil
 }
 
 // New creates a Value by parsing both the metadata and value bytes.

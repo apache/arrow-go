@@ -604,6 +604,45 @@ func TestArrayValues(t *testing.T) {
 	})
 }
 
+func TestIndexedValueRoundTrip(t *testing.T) {
+	assertRoundTrip := func(t *testing.T, value variant.Value) {
+		t.Helper()
+
+		roundTripped, err := variant.NewWithMetadata(value.Metadata(), value.Bytes())
+		require.NoError(t, err)
+		assert.Equal(t, value.Bytes(), roundTripped.Bytes())
+	}
+
+	t.Run("array values", func(t *testing.T) {
+		v, err := variant.ParseJSON(`[1, 2, {"nested": 3}]`, false)
+		require.NoError(t, err)
+
+		arr := v.Value().(variant.ArrayValue)
+		for i := range arr.Len() {
+			value, err := arr.Value(i)
+			require.NoError(t, err)
+			assertRoundTrip(t, value)
+		}
+	})
+
+	t.Run("object values", func(t *testing.T) {
+		v, err := variant.ParseJSON(`{"a": 1, "b": [2, 3]}`, false)
+		require.NoError(t, err)
+
+		obj := v.Value().(variant.ObjectValue)
+		for _, key := range []string{"a", "b"} {
+			field, err := obj.ValueByKey(key)
+			require.NoError(t, err)
+			assertRoundTrip(t, field.Value)
+		}
+		for i := range obj.NumElements() {
+			field, err := obj.FieldAt(i)
+			require.NoError(t, err)
+			assertRoundTrip(t, field.Value)
+		}
+	})
+}
+
 func TestInvalidMetadata(t *testing.T) {
 	tests := []struct {
 		name     string
