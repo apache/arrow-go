@@ -37,6 +37,31 @@ func TestRleEncoderMaximumRepeatedRun(t *testing.T) {
 	}
 }
 
+func TestRleEncoderBatchSplitsMaximumRepeatedRun(t *testing.T) {
+	buf := make([]byte, 16)
+	enc := NewRleEncoder(NewWriterAtBuffer(buf), 1)
+	enc.curVal = 1
+	enc.repCount = math.MaxInt32 - 4
+
+	n, err := enc.PutBatchLevels([]int16{1, 1, 1, 1, 1, 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 6 {
+		t.Fatalf("encoded %d values, want 6", n)
+	}
+	if n := enc.Flush(); n != 8 {
+		t.Fatalf("encoded %d bytes, want 8", n)
+	}
+
+	want := []byte{0xfe, 0xff, 0xff, 0xff, 0x0f, 1, 4, 1}
+	for i, value := range want {
+		if buf[i] != value {
+			t.Fatalf("byte %d = %#x, want %#x", i, buf[i], value)
+		}
+	}
+}
+
 func TestRleEncoderBatchReportsValuesBeforeFlushError(t *testing.T) {
 	enc := NewRleEncoder(NewWriterAtBuffer(nil), 1)
 	values := []int16{0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1}

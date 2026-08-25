@@ -663,13 +663,25 @@ func TestRleRandom(t *testing.T) {
 
 func TestRleBatchLevelsMatchesScalar(t *testing.T) {
 	patterns := map[string][]int16{
-		"all defined": make([]int16, 257),
-		"alternating": make([]int16, 257),
-		"mixed runs":  {},
+		"all defined":      make([]int16, 257),
+		"alternating":      make([]int16, 257),
+		"long alternating": make([]int16, 63*8+17),
+		"literal boundary": make([]int16, 63*8+17),
+		"mixed runs":       {},
 	}
 	for i := range patterns["all defined"] {
 		patterns["all defined"][i] = 3
 		patterns["alternating"][i] = int16(i % 2)
+	}
+	for i := range patterns["long alternating"] {
+		patterns["long alternating"][i] = int16(i % 2)
+	}
+	for i := range patterns["literal boundary"] {
+		if i < 63*8-3 {
+			patterns["literal boundary"][i] = int16(i % 2)
+		} else {
+			patterns["literal boundary"][i] = 3
+		}
 	}
 	for runLength := 1; runLength <= 32; runLength++ {
 		for range runLength {
