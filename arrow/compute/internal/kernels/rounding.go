@@ -916,21 +916,13 @@ func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts 
 
 	// Calendar units with variable duration (year, quarter, month, week) require date arithmetic
 	if !opts.isSubDay {
-		tsNanos, err := convertToNanos(ts, inputUnit)
-		if err != nil {
-			return 0, err
-		}
-		return roundTimestampCalendar(tsNanos, inputUnit, tz, opts)
+		return roundTimestampCalendar(ts, inputUnit, tz, opts)
 	}
 
 	// Day rounding with timezone requires calendar arithmetic (days vary: 23/24/25 hours due to DST)
 	isUTC := tz == time.UTC || tz.String() == "UTC"
 	if !isUTC && opts.Unit == RoundTemporalDay {
-		tsNanos, err := convertToNanos(ts, inputUnit)
-		if err != nil {
-			return 0, err
-		}
-		return roundTimestampCalendar(tsNanos, inputUnit, tz, opts)
+		return roundTimestampCalendar(ts, inputUnit, tz, opts)
 	}
 
 	// Sub-day units (hour, minute, second, etc.) use fixed-duration arithmetic
@@ -1024,20 +1016,7 @@ func checkedInt64ToInt(value int64) (int, error) {
 	return result, nil
 }
 
-// Nanosecond timestamps can only represent dates in this year range. Keep
-// calendar arithmetic inside it before constructing a time.Time so large
-// options cannot wrap inside the time package.
-const (
-	minNanosecondTimestampYear = 1677
-	maxNanosecondTimestampYear = 2262
-	maxCalendarDayOffset       = (maxNanosecondTimestampYear - minNanosecondTimestampYear + 1) * 366
-)
-
 func checkedCalendarDate(year, month int64, tz *time.Location) (time.Time, error) {
-	if year < minNanosecondTimestampYear || year > maxNanosecondTimestampYear {
-		return time.Time{}, overflowError()
-	}
-
 	dateYear, err := checkedInt64ToInt(year)
 	if err != nil {
 		return time.Time{}, err
@@ -1046,20 +1025,20 @@ func checkedCalendarDate(year, month int64, tz *time.Location) (time.Time, error
 	if err != nil {
 		return time.Time{}, err
 	}
-	return time.Date(dateYear, time.Month(dateMonth), 1, 0, 0, 0, 0, tz), nil
+	result := time.Date(dateYear, time.Month(dateMonth), 1, 0, 0, 0, 0, tz)
+	if int64(result.Year()) != year {
+		return time.Time{}, overflowError()
+	}
+	return result, nil
 }
 
 func checkedCalendarAddDays(value time.Time, days int64) (time.Time, error) {
-	if days < -maxCalendarDayOffset || days > maxCalendarDayOffset {
-		return time.Time{}, overflowError()
-	}
-
 	dayOffset, err := checkedInt64ToInt(days)
 	if err != nil {
 		return time.Time{}, err
 	}
 	result := value.AddDate(0, 0, dayOffset)
-	if result.Year() < minNanosecondTimestampYear || result.Year() > maxNanosecondTimestampYear {
+	if (days > 0 && result.Before(value)) || (days < 0 && result.After(value)) {
 		return time.Time{}, overflowError()
 	}
 	return result, nil
@@ -1180,22 +1159,60 @@ func roundToMultipleInt64(value, multiple int64, mode RoundMode, strictCeil bool
 	return checkedMulInt64(quotient, multiple)
 }
 
-// halfRoundPeriod performs half-rounding by finding the midpoint between period start and end
-func halfRoundPeriod(t, periodStart, periodEnd time.Time) time.Time {
-	midPoint := periodStart.Add(periodEnd.Sub(periodStart) / 2)
-	if t.Before(midPoint) {
-		return periodStart
+// halfRoundPeriod performs half-rounding by finding the midpoint between period start and end.
+// It does not use time.Time.Sub because that method saturates for periods longer than
+// approximately 292 years.
+func halfRoundPeriod(t, periodStart, periodEnd time.Time) (time.Time, error) {
+	if periodEnd.Before(periodStart) {
+		return time.Time{}, overflowError()
 	}
-	return periodEnd
+
+	startSeconds := periodStart.Unix()
+	endSeconds := periodEnd.Unix()
+	deltaSeconds, err := checkedSubInt64(endSeconds, startSeconds)
+	if err != nil {
+		return time.Time{}, err
+	}
+	deltaNanos := periodEnd.Nanosecond() - periodStart.Nanosecond()
+	if deltaNanos < 0 {
+		deltaSeconds, err = checkedSubInt64(deltaSeconds, 1)
+		if err != nil {
+			return time.Time{}, err
+		}
+		deltaNanos += int(time.Second)
+	}
+
+	halfSeconds := deltaSeconds / 2
+	halfNanos := int64(deltaNanos)
+	if deltaSeconds%2 != 0 {
+		halfNanos += int64(time.Second)
+	}
+	halfNanos /= 2
+
+	midpointSeconds, err := checkedAddInt64(startSeconds, halfSeconds)
+	if err != nil {
+		return time.Time{}, err
+	}
+	midpointNanos := periodStart.Nanosecond() + int(halfNanos)
+	if midpointNanos >= int(time.Second) {
+		midpointSeconds, err = checkedAddInt64(midpointSeconds, 1)
+		if err != nil {
+			return time.Time{}, err
+		}
+		midpointNanos -= int(time.Second)
+	}
+	midPoint := time.Unix(midpointSeconds, int64(midpointNanos)).In(periodStart.Location())
+	if t.Before(midPoint) {
+		return periodStart, nil
+	}
+	return periodEnd, nil
 }
 
 // roundTimestampCalendar handles calendar-based rounding (year, quarter, month, week, day).
 // Requires date arithmetic for variable-length periods and timezone-aware boundaries.
-func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Location, opts roundTemporalState) (int64, error) {
+func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts roundTemporalState) (int64, error) {
 	// Convert to time.Time for calendar operations in the specified timezone
-	secs := tsNanos / 1000000000
-	nanos := tsNanos % 1000000000
-	t := time.Unix(secs, nanos).In(tz)
+	t := arrow.Timestamp(ts).ToTime(inputUnit).In(tz)
 
 	var rounded time.Time
 	var err error
@@ -1245,7 +1262,10 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 			if dateErr != nil {
 				return 0, dateErr
 			}
-			rounded = halfRoundPeriod(t, yearStart, yearEnd)
+			rounded, err = halfRoundPeriod(t, yearStart, yearEnd)
+			if err != nil {
+				return 0, err
+			}
 		}
 
 	case RoundTemporalQuarter:
@@ -1311,7 +1331,10 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 			if dateErr != nil {
 				return 0, dateErr
 			}
-			rounded = halfRoundPeriod(t, quarterStart, quarterEnd)
+			rounded, err = halfRoundPeriod(t, quarterStart, quarterEnd)
+			if err != nil {
+				return 0, err
+			}
 		}
 
 	case RoundTemporalMonth:
@@ -1377,7 +1400,10 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 			if dateErr != nil {
 				return 0, dateErr
 			}
-			rounded = halfRoundPeriod(t, monthStart, monthEnd)
+			rounded, err = halfRoundPeriod(t, monthStart, monthEnd)
+			if err != nil {
+				return 0, err
+			}
 		}
 
 	case RoundTemporalWeek:
@@ -1445,7 +1471,10 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 			if dateErr != nil {
 				return 0, dateErr
 			}
-			rounded = halfRoundPeriod(t, roundedWeekStart, weekEnd)
+			rounded, err = halfRoundPeriod(t, roundedWeekStart, weekEnd)
+			if err != nil {
+				return 0, err
+			}
 		}
 
 	case RoundTemporalDay:
@@ -1465,7 +1494,10 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 			if dateErr != nil {
 				return 0, dateErr
 			}
-			rounded = halfRoundPeriod(t, startOfDay, nextDay)
+			rounded, err = halfRoundPeriod(t, startOfDay, nextDay)
+			if err != nil {
+				return 0, err
+			}
 		}
 
 	default:
@@ -1475,12 +1507,12 @@ func roundTimestampCalendar(tsNanos int64, inputUnit arrow.TimeUnit, tz *time.Lo
 		return 0, err
 	}
 
-	// Convert back to the input unit
-	roundedNanos, err := timeToNanos(rounded)
+	// Convert back to the input unit, validating only the selected result.
+	roundedTimestamp, err := arrow.TimestampFromTime(rounded, inputUnit)
 	if err != nil {
 		return 0, err
 	}
-	return convertFromNanos(roundedNanos, inputUnit), nil
+	return int64(roundedTimestamp), nil
 }
 
 func timeToNanos(value time.Time) (int64, error) {
