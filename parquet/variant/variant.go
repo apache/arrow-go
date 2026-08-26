@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"iter"
 	"maps"
-	"math"
 	"slices"
 	"strings"
 	"time"
@@ -321,9 +320,9 @@ type ArrayValue struct {
 	meta  Metadata
 
 	numElements uint32
-	dataStart   uint32
+	dataStart   uint64
 	offsetSize  uint8
-	offsetStart uint8
+	offsetStart uint64
 }
 
 // MarshalJSON implements the json.Marshaler interface for ArrayValue.
@@ -340,10 +339,10 @@ func (v ArrayValue) Len() uint32 { return v.numElements }
 func (v ArrayValue) Values() iter.Seq[Value] {
 	return func(yield func(Value) bool) {
 		for i := range v.numElements {
-			idx := uint32(v.offsetStart) + i*uint32(v.offsetSize)
-			offset := readLEU32(v.value[idx : idx+uint32(v.offsetSize)])
+			idx := v.offsetStart + uint64(i)*uint64(v.offsetSize)
+			offset := readLEU32(v.value[idx : idx+uint64(v.offsetSize)])
 
-			if !yield(trimValue(v.meta, v.value[v.dataStart+offset:])) {
+			if !yield(trimValue(v.meta, v.value[v.dataStart+uint64(offset):])) {
 				return
 			}
 		}
@@ -358,10 +357,10 @@ func (v ArrayValue) Value(i uint32) (Value, error) {
 			arrow.ErrIndex, i, v.numElements)
 	}
 
-	idx := uint32(v.offsetStart) + i*uint32(v.offsetSize)
-	offset := readLEU32(v.value[idx : idx+uint32(v.offsetSize)])
+	idx := v.offsetStart + uint64(i)*uint64(v.offsetSize)
+	offset := readLEU32(v.value[idx : idx+uint64(v.offsetSize)])
 
-	return trimValue(v.meta, v.value[v.dataStart+offset:]), nil
+	return trimValue(v.meta, v.value[v.dataStart+uint64(offset):]), nil
 }
 
 // ObjectValue represents an object (map/dictionary) of key-value pairs.
@@ -370,11 +369,11 @@ type ObjectValue struct {
 	meta  Metadata
 
 	numElements uint32
-	offsetStart uint32
-	dataStart   uint32
+	offsetStart uint64
+	dataStart   uint64
 	idSize      uint8
 	offsetSize  uint8
-	idStart     uint8
+	idStart     uint64
 }
 
 // ObjectField represents a key-value pair in an object.
@@ -396,18 +395,18 @@ func (v ObjectValue) ValueByKey(key string) (ObjectField, error) {
 	const binarySearchThreshold = 32
 	if n < binarySearchThreshold {
 		for i := range n {
-			idx := uint32(v.idStart) + i*uint32(v.idSize)
-			id := readLEU32(v.value[idx : idx+uint32(v.idSize)])
+			idx := v.idStart + uint64(i)*uint64(v.idSize)
+			id := readLEU32(v.value[idx : idx+uint64(v.idSize)])
 			k, err := v.meta.KeyAt(id)
 			if err != nil {
 				return ObjectField{}, fmt.Errorf("invalid object value: fieldID at idx %d is not in metadata", idx)
 			}
 			if k == key {
-				idx := uint32(v.offsetStart) + uint32(v.offsetSize)*i
-				offset := readLEU32(v.value[idx : idx+uint32(v.offsetSize)])
+				idx := v.offsetStart + uint64(v.offsetSize)*uint64(i)
+				offset := readLEU32(v.value[idx : idx+uint64(v.offsetSize)])
 				return ObjectField{
 					Key:   key,
-					Value: trimValue(v.meta, v.value[v.dataStart+offset:])}, nil
+					Value: trimValue(v.meta, v.value[v.dataStart+uint64(offset):])}, nil
 			}
 		}
 		return ObjectField{}, arrow.ErrNotFound
@@ -416,8 +415,8 @@ func (v ObjectValue) ValueByKey(key string) (ObjectField, error) {
 	i, j := uint32(0), n
 	for i < j {
 		mid := (i + j) >> 1
-		idx := uint32(v.idStart) + mid*uint32(v.idSize)
-		id := readLEU32(v.value[idx : idx+uint32(v.idSize)])
+		idx := v.idStart + uint64(mid)*uint64(v.idSize)
+		id := readLEU32(v.value[idx : idx+uint64(v.idSize)])
 		k, err := v.meta.KeyAt(id)
 		if err != nil {
 			return ObjectField{}, fmt.Errorf("invalid object value: fieldID at idx %d is not in metadata", idx)
@@ -427,12 +426,12 @@ func (v ObjectValue) ValueByKey(key string) (ObjectField, error) {
 		case -1:
 			i = mid + 1
 		case 0:
-			idx := uint32(v.offsetStart) + uint32(v.offsetSize)*mid
-			offset := readLEU32(v.value[idx : idx+uint32(v.offsetSize)])
+			idx := v.offsetStart + uint64(v.offsetSize)*uint64(mid)
+			offset := readLEU32(v.value[idx : idx+uint64(v.offsetSize)])
 
 			return ObjectField{
 				Key:   key,
-				Value: trimValue(v.meta, v.value[v.dataStart+offset:])}, nil
+				Value: trimValue(v.meta, v.value[v.dataStart+uint64(offset):])}, nil
 		case 1:
 			j = mid
 		}
@@ -449,36 +448,36 @@ func (v ObjectValue) FieldAt(i uint32) (ObjectField, error) {
 			arrow.ErrIndex, i, v.numElements)
 	}
 
-	idx := uint32(v.idStart) + i*uint32(v.idSize)
-	id := readLEU32(v.value[idx : idx+uint32(v.idSize)])
+	idx := v.idStart + uint64(i)*uint64(v.idSize)
+	id := readLEU32(v.value[idx : idx+uint64(v.idSize)])
 	k, err := v.meta.KeyAt(id)
 	if err != nil {
 		return ObjectField{}, fmt.Errorf("invalid object value: fieldID at idx %d is not in metadata", idx)
 	}
 
-	offsetIdx := uint32(v.offsetStart) + i*uint32(v.offsetSize)
-	offset := readLEU32(v.value[offsetIdx : offsetIdx+uint32(v.offsetSize)])
+	offsetIdx := v.offsetStart + uint64(i)*uint64(v.offsetSize)
+	offset := readLEU32(v.value[offsetIdx : offsetIdx+uint64(v.offsetSize)])
 
 	return ObjectField{
 		Key:   k,
-		Value: trimValue(v.meta, v.value[v.dataStart+offset:])}, nil
+		Value: trimValue(v.meta, v.value[v.dataStart+uint64(offset):])}, nil
 }
 
 // Values returns an iterator over all key-value pairs in the object.
 func (v ObjectValue) Values() iter.Seq2[string, Value] {
 	return func(yield func(string, Value) bool) {
 		for i := range v.numElements {
-			idx := uint32(v.idStart) + i*uint32(v.idSize)
-			id := readLEU32(v.value[idx : idx+uint32(v.idSize)])
+			idx := v.idStart + uint64(i)*uint64(v.idSize)
+			id := readLEU32(v.value[idx : idx+uint64(v.idSize)])
 			k, err := v.meta.KeyAt(id)
 			if err != nil {
 				return
 			}
 
-			offsetIdx := uint32(v.offsetStart) + i*uint32(v.offsetSize)
-			offset := readLEU32(v.value[offsetIdx : offsetIdx+uint32(v.offsetSize)])
+			offsetIdx := v.offsetStart + uint64(i)*uint64(v.offsetSize)
+			offset := readLEU32(v.value[offsetIdx : offsetIdx+uint64(v.offsetSize)])
 
-			if !yield(k, trimValue(v.meta, v.value[v.dataStart+offset:])) {
+			if !yield(k, trimValue(v.meta, v.value[v.dataStart+uint64(offset):])) {
 				return
 			}
 		}
@@ -583,8 +582,8 @@ type validationFrame struct {
 	value               []byte
 	size                uint64
 	dataSize            uint32
-	dataStart           uint32
-	offsetStart         uint32
+	dataStart           uint64
+	offsetStart         uint64
 	numChildren         uint32
 	nextChild           uint32
 	pendingIndex        uint32
@@ -849,7 +848,7 @@ func prepareArrayValidationFrame(frame *validationFrame) error {
 	}
 
 	dataStart := offsetStart + (uint64(numElements)+1)*uint64(offsetSize)
-	if dataStart > uint64(len(value)) || dataStart > math.MaxUint32 {
+	if dataStart > uint64(len(value)) {
 		return fmt.Errorf("invalid variant value: array offset table ends at %d, got %d bytes", dataStart, len(value))
 	}
 
@@ -863,14 +862,14 @@ func prepareArrayValidationFrame(frame *validationFrame) error {
 		if i > 0 && offset < previousOffset {
 			return fmt.Errorf("invalid variant value: array offsets are not monotonic")
 		}
-		if dataStart+uint64(offset) > uint64(len(value)) || dataStart+uint64(offset) > math.MaxUint32 {
+		if dataStart+uint64(offset) > uint64(len(value)) {
 			return fmt.Errorf("invalid variant value: array offset %d is out of range", offset)
 		}
 		previousOffset = offset
 	}
 
-	frame.dataStart = uint32(dataStart)
-	frame.offsetStart = uint32(offsetStart)
+	frame.dataStart = dataStart
+	frame.offsetStart = offsetStart
 	frame.offsetSize = offsetSize
 	frame.numChildren = numElements
 	frame.size = dataStart + uint64(previousOffset)
@@ -899,12 +898,12 @@ func prepareObjectValidationFrame(meta Metadata, frame *validationFrame) error {
 	idStart := 1 + elementSize
 	offsetStart := idStart + uint64(numElements)*uint64(idSize)
 	dataStart := offsetStart + (uint64(numElements)+1)*uint64(offsetSize)
-	if dataStart > uint64(len(value)) || dataStart > math.MaxUint32 {
+	if dataStart > uint64(len(value)) {
 		return fmt.Errorf("invalid variant value: object offset table ends at %d, got %d bytes", dataStart, len(value))
 	}
 	finalOffsetPos := offsetStart + uint64(numElements)*uint64(offsetSize)
 	dataSize := readLEU32(value[int(finalOffsetPos) : int(finalOffsetPos)+int(offsetSize)])
-	if dataStart+uint64(dataSize) > uint64(len(value)) || dataStart+uint64(dataSize) > math.MaxUint32 {
+	if dataStart+uint64(dataSize) > uint64(len(value)) {
 		return fmt.Errorf("invalid variant value: object data ends at %d, got %d bytes", dataStart+uint64(dataSize), len(value))
 	}
 
@@ -928,8 +927,8 @@ func prepareObjectValidationFrame(meta Metadata, frame *validationFrame) error {
 		}
 	}
 
-	frame.dataStart = uint32(dataStart)
-	frame.offsetStart = uint32(offsetStart)
+	frame.dataStart = dataStart
+	frame.offsetStart = offsetStart
 	frame.offsetSize = offsetSize
 	frame.numChildren = numElements
 	frame.dataSize = dataSize
@@ -939,14 +938,14 @@ func prepareObjectValidationFrame(meta Metadata, frame *validationFrame) error {
 
 func nextValidationChild(frame *validationFrame) ([]byte, int, uint64, uint64, error) {
 	index := int(frame.nextChild)
-	position := uint64(frame.offsetStart) + uint64(frame.nextChild)*uint64(frame.offsetSize)
+	position := frame.offsetStart + uint64(frame.nextChild)*uint64(frame.offsetSize)
 	offset := readLEU32(frame.value[int(position) : int(position)+int(frame.offsetSize)])
-	start := uint64(frame.dataStart) + uint64(offset)
+	start := frame.dataStart + uint64(offset)
 
 	if BasicType(frame.kind) == BasicArray {
 		nextPosition := position + uint64(frame.offsetSize)
 		nextOffset := readLEU32(frame.value[int(nextPosition) : int(nextPosition)+int(frame.offsetSize)])
-		end := uint64(frame.dataStart) + uint64(nextOffset)
+		end := frame.dataStart + uint64(nextOffset)
 		return frame.value[int(start):int(end)], index, 0, end - start, nil
 	}
 
@@ -1138,11 +1137,11 @@ func (v Value) Value() any {
 
 		debug.Assert(len(v.value) >= int(1+nelemSize), "invalid object value: too short")
 		numElements := readLEU32(v.value[1 : 1+nelemSize])
-		idStart := uint32(1 + nelemSize)
-		offsetStart := idStart + numElements*uint32(fieldIdSz)
-		dataStart := offsetStart + (numElements+1)*uint32(fieldOffsetSz)
+		idStart := uint64(1 + nelemSize)
+		offsetStart := idStart + uint64(numElements)*uint64(fieldIdSz)
+		dataStart := offsetStart + (uint64(numElements)+1)*uint64(fieldOffsetSz)
 
-		debug.Assert(dataStart <= uint32(len(v.value)), "invalid object value: dataStart out of range")
+		debug.Assert(dataStart <= uint64(len(v.value)), "invalid object value: dataStart out of range")
 		return ObjectValue{
 			value:       v.value,
 			meta:        v.meta,
@@ -1151,7 +1150,7 @@ func (v Value) Value() any {
 			dataStart:   dataStart,
 			idSize:      fieldIdSz,
 			offsetSize:  fieldOffsetSz,
-			idStart:     uint8(idStart),
+			idStart:     idStart,
 		}
 	case BasicArray:
 		valueHdr := (v.value[0] >> basicTypeBits)
@@ -1159,25 +1158,25 @@ func (v Value) Value() any {
 		isLarge := ((valueHdr >> 2) & 0b1) == 1
 
 		var (
-			sz                     int
-			offsetStart, dataStart int
+			sz          uint32
+			offsetStart uint64
 		)
 
 		if isLarge {
-			sz, offsetStart = int(readLEU32(v.value[1:5])), 5
+			sz, offsetStart = readLEU32(v.value[1:5]), 5
 		} else {
-			sz, offsetStart = int(v.value[1]), 2
+			sz, offsetStart = uint32(v.value[1]), 2
 		}
 
-		dataStart = offsetStart + (sz+1)*int(fieldOffsetSz)
-		debug.Assert(dataStart <= len(v.value), "invalid array value: dataStart out of range")
+		dataStart := offsetStart + (uint64(sz)+1)*uint64(fieldOffsetSz)
+		debug.Assert(dataStart <= uint64(len(v.value)), "invalid array value: dataStart out of range")
 		return ArrayValue{
 			value:       v.value,
 			meta:        v.meta,
-			numElements: uint32(sz),
-			dataStart:   uint32(dataStart),
+			numElements: sz,
+			dataStart:   dataStart,
 			offsetSize:  fieldOffsetSz,
-			offsetStart: uint8(offsetStart),
+			offsetStart: offsetStart,
 		}
 	}
 
