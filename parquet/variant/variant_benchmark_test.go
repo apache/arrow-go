@@ -80,10 +80,34 @@ func benchmarkArrayValue(b *testing.B, numElements int) Value {
 	return value
 }
 
+func benchmarkNestedArrayValue(b *testing.B, depth int) Value {
+	b.Helper()
+
+	var nested any = int64(1)
+	for range depth {
+		nested = []any{nested}
+	}
+
+	var builder Builder
+	if err := builder.Append(nested); err != nil {
+		b.Fatal(err)
+	}
+
+	value, err := builder.Build()
+	if err != nil {
+		b.Fatal(err)
+	}
+	return value
+}
+
 func BenchmarkNewWithMetadataObject40Fields(b *testing.B) {
 	benchmarkNewWithMetadata(b, benchmarkObjectValue(b, 40))
 }
 
 func BenchmarkNewWithMetadataArray40Elements(b *testing.B) {
 	benchmarkNewWithMetadata(b, benchmarkArrayValue(b, 40))
+}
+
+func BenchmarkNewWithMetadataNestedArray1000(b *testing.B) {
+	benchmarkNewWithMetadata(b, benchmarkNestedArrayValue(b, 1000))
 }

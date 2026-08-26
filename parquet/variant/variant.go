@@ -135,6 +135,8 @@ const (
 	supportedVersion           = 1
 	maxShortStringSize         = 0x3F
 	metadataMaxSizeLimit       = 128 * 1024 * 1024 // 128MB
+	// maxValidationDepth bounds memory used while validating nested values.
+	maxValidationDepth         = 1024
 )
 
 var (
@@ -598,12 +600,16 @@ type validationFrame struct {
 
 const (
 	validationStackInlineCapacity = 32
+	// The root value is at depth zero, so the stack needs one more frame than
+	// the maximum allowed nesting depth. Keeping this storage fixed prevents
+	// untrusted values from growing the validation stack on the heap.
+	validationStackCapacity       = maxValidationDepth + 1
 	validationRangeInlineCapacity = 64
 )
 
 // validateValue walks compound values with an explicit stack so valid values
-// are not limited by the Go call stack or an implementation-defined nesting
-// depth.
+// do not consume the Go call stack. Nesting is bounded to keep validation
+// memory usage independent of attacker-controlled input depth.
 func validateValue(meta Metadata, value []byte) (int, error) {
 	var stackStorage [validationStackInlineCapacity]validationFrame
 	stack := stackStorage[:1]
@@ -611,8 +617,10 @@ func validateValue(meta Metadata, value []byte) (int, error) {
 
 	var rangeStorage [validationRangeInlineCapacity]validationRange
 	ranges := rangeStorage[:0]
-	rangeTop := 0
+	return validateValueLoop(meta, value, stack, ranges, 0)
+}
 
+func validateValueLoop(meta Metadata, value []byte, stack []validationFrame, ranges []validationRange, rangeTop int) (int, error) {
 	var (
 		resultSize int
 		resultErr  error
@@ -681,6 +689,13 @@ func validateValue(meta Metadata, value []byte) (int, error) {
 
 		if frame.compound {
 			if frame.nextChild < frame.numChildren {
+				if len(stack) == validationStackCapacity {
+					return 0, fmt.Errorf("invalid variant value: maximum nesting depth exceeded")
+				}
+				if len(stack) == cap(stack) {
+					return validateValueDeep(meta, value, stack, ranges, rangeTop)
+				}
+
 				child, index, start, expectedSize, err := nextValidationChild(frame)
 				if err != nil {
 					stack = stack[:len(stack)-1]
@@ -726,6 +741,13 @@ func validateValue(meta Metadata, value []byte) (int, error) {
 	}
 
 	return 0, errors.New("invalid variant value: validation stack exhausted")
+}
+
+func validateValueDeep(meta Metadata, value []byte, initialStack []validationFrame, ranges []validationRange, rangeTop int) (int, error) {
+	var stackStorage [validationStackCapacity]validationFrame
+	stack := stackStorage[:len(initialStack)]
+	copy(stack, initialStack)
+	return validateValueLoop(meta, value, stack, ranges, rangeTop)
 }
 
 func finishValidationFrame(frame *validationFrame, ranges []validationRange) error {

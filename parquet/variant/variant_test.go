@@ -887,7 +887,7 @@ func TestValidateObjectMetadataAndRanges(t *testing.T) {
 
 func TestValidateDeeplyNestedValue(t *testing.T) {
 	var nested any = int64(1)
-	for range 300 {
+	for range 1000 {
 		nested = []any{nested}
 	}
 
@@ -898,6 +898,22 @@ func TestValidateDeeplyNestedValue(t *testing.T) {
 
 	_, err = variant.NewWithMetadata(v.Metadata(), v.Bytes())
 	require.NoError(t, err)
+}
+
+func TestRejectsExcessiveNesting(t *testing.T) {
+	var nested any = int64(1)
+	for range 1025 {
+		nested = []any{nested}
+	}
+
+	var b variant.Builder
+	require.NoError(t, b.Append(nested))
+	v, err := b.Build()
+	require.NoError(t, err)
+
+	_, err = variant.NewWithMetadata(v.Metadata(), v.Bytes())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "maximum nesting depth exceeded")
 }
 
 func TestInvalidObjectAccess(t *testing.T) {
