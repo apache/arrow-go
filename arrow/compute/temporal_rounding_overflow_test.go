@@ -412,6 +412,63 @@ func TestTemporalRoundingFinerUnitPreservesInputPrecision(t *testing.T) {
 	})
 }
 
+func TestTemporalRoundingCalendarOriginWideUnits(t *testing.T) {
+	valueTime := time.Date(1500, time.June, 15, 12, 34, 56, 0, time.UTC)
+	wantTime := time.Date(1500, time.June, 15, 12, 0, 0, 0, time.UTC)
+
+	for _, unit := range []arrow.TimeUnit{arrow.Second, arrow.Millisecond, arrow.Microsecond} {
+		t.Run(unit.String(), func(t *testing.T) {
+			value, err := arrow.TimestampFromTime(valueTime, unit)
+			require.NoError(t, err)
+
+			builder := array.NewTimestampBuilder(memory.DefaultAllocator, &arrow.TimestampType{Unit: unit})
+			builder.Append(value)
+			input := builder.NewArray()
+			builder.Release()
+			defer input.Release()
+
+			result, err := compute.FloorTemporal(context.Background(), compute.RoundTemporalOptions{
+				Multiple:            2,
+				Unit:                compute.RoundTemporalHour,
+				CalendarBasedOrigin: true,
+			}, compute.NewDatum(input))
+			require.NoError(t, err)
+			defer result.Release()
+
+			output := result.(*compute.ArrayDatum).MakeArray().(*array.Timestamp)
+			defer output.Release()
+			want, err := arrow.TimestampFromTime(wantTime, unit)
+			require.NoError(t, err)
+			require.Equal(t, want, output.Value(0))
+		})
+	}
+}
+
+func TestTemporalRoundingCalendarOriginAtMinimum(t *testing.T) {
+	minTime := arrow.Timestamp(math.MinInt64).ToTime(arrow.Nanosecond)
+	wantTime := time.Date(minTime.Year(), minTime.Month(), minTime.Day(), minTime.Hour()+1, 0, 0, 0, time.UTC)
+
+	builder := array.NewTimestampBuilder(memory.DefaultAllocator, &arrow.TimestampType{Unit: arrow.Nanosecond})
+	builder.Append(arrow.Timestamp(math.MinInt64))
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	result, err := compute.CeilTemporal(context.Background(), compute.RoundTemporalOptions{
+		Multiple:            1,
+		Unit:                compute.RoundTemporalHour,
+		CalendarBasedOrigin: true,
+	}, compute.NewDatum(input))
+	require.NoError(t, err)
+	defer result.Release()
+
+	output := result.(*compute.ArrayDatum).MakeArray().(*array.Timestamp)
+	defer output.Release()
+	want, err := arrow.TimestampFromTime(wantTime, arrow.Nanosecond)
+	require.NoError(t, err)
+	require.Equal(t, want, output.Value(0))
+}
+
 func TestTemporalRoundingCalendarLongRangeWeek(t *testing.T) {
 	value, err := arrow.TimestampFromTime(
 		time.Date(1500, time.June, 15, 12, 34, 56, 0, time.UTC),
@@ -477,6 +534,87 @@ func TestTemporalRoundingSecondOverflow(t *testing.T) {
 		Unit:     compute.RoundTemporalYear,
 	}, compute.NewDatum(input))
 	require.ErrorIs(t, err, arrow.ErrInvalid)
+}
+
+func TestTemporalRoundingNegativeCalendarMultiples(t *testing.T) {
+	tests := []struct {
+		name             string
+		value            time.Time
+		floor            time.Time
+		ceil             time.Time
+		multiple         int64
+		unit             compute.RoundTemporalUnit
+	}{
+		{
+			name:     "year",
+			value:    time.Date(-5, time.June, 15, 12, 0, 0, 0, time.UTC),
+			floor:    time.Date(-6, time.January, 1, 0, 0, 0, 0, time.UTC),
+			ceil:     time.Date(-4, time.January, 1, 0, 0, 0, 0, time.UTC),
+			multiple: 2,
+			unit:     compute.RoundTemporalYear,
+		},
+		{
+			name:     "quarter",
+			value:    time.Date(-5, time.June, 15, 12, 0, 0, 0, time.UTC),
+			floor:    time.Date(-5, time.January, 1, 0, 0, 0, 0, time.UTC),
+			ceil:     time.Date(-5, time.July, 1, 0, 0, 0, 0, time.UTC),
+			multiple: 2,
+			unit:     compute.RoundTemporalQuarter,
+		},
+		{
+			name:     "month",
+			value:    time.Date(-5, time.June, 15, 12, 0, 0, 0, time.UTC),
+			floor:    time.Date(-5, time.May, 1, 0, 0, 0, 0, time.UTC),
+			ceil:     time.Date(-5, time.July, 1, 0, 0, 0, 0, time.UTC),
+			multiple: 2,
+			unit:     compute.RoundTemporalMonth,
+		},
+		{
+			name:     "pre-epoch weeks",
+			value:    time.Date(1969, time.December, 21, 12, 0, 0, 0, time.UTC),
+			floor:    time.Date(1969, time.December, 14, 0, 0, 0, 0, time.UTC),
+			ceil:     time.Date(1969, time.December, 28, 0, 0, 0, 0, time.UTC),
+			multiple: 2,
+			unit:     compute.RoundTemporalWeek,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			value, err := arrow.TimestampFromTime(tc.value, arrow.Second)
+			require.NoError(t, err)
+
+			builder := array.NewTimestampBuilder(memory.DefaultAllocator, &arrow.TimestampType{Unit: arrow.Second})
+			builder.Append(value)
+			input := builder.NewArray()
+			builder.Release()
+			defer input.Release()
+
+			for _, round := range []struct {
+				name string
+				fn   func(context.Context, compute.RoundTemporalOptions, compute.Datum) (compute.Datum, error)
+				want time.Time
+			}{
+				{name: "floor", fn: compute.FloorTemporal, want: tc.floor},
+				{name: "ceil", fn: compute.CeilTemporal, want: tc.ceil},
+			} {
+				t.Run(round.name, func(t *testing.T) {
+					result, err := round.fn(context.Background(), compute.RoundTemporalOptions{
+						Multiple: tc.multiple,
+						Unit:     tc.unit,
+					}, compute.NewDatum(input))
+					require.NoError(t, err)
+					defer result.Release()
+
+					output := result.(*compute.ArrayDatum).MakeArray().(*array.Timestamp)
+					defer output.Release()
+					want, err := arrow.TimestampFromTime(round.want, arrow.Second)
+					require.NoError(t, err)
+					require.Equal(t, want, output.Value(0))
+				})
+			}
+		})
+	}
 }
 
 func TestTemporalRoundingCalendarLongPeriod(t *testing.T) {

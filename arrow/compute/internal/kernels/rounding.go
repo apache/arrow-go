@@ -936,13 +936,29 @@ func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts 
 			// timestamp ranges do not overflow during a nanosecond conversion.
 			return ts, nil
 		}
-		if !opts.useCalendarOrigin {
-			intervalInInputUnit := opts.roundingInterval / int64(inputUnit.Multiplier())
-			return roundToMultipleInt64(ts, intervalInInputUnit, opts.mode, opts.CeilIsStrictlyGreater)
+		intervalInInputUnit := opts.roundingInterval / inputUnitNanos
+		if opts.useCalendarOrigin {
+			// The offset from the start of the local day is bounded by a local day, so
+			// it can be calculated safely even when the absolute timestamp cannot
+			// be represented in nanoseconds.
+			t := arrow.Timestamp(ts).ToTime(inputUnit).In(tz)
+			startOfDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, tz)
+			elapsed := int64(t.Sub(startOfDay)) / inputUnitNanos
+			roundedElapsed, err := roundToMultipleInt64(elapsed, intervalInInputUnit, opts.mode, opts.CeilIsStrictlyGreater)
+			if err != nil {
+				return 0, err
+			}
+			adjustment, err := checkedSubInt64(roundedElapsed, elapsed)
+			if err != nil {
+				return 0, err
+			}
+			return checkedAddInt64(ts, adjustment)
 		}
+		return roundToMultipleInt64(ts, intervalInInputUnit, opts.mode, opts.CeilIsStrictlyGreater)
 	}
 
-	// Slow path: convert to nanoseconds for calendar origin or incompatible units
+	// Slow path: convert to nanoseconds when the interval is incompatible with
+	// the input resolution.
 	tsNanos, err := convertToNanos(ts, inputUnit)
 	if err != nil {
 		return 0, err
@@ -1031,6 +1047,17 @@ func checkedInt64ToInt(value int64) (int, error) {
 		return 0, overflowError()
 	}
 	return result, nil
+}
+
+// floorDivInt64 divides by a positive divisor and rounds towards negative
+// infinity. Go's integer division rounds towards zero, which would place
+// negative calendar values in the wrong period.
+func floorDivInt64(dividend, divisor int64) int64 {
+	quotient := dividend / divisor
+	if dividend%divisor < 0 {
+		quotient--
+	}
+	return quotient
 }
 
 func checkedCalendarDate(year, month int64, tz *time.Location) (time.Time, error) {
@@ -1370,7 +1397,7 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 	switch opts.Unit {
 	case RoundTemporalYear:
 		year := int64(t.Year())
-		roundedYear, err := checkedMulInt64(year/multiple, multiple)
+		roundedYear, err := checkedMulInt64(floorDivInt64(year, multiple), multiple)
 		if err != nil {
 			return 0, err
 		}
@@ -1429,12 +1456,12 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 		if err != nil {
 			return 0, err
 		}
-		roundedQuarters, err := checkedMulInt64(totalQuarters/multiple, multiple)
+		roundedQuarters, err := checkedMulInt64(floorDivInt64(totalQuarters, multiple), multiple)
 		if err != nil {
 			return 0, err
 		}
-		roundedYear := roundedQuarters / 4
-		roundedQuarter := roundedQuarters % 4
+		roundedYear := floorDivInt64(roundedQuarters, 4)
+		roundedQuarter := roundedQuarters - roundedYear*4
 		roundedMonth := roundedQuarter*3 + 1 // First month of the quarter
 
 		switch opts.mode {
@@ -1454,8 +1481,8 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 				if err != nil {
 					return 0, err
 				}
-				roundedYear = roundedQuarters / 4
-				roundedQuarter = roundedQuarters % 4
+				roundedYear = floorDivInt64(roundedQuarters, 4)
+				roundedQuarter = roundedQuarters - roundedYear*4
 				roundedMonth = roundedQuarter*3 + 1
 				rounded, dateErr = checkedCalendarDate(roundedYear, roundedMonth, tz)
 				if dateErr != nil {
@@ -1473,8 +1500,8 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 			if dateErr != nil {
 				return 0, dateErr
 			}
-			nextYear := nextQuarterNum / 4
-			nextQuarter := nextQuarterNum % 4
+			nextYear := floorDivInt64(nextQuarterNum, 4)
+			nextQuarter := nextQuarterNum - nextYear*4
 			nextMonth := nextQuarter*3 + 1
 			quarterEnd, dateErr := checkedCalendarDate(nextYear, nextMonth, tz)
 			if dateErr != nil {
@@ -1501,12 +1528,12 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 		if err != nil {
 			return 0, err
 		}
-		roundedMonths, err := checkedMulInt64(totalMonths/multiple, multiple)
+		roundedMonths, err := checkedMulInt64(floorDivInt64(totalMonths, multiple), multiple)
 		if err != nil {
 			return 0, err
 		}
-		roundedYear := roundedMonths / 12
-		roundedMonth := (roundedMonths % 12) + 1
+		roundedYear := floorDivInt64(roundedMonths, 12)
+		roundedMonth := roundedMonths - roundedYear*12 + 1
 
 		switch opts.mode {
 		case RoundDown:
@@ -1525,8 +1552,8 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 				if err != nil {
 					return 0, err
 				}
-				roundedYear = roundedMonths / 12
-				roundedMonth = (roundedMonths % 12) + 1
+				roundedYear = floorDivInt64(roundedMonths, 12)
+				roundedMonth = roundedMonths - roundedYear*12 + 1
 				rounded, dateErr = checkedCalendarDate(roundedYear, roundedMonth, tz)
 				if dateErr != nil {
 					return 0, dateErr
@@ -1543,8 +1570,8 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 			if dateErr != nil {
 				return 0, dateErr
 			}
-			nextYear := nextMonthNum / 12
-			nextMonth := (nextMonthNum % 12) + 1
+			nextYear := floorDivInt64(nextMonthNum, 12)
+			nextMonth := nextMonthNum - nextYear*12 + 1
 			monthEnd, dateErr := checkedCalendarDate(nextYear, nextMonth, tz)
 			if dateErr != nil {
 				return 0, dateErr
@@ -1576,8 +1603,8 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 		if err != nil {
 			return 0, err
 		}
-		weeksSinceEpoch := daysSinceEpochWeek / 7
-		roundedWeeks, err := checkedMulInt64(weeksSinceEpoch/multiple, multiple)
+		weeksSinceEpoch := floorDivInt64(daysSinceEpochWeek, 7)
+		roundedWeeks, err := checkedMulInt64(floorDivInt64(weeksSinceEpoch, multiple), multiple)
 		if err != nil {
 			return 0, err
 		}
