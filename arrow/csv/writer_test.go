@@ -520,6 +520,41 @@ func TestCustomTypeConverterValidatesRowCount(t *testing.T) {
 	}
 }
 
+func TestCSVWriterSupportsReusedCustomTypeConverterResult(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "first", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "second", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+	builder.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2}, nil)
+	builder.Field(1).(*array.Int32Builder).AppendValues([]int32{10, 20}, nil)
+	record := builder.NewRecordBatch()
+	defer record.Release()
+
+	result := make([]string, 2)
+	var output bytes.Buffer
+	writer := csv.NewWriter(&output, schema, csv.WithCustomTypeConverter(func(typ arrow.DataType, col arrow.Array) ([]string, bool) {
+		if typ.ID() != arrow.INT32 {
+			return nil, false
+		}
+
+		arr := col.(*array.Int32)
+		for i := 0; i < arr.Len(); i++ {
+			result[i] = fmt.Sprintf("%d", arr.Value(i))
+		}
+		return result, true
+	}))
+
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Flush())
+	require.NoError(t, writer.Error())
+	assert.Equal(t, "1,10\n2,20\n", output.String())
+}
+
 // TestParquetTestingCSVWriter tests that the CSV writer successfully convert arrow/parquet-testing files to CSV
 func TestParquetTestingCSVWriter(t *testing.T) {
 	dir := os.Getenv("PARQUET_TEST_DATA")
