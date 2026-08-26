@@ -69,6 +69,39 @@ func BenchmarkBloomFilterHashingFromBitmap(b *testing.B) {
 	}
 }
 
+// BenchmarkBloomFilterHashBatching compares the materialized and streaming
+// paths used to update a bloom filter from a large fixed-width batch.
+func BenchmarkBloomFilterHashBatching(b *testing.B) {
+	const numValues = 100000
+
+	values := make([]int32, numValues)
+	for i := range values {
+		values[i] = int32(i)
+	}
+
+	b.Run("materialized", func(b *testing.B) {
+		bloom := NewBloomFilter(1024, 1024, memory.DefaultAllocator)
+		b.SetBytes(int64(numValues * 4))
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			bloom.InsertBulk(GetHashes(bloom.Hasher(), values))
+		}
+	})
+
+	b.Run("bounded", func(b *testing.B) {
+		bloom := NewBloomFilter(1024, 1024, memory.DefaultAllocator)
+		b.SetBytes(int64(numValues * 4))
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			InsertHashes(bloom, values)
+		}
+	})
+}
+
 // BenchmarkBooleanWritePathBitmap benchmarks the complete write path with bitmap operations
 func BenchmarkBooleanWritePathBitmap(b *testing.B) {
 	const numValues = 100000
@@ -92,7 +125,6 @@ func BenchmarkBooleanWritePathBitmap(b *testing.B) {
 
 		// Bloom filter update
 		bloom := NewBloomFilter(1024, 1024, memory.DefaultAllocator)
-		hashes := GetHashesFromBitmap(bloom.Hasher(), bitmap, 0, numValues)
-		bloom.InsertBulk(hashes)
+		InsertHashesFromBitmap(bloom, bitmap, 0, numValues)
 	}
 }

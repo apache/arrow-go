@@ -41,9 +41,10 @@ import (
 )
 
 const (
-	bytesPerFilterBlock     = 32
-	bitsSetPerBlock         = 8
-	minimumBloomFilterBytes = bytesPerFilterBlock
+	bytesPerFilterBlock      = 32
+	bitsSetPerBlock          = 8
+	minimumBloomFilterBytes  = bytesPerFilterBlock
+	bloomFilterHashBatchSize = 1024
 	// currently using 128MB as maximum size, should probably be reconsidered
 	maximumBloomFilterBytes = 128 * 1024 * 1024
 )
@@ -108,12 +109,65 @@ func (xxhasher) Sum64s(b [][]byte) (vals []uint64) {
 	return
 }
 
+func (xxhasher) Sum64sInto(b [][]byte, vals []uint64) {
+	for i, v := range b {
+		vals[i] = xxhash.Sum64(v)
+	}
+}
+
+type sum64sIntoHasher interface {
+	Sum64sInto([][]byte, []uint64)
+}
+
+func sum64s(h Hasher, b [][]byte, vals []uint64) []uint64 {
+	if into, ok := h.(sum64sIntoHasher); ok {
+		into.Sum64sInto(b, vals)
+		return vals[:len(b)]
+	}
+	return h.Sum64s(b)
+}
+
 func GetHash[T parquet.ColumnTypes](h Hasher, v T) uint64 {
 	return h.Sum64(getBytes(v))
 }
 
 func GetHashes[T parquet.ColumnTypes](h Hasher, vals []T) []uint64 {
-	return h.Sum64s(getBytesSlice(vals))
+	out := make([]uint64, len(vals))
+	var (
+		byteBatch [bloomFilterHashBatchSize][]byte
+		rawBatch  [bloomFilterHashBatchSize * arrow.Int64SizeBytes]byte
+		hashBatch [bloomFilterHashBatchSize]uint64
+	)
+
+	for offset := 0; offset < len(vals); offset += bloomFilterHashBatchSize {
+		end := min(offset+bloomFilterHashBatchSize, len(vals))
+		n := end - offset
+		getBytesSliceInto(byteBatch[:n], rawBatch[:], vals[offset:end])
+		hashes := sum64s(h, byteBatch[:n], hashBatch[:n])
+		copy(out[offset:end], hashes)
+	}
+	return out
+}
+
+// InsertHashes hashes values in bounded batches and inserts each batch into the bloom filter.
+func InsertHashes[T parquet.ColumnTypes](b BloomFilterBuilder, vals []T) {
+	if len(vals) == 0 {
+		return
+	}
+
+	h := b.Hasher()
+	var (
+		byteBatch [bloomFilterHashBatchSize][]byte
+		rawBatch  [bloomFilterHashBatchSize * arrow.Int64SizeBytes]byte
+		hashBatch [bloomFilterHashBatchSize]uint64
+	)
+
+	for offset := 0; offset < len(vals); offset += bloomFilterHashBatchSize {
+		end := min(offset+bloomFilterHashBatchSize, len(vals))
+		n := end - offset
+		getBytesSliceInto(byteBatch[:n], rawBatch[:], vals[offset:end])
+		b.InsertBulk(sum64s(h, byteBatch[:n], hashBatch[:n]))
+	}
 }
 
 func GetSpacedHashes[T parquet.ColumnTypes](h Hasher, numValid int64, vals []T, validBits []byte, validBitsOffset int64) []uint64 {
@@ -122,6 +176,11 @@ func GetSpacedHashes[T parquet.ColumnTypes](h Hasher, numValid int64, vals []T, 
 	}
 
 	out := make([]uint64, 0, numValid)
+	var (
+		byteBatch [bloomFilterHashBatchSize][]byte
+		rawBatch  [bloomFilterHashBatchSize * arrow.Int64SizeBytes]byte
+		hashBatch [bloomFilterHashBatchSize]uint64
+	)
 
 	// TODO: replace with bitset run reader pool
 	setReader := bitutils.NewSetBitRunReader(validBits, validBitsOffset, int64(len(vals)))
@@ -131,9 +190,47 @@ func GetSpacedHashes[T parquet.ColumnTypes](h Hasher, numValid int64, vals []T, 
 			break
 		}
 
-		out = append(out, h.Sum64s(getBytesSlice(vals[run.Pos:run.Pos+run.Length]))...)
+		runEnd := run.Pos + run.Length
+		for pos := run.Pos; pos < runEnd; pos += bloomFilterHashBatchSize {
+			end := min(pos+int64(bloomFilterHashBatchSize), runEnd)
+			n := int(end - pos)
+			getBytesSliceInto(byteBatch[:n], rawBatch[:], vals[pos:end])
+			hashes := sum64s(h, byteBatch[:n], hashBatch[:n])
+			out = append(out, hashes...)
+		}
 	}
 	return out
+}
+
+// InsertSpacedHashes hashes valid values in bounded batches and inserts each batch into the bloom filter.
+func InsertSpacedHashes[T parquet.ColumnTypes](b BloomFilterBuilder, numValid int64, vals []T, validBits []byte, validBitsOffset int64) {
+	if numValid == 0 {
+		return
+	}
+
+	h := b.Hasher()
+	var (
+		byteBatch [bloomFilterHashBatchSize][]byte
+		rawBatch  [bloomFilterHashBatchSize * arrow.Int64SizeBytes]byte
+		hashBatch [bloomFilterHashBatchSize]uint64
+	)
+
+	// TODO: replace with bitset run reader pool
+	setReader := bitutils.NewSetBitRunReader(validBits, validBitsOffset, int64(len(vals)))
+	for {
+		run := setReader.NextRun()
+		if run.Length == 0 {
+			break
+		}
+
+		runEnd := run.Pos + run.Length
+		for pos := run.Pos; pos < runEnd; pos += bloomFilterHashBatchSize {
+			end := min(pos+int64(bloomFilterHashBatchSize), runEnd)
+			n := int(end - pos)
+			getBytesSliceInto(byteBatch[:n], rawBatch[:], vals[pos:end])
+			b.InsertBulk(sum64s(h, byteBatch[:n], hashBatch[:n]))
+		}
+	}
 }
 
 // GetHashesFromBitmap computes hashes for boolean values directly from a bitmap
@@ -194,6 +291,67 @@ func GetSpacedHashesFromBitmap(h Hasher, numValid int64, bitmap []byte, bitmapOf
 	return out
 }
 
+// InsertHashesFromBitmap hashes boolean values in bounded batches and inserts each batch into the bloom filter.
+func InsertHashesFromBitmap(b BloomFilterBuilder, bitmap []byte, bitmapOffset int64, numValues int64) {
+	if numValues == 0 {
+		return
+	}
+
+	h := b.Hasher()
+	var (
+		hashBatch [bloomFilterHashBatchSize]uint64
+		value     [1]byte
+	)
+
+	for offset := int64(0); offset < numValues; offset += bloomFilterHashBatchSize {
+		end := min(offset+int64(bloomFilterHashBatchSize), numValues)
+		for i := offset; i < end; i++ {
+			if bitutil.BitIsSet(bitmap, int(bitmapOffset+i)) {
+				value[0] = 1
+			} else {
+				value[0] = 0
+			}
+			hashBatch[i-offset] = h.Sum64(value[:])
+		}
+		b.InsertBulk(hashBatch[:end-offset])
+	}
+}
+
+// InsertSpacedHashesFromBitmap hashes valid boolean values in bounded batches and inserts each batch into the bloom filter.
+func InsertSpacedHashesFromBitmap(b BloomFilterBuilder, numValid int64, bitmap []byte, bitmapOffset int64, numValues int64, validBits []byte, validBitsOffset int64) {
+	if numValid == 0 {
+		return
+	}
+
+	h := b.Hasher()
+	var (
+		hashBatch [bloomFilterHashBatchSize]uint64
+		value     [1]byte
+	)
+
+	setReader := bitutils.NewSetBitRunReader(validBits, validBitsOffset, numValues)
+	for {
+		run := setReader.NextRun()
+		if run.Length == 0 {
+			break
+		}
+
+		runEnd := run.Pos + run.Length
+		for pos := run.Pos; pos < runEnd; pos += bloomFilterHashBatchSize {
+			end := min(pos+int64(bloomFilterHashBatchSize), runEnd)
+			for i := pos; i < end; i++ {
+				if bitutil.BitIsSet(bitmap, int(bitmapOffset+i)) {
+					value[0] = 1
+				} else {
+					value[0] = 0
+				}
+				hashBatch[i-pos] = h.Sum64(value[:])
+			}
+			b.InsertBulk(hashBatch[:end-pos])
+		}
+	}
+}
+
 func getBytes[T parquet.ColumnTypes](v T) []byte {
 	switch v := any(v).(type) {
 	case int32:
@@ -231,74 +389,67 @@ func getBytes[T parquet.ColumnTypes](v T) []byte {
 	return unsafe.Slice((*byte)(unsafe.Pointer(&v)), unsafe.Sizeof(v))
 }
 
-func getBytesSlice[T parquet.ColumnTypes](v []T) [][]byte {
-	b := make([][]byte, len(v))
+func getBytesSliceInto[T parquet.ColumnTypes](b [][]byte, raw []byte, v []T) {
 	switch v := any(v).(type) {
 	case []int32:
 		if endian.IsBigEndian {
-			raw := make([]byte, arrow.Int32SizeBytes*len(v))
 			for i, vv := range v {
 				value := raw[i*arrow.Int32SizeBytes : (i+1)*arrow.Int32SizeBytes]
 				binary.LittleEndian.PutUint32(value, uint32(vv))
 				b[i] = value
 			}
-			return b
+			return
 		}
 	case []int64:
 		if endian.IsBigEndian {
-			raw := make([]byte, arrow.Int64SizeBytes*len(v))
 			for i, vv := range v {
 				value := raw[i*arrow.Int64SizeBytes : (i+1)*arrow.Int64SizeBytes]
 				binary.LittleEndian.PutUint64(value, uint64(vv))
 				b[i] = value
 			}
-			return b
+			return
 		}
 	case []float32:
 		if endian.IsBigEndian {
-			raw := make([]byte, arrow.Float32SizeBytes*len(v))
 			for i, vv := range v {
 				value := raw[i*arrow.Float32SizeBytes : (i+1)*arrow.Float32SizeBytes]
 				binary.LittleEndian.PutUint32(value, math.Float32bits(vv))
 				b[i] = value
 			}
-			return b
+			return
 		}
 	case []float64:
 		if endian.IsBigEndian {
-			raw := make([]byte, arrow.Float64SizeBytes*len(v))
 			for i, vv := range v {
 				value := raw[i*arrow.Float64SizeBytes : (i+1)*arrow.Float64SizeBytes]
 				binary.LittleEndian.PutUint64(value, math.Float64bits(vv))
 				b[i] = value
 			}
-			return b
+			return
 		}
 	case []parquet.ByteArray:
 		for i, vv := range v {
 			b[i] = vv
 		}
-		return b
+		return
 	case []parquet.FixedLenByteArray:
 		for i, vv := range v {
 			b[i] = vv
 		}
-		return b
+		return
 	case []parquet.Int96:
 		for i, vv := range v {
 			b[i] = vv[:]
 		}
-		return b
+		return
 	}
 
 	var z T
 	sz, ptr := int(unsafe.Sizeof(z)), unsafe.SliceData(v)
-	raw := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), sz*len(v))
+	rawValues := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), sz*len(v))
 	for i := range b {
-		b[i] = raw[i*sz : (i+1)*sz]
+		b[i] = rawValues[i*sz : (i+1)*sz]
 	}
-
-	return b
 }
 
 type blockSplitBloomFilter struct {
