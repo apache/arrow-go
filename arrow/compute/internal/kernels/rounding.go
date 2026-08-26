@@ -847,10 +847,9 @@ type roundTemporalState struct {
 	mode RoundMode
 
 	// Pre-calculated values to avoid repeated computation
-	unitNanos         int64 // Duration of the unit in nanoseconds
-	roundingInterval  int64 // unitNanos * Multiple
-	isSubDay          bool  // true if this is a sub-day unit (can use fast path)
-	useCalendarOrigin bool  // true if using calendar-based origin
+	unitNanos        int64 // Duration of the unit in nanoseconds
+	roundingInterval int64 // unitNanos * Multiple
+	isSubDay         bool  // true if this is a sub-day unit (can use fast path)
 }
 
 func InitRoundTemporalState(_ *exec.KernelCtx, args exec.KernelInitArgs) (exec.KernelState, error) {
@@ -878,7 +877,6 @@ func InitRoundTemporalState(_ *exec.KernelCtx, args exec.KernelInitArgs) (exec.K
 		if err != nil {
 			return nil, err
 		}
-		rs.useCalendarOrigin = rs.CalendarBasedOrigin && rs.Unit <= RoundTemporalDay
 	}
 
 	return rs, nil
@@ -914,15 +912,24 @@ func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts 
 		tz = time.UTC
 	}
 
-	// Calendar units with variable duration (year, quarter, month, week) require date arithmetic
+	// Calendar units with variable duration (year, quarter, month, week) require date arithmetic.
 	if !opts.isSubDay {
 		return roundTimestampCalendar(ts, inputUnit, tz, opts)
 	}
 
-	// Day rounding with timezone requires calendar arithmetic (days vary: 23/24/25 hours due to DST)
-	isUTC := tz == time.UTC || tz.String() == "UTC"
-	if !isUTC && opts.Unit == RoundTemporalDay {
+	// A day is a calendar unit when it is associated with a timezone. This also
+	// handles CalendarBasedOrigin for day multiples, whose origin is the start
+	// of the month rather than the Unix epoch.
+	if opts.Unit == RoundTemporalDay {
 		return roundTimestampCalendar(ts, inputUnit, tz, opts)
+	}
+
+	// CalendarBasedOrigin rounds fixed-duration units against the preceding
+	// calendar boundary (for example, minutes from the start of the hour).
+	// Use local wall-clock arithmetic here: time.Time.Sub measures elapsed time
+	// and therefore gives the wrong answer across daylight-saving transitions.
+	if opts.CalendarBasedOrigin {
+		return roundTimestampCalendarOrigin(ts, inputUnit, tz, opts)
 	}
 
 	// Sub-day units (hour, minute, second, etc.) use fixed-duration arithmetic.
@@ -937,23 +944,6 @@ func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts 
 			return ts, nil
 		}
 		intervalInInputUnit := opts.roundingInterval / inputUnitNanos
-		if opts.useCalendarOrigin {
-			// The offset from the start of the local day is bounded by a local day, so
-			// it can be calculated safely even when the absolute timestamp cannot
-			// be represented in nanoseconds.
-			t := arrow.Timestamp(ts).ToTime(inputUnit).In(tz)
-			startOfDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, tz)
-			elapsed := int64(t.Sub(startOfDay)) / inputUnitNanos
-			roundedElapsed, err := roundToMultipleInt64(elapsed, intervalInInputUnit, opts.mode, opts.CeilIsStrictlyGreater)
-			if err != nil {
-				return 0, err
-			}
-			adjustment, err := checkedSubInt64(roundedElapsed, elapsed)
-			if err != nil {
-				return 0, err
-			}
-			return checkedAddInt64(ts, adjustment)
-		}
 		return roundToMultipleInt64(ts, intervalInInputUnit, opts.mode, opts.CeilIsStrictlyGreater)
 	}
 
@@ -964,35 +954,11 @@ func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts 
 		return 0, err
 	}
 
-	var origin int64 = 0
-	if opts.useCalendarOrigin {
-		// Calendar origin: round relative to start of day (timezone-aware if tz != nil)
-		if tz != nil {
-			t := time.Unix(0, tsNanos).In(tz)
-			startOfDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, tz)
-			origin, err = timeToNanos(startOfDay)
-			if err != nil {
-				return 0, err
-			}
-		} else {
-			origin = tsNanos
-		}
-	}
-
-	adjusted, err := checkedSubInt64(tsNanos, origin)
+	rounded, err := roundToMultipleInt64(tsNanos, opts.roundingInterval, opts.mode, opts.CeilIsStrictlyGreater)
 	if err != nil {
 		return 0, err
 	}
-	rounded, err := roundToMultipleInt64(adjusted, opts.roundingInterval, opts.mode, opts.CeilIsStrictlyGreater)
-	if err != nil {
-		return 0, err
-	}
-	result, err := checkedAddInt64(origin, rounded)
-	if err != nil {
-		return 0, err
-	}
-
-	return convertFromNanos(result, inputUnit), nil
+	return convertFromNanos(rounded, inputUnit), nil
 }
 
 // canRoundInInputUnit checks if rounding can be done in the input unit
@@ -1006,6 +972,145 @@ func canRoundInInputUnit(inputUnit arrow.TimeUnit, roundingIntervalNanos int64) 
 	inputUnitNanos := int64(inputUnit.Multiplier())
 	return roundingIntervalNanos%inputUnitNanos == 0 ||
 		(roundingIntervalNanos < inputUnitNanos && inputUnitNanos%roundingIntervalNanos == 0)
+}
+
+// roundTimestampCalendarOrigin rounds a fixed-duration unit relative to the
+// preceding calendar boundary. The calculation is performed in local wall
+// time so daylight-saving transitions do not change the number of clock hours,
+// minutes, or seconds in the current period.
+func roundTimestampCalendarOrigin(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts roundTemporalState) (int64, error) {
+	t := arrow.Timestamp(ts).ToTime(inputUnit).In(tz)
+	origin, err := fixedCalendarOrigin(t, opts.Unit, tz)
+	if err != nil {
+		return 0, err
+	}
+
+	elapsed, err := wallClockDifference(t, origin)
+	if err != nil {
+		return 0, err
+	}
+	roundedElapsed, err := roundToMultipleInt64(
+		elapsed, opts.roundingInterval, opts.mode, opts.CeilIsStrictlyGreater,
+	)
+	if err != nil {
+		return 0, err
+	}
+	rounded, err := addWallNanos(origin, roundedElapsed)
+	if err != nil {
+		return 0, err
+	}
+
+	result, err := arrow.TimestampFromTime(rounded, inputUnit)
+	if err != nil {
+		return 0, err
+	}
+	return int64(result), nil
+}
+
+func fixedCalendarOrigin(value time.Time, unit RoundTemporalUnit, tz *time.Location) (time.Time, error) {
+	switch unit {
+	case RoundTemporalHour:
+		return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, tz), nil
+	case RoundTemporalMinute:
+		return time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), 0, 0, 0, tz), nil
+	case RoundTemporalSecond:
+		return time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), 0, 0, tz), nil
+	case RoundTemporalMillisecond:
+		return time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(), 0, tz), nil
+	case RoundTemporalMicrosecond:
+		return time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(),
+			(value.Nanosecond()/1_000_000)*1_000_000, tz), nil
+	case RoundTemporalNanosecond:
+		return time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(),
+			(value.Nanosecond()/1_000)*1_000, tz), nil
+	default:
+		return time.Time{}, fmt.Errorf("%w: unsupported fixed calendar unit", arrow.ErrNotImplemented)
+	}
+}
+
+func wallClockNanos(value time.Time) (int64, error) {
+	seconds := int64(value.Hour())*3600 + int64(value.Minute())*60 + int64(value.Second())
+	nanos, err := checkedMulInt64(seconds, int64(time.Second))
+	if err != nil {
+		return 0, err
+	}
+	return checkedAddInt64(nanos, int64(value.Nanosecond()))
+}
+
+func wallClockDifference(value, origin time.Time) (int64, error) {
+	days, err := calendarDayDifference(value, origin)
+	if err != nil {
+		return 0, err
+	}
+	daysNanos, err := checkedMulInt64(days, nanosPerDay)
+	if err != nil {
+		return 0, err
+	}
+	valueNanos, err := wallClockNanos(value)
+	if err != nil {
+		return 0, err
+	}
+	originNanos, err := wallClockNanos(origin)
+	if err != nil {
+		return 0, err
+	}
+	daysNanos, err = checkedAddInt64(daysNanos, valueNanos)
+	if err != nil {
+		return 0, err
+	}
+	return checkedSubInt64(daysNanos, originNanos)
+}
+
+// addWallNanos adds a duration to a local wall-clock value without using
+// time.Time.Add, which applies elapsed-time arithmetic across timezone
+// transitions. The result is normalized through calendar dates and then
+// reconstructed in the original location.
+func addWallNanos(origin time.Time, nanos int64) (time.Time, error) {
+	days := floorDivInt64(nanos, nanosPerDay)
+	daysNanos, err := checkedMulInt64(days, nanosPerDay)
+	if err != nil {
+		return time.Time{}, err
+	}
+	remainder, err := checkedSubInt64(nanos, daysNanos)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	originNanos, err := wallClockNanos(origin)
+	if err != nil {
+		return time.Time{}, err
+	}
+	dayTimeNanos, err := checkedAddInt64(originNanos, remainder)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if dayTimeNanos >= nanosPerDay {
+		days, err = checkedAddInt64(days, 1)
+		if err != nil {
+			return time.Time{}, err
+		}
+		dayTimeNanos -= nanosPerDay
+	}
+
+	date := time.Date(origin.Year(), origin.Month(), origin.Day(), 0, 0, 0, 0, origin.Location())
+	date, err = checkedCalendarAddDays(date, days)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	hour := dayTimeNanos / int64(time.Hour)
+	dayTimeNanos -= hour * int64(time.Hour)
+	minute := dayTimeNanos / int64(time.Minute)
+	dayTimeNanos -= minute * int64(time.Minute)
+	second := dayTimeNanos / int64(time.Second)
+	nanosecond := dayTimeNanos - second*int64(time.Second)
+	result := time.Date(date.Year(), date.Month(), date.Day(), int(hour), int(minute), int(second), int(nanosecond), origin.Location())
+	if result.Year() != date.Year() || result.Month() != date.Month() || result.Day() != date.Day() ||
+		result.Hour() != int(hour) || result.Minute() != int(minute) || result.Second() != int(second) ||
+		result.Nanosecond() != int(nanosecond) {
+		return time.Time{}, fmt.Errorf("%w: local time does not exist", arrow.ErrInvalid)
+	}
+	return result, nil
 }
 
 func overflowError() error {
@@ -1384,6 +1489,178 @@ func calendarDayDifference(left, right time.Time) (int64, error) {
 	return checkedSubInt64(leftDays, rightDays)
 }
 
+// floorCalendarIndex returns the start of the current calendar period as an
+// index in either months or quarters. Without a calendar origin, periods are
+// anchored at 1970-01-01. With one, multiple periods start at the beginning of
+// the current year.
+func floorCalendarIndex(year, offset, periodsPerYear, multiple int64, calendarOrigin bool) (int64, error) {
+	yearIndex, err := checkedMulInt64(year, periodsPerYear)
+	if err != nil {
+		return 0, err
+	}
+	currentIndex, err := checkedAddInt64(yearIndex, offset)
+	if err != nil {
+		return 0, err
+	}
+
+	if calendarOrigin && multiple != 1 {
+		roundedOffset, err := checkedMulInt64(floorDivInt64(offset, multiple), multiple)
+		if err != nil {
+			return 0, err
+		}
+		return checkedAddInt64(yearIndex, roundedOffset)
+	}
+
+	epochIndex, err := checkedMulInt64(1970, periodsPerYear)
+	if err != nil {
+		return 0, err
+	}
+	relative, err := checkedSubInt64(currentIndex, epochIndex)
+	if err != nil {
+		return 0, err
+	}
+	roundedRelative, err := checkedMulInt64(floorDivInt64(relative, multiple), multiple)
+	if err != nil {
+		return 0, err
+	}
+	return checkedAddInt64(epochIndex, roundedRelative)
+}
+
+func calendarDateFromIndex(index, periodsPerYear, monthsPerPeriod int64, tz *time.Location) (time.Time, error) {
+	year := floorDivInt64(index, periodsPerYear)
+	yearIndex, err := checkedMulInt64(year, periodsPerYear)
+	if err != nil {
+		return time.Time{}, err
+	}
+	offset, err := checkedSubInt64(index, yearIndex)
+	if err != nil {
+		return time.Time{}, err
+	}
+	monthOffset, err := checkedMulInt64(offset, monthsPerPeriod)
+	if err != nil {
+		return time.Time{}, err
+	}
+	month, err := checkedAddInt64(monthOffset, 1)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return checkedCalendarDate(year, month, tz)
+}
+
+func floorCalendarDay(value time.Time, multiple int64, calendarOrigin bool, tz *time.Location) (time.Time, error) {
+	day := time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, tz)
+	if multiple == 1 {
+		return day, nil
+	}
+
+	origin := time.Date(1970, 1, 1, 0, 0, 0, 0, tz)
+	if calendarOrigin {
+		origin = time.Date(value.Year(), value.Month(), 1, 0, 0, 0, 0, tz)
+	}
+	daysSinceOrigin, err := calendarDayDifference(day, origin)
+	if err != nil {
+		return time.Time{}, err
+	}
+	roundedDays, err := checkedMulInt64(floorDivInt64(daysSinceOrigin, multiple), multiple)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return checkedCalendarAddDays(origin, roundedDays)
+}
+
+func floorCalendarWeek(value time.Time, multiple int64, weekStartsMonday bool, tz *time.Location) (time.Time, error) {
+	offsetDays := int64(4)
+	targetWeekday := time.Wednesday
+	if weekStartsMonday {
+		offsetDays = 3
+		targetWeekday = time.Thursday
+	}
+	shifted, err := checkedCalendarAddDays(value, offsetDays)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	previousYear, err := checkedSubInt64(int64(shifted.Year()), 1)
+	if err != nil {
+		return time.Time{}, err
+	}
+	december, err := checkedCalendarDate(previousYear, 12, tz)
+	if err != nil {
+		return time.Time{}, err
+	}
+	december, err = checkedCalendarAddDays(december, 30)
+	if err != nil {
+		return time.Time{}, err
+	}
+	daysBack := (int(december.Weekday()) - int(targetWeekday) + 7) % 7
+	lastWeekday, err := checkedCalendarAddDays(december, -int64(daysBack))
+	if err != nil {
+		return time.Time{}, err
+	}
+	origin, err := checkedCalendarAddDays(lastWeekday, 4)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	shiftedDay := time.Date(shifted.Year(), shifted.Month(), shifted.Day(), 0, 0, 0, 0, tz)
+	daysSinceOrigin, err := calendarDayDifference(shiftedDay, origin)
+	if err != nil {
+		return time.Time{}, err
+	}
+	weeksSinceOrigin := floorDivInt64(daysSinceOrigin, 7)
+	roundedWeeks, err := checkedMulInt64(floorDivInt64(weeksSinceOrigin, multiple), multiple)
+	if err != nil {
+		return time.Time{}, err
+	}
+	roundedDays, err := checkedMulInt64(roundedWeeks, 7)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return checkedCalendarAddDays(origin, roundedDays)
+}
+
+func roundCalendarOriginWeek(value time.Time, opts roundTemporalState, tz *time.Location) (time.Time, error) {
+	floor, err := floorCalendarWeek(value, opts.Multiple, opts.WeekStartsMonday, tz)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if opts.mode == RoundDown {
+		return floor, nil
+	}
+
+	var next time.Time
+	makeNext := func() (time.Time, error) {
+		if next.IsZero() {
+			weekDays, err := checkedMulInt64(opts.Multiple, 7)
+			if err != nil {
+				return time.Time{}, err
+			}
+			next, err = checkedCalendarAddDays(floor, weekDays)
+			if err != nil {
+				return time.Time{}, err
+			}
+		}
+		return next, nil
+	}
+
+	switch opts.mode {
+	case RoundUp:
+		if opts.CeilIsStrictlyGreater || floor.Before(value) {
+			return makeNext()
+		}
+		return floor, nil
+	default:
+		if floor.After(value) {
+			return floor, nil
+		}
+		next, err := makeNext()
+		if err != nil {
+			return time.Time{}, err
+		}
+		return halfRoundPeriod(value, floor, next)
+	}
+}
+
 // roundTimestampCalendar handles calendar-based rounding (year, quarter, month, week, day).
 // Requires date arithmetic for variable-length periods and timezone-aware boundaries.
 func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts roundTemporalState) (int64, error) {
@@ -1448,43 +1725,30 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 		// Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec
 		month := int64(t.Month())
 		year := int64(t.Year())
-		totalQuarters, err := checkedMulInt64(year, 4)
+		roundedQuarters, err := floorCalendarIndex(
+			year, (month-1)/3, 4, multiple, opts.CalendarBasedOrigin,
+		)
 		if err != nil {
 			return 0, err
 		}
-		totalQuarters, err = checkedAddInt64(totalQuarters, (month-1)/3)
-		if err != nil {
-			return 0, err
-		}
-		roundedQuarters, err := checkedMulInt64(floorDivInt64(totalQuarters, multiple), multiple)
-		if err != nil {
-			return 0, err
-		}
-		roundedYear := floorDivInt64(roundedQuarters, 4)
-		roundedQuarter := roundedQuarters - roundedYear*4
-		roundedMonth := roundedQuarter*3 + 1 // First month of the quarter
 
 		switch opts.mode {
 		case RoundDown:
-			var dateErr error
-			rounded, dateErr = checkedCalendarDate(roundedYear, roundedMonth, tz)
-			if dateErr != nil {
-				return 0, dateErr
+			rounded, err = calendarDateFromIndex(roundedQuarters, 4, 3, tz)
+			if err != nil {
+				return 0, err
 			}
 		case RoundUp:
-			periodStart, dateErr := checkedCalendarDate(roundedYear, roundedMonth, tz)
+			periodStart, dateErr := calendarDateFromIndex(roundedQuarters, 4, 3, tz)
 			if dateErr != nil {
 				return 0, dateErr
 			}
 			if opts.CeilIsStrictlyGreater || !t.Equal(periodStart) {
-				roundedQuarters, err = checkedAddInt64(roundedQuarters, multiple)
-				if err != nil {
-					return 0, err
+				nextQuarters, dateErr := checkedAddInt64(roundedQuarters, multiple)
+				if dateErr != nil {
+					return 0, dateErr
 				}
-				roundedYear = floorDivInt64(roundedQuarters, 4)
-				roundedQuarter = roundedQuarters - roundedYear*4
-				roundedMonth = roundedQuarter*3 + 1
-				rounded, dateErr = checkedCalendarDate(roundedYear, roundedMonth, tz)
+				rounded, dateErr = calendarDateFromIndex(nextQuarters, 4, 3, tz)
 				if dateErr != nil {
 					return 0, dateErr
 				}
@@ -1492,7 +1756,7 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 				rounded = periodStart
 			}
 		default:
-			quarterStart, dateErr := checkedCalendarDate(roundedYear, roundedMonth, tz)
+			quarterStart, dateErr := calendarDateFromIndex(roundedQuarters, 4, 3, tz)
 			if dateErr != nil {
 				return 0, dateErr
 			}
@@ -1500,10 +1764,7 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 			if dateErr != nil {
 				return 0, dateErr
 			}
-			nextYear := floorDivInt64(nextQuarterNum, 4)
-			nextQuarter := nextQuarterNum - nextYear*4
-			nextMonth := nextQuarter*3 + 1
-			quarterEnd, dateErr := checkedCalendarDate(nextYear, nextMonth, tz)
+			quarterEnd, dateErr := calendarDateFromIndex(nextQuarterNum, 4, 3, tz)
 			if dateErr != nil {
 				return 0, dateErr
 			}
@@ -1516,45 +1777,30 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 	case RoundTemporalMonth:
 		month := int64(t.Month())
 		year := int64(t.Year())
-		totalMonths, err := checkedMulInt64(year, 12)
+		roundedMonths, err := floorCalendarIndex(
+			year, month-1, 12, multiple, opts.CalendarBasedOrigin,
+		)
 		if err != nil {
 			return 0, err
 		}
-		totalMonths, err = checkedAddInt64(totalMonths, month)
-		if err != nil {
-			return 0, err
-		}
-		totalMonths, err = checkedSubInt64(totalMonths, 1)
-		if err != nil {
-			return 0, err
-		}
-		roundedMonths, err := checkedMulInt64(floorDivInt64(totalMonths, multiple), multiple)
-		if err != nil {
-			return 0, err
-		}
-		roundedYear := floorDivInt64(roundedMonths, 12)
-		roundedMonth := roundedMonths - roundedYear*12 + 1
 
 		switch opts.mode {
 		case RoundDown:
-			var dateErr error
-			rounded, dateErr = checkedCalendarDate(roundedYear, roundedMonth, tz)
-			if dateErr != nil {
-				return 0, dateErr
+			rounded, err = calendarDateFromIndex(roundedMonths, 12, 1, tz)
+			if err != nil {
+				return 0, err
 			}
 		case RoundUp:
-			periodStart, dateErr := checkedCalendarDate(roundedYear, roundedMonth, tz)
+			periodStart, dateErr := calendarDateFromIndex(roundedMonths, 12, 1, tz)
 			if dateErr != nil {
 				return 0, dateErr
 			}
 			if opts.CeilIsStrictlyGreater || !t.Equal(periodStart) {
-				roundedMonths, err = checkedAddInt64(roundedMonths, multiple)
-				if err != nil {
-					return 0, err
+				nextMonths, dateErr := checkedAddInt64(roundedMonths, multiple)
+				if dateErr != nil {
+					return 0, dateErr
 				}
-				roundedYear = floorDivInt64(roundedMonths, 12)
-				roundedMonth = roundedMonths - roundedYear*12 + 1
-				rounded, dateErr = checkedCalendarDate(roundedYear, roundedMonth, tz)
+				rounded, dateErr = calendarDateFromIndex(nextMonths, 12, 1, tz)
 				if dateErr != nil {
 					return 0, dateErr
 				}
@@ -1562,7 +1808,7 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 				rounded = periodStart
 			}
 		default:
-			monthStart, dateErr := checkedCalendarDate(roundedYear, roundedMonth, tz)
+			monthStart, dateErr := calendarDateFromIndex(roundedMonths, 12, 1, tz)
 			if dateErr != nil {
 				return 0, dateErr
 			}
@@ -1570,9 +1816,7 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 			if dateErr != nil {
 				return 0, dateErr
 			}
-			nextYear := floorDivInt64(nextMonthNum, 12)
-			nextMonth := nextMonthNum - nextYear*12 + 1
-			monthEnd, dateErr := checkedCalendarDate(nextYear, nextMonth, tz)
+			monthEnd, dateErr := calendarDateFromIndex(nextMonthNum, 12, 1, tz)
 			if dateErr != nil {
 				return 0, dateErr
 			}
@@ -1583,6 +1827,14 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 		}
 
 	case RoundTemporalWeek:
+		if opts.CalendarBasedOrigin && multiple != 1 {
+			rounded, err = roundCalendarOriginWeek(t, opts, tz)
+			if err != nil {
+				return 0, err
+			}
+			break
+		}
+
 		weekday := int(t.Weekday())
 		if opts.WeekStartsMonday {
 			weekday = (weekday + 6) % 7
@@ -1657,22 +1909,25 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 		}
 
 	case RoundTemporalDay:
-		startOfDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, tz)
+		startOfDay, dateErr := floorCalendarDay(t, multiple, opts.CalendarBasedOrigin, tz)
+		if dateErr != nil {
+			return 0, dateErr
+		}
+		nextDay, dateErr := checkedCalendarAddDays(startOfDay, multiple)
+		if dateErr != nil {
+			return 0, dateErr
+		}
 
 		switch opts.mode {
 		case RoundDown:
 			rounded = startOfDay
 		case RoundUp:
 			if opts.CeilIsStrictlyGreater || !t.Equal(startOfDay) {
-				rounded, err = checkedCalendarAddDays(startOfDay, 1)
+				rounded = nextDay
 			} else {
 				rounded = startOfDay
 			}
 		default:
-			nextDay, dateErr := checkedCalendarAddDays(startOfDay, 1)
-			if dateErr != nil {
-				return 0, dateErr
-			}
 			rounded, err = halfRoundPeriod(t, startOfDay, nextDay)
 			if err != nil {
 				return 0, err

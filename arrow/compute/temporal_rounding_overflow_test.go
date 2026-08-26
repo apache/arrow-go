@@ -189,12 +189,12 @@ func TestTemporalRoundingTimezonePaths(t *testing.T) {
 			want:     time.Date(2024, time.March, 10, 0, 0, 0, 0, loc),
 		},
 		{
-			name:     "UTC calendar origin",
+			name:     "timezone calendar origin",
 			value:    time.Date(2024, time.January, 15, 10, 37, 0, 0, time.UTC),
 			unit:     compute.RoundTemporalHour,
 			multiple: 2,
 			calendar: true,
-			want:     time.Date(2024, time.January, 15, 10, 0, 0, 0, time.UTC),
+			want:     time.Date(2024, time.January, 15, 9, 0, 0, 0, time.UTC),
 		},
 	}
 
@@ -537,13 +537,13 @@ func TestTemporalRoundingSecondOverflow(t *testing.T) {
 }
 
 func TestTemporalRoundingNegativeCalendarMultiples(t *testing.T) {
-	tests := []struct {
-		name             string
-		value            time.Time
-		floor            time.Time
-		ceil             time.Time
-		multiple         int64
-		unit             compute.RoundTemporalUnit
+		tests := []struct {
+			name             string
+			value            time.Time
+			floor            time.Time
+			ceil             time.Time
+			multiple         int64
+			unit             compute.RoundTemporalUnit
 	}{
 		{
 			name:     "year",
