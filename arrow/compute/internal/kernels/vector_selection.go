@@ -99,6 +99,19 @@ type builder[T any] interface {
 	UnsafeAppendBoolToBitmap(bool)
 }
 
+func unsafeAppendRange[T arrow.IntType | arrow.UintType](b *bufferBuilder[T], start T, n int) {
+	if n == 0 {
+		return
+	}
+
+	b.reserve(n)
+	values := arrow.GetData[T](b.data[b.sz:])[:n]
+	for i := range values {
+		values[i] = start + T(i)
+	}
+	b.sz += len(arrow.GetBytes(values))
+}
+
 func getTakeIndices[T arrow.IntType | arrow.UintType](mem memory.Allocator, filter *exec.ArraySpan, nullSelect NullSelectionBehavior) arrow.ArrayData {
 	var (
 		filterData      = filter.Buffers[1].Buf
@@ -129,6 +142,7 @@ func getTakeIndices[T arrow.IntType | arrow.UintType](mem memory.Allocator, filt
 			// true OR NOT valid
 			selectedOrNullBlock := filterCounter.NextOrNotWord()
 			if selectedOrNullBlock.NoneSet() {
+				isValidCounter.NextWord()
 				pos += T(selectedOrNullBlock.Len)
 				posWithOffset += int64(selectedOrNullBlock.Len)
 				continue
@@ -183,16 +197,14 @@ func getTakeIndices[T arrow.IntType | arrow.UintType](mem memory.Allocator, filt
 		filterCounter := bitutils.NewBinaryBitBlockCounter(filterData, filterIsValid, filter.Offset, filter.Offset, filter.Len)
 		for int64(pos) < filter.Len {
 			andBlock := filterCounter.NextAndWord()
-			bldr.reserve(int(andBlock.Popcnt))
 			if andBlock.AllSet() {
 				// all the values are selected and non-null
-				for i := 0; i < int(andBlock.Len); i++ {
-					bldr.unsafeAppend(pos)
-					pos++
-				}
+				unsafeAppendRange(bldr, pos, int(andBlock.Len))
+				pos += T(andBlock.Len)
 				posWithOffset += int64(andBlock.Len)
 			} else if !andBlock.NoneSet() {
 				// some values are false or null
+				bldr.reserve(int(andBlock.Popcnt))
 				for i := 0; i < int(andBlock.Len); i++ {
 					if bitutil.BitIsSet(filterIsValid, int(posWithOffset)) && bitutil.BitIsSet(filterData, int(posWithOffset)) {
 						bldr.unsafeAppend(pos)
@@ -210,10 +222,7 @@ func getTakeIndices[T arrow.IntType | arrow.UintType](mem memory.Allocator, filt
 		bitutils.VisitSetBitRuns(filterData, filter.Offset, filter.Len,
 			func(pos, length int64) error {
 				// append consecutive run of indices
-				bldr.reserve(int(length))
-				for i := int64(0); i < length; i++ {
-					bldr.unsafeAppend(T(pos + i))
-				}
+				unsafeAppendRange(bldr, T(pos), int(length))
 				return nil
 			})
 	}
