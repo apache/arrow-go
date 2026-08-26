@@ -17,6 +17,7 @@
 package metadata
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
+	"github.com/apache/arrow-go/v18/arrow/endian"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -194,6 +196,30 @@ func GetSpacedHashesFromBitmap(h Hasher, numValid int64, bitmap []byte, bitmapOf
 
 func getBytes[T parquet.ColumnTypes](v T) []byte {
 	switch v := any(v).(type) {
+	case int32:
+		if endian.IsBigEndian {
+			var out [arrow.Int32SizeBytes]byte
+			binary.LittleEndian.PutUint32(out[:], uint32(v))
+			return out[:]
+		}
+	case int64:
+		if endian.IsBigEndian {
+			var out [arrow.Int64SizeBytes]byte
+			binary.LittleEndian.PutUint64(out[:], uint64(v))
+			return out[:]
+		}
+	case float32:
+		if endian.IsBigEndian {
+			var out [arrow.Float32SizeBytes]byte
+			binary.LittleEndian.PutUint32(out[:], math.Float32bits(v))
+			return out[:]
+		}
+	case float64:
+		if endian.IsBigEndian {
+			var out [arrow.Float64SizeBytes]byte
+			binary.LittleEndian.PutUint64(out[:], math.Float64bits(v))
+			return out[:]
+		}
 	case parquet.ByteArray:
 		return v
 	case parquet.FixedLenByteArray:
@@ -208,6 +234,46 @@ func getBytes[T parquet.ColumnTypes](v T) []byte {
 func getBytesSlice[T parquet.ColumnTypes](v []T) [][]byte {
 	b := make([][]byte, len(v))
 	switch v := any(v).(type) {
+	case []int32:
+		if endian.IsBigEndian {
+			raw := make([]byte, arrow.Int32SizeBytes*len(v))
+			for i, vv := range v {
+				value := raw[i*arrow.Int32SizeBytes : (i+1)*arrow.Int32SizeBytes]
+				binary.LittleEndian.PutUint32(value, uint32(vv))
+				b[i] = value
+			}
+			return b
+		}
+	case []int64:
+		if endian.IsBigEndian {
+			raw := make([]byte, arrow.Int64SizeBytes*len(v))
+			for i, vv := range v {
+				value := raw[i*arrow.Int64SizeBytes : (i+1)*arrow.Int64SizeBytes]
+				binary.LittleEndian.PutUint64(value, uint64(vv))
+				b[i] = value
+			}
+			return b
+		}
+	case []float32:
+		if endian.IsBigEndian {
+			raw := make([]byte, arrow.Float32SizeBytes*len(v))
+			for i, vv := range v {
+				value := raw[i*arrow.Float32SizeBytes : (i+1)*arrow.Float32SizeBytes]
+				binary.LittleEndian.PutUint32(value, math.Float32bits(vv))
+				b[i] = value
+			}
+			return b
+		}
+	case []float64:
+		if endian.IsBigEndian {
+			raw := make([]byte, arrow.Float64SizeBytes*len(v))
+			for i, vv := range v {
+				value := raw[i*arrow.Float64SizeBytes : (i+1)*arrow.Float64SizeBytes]
+				binary.LittleEndian.PutUint64(value, math.Float64bits(vv))
+				b[i] = value
+			}
+			return b
+		}
 	case []parquet.ByteArray:
 		for i, vv := range v {
 			b[i] = vv

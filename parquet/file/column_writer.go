@@ -115,9 +115,10 @@ type columnWriter struct {
 	repEncoder encoding.LevelEncoder
 	mem        memory.Allocator
 
-	pageStatistics  metadata.TypedStatistics
-	chunkStatistics metadata.TypedStatistics
-	bloomFilter     metadata.BloomFilterBuilder
+	pageStatistics     metadata.TypedStatistics
+	chunkStatistics    metadata.TypedStatistics
+	bloomFilter        metadata.BloomFilterBuilder
+	dictBloomPopulated bool
 
 	// total number of values stored in the current data page. this is the maximum
 	// of the number of encoded def levels or encoded values. for
@@ -519,12 +520,91 @@ func (w *columnWriter) WriteDictionaryPage() error {
 	buffer.Resize(dictEncoder.DictEncodedSize())
 	dictEncoder.WriteDict(buffer.Bytes())
 	defer buffer.Release()
+	if err := w.populateBloomFilterFromDictionary(dictEncoder, buffer.Bytes()); err != nil {
+		return err
+	}
 
 	page := NewDictionaryPage(buffer, int32(dictEncoder.NumEntries()), w.props.DictionaryPageEncoding())
 	written, err := w.pager.WriteDictionaryPage(page)
 	w.totalBytesWritten += written
 	w.dictPageWritten = err == nil
 	return err
+}
+
+func (w *columnWriter) populateBloomFilterFromEncoder(dictEncoder encoding.DictEncoder) error {
+	if w.bloomFilter == nil || w.dictBloomPopulated {
+		return nil
+	}
+
+	buffer := memory.NewResizableBuffer(w.mem)
+	defer buffer.Release()
+	buffer.Resize(dictEncoder.DictEncodedSize())
+	dictEncoder.WriteDict(buffer.Bytes())
+	return w.populateBloomFilterFromDictionary(dictEncoder, buffer.Bytes())
+}
+
+// populateBloomFilterFromDictionary hashes the PLAIN-encoded dictionary entries
+// that are referenced by data pages. Repeated logical values therefore contribute
+// one hash for the entire column chunk.
+func (w *columnWriter) populateBloomFilterFromDictionary(dictEncoder encoding.DictEncoder, dictionary []byte) error {
+	if w.bloomFilter == nil || w.dictBloomPopulated {
+		return nil
+	}
+
+	referenced := dictEncoder.ReferencedDictionaryIndices()
+	if len(referenced) == 0 {
+		w.dictBloomPopulated = true
+		return nil
+	}
+
+	hasher := w.bloomFilter.Hasher()
+	insertFixedWidth := func(width int) error {
+		for _, index := range referenced {
+			start := int(index) * width
+			end := start + width
+			if index < 0 || start < 0 || end > len(dictionary) {
+				return fmt.Errorf("parquet: referenced dictionary index %d out of bounds", index)
+			}
+			w.bloomFilter.InsertHash(hasher.Sum64(dictionary[start:end]))
+		}
+		return nil
+	}
+
+	var err error
+	switch w.descr.PhysicalType() {
+	case parquet.Types.Int32, parquet.Types.Float:
+		err = insertFixedWidth(arrow.Int32SizeBytes)
+	case parquet.Types.Int64, parquet.Types.Double:
+		err = insertFixedWidth(arrow.Int64SizeBytes)
+	case parquet.Types.Int96:
+		err = insertFixedWidth(12)
+	case parquet.Types.FixedLenByteArray:
+		err = insertFixedWidth(w.descr.TypeLength())
+	case parquet.Types.ByteArray:
+		offset := 0
+		for index := 0; index < dictEncoder.NumEntries(); index++ {
+			if len(dictionary)-offset < arrow.Uint32SizeBytes {
+				return fmt.Errorf("parquet: truncated byte-array dictionary length at index %d", index)
+			}
+			valueLen := int(binary.LittleEndian.Uint32(dictionary[offset:]))
+			offset += arrow.Uint32SizeBytes
+			if valueLen < 0 || valueLen > len(dictionary)-offset {
+				return fmt.Errorf("parquet: truncated byte-array dictionary value at index %d", index)
+			}
+			if dictEncoder.DictionaryIndexReferenced(index) {
+				w.bloomFilter.InsertHash(hasher.Sum64(dictionary[offset : offset+valueLen]))
+			}
+			offset += valueLen
+		}
+	default:
+		err = fmt.Errorf("parquet: bloom filters are not supported for dictionary type %s", w.descr.PhysicalType())
+	}
+	if err != nil {
+		return err
+	}
+
+	w.dictBloomPopulated = true
+	return nil
 }
 
 type batchWriteInfo struct {

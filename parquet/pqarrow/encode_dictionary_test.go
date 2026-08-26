@@ -34,6 +34,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/internal/testutils"
+	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -79,6 +80,150 @@ func TestWriteColumnChunkedPropagatesLevelBuilderError(t *testing.T) {
 	assert.True(t, errors.Is(err, arrow.ErrNotImplemented))
 	require.NoError(t, writer.WriteColumnData(valid))
 	require.NoError(t, writer.Close())
+}
+
+func TestDictionaryArrayBloomFilter(t *testing.T) {
+	mem := memory.DefaultAllocator
+
+	dictionary, _, err := array.FromJSON(mem, arrow.BinaryTypes.String,
+		strings.NewReader(`["unused", "alpha", "beta"]`))
+	require.NoError(t, err)
+	defer dictionary.Release()
+	indices, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32,
+		strings.NewReader(`[1, null, 1, 2, 1]`))
+	require.NoError(t, err)
+	defer indices.Release()
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}
+	values := array.NewDictionaryArray(dictType, indices, dictionary)
+	defer values.Release()
+	sc := arrow.NewSchema([]arrow.Field{{Name: "values", Type: dictType, Nullable: true}}, nil)
+
+	var output bytes.Buffer
+	writer, err := pqarrow.NewFileWriter(sc, &output, parquet.NewWriterProperties(
+		parquet.WithAllocator(mem),
+		parquet.WithDictionaryDefault(true),
+		parquet.WithStats(false),
+		parquet.WithDataPageSize(1),
+		parquet.WithBatchSize(2),
+		parquet.WithBloomFilterEnabledFor("values", true),
+		parquet.WithBloomFilterNDVFor("values", 2),
+	), pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem)))
+	require.NoError(t, err)
+	require.NoError(t, writer.NewRowGroupChecked())
+	require.NoError(t, writer.WriteColumnData(values))
+	require.NoError(t, writer.Close())
+
+	reader, err := file.NewParquetReader(bytes.NewReader(output.Bytes()))
+	require.NoError(t, err)
+	defer reader.Close()
+	bloomReader := reader.GetBloomFilterReader()
+	rowGroupBloom, err := bloomReader.RowGroup(0)
+	require.NoError(t, err)
+	require.NoError(t, rowGroupBloom.VisitColumnBloomFilter(0, func(filter metadata.BloomFilter) error {
+		typedFilter := metadata.TypedBloomFilter[parquet.ByteArray]{BloomFilter: filter}
+		assert.True(t, typedFilter.Check(parquet.ByteArray("alpha")))
+		assert.True(t, typedFilter.Check(parquet.ByteArray("beta")))
+		return nil
+	}))
+}
+
+func TestWriteColumnDataRejectsOutOfBoundsDictionaryIndex(t *testing.T) {
+	mem := memory.DefaultAllocator
+
+	dictionary, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32,
+		strings.NewReader(`[10, 20]`))
+	require.NoError(t, err)
+	defer dictionary.Release()
+	indices, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int8,
+		strings.NewReader(`[2]`))
+	require.NoError(t, err)
+	defer indices.Release()
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.PrimitiveTypes.Int32}
+	values := array.NewDictionaryArray(dictType, indices, dictionary)
+	defer values.Release()
+	sc := arrow.NewSchema([]arrow.Field{{Name: "values", Type: dictType, Nullable: false}}, nil)
+
+	var output bytes.Buffer
+	writer, err := pqarrow.NewFileWriter(sc, &output, parquet.NewWriterProperties(
+		parquet.WithAllocator(mem),
+		parquet.WithDictionaryDefault(true),
+		parquet.WithStats(true),
+	), pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem)))
+	require.NoError(t, err)
+	require.NoError(t, writer.NewRowGroupChecked())
+
+	err = writer.WriteColumnData(values)
+	require.ErrorIs(t, err, arrow.ErrIndex)
+	require.NoError(t, writer.Close())
+}
+
+func BenchmarkDictionaryArrayBloomFilter(b *testing.B) {
+	tests := []struct {
+		name              string
+		dictionaryEntries int
+		referencedEntries int
+	}{
+		{name: "dictionary=100k/referenced=10", dictionaryEntries: 100_000, referencedEntries: 10},
+		{name: "dictionary=1m/referenced=100", dictionaryEntries: 1_000_000, referencedEntries: 100},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			const numRows = 100_000
+			mem := memory.DefaultAllocator
+
+			dictionaryBuilder := array.NewStringBuilder(mem)
+			dictionaryBuilder.Reserve(tt.dictionaryEntries)
+			for i := 0; i < tt.dictionaryEntries; i++ {
+				dictionaryBuilder.Append(fmt.Sprintf("value-%08d", i))
+			}
+			dictionary := dictionaryBuilder.NewArray()
+			dictionaryBuilder.Release()
+			defer dictionary.Release()
+
+			indicesBuilder := array.NewInt32Builder(mem)
+			indicesBuilder.Reserve(numRows)
+			for i := 0; i < numRows; i++ {
+				indicesBuilder.Append(int32(i % tt.referencedEntries))
+			}
+			indices := indicesBuilder.NewArray()
+			indicesBuilder.Release()
+			defer indices.Release()
+
+			dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}
+			values := array.NewDictionaryArray(dictType, indices, dictionary)
+			defer values.Release()
+			sc := arrow.NewSchema([]arrow.Field{{Name: "values", Type: dictType}}, nil)
+			props := parquet.NewWriterProperties(
+				parquet.WithDictionaryDefault(true),
+				parquet.WithStats(false),
+				parquet.WithBloomFilterEnabledFor("values", true),
+				parquet.WithBloomFilterNDVFor("values", int64(tt.referencedEntries)),
+			)
+			arrowProps := pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem))
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var output bytes.Buffer
+				writer, err := pqarrow.NewFileWriter(sc, &output, props, arrowProps)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if err := writer.NewRowGroupChecked(); err != nil {
+					b.Fatal(err)
+				}
+				if err := writer.WriteColumnData(values); err != nil {
+					b.Fatal(err)
+				}
+				if err := writer.Close(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }
 
 func (ps *ParquetIOTestSuite) TestSingleColumnOptionalDictionaryWrite() {

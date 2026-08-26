@@ -168,6 +168,7 @@ func (enc *typedDictEncoder[T]) Put(in []T) {
 			enc.dictEncodedSize += int(unsafe.Sizeof(T(0)))
 		}
 		enc.idxValues[curPos+i] = int32(memoIdx)
+		enc.recordDictionaryReference(int32(memoIdx))
 	}
 	enc.AddRawSize(int64(len(in)) * int64(unsafe.Sizeof(T(0))))
 }
@@ -458,7 +459,7 @@ func (enc *DictInt96Encoder) WriteDict(out []byte) {
 // Put encodes the values passed in, adding to the index as needed
 func (enc *DictInt96Encoder) Put(in []parquet.Int96) {
 	for _, v := range in {
-		memoIdx, found, err := enc.memo.GetOrInsert(v)
+		memoIdx, found, err := enc.memo.GetOrInsert(v[:])
 		if err != nil {
 			panic(err)
 		}
@@ -485,6 +486,10 @@ func (enc *DictInt96Encoder) PutSpaced(in []parquet.Int96, validBits []byte, val
 // be called on an empty encoder.
 func (enc *DictInt96Encoder) PutDictionary(arrow.Array) error {
 	return fmt.Errorf("%w: direct PutDictionary to Int96", arrow.ErrNotImplemented)
+}
+
+func (enc *DictInt96Encoder) NormalizeDict(arrow.Array) (arrow.Array, error) {
+	return nil, fmt.Errorf("%w: direct PutDictionary to Int96", arrow.ErrNotImplemented)
 }
 
 // FallBackTo drains buffered indices through the dictionary into the
