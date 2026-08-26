@@ -380,12 +380,46 @@ func TestRunEndEncodedBuilderEmptyValues(t *testing.T) {
 	arr := bldr.NewRunEndEncodedArray()
 	defer arr.Release()
 
+	assert.Equal(t, []int16{1, 3}, arr.RunEndsArr().(*array.Int16).Int16Values())
 	values := arr.Values().(*array.String)
-	assert.Equal(t, 3, values.Len())
+	assert.Equal(t, 2, values.Len())
 	for i := 0; i < values.Len(); i++ {
 		assert.False(t, values.IsNull(i))
 		assert.Empty(t, values.Value(i))
 	}
+}
+
+func TestRunEndEncodedBuilderBulkAppendNullsAndEmptyValues(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewRunEndEncodedBuilder(mem, arrow.PrimitiveTypes.Int16, arrow.BinaryTypes.String)
+	defer bldr.Release()
+
+	bldr.AppendNulls(0)
+	bldr.AppendEmptyValues(0)
+	bldr.AppendNulls(-1)
+	bldr.AppendEmptyValues(-1)
+	assert.Zero(t, bldr.Len())
+
+	bldr.AppendEmptyValues(2)
+	bldr.AppendNulls(3)
+	bldr.AppendEmptyValues(4)
+
+	arr := bldr.NewRunEndEncodedArray()
+	defer arr.Release()
+	require.NoError(t, arr.ValidateFull())
+
+	assert.Equal(t, 9, arr.Len())
+	assert.Equal(t, []int16{2, 5, 9}, arr.RunEndsArr().(*array.Int16).Int16Values())
+
+	values := arr.Values().(*array.String)
+	assert.Equal(t, 3, values.Len())
+	assert.False(t, values.IsNull(0))
+	assert.Empty(t, values.Value(0))
+	assert.True(t, values.IsNull(1))
+	assert.False(t, values.IsNull(2))
+	assert.Empty(t, values.Value(2))
 }
 
 func TestRunEndEncodedBuilderEmptyValueBeforeUnmarshalNull(t *testing.T) {
@@ -424,14 +458,12 @@ func TestRunEndEncodedBuilderEmptyValuesBeforeUnmarshalNulls(t *testing.T) {
 	arr := bldr.NewRunEndEncodedArray()
 	defer arr.Release()
 
-	assert.Equal(t, []int16{1, 2, 4}, arr.RunEndsArr().(*array.Int16).Int16Values())
+	assert.Equal(t, []int16{2, 4}, arr.RunEndsArr().(*array.Int16).Int16Values())
 	values := arr.Values().(*array.String)
-	assert.Equal(t, 3, values.Len())
+	assert.Equal(t, 2, values.Len())
 	assert.False(t, values.IsNull(0))
 	assert.Empty(t, values.Value(0))
-	assert.False(t, values.IsNull(1))
-	assert.Empty(t, values.Value(1))
-	assert.True(t, values.IsNull(2))
+	assert.True(t, values.IsNull(1))
 }
 
 func TestRunEndEncodedBuilderDictionaryEmptyValue(t *testing.T) {
