@@ -707,3 +707,34 @@ func TestFromStringDecimal128b(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, decStr, num.ToString(19))
 }
+
+func TestToStringMatchesBigFloat(t *testing.T) {
+	values := []string{
+		"0",
+		"1",
+		"-1",
+		"9",
+		"-9",
+		"12345678901234567890123456789012345678",
+		"-12345678901234567890123456789012345678",
+		"170141183460469231731687303715884105727",
+		"-170141183460469231731687303715884105727",
+	}
+	scales := []int32{-38, -10, -1, 0, 1, 2, 10, 38}
+
+	for _, value := range values {
+		integer, ok := new(big.Int).SetString(value, 10)
+		require.True(t, ok)
+		number := decimal128.FromBigInt(integer)
+		for _, scale := range scales {
+			want := number.ToBigFloat(scale).Text('f', int(scale))
+			assert.Equalf(t, want, number.ToString(scale), "value=%s scale=%d", value, scale)
+		}
+	}
+}
+
+func TestToStringRejectsInvalidScale(t *testing.T) {
+	for _, scale := range []int32{-39, 39} {
+		assert.Panics(t, func() { decimal128.FromI64(1).ToString(scale) })
+	}
+}
