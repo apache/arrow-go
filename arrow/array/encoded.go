@@ -490,9 +490,13 @@ func (b *RunEndEncodedBuilder) AppendNull() {
 }
 
 func (b *RunEndEncodedBuilder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+
+	b.finishRun()
+	b.values.AppendNull()
+	b.addLength(uint64(n))
 }
 
 func (b *RunEndEncodedBuilder) UnsafeAppendBoolToBitmap(v bool) {
@@ -511,9 +515,14 @@ func (b *RunEndEncodedBuilder) AppendEmptyValue() {
 }
 
 func (b *RunEndEncodedBuilder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+
+	b.finishRun()
+	b.values.AppendEmptyValue()
+	b.addLength(uint64(n))
+	b.lastValueWasEmpty = true
 }
 
 func (b *RunEndEncodedBuilder) Reserve(n int) {
