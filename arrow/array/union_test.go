@@ -178,6 +178,47 @@ func TestUnionBuilderRejectsRoundedJSONTypeCodes(t *testing.T) {
 	}
 }
 
+func TestUnionBuilderUnmarshalOnePreservesDecoderConfiguration(t *testing.T) {
+	unionFields := []arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}
+	cases := []struct {
+		name string
+		typ  arrow.DataType
+	}{
+		{
+			name: "dense",
+			typ:  arrow.DenseUnionOf(unionFields, []arrow.UnionTypeCode{0}),
+		},
+		{
+			name: "sparse",
+			typ:  arrow.SparseUnionOf(unionFields, []arrow.UnionTypeCode{0}),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dtype := arrow.StructOf(
+				arrow.Field{Name: "u", Type: tc.typ},
+				arrow.Field{Name: "i", Type: arrow.PrimitiveTypes.Int32},
+			)
+			for _, input := range []struct {
+				name string
+				json string
+			}{
+				{name: "integer first", json: `{"i":1.5,"u":[0,1]}`},
+				{name: "union first", json: `{"u":[0,1],"i":1.5}`},
+			} {
+				t.Run(input.name, func(t *testing.T) {
+					builder := array.NewStructBuilder(memory.DefaultAllocator, dtype)
+					defer builder.Release()
+
+					dec := internaljson.NewDecoder(strings.NewReader(input.json))
+					require.NoError(t, builder.UnmarshalOne(dec))
+				})
+			}
+		})
+	}
+}
+
 func TestUnionSliceEquals(t *testing.T) {
 	unionFields := []arrow.Field{
 		{Name: "u0", Type: arrow.PrimitiveTypes.Int32, Nullable: true},

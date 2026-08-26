@@ -776,31 +776,14 @@ type unionBuilder struct {
 	typesBuilder *int8BufferBuilder
 }
 
-func unionTypeCodeFromJSON(dec *json.Decoder, typeID any, typ arrow.DataType) (arrow.UnionTypeCode, error) {
-	var id int64
-	switch tid := typeID.(type) {
-	case json.Number:
-		var err error
-		id, err = tid.Int64()
-		if err != nil {
-			return 0, err
-		}
-	case float64:
-		if tid != math.Trunc(tid) || tid < 0 || tid > float64(arrow.MaxUnionTypeCode) {
-			return 0, &json.UnmarshalTypeError{
-				Offset: dec.InputOffset(),
-				Type:   reflect.TypeOf(int8(0)),
-				Struct: fmt.Sprint(typ),
-				Value:  "float",
-			}
-		}
-		id = int64(tid)
-	default:
+func unionTypeCodeFromJSON(dec *json.Decoder, typeID json.RawMessage, typ arrow.DataType) (arrow.UnionTypeCode, error) {
+	id, err := json.Number(string(typeID)).Int64()
+	if err != nil {
 		return 0, &json.UnmarshalTypeError{
 			Offset: dec.InputOffset(),
 			Type:   reflect.TypeOf(int8(0)),
 			Struct: fmt.Sprint(typ),
-			Value:  "union type code",
+			Value:  "integer",
 		}
 	}
 
@@ -1114,7 +1097,6 @@ func (b *SparseUnionBuilder) AppendValueFromString(s string) error {
 }
 
 func (b *SparseUnionBuilder) UnmarshalOne(dec *json.Decoder) error {
-	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -1123,8 +1105,8 @@ func (b *SparseUnionBuilder) UnmarshalOne(dec *json.Decoder) error {
 	switch t {
 	case json.Delim('['):
 		// should be [type_id, Value]
-		typeID, err := dec.Token()
-		if err != nil {
+		var typeID json.RawMessage
+		if err := dec.Decode(&typeID); err != nil {
 			return err
 		}
 
@@ -1380,7 +1362,6 @@ func (d *DenseUnionBuilder) AppendValueFromString(s string) error {
 }
 
 func (b *DenseUnionBuilder) UnmarshalOne(dec *json.Decoder) error {
-	dec.UseNumber()
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -1389,8 +1370,8 @@ func (b *DenseUnionBuilder) UnmarshalOne(dec *json.Decoder) error {
 	switch t {
 	case json.Delim('['):
 		// should be [type_id, Value]
-		typeID, err := dec.Token()
-		if err != nil {
+		var typeID json.RawMessage
+		if err := dec.Decode(&typeID); err != nil {
 			return err
 		}
 
