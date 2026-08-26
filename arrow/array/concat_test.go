@@ -190,6 +190,146 @@ func TestConcatenateFixedWidthSlices(t *testing.T) {
 	}
 }
 
+func BenchmarkConcatenateBinary(b *testing.B) {
+	const totalValues = 1 << 16
+
+	types := []struct {
+		name string
+		dt   arrow.BinaryDataType
+	}{
+		{"binary", arrow.BinaryTypes.Binary},
+		{"string", arrow.BinaryTypes.String},
+		{"large_binary", arrow.BinaryTypes.LargeBinary},
+		{"large_string", arrow.BinaryTypes.LargeString},
+	}
+
+	for _, tt := range types {
+		for _, valueSize := range []int{8, 32} {
+			tt, valueSize := tt, valueSize
+			b.Run(fmt.Sprintf("%s/value_size=%d", tt.name, valueSize), func(b *testing.B) {
+				mem := memory.NewGoAllocator()
+				backing := makeConcatenateBinaryArray(mem, tt.dt, totalValues, valueSize)
+				defer backing.Release()
+
+				for _, chunkCount := range []int{1, 8, 64, 1024, 8192} {
+					chunkCount := chunkCount
+					b.Run(fmt.Sprintf("chunks=%d", chunkCount), func(b *testing.B) {
+						chunkSize := totalValues / chunkCount
+						inputs := make([]arrow.Array, chunkCount)
+						for i := range inputs {
+							begin := int64(i * chunkSize)
+							inputs[i] = array.NewSlice(backing, begin, begin+int64(chunkSize))
+						}
+						defer func() {
+							for _, input := range inputs {
+								input.Release()
+							}
+						}()
+
+						b.SetBytes(int64(totalValues * valueSize))
+						b.ReportAllocs()
+						b.ResetTimer()
+						for i := 0; i < b.N; i++ {
+							result, err := array.Concatenate(inputs, mem)
+							if err != nil {
+								b.Fatal(err)
+							}
+							if result.Len() != totalValues {
+								b.Fatalf("result length = %d, want %d", result.Len(), totalValues)
+							}
+							result.Release()
+						}
+					})
+				}
+			})
+		}
+	}
+}
+
+func TestConcatenateBinarySlices(t *testing.T) {
+	types := []struct {
+		name string
+		dt   arrow.BinaryDataType
+	}{
+		{"binary", arrow.BinaryTypes.Binary},
+		{"string", arrow.BinaryTypes.String},
+		{"large_binary", arrow.BinaryTypes.LargeBinary},
+		{"large_string", arrow.BinaryTypes.LargeString},
+	}
+
+	for _, tt := range types {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			backing := makeConcatenateBinaryArrayWithValidity(mem, tt.dt,
+				[]string{"zero", "one", "two", "", "four"},
+				[]bool{true, false, true, true, true})
+			defer backing.Release()
+
+			inputs := []arrow.Array{
+				array.NewSlice(backing, 1, 4),
+				array.NewSlice(backing, 2, 2),
+				array.NewSlice(backing, 4, 5),
+				array.NewSlice(backing, 0, 1),
+			}
+			for _, input := range inputs {
+				defer input.Release()
+			}
+
+			actual, err := array.Concatenate(inputs, mem)
+			require.NoError(t, err)
+			defer actual.Release()
+
+			expected := makeConcatenateBinaryArrayWithValidity(mem, tt.dt,
+				[]string{"one", "two", "", "four", "zero"},
+				[]bool{false, true, true, true, true})
+			defer expected.Release()
+
+			assert.True(t, array.Equal(expected, actual))
+			assert.Equal(t, 1, actual.NullN())
+			switch actual.DataType().Layout().Buffers[1].ByteWidth {
+			case arrow.Int32SizeBytes:
+				assert.Equal(t, []int32{0, 0, 3, 3, 7, 11}, arrow.Int32Traits.CastFromBytes(actual.Data().Buffers()[1].Bytes()))
+			case arrow.Int64SizeBytes:
+				assert.Equal(t, []int64{0, 0, 3, 3, 7, 11}, arrow.Int64Traits.CastFromBytes(actual.Data().Buffers()[1].Bytes()))
+			}
+		})
+	}
+}
+
+func makeConcatenateBinaryArray(mem memory.Allocator, dt arrow.BinaryDataType, length, valueSize int) arrow.Array {
+	builder := array.NewBinaryBuilder(mem, dt)
+	builder.Reserve(length)
+	builder.ReserveData(length * valueSize)
+	value := strings.Repeat("a", valueSize)
+	for i := 0; i < length; i++ {
+		builder.AppendString(value)
+	}
+	return finishConcatenateBinaryArray(builder)
+}
+
+func makeConcatenateBinaryArrayWithValidity(mem memory.Allocator, dt arrow.BinaryDataType, values []string, valid []bool) arrow.Array {
+	builder := array.NewBinaryBuilder(mem, dt)
+	builder.Reserve(len(values))
+	for i, value := range values {
+		if !valid[i] {
+			builder.AppendNull()
+			continue
+		}
+		builder.AppendString(value)
+	}
+	return finishConcatenateBinaryArray(builder)
+}
+
+func finishConcatenateBinaryArray(builder *array.BinaryBuilder) arrow.Array {
+	raw := builder.NewArray()
+	builder.Release()
+	result := array.MakeFromData(raw.Data())
+	raw.Release()
+	return result
+}
+
 type ConcatTestSuite struct {
 	suite.Suite
 
