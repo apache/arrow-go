@@ -308,6 +308,7 @@ func TestGetZeroBasedValueOffsets(t *testing.T) {
 	offsets := env.getZeroBasedValueOffsets(arr)
 	defer offsets.Release()
 	assert.Equal(t, 44, offsets.Len(), "include all offsets if array is not sliced")
+	assert.Same(t, arr.Data().Buffers()[1], offsets)
 
 	sl := array.NewSlice(arr, 0, 4)
 	defer sl.Release()
@@ -315,6 +316,120 @@ func TestGetZeroBasedValueOffsets(t *testing.T) {
 	offsets = env.getZeroBasedValueOffsets(sl)
 	defer offsets.Release()
 	assert.Equal(t, 20, offsets.Len(), "trim trailing offsets after slice")
+	assert.Same(t, sl.Data().Buffers()[1], offsets.Parent())
+
+	sl = array.NewSlice(arr, 2, 6)
+	defer sl.Release()
+
+	offsets = env.getZeroBasedValueOffsets(sl)
+	defer offsets.Release()
+	assert.Nil(t, offsets.Parent(), "rebase offsets when the first logical offset is non-zero")
+	assert.Equal(t, []int32{0, 1, 2, 3, 4}, arrow.Int32Traits.CastFromBytes(offsets.Bytes()))
+
+	emptyPrefixBuilder := array.NewStringBuilder(alloc)
+	emptyPrefixBuilder.AppendValues([]string{"", "", "a"}, nil)
+	emptyPrefix := emptyPrefixBuilder.NewArray()
+	emptyPrefixBuilder.Release()
+	defer emptyPrefix.Release()
+
+	sl = array.NewSlice(emptyPrefix, 1, 3)
+	defer sl.Release()
+
+	offsets = env.getZeroBasedValueOffsets(sl)
+	defer offsets.Release()
+	assert.Same(t, sl.Data().Buffers()[1], offsets.Parent())
+	assert.Equal(t, []int32{0, 0, 1}, arrow.Int32Traits.CastFromBytes(offsets.Bytes()))
+
+	largeBuilder := array.NewLargeStringBuilder(alloc)
+	largeBuilder.AppendValues(vals, nil)
+	large := largeBuilder.NewArray()
+	largeBuilder.Release()
+	defer large.Release()
+
+	sl = array.NewSlice(large, 0, 4)
+	defer sl.Release()
+
+	offsets = env.getZeroBasedValueOffsets(sl)
+	defer offsets.Release()
+	assert.Same(t, sl.Data().Buffers()[1], offsets.Parent())
+	assert.Equal(t, []int64{0, 1, 2, 3, 4}, arrow.Int64Traits.CastFromBytes(offsets.Bytes()))
+
+	sl = array.NewSlice(large, 2, 6)
+	defer sl.Release()
+
+	offsets = env.getZeroBasedValueOffsets(sl)
+	defer offsets.Release()
+	assert.Nil(t, offsets.Parent(), "rebase int64 offsets when the first logical offset is non-zero")
+	assert.Equal(t, []int64{0, 1, 2, 3, 4}, arrow.Int64Traits.CastFromBytes(offsets.Bytes()))
+
+	largeEmptyPrefixBuilder := array.NewLargeStringBuilder(alloc)
+	largeEmptyPrefixBuilder.AppendValues([]string{"", "", "a"}, nil)
+	largeEmptyPrefix := largeEmptyPrefixBuilder.NewArray()
+	largeEmptyPrefixBuilder.Release()
+	defer largeEmptyPrefix.Release()
+
+	sl = array.NewSlice(largeEmptyPrefix, 1, 3)
+	defer sl.Release()
+
+	offsets = env.getZeroBasedValueOffsets(sl)
+	defer offsets.Release()
+	assert.Same(t, sl.Data().Buffers()[1], offsets.Parent())
+	assert.Equal(t, []int64{0, 0, 1}, arrow.Int64Traits.CastFromBytes(offsets.Bytes()))
+}
+
+func BenchmarkGetZeroBasedValueOffsets(b *testing.B) {
+	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer alloc.AssertSize(b, 0)
+
+	const n = 1 << 20
+	values := make([]string, n)
+	for i := range values {
+		values[i] = "x"
+	}
+
+	stringBuilder := array.NewStringBuilder(alloc)
+	stringBuilder.AppendValues(values, nil)
+	strings := stringBuilder.NewArray()
+	stringBuilder.Release()
+	defer strings.Release()
+
+	largeStringBuilder := array.NewLargeStringBuilder(alloc)
+	largeStringBuilder.AppendValues(values, nil)
+	largeStrings := largeStringBuilder.NewArray()
+	largeStringBuilder.Release()
+	defer largeStrings.Release()
+
+	env := &recordEncoder{mem: alloc}
+	for _, tc := range []struct {
+		name string
+		arr  arrow.Array
+	}{
+		{name: "int32", arr: strings},
+		{name: "int64", arr: largeStrings},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			for _, slice := range []struct {
+				name       string
+				begin, end int64
+			}{
+				{name: "full", begin: 0, end: n},
+				{name: "prefix", begin: 0, end: n / 2},
+				{name: "middle", begin: n / 4, end: 3 * n / 4},
+			} {
+				b.Run(slice.name, func(b *testing.B) {
+					arr := array.NewSlice(tc.arr, slice.begin, slice.end)
+					defer arr.Release()
+
+					b.ReportAllocs()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						offsets := env.getZeroBasedValueOffsets(arr)
+						offsets.Release()
+					}
+				})
+			}
+		})
+	}
 }
 
 func TestWriterCatchPanic(t *testing.T) {
