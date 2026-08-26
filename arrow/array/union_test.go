@@ -219,6 +219,52 @@ func TestUnionBuilderUnmarshalOnePreservesDecoderConfiguration(t *testing.T) {
 	}
 }
 
+func TestUnionBuilderCanAppendMaxTypeCodeChild(t *testing.T) {
+	cases := []struct {
+		name string
+		new  func(memory.Allocator) array.UnionBuilder
+	}{
+		{
+			name: "dense",
+			new: func(mem memory.Allocator) array.UnionBuilder {
+				return array.NewEmptyDenseUnionBuilder(mem)
+			},
+		},
+		{
+			name: "sparse",
+			new: func(mem memory.Allocator) array.UnionBuilder {
+				return array.NewEmptySparseUnionBuilder(mem)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
+			builder := tc.new(mem)
+			defer builder.Release()
+			appendChild := func(name string) arrow.UnionTypeCode {
+				child := array.NewInt32Builder(mem)
+				defer child.Release()
+				return builder.AppendChild(child, name)
+			}
+
+			for i := 0; i <= int(arrow.MaxUnionTypeCode); i++ {
+				code := appendChild(fmt.Sprintf("child-%d", i))
+				assert.EqualValues(t, i, code)
+			}
+			assert.Equal(t, int(arrow.MaxUnionTypeCode)+1, builder.Type().(arrow.UnionType).NumFields())
+
+			assert.PanicsWithValue(t, "arrow/array: too many children typeids", func() {
+				appendChild("overflow")
+			})
+			assert.Equal(t, int(arrow.MaxUnionTypeCode)+1, builder.Type().(arrow.UnionType).NumFields())
+		})
+	}
+}
+
 func TestUnionSliceEquals(t *testing.T) {
 	unionFields := []arrow.Field{
 		{Name: "u0", Type: arrow.PrimitiveTypes.Int32, Nullable: true},

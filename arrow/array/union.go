@@ -772,7 +772,7 @@ type unionBuilder struct {
 	typeIDtoBuilder []Builder
 	typeIDtoChildID []int
 	// for all typeID < denseTypeID, typeIDtoBuilder[typeID] != nil
-	denseTypeID  arrow.UnionTypeCode
+	denseTypeID  int
 	typesBuilder *int8BufferBuilder
 }
 
@@ -886,9 +886,9 @@ func (b *unionBuilder) Type() arrow.DataType {
 }
 
 func (b *unionBuilder) AppendChild(newChild Builder, fieldName string) arrow.UnionTypeCode {
+	newType := b.nextTypeID()
 	newChild.Retain()
 	b.children = append(b.children, newChild)
-	newType := b.nextTypeID()
 
 	b.typeIDtoChildID[newType] = len(b.children) - 1
 	b.typeIDtoBuilder[newType] = newChild
@@ -902,21 +902,23 @@ func (b *unionBuilder) nextTypeID() arrow.UnionTypeCode {
 	// find typeID such that typeIDtoBuilder[typeID] == nil
 	// use that for the new child. Start searching at denseTypeID
 	// since typeIDtoBuilder is densely packed up at least to denseTypeID
-	for ; int(b.denseTypeID) < len(b.typeIDtoBuilder); b.denseTypeID++ {
+	for ; b.denseTypeID < len(b.typeIDtoBuilder); b.denseTypeID++ {
 		if b.typeIDtoBuilder[b.denseTypeID] == nil {
 			id := b.denseTypeID
 			b.denseTypeID++
-			return id
+			return arrow.UnionTypeCode(id)
 		}
 	}
 
-	debug.Assert(len(b.typeIDtoBuilder) < int(arrow.MaxUnionTypeCode), "too many children typeids")
+	if b.denseTypeID > int(arrow.MaxUnionTypeCode) {
+		panic("arrow/array: too many children typeids")
+	}
 	// typeIDtoBuilder is already densely packed, so just append the new child
 	b.typeIDtoBuilder = append(b.typeIDtoBuilder, nil)
 	b.typeIDtoChildID = append(b.typeIDtoChildID, arrow.InvalidUnionChildID)
 	id := b.denseTypeID
 	b.denseTypeID++
-	return id
+	return arrow.UnionTypeCode(id)
 }
 
 func (b *unionBuilder) newData() *Data {
