@@ -135,8 +135,7 @@ const (
 	supportedVersion           = 1
 	maxShortStringSize         = 0x3F
 	metadataMaxSizeLimit       = 128 * 1024 * 1024 // 128MB
-	// maxValidationDepth bounds memory used while validating nested values.
-	maxValidationDepth         = 1024
+	maxValidationDepth         = 1024              // bounds memory used while validating nested values.
 )
 
 var (
@@ -582,20 +581,19 @@ type validationRange struct {
 
 type validationFrame struct {
 	value               []byte
-	kind                BasicType
-	size                int
-	dataSize            uint64
-	dataStart           uint64
-	offsetStart         uint64
-	offsetSize          uint8
+	size                uint64
+	dataSize            uint32
+	dataStart           uint32
+	offsetStart         uint32
 	numChildren         uint32
 	nextChild           uint32
-	pendingIndex        int
-	pendingStart        uint64
-	pendingExpectedSize uint64
-	rangeStart          int
+	pendingIndex        uint32
+	pendingStart        uint32
+	pendingExpectedSize uint32
+	rangeStart          uint32
+	offsetSize          uint8
+	kind                uint8
 	initialized         bool
-	compound            bool
 }
 
 const (
@@ -633,7 +631,7 @@ func validateValueLoop(meta Metadata, value []byte, stack []validationFrame, ran
 			hasResult = false
 
 			if resultErr != nil {
-				switch frame.kind {
+				switch BasicType(frame.kind) {
 				case BasicArray:
 					return 0, fmt.Errorf("invalid variant value: array element %d: %w", frame.pendingIndex, resultErr)
 				case BasicObject:
@@ -643,27 +641,27 @@ func validateValueLoop(meta Metadata, value []byte, stack []validationFrame, ran
 				}
 			}
 
-			switch frame.kind {
+			switch BasicType(frame.kind) {
 			case BasicArray:
-				if uint64(resultSize) != frame.pendingExpectedSize {
+				if uint64(resultSize) != uint64(frame.pendingExpectedSize) {
 					return 0, fmt.Errorf("invalid variant value: array element %d has trailing bytes", frame.pendingIndex)
 				}
 			case BasicObject:
-				end := frame.pendingStart + uint64(resultSize)
-				if end > frame.dataSize {
+				end := uint64(frame.pendingStart) + uint64(resultSize)
+				if end > uint64(frame.dataSize) {
 					return 0, fmt.Errorf("invalid variant value: object field %d extends beyond data", frame.pendingIndex)
 				}
 				if rangeTop < len(ranges) {
 					ranges[rangeTop] = validationRange{
-						start: frame.pendingStart,
+						start: uint64(frame.pendingStart),
 						end:   end,
-						field: frame.pendingIndex,
+						field: int(frame.pendingIndex),
 					}
 				} else {
 					ranges = append(ranges, validationRange{
-						start: frame.pendingStart,
+						start: uint64(frame.pendingStart),
 						end:   end,
-						field: frame.pendingIndex,
+						field: int(frame.pendingIndex),
 					})
 				}
 				rangeTop++
@@ -682,12 +680,12 @@ func validateValueLoop(meta Metadata, value []byte, stack []validationFrame, ran
 				hasResult = true
 				continue
 			}
-			if frame.kind == BasicObject {
-				frame.rangeStart = rangeTop
+			if BasicType(frame.kind) == BasicObject {
+				frame.rangeStart = uint32(rangeTop)
 			}
 		}
 
-		if frame.compound {
+		if frame.kind == uint8(BasicArray) || frame.kind == uint8(BasicObject) {
 			if frame.nextChild < frame.numChildren {
 				if len(stack) == validationStackCapacity {
 					return 0, fmt.Errorf("invalid variant value: maximum nesting depth exceeded")
@@ -708,16 +706,16 @@ func validateValueLoop(meta Metadata, value []byte, stack []validationFrame, ran
 				}
 
 				frame.nextChild++
-				frame.pendingIndex = index
-				frame.pendingStart = start
-				frame.pendingExpectedSize = expectedSize
+				frame.pendingIndex = uint32(index)
+				frame.pendingStart = uint32(start)
+				frame.pendingExpectedSize = uint32(expectedSize)
 				stack = append(stack, validationFrame{value: child})
 				continue
 			}
 
-			if err := finishValidationFrame(frame, ranges[frame.rangeStart:rangeTop]); err != nil {
-				if frame.kind == BasicObject {
-					rangeTop = frame.rangeStart
+			if err := finishValidationFrame(frame, ranges[int(frame.rangeStart):rangeTop]); err != nil {
+				if BasicType(frame.kind) == BasicObject {
+					rangeTop = int(frame.rangeStart)
 				}
 				stack = stack[:len(stack)-1]
 				if len(stack) == 0 {
@@ -727,12 +725,12 @@ func validateValueLoop(meta Metadata, value []byte, stack []validationFrame, ran
 				hasResult = true
 				continue
 			}
-			if frame.kind == BasicObject {
-				rangeTop = frame.rangeStart
+			if BasicType(frame.kind) == BasicObject {
+				rangeTop = int(frame.rangeStart)
 			}
 		}
 
-		resultSize = frame.size
+		resultSize = int(frame.size)
 		stack = stack[:len(stack)-1]
 		if len(stack) == 0 {
 			return resultSize, nil
@@ -751,7 +749,7 @@ func validateValueDeep(meta Metadata, value []byte, initialStack []validationFra
 }
 
 func finishValidationFrame(frame *validationFrame, ranges []validationRange) error {
-	if frame.kind != BasicObject {
+	if BasicType(frame.kind) != BasicObject {
 		return nil
 	}
 
@@ -780,7 +778,7 @@ func finishValidationFrame(frame *validationFrame, ranges []validationRange) err
 		next = child.end
 		previousField = child.field
 	}
-	if next != frame.dataSize {
+	if next != uint64(frame.dataSize) {
 		return fmt.Errorf("invalid variant value: object data has trailing bytes")
 	}
 	return nil
@@ -791,26 +789,24 @@ func prepareValidationFrame(meta Metadata, frame *validationFrame) error {
 		return errors.New("invalid variant value: empty")
 	}
 
-	frame.kind = basicTypeFromHeader(frame.value[0])
-	switch frame.kind {
+	frame.kind = uint8(basicTypeFromHeader(frame.value[0]))
+	switch BasicType(frame.kind) {
 	case BasicShortString:
 		want := 1 + int(frame.value[0]>>basicTypeBits)
 		if len(frame.value) < want {
 			return fmt.Errorf("invalid variant value: short string requires %d bytes, got %d", want, len(frame.value))
 		}
-		frame.size = want
+		frame.size = uint64(want)
 	case BasicObject:
-		frame.compound = true
 		return prepareObjectValidationFrame(meta, frame)
 	case BasicArray:
-		frame.compound = true
 		return prepareArrayValidationFrame(frame)
 	case BasicPrimitive:
-		var err error
-		frame.size, err = validatePrimitiveValue(frame.value)
+		size, err := validatePrimitiveValue(frame.value)
+		frame.size = uint64(size)
 		return err
 	default:
-		return fmt.Errorf("invalid variant value: unknown basic type %d", frame.kind)
+		return fmt.Errorf("invalid variant value: unknown basic type %d", BasicType(frame.kind))
 	}
 	return nil
 }
@@ -860,11 +856,11 @@ func prepareArrayValidationFrame(frame *validationFrame) error {
 		previousOffset = offset
 	}
 
-	frame.dataStart = dataStart
-	frame.offsetStart = offsetStart
+	frame.dataStart = uint32(dataStart)
+	frame.offsetStart = uint32(offsetStart)
 	frame.offsetSize = offsetSize
 	frame.numChildren = numElements
-	frame.size = int(dataStart + uint64(previousOffset))
+	frame.size = dataStart + uint64(previousOffset)
 	return nil
 }
 
@@ -919,29 +915,29 @@ func prepareObjectValidationFrame(meta Metadata, frame *validationFrame) error {
 		}
 	}
 
-	frame.dataStart = dataStart
-	frame.offsetStart = offsetStart
+	frame.dataStart = uint32(dataStart)
+	frame.offsetStart = uint32(offsetStart)
 	frame.offsetSize = offsetSize
 	frame.numChildren = numElements
-	frame.dataSize = uint64(dataSize)
-	frame.size = int(dataStart + uint64(dataSize))
+	frame.dataSize = dataSize
+	frame.size = dataStart + uint64(dataSize)
 	return nil
 }
 
 func nextValidationChild(frame *validationFrame) ([]byte, int, uint64, uint64, error) {
 	index := int(frame.nextChild)
-	position := frame.offsetStart + uint64(frame.nextChild)*uint64(frame.offsetSize)
+	position := uint64(frame.offsetStart) + uint64(frame.nextChild)*uint64(frame.offsetSize)
 	offset := readLEU32(frame.value[int(position) : int(position)+int(frame.offsetSize)])
-	start := frame.dataStart + uint64(offset)
+	start := uint64(frame.dataStart) + uint64(offset)
 
-	if frame.kind == BasicArray {
+	if BasicType(frame.kind) == BasicArray {
 		nextPosition := position + uint64(frame.offsetSize)
 		nextOffset := readLEU32(frame.value[int(nextPosition) : int(nextPosition)+int(frame.offsetSize)])
-		end := frame.dataStart + uint64(nextOffset)
+		end := uint64(frame.dataStart) + uint64(nextOffset)
 		return frame.value[int(start):int(end)], index, 0, end - start, nil
 	}
 
-	if uint64(offset) > frame.dataSize {
+	if uint64(offset) > uint64(frame.dataSize) {
 		return nil, index, 0, 0, fmt.Errorf("invalid variant value: object field %d offset %d is out of range", index, offset)
 	}
 	return frame.value[int(start):], index, uint64(offset), 0, nil

@@ -916,6 +916,20 @@ func TestRejectsExcessiveNesting(t *testing.T) {
 	assert.Contains(t, err.Error(), "maximum nesting depth exceeded")
 }
 
+func FuzzNewWithMetadataNeverPanics(f *testing.F) {
+	f.Add([]byte{byte(variant.PrimitiveNull << 2)})
+	f.Add([]byte{byte(variant.BasicShortString)})
+	f.Add([]byte{byte(variant.BasicArray), 0, 0})
+	f.Add([]byte{byte(variant.BasicObject), 0, 0})
+
+	meta, err := variant.NewMetadata(variant.EmptyMetadataBytes[:])
+	require.NoError(f, err)
+
+	f.Fuzz(func(t *testing.T, value []byte) {
+		_, _ = variant.NewWithMetadata(meta, value)
+	})
+}
+
 func TestInvalidObjectAccess(t *testing.T) {
 	v := loadVariant(t, "object_primitive")
 	obj := v.Value().(variant.ObjectValue)
