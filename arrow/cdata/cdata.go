@@ -347,6 +347,7 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 				return ret, fmt.Errorf("%w: run-end encoded arrays must have 2 children", arrow.ErrInvalid)
 			}
 			dt = arrow.RunEndEncodedOf(childFields[0].Type, childFields[1].Type)
+			dt.(*arrow.RunEndEncodedType).ValueNullable = childFields[1].Nullable
 		case 'm': // map type is basically a list of structs.
 			if f != "+m" {
 				return ret, fmt.Errorf("%w: invalid map type format %q", arrow.ErrInvalid, f)

@@ -133,6 +133,7 @@ func TestTimestampWithOffsetTypeDeserializeInvalidStorage(t *testing.T) {
 
 	badDict := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.PrimitiveTypes.Int32}
 	badREE := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32)
+	nullableREE := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int16, arrow.PrimitiveTypes.Int16)
 
 	valid, err := base.Deserialize(base.StorageType(), "")
 	require.NoError(t, err)
@@ -152,6 +153,7 @@ func TestTimestampWithOffsetTypeDeserializeInvalidStorage(t *testing.T) {
 		"offset nullable":              arrow.StructOf(tsField, arrow.Field{Name: "offset_minutes", Type: arrow.PrimitiveTypes.Int16, Nullable: true}),
 		"offset dict value not int16":  arrow.StructOf(tsField, arrow.Field{Name: "offset_minutes", Type: badDict}),
 		"offset ree encoded not int16": arrow.StructOf(tsField, arrow.Field{Name: "offset_minutes", Type: badREE}),
+		"offset ree values nullable":   arrow.StructOf(tsField, arrow.Field{Name: "offset_minutes", Type: nullableREE}),
 		"fields swapped":               arrow.StructOf(offField, tsField),
 	}
 
@@ -161,6 +163,12 @@ func TestTimestampWithOffsetTypeDeserializeInvalidStorage(t *testing.T) {
 			assert.Error(t, err)
 		})
 	}
+}
+
+func TestTimestampWithOffsetTypeRejectsNullableRunEndEncodedOffset(t *testing.T) {
+	offsetType := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int16, arrow.PrimitiveTypes.Int16)
+	_, err := extensions.NewTimestampWithOffsetTypeCustomOffset(testTimeUnit, offsetType)
+	assert.Error(t, err)
 }
 
 func assertDictBasics[I extensions.DictIndexType](t *testing.T, indexType I) {
@@ -685,6 +693,10 @@ func TestTimestampWithOffsetTypeBatchIPCRoundTrip(t *testing.T) {
 
 			assert.Truef(t, batch.Schema().Equal(written.Schema()), "expected: %s\n\ngot: %s",
 				batch.Schema(), written.Schema())
+			if _, ok := offsetType.(*arrow.RunEndEncodedType); ok {
+				writtenType := written.Schema().Field(0).Type.(*extensions.TimestampWithOffsetType)
+				assert.False(t, writtenType.OffsetType().(*arrow.RunEndEncodedType).ValueNullable)
+			}
 
 			assert.Truef(t, array.RecordEqual(batch, written), "expected: %s\n\ngot: %s",
 				batch, written)
