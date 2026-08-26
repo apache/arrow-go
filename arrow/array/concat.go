@@ -190,6 +190,121 @@ func concatFixedWidthBuffers(data []arrow.ArrayData, idx, byteWidth, length int,
 	return out
 }
 
+func concatBinaryBuffers(data []arrow.ArrayData, byteWidth, length int, out *Data, mem memory.Allocator) error {
+	offsetBuffer := memory.NewResizableBuffer(mem)
+	out.buffers[1] = offsetBuffer
+	offsetBuffer.Resize(byteWidth * (length + 1))
+
+	var (
+		valueRanges []rng
+		err         error
+	)
+	switch byteWidth {
+	case arrow.Int64SizeBytes:
+		valueRanges, err = handle64BitOffsetsData(data, offsetBuffer, length)
+	default:
+		valueRanges, err = handle32BitOffsetsData(data, offsetBuffer, length)
+	}
+	if err != nil {
+		return err
+	}
+
+	valueLength := 0
+	for _, r := range valueRanges {
+		valueLength += r.len
+	}
+
+	valueBuffer := memory.NewResizableBuffer(mem)
+	out.buffers[2] = valueBuffer
+	valueBuffer.Resize(valueLength)
+	dst := valueBuffer.Bytes()
+	for i, d := range data {
+		r := valueRanges[i]
+		if r.len == 0 {
+			continue
+		}
+
+		buf := d.Buffers()[2]
+		copy(dst, buf.Bytes()[r.offset:r.offset+r.len])
+		dst = dst[r.len:]
+	}
+	return nil
+}
+
+func handle32BitOffsetsData(data []arrow.ArrayData, out *memory.Buffer, outLen int) ([]rng, error) {
+	dst := arrow.Int32Traits.CastFromBytes(out.Bytes())
+	valueRanges := make([]rng, len(data))
+	nextOffset := int32(0)
+	nextElem := 0
+	for i, d := range data {
+		if d.Len() == 0 {
+			continue
+		}
+
+		buf := d.Buffers()[1]
+		if buf == nil {
+			return nil, errors.New("array/concat: binary array is missing an offset buffer")
+		}
+		src := arrow.Int32Traits.CastFromBytes(buf.Bytes())
+		begin := d.Offset()
+		end := begin + d.Len()
+		startOffset, endOffset := src[begin], src[end]
+		valueLength := int(endOffset) - int(startOffset)
+
+		if valueLength < 0 || int64(nextOffset)+int64(valueLength) > math.MaxInt32 {
+			return nil, errors.New("offset overflow while concatenating arrays")
+		}
+
+		valueRanges[i] = rng{offset: int(startOffset), len: valueLength}
+		adj := nextOffset - startOffset
+		for j, o := range src[begin:end] {
+			dst[nextElem+j] = adj + o
+		}
+		nextElem += d.Len()
+		nextOffset += int32(valueLength)
+	}
+
+	dst[outLen] = nextOffset
+	return valueRanges, nil
+}
+
+func handle64BitOffsetsData(data []arrow.ArrayData, out *memory.Buffer, outLen int) ([]rng, error) {
+	dst := arrow.Int64Traits.CastFromBytes(out.Bytes())
+	valueRanges := make([]rng, len(data))
+	nextOffset := int64(0)
+	nextElem := 0
+	for i, d := range data {
+		if d.Len() == 0 {
+			continue
+		}
+
+		buf := d.Buffers()[1]
+		if buf == nil {
+			return nil, errors.New("array/concat: binary array is missing an offset buffer")
+		}
+		src := arrow.Int64Traits.CastFromBytes(buf.Bytes())
+		begin := d.Offset()
+		end := begin + d.Len()
+		startOffset, endOffset := src[begin], src[end]
+		valueLength := int(endOffset) - int(startOffset)
+
+		if valueLength < 0 || nextOffset > math.MaxInt64-int64(valueLength) {
+			return nil, errors.New("offset overflow while concatenating arrays")
+		}
+
+		valueRanges[i] = rng{offset: int(startOffset), len: valueLength}
+		adj := nextOffset - startOffset
+		for j, o := range src[begin:end] {
+			dst[nextElem+j] = adj + o
+		}
+		nextElem += d.Len()
+		nextOffset += int64(valueLength)
+	}
+
+	dst[outLen] = nextOffset
+	return valueRanges, nil
+}
+
 func handle32BitOffsets(outLen int, buffers []*memory.Buffer, out *memory.Buffer) (*memory.Buffer, []rng, error) {
 	dst := arrow.Int32Traits.CastFromBytes(out.Bytes())
 	valuesRanges := make([]rng, len(buffers))
@@ -648,12 +763,9 @@ func concat(data []arrow.ArrayData, mem memory.Allocator) (arr arrow.ArrayData, 
 		}
 	case arrow.BinaryDataType:
 		offsetWidth := dt.Layout().Buffers[1].ByteWidth
-		offsetBuffer, valueRanges, err := concatOffsets(gatherFixedBuffers(data, 1, offsetWidth), offsetWidth, mem)
-		if err != nil {
+		if err := concatBinaryBuffers(data, offsetWidth, out.length, out, mem); err != nil {
 			return nil, err
 		}
-		out.buffers[1] = offsetBuffer
-		out.buffers[2] = concatBuffers(gatherBufferRanges(data, 2, valueRanges), mem)
 	case *arrow.ListType:
 		offsetWidth := dt.Layout().Buffers[1].ByteWidth
 		offsetBuffer, valueRanges, err := concatOffsets(gatherFixedBuffers(data, 1, offsetWidth), offsetWidth, mem)
