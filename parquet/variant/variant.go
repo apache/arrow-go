@@ -598,6 +598,9 @@ type validationFrame struct {
 
 const (
 	validationStackInlineCapacity = 32
+	// Values that exceed the inline stack commonly need only a modest amount
+	// of additional depth, so avoid allocating the maximum stack for them.
+	validationStackIntermediateCapacity = 128
 	// The root value is at depth zero, so the stack needs one more frame than
 	// the maximum allowed nesting depth. Keeping this storage fixed prevents
 	// untrusted values from growing the validation stack on the heap.
@@ -691,6 +694,9 @@ func validateValueLoop(meta Metadata, value []byte, stack []validationFrame, ran
 					return 0, fmt.Errorf("invalid variant value: maximum nesting depth exceeded")
 				}
 				if len(stack) == cap(stack) {
+					if cap(stack) == validationStackInlineCapacity {
+						return validateValueIntermediate(meta, value, stack, ranges, rangeTop)
+					}
 					return validateValueDeep(meta, value, stack, ranges, rangeTop)
 				}
 
@@ -739,6 +745,13 @@ func validateValueLoop(meta Metadata, value []byte, stack []validationFrame, ran
 	}
 
 	return 0, errors.New("invalid variant value: validation stack exhausted")
+}
+
+func validateValueIntermediate(meta Metadata, value []byte, initialStack []validationFrame, ranges []validationRange, rangeTop int) (int, error) {
+	var stackStorage [validationStackIntermediateCapacity]validationFrame
+	stack := stackStorage[:len(initialStack)]
+	copy(stack, initialStack)
+	return validateValueLoop(meta, value, stack, ranges, rangeTop)
 }
 
 func validateValueDeep(meta Metadata, value []byte, initialStack []validationFrame, ranges []validationRange, rangeTop int) (int, error) {
