@@ -526,6 +526,9 @@ func TestTimestampFromTimeBoundaries(t *testing.T) {
 
 				_, err = arrow.TimestampFromTime(minTime.Add(-unit.Multiplier()), unit)
 				assert.ErrorIs(t, err, arrow.ErrInvalid)
+			} else {
+				_, err = arrow.TimestampFromTime(time.Date(maxTime.Year()+1, 1, 1, 0, 0, 0, 0, time.UTC), unit)
+				assert.ErrorIs(t, err, arrow.ErrInvalid)
 			}
 		})
 	}

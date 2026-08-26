@@ -754,7 +754,7 @@ func TestTemporalTimezoneAware(t *testing.T) {
 		{name: "week_utc", tz: "UTC", unit: compute.RoundTemporalWeek,
 			expectedUTC: time.Date(2024, 7, 15, 0, 0, 0, 0, time.UTC)}, // Floor to Monday 00:00 UTC
 		{name: "week_ny", tz: "America/New_York", unit: compute.RoundTemporalWeek,
-			expectedUTC: time.Date(2024, 7, 8, 4, 0, 0, 0, time.UTC)}, // Floor to Monday 00:00 EDT (previous Monday in NY time)
+			expectedUTC: time.Date(2024, 7, 15, 4, 0, 0, 0, time.UTC)}, // Floor to Monday 00:00 EDT
 		{name: "week_tokyo", tz: "Asia/Tokyo", unit: compute.RoundTemporalWeek,
 			expectedUTC: time.Date(2024, 7, 14, 15, 0, 0, 0, time.UTC)}, // Floor to Monday 00:00 JST
 

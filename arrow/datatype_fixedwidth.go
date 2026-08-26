@@ -70,6 +70,8 @@ type (
 	Duration  int64
 )
 
+var maxTimestampSecondYear = time.Unix(math.MaxInt64, 0).UTC().Year()
+
 // Date32FromTime returns a Date32 value from a time object
 func Date32FromTime(t time.Time) Date32 {
 	return Date32(t.Truncate(24*time.Hour).Unix() / int64((time.Hour * 24).Seconds()))
@@ -201,7 +203,7 @@ func (t Timestamp) ToTime(unit TimeUnit) time.Time {
 func TimestampFromTime(val time.Time, unit TimeUnit) (Timestamp, error) {
 	switch unit {
 	case Second:
-		return Timestamp(val.Unix()), nil
+		return timestampFromTime(val, 1, 1e9, unit)
 	case Millisecond:
 		return timestampFromTime(val, 1e3, 1e6, unit)
 	case Microsecond:
@@ -215,6 +217,12 @@ func TimestampFromTime(val time.Time, unit TimeUnit) (Timestamp, error) {
 
 func timestampFromTime(val time.Time, multiplier, divisor int64, unit TimeUnit) (Timestamp, error) {
 	seconds := val.Unix()
+	if !val.Equal(time.Unix(seconds, int64(val.Nanosecond()))) {
+		return 0, fmt.Errorf("%w: timestamp value is out of range for %s", ErrInvalid, unit)
+	}
+	if unit == Second && val.UTC().Year() > maxTimestampSecondYear {
+		return 0, fmt.Errorf("%w: timestamp value is out of range for %s", ErrInvalid, unit)
+	}
 	fraction := int64(val.Nanosecond()) / divisor
 	maxSeconds := math.MaxInt64 / multiplier
 	if seconds > maxSeconds || (seconds == maxSeconds && fraction > math.MaxInt64%multiplier) {
