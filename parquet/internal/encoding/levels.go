@@ -98,12 +98,7 @@ func (l *LevelEncoder) EncodeNoFlush(lvls []int16) (nencoded int, err error) {
 
 	switch l.encoding {
 	case format.Encoding_RLE:
-		for _, level := range lvls {
-			if err = l.rle.Put(uint64(level)); err != nil {
-				return
-			}
-			nencoded++
-		}
+		nencoded, err = l.rle.PutBatchLevels(lvls)
 	default:
 		for _, level := range lvls {
 			if err = l.bit.WriteValue(uint64(level), uint(l.bitWidth)); err != nil {
@@ -140,12 +135,7 @@ func (l *LevelEncoder) Encode(lvls []int16) (nencoded int, err error) {
 	switch l.encoding {
 	case format.Encoding_RLE:
 		defer func() { l.rleLen = l.rle.Flush() }()
-		for _, level := range lvls {
-			if err = l.rle.Put(uint64(level)); err != nil {
-				return
-			}
-			nencoded++
-		}
+		nencoded, err = l.rle.PutBatchLevels(lvls)
 
 	default:
 		defer l.bit.Flush(false)

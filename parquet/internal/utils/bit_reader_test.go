@@ -661,6 +661,65 @@ func TestRleRandom(t *testing.T) {
 	suite.Run(t, new(RLERandomSuite))
 }
 
+func TestRleBatchLevelsMatchesScalar(t *testing.T) {
+	patterns := map[string][]int16{
+		"all defined":      make([]int16, 257),
+		"alternating":      make([]int16, 257),
+		"long alternating": make([]int16, 63*8+17),
+		"literal boundary": make([]int16, 63*8+17),
+		"mixed runs":       {},
+	}
+	for i := range patterns["all defined"] {
+		patterns["all defined"][i] = 3
+		patterns["alternating"][i] = int16(i % 2)
+	}
+	for i := range patterns["long alternating"] {
+		patterns["long alternating"][i] = int16(i % 2)
+	}
+	for i := range patterns["literal boundary"] {
+		if i < 63*8-3 {
+			patterns["literal boundary"][i] = int16(i % 2)
+		} else {
+			patterns["literal boundary"][i] = 3
+		}
+	}
+	for runLength := 1; runLength <= 32; runLength++ {
+		for range runLength {
+			patterns["mixed runs"] = append(patterns["mixed runs"], int16(runLength%4))
+		}
+	}
+
+	for name, levels := range patterns {
+		t.Run(name, func(t *testing.T) {
+			bufSize := utils.MaxRLEBufferSize(2, len(levels))
+			scalarBuf := make([]byte, bufSize)
+			scalar := utils.NewRleEncoder(utils.NewWriterAtBuffer(scalarBuf), 2)
+			for _, level := range levels {
+				if err := scalar.Put(uint64(level)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			scalarLen := scalar.Flush()
+
+			batchBuf := make([]byte, bufSize)
+			batch := utils.NewRleEncoder(utils.NewWriterAtBuffer(batchBuf), 2)
+			chunkSizes := []int{1, 7, 8, 9, 31}
+			for offset, chunk := 0, 0; offset < len(levels); chunk++ {
+				end := min(offset+chunkSizes[chunk%len(chunkSizes)], len(levels))
+				n, err := batch.PutBatchLevels(levels[offset:end])
+				if err != nil {
+					t.Fatal(err)
+				}
+				assert.Equal(t, end-offset, n)
+				offset = end
+			}
+			batchLen := batch.Flush()
+
+			assert.Equal(t, scalarBuf[:scalarLen], batchBuf[:batchLen])
+		})
+	}
+}
+
 func (r *RLETestSuite) ValidateRle(vals []uint64, width int, expected []byte, explen int) {
 	const buflen = 64 * 1024
 	buf := make([]byte, buflen)
