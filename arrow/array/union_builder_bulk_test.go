@@ -239,23 +239,6 @@ func BenchmarkUnionBuilderBulkAppend(b *testing.B) {
 	}
 }
 
-func BenchmarkUnionBuilderScalarAppend(b *testing.B) {
-	for _, tc := range bulkUnionBuilderFactories {
-		b.Run(tc.name, func(b *testing.B) {
-			for _, rows := range []int{1, 16, 1024, 65536} {
-				b.Run(fmt.Sprintf("rows_%d", rows), func(b *testing.B) {
-					b.Run("nulls", func(b *testing.B) {
-						benchmarkUnionBuilderScalarAppend(b, tc.new, rows, false)
-					})
-					b.Run("empty", func(b *testing.B) {
-						benchmarkUnionBuilderScalarAppend(b, tc.new, rows, true)
-					})
-				})
-			}
-		})
-	}
-}
-
 func benchmarkUnionBuilderBulkAppend(b *testing.B, factory bulkUnionBuilderFactory, rows int, empty bool) {
 	builder := factory(memory.DefaultAllocator)
 	defer builder.Release()
@@ -266,25 +249,6 @@ func benchmarkUnionBuilderBulkAppend(b *testing.B, factory bulkUnionBuilderFacto
 			builder.AppendEmptyValues(rows)
 		} else {
 			builder.AppendNulls(rows)
-		}
-
-		arr := builder.NewArray()
-		arr.Release()
-	}
-}
-
-func benchmarkUnionBuilderScalarAppend(b *testing.B, factory bulkUnionBuilderFactory, rows int, empty bool) {
-	builder := factory(memory.DefaultAllocator)
-	defer builder.Release()
-	b.ReportAllocs()
-
-	for b.Loop() {
-		for i := 0; i < rows; i++ {
-			if empty {
-				builder.AppendEmptyValue()
-			} else {
-				builder.AppendNull()
-			}
 		}
 
 		arr := builder.NewArray()
