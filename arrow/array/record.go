@@ -469,6 +469,12 @@ type builderCheckpoint struct {
 	lastStr          *string
 }
 
+func (checkpoint *builderCheckpoint) syncChildren(builders []Builder) {
+	for i := len(checkpoint.children); i < len(builders); i++ {
+		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builders[i]))
+	}
+}
+
 func newBuilderCheckpoint(builder Builder) *builderCheckpoint {
 	checkpoint := &builderCheckpoint{
 		builder: builder,
@@ -499,13 +505,9 @@ func newBuilderCheckpoint(builder Builder) *builderCheckpoint {
 			checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(field))
 		}
 	case *SparseUnionBuilder:
-		for _, child := range builder.children {
-			checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(child))
-		}
+		checkpoint.syncChildren(builder.children)
 	case *DenseUnionBuilder:
-		for _, child := range builder.children {
-			checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(child))
-		}
+		checkpoint.syncChildren(builder.children)
 	case storageBuilder:
 		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.StorageBuilder()))
 	case *RunEndEncodedBuilder:
@@ -520,6 +522,13 @@ func newBuilderCheckpoint(builder Builder) *builderCheckpoint {
 }
 
 func (checkpoint *builderCheckpoint) capture() {
+	switch builder := checkpoint.builder.(type) {
+	case *SparseUnionBuilder:
+		checkpoint.syncChildren(builder.children)
+	case *DenseUnionBuilder:
+		checkpoint.syncChildren(builder.children)
+	}
+
 	checkpoint.length = checkpoint.builder.Len()
 	if checkpoint.state != nil {
 		checkpoint.state.capture()

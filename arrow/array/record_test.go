@@ -560,6 +560,50 @@ func TestRecordBuilderRollsBackRowsAfterDecodeError(t *testing.T) {
 
 }
 
+func TestRecordBuilderRollsBackDynamicallyAddedUnionChild(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	for _, tc := range []struct {
+		name string
+		mode arrow.UnionMode
+	}{{name: "dense", mode: arrow.DenseMode}, {name: "sparse", mode: arrow.SparseMode}} {
+		t.Run(tc.name, func(t *testing.T) {
+			unionType := arrow.UnionOf(tc.mode,
+				[]arrow.Field{{Name: "first", Type: arrow.PrimitiveTypes.Int32}},
+				[]arrow.UnionTypeCode{0})
+			schema := arrow.NewSchema([]arrow.Field{
+				{Name: "value", Type: unionType},
+				{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+			}, nil)
+			builder := array.NewRecordBuilder(mem, schema)
+			defer builder.Release()
+
+			unionBuilder := builder.Field(0).(array.UnionBuilder)
+			assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":[0,1],"other":1}`)))
+
+			secondChild := array.NewInt32Builder(mem)
+			defer secondChild.Release()
+			if tc.mode == arrow.SparseMode {
+				secondChild.AppendNull()
+			}
+			assert.EqualValues(t, 1, unionBuilder.AppendChild(secondChild, "second"))
+
+			assert.Error(t, builder.UnmarshalJSON([]byte(`{"value":[1,2],"other":"invalid"}`)))
+			wantChildLen := 0
+			if tc.mode == arrow.SparseMode {
+				wantChildLen = 1
+			}
+			assert.Equal(t, wantChildLen, unionBuilder.Child(1).Len())
+
+			assert.NoError(t, builder.UnmarshalJSON([]byte(`{"value":[1,3],"other":2}`)))
+			union := unionBuilder.NewArray().(array.Union)
+			defer union.Release()
+			assert.Equal(t, `[1,3]`, union.ValueStr(1))
+		})
+	}
+}
+
 func TestRecordBuilderRollsBackVariableWidthState(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
