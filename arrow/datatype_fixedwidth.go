@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow/decimal"
-	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/internal/json"
 )
 
@@ -590,22 +589,32 @@ func NarrowestDecimalType(prec, scale int32) (DecimalType, error) {
 }
 
 func NewDecimalType(id Type, prec, scale int32) (DecimalType, error) {
+	var (
+		dtype        DecimalType
+		maxPrecision int32
+	)
 	switch id {
 	case DECIMAL32:
-		debug.Assert(prec <= int32(decimal.MaxPrecision[decimal.Decimal32]()), "invalid precision for decimal32")
-		return &Decimal32Type{Precision: prec, Scale: scale}, nil
+		dtype = &Decimal32Type{Precision: prec, Scale: scale}
+		maxPrecision = int32(decimal.MaxPrecision[decimal.Decimal32]())
 	case DECIMAL64:
-		debug.Assert(prec <= int32(decimal.MaxPrecision[decimal.Decimal64]()), "invalid precision for decimal64")
-		return &Decimal64Type{Precision: prec, Scale: scale}, nil
+		dtype = &Decimal64Type{Precision: prec, Scale: scale}
+		maxPrecision = int32(decimal.MaxPrecision[decimal.Decimal64]())
 	case DECIMAL128:
-		debug.Assert(prec <= int32(decimal.MaxPrecision[decimal.Decimal128]()), "invalid precision for decimal128")
-		return &Decimal128Type{Precision: prec, Scale: scale}, nil
+		dtype = &Decimal128Type{Precision: prec, Scale: scale}
+		maxPrecision = int32(decimal.MaxPrecision[decimal.Decimal128]())
 	case DECIMAL256:
-		debug.Assert(prec <= int32(decimal.MaxPrecision[decimal.Decimal256]()), "invalid precision for decimal256")
-		return &Decimal256Type{Precision: prec, Scale: scale}, nil
+		dtype = &Decimal256Type{Precision: prec, Scale: scale}
+		maxPrecision = int32(decimal.MaxPrecision[decimal.Decimal256]())
 	default:
 		return nil, fmt.Errorf("%w: must use one of the DECIMAL IDs to create a DecimalType", ErrInvalid)
 	}
+
+	if prec <= 0 || prec > maxPrecision {
+		return nil, fmt.Errorf("%w: precision for %s must be between 1 and %d, got %d",
+			ErrInvalid, id, maxPrecision, prec)
+	}
+	return dtype, nil
 }
 
 // Decimal32Type represents a fixed-size 32-bit decimal type.
