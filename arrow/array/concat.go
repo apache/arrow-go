@@ -595,11 +595,10 @@ func concat(data []arrow.ArrayData, mem memory.Allocator) (arr arrow.ArrayData, 
 			dict.Release()
 		}
 
-		indexBuffers := gatherBuffersFixedWidthType(data, 1, idxType)
 		if dictsSame {
 			out.dictionary = dict0.Data().(*Data)
 			out.dictionary.Retain()
-			out.buffers[1] = concatBuffers(indexBuffers, mem)
+			out.buffers[1] = concatFixedWidthBuffers(data, 1, idxType.BitWidth()/8, out.length, mem)
 			break
 		}
 
