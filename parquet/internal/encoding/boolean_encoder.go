@@ -35,8 +35,9 @@ const (
 // PlainBooleanEncoder encodes bools as a bitmap as per the Plain Encoding
 type PlainBooleanEncoder struct {
 	encoder
-	bitsBuffer []byte
-	wr         utils.BitmapWriter
+	bitsBuffer    []byte
+	spacedScratch []bool
+	wr            utils.BitmapWriter
 }
 
 // Type for the PlainBooleanEncoder is parquet.Types.Boolean
@@ -113,9 +114,13 @@ func (enc *PlainBooleanEncoder) putBitmapScalar(bitmap []byte, offset, length in
 // PutSpaced will use the validBits bitmap to determine which values are nulls
 // and can be left out from the slice, and the encoded without those nulls.
 func (enc *PlainBooleanEncoder) PutSpaced(in []bool, validBits []byte, validBitsOffset int64) {
-	bufferOut := make([]bool, len(in))
-	nvalid := spacedCompress(in, bufferOut, validBits, validBitsOffset)
-	enc.Put(bufferOut[:nvalid])
+	if cap(enc.spacedScratch) < len(in) {
+		enc.spacedScratch = make([]bool, len(in))
+	} else {
+		enc.spacedScratch = enc.spacedScratch[:len(in)]
+	}
+	nvalid := spacedCompress(in, enc.spacedScratch, validBits, validBitsOffset)
+	enc.Put(enc.spacedScratch[:nvalid])
 }
 
 // PutSpacedBitmap encodes boolean values directly from a bitmap with validity information,
@@ -186,6 +191,7 @@ type RleBooleanEncoder struct {
 	encoder
 
 	bufferedValues []bool
+	spacedScratch  []bool
 }
 
 func (RleBooleanEncoder) Type() parquet.Type {
@@ -197,9 +203,13 @@ func (enc *RleBooleanEncoder) Put(in []bool) {
 }
 
 func (enc *RleBooleanEncoder) PutSpaced(in []bool, validBits []byte, validBitsOffset int64) {
-	bufferOut := make([]bool, len(in))
-	nvalid := spacedCompress(in, bufferOut, validBits, validBitsOffset)
-	enc.Put(bufferOut[:nvalid])
+	if cap(enc.spacedScratch) < len(in) {
+		enc.spacedScratch = make([]bool, len(in))
+	} else {
+		enc.spacedScratch = enc.spacedScratch[:len(in)]
+	}
+	nvalid := spacedCompress(in, enc.spacedScratch, validBits, validBitsOffset)
+	enc.Put(enc.spacedScratch[:nvalid])
 }
 
 // PutSpacedBitmap encodes boolean values from a bitmap with validity information.
@@ -219,7 +229,12 @@ func (enc *RleBooleanEncoder) PutSpacedBitmap(bitmap []byte, bitmapOffset int64,
 
 	// Extract valid bits to []bool for buffering
 	// Use SetBitRunReader to efficiently iterate over valid values
-	bufferOut := make([]bool, numValid)
+	nvalid := int(numValid)
+	if cap(enc.spacedScratch) < nvalid {
+		enc.spacedScratch = make([]bool, nvalid)
+	} else {
+		enc.spacedScratch = enc.spacedScratch[:nvalid]
+	}
 	idx := 0
 
 	reader := bitutils.NewSetBitRunReader(validBits, validBitsOffset, numValues)
@@ -231,12 +246,12 @@ func (enc *RleBooleanEncoder) PutSpacedBitmap(bitmap []byte, bitmapOffset int64,
 
 		// Convert this run of bits to bools
 		for i := int64(0); i < run.Length; i++ {
-			bufferOut[idx] = bitutil.BitIsSet(bitmap, int(bitmapOffset+run.Pos+i))
+			enc.spacedScratch[idx] = bitutil.BitIsSet(bitmap, int(bitmapOffset+run.Pos+i))
 			idx++
 		}
 	}
 
-	enc.Put(bufferOut)
+	enc.Put(enc.spacedScratch[:idx])
 	return numValid
 }
 
