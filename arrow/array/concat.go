@@ -67,26 +67,6 @@ type rng struct {
 	offset, len int
 }
 
-// simple bitmap struct to reference a specific slice of a bitmap where the range
-// offset and length are in bits
-type bitmap struct {
-	data []byte
-	rng  rng
-}
-
-// gather up the bitmaps from the passed in data objects
-func gatherBitmaps(data []arrow.ArrayData, idx int) []bitmap {
-	out := make([]bitmap, len(data))
-	for i, d := range data {
-		if d.Buffers()[idx] != nil {
-			out[i].data = d.Buffers()[idx].Bytes()
-		}
-		out[i].rng.offset = d.Offset()
-		out[i].rng.len = d.Len()
-	}
-	return out
-}
-
 // gatherFixedBuffers gathers up the buffer objects of the given index, specifically
 // returning only the slices of the buffers which are relevant to the passed in arrays
 // in case they are themselves slices of other arrays. nil buffers are ignored and not
@@ -674,7 +654,7 @@ func concat(data []arrow.ArrayData, mem memory.Allocator) (arr arrow.ArrayData, 
 
 	out.buffers = make([]*memory.Buffer, len(data[0].Buffers()))
 	if out.nulls != 0 && out.dtype.ID() != arrow.NULL {
-		bm, err := concatBitmaps(gatherBitmaps(data, 0), mem)
+		bm, err := concatBitmaps(data, 0, mem)
 		if err != nil {
 			return nil, err
 		}
@@ -689,7 +669,7 @@ func concat(data []arrow.ArrayData, mem memory.Allocator) (arr arrow.ArrayData, 
 	switch dt := dt.(type) {
 	case *arrow.NullType:
 	case *arrow.BooleanType:
-		bm, err := concatBitmaps(gatherBitmaps(data, 1), mem)
+		bm, err := concatBitmaps(data, 1, mem)
 		if err != nil {
 			return nil, err
 		}
@@ -917,14 +897,14 @@ func addOvf(x, y int) (int, bool) {
 }
 
 // concatenate bitmaps together and return a buffer with the combined bitmaps
-func concatBitmaps(bitmaps []bitmap, mem memory.Allocator) (*memory.Buffer, error) {
+func concatBitmaps(data []arrow.ArrayData, idx int, mem memory.Allocator) (*memory.Buffer, error) {
 	var (
 		outlen   int
 		overflow bool
 	)
 
-	for _, bm := range bitmaps {
-		if outlen, overflow = addOvf(outlen, bm.rng.len); overflow {
+	for _, d := range data {
+		if outlen, overflow = addOvf(outlen, d.Len()); overflow {
 			return nil, errors.New("length overflow when concatenating arrays")
 		}
 	}
@@ -934,13 +914,13 @@ func concatBitmaps(bitmaps []bitmap, mem memory.Allocator) (*memory.Buffer, erro
 	dst := out.Bytes()
 
 	offset := 0
-	for _, bm := range bitmaps {
-		if bm.data == nil { // if the bitmap is nil, that implies that the value is true for all elements
-			bitutil.SetBitsTo(out.Bytes(), int64(offset), int64(bm.rng.len), true)
+	for _, d := range data {
+		if buf := d.Buffers()[idx]; buf == nil { // if the bitmap is nil, that implies that the value is true for all elements
+			bitutil.SetBitsTo(out.Bytes(), int64(offset), int64(d.Len()), true)
 		} else {
-			bitutil.CopyBitmap(bm.data, bm.rng.offset, bm.rng.len, dst, offset)
+			bitutil.CopyBitmap(buf.Bytes(), d.Offset(), d.Len(), dst, offset)
 		}
-		offset += bm.rng.len
+		offset += d.Len()
 	}
 	return out, nil
 }
