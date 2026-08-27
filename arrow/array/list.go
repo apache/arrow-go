@@ -297,6 +297,8 @@ type baseListBuilder struct {
 	// actual list type
 	dt              arrow.DataType
 	appendOffsetVal func(int)
+
+	checkpoint *builderCheckpoint
 }
 
 type ListLikeBuilder interface {
@@ -632,6 +634,19 @@ func unmarshalListValues(dec *json.Decoder, values Builder, dt arrow.DataType) e
 }
 
 func (b *baseListBuilder) UnmarshalOne(dec *json.Decoder) error {
+	if b.checkpoint == nil {
+		b.checkpoint = newBuilderCheckpoint(b)
+	}
+	b.checkpoint.capture()
+
+	if err := b.unmarshalOne(dec); err != nil {
+		b.checkpoint.restore()
+		return err
+	}
+	return nil
+}
+
+func (b *baseListBuilder) unmarshalOne(dec *json.Decoder) error {
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -1124,6 +1139,8 @@ type baseListViewBuilder struct {
 	dt              arrow.DataType
 	appendOffsetVal func(int)
 	appendSizeVal   func(int)
+
+	checkpoint *builderCheckpoint
 }
 
 type ListViewBuilder struct {
@@ -1441,6 +1458,19 @@ func (b *baseListViewBuilder) AppendValueFromString(s string) error {
 }
 
 func (b *baseListViewBuilder) UnmarshalOne(dec *json.Decoder) error {
+	if b.checkpoint == nil {
+		b.checkpoint = newBuilderCheckpoint(b)
+	}
+	b.checkpoint.capture()
+
+	if err := b.unmarshalOne(dec); err != nil {
+		b.checkpoint.restore()
+		return err
+	}
+	return nil
+}
+
+func (b *baseListViewBuilder) unmarshalOne(dec *json.Decoder) error {
 	t, err := dec.Token()
 	if err != nil {
 		return err

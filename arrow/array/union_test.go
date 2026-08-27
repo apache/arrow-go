@@ -1543,3 +1543,67 @@ func TestUnionUnmarshalNonNullableChild(t *testing.T) {
 		})
 	}
 }
+
+func TestUnionBuilderUnmarshalOneRollback(t *testing.T) {
+	unionFields := []arrow.Field{
+		{Name: "u0", Type: arrow.PrimitiveTypes.Int32, Nullable: false},
+		{Name: "u1", Type: arrow.BinaryTypes.String, Nullable: true},
+	}
+	codes := []arrow.UnionTypeCode{0, 1}
+
+	tests := []struct {
+		name string
+		dt   arrow.DataType
+		bad  string
+		want string
+	}{
+		{
+			name: "sparse null in non-nullable child",
+			dt:   arrow.SparseUnionOf(unionFields, codes),
+			bad:  `[0, null]`,
+			want: `[{u0=7}]`,
+		},
+		{
+			name: "dense null in non-nullable child",
+			dt:   arrow.DenseUnionOf(unionFields, codes),
+			bad:  `[0, null]`,
+			want: `[{u0=7}]`,
+		},
+		{
+			name: "sparse wrong child type",
+			dt:   arrow.SparseUnionOf(unionFields, codes),
+			bad:  `[0, "nope"]`,
+			want: `[{u0=7}]`,
+		},
+		{
+			name: "dense wrong child type",
+			dt:   arrow.DenseUnionOf(unionFields, codes),
+			bad:  `[0, "nope"]`,
+			want: `[{u0=7}]`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer pool.AssertSize(t, 0)
+
+			bldr := array.NewBuilder(pool, tc.dt).(array.UnionBuilder)
+			defer bldr.Release()
+
+			require.Error(t, bldr.UnmarshalOne(internaljson.NewDecoder(strings.NewReader(tc.bad))))
+			require.Zero(t, bldr.Len())
+			for i := range unionFields {
+				require.Zero(t, bldr.Child(i).Len(), "child %d", i)
+			}
+
+			require.NoError(t, bldr.UnmarshalOne(internaljson.NewDecoder(strings.NewReader(`[0, 7]`))))
+
+			arr := bldr.NewArray()
+			defer arr.Release()
+
+			require.NoError(t, array.ValidateFull(arr))
+			require.Equal(t, tc.want, arr.String())
+		})
+	}
+}
