@@ -114,6 +114,26 @@ given by "indices". Nulls in "indices" emit null in the output`,
 		})
 )
 
+func takeTableColumn(ctx context.Context, opts FunctionOptions, tbl arrow.Table, indices Datum, cols []arrow.Column, i int) error {
+	inCol := tbl.Column(i)
+	result, err := CallFunction(ctx, "take", opts,
+		&ChunkedDatum{Value: inCol.Data()},
+		indices)
+	if err != nil {
+		return err
+	}
+	defer result.Release()
+	out := result.(ArrayLikeDatum)
+	chunks := out.Chunks()
+	if out.Kind() == KindArray {
+		defer chunks[0].Release()
+	}
+	chk := arrow.NewChunked(out.Type(), chunks)
+	defer chk.Release()
+	cols[i] = *arrow.NewColumn(inCol.Field(), chk)
+	return nil
+}
+
 func takeTableImpl(ctx context.Context, opts FunctionOptions, args ...Datum) (Datum, error) {
 	tbl := args[0].(*TableDatum).Value
 	ncols := int(tbl.NumCols())
@@ -124,37 +144,40 @@ func takeTableImpl(ctx context.Context, opts FunctionOptions, args ...Datum) (Da
 		}
 	}()
 
-	eg, cctx := errgroup.WithContext(ctx)
-	eg.SetLimit(GetExecCtx(ctx).NumParallel)
-	for i := 0; i < ncols; i++ {
-		i := i
-		eg.Go(func() error {
-			inCol := tbl.Column(i)
-			result, err := CallFunction(cctx, "take", opts,
-				&ChunkedDatum{Value: inCol.Data()},
-				args[1])
-			if err != nil {
-				return err
+	numParallel := GetExecCtx(ctx).NumParallel
+	if ncols <= 1 || numParallel <= 1 {
+		for i := 0; i < ncols; i++ {
+			if err := takeTableColumn(ctx, opts, tbl, args[1], cols, i); err != nil {
+				return nil, err
 			}
-			defer result.Release()
-			out := result.(ArrayLikeDatum)
-			chunks := out.Chunks()
-			if out.Kind() == KindArray {
-				defer chunks[0].Release()
-			}
-			chk := arrow.NewChunked(out.Type(), chunks)
-			defer chk.Release()
-			cols[i] = *arrow.NewColumn(inCol.Field(), chk)
-			return nil
-		})
-	}
+		}
+	} else {
+		eg, cctx := errgroup.WithContext(ctx)
+		eg.SetLimit(numParallel)
+		for i := 0; i < ncols; i++ {
+			i := i
+			eg.Go(func() error {
+				return takeTableColumn(cctx, opts, tbl, args[1], cols, i)
+			})
+		}
 
-	if err := eg.Wait(); err != nil {
-		return nil, err
+		if err := eg.Wait(); err != nil {
+			return nil, err
+		}
 	}
 
 	final := array.NewTable(tbl.Schema(), cols, -1)
 	return &TableDatum{Value: final}, nil
+}
+
+func takeRecordColumn(ctx context.Context, opts FunctionOptions, rb arrow.RecordBatch, indices Datum, cols []arrow.Array, i int) error {
+	out, err := CallFunction(ctx, "array_take", opts, &ArrayDatum{Value: rb.Column(i).Data()}, indices)
+	if err != nil {
+		return err
+	}
+	defer out.Release()
+	cols[i] = out.(*ArrayDatum).MakeArray()
+	return nil
 }
 
 func takeRecordImpl(ctx context.Context, opts FunctionOptions, args ...Datum) (Datum, error) {
@@ -169,7 +192,7 @@ func takeRecordImpl(ctx context.Context, opts FunctionOptions, args ...Datum) (D
 	}
 
 	rb := args[0].(*RecordDatum).Value
-	ncols := rb.NumCols()
+	ncols := int(rb.NumCols())
 	nrows := args[1].(ArrayLikeDatum).Len()
 	cols := make([]arrow.Array, ncols)
 	defer func() {
@@ -180,27 +203,39 @@ func takeRecordImpl(ctx context.Context, opts FunctionOptions, args ...Datum) (D
 		}
 	}()
 
-	eg, cctx := errgroup.WithContext(ctx)
-	eg.SetLimit(GetExecCtx(ctx).NumParallel)
-	for i := range rb.Columns() {
-		i := i
-		eg.Go(func() error {
-			out, err := CallFunction(cctx, "array_take", opts, &ArrayDatum{Value: rb.Column(i).Data()}, indices)
-			if err != nil {
-				return err
+	numParallel := GetExecCtx(ctx).NumParallel
+	if ncols <= 1 || numParallel <= 1 {
+		for i := 0; i < ncols; i++ {
+			if err := takeRecordColumn(ctx, opts, rb, indices, cols, i); err != nil {
+				return nil, err
 			}
-			defer out.Release()
-			cols[i] = out.(*ArrayDatum).MakeArray()
-			return nil
-		})
-	}
+		}
+	} else {
+		eg, cctx := errgroup.WithContext(ctx)
+		eg.SetLimit(numParallel)
+		for i := 0; i < ncols; i++ {
+			i := i
+			eg.Go(func() error {
+				return takeRecordColumn(cctx, opts, rb, indices, cols, i)
+			})
+		}
 
-	if err := eg.Wait(); err != nil {
-		return nil, err
+		if err := eg.Wait(); err != nil {
+			return nil, err
+		}
 	}
 
 	outRec := array.NewRecordBatch(rb.Schema(), cols, nrows)
 	return &RecordDatum{Value: outRec}, nil
+}
+
+func takeArrayChunk(ctx context.Context, opts FunctionOptions, values Datum, chunk arrow.Array) (arrow.Array, error) {
+	result, err := CallFunction(ctx, "array_take", opts, values, &ArrayDatum{Value: chunk.Data()})
+	if err != nil {
+		return nil, err
+	}
+	defer result.Release()
+	return result.(*ArrayDatum).MakeArray(), nil
 }
 
 func takeArrayImpl(ctx context.Context, opts FunctionOptions, args ...Datum) (Datum, error) {
@@ -218,22 +253,32 @@ func takeArrayImpl(ctx context.Context, opts FunctionOptions, args ...Datum) (Da
 			}
 		}()
 
-		eg, cctx := errgroup.WithContext(ctx)
-		eg.SetLimit(GetExecCtx(ctx).NumParallel)
-		for i := range chunks {
-			i := i
-			eg.Go(func() error {
-				result, err := CallFunction(cctx, "array_take", opts, args[0], &ArrayDatum{Value: chunks[i].Data()})
+		numParallel := GetExecCtx(ctx).NumParallel
+		if len(chunks) <= 1 || numParallel <= 1 {
+			for i, chunk := range chunks {
+				result, err := takeArrayChunk(ctx, opts, args[0], chunk)
 				if err != nil {
-					return err
+					return nil, err
 				}
-				defer result.Release()
-				out[i] = result.(*ArrayDatum).MakeArray()
-				return nil
-			})
-		}
-		if err := eg.Wait(); err != nil {
-			return nil, err
+				out[i] = result
+			}
+		} else {
+			eg, cctx := errgroup.WithContext(ctx)
+			eg.SetLimit(numParallel)
+			for i := range chunks {
+				i := i
+				eg.Go(func() error {
+					result, err := takeArrayChunk(cctx, opts, args[0], chunks[i])
+					if err != nil {
+						return err
+					}
+					out[i] = result
+					return nil
+				})
+			}
+			if err := eg.Wait(); err != nil {
+				return nil, err
+			}
 		}
 		return &ChunkedDatum{
 			Value: arrow.NewChunked(args[0].(*ArrayDatum).Type(), out)}, nil
