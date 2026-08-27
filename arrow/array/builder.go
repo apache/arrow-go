@@ -17,6 +17,7 @@
 package array
 
 import (
+	"bytes"
 	"fmt"
 	"math/bits"
 	"sync/atomic"
@@ -386,6 +387,25 @@ func (b *builder) UnsafeAppendBoolToBitmap(isValid bool) {
 		b.nulls++
 	}
 	b.length++
+}
+
+func unmarshalChild(dec *json.Decoder, child Builder, field arrow.Field) error {
+	if field.Nullable {
+		return child.UnmarshalOne(dec)
+	}
+
+	var val json.RawMessage
+	if err := dec.Decode(&val); err != nil {
+		return err
+	}
+
+	if bytes.Equal(val, []byte("null")) {
+		return fmt.Errorf("field '%s' is non-nullable but got null", field.Name)
+	}
+
+	valDec := json.NewDecoder(bytes.NewReader(val))
+	valDec.UseNumber()
+	return child.UnmarshalOne(valDec)
 }
 
 func NewBuilder(mem memory.Allocator, dtype arrow.DataType) Builder {
