@@ -407,8 +407,16 @@ func (b *StructBuilder) AppendValues(valids []bool) {
 func (b *StructBuilder) AppendNull() { b.Append(false) }
 
 func (b *StructBuilder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
+	}
+
+	b.Reserve(n)
+	bitutil.SetBitsTo(b.nullBitmap.Bytes(), int64(b.length), int64(n), false)
+	b.length += n
+	b.nulls += n
+	for _, f := range b.fields {
+		f.AppendNulls(n)
 	}
 }
 
@@ -420,8 +428,14 @@ func (b *StructBuilder) AppendEmptyValue() {
 }
 
 func (b *StructBuilder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
+	}
+
+	b.Reserve(n)
+	b.unsafeAppendBoolsToBitmap(nil, n)
+	for _, f := range b.fields {
+		f.AppendEmptyValues(n)
 	}
 }
 
