@@ -623,18 +623,7 @@ func unmarshalListValues(dec *json.Decoder, values Builder, dt arrow.DataType) e
 	}
 
 	for dec.More() {
-		var val json.RawMessage
-		if err := dec.Decode(&val); err != nil {
-			return err
-		}
-
-		if bytes.Equal(val, []byte("null")) {
-			return fmt.Errorf("field '%s' is non-nullable but got null", elem.Name)
-		}
-
-		valDec := json.NewDecoder(bytes.NewReader(val))
-		valDec.UseNumber()
-		if err := values.UnmarshalOne(valDec); err != nil {
+		if err := unmarshalChild(dec, values, elem); err != nil {
 			return err
 		}
 	}
