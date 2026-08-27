@@ -606,6 +606,12 @@ func (b *RunEndEncodedBuilder) UnmarshalOne(dec *json.Decoder) error {
 		return err
 	}
 
+	if value == nil {
+		if valueField := b.dt.(*arrow.RunEndEncodedType).Fields()[1]; !valueField.Nullable {
+			return fmt.Errorf("field '%s' is non-nullable but got null", valueField.Name)
+		}
+	}
+
 	// if we unmarshalled the same value as the previous one, we want to
 	// continue the run. However, there's an edge case. At the start of
 	// unmarshalling, lastUnmarshalled will be nil, but we might get
