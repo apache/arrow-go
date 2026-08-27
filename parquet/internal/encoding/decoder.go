@@ -108,7 +108,9 @@ type dictDecoder[T parquet.ColumnTypes] struct {
 	dictValueDecoder utils.DictionaryConverter[T]
 	idxDecoder       *utils.TypedRleDecoder[T]
 
-	idxScratchSpace []uint64
+	idxScratchSpace  []uint64
+	idxAppendScratch []int
+	validScratch     []bool
 }
 
 // SetDict sets a decoder that can be used to decode the dictionary that is
@@ -169,11 +171,15 @@ func (d *dictDecoder[T]) DecodeIndices(numValues int, bldr array.Builder) (int, 
 
 	n, err := d.idxDecoder.GetBatch(d.idxScratchSpace)
 
-	toAppend := make([]int, n)
-	for i, v := range d.idxScratchSpace {
-		toAppend[i] = int(v)
+	if cap(d.idxAppendScratch) < n {
+		d.idxAppendScratch = make([]int, n, bitutil.NextPowerOf2(n))
+	} else {
+		d.idxAppendScratch = d.idxAppendScratch[:n]
 	}
-	bldr.(*array.BinaryDictionaryBuilder).AppendIndices(toAppend, nil)
+	for i, v := range d.idxScratchSpace[:n] {
+		d.idxAppendScratch[i] = int(v)
+	}
+	bldr.(*array.BinaryDictionaryBuilder).AppendIndices(d.idxAppendScratch, nil)
 	d.nvals -= n
 	return n, err
 }
@@ -190,15 +196,24 @@ func (d *dictDecoder[T]) DecodeIndicesSpaced(numValues, nullCount int, validBits
 		return n, err
 	}
 
-	valid := make([]bool, n)
-	bitutils.VisitBitBlocks(validBits, offset, int64(n),
-		func(pos int64) { valid[pos] = true }, func() {})
-
-	toAppend := make([]int, n)
-	for i, v := range d.idxScratchSpace {
-		toAppend[i] = int(v)
+	if cap(d.validScratch) < n {
+		d.validScratch = make([]bool, n, bitutil.NextPowerOf2(n))
+	} else {
+		d.validScratch = d.validScratch[:n]
 	}
-	bldr.(*array.BinaryDictionaryBuilder).AppendIndices(toAppend, valid)
+	clear(d.validScratch)
+	bitutils.VisitBitBlocks(validBits, offset, int64(n),
+		func(pos int64) { d.validScratch[pos] = true }, func() {})
+
+	if cap(d.idxAppendScratch) < n {
+		d.idxAppendScratch = make([]int, n, bitutil.NextPowerOf2(n))
+	} else {
+		d.idxAppendScratch = d.idxAppendScratch[:n]
+	}
+	for i, v := range d.idxScratchSpace[:n] {
+		d.idxAppendScratch[i] = int(v)
+	}
+	bldr.(*array.BinaryDictionaryBuilder).AppendIndices(d.idxAppendScratch, d.validScratch)
 	d.nvals -= n - nullCount
 	return n, nil
 }
