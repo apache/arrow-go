@@ -827,3 +827,51 @@ func TestVariadicCountsNotAccumulatedAcrossEncode(t *testing.T) {
 		p.Release()
 	}
 }
+
+func TestRecordEncoderResetRestoresDepth(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	childBuilder := array.NewInt32Builder(mem)
+	childBuilder.Append(1)
+	child := childBuilder.NewArray()
+	childBuilder.Release()
+	defer child.Release()
+
+	structArr, err := array.NewStructArrayWithFields(
+		[]arrow.Array{child},
+		[]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}},
+	)
+	require.NoError(t, err)
+	defer structArr.Release()
+
+	structSchema := arrow.NewSchema([]arrow.Field{{
+		Name: "struct",
+		Type: structArr.DataType(),
+	}}, nil)
+	structRecord := array.NewRecordBatch(structSchema, []arrow.Array{structArr}, 1)
+	defer structRecord.Release()
+
+	enc := newRecordEncoder(mem, 0, 1, true, -1, 1, 0, nil)
+	var nestedPayload Payload
+	require.ErrorIs(t, enc.encode(&nestedPayload, structRecord), errMaxRecursion)
+	nestedPayload.Release()
+
+	enc.reset()
+
+	simpleSchema := arrow.NewSchema([]arrow.Field{{
+		Name: "value",
+		Type: arrow.PrimitiveTypes.Int32,
+	}}, nil)
+	simpleBuilder := array.NewInt32Builder(mem)
+	simpleBuilder.Append(1)
+	simple := simpleBuilder.NewArray()
+	simpleBuilder.Release()
+	defer simple.Release()
+	simpleRecord := array.NewRecordBatch(simpleSchema, []arrow.Array{simple}, 1)
+	defer simpleRecord.Release()
+
+	var simplePayload Payload
+	require.NoError(t, enc.encode(&simplePayload, simpleRecord))
+	simplePayload.Release()
+}

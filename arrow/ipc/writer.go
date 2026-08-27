@@ -96,6 +96,7 @@ type Writer struct {
 	codec           flatbuf.CompressionType
 	compressNP      int
 	compressors     []compressor
+	encoder         *recordEncoder
 	minSpaceSavings float64
 
 	// map of the last written dictionaries by id
@@ -135,6 +136,22 @@ func NewWriter(w io.Writer, opts ...Option) *Writer {
 		minSpaceSavings: cfg.minSpaceSavings,
 		compressors:     make([]compressor, cfg.compressNP),
 	}
+}
+
+func (w *Writer) getRecordEncoder() *recordEncoder {
+	if w.encoder == nil {
+		w.encoder = newRecordEncoder(
+			w.mem,
+			0,
+			kMaxNestingDepth,
+			true,
+			w.codec,
+			w.compressNP,
+			w.minSpaceSavings,
+			w.compressors,
+		)
+	}
+	return w.encoder
 }
 
 func (w *Writer) Close() error {
@@ -211,20 +228,8 @@ func (w *Writer) Write(rec arrow.RecordBatch) (err error) {
 		return errInconsistentSchema
 	}
 
-	const allow64b = true
-	var (
-		data = Payload{msg: MessageRecordBatch}
-		enc  = newRecordEncoder(
-			w.mem,
-			0,
-			kMaxNestingDepth,
-			allow64b,
-			w.codec,
-			w.compressNP,
-			w.minSpaceSavings,
-			w.compressors,
-		)
-	)
+	data := Payload{msg: MessageRecordBatch}
+	enc := w.getRecordEncoder()
 	defer data.Release()
 
 	err = writeDictionaryPayloads(w.mem, rec, false, w.emitDictDeltas, &w.mapper, w.lastWrittenDicts, w.pw, enc)
@@ -368,6 +373,7 @@ type recordEncoder struct {
 	variadicCounts []int64
 
 	depth           int64
+	maxDepth        int64
 	start           int64
 	allow64b        bool
 	codec           flatbuf.CompressionType
@@ -390,6 +396,7 @@ func newRecordEncoder(
 		mem:             mem,
 		start:           startOffset,
 		depth:           maxDepth,
+		maxDepth:        maxDepth,
 		allow64b:        allow64b,
 		codec:           codec,
 		compressNP:      compressNP,
@@ -409,9 +416,11 @@ func (w *recordEncoder) shouldCompress(uncompressed, compressed int) bool {
 }
 
 func (w *recordEncoder) reset() {
+	w.depth = w.maxDepth
 	w.start = 0
-	w.fields = make([]fieldMetadata, 0)
-	w.variadicCounts = nil
+	w.fields = w.fields[:0]
+	w.meta = w.meta[:0]
+	w.variadicCounts = w.variadicCounts[:0]
 }
 
 func (w *recordEncoder) getCompressor(id int) compressor {
@@ -550,7 +559,11 @@ func (w *recordEncoder) encode(p *Payload, rec arrow.RecordBatch) error {
 	// position for the start of a buffer relative to the passed frame of reference.
 	// may be 0 or some other position in an address space.
 	offset := w.start
-	w.meta = make([]bufferMetadata, len(p.body))
+	if cap(w.meta) < len(p.body) {
+		w.meta = make([]bufferMetadata, len(p.body))
+	} else {
+		w.meta = w.meta[:len(p.body)]
+	}
 
 	// construct the metadata for the record batch header
 	for i, buf := range p.body {
