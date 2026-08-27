@@ -78,3 +78,27 @@ func TestPlainFixedLenByteArrayEncoder_Put(t *testing.T) {
 		})
 	}
 }
+
+func TestPlainFixedLenByteArrayEncoder_ReusesZeroValue(t *testing.T) {
+	sink := NewPooledBufferWriter(0)
+	elem := schema.NewFixedLenByteArrayNode("test", parquet.Repetitions.Required, 4, 0)
+	descr := schema.NewColumn(elem, 0, 0)
+	encoder := &PlainFixedLenByteArrayEncoder{
+		encoder: encoder{
+			descr: descr,
+			sink:  sink,
+		},
+	}
+	defer encoder.Release()
+
+	encoder.Put([]parquet.FixedLenByteArray{[]byte("abcd")})
+	require.Nil(t, encoder.zeroValue)
+	sink.Reset(0)
+	encoder.Put([]parquet.FixedLenByteArray{nil})
+	zeroValue := encoder.zeroValue
+	require.Equal(t, []byte{0, 0, 0, 0}, zeroValue)
+
+	sink.Reset(0)
+	encoder.Put([]parquet.FixedLenByteArray{nil})
+	require.Same(t, &zeroValue[0], &encoder.zeroValue[0])
+}
