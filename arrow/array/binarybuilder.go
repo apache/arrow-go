@@ -606,10 +606,17 @@ func (b *BinaryViewBuilder) AppendNull() {
 }
 
 func (b *BinaryViewBuilder) AppendNulls(n int) {
-	b.Reserve(n)
-	for i := 0; i < n; i++ {
-		b.UnsafeAppendBoolToBitmap(false)
+	if n <= 0 {
+		return
 	}
+	if n > math.MaxInt-b.length {
+		panic("arrow/array: builder length overflow")
+	}
+
+	b.Reserve(n)
+	bitutil.SetBitsTo(b.nullBitmap.Bytes(), int64(b.length), int64(n), false)
+	b.length += n
+	b.nulls += n
 }
 
 func (b *BinaryViewBuilder) AppendEmptyValue() {
