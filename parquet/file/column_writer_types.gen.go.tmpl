@@ -467,7 +467,7 @@ func (w *{{.Name}}ColumnChunkWriter) writeValues(values []{{.name}}, numNulls in
 {{- end}}
   }
   if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-    w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+    metadata.InsertHashes(w.bloomFilter, values)
   }
 }
 
@@ -490,7 +490,7 @@ func (w *{{.Name}}ColumnChunkWriter) writeValuesSpaced(spacedValues []{{.name}},
 {{- end}}
   }
   if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-    w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
+    metadata.InsertSpacedHashes(w.bloomFilter, numRead, spacedValues, validBits, validBitsOffset)
   }
 }
 
@@ -518,7 +518,7 @@ func (w *{{.Name}}ColumnChunkWriter) writeBitmapValues(bitmap []byte, bitmapOffs
     w.pageStatistics.(*metadata.BooleanStatistics).UpdateFromBitmap(bitmap, bitmapOffset, numValues, numNulls)
   }
   if w.bloomFilter != nil {
-    w.bloomFilter.InsertBulk(metadata.GetHashesFromBitmap(w.bloomFilter.Hasher(), bitmap, bitmapOffset, numValues))
+    metadata.InsertHashesFromBitmap(w.bloomFilter, bitmap, bitmapOffset, numValues)
   }
 }
 
@@ -554,7 +554,7 @@ func (w *{{.Name}}ColumnChunkWriter) writeBitmapValuesSpaced(bitmap []byte, bitm
 
   // Use bitmap-aware bloom filter hashing
   if w.bloomFilter != nil {
-    w.bloomFilter.InsertBulk(metadata.GetSpacedHashesFromBitmap(w.bloomFilter.Hasher(), numRead, bitmap, bitmapOffset, numValues, validBits, validBitsOffset))
+    metadata.InsertSpacedHashesFromBitmap(w.bloomFilter, numRead, bitmap, bitmapOffset, numValues, validBits, validBitsOffset)
   }
 }
 

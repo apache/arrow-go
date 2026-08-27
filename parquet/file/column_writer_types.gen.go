@@ -211,7 +211,7 @@ func (w *Int32ColumnChunkWriter) writeValues(values []int32, numNulls int64) {
 		w.pageStatistics.(*metadata.Int32Statistics).Update(values, numNulls)
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+		metadata.InsertHashes(w.bloomFilter, values)
 	}
 }
 
@@ -226,7 +226,7 @@ func (w *Int32ColumnChunkWriter) writeValuesSpaced(spacedValues []int32, numRead
 		w.pageStatistics.(*metadata.Int32Statistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
+		metadata.InsertSpacedHashes(w.bloomFilter, numRead, spacedValues, validBits, validBitsOffset)
 	}
 }
 
@@ -482,7 +482,7 @@ func (w *Int64ColumnChunkWriter) writeValues(values []int64, numNulls int64) {
 		w.pageStatistics.(*metadata.Int64Statistics).Update(values, numNulls)
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+		metadata.InsertHashes(w.bloomFilter, values)
 	}
 }
 
@@ -497,7 +497,7 @@ func (w *Int64ColumnChunkWriter) writeValuesSpaced(spacedValues []int64, numRead
 		w.pageStatistics.(*metadata.Int64Statistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
+		metadata.InsertSpacedHashes(w.bloomFilter, numRead, spacedValues, validBits, validBitsOffset)
 	}
 }
 
@@ -753,7 +753,7 @@ func (w *Int96ColumnChunkWriter) writeValues(values []parquet.Int96, numNulls in
 		w.pageStatistics.(*metadata.Int96Statistics).Update(values, numNulls)
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+		metadata.InsertHashes(w.bloomFilter, values)
 	}
 }
 
@@ -768,7 +768,7 @@ func (w *Int96ColumnChunkWriter) writeValuesSpaced(spacedValues []parquet.Int96,
 		w.pageStatistics.(*metadata.Int96Statistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
+		metadata.InsertSpacedHashes(w.bloomFilter, numRead, spacedValues, validBits, validBitsOffset)
 	}
 }
 
@@ -1024,7 +1024,7 @@ func (w *Float32ColumnChunkWriter) writeValues(values []float32, numNulls int64)
 		w.pageStatistics.(*metadata.Float32Statistics).Update(values, numNulls)
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+		metadata.InsertHashes(w.bloomFilter, values)
 	}
 }
 
@@ -1039,7 +1039,7 @@ func (w *Float32ColumnChunkWriter) writeValuesSpaced(spacedValues []float32, num
 		w.pageStatistics.(*metadata.Float32Statistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
+		metadata.InsertSpacedHashes(w.bloomFilter, numRead, spacedValues, validBits, validBitsOffset)
 	}
 }
 
@@ -1295,7 +1295,7 @@ func (w *Float64ColumnChunkWriter) writeValues(values []float64, numNulls int64)
 		w.pageStatistics.(*metadata.Float64Statistics).Update(values, numNulls)
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+		metadata.InsertHashes(w.bloomFilter, values)
 	}
 }
 
@@ -1310,7 +1310,7 @@ func (w *Float64ColumnChunkWriter) writeValuesSpaced(spacedValues []float64, num
 		w.pageStatistics.(*metadata.Float64Statistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
+		metadata.InsertSpacedHashes(w.bloomFilter, numRead, spacedValues, validBits, validBitsOffset)
 	}
 }
 
@@ -1649,7 +1649,7 @@ func (w *BooleanColumnChunkWriter) writeValues(values []bool, numNulls int64) {
 		w.pageStatistics.(*metadata.BooleanStatistics).Update(values, numNulls)
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+		metadata.InsertHashes(w.bloomFilter, values)
 	}
 }
 
@@ -1664,7 +1664,7 @@ func (w *BooleanColumnChunkWriter) writeValuesSpaced(spacedValues []bool, numRea
 		w.pageStatistics.(*metadata.BooleanStatistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
+		metadata.InsertSpacedHashes(w.bloomFilter, numRead, spacedValues, validBits, validBitsOffset)
 	}
 }
 
@@ -1691,7 +1691,7 @@ func (w *BooleanColumnChunkWriter) writeBitmapValues(bitmap []byte, bitmapOffset
 		w.pageStatistics.(*metadata.BooleanStatistics).UpdateFromBitmap(bitmap, bitmapOffset, numValues, numNulls)
 	}
 	if w.bloomFilter != nil {
-		w.bloomFilter.InsertBulk(metadata.GetHashesFromBitmap(w.bloomFilter.Hasher(), bitmap, bitmapOffset, numValues))
+		metadata.InsertHashesFromBitmap(w.bloomFilter, bitmap, bitmapOffset, numValues)
 	}
 }
 
@@ -1727,7 +1727,7 @@ func (w *BooleanColumnChunkWriter) writeBitmapValuesSpaced(bitmap []byte, bitmap
 
 	// Use bitmap-aware bloom filter hashing
 	if w.bloomFilter != nil {
-		w.bloomFilter.InsertBulk(metadata.GetSpacedHashesFromBitmap(w.bloomFilter.Hasher(), numRead, bitmap, bitmapOffset, numValues, validBits, validBitsOffset))
+		metadata.InsertSpacedHashesFromBitmap(w.bloomFilter, numRead, bitmap, bitmapOffset, numValues, validBits, validBitsOffset)
 	}
 }
 
@@ -2093,7 +2093,7 @@ func (w *ByteArrayColumnChunkWriter) writeValues(values []parquet.ByteArray, num
 		w.pageStatistics.(*metadata.ByteArrayStatistics).Update(values, numNulls)
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+		metadata.InsertHashes(w.bloomFilter, values)
 	}
 }
 
@@ -2108,7 +2108,7 @@ func (w *ByteArrayColumnChunkWriter) writeValuesSpaced(spacedValues []parquet.By
 		w.pageStatistics.(*metadata.ByteArrayStatistics).UpdateSpaced(spacedValues, validBits, validBitsOffset, nulls)
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
+		metadata.InsertSpacedHashes(w.bloomFilter, numRead, spacedValues, validBits, validBitsOffset)
 	}
 }
 
@@ -2478,7 +2478,7 @@ func (w *FixedLenByteArrayColumnChunkWriter) writeValues(values []parquet.FixedL
 		}
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-		w.bloomFilter.InsertBulk(metadata.GetHashes(w.bloomFilter.Hasher(), values))
+		metadata.InsertHashes(w.bloomFilter, values)
 	}
 }
 
@@ -2497,7 +2497,7 @@ func (w *FixedLenByteArrayColumnChunkWriter) writeValuesSpaced(spacedValues []pa
 		}
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
-		w.bloomFilter.InsertBulk(metadata.GetSpacedHashes(w.bloomFilter.Hasher(), numRead, spacedValues, validBits, validBitsOffset))
+		metadata.InsertSpacedHashes(w.bloomFilter, numRead, spacedValues, validBits, validBitsOffset)
 	}
 }
 
