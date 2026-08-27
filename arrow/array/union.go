@@ -333,6 +333,13 @@ func (a *SparseUnion) GetOneForMarshal(i int) interface{} {
 	return []interface{}{typeID, data.GetOneForMarshal(i)}
 }
 
+func (a *SparseUnion) ValueAsAny(i int) any {
+	typeID := a.RawTypeCodes()[i]
+	childID := a.ChildID(i)
+	data := a.Field(childID)
+	return []any{typeID, ValueAsAny(data, i)}
+}
+
 func (a *SparseUnion) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -627,6 +634,14 @@ func (a *DenseUnion) GetOneForMarshal(i int) interface{} {
 	return []interface{}{typeID, data.GetOneForMarshal(offset)}
 }
 
+func (a *DenseUnion) ValueAsAny(i int) any {
+	typeID := a.RawTypeCodes()[i]
+	childID := a.ChildID(i)
+	data := a.Field(childID)
+	offset := int(a.RawValueOffsets()[i])
+	return []any{typeID, ValueAsAny(data, offset)}
+}
+
 func (a *DenseUnion) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -757,8 +772,30 @@ type unionBuilder struct {
 	typeIDtoBuilder []Builder
 	typeIDtoChildID []int
 	// for all typeID < denseTypeID, typeIDtoBuilder[typeID] != nil
-	denseTypeID  arrow.UnionTypeCode
+	denseTypeID  int
 	typesBuilder *int8BufferBuilder
+}
+
+func unionTypeCodeFromJSON(dec *json.Decoder, typeID json.RawMessage, typ arrow.DataType) (arrow.UnionTypeCode, error) {
+	id, err := json.Number(string(typeID)).Int64()
+	if err != nil {
+		return 0, &json.UnmarshalTypeError{
+			Offset: dec.InputOffset(),
+			Type:   reflect.TypeOf(int8(0)),
+			Struct: fmt.Sprint(typ),
+			Value:  "integer",
+		}
+	}
+
+	if id < 0 || id > int64(arrow.MaxUnionTypeCode) {
+		return 0, &json.UnmarshalTypeError{
+			Offset: dec.InputOffset(),
+			Type:   reflect.TypeOf(int8(0)),
+			Struct: fmt.Sprint(typ),
+			Value:  "integer",
+		}
+	}
+	return arrow.UnionTypeCode(id), nil
 }
 
 func newUnionBuilder(mem memory.Allocator, children []Builder, typ arrow.UnionType) *unionBuilder {
@@ -849,9 +886,9 @@ func (b *unionBuilder) Type() arrow.DataType {
 }
 
 func (b *unionBuilder) AppendChild(newChild Builder, fieldName string) arrow.UnionTypeCode {
+	newType := b.nextTypeID()
 	newChild.Retain()
 	b.children = append(b.children, newChild)
-	newType := b.nextTypeID()
 
 	b.typeIDtoChildID[newType] = len(b.children) - 1
 	b.typeIDtoBuilder[newType] = newChild
@@ -865,21 +902,23 @@ func (b *unionBuilder) nextTypeID() arrow.UnionTypeCode {
 	// find typeID such that typeIDtoBuilder[typeID] == nil
 	// use that for the new child. Start searching at denseTypeID
 	// since typeIDtoBuilder is densely packed up at least to denseTypeID
-	for ; int(b.denseTypeID) < len(b.typeIDtoBuilder); b.denseTypeID++ {
+	for ; b.denseTypeID < len(b.typeIDtoBuilder); b.denseTypeID++ {
 		if b.typeIDtoBuilder[b.denseTypeID] == nil {
 			id := b.denseTypeID
 			b.denseTypeID++
-			return id
+			return arrow.UnionTypeCode(id)
 		}
 	}
 
-	debug.Assert(len(b.typeIDtoBuilder) < int(arrow.MaxUnionTypeCode), "too many children typeids")
+	if b.denseTypeID > int(arrow.MaxUnionTypeCode) {
+		panic("arrow/array: too many children typeids")
+	}
 	// typeIDtoBuilder is already densely packed, so just append the new child
 	b.typeIDtoBuilder = append(b.typeIDtoBuilder, nil)
 	b.typeIDtoChildID = append(b.typeIDtoChildID, arrow.InvalidUnionChildID)
 	id := b.denseTypeID
 	b.denseTypeID++
-	return id
+	return arrow.UnionTypeCode(id)
 }
 
 func (b *unionBuilder) newData() *Data {
@@ -943,6 +982,10 @@ func (b *SparseUnionBuilder) Reserve(n int) {
 
 func (b *SparseUnionBuilder) Resize(n int) {
 	b.typesBuilder.resize(n)
+}
+
+func (b *SparseUnionBuilder) truncate(n int) {
+	b.typesBuilder.SetLength(n)
 }
 
 // AppendNull will append a null to the first child and an empty value
@@ -1051,6 +1094,7 @@ func (b *SparseUnionBuilder) AppendValueFromString(s string) error {
 		return nil
 	}
 	dec := json.NewDecoder(strings.NewReader(s))
+	dec.UseNumber()
 	return b.UnmarshalOne(dec)
 }
 
@@ -1063,30 +1107,21 @@ func (b *SparseUnionBuilder) UnmarshalOne(dec *json.Decoder) error {
 	switch t {
 	case json.Delim('['):
 		// should be [type_id, Value]
-		typeID, err := dec.Token()
+		var typeID json.RawMessage
+		if err := dec.Decode(&typeID); err != nil {
+			return err
+		}
+
+		typeCode, err := unionTypeCodeFromJSON(dec, typeID, b.Type())
 		if err != nil {
 			return err
 		}
 
-		var typeCode int8
-
-		switch tid := typeID.(type) {
-		case json.Number:
-			id, err := tid.Int64()
-			if err != nil {
-				return err
+		if int(typeCode) >= len(b.typeIDtoChildID) {
+			return &json.UnmarshalTypeError{
+				Offset: dec.InputOffset(),
+				Value:  "invalid type code",
 			}
-			typeCode = int8(id)
-		case float64:
-			if tid != float64(int64(tid)) {
-				return &json.UnmarshalTypeError{
-					Offset: dec.InputOffset(),
-					Type:   reflect.TypeOf(int8(0)),
-					Struct: fmt.Sprint(b.Type()),
-					Value:  "float",
-				}
-			}
-			typeCode = int8(tid)
 		}
 
 		childNum := b.typeIDtoChildID[typeCode]
@@ -1184,6 +1219,11 @@ func (b *DenseUnionBuilder) Reserve(n int) {
 func (b *DenseUnionBuilder) Resize(n int) {
 	b.typesBuilder.resize(n)
 	b.offsetsBuilder.resize(n * arrow.Int32SizeBytes)
+}
+
+func (b *DenseUnionBuilder) truncate(n int) {
+	b.typesBuilder.SetLength(n)
+	b.offsetsBuilder.SetLength(n * arrow.Int32SizeBytes)
 }
 
 // AppendNull will only append a null value arbitrarily to the first child
@@ -1319,6 +1359,7 @@ func (d *DenseUnionBuilder) AppendValueFromString(s string) error {
 		return nil
 	}
 	dec := json.NewDecoder(strings.NewReader(s))
+	dec.UseNumber()
 	return d.UnmarshalOne(dec)
 }
 
@@ -1331,30 +1372,21 @@ func (b *DenseUnionBuilder) UnmarshalOne(dec *json.Decoder) error {
 	switch t {
 	case json.Delim('['):
 		// should be [type_id, Value]
-		typeID, err := dec.Token()
+		var typeID json.RawMessage
+		if err := dec.Decode(&typeID); err != nil {
+			return err
+		}
+
+		typeCode, err := unionTypeCodeFromJSON(dec, typeID, b.Type())
 		if err != nil {
 			return err
 		}
 
-		var typeCode int8
-
-		switch tid := typeID.(type) {
-		case json.Number:
-			id, err := tid.Int64()
-			if err != nil {
-				return err
+		if int(typeCode) >= len(b.typeIDtoChildID) {
+			return &json.UnmarshalTypeError{
+				Offset: dec.InputOffset(),
+				Value:  "invalid type code",
 			}
-			typeCode = int8(id)
-		case float64:
-			if tid != float64(int64(tid)) {
-				return &json.UnmarshalTypeError{
-					Offset: dec.InputOffset(),
-					Type:   reflect.TypeOf(int8(0)),
-					Struct: fmt.Sprint(b.Type()),
-					Value:  "float",
-				}
-			}
-			typeCode = int8(tid)
 		}
 
 		childNum := b.typeIDtoChildID[typeCode]

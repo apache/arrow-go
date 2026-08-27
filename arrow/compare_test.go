@@ -22,6 +22,12 @@ import (
 )
 
 func TestTypeEqual(t *testing.T) {
+	mapType := func(keysSorted bool) DataType {
+		typ := MapOf(BinaryTypes.String, PrimitiveTypes.Int32)
+		typ.KeysSorted = keysSorted
+		return typ
+	}
+
 	tests := []struct {
 		left, right   DataType
 		want          bool
@@ -333,6 +339,16 @@ func TestTypeEqual(t *testing.T) {
 			true, false,
 		},
 		{
+			mapType(false),
+			mapType(true),
+			false, false,
+		},
+		{
+			mapType(true),
+			mapType(true),
+			true, false,
+		},
+		{
 			MapOf(PrimitiveTypes.Int32, FixedWidthTypes.Timestamp_ns),
 			MapOf(PrimitiveTypes.Int32, FixedWidthTypes.Timestamp_ns),
 			true, false,
@@ -393,5 +409,21 @@ func TestTypeEqual(t *testing.T) {
 				t.Fatalf("TypeEqual(%v, %v, %v): got=%v, want=%v", test.left, test.right, test.checkMetadata, got, test.want)
 			}
 		})
+	}
+}
+
+func TestTypeEqualRunEndEncodedValueNullability(t *testing.T) {
+	nullable := RunEndEncodedOf(PrimitiveTypes.Int16, BinaryTypes.String)
+	nonNullable := RunEndEncodedOf(PrimitiveTypes.Int16, BinaryTypes.String)
+	nonNullable.ValueNullable = false
+
+	if TypeEqual(nullable, nonNullable) {
+		t.Fatal("run-end encoded types with different value nullability compared equal")
+	}
+	if TypeEqual(nonNullable, nullable) {
+		t.Fatal("run-end encoded type equality was not symmetric")
+	}
+	if nullable.Fingerprint() == nonNullable.Fingerprint() {
+		t.Fatal("run-end encoded types with different value nullability had identical fingerprints")
 	}
 }

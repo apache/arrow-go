@@ -56,6 +56,15 @@ type Decoder[T parquet.ColumnTypes] interface {
 }
 
 type BooleanDecoder = Decoder[bool]
+
+// BooleanBitmapDecoder decodes boolean values directly into a packed bitmap.
+type BooleanBitmapDecoder interface {
+	BooleanDecoder
+	DecodeToBitmap(out []byte, outOffset int64, length int) (int, error)
+	DecodeSpacedToBitmap(out []byte, outOffset int64, length, nullCount int,
+		validBits []byte, validBitsOffset int64) (int, error)
+}
+
 type Int32Decoder = Decoder[int32]
 type Int64Decoder = Decoder[int64]
 type Int96Decoder = Decoder[parquet.Int96]
@@ -142,8 +151,24 @@ func (enc *typedDictEncoder[T]) WriteDict(out []byte) {
 }
 
 func (enc *typedDictEncoder[T]) Put(in []T) {
-	for _, val := range in {
-		enc.dictEncoder.Put(val)
+	if len(in) == 0 {
+		return
+	}
+
+	curPos := len(enc.idxValues)
+	enc.expandBuffer(curPos + len(in))
+	enc.idxValues = enc.idxValues[:curPos+len(in)]
+	typedMemo := enc.memo.(TypedMemoTable[T])
+	for i, val := range in {
+		memoIdx, found, err := typedMemo.InsertOrGet(val)
+		if err != nil {
+			panic(err)
+		}
+		if !found {
+			enc.dictEncodedSize += int(unsafe.Sizeof(T(0)))
+		}
+		enc.idxValues[curPos+i] = int32(memoIdx)
+		enc.recordDictionaryReference(int32(memoIdx))
 	}
 	enc.AddRawSize(int64(len(in)) * int64(unsafe.Sizeof(T(0))))
 }
@@ -434,7 +459,7 @@ func (enc *DictInt96Encoder) WriteDict(out []byte) {
 // Put encodes the values passed in, adding to the index as needed
 func (enc *DictInt96Encoder) Put(in []parquet.Int96) {
 	for _, v := range in {
-		memoIdx, found, err := enc.memo.GetOrInsert(v)
+		memoIdx, found, err := enc.memo.GetOrInsert(v[:])
 		if err != nil {
 			panic(err)
 		}
@@ -461,6 +486,10 @@ func (enc *DictInt96Encoder) PutSpaced(in []parquet.Int96, validBits []byte, val
 // be called on an empty encoder.
 func (enc *DictInt96Encoder) PutDictionary(arrow.Array) error {
 	return fmt.Errorf("%w: direct PutDictionary to Int96", arrow.ErrNotImplemented)
+}
+
+func (enc *DictInt96Encoder) NormalizeDict(arrow.Array) (arrow.Array, error) {
+	return nil, fmt.Errorf("%w: direct PutDictionary to Int96", arrow.ErrNotImplemented)
 }
 
 // FallBackTo drains buffered indices through the dictionary into the

@@ -194,6 +194,39 @@ func TestCSVWriter(t *testing.T) {
 	}
 }
 
+func TestCSVWriterWritesMultipleRecordBatches(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "label", Type: arrow.BinaryTypes.String},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	ids := builder.Field(0).(*array.Int32Builder)
+	labels := builder.Field(1).(*array.StringBuilder)
+	ids.AppendValues([]int32{1, 2}, nil)
+	labels.AppendValues([]string{"first, row", "line\nbreak"}, nil)
+	first := builder.NewRecordBatch()
+	defer first.Release()
+
+	ids.Append(3)
+	labels.Append("last")
+	second := builder.NewRecordBatch()
+	defer second.Release()
+
+	var output bytes.Buffer
+	writer := csv.NewWriter(&output, schema, csv.WithHeader(true))
+	require.NoError(t, writer.Write(first))
+	require.NoError(t, writer.Write(second))
+	require.NoError(t, writer.Flush())
+	require.NoError(t, writer.Error())
+
+	assert.Equal(t, "id,label\n1,\"first, row\"\n2,\"line\nbreak\"\n3,last\n", output.String())
+}
+
 func genTimestamps(unit arrow.TimeUnit) []arrow.Timestamp {
 	out := []arrow.Timestamp{}
 	for _, input := range []string{"2014-07-28 15:04:05", "2016-09-08 15:04:05", "2021-09-18 15:04:05"} {
@@ -461,6 +494,65 @@ func TestCSVWriterPreservesDecimalScaleAndPrecision(t *testing.T) {
 	require.NoError(t, writer.Write(record))
 	require.NoError(t, writer.Flush())
 	assert.Equal(t, value128.ToString(type128.Scale)+","+value256.ToString(type256.Scale)+"\n", output.String())
+}
+
+func TestCustomTypeConverterValidatesRowCount(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	builder.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2}, nil)
+	record := builder.NewRecordBatch()
+	builder.Release()
+	defer record.Release()
+
+	for name, result := range map[string][]string{
+		"too few":  {"one"},
+		"too many": {"one", "two", "three"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			writer := csv.NewWriter(io.Discard, schema, csv.WithCustomTypeConverter(func(arrow.DataType, arrow.Array) ([]string, bool) {
+				return result, true
+			}))
+			require.ErrorIs(t, writer.Write(record), arrow.ErrInvalid)
+		})
+	}
+}
+
+func TestCSVWriterSupportsReusedCustomTypeConverterResult(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "first", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "second", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+	builder.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2}, nil)
+	builder.Field(1).(*array.Int32Builder).AppendValues([]int32{10, 20}, nil)
+	record := builder.NewRecordBatch()
+	defer record.Release()
+
+	result := make([]string, 2)
+	var output bytes.Buffer
+	writer := csv.NewWriter(&output, schema, csv.WithCustomTypeConverter(func(typ arrow.DataType, col arrow.Array) ([]string, bool) {
+		if typ.ID() != arrow.INT32 {
+			return nil, false
+		}
+
+		arr := col.(*array.Int32)
+		for i := 0; i < arr.Len(); i++ {
+			result[i] = fmt.Sprintf("%d", arr.Value(i))
+		}
+		return result, true
+	}))
+
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Flush())
+	require.NoError(t, writer.Error())
+	assert.Equal(t, "1,10\n2,20\n", output.String())
 }
 
 // TestParquetTestingCSVWriter tests that the CSV writer successfully convert arrow/parquet-testing files to CSV

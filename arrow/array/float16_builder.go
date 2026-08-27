@@ -91,9 +91,15 @@ func (b *Float16Builder) AppendEmptyValue() {
 }
 
 func (b *Float16Builder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.Float16Traits.BytesRequired(1), n)
 }
 
 func (b *Float16Builder) UnsafeAppendBoolToBitmap(isValid bool) {

@@ -1019,6 +1019,40 @@ func TestTableReaderSkipsEmptyChunks(t *testing.T) {
 	}
 }
 
+func TestTableReaderRetainedRecordBatchSurvivesNext(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	builder := array.NewInt32Builder(mem)
+	builder.AppendValues([]int32{1, 2, 3, 4}, nil)
+	values := builder.NewInt32Array()
+	builder.Release()
+	defer values.Release()
+
+	field := arrow.Field{Name: "values", Type: arrow.PrimitiveTypes.Int32}
+	column := arrow.NewColumnFromArr(field, values)
+	defer column.Release()
+	table := array.NewTable(arrow.NewSchema([]arrow.Field{field}, nil), []arrow.Column{column}, -1)
+	defer table.Release()
+
+	reader := array.NewTableReader(table, 2)
+	defer reader.Release()
+	if !reader.Next() {
+		t.Fatal("expected the first record batch")
+	}
+	first := reader.RecordBatch()
+	first.Retain()
+	defer first.Release()
+
+	if !reader.Next() {
+		t.Fatal("expected the second record batch")
+	}
+	got := first.Column(0).(*array.Int32).Value(0)
+	if got != 1 {
+		t.Fatalf("first record batch changed after Next: got=%d, want=1", got)
+	}
+}
+
 func TestTableToString(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)

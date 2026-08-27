@@ -436,9 +436,11 @@ func (w *recordEncoder) compressBodyBuffers(p *Payload) error {
 
 		n, err := codec.Write(p.body[idx].Bytes())
 		if err != nil {
+			buf.Release()
 			return err
 		}
 		if err := codec.Close(); err != nil {
+			buf.Release()
 			return err
 		}
 
@@ -471,7 +473,7 @@ func (w *recordEncoder) compressBodyBuffers(p *Payload) error {
 	var (
 		wg          sync.WaitGroup
 		ch          = make(chan int)
-		errch       = make(chan error)
+		errch       = make(chan error, 1)
 		ctx, cancel = context.WithCancel(context.Background())
 	)
 	defer cancel()
@@ -490,7 +492,10 @@ func (w *recordEncoder) compressBodyBuffers(p *Payload) error {
 					}
 
 					if err := compress(idx, codec); err != nil {
-						errch <- err
+						select {
+						case errch <- err:
+						default:
+						}
 						cancel()
 						return
 					}
@@ -502,15 +507,24 @@ func (w *recordEncoder) compressBodyBuffers(p *Payload) error {
 		}(workerID)
 	}
 
+send:
 	for idx := range p.body {
-		ch <- idx
+		select {
+		case ch <- idx:
+		case <-ctx.Done():
+			break send
+		}
 	}
 
 	close(ch)
 	wg.Wait()
-	close(errch)
 
-	return <-errch
+	select {
+	case err := <-errch:
+		return err
+	default:
+		return nil
+	}
 }
 
 func (w *recordEncoder) encode(p *Payload, rec arrow.RecordBatch) error {
@@ -528,7 +542,9 @@ func (w *recordEncoder) encode(p *Payload, rec arrow.RecordBatch) error {
 			return fmt.Errorf("%w: minSpaceSavings not in range [0,1]. Provided %.05f",
 				arrow.ErrInvalid, w.minSpaceSavings)
 		}
-		w.compressBodyBuffers(p)
+		if err := w.compressBodyBuffers(p); err != nil {
+			return err
+		}
 	}
 
 	// position for the start of a buffer relative to the passed frame of reference.
@@ -906,29 +922,14 @@ func (w *recordEncoder) getZeroBasedValueOffsets(arr arrow.Array) *memory.Buffer
 
 	dataTypeWidth := arr.DataType().Layout().Buffers[1].ByteWidth
 
-	// if we have a non-zero offset, then the value offsets do not start at
-	// zero. we must a) create a new offsets array with shifted offsets and
-	// b) slice the values array accordingly
-	hasNonZeroOffset := data.Offset() != 0
-
-	// or if there are more value offsets than values (the array has been sliced)
-	// we need to trim off the trailing offsets
-	hasMoreOffsetsThanValues := offsetBytesNeeded < voffsets.Len()
-
-	// or if the offsets do not start from the zero index, we need to shift them
-	// and slice the values array
 	var firstOffset int64
 	if dataTypeWidth == 8 {
-		firstOffset = arrow.Int64Traits.CastFromBytes(voffsets.Bytes())[0]
+		firstOffset = arrow.Int64Traits.CastFromBytes(voffsets.Bytes())[data.Offset()]
 	} else {
-		firstOffset = int64(arrow.Int32Traits.CastFromBytes(voffsets.Bytes())[0])
+		firstOffset = int64(arrow.Int32Traits.CastFromBytes(voffsets.Bytes())[data.Offset()])
 	}
-	offsetsDoNotStartFromZero := firstOffset != 0
 
-	// determine whether the offsets array should be shifted
-	needsTruncateAndShift := hasNonZeroOffset || hasMoreOffsetsThanValues || offsetsDoNotStartFromZero
-
-	if needsTruncateAndShift {
+	if firstOffset != 0 {
 		shiftedOffsets := memory.NewResizableBuffer(w.mem)
 		shiftedOffsets.Resize(offsetBytesNeeded)
 
@@ -954,6 +955,8 @@ func (w *recordEncoder) getZeroBasedValueOffsets(arr arrow.Array) *memory.Buffer
 		}
 
 		voffsets = shiftedOffsets
+	} else if data.Offset() != 0 || offsetBytesNeeded < voffsets.Len() {
+		voffsets = memory.SliceBuffer(voffsets, data.Offset()*dataTypeWidth, offsetBytesNeeded)
 	} else {
 		voffsets.Retain()
 	}
@@ -1137,6 +1140,8 @@ func needTruncate(offset int64, buf *memory.Buffer, minLength int64) bool {
 // method after it is no longer needed.
 func GetRecordBatchPayload(batch arrow.RecordBatch, opts ...Option) (Payload, error) {
 	cfg := newConfig(opts...)
+	compressors := make([]compressor, cfg.compressNP)
+	copy(compressors, cfg.compressors)
 	var (
 		data = Payload{msg: MessageRecordBatch}
 		enc  = newRecordEncoder(
@@ -1147,12 +1152,13 @@ func GetRecordBatchPayload(batch arrow.RecordBatch, opts ...Option) (Payload, er
 			cfg.codec,
 			cfg.compressNP,
 			cfg.minSpaceSavings,
-			make([]compressor, cfg.compressNP),
+			compressors,
 		)
 	)
 
 	err := enc.Encode(&data, batch)
 	if err != nil {
+		data.Release()
 		return Payload{}, err
 	}
 

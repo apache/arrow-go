@@ -1107,20 +1107,20 @@ func makeUnionRecords() []arrow.RecordBatch {
 
 func makeRunEndEncodedRecords() []arrow.RecordBatch {
 	mem := memory.NewGoAllocator()
+	ree32Type := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32)
+	ree32Type.ValueNullable = false
 	schema := arrow.NewSchema([]arrow.Field{
 		{Name: "ree16", Type: arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int16, arrow.BinaryTypes.String)},
-		{Name: "ree32", Type: arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32)},
+		{Name: "ree32", Type: ree32Type},
 		{Name: "ree64", Type: arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int64, arrow.BinaryTypes.Binary)},
 	}, nil)
-
-	schema.Field(1).Type.(*arrow.RunEndEncodedType).ValueNullable = false
 	isValid := []bool{true, false, true, false, true}
 	chunks := [][]arrow.Array{
 		{
 			runEndEncodedOf(
 				arrayOf(mem, []int16{5, 10, 20, 1020, 1120}, nil),
 				arrayOf(mem, []string{"foo", "bar", "baz", "foo", ""}, isValid), 1100, 20),
-			runEndEncodedOf(
+			runEndEncodedOfType(ree32Type,
 				arrayOf(mem, []int32{100, 200, 800, 1000, 1100}, nil),
 				arrayOf(mem, []int32{-1, -2, -3, -4, -5}, nil), 1100, 0),
 			runEndEncodedOf(
@@ -1131,7 +1131,7 @@ func makeRunEndEncodedRecords() []arrow.RecordBatch {
 			runEndEncodedOf(
 				arrayOf(mem, []int16{110, 160, 170, 1070, 1120}, nil),
 				arrayOf(mem, []string{"super", "dee", "", "duper", "doo"}, isValid), 1100, 20),
-			runEndEncodedOf(
+			runEndEncodedOfType(ree32Type,
 				arrayOf(mem, []int32{100, 120, 710, 810, 1100}, nil),
 				arrayOf(mem, []int32{-1, -2, -3, -4, -5}, nil), 1100, 0),
 			runEndEncodedOf(
@@ -1662,6 +1662,12 @@ func runEndEncodedOf(runEnds, values arrow.Array, logicalLen, offset int) arrow.
 	defer runEnds.Release()
 	defer values.Release()
 	return array.NewRunEndEncodedArray(runEnds, values, logicalLen, offset)
+}
+
+func runEndEncodedOfType(dt *arrow.RunEndEncodedType, runEnds, values arrow.Array, logicalLen, offset int) arrow.Array {
+	defer runEnds.Release()
+	defer values.Release()
+	return array.NewRunEndEncodedArrayWithType(dt, runEnds, values, logicalLen, offset)
 }
 
 func buildArray(bldr array.Builder, data arrow.Array) {

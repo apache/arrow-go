@@ -430,6 +430,29 @@ func TestDictionary(t *testing.T) {
 	ipcReader.Release()
 }
 
+func TestFileWriterRejectsWriteAfterClose(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer pool.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "field", Type: &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.BinaryTypes.String,
+	}}}, nil)
+	bldr := array.NewBuilder(pool, schema.Field(0).Type)
+	defer bldr.Release()
+	require.NoError(t, bldr.UnmarshalJSON([]byte(`["value"]`)))
+	arr := bldr.NewArray()
+	defer arr.Release()
+	record := array.NewRecordBatch(schema, []arrow.Array{arr}, 1)
+	defer record.Release()
+
+	writer, err := ipc.NewFileWriter(&bytes.Buffer{}, ipc.WithSchema(schema), ipc.WithAllocator(pool))
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+	require.ErrorContains(t, writer.Write(record), "already closed")
+}
+
 // ARROW-18326
 func TestDictionaryDeltas(t *testing.T) {
 	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())

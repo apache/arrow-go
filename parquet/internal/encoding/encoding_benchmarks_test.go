@@ -17,6 +17,7 @@
 package encoding_test
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"testing"
@@ -423,6 +424,84 @@ func BenchmarkEncodeDictByteArray(b *testing.B) {
 	}
 }
 
+func benchmarkEncodeDictNumeric[T int32 | int64 | float32 | float64](b *testing.B, typ parquet.Type, col *schema.Column, valueSize int64) {
+	const (
+		nunique = 100
+		nvalues = 65535
+	)
+
+	values := make([]T, nvalues)
+	for idx := range values {
+		values[idx] = T(idx % nunique)
+	}
+
+	b.SetBytes(int64(len(values)) * valueSize)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		enc := encoding.NewEncoder(typ, parquet.Encodings.PlainDict, true, col, memory.DefaultAllocator).(encoding.Encoder[T])
+		enc.Put(values)
+		buf, err := enc.FlushValues()
+		if err != nil {
+			b.Fatal(err)
+		}
+		buf.Release()
+		enc.Release()
+	}
+}
+
+func BenchmarkEncodeDictNumeric(b *testing.B) {
+	b.Run("int32", func(b *testing.B) {
+		col := schema.NewColumn(schema.NewInt32Node("int32", parquet.Repetitions.Required, -1), 0, 0)
+		benchmarkEncodeDictNumeric[int32](b, parquet.Types.Int32, col, int64(arrow.Int32SizeBytes))
+	})
+	b.Run("int64", func(b *testing.B) {
+		col := schema.NewColumn(schema.NewInt64Node("int64", parquet.Repetitions.Required, -1), 0, 0)
+		benchmarkEncodeDictNumeric[int64](b, parquet.Types.Int64, col, int64(arrow.Int64SizeBytes))
+	})
+	b.Run("float32", func(b *testing.B) {
+		col := schema.NewColumn(schema.NewFloat32Node("float32", parquet.Repetitions.Required, -1), 0, 0)
+		benchmarkEncodeDictNumeric[float32](b, parquet.Types.Float, col, int64(arrow.Float32SizeBytes))
+	})
+	b.Run("float64", func(b *testing.B) {
+		col := schema.NewColumn(schema.NewFloat64Node("float64", parquet.Repetitions.Required, -1), 0, 0)
+		benchmarkEncodeDictNumeric[float64](b, parquet.Types.Double, col, int64(arrow.Float64SizeBytes))
+	})
+}
+
+func BenchmarkEncodePlainByteArray(b *testing.B) {
+	const nvalues = 1 << 20
+	validBits := bytes.Repeat([]byte{0xff}, nvalues/8)
+
+	for _, width := range []int{4, 16, 64} {
+		value := bytes.Repeat([]byte{'a'}, width)
+		values := make([]parquet.ByteArray, nvalues)
+		for i := range values {
+			values[i] = value
+		}
+
+		for _, tc := range []struct {
+			name string
+			put  func(encoding.ByteArrayEncoder)
+		}{
+			{name: "Put", put: func(enc encoding.ByteArrayEncoder) { enc.Put(values) }},
+			{name: "PutSpaced", put: func(enc encoding.ByteArrayEncoder) { enc.PutSpaced(values, validBits, 0) }},
+		} {
+			b.Run(fmt.Sprintf("width=%d/%s", width, tc.name), func(b *testing.B) {
+				b.SetBytes(int64(nvalues * (width + arrow.Uint32SizeBytes)))
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					enc := encoding.NewEncoder(parquet.Types.ByteArray, parquet.Encodings.Plain, false, nil, memory.DefaultAllocator).(encoding.ByteArrayEncoder)
+					tc.put(enc)
+					if got, want := enc.EstimatedDataEncodedSize(), int64(nvalues*(width+arrow.Uint32SizeBytes)); got != want {
+						b.Fatalf("encoded size = %d, want %d", got, want)
+					}
+					enc.Release()
+				}
+			})
+		}
+	}
+}
+
 func BenchmarkDecodeDictByteArray(b *testing.B) {
 	const (
 		nunique = 100
@@ -656,13 +735,49 @@ func BenchmarkDeltaBinaryPackedEncodingInt32(b *testing.B) {
 }
 
 func BenchmarkDeltaBinaryPackedDecodingInt32(b *testing.B) {
-	for sz := MINSIZE; sz < MAXSIZE+1; sz *= 2 {
-		b.Run(fmt.Sprintf("len %d", sz), func(b *testing.B) {
-			output := make([]int32, sz)
-			values := make([]int32, sz)
+	patterns := []struct {
+		name   string
+		values func(int) []int32
+	}{
+		{"constant", func(size int) []int32 {
+			values := make([]int32, size)
 			for idx := range values {
 				values[idx] = 64
 			}
+			return values
+		}},
+		{"varying-small-deltas", func(size int) []int32 {
+			values := make([]int32, size)
+			for idx := 1; idx < size; idx++ {
+				values[idx] = values[idx-1] + int32(idx%8)
+			}
+			return values
+		}},
+		{"alternating-wide-deltas", func(size int) []int32 {
+			values := make([]int32, size)
+			for idx := 1; idx < size; idx++ {
+				if idx%2 == 0 {
+					values[idx] = values[idx-1] + 1_000_000
+				} else {
+					values[idx] = values[idx-1] - 1_000_000
+				}
+			}
+			return values
+		}},
+	}
+
+	for _, pattern := range patterns {
+		b.Run(pattern.name, func(b *testing.B) {
+			benchmarkDeltaBinaryPackedDecodingInt32(b, pattern.values)
+		})
+	}
+}
+
+func benchmarkDeltaBinaryPackedDecodingInt32(b *testing.B, makeValues func(int) []int32) {
+	for sz := MINSIZE; sz < MAXSIZE+1; sz *= 2 {
+		b.Run(fmt.Sprintf("len-%d", sz), func(b *testing.B) {
+			output := make([]int32, sz)
+			values := makeValues(sz)
 			encoder := encoding.NewEncoder(parquet.Types.Int32, parquet.Encodings.DeltaBinaryPacked,
 				false, nil, memory.DefaultAllocator).(encoding.Int32Encoder)
 			encoder.Put(values)
@@ -672,9 +787,61 @@ func BenchmarkDeltaBinaryPackedDecodingInt32(b *testing.B) {
 			decoder := encoding.NewDecoder(parquet.Types.Int32, parquet.Encodings.DeltaBinaryPacked, nil, memory.DefaultAllocator)
 			b.ResetTimer()
 			b.SetBytes(int64(len(values) * arrow.Int32SizeBytes))
+			b.ReportAllocs()
 			for n := 0; n < b.N; n++ {
 				decoder.SetData(sz, buf.Bytes())
 				decoder.(encoding.Int32Decoder).Decode(output)
+			}
+		})
+	}
+}
+
+func BenchmarkDeltaBinaryPackedDecodingInt64(b *testing.B) {
+	patterns := []struct {
+		name   string
+		values func(int) []int64
+	}{
+		{"varying-timestamp-deltas", func(size int) []int64 {
+			values := make([]int64, size)
+			for idx := 1; idx < size; idx++ {
+				values[idx] = values[idx-1] + 1_000_000 + int64(idx%1024)
+			}
+			return values
+		}},
+		{"alternating-wide-deltas", func(size int) []int64 {
+			values := make([]int64, size)
+			for idx := 1; idx < size; idx++ {
+				if idx%2 == 0 {
+					values[idx] = values[idx-1] + 1_000_000_000_000
+				} else {
+					values[idx] = values[idx-1] - 1_000_000_000_000
+				}
+			}
+			return values
+		}},
+	}
+
+	for _, pattern := range patterns {
+		b.Run(pattern.name, func(b *testing.B) {
+			for sz := MINSIZE; sz < MAXSIZE+1; sz *= 2 {
+				b.Run(fmt.Sprintf("len-%d", sz), func(b *testing.B) {
+					output := make([]int64, sz)
+					values := pattern.values(sz)
+					encoder := encoding.NewEncoder(parquet.Types.Int64, parquet.Encodings.DeltaBinaryPacked,
+						false, nil, memory.DefaultAllocator).(encoding.Int64Encoder)
+					encoder.Put(values)
+					buf, _ := encoder.FlushValues()
+					defer buf.Release()
+
+					decoder := encoding.NewDecoder(parquet.Types.Int64, parquet.Encodings.DeltaBinaryPacked, nil, memory.DefaultAllocator)
+					b.ResetTimer()
+					b.SetBytes(int64(len(values) * arrow.Int64SizeBytes))
+					b.ReportAllocs()
+					for n := 0; n < b.N; n++ {
+						decoder.SetData(sz, buf.Bytes())
+						decoder.(encoding.Int64Decoder).Decode(output)
+					}
+				})
 			}
 		})
 	}
