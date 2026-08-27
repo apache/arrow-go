@@ -246,10 +246,14 @@ func propagateNulls(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ArraySp
 		return fmt.Errorf("%w: can only propagate nulls into pre-allocated memory when output offset is non-zero", arrow.ErrInvalid)
 	}
 
-	var (
+	var scratch [8]*exec.ArraySpan
+	arrsWithNulls := scratch[:0]
+	if len(batch.Values) > len(scratch) {
 		arrsWithNulls = make([]*exec.ArraySpan, 0, len(batch.Values))
-		isAllNull     bool
-		prealloc      = out.Buffers[0].Buf != nil
+	}
+	var (
+		isAllNull bool
+		prealloc  = out.Buffers[0].Buf != nil
 	)
 
 	for i := range batch.Values {
