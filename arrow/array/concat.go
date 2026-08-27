@@ -861,37 +861,44 @@ func updateRuns[T int16 | int32 | int64](inputData []arrow.ArrayData, inputBuffe
 	// can fold the end and beginning of each array we're concatenating
 	// into a single run
 	pos := 0
+	logicalLen := T(0)
 	for i, buf := range inputBuffers {
 		if buf.Len() == 0 {
 			continue
 		}
 		src := arrow.GetData[T](buf.Bytes())
+		logicalLen += T(inputData[i].Len())
 		if pos == 0 {
 			pos += copy(output, src)
 			// normalize the first run ends by subtracting the offset
 			for j := 0; j < pos; j++ {
 				output[j] -= T(inputData[i].Offset())
 			}
+		} else {
+			lastEnd := output[pos-1]
+			// we can check the last runEnd in the src and add it to the
+			// last value that we're adjusting them all by to see if we
+			// are going to overflow
+			if uint64(lastEnd)+uint64(int(src[len(src)-1])-inputData[i].Offset()) > uint64(maxOf[T]()) {
+				return fmt.Errorf("%w: overflow in run-length-encoded run ends concat", arrow.ErrInvalid)
+			}
 
-			continue
+			// adjust all of the run ends by first normalizing them (e - data[i].offset)
+			// then adding the previous value we ended on. Since the offset
+			// is a logical length offset it should be accurate to just subtract
+			// it from each value.
+			for j, e := range src {
+				output[pos+j] = lastEnd + T(int(e)-inputData[i].Offset())
+			}
+			pos += len(src)
 		}
 
-		lastEnd := output[pos-1]
-		// we can check the last runEnd in the src and add it to the
-		// last value that we're adjusting them all by to see if we
-		// are going to overflow
-		if uint64(lastEnd)+uint64(int(src[len(src)-1])-inputData[i].Offset()) > uint64(maxOf[T]()) {
-			return fmt.Errorf("%w: overflow in run-length-encoded run ends concat", arrow.ErrInvalid)
+		// a slice can end in the middle of a run, so this input's final physical run end
+		// can reach past its logical length; clamp it to keep the run ends within bounds and
+		// stop the overshoot from shifting every following array's run ends.
+		if output[pos-1] > logicalLen {
+			output[pos-1] = logicalLen
 		}
-
-		// adjust all of the run ends by first normalizing them (e - data[i].offset)
-		// then adding the previous value we ended on. Since the offset
-		// is a logical length offset it should be accurate to just subtract
-		// it from each value.
-		for j, e := range src {
-			output[pos+j] = lastEnd + T(int(e)-inputData[i].Offset())
-		}
-		pos += len(src)
 	}
 	return nil
 }

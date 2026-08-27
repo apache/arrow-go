@@ -819,6 +819,49 @@ func TestConcatRunEndEncoded(t *testing.T) {
 	}
 }
 
+func TestConcatRunEndEncodedMidRunSlice(t *testing.T) {
+	// A run-end encoded array sliced in the middle of a run keeps that run's physical end, which
+	// reaches past the slice's logical length. Concatenating it must clamp that final run end,
+	// otherwise the overshoot shifts every following array's run ends and silently corrupts values.
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewRunEndEncodedBuilder(mem, arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int64)
+	defer bldr.Release()
+	valBldr := bldr.ValueBuilder().(*array.Int64Builder)
+
+	// runs: 100x3, 200x2, 300x3 -> run ends [3, 5, 8], logical length 8
+	bldr.Append(3)
+	valBldr.Append(100)
+	bldr.Append(2)
+	valBldr.Append(200)
+	bldr.Append(3)
+	valBldr.Append(300)
+	full := bldr.NewArray()
+	defer full.Release()
+
+	// slice [1, 4): logical [100, 100, 200], length 3, ending in the middle of the "200" run
+	sliced := array.NewSlice(full, 1, 4)
+	defer sliced.Release()
+
+	bldr.Append(2)
+	valBldr.Append(700)
+	tail := bldr.NewArray()
+	defer tail.Release()
+
+	result, err := array.Concatenate([]arrow.Array{sliced, tail}, mem)
+	require.NoError(t, err)
+	defer result.Release()
+
+	rle := result.(*array.RunEndEncoded)
+	values := rle.Values().(*array.Int64)
+	got := make([]int64, rle.Len())
+	for i := range got {
+		got[i] = values.Value(rle.GetPhysicalIndex(i))
+	}
+	assert.Equal(t, []int64{100, 100, 200, 700, 700}, got)
+}
+
 func TestConcatAlmostOverflowRunEndEncoding(t *testing.T) {
 	tests := []struct {
 		offsetType arrow.DataType
