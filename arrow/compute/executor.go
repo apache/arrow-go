@@ -781,42 +781,61 @@ func iterateExecSpans(batch *ExecBatch, maxChunkSize int64, promoteIfAllScalar b
 	}
 
 	var (
-		args           = batch.Values
-		haveChunked    bool
-		chunkIdxes           = make([]int, len(args))
-		valuePositions       = make([]int64, len(args))
-		valueOffsets         = make([]int64, len(args))
-		pos, length    int64 = 0, batch.Len
+		args              = batch.Values
+		pos, length int64 = 0, batch.Len
 	)
 	haveAllScalars = checkIfAllScalar(batch)
 	maxChunkSize = exec.Min(length, maxChunkSize)
 
 	span := exec.ExecSpan{Values: make([]exec.ExecValue, len(args)), Len: 0}
+	haveChunked := false
 	for i, a := range args {
 		switch arg := a.(type) {
 		case *ScalarDatum:
 			span.Values[i].Scalar = arg.Value
 		case *ArrayDatum:
 			span.Values[i].Array.SetMembers(arg.Value)
-			valueOffsets[i] = int64(arg.Value.Offset())
 		case *ChunkedDatum:
+			haveChunked = true
 			// populate from first chunk
 			carr := arg.Value
 			if len(carr.Chunks()) > 0 {
 				arr := carr.Chunk(0).Data()
 				span.Values[i].Array.SetMembers(arr)
-				valueOffsets[i] = int64(arr.Offset())
 			} else {
 				// fill as zero len
 				exec.FillZeroLength(carr.DataType(), &span.Values[i].Array)
 			}
-			haveChunked = true
+		}
+	}
+
+	singleSpan := !haveChunked && length > 0 && length <= maxChunkSize
+	var valueOffsets []int64
+	if !singleSpan {
+		valueOffsets = make([]int64, len(args))
+		for i := range args {
+			valueOffsets[i] = span.Values[i].Array.Offset
 		}
 	}
 
 	if haveAllScalars && promoteIfAllScalar {
 		exec.PromoteExecSpanScalars(span)
 	}
+
+	if singleSpan {
+		span.Len = length
+		returned := false
+		return haveAllScalars, func() (exec.ExecSpan, int64, bool) {
+			if returned {
+				return exec.ExecSpan{}, length, false
+			}
+			returned = true
+			return span, length, true
+		}, nil
+	}
+
+	chunkIdxes := make([]int, len(args))
+	valuePositions := make([]int64, len(args))
 
 	nextChunkSpan := func(iterSz int64, span exec.ExecSpan) int64 {
 		for i := 0; i < len(args) && iterSz > 0; i++ {
