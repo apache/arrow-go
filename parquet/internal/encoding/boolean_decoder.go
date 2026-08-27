@@ -24,6 +24,7 @@ import (
 	"io"
 
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
+	"github.com/apache/arrow-go/v18/internal/bitutils"
 	shared_utils "github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/utils"
@@ -169,7 +170,8 @@ func (dec *PlainBooleanDecoder) DecodeToBitmap(out []byte, outOffset int64, leng
 			dstSlice[fullBytes] = (dstSlice[fullBytes] &^ mask) | (lastByte & mask)
 		}
 
-		dec.data = dec.data[bytesToCopy:]
+		dec.data = dec.data[fullBytes:]
+		dec.bitOffset = trailingBits
 		dec.nvals -= max
 		return max, nil
 	}
@@ -203,6 +205,107 @@ func (dec *PlainBooleanDecoder) DecodeSpaced(out []bool, nullCount int, validBit
 		return spacedExpand(out, nullCount, validBits, validBitsOffset), nil
 	}
 	return dec.Decode(out)
+}
+
+func copyBitmapChunk(buf []byte, srcOffset, dstOffset, length int) {
+	srcByte, srcBit := srcOffset/8, srcOffset%8
+	value := uint16(buf[srcByte]) >> srcBit
+	if srcBit+length > 8 {
+		value |= uint16(buf[srcByte+1]) << (8 - srcBit)
+	}
+	value &= uint16(1<<length) - 1
+
+	dstByte, dstBit := dstOffset/8, dstOffset%8
+	first := min(length, 8-dstBit)
+	firstMask := byte((1<<first)-1) << dstBit
+	buf[dstByte] = (buf[dstByte] &^ firstMask) | (byte(value) << dstBit & firstMask)
+	if first < length {
+		remaining := length - first
+		secondMask := byte((1 << remaining) - 1)
+		buf[dstByte+1] = (buf[dstByte+1] &^ secondMask) | (byte(value>>first) & secondMask)
+	}
+}
+
+func copyBitmapWithinBuffer(buf []byte, srcOffset, dstOffset, length int) {
+	if length == 0 || srcOffset == dstOffset {
+		return
+	}
+
+	if dstOffset < srcOffset {
+		for copied := 0; copied < length; {
+			n := min(length-copied, 8)
+			copyBitmapChunk(buf, srcOffset+copied, dstOffset+copied, n)
+			copied += n
+		}
+		return
+	}
+
+	for copied := length; copied > 0; {
+		n := min(copied, 8)
+		copied -= n
+		copyBitmapChunk(buf, srcOffset+copied, dstOffset+copied, n)
+	}
+}
+
+func expandSpacedBitmapPerBit(out []byte, outOffset int64, length, nullCount int,
+	validBits []byte, validBitsOffset int64) {
+	physicalIndex := 0
+	physicalOffset := int(outOffset) + nullCount
+	for logicalIndex := 0; logicalIndex < length; logicalIndex++ {
+		destination := int(outOffset) + logicalIndex
+		if bitutil.BitIsSet(validBits, int(validBitsOffset)+logicalIndex) {
+			value := bitutil.BitIsSet(out, physicalOffset+physicalIndex)
+			bitutil.SetBitTo(out, destination, value)
+			physicalIndex++
+		}
+	}
+}
+
+func decodeSpacedToBitmap(dec BooleanBitmapDecoder, out []byte, outOffset int64,
+	length, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
+	if nullCount == 0 {
+		return dec.DecodeToBitmap(out, outOffset, length)
+	}
+
+	valuesToRead := length - nullCount
+	valuesRead, err := dec.DecodeToBitmap(out, outOffset+int64(nullCount), valuesToRead)
+	if err != nil {
+		return valuesRead, err
+	}
+	if valuesRead != valuesToRead {
+		return valuesRead, errors.New("parquet: boolean decoder: number of values / definition levels read did not match")
+	}
+	perBitThreshold := length / 8
+	if length%8 != 0 {
+		perBitThreshold++
+	}
+	if nullCount >= perBitThreshold {
+		expandSpacedBitmapPerBit(out, outOffset, length, nullCount, validBits, validBitsOffset)
+		return length, nil
+	}
+
+	// Expand the packed physical values into their logical positions.
+	// Decoding after the null slots means each destination run is at or before
+	// its source run, so bitmap copies remain safe while the buffers overlap.
+	physicalIndex := int64(0)
+	runs := bitutils.NewSetBitRunReader(validBits, validBitsOffset, int64(length))
+	for {
+		run := runs.NextRun()
+		if run.Length == 0 {
+			break
+		}
+
+		copyBitmapWithinBuffer(out,
+			int(outOffset+int64(nullCount)+physicalIndex),
+			int(outOffset+run.Pos), int(run.Length))
+		physicalIndex += run.Length
+	}
+	return length, nil
+}
+
+func (dec *PlainBooleanDecoder) DecodeSpacedToBitmap(out []byte, outOffset int64,
+	length, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
+	return decodeSpacedToBitmap(dec, out, outOffset, length, nullCount, validBits, validBitsOffset)
 }
 
 type RleBooleanDecoder struct {
@@ -276,6 +379,43 @@ func (dec *RleBooleanDecoder) Decode(out []bool) (int, error) {
 	return max, nil
 }
 
+func (dec *RleBooleanDecoder) DecodeToBitmap(out []byte, outOffset int64, length int) (int, error) {
+	max := shared_utils.Min(length, dec.nvals)
+	writer := bitutil.NewBitmapWriter(out, int(outOffset), max)
+
+	var (
+		buf [1024]uint64
+		n   = max
+	)
+	for n > 0 {
+		batch := shared_utils.Min(len(buf), n)
+		decoded, err := dec.rleDec.GetBatch(buf[:batch])
+		for _, value := range buf[:decoded] {
+			if value != 0 {
+				writer.Set()
+			} else {
+				writer.Clear()
+			}
+			writer.Next()
+		}
+		n -= decoded
+		if err != nil {
+			writer.Finish()
+			dec.nvals -= max - n
+			return max - n, err
+		}
+		if decoded != batch {
+			writer.Finish()
+			dec.nvals -= max - n
+			return max - n, io.ErrUnexpectedEOF
+		}
+	}
+
+	writer.Finish()
+	dec.nvals -= max
+	return max, nil
+}
+
 func (dec *RleBooleanDecoder) DecodeSpaced(out []bool, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
 	if nullCount > 0 {
 		toRead := len(out) - nullCount
@@ -289,4 +429,9 @@ func (dec *RleBooleanDecoder) DecodeSpaced(out []bool, nullCount int, validBits 
 		return spacedExpand(out, nullCount, validBits, validBitsOffset), nil
 	}
 	return dec.Decode(out)
+}
+
+func (dec *RleBooleanDecoder) DecodeSpacedToBitmap(out []byte, outOffset int64,
+	length, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
+	return decodeSpacedToBitmap(dec, out, outOffset, length, nullCount, validBits, validBitsOffset)
 }

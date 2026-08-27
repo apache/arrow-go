@@ -25,6 +25,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -46,8 +47,34 @@ type failingPayloadWriter struct {
 
 type shortWriteWriter struct{}
 
+type failingCompressor struct {
+	err      error
+	closeErr error
+}
+
+func (failingCompressor) MaxCompressedLen(n int) int { return n }
+func (failingCompressor) Reset(io.Writer)            {}
+func (f failingCompressor) Write(p []byte) (int, error) {
+	if f.err != nil {
+		return 0, f.err
+	}
+	return len(p), nil
+}
+func (f failingCompressor) Close() error { return f.closeErr }
+func (failingCompressor) Type() flatbuf.CompressionType {
+	return flatbuf.CompressionTypeZSTD
+}
+
+type failingWriter struct {
+	err error
+}
+
 func (shortWriteWriter) Write(p []byte) (int, error) {
 	return len(p) - 1, io.ErrShortWrite
+}
+
+func (w failingWriter) Write([]byte) (int, error) {
+	return 0, w.err
 }
 
 func TestPayloadWriteRejectsShortWrites(t *testing.T) {
@@ -89,6 +116,16 @@ func TestWriterCloseFailureIsTerminal(t *testing.T) {
 	require.ErrorIs(t, writer.Close(), want)
 	require.ErrorIs(t, writer.Close(), want)
 	require.Equal(t, 1, payloadWriter.closeCall)
+}
+
+func TestFileWriterCloseFailureIsTerminal(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	want := errors.New("write failed")
+	writer, err := NewFileWriter(failingWriter{err: want}, WithSchema(schema))
+	require.NoError(t, err)
+
+	require.ErrorIs(t, writer.Close(), want)
+	require.ErrorIs(t, writer.Close(), want)
 }
 
 func TestWriterSchemaFailureIsTerminal(t *testing.T) {
@@ -271,6 +308,7 @@ func TestGetZeroBasedValueOffsets(t *testing.T) {
 	offsets := env.getZeroBasedValueOffsets(arr)
 	defer offsets.Release()
 	assert.Equal(t, 44, offsets.Len(), "include all offsets if array is not sliced")
+	assert.Same(t, arr.Data().Buffers()[1], offsets)
 
 	sl := array.NewSlice(arr, 0, 4)
 	defer sl.Release()
@@ -278,6 +316,120 @@ func TestGetZeroBasedValueOffsets(t *testing.T) {
 	offsets = env.getZeroBasedValueOffsets(sl)
 	defer offsets.Release()
 	assert.Equal(t, 20, offsets.Len(), "trim trailing offsets after slice")
+	assert.Same(t, sl.Data().Buffers()[1], offsets.Parent())
+
+	sl = array.NewSlice(arr, 2, 6)
+	defer sl.Release()
+
+	offsets = env.getZeroBasedValueOffsets(sl)
+	defer offsets.Release()
+	assert.Nil(t, offsets.Parent(), "rebase offsets when the first logical offset is non-zero")
+	assert.Equal(t, []int32{0, 1, 2, 3, 4}, arrow.Int32Traits.CastFromBytes(offsets.Bytes()))
+
+	emptyPrefixBuilder := array.NewStringBuilder(alloc)
+	emptyPrefixBuilder.AppendValues([]string{"", "", "a"}, nil)
+	emptyPrefix := emptyPrefixBuilder.NewArray()
+	emptyPrefixBuilder.Release()
+	defer emptyPrefix.Release()
+
+	sl = array.NewSlice(emptyPrefix, 1, 3)
+	defer sl.Release()
+
+	offsets = env.getZeroBasedValueOffsets(sl)
+	defer offsets.Release()
+	assert.Same(t, sl.Data().Buffers()[1], offsets.Parent())
+	assert.Equal(t, []int32{0, 0, 1}, arrow.Int32Traits.CastFromBytes(offsets.Bytes()))
+
+	largeBuilder := array.NewLargeStringBuilder(alloc)
+	largeBuilder.AppendValues(vals, nil)
+	large := largeBuilder.NewArray()
+	largeBuilder.Release()
+	defer large.Release()
+
+	sl = array.NewSlice(large, 0, 4)
+	defer sl.Release()
+
+	offsets = env.getZeroBasedValueOffsets(sl)
+	defer offsets.Release()
+	assert.Same(t, sl.Data().Buffers()[1], offsets.Parent())
+	assert.Equal(t, []int64{0, 1, 2, 3, 4}, arrow.Int64Traits.CastFromBytes(offsets.Bytes()))
+
+	sl = array.NewSlice(large, 2, 6)
+	defer sl.Release()
+
+	offsets = env.getZeroBasedValueOffsets(sl)
+	defer offsets.Release()
+	assert.Nil(t, offsets.Parent(), "rebase int64 offsets when the first logical offset is non-zero")
+	assert.Equal(t, []int64{0, 1, 2, 3, 4}, arrow.Int64Traits.CastFromBytes(offsets.Bytes()))
+
+	largeEmptyPrefixBuilder := array.NewLargeStringBuilder(alloc)
+	largeEmptyPrefixBuilder.AppendValues([]string{"", "", "a"}, nil)
+	largeEmptyPrefix := largeEmptyPrefixBuilder.NewArray()
+	largeEmptyPrefixBuilder.Release()
+	defer largeEmptyPrefix.Release()
+
+	sl = array.NewSlice(largeEmptyPrefix, 1, 3)
+	defer sl.Release()
+
+	offsets = env.getZeroBasedValueOffsets(sl)
+	defer offsets.Release()
+	assert.Same(t, sl.Data().Buffers()[1], offsets.Parent())
+	assert.Equal(t, []int64{0, 0, 1}, arrow.Int64Traits.CastFromBytes(offsets.Bytes()))
+}
+
+func BenchmarkGetZeroBasedValueOffsets(b *testing.B) {
+	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer alloc.AssertSize(b, 0)
+
+	const n = 1 << 20
+	values := make([]string, n)
+	for i := range values {
+		values[i] = "x"
+	}
+
+	stringBuilder := array.NewStringBuilder(alloc)
+	stringBuilder.AppendValues(values, nil)
+	strings := stringBuilder.NewArray()
+	stringBuilder.Release()
+	defer strings.Release()
+
+	largeStringBuilder := array.NewLargeStringBuilder(alloc)
+	largeStringBuilder.AppendValues(values, nil)
+	largeStrings := largeStringBuilder.NewArray()
+	largeStringBuilder.Release()
+	defer largeStrings.Release()
+
+	env := &recordEncoder{mem: alloc}
+	for _, tc := range []struct {
+		name string
+		arr  arrow.Array
+	}{
+		{name: "int32", arr: strings},
+		{name: "int64", arr: largeStrings},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			for _, slice := range []struct {
+				name       string
+				begin, end int64
+			}{
+				{name: "full", begin: 0, end: n},
+				{name: "prefix", begin: 0, end: n / 2},
+				{name: "middle", begin: n / 4, end: 3 * n / 4},
+			} {
+				b.Run(slice.name, func(b *testing.B) {
+					arr := array.NewSlice(tc.arr, slice.begin, slice.end)
+					defer arr.Release()
+
+					b.ReportAllocs()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						offsets := env.getZeroBasedValueOffsets(arr)
+						offsets.Release()
+					}
+				})
+			}
+		})
+	}
 }
 
 func TestWriterCatchPanic(t *testing.T) {
@@ -323,6 +475,79 @@ func TestWriterMemCompression(t *testing.T) {
 	defer w.Close()
 
 	require.NoError(t, w.Write(rec))
+}
+
+func TestNewWriterWithMinSpaceSavings(t *testing.T) {
+	const minSpaceSavings = 0.5
+
+	writer := NewWriter(io.Discard, WithMinSpaceSavings(minSpaceSavings))
+
+	assert.Equal(t, minSpaceSavings, writer.minSpaceSavings)
+}
+
+func TestRecordEncoderCompressionErrorDoesNotDeadlock(t *testing.T) {
+	want := errors.New("compression failed")
+	body := make([]*memory.Buffer, 64)
+	for i := range body {
+		body[i] = memory.NewBufferBytes([]byte("payload"))
+	}
+	payload := Payload{body: body}
+	defer payload.Release()
+
+	encoder := newRecordEncoder(memory.DefaultAllocator, 0, kMaxNestingDepth, true,
+		flatbuf.CompressionTypeZSTD, 2, 0, []compressor{
+			failingCompressor{err: want},
+			failingCompressor{err: want},
+		})
+
+	result := make(chan error, 1)
+	go func() {
+		result <- encoder.compressBodyBuffers(&payload)
+	}()
+
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, want)
+	case <-time.After(time.Second):
+		t.Fatal("compression did not return after timeout")
+	}
+}
+
+func TestRecordEncoderReturnsCompressionError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int8}}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+	builder.Field(0).(*array.Int8Builder).Append(1)
+	record := builder.NewRecordBatch()
+	defer record.Release()
+
+	want := errors.New("compression failed")
+	encoder := newRecordEncoder(mem, 0, kMaxNestingDepth, true,
+		flatbuf.CompressionTypeZSTD, 1, 0, []compressor{failingCompressor{err: want}})
+	var payload Payload
+	defer payload.Release()
+
+	require.ErrorIs(t, encoder.Encode(&payload, record), want)
+}
+
+func TestGetRecordBatchPayloadReturnsCompressionErrorOnClose(t *testing.T) {
+	want := errors.New("compression failed")
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int8}}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+	builder.Field(0).(*array.Int8Builder).Append(1)
+	record := builder.NewRecordBatch()
+	defer record.Release()
+
+	_, err := GetRecordBatchPayload(record, WithAllocator(mem), WithZstd(),
+		withCompressors(failingCompressor{closeErr: want}))
+	require.ErrorIs(t, err, want)
 }
 
 func TestWriteWithCompressionAndMinSavings(t *testing.T) {

@@ -564,6 +564,35 @@ func TestStringDictionaryBuilderInit(t *testing.T) {
 	assert.True(t, array.Equal(expected, result))
 }
 
+func TestStringDictionaryBuilderAppendEmptyValue(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictArr, _, err := array.FromJSON(mem, arrow.BinaryTypes.String, strings.NewReader(`["existing"]`))
+	require.NoError(t, err)
+	defer dictArr.Release()
+
+	dictType := &arrow.DictionaryType{IndexType: &arrow.Int8Type{}, ValueType: arrow.BinaryTypes.String}
+	bldr := array.NewDictionaryBuilderWithDict(mem, dictType, dictArr)
+	defer bldr.Release()
+
+	bldr.AppendEmptyValue()
+	bldr.AppendEmptyValues(2)
+
+	result := bldr.NewDictionaryArray()
+	defer result.Release()
+
+	dict := result.Dictionary().(*array.String)
+	assert.Equal(t, 2, dict.Len())
+	assert.Equal(t, "existing", dict.Value(0))
+	assert.Empty(t, dict.Value(1))
+	for i := 0; i < result.Len(); i++ {
+		assert.False(t, result.IsNull(i))
+		assert.Equal(t, 1, result.GetValueIndex(i))
+		assert.Empty(t, result.GetOneForMarshal(i))
+	}
+}
+
 func TestStringDictionaryBuilderOnlyNull(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -1205,6 +1234,31 @@ func TestDictionaryFromArrays(t *testing.T) {
 			assert.Error(t, err)
 		})
 	}
+}
+
+func TestValidatedDictionaryAllowsSignedIndexAtTypeLimit(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	indicesBuilder := array.NewInt8Builder(mem)
+	indicesBuilder.Append(127)
+	indices := indicesBuilder.NewArray()
+	indicesBuilder.Release()
+	defer indices.Release()
+
+	dictBuilder := array.NewStringBuilder(mem)
+	for i := 0; i < 128; i++ {
+		dictBuilder.AppendString(fmt.Sprintf("value-%d", i))
+	}
+	dict := dictBuilder.NewArray()
+	dictBuilder.Release()
+	defer dict.Release()
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	result, err := array.NewValidatedDictionaryArray(dictType, indices, dict)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	defer result.Release()
 }
 
 func TestListOfDictionary(t *testing.T) {

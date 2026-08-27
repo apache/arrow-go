@@ -99,6 +99,97 @@ func TestConcatenate(t *testing.T) {
 	}
 }
 
+func BenchmarkConcatenateFixedWidth(b *testing.B) {
+	mem := memory.NewGoAllocator()
+
+	const totalValues = 1 << 16
+	values := make([]int64, totalValues)
+	builder := array.NewInt64Builder(mem)
+	builder.AppendValues(values, nil)
+	backing := builder.NewInt64Array()
+	builder.Release()
+	defer backing.Release()
+
+	for _, chunkCount := range []int{1, 8, 64, 1024, 8192} {
+		b.Run(fmt.Sprintf("chunks=%d", chunkCount), func(b *testing.B) {
+			chunkSize := totalValues / chunkCount
+			inputs := make([]arrow.Array, chunkCount)
+			for i := range inputs {
+				begin := int64(i * chunkSize)
+				inputs[i] = array.NewSlice(backing, begin, begin+int64(chunkSize))
+			}
+			defer func() {
+				for _, input := range inputs {
+					input.Release()
+				}
+			}()
+
+			b.SetBytes(int64(totalValues * arrow.Int64SizeBytes))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result, err := array.Concatenate(inputs, mem)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if result.Len() != totalValues {
+					b.Fatalf("result length = %d, want %d", result.Len(), totalValues)
+				}
+				result.Release()
+			}
+		})
+	}
+}
+
+func TestConcatenateFixedWidthSlices(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	tests := []struct {
+		name  string
+		build func(memory.Allocator) arrow.Array
+	}{
+		{"int32", func(mem memory.Allocator) arrow.Array {
+			builder := array.NewInt32Builder(mem)
+			builder.AppendValues([]int32{10, 20, 30, 40, 50}, nil)
+			result := builder.NewInt32Array()
+			builder.Release()
+			return result
+		}},
+		{"int64", func(mem memory.Allocator) arrow.Array {
+			builder := array.NewInt64Builder(mem)
+			builder.AppendValues([]int64{10, 20, 30, 40, 50}, nil)
+			result := builder.NewInt64Array()
+			builder.Release()
+			return result
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			backing := tt.build(mem)
+			defer backing.Release()
+
+			inputs := []arrow.Array{
+				array.NewSlice(backing, 1, 1),
+				array.NewSlice(backing, 2, 4),
+				array.NewSlice(backing, 4, 5),
+			}
+			for _, input := range inputs {
+				defer input.Release()
+			}
+
+			result, err := array.Concatenate(inputs, mem)
+			require.NoError(t, err)
+			defer result.Release()
+
+			expected := array.NewSlice(backing, 2, 5)
+			defer expected.Release()
+			assert.True(t, array.Equal(expected, result))
+		})
+	}
+}
+
 type ConcatTestSuite struct {
 	suite.Suite
 

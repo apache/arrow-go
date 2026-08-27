@@ -642,3 +642,18 @@ func TestFieldsImmutability(t *testing.T) {
 		})
 	}
 }
+
+func TestUnionRejectsDuplicateTypeCodes(t *testing.T) {
+	fields := []Field{
+		{Name: "a", Type: PrimitiveTypes.Int32},
+		{Name: "b", Type: PrimitiveTypes.Int32},
+	}
+	codes := []UnionTypeCode{1, 1}
+
+	assert.Panics(t, func() {
+		SparseUnionOf(fields, codes)
+	})
+	assert.Panics(t, func() {
+		DenseUnionOf(fields, codes)
+	})
+}

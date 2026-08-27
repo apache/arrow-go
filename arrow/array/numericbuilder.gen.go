@@ -88,9 +88,15 @@ func (b *Int64Builder) AppendEmptyValue() {
 }
 
 func (b *Int64Builder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.Int64Traits.BytesRequired(1), n)
 }
 
 func (b *Int64Builder) UnsafeAppend(v int64) {
@@ -412,9 +418,15 @@ func (b *Uint64Builder) AppendEmptyValue() {
 }
 
 func (b *Uint64Builder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.Uint64Traits.BytesRequired(1), n)
 }
 
 func (b *Uint64Builder) UnsafeAppend(v uint64) {
@@ -740,9 +752,15 @@ func (b *Float64Builder) AppendEmptyValue() {
 }
 
 func (b *Float64Builder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.Float64Traits.BytesRequired(1), n)
 }
 
 func (b *Float64Builder) UnsafeAppend(v float64) {
@@ -982,9 +1000,15 @@ func (b *Int32Builder) AppendEmptyValue() {
 }
 
 func (b *Int32Builder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.Int32Traits.BytesRequired(1), n)
 }
 
 func (b *Int32Builder) UnsafeAppend(v int32) {
@@ -1290,9 +1314,15 @@ func (b *Uint32Builder) AppendEmptyValue() {
 }
 
 func (b *Uint32Builder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.Uint32Traits.BytesRequired(1), n)
 }
 
 func (b *Uint32Builder) UnsafeAppend(v uint32) {
@@ -1598,9 +1628,15 @@ func (b *Float32Builder) AppendEmptyValue() {
 }
 
 func (b *Float32Builder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.Float32Traits.BytesRequired(1), n)
 }
 
 func (b *Float32Builder) UnsafeAppend(v float32) {
@@ -1840,9 +1876,15 @@ func (b *Int16Builder) AppendEmptyValue() {
 }
 
 func (b *Int16Builder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.Int16Traits.BytesRequired(1), n)
 }
 
 func (b *Int16Builder) UnsafeAppend(v int16) {
@@ -2148,9 +2190,15 @@ func (b *Uint16Builder) AppendEmptyValue() {
 }
 
 func (b *Uint16Builder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.Uint16Traits.BytesRequired(1), n)
 }
 
 func (b *Uint16Builder) UnsafeAppend(v uint16) {
@@ -2456,9 +2504,15 @@ func (b *Int8Builder) AppendEmptyValue() {
 }
 
 func (b *Int8Builder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.Int8Traits.BytesRequired(1), n)
 }
 
 func (b *Int8Builder) UnsafeAppend(v int8) {
@@ -2764,9 +2818,15 @@ func (b *Uint8Builder) AppendEmptyValue() {
 }
 
 func (b *Uint8Builder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.Uint8Traits.BytesRequired(1), n)
 }
 
 func (b *Uint8Builder) UnsafeAppend(v uint8) {
@@ -3073,9 +3133,15 @@ func (b *Time32Builder) AppendEmptyValue() {
 }
 
 func (b *Time32Builder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.Time32Traits.BytesRequired(1), n)
 }
 
 func (b *Time32Builder) UnsafeAppend(v arrow.Time32) {
@@ -3333,9 +3399,15 @@ func (b *Time64Builder) AppendEmptyValue() {
 }
 
 func (b *Time64Builder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.Time64Traits.BytesRequired(1), n)
 }
 
 func (b *Time64Builder) UnsafeAppend(v arrow.Time64) {
@@ -3583,9 +3655,15 @@ func (b *Date32Builder) AppendEmptyValue() {
 }
 
 func (b *Date32Builder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.Date32Traits.BytesRequired(1), n)
 }
 
 func (b *Date32Builder) UnsafeAppend(v arrow.Date32) {
@@ -3842,9 +3920,15 @@ func (b *Date64Builder) AppendEmptyValue() {
 }
 
 func (b *Date64Builder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.Date64Traits.BytesRequired(1), n)
 }
 
 func (b *Date64Builder) UnsafeAppend(v arrow.Date64) {
@@ -4093,9 +4177,15 @@ func (b *DurationBuilder) AppendEmptyValue() {
 }
 
 func (b *DurationBuilder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), arrow.DurationTraits.BytesRequired(1), n)
 }
 
 func (b *DurationBuilder) UnsafeAppend(v arrow.Duration) {

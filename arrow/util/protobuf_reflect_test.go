@@ -390,6 +390,19 @@ func TestRecordReleasesConstructionBuffers(t *testing.T) {
 	mem.AssertSize(t, 0)
 }
 
+func TestRecordWithErrorReportsFieldConversion(t *testing.T) {
+	msg := AllTheTypesNoAnyFixture().msg.(*util_message.AllTheTypesNoAny)
+	msg.Enum = util_message.AllTheTypesNoAny_ExampleEnum(999)
+	pmr := NewProtobufMessageReflection(msg)
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	rec, err := pmr.RecordWithError(mem)
+	assert.Nil(t, rec)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, `failed to append protobuf field "enum"`)
+	assert.ErrorContains(t, err, "enum value 999 is not defined")
+	mem.AssertSize(t, 0)
+}
+
 func TestRecordWithAllFieldsExcluded(t *testing.T) {
 	pmr := NewProtobufMessageReflection(AllTheTypesNoAnyFixture().msg,
 		WithExclusionPolicy(func(*ProtobufFieldReflection) bool { return true }))
@@ -398,6 +411,33 @@ func TestRecordWithAllFieldsExcluded(t *testing.T) {
 
 	assert.EqualValues(t, 1, rec.NumRows())
 	assert.Zero(t, rec.NumCols())
+}
+
+func TestRecordWithErrorReportsUnknownEnumValueForEnumValueHandler(t *testing.T) {
+	msg := AllTheTypesNoAnyFixture().msg.(*util_message.AllTheTypesNoAny)
+	msg.Enum = util_message.AllTheTypesNoAny_ExampleEnum(999)
+	onlyEnum := func(pfr *ProtobufFieldReflection) bool { return !pfr.isEnum() }
+	pmr := NewProtobufMessageReflection(msg, WithExclusionPolicy(onlyEnum), WithEnumHandler(EnumValue))
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+
+	rec, err := pmr.RecordWithError(mem)
+	assert.Nil(t, rec)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, `failed to append protobuf field "enum"`)
+	assert.ErrorContains(t, err, "enum value 999 is not defined")
+	mem.AssertSize(t, 0)
+}
+
+func TestRecordWithErrorReturnsOneRowForZeroFieldSchema(t *testing.T) {
+	excludeAll := func(*ProtobufFieldReflection) bool { return true }
+	pmr := NewProtobufMessageReflection(&util_message.AllTheTypesNoAny{}, WithExclusionPolicy(excludeAll))
+
+	rec, err := pmr.RecordWithError(memory.DefaultAllocator)
+	require.NoError(t, err)
+	require.NotNil(t, rec)
+	defer rec.Release()
+	require.EqualValues(t, 1, rec.NumRows())
+	require.EqualValues(t, 0, rec.NumCols())
 }
 
 func TestRecordFromEmptyMessage(t *testing.T) {

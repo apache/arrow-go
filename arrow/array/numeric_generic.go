@@ -91,6 +91,14 @@ func (a *numericArray[T]) GetOneForMarshal(i int) any {
 	return a.values[i]
 }
 
+func (a *numericArray[T]) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+
+	return a.values[i]
+}
+
 func (a *numericArray[T]) MarshalJSON() ([]byte, error) {
 	vals := make([]any, a.Len())
 	for i := range a.Len() {
@@ -113,6 +121,14 @@ func (a *oneByteArrs[T]) GetOneForMarshal(i int) any {
 	}
 
 	return float64(a.values[i]) // prevent uint8/int8 from being seen as binary data
+}
+
+func (a *oneByteArrs[T]) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+
+	return a.values[i]
 }
 
 func (a *oneByteArrs[T]) MarshalJSON() ([]byte, error) {
@@ -155,6 +171,14 @@ func (a *floatArray[T]) GetOneForMarshal(i int) any {
 	default:
 		return f
 	}
+}
+
+func (a *floatArray[T]) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+
+	return a.Value(i)
 }
 
 func (a *floatArray[T]) MarshalJSON() ([]byte, error) {
@@ -210,6 +234,14 @@ func (d *dateArray[T]) GetOneForMarshal(i int) interface{} {
 	return d.values[i].FormattedString()
 }
 
+func (d *dateArray[T]) ValueAsAny(i int) any {
+	if d.IsNull(i) {
+		return nil
+	}
+
+	return d.values[i]
+}
+
 type timeType interface {
 	TimeUnit() arrow.TimeUnit
 }
@@ -246,6 +278,14 @@ func (a *timeArray[T]) GetOneForMarshal(i int) interface{} {
 	return a.values[i].ToTime(a.DataType().(timeType).TimeUnit()).Format("15:04:05.999999999")
 }
 
+func (a *timeArray[T]) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+
+	return a.values[i]
+}
+
 type Duration struct {
 	numericArray[arrow.Duration]
 }
@@ -279,6 +319,14 @@ func (a *Duration) GetOneForMarshal(i int) any {
 		return nil
 	}
 	return fmt.Sprintf("%d%s", a.values[i], a.DataType().(timeType).TimeUnit())
+}
+
+func (a *Duration) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+
+	return a.values[i]
 }
 
 type Int64 struct {

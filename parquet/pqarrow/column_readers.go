@@ -21,11 +21,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -453,6 +451,10 @@ func (lr *listReader) LoadBatch(nrecords int64) error {
 }
 
 func (lr *listReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
+	return lr.buildArray(lenBound)
+}
+
+func (lr *listReader) buildArray(lenBound int64) (*arrow.Chunked, error) {
 	var (
 		defLevels      []int16
 		repLevels      []int16
@@ -523,6 +525,14 @@ func (lr *listReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
 		return nil, err
 	}
 	defer item.Release()
+	itemArr := array.MakeFromData(item)
+	defer itemArr.Release()
+
+	if lr.field.Type.ID() == arrow.FIXED_SIZE_LIST {
+		offsetData := arrow.Int32Traits.CastFromBytes(offsetsBuffer.Bytes())
+		return lr.buildFixedSizeListArray(int(validityIO.Read), offsetData, validityBuffer,
+			validityIO.NullCount, itemArr)
+	}
 
 	buffers := []*memory.Buffer{nil, offsetsBuffer}
 	if validityIO.NullCount > 0 {
@@ -531,38 +541,147 @@ func (lr *listReader) BuildArray(lenBound int64) (*arrow.Chunked, error) {
 
 	data := array.NewData(lr.field.Type, int(validityIO.Read), buffers, []arrow.ArrayData{item}, int(validityIO.NullCount), 0)
 	defer data.Release()
-	if lr.field.Type.ID() == arrow.FIXED_SIZE_LIST {
-		defer data.Buffers()[1].Release()
-		offsetData := arrow.Int32Traits.CastFromBytes(offsetsBuffer.Bytes())
-		listSize := lr.field.Type.(*arrow.FixedSizeListType).Len()
-		for x := 1; x < data.Len(); x++ {
-			size := offsetData[x] - offsetData[x-1]
-			if size != listSize {
-				return nil, fmt.Errorf("expected all lists to be of size=%d, but index %d had size=%d", listSize, x, size)
-			}
-		}
-		data.Buffers()[1] = nil
-	}
 	out := array.MakeFromData(data)
 	defer out.Release()
 	return arrow.NewChunked(lr.field.Type, []arrow.Array{out}), nil
 }
 
-// column reader logic for fixed size lists instead of variable length ones.
-type fixedSizeListReader struct {
-	*listReader
+func (lr *listReader) buildFixedSizeListArray(length int, offsets []int32, validityBuffer *memory.Buffer,
+	nullCount int64, item arrow.Array) (*arrow.Chunked, error) {
+	listType := lr.field.Type.(*arrow.FixedSizeListType)
+	listSize := int(listType.Len())
+
+	if offsets[0] != 0 {
+		return nil, fmt.Errorf("fixed-size list first offset must be zero, got %d", offsets[0])
+	}
+	if int64(offsets[length]) != int64(item.Len()) {
+		return nil, fmt.Errorf("fixed-size list final offset %d does not match decoded child length %d",
+			offsets[length], item.Len())
+	}
+
+	if nullCount == 0 {
+		for idx := 0; idx < length; idx++ {
+			if size := offsets[idx+1] - offsets[idx]; size != int32(listSize) {
+				return nil, fmt.Errorf("expected all lists to be of size=%d, but index %d had size=%d", listSize, idx, size)
+			}
+		}
+		data := array.NewData(lr.field.Type, length, []*memory.Buffer{nil},
+			[]arrow.ArrayData{item.Data()}, 0, 0)
+		defer data.Release()
+		out := array.MakeFromData(data)
+		defer out.Release()
+		return arrow.NewChunked(lr.field.Type, []arrow.Array{out}), nil
+	}
+
+	validity := validityBuffer.Bytes()
+	runCount := 0
+	previousValid := false
+	for idx := 0; idx < length; idx++ {
+		valid := !lr.field.Nullable || bitutil.BitIsSet(validity, idx)
+		if valid {
+			if size := offsets[idx+1] - offsets[idx]; size != int32(listSize) {
+				return nil, fmt.Errorf("expected all lists to be of size=%d, but index %d had size=%d", listSize, idx, size)
+			}
+		} else {
+			if size := offsets[idx+1] - offsets[idx]; size != 0 {
+				return nil, fmt.Errorf("null fixed-size list at index %d consumed %d child values", idx, size)
+			}
+		}
+		if idx == 0 || valid != previousValid {
+			runCount++
+		}
+		previousValid = valid
+	}
+
+	var child arrow.Array
+	var err error
+	// For a small number of runs, concatenating slices avoids materializing
+	// indices. Once the run count is high, the temporary arrays dominate.
+	const minRunsForTake = 1024
+	if runCount < minRunsForTake {
+		pieces := make([]arrow.Array, 0, runCount)
+		defer func() { releaseArrays(pieces) }()
+		for i := 0; i < length; {
+			valid := !lr.field.Nullable || bitutil.BitIsSet(validity, i)
+			end := i + 1
+			for end < length {
+				nextValid := !lr.field.Nullable || bitutil.BitIsSet(validity, end)
+				if nextValid != valid {
+					break
+				}
+				end++
+			}
+			if valid {
+				pieces = append(pieces, array.NewSlice(item, int64(offsets[i]), int64(offsets[end])))
+			} else {
+				pieces = append(pieces, array.MakeArrayOfNull(lr.rctx.mem, listType.Elem(), (end-i)*listSize))
+			}
+			i = end
+		}
+		if len(pieces) == 0 {
+			pieces = append(pieces, array.MakeArrayOfNull(lr.rctx.mem, listType.Elem(), 0))
+		}
+		child, err = array.Concatenate(pieces, lr.rctx.mem)
+	} else {
+		childLength := length * listSize
+		indicesBuffer := memory.NewResizableBuffer(lr.rctx.mem)
+		defer indicesBuffer.Release()
+		indicesBuffer.Resize(arrow.Int32Traits.BytesRequired(childLength))
+		indices := arrow.Int32Traits.CastFromBytes(indicesBuffer.Bytes())
+
+		indicesValidity := memory.NewResizableBuffer(lr.rctx.mem)
+		defer indicesValidity.Release()
+		indicesValidity.Resize(int(bitutil.BytesForBits(int64(childLength))))
+		clear(indicesValidity.Bytes())
+
+		for i := 0; i < length; {
+			valid := !lr.field.Nullable || bitutil.BitIsSet(validity, i)
+			end := i + 1
+			for end < length {
+				nextValid := !lr.field.Nullable || bitutil.BitIsSet(validity, end)
+				if nextValid != valid {
+					break
+				}
+				end++
+			}
+			if valid {
+				childStart := i * listSize
+				runChildLength := (end - i) * listSize
+				bitutil.SetBitsTo(indicesValidity.Bytes(), int64(childStart), int64(runChildLength), true)
+				for idx := 0; idx < runChildLength; idx++ {
+					indices[childStart+idx] = offsets[i] + int32(idx)
+				}
+			}
+			i = end
+		}
+
+		indicesData := array.NewData(arrow.PrimitiveTypes.Int32, childLength,
+			[]*memory.Buffer{indicesValidity, indicesBuffer}, nil, int(nullCount)*listSize, 0)
+		defer indicesData.Release()
+		indicesArr := array.NewInt32Data(indicesData)
+		defer indicesArr.Release()
+
+		ctx := compute.WithAllocator(context.Background(), lr.rctx.mem)
+		child, err = compute.TakeArrayOpts(ctx, item, indicesArr, compute.TakeOptions{BoundsCheck: false})
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer child.Release()
+
+	buffers := []*memory.Buffer{nil}
+	if nullCount > 0 {
+		buffers[0] = validityBuffer
+	}
+	data := array.NewData(lr.field.Type, length, buffers, []arrow.ArrayData{child.Data()}, int(nullCount), 0)
+	defer data.Release()
+	out := array.MakeFromData(data)
+	defer out.Release()
+	return arrow.NewChunked(lr.field.Type, []arrow.Array{out}), nil
 }
 
 func newFixedSizeListReader(rctx *readerCtx, field *arrow.Field, info file.LevelInfo, childRdr *ColumnReader, props ArrowReadProperties) *ColumnReader {
-	childRdr.Retain()
-	lr := listReader{rctx: rctx, field: field, info: info, itemRdr: childRdr, props: props}
-	lr.refCount.Add(1)
-
-	return &ColumnReader{
-		&fixedSizeListReader{
-			&lr,
-		},
-	}
+	return newListReader(rctx, field, info, childRdr, props)
 }
 
 // helper function to combine chunks into a single array.
@@ -595,7 +714,10 @@ func transferColumnData(rdr file.RecordReader, valueType arrow.DataType, descr *
 		dt = valueType.(arrow.ExtensionType).StorageType()
 	}
 
-	var data arrow.ArrayData
+	var (
+		data arrow.ArrayData
+		err  error
+	)
 	switch dt.ID() {
 	case arrow.DICTIONARY:
 		return transferDictionary(rdr, valueType, mem)
@@ -635,7 +757,10 @@ func transferColumnData(rdr file.RecordReader, valueType arrow.DataType, descr *
 			data = transferZeroCopy(rdr, valueType)
 		case arrow.Nanosecond:
 			if descr.PhysicalType() == parquet.Types.Int96 {
-				data = transferInt96(rdr, valueType)
+				data, err = transferInt96(rdr, valueType)
+				if err != nil {
+					return nil, err
+				}
 			} else {
 				data = transferZeroCopy(rdr, valueType)
 			}
@@ -708,64 +833,58 @@ func transferBinary(rdr file.RecordReader, dt arrow.DataType, mem memory.Allocat
 	return arrow.NewChunked(dt, chunks), nil
 }
 
-func transferInt(rdr file.RecordReader, dt arrow.DataType) arrow.ArrayData {
-	var output reflect.Value
+type parquetInteger interface {
+	~int32 | ~int64
+}
 
-	signed := true
+type arrowInteger interface {
+	~int8 | ~uint8 | ~int16 | ~uint16 | ~int32 | ~uint32 | ~int64 | ~uint64
+}
+
+func convertIntegerValues[Out arrowInteger, In parquetInteger](out []Out, values []In) {
+	for i, value := range values {
+		out[i] = Out(value)
+	}
+}
+
+func transferIntegerValues[In parquetInteger](values []In, data []byte, dt arrow.Type) {
+	switch dt {
+	case arrow.INT8:
+		convertIntegerValues(arrow.Int8Traits.CastFromBytes(data), values)
+	case arrow.UINT8:
+		convertIntegerValues(arrow.Uint8Traits.CastFromBytes(data), values)
+	case arrow.INT16:
+		convertIntegerValues(arrow.Int16Traits.CastFromBytes(data), values)
+	case arrow.UINT16:
+		convertIntegerValues(arrow.Uint16Traits.CastFromBytes(data), values)
+	case arrow.UINT32:
+		convertIntegerValues(arrow.Uint32Traits.CastFromBytes(data), values)
+	case arrow.UINT64:
+		convertIntegerValues(arrow.Uint64Traits.CastFromBytes(data), values)
+	case arrow.DATE32:
+		convertIntegerValues(arrow.Date32Traits.CastFromBytes(data), values)
+	case arrow.TIME32:
+		convertIntegerValues(arrow.Time32Traits.CastFromBytes(data), values)
+	case arrow.TIME64:
+		convertIntegerValues(arrow.Time64Traits.CastFromBytes(data), values)
+	}
+}
+
+func transferInt(rdr file.RecordReader, dt arrow.DataType) arrow.ArrayData {
 	// create buffer for proper type since parquet only has int32 and int64
 	// physical representations, but we want the correct type representation
 	// for Arrow's in memory buffer.
 	data := make([]byte, rdr.ValuesWritten()*int(bitutil.BytesForBits(int64(dt.(arrow.FixedWidthDataType).BitWidth()))))
-	switch dt.ID() {
-	case arrow.INT8:
-		output = reflect.ValueOf(arrow.Int8Traits.CastFromBytes(data))
-	case arrow.UINT8:
-		signed = false
-		output = reflect.ValueOf(arrow.Uint8Traits.CastFromBytes(data))
-	case arrow.INT16:
-		output = reflect.ValueOf(arrow.Int16Traits.CastFromBytes(data))
-	case arrow.UINT16:
-		signed = false
-		output = reflect.ValueOf(arrow.Uint16Traits.CastFromBytes(data))
-	case arrow.UINT32:
-		signed = false
-		output = reflect.ValueOf(arrow.Uint32Traits.CastFromBytes(data))
-	case arrow.UINT64:
-		signed = false
-		output = reflect.ValueOf(arrow.Uint64Traits.CastFromBytes(data))
-	case arrow.DATE32:
-		output = reflect.ValueOf(arrow.Date32Traits.CastFromBytes(data))
-	case arrow.TIME32:
-		output = reflect.ValueOf(arrow.Time32Traits.CastFromBytes(data))
-	case arrow.TIME64:
-		output = reflect.ValueOf(arrow.Time64Traits.CastFromBytes(data))
-	}
 
 	length := rdr.ValuesWritten()
 	// copy the values semantically with the correct types
 	switch rdr.Type() {
 	case parquet.Types.Int32:
-		values := arrow.Int32Traits.CastFromBytes(rdr.Values())
-		if signed {
-			for idx, v := range values[:length] {
-				output.Index(idx).SetInt(int64(v))
-			}
-		} else {
-			for idx, v := range values[:length] {
-				output.Index(idx).SetUint(uint64(v))
-			}
-		}
+		values := arrow.Int32Traits.CastFromBytes(rdr.Values())[:length]
+		transferIntegerValues(values, data, dt.ID())
 	case parquet.Types.Int64:
-		values := arrow.Int64Traits.CastFromBytes(rdr.Values())
-		if signed {
-			for idx, v := range values[:length] {
-				output.Index(idx).SetInt(v)
-			}
-		} else {
-			for idx, v := range values[:length] {
-				output.Index(idx).SetUint(uint64(v))
-			}
-		}
+		values := arrow.Int64Traits.CastFromBytes(rdr.Values())[:length]
+		transferIntegerValues(values, data, dt.ID())
 	}
 
 	bitmap := rdr.ReleaseValidBits()
@@ -779,26 +898,28 @@ func transferInt(rdr file.RecordReader, dt arrow.DataType) arrow.ArrayData {
 }
 
 func transferBool(rdr file.RecordReader) arrow.ArrayData {
-	// TODO(mtopol): optimize this so we don't convert bitmap to []bool back to bitmap
 	length := rdr.ValuesWritten()
-	data := make([]byte, int(bitutil.BytesForBits(int64(length))))
-	bytedata := rdr.Values()
-	values := *(*[]bool)(unsafe.Pointer(&bytedata))
-
-	for idx, v := range values[:length] {
-		if v {
-			bitutil.SetBit(data, idx)
-		}
-	}
-
 	bitmap := rdr.ReleaseValidBits()
 	if bitmap != nil {
 		defer bitmap.Release()
 	}
-	bb := memory.NewBufferBytes(data)
-	defer bb.Release()
+	var values *memory.Buffer
+	if boolReader, ok := rdr.(file.BooleanRecordReader); ok {
+		values = boolReader.ReleaseValueBitmap()
+	} else {
+		// Keep the bridge compatible with RecordReader implementations that do
+		// not expose the packed Boolean fast path.
+		data := make([]byte, int(bitutil.BytesForBits(int64(length))))
+		for idx, value := range rdr.Values()[:length] {
+			if value != 0 {
+				bitutil.SetBit(data, idx)
+			}
+		}
+		values = memory.NewBufferBytes(data)
+	}
+	defer values.Release()
 	return array.NewData(&arrow.BooleanType{}, length, []*memory.Buffer{
-		bitmap, bb,
+		bitmap, values,
 	}, nil, int(rdr.NullCount()), 0)
 }
 
@@ -826,56 +947,65 @@ func transferDate64(rdr file.RecordReader, dt arrow.DataType) arrow.ArrayData {
 }
 
 // coerce int96 to nanosecond timestamp
-func transferInt96(rdr file.RecordReader, dt arrow.DataType) arrow.ArrayData {
+func transferInt96(rdr file.RecordReader, dt arrow.DataType) (arrow.ArrayData, error) {
 	length := rdr.ValuesWritten()
 	values := parquet.Int96Traits.CastFromBytes(rdr.Values())
-
-	data := make([]byte, arrow.Int64SizeBytes*length)
-	out := arrow.Int64Traits.CastFromBytes(data)
-
-	for idx, val := range values[:length] {
-		if binary.LittleEndian.Uint32(val[8:]) == 0 {
-			out[idx] = 0
-		} else {
-			out[idx] = val.ToTime().UnixNano()
-		}
-	}
 
 	bitmap := rdr.ReleaseValidBits()
 	if bitmap != nil {
 		defer bitmap.Release()
 	}
+
+	data := make([]byte, arrow.Int64SizeBytes*length)
+	out := arrow.Int64Traits.CastFromBytes(data)
+
+	for idx, val := range values[:length] {
+		if bitmap == nil || bitutil.BitIsSet(bitmap.Bytes(), idx) {
+			timestamp, err := val.ToTimestamp()
+			if err != nil {
+				return nil, fmt.Errorf("parquet INT96 timestamp at index %d: %w", idx, err)
+			}
+			out[idx] = int64(timestamp)
+		}
+	}
+
 	return array.NewData(dt, length, []*memory.Buffer{
 		bitmap, memory.NewBufferBytes(data),
-	}, nil, int(rdr.NullCount()), 0)
+	}, nil, int(rdr.NullCount()), 0), nil
 }
 
 // convert physical integer storage of a decimal logical type to a decimal128 typed array
+func transferDecimalIntegerValues[In parquetInteger](values []In, dt arrow.Type) []byte {
+	switch dt {
+	case arrow.DECIMAL128:
+		data := make([]byte, arrow.Decimal128Traits.BytesRequired(len(values)))
+		out := arrow.Decimal128Traits.CastFromBytes(data)
+		for i, value := range values {
+			out[i] = decimal128.FromI64(int64(value))
+		}
+		return data
+	case arrow.DECIMAL256:
+		data := make([]byte, arrow.Decimal256Traits.BytesRequired(len(values)))
+		out := arrow.Decimal256Traits.CastFromBytes(data)
+		for i, value := range values {
+			out[i] = decimal256.FromI64(int64(value))
+		}
+		return data
+	}
+	return nil
+}
+
 func transferDecimalInteger(rdr file.RecordReader, dt arrow.DataType) arrow.ArrayData {
 	length := rdr.ValuesWritten()
 
-	var values reflect.Value
+	var data []byte
 	switch rdr.Type() {
 	case parquet.Types.Int32:
-		values = reflect.ValueOf(arrow.Int32Traits.CastFromBytes(rdr.Values())[:length])
+		values := arrow.Int32Traits.CastFromBytes(rdr.Values())[:length]
+		data = transferDecimalIntegerValues(values, dt.ID())
 	case parquet.Types.Int64:
-		values = reflect.ValueOf(arrow.Int64Traits.CastFromBytes(rdr.Values())[:length])
-	}
-
-	var data []byte
-	switch dt.ID() {
-	case arrow.DECIMAL128:
-		data = make([]byte, arrow.Decimal128Traits.BytesRequired(length))
-		out := arrow.Decimal128Traits.CastFromBytes(data)
-		for i := 0; i < values.Len(); i++ {
-			out[i] = decimal128.FromI64(values.Index(i).Int())
-		}
-	case arrow.DECIMAL256:
-		data = make([]byte, arrow.Decimal256Traits.BytesRequired(length))
-		out := arrow.Decimal256Traits.CastFromBytes(data)
-		for i := 0; i < values.Len(); i++ {
-			out[i] = decimal256.FromI64(values.Index(i).Int())
-		}
+		values := arrow.Int64Traits.CastFromBytes(rdr.Values())[:length]
+		data = transferDecimalIntegerValues(values, dt.ID())
 	}
 
 	var nullmap *memory.Buffer

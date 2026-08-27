@@ -43,6 +43,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -168,6 +169,52 @@ func TestWriteDataPageV2NumRows(t *testing.T) {
 
 	wr.FlushBufferedDataPages()
 	assert.EqualValues(t, 3, wr.RowsWritten())
+}
+
+func TestWriteDictIndicesRejectsBeforeWritingLevels(t *testing.T) {
+	root, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewInt32Node("v", parquet.Repetitions.Required, -1),
+	}, -1)
+	require.NoError(t, err)
+
+	props := parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(true),
+		parquet.WithStats(false),
+	)
+	var buf bytes.Buffer
+	w := file.NewParquetWriter(&buf, root, file.WithWriterProps(props))
+	rgw := w.AppendRowGroup()
+	cw, err := rgw.NextColumn()
+	require.NoError(t, err)
+	writer := cw.(*file.Int32ColumnChunkWriter)
+
+	dictionary := array.NewInt32Builder(memory.DefaultAllocator)
+	dictionary.AppendValues([]int32{10, 20}, nil)
+	dictValues := dictionary.NewArray()
+	dictionary.Release()
+	defer dictValues.Release()
+	indices := array.NewInt8Builder(memory.DefaultAllocator)
+	indices.Append(2)
+	invalidIndices := indices.NewArray()
+	indices.Release()
+	defer invalidIndices.Release()
+
+	dictEncoder := cw.CurrentEncoder().(encoding.DictEncoder)
+	require.NoError(t, dictEncoder.PutDictionary(dictValues))
+	require.ErrorIs(t, writer.WriteDictIndices(invalidIndices, nil, nil), arrow.ErrInvalid)
+	assert.Equal(t, 0, writer.RowsWritten())
+
+	validBuilder := array.NewInt8Builder(memory.DefaultAllocator)
+	validBuilder.Append(0)
+	validIndices := validBuilder.NewArray()
+	validBuilder.Release()
+	defer validIndices.Release()
+	require.NoError(t, writer.WriteDictIndices(validIndices, nil, nil))
+	assert.Equal(t, 1, writer.RowsWritten())
+
+	require.NoError(t, cw.Close())
+	require.NoError(t, rgw.Close())
+	require.NoError(t, w.Close())
 }
 
 func TestDataPageV2RowBoundaries(t *testing.T) {

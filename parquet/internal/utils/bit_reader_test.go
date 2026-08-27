@@ -360,6 +360,70 @@ func TestBitArrayVals(t *testing.T) {
 	}
 }
 
+func TestBitReaderGetBatchWideValues(t *testing.T) {
+	for width := uint(33); width <= 64; width++ {
+		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
+			const nvalues = 32
+			values := make([]uint64, nvalues)
+			mask := uint64(math.MaxUint64)
+			if width < 64 {
+				mask = 1<<width - 1
+			}
+			for idx := range values {
+				values[idx] = uint64(idx) * 0x9e3779b97f4a7c15 & mask
+			}
+
+			buf := make([]byte, bitutil.BytesForBits(int64(width*nvalues)))
+			writer := utils.NewBitWriter(utils.NewWriterAtBuffer(buf))
+			for _, value := range values {
+				assert.NoError(t, writer.WriteValue(value, width))
+			}
+			writer.Flush(false)
+
+			reader := utils.NewBitReader(bytes.NewReader(buf))
+			actual := make([]uint64, nvalues)
+			n, err := reader.GetBatch(width, actual)
+			assert.NoError(t, err)
+			assert.Equal(t, nvalues, n)
+			assert.Equal(t, values, actual)
+		})
+	}
+}
+
+func TestBitReaderGetBatchKeepsFollowingValues(t *testing.T) {
+	for width := uint(1); width <= 64; width++ {
+		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
+			const nvalues = 65
+			values := make([]uint64, nvalues)
+			mask := uint64(math.MaxUint64)
+			if width < 64 {
+				mask = 1<<width - 1
+			}
+			for idx := range values {
+				values[idx] = (uint64(idx)*0x9e3779b97f4a7c15 + uint64(idx/3)) & mask
+			}
+
+			buf := make([]byte, bitutil.BytesForBits(int64(width*nvalues)))
+			writer := utils.NewBitWriter(utils.NewWriterAtBuffer(buf))
+			for _, value := range values {
+				assert.NoError(t, writer.WriteValue(value, width))
+			}
+			writer.Flush(false)
+
+			reader := utils.NewBitReader(bytes.NewReader(buf))
+			actual := make([]uint64, nvalues-1)
+			n, err := reader.GetBatch(width, actual)
+			assert.NoError(t, err)
+			assert.Equal(t, nvalues-1, n)
+			assert.Equal(t, values[:nvalues-1], actual)
+
+			value, ok := reader.GetValue(int(width))
+			assert.True(t, ok)
+			assert.Equal(t, values[nvalues-1], value)
+		})
+	}
+}
+
 func TestBitReaderRejectsTruncatedPackedBatches(t *testing.T) {
 	for width := 1; width <= 32; width++ {
 		for _, batchSize := range []int{32, 64} {
@@ -595,6 +659,65 @@ func TestRLE(t *testing.T) {
 
 func TestRleRandom(t *testing.T) {
 	suite.Run(t, new(RLERandomSuite))
+}
+
+func TestRleBatchLevelsMatchesScalar(t *testing.T) {
+	patterns := map[string][]int16{
+		"all defined":      make([]int16, 257),
+		"alternating":      make([]int16, 257),
+		"long alternating": make([]int16, 63*8+17),
+		"literal boundary": make([]int16, 63*8+17),
+		"mixed runs":       {},
+	}
+	for i := range patterns["all defined"] {
+		patterns["all defined"][i] = 3
+		patterns["alternating"][i] = int16(i % 2)
+	}
+	for i := range patterns["long alternating"] {
+		patterns["long alternating"][i] = int16(i % 2)
+	}
+	for i := range patterns["literal boundary"] {
+		if i < 63*8-3 {
+			patterns["literal boundary"][i] = int16(i % 2)
+		} else {
+			patterns["literal boundary"][i] = 3
+		}
+	}
+	for runLength := 1; runLength <= 32; runLength++ {
+		for range runLength {
+			patterns["mixed runs"] = append(patterns["mixed runs"], int16(runLength%4))
+		}
+	}
+
+	for name, levels := range patterns {
+		t.Run(name, func(t *testing.T) {
+			bufSize := utils.MaxRLEBufferSize(2, len(levels))
+			scalarBuf := make([]byte, bufSize)
+			scalar := utils.NewRleEncoder(utils.NewWriterAtBuffer(scalarBuf), 2)
+			for _, level := range levels {
+				if err := scalar.Put(uint64(level)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			scalarLen := scalar.Flush()
+
+			batchBuf := make([]byte, bufSize)
+			batch := utils.NewRleEncoder(utils.NewWriterAtBuffer(batchBuf), 2)
+			chunkSizes := []int{1, 7, 8, 9, 31}
+			for offset, chunk := 0, 0; offset < len(levels); chunk++ {
+				end := min(offset+chunkSizes[chunk%len(chunkSizes)], len(levels))
+				n, err := batch.PutBatchLevels(levels[offset:end])
+				if err != nil {
+					t.Fatal(err)
+				}
+				assert.Equal(t, end-offset, n)
+				offset = end
+			}
+			batchLen := batch.Flush()
+
+			assert.Equal(t, scalarBuf[:scalarLen], batchBuf[:batchLen])
+		})
+	}
 }
 
 func (r *RLETestSuite) ValidateRle(vals []uint64, width int, expected []byte, explen int) {

@@ -17,6 +17,7 @@
 package avro
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -265,6 +266,28 @@ func TestArrowSchemaFromAvroJSON_RejectsInvalidRoot(t *testing.T) {
 				t.Fatalf("unexpected error for %s: %v", tt.schemaJSON, err)
 			}
 		})
+	}
+}
+
+func TestArrowSchemaFromAvroJSON_RejectsInvalidDecimalPrecision(t *testing.T) {
+	const schemaJSON = `{
+		"type": "record",
+		"name": "Root",
+		"fields": [{
+			"name": "value",
+			"type": {"type": "bytes", "logicalType": "decimal", "precision": 77, "scale": 2}
+		}]
+	}`
+
+	_, err := ArrowSchemaFromAvroJSON(schemaJSON)
+	if err == nil {
+		t.Fatal("expected invalid decimal precision error")
+	}
+	if !errors.Is(err, arrow.ErrInvalid) {
+		t.Fatalf("expected errors.Is(err, arrow.ErrInvalid), got %v", err)
+	}
+	if !strings.Contains(err.Error(), "precision") {
+		t.Fatalf("expected precision in error, got %v", err)
 	}
 }
 

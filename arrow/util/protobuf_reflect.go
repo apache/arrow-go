@@ -661,23 +661,35 @@ func (msg ProtobufMessageReflection) Schema() *arrow.Schema {
 
 // Record returns an arrow.RecordBatch for a protobuf message
 func (msg ProtobufMessageReflection) Record(mem memory.Allocator) arrow.RecordBatch {
+	record, err := msg.RecordWithError(mem)
+	if err != nil {
+		panic(err)
+	}
+	return record
+}
+
+// RecordWithError returns an arrow.RecordBatch for a protobuf message and
+// reports conversion failures.
+func (msg ProtobufMessageReflection) RecordWithError(mem memory.Allocator) (arrow.RecordBatch, error) {
 	if mem == nil {
 		mem = memory.NewGoAllocator()
 	}
 
 	schema := msg.Schema()
 	if schema.NumFields() == 0 {
-		return array.NewRecordBatch(schema, nil, 1)
+		return array.NewRecordBatch(schema, nil, 1), nil
 	}
 
 	recordBuilder := array.NewRecordBuilder(mem, schema)
 	defer recordBuilder.Release()
 
 	for i, f := range msg.fields {
-		f.AppendValueOrNull(recordBuilder.Field(i), mem)
+		if err := f.AppendValueOrNull(recordBuilder.Field(i), mem); err != nil {
+			return nil, fmt.Errorf("failed to append protobuf field %q: %w", f.name(), err)
+		}
 	}
 
-	return recordBuilder.NewRecordBatch()
+	return recordBuilder.NewRecordBatch(), nil
 }
 
 // NewProtobufMessageReflection initialises a ProtobufMessageReflection
@@ -776,7 +788,11 @@ func (f ProtobufMessageFieldReflection) AppendValueOrNull(b array.Builder, mem m
 	switch b.Type().ID() {
 	case arrow.STRING:
 		if f.isEnum() {
-			b.(*array.StringBuilder).Append(string(fd.Enum().Values().ByNumber(pv.Enum()).Name()))
+			enumValue := fd.Enum().Values().ByNumber(pv.Enum())
+			if enumValue == nil {
+				return fmt.Errorf("enum value %d is not defined for %s", pv.Enum(), fd.Enum().FullName())
+			}
+			b.(*array.StringBuilder).Append(string(enumValue.Name()))
 		} else {
 			b.(*array.StringBuilder).Append(pv.String())
 		}
@@ -816,6 +832,11 @@ func (f ProtobufMessageFieldReflection) AppendValueOrNull(b array.Builder, mem m
 			return err
 		}
 	case arrow.DICTIONARY:
+		enumNum := int(f.reflectValue().Int())
+		enumValue := fd.Enum().Values().ByNumber(protoreflect.EnumNumber(enumNum))
+		if enumValue == nil {
+			return fmt.Errorf("enum value %d is not defined for %s", enumNum, fd.Enum().FullName())
+		}
 		pdr := f.asDictionary()
 		db := b.(*array.BinaryDictionaryBuilder)
 		dictValues := pdr.getDictValues(mem).(*array.String)
@@ -824,8 +845,7 @@ func (f ProtobufMessageFieldReflection) AppendValueOrNull(b array.Builder, mem m
 		if err != nil {
 			return err
 		}
-		enumNum := int(f.reflectValue().Int())
-		enumVal := fd.Enum().Values().ByNumber(protoreflect.EnumNumber(enumNum)).Name()
+		enumVal := enumValue.Name()
 		err = db.AppendValueFromString(string(enumVal))
 		if err != nil {
 			return err

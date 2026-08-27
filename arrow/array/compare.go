@@ -361,6 +361,38 @@ func SliceEqual(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, ren
 	return Equal(l, r)
 }
 
+type listOffset interface {
+	int32 | int64
+}
+
+func arrayEqualListOffsets[T listOffset](leftValues, rightValues arrow.Array,
+	leftOffsets, rightOffsets []T, leftOffset, rightOffset, length int, validBits []byte) bool {
+	if len(validBits) == 0 {
+		validBits = nil
+	}
+	return bitutils.VisitSetBitRuns(validBits, int64(leftOffset), int64(length),
+		func(pos, runLength int64) error {
+			leftIndex := leftOffset + int(pos)
+			rightIndex := rightOffset + int(pos)
+			for i := range int(runLength) {
+				leftLength := int64(leftOffsets[leftIndex+i+1]) - int64(leftOffsets[leftIndex+i])
+				rightLength := int64(rightOffsets[rightIndex+i+1]) - int64(rightOffsets[rightIndex+i])
+				if leftLength != rightLength {
+					return arrow.ErrInvalid
+				}
+			}
+
+			leftStart := int64(leftOffsets[leftIndex])
+			rightStart := int64(rightOffsets[rightIndex])
+			leftEnd := int64(leftOffsets[leftIndex+int(runLength)])
+			rightEnd := int64(rightOffsets[rightIndex+int(runLength)])
+			if !SliceEqual(leftValues, leftStart, leftEnd, rightValues, rightStart, rightEnd) {
+				return arrow.ErrInvalid
+			}
+			return nil
+		}) == nil
+}
+
 // SliceApproxEqual reports whether slices left[lbeg:lend] and right[rbeg:rend] are approximately equal.
 func SliceApproxEqual(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64, opts ...EqualOption) bool {
 	opt := newEqualOption(opts...)

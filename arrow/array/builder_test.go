@@ -19,6 +19,7 @@ package array
 import (
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/internal/testing/tools"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
@@ -54,6 +55,62 @@ func TestBuilder_UnsafeSetValid(t *testing.T) {
 
 	ab.unsafeSetValid(17)
 	assert.Equal(t, []byte{0xe0, 0xff, 0x3f, 0}, ab.nullBitmap.Bytes())
+}
+
+func TestBuilder_UnsafeAppendBoolsToBitmap(t *testing.T) {
+	patterns := []struct {
+		name  string
+		valid func(int) bool
+	}{
+		{"all valid", func(int) bool { return true }},
+		{"all null", func(int) bool { return false }},
+		{"alternating", func(i int) bool { return i%2 == 0 }},
+		{"one in three null", func(i int) bool { return i%3 != 0 }},
+	}
+
+	for _, pattern := range patterns {
+		for offset := 0; offset < 8; offset++ {
+			for length := 1; length <= 33; length++ {
+				b := &builder{mem: memory.NewGoAllocator()}
+				b.init(48)
+				for i := range b.nullBitmap.Bytes() {
+					b.nullBitmap.Bytes()[i] = byte(0x5a + i*31)
+				}
+
+				expectedBitmap := append([]byte(nil), b.nullBitmap.Bytes()...)
+				valid := make([]bool, length)
+				expectedNulls := offset - bitutil.CountSetBits(expectedBitmap, 0, offset)
+				for i := range valid {
+					valid[i] = pattern.valid(i)
+					if valid[i] {
+						bitutil.SetBit(expectedBitmap, offset+i)
+					} else {
+						bitutil.ClearBit(expectedBitmap, offset+i)
+						expectedNulls++
+					}
+				}
+
+				b.length = offset
+				b.nulls = offset - bitutil.CountSetBits(b.nullBitmap.Bytes(), 0, offset)
+				b.unsafeAppendBoolsToBitmap(valid, len(valid))
+
+				assert.Equal(t, offset+length, b.Len(), "%s, offset=%d, length=%d", pattern.name, offset, length)
+				assert.Equal(t, expectedNulls, b.NullN(), "%s, offset=%d, length=%d", pattern.name, offset, length)
+				assert.Equal(t, expectedBitmap, b.nullBitmap.Bytes(), "%s, offset=%d, length=%d", pattern.name, offset, length)
+				b.nullBitmap.Release()
+			}
+		}
+	}
+}
+
+func TestPackValidityByte(t *testing.T) {
+	for want := 0; want < 1<<8; want++ {
+		valid := make([]bool, 8)
+		for i := range valid {
+			valid[i] = want&(1<<i) != 0
+		}
+		assert.Equal(t, byte(want), packValidityByte(valid), "want=%08b", want)
+	}
 }
 
 func TestBuilder_resize(t *testing.T) {
