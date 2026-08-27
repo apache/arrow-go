@@ -253,6 +253,24 @@ func (fr *FileReader) GetFieldReaders(ctx context.Context, colIndices, rowGroups
 	out := make([]*ColumnReader, len(fieldIndices))
 	outFields := make([]arrow.Field, len(fieldIndices))
 
+	if !fr.Props.Parallel {
+		for idx, fidx := range fieldIndices {
+			rdr, err := fr.GetFieldReader(ctx, fidx, includedLeaves, rowGroups)
+			if err != nil {
+				for _, rdr := range out {
+					if rdr != nil {
+						rdr.Release()
+					}
+				}
+				return nil, nil, err
+			}
+			outFields[idx] = *rdr.Field()
+			out[idx] = rdr
+		}
+
+		return out, arrow.NewSchema(outFields, fr.Manifest.SchemaMeta), nil
+	}
+
 	// Load batches in parallel
 	// When reading structs with large numbers of columns, the serial load is very slow.
 	// This is especially true when reading Cloud Storage. Loading concurrently
@@ -260,9 +278,6 @@ func (fr *FileReader) GetFieldReaders(ctx context.Context, colIndices, rowGroups
 	// GetFieldReader causes read operations, when issued serially on large numbers of columns,
 	// this is super time consuming. Get field readers concurrently.
 	g, gctx := errgroup.WithContext(ctx)
-	if !fr.Props.Parallel {
-		g.SetLimit(1)
-	}
 	for idx, fidx := range fieldIndices {
 		idx, fidx := idx, fidx // create concurrent copy
 		g.Go(func() error {
@@ -368,6 +383,39 @@ func (fr *FileReader) ReadRowGroups(ctx context.Context, indices, rowGroups []in
 	readers, sc, err := fr.GetFieldReaders(ctx, indices, rowGroups)
 	if err != nil {
 		return nil, err
+	}
+
+	if !fr.Props.Parallel {
+		columns := make([]arrow.Column, sc.NumFields())
+		defer releaseColumns(columns)
+		defer func() {
+			for _, rdr := range readers {
+				rdr.Release()
+			}
+		}()
+
+		for idx, rdr := range readers {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+
+			data, err := fr.ReadColumn(rowGroups, rdr)
+			if err != nil {
+				if data != nil {
+					data.Release()
+				}
+				return nil, err
+			}
+			columns[idx] = *arrow.NewColumn(sc.Field(idx), data)
+			data.Release()
+		}
+
+		var nrows int
+		if len(columns) > 0 {
+			nrows = columns[0].Len()
+		}
+
+		return array.NewTable(sc, columns, int64(nrows)), nil
 	}
 
 	// producer-consumer parallelization
