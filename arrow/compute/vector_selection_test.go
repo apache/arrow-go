@@ -2366,6 +2366,62 @@ func BenchmarkTakeStringPartitionPattern(b *testing.B) {
 	b.ReportMetric(float64(numRows*b.N)/b.Elapsed().Seconds(), "rows/sec")
 }
 
+func TestFilterRejectsNonArrayLikeFilters(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	values, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader("[1]"))
+	require.NoError(t, err)
+	defer values.Release()
+
+	valuesDatum := compute.NewDatum(values)
+	defer valuesDatum.Release()
+	schema := arrow.NewSchema([]arrow.Field{{Name: "filter", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	filterRecord := array.NewRecordBatch(
+		schema,
+		[]arrow.Array{values},
+		1,
+	)
+	defer filterRecord.Release()
+	filterTable := array.NewTableFromRecords(schema, []arrow.RecordBatch{filterRecord})
+	defer filterTable.Release()
+
+	for _, tt := range []struct {
+		name   string
+		filter interface{}
+	}{
+		{"record batch", filterRecord},
+		{"table", filterTable},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			filterDatum := compute.NewDatum(tt.filter)
+			defer filterDatum.Release()
+
+			_, err := compute.Filter(context.Background(), valuesDatum, filterDatum, compute.FilterOptions{})
+			require.ErrorIs(t, err, arrow.ErrNotImplemented)
+		})
+	}
+}
+
+func TestFilterAcceptsScalarBooleanFilter(t *testing.T) {
+	valuesDatum := compute.NewDatum(int32(1))
+	defer valuesDatum.Release()
+	filterDatum := compute.NewDatum(true)
+	defer filterDatum.Release()
+
+	result, err := compute.Filter(context.Background(), valuesDatum, filterDatum, compute.FilterOptions{})
+	require.NoError(t, err)
+	defer result.Release()
+
+	expected, _, err := array.FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32, strings.NewReader("[1]"))
+	require.NoError(t, err)
+	defer expected.Release()
+	actual := result.(*compute.ArrayDatum).MakeArray()
+	defer actual.Release()
+
+	require.True(t, array.Equal(expected, actual))
+}
+
 func BenchmarkTakeMultiColumn(b *testing.B) {
 	// Benchmark Take on a record batch with multiple string columns
 	// to simulate real-world use cases (e.g., CloudFront logs with 20+ string columns)

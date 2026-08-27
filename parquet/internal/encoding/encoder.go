@@ -107,10 +107,13 @@ func (e *encoder) Reset() { e.sink.Reset(0) }
 type dictEncoder struct {
 	encoder
 
-	dictEncodedSize int
-	idxBuffer       *memory.Buffer
-	idxValues       []int32
-	memo            MemoTable
+	dictEncodedSize   int
+	idxBuffer         *memory.Buffer
+	idxValues         []int32
+	memo              MemoTable
+	trackReferences   bool
+	referencedBitmap  []byte
+	referencedIndices []int32
 
 	// rawDataSize is the number of bytes of input values observed since
 	// the last page flush. Mirrors parquet-mr's rawDataByteSize and is
@@ -140,10 +143,44 @@ func (d *dictEncoder) Reset() {
 	d.idxValues = d.idxValues[:0]
 	d.idxBuffer.ResizeNoShrink(0)
 	d.rawDataSize = 0
+	clear(d.referencedBitmap)
+	d.referencedIndices = d.referencedIndices[:0]
 	d.memo.Reset()
 	if d.preservedDict != nil {
 		d.preservedDict.Release()
 		d.preservedDict = nil
+	}
+}
+
+func (d *dictEncoder) EnableDictionaryReferenceTracking() {
+	d.trackReferences = true
+}
+
+func (d *dictEncoder) ReferencedDictionaryIndices() []int32 {
+	return d.referencedIndices
+}
+
+func (d *dictEncoder) DictionaryIndexReferenced(index int) bool {
+	if index < 0 || index>>3 >= len(d.referencedBitmap) {
+		return false
+	}
+	return d.referencedBitmap[index>>3]&(1<<uint(index&7)) != 0
+}
+
+func (d *dictEncoder) recordDictionaryReference(index int32) {
+	if !d.trackReferences || index < 0 {
+		return
+	}
+
+	byteIndex := int(index) >> 3
+	if byteIndex >= len(d.referencedBitmap) {
+		d.referencedBitmap = append(d.referencedBitmap,
+			make([]byte, byteIndex-len(d.referencedBitmap)+1)...)
+	}
+	mask := byte(1 << uint(index&7))
+	if d.referencedBitmap[byteIndex]&mask == 0 {
+		d.referencedBitmap[byteIndex] |= mask
+		d.referencedIndices = append(d.referencedIndices, index)
 	}
 }
 
@@ -182,56 +219,115 @@ func (d *dictEncoder) expandBuffer(newCap int) {
 	d.idxValues = arrow.Int32Traits.CastFromBytes(d.idxBuffer.Buf())[: curLen : d.idxBuffer.Len()/arrow.Int32SizeBytes]
 }
 
+type signedDictionaryIndex interface {
+	int8 | int16 | int32 | int64
+}
+
+type unsignedDictionaryIndex interface {
+	uint8 | uint16 | uint32 | uint64
+}
+
+const maxDictionaryIndex = uint64(1<<31 - 1)
+
+func (d *dictEncoder) invalidDictionaryIndex(index any) error {
+	return fmt.Errorf("%w: dictionary index %v out of bounds for dictionary of length %d",
+		arrow.ErrInvalid, index, d.NumEntries())
+}
+
+func putSignedDictionaryIndices[T signedDictionaryIndex](d *dictEncoder, data arrow.Array, values []T, start int) error {
+	dictSize := uint64(d.NumEntries())
+	curPos := start
+	return bitutils.VisitSetBitRuns(data.NullBitmapBytes(),
+		int64(data.Data().Offset()), int64(data.Len()),
+		func(pos, length int64) error {
+			for i := int64(0); i < length; i++ {
+				index := values[i+pos]
+				if index < 0 || uint64(index) >= dictSize || uint64(index) > maxDictionaryIndex {
+					return d.invalidDictionaryIndex(index)
+				}
+				d.idxValues[curPos] = int32(index)
+				d.recordDictionaryReference(int32(index))
+				curPos++
+			}
+			return nil
+		})
+}
+
+func putUnsignedDictionaryIndices[T unsignedDictionaryIndex](d *dictEncoder, data arrow.Array, values []T, start int) error {
+	dictSize := uint64(d.NumEntries())
+	curPos := start
+	return bitutils.VisitSetBitRuns(data.NullBitmapBytes(),
+		int64(data.Data().Offset()), int64(data.Len()),
+		func(pos, length int64) error {
+			for i := int64(0); i < length; i++ {
+				index := values[i+pos]
+				if uint64(index) >= dictSize || uint64(index) > maxDictionaryIndex {
+					return d.invalidDictionaryIndex(index)
+				}
+				d.idxValues[curPos] = int32(index)
+				d.recordDictionaryReference(int32(index))
+				curPos++
+			}
+			return nil
+		})
+}
+
+func (d *dictEncoder) rollbackDictionaryReferences(start, bitmapLen int) {
+	for _, index := range d.referencedIndices[start:] {
+		d.referencedBitmap[index>>3] &^= byte(1 << uint(index&7))
+	}
+	d.referencedIndices = d.referencedIndices[:start]
+	d.referencedBitmap = d.referencedBitmap[:bitmapLen]
+}
+
 func (d *dictEncoder) PutIndices(data arrow.Array) error {
+	switch data.DataType().ID() {
+	case arrow.INT8, arrow.UINT8, arrow.INT16, arrow.UINT16,
+		arrow.INT32, arrow.UINT32, arrow.INT64, arrow.UINT64:
+	default:
+		return fmt.Errorf("%w: passed non-integer array to PutIndices", arrow.ErrInvalid)
+	}
+
 	newValues := data.Len() - data.NullN()
 	curPos := len(d.idxValues)
 	newLen := newValues + curPos
 	d.expandBuffer(newLen)
 	d.idxValues = d.idxValues[:newLen:cap(d.idxValues)]
 
+	referenceStart := len(d.referencedIndices)
+	bitmapLen := len(d.referencedBitmap)
+	valueOffset := data.Data().Offset()
+	var err error
 	switch data.DataType().ID() {
-	case arrow.UINT8, arrow.INT8:
-		values := arrow.Uint8Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[data.Data().Offset():]
-		bitutils.VisitSetBitRunsNoErr(data.NullBitmapBytes(),
-			int64(data.Data().Offset()), int64(data.Len()),
-			func(pos, length int64) {
-				for i := int64(0); i < length; i++ {
-					d.idxValues[curPos] = int32(values[i+pos])
-					curPos++
-				}
-			})
-	case arrow.UINT16, arrow.INT16:
-		values := arrow.Uint16Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[data.Data().Offset():]
-		bitutils.VisitSetBitRunsNoErr(data.NullBitmapBytes(),
-			int64(data.Data().Offset()), int64(data.Len()),
-			func(pos, length int64) {
-				for i := int64(0); i < length; i++ {
-					d.idxValues[curPos] = int32(values[i+pos])
-					curPos++
-				}
-			})
-	case arrow.UINT32, arrow.INT32:
-		values := arrow.Uint32Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[data.Data().Offset():]
-		bitutils.VisitSetBitRunsNoErr(data.NullBitmapBytes(),
-			int64(data.Data().Offset()), int64(data.Len()),
-			func(pos, length int64) {
-				for i := int64(0); i < length; i++ {
-					d.idxValues[curPos] = int32(values[i+pos])
-					curPos++
-				}
-			})
-	case arrow.UINT64, arrow.INT64:
-		values := arrow.Uint64Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[data.Data().Offset():]
-		bitutils.VisitSetBitRunsNoErr(data.NullBitmapBytes(),
-			int64(data.Data().Offset()), int64(data.Len()),
-			func(pos, length int64) {
-				for i := int64(0); i < length; i++ {
-					d.idxValues[curPos] = int32(values[i+pos])
-					curPos++
-				}
-			})
-	default:
-		return fmt.Errorf("%w: passed non-integer array to PutIndices", arrow.ErrInvalid)
+	case arrow.INT8:
+		values := arrow.Int8Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[valueOffset:]
+		err = putSignedDictionaryIndices(d, data, values, curPos)
+	case arrow.UINT8:
+		values := arrow.Uint8Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[valueOffset:]
+		err = putUnsignedDictionaryIndices(d, data, values, curPos)
+	case arrow.INT16:
+		values := arrow.Int16Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[valueOffset:]
+		err = putSignedDictionaryIndices(d, data, values, curPos)
+	case arrow.UINT16:
+		values := arrow.Uint16Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[valueOffset:]
+		err = putUnsignedDictionaryIndices(d, data, values, curPos)
+	case arrow.INT32:
+		values := arrow.Int32Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[valueOffset:]
+		err = putSignedDictionaryIndices(d, data, values, curPos)
+	case arrow.UINT32:
+		values := arrow.Uint32Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[valueOffset:]
+		err = putUnsignedDictionaryIndices(d, data, values, curPos)
+	case arrow.INT64:
+		values := arrow.Int64Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[valueOffset:]
+		err = putSignedDictionaryIndices(d, data, values, curPos)
+	case arrow.UINT64:
+		values := arrow.Uint64Traits.CastFromBytes(data.Data().Buffers()[1].Bytes())[valueOffset:]
+		err = putUnsignedDictionaryIndices(d, data, values, curPos)
+	}
+	if err != nil {
+		d.idxValues = d.idxValues[:curPos]
+		d.rollbackDictionaryReferences(referenceStart, bitmapLen)
+		return err
 	}
 
 	return nil
@@ -242,6 +338,7 @@ func (d *dictEncoder) addIndex(idx int) {
 	curLen := len(d.idxValues)
 	d.expandBuffer(curLen + 1)
 	d.idxValues = append(d.idxValues, int32(idx))
+	d.recordDictionaryReference(int32(idx))
 }
 
 // FlushValues dumps all the currently buffered indexes that would become the data page to a buffer and

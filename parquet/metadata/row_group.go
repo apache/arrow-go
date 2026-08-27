@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
@@ -79,8 +80,8 @@ func (r *RowGroupMetaData) Ordinal() int16 { return r.rowGroup.GetOrdinal() }
 
 // ColumnChunk returns the metadata for the requested (0-based) chunk index
 func (r *RowGroupMetaData) ColumnChunk(i int) (*ColumnChunkMetaData, error) {
-	if i >= r.NumColumns() {
-		panic(fmt.Errorf("parquet: the file only has %d columns, requested metadata for column: %d", r.NumColumns(), i))
+	if i < 0 || i >= r.NumColumns() {
+		return nil, fmt.Errorf("%w: parquet file only has %d columns, requested metadata for column %d", arrow.ErrIndex, r.NumColumns(), i)
 	}
 
 	return NewColumnChunkMetaData(r.rowGroup.Columns[i], r.Schema.Column(i), r.version, r.rowGroup.GetOrdinal(), int16(i), r.fileDecryptor)
@@ -95,6 +96,9 @@ func (r *RowGroupMetaData) SortingColumns() []parquet.SortingColumn {
 // directly from the underlying thrift struct, avoiding the overhead of
 // constructing a full ColumnChunkMetaData.
 func (r *RowGroupMetaData) ColumnIndexLocation(i int) (IndexLocation, bool) {
+	if i < 0 || i >= r.NumColumns() {
+		return IndexLocation{}, false
+	}
 	col := r.rowGroup.Columns[i]
 	if col.IsSetColumnIndexOffset() {
 		return IndexLocation{
@@ -109,6 +113,9 @@ func (r *RowGroupMetaData) ColumnIndexLocation(i int) (IndexLocation, bool) {
 // directly from the underlying thrift struct, avoiding the overhead of
 // constructing a full ColumnChunkMetaData.
 func (r *RowGroupMetaData) OffsetIndexLocation(i int) (IndexLocation, bool) {
+	if i < 0 || i >= r.NumColumns() {
+		return IndexLocation{}, false
+	}
 	col := r.rowGroup.Columns[i]
 	if col.IsSetOffsetIndexOffset() {
 		return IndexLocation{

@@ -482,7 +482,7 @@ func (fv *fieldVisitor) visit(field arrow.Field) {
 		offsets[0] = fieldToFB(fv.b, fv.pos.Child(0),
 			arrow.Field{Name: "run_ends", Type: dt.RunEnds()}, fv.memo)
 		offsets[1] = fieldToFB(fv.b, fv.pos.Child(1),
-			arrow.Field{Name: "values", Type: dt.Encoded(), Nullable: true}, fv.memo)
+			arrow.Field{Name: "values", Type: dt.Encoded(), Nullable: dt.ValueNullable}, fv.memo)
 		flatbuf.RunEndEncodedStart(fv.b)
 		fv.b.PrependUOffsetT(offsets[1])
 		fv.b.PrependUOffsetT(offsets[0])
@@ -889,7 +889,9 @@ func concreteTypeFromFB(typ flatbuf.Type, data flatbuffers.Table, children []arr
 		default:
 			return nil, fmt.Errorf("%w: arrow/ipc: run-end encoded run_ends field must be one of int16, int32, or int64 type", arrow.ErrInvalid)
 		}
-		return arrow.RunEndEncodedOf(children[0].Type, children[1].Type), nil
+		ret := arrow.RunEndEncodedOf(children[0].Type, children[1].Type)
+		ret.ValueNullable = children[1].Nullable
+		return ret, nil
 
 	default:
 		panic(fmt.Errorf("arrow/ipc: type %v not implemented", flatbuf.EnumNamesType[typ]))

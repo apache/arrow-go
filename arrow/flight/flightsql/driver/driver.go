@@ -100,6 +100,16 @@ func (r *Rows) releaseRecord() {
 	}
 }
 
+func (r *Rows) sendRecord(ctx context.Context, record arrow.RecordBatch) bool {
+	select {
+	case r.recordChan <- record:
+		return true
+	case <-ctx.Done():
+		record.Release()
+		return false
+	}
+}
+
 // Close closes the rows iterator.
 func (r *Rows) Close() error {
 	r.ctxCancelFunc() // interrupting data streaming.
@@ -107,6 +117,9 @@ func (r *Rows) Close() error {
 	r.currentRow = 0
 
 	r.releaseRecord()
+	for record := range r.recordChan {
+		record.Release()
+	}
 
 	return nil
 }
@@ -451,9 +464,11 @@ func (c *Connector) Connect(ctx context.Context) (driver.Conn, error) {
 	}
 	client.Alloc = c.allocator
 
-	return &Connection{
-		client:  client,
-		timeout: c.timeout,
+	return &connBeginTx{
+		Connection: &Connection{
+			client:  client,
+			timeout: c.timeout,
+		},
 	}, nil
 }
 
@@ -469,6 +484,19 @@ type Connection struct {
 	txn    *flightsql.Txn
 
 	timeout time.Duration
+}
+
+type connBeginTx struct {
+	*Connection
+}
+
+var _ driver.ConnBeginTx = (*connBeginTx)(nil)
+
+func (c *connBeginTx) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	return c.Connection.BeginTx(ctx, sql.TxOptions{
+		Isolation: sql.IsolationLevel(opts.Isolation),
+		ReadOnly:  opts.ReadOnly,
+	})
 }
 
 // Prepare returns a prepared statement, bound to this connection.
@@ -587,7 +615,9 @@ func (r *Rows) streamRecordset(ctx context.Context, c *flightsql.Client, endpoin
 					continue
 				}
 
-				r.recordChan <- record
+				if !r.sendRecord(ctx, record) {
+					return
+				}
 
 				go initializeOnceOnly.Do(func() { r.initializedChan <- true })
 			}
@@ -624,6 +654,10 @@ func (c *Connection) Begin() (driver.Tx, error) {
 }
 
 func (c *Connection) BeginTx(ctx context.Context, opts sql.TxOptions) (driver.Tx, error) {
+	if opts.Isolation != sql.LevelDefault || opts.ReadOnly {
+		return nil, fmt.Errorf("%w: transaction options are not supported", ErrNotSupported)
+	}
+
 	tx, err := c.client.BeginTransaction(ctx)
 	if err != nil {
 		return nil, err

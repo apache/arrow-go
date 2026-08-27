@@ -42,7 +42,15 @@ type RunEndEncoded struct {
 }
 
 func NewRunEndEncodedArray(runEnds, values arrow.Array, logicalLength, offset int) *RunEndEncoded {
-	data := NewData(arrow.RunEndEncodedOf(runEnds.DataType(), values.DataType()), logicalLength,
+	return NewRunEndEncodedArrayWithType(
+		arrow.RunEndEncodedOf(runEnds.DataType(), values.DataType()),
+		runEnds, values, logicalLength, offset)
+}
+
+// NewRunEndEncodedArrayWithType constructs a run-end encoded array with the
+// provided type.
+func NewRunEndEncodedArrayWithType(dt *arrow.RunEndEncodedType, runEnds, values arrow.Array, logicalLength, offset int) *RunEndEncoded {
+	data := NewData(dt, logicalLength,
 		[]*memory.Buffer{nil}, []arrow.ArrayData{runEnds.Data(), values.Data()}, 0, offset)
 	defer data.Release()
 	return NewRunEndEncodedData(data)
@@ -332,6 +340,13 @@ func (r *RunEndEncoded) GetOneForMarshal(i int) interface{} {
 	return r.values.GetOneForMarshal(r.GetPhysicalIndex(i))
 }
 
+func (r *RunEndEncoded) ValueAsAny(i int) any {
+	if r.IsNull(i) {
+		return nil
+	}
+	return ValueAsAny(r.values, r.GetPhysicalIndex(i))
+}
+
 func (r *RunEndEncoded) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -385,13 +400,18 @@ type RunEndEncodedBuilder struct {
 	maxRunEnd uint64
 
 	// currently, mixing AppendValueFromString & UnmarshalOne is unsupported
-	lastUnmarshalled interface{}
-	unmarshalled     bool // tracks if Unmarshal was called (in case lastUnmarshalled is nil)
-	lastStr          *string
+	lastUnmarshalled  interface{}
+	unmarshalled      bool // tracks if Unmarshal was called (in case lastUnmarshalled is nil)
+	lastValueWasEmpty bool
+	lastStr           *string
 }
 
 func NewRunEndEncodedBuilder(mem memory.Allocator, runEnds, encoded arrow.DataType) *RunEndEncodedBuilder {
-	dt := arrow.RunEndEncodedOf(runEnds, encoded)
+	return newRunEndEncodedBuilder(mem, arrow.RunEndEncodedOf(runEnds, encoded))
+}
+
+func newRunEndEncodedBuilder(mem memory.Allocator, dt *arrow.RunEndEncodedType) *RunEndEncodedBuilder {
+	runEnds, encoded := dt.RunEnds(), dt.Encoded()
 	if !dt.ValidRunEndsType(runEnds) {
 		panic("arrow/ree: invalid runEnds type for run length encoded array")
 	}
@@ -442,6 +462,7 @@ func (b *RunEndEncodedBuilder) finishRun() {
 	b.lastUnmarshalled = nil
 	b.lastStr = nil
 	b.unmarshalled = false
+	b.lastValueWasEmpty = false
 	if b.length == 0 {
 		return
 	}
@@ -481,9 +502,13 @@ func (b *RunEndEncodedBuilder) AppendNull() {
 }
 
 func (b *RunEndEncodedBuilder) AppendNulls(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendNull()
+	if n <= 0 {
+		return
 	}
+
+	b.finishRun()
+	b.values.AppendNull()
+	b.addLength(uint64(n))
 }
 
 func (b *RunEndEncodedBuilder) UnsafeAppendBoolToBitmap(v bool) {
@@ -495,11 +520,21 @@ func (b *RunEndEncodedBuilder) NullN() int {
 }
 
 func (b *RunEndEncodedBuilder) AppendEmptyValue() {
-	b.AppendNull()
+	b.finishRun()
+	b.values.AppendEmptyValue()
+	b.addLength(1)
+	b.lastValueWasEmpty = true
 }
 
 func (b *RunEndEncodedBuilder) AppendEmptyValues(n int) {
-	b.AppendNulls(n)
+	if n <= 0 {
+		return
+	}
+
+	b.finishRun()
+	b.values.AppendEmptyValue()
+	b.addLength(uint64(n))
+	b.lastValueWasEmpty = true
 }
 
 func (b *RunEndEncodedBuilder) Reserve(n int) {
@@ -578,7 +613,7 @@ func (b *RunEndEncodedBuilder) UnmarshalOne(dec *json.Decoder) error {
 	// make sure we add a new run instead. We can detect that case by
 	// checking that the number of runEnds matches the number of values
 	// we have, which means no matter what we have to start a new run
-	if reflect.DeepEqual(value, b.lastUnmarshalled) && (value != nil || b.runEnds.Len() != b.values.Len()) {
+	if !b.lastValueWasEmpty && reflect.DeepEqual(value, b.lastUnmarshalled) && (value != nil || b.runEnds.Len() != b.values.Len()) {
 		b.ContinueRun(1)
 		return nil
 	}

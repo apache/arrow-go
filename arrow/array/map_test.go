@@ -17,6 +17,7 @@
 package array_test
 
 import (
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -326,4 +327,89 @@ func TestMapBuilder_SetNull(t *testing.T) {
 	assert.True(t, arr.IsNull(0))
 	assert.True(t, arr.IsValid(1))
 	assert.True(t, arr.IsNull(3))
+}
+
+func TestMapBuilderBulkAppendMatchesScalar(t *testing.T) {
+	starts := []int{0, 1, 7, 8, 9, 15, 16, 17}
+	batchSizes := []int{-1, 0, 1, 2, 7, 8, 9, 16, 17}
+	operations := []struct {
+		name   string
+		bulk   func(*array.MapBuilder, int)
+		scalar func(*array.MapBuilder, int)
+	}{
+		{
+			name: "nulls",
+			bulk: func(builder *array.MapBuilder, n int) {
+				builder.AppendNulls(n)
+			},
+			scalar: func(builder *array.MapBuilder, n int) {
+				for i := 0; i < n; i++ {
+					builder.AppendNull()
+				}
+			},
+		},
+		{
+			name: "empty_values",
+			bulk: func(builder *array.MapBuilder, n int) {
+				builder.AppendEmptyValues(n)
+			},
+			scalar: func(builder *array.MapBuilder, n int) {
+				for i := 0; i < n; i++ {
+					builder.AppendEmptyValue()
+				}
+			},
+		},
+	}
+
+	for operationIndex, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			reuseOperation := operations[1-operationIndex]
+			for _, start := range starts {
+				for _, batchSize := range batchSizes {
+					t.Run(fmt.Sprintf("start_%d_batch_%d", start, batchSize), func(t *testing.T) {
+						mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+						defer mem.AssertSize(t, 0)
+
+						bulk := array.NewMapBuilder(mem, arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32, false)
+						defer bulk.Release()
+						scalar := array.NewMapBuilder(mem, arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32, false)
+						defer scalar.Release()
+
+						appendMapBuilderPrefix(bulk, start)
+						appendMapBuilderPrefix(scalar, start)
+						operation.bulk(bulk, batchSize)
+						operation.scalar(scalar, batchSize)
+						assertBuilderArrayParity(t, bulk, scalar)
+
+						appendMapBuilderPrefix(bulk, start)
+						appendMapBuilderPrefix(scalar, start)
+						reuseOperation.bulk(bulk, 9)
+						reuseOperation.scalar(scalar, 9)
+						assertBuilderArrayParity(t, bulk, scalar)
+					})
+				}
+			}
+		})
+	}
+}
+
+func appendMapBuilderPrefix(builder *array.MapBuilder, n int) {
+	keys := builder.KeyBuilder().(*array.Int32Builder)
+	items := builder.ItemBuilder().(*array.Int32Builder)
+	for i := 0; i < n; i++ {
+		switch i % 4 {
+		case 0:
+			builder.Append(true)
+			keys.Append(int32(i))
+			items.Append(int32(i + 100))
+		case 1:
+			builder.AppendNull()
+		case 2:
+			builder.AppendEmptyValue()
+		case 3:
+			builder.Append(true)
+			keys.Append(int32(i + 1000))
+			items.Append(int32(i + 1100))
+		}
+	}
 }

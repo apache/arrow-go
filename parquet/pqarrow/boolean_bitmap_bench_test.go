@@ -18,6 +18,7 @@ package pqarrow
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -25,6 +26,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/compress"
+	"github.com/apache/arrow-go/v18/parquet/file"
 )
 
 // Benchmark writing boolean columns with direct bitmap path
@@ -106,12 +108,90 @@ func benchmarkBooleanWrite(b *testing.B, size int, nullable bool) {
 	b.SetBytes(int64(size / 8)) // Report bits as bytes for throughput
 }
 
+func BenchmarkBooleanBitmapRead(b *testing.B) {
+	patterns := []struct {
+		name      string
+		nullEvery int
+	}{
+		{name: "dense"},
+		{name: "nullable-1pct", nullEvery: 100},
+		{name: "nullable-5pct", nullEvery: 20},
+		{name: "nullable-10pct", nullEvery: 10},
+		{name: "nullable-50pct", nullEvery: 2},
+	}
+
+	for _, size := range []int{65536, 1000000} {
+		for _, pattern := range patterns {
+			b.Run(formatSize(size)+"/"+pattern.name, func(b *testing.B) {
+				benchmarkBooleanRead(b, size, pattern.nullEvery)
+			})
+		}
+	}
+}
+
+func benchmarkBooleanRead(b *testing.B, size, nullEvery int) {
+	mem := memory.NewGoAllocator()
+	arrowSchema := arrow.NewSchema([]arrow.Field{{
+		Name: "bools", Type: arrow.FixedWidthTypes.Boolean, Nullable: nullEvery > 0,
+	}}, nil)
+
+	bldr := array.NewBooleanBuilder(mem)
+	defer bldr.Release()
+	for i := 0; i < size; i++ {
+		if nullEvery > 0 && i%nullEvery == 0 {
+			bldr.AppendNull()
+		} else {
+			bldr.Append(i%2 == 0)
+		}
+	}
+	arr := bldr.NewBooleanArray()
+	defer arr.Release()
+	rec := array.NewRecordBatch(arrowSchema, []arrow.Array{arr}, int64(size))
+	defer rec.Release()
+
+	var buf bytes.Buffer
+	writer, err := NewFileWriter(arrowSchema, &buf,
+		parquet.NewWriterProperties(parquet.WithCompression(compress.Codecs.Uncompressed)),
+		NewArrowWriterProperties(WithAllocator(mem)))
+	if err != nil {
+		b.Fatal(err)
+	}
+	if err := writer.WriteBuffered(rec); err != nil {
+		b.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	b.SetBytes(int64(size / 8))
+	ctx := context.Background()
+	for i := 0; i < b.N; i++ {
+		pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+		if err != nil {
+			b.Fatal(err)
+		}
+		reader, err := NewFileReader(pf, ArrowReadProperties{}, mem)
+		if err != nil {
+			b.Fatal(err)
+		}
+		tbl, err := reader.ReadTable(ctx)
+		if err != nil {
+			b.Fatal(err)
+		}
+		tbl.Release()
+	}
+}
+
 func formatSize(size int) string {
 	switch {
 	case size >= 1000000:
 		return "1M"
 	case size >= 100000:
 		return "100K"
+	case size >= 65536:
+		return "64K"
 	case size >= 10000:
 		return "10K"
 	case size >= 1000:

@@ -133,6 +133,7 @@ func TestTimestampWithOffsetTypeDeserializeInvalidStorage(t *testing.T) {
 
 	badDict := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.PrimitiveTypes.Int32}
 	badREE := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32)
+	nullableREE := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int16, arrow.PrimitiveTypes.Int16)
 
 	valid, err := base.Deserialize(base.StorageType(), "")
 	require.NoError(t, err)
@@ -152,6 +153,7 @@ func TestTimestampWithOffsetTypeDeserializeInvalidStorage(t *testing.T) {
 		"offset nullable":              arrow.StructOf(tsField, arrow.Field{Name: "offset_minutes", Type: arrow.PrimitiveTypes.Int16, Nullable: true}),
 		"offset dict value not int16":  arrow.StructOf(tsField, arrow.Field{Name: "offset_minutes", Type: badDict}),
 		"offset ree encoded not int16": arrow.StructOf(tsField, arrow.Field{Name: "offset_minutes", Type: badREE}),
+		"offset ree values nullable":   arrow.StructOf(tsField, arrow.Field{Name: "offset_minutes", Type: nullableREE}),
 		"fields swapped":               arrow.StructOf(offField, tsField),
 	}
 
@@ -161,6 +163,12 @@ func TestTimestampWithOffsetTypeDeserializeInvalidStorage(t *testing.T) {
 			assert.Error(t, err)
 		})
 	}
+}
+
+func TestTimestampWithOffsetTypeRejectsNullableRunEndEncodedOffset(t *testing.T) {
+	offsetType := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int16, arrow.PrimitiveTypes.Int16)
+	_, err := extensions.NewTimestampWithOffsetTypeCustomOffset(testTimeUnit, offsetType)
+	assert.Error(t, err)
 }
 
 func assertDictBasics[I extensions.DictIndexType](t *testing.T, indexType I) {
@@ -369,6 +377,23 @@ func TestTimestampWithOffsetBuilderRunEndEncodedNullContinuesRun(t *testing.T) {
 	assert.Equal(t, testDate1, typedArr.Value(0))
 	assert.True(t, typedArr.IsNull(1))
 	assert.Equal(t, testDate1, typedArr.Value(2))
+}
+
+func TestTimestampWithOffsetBuilderRunEndEncodedResizeContinuesRun(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	builder, err := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, ree(arrow.PrimitiveTypes.Int16))
+	require.NoError(t, err)
+
+	builder.Append(testDate1)
+	builder.Resize(builder.Cap() * 2)
+	builder.Append(testDate1)
+
+	arr := builder.NewArray()
+	defer arr.Release()
+	offsets := arr.(*extensions.TimestampWithOffsetArray).Storage().(*array.Struct).Field(1).(*array.RunEndEncoded)
+	assert.Equal(t, 1, offsets.Values().Len())
 }
 
 func TestTimestampWithOffsetBuilderAppendValuesNilValids(t *testing.T) {
@@ -600,6 +625,36 @@ func TestTimestampWithOffsetExtensionRecordBuilder(t *testing.T) {
 	}
 }
 
+func TestTimestampWithOffsetExtensionRecordBuilderRollsBackState(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dataType, err := extensions.NewTimestampWithOffsetTypeCustomOffset(testTimeUnit, ree(arrow.PrimitiveTypes.Int16))
+	require.NoError(t, err)
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "timestamp_with_offset", Type: dataType},
+		{Name: "other", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	require.NoError(t, builder.UnmarshalJSON([]byte(`{"timestamp_with_offset":"2025-01-01T00:00:00+01:00","other":1}`)))
+	require.Error(t, builder.UnmarshalJSON([]byte(`{"timestamp_with_offset":"2025-01-01T00:00:00+01:00","other":"invalid"}`)))
+	require.NoError(t, builder.UnmarshalJSON([]byte(`{"timestamp_with_offset":"2025-01-01T00:00:00+01:00","other":2}`)))
+
+	rec := builder.NewRecordBatch()
+	defer rec.Release()
+
+	values := rec.Column(0).(*extensions.TimestampWithOffsetArray)
+	require.Equal(t, 2, values.Len())
+	_, offset := values.Value(0).Zone()
+	require.Equal(t, 60*60, offset)
+	_, offset = values.Value(1).Zone()
+	require.Equal(t, 60*60, offset)
+	offsets := values.Storage().(*array.Struct).Field(1).(*array.RunEndEncoded)
+	require.Equal(t, 1, offsets.RunEndsArr().Len())
+}
+
 func TestTimestampWithOffsetTypeBatchIPCRoundTrip(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -638,6 +693,10 @@ func TestTimestampWithOffsetTypeBatchIPCRoundTrip(t *testing.T) {
 
 			assert.Truef(t, batch.Schema().Equal(written.Schema()), "expected: %s\n\ngot: %s",
 				batch.Schema(), written.Schema())
+			if _, ok := offsetType.(*arrow.RunEndEncodedType); ok {
+				writtenType := written.Schema().Field(0).Type.(*extensions.TimestampWithOffsetType)
+				assert.False(t, writtenType.OffsetType().(*arrow.RunEndEncodedType).ValueNullable)
+			}
 
 			assert.Truef(t, array.RecordEqual(batch, written), "expected: %s\n\ngot: %s",
 				batch, written)

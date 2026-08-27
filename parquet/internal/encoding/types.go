@@ -84,6 +84,16 @@ type TypedEncoder interface {
 // encoding.
 type DictEncoder interface {
 	TypedEncoder
+	// EnableDictionaryReferenceTracking records which dictionary entries are
+	// referenced by encoded values. Tracking is disabled by default so writers
+	// that do not need it do not pay its per-value cost.
+	EnableDictionaryReferenceTracking()
+	// ReferencedDictionaryIndices returns dictionary indices in the order they
+	// were first referenced. The returned slice is owned by the encoder and must
+	// not be modified.
+	ReferencedDictionaryIndices() []int32
+	// DictionaryIndexReferenced reports whether an entry has been referenced.
+	DictionaryIndexReferenced(index int) bool
 	// WriteIndices populates the byte slice with the final indexes of data and returns
 	// the number of bytes written
 	WriteIndices(out []byte) (int, error)
@@ -109,9 +119,8 @@ type DictEncoder interface {
 	// from PutDictionary or nil.
 	PreservedDictionary() arrow.Array
 	// PutIndices adds the indices from the passed in integral array to
-	// the column data. It is assumed that the indices are within the bounds
-	// of [0,dictSize) and is not validated. Returns an error if a non-integral
-	// array is passed.
+	// the column data. Returns an error if an index is outside [0, dictSize)
+	// or a non-integral array is passed.
 	PutIndices(arrow.Array) error
 	// NormalizeDict takes an arrow array and normalizes it to a parquet
 	// native type. e.g. a dictionary of type int8 will be cast to an int32
@@ -340,18 +349,27 @@ func (b *BufferWriter) SetOffset(offset int) {
 	b.offset = offset
 }
 
+func (b *BufferWriter) ensureOffset() {
+	if b.buffer.Len() < b.offset {
+		b.buffer.ResizeNoShrink(b.offset)
+	}
+}
+
 // Bytes returns the current bytes slice of slice Len
 func (b *BufferWriter) Bytes() []byte {
+	b.ensureOffset()
 	return b.buffer.Bytes()[b.offset:]
 }
 
 // Len provides the current Length of the byte slice
 func (b *BufferWriter) Len() int {
+	b.ensureOffset()
 	return b.buffer.Len() - b.offset
 }
 
 // Cap returns the current capacity of the underlying buffer
 func (b *BufferWriter) Cap() int {
+	b.ensureOffset()
 	return b.buffer.Cap() - b.offset
 }
 
@@ -406,8 +424,8 @@ func (b *BufferWriter) Reserve(nbytes int) {
 		b.buffer = memory.NewResizableBuffer(b.mem)
 	}
 	newCap := utils.Max(b.buffer.Cap(), 256)
-	for newCap < b.pos+nbytes {
-		newCap = bitutil.NextPowerOf2(b.pos + nbytes)
+	for newCap < b.offset+b.pos+nbytes {
+		newCap = bitutil.NextPowerOf2(b.offset + b.pos + nbytes)
 	}
 	b.buffer.Reserve(newCap)
 }
@@ -423,7 +441,7 @@ func (b *BufferWriter) WriteAt(p []byte, offset int64) (n int, err error) {
 	need := int(offset) + len(p)
 
 	if need >= b.buffer.Cap() {
-		b.Reserve(need - b.pos)
+		b.Reserve(need - b.offset - b.pos)
 	}
 	copy(b.buffer.Buf()[offset:], p)
 
@@ -449,13 +467,16 @@ func (b *BufferWriter) Write(buf []byte) (int, error) {
 
 func (b *BufferWriter) UnsafeWriteCopy(ncopies int, pattern []byte) (int, error) {
 	nbytes := len(pattern) * ncopies
-	slc := b.buffer.Buf()[b.pos : b.pos+nbytes]
+	start := b.pos + b.offset
+	slc := b.buffer.Buf()[start : start+nbytes]
 	copy(slc, pattern)
 	for j := len(pattern); j < len(slc); j *= 2 {
 		copy(slc[j:], slc[:j])
 	}
 	b.pos += nbytes
-	b.buffer.ResizeNoShrink(b.pos)
+	if b.buffer.Len() < b.pos+b.offset {
+		b.buffer.ResizeNoShrink(b.pos + b.offset)
+	}
 	return nbytes, nil
 }
 
@@ -463,7 +484,9 @@ func (b *BufferWriter) UnsafeWriteCopy(ncopies int, pattern []byte) (int, error)
 func (b *BufferWriter) UnsafeWrite(buf []byte) (int, error) {
 	copy(b.buffer.Buf()[b.pos+b.offset:], buf)
 	b.pos += len(buf)
-	b.buffer.ResizeNoShrink(b.pos)
+	if b.buffer.Len() < b.pos+b.offset {
+		b.buffer.ResizeNoShrink(b.pos + b.offset)
+	}
 	return len(buf), nil
 }
 
@@ -471,14 +494,13 @@ func (b *BufferWriter) UnsafeWrite(buf []byte) (int, error) {
 // whence must be io.SeekStart, io.SeekCurrent or io.SeekEnd or it will be ignored.
 func (b *BufferWriter) Seek(offset int64, whence int) (int64, error) {
 	newPos, offs := 0, int(offset)
-	offs += b.offset
 	switch whence {
 	case io.SeekStart:
 		newPos = offs
 	case io.SeekCurrent:
 		newPos = b.pos + offs
 	case io.SeekEnd:
-		newPos = b.buffer.Len() + offs
+		newPos = b.Len() + offs
 	}
 	if newPos < 0 {
 		return 0, errors.New("negative result pos")

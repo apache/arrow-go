@@ -488,6 +488,13 @@ func (d *Dictionary) GetOneForMarshal(i int) interface{} {
 	return d.Dictionary().GetOneForMarshal(vidx)
 }
 
+func (d *Dictionary) ValueAsAny(i int) any {
+	if d.IsNull(i) {
+		return nil
+	}
+	return ValueAsAny(d.Dictionary(), d.GetValueIndex(i))
+}
+
 func (d *Dictionary) MarshalJSON() ([]byte, error) {
 	vals := make([]any, d.Len())
 	for i := range d.Len() {
@@ -854,13 +861,27 @@ func (b *dictionaryBuilder) AppendNulls(n int) {
 }
 
 func (b *dictionaryBuilder) AppendEmptyValue() {
-	b.length += 1
-	b.idxBuilder.AppendEmptyValue()
+	b.AppendEmptyValues(1)
 }
 
 func (b *dictionaryBuilder) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
+	}
+
+	if b.dt.ValueType.ID() == arrow.NULL {
+		b.AppendNulls(n)
+		return
+	}
+
+	valueBuilder := NewBuilder(b.mem, b.dt.ValueType)
+	defer valueBuilder.Release()
+	valueBuilder.AppendEmptyValues(n)
+
+	values := valueBuilder.NewArray()
+	defer values.Release()
+	if err := b.AppendArray(values); err != nil {
+		panic(err)
 	}
 }
 
@@ -879,12 +900,36 @@ func (b *dictionaryBuilder) Reserve(n int) {
 func (b *dictionaryBuilder) Resize(n int) {
 	b.idxBuilder.Resize(n)
 	b.length = b.idxBuilder.Len()
+	b.nulls = b.idxBuilder.NullN()
+}
+
+func (b *dictionaryBuilder) truncate(n int) {
+	b.idxBuilder.truncate(n)
+	b.length = b.idxBuilder.Len()
+	b.nulls = b.idxBuilder.NullN()
 }
 
 func (b *dictionaryBuilder) ResetFull() {
 	b.reset()
 	b.idxBuilder.NewArray().Release()
 	b.memoTable.Reset()
+}
+
+type dictionaryBuilderCheckpoint struct {
+	builder *dictionaryBuilder
+	size    int
+}
+
+func (c *dictionaryBuilderCheckpoint) capture() {
+	c.size = c.builder.memoTable.Size()
+}
+
+func (c *dictionaryBuilderCheckpoint) restore() {
+	c.builder.memoTable.Truncate(c.size)
+}
+
+func (b *dictionaryBuilder) newCheckpoint() checkpointState {
+	return &dictionaryBuilderCheckpoint{builder: b}
 }
 
 func (b *dictionaryBuilder) Cap() int { return b.idxBuilder.Cap() }

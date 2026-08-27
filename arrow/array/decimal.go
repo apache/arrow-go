@@ -99,6 +99,13 @@ func (a *baseDecimal[T]) GetOneForMarshal(i int) any {
 	return n.ToBigFloat(scale).Text('g', int(typ.GetPrecision()))
 }
 
+func (a *baseDecimal[T]) ValueAsAny(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+	return a.Value(i)
+}
+
 func (a *baseDecimal[T]) MarshalJSON() ([]byte, error) {
 	vals := make([]any, a.Len())
 	for i := 0; i < a.Len(); i++ {
@@ -236,9 +243,15 @@ func (b *baseDecimalBuilder[T]) AppendEmptyValue() {
 }
 
 func (b *baseDecimalBuilder[T]) AppendEmptyValues(n int) {
-	for i := 0; i < n; i++ {
-		b.AppendEmptyValue()
+	if n <= 0 {
+		return
 	}
+	if n == 1 {
+		b.AppendEmptyValue()
+		return
+	}
+	b.Reserve(n)
+	b.unsafeAppendEmptyValues(b.data.Bytes(), b.traits.BytesRequired(1), n)
 }
 
 func (b *baseDecimalBuilder[T]) UnsafeAppendBoolToBitmap(isValid bool) {
