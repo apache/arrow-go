@@ -371,6 +371,7 @@ type deltaBitPackEncoder[T int32 | int64] struct {
 	miniBlockSize uint64
 	numMiniBlocks uint64
 	deltas        []int64
+	spacedScratch *memory.Buffer
 }
 
 // flushBlock flushes out a finished block for writing to the underlying encoder
@@ -502,15 +503,24 @@ func (enc *deltaBitPackEncoder[T]) EstimatedDataEncodedSize() int64 {
 	return int64(enc.bitWriter.Written())
 }
 
+func (enc *deltaBitPackEncoder[T]) Release() {
+	enc.encoder.Release()
+	if enc.spacedScratch != nil {
+		enc.spacedScratch.Release()
+		enc.spacedScratch = nil
+	}
+}
+
 // PutSpaced takes a slice of values along with a bitmap that describes the nulls and an offset into the bitmap
 // in order to write spaced data to the encoder.
 func (enc *deltaBitPackEncoder[T]) PutSpaced(in []T, validBits []byte, validBitsOffset int64) {
-	buffer := memory.NewResizableBuffer(enc.mem)
+	if enc.spacedScratch == nil {
+		enc.spacedScratch = memory.NewResizableBuffer(enc.mem)
+	}
 	dt := arrow.GetDataType[T]().(arrow.FixedWidthDataType)
-	buffer.Reserve(dt.Bytes() * len(in))
-	defer buffer.Release()
+	enc.spacedScratch.ResizeNoShrink(dt.Bytes() * len(in))
 
-	data := arrow.GetData[T](buffer.Buf())
+	data := arrow.GetData[T](enc.spacedScratch.Buf())
 	nvalid := spacedCompress(in, data, validBits, validBitsOffset)
 	enc.Put(data[:nvalid])
 }
