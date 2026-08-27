@@ -459,8 +459,13 @@ type storageBuilder interface {
 	StorageBuilder() Builder
 }
 
+type truncatableBuilder interface {
+	Len() int
+	truncate(n int)
+}
+
 type builderCheckpoint struct {
-	builder          Builder
+	builder          truncatableBuilder
 	length           int
 	children         []*builderCheckpoint
 	state            checkpointState
@@ -475,7 +480,7 @@ func (checkpoint *builderCheckpoint) syncChildren(builders []Builder) {
 	}
 }
 
-func newBuilderCheckpoint(builder Builder) *builderCheckpoint {
+func newBuilderCheckpoint(builder truncatableBuilder) *builderCheckpoint {
 	checkpoint := &builderCheckpoint{
 		builder: builder,
 	}
@@ -488,6 +493,10 @@ func newBuilderCheckpoint(builder Builder) *builderCheckpoint {
 	// Keep this switch in sync with builder types that own children. An omitted
 	// nested builder would restore its own state but leave its children changed.
 	switch builder := builder.(type) {
+	case *baseListBuilder:
+		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.values))
+	case *baseListViewBuilder:
+		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.values))
 	case *ListBuilder:
 		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.values))
 	case *LargeListBuilder:

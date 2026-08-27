@@ -25,6 +25,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/internal/json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -485,4 +486,29 @@ func TestMapUnmarshalNonNullableFields(t *testing.T) {
 			require.Equal(t, tc.want, arr.String())
 		})
 	}
+}
+
+func TestMapBuilderUnmarshalOneRollback(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer pool.AssertSize(t, 0)
+
+	dt := arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32)
+	dt.SetItemNullable(false)
+
+	bldr := array.NewMapBuilderWithType(pool, dt)
+	defer bldr.Release()
+
+	err := bldr.UnmarshalOne(json.NewDecoder(strings.NewReader(`[{"key": "a", "value": null}]`)))
+	require.ErrorContains(t, err, "field 'value' is non-nullable but got null")
+	require.Zero(t, bldr.Len())
+	require.Zero(t, bldr.KeyBuilder().Len())
+	require.Zero(t, bldr.ItemBuilder().Len())
+
+	require.NoError(t, bldr.UnmarshalOne(json.NewDecoder(strings.NewReader(`[{"key": "a", "value": 1}]`))))
+
+	arr := bldr.NewArray()
+	defer arr.Release()
+
+	require.NoError(t, array.ValidateFull(arr))
+	require.Equal(t, `[{["a"] [1]}]`, arr.String())
 }
