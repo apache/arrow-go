@@ -19,12 +19,14 @@ package array_test
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMapArray(t *testing.T) {
@@ -411,5 +413,76 @@ func appendMapBuilderPrefix(builder *array.MapBuilder, n int) {
 			keys.Append(int32(i + 1000))
 			items.Append(int32(i + 1100))
 		}
+	}
+}
+
+func TestMapUnmarshalNonNullableFields(t *testing.T) {
+	nonNullableItem := func() *arrow.MapType {
+		dt := arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32)
+		dt.SetItemNullable(false)
+		return dt
+	}
+
+	tests := []struct {
+		name      string
+		dt        arrow.DataType
+		jsonInput string
+		wantErr   string
+		want      string
+	}{
+		{
+			name:      "null entry",
+			dt:        arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32),
+			jsonInput: `[[null]]`,
+			wantErr:   "field 'entries' is non-nullable but got null",
+		},
+		{
+			name:      "null key",
+			dt:        arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32),
+			jsonInput: `[[{"key": null, "value": 1}]]`,
+			wantErr:   "field 'key' is non-nullable but got null",
+		},
+		{
+			name:      "null item with non-nullable item",
+			dt:        nonNullableItem(),
+			jsonInput: `[[{"key": "a", "value": null}]]`,
+			wantErr:   "field 'value' is non-nullable but got null",
+		},
+		{
+			name:      "null map",
+			dt:        arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32),
+			jsonInput: `[null]`,
+			want:      `[(null)]`,
+		},
+		{
+			name:      "null item with nullable item",
+			dt:        arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32),
+			jsonInput: `[[{"key": "a", "value": null}]]`,
+			want:      `[{["a"] [(null)]}]`,
+		},
+		{
+			name:      "non-nullable item with values",
+			dt:        nonNullableItem(),
+			jsonInput: `[[{"key": "a", "value": 1}]]`,
+			want:      `[{["a"] [1]}]`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer pool.AssertSize(t, 0)
+
+			arr, _, err := array.FromJSON(pool, tc.dt, strings.NewReader(tc.jsonInput))
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			defer arr.Release()
+
+			require.NoError(t, array.ValidateFull(arr))
+			require.Equal(t, tc.want, arr.String())
+		})
 	}
 }
