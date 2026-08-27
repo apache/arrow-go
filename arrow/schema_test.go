@@ -349,6 +349,19 @@ func TestSchemaFieldsByNameReturnsCopy(t *testing.T) {
 	}
 }
 
+func TestSchemaFieldIndicesReturnsCopy(t *testing.T) {
+	schema := NewSchema([]Field{
+		{Name: "id", Type: PrimitiveTypes.Int32},
+		{Name: "id", Type: PrimitiveTypes.Int64},
+	}, nil)
+	indices := schema.FieldIndices("id")
+	indices[0] = 99
+
+	if got, want := schema.FieldIndices("id"), []int{0, 1}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("schema indices mutated through returned slice: got %v, want %v", got, want)
+	}
+}
+
 func TestSchemaAddField(t *testing.T) {
 	s := NewSchema([]Field{
 		{Name: "f1", Type: PrimitiveTypes.Int32},

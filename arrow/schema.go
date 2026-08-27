@@ -232,12 +232,12 @@ func (sc *Schema) FieldsByName(n string) ([]Field, bool) {
 	return nil, false
 }
 
-// FieldIndices returns the indices of the named field or nil.
+// FieldIndices returns a copy of the indices of the named field or nil.
 func (sc *Schema) FieldIndices(n string) []int {
-	return sc.index[n]
+	return slices.Clone(sc.index[n])
 }
 
-func (sc *Schema) HasField(n string) bool { return len(sc.FieldIndices(n)) > 0 }
+func (sc *Schema) HasField(n string) bool { return len(sc.index[n]) > 0 }
 func (sc *Schema) HasMetadata() bool      { return len(sc.meta.keys) > 0 }
 
 // Equal returns whether two schema are equal.
