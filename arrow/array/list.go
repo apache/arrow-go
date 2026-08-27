@@ -611,6 +611,37 @@ func (b *baseListBuilder) AppendValueFromString(s string) error {
 	return b.UnmarshalOne(json.NewDecoder(strings.NewReader(s)))
 }
 
+func unmarshalListValues(dec *json.Decoder, values Builder, dt arrow.DataType) error {
+	listLike, ok := dt.(arrow.ListLikeType)
+	if !ok {
+		return values.Unmarshal(dec)
+	}
+
+	elem := listLike.ElemField()
+	if elem.Nullable {
+		return values.Unmarshal(dec)
+	}
+
+	for dec.More() {
+		var val json.RawMessage
+		if err := dec.Decode(&val); err != nil {
+			return err
+		}
+
+		if bytes.Equal(val, []byte("null")) {
+			return fmt.Errorf("field '%s' is non-nullable but got null", elem.Name)
+		}
+
+		valDec := json.NewDecoder(bytes.NewReader(val))
+		valDec.UseNumber()
+		if err := values.UnmarshalOne(valDec); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (b *baseListBuilder) UnmarshalOne(dec *json.Decoder) error {
 	t, err := dec.Token()
 	if err != nil {
@@ -620,7 +651,7 @@ func (b *baseListBuilder) UnmarshalOne(dec *json.Decoder) error {
 	switch t {
 	case json.Delim('['):
 		b.Append(true)
-		if err := b.values.Unmarshal(dec); err != nil {
+		if err := unmarshalListValues(dec, b.values, b.dt); err != nil {
 			return err
 		}
 		// consume ']'
@@ -1431,7 +1462,7 @@ func (b *baseListViewBuilder) UnmarshalOne(dec *json.Decoder) error {
 		offset := b.values.Len()
 		// 0 is a placeholder size as we don't know the actual size yet
 		b.AppendWithSize(true, 0)
-		if err := b.values.Unmarshal(dec); err != nil {
+		if err := unmarshalListValues(dec, b.values, b.dt); err != nil {
 			return err
 		}
 		// consume ']'

@@ -373,7 +373,7 @@ func (b *FixedSizeListBuilder) UnmarshalOne(dec *json.Decoder) error {
 	switch t {
 	case json.Delim('['):
 		b.Append(true)
-		if err := b.values.Unmarshal(dec); err != nil {
+		if err := unmarshalListValues(dec, b.values, b.dt); err != nil {
 			return err
 		}
 		// consume ']'

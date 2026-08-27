@@ -18,12 +18,14 @@ package array_test
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestListArray(t *testing.T) {
@@ -859,6 +861,95 @@ func TestRangeOfValuesUsed(t *testing.T) {
 			} else {
 				assert.Equal(t, 9, len)
 			}
+		})
+	}
+}
+
+func TestListUnmarshalNonNullableElem(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer pool.AssertSize(t, 0)
+
+	tests := []struct {
+		name      string
+		dt        arrow.DataType
+		jsonInput string
+		wantErr   string
+		want      string
+	}{
+		{
+			name:      "list",
+			dt:        arrow.ListOfNonNullable(arrow.PrimitiveTypes.Int32),
+			jsonInput: `[[1, null]]`,
+			wantErr:   "field 'item' is non-nullable but got null",
+		},
+		{
+			name:      "large list",
+			dt:        arrow.LargeListOfNonNullable(arrow.PrimitiveTypes.Int32),
+			jsonInput: `[[1, null]]`,
+			wantErr:   "field 'item' is non-nullable but got null",
+		},
+		{
+			name:      "list view",
+			dt:        arrow.ListViewOfNonNullable(arrow.PrimitiveTypes.Int32),
+			jsonInput: `[[1, null]]`,
+			wantErr:   "field 'item' is non-nullable but got null",
+		},
+		{
+			name:      "large list view",
+			dt:        arrow.LargeListViewOfNonNullable(arrow.PrimitiveTypes.Int32),
+			jsonInput: `[[1, null]]`,
+			wantErr:   "field 'item' is non-nullable but got null",
+		},
+		{
+			name:      "fixed size list",
+			dt:        arrow.FixedSizeListOfNonNullable(2, arrow.PrimitiveTypes.Int32),
+			jsonInput: `[[1, null]]`,
+			wantErr:   "field 'item' is non-nullable but got null",
+		},
+		{
+			name:      "nested non-nullable elem",
+			dt:        arrow.ListOf(arrow.ListOfNonNullable(arrow.PrimitiveTypes.Int32)),
+			jsonInput: `[[[1, null]]]`,
+			wantErr:   "field 'item' is non-nullable but got null",
+		},
+		{
+			name:      "non-nullable struct elem",
+			dt:        arrow.ListOfNonNullable(arrow.StructOf(arrow.Field{Name: "x", Type: arrow.PrimitiveTypes.Int32, Nullable: true})),
+			jsonInput: `[[null]]`,
+			wantErr:   "field 'item' is non-nullable but got null",
+		},
+		{
+			name:      "nullable elem accepts null",
+			dt:        arrow.ListOf(arrow.PrimitiveTypes.Int32),
+			jsonInput: `[[1, null]]`,
+			want:      `[[1 (null)]]`,
+		},
+		{
+			name:      "non-nullable elem accepts values",
+			dt:        arrow.ListOfNonNullable(arrow.PrimitiveTypes.Int64),
+			jsonInput: `[[9007199254740993]]`,
+			want:      `[[9007199254740993]]`,
+		},
+		{
+			name:      "non-nullable elem accepts null list",
+			dt:        arrow.ListOfNonNullable(arrow.PrimitiveTypes.Int32),
+			jsonInput: `[null, [1]]`,
+			want:      `[(null) [1]]`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			arr, _, err := array.FromJSON(pool, tc.dt, strings.NewReader(tc.jsonInput))
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			defer arr.Release()
+
+			require.NoError(t, array.ValidateFull(arr))
+			require.Equal(t, tc.want, arr.String())
 		})
 	}
 }
