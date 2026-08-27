@@ -564,6 +564,35 @@ func TestStringDictionaryBuilderInit(t *testing.T) {
 	assert.True(t, array.Equal(expected, result))
 }
 
+func TestStringDictionaryBuilderAppendEmptyValue(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictArr, _, err := array.FromJSON(mem, arrow.BinaryTypes.String, strings.NewReader(`["existing"]`))
+	require.NoError(t, err)
+	defer dictArr.Release()
+
+	dictType := &arrow.DictionaryType{IndexType: &arrow.Int8Type{}, ValueType: arrow.BinaryTypes.String}
+	bldr := array.NewDictionaryBuilderWithDict(mem, dictType, dictArr)
+	defer bldr.Release()
+
+	bldr.AppendEmptyValue()
+	bldr.AppendEmptyValues(2)
+
+	result := bldr.NewDictionaryArray()
+	defer result.Release()
+
+	dict := result.Dictionary().(*array.String)
+	assert.Equal(t, 2, dict.Len())
+	assert.Equal(t, "existing", dict.Value(0))
+	assert.Empty(t, dict.Value(1))
+	for i := 0; i < result.Len(); i++ {
+		assert.False(t, result.IsNull(i))
+		assert.Equal(t, 1, result.GetValueIndex(i))
+		assert.Empty(t, result.GetOneForMarshal(i))
+	}
+}
+
 func TestStringDictionaryBuilderOnlyNull(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

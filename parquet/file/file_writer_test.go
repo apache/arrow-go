@@ -1211,6 +1211,87 @@ func TestWriteBloomFilters(t *testing.T) {
 	assert.False(t, byteArrayFilter.Check(parquet.ByteArray("baz")))
 }
 
+func TestWriteDictionaryBloomFilterAfterFallback(t *testing.T) {
+	values := []parquet.ByteArray{
+		parquet.ByteArray("alpha"),
+		parquet.ByteArray("beta"),
+		parquet.ByteArray("alpha"),
+	}
+	props := parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(true),
+		parquet.WithDictionaryPageSizeLimit(1),
+		parquet.WithBloomFilterEnabledFor("values", true),
+		parquet.WithBloomFilterNDVFor("values", 2),
+	)
+	field := schema.NewByteArrayNode("values", parquet.Repetitions.Required, -1)
+	sc, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{field}, -1)
+	require.NoError(t, err)
+
+	sink := encoding.NewBufferWriter(0, memory.DefaultAllocator)
+	defer sink.Release()
+	writer := file.NewParquetWriter(sink, sc, file.WithWriterProps(props))
+	rowGroup := writer.AppendRowGroup()
+	column, err := rowGroup.NextColumn()
+	require.NoError(t, err)
+	_, err = column.(*file.ByteArrayColumnChunkWriter).WriteBatch(values, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, column.Close())
+	require.NoError(t, rowGroup.Close())
+	require.NoError(t, writer.Close())
+
+	reader, err := file.NewParquetReader(bytes.NewReader(sink.Bytes()))
+	require.NoError(t, err)
+	defer reader.Close()
+	bloomReader := reader.GetBloomFilterReader()
+	rowGroupBloom, err := bloomReader.RowGroup(0)
+	require.NoError(t, err)
+	require.NoError(t, rowGroupBloom.VisitColumnBloomFilter(0, func(filter metadata.BloomFilter) error {
+		typedFilter := metadata.TypedBloomFilter[parquet.ByteArray]{BloomFilter: filter}
+		assert.True(t, typedFilter.Check(parquet.ByteArray("alpha")))
+		assert.True(t, typedFilter.Check(parquet.ByteArray("beta")))
+		return nil
+	}))
+}
+
+func TestWriteDictionaryBloomFilterAcrossPages(t *testing.T) {
+	values := []int32{7, 42, 7, 99, 42, 7}
+	props := parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(true),
+		parquet.WithDataPageSize(1),
+		parquet.WithBatchSize(2),
+		parquet.WithBloomFilterEnabledFor("values", true),
+		parquet.WithBloomFilterNDVFor("values", 3),
+	)
+	field := schema.NewInt32Node("values", parquet.Repetitions.Required, -1)
+	sc, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{field}, -1)
+	require.NoError(t, err)
+
+	sink := encoding.NewBufferWriter(0, memory.DefaultAllocator)
+	defer sink.Release()
+	writer := file.NewParquetWriter(sink, sc, file.WithWriterProps(props))
+	rowGroup := writer.AppendRowGroup()
+	column, err := rowGroup.NextColumn()
+	require.NoError(t, err)
+	_, err = column.(*file.Int32ColumnChunkWriter).WriteBatch(values, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, column.Close())
+	require.NoError(t, rowGroup.Close())
+	require.NoError(t, writer.Close())
+
+	reader, err := file.NewParquetReader(bytes.NewReader(sink.Bytes()))
+	require.NoError(t, err)
+	defer reader.Close()
+	rowGroupBloom, err := reader.GetBloomFilterReader().RowGroup(0)
+	require.NoError(t, err)
+	require.NoError(t, rowGroupBloom.VisitColumnBloomFilter(0, func(filter metadata.BloomFilter) error {
+		typedFilter := metadata.TypedBloomFilter[int32]{BloomFilter: filter}
+		assert.True(t, typedFilter.Check(7))
+		assert.True(t, typedFilter.Check(42))
+		assert.True(t, typedFilter.Check(99))
+		return nil
+	}))
+}
+
 // TestBufferedStreamDictionaryCompressed tests the fix for issue #619
 // where BufferedStreamEnabled=true with dictionary encoding and compression
 // caused "dict spaced eof exception" and "snappy: corrupt input" errors.

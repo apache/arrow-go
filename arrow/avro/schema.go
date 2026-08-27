@@ -183,8 +183,8 @@ func arrowSchemaFromAvroInternal(schema *avro.Schema) (s *arrow.Schema, err erro
 		panic(fmt.Errorf("avro schema root must be a record, got type %q", root.Type))
 	}
 	n := newSchemaNode()
-	n.node = root
-	c := n.newChild(root.Name, root)
+	n.node = *root
+	c := n.newChild(root.Name, *root)
 	arrowSchemafromAvro(c)
 	var fields []arrow.Field
 	for _, g := range c.children() {
@@ -472,7 +472,11 @@ func avroLogicalToArrowField(n *schemaNode) {
 		if n.node.Precision > decimal128.MaxPrecision {
 			id = arrow.DECIMAL256
 		}
-		dt, _ = arrow.NewDecimalType(id, int32(n.node.Precision), int32(n.node.Scale))
+		var err error
+		dt, err = arrow.NewDecimalType(id, int32(n.node.Precision), int32(n.node.Scale))
+		if err != nil {
+			panic(err)
+		}
 
 	// The uuid logical type represents a random generated universally unique identifier (UUID).
 	// A uuid logical type annotates an Avro string. The string has to conform with RFC-4122

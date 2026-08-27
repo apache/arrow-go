@@ -113,7 +113,7 @@ func writeDictionaryArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, lea
 			if referencedIndices.Len() == normalized.Len() {
 				referencedDict = normalized
 			} else {
-				referencedDict, err = compute.TakeArrayOpts(ctx, normalized, referencedIndices, compute.TakeOptions{BoundsCheck: false})
+				referencedDict, err = compute.TakeArrayOpts(ctx, normalized, referencedIndices, compute.TakeOptions{BoundsCheck: true})
 				if err != nil {
 					return err
 				}

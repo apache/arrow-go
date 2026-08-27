@@ -172,6 +172,24 @@ func concatBuffers(bufs []*memory.Buffer, mem memory.Allocator) *memory.Buffer {
 	return out
 }
 
+func concatFixedWidthBuffers(data []arrow.ArrayData, idx, byteWidth, length int, mem memory.Allocator) *memory.Buffer {
+	out := memory.NewResizableBuffer(mem)
+	out.Resize(length * byteWidth)
+	dst := out.Bytes()
+	for _, d := range data {
+		buf := d.Buffers()[idx]
+		if buf == nil {
+			continue
+		}
+
+		begin := d.Offset() * byteWidth
+		nbytes := d.Len() * byteWidth
+		copy(dst, buf.Bytes()[begin:begin+nbytes])
+		dst = dst[nbytes:]
+	}
+	return out
+}
+
 func handle32BitOffsets(outLen int, buffers []*memory.Buffer, out *memory.Buffer) (*memory.Buffer, []rng, error) {
 	dst := arrow.Int32Traits.CastFromBytes(out.Bytes())
 	valuesRanges := make([]rng, len(buffers))
@@ -598,7 +616,7 @@ func concat(data []arrow.ArrayData, mem memory.Allocator) (arr arrow.ArrayData, 
 			return nil, err
 		}
 	case arrow.FixedWidthDataType:
-		out.buffers[1] = concatBuffers(gatherBuffersFixedWidthType(data, 1, dt), mem)
+		out.buffers[1] = concatFixedWidthBuffers(data, 1, dt.BitWidth()/8, out.length, mem)
 	case arrow.BinaryViewDataType:
 		out.buffers = out.buffers[:2]
 		for _, d := range data {

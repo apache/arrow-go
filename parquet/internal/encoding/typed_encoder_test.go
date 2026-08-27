@@ -17,7 +17,10 @@
 package encoding
 
 import (
+	"math"
+	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -25,7 +28,51 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func assertTypedDictEncoderPut[T int32 | int64 | float32 | float64](t *testing.T, values, expectedDict []T, expectedIndices []int32) {
+	t.Helper()
+	enc := &typedDictEncoder[T]{newDictEncoderBase(nil, NewDictionary[T](), memory.DefaultAllocator)}
+	defer enc.Release()
+
+	split := len(values) / 2
+	enc.Put(values[:split])
+	enc.Put(values[split:])
+
+	assert.Equal(t, expectedIndices, enc.idxValues)
+	actualDict := make([]T, len(expectedDict))
+	enc.memo.CopyValues(actualDict)
+	assert.Equal(t, expectedDict, actualDict)
+	assert.Equal(t, len(expectedDict)*int(unsafe.Sizeof(T(0))), enc.DictEncodedSize())
+}
+
+func TestTypedDictEncoderPut(t *testing.T) {
+	t.Run("int32", func(t *testing.T) {
+		assertTypedDictEncoderPut(t,
+			[]int32{1, 2, 1, 4, 2},
+			[]int32{1, 2, 4},
+			[]int32{0, 1, 0, 2, 1})
+	})
+	t.Run("int64", func(t *testing.T) {
+		assertTypedDictEncoderPut(t,
+			[]int64{-1, 2, -1, 3, 2},
+			[]int64{-1, 2, 3},
+			[]int32{0, 1, 0, 2, 1})
+	})
+	t.Run("float32", func(t *testing.T) {
+		assertTypedDictEncoderPut(t,
+			[]float32{1.5, 2.5, 1.5, 3.5, 2.5},
+			[]float32{1.5, 2.5, 3.5},
+			[]int32{0, 1, 0, 2, 1})
+	})
+	t.Run("float64", func(t *testing.T) {
+		assertTypedDictEncoderPut(t,
+			[]float64{1.5, 2.5, 1.5, 3.5, 2.5},
+			[]float64{1.5, 2.5, 3.5},
+			[]int32{0, 1, 0, 2, 1})
+	})
+}
 
 func TestPutDictionary(t *testing.T) {
 	exp := []int32{1, 2, 4, 8, 16}
@@ -42,4 +89,99 @@ func TestPutDictionary(t *testing.T) {
 
 	err := enc.PutDictionary(arr)
 	assert.NoError(t, err)
+}
+
+func TestDictionaryReferenceTracking(t *testing.T) {
+	dictionary, _, err := array.FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32,
+		strings.NewReader(`[10, 20, 30]`))
+	require.NoError(t, err)
+	defer dictionary.Release()
+
+	indices, _, err := array.FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32,
+		strings.NewReader(`[2, null, 2, 1]`))
+	require.NoError(t, err)
+	defer indices.Release()
+
+	typ := schema.NewInt32Node("a", parquet.Repetitions.Required, -1)
+	descr := schema.NewColumn(typ, 0, 0)
+	enc := &typedDictEncoder[int32]{newDictEncoderBase(descr, NewDictionary[int32](), memory.DefaultAllocator)}
+	defer enc.Release()
+	enc.EnableDictionaryReferenceTracking()
+
+	require.NoError(t, enc.PutDictionary(dictionary))
+	require.NoError(t, enc.PutIndices(indices))
+	assert.Equal(t, []int32{2, 1}, enc.ReferencedDictionaryIndices())
+	assert.False(t, enc.DictionaryIndexReferenced(0))
+	assert.True(t, enc.DictionaryIndexReferenced(1))
+	assert.True(t, enc.DictionaryIndexReferenced(2))
+}
+
+func TestPutIndicesRejectsOutOfBoundsIndices(t *testing.T) {
+	dictionary, _, err := array.FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32,
+		strings.NewReader(`[10]`))
+	require.NoError(t, err)
+	defer dictionary.Release()
+
+	tests := []struct {
+		name       string
+		newIndices func() arrow.Array
+	}{
+		{
+			name: "negative signed index",
+			newIndices: func() arrow.Array {
+				builder := array.NewInt8Builder(memory.DefaultAllocator)
+				defer builder.Release()
+				builder.Append(-1)
+				return builder.NewArray()
+			},
+		},
+		{
+			name: "index equal to dictionary length",
+			newIndices: func() arrow.Array {
+				builder := array.NewInt16Builder(memory.DefaultAllocator)
+				defer builder.Release()
+				builder.Append(0)
+				builder.Append(1)
+				return builder.NewArray()
+			},
+		},
+		{
+			name: "maximum int32 index",
+			newIndices: func() arrow.Array {
+				builder := array.NewInt32Builder(memory.DefaultAllocator)
+				defer builder.Release()
+				builder.Append(math.MaxInt32)
+				return builder.NewArray()
+			},
+		},
+		{
+			name: "large unsigned index",
+			newIndices: func() arrow.Array {
+				builder := array.NewUint64Builder(memory.DefaultAllocator)
+				defer builder.Release()
+				builder.Append(math.MaxUint64)
+				return builder.NewArray()
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			indices := tt.newIndices()
+			defer indices.Release()
+
+			typ := schema.NewInt32Node("a", parquet.Repetitions.Required, -1)
+			descr := schema.NewColumn(typ, 0, 0)
+			enc := &typedDictEncoder[int32]{newDictEncoderBase(descr, NewDictionary[int32](), memory.DefaultAllocator)}
+			defer enc.Release()
+			enc.EnableDictionaryReferenceTracking()
+			require.NoError(t, enc.PutDictionary(dictionary))
+
+			err := enc.PutIndices(indices)
+			require.ErrorIs(t, err, arrow.ErrInvalid)
+			assert.Empty(t, enc.idxValues)
+			assert.Empty(t, enc.referencedBitmap)
+			assert.Empty(t, enc.ReferencedDictionaryIndices())
+		})
+	}
 }

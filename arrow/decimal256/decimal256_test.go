@@ -590,6 +590,37 @@ func TestToString(t *testing.T) {
 	assert.Equal(t, decStr+"0000", dec.ToString(-4))
 }
 
+func TestToStringMatchesBigFloat(t *testing.T) {
+	values := []string{
+		"0",
+		"1",
+		"-1",
+		"9",
+		"-9",
+		"1234567890123456789012345678901234567890123456789012345678901234567890123456",
+		"-1234567890123456789012345678901234567890123456789012345678901234567890123456",
+		"57896044618658097711785492504343953926634992332820282019728792003956564819967",
+		"-57896044618658097711785492504343953926634992332820282019728792003956564819967",
+	}
+	scales := []int32{-76, -10, -1, 0, 1, 2, 10, 38, 76}
+
+	for _, value := range values {
+		integer, ok := new(big.Int).SetString(value, 10)
+		assert.True(t, ok)
+		number := decimal256.FromBigInt(integer)
+		for _, scale := range scales {
+			want := number.ToBigFloat(scale).Text('f', int(scale))
+			assert.Equalf(t, want, number.ToString(scale), "value=%s scale=%d", value, scale)
+		}
+	}
+}
+
+func TestToStringRejectsInvalidScale(t *testing.T) {
+	for _, scale := range []int32{-77, 77} {
+		assert.Panics(t, func() { decimal256.FromI64(1).ToString(scale) })
+	}
+}
+
 // Test issues from GH-38395
 func TestHexFromString(t *testing.T) {
 	const decStr = "11111111111111111111111111111111111111.00000000000000000000000000000000000000"
