@@ -1470,3 +1470,76 @@ func TestNestedUnionDictUnion(t *testing.T) {
 	defer arr.Release()
 	assert.Equal(t, 0, arr.Len())
 }
+
+func TestUnionUnmarshalNonNullableChild(t *testing.T) {
+	unionFields := func(nullable bool) []arrow.Field {
+		return []arrow.Field{
+			{Name: "u0", Type: arrow.PrimitiveTypes.Int32, Nullable: nullable},
+			{Name: "u1", Type: arrow.BinaryTypes.String, Nullable: true},
+		}
+	}
+	codes := []arrow.UnionTypeCode{0, 1}
+
+	tests := []struct {
+		name      string
+		dt        arrow.DataType
+		jsonInput string
+		wantErr   string
+		want      string
+	}{
+		{
+			name:      "sparse non-nullable child",
+			dt:        arrow.SparseUnionOf(unionFields(false), codes),
+			jsonInput: `[[0, null]]`,
+			wantErr:   "field 'u0' is non-nullable but got null",
+		},
+		{
+			name:      "dense non-nullable child",
+			dt:        arrow.DenseUnionOf(unionFields(false), codes),
+			jsonInput: `[[0, null]]`,
+			wantErr:   "field 'u0' is non-nullable but got null",
+		},
+		{
+			name:      "sparse nullable child",
+			dt:        arrow.SparseUnionOf(unionFields(true), codes),
+			jsonInput: `[[0, null], [1, "x"]]`,
+			want:      `[{u0=<nil>} {u1=x}]`,
+		},
+		{
+			name:      "dense nullable child",
+			dt:        arrow.DenseUnionOf(unionFields(true), codes),
+			jsonInput: `[[0, null], [1, "x"]]`,
+			want:      `[{u0=<nil>} {u1=x}]`,
+		},
+		{
+			name:      "sparse non-nullable child with values",
+			dt:        arrow.SparseUnionOf(unionFields(false), codes),
+			jsonInput: `[[0, 1], [1, null]]`,
+			want:      `[{u0=1} {u1=<nil>}]`,
+		},
+		{
+			name:      "dense non-nullable child with values",
+			dt:        arrow.DenseUnionOf(unionFields(false), codes),
+			jsonInput: `[[0, 1], [1, null]]`,
+			want:      `[{u0=1} {u1=<nil>}]`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
+			arr, _, err := array.FromJSON(mem, tc.dt, strings.NewReader(tc.jsonInput))
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			defer arr.Release()
+
+			require.NoError(t, array.ValidateFull(arr))
+			require.Equal(t, tc.want, arr.String())
+		})
+	}
+}
