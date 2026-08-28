@@ -81,7 +81,7 @@ func (enc *DeltaByteArrayEncoder) initEncoders() {
 }
 
 // Type returns the underlying physical type this operates on, in this case ByteArrays only
-func (DeltaByteArrayEncoder) Type() parquet.Type { return parquet.Types.ByteArray }
+func (*DeltaByteArrayEncoder) Type() parquet.Type { return parquet.Types.ByteArray }
 
 // Put writes a slice of ByteArrays to the encoder
 func (enc *DeltaByteArrayEncoder) Put(in []parquet.ByteArray) {
@@ -111,7 +111,7 @@ func (enc *DeltaByteArrayEncoder) Put(in []parquet.ByteArray) {
 	// we do a copy here so that we only copy and keep a reference
 	// to the suffix, and aren't forcing the *entire* value to stay
 	// in memory while we have this reference to just the suffix.
-	enc.lastVal = append([]byte{}, lastVal...)
+	enc.lastVal = append(enc.lastVal[:0], lastVal...)
 }
 
 // PutSpaced is like Put, but assumes the data is already spaced for nulls and uses the bitmap provided and offset

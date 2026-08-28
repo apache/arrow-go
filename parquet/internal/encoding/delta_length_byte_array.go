@@ -71,7 +71,7 @@ func (enc *DeltaLengthByteArrayEncoder) PutSpaced(in []parquet.ByteArray, validB
 }
 
 // Type returns the underlying type which is handled by this encoder, ByteArrays only.
-func (DeltaLengthByteArrayEncoder) Type() parquet.Type {
+func (*DeltaLengthByteArrayEncoder) Type() parquet.Type {
 	return parquet.Types.ByteArray
 }
 
