@@ -257,6 +257,62 @@ func (d *DeltaByteArrayDecoder) Discard(n int) (int, error) {
 	return n, nil
 }
 
+func (d *DeltaByteArrayDecoder) decodedArenaSize(max int) (int, error) {
+	maxInt := int(^uint(0) >> 1)
+	total := 0
+	prefixLengths := d.prefixLengths
+	suffixLengths := d.lengths
+	previousLen := len(d.lastVal)
+	if d.lastVal == nil {
+		if len(prefixLengths) == 0 || prefixLengths[0] != 0 {
+			return 0, errors.New("parquet: first delta byte array prefix length must be zero")
+		}
+		if len(suffixLengths) == 0 {
+			return 0, errors.New("parquet: not enough delta byte array suffix lengths")
+		}
+
+		suffixLen := suffixLengths[0]
+		if suffixLen < 0 {
+			return 0, fmt.Errorf("parquet: negative delta byte array length %d", suffixLen)
+		}
+		previousLen = int(suffixLen)
+		total = previousLen
+		prefixLengths = prefixLengths[1:]
+		suffixLengths = suffixLengths[1:]
+		max--
+	}
+
+	for i := 0; i < max; i++ {
+		if i >= len(prefixLengths) {
+			return 0, errors.New("parquet: not enough delta byte array prefix lengths")
+		}
+		if i >= len(suffixLengths) {
+			return 0, errors.New("parquet: not enough delta byte array suffix lengths")
+		}
+		prefixLen := prefixLengths[i]
+		suffixLen := suffixLengths[i]
+		if prefixLen < 0 || int(prefixLen) > previousLen {
+			return 0, fmt.Errorf("parquet: invalid delta byte array prefix length %d", prefixLen)
+		}
+		if suffixLen < 0 {
+			return 0, fmt.Errorf("parquet: negative delta byte array length %d", suffixLen)
+		}
+
+		valueLen := int(prefixLen)
+		if int(suffixLen) > maxInt-valueLen {
+			return 0, errors.New("parquet: delta byte array value length overflows int")
+		}
+		valueLen += int(suffixLen)
+		if valueLen > maxInt-total {
+			return 0, errors.New("parquet: decoded delta byte array size overflows int")
+		}
+		total += valueLen
+		previousLen = valueLen
+	}
+
+	return total, nil
+}
+
 // Decode decodes byte arrays into the slice provided and returns the number of values actually decoded
 func (d *DeltaByteArrayDecoder) Decode(out []parquet.ByteArray) (int, error) {
 	max := utils.Min(len(out), d.nvals)
@@ -265,45 +321,47 @@ func (d *DeltaByteArrayDecoder) Decode(out []parquet.ByteArray) (int, error) {
 	}
 	out = out[:max]
 
-	var err error
-	if d.lastVal == nil {
-		if len(d.prefixLengths) == 0 || d.prefixLengths[0] != 0 {
-			return 0, errors.New("parquet: first delta byte array prefix length must be zero")
-		}
-		_, err = d.DeltaLengthByteArrayDecoder.Decode(out[:1])
-		if err != nil {
-			return 0, err
-		}
-		d.lastVal = out[0]
-		out = out[1:]
-		d.prefixLengths = d.prefixLengths[1:]
+	arenaSize, err := d.decodedArenaSize(max)
+	if err != nil {
+		return 0, err
+	}
+	arena := make([]byte, arenaSize)
+	arenaOffset := 0
+	decoded, err := d.DeltaLengthByteArrayDecoder.Decode(out)
+	if err != nil {
+		return 0, err
+	}
+	if decoded != max {
+		return 0, errors.New("parquet: not enough delta byte array suffix values")
 	}
 
-	var prefixLen int32
-	suffixHolder := make([]parquet.ByteArray, 1)
+	if d.lastVal == nil {
+		valueLen := len(out[0])
+		value := arena[arenaOffset : arenaOffset+valueLen : arenaOffset+valueLen]
+		copy(value, out[0])
+		out[0] = value
+		d.lastVal = value
+		arenaOffset += valueLen
+		d.prefixLengths = d.prefixLengths[1:]
+		out = out[1:]
+	}
+
 	for len(out) > 0 {
 		if len(d.prefixLengths) == 0 {
 			return 0, errors.New("parquet: not enough delta byte array prefix lengths")
 		}
-		prefixLen, d.prefixLengths = d.prefixLengths[0], d.prefixLengths[1:]
-		if prefixLen < 0 || int(prefixLen) > len(d.lastVal) {
-			return 0, fmt.Errorf("parquet: invalid delta byte array prefix length %d", prefixLen)
-		}
+		prefixLen := d.prefixLengths[0]
+		d.prefixLengths = d.prefixLengths[1:]
 
 		prefix := d.lastVal[:prefixLen:prefixLen]
-		_, err = d.DeltaLengthByteArrayDecoder.Decode(suffixHolder)
-		if err != nil {
-			return 0, err
-		}
 
-		if len(suffixHolder[0]) == 0 {
-			d.lastVal = prefix
-		} else {
-			d.lastVal = make([]byte, int(prefixLen)+len(suffixHolder[0]))
-			copy(d.lastVal, prefix)
-			copy(d.lastVal[prefixLen:], suffixHolder[0])
-		}
-		out[0], out = d.lastVal, out[1:]
+		valueLen := int(prefixLen) + len(out[0])
+		value := arena[arenaOffset : arenaOffset+valueLen : arenaOffset+valueLen]
+		copy(value, prefix)
+		copy(value[len(prefix):], out[0])
+		out[0], out = value, out[1:]
+		d.lastVal = value
+		arenaOffset += valueLen
 	}
 	return max, nil
 }
