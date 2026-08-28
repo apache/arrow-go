@@ -356,12 +356,13 @@ func doAppendFixedSize(action Action, memo hashing.MemoTable, arr *exec.ArraySpa
 		})
 }
 
-func doAppendNumeric[T arrow.IntType | arrow.UintType | arrow.FloatType](action Action, memo hashing.MemoTable, arr *exec.ArraySpan) error {
+func doAppendNumeric[T uint8 | uint16 | uint32 | uint64](action Action, memo hashing.MemoTable, arr *exec.ArraySpan) error {
 	arrData := exec.GetSpanValues[T](arr, 1)
 	shouldEncodeNulls := action.ShouldEncodeNulls()
+	typedMemo := memo.(hashing.TypedMemoTable[T])
 	return bitutils.VisitBitBlocksShort(arr.Buffers[0].Buf, arr.Offset, arr.Len,
 		func(pos int64) error {
-			idx, found, err := memo.GetOrInsert(arrData[pos])
+			idx, found, err := typedMemo.InsertOrGet(arrData[pos])
 			if err != nil {
 				return err
 			}
