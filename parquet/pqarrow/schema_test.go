@@ -1334,3 +1334,37 @@ func TestShreddedVariantSchema(t *testing.T) {
 
 	assert.True(t, arrSchema.Equal(arrsc), "expected: %s\ngot: %s", arrSchema, arrsc)
 }
+
+func TestVariantValueRequiredOnWrite(t *testing.T) {
+	vt, err := extensions.NewVariantType(arrow.StructOf(
+		arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
+		arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+	))
+	require.NoError(t, err)
+
+	arrSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "variant_col", Type: vt, Nullable: true},
+	}, nil)
+	_, err = pqarrow.ToParquet(arrSchema, nil, pqarrow.DefaultWriterProps())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
+	assert.ErrorContains(t, err, "variant 'value' field is required when writing Parquet")
+}
+
+func TestReadVariantWithoutValueField(t *testing.T) {
+	metadata := schema.NewByteArrayNode("metadata", parquet.Repetitions.Required, -1)
+	typed := schema.MustPrimitive(schema.NewPrimitiveNodeLogical("typed_value", parquet.Repetitions.Optional,
+		schema.NewIntLogicalType(32, true), parquet.Types.Int32, 0, -1))
+	variant, err := schema.NewGroupNodeLogical("var", parquet.Repetitions.Optional,
+		schema.FieldList{metadata, typed}, schema.VariantLogicalType{}, -1)
+	require.NoError(t, err)
+
+	pqschema := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{variant}, -1)))
+	outSchema, err := pqarrow.FromParquet(pqschema, nil, nil)
+	require.NoError(t, err)
+
+	vt, ok := outSchema.Field(0).Type.(*extensions.VariantType)
+	require.True(t, ok)
+	assert.Nil(t, vt.Value().Type)
+	assert.Equal(t, arrow.PrimitiveTypes.Int32, vt.TypedValue().Type)
+}

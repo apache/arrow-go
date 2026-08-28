@@ -265,13 +265,16 @@ func variantToNode(t *extensions.VariantType, field arrow.Field, props *parquet.
 		return nil, err
 	}
 
-	if value := t.Value(); value.Type != nil {
-		valueField, err := fieldToNode("value", value, props, arrProps)
-		if err != nil {
-			return nil, err
-		}
-		fields = append(fields, valueField)
+	value := t.Value()
+	if value.Type == nil {
+		return nil, fmt.Errorf("%w: variant 'value' field is required when writing Parquet", arrow.ErrInvalid)
 	}
+
+	valueField, err := fieldToNode("value", value, props, arrProps)
+	if err != nil {
+		return nil, err
+	}
+	fields = append(fields, valueField)
 
 	if typed := t.TypedValue(); typed.Type != nil {
 		typedValue, err := fieldToNode("typed_value", typed, props, arrProps)
