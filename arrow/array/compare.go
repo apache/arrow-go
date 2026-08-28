@@ -354,7 +354,9 @@ func Equal(left, right arrow.Array) bool {
 
 // SliceEqual reports whether slices left[lbeg:lend] and right[rbeg:rend] are equal.
 func SliceEqual(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64) bool {
-	if lbeg == 0 && lend == int64(left.Len()) && rbeg == 0 && rend == int64(right.Len()) {
+	if lbeg == 0 && lend == int64(left.Len()) &&
+		rbeg == 0 && rend == int64(right.Len()) &&
+		canEqualDirectly(left) && canEqualDirectly(right) {
 		return Equal(left, right)
 	}
 
@@ -364,6 +366,27 @@ func SliceEqual(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, ren
 	defer r.Release()
 
 	return Equal(l, r)
+}
+
+// canEqualDirectly reports whether Equal can handle an array without first
+// normalizing it through NewSlice. Equal uses concrete type assertions, so
+// generic arrow.Array implementations must keep the normalization path.
+func canEqualDirectly(arr arrow.Array) bool {
+	switch arr.(type) {
+	case *Null, *Boolean, *FixedSizeBinary, *Binary, *String,
+		*LargeBinary, *LargeString, *BinaryView, *StringView,
+		*Int8, *Int16, *Int32, *Int64, *Uint8, *Uint16, *Uint32, *Uint64,
+		*Float16, *Float32, *Float64,
+		*Decimal32, *Decimal64, *Decimal128, *Decimal256,
+		*Date32, *Date64, *Time32, *Time64, *Timestamp,
+		*List, *LargeList, *ListView, *LargeListView, *FixedSizeList,
+		*Struct, *MonthInterval, *DayTimeInterval, *MonthDayNanoInterval,
+		*Duration, *Map, ExtensionArray, *Dictionary, *SparseUnion,
+		*DenseUnion, *RunEndEncoded:
+		return true
+	default:
+		return false
+	}
 }
 
 type listOffset interface {
