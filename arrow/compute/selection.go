@@ -676,6 +676,10 @@ func FilterArray(ctx context.Context, values, filter arrow.Array, options Filter
 	return outDatum.(*ArrayDatum).MakeArray(), nil
 }
 
+func filterRecordBatchColumn(ctx context.Context, col, indices arrow.Array) (arrow.Array, error) {
+	return TakeArrayOpts(ctx, col, indices, kernels.TakeOptions{BoundsCheck: false})
+}
+
 func FilterRecordBatch(ctx context.Context, batch arrow.RecordBatch, filter arrow.Array, opts *FilterOptions) (arrow.RecordBatch, error) {
 	if batch.NumRows() != int64(filter.Len()) {
 		return nil, fmt.Errorf("%w: filter inputs must all be the same length", arrow.ErrInvalid)
@@ -701,22 +705,34 @@ func FilterRecordBatch(ctx context.Context, batch arrow.RecordBatch, filter arro
 			}
 		}
 	}()
-	eg, cctx := errgroup.WithContext(ctx)
-	eg.SetLimit(GetExecCtx(ctx).NumParallel)
-	for i, col := range batch.Columns() {
-		i, col := i, col
-		eg.Go(func() error {
-			out, err := TakeArrayOpts(cctx, col, indicesArr, kernels.TakeOptions{BoundsCheck: false})
+
+	numParallel := GetExecCtx(ctx).NumParallel
+	if batch.NumCols() == 1 || numParallel <= 1 {
+		for i, col := range batch.Columns() {
+			out, err := filterRecordBatchColumn(ctx, col, indicesArr)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			cols[i] = out
-			return nil
-		})
-	}
+		}
+	} else {
+		eg, cctx := errgroup.WithContext(ctx)
+		eg.SetLimit(numParallel)
+		for i, col := range batch.Columns() {
+			i, col := i, col
+			eg.Go(func() error {
+				out, err := filterRecordBatchColumn(cctx, col, indicesArr)
+				if err != nil {
+					return err
+				}
+				cols[i] = out
+				return nil
+			})
+		}
 
-	if err := eg.Wait(); err != nil {
-		return nil, err
+		if err := eg.Wait(); err != nil {
+			return nil, err
+		}
 	}
 
 	return array.NewRecordBatch(batch.Schema(), cols, int64(indicesArr.Len())), nil
