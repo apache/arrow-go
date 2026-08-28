@@ -1224,7 +1224,7 @@ func TestConvertSchemaParquetVariant(t *testing.T) {
 	assert.Equal(t, "variant_unshredded", outSchema.Field(0).Name)
 	assert.Equal(t, arrow.EXTENSION, outSchema.Field(0).Type.ID())
 
-	assert.Equal(t, "parquet.variant", outSchema.Field(0).Type.(arrow.ExtensionType).ExtensionName())
+	assert.Equal(t, "arrow.parquet.variant", outSchema.Field(0).Type.(arrow.ExtensionType).ExtensionName())
 
 	sc, err := pqarrow.ToParquet(outSchema, nil, pqarrow.DefaultWriterProps())
 	require.NoError(t, err)

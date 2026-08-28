@@ -35,4 +35,19 @@ func init() {
 			panic(err)
 		}
 	}
+
+	// arrow-go originally registered Variant as parquet.variant. Keep that
+	// name in the registry so older IPC still deserializes.
+	if err := arrow.RegisterExtensionType(&legacyVariantType{}); err != nil {
+		panic(err)
+	}
 }
+
+// legacyVariantType exists only so GetExtensionType("parquet.variant") can
+// still reconstruct a VariantType. In-memory and newly written IPC use
+// VariantExtensionName.
+type legacyVariantType struct {
+	VariantType
+}
+
+func (*legacyVariantType) ExtensionName() string { return LegacyVariantExtensionName }

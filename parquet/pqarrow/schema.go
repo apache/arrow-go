@@ -353,7 +353,7 @@ func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties
 		return schema.MapOf(field.Name, keyNode, valueNode, repFromNullable(field.Nullable), fieldIDFromMeta(field.Metadata))
 	case arrow.EXTENSION:
 		extType := field.Type.(arrow.ExtensionType)
-		if extType.ExtensionName() == "parquet.variant" {
+		if extensions.IsVariantExtensionName(extType.ExtensionName()) {
 			return variantToNode(extType.(*extensions.VariantType), field, props, arrprops)
 		}
 	}

@@ -262,7 +262,24 @@ func (v *VariantType) TypedValue() arrow.Field {
 	return v.StorageType().(*arrow.StructType).Field(v.typedValueFieldIdx)
 }
 
-func (*VariantType) ExtensionName() string { return "parquet.variant" }
+const (
+	// VariantExtensionName is the canonical Arrow extension type name.
+	// See https://arrow.apache.org/docs/format/CanonicalExtensions.html#parquet-variant
+	VariantExtensionName = "arrow.parquet.variant"
+
+	// LegacyVariantExtensionName was used by arrow-go before the canonical
+	// name landed. It is still accepted when reading IPC so older data
+	// continues to deserialize as VariantType.
+	LegacyVariantExtensionName = "parquet.variant"
+)
+
+// IsVariantExtensionName reports whether name is the canonical or historical
+// Variant extension type name.
+func IsVariantExtensionName(name string) bool {
+	return name == VariantExtensionName || name == LegacyVariantExtensionName
+}
+
+func (*VariantType) ExtensionName() string { return VariantExtensionName }
 
 func (v *VariantType) String() string {
 	return fmt.Sprintf("extension<%s>", v.ExtensionName())
