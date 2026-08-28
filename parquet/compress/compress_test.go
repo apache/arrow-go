@@ -200,6 +200,43 @@ func TestGzipCompressBound(t *testing.T) {
 	}
 }
 
+func TestGzipEncodeLevelConcurrent(t *testing.T) {
+	codec, err := compress.GetCodec(compress.Codecs.Gzip)
+	assert.NoError(t, err)
+
+	src := makeCompressibleData(4 * 1024)
+	levels := []int{
+		gzip.DefaultCompression,
+		gzip.NoCompression,
+		gzip.BestSpeed,
+		gzip.BestCompression,
+		gzip.StatelessCompression,
+	}
+
+	const workers = 16
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < len(levels); j++ {
+				level := levels[(i+j)%len(levels)]
+				compressed := codec.EncodeLevel(nil, src, level)
+				decoded, err := compress.Decode(codec, nil, compressed)
+				if err != nil {
+					t.Errorf("level %d: decode failed: %v", level, err)
+					return
+				}
+				if !bytes.Equal(src, decoded) {
+					t.Errorf("level %d: decoded data differs", level)
+					return
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
 func TestBrotliCompressBound(t *testing.T) {
 	codec, err := compress.GetCodec(compress.Codecs.Brotli)
 	assert.NoError(t, err)
