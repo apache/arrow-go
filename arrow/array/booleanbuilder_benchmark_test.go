@@ -52,13 +52,15 @@ func BenchmarkBooleanBuilderAppendValuesSmall(b *testing.B) {
 	for _, length := range []int{1, 2, 3, 7, 8} {
 		b.Run(fmt.Sprintf("len=%d", length), func(b *testing.B) {
 			values := makeBooleanBenchmarkValues(length, func(i int) bool { return i%2 == 0 })
-			benchmarkAppendValues(b, func() (func(), func()) {
-				bldr := NewBooleanBuilder(memory.DefaultAllocator)
-				bldr.Reserve(length)
-				return func() {
-					bldr.AppendValues(values, nil)
-				}, bldr.Release
-			})
+			bldr := NewBooleanBuilder(memory.DefaultAllocator)
+			bldr.Reserve(len(values) * b.N)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				bldr.AppendValues(values, nil)
+			}
+			b.StopTimer()
+			bldr.Release()
 		})
 	}
 }
