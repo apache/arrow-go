@@ -420,6 +420,15 @@ func (r *Reader) read(recs []string) {
 }
 
 func (r *Reader) initFieldConverter(bldr array.Builder) func(string) {
+	if err := validateTimestampMetadata(bldr.Type()); err != nil {
+		if r.err == nil {
+			r.err = err
+		}
+		return func(string) {
+			bldr.AppendNull()
+		}
+	}
+
 	switch dt := bldr.Type().(type) {
 	case *arrow.BooleanType:
 		return func(str string) {
@@ -1060,7 +1069,17 @@ func tryParse(val string, dt arrow.DataType) error {
 		_, err := arrow.Time32FromString(val, dt.Unit)
 		return err
 	case *arrow.TimestampType:
-		_, err := arrow.TimestampFromString(val, dt.Unit)
+		loc, err := dt.GetZone()
+		if err != nil {
+			return err
+		}
+		_, zonePresent, err := arrow.TimestampFromStringInLocation(val, dt.Unit, loc)
+		if err != nil {
+			return err
+		}
+		if zonePresent != (dt.TimeZone != "") {
+			return arrow.ErrInvalid
+		}
 		return err
 	case *arrow.Float64Type:
 		_, err := strconv.ParseFloat(val, 64)

@@ -519,6 +519,45 @@ func TestTimestampScalarsMakeScalar(t *testing.T) {
 	assertParseScalar(t, typ4, epochPlus1s, scalar.NewTimestampScalar(arrow.Timestamp(1000*1000*1000), typ4))
 }
 
+func TestTimestampScalarStringRoundTrip(t *testing.T) {
+	tests := []struct {
+		name  string
+		typ   *arrow.TimestampType
+		value arrow.Timestamp
+		want  string
+	}{
+		{
+			name:  "timezone-less",
+			typ:   &arrow.TimestampType{Unit: arrow.Second},
+			value: 1,
+			want:  "1970-01-01 00:00:01",
+		},
+		{
+			name:  "utc",
+			typ:   &arrow.TimestampType{Unit: arrow.Second, TimeZone: "UTC"},
+			value: 1,
+			want:  "1970-01-01 00:00:01Z",
+		},
+		{
+			name:  "fixed offset",
+			typ:   &arrow.TimestampType{Unit: arrow.Second, TimeZone: "+02:00"},
+			value: 1,
+			want:  "1970-01-01 02:00:01+0200",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			value := scalar.NewTimestampScalar(tc.value, tc.typ)
+			assert.Equal(t, tc.want, value.String())
+
+			parsed, err := scalar.ParseScalar(tc.typ, value.String())
+			require.NoError(t, err)
+			assert.Equal(t, tc.value, parsed.(*scalar.Timestamp).Value)
+		})
+	}
+}
+
 func TestTimestampScalarsPreserveExplicitOffsetForNamedTimezone(t *testing.T) {
 	typ := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "Europe/Berlin"}
 	value := "1970-01-01 01:00:00+05:00"
@@ -768,7 +807,7 @@ func TestTimestampScalarsCasting(t *testing.T) {
 
 	str, err := scalar.NewTimestampScalar(arrow.Timestamp(1024), arrow.FixedWidthTypes.Timestamp_ms).CastTo(arrow.BinaryTypes.String)
 	assert.NoError(t, err)
-	assert.Truef(t, scalar.Equals(scalar.NewStringScalar("1970-01-01 00:00:01.024"), str), "expected: '1970-01-01 00:00:01.024', got: %s", str)
+	assert.Truef(t, scalar.Equals(scalar.NewStringScalar("1970-01-01 00:00:01.024Z"), str), "expected: '1970-01-01 00:00:01.024Z', got: %s", str)
 
 	i64, err := scalar.NewTimestampScalar(arrow.Timestamp(1024), arrow.FixedWidthTypes.Timestamp_ms).CastTo(arrow.PrimitiveTypes.Int64)
 	assert.NoError(t, err)

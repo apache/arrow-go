@@ -26,6 +26,8 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 )
 
+const timestampScalarLayout = "2006-01-02 15:04:05.999999999"
+
 func temporalToString(s TemporalScalar) string {
 	switch s := s.(type) {
 	case *Date32:
@@ -40,7 +42,15 @@ func temporalToString(s TemporalScalar) string {
 	case *Time64:
 		return time.Unix(0, int64(s.Value)*int64(s.Unit().Multiplier())).UTC().Format("15:04:05.999999999")
 	case *Timestamp:
-		return time.Unix(0, int64(s.Value)*int64(s.Unit().Multiplier())).UTC().Format("2006-01-02 15:04:05.999999999")
+		typ := s.DataType().(*arrow.TimestampType)
+		if typ.TimeZone == "" {
+			return time.Unix(0, int64(s.Value)*int64(s.Unit().Multiplier())).UTC().Format(timestampScalarLayout)
+		}
+		toTime, err := typ.GetToTimeFunc()
+		if err != nil {
+			return "..."
+		}
+		return toTime(s.Value).Format(timestampScalarLayout + "Z0700")
 	}
 	return "..."
 }

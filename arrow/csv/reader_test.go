@@ -398,6 +398,62 @@ func TestCSVReaderInvalidTimestampTimezoneWithNullValue(t *testing.T) {
 	assert.ErrorContains(t, r.Err(), "could not find timezone location")
 }
 
+func TestCSVReaderInvalidNestedTimestampTimezone(t *testing.T) {
+	invalidTimestamp := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "not/a_timezone"}
+	tests := []struct {
+		name  string
+		typ   arrow.DataType
+		value string
+	}{
+		{name: "list", typ: arrow.ListOf(invalidTimestamp), value: "NULL"},
+		{name: "fixed size list", typ: arrow.FixedSizeListOf(1, invalidTimestamp), value: "{1970-01-01T00:00:00Z}"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := arrow.NewSchema([]arrow.Field{{Name: "values", Type: tc.typ, Nullable: true}}, nil)
+			r := csv.NewReader(strings.NewReader(tc.value+"\n"), schema, csv.WithNullReader(true, "NULL"))
+			defer r.Release()
+
+			assert.NotPanics(t, func() {
+				assert.False(t, r.Next())
+			})
+			assert.ErrorContains(t, r.Err(), "could not find timezone location")
+		})
+	}
+}
+
+func TestCSVReaderInvalidInferredTimestampTimezoneDoesNotPanic(t *testing.T) {
+	typ := arrow.ListOf(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "not/a_timezone"})
+	r := csv.NewInferringReader(strings.NewReader("NULL,1\n"),
+		csv.WithHeader(false),
+		csv.WithNullReader(true, "NULL"),
+		csv.WithColumnTypes(map[string]arrow.DataType{"f0": typ}),
+	)
+	defer r.Release()
+
+	assert.NotPanics(t, func() {
+		assert.True(t, r.Next())
+	})
+	assert.ErrorContains(t, r.Err(), "could not find timezone location")
+	assert.True(t, r.RecordBatch().Column(0).IsNull(0))
+	assert.Equal(t, int64(1), r.RecordBatch().Column(1).(*array.Int64).Value(0))
+}
+
+func TestInferringReaderUsesTimezoneAwareTimestamp(t *testing.T) {
+	r := csv.NewInferringReader(strings.NewReader("2024-01-01T00:00:00Z\n"), csv.WithHeader(false))
+	defer r.Release()
+
+	require.True(t, r.Next())
+	require.NoError(t, r.Err())
+
+	typ, ok := r.Schema().Field(0).Type.(*arrow.TimestampType)
+	require.True(t, ok)
+	assert.Equal(t, arrow.Second, typ.Unit)
+	assert.Equal(t, "UTC", typ.TimeZone)
+	assert.Equal(t, arrow.Timestamp(1704067200), r.RecordBatch().Column(0).(*array.Timestamp).Value(0))
+}
+
 func TestCSVReader(t *testing.T) {
 	tests := []struct {
 		Name             string

@@ -305,3 +305,22 @@ func readTypeSupported(dt arrow.DataType) bool {
 	}
 	return true
 }
+
+func validateTimestampMetadata(dt arrow.DataType) error {
+	switch dt := dt.(type) {
+	case *arrow.TimestampType:
+		_, err := dt.GetZone()
+		return err
+	case arrow.ExtensionType:
+		return validateTimestampMetadata(dt.StorageType())
+	case arrow.ListLikeType:
+		return validateTimestampMetadata(dt.Elem())
+	case arrow.NestedType:
+		for _, field := range dt.Fields() {
+			if err := validateTimestampMetadata(field.Type); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
