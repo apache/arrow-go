@@ -294,11 +294,9 @@ func (b *MapBuilder) adjustStructBuilderLen() {
 			arrow.ErrInvalid, sb.Len(), keyLen))
 	}
 	if sb.Len() < keyLen {
-		valids := make([]bool, keyLen-sb.Len())
-		for i := range valids {
-			valids[i] = true
-		}
-		sb.AppendValues(valids)
+		missing := keyLen - sb.Len()
+		sb.Reserve(missing)
+		sb.unsafeAppendBoolsToBitmap(nil, missing)
 	}
 }
 
