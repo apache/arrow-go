@@ -192,6 +192,54 @@ func (ss *ScalarSetLookupSuite) TestIsInPrimitive() {
 	}
 }
 
+func (ss *ScalarSetLookupSuite) TestIsInBoolean() {
+	for _, tc := range []struct {
+		name     string
+		input    string
+		valueset string
+		expected string
+		matching compute.NullMatchingBehavior
+	}{
+		{
+			name:     "no nulls",
+			input:    `[false, true, false, true]`,
+			valueset: `[true]`,
+			expected: `[false, true, false, true]`,
+			matching: compute.NullMatchingMatch,
+		},
+		{
+			name:     "nulls in both",
+			input:    `[false, true, null, false]`,
+			valueset: `[true, null]`,
+			expected: `[false, true, true, false]`,
+			matching: compute.NullMatchingMatch,
+		},
+		{
+			name:     "inconclusive nulls",
+			input:    `[false, true, null, false]`,
+			valueset: `[true, null]`,
+			expected: `[null, true, null, null]`,
+			matching: compute.NullMatchingInconclusive,
+		},
+	} {
+		ss.Run(tc.name, func() {
+			ss.checkIsInFromJSON(arrow.FixedWidthTypes.Boolean,
+				tc.input, tc.valueset, tc.expected, tc.matching)
+		})
+	}
+
+	input := ss.getArr(arrow.FixedWidthTypes.Boolean, `[false, true, false, true, false]`)
+	defer input.Release()
+	valueSet := ss.getArr(arrow.FixedWidthTypes.Boolean, `[false, true, false]`)
+	defer valueSet.Release()
+
+	inputSlice := array.NewSlice(input, 1, 4)
+	defer inputSlice.Release()
+	valueSetSlice := array.NewSlice(valueSet, 1, 3)
+	defer valueSetSlice.Release()
+	ss.checkIsIn(inputSlice, valueSetSlice, `[true, true, true]`, compute.NullMatchingMatch)
+}
+
 func (ss *ScalarSetLookupSuite) TestDurationCasts() {
 	vals := ss.getArr(arrow.FixedWidthTypes.Duration_s, `[0, 1, 2]`)
 	defer vals.Release()

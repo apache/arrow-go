@@ -50,6 +50,22 @@ func visitBinary[OffsetT int32 | int64](data *exec.ArraySpan, valid func([]byte)
 		}, null)
 }
 
+func visitBool(data *exec.ArraySpan, valid func(uint8) error, null func() error) error {
+	if data.Len == 0 {
+		return nil
+	}
+
+	values := data.Buffers[1].Buf
+	return bitutils.VisitBitBlocksShort(data.Buffers[0].Buf, data.Offset, data.Len,
+		func(pos int64) error {
+			var value uint8
+			if bitutil.BitIsSet(values, int(data.Offset+pos)) {
+				value = 1
+			}
+			return valid(value)
+		}, null)
+}
+
 func visitNumeric[T arrow.FixedWidthType](data *exec.ArraySpan, valid func(T) error, null func() error) error {
 	if data.Len == 0 {
 		return nil
@@ -107,6 +123,11 @@ func CreateSetLookupState(opts SetLookupOptions, alloc memory.Allocator) (exec.K
 				Alloc:   alloc,
 				visitFn: visitBinary[int64],
 			}
+		}
+	case *arrow.BooleanType:
+		state = &SetLookupState[uint8]{
+			Alloc:   alloc,
+			visitFn: visitBool,
 		}
 	case arrow.FixedWidthDataType:
 		switch ty.Bytes() {
