@@ -195,6 +195,77 @@ func TestBitReaderGetBatchBools(t *testing.T) {
 	})
 }
 
+func TestBitReaderGetBatchBitmap(t *testing.T) {
+	data := bytes.Repeat([]byte{0xAA, 0xCC, 0xF0}, 128)
+
+	for _, outOffset := range []int{0, 1, 7} {
+		t.Run(fmt.Sprintf("aligned/offset=%d", outOffset), func(t *testing.T) {
+			const length = 2048
+			reader := utils.NewBitReader(bytes.NewReader(data))
+			out := bytes.Repeat([]byte{0xa5}, int(bitutil.BytesForBits(int64(outOffset+length+8))))
+			before := append([]byte(nil), out...)
+
+			n, err := reader.GetBatchBitmap(out, outOffset, length)
+			assert.NoError(t, err)
+			assert.Equal(t, length, n)
+			for i := 0; i < length; i++ {
+				assert.Equal(t, bitutil.BitIsSet(data, i), bitutil.BitIsSet(out, outOffset+i), "bit %d", i)
+			}
+			for i := 0; i < outOffset; i++ {
+				assert.Equal(t, bitutil.BitIsSet(before, i), bitutil.BitIsSet(out, i), "prefix bit %d", i)
+			}
+			for i := outOffset + length; i < len(out)*8; i++ {
+				assert.Equal(t, bitutil.BitIsSet(before, i), bitutil.BitIsSet(out, i), "suffix bit %d", i)
+			}
+		})
+	}
+
+	t.Run("unaligned_input", func(t *testing.T) {
+		reader := utils.NewBitReader(bytes.NewReader(data))
+		_, ok := reader.GetValue(1)
+		assert.True(t, ok)
+		const length = 80
+		const outOffset = 7
+		out := bytes.Repeat([]byte{0xa5}, int(bitutil.BytesForBits(outOffset+length+8)))
+
+		n, err := reader.GetBatchBitmap(out, outOffset, length)
+		assert.NoError(t, err)
+		assert.Equal(t, length, n)
+		for i := 0; i < length; i++ {
+			assert.Equal(t, bitutil.BitIsSet(data, i+1), bitutil.BitIsSet(out, outOffset+i), "bit %d", i)
+		}
+	})
+
+	for _, tc := range []struct {
+		name      string
+		inputSize int
+		length    int
+		want      int
+		err       error
+	}{
+		{name: "partial_group", inputSize: 7, length: 64, want: 32, err: io.ErrUnexpectedEOF},
+		{name: "group_boundary", inputSize: 4, length: 64, want: 32, err: io.EOF},
+		{name: "partial_scalar", inputSize: 1, length: 9, want: 8, err: io.ErrUnexpectedEOF},
+	} {
+		t.Run("truncated/"+tc.name, func(t *testing.T) {
+			input := bytes.Repeat([]byte{0xff}, tc.inputSize)
+			reader := utils.NewBitReader(bytes.NewReader(input))
+			out := bytes.Repeat([]byte{0xa5}, int(bitutil.BytesForBits(int64(tc.length+8))))
+			before := append([]byte(nil), out...)
+
+			n, err := reader.GetBatchBitmap(out, 3, tc.length)
+			assert.ErrorIs(t, err, tc.err)
+			assert.Equal(t, tc.want, n)
+			for i := 0; i < n; i++ {
+				assert.True(t, bitutil.BitIsSet(out, 3+i), "decoded bit %d", i)
+			}
+			for i := n; i < tc.length; i++ {
+				assert.Equal(t, bitutil.BitIsSet(before, 3+i), bitutil.BitIsSet(out, 3+i), "unreturned bit %d", i)
+			}
+		})
+	}
+}
+
 func TestBitReader(t *testing.T) {
 	buf := []byte{0xAA, 0xCC} // 0b10101010 0b11001100
 

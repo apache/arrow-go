@@ -658,6 +658,75 @@ func (b *BitReader) GetBatchLevels(bits uint, out []int16, maxLevel int16) (int,
 	return i, maxCount, nil
 }
 
+// GetBatchBitmap fills out with bit-packed boolean values without unpacking
+// them into a slice of integers. The input must be packed one bit per value.
+func (b *BitReader) GetBatchBitmap(out []byte, outOffset, length int) (int, error) {
+	if length == 0 {
+		return 0, nil
+	}
+
+	i := 0
+	// Match GetBatch's scalar handling when the current value is in the
+	// middle of the reader's buffered word.
+	for ; i < length && b.bitoffset != 0; i++ {
+		val, err := b.next(1)
+		if err != nil {
+			return i, err
+		}
+		bitutil.SetBitTo(out, outOffset+i, val != 0)
+	}
+
+	if _, err := b.reader.Seek(b.byteoffset, io.SeekStart); err != nil {
+		return i, err
+	}
+
+	// Read complete 32-value groups directly into the bitmap. Keep the
+	// temporary packed data so a short final read cannot modify bits that were
+	// not returned to the caller.
+	for i < length {
+		batch := min(buflen, length-i)
+		batch = batch / 32 * 32
+		if batch == 0 {
+			break
+		}
+
+		packedBytes := batch / 8
+		packed := arrow.Uint32Traits.CastToBytes(b.unpackBuf[:packedBytes/4])
+		nread, err := io.ReadFull(b.reader, packed[:packedBytes])
+		if err == io.ErrUnexpectedEOF && nread%4 == 0 {
+			// Match unpack32's group-boundary behavior: an EOF between
+			// complete 32-value groups is reported as io.EOF.
+			err = io.EOF
+		}
+		completeBytes := nread / 4 * 4
+		if completeBytes > 0 {
+			if (outOffset+i)%8 == 0 {
+				copy(out[(outOffset+i)/8:], packed[:completeBytes])
+			} else {
+				bitutil.CopyBitmap(packed, 0, completeBytes*8, out, outOffset+i)
+			}
+			i += completeBytes * 8
+			b.byteoffset += int64(completeBytes)
+		}
+		if err != nil {
+			return i, err
+		}
+	}
+
+	if err := b.fillbuffer(); err != nil {
+		return i, err
+	}
+	for ; i < length; i++ {
+		val, err := b.next(1)
+		if err != nil {
+			return i, err
+		}
+		bitutil.SetBitTo(out, outOffset+i, val != 0)
+	}
+
+	return length, nil
+}
+
 // GetValue returns a single value that is bit packed using width as the number of bits
 // and returns false if there weren't enough bits remaining.
 func (b *BitReader) GetValue(width int) (uint64, bool) {

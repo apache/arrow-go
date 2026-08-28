@@ -281,6 +281,42 @@ func (r *RleDecoder) GetBatchLevels(values []int16, maxLevel int16) (int, int64,
 	return read, maxCount, nil
 }
 
+// GetBatchBitmap decodes one-bit values directly into a bitmap.
+func (r *RleDecoder) GetBatchBitmap(out []byte, outOffset, size int) (int, error) {
+	if r.bitWidth != 1 {
+		return 0, errors.New("bitmap decoding requires a bit width of 1")
+	}
+
+	read := 0
+	for read < size {
+		remain := size - read
+
+		if r.repCount > 0 {
+			repbatch := min(remain, int(r.repCount))
+			bitutil.SetBitsTo(out, int64(outOffset+read), int64(repbatch), r.curVal != 0)
+
+			r.repCount -= int32(repbatch)
+			read += repbatch
+		} else if r.litCount > 0 {
+			litbatch := min(remain, int(r.litCount))
+			n, err := r.r.GetBatchBitmap(out, outOffset+read, litbatch)
+			r.litCount -= int32(n)
+			read += n
+			if err != nil {
+				return read, err
+			}
+			if n != litbatch {
+				return read, nil
+			}
+		} else {
+			if !r.Next() {
+				return read, nil
+			}
+		}
+	}
+	return read, nil
+}
+
 func (r *RleDecoder) GetBatchSpaced(vals []uint64, nullcount int, validBits []byte, validBitsOffset int64) (int, error) {
 	if nullcount == 0 {
 		return r.GetBatch(vals)

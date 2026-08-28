@@ -381,38 +381,18 @@ func (dec *RleBooleanDecoder) Decode(out []bool) (int, error) {
 
 func (dec *RleBooleanDecoder) DecodeToBitmap(out []byte, outOffset int64, length int) (int, error) {
 	max := shared_utils.Min(length, dec.nvals)
-	writer := bitutil.NewBitmapWriter(out, int(outOffset), max)
-
-	var (
-		buf [1024]uint64
-		n   = max
-	)
-	for n > 0 {
-		batch := shared_utils.Min(len(buf), n)
-		decoded, err := dec.rleDec.GetBatch(buf[:batch])
-		for _, value := range buf[:decoded] {
-			if value != 0 {
-				writer.Set()
-			} else {
-				writer.Clear()
-			}
-			writer.Next()
-		}
-		n -= decoded
-		if err != nil {
-			writer.Finish()
-			dec.nvals -= max - n
-			return max - n, err
-		}
-		if decoded != batch {
-			writer.Finish()
-			dec.nvals -= max - n
-			return max - n, io.ErrUnexpectedEOF
-		}
+	if max == 0 {
+		return 0, nil
 	}
 
-	writer.Finish()
-	dec.nvals -= max
+	decoded, err := dec.rleDec.GetBatchBitmap(out, int(outOffset), max)
+	dec.nvals -= decoded
+	if err != nil {
+		return decoded, err
+	}
+	if decoded != max {
+		return decoded, io.ErrUnexpectedEOF
+	}
 	return max, nil
 }
 
