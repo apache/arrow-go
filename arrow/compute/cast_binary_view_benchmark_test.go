@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build go1.18
+//go:build go1.24
 
 package compute_test
 
@@ -40,9 +40,13 @@ func BenchmarkBinaryViewToBinaryMaterialization(b *testing.B) {
 				values := make([][]byte, count)
 				valid := make([]bool, count)
 				value := []byte(strings.Repeat("x", valueLen))
+				validCount := 0
 				for i := range values {
 					values[i] = value
 					valid[i] = nullEvery == 0 || i%nullEvery != 0
+					if valid[i] {
+						validCount++
+					}
 				}
 
 				builder := array.NewBinaryViewBuilder(memory.DefaultAllocator)
@@ -52,7 +56,7 @@ func BenchmarkBinaryViewToBinaryMaterialization(b *testing.B) {
 				defer input.Release()
 
 				opts := compute.SafeCastOptions(arrow.BinaryTypes.Binary)
-				b.SetBytes(int64(count * valueLen))
+				b.SetBytes(int64(validCount * valueLen))
 				b.ReportAllocs()
 				b.ResetTimer()
 				for b.Loop() {
