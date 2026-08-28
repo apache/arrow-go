@@ -558,6 +558,20 @@ func TestTimestampScalarStringRoundTrip(t *testing.T) {
 	}
 }
 
+func TestTimestampScalarStringRoundTripPreservesHistoricalOffsetSeconds(t *testing.T) {
+	value, err := arrow.TimestampFromString("0000-01-01 00:00:00", arrow.Second)
+	require.NoError(t, err)
+
+	typ := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "Europe/Berlin"}
+	scalarValue := scalar.NewTimestampScalar(value, typ)
+
+	assert.Equal(t, "0000-01-01 00:53:28+005328", scalarValue.String())
+
+	parsed, err := scalar.ParseScalar(typ, scalarValue.String())
+	require.NoError(t, err)
+	assert.Equal(t, value, parsed.(*scalar.Timestamp).Value)
+}
+
 func TestTimestampScalarsPreserveExplicitOffsetForNamedTimezone(t *testing.T) {
 	typ := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "Europe/Berlin"}
 	value := "1970-01-01 01:00:00+05:00"

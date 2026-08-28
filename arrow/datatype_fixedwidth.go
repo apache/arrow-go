@@ -118,6 +118,12 @@ func TimestampFromStringInLocation(val string, unit TimeUnit, loc *time.Location
 		case val[len(val)-1] == 'Z':
 			zoneFmt = "Z"
 			lenWithoutZone--
+		case val[len(val)-9] == '+' || val[len(val)-9] == '-':
+			zoneFmt = "-07:00:00"
+			lenWithoutZone -= 9
+		case val[len(val)-7] == '+' || val[len(val)-7] == '-':
+			zoneFmt = "-070000"
+			lenWithoutZone -= 7
 		case val[len(val)-3] == '+' || val[len(val)-3] == '-':
 			zoneFmt = "-07"
 			lenWithoutZone -= 3
@@ -179,7 +185,8 @@ func TimestampFromStringInLocation(val string, unit TimeUnit, loc *time.Location
 //	YYYY-MM-DD[T]HH:MM:SS[.zzzzzzzz]
 //
 // You can also optionally have an ending Z to indicate UTC or indicate a specific
-// timezone using ±HH, ±HHMM or ±HH:MM at the end of the string.
+// timezone using ±HH, ±HHMM, ±HH:MM, ±HHMMSS or ±HH:MM:SS at the end
+// of the string.
 func TimestampFromString(val string, unit TimeUnit) (Timestamp, error) {
 	tm, _, err := TimestampFromStringInLocation(val, unit, time.UTC)
 	return tm, err

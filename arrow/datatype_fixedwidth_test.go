@@ -583,6 +583,25 @@ func TestTimestampFromTimeFractionalSeconds(t *testing.T) {
 	assert.ErrorIs(t, err, arrow.ErrInvalid)
 }
 
+func TestTimestampFromStringWithSecondOffsets(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value string
+		want  arrow.Timestamp
+	}{
+		{name: "compact positive", value: "1970-01-01 00:00:00+005328", want: -3208},
+		{name: "colon positive", value: "1970-01-01 00:00:00+00:53:28", want: -3208},
+		{name: "compact negative", value: "1970-01-01 00:00:00-005328", want: 3208},
+		{name: "colon negative", value: "1970-01-01 00:00:00-00:53:28", want: 3208},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := arrow.TimestampFromString(tc.value, arrow.Second)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestNarrowestDecimalType(t *testing.T) {
 	tests := []struct {
 		min, max int32

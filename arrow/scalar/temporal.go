@@ -26,7 +26,11 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 )
 
-const timestampScalarLayout = "2006-01-02 15:04:05.999999999"
+const (
+	timestampScalarLayout            = "2006-01-02 15:04:05.999999999"
+	timestampScalarZoneLayout        = timestampScalarLayout + "Z0700"
+	timestampScalarZoneSecondsLayout = timestampScalarLayout + "Z070000"
+)
 
 func temporalToString(s TemporalScalar) string {
 	switch s := s.(type) {
@@ -50,7 +54,12 @@ func temporalToString(s TemporalScalar) string {
 		if err != nil {
 			return "..."
 		}
-		return toTime(s.Value).Format(timestampScalarLayout + "Z0700")
+		tm := toTime(s.Value)
+		layout := timestampScalarZoneLayout
+		if _, offset := tm.Zone(); offset%60 != 0 {
+			layout = timestampScalarZoneSecondsLayout
+		}
+		return tm.Format(layout)
 	}
 	return "..."
 }
