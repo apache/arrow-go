@@ -20,12 +20,15 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/andybalholm/brotli"
 	"github.com/apache/arrow-go/v18/parquet/internal/debug"
 )
 
 type brotliCodec struct{}
+
+var brotliWriterPools [brotli.BestCompression + 1]sync.Pool
 
 func (brotliCodec) NewReader(r io.Reader) io.ReadCloser {
 	return io.NopCloser(brotli.NewReader(r))
@@ -41,15 +44,44 @@ func (b brotliCodec) EncodeLevel(dst, src []byte, level int) []byte {
 		dst = make([]byte, 0, maxlen)
 	}
 	buf := bytes.NewBuffer(dst[:0])
-	w := brotli.NewWriterLevel(buf, level)
+	pool := brotliWriterPool(level)
+	var w *brotli.Writer
+	if pool != nil {
+		if cached := pool.Get(); cached != nil {
+			w = cached.(*brotli.Writer)
+			w.Reset(buf)
+		}
+	}
+	if w == nil {
+		w = brotli.NewWriterLevel(buf, level)
+	}
 	_, err := w.Write(src)
 	if err != nil {
+		releaseBrotliWriter(pool, w)
 		panic(err)
 	}
 	if err := w.Close(); err != nil {
+		releaseBrotliWriter(pool, w)
 		panic(err)
 	}
-	return buf.Bytes()
+	compressed := buf.Bytes()
+	releaseBrotliWriter(pool, w)
+	return compressed
+}
+
+func brotliWriterPool(level int) *sync.Pool {
+	if level < brotli.BestSpeed || level > brotli.BestCompression {
+		return nil
+	}
+	return &brotliWriterPools[level]
+}
+
+func releaseBrotliWriter(pool *sync.Pool, w *brotli.Writer) {
+	if pool == nil {
+		return
+	}
+	w.Reset(nil)
+	pool.Put(w)
 }
 
 func (b brotliCodec) Encode(dst, src []byte) []byte {

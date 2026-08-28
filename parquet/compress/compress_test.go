@@ -259,6 +259,66 @@ func TestBrotliCompressBound(t *testing.T) {
 	}
 }
 
+func TestBrotliEncodeLevelReuse(t *testing.T) {
+	codec, err := compress.GetCodec(compress.Codecs.Brotli)
+	assert.NoError(t, err)
+
+	tests := []struct {
+		name string
+		src  []byte
+	}{
+		{name: "empty", src: nil},
+		{name: "one byte", src: []byte{0xab}},
+		{name: "compressible", src: makeCompressibleData(4 * 1024)},
+		{name: "random", src: makeRandomData(4 * 1024)},
+	}
+	levels := []int{0, compress.DefaultCompressionLevel, 5, 11, -2, 12}
+
+	for _, tt := range tests {
+		dst := make([]byte, 0, int(codec.CompressBound(int64(len(tt.src)))))
+		for _, level := range levels {
+			compressed := codec.EncodeLevel(dst, tt.src, level)
+			decoded, err := compress.Decode(codec, nil, compressed)
+			if !assert.NoError(t, err, "%s, level %d", tt.name, level) {
+				continue
+			}
+			assert.True(t, bytes.Equal(tt.src, decoded), "%s, level %d", tt.name, level)
+			dst = compressed[:0]
+		}
+	}
+}
+
+func TestBrotliEncodeLevelConcurrent(t *testing.T) {
+	codec, err := compress.GetCodec(compress.Codecs.Brotli)
+	assert.NoError(t, err)
+
+	src := makeCompressibleData(4 * 1024)
+	levels := []int{0, compress.DefaultCompressionLevel, 9, 11}
+
+	const workers = 16
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < len(levels); j++ {
+				level := levels[(i+j)%len(levels)]
+				compressed := codec.EncodeLevel(nil, src, level)
+				decoded, err := compress.Decode(codec, nil, compressed)
+				if err != nil {
+					t.Errorf("level %d: decode failed: %v", level, err)
+					return
+				}
+				if !bytes.Equal(src, decoded) {
+					t.Errorf("level %d: decoded data differs", level)
+					return
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
 func TestCompressReaderWriter(t *testing.T) {
 	tests := []struct {
 		c compress.Compression
