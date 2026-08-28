@@ -304,6 +304,8 @@ func (f *FileWriter) getRecordEncoder() *recordEncoder {
 }
 
 func (f *FileWriter) Close() error {
+	defer func() { f.encoder = nil }()
+
 	if f.closed {
 		return f.closeErr
 	}

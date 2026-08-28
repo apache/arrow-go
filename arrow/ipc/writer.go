@@ -155,6 +155,8 @@ func (w *Writer) getRecordEncoder() *recordEncoder {
 }
 
 func (w *Writer) Close() error {
+	defer func() { w.encoder = nil }()
+
 	if w.err != nil {
 		return w.closeAfterFailure()
 	}
