@@ -225,6 +225,10 @@ func NewVariantType(storage arrow.DataType) (*VariantType, error) {
 		dt = dt.(arrow.ExtensionType).StorageType()
 	}
 
+	if dt.ID() == arrow.NULL {
+		return nil, fmt.Errorf("%w: typed_value field must not be null type", arrow.ErrInvalid)
+	}
+
 	if nt, ok := dt.(arrow.NestedType); ok {
 		if !validNestedType(nt) {
 			return nil, fmt.Errorf("%w: typed_value field must be a valid nested type, got %s", arrow.ErrInvalid, typedValueField.Type)
@@ -295,7 +299,10 @@ func validStruct(s *arrow.StructType) bool {
 	switch s.NumFields() {
 	case 1:
 		f := s.Field(0)
-		return (f.Name == "value" && isBinary(f.Type)) || f.Name == "typed_value"
+		if f.Name == "value" {
+			return isBinary(f.Type)
+		}
+		return f.Name == "typed_value" && f.Type.ID() != arrow.NULL
 	case 2:
 		valField, ok := s.FieldByName("value")
 		if !ok || !valField.Nullable || !isBinary(valField.Type) {
@@ -311,7 +318,7 @@ func validStruct(s *arrow.StructType) bool {
 			return validNestedType(nt)
 		}
 
-		return true
+		return typedField.Type.ID() != arrow.NULL
 	default:
 		return false
 	}
