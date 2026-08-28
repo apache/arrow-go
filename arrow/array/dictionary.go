@@ -876,13 +876,20 @@ func (b *dictionaryBuilder) AppendEmptyValues(n int) {
 
 	valueBuilder := NewBuilder(b.mem, b.dt.ValueType)
 	defer valueBuilder.Release()
-	valueBuilder.AppendEmptyValues(n)
+	valueBuilder.AppendEmptyValue()
 
 	values := valueBuilder.NewArray()
 	defer values.Release()
-	if err := b.AppendArray(values); err != nil {
+	idx, _, err := b.memoTable.GetOrInsert(getvalFn(values)(0))
+	if err != nil {
 		panic(err)
 	}
+
+	b.idxBuilder.Reserve(n)
+	for i := 0; i < n; i++ {
+		b.idxBuilder.UnsafeAppend(idx)
+	}
+	b.length += n
 }
 
 func (b *dictionaryBuilder) UnsafeAppendBoolToBitmap(v bool) {
