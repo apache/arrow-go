@@ -229,5 +229,7 @@ func (dec *ByteStreamSplitFixedLenByteArrayDecoder) DecodeSpaced(out []parquet.F
 		return valuesRead, errors.New("parquet: number of values / definitions levels read did not match")
 	}
 
-	return spacedExpand(out, nullCount, validBits, validBitsOffset), nil
+	// This decoder writes through the caller's slices, so it must not leave aliased
+	// headers behind for the next page; see spacedExpandSwap.
+	return spacedExpandSwap(out, nullCount, validBits, validBitsOffset), nil
 }

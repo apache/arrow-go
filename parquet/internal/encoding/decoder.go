@@ -218,6 +218,46 @@ func (d *dictDecoder[T]) DecodeIndicesSpaced(numValues, nullCount int, validBits
 	return n, nil
 }
 
+// spacedExpandSwap is spacedExpand for decoders that write *through* caller-provided
+// storage instead of replacing it. spacedExpand moves values with copy and leaves the
+// null slots alone, which for the slice-header column types (ByteArray /
+// FixedLenByteArray) leaves duplicate headers behind: a null slot and a valid slot end
+// up referencing the same backing array. That is harmless for a decoder that replaces
+// the header, but a decoder that writes through it would have two output slots share
+// one array and clobber each other once the buffer is reused for a later page.
+//
+// Swapping instead of copying keeps the buffer a permutation of its original elements,
+// so no slot aliases another and every slot keeps its reusable capacity.
+func spacedExpandSwap[T parquet.ColumnTypes](buffer []T, nullCount int, validBits []byte, validBitsOffset int64) int {
+	numValues := len(buffer)
+
+	idxDecode := int64(numValues - nullCount)
+	if idxDecode == 0 {
+		return numValues
+	}
+
+	rdr := bitutils.NewReverseSetBitRunReader(validBits, validBitsOffset, int64(numValues))
+	for {
+		run := rdr.NextRun()
+		if run.Length == 0 {
+			break
+		}
+
+		idxDecode -= run.Length
+		// Once the decoded prefix is already aligned every remaining swap is a
+		// self-swap, so there is nothing left to do. Mirrors spacedExpand.
+		if idxDecode == run.Pos {
+			return numValues
+		}
+		for k := run.Length - 1; k >= 0; k-- {
+			dst, src := run.Pos+k, idxDecode+k
+			buffer[dst], buffer[src] = buffer[src], buffer[dst]
+		}
+	}
+
+	return numValues
+}
+
 // spacedExpand is used to take a slice of data and utilize the bitmap provided to fill in nulls into the
 // correct slots according to the bitmap in order to produce a fully expanded result slice with nulls
 // in the correct slots.
