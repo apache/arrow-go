@@ -315,7 +315,6 @@ func (fw *FileWriter) WriteBuffered(rec arrow.RecordBatch) error {
 	}
 
 	var (
-		recList []arrow.RecordBatch
 		maxRows = fw.wr.Properties().MaxRowGroupLength()
 		curRows int
 		err     error
@@ -329,31 +328,33 @@ func (fw *FileWriter) WriteBuffered(rec arrow.RecordBatch) error {
 			return err
 		}
 	}
-
 	if int64(curRows)+rec.NumRows() <= maxRows {
-		recList = []arrow.RecordBatch{rec}
-	} else {
-		recList = []arrow.RecordBatch{rec.NewSlice(0, maxRows-int64(curRows))}
-		defer recList[0].Release()
-		for offset := maxRows - int64(curRows); offset < rec.NumRows(); offset += maxRows {
-			s := rec.NewSlice(offset, offset+utils.Min(maxRows, rec.NumRows()-offset))
-			defer s.Release()
-			recList = append(recList, s)
+		if err := fw.writeRecordBatchColumns(rec); err != nil {
+			fw.Close()
+			return err
 		}
+		fw.colIdx = 0
+		return nil
 	}
 
-	for idx, r := range recList {
-		if idx > 0 {
-			if err := fw.NewBufferedRowGroupChecked(); err != nil {
-				return err
-			}
+	columns := newChunkedRecordColumns(rec)
+	defer releaseChunkedRecordColumns(columns)
+
+	firstSize := maxRows - int64(curRows)
+
+	for offset, size := int64(0), firstSize; ; {
+		if err := fw.writeRecordBatchRange(columns, offset, size); err != nil {
+			fw.Close()
+			return err
 		}
-		for i := 0; i < int(r.NumCols()); i++ {
-			if err := fw.WriteColumnData(r.Column(i)); err != nil {
-				fw.Close()
-				return err
-			}
+		if offset+size >= rec.NumRows() {
+			break
 		}
+		if err := fw.NewBufferedRowGroupChecked(); err != nil {
+			return err
+		}
+		offset += size
+		size = utils.Min(maxRows, rec.NumRows()-offset)
 	}
 	fw.colIdx = 0
 	return nil
@@ -375,32 +376,66 @@ func (fw *FileWriter) Write(rec arrow.RecordBatch) error {
 		return fmt.Errorf("record schema does not match writer's. \nrecord: %s\nwriter: %s", rec.Schema(), fw.schema)
 	}
 
-	var recList []arrow.RecordBatch
 	rowgroupLen := fw.wr.Properties().MaxRowGroupLength()
-	if rec.NumRows() > rowgroupLen {
-		recList = make([]arrow.RecordBatch, 0)
-		for offset := int64(0); offset < rec.NumRows(); offset += rowgroupLen {
-			s := rec.NewSlice(offset, offset+utils.Min(rowgroupLen, rec.NumRows()-offset))
-			defer s.Release()
-			recList = append(recList, s)
-		}
-	} else {
-		recList = []arrow.RecordBatch{rec}
-	}
-
-	for _, r := range recList {
+	if rec.NumRows() <= rowgroupLen {
 		if err := fw.NewRowGroupChecked(); err != nil {
 			return err
 		}
-		for i := 0; i < int(r.NumCols()); i++ {
-			if err := fw.WriteColumnData(r.Column(i)); err != nil {
-				fw.Close()
-				return err
-			}
+		if err := fw.writeRecordBatchColumns(rec); err != nil {
+			fw.Close()
+			return err
+		}
+		fw.colIdx = 0
+		return fw.rgw.Close()
+	}
+
+	columns := newChunkedRecordColumns(rec)
+	defer releaseChunkedRecordColumns(columns)
+
+	for offset := int64(0); offset < rec.NumRows(); offset += rowgroupLen {
+		if err := fw.NewRowGroupChecked(); err != nil {
+			return err
+		}
+		size := utils.Min(rowgroupLen, rec.NumRows()-offset)
+		if err := fw.writeRecordBatchRange(columns, offset, size); err != nil {
+			fw.Close()
+			return err
 		}
 	}
 	fw.colIdx = 0
 	return fw.rgw.Close()
+}
+
+func newChunkedRecordColumns(rec arrow.RecordBatch) []*arrow.Chunked {
+	columns := make([]*arrow.Chunked, int(rec.NumCols()))
+	for i, column := range rec.Columns() {
+		columns[i] = arrow.NewChunked(column.DataType(), []arrow.Array{column})
+	}
+	return columns
+}
+
+func releaseChunkedRecordColumns(columns []*arrow.Chunked) {
+	for _, column := range columns {
+		column.Release()
+	}
+}
+
+func (fw *FileWriter) writeRecordBatchColumns(rec arrow.RecordBatch) error {
+	for i := 0; i < int(rec.NumCols()); i++ {
+		if err := fw.WriteColumnData(rec.Column(i)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (fw *FileWriter) writeRecordBatchRange(columns []*arrow.Chunked, offset, size int64) error {
+	for _, column := range columns {
+		if err := fw.WriteColumnChunked(column, offset, size); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // WriteTable writes an arrow table to the underlying file using chunkSize to determine
