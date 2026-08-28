@@ -165,9 +165,11 @@ func (s *SetLookupState[T]) Init(opts SetLookupOptions) error {
 	s.NullBehavior = opts.NullBehavior
 	s.MemoIndexToValueIndex = make([]int32, 0, opts.TotalLen)
 	s.NullIndex = -1
-	memoType := s.ValueSetType.ID()
+	valueSetType := s.ValueSetType
+	memoType := valueSetType.ID()
 	if memoType == arrow.EXTENSION {
-		memoType = s.ValueSetType.(arrow.ExtensionType).StorageType().ID()
+		valueSetType = s.ValueSetType.(arrow.ExtensionType).StorageType()
+		memoType = valueSetType.ID()
 	}
 	// FixedSizeBinary with byte-widths 1/2/4/8 takes the numeric fast-path
 	// in CreateSetLookupState (SetLookupState[uintN] + visitNumeric[uintN]),
@@ -175,7 +177,7 @@ func (s *SetLookupState[T]) Init(opts SetLookupOptions) error {
 	// the BinaryMemoTable that newMemoTable would otherwise return for
 	// FIXED_SIZE_BINARY.
 	if memoType == arrow.FIXED_SIZE_BINARY {
-		if fsb, ok := s.ValueSetType.(*arrow.FixedSizeBinaryType); ok {
+		if fsb, ok := valueSetType.(*arrow.FixedSizeBinaryType); ok {
 			switch fsb.ByteWidth {
 			case 1:
 				memoType = arrow.UINT8

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -27,9 +28,33 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/compute"
+	"github.com/apache/arrow-go/v18/arrow/compute/exec"
+	"github.com/apache/arrow-go/v18/arrow/compute/internal/kernels"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/suite"
 )
+
+type fixedSizeBinaryExtensionType struct {
+	arrow.ExtensionBase
+}
+
+func (t *fixedSizeBinaryExtensionType) ArrayType() reflect.Type {
+	return reflect.TypeOf(fixedSizeBinaryExtensionArray{})
+}
+
+func (t *fixedSizeBinaryExtensionType) ExtensionEquals(other arrow.ExtensionType) bool {
+	return t.ExtensionName() == other.ExtensionName() && arrow.TypeEqual(t.StorageType(), other.StorageType())
+}
+
+func (*fixedSizeBinaryExtensionType) ExtensionName() string { return "compute.test.fixed_size_binary" }
+func (*fixedSizeBinaryExtensionType) Serialize() string     { return "" }
+func (t *fixedSizeBinaryExtensionType) Deserialize(storageType arrow.DataType, _ string) (arrow.ExtensionType, error) {
+	return &fixedSizeBinaryExtensionType{ExtensionBase: arrow.ExtensionBase{Storage: storageType}}, nil
+}
+
+type fixedSizeBinaryExtensionArray struct {
+	array.ExtensionArrayBase
+}
 
 type ScalarSetLookupSuite struct {
 	suite.Suite
@@ -293,6 +318,40 @@ func (ss *ScalarSetLookupSuite) TestIsInFixedSizeBinaryFastPaths() {
 				enc(pad("a", w)), enc(pad("b", w)))
 			ss.checkIsInFromJSON(typ, input, valueset,
 				`[true, false, true]`, compute.NullMatchingMatch)
+		})
+	}
+}
+
+func (ss *ScalarSetLookupSuite) TestIsInFixedSizeBinaryExtensionFastPaths() {
+	for _, width := range []int{1, 2, 4, 8} {
+		width := width
+		ss.Run(fmt.Sprintf("ByteWidth=%d", width), func() {
+			typ := &fixedSizeBinaryExtensionType{
+				ExtensionBase: arrow.ExtensionBase{
+					Storage: &arrow.FixedSizeBinaryType{ByteWidth: width},
+				},
+			}
+			builder := array.NewFixedSizeBinaryBuilder(ss.mem, typ.StorageType().(*arrow.FixedSizeBinaryType))
+			values := make([][]byte, 2)
+			for i := range values {
+				values[i] = make([]byte, width)
+				values[i][0] = byte(i + 1)
+			}
+			builder.AppendValues(values, nil)
+			storage := builder.NewFixedSizeBinaryArray()
+			builder.Release()
+			defer storage.Release()
+
+			var span exec.ArraySpan
+			span.SetMembers(storage.Data())
+			state, err := kernels.CreateSetLookupState(kernels.SetLookupOptions{
+				ValueSetType: typ,
+				TotalLen:     int64(storage.Len()),
+				ValueSet:     []exec.ArraySpan{span},
+				NullBehavior: kernels.NullMatchingMatch,
+			}, ss.mem)
+			ss.Require().NoError(err)
+			ss.Require().Equal(typ, state.(interface{ ValueType() arrow.DataType }).ValueType())
 		})
 	}
 }
