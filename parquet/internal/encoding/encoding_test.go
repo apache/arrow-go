@@ -628,6 +628,56 @@ func TestDictionaryDecoderRejectsTruncatedPackedLiteralRun(t *testing.T) {
 	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
 }
 
+func encodeDictionaryIndexPage(t *testing.T, values []uint64, width int) []byte {
+	t.Helper()
+
+	data := make([]byte, 1+utils.MaxRLEBufferSize(width, len(values))+utils.MinRLEBufferSize(width))
+	data[0] = byte(width)
+	encoder := utils.NewRleEncoder(utils.NewWriterAtBuffer(data[1:]), width)
+	for _, value := range values {
+		require.NoError(t, encoder.Put(value))
+	}
+	return data[:encoder.Flush()+1]
+}
+
+func TestDictionaryDecoderResetsStateBetweenPages(t *testing.T) {
+	column := schema.NewColumn(schema.NewInt32Node("int32", parquet.Repetitions.Required, -1), 0, 0)
+	dictionaryData := make([]byte, 8)
+	binary.LittleEndian.PutUint32(dictionaryData, 10)
+	binary.LittleEndian.PutUint32(dictionaryData[4:], 20)
+
+	dictionary := encoding.NewDecoder(parquet.Types.Int32, parquet.Encodings.Plain, column, memory.DefaultAllocator)
+	require.NoError(t, dictionary.SetData(2, dictionaryData))
+
+	decoder := encoding.NewDictDecoder(parquet.Types.Int32, column, memory.DefaultAllocator)
+	decoder.SetDict(dictionary)
+
+	firstPageValues := make([]uint64, 16)
+	firstPage := encodeDictionaryIndexPage(t, firstPageValues, 1)
+	require.NoError(t, decoder.SetData(len(firstPageValues), firstPage))
+
+	firstOutput := make([]int32, 3)
+	decoded, err := decoder.(encoding.Int32Decoder).Decode(firstOutput)
+	require.NoError(t, err)
+	assert.Equal(t, len(firstOutput), decoded)
+	assert.Equal(t, []int32{10, 10, 10}, firstOutput)
+	assert.Equal(t, len(firstPageValues)-len(firstOutput), decoder.ValuesLeft())
+
+	require.NoError(t, decoder.SetData(1, nil))
+	_, err = decoder.(encoding.Int32Decoder).Decode(make([]int32, 1))
+	assert.Error(t, err)
+
+	secondPageValues := []uint64{1, 0, 1, 1, 0, 1, 0, 1}
+	secondPage := encodeDictionaryIndexPage(t, secondPageValues, 1)
+	require.NoError(t, decoder.SetData(len(secondPageValues), secondPage))
+
+	secondOutput := make([]int32, len(secondPageValues))
+	decoded, err = decoder.(encoding.Int32Decoder).Decode(secondOutput)
+	require.NoError(t, err)
+	assert.Equal(t, len(secondOutput), decoded)
+	assert.Equal(t, []int32{20, 10, 20, 20, 10, 20, 10, 20}, secondOutput)
+}
+
 func TestWriteDeltaBitPackedInt32(t *testing.T) {
 	column := schema.NewColumn(schema.NewInt32Node("int32", parquet.Repetitions.Required, -1), 0, 0)
 

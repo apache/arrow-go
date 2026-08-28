@@ -544,6 +544,77 @@ func BenchmarkDecodeDictByteArray(b *testing.B) {
 	}
 }
 
+func BenchmarkDecodeDictByteArrayReuse(b *testing.B) {
+	const nunique = 100
+
+	for _, nvalues := range []int{64, 1024, 8192} {
+		b.Run(fmt.Sprintf("values=%d", nvalues), func(b *testing.B) {
+			rag := testutils.NewRandomArrayGenerator(0)
+			dict := rag.ByteArray(nunique, 32, 32, 0).(*array.String)
+			indices := rag.Int32(int64(nvalues), 0, nunique-1, 0)
+
+			values := make([]parquet.ByteArray, nvalues)
+			for idx := range values {
+				values[idx] = []byte(dict.Value(int(indices.Value(idx))))
+			}
+
+			col := schema.NewColumn(schema.NewByteArrayNode("bytearray", parquet.Repetitions.Required, -1), 0, 0)
+			enc := encoding.NewEncoder(parquet.Types.ByteArray, parquet.Encodings.PlainDict, true, col, memory.DefaultAllocator).(*encoding.DictByteArrayEncoder)
+			enc.Put(values)
+
+			dictBuf := make([]byte, enc.DictEncodedSize())
+			enc.WriteDict(dictBuf)
+			idxBuf := make([]byte, enc.EstimatedDataEncodedSize())
+			n, err := enc.WriteIndices(idxBuf)
+			if err != nil {
+				b.Fatal(err)
+			}
+			idxBuf = idxBuf[:n]
+
+			dec := encoding.NewDecoder(parquet.Types.ByteArray, parquet.Encodings.Plain, col, memory.DefaultAllocator)
+			if err := dec.SetData(nunique, dictBuf); err != nil {
+				b.Fatal(err)
+			}
+			dictDec := encoding.NewDictDecoder(parquet.Types.ByteArray, col, memory.DefaultAllocator).(*encoding.DictByteArrayDecoder)
+			dictDec.SetDict(dec)
+			out := make([]parquet.ByteArray, nvalues)
+
+			b.SetBytes(int64(nvalues))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if err := dictDec.SetData(nvalues, idxBuf); err != nil {
+					b.Fatal(err)
+				}
+				decoded, err := dictDec.Decode(out)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if decoded != nvalues {
+					b.Fatalf("decoded %d values, want %d", decoded, nvalues)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkDictDecoderSetDataReuse(b *testing.B) {
+	column := schema.NewColumn(schema.NewInt32Node("int32", parquet.Repetitions.Required, -1), 0, 0)
+	decoder := encoding.NewDictDecoder(parquet.Types.Int32, column, memory.DefaultAllocator)
+	data := []byte{1}
+	if err := decoder.SetData(1024, data); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := decoder.SetData(1024, data); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkByteStreamSplitEncodingInt32(b *testing.B) {
 	for sz := MINSIZE; sz < MAXSIZE+1; sz *= 2 {
 		b.Run(fmt.Sprintf("len %d", sz), func(b *testing.B) {
