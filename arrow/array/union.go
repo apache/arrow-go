@@ -451,18 +451,20 @@ func arraySparseUnionEqual(l, r *SparseUnion) bool {
 	childIDs := l.unionType.ChildIDs()
 	leftCodes, rightCodes := l.RawTypeCodes(), r.RawTypeCodes()
 
-	for i := 0; i < l.data.length; i++ {
+	for i := 0; i < l.data.length; {
 		typeID := leftCodes[i]
 		if typeID != rightCodes[i] {
 			return false
 		}
 
+		end := sparseUnionRunEnd(leftCodes, rightCodes, typeID, i, l.data.length)
 		childNum := childIDs[typeID]
-		eq := SliceEqual(l.children[childNum], int64(i), int64(i+1),
-			r.children[childNum], int64(i), int64(i+1))
+		eq := SliceEqual(l.children[childNum], int64(i), int64(end),
+			r.children[childNum], int64(i), int64(end))
 		if !eq {
 			return false
 		}
+		i = end
 	}
 	return true
 }
@@ -471,20 +473,30 @@ func arraySparseUnionApproxEqual(l, r *SparseUnion, opt equalOption) bool {
 	childIDs := l.unionType.ChildIDs()
 	leftCodes, rightCodes := l.RawTypeCodes(), r.RawTypeCodes()
 
-	for i := 0; i < l.data.length; i++ {
+	for i := 0; i < l.data.length; {
 		typeID := leftCodes[i]
 		if typeID != rightCodes[i] {
 			return false
 		}
 
+		end := sparseUnionRunEnd(leftCodes, rightCodes, typeID, i, l.data.length)
 		childNum := childIDs[typeID]
-		eq := sliceApproxEqual(l.children[childNum], int64(i), int64(i+1),
-			r.children[childNum], int64(i), int64(i+1), opt)
+		eq := sliceApproxEqual(l.children[childNum], int64(i), int64(end),
+			r.children[childNum], int64(i), int64(end), opt)
 		if !eq {
 			return false
 		}
+		i = end
 	}
 	return true
+}
+
+func sparseUnionRunEnd(leftCodes, rightCodes []arrow.UnionTypeCode, typeID arrow.UnionTypeCode, start, length int) int {
+	end := start + 1
+	for end < length && leftCodes[end] == typeID && rightCodes[end] == typeID {
+		end++
+	}
+	return end
 }
 
 // DenseUnion represents an array where each logical value is taken from
@@ -702,18 +714,22 @@ func arrayDenseUnionEqual(l, r *DenseUnion) bool {
 	leftCodes, rightCodes := l.RawTypeCodes(), r.RawTypeCodes()
 	leftOffsets, rightOffsets := l.RawValueOffsets(), r.RawValueOffsets()
 
-	for i := 0; i < l.data.length; i++ {
+	for i := 0; i < l.data.length; {
 		typeID := leftCodes[i]
 		if typeID != rightCodes[i] {
 			return false
 		}
 
+		end := denseUnionRunEnd(leftCodes, rightCodes, leftOffsets, rightOffsets, typeID, i, l.data.length)
 		childNum := childIDs[typeID]
-		eq := SliceEqual(l.children[childNum], int64(leftOffsets[i]), int64(leftOffsets[i]+1),
-			r.children[childNum], int64(rightOffsets[i]), int64(rightOffsets[i]+1))
+		leftStart, leftEnd := int64(leftOffsets[i]), int64(leftOffsets[end-1])+1
+		rightStart, rightEnd := int64(rightOffsets[i]), int64(rightOffsets[end-1])+1
+		eq := SliceEqual(l.children[childNum], leftStart, leftEnd,
+			r.children[childNum], rightStart, rightEnd)
 		if !eq {
 			return false
 		}
+		i = end
 	}
 	return true
 }
@@ -723,20 +739,35 @@ func arrayDenseUnionApproxEqual(l, r *DenseUnion, opt equalOption) bool {
 	leftCodes, rightCodes := l.RawTypeCodes(), r.RawTypeCodes()
 	leftOffsets, rightOffsets := l.RawValueOffsets(), r.RawValueOffsets()
 
-	for i := 0; i < l.data.length; i++ {
+	for i := 0; i < l.data.length; {
 		typeID := leftCodes[i]
 		if typeID != rightCodes[i] {
 			return false
 		}
 
+		end := denseUnionRunEnd(leftCodes, rightCodes, leftOffsets, rightOffsets, typeID, i, l.data.length)
 		childNum := childIDs[typeID]
-		eq := sliceApproxEqual(l.children[childNum], int64(leftOffsets[i]), int64(leftOffsets[i]+1),
-			r.children[childNum], int64(rightOffsets[i]), int64(rightOffsets[i]+1), opt)
+		leftStart, leftEnd := int64(leftOffsets[i]), int64(leftOffsets[end-1])+1
+		rightStart, rightEnd := int64(rightOffsets[i]), int64(rightOffsets[end-1])+1
+		eq := sliceApproxEqual(l.children[childNum], leftStart, leftEnd,
+			r.children[childNum], rightStart, rightEnd, opt)
 		if !eq {
 			return false
 		}
+		i = end
 	}
 	return true
+}
+
+func denseUnionRunEnd(leftCodes, rightCodes []arrow.UnionTypeCode, leftOffsets, rightOffsets []int32, typeID arrow.UnionTypeCode, start, length int) int {
+	end := start + 1
+	for end < length &&
+		leftCodes[end] == typeID && rightCodes[end] == typeID &&
+		int64(leftOffsets[end]) == int64(leftOffsets[end-1])+1 &&
+		int64(rightOffsets[end]) == int64(rightOffsets[end-1])+1 {
+		end++
+	}
+	return end
 }
 
 // UnionBuilder is a convenience interface for building Union arrays of
