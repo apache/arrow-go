@@ -692,7 +692,7 @@ func (b *dictionaryBuilder) AppendEmptyValues(n int) {
 		panic(err)
 	}
 
-	b.idxBuilder.Builder.Reserve(n)
+	b.idxBuilder.Reserve(n)
 	for i := 0; i < n; i++ {
 		b.idxBuilder.UnsafeAppend(idx)
 	}
