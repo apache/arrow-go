@@ -354,6 +354,10 @@ func Equal(left, right arrow.Array) bool {
 
 // SliceEqual reports whether slices left[lbeg:lend] and right[rbeg:rend] are equal.
 func SliceEqual(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64) bool {
+	if lbeg == 0 && lend == int64(left.Len()) && rbeg == 0 && rend == int64(right.Len()) {
+		return Equal(left, right)
+	}
+
 	l := NewSlice(left, lbeg, lend)
 	defer l.Release()
 	r := NewSlice(right, rbeg, rend)

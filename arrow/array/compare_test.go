@@ -85,6 +85,23 @@ func TestArraySliceEqual(t *testing.T) {
 	}
 }
 
+func TestArraySliceEqualFullRange(t *testing.T) {
+	builder := array.NewInt64Builder(memory.DefaultAllocator)
+	builder.AppendValues([]int64{1, 2, 3}, nil)
+	arr := builder.NewInt64Array()
+	builder.Release()
+	defer arr.Release()
+
+	short := array.NewSlice(arr, 0, 2)
+	defer short.Release()
+	shifted := array.NewSlice(arr, 1, 3)
+	defer shifted.Release()
+
+	assert.True(t, array.SliceEqual(arr, 0, int64(arr.Len()), arr, 0, int64(arr.Len())))
+	assert.True(t, array.SliceEqual(shifted, 0, int64(shifted.Len()), shifted, 0, int64(shifted.Len())))
+	assert.False(t, array.SliceEqual(arr, 0, int64(arr.Len()), short, 0, int64(short.Len())))
+}
+
 func TestListEqualByValidRuns(t *testing.T) {
 	for _, dt := range []arrow.DataType{
 		arrow.ListOf(arrow.PrimitiveTypes.Int32),
