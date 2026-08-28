@@ -127,6 +127,35 @@ func TestBinaryEqualityWithFragmentedValidity(t *testing.T) {
 	require.False(t, array.Equal(left, right))
 }
 
+func TestBinaryEqualityWithDeclaredNullsWithoutBitmap(t *testing.T) {
+	makeArray := func() *array.Binary {
+		offsets := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes([]int32{0, 1, 2, 3, 4, 5, 6, 7, 8}))
+		values := memory.NewBufferBytes([]byte("abcdefgh"))
+		data := array.NewData(
+			arrow.BinaryTypes.Binary,
+			8,
+			[]*memory.Buffer{nil, offsets, values},
+			nil,
+			1,
+			0,
+		)
+		offsets.Release()
+		values.Release()
+		result := array.NewBinaryData(data)
+		data.Release()
+		return result
+	}
+
+	left := makeArray()
+	defer left.Release()
+	right := makeArray()
+	defer right.Release()
+
+	var equal bool
+	assert.NotPanics(t, func() { equal = array.Equal(left, right) })
+	assert.True(t, equal)
+}
+
 func makeBinaryEqualityArray(
 	mem memory.Allocator, dtype arrow.BinaryDataType, values []string, valid []bool,
 ) arrow.Array {

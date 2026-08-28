@@ -464,6 +464,9 @@ func useScalarVariableWidthEquality(values arrow.Array) bool {
 	if values.NullN() == 0 {
 		return false
 	}
+	if values.Len() <= 64 || len(values.NullBitmapBytes()) == 0 {
+		return true
+	}
 
 	// Very short validity runs cost more to set up than direct value comparisons.
 	// Sample a few runs and retain the scalar path when they average under four values.

@@ -62,6 +62,23 @@ func BenchmarkBinaryEquality(b *testing.B) {
 	}
 }
 
+func BenchmarkBinaryEqualityShortArrays(b *testing.B) {
+	for _, length := range []int{4, 8, 16, 32, 64, 128} {
+		length := length
+		b.Run(fmt.Sprintf("length_%d", length), func(b *testing.B) {
+			benchmarkBinaryEqualityCase(
+				b,
+				arrow.BinaryTypes.String,
+				length,
+				16,
+				func(i int) bool { return i%2 == 0 },
+				"alternating_nulls",
+				-1,
+			)
+		})
+	}
+}
+
 func benchmarkBinaryEqualityCase(
 	b *testing.B, dtype arrow.BinaryDataType, length, valueLen int, validValue func(int) bool, name string, mismatchIndex int,
 ) {
