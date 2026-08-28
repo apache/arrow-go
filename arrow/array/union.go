@@ -934,6 +934,34 @@ func (b *unionBuilder) newData() *Data {
 	return NewData(b.Type(), length, []*memory.Buffer{nil, typesBuffer}, childData, 0, 0)
 }
 
+func unsafeAppendRepeatedInt8(b *int8BufferBuilder, value int8, n int) {
+	if n <= 0 {
+		return
+	}
+
+	end := b.length + n
+	if b.capacity < end {
+		b.resize(bitutil.NextPowerOf2(end))
+	}
+	memory.Set(b.bytes[b.length:end], byte(value))
+	b.length = end
+}
+
+func unsafeAppendRepeatedInt32(b *int32BufferBuilder, value int32, n int) {
+	if n <= 0 {
+		return
+	}
+
+	end := b.length + n*arrow.Int32SizeBytes
+	if b.capacity < end {
+		b.resize(bitutil.NextPowerOf2(end))
+	}
+	for i := b.length; i < end; i += arrow.Int32SizeBytes {
+		arrow.Int32Traits.PutValue(b.bytes[i:], value)
+	}
+	b.length = end
+}
+
 // SparseUnionBuilder is used to build a Sparse Union array using the Append
 // methods. You can also add new types to the union on the fly by using
 // AppendChild.
@@ -1002,17 +1030,20 @@ func (b *SparseUnionBuilder) AppendNull() {
 // AppendNulls is identical to calling AppendNull() n times, except
 // it will pre-allocate with reserve for all the nulls beforehand.
 func (b *SparseUnionBuilder) AppendNulls(n int) {
+	if n <= 0 {
+		return
+	}
+
 	firstChildCode := b.codes[0]
 	b.Reserve(n)
 	for _, c := range b.codes {
 		b.typeIDtoBuilder[c].Reserve(n)
 	}
-	for i := 0; i < n; i++ {
-		b.typesBuilder.AppendValue(firstChildCode)
-		b.typeIDtoBuilder[firstChildCode].AppendNull()
-		for _, c := range b.codes[1:] {
-			b.typeIDtoBuilder[c].AppendEmptyValue()
-		}
+
+	unsafeAppendRepeatedInt8(b.typesBuilder, firstChildCode, n)
+	b.typeIDtoBuilder[firstChildCode].AppendNulls(n)
+	for _, c := range b.codes[1:] {
+		b.typeIDtoBuilder[c].AppendEmptyValues(n)
 	}
 }
 
@@ -1029,16 +1060,19 @@ func (b *SparseUnionBuilder) AppendEmptyValue() {
 // AppendEmptyValues is identical to calling AppendEmptyValue() n times,
 // except it pre-allocates first so it is more efficient.
 func (b *SparseUnionBuilder) AppendEmptyValues(n int) {
+	if n <= 0 {
+		return
+	}
+
 	b.Reserve(n)
 	firstChildCode := b.codes[0]
 	for _, c := range b.codes {
 		b.typeIDtoBuilder[c].Reserve(n)
 	}
-	for i := 0; i < n; i++ {
-		b.typesBuilder.AppendValue(firstChildCode)
-		for _, c := range b.codes {
-			b.typeIDtoBuilder[c].AppendEmptyValue()
-		}
+
+	unsafeAppendRepeatedInt8(b.typesBuilder, firstChildCode, n)
+	for _, c := range b.codes {
+		b.typeIDtoBuilder[c].AppendEmptyValues(n)
 	}
 }
 
@@ -1249,10 +1283,8 @@ func (b *DenseUnionBuilder) AppendNulls(n int) {
 	firstChildCode := b.codes[0]
 	childBuilder := b.typeIDtoBuilder[firstChildCode]
 	b.Reserve(n)
-	for i := 0; i < n; i++ {
-		b.typesBuilder.AppendValue(firstChildCode)
-		b.offsetsBuilder.AppendValue(int32(childBuilder.Len()))
-	}
+	unsafeAppendRepeatedInt8(b.typesBuilder, firstChildCode, n)
+	unsafeAppendRepeatedInt32(b.offsetsBuilder, int32(childBuilder.Len()), n)
 	// only append a single null to the child builder, the offsets all refer to the same value
 	childBuilder.AppendNull()
 }
@@ -1280,10 +1312,8 @@ func (b *DenseUnionBuilder) AppendEmptyValues(n int) {
 	firstChildCode := b.codes[0]
 	childBuilder := b.typeIDtoBuilder[firstChildCode]
 	b.Reserve(n)
-	for i := 0; i < n; i++ {
-		b.typesBuilder.AppendValue(firstChildCode)
-		b.offsetsBuilder.AppendValue(int32(childBuilder.Len()))
-	}
+	unsafeAppendRepeatedInt8(b.typesBuilder, firstChildCode, n)
+	unsafeAppendRepeatedInt32(b.offsetsBuilder, int32(childBuilder.Len()), n)
 	// only append a single empty value to the child builder, the offsets all
 	// refer to the same value
 	childBuilder.AppendEmptyValue()
