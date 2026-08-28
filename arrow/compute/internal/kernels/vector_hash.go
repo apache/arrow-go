@@ -256,7 +256,7 @@ func (rhs *regularHashState) ValueType() arrow.DataType { return rhs.typ }
 
 func (rhs *regularHashState) Reset() error {
 	if rhs.memoReleased {
-		memoTable, err := newMemoTable(rhs.mem, rhs.typ.ID())
+		memoTable, err := newMemoTable(rhs.mem, rhs.typ.ID(), 0)
 		if err != nil {
 			return err
 		}
@@ -592,25 +592,25 @@ func nullHashInit(actionInit initAction) exec.KernelInitFn {
 	}
 }
 
-func newMemoTable(mem memory.Allocator, dt arrow.Type) (hashing.MemoTable, error) {
+func newMemoTable(mem memory.Allocator, dt arrow.Type, initial int64) (hashing.MemoTable, error) {
 	switch dt {
 	case arrow.BOOL, arrow.INT8, arrow.UINT8:
-		return hashing.NewMemoTable[uint8](0), nil
+		return hashing.NewMemoTable[uint8](initial), nil
 	case arrow.INT16, arrow.UINT16:
-		return hashing.NewMemoTable[uint16](0), nil
+		return hashing.NewMemoTable[uint16](initial), nil
 	case arrow.INT32, arrow.UINT32, arrow.FLOAT32, arrow.DECIMAL32,
 		arrow.DATE32, arrow.TIME32, arrow.INTERVAL_MONTHS:
-		return hashing.NewMemoTable[uint32](0), nil
+		return hashing.NewMemoTable[uint32](initial), nil
 	case arrow.INT64, arrow.UINT64, arrow.FLOAT64, arrow.DECIMAL64,
 		arrow.DATE64, arrow.TIME64, arrow.TIMESTAMP,
 		arrow.DURATION, arrow.INTERVAL_DAY_TIME:
-		return hashing.NewMemoTable[uint64](0), nil
+		return hashing.NewMemoTable[uint64](initial), nil
 	case arrow.BINARY, arrow.STRING, arrow.FIXED_SIZE_BINARY, arrow.DECIMAL128,
 		arrow.DECIMAL256, arrow.INTERVAL_MONTH_DAY_NANO:
-		return hashing.NewBinaryMemoTable(0, 0,
+		return hashing.NewBinaryMemoTable(int(initial), 0,
 			array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)), nil
 	case arrow.LARGE_BINARY, arrow.LARGE_STRING:
-		return hashing.NewBinaryMemoTable(0, 0,
+		return hashing.NewBinaryMemoTable(int(initial), 0,
 			array.NewBinaryBuilder(mem, arrow.BinaryTypes.LargeBinary)), nil
 	default:
 		return nil, fmt.Errorf("%w: unsupported type %s", arrow.ErrNotImplemented, dt)
@@ -624,7 +624,7 @@ func regularHashInit(dt arrow.DataType, actionInit initAction, appendFn func(Act
 		if err != nil {
 			return nil, err
 		}
-		memoTable, err := newMemoTable(mem, dt.ID())
+		memoTable, err := newMemoTable(mem, dt.ID(), 0)
 		if err != nil {
 			return nil, err
 		}

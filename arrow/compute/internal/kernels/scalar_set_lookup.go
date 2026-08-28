@@ -188,7 +188,7 @@ func (s *SetLookupState[T]) Init(opts SetLookupOptions) error {
 			}
 		}
 	}
-	lookup, err := newMemoTable(s.Alloc, memoType)
+	lookup, err := newMemoTable(s.Alloc, memoType, opts.TotalLen*2)
 	if err != nil {
 		return err
 	}
