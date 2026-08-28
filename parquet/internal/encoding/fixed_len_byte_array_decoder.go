@@ -173,13 +173,13 @@ func (dec *ByteStreamSplitFixedLenByteArrayDecoder) Decode(out []parquet.FixedLe
 		return 0, errors.New("parquet: eof exception")
 	}
 
-	output := out[:toRead]
-	for idx := range output {
-		if cap(output[idx]) < dec.typeLen {
-			dec.prepareOutput(output[idx:])
+	out = out[:toRead]
+	for idx := range out {
+		if cap(out[idx]) < dec.typeLen {
+			dec.prepareOutput(out[idx:])
 			break
 		}
-		output[idx] = output[idx][:dec.typeLen]
+		out[idx] = out[idx][:dec.typeLen]
 	}
 
 	switch dec.typeLen {
