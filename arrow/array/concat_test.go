@@ -862,6 +862,36 @@ func TestConcatRunEndEncodedMidRunSlice(t *testing.T) {
 	assert.Equal(t, []int64{100, 100, 200, 700, 700}, got)
 }
 
+func TestConcatRunEndEncodedNearTypeLimitSlice(t *testing.T) {
+	// A sliced input whose physical final run end is near the run-end type limit must
+	// not trip a false overflow: the overflow check has to use the clamped logical end,
+	// not the physical one. int16 prefix of 32760 + a 1-element slice of a physical
+	// 32767-length run should yield 32761, not an overflow error.
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	prefixBldr := array.NewRunEndEncodedBuilder(mem, arrow.PrimitiveTypes.Int16, arrow.PrimitiveTypes.Int64)
+	defer prefixBldr.Release()
+	prefixBldr.Append(32760)
+	prefixBldr.ValueBuilder().(*array.Int64Builder).Append(1)
+	prefix := prefixBldr.NewArray()
+	defer prefix.Release()
+
+	bigBldr := array.NewRunEndEncodedBuilder(mem, arrow.PrimitiveTypes.Int16, arrow.PrimitiveTypes.Int64)
+	defer bigBldr.Release()
+	bigBldr.Append(32767)
+	bigBldr.ValueBuilder().(*array.Int64Builder).Append(2)
+	big := bigBldr.NewArray()
+	defer big.Release()
+	oneElem := array.NewSlice(big, 0, 1) // first element of the 32767-length run
+	defer oneElem.Release()
+
+	result, err := array.Concatenate([]arrow.Array{prefix, oneElem}, mem)
+	require.NoError(t, err)
+	defer result.Release()
+	assert.EqualValues(t, 32761, result.Len())
+}
+
 func TestConcatAlmostOverflowRunEndEncoding(t *testing.T) {
 	tests := []struct {
 		offsetType arrow.DataType
