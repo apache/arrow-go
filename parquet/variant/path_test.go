@@ -84,11 +84,33 @@ func TestVariantPathJoinAndStepAt(t *testing.T) {
 	p := variant.VariantPath{}.Field("a").Join(variant.VariantPath{}.Index(2).Field("b"))
 	require.Equal(t, 3, p.Len())
 
-	name, _ := p.StepAt(0)
+	name, _, isField := p.StepAt(0)
 	assert.Equal(t, "a", name)
-	name, idx := p.StepAt(1)
+	assert.True(t, isField)
+	name, idx, isField := p.StepAt(1)
 	assert.Equal(t, "", name)
 	assert.Equal(t, 2, idx)
-	name, _ = p.StepAt(2)
+	assert.False(t, isField)
+	name, _, isField = p.StepAt(2)
 	assert.Equal(t, "b", name)
+	assert.True(t, isField)
+}
+
+// TestGetByPathEmptyKey covers the empty-string object key: Field("") is a field
+// step distinct from Index(0), so it must resolve the "" key rather than index 0.
+func TestGetByPathEmptyKey(t *testing.T) {
+	v := buildVar(t, map[string]any{"": int64(42)})
+
+	_, _, isField := variant.VariantPath{}.Field("").StepAt(0)
+	assert.True(t, isField, `Field("") must be a field step, not an index step`)
+
+	leaf, found, err := v.GetByPath(variant.VariantPath{}.Field(""))
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.EqualValues(t, 42, leaf.Value())
+
+	// Index(0) on the object must not match the "" key.
+	_, found, err = v.GetByPath(variant.VariantPath{}.Index(0))
+	require.NoError(t, err)
+	assert.False(t, found)
 }

@@ -24,11 +24,11 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 )
 
-// pathElem is one step of a VariantPath: an object field when name != "", else an
-// array index.
+// pathElem is one step of a VariantPath: an object field when isField is set, else an array index.
 type pathElem struct {
-	name  string
-	index int
+	name    string
+	index   int
+	isField bool
 }
 
 // VariantPath is an ordered list of steps to navigate into a variant value. The
@@ -39,7 +39,7 @@ type VariantPath struct {
 
 // Field returns a copy of the path with an object-field step appended.
 func (p VariantPath) Field(name string) VariantPath {
-	return VariantPath{elems: append(p.grow(), pathElem{name: name})}
+	return VariantPath{elems: append(p.grow(), pathElem{name: name, isField: true})}
 }
 
 // Index returns a copy of the path with an array-index step appended.
@@ -59,10 +59,11 @@ func (p VariantPath) grow() []pathElem {
 // Len returns the number of steps in the path.
 func (p VariantPath) Len() int { return len(p.elems) }
 
-// StepAt returns the i-th step. When name != "" it is an object-field step;
-// otherwise it is an array-index step selecting index.
-func (p VariantPath) StepAt(i int) (name string, index int) {
-	return p.elems[i].name, p.elems[i].index
+// StepAt returns the i-th step's name and index, with isField true for an object-field step.
+func (p VariantPath) StepAt(i int) (name string, index int, isField bool) {
+	e := p.elems[i]
+
+	return e.name, e.index, e.isField
 }
 
 // GetByPath navigates path into v and returns the leaf value. found is false when
@@ -72,7 +73,7 @@ func (p VariantPath) StepAt(i int) (name string, index int) {
 func (v Value) GetByPath(path VariantPath) (leaf Value, found bool, err error) {
 	cur := v
 	for _, e := range path.elems {
-		if e.name != "" {
+		if e.isField {
 			obj, ok := cur.Value().(ObjectValue)
 			if !ok {
 				return Value{}, false, fmt.Errorf("%w: variant path field %q applied to non-object", arrow.ErrInvalid, e.name)

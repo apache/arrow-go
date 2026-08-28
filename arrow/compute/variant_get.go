@@ -41,6 +41,7 @@ type VariantGetOptions struct {
 	// Strict makes a lossy cast fail; the default allows overflow and truncation via
 	// the cast kernels. Unlike arrow-rs safe mode there is no null-on-failure: an
 	// impossible cast always errors, since arrow-go's cast kernels have no safe flag.
+	// Non-strict nulls a whole natural-type group if any value in it is inconvertible.
 	Strict bool
 }
 
@@ -52,6 +53,12 @@ type VariantGetOptions struct {
 func VariantGet(ctx context.Context, input *extensions.VariantArray, opts VariantGetOptions) (arrow.Array, error) {
 	if input == nil {
 		return nil, fmt.Errorf("%w: VariantGet requires a non-nil VariantArray", arrow.ErrInvalid)
+	}
+
+	// Nested target types are not yet supported; reject up front rather than
+	// silently producing an all-null array from the leaf cast.
+	if _, ok := opts.AsType.(arrow.NestedType); ok {
+		return nil, fmt.Errorf("%w: VariantGet cast to nested type %s", arrow.ErrNotImplemented, opts.AsType)
 	}
 
 	// Empty path, no cast: the values are returned unchanged.
@@ -101,7 +108,6 @@ type pathStepKind int
 const (
 	stepSuccess pathStepKind = iota
 	stepMissing
-	stepNotShredded
 )
 
 type pathStep struct {
@@ -110,14 +116,15 @@ type pathStep struct {
 	owned []arrow.Array // intermediate take results the caller must release
 }
 
-// missingStep reports whether an absent typed field is provably missing (the value
-// column is all-null) or merely not shredded (a residual may hold it).
+// missingStep marks a path step whose typed field is absent. The descent loop breaks
+// on any residual before stepping, so a step that reaches here is provably missing.
 func (s shreddingState) missingStep() pathStep {
-	if s.value == nil || s.value.NullN() == s.value.Len() {
-		return pathStep{kind: stepMissing}
-	}
+	return pathStep{kind: stepMissing}
+}
 
-	return pathStep{kind: stepNotShredded}
+// hasResidual reports whether any row carries a value in this level's value column.
+func (s shreddingState) hasResidual() bool {
+	return s.value != nil && s.value.NullN() != s.value.Len()
 }
 
 func fieldStep(s shreddingState, name string) (pathStep, error) {
@@ -126,7 +133,10 @@ func fieldStep(s shreddingState, name string) (pathStep, error) {
 	}
 	st, ok := s.typedValue.(*array.Struct)
 	if !ok {
-		return s.missingStep(), nil
+		// A field step into a non-object shredded value is a type error, matching the
+		// per-row GetByPath path. Any residual was already diverted before this runs.
+		return pathStep{}, fmt.Errorf("%w: variant path field %q applied to non-object %s",
+			arrow.ErrInvalid, name, s.typedValue.DataType())
 	}
 	idx, ok := st.DataType().(*arrow.StructType).FieldIdx(name)
 	if !ok {
@@ -215,12 +225,17 @@ func shreddedGetPath(ctx context.Context, input *extensions.VariantArray, opts V
 
 	idx := 0
 	for idx < opts.Path.Len() {
-		name, index := opts.Path.StepAt(idx)
+		// residual-backed rows live in the value column, unreachable by the typed_value descent; reassemble per-row.
+		if state.hasResidual() {
+			break
+		}
+
+		name, index, isField := opts.Path.StepAt(idx)
 		var (
 			step pathStep
 			err  error
 		)
-		if name != "" {
+		if isField {
 			step, err = fieldStep(state, name)
 		} else {
 			step, err = indexStep(ctx, mem, state, index)
@@ -237,11 +252,9 @@ func shreddedGetPath(ctx context.Context, input *extensions.VariantArray, opts V
 
 			continue
 		}
-		if step.kind == stepMissing {
-			return allNullResult(mem, input.Len(), opts.AsType), nil
-		}
 
-		break // stepNotShredded
+		// stepMissing: the typed field is provably absent (no residual, checked above).
+		return allNullResult(mem, input.Len(), opts.AsType), nil
 	}
 
 	remaining := subPath(opts.Path, idx)
@@ -276,22 +289,13 @@ func shreddedGetPath(ctx context.Context, input *extensions.VariantArray, opts V
 		return buildLeafVariantArray(mem, leaves), nil
 	}
 
-	src := buildNaturalArray(mem, leaves)
-	if src == nil {
-		return allNullResult(mem, len(leaves), opts.AsType), nil
-	}
-	defer src.Release()
-
-	return CastArray(ctx, src, NewCastOptions(opts.AsType, opts.Strict))
+	return castLeaves(ctx, mem, leaves, opts.AsType, opts.Strict)
 }
 
 // perfectShredded returns the typed_value column when the path landed on a fully
 // shredded value of exactly AsType and no ancestor nulls need merging; otherwise
 // the caller's reassembly path produces the same values.
 func perfectShredded(s shreddingState, nulls *nullTracker, asType arrow.DataType) arrow.Array {
-	if _, ok := asType.(arrow.NestedType); ok {
-		return nil
-	}
 	if s.typedValue == nil || !nulls.allValid() {
 		return nil
 	}
@@ -348,7 +352,7 @@ func buildTargetVariant(input *extensions.VariantArray, s shreddingState, nulls 
 func subPath(p variant.VariantPath, from int) variant.VariantPath {
 	var out variant.VariantPath
 	for i := from; i < p.Len(); i++ {
-		if name, index := p.StepAt(i); name != "" {
+		if name, index, isField := p.StepAt(i); isField {
 			out = out.Field(name)
 		} else {
 			out = out.Index(index)
@@ -401,27 +405,100 @@ func buildLeafVariantArray(mem memory.Allocator, leaves []variantLeaf) arrow.Arr
 	return bldr.NewArray()
 }
 
-// buildNaturalArray materializes the leaves as an array of the first present leaf's
-// natural Arrow type so the cast kernels can convert it. Rows whose value does not
-// match that natural type become null. Returns nil when no leaf is present.
-func buildNaturalArray(mem memory.Allocator, leaves []variantLeaf) arrow.Array {
-	var natural arrow.DataType
-	for _, l := range leaves {
-		if l.present && l.value.Type() != variant.Null {
-			natural = naturalArrowType(l.value)
+// castLeaves converts each leaf to asType (arrow-rs variant_get parity): leaves are
+// grouped by natural type, each group cast with the cast kernels, then scattered back
+// so the result is order-independent. Strict errors on a lossy cast, else null.
+func castLeaves(ctx context.Context, mem memory.Allocator, leaves []variantLeaf, asType arrow.DataType, strict bool) (arrow.Array, error) {
+	type leafGroup struct {
+		dt   arrow.DataType
+		rows []int
+	}
+	groups := make(map[string]*leafGroup)
+	var order []string
+	for i, l := range leaves {
+		if !l.present || l.value.Type() == variant.Null {
+			continue
+		}
+		dt := naturalArrowType(l.value)
+		if dt == nil {
+			// Object/array leaves have no primitive natural type. Under Strict this is an
+			// impossible cast (errors like any other); otherwise the row stays null.
+			if strict {
+				return nil, fmt.Errorf("%w: cannot cast non-primitive variant leaf to %s", arrow.ErrInvalid, asType)
+			}
 
-			break
+			continue
+		}
+		key := dt.String()
+		g := groups[key]
+		if g == nil {
+			g = &leafGroup{dt: dt}
+			groups[key] = g
+			order = append(order, key)
+		}
+		g.rows = append(g.rows, i)
+	}
+
+	perm := make([]uint64, len(leaves))
+	valid := make([]bool, len(leaves))
+	var casted []arrow.Array
+	defer func() { releaseAll(casted) }()
+
+	var pos uint64
+	for _, key := range order {
+		g := groups[key]
+		col := buildTypedColumn(mem, g.dt, leaves, g.rows)
+		cast, err := CastArray(ctx, col, NewCastOptions(asType, strict))
+		col.Release()
+		if err != nil {
+			if strict {
+				return nil, err
+			}
+			// Non-strict: this natural type cannot convert to asType; its rows stay null.
+			continue
+		}
+		casted = append(casted, cast)
+		for _, row := range g.rows {
+			perm[row] = pos
+			valid[row] = true
+			pos++
 		}
 	}
-	if natural == nil {
-		return nil
+
+	if len(casted) == 0 {
+		return allNullResult(mem, len(leaves), asType), nil
 	}
 
-	bldr := array.NewBuilder(mem, natural)
+	// One natural type covering every row already sits in original order.
+	if len(casted) == 1 && pos == uint64(len(leaves)) {
+		casted[0].Retain()
+
+		return casted[0], nil
+	}
+
+	combined, err := array.Concatenate(casted, mem)
+	if err != nil {
+		return nil, err
+	}
+	defer combined.Release()
+
+	ib := array.NewUint64Builder(mem)
+	defer ib.Release()
+	ib.AppendValues(perm, valid)
+	indices := ib.NewArray()
+	defer indices.Release()
+
+	return TakeArray(ctx, combined, indices)
+}
+
+// buildTypedColumn materializes the given leaf rows, all of natural type dt, into a
+// homogeneous Arrow array the cast kernels can consume.
+func buildTypedColumn(mem memory.Allocator, dt arrow.DataType, leaves []variantLeaf, rows []int) arrow.Array {
+	bldr := array.NewBuilder(mem, dt)
 	defer bldr.Release()
-	bldr.Reserve(len(leaves))
-	for _, l := range leaves {
-		if !l.present || !appendNatural(bldr, l.value) {
+	bldr.Reserve(len(rows))
+	for _, row := range rows {
+		if !appendNatural(bldr, leaves[row].value) {
 			bldr.AppendNull()
 		}
 	}
@@ -538,8 +615,8 @@ func naturalArrowType(v variant.Value) arrow.DataType {
 	return nil
 }
 
-// appendNatural appends v to bldr when v matches bldr's natural type, reporting
-// whether it did; a non-matching value is left for the caller to null.
+// appendNatural appends v to bldr when v's value matches bldr's element type,
+// reporting whether it did; callers group leaves by natural type first, so it matches.
 func appendNatural(bldr array.Builder, v variant.Value) bool {
 	switch b := bldr.(type) {
 	case *array.BooleanBuilder:
