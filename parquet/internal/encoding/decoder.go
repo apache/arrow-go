@@ -243,6 +243,9 @@ func spacedExpand[T parquet.ColumnTypes](buffer []T, nullCount int, validBits []
 		// overwrite any existing data with the correctly spaced data. Any data that happens to be left in the null
 		// slots is fine since it shouldn't matter and saves us work.
 		idxDecode -= run.Length
+		if idxDecode == run.Pos {
+			return numValues
+		}
 		n := copy(buffer[run.Pos:], buffer[idxDecode:int64(idxDecode)+run.Length])
 		debug.Assert(n == int(run.Length), "copy copied incorrect number of elements in spacedExpand")
 	}
