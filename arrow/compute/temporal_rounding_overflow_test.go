@@ -536,14 +536,64 @@ func TestTemporalRoundingSecondOverflow(t *testing.T) {
 	require.ErrorIs(t, err, arrow.ErrInvalid)
 }
 
+func TestTemporalRoundingSecondCalendarExtremes(t *testing.T) {
+	tests := []struct {
+		name  string
+		value arrow.Timestamp
+		fn    func(context.Context, compute.RoundTemporalOptions, compute.Datum) (compute.Datum, error)
+		opts  compute.RoundTemporalOptions
+	}{
+		{
+			name:  "floor at minimum",
+			value: arrow.Timestamp(math.MinInt64),
+			fn:    compute.FloorTemporal,
+			opts: compute.RoundTemporalOptions{
+				Multiple: 1,
+				Unit:     compute.RoundTemporalYear,
+			},
+		},
+		{
+			name:  "ceil at maximum to day",
+			value: arrow.Timestamp(math.MaxInt64),
+			fn:    compute.CeilTemporal,
+			opts: compute.RoundTemporalOptions{
+				Multiple: 1,
+				Unit:     compute.RoundTemporalDay,
+			},
+		},
+		{
+			name:  "ceil immediately below maximum to day",
+			value: arrow.Timestamp(math.MaxInt64 - 1),
+			fn:    compute.CeilTemporal,
+			opts: compute.RoundTemporalOptions{
+				Multiple: 1,
+				Unit:     compute.RoundTemporalDay,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			builder := array.NewTimestampBuilder(memory.DefaultAllocator, &arrow.TimestampType{Unit: arrow.Second})
+			builder.Append(tc.value)
+			input := builder.NewArray()
+			builder.Release()
+			defer input.Release()
+
+			_, err := tc.fn(context.Background(), tc.opts, compute.NewDatum(input))
+			require.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
+}
+
 func TestTemporalRoundingNegativeCalendarMultiples(t *testing.T) {
-		tests := []struct {
-			name             string
-			value            time.Time
-			floor            time.Time
-			ceil             time.Time
-			multiple         int64
-			unit             compute.RoundTemporalUnit
+	tests := []struct {
+		name     string
+		value    time.Time
+		floor    time.Time
+		ceil     time.Time
+		multiple int64
+		unit     compute.RoundTemporalUnit
 	}{
 		{
 			name:     "year",

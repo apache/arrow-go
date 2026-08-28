@@ -979,7 +979,10 @@ func canRoundInInputUnit(inputUnit arrow.TimeUnit, roundingIntervalNanos int64) 
 // time so daylight-saving transitions do not change the number of clock hours,
 // minutes, or seconds in the current period.
 func roundTimestampCalendarOrigin(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts roundTemporalState) (int64, error) {
-	t := arrow.Timestamp(ts).ToTime(inputUnit).In(tz)
+	t, err := timestampToCalendarTime(ts, inputUnit, tz)
+	if err != nil {
+		return 0, err
+	}
 	origin, err := fixedCalendarOrigin(t, opts.Unit, tz)
 	if err != nil {
 		return 0, err
@@ -1000,7 +1003,7 @@ func roundTimestampCalendarOrigin(ts int64, inputUnit arrow.TimeUnit, tz *time.L
 		return 0, err
 	}
 
-	result, err := arrow.TimestampFromTime(rounded, inputUnit)
+	result, err := timestampFromCalendarTime(rounded, inputUnit)
 	if err != nil {
 		return 0, err
 	}
@@ -1115,6 +1118,20 @@ func addWallNanos(origin time.Time, nanos int64) (time.Time, error) {
 
 func overflowError() error {
 	return fmt.Errorf("%w: temporal rounding overflow", arrow.ErrInvalid)
+}
+
+// time.Time's calendar representation wraps for Unix seconds before this
+// boundary. time.Unix(math.MaxInt64, 0) also overflows its internal signed
+// seconds field. Keep both cases out of calendar arithmetic before constructing
+// a time.Time. The public timestamp conversion intentionally remains bijective
+// over the full int64 range, so this check belongs in the calendar kernel.
+const minCalendarTimestampSecond = -9223372028741760000
+
+func timestampToCalendarTime(ts int64, inputUnit arrow.TimeUnit, tz *time.Location) (time.Time, error) {
+	if inputUnit == arrow.Second && (ts < minCalendarTimestampSecond || ts == math.MaxInt64) {
+		return time.Time{}, overflowError()
+	}
+	return arrow.Timestamp(ts).ToTime(inputUnit).In(tz), nil
 }
 
 func checkedAddInt64(left, right int64) (int64, error) {
@@ -1665,10 +1682,12 @@ func roundCalendarOriginWeek(value time.Time, opts roundTemporalState, tz *time.
 // Requires date arithmetic for variable-length periods and timezone-aware boundaries.
 func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts roundTemporalState) (int64, error) {
 	// Convert to time.Time for calendar operations in the specified timezone
-	t := arrow.Timestamp(ts).ToTime(inputUnit).In(tz)
+	t, err := timestampToCalendarTime(ts, inputUnit, tz)
+	if err != nil {
+		return 0, err
+	}
 
 	var rounded time.Time
-	var err error
 	multiple := opts.Multiple
 
 	switch opts.Unit {
@@ -1942,11 +1961,31 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 	}
 
 	// Convert back to the input unit, validating only the selected result.
-	roundedTimestamp, err := arrow.TimestampFromTime(rounded, inputUnit)
+	roundedTimestamp, err := timestampFromCalendarTime(rounded, inputUnit)
 	if err != nil {
 		return 0, err
 	}
 	return int64(roundedTimestamp), nil
+}
+
+func timestampFromCalendarTime(value time.Time, unit arrow.TimeUnit) (arrow.Timestamp, error) {
+	if unit != arrow.Second {
+		return arrow.TimestampFromTime(value, unit)
+	}
+
+	days, nanos, err := calendarTimeParts(value)
+	if err != nil {
+		return 0, err
+	}
+	seconds, err := checkedMulInt64(days, int64(24*time.Hour/time.Second))
+	if err != nil {
+		return 0, err
+	}
+	seconds, err = checkedAddInt64(seconds, nanos/int64(time.Second))
+	if err != nil {
+		return 0, err
+	}
+	return arrow.Timestamp(seconds), nil
 }
 
 func timeToNanos(value time.Time) (int64, error) {
