@@ -198,6 +198,69 @@ func assertBinaryBuilderArrayParity(t *testing.T, bulk, scalar array.Builder) {
 	assert.True(t, array.Equal(bulkArray, scalarArray))
 }
 
+func TestBinaryBuilderBulkAppendValuesPreservesNullPayload(t *testing.T) {
+	values := []string{"", "one", "世界", "", "five", "six"}
+	valid := []bool{true, false, true, true, false, true}
+	suffix := []string{"tail", ""}
+
+	for _, factory := range binaryBuilderFactories {
+		t.Run(factory.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
+			builder := factory.new(mem)
+			defer builder.Release()
+			appendBinaryBuilderValue(builder, "prefix")
+			builder.AppendNull()
+			builder.AppendEmptyValue()
+			appendBinaryBuilderValues(builder, values, valid)
+			appendBinaryBuilderValues(builder, suffix, nil)
+
+			arr := builder.NewArray().(array.BinaryLike)
+			defer arr.Release()
+			require.NoError(t, arr.(interface{ ValidateFull() error }).ValidateFull())
+
+			expectedValues := append([]string{"prefix", "", ""}, values...)
+			expectedValues = append(expectedValues, suffix...)
+			expectedValid := append([]bool{true, false, true}, valid...)
+			expectedValid = append(expectedValid, true, true)
+			expectedData := make([]byte, 0)
+			for _, value := range expectedValues {
+				expectedData = append(expectedData, []byte(value)...)
+			}
+
+			assert.Equal(t, len(expectedValues), arr.Len())
+			assert.Equal(t, 3, arr.NullN())
+			assert.Equal(t, expectedData, arr.ValueBytes())
+
+			dataOffset := int64(0)
+			for i, value := range expectedValues {
+				assert.Equal(t, expectedValid[i], arr.IsValid(i), "value %d", i)
+				assert.Equal(t, dataOffset, arr.ValueOffset64(i), "value %d offset", i)
+				assert.Equal(t, len(value), arr.ValueLen(i), "value %d length", i)
+				dataOffset += int64(len(value))
+			}
+		})
+	}
+}
+
+func appendBinaryBuilderValues(builder array.Builder, values []string, valid []bool) {
+	switch builder := builder.(type) {
+	case *array.BinaryBuilder:
+		binaryValues := make([][]byte, len(values))
+		for i, value := range values {
+			binaryValues[i] = []byte(value)
+		}
+		builder.AppendValues(binaryValues, valid)
+	case *array.StringBuilder:
+		builder.AppendValues(values, valid)
+	case *array.LargeStringBuilder:
+		builder.AppendValues(values, valid)
+	default:
+		panic(fmt.Sprintf("unexpected binary builder %T", builder))
+	}
+}
+
 func BenchmarkBinaryBuilderBulkAppend(b *testing.B) {
 	for _, tc := range binaryBuilderFactories {
 		b.Run(tc.name, func(b *testing.B) {
@@ -229,5 +292,218 @@ func benchmarkBinaryBuilderBulkAppend(b *testing.B, factory binaryBuilderFactory
 
 		arr := builder.NewArray()
 		arr.Release()
+	}
+}
+
+func BenchmarkBinaryBuilderScalarAppend(b *testing.B) {
+	const rows = 64 * 1024
+
+	b.Run("append", func(b *testing.B) {
+		builder := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+		defer builder.Release()
+		value := []byte("data")
+		builder.Resize(rows)
+		builder.ReserveData(rows * len(value))
+		builder.Resize(0)
+
+		b.SetBytes(int64(rows * len(value)))
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			b.StopTimer()
+			builder.Resize(rows)
+			b.StartTimer()
+			for range rows {
+				builder.Append(value)
+			}
+			b.StopTimer()
+			builder.Resize(0)
+			b.StartTimer()
+		}
+	})
+
+	b.Run("append_null", func(b *testing.B) {
+		builder := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+		defer builder.Release()
+		builder.Resize(rows)
+		builder.Resize(0)
+
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			b.StopTimer()
+			builder.Resize(rows)
+			b.StartTimer()
+			for range rows {
+				builder.AppendNull()
+			}
+			b.StopTimer()
+			builder.Resize(0)
+			b.StartTimer()
+		}
+	})
+
+	b.Run("append_empty_value", func(b *testing.B) {
+		builder := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+		defer builder.Release()
+		builder.Resize(rows)
+		builder.Resize(0)
+
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			b.StopTimer()
+			builder.Resize(rows)
+			b.StartTimer()
+			for range rows {
+				builder.AppendEmptyValue()
+			}
+			b.StopTimer()
+			builder.Resize(0)
+			b.StartTimer()
+		}
+	})
+}
+
+type binaryBuilderValuesFactory struct {
+	name         string
+	new          binaryBuilderFactory
+	values       func(rows, width int) any
+	appendValues func(array.Builder, any, []bool)
+}
+
+var binaryBuilderValuesFactories = []binaryBuilderValuesFactory{
+	{
+		name: "binary",
+		new: func(mem memory.Allocator) array.Builder {
+			return array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
+		},
+		values: func(rows, width int) any {
+			value := make([]byte, width)
+			for i := range value {
+				value[i] = byte('a' + i%26)
+			}
+			values := make([][]byte, rows)
+			for i := range values {
+				values[i] = value
+			}
+			return values
+		},
+		appendValues: func(builder array.Builder, values any, valid []bool) {
+			builder.(*array.BinaryBuilder).AppendValues(values.([][]byte), valid)
+		},
+	},
+	{
+		name: "large_binary",
+		new: func(mem memory.Allocator) array.Builder {
+			return array.NewBinaryBuilder(mem, arrow.BinaryTypes.LargeBinary)
+		},
+		values: func(rows, width int) any {
+			value := make([]byte, width)
+			for i := range value {
+				value[i] = byte('a' + i%26)
+			}
+			values := make([][]byte, rows)
+			for i := range values {
+				values[i] = value
+			}
+			return values
+		},
+		appendValues: func(builder array.Builder, values any, valid []bool) {
+			builder.(*array.BinaryBuilder).AppendValues(values.([][]byte), valid)
+		},
+	},
+	{
+		name: "string",
+		new: func(mem memory.Allocator) array.Builder {
+			return array.NewStringBuilder(mem)
+		},
+		values: func(rows, width int) any {
+			value := make([]byte, width)
+			for i := range value {
+				value[i] = byte('a' + i%26)
+			}
+			values := make([]string, rows)
+			for i := range values {
+				values[i] = string(value)
+			}
+			return values
+		},
+		appendValues: func(builder array.Builder, values any, valid []bool) {
+			builder.(*array.StringBuilder).AppendValues(values.([]string), valid)
+		},
+	},
+	{
+		name: "large_string",
+		new: func(mem memory.Allocator) array.Builder {
+			return array.NewLargeStringBuilder(mem)
+		},
+		values: func(rows, width int) any {
+			value := make([]byte, width)
+			for i := range value {
+				value[i] = byte('a' + i%26)
+			}
+			values := make([]string, rows)
+			for i := range values {
+				values[i] = string(value)
+			}
+			return values
+		},
+		appendValues: func(builder array.Builder, values any, valid []bool) {
+			builder.(*array.LargeStringBuilder).AppendValues(values.([]string), valid)
+		},
+	},
+}
+
+func BenchmarkBinaryBuilderAppendValues(b *testing.B) {
+	validityPatterns := []struct {
+		name  string
+		valid func(rows int) []bool
+	}{
+		{name: "all_valid", valid: func(int) []bool { return nil }},
+		{
+			name: "10pct_null",
+			valid: func(rows int) []bool {
+				valid := make([]bool, rows)
+				for i := range valid {
+					valid[i] = i%10 != 0
+				}
+				return valid
+			},
+		},
+		{
+			name: "50pct_null",
+			valid: func(rows int) []bool {
+				valid := make([]bool, rows)
+				for i := range valid {
+					valid[i] = i%2 != 0
+				}
+				return valid
+			},
+		},
+	}
+
+	for _, factory := range binaryBuilderValuesFactories {
+		for _, rows := range []int{1024, 65536} {
+			for _, width := range []int{4, 16, 64, 256} {
+				values := factory.values(rows, width)
+				for _, pattern := range validityPatterns {
+					valid := pattern.valid(rows)
+					name := fmt.Sprintf("%s/rows_%d/width_%d/%s", factory.name, rows, width, pattern.name)
+					b.Run(name, func(b *testing.B) {
+						builder := factory.new(memory.DefaultAllocator)
+						defer builder.Release()
+						b.SetBytes(int64(rows * width))
+						b.ReportAllocs()
+
+						for b.Loop() {
+							factory.appendValues(builder, values, valid)
+							arr := builder.NewArray()
+							arr.Release()
+						}
+					})
+				}
+			}
+		}
 	}
 }

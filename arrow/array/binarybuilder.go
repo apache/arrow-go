@@ -39,26 +39,29 @@ type BinaryBuilder struct {
 	offsets bufBuilder
 	values  *byteBufferBuilder
 
-	appendOffsetVal func(int)
-	getOffsetVal    func(int) int
-	maxCapacity     uint64
-	offsetByteWidth int
+	appendOffsetVal       func(int)
+	unsafeAppendOffsetVal func(int)
+	getOffsetVal          func(int) int
+	maxCapacity           uint64
+	offsetByteWidth       int
 }
 
 // NewBinaryBuilder can be used for any of the variable length binary types,
 // Binary, LargeBinary, String, LargeString by passing the appropriate data type
 func NewBinaryBuilder(mem memory.Allocator, dtype arrow.BinaryDataType) *BinaryBuilder {
 	var (
-		offsets         bufBuilder
-		offsetValFn     func(int)
-		maxCapacity     uint64
-		offsetByteWidth int
-		getOffsetVal    func(int) int
+		offsets           bufBuilder
+		offsetValFn       func(int)
+		unsafeOffsetValFn func(int)
+		maxCapacity       uint64
+		offsetByteWidth   int
+		getOffsetVal      func(int) int
 	)
 	switch dtype.Layout().Buffers[1].ByteWidth {
 	case 4:
 		b := newInt32BufferBuilder(mem)
 		offsetValFn = func(v int) { b.AppendValue(int32(v)) }
+		unsafeOffsetValFn = func(v int) { b.unsafeAppendValue(v) }
 		getOffsetVal = func(i int) int { return int(b.Value(i)) }
 		offsets = b
 		maxCapacity = math.MaxInt32
@@ -66,6 +69,7 @@ func NewBinaryBuilder(mem memory.Allocator, dtype arrow.BinaryDataType) *BinaryB
 	case 8:
 		b := newInt64BufferBuilder(mem)
 		offsetValFn = func(v int) { b.AppendValue(int64(v)) }
+		unsafeOffsetValFn = func(v int) { b.unsafeAppendValue(v) }
 		getOffsetVal = func(i int) int { return int(b.Value(i)) }
 		offsets = b
 		maxCapacity = math.MaxInt64
@@ -73,14 +77,15 @@ func NewBinaryBuilder(mem memory.Allocator, dtype arrow.BinaryDataType) *BinaryB
 	}
 
 	bb := &BinaryBuilder{
-		builder:         builder{mem: mem},
-		dtype:           dtype,
-		offsets:         offsets,
-		values:          newByteBufferBuilder(mem),
-		appendOffsetVal: offsetValFn,
-		maxCapacity:     maxCapacity,
-		offsetByteWidth: offsetByteWidth,
-		getOffsetVal:    getOffsetVal,
+		builder:               builder{mem: mem},
+		dtype:                 dtype,
+		offsets:               offsets,
+		values:                newByteBufferBuilder(mem),
+		appendOffsetVal:       offsetValFn,
+		unsafeAppendOffsetVal: unsafeOffsetValFn,
+		maxCapacity:           maxCapacity,
+		offsetByteWidth:       offsetByteWidth,
+		getOffsetVal:          getOffsetVal,
 	}
 	bb.refCount.Add(1)
 	return bb
@@ -168,6 +173,7 @@ func (b *BinaryBuilder) AppendValues(v [][]byte, valid []bool) {
 	}
 
 	b.Reserve(len(v))
+	b.reserveOffsetCapacity(len(v))
 
 	// Pre-calculate total data size to minimize allocations
 	totalDataSize := 0
@@ -177,8 +183,8 @@ func (b *BinaryBuilder) AppendValues(v [][]byte, valid []bool) {
 	b.ReserveData(totalDataSize)
 
 	for _, vv := range v {
-		b.appendNextOffset()
-		b.values.Append(vv)
+		b.unsafeAppendNextOffset()
+		b.values.unsafeAppend(vv)
 	}
 
 	b.unsafeAppendBoolsToBitmap(valid, len(v))
@@ -197,6 +203,7 @@ func (b *BinaryBuilder) AppendStringValues(v []string, valid []bool) {
 	}
 
 	b.Reserve(len(v))
+	b.reserveOffsetCapacity(len(v))
 
 	// Pre-calculate total data size to minimize allocations
 	totalDataSize := 0
@@ -206,8 +213,8 @@ func (b *BinaryBuilder) AppendStringValues(v []string, valid []bool) {
 	b.ReserveData(totalDataSize)
 
 	for _, vv := range v {
-		b.appendNextOffset()
-		b.values.Append([]byte(vv))
+		b.unsafeAppendNextOffset()
+		b.values.unsafeAppend([]byte(vv))
 	}
 
 	b.unsafeAppendBoolsToBitmap(valid, len(v))
@@ -263,6 +270,13 @@ func (b *BinaryBuilder) DataCap() int { return b.values.capacity }
 // by checking the capacity and calling Resize if necessary.
 func (b *BinaryBuilder) Reserve(n int) {
 	b.reserve(n, b.Resize)
+}
+
+func (b *BinaryBuilder) reserveOffsetCapacity(n int) {
+	offsetBytes := (b.length + n + 1) * b.offsetByteWidth
+	if b.offsets.Cap() < offsetBytes {
+		b.offsets.resize(offsetBytes)
+	}
 }
 
 // ReserveData ensures there is enough space for appending n bytes
@@ -357,6 +371,12 @@ func (b *BinaryBuilder) appendNextOffset() {
 	numBytes := b.values.Len()
 	debug.Assert(uint64(numBytes) <= b.maxCapacity, "exceeded maximum capacity of binary array")
 	b.appendOffsetVal(numBytes)
+}
+
+func (b *BinaryBuilder) unsafeAppendNextOffset() {
+	numBytes := b.values.Len()
+	debug.Assert(uint64(numBytes) <= b.maxCapacity, "exceeded maximum capacity of binary array")
+	b.unsafeAppendOffsetVal(numBytes)
 }
 
 func (b *BinaryBuilder) appendCurrentOffsets(n int) {
