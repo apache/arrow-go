@@ -117,3 +117,12 @@ func TestDeltaBitPackDecoderBoundsPackedScratch(t *testing.T) {
 	require.Error(t, err)
 	require.LessOrEqual(t, cap(dec.deltaBuf), deltaBitPackScratchSize)
 }
+
+func TestDeltaBitPackEncoderReleasesSpacedScratch(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	enc := NewEncoder(parquet.Types.Int32, parquet.Encodings.DeltaBinaryPacked, false, nil, mem).(*deltaBitPackEncoder[int32])
+	enc.PutSpaced([]int32{1, 2, 3, 4}, []byte{0x0f}, 0)
+	enc.Release()
+}
