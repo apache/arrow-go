@@ -103,13 +103,45 @@ func TestBuilder_UnsafeAppendBoolsToBitmap(t *testing.T) {
 	}
 }
 
-func TestPackValidityByte(t *testing.T) {
+func TestPackBoolsByte(t *testing.T) {
 	for want := 0; want < 1<<8; want++ {
 		valid := make([]bool, 8)
 		for i := range valid {
 			valid[i] = want&(1<<i) != 0
 		}
-		assert.Equal(t, byte(want), packValidityByte(valid), "want=%08b", want)
+		assert.Equal(t, byte(want), packBoolsByte(valid), "want=%08b", want)
+	}
+}
+
+func TestPackBoolsToBitmap(t *testing.T) {
+	patterns := []struct {
+		name  string
+		value func(int) bool
+	}{
+		{"all false", func(int) bool { return false }},
+		{"all true", func(int) bool { return true }},
+		{"alternating", func(i int) bool { return i%2 == 0 }},
+		{"one in three", func(i int) bool { return i%3 == 0 }},
+	}
+
+	for _, pattern := range patterns {
+		for offset := 0; offset < 8; offset++ {
+			for length := 0; length <= 33; length++ {
+				got := make([]byte, 8)
+				for i := range got {
+					got[i] = byte(0x5a + i*31)
+				}
+				want := append([]byte(nil), got...)
+				values := make([]bool, length)
+				for i := range values {
+					values[i] = pattern.value(i)
+					bitutil.SetBitTo(want, offset+i, values[i])
+				}
+
+				packBoolsToBitmap(got, offset, values)
+				assert.Equal(t, want, got, "%s, offset=%d, length=%d", pattern.name, offset, length)
+			}
+		}
 	}
 }
 

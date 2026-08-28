@@ -135,8 +135,12 @@ func (b *BooleanBuilder) AppendValues(v []bool, valid []bool) {
 	}
 
 	b.Reserve(len(v))
-	for i, vv := range v {
-		bitutil.SetBitTo(b.rawData, b.length+i, vv)
+	if len(v) < 8 {
+		for i, vv := range v {
+			bitutil.SetBitTo(b.rawData, b.length+i, vv)
+		}
+	} else {
+		packBoolsToBitmap(b.rawData, b.length, v)
 	}
 	b.unsafeAppendBoolsToBitmap(valid, len(v))
 }

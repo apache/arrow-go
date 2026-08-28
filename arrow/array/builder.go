@@ -238,7 +238,7 @@ func (b *builder) unsafeAppendBoolsToBitmap(valid []bool, length int) {
 	}
 
 	for len(valid) >= 8 {
-		bitSet := packValidityByte(valid)
+		bitSet := packBoolsByte(valid)
 		nullBitmap[byteOffset] = bitSet
 		b.nulls += 8 - bits.OnesCount8(bitSet)
 		valid = valid[8:]
@@ -260,34 +260,75 @@ func (b *builder) unsafeAppendBoolsToBitmap(valid []bool, length int) {
 	b.length += validLength
 }
 
-func packValidityByte(valid []bool) byte {
-	valid = valid[:8]
+func packBoolsByte(values []bool) byte {
+	values = values[:8]
 	var packed byte
-	if valid[0] {
+	if values[0] {
 		packed |= 1 << 0
 	}
-	if valid[1] {
+	if values[1] {
 		packed |= 1 << 1
 	}
-	if valid[2] {
+	if values[2] {
 		packed |= 1 << 2
 	}
-	if valid[3] {
+	if values[3] {
 		packed |= 1 << 3
 	}
-	if valid[4] {
+	if values[4] {
 		packed |= 1 << 4
 	}
-	if valid[5] {
+	if values[5] {
 		packed |= 1 << 5
 	}
-	if valid[6] {
+	if values[6] {
 		packed |= 1 << 6
 	}
-	if valid[7] {
+	if values[7] {
 		packed |= 1 << 7
 	}
 	return packed
+}
+
+func packBoolsToBitmap(dst []byte, offset int, values []bool) {
+	if len(values) == 0 {
+		return
+	}
+
+	byteOffset := offset / 8
+	bitOffset := offset % 8
+	if bitOffset != 0 {
+		bitSet := dst[byteOffset]
+		prefixLength := min(8-bitOffset, len(values))
+		for i, v := range values[:prefixLength] {
+			if v {
+				bitSet |= bitutil.BitMask[bitOffset+i]
+			} else {
+				bitSet &= bitutil.FlippedBitMask[bitOffset+i]
+			}
+		}
+		dst[byteOffset] = bitSet
+		values = values[prefixLength:]
+		byteOffset++
+	}
+
+	for len(values) >= 8 {
+		dst[byteOffset] = packBoolsByte(values)
+		values = values[8:]
+		byteOffset++
+	}
+
+	if len(values) != 0 {
+		bitSet := dst[byteOffset]
+		for i, v := range values {
+			if v {
+				bitSet |= bitutil.BitMask[i]
+			} else {
+				bitSet &= bitutil.FlippedBitMask[i]
+			}
+		}
+		dst[byteOffset] = bitSet
+	}
 }
 
 // unsafeSetValid sets the next length bits to valid in the validity bitmap.
