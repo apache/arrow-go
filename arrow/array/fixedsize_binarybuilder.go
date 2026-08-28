@@ -162,6 +162,8 @@ func (b *FixedSizeBinaryBuilder) Reserve(n int) {
 // additional memory will be allocated. If n is smaller, the allocated memory may reduced.
 func (b *FixedSizeBinaryBuilder) Resize(n int) {
 	b.resize(n, b.init)
+	// Keep the value buffer sized to the effective builder capacity. b.resize
+	// may clamp n to minBuilderCapacity.
 	b.values.resize(b.capacity * b.dtype.ByteWidth)
 }
 

@@ -80,7 +80,7 @@ func TestFixedWidthBuilderAppendNulls(t *testing.T) {
 	}
 }
 
-func TestFixedWidthBuilderAppendNullsClearsReusedValidity(t *testing.T) {
+func TestFixedWidthBuilderAppendNullsAfterTruncate(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
 
