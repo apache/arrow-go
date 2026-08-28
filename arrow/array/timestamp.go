@@ -133,15 +133,7 @@ func (a *Timestamp) MarshalJSON() ([]byte, error) {
 }
 
 func arrayEqualTimestamp(left, right *Timestamp) bool {
-	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
-			continue
-		}
-		if left.Value(i) != right.Value(i) {
-			return false
-		}
-	}
-	return true
+	return arrayEqualFixedWidth(left, right)
 }
 
 type TimestampBuilder struct {
