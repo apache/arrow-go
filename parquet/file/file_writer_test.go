@@ -310,53 +310,66 @@ func TestBufferedMultiPageDisabledDictionary(t *testing.T) {
 		valueCount = 10000
 		pageSize   = 16384
 	)
-	var (
-		sink  = encoding.NewBufferWriter(0, memory.DefaultAllocator)
-		props = parquet.NewWriterProperties(
-			parquet.WithDictionaryDefault(false),
-			parquet.WithDataPageVersion(parquet.DataPageV2),
-			parquet.WithDataPageSize(pageSize),
-		)
-		sc, _ = schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
-			schema.NewInt32Node("col", parquet.Repetitions.Required, -1),
-		}, -1)
-	)
+	for _, pageVersion := range []struct {
+		name    string
+		version parquet.DataPageVersion
+	}{
+		{name: "v1", version: parquet.DataPageV1},
+		{name: "v2", version: parquet.DataPageV2},
+	} {
+		t.Run(pageVersion.name, func(t *testing.T) {
+			sink := encoding.NewBufferWriter(0, memory.DefaultAllocator)
+			props := parquet.NewWriterProperties(
+				parquet.WithDictionaryDefault(false),
+				parquet.WithDataPageVersion(pageVersion.version),
+				parquet.WithDataPageSize(pageSize),
+			)
+			sc, _ := schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+				schema.NewInt32Node("col", parquet.Repetitions.Optional, -1),
+			}, -1)
 
-	writer := file.NewParquetWriter(sink, sc, file.WithWriterProps(props))
-	rgWriter := writer.AppendBufferedRowGroup()
-	cwr, _ := rgWriter.Column(0)
-	cw := cwr.(*file.Int32ColumnChunkWriter)
-	valuesIn := make([]int32, 0, valueCount)
-	for i := int32(0); i < valueCount; i++ {
-		valuesIn = append(valuesIn, (i%100)+1)
-	}
-	cw.WriteBatch(valuesIn, nil, nil)
-	rgWriter.Close()
-	writer.Close()
-	buffer := sink.Finish()
-	defer buffer.Release()
+			writer := file.NewParquetWriter(sink, sc, file.WithWriterProps(props))
+			rgWriter := writer.AppendBufferedRowGroup()
+			cwr, _ := rgWriter.Column(0)
+			cw := cwr.(*file.Int32ColumnChunkWriter)
+			valuesIn := make([]int32, 0, valueCount)
+			defLevels := make([]int16, 0, valueCount)
+			for i := int32(0); i < valueCount; i++ {
+				valuesIn = append(valuesIn, (i%100)+1)
+				defLevels = append(defLevels, 1)
+			}
+			_, err := cw.WriteBatch(valuesIn, defLevels, nil)
+			assert.NoError(t, err)
+			assert.NoError(t, rgWriter.Close())
+			assert.NoError(t, writer.Close())
+			buffer := sink.Finish()
+			defer buffer.Release()
 
-	reader, err := file.NewParquetReader(bytes.NewReader(buffer.Bytes()))
-	assert.NoError(t, err)
+			reader, err := file.NewParquetReader(bytes.NewReader(buffer.Bytes()))
+			assert.NoError(t, err)
+			defer reader.Close()
 
-	assert.EqualValues(t, 1, reader.NumRowGroups())
-	valuesOut := make([]int32, valueCount)
+			assert.EqualValues(t, 1, reader.NumRowGroups())
+			valuesOut := make([]int32, valueCount)
 
-	for r := 0; r < reader.NumRowGroups(); r++ {
-		rgr := reader.RowGroup(r)
-		assert.EqualValues(t, 1, rgr.NumColumns())
-		assert.EqualValues(t, valueCount, rgr.NumRows())
+			for r := 0; r < reader.NumRowGroups(); r++ {
+				rgr := reader.RowGroup(r)
+				assert.EqualValues(t, 1, rgr.NumColumns())
+				assert.EqualValues(t, valueCount, rgr.NumRows())
 
-		var totalRead int64
-		col, err := rgr.Column(0)
-		assert.NoError(t, err)
-		colReader := col.(*file.Int32ColumnChunkReader)
-		for colReader.HasNext() {
-			total, _, _ := colReader.ReadBatch(valueCount-totalRead, valuesOut[totalRead:], nil, nil)
-			totalRead += total
-		}
-		assert.EqualValues(t, valueCount, totalRead)
-		assert.Equal(t, valuesIn, valuesOut)
+				var totalRead int64
+				col, err := rgr.Column(0)
+				assert.NoError(t, err)
+				colReader := col.(*file.Int32ColumnChunkReader)
+				for colReader.HasNext() {
+					total, _, err := colReader.ReadBatch(valueCount-totalRead, valuesOut[totalRead:], nil, nil)
+					assert.NoError(t, err)
+					totalRead += total
+				}
+				assert.EqualValues(t, valueCount, totalRead)
+				assert.Equal(t, valuesIn, valuesOut)
+			}
+		})
 	}
 }
 

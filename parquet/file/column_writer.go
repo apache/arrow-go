@@ -149,6 +149,7 @@ type columnWriter struct {
 	defLevelSink *encoding.PooledBufferWriter
 	repLevelSink *encoding.PooledBufferWriter
 
+	// Scratch for eagerly assembled pages. It retains the largest page until Close.
 	uncompressedData bytes.Buffer
 	compressedTemp   *bytes.Buffer
 
@@ -697,6 +698,7 @@ func (w *columnWriter) resetPageStatistics() {
 func (w *columnWriter) Close() (err error) {
 	if !w.closed {
 		w.closed = true
+		defer func() { w.uncompressedData = bytes.Buffer{} }()
 		if w.hasDict && !w.fallbackToNonDict {
 			if err = w.WriteDictionaryPage(); err != nil {
 				return err
