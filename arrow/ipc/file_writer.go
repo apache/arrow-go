@@ -256,6 +256,7 @@ type FileWriter struct {
 	codec           flatbuf.CompressionType
 	compressNP      int
 	compressors     []compressor
+	encoder         *recordEncoder
 	minSpaceSavings float64
 
 	// map of the last written dictionaries by id
@@ -286,7 +287,25 @@ func NewFileWriter(w io.Writer, opts ...Option) (*FileWriter, error) {
 	return &f, err
 }
 
+func (f *FileWriter) getRecordEncoder() *recordEncoder {
+	if f.encoder == nil {
+		f.encoder = newRecordEncoder(
+			f.mem,
+			0,
+			kMaxNestingDepth,
+			true,
+			f.codec,
+			f.compressNP,
+			f.minSpaceSavings,
+			f.compressors,
+		)
+	}
+	return f.encoder
+}
+
 func (f *FileWriter) Close() error {
+	defer func() { f.encoder = nil }()
+
 	if f.closed {
 		return f.closeErr
 	}
@@ -334,13 +353,8 @@ func (f *FileWriter) Write(rec arrow.RecordBatch) error {
 		return fmt.Errorf("arrow/ipc: could not write header: %w", err)
 	}
 
-	const allow64b = true
-	var (
-		data = Payload{msg: MessageRecordBatch}
-		enc  = newRecordEncoder(
-			f.mem, 0, kMaxNestingDepth, allow64b, f.codec, f.compressNP, f.minSpaceSavings, f.compressors,
-		)
-	)
+	data := Payload{msg: MessageRecordBatch}
+	enc := f.getRecordEncoder()
 	defer data.Release()
 
 	err := writeDictionaryPayloads(f.mem, rec, true, false, &f.mapper, f.lastWrittenDicts, f.pw, enc)

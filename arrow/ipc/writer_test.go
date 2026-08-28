@@ -69,6 +69,20 @@ type failingWriter struct {
 	err error
 }
 
+type closeFailWriter struct {
+	bytes.Buffer
+	err  error
+	fail bool
+}
+
+func (w *closeFailWriter) Write(p []byte) (int, error) {
+	if w.fail {
+		return 0, w.err
+	}
+
+	return w.Buffer.Write(p)
+}
+
 func (shortWriteWriter) Write(p []byte) (int, error) {
 	return len(p) - 1, io.ErrShortWrite
 }
@@ -118,6 +132,39 @@ func TestWriterCloseFailureIsTerminal(t *testing.T) {
 	require.Equal(t, 1, payloadWriter.closeCall)
 }
 
+func TestWriterCloseReleasesRecordEncoder(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer builder.Release()
+	record := builder.NewRecordBatch()
+	defer record.Release()
+
+	var output bytes.Buffer
+	writer := NewWriter(&output, WithSchema(schema))
+	require.NoError(t, writer.Write(record))
+	require.NotNil(t, writer.encoder)
+
+	require.NoError(t, writer.Close())
+	require.Nil(t, writer.encoder)
+}
+
+func TestWriterCloseAfterFailureReleasesRecordEncoder(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer builder.Release()
+	record := builder.NewRecordBatch()
+	defer record.Release()
+
+	want := errors.New("payload failed")
+	payloadWriter := &failingPayloadWriter{err: want, failAfter: 2}
+	writer := NewWriterWithPayloadWriter(payloadWriter, WithSchema(schema))
+	require.ErrorIs(t, writer.Write(record), want)
+	require.NotNil(t, writer.encoder)
+
+	require.ErrorIs(t, writer.Close(), want)
+	require.Nil(t, writer.encoder)
+}
+
 func TestFileWriterCloseFailureIsTerminal(t *testing.T) {
 	schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int32}}, nil)
 	want := errors.New("write failed")
@@ -126,6 +173,42 @@ func TestFileWriterCloseFailureIsTerminal(t *testing.T) {
 
 	require.ErrorIs(t, writer.Close(), want)
 	require.ErrorIs(t, writer.Close(), want)
+}
+
+func TestFileWriterCloseReleasesRecordEncoder(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer builder.Release()
+	record := builder.NewRecordBatch()
+	defer record.Release()
+
+	var output bytes.Buffer
+	writer, err := NewFileWriter(&output, WithSchema(schema))
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NotNil(t, writer.encoder)
+
+	require.NoError(t, writer.Close())
+	require.Nil(t, writer.encoder)
+}
+
+func TestFileWriterCloseFailureReleasesRecordEncoder(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer builder.Release()
+	record := builder.NewRecordBatch()
+	defer record.Release()
+
+	want := errors.New("close failed")
+	output := &closeFailWriter{err: want}
+	writer, err := NewFileWriter(output, WithSchema(schema))
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NotNil(t, writer.encoder)
+
+	output.fail = true
+	require.ErrorIs(t, writer.Close(), want)
+	require.Nil(t, writer.encoder)
 }
 
 func TestWriterSchemaFailureIsTerminal(t *testing.T) {
@@ -826,4 +909,52 @@ func TestVariadicCountsNotAccumulatedAcrossEncode(t *testing.T) {
 		require.Equal(t, expectedCounts, enc.variadicCounts)
 		p.Release()
 	}
+}
+
+func TestRecordEncoderResetRestoresDepth(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	childBuilder := array.NewInt32Builder(mem)
+	childBuilder.Append(1)
+	child := childBuilder.NewArray()
+	childBuilder.Release()
+	defer child.Release()
+
+	structArr, err := array.NewStructArrayWithFields(
+		[]arrow.Array{child},
+		[]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}},
+	)
+	require.NoError(t, err)
+	defer structArr.Release()
+
+	structSchema := arrow.NewSchema([]arrow.Field{{
+		Name: "struct",
+		Type: structArr.DataType(),
+	}}, nil)
+	structRecord := array.NewRecordBatch(structSchema, []arrow.Array{structArr}, 1)
+	defer structRecord.Release()
+
+	enc := newRecordEncoder(mem, 0, 1, true, -1, 1, 0, nil)
+	var nestedPayload Payload
+	require.ErrorIs(t, enc.encode(&nestedPayload, structRecord), errMaxRecursion)
+	nestedPayload.Release()
+
+	enc.reset()
+
+	simpleSchema := arrow.NewSchema([]arrow.Field{{
+		Name: "value",
+		Type: arrow.PrimitiveTypes.Int32,
+	}}, nil)
+	simpleBuilder := array.NewInt32Builder(mem)
+	simpleBuilder.Append(1)
+	simple := simpleBuilder.NewArray()
+	simpleBuilder.Release()
+	defer simple.Release()
+	simpleRecord := array.NewRecordBatch(simpleSchema, []arrow.Array{simple}, 1)
+	defer simpleRecord.Release()
+
+	var simplePayload Payload
+	require.NoError(t, enc.encode(&simplePayload, simpleRecord))
+	simplePayload.Release()
 }
