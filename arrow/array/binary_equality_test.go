@@ -21,6 +21,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -103,6 +104,96 @@ func TestBinaryEqualityByValidRuns(t *testing.T) {
 	}
 }
 
+func TestBinaryEqualityByValidRunsAcrossNulls(t *testing.T) {
+	const length = 256
+
+	types := []arrow.BinaryDataType{
+		arrow.BinaryTypes.Binary,
+		arrow.BinaryTypes.String,
+		arrow.BinaryTypes.LargeBinary,
+		arrow.BinaryTypes.LargeString,
+	}
+	valid := makeLongValidRuns(length)
+	tests := []struct {
+		name  string
+		build func(arrow.BinaryDataType) (arrow.Array, arrow.Array)
+		want  bool
+	}{
+		{
+			name: "equal arrays with long valid runs",
+			build: func(dtype arrow.BinaryDataType) (arrow.Array, arrow.Array) {
+				values := makeBinaryEqualityValues(length, 16)
+				return makeBinaryEqualityArray(memory.DefaultAllocator, dtype, values, valid),
+					makeBinaryEqualityArray(memory.DefaultAllocator, dtype, values, valid)
+			},
+			want: true,
+		},
+		{
+			name: "different bytes under null slots are ignored",
+			build: func(dtype arrow.BinaryDataType) (arrow.Array, arrow.Array) {
+				leftValues := makeBinaryEqualityValues(length, 16)
+				rightValues := append([]string(nil), leftValues...)
+				for i, isValid := range valid {
+					if !isValid {
+						rightValues[i] = "different ignored payload"
+					}
+				}
+				return makeRawBinaryEqualityArray(dtype, leftValues, valid),
+					makeRawBinaryEqualityArray(dtype, rightValues, valid)
+			},
+			want: true,
+		},
+		{
+			name: "mismatch in a later valid run",
+			build: func(dtype arrow.BinaryDataType) (arrow.Array, arrow.Array) {
+				leftValues := makeBinaryEqualityValues(length, 16)
+				rightValues := append([]string(nil), leftValues...)
+				value := []byte(rightValues[192])
+				value[0]++
+				rightValues[192] = string(value)
+				return makeBinaryEqualityArray(memory.DefaultAllocator, dtype, leftValues, valid),
+					makeBinaryEqualityArray(memory.DefaultAllocator, dtype, rightValues, valid)
+			},
+		},
+		{
+			name:  "different physical offsets with nulls",
+			build: makeSlicedBinaryEqualityPair,
+			want:  true,
+		},
+		{
+			name: "shifted value boundary inside a valid run",
+			build: func(dtype arrow.BinaryDataType) (arrow.Array, arrow.Array) {
+				const length = 192
+				valid := make([]bool, length)
+				for i := range valid {
+					valid[i] = i < 128
+				}
+
+				leftValues := makeBinaryEqualityValues(length, 16)
+				rightValues := append([]string(nil), leftValues...)
+				leftValues[64], leftValues[65] = "ab", "c"
+				rightValues[64], rightValues[65] = "a", "bc"
+				return makeBinaryEqualityArray(memory.DefaultAllocator, dtype, leftValues, valid),
+					makeBinaryEqualityArray(memory.DefaultAllocator, dtype, rightValues, valid)
+			},
+		},
+	}
+
+	for _, dtype := range types {
+		t.Run(dtype.Name(), func(t *testing.T) {
+			for _, test := range tests {
+				t.Run(test.name, func(t *testing.T) {
+					left, right := test.build(dtype)
+					defer left.Release()
+					defer right.Release()
+
+					assert.Equal(t, test.want, array.Equal(left, right))
+				})
+			}
+		})
+	}
+}
+
 func TestBinaryEqualityWithFragmentedValidity(t *testing.T) {
 	const length = 1024
 	leftValues := makeBinaryEqualityValues(length, 16)
@@ -129,18 +220,27 @@ func TestBinaryEqualityWithFragmentedValidity(t *testing.T) {
 
 func TestBinaryEqualityWithDeclaredNullsWithoutBitmap(t *testing.T) {
 	makeArray := func() *array.Binary {
-		offsets := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes([]int32{0, 1, 2, 3, 4, 5, 6, 7, 8}))
-		values := memory.NewBufferBytes([]byte("abcdefgh"))
+		const length = 128
+		offsets := make([]int32, length+1)
+		values := make([]byte, length)
+		for i := range values {
+			offsets[i] = int32(i)
+			values[i] = byte('a' + i%26)
+		}
+		offsets[length] = int32(length)
+
+		offsetsBuffer := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes(offsets))
+		valuesBuffer := memory.NewBufferBytes(values)
 		data := array.NewData(
 			arrow.BinaryTypes.Binary,
-			8,
-			[]*memory.Buffer{nil, offsets, values},
+			length,
+			[]*memory.Buffer{nil, offsetsBuffer, valuesBuffer},
 			nil,
 			1,
 			0,
 		)
-		offsets.Release()
-		values.Release()
+		offsetsBuffer.Release()
+		valuesBuffer.Release()
 		result := array.NewBinaryData(data)
 		data.Release()
 		return result
@@ -154,6 +254,100 @@ func TestBinaryEqualityWithDeclaredNullsWithoutBitmap(t *testing.T) {
 	var equal bool
 	assert.NotPanics(t, func() { equal = array.Equal(left, right) })
 	assert.True(t, equal)
+}
+
+func makeLongValidRuns(length int) []bool {
+	valid := make([]bool, length)
+	for i := range valid {
+		valid[i] = (i/8)%2 == 0
+	}
+	return valid
+}
+
+func makeSlicedBinaryEqualityPair(dtype arrow.BinaryDataType) (arrow.Array, arrow.Array) {
+	const (
+		length      = 256
+		leftOffset  = 5
+		rightOffset = 17
+	)
+
+	logicalValues := makeBinaryEqualityValues(length, 16)
+	logicalValid := makeLongValidRuns(length)
+	leftValues := makeBinaryEqualityValues(leftOffset+length+1, 16)
+	rightValues := makeBinaryEqualityValues(rightOffset+length+1, 16)
+	leftValid := make([]bool, len(leftValues))
+	rightValid := make([]bool, len(rightValues))
+	for i := range logicalValues {
+		leftValues[leftOffset+i] = logicalValues[i]
+		rightValues[rightOffset+i] = logicalValues[i]
+		leftValid[leftOffset+i] = logicalValid[i]
+		rightValid[rightOffset+i] = logicalValid[i]
+	}
+
+	leftBase := makeBinaryEqualityArray(memory.DefaultAllocator, dtype, leftValues, leftValid)
+	left := array.NewSlice(leftBase, leftOffset, leftOffset+length)
+	leftBase.Release()
+	rightBase := makeBinaryEqualityArray(memory.DefaultAllocator, dtype, rightValues, rightValid)
+	right := array.NewSlice(rightBase, rightOffset, rightOffset+length)
+	rightBase.Release()
+	return left, right
+}
+
+func makeRawBinaryEqualityArray(dtype arrow.BinaryDataType, values []string, valid []bool) arrow.Array {
+	if len(values) != len(valid) {
+		panic("len(values) != len(valid)")
+	}
+
+	valueBytes := make([]byte, 0)
+	var offsetBytes []byte
+	switch dtype.ID() {
+	case arrow.BINARY, arrow.STRING:
+		offsets := make([]int32, len(values)+1)
+		for i, value := range values {
+			offsets[i] = int32(len(valueBytes))
+			valueBytes = append(valueBytes, value...)
+		}
+		offsets[len(values)] = int32(len(valueBytes))
+		offsetBytes = arrow.Int32Traits.CastToBytes(offsets)
+	case arrow.LARGE_BINARY, arrow.LARGE_STRING:
+		offsets := make([]int64, len(values)+1)
+		for i, value := range values {
+			offsets[i] = int64(len(valueBytes))
+			valueBytes = append(valueBytes, value...)
+		}
+		offsets[len(values)] = int64(len(valueBytes))
+		offsetBytes = arrow.Int64Traits.CastToBytes(offsets)
+	default:
+		panic("unsupported binary type")
+	}
+
+	validity := make([]byte, (len(valid)+7)/8)
+	nulls := 0
+	for i, isValid := range valid {
+		if isValid {
+			bitutil.SetBit(validity, i)
+		} else {
+			nulls++
+		}
+	}
+
+	validityBuffer := memory.NewBufferBytes(validity)
+	offsetsBuffer := memory.NewBufferBytes(offsetBytes)
+	valuesBuffer := memory.NewBufferBytes(valueBytes)
+	data := array.NewData(
+		dtype,
+		len(values),
+		[]*memory.Buffer{validityBuffer, offsetsBuffer, valuesBuffer},
+		nil,
+		nulls,
+		0,
+	)
+	validityBuffer.Release()
+	offsetsBuffer.Release()
+	valuesBuffer.Release()
+	result := array.MakeFromData(data)
+	data.Release()
+	return result
 }
 
 func makeBinaryEqualityArray(
