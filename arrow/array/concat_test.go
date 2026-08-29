@@ -1073,6 +1073,28 @@ func TestConcatPanic(t *testing.T) {
 	assert.Nil(t, concat)
 }
 
+type missingBuffersArray struct {
+	arrow.Array
+	data arrow.ArrayData
+}
+
+func (a *missingBuffersArray) Data() arrow.ArrayData { return a.data }
+
+func TestConcatMissingBitmapBufferReleasesOutput(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	backing := array.NewBoolean(512, nil, nil, 1)
+	defer backing.Release()
+	data := array.NewData(arrow.FixedWidthTypes.Boolean, backing.Len(), nil, nil, 1, 0)
+	defer data.Release()
+
+	input := &missingBuffersArray{Array: backing, data: data}
+	concat, err := array.Concatenate([]arrow.Array{input}, mem)
+	require.Error(t, err)
+	require.Nil(t, concat)
+}
+
 // github.com/apache/arrow-go/issues/562
 func TestREESliceAndConcatenate(t *testing.T) {
 	mem := memory.DefaultAllocator

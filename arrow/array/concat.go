@@ -910,6 +910,12 @@ func concatBitmaps(data []arrow.ArrayData, idx int, mem memory.Allocator) (*memo
 	}
 
 	out := memory.NewResizableBuffer(mem)
+	success := false
+	defer func() {
+		if !success {
+			out.Release()
+		}
+	}()
 	out.Resize(int(bitutil.BytesForBits(int64(outlen))))
 	dst := out.Bytes()
 
@@ -922,6 +928,7 @@ func concatBitmaps(data []arrow.ArrayData, idx int, mem memory.Allocator) (*memo
 		}
 		offset += d.Len()
 	}
+	success = true
 	return out, nil
 }
 
