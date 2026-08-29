@@ -517,6 +517,24 @@ func (s *BitmapOpSuite) TestBitmapOr() {
 	})
 }
 
+func (s *BitmapOpSuite) TestBitmapAndNot() {
+	op := bitmapOp{
+		noAlloc: bitutil.BitmapAndNot,
+		alloc:   bitutil.BitmapAndNotAlloc,
+	}
+
+	leftBits := []int{0, 1, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1}
+	rightBits := []int{0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0}
+	resultBits := []bool{false, true, false, true, false, false, false, true, false, false, false, true, false, true}
+
+	s.Run("aligned", func() {
+		s.testAligned(op, leftBits, rightBits, resultBits)
+	})
+	s.Run("unaligned", func() {
+		s.testUnaligned(op, leftBits, rightBits, resultBits)
+	})
+}
+
 func (s *BitmapOpSuite) TestBitmapXnor() {
 	op := bitmapOp{
 		noAlloc: bitutil.BitmapXnor,
@@ -553,6 +571,37 @@ func TestSmallBitmapOp(t *testing.T) {
 
 	bitutil.BitmapAnd(left[:], right[:], 0, 0, out[:], 0, 16)
 	assert.Equal(t, results, out)
+}
+
+func TestBitmapOpsLargeAligned(t *testing.T) {
+	const nbytes = 257
+
+	rng := rand.New(rand.NewSource(0))
+	left := make([]byte, nbytes)
+	right := make([]byte, nbytes)
+	_, _ = rng.Read(left)
+	_, _ = rng.Read(right)
+
+	for _, op := range []struct {
+		name string
+		fn   noAllocFn
+		want func(byte, byte) byte
+	}{
+		{name: "and", fn: bitutil.BitmapAnd, want: func(left, right byte) byte { return left & right }},
+		{name: "or", fn: bitutil.BitmapOr, want: func(left, right byte) byte { return left | right }},
+		{name: "and-not", fn: bitutil.BitmapAndNot, want: func(left, right byte) byte { return left &^ right }},
+	} {
+		t.Run(op.name, func(t *testing.T) {
+			out := make([]byte, nbytes)
+			op.fn(left, right, 0, 0, out, 0, nbytes*8)
+
+			expected := make([]byte, nbytes)
+			for i := range expected {
+				expected[i] = op.want(left[i], right[i])
+			}
+			assert.Equal(t, expected, out)
+		})
+	}
 }
 
 func createRandomBuffer(mem memory.Allocator, src *rand.Rand, nbytes int) []byte {

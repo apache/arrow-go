@@ -14,14 +14,47 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !noasm
-// +build !noasm
+//go:build !noasm && !appengine
+// +build !noasm,!appengine
 
 package bitutil
 
+import (
+	"unsafe"
+
+	"golang.org/x/sys/cpu"
+)
+
+//go:noescape
+func _bitmap_aligned_and_neon(left, right, out unsafe.Pointer, length int64)
+
+//go:noescape
+func _bitmap_aligned_or_neon(left, right, out unsafe.Pointer, length int64)
+
+//go:noescape
+func _bitmap_aligned_and_not_neon(left, right, out unsafe.Pointer, length int64)
+
+func bitmapAlignedAndNEON(left, right, out []byte) {
+	_bitmap_aligned_and_neon(unsafe.Pointer(&left[0]), unsafe.Pointer(&right[0]), unsafe.Pointer(&out[0]), int64(len(out)))
+}
+
+func bitmapAlignedOrNEON(left, right, out []byte) {
+	_bitmap_aligned_or_neon(unsafe.Pointer(&left[0]), unsafe.Pointer(&right[0]), unsafe.Pointer(&out[0]), int64(len(out)))
+}
+
+func bitmapAlignedAndNotNEON(left, right, out []byte) {
+	_bitmap_aligned_and_not_neon(unsafe.Pointer(&left[0]), unsafe.Pointer(&right[0]), unsafe.Pointer(&out[0]), int64(len(out)))
+}
+
 func init() {
-	bitAndOp.opAligned = alignedBitAndGo
-	bitOrOp.opAligned = alignedBitOrGo
-	bitAndNotOp.opAligned = alignedBitAndNotGo
+	if cpu.ARM64.HasASIMD {
+		bitAndOp.opAligned = bitmapAlignedAndNEON
+		bitOrOp.opAligned = bitmapAlignedOrNEON
+		bitAndNotOp.opAligned = bitmapAlignedAndNotNEON
+	} else {
+		bitAndOp.opAligned = alignedBitAndGo
+		bitOrOp.opAligned = alignedBitOrGo
+		bitAndNotOp.opAligned = alignedBitAndNotGo
+	}
 	bitXorOp.opAligned = alignedBitXorGo
 }
