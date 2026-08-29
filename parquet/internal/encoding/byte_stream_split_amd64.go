@@ -29,7 +29,31 @@ func init() {
 	if cpu.X86.HasAVX2 {
 		decodeByteStreamSplitBatchWidth4InByteOrder = decodeByteStreamSplitBatchWidth4AVX2
 		decodeByteStreamSplitBatchWidth8InByteOrder = decodeByteStreamSplitBatchWidth8AVX2
+		encodeByteStreamSplitWidth4Impl = encodeByteStreamSplitWidth4AVX2
+		encodeByteStreamSplitWidth8Impl = encodeByteStreamSplitWidth8AVX2
 	}
+}
+
+//go:noescape
+func _encodeByteStreamSplitWidth4AVX2(in, out unsafe.Pointer, nValues int)
+
+//go:noescape
+func _encodeByteStreamSplitWidth8AVX2(in, out unsafe.Pointer, nValues int)
+
+func encodeByteStreamSplitWidth4AVX2(data, in []byte) {
+	if len(in) == 0 {
+		return
+	}
+	debug.Assert(len(data) >= len(in), "not enough space in destination buffer for encoding")
+	_encodeByteStreamSplitWidth4AVX2(unsafe.Pointer(&in[0]), unsafe.Pointer(&data[0]), len(in)/4)
+}
+
+func encodeByteStreamSplitWidth8AVX2(data, in []byte) {
+	if len(in) == 0 {
+		return
+	}
+	debug.Assert(len(data) >= len(in), "not enough space in destination buffer for encoding")
+	_encodeByteStreamSplitWidth8AVX2(unsafe.Pointer(&in[0]), unsafe.Pointer(&data[0]), len(in)/8)
 }
 
 //go:noescape
