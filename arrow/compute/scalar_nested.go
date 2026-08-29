@@ -56,6 +56,32 @@ func validateListElementIndex(index Datum) error {
 	return nil
 }
 
+func validateListElementOutputType(lists Datum) error {
+	var typ arrow.DataType
+	switch lists.Kind() {
+	case KindScalar:
+		value, ok := lists.(*ScalarDatum)
+		if !ok || value.Value == nil {
+			return nil
+		}
+		typ = value.Value.DataType()
+	case KindArray, KindChunked:
+		value, ok := lists.(ArrayLikeDatum)
+		if !ok {
+			return nil
+		}
+		typ = value.Type()
+	default:
+		return nil
+	}
+
+	listType, ok := typ.(arrow.ListLikeType)
+	if !ok || kernels.ListElementOutputTypeSupported(listType.Elem()) {
+		return nil
+	}
+	return fmt.Errorf("%w: list_element output type %s is not supported", arrow.ErrNotImplemented, listType.Elem())
+}
+
 type listElementFunction struct {
 	ScalarFunction
 }
@@ -134,6 +160,9 @@ func (fn *listElementFunction) Execute(ctx context.Context, opts FunctionOptions
 	}
 
 	if err := validateListElementIndex(args[1]); err != nil {
+		return nil, err
+	}
+	if err := validateListElementOutputType(args[0]); err != nil {
 		return nil, err
 	}
 	if args[0].Kind() == KindScalar && args[1].Kind() == KindScalar {

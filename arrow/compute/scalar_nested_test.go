@@ -39,7 +39,7 @@ type denseUnionExtensionArray struct {
 	array.ExtensionArrayBase
 }
 
-func (a denseUnionExtensionArray) ValueStr(i int) string {
+func (a *denseUnionExtensionArray) ValueStr(i int) string {
 	if a.IsNull(i) {
 		return array.NullValueStr
 	}
@@ -73,7 +73,7 @@ type runEndExtensionArray struct {
 	array.ExtensionArrayBase
 }
 
-func (a runEndExtensionArray) ValueStr(i int) string {
+func (a *runEndExtensionArray) ValueStr(i int) string {
 	return a.Storage().ValueStr(i)
 }
 
@@ -427,7 +427,7 @@ func TestListElementRejectsInvalidListViewOffsets(t *testing.T) {
 				&compute.ArrayDatum{Value: input.Data()},
 				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
 			)
-			if result != nil {
+			if err == nil && result != nil {
 				result.Release()
 			}
 			require.ErrorIs(t, err, arrow.ErrInvalid)
@@ -457,7 +457,7 @@ func TestListElementRejectsFixedSizeListOffsetOverflow(t *testing.T) {
 		&compute.ArrayDatum{Value: input.Data()},
 		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
 	)
-	if result != nil {
+	if err == nil && result != nil {
 		result.Release()
 	}
 	require.ErrorIs(t, err, arrow.ErrInvalid)
@@ -653,7 +653,182 @@ func TestListElementScalarListWithViewElement(t *testing.T) {
 				&compute.ScalarDatum{Value: lists},
 				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
 			)
-			if result != nil {
+			if err == nil && result != nil {
+				result.Release()
+			}
+			require.ErrorIs(t, err, arrow.ErrNotImplemented)
+		})
+	}
+}
+
+func makeListElementViewValues(mem memory.Allocator, binary bool) arrow.Array {
+	values := []string{strings.Repeat("a", 32), strings.Repeat("b", 32)}
+	if binary {
+		builder := array.NewBinaryViewBuilder(mem)
+		builder.SetBlockSize(1)
+		for _, value := range values {
+			builder.Append([]byte(value))
+		}
+		result := builder.NewArray()
+		builder.Release()
+		return result
+	}
+
+	builder := array.NewStringViewBuilder(mem)
+	builder.SetBlockSize(1)
+	for _, value := range values {
+		builder.Append(value)
+	}
+	result := builder.NewArray()
+	builder.Release()
+	return result
+}
+
+func makeListElementArrayWithChild(mem memory.Allocator, elemType arrow.DataType, child arrow.Array) arrow.Array {
+	offsetsBuilder := array.NewInt32Builder(mem)
+	offsetsBuilder.AppendValues([]int32{0, 1, 2}, nil)
+	offsets := offsetsBuilder.NewArray()
+	offsetsBuilder.Release()
+
+	data := array.NewData(
+		arrow.ListOf(elemType),
+		2,
+		[]*memory.Buffer{nil, offsets.Data().Buffers()[1]},
+		[]arrow.ArrayData{child.Data()},
+		0,
+		0,
+	)
+	result := array.NewListData(data)
+	data.Release()
+	offsets.Release()
+	child.Release()
+	return result
+}
+
+func TestListElementRejectsNestedViewChildren(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	viewType := arrow.BinaryTypes.StringView
+	tests := []struct {
+		name  string
+		build func() arrow.Array
+	}{
+		{
+			name: "string_view",
+			build: func() arrow.Array {
+				return makeListElementArrayWithChild(mem, viewType, makeListElementViewValues(mem, false))
+			},
+		},
+		{
+			name: "binary_view",
+			build: func() arrow.Array {
+				return makeListElementArrayWithChild(mem, arrow.BinaryTypes.BinaryView, makeListElementViewValues(mem, true))
+			},
+		},
+		{
+			name: "struct_string_view",
+			build: func() arrow.Array {
+				typ := arrow.StructOf(arrow.Field{Name: "value", Type: viewType, Nullable: true})
+				builder := array.NewStructBuilder(mem, typ)
+				values := builder.FieldBuilder(0).(*array.StringViewBuilder)
+				values.SetBlockSize(1)
+				for _, value := range []string{strings.Repeat("a", 32), strings.Repeat("b", 32)} {
+					builder.Append(true)
+					values.Append(value)
+				}
+				child := builder.NewArray()
+				builder.Release()
+				return makeListElementArrayWithChild(mem, typ, child)
+			},
+		},
+		{
+			name: "list_string_view",
+			build: func() arrow.Array {
+				typ := arrow.ListOf(viewType)
+				builder := array.NewListBuilder(mem, viewType)
+				values := builder.ValueBuilder().(*array.StringViewBuilder)
+				values.SetBlockSize(1)
+				for _, value := range []string{strings.Repeat("a", 32), strings.Repeat("b", 32)} {
+					builder.Append(true)
+					values.Append(value)
+				}
+				child := builder.NewArray()
+				builder.Release()
+				return makeListElementArrayWithChild(mem, typ, child)
+			},
+		},
+		{
+			name: "fixed_size_list_string_view",
+			build: func() arrow.Array {
+				typ := arrow.FixedSizeListOf(2, viewType)
+				builder := array.NewFixedSizeListBuilder(mem, 2, viewType)
+				values := builder.ValueBuilder().(*array.StringViewBuilder)
+				values.SetBlockSize(1)
+				for _, value := range []string{strings.Repeat("a", 32), strings.Repeat("b", 32)} {
+					builder.Append(true)
+					values.Append(value)
+					values.Append(value)
+				}
+				child := builder.NewArray()
+				builder.Release()
+				return makeListElementArrayWithChild(mem, typ, child)
+			},
+		},
+		{
+			name: "dictionary_string_view",
+			build: func() arrow.Array {
+				typ := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: viewType}
+				values := makeListElementViewValues(mem, false)
+				indicesBuilder := array.NewInt8Builder(mem)
+				indicesBuilder.AppendValues([]int8{0, 1}, nil)
+				indices := indicesBuilder.NewArray()
+				indicesBuilder.Release()
+				child := array.NewDictionaryArray(typ, indices, values)
+				indices.Release()
+				values.Release()
+				return makeListElementArrayWithChild(mem, typ, child)
+			},
+		},
+		{
+			name: "run_end_encoded_string_view",
+			build: func() arrow.Array {
+				typ := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, viewType)
+				builder := array.NewRunEndEncodedBuilder(mem, typ.RunEnds(), typ.Encoded())
+				values := builder.ValueBuilder().(*array.StringViewBuilder)
+				values.SetBlockSize(1)
+				for _, value := range []string{strings.Repeat("a", 32), strings.Repeat("b", 32)} {
+					builder.Append(1)
+					values.Append(value)
+				}
+				child := builder.NewArray()
+				builder.Release()
+				return makeListElementArrayWithChild(mem, typ, child)
+			},
+		},
+		{
+			name: "extension_string_view",
+			build: func() arrow.Array {
+				typ := &denseUnionExtensionType{ExtensionBase: arrow.ExtensionBase{Storage: viewType}}
+				storage := makeListElementViewValues(mem, false)
+				child := array.NewExtensionArrayWithStorage(typ, storage)
+				storage.Release()
+				return makeListElementArrayWithChild(mem, typ, child)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			input := tc.build()
+			defer input.Release()
+
+			result, err := compute.ListElement(
+				context.Background(),
+				&compute.ArrayDatum{Value: input.Data()},
+				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+			)
+			if err == nil && result != nil {
 				result.Release()
 			}
 			require.ErrorIs(t, err, arrow.ErrNotImplemented)
@@ -757,7 +932,7 @@ func TestListElementScalarListWithUnsupportedDecimalValues(t *testing.T) {
 				&compute.ScalarDatum{Value: list},
 				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
 			)
-			if result != nil {
+			if err == nil && result != nil {
 				result.Release()
 			}
 			require.ErrorIs(t, err, arrow.ErrNotImplemented)
@@ -804,7 +979,7 @@ func TestListElementSingleIndexArrayRejectsMismatchedLengths(t *testing.T) {
 		&compute.ArrayDatum{Value: input.Data()},
 		&compute.ArrayDatum{Value: index.Data()},
 	)
-	if result != nil {
+	if err == nil && result != nil {
 		result.Release()
 	}
 	require.ErrorIs(t, err, arrow.ErrInvalid)
@@ -859,7 +1034,7 @@ func TestListElementRejectsMultipleIndicesIndependentOfExecutionSpans(t *testing
 				tc.lists,
 				&compute.ArrayDatum{Value: index.Data()},
 			)
-			if result != nil {
+			if err == nil && result != nil {
 				result.Release()
 			}
 			require.ErrorIs(t, err, arrow.ErrNotImplemented)
@@ -922,7 +1097,7 @@ func TestListElementRejectsNonListScalar(t *testing.T) {
 		&compute.ScalarDatum{Value: scalar.NewInt32Scalar(7)},
 		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
 	)
-	if result != nil {
+	if err == nil && result != nil {
 		result.Release()
 	}
 	require.ErrorIs(t, err, arrow.ErrType)
@@ -934,7 +1109,7 @@ func TestListElementRejectsNilScalarIndex(t *testing.T) {
 		compute.EmptyDatum{},
 		&compute.ScalarDatum{},
 	)
-	if result != nil {
+	if err == nil && result != nil {
 		result.Release()
 	}
 	require.ErrorIs(t, err, arrow.ErrType)
@@ -993,7 +1168,7 @@ func TestListElementErrors(t *testing.T) {
 				&compute.ArrayDatum{Value: input.Data()},
 				&compute.ScalarDatum{Value: tc.index},
 			)
-			if result != nil {
+			if err == nil && result != nil {
 				result.Release()
 			}
 			assert.ErrorIs(t, err, arrow.ErrInvalid)
@@ -1308,7 +1483,7 @@ func TestListElementDenseUnionScalarWithActiveUnsupportedChild(t *testing.T) {
 		&compute.ScalarDatum{Value: listValue},
 		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
 	)
-	if result != nil {
+	if err == nil && result != nil {
 		result.Release()
 	}
 	require.ErrorIs(t, err, arrow.ErrNotImplemented)
@@ -1359,7 +1534,7 @@ func TestListElementDenseUnionScalarWithActiveUnsupportedDecimalChild(t *testing
 				&compute.ScalarDatum{Value: listValue},
 				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
 			)
-			if result != nil {
+			if err == nil && result != nil {
 				result.Release()
 			}
 			require.ErrorIs(t, err, arrow.ErrNotImplemented)
@@ -1421,7 +1596,7 @@ func TestListElementDenseUnionScalarWithActiveNullUnsupportedChild(t *testing.T)
 				&compute.ScalarDatum{Value: listValue},
 				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
 			)
-			if result != nil {
+			if err == nil && result != nil {
 				result.Release()
 			}
 			require.ErrorIs(t, err, arrow.ErrNotImplemented)
@@ -1864,7 +2039,7 @@ func TestListElementDenseUnionRecursiveErrorReleasesTemporaryIndices(t *testing.
 			&compute.ArrayDatum{Value: input.Data()},
 			&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
 		)
-		if result != nil {
+		if err == nil && result != nil {
 			result.Release()
 		}
 		require.Error(t, err)
@@ -1901,7 +2076,7 @@ func TestListElementValidatesScalarIndexForEmptyInputs(t *testing.T) {
 					lists,
 					&compute.ScalarDatum{Value: tc.index},
 				)
-				if result != nil {
+				if err == nil && result != nil {
 					result.Release()
 				}
 				if tc.wantErr {

@@ -191,6 +191,9 @@ func listElementExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 	}
 
 	elemType := list.Type.(arrow.ListLikeType).Elem()
+	if !ListElementOutputTypeSupported(elemType) {
+		return fmt.Errorf("%w: list_element output type %s is not supported", arrow.ErrNotImplemented, elemType)
+	}
 	if list.Len == 0 {
 		values := list.Children[0].MakeArray()
 		defer values.Release()
@@ -229,6 +232,28 @@ func listElementExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 	indices := indexBuilder.NewArray()
 	defer indices.Release()
 	return listElementTakeOrFallback(ctx, &list.Children[0], indices, out)
+}
+
+func ListElementOutputTypeSupported(typ arrow.DataType) bool {
+	switch typ.ID() {
+	case arrow.BINARY_VIEW, arrow.STRING_VIEW:
+		return false
+	case arrow.EXTENSION:
+		return ListElementOutputTypeSupported(typ.(arrow.ExtensionType).StorageType())
+	case arrow.DICTIONARY:
+		return ListElementOutputTypeSupported(typ.(*arrow.DictionaryType).ValueType)
+	}
+
+	nested, ok := typ.(arrow.NestedType)
+	if !ok {
+		return true
+	}
+	for _, field := range nested.Fields() {
+		if !ListElementOutputTypeSupported(field.Type) {
+			return false
+		}
+	}
+	return true
 }
 
 func listElementTakeSupported(typ arrow.DataType) bool {
