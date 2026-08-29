@@ -686,6 +686,21 @@ func writeDenseArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, leafArr 
 	case *file.FixedLenByteArrayColumnChunkWriter:
 		switch dt := leafArr.DataType().(type) {
 		case *arrow.FixedSizeBinaryType:
+			if wr.SupportsArrowValues() {
+				buffer := leafArr.Data().Buffers()[1]
+				var valueBuf []byte
+				if buffer != nil {
+					start := leafArr.Data().Offset() * dt.ByteWidth
+					end := start + leafArr.Len()*dt.ByteWidth
+					valueBuf = buffer.Bytes()[start:end]
+				}
+				if !maybeParentNulls && noNulls {
+					_, err = wr.WriteBatchArrow(valueBuf, defLevels, repLevels)
+				} else {
+					_, err = wr.WriteBatchSpacedArrow(valueBuf, defLevels, repLevels, leafArr.NullBitmapBytes(), int64(leafArr.Data().Offset()))
+				}
+				return err
+			}
 			data := make([]parquet.FixedLenByteArray, leafArr.Len())
 			for idx := range data {
 				data[idx] = leafArr.(*array.FixedSizeBinary).Value(idx)
