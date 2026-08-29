@@ -17,12 +17,16 @@
 package pqarrow
 
 import (
+	"bytes"
+	"context"
 	"reflect"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,6 +45,29 @@ type stableExtensionType struct {
 
 type stableExtensionArray struct {
 	array.ExtensionArrayBase
+}
+
+type panickingExtensionType struct {
+	arrow.ExtensionBase
+}
+
+func (*panickingExtensionType) ArrayType() reflect.Type {
+	panic("malformed extension array type")
+}
+
+func (*panickingExtensionType) ExtensionName() string { return "test.panicking" }
+
+func (*panickingExtensionType) ExtensionEquals(other arrow.ExtensionType) bool {
+	_, ok := other.(*panickingExtensionType)
+	return ok
+}
+
+func (*panickingExtensionType) Serialize() string { return "" }
+
+func (*panickingExtensionType) Deserialize(arrow.DataType, string) (arrow.ExtensionType, error) {
+	return &panickingExtensionType{
+		ExtensionBase: arrow.ExtensionBase{Storage: arrow.PrimitiveTypes.Int32},
+	}, nil
 }
 
 func (*stableExtensionType) StorageType() arrow.DataType { return arrow.PrimitiveTypes.Int32 }
@@ -155,4 +182,45 @@ func TestExtensionReaderBuildArrayReleasesChunks(t *testing.T) {
 	out, err := r.BuildArray(0)
 	require.NoError(t, err)
 	out.Release()
+}
+
+func TestReadRowGroupsSerialRecoversFromPanic(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	builder := array.NewInt32Builder(mem)
+	builder.Append(1)
+	values := builder.NewInt32Array()
+	builder.Release()
+	defer values.Release()
+
+	record := array.NewRecordBatch(schema, []arrow.Array{values}, 1)
+	defer record.Release()
+
+	var buf bytes.Buffer
+	writer, err := NewFileWriter(schema, &buf, nil, DefaultWriterProps())
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+
+	parquetReader, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()),
+		file.WithReadProps(parquet.NewReaderProperties(mem)))
+	require.NoError(t, err)
+	defer parquetReader.Close()
+
+	reader, err := NewFileReader(parquetReader, ArrowReadProperties{Parallel: false}, mem)
+	require.NoError(t, err)
+	reader.Manifest.Fields[0].Field.Type = &panickingExtensionType{
+		ExtensionBase: arrow.ExtensionBase{Storage: arrow.PrimitiveTypes.Int32},
+	}
+
+	var table arrow.Table
+	var readErr error
+	require.NotPanics(t, func() {
+		table, readErr = reader.ReadRowGroups(context.Background(), []int{0}, []int{0})
+	})
+	require.Nil(t, table)
+	require.ErrorContains(t, readErr, "panic while reading")
+	require.ErrorContains(t, readErr, "malformed extension array type")
 }

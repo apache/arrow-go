@@ -320,6 +320,15 @@ func (fr *FileReader) ReadColumn(rowGroups []int, rdr *ColumnReader) (*arrow.Chu
 	return rdr.NextBatch(recs)
 }
 
+func (fr *FileReader) readColumn(rowGroups []int, rdr *ColumnReader) (data *arrow.Chunked, err error) {
+	defer func() {
+		if pErr := recover(); pErr != nil {
+			err = utils.FormatRecoveredError("panic while reading", pErr)
+		}
+	}()
+	return fr.ReadColumn(rowGroups, rdr)
+}
+
 // ReadTable reads the entire file into an array.Table
 func (fr *FileReader) ReadTable(ctx context.Context) (arrow.Table, error) {
 	var (
@@ -399,7 +408,7 @@ func (fr *FileReader) ReadRowGroups(ctx context.Context, indices, rowGroups []in
 				return nil, err
 			}
 
-			data, err := fr.ReadColumn(rowGroups, rdr)
+			data, err := fr.readColumn(rowGroups, rdr)
 			if err != nil {
 				if data != nil {
 					data.Release()
@@ -451,7 +460,7 @@ func (fr *FileReader) ReadRowGroups(ctx context.Context, indices, rowGroups []in
 						return
 					}
 
-					chnked, err := fr.ReadColumn(rowGroups, r.rdr)
+					chnked, err := fr.readColumn(rowGroups, r.rdr)
 					// pass the result column data to the result channel
 					// for the consumer goroutine to process
 					results <- resultPair{r.idx, chnked, err}
