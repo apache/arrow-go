@@ -53,11 +53,6 @@ func compareNeon(typ arrow.Type, op CompareOperator, width, shape int, left, rig
 		return
 	}
 
-	if !cpu.ARM64.HasASIMD || !neonComparisonSupported(typ) {
-		fallback(left, right, out, offset)
-		return
-	}
-
 	if offset != 0 {
 		prefix := min(n, 8-offset)
 		switch shape {
@@ -116,8 +111,12 @@ func compareNeon(typ arrow.Type, op CompareOperator, width, shape int, left, rig
 
 func genCompareKernel[T arrow.NumericType](op CompareOperator) *CompareData {
 	ty := arrow.GetType[T]()
-	width := int(unsafe.Sizeof(T(0)))
 	fallback := genGoCompareKernel(getCmpOp[T](op))
+	if !cpu.ARM64.HasASIMD || !neonComparisonSupported(ty) {
+		return fallback
+	}
+
+	width := int(unsafe.Sizeof(T(0)))
 	return &CompareData{
 		funcAA: func(left, right, out []byte, offset int) {
 			compareNeon(ty, op, width, neonCompareArrayArray, left, right, out, offset, fallback.funcAA)

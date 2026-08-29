@@ -29,18 +29,19 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 )
 
+const neonComparisonTestLength = 1024
+
 func testNeonComparison[T arrow.NumericType](t *testing.T, left, right []T, leftScalar, rightScalar T) {
 	t.Helper()
 
 	operations := []struct {
 		name string
 		op   CompareOperator
-		fn   func(T, T) bool
 	}{
-		{"equal", CmpEQ, func(l, r T) bool { return l == r }},
-		{"not_equal", CmpNE, func(l, r T) bool { return l != r }},
-		{"greater", CmpGT, func(l, r T) bool { return l > r }},
-		{"greater_equal", CmpGE, func(l, r T) bool { return l >= r }},
+		{"equal", CmpEQ},
+		{"not_equal", CmpNE},
+		{"greater", CmpGT},
+		{"greater_equal", CmpGE},
 	}
 
 	leftBytes := arrow.GetBytes(left)
@@ -48,11 +49,12 @@ func testNeonComparison[T arrow.NumericType](t *testing.T, left, right []T, left
 	leftScalarBytes := arrow.GetBytes([]T{leftScalar})
 	rightScalarBytes := arrow.GetBytes([]T{rightScalar})
 	width := int(unsafe.Sizeof(T(0)))
-	lengths := []int{0, 1, 2, 7, 8, 9, 15, 16, 17, 23, 24, 25}
+	lengths := []int{0, 1, 2, 7, 8, 9, 15, 16, 17, 23, 24, 25, 31, 32, 33, 63, 64, 65, 127, 128, 129, neonComparisonTestLength}
 
 	for _, operation := range operations {
 		t.Run(operation.name, func(t *testing.T) {
 			cmp := genCompareKernel[T](operation.op)
+			fallback := genGoCompareKernel(getCmpOp[T](operation.op))
 			for _, shape := range []string{"array_array", "array_scalar", "scalar_array"} {
 				t.Run(shape, func(t *testing.T) {
 					for offset := 0; offset < 8; offset++ {
@@ -60,17 +62,14 @@ func testNeonComparison[T arrow.NumericType](t *testing.T, left, right []T, left
 							t.Run(fmt.Sprintf("offset_%d/length_%d", offset, length), func(t *testing.T) {
 								out := bytes.Repeat([]byte{0xa5}, int(bitutil.BytesForBits(int64(offset+length))))
 								expected := append([]byte(nil), out...)
-								for i := 0; i < length; i++ {
-									var result bool
-									switch shape {
-									case "array_array":
-										result = operation.fn(left[i], right[i])
-									case "array_scalar":
-										result = operation.fn(left[i], rightScalar)
-									case "scalar_array":
-										result = operation.fn(leftScalar, right[i])
-									}
-									bitutil.SetBitTo(expected, offset+i, result)
+
+								switch shape {
+								case "array_array":
+									fallback.funcAA(leftBytes[:length*width], rightBytes[:length*width], expected, offset)
+								case "array_scalar":
+									fallback.funcAS(leftBytes[:length*width], rightScalarBytes, expected, offset)
+								case "scalar_array":
+									fallback.funcSA(leftScalarBytes, rightBytes[:length*width], expected, offset)
 								}
 
 								switch shape {
@@ -96,58 +95,58 @@ func testNeonComparison[T arrow.NumericType](t *testing.T, left, right []T, left
 
 func TestNeonComparisons(t *testing.T) {
 	t.Run("int32", func(t *testing.T) {
-		left := make([]int32, 32)
-		right := make([]int32, 32)
+		leftPattern := []int32{-1 << 31, -17, -1, 0, 1, 17, 1<<31 - 1, 42, -42, 3, 9, -9, 5, -5, 2, -2}
+		rightPattern := []int32{1<<31 - 1, -17, 0, 1, -1, -42, -1 << 31, 42, 4, -3, 9, -10, -5, 5, -2, 2}
+		left := make([]int32, neonComparisonTestLength)
+		right := make([]int32, neonComparisonTestLength)
 		for i := range left {
-			left[i] = int32((i*37)%17 - 8)
-			right[i] = int32((i*19)%13 - 6)
+			left[i] = leftPattern[i%len(leftPattern)]
+			right[i] = rightPattern[i%len(rightPattern)]
 		}
-		left[0], left[1] = -1<<31, 1<<31-1
-		right[0], right[1] = 1<<31-1, -1<<31
 		testNeonComparison(t, left, right, int32(-3), int32(4))
 	})
 
 	t.Run("uint32", func(t *testing.T) {
-		left := make([]uint32, 32)
-		right := make([]uint32, 32)
+		leftPattern := []uint32{0, 1, 2, 1<<31 - 1, 1 << 31, ^uint32(0), 42, 7, 100, 3, 19, 5, 77, 11, 12, 13}
+		rightPattern := []uint32{^uint32(0), 1, 3, 1 << 31, 1<<31 - 1, 0, 42, 8, 99, 4, 19, 6, 78, 10, 13, 12}
+		left := make([]uint32, neonComparisonTestLength)
+		right := make([]uint32, neonComparisonTestLength)
 		for i := range left {
-			left[i] = uint32(i * 37)
-			right[i] = uint32(i*19 + 3)
+			left[i] = leftPattern[i%len(leftPattern)]
+			right[i] = rightPattern[i%len(rightPattern)]
 		}
-		left[0], left[1], left[2] = 0, 1<<31, ^uint32(0)
-		right[0], right[1], right[2] = ^uint32(0), 1<<31, 1
 		testNeonComparison(t, left, right, uint32(1<<31), uint32(7))
 	})
 
 	t.Run("int64", func(t *testing.T) {
-		left := make([]int64, 32)
-		right := make([]int64, 32)
+		leftPattern := []int64{-1 << 63, -17, -1, 0, 1, 17, 1<<63 - 1, 42, -42, 3, 9, -9, 5, -5, 2, -2}
+		rightPattern := []int64{1<<63 - 1, -17, 0, 1, -1, -42, -1 << 63, 42, 4, -3, 9, -10, -5, 5, -2, 2}
+		left := make([]int64, neonComparisonTestLength)
+		right := make([]int64, neonComparisonTestLength)
 		for i := range left {
-			left[i] = int64(i*37 - 400)
-			right[i] = int64(i*19 - 200)
+			left[i] = leftPattern[i%len(leftPattern)]
+			right[i] = rightPattern[i%len(rightPattern)]
 		}
-		left[0], left[1] = -1<<63, 1<<63-1
-		right[0], right[1] = 1<<63-1, -1<<63
 		testNeonComparison(t, left, right, int64(-3), int64(4))
 	})
 
 	t.Run("uint64", func(t *testing.T) {
-		left := make([]uint64, 32)
-		right := make([]uint64, 32)
+		leftPattern := []uint64{0, 1, 2, 1<<63 - 1, 1 << 63, ^uint64(0), 42, 7, 100, 3, 19, 5, 77, 11, 12, 13}
+		rightPattern := []uint64{^uint64(0), 1, 3, 1 << 63, 1<<63 - 1, 0, 42, 8, 99, 4, 19, 6, 78, 10, 13, 12}
+		left := make([]uint64, neonComparisonTestLength)
+		right := make([]uint64, neonComparisonTestLength)
 		for i := range left {
-			left[i] = uint64(i * 37)
-			right[i] = uint64(i*19 + 3)
+			left[i] = leftPattern[i%len(leftPattern)]
+			right[i] = rightPattern[i%len(rightPattern)]
 		}
-		left[0], left[1], left[2] = 0, 1<<63, ^uint64(0)
-		right[0], right[1], right[2] = ^uint64(0), 1<<63, 1
 		testNeonComparison(t, left, right, uint64(1<<63), uint64(7))
 	})
 
 	t.Run("float32", func(t *testing.T) {
 		leftPattern := []float32{float32(math.NaN()), float32(math.Inf(-1)), -1.5, float32(math.Copysign(0, -1)), 0, 1.5, float32(math.Inf(1)), float32(math.NaN())}
 		rightPattern := []float32{float32(math.NaN()), -float32(math.Inf(1)), -1.5, 0, float32(math.Copysign(0, -1)), 2.5, float32(math.Inf(1)), 3}
-		left := make([]float32, 32)
-		right := make([]float32, 32)
+		left := make([]float32, neonComparisonTestLength)
+		right := make([]float32, neonComparisonTestLength)
 		for i := range left {
 			left[i] = leftPattern[i%len(leftPattern)]
 			right[i] = rightPattern[i%len(rightPattern)]
@@ -158,8 +157,8 @@ func TestNeonComparisons(t *testing.T) {
 	t.Run("float64", func(t *testing.T) {
 		leftPattern := []float64{math.NaN(), math.Inf(-1), -1.5, math.Copysign(0, -1), 0, 1.5, math.Inf(1), math.NaN()}
 		rightPattern := []float64{math.NaN(), -math.Inf(1), -1.5, 0, math.Copysign(0, -1), 2.5, math.Inf(1), 3}
-		left := make([]float64, 32)
-		right := make([]float64, 32)
+		left := make([]float64, neonComparisonTestLength)
+		right := make([]float64, neonComparisonTestLength)
 		for i := range left {
 			left[i] = leftPattern[i%len(leftPattern)]
 			right[i] = rightPattern[i%len(rightPattern)]
