@@ -291,19 +291,21 @@ func writeDictionaryPayloads(mem memory.Allocator, batch arrow.RecordBatch, isFi
 			}
 		}
 
-		var data = Payload{msg: MessageDictionaryBatch}
-		defer data.Release()
+		if err := func() error {
+			data := Payload{msg: MessageDictionaryBatch}
+			defer data.Release()
 
-		dict := pair.Dict
-		if deltaStart > 0 {
-			dict = array.NewSlice(dict, deltaStart, int64(dict.Len()))
-			defer dict.Release()
-		}
-		if err := enc.Encode(&data, pair.ID, deltaStart > 0, dict); err != nil {
-			return err
-		}
+			dict := pair.Dict
+			if deltaStart > 0 {
+				dict = array.NewSlice(dict, deltaStart, int64(dict.Len()))
+				defer dict.Release()
+			}
+			if err := enc.Encode(&data, pair.ID, deltaStart > 0, dict); err != nil {
+				return err
+			}
 
-		if err := pw.WritePayload(data); err != nil {
+			return pw.WritePayload(data)
+		}(); err != nil {
 			return err
 		}
 
