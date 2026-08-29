@@ -39,6 +39,7 @@ type DeltaLengthByteArrayEncoder struct {
 
 	lengthEncoder *DeltaBitPackInt32Encoder
 	lengths       [deltaByteArrayBatchSize]int32
+	spacedScratch []parquet.ByteArray
 }
 
 // Put writes the provided slice of byte arrays to the encoder
@@ -62,9 +63,14 @@ func (enc *DeltaLengthByteArrayEncoder) Put(in []parquet.ByteArray) {
 // accordingly before it is written to drop the null data from the write.
 func (enc *DeltaLengthByteArrayEncoder) PutSpaced(in []parquet.ByteArray, validBits []byte, validBitsOffset int64) {
 	if validBits != nil {
-		data := make([]parquet.ByteArray, len(in))
-		nvalid := spacedCompress(in, data, validBits, validBitsOffset)
-		enc.Put(data[:nvalid])
+		if cap(enc.spacedScratch) < len(in) {
+			enc.spacedScratch = make([]parquet.ByteArray, len(in))
+		} else {
+			enc.spacedScratch = enc.spacedScratch[:len(in)]
+		}
+		nvalid := spacedCompress(in, enc.spacedScratch, validBits, validBitsOffset)
+		enc.Put(enc.spacedScratch[:nvalid])
+		clear(enc.spacedScratch)
 	} else {
 		enc.Put(in)
 	}
