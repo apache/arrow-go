@@ -661,6 +661,30 @@ func writeDenseArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, leafArr 
 			valueBuf = buffer.Bytes()
 		}
 
+		if wr.SupportsArrowOffsets() {
+			switch leafArr.DataType().ID() {
+			case arrow.BINARY, arrow.STRING:
+				offsets := leafArr.(binaryarr).ValueOffsets()
+				if !maybeParentNulls && noNulls {
+					_, err = wr.WriteBatchArrow(valueBuf, offsets, defLevels, repLevels)
+				} else {
+					_, err = wr.WriteBatchSpacedArrow(valueBuf, offsets, defLevels, repLevels,
+						leafArr.NullBitmapBytes(), int64(leafArr.Data().Offset()))
+				}
+			case arrow.LARGE_BINARY, arrow.LARGE_STRING:
+				offsets := leafArr.(binary64arr).ValueOffsets()
+				if !maybeParentNulls && noNulls {
+					_, err = wr.WriteBatchArrow64(valueBuf, offsets, defLevels, repLevels)
+				} else {
+					_, err = wr.WriteBatchSpacedArrow64(valueBuf, offsets, defLevels, repLevels,
+						leafArr.NullBitmapBytes(), int64(leafArr.Data().Offset()))
+				}
+			default:
+				return fmt.Errorf("%w: invalid column type to write to ByteArray: %s", arrow.ErrInvalid, leafArr.DataType().Name())
+			}
+			return err
+		}
+
 		data := make([]parquet.ByteArray, leafArr.Len())
 		switch leafArr.DataType().ID() {
 		case arrow.BINARY, arrow.STRING:
