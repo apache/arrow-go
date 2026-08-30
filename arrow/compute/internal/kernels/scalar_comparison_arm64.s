@@ -711,8 +711,6 @@ Lcomparison64IntAAEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -725,8 +723,6 @@ Lcomparison64IntAAEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -739,8 +735,6 @@ Lcomparison64IntAAEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -774,8 +768,6 @@ Lcomparison64IntAANELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -789,8 +781,6 @@ Lcomparison64IntAANELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -804,8 +794,6 @@ Lcomparison64IntAANELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -837,8 +825,6 @@ Lcomparison64IntAASGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -851,8 +837,6 @@ Lcomparison64IntAASGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -865,8 +849,6 @@ Lcomparison64IntAASGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -898,8 +880,6 @@ Lcomparison64IntAAUGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -912,8 +892,6 @@ Lcomparison64IntAAUGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -926,8 +904,6 @@ Lcomparison64IntAAUGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -959,8 +935,6 @@ Lcomparison64IntAASGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -973,8 +947,6 @@ Lcomparison64IntAASGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -987,8 +959,6 @@ Lcomparison64IntAASGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -1020,8 +990,6 @@ Lcomparison64IntAAUGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -1034,8 +1002,6 @@ Lcomparison64IntAAUGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -1048,8 +1014,6 @@ Lcomparison64IntAAUGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -1079,8 +1043,6 @@ Lcomparison64IntASEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -1091,8 +1053,6 @@ Lcomparison64IntASEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -1103,8 +1063,6 @@ Lcomparison64IntASEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -1135,8 +1093,6 @@ Lcomparison64IntASNELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -1148,8 +1104,6 @@ Lcomparison64IntASNELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -1161,8 +1115,6 @@ Lcomparison64IntASNELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -1191,8 +1143,6 @@ Lcomparison64IntASSGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -1203,8 +1153,6 @@ Lcomparison64IntASSGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -1215,8 +1163,6 @@ Lcomparison64IntASSGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -1245,8 +1191,6 @@ Lcomparison64IntASUGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -1257,8 +1201,6 @@ Lcomparison64IntASUGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -1269,8 +1211,6 @@ Lcomparison64IntASUGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -1299,8 +1239,6 @@ Lcomparison64IntASSGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -1311,8 +1249,6 @@ Lcomparison64IntASSGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -1323,8 +1259,6 @@ Lcomparison64IntASSGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -1353,8 +1287,6 @@ Lcomparison64IntASUGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -1365,8 +1297,6 @@ Lcomparison64IntASUGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -1377,8 +1307,6 @@ Lcomparison64IntASUGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -1407,8 +1335,6 @@ Lcomparison64IntSAEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -1419,8 +1345,6 @@ Lcomparison64IntSAEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -1431,8 +1355,6 @@ Lcomparison64IntSAEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -1463,8 +1385,6 @@ Lcomparison64IntSANELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -1476,8 +1396,6 @@ Lcomparison64IntSANELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -1489,8 +1407,6 @@ Lcomparison64IntSANELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -1519,8 +1435,6 @@ Lcomparison64IntSASGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -1531,8 +1445,6 @@ Lcomparison64IntSASGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -1543,8 +1455,6 @@ Lcomparison64IntSASGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -1573,8 +1483,6 @@ Lcomparison64IntSAUGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -1585,8 +1493,6 @@ Lcomparison64IntSAUGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -1597,8 +1503,6 @@ Lcomparison64IntSAUGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -1627,8 +1531,6 @@ Lcomparison64IntSASGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -1639,8 +1541,6 @@ Lcomparison64IntSASGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -1651,8 +1551,6 @@ Lcomparison64IntSASGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -1681,8 +1579,6 @@ Lcomparison64IntSAUGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -1693,8 +1589,6 @@ Lcomparison64IntSAUGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -1705,8 +1599,6 @@ Lcomparison64IntSAUGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -2192,8 +2084,6 @@ Lcomparison64FloatAAEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -2206,8 +2096,6 @@ Lcomparison64FloatAAEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -2220,8 +2108,6 @@ Lcomparison64FloatAAEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -2255,8 +2141,6 @@ Lcomparison64FloatAANELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -2270,8 +2154,6 @@ Lcomparison64FloatAANELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -2285,8 +2167,6 @@ Lcomparison64FloatAANELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -2318,8 +2198,6 @@ Lcomparison64FloatAAFGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -2332,8 +2210,6 @@ Lcomparison64FloatAAFGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -2346,8 +2222,6 @@ Lcomparison64FloatAAFGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -2379,8 +2253,6 @@ Lcomparison64FloatAAFGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -2393,8 +2265,6 @@ Lcomparison64FloatAAFGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -2407,8 +2277,6 @@ Lcomparison64FloatAAFGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -2438,8 +2306,6 @@ Lcomparison64FloatASEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -2450,8 +2316,6 @@ Lcomparison64FloatASEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -2462,8 +2326,6 @@ Lcomparison64FloatASEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -2494,8 +2356,6 @@ Lcomparison64FloatASNELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -2507,8 +2367,6 @@ Lcomparison64FloatASNELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -2520,8 +2378,6 @@ Lcomparison64FloatASNELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -2550,8 +2406,6 @@ Lcomparison64FloatASFGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -2562,8 +2416,6 @@ Lcomparison64FloatASFGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -2574,8 +2426,6 @@ Lcomparison64FloatASFGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -2604,8 +2454,6 @@ Lcomparison64FloatASFGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -2616,8 +2464,6 @@ Lcomparison64FloatASFGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -2628,8 +2474,6 @@ Lcomparison64FloatASFGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -2658,8 +2502,6 @@ Lcomparison64FloatSAEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -2670,8 +2512,6 @@ Lcomparison64FloatSAEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -2682,8 +2522,6 @@ Lcomparison64FloatSAEQLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -2714,8 +2552,6 @@ Lcomparison64FloatSANELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -2727,8 +2563,6 @@ Lcomparison64FloatSANELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -2740,8 +2574,6 @@ Lcomparison64FloatSANELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -2770,8 +2602,6 @@ Lcomparison64FloatSAFGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -2782,8 +2612,6 @@ Lcomparison64FloatSAFGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -2794,8 +2622,6 @@ Lcomparison64FloatSAFGTLoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7
@@ -2824,8 +2650,6 @@ Lcomparison64FloatSAFGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $2, R8, R8
 	ORR R8, R7, R7
@@ -2836,8 +2660,6 @@ Lcomparison64FloatSAFGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $4, R8, R8
 	ORR R8, R7, R7
@@ -2848,8 +2670,6 @@ Lcomparison64FloatSAFGELoop:
 	WORD $0x6ef44442 // ushl v2.2d, v2.2d, v20.2d
 	WORD $0x4e083c48 // umov x8, v2.d[0]
 	WORD $0x4e183c49 // umov x9, v2.d[1]
-	LSR $1, R9, R9
-	LSL $1, R9, R9
 	ORR R9, R8, R8
 	LSL $6, R8, R8
 	ORR R8, R7, R7

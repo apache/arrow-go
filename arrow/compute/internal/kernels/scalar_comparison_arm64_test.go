@@ -166,3 +166,45 @@ func TestNeonComparisons(t *testing.T) {
 		testNeonComparison(t, left, right, math.NaN(), 1.5)
 	})
 }
+
+func TestNeonComparisonBitPacking(t *testing.T) {
+	t.Run("int32", testNeonComparisonBitPacking[int32])
+	t.Run("uint32", testNeonComparisonBitPacking[uint32])
+	t.Run("int64", testNeonComparisonBitPacking[int64])
+	t.Run("uint64", testNeonComparisonBitPacking[uint64])
+	t.Run("float32", testNeonComparisonBitPacking[float32])
+	t.Run("float64", testNeonComparisonBitPacking[float64])
+}
+
+func testNeonComparisonBitPacking[T arrow.NumericType](t *testing.T) {
+	const n = 256 * 8
+	left, right := make([]T, n), make([]T, n)
+	for mask := 0; mask < 256; mask++ {
+		for bit := 0; bit < 8; bit++ {
+			left[mask*8+bit] = T(mask >> bit & 1)
+			right[mask*8+bit] = T(mask >> (7 - bit) & 1)
+		}
+	}
+	leftBytes, rightBytes := arrow.GetBytes(left), arrow.GetBytes(right)
+	scalar := arrow.GetBytes([]T{0})
+	for _, op := range []CompareOperator{CmpEQ, CmpNE, CmpGT, CmpGE} {
+		got, want := genCompareKernel[T](op), genGoCompareKernel(getCmpOp[T](op))
+		for _, shape := range []struct {
+			name        string
+			got, want   binaryKernel
+			left, right []byte
+		}{
+			{"array_array", got.funcAA, want.funcAA, leftBytes, rightBytes},
+			{"array_scalar", got.funcAS, want.funcAS, leftBytes, scalar},
+			{"scalar_array", got.funcSA, want.funcSA, scalar, rightBytes},
+		} {
+			output := bytes.Repeat([]byte{0xa5}, n/8+2)
+			expected := bytes.Clone(output)
+			shape.want(shape.left, shape.right, expected[1:len(expected)-1], 0)
+			shape.got(shape.left, shape.right, output[1:len(output)-1], 0)
+			if !bytes.Equal(output, expected) {
+				t.Fatalf("%s %s: expected %08b, got %08b", op, shape.name, expected, output)
+			}
+		}
+	}
+}
