@@ -37,8 +37,9 @@ var listElementDoc = FunctionDoc{
 		"ListView, LargeListView, and FixedSizeList; Map is not supported.\n" +
 		"Null lists and null child values produce null results. A null or negative\n" +
 		"index is invalid, as is an index outside any non-null list's length\n" +
-		"(including an empty list). StringView and BinaryView child types are\n" +
-		"not supported, including when nested inside another child type.",
+		"(including an empty list). StringView, BinaryView, and dictionary-backed\n" +
+		"extension children are not supported, including when nested inside\n" +
+		"another child type.",
 	ArgNames: []string{"lists", "index"},
 }
 

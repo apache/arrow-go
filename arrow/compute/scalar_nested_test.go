@@ -836,6 +836,66 @@ func TestListElementRejectsNestedViewChildren(t *testing.T) {
 	}
 }
 
+func TestListElementRejectsDictionaryBackedExtensionChildren(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	extType := &denseUnionExtensionType{ExtensionBase: arrow.ExtensionBase{Storage: dictType}}
+	valuesBuilder := array.NewStringBuilder(mem)
+	valuesBuilder.AppendValues([]string{"a", "b"}, nil)
+	values := valuesBuilder.NewArray()
+	valuesBuilder.Release()
+	defer values.Release()
+	indicesBuilder := array.NewInt8Builder(mem)
+	indicesBuilder.AppendValues([]int8{0, 1}, nil)
+	indices := indicesBuilder.NewArray()
+	indicesBuilder.Release()
+	defer indices.Release()
+
+	data := array.NewDataWithDictionary(extType, 2, indices.Data().Buffers(), 0, 0, values.Data().(*array.Data))
+	child := array.NewExtensionData(data)
+	data.Release()
+	defer child.Release()
+	require.NoError(t, array.ValidateFull(child.Storage()))
+	nested, err := array.NewStructArray([]arrow.Array{child}, []string{"value"})
+	require.NoError(t, err)
+	defer nested.Release()
+
+	for _, child := range []arrow.Array{child, nested} {
+		t.Run(child.DataType().String(), func(t *testing.T) {
+			child.Retain()
+			input := makeListElementArrayWithChild(mem, child.DataType(), child)
+			defer input.Release()
+			empty := array.NewSlice(input, 0, 0)
+			defer empty.Release()
+			chunked := arrow.NewChunked(input.DataType(), []arrow.Array{input})
+			defer chunked.Release()
+			listScalar := scalar.NewListScalar(child)
+			defer listScalar.Release()
+			nullScalar := scalar.MakeNullScalar(input.DataType()).(scalar.ListScalar)
+			defer nullScalar.Release()
+
+			for _, input := range []compute.Datum{
+				&compute.ArrayDatum{Value: input.Data()},
+				&compute.ArrayDatum{Value: empty.Data()},
+				&compute.ChunkedDatum{Value: chunked},
+				&compute.ScalarDatum{Value: listScalar},
+				&compute.ScalarDatum{Value: nullScalar},
+			} {
+				result, err := compute.ListElement(
+					context.Background(), input,
+					&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+				)
+				if err == nil && result != nil {
+					result.Release()
+				}
+				require.ErrorIs(t, err, arrow.ErrNotImplemented)
+			}
+		})
+	}
+}
+
 func TestListElementDecimalArrayChildren(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -2006,6 +2066,84 @@ func TestListElementNestedDictionaryWithNullParent(t *testing.T) {
 	require.NoError(t, array.ValidateFull(actual))
 	assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
 	assert.True(t, array.Equal(dictionaryValues, actual.(*array.Dictionary).Dictionary()))
+}
+
+func TestListElementRunEndEncodedNestedDictionaryWithNullParent(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.ListOf(arrow.PrimitiveTypes.Int32),
+	}
+	valuesBuilder := array.NewListBuilder(mem, arrow.PrimitiveTypes.Int32)
+	valuesBuilder.Append(true)
+	valuesBuilder.ValueBuilder().(*array.Int32Builder).Append(7)
+	values := valuesBuilder.NewArray()
+	valuesBuilder.Release()
+	defer values.Release()
+	indicesBuilder := array.NewInt8Builder(mem)
+	indicesBuilder.Append(0)
+	indices := indicesBuilder.NewArray()
+	indicesBuilder.Release()
+	defer indices.Release()
+	dictionary := array.NewDictionaryArray(dictType, indices, values)
+	defer dictionary.Release()
+
+	for _, runEndType := range []arrow.DataType{
+		arrow.PrimitiveTypes.Int16, arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int64,
+	} {
+		t.Run(runEndType.String(), func(t *testing.T) {
+			endsBuilder := array.NewBuilder(mem, runEndType)
+			require.NoError(t, endsBuilder.AppendValueFromString("1"))
+			ends := endsBuilder.NewArray()
+			endsBuilder.Release()
+			defer ends.Release()
+			child := array.NewRunEndEncodedArray(ends, dictionary, 1, 0)
+			defer child.Release()
+
+			offsetsBuilder := array.NewInt32Builder(mem)
+			offsetsBuilder.AppendValues([]int32{0, 1, 1}, nil)
+			offsets := offsetsBuilder.NewArray()
+			offsetsBuilder.Release()
+			defer offsets.Release()
+			validity := memory.NewResizableBuffer(mem)
+			validity.Resize(1)
+			validity.Bytes()[0] = 0x01
+			data := array.NewData(arrow.ListOf(child.DataType()), 2,
+				[]*memory.Buffer{validity, offsets.Data().Buffers()[1]},
+				[]arrow.ArrayData{child.Data()}, 1, 0)
+			validity.Release()
+			input := array.NewListData(data)
+			data.Release()
+			defer input.Release()
+			require.NoError(t, array.ValidateFull(input))
+
+			for _, start := range []int64{0, 1} {
+				sliced := array.NewSlice(input, start, 2)
+				defer sliced.Release()
+				result, err := compute.ListElement(
+					compute.WithAllocator(context.Background(), mem),
+					&compute.ArrayDatum{Value: sliced.Data()},
+					&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+				)
+				require.NoError(t, err)
+				defer result.Release()
+				actual := result.(*compute.ArrayDatum).MakeArray()
+				defer actual.Release()
+				require.NoError(t, array.ValidateFull(actual))
+				require.Equal(t, 2-int(start), actual.Len())
+				encoded := actual.(*array.RunEndEncoded)
+				actualValues := encoded.Values().(*array.Dictionary)
+				assert.True(t, array.Equal(values, actualValues.Dictionary()))
+				assert.True(t, actualValues.IsNull(encoded.GetPhysicalIndex(actual.Len()-1)))
+				if start == 0 {
+					assert.False(t, actualValues.IsNull(encoded.GetPhysicalIndex(0)))
+					assert.Equal(t, 0, actualValues.GetValueIndex(encoded.GetPhysicalIndex(0)))
+				}
+			}
+		})
+	}
 }
 
 func TestListElementDenseUnionRecursiveErrorReleasesTemporaryIndices(t *testing.T) {

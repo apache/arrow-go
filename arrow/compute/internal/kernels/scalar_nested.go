@@ -243,7 +243,9 @@ func ListElementOutputTypeSupported(typ arrow.DataType) bool {
 			return false
 		}
 	case arrow.EXTENSION:
-		return ListElementOutputTypeSupported(typ.(arrow.ExtensionType).StorageType())
+		storageType := typ.(arrow.ExtensionType).StorageType()
+		// ArraySpan does not preserve a dictionary stored under an extension.
+		return storageType.ID() != arrow.DICTIONARY && ListElementOutputTypeSupported(storageType)
 	case arrow.DICTIONARY:
 		return ListElementOutputTypeSupported(typ.(*arrow.DictionaryType).ValueType)
 	}
@@ -340,11 +342,15 @@ func listElementMakeNullLike(ctx *exec.KernelCtx, values arrow.Array, elemType a
 	}
 	if elemType.ID() == arrow.RUN_END_ENCODED {
 		runEndType := elemType.(*arrow.RunEndEncodedType)
-		builder := array.NewRunEndEncodedBuilder(mem, runEndType.RunEnds(), runEndType.Encoded())
+		// Build only the run ends; nested encoded values may not have a builder.
+		builder := array.NewRunEndEncodedBuilder(mem, runEndType.RunEnds(), arrow.Null)
+		defer builder.Release()
 		builder.AppendNull()
-		result := builder.NewArray()
-		builder.Release()
-		return result
+		runEnds := builder.NewRunEndEncodedArray()
+		defer runEnds.Release()
+		nulls := listElementMakeNullLike(ctx, values.(*array.RunEndEncoded).Values(), runEndType.Encoded())
+		defer nulls.Release()
+		return array.NewRunEndEncodedArrayWithType(runEndType, runEnds.RunEndsArr(), nulls, 1, 0)
 	}
 	if values.Len() == 0 || len(values.Data().Buffers()) == 0 ||
 		elemType.ID() == arrow.NULL || arrow.IsUnion(elemType.ID()) {

@@ -575,7 +575,8 @@ func (n *nullArrayFactory) create() *Data {
 			defer childData[i].Release()
 		}
 	case *arrow.RunEndEncodedType:
-		bldr := NewRunEndEncodedBuilder(n.mem, dt.RunEnds(), dt.Encoded())
+		// Build the run ends separately from encoded types without builders.
+		bldr := NewRunEndEncodedBuilder(n.mem, dt.RunEnds(), arrow.Null)
 		defer bldr.Release()
 
 		if n.len > 0 {
@@ -585,8 +586,10 @@ func (n *nullArrayFactory) create() *Data {
 
 		arr := bldr.NewArray()
 		defer arr.Release()
+		values := MakeArrayOfNull(n.mem, dt.Encoded(), arr.Data().Children()[1].Len())
+		defer values.Release()
 		childData[0] = arr.Data().Children()[0]
-		childData[1] = arr.Data().Children()[1]
+		childData[1] = values.Data()
 		bufs[0].Release()
 		bufs[0] = nil
 	}
