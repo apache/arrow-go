@@ -18,6 +18,7 @@ package kernels
 
 import (
 	"fmt"
+	"math/rand"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -59,6 +60,24 @@ func TestMultiplyConstant(t *testing.T) {
 				assertMultiplyInt64Int32(t, input64, factor)
 				assertMultiplyInt64Int64(t, input64, factor)
 			})
+		}
+	}
+}
+
+func TestMultiplyConstantRandomized(t *testing.T) {
+	rng := rand.New(rand.NewSource(23))
+	for iteration := 0; iteration < 64; iteration++ {
+		for _, length := range []int{1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 65, 257} {
+			input32, input64 := make([]int32, length), make([]int64, length)
+			for i := range input32 {
+				input32[i] = int32(rng.Uint32())
+				input64[i] = int64(rng.Uint64())
+			}
+			factor := int64(rng.Uint64())
+			assertMultiplyInt32Int32(t, input32, factor)
+			assertMultiplyInt32Int64(t, input32, factor)
+			assertMultiplyInt64Int32(t, input64, factor)
+			assertMultiplyInt64Int64(t, input64, factor)
 		}
 	}
 }
