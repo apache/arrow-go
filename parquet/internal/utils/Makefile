@@ -49,8 +49,14 @@ ARM_SOURCES := \
 
 assembly: $(INTEL_SOURCES)
 
+# c2goasm does not translate AVX2 VSIB gather instructions, so the matching
+# Go assembly is maintained manually in dictionary_gather_avx2_amd64.s.
+
 _lib/bit_packing_avx2.s: _lib/bit_packing_avx2.c
 	$(CC) -S $(C_FLAGS) $(ASM_FLAGS_AVX2) $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@; perl -i -pe 's/mem(cpy|set)/clib·_mem\1(SB)/' $@
+
+_lib/dictionary_gather_avx2.s: _lib/dictionary_gather_avx2.c
+	$(CC) -S $(C_FLAGS) $(ASM_FLAGS_AVX2) $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
 
 _lib/unpack_bool_avx2.s: _lib/unpack_bool.c
 	$(CC) -S $(C_FLAGS) $(ASM_FLAGS_AVX2) $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
