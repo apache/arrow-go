@@ -1002,6 +1002,16 @@ func roundTimestampCalendarOrigin(ts int64, inputUnit arrow.TimeUnit, tz *time.L
 	if err != nil {
 		return 0, err
 	}
+	// time.Date can select either occurrence of a repeated local time. Prefer
+	// the input's offset when it also represents the requested clock time.
+	_, inputOffset := t.Zone()
+	_, roundedOffset := rounded.Zone()
+	if inputOffset != roundedOffset {
+		candidate := rounded.Add(time.Duration(roundedOffset-inputOffset) * time.Second)
+		if difference, err := wallClockDifference(candidate, rounded); err == nil && difference == 0 {
+			rounded = candidate
+		}
+	}
 
 	result, err := timestampFromCalendarTime(rounded, inputUnit)
 	if err != nil {

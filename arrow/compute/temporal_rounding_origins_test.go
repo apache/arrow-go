@@ -48,7 +48,9 @@ func requireTemporalRoundingTime(t *testing.T, fn temporalRoundingFunc, input, e
 	builder.Release()
 	defer inputArray.Release()
 
-	result, err := fn(context.Background(), opts, compute.NewDatum(inputArray))
+	inputDatum := compute.NewDatum(inputArray)
+	defer inputDatum.Release()
+	result, err := fn(context.Background(), opts, inputDatum)
 	require.NoError(t, err)
 	defer result.Release()
 
@@ -254,6 +256,69 @@ func TestTemporalRoundingCalendarOriginRejectsDSTGap(t *testing.T) {
 		CalendarBasedOrigin: true,
 	}, compute.NewDatum(inputArray))
 	require.ErrorIs(t, err, arrow.ErrInvalid)
+}
+
+func TestTemporalRoundingCalendarOriginPreservesRepeatedHour(t *testing.T) {
+	for _, tc := range []struct {
+		zone, input string
+	}{
+		{"America/New_York", "2024-11-03T01:30:00-04:00"},
+		{"America/New_York", "2024-11-03T01:30:00-05:00"},
+		{"Europe/Berlin", "2024-10-27T02:30:00+02:00"},
+		{"Europe/Berlin", "2024-10-27T02:30:00+01:00"},
+		{"Australia/Lord_Howe", "2024-04-07T01:45:00+11:00"},
+		{"Australia/Lord_Howe", "2024-04-07T01:45:00+10:30"},
+	} {
+		t.Run(tc.zone+"/"+tc.input, func(t *testing.T) {
+			input, err := time.Parse(time.RFC3339, tc.input)
+			require.NoError(t, err)
+			for _, unit := range []arrow.TimeUnit{arrow.Second, arrow.Millisecond, arrow.Microsecond, arrow.Nanosecond} {
+				t.Run(unit.String(), func(t *testing.T) {
+					opts := compute.RoundTemporalOptions{
+						Multiple:            1,
+						Unit:                compute.RoundTemporalMinute,
+						CalendarBasedOrigin: true,
+					}
+					for _, fn := range []temporalRoundingFunc{compute.FloorTemporal, compute.CeilTemporal, compute.RoundTemporal} {
+						requireTemporalRoundingTime(t, fn, input, input, unit, tc.zone, opts)
+					}
+
+					unaligned := input.Add(40 * time.Second)
+					requireTemporalRoundingTime(t, compute.FloorTemporal, unaligned, input, unit, tc.zone, opts)
+					for _, fn := range []temporalRoundingFunc{compute.CeilTemporal, compute.RoundTemporal} {
+						requireTemporalRoundingTime(t, fn, unaligned, input.Add(time.Minute), unit, tc.zone, opts)
+					}
+					opts.CeilIsStrictlyGreater = true
+					requireTemporalRoundingTime(t, compute.CeilTemporal, input, input.Add(time.Minute), unit, tc.zone, opts)
+				})
+			}
+		})
+	}
+}
+
+func TestTemporalRoundingCalendarOriginCrossesRepeatedHour(t *testing.T) {
+	for _, tc := range []struct {
+		zone, input, expected string
+	}{
+		{"America/New_York", "2024-11-03T01:59:40-04:00", "2024-11-03T02:00:00-05:00"},
+		{"Europe/Berlin", "2024-10-27T02:59:40+02:00", "2024-10-27T03:00:00+01:00"},
+		{"Australia/Lord_Howe", "2024-04-07T01:59:40+11:00", "2024-04-07T02:00:00+10:30"},
+	} {
+		t.Run(tc.zone, func(t *testing.T) {
+			input, err := time.Parse(time.RFC3339, tc.input)
+			require.NoError(t, err)
+			expected, err := time.Parse(time.RFC3339, tc.expected)
+			require.NoError(t, err)
+			for _, fn := range []temporalRoundingFunc{compute.CeilTemporal, compute.RoundTemporal} {
+				requireTemporalRoundingTime(t, fn, input, expected, arrow.Microsecond, tc.zone,
+					compute.RoundTemporalOptions{
+						Multiple:            1,
+						Unit:                compute.RoundTemporalMinute,
+						CalendarBasedOrigin: true,
+					})
+			}
+		})
+	}
 }
 
 func TestTemporalRoundingTimezoneDayMultipleUsesEpochOrigin(t *testing.T) {
