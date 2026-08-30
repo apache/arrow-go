@@ -430,3 +430,25 @@ func TestTimestampArrayJSONRoundTripWithDeprecatedLayout(t *testing.T) {
 	require.Equal(t, expectedJSON, string(json_bytes))
 
 }
+
+func TestTimestampStringRoundTripHistoricalOffsetSeconds(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	for _, zone := range []string{"Europe/Berlin", "America/New_York"} {
+		t.Run(zone, func(t *testing.T) {
+			typ := &arrow.TimestampType{Unit: arrow.Second, TimeZone: zone}
+			value := arrow.Timestamp(time.Date(1800, 1, 1, 0, 0, 0, 0, time.UTC).Unix())
+			builder := array.NewTimestampBuilder(mem, typ)
+			defer builder.Release()
+			builder.Append(value)
+			values := builder.NewTimestampArray()
+			defer values.Release()
+
+			require.NoError(t, builder.AppendValueFromString(values.ValueStr(0)))
+			result := builder.NewTimestampArray()
+			defer result.Release()
+			assert.Equal(t, value, result.Value(0))
+		})
+	}
+}

@@ -198,7 +198,12 @@ func (w *Writer) transformColToStringArr(typ arrow.DataType, col arrow.Array, st
 		}
 		for i := 0; i < arr.Len(); i++ {
 			if arr.IsValid(i) {
-				res[i] = toTime(arr.Value(i)).Format(layout)
+				value := toTime(arr.Value(i))
+				valueLayout := layout
+				if _, offset := value.Zone(); t.TimeZone != "" && offset%60 != 0 {
+					valueLayout += ":00"
+				}
+				res[i] = value.Format(valueLayout)
 			} else {
 				res[i] = w.nullValue
 			}

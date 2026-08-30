@@ -663,3 +663,25 @@ func TestNewDecimalTypeValidatesPrecision(t *testing.T) {
 		})
 	}
 }
+
+func TestTimestampFromStringShortTimeComponents(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  time.Time
+	}{
+		{"2024-01-01", time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{"2024-01-01T12", time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)},
+		{"2024-01-01T12:30", time.Date(2024, 1, 1, 12, 30, 0, 0, time.UTC)},
+		{"2024-01-01T12:30+01", time.Date(2024, 1, 1, 11, 30, 0, 0, time.UTC)},
+		{"2024-01-01T12:30+0100", time.Date(2024, 1, 1, 11, 30, 0, 0, time.UTC)},
+		{"2024-01-01T12:30+01:00", time.Date(2024, 1, 1, 11, 30, 0, 0, time.UTC)},
+		{"2024-01-01T12:30+010028", time.Date(2024, 1, 1, 11, 29, 32, 0, time.UTC)},
+		{"2024-01-01T12:30+01:00:28", time.Date(2024, 1, 1, 11, 29, 32, 0, time.UTC)},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			got, err := arrow.TimestampFromString(tc.value, arrow.Second)
+			require.NoError(t, err)
+			assert.Equal(t, arrow.Timestamp(tc.want.Unix()), got)
+		})
+	}
+}

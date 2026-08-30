@@ -110,14 +110,17 @@ func (a *Timestamp) ValueStr(i int) string {
 
 	typ := a.DataType().(*arrow.TimestampType)
 	toTime, _ := typ.GetToTimeFunc()
+	value := toTime(a.values[i])
 	layout := a.layout
 	if a.useDefaultLayout {
 		layout = time.RFC3339Nano
 		if typ.TimeZone == "" {
 			layout = timestampNoTimezoneLayout
+		} else if _, offset := value.Zone(); offset%60 != 0 {
+			layout = timestampNoTimezoneLayout + "Z07:00:00"
 		}
 	}
-	return toTime(a.values[i]).Format(layout)
+	return value.Format(layout)
 }
 
 func (a *Timestamp) GetOneForMarshal(i int) interface{} {

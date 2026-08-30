@@ -804,6 +804,18 @@ func TestCSVWriterReaderTimestampRoundTrip(t *testing.T) {
 			value:   0,
 			wantCSV: "1969-12-31 19:00:00-05:00\n",
 		},
+		{
+			name:    "historical positive offset seconds",
+			typ:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "Europe/Berlin"},
+			value:   arrow.Timestamp(time.Date(1800, 1, 1, 0, 0, 0, 0, time.UTC).Unix()),
+			wantCSV: "1800-01-01 00:53:28+00:53:28\n",
+		},
+		{
+			name:    "historical negative offset seconds",
+			typ:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/New_York"},
+			value:   arrow.Timestamp(time.Date(1800, 1, 1, 0, 0, 0, 0, time.UTC).Unix()),
+			wantCSV: "1799-12-31 19:03:58-04:56:02\n",
+		},
 	}
 
 	for _, tc := range tests {

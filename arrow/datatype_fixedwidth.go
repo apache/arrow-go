@@ -118,19 +118,19 @@ func TimestampFromStringInLocation(val string, unit TimeUnit, loc *time.Location
 		case val[len(val)-1] == 'Z':
 			zoneFmt = "Z"
 			lenWithoutZone--
-		case val[len(val)-9] == '+' || val[len(val)-9] == '-':
+		case len(val) >= 19 && (val[len(val)-9] == '+' || val[len(val)-9] == '-'):
 			zoneFmt = "-07:00:00"
 			lenWithoutZone -= 9
-		case val[len(val)-7] == '+' || val[len(val)-7] == '-':
+		case len(val) >= 17 && (val[len(val)-7] == '+' || val[len(val)-7] == '-'):
 			zoneFmt = "-070000"
 			lenWithoutZone -= 7
-		case val[len(val)-3] == '+' || val[len(val)-3] == '-':
+		case len(val) >= 13 && (val[len(val)-3] == '+' || val[len(val)-3] == '-'):
 			zoneFmt = "-07"
 			lenWithoutZone -= 3
-		case val[len(val)-5] == '+' || val[len(val)-5] == '-':
+		case len(val) >= 15 && (val[len(val)-5] == '+' || val[len(val)-5] == '-'):
 			zoneFmt = "-0700"
 			lenWithoutZone -= 5
-		case val[len(val)-6] == '+' || val[len(val)-6] == '-':
+		case len(val) >= 16 && (val[len(val)-6] == '+' || val[len(val)-6] == '-'):
 			zoneFmt = "-07:00"
 			lenWithoutZone -= 6
 		}
