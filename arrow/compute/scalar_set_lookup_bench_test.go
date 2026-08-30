@@ -34,6 +34,9 @@ func BenchmarkIsInMemoPreSizing(b *testing.B) {
 		valueSetSize int
 		cardinality  int
 	}{
+		{name: "bool/repeated-64k", typ: arrow.FixedWidthTypes.Boolean, valueSetSize: 65_536, cardinality: 2},
+		{name: "uint8/repeated-64k", typ: arrow.PrimitiveTypes.Uint8, valueSetSize: 65_536, cardinality: 256},
+		{name: "uint16/repeated-256k", typ: arrow.PrimitiveTypes.Uint16, valueSetSize: 262_144, cardinality: 65_536},
 		{name: "int64/unique-1k", typ: arrow.PrimitiveTypes.Int64, valueSetSize: 1_000, cardinality: 1_000},
 		{name: "int64/unique-64k", typ: arrow.PrimitiveTypes.Int64, valueSetSize: 64_000, cardinality: 64_000},
 		{name: "int64/repeated-64k", typ: arrow.PrimitiveTypes.Int64, valueSetSize: 64_000, cardinality: 64},
@@ -72,6 +75,33 @@ func BenchmarkIsInMemoPreSizing(b *testing.B) {
 func newMemoBenchmarkArray(b *testing.B, typ arrow.DataType, length, cardinality int) arrow.Array {
 	b.Helper()
 	switch typ.ID() {
+	case arrow.BOOL:
+		builder := array.NewBooleanBuilder(memory.DefaultAllocator)
+		builder.Reserve(length)
+		for i := 0; i < length; i++ {
+			builder.Append(i%cardinality != 0)
+		}
+		result := builder.NewArray()
+		builder.Release()
+		return result
+	case arrow.UINT8:
+		builder := array.NewUint8Builder(memory.DefaultAllocator)
+		builder.Reserve(length)
+		for i := 0; i < length; i++ {
+			builder.Append(uint8(i % cardinality))
+		}
+		result := builder.NewArray()
+		builder.Release()
+		return result
+	case arrow.UINT16:
+		builder := array.NewUint16Builder(memory.DefaultAllocator)
+		builder.Reserve(length)
+		for i := 0; i < length; i++ {
+			builder.Append(uint16(i % cardinality))
+		}
+		result := builder.NewArray()
+		builder.Release()
+		return result
 	case arrow.INT64:
 		builder := array.NewInt64Builder(memory.DefaultAllocator)
 		builder.Reserve(length)

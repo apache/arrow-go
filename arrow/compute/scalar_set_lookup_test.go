@@ -250,6 +250,65 @@ func (ss *ScalarSetLookupSuite) TestDurationCasts() {
 	ss.checkIsIn(vals, valueset, `[false, false, true]`, compute.NullMatchingMatch)
 }
 
+func (ss *ScalarSetLookupSuite) TestIsInSaturatedDomains() {
+	for _, tc := range []struct {
+		typ    arrow.DataType
+		domain int
+	}{
+		{arrow.FixedWidthTypes.Boolean, 2},
+		{arrow.PrimitiveTypes.Int8, 1 << 8},
+		{arrow.PrimitiveTypes.Uint8, 1 << 8},
+		{arrow.PrimitiveTypes.Int16, 1 << 16},
+		{arrow.PrimitiveTypes.Uint16, 1 << 16},
+		{&arrow.FixedSizeBinaryType{ByteWidth: 1}, 1 << 8},
+		{&arrow.FixedSizeBinaryType{ByteWidth: 2}, 1 << 16},
+	} {
+		ss.Run(tc.typ.String(), func() {
+			builder := array.NewBuilder(ss.mem, tc.typ)
+			defer builder.Release()
+			builder.Reserve(2*tc.domain + 2)
+			builder.AppendNull()
+			for i := 0; i < 2*tc.domain; i++ {
+				switch b := builder.(type) {
+				case *array.BooleanBuilder:
+					b.Append(i%2 != 0)
+				case *array.Int8Builder:
+					b.Append(int8(i))
+				case *array.Uint8Builder:
+					b.Append(uint8(i))
+				case *array.Int16Builder:
+					b.Append(int16(i))
+				case *array.Uint16Builder:
+					b.Append(uint16(i))
+				case *array.FixedSizeBinaryBuilder:
+					value := []byte{byte(i), byte(i >> 8)}
+					b.Append(value[:tc.typ.(*arrow.FixedSizeBinaryType).ByteWidth])
+				}
+			}
+			builder.AppendNull()
+			values := builder.NewArray()
+			defer values.Release()
+
+			input := array.NewSlice(values, 1, int64(tc.domain+1))
+			defer input.Release()
+			expectedBuilder := array.NewBooleanBuilder(ss.mem)
+			defer expectedBuilder.Release()
+			for i := 0; i < input.Len(); i++ {
+				expectedBuilder.Append(true)
+			}
+			expected := expectedBuilder.NewArray()
+			defer expected.Release()
+
+			result, err := compute.IsIn(ss.ctx, compute.SetOptions{
+				ValueSet: compute.NewDatumWithoutOwning(values),
+			}, compute.NewDatumWithoutOwning(input))
+			ss.Require().NoError(err)
+			defer result.Release()
+			assertDatumsEqual(ss.T(), compute.NewDatumWithoutOwning(expected), result, nil, nil)
+		})
+	}
+}
+
 func (ss *ScalarSetLookupSuite) TestIsInBinary() {
 	type testCase struct {
 		expected string

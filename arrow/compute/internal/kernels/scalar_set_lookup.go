@@ -211,7 +211,16 @@ func (s *SetLookupState[T]) Init(opts SetLookupOptions) error {
 			}
 		}
 	}
-	lookup, err := newMemoTable(s.Alloc, memoType, opts.TotalLen*2)
+	initial := opts.TotalLen
+	switch memoType {
+	case arrow.BOOL:
+		initial = min(initial, 2)
+	case arrow.INT8, arrow.UINT8:
+		initial = min(initial, 1<<8)
+	case arrow.INT16, arrow.UINT16:
+		initial = min(initial, 1<<16)
+	}
+	lookup, err := newMemoTable(s.Alloc, memoType, initial*2)
 	if err != nil {
 		return err
 	}
