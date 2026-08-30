@@ -233,29 +233,123 @@ func TestTemporalRoundingCalendarOriginUsesWallClockAcrossDST(t *testing.T) {
 		location.String(), opts)
 }
 
-func TestTemporalRoundingCalendarOriginRejectsDSTGap(t *testing.T) {
-	location, err := time.LoadLocation("America/New_York")
+func TestTemporalRoundingCalendarOriginAfterMidnightGap(t *testing.T) {
+	// Sao Paulo skipped midnight to 01:00. Monrovia skipped midnight to
+	// 00:44:30, so even an hour or minute boundary may not exist locally.
+	for _, tc := range []struct {
+		zone, input  string
+		unit         compute.RoundTemporalUnit
+		multiple     int64
+		interval     time.Duration
+		minInputUnit arrow.TimeUnit
+	}{
+		{"America/Sao_Paulo", "2018-11-04T02:00:00-02:00", compute.RoundTemporalHour, 2, 2 * time.Hour, arrow.Second},
+		{"America/Sao_Paulo", "2018-11-04T01:30:00-02:00", compute.RoundTemporalMinute, 30, 30 * time.Minute, arrow.Second},
+		{"Africa/Monrovia", "1972-01-07T01:00:00Z", compute.RoundTemporalHour, 1, time.Hour, arrow.Second},
+		{"Africa/Monrovia", "1972-01-07T00:45:00Z", compute.RoundTemporalMinute, 15, 15 * time.Minute, arrow.Second},
+		{"Africa/Monrovia", "1972-01-07T00:44:30Z", compute.RoundTemporalSecond, 10, 10 * time.Second, arrow.Second},
+		{"Africa/Monrovia", "1972-01-07T00:44:30.125Z", compute.RoundTemporalMillisecond, 5, 5 * time.Millisecond, arrow.Millisecond},
+		{"Africa/Monrovia", "1972-01-07T00:44:30.123455Z", compute.RoundTemporalMicrosecond, 5, 5 * time.Microsecond, arrow.Microsecond},
+		{"Africa/Monrovia", "1972-01-07T00:44:30.123456785Z", compute.RoundTemporalNanosecond, 5, 5 * time.Nanosecond, arrow.Nanosecond},
+	} {
+		t.Run(tc.zone+"/"+tc.input, func(t *testing.T) {
+			input, err := time.Parse(time.RFC3339Nano, tc.input)
+			require.NoError(t, err)
+			for _, unit := range []arrow.TimeUnit{arrow.Second, arrow.Millisecond, arrow.Microsecond, arrow.Nanosecond} {
+				if unit < tc.minInputUnit {
+					continue
+				}
+				t.Run(unit.String(), func(t *testing.T) {
+					opts := compute.RoundTemporalOptions{
+						Multiple:            tc.multiple,
+						Unit:                tc.unit,
+						CalendarBasedOrigin: true,
+					}
+					for _, fn := range []temporalRoundingFunc{compute.FloorTemporal, compute.CeilTemporal, compute.RoundTemporal} {
+						requireTemporalRoundingTime(t, fn, input, input, unit, tc.zone, opts)
+					}
+
+					unaligned := input.Add(tc.interval * 4 / 5)
+					requireTemporalRoundingTime(t, compute.FloorTemporal, unaligned, input, unit, tc.zone, opts)
+					for _, fn := range []temporalRoundingFunc{compute.CeilTemporal, compute.RoundTemporal} {
+						requireTemporalRoundingTime(t, fn, unaligned, input.Add(tc.interval), unit, tc.zone, opts)
+					}
+					opts.CeilIsStrictlyGreater = true
+					requireTemporalRoundingTime(t, compute.CeilTemporal, input, input.Add(tc.interval), unit, tc.zone, opts)
+				})
+			}
+		})
+	}
+}
+
+func TestTemporalRoundingCalendarOriginCrossesMidnightGap(t *testing.T) {
+	input, err := time.Parse(time.RFC3339, "2018-11-03T23:30:00-03:00")
 	require.NoError(t, err)
-
-	input := time.Date(2024, time.March, 10, 1, 30, 0, 0, location)
-	value, err := arrow.TimestampFromTime(input, arrow.Microsecond)
+	floor, err := time.Parse(time.RFC3339, "2018-11-03T20:00:00-03:00")
 	require.NoError(t, err)
-
-	builder := array.NewTimestampBuilder(memory.DefaultAllocator, &arrow.TimestampType{
-		Unit:     arrow.Microsecond,
-		TimeZone: location.String(),
-	})
-	builder.Append(value)
-	inputArray := builder.NewArray()
-	builder.Release()
-	defer inputArray.Release()
-
-	_, err = compute.CeilTemporal(context.Background(), compute.RoundTemporalOptions{
-		Multiple:            1,
+	ceil, err := time.Parse(time.RFC3339, "2018-11-04T01:00:00-02:00")
+	require.NoError(t, err)
+	opts := compute.RoundTemporalOptions{
+		Multiple:            5,
 		Unit:                compute.RoundTemporalHour,
 		CalendarBasedOrigin: true,
-	}, compute.NewDatum(inputArray))
-	require.ErrorIs(t, err, arrow.ErrInvalid)
+	}
+	for _, unit := range []arrow.TimeUnit{arrow.Second, arrow.Millisecond, arrow.Microsecond, arrow.Nanosecond} {
+		t.Run(unit.String(), func(t *testing.T) {
+			requireTemporalRoundingTime(t, compute.FloorTemporal, input, floor, unit, "America/Sao_Paulo", opts)
+			for _, fn := range []temporalRoundingFunc{compute.CeilTemporal, compute.RoundTemporal} {
+				requireTemporalRoundingTime(t, fn, input, ceil, unit, "America/Sao_Paulo", opts)
+			}
+		})
+	}
+}
+
+func TestTemporalRoundingCalendarOriginRejectsDSTGap(t *testing.T) {
+	for _, tc := range []struct {
+		zone, input string
+		fn          temporalRoundingFunc
+		unit        compute.RoundTemporalUnit
+		multiple    int64
+	}{
+		{"America/New_York", "2024-03-10T01:30:00-05:00", compute.CeilTemporal, compute.RoundTemporalHour, 1},
+		{"America/Sao_Paulo", "2018-11-04T01:30:00-02:00", compute.FloorTemporal, compute.RoundTemporalHour, 2},
+		{"America/Sao_Paulo", "2018-11-03T23:30:00-03:00", compute.CeilTemporal, compute.RoundTemporalHour, 1},
+		{"Africa/Monrovia", "1972-01-07T00:45:00Z", compute.FloorTemporal, compute.RoundTemporalMinute, 30},
+		{"Africa/Monrovia", "1972-01-07T00:44:35Z", compute.FloorTemporal, compute.RoundTemporalSecond, 60},
+		{"Pacific/Apia", "2011-12-29T23:30:00-10:00", compute.CeilTemporal, compute.RoundTemporalHour, 5},
+	} {
+		t.Run(tc.zone+"/"+tc.input, func(t *testing.T) {
+			input, err := time.Parse(time.RFC3339, tc.input)
+			require.NoError(t, err)
+			for _, unit := range []arrow.TimeUnit{arrow.Second, arrow.Millisecond, arrow.Microsecond, arrow.Nanosecond} {
+				t.Run(unit.String(), func(t *testing.T) {
+					value, err := arrow.TimestampFromTime(input, unit)
+					require.NoError(t, err)
+
+					builder := array.NewTimestampBuilder(memory.DefaultAllocator, &arrow.TimestampType{
+						Unit:     unit,
+						TimeZone: tc.zone,
+					})
+					builder.Append(value)
+					inputArray := builder.NewArray()
+					builder.Release()
+					defer inputArray.Release()
+					inputDatum := compute.NewDatum(inputArray)
+					defer inputDatum.Release()
+
+					result, err := tc.fn(context.Background(), compute.RoundTemporalOptions{
+						Multiple:            tc.multiple,
+						Unit:                tc.unit,
+						CalendarBasedOrigin: true,
+					}, inputDatum)
+					if err == nil && result != nil {
+						defer result.Release()
+					}
+					require.ErrorIs(t, err, arrow.ErrInvalid)
+				})
+			}
+		})
+	}
 }
 
 func TestTemporalRoundingCalendarOriginPreservesRepeatedHour(t *testing.T) {

@@ -983,7 +983,7 @@ func roundTimestampCalendarOrigin(ts int64, inputUnit arrow.TimeUnit, tz *time.L
 	if err != nil {
 		return 0, err
 	}
-	origin, err := fixedCalendarOrigin(t, opts.Unit, tz)
+	origin, err := fixedCalendarOrigin(t, opts.Unit)
 	if err != nil {
 		return 0, err
 	}
@@ -998,7 +998,7 @@ func roundTimestampCalendarOrigin(ts int64, inputUnit arrow.TimeUnit, tz *time.L
 	if err != nil {
 		return 0, err
 	}
-	rounded, err := addWallNanos(origin, roundedElapsed)
+	rounded, err := addWallNanos(origin, roundedElapsed, tz)
 	if err != nil {
 		return 0, err
 	}
@@ -1020,22 +1020,24 @@ func roundTimestampCalendarOrigin(ts int64, inputUnit arrow.TimeUnit, tz *time.L
 	return int64(result), nil
 }
 
-func fixedCalendarOrigin(value time.Time, unit RoundTemporalUnit, tz *time.Location) (time.Time, error) {
+// Keep the origin's civil fields in UTC because its local time may not exist.
+// The requested location is applied only after rounding the wall-clock value.
+func fixedCalendarOrigin(value time.Time, unit RoundTemporalUnit) (time.Time, error) {
 	switch unit {
 	case RoundTemporalHour:
-		return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, tz), nil
+		return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC), nil
 	case RoundTemporalMinute:
-		return time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), 0, 0, 0, tz), nil
+		return time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), 0, 0, 0, time.UTC), nil
 	case RoundTemporalSecond:
-		return time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), 0, 0, tz), nil
+		return time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), 0, 0, time.UTC), nil
 	case RoundTemporalMillisecond:
-		return time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(), 0, tz), nil
+		return time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(), 0, time.UTC), nil
 	case RoundTemporalMicrosecond:
 		return time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(),
-			(value.Nanosecond()/1_000_000)*1_000_000, tz), nil
+			(value.Nanosecond()/1_000_000)*1_000_000, time.UTC), nil
 	case RoundTemporalNanosecond:
 		return time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(),
-			(value.Nanosecond()/1_000)*1_000, tz), nil
+			(value.Nanosecond()/1_000)*1_000, time.UTC), nil
 	default:
 		return time.Time{}, fmt.Errorf("%w: unsupported fixed calendar unit", arrow.ErrNotImplemented)
 	}
@@ -1076,9 +1078,9 @@ func wallClockDifference(value, origin time.Time) (int64, error) {
 
 // addWallNanos adds a duration to a local wall-clock value without using
 // time.Time.Add, which applies elapsed-time arithmetic across timezone
-// transitions. The result is normalized through calendar dates and then
-// reconstructed in the original location.
-func addWallNanos(origin time.Time, nanos int64) (time.Time, error) {
+// transitions. The result is normalized through calendar dates in UTC and then
+// reconstructed in the requested location.
+func addWallNanos(origin time.Time, nanos int64, tz *time.Location) (time.Time, error) {
 	days := floorDivInt64(nanos, nanosPerDay)
 	daysNanos, err := checkedMulInt64(days, nanosPerDay)
 	if err != nil {
@@ -1105,7 +1107,7 @@ func addWallNanos(origin time.Time, nanos int64) (time.Time, error) {
 		dayTimeNanos -= nanosPerDay
 	}
 
-	date := time.Date(origin.Year(), origin.Month(), origin.Day(), 0, 0, 0, 0, origin.Location())
+	date := time.Date(origin.Year(), origin.Month(), origin.Day(), 0, 0, 0, 0, time.UTC)
 	date, err = checkedCalendarAddDays(date, days)
 	if err != nil {
 		return time.Time{}, err
@@ -1117,7 +1119,7 @@ func addWallNanos(origin time.Time, nanos int64) (time.Time, error) {
 	dayTimeNanos -= minute * int64(time.Minute)
 	second := dayTimeNanos / int64(time.Second)
 	nanosecond := dayTimeNanos - second*int64(time.Second)
-	result := time.Date(date.Year(), date.Month(), date.Day(), int(hour), int(minute), int(second), int(nanosecond), origin.Location())
+	result := time.Date(date.Year(), date.Month(), date.Day(), int(hour), int(minute), int(second), int(nanosecond), tz)
 	if result.Year() != date.Year() || result.Month() != date.Month() || result.Day() != date.Day() ||
 		result.Hour() != int(hour) || result.Minute() != int(minute) || result.Second() != int(second) ||
 		result.Nanosecond() != int(nanosecond) {
