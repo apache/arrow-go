@@ -101,11 +101,11 @@ func TestCopyDictionaryPreservesFloatBits(t *testing.T) {
 }
 
 func TestCopyDictionaryRejectsUnsupportedOrShortOutput(t *testing.T) {
-	if CopyDictionary(make([]bool, 8), []bool{false, true}, make([]IndexType, 8)) {
+	if CopyDictionary(make([]bool, 64), []bool{false, true}, make([]IndexType, 64)) {
 		t.Fatal("boolean dictionary unexpectedly used fixed-width gather")
 	}
 
-	indices := make([]IndexType, 8)
+	indices := make([]IndexType, 64)
 	out := make([]int32, len(indices)-1)
 	for i := range out {
 		out[i] = -1
