@@ -31,15 +31,18 @@ func TestEncodeByteStreamSplitWidth8(t *testing.T) {
 }
 
 func testEncodeByteStreamSplit(t *testing.T, width int, implementation func([]byte, []byte)) {
-	for _, nValues := range []int{0, 1, 2, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129} {
+	for _, nValues := range []int{0, 1, 2, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 1023, 1024, 1025} {
 		t.Run(fmt.Sprintf("nValues=%d", nValues), func(t *testing.T) {
-			in := make([]byte, nValues*width)
+			input := bytes.Repeat([]byte{0xa5}, nValues*width+2)
+			in := input[1 : len(input)-1]
 			for i := range in {
 				in[i] = byte((i*37 + width) ^ (i >> 3))
 			}
+			original := bytes.Clone(input)
 
 			want := make([]byte, len(in))
-			got := make([]byte, len(in))
+			output := bytes.Repeat([]byte{0x5a}, len(in)+2)
+			got := output[1 : len(output)-1]
 			switch width {
 			case 4:
 				encodeByteStreamSplitWidth4(want, in)
@@ -49,6 +52,12 @@ func testEncodeByteStreamSplit(t *testing.T, width int, implementation func([]by
 			implementation(got, in)
 			if !bytes.Equal(got, want) {
 				t.Fatalf("encoded output mismatch: got %x, want %x", got, want)
+			}
+			if output[0] != 0x5a || output[len(output)-1] != 0x5a {
+				t.Fatal("encoding modified bytes outside the output slice")
+			}
+			if !bytes.Equal(input, original) {
+				t.Fatal("encoding modified the input")
 			}
 		})
 	}
