@@ -21,7 +21,6 @@ package kernels
 import (
 	"fmt"
 	"math"
-	"reflect"
 	"runtime"
 	"testing"
 	"unsafe"
@@ -39,7 +38,7 @@ func checkNeonBinary[T arrow.NumericType](t *testing.T, typ arrow.Type, op Arith
 		wantValues[i] = want(left[i], right[i])
 	}
 	arithmeticNeon(typ, op, arrow.GetBytes(left), arrow.GetBytes(right), arrow.GetBytes(got), len(left))
-	if !reflect.DeepEqual(got, wantValues) {
+	if !neonArithmeticEqual(got, wantValues) {
 		t.Fatalf("array-array: got %v, want %v", got, wantValues)
 	}
 
@@ -52,7 +51,7 @@ func checkNeonBinary[T arrow.NumericType](t *testing.T, typ arrow.Type, op Arith
 		wantValues[i] = want(left[i], scalar)
 	}
 	arithmeticArrScalarNeon(typ, op, arrow.GetBytes(left), unsafe.Pointer(&scalar), arrow.GetBytes(got), len(left))
-	if !reflect.DeepEqual(got, wantValues) {
+	if !neonArithmeticEqual(got, wantValues) {
 		t.Fatalf("array-scalar: got %v, want %v", got, wantValues)
 	}
 
@@ -64,7 +63,7 @@ func checkNeonBinary[T arrow.NumericType](t *testing.T, typ arrow.Type, op Arith
 		wantValues[i] = want(scalar, right[i])
 	}
 	arithmeticScalarArrNeon(typ, op, unsafe.Pointer(&scalar), arrow.GetBytes(right), arrow.GetBytes(got), len(right))
-	if !reflect.DeepEqual(got[:len(right)], wantValues) {
+	if !neonArithmeticEqual(got[:len(right)], wantValues) {
 		t.Fatalf("scalar-array: got %v, want %v", got[:len(right)], wantValues)
 	}
 }
@@ -78,8 +77,61 @@ func checkNeonUnary[T arrow.NumericType](t *testing.T, typ arrow.Type, op Arithm
 		wantValues[i] = want(value)
 	}
 	arithmeticUnaryNeon(typ, op, arrow.GetBytes(input), arrow.GetBytes(got), len(input))
-	if !reflect.DeepEqual(got, wantValues) {
+	if !neonArithmeticEqual(got, wantValues) {
 		t.Fatalf("got %v, want %v", got, wantValues)
+	}
+}
+
+func neonArithmeticEqual[T arrow.NumericType](got, want []T) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i, value := range got {
+		if value == want[i] {
+			if value == 0 && math.Signbit(float64(value)) != math.Signbit(float64(want[i])) {
+				return false
+			}
+		} else if !math.IsNaN(float64(value)) || !math.IsNaN(float64(want[i])) {
+			return false
+		}
+	}
+	return true
+}
+
+func TestNeonArithmeticFloatingSpecialValues(t *testing.T) {
+	if !cpu.ARM64.HasASIMD {
+		t.Skip("ARM64 SIMD is not available")
+	}
+	t.Run("float32", func(t *testing.T) {
+		testNeonArithmeticFloatingSpecialValues(t, arrow.FLOAT32, []float32{
+			float32(math.Copysign(0, -1)), 0, float32(math.Inf(1)), float32(math.Inf(-1)),
+			float32(math.NaN()), math.SmallestNonzeroFloat32, -math.SmallestNonzeroFloat32,
+			math.MaxFloat32, -math.MaxFloat32, 1, -1,
+		})
+	})
+	t.Run("float64", func(t *testing.T) {
+		testNeonArithmeticFloatingSpecialValues(t, arrow.FLOAT64, []float64{
+			math.Copysign(0, -1), 0, math.Inf(1), math.Inf(-1), math.NaN(),
+			math.SmallestNonzeroFloat64, -math.SmallestNonzeroFloat64,
+			math.MaxFloat64, -math.MaxFloat64, 1, -1,
+		})
+	})
+}
+
+func testNeonArithmeticFloatingSpecialValues[T float32 | float64](t *testing.T, typ arrow.Type, pattern []T) {
+	for _, length := range []int{1, 2, 3, 4, 5, 7, 8, 9, 17, 65} {
+		for shift := range pattern {
+			left, right := make([]T, length), make([]T, length)
+			for i := range left {
+				left[i] = pattern[(i+shift)%len(pattern)]
+				right[i] = pattern[(2*i+shift)%len(pattern)]
+			}
+			checkNeonBinary(t, typ, OpAdd, left, right, func(l, r T) T { return l + r })
+			checkNeonBinary(t, typ, OpSub, left, right, func(l, r T) T { return l - r })
+			checkNeonBinary(t, typ, OpMul, left, right, func(l, r T) T { return l * r })
+			checkNeonUnary(t, typ, OpAbsoluteValue, left, func(v T) T { return T(math.Abs(float64(v))) })
+			checkNeonUnary(t, typ, OpNegate, left, func(v T) T { return -v })
+		}
 	}
 }
 
