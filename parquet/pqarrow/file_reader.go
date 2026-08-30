@@ -492,6 +492,9 @@ func (fr *FileReader) ReadRowGroups(ctx context.Context, indices, rowGroups []in
 	defer releaseColumns(columns)
 	for data := range results {
 		if data.err != nil {
+			if data.data != nil {
+				data.data.Release()
+			}
 			err = data.err
 			cancel()
 			break
@@ -508,7 +511,9 @@ func (fr *FileReader) ReadRowGroups(ctx context.Context, indices, rowGroups []in
 		// so the goroutines don't leak and so memory can get cleaned up. we already
 		// cancelled the context, so we're just consuming anything that was already queued up.
 		for data := range results {
-			data.data.Release()
+			if data.data != nil {
+				data.data.Release()
+			}
 		}
 		return nil, err
 	}
