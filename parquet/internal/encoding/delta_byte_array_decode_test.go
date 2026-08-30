@@ -18,6 +18,7 @@ package encoding
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -88,6 +89,41 @@ func TestDeltaByteArrayDecoderDecodesAllEmptyValues(t *testing.T) {
 
 	for i, value := range decoded {
 		require.Empty(t, value, "value %d", i)
+	}
+}
+
+func TestDeltaByteArrayDecoderReusesValuesWithoutSuffixes(t *testing.T) {
+	value := strings.Repeat("x", 64*1024)
+	values := make([]string, 128)
+	for i := range values {
+		values[i] = value
+	}
+	values = append(values, value[:1024], "", "new value", "new value")
+	data := encodeDeltaByteArrayPage(t, values)
+
+	for _, batchSize := range []int{1, 17, len(values)} {
+		t.Run(fmt.Sprintf("batch-%d", batchSize), func(t *testing.T) {
+			dec := NewDecoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray,
+				nil, memory.DefaultAllocator).(*DeltaByteArrayDecoder)
+			require.NoError(t, dec.SetData(len(values), data))
+
+			arenaSize, err := dec.decodedArenaSize(len(values))
+			require.NoError(t, err)
+			require.Equal(t, len(value)+len("new value"), arenaSize)
+
+			decoded := make([]parquet.ByteArray, len(values))
+			for offset := 0; offset < len(values); offset += batchSize {
+				end := min(offset+batchSize, len(values))
+				n, err := dec.Decode(decoded[offset:end])
+				require.NoError(t, err)
+				require.Equal(t, end-offset, n)
+			}
+			requireDecodedStrings(t, decoded, values)
+			for i := 1; i < 128; i++ {
+				require.Same(t, &decoded[0][0], &decoded[i][0])
+			}
+			require.Equal(t, len(decoded[128]), cap(decoded[128]))
+		})
 	}
 }
 

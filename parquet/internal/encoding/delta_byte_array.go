@@ -303,10 +303,12 @@ func (d *DeltaByteArrayDecoder) decodedArenaSize(max int) (int, error) {
 			return 0, errors.New("parquet: delta byte array value length overflows int")
 		}
 		valueLen += int(suffixLen)
-		if valueLen > maxInt-total {
-			return 0, errors.New("parquet: decoded delta byte array size overflows int")
+		if suffixLen != 0 {
+			if valueLen > maxInt-total {
+				return 0, errors.New("parquet: decoded delta byte array size overflows int")
+			}
+			total += valueLen
 		}
-		total += valueLen
 		previousLen = valueLen
 	}
 
@@ -354,6 +356,11 @@ func (d *DeltaByteArrayDecoder) Decode(out []parquet.ByteArray) (int, error) {
 		d.prefixLengths = d.prefixLengths[1:]
 
 		prefix := d.lastVal[:prefixLen:prefixLen]
+		if len(out[0]) == 0 {
+			d.lastVal = prefix
+			out[0], out = prefix, out[1:]
+			continue
+		}
 
 		valueLen := int(prefixLen) + len(out[0])
 		value := arena[arenaOffset : arenaOffset+valueLen : arenaOffset+valueLen]

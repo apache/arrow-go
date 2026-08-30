@@ -18,6 +18,7 @@ package encoding
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -25,10 +26,17 @@ import (
 )
 
 func BenchmarkDeltaByteArrayDecoderDecode(b *testing.B) {
+	repeatedValue := strings.Repeat("x", 1024)
 	for _, test := range []struct {
 		name  string
 		value func(int) string
 	}{
+		{
+			name: "identical",
+			value: func(int) string {
+				return repeatedValue
+			},
+		},
 		{
 			name: "prefix-heavy",
 			value: func(i int) string {
