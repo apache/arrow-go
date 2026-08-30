@@ -33,7 +33,12 @@ var listElementDoc = FunctionDoc{
 	Description: "For each list value, return the element at the requested index.\n" +
 		"Use an integral scalar for broadcast selection. A one-element array-like\n" +
 		"index is accepted only for a matching one-element execution and is not\n" +
-		"broadcast over longer input.",
+		"broadcast over longer input. Supported inputs are List, LargeList,\n" +
+		"ListView, LargeListView, and FixedSizeList; Map is not supported.\n" +
+		"Null lists and null child values produce null results. A null or negative\n" +
+		"index is invalid, as is an index outside any non-null list's length\n" +
+		"(including an empty list). StringView and BinaryView child types are\n" +
+		"not supported, including when nested inside another child type.",
 	ArgNames: []string{"lists", "index"},
 }
 
