@@ -110,6 +110,19 @@ func TestMakeArrayOfNullRunEndEncoded(t *testing.T) {
 	}
 }
 
+func TestMakeArrayOfNullEmptyUnions(t *testing.T) {
+	for _, typ := range []arrow.DataType{arrow.SparseUnionOf(nil, nil), arrow.DenseUnionOf(nil, nil)} {
+		t.Run(typ.ID().String(), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+			values := array.MakeArrayOfNull(mem, typ, 0)
+			defer values.Release()
+			require.Zero(t, values.Len())
+			require.NoError(t, array.ValidateFull(values))
+		})
+	}
+}
+
 func TestMakeArrayOfNullUnions(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

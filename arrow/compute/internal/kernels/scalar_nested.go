@@ -238,6 +238,10 @@ func ListElementOutputTypeSupported(typ arrow.DataType) bool {
 	switch typ.ID() {
 	case arrow.BINARY_VIEW, arrow.STRING_VIEW:
 		return false
+	case arrow.SPARSE_UNION, arrow.DENSE_UNION:
+		if typ.(arrow.UnionType).NumFields() == 0 {
+			return false
+		}
 	case arrow.EXTENSION:
 		return ListElementOutputTypeSupported(typ.(arrow.ExtensionType).StorageType())
 	case arrow.DICTIONARY:

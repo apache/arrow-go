@@ -1622,6 +1622,8 @@ func TestListElementDenseUnionExtensionScalarWithUnusedUnsupportedChild(t *testi
 	builder.Append(true)
 	values.Append(0)
 	values.Child(0).(*array.Int32Builder).Append(42)
+	values.Append(0)
+	values.Child(0).(*array.Int32Builder).AppendNull()
 	input := builder.NewArray()
 	builder.Release()
 	defer input.Release()
@@ -1630,17 +1632,23 @@ func TestListElementDenseUnionExtensionScalarWithUnusedUnsupportedChild(t *testi
 	require.NoError(t, err)
 	defer listValue.(scalar.Releasable).Release()
 
-	result, err := compute.ListElement(
-		context.Background(),
-		&compute.ScalarDatum{Value: listValue},
-		&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
-	)
-	require.NoError(t, err)
-	defer result.Release()
+	for i := int64(0); i < 2; i++ {
+		result, err := compute.ListElement(
+			context.Background(),
+			&compute.ScalarDatum{Value: listValue},
+			&compute.ScalarDatum{Value: scalar.NewInt64Scalar(i)},
+		)
+		require.NoError(t, err)
+		defer result.Release()
 
-	actual := result.(*compute.ScalarDatum).Value
-	require.True(t, arrow.TypeEqual(extType, actual.DataType()))
-	assert.Equal(t, int32(42), actual.(*scalar.Extension).Value.(scalar.Union).ChildValue().(*scalar.Int32).Value)
+		actual := result.(*compute.ScalarDatum).Value
+		require.True(t, arrow.TypeEqual(extType, actual.DataType()))
+		assert.Equal(t, i == 0, actual.IsValid())
+		assert.NoError(t, actual.ValidateFull())
+		if i == 0 {
+			assert.Equal(t, int32(42), actual.(*scalar.Extension).Value.(scalar.Union).ChildValue().(*scalar.Int32).Value)
+		}
+	}
 }
 
 func TestListElementDenseUnionMonthDayNanoIntervalChild(t *testing.T) {
@@ -2084,6 +2092,182 @@ func TestListElementValidatesScalarIndexForEmptyInputs(t *testing.T) {
 				} else {
 					assert.NoError(t, err)
 				}
+			}
+		})
+	}
+}
+
+func TestListElementNullScalarDenseUnionChildren(t *testing.T) {
+	for _, unsupported := range []arrow.DataType{
+		&arrow.Decimal32Type{Precision: 6, Scale: 2},
+		&arrow.Decimal64Type{Precision: 12, Scale: 2},
+		arrow.ListViewOf(arrow.PrimitiveTypes.Int32),
+		arrow.LargeListViewOf(arrow.PrimitiveTypes.Int32),
+	} {
+		for _, unsupportedFirst := range []bool{true, false} {
+			fields := []arrow.Field{
+				{Name: "unsupported", Type: unsupported, Nullable: true},
+				{Name: "number", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			}
+			if !unsupportedFirst {
+				fields[0], fields[1] = fields[1], fields[0]
+			}
+			union := arrow.DenseUnionOf(fields, []arrow.UnionTypeCode{3, 7})
+			for _, elem := range []arrow.DataType{
+				union,
+				arrow.StructOf(arrow.Field{Name: "union", Type: union, Nullable: true}),
+				&denseUnionExtensionType{ExtensionBase: arrow.ExtensionBase{Storage: union}},
+				arrow.DenseUnionOf([]arrow.Field{{Name: "nested", Type: union, Nullable: true}}, []arrow.UnionTypeCode{5}),
+			} {
+				for _, listType := range []arrow.DataType{arrow.ListOf(elem), arrow.LargeListOf(elem), arrow.FixedSizeListOf(2, elem)} {
+					t.Run(fmt.Sprintf("%s/unsupported-first=%t", listType, unsupportedFirst), func(t *testing.T) {
+						mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+						defer mem.AssertSize(t, 0)
+						ctx := compute.WithAllocator(context.Background(), mem)
+						list := scalar.MakeNullScalar(listType)
+						defer list.(scalar.Releasable).Release()
+						result, err := compute.ListElement(ctx,
+							&compute.ScalarDatum{Value: list},
+							&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)})
+						if err == nil && result != nil {
+							defer result.Release()
+						}
+						if unsupportedFirst {
+							require.ErrorIs(t, err, arrow.ErrNotImplemented)
+						} else {
+							require.NoError(t, err)
+							actual := result.(*compute.ScalarDatum).Value
+							require.False(t, actual.IsValid())
+							require.NoError(t, actual.ValidateFull())
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestListElementEmptyUnionChild(t *testing.T) {
+	for _, elem := range []arrow.DataType{arrow.DenseUnionOf(nil, nil), arrow.SparseUnionOf(nil, nil)} {
+		t.Run(elem.ID().String(), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+			builder := array.NewListBuilder(mem, elem)
+			builder.AppendNull()
+			input := builder.NewArray()
+			builder.Release()
+			defer input.Release()
+			chunked := arrow.NewChunked(input.DataType(), []arrow.Array{input})
+			defer chunked.Release()
+			for _, lists := range []compute.Datum{
+				&compute.ArrayDatum{Value: input.Data()},
+				&compute.ChunkedDatum{Value: chunked},
+			} {
+				result, err := compute.ListElement(compute.WithAllocator(context.Background(), mem),
+					lists, &compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)})
+				if err == nil && result != nil {
+					result.Release()
+				}
+				require.ErrorIs(t, err, arrow.ErrNotImplemented)
+			}
+		})
+	}
+}
+
+func TestListElementNullScalarValidation(t *testing.T) {
+	for _, elem := range []arrow.DataType{
+		arrow.DenseUnionOf(nil, nil),
+		arrow.SparseUnionOf(nil, nil),
+	} {
+		t.Run(elem.ID().String(), func(t *testing.T) {
+			list := scalar.MakeNullScalar(arrow.ListOf(elem))
+			defer list.(scalar.Releasable).Release()
+			result, err := compute.ListElement(context.Background(),
+				&compute.ScalarDatum{Value: list},
+				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)})
+			if err == nil && result != nil {
+				result.Release()
+			}
+			require.ErrorIs(t, err, arrow.ErrNotImplemented)
+		})
+	}
+
+	list := scalar.MakeNullScalar(arrow.ListOf(arrow.PrimitiveTypes.Int32))
+	defer list.(scalar.Releasable).Release()
+	for _, index := range []scalar.Scalar{scalar.NewInt64Scalar(-1), scalar.MakeNullScalar(arrow.PrimitiveTypes.Int64)} {
+		result, err := compute.ListElement(context.Background(),
+			&compute.ScalarDatum{Value: list}, &compute.ScalarDatum{Value: index})
+		if err == nil && result != nil {
+			result.Release()
+		}
+		require.ErrorIs(t, err, arrow.ErrInvalid)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := compute.ListElement(ctx,
+		&compute.ScalarDatum{Value: list}, &compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)})
+	if err == nil && result != nil {
+		result.Release()
+	}
+	require.ErrorIs(t, err, context.Canceled)
+
+	mapValue := scalar.MakeNullScalar(arrow.MapOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32))
+	defer mapValue.(scalar.Releasable).Release()
+	result, err = compute.ListElement(context.Background(),
+		&compute.ScalarDatum{Value: mapValue}, &compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)})
+	if err == nil && result != nil {
+		result.Release()
+	}
+	require.Error(t, err)
+}
+
+func TestListElementNullStructScalarWithDenseUnionChild(t *testing.T) {
+	for _, unsupportedFirst := range []bool{true, false} {
+		t.Run(fmt.Sprintf("unsupported-first=%t", unsupportedFirst), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+			fields := []arrow.Field{
+				{Name: "unsupported", Type: &arrow.Decimal32Type{Precision: 6, Scale: 2}, Nullable: true},
+				{Name: "number", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			}
+			childID := 1
+			if !unsupportedFirst {
+				fields[0], fields[1] = fields[1], fields[0]
+				childID = 0
+			}
+			codes := []arrow.UnionTypeCode{3, 7}
+			unionType := arrow.DenseUnionOf(fields, codes)
+			builder := array.NewDenseUnionBuilder(mem, unionType)
+			builder.Append(codes[childID])
+			builder.Child(childID).(*array.Int32Builder).Append(42)
+			values := builder.NewArray()
+			builder.Release()
+			defer values.Release()
+
+			structType := arrow.StructOf(arrow.Field{Name: "union", Type: unionType, Nullable: true})
+			validity := memory.NewBufferBytes([]byte{0})
+			data := array.NewData(structType, 1, []*memory.Buffer{validity}, []arrow.ArrayData{values.Data()}, 1, 0)
+			validity.Release()
+			child := array.NewStructData(data)
+			data.Release()
+			defer child.Release()
+			list := scalar.NewListScalar(child)
+			defer list.Release()
+
+			result, err := compute.ListElement(compute.WithAllocator(context.Background(), mem),
+				&compute.ScalarDatum{Value: list},
+				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)})
+			if err == nil && result != nil {
+				defer result.Release()
+			}
+			if unsupportedFirst {
+				require.ErrorIs(t, err, arrow.ErrNotImplemented)
+			} else {
+				require.NoError(t, err)
+				actual := result.(*compute.ScalarDatum).Value
+				require.False(t, actual.IsValid())
+				require.NoError(t, actual.ValidateFull())
 			}
 		})
 	}

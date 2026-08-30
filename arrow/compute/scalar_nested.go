@@ -91,34 +91,45 @@ type listElementFunction struct {
 	ScalarFunction
 }
 
-func listElementScalarResultSupported(typ arrow.DataType) bool {
+func listElementScalarResultSupported(typ arrow.DataType, nullResult bool) bool {
 	switch typ.ID() {
 	case arrow.BINARY_VIEW, arrow.STRING_VIEW, arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW,
 		arrow.DECIMAL32, arrow.DECIMAL64:
 		return false
 	case arrow.EXTENSION:
-		return listElementScalarResultSupported(typ.(arrow.ExtensionType).StorageType())
+		return listElementScalarResultSupported(typ.(arrow.ExtensionType).StorageType(), nullResult)
 	case arrow.STRUCT:
 		for _, field := range typ.(*arrow.StructType).Fields() {
-			if !listElementScalarResultSupported(field.Type) {
+			if !listElementScalarResultSupported(field.Type, nullResult) {
 				return false
 			}
 		}
 	case arrow.SPARSE_UNION:
+		if typ.(arrow.UnionType).NumFields() == 0 {
+			return false
+		}
 		for _, field := range typ.(arrow.UnionType).Fields() {
-			if !listElementScalarResultSupported(field.Type) {
+			if !listElementScalarResultSupported(field.Type, nullResult) {
 				return false
 			}
 		}
 	case arrow.DENSE_UNION:
-		return true
+		if !nullResult {
+			return true
+		}
+		fields := typ.(arrow.UnionType).Fields()
+		return len(fields) != 0 && listElementScalarResultSupported(fields[0].Type, true)
 	case arrow.RUN_END_ENCODED:
-		return listElementScalarResultSupported(typ.(*arrow.RunEndEncodedType).Encoded())
+		return listElementScalarResultSupported(typ.(*arrow.RunEndEncodedType).Encoded(), nullResult)
 	}
 	return true
 }
 
 func listElementScalarArrayValueSupported(values arrow.Array, index int) bool {
+	if values.IsNull(index) {
+		return listElementScalarResultSupported(values.DataType(), true)
+	}
+
 	switch values := values.(type) {
 	case *array.BinaryView, *array.StringView, *array.ListView, *array.LargeListView,
 		*array.Decimal32, *array.Decimal64:
@@ -187,22 +198,47 @@ func (fn *listElementFunction) Execute(ctx context.Context, opts FunctionOptions
 		if !ok {
 			return nil, fmt.Errorf("%w: list_element requires a list-like input", arrow.ErrType)
 		}
-		if !listElementScalarResultSupported(listType.Elem()) {
-			return nil, fmt.Errorf("%w: list_element scalar output type %s is not supported", arrow.ErrNotImplemented, listType.Elem())
-		}
-
 		listValue, ok := listDatum.Value.(scalar.ListScalar)
 		if !ok {
 			return nil, fmt.Errorf("%w: list_element requires a list-like scalar input", arrow.ErrType)
 		}
-		if listValue.IsValid() && listValue.GetList() != nil {
+		if !listElementScalarResultSupported(listType.Elem(), !listValue.IsValid()) {
+			return nil, fmt.Errorf("%w: list_element scalar output type %s is not supported", arrow.ErrNotImplemented, listType.Elem())
+		}
+		if !listValue.IsValid() {
+			if _, err := fn.DispatchExact(listDatum.Type(), indexDatum.Type()); err != nil {
+				return nil, err
+			}
+			if err := context.Cause(ctx); err != nil {
+				return nil, err
+			}
+			// Null scalar construction does not need array concatenation or
+			// unboxing, which do not support every nested scalar type.
+			return &ScalarDatum{Value: scalar.MakeNullScalar(listType.Elem())}, nil
+		}
+		if listValue.GetList() != nil {
 			index, err := kernels.ListElementScalarIndex(indexDatum.Value)
 			if err != nil {
 				return nil, err
 			}
 			values := listValue.GetList()
-			if index < uint64(values.Len()) && !listElementScalarArrayValueSupported(values, int(index)) {
-				return nil, fmt.Errorf("%w: list_element scalar output value %s is not supported", arrow.ErrNotImplemented, values.DataType())
+			if index < uint64(values.Len()) {
+				if !listElementScalarArrayValueSupported(values, int(index)) {
+					return nil, fmt.Errorf("%w: list_element scalar output value %s is not supported", arrow.ErrNotImplemented, values.DataType())
+				}
+				if values.IsNull(int(index)) {
+					if _, err := fn.DispatchExact(listDatum.Type(), indexDatum.Type()); err != nil {
+						return nil, err
+					}
+					if err := context.Cause(ctx); err != nil {
+						return nil, err
+					}
+					value, err := scalar.GetScalar(values, int(index))
+					if err != nil {
+						return nil, err
+					}
+					return &ScalarDatum{Value: value}, nil
+				}
 			}
 		}
 	}

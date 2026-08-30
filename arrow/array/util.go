@@ -535,7 +535,7 @@ func (n *nullArrayFactory) create() *Data {
 		bufs[0] = nil
 		bufs = append(bufs, n.buf)
 		// buffer is zeroed, but 0 may not be a valid type code
-		if dt.TypeCodes()[0] != 0 {
+		if n.len > 0 && dt.TypeCodes()[0] != 0 {
 			bufs[1] = memory.NewResizableBuffer(n.mem)
 			bufs[1].Resize(n.len)
 			defer bufs[1].Release()
