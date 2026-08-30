@@ -17,6 +17,7 @@
 package ipc
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -125,6 +126,46 @@ func TestWriteDictionaryPayloadsReleasesPayloadPerDictionary(t *testing.T) {
 	require.Positive(t, payloadBytes)
 	lastPayloadGrowth := writer.payloads[len(writer.payloads)-1] - writer.payloads[0]
 	require.Less(t, lastPayloadGrowth, payloadBytes)
+}
+
+func TestWriteDictionaryPayloadsReleasesPayloadOnFailure(t *testing.T) {
+	const numColumns = 3
+	for _, delta := range []bool{false, true} {
+		for failAfter := 1; failAfter <= numColumns; failAfter++ {
+			t.Run(fmt.Sprintf("delta=%t/failAfter=%d", delta, failAfter), func(t *testing.T) {
+				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+				defer mem.AssertSize(t, 0)
+				record := newDictionaryRecordBatch(mem, numColumns, 64)
+				defer record.Release()
+
+				mapper := &dictutils.Mapper{}
+				mapper.ImportSchema(record.Schema())
+				encoder := newRecordEncoder(mem, 0, kMaxNestingDepth, true, -1, 1, 0, nil)
+				lastWrittenDicts := make(map[int64]arrow.Array)
+				defer func() {
+					for _, dict := range lastWrittenDicts {
+						dict.Release()
+					}
+				}()
+
+				if delta {
+					previous := newDictionaryRecordBatch(mem, numColumns, 32)
+					defer previous.Release()
+					require.NoError(t, writeDictionaryPayloads(mem, previous, false, true,
+						mapper, lastWrittenDicts, &failingPayloadWriter{}, encoder))
+				}
+
+				before := mem.CurrentAlloc()
+				want := errors.New("dictionary payload write failed")
+				writer := &failingPayloadWriter{err: want, failAfter: failAfter}
+				err := writeDictionaryPayloads(mem, record, false, delta,
+					mapper, lastWrittenDicts, writer, encoder)
+				require.ErrorIs(t, err, want)
+				require.Equal(t, failAfter, writer.payloads)
+				require.Equal(t, before, mem.CurrentAlloc())
+			})
+		}
+	}
 }
 
 func BenchmarkWriteDictionaryPayloadsPeak(b *testing.B) {
