@@ -17,12 +17,15 @@
 package pqarrow_test
 
 import (
+	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/stretchr/testify/require"
 )
@@ -39,7 +42,7 @@ func makeArrowBinaryOffsetsTables(t *testing.T) []struct {
 	}, 0, 3)
 
 	binaryBuilder := array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
-	for _, value := range [][]byte{[]byte("alpha"), []byte("beta"), nil, []byte("gamma"), []byte{}, []byte("delta")} {
+	for _, value := range [][]byte{[]byte("alpha"), []byte("beta"), nil, []byte("gamma"), {}, []byte("delta")} {
 		if value == nil {
 			binaryBuilder.AppendNull()
 		} else {
@@ -181,5 +184,51 @@ func TestWriteArrowBinaryOffsetsWithSlice(t *testing.T) {
 	gotArr := got.Column(0).Data().Chunk(0)
 	for i := 0; i < wantArr.Len(); i++ {
 		require.Equal(t, binaryOffsetValue(wantArr, i), binaryOffsetValue(gotArr, i))
+	}
+}
+
+func TestWriteArrowBinaryOffsetsNestedNullPageIndex(t *testing.T) {
+	for _, dtype := range []arrow.DataType{arrow.BinaryTypes.Binary, arrow.BinaryTypes.LargeBinary,
+		arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString} {
+		for _, pageVersion := range []parquet.DataPageVersion{parquet.DataPageV1, parquet.DataPageV2} {
+			for _, enc := range []parquet.Encoding{parquet.Encodings.Plain,
+				parquet.Encodings.DeltaLengthByteArray, parquet.Encodings.DeltaByteArray} {
+				t.Run(fmt.Sprintf("%s/page-%d/%s", dtype, pageVersion, enc), func(t *testing.T) {
+					builder := array.NewListBuilder(memory.DefaultAllocator, dtype)
+					defer builder.Release()
+					builder.Append(true)
+					value := "aaa"
+					if dtype.ID() == arrow.BINARY || dtype.ID() == arrow.LARGE_BINARY {
+						value = "YWFh"
+					}
+					require.NoError(t, builder.ValueBuilder().AppendValueFromString(value))
+					builder.ValueBuilder().AppendNull()
+					builder.AppendNull()
+					arr := builder.NewListArray()
+					defer arr.Release()
+					field := arrow.Field{Name: "value", Type: arr.DataType(), Nullable: true}
+					column := arrow.NewColumnFromArr(field, arr)
+					defer column.Release()
+					tbl := array.NewTable(arrow.NewSchema([]arrow.Field{field}, nil), []arrow.Column{column}, int64(arr.Len()))
+					defer tbl.Release()
+					props := parquet.NewWriterProperties(parquet.WithDictionaryDefault(false),
+						parquet.WithDataPageVersion(pageVersion), parquet.WithEncoding(enc),
+						parquet.WithPageIndexEnabled(true))
+					data := writeParquetTable(t, tbl, tbl.NumRows(), props)
+					reader, err := file.NewParquetReader(bytes.NewReader(data))
+					require.NoError(t, err)
+					defer reader.Close()
+					rgIndex, err := reader.GetPageIndexReader().RowGroup(0)
+					require.NoError(t, err)
+					index, err := rgIndex.GetColumnIndex(0)
+					require.NoError(t, err)
+					require.NotNil(t, index)
+					require.Equal(t, []bool{false}, index.GetNullPages())
+					require.Equal(t, []int64{2}, index.GetNullCounts())
+					require.Equal(t, [][]byte{[]byte("aaa")}, index.GetMinValues())
+					require.Equal(t, [][]byte{[]byte("aaa")}, index.GetMaxValues())
+				})
+			}
+		}
 	}
 }

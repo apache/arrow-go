@@ -111,8 +111,9 @@ func writeArrowValuesSpaced[T byteArrayArrowOffset](w *ByteArrayColumnChunkWrite
 			enc.PutArrow(values, offsets)
 		}
 		if w.pageStatistics != nil {
-			nulls := numValues - numRead
-			w.pageStatistics.(*metadata.ByteArrayStatistics).UpdateFromArrowOffsetsSpaced(values, offsets, validBits, validBitsOffset, nulls)
+			stats := w.pageStatistics.(*metadata.ByteArrayStatistics)
+			stats.UpdateFromArrowOffsetsSpaced(values, offsets, validBits, validBitsOffset, numSpaced-numRead)
+			stats.IncNulls(numValues - numSpaced)
 		}
 		if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 			metadata.InsertSpacedArrowOffsetHashes(w.bloomFilter, numRead, values, offsets, validBits, validBitsOffset)
@@ -128,8 +129,9 @@ func writeArrowValuesSpaced[T byteArrayArrowOffset](w *ByteArrayColumnChunkWrite
 			enc.PutArrow64(values, offsets)
 		}
 		if w.pageStatistics != nil {
-			nulls := numValues - numRead
-			w.pageStatistics.(*metadata.ByteArrayStatistics).UpdateFromArrowOffsetsSpaced64(values, offsets, validBits, validBitsOffset, nulls)
+			stats := w.pageStatistics.(*metadata.ByteArrayStatistics)
+			stats.UpdateFromArrowOffsetsSpaced64(values, offsets, validBits, validBitsOffset, numSpaced-numRead)
+			stats.IncNulls(numValues - numSpaced)
 		}
 		if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 			metadata.InsertSpacedArrowOffsetHashes64(w.bloomFilter, numRead, values, offsets, validBits, validBitsOffset)
