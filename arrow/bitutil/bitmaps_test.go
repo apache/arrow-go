@@ -795,3 +795,47 @@ func TestBitmapWriterAppendBitmapLarge(t *testing.T) {
 		assert.Equal(t, expected, actual, "bit mismatch at position %d", i)
 	}
 }
+
+func TestBitmapOpsBoundaries(t *testing.T) {
+	rng := rand.New(rand.NewSource(17))
+	left, right := make([]byte, 260), make([]byte, 260)
+	_, _ = rng.Read(left)
+	_, _ = rng.Read(right)
+	for _, op := range []struct {
+		name string
+		fn   noAllocFn
+		want func(bool, bool) bool
+	}{
+		{"and", bitutil.BitmapAnd, func(l, r bool) bool { return l && r }},
+		{"or", bitutil.BitmapOr, func(l, r bool) bool { return l || r }},
+		{"and-not", bitutil.BitmapAndNot, func(l, r bool) bool { return l && !r }},
+		{"xor", bitutil.BitmapXor, func(l, r bool) bool { return l != r }},
+		{"xnor", bitutil.BitmapXnor, func(l, r bool) bool { return l == r }},
+	} {
+		t.Run(op.name, func(t *testing.T) {
+			for _, length := range []int{0, 1, 7, 8, 9, 15, 16, 17, 504, 512, 520, 528, 536, 1016, 1024, 1032, 1040, 2056} {
+				for _, offset := range []int{0, 1, 7, 8, 15} {
+					for _, alias := range []string{"none", "left", "right"} {
+						l, r := append([]byte(nil), left...), append([]byte(nil), right...)
+						out := make([]byte, len(left))
+						for i := range out {
+							out[i] = 0xa5
+						}
+						switch alias {
+						case "left":
+							out = l
+						case "right":
+							out = r
+						}
+						expected := append([]byte(nil), out...)
+						for i := offset; i < offset+length; i++ {
+							bitutil.SetBitTo(expected, i, op.want(bitutil.BitIsSet(left, i), bitutil.BitIsSet(right, i)))
+						}
+						op.fn(l, r, int64(offset), int64(offset), out, int64(offset), int64(length))
+						assert.Equal(t, expected, out, "length=%d offset=%d alias=%s", length, offset, alias)
+					}
+				}
+			}
+		})
+	}
+}
