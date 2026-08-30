@@ -159,3 +159,31 @@ func TestRoundToMultipleInt64HalfModes(t *testing.T) {
 		})
 	}
 }
+
+func TestTemporalRoundingExtremeOrdering(t *testing.T) {
+	values := []int64{
+		math.MinInt64, math.MinInt64 + 1, minCalendarTimestampSecond - 1,
+		minCalendarTimestampSecond, -1, 0, 1, math.MaxInt64 - 86400, math.MaxInt64 - 1, math.MaxInt64,
+	}
+	for _, inputUnit := range []arrow.TimeUnit{arrow.Second, arrow.Millisecond, arrow.Microsecond, arrow.Nanosecond} {
+		for _, unit := range []RoundTemporalUnit{RoundTemporalYear, RoundTemporalQuarter, RoundTemporalMonth, RoundTemporalWeek, RoundTemporalDay} {
+			for _, multiple := range []int64{1, 2, 7, 300} {
+				for _, value := range values {
+					state := roundTemporalState{RoundTemporalOptions: RoundTemporalOptions{Unit: unit, Multiple: multiple}}
+					state.unitNanos, state.isSubDay = unitInNanos(unit)
+					state.roundingInterval = state.unitNanos * multiple
+					state.mode = RoundDown
+					floor, err := roundTimestamp(value, inputUnit, time.UTC, state)
+					if err == nil && floor > value {
+						t.Errorf("floor(%d, %s, %d %v) = %d exceeds the input", value, inputUnit, multiple, unit, floor)
+					}
+					state.mode = RoundUp
+					ceil, err := roundTimestamp(value, inputUnit, time.UTC, state)
+					if err == nil && ceil < value {
+						t.Errorf("ceil(%d, %s, %d %v) = %d precedes the input", value, inputUnit, multiple, unit, ceil)
+					}
+				}
+			}
+		}
+	}
+}
