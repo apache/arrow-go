@@ -47,17 +47,17 @@ func temporalToString(s TemporalScalar) string {
 		return time.Unix(0, int64(s.Value)*int64(s.Unit().Multiplier())).UTC().Format("15:04:05.999999999")
 	case *Timestamp:
 		typ := s.DataType().(*arrow.TimestampType)
-		if typ.TimeZone == "" {
-			return time.Unix(0, int64(s.Value)*int64(s.Unit().Multiplier())).UTC().Format(timestampScalarLayout)
-		}
 		toTime, err := typ.GetToTimeFunc()
 		if err != nil {
 			return "..."
 		}
 		tm := toTime(s.Value)
-		layout := timestampScalarZoneLayout
-		if _, offset := tm.Zone(); offset%60 != 0 {
-			layout = timestampScalarZoneSecondsLayout
+		layout := timestampScalarLayout
+		if typ.TimeZone != "" {
+			layout = timestampScalarZoneLayout
+			if _, offset := tm.Zone(); offset%60 != 0 {
+				layout = timestampScalarZoneSecondsLayout
+			}
 		}
 		return tm.Format(layout)
 	}

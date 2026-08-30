@@ -558,6 +558,37 @@ func TestTimestampScalarStringRoundTrip(t *testing.T) {
 	}
 }
 
+func TestTimestampScalarStringRoundTripOutsideNanosecondRange(t *testing.T) {
+	for _, unit := range []arrow.TimeUnit{arrow.Second, arrow.Millisecond, arrow.Microsecond} {
+		inputs := []string{
+			"0000-01-01 00:00:00", "1500-06-15 12:34:56",
+			"2500-06-15 12:34:56", "9999-12-31 23:59:59",
+		}
+		if unit != arrow.Second {
+			inputs = append(inputs, "1500-06-15 12:34:56.123", "2500-06-15 12:34:56.123")
+		}
+		if unit == arrow.Microsecond {
+			inputs = append(inputs, "1500-06-15 12:34:56.123456", "2500-06-15 12:34:56.123456")
+		}
+		for _, input := range inputs {
+			t.Run(unit.String()+"/"+input, func(t *testing.T) {
+				typ := &arrow.TimestampType{Unit: unit}
+				value, err := arrow.TimestampFromString(input, unit)
+				require.NoError(t, err)
+				original := scalar.NewTimestampScalar(value, typ)
+				require.Equal(t, input, original.String())
+
+				parsed, err := scalar.ParseScalar(typ, original.String())
+				require.NoError(t, err)
+				assertScalarsEqual(t, original, parsed)
+				fromParam, err := scalar.MakeScalarParam(original.String(), typ)
+				require.NoError(t, err)
+				assertScalarsEqual(t, original, fromParam)
+			})
+		}
+	}
+}
+
 func TestTimestampScalarStringRoundTripPreservesHistoricalOffsetSeconds(t *testing.T) {
 	value, err := arrow.TimestampFromString("0000-01-01 00:00:00", arrow.Second)
 	require.NoError(t, err)
