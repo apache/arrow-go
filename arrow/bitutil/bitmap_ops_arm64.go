@@ -34,6 +34,12 @@ func _bitmap_aligned_or_neon(left, right, out unsafe.Pointer, length int64)
 //go:noescape
 func _bitmap_aligned_and_not_neon(left, right, out unsafe.Pointer, length int64)
 
+//go:noescape
+func _bitmap_aligned_xor_neon(left, right, out unsafe.Pointer, length int64)
+
+//go:noescape
+func _bitmap_aligned_xnor_neon(left, right, out unsafe.Pointer, length int64)
+
 func bitmapAlignedAndNEON(left, right, out []byte) {
 	_bitmap_aligned_and_neon(unsafe.Pointer(&left[0]), unsafe.Pointer(&right[0]), unsafe.Pointer(&out[0]), int64(len(out)))
 }
@@ -46,15 +52,26 @@ func bitmapAlignedAndNotNEON(left, right, out []byte) {
 	_bitmap_aligned_and_not_neon(unsafe.Pointer(&left[0]), unsafe.Pointer(&right[0]), unsafe.Pointer(&out[0]), int64(len(out)))
 }
 
+func bitmapAlignedXorNEON(left, right, out []byte) {
+	_bitmap_aligned_xor_neon(unsafe.Pointer(&left[0]), unsafe.Pointer(&right[0]), unsafe.Pointer(&out[0]), int64(len(out)))
+}
+
+func bitmapAlignedXnorNEON(left, right, out []byte) {
+	_bitmap_aligned_xnor_neon(unsafe.Pointer(&left[0]), unsafe.Pointer(&right[0]), unsafe.Pointer(&out[0]), int64(len(out)))
+}
+
 func init() {
 	if cpu.ARM64.HasASIMD {
 		bitAndOp.opAligned = bitmapAlignedAndNEON
 		bitOrOp.opAligned = bitmapAlignedOrNEON
 		bitAndNotOp.opAligned = bitmapAlignedAndNotNEON
+		bitXorOp.opAligned = bitmapAlignedXorNEON
+		bitXnorOp.opAligned = bitmapAlignedXnorNEON
 	} else {
 		bitAndOp.opAligned = alignedBitAndGo
 		bitOrOp.opAligned = alignedBitOrGo
 		bitAndNotOp.opAligned = alignedBitAndNotGo
+		bitXorOp.opAligned = alignedBitXorGo
+		bitXnorOp.opAligned = alignedBitXnorGo
 	}
-	bitXorOp.opAligned = alignedBitXorGo
 }

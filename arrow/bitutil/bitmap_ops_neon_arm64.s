@@ -119,3 +119,77 @@ and_not_tail_loop:
 	BNE and_not_tail_loop
 and_not_done:
 	RET
+
+TEXT ·_bitmap_aligned_xor_neon(SB), $0-32
+	MOVD left+0(FP), R0
+	MOVD right+8(FP), R1
+	MOVD out+16(FP), R2
+	MOVD length+24(FP), R3
+
+xor_loop:
+	CMP $64, R3
+	BLO xor_tail
+	VLD1.P 64(R0), [V0.B16, V1.B16, V2.B16, V3.B16]
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VEOR V0.B16, V4.B16, V0.B16
+	VEOR V1.B16, V5.B16, V1.B16
+	VEOR V2.B16, V6.B16, V2.B16
+	VEOR V3.B16, V7.B16, V3.B16
+	VST1.P [V0.B16, V1.B16, V2.B16, V3.B16], 64(R2)
+	SUB $64, R3
+	B xor_loop
+
+xor_tail:
+	CBZ R3, xor_done
+xor_tail_loop:
+	MOVBU (R0), R4
+	MOVBU (R1), R5
+	EOR R5, R4, R4
+	MOVB R4, (R2)
+	ADD $1, R0
+	ADD $1, R1
+	ADD $1, R2
+	SUBS $1, R3
+	BNE xor_tail_loop
+xor_done:
+	RET
+
+TEXT ·_bitmap_aligned_xnor_neon(SB), $0-32
+	MOVD left+0(FP), R0
+	MOVD right+8(FP), R1
+	MOVD out+16(FP), R2
+	MOVD length+24(FP), R3
+	VMOVI $0xff, V31.B16
+
+xnor_loop:
+	CMP $64, R3
+	BLO xnor_tail
+	VLD1.P 64(R0), [V0.B16, V1.B16, V2.B16, V3.B16]
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VEOR V0.B16, V4.B16, V0.B16
+	VEOR V31.B16, V0.B16, V0.B16
+	VEOR V1.B16, V5.B16, V1.B16
+	VEOR V31.B16, V1.B16, V1.B16
+	VEOR V2.B16, V6.B16, V2.B16
+	VEOR V31.B16, V2.B16, V2.B16
+	VEOR V3.B16, V7.B16, V3.B16
+	VEOR V31.B16, V3.B16, V3.B16
+	VST1.P [V0.B16, V1.B16, V2.B16, V3.B16], 64(R2)
+	SUB $64, R3
+	B xnor_loop
+
+xnor_tail:
+	CBZ R3, xnor_done
+xnor_tail_loop:
+	MOVBU (R0), R4
+	MOVBU (R1), R5
+	EOR R5, R4, R4
+	MVN R4, R4
+	MOVB R4, (R2)
+	ADD $1, R0
+	ADD $1, R1
+	ADD $1, R2
+	SUBS $1, R3
+	BNE xnor_tail_loop
+xnor_done:
+	RET

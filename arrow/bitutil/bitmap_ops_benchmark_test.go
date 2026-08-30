@@ -38,6 +38,8 @@ func BenchmarkBitmapAlignedOps(b *testing.B) {
 				{name: "and", fn: bitutil.BitmapAnd},
 				{name: "or", fn: bitutil.BitmapOr},
 				{name: "and-not", fn: bitutil.BitmapAndNot},
+				{name: "xor", fn: bitutil.BitmapXor},
+				{name: "xnor", fn: bitutil.BitmapXnor},
 			} {
 				b.Run(op.name, func(b *testing.B) {
 					b.SetBytes(int64(2 * nbytes))

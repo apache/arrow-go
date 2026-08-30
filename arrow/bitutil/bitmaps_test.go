@@ -535,6 +535,24 @@ func (s *BitmapOpSuite) TestBitmapAndNot() {
 	})
 }
 
+func (s *BitmapOpSuite) TestBitmapXor() {
+	op := bitmapOp{
+		noAlloc: bitutil.BitmapXor,
+		alloc:   bitutil.BitmapXorAlloc,
+	}
+
+	leftBits := []int{0, 1, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1}
+	rightBits := []int{0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0}
+	resultBits := []bool{false, true, false, true, true, true, false, true, true, false, true, true, true, true}
+
+	s.Run("aligned", func() {
+		s.testAligned(op, leftBits, rightBits, resultBits)
+	})
+	s.Run("unaligned", func() {
+		s.testUnaligned(op, leftBits, rightBits, resultBits)
+	})
+}
+
 func (s *BitmapOpSuite) TestBitmapXnor() {
 	op := bitmapOp{
 		noAlloc: bitutil.BitmapXnor,
@@ -590,6 +608,8 @@ func TestBitmapOpsLargeAligned(t *testing.T) {
 		{name: "and", fn: bitutil.BitmapAnd, want: func(left, right byte) byte { return left & right }},
 		{name: "or", fn: bitutil.BitmapOr, want: func(left, right byte) byte { return left | right }},
 		{name: "and-not", fn: bitutil.BitmapAndNot, want: func(left, right byte) byte { return left &^ right }},
+		{name: "xor", fn: bitutil.BitmapXor, want: func(left, right byte) byte { return left ^ right }},
+		{name: "xnor", fn: bitutil.BitmapXnor, want: func(left, right byte) byte { return ^(left ^ right) }},
 	} {
 		t.Run(op.name, func(t *testing.T) {
 			out := make([]byte, nbytes)
