@@ -24,7 +24,7 @@ import (
 )
 
 func BenchmarkBitmapAlignedOps(b *testing.B) {
-	for _, nbytes := range []int{bufferSize * 4, bufferSize * 16} {
+	for _, nbytes := range []int{8, 32, 64, 128, 1024, bufferSize * 4, bufferSize * 16} {
 		b.Run(strconv.Itoa(nbytes), func(b *testing.B) {
 			left := randomBuffer(int64(nbytes))
 			right := randomBuffer(int64(nbytes))

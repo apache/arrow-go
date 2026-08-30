@@ -813,7 +813,7 @@ func TestBitmapOpsBoundaries(t *testing.T) {
 		{"xnor", bitutil.BitmapXnor, func(l, r bool) bool { return l == r }},
 	} {
 		t.Run(op.name, func(t *testing.T) {
-			for _, length := range []int{0, 1, 7, 8, 9, 15, 16, 17, 504, 512, 520, 528, 536, 1016, 1024, 1032, 1040, 2056} {
+			for _, length := range []int{0, 1, 7, 8, 9, 15, 16, 17, 24, 32, 56, 64, 72, 120, 128, 136, 504, 512, 520, 528, 536, 1016, 1024, 1032, 1040, 2056} {
 				for _, offset := range []int{0, 1, 7, 8, 15} {
 					for _, alias := range []string{"none", "left", "right"} {
 						l, r := append([]byte(nil), left...), append([]byte(nil), right...)

@@ -40,23 +40,60 @@ func _bitmap_aligned_xor_neon(left, right, out unsafe.Pointer, length int64)
 //go:noescape
 func _bitmap_aligned_xnor_neon(left, right, out unsafe.Pointer, length int64)
 
+func bitmapSlicesOverlap(left, right []byte) bool {
+	if len(left) == 0 || len(right) == 0 {
+		return false
+	}
+
+	leftStart := uintptr(unsafe.Pointer(&left[0]))
+	rightStart := uintptr(unsafe.Pointer(&right[0]))
+	if leftStart < rightStart {
+		return rightStart-leftStart < uintptr(len(left))
+	}
+	return leftStart-rightStart < uintptr(len(right))
+}
+
+func bitmapAlignedNEONHasOverlap(left, right, out []byte) bool {
+	return bitmapSlicesOverlap(left, out) || bitmapSlicesOverlap(right, out)
+}
+
 func bitmapAlignedAndNEON(left, right, out []byte) {
+	if bitmapAlignedNEONHasOverlap(left, right, out) {
+		alignedBitAndGo(left, right, out)
+		return
+	}
 	_bitmap_aligned_and_neon(unsafe.Pointer(&left[0]), unsafe.Pointer(&right[0]), unsafe.Pointer(&out[0]), int64(len(out)))
 }
 
 func bitmapAlignedOrNEON(left, right, out []byte) {
+	if bitmapAlignedNEONHasOverlap(left, right, out) {
+		alignedBitOrGo(left, right, out)
+		return
+	}
 	_bitmap_aligned_or_neon(unsafe.Pointer(&left[0]), unsafe.Pointer(&right[0]), unsafe.Pointer(&out[0]), int64(len(out)))
 }
 
 func bitmapAlignedAndNotNEON(left, right, out []byte) {
+	if bitmapAlignedNEONHasOverlap(left, right, out) {
+		alignedBitAndNotGo(left, right, out)
+		return
+	}
 	_bitmap_aligned_and_not_neon(unsafe.Pointer(&left[0]), unsafe.Pointer(&right[0]), unsafe.Pointer(&out[0]), int64(len(out)))
 }
 
 func bitmapAlignedXorNEON(left, right, out []byte) {
+	if bitmapAlignedNEONHasOverlap(left, right, out) {
+		alignedBitXorGo(left, right, out)
+		return
+	}
 	_bitmap_aligned_xor_neon(unsafe.Pointer(&left[0]), unsafe.Pointer(&right[0]), unsafe.Pointer(&out[0]), int64(len(out)))
 }
 
 func bitmapAlignedXnorNEON(left, right, out []byte) {
+	if bitmapAlignedNEONHasOverlap(left, right, out) {
+		alignedBitXnorGo(left, right, out)
+		return
+	}
 	_bitmap_aligned_xnor_neon(unsafe.Pointer(&left[0]), unsafe.Pointer(&right[0]), unsafe.Pointer(&out[0]), int64(len(out)))
 }
 
