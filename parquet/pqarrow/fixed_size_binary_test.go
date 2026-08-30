@@ -17,12 +17,15 @@
 package pqarrow_test
 
 import (
+	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/stretchr/testify/require"
 )
@@ -186,4 +189,69 @@ func TestWriteArrowFixedSizeBinaryAllNull(t *testing.T) {
 	defer got.Release()
 	assertTableColumnsEqual(t, tbl, got)
 	require.Equal(t, tbl.NumRows(), got.NumRows())
+}
+
+func TestWriteArrowFixedSizeBinaryNestedNullStatistics(t *testing.T) {
+	for _, pageVersion := range []parquet.DataPageVersion{parquet.DataPageV1, parquet.DataPageV2} {
+		for _, nullableValues := range []bool{false, true} {
+			t.Run(fmt.Sprintf("page-%d/nullable-values-%t", pageVersion, nullableValues), func(t *testing.T) {
+				builder := array.NewListBuilder(memory.DefaultAllocator, &arrow.FixedSizeBinaryType{ByteWidth: 3})
+				defer builder.Release()
+				values := builder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
+				builder.Append(true)
+				values.Append([]byte("aaa"))
+				builder.AppendNull()
+				builder.Append(true)
+				builder.Append(true)
+				values.Append([]byte("zzz"))
+				nullCount := int64(2)
+				if nullableValues {
+					values.AppendNull()
+					nullCount++
+				}
+				arr := builder.NewListArray()
+				defer arr.Release()
+				field := arrow.Field{Name: "value", Type: arr.DataType(), Nullable: true}
+				column := arrow.NewColumnFromArr(field, arr)
+				defer column.Release()
+				tbl := array.NewTable(arrow.NewSchema([]arrow.Field{field}, nil), []arrow.Column{column}, int64(arr.Len()))
+				defer tbl.Release()
+				props := parquet.NewWriterProperties(parquet.WithDictionaryDefault(false),
+					parquet.WithDataPageVersion(pageVersion), parquet.WithBatchSize(2))
+				data := writeParquetTable(t, tbl, tbl.NumRows(), props)
+				reader, err := file.NewParquetReader(bytes.NewReader(data))
+				require.NoError(t, err)
+				defer reader.Close()
+				chunk, err := reader.MetaData().RowGroup(0).ColumnChunk(0)
+				require.NoError(t, err)
+				stats, err := chunk.Statistics()
+				require.NoError(t, err)
+				require.Equal(t, nullCount, stats.NullCount())
+				require.Equal(t, int64(2), stats.NumValues())
+				require.Equal(t, []byte("aaa"), stats.EncodeMin())
+				require.Equal(t, []byte("zzz"), stats.EncodeMax())
+			})
+		}
+	}
+}
+
+func TestWriteArrowFixedSizeBinaryBatchSizeFallback(t *testing.T) {
+	for _, batchSize := range []int64{-1, 0, (1<<30)/7 + 1} {
+		for _, nullable := range []bool{false, true} {
+			t.Run(fmt.Sprintf("batch-%d/nullable-%t", batchSize, nullable), func(t *testing.T) {
+				values := [][]byte{[]byte("aaa"), []byte("zzz")}
+				if nullable {
+					values = append(values, nil)
+				}
+				tbl := fixedSizeBinaryTable(t, values, 3)
+				defer tbl.Release()
+				props := parquet.NewWriterProperties(parquet.WithDictionaryDefault(false),
+					parquet.WithBatchSize(batchSize))
+				data := writeParquetTable(t, tbl, tbl.NumRows(), props)
+				got := readParquetTable(t, data, pqarrow.ArrowReadProperties{})
+				defer got.Release()
+				assertTableColumnsEqual(t, tbl, got)
+			})
+		}
+	}
 }

@@ -30,9 +30,15 @@ type fixedLenByteArrayArrowEncoder interface {
 }
 
 // SupportsArrowValues reports whether the active fixed-length byte-array
-// encoder can consume values directly from an Arrow value buffer.
+// encoder and configured batch size support writing an Arrow value buffer directly.
 func (w *FixedLenByteArrayColumnChunkWriter) SupportsArrowValues() bool {
 	if _, ok := w.currentEncoder.(fixedLenByteArrayArrowEncoder); !ok {
+		return false
+	}
+	typeLen := int64(w.descr.TypeLength())
+	batchSize := w.props.WriteBatchSize()
+	const maxSafeBatchDataSize int64 = 1 << 30
+	if typeLen <= 0 || batchSize <= 0 || batchSize > max(1, maxSafeBatchDataSize/(typeLen+4)) {
 		return false
 	}
 	if w.pageStatistics == nil {
@@ -42,17 +48,17 @@ func (w *FixedLenByteArrayColumnChunkWriter) SupportsArrowValues() bool {
 	return ok
 }
 
-func (w *FixedLenByteArrayColumnChunkWriter) writeArrowValues(values []byte, byteWidth int) {
+func (w *FixedLenByteArrayColumnChunkWriter) writeArrowValues(values []byte, byteWidth int, numNulls int64) {
 	w.currentEncoder.(fixedLenByteArrayArrowEncoder).PutArrow(values)
 	if stats, ok := w.pageStatistics.(*metadata.FixedLenByteArrayStatistics); ok {
-		stats.UpdateFromArrowFixedWidth(values, byteWidth, 0)
+		stats.UpdateFromArrowFixedWidth(values, byteWidth, numNulls)
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		metadata.InsertArrowFixedLenHashes(w.bloomFilter, values, byteWidth)
 	}
 }
 
-func (w *FixedLenByteArrayColumnChunkWriter) writeArrowValuesSpaced(values []byte, byteWidth int, numRead int64, validBits []byte, validBitsOffset int64) {
+func (w *FixedLenByteArrayColumnChunkWriter) writeArrowValuesSpaced(values []byte, byteWidth int, numRead, numValues int64, validBits []byte, validBitsOffset int64) {
 	enc := w.currentEncoder.(fixedLenByteArrayArrowEncoder)
 	numSpaced := int64(len(values) / byteWidth)
 	if numSpaced == numRead {
@@ -63,6 +69,7 @@ func (w *FixedLenByteArrayColumnChunkWriter) writeArrowValuesSpaced(values []byt
 
 	if stats, ok := w.pageStatistics.(*metadata.FixedLenByteArrayStatistics); ok {
 		stats.UpdateFromArrowFixedWidthSpaced(values, byteWidth, validBits, validBitsOffset, numSpaced-numRead)
+		stats.IncNulls(numValues - numSpaced)
 	}
 	if w.bloomFilter != nil && w.currentEncoder.Encoding() != parquet.Encodings.PlainDict {
 		metadata.InsertSpacedArrowFixedLenHashes(w.bloomFilter, numRead, values, byteWidth, validBits, validBitsOffset)
@@ -97,7 +104,7 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatchArrow(values []byte, defL
 		toWrite := w.writeLevels(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 		start := int(valueOffset) * typeLen
 		end := int(valueOffset+toWrite) * typeLen
-		w.writeArrowValues(values[start:end], typeLen)
+		w.writeArrowValues(values[start:end], typeLen, batch-toWrite)
 		if err := w.commitWriteAndCheckPageLimit(batch, toWrite); err != nil {
 			panic(err)
 		}
@@ -143,7 +150,7 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatchSpacedArrow(values []byte
 			writeBits = w.bitsBuffer.Bytes()
 			writeBitsOffset = 0
 		}
-		w.writeArrowValuesSpaced(values[start:end], typeLen, info.batchNum, writeBits, writeBitsOffset)
+		w.writeArrowValuesSpaced(values[start:end], typeLen, info.batchNum, batch, writeBits, writeBitsOffset)
 		if err := w.commitWriteAndCheckPageLimit(batch, info.numSpaced()); err != nil {
 			panic(err)
 		}
