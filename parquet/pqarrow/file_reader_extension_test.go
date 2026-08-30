@@ -224,3 +224,58 @@ func TestReadRowGroupsSerialRecoversFromPanic(t *testing.T) {
 	require.ErrorContains(t, readErr, "panic while reading")
 	require.ErrorContains(t, readErr, "malformed extension array type")
 }
+
+type cancelingExtensionType struct {
+	stableExtensionType
+	cancel context.CancelFunc
+}
+
+func (t *cancelingExtensionType) ArrayType() reflect.Type {
+	t.cancel()
+	return reflect.TypeFor[stableExtensionArray]()
+}
+
+func TestReadRowGroupsCanceledDuringFinalColumn(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	builder := array.NewInt32Builder(mem)
+	builder.Append(1)
+	values := builder.NewInt32Array()
+	builder.Release()
+	defer values.Release()
+	record := array.NewRecordBatch(schema, []arrow.Array{values}, 1)
+	defer record.Release()
+
+	var buf bytes.Buffer
+	writer, err := NewFileWriter(schema, &buf, nil, DefaultWriterProps())
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+
+	for _, parallel := range []bool{false, true} {
+		name := "serial"
+		if parallel {
+			name = "parallel"
+		}
+		t.Run(name, func(t *testing.T) {
+			parquetReader, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()),
+				file.WithReadProps(parquet.NewReaderProperties(mem)))
+			require.NoError(t, err)
+			defer parquetReader.Close()
+			reader, err := NewFileReader(parquetReader, ArrowReadProperties{Parallel: parallel}, mem)
+			require.NoError(t, err)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			reader.Manifest.Fields[0].Field.Type = &cancelingExtensionType{cancel: cancel}
+
+			table, err := reader.ReadTable(ctx)
+			if table != nil {
+				defer table.Release()
+			}
+			require.ErrorIs(t, err, context.Canceled)
+			require.Nil(t, table)
+		})
+	}
+}

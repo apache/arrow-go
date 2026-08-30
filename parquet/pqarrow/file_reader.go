@@ -418,6 +418,9 @@ func (fr *FileReader) ReadRowGroups(ctx context.Context, indices, rowGroups []in
 			columns[idx] = *arrow.NewColumn(sc.Field(idx), data)
 			data.Release()
 		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 
 		var nrows int
 		if len(columns) > 0 {
