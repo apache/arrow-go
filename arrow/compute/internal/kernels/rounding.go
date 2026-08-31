@@ -966,20 +966,25 @@ func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts 
 }
 
 func roundTimestampInInputUnit(ts int64, inputUnit arrow.TimeUnit, opts roundTemporalState) (int64, error) {
-	valueNanos, err := convertToNanos(ts, inputUnit)
-	if err != nil {
-		return 0, err
+	// Keep the input in the target unit's arithmetic domain. Converting a wide
+	// timestamp to nanoseconds first would reject values that are valid in the
+	// requested unit (for example timestamp[s] in year 2300 rounded to 3 ms).
+	inputUnitNanos := big.NewInt(int64(inputUnit.Multiplier()))
+	valueNanos := new(big.Int).Mul(big.NewInt(ts), inputUnitNanos)
+	floorNanos := floorBigIntToMultiple(valueNanos, opts.roundingInterval)
+	targetUnit := big.NewInt(opts.unitNanos)
+	floorTarget := new(big.Int).Quo(new(big.Int).Set(floorNanos), targetUnit)
+	if !floorTarget.IsInt64() {
+		return 0, overflowError()
 	}
-	inputUnitNanos := int64(inputUnit.Multiplier())
-	floorNanos := floorBigIntToMultiple(big.NewInt(valueNanos), opts.roundingInterval)
-	floorInput := new(big.Int).Quo(floorNanos, big.NewInt(inputUnitNanos))
+	floorInput := new(big.Int).Quo(floorNanos, inputUnitNanos)
 	if !floorInput.IsInt64() {
 		return 0, overflowError()
 	}
 	floor := floorInput.Int64()
 
 	ceil := floor
-	increment := opts.roundingInterval / inputUnitNanos
+	increment := opts.roundingInterval / inputUnitNanos.Int64()
 	if opts.CeilIsStrictlyGreater || floor < ts {
 		var err error
 		ceil, err = checkedAddInt64(floor, increment)
@@ -1069,6 +1074,9 @@ func roundTimestampFromWallOrigin(t time.Time, inputUnit arrow.TimeUnit, tz *tim
 		return 0, err
 	}
 	floorWall := calendarWallTime(floor.In(tz))
+	if err := validateWallBoundaryInUnit(floorWall, opts.Unit); err != nil {
+		return 0, err
+	}
 	floorWallAtInputResolution, err := truncateWallToInputResolution(floorWall, origin, inputUnit)
 	if err != nil {
 		return 0, err
@@ -1103,6 +1111,23 @@ func roundTimestampFromWallOrigin(t time.Time, inputUnit arrow.TimeUnit, tz *tim
 		return 0, err
 	}
 	return int64(result), nil
+}
+
+func validateWallBoundaryInUnit(value time.Time, unit RoundTemporalUnit) error {
+	unitNanos, ok := unitInNanos(unit)
+	if !ok {
+		return fmt.Errorf("%w: unsupported fixed temporal unit", arrow.ErrNotImplemented)
+	}
+
+	origin := time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC)
+	elapsed, err := wallClockDifferenceBig(calendarWallTime(value), origin)
+	if err != nil {
+		return err
+	}
+	if !new(big.Int).Quo(elapsed, big.NewInt(unitNanos)).IsInt64() {
+		return overflowError()
+	}
+	return nil
 }
 
 func truncateWallToInputResolution(value, origin time.Time, inputUnit arrow.TimeUnit) (time.Time, error) {

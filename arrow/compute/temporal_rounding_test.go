@@ -718,6 +718,50 @@ func TestTemporalRoundingInputResolutionCasting(t *testing.T) {
 	}
 }
 
+func TestTemporalRoundingWideInputResolution(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		input    time.Time
+		expected time.Time
+		timezone string
+	}{
+		{
+			name:     "before epoch",
+			input:    time.Date(1500, time.June, 15, 12, 34, 56, 0, time.UTC),
+			expected: time.Date(1500, time.June, 15, 12, 34, 56, 0, time.UTC),
+		},
+		{
+			name:     "after nanosecond range",
+			input:    time.Date(2300, time.June, 15, 12, 34, 56, 0, time.UTC),
+			expected: time.Date(2300, time.June, 15, 12, 34, 55, 0, time.UTC),
+		},
+		{
+			name:     "after nanosecond range in Kathmandu",
+			input:    time.Date(2300, time.June, 15, 12, 34, 56, 0, time.UTC),
+			expected: time.Date(2300, time.June, 15, 12, 34, 55, 0, time.UTC),
+			timezone: "Asia/Kathmandu",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, rounding := range []struct {
+				name string
+				fn   temporalRoundingFunc
+			}{
+				{name: "floor", fn: compute.FloorTemporal},
+				{name: "ceil", fn: compute.CeilTemporal},
+				{name: "round", fn: compute.RoundTemporal},
+			} {
+				t.Run(rounding.name, func(t *testing.T) {
+					requireTemporalRoundingTime(t, rounding.fn, tc.input, tc.expected, arrow.Second, tc.timezone, compute.RoundTemporalOptions{
+						Multiple: 3,
+						Unit:     compute.RoundTemporalMillisecond,
+					})
+				})
+			}
+		})
+	}
+}
+
 func TestTemporalWithNulls(t *testing.T) {
 	ctx := context.Background()
 	mem := memory.DefaultAllocator
