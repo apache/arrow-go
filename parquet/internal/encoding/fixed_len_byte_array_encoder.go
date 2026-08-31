@@ -56,6 +56,20 @@ func (enc *PlainFixedLenByteArrayEncoder) Put(in []parquet.FixedLenByteArray) {
 	}
 }
 
+// PutArrow writes fixed-width values already laid out in an Arrow value buffer.
+// The buffer contains typeLen bytes for each value.
+func (enc *PlainFixedLenByteArrayEncoder) PutArrow(values []byte) {
+	if len(values) == 0 {
+		return
+	}
+	if enc.typeLen <= 0 || len(values)%enc.typeLen != 0 {
+		panic("parquet: Arrow fixed-length values are not aligned to the type length")
+	}
+
+	enc.sink.Reserve(len(values))
+	enc.sink.UnsafeWrite(values)
+}
+
 func (enc *PlainFixedLenByteArrayEncoder) Release() {
 	enc.encoder.Release()
 	enc.zeroValue = nil
@@ -79,6 +93,35 @@ func (enc *PlainFixedLenByteArrayEncoder) PutSpaced(in []parquet.FixedLenByteArr
 		}
 	} else {
 		enc.Put(in)
+	}
+}
+
+// PutArrowSpaced writes fixed-width values from an Arrow value buffer while
+// skipping values whose corresponding validity bits are unset.
+func (enc *PlainFixedLenByteArrayEncoder) PutArrowSpaced(values []byte, validBits []byte, validBitsOffset int64) {
+	if validBits == nil {
+		enc.PutArrow(values)
+		return
+	}
+	if enc.typeLen <= 0 || len(values)%enc.typeLen != 0 {
+		panic("parquet: Arrow fixed-length values are not aligned to the type length")
+	}
+
+	nvalues := int64(len(values) / enc.typeLen)
+	if enc.bitSetReader == nil {
+		enc.bitSetReader = bitutils.NewSetBitRunReader(validBits, validBitsOffset, nvalues)
+	} else {
+		enc.bitSetReader.Reset(validBits, validBitsOffset, nvalues)
+	}
+
+	for {
+		run := enc.bitSetReader.NextRun()
+		if run.Length == 0 {
+			break
+		}
+		start := int(run.Pos) * enc.typeLen
+		end := int(run.Pos+run.Length) * enc.typeLen
+		enc.PutArrow(values[start:end])
 	}
 }
 
