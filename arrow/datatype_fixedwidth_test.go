@@ -668,7 +668,7 @@ func TestTimestampFromStringRejectsInvalidFractions(t *testing.T) {
 	} {
 		t.Run(tc.value, func(t *testing.T) {
 			_, err := arrow.TimestampFromString(tc.value, tc.unit)
-			assert.Error(t, err)
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
 		})
 	}
 }
