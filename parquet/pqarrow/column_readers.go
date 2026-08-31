@@ -295,12 +295,19 @@ func (sr *structReader) GetRepLevels() ([]int16, error) {
 }
 
 func (sr *structReader) SeekToRow(rowIdx int64) error {
-	var g errgroup.Group
 	if !sr.props.Parallel {
-		g.SetLimit(1)
+		var firstErr error
+		for _, rdr := range sr.children {
+			if err := rdr.SeekToRow(rowIdx); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		return firstErr
 	}
 
+	var g errgroup.Group
 	for _, rdr := range sr.children {
+		rdr := rdr
 		g.Go(func() error {
 			return rdr.SeekToRow(rowIdx)
 		})
@@ -310,14 +317,21 @@ func (sr *structReader) SeekToRow(rowIdx int64) error {
 }
 
 func (sr *structReader) LoadBatch(nrecords int64) error {
+	if !sr.props.Parallel {
+		var firstErr error
+		for _, rdr := range sr.children {
+			if err := rdr.LoadBatch(nrecords); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		return firstErr
+	}
+
 	// Load batches in parallel
 	// When reading structs with large numbers of columns, the serial load is very slow.
 	// This is especially true when reading Cloud Storage. Loading concurrently
 	// greatly improves performance.
 	g := new(errgroup.Group)
-	if !sr.props.Parallel {
-		g.SetLimit(1)
-	}
 	for _, rdr := range sr.children {
 		rdr := rdr
 		g.Go(func() error {
