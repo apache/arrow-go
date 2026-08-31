@@ -40,6 +40,7 @@ type DeltaByteArrayEncoder struct {
 
 	prefixLengths [deltaByteArrayBatchSize]int32
 	suffixes      [deltaByteArrayBatchSize]parquet.ByteArray
+	spacedScratch []parquet.ByteArray
 
 	lastVal parquet.ByteArray
 }
@@ -118,9 +119,14 @@ func (enc *DeltaByteArrayEncoder) Put(in []parquet.ByteArray) {
 // to compress the data before writing it without the null slots.
 func (enc *DeltaByteArrayEncoder) PutSpaced(in []parquet.ByteArray, validBits []byte, validBitsOffset int64) {
 	if validBits != nil {
-		data := make([]parquet.ByteArray, len(in))
-		nvalid := spacedCompress(in, data, validBits, validBitsOffset)
-		enc.Put(data[:nvalid])
+		if cap(enc.spacedScratch) < len(in) {
+			enc.spacedScratch = make([]parquet.ByteArray, len(in))
+		} else {
+			enc.spacedScratch = enc.spacedScratch[:len(in)]
+		}
+		nvalid := spacedCompress(in, enc.spacedScratch, validBits, validBitsOffset)
+		enc.Put(enc.spacedScratch[:nvalid])
+		clear(enc.spacedScratch)
 	} else {
 		enc.Put(in)
 	}
