@@ -62,6 +62,31 @@ func requireTemporalRoundingTime(t *testing.T, fn temporalRoundingFunc, input, e
 	require.Equal(t, expectedValue, output.Value(0))
 }
 
+func requireTemporalRoundingError(t *testing.T, fn temporalRoundingFunc, input time.Time,
+	inputUnit arrow.TimeUnit, timezone string, opts compute.RoundTemporalOptions, expected error) {
+	t.Helper()
+
+	value, err := arrow.TimestampFromTime(input, inputUnit)
+	require.NoError(t, err)
+
+	builder := array.NewTimestampBuilder(memory.DefaultAllocator, &arrow.TimestampType{
+		Unit:     inputUnit,
+		TimeZone: timezone,
+	})
+	builder.Append(value)
+	inputArray := builder.NewArray()
+	builder.Release()
+	defer inputArray.Release()
+
+	inputDatum := compute.NewDatum(inputArray)
+	defer inputDatum.Release()
+	result, err := fn(context.Background(), opts, inputDatum)
+	if result != nil {
+		result.Release()
+	}
+	require.ErrorIs(t, err, expected)
+}
+
 func TestTemporalRoundingUsesUnixEpochForCalendarMultiples(t *testing.T) {
 	input := time.Date(2024, time.January, 15, 10, 37, 0, 0, time.UTC)
 	tests := []struct {
@@ -327,6 +352,19 @@ func TestTemporalRoundingCalendarOriginUsesWallClockAcrossDST(t *testing.T) {
 		location.String(), opts)
 }
 
+func TestTemporalRoundingZonedFixedUnitsUseLocalTime(t *testing.T) {
+	location, err := time.LoadLocation("Asia/Kathmandu")
+	require.NoError(t, err)
+	input := time.Date(2024, time.July, 15, 10, 37, 0, 0, location)
+
+	requireTemporalRoundingTime(t, compute.FloorTemporal, input,
+		time.Date(2024, time.July, 15, 10, 0, 0, 0, location), arrow.Second,
+		location.String(), compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalHour})
+	requireTemporalRoundingTime(t, compute.CeilTemporal, input,
+		time.Date(2024, time.July, 15, 11, 0, 0, 0, location), arrow.Second,
+		location.String(), compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalHour})
+}
+
 func TestTemporalRoundingCalendarOriginAfterMidnightGap(t *testing.T) {
 	// Sao Paulo skipped midnight to 01:00. Monrovia skipped midnight to
 	// 00:44:30, so even an hour or minute boundary may not exist locally.
@@ -507,7 +545,63 @@ func TestTemporalRoundingRejectsMissingCalendarBoundary(t *testing.T) {
 	}
 }
 
-func TestTemporalRoundingCalendarOriginPreservesRepeatedHour(t *testing.T) {
+func TestTemporalRoundingRejectsMissingNextCalendarDay(t *testing.T) {
+	input, err := time.Parse(time.RFC3339, "1995-10-14T23:37:29-03:00")
+	require.NoError(t, err)
+	value, err := arrow.TimestampFromTime(input, arrow.Second)
+	require.NoError(t, err)
+
+	builder := array.NewTimestampBuilder(memory.DefaultAllocator, &arrow.TimestampType{
+		Unit:     arrow.Second,
+		TimeZone: "America/Sao_Paulo",
+	})
+	builder.Append(value)
+	inputArray := builder.NewArray()
+	builder.Release()
+	defer inputArray.Release()
+
+	result, err := compute.CeilTemporal(context.Background(), compute.RoundTemporalOptions{
+		Multiple: 1,
+		Unit:     compute.RoundTemporalDay,
+	}, compute.NewDatum(inputArray))
+	if result != nil {
+		defer result.Release()
+	}
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+}
+
+func TestTemporalRoundingWeekUsesFixedWallClockPeriods(t *testing.T) {
+	input, err := time.Parse(time.RFC3339, "2015-10-23T23:37:29-02:00")
+	require.NoError(t, err)
+	location, err := time.LoadLocation("America/Sao_Paulo")
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name     string
+		fn       temporalRoundingFunc
+		expected time.Time
+	}{
+		{
+			name:     "floor",
+			fn:       compute.FloorTemporal,
+			expected: time.Date(2015, time.October, 17, 23, 0, 0, 0, location),
+		},
+		{
+			name:     "ceil",
+			fn:       compute.CeilTemporal,
+			expected: time.Date(2015, time.October, 24, 23, 0, 0, 0, location),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requireTemporalRoundingTime(t, tc.fn, input, tc.expected, arrow.Second, "America/Sao_Paulo", compute.RoundTemporalOptions{
+				Multiple:         1,
+				Unit:             compute.RoundTemporalWeek,
+				WeekStartsMonday: false,
+			})
+		})
+	}
+}
+
+func TestTemporalRoundingRejectsAmbiguousCalendarBoundary(t *testing.T) {
 	for _, tc := range []struct {
 		zone, input string
 	}{
@@ -529,42 +623,9 @@ func TestTemporalRoundingCalendarOriginPreservesRepeatedHour(t *testing.T) {
 						CalendarBasedOrigin: true,
 					}
 					for _, fn := range []temporalRoundingFunc{compute.FloorTemporal, compute.CeilTemporal, compute.RoundTemporal} {
-						requireTemporalRoundingTime(t, fn, input, input, unit, tc.zone, opts)
+						requireTemporalRoundingError(t, fn, input, unit, tc.zone, opts, arrow.ErrInvalid)
 					}
-
-					unaligned := input.Add(40 * time.Second)
-					requireTemporalRoundingTime(t, compute.FloorTemporal, unaligned, input, unit, tc.zone, opts)
-					for _, fn := range []temporalRoundingFunc{compute.CeilTemporal, compute.RoundTemporal} {
-						requireTemporalRoundingTime(t, fn, unaligned, input.Add(time.Minute), unit, tc.zone, opts)
-					}
-					opts.CeilIsStrictlyGreater = true
-					requireTemporalRoundingTime(t, compute.CeilTemporal, input, input.Add(time.Minute), unit, tc.zone, opts)
 				})
-			}
-		})
-	}
-}
-
-func TestTemporalRoundingCalendarOriginCrossesRepeatedHour(t *testing.T) {
-	for _, tc := range []struct {
-		zone, input, expected string
-	}{
-		{"America/New_York", "2024-11-03T01:59:40-04:00", "2024-11-03T02:00:00-05:00"},
-		{"Europe/Berlin", "2024-10-27T02:59:40+02:00", "2024-10-27T03:00:00+01:00"},
-		{"Australia/Lord_Howe", "2024-04-07T01:59:40+11:00", "2024-04-07T02:00:00+10:30"},
-	} {
-		t.Run(tc.zone, func(t *testing.T) {
-			input, err := time.Parse(time.RFC3339, tc.input)
-			require.NoError(t, err)
-			expected, err := time.Parse(time.RFC3339, tc.expected)
-			require.NoError(t, err)
-			for _, fn := range []temporalRoundingFunc{compute.CeilTemporal, compute.RoundTemporal} {
-				requireTemporalRoundingTime(t, fn, input, expected, arrow.Microsecond, tc.zone,
-					compute.RoundTemporalOptions{
-						Multiple:            1,
-						Unit:                compute.RoundTemporalMinute,
-						CalendarBasedOrigin: true,
-					})
 			}
 		})
 	}

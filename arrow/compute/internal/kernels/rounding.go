@@ -924,6 +924,16 @@ func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts 
 		return roundTimestampCalendar(ts, inputUnit, tz, opts)
 	}
 
+	// Zoned timestamps are rounded in their local wall-clock timeline. This is
+	// observable for offsets that are not whole hours (for example, Kathmandu)
+	// and around daylight-saving transitions.
+	if tz != time.UTC && tz.String() != "UTC" {
+		if opts.CalendarBasedOrigin {
+			return roundTimestampCalendarOrigin(ts, inputUnit, tz, opts)
+		}
+		return roundTimestampFixedTimezone(ts, inputUnit, tz, opts)
+	}
+
 	// CalendarBasedOrigin rounds fixed-duration units against the preceding
 	// calendar boundary (for example, minutes from the start of the hour).
 	// Use local wall-clock arithmetic here: time.Time.Sub measures elapsed time
@@ -975,9 +985,9 @@ func canRoundInInputUnit(inputUnit arrow.TimeUnit, roundingIntervalNanos int64) 
 }
 
 // roundTimestampCalendarOrigin rounds a fixed-duration unit relative to the
-// preceding calendar boundary. The calculation is performed in local wall
-// time so daylight-saving transitions do not change the number of clock hours,
-// minutes, or seconds in the current period.
+// preceding calendar boundary. Candidate boundaries are calculated in local
+// wall time, then compared as system times so daylight-saving transitions are
+// handled consistently with the temporal rounding reference implementation.
 func roundTimestampCalendarOrigin(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts roundTemporalState) (int64, error) {
 	t, err := timestampToCalendarTime(ts, inputUnit, tz)
 	if err != nil {
@@ -987,29 +997,52 @@ func roundTimestampCalendarOrigin(ts int64, inputUnit arrow.TimeUnit, tz *time.L
 	if err != nil {
 		return 0, err
 	}
+	return roundTimestampFromWallOrigin(t, inputUnit, tz, opts, origin)
+}
 
-	elapsed, err := wallClockDifference(t, origin)
+func roundTimestampFixedTimezone(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts roundTemporalState) (int64, error) {
+	t, err := timestampToCalendarTime(ts, inputUnit, tz)
 	if err != nil {
 		return 0, err
 	}
-	roundedElapsed, err := roundToMultipleInt64(
-		elapsed, opts.roundingInterval, opts.mode, opts.CeilIsStrictlyGreater,
-	)
+	origin := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+	return roundTimestampFromWallOrigin(t, inputUnit, tz, opts, origin)
+}
+
+func roundTimestampFromWallOrigin(t time.Time, inputUnit arrow.TimeUnit, tz *time.Location, opts roundTemporalState, origin time.Time) (int64, error) {
+	inputTime := t
+	wallTime := calendarWallTime(t)
+
+	elapsed, err := wallClockDifference(wallTime, origin)
 	if err != nil {
 		return 0, err
 	}
-	rounded, err := addWallNanos(origin, roundedElapsed, tz)
+	flooredElapsed, err := roundToMultipleInt64(elapsed, opts.roundingInterval, RoundDown, false)
 	if err != nil {
 		return 0, err
 	}
-	// time.Date can select either occurrence of a repeated local time. Prefer
-	// the input's offset when it also represents the requested clock time.
-	_, inputOffset := t.Zone()
-	_, roundedOffset := rounded.Zone()
-	if inputOffset != roundedOffset {
-		candidate := rounded.Add(time.Duration(roundedOffset-inputOffset) * time.Second)
-		if difference, err := wallClockDifference(candidate, rounded); err == nil && difference == 0 {
-			rounded = candidate
+	floor, err := addWallNanos(origin, flooredElapsed, tz)
+	if err != nil {
+		return 0, err
+	}
+
+	var rounded time.Time
+	switch opts.mode {
+	case RoundDown:
+		rounded = floor
+	case RoundUp:
+		rounded, err = ceilCalendarOrigin(inputTime, floor, opts, tz)
+		if err != nil {
+			return 0, err
+		}
+	default:
+		ceil, ceilErr := ceilCalendarOrigin(inputTime, floor, opts, tz)
+		if ceilErr != nil {
+			return 0, ceilErr
+		}
+		rounded, err = halfRoundPeriod(inputTime, floor, ceil)
+		if err != nil {
+			return 0, err
 		}
 	}
 
@@ -1018,6 +1051,27 @@ func roundTimestampCalendarOrigin(ts int64, inputUnit arrow.TimeUnit, tz *time.L
 		return 0, err
 	}
 	return int64(result), nil
+}
+
+func ceilCalendarOrigin(value, floor time.Time, opts roundTemporalState, tz *time.Location) (time.Time, error) {
+	// Convert the floored system time back to local wall time before deciding
+	// whether to advance. This matters when the period crosses a timezone
+	// transition because the elapsed system duration need not equal the wall
+	// clock duration.
+	floorWall := calendarWallTime(floor.In(tz))
+	cs, err := checkedLocalTime(floorWall, tz)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !opts.CeilIsStrictlyGreater && !cs.Before(value) {
+		return cs, nil
+	}
+
+	nextWall, err := addWallNanos(floorWall, opts.roundingInterval, tz)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return nextWall, nil
 }
 
 // Keep the origin's civil fields in UTC because its local time may not exist.
@@ -1076,6 +1130,41 @@ func wallClockDifference(value, origin time.Time) (int64, error) {
 	return checkedSubInt64(daysNanos, originNanos)
 }
 
+func calendarWallTime(value time.Time) time.Time {
+	return time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(), value.Nanosecond(), time.UTC)
+}
+
+func checkedLocalTime(value time.Time, tz *time.Location) (time.Time, error) {
+	result := time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(), value.Nanosecond(), tz)
+	if result.Year() != value.Year() || result.Month() != value.Month() || result.Day() != value.Day() ||
+		result.Hour() != value.Hour() || result.Minute() != value.Minute() || result.Second() != value.Second() ||
+		result.Nanosecond() != value.Nanosecond() {
+		return time.Time{}, fmt.Errorf("%w: local time does not exist", arrow.ErrInvalid)
+	}
+	if ambiguousLocalTime(value, result, tz) {
+		return time.Time{}, fmt.Errorf("%w: local time is ambiguous", arrow.ErrInvalid)
+	}
+	return result, nil
+}
+
+func ambiguousLocalTime(value, result time.Time, tz *time.Location) bool {
+	_, selectedOffset := result.Zone()
+	wall := calendarWallTime(value)
+	for _, delta := range []time.Duration{-2 * time.Hour, 2 * time.Hour, -48 * time.Hour, 48 * time.Hour} {
+		_, offset := result.Add(delta).Zone()
+		if offset == selectedOffset {
+			continue
+		}
+		candidate := wall.Add(-time.Duration(offset) * time.Second).In(tz)
+		if candidate.Year() == value.Year() && candidate.Month() == value.Month() && candidate.Day() == value.Day() &&
+			candidate.Hour() == value.Hour() && candidate.Minute() == value.Minute() &&
+			candidate.Second() == value.Second() && candidate.Nanosecond() == value.Nanosecond() {
+			return true
+		}
+	}
+	return false
+}
+
 // addWallNanos adds a duration to a local wall-clock value without using
 // time.Time.Add, which applies elapsed-time arithmetic across timezone
 // transitions. The result is normalized through calendar dates in UTC and then
@@ -1119,13 +1208,7 @@ func addWallNanos(origin time.Time, nanos int64, tz *time.Location) (time.Time, 
 	dayTimeNanos -= minute * int64(time.Minute)
 	second := dayTimeNanos / int64(time.Second)
 	nanosecond := dayTimeNanos - second*int64(time.Second)
-	result := time.Date(date.Year(), date.Month(), date.Day(), int(hour), int(minute), int(second), int(nanosecond), tz)
-	if result.Year() != date.Year() || result.Month() != date.Month() || result.Day() != date.Day() ||
-		result.Hour() != int(hour) || result.Minute() != int(minute) || result.Second() != int(second) ||
-		result.Nanosecond() != int(nanosecond) {
-		return time.Time{}, fmt.Errorf("%w: local time does not exist", arrow.ErrInvalid)
-	}
-	return result, nil
+	return checkedLocalTime(time.Date(date.Year(), date.Month(), date.Day(), int(hour), int(minute), int(second), int(nanosecond), time.UTC), tz)
 }
 
 func overflowError() error {
@@ -1203,26 +1286,15 @@ func checkedCalendarDate(year, month int64, tz *time.Location) (time.Time, error
 	if err != nil {
 		return time.Time{}, err
 	}
-	result := time.Date(dateYear, time.Month(dateMonth), 1, 0, 0, 0, 0, tz)
-	if int64(result.Year()) != year {
+	wall := time.Date(dateYear, time.Month(dateMonth), 1, 0, 0, 0, 0, time.UTC)
+	if int64(wall.Year()) != year {
 		return time.Time{}, overflowError()
 	}
-	if result.Month() != time.Month(dateMonth) || result.Day() != 1 ||
-		result.Hour() != 0 || result.Minute() != 0 || result.Second() != 0 ||
-		result.Nanosecond() != 0 {
-		return time.Time{}, fmt.Errorf("%w: local time does not exist", arrow.ErrInvalid)
-	}
-	return result, nil
+	return checkedLocalTime(wall, tz)
 }
 
 func checkedCalendarMidnight(year int, month time.Month, day int, tz *time.Location) (time.Time, error) {
-	result := time.Date(year, month, day, 0, 0, 0, 0, tz)
-	if result.Year() != year || result.Month() != month || result.Day() != day ||
-		result.Hour() != 0 || result.Minute() != 0 || result.Second() != 0 ||
-		result.Nanosecond() != 0 {
-		return time.Time{}, fmt.Errorf("%w: local time does not exist", arrow.ErrInvalid)
-	}
-	return result, nil
+	return checkedLocalTime(time.Date(year, month, day, 0, 0, 0, 0, time.UTC), tz)
 }
 
 func checkedCalendarAddDays(value time.Time, days int64) (time.Time, error) {
@@ -1233,26 +1305,6 @@ func checkedCalendarAddDays(value time.Time, days int64) (time.Time, error) {
 	result := value.AddDate(0, 0, dayOffset)
 	if (days > 0 && result.Before(value)) || (days < 0 && result.After(value)) {
 		return time.Time{}, overflowError()
-	}
-	return result, nil
-}
-
-func checkedCalendarAddDaysPreservingFields(value time.Time, days int64) (time.Time, error) {
-	dayOffset, err := checkedInt64ToInt(days)
-	if err != nil {
-		return time.Time{}, err
-	}
-	result, err := checkedCalendarAddDays(value, days)
-	if err != nil {
-		return time.Time{}, err
-	}
-	expected := time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC).
-		AddDate(0, 0, dayOffset)
-	if result.Year() != expected.Year() || result.Month() != expected.Month() ||
-		result.Day() != expected.Day() || result.Hour() != value.Hour() ||
-		result.Minute() != value.Minute() || result.Second() != value.Second() ||
-		result.Nanosecond() != value.Nanosecond() {
-		return time.Time{}, fmt.Errorf("%w: local time does not exist", arrow.ErrInvalid)
 	}
 	return result, nil
 }
@@ -1612,25 +1664,16 @@ func calendarDateFromIndex(index, periodsPerYear, monthsPerPeriod int64, tz *tim
 }
 
 func floorCalendarDay(value time.Time, multiple int64, calendarOrigin bool, tz *time.Location) (time.Time, error) {
-	day, err := checkedCalendarMidnight(value.Year(), value.Month(), value.Day(), tz)
-	if err != nil {
-		return time.Time{}, err
-	}
+	valueDay := time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC)
 	if multiple == 1 {
-		return day, nil
+		return checkedCalendarMidnight(value.Year(), value.Month(), value.Day(), tz)
 	}
 
-	origin, err := checkedCalendarMidnight(1970, 1, 1, tz)
-	if err != nil {
-		return time.Time{}, err
-	}
+	origin := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
 	if calendarOrigin {
-		origin, err = checkedCalendarMidnight(value.Year(), value.Month(), 1, tz)
-		if err != nil {
-			return time.Time{}, err
-		}
+		origin = time.Date(value.Year(), value.Month(), 1, 0, 0, 0, 0, time.UTC)
 	}
-	daysSinceOrigin, err := calendarDayDifference(day, origin)
+	daysSinceOrigin, err := calendarDayDifference(valueDay, origin)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -1638,28 +1681,29 @@ func floorCalendarDay(value time.Time, multiple int64, calendarOrigin bool, tz *
 	if err != nil {
 		return time.Time{}, err
 	}
-	return checkedCalendarAddDaysPreservingFields(origin, roundedDays)
-}
-
-func floorCalendarWeek(value time.Time, multiple int64, weekStartsMonday bool, tz *time.Location) (time.Time, error) {
-	valueDay, err := checkedCalendarMidnight(value.Year(), value.Month(), value.Day(), tz)
+	result, err := checkedCalendarAddDays(origin, roundedDays)
 	if err != nil {
 		return time.Time{}, err
 	}
+	return checkedCalendarMidnight(result.Year(), result.Month(), result.Day(), tz)
+}
+
+func floorCalendarWeek(value time.Time, multiple int64, weekStartsMonday bool, tz *time.Location) (time.Time, error) {
+	valueDay := time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC)
 	weekday := int(valueDay.Weekday())
 	targetWeekday := time.Wednesday
 	if weekStartsMonday {
 		weekday = (weekday + 6) % 7
 		targetWeekday = time.Thursday
 	}
-	weekStart, err := checkedCalendarAddDaysPreservingFields(valueDay, -int64(weekday))
+	weekStart, err := checkedCalendarAddDays(valueDay, -int64(weekday))
 	if err != nil {
 		return time.Time{}, err
 	}
 	// Use a fixed representative day from the input's week to identify the
 	// calendar week-year. Adding a constant to the input can cross into the
 	// following week for late-week values.
-	weekYearDate, err := checkedCalendarAddDaysPreservingFields(weekStart, 3)
+	weekYearDate, err := checkedCalendarAddDays(weekStart, 3)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -1668,20 +1712,13 @@ func floorCalendarWeek(value time.Time, multiple int64, weekStartsMonday bool, t
 	if err != nil {
 		return time.Time{}, err
 	}
-	december, err := checkedCalendarDate(previousYear, 12, tz)
-	if err != nil {
-		return time.Time{}, err
-	}
-	december, err = checkedCalendarAddDaysPreservingFields(december, 30)
-	if err != nil {
-		return time.Time{}, err
-	}
+	december := time.Date(int(previousYear), time.December, 31, 0, 0, 0, 0, time.UTC)
 	daysBack := (int(december.Weekday()) - int(targetWeekday) + 7) % 7
-	lastWeekday, err := checkedCalendarAddDaysPreservingFields(december, -int64(daysBack))
+	lastWeekday, err := checkedCalendarAddDays(december, -int64(daysBack))
 	if err != nil {
 		return time.Time{}, err
 	}
-	origin, err := checkedCalendarAddDaysPreservingFields(lastWeekday, 4)
+	origin, err := checkedCalendarAddDays(lastWeekday, 4)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -1699,7 +1736,72 @@ func floorCalendarWeek(value time.Time, multiple int64, weekStartsMonday bool, t
 	if err != nil {
 		return time.Time{}, err
 	}
-	return checkedCalendarAddDaysPreservingFields(origin, roundedDays)
+	result, err := checkedCalendarAddDays(origin, roundedDays)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return checkedLocalTime(result, tz)
+}
+
+func floorFixedCalendarWeek(value time.Time, multiple int64, weekStartsMonday bool, tz *time.Location) (time.Time, error) {
+	weekdayOffset := int64(4)
+	if weekStartsMonday {
+		weekdayOffset = 3
+	}
+
+	// The reference algorithm shifts the local wall-clock timestamp by the
+	// weekday offset, floors fixed seven-day periods from the Unix epoch, and
+	// only then converts the candidate back to system time. Keep the wall-clock
+	// date in UTC while doing the arithmetic so a missing local midnight cannot
+	// move the period into a different civil date.
+	shifted, err := checkedCalendarAddDays(calendarWallTime(value), weekdayOffset)
+	if err != nil {
+		return time.Time{}, err
+	}
+	shiftedDay := time.Date(shifted.Year(), shifted.Month(), shifted.Day(), 0, 0, 0, 0, time.UTC)
+	dayIndex, err := calendarDays(shiftedDay)
+	if err != nil {
+		return time.Time{}, err
+	}
+	weekIndex := floorDivInt64(dayIndex, 7)
+	roundedWeeks, err := checkedMulInt64(floorDivInt64(weekIndex, multiple), multiple)
+	if err != nil {
+		return time.Time{}, err
+	}
+	roundedDays, err := checkedMulInt64(roundedWeeks, 7)
+	if err != nil {
+		return time.Time{}, err
+	}
+	boundaryWall, err := checkedCalendarAddDays(time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC), roundedDays)
+	if err != nil {
+		return time.Time{}, err
+	}
+	boundary, err := checkedLocalTime(boundaryWall, tz)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return boundary.Add(-time.Duration(weekdayOffset) * 24 * time.Hour), nil
+}
+
+func ceilFixedCalendarWeek(value, floor time.Time, multiple int64, strict bool, tz *time.Location) (time.Time, error) {
+	floorWall := calendarWallTime(floor.In(tz))
+	cs, err := checkedLocalTime(floorWall, tz)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !strict && !cs.Before(value) {
+		return cs, nil
+	}
+
+	weekDays, err := checkedMulInt64(multiple, 7)
+	if err != nil {
+		return time.Time{}, err
+	}
+	nextWall, err := checkedCalendarAddDays(floorWall, weekDays)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return checkedLocalTime(nextWall, tz)
 }
 
 func roundCalendarOriginWeek(value time.Time, opts roundTemporalState, tz *time.Location) (time.Time, error) {
@@ -1718,7 +1820,11 @@ func roundCalendarOriginWeek(value time.Time, opts roundTemporalState, tz *time.
 			if err != nil {
 				return time.Time{}, err
 			}
-			next, err = checkedCalendarAddDaysPreservingFields(floor, weekDays)
+			nextWall, err := checkedCalendarAddDays(calendarWallTime(floor.In(tz)), weekDays)
+			if err != nil {
+				return time.Time{}, err
+			}
+			next, err = checkedLocalTime(nextWall, tz)
 			if err != nil {
 				return time.Time{}, err
 			}
@@ -1726,15 +1832,17 @@ func roundCalendarOriginWeek(value time.Time, opts roundTemporalState, tz *time.
 		return next, nil
 	}
 
+	cs := floor
+
 	switch opts.mode {
 	case RoundUp:
-		if opts.CeilIsStrictlyGreater || floor.Before(value) {
+		if opts.CeilIsStrictlyGreater || cs.Before(value) {
 			return makeNext()
 		}
-		return floor, nil
+		return cs, nil
 	default:
-		if floor.After(value) {
-			return floor, nil
+		if cs.After(value) {
+			return cs, nil
 		}
 		next, err := makeNext()
 		if err != nil {
@@ -1771,21 +1879,13 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 				return 0, dateErr
 			}
 		case RoundUp:
-			periodStart, dateErr := checkedCalendarDate(roundedYear, 1, tz)
-			if dateErr != nil {
-				return 0, dateErr
+			roundedYear, err = checkedAddInt64(roundedYear, multiple)
+			if err != nil {
+				return 0, err
 			}
-			if opts.CeilIsStrictlyGreater || !t.Equal(periodStart) {
-				roundedYear, err = checkedAddInt64(roundedYear, multiple)
-				if err != nil {
-					return 0, err
-				}
-				rounded, dateErr = checkedCalendarDate(roundedYear, 1, tz)
-				if dateErr != nil {
-					return 0, dateErr
-				}
-			} else {
-				rounded = periodStart
+			rounded, err = checkedCalendarDate(roundedYear, 1, tz)
+			if err != nil {
+				return 0, err
 			}
 		default:
 			yearStart, dateErr := checkedCalendarDate(roundedYear, 1, tz)
@@ -1824,21 +1924,13 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 				return 0, err
 			}
 		case RoundUp:
-			periodStart, dateErr := calendarDateFromIndex(roundedQuarters, 4, 3, tz)
+			nextQuarters, dateErr := checkedAddInt64(roundedQuarters, multiple)
 			if dateErr != nil {
 				return 0, dateErr
 			}
-			if opts.CeilIsStrictlyGreater || !t.Equal(periodStart) {
-				nextQuarters, dateErr := checkedAddInt64(roundedQuarters, multiple)
-				if dateErr != nil {
-					return 0, dateErr
-				}
-				rounded, dateErr = calendarDateFromIndex(nextQuarters, 4, 3, tz)
-				if dateErr != nil {
-					return 0, dateErr
-				}
-			} else {
-				rounded = periodStart
+			rounded, dateErr = calendarDateFromIndex(nextQuarters, 4, 3, tz)
+			if dateErr != nil {
+				return 0, dateErr
 			}
 		default:
 			quarterStart, dateErr := calendarDateFromIndex(roundedQuarters, 4, 3, tz)
@@ -1876,21 +1968,13 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 				return 0, err
 			}
 		case RoundUp:
-			periodStart, dateErr := calendarDateFromIndex(roundedMonths, 12, 1, tz)
+			nextMonths, dateErr := checkedAddInt64(roundedMonths, multiple)
 			if dateErr != nil {
 				return 0, dateErr
 			}
-			if opts.CeilIsStrictlyGreater || !t.Equal(periodStart) {
-				nextMonths, dateErr := checkedAddInt64(roundedMonths, multiple)
-				if dateErr != nil {
-					return 0, dateErr
-				}
-				rounded, dateErr = calendarDateFromIndex(nextMonths, 12, 1, tz)
-				if dateErr != nil {
-					return 0, dateErr
-				}
-			} else {
-				rounded = periodStart
+			rounded, dateErr = calendarDateFromIndex(nextMonths, 12, 1, tz)
+			if dateErr != nil {
+				return 0, dateErr
 			}
 		default:
 			monthStart, dateErr := calendarDateFromIndex(roundedMonths, 12, 1, tz)
@@ -1920,87 +2004,40 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 			break
 		}
 
-		weekday := int(t.Weekday())
-		if opts.WeekStartsMonday {
-			weekday = (weekday + 6) % 7
+		floor, dateErr := floorFixedCalendarWeek(t, multiple, opts.WeekStartsMonday, tz)
+		if dateErr != nil {
+			return 0, dateErr
 		}
-		startOfWeek := t.AddDate(0, 0, -weekday)
-		startOfWeek = time.Date(startOfWeek.Year(), startOfWeek.Month(), startOfWeek.Day(), 0, 0, 0, 0, tz)
-
-		// Calculate N-week periods from epoch for Multiple > 1
-		epochInTz := time.Unix(0, 0).In(tz)
-		epochWeekday := int(epochInTz.Weekday())
-		if opts.WeekStartsMonday {
-			epochWeekday = (epochWeekday + 6) % 7
-		}
-		epochWeekStart := epochInTz.AddDate(0, 0, -epochWeekday)
-		epochWeekStart = time.Date(epochWeekStart.Year(), epochWeekStart.Month(), epochWeekStart.Day(), 0, 0, 0, 0, tz)
-
-		daysSinceEpochWeek, err := calendarDayDifference(startOfWeek, epochWeekStart)
-		if err != nil {
-			return 0, err
-		}
-		weeksSinceEpoch := floorDivInt64(daysSinceEpochWeek, 7)
-		roundedWeeks, err := checkedMulInt64(floorDivInt64(weeksSinceEpoch, multiple), multiple)
-		if err != nil {
-			return 0, err
-		}
-		roundedWeekDays, err := checkedMulInt64(roundedWeeks, 7)
-		if err != nil {
-			return 0, err
-		}
-		roundedWeekStart, err := checkedCalendarAddDays(epochWeekStart, roundedWeekDays)
-		if err != nil {
-			return 0, err
+		ceil, dateErr := ceilFixedCalendarWeek(t, floor, multiple, opts.CeilIsStrictlyGreater, tz)
+		if dateErr != nil {
+			return 0, dateErr
 		}
 
 		switch opts.mode {
 		case RoundDown:
-			rounded = roundedWeekStart
+			rounded = floor
 		case RoundUp:
-			if opts.CeilIsStrictlyGreater || !t.Equal(roundedWeekStart) {
-				nextWeeks, dateErr := checkedAddInt64(roundedWeeks, multiple)
-				if dateErr != nil {
-					return 0, dateErr
-				}
-				nextWeekDays, dateErr := checkedMulInt64(nextWeeks, 7)
-				if dateErr != nil {
-					return 0, dateErr
-				}
-				rounded, err = checkedCalendarAddDays(epochWeekStart, nextWeekDays)
-				if err != nil {
-					return 0, err
-				}
-			} else {
-				rounded = roundedWeekStart
-			}
+			rounded = ceil
 		default:
-			nextWeeks, dateErr := checkedAddInt64(roundedWeeks, multiple)
-			if dateErr != nil {
-				return 0, dateErr
-			}
-			nextWeekDays, dateErr := checkedMulInt64(nextWeeks, 7)
-			if dateErr != nil {
-				return 0, dateErr
-			}
-			weekEnd, dateErr := checkedCalendarAddDays(epochWeekStart, nextWeekDays)
-			if dateErr != nil {
-				return 0, dateErr
-			}
-			rounded, err = halfRoundPeriod(t, roundedWeekStart, weekEnd)
+			rounded, err = halfRoundPeriod(t, floor, ceil)
 			if err != nil {
 				return 0, err
 			}
 		}
+
+		break
 
 	case RoundTemporalDay:
 		startOfDay, dateErr := floorCalendarDay(t, multiple, opts.CalendarBasedOrigin, tz)
 		if dateErr != nil {
 			return 0, dateErr
 		}
-		nextDay, dateErr := checkedCalendarAddDays(startOfDay, multiple)
-		if dateErr != nil {
-			return 0, dateErr
+		makeNextDay := func() (time.Time, error) {
+			nextWall, err := checkedCalendarAddDays(calendarWallTime(startOfDay), multiple)
+			if err != nil {
+				return time.Time{}, err
+			}
+			return checkedLocalTime(nextWall, tz)
 		}
 
 		switch opts.mode {
@@ -2008,11 +2045,18 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 			rounded = startOfDay
 		case RoundUp:
 			if opts.CeilIsStrictlyGreater || !t.Equal(startOfDay) {
-				rounded = nextDay
+				rounded, dateErr = makeNextDay()
+				if dateErr != nil {
+					return 0, dateErr
+				}
 			} else {
 				rounded = startOfDay
 			}
 		default:
+			nextDay, nextErr := makeNextDay()
+			if nextErr != nil {
+				return 0, nextErr
+			}
 			rounded, err = halfRoundPeriod(t, startOfDay, nextDay)
 			if err != nil {
 				return 0, err

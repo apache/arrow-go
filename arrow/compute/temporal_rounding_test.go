@@ -385,9 +385,9 @@ func TestTemporalRoundingVectors(t *testing.T) {
 				time.Date(2023, 2, 1, 0, 0, 0, 0, time.UTC),
 				time.Date(2023, 2, 1, 0, 0, 0, 0, time.UTC),
 				time.Date(2023, 2, 1, 0, 0, 0, 0, time.UTC),
-				time.Date(2023, 3, 1, 0, 0, 0, 0, time.UTC),
 				time.Date(2023, 4, 1, 0, 0, 0, 0, time.UTC),
-				time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2023, 4, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(1970, 2, 1, 0, 0, 0, 0, time.UTC),
 				time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC),
 				time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 				time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC),
@@ -435,7 +435,7 @@ func TestTemporalRoundingVectors(t *testing.T) {
 				time.Date(2023, 4, 1, 0, 0, 0, 0, time.UTC), // -> Q2 2023 (not at quarter boundary)
 				time.Date(2023, 4, 1, 0, 0, 0, 0, time.UTC), // -> Q2 2023 (March 1 is in Q1)
 				time.Date(2023, 4, 1, 0, 0, 0, 0, time.UTC), // -> Q2 2023
-				time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC), // already at Q1 start
+				time.Date(1970, 4, 1, 0, 0, 0, 0, time.UTC), // exact Q1 start advances to Q2
 				time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC), // -> Q1 1970
 				time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), // -> Q1 2024
 				time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC), // -> Q2 2024

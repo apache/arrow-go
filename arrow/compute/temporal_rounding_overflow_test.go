@@ -179,7 +179,7 @@ func TestTemporalRoundingTimezonePaths(t *testing.T) {
 			value:    time.Date(2024, time.January, 15, 10, 37, 0, 0, loc),
 			unit:     compute.RoundTemporalHour,
 			multiple: 2,
-			want:     time.Date(2024, time.January, 15, 9, 0, 0, 0, loc),
+			want:     time.Date(2024, time.January, 15, 10, 0, 0, 0, loc),
 		},
 		{
 			name:     "spring DST day",
