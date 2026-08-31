@@ -1207,6 +1207,21 @@ func checkedCalendarDate(year, month int64, tz *time.Location) (time.Time, error
 	if int64(result.Year()) != year {
 		return time.Time{}, overflowError()
 	}
+	if result.Month() != time.Month(dateMonth) || result.Day() != 1 ||
+		result.Hour() != 0 || result.Minute() != 0 || result.Second() != 0 ||
+		result.Nanosecond() != 0 {
+		return time.Time{}, fmt.Errorf("%w: local time does not exist", arrow.ErrInvalid)
+	}
+	return result, nil
+}
+
+func checkedCalendarMidnight(year int, month time.Month, day int, tz *time.Location) (time.Time, error) {
+	result := time.Date(year, month, day, 0, 0, 0, 0, tz)
+	if result.Year() != year || result.Month() != month || result.Day() != day ||
+		result.Hour() != 0 || result.Minute() != 0 || result.Second() != 0 ||
+		result.Nanosecond() != 0 {
+		return time.Time{}, fmt.Errorf("%w: local time does not exist", arrow.ErrInvalid)
+	}
 	return result, nil
 }
 
@@ -1218,6 +1233,14 @@ func checkedCalendarAddDays(value time.Time, days int64) (time.Time, error) {
 	result := value.AddDate(0, 0, dayOffset)
 	if (days > 0 && result.Before(value)) || (days < 0 && result.After(value)) {
 		return time.Time{}, overflowError()
+	}
+	expected := time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC).
+		AddDate(0, 0, dayOffset)
+	if result.Year() != expected.Year() || result.Month() != expected.Month() ||
+		result.Day() != expected.Day() || result.Hour() != value.Hour() ||
+		result.Minute() != value.Minute() || result.Second() != value.Second() ||
+		result.Nanosecond() != value.Nanosecond() {
+		return time.Time{}, fmt.Errorf("%w: local time does not exist", arrow.ErrInvalid)
 	}
 	return result, nil
 }
@@ -1577,14 +1600,23 @@ func calendarDateFromIndex(index, periodsPerYear, monthsPerPeriod int64, tz *tim
 }
 
 func floorCalendarDay(value time.Time, multiple int64, calendarOrigin bool, tz *time.Location) (time.Time, error) {
-	day := time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, tz)
+	day, err := checkedCalendarMidnight(value.Year(), value.Month(), value.Day(), tz)
+	if err != nil {
+		return time.Time{}, err
+	}
 	if multiple == 1 {
 		return day, nil
 	}
 
-	origin := time.Date(1970, 1, 1, 0, 0, 0, 0, tz)
+	origin, err := checkedCalendarMidnight(1970, 1, 1, tz)
+	if err != nil {
+		return time.Time{}, err
+	}
 	if calendarOrigin {
-		origin = time.Date(value.Year(), value.Month(), 1, 0, 0, 0, 0, tz)
+		origin, err = checkedCalendarMidnight(value.Year(), value.Month(), 1, tz)
+		if err != nil {
+			return time.Time{}, err
+		}
 	}
 	daysSinceOrigin, err := calendarDayDifference(day, origin)
 	if err != nil {
@@ -1598,7 +1630,10 @@ func floorCalendarDay(value time.Time, multiple int64, calendarOrigin bool, tz *
 }
 
 func floorCalendarWeek(value time.Time, multiple int64, weekStartsMonday bool, tz *time.Location) (time.Time, error) {
-	valueDay := time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, tz)
+	valueDay, err := checkedCalendarMidnight(value.Year(), value.Month(), value.Day(), tz)
+	if err != nil {
+		return time.Time{}, err
+	}
 	weekday := int(valueDay.Weekday())
 	targetWeekday := time.Wednesday
 	if weekStartsMonday {
@@ -1878,7 +1913,10 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 			weekday = (weekday + 6) % 7
 		}
 		startOfWeek := t.AddDate(0, 0, -weekday)
-		startOfWeek = time.Date(startOfWeek.Year(), startOfWeek.Month(), startOfWeek.Day(), 0, 0, 0, 0, tz)
+		startOfWeek, err = checkedCalendarMidnight(startOfWeek.Year(), startOfWeek.Month(), startOfWeek.Day(), tz)
+		if err != nil {
+			return 0, err
+		}
 
 		// Calculate N-week periods from epoch for Multiple > 1
 		epochInTz := time.Unix(0, 0).In(tz)
@@ -1887,7 +1925,10 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 			epochWeekday = (epochWeekday + 6) % 7
 		}
 		epochWeekStart := epochInTz.AddDate(0, 0, -epochWeekday)
-		epochWeekStart = time.Date(epochWeekStart.Year(), epochWeekStart.Month(), epochWeekStart.Day(), 0, 0, 0, 0, tz)
+		epochWeekStart, err = checkedCalendarMidnight(epochWeekStart.Year(), epochWeekStart.Month(), epochWeekStart.Day(), tz)
+		if err != nil {
+			return 0, err
+		}
 
 		daysSinceEpochWeek, err := calendarDayDifference(startOfWeek, epochWeekStart)
 		if err != nil {

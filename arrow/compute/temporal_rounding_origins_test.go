@@ -446,6 +446,62 @@ func TestTemporalRoundingCalendarOriginRejectsDSTGap(t *testing.T) {
 	}
 }
 
+func TestTemporalRoundingRejectsMissingCalendarBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name, zone, input string
+		unit              compute.RoundTemporalUnit
+		calendarOrigin    bool
+	}{
+		{
+			name:           "month start",
+			zone:           "America/Argentina/Buenos_Aires",
+			input:          "1930-12-02T12:00:00-03:00",
+			unit:           compute.RoundTemporalMonth,
+			calendarOrigin: true,
+		},
+		{
+			name:  "day start",
+			zone:  "America/Sao_Paulo",
+			input: "2018-11-04T01:30:00-02:00",
+			unit:  compute.RoundTemporalDay,
+		},
+		{
+			name:  "week start",
+			zone:  "America/Sao_Paulo",
+			input: "2018-11-04T01:30:00-02:00",
+			unit:  compute.RoundTemporalWeek,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input, err := time.Parse(time.RFC3339, tc.input)
+			require.NoError(t, err)
+			value, err := arrow.TimestampFromTime(input, arrow.Second)
+			require.NoError(t, err)
+
+			builder := array.NewTimestampBuilder(memory.DefaultAllocator, &arrow.TimestampType{
+				Unit:     arrow.Second,
+				TimeZone: tc.zone,
+			})
+			builder.Append(value)
+			inputArray := builder.NewArray()
+			builder.Release()
+			defer inputArray.Release()
+
+			inputDatum := compute.NewDatum(inputArray)
+			defer inputDatum.Release()
+			result, err := compute.FloorTemporal(context.Background(), compute.RoundTemporalOptions{
+				Multiple:            1,
+				Unit:                tc.unit,
+				CalendarBasedOrigin: tc.calendarOrigin,
+			}, inputDatum)
+			if result != nil {
+				defer result.Release()
+			}
+			require.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
+}
+
 func TestTemporalRoundingCalendarOriginPreservesRepeatedHour(t *testing.T) {
 	for _, tc := range []struct {
 		zone, input string
