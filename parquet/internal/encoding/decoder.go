@@ -107,6 +107,7 @@ type dictDecoder[T parquet.ColumnTypes] struct {
 	mem              memory.Allocator
 	dictValueDecoder utils.DictionaryConverter[T]
 	idxDecoder       *utils.TypedRleDecoder[T]
+	idxReader        bytes.Reader
 
 	idxScratchSpace  []uint64
 	idxAppendScratch []int
@@ -128,7 +129,7 @@ func (d *dictDecoder[T]) SetData(nvals int, data []byte) error {
 	d.nvals = nvals
 	if len(data) == 0 {
 		// no data, bitwidth can safely be 0
-		d.idxDecoder = utils.NewTypedRleDecoder[T](bytes.NewReader(data), 0 /* bitwidth */)
+		d.resetIndexDecoder(data, 0 /* bitwidth */)
 		return nil
 	}
 
@@ -139,8 +140,18 @@ func (d *dictDecoder[T]) SetData(nvals int, data []byte) error {
 	}
 
 	// pass the rest of the data, minus that first byte, to the decoder
-	d.idxDecoder = utils.NewTypedRleDecoder[T](bytes.NewReader(data[1:]), int(width))
+	d.resetIndexDecoder(data[1:], int(width))
 	return nil
+}
+
+func (d *dictDecoder[T]) resetIndexDecoder(data []byte, width int) {
+	d.idxReader.Reset(data)
+	if d.idxDecoder == nil {
+		d.idxDecoder = utils.NewTypedRleDecoder[T](&d.idxReader, width)
+		return
+	}
+
+	d.idxDecoder.Reset(&d.idxReader, width)
 }
 
 func (d *dictDecoder[T]) discard(n int) (int, error) {
