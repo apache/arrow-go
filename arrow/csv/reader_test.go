@@ -440,6 +440,28 @@ func TestCSVReaderInvalidInferredTimestampTimezoneDoesNotPanic(t *testing.T) {
 	assert.Equal(t, int64(1), r.RecordBatch().Column(1).(*array.Int64).Value(0))
 }
 
+func TestCSVReaderListViewTimestamp(t *testing.T) {
+	for _, typ := range []arrow.DataType{
+		arrow.ListViewOf(&arrow.TimestampType{Unit: arrow.Second}),
+		arrow.LargeListViewOf(&arrow.TimestampType{Unit: arrow.Second}),
+	} {
+		t.Run(typ.String(), func(t *testing.T) {
+			schema := arrow.NewSchema([]arrow.Field{{Name: "values", Type: typ}}, nil)
+			r := csv.NewReader(strings.NewReader("{1970-01-01 00:00:00}\n"), schema)
+			defer r.Release()
+
+			require.True(t, r.Next())
+			require.NoError(t, r.Err())
+			values := r.RecordBatch().Column(0).(array.ListLike)
+			require.Equal(t, 1, values.Len())
+			start, end := values.ValueOffsets(0)
+			require.Equal(t, int64(0), start)
+			require.Equal(t, int64(1), end)
+			assert.Equal(t, arrow.Timestamp(0), values.ListValues().(*array.Timestamp).Value(0))
+		})
+	}
+}
+
 func TestCSVReaderValidatesSuppliedTimestampTypeWithHeaderOnly(t *testing.T) {
 	invalidTimestamp := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "not/a_timezone"}
 	for _, typ := range []arrow.DataType{

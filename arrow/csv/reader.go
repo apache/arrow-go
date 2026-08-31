@@ -859,7 +859,7 @@ func (r *Reader) parseListLike(field array.ListLikeBuilder, str string) {
 	if len(str) == 0 {
 		// we don't want to create the csv reader if we already know the
 		// string is empty
-		field.Append(true)
+		r.appendListValue(field, 0)
 		return
 	}
 	reader := csv.NewReader(strings.NewReader(str))
@@ -869,11 +869,19 @@ func (r *Reader) parseListLike(field array.ListLikeBuilder, str string) {
 		field.AppendNull()
 		return
 	}
-	field.Append(true)
+	r.appendListValue(field, len(items))
 	valueBldr := field.ValueBuilder()
 	for _, str := range items {
 		r.initFieldConverter(valueBldr)(str)
 	}
+}
+
+func (r *Reader) appendListValue(field array.ListLikeBuilder, size int) {
+	if field, ok := field.(array.VarLenListLikeBuilder); ok {
+		field.AppendWithSize(true, size)
+		return
+	}
+	field.Append(true)
 }
 
 func (r *Reader) parseFixedSizeList(field *array.FixedSizeListBuilder, str string, n int) {
