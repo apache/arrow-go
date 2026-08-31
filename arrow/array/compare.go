@@ -19,6 +19,7 @@ package array
 import (
 	"fmt"
 	"math"
+	"reflect"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
@@ -356,7 +357,7 @@ func Equal(left, right arrow.Array) bool {
 func SliceEqual(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, rend int64) bool {
 	if lbeg == 0 && lend == int64(left.Len()) &&
 		rbeg == 0 && rend == int64(right.Len()) &&
-		canEqualDirectly(left) && canEqualDirectly(right) {
+		canEqualDirectly(left, right) {
 		return Equal(left, right)
 	}
 
@@ -368,11 +369,16 @@ func SliceEqual(left arrow.Array, lbeg, lend int64, right arrow.Array, rbeg, ren
 	return Equal(l, r)
 }
 
-// canEqualDirectly reports whether Equal can handle an array without first
-// normalizing it through NewSlice. Equal uses concrete type assertions, so
-// generic arrow.Array implementations must keep the normalization path.
-func canEqualDirectly(arr arrow.Array) bool {
-	switch arr.(type) {
+// canEqualDirectly reports whether Equal can handle both arrays without first
+// normalizing them through NewSlice. Equal uses concrete type assertions, so
+// generic arrow.Array implementations and mismatched concrete types must keep
+// the normalization path.
+func canEqualDirectly(left, right arrow.Array) bool {
+	if reflect.TypeOf(left) != reflect.TypeOf(right) {
+		return false
+	}
+
+	switch left.(type) {
 	case *Null, *Boolean, *FixedSizeBinary, *Binary, *String,
 		*LargeBinary, *LargeString, *BinaryView, *StringView,
 		*Int8, *Int16, *Int32, *Int64, *Uint8, *Uint16, *Uint32, *Uint64,

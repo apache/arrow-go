@@ -130,6 +130,25 @@ func TestArraySliceEqualFullRangeGenericArray(t *testing.T) {
 	right.Release()
 }
 
+func TestArraySliceEqualFullRangeMismatchedConcreteTypes(t *testing.T) {
+	binaryBuilder := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.String)
+	binaryBuilder.Append([]byte("value"))
+	binary := binaryBuilder.NewArray()
+	binaryBuilder.Release()
+	defer binary.Release()
+
+	stringBuilder := array.NewStringBuilder(memory.DefaultAllocator)
+	stringBuilder.Append("value")
+	str := stringBuilder.NewArray()
+	stringBuilder.Release()
+	defer str.Release()
+
+	assert.True(t, array.SliceEqual(
+		binary, 0, int64(binary.Len()),
+		str, 0, int64(str.Len()),
+	))
+}
+
 func TestListEqualByValidRuns(t *testing.T) {
 	for _, dt := range []arrow.DataType{
 		arrow.ListOf(arrow.PrimitiveTypes.Int32),
