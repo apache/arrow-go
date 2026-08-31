@@ -1315,7 +1315,7 @@ func roundTemporalExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.Exec
 	var tz *time.Location
 	if tsType, ok := input.Type.(*arrow.TimestampType); ok && tsType.TimeZone != "" {
 		var err error
-		tz, err = time.LoadLocation(tsType.TimeZone)
+		tz, err = tsType.GetZone()
 		if err != nil {
 			return fmt.Errorf("%w: invalid timezone %q: %v", arrow.ErrInvalid, tsType.TimeZone, err)
 		}
