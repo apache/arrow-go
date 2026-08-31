@@ -495,7 +495,7 @@ func arrayEqualVariableWidth[T binaryOffset, V ~[]byte | ~string](
 	validity []byte,
 	equalValues func(V, V) bool,
 ) bool {
-	if nulls == 0 {
+	if nulls == 0 && len(validity) == 0 {
 		return arrayEqualVariableWidthRun(
 			leftOffsets, rightOffsets,
 			leftValues, rightValues,

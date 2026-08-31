@@ -256,6 +256,34 @@ func TestBinaryEqualityWithDeclaredNullsWithoutBitmap(t *testing.T) {
 	assert.True(t, equal)
 }
 
+func TestBinaryEqualityWithBitmapAndZeroDeclaredNulls(t *testing.T) {
+	const length = 128
+	valid := makeLongValidRuns(length)
+	leftValues := makeBinaryEqualityValues(length, 16)
+	rightValues := append([]string(nil), leftValues...)
+	for i, isValid := range valid {
+		if !isValid {
+			rightValues[i] = "different ignored payload"
+		}
+	}
+
+	for _, dtype := range []arrow.BinaryDataType{
+		arrow.BinaryTypes.Binary,
+		arrow.BinaryTypes.String,
+		arrow.BinaryTypes.LargeBinary,
+		arrow.BinaryTypes.LargeString,
+	} {
+		t.Run(dtype.Name(), func(t *testing.T) {
+			left := makeRawBinaryEqualityArrayWithNullCount(dtype, leftValues, valid, 0)
+			defer left.Release()
+			right := makeRawBinaryEqualityArrayWithNullCount(dtype, rightValues, valid, 0)
+			defer right.Release()
+
+			assert.True(t, array.Equal(left, right))
+		})
+	}
+}
+
 func makeLongValidRuns(length int) []bool {
 	valid := make([]bool, length)
 	for i := range valid {
@@ -294,6 +322,18 @@ func makeSlicedBinaryEqualityPair(dtype arrow.BinaryDataType) (arrow.Array, arro
 }
 
 func makeRawBinaryEqualityArray(dtype arrow.BinaryDataType, values []string, valid []bool) arrow.Array {
+	nulls := 0
+	for _, isValid := range valid {
+		if !isValid {
+			nulls++
+		}
+	}
+	return makeRawBinaryEqualityArrayWithNullCount(dtype, values, valid, nulls)
+}
+
+func makeRawBinaryEqualityArrayWithNullCount(
+	dtype arrow.BinaryDataType, values []string, valid []bool, nulls int,
+) arrow.Array {
 	if len(values) != len(valid) {
 		panic("len(values) != len(valid)")
 	}
@@ -322,12 +362,9 @@ func makeRawBinaryEqualityArray(dtype arrow.BinaryDataType, values []string, val
 	}
 
 	validity := make([]byte, (len(valid)+7)/8)
-	nulls := 0
 	for i, isValid := range valid {
 		if isValid {
 			bitutil.SetBit(validity, i)
-		} else {
-			nulls++
 		}
 	}
 
