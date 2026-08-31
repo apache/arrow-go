@@ -365,6 +365,22 @@ func TestTemporalRoundingZonedFixedUnitsUseLocalTime(t *testing.T) {
 		location.String(), compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalHour})
 }
 
+func TestTemporalRoundingZonedFixedUnitsSupportWideDates(t *testing.T) {
+	location, err := time.LoadLocation("Asia/Kathmandu")
+	require.NoError(t, err)
+	input := time.Date(1000, time.July, 15, 10, 37, 0, 0, location)
+
+	requireTemporalRoundingTime(t, compute.FloorTemporal, input,
+		time.Date(1000, time.July, 15, 10, 0, 0, 0, location), arrow.Second,
+		location.String(), compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalHour})
+	requireTemporalRoundingTime(t, compute.CeilTemporal, input,
+		time.Date(1000, time.July, 15, 11, 0, 0, 0, location), arrow.Second,
+		location.String(), compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalHour})
+	requireTemporalRoundingTime(t, compute.RoundTemporal, input,
+		time.Date(1000, time.July, 15, 11, 0, 0, 0, location), arrow.Second,
+		location.String(), compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalHour})
+}
+
 func TestTemporalRoundingCalendarOriginAfterMidnightGap(t *testing.T) {
 	// Sao Paulo skipped midnight to 01:00. Monrovia skipped midnight to
 	// 00:44:30, so even an hour or minute boundary may not exist locally.

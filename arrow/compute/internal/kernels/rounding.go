@@ -21,6 +21,7 @@ package kernels
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -1014,14 +1015,25 @@ func roundTimestampFromWallOrigin(t time.Time, inputUnit arrow.TimeUnit, tz *tim
 	wallTime := calendarWallTime(t)
 
 	elapsed, err := wallClockDifference(wallTime, origin)
-	if err != nil {
-		return 0, err
+	var floor time.Time
+	if err == nil {
+		flooredElapsed, roundErr := roundToMultipleInt64(elapsed, opts.roundingInterval, RoundDown, false)
+		if roundErr != nil {
+			return 0, roundErr
+		}
+		floor, err = addWallNanos(origin, flooredElapsed, tz)
+	} else {
+		// Keep the wide timestamp range available for zoned timestamps. The
+		// reference implementation performs this arithmetic in the input
+		// duration, while an int64 nanosecond distance only spans about 292
+		// years.
+		wideElapsed, wideErr := wallClockDifferenceBig(wallTime, origin)
+		if wideErr != nil {
+			return 0, wideErr
+		}
+		flooredElapsed := floorBigIntToMultiple(wideElapsed, opts.roundingInterval)
+		floor, err = addWallNanosBig(origin, flooredElapsed, tz)
 	}
-	flooredElapsed, err := roundToMultipleInt64(elapsed, opts.roundingInterval, RoundDown, false)
-	if err != nil {
-		return 0, err
-	}
-	floor, err := addWallNanos(origin, flooredElapsed, tz)
 	if err != nil {
 		return 0, err
 	}
@@ -1130,6 +1142,37 @@ func wallClockDifference(value, origin time.Time) (int64, error) {
 	return checkedSubInt64(daysNanos, originNanos)
 }
 
+func wallClockDifferenceBig(value, origin time.Time) (*big.Int, error) {
+	days, err := calendarDayDifference(value, origin)
+	if err != nil {
+		return nil, err
+	}
+	valueNanos, err := wallClockNanos(value)
+	if err != nil {
+		return nil, err
+	}
+	originNanos, err := wallClockNanos(origin)
+	if err != nil {
+		return nil, err
+	}
+
+	result := new(big.Int).Mul(big.NewInt(days), big.NewInt(nanosPerDay))
+	result.Add(result, big.NewInt(valueNanos))
+	result.Sub(result, big.NewInt(originNanos))
+	return result, nil
+}
+
+func floorBigIntToMultiple(value *big.Int, multiple int64) *big.Int {
+	divisor := big.NewInt(multiple)
+	quotient := new(big.Int)
+	remainder := new(big.Int)
+	quotient.QuoRem(value, divisor, remainder)
+	if remainder.Sign() < 0 {
+		quotient.Sub(quotient, big.NewInt(1))
+	}
+	return quotient.Mul(quotient, divisor)
+}
+
 func calendarWallTime(value time.Time) time.Time {
 	return time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(), value.Nanosecond(), time.UTC)
 }
@@ -1208,6 +1251,43 @@ func addWallNanos(origin time.Time, nanos int64, tz *time.Location) (time.Time, 
 	dayTimeNanos -= minute * int64(time.Minute)
 	second := dayTimeNanos / int64(time.Second)
 	nanosecond := dayTimeNanos - second*int64(time.Second)
+	return checkedLocalTime(time.Date(date.Year(), date.Month(), date.Day(), int(hour), int(minute), int(second), int(nanosecond), time.UTC), tz)
+}
+
+func addWallNanosBig(origin time.Time, nanos *big.Int, tz *time.Location) (time.Time, error) {
+	days := new(big.Int)
+	remainder := new(big.Int)
+	days.QuoRem(nanos, big.NewInt(nanosPerDay), remainder)
+	if remainder.Sign() < 0 {
+		days.Sub(days, big.NewInt(1))
+		remainder.Add(remainder, big.NewInt(nanosPerDay))
+	}
+
+	originNanos, err := wallClockNanos(origin)
+	if err != nil {
+		return time.Time{}, err
+	}
+	dayTimeNanos := new(big.Int).Add(remainder, big.NewInt(originNanos))
+	if dayTimeNanos.Cmp(big.NewInt(nanosPerDay)) >= 0 {
+		days.Add(days, big.NewInt(1))
+		dayTimeNanos.Sub(dayTimeNanos, big.NewInt(nanosPerDay))
+	}
+	if !days.IsInt64() {
+		return time.Time{}, overflowError()
+	}
+
+	date := time.Date(origin.Year(), origin.Month(), origin.Day(), 0, 0, 0, 0, time.UTC)
+	date, err = checkedCalendarAddDays(date, days.Int64())
+	if err != nil {
+		return time.Time{}, err
+	}
+	dayTime := dayTimeNanos.Int64()
+	hour := dayTime / int64(time.Hour)
+	dayTime -= hour * int64(time.Hour)
+	minute := dayTime / int64(time.Minute)
+	dayTime -= minute * int64(time.Minute)
+	second := dayTime / int64(time.Second)
+	nanosecond := dayTime - second*int64(time.Second)
 	return checkedLocalTime(time.Date(date.Year(), date.Month(), date.Day(), int(hour), int(minute), int(second), int(nanosecond), time.UTC), tz)
 }
 
