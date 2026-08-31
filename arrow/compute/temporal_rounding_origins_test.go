@@ -370,15 +370,20 @@ func TestTemporalRoundingZonedFixedUnitsSupportWideDates(t *testing.T) {
 	require.NoError(t, err)
 	input := time.Date(1000, time.July, 15, 10, 37, 0, 0, location)
 
-	requireTemporalRoundingTime(t, compute.FloorTemporal, input,
-		time.Date(1000, time.July, 15, 10, 0, 0, 0, location), arrow.Second,
-		location.String(), compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalHour})
-	requireTemporalRoundingTime(t, compute.CeilTemporal, input,
-		time.Date(1000, time.July, 15, 11, 0, 0, 0, location), arrow.Second,
-		location.String(), compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalHour})
-	requireTemporalRoundingTime(t, compute.RoundTemporal, input,
-		time.Date(1000, time.July, 15, 11, 0, 0, 0, location), arrow.Second,
-		location.String(), compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalHour})
+	for _, unit := range []arrow.TimeUnit{arrow.Second, arrow.Millisecond, arrow.Microsecond} {
+		t.Run(unit.String(), func(t *testing.T) {
+			opts := compute.RoundTemporalOptions{Multiple: 1, Unit: compute.RoundTemporalHour}
+			requireTemporalRoundingTime(t, compute.FloorTemporal, input,
+				time.Date(1000, time.July, 15, 10, 0, 0, 0, location), unit,
+				location.String(), opts)
+			requireTemporalRoundingTime(t, compute.CeilTemporal, input,
+				time.Date(1000, time.July, 15, 11, 0, 0, 0, location), unit,
+				location.String(), opts)
+			requireTemporalRoundingTime(t, compute.RoundTemporal, input,
+				time.Date(1000, time.July, 15, 11, 0, 0, 0, location), unit,
+				location.String(), opts)
+		})
+	}
 }
 
 func TestTemporalRoundingCalendarOriginAfterMidnightGap(t *testing.T) {
