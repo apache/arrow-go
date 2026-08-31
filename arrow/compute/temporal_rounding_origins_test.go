@@ -259,6 +259,55 @@ func TestTemporalRoundingCalendarOriginMultiWeek(t *testing.T) {
 	}
 }
 
+func TestTemporalRoundingCalendarOriginMultiWeekYearBoundaries(t *testing.T) {
+	tests := []struct {
+		name             string
+		input            time.Time
+		multiple         int64
+		weekStartsMonday bool
+		floor            time.Time
+		ceil             time.Time
+	}{
+		{
+			name:     "sunday start at end of year",
+			input:    time.Date(2025, time.December, 31, 4, 58, 46, 0, time.UTC),
+			multiple: 2,
+			floor:    time.Date(2025, time.December, 28, 0, 0, 0, 0, time.UTC),
+			ceil:     time.Date(2026, time.January, 11, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:             "monday start at end of year",
+			input:            time.Date(2025, time.December, 31, 4, 58, 46, 0, time.UTC),
+			multiple:         2,
+			weekStartsMonday: true,
+			floor:            time.Date(2025, time.December, 29, 0, 0, 0, 0, time.UTC),
+			ceil:             time.Date(2026, time.January, 12, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:             "monday start before first week",
+			input:            time.Date(2023, time.January, 1, 4, 58, 46, 0, time.UTC),
+			multiple:         2,
+			weekStartsMonday: true,
+			floor:            time.Date(2022, time.December, 19, 0, 0, 0, 0, time.UTC),
+			ceil:             time.Date(2023, time.January, 2, 0, 0, 0, 0, time.UTC),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			opts := compute.RoundTemporalOptions{
+				Multiple:            test.multiple,
+				Unit:                compute.RoundTemporalWeek,
+				WeekStartsMonday:    test.weekStartsMonday,
+				CalendarBasedOrigin: true,
+			}
+			requireTemporalRoundingTime(t, compute.FloorTemporal, test.input, test.floor, arrow.Second, "", opts)
+			requireTemporalRoundingTime(t, compute.FloorTemporal, test.floor, test.floor, arrow.Second, "", opts)
+			requireTemporalRoundingTime(t, compute.CeilTemporal, test.input, test.ceil, arrow.Second, "", opts)
+		})
+	}
+}
+
 func TestTemporalRoundingCalendarOriginUsesWallClockAcrossDST(t *testing.T) {
 	location, err := time.LoadLocation("America/New_York")
 	require.NoError(t, err)

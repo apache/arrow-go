@@ -1598,18 +1598,26 @@ func floorCalendarDay(value time.Time, multiple int64, calendarOrigin bool, tz *
 }
 
 func floorCalendarWeek(value time.Time, multiple int64, weekStartsMonday bool, tz *time.Location) (time.Time, error) {
-	offsetDays := int64(4)
+	valueDay := time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, tz)
+	weekday := int(valueDay.Weekday())
 	targetWeekday := time.Wednesday
 	if weekStartsMonday {
-		offsetDays = 3
+		weekday = (weekday + 6) % 7
 		targetWeekday = time.Thursday
 	}
-	shifted, err := checkedCalendarAddDays(value, offsetDays)
+	weekStart, err := checkedCalendarAddDays(valueDay, -int64(weekday))
+	if err != nil {
+		return time.Time{}, err
+	}
+	// Use a fixed representative day from the input's week to identify the
+	// calendar week-year. Adding a constant to the input can cross into the
+	// following week for late-week values.
+	weekYearDate, err := checkedCalendarAddDays(weekStart, 3)
 	if err != nil {
 		return time.Time{}, err
 	}
 
-	previousYear, err := checkedSubInt64(int64(shifted.Year()), 1)
+	previousYear, err := checkedSubInt64(int64(weekYearDate.Year()), 1)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -1631,11 +1639,6 @@ func floorCalendarWeek(value time.Time, multiple int64, weekStartsMonday bool, t
 		return time.Time{}, err
 	}
 
-	// The shifted date is only used to identify the calendar week-year above.
-	// Keep the original local date when calculating its position in the bucket;
-	// otherwise a mid-week value can be moved into the following week and floor
-	// may return a boundary later than the input.
-	valueDay := time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, tz)
 	daysSinceOrigin, err := calendarDayDifference(valueDay, origin)
 	if err != nil {
 		return time.Time{}, err
