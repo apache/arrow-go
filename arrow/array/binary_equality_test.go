@@ -284,6 +284,33 @@ func TestBinaryEqualityWithBitmapAndZeroDeclaredNulls(t *testing.T) {
 	}
 }
 
+func TestBinaryEqualityEmptyArraysWithoutOffsets(t *testing.T) {
+	for _, dtype := range []arrow.BinaryDataType{
+		arrow.BinaryTypes.Binary,
+		arrow.BinaryTypes.String,
+		arrow.BinaryTypes.LargeBinary,
+		arrow.BinaryTypes.LargeString,
+	} {
+		t.Run(dtype.Name(), func(t *testing.T) {
+			makeArray := func() arrow.Array {
+				data := array.NewData(dtype, 0, []*memory.Buffer{nil, nil, nil}, nil, 0, 0)
+				result := array.MakeFromData(data)
+				data.Release()
+				return result
+			}
+
+			left := makeArray()
+			defer left.Release()
+			right := makeArray()
+			defer right.Release()
+
+			assert.NotPanics(t, func() {
+				assert.True(t, array.Equal(left, right))
+			})
+		})
+	}
+}
+
 func makeLongValidRuns(length int) []bool {
 	valid := make([]bool, length)
 	for i := range valid {

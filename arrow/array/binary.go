@@ -496,6 +496,10 @@ func arrayEqualVariableWidth[T binaryOffset, V ~[]byte | ~string](
 	validity []byte,
 	equalValues func(V, V) bool,
 ) bool {
+	if length == 0 {
+		return true
+	}
+
 	// A declared null count may be inconsistent with the validity bitmap.
 	// Verify zero-null bitmaps before comparing the whole payload.
 	if len(validity) == 0 ||
