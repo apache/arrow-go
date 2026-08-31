@@ -248,6 +248,16 @@ func TestTimestampTypeGetZoneAcceptsCaseInsensitiveUTC(t *testing.T) {
 	}
 }
 
+func TestTimestampTypeGetZoneRejectsInvalidFixedOffsets(t *testing.T) {
+	for _, timezone := range []string{"+24:00", "-24:00", "+00:60", "-00:60", "+01:00:00", "+0100"} {
+		t.Run(timezone, func(t *testing.T) {
+			typ := &arrow.TimestampType{TimeZone: timezone}
+			_, err := typ.GetZone()
+			assert.Error(t, err)
+		})
+	}
+}
+
 // Test race condition from GH-38795
 func TestGetToTimeFuncRace(t *testing.T) {
 	var (
@@ -618,6 +628,49 @@ func TestTimestampFromStringRejectsDateOnlyTimezone(t *testing.T) {
 	value, err := arrow.TimestampFromString("2024-01-01", arrow.Second)
 	require.NoError(t, err)
 	assert.Equal(t, arrow.Timestamp(1704067200), value)
+}
+
+func TestTimestampFromStringRejectsInvalidTimeSeparator(t *testing.T) {
+	for _, value := range []string{
+		"2024-01-01X00:00:00",
+		"2024-01-01_00:00:00Z",
+		"2024-01-01X00:00:00+01:00",
+	} {
+		t.Run(value, func(t *testing.T) {
+			_, err := arrow.TimestampFromString(value, arrow.Second)
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
+}
+
+func TestTimestampFromStringRejectsInvalidOffsets(t *testing.T) {
+	for _, value := range []string{
+		"2024-01-01 00:00:00+24",
+		"2024-01-01 00:00:00+2400",
+		"2024-01-01 00:00:00+24:00",
+		"2024-01-01 00:00:00+00:60",
+		"2024-01-01 00:00:00+00:00:60",
+	} {
+		t.Run(value, func(t *testing.T) {
+			_, err := arrow.TimestampFromString(value, arrow.Second)
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
+}
+
+func TestTimestampFromStringRejectsInvalidFractions(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		unit  arrow.TimeUnit
+	}{
+		{value: "2024-01-01 00:00:00,1", unit: arrow.Millisecond},
+		{value: "2024-01-01 00:00:00.1234567890", unit: arrow.Nanosecond},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			_, err := arrow.TimestampFromString(tc.value, tc.unit)
+			assert.Error(t, err)
+		})
+	}
 }
 
 func TestNarrowestDecimalType(t *testing.T) {
