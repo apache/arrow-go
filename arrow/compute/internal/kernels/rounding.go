@@ -1234,6 +1234,18 @@ func checkedCalendarAddDays(value time.Time, days int64) (time.Time, error) {
 	if (days > 0 && result.Before(value)) || (days < 0 && result.After(value)) {
 		return time.Time{}, overflowError()
 	}
+	return result, nil
+}
+
+func checkedCalendarAddDaysPreservingFields(value time.Time, days int64) (time.Time, error) {
+	dayOffset, err := checkedInt64ToInt(days)
+	if err != nil {
+		return time.Time{}, err
+	}
+	result, err := checkedCalendarAddDays(value, days)
+	if err != nil {
+		return time.Time{}, err
+	}
 	expected := time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC).
 		AddDate(0, 0, dayOffset)
 	if result.Year() != expected.Year() || result.Month() != expected.Month() ||
@@ -1626,7 +1638,7 @@ func floorCalendarDay(value time.Time, multiple int64, calendarOrigin bool, tz *
 	if err != nil {
 		return time.Time{}, err
 	}
-	return checkedCalendarAddDays(origin, roundedDays)
+	return checkedCalendarAddDaysPreservingFields(origin, roundedDays)
 }
 
 func floorCalendarWeek(value time.Time, multiple int64, weekStartsMonday bool, tz *time.Location) (time.Time, error) {
@@ -1640,14 +1652,14 @@ func floorCalendarWeek(value time.Time, multiple int64, weekStartsMonday bool, t
 		weekday = (weekday + 6) % 7
 		targetWeekday = time.Thursday
 	}
-	weekStart, err := checkedCalendarAddDays(valueDay, -int64(weekday))
+	weekStart, err := checkedCalendarAddDaysPreservingFields(valueDay, -int64(weekday))
 	if err != nil {
 		return time.Time{}, err
 	}
 	// Use a fixed representative day from the input's week to identify the
 	// calendar week-year. Adding a constant to the input can cross into the
 	// following week for late-week values.
-	weekYearDate, err := checkedCalendarAddDays(weekStart, 3)
+	weekYearDate, err := checkedCalendarAddDaysPreservingFields(weekStart, 3)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -1660,16 +1672,16 @@ func floorCalendarWeek(value time.Time, multiple int64, weekStartsMonday bool, t
 	if err != nil {
 		return time.Time{}, err
 	}
-	december, err = checkedCalendarAddDays(december, 30)
+	december, err = checkedCalendarAddDaysPreservingFields(december, 30)
 	if err != nil {
 		return time.Time{}, err
 	}
 	daysBack := (int(december.Weekday()) - int(targetWeekday) + 7) % 7
-	lastWeekday, err := checkedCalendarAddDays(december, -int64(daysBack))
+	lastWeekday, err := checkedCalendarAddDaysPreservingFields(december, -int64(daysBack))
 	if err != nil {
 		return time.Time{}, err
 	}
-	origin, err := checkedCalendarAddDays(lastWeekday, 4)
+	origin, err := checkedCalendarAddDaysPreservingFields(lastWeekday, 4)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -1687,7 +1699,7 @@ func floorCalendarWeek(value time.Time, multiple int64, weekStartsMonday bool, t
 	if err != nil {
 		return time.Time{}, err
 	}
-	return checkedCalendarAddDays(origin, roundedDays)
+	return checkedCalendarAddDaysPreservingFields(origin, roundedDays)
 }
 
 func roundCalendarOriginWeek(value time.Time, opts roundTemporalState, tz *time.Location) (time.Time, error) {
@@ -1706,7 +1718,7 @@ func roundCalendarOriginWeek(value time.Time, opts roundTemporalState, tz *time.
 			if err != nil {
 				return time.Time{}, err
 			}
-			next, err = checkedCalendarAddDays(floor, weekDays)
+			next, err = checkedCalendarAddDaysPreservingFields(floor, weekDays)
 			if err != nil {
 				return time.Time{}, err
 			}
@@ -1913,10 +1925,7 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 			weekday = (weekday + 6) % 7
 		}
 		startOfWeek := t.AddDate(0, 0, -weekday)
-		startOfWeek, err = checkedCalendarMidnight(startOfWeek.Year(), startOfWeek.Month(), startOfWeek.Day(), tz)
-		if err != nil {
-			return 0, err
-		}
+		startOfWeek = time.Date(startOfWeek.Year(), startOfWeek.Month(), startOfWeek.Day(), 0, 0, 0, 0, tz)
 
 		// Calculate N-week periods from epoch for Multiple > 1
 		epochInTz := time.Unix(0, 0).In(tz)
@@ -1925,10 +1934,7 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 			epochWeekday = (epochWeekday + 6) % 7
 		}
 		epochWeekStart := epochInTz.AddDate(0, 0, -epochWeekday)
-		epochWeekStart, err = checkedCalendarMidnight(epochWeekStart.Year(), epochWeekStart.Month(), epochWeekStart.Day(), tz)
-		if err != nil {
-			return 0, err
-		}
+		epochWeekStart = time.Date(epochWeekStart.Year(), epochWeekStart.Month(), epochWeekStart.Day(), 0, 0, 0, 0, tz)
 
 		daysSinceEpochWeek, err := calendarDayDifference(startOfWeek, epochWeekStart)
 		if err != nil {

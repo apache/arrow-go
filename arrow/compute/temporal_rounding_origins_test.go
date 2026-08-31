@@ -449,6 +449,7 @@ func TestTemporalRoundingCalendarOriginRejectsDSTGap(t *testing.T) {
 func TestTemporalRoundingRejectsMissingCalendarBoundary(t *testing.T) {
 	for _, tc := range []struct {
 		name, zone, input string
+		multiple          int64
 		unit              compute.RoundTemporalUnit
 		calendarOrigin    bool
 	}{
@@ -456,20 +457,24 @@ func TestTemporalRoundingRejectsMissingCalendarBoundary(t *testing.T) {
 			name:           "month start",
 			zone:           "America/Argentina/Buenos_Aires",
 			input:          "1930-12-02T12:00:00-03:00",
+			multiple:       1,
 			unit:           compute.RoundTemporalMonth,
 			calendarOrigin: true,
 		},
 		{
-			name:  "day start",
-			zone:  "America/Sao_Paulo",
-			input: "2018-11-04T01:30:00-02:00",
-			unit:  compute.RoundTemporalDay,
+			name:     "day start",
+			zone:     "America/Sao_Paulo",
+			input:    "2018-11-04T01:30:00-02:00",
+			multiple: 1,
+			unit:     compute.RoundTemporalDay,
 		},
 		{
-			name:  "week start",
-			zone:  "America/Sao_Paulo",
-			input: "2018-11-04T01:30:00-02:00",
-			unit:  compute.RoundTemporalWeek,
+			name:           "calendar-origin week start",
+			zone:           "America/Sao_Paulo",
+			input:          "2018-11-05T12:00:00-02:00",
+			multiple:       2,
+			unit:           compute.RoundTemporalWeek,
+			calendarOrigin: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -490,7 +495,7 @@ func TestTemporalRoundingRejectsMissingCalendarBoundary(t *testing.T) {
 			inputDatum := compute.NewDatum(inputArray)
 			defer inputDatum.Release()
 			result, err := compute.FloorTemporal(context.Background(), compute.RoundTemporalOptions{
-				Multiple:            1,
+				Multiple:            tc.multiple,
 				Unit:                tc.unit,
 				CalendarBasedOrigin: tc.calendarOrigin,
 			}, inputDatum)
