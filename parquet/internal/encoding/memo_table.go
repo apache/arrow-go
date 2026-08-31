@@ -99,6 +99,9 @@ type TypedMemoTable[T hashing.MemoTypes] interface {
 // for handling byte arrays/strings/fixed length byte arrays.
 type BinaryMemoTable interface {
 	MemoTable
+	// InsertOrGet is the typed equivalent of MemoTable.GetOrInsert, avoiding the
+	// interface boxing of the value on every call.
+	InsertOrGet(val []byte) (idx int, found bool, err error)
 	// ValuesSize returns the total number of bytes needed to copy all of the values
 	// from this table.
 	ValuesSize() int
@@ -231,6 +234,17 @@ func (m *binaryMemoTableImpl) Get(val interface{}) (int, bool) {
 
 func (m *binaryMemoTableImpl) GetOrInsert(val interface{}) (idx int, found bool, err error) {
 	key := m.valAsString(val)
+	idx, found = m.table[key]
+	if !found {
+		idx = m.Size()
+		m.builder.AppendString(key)
+		m.table[key] = idx
+	}
+	return
+}
+
+func (m *binaryMemoTableImpl) InsertOrGet(val []byte) (idx int, found bool, err error) {
+	key := string(val)
 	idx, found = m.table[key]
 	if !found {
 		idx = m.Size()

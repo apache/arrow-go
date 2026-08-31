@@ -106,7 +106,7 @@ func (enc *DictByteArrayEncoder) WriteDict(out []byte) {
 // PutByteArray adds a single byte array to buffer, updating the dictionary
 // and encoded size if it's a new value
 func (enc *DictByteArrayEncoder) PutByteArray(in parquet.ByteArray) {
-	memoIdx, found, err := enc.memo.GetOrInsert(in)
+	memoIdx, found, err := enc.memo.(BinaryMemoTable).InsertOrGet(in)
 	if err != nil {
 		panic(err)
 	}
