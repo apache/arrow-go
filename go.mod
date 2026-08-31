@@ -27,7 +27,7 @@ tool (
 )
 
 require (
-	github.com/andybalholm/brotli v1.2.2
+	github.com/andybalholm/brotli v1.2.3
 	github.com/apache/thrift v0.24.0
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/goccy/go-json v0.10.6
