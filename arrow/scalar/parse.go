@@ -45,6 +45,9 @@ func parseTimestamp(val string, dt *arrow.TimestampType) (arrow.Timestamp, error
 	if err != nil {
 		return 0, err
 	}
+	if i, parseErr := strconv.ParseInt(val, 10, 64); parseErr == nil {
+		return arrow.Timestamp(i), nil
+	}
 
 	ts, zonePresent, err := arrow.TimestampFromStringInLocation(val, dt.Unit, loc)
 	if err != nil {

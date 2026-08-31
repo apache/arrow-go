@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path"
 	"strings"
@@ -815,6 +816,30 @@ func TestCSVWriterReaderTimestampRoundTrip(t *testing.T) {
 			typ:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/New_York"},
 			value:   arrow.Timestamp(time.Date(1800, 1, 1, 0, 0, 0, 0, time.UTC).Unix()),
 			wantCSV: "1799-12-31 19:03:58-04:56:02\n",
+		},
+		{
+			name:    "minimum seconds without timezone",
+			typ:     &arrow.TimestampType{Unit: arrow.Second},
+			value:   math.MinInt64,
+			wantCSV: "-9223372036854775808\n",
+		},
+		{
+			name:    "minimum seconds with UTC timezone",
+			typ:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "UTC"},
+			value:   math.MinInt64,
+			wantCSV: "-9223372036854775808\n",
+		},
+		{
+			name:    "minimum seconds with fixed timezone",
+			typ:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "+02:00"},
+			value:   math.MinInt64,
+			wantCSV: "-9223372036854775808\n",
+		},
+		{
+			name:    "minimum seconds with named timezone",
+			typ:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "Europe/Berlin"},
+			value:   math.MinInt64,
+			wantCSV: "-9223372036854775808\n",
 		},
 	}
 

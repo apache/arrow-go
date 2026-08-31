@@ -19,6 +19,7 @@ package scalar_test
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"math/bits"
 	"strings"
 	"testing"
@@ -585,6 +586,30 @@ func TestTimestampScalarStringRoundTripOutsideNanosecondRange(t *testing.T) {
 				require.NoError(t, err)
 				assertScalarsEqual(t, original, fromParam)
 			})
+		}
+	}
+}
+
+func TestTimestampScalarStringRoundTripBoundaries(t *testing.T) {
+	for _, unit := range arrow.TimeUnitValues {
+		for _, timezone := range []string{"", "UTC", "+02:00", "Europe/Berlin"} {
+			for _, value := range []arrow.Timestamp{math.MinInt64, math.MaxInt64} {
+				t.Run(fmt.Sprintf("%s/%s/%d", unit, timezone, value), func(t *testing.T) {
+					typ := &arrow.TimestampType{Unit: unit, TimeZone: timezone}
+					original := scalar.NewTimestampScalar(value, typ)
+					if unit == arrow.Second && value == math.MinInt64 {
+						assert.Equal(t, "-9223372036854775808", original.String())
+					}
+
+					parsed, err := scalar.ParseScalar(typ, original.String())
+					require.NoError(t, err)
+					assertScalarsEqual(t, original, parsed)
+
+					fromParam, err := scalar.MakeScalarParam(original.String(), typ)
+					require.NoError(t, err)
+					assertScalarsEqual(t, original, fromParam)
+				})
+			}
 		}
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 	"time"
 	"unsafe"
 
@@ -52,6 +53,11 @@ func temporalToString(s TemporalScalar) string {
 			return "..."
 		}
 		tm := toTime(s.Value)
+		if tm.Year() < 0 || tm.Year() > 9999 {
+			// Timestamp parsing follows time.Parse, whose textual year range is
+			// limited to 0000 through 9999. Numeric timestamp values are raw epochs.
+			return strconv.FormatInt(int64(s.Value), 10)
+		}
 		layout := timestampScalarLayout
 		if typ.TimeZone != "" {
 			layout = timestampScalarZoneLayout

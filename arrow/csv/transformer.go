@@ -199,6 +199,10 @@ func (w *Writer) transformColToStringArr(typ arrow.DataType, col arrow.Array, st
 		for i := 0; i < arr.Len(); i++ {
 			if arr.IsValid(i) {
 				value := toTime(arr.Value(i))
+				if value.Year() < 0 || value.Year() > 9999 {
+					res[i] = strconv.FormatInt(int64(arr.Value(i)), 10)
+					continue
+				}
 				valueLayout := layout
 				if _, offset := value.Zone(); t.TimeZone != "" && offset%60 != 0 {
 					valueLayout += ":00"

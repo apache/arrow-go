@@ -17,6 +17,8 @@
 package array_test
 
 import (
+	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -70,6 +72,34 @@ func TestTimestampStringRoundTrip(t *testing.T) {
 	defer arr1.Release()
 
 	assert.True(t, array.Equal(arr, arr1))
+}
+
+func TestTimestampValueStrRoundTripBoundaries(t *testing.T) {
+	for _, unit := range arrow.TimeUnitValues {
+		for _, timezone := range []string{"", "UTC", "+02:00", "Europe/Berlin"} {
+			for _, value := range []arrow.Timestamp{math.MinInt64, math.MaxInt64} {
+				t.Run(fmt.Sprintf("%s/%s/%d", unit, timezone, value), func(t *testing.T) {
+					mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+					defer mem.AssertSize(t, 0)
+					typ := &arrow.TimestampType{Unit: unit, TimeZone: timezone}
+					builder := array.NewTimestampBuilder(mem, typ)
+					builder.Append(value)
+					values := builder.NewTimestampArray()
+					builder.Release()
+					defer values.Release()
+
+					input := values.ValueStr(0)
+					builder = array.NewTimestampBuilder(mem, typ)
+					require.NoError(t, builder.AppendValueFromString(input))
+					parsed := builder.NewTimestampArray()
+					builder.Release()
+					defer parsed.Release()
+
+					assert.Equal(t, value, parsed.Value(0))
+				})
+			}
+		}
+	}
 }
 
 func TestNewTimestampBuilder(t *testing.T) {
