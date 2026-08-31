@@ -1209,6 +1209,92 @@ func TestVariantBuilderTimestamps(t *testing.T) {
 	]`, string(out))
 }
 
+func TestVariantBuilderTimestampMixedCaseUTC(t *testing.T) {
+	timestampType := &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "Utc"}
+	storage := arrow.StructOf(
+		arrow.Field{Name: "metadata", Type: &arrow.DictionaryType{
+			IndexType: arrow.PrimitiveTypes.Uint8, ValueType: arrow.BinaryTypes.Binary}},
+		arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+		arrow.Field{Name: "typed_value", Type: arrow.StructOf(
+			arrow.Field{Name: "ts", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: timestampType, Nullable: true},
+			)},
+		), Nullable: true},
+	)
+
+	variantType, err := extensions.NewVariantType(storage)
+	require.NoError(t, err)
+	builder := variantType.NewBuilder(memory.DefaultAllocator).(*extensions.VariantBuilder)
+	defer builder.Release()
+
+	var valueBuilder variant.Builder
+	timestamp := arrow.Timestamp(1729773296789012)
+	require.NoError(t, valueBuilder.Append(map[string]any{"ts": timestamp}, variant.OptTimestampUTC))
+	value, err := valueBuilder.Build()
+	require.NoError(t, err)
+	builder.Append(value)
+
+	arr := builder.NewArray().(*extensions.VariantArray)
+	defer arr.Release()
+
+	assert.True(t, arr.IsShredded())
+	assert.True(t, arr.UntypedValues().IsNull(0))
+	typedValue := arr.Shredded().(*array.Struct).Field(0).(*array.Struct).Field(1)
+	assert.False(t, typedValue.IsNull(0))
+}
+
+func TestVariantBuilderTimestampTimezoneSemantics(t *testing.T) {
+	tests := []struct {
+		name     string
+		unit     arrow.TimeUnit
+		timezone string
+		options  variant.AppendOpt
+		typ      variant.Type
+	}{
+		{name: "UTC micros", unit: arrow.Microsecond, timezone: "UTC", options: variant.OptTimestampUTC, typ: variant.TimestampMicros},
+		{name: "mixed-case UTC micros", unit: arrow.Microsecond, timezone: "Utc", options: variant.OptTimestampUTC, typ: variant.TimestampMicros},
+		{name: "named timezone micros", unit: arrow.Microsecond, timezone: "Europe/Berlin", options: variant.OptTimestampUTC, typ: variant.TimestampMicros},
+		{name: "fixed offset micros", unit: arrow.Microsecond, timezone: "+02:00", options: variant.OptTimestampUTC, typ: variant.TimestampMicros},
+		{name: "timezone-less micros", unit: arrow.Microsecond, typ: variant.TimestampMicrosNTZ},
+		{name: "named timezone nanos", unit: arrow.Nanosecond, timezone: "Europe/Berlin", options: variant.OptTimestampUTC | variant.OptTimestampNano, typ: variant.TimestampNanos},
+		{name: "fixed offset nanos", unit: arrow.Nanosecond, timezone: "+02:00", options: variant.OptTimestampUTC | variant.OptTimestampNano, typ: variant.TimestampNanos},
+		{name: "timezone-less nanos", unit: arrow.Nanosecond, options: variant.OptTimestampNano, typ: variant.TimestampNanosNTZ},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			vt := extensions.NewShreddedVariantType(&arrow.TimestampType{
+				Unit:     tc.unit,
+				TimeZone: tc.timezone,
+			})
+			builder := extensions.NewVariantBuilder(memory.DefaultAllocator, vt)
+			defer builder.Release()
+
+			var valueBuilder variant.Builder
+			timestamp := arrow.Timestamp(1729773296789012)
+			require.NoError(t, valueBuilder.Append(timestamp, tc.options))
+			value, err := valueBuilder.Build()
+			require.NoError(t, err)
+			builder.Append(value)
+
+			arr := builder.NewArray().(*extensions.VariantArray)
+			defer arr.Release()
+
+			assert.True(t, arr.UntypedValues().IsNull(0))
+			assert.False(t, arr.Shredded().IsNull(0))
+
+			unshredded, err := extensions.UnshredVariant(arr, memory.DefaultAllocator)
+			require.NoError(t, err)
+			defer unshredded.Release()
+
+			got, err := unshredded.Value(0)
+			require.NoError(t, err)
+			assert.Equal(t, tc.typ, got.Type())
+		})
+	}
+}
+
 func TestVariantBuilderUnmarshalJSON(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

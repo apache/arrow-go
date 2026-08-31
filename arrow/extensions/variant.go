@@ -700,7 +700,7 @@ func createPrimitiveVariantReader(arr arrow.Array) (typedValReader, error) {
 				arrow.ErrInvalid, a.DataType().(*arrow.TimestampType).Unit)
 		}
 
-		if dt.TimeZone == "UTC" {
+		if dt.TimeZone != "" {
 			opt |= variant.OptTimestampUTC
 		}
 
@@ -1231,15 +1231,15 @@ func variantTypeFromArrow(dt arrow.DataType) variant.Type {
 		}
 	case arrow.TIMESTAMP:
 		dt := dt.(*arrow.TimestampType)
-		isUTC := dt.TimeZone == "" || dt.TimeZone == "UTC"
+		isTimeZoneAware := dt.TimeZone != ""
 		switch dt.Unit {
 		case arrow.Microsecond:
-			if isUTC {
+			if isTimeZoneAware {
 				return variant.TimestampMicros
 			}
 			return variant.TimestampMicrosNTZ
 		case arrow.Nanosecond:
-			if isUTC {
+			if isTimeZoneAware {
 				return variant.TimestampNanos
 			}
 			return variant.TimestampNanosNTZ
@@ -1554,7 +1554,7 @@ func (b *shreddedPrimitiveBuilder) tryTyped(v variant.Value) (residual []byte) {
 		tsType := bldr.Type().(*arrow.TimestampType)
 		switch v.Type() {
 		case variant.TimestampMicros:
-			if tsType.TimeZone != "UTC" {
+			if tsType.TimeZone == "" {
 				break
 			}
 
@@ -1580,7 +1580,7 @@ func (b *shreddedPrimitiveBuilder) tryTyped(v variant.Value) (residual []byte) {
 				return nil
 			}
 		case variant.TimestampNanos:
-			if tsType.TimeZone == "UTC" && tsType.Unit == arrow.Nanosecond {
+			if tsType.TimeZone != "" && tsType.Unit == arrow.Nanosecond {
 				bldr.Append(v.Value().(arrow.Timestamp))
 				return nil
 			}
