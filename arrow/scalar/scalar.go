@@ -615,7 +615,9 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 		if err != nil {
 			return nil, err
 		}
-		return NewExtensionScalar(storage, arr.DataType()), nil
+		result := NewExtensionScalar(storage, arr.DataType())
+		result.Valid = storage.IsValid()
+		return result, nil
 	case *array.FixedSizeBinary:
 		width := arr.DataType().(*arrow.FixedSizeBinaryType).ByteWidth
 		buf := scalarValueBuffer(arr.Data().Buffers()[1], (arr.Data().Offset()+idx)*width, width)

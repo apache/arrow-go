@@ -183,6 +183,9 @@ func (a *ArraySpan) MakeData() arrow.ArrayData {
 	} else if dt.ID() == arrow.DENSE_UNION || dt.ID() == arrow.SPARSE_UNION {
 		bufs[0] = nil
 		nulls = 0
+	} else if dt.ID() == arrow.RUN_END_ENCODED {
+		bufs[0] = nil
+		nulls = 0
 	}
 
 	if len(a.Children) > 0 {
@@ -578,10 +581,11 @@ type ExecSpan struct {
 func getNumBuffers(dt arrow.DataType) int {
 	switch dt.ID() {
 	case arrow.RUN_END_ENCODED:
-		return 0
+		return 1
 	case arrow.NULL, arrow.STRUCT, arrow.FIXED_SIZE_LIST:
 		return 1
-	case arrow.BINARY, arrow.LARGE_BINARY, arrow.STRING, arrow.LARGE_STRING, arrow.DENSE_UNION:
+	case arrow.BINARY, arrow.LARGE_BINARY, arrow.STRING, arrow.LARGE_STRING,
+		arrow.DENSE_UNION:
 		return 3
 	case arrow.BINARY_VIEW, arrow.STRING_VIEW:
 		// bitmap + view-header buffer + a single overflow data buffer.

@@ -63,6 +63,135 @@ func TestGetDictArrayDataNullInSuffix(t *testing.T) {
 	assert.True(t, dict.IsNull(1))
 }
 
+func TestMakeArrayOfNullListViews(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	for _, typ := range []arrow.DataType{
+		arrow.ListViewOf(arrow.PrimitiveTypes.Int32),
+		arrow.LargeListViewOf(arrow.PrimitiveTypes.Int32),
+	} {
+		t.Run(typ.String(), func(t *testing.T) {
+			for _, length := range []int{0, 1} {
+				arr := array.MakeArrayOfNull(mem, typ, length)
+				require.Equal(t, length, arr.Len())
+				require.Equal(t, length, arr.NullN())
+				require.NoError(t, array.ValidateFull(arr))
+				arr.Release()
+			}
+		})
+	}
+}
+
+func TestMakeArrayOfNullRunEndEncoded(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	typ := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32)
+	for _, length := range []int{0, 1, 4} {
+		t.Run(fmt.Sprintf("length-%d", length), func(t *testing.T) {
+			arr := array.MakeArrayOfNull(mem, typ, length)
+			defer arr.Release()
+
+			require.Equal(t, length, arr.Len())
+			require.Equal(t, 0, arr.NullN())
+			require.NoError(t, array.ValidateFull(arr))
+
+			rle := arr.(*array.RunEndEncoded)
+			if length == 0 {
+				require.Zero(t, rle.RunEndsArr().Len())
+				require.Zero(t, rle.Values().Len())
+			} else {
+				require.Equal(t, 1, rle.RunEndsArr().Len())
+				require.Equal(t, 1, rle.Values().Len())
+				require.True(t, rle.Values().IsNull(0))
+			}
+		})
+	}
+}
+
+func TestMakeArrayOfNullRunEndEncodedNestedDictionary(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.ListOf(arrow.PrimitiveTypes.Int32),
+	}
+	for _, runEndType := range []arrow.DataType{
+		arrow.PrimitiveTypes.Int16, arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int64,
+	} {
+		t.Run(runEndType.String(), func(t *testing.T) {
+			typ := arrow.RunEndEncodedOf(runEndType, dictType)
+			for _, length := range []int{0, 1, 4} {
+				t.Run(fmt.Sprintf("length-%d", length), func(t *testing.T) {
+					arr := array.MakeArrayOfNull(mem, typ, length)
+					defer arr.Release()
+					require.Equal(t, length, arr.Len())
+					require.NoError(t, array.ValidateFull(arr))
+					encoded := arr.(*array.RunEndEncoded)
+					values := encoded.Values().(*array.Dictionary)
+					require.Empty(t, values.Dictionary().(*array.List).ListValues().(*array.Int32).Int32Values())
+					if length == 0 {
+						require.Zero(t, encoded.RunEndsArr().Len())
+						require.Zero(t, values.Len())
+					} else {
+						require.Equal(t, 1, encoded.RunEndsArr().Len())
+						require.Equal(t, 1, values.Len())
+						require.True(t, values.IsNull(0))
+						require.Equal(t, fmt.Sprint(length), encoded.RunEndsArr().ValueStr(0))
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestMakeArrayOfNullEmptyUnions(t *testing.T) {
+	for _, typ := range []arrow.DataType{arrow.SparseUnionOf(nil, nil), arrow.DenseUnionOf(nil, nil)} {
+		t.Run(typ.ID().String(), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+			values := array.MakeArrayOfNull(mem, typ, 0)
+			defer values.Release()
+			require.Zero(t, values.Len())
+			require.NoError(t, array.ValidateFull(values))
+		})
+	}
+}
+
+func TestMakeArrayOfNullUnions(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	types := []arrow.DataType{
+		arrow.SparseUnionOf(
+			[]arrow.Field{
+				{Name: "number", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+				{Name: "text", Type: arrow.BinaryTypes.String, Nullable: true},
+			},
+			[]arrow.UnionTypeCode{5, 42},
+		),
+		arrow.DenseUnionOf(
+			[]arrow.Field{
+				{Name: "number", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+				{Name: "text", Type: arrow.BinaryTypes.String, Nullable: true},
+			},
+			[]arrow.UnionTypeCode{5, 42},
+		),
+	}
+
+	for _, typ := range types {
+		t.Run(typ.String(), func(t *testing.T) {
+			arr := array.MakeArrayOfNull(mem, typ, 1)
+			defer arr.Release()
+
+			require.Equal(t, 0, arr.NullN())
+			require.NoError(t, array.ValidateFull(arr))
+		})
+	}
+}
+
 var typemap = map[arrow.DataType]reflect.Type{
 	arrow.PrimitiveTypes.Int8:   reflect.TypeOf(int8(0)),
 	arrow.PrimitiveTypes.Uint8:  reflect.TypeOf(uint8(0)),

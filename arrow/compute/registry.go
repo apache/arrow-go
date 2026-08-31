@@ -49,6 +49,7 @@ func GetFunctionRegistry() FunctionRegistry {
 		registry = NewRegistry()
 		RegisterScalarCast(registry)
 		RegisterVectorSelection(registry)
+		RegisterScalarNested(registry)
 		RegisterVectorSort(registry)
 		RegisterScalarBoolean(registry)
 		RegisterScalarArithmetic(registry)

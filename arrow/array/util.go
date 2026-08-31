@@ -463,12 +463,18 @@ func getMaxBufferLen(dt arrow.DataType, length int) int {
 			bufferLen = maxOf(getMaxBufferLen(f.Type, 1))
 		}
 		return bufferLen
+	case *arrow.ListViewType:
+		return maxOf(dt.OffsetTypeTraits().BytesRequired(length))
+	case *arrow.LargeListViewType:
+		return maxOf(dt.OffsetTypeTraits().BytesRequired(length))
 	case arrow.OffsetsDataType:
 		return maxOf(dt.OffsetTypeTraits().BytesRequired(length + 1))
 	case arrow.BinaryViewDataType:
 		return maxOf(arrow.ViewHeaderSizeBytes * length)
 	case *arrow.FixedSizeListType:
 		return maxOf(getMaxBufferLen(dt.Elem(), int(dt.Len())*length))
+	case *arrow.RunEndEncodedType:
+		return bufferLen
 	case arrow.ExtensionType:
 		return maxOf(getMaxBufferLen(dt.StorageType(), length))
 	default:
@@ -497,7 +503,11 @@ func (n *nullArrayFactory) create() *Data {
 		childData []arrow.ArrayData
 		dictData  arrow.ArrayData
 	)
-	defer bufs[0].Release()
+	defer func() {
+		if bufs[0] != nil {
+			bufs[0].Release()
+		}
+	}()
 
 	if ex, ok := dt.(arrow.ExtensionType); ok {
 		dt = ex.StorageType()
@@ -520,41 +530,12 @@ func (n *nullArrayFactory) create() *Data {
 		bufs = append(bufs, n.buf)
 	case arrow.BinaryDataType:
 		bufs = append(bufs, n.buf, n.buf)
-	case arrow.OffsetsDataType:
-		bufs = append(bufs, n.buf)
-		childData[0] = n.createChild(dt, 0, 0)
-		defer childData[0].Release()
-	case *arrow.FixedSizeListType:
-		childData[0] = n.createChild(dt, 0, n.len*int(dt.Len()))
-		defer childData[0].Release()
-	case *arrow.StructType:
-		for i := range dt.Fields() {
-			childData[i] = n.createChild(dt, i, n.len)
-			defer childData[i].Release()
-		}
-	case *arrow.RunEndEncodedType:
-		bldr := NewBuilder(n.mem, dt.RunEnds())
-		defer bldr.Release()
-
-		switch b := bldr.(type) {
-		case *Int16Builder:
-			b.Append(int16(n.len))
-		case *Int32Builder:
-			b.Append(int32(n.len))
-		case *Int64Builder:
-			b.Append(int64(n.len))
-		}
-
-		childData[0] = bldr.newData()
-		defer childData[0].Release()
-		childData[1] = n.createChild(dt.Encoded(), 1, 1)
-		defer childData[1].Release()
 	case arrow.UnionType:
 		bufs[0].Release()
 		bufs[0] = nil
 		bufs = append(bufs, n.buf)
 		// buffer is zeroed, but 0 may not be a valid type code
-		if dt.TypeCodes()[0] != 0 {
+		if n.len > 0 && dt.TypeCodes()[0] != 0 {
 			bufs[1] = memory.NewResizableBuffer(n.mem)
 			bufs[1].Resize(n.len)
 			defer bufs[1].Release()
@@ -573,9 +554,51 @@ func (n *nullArrayFactory) create() *Data {
 			childData[i] = n.createChild(dt, i, childLen)
 			defer childData[i].Release()
 		}
+	case *arrow.ListViewType:
+		bufs = append(bufs, n.buf, n.buf)
+		childData[0] = n.createChild(dt, 0, 0)
+		defer childData[0].Release()
+	case *arrow.LargeListViewType:
+		bufs = append(bufs, n.buf, n.buf)
+		childData[0] = n.createChild(dt, 0, 0)
+		defer childData[0].Release()
+	case arrow.OffsetsDataType:
+		bufs = append(bufs, n.buf)
+		childData[0] = n.createChild(dt, 0, 0)
+		defer childData[0].Release()
+	case *arrow.FixedSizeListType:
+		childData[0] = n.createChild(dt, 0, n.len*int(dt.Len()))
+		defer childData[0].Release()
+	case *arrow.StructType:
+		for i := range dt.Fields() {
+			childData[i] = n.createChild(dt, i, n.len)
+			defer childData[i].Release()
+		}
+	case *arrow.RunEndEncodedType:
+		// Build the run ends separately from encoded types without builders.
+		bldr := NewRunEndEncodedBuilder(n.mem, dt.RunEnds(), arrow.Null)
+		defer bldr.Release()
+
+		if n.len > 0 {
+			bldr.AppendNull()
+			bldr.ContinueRun(uint64(n.len - 1))
+		}
+
+		arr := bldr.NewArray()
+		defer arr.Release()
+		values := MakeArrayOfNull(n.mem, dt.Encoded(), arr.Data().Children()[1].Len())
+		defer values.Release()
+		childData[0] = arr.Data().Children()[0]
+		childData[1] = values.Data()
+		bufs[0].Release()
+		bufs[0] = nil
 	}
 
-	out := NewData(n.dt, n.len, bufs, childData, n.len, 0)
+	nulls := n.len
+	if dt.ID() == arrow.RUN_END_ENCODED || arrow.IsUnion(dt.ID()) {
+		nulls = 0
+	}
+	out := NewData(n.dt, n.len, bufs, childData, nulls, 0)
 	if dictData != nil {
 		out.SetDictionary(dictData)
 	}
