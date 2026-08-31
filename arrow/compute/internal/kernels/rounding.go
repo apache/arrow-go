@@ -958,18 +958,49 @@ func roundTimestamp(ts int64, inputUnit arrow.TimeUnit, tz *time.Location, opts 
 		return roundToMultipleInt64(ts, intervalInInputUnit, opts.mode, opts.CeilIsStrictlyGreater)
 	}
 
-	// Slow path: convert to nanoseconds when the interval is incompatible with
-	// the input resolution.
-	tsNanos, err := convertToNanos(ts, inputUnit)
+	// Slow path: calculate the floor in nanoseconds, then cast the floor and
+	// ceiling back to the input resolution before comparing them. This mirrors
+	// the C++ kernel's duration_cast behavior when the requested interval is not
+	// representable in the input unit.
+	return roundTimestampInInputUnit(ts, inputUnit, opts)
+}
+
+func roundTimestampInInputUnit(ts int64, inputUnit arrow.TimeUnit, opts roundTemporalState) (int64, error) {
+	valueNanos, err := convertToNanos(ts, inputUnit)
 	if err != nil {
 		return 0, err
+	}
+	inputUnitNanos := int64(inputUnit.Multiplier())
+	floorNanos := floorBigIntToMultiple(big.NewInt(valueNanos), opts.roundingInterval)
+	floorInput := new(big.Int).Quo(floorNanos, big.NewInt(inputUnitNanos))
+	if !floorInput.IsInt64() {
+		return 0, overflowError()
+	}
+	floor := floorInput.Int64()
+
+	ceil := floor
+	increment := opts.roundingInterval / inputUnitNanos
+	if opts.CeilIsStrictlyGreater || floor < ts {
+		var err error
+		ceil, err = checkedAddInt64(floor, increment)
+		if err != nil {
+			return 0, err
+		}
 	}
 
-	rounded, err := roundToMultipleInt64(tsNanos, opts.roundingInterval, opts.mode, opts.CeilIsStrictlyGreater)
-	if err != nil {
-		return 0, err
+	switch opts.mode {
+	case RoundDown:
+		return floor, nil
+	case RoundUp:
+		return ceil, nil
+	default:
+		fromFloor := new(big.Int).Sub(big.NewInt(ts), big.NewInt(floor))
+		toCeil := new(big.Int).Sub(big.NewInt(ceil), big.NewInt(ts))
+		if fromFloor.Cmp(toCeil) >= 0 {
+			return ceil, nil
+		}
+		return floor, nil
 	}
-	return convertFromNanos(rounded, inputUnit), nil
 }
 
 // canRoundInInputUnit checks if rounding can be done in the input unit
@@ -1037,22 +1068,31 @@ func roundTimestampFromWallOrigin(t time.Time, inputUnit arrow.TimeUnit, tz *tim
 	if err != nil {
 		return 0, err
 	}
+	floorWall := calendarWallTime(floor.In(tz))
+	floorWallAtInputResolution, err := truncateWallToInputResolution(floorWall, origin, inputUnit)
+	if err != nil {
+		return 0, err
+	}
+	floorAtInputResolution, err := checkedLocalTime(floorWallAtInputResolution, tz)
+	if err != nil {
+		return 0, err
+	}
 
 	var rounded time.Time
 	switch opts.mode {
 	case RoundDown:
-		rounded = floor
+		rounded = floorAtInputResolution
 	case RoundUp:
-		rounded, err = ceilCalendarOrigin(inputTime, floor, opts, tz)
+		rounded, err = ceilCalendarOrigin(inputTime, floorAtInputResolution, inputUnit, opts, tz)
 		if err != nil {
 			return 0, err
 		}
 	default:
-		ceil, ceilErr := ceilCalendarOrigin(inputTime, floor, opts, tz)
+		ceil, ceilErr := ceilCalendarOrigin(inputTime, floorAtInputResolution, inputUnit, opts, tz)
 		if ceilErr != nil {
 			return 0, ceilErr
 		}
-		rounded, err = halfRoundPeriod(inputTime, floor, ceil)
+		rounded, err = halfRoundPeriod(inputTime, floorAtInputResolution, ceil)
 		if err != nil {
 			return 0, err
 		}
@@ -1065,7 +1105,18 @@ func roundTimestampFromWallOrigin(t time.Time, inputUnit arrow.TimeUnit, tz *tim
 	return int64(result), nil
 }
 
-func ceilCalendarOrigin(value, floor time.Time, opts roundTemporalState, tz *time.Location) (time.Time, error) {
+func truncateWallToInputResolution(value, origin time.Time, inputUnit arrow.TimeUnit) (time.Time, error) {
+	elapsed, err := wallClockDifferenceBig(value, origin)
+	if err != nil {
+		return time.Time{}, err
+	}
+	unitNanos := big.NewInt(int64(inputUnit.Multiplier()))
+	elapsed.Quo(elapsed, unitNanos)
+	elapsed.Mul(elapsed, unitNanos)
+	return addWallNanosBig(origin, elapsed, time.UTC)
+}
+
+func ceilCalendarOrigin(value, floor time.Time, inputUnit arrow.TimeUnit, opts roundTemporalState, tz *time.Location) (time.Time, error) {
 	// Convert the floored system time back to local wall time before deciding
 	// whether to advance. This matters when the period crosses a timezone
 	// transition because the elapsed system duration need not equal the wall
@@ -1079,7 +1130,9 @@ func ceilCalendarOrigin(value, floor time.Time, opts roundTemporalState, tz *tim
 		return cs, nil
 	}
 
-	nextWall, err := addWallNanos(floorWall, opts.roundingInterval, tz)
+	inputUnitNanos := int64(inputUnit.Multiplier())
+	increment := (opts.roundingInterval / inputUnitNanos) * inputUnitNanos
+	nextWall, err := addWallNanos(floorWall, increment, tz)
 	if err != nil {
 		return time.Time{}, err
 	}

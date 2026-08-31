@@ -603,6 +603,121 @@ func TestTemporalRoundingVectors(t *testing.T) {
 	}
 }
 
+func TestTemporalRoundingInputResolutionCasting(t *testing.T) {
+	values := []int64{2, 1, 0, -1, -2}
+	tests := []struct {
+		name     string
+		timezone string
+		multiple int64
+		unit     compute.RoundTemporalUnit
+		floor    []int64
+		ceil     []int64
+		strict   []int64
+		round    []int64
+	}{
+		{
+			name:     "nanosecond multiple in seconds UTC",
+			multiple: 1_500_000_000,
+			unit:     compute.RoundTemporalNanosecond,
+			floor:    []int64{1, 0, 0, -1, -3},
+			ceil:     []int64{2, 1, 0, -1, -2},
+			strict:   []int64{2, 1, 1, 0, -2},
+			round:    []int64{2, 1, 0, -1, -2},
+		},
+		{
+			name:     "nanosecond multiple in seconds New York",
+			timezone: "America/New_York",
+			multiple: 1_500_000_000,
+			unit:     compute.RoundTemporalNanosecond,
+			floor:    []int64{2, 0, 0, -1, -3},
+			ceil:     []int64{2, 1, 0, -1, -2},
+			strict:   []int64{3, 1, 1, 0, -2},
+			round:    []int64{2, 1, 0, -1, -2},
+		},
+		{
+			name:     "nanosecond multiple in seconds Kathmandu",
+			timezone: "Asia/Kathmandu",
+			multiple: 1_500_000_000,
+			unit:     compute.RoundTemporalNanosecond,
+			floor:    []int64{1, 0, 0, -2, -3},
+			ceil:     []int64{2, 1, 0, -1, -2},
+			strict:   []int64{2, 1, 1, -1, -2},
+			round:    []int64{2, 1, 0, -1, -2},
+		},
+		{
+			name:     "millisecond multiple in seconds UTC",
+			multiple: 999,
+			unit:     compute.RoundTemporalMillisecond,
+			floor:    []int64{1, 0, 0, -1, -2},
+			ceil:     []int64{1, 0, 0, -1, -2},
+			strict:   []int64{1, 0, 0, -1, -2},
+			round:    []int64{1, 0, 0, -1, -2},
+		},
+		{
+			name:     "millisecond multiple in seconds New York",
+			timezone: "America/New_York",
+			multiple: 999,
+			unit:     compute.RoundTemporalMillisecond,
+			floor:    []int64{2, 1, 0, -1, -2},
+			ceil:     []int64{2, 1, 0, -1, -2},
+			strict:   []int64{2, 1, 0, -1, -2},
+			round:    []int64{2, 1, 0, -1, -2},
+		},
+		{
+			name:     "millisecond multiple in seconds Kathmandu",
+			timezone: "Asia/Kathmandu",
+			multiple: 999,
+			unit:     compute.RoundTemporalMillisecond,
+			floor:    []int64{1, 0, -1, -2, -3},
+			ceil:     []int64{1, 0, -1, -2, -3},
+			strict:   []int64{1, 0, -1, -2, -3},
+			round:    []int64{1, 0, -1, -2, -3},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			builder := array.NewTimestampBuilder(memory.DefaultAllocator, &arrow.TimestampType{
+				Unit: arrow.Second, TimeZone: tc.timezone,
+			})
+			for _, value := range values {
+				builder.Append(arrow.Timestamp(value))
+			}
+			input := builder.NewArray()
+			builder.Release()
+			defer input.Release()
+
+			for _, rounding := range []struct {
+				name   string
+				fn     func(context.Context, compute.RoundTemporalOptions, compute.Datum) (compute.Datum, error)
+				strict bool
+				want   []int64
+			}{
+				{name: "floor", fn: compute.FloorTemporal, want: tc.floor},
+				{name: "ceil", fn: compute.CeilTemporal, want: tc.ceil},
+				{name: "ceil strictly greater", fn: compute.CeilTemporal, strict: true, want: tc.strict},
+				{name: "round", fn: compute.RoundTemporal, want: tc.round},
+			} {
+				t.Run(rounding.name, func(t *testing.T) {
+					result, err := rounding.fn(context.Background(), compute.RoundTemporalOptions{
+						Multiple:              tc.multiple,
+						Unit:                  tc.unit,
+						CeilIsStrictlyGreater: rounding.strict,
+					}, compute.NewDatum(input))
+					require.NoError(t, err)
+					defer result.Release()
+
+					output := result.(*compute.ArrayDatum).MakeArray().(*array.Timestamp)
+					defer output.Release()
+					for i, want := range rounding.want {
+						require.Equal(t, arrow.Timestamp(want), output.Value(i), "value %d", i)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTemporalWithNulls(t *testing.T) {
 	ctx := context.Background()
 	mem := memory.DefaultAllocator
