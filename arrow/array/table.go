@@ -69,7 +69,12 @@ func NewChunkedSlice(a *arrow.Chunked, i, j int64) *arrow.Chunked {
 		if end > int64(arr.Len()) {
 			end = int64(arr.Len())
 		}
-		chunks = append(chunks, NewSlice(arr, beg, end))
+		if beg == 0 && end == int64(arr.Len()) {
+			arr.Retain()
+			chunks = append(chunks, arr)
+		} else {
+			chunks = append(chunks, NewSlice(arr, beg, end))
+		}
 		sz -= int64(arr.Len()) - beg
 		beg = 0
 		cur++
