@@ -149,6 +149,7 @@ type columnWriter struct {
 	defLevelSink *encoding.PooledBufferWriter
 	repLevelSink *encoding.PooledBufferWriter
 
+	// Scratch for eagerly assembled pages. It retains the largest page until Close.
 	uncompressedData bytes.Buffer
 	compressedTemp   *bytes.Buffer
 
@@ -398,9 +399,20 @@ func (w *columnWriter) buildDataPageV2(defLevelsRLESize, repLevelsRLESize, uncom
 	}
 
 	// concatenate uncompressed levels and the possibly compressed values
-	var combined bytes.Buffer
-	combined.Grow(int(int64(defLevelsRLESize) + int64(repLevelsRLESize) + int64(len(data))))
-	w.concatBuffers(defLevelsRLESize, repLevelsRLESize, data, &combined)
+	bufferedPage := w.hasDict && !w.fallbackToNonDict
+	combinedSize := int(int64(defLevelsRLESize) + int64(repLevelsRLESize) + int64(len(data)))
+	var combined []byte
+	if bufferedPage {
+		var owned bytes.Buffer
+		owned.Grow(combinedSize)
+		w.concatBuffers(defLevelsRLESize, repLevelsRLESize, data, &owned)
+		combined = owned.Bytes()
+	} else {
+		w.uncompressedData.Reset()
+		w.uncompressedData.Grow(combinedSize)
+		w.concatBuffers(defLevelsRLESize, repLevelsRLESize, data, &w.uncompressedData)
+		combined = w.uncompressedData.Bytes()
+	}
 
 	pageStats, err := w.getPageStatistics()
 	if err != nil {
@@ -417,7 +429,7 @@ func (w *columnWriter) buildDataPageV2(defLevelsRLESize, repLevelsRLESize, uncom
 	repLevelsByteLen := int32(repLevelsRLESize)
 	firstRowIndex := int64(w.rowsWritten)
 
-	page := NewDataPageV2WithConfig(memory.NewBufferBytes(combined.Bytes()), nullCount, numRows, defLevelsByteLen, repLevelsByteLen,
+	page := NewDataPageV2WithConfig(memory.NewBufferBytes(combined), nullCount, numRows, defLevelsByteLen, repLevelsByteLen,
 		w.pager.HasCompressor(), DataPageConfig{
 			Num:              numValues,
 			Encoding:         w.encoding,
@@ -425,11 +437,11 @@ func (w *columnWriter) buildDataPageV2(defLevelsRLESize, repLevelsRLESize, uncom
 			Stats:            pageStats,
 			FirstRowIndex:    firstRowIndex,
 		})
-	if w.hasDict && !w.fallbackToNonDict {
+	if bufferedPage {
 		w.totalCompressedBytes += int64(page.buf.Len()) // + sizeof pageheader
 		w.pages = append(w.pages, page)
 	} else {
-		w.totalCompressedBytes += int64(combined.Len())
+		w.totalCompressedBytes += int64(len(combined))
 		defer page.Release()
 		return w.WriteDataPage(page)
 	}
@@ -686,6 +698,7 @@ func (w *columnWriter) resetPageStatistics() {
 func (w *columnWriter) Close() (err error) {
 	if !w.closed {
 		w.closed = true
+		defer func() { w.uncompressedData = bytes.Buffer{} }()
 		if w.hasDict && !w.fallbackToNonDict {
 			if err = w.WriteDictionaryPage(); err != nil {
 				return err
