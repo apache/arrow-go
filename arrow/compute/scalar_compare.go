@@ -20,6 +20,7 @@ package compute
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
@@ -52,6 +53,14 @@ func (fn *compareFunction) DispatchBest(vals ...arrow.DataType) (exec.Kernel, er
 	ensureDictionaryDecoded(vals...)
 	ensureNoExtensionType(vals...)
 	replaceNullWithOtherType(vals...)
+
+	if vals[0].ID() == arrow.TIMESTAMP && vals[1].ID() == arrow.TIMESTAMP {
+		lhs, rhs := vals[0].(*arrow.TimestampType), vals[1].(*arrow.TimestampType)
+		if (lhs.TimeZone == "") != (rhs.TimeZone == "") {
+			return nil, fmt.Errorf("%w: cannot compare timestamp with timezone to timestamp without timezone, got: %s and %s",
+				arrow.ErrInvalid, lhs, rhs)
+		}
+	}
 
 	if dt := commonNumeric(vals...); dt != nil {
 		replaceTypes(dt, vals...)

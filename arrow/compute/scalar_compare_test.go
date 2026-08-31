@@ -568,6 +568,23 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 
 				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()}, expected, nil)
 			})
+			c.Run("diff time zones and units", func() {
+				cases := []struct {
+					lhsZone string
+					rhsZone string
+				}{
+					{lhsZone: "America/New_York", rhsZone: "America/Phoenix"},
+					{lhsZone: "+02:00", rhsZone: "+02:00"},
+				}
+				for _, tc := range cases {
+					lhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second, TimeZone: tc.lhsZone}, zonedLHSJSON)
+					rhs := c.getArr(&arrow.TimestampType{Unit: arrow.Millisecond, TimeZone: tc.rhsZone}, zonedRHSJSON)
+
+					checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()}, expected, nil)
+					lhs.Release()
+					rhs.Release()
+				}
+			})
 			c.Run("native to zoned", func() {
 				lhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second}, lhsJSON)
 				defer lhs.Release()
@@ -586,6 +603,37 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 				_, err = compute.CallFunction(c.ctx, op.fn, nil, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()})
 				c.ErrorIs(err, arrow.ErrInvalid)
 				c.ErrorContains(err, "cannot compare timestamp with timezone to timestamp without timezone")
+			})
+			c.Run("native to zoned and diff units", func() {
+				cases := []struct {
+					lhsType  *arrow.TimestampType
+					lhsValue string
+					rhsType  *arrow.TimestampType
+					rhsValue string
+				}{
+					{
+						lhsType:  &arrow.TimestampType{Unit: arrow.Second},
+						lhsValue: lhsJSON,
+						rhsType:  &arrow.TimestampType{Unit: arrow.Millisecond, TimeZone: "UTC"},
+						rhsValue: zonedRHSJSON,
+					},
+					{
+						lhsType:  &arrow.TimestampType{Unit: arrow.Second, TimeZone: "UTC"},
+						lhsValue: zonedLHSJSON,
+						rhsType:  &arrow.TimestampType{Unit: arrow.Millisecond},
+						rhsValue: rhsJSON,
+					},
+				}
+				for _, tc := range cases {
+					lhs := c.getArr(tc.lhsType, tc.lhsValue)
+					rhs := c.getArr(tc.rhsType, tc.rhsValue)
+					_, err := compute.CallFunction(c.ctx, op.fn, nil, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()})
+					lhs.Release()
+					rhs.Release()
+
+					c.ErrorIs(err, arrow.ErrInvalid)
+					c.ErrorContains(err, "cannot compare timestamp with timezone to timestamp without timezone")
+				}
 			})
 		})
 	}
