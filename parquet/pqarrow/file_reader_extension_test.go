@@ -17,12 +17,17 @@
 package pqarrow
 
 import (
+	"bytes"
+	"context"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,6 +46,33 @@ type stableExtensionType struct {
 
 type stableExtensionArray struct {
 	array.ExtensionArrayBase
+}
+
+type panickingExtensionType struct {
+	arrow.ExtensionBase
+	beforePanic func()
+}
+
+func (t *panickingExtensionType) ArrayType() reflect.Type {
+	if t.beforePanic != nil {
+		t.beforePanic()
+	}
+	panic("malformed extension array type")
+}
+
+func (*panickingExtensionType) ExtensionName() string { return "test.panicking" }
+
+func (*panickingExtensionType) ExtensionEquals(other arrow.ExtensionType) bool {
+	_, ok := other.(*panickingExtensionType)
+	return ok
+}
+
+func (*panickingExtensionType) Serialize() string { return "" }
+
+func (*panickingExtensionType) Deserialize(arrow.DataType, string) (arrow.ExtensionType, error) {
+	return &panickingExtensionType{
+		ExtensionBase: arrow.ExtensionBase{Storage: arrow.PrimitiveTypes.Int32},
+	}, nil
 }
 
 func (*stableExtensionType) StorageType() arrow.DataType { return arrow.PrimitiveTypes.Int32 }
@@ -155,4 +187,162 @@ func TestExtensionReaderBuildArrayReleasesChunks(t *testing.T) {
 	out, err := r.BuildArray(0)
 	require.NoError(t, err)
 	out.Release()
+}
+
+func TestReadRowGroupsSerialRecoversFromPanic(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	builder := array.NewInt32Builder(mem)
+	builder.Append(1)
+	values := builder.NewInt32Array()
+	builder.Release()
+	defer values.Release()
+
+	record := array.NewRecordBatch(schema, []arrow.Array{values}, 1)
+	defer record.Release()
+
+	var buf bytes.Buffer
+	writer, err := NewFileWriter(schema, &buf, nil, DefaultWriterProps())
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+
+	parquetReader, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()),
+		file.WithReadProps(parquet.NewReaderProperties(mem)))
+	require.NoError(t, err)
+	defer parquetReader.Close()
+
+	reader, err := NewFileReader(parquetReader, ArrowReadProperties{Parallel: false}, mem)
+	require.NoError(t, err)
+	reader.Manifest.Fields[0].Field.Type = &panickingExtensionType{
+		ExtensionBase: arrow.ExtensionBase{Storage: arrow.PrimitiveTypes.Int32},
+	}
+
+	var table arrow.Table
+	var readErr error
+	require.NotPanics(t, func() {
+		table, readErr = reader.ReadRowGroups(context.Background(), []int{0}, []int{0})
+	})
+	require.Nil(t, table)
+	require.ErrorContains(t, readErr, "panic while reading")
+	require.ErrorContains(t, readErr, "malformed extension array type")
+}
+
+func TestReadRowGroupsRecoversFromMultiplePanics(t *testing.T) {
+	for _, parallel := range []bool{false, true} {
+		name := "serial"
+		if parallel {
+			name = "parallel"
+		}
+		t.Run(name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			schema := arrow.NewSchema([]arrow.Field{
+				{Name: "valid", Type: arrow.PrimitiveTypes.Int32},
+				{Name: "invalid1", Type: arrow.PrimitiveTypes.Int32},
+				{Name: "invalid2", Type: arrow.PrimitiveTypes.Int32},
+			}, nil)
+			builder := array.NewInt32Builder(mem)
+			builder.Append(1)
+			values := builder.NewInt32Array()
+			builder.Release()
+			defer values.Release()
+			record := array.NewRecordBatch(schema, []arrow.Array{values, values, values}, 1)
+			defer record.Release()
+
+			var buf bytes.Buffer
+			writer, err := NewFileWriter(schema, &buf, nil, DefaultWriterProps())
+			require.NoError(t, err)
+			require.NoError(t, writer.Write(record))
+			require.NoError(t, writer.Close())
+
+			parquetReader, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()),
+				file.WithReadProps(parquet.NewReaderProperties(mem)))
+			require.NoError(t, err)
+			defer parquetReader.Close()
+			reader, err := NewFileReader(parquetReader, ArrowReadProperties{Parallel: parallel}, mem)
+			require.NoError(t, err)
+
+			var ready sync.WaitGroup
+			ready.Add(2)
+			typ := &panickingExtensionType{
+				ExtensionBase: arrow.ExtensionBase{Storage: arrow.PrimitiveTypes.Int32},
+			}
+			if parallel {
+				typ.beforePanic = func() {
+					ready.Done()
+					ready.Wait()
+				}
+			}
+			reader.Manifest.Fields[1].Field.Type = typ
+			reader.Manifest.Fields[2].Field.Type = typ
+
+			var table arrow.Table
+			var readErr error
+			require.NotPanics(t, func() {
+				table, readErr = reader.ReadTable(context.Background())
+			})
+			require.Nil(t, table)
+			require.ErrorContains(t, readErr, "panic while reading")
+			require.ErrorContains(t, readErr, "malformed extension array type")
+		})
+	}
+}
+
+type cancelingExtensionType struct {
+	stableExtensionType
+	cancel context.CancelFunc
+}
+
+func (t *cancelingExtensionType) ArrayType() reflect.Type {
+	t.cancel()
+	return reflect.TypeFor[stableExtensionArray]()
+}
+
+func TestReadRowGroupsCanceledDuringFinalColumn(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	builder := array.NewInt32Builder(mem)
+	builder.Append(1)
+	values := builder.NewInt32Array()
+	builder.Release()
+	defer values.Release()
+	record := array.NewRecordBatch(schema, []arrow.Array{values}, 1)
+	defer record.Release()
+
+	var buf bytes.Buffer
+	writer, err := NewFileWriter(schema, &buf, nil, DefaultWriterProps())
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+
+	for _, parallel := range []bool{false, true} {
+		name := "serial"
+		if parallel {
+			name = "parallel"
+		}
+		t.Run(name, func(t *testing.T) {
+			parquetReader, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()),
+				file.WithReadProps(parquet.NewReaderProperties(mem)))
+			require.NoError(t, err)
+			defer parquetReader.Close()
+			reader, err := NewFileReader(parquetReader, ArrowReadProperties{Parallel: parallel}, mem)
+			require.NoError(t, err)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			reader.Manifest.Fields[0].Field.Type = &cancelingExtensionType{cancel: cancel}
+
+			table, err := reader.ReadTable(ctx)
+			if table != nil {
+				defer table.Release()
+			}
+			require.ErrorIs(t, err, context.Canceled)
+			require.Nil(t, table)
+		})
+	}
 }

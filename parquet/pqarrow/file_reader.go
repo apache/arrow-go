@@ -253,6 +253,24 @@ func (fr *FileReader) GetFieldReaders(ctx context.Context, colIndices, rowGroups
 	out := make([]*ColumnReader, len(fieldIndices))
 	outFields := make([]arrow.Field, len(fieldIndices))
 
+	if !fr.Props.Parallel {
+		for idx, fidx := range fieldIndices {
+			rdr, err := fr.GetFieldReader(ctx, fidx, includedLeaves, rowGroups)
+			if err != nil {
+				for _, rdr := range out {
+					if rdr != nil {
+						rdr.Release()
+					}
+				}
+				return nil, nil, err
+			}
+			outFields[idx] = *rdr.Field()
+			out[idx] = rdr
+		}
+
+		return out, arrow.NewSchema(outFields, fr.Manifest.SchemaMeta), nil
+	}
+
 	// Load batches in parallel
 	// When reading structs with large numbers of columns, the serial load is very slow.
 	// This is especially true when reading Cloud Storage. Loading concurrently
@@ -260,9 +278,6 @@ func (fr *FileReader) GetFieldReaders(ctx context.Context, colIndices, rowGroups
 	// GetFieldReader causes read operations, when issued serially on large numbers of columns,
 	// this is super time consuming. Get field readers concurrently.
 	g, gctx := errgroup.WithContext(ctx)
-	if !fr.Props.Parallel {
-		g.SetLimit(1)
-	}
 	for idx, fidx := range fieldIndices {
 		idx, fidx := idx, fidx // create concurrent copy
 		g.Go(func() error {
@@ -303,6 +318,15 @@ func (fr *FileReader) ReadColumn(rowGroups []int, rdr *ColumnReader) (*arrow.Chu
 		recs += fr.rdr.MetaData().RowGroups[rg].GetNumRows()
 	}
 	return rdr.NextBatch(recs)
+}
+
+func (fr *FileReader) readColumn(rowGroups []int, rdr *ColumnReader) (data *arrow.Chunked, err error) {
+	defer func() {
+		if pErr := recover(); pErr != nil {
+			err = utils.FormatRecoveredError("panic while reading", pErr)
+		}
+	}()
+	return fr.ReadColumn(rowGroups, rdr)
 }
 
 // ReadTable reads the entire file into an array.Table
@@ -370,6 +394,42 @@ func (fr *FileReader) ReadRowGroups(ctx context.Context, indices, rowGroups []in
 		return nil, err
 	}
 
+	if !fr.Props.Parallel {
+		columns := make([]arrow.Column, sc.NumFields())
+		defer releaseColumns(columns)
+		defer func() {
+			for _, rdr := range readers {
+				rdr.Release()
+			}
+		}()
+
+		for idx, rdr := range readers {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+
+			data, err := fr.readColumn(rowGroups, rdr)
+			if err != nil {
+				if data != nil {
+					data.Release()
+				}
+				return nil, err
+			}
+			columns[idx] = *arrow.NewColumn(sc.Field(idx), data)
+			data.Release()
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		var nrows int
+		if len(columns) > 0 {
+			nrows = columns[0].Len()
+		}
+
+		return array.NewTable(sc, columns, int64(nrows)), nil
+	}
+
 	// producer-consumer parallelization
 	var (
 		np      = 1
@@ -403,7 +463,7 @@ func (fr *FileReader) ReadRowGroups(ctx context.Context, indices, rowGroups []in
 						return
 					}
 
-					chnked, err := fr.ReadColumn(rowGroups, r.rdr)
+					chnked, err := fr.readColumn(rowGroups, r.rdr)
 					// pass the result column data to the result channel
 					// for the consumer goroutine to process
 					results <- resultPair{r.idx, chnked, err}
@@ -432,6 +492,9 @@ func (fr *FileReader) ReadRowGroups(ctx context.Context, indices, rowGroups []in
 	defer releaseColumns(columns)
 	for data := range results {
 		if data.err != nil {
+			if data.data != nil {
+				data.data.Release()
+			}
 			err = data.err
 			cancel()
 			break
@@ -448,7 +511,9 @@ func (fr *FileReader) ReadRowGroups(ctx context.Context, indices, rowGroups []in
 		// so the goroutines don't leak and so memory can get cleaned up. we already
 		// cancelled the context, so we're just consuming anything that was already queued up.
 		for data := range results {
-			data.data.Release()
+			if data.data != nil {
+				data.data.Release()
+			}
 		}
 		return nil, err
 	}
