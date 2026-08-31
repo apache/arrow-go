@@ -214,6 +214,51 @@ func TestTemporalRoundingCalendarBasedOrigins(t *testing.T) {
 	}
 }
 
+func TestTemporalRoundingCalendarOriginMultiWeek(t *testing.T) {
+	input := time.Date(1078, time.June, 14, 4, 11, 8, 0, time.UTC)
+	tests := []struct {
+		name             string
+		multiple         int64
+		weekStartsMonday bool
+		floor            time.Time
+		ceil             time.Time
+	}{
+		{
+			name:             "monday start, two weeks",
+			multiple:         2,
+			weekStartsMonday: true,
+			floor:            time.Date(1078, time.June, 3, 0, 0, 0, 0, time.UTC),
+			ceil:             time.Date(1078, time.June, 17, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:     "sunday start, two weeks",
+			multiple: 2,
+			floor:    time.Date(1078, time.June, 2, 0, 0, 0, 0, time.UTC),
+			ceil:     time.Date(1078, time.June, 16, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:             "monday start, three weeks",
+			multiple:         3,
+			weekStartsMonday: true,
+			floor:            time.Date(1078, time.May, 27, 0, 0, 0, 0, time.UTC),
+			ceil:             time.Date(1078, time.June, 17, 0, 0, 0, 0, time.UTC),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			opts := compute.RoundTemporalOptions{
+				Multiple:            test.multiple,
+				Unit:                compute.RoundTemporalWeek,
+				WeekStartsMonday:    test.weekStartsMonday,
+				CalendarBasedOrigin: true,
+			}
+			requireTemporalRoundingTime(t, compute.FloorTemporal, input, test.floor, arrow.Second, "", opts)
+			requireTemporalRoundingTime(t, compute.CeilTemporal, input, test.ceil, arrow.Second, "", opts)
+		})
+	}
+}
+
 func TestTemporalRoundingCalendarOriginUsesWallClockAcrossDST(t *testing.T) {
 	location, err := time.LoadLocation("America/New_York")
 	require.NoError(t, err)

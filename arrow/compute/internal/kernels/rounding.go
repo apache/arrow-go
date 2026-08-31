@@ -1631,8 +1631,12 @@ func floorCalendarWeek(value time.Time, multiple int64, weekStartsMonday bool, t
 		return time.Time{}, err
 	}
 
-	shiftedDay := time.Date(shifted.Year(), shifted.Month(), shifted.Day(), 0, 0, 0, 0, tz)
-	daysSinceOrigin, err := calendarDayDifference(shiftedDay, origin)
+	// The shifted date is only used to identify the calendar week-year above.
+	// Keep the original local date when calculating its position in the bucket;
+	// otherwise a mid-week value can be moved into the following week and floor
+	// may return a boundary later than the input.
+	valueDay := time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, tz)
+	daysSinceOrigin, err := calendarDayDifference(valueDay, origin)
 	if err != nil {
 		return time.Time{}, err
 	}
