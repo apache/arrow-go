@@ -88,6 +88,11 @@ func encodeByteStreamSplitWidth8(data []byte, in []byte) {
 	}
 }
 
+var (
+	encodeByteStreamSplitWidth4Impl = encodeByteStreamSplitWidth4
+	encodeByteStreamSplitWidth8Impl = encodeByteStreamSplitWidth8
+)
+
 func releaseBufferToPool(pooled *PooledBufferWriter) {
 	buf := pooled.buf
 	memory.Set(buf.Buf(), 0)
@@ -126,9 +131,9 @@ func (enc *byteStreamSplitEncoder[T]) FlushValues() (Buffer, error) {
 	var z T
 	switch any(z).(type) {
 	case int32, float32:
-		encodeByteStreamSplitWidth4(enc.flushBuffer.Bytes(), in.Bytes())
+		encodeByteStreamSplitWidth4Impl(enc.flushBuffer.Bytes(), in.Bytes())
 	case int64, float64:
-		encodeByteStreamSplitWidth8(enc.flushBuffer.Bytes(), in.Bytes())
+		encodeByteStreamSplitWidth8Impl(enc.flushBuffer.Bytes(), in.Bytes())
 	}
 
 	return enc.flushBuffer.Finish(), nil

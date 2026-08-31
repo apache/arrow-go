@@ -29,7 +29,31 @@ func init() {
 	if cpu.ARM64.HasASIMD {
 		decodeByteStreamSplitBatchWidth4InByteOrder = decodeByteStreamSplitBatchWidth4NEON
 		decodeByteStreamSplitBatchWidth8InByteOrder = decodeByteStreamSplitBatchWidth8NEON
+		encodeByteStreamSplitWidth4Impl = encodeByteStreamSplitWidth4NEON
+		encodeByteStreamSplitWidth8Impl = encodeByteStreamSplitWidth8NEON
 	}
+}
+
+//go:noescape
+func _encodeByteStreamSplitWidth4NEON(in, out unsafe.Pointer, nValues int)
+
+//go:noescape
+func _encodeByteStreamSplitWidth8NEON(in, out unsafe.Pointer, nValues int)
+
+func encodeByteStreamSplitWidth4NEON(data, in []byte) {
+	if len(in) == 0 {
+		return
+	}
+	debug.Assert(len(data) >= len(in), "not enough space in destination buffer for encoding")
+	_encodeByteStreamSplitWidth4NEON(unsafe.Pointer(&in[0]), unsafe.Pointer(&data[0]), len(in)/4)
+}
+
+func encodeByteStreamSplitWidth8NEON(data, in []byte) {
+	if len(in) == 0 {
+		return
+	}
+	debug.Assert(len(data) >= len(in), "not enough space in destination buffer for encoding")
+	_encodeByteStreamSplitWidth8NEON(unsafe.Pointer(&in[0]), unsafe.Pointer(&data[0]), len(in)/8)
 }
 
 //go:noescape

@@ -110,9 +110,9 @@ func (enc *ByteStreamSplitFixedLenByteArrayEncoder) FlushValues() (Buffer, error
 	case 2:
 		encodeByteStreamSplitWidth2(enc.flushBuffer.Bytes(), in.Bytes())
 	case 4:
-		encodeByteStreamSplitWidth4(enc.flushBuffer.Bytes(), in.Bytes())
+		encodeByteStreamSplitWidth4Impl(enc.flushBuffer.Bytes(), in.Bytes())
 	case 8:
-		encodeByteStreamSplitWidth8(enc.flushBuffer.Bytes(), in.Bytes())
+		encodeByteStreamSplitWidth8Impl(enc.flushBuffer.Bytes(), in.Bytes())
 	default:
 		encodeByteStreamSplit(enc.flushBuffer.Bytes(), in.Bytes(), enc.typeLen)
 	}
