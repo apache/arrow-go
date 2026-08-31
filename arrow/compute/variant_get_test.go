@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet/variant"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -829,4 +830,46 @@ func TestVariantGetShreddedFieldOnScalarErrors(t *testing.T) {
 		out.Release()
 	}
 	require.ErrorIs(t, err, arrow.ErrInvalid, "field access on a shredded scalar must error, not return null")
+}
+
+// TestVariantGetUUIDTarget pins that a UUID AsType reaches the UUID cast, not the nested-type reject.
+func TestVariantGetUUIDTarget(t *testing.T) {
+	mem := memory.DefaultAllocator
+	u := uuid.MustParse("00112233-4455-6677-8899-aabbccddeeff")
+	arr := vgNonShredded(t, mem, map[string]any{"id": u})
+	defer arr.Release()
+
+	out, err := compute.VariantGet(context.Background(), arr, compute.VariantGetOptions{
+		Path: field("id"), AsType: extensions.NewUUIDType(),
+	})
+	require.NoError(t, err, "UUID target must not be rejected as a nested type")
+	defer out.Release()
+
+	uarr, ok := out.(*extensions.UUIDArray)
+	require.True(t, ok, "expected *extensions.UUIDArray, got %T", out)
+	require.Equal(t, 1, uarr.Len())
+	require.False(t, uarr.IsNull(0))
+	assert.Equal(t, u, uarr.Value(0))
+}
+
+// TestVariantGetPartialCastFailure pins that non-strict nulls only the inconvertible row: ["1","bad"]->int64 is [1,null].
+func TestVariantGetPartialCastFailure(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := exec.WithAllocator(context.Background(), mem)
+	arr := vgNonShredded(t, mem, "1", "bad")
+
+	out, err := compute.VariantGet(ctx, arr, compute.VariantGetOptions{
+		AsType: arrow.PrimitiveTypes.Int64,
+	})
+	require.NoError(t, err)
+
+	ints := out.(*array.Int64)
+	require.Equal(t, 2, ints.Len())
+	assert.False(t, ints.IsNull(0), "valid row must survive a sibling row's cast failure")
+	assert.EqualValues(t, 1, ints.Value(0))
+	assert.True(t, ints.IsNull(1), "only the inconvertible row is null")
+
+	out.Release()
+	arr.Release()
 }

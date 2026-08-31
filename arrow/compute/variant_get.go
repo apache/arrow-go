@@ -38,10 +38,8 @@ type VariantGetOptions struct {
 	// AsType, when nil, makes VariantGet return a VariantArray pointing at the path;
 	// when set, the extracted values are cast to it via the cast kernels.
 	AsType arrow.DataType
-	// Strict makes a lossy cast fail; the default allows overflow and truncation via
-	// the cast kernels. Unlike arrow-rs safe mode there is no null-on-failure: an
-	// impossible cast always errors, since arrow-go's cast kernels have no safe flag.
-	// Non-strict nulls a whole natural-type group if any value in it is inconvertible.
+	// Strict makes a lossy cast fail; otherwise a value that cannot convert to AsType
+	// nulls only that row, not the rest of its natural-type group.
 	Strict bool
 }
 
@@ -55,9 +53,13 @@ func VariantGet(ctx context.Context, input *extensions.VariantArray, opts Varian
 		return nil, fmt.Errorf("%w: VariantGet requires a non-nil VariantArray", arrow.ErrInvalid)
 	}
 
-	// Nested target types are not yet supported; reject up front rather than
-	// silently producing an all-null array from the leaf cast.
-	if _, ok := opts.AsType.(arrow.NestedType); ok {
+	// Reject nested target storage. Unwrap extension types first: they embed
+	// ExtensionBase and so satisfy arrow.NestedType even when backed by e.g. UUID.
+	nestedCheck := opts.AsType
+	if ext, ok := nestedCheck.(arrow.ExtensionType); ok {
+		nestedCheck = ext.StorageType()
+	}
+	if _, ok := nestedCheck.(arrow.NestedType); ok {
 		return nil, fmt.Errorf("%w: VariantGet cast to nested type %s", arrow.ErrNotImplemented, opts.AsType)
 	}
 
@@ -450,15 +452,28 @@ func castLeaves(ctx context.Context, mem memory.Allocator, leaves []variantLeaf,
 		col := buildTypedColumn(mem, g.dt, leaves, g.rows)
 		cast, err := CastArray(ctx, col, NewCastOptions(asType, strict))
 		col.Release()
-		if err != nil {
-			if strict {
-				return nil, err
+		if err == nil {
+			casted = append(casted, cast)
+			for _, row := range g.rows {
+				perm[row] = pos
+				valid[row] = true
+				pos++
 			}
-			// Non-strict: this natural type cannot convert to asType; its rows stay null.
+
 			continue
 		}
-		casted = append(casted, cast)
+		if strict {
+			return nil, err
+		}
+		// Non-strict: retry each row alone so only the inconvertible rows null, not the whole group.
 		for _, row := range g.rows {
+			rc := buildTypedColumn(mem, g.dt, leaves, []int{row})
+			one, cerr := CastArray(ctx, rc, NewCastOptions(asType, strict))
+			rc.Release()
+			if cerr != nil {
+				continue // this row alone is inconvertible; it stays null
+			}
+			casted = append(casted, one)
 			perm[row] = pos
 			valid[row] = true
 			pos++
