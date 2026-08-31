@@ -24,6 +24,7 @@ import (
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
 	"github.com/apache/arrow-go/v18/internal/json"
@@ -495,7 +496,10 @@ func arrayEqualVariableWidth[T binaryOffset, V ~[]byte | ~string](
 	validity []byte,
 	equalValues func(V, V) bool,
 ) bool {
-	if nulls == 0 && len(validity) == 0 {
+	// A declared null count may be inconsistent with the validity bitmap.
+	// Verify zero-null bitmaps before comparing the whole payload.
+	if len(validity) == 0 ||
+		(nulls == 0 && bitutil.CountSetBits(validity, leftOffset, length) == length) {
 		return arrayEqualVariableWidthRun(
 			leftOffsets, rightOffsets,
 			leftValues, rightValues,
