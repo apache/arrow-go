@@ -135,6 +135,9 @@ func TimestampFromStringInLocation(val string, unit TimeUnit, loc *time.Location
 			lenWithoutZone -= 6
 		}
 	}
+	if zoneFmt != "" && lenWithoutZone == 10 {
+		return 0, true, fmt.Errorf("%w: timezone offset requires a time component", ErrInvalid)
+	}
 
 	switch {
 	case lenWithoutZone == 13:

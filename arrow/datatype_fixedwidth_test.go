@@ -602,6 +602,24 @@ func TestTimestampFromStringWithSecondOffsets(t *testing.T) {
 	}
 }
 
+func TestTimestampFromStringRejectsDateOnlyTimezone(t *testing.T) {
+	for _, value := range []string{
+		"2024-01-01Z",
+		"2024-01-01+01",
+		"2024-01-01+0100",
+		"2024-01-01+01:00",
+	} {
+		t.Run(value, func(t *testing.T) {
+			_, err := arrow.TimestampFromString(value, arrow.Second)
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
+
+	value, err := arrow.TimestampFromString("2024-01-01", arrow.Second)
+	require.NoError(t, err)
+	assert.Equal(t, arrow.Timestamp(1704067200), value)
+}
+
 func TestNarrowestDecimalType(t *testing.T) {
 	tests := []struct {
 		min, max int32
