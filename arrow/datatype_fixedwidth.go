@@ -201,11 +201,11 @@ func TimestampFromStringInLocation(val string, unit TimeUnit, loc *time.Location
 		fractionDigits := lenWithoutZone - 20
 		switch {
 		case unit == Second && fractionDigits > 0:
-			return 0, zoneFmt != "", errors.New("provided more than second precision for timestamp[s]")
+			return 0, zoneFmt != "", fmt.Errorf("%w: provided more than second precision for timestamp[s]", ErrInvalid)
 		case unit == Millisecond && fractionDigits > 3:
-			return 0, zoneFmt != "", errors.New("provided more than millisecond precision for timestamp[ms]")
+			return 0, zoneFmt != "", fmt.Errorf("%w: provided more than millisecond precision for timestamp[ms]", ErrInvalid)
 		case unit == Microsecond && fractionDigits > 6:
-			return 0, zoneFmt != "", errors.New("provided more than microsecond precision for timestamp[us]")
+			return 0, zoneFmt != "", fmt.Errorf("%w: provided more than microsecond precision for timestamp[us]", ErrInvalid)
 		case unit == Nanosecond && fractionDigits > 9:
 			return 0, zoneFmt != "", fmt.Errorf("%w: provided more than nanosecond precision for timestamp[ns]", ErrInvalid)
 		}

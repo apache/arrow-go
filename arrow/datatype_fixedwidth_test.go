@@ -663,6 +663,9 @@ func TestTimestampFromStringRejectsInvalidFractions(t *testing.T) {
 		value string
 		unit  arrow.TimeUnit
 	}{
+		{value: "2024-01-01 00:00:00.1", unit: arrow.Second},
+		{value: "2024-01-01 00:00:00.1234", unit: arrow.Millisecond},
+		{value: "2024-01-01 00:00:00.1234567", unit: arrow.Microsecond},
 		{value: "2024-01-01 00:00:00,1", unit: arrow.Millisecond},
 		{value: "2024-01-01 00:00:00.1234567890", unit: arrow.Nanosecond},
 	} {
