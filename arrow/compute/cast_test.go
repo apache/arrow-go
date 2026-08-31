@@ -1346,6 +1346,12 @@ func (c *CastSuite) TestTimestampToString() {
 
 		c.checkCast(&arrow.TimestampType{Unit: arrow.Nanosecond}, stype,
 			`[-596933876543210988, 349837323456789012]`, `["1951-02-01 01:02:03.456789012", "1981-02-01 01:02:03.456789012"]`)
+
+		for _, unit := range []arrow.TimeUnit{arrow.Second, arrow.Millisecond, arrow.Microsecond} {
+			c.checkCast(&arrow.TimestampType{Unit: unit}, stype,
+				fmt.Sprintf(`[%d, %d]`, math.MinInt64, math.MaxInt64),
+				fmt.Sprintf(`["%d", "%d"]`, math.MinInt64, math.MaxInt64))
+		}
 	}
 }
 
@@ -1365,6 +1371,9 @@ func (c *CastSuite) TestTimestampWithZoneToString() {
 
 		c.checkCast(&arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: "America/Phoenix"}, stype,
 			`[-34226955876543211, 1456767743456789246]`, `["1968-11-30 13:30:44.123456789-0700", "2016-02-29 10:42:23.456789246-0700"]`)
+
+		c.checkCast(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "Europe/Berlin"}, stype,
+			`[-62167219200]`, `["0000-01-01 00:53:28+005328"]`)
 	}
 }
 
@@ -3204,6 +3213,12 @@ func (c *CastSuite) TestStringToTimestamp() {
 		// timestamp with zone offset can parse as any time zone (since they're unambiguous)
 		c.checkCastArr(zoned, arrow.FixedWidthTypes.Timestamp_s, `[1582934400, 1583140152]`, *compute.DefaultCastOptions(true))
 		c.checkCastArr(zoned, &arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/Phoenix"}, `[1582934400, 1583140152]`, *compute.DefaultCastOptions(true))
+
+		for _, timezone := range []string{"", "UTC"} {
+			c.checkCast(dt, &arrow.TimestampType{Unit: arrow.Second, TimeZone: timezone},
+				`["-9223372036854775808", "9223372036854775807"]`,
+				`[-9223372036854775808, 9223372036854775807]`)
+		}
 	}
 }
 

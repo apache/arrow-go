@@ -440,6 +440,23 @@ func TestCSVReaderInvalidInferredTimestampTimezoneDoesNotPanic(t *testing.T) {
 	assert.Equal(t, int64(1), r.RecordBatch().Column(1).(*array.Int64).Value(0))
 }
 
+func TestCSVReaderValidatesSuppliedTimestampTypeWithHeaderOnly(t *testing.T) {
+	invalidTimestamp := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "not/a_timezone"}
+	for _, typ := range []arrow.DataType{
+		arrow.ListOf(invalidTimestamp),
+		arrow.FixedSizeListOf(1, invalidTimestamp),
+	} {
+		r := csv.NewInferringReader(strings.NewReader("values\n"),
+			csv.WithHeader(true),
+			csv.WithColumnTypes(map[string]arrow.DataType{"values": typ}),
+		)
+
+		assert.False(t, r.Next())
+		assert.ErrorContains(t, r.Err(), "could not find timezone location")
+		r.Release()
+	}
+}
+
 func TestInferringReaderUsesTimezoneAwareTimestamp(t *testing.T) {
 	r := csv.NewInferringReader(strings.NewReader("2024-01-01T00:00:00Z\n"), csv.WithHeader(false))
 	defer r.Release()

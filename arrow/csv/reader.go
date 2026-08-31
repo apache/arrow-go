@@ -214,6 +214,15 @@ func (r *Reader) readHeader() error {
 		}
 		r.columnFilter = nil
 	}
+	if r.header {
+		for _, cc := range r.conversions {
+			if cc.typ != nil {
+				if err := validateTimestampMetadata(cc.typ); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	r.columnTypes = nil
 	if !r.header {
 		r.pendingRecord = append([]string(nil), records...)
