@@ -18,6 +18,7 @@ package pqarrow_test
 
 import (
 	"bytes"
+	"context"
 	"math"
 	"strings"
 	"testing"
@@ -26,6 +27,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -207,6 +209,129 @@ func TestFileWriterTotalBytesBuffered(t *testing.T) {
 	// Verify total bytes & compressed bytes are correct
 	assert.Equal(t, int64(482), writer.TotalCompressedBytes())
 	assert.Equal(t, int64(1120), writer.TotalBytesWritten())
+}
+
+func TestFileWriterRangeWritesPreserveData(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "number", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+		{Name: "text", Type: arrow.BinaryTypes.String, Nullable: true},
+		{Name: "values", Type: arrow.ListOf(arrow.PrimitiveTypes.Int32), Nullable: true},
+	}, nil)
+	record, _, err := array.RecordFromJSON(memory.DefaultAllocator, schema, strings.NewReader(`[
+		{"number": 1, "text": "one", "values": [1, 2]},
+		{"number": null, "text": "two", "values": []},
+		{"number": 3, "text": null, "values": null},
+		{"number": 4, "text": "four", "values": [4]},
+		{"number": 5, "text": "five", "values": [5, 6, 7]}
+	]`))
+	require.NoError(t, err)
+	defer record.Release()
+
+	writeAndRead := func(t *testing.T, write func(*pqarrow.FileWriter) error) {
+		t.Helper()
+
+		var output bytes.Buffer
+		writer, err := pqarrow.NewFileWriter(
+			schema,
+			&output,
+			parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(2)),
+			pqarrow.DefaultWriterProps(),
+		)
+		require.NoError(t, err)
+		require.NoError(t, write(writer))
+		require.NoError(t, writer.Close())
+
+		reader, err := file.NewParquetReader(bytes.NewReader(output.Bytes()))
+		require.NoError(t, err)
+		require.Equal(t, 3, reader.NumRowGroups())
+		require.Equal(t, int64(5), reader.NumRows())
+		require.NoError(t, reader.Close())
+
+		got, err := pqarrow.ReadTable(context.Background(), bytes.NewReader(output.Bytes()), nil, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+		require.NoError(t, err)
+		defer got.Release()
+		require.Equal(t, int64(5), got.NumRows())
+		for i := 0; i < int(record.NumCols()); i++ {
+			expected := arrow.NewChunked(record.Column(i).DataType(), []arrow.Array{record.Column(i)})
+			require.Truef(t, array.ChunkedEqual(expected, got.Column(i).Data()), "column %d differs", i)
+			expected.Release()
+		}
+	}
+
+	t.Run("Write", func(t *testing.T) {
+		writeAndRead(t, func(writer *pqarrow.FileWriter) error {
+			return writer.Write(record)
+		})
+	})
+
+	t.Run("WriteBuffered", func(t *testing.T) {
+		writeAndRead(t, func(writer *pqarrow.FileWriter) error {
+			return writer.WriteBuffered(record)
+		})
+	})
+
+	t.Run("WriteBufferedAcrossCalls", func(t *testing.T) {
+		first := record.NewSlice(0, 1)
+		defer first.Release()
+		second := record.NewSlice(1, record.NumRows())
+		defer second.Release()
+
+		writeAndRead(t, func(writer *pqarrow.FileWriter) error {
+			if err := writer.WriteBuffered(first); err != nil {
+				return err
+			}
+			return writer.WriteBuffered(second)
+		})
+	})
+
+	t.Run("WriteBufferedAtFullBoundary", func(t *testing.T) {
+		first := record.NewSlice(0, 2)
+		defer first.Release()
+		second := record.NewSlice(2, record.NumRows())
+		defer second.Release()
+
+		writeAndRead(t, func(writer *pqarrow.FileWriter) error {
+			if err := writer.WriteBuffered(first); err != nil {
+				return err
+			}
+			return writer.WriteBuffered(second)
+		})
+	})
+}
+
+func TestFileWriterZeroRowRecord(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int64}}, nil)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	record := builder.NewRecordBatch()
+	builder.Release()
+	defer record.Release()
+
+	for _, test := range []struct {
+		name  string
+		write func(*pqarrow.FileWriter, arrow.RecordBatch) error
+	}{
+		{name: "Write", write: (*pqarrow.FileWriter).Write},
+		{name: "WriteBuffered", write: (*pqarrow.FileWriter).WriteBuffered},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			writer, err := pqarrow.NewFileWriter(
+				schema,
+				&output,
+				parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(2)),
+				pqarrow.DefaultWriterProps(),
+			)
+			require.NoError(t, err)
+			require.NoError(t, test.write(writer, record))
+			require.NoError(t, writer.Close())
+
+			reader, err := file.NewParquetReader(bytes.NewReader(output.Bytes()))
+			require.NoError(t, err)
+			require.Equal(t, 1, reader.NumRowGroups())
+			require.Equal(t, int64(0), reader.NumRows())
+			require.NoError(t, reader.Close())
+		})
+	}
 }
 
 func TestWriteOnClosedFileWriter(t *testing.T) {
