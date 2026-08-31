@@ -154,6 +154,35 @@ func TestByteStreamSplitFixedLenByteArrayDecoderSpacedOutput(t *testing.T) {
 	require.Equal(t, uintptr(width), third-second)
 }
 
+func TestFixedLenByteArrayDecoderSpacedOutputAcrossEncodings(t *testing.T) {
+	const width = 4
+	validBits := []byte{0b00010101}
+	firstValues := makeFixedLenByteArrayValues(3, width, 0)
+	secondValues := makeFixedLenByteArrayValues(3, width, 100)
+
+	node := schema.NewFixedLenByteArrayNode("value", parquet.Repetitions.Required, width, -1)
+	column := schema.NewColumn(node, 0, 0)
+	plain := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.Plain, column, memory.DefaultAllocator).(FixedLenByteArrayDecoder)
+	plainData := make([]byte, 0, len(firstValues)*width)
+	for _, value := range firstValues {
+		plainData = append(plainData, value...)
+	}
+	require.NoError(t, plain.SetData(len(firstValues), plainData))
+
+	out := make([]parquet.FixedLenByteArray, 5)
+	decoded, err := plain.DecodeSpaced(out, 2, validBits, 0)
+	require.NoError(t, err)
+	require.Equal(t, len(out), decoded)
+
+	byteStreamSplit := newByteStreamSplitFixedLenByteArrayDecoder(t, width, secondValues)
+	decoded, err = byteStreamSplit.DecodeSpaced(out, 2, validBits, 0)
+	require.NoError(t, err)
+	require.Equal(t, len(out), decoded)
+	require.Equal(t, secondValues[0], out[0])
+	require.Equal(t, secondValues[1], out[2])
+	require.Equal(t, secondValues[2], out[4])
+}
+
 func newByteStreamSplitFixedLenByteArrayDecoder(t *testing.T, width int, values []parquet.FixedLenByteArray) FixedLenByteArrayDecoder {
 	t.Helper()
 

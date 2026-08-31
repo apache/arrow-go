@@ -218,13 +218,12 @@ func (d *dictDecoder[T]) DecodeIndicesSpaced(numValues, nullCount int, validBits
 	return n, nil
 }
 
-// spacedExpandSwap is spacedExpand for decoders that write *through* caller-provided
-// storage instead of replacing it. spacedExpand moves values with copy and leaves the
-// null slots alone, which for the slice-header column types (ByteArray /
-// FixedLenByteArray) leaves duplicate headers behind: a null slot and a valid slot end
-// up referencing the same backing array. That is harmless for a decoder that replaces
-// the header, but a decoder that writes through it would have two output slots share
-// one array and clobber each other once the buffer is reused for a later page.
+// spacedExpandSwap is spacedExpand for reusable slices whose entries may later be
+// written through. spacedExpand moves values with copy and leaves the null slots alone,
+// which for the slice-header column types (ByteArray / FixedLenByteArray) leaves
+// duplicate headers behind: a null slot and a valid slot end up referencing the same
+// backing array. A later decoder that writes through those entries would then clobber
+// one value when the buffer is reused for another page.
 //
 // Swapping instead of copying keeps the buffer a permutation of its original elements,
 // so no slot aliases another and every slot keeps its reusable capacity.

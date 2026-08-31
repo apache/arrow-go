@@ -125,7 +125,9 @@ func (pflba *PlainFixedLenByteArrayDecoder) DecodeSpaced(out []parquet.FixedLenB
 		return valuesRead, errors.New("parquet: number of values / definitions levels read did not match")
 	}
 
-	return spacedExpand(out, nullCount, validBits, validBitsOffset), nil
+	// Keep every output slot independent because a later decoder may write through
+	// these slices when this buffer is reused across pages.
+	return spacedExpandSwap(out, nullCount, validBits, validBitsOffset), nil
 }
 
 // ByteStreamSplitFixedLenByteArrayDecoder is a decoder for BYTE_STREAM_SPLIT-encoded
