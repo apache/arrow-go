@@ -354,6 +354,23 @@ func TestTimestampValueStrWithEmptyCustomLayout(t *testing.T) {
 	assert.Empty(t, arr.ValueStr(0))
 }
 
+func TestTimestampValueStrInvalidTimezoneDoesNotPanic(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dt := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "not/a_timezone"}
+	b := array.NewTimestampBuilder(mem, dt)
+	defer b.Release()
+
+	b.Append(0)
+	arr := b.NewArray()
+	defer arr.Release()
+
+	assert.NotPanics(t, func() {
+		assert.Equal(t, "...", arr.ValueStr(0))
+	})
+}
+
 func TestTimestampEquality(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)

@@ -109,7 +109,10 @@ func (a *Timestamp) ValueStr(i int) string {
 	}
 
 	typ := a.DataType().(*arrow.TimestampType)
-	toTime, _ := typ.GetToTimeFunc()
+	toTime, err := typ.GetToTimeFunc()
+	if err != nil {
+		return "..."
+	}
 	value := toTime(a.values[i])
 	if a.useDefaultLayout && (value.Year() < 0 || value.Year() > 9999) {
 		return strconv.FormatInt(int64(a.values[i]), 10)
