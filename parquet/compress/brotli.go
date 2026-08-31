@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"sync"
 
 	"github.com/andybalholm/brotli"
 	"github.com/apache/arrow-go/v18/parquet/internal/debug"
@@ -28,7 +27,23 @@ import (
 
 type brotliCodec struct{}
 
-var brotliWriterPools [brotli.BestCompression + 1]sync.Pool
+const (
+	// Brotli qualities above the default retain substantially larger encoder
+	// workspaces. Keep those writers transient so a high-quality request does
+	// not permanently increase the process memory footprint.
+	maxPooledBrotliLevel = brotli.DefaultCompression
+	brotliWriterPoolSize = 1
+)
+
+var brotliWriterPools = newBrotliWriterPools()
+
+func newBrotliWriterPools() [brotli.BestCompression + 1]chan *brotli.Writer {
+	var pools [brotli.BestCompression + 1]chan *brotli.Writer
+	for level := brotli.BestSpeed; level <= maxPooledBrotliLevel; level++ {
+		pools[level] = make(chan *brotli.Writer, brotliWriterPoolSize)
+	}
+	return pools
+}
 
 func (brotliCodec) NewReader(r io.Reader) io.ReadCloser {
 	return io.NopCloser(brotli.NewReader(r))
@@ -47,9 +62,10 @@ func (b brotliCodec) EncodeLevel(dst, src []byte, level int) []byte {
 	pool := brotliWriterPool(level)
 	var w *brotli.Writer
 	if pool != nil {
-		if cached := pool.Get(); cached != nil {
-			w = cached.(*brotli.Writer)
+		select {
+		case w = <-pool:
 			w.Reset(buf)
+		default:
 		}
 	}
 	if w == nil {
@@ -69,19 +85,22 @@ func (b brotliCodec) EncodeLevel(dst, src []byte, level int) []byte {
 	return compressed
 }
 
-func brotliWriterPool(level int) *sync.Pool {
-	if level < brotli.BestSpeed || level > brotli.BestCompression {
+func brotliWriterPool(level int) chan *brotli.Writer {
+	if level < brotli.BestSpeed || level > maxPooledBrotliLevel {
 		return nil
 	}
-	return &brotliWriterPools[level]
+	return brotliWriterPools[level]
 }
 
-func releaseBrotliWriter(pool *sync.Pool, w *brotli.Writer) {
+func releaseBrotliWriter(pool chan *brotli.Writer, w *brotli.Writer) {
 	if pool == nil {
 		return
 	}
 	w.Reset(nil)
-	pool.Put(w)
+	select {
+	case pool <- w:
+	default:
+	}
 }
 
 func (b brotliCodec) Encode(dst, src []byte) []byte {
