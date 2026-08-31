@@ -54,6 +54,9 @@ var (
 		0x47b6137b, 0x44974d91, 0x8824ad5b, 0xa2b7289d,
 		0x705495c7, 0x2df1424b, 0x9efc4947, 0x5c6bfb31}
 
+	booleanFalseHash = xxhash.Sum64([]byte{0})
+	booleanTrueHash  = xxhash.Sum64([]byte{1})
+
 	defaultHashStrategy = format.BloomFilterHash{XXHASH: &format.XxHash{}}
 	defaultAlgorithm    = format.BloomFilterAlgorithm{BLOCK: &format.SplitBlockAlgorithm{}}
 	defaultCompression  = format.BloomFilterCompression{UNCOMPRESSED: &format.Uncompressed{}}
@@ -113,6 +116,13 @@ func (xxhasher) Sum64sInto(b [][]byte, vals []uint64) {
 	for i, v := range b {
 		vals[i] = xxhash.Sum64(v)
 	}
+}
+
+func precomputedBooleanHashes(h Hasher) (falseHash, trueHash uint64, ok bool) {
+	if _, ok := h.(xxhasher); !ok {
+		return 0, 0, false
+	}
+	return booleanFalseHash, booleanTrueHash, true
 }
 
 type sum64sIntoHasher interface {
@@ -240,9 +250,20 @@ func GetHashesFromBitmap(h Hasher, bitmap []byte, bitmapOffset int64, numValues 
 		return []uint64{}
 	}
 
+	out := make([]uint64, numValues)
+	if falseHash, trueHash, ok := precomputedBooleanHashes(h); ok {
+		for i := range numValues {
+			if bitutil.BitIsSet(bitmap, int(bitmapOffset+i)) {
+				out[i] = trueHash
+			} else {
+				out[i] = falseHash
+			}
+		}
+		return out
+	}
+
 	// Convert each bool bit to []byte for hashing
 	// Reuse a single-byte slice to avoid allocating per value
-	out := make([]uint64, numValues)
 	b := []byte{0}
 	for i := range numValues {
 		val := bitutil.BitIsSet(bitmap, int(bitmapOffset+i))
@@ -266,11 +287,30 @@ func GetSpacedHashesFromBitmap(h Hasher, numValid int64, bitmap []byte, bitmapOf
 	}
 
 	out := make([]uint64, 0, numValid)
+	falseHash, trueHash, usePrecomputedHashes := precomputedBooleanHashes(h)
 
 	// Use SetBitRunReader to efficiently iterate over valid values
+	setReader := bitutils.NewSetBitRunReader(validBits, validBitsOffset, numValues)
+	if usePrecomputedHashes {
+		for {
+			run := setReader.NextRun()
+			if run.Length == 0 {
+				break
+			}
+
+			for i := range run.Length {
+				if bitutil.BitIsSet(bitmap, int(bitmapOffset+run.Pos+i)) {
+					out = append(out, trueHash)
+				} else {
+					out = append(out, falseHash)
+				}
+			}
+		}
+		return out
+	}
+
 	// Reuse a single-byte slice to avoid allocating per value
 	b := []byte{0}
-	setReader := bitutils.NewSetBitRunReader(validBits, validBitsOffset, numValues)
 	for {
 		run := setReader.NextRun()
 		if run.Length == 0 {
@@ -298,10 +338,26 @@ func InsertHashesFromBitmap(b BloomFilterBuilder, bitmap []byte, bitmapOffset in
 	}
 
 	h := b.Hasher()
+	falseHash, trueHash, usePrecomputedHashes := precomputedBooleanHashes(h)
 	var (
 		hashBatch [bloomFilterHashBatchSize]uint64
 		value     [1]byte
 	)
+
+	if usePrecomputedHashes {
+		for offset := int64(0); offset < numValues; offset += bloomFilterHashBatchSize {
+			end := min(offset+int64(bloomFilterHashBatchSize), numValues)
+			for i := offset; i < end; i++ {
+				if bitutil.BitIsSet(bitmap, int(bitmapOffset+i)) {
+					hashBatch[i-offset] = trueHash
+				} else {
+					hashBatch[i-offset] = falseHash
+				}
+			}
+			b.InsertBulk(hashBatch[:end-offset])
+		}
+		return
+	}
 
 	for offset := int64(0); offset < numValues; offset += bloomFilterHashBatchSize {
 		end := min(offset+int64(bloomFilterHashBatchSize), numValues)
@@ -324,12 +380,36 @@ func InsertSpacedHashesFromBitmap(b BloomFilterBuilder, numValid int64, bitmap [
 	}
 
 	h := b.Hasher()
+	falseHash, trueHash, usePrecomputedHashes := precomputedBooleanHashes(h)
 	var (
 		hashBatch [bloomFilterHashBatchSize]uint64
 		value     [1]byte
 	)
 
 	setReader := bitutils.NewSetBitRunReader(validBits, validBitsOffset, numValues)
+	if usePrecomputedHashes {
+		for {
+			run := setReader.NextRun()
+			if run.Length == 0 {
+				break
+			}
+
+			runEnd := run.Pos + run.Length
+			for pos := run.Pos; pos < runEnd; pos += bloomFilterHashBatchSize {
+				end := min(pos+int64(bloomFilterHashBatchSize), runEnd)
+				for i := pos; i < end; i++ {
+					if bitutil.BitIsSet(bitmap, int(bitmapOffset+i)) {
+						hashBatch[i-pos] = trueHash
+					} else {
+						hashBatch[i-pos] = falseHash
+					}
+				}
+				b.InsertBulk(hashBatch[:end-pos])
+			}
+		}
+		return
+	}
+
 	for {
 		run := setReader.NextRun()
 		if run.Length == 0 {

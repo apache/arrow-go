@@ -177,6 +177,49 @@ func TestInsertHashesFromBitmapBatchesValues(t *testing.T) {
 	assert.Empty(t, empty.batches)
 }
 
+func TestBitmapBloomHashingPreservesCustomHasher(t *testing.T) {
+	const (
+		numValues    = bloomFilterHashBatchSize + 7
+		bitmapOffset = int64(3)
+		validOffset  = int64(5)
+	)
+
+	bitmap := make([]byte, bitutil.BytesForBits(bitmapOffset+numValues))
+	validBits := make([]byte, bitutil.BytesForBits(validOffset+numValues))
+	var numValid int64
+	for i := 0; i < numValues; i++ {
+		if i%3 == 0 {
+			bitutil.SetBit(bitmap, int(bitmapOffset)+i)
+		}
+		if i%4 != 0 {
+			bitutil.SetBit(validBits, int(validOffset)+i)
+			numValid++
+		}
+	}
+
+	expectedDense := GetHashesFromBitmap(xxhasher{}, bitmap, bitmapOffset, numValues)
+	hasher := &recordingHasher{}
+	assert.Equal(t, expectedDense, GetHashesFromBitmap(hasher, bitmap, bitmapOffset, numValues))
+	assert.Len(t, hasher.inputs, numValues)
+
+	expectedSpaced := GetSpacedHashesFromBitmap(xxhasher{}, numValid, bitmap, bitmapOffset, numValues, validBits, validOffset)
+	hasher = &recordingHasher{}
+	assert.Equal(t, expectedSpaced, GetSpacedHashesFromBitmap(hasher, numValid, bitmap, bitmapOffset, numValues, validBits, validOffset))
+	assert.Len(t, hasher.inputs, int(numValid))
+
+	hasher = &recordingHasher{}
+	bloom := newBatchRecordingBloomFilter(hasher)
+	InsertHashesFromBitmap(bloom, bitmap, bitmapOffset, numValues)
+	assert.Equal(t, expectedDense, flattenHashBatches(bloom.batches))
+	assert.Len(t, hasher.inputs, numValues)
+
+	hasher = &recordingHasher{}
+	bloom = newBatchRecordingBloomFilter(hasher)
+	InsertSpacedHashesFromBitmap(bloom, numValid, bitmap, bitmapOffset, numValues, validBits, validOffset)
+	assert.Equal(t, expectedSpaced, flattenHashBatches(bloom.batches))
+	assert.Len(t, hasher.inputs, int(numValid))
+}
+
 func TestInsertSpacedHashesFromBitmapBatchesValidValues(t *testing.T) {
 	const (
 		numValues    = 2*bloomFilterHashBatchSize + 19
