@@ -145,13 +145,16 @@ func TestVariantTypeBatchIPCRoundTrip(t *testing.T) {
 	require.NoError(t, wr.Write(batch))
 	require.NoError(t, wr.Close())
 
-	rdr, err := ipc.NewReader(&buf)
-	require.NoError(t, err)
-	defer rdr.Release()
-
-	written, err := rdr.Read()
-	require.NoError(t, err)
-	defer written.Release()
+	var written arrow.RecordBatch
+	{
+		rdr, err := ipc.NewReader(&buf)
+		require.NoError(t, err)
+		written, err = rdr.Read()
+		require.NoError(t, err)
+		written.Retain()
+		defer written.Release()
+		rdr.Release()
+	}
 
 	assert.Equal(t, extensions.VariantExtensionName, written.Schema().Field(0).Type.(arrow.ExtensionType).ExtensionName())
 	assert.Truef(t, batch.Schema().Equal(written.Schema()), "expected: %s, got: %s",
