@@ -458,6 +458,11 @@ func (v *VariantArray) IsShredded() bool {
 	return v.ExtensionType().(*VariantType).typedValueFieldIdx != -1
 }
 
+// VariantType returns the array's extension type without the ExtensionType cast.
+func (v *VariantArray) VariantType() *VariantType {
+	return v.ExtensionType().(*VariantType)
+}
+
 // UnshredVariant returns an equivalent VariantArray in the non-shredded layout
 // (a struct of metadata and value), reassembling each row's value from the
 // shredded typed_value and value columns. If the array is already non-shredded
@@ -511,6 +516,11 @@ func (v *VariantArray) IsNull(i int) bool {
 		if !typedArr.IsNull(i) {
 			return false
 		}
+	}
+
+	if vt.valueFieldIdx == -1 {
+		// No residual value column: a null typed_value means the value is missing.
+		return true
 	}
 
 	valArr := v.Storage().(*array.Struct).Field(vt.valueFieldIdx)
