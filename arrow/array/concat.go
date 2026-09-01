@@ -873,9 +873,9 @@ func updateRuns[T int16 | int32 | int64](inputData []arrow.ArrayData, inputBuffe
 		// input's logical length before both the overflow check and the output write:
 		// otherwise a valid near-limit slice trips a false overflow, and the written
 		// run end overshoots (shifting every following array's run ends).
-		finalEnd := int(src[len(src)-1]) - offset
-		if finalEnd > inputData[i].Len() {
-			finalEnd = inputData[i].Len()
+		finalEnd := src[len(src)-1] - T(offset)
+		if finalEnd > T(inputData[i].Len()) {
+			finalEnd = T(inputData[i].Len())
 		}
 
 		if pos == 0 {
@@ -884,7 +884,7 @@ func updateRuns[T int16 | int32 | int64](inputData []arrow.ArrayData, inputBuffe
 			for j := 0; j < pos; j++ {
 				output[j] -= T(offset)
 			}
-			output[pos-1] = T(finalEnd)
+			output[pos-1] = finalEnd
 			continue
 		}
 
@@ -900,12 +900,12 @@ func updateRuns[T int16 | int32 | int64](inputData []arrow.ArrayData, inputBuffe
 		// is a logical length offset it should be accurate to just subtract
 		// it from each value.
 		for j, e := range src {
-			output[pos+j] = lastEnd + T(int(e)-offset)
+			output[pos+j] = lastEnd + e - T(offset)
 		}
 		pos += len(src)
 		// the write above uses the unclamped physical end for the final run; set it
 		// to the clamped logical end.
-		output[pos-1] = lastEnd + T(finalEnd)
+		output[pos-1] = lastEnd + finalEnd
 	}
 	return nil
 }

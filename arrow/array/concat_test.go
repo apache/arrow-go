@@ -892,6 +892,36 @@ func TestConcatRunEndEncodedNearTypeLimitSlice(t *testing.T) {
 	assert.EqualValues(t, 32761, result.Len())
 }
 
+func TestConcatRunEndEncodedInt64FinalRunEndClamp(t *testing.T) {
+	// A run-end-encoded array whose final physical run end is math.MaxInt64,
+	// sliced to a small logical length, must clamp the final run end with
+	// run-end-typed arithmetic. Converting the value through int overflows on
+	// 32-bit targets, turning a valid run end into a negative output value.
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	prefixBldr := array.NewRunEndEncodedBuilder(mem, arrow.PrimitiveTypes.Int64, arrow.PrimitiveTypes.Int64)
+	defer prefixBldr.Release()
+	prefixBldr.Append(5)
+	prefixBldr.ValueBuilder().(*array.Int64Builder).Append(1)
+	prefix := prefixBldr.NewArray()
+	defer prefix.Release()
+
+	bigBldr := array.NewRunEndEncodedBuilder(mem, arrow.PrimitiveTypes.Int64, arrow.PrimitiveTypes.Int64)
+	defer bigBldr.Release()
+	bigBldr.Append(math.MaxInt64)
+	bigBldr.ValueBuilder().(*array.Int64Builder).Append(2)
+	big := bigBldr.NewArray()
+	defer big.Release()
+	oneElem := array.NewSlice(big, 0, 1) // first element of the MaxInt64-length run
+	defer oneElem.Release()
+
+	result, err := array.Concatenate([]arrow.Array{prefix, oneElem}, mem)
+	require.NoError(t, err)
+	defer result.Release()
+	assert.EqualValues(t, 6, result.Len())
+}
+
 func TestConcatAlmostOverflowRunEndEncoding(t *testing.T) {
 	tests := []struct {
 		offsetType arrow.DataType
