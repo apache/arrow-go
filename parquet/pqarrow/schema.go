@@ -354,7 +354,11 @@ func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties
 	case arrow.EXTENSION:
 		extType := field.Type.(arrow.ExtensionType)
 		if extensions.IsVariantExtensionName(extType.ExtensionName()) {
-			return variantToNode(extType.(*extensions.VariantType), field, props, arrprops)
+			vt, err := extensions.NewVariantType(extType.StorageType())
+			if err != nil {
+				return nil, err
+			}
+			return variantToNode(vt, field, props, arrprops)
 		}
 	}
 

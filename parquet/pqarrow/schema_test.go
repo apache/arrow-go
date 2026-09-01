@@ -1231,6 +1231,32 @@ func TestConvertSchemaParquetVariant(t *testing.T) {
 	assert.True(t, pqschema.Equals(sc), pqschema.String(), sc.String())
 }
 
+func TestToParquetLegacyRegistryVariantType(t *testing.T) {
+	ext := arrow.GetExtensionType(extensions.LegacyVariantExtensionName)
+	require.NotNil(t, ext)
+	require.Equal(t, extensions.LegacyVariantExtensionName, ext.ExtensionName())
+	_, isCanonical := ext.(*extensions.VariantType)
+	require.False(t, isCanonical, "registry type must be the legacy wrapper, not *VariantType")
+
+	legacySchema := arrow.NewSchema([]arrow.Field{{
+		Name:     "variant_col",
+		Type:     ext,
+		Nullable: true,
+	}}, nil)
+	canonicalSchema := arrow.NewSchema([]arrow.Field{{
+		Name:     "variant_col",
+		Type:     extensions.NewDefaultVariantType(),
+		Nullable: true,
+	}}, nil)
+
+	got, err := pqarrow.ToParquet(legacySchema, nil, pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+
+	want, err := pqarrow.ToParquet(canonicalSchema, nil, pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+	assert.True(t, want.Equals(got), "expected: %s\ngot: %s", want, got)
+}
+
 func TestShreddedVariantSchema(t *testing.T) {
 	metaNoFieldID := arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"-1"})
 

@@ -37,8 +37,9 @@ func init() {
 	}
 
 	// arrow-go originally registered Variant as parquet.variant. Keep that
-	// name in the registry so older IPC still deserializes.
-	if err := arrow.RegisterExtensionType(&legacyVariantType{}); err != nil {
+	// name in the registry so older IPC still deserializes. Seed default
+	// storage so GetExtensionType("parquet.variant") is a complete type.
+	if err := arrow.RegisterExtensionType(&legacyVariantType{VariantType: *NewDefaultVariantType()}); err != nil {
 		panic(err)
 	}
 }
