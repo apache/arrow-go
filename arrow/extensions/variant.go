@@ -122,10 +122,10 @@ func createShreddedField(dt arrow.DataType) arrow.DataType {
 //	 ), Nullable: true})
 //
 // This is intended to be a convenient way to create a shredded variant type from a definition
-// of the fields to shred. If the provided data type is nil, it will create a default
-// variant type.
+// of the fields to shred. If the provided data type is nil or Null (including an
+// extension whose storage is Null), it will create a default variant type.
 func NewShreddedVariantType(dt arrow.DataType) *VariantType {
-	if dt == nil {
+	if dt == nil || isNullType(dt) {
 		return NewDefaultVariantType()
 	}
 
@@ -220,11 +220,7 @@ func NewVariantType(storage arrow.DataType) (*VariantType, error) {
 		return nil, fmt.Errorf("%w: typed_value field must be nullable, got %s", arrow.ErrInvalid, typedValueField.Type)
 	}
 
-	dt := typedValueField.Type
-	if dt.ID() == arrow.EXTENSION {
-		dt = dt.(arrow.ExtensionType).StorageType()
-	}
-
+	dt := storageType(typedValueField.Type)
 	if dt.ID() == arrow.NULL {
 		return nil, fmt.Errorf("%w: typed_value field must not be null type", arrow.ErrInvalid)
 	}
@@ -295,6 +291,17 @@ func isBinary(dt arrow.DataType) bool {
 		dt.ID() == arrow.BINARY_VIEW
 }
 
+func storageType(dt arrow.DataType) arrow.DataType {
+	if ext, ok := dt.(arrow.ExtensionType); ok {
+		return ext.StorageType()
+	}
+	return dt
+}
+
+func isNullType(dt arrow.DataType) bool {
+	return storageType(dt).ID() == arrow.NULL
+}
+
 func validStruct(s *arrow.StructType) bool {
 	switch s.NumFields() {
 	case 1:
@@ -302,7 +309,7 @@ func validStruct(s *arrow.StructType) bool {
 		if f.Name == "value" {
 			return isBinary(f.Type)
 		}
-		return f.Name == "typed_value" && f.Type.ID() != arrow.NULL
+		return f.Name == "typed_value" && !isNullType(f.Type)
 	case 2:
 		valField, ok := s.FieldByName("value")
 		if !ok || !valField.Nullable || !isBinary(valField.Type) {
@@ -318,7 +325,7 @@ func validStruct(s *arrow.StructType) bool {
 			return validNestedType(nt)
 		}
 
-		return typedField.Type.ID() != arrow.NULL
+		return !isNullType(typedField.Type)
 	default:
 		return false
 	}

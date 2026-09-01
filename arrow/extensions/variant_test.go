@@ -88,6 +88,11 @@ func TestVariantExtensionType(t *testing.T) {
 			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
 			arrow.Field{Name: "typed_value", Type: arrow.Null, Nullable: true}),
 			"typed_value field must not be null type"},
+		{arrow.StructOf(
+			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
+			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+			arrow.Field{Name: "typed_value", Type: extensions.NewOpaqueType(arrow.Null, "null", "test"), Nullable: true}),
+			"typed_value field must not be null type"},
 	}
 
 	for _, tt := range tests {
@@ -122,6 +127,15 @@ func TestVariantExtensionBadNestedTypes(t *testing.T) {
 			arrow.Field{Name: "foobar", Type: arrow.StructOf(
 				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
 				arrow.Field{Name: "typed_value", Type: arrow.Null, Nullable: true},
+			), Nullable: false})},
+		{"null typed_value extension in one-field shredded field", arrow.StructOf(
+			arrow.Field{Name: "foobar", Type: arrow.StructOf(
+				arrow.Field{Name: "typed_value", Type: extensions.NewOpaqueType(arrow.Null, "null", "test"), Nullable: true},
+			), Nullable: false})},
+		{"null typed_value extension in two-field shredded field", arrow.StructOf(
+			arrow.Field{Name: "foobar", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: extensions.NewOpaqueType(arrow.Null, "null", "test"), Nullable: true},
 			), Nullable: false})},
 		{"non-nullable two elem struct", arrow.StructOf(
 			arrow.Field{Name: "foobar", Type: arrow.StructOf(
@@ -1570,6 +1584,10 @@ func TestVariantBuilderUnmarshalJSON(t *testing.T) {
 func TestNewSimpleShreddedVariantType(t *testing.T) {
 	assert.True(t, arrow.TypeEqual(extensions.NewDefaultVariantType(),
 		extensions.NewShreddedVariantType(nil)))
+	assert.True(t, arrow.TypeEqual(extensions.NewDefaultVariantType(),
+		extensions.NewShreddedVariantType(arrow.Null)))
+	assert.True(t, arrow.TypeEqual(extensions.NewDefaultVariantType(),
+		extensions.NewShreddedVariantType(extensions.NewOpaqueType(arrow.Null, "null", "test"))))
 
 	vt := extensions.NewShreddedVariantType(arrow.PrimitiveTypes.Float32)
 	s := arrow.StructOf(
