@@ -169,6 +169,9 @@ func TestCallFunctionPreservesCallerCancellation(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("CallFunction did not stop after caller cancellation")
 	}
+	if result != nil {
+		defer result.Release()
+	}
 	require.Nil(t, result)
 	require.ErrorIs(t, callErr, cancellationErr)
 }
@@ -228,6 +231,9 @@ func TestCallFunctionReleasesPartialResultOnCallerCancellation(t *testing.T) {
 		t.Fatal("CallFunction did not stop after caller cancellation")
 	}
 
+	if result != nil {
+		defer result.Release()
+	}
 	require.Nil(t, result)
 	require.ErrorIs(t, callErr, cancellationErr)
 }
@@ -319,6 +325,9 @@ func TestCallFunctionDrainsResultsAfterCallerCancellation(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("CallFunction did not finish after execution was released")
 	}
+	if result != nil {
+		defer result.Release()
+	}
 	require.Nil(t, result)
 	require.ErrorIs(t, callErr, cancellationErr)
 }
@@ -369,6 +378,9 @@ func TestCallFunctionPreservesCallerCancellationForVectorFunction(t *testing.T) 
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("vector CallFunction did not stop after caller cancellation")
+	}
+	if result != nil {
+		defer result.Release()
 	}
 	require.Nil(t, result)
 	require.ErrorIs(t, callErr, cancellationErr)
