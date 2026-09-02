@@ -488,3 +488,120 @@ func TestSpacedExpandSwapMatchesSpacedExpand(t *testing.T) {
 			"iter %d n=%d nulls=%d: swap left duplicate entries", iter, n, nullCount)
 	}
 }
+
+// bssEncodeFLBA lays out values in BYTE_STREAM_SPLIT order: all byte 0s, then all
+// byte 1s, and so on.
+func bssEncodeFLBA(values []parquet.FixedLenByteArray, width int) []byte {
+	data := make([]byte, len(values)*width)
+	for vi, v := range values {
+		for bi, b := range v {
+			data[bi*len(values)+vi] = b
+		}
+	}
+	return data
+}
+
+// TestByteStreamSplitFLBADoesNotWriteThroughForeignBuffers guards the second half of the
+// aliasing hazard reported on GH-1255: this decoder reuses any output slice with enough
+// capacity and writes through it, so if the previous page left slices that point at
+// memory the decoder does not own, decoding corrupts that memory.
+//
+// Two producers leave such slices behind, and neither needs nulls to do it:
+//
+//   - RLE_DICTIONARY assigns dict[idx] into every slot for that index, so a repeated
+//     index leaves several slots aliasing one dictionary-backed slice. Writing through
+//     them both clobbers a decoded value and corrupts the dictionary itself.
+//   - PLAIN slices the page buffer directly, so every slot points into the previous
+//     page's data.
+func TestByteStreamSplitFLBADoesNotWriteThroughForeignBuffers(t *testing.T) {
+	for _, width := range []int{2, 3, 4, 7, 8, 16} {
+		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
+			col := schema.NewColumn(schema.NewFixedLenByteArrayNode("v", parquet.Repetitions.Required, int32(width), -1), 0, 0)
+
+			// The BSS page: three distinct values, decoded into a reused buffer.
+			bssValues := make([]parquet.FixedLenByteArray, 3)
+			for i := range bssValues {
+				bssValues[i] = make(parquet.FixedLenByteArray, width)
+				for j := range bssValues[i] {
+					bssValues[i][j] = 100 + byte(i*width+j)
+				}
+			}
+			bssData := bssEncodeFLBA(bssValues, width)
+
+			t.Run("after RLE_DICTIONARY", func(t *testing.T) {
+				// Dictionary of two entries, referenced by indices [0, 0, 1] so that
+				// slots 0 and 1 alias the same dictionary-backed slice.
+				dictBuf := make([]byte, 2*width)
+				for i := range dictBuf {
+					dictBuf[i] = byte(i + 1)
+				}
+				// RLE_DICTIONARY index data: bit width byte, then a bit-packed run.
+				idxBuf := []byte{1, 0b00000011, 0b00000100}
+
+				plainDict := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.Plain,
+					col, memory.DefaultAllocator)
+				require.NoError(t, plainDict.SetData(2, dictBuf))
+
+				dictDec := NewDictDecoder(parquet.Types.FixedLenByteArray, col, memory.DefaultAllocator).(*DictFixedLenByteArrayDecoder)
+				dictDec.SetDict(plainDict)
+				require.NoError(t, dictDec.SetData(3, idxBuf))
+
+				out := make([]parquet.FixedLenByteArray, 3)
+				n, err := dictDec.Decode(out)
+				require.NoError(t, err)
+				require.Equal(t, 3, n)
+
+				dictBefore := bytes.Clone(dictBuf)
+
+				bssDec := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.ByteStreamSplit,
+					col, memory.DefaultAllocator).(FixedLenByteArrayDecoder)
+				require.NoError(t, bssDec.SetData(len(bssValues), bssData))
+				n, err = bssDec.Decode(out)
+				require.NoError(t, err)
+				require.Equal(t, len(bssValues), n)
+
+				for i, want := range bssValues {
+					require.Equalf(t, want, out[i], "slot %d decoded incorrectly", i)
+				}
+				require.Equal(t, dictBefore, dictBuf, "decoding wrote through into the dictionary page buffer")
+			})
+
+			t.Run("after PLAIN", func(t *testing.T) {
+				plainValues := make([]parquet.FixedLenByteArray, 3)
+				for i := range plainValues {
+					plainValues[i] = make(parquet.FixedLenByteArray, width)
+					for j := range plainValues[i] {
+						plainValues[i][j] = byte(i*width + j)
+					}
+				}
+				plainData := make([]byte, 0, len(plainValues)*width)
+				for _, v := range plainValues {
+					plainData = append(plainData, v...)
+				}
+
+				plainDec := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.Plain,
+					col, memory.DefaultAllocator).(FixedLenByteArrayDecoder)
+				require.NoError(t, plainDec.SetData(len(plainValues), plainData))
+
+				out := make([]parquet.FixedLenByteArray, 3)
+				n, err := plainDec.Decode(out)
+				require.NoError(t, err)
+				require.Equal(t, len(plainValues), n)
+
+				plainBefore := bytes.Clone(plainData)
+
+				bssDec := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.ByteStreamSplit,
+					col, memory.DefaultAllocator).(FixedLenByteArrayDecoder)
+				require.NoError(t, bssDec.SetData(len(bssValues), bssData))
+				n, err = bssDec.Decode(out)
+				require.NoError(t, err)
+				require.Equal(t, len(bssValues), n)
+
+				for i, want := range bssValues {
+					require.Equalf(t, want, out[i], "slot %d decoded incorrectly", i)
+				}
+				require.Equal(t, plainBefore, plainData, "decoding wrote through into the PLAIN page buffer")
+			})
+		})
+	}
+}

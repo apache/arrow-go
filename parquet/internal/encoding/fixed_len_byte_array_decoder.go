@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -135,6 +136,10 @@ func (pflba *PlainFixedLenByteArrayDecoder) DecodeSpaced(out []parquet.FixedLenB
 type ByteStreamSplitFixedLenByteArrayDecoder struct {
 	decoder
 	stride int
+
+	// storage is the most recent block this decoder allocated for output values.
+	// Decode may only write through an output slice backed by this block; see owns.
+	storage []byte
 }
 
 func (dec *ByteStreamSplitFixedLenByteArrayDecoder) Type() parquet.Type {
@@ -176,13 +181,7 @@ func (dec *ByteStreamSplitFixedLenByteArrayDecoder) Decode(out []parquet.FixedLe
 	}
 
 	out = out[:toRead]
-	for idx := range out {
-		if cap(out[idx]) < dec.typeLen {
-			dec.prepareOutput(out[idx:])
-			break
-		}
-		out[idx] = out[idx][:dec.typeLen]
-	}
+	dec.prepareOutput(out)
 
 	switch dec.typeLen {
 	case 2:
@@ -200,29 +199,73 @@ func (dec *ByteStreamSplitFixedLenByteArrayDecoder) Decode(out []parquet.FixedLe
 	return toRead, nil
 }
 
-// prepareOutput allocates storage for the entries in out that do not have enough
-// capacity, while continuing to reuse the entries that do.
-func (dec *ByteStreamSplitFixedLenByteArrayDecoder) prepareOutput(out []parquet.FixedLenByteArray) {
-	missing := 0
-	for idx := range out {
-		if cap(out[idx]) < dec.typeLen {
-			missing++
-		}
+// owns reports whether every entry of out is backed by the block this decoder most
+// recently allocated, and so may be written through.
+//
+// The check matters because this decoder decodes in place: it writes bytes through the
+// slice headers the caller hands it. Reusing a header whose memory belongs to something
+// else corrupts that memory. Two earlier decoders leave such headers in a shared value
+// buffer, neither of which requires nulls to do so:
+//
+//   - RLE_DICTIONARY assigns dict[idx] into every slot holding that index, so repeated
+//     indices leave several slots aliasing one dictionary-backed slice. Writing through
+//     them clobbers a decoded value and corrupts the dictionary itself.
+//   - PLAIN slices the page buffer directly, so every slot points into that page's data.
+//
+// Capacity alone cannot distinguish these from our own storage, so we compare against
+// the bounds of the block we allocated.
+func (dec *ByteStreamSplitFixedLenByteArrayDecoder) owns(out []parquet.FixedLenByteArray) bool {
+	if len(dec.storage) == 0 {
+		return false
 	}
 
-	storage := make([]byte, missing*dec.typeLen)
+	base := uintptr(unsafe.Pointer(unsafe.SliceData(dec.storage)))
+	end := base + uintptr(len(dec.storage))
 	for idx := range out {
 		if cap(out[idx]) < dec.typeLen {
-			out[idx] = storage[:dec.typeLen:dec.typeLen]
-			storage = storage[dec.typeLen:]
-		} else {
+			return false
+		}
+		p := uintptr(unsafe.Pointer(unsafe.SliceData(out[idx])))
+		if p < base || p+uintptr(dec.typeLen) > end {
+			return false
+		}
+	}
+	return true
+}
+
+// prepareOutput points every entry of out at storage this decoder owns, so that decoding
+// in place cannot write through into memory belonging to a previous page's decoder.
+//
+// When out already sits entirely within our own block the headers are reused as-is and
+// nothing is allocated, which keeps repeated decodes into the same buffer allocation
+// free. Otherwise a single block is allocated for the whole window. Earlier windows keep
+// pointing at the blocks they were given, so callers that decode into successive windows
+// of one buffer (as the record reader does) keep their previously decoded values.
+func (dec *ByteStreamSplitFixedLenByteArrayDecoder) prepareOutput(out []parquet.FixedLenByteArray) {
+	if dec.owns(out) {
+		for idx := range out {
 			out[idx] = out[idx][:dec.typeLen]
 		}
+		return
+	}
+
+	storage := make([]byte, len(out)*dec.typeLen)
+	dec.storage = storage
+	for idx := range out {
+		out[idx] = storage[:dec.typeLen:dec.typeLen]
+		storage = storage[dec.typeLen:]
 	}
 }
 
 func (dec *ByteStreamSplitFixedLenByteArrayDecoder) DecodeSpaced(out []parquet.FixedLenByteArray, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
 	toRead := len(out) - nullCount
+
+	// Back every slot, the null slots included, before decoding. The expansion below
+	// permutes headers across the whole window, so preparing only the decoded prefix
+	// would let headers we do not own migrate into it and force the next page to
+	// reallocate. Preparing the window once keeps repeated decodes allocation free.
+	dec.prepareOutput(out)
+
 	valuesRead, err := dec.Decode(out[:toRead])
 	if err != nil {
 		return valuesRead, err

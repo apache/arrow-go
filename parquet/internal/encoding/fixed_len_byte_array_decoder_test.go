@@ -51,15 +51,24 @@ func TestByteStreamSplitFixedLenByteArrayDecoderContiguousOutput(t *testing.T) {
 	}
 }
 
-func TestByteStreamSplitFixedLenByteArrayDecoderReusesProvidedOutput(t *testing.T) {
+// TestByteStreamSplitFixedLenByteArrayDecoderDoesNotWriteThroughProvidedOutput pins the
+// narrowed reuse contract introduced for GH-1255.
+//
+// This decoder writes bytes through the slice headers it is handed, so it may only reuse
+// a header backed by storage it allocated itself. Output buffers are shared across pages
+// and encodings, and RLE_DICTIONARY and PLAIN both leave headers pointing at memory they
+// own (dictionary entries and the page buffer respectively). Reusing those on capacity
+// alone corrupted that memory, so capacity is no longer sufficient to claim a header.
+func TestByteStreamSplitFixedLenByteArrayDecoderDoesNotWriteThroughProvidedOutput(t *testing.T) {
 	const width = 16
 	values := makeFixedLenByteArrayValues(4, width, 0)
 	decoder := newByteStreamSplitFixedLenByteArrayDecoder(t, width, values)
 
+	caller := make([]byte, width)
 	out := []parquet.FixedLenByteArray{
 		make([]byte, 0, width+4),
 		nil,
-		make([]byte, width),
+		caller,
 		nil,
 	}
 	firstPtr := unsafe.Pointer(unsafe.SliceData(out[0]))
@@ -69,10 +78,44 @@ func TestByteStreamSplitFixedLenByteArrayDecoderReusesProvidedOutput(t *testing.
 	require.NoError(t, err)
 	require.Equal(t, len(values), decoded)
 	require.Equal(t, values, out)
-	require.Equal(t, firstPtr, unsafe.Pointer(unsafe.SliceData(out[0])))
-	require.Equal(t, thirdPtr, unsafe.Pointer(unsafe.SliceData(out[2])))
-	require.Equal(t, uintptr(width),
-		uintptr(unsafe.Pointer(&out[3][0]))-uintptr(unsafe.Pointer(&out[1][0])))
+
+	// The caller's buffers are re-pointed rather than written through, and are left
+	// untouched.
+	require.NotEqual(t, firstPtr, unsafe.Pointer(unsafe.SliceData(out[0])))
+	require.NotEqual(t, thirdPtr, unsafe.Pointer(unsafe.SliceData(out[2])))
+	require.Equal(t, make([]byte, width), caller, "decoding wrote through a caller buffer")
+
+	// Every slot now comes from one contiguous block the decoder owns.
+	for idx := 1; idx < len(out); idx++ {
+		previous := uintptr(unsafe.Pointer(&out[idx-1][0]))
+		current := uintptr(unsafe.Pointer(&out[idx][0]))
+		require.Equal(t, uintptr(width), current-previous)
+	}
+}
+
+// TestByteStreamSplitFixedLenByteArrayDecoderReusesOwnStorage checks that the narrowed
+// contract still keeps repeated decodes into the same buffer allocation free, which is
+// the case GH-1172 optimized.
+func TestByteStreamSplitFixedLenByteArrayDecoderReusesOwnStorage(t *testing.T) {
+	const width = 16
+	values := makeFixedLenByteArrayValues(4, width, 0)
+	data := encodeByteStreamSplitFixedLenByteArray(values, width)
+	decoder := newByteStreamSplitFixedLenByteArrayDecoder(t, width, values)
+
+	// First decode hands out the decoder's own block.
+	out := make([]parquet.FixedLenByteArray, len(values))
+	_, err := decoder.Decode(out)
+	require.NoError(t, err)
+	require.Equal(t, values, out)
+
+	// Subsequent decodes into that same window recognize the block as their own.
+	allocs := testing.AllocsPerRun(100, func() {
+		require.NoError(t, decoder.SetData(len(values), data))
+		_, err := decoder.Decode(out)
+		require.NoError(t, err)
+	})
+	require.Zero(t, allocs)
+	require.Equal(t, values, out)
 }
 
 func TestByteStreamSplitFixedLenByteArrayDecoderMixedOutputAllocations(t *testing.T) {
