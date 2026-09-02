@@ -70,9 +70,9 @@ func TestBuilder_UnsafeAppendBoolsToBitmap(t *testing.T) {
 
 	for _, pattern := range patterns {
 		for offset := 0; offset < 8; offset++ {
-			for length := 1; length <= 33; length++ {
+			for _, length := range []int{1, 2, 3, 7, 8, 15, 16, 31, 32, 33, 63, 64, 65, 127, 128, 129} {
 				b := &builder{mem: memory.NewGoAllocator()}
-				b.init(48)
+				b.init(160)
 				for i := range b.nullBitmap.Bytes() {
 					b.nullBitmap.Bytes()[i] = byte(0x5a + i*31)
 				}
@@ -126,8 +126,8 @@ func TestPackBoolsToBitmap(t *testing.T) {
 
 	for _, pattern := range patterns {
 		for offset := 0; offset < 8; offset++ {
-			for length := 0; length <= 33; length++ {
-				got := make([]byte, 8)
+			for _, length := range []int{0, 1, 2, 3, 7, 8, 15, 16, 31, 32, 33, 63, 64, 65, 127, 128, 129} {
+				got := make([]byte, 24)
 				for i := range got {
 					got[i] = byte(0x5a + i*31)
 				}
