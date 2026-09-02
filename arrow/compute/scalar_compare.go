@@ -47,12 +47,18 @@ func (fn *compareFunction) DispatchBest(vals ...arrow.DataType) (exec.Kernel, er
 	}
 
 	if kn, err := fn.DispatchExact(vals...); err == nil {
+		if err := validateTimestampTimezones(vals...); err != nil {
+			return nil, err
+		}
 		return kn, nil
 	}
 
 	ensureDictionaryDecoded(vals...)
 	ensureNoExtensionType(vals...)
 	replaceNullWithOtherType(vals...)
+	if err := validateTimestampTimezones(vals...); err != nil {
+		return nil, err
+	}
 
 	if vals[0].ID() == arrow.TIMESTAMP && vals[1].ID() == arrow.TIMESTAMP {
 		lhs, rhs := vals[0].(*arrow.TimestampType), vals[1].(*arrow.TimestampType)
@@ -71,6 +77,17 @@ func (fn *compareFunction) DispatchBest(vals ...arrow.DataType) (exec.Kernel, er
 	}
 
 	return fn.DispatchExact(vals...)
+}
+
+func validateTimestampTimezones(vals ...arrow.DataType) error {
+	for _, val := range vals {
+		if ts, ok := val.(*arrow.TimestampType); ok {
+			if _, err := ts.GetZone(); err != nil {
+				return fmt.Errorf("%w: invalid timestamp timezone %q: %v", arrow.ErrInvalid, ts.TimeZone, err)
+			}
+		}
+	}
+	return nil
 }
 
 type flippedData struct {

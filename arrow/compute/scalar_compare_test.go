@@ -1659,3 +1659,24 @@ func BenchmarkCompare(b *testing.B) {
 		}
 	})
 }
+
+func TestCompareRejectsInvalidTimestampTimezone(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	invalid := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "not/a_timezone"}
+	builder := array.NewTimestampBuilder(mem, invalid)
+	builder.Append(0)
+	values := builder.NewArray()
+	builder.Release()
+	defer values.Release()
+
+	for _, name := range []string{"equal", "less"} {
+		t.Run(name, func(t *testing.T) {
+			_, err := compute.CallFunction(context.Background(), name, nil,
+				&compute.ArrayDatum{Value: values.Data()}, &compute.ArrayDatum{Value: values.Data()})
+			require.ErrorIs(t, err, arrow.ErrInvalid)
+			assert.ErrorContains(t, err, "invalid timestamp timezone")
+		})
+	}
+}
