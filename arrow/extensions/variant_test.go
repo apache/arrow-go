@@ -163,6 +163,99 @@ func TestVariantTypeBatchIPCRoundTrip(t *testing.T) {
 		batch, written)
 }
 
+func TestLegacyVariantTypeAdapter(t *testing.T) {
+	canonical := extensions.NewDefaultVariantType()
+	legacy := arrow.GetExtensionType(extensions.LegacyVariantExtensionName)
+	require.NotNil(t, legacy)
+	_, isCanonical := legacy.(*extensions.VariantType)
+	require.False(t, isCanonical)
+
+	assert.Equal(t, extensions.LegacyVariantExtensionName, legacy.ExtensionName())
+	assert.Equal(t, "extension<"+extensions.LegacyVariantExtensionName+">", legacy.String())
+
+	assert.True(t, canonical.ExtensionEquals(legacy))
+	assert.True(t, legacy.ExtensionEquals(canonical))
+	assert.True(t, arrow.TypeEqual(canonical, legacy))
+	assert.True(t, arrow.TypeEqual(legacy, canonical))
+}
+
+func TestLegacyVariantArrayAccessors(t *testing.T) {
+	canonical := extensions.NewDefaultVariantType()
+	bldr := extensions.NewVariantBuilder(memory.DefaultAllocator, canonical)
+	defer bldr.Release()
+
+	var b variant.Builder
+	require.NoError(t, b.Append("hello"))
+	v, err := b.Build()
+	require.NoError(t, err)
+	bldr.Append(v)
+
+	src := bldr.NewArray().(*extensions.VariantArray)
+	defer src.Release()
+
+	legacy := arrow.GetExtensionType(extensions.LegacyVariantExtensionName)
+	arr := array.NewExtensionArrayWithStorage(legacy, src.Storage())
+	defer arr.Release()
+
+	varr := arr.(*extensions.VariantArray)
+	assert.Equal(t, extensions.LegacyVariantExtensionName, varr.ExtensionType().ExtensionName())
+	assert.False(t, varr.IsShredded())
+	assert.NotNil(t, varr.Metadata())
+	assert.NotNil(t, varr.UntypedValues())
+	assert.Nil(t, varr.Shredded())
+	assert.False(t, varr.IsNull(0))
+
+	got, err := varr.Value(0)
+	require.NoError(t, err)
+	assert.Equal(t, "hello", got.Value())
+}
+
+func TestLegacyVariantIPCCanonicalizes(t *testing.T) {
+	canonical := extensions.NewDefaultVariantType()
+	bldr := extensions.NewVariantBuilder(memory.DefaultAllocator, canonical)
+	defer bldr.Release()
+
+	var b variant.Builder
+	require.NoError(t, b.Append("hello"))
+	v, err := b.Build()
+	require.NoError(t, err)
+	bldr.Append(v)
+
+	src := bldr.NewArray().(*extensions.VariantArray)
+	defer src.Release()
+
+	legacy := arrow.GetExtensionType(extensions.LegacyVariantExtensionName)
+	arr := array.NewExtensionArrayWithStorage(legacy, src.Storage())
+	defer arr.Release()
+
+	batch := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{{Name: "field", Type: legacy, Nullable: true}}, nil),
+		[]arrow.Array{arr}, -1)
+	defer batch.Release()
+
+	var buf bytes.Buffer
+	wr := ipc.NewWriter(&buf, ipc.WithSchema(batch.Schema()))
+	require.NoError(t, wr.Write(batch))
+	require.NoError(t, wr.Close())
+
+	rdr, err := ipc.NewReader(&buf)
+	require.NoError(t, err)
+	written, err := rdr.Read()
+	require.NoError(t, err)
+	written.Retain()
+	defer written.Release()
+	rdr.Release()
+
+	got := written.Schema().Field(0).Type.(arrow.ExtensionType)
+	assert.Equal(t, extensions.VariantExtensionName, got.ExtensionName())
+	_, isCanonical := got.(*extensions.VariantType)
+	assert.True(t, isCanonical)
+
+	want := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{{Name: "field", Type: canonical, Nullable: true}}, nil),
+		[]arrow.Array{src}, -1)
+	defer want.Release()
+	assert.Truef(t, array.RecordEqual(want, written), "expected: %s, got: %s", want, written)
+}
+
 func TestVariantExtensionBadNestedTypes(t *testing.T) {
 	tests := []struct {
 		name string
