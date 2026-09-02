@@ -303,6 +303,10 @@ type RecordBuilder struct {
 	schema      *arrow.Schema
 	fields      []Builder
 	checkpoints []*builderCheckpoint
+
+	rows     rowDecoder
+	fieldIdx map[string]int
+	seen     []bool
 }
 
 // NewRecordBuilder returns a builder, using the provided memory allocator and a schema.
@@ -607,10 +611,26 @@ func (b *RecordBuilder) UnmarshalOne(dec *json.Decoder) error {
 	return err
 }
 
+// fieldIndexByName returns the index of the field by name.
+func (b *RecordBuilder) fieldIndexByName(name string) (int, bool) {
+	if b.fieldIdx == nil {
+		b.fieldIdx = make(map[string]int, b.schema.NumFields())
+		for i := 0; i < b.schema.NumFields(); i++ {
+			b.fieldIdx[b.schema.Field(i).Name] = i
+		}
+	}
+	idx, ok := b.fieldIdx[name]
+	return idx, ok
+}
+
 func (b *RecordBuilder) unmarshalOne(dec *json.Decoder) (err error) {
+	rowDec, err := b.rows.next(dec)
+	if err != nil {
+		return err
+	}
 
 	// should start with a '{'
-	t, err := dec.Token()
+	t, err := rowDec.Token()
 	if err != nil {
 		return err
 	}
@@ -619,64 +639,58 @@ func (b *RecordBuilder) unmarshalOne(dec *json.Decoder) (err error) {
 		return fmt.Errorf("record should start with '{', not %s", t)
 	}
 
-	// consume one row checking for duplicates and nulls
-	keylist := make(map[string]json.RawMessage)
-	for dec.More() {
-		keyTok, err := dec.Token()
+	// grow the "seen" buffer if needed
+	if cap(b.seen) < b.schema.NumFields() {
+		b.seen = make([]bool, b.schema.NumFields())
+	} else {
+		b.seen = b.seen[:b.schema.NumFields()]
+		clear(b.seen)
+	}
+
+	for rowDec.More() {
+		keyTok, err := rowDec.Token()
 		if err != nil {
 			return err
 		}
 
 		key := keyTok.(string)
-		if _, ok := keylist[key]; ok {
-			return fmt.Errorf("key %s shows up twice in row to be decoded", key)
-		}
-
-		var val json.RawMessage
-		if err := dec.Decode(&val); err != nil {
-			return err
-		}
-
-		indices := b.schema.FieldIndices(key)
-		if len(indices) == 0 {
+		idx, ok := b.fieldIndexByName(key)
+		if !ok {
+			// TODO(serramatutu): this is equivalent to ParseOptions::Ignore in Arrow C++, i.e silently drop extra keys.
+			// We should eventually support ParseOptions::InferType and ParseOptions::Error
+			if err := b.rows.skip(rowDec); err != nil {
+				return err
+			}
 			continue
 		}
 
-		idx := indices[0]
-
-		if bytes.Equal(val, []byte("null")) && !b.schema.Field(idx).Nullable {
-			return fmt.Errorf("field '%s' is non-nullable but got null", key)
+		if b.seen[idx] {
+			return fmt.Errorf("key %s shows up twice in row to be decoded", key)
 		}
+		b.seen[idx] = true
 
-		keylist[key] = val
+		if err := unmarshalChild(rowDec, b.fields[idx], b.schema.Field(idx)); err != nil {
+			return err
+		}
 	}
 
 	// consume the closing '}'
-	if _, err := dec.Token(); err != nil {
+	if _, err := rowDec.Token(); err != nil {
 		return err
 	}
 
 	// check that all non-nullable fields were specified
 	for i := 0; i < b.schema.NumFields(); i++ {
 		f := b.schema.Field(i)
-		if _, ok := keylist[f.Name]; !ok && !f.Nullable {
+		if !b.seen[i] && !f.Nullable {
 			return fmt.Errorf("field '%s' is required but no value was given", f.Name)
 		}
 	}
 
-	// At this point we know there are no integrity errors, so append values to the
-	// field builders in schema order.
+	// missing fields are nullable at this point, so they get a null
 	for i := 0; i < b.schema.NumFields(); i++ {
-		val, ok := keylist[b.schema.Field(i).Name]
-		if !ok {
+		if !b.seen[i] {
 			b.fields[i].AppendNull()
-			continue
-		}
-
-		valDec := json.NewDecoder(bytes.NewReader(val))
-		valDec.UseNumber()
-		if err := b.fields[i].UnmarshalOne(valDec); err != nil {
-			return err
 		}
 	}
 

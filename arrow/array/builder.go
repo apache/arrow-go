@@ -389,23 +389,70 @@ func (b *builder) UnsafeAppendBoolToBitmap(isValid bool) {
 	b.length++
 }
 
+var jsonNull = []byte("null")
+
 func unmarshalChild(dec *json.Decoder, child Builder, field arrow.Field) error {
 	if field.Nullable {
 		return child.UnmarshalOne(dec)
 	}
 
-	var val json.RawMessage
-	if err := dec.Decode(&val); err != nil {
-		return err
+	nulls := child.NullN()
+	if nulls == UnknownNullCount {
+		var val json.RawMessage
+		if err := dec.Decode(&val); err != nil {
+			return err
+		}
+		return unmarshalBufferedChild(val, child, field)
 	}
 
-	if bytes.Equal(val, []byte("null")) {
+	// Every builder appends a null for a JSON null and for nothing else, so
+	// the child's null count going up by one over the call means the input
+	// had a null.
+	length := child.Len()
+	if err := child.UnmarshalOne(dec); err != nil {
+		return err
+	}
+	if child.Len() == length+1 && child.NullN() == nulls+1 {
+		return fmt.Errorf("field '%s' is non-nullable but got null", field.Name)
+	}
+	return nil
+}
+
+func unmarshalBufferedChild(val json.RawMessage, child Builder, field arrow.Field) error {
+	if !field.Nullable && bytes.Equal(val, jsonNull) {
 		return fmt.Errorf("field '%s' is non-nullable but got null", field.Name)
 	}
 
 	valDec := json.NewDecoder(bytes.NewReader(val))
 	valDec.UseNumber()
 	return child.UnmarshalOne(valDec)
+}
+
+// rowDecoder decodes a value out of a reused copy of that value, so that
+// unescaping a string costs O(value) instead of O(remaining document). 
+//
+// NOTE: goccy/go-json unescapes in place and shifts every byte after the escape,
+// which is a big performance cost for large JSON documents:
+// https://github.com/goccy/go-json/blob/v0.10.6/internal/decoder/string.go#L190
+type rowDecoder struct {
+	buf     json.RawMessage
+	reader  bytes.Reader
+	scratch json.RawMessage
+}
+
+func (r *rowDecoder) next(dec *json.Decoder) (*json.Decoder, error) {
+	if err := dec.Decode(&r.buf); err != nil {
+		return nil, err
+	}
+
+	r.reader.Reset(r.buf)
+	rowDec := json.NewDecoder(&r.reader)
+	rowDec.UseNumber()
+	return rowDec, nil
+}
+
+func (r *rowDecoder) skip(dec *json.Decoder) error {
+	return dec.Decode(&r.scratch)
 }
 
 func NewBuilder(mem memory.Allocator, dtype arrow.DataType) Builder {

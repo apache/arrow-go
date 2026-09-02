@@ -344,6 +344,9 @@ type StructBuilder struct {
 	dtype      arrow.DataType
 	fields     []Builder
 	checkpoint *builderCheckpoint
+
+	rows rowDecoder
+	seen []bool
 }
 
 // NewStructBuilder returns a builder, using the provided memory allocator.
@@ -355,8 +358,8 @@ func NewStructBuilder(mem memory.Allocator, dtype *arrow.StructType) *StructBuil
 	}
 	b.refCount.Add(1)
 
-	for i, f := range dtype.Fields() {
-		b.fields[i] = NewBuilder(b.mem, f.Type)
+	for i := 0; i < dtype.NumFields(); i++ {
+		b.fields[i] = NewBuilder(b.mem, dtype.Field(i).Type)
 	}
 	return b
 }
@@ -556,7 +559,13 @@ func (b *StructBuilder) UnmarshalOne(dec *json.Decoder) error {
 }
 
 func (b *StructBuilder) unmarshalOne(dec *json.Decoder) error {
-	t, err := dec.Token()
+	offset := dec.InputOffset()
+	rowDec, err := b.rows.next(dec)
+	if err != nil {
+		return err
+	}
+
+	t, err := rowDec.Token()
 	if err != nil {
 		return err
 	}
@@ -565,11 +574,17 @@ func (b *StructBuilder) unmarshalOne(dec *json.Decoder) error {
 	case json.Delim('{'):
 		dtype := b.dtype.(*arrow.StructType)
 
-		// Store each field's raw value and validate before appending anything so
-		// that a validation error does not leave the builder partially advanced.
-		keylist := make(map[string]json.RawMessage)
-		for dec.More() {
-			keyTok, err := dec.Token()
+		// grow the "seen" buffer if needed
+		if cap(b.seen) < dtype.NumFields() {
+			b.seen = make([]bool, dtype.NumFields())
+		} else {
+			b.seen = b.seen[:dtype.NumFields()]
+			clear(b.seen)
+		}
+
+		b.Append(true)
+		for rowDec.More() {
+			keyTok, err := rowDec.Token()
 			if err != nil {
 				return err
 			}
@@ -579,55 +594,43 @@ func (b *StructBuilder) unmarshalOne(dec *json.Decoder) error {
 				return errors.New("missing key")
 			}
 
-			if _, dup := keylist[key]; dup {
-				return fmt.Errorf("key %s is specified twice", key)
-			}
-
-			var next json.RawMessage
-			if err := dec.Decode(&next); err != nil {
-				return err
-			}
-
 			idx, ok := dtype.FieldIdx(key)
 			if !ok {
-				continue
-			}
-
-			if bytes.Equal(next, []byte("null")) && !dtype.Field(idx).Nullable {
-				return fmt.Errorf("field '%s' is non-nullable but got null", dtype.Field(idx).Name)
-			}
-
-			keylist[key] = next
-		}
-
-		// consume '}'
-		if _, err := dec.Token(); err != nil {
-			return err
-		}
-
-		// check that all non-nullable fields were specified
-		for _, field := range dtype.Fields() {
-			if _, ok := keylist[field.Name]; !ok && !field.Nullable {
-				return fmt.Errorf("field '%s' is required but no value was given", field.Name)
-			}
-		}
-
-		// All validation passed; append the struct entry and its child values.
-		b.Append(true)
-		for i, field := range dtype.Fields() {
-			next, hasKey := keylist[field.Name]
-			if !hasKey {
-				// Optional fields that were not present get a null.
-				if field.Nullable {
-					b.fields[i].AppendNull()
+				// TODO(serramatutu): this is equivalent to ParseOptions::Ignore in Arrow C++, i.e silently drop extra keys.
+				// We should eventually support ParseOptions::InferType and ParseOptions::Error
+				if err := b.rows.skip(rowDec); err != nil {
+					return err
 				}
 				continue
 			}
 
-			valDec := json.NewDecoder(bytes.NewReader(next))
-			valDec.UseNumber()
-			if err := b.fields[i].UnmarshalOne(valDec); err != nil {
+			if b.seen[idx] {
+				return fmt.Errorf("key %s is specified twice", key)
+			}
+			b.seen[idx] = true
+
+			if err := unmarshalChild(rowDec, b.fields[idx], dtype.Field(idx)); err != nil {
 				return err
+			}
+		}
+
+		// consume '}'
+		if _, err := rowDec.Token(); err != nil {
+			return err
+		}
+
+		// check that all non-nullable fields were specified
+		for i := 0; i < dtype.NumFields(); i++ {
+			field := dtype.Field(i)
+			if !b.seen[i] && !field.Nullable {
+				return fmt.Errorf("field '%s' is required but no value was given", field.Name)
+			}
+		}
+
+		// missing fields are nullable at this point, so they get a null
+		for i := 0; i < dtype.NumFields(); i++ {
+			if !b.seen[i] {
+				b.fields[i].AppendNull()
 			}
 		}
 		return nil
@@ -635,7 +638,7 @@ func (b *StructBuilder) unmarshalOne(dec *json.Decoder) error {
 		b.AppendNull()
 	default:
 		return &json.UnmarshalTypeError{
-			Offset: dec.InputOffset(),
+			Offset: offset + rowDec.InputOffset(),
 			Struct: fmt.Sprint(b.dtype),
 		}
 	}
