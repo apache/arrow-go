@@ -19,16 +19,27 @@
 package kernels
 
 import (
+	"math"
 	"unsafe"
 
 	"golang.org/x/sys/cpu"
 )
+
+const maxNeonLength = int(math.MaxInt32)
+
+func neonLengthFitsAssembly(length int) bool {
+	return length <= maxNeonLength
+}
 
 //go:noescape
 func _multiply_constant_int32_int32_neon(src, dest unsafe.Pointer, len int, factor int64)
 
 func multiplyConstantInt32Int32Neon(in []int32, out []int32, factor int64) {
 	if len(out) == 0 {
+		return
+	}
+	if !neonLengthFitsAssembly(len(out)) {
+		multiplyConstantGo(in, out, factor)
 		return
 	}
 	_multiply_constant_int32_int32_neon(unsafe.Pointer(&in[0]), unsafe.Pointer(&out[0]), len(out), factor)
@@ -41,6 +52,10 @@ func multiplyConstantInt32Int64Neon(in []int32, out []int64, factor int64) {
 	if len(out) == 0 {
 		return
 	}
+	if !neonLengthFitsAssembly(len(out)) {
+		multiplyConstantGo(in, out, factor)
+		return
+	}
 	_multiply_constant_int32_int64_neon(unsafe.Pointer(&in[0]), unsafe.Pointer(&out[0]), len(out), factor)
 }
 
@@ -51,6 +66,10 @@ func multiplyConstantInt64Int32Neon(in []int64, out []int32, factor int64) {
 	if len(out) == 0 {
 		return
 	}
+	if !neonLengthFitsAssembly(len(out)) {
+		multiplyConstantGo(in, out, factor)
+		return
+	}
 	_multiply_constant_int64_int32_neon(unsafe.Pointer(&in[0]), unsafe.Pointer(&out[0]), len(out), factor)
 }
 
@@ -59,6 +78,10 @@ func _multiply_constant_int64_int64_neon(src, dest unsafe.Pointer, len int, fact
 
 func multiplyConstantInt64Int64Neon(in []int64, out []int64, factor int64) {
 	if len(out) == 0 {
+		return
+	}
+	if !neonLengthFitsAssembly(len(out)) {
+		multiplyConstantGo(in, out, factor)
 		return
 	}
 	_multiply_constant_int64_int64_neon(unsafe.Pointer(&in[0]), unsafe.Pointer(&out[0]), len(out), factor)
