@@ -394,6 +394,10 @@ func (dc *dictConverter[T]) FillZero(o []T) {
 }
 
 func (dc *dictConverter[T]) Copy(o []T, vals []utils.IndexType) error {
+	if utils.CopyDictionary(o, dc.dict, vals) {
+		return nil
+	}
+
 	for idx, val := range vals {
 		o[idx] = dc.dict[val]
 	}
