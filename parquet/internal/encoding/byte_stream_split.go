@@ -94,6 +94,12 @@ var (
 )
 
 func releaseBufferToPool(pooled *PooledBufferWriter) {
+	// the byte-stream-split encoders allocate their flush buffer lazily on the first
+	// FlushValues, so releasing an encoder that never flushed (e.g. a column chunk that
+	// received no values) passes nil here
+	if pooled == nil {
+		return
+	}
 	buf := pooled.buf
 	memory.Set(buf.Buf(), 0)
 	buf.ResizeNoShrink(0)
