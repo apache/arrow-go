@@ -83,6 +83,27 @@ func TestVariantExtensionType(t *testing.T) {
 			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.String, Nullable: false},
 			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: false}),
 			"metadata field must be non-nullable binary type, got utf8"},
+		{arrow.StructOf(
+			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
+			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+			arrow.Field{Name: "typed_value", Type: arrow.Null, Nullable: true}),
+			"typed_value field must not be null type"},
+		{arrow.StructOf(
+			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
+			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+			arrow.Field{Name: "typed_value", Type: extensions.NewOpaqueType(arrow.Null, "null", "test"), Nullable: true}),
+			"typed_value field must not be null type"},
+		{arrow.StructOf(
+			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
+			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+			arrow.Field{Name: "typed_value", Type: extensions.NewOpaqueType(
+				extensions.NewOpaqueType(arrow.Null, "null", "test"), "null", "test"), Nullable: true}),
+			"typed_value field must not be null type"},
+		{arrow.StructOf(
+			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
+			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+			arrow.Field{Name: "typed_value", Type: extensions.NewOpaqueType(nil, "null", "test"), Nullable: true}),
+			"typed_value field has invalid storage type"},
 	}
 
 	for _, tt := range tests {
@@ -113,6 +134,31 @@ func TestVariantExtensionBadNestedTypes(t *testing.T) {
 			), Nullable: false})},
 		{"empty struct elem", arrow.StructOf(
 			arrow.Field{Name: "foobar", Type: arrow.StructOf(), Nullable: false})},
+		{"null typed_value in shredded field", arrow.StructOf(
+			arrow.Field{Name: "foobar", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.Null, Nullable: true},
+			), Nullable: false})},
+		{"null typed_value extension in one-field shredded field", arrow.StructOf(
+			arrow.Field{Name: "foobar", Type: arrow.StructOf(
+				arrow.Field{Name: "typed_value", Type: extensions.NewOpaqueType(arrow.Null, "null", "test"), Nullable: true},
+			), Nullable: false})},
+		{"null typed_value extension in two-field shredded field", arrow.StructOf(
+			arrow.Field{Name: "foobar", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: extensions.NewOpaqueType(arrow.Null, "null", "test"), Nullable: true},
+			), Nullable: false})},
+		{"double-wrapped null typed_value in one-field shredded field", arrow.StructOf(
+			arrow.Field{Name: "foobar", Type: arrow.StructOf(
+				arrow.Field{Name: "typed_value", Type: extensions.NewOpaqueType(
+					extensions.NewOpaqueType(arrow.Null, "null", "test"), "null", "test"), Nullable: true},
+			), Nullable: false})},
+		{"double-wrapped null typed_value in two-field shredded field", arrow.StructOf(
+			arrow.Field{Name: "foobar", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: extensions.NewOpaqueType(
+					extensions.NewOpaqueType(arrow.Null, "null", "test"), "null", "test"), Nullable: true},
+			), Nullable: false})},
 		{"non-nullable two elem struct", arrow.StructOf(
 			arrow.Field{Name: "foobar", Type: arrow.StructOf(
 				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
@@ -1560,6 +1606,15 @@ func TestVariantBuilderUnmarshalJSON(t *testing.T) {
 func TestNewSimpleShreddedVariantType(t *testing.T) {
 	assert.True(t, arrow.TypeEqual(extensions.NewDefaultVariantType(),
 		extensions.NewShreddedVariantType(nil)))
+	assert.True(t, arrow.TypeEqual(extensions.NewDefaultVariantType(),
+		extensions.NewShreddedVariantType(arrow.Null)))
+	assert.True(t, arrow.TypeEqual(extensions.NewDefaultVariantType(),
+		extensions.NewShreddedVariantType(extensions.NewOpaqueType(arrow.Null, "null", "test"))))
+	assert.True(t, arrow.TypeEqual(extensions.NewDefaultVariantType(),
+		extensions.NewShreddedVariantType(extensions.NewOpaqueType(
+			extensions.NewOpaqueType(arrow.Null, "null", "test"), "null", "test"))))
+	assert.True(t, arrow.TypeEqual(extensions.NewDefaultVariantType(),
+		extensions.NewShreddedVariantType(extensions.NewOpaqueType(nil, "null", "test"))))
 
 	vt := extensions.NewShreddedVariantType(arrow.PrimitiveTypes.Float32)
 	s := arrow.StructOf(
