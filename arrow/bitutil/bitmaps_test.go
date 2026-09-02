@@ -517,6 +517,42 @@ func (s *BitmapOpSuite) TestBitmapOr() {
 	})
 }
 
+func (s *BitmapOpSuite) TestBitmapAndNot() {
+	op := bitmapOp{
+		noAlloc: bitutil.BitmapAndNot,
+		alloc:   bitutil.BitmapAndNotAlloc,
+	}
+
+	leftBits := []int{0, 1, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1}
+	rightBits := []int{0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0}
+	resultBits := []bool{false, true, false, true, false, false, false, true, false, false, false, true, false, true}
+
+	s.Run("aligned", func() {
+		s.testAligned(op, leftBits, rightBits, resultBits)
+	})
+	s.Run("unaligned", func() {
+		s.testUnaligned(op, leftBits, rightBits, resultBits)
+	})
+}
+
+func (s *BitmapOpSuite) TestBitmapXor() {
+	op := bitmapOp{
+		noAlloc: bitutil.BitmapXor,
+		alloc:   bitutil.BitmapXorAlloc,
+	}
+
+	leftBits := []int{0, 1, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1}
+	rightBits := []int{0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0}
+	resultBits := []bool{false, true, false, true, true, true, false, true, true, false, true, true, true, true}
+
+	s.Run("aligned", func() {
+		s.testAligned(op, leftBits, rightBits, resultBits)
+	})
+	s.Run("unaligned", func() {
+		s.testUnaligned(op, leftBits, rightBits, resultBits)
+	})
+}
+
 func (s *BitmapOpSuite) TestBitmapXnor() {
 	op := bitmapOp{
 		noAlloc: bitutil.BitmapXnor,
@@ -553,6 +589,39 @@ func TestSmallBitmapOp(t *testing.T) {
 
 	bitutil.BitmapAnd(left[:], right[:], 0, 0, out[:], 0, 16)
 	assert.Equal(t, results, out)
+}
+
+func TestBitmapOpsLargeAligned(t *testing.T) {
+	const nbytes = 257
+
+	rng := rand.New(rand.NewSource(0))
+	left := make([]byte, nbytes)
+	right := make([]byte, nbytes)
+	_, _ = rng.Read(left)
+	_, _ = rng.Read(right)
+
+	for _, op := range []struct {
+		name string
+		fn   noAllocFn
+		want func(byte, byte) byte
+	}{
+		{name: "and", fn: bitutil.BitmapAnd, want: func(left, right byte) byte { return left & right }},
+		{name: "or", fn: bitutil.BitmapOr, want: func(left, right byte) byte { return left | right }},
+		{name: "and-not", fn: bitutil.BitmapAndNot, want: func(left, right byte) byte { return left &^ right }},
+		{name: "xor", fn: bitutil.BitmapXor, want: func(left, right byte) byte { return left ^ right }},
+		{name: "xnor", fn: bitutil.BitmapXnor, want: func(left, right byte) byte { return ^(left ^ right) }},
+	} {
+		t.Run(op.name, func(t *testing.T) {
+			out := make([]byte, nbytes)
+			op.fn(left, right, 0, 0, out, 0, nbytes*8)
+
+			expected := make([]byte, nbytes)
+			for i := range expected {
+				expected[i] = op.want(left[i], right[i])
+			}
+			assert.Equal(t, expected, out)
+		})
+	}
 }
 
 func createRandomBuffer(mem memory.Allocator, src *rand.Rand, nbytes int) []byte {
@@ -724,5 +793,49 @@ func TestBitmapWriterAppendBitmapLarge(t *testing.T) {
 		expected := i%2 == 0
 		actual := bitutil.BitIsSet(dstBytes, i)
 		assert.Equal(t, expected, actual, "bit mismatch at position %d", i)
+	}
+}
+
+func TestBitmapOpsBoundaries(t *testing.T) {
+	rng := rand.New(rand.NewSource(17))
+	left, right := make([]byte, 260), make([]byte, 260)
+	_, _ = rng.Read(left)
+	_, _ = rng.Read(right)
+	for _, op := range []struct {
+		name string
+		fn   noAllocFn
+		want func(bool, bool) bool
+	}{
+		{"and", bitutil.BitmapAnd, func(l, r bool) bool { return l && r }},
+		{"or", bitutil.BitmapOr, func(l, r bool) bool { return l || r }},
+		{"and-not", bitutil.BitmapAndNot, func(l, r bool) bool { return l && !r }},
+		{"xor", bitutil.BitmapXor, func(l, r bool) bool { return l != r }},
+		{"xnor", bitutil.BitmapXnor, func(l, r bool) bool { return l == r }},
+	} {
+		t.Run(op.name, func(t *testing.T) {
+			for _, length := range []int{0, 1, 7, 8, 9, 15, 16, 17, 24, 32, 56, 64, 72, 120, 128, 136, 504, 512, 520, 528, 536, 1016, 1024, 1032, 1040, 2056} {
+				for _, offset := range []int{0, 1, 7, 8, 15} {
+					for _, alias := range []string{"none", "left", "right"} {
+						l, r := append([]byte(nil), left...), append([]byte(nil), right...)
+						out := make([]byte, len(left))
+						for i := range out {
+							out[i] = 0xa5
+						}
+						switch alias {
+						case "left":
+							out = l
+						case "right":
+							out = r
+						}
+						expected := append([]byte(nil), out...)
+						for i := offset; i < offset+length; i++ {
+							bitutil.SetBitTo(expected, i, op.want(bitutil.BitIsSet(left, i), bitutil.BitIsSet(right, i)))
+						}
+						op.fn(l, r, int64(offset), int64(offset), out, int64(offset), int64(length))
+						assert.Equal(t, expected, out, "length=%d offset=%d alias=%s", length, offset, alias)
+					}
+				}
+			}
+		})
 	}
 }
