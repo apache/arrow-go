@@ -1349,8 +1349,8 @@ func (c *CastSuite) TestTimestampToString() {
 
 		for _, unit := range []arrow.TimeUnit{arrow.Second, arrow.Millisecond, arrow.Microsecond} {
 			c.checkCast(&arrow.TimestampType{Unit: unit}, stype,
-				fmt.Sprintf(`[%d, %d]`, math.MinInt64, math.MaxInt64),
-				fmt.Sprintf(`["%d", "%d"]`, math.MinInt64, math.MaxInt64))
+				fmt.Sprintf(`[%d, %d]`, int64(math.MinInt64), int64(math.MaxInt64)),
+				fmt.Sprintf(`["%d", "%d"]`, int64(math.MinInt64), int64(math.MaxInt64)))
 		}
 	}
 }
