@@ -127,13 +127,13 @@ func namedSpec(named *types.Named, opts tagOpts) (colSpec, error) {
 			},
 		}, nil
 	case isDecimalPkg(pkg, "decimal") && obj.Name() == "Decimal32":
-		return decimalSpec(opts, "Decimal32", 9)
+		return decimalSpec(opts, "Decimal32", 9, "")
 	case isDecimalPkg(pkg, "decimal") && obj.Name() == "Decimal64":
-		return decimalSpec(opts, "Decimal64", 18)
+		return decimalSpec(opts, "Decimal64", 18, "")
 	case isDecimalPkg(pkg, "decimal128") && obj.Name() == "Num":
-		return decimalSpec(opts, "Decimal128", 38)
+		return decimalSpec(opts, "Decimal128", 38, "decimal128.Num")
 	case isDecimalPkg(pkg, "decimal256") && obj.Name() == "Num":
-		return decimalSpec(opts, "Decimal256", 76)
+		return decimalSpec(opts, "Decimal256", 76, "decimal256.Num")
 	}
 	if _, ok := named.Underlying().(*types.Struct); ok {
 		return colSpec{}, fmt.Errorf("nested struct column for %s is not supported; encode it with arreflect", named)
@@ -146,10 +146,18 @@ func isDecimalPkg(path, name string) bool {
 	return path == prefix+name
 }
 
-func decimalSpec(opts tagOpts, arrowName string, defaultPrecision int32) (colSpec, error) {
+// decimalSpec maps a decimal field. structGoType is empty for decimal.Decimal32
+// and decimal.Decimal64, whose Go types are defined integers, and the Go type's
+// name for decimal128.Num and decimal256.Num, whose Go types are structs and so
+// need an explicit decimal tag to stay in step with arreflect. See
+// errUninferableStructScalar.
+func decimalSpec(opts tagOpts, arrowName string, defaultPrecision int32, structGoType string) (colSpec, error) {
 	goType := "decimal." + arrowName
 	if err := checkOpts(opts, goType, optSupport{decimal: true}); err != nil {
 		return colSpec{}, err
+	}
+	if structGoType != "" && !opts.HasDecimalOpts {
+		return colSpec{}, errUninferableStructScalar(structGoType, "a decimal(precision,scale) tag")
 	}
 	precision, scale := defaultPrecision, int32(0)
 	if opts.HasDecimalOpts {
@@ -162,10 +170,9 @@ func decimalSpec(opts tagOpts, arrowName string, defaultPrecision int32) (colSpe
 	}, nil
 }
 
-// timeSpec maps a time.Time field. Note that an untagged time.Time is a
-// TIMESTAMP(ns, UTC) column here, which is what arreflect.InferType[time.Time]
-// and its top-level FromSlice path both produce - but not what its struct-field
-// path produces today. See the divergence note in the package README.
+// timeSpec maps a time.Time field, which needs one of the four temporal tags:
+// the timestamp spelling arreflect cannot infer for a struct field is rejected
+// rather than generated. See errUninferableStructScalar.
 func timeSpec(opts tagOpts) (colSpec, error) {
 	if err := checkOpts(opts, "time.Time", optSupport{temporal: true}); err != nil {
 		return colSpec{}, err
@@ -192,14 +199,30 @@ func timeSpec(opts tagOpts) (colSpec, error) {
 	case "time64":
 		return timeOfDaySpec("&arrow.Time64Type{Unit: arrow.Nanosecond}", "*array.Time64Builder", "arrow.Time64", ""), nil
 	default:
-		return colSpec{
-			arrowType:   `&arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: "UTC"}`,
-			builderType: "*array.TimestampBuilder",
-			appendStmt: func(bld, recv, _ string) string {
-				return fmt.Sprintf("%s.Append(arrow.Timestamp(%s.UnixNano()))", bld, recv)
-			},
-		}, nil
+		// "" and "timestamp" are the two spellings that ask for a TIMESTAMP
+		// column, and neither is inferable as a struct field.
+		return colSpec{}, errUninferableStructScalar("time.Time", "one of the date32, date64, time32 or time64 tags")
 	}
+}
+
+// errUninferableStructScalar reports a field whose Go type is a struct that
+// Arrow models as a scalar, tagged in a way arreflect cannot infer.
+//
+// arreflect's inferArrowType switches on reflect.Kind before it reaches the
+// types it matches by identity, so a struct field of one of these types is
+// resolved by inferStructType instead, which finds only unexported fields and
+// yields an empty struct<> - and the value is then dropped. Only a tag that
+// names the Arrow type outright survives, because arreflect applies the tag
+// after the inferred type.
+//
+// arrgen could emit the column Arrow plainly means here, but generated code and
+// arreflect would then disagree about the schema, which is the one thing this
+// generator exists not to do. So the untaggable spellings are a generate-time
+// error naming the field and the tag that fixes it.
+func errUninferableStructScalar(goType, fix string) error {
+	return fmt.Errorf("%s needs %s: arreflect infers an empty struct<> for it as a struct field "+
+		"and drops the value, so a column generated here would not match arreflect.InferSchema. "+
+		"Tag it, or encode the struct with arreflect instead", goType, fix)
 }
 
 // timeOfDaySpec renders arreflect's timeOfDayNanos inline. It is emitted as a

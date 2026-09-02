@@ -48,17 +48,16 @@ type Row struct {
 	Str     string  `arrow:"s"`
 	Bin     []byte  `arrow:"bin"`
 
-	Timestamp time.Time     `arrow:"ts"`
-	Date32    time.Time     `arrow:"d32,date32"`
-	Date64    time.Time     `arrow:"d64,date64"`
-	Time32    time.Time     `arrow:"t32,time32"`
-	Time64    time.Time     `arrow:"t64,time64"`
-	Duration  time.Duration `arrow:"dur"`
+	Date32   time.Time     `arrow:"d32,date32"`
+	Date64   time.Time     `arrow:"d64,date64"`
+	Time32   time.Time     `arrow:"t32,time32"`
+	Time64   time.Time     `arrow:"t64,time64"`
+	Duration time.Duration `arrow:"dur"`
 
 	Dec32  decimal.Decimal32 `arrow:"dec32"`
 	Dec64  decimal.Decimal64 `arrow:"dec64,decimal(18,4)"`
 	Dec128 decimal128.Num    `arrow:"dec128,decimal(20,3)"`
-	Dec256 decimal256.Num    `arrow:"dec256"`
+	Dec256 decimal256.Num    `arrow:"dec256,decimal(40,5)"`
 
 	LargeStr string `arrow:"ls,large"`
 	ViewStr  string `arrow:"vs,view"`
@@ -76,12 +75,12 @@ type Row struct {
 	PF64    *float64           `arrow:"pf64"`
 	PStr    *string            `arrow:"ps"`
 	PBin    *[]byte            `arrow:"pbin"`
-	PTS     *time.Time         `arrow:"pts"`
 	PDate32 *time.Time         `arrow:"pd32,date32"`
+	PDate64 *time.Time         `arrow:"pd64,date64"`
 	PTime64 *time.Time         `arrow:"pt64,time64"`
 	PDur    *time.Duration     `arrow:"pdur"`
 	PDec32  *decimal.Decimal32 `arrow:"pdec32"`
-	PDec128 *decimal128.Num    `arrow:"pdec128"`
+	PDec128 *decimal128.Num    `arrow:"pdec128,decimal(20,3)"`
 	PDictS  *string            `arrow:"pds,dict"`
 
 	Secret string `arrow:"-"` // excluded from Arrow entirely
@@ -93,11 +92,11 @@ type Row struct {
 // allocating at all, which is not something a string or []byte column can
 // promise once its data buffer needs to double.
 type Fixed struct {
-	Timestamp time.Time `arrow:"ts"`
-	ID        int64     `arrow:"id"`
-	Value     float64   `arrow:"val"`
-	OK        bool      `arrow:"ok"`
-	Optional  *float64  `arrow:"opt"`
+	Day      time.Time `arrow:"day,date32"`
+	ID       int64     `arrow:"id"`
+	Value    float64   `arrow:"val"`
+	OK       bool      `arrow:"ok"`
+	Optional *float64  `arrow:"opt"`
 }
 
 //go:generate go run github.com/apache/arrow-go/arrgen/cmd/arrgen -type Row,Fixed -header ../../license_header.txt -output row_arrow.go

@@ -29,14 +29,19 @@
 //
 // # Usage
 //
-// Put a go:generate directive next to the struct:
+// Add the generator to your module as a tool dependency, then put a go:generate
+// directive next to the struct:
 //
-//	//go:generate go run github.com/apache/arrow-go/arrgen/cmd/arrgen -type Metric
+//	go get -tool github.com/apache/arrow-go/arrgen/cmd/arrgen
+//
+//	//go:generate go tool arrgen -type Metric
 //
 // then run `go generate ./...`, which writes metric_arrow.go next to the type.
 // Nothing in the arrow-go module depends on arrgen, and the code it emits
 // imports only arrow, arrow/array and arrow/memory, so the generator itself is
-// a build-time-only dependency.
+// a build-time-only dependency. The unversioned `go run <pkg>` spelling this
+// module's own directives use resolves only inside a module that already
+// requires arrgen; see the README for the alternatives.
 //
 // # Supported field types
 //
@@ -46,8 +51,18 @@
 // nullable column.
 //
 // Tag options mirror arreflect: a leading name, "-" to skip a field, the
-// temporal overrides date32, date64, time32, time64 and timestamp, dict, view,
-// large, and decimal(precision,scale).
+// temporal overrides date32, date64, time32 and time64, dict, view, large, and
+// decimal(precision,scale).
+//
+// A time.Time field must carry one of the four temporal tags, and a
+// decimal128.Num or decimal256.Num field must carry a decimal(precision,scale)
+// tag. Untagged, all three are Go structs that arreflect's inferArrowType
+// resolves through inferStructType - it switches on reflect.Kind before it
+// reaches the types it matches by identity - so it infers an empty struct<> and
+// drops the value. Generating the column Arrow means here would put the two
+// paths out of step, so arrgen rejects those spellings instead. One consequence
+// is that arrgen cannot emit a TIMESTAMP column at all: ",timestamp" is
+// rejected along with the untagged spelling.
 //
 // Anything arrgen cannot map exactly the way arreflect would - nested structs,
 // slices other than []byte, arrays, maps, embedded fields, named scalar types -

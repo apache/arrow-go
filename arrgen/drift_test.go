@@ -45,7 +45,7 @@ func TestCheckedInFilesAreUpToDate(t *testing.T) {
 		types []string
 		file  string
 	}{
-		{"example", []string{"Metric"}, "metric_arrow.go"},
+		{"internal/gentypes", []string{"Metric"}, "metric_arrow.go"},
 		{"internal/gentypes", []string{"Row", "Fixed"}, "row_arrow.go"},
 	}
 

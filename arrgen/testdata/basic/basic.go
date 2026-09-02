@@ -23,7 +23,7 @@ import "time"
 
 // Metric is an exported type, so its generated API is exported too.
 type Metric struct {
-	Time  time.Time `arrow:"ts"`
+	Day   time.Time `arrow:"day,date64"`
 	Host  string    `arrow:"host,dict"`
 	Count *int64    `arrow:"count"`
 	Blob  []byte

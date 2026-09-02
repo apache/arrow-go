@@ -87,3 +87,34 @@ go test "${parquet_test_args[@]}" -tags assert ./...
 go test "${parquet_test_args[@]}" -tags assert,noasm ./...
 
 popd
+
+# arrgen is a nested module: "./..." above stops at its go.mod, so it needs its
+# own vet, test and generation check. Its allocation assertions step aside under
+# -race and -asan on their own, via build tags.
+pushd "${source_dir}/arrgen"
+
+go vet ./...
+
+go test "${test_args[@]}" ./...
+
+# TestCheckedInFilesAreUpToDate covers the same ground through the arrgen
+# package, but only running the committed go:generate directives covers the
+# command wrapper and the flags they pass it.
+go generate ./...
+git diff --exit-code -- .
+
+popd
+
+# The run above resolves the released arrow-go that arrgen's go.mod names, which
+# is what a consumer of the generator gets. Run it against this tree as well: the
+# equivalence tests are what catch a change to arrow/array/arreflect that the
+# generated encoders no longer match, and in module mode they would not see one
+# until after the next release.
+pushd "${source_dir}"
+
+rm -f go.work go.work.sum
+go work init . ./arrgen
+go test "${test_args[@]}" ./arrgen/...
+rm -f go.work go.work.sum
+
+popd

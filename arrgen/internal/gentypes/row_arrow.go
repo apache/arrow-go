@@ -44,7 +44,6 @@ var rowArrowSchema = arrow.NewSchema([]arrow.Field{
 	{Name: "f64", Type: arrow.PrimitiveTypes.Float64, Nullable: false},
 	{Name: "s", Type: arrow.BinaryTypes.String, Nullable: false},
 	{Name: "bin", Type: arrow.BinaryTypes.Binary, Nullable: false},
-	{Name: "ts", Type: &arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: "UTC"}, Nullable: false},
 	{Name: "d32", Type: arrow.FixedWidthTypes.Date32, Nullable: false},
 	{Name: "d64", Type: arrow.FixedWidthTypes.Date64, Nullable: false},
 	{Name: "t32", Type: &arrow.Time32Type{Unit: arrow.Millisecond}, Nullable: false},
@@ -53,7 +52,7 @@ var rowArrowSchema = arrow.NewSchema([]arrow.Field{
 	{Name: "dec32", Type: &arrow.Decimal32Type{Precision: 9, Scale: 0}, Nullable: false},
 	{Name: "dec64", Type: &arrow.Decimal64Type{Precision: 18, Scale: 4}, Nullable: false},
 	{Name: "dec128", Type: &arrow.Decimal128Type{Precision: 20, Scale: 3}, Nullable: false},
-	{Name: "dec256", Type: &arrow.Decimal256Type{Precision: 76, Scale: 0}, Nullable: false},
+	{Name: "dec256", Type: &arrow.Decimal256Type{Precision: 40, Scale: 5}, Nullable: false},
 	{Name: "ls", Type: arrow.BinaryTypes.LargeString, Nullable: false},
 	{Name: "vs", Type: arrow.BinaryTypes.StringView, Nullable: false},
 	{Name: "lb", Type: arrow.BinaryTypes.LargeBinary, Nullable: false},
@@ -68,12 +67,12 @@ var rowArrowSchema = arrow.NewSchema([]arrow.Field{
 	{Name: "pf64", Type: arrow.PrimitiveTypes.Float64, Nullable: true},
 	{Name: "ps", Type: arrow.BinaryTypes.String, Nullable: true},
 	{Name: "pbin", Type: arrow.BinaryTypes.Binary, Nullable: true},
-	{Name: "pts", Type: &arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: "UTC"}, Nullable: true},
 	{Name: "pd32", Type: arrow.FixedWidthTypes.Date32, Nullable: true},
+	{Name: "pd64", Type: arrow.FixedWidthTypes.Date64, Nullable: true},
 	{Name: "pt64", Type: &arrow.Time64Type{Unit: arrow.Nanosecond}, Nullable: true},
 	{Name: "pdur", Type: &arrow.DurationType{Unit: arrow.Nanosecond}, Nullable: true},
 	{Name: "pdec32", Type: &arrow.Decimal32Type{Precision: 9, Scale: 0}, Nullable: true},
-	{Name: "pdec128", Type: &arrow.Decimal128Type{Precision: 38, Scale: 0}, Nullable: true},
+	{Name: "pdec128", Type: &arrow.Decimal128Type{Precision: 20, Scale: 3}, Nullable: true},
 	{Name: "pds", Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}, Nullable: true},
 }, nil)
 
@@ -103,37 +102,36 @@ type RowAppender struct {
 	b12 *array.Float64Builder
 	b13 *array.StringBuilder
 	b14 *array.BinaryBuilder
-	b15 *array.TimestampBuilder
-	b16 *array.Date32Builder
-	b17 *array.Date64Builder
-	b18 *array.Time32Builder
-	b19 *array.Time64Builder
-	b20 *array.DurationBuilder
-	b21 *array.Decimal32Builder
-	b22 *array.Decimal64Builder
-	b23 *array.Decimal128Builder
-	b24 *array.Decimal256Builder
-	b25 *array.LargeStringBuilder
-	b26 *array.StringViewBuilder
-	b27 *array.BinaryBuilder
-	b28 *array.BinaryViewBuilder
+	b15 *array.Date32Builder
+	b16 *array.Date64Builder
+	b17 *array.Time32Builder
+	b18 *array.Time64Builder
+	b19 *array.DurationBuilder
+	b20 *array.Decimal32Builder
+	b21 *array.Decimal64Builder
+	b22 *array.Decimal128Builder
+	b23 *array.Decimal256Builder
+	b24 *array.LargeStringBuilder
+	b25 *array.StringViewBuilder
+	b26 *array.BinaryBuilder
+	b27 *array.BinaryViewBuilder
+	b28 *array.BinaryDictionaryBuilder
 	b29 *array.BinaryDictionaryBuilder
-	b30 *array.BinaryDictionaryBuilder
-	b31 *array.Int32DictionaryBuilder
-	b32 *array.Float64DictionaryBuilder
-	b33 *array.Int64Builder
-	b34 *array.BooleanBuilder
-	b35 *array.Int64Builder
-	b36 *array.Float64Builder
-	b37 *array.StringBuilder
-	b38 *array.BinaryBuilder
-	b39 *array.TimestampBuilder
-	b40 *array.Date32Builder
-	b41 *array.Time64Builder
-	b42 *array.DurationBuilder
-	b43 *array.Decimal32Builder
-	b44 *array.Decimal128Builder
-	b45 *array.BinaryDictionaryBuilder
+	b30 *array.Int32DictionaryBuilder
+	b31 *array.Float64DictionaryBuilder
+	b32 *array.Int64Builder
+	b33 *array.BooleanBuilder
+	b34 *array.Int64Builder
+	b35 *array.Float64Builder
+	b36 *array.StringBuilder
+	b37 *array.BinaryBuilder
+	b38 *array.Date32Builder
+	b39 *array.Date64Builder
+	b40 *array.Time64Builder
+	b41 *array.DurationBuilder
+	b42 *array.Decimal32Builder
+	b43 *array.Decimal128Builder
+	b44 *array.BinaryDictionaryBuilder
 	err error
 }
 
@@ -164,37 +162,36 @@ func NewRowAppender(mem memory.Allocator) *RowAppender {
 		b12: rb.Field(12).(*array.Float64Builder),
 		b13: rb.Field(13).(*array.StringBuilder),
 		b14: rb.Field(14).(*array.BinaryBuilder),
-		b15: rb.Field(15).(*array.TimestampBuilder),
-		b16: rb.Field(16).(*array.Date32Builder),
-		b17: rb.Field(17).(*array.Date64Builder),
-		b18: rb.Field(18).(*array.Time32Builder),
-		b19: rb.Field(19).(*array.Time64Builder),
-		b20: rb.Field(20).(*array.DurationBuilder),
-		b21: rb.Field(21).(*array.Decimal32Builder),
-		b22: rb.Field(22).(*array.Decimal64Builder),
-		b23: rb.Field(23).(*array.Decimal128Builder),
-		b24: rb.Field(24).(*array.Decimal256Builder),
-		b25: rb.Field(25).(*array.LargeStringBuilder),
-		b26: rb.Field(26).(*array.StringViewBuilder),
-		b27: rb.Field(27).(*array.BinaryBuilder),
-		b28: rb.Field(28).(*array.BinaryViewBuilder),
+		b15: rb.Field(15).(*array.Date32Builder),
+		b16: rb.Field(16).(*array.Date64Builder),
+		b17: rb.Field(17).(*array.Time32Builder),
+		b18: rb.Field(18).(*array.Time64Builder),
+		b19: rb.Field(19).(*array.DurationBuilder),
+		b20: rb.Field(20).(*array.Decimal32Builder),
+		b21: rb.Field(21).(*array.Decimal64Builder),
+		b22: rb.Field(22).(*array.Decimal128Builder),
+		b23: rb.Field(23).(*array.Decimal256Builder),
+		b24: rb.Field(24).(*array.LargeStringBuilder),
+		b25: rb.Field(25).(*array.StringViewBuilder),
+		b26: rb.Field(26).(*array.BinaryBuilder),
+		b27: rb.Field(27).(*array.BinaryViewBuilder),
+		b28: rb.Field(28).(*array.BinaryDictionaryBuilder),
 		b29: rb.Field(29).(*array.BinaryDictionaryBuilder),
-		b30: rb.Field(30).(*array.BinaryDictionaryBuilder),
-		b31: rb.Field(31).(*array.Int32DictionaryBuilder),
-		b32: rb.Field(32).(*array.Float64DictionaryBuilder),
-		b33: rb.Field(33).(*array.Int64Builder),
-		b34: rb.Field(34).(*array.BooleanBuilder),
-		b35: rb.Field(35).(*array.Int64Builder),
-		b36: rb.Field(36).(*array.Float64Builder),
-		b37: rb.Field(37).(*array.StringBuilder),
-		b38: rb.Field(38).(*array.BinaryBuilder),
-		b39: rb.Field(39).(*array.TimestampBuilder),
-		b40: rb.Field(40).(*array.Date32Builder),
-		b41: rb.Field(41).(*array.Time64Builder),
-		b42: rb.Field(42).(*array.DurationBuilder),
-		b43: rb.Field(43).(*array.Decimal32Builder),
-		b44: rb.Field(44).(*array.Decimal128Builder),
-		b45: rb.Field(45).(*array.BinaryDictionaryBuilder),
+		b30: rb.Field(30).(*array.Int32DictionaryBuilder),
+		b31: rb.Field(31).(*array.Float64DictionaryBuilder),
+		b32: rb.Field(32).(*array.Int64Builder),
+		b33: rb.Field(33).(*array.BooleanBuilder),
+		b34: rb.Field(34).(*array.Int64Builder),
+		b35: rb.Field(35).(*array.Float64Builder),
+		b36: rb.Field(36).(*array.StringBuilder),
+		b37: rb.Field(37).(*array.BinaryBuilder),
+		b38: rb.Field(38).(*array.Date32Builder),
+		b39: rb.Field(39).(*array.Date64Builder),
+		b40: rb.Field(40).(*array.Time64Builder),
+		b41: rb.Field(41).(*array.DurationBuilder),
+		b42: rb.Field(42).(*array.Decimal32Builder),
+		b43: rb.Field(43).(*array.Decimal128Builder),
+		b44: rb.Field(44).(*array.BinaryDictionaryBuilder),
 	}
 }
 
@@ -235,103 +232,102 @@ func (a *RowAppender) Append(v *Row) {
 	} else {
 		a.b14.Append(v.Bin)
 	}
-	a.b15.Append(arrow.Timestamp(v.Timestamp.UnixNano()))
-	a.b16.Append(arrow.Date32FromTime(v.Date32))
-	a.b17.Append(arrow.Date64FromTime(v.Date64))
+	a.b15.Append(arrow.Date32FromTime(v.Date32))
+	a.b16.Append(arrow.Date64FromTime(v.Date64))
 	{
 		tod := v.Time32.UTC()
-		a.b18.Append(arrow.Time32(tod.Sub(time.Date(tod.Year(), tod.Month(), tod.Day(), 0, 0, 0, 0, time.UTC)).Nanoseconds() / 1e6))
+		a.b17.Append(arrow.Time32(tod.Sub(time.Date(tod.Year(), tod.Month(), tod.Day(), 0, 0, 0, 0, time.UTC)).Nanoseconds() / 1e6))
 	}
 	{
 		tod := v.Time64.UTC()
-		a.b19.Append(arrow.Time64(tod.Sub(time.Date(tod.Year(), tod.Month(), tod.Day(), 0, 0, 0, 0, time.UTC)).Nanoseconds()))
+		a.b18.Append(arrow.Time64(tod.Sub(time.Date(tod.Year(), tod.Month(), tod.Day(), 0, 0, 0, 0, time.UTC)).Nanoseconds()))
 	}
-	a.b20.Append(arrow.Duration(v.Duration.Nanoseconds()))
-	a.b21.Append(v.Dec32)
-	a.b22.Append(v.Dec64)
-	a.b23.Append(v.Dec128)
-	a.b24.Append(v.Dec256)
-	a.b25.Append(v.LargeStr)
-	a.b26.Append(v.ViewStr)
+	a.b19.Append(arrow.Duration(v.Duration.Nanoseconds()))
+	a.b20.Append(v.Dec32)
+	a.b21.Append(v.Dec64)
+	a.b22.Append(v.Dec128)
+	a.b23.Append(v.Dec256)
+	a.b24.Append(v.LargeStr)
+	a.b25.Append(v.ViewStr)
 	if v.LargeBin == nil {
-		a.b27.AppendNull()
+		a.b26.AppendNull()
 	} else {
-		a.b27.Append(v.LargeBin)
+		a.b26.Append(v.LargeBin)
 	}
 	if v.ViewBin == nil {
-		a.b28.AppendNull()
+		a.b27.AppendNull()
 	} else {
-		a.b28.Append(v.ViewBin)
+		a.b27.Append(v.ViewBin)
 	}
-	a.setErr(a.b29.AppendString(v.DictStr))
+	a.setErr(a.b28.AppendString(v.DictStr))
 	if v.DictBin == nil {
-		a.b30.AppendNull()
+		a.b29.AppendNull()
 	} else {
-		a.setErr(a.b30.Append(v.DictBin))
+		a.setErr(a.b29.Append(v.DictBin))
 	}
-	a.setErr(a.b31.Append(v.DictInt))
-	a.setErr(a.b32.Append(v.DictF64))
-	a.b33.Append(v.Untagged)
+	a.setErr(a.b30.Append(v.DictInt))
+	a.setErr(a.b31.Append(v.DictF64))
+	a.b32.Append(v.Untagged)
 	if v.PBool == nil {
-		a.b34.AppendNull()
+		a.b33.AppendNull()
 	} else {
-		a.b34.Append(*v.PBool)
+		a.b33.Append(*v.PBool)
 	}
 	if v.PInt64 == nil {
-		a.b35.AppendNull()
+		a.b34.AppendNull()
 	} else {
-		a.b35.Append(*v.PInt64)
+		a.b34.Append(*v.PInt64)
 	}
 	if v.PF64 == nil {
-		a.b36.AppendNull()
+		a.b35.AppendNull()
 	} else {
-		a.b36.Append(*v.PF64)
+		a.b35.Append(*v.PF64)
 	}
 	if v.PStr == nil {
-		a.b37.AppendNull()
+		a.b36.AppendNull()
 	} else {
-		a.b37.Append(*v.PStr)
+		a.b36.Append(*v.PStr)
 	}
 	if v.PBin == nil || *v.PBin == nil {
-		a.b38.AppendNull()
+		a.b37.AppendNull()
 	} else {
-		a.b38.Append(*v.PBin)
-	}
-	if v.PTS == nil {
-		a.b39.AppendNull()
-	} else {
-		a.b39.Append(arrow.Timestamp((*v.PTS).UnixNano()))
+		a.b37.Append(*v.PBin)
 	}
 	if v.PDate32 == nil {
-		a.b40.AppendNull()
+		a.b38.AppendNull()
 	} else {
-		a.b40.Append(arrow.Date32FromTime(*v.PDate32))
+		a.b38.Append(arrow.Date32FromTime(*v.PDate32))
+	}
+	if v.PDate64 == nil {
+		a.b39.AppendNull()
+	} else {
+		a.b39.Append(arrow.Date64FromTime(*v.PDate64))
 	}
 	if v.PTime64 == nil {
-		a.b41.AppendNull()
+		a.b40.AppendNull()
 	} else {
 		tod := (*v.PTime64).UTC()
-		a.b41.Append(arrow.Time64(tod.Sub(time.Date(tod.Year(), tod.Month(), tod.Day(), 0, 0, 0, 0, time.UTC)).Nanoseconds()))
+		a.b40.Append(arrow.Time64(tod.Sub(time.Date(tod.Year(), tod.Month(), tod.Day(), 0, 0, 0, 0, time.UTC)).Nanoseconds()))
 	}
 	if v.PDur == nil {
-		a.b42.AppendNull()
+		a.b41.AppendNull()
 	} else {
-		a.b42.Append(arrow.Duration((*v.PDur).Nanoseconds()))
+		a.b41.Append(arrow.Duration((*v.PDur).Nanoseconds()))
 	}
 	if v.PDec32 == nil {
-		a.b43.AppendNull()
+		a.b42.AppendNull()
 	} else {
-		a.b43.Append(*v.PDec32)
+		a.b42.Append(*v.PDec32)
 	}
 	if v.PDec128 == nil {
-		a.b44.AppendNull()
+		a.b43.AppendNull()
 	} else {
-		a.b44.Append(*v.PDec128)
+		a.b43.Append(*v.PDec128)
 	}
 	if v.PDictS == nil {
-		a.b45.AppendNull()
+		a.b44.AppendNull()
 	} else {
-		a.setErr(a.b45.AppendString(*v.PDictS))
+		a.setErr(a.b44.AppendString(*v.PDictS))
 	}
 }
 
@@ -380,7 +376,7 @@ func RowRecordBatch(mem memory.Allocator, vs []Row) (arrow.RecordBatch, error) {
 // fixedArrowSchema is the Arrow schema of Fixed, resolved from its arrow
 // struct tags at generate time.
 var fixedArrowSchema = arrow.NewSchema([]arrow.Field{
-	{Name: "ts", Type: &arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: "UTC"}, Nullable: false},
+	{Name: "day", Type: arrow.FixedWidthTypes.Date32, Nullable: false},
 	{Name: "id", Type: arrow.PrimitiveTypes.Int64, Nullable: false},
 	{Name: "val", Type: arrow.PrimitiveTypes.Float64, Nullable: false},
 	{Name: "ok", Type: arrow.FixedWidthTypes.Boolean, Nullable: false},
@@ -398,7 +394,7 @@ func FixedSchema() *arrow.Schema { return fixedArrowSchema }
 // It is not safe for concurrent use. Release it when done.
 type FixedAppender struct {
 	rb  *array.RecordBuilder
-	b0  *array.TimestampBuilder
+	b0  *array.Date32Builder
 	b1  *array.Int64Builder
 	b2  *array.Float64Builder
 	b3  *array.BooleanBuilder
@@ -418,7 +414,7 @@ func NewFixedAppender(mem memory.Allocator) *FixedAppender {
 	rb := array.NewRecordBuilder(mem, fixedArrowSchema)
 	return &FixedAppender{
 		rb: rb,
-		b0: rb.Field(0).(*array.TimestampBuilder),
+		b0: rb.Field(0).(*array.Date32Builder),
 		b1: rb.Field(1).(*array.Int64Builder),
 		b2: rb.Field(2).(*array.Float64Builder),
 		b3: rb.Field(3).(*array.BooleanBuilder),
@@ -444,7 +440,7 @@ func (a *FixedAppender) Len() int { return a.rb.Field(0).Len() }
 // Append appends one row. v is read synchronously and never retained, so a
 // caller streaming rows can reuse a single Fixed variable across calls.
 func (a *FixedAppender) Append(v *Fixed) {
-	a.b0.Append(arrow.Timestamp(v.Timestamp.UnixNano()))
+	a.b0.Append(arrow.Date32FromTime(v.Day))
 	a.b1.Append(v.ID)
 	a.b2.Append(v.Value)
 	a.b3.Append(v.OK)

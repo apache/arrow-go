@@ -27,7 +27,7 @@ import (
 )
 
 type Sample struct {
-	At    time.Time `arrow:"at"`
+	At    time.Time `arrow:"at,date64"`
 	Value float64   `arrow:"value"`
 }
 

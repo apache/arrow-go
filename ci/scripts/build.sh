@@ -79,3 +79,10 @@ pushd "${source_dir}/parquet"
 go install -tags pqarrow_read_only ./...
 
 popd
+
+# arrgen is a nested module, so the traversals above never reach it.
+pushd "${source_dir}/arrgen"
+
+go build -v ./...
+
+popd

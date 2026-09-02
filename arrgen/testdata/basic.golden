@@ -27,7 +27,7 @@ import (
 // metricArrowSchema is the Arrow schema of Metric, resolved from its arrow
 // struct tags at generate time.
 var metricArrowSchema = arrow.NewSchema([]arrow.Field{
-	{Name: "ts", Type: &arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: "UTC"}, Nullable: false},
+	{Name: "day", Type: arrow.FixedWidthTypes.Date64, Nullable: false},
 	{Name: "host", Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}, Nullable: false},
 	{Name: "count", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
 	{Name: "Blob", Type: arrow.BinaryTypes.Binary, Nullable: false},
@@ -44,7 +44,7 @@ func MetricSchema() *arrow.Schema { return metricArrowSchema }
 // It is not safe for concurrent use. Release it when done.
 type MetricAppender struct {
 	rb  *array.RecordBuilder
-	b0  *array.TimestampBuilder
+	b0  *array.Date64Builder
 	b1  *array.BinaryDictionaryBuilder
 	b2  *array.Int64Builder
 	b3  *array.BinaryBuilder
@@ -63,7 +63,7 @@ func NewMetricAppender(mem memory.Allocator) *MetricAppender {
 	rb := array.NewRecordBuilder(mem, metricArrowSchema)
 	return &MetricAppender{
 		rb: rb,
-		b0: rb.Field(0).(*array.TimestampBuilder),
+		b0: rb.Field(0).(*array.Date64Builder),
 		b1: rb.Field(1).(*array.BinaryDictionaryBuilder),
 		b2: rb.Field(2).(*array.Int64Builder),
 		b3: rb.Field(3).(*array.BinaryBuilder),
@@ -88,7 +88,7 @@ func (a *MetricAppender) Len() int { return a.rb.Field(0).Len() }
 // Append appends one row. v is read synchronously and never retained, so a
 // caller streaming rows can reuse a single Metric variable across calls.
 func (a *MetricAppender) Append(v *Metric) {
-	a.b0.Append(arrow.Timestamp(v.Time.UnixNano()))
+	a.b0.Append(arrow.Date64FromTime(v.Day))
 	a.setErr(a.b1.AppendString(v.Host))
 	if v.Count == nil {
 		a.b2.AppendNull()

@@ -18,7 +18,12 @@
 // error messages stay covered and stay readable.
 package errors
 
-import "time"
+import (
+	"time"
+
+	"github.com/apache/arrow-go/v18/arrow/decimal128"
+	"github.com/apache/arrow-go/v18/arrow/decimal256"
+)
 
 // Inner is a nested struct used by Nested and Embedded.
 type Inner struct {
@@ -118,6 +123,25 @@ type TimeSlice struct {
 
 // NotAStruct is a named type whose underlying type is not a struct.
 type NotAStruct int64
+
+// BareTime, TimestampTime and the two bare decimals below are the spellings
+// arreflect cannot infer as a struct field, so arrgen rejects them rather than
+// generating a column the reflection path would not agree with.
+type BareTime struct {
+	Field time.Time
+}
+
+type TimestampTime struct {
+	Field time.Time `arrow:"f,timestamp"`
+}
+
+type BareDecimal128 struct {
+	Field decimal128.Num
+}
+
+type BareDecimal256 struct {
+	Field decimal256.Num
+}
 
 type Collide struct {
 	Field int64

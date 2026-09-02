@@ -23,8 +23,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow-go/arrgen"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array/arreflect"
+	"github.com/apache/arrow-go/v18/arrow/decimal128"
+	"github.com/apache/arrow-go/v18/arrow/decimal256"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files instead of comparing against them")
@@ -121,6 +126,10 @@ func TestGenerateRejects(t *testing.T) {
 		{"RunEndEncoded", "ree is not supported"},
 		{"DictAndView", "at most one of dict, view, ree"},
 		{"DictAndLarge", "cannot be combined with large"},
+		{"BareTime", "one of the date32, date64, time32 or time64 tags"},
+		{"TimestampTime", "one of the date32, date64, time32 or time64 tags"},
+		{"BareDecimal128", "decimal128.Num needs a decimal(precision,scale) tag"},
+		{"BareDecimal256", "decimal256.Num needs a decimal(precision,scale) tag"},
 		{"NoColumns", "no Arrow columns"},
 		{"DoublePointer", "multi-level pointer"},
 		{"TimeSlice", "list column"},
@@ -217,6 +226,40 @@ func TestGenerateMissingPackage(t *testing.T) {
 	}
 	if _, err := arrgen.Generate(arrgen.Config{Dir: dir, Types: []string{"Metric"}}); err == nil {
 		t.Error("Generate in a directory with no Go files succeeded, want an error")
+	}
+}
+
+// TestArreflectCannotInferStructScalars pins the upstream behavior that the
+// rejections above exist for.
+//
+// time.Time, decimal128.Num and decimal256.Num are Go structs that Arrow models
+// as scalars. arreflect's inferArrowType switches on reflect.Kind before it
+// reaches the types it matches by identity, so as a struct field each one is
+// resolved by inferStructType, which sees only unexported fields and yields an
+// empty struct<>. arrgen refuses to generate the column Arrow means here
+// because doing so would break the equivalence it promises.
+//
+// If arreflect learns to infer these, this test fails - which is good news, not
+// a regression. It means the rejections in mapping.go can be dropped and the
+// untagged spellings generated instead.
+func TestArreflectCannotInferStructScalars(t *testing.T) {
+	type row struct {
+		Time time.Time      `arrow:"t"`
+		TS   time.Time      `arrow:"ts,timestamp"`
+		D128 decimal128.Num `arrow:"d128"`
+		D256 decimal256.Num `arrow:"d256"`
+	}
+
+	schema, err := arreflect.InferSchema[row]()
+	if err != nil {
+		t.Fatalf("InferSchema: %v", err)
+	}
+	for i := 0; i < schema.NumFields(); i++ {
+		f := schema.Field(i)
+		if f.Type.ID() != arrow.STRUCT {
+			t.Errorf("arreflect now infers column %q as %s rather than an empty struct; "+
+				"drop the matching rejection in mapping.go and generate the column instead", f.Name, f.Type)
+		}
 	}
 }
 

@@ -19,9 +19,7 @@ package gentypes_test
 import (
 	"fmt"
 	"testing"
-	"time"
 
-	"github.com/apache/arrow-go/arrgen/example"
 	"github.com/apache/arrow-go/arrgen/internal/gentypes"
 	"github.com/apache/arrow-go/v18/arrow/array/arreflect"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -31,12 +29,12 @@ import (
 // that per-batch setup does not dominate and small enough to stay in cache.
 const benchRows = 1024
 
-func makeMetrics(n int) []example.Metric {
-	metrics := make([]example.Metric, n)
+func makeMetrics(n int) []gentypes.Metric {
+	metrics := make([]gentypes.Metric, n)
 	v := 42.5
 	for i := range metrics {
-		metrics[i] = example.Metric{
-			Time: base.Add(time.Duration(i) * time.Second),
+		metrics[i] = gentypes.Metric{
+			Day:  base.AddDate(0, 0, i),
 			Host: fmt.Sprintf("host-%d", i%16),
 			CPU:  float64(i) / 100,
 		}
@@ -52,10 +50,10 @@ func makeFixed(n int) []gentypes.Fixed {
 	v := 1.5
 	for i := range rows {
 		rows[i] = gentypes.Fixed{
-			Timestamp: base.Add(time.Duration(i) * time.Second),
-			ID:        int64(i),
-			Value:     float64(i) * 1.5,
-			OK:        i%2 == 0,
+			Day:   base.AddDate(0, 0, i),
+			ID:    int64(i),
+			Value: float64(i) * 1.5,
+			OK:    i%2 == 0,
 		}
 		if i%3 != 0 {
 			rows[i].Optional = &v
@@ -85,7 +83,7 @@ func BenchmarkMetricBatch(b *testing.B) {
 	b.Run("arrgen", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			rec, err := example.MetricRecordBatch(mem, metrics)
+			rec, err := gentypes.MetricRecordBatch(mem, metrics)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -96,7 +94,7 @@ func BenchmarkMetricBatch(b *testing.B) {
 }
 
 // BenchmarkRowBatch runs the same comparison over the wide fixture, where a
-// row costs 46 columns of reflection instead of four.
+// row costs 45 columns of reflection instead of four.
 func BenchmarkRowBatch(b *testing.B) {
 	rows := makeRows(benchRows)
 	mem := memory.DefaultAllocator

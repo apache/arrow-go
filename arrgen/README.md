@@ -34,7 +34,14 @@ a build-time step; your binary does not grow a dependency for it.
 
 ## Quick start
 
-Tag a struct as you would for `arreflect`, and add a `go:generate` line:
+Add `arrgen` to your module as a tool dependency, which needs `go 1.24` or
+later in your `go.mod`:
+
+```sh
+go get -tool github.com/apache/arrow-go/arrgen/cmd/arrgen
+```
+
+Then tag a struct as you would for `arreflect` and add a `go:generate` line:
 
 ```go
 package telemetry
@@ -42,14 +49,14 @@ package telemetry
 import "time"
 
 type Metric struct {
-	Time   time.Time `arrow:"ts"`
+	Day    time.Time `arrow:"day,date32"`
 	Host   string    `arrow:"host"`
 	CPU    float64   `arrow:"cpu"`
 	Value  *float64  `arrow:"value"` // nullable
 	Secret string    `arrow:"-"`     // not a column
 }
 
-//go:generate go run github.com/apache/arrow-go/arrgen/cmd/arrgen -type Metric
+//go:generate go tool arrgen -type Metric
 ```
 
 ```sh
@@ -57,12 +64,31 @@ go generate ./...   # writes metric_arrow.go next to the type
 ```
 
 Check the result in, as you would `stringer` or `easyjson` output, and
-regenerate when the struct changes. If you would rather not add `arrgen` to your
-module's dependencies at all, pin it in the directive instead:
+regenerate when the struct changes.
+
+`go get -tool` records the generator in your `go.mod` and `go.sum` but not in
+your build: nothing in your packages imports it, so it is not linked into your
+binary. If you would rather not record it at all, name a version in the
+directive instead, which resolves the generator per run without touching your
+module files:
 
 ```go
-//go:generate go run github.com/apache/arrow-go/arrgen/cmd/arrgen@v0.1.0 -type Metric
+//go:generate go run github.com/apache/arrow-go/arrgen/cmd/arrgen@arrgen/v0.1.0 -type Metric
 ```
+
+Both forms need `arrgen` to be resolvable. As a nested module it is versioned
+under its own `arrgen/vX.Y.Z` tags, and until the first of those is published
+neither form resolves from a released version - use a `replace` directive
+pointing at a checkout in the meantime:
+
+```sh
+go mod edit -replace github.com/apache/arrow-go/arrgen=../arrow-go/arrgen
+```
+
+The unversioned `go run github.com/apache/arrow-go/arrgen/cmd/arrgen` spelling
+works only inside a module that already requires `arrgen`; anywhere else the go
+tool refuses it with `no required module provides package`. The directives in
+this module use that spelling because this module is `arrgen`.
 
 ### What you get
 
@@ -91,6 +117,9 @@ a.Err()                    // first append error; only dictionary columns can fa
 `Append` reads `v` synchronously and never retains it, so a caller draining a
 stream can reuse one row variable for every row.
 
+Runnable versions of all three are the testable examples in
+[`example_test.go`](example_test.go).
+
 ## Flags
 
 | Flag | Meaning |
@@ -108,8 +137,16 @@ stream can reuse one row variable for every row.
 those for a nullable column.
 
 Tag options are `arreflect`'s: a leading column name, `-` to skip the field, the
-temporal overrides `date32`, `date64`, `time32`, `time64` and `timestamp`,
-`dict`, `view`, `large`, and `decimal(precision,scale)`.
+temporal overrides `date32`, `date64`, `time32` and `time64`, `dict`, `view`,
+`large`, and `decimal(precision,scale)`.
+
+Two of those types need an explicit tag, because the untagged spelling is one
+`arreflect` cannot infer as a struct field - see [below](#the-two-types-that-need-a-tag):
+
+| Field | Required tag |
+| --- | --- |
+| `time.Time` | one of `date32`, `date64`, `time32`, `time64` |
+| `decimal128.Num`, `decimal256.Num` | `decimal(precision,scale)` |
 
 Anything else such as nested structs, slices other than `[]byte`, arrays, maps,
 embedded fields, defined scalar types such as `type ID int64` is a
@@ -124,20 +161,50 @@ The point of matching `arreflect`'s tag dialect is that switching between the
 two paths is a call-site change and nothing else. `internal/gentypes` holds a
 fixture with one field for every supported column shape and asserts, on every
 run, that the generated encoder and `arreflect` produce the same schema and the
-same column data for the same input.
+same column data for the same input - every column, with nothing excused.
+
+### The two types that need a tag
+
+`arreflect`'s `inferArrowType` switches on `reflect.Kind` before it reaches the
+types it matches by identity, so a Go struct that Arrow models as a scalar
+reaches `inferStructType` instead. That finds only unexported fields and yields
+an empty `struct<>`, and the value is then dropped. Today that affects:
+
+| Field | `arreflect` infers |
+| --- | --- |
+| `time.Time`, untagged or `,timestamp` | `struct<>` |
+| `decimal128.Num` / `decimal256.Num`, untagged | `struct<>` |
+
+A tag naming the Arrow type outright - `,date32`, `,decimal(20,3)` - rescues the
+field, because `arreflect` applies the tag after the inferred type.
+`arreflect`'s own tests only pass these types as the top-level element of a
+slice, where `buildArray` special-cases them before the `reflect.Struct` branch
+and they encode correctly.
+
+`arrgen` could emit the column Arrow plainly means here, and an earlier revision
+did. But then generated code and `arreflect` would disagree about the schema,
+which is the one thing this generator exists not to do, so the untaggable
+spellings are a generate-time error naming the field and the tag that fixes it
+instead. The practical consequence is that **`arrgen` cannot emit a `TIMESTAMP`
+column**: `,timestamp` is rejected along with the untagged spelling, since
+`arreflect` infers `struct<>` for both.
+
+`TestArreflectCannotInferStructScalars` pins that upstream behavior. If
+`arrow/array/arreflect` is fixed, that test fails and tells us to drop these
+rejections and generate the columns instead.
 
 ## Performance
 
-`go test ./internal/gentypes/ -bench . -benchmem`, Go 1.25, linux/arm64. Batch
-benchmarks encode 1024 rows per operation.
+`go test ./internal/gentypes/ -bench . -benchmem`, Go 1.25, linux/arm64, 2 vCPU.
+Batch benchmarks encode 1024 rows per operation.
 
 | Benchmark | arreflect | arrgen | |
 | --- | --- | --- | --- |
-| `MetricBatch` (4 columns) | 56.9 µs, 98 allocs | 20.3 µs, 52 allocs | **2.8x faster** |
-| `FixedBatch` (5 fixed-width columns) | 59.0 µs, 97 allocs | 17.4 µs, 46 allocs | **3.4x faster** |
-| `RowBatch` (46 columns) | 843 µs, 3430 allocs | 413 µs, 3126 allocs | **2.0x faster** |
-| `StreamAppend` (per row) | 58.3 ns | 18.6 ns, **0 allocs** | **3.1x faster** |
-| `Schema` | 5.6 µs, 132 allocs | 1.5 ns, **0 allocs** | |
+| `MetricBatch` (4 columns) | 69.6 µs, 97 allocs | 30.5 µs, 52 allocs | **2.3x faster** |
+| `FixedBatch` (5 fixed-width columns) | 72.9 µs, 96 allocs | 26.7 µs, 46 allocs | **2.7x faster** |
+| `RowBatch` (45 columns) | 985 µs, 3418 allocs | 515 µs, 3118 allocs | **1.9x faster** |
+| `StreamAppend` (per row) | 73.2 ns | 27.5 ns, **0 allocs** | **2.7x faster** |
+| `Schema` | 6.4 µs, 131 allocs | 1.8 ns, **0 allocs** | |
 
 Three things move the numbers:
 
@@ -163,17 +230,31 @@ an appender can be fed a row at a time and cut into batches wherever you like.
 
 ## Working on arrgen
 
-The repository root carries a `go.work` so this module builds against the
-arrow-go tree next to it rather than the released version its `go.mod` names:
+This module's `go.mod` names a released `github.com/apache/arrow-go/v18`, so by
+default it builds against that rather than the tree it sits in:
 
 ```sh
-go test ./arrgen/...                    # workspace: local arrow-go
-cd arrgen && GOWORK=off go test ./...   # standalone: released arrow-go
+cd arrgen && go test ./...
 ```
 
-Both are expected to pass. `TestCheckedInFilesAreUpToDate` regenerates every
-committed output in this module and fails if it differs, so a struct change
-without a `go generate` is caught at the point of the edit.
+To test it against the local arrow-go instead - which is what you want when
+changing `arrow/array/arreflect`, since the equivalence tests are what catch a
+divergence - put a workspace over the two modules:
+
+```sh
+go work init . ./arrgen   # from the repository root; go.work is gitignored
+go test ./arrgen/...
+```
+
+`ci/scripts/build.sh` and `ci/scripts/test.sh` both descend into this module
+explicitly, because `./...` in the root module stops at its `go.mod`. CI builds
+it, vets it, runs its tests under the same `-race`/`-asan` args as the rest of
+the repository, and runs `go generate ./...` followed by `git diff
+--exit-code` so a committed output that drifted from its struct fails the build.
+
+`TestCheckedInFilesAreUpToDate` checks the same property from inside the test
+binary, which is what fails first when you edit a struct and forget to
+regenerate.
 
 The golden file in `testdata` is the review surface for generator changes:
 `go test ./arrgen/ -update` rewrites it, and the resulting diff is exactly what
@@ -185,4 +266,5 @@ As a nested module, `arrgen` is versioned and tagged independently of the root
 module: its tags are `arrgen/vX.Y.Z`, not `vX.Y.Z`. It cannot share the root's
 `v18` line, because a module path without a `/vN` suffix is limited to v0 and
 v1. Nothing in the release scripts tags it yet - that is a deliberate omission
-for maintainers to decide on, not an oversight.
+for maintainers to decide on, not an oversight, and it is why the Quick Start
+cannot yet name a version that resolves.

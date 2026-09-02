@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/apache/arrow-go/arrgen/example"
 	"github.com/apache/arrow-go/arrgen/internal/gentypes"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -33,35 +32,10 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
-// arreflectStructFieldGaps names the Row columns whose Go type arreflect cannot
-// encode when it appears as a struct field, and what it emits instead.
+// compareColumns asserts that got and want hold the same columns.
 //
-// Its inferArrowType dispatches on reflect.Kind before it checks for the types
-// it special-cases, so any Go struct that Arrow models as a scalar - time.Time,
-// decimal128.Num, decimal256.Num - reaches inferStructType, which finds only
-// unexported fields and returns an empty struct<>. The value is then dropped on
-// the floor. Its own tests only ever pass these types as the top-level element
-// of a slice, where a different branch handles them correctly, which is why the
-// gap has gone unnoticed.
-//
-// arrgen emits the column arreflect's own InferType and FromSlice paths agree
-// on (TIMESTAMP(ns, UTC), DECIMAL128, DECIMAL256), so these columns are the one
-// place the two paths disagree and are compared separately, by value, in
-// TestGapColumnValues. TestArreflectStructFieldGaps pins the current arreflect
-// behavior so that fixing it upstream turns into a failure here telling us to
-// shorten this list.
-// A tag that names an explicit Arrow type - date32, decimal(20,3) - rescues the
-// field, because arreflect overrides the inferred type from the tag afterwards.
-// Only the untagged spellings are listed here.
-var arreflectStructFieldGaps = map[string]string{
-	"ts":      "time.Time",
-	"pts":     "*time.Time",
-	"dec256":  "decimal256.Num",
-	"pdec128": "*decimal128.Num",
-}
-
-// compareColumns asserts that got and want hold the same columns, skipping the
-// ones arreflect cannot encode as struct fields.
+// It walks the columns rather than calling array.RecordEqual so a failure names
+// the column that differs instead of dumping two whole batches.
 //
 // dictsByValue relaxes dictionary columns to a comparison of the values they
 // decode to. An appender reused across batches carries its memo table forward,
@@ -78,9 +52,6 @@ func compareColumns(t *testing.T, label string, got, want arrow.RecordBatch, dic
 	}
 	for i := 0; i < int(got.NumCols()); i++ {
 		name := got.Schema().Field(i).Name
-		if _, gap := arreflectStructFieldGaps[name]; gap {
-			continue
-		}
 		gc, wc := got.Column(i), want.Column(i)
 		if dictsByValue && gc.DataType().ID() == arrow.DICTIONARY {
 			compareByValueStr(t, label, name, gc, wc)
@@ -127,41 +98,40 @@ func makeRows(n int) []gentypes.Row {
 	for i := range rows {
 		null := i%3 == 0
 		r := gentypes.Row{
-			Bool:      i%2 == 0,
-			Int8:      int8(i),
-			Int16:     int16(i * 3),
-			Int32:     int32(i * 7),
-			Int64:     int64(i) * 1e6,
-			Int:       i,
-			Uint8:     uint8(i),
-			Uint16:    uint16(i * 5),
-			Uint32:    uint32(i * 11),
-			Uint64:    uint64(i) * 1e9,
-			Uint:      uint(i),
-			Float32:   float32(i) + 0.25,
-			Float64:   float64(i) * math.Pi,
-			Str:       fmt.Sprintf("host-%d", i%7),
-			Bin:       []byte{byte(i), byte(i >> 8)},
-			Timestamp: base.Add(time.Duration(i) * time.Second),
-			Date32:    base.AddDate(0, 0, i),
-			Date64:    base.AddDate(0, 0, i),
-			Time32:    base.Add(time.Duration(i) * time.Minute),
-			Time64:    base.Add(time.Duration(i) * time.Minute),
-			Duration:  time.Duration(i) * time.Millisecond,
-			Dec32:     decimal.Decimal32(i * 100),
-			Dec64:     decimal.Decimal64(i * 10000),
-			Dec128:    decimal128.FromU64(uint64(i) * 1000),
-			Dec256:    decimal256.FromU64(uint64(i) * 2000),
-			LargeStr:  fmt.Sprintf("large-%d", i),
-			ViewStr:   fmt.Sprintf("view-%d", i),
-			LargeBin:  []byte(fmt.Sprintf("lb-%d", i)),
-			ViewBin:   []byte(fmt.Sprintf("vb-%d", i)),
-			DictStr:   fmt.Sprintf("region-%d", i%3),
-			DictBin:   []byte(fmt.Sprintf("k%d", i%4)),
-			DictInt:   int32(i % 5),
-			DictF64:   float64(i % 6),
-			Untagged:  int64(i),
-			Secret:    "never encoded",
+			Bool:     i%2 == 0,
+			Int8:     int8(i),
+			Int16:    int16(i * 3),
+			Int32:    int32(i * 7),
+			Int64:    int64(i) * 1e6,
+			Int:      i,
+			Uint8:    uint8(i),
+			Uint16:   uint16(i * 5),
+			Uint32:   uint32(i * 11),
+			Uint64:   uint64(i) * 1e9,
+			Uint:     uint(i),
+			Float32:  float32(i) + 0.25,
+			Float64:  float64(i) * math.Pi,
+			Str:      fmt.Sprintf("host-%d", i%7),
+			Bin:      []byte{byte(i), byte(i >> 8)},
+			Date32:   base.AddDate(0, 0, i),
+			Date64:   base.AddDate(0, 0, i),
+			Time32:   base.Add(time.Duration(i) * time.Minute),
+			Time64:   base.Add(time.Duration(i) * time.Minute),
+			Duration: time.Duration(i) * time.Millisecond,
+			Dec32:    decimal.Decimal32(i * 100),
+			Dec64:    decimal.Decimal64(i * 10000),
+			Dec128:   decimal128.FromU64(uint64(i) * 1000),
+			Dec256:   decimal256.FromU64(uint64(i) * 2000),
+			LargeStr: fmt.Sprintf("large-%d", i),
+			ViewStr:  fmt.Sprintf("view-%d", i),
+			LargeBin: []byte(fmt.Sprintf("lb-%d", i)),
+			ViewBin:  []byte(fmt.Sprintf("vb-%d", i)),
+			DictStr:  fmt.Sprintf("region-%d", i%3),
+			DictBin:  []byte(fmt.Sprintf("k%d", i%4)),
+			DictInt:  int32(i % 5),
+			DictF64:  float64(i % 6),
+			Untagged: int64(i),
+			Secret:   "never encoded",
 		}
 		if null {
 			// Leave every pointer nil, and null out the two shapes that map to
@@ -184,7 +154,7 @@ func makeRows(n int) []gentypes.Row {
 		ds := fmt.Sprintf("pd-%d", i%2)
 		r.PBool, r.PInt64, r.PF64, r.PStr, r.PBin = &b, &i64, &f64, &s, &bin
 		dec128 := decimal128.FromU64(uint64(i))
-		r.PTS, r.PDate32, r.PTime64, r.PDur, r.PDec32, r.PDictS = &ts, &ts, &ts, &dur, &dec, &ds
+		r.PDate32, r.PDate64, r.PTime64, r.PDur, r.PDec32, r.PDictS = &ts, &ts, &ts, &dur, &dec, &ds
 		r.PDec128 = &dec128
 		rows[i] = r
 	}
@@ -199,7 +169,30 @@ func TestRowSchemaMatchesArreflect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InferSchema: %v", err)
 	}
-	got := gentypes.RowSchema()
+	compareSchemas(t, gentypes.RowSchema(), want)
+}
+
+func TestMetricSchemaMatchesArreflect(t *testing.T) {
+	want, err := arreflect.InferSchema[gentypes.Metric]()
+	if err != nil {
+		t.Fatalf("InferSchema: %v", err)
+	}
+	compareSchemas(t, gentypes.MetricSchema(), want)
+}
+
+func TestFixedSchemaMatchesArreflect(t *testing.T) {
+	want, err := arreflect.InferSchema[gentypes.Fixed]()
+	if err != nil {
+		t.Fatalf("InferSchema: %v", err)
+	}
+	compareSchemas(t, gentypes.FixedSchema(), want)
+}
+
+// compareSchemas asserts got and want are the same schema, field for field.
+// Schema.Equal would answer the same question in one call, but a mismatch on a
+// 45-column fixture is only actionable if the failure names the column.
+func compareSchemas(t *testing.T, got, want *arrow.Schema) {
+	t.Helper()
 	if got.NumFields() != want.NumFields() {
 		t.Fatalf("field count = %d, want %d\n got: %s\nwant: %s", got.NumFields(), want.NumFields(), got, want)
 	}
@@ -209,30 +202,12 @@ func TestRowSchemaMatchesArreflect(t *testing.T) {
 			t.Errorf("field %d: name = %q, want %q", i, gf.Name, wf.Name)
 			continue
 		}
-		if _, gap := arreflectStructFieldGaps[gf.Name]; gap {
-			continue
-		}
 		if !arrow.TypeEqual(gf.Type, wf.Type) || gf.Nullable != wf.Nullable {
 			t.Errorf("field %q: got %s nullable=%t, want %s nullable=%t", gf.Name, gf.Type, gf.Nullable, wf.Type, wf.Nullable)
 		}
 	}
-}
-
-func TestMetricSchemaMatchesArreflect(t *testing.T) {
-	want, err := arreflect.InferSchema[example.Metric]()
-	if err != nil {
-		t.Fatalf("InferSchema: %v", err)
-	}
-	got := example.MetricSchema()
-	// "ts" is a bare time.Time: see arreflectStructFieldGaps.
-	for i := 0; i < got.NumFields(); i++ {
-		gf, wf := got.Field(i), want.Field(i)
-		if gf.Name == "ts" {
-			continue
-		}
-		if gf.Name != wf.Name || !arrow.TypeEqual(gf.Type, wf.Type) || gf.Nullable != wf.Nullable {
-			t.Errorf("field %d: got %s, want %s", i, gf, wf)
-		}
+	if !got.Equal(want) {
+		t.Errorf("schemas differ beyond their fields\n got: %s\nwant: %s", got, want)
 	}
 }
 
@@ -241,9 +216,8 @@ func TestMetricSchemaMatchesArreflect(t *testing.T) {
 // columns. Everything else in this package - the benchmarks, the allocation
 // assertions - is only interesting because this holds.
 //
-// It compares column by column rather than with array.RecordEqual so that the
-// handful of columns arreflect cannot encode as struct fields can be skipped by
-// name instead of poisoning the whole comparison; see arreflectStructFieldGaps.
+// Every column is compared: arrgen rejects at generate time any field it
+// cannot map the way arreflect would, so there is nothing here to excuse.
 func TestRowRecordMatchesArreflect(t *testing.T) {
 	for _, n := range []int{0, 1, 2, 3, 64} {
 		t.Run(fmt.Sprintf("rows=%d", n), func(t *testing.T) {
@@ -269,94 +243,14 @@ func TestRowRecordMatchesArreflect(t *testing.T) {
 	}
 }
 
-// TestArreflectStructFieldGaps pins the upstream behavior that
-// arreflectStructFieldGaps exists to work around. If arreflect learns to encode
-// these struct fields, this test fails and the skip list should shrink to match
-// - a failure here is good news, not a regression.
-func TestArreflectStructFieldGaps(t *testing.T) {
-	schema, err := arreflect.InferSchema[gentypes.Row]()
-	if err != nil {
-		t.Fatalf("InferSchema: %v", err)
-	}
-	for name, goType := range arreflectStructFieldGaps {
-		idx := schema.FieldIndices(name)
-		if len(idx) != 1 {
-			t.Fatalf("column %q: found %d fields, want 1", name, len(idx))
-		}
-		if dt := schema.Field(idx[0]).Type; dt.ID() != arrow.STRUCT {
-			t.Errorf("arreflect now infers %s column %q as %s rather than an empty struct; "+
-				"remove it from arreflectStructFieldGaps so the strict comparison covers it", goType, name, dt)
-		}
-	}
-}
-
-// TestGapColumnValues covers the columns TestRowRecordMatchesArreflect has to
-// skip. There is no reflection-built batch to compare them against, so the
-// expected Arrow values are spelled out here directly.
-func TestGapColumnValues(t *testing.T) {
-	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer mem.AssertSize(t, 0)
-
-	ts := base
-	dec128 := decimal128.FromU64(12345)
-	dec256 := decimal256.FromU64(67890)
-	rows := []gentypes.Row{
-		{Timestamp: ts, Dec128: dec128, Dec256: dec256, PTS: &ts, PDec128: &dec128},
-		{Timestamp: ts.Add(time.Second), Dec128: dec128, Dec256: dec256}, // pointers nil
-	}
-
-	rec, err := gentypes.RowRecordBatch(mem, rows)
-	if err != nil {
-		t.Fatalf("RowRecordBatch: %v", err)
-	}
-	defer rec.Release()
-
-	col := func(name string) arrow.Array {
-		idx := rec.Schema().FieldIndices(name)
-		if len(idx) != 1 {
-			t.Fatalf("column %q: found %d fields, want 1", name, len(idx))
-		}
-		return rec.Column(idx[0])
-	}
-
-	tsCol := col("ts").(*array.Timestamp)
-	if got, want := tsCol.Value(0), arrow.Timestamp(ts.UnixNano()); got != want {
-		t.Errorf("ts[0] = %d, want %d", got, want)
-	}
-	if got, want := tsCol.Value(1), arrow.Timestamp(ts.Add(time.Second).UnixNano()); got != want {
-		t.Errorf("ts[1] = %d, want %d", got, want)
-	}
-	if dt := tsCol.DataType().(*arrow.TimestampType); dt.Unit != arrow.Nanosecond || dt.TimeZone != "UTC" {
-		t.Errorf("ts type = %s, want timestamp[ns, tz=UTC]", dt)
-	}
-
-	ptsCol := col("pts").(*array.Timestamp)
-	if ptsCol.IsNull(0) {
-		t.Error("pts[0] is null, want a value")
-	}
-	if !ptsCol.IsNull(1) {
-		t.Error("pts[1] is not null, want null")
-	}
-
-	if got := col("dec128").(*array.Decimal128).Value(0); got != dec128 {
-		t.Errorf("dec128[0] = %v, want %v", got, dec128)
-	}
-	if got := col("dec256").(*array.Decimal256).Value(0); got != dec256 {
-		t.Errorf("dec256[0] = %v, want %v", got, dec256)
-	}
-	if !col("pdec128").(*array.Decimal128).IsNull(1) {
-		t.Error("pdec128[1] is not null, want null")
-	}
-}
-
 func TestMetricRecordMatchesArreflect(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
 	v := 3.5
-	metrics := []example.Metric{
-		{Time: base, Host: "a", CPU: 0.5, Value: &v, Secret: "hidden"},
-		{Time: base.Add(time.Second), Host: "b", CPU: 1.5, Value: nil},
+	metrics := []gentypes.Metric{
+		{Day: base, Host: "a", CPU: 0.5, Value: &v, Secret: "hidden"},
+		{Day: base.AddDate(0, 0, 1), Host: "b", CPU: 1.5, Value: nil},
 	}
 
 	want, err := arreflect.RecordFromSlice(metrics, mem)
@@ -365,26 +259,13 @@ func TestMetricRecordMatchesArreflect(t *testing.T) {
 	}
 	defer want.Release()
 
-	got, err := example.MetricRecordBatch(mem, metrics)
+	got, err := gentypes.MetricRecordBatch(mem, metrics)
 	if err != nil {
 		t.Fatalf("MetricRecordBatch: %v", err)
 	}
 	defer got.Release()
 
-	// "ts" is a bare time.Time, one of the columns arreflect drops as a struct
-	// field; the rest must match it exactly. See arreflectStructFieldGaps.
-	for i := 0; i < int(got.NumCols()); i++ {
-		name := got.Schema().Field(i).Name
-		if name == "ts" {
-			continue
-		}
-		if !array.Equal(got.Column(i), want.Column(i)) {
-			t.Errorf("column %q differs\n got: %s\nwant: %s", name, got.Column(i), want.Column(i))
-		}
-	}
-	if got, want := got.Column(0).(*array.Timestamp).Value(0), arrow.Timestamp(base.UnixNano()); got != want {
-		t.Errorf("ts[0] = %d, want %d", got, want)
-	}
+	compareColumns(t, "Metric", got, want, false)
 	if secrets := got.Schema().FieldIndices("Secret"); len(secrets) != 0 {
 		t.Errorf(`a field tagged arrow:"-" was encoded as column %v`, secrets)
 	}
