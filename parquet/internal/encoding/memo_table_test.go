@@ -291,3 +291,72 @@ func (m *MemoTableTestSuite) TestBinaryEmpty() {
 	table.CopyOffsetsSubset(0, offsets)
 	m.Equal(int32(0), offsets[0])
 }
+
+// InsertOrGet is the typed entry point used by the byte-array dictionary
+// encoders. It must agree with GetOrInsert on index assignment and on whether
+// the value already existed, for every BinaryMemoTable implementation.
+func (m *MemoTableTestSuite) TestBinaryInsertOrGet() {
+	const (
+		A = ""
+		B = "a"
+		C = "foo"
+		D = "\000"
+		E = "\000trailing"
+	)
+
+	for _, tt := range []struct {
+		name  string
+		table func() encoding.BinaryMemoTable
+	}{
+		{"hashing", func() encoding.BinaryMemoTable {
+			return encoding.NewBinaryDictionary(memory.DefaultAllocator)
+		}},
+		{"legacy", func() encoding.BinaryMemoTable {
+			return encoding.NewBinaryMemoTable(memory.DefaultAllocator)
+		}},
+	} {
+		m.Run(tt.name, func() {
+			table := tt.table()
+			defer table.Release()
+
+			for idx, val := range []string{A, B, C, D, E} {
+				got, found, err := table.InsertOrGet([]byte(val))
+				m.Require().NoError(err)
+				m.False(found, "value %q should be inserted, not found", val)
+				m.Equal(idx, got)
+			}
+			m.Equal(5, table.Size())
+
+			// Re-inserting must return the original index and report found.
+			for idx, val := range []string{A, B, C, D, E} {
+				got, found, err := table.InsertOrGet([]byte(val))
+				m.Require().NoError(err)
+				m.True(found, "value %q should already exist", val)
+				m.Equal(idx, got)
+			}
+			m.Equal(5, table.Size())
+
+			// A nil slice is the empty value, which was inserted first.
+			got, found, err := table.InsertOrGet(nil)
+			m.Require().NoError(err)
+			m.True(found)
+			m.Equal(0, got)
+
+			// InsertOrGet and GetOrInsert must agree.
+			got, found, err = table.GetOrInsert([]byte(C))
+			m.Require().NoError(err)
+			m.True(found)
+			m.Equal(2, got)
+
+			// The inserted value must not alias the caller's buffer.
+			buf := []byte("mutable")
+			inserted, _, err := table.InsertOrGet(buf)
+			m.Require().NoError(err)
+			buf[0] = 'X'
+			again, found, err := table.InsertOrGet([]byte("mutable"))
+			m.Require().NoError(err)
+			m.True(found, "stored value must be a copy, not a view of the caller's slice")
+			m.Equal(inserted, again)
+		})
+	}
+}
