@@ -2032,6 +2032,53 @@ func TestFilterKernels(t *testing.T) {
 	suite.Run(t, new(FilterKernelWithTable))
 }
 
+func TestFilterInt32MixedMaskOffsets(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	const length = 128
+	for _, offset := range []int64{0, 3, 8} {
+		t.Run(fmt.Sprintf("offset=%d", offset), func(t *testing.T) {
+			valuesBuilder := array.NewInt32Builder(mem)
+			valuesBuilder.Reserve(int(offset) + length)
+			for i := int64(0); i < offset+length; i++ {
+				valuesBuilder.Append(int32(i))
+			}
+			valuesBase := valuesBuilder.NewInt32Array()
+			valuesBuilder.Release()
+			values := array.NewSlice(valuesBase, offset, offset+length)
+			valuesBase.Release()
+			defer values.Release()
+
+			filterBuilder := array.NewBooleanBuilder(mem)
+			filterBuilder.Reserve(int(offset) + length)
+			for i := int64(0); i < offset+length; i++ {
+				filterBuilder.Append(i%2 == 0)
+			}
+			filterBase := filterBuilder.NewBooleanArray()
+			filterBuilder.Release()
+			filter := array.NewSlice(filterBase, offset, offset+length)
+			filterBase.Release()
+			defer filter.Release()
+
+			expectedBuilder := array.NewInt32Builder(mem)
+			for i := offset; i < offset+length; i++ {
+				if i%2 == 0 {
+					expectedBuilder.Append(int32(i))
+				}
+			}
+			expected := expectedBuilder.NewInt32Array()
+			expectedBuilder.Release()
+			defer expected.Release()
+
+			actual, err := compute.FilterArray(context.Background(), values, filter, *compute.DefaultFilterOptions())
+			require.NoError(t, err)
+			defer actual.Release()
+			assertArraysEqual(t, expected, actual)
+		})
+	}
+}
+
 // Benchmark tests for Take operation with variable-length data
 // These benchmarks test the performance improvements from buffer pre-allocation
 // in VarBinaryImpl for string/binary data reorganization (e.g., partitioning).
