@@ -303,18 +303,16 @@ type RecordBuilder struct {
 	schema      *arrow.Schema
 	fields      []Builder
 	checkpoints []*builderCheckpoint
-
-	rows     rowDecoder
-	fieldIdx map[string]int
-	seen     []bool
+	jsonDec     nestedJSONDecoder
 }
 
 // NewRecordBuilder returns a builder, using the provided memory allocator and a schema.
 func NewRecordBuilder(mem memory.Allocator, schema *arrow.Schema) *RecordBuilder {
 	b := &RecordBuilder{
-		mem:    mem,
-		schema: schema,
-		fields: make([]Builder, schema.NumFields()),
+		mem:     mem,
+		schema:  schema,
+		fields:  make([]Builder, schema.NumFields()),
+		jsonDec: newNestedJSONDecoder(schema),
 	}
 	b.refCount.Add(1)
 
@@ -611,20 +609,8 @@ func (b *RecordBuilder) UnmarshalOne(dec *json.Decoder) error {
 	return err
 }
 
-// fieldIndexByName returns the index of the field by name.
-func (b *RecordBuilder) fieldIndexByName(name string) (int, bool) {
-	if b.fieldIdx == nil {
-		b.fieldIdx = make(map[string]int, b.schema.NumFields())
-		for i := 0; i < b.schema.NumFields(); i++ {
-			b.fieldIdx[b.schema.Field(i).Name] = i
-		}
-	}
-	idx, ok := b.fieldIdx[name]
-	return idx, ok
-}
-
 func (b *RecordBuilder) unmarshalOne(dec *json.Decoder) (err error) {
-	rowDec, err := b.rows.next(dec)
+	rowDec, err := b.jsonDec.next(dec)
 	if err != nil {
 		return err
 	}
@@ -639,62 +625,7 @@ func (b *RecordBuilder) unmarshalOne(dec *json.Decoder) (err error) {
 		return fmt.Errorf("record should start with '{', not %s", t)
 	}
 
-	// grow the "seen" buffer if needed
-	if cap(b.seen) < b.schema.NumFields() {
-		b.seen = make([]bool, b.schema.NumFields())
-	} else {
-		b.seen = b.seen[:b.schema.NumFields()]
-		clear(b.seen)
-	}
-
-	for rowDec.More() {
-		keyTok, err := rowDec.Token()
-		if err != nil {
-			return err
-		}
-
-		key := keyTok.(string)
-		idx, ok := b.fieldIndexByName(key)
-		if !ok {
-			// TODO(serramatutu): this is equivalent to ParseOptions::Ignore in Arrow C++, i.e silently drop extra keys.
-			// We should eventually support ParseOptions::InferType and ParseOptions::Error
-			if err := b.rows.skip(rowDec); err != nil {
-				return err
-			}
-			continue
-		}
-
-		if b.seen[idx] {
-			return fmt.Errorf("key %s shows up twice in row to be decoded", key)
-		}
-		b.seen[idx] = true
-
-		if err := unmarshalChild(rowDec, b.fields[idx], b.schema.Field(idx)); err != nil {
-			return err
-		}
-	}
-
-	// consume the closing '}'
-	if _, err := rowDec.Token(); err != nil {
-		return err
-	}
-
-	// check that all non-nullable fields were specified
-	for i := 0; i < b.schema.NumFields(); i++ {
-		f := b.schema.Field(i)
-		if !b.seen[i] && !f.Nullable {
-			return fmt.Errorf("field '%s' is required but no value was given", f.Name)
-		}
-	}
-
-	// missing fields are nullable at this point, so they get a null
-	for i := 0; i < b.schema.NumFields(); i++ {
-		if !b.seen[i] {
-			b.fields[i].AppendNull()
-		}
-	}
-
-	return nil
+	return b.jsonDec.unmarshalFields(rowDec, b.fields)
 }
 
 // Unmarshal reads multiple rows from the decoder, calling UnmarshalOne in a

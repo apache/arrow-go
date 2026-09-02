@@ -18,7 +18,6 @@ package array
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -344,9 +343,7 @@ type StructBuilder struct {
 	dtype      arrow.DataType
 	fields     []Builder
 	checkpoint *builderCheckpoint
-
-	rows rowDecoder
-	seen []bool
+	jsonDec    nestedJSONDecoder
 }
 
 // NewStructBuilder returns a builder, using the provided memory allocator.
@@ -355,11 +352,12 @@ func NewStructBuilder(mem memory.Allocator, dtype *arrow.StructType) *StructBuil
 		builder: builder{mem: mem},
 		dtype:   dtype,
 		fields:  make([]Builder, dtype.NumFields()),
+		jsonDec: newNestedJSONDecoder(dtype),
 	}
 	b.refCount.Add(1)
 
-	for i := 0; i < dtype.NumFields(); i++ {
-		b.fields[i] = NewBuilder(b.mem, dtype.Field(i).Type)
+	for i, f := range dtype.Fields() {
+		b.fields[i] = NewBuilder(b.mem, f.Type)
 	}
 	return b
 }
@@ -560,7 +558,7 @@ func (b *StructBuilder) UnmarshalOne(dec *json.Decoder) error {
 
 func (b *StructBuilder) unmarshalOne(dec *json.Decoder) error {
 	offset := dec.InputOffset()
-	rowDec, err := b.rows.next(dec)
+	rowDec, err := b.jsonDec.next(dec)
 	if err != nil {
 		return err
 	}
@@ -572,68 +570,8 @@ func (b *StructBuilder) unmarshalOne(dec *json.Decoder) error {
 
 	switch t {
 	case json.Delim('{'):
-		dtype := b.dtype.(*arrow.StructType)
-
-		// grow the "seen" buffer if needed
-		if cap(b.seen) < dtype.NumFields() {
-			b.seen = make([]bool, dtype.NumFields())
-		} else {
-			b.seen = b.seen[:dtype.NumFields()]
-			clear(b.seen)
-		}
-
 		b.Append(true)
-		for rowDec.More() {
-			keyTok, err := rowDec.Token()
-			if err != nil {
-				return err
-			}
-
-			key, ok := keyTok.(string)
-			if !ok {
-				return errors.New("missing key")
-			}
-
-			idx, ok := dtype.FieldIdx(key)
-			if !ok {
-				// TODO(serramatutu): this is equivalent to ParseOptions::Ignore in Arrow C++, i.e silently drop extra keys.
-				// We should eventually support ParseOptions::InferType and ParseOptions::Error
-				if err := b.rows.skip(rowDec); err != nil {
-					return err
-				}
-				continue
-			}
-
-			if b.seen[idx] {
-				return fmt.Errorf("key %s is specified twice", key)
-			}
-			b.seen[idx] = true
-
-			if err := unmarshalChild(rowDec, b.fields[idx], dtype.Field(idx)); err != nil {
-				return err
-			}
-		}
-
-		// consume '}'
-		if _, err := rowDec.Token(); err != nil {
-			return err
-		}
-
-		// check that all non-nullable fields were specified
-		for i := 0; i < dtype.NumFields(); i++ {
-			field := dtype.Field(i)
-			if !b.seen[i] && !field.Nullable {
-				return fmt.Errorf("field '%s' is required but no value was given", field.Name)
-			}
-		}
-
-		// missing fields are nullable at this point, so they get a null
-		for i := 0; i < dtype.NumFields(); i++ {
-			if !b.seen[i] {
-				b.fields[i].AppendNull()
-			}
-		}
-		return nil
+		return b.jsonDec.unmarshalFields(rowDec, b.fields)
 	case nil:
 		b.AppendNull()
 	default:
