@@ -1074,9 +1074,6 @@ func roundTimestampFromWallOrigin(t time.Time, inputUnit arrow.TimeUnit, tz *tim
 		return 0, err
 	}
 	floorWall := calendarWallTime(floor.In(tz))
-	if err := validateWallBoundaryInUnit(floorWall, opts.Unit); err != nil {
-		return 0, err
-	}
 	floorWallAtInputResolution, err := truncateWallToInputResolution(floorWall, origin, inputUnit)
 	if err != nil {
 		return 0, err
@@ -1111,23 +1108,6 @@ func roundTimestampFromWallOrigin(t time.Time, inputUnit arrow.TimeUnit, tz *tim
 		return 0, err
 	}
 	return int64(result), nil
-}
-
-func validateWallBoundaryInUnit(value time.Time, unit RoundTemporalUnit) error {
-	unitNanos, ok := unitInNanos(unit)
-	if !ok {
-		return fmt.Errorf("%w: unsupported fixed temporal unit", arrow.ErrNotImplemented)
-	}
-
-	origin := time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC)
-	elapsed, err := wallClockDifferenceBig(calendarWallTime(value), origin)
-	if err != nil {
-		return err
-	}
-	if !new(big.Int).Quo(elapsed, big.NewInt(unitNanos)).IsInt64() {
-		return overflowError()
-	}
-	return nil
 }
 
 func truncateWallToInputResolution(value, origin time.Time, inputUnit arrow.TimeUnit) (time.Time, error) {

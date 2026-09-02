@@ -444,6 +444,52 @@ func TestTemporalRoundingCalendarOriginWideUnits(t *testing.T) {
 	}
 }
 
+func TestTemporalRoundingZonedWideInputNoOp(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		input          time.Time
+		calendarOrigin bool
+	}{
+		{
+			name:  "before nanosecond range",
+			input: time.Date(1500, time.June, 15, 12, 34, 56, 0, time.UTC),
+		},
+		{
+			name:  "after nanosecond range",
+			input: time.Date(2300, time.June, 15, 12, 34, 56, 0, time.UTC),
+		},
+		{
+			name:           "before nanosecond range with calendar origin",
+			input:          time.Date(1500, time.June, 15, 12, 34, 56, 0, time.UTC),
+			calendarOrigin: true,
+		},
+		{
+			name:           "after nanosecond range with calendar origin",
+			input:          time.Date(2300, time.June, 15, 12, 34, 56, 0, time.UTC),
+			calendarOrigin: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, rounding := range []struct {
+				name string
+				fn   temporalRoundingFunc
+			}{
+				{name: "floor", fn: compute.FloorTemporal},
+				{name: "ceil", fn: compute.CeilTemporal},
+				{name: "round", fn: compute.RoundTemporal},
+			} {
+				t.Run(rounding.name, func(t *testing.T) {
+					requireTemporalRoundingTime(t, rounding.fn, tc.input, tc.input, arrow.Second, "Asia/Kathmandu", compute.RoundTemporalOptions{
+						Multiple:            1,
+						Unit:                compute.RoundTemporalNanosecond,
+						CalendarBasedOrigin: tc.calendarOrigin,
+					})
+				})
+			}
+		})
+	}
+}
+
 func TestTemporalRoundingCalendarOriginAtMinimum(t *testing.T) {
 	minTime := arrow.Timestamp(math.MinInt64).ToTime(arrow.Nanosecond)
 	wantTime := time.Date(minTime.Year(), minTime.Month(), minTime.Day(), minTime.Hour()+1, 0, 0, 0, time.UTC)
