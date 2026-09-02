@@ -21,4 +21,9 @@ FROM ${arch}/golang:${go}-bookworm
 
 # Copy the go.mod and go.sum over and pre-download all the dependencies
 COPY . /arrow-go
-RUN cd /arrow-go && go mod download github.com/apache/arrow-go/v18@latest
+RUN cd /arrow-go && \
+    for attempt in 1 2 3 4 5; do \
+      go mod download github.com/apache/arrow-go/v18@latest && exit 0; \
+      if [ "${attempt}" -eq 5 ]; then exit 1; fi; \
+      sleep $((attempt * 2)); \
+    done

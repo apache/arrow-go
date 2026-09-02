@@ -29,6 +29,11 @@ if [ ! -f "${RAT_JAR}" ]; then
   curl \
     --fail \
     --output "${RAT_JAR}" \
+    --remove-on-error \
+    --retry 5 \
+    --retry-all-errors \
+    --retry-delay 2 \
+    --retry-max-time 60 \
     --show-error \
     --silent \
     https://repo1.maven.org/maven2/org/apache/rat/apache-rat/${RAT_VERSION}/apache-rat-${RAT_VERSION}.jar
@@ -48,6 +53,7 @@ if actual != expected:
     raise SystemExit(1)
 PY
   echo "checksum verification failed for ${RAT_JAR}" >&2
+  rm -f "${RAT_JAR}"
   exit 1
 fi
 
