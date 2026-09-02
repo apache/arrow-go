@@ -147,18 +147,16 @@ func (dec *ByteStreamSplitFixedLenByteArrayDecoder) Type() parquet.Type {
 }
 
 func (dec *ByteStreamSplitFixedLenByteArrayDecoder) SetData(nvals int, data []byte) error {
-	if nvals*dec.typeLen < len(data) {
-		return fmt.Errorf("data size (%d) is too small for the number of values in in BYTE_STREAM_SPLIT (%d)", len(data), nvals)
+	encodedNvals, err := validateByteStreamSplitPageData(dec.typeLen, nvals, data)
+	if err != nil {
+		return err
+	}
+	if dec.descr != nil && dec.descr.MaxDefinitionLevel() == 0 && encodedNvals != nvals {
+		return fmt.Errorf("BYTE_STREAM_SPLIT data contains %d values, expected %d", encodedNvals, nvals)
 	}
 
-	if len(data)%dec.typeLen != 0 {
-		return fmt.Errorf("ByteStreamSplit data size %d not aligned with type %s and byte_width: %d", len(data), dec.Type(), dec.typeLen)
-	}
-
-	nvals = len(data) / dec.typeLen
-	dec.stride = nvals
-
-	return dec.decoder.SetData(nvals, data)
+	dec.stride = encodedNvals
+	return dec.decoder.SetData(encodedNvals, data)
 }
 
 func (dec *ByteStreamSplitFixedLenByteArrayDecoder) Discard(n int) (int, error) {

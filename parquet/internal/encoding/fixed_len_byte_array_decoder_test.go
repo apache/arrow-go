@@ -27,6 +27,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestByteStreamSplitFixedLenByteArrayDecoderRejectsTruncatedRequiredData(t *testing.T) {
+	const width = 4
+	node := schema.NewFixedLenByteArrayNode("value", parquet.Repetitions.Required, width, -1)
+	column := schema.NewColumn(node, 0, 0)
+	decoder := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.ByteStreamSplit, column, memory.DefaultAllocator)
+
+	err := decoder.SetData(3, make([]byte, 2*width))
+	require.EqualError(t, err, "BYTE_STREAM_SPLIT data contains 2 values, expected 3")
+	require.Zero(t, decoder.ValuesLeft())
+}
+
+func TestByteStreamSplitFixedLenByteArrayDecoderAllowsNulls(t *testing.T) {
+	const width = 4
+	values := makeFixedLenByteArrayValues(2, width, 0)
+	node := schema.NewFixedLenByteArrayNode("value", parquet.Repetitions.Optional, width, -1)
+	column := schema.NewColumn(node, 1, 0)
+	decoder := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.ByteStreamSplit, column, memory.DefaultAllocator).(FixedLenByteArrayDecoder)
+
+	require.NoError(t, decoder.SetData(3, encodeByteStreamSplitFixedLenByteArray(values, width)))
+	out := make([]parquet.FixedLenByteArray, len(values))
+	decoded, err := decoder.Decode(out)
+	require.NoError(t, err)
+	require.Equal(t, len(values), decoded)
+	require.Equal(t, values, out)
+
+	// An optional page can legitimately contain no physical values even when its
+	// logical count would overflow when multiplied by the byte width.
+	require.NoError(t, decoder.SetData(int(^uint(0)>>1), nil))
+	require.Zero(t, decoder.ValuesLeft())
+}
+
 func TestByteStreamSplitFixedLenByteArrayDecoderContiguousOutput(t *testing.T) {
 	for _, width := range []int{2, 4, 8, 16, 32} {
 		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
