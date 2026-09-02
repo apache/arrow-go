@@ -466,6 +466,46 @@ func (c *CastSuite) TestNumericToBool() {
 	}
 }
 
+func (c *CastSuite) TestNumericToBoolSpecialValues() {
+	builder := array.NewFloat64Builder(c.mem)
+	builder.AppendValues([]float64{
+		1,
+		math.Copysign(0, -1),
+		0,
+		math.NaN(),
+		math.Inf(1),
+		math.Inf(-1),
+		1,
+		-1,
+		0,
+		1,
+		math.Copysign(0, -1),
+		math.NaN(),
+		math.Inf(1),
+		math.Inf(-1),
+		0,
+		-1,
+		1,
+	}, nil)
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	sliced := array.NewSlice(input, 1, 16)
+	defer sliced.Release()
+
+	expectedBuilder := array.NewBooleanBuilder(c.mem)
+	expectedBuilder.AppendValues([]bool{
+		false, false, true, true, true, true, true, false,
+		true, false, true, true, true, false, true,
+	}, nil)
+	expected := expectedBuilder.NewArray()
+	expectedBuilder.Release()
+	defer expected.Release()
+
+	checkCast(c.T(), sliced, expected, *compute.DefaultCastOptions(true))
+}
+
 func (c *CastSuite) StringToBool() {
 	for _, dt := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString} {
 		c.checkCast(dt, arrow.FixedWidthTypes.Boolean,
