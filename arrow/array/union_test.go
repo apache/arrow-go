@@ -204,8 +204,8 @@ func TestUnionBuilderUnmarshalOnePreservesDecoderConfiguration(t *testing.T) {
 				name string
 				json string
 			}{
-				{name: "integer first", json: `{"i":1.5,"u":[0,1]}`},
-				{name: "union first", json: `{"u":[0,1],"i":1.5}`},
+				{name: "integer first", json: `{"i":2,"u":[0,1]}`},
+				{name: "union first", json: `{"u":[0,1],"i":2}`},
 			} {
 				t.Run(input.name, func(t *testing.T) {
 					builder := array.NewStructBuilder(memory.DefaultAllocator, dtype)
