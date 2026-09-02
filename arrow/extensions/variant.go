@@ -221,6 +221,9 @@ func NewVariantType(storage arrow.DataType) (*VariantType, error) {
 	}
 
 	dt := storageType(typedValueField.Type)
+	if dt == nil {
+		return nil, fmt.Errorf("%w: typed_value field has invalid storage type", arrow.ErrInvalid)
+	}
 	if dt.ID() == arrow.NULL {
 		return nil, fmt.Errorf("%w: typed_value field must not be null type", arrow.ErrInvalid)
 	}
@@ -292,14 +295,24 @@ func isBinary(dt arrow.DataType) bool {
 }
 
 func storageType(dt arrow.DataType) arrow.DataType {
-	if ext, ok := dt.(arrow.ExtensionType); ok {
-		return ext.StorageType()
+	seen := make(map[arrow.DataType]struct{})
+	for dt != nil {
+		ext, ok := dt.(arrow.ExtensionType)
+		if !ok {
+			return dt
+		}
+		if _, dup := seen[dt]; dup {
+			return nil
+		}
+		seen[dt] = struct{}{}
+		dt = ext.StorageType()
 	}
-	return dt
+	return nil
 }
 
 func isNullType(dt arrow.DataType) bool {
-	return storageType(dt).ID() == arrow.NULL
+	st := storageType(dt)
+	return st == nil || st.ID() == arrow.NULL
 }
 
 func validStruct(s *arrow.StructType) bool {
