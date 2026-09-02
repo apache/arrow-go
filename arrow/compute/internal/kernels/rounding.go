@@ -1447,16 +1447,6 @@ func checkedCalendarAddDays(value time.Time, days int64) (time.Time, error) {
 	return result, nil
 }
 
-// convertToNanos converts a timestamp value to nanoseconds.
-func convertToNanos(ts int64, unit arrow.TimeUnit) (int64, error) {
-	return checkedMulInt64(ts, int64(unit.Multiplier()))
-}
-
-// convertFromNanos converts a nanosecond timestamp to the specified unit
-func convertFromNanos(nanos int64, unit arrow.TimeUnit) int64 {
-	return nanos / int64(unit.Multiplier())
-}
-
 func roundToMultipleInt64(value, multiple int64, mode RoundMode, strictCeil bool) (int64, error) {
 	if multiple == 0 || value%multiple == 0 {
 		if strictCeil && mode == RoundUp {
