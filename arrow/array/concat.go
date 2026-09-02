@@ -964,21 +964,32 @@ func updateRuns[T int16 | int32 | int64](inputData []arrow.ArrayData, inputBuffe
 			continue
 		}
 		src := arrow.GetData[T](buf.Bytes())
+		offset := inputData[i].Offset()
+
+		// A slice can end in the middle of a run, leaving this input's final physical
+		// run end past its logical length. Clamp the normalized final run end to the
+		// input's logical length before both the overflow check and the output write:
+		// otherwise a valid near-limit slice trips a false overflow, and the written
+		// run end overshoots (shifting every following array's run ends).
+		finalEnd := src[len(src)-1] - T(offset)
+		if finalEnd > T(inputData[i].Len()) {
+			finalEnd = T(inputData[i].Len())
+		}
+
 		if pos == 0 {
 			pos += copy(output, src)
 			// normalize the first run ends by subtracting the offset
 			for j := 0; j < pos; j++ {
-				output[j] -= T(inputData[i].Offset())
+				output[j] -= T(offset)
 			}
-
+			output[pos-1] = finalEnd
 			continue
 		}
 
 		lastEnd := output[pos-1]
-		// we can check the last runEnd in the src and add it to the
-		// last value that we're adjusting them all by to see if we
-		// are going to overflow
-		if uint64(lastEnd)+uint64(int(src[len(src)-1])-inputData[i].Offset()) > uint64(maxOf[T]()) {
+		// check whether adding this input's clamped final run end to the previous
+		// end will overflow the run-end type
+		if uint64(lastEnd)+uint64(finalEnd) > uint64(maxOf[T]()) {
 			return fmt.Errorf("%w: overflow in run-length-encoded run ends concat", arrow.ErrInvalid)
 		}
 
@@ -987,9 +998,12 @@ func updateRuns[T int16 | int32 | int64](inputData []arrow.ArrayData, inputBuffe
 		// is a logical length offset it should be accurate to just subtract
 		// it from each value.
 		for j, e := range src {
-			output[pos+j] = lastEnd + T(int(e)-inputData[i].Offset())
+			output[pos+j] = lastEnd + e - T(offset)
 		}
 		pos += len(src)
+		// the write above uses the unclamped physical end for the final run; set it
+		// to the clamped logical end.
+		output[pos-1] = lastEnd + finalEnd
 	}
 	return nil
 }
