@@ -18,6 +18,7 @@ package array
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math/bits"
 	"sync/atomic"
@@ -429,7 +430,7 @@ func unmarshalBufferedChild(val json.RawMessage, child Builder, field arrow.Fiel
 }
 
 // rowDecoder decodes a value out of a reused copy of that value, so that
-// unescaping a string costs O(value) instead of O(remaining document). 
+// unescaping a string costs O(value) instead of O(remaining document).
 //
 // NOTE: goccy/go-json unescapes in place and shifts every byte after the escape,
 // which is a big performance cost for large JSON documents:
@@ -453,6 +454,104 @@ func (r *rowDecoder) next(dec *json.Decoder) (*json.Decoder, error) {
 
 func (r *rowDecoder) skip(dec *json.Decoder) error {
 	return dec.Decode(&r.scratch)
+}
+
+// fieldContainer is what nestedJSONDecoder needs out of *arrow.Schema and
+// *arrow.StructType.
+type fieldContainer interface {
+	NumFields() int
+	Field(i int) arrow.Field
+}
+
+// nestedJSONDecoder decodes JSON objects into one builder per field.
+type nestedJSONDecoder struct {
+	rowDecoder
+
+	fields   fieldContainer
+	seen     []bool
+	fieldIdx map[string]int
+}
+
+func newNestedJSONDecoder(fields fieldContainer) nestedJSONDecoder {
+	return nestedJSONDecoder{fields: fields}
+}
+
+func (d *nestedJSONDecoder) fieldIndexByName(name string) (int, bool) {
+	if d.fieldIdx == nil {
+		d.fieldIdx = make(map[string]int, d.fields.NumFields())
+		for i := 0; i < d.fields.NumFields(); i++ {
+			d.fieldIdx[d.fields.Field(i).Name] = i
+		}
+	}
+	idx, ok := d.fieldIdx[name]
+	return idx, ok
+}
+
+// unmarshalFields consumes one object from the decoder and appends its fields to
+// each nested field builder. It consumes the opening and closing '{' and '}'.
+//
+// Nullable fields that are not present in the JSON-object are assumed to be null.
+func (d *nestedJSONDecoder) unmarshalFields(dec *json.Decoder, builders []Builder) error {
+	// grow the "seen" buffer if needed
+	if cap(d.seen) < d.fields.NumFields() {
+		d.seen = make([]bool, d.fields.NumFields())
+	} else {
+		d.seen = d.seen[:d.fields.NumFields()]
+		clear(d.seen)
+	}
+
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+
+		key, ok := keyTok.(string)
+		if !ok {
+			return errors.New("JSON row must be an object with keys and values, but key is missing")
+		}
+
+		idx, ok := d.fieldIndexByName(key)
+		if !ok {
+			// TODO(serramatutu): this is equivalent to ParseOptions::Ignore in Arrow C++, i.e silently drop extra keys.
+			// We should eventually support ParseOptions::InferType and ParseOptions::Error
+			if err := d.skip(dec); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if d.seen[idx] {
+			return fmt.Errorf("key '%s' is specified twice", key)
+		}
+		d.seen[idx] = true
+
+		if err := unmarshalChild(dec, builders[idx], d.fields.Field(idx)); err != nil {
+			return err
+		}
+	}
+
+	// consume the closing '}'
+	if _, err := dec.Token(); err != nil {
+		return err
+	}
+
+	// check that all non-nullable fields were specified
+	for i := 0; i < d.fields.NumFields(); i++ {
+		field := d.fields.Field(i)
+		if !d.seen[i] && !field.Nullable {
+			return fmt.Errorf("field '%s' is required but no value was given", field.Name)
+		}
+	}
+
+	// missing fields are nullable at this point, so they get a null
+	for i := 0; i < d.fields.NumFields(); i++ {
+		if !d.seen[i] {
+			builders[i].AppendNull()
+		}
+	}
+
+	return nil
 }
 
 func NewBuilder(mem memory.Allocator, dtype arrow.DataType) Builder {
