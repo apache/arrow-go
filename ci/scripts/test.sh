@@ -75,9 +75,15 @@ popd
 
 pushd "${source_dir}/parquet"
 
-go test "${test_args[@]}" -tags assert ./...
+parquet_test_args=("${test_args[@]}")
+if [[ "$(go env GOOS)" = "darwin" ]]; then
+  # Keep package-level memory bounded on the 7 GB macOS ARM64 runners.
+  parquet_test_args+=("-p=1")
+fi
+
+go test "${parquet_test_args[@]}" -tags assert ./...
 
 # run the tests again but with the noasm tag
-go test "${test_args[@]}" -tags assert,noasm ./...
+go test "${parquet_test_args[@]}" -tags assert,noasm ./...
 
 popd

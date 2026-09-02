@@ -34,12 +34,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type countingWriter struct {
+	bytesWritten int64
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.bytesWritten += int64(len(p))
+	return len(p), nil
+}
+
 // TestLargeByteArrayValuesDoNotOverflowInt32 tests that writing large byte array
 // values totalling over 1GB in a single WriteBatch call triggers adaptive batch
 // sizing and does not cause an int32 overflow panic in FlushCurrentPage.
 //
-// Memory note: input values all share one 1.5MB buffer so input memory is low,
-// but the parquet output buffer grows to ~1GB (unavoidable for this boundary test).
+// Memory note: input values all share one 1.5MB buffer so input memory is low.
+// Use a counting writer so the test does not retain more than 1GB of output.
 func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
 	if runtime.GOARCH == "386" {
 		t.Skip("Skipping test on 32-bit architecture")
@@ -57,7 +66,7 @@ func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
 		parquet.WithDataPageSize(1024*1024),
 	)
 
-	out := &bytes.Buffer{}
+	out := &countingWriter{}
 	writer := file.NewParquetWriter(out, sc.Root(), file.WithWriterProps(props))
 	defer writer.Close()
 
@@ -86,7 +95,7 @@ func TestLargeByteArrayValuesDoNotOverflowInt32(t *testing.T) {
 	assert.NoError(t, colWriter.Close())
 	assert.NoError(t, rgw.Close())
 	assert.NoError(t, writer.Close())
-	assert.Greater(t, out.Len(), 0)
+	assert.Greater(t, out.bytesWritten, int64(0))
 }
 
 // TestLargeStringArrayWithArrow tests the pqarrow integration path with large values.
@@ -101,7 +110,7 @@ func TestLargeStringArrayWithArrow(t *testing.T) {
 	field := arrow.Field{Name: "large_strings", Type: arrow.BinaryTypes.LargeString, Nullable: true}
 	arrowSchema := arrow.NewSchema([]arrow.Field{field}, nil)
 
-	out := &bytes.Buffer{}
+	out := &countingWriter{}
 	props := parquet.NewWriterProperties(
 		parquet.WithStats(false),
 		parquet.WithVersion(parquet.V2_LATEST),
@@ -137,7 +146,7 @@ func TestLargeStringArrayWithArrow(t *testing.T) {
 	}
 
 	assert.NoError(t, pqw.Close())
-	assert.Greater(t, out.Len(), 0)
+	assert.Greater(t, out.bytesWritten, int64(0))
 }
 
 // TestLargeByteArrayRoundTripCorrectness verifies that ByteArray values
