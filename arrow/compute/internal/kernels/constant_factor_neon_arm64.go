@@ -25,6 +25,8 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
+// The generated assembly reads the length through a 32-bit register. Larger
+// Go slices must stay on the scalar path.
 const maxNeonLength = int(math.MaxInt32)
 
 func neonLengthFitsAssembly(length int) bool {
