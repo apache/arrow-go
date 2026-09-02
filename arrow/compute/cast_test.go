@@ -3222,6 +3222,20 @@ func (c *CastSuite) TestStringToTimestamp() {
 	}
 }
 
+func (c *CastSuite) TestStringToTimestampPreservesParseErrors() {
+	for _, stype := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString} {
+		input, _, err := array.FromJSON(c.mem, stype, strings.NewReader(`["x"]`))
+		c.Require().NoError(err)
+
+		_, err = compute.CastArray(context.Background(), input,
+			compute.SafeCastOptions(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "UTC"}))
+		input.Release()
+
+		c.Require().ErrorIs(err, arrow.ErrInvalid)
+		c.ErrorContains(err, "invalid timestamp string")
+	}
+}
+
 func (c *CastSuite) TestIntToString() {
 	for _, stype := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString} {
 		c.Run(stype.String(), func() {

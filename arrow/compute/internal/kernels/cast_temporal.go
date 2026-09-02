@@ -197,6 +197,7 @@ func StringToTimestamp[OffsetT int32 | int64](ctx *exec.KernelCtx, batch *exec.E
 		o, zonePresent, e := arrow.TimestampFromStringInLocation(v, outType.Unit, zn)
 		if e != nil {
 			*err = e
+			return o
 		}
 
 		if zonePresent != expectTimezone {
