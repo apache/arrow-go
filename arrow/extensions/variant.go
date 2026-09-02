@@ -265,15 +265,47 @@ func (v *VariantType) TypedValue() arrow.Field {
 	return v.StorageType().(*arrow.StructType).Field(v.typedValueFieldIdx)
 }
 
-func (*VariantType) ExtensionName() string { return "parquet.variant" }
+const (
+	// VariantExtensionName is the canonical Arrow extension type name.
+	// See https://arrow.apache.org/docs/format/CanonicalExtensions.html#parquet-variant
+	VariantExtensionName = "arrow.parquet.variant"
+
+	// LegacyVariantExtensionName was used by arrow-go before the canonical
+	// name landed. It is still accepted when reading IPC so older data
+	// continues to deserialize as VariantType.
+	LegacyVariantExtensionName = "parquet.variant"
+)
+
+// IsVariantExtensionName reports whether name is the canonical or historical
+// Variant extension type name.
+func IsVariantExtensionName(name string) bool {
+	return name == VariantExtensionName || name == LegacyVariantExtensionName
+}
+
+func (*VariantType) ExtensionName() string { return VariantExtensionName }
 
 func (v *VariantType) String() string {
 	return fmt.Sprintf("extension<%s>", v.ExtensionName())
 }
 
+func variantExtensionEquals(storage arrow.DataType, other arrow.ExtensionType) bool {
+	return IsVariantExtensionName(other.ExtensionName()) &&
+		arrow.TypeEqual(storage, other.StorageType())
+}
+
 func (v *VariantType) ExtensionEquals(other arrow.ExtensionType) bool {
-	return v.ExtensionName() == other.ExtensionName() &&
-		arrow.TypeEqual(v.Storage, other.StorageType())
+	return variantExtensionEquals(v.Storage, other)
+}
+
+func asVariantType(dt arrow.ExtensionType) *VariantType {
+	if vt, ok := dt.(*VariantType); ok {
+		return vt
+	}
+	vt, err := NewVariantType(dt.StorageType())
+	if err != nil {
+		panic(err)
+	}
+	return vt
 }
 
 func (*VariantType) Serialize() string { return "" }
@@ -398,7 +430,7 @@ func (v *VariantArray) initReader() {
 	// initialize a reader that coalesces shredded fields back into a variant
 	// or just returns the basic variants if the array is not shredded.
 	v.initRdr.Do(func() {
-		vt := v.ExtensionType().(*VariantType)
+		vt := asVariantType(v.ExtensionType())
 		st := v.Storage().(*array.Struct)
 		metaField := st.Field(vt.metadataFieldIdx)
 		metadata, ok := metaField.(arrow.TypedArray[[]byte])
@@ -439,7 +471,7 @@ func (v *VariantArray) initReader() {
 // Metadata returns the metadata column of the variant array, containing the
 // metadata for each variant value.
 func (v *VariantArray) Metadata() arrow.TypedArray[[]byte] {
-	vt := v.ExtensionType().(*VariantType)
+	vt := asVariantType(v.ExtensionType())
 	return v.Storage().(*array.Struct).Field(vt.metadataFieldIdx).(arrow.TypedArray[[]byte])
 }
 
@@ -458,7 +490,7 @@ func (v *VariantArray) Metadata() arrow.TypedArray[[]byte] {
 // it means that the value is missing entirely (as opposed to existing and having a
 // value of null).
 func (v *VariantArray) UntypedValues() arrow.TypedArray[[]byte] {
-	vt := v.ExtensionType().(*VariantType)
+	vt := asVariantType(v.ExtensionType())
 	if vt.valueFieldIdx == -1 {
 		return nil
 	}
@@ -472,7 +504,7 @@ func (v *VariantArray) UntypedValues() arrow.TypedArray[[]byte] {
 // The reason for exposing this is to allow users to quickly access one of the shredded
 // fields without having to decode the entire variant value.
 func (v *VariantArray) Shredded() arrow.Array {
-	vt := v.ExtensionType().(*VariantType)
+	vt := asVariantType(v.ExtensionType())
 	if vt.typedValueFieldIdx == -1 {
 		return nil
 	}
@@ -482,7 +514,7 @@ func (v *VariantArray) Shredded() arrow.Array {
 
 // IsShredded returns true if the variant has shredded columns.
 func (v *VariantArray) IsShredded() bool {
-	return v.ExtensionType().(*VariantType).typedValueFieldIdx != -1
+	return asVariantType(v.ExtensionType()).typedValueFieldIdx != -1
 }
 
 // VariantType returns the array's extension type without the ExtensionType cast.
@@ -537,7 +569,7 @@ func (v *VariantArray) IsNull(i int) bool {
 		return true
 	}
 
-	vt := v.ExtensionType().(*VariantType)
+	vt := asVariantType(v.ExtensionType())
 	if vt.typedValueFieldIdx != -1 {
 		typedArr := v.Storage().(*array.Struct).Field(vt.typedValueFieldIdx)
 		if !typedArr.IsNull(i) {
