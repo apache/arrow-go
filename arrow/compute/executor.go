@@ -534,6 +534,13 @@ func (s *scalarExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 		}
 		acc = nil
 	}
+	releaseOutput := func() {
+		if output != nil {
+			output.Release()
+			output = nil
+		}
+		releaseAccumulated()
+	}
 
 	toChunked := func() {
 		acc = output.(ArrayLikeDatum).Chunks()
@@ -562,15 +569,18 @@ func (s *scalarExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 	for {
 		select {
 		case <-ctx.Done():
-			// context is done, either cancelled or a timeout.
-			// either way, we end early and return what we've got so far.
-			if output == nil {
-				releaseAccumulated()
-				return nil
-			}
-			return output
+			// A canceled call must not return a partial result.
+			releaseOutput()
+			return nil
 		case o, ok := <-out:
 			if !ok { // channel closed, wrap it up
+				// Cancellation and channel closure can become ready together.
+				// Recheck the context so selecting the channel cannot make a
+				// canceled call return a result nondeterministically.
+				if ctx.Err() != nil {
+					releaseOutput()
+					return nil
+				}
 				if output != nil {
 					return output
 				}
@@ -1022,6 +1032,12 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 		case <-ctx.Done():
 			return nil
 		case output = <-out:
+			if output == nil || ctx.Err() != nil {
+				if output != nil {
+					output.Release()
+				}
+				return nil
+			}
 		}
 
 		// we got an output datum, but let's wait for the channel to
@@ -1031,6 +1047,10 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 			output.Release()
 			return nil
 		case <-out:
+			if ctx.Err() != nil {
+				output.Release()
+				return nil
+			}
 			return output
 		}
 	}
@@ -1045,6 +1065,13 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 			c.Release()
 		}
 		acc = nil
+	}
+	releaseOutput := func() {
+		if output != nil {
+			output.Release()
+			output = nil
+		}
+		releaseAccumulated()
 	}
 
 	toChunked := func() {
@@ -1089,15 +1116,18 @@ func (v *vectorExecutor) WrapResults(ctx context.Context, out <-chan Datum, hasC
 	for {
 		select {
 		case <-ctx.Done():
-			// context is done, either cancelled or a timeout.
-			// either way, we end early and return what we've got so far.
-			if output == nil {
-				releaseAccumulated()
-				return nil
-			}
-			return output
+			// A canceled call must not return a partial result.
+			releaseOutput()
+			return nil
 		case o, ok := <-out:
 			if !ok { // channel closed, wrap it up
+				// Cancellation and channel closure can become ready together.
+				// Recheck the context so selecting the channel cannot make a
+				// canceled call return a result nondeterministically.
+				if ctx.Err() != nil {
+					releaseOutput()
+					return nil
+				}
 				if output != nil {
 					return output
 				}

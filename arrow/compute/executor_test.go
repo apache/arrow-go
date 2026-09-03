@@ -84,6 +84,33 @@ func TestScalarExecutorWrapResultsReleasesAccumulatedOutputOnCancellation(t *tes
 	close(output)
 }
 
+func TestScalarExecutorWrapResultsReleasesSingleOutputOnCancellation(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	builder := array.NewInt32Builder(mem)
+	builder.Append(42)
+	value := builder.NewInt32Array()
+	builder.Release()
+	defer value.Release()
+
+	output := make(chan Datum)
+	ctx, cancel := context.WithCancel(context.Background())
+	executor := &scalarExecutor{
+		nonAggExecImpl: nonAggExecImpl{outType: value.DataType()},
+	}
+
+	result := make(chan Datum, 1)
+	go func() {
+		result <- executor.WrapResults(ctx, output, false)
+	}()
+
+	output <- NewDatum(value)
+	cancel()
+	require.Nil(t, <-result)
+	close(output)
+}
+
 func TestScalarExecutorWrapResultsHandlesClosedOutput(t *testing.T) {
 	output := make(chan Datum)
 	close(output)
