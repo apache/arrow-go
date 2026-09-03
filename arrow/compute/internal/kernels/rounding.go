@@ -1904,11 +1904,11 @@ func floorFixedCalendarWeek(value time.Time, multiple int64, weekStartsMonday bo
 	if err != nil {
 		return time.Time{}, err
 	}
-	boundary, err := checkedLocalTime(boundaryWall, tz)
+	weekStartWall, err := checkedCalendarAddDays(boundaryWall, -weekdayOffset)
 	if err != nil {
 		return time.Time{}, err
 	}
-	return boundary.Add(-time.Duration(weekdayOffset) * 24 * time.Hour), nil
+	return time.Date(weekStartWall.Year(), weekStartWall.Month(), weekStartWall.Day(), 0, 0, 0, 0, tz), nil
 }
 
 func ceilFixedCalendarWeek(value, floor time.Time, multiple int64, strict bool, tz *time.Location) (time.Time, error) {

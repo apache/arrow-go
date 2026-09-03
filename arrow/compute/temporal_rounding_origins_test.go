@@ -622,6 +622,42 @@ func TestTemporalRoundingWeekUsesFixedWallClockPeriods(t *testing.T) {
 	}
 }
 
+func TestTemporalRoundingWeekPreservesWallBoundaryAcrossDST(t *testing.T) {
+	location, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	input := time.Date(2024, time.March, 12, 12, 0, 0, 0, time.UTC)
+
+	for _, tc := range []struct {
+		name             string
+		weekStartsMonday bool
+		floor            time.Time
+		ceil             time.Time
+	}{
+		{
+			name:  "sunday start",
+			floor: time.Date(2024, time.March, 10, 0, 0, 0, 0, location),
+			ceil:  time.Date(2024, time.March, 17, 0, 0, 0, 0, location),
+		},
+		{
+			name:             "monday start",
+			weekStartsMonday: true,
+			floor:            time.Date(2024, time.March, 11, 0, 0, 0, 0, location),
+			ceil:             time.Date(2024, time.March, 18, 0, 0, 0, 0, location),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := compute.RoundTemporalOptions{
+				Multiple:         1,
+				Unit:             compute.RoundTemporalWeek,
+				WeekStartsMonday: tc.weekStartsMonday,
+			}
+			requireTemporalRoundingTime(t, compute.FloorTemporal, input, tc.floor, arrow.Second, location.String(), opts)
+			requireTemporalRoundingTime(t, compute.CeilTemporal, input, tc.ceil, arrow.Second, location.String(), opts)
+			requireTemporalRoundingTime(t, compute.FloorTemporal, tc.floor, tc.floor, arrow.Second, location.String(), opts)
+		})
+	}
+}
+
 func TestTemporalRoundingRejectsAmbiguousCalendarBoundary(t *testing.T) {
 	for _, tc := range []struct {
 		zone, input string
