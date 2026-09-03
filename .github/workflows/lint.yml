@@ -57,6 +57,11 @@ jobs:
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: Cache Apache RAT
+        uses: actions/cache@v6
+        with:
+          path: dev/release/apache-rat-0.16.1.jar
+          key: apache-rat-0.16.1
       - name: Run pre-commit
         run: |
           pre-commit run --all-files --color=always --show-diff-on-failure
