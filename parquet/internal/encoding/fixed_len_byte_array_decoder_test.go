@@ -27,6 +27,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestByteStreamSplitFixedLenByteArrayDecoderRejectsTruncatedRequiredData(t *testing.T) {
+	const width = 4
+	node := schema.NewFixedLenByteArrayNode("value", parquet.Repetitions.Required, width, -1)
+	column := schema.NewColumn(node, 0, 0)
+	decoder := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.ByteStreamSplit, column, memory.DefaultAllocator)
+
+	err := decoder.SetData(3, make([]byte, 2*width))
+	require.EqualError(t, err, "BYTE_STREAM_SPLIT data contains 2 values, expected 3")
+	require.Zero(t, decoder.ValuesLeft())
+}
+
+func TestByteStreamSplitFixedLenByteArrayDecoderAllowsNulls(t *testing.T) {
+	const width = 4
+	values := makeFixedLenByteArrayValues(2, width, 0)
+	node := schema.NewFixedLenByteArrayNode("value", parquet.Repetitions.Optional, width, -1)
+	column := schema.NewColumn(node, 1, 0)
+	decoder := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.ByteStreamSplit, column, memory.DefaultAllocator).(FixedLenByteArrayDecoder)
+
+	require.NoError(t, decoder.SetData(3, encodeByteStreamSplitFixedLenByteArray(values, width)))
+	out := make([]parquet.FixedLenByteArray, len(values))
+	decoded, err := decoder.Decode(out)
+	require.NoError(t, err)
+	require.Equal(t, len(values), decoded)
+	require.Equal(t, values, out)
+
+	// An optional page can legitimately contain no physical values even when its
+	// logical count would overflow when multiplied by the byte width.
+	require.NoError(t, decoder.SetData(int(^uint(0)>>1), nil))
+	require.Zero(t, decoder.ValuesLeft())
+}
+
 func TestByteStreamSplitFixedLenByteArrayDecoderContiguousOutput(t *testing.T) {
 	for _, width := range []int{2, 4, 8, 16, 32} {
 		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
@@ -51,15 +82,24 @@ func TestByteStreamSplitFixedLenByteArrayDecoderContiguousOutput(t *testing.T) {
 	}
 }
 
-func TestByteStreamSplitFixedLenByteArrayDecoderReusesProvidedOutput(t *testing.T) {
+// TestByteStreamSplitFixedLenByteArrayDecoderDoesNotWriteThroughProvidedOutput pins the
+// narrowed reuse contract introduced for GH-1255.
+//
+// This decoder writes bytes through the slice headers it is handed, so it may only reuse
+// a header backed by storage it allocated itself. Output buffers are shared across pages
+// and encodings, and RLE_DICTIONARY and PLAIN both leave headers pointing at memory they
+// own (dictionary entries and the page buffer respectively). Reusing those on capacity
+// alone corrupted that memory, so capacity is no longer sufficient to claim a header.
+func TestByteStreamSplitFixedLenByteArrayDecoderDoesNotWriteThroughProvidedOutput(t *testing.T) {
 	const width = 16
 	values := makeFixedLenByteArrayValues(4, width, 0)
 	decoder := newByteStreamSplitFixedLenByteArrayDecoder(t, width, values)
 
+	caller := make([]byte, width)
 	out := []parquet.FixedLenByteArray{
 		make([]byte, 0, width+4),
 		nil,
-		make([]byte, width),
+		caller,
 		nil,
 	}
 	firstPtr := unsafe.Pointer(unsafe.SliceData(out[0]))
@@ -69,10 +109,44 @@ func TestByteStreamSplitFixedLenByteArrayDecoderReusesProvidedOutput(t *testing.
 	require.NoError(t, err)
 	require.Equal(t, len(values), decoded)
 	require.Equal(t, values, out)
-	require.Equal(t, firstPtr, unsafe.Pointer(unsafe.SliceData(out[0])))
-	require.Equal(t, thirdPtr, unsafe.Pointer(unsafe.SliceData(out[2])))
-	require.Equal(t, uintptr(width),
-		uintptr(unsafe.Pointer(&out[3][0]))-uintptr(unsafe.Pointer(&out[1][0])))
+
+	// The caller's buffers are re-pointed rather than written through, and are left
+	// untouched.
+	require.NotEqual(t, firstPtr, unsafe.Pointer(unsafe.SliceData(out[0])))
+	require.NotEqual(t, thirdPtr, unsafe.Pointer(unsafe.SliceData(out[2])))
+	require.Equal(t, make([]byte, width), caller, "decoding wrote through a caller buffer")
+
+	// Every slot now comes from one contiguous block the decoder owns.
+	for idx := 1; idx < len(out); idx++ {
+		previous := uintptr(unsafe.Pointer(&out[idx-1][0]))
+		current := uintptr(unsafe.Pointer(&out[idx][0]))
+		require.Equal(t, uintptr(width), current-previous)
+	}
+}
+
+// TestByteStreamSplitFixedLenByteArrayDecoderReusesOwnStorage checks that the narrowed
+// contract still keeps repeated decodes into the same buffer allocation free, which is
+// the case GH-1172 optimized.
+func TestByteStreamSplitFixedLenByteArrayDecoderReusesOwnStorage(t *testing.T) {
+	const width = 16
+	values := makeFixedLenByteArrayValues(4, width, 0)
+	data := encodeByteStreamSplitFixedLenByteArray(values, width)
+	decoder := newByteStreamSplitFixedLenByteArrayDecoder(t, width, values)
+
+	// First decode hands out the decoder's own block.
+	out := make([]parquet.FixedLenByteArray, len(values))
+	_, err := decoder.Decode(out)
+	require.NoError(t, err)
+	require.Equal(t, values, out)
+
+	// Subsequent decodes into that same window recognize the block as their own.
+	allocs := testing.AllocsPerRun(100, func() {
+		require.NoError(t, decoder.SetData(len(values), data))
+		_, err := decoder.Decode(out)
+		require.NoError(t, err)
+	})
+	require.Zero(t, allocs)
+	require.Equal(t, values, out)
 }
 
 func TestByteStreamSplitFixedLenByteArrayDecoderMixedOutputAllocations(t *testing.T) {
@@ -152,6 +226,35 @@ func TestByteStreamSplitFixedLenByteArrayDecoderSpacedOutput(t *testing.T) {
 	third := uintptr(unsafe.Pointer(&out[4][0]))
 	require.Equal(t, uintptr(width), second-first)
 	require.Equal(t, uintptr(width), third-second)
+}
+
+func TestFixedLenByteArrayDecoderSpacedOutputAcrossEncodings(t *testing.T) {
+	const width = 4
+	validBits := []byte{0b00010101}
+	firstValues := makeFixedLenByteArrayValues(3, width, 0)
+	secondValues := makeFixedLenByteArrayValues(3, width, 100)
+
+	node := schema.NewFixedLenByteArrayNode("value", parquet.Repetitions.Required, width, -1)
+	column := schema.NewColumn(node, 0, 0)
+	plain := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.Plain, column, memory.DefaultAllocator).(FixedLenByteArrayDecoder)
+	plainData := make([]byte, 0, len(firstValues)*width)
+	for _, value := range firstValues {
+		plainData = append(plainData, value...)
+	}
+	require.NoError(t, plain.SetData(len(firstValues), plainData))
+
+	out := make([]parquet.FixedLenByteArray, 5)
+	decoded, err := plain.DecodeSpaced(out, 2, validBits, 0)
+	require.NoError(t, err)
+	require.Equal(t, len(out), decoded)
+
+	byteStreamSplit := newByteStreamSplitFixedLenByteArrayDecoder(t, width, secondValues)
+	decoded, err = byteStreamSplit.DecodeSpaced(out, 2, validBits, 0)
+	require.NoError(t, err)
+	require.Equal(t, len(out), decoded)
+	require.Equal(t, secondValues[0], out[0])
+	require.Equal(t, secondValues[1], out[2])
+	require.Equal(t, secondValues[2], out[4])
 }
 
 func newByteStreamSplitFixedLenByteArrayDecoder(t *testing.T, width int, values []parquet.FixedLenByteArray) FixedLenByteArrayDecoder {

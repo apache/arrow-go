@@ -107,15 +107,16 @@ func releaseBufferToPool(pooled *PooledBufferWriter) {
 }
 
 func validateByteStreamSplitPageData(typeLen, nvals int, data []byte) (int, error) {
-	if nvals*typeLen < len(data) {
+	encodedNvals, remainder := len(data)/typeLen, len(data)%typeLen
+	if encodedNvals > nvals || (encodedNvals == nvals && remainder != 0) {
 		return 0, fmt.Errorf("data size (%d) is too small for the number of values in in BYTE_STREAM_SPLIT (%d)", len(data), nvals)
 	}
 
-	if len(data)%typeLen != 0 {
+	if remainder != 0 {
 		return 0, fmt.Errorf("ByteStreamSplit data size %d not aligned with byte_width: %d", len(data), typeLen)
 	}
 
-	return len(data) / typeLen, nil
+	return encodedNvals, nil
 }
 
 type byteStreamSplitEncoder[T int32 | int64 | float32 | float64] struct {

@@ -19,11 +19,16 @@ package encoding
 import (
 	"bytes"
 	"fmt"
+	"math/rand"
 	"testing"
 	"unsafe"
 
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/schema"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDecodeByteStreamSplitWidth4(t *testing.T) {
@@ -390,6 +395,213 @@ func BenchmarkDecodeByteStreamSplitBatchFLBAWidth8(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				decodeByteStreamSplitBatchFLBAWidth8(data, nValues, stride, out)
 			}
+		})
+	}
+}
+
+// TestByteStreamSplitFLBADecodeSpacedReusedBuffer guards the aliasing bug where decoding
+// a second page into a buffer previously expanded by DecodeSpaced silently corrupted
+// values: spacedExpand moves slice headers with copy, leaving duplicate headers behind in
+// the null slots, and because this decoder writes through the caller's slices rather than
+// replacing them, two output slots shared one backing array and clobbered each other.
+func TestByteStreamSplitFLBADecodeSpacedReusedBuffer(t *testing.T) {
+	for _, width := range []int{2, 3, 4, 7, 8, 16} {
+		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
+			// 5 slots, 2 nulls: slots 0, 2 and 4 are valid.
+			validBits := []byte{0b00010101}
+			const nullCount = 2
+
+			col := schema.NewColumn(schema.NewFixedLenByteArrayNode("v", parquet.Repetitions.Optional, int32(width), -1), 1, 0)
+			dec := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.ByteStreamSplit,
+				col, memory.DefaultAllocator).(FixedLenByteArrayDecoder)
+
+			// A single output buffer reused across both pages, as the record reader does.
+			out := make([]parquet.FixedLenByteArray, 5)
+
+			for page, offset := range []byte{0, 100} {
+				values := make([]parquet.FixedLenByteArray, 3)
+				for i := range values {
+					values[i] = make(parquet.FixedLenByteArray, width)
+					for j := range values[i] {
+						values[i][j] = offset + byte(i*width+j)
+					}
+				}
+
+				data := make([]byte, len(values)*width)
+				for vi, v := range values {
+					for bi, b := range v {
+						data[bi*len(values)+vi] = b
+					}
+				}
+
+				require.NoError(t, dec.SetData(len(values), data))
+				n, err := dec.DecodeSpaced(out, nullCount, validBits, 0)
+				require.NoError(t, err)
+				require.Equal(t, len(out), n)
+
+				require.Equal(t, values[0], out[0], "page %d slot 0", page)
+				require.Equal(t, values[1], out[2], "page %d slot 2", page)
+				require.Equal(t, values[2], out[4], "page %d slot 4", page)
+			}
+		})
+	}
+}
+
+// TestSpacedExpandSwapMatchesSpacedExpand checks that swapping places values in exactly
+// the same slots as copying, and additionally never leaves duplicate entries behind.
+func TestSpacedExpandSwapMatchesSpacedExpand(t *testing.T) {
+	rng := rand.New(rand.NewSource(42))
+	for iter := 0; iter < 5000; iter++ {
+		n := 1 + rng.Intn(200)
+		validBits := make([]byte, bitutil.BytesForBits(int64(n)))
+		nullCount, density := 0, rng.Float64()
+		for i := 0; i < n; i++ {
+			if rng.Float64() < density {
+				bitutil.ClearBit(validBits, i)
+				nullCount++
+			} else {
+				bitutil.SetBit(validBits, i)
+			}
+		}
+
+		// distinct sentinels so duplicates are detectable
+		copied, swapped := make([]int64, n), make([]int64, n)
+		for i := range copied {
+			copied[i], swapped[i] = int64(i+1), int64(i+1)
+		}
+
+		spacedExpand(copied, nullCount, validBits, 0)
+		spacedExpandSwap(swapped, nullCount, validBits, 0)
+
+		for i := 0; i < n; i++ {
+			if bitutil.BitIsSet(validBits, i) {
+				require.Equalf(t, copied[i], swapped[i],
+					"iter %d n=%d nulls=%d: valid slot %d differs", iter, n, nullCount, i)
+			}
+		}
+
+		seen := make(map[int64]struct{}, n)
+		for _, v := range swapped {
+			seen[v] = struct{}{}
+		}
+		require.Lenf(t, seen, n,
+			"iter %d n=%d nulls=%d: swap left duplicate entries", iter, n, nullCount)
+	}
+}
+
+// bssEncodeFLBA lays out values in BYTE_STREAM_SPLIT order: all byte 0s, then all
+// byte 1s, and so on.
+func bssEncodeFLBA(values []parquet.FixedLenByteArray, width int) []byte {
+	data := make([]byte, len(values)*width)
+	for vi, v := range values {
+		for bi, b := range v {
+			data[bi*len(values)+vi] = b
+		}
+	}
+	return data
+}
+
+// TestByteStreamSplitFLBADoesNotWriteThroughForeignBuffers guards the second half of the
+// aliasing hazard reported on GH-1255: this decoder reuses any output slice with enough
+// capacity and writes through it, so if the previous page left slices that point at
+// memory the decoder does not own, decoding corrupts that memory.
+//
+// Two producers leave such slices behind, and neither needs nulls to do it:
+//
+//   - RLE_DICTIONARY assigns dict[idx] into every slot for that index, so a repeated
+//     index leaves several slots aliasing one dictionary-backed slice. Writing through
+//     them both clobbers a decoded value and corrupts the dictionary itself.
+//   - PLAIN slices the page buffer directly, so every slot points into the previous
+//     page's data.
+func TestByteStreamSplitFLBADoesNotWriteThroughForeignBuffers(t *testing.T) {
+	for _, width := range []int{2, 3, 4, 7, 8, 16} {
+		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
+			col := schema.NewColumn(schema.NewFixedLenByteArrayNode("v", parquet.Repetitions.Required, int32(width), -1), 0, 0)
+
+			// The BSS page: three distinct values, decoded into a reused buffer.
+			bssValues := make([]parquet.FixedLenByteArray, 3)
+			for i := range bssValues {
+				bssValues[i] = make(parquet.FixedLenByteArray, width)
+				for j := range bssValues[i] {
+					bssValues[i][j] = 100 + byte(i*width+j)
+				}
+			}
+			bssData := bssEncodeFLBA(bssValues, width)
+
+			t.Run("after RLE_DICTIONARY", func(t *testing.T) {
+				// Dictionary of two entries, referenced by indices [0, 0, 1] so that
+				// slots 0 and 1 alias the same dictionary-backed slice.
+				dictBuf := make([]byte, 2*width)
+				for i := range dictBuf {
+					dictBuf[i] = byte(i + 1)
+				}
+				// RLE_DICTIONARY index data: bit width byte, then a bit-packed run.
+				idxBuf := []byte{1, 0b00000011, 0b00000100}
+
+				plainDict := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.Plain,
+					col, memory.DefaultAllocator)
+				require.NoError(t, plainDict.SetData(2, dictBuf))
+
+				dictDec := NewDictDecoder(parquet.Types.FixedLenByteArray, col, memory.DefaultAllocator).(*DictFixedLenByteArrayDecoder)
+				dictDec.SetDict(plainDict)
+				require.NoError(t, dictDec.SetData(3, idxBuf))
+
+				out := make([]parquet.FixedLenByteArray, 3)
+				n, err := dictDec.Decode(out)
+				require.NoError(t, err)
+				require.Equal(t, 3, n)
+
+				dictBefore := bytes.Clone(dictBuf)
+
+				bssDec := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.ByteStreamSplit,
+					col, memory.DefaultAllocator).(FixedLenByteArrayDecoder)
+				require.NoError(t, bssDec.SetData(len(bssValues), bssData))
+				n, err = bssDec.Decode(out)
+				require.NoError(t, err)
+				require.Equal(t, len(bssValues), n)
+
+				for i, want := range bssValues {
+					require.Equalf(t, want, out[i], "slot %d decoded incorrectly", i)
+				}
+				require.Equal(t, dictBefore, dictBuf, "decoding wrote through into the dictionary page buffer")
+			})
+
+			t.Run("after PLAIN", func(t *testing.T) {
+				plainValues := make([]parquet.FixedLenByteArray, 3)
+				for i := range plainValues {
+					plainValues[i] = make(parquet.FixedLenByteArray, width)
+					for j := range plainValues[i] {
+						plainValues[i][j] = byte(i*width + j)
+					}
+				}
+				plainData := make([]byte, 0, len(plainValues)*width)
+				for _, v := range plainValues {
+					plainData = append(plainData, v...)
+				}
+
+				plainDec := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.Plain,
+					col, memory.DefaultAllocator).(FixedLenByteArrayDecoder)
+				require.NoError(t, plainDec.SetData(len(plainValues), plainData))
+
+				out := make([]parquet.FixedLenByteArray, 3)
+				n, err := plainDec.Decode(out)
+				require.NoError(t, err)
+				require.Equal(t, len(plainValues), n)
+
+				plainBefore := bytes.Clone(plainData)
+
+				bssDec := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.ByteStreamSplit,
+					col, memory.DefaultAllocator).(FixedLenByteArrayDecoder)
+				require.NoError(t, bssDec.SetData(len(bssValues), bssData))
+				n, err = bssDec.Decode(out)
+				require.NoError(t, err)
+				require.Equal(t, len(bssValues), n)
+
+				for i, want := range bssValues {
+					require.Equalf(t, want, out[i], "slot %d decoded incorrectly", i)
+				}
+				require.Equal(t, plainBefore, plainData, "decoding wrote through into the PLAIN page buffer")
+			})
 		})
 	}
 }
