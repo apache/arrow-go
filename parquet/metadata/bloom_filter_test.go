@@ -196,12 +196,10 @@ func TestNewBloomFilter(t *testing.T) {
 			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 			defer mem.AssertSize(t, 0)
 
-			{
-				bf := NewBloomFilterFromNDVAndFPP(tt.ndv, tt.fpp, tt.maxBytes, mem)
-				assert.EqualValues(t, tt.expectedBytes, bf.Size())
-				runtime.GC()
-			}
-			runtime.GC() // force GC to run and do the cleanup routines
+			bf := NewBloomFilterFromNDVAndFPP(tt.ndv, tt.fpp, tt.maxBytes, mem)
+			assert.EqualValues(t, tt.expectedBytes, bf.Size())
+			bf.Release()
+			bf.Release() // releasing a builder is idempotent
 		})
 	}
 }
@@ -351,12 +349,7 @@ func TestAdaptiveBloomFilterEdgeCases(t *testing.T) {
 
 	t.Run("clamps maximum size to the minimum allocation", func(t *testing.T) {
 		bf := NewAdaptiveBlockSplitBloomFilter(0, 1, 0.01, col, mem).(*adaptiveBlockSplitBloomFilter)
-		defer func() {
-			for _, candidate := range bf.candidates {
-				candidate.bloomFilter.cancelCleanup()
-				candidate.bloomFilter.data.Release()
-			}
-		}()
+		defer bf.Release()
 
 		assert.EqualValues(t, minimumBloomFilterBytes, bf.maxBytes)
 		assert.NotPanics(t, func() { bf.InsertHash(1) })

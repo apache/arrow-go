@@ -581,6 +581,18 @@ func (b *blockSplitBloomFilter) Size() int64 {
 	return int64(len(b.bitset32) * 4)
 }
 
+func (b *blockSplitBloomFilter) Release() {
+	if b.cancelCleanup != nil {
+		b.cancelCleanup()
+		b.cancelCleanup = nil
+	}
+	if b.data != nil {
+		b.data.Release()
+		b.data = nil
+		b.bitset32 = nil
+	}
+}
+
 func (b *blockSplitBloomFilter) WriteTo(w io.Writer, enc encryption.Encryptor) (int, error) {
 	if enc != nil {
 		n := enc.Encrypt(w, b.data.Bytes())
@@ -630,6 +642,9 @@ func NewBloomFilterFromNDVAndFPP(ndv uint32, fpp float64, maxBytes int64, mem me
 type BloomFilterBuilder interface {
 	Hasher() Hasher
 	Size() int64
+	// Release immediately frees buffers owned by the builder. It is safe to
+	// call more than once. Builders otherwise release their buffers during GC.
+	Release()
 	InsertHash(hash uint64)
 	InsertBulk(hashes []uint64)
 	WriteTo(io.Writer, encryption.Encryptor) (int, error)
