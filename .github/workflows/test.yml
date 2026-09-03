@@ -37,22 +37,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        go: [1.25, 1.26, 1.27]
+        arch: [amd64, arm64v8]
         include:
           - arch-label: AMD64
             arch: amd64
-            go: 1.25
             runs-on: ubuntu-latest
           - arch-label: ARM64
             arch: arm64v8
-            go: 1.25
-            runs-on: ubuntu-24.04-arm
-          - arch-label: AMD64
-            arch: amd64
-            go: 1.26
-            runs-on: ubuntu-latest
-          - arch-label: ARM64
-            arch: arm64v8
-            go: 1.26
             runs-on: ubuntu-24.04-arm
     env:
       ARCH: ${{ matrix.arch }}
@@ -90,6 +82,7 @@ jobs:
         go:
           - '1.25'
           - '1.26'
+          - '1.27'
     env:
       GO: ${{ matrix.go }}
     steps:
@@ -130,6 +123,7 @@ jobs:
         go:
           - '1.25'
           - '1.26'
+          - '1.27'
     env:
       GO: ${{ matrix.go }}
     steps:
@@ -170,6 +164,7 @@ jobs:
         go:
           - '1.25'
           - '1.26'
+          - '1.27'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.1
@@ -197,6 +192,7 @@ jobs:
         go:
           - '1.25'
           - '1.26'
+          - '1.27'
     env:
       ARROW_GO_TESTCGO: "1"
     steps:
@@ -231,6 +227,7 @@ jobs:
         go:
           - '1.25'
           - '1.26'
+          - '1.27'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.1
