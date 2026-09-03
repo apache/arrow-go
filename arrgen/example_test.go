@@ -100,13 +100,19 @@ func Example() {
 	defer rec.Release()
 
 	fmt.Println("rows:", rec.NumRows())
+	// The %v form of an array is a debug representation. It changes between
+	// arrow-go releases, so this example reads each value through ValueStr.
 	for i, col := range rec.Columns() {
-		fmt.Printf("%s: %v\n", rec.Schema().Field(i).Name, col)
+		vals := make([]string, col.Len())
+		for j := range vals {
+			vals[j] = col.ValueStr(j)
+		}
+		fmt.Printf("%s: %v\n", rec.Schema().Field(i).Name, vals)
 	}
 	// Output:
 	// rows: 2
-	// day: [19799 19800]
-	// host: ["web-1" "web-2"]
+	// day: [2024-03-17 2024-03-18]
+	// host: [web-1 web-2]
 	// cpu: [0.5 1.5]
 	// value: [0.75 (null)]
 }

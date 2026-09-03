@@ -164,9 +164,10 @@ func makeRows(n int) []gentypes.Row {
 		ppf64 := &pf64
 		r.PPInt64, r.PPStr, r.PPPF64 = &pi64, &pstr, &ppf64
 		ppbin := &bin
-		if i%4 == 1 {
+		switch i % 4 {
+		case 1:
 			ppbin = nil // a nil inner pointer behind a set outer one
-		} else if i%4 == 2 {
+		case 2:
 			var nilBin []byte
 			ppbin = &nilBin // a set pointer to a nil []byte
 		}

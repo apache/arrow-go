@@ -60,7 +60,7 @@ func TestCheckedInFilesAreUpToDate(t *testing.T) {
 				t.Fatalf("Generate: %v", err)
 			}
 			path := filepath.Join(target.dir, target.file)
-			want, err := os.ReadFile(path)
+			want, err := readCheckedIn(path)
 			if err != nil {
 				t.Fatalf("reading %s: %v", path, err)
 			}

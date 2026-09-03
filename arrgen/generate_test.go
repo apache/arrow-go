@@ -36,6 +36,17 @@ var update = flag.Bool("update", false, "rewrite the golden files instead of com
 
 const goldenPath = "testdata/basic.golden"
 
+// readCheckedIn reads a committed generated file so a test can compare it
+// against fresh generator output. Git checks a file out with CRLF line endings
+// on Windows, and the generator always writes LF, so the read normalizes them.
+func readCheckedIn(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n")), nil
+}
+
 // TestGenerateGolden compares the whole emitted file against a checked-in
 // copy. A golden file is worth more than a set of assertions about fragments
 // here: what ships to users is the file, and a reviewer reading the diff of
@@ -61,7 +72,7 @@ func TestGenerateGolden(t *testing.T) {
 		return
 	}
 
-	want, err := os.ReadFile(goldenPath)
+	want, err := readCheckedIn(goldenPath)
 	if err != nil {
 		t.Fatalf("reading golden: %v (run: go test ./... -update)", err)
 	}
