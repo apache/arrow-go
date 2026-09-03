@@ -30,6 +30,8 @@ ASM_FLAGS_POPCNT=-mpopcnt
 
 C_FLAGS_NEON=-O3 -fvectorize -mllvm -force-vector-width=16 -fno-asynchronous-unwind-tables -mno-red-zone -mstackrealign -fno-exceptions \
 	-fno-rtti -fno-builtin -fno-math-errno -funsafe-math-optimizations -fno-rounding-math -fno-trapping-math -fno-jump-tables -I_lib -I../../../../internal/utils/_lib
+C_FLAGS_NEON_CONSTANT_FACTOR=-O2 -fno-unroll-loops -fno-vectorize -fno-slp-vectorize -fno-asynchronous-unwind-tables -mno-red-zone -fno-exceptions \
+	-fno-rtti -fno-builtin -fno-math-errno -funsafe-math-optimizations -fno-rounding-math -fno-trapping-math -fno-jump-tables -I_lib -I../../../../internal/utils/_lib
 
 GO_SOURCES  := $(shell find . -path ./_lib -prune -o -name '*.go' -not -name '*_test.go')
 ALL_SOURCES := $(shell find . -path ./_lib -prune -o -name '*.go' -name '*.s' -not -name '*_test.go')
@@ -82,8 +84,8 @@ _lib/constant_factor_avx2_amd64.s: _lib/constant_factor.c
 _lib/constant_factor_sse4_amd64.s: _lib/constant_factor.c
 	$(CC) -S $(C_FLAGS) $(ASM_FLAGS_SSE4) $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
 
-_lib/constant_factor_neon.s: _lib/constant_factor.c
-	$(CC) -S $(C_FLAGS_NEON) $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
+_lib/constant_factor_neon.s: _lib/constant_factor_neon.c
+	$(CC) -S $(C_FLAGS_NEON_CONSTANT_FACTOR) $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
 
 cast_numeric_avx2_amd64.s: _lib/cast_numeric_avx2_amd64.s
 	$(C2GOASM) -a -f $^ $@
