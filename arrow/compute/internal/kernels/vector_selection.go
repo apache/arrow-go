@@ -238,6 +238,11 @@ func GetTakeIndices(mem memory.Allocator, filter *exec.ArraySpan, nullSelect Nul
 	if filter.Len < math.MaxUint16 {
 		return getTakeIndices[uint16](mem, filter, nullSelect), nil
 	} else if filter.Len < math.MaxUint32 {
+		if nullSelect == DropNulls {
+			if result, ok := getTakeIndicesUint32NEON(mem, filter); ok {
+				return result, nil
+			}
+		}
 		return getTakeIndices[uint32](mem, filter, nullSelect), nil
 	}
 	return nil, fmt.Errorf("%w: filter length exceeds UINT32_MAX, consider a different strategy for selecting elements",
