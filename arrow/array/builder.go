@@ -237,6 +237,14 @@ func (b *builder) unsafeAppendBoolsToBitmap(valid []bool, length int) {
 		byteOffset++
 	}
 
+	packed := packBoolsSIMD(nullBitmap[byteOffset:], valid)
+	for i := 0; i < packed/8; i++ {
+		bitSet := nullBitmap[byteOffset+i]
+		b.nulls += 8 - bits.OnesCount8(bitSet)
+	}
+	valid = valid[packed:]
+	byteOffset += packed / 8
+
 	for len(valid) >= 8 {
 		bitSet := packBoolsByte(valid)
 		nullBitmap[byteOffset] = bitSet
@@ -311,6 +319,10 @@ func packBoolsToBitmap(dst []byte, offset int, values []bool) {
 		values = values[prefixLength:]
 		byteOffset++
 	}
+
+	packed := packBoolsSIMD(dst[byteOffset:], values)
+	values = values[packed:]
+	byteOffset += packed / 8
 
 	for len(values) >= 8 {
 		dst[byteOffset] = packBoolsByte(values)
