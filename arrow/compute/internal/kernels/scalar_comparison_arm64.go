@@ -34,9 +34,13 @@ const (
 //go:noescape
 func _comparison_neon(typ int, op int, shape int, left, right, out unsafe.Pointer, groups int64)
 
+//go:noescape
+func _comparison_narrow_neon(typ int, op int, shape int, left, right, out unsafe.Pointer, groups int64)
+
 func neonComparisonSupported(typ arrow.Type) bool {
 	switch typ {
-	case arrow.INT32, arrow.UINT32, arrow.INT64, arrow.UINT64,
+	case arrow.INT8, arrow.UINT8, arrow.INT16, arrow.UINT16,
+		arrow.INT32, arrow.UINT32, arrow.INT64, arrow.UINT64,
 		arrow.FLOAT32, arrow.FLOAT64:
 		return true
 	default:
@@ -92,7 +96,11 @@ func compareNeon(typ arrow.Type, op CompareOperator, width, shape int, left, rig
 		case neonCompareScalarArray:
 			assemblyRight = right[:bulk*width]
 		}
-		_comparison_neon(int(typ), int(op), shape,
+		comparison := _comparison_neon
+		if width <= 2 {
+			comparison = _comparison_narrow_neon
+		}
+		comparison(int(typ), int(op), shape,
 			unsafe.Pointer(&assemblyLeft[0]), unsafe.Pointer(&assemblyRight[0]), unsafe.Pointer(&out[0]), int64(bulk/8))
 	}
 

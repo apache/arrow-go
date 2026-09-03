@@ -118,6 +118,54 @@ func TestNeonComparisons(t *testing.T) {
 		testNeonComparison(t, left, right, uint32(1<<31), uint32(7))
 	})
 
+	t.Run("int8", func(t *testing.T) {
+		leftPattern := []int8{-1 << 7, -17, -1, 0, 1, 17, 1<<7 - 1, 42, -42, 3, 9, -9, 5, -5, 2, -2}
+		rightPattern := []int8{1<<7 - 1, -17, 0, 1, -1, -42, -1 << 7, 42, 4, -3, 9, -10, -5, 5, -2, 2}
+		left := make([]int8, neonComparisonTestLength)
+		right := make([]int8, neonComparisonTestLength)
+		for i := range left {
+			left[i] = leftPattern[i%len(leftPattern)]
+			right[i] = rightPattern[i%len(rightPattern)]
+		}
+		testNeonComparison(t, left, right, int8(-3), int8(4))
+	})
+
+	t.Run("uint8", func(t *testing.T) {
+		leftPattern := []uint8{0, 1, 2, 1<<7 - 1, 1 << 7, ^uint8(0), 42, 7, 100, 3, 19, 5, 77, 11, 12, 13}
+		rightPattern := []uint8{^uint8(0), 1, 3, 1 << 7, 1<<7 - 1, 0, 42, 8, 99, 4, 19, 6, 78, 10, 13, 12}
+		left := make([]uint8, neonComparisonTestLength)
+		right := make([]uint8, neonComparisonTestLength)
+		for i := range left {
+			left[i] = leftPattern[i%len(leftPattern)]
+			right[i] = rightPattern[i%len(rightPattern)]
+		}
+		testNeonComparison(t, left, right, uint8(1<<7), uint8(7))
+	})
+
+	t.Run("int16", func(t *testing.T) {
+		leftPattern := []int16{-1 << 15, -17, -1, 0, 1, 17, 1<<15 - 1, 42, -42, 3, 9, -9, 5, -5, 2, -2}
+		rightPattern := []int16{1<<15 - 1, -17, 0, 1, -1, -42, -1 << 15, 42, 4, -3, 9, -10, -5, 5, -2, 2}
+		left := make([]int16, neonComparisonTestLength)
+		right := make([]int16, neonComparisonTestLength)
+		for i := range left {
+			left[i] = leftPattern[i%len(leftPattern)]
+			right[i] = rightPattern[i%len(rightPattern)]
+		}
+		testNeonComparison(t, left, right, int16(-3), int16(4))
+	})
+
+	t.Run("uint16", func(t *testing.T) {
+		leftPattern := []uint16{0, 1, 2, 1<<15 - 1, 1 << 15, ^uint16(0), 42, 7, 100, 3, 19, 5, 77, 11, 12, 13}
+		rightPattern := []uint16{^uint16(0), 1, 3, 1 << 15, 1<<15 - 1, 0, 42, 8, 99, 4, 19, 6, 78, 10, 13, 12}
+		left := make([]uint16, neonComparisonTestLength)
+		right := make([]uint16, neonComparisonTestLength)
+		for i := range left {
+			left[i] = leftPattern[i%len(leftPattern)]
+			right[i] = rightPattern[i%len(rightPattern)]
+		}
+		testNeonComparison(t, left, right, uint16(1<<15), uint16(7))
+	})
+
 	t.Run("int64", func(t *testing.T) {
 		leftPattern := []int64{-1 << 63, -17, -1, 0, 1, 17, 1<<63 - 1, 42, -42, 3, 9, -9, 5, -5, 2, -2}
 		rightPattern := []int64{1<<63 - 1, -17, 0, 1, -1, -42, -1 << 63, 42, 4, -3, 9, -10, -5, 5, -2, 2}
@@ -168,6 +216,10 @@ func TestNeonComparisons(t *testing.T) {
 }
 
 func TestNeonComparisonBitPacking(t *testing.T) {
+	t.Run("int8", testNeonComparisonBitPacking[int8])
+	t.Run("uint8", testNeonComparisonBitPacking[uint8])
+	t.Run("int16", testNeonComparisonBitPacking[int16])
+	t.Run("uint16", testNeonComparisonBitPacking[uint16])
 	t.Run("int32", testNeonComparisonBitPacking[int32])
 	t.Run("uint32", testNeonComparisonBitPacking[uint32])
 	t.Run("int64", testNeonComparisonBitPacking[int64])
