@@ -192,9 +192,22 @@ func (w *Writer) transformColToStringArr(typ arrow.DataType, col arrow.Array, st
 		if err != nil {
 			return nil, fmt.Errorf("arrow/csv: invalid timestamp timezone: %w", err)
 		}
+		layout := "2006-01-02 15:04:05.999999999"
+		if t.TimeZone != "" {
+			layout += "Z07:00"
+		}
 		for i := 0; i < arr.Len(); i++ {
 			if arr.IsValid(i) {
-				res[i] = toTime(arr.Value(i)).Format("2006-01-02 15:04:05.999999999")
+				value := toTime(arr.Value(i))
+				if value.Year() < 0 || value.Year() > 9999 {
+					res[i] = strconv.FormatInt(int64(arr.Value(i)), 10)
+					continue
+				}
+				valueLayout := layout
+				if _, offset := value.Zone(); t.TimeZone != "" && offset%60 != 0 {
+					valueLayout += ":00"
+				}
+				res[i] = value.Format(valueLayout)
 			} else {
 				res[i] = w.nullValue
 			}

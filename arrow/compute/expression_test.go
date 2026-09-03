@@ -43,7 +43,7 @@ type privateFunctionOptions struct {
 func (privateFunctionOptions) TypeName() string { return "privateFunctionOptions" }
 
 func TestExpressionToString(t *testing.T) {
-	ts, _ := scalar.MakeScalar("1990-10-23 10:23:33.123456").CastTo(arrow.FixedWidthTypes.Timestamp_ns)
+	ts, _ := scalar.MakeScalar("1990-10-23 10:23:33.123456Z").CastTo(arrow.FixedWidthTypes.Timestamp_ns)
 
 	add := compute.NewCall("add", []compute.Expression{compute.NewFieldRef("beta"), compute.NewLiteral(3)}, &compute.ArithmeticOptions{})
 
@@ -59,7 +59,7 @@ func TestExpressionToString(t *testing.T) {
 		{compute.NewLiteral(&scalar.Int64{}), "null"},
 		{compute.NewLiteral(scalar.NewBinaryScalar(memory.NewBufferBytes([]byte("az")),
 			arrow.BinaryTypes.Binary)), `"617A"`},
-		{compute.NewLiteral(ts), "1990-10-23 10:23:33.123456"},
+		{compute.NewLiteral(ts), "1990-10-23 10:23:33.123456Z"},
 		{compute.NewCall("add", []compute.Expression{compute.NewLiteral(3), compute.NewFieldRef("beta")}, nil), "add(3, beta)"},
 		{compute.And(compute.NewFieldRef("a"), compute.NewFieldRef("b")), "(a and b)"},
 		{compute.Or(compute.NewFieldRef("a"), compute.NewFieldRef("b")), "(a or b)"},

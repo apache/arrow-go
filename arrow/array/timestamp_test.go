@@ -17,6 +17,8 @@
 package array_test
 
 import (
+	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -70,6 +72,34 @@ func TestTimestampStringRoundTrip(t *testing.T) {
 	defer arr1.Release()
 
 	assert.True(t, array.Equal(arr, arr1))
+}
+
+func TestTimestampValueStrRoundTripBoundaries(t *testing.T) {
+	for _, unit := range arrow.TimeUnitValues {
+		for _, timezone := range []string{"", "UTC", "+02:00", "Europe/Berlin"} {
+			for _, value := range []arrow.Timestamp{math.MinInt64, math.MaxInt64} {
+				t.Run(fmt.Sprintf("%s/%s/%d", unit, timezone, value), func(t *testing.T) {
+					mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+					defer mem.AssertSize(t, 0)
+					typ := &arrow.TimestampType{Unit: unit, TimeZone: timezone}
+					builder := array.NewTimestampBuilder(mem, typ)
+					builder.Append(value)
+					values := builder.NewTimestampArray()
+					builder.Release()
+					defer values.Release()
+
+					input := values.ValueStr(0)
+					builder = array.NewTimestampBuilder(mem, typ)
+					require.NoError(t, builder.AppendValueFromString(input))
+					parsed := builder.NewTimestampArray()
+					builder.Release()
+					defer parsed.Release()
+
+					assert.Equal(t, value, parsed.Value(0))
+				})
+			}
+		}
+	}
 }
 
 func TestNewTimestampBuilder(t *testing.T) {
@@ -309,6 +339,38 @@ func TestTimestampValueStrWithDeprecatedLayout(t *testing.T) {
 	assert.Equal(t, "2016-02-29 10:42:23-0700", arr.ValueStr(1))
 }
 
+func TestTimestampValueStrWithEmptyCustomLayout(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dt := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "UTC"}
+	b := array.NewTimestampBuilderWithValueStrLayout(mem, dt, "")
+	defer b.Release()
+
+	b.Append(0)
+	arr := b.NewArray()
+	defer arr.Release()
+
+	assert.Empty(t, arr.ValueStr(0))
+}
+
+func TestTimestampValueStrInvalidTimezoneDoesNotPanic(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dt := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "not/a_timezone"}
+	b := array.NewTimestampBuilder(mem, dt)
+	defer b.Release()
+
+	b.Append(0)
+	arr := b.NewArray()
+	defer arr.Release()
+
+	assert.NotPanics(t, func() {
+		assert.Equal(t, "...", arr.ValueStr(0))
+	})
+}
+
 func TestTimestampEquality(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
@@ -334,9 +396,8 @@ func TestTimestampEquality(t *testing.T) {
 	}
 
 	// No timezone, "wall clock" semantics
-	// These timestamps have no actual timezone, but we still represent as UTC per Go conventions
-	assert.Equal(t, "1968-11-30T20:30:45Z", arrs[0].ValueStr(0))
-	assert.Equal(t, "2016-02-29T17:42:23Z", arrs[0].ValueStr(1))
+	assert.Equal(t, "1968-11-30T20:30:45", arrs[0].ValueStr(0))
+	assert.Equal(t, "2016-02-29T17:42:23", arrs[0].ValueStr(1))
 
 	// UTC timezone, "instant" semantics
 	assert.Equal(t, "1968-11-30T20:30:45Z", arrs[1].ValueStr(0))
@@ -415,4 +476,26 @@ func TestTimestampArrayJSONRoundTripWithDeprecatedLayout(t *testing.T) {
 	expectedJSON := `["1968-11-30 13:30:45-0700","2016-02-29 10:42:23-0700"]`
 	require.Equal(t, expectedJSON, string(json_bytes))
 
+}
+
+func TestTimestampStringRoundTripHistoricalOffsetSeconds(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	for _, zone := range []string{"Europe/Berlin", "America/New_York"} {
+		t.Run(zone, func(t *testing.T) {
+			typ := &arrow.TimestampType{Unit: arrow.Second, TimeZone: zone}
+			value := arrow.Timestamp(time.Date(1800, 1, 1, 0, 0, 0, 0, time.UTC).Unix())
+			builder := array.NewTimestampBuilder(mem, typ)
+			defer builder.Release()
+			builder.Append(value)
+			values := builder.NewTimestampArray()
+			defer values.Release()
+
+			require.NoError(t, builder.AppendValueFromString(values.ValueStr(0)))
+			result := builder.NewTimestampArray()
+			defer result.Release()
+			assert.Equal(t, value, result.Value(0))
+		})
+	}
 }

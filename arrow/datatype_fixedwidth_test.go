@@ -237,6 +237,27 @@ func TestTimestampType_GetToTimeFunc(t *testing.T) {
 	assert.Equal(t, "2345-12-29T19:00:00-05:00", toTimeNY(ts).Format(time.RFC3339))
 }
 
+func TestTimestampTypeGetZoneAcceptsCaseInsensitiveUTC(t *testing.T) {
+	for _, timezone := range []string{"UTC", "utc", "Utc", "uTc"} {
+		t.Run(timezone, func(t *testing.T) {
+			typ := &arrow.TimestampType{TimeZone: timezone}
+			zone, err := typ.GetZone()
+			require.NoError(t, err)
+			assert.Same(t, time.UTC, zone)
+		})
+	}
+}
+
+func TestTimestampTypeGetZoneRejectsInvalidFixedOffsets(t *testing.T) {
+	for _, timezone := range []string{"+24:00", "-24:00", "+00:60", "-00:60", "+01:00:00", "+0100"} {
+		t.Run(timezone, func(t *testing.T) {
+			typ := &arrow.TimestampType{TimeZone: timezone}
+			_, err := typ.GetZone()
+			assert.Error(t, err)
+		})
+	}
+}
+
 // Test race condition from GH-38795
 func TestGetToTimeFuncRace(t *testing.T) {
 	var (
@@ -572,6 +593,89 @@ func TestTimestampFromTimeFractionalSeconds(t *testing.T) {
 	assert.ErrorIs(t, err, arrow.ErrInvalid)
 }
 
+func TestTimestampFromStringWithSecondOffsets(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value string
+		want  arrow.Timestamp
+	}{
+		{name: "compact positive", value: "1970-01-01 00:00:00+005328", want: -3208},
+		{name: "colon positive", value: "1970-01-01 00:00:00+00:53:28", want: -3208},
+		{name: "compact negative", value: "1970-01-01 00:00:00-005328", want: 3208},
+		{name: "colon negative", value: "1970-01-01 00:00:00-00:53:28", want: 3208},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := arrow.TimestampFromString(tc.value, arrow.Second)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestTimestampFromStringRejectsDateOnlyTimezone(t *testing.T) {
+	for _, value := range []string{
+		"2024-01-01Z",
+		"2024-01-01+01",
+		"2024-01-01+0100",
+		"2024-01-01+01:00",
+	} {
+		t.Run(value, func(t *testing.T) {
+			_, err := arrow.TimestampFromString(value, arrow.Second)
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
+
+	value, err := arrow.TimestampFromString("2024-01-01", arrow.Second)
+	require.NoError(t, err)
+	assert.Equal(t, arrow.Timestamp(1704067200), value)
+}
+
+func TestTimestampFromStringRejectsInvalidTimeSeparator(t *testing.T) {
+	for _, value := range []string{
+		"2024-01-01X00:00:00",
+		"2024-01-01_00:00:00Z",
+		"2024-01-01X00:00:00+01:00",
+	} {
+		t.Run(value, func(t *testing.T) {
+			_, err := arrow.TimestampFromString(value, arrow.Second)
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
+}
+
+func TestTimestampFromStringRejectsInvalidOffsets(t *testing.T) {
+	for _, value := range []string{
+		"2024-01-01 00:00:00+24",
+		"2024-01-01 00:00:00+2400",
+		"2024-01-01 00:00:00+24:00",
+		"2024-01-01 00:00:00+00:60",
+		"2024-01-01 00:00:00+00:00:60",
+	} {
+		t.Run(value, func(t *testing.T) {
+			_, err := arrow.TimestampFromString(value, arrow.Second)
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
+}
+
+func TestTimestampFromStringRejectsInvalidFractions(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		unit  arrow.TimeUnit
+	}{
+		{value: "2024-01-01 00:00:00.1", unit: arrow.Second},
+		{value: "2024-01-01 00:00:00.1234", unit: arrow.Millisecond},
+		{value: "2024-01-01 00:00:00.1234567", unit: arrow.Microsecond},
+		{value: "2024-01-01 00:00:00,1", unit: arrow.Millisecond},
+		{value: "2024-01-01 00:00:00.1234567890", unit: arrow.Nanosecond},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			_, err := arrow.TimestampFromString(tc.value, tc.unit)
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
+}
+
 func TestNarrowestDecimalType(t *testing.T) {
 	tests := []struct {
 		min, max int32
@@ -630,6 +734,28 @@ func TestNewDecimalTypeValidatesPrecision(t *testing.T) {
 				assert.Nil(t, typ)
 				assert.ErrorIs(t, err, arrow.ErrInvalid)
 			}
+		})
+	}
+}
+
+func TestTimestampFromStringShortTimeComponents(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  time.Time
+	}{
+		{"2024-01-01", time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{"2024-01-01T12", time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)},
+		{"2024-01-01T12:30", time.Date(2024, 1, 1, 12, 30, 0, 0, time.UTC)},
+		{"2024-01-01T12:30+01", time.Date(2024, 1, 1, 11, 30, 0, 0, time.UTC)},
+		{"2024-01-01T12:30+0100", time.Date(2024, 1, 1, 11, 30, 0, 0, time.UTC)},
+		{"2024-01-01T12:30+01:00", time.Date(2024, 1, 1, 11, 30, 0, 0, time.UTC)},
+		{"2024-01-01T12:30+010028", time.Date(2024, 1, 1, 11, 29, 32, 0, time.UTC)},
+		{"2024-01-01T12:30+01:00:28", time.Date(2024, 1, 1, 11, 29, 32, 0, time.UTC)},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			got, err := arrow.TimestampFromString(tc.value, arrow.Second)
+			require.NoError(t, err)
+			assert.Equal(t, arrow.Timestamp(tc.want.Unix()), got)
 		})
 	}
 }

@@ -214,6 +214,15 @@ func (r *Reader) readHeader() error {
 		}
 		r.columnFilter = nil
 	}
+	if r.header {
+		for _, cc := range r.conversions {
+			if cc.typ != nil {
+				if err := validateTimestampMetadata(cc.typ); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	r.columnTypes = nil
 	if !r.header {
 		r.pendingRecord = append([]string(nil), records...)
@@ -420,6 +429,15 @@ func (r *Reader) read(recs []string) {
 }
 
 func (r *Reader) initFieldConverter(bldr array.Builder) func(string) {
+	if err := validateTimestampMetadata(bldr.Type()); err != nil {
+		if r.err == nil {
+			r.err = err
+		}
+		return func(string) {
+			bldr.AppendNull()
+		}
+	}
+
 	switch dt := bldr.Type().(type) {
 	case *arrow.BooleanType:
 		return func(str string) {
@@ -501,7 +519,7 @@ func (r *Reader) initFieldConverter(bldr array.Builder) func(string) {
 		}
 	case *arrow.TimestampType:
 		return func(str string) {
-			r.parseTimestamp(bldr, str, dt.Unit)
+			r.parseTimestamp(bldr, str)
 		}
 	case *arrow.Date32Type:
 		return func(str string) {
@@ -741,21 +759,15 @@ func (r *Reader) parseFloat64(field array.Builder, str string) {
 	field.(*array.Float64Builder).Append(v)
 }
 
-// parses timestamps using millisecond precision
-func (r *Reader) parseTimestamp(field array.Builder, str string, unit arrow.TimeUnit) {
+func (r *Reader) parseTimestamp(field array.Builder, str string) {
 	if r.isNull(str) {
 		field.AppendNull()
 		return
 	}
 
-	v, err := arrow.TimestampFromString(str, unit)
-	if err != nil {
+	if err := field.(*array.TimestampBuilder).AppendValueFromString(str); err != nil {
 		r.setParseError(err)
-		field.AppendNull()
-		return
 	}
-
-	field.(*array.TimestampBuilder).Append(v)
 }
 
 func (r *Reader) parseDate32(field array.Builder, str string) {
@@ -847,7 +859,7 @@ func (r *Reader) parseListLike(field array.ListLikeBuilder, str string) {
 	if len(str) == 0 {
 		// we don't want to create the csv reader if we already know the
 		// string is empty
-		field.Append(true)
+		r.appendListValue(field, 0)
 		return
 	}
 	reader := csv.NewReader(strings.NewReader(str))
@@ -857,11 +869,19 @@ func (r *Reader) parseListLike(field array.ListLikeBuilder, str string) {
 		field.AppendNull()
 		return
 	}
-	field.Append(true)
+	r.appendListValue(field, len(items))
 	valueBldr := field.ValueBuilder()
 	for _, str := range items {
 		r.initFieldConverter(valueBldr)(str)
 	}
+}
+
+func (r *Reader) appendListValue(field array.ListLikeBuilder, size int) {
+	if field, ok := field.(array.VarLenListLikeBuilder); ok {
+		field.AppendWithSize(true, size)
+		return
+	}
+	field.Append(true)
 }
 
 func (r *Reader) parseFixedSizeList(field *array.FixedSizeListBuilder, str string, n int) {
@@ -1060,7 +1080,17 @@ func tryParse(val string, dt arrow.DataType) error {
 		_, err := arrow.Time32FromString(val, dt.Unit)
 		return err
 	case *arrow.TimestampType:
-		_, err := arrow.TimestampFromString(val, dt.Unit)
+		loc, err := dt.GetZone()
+		if err != nil {
+			return err
+		}
+		_, zonePresent, err := arrow.TimestampFromStringInLocation(val, dt.Unit, loc)
+		if err != nil {
+			return err
+		}
+		if zonePresent != (dt.TimeZone != "") {
+			return arrow.ErrInvalid
+		}
 		return err
 	case *arrow.Float64Type:
 		_, err := strconv.ParseFloat(val, 64)

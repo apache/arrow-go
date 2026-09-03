@@ -22,7 +22,6 @@ import (
 	"math/bits"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -39,6 +38,30 @@ type TypeToScalar interface {
 
 type TypeFromScalar interface {
 	FromStructScalar(*Struct) error
+}
+
+func parseTimestamp(val string, dt *arrow.TimestampType) (arrow.Timestamp, error) {
+	loc, err := dt.GetZone()
+	if err != nil {
+		return 0, err
+	}
+	if i, parseErr := strconv.ParseInt(val, 10, 64); parseErr == nil {
+		return arrow.Timestamp(i), nil
+	}
+
+	ts, zonePresent, err := arrow.TimestampFromStringInLocation(val, dt.Unit, loc)
+	if err != nil {
+		return 0, err
+	}
+
+	if zonePresent != (dt.TimeZone != "") {
+		if dt.TimeZone != "" {
+			return 0, fmt.Errorf("%w: timestamp value %q for type %s must include a zone offset", arrow.ErrInvalid, val, dt)
+		}
+		return 0, fmt.Errorf("%w: timestamp value %q for type %s must not include a zone offset", arrow.ErrInvalid, val, dt)
+	}
+
+	return ts, nil
 }
 
 type hasTypename interface {
@@ -570,18 +593,7 @@ func MakeScalarParam(val interface{}, dt arrow.DataType) (Scalar, error) {
 			return NewFloat64Scalar(val), nil
 		case dt.ID() == arrow.TIMESTAMP:
 			ty := dt.(*arrow.TimestampType)
-			if ty.TimeZone == "" || strings.ToLower(ty.TimeZone) == "utc" {
-				ts, err := arrow.TimestampFromString(v, ty.Unit)
-				if err != nil {
-					return nil, err
-				}
-				return NewTimestampScalar(ts, dt), nil
-			}
-			loc, err := time.LoadLocation(ty.TimeZone)
-			if err != nil {
-				return nil, err
-			}
-			ts, _, err := arrow.TimestampFromStringInLocation(v, ty.Unit, loc)
+			ts, err := parseTimestamp(v, ty)
 			if err != nil {
 				return nil, err
 			}
@@ -807,7 +819,7 @@ func ParseScalar(dt arrow.DataType, val string) (Scalar, error) {
 			return NewFloat64Scalar(float64(val)), nil
 		}
 	case arrow.TIMESTAMP:
-		value, err := arrow.TimestampFromString(val, dt.(*arrow.TimestampType).Unit)
+		value, err := parseTimestamp(val, dt.(*arrow.TimestampType))
 		if err != nil {
 			return nil, err
 		}

@@ -20,10 +20,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 	"time"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
+)
+
+const (
+	timestampScalarLayout            = "2006-01-02 15:04:05.999999999"
+	timestampScalarZoneLayout        = timestampScalarLayout + "Z0700"
+	timestampScalarZoneSecondsLayout = timestampScalarLayout + "Z070000"
 )
 
 func temporalToString(s TemporalScalar) string {
@@ -40,7 +47,25 @@ func temporalToString(s TemporalScalar) string {
 	case *Time64:
 		return time.Unix(0, int64(s.Value)*int64(s.Unit().Multiplier())).UTC().Format("15:04:05.999999999")
 	case *Timestamp:
-		return time.Unix(0, int64(s.Value)*int64(s.Unit().Multiplier())).UTC().Format("2006-01-02 15:04:05.999999999")
+		typ := s.DataType().(*arrow.TimestampType)
+		toTime, err := typ.GetToTimeFunc()
+		if err != nil {
+			return "..."
+		}
+		tm := toTime(s.Value)
+		if tm.Year() < 0 || tm.Year() > 9999 {
+			// Timestamp parsing follows time.Parse, whose textual year range is
+			// limited to 0000 through 9999. Numeric timestamp values are raw epochs.
+			return strconv.FormatInt(int64(s.Value), 10)
+		}
+		layout := timestampScalarLayout
+		if typ.TimeZone != "" {
+			layout = timestampScalarZoneLayout
+			if _, offset := tm.Zone(); offset%60 != 0 {
+				layout = timestampScalarZoneSecondsLayout
+			}
+		}
+		return tm.Format(layout)
 	}
 	return "..."
 }

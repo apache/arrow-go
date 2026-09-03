@@ -1386,6 +1386,12 @@ func (c *CastSuite) TestTimestampToString() {
 
 		c.checkCast(&arrow.TimestampType{Unit: arrow.Nanosecond}, stype,
 			`[-596933876543210988, 349837323456789012]`, `["1951-02-01 01:02:03.456789012", "1981-02-01 01:02:03.456789012"]`)
+
+		for _, unit := range []arrow.TimeUnit{arrow.Second, arrow.Millisecond, arrow.Microsecond} {
+			c.checkCast(&arrow.TimestampType{Unit: unit}, stype,
+				fmt.Sprintf(`[%d, %d]`, int64(math.MinInt64), int64(math.MaxInt64)),
+				fmt.Sprintf(`["%d", "%d"]`, int64(math.MinInt64), int64(math.MaxInt64)))
+		}
 	}
 }
 
@@ -1405,6 +1411,9 @@ func (c *CastSuite) TestTimestampWithZoneToString() {
 
 		c.checkCast(&arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: "America/Phoenix"}, stype,
 			`[-34226955876543211, 1456767743456789246]`, `["1968-11-30 13:30:44.123456789-0700", "2016-02-29 10:42:23.456789246-0700"]`)
+
+		c.checkCast(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "Europe/Berlin"}, stype,
+			`[-62167219200]`, `["0000-01-01 00:53:28+005328"]`)
 	}
 }
 
@@ -2747,14 +2756,22 @@ func (c *CastSuite) TestTimestampToTimestampMultiplyOverflow() {
 }
 
 var (
-	timestampJSON = `["1970-01-01T00:00:59.123456789","2000-02-29T23:23:23.999999999",
-		"1899-01-01T00:59:20.001001001","2033-05-18T03:33:20.000000000",
-		"2020-01-01T01:05:05.001", "2019-12-31T02:10:10.002",
-		"2019-12-30T03:15:15.003", "2009-12-31T04:20:20.004132",
-		"2010-01-01T05:25:25.005321", "2010-01-03T06:30:30.006163",
-		"2010-01-04T07:35:35", "2006-01-01T08:40:40", "2005-12-31T09:45:45",
-		"2008-12-28", "2008-12-29", "2012-01-01 01:02:03", null]`
-	timestampSecondsJSON = `["1970-01-01T00:00:59","2000-02-29T23:23:23",
+	timestampJSON = `["1970-01-01T00:00:59.123456789Z","2000-02-29T23:23:23.999999999Z",
+		"1899-01-01T00:59:20.001001001Z","2033-05-18T03:33:20.000000000Z",
+		"2020-01-01T01:05:05.001Z", "2019-12-31T02:10:10.002Z",
+		"2019-12-30T03:15:15.003Z", "2009-12-31T04:20:20.004132Z",
+		"2010-01-01T05:25:25.005321Z", "2010-01-03T06:30:30.006163Z",
+		"2010-01-04T07:35:35Z", "2006-01-01T08:40:40Z", "2005-12-31T09:45:45Z",
+		"2008-12-28T00:00:00Z", "2008-12-29T00:00:00Z", "2012-01-01T01:02:03Z", null]`
+	timestampSecondsJSON = `["1970-01-01T00:00:59Z","2000-02-29T23:23:23Z",
+		"1899-01-01T00:59:20Z","2033-05-18T03:33:20Z",
+		"2020-01-01T01:05:05Z", "2019-12-31T02:10:10Z",
+		"2019-12-30T03:15:15Z", "2009-12-31T04:20:20Z",
+		"2010-01-01T05:25:25Z", "2010-01-03T06:30:30Z",
+		"2010-01-04T07:35:35Z", "2006-01-01T08:40:40Z",
+		"2005-12-31T09:45:45Z", "2008-12-28T00:00:00Z", "2008-12-29T00:00:00Z",
+		"2012-01-01T01:02:03Z", null]`
+	timestampSecondsNaiveJSON = `["1970-01-01T00:00:59","2000-02-29T23:23:23",
 		"1899-01-01T00:59:20","2033-05-18T03:33:20",
 		"2020-01-01T01:05:05", "2019-12-31T02:10:10",
 		"2019-12-30T03:15:15", "2009-12-31T04:20:20",
@@ -2762,7 +2779,7 @@ var (
 		"2010-01-04T07:35:35", "2006-01-01T08:40:40",
 		"2005-12-31T09:45:45", "2008-12-28", "2008-12-29",
 		"2012-01-01 01:02:03", null]`
-	timestampExtremeJSON = `["1677-09-20T00:00:59.123456", "2262-04-13T23:23:23.999999"]`
+	timestampExtremeJSON = `["1677-09-20T00:00:59.123456Z", "2262-04-13T23:23:23.999999Z"]`
 )
 
 func (c *CastSuite) TestTimestampToDate() {
@@ -2792,8 +2809,8 @@ func (c *CastSuite) TestTimestampToDate() {
 		timestampExtremeJSON, `[-9223459200000, 9223459200000]`)
 	for _, u := range []arrow.TimeUnit{arrow.Second, arrow.Microsecond, arrow.Millisecond, arrow.Nanosecond} {
 		dt := &arrow.TimestampType{Unit: u}
-		c.checkCastExp(dt, timestampSecondsJSON, date32)
-		c.checkCastExp(dt, timestampSecondsJSON, date64)
+		c.checkCastExp(dt, timestampSecondsNaiveJSON, date32)
+		c.checkCastExp(dt, timestampSecondsNaiveJSON, date64)
 	}
 }
 
@@ -2889,20 +2906,20 @@ func (c *CastSuite) TestTimestampToTime() {
 
 	trunc := compute.CastOptions{AllowTimeTruncate: true}
 
-	timestampsUS := `["1970-01-01T00:00:59.123456","2000-02-29T23:23:23.999999",
-					"1899-01-01T00:59:20.001001","2033-05-18T03:33:20.000000",
-					"2020-01-01T01:05:05.001", "2019-12-31T02:10:10.002",
-					"2019-12-30T03:15:15.003", "2009-12-31T04:20:20.004132",
-					"2010-01-01T05:25:25.005321", "2010-01-03T06:30:30.006163",
-					"2010-01-04T07:35:35", "2006-01-01T08:40:40", "2005-12-31T09:45:45",
-					"2008-12-28", "2008-12-29", "2012-01-01 01:02:03", null]`
-	timestampsMS := `["1970-01-01T00:00:59.123","2000-02-29T23:23:23.999",
-					"1899-01-01T00:59:20.001","2033-05-18T03:33:20.000",
-					"2020-01-01T01:05:05.001", "2019-12-31T02:10:10.002",
-					"2019-12-30T03:15:15.003", "2009-12-31T04:20:20.004",
-					"2010-01-01T05:25:25.005", "2010-01-03T06:30:30.006",
-					"2010-01-04T07:35:35", "2006-01-01T08:40:40", "2005-12-31T09:45:45",
-					"2008-12-28", "2008-12-29", "2012-01-01 01:02:03", null]`
+	timestampsUS := `["1970-01-01T00:00:59.123456Z","2000-02-29T23:23:23.999999Z",
+					"1899-01-01T00:59:20.001001Z","2033-05-18T03:33:20.000000Z",
+					"2020-01-01T01:05:05.001Z", "2019-12-31T02:10:10.002Z",
+					"2019-12-30T03:15:15.003Z", "2009-12-31T04:20:20.004132Z",
+					"2010-01-01T05:25:25.005321Z", "2010-01-03T06:30:30.006163Z",
+					"2010-01-04T07:35:35Z", "2006-01-01T08:40:40Z", "2005-12-31T09:45:45Z",
+					"2008-12-28T00:00:00Z", "2008-12-29T00:00:00Z", "2012-01-01T01:02:03Z", null]`
+	timestampsMS := `["1970-01-01T00:00:59.123Z","2000-02-29T23:23:23.999Z",
+					"1899-01-01T00:59:20.001Z","2033-05-18T03:33:20.000Z",
+					"2020-01-01T01:05:05.001Z", "2019-12-31T02:10:10.002Z",
+					"2019-12-30T03:15:15.003Z", "2009-12-31T04:20:20.004Z",
+					"2010-01-01T05:25:25.005Z", "2010-01-03T06:30:30.006Z",
+					"2010-01-04T07:35:35Z", "2006-01-01T08:40:40Z", "2005-12-31T09:45:45Z",
+					"2008-12-28T00:00:00Z", "2008-12-29T00:00:00Z", "2012-01-01T01:02:03Z", null]`
 
 	c.checkCastFails(arrow.FixedWidthTypes.Timestamp_ns, timestampJSON, compute.NewCastOptions(arrow.FixedWidthTypes.Time64us, true))
 	c.checkCastFails(arrow.FixedWidthTypes.Timestamp_ns, timestampJSON, compute.NewCastOptions(arrow.FixedWidthTypes.Time32ms, true))
@@ -3236,6 +3253,26 @@ func (c *CastSuite) TestStringToTimestamp() {
 		// timestamp with zone offset can parse as any time zone (since they're unambiguous)
 		c.checkCastArr(zoned, arrow.FixedWidthTypes.Timestamp_s, `[1582934400, 1583140152]`, *compute.DefaultCastOptions(true))
 		c.checkCastArr(zoned, &arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/Phoenix"}, `[1582934400, 1583140152]`, *compute.DefaultCastOptions(true))
+
+		for _, timezone := range []string{"", "UTC"} {
+			c.checkCast(dt, &arrow.TimestampType{Unit: arrow.Second, TimeZone: timezone},
+				`["-9223372036854775808", "9223372036854775807"]`,
+				`[-9223372036854775808, 9223372036854775807]`)
+		}
+	}
+}
+
+func (c *CastSuite) TestStringToTimestampPreservesParseErrors() {
+	for _, stype := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString} {
+		input, _, err := array.FromJSON(c.mem, stype, strings.NewReader(`["x"]`))
+		c.Require().NoError(err)
+
+		_, err = compute.CastArray(context.Background(), input,
+			compute.SafeCastOptions(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "UTC"}))
+		input.Release()
+
+		c.Require().ErrorIs(err, arrow.ErrInvalid)
+		c.ErrorContains(err, "invalid timestamp string")
 	}
 }
 

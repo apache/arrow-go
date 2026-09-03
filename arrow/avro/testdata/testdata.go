@@ -50,6 +50,12 @@ func (t TimestampJSON) MarshalJSON() ([]byte, error) {
 	return json.Marshal(time.Time(t).UTC().Format(time.RFC3339Nano))
 }
 
+type LocalTimestampJSON time.Time
+
+func (t LocalTimestampJSON) MarshalJSON() ([]byte, error) {
+	return json.Marshal(time.Time(t).UTC().Format("2006-01-02T15:04:05.999999999"))
+}
+
 type TimeMillisJSON time.Duration
 
 func (t TimeMillisJSON) MarshalJSON() ([]byte, error) {
@@ -151,31 +157,31 @@ func (e Example) MarshalJSON() ([]byte, error) {
 		nullableRemoteIPs = &arr
 	}
 	out := struct {
-		InheritNull       string         `json:"inheritNull"`
-		ExplicitNamespace FixedJSON      `json:"explicitNamespace"`
-		FullName          fullNameJSON   `json:"fullName"`
-		ID                int32          `json:"id"`
-		BigID             int64          `json:"bigId"`
-		Temperature       *float32       `json:"temperature"`
-		Fraction          *float64       `json:"fraction"`
-		IsEmergency       bool           `json:"is_emergency"`
-		RemoteIP          *ByteArray     `json:"remote_ip"`
-		NullableRemoteIPS *[]ByteArray   `json:"nullable_remote_ips"`
-		Person            PersonData     `json:"person"`
-		DecimalField      DecimalJSON    `json:"decimalField"`
-		Decimal256Field   DecimalJSON    `json:"decimal256Field"`
-		UUIDField         string         `json:"uuidField"`
-		FixedUUIDField    FixedUUIDJSON  `json:"fixedUuidField"`
-		TimeMillis        TimeMillisJSON `json:"timemillis"`
-		TimeMicros        TimeMicrosJSON `json:"timemicros"`
-		TimestampMillis   TimestampJSON  `json:"timestampmillis"`
-		TimestampMicros   TimestampJSON  `json:"timestampmicros"`
-		LocalTSMillis     TimestampJSON  `json:"localtimestampmillis"`
-		LocalTSMicros     TimestampJSON  `json:"localtimestampmicros"`
-		TimestampNanos    TimestampJSON  `json:"timestampnanos"`
-		LocalTSNanos      TimestampJSON  `json:"localtimestampnanos"`
-		Duration          DurationJSON   `json:"duration"`
-		Date              DateJSON       `json:"date"`
+		InheritNull       string             `json:"inheritNull"`
+		ExplicitNamespace FixedJSON          `json:"explicitNamespace"`
+		FullName          fullNameJSON       `json:"fullName"`
+		ID                int32              `json:"id"`
+		BigID             int64              `json:"bigId"`
+		Temperature       *float32           `json:"temperature"`
+		Fraction          *float64           `json:"fraction"`
+		IsEmergency       bool               `json:"is_emergency"`
+		RemoteIP          *ByteArray         `json:"remote_ip"`
+		NullableRemoteIPS *[]ByteArray       `json:"nullable_remote_ips"`
+		Person            PersonData         `json:"person"`
+		DecimalField      DecimalJSON        `json:"decimalField"`
+		Decimal256Field   DecimalJSON        `json:"decimal256Field"`
+		UUIDField         string             `json:"uuidField"`
+		FixedUUIDField    FixedUUIDJSON      `json:"fixedUuidField"`
+		TimeMillis        TimeMillisJSON     `json:"timemillis"`
+		TimeMicros        TimeMicrosJSON     `json:"timemicros"`
+		TimestampMillis   TimestampJSON      `json:"timestampmillis"`
+		TimestampMicros   TimestampJSON      `json:"timestampmicros"`
+		LocalTSMillis     LocalTimestampJSON `json:"localtimestampmillis"`
+		LocalTSMicros     LocalTimestampJSON `json:"localtimestampmicros"`
+		TimestampNanos    TimestampJSON      `json:"timestampnanos"`
+		LocalTSNanos      LocalTimestampJSON `json:"localtimestampnanos"`
+		Duration          DurationJSON       `json:"duration"`
+		Date              DateJSON           `json:"date"`
 	}{
 		InheritNull:       e.InheritNull,
 		ExplicitNamespace: FixedJSON(e.ExplicitNamespace[:]),
@@ -196,10 +202,10 @@ func (e Example) MarshalJSON() ([]byte, error) {
 		TimeMicros:        TimeMicrosJSON(e.TimeMicros),
 		TimestampMillis:   TimestampJSON(e.TimestampMillis),
 		TimestampMicros:   TimestampJSON(e.TimestampMicros),
-		LocalTSMillis:     TimestampJSON(e.LocalTSMillis),
-		LocalTSMicros:     TimestampJSON(e.LocalTSMicros),
+		LocalTSMillis:     LocalTimestampJSON(e.LocalTSMillis),
+		LocalTSMicros:     LocalTimestampJSON(e.LocalTSMicros),
 		TimestampNanos:    TimestampJSON(e.TimestampNanos),
-		LocalTSNanos:      TimestampJSON(e.LocalTSNanos),
+		LocalTSNanos:      LocalTimestampJSON(e.LocalTSNanos),
 		Duration:          DurationJSON(e.Duration),
 		Date:              DateJSON(e.Date),
 	}

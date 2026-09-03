@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path"
 	"strings"
@@ -144,16 +145,16 @@ func Example_writer() {
 var (
 	fullData = [][]string{
 		{"bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32", "f64", "str", "large_str", "ts_s", "d32", "d64", "dec128", "dec256", "list(i64)", "large_list(i64)", "fixed_size_list(i64)", "binary", "large_binary", "fixed_size_binary", "uuid", "null"},
-		{"true", "-1", "-1", "-1", "-1", "0", "0", "0", "0", "0", "0", "0", "str-0", "str-0", "2014-07-28 15:04:05", "2017-05-18", "2028-04-26", "-123.45", "-123.45", "{1,2,3}", "{1,2,3}", "{1,2,3}", "AAEC", "AAEC", "AAEC", "00000000-0000-0000-0000-000000000001", nullVal},
-		{"false", "0", "0", "0", "0", "1", "1", "1", "1", "0.099975586", "0.1", "0.1", "str-1", "str-1", "2016-09-08 15:04:05", "2022-11-08", "2031-06-28", "0.00", "0.00", "{4,5,6}", "{4,5,6}", "{4,5,6}", "AwQF", "AwQF", "AwQF", "00000000-0000-0000-0000-000000000002", nullVal},
-		{"true", "1", "1", "1", "1", "2", "2", "2", "2", "0.19995117", "0.2", "0.2", "str-2", "str-2", "2021-09-18 15:04:05", "2025-08-04", "2034-08-28", "123.45", "123.45", "{7,8,9}", "{7,8,9}", "{7,8,9}", "", "", "AAAA", "00000000-0000-0000-0000-000000000003", nullVal},
+		{"true", "-1", "-1", "-1", "-1", "0", "0", "0", "0", "0", "0", "0", "str-0", "str-0", "2014-07-28 15:04:05Z", "2017-05-18", "2028-04-26", "-123.45", "-123.45", "{1,2,3}", "{1,2,3}", "{1,2,3}", "AAEC", "AAEC", "AAEC", "00000000-0000-0000-0000-000000000001", nullVal},
+		{"false", "0", "0", "0", "0", "1", "1", "1", "1", "0.099975586", "0.1", "0.1", "str-1", "str-1", "2016-09-08 15:04:05Z", "2022-11-08", "2031-06-28", "0.00", "0.00", "{4,5,6}", "{4,5,6}", "{4,5,6}", "AwQF", "AwQF", "AwQF", "00000000-0000-0000-0000-000000000002", nullVal},
+		{"true", "1", "1", "1", "1", "2", "2", "2", "2", "0.19995117", "0.2", "0.2", "str-2", "str-2", "2021-09-18 15:04:05Z", "2025-08-04", "2034-08-28", "123.45", "123.45", "{7,8,9}", "{7,8,9}", "{7,8,9}", "", "", "AAAA", "00000000-0000-0000-0000-000000000003", nullVal},
 		{nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal},
 	}
 	bananaData = [][]string{
 		{"bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32", "f64", "str", "large_str", "ts_s", "d32", "d64", "dec128", "dec256", "list(i64)", "large_list(i64)", "fixed_size_list(i64)", "binary", "large_binary", "fixed_size_binary", "uuid", "null"},
-		{"BANANA", "-1", "-1", "-1", "-1", "0", "0", "0", "0", "0", "0", "0", "str-0", "str-0", "2014-07-28 15:04:05", "2017-05-18", "2028-04-26", "-123.45", "-123.45", "{1,2,3}", "{1,2,3}", "{1,2,3}", "AAEC", "AAEC", "AAEC", "00000000-0000-0000-0000-000000000001", nullVal},
-		{"MANGO", "0", "0", "0", "0", "1", "1", "1", "1", "0.099975586", "0.1", "0.1", "str-1", "str-1", "2016-09-08 15:04:05", "2022-11-08", "2031-06-28", "0.00", "0.00", "{4,5,6}", "{4,5,6}", "{4,5,6}", "AwQF", "AwQF", "AwQF", "00000000-0000-0000-0000-000000000002", nullVal},
-		{"BANANA", "1", "1", "1", "1", "2", "2", "2", "2", "0.19995117", "0.2", "0.2", "str-2", "str-2", "2021-09-18 15:04:05", "2025-08-04", "2034-08-28", "123.45", "123.45", "{7,8,9}", "{7,8,9}", "{7,8,9}", "", "", "AAAA", "00000000-0000-0000-0000-000000000003", nullVal},
+		{"BANANA", "-1", "-1", "-1", "-1", "0", "0", "0", "0", "0", "0", "0", "str-0", "str-0", "2014-07-28 15:04:05Z", "2017-05-18", "2028-04-26", "-123.45", "-123.45", "{1,2,3}", "{1,2,3}", "{1,2,3}", "AAEC", "AAEC", "AAEC", "00000000-0000-0000-0000-000000000001", nullVal},
+		{"MANGO", "0", "0", "0", "0", "1", "1", "1", "1", "0.099975586", "0.1", "0.1", "str-1", "str-1", "2016-09-08 15:04:05Z", "2022-11-08", "2031-06-28", "0.00", "0.00", "{4,5,6}", "{4,5,6}", "{4,5,6}", "AwQF", "AwQF", "AwQF", "00000000-0000-0000-0000-000000000002", nullVal},
+		{"BANANA", "1", "1", "1", "1", "2", "2", "2", "2", "0.19995117", "0.2", "0.2", "str-2", "str-2", "2021-09-18 15:04:05Z", "2025-08-04", "2034-08-28", "123.45", "123.45", "{7,8,9}", "{7,8,9}", "{7,8,9}", "", "", "AAAA", "00000000-0000-0000-0000-000000000003", nullVal},
 		{nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal, nullVal},
 	}
 )
@@ -596,14 +597,14 @@ func TestParquetTestingCSVWriter(t *testing.T) {
 		require.NoError(t, csvWriter.Flush())
 
 		expected := `id,bool_col,tinyint_col,smallint_col,int_col,bigint_col,float_col,double_col,date_string_col,string_col,timestamp_col
-4,true,0,0,0,0,0,0,MDMvMDEvMDk=,MA==,2009-03-01 00:00:00
-5,false,1,1,1,10,1.1,10.1,MDMvMDEvMDk=,MQ==,2009-03-01 00:01:00
-6,true,0,0,0,0,0,0,MDQvMDEvMDk=,MA==,2009-04-01 00:00:00
-7,false,1,1,1,10,1.1,10.1,MDQvMDEvMDk=,MQ==,2009-04-01 00:01:00
-2,true,0,0,0,0,0,0,MDIvMDEvMDk=,MA==,2009-02-01 00:00:00
-3,false,1,1,1,10,1.1,10.1,MDIvMDEvMDk=,MQ==,2009-02-01 00:01:00
-0,true,0,0,0,0,0,0,MDEvMDEvMDk=,MA==,2009-01-01 00:00:00
-1,false,1,1,1,10,1.1,10.1,MDEvMDEvMDk=,MQ==,2009-01-01 00:01:00
+4,true,0,0,0,0,0,0,MDMvMDEvMDk=,MA==,2009-03-01 00:00:00Z
+5,false,1,1,1,10,1.1,10.1,MDMvMDEvMDk=,MQ==,2009-03-01 00:01:00Z
+6,true,0,0,0,0,0,0,MDQvMDEvMDk=,MA==,2009-04-01 00:00:00Z
+7,false,1,1,1,10,1.1,10.1,MDQvMDEvMDk=,MQ==,2009-04-01 00:01:00Z
+2,true,0,0,0,0,0,0,MDIvMDEvMDk=,MA==,2009-02-01 00:00:00Z
+3,false,1,1,1,10,1.1,10.1,MDIvMDEvMDk=,MQ==,2009-02-01 00:01:00Z
+0,true,0,0,0,0,0,0,MDEvMDEvMDk=,MA==,2009-01-01 00:00:00Z
+1,false,1,1,1,10,1.1,10.1,MDEvMDEvMDk=,MQ==,2009-01-01 00:01:00Z
 `
 
 		require.Equal(t, expected, buf.String())
@@ -776,7 +777,101 @@ func TestCSVWriterUsesTimestampTimezone(t *testing.T) {
 	writer := csv.NewWriter(&output, schema)
 	require.NoError(t, writer.Write(record))
 	require.NoError(t, writer.Flush())
-	assert.Equal(t, "1969-12-31 19:00:00\n", output.String())
+	assert.Equal(t, "1969-12-31 19:00:00-05:00\n", output.String())
+}
+
+func TestCSVWriterReaderTimestampRoundTrip(t *testing.T) {
+	tests := []struct {
+		name    string
+		typ     *arrow.TimestampType
+		value   arrow.Timestamp
+		wantCSV string
+	}{
+		{
+			name:    "timezone-less",
+			typ:     &arrow.TimestampType{Unit: arrow.Second},
+			value:   1234,
+			wantCSV: "1970-01-01 00:20:34\n",
+		},
+		{
+			name:    "UTC",
+			typ:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "UTC"},
+			value:   0,
+			wantCSV: "1970-01-01 00:00:00Z\n",
+		},
+		{
+			name:    "named timezone",
+			typ:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/New_York"},
+			value:   0,
+			wantCSV: "1969-12-31 19:00:00-05:00\n",
+		},
+		{
+			name:    "historical positive offset seconds",
+			typ:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "Europe/Berlin"},
+			value:   arrow.Timestamp(time.Date(1800, 1, 1, 0, 0, 0, 0, time.UTC).Unix()),
+			wantCSV: "1800-01-01 00:53:28+00:53:28\n",
+		},
+		{
+			name:    "historical negative offset seconds",
+			typ:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/New_York"},
+			value:   arrow.Timestamp(time.Date(1800, 1, 1, 0, 0, 0, 0, time.UTC).Unix()),
+			wantCSV: "1799-12-31 19:03:58-04:56:02\n",
+		},
+		{
+			name:    "minimum seconds without timezone",
+			typ:     &arrow.TimestampType{Unit: arrow.Second},
+			value:   math.MinInt64,
+			wantCSV: "-9223372036854775808\n",
+		},
+		{
+			name:    "minimum seconds with UTC timezone",
+			typ:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "UTC"},
+			value:   math.MinInt64,
+			wantCSV: "-9223372036854775808\n",
+		},
+		{
+			name:    "minimum seconds with fixed timezone",
+			typ:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "+02:00"},
+			value:   math.MinInt64,
+			wantCSV: "-9223372036854775808\n",
+		},
+		{
+			name:    "minimum seconds with named timezone",
+			typ:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "Europe/Berlin"},
+			value:   math.MinInt64,
+			wantCSV: "-9223372036854775808\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
+			builder := array.NewTimestampBuilder(mem, tc.typ)
+			builder.Append(tc.value)
+			values := builder.NewTimestampArray()
+			builder.Release()
+			defer values.Release()
+
+			schema := arrow.NewSchema([]arrow.Field{{Name: "timestamp", Type: tc.typ}}, nil)
+			record := array.NewRecordBatch(schema, []arrow.Array{values}, 1)
+			defer record.Release()
+
+			var output bytes.Buffer
+			writer := csv.NewWriter(&output, schema)
+			require.NoError(t, writer.Write(record))
+			require.NoError(t, writer.Flush())
+			assert.Equal(t, tc.wantCSV, output.String())
+
+			reader := csv.NewReader(strings.NewReader(output.String()), schema)
+			defer reader.Release()
+			require.True(t, reader.Next())
+			require.NoError(t, reader.Err())
+			got := reader.RecordBatch().Column(0).(*array.Timestamp)
+			assert.Equal(t, tc.value, got.Value(0))
+		})
+	}
 }
 
 func TestCSVWriterRejectsInvalidTimestampTimezone(t *testing.T) {

@@ -312,6 +312,187 @@ func TestCSVReaderParseError(t *testing.T) {
 	rec.Release()
 }
 
+func TestReadCSVTimestampTimezonePresence(t *testing.T) {
+	tests := []struct {
+		name     string
+		timezone string
+		value    string
+		want     arrow.Timestamp
+		wantErr  bool
+	}{
+		{
+			name:  "timezone-less value for timezone-less type",
+			value: "1970-01-01 01:00:00",
+			want:  3600,
+		},
+		{
+			name:     "timezone-less value for UTC type",
+			timezone: "UTC",
+			value:    "1970-01-01 00:00:00",
+			wantErr:  true,
+		},
+		{
+			name:    "explicit offset for timezone-less type",
+			value:   "1970-01-01 01:00:00+01:00",
+			wantErr: true,
+		},
+		{
+			name:     "explicit offset for mixed-case UTC type",
+			timezone: "Utc",
+			value:    "1970-01-01 00:00:00Z",
+			want:     0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := arrow.NewSchema([]arrow.Field{{
+				Name:     "ts",
+				Type:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: tc.timezone},
+				Nullable: true,
+			}}, nil)
+			r := csv.NewReader(strings.NewReader("ts\n"+tc.value+"\n"), schema, csv.WithHeader(true))
+			defer r.Release()
+
+			require.True(t, r.Next())
+			if tc.wantErr {
+				require.ErrorIs(t, r.Err(), arrow.ErrInvalid)
+			} else {
+				require.NoError(t, r.Err())
+				assert.Equal(t, tc.want, r.RecordBatch().Column(0).(*array.Timestamp).Value(0))
+			}
+		})
+	}
+}
+
+func TestCSVReaderInvalidTimestampTimezoneDoesNotPanic(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{
+			Name:     "ts",
+			Type:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "not/a_timezone"},
+			Nullable: true,
+		},
+		{Name: "value", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+	}, nil)
+	r := csv.NewReader(strings.NewReader("1970-01-01T00:00:00Z,1\n"), schema)
+	defer r.Release()
+
+	assert.NotPanics(t, func() {
+		assert.False(t, r.Next())
+	})
+	assert.ErrorContains(t, r.Err(), "could not find timezone location")
+}
+
+func TestCSVReaderInvalidTimestampTimezoneWithNullValue(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{
+		Name:     "ts",
+		Type:     &arrow.TimestampType{Unit: arrow.Second, TimeZone: "not/a_timezone"},
+		Nullable: true,
+	}}, nil)
+	r := csv.NewReader(strings.NewReader("NULL\n"), schema, csv.WithNullReader(true, "NULL"))
+	defer r.Release()
+
+	assert.NotPanics(t, func() {
+		assert.False(t, r.Next())
+	})
+	assert.ErrorContains(t, r.Err(), "could not find timezone location")
+}
+
+func TestCSVReaderInvalidNestedTimestampTimezone(t *testing.T) {
+	invalidTimestamp := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "not/a_timezone"}
+	tests := []struct {
+		name  string
+		typ   arrow.DataType
+		value string
+	}{
+		{name: "list", typ: arrow.ListOf(invalidTimestamp), value: "NULL"},
+		{name: "fixed size list", typ: arrow.FixedSizeListOf(1, invalidTimestamp), value: "{1970-01-01T00:00:00Z}"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := arrow.NewSchema([]arrow.Field{{Name: "values", Type: tc.typ, Nullable: true}}, nil)
+			r := csv.NewReader(strings.NewReader(tc.value+"\n"), schema, csv.WithNullReader(true, "NULL"))
+			defer r.Release()
+
+			assert.NotPanics(t, func() {
+				assert.False(t, r.Next())
+			})
+			assert.ErrorContains(t, r.Err(), "could not find timezone location")
+		})
+	}
+}
+
+func TestCSVReaderInvalidInferredTimestampTimezoneDoesNotPanic(t *testing.T) {
+	typ := arrow.ListOf(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "not/a_timezone"})
+	r := csv.NewInferringReader(strings.NewReader("NULL,1\n"),
+		csv.WithHeader(false),
+		csv.WithNullReader(true, "NULL"),
+		csv.WithColumnTypes(map[string]arrow.DataType{"f0": typ}),
+	)
+	defer r.Release()
+
+	assert.NotPanics(t, func() {
+		assert.True(t, r.Next())
+	})
+	assert.ErrorContains(t, r.Err(), "could not find timezone location")
+	assert.True(t, r.RecordBatch().Column(0).IsNull(0))
+	assert.Equal(t, int64(1), r.RecordBatch().Column(1).(*array.Int64).Value(0))
+}
+
+func TestCSVReaderListViewTimestamp(t *testing.T) {
+	for _, typ := range []arrow.DataType{
+		arrow.ListViewOf(&arrow.TimestampType{Unit: arrow.Second}),
+		arrow.LargeListViewOf(&arrow.TimestampType{Unit: arrow.Second}),
+	} {
+		t.Run(typ.String(), func(t *testing.T) {
+			schema := arrow.NewSchema([]arrow.Field{{Name: "values", Type: typ}}, nil)
+			r := csv.NewReader(strings.NewReader("{1970-01-01 00:00:00}\n"), schema)
+			defer r.Release()
+
+			require.True(t, r.Next())
+			require.NoError(t, r.Err())
+			values := r.RecordBatch().Column(0).(array.ListLike)
+			require.Equal(t, 1, values.Len())
+			start, end := values.ValueOffsets(0)
+			require.Equal(t, int64(0), start)
+			require.Equal(t, int64(1), end)
+			assert.Equal(t, arrow.Timestamp(0), values.ListValues().(*array.Timestamp).Value(0))
+		})
+	}
+}
+
+func TestCSVReaderValidatesSuppliedTimestampTypeWithHeaderOnly(t *testing.T) {
+	invalidTimestamp := &arrow.TimestampType{Unit: arrow.Second, TimeZone: "not/a_timezone"}
+	for _, typ := range []arrow.DataType{
+		arrow.ListOf(invalidTimestamp),
+		arrow.FixedSizeListOf(1, invalidTimestamp),
+	} {
+		r := csv.NewInferringReader(strings.NewReader("values\n"),
+			csv.WithHeader(true),
+			csv.WithColumnTypes(map[string]arrow.DataType{"values": typ}),
+		)
+
+		assert.False(t, r.Next())
+		assert.ErrorContains(t, r.Err(), "could not find timezone location")
+		r.Release()
+	}
+}
+
+func TestInferringReaderUsesTimezoneAwareTimestamp(t *testing.T) {
+	r := csv.NewInferringReader(strings.NewReader("2024-01-01T00:00:00Z\n"), csv.WithHeader(false))
+	defer r.Release()
+
+	require.True(t, r.Next())
+	require.NoError(t, r.Err())
+
+	typ, ok := r.Schema().Field(0).Type.(*arrow.TimestampType)
+	require.True(t, ok)
+	assert.Equal(t, arrow.Second, typ.Unit)
+	assert.Equal(t, "UTC", typ.TimeZone)
+	assert.Equal(t, arrow.Timestamp(1704067200), r.RecordBatch().Column(0).(*array.Timestamp).Value(0))
+}
+
 func TestCSVReader(t *testing.T) {
 	tests := []struct {
 		Name             string

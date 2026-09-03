@@ -745,6 +745,10 @@ func TestTemporalTimezoneAware(t *testing.T) {
 		// Day rounding
 		{name: "day_utc", tz: "UTC", unit: compute.RoundTemporalDay,
 			expectedUTC: time.Date(2024, 7, 15, 0, 0, 0, 0, time.UTC)},
+		{name: "day_mixed_case_utc", tz: "Utc", unit: compute.RoundTemporalDay,
+			expectedUTC: time.Date(2024, 7, 15, 0, 0, 0, 0, time.UTC)},
+		{name: "day_fixed_offset", tz: "+02:00", unit: compute.RoundTemporalDay,
+			expectedUTC: time.Date(2024, 7, 14, 22, 0, 0, 0, time.UTC)},
 		{name: "day_ny", tz: "America/New_York", unit: compute.RoundTemporalDay,
 			expectedUTC: time.Date(2024, 7, 15, 4, 0, 0, 0, time.UTC)}, // 2024-07-15 00:00 EDT = 04:00 UTC
 		{name: "day_tokyo", tz: "Asia/Tokyo", unit: compute.RoundTemporalDay,
