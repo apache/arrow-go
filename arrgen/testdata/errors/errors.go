@@ -113,10 +113,6 @@ type NoColumns struct {
 	hidden int64
 }
 
-type DoublePointer struct {
-	Field **int64
-}
-
 type TimeSlice struct {
 	Field []time.Time
 }

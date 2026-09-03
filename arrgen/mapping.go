@@ -72,19 +72,24 @@ func checkOpts(o tagOpts, goType string, s optSupport) error {
 }
 
 // resolveColumn maps a Go field type and its parsed tag to an Arrow column,
-// reporting nullable=true for a pointer field (matching arreflect, which marks
-// a column nullable from the outermost pointer).
-func resolveColumn(t types.Type, opts tagOpts) (spec colSpec, nullable bool, err error) {
+// also reporting how many pointers the field is behind.
+//
+// Every level is stripped, matching arreflect, whose appendValue walks pointers
+// to the value and nulls the column if any level along the way is nil. The
+// column is nullable when there is at least one, which is arreflect's rule too:
+// it reads nullability from the outermost pointer alone.
+func resolveColumn(t types.Type, opts tagOpts) (spec colSpec, ptrDepth int, err error) {
 	t = types.Unalias(t)
-	if p, ok := t.(*types.Pointer); ok {
-		nullable = true
-		t = types.Unalias(p.Elem())
-		if _, ok := t.(*types.Pointer); ok {
-			return colSpec{}, false, fmt.Errorf("multi-level pointer type %s is not supported", t)
+	for {
+		p, ok := t.(*types.Pointer)
+		if !ok {
+			break
 		}
+		ptrDepth++
+		t = types.Unalias(p.Elem())
 	}
 	spec, err = baseSpec(t, opts)
-	return spec, nullable, err
+	return spec, ptrDepth, err
 }
 
 func baseSpec(t types.Type, opts tagOpts) (colSpec, error) {

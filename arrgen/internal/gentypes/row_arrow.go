@@ -74,6 +74,10 @@ var rowArrowSchema = arrow.NewSchema([]arrow.Field{
 	{Name: "pdec32", Type: &arrow.Decimal32Type{Precision: 9, Scale: 0}, Nullable: true},
 	{Name: "pdec128", Type: &arrow.Decimal128Type{Precision: 20, Scale: 3}, Nullable: true},
 	{Name: "pds", Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}, Nullable: true},
+	{Name: "ppi64", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+	{Name: "pps", Type: arrow.BinaryTypes.String, Nullable: true},
+	{Name: "ppbin", Type: arrow.BinaryTypes.Binary, Nullable: true},
+	{Name: "pppf64", Type: arrow.PrimitiveTypes.Float64, Nullable: true},
 }, nil)
 
 // RowSchema returns the Arrow schema encoded by RowAppender. It is
@@ -132,6 +136,10 @@ type RowAppender struct {
 	b42 *array.Decimal32Builder
 	b43 *array.Decimal128Builder
 	b44 *array.BinaryDictionaryBuilder
+	b45 *array.Int64Builder
+	b46 *array.StringBuilder
+	b47 *array.BinaryBuilder
+	b48 *array.Float64Builder
 	err error
 }
 
@@ -192,6 +200,10 @@ func NewRowAppender(mem memory.Allocator) *RowAppender {
 		b42: rb.Field(42).(*array.Decimal32Builder),
 		b43: rb.Field(43).(*array.Decimal128Builder),
 		b44: rb.Field(44).(*array.BinaryDictionaryBuilder),
+		b45: rb.Field(45).(*array.Int64Builder),
+		b46: rb.Field(46).(*array.StringBuilder),
+		b47: rb.Field(47).(*array.BinaryBuilder),
+		b48: rb.Field(48).(*array.Float64Builder),
 	}
 }
 
@@ -328,6 +340,26 @@ func (a *RowAppender) Append(v *Row) {
 		a.b44.AppendNull()
 	} else {
 		a.setErr(a.b44.AppendString(*v.PDictS))
+	}
+	if v.PPInt64 == nil || *v.PPInt64 == nil {
+		a.b45.AppendNull()
+	} else {
+		a.b45.Append(**v.PPInt64)
+	}
+	if v.PPStr == nil || *v.PPStr == nil {
+		a.b46.AppendNull()
+	} else {
+		a.b46.Append(**v.PPStr)
+	}
+	if v.PPBin == nil || *v.PPBin == nil || **v.PPBin == nil {
+		a.b47.AppendNull()
+	} else {
+		a.b47.Append(**v.PPBin)
+	}
+	if v.PPPF64 == nil || *v.PPPF64 == nil || **v.PPPF64 == nil {
+		a.b48.AppendNull()
+	} else {
+		a.b48.Append(***v.PPPF64)
 	}
 }
 

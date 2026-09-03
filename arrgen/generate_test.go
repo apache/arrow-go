@@ -131,7 +131,6 @@ func TestGenerateRejects(t *testing.T) {
 		{"BareDecimal128", "decimal128.Num needs a decimal(precision,scale) tag"},
 		{"BareDecimal256", "decimal256.Num needs a decimal(precision,scale) tag"},
 		{"NoColumns", "no Arrow columns"},
-		{"DoublePointer", "multi-level pointer"},
 		{"TimeSlice", "list column"},
 		{"NotAStruct", "not a struct type"},
 		{"Absent", "type not found"},

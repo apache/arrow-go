@@ -133,8 +133,9 @@ Runnable versions of all three are the testable examples in
 
 `bool`, `int8/16/32/64`, `int`, `uint8/16/32/64`, `uint`, `float32/64`,
 `string`, `[]byte`, `time.Time`, `time.Duration`, `decimal.Decimal32`,
-`decimal.Decimal64`, `decimal128.Num`, `decimal256.Num`, and a pointer to any of
-those for a nullable column.
+`decimal.Decimal64`, `decimal128.Num`, `decimal256.Num`, and one or more
+pointers to any of those for a nullable column - a nil at any level is a null,
+as it is in `arreflect`.
 
 Tag options are `arreflect`'s: a leading column name, `-` to skip the field, the
 temporal overrides `date32`, `date64`, `time32` and `time64`, `dict`, `view`,
@@ -202,7 +203,7 @@ Batch benchmarks encode 1024 rows per operation.
 | --- | --- | --- | --- |
 | `MetricBatch` (4 columns) | 69.6 µs, 97 allocs | 30.5 µs, 52 allocs | **2.3x faster** |
 | `FixedBatch` (5 fixed-width columns) | 72.9 µs, 96 allocs | 26.7 µs, 46 allocs | **2.7x faster** |
-| `RowBatch` (45 columns) | 985 µs, 3418 allocs | 515 µs, 3118 allocs | **1.9x faster** |
+| `RowBatch` (49 columns) | 870 µs, 3502 allocs | 483 µs, 3174 allocs | **1.8x faster** |
 | `StreamAppend` (per row) | 73.2 ns | 27.5 ns, **0 allocs** | **2.7x faster** |
 | `Schema` | 6.4 µs, 131 allocs | 1.8 ns, **0 allocs** | |
 

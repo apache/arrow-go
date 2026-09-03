@@ -164,7 +164,7 @@ func genForType(pkg *packages.Package, name string) (genType, error) {
 			Index:       i,
 			Name:        c.name,
 			GoField:     c.goField,
-			Nullable:    c.nullable,
+			Nullable:    c.nullable(),
 			ArrowType:   c.spec.arrowType,
 			BuilderType: c.spec.builderType,
 			BuilderVar:  fmt.Sprintf("b%d", i),
@@ -209,9 +209,13 @@ func findStruct(pkg *packages.Package, name string) (*types.Struct, error) {
 type column struct {
 	name     string
 	goField  string
-	nullable bool
+	ptrDepth int // pointer levels between the field and its value
 	spec     colSpec
 }
+
+// nullable reports whether the column admits nulls, which for arreflect is a
+// question about the field's outermost pointer and nothing else.
+func (c column) nullable() bool { return c.ptrDepth > 0 }
 
 // collectColumns walks the struct's fields in declaration order, which is the
 // order arreflect settles on for a flat struct. Embedded fields are rejected
@@ -255,23 +259,25 @@ func collectColumns(st *types.Struct) ([]column, error) {
 		}
 		seen[name] = f.Name()
 
-		spec, nullable, err := resolveColumn(f.Type(), opts)
+		spec, ptrDepth, err := resolveColumn(f.Type(), opts)
 		if err != nil {
 			return nil, fmt.Errorf("field %s: %w", f.Name(), err)
 		}
-		cols = append(cols, column{name: name, goField: f.Name(), nullable: nullable, spec: spec})
+		cols = append(cols, column{name: name, goField: f.Name(), ptrDepth: ptrDepth, spec: spec})
 	}
 	return cols, nil
 }
 
 // renderAppend emits the append statement for one column, wrapping it in the
-// null guards the reflection path applies: a nil pointer is a null, and so is a
-// nil []byte even when the column itself is not nullable.
+// null guards the reflection path applies: a nil pointer at any level is a
+// null, and so is a nil []byte even when the column itself is not nullable.
 func renderAppend(idx int, c column) string {
 	bld := fmt.Sprintf("a.b%d", idx)
-	val, recv := "v."+c.goField, "v."+c.goField
-	if c.nullable {
-		val, recv = "*v."+c.goField, "(*v."+c.goField+")"
+	val := strings.Repeat("*", c.ptrDepth) + "v." + c.goField
+	recv := val
+	if c.ptrDepth > 0 {
+		// A method on the value has to bind to the value, not to a pointer.
+		recv = "(" + val + ")"
 	}
 
 	stmt := c.spec.appendStmt(bld, recv, val)
@@ -279,15 +285,20 @@ func renderAppend(idx int, c column) string {
 		stmt = "a.setErr(" + stmt + ")"
 	}
 
-	var guard string
-	switch {
-	case c.nullable && c.spec.nilable:
-		guard = fmt.Sprintf("v.%s == nil || *v.%s == nil", c.goField, c.goField)
-	case c.nullable, c.spec.nilable:
-		guard = fmt.Sprintf("v.%s == nil", c.goField)
-	default:
+	// One nil check per pointer level, plus one on the value itself when a nil
+	// value is a null in its own right.
+	levels := c.ptrDepth
+	if c.spec.nilable {
+		levels++
+	}
+	if levels == 0 {
 		return stmt
 	}
+	checks := make([]string, levels)
+	for i := range checks {
+		checks[i] = strings.Repeat("*", i) + "v." + c.goField + " == nil"
+	}
+	guard := strings.Join(checks, " || ")
 
 	// A statement that is already a block (a time-of-day column scopes a local)
 	// sheds its braces on the way into the guard's else, which would otherwise

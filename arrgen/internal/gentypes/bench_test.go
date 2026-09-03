@@ -94,7 +94,7 @@ func BenchmarkMetricBatch(b *testing.B) {
 }
 
 // BenchmarkRowBatch runs the same comparison over the wide fixture, where a
-// row costs 45 columns of reflection instead of four.
+// row costs 49 columns of reflection instead of four.
 func BenchmarkRowBatch(b *testing.B) {
 	rows := makeRows(benchRows)
 	mem := memory.DefaultAllocator

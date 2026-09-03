@@ -47,8 +47,8 @@
 //
 // bool, int8/16/32/64, int, uint8/16/32/64, uint, float32/64, string, []byte,
 // time.Time, time.Duration, decimal.Decimal32, decimal.Decimal64,
-// decimal128.Num and decimal256.Num, plus a pointer to any of those for a
-// nullable column.
+// decimal128.Num and decimal256.Num, plus one or more pointers to any of those
+// for a nullable column - a nil at any level is a null, as it is in arreflect.
 //
 // Tag options mirror arreflect: a leading name, "-" to skip a field, the
 // temporal overrides date32, date64, time32 and time64, dict, view, large, and

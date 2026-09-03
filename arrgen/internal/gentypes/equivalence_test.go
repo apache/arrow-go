@@ -156,6 +156,21 @@ func makeRows(n int) []gentypes.Row {
 		dec128 := decimal128.FromU64(uint64(i))
 		r.PDate32, r.PDate64, r.PTime64, r.PDur, r.PDec32, r.PDictS = &ts, &ts, &ts, &dur, &dec, &ds
 		r.PDec128 = &dec128
+
+		// Multi-level pointers. Every fourth row nils the inner level while the
+		// outer one stays set, so the per-level guards are covered separately
+		// rather than only ever failing at the first.
+		pi64, pf64, pstr := &i64, &f64, &s
+		ppf64 := &pf64
+		r.PPInt64, r.PPStr, r.PPPF64 = &pi64, &pstr, &ppf64
+		ppbin := &bin
+		if i%4 == 1 {
+			ppbin = nil // a nil inner pointer behind a set outer one
+		} else if i%4 == 2 {
+			var nilBin []byte
+			ppbin = &nilBin // a set pointer to a nil []byte
+		}
+		r.PPBin = &ppbin
 		rows[i] = r
 	}
 	return rows
@@ -190,7 +205,7 @@ func TestFixedSchemaMatchesArreflect(t *testing.T) {
 
 // compareSchemas asserts got and want are the same schema, field for field.
 // Schema.Equal would answer the same question in one call, but a mismatch on a
-// 45-column fixture is only actionable if the failure names the column.
+// 49-column fixture is only actionable if the failure names the column.
 func compareSchemas(t *testing.T, got, want *arrow.Schema) {
 	t.Helper()
 	if got.NumFields() != want.NumFields() {
