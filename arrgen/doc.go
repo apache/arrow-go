@@ -48,7 +48,7 @@
 // bool, int8/16/32/64, int, uint8/16/32/64, uint, float32/64, string, []byte,
 // time.Time, time.Duration, decimal.Decimal32, decimal.Decimal64,
 // decimal128.Num and decimal256.Num, plus one or more pointers to any of those
-// for a nullable column - a nil at any level is a null, as it is in arreflect.
+// for a nullable column. A nil at any level is a null, as it is in arreflect.
 //
 // Tag options mirror arreflect: a leading name, "-" to skip a field, the
 // temporal overrides date32, date64, time32 and time64, dict, view, large, and
@@ -56,16 +56,16 @@
 //
 // A time.Time field must carry one of the four temporal tags, and a
 // decimal128.Num or decimal256.Num field must carry a decimal(precision,scale)
-// tag. Untagged, all three are Go structs that arreflect's inferArrowType
-// resolves through inferStructType - it switches on reflect.Kind before it
-// reaches the types it matches by identity - so it infers an empty struct<> and
-// drops the value. Generating the column Arrow means here would put the two
-// paths out of step, so arrgen rejects those spellings instead. One consequence
-// is that arrgen cannot emit a TIMESTAMP column at all: ",timestamp" is
-// rejected along with the untagged spelling.
+// tag. All three are Go structs, and arreflect's inferArrowType switches on
+// reflect.Kind before it reaches the types it matches by identity, so untagged
+// it resolves them through inferStructType, infers an empty struct<>, and drops
+// the value. Generating the column Arrow means here would put the two paths out
+// of step, so arrgen rejects those spellings. One consequence: arrgen cannot
+// emit a TIMESTAMP column at all, since ",timestamp" is rejected along with the
+// untagged spelling.
 //
-// Anything arrgen cannot map exactly the way arreflect would - nested structs,
-// slices other than []byte, arrays, maps, embedded fields, named scalar types -
-// is a generate-time error naming the field, never a silently dropped column.
-// Those structs still work with arreflect at runtime.
+// Anything arrgen cannot map exactly the way arreflect would is a generate-time
+// error naming the field, never a silently dropped column: nested structs,
+// slices other than []byte, arrays, maps, embedded fields and named scalar
+// types. Those structs still work with arreflect at runtime.
 package arrgen

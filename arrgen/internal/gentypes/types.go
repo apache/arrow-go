@@ -83,9 +83,9 @@ type Row struct {
 	PDec128 *decimal128.Num    `arrow:"pdec128,decimal(20,3)"`
 	PDictS  *string            `arrow:"pds,dict"`
 
-	// Multi-level pointers: arreflect walks to the value and nulls the column
-	// if any level is nil, so these cover the guard renderAppend emits per
-	// level - and, for ppbin, a nil []byte behind two of them.
+	// Multi-level pointers. arreflect walks down to the value and writes a null
+	// if any level is nil, so these cover the nil check renderAppend emits per
+	// level, and for ppbin a nil []byte behind two of them.
 	PPInt64 **int64    `arrow:"ppi64"`
 	PPStr   **string   `arrow:"pps"`
 	PPBin   **[]byte   `arrow:"ppbin"`

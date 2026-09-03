@@ -158,8 +158,8 @@ func makeRows(n int) []gentypes.Row {
 		r.PDec128 = &dec128
 
 		// Multi-level pointers. Every fourth row nils the inner level while the
-		// outer one stays set, so the per-level guards are covered separately
-		// rather than only ever failing at the first.
+		// outer one stays set, so each per-level nil check is covered instead of
+		// only ever failing at the first.
 		pi64, pf64, pstr := &i64, &f64, &s
 		ppf64 := &pf64
 		r.PPInt64, r.PPStr, r.PPPF64 = &pi64, &pstr, &ppf64
@@ -231,8 +231,8 @@ func compareSchemas(t *testing.T, got, want *arrow.Schema) {
 // columns. Everything else in this package - the benchmarks, the allocation
 // assertions - is only interesting because this holds.
 //
-// Every column is compared: arrgen rejects at generate time any field it
-// cannot map the way arreflect would, so there is nothing here to excuse.
+// Every column is compared. arrgen rejects at generate time any field it cannot
+// map the way arreflect would, so nothing needs skipping here.
 func TestRowRecordMatchesArreflect(t *testing.T) {
 	for _, n := range []int{0, 1, 2, 3, 64} {
 		t.Run(fmt.Sprintf("rows=%d", n), func(t *testing.T) {

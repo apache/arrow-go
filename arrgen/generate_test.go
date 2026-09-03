@@ -228,19 +228,17 @@ func TestGenerateMissingPackage(t *testing.T) {
 	}
 }
 
-// TestArreflectCannotInferStructScalars pins the upstream behavior that the
-// rejections above exist for.
+// TestArreflectCannotInferStructScalars pins the upstream behavior behind the
+// rejections above. time.Time, decimal128.Num and decimal256.Num are Go structs
+// that Arrow models as scalars, and as struct fields arreflect infers an empty
+// struct<> for all three.
 //
-// time.Time, decimal128.Num and decimal256.Num are Go structs that Arrow models
-// as scalars. arreflect's inferArrowType switches on reflect.Kind before it
-// reaches the types it matches by identity, so as a struct field each one is
-// resolved by inferStructType, which sees only unexported fields and yields an
-// empty struct<>. arrgen refuses to generate the column Arrow means here
-// because doing so would break the equivalence it promises.
+// arreflect's own tests assert the intended mapping against
+// inferPrimitiveArrowType, which a struct field never reaches, so they pass
+// either way.
 //
-// If arreflect learns to infer these, this test fails - which is good news, not
-// a regression. It means the rejections in mapping.go can be dropped and the
-// untagged spellings generated instead.
+// If arreflect learns to infer these, this test fails. That is the signal to
+// drop the rejections in mapping.go and generate the columns instead.
 func TestArreflectCannotInferStructScalars(t *testing.T) {
 	type row struct {
 		Time time.Time      `arrow:"t"`

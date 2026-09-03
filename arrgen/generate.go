@@ -213,8 +213,8 @@ type column struct {
 	spec     colSpec
 }
 
-// nullable reports whether the column admits nulls, which for arreflect is a
-// question about the field's outermost pointer and nothing else.
+// nullable reports whether the column admits nulls. arreflect decides this from
+// the outermost pointer alone.
 func (c column) nullable() bool { return c.ptrDepth > 0 }
 
 // collectColumns walks the struct's fields in declaration order, which is the
@@ -268,9 +268,9 @@ func collectColumns(st *types.Struct) ([]column, error) {
 	return cols, nil
 }
 
-// renderAppend emits the append statement for one column, wrapping it in the
-// null guards the reflection path applies: a nil pointer at any level is a
-// null, and so is a nil []byte even when the column itself is not nullable.
+// renderAppend emits the append statement for one column, wrapped in the same
+// nil checks the reflection path applies: a nil pointer at any level means a
+// null, and so does a nil []byte even when the column is not nullable.
 func renderAppend(idx int, c column) string {
 	bld := fmt.Sprintf("a.b%d", idx)
 	val := strings.Repeat("*", c.ptrDepth) + "v." + c.goField
@@ -286,7 +286,7 @@ func renderAppend(idx int, c column) string {
 	}
 
 	// One nil check per pointer level, plus one on the value itself when a nil
-	// value is a null in its own right.
+	// value counts as a null.
 	levels := c.ptrDepth
 	if c.spec.nilable {
 		levels++
@@ -298,13 +298,13 @@ func renderAppend(idx int, c column) string {
 	for i := range checks {
 		checks[i] = strings.Repeat("*", i) + "v." + c.goField + " == nil"
 	}
-	guard := strings.Join(checks, " || ")
+	cond := strings.Join(checks, " || ")
 
 	// A statement that is already a block (a time-of-day column scopes a local)
-	// sheds its braces on the way into the guard's else, which would otherwise
-	// nest two sets for no reason.
+	// sheds its braces on the way into the else, which would otherwise nest two
+	// sets for no reason.
 	inner := strings.TrimSuffix(strings.TrimPrefix(stmt, "{\n"), "\n}")
-	return fmt.Sprintf("if %s {\n%s.AppendNull()\n} else {\n%s\n}", guard, bld, inner)
+	return fmt.Sprintf("if %s {\n%s.AppendNull()\n} else {\n%s\n}", cond, bld, inner)
 }
 
 type genFile struct {

@@ -105,11 +105,10 @@ git diff --exit-code -- .
 
 popd
 
-# The run above resolves the released arrow-go that arrgen's go.mod names, which
-# is what a consumer of the generator gets. Run it against this tree as well: the
-# equivalence tests are what catch a change to arrow/array/arreflect that the
-# generated encoders no longer match, and in module mode they would not see one
-# until after the next release.
+# The run above uses the released arrow-go that arrgen's go.mod names, which is
+# what a consumer gets. Run it against this tree too: the equivalence tests are
+# what catch an arrow/array/arreflect change the generated encoders no longer
+# match, and in module mode they would not see one until the next release.
 pushd "${source_dir}"
 
 rm -f go.work go.work.sum

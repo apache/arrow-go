@@ -29,7 +29,7 @@ fields straight into typed Arrow builders.
 
 It lives in its own Go module, so it is opt-in twice over: nothing in
 `github.com/apache/arrow-go/v18` imports it, and the code it emits imports only
-`arrow`, `arrow/array` and `arrow/memory` - never `arrgen` itself. Generating is
+`arrow`, `arrow/array` and `arrow/memory`, never `arrgen` itself. Generating is
 a build-time step; your binary does not grow a dependency for it.
 
 ## Quick start
@@ -77,9 +77,8 @@ module files:
 ```
 
 Both forms need `arrgen` to be resolvable. As a nested module it is versioned
-under its own `arrgen/vX.Y.Z` tags, and until the first of those is published
-neither form resolves from a released version - use a `replace` directive
-pointing at a checkout in the meantime:
+under its own `arrgen/vX.Y.Z` tags. Until the first of those is published,
+neither form resolves from a released version, so point at a checkout instead:
 
 ```sh
 go mod edit -replace github.com/apache/arrow-go/arrgen=../arrow-go/arrgen
@@ -93,7 +92,7 @@ this module use that spelling because this module is `arrgen`.
 ### What you get
 
 ```go
-// One batch from a slice - the drop-in for arreflect.RecordFromSlice.
+// One batch from a slice. The drop-in for arreflect.RecordFromSlice.
 rec, err := telemetry.MetricRecordBatch(mem, metrics)
 
 // Or stream rows in and cut batches where you want them.
@@ -134,15 +133,16 @@ Runnable versions of all three are the testable examples in
 `bool`, `int8/16/32/64`, `int`, `uint8/16/32/64`, `uint`, `float32/64`,
 `string`, `[]byte`, `time.Time`, `time.Duration`, `decimal.Decimal32`,
 `decimal.Decimal64`, `decimal128.Num`, `decimal256.Num`, and one or more
-pointers to any of those for a nullable column - a nil at any level is a null,
+pointers to any of those for a nullable column. A nil at any level is a null,
 as it is in `arreflect`.
 
 Tag options are `arreflect`'s: a leading column name, `-` to skip the field, the
 temporal overrides `date32`, `date64`, `time32` and `time64`, `dict`, `view`,
 `large`, and `decimal(precision,scale)`.
 
-Two of those types need an explicit tag, because the untagged spelling is one
-`arreflect` cannot infer as a struct field - see [below](#the-two-types-that-need-a-tag):
+Two of those types need an explicit tag, because `arreflect` cannot infer the
+untagged spelling as a struct field. See
+[below](#the-two-types-that-need-a-tag):
 
 | Field | Required tag |
 | --- | --- |
@@ -162,7 +162,8 @@ The point of matching `arreflect`'s tag dialect is that switching between the
 two paths is a call-site change and nothing else. `internal/gentypes` holds a
 fixture with one field for every supported column shape and asserts, on every
 run, that the generated encoder and `arreflect` produce the same schema and the
-same column data for the same input - every column, with nothing excused.
+same column data for the same input. Every column is compared, with no
+exceptions.
 
 ### The two types that need a tag
 
@@ -176,23 +177,25 @@ an empty `struct<>`, and the value is then dropped. Today that affects:
 | `time.Time`, untagged or `,timestamp` | `struct<>` |
 | `decimal128.Num` / `decimal256.Num`, untagged | `struct<>` |
 
-A tag naming the Arrow type outright - `,date32`, `,decimal(20,3)` - rescues the
-field, because `arreflect` applies the tag after the inferred type.
-`arreflect`'s own tests only pass these types as the top-level element of a
-slice, where `buildArray` special-cases them before the `reflect.Struct` branch
-and they encode correctly.
+A tag naming the Arrow type survives, such as `,date32` or `,decimal(20,3)`,
+because `arreflect` applies tags after inference. `arreflect.FromSlice` also
+handles them correctly at the top level, returning `timestamp[ns, tz=UTC]` and
+`decimal(38, 0)`, because `buildArray` matches them by type rather than reaching
+`inferStructType`.
 
-`arrgen` could emit the column Arrow plainly means here, and an earlier revision
-did. But then generated code and `arreflect` would disagree about the schema,
-which is the one thing this generator exists not to do, so the untaggable
-spellings are a generate-time error naming the field and the tag that fixes it
-instead. The practical consequence is that **`arrgen` cannot emit a `TIMESTAMP`
-column**: `,timestamp` is rejected along with the untagged spelling, since
-`arreflect` infers `struct<>` for both.
+`arreflect`'s own tests assert the intended mapping against
+`inferPrimitiveArrowType`, which a struct field never reaches, so they pass
+either way.
 
-`TestArreflectCannotInferStructScalars` pins that upstream behavior. If
-`arrow/array/arreflect` is fixed, that test fails and tells us to drop these
-rejections and generate the columns instead.
+`arrgen` could emit the column Arrow means here, and an earlier revision did.
+Generated code and `arreflect` would then disagree about the schema, so instead
+these spellings are a generate-time error naming the field and the tag that
+fixes it. One consequence: **`arrgen` cannot emit a `TIMESTAMP` column**, since
+`,timestamp` is rejected along with the untagged spelling.
+
+`TestArreflectCannotInferStructScalars` pins the upstream behavior. If
+`arrow/array/arreflect` is fixed, that test fails, which is the signal to drop
+these rejections and generate the columns.
 
 ## Performance
 
@@ -213,7 +216,7 @@ Three things move the numbers:
   `Float64Builder.Append`. The reflection path resolves a field index, produces
   a `reflect.Value`, and dispatches on the builder's dynamic type, per value.
 - **Builder lookup.** Typed builders are resolved once, in the constructor, so
-  `Append` does no type assertions at all - not even the
+  `Append` does no type assertions at all, not even the
   `b.Field(i).(*array.Float64Builder)` a hand-written encoder usually repeats.
 - **Schema construction.** The schema is a package-level variable rather than a
   struct walk per call.
@@ -238,9 +241,9 @@ default it builds against that rather than the tree it sits in:
 cd arrgen && go test ./...
 ```
 
-To test it against the local arrow-go instead - which is what you want when
-changing `arrow/array/arreflect`, since the equivalence tests are what catch a
-divergence - put a workspace over the two modules:
+To test it against the local arrow-go instead, put a workspace over the two
+modules. This is what you want when changing `arrow/array/arreflect`, since the
+equivalence tests are what catch a divergence:
 
 ```sh
 go work init . ./arrgen   # from the repository root; go.work is gitignored
@@ -257,7 +260,7 @@ the repository, and runs `go generate ./...` followed by `git diff
 binary, which is what fails first when you edit a struct and forget to
 regenerate.
 
-The golden file in `testdata` is the review surface for generator changes:
+The golden file in `testdata` is where generator changes get reviewed:
 `go test ./arrgen/ -update` rewrites it, and the resulting diff is exactly what
 users would see in their own regenerated code.
 
@@ -266,6 +269,6 @@ users would see in their own regenerated code.
 As a nested module, `arrgen` is versioned and tagged independently of the root
 module: its tags are `arrgen/vX.Y.Z`, not `vX.Y.Z`. It cannot share the root's
 `v18` line, because a module path without a `/vN` suffix is limited to v0 and
-v1. Nothing in the release scripts tags it yet - that is a deliberate omission
-for maintainers to decide on, not an oversight, and it is why the Quick Start
-cannot yet name a version that resolves.
+v1. Nothing in the release scripts tags it yet. That is a deliberate omission
+for maintainers to decide on, and it is why the Quick Start cannot yet name a
+version that resolves.
