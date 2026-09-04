@@ -32,6 +32,16 @@ import (
 var benchmarkFilterOutputLength int
 
 func BenchmarkFilterInt32MixedMasks(b *testing.B) {
+	benchmarkFilter32MixedMasks(b, makeFilterInt32BenchmarkInput)
+}
+
+func BenchmarkFilterFloat32MixedMasks(b *testing.B) {
+	benchmarkFilter32MixedMasks(b, makeFilterFloat32BenchmarkInput)
+}
+
+func benchmarkFilter32MixedMasks(b *testing.B,
+	makeInput func(*testing.B, int, func(int) bool) (arrow.Array, arrow.Array),
+) {
 	patterns := []struct {
 		name     string
 		selected func(int) bool
@@ -50,7 +60,7 @@ func BenchmarkFilterInt32MixedMasks(b *testing.B) {
 		for _, pattern := range patterns {
 			pattern := pattern
 			b.Run(fmt.Sprintf("size=%d/%s", size, pattern.name), func(b *testing.B) {
-				values, filter := makeFilterInt32BenchmarkInput(b, size, pattern.selected)
+				values, filter := makeInput(b, size, pattern.selected)
 				defer values.Release()
 				defer filter.Release()
 
@@ -70,16 +80,80 @@ func BenchmarkFilterInt32MixedMasks(b *testing.B) {
 	}
 }
 
+func BenchmarkFilterInt32FallbackControls(b *testing.B) {
+	controls := []struct {
+		name   string
+		size   int
+		offset int64
+	}{
+		{name: "unaligned-filter-offset", size: 1 << 16, offset: 3},
+		{name: "short", size: 56},
+		{name: "non-multiple-of-eight", size: 1<<16 + 1},
+	}
+
+	for _, control := range controls {
+		control := control
+		b.Run(control.name, func(b *testing.B) {
+			values, filter := makeFilterInt32BenchmarkInputWithOffset(b, control.size, control.offset,
+				func(i int) bool { return i%2 == 0 })
+			defer values.Release()
+			defer filter.Release()
+
+			b.ReportAllocs()
+			b.SetBytes(int64(control.size * 4))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result, err := compute.FilterArray(context.Background(), values, filter, *compute.DefaultFilterOptions())
+				if err != nil {
+					b.Fatal(err)
+				}
+				benchmarkFilterOutputLength = result.Len()
+				result.Release()
+			}
+		})
+	}
+}
+
 func makeFilterInt32BenchmarkInput(b *testing.B, size int, selected func(int) bool) (arrow.Array, arrow.Array) {
+	return makeFilterInt32BenchmarkInputWithOffset(b, size, 0, selected)
+}
+
+func makeFilterInt32BenchmarkInputWithOffset(b *testing.B, size int, offset int64, selected func(int) bool) (arrow.Array, arrow.Array) {
 	b.Helper()
 	mem := memory.DefaultAllocator
 
 	valuesBuilder := array.NewInt32Builder(mem)
-	valuesBuilder.Reserve(size)
-	for i := 0; i < size; i++ {
+	valuesBuilder.Reserve(size + int(offset))
+	for i := 0; i < size+int(offset); i++ {
 		valuesBuilder.Append(int32(i))
 	}
-	values := valuesBuilder.NewInt32Array()
+	valuesBase := valuesBuilder.NewInt32Array()
+	valuesBuilder.Release()
+	values := array.NewSlice(valuesBase, offset, offset+int64(size))
+	valuesBase.Release()
+
+	filterBuilder := array.NewBooleanBuilder(mem)
+	filterBuilder.Reserve(size + int(offset))
+	for i := 0; i < size+int(offset); i++ {
+		filterBuilder.Append(selected(i))
+	}
+	filterBase := filterBuilder.NewBooleanArray()
+	filterBuilder.Release()
+	filter := array.NewSlice(filterBase, offset, offset+int64(size))
+	filterBase.Release()
+	return values, filter
+}
+
+func makeFilterFloat32BenchmarkInput(b *testing.B, size int, selected func(int) bool) (arrow.Array, arrow.Array) {
+	b.Helper()
+	mem := memory.DefaultAllocator
+
+	valuesBuilder := array.NewFloat32Builder(mem)
+	valuesBuilder.Reserve(size)
+	for i := 0; i < size; i++ {
+		valuesBuilder.Append(float32(i))
+	}
+	values := valuesBuilder.NewFloat32Array()
 	valuesBuilder.Release()
 
 	filterBuilder := array.NewBooleanBuilder(mem)
