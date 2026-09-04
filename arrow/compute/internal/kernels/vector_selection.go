@@ -21,6 +21,7 @@ package kernels
 import (
 	"fmt"
 	"math"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -99,19 +100,6 @@ type builder[T any] interface {
 	UnsafeAppendBoolToBitmap(bool)
 }
 
-func unsafeAppendRange[T arrow.IntType | arrow.UintType](b *bufferBuilder[T], start T, n int) {
-	if n == 0 {
-		return
-	}
-
-	b.reserve(n)
-	values := arrow.GetData[T](b.data[b.sz:])[:n]
-	for i := range values {
-		values[i] = start + T(i)
-	}
-	b.sz += len(arrow.GetBytes(values))
-}
-
 func getTakeIndices[T arrow.IntType | arrow.UintType](mem memory.Allocator, filter *exec.ArraySpan, nullSelect NullSelectionBehavior) arrow.ArrayData {
 	var (
 		filterData      = filter.Buffers[1].Buf
@@ -183,11 +171,15 @@ func getTakeIndices[T arrow.IntType | arrow.UintType](mem memory.Allocator, filt
 		return result.Data()
 	}
 
-	bldr := newBufferBuilder[T](mem)
 	if haveFilterNulls {
 		// the filter may have nulls, so we scan the validity bitmap
 		// and the filter data bitmap together
 		debug.Assert(nullSelect == DropNulls, "incorrect nullselect logic")
+		length := getFilterOutputSize(filter, DropNulls)
+		outBuf := memory.NewBufferWithAllocator(mem.Allocate(int(length)*int(unsafe.Sizeof(*new(T)))), mem)
+		defer outBuf.Release()
+		out := arrow.GetData[T](outBuf.Bytes())
+		outPos := 0
 
 		// position relative to start of the filter
 		var pos T
@@ -199,15 +191,18 @@ func getTakeIndices[T arrow.IntType | arrow.UintType](mem memory.Allocator, filt
 			andBlock := filterCounter.NextAndWord()
 			if andBlock.AllSet() {
 				// all the values are selected and non-null
-				unsafeAppendRange(bldr, pos, int(andBlock.Len))
-				pos += T(andBlock.Len)
+				for i := 0; i < int(andBlock.Len); i++ {
+					out[outPos] = pos
+					outPos++
+					pos++
+				}
 				posWithOffset += int64(andBlock.Len)
 			} else if !andBlock.NoneSet() {
 				// some values are false or null
-				bldr.reserve(int(andBlock.Popcnt))
 				for i := 0; i < int(andBlock.Len); i++ {
 					if bitutil.BitIsSet(filterIsValid, int(posWithOffset)) && bitutil.BitIsSet(filterData, int(posWithOffset)) {
-						bldr.unsafeAppend(pos)
+						out[outPos] = pos
+						outPos++
 					}
 					pos++
 					posWithOffset++
@@ -217,20 +212,25 @@ func getTakeIndices[T arrow.IntType | arrow.UintType](mem memory.Allocator, filt
 				posWithOffset += int64(andBlock.Len)
 			}
 		}
+		return array.NewData(idxType, int(length), []*memory.Buffer{nil, outBuf}, nil, 0, 0)
 	} else {
 		// filter has no nulls, so we only need to look for true values
+		length := int64(bitutil.CountSetBits(filterData, int(filter.Offset), int(filter.Len)))
+		outBuf := memory.NewBufferWithAllocator(mem.Allocate(int(length)*int(unsafe.Sizeof(*new(T)))), mem)
+		defer outBuf.Release()
+		out := arrow.GetData[T](outBuf.Bytes())
+		outPos := 0
 		bitutils.VisitSetBitRuns(filterData, filter.Offset, filter.Len,
-			func(pos, length int64) error {
+			func(pos, runLength int64) error {
 				// append consecutive run of indices
-				unsafeAppendRange(bldr, T(pos), int(length))
+				for i := int64(0); i < runLength; i++ {
+					out[outPos] = T(pos + i)
+					outPos++
+				}
 				return nil
 			})
+		return array.NewData(idxType, int(length), []*memory.Buffer{nil, outBuf}, nil, 0, 0)
 	}
-
-	length := bldr.len()
-	outBuf := bldr.finish()
-	defer outBuf.Release()
-	return array.NewData(idxType, length, []*memory.Buffer{nil, outBuf}, nil, 0, 0)
 }
 
 func GetTakeIndices(mem memory.Allocator, filter *exec.ArraySpan, nullSelect NullSelectionBehavior) (arrow.ArrayData, error) {
