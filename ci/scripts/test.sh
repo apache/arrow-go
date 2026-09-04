@@ -101,7 +101,12 @@ go test "${test_args[@]}" ./...
 # package, but only running the committed go:generate directives covers the
 # command wrapper and the flags they pass it.
 go generate ./...
-git diff --exit-code -- .
+
+# The release verification runs this script over an extracted archive, which is
+# not a git checkout. Compare the regenerated files only in a repository.
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git diff --exit-code -- .
+fi
 
 popd
 
