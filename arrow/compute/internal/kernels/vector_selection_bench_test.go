@@ -34,11 +34,20 @@ type filterBenchmarkPattern struct {
 }
 
 var filterBenchmarkPatterns = []filterBenchmarkPattern{
-	{name: "all", selected: func(int) bool { return true }},
+	{name: "all-selected", selected: func(int) bool { return true }},
+	{name: "all-clear", selected: func(int) bool { return false }},
 	{name: "long-runs", selected: func(i int) bool { return i%1024 < 900 }},
 	{name: "alternating", selected: func(i int) bool { return i%2 == 0 }},
 	{name: "short-runs", selected: func(i int) bool { return i%100 < 10 }},
+	{name: "random", selected: func(i int) bool { return getTakeIndicesBenchmarkRandom(i) }},
 	{name: "nullable-long-runs", selected: func(i int) bool { return i%1024 < 900 }, nullable: true},
+}
+
+func getTakeIndicesBenchmarkRandom(i int) bool {
+	x := uint32(i)*747796405 + 2891336453
+	x = ((x >> ((x >> 28) + 4)) ^ x) * 277803737
+	x = (x >> 22) ^ x
+	return x&1 == 0
 }
 
 func makeFilterBenchmarkSpan(tb testing.TB, n int, pattern filterBenchmarkPattern) *exec.ArraySpan {

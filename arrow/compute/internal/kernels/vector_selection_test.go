@@ -201,3 +201,157 @@ func TestGetTakeIndicesBatchedRanges(t *testing.T) {
 		})
 	}
 }
+
+func TestGetTakeIndicesUint32Coverage(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	const length = 65536
+	values := make([]bool, length)
+	want := make([]uint32, 0, length/2)
+	for i := range values {
+		mask := byte(i / 8)
+		values[i] = mask&(1<<uint(i%8)) != 0
+		if values[i] {
+			want = append(want, uint32(i))
+		}
+	}
+
+	tests := []struct {
+		name   string
+		filter arrow.Array
+		want   []uint32
+	}{
+		{
+			name:   "all_masks",
+			filter: makeBooleanFilter(t, values, nil, mem),
+			want:   want,
+		},
+		{
+			name:   "aligned_offset",
+			filter: makeSlicedBooleanFilter(t, values, nil, 8, mem),
+			want:   want,
+		},
+		{
+			name:   "unaligned_offset",
+			filter: makeSlicedBooleanFilter(t, values, nil, 1, mem),
+			want:   want,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			defer tc.filter.Release()
+			var span exec.ArraySpan
+			span.SetMembers(tc.filter.Data())
+
+			result, err := GetTakeIndices(mem, &span, DropNulls)
+			require.NoError(t, err)
+			defer result.Release()
+			require.Equal(t, arrow.PrimitiveTypes.Uint32.ID(), result.DataType().ID())
+			got := arrow.GetData[uint32](result.Buffers()[1].Bytes())
+			require.Len(t, got, len(tc.want))
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("value at index %d: got %d, want %d", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+
+	t.Run("nullable_filter_uses_scalar_path", func(t *testing.T) {
+		valid := make([]bool, length)
+		for i := range valid {
+			valid[i] = true
+		}
+		valid[8] = false
+		filter := makeBooleanFilter(t, values, valid, mem)
+		defer filter.Release()
+		var span exec.ArraySpan
+		span.SetMembers(filter.Data())
+
+		wantDrop := make([]uint32, 0, len(want)-1)
+		for _, value := range want {
+			if value != 8 {
+				wantDrop = append(wantDrop, value)
+			}
+		}
+		result, err := GetTakeIndices(mem, &span, DropNulls)
+		require.NoError(t, err)
+		assertTakeIndices(t, result, wantDrop, nil)
+		result.Release()
+
+		result, err = GetTakeIndices(mem, &span, EmitNulls)
+		require.NoError(t, err)
+		defer result.Release()
+		wantValid := make([]bool, len(want))
+		for i := range wantValid {
+			wantValid[i] = true
+		}
+		for i, value := range want {
+			if value == 8 {
+				wantValid[i] = false
+			}
+		}
+		assertTakeIndices(t, result, want, wantValid)
+	})
+
+	t.Run("tail_ignores_padding_bits", func(t *testing.T) {
+		const tailLength = int64(length + 3)
+		data := make([]byte, int(bitutil.BytesForBits(tailLength)))
+		wantTail := make([]uint32, 0, len(want))
+		for i := int64(0); i < tailLength; i++ {
+			mask := byte(i / 8)
+			if mask&(1<<uint(i%8)) != 0 {
+				bitutil.SetBit(data, int(i))
+				wantTail = append(wantTail, uint32(i))
+			}
+		}
+		data[len(data)-1] |= 0xe0
+
+		filterData := array.NewData(arrow.FixedWidthTypes.Boolean, int(tailLength), []*memory.Buffer{
+			nil,
+			memory.NewBufferBytes(data),
+		}, nil, 0, 0)
+		defer filterData.Release()
+		var span exec.ArraySpan
+		span.SetMembers(filterData)
+
+		result, err := GetTakeIndices(mem, &span, DropNulls)
+		require.NoError(t, err)
+		defer result.Release()
+		got := arrow.GetData[uint32](result.Buffers()[1].Bytes())
+		require.Len(t, got, len(wantTail))
+		for i := range got {
+			if got[i] != wantTail[i] {
+				t.Fatalf("value at index %d: got %d, want %d", i, got[i], wantTail[i])
+			}
+		}
+	})
+
+	for _, tc := range []struct {
+		name   string
+		length int
+		wantID arrow.Type
+	}{
+		{name: "uint16_boundary", length: 65534, wantID: arrow.UINT16},
+		{name: "uint32_boundary", length: 65535, wantID: arrow.UINT32},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			values := make([]bool, tc.length)
+			for i := range values {
+				values[i] = true
+			}
+			filter := makeBooleanFilter(t, values, nil, mem)
+			defer filter.Release()
+			var span exec.ArraySpan
+			span.SetMembers(filter.Data())
+
+			result, err := GetTakeIndices(mem, &span, DropNulls)
+			require.NoError(t, err)
+			defer result.Release()
+			require.Equal(t, tc.wantID, result.DataType().ID())
+			require.Equal(t, tc.length, result.Len())
+		})
+	}
+}

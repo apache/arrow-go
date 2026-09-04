@@ -59,6 +59,34 @@ func BenchmarkFilterRecordBatchSerial(b *testing.B) {
 	}
 }
 
+var benchmarkLargeFilterRecordBatchRows int64
+
+func BenchmarkFilterRecordBatchGetTakeIndices(b *testing.B) {
+	for _, numRows := range []int{64 * 1024, 1024 * 1024} {
+		b.Run(fmt.Sprintf("rows=%d", numRows), func(b *testing.B) {
+			batch, filter := makeFilterRecordBatchBenchmarkInput(b, 1, numRows)
+			defer batch.Release()
+			defer filter.Release()
+
+			execCtx := compute.DefaultExecCtx()
+			execCtx.NumParallel = 1
+			ctx := compute.SetExecCtx(context.Background(), execCtx)
+
+			b.ReportAllocs()
+			b.SetBytes(int64(numRows * 8))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result, err := compute.FilterRecordBatch(ctx, batch, filter, compute.DefaultFilterOptions())
+				if err != nil {
+					b.Fatal(err)
+				}
+				benchmarkLargeFilterRecordBatchRows = result.NumRows()
+				result.Release()
+			}
+		})
+	}
+}
+
 func makeFilterRecordBatchBenchmarkInput(b *testing.B, numCols, numRows int) (arrow.RecordBatch, arrow.Array) {
 	b.Helper()
 	mem := memory.DefaultAllocator
