@@ -96,12 +96,13 @@ func compareNeon(typ arrow.Type, op CompareOperator, width, shape int, left, rig
 		case neonCompareScalarArray:
 			assemblyRight = right[:bulk*width]
 		}
-		comparison := _comparison_neon
 		if width <= 2 {
-			comparison = _comparison_narrow_neon
+			_comparison_narrow_neon(int(typ), int(op), shape,
+				unsafe.Pointer(&assemblyLeft[0]), unsafe.Pointer(&assemblyRight[0]), unsafe.Pointer(&out[0]), int64(bulk/8))
+		} else {
+			_comparison_neon(int(typ), int(op), shape,
+				unsafe.Pointer(&assemblyLeft[0]), unsafe.Pointer(&assemblyRight[0]), unsafe.Pointer(&out[0]), int64(bulk/8))
 		}
-		comparison(int(typ), int(op), shape,
-			unsafe.Pointer(&assemblyLeft[0]), unsafe.Pointer(&assemblyRight[0]), unsafe.Pointer(&out[0]), int64(bulk/8))
 	}
 
 	if tail := n - bulk; tail != 0 {
