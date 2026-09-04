@@ -86,9 +86,6 @@ const (
 	alpEncodingLowerFloat32 = float32(-2147483520.0)
 	alpEncodingUpperFloat64 = float64(9223372036854774784.0)
 	alpEncodingLowerFloat64 = float64(-9223372036854774784.0)
-
-	alpNegZeroFloat32Bits = uint32(0x80000000)
-	alpNegZeroFloat64Bits = uint64(0x8000000000000000)
 )
 
 // alpFloat is the set of column types ALP encodes.
@@ -267,20 +264,14 @@ func alpDecode[T alpFloat](encoded int64, exponent, factor int) T {
 	return T(encoded) * alpPow10[T](factor) * alpNegPow10[T](exponent)
 }
 
-// alpIsBasicException reports whether v can never be encoded, whatever the
-// exponent and factor. NaN and the infinities have no integer form, and
-// negative zero would come back as positive zero.
-func alpIsBasicException[T alpFloat](v T) bool {
-	f := float64(v)
-	return math.IsNaN(f) || math.IsInf(f, 0) || (f == 0 && math.Signbit(f))
-}
-
-// alpIsException reports whether v has to be stored verbatim under the given
-// exponent and factor, which is the case when the round trip does not return it
-// unchanged. A NaN is never equal to itself, and a negative zero comes back
-// from the sentinel as a large number, so both compare unequal here.
-func alpIsException[T alpFloat](v T, exponent, factor int) bool {
-	return alpDecode[T](alpEncode(v, exponent, factor), exponent, factor) != v
+// alpTryEncode scales v and reports whether the round trip returns it unchanged.
+// A value that fails has to be stored verbatim as an exception, which is the
+// case for anything with no integer form: a NaN is never equal to itself, and an
+// infinity, an out-of-range magnitude, or a negative zero all encode to the
+// sentinel, which decodes to something else.
+func alpTryEncode[T alpFloat](v T, exponent, factor int) (encoded int64, ok bool) {
+	encoded = alpEncode(v, exponent, factor)
+	return encoded, alpDecode[T](encoded, exponent, factor) == v
 }
 
 // alpBitWidth returns the number of bits needed to hold v.
@@ -366,8 +357,8 @@ func alpEstimateSizeBits[T alpFloat](values []T, exponent, factor int) (sizeBits
 	minEncoded, maxEncoded := int64(math.MaxInt64), int64(math.MinInt64)
 	numExceptions := 0
 	for _, v := range values {
-		e := alpEncode(v, exponent, factor)
-		if alpDecode[T](e, exponent, factor) != v {
+		e, ok := alpTryEncode(v, exponent, factor)
+		if !ok {
 			numExceptions++
 			continue
 		}
@@ -556,12 +547,12 @@ func (enc *alpEncoder[T]) encodeVector(values []T) {
 	enc.excPositions = enc.excPositions[:0]
 	enc.excValues = enc.excValues[:0]
 
-	// A value is an exception when the round trip does not return it unchanged,
-	// which this pass finds out by doing the round trip.
+	// One pass encodes and collects the exceptions, since finding out whether a
+	// value is an exception means encoding it.
 	minValue := int64(math.MaxInt64)
 	for i, v := range values {
-		e := alpEncode(v, params.exponent, params.factor)
-		if alpDecode[T](e, params.exponent, params.factor) != v {
+		e, ok := alpTryEncode(v, params.exponent, params.factor)
+		if !ok {
 			enc.excPositions = append(enc.excPositions, uint16(i))
 			enc.excValues = append(enc.excValues, v)
 			continue
@@ -669,6 +660,9 @@ func (enc *alpEncoder[T]) EstimatedDataEncodedSize() int64 {
 	return int64(len(enc.encodedBuf)) + int64(enc.bufCount*alpEncodedBytes[T]())
 }
 
+// FlushValues writes one page and clears the values it wrote, so that the next
+// Put starts a new page. The exponent and factor shortlist survives, because it
+// describes the column rather than the page.
 func (enc *alpEncoder[T]) FlushValues() (Buffer, error) {
 	if enc.bufCount > 0 {
 		enc.encodeVector(enc.vectorBuf[:enc.bufCount])
@@ -678,6 +672,7 @@ func (enc *alpEncoder[T]) FlushValues() (Buffer, error) {
 	if enc.totalCount == 0 {
 		return enc.encoder.FlushValues()
 	}
+	defer enc.resetPage()
 
 	offsetArraySize := len(enc.vectorSizes) * 4
 	enc.sink.Reserve(alpHeaderSize + offsetArraySize + len(enc.encodedBuf))
@@ -697,15 +692,20 @@ func (enc *alpEncoder[T]) FlushValues() (Buffer, error) {
 	return enc.sink.Finish(), nil
 }
 
-func (enc *alpEncoder[T]) Reset() {
-	enc.encoder.Reset()
-	enc.bufCount = 0
+// resetPage drops the encoded vectors of the page just written.
+func (enc *alpEncoder[T]) resetPage() {
 	enc.totalCount = 0
 	enc.encodedBuf = enc.encodedBuf[:0]
 	enc.vectorSizes = enc.vectorSizes[:0]
+}
+
+func (enc *alpEncoder[T]) Reset() {
+	enc.encoder.Reset()
+	enc.resetPage()
+	enc.bufCount = 0
 	enc.vectorsProcessed = 0
 	enc.cachedPresets = nil
-	enc.presetCounts = make(map[uint32]int)
+	clear(enc.presetCounts)
 }
 
 type alpDecoder[T alpFloat] struct {
@@ -788,7 +788,9 @@ func (dec *alpDecoder[T]) SetData(nvals int, data []byte) error {
 			alpHeaderSize+offsetArraySize, len(data))
 	}
 
-	dec.vectorOffsets = make([]uint32, dec.numVectors)
+	// Grow rather than allocate, so that a column of many pages pays for these
+	// once. The offset array is the one that changes size from page to page.
+	dec.vectorOffsets = slices.Grow(dec.vectorOffsets[:0], dec.numVectors)[:dec.numVectors]
 	for i := range dec.vectorOffsets {
 		dec.vectorOffsets[i] = binary.LittleEndian.Uint32(data[alpHeaderSize+i*4:])
 	}
@@ -796,8 +798,8 @@ func (dec *alpDecoder[T]) SetData(nvals int, data []byte) error {
 	// Vector offsets count from the start of the offset array, so keep the page
 	// from there rather than from the start of the data.
 	dec.bodyData = data[alpHeaderSize:]
-	dec.decodedValues = make([]T, dec.vectorSize)
-	dec.deltas = make([]uint64, dec.vectorSize)
+	dec.decodedValues = slices.Grow(dec.decodedValues[:0], dec.vectorSize)[:dec.vectorSize]
+	dec.deltas = slices.Grow(dec.deltas[:0], dec.vectorSize)[:dec.vectorSize]
 
 	return nil
 }

@@ -689,7 +689,8 @@ func TestAlpFileRoundtrip(t *testing.T) {
 			require.EqualValues(t, len(tc.values), total)
 			require.EqualValues(t, len(tc.values), read)
 
-			// Bit-exact comparison (handles NaN, -0.0 correctly)
+			// Compare the bit patterns, so that a NaN or a negative zero has to come
+			// back exactly as it went in.
 			for i := range tc.values {
 				assert.Equal(t, math.Float64bits(tc.values[i]), math.Float64bits(output[i]),
 					"index %d: got %v (bits %016x), want %v (bits %016x)",
@@ -699,6 +700,72 @@ func TestAlpFileRoundtrip(t *testing.T) {
 			require.NoError(t, reader.Close())
 		})
 	}
+}
+
+// A column whose values outgrow the data page size is written as several pages.
+// Each one carries its own ALP header, offset array and vectors, so a page that
+// repeated an earlier page's values would decode to the wrong numbers here.
+func TestAlpFileRoundtripManyPages(t *testing.T) {
+	const numValues = 40000
+
+	values := make([]float64, numValues)
+	for i := range values {
+		values[i] = float64(i) / 100
+	}
+
+	props := parquet.NewWriterProperties(
+		parquet.WithEncoding(parquet.Encodings.ALP),
+		parquet.WithAlpEncoding(true),
+		parquet.WithDictionaryDefault(false),
+		// Small enough that 1024-value vectors fill a page every few vectors.
+		parquet.WithDataPageSize(16*1024),
+	)
+
+	field, err := schema.NewPrimitiveNode("value", parquet.Repetitions.Required, parquet.Types.Double, -1, -1)
+	require.NoError(t, err)
+
+	sc, err := schema.NewGroupNode("test", parquet.Repetitions.Required, schema.FieldList{field}, 0)
+	require.NoError(t, err)
+
+	sink := encoding.NewBufferWriter(0, memory.DefaultAllocator)
+	writer := file.NewParquetWriter(sink, sc, file.WithWriterProps(props))
+
+	rgw := writer.AppendRowGroup()
+	cw, err := rgw.NextColumn()
+	require.NoError(t, err)
+
+	f64Writer, ok := cw.(*file.Float64ColumnChunkWriter)
+	require.True(t, ok)
+
+	nVals, err := f64Writer.WriteBatch(values, nil, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, numValues, nVals)
+
+	require.NoError(t, cw.Close())
+	require.NoError(t, rgw.Close())
+	require.NoError(t, writer.Close())
+
+	reader, err := file.NewParquetReader(bytes.NewReader(sink.Bytes()))
+	require.NoError(t, err)
+	defer reader.Close()
+
+	rgr := reader.RowGroup(0)
+	cr, err := rgr.Column(0)
+	require.NoError(t, err)
+
+	f64Reader, ok := cr.(*file.Float64ColumnChunkReader)
+	require.True(t, ok)
+
+	// Read in batches that do not divide the vector size, so a batch boundary
+	// lands inside a vector and inside a page.
+	output := make([]float64, numValues)
+	for read := 0; read < numValues; {
+		_, n, err := f64Reader.ReadBatch(700, output[read:], nil, nil)
+		require.NoError(t, err)
+		require.NotZero(t, n, "read stalled at %d of %d values", read, numValues)
+		read += int(n)
+	}
+	require.Equal(t, values, output)
 }
 
 func TestAlpFloat32FileRoundtrip(t *testing.T) {
