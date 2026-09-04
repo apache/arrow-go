@@ -663,14 +663,14 @@ func (enc *alpEncoder[T]) EstimatedDataEncodedSize() int64 {
 // FlushValues writes one page and clears the values it wrote, so that the next
 // Put starts a new page. The exponent and factor shortlist survives, because it
 // describes the column rather than the page.
+//
+// A page always carries the header, even when it holds no values: a column of
+// optional values can produce a page whose rows are all null, and a reader
+// rejects an empty page rather than reading it as no values.
 func (enc *alpEncoder[T]) FlushValues() (Buffer, error) {
 	if enc.bufCount > 0 {
 		enc.encodeVector(enc.vectorBuf[:enc.bufCount])
 		enc.bufCount = 0
-	}
-
-	if enc.totalCount == 0 {
-		return enc.encoder.FlushValues()
 	}
 	defer enc.resetPage()
 
@@ -882,12 +882,11 @@ func (dec *alpDecoder[T]) Decode(out []T) (int, error) {
 	toRead := min(len(out), dec.nvals)
 
 	read := 0
-	for read < toRead {
+	// Stop at the last value the page holds, which is not always the end of the
+	// last vector: that one is short whenever the count is not a whole number of
+	// vectors.
+	for read < toRead && dec.currentIndex < dec.totalCount {
 		vectorIdx := dec.currentIndex / dec.vectorSize
-		if vectorIdx >= dec.numVectors {
-			break
-		}
-
 		if vectorIdx != dec.currentVectorIndex {
 			if err := dec.decodeVector(vectorIdx); err != nil {
 				dec.nvals -= read
@@ -904,6 +903,14 @@ func (dec *alpDecoder[T]) Decode(out []T) (int, error) {
 	}
 
 	dec.nvals -= read
+	if read < toRead {
+		// The page header and the ALP header disagree about how many values the
+		// page holds. Report it rather than return a short read, which the column
+		// reader would retry forever, since a read of nothing leaves it where it
+		// was.
+		return read, fmt.Errorf("parquet: ALP page holds %d values, %d more were requested",
+			dec.totalCount, toRead-read)
+	}
 	return read, nil
 }
 
