@@ -467,6 +467,7 @@ var knownEncodingValues = []Encoding{
 	Encoding_DELTA_BYTE_ARRAY,
 	Encoding_RLE_DICTIONARY,
 	Encoding_BYTE_STREAM_SPLIT,
+	Encoding_ALP,
 }
 
 func EncodingValues() iter.Seq[Encoding] {

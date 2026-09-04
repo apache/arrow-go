@@ -21,6 +21,7 @@ package encoding
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"math/bits"
@@ -30,7 +31,6 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/schema"
-	"golang.org/x/xerrors"
 )
 
 const (
@@ -950,7 +950,7 @@ func (dec *alpDecoder[T]) DecodeSpaced(out []T, nullCount int, validBits []byte,
 		return valuesRead, err
 	}
 	if valuesRead != toRead {
-		return valuesRead, xerrors.New("parquet: number of values / definitions levels read did not match")
+		return valuesRead, errors.New("parquet: number of values / definitions levels read did not match")
 	}
 
 	return spacedExpand(out, nullCount, validBits, validBitsOffset), nil
