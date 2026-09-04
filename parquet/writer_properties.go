@@ -61,6 +61,11 @@ const (
 	DefaultAdaptiveBloomFilterEnabled = false
 	DefaultBloomFilterCandidates      = 5
 
+	// DefaultAlpEnabled is off because parquet-format marks ALP as a preview
+	// feature, and recommends that writers keep preview encodings behind an
+	// opt-in flag.
+	DefaultAlpEnabled = false
+
 	minimumBloomFilterBytes = 32
 	maximumBloomFilterBytes = 128 * 1024 * 1024
 )
@@ -281,6 +286,20 @@ func WithEncodingFor(path string, encoding Encoding) WriterProperty {
 // WithEncodingPath is the same as WithEncodingFor but takes a ColumnPath directly.
 func WithEncodingPath(path ColumnPath, encoding Encoding) WriterProperty {
 	return WithEncodingFor(path.String(), encoding)
+}
+
+// WithAlpEncoding allows columns to be written with the ALP encoding, which
+// parquet-format marks as a preview feature: a reader that does not implement it
+// fails on the file instead of returning wrong values. Writing one is a decision
+// for the application, so the encoding is off until this grants it.
+//
+// The flag grants permission and does not select ALP. A column still asks for the
+// encoding through WithEncoding or WithEncodingFor, and asking for it without
+// this flag panics, as asking for an unusable encoding does.
+func WithAlpEncoding(enabled bool) WriterProperty {
+	return func(cfg *writerPropConfig) {
+		cfg.wr.alpEnabled = enabled
+	}
 }
 
 // WithCompression specifies the default compression type to use for column writing.
@@ -543,6 +562,7 @@ type WriterProperties struct {
 	rootRepetition      Repetition
 	storeDecimalAsInt   bool
 	maxBloomFilterBytes int64
+	alpEnabled          bool
 
 	defColumnProps  ColumnProperties
 	columnProps     map[string]*ColumnProperties
@@ -563,6 +583,7 @@ func defaultWriterProperties() *WriterProperties {
 		rootName:            DefaultRootName,
 		rootRepetition:      Repetitions.Repeated,
 		maxBloomFilterBytes: DefaultMaxBloomFilterBytes,
+		alpEnabled:          DefaultAlpEnabled,
 		defColumnProps:      DefaultColumnProperties(),
 		sortingCols:         []SortingColumn{},
 	}
@@ -660,7 +681,26 @@ func NewWriterProperties(opts ...WriterProperty) *WriterProperties {
 		get(key).BloomFilterCandidates = value
 	}
 
+	// The check runs here rather than in the options, because an option that
+	// selects ALP may be given before the one that allows it.
+	if !cfg.wr.alpEnabled {
+		if cfg.wr.defColumnProps.Encoding == Encodings.ALP {
+			panic("parquet: ALP encoding requires WithAlpEncoding(true)")
+		}
+		for path, props := range cfg.wr.columnProps {
+			if props.Encoding == Encodings.ALP {
+				panic("parquet: ALP encoding for column " + path + " requires WithAlpEncoding(true)")
+			}
+		}
+	}
+
 	return cfg.wr
+}
+
+// AlpEncodingEnabled reports whether columns may be written with the ALP
+// encoding.
+func (w *WriterProperties) AlpEncodingEnabled() bool {
+	return w.alpEnabled
 }
 
 // FileEncryptionProperties returns the current encryption properties that were

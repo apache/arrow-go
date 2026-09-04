@@ -93,3 +93,27 @@ func TestReaderPropsGetStreamInsufficient(t *testing.T) {
 	_, err := props.GetStream(rdr, 12, 15)
 	assert.Error(t, err)
 }
+
+func TestWriterPropAlpEncodingOptIn(t *testing.T) {
+	assert.False(t, parquet.NewWriterProperties().AlpEncodingEnabled(),
+		"ALP is a preview encoding, so it stays off by default")
+
+	assert.Panics(t, func() {
+		parquet.NewWriterProperties(parquet.WithEncoding(parquet.Encodings.ALP))
+	}, "the default encoding cannot be ALP without the flag")
+	assert.Panics(t, func() {
+		parquet.NewWriterProperties(parquet.WithEncodingFor("price", parquet.Encodings.ALP))
+	}, "a column cannot ask for ALP without the flag")
+
+	// The flag may be given before or after the encoding it allows.
+	for _, opts := range [][]parquet.WriterProperty{
+		{parquet.WithAlpEncoding(true), parquet.WithEncodingFor("price", parquet.Encodings.ALP)},
+		{parquet.WithEncodingFor("price", parquet.Encodings.ALP), parquet.WithAlpEncoding(true)},
+	} {
+		props := parquet.NewWriterProperties(opts...)
+		assert.True(t, props.AlpEncodingEnabled())
+		assert.Equal(t, parquet.Encodings.ALP, props.EncodingFor("price"))
+		assert.Equal(t, parquet.Encodings.Plain, props.EncodingFor("other"),
+			"the flag allows ALP without selecting it")
+	}
+}

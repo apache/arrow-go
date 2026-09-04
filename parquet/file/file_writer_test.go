@@ -642,6 +642,7 @@ func TestAlpFileRoundtrip(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			props := parquet.NewWriterProperties(
 				parquet.WithEncoding(parquet.Encodings.ALP),
+				parquet.WithAlpEncoding(true),
 				parquet.WithDictionaryDefault(false),
 			)
 
@@ -705,6 +706,7 @@ func TestAlpFloat32FileRoundtrip(t *testing.T) {
 
 	props := parquet.NewWriterProperties(
 		parquet.WithEncoding(parquet.Encodings.ALP),
+		parquet.WithAlpEncoding(true),
 		parquet.WithDictionaryDefault(false),
 	)
 

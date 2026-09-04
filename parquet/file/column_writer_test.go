@@ -358,6 +358,9 @@ func (p *PrimitiveWriterTestSuite) buildWriter(_ int64, columnProps parquet.Colu
 	} else {
 		opts = append(opts, parquet.WithDictionaryDefault(false), parquet.WithEncoding(columnProps.Encoding))
 	}
+	if columnProps.Encoding == parquet.Encodings.ALP {
+		opts = append(opts, parquet.WithAlpEncoding(true))
+	}
 	opts = append(opts, parquet.WithMaxStatsSize(columnProps.MaxStatsSize), parquet.WithStats(columnProps.StatsEnabled))
 	p.props = parquet.NewWriterProperties(opts...)
 

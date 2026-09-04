@@ -328,7 +328,9 @@ var (
 		DeltaBinaryPacked    Encoding
 		DeltaLengthByteArray Encoding
 		ByteStreamSplit      Encoding
-		ALP                  Encoding
+		// ALP encodes FLOAT and DOUBLE columns. parquet-format marks it as a
+		// preview feature, so writing it requires WithAlpEncoding.
+		ALP Encoding
 	}{
 		Plain:                Encoding(format.Encoding_PLAIN),
 		PlainDict:            Encoding(format.Encoding_PLAIN_DICTIONARY),
