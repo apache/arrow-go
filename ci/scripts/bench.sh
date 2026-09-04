@@ -17,37 +17,140 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# this will output the benchmarks to STDOUT but if `-json` or `--json` is passed
-# as the second argument, it will create a file "bench_stats.json"
-# in the directory this is called from containing a json representation
+# --run and --aggregate split a benchmark run so CI can shard packages across
+# parallel jobs and then combine the shards into one JSON for a single upload.
+# See usage() for the full interface.
 
 set -exo pipefail
 
-# Validate input arguments
-if [ -z "$1" ]; then
-  echo "Error: Missing source directory argument"
+GOBENCHDATA_VERSION="v1.3.1"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  bench.sh <source_dir> [--json|-json]
+      Run every benchmark (BENCH_PACKAGES, default "./..."); with --json/-json
+      also aggregate into "bench_stats.json". Removes .dat files afterwards.
+  bench.sh <source_dir> --run [--packages "<patterns>"] [--out <file>] [--timeout <dur>]
+      Run benchmarks only and write raw output to <file> (default
+      "bench_stat.dat"); leaves it in place for later aggregation.
+  bench.sh <source_dir> --aggregate [--dat "<glob>"] [--json-out <file>]
+      Combine .dat files (default "<source_dir>/bench_*.dat") into <file>
+      (default "bench_stats.json") via gobenchdata.
+
+Environment:
+  BENCH_PACKAGES  Default packages for full/--run modes (default "./...").
+  BENCH_TIMEOUT   Default per-package `go test` timeout (default "40m").
+EOF
+}
+
+run_benchmarks() {
+  local source_dir="$1" packages="$2" out_file="$3" timeout="$4"
+
+  PARQUET_TEST_DATA="${source_dir}/parquet-testing/data"
+  export PARQUET_TEST_DATA
+
+  pushd "${source_dir}" >/dev/null
+  # -timeout is applied to each package's test binary separately, so the full
+  # "./..." wall-clock cost is the sum across packages; --run shards a subset.
+  # shellcheck disable=SC2086  # intentional word-splitting of package patterns
+  go test -bench=. -benchmem -timeout "${timeout}" -run='^$' ${packages} | tee "${out_file}"
+  popd >/dev/null
+}
+
+aggregate_results() {
+  local dat_glob="$1" json_out="$2"
+
+  go install "go.bobheadxi.dev/gobenchdata@${GOBENCHDATA_VERSION}"
+  PATH="$(go env GOPATH)/bin:$PATH"
+  export PATH
+
+  # shellcheck disable=SC2086  # dat_glob is an intentional glob / list of files
+  cat ${dat_glob} | gobenchdata --json "${json_out}"
+}
+
+if [ -z "${1:-}" ]; then
+  echo "Error: Missing source directory argument" >&2
+  usage
   exit 1
 fi
 
 source_dir="$1"
+shift
 
-PARQUET_TEST_DATA="${source_dir}/parquet-testing/data"
-export PARQUET_TEST_DATA
+mode="${1:-}"
 
-pushd "${source_dir}"
+packages="${BENCH_PACKAGES:-./...}"
+timeout="${BENCH_TIMEOUT:-40m}"
 
-# lots of benchmarks, they can take a while
-# the timeout is for *ALL* benchmarks together,
-# not per benchmark
-go test -bench=. -benchmem -timeout 40m -run=^$ ./... | tee bench_stat.dat
+case "${mode}" in
+"" | -json | --json)
+  run_benchmarks "${source_dir}" "${packages}" "bench_stat.dat" "${timeout}"
+  if [[ "${mode}" == "-json" || "${mode}" == "--json" ]]; then
+    aggregate_results "${source_dir}/bench_*.dat" "bench_stats.json"
+  fi
+  rm "${source_dir}"/bench_*.dat
+  ;;
 
-popd
+--run)
+  shift
+  out_file="bench_stat.dat"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+    --packages)
+      packages="$2"
+      shift 2
+      ;;
+    --out)
+      out_file="$2"
+      shift 2
+      ;;
+    --timeout)
+      timeout="$2"
+      shift 2
+      ;;
+    *)
+      echo "Error: unknown --run option: $1" >&2
+      usage
+      exit 1
+      ;;
+    esac
+  done
+  run_benchmarks "${source_dir}" "${packages}" "${out_file}" "${timeout}"
+  ;;
 
-if [[ "$2" = "-json" || "$2" = "--json" ]]; then
-  go install go.bobheadxi.dev/gobenchdata@v1.3.1
-  PATH=$(go env GOPATH)/bin:$PATH
-  export PATH
-  cat "${source_dir}"/bench_*.dat | gobenchdata --json bench_stats.json
-fi
+--aggregate)
+  shift
+  dat_glob="${source_dir}/bench_*.dat"
+  json_out="bench_stats.json"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+    --dat)
+      dat_glob="$2"
+      shift 2
+      ;;
+    --json-out)
+      json_out="$2"
+      shift 2
+      ;;
+    *)
+      echo "Error: unknown --aggregate option: $1" >&2
+      usage
+      exit 1
+      ;;
+    esac
+  done
+  aggregate_results "${dat_glob}" "${json_out}"
+  ;;
 
-rm "${source_dir}"/bench_*.dat
+-h | --help)
+  usage
+  exit 0
+  ;;
+
+*)
+  echo "Error: unknown mode: ${mode}" >&2
+  usage
+  exit 1
+  ;;
+esac
