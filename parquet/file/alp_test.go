@@ -170,18 +170,21 @@ func TestAlpDataPageV2(t *testing.T) {
 }
 
 // alpSinglePageReader hands the column reader one page and then reports the end
-// of the chunk.
+// of the chunk. It hands it over once, so that a reader which asks for another
+// page ends rather than sees the same one again.
 type alpSinglePageReader struct {
-	page file.Page
+	page   file.Page
+	handed bool
 }
 
 func (r *alpSinglePageReader) SetMaxPageHeaderSize(int) {}
 func (r *alpSinglePageReader) Page() file.Page          { return r.page }
 func (r *alpSinglePageReader) Next() bool {
-	if r.page == nil {
+	if r.handed {
 		return false
 	}
-	return true
+	r.handed = true
+	return r.page != nil
 }
 func (r *alpSinglePageReader) Err() error { return nil }
 func (r *alpSinglePageReader) Reset(parquet.BufferedReader, int64, compress.Compression, *file.CryptoContext) {
