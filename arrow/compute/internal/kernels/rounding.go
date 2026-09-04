@@ -2153,8 +2153,6 @@ func roundTimestampCalendar(ts int64, inputUnit arrow.TimeUnit, tz *time.Locatio
 			}
 		}
 
-		break
-
 	case RoundTemporalDay:
 		startOfDay, dateErr := floorCalendarDay(t, multiple, opts.CalendarBasedOrigin, tz)
 		if dateErr != nil {
