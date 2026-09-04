@@ -289,7 +289,7 @@ func (floatDecoderTraits[T]) Decoder(e parquet.Encoding, descr *schema.Column, u
 	case parquet.Encodings.ByteStreamSplit:
 		return &ByteStreamSplitDecoder[T]{decoder: newDecoderBase(format.Encoding(e), descr)}
 	case parquet.Encodings.ALP:
-		return &alpDecoder[T]{decoder: newDecoderBase(format.Encoding(e), descr)}
+		return newAlpDecoder[T](format.Encoding(e), descr)
 	default:
 		panic("unimplemented encoding for float types: " + e.String())
 	}

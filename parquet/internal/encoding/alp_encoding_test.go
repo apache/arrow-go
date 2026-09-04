@@ -17,6 +17,7 @@
 package encoding
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -25,6 +26,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
+	"github.com/apache/arrow-go/v18/parquet/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,7 +36,7 @@ func TestAlpFastRoundFloat32(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    float32
-		expected int32
+		expected int64
 	}{
 		{"positive integer", 5.0, 5},
 		{"positive round up", 2.7, 3},
@@ -50,8 +52,8 @@ func TestAlpFastRoundFloat32(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := alpFastRoundFloat32(tt.input)
-			assert.Equal(t, tt.expected, result, "alpFastRoundFloat32(%v) = %d, want %d", tt.input, result, tt.expected)
+			result := alpFastRound(tt.input)
+			assert.Equal(t, tt.expected, result, "alpFastRound(%v) = %d, want %d", tt.input, result, tt.expected)
 		})
 	}
 }
@@ -75,57 +77,57 @@ func TestAlpFastRoundFloat64(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := alpFastRoundFloat64(tt.input)
-			assert.Equal(t, tt.expected, result, "alpFastRoundFloat64(%v) = %d, want %d", tt.input, result, tt.expected)
+			result := alpFastRound(tt.input)
+			assert.Equal(t, tt.expected, result, "alpFastRound(%v) = %d, want %d", tt.input, result, tt.expected)
 		})
 	}
 }
 
 func TestAlpIsBasicFloatException(t *testing.T) {
-	assert.True(t, alpIsBasicFloatException(float32(math.NaN())), "NaN should be exception")
-	assert.True(t, alpIsBasicFloatException(float32(math.Inf(1))), "+Inf should be exception")
-	assert.True(t, alpIsBasicFloatException(float32(math.Inf(-1))), "-Inf should be exception")
+	assert.True(t, alpIsBasicException[float32](float32(math.NaN())), "NaN should be exception")
+	assert.True(t, alpIsBasicException[float32](float32(math.Inf(1))), "+Inf should be exception")
+	assert.True(t, alpIsBasicException[float32](float32(math.Inf(-1))), "-Inf should be exception")
 	negZero := math.Float32frombits(alpNegZeroFloat32Bits)
-	assert.True(t, alpIsBasicFloatException(negZero), "-0.0 should be exception")
-	assert.False(t, alpIsBasicFloatException(0.0), "+0.0 should not be exception")
-	assert.False(t, alpIsBasicFloatException(1.0), "1.0 should not be exception")
-	assert.False(t, alpIsBasicFloatException(-1.0), "-1.0 should not be exception")
+	assert.True(t, alpIsBasicException[float32](negZero), "-0.0 should be exception")
+	assert.False(t, alpIsBasicException[float32](0.0), "+0.0 should not be exception")
+	assert.False(t, alpIsBasicException[float32](1.0), "1.0 should not be exception")
+	assert.False(t, alpIsBasicException[float32](-1.0), "-1.0 should not be exception")
 }
 
 func TestAlpIsBasicDoubleException(t *testing.T) {
-	assert.True(t, alpIsBasicDoubleException(math.NaN()), "NaN should be exception")
-	assert.True(t, alpIsBasicDoubleException(math.Inf(1)), "+Inf should be exception")
-	assert.True(t, alpIsBasicDoubleException(math.Inf(-1)), "-Inf should be exception")
+	assert.True(t, alpIsBasicException[float64](math.NaN()), "NaN should be exception")
+	assert.True(t, alpIsBasicException[float64](math.Inf(1)), "+Inf should be exception")
+	assert.True(t, alpIsBasicException[float64](math.Inf(-1)), "-Inf should be exception")
 	negZero := math.Float64frombits(alpNegZeroFloat64Bits)
-	assert.True(t, alpIsBasicDoubleException(negZero), "-0.0 should be exception")
-	assert.False(t, alpIsBasicDoubleException(0.0), "+0.0 should not be exception")
-	assert.False(t, alpIsBasicDoubleException(1.0), "1.0 should not be exception")
-	assert.False(t, alpIsBasicDoubleException(-1.0), "-1.0 should not be exception")
+	assert.True(t, alpIsBasicException[float64](negZero), "-0.0 should be exception")
+	assert.False(t, alpIsBasicException[float64](0.0), "+0.0 should not be exception")
+	assert.False(t, alpIsBasicException[float64](1.0), "1.0 should not be exception")
+	assert.False(t, alpIsBasicException[float64](-1.0), "-1.0 should not be exception")
 }
 
 func TestAlpIsFloatException(t *testing.T) {
-	assert.True(t, alpIsFloatException(float32(math.NaN()), 2, 0))
-	assert.True(t, alpIsFloatException(float32(math.Inf(1)), 2, 0))
+	assert.True(t, alpIsException[float32](float32(math.NaN()), 2, 0))
+	assert.True(t, alpIsException[float32](float32(math.Inf(1)), 2, 0))
 	negZero := math.Float32frombits(alpNegZeroFloat32Bits)
-	assert.True(t, alpIsFloatException(negZero, 2, 0))
+	assert.True(t, alpIsException[float32](negZero, 2, 0))
 
-	assert.False(t, alpIsFloatException(1.23, 2, 0), "1.23 with exp=2 should encode to 123")
-	assert.False(t, alpIsFloatException(0.0, 2, 0), "0.0 should not be exception")
-	assert.False(t, alpIsFloatException(42.0, 0, 0), "42.0 with exp=0 should encode to 42")
+	assert.False(t, alpIsException[float32](1.23, 2, 0), "1.23 with exp=2 should encode to 123")
+	assert.False(t, alpIsException[float32](0.0, 2, 0), "0.0 should not be exception")
+	assert.False(t, alpIsException[float32](42.0, 0, 0), "42.0 with exp=0 should encode to 42")
 
-	assert.True(t, alpIsFloatException(float32(1e30), 10, 0),
+	assert.True(t, alpIsException[float32](float32(1e30), 10, 0),
 		"1e30 * 10^10 overflows int32")
 }
 
 func TestAlpIsDoubleException(t *testing.T) {
-	assert.True(t, alpIsDoubleException(math.NaN(), 2, 0))
-	assert.True(t, alpIsDoubleException(math.Inf(1), 2, 0))
+	assert.True(t, alpIsException[float64](math.NaN(), 2, 0))
+	assert.True(t, alpIsException[float64](math.Inf(1), 2, 0))
 	negZero := math.Float64frombits(alpNegZeroFloat64Bits)
-	assert.True(t, alpIsDoubleException(negZero, 2, 0))
+	assert.True(t, alpIsException[float64](negZero, 2, 0))
 
-	assert.False(t, alpIsDoubleException(1.23, 2, 0), "1.23 with exp=2 should encode to 123")
-	assert.False(t, alpIsDoubleException(0.0, 2, 0), "0.0 should not be exception")
-	assert.False(t, alpIsDoubleException(42.0, 0, 0), "42.0 with exp=0 should encode to 42")
+	assert.False(t, alpIsException[float64](1.23, 2, 0), "1.23 with exp=2 should encode to 123")
+	assert.False(t, alpIsException[float64](0.0, 2, 0), "0.0 should not be exception")
+	assert.False(t, alpIsException[float64](42.0, 0, 0), "42.0 with exp=0 should encode to 42")
 }
 
 func TestAlpEncodeDecodeFloat32(t *testing.T) {
@@ -134,7 +136,7 @@ func TestAlpEncodeDecodeFloat32(t *testing.T) {
 		value    float32
 		exponent int
 		factor   int
-		encoded  int32
+		encoded  int64
 	}{
 		{"integer no scaling", 42.0, 0, 0, 42},
 		{"one decimal", 1.5, 1, 0, 15},
@@ -146,10 +148,10 @@ func TestAlpEncodeDecodeFloat32(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			encoded := alpEncodeFloat32(tt.value, tt.exponent, tt.factor)
+			encoded := alpEncode(tt.value, tt.exponent, tt.factor)
 			assert.Equal(t, tt.encoded, encoded, "encode(%v, exp=%d, fac=%d)", tt.value, tt.exponent, tt.factor)
 
-			decoded := alpDecodeFloat32(encoded, tt.exponent, tt.factor)
+			decoded := alpDecode[float32](encoded, tt.exponent, tt.factor)
 			assert.Equal(t, math.Float32bits(tt.value), math.Float32bits(decoded),
 				"decode(%d, exp=%d, fac=%d) = %v, want %v", encoded, tt.exponent, tt.factor, decoded, tt.value)
 		})
@@ -174,90 +176,90 @@ func TestAlpEncodeDecodeFloat64(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			encoded := alpEncodeFloat64(tt.value, tt.exponent, tt.factor)
+			encoded := alpEncode(tt.value, tt.exponent, tt.factor)
 			assert.Equal(t, tt.encoded, encoded, "encode(%v, exp=%d, fac=%d)", tt.value, tt.exponent, tt.factor)
 
-			decoded := alpDecodeFloat64(encoded, tt.exponent, tt.factor)
+			decoded := alpDecode[float64](encoded, tt.exponent, tt.factor)
 			assert.Equal(t, math.Float64bits(tt.value), math.Float64bits(decoded),
 				"decode(%d, exp=%d, fac=%d) = %v, want %v", encoded, tt.exponent, tt.factor, decoded, tt.value)
 		})
 	}
 }
 
-func TestAlpMultiplier(t *testing.T) {
-	assert.Equal(t, float32(1.0), alpFloatMultiplier(0, 0))
-	assert.Equal(t, float32(100.0), alpFloatMultiplier(2, 0))
-	assert.Equal(t, float32(10.0), alpFloatMultiplier(2, 1)) // 100/10 = 10
-	assert.Equal(t, float32(1.0), alpFloatMultiplier(2, 2))  // 100/100 = 1
-	assert.Equal(t, float32(1e10), alpFloatMultiplier(10, 0))
+func TestAlpPowerTables(t *testing.T) {
+	assert.Equal(t, float32(1.0), alpPow10[float32](0))
+	assert.Equal(t, float32(100.0), alpPow10[float32](2))
+	assert.Equal(t, float32(1e10), alpPow10[float32](alpNumExponents[float32]()-1))
+	assert.Equal(t, float32(1.0), alpNegPow10[float32](0))
+	assert.Equal(t, float32(1e-10), alpNegPow10[float32](alpNumExponents[float32]()-1))
 
-	assert.Equal(t, float64(1.0), alpDoubleMultiplier(0, 0))
-	assert.Equal(t, float64(100.0), alpDoubleMultiplier(2, 0))
-	assert.Equal(t, float64(10.0), alpDoubleMultiplier(2, 1))
-	assert.Equal(t, float64(1e18), alpDoubleMultiplier(18, 0))
+	assert.Equal(t, float64(1.0), alpPow10[float64](0))
+	assert.Equal(t, float64(1e18), alpPow10[float64](alpNumExponents[float64]()-1))
+	assert.Equal(t, float64(1e-18), alpNegPow10[float64](alpNumExponents[float64]()-1))
+}
+
+// TestAlpScalingMultipliesByANegativePower guards the one arithmetic choice that
+// two implementations can disagree on. Dividing by 10^exponent and multiplying by
+// the tabulated 10^-exponent differ by a unit in the last place, so a page written
+// here would decode elsewhere to a value one bit away from the original.
+func TestAlpScalingMultipliesByANegativePower(t *testing.T) {
+	const value = float32(1016.10999)
+	const exponent, factor = 6, 0
+
+	encoded := alpEncode(value, exponent, factor)
+	assert.Equal(t, value, alpDecode[float32](encoded, exponent, factor))
+	assert.NotEqual(t, value, float32(encoded)/(alpPow10[float32](exponent)/alpPow10[float32](factor)),
+		"dividing has stopped losing the last bit, so this test no longer guards anything")
 }
 func TestAlpBitWidth(t *testing.T) {
-	assert.Equal(t, 0, alpBitWidth32(0))
-	assert.Equal(t, 1, alpBitWidth32(1))
-	assert.Equal(t, 2, alpBitWidth32(2))
-	assert.Equal(t, 2, alpBitWidth32(3))
-	assert.Equal(t, 8, alpBitWidth32(255))
-	assert.Equal(t, 9, alpBitWidth32(256))
-	assert.Equal(t, 32, alpBitWidth32(math.MaxUint32))
+	assert.Equal(t, 0, alpBitWidth(0))
+	assert.Equal(t, 1, alpBitWidth(1))
+	assert.Equal(t, 2, alpBitWidth(2))
+	assert.Equal(t, 2, alpBitWidth(3))
+	assert.Equal(t, 8, alpBitWidth(255))
+	assert.Equal(t, 9, alpBitWidth(256))
+	assert.Equal(t, 32, alpBitWidth(math.MaxUint32))
 
-	assert.Equal(t, 0, alpBitWidth64(0))
-	assert.Equal(t, 1, alpBitWidth64(1))
-	assert.Equal(t, 8, alpBitWidth64(255))
-	assert.Equal(t, 64, alpBitWidth64(math.MaxUint64))
+	assert.Equal(t, 0, alpBitWidth(0))
+	assert.Equal(t, 1, alpBitWidth(1))
+	assert.Equal(t, 8, alpBitWidth(255))
+	assert.Equal(t, 64, alpBitWidth(math.MaxUint64))
 }
 
-func TestAlpPackUnpackBits32(t *testing.T) {
-	tests := []struct {
-		name     string
-		values   []uint32
-		bitWidth int
-	}{
-		{"1-bit values", []uint32{0, 1, 0, 1, 1, 0, 1, 0}, 1},
-		{"4-bit values", []uint32{0, 1, 5, 10, 15, 3, 7, 12}, 4},
-		{"8-bit values", []uint32{0, 128, 255, 1, 42, 100, 200, 50}, 8},
-		{"16-bit values", []uint32{0, 1000, 50000, 65535, 32768, 1, 256, 2048}, 16},
-		{"32-bit values", []uint32{0, math.MaxUint32, 12345, 67890}, 32},
-		{"zero bit width", []uint32{0, 0, 0, 0}, 0},
-		{"single value", []uint32{42}, 6},
-		{"mixed bit widths", []uint32{0, 1, 2, 3, 4, 5, 6, 7}, 3},
-		{"large count", func() []uint32 {
-			v := make([]uint32, 1024)
-			for i := range v {
-				v[i] = uint32(i % 256)
-			}
-			return v
-		}(), 8},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			packed := alpPackBits32(tt.values, len(tt.values), tt.bitWidth)
-			unpacked := alpUnpackBits32(packed, len(tt.values), tt.bitWidth)
-			assert.Equal(t, tt.values, unpacked, "pack/unpack round-trip failed")
-		})
-	}
+// alpTestUnpackBits unpacks with readers of its own, since the decoder's are
+// tied to a page.
+func alpTestUnpackBits(packed []byte, out []uint64, bitWidth int) error {
+	reader := bytes.NewReader(nil)
+	return alpUnpackBits(utils.NewBitReader(reader), reader, packed, out, bitWidth)
 }
 
-func TestAlpPackUnpackBits64(t *testing.T) {
+func TestAlpPackUnpackBits(t *testing.T) {
 	tests := []struct {
 		name     string
 		values   []uint64
 		bitWidth int
 	}{
 		{"1-bit values", []uint64{0, 1, 0, 1, 1, 0, 1, 0}, 1},
+		{"3-bit values", []uint64{0, 1, 2, 3, 4, 5, 6, 7}, 3},
+		{"4-bit values", []uint64{0, 1, 5, 10, 15, 3, 7, 12}, 4},
 		{"8-bit values", []uint64{0, 128, 255, 1, 42, 100, 200, 50}, 8},
+		{"16-bit values", []uint64{0, 1000, 50000, 65535, 32768, 1, 256, 2048}, 16},
 		{"32-bit values", []uint64{0, math.MaxUint32, 12345, 67890}, 32},
 		{"48-bit values", []uint64{0, 1 << 47, 12345678901234, 1}, 48},
 		{"64-bit values", []uint64{0, math.MaxUint64, 12345, 67890}, 64},
 		{"zero bit width", []uint64{0, 0, 0, 0}, 0},
 		{"single value", []uint64{42}, 6},
-		{"large count", func() []uint64 {
-			v := make([]uint64, 1024)
+		// A full vector exercises the vectorized unpack path, which handles
+		// whole groups of 32 values and leaves the remainder to the scalar one.
+		{"full vector", func() []uint64 {
+			v := make([]uint64, alpDefaultVectorSize)
+			for i := range v {
+				v[i] = uint64(i % 256)
+			}
+			return v
+		}(), 8},
+		{"partial group", func() []uint64 {
+			v := make([]uint64, 100)
 			for i := range v {
 				v[i] = uint64(i * 1000)
 			}
@@ -267,40 +269,82 @@ func TestAlpPackUnpackBits64(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			packed := alpPackBits64(tt.values, len(tt.values), tt.bitWidth)
-			unpacked := alpUnpackBits64(packed, len(tt.values), tt.bitWidth)
+			packed := alpAppendPackedBits(nil, tt.values, tt.bitWidth)
+			assert.Len(t, packed, alpPackedSize(len(tt.values), tt.bitWidth))
+
+			unpacked := make([]uint64, len(tt.values))
+			require.NoError(t, alpTestUnpackBits(packed, unpacked, tt.bitWidth))
 			assert.Equal(t, tt.values, unpacked, "pack/unpack round-trip failed")
 		})
 	}
 }
 
-func TestAlpPackBits32KnownOutput(t *testing.T) {
-	values := []uint32{0, 1, 2, 3}
-	packed := alpPackBits32(values, 4, 2)
+// TestAlpPackBitsKnownOutput pins the byte layout, so a change of bit packer
+// cannot silently break pages written by an earlier one.
+func TestAlpPackBitsKnownOutput(t *testing.T) {
+	packed := alpAppendPackedBits(nil, []uint64{0, 1, 2, 3}, 2)
 	require.Len(t, packed, 1)
 	assert.Equal(t, byte(0xE4), packed[0])
 }
 
-func TestAlpPackBits64KnownOutput(t *testing.T) {
-	values := []uint64{0, 1, 2, 3}
-	packed := alpPackBits64(values, 4, 2)
-	require.Len(t, packed, 1)
-	assert.Equal(t, byte(0xE4), packed[0])
+// TestAlpUnpackBitsShortInput covers a truncated page: unpacking has to report
+// an error rather than hand back whatever it managed to read. The two lengths
+// take the two paths, scalar for a partial group of 32 and vectorized for a
+// whole one.
+func TestAlpUnpackBitsShortInput(t *testing.T) {
+	for _, count := range []int{8, 64} {
+		out := make([]uint64, count)
+		assert.Error(t, alpTestUnpackBits([]byte{0xFF}, out, 8), "count=%d", count)
+	}
 }
+
+// alpCountTestExceptions counts the values a scaling cannot encode.
+func alpCountTestExceptions[T float32 | float64](values []T, params alpEncodingParams) int {
+	count := 0
+	for _, v := range values {
+		if alpDecode[T](alpEncode(v, params.exponent, params.factor), params.exponent, params.factor) != v {
+			count++
+		}
+	}
+	return count
+}
+
+// assertCheapestParams fails if any exponent and factor pair estimates smaller
+// than the one the search returned.
+func assertCheapestParams[T float32 | float64](t *testing.T, values []T, got alpEncodingParams) {
+	t.Helper()
+	gotBits, _ := alpEstimateSizeBits(values, got.exponent, got.factor)
+	for e := range alpNumExponents[T]() {
+		for f := range e + 1 {
+			bits, numEncodable := alpEstimateSizeBits(values, e, f)
+			if numEncodable < 2 {
+				continue
+			}
+			assert.LessOrEqual(t, gotBits, bits,
+				"exponent %d factor %d estimates %d bits, below the chosen %d/%d at %d",
+				e, f, bits, got.exponent, got.factor, gotBits)
+		}
+	}
+}
+
 func TestAlpFindBestFloat32Params(t *testing.T) {
 	values := []float32{1.23, 4.56, 7.89, 10.11, 12.13}
-	params := alpFindBestFloat32Params(values, 0, len(values))
-	assert.Equal(t, 0, params.numExceptions, "clean monetary data should have 0 exceptions")
-	assert.Equal(t, 2, params.exponent)
-	assert.Equal(t, 0, params.factor)
+	params := alpFindBestParams(values)
+	assert.Equal(t, 0, alpCountTestExceptions(values, params), "two decimal places always encode")
+	assertCheapestParams(t, values, params)
+	assert.Equal(t, 2, params.exponent-params.factor, "the values scale by 10^2")
 }
 
+// TestAlpFindBestFloat64Params covers a case where the exponent is not the count
+// of decimal places. Scaling 4.56 by 10^2 gives an integer that decodes to
+// 4.5600000000000005, so the search has to reach a larger pair that does not
+// lose the last bit.
 func TestAlpFindBestFloat64Params(t *testing.T) {
 	values := []float64{1.23, 4.56, 7.89, 10.11, 12.13}
-	params := alpFindBestFloat64Params(values, 0, len(values))
-	assert.Equal(t, 0, params.numExceptions, "clean monetary data should have 0 exceptions")
-	assert.Equal(t, 2, params.exponent)
-	assert.Equal(t, 0, params.factor)
+	params := alpFindBestParams(values)
+	assert.Equal(t, 0, alpCountTestExceptions(values, params))
+	assertCheapestParams(t, values, params)
+	assert.Equal(t, 2, params.exponent-params.factor, "the values scale by 10^2")
 }
 
 func TestAlpFindBestParamsWithExceptions(t *testing.T) {
@@ -308,42 +352,106 @@ func TestAlpFindBestParamsWithExceptions(t *testing.T) {
 		1.23, 4.56, float32(math.Inf(1)), 7.89,
 		math.Float32frombits(alpNegZeroFloat32Bits), 10.11,
 	}
-	params := alpFindBestFloat32Params(values, 0, len(values))
-	assert.Equal(t, 2, params.numExceptions)
+	params := alpFindBestParams(values)
+	assert.Equal(t, 2, alpCountTestExceptions(values, params),
+		"the infinity and the negative zero are the only exceptions")
+	assertCheapestParams(t, values, params)
+}
+
+// TestAlpFindBestParamsPrefersNarrowPacking pins the reason the search weighs
+// estimated size rather than exceptions alone: both pairs below encode every
+// value, and the one with the smaller factor packs 30 bits wider.
+func TestAlpFindBestParamsPrefersNarrowPacking(t *testing.T) {
+	values := []float64{1.23, 4.56, 7.89}
+	wide, _ := alpEstimateSizeBits(values, 14, 0)
+	narrow, _ := alpEstimateSizeBits(values, 14, 12)
+	assert.Less(t, narrow, wide)
+
+	params := alpFindBestParams(values)
+	assert.Equal(t, 0, alpCountTestExceptions(values, params))
+	assertCheapestParams(t, values, params)
 }
 
 func TestAlpFindBestFloat32ParamsWithPresets(t *testing.T) {
 	values := []float32{1.23, 4.56, 7.89}
-	presets := [][2]int{{2, 0}, {3, 0}, {1, 0}}
-	params := alpFindBestFloat32ParamsWithPresets(values, 0, len(values), presets)
-	assert.Equal(t, 0, params.numExceptions)
+	presets := [][2]int{{3, 0}, {2, 0}, {1, 0}}
+	params := alpFindBestParamsWithPresets(values, presets)
+	assert.Equal(t, 0, alpCountTestExceptions(values, params))
+	// 10^3 encodes the values too, but three digits wider than it has to.
 	assert.Equal(t, 2, params.exponent)
+	assert.Equal(t, 0, params.factor)
 }
 
 func TestAlpFindBestFloat64ParamsWithPresets(t *testing.T) {
 	values := []float64{1.23, 4.56, 7.89}
-	presets := [][2]int{{2, 0}, {3, 0}, {1, 0}}
-	params := alpFindBestFloat64ParamsWithPresets(values, 0, len(values), presets)
-	assert.Equal(t, 0, params.numExceptions)
+	presets := [][2]int{{2, 0}, {14, 12}, {16, 12}}
+	params := alpFindBestParamsWithPresets(values, presets)
+	assert.Equal(t, 0, alpCountTestExceptions(values, params))
+	assert.Equal(t, 14, params.exponent)
+	assert.Equal(t, 12, params.factor)
+}
+
+// TestAlpFindBestParamsWithPresetsStopsImproving covers the early exit: the
+// shortlist is ordered by how often each scaling won, so once several in a row
+// have failed to beat the best, the rest are not worth estimating.
+func TestAlpFindBestParamsWithPresetsStopsImproving(t *testing.T) {
+	values := []float32{1.23, 4.56, 7.89}
+	presets := [][2]int{{2, 0}, {3, 0}, {4, 0}, {5, 0}, {6, 0}}
+	require.GreaterOrEqual(t, len(presets), alpPresetGiveUpAfter+1)
+
+	params := alpFindBestParamsWithPresets(values, presets)
 	assert.Equal(t, 2, params.exponent)
 }
 
 func TestAlpFindBestParamsIntegerData(t *testing.T) {
 	values := []float32{1.0, 2.0, 3.0, 100.0, 200.0}
-	params := alpFindBestFloat32Params(values, 0, len(values))
-	assert.Equal(t, 0, params.numExceptions)
-	assert.Equal(t, 0, params.exponent)
-	assert.Equal(t, 0, params.factor)
+	params := alpFindBestParams(values)
+	assert.Equal(t, 0, alpCountTestExceptions(values, params))
+	assert.Equal(t, params.exponent, params.factor,
+		"integers need no scaling, so the exponent and the factor cancel")
 }
 
+// TestAlpFindBestParamsAllExceptions covers a vector no scaling can encode. The
+// search returns the pair that leaves the values as they are, and the encoder
+// writes all of them verbatim.
 func TestAlpFindBestParamsAllExceptions(t *testing.T) {
 	inf := float32(math.Inf(1))
-	ninf := float32(math.Inf(-1))
 	negZero := math.Float32frombits(alpNegZeroFloat32Bits)
-	values := []float32{inf, ninf, negZero, inf}
-	params := alpFindBestFloat32Params(values, 0, len(values))
-	assert.Equal(t, 4, params.numExceptions, "all values are exceptions")
+	values := []float32{inf, float32(math.Inf(-1)), negZero, inf}
+
+	params := alpFindBestParams(values)
+	assert.Equal(t, len(values), alpCountTestExceptions(values, params))
+	assert.Equal(t, alpNumExponents[float32]()-1, params.exponent)
+	assert.Equal(t, params.exponent, params.factor)
 }
+
+func TestAlpBetterParams(t *testing.T) {
+	a := alpEncodingParams{exponent: 3, factor: 1}
+	b := alpEncodingParams{exponent: 2, factor: 2}
+	assert.True(t, alpBetterParams(a, 100, b, 200), "fewer bits wins")
+	assert.False(t, alpBetterParams(a, 200, b, 100))
+	assert.True(t, alpBetterParams(a, 100, b, 100), "a tie goes to the larger exponent")
+	assert.True(t, alpBetterParams(alpEncodingParams{exponent: 2, factor: 2}, 100,
+		alpEncodingParams{exponent: 2, factor: 1}, 100), "then to the larger factor")
+}
+
+func TestAlpSample(t *testing.T) {
+	values := make([]float64, alpDefaultVectorSize)
+	for i := range values {
+		values[i] = float64(i)
+	}
+
+	sample := alpSample(values, nil)
+	assert.Len(t, sample, alpSamplerSamples)
+	assert.Equal(t, float64(0), sample[0])
+	assert.Equal(t, float64(4), sample[1], "the stride spreads the sample over the vector")
+
+	// Fewer values than the sample size means every value is sampled.
+	short := alpSample(values[:10], nil)
+	assert.Equal(t, values[:10], short)
+	assert.Empty(t, alpSample(values[:0], nil))
+}
+
 func newFloat32Column() *schema.Column {
 	return schema.NewColumn(schema.NewFloat32Node("float32", parquet.Repetitions.Required, -1), 0, 0)
 }
@@ -363,7 +471,7 @@ func alpFloat32RoundTrip(t *testing.T, values []float32) {
 	require.NoError(t, err)
 	defer buf.Release()
 
-	dec := &alpDecoder[float32]{decoder: newDecoderBase(format.Encoding_ALP, col)}
+	dec := newAlpDecoder[float32](format.Encoding_ALP, col)
 	err = dec.SetData(len(values), buf.Bytes())
 	require.NoError(t, err)
 
@@ -390,7 +498,7 @@ func alpFloat64RoundTrip(t *testing.T, values []float64) {
 	require.NoError(t, err)
 	defer buf.Release()
 
-	dec := &alpDecoder[float64]{decoder: newDecoderBase(format.Encoding_ALP, col)}
+	dec := newAlpDecoder[float64](format.Encoding_ALP, col)
 	err = dec.SetData(len(values), buf.Bytes())
 	require.NoError(t, err)
 
@@ -628,7 +736,7 @@ func TestAlpFloat32ProgressiveDecoding(t *testing.T) {
 	require.NoError(t, err)
 	defer buf.Release()
 
-	dec := &alpDecoder[float32]{decoder: newDecoderBase(format.Encoding_ALP, col)}
+	dec := newAlpDecoder[float32](format.Encoding_ALP, col)
 	err = dec.SetData(len(values), buf.Bytes())
 	require.NoError(t, err)
 
@@ -669,7 +777,7 @@ func TestAlpFloat64ProgressiveDecoding(t *testing.T) {
 	require.NoError(t, err)
 	defer buf.Release()
 
-	dec := &alpDecoder[float64]{decoder: newDecoderBase(format.Encoding_ALP, col)}
+	dec := newAlpDecoder[float64](format.Encoding_ALP, col)
 	err = dec.SetData(len(values), buf.Bytes())
 	require.NoError(t, err)
 
@@ -709,7 +817,7 @@ func TestAlpFloat32Discard(t *testing.T) {
 	require.NoError(t, err)
 	defer buf.Release()
 
-	dec := &alpDecoder[float32]{decoder: newDecoderBase(format.Encoding_ALP, col)}
+	dec := newAlpDecoder[float32](format.Encoding_ALP, col)
 	err = dec.SetData(len(values), buf.Bytes())
 	require.NoError(t, err)
 
@@ -743,7 +851,7 @@ func TestAlpFloat64Discard(t *testing.T) {
 	require.NoError(t, err)
 	defer buf.Release()
 
-	dec := &alpDecoder[float64]{decoder: newDecoderBase(format.Encoding_ALP, col)}
+	dec := newAlpDecoder[float64](format.Encoding_ALP, col)
 	err = dec.SetData(len(values), buf.Bytes())
 	require.NoError(t, err)
 
@@ -774,7 +882,7 @@ func TestAlpDiscardMoreThanAvailable(t *testing.T) {
 	require.NoError(t, err)
 	defer buf.Release()
 
-	dec := &alpDecoder[float32]{decoder: newDecoderBase(format.Encoding_ALP, col)}
+	dec := newAlpDecoder[float32](format.Encoding_ALP, col)
 	err = dec.SetData(len(values), buf.Bytes())
 	require.NoError(t, err)
 
@@ -786,7 +894,7 @@ func TestAlpFloat32MultiplePages(t *testing.T) {
 	col := newFloat32Column()
 	mem := memory.DefaultAllocator
 
-	dec := &alpDecoder[float32]{decoder: newDecoderBase(format.Encoding_ALP, col)}
+	dec := newAlpDecoder[float32](format.Encoding_ALP, col)
 
 	for page := 0; page < 5; page++ {
 		values := make([]float32, 500)
@@ -820,7 +928,7 @@ func TestAlpFloat64MultiplePages(t *testing.T) {
 	col := newFloat64Column()
 	mem := memory.DefaultAllocator
 
-	dec := &alpDecoder[float64]{decoder: newDecoderBase(format.Encoding_ALP, col)}
+	dec := newAlpDecoder[float64](format.Encoding_ALP, col)
 
 	for page := 0; page < 5; page++ {
 		values := make([]float64, 500)
@@ -868,7 +976,7 @@ func TestAlpEncoderReset(t *testing.T) {
 	require.NoError(t, err)
 	defer buf2.Release()
 
-	dec := &alpDecoder[float32]{decoder: newDecoderBase(format.Encoding_ALP, col)}
+	dec := newAlpDecoder[float32](format.Encoding_ALP, col)
 	err = dec.SetData(len(values1), buf1.Bytes())
 	require.NoError(t, err)
 	out1 := make([]float32, len(values1))
@@ -928,7 +1036,7 @@ func TestAlpEncoderPutSpaced(t *testing.T) {
 
 	expected := []float32{1.0, 2.0, 4.0, 6.0, 7.0}
 
-	dec := &alpDecoder[float32]{decoder: newDecoderBase(format.Encoding_ALP, col)}
+	dec := newAlpDecoder[float32](format.Encoding_ALP, col)
 	err = dec.SetData(len(expected), buf.Bytes())
 	require.NoError(t, err)
 
@@ -958,15 +1066,12 @@ func TestAlpHeaderFormat(t *testing.T) {
 	defer buf.Release()
 
 	data := buf.Bytes()
-	require.True(t, len(data) >= alpHeaderSize, "encoded data should be at least header size")
+	require.GreaterOrEqual(t, len(data), alpHeaderSize)
 
-	assert.Equal(t, byte(alpVersion), data[0], "version")
-	assert.Equal(t, byte(alpCompressionMode), data[1], "compression mode")
-	assert.Equal(t, byte(alpIntegerEncodingFOR), data[2], "integer encoding")
-	assert.Equal(t, byte(alpDefaultLogVector), data[3], "log vector size")
-
-	numElements := binary.LittleEndian.Uint32(data[4:8])
-	assert.Equal(t, uint32(100), numElements, "element count")
+	assert.Equal(t, byte(alpCompressionMode), data[0], "compression mode")
+	assert.Equal(t, byte(alpIntegerEncodingFOR), data[1], "integer encoding")
+	assert.Equal(t, byte(alpDefaultLogVector), data[2], "log vector size")
+	assert.Equal(t, uint32(100), binary.LittleEndian.Uint32(data[3:]), "element count")
 }
 
 func TestAlpHeaderFormatMultipleVectors(t *testing.T) {
@@ -985,116 +1090,194 @@ func TestAlpHeaderFormatMultipleVectors(t *testing.T) {
 	defer buf.Release()
 
 	data := buf.Bytes()
-	require.True(t, len(data) >= alpHeaderSize)
+	require.GreaterOrEqual(t, len(data), alpHeaderSize)
+	assert.Equal(t, uint32(3000), binary.LittleEndian.Uint32(data[3:]))
 
-	numElements := binary.LittleEndian.Uint32(data[4:8])
-	assert.Equal(t, uint32(3000), numElements)
-
-	numVectors := (3000 + 1023) / 1024
-	assert.Equal(t, 3, numVectors)
-
+	numVectors := 3
 	offsetArraySize := numVectors * 4
-	require.True(t, len(data) >= alpHeaderSize+offsetArraySize)
+	require.GreaterOrEqual(t, len(data), alpHeaderSize+offsetArraySize)
 
+	// Offsets count from the start of the array, so the first vector begins
+	// where the array ends and each later one begins after its predecessor.
 	firstOffset := binary.LittleEndian.Uint32(data[alpHeaderSize:])
-	assert.Equal(t, uint32(offsetArraySize), firstOffset,
-		"first vector offset should equal offset array size")
+	assert.Equal(t, uint32(offsetArraySize), firstOffset)
 
 	for i := 1; i < numVectors; i++ {
 		offset := binary.LittleEndian.Uint32(data[alpHeaderSize+i*4:])
 		prevOffset := binary.LittleEndian.Uint32(data[alpHeaderSize+(i-1)*4:])
-		assert.True(t, offset > prevOffset,
+		assert.Greater(t, offset, prevOffset,
 			"offset[%d]=%d should be greater than offset[%d]=%d", i, offset, i-1, prevOffset)
 	}
 }
+
+// alpTestPage returns a page whose header is valid, for tests that corrupt one
+// field at a time.
+func alpTestPage(numElements uint32) []byte {
+	data := make([]byte, 100)
+	data[0] = alpCompressionMode
+	data[1] = alpIntegerEncodingFOR
+	data[2] = alpDefaultLogVector
+	binary.LittleEndian.PutUint32(data[3:], numElements)
+	return data
+}
+
 func TestAlpDecoderInvalidData(t *testing.T) {
 	col := newFloat32Column()
-	dec := &alpDecoder[float32]{decoder: newDecoderBase(format.Encoding_ALP, col)}
+	dec := newAlpDecoder[float32](format.Encoding_ALP, col)
 
 	err := dec.SetData(10, []byte{1, 2, 3})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "too short")
 }
 
-func TestAlpDecoderInvalidVersion(t *testing.T) {
-	col := newFloat32Column()
-	dec := &alpDecoder[float32]{decoder: newDecoderBase(format.Encoding_ALP, col)}
+func TestAlpDecoderInvalidHeaderFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		offset int
+		value  byte
+		errMsg string
+	}{
+		{"compression mode", 0, 99, "compression mode"},
+		{"integer encoding", 1, 99, "integer encoding"},
+		{"log vector size too large", 2, alpMaxLogVectorSize + 1, "log vector size"},
+		{"log vector size too small", 2, alpMinLogVectorSize - 1, "log vector size"},
+	}
 
-	data := make([]byte, 100)
-	data[0] = 99 // invalid version
-	data[1] = 0
-	data[2] = 0
-	data[3] = 10
-	binary.LittleEndian.PutUint32(data[4:], 1)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := newFloat32Column()
+			dec := newAlpDecoder[float32](format.Encoding_ALP, col)
 
-	err := dec.SetData(1, data)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "version")
-}
+			data := alpTestPage(1)
+			data[tt.offset] = tt.value
 
-func TestAlpDecoderInvalidLogVectorSize(t *testing.T) {
-	col := newFloat32Column()
-	dec := &alpDecoder[float32]{decoder: newDecoderBase(format.Encoding_ALP, col)}
-
-	data := make([]byte, 100)
-	data[0] = alpVersion
-	data[1] = alpCompressionMode
-	data[2] = alpIntegerEncodingFOR
-	data[3] = 20 // invalid: > alpMaxLogVectorSize
-	binary.LittleEndian.PutUint32(data[4:], 1)
-
-	err := dec.SetData(1, data)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "log vector size")
-}
-
-func TestAlpDecoderInvalidCompressionMode(t *testing.T) {
-	col := newFloat32Column()
-	dec := &alpDecoder[float32]{decoder: newDecoderBase(format.Encoding_ALP, col)}
-
-	data := make([]byte, 100)
-	data[0] = alpVersion
-	data[1] = 99 // invalid compression mode
-	data[2] = alpIntegerEncodingFOR
-	data[3] = alpDefaultLogVector
-	binary.LittleEndian.PutUint32(data[4:], 1)
-
-	err := dec.SetData(1, data)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "compression mode")
-}
-
-func TestAlpDecoderInvalidIntegerEncoding(t *testing.T) {
-	col := newFloat32Column()
-	dec := &alpDecoder[float32]{decoder: newDecoderBase(format.Encoding_ALP, col)}
-
-	data := make([]byte, 100)
-	data[0] = alpVersion
-	data[1] = alpCompressionMode
-	data[2] = 99 // invalid integer encoding
-	data[3] = alpDefaultLogVector
-	binary.LittleEndian.PutUint32(data[4:], 1)
-
-	err := dec.SetData(1, data)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "integer encoding")
+			err := dec.SetData(1, data)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errMsg)
+		})
+	}
 }
 
 func TestAlpDecoderTruncatedOffsetArray(t *testing.T) {
 	col := newFloat32Column()
-	dec := &alpDecoder[float32]{decoder: newDecoderBase(format.Encoding_ALP, col)}
+	dec := newAlpDecoder[float32](format.Encoding_ALP, col)
 
-	data := make([]byte, alpHeaderSize+2) // not enough for 4-byte offset
-	data[0] = alpVersion
-	data[1] = alpCompressionMode
-	data[2] = alpIntegerEncodingFOR
-	data[3] = alpDefaultLogVector
-	binary.LittleEndian.PutUint32(data[4:], 1024)
+	data := alpTestPage(1024)[:alpHeaderSize+2] // not enough for a 4-byte offset
 
 	err := dec.SetData(1024, data)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "too short")
 }
+
+// alpEncodeTestPage encodes values into a one vector page, and returns the page
+// along with where that vector starts in it.
+func alpEncodeTestPage(t *testing.T, values []float32) (page []byte, vectorPos int) {
+	t.Helper()
+
+	enc := newAlpEncoder[float32](format.Encoding_ALP, newFloat32Column(), memory.DefaultAllocator)
+	enc.Put(values)
+	buf, err := enc.FlushValues()
+	require.NoError(t, err)
+	t.Cleanup(buf.Release)
+
+	page = append([]byte(nil), buf.Bytes()...)
+	// One offset follows the header, and it holds the size of the offset array.
+	vectorPos = alpHeaderSize + int(binary.LittleEndian.Uint32(page[alpHeaderSize:]))
+	return page, vectorPos
+}
+
+// TestAlpDecoderCorruptVector covers the checks a vector header gets. Each case
+// writes one field a writer could not have produced, which the decoder has to
+// report rather than read past the page or scale by a table it has no entry for.
+func TestAlpDecoderCorruptVector(t *testing.T) {
+	values := make([]float32, 100)
+	for i := range values {
+		values[i] = float32(i) * 1.25
+	}
+
+	tests := []struct {
+		name    string
+		corrupt func(page []byte, vectorPos int) []byte
+		errMsg  string
+	}{
+		{
+			name: "exponent past the power table",
+			corrupt: func(page []byte, vectorPos int) []byte {
+				page[vectorPos] = byte(alpNumExponents[float32]())
+				return page
+			},
+			errMsg: "invalid ALP exponent",
+		},
+		{
+			name: "factor above the exponent",
+			corrupt: func(page []byte, vectorPos int) []byte {
+				page[vectorPos+1] = page[vectorPos] + 1
+				return page
+			},
+			errMsg: "invalid ALP exponent",
+		},
+		{
+			name: "more exceptions than values",
+			corrupt: func(page []byte, vectorPos int) []byte {
+				binary.LittleEndian.PutUint16(page[vectorPos+2:], uint16(len(values)+1))
+				return page
+			},
+			errMsg: "exceptions in",
+		},
+		{
+			name: "bit width past the integer width",
+			corrupt: func(page []byte, vectorPos int) []byte {
+				page[vectorPos+alpInfoSize+4] = 33
+				return page
+			},
+			errMsg: "invalid ALP bit width",
+		},
+		{
+			name: "vector longer than the page",
+			corrupt: func(page []byte, vectorPos int) []byte {
+				return page[:len(page)-1]
+			},
+			errMsg: "past the end of the page",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			page, vectorPos := alpEncodeTestPage(t, values)
+			page = tt.corrupt(page, vectorPos)
+
+			dec := newAlpDecoder[float32](format.Encoding_ALP, newFloat32Column())
+			require.NoError(t, dec.SetData(len(values), page))
+
+			_, err := dec.Decode(make([]float32, len(values)))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errMsg)
+		})
+	}
+}
+
+// TestAlpDecoderExceptionPositionOutsideVector covers the one check that needs a
+// vector with an exception in it: the position that patches the value back in
+// has to land inside the vector.
+func TestAlpDecoderExceptionPositionOutsideVector(t *testing.T) {
+	values := []float32{1.25, 2.5, float32(math.Inf(1)), 3.75}
+	page, vectorPos := alpEncodeTestPage(t, values)
+
+	// The positions follow the packed deltas, which the vector's own bit width
+	// sizes.
+	bitWidth := int(page[vectorPos+alpInfoSize+4])
+	positionPos := vectorPos + alpInfoSize + 5 + alpPackedSize(len(values), bitWidth)
+	require.Equal(t, 1, int(binary.LittleEndian.Uint16(page[vectorPos+2:])), "one exception")
+	binary.LittleEndian.PutUint16(page[positionPos:], uint16(len(values)))
+
+	dec := newAlpDecoder[float32](format.Encoding_ALP, newFloat32Column())
+	require.NoError(t, dec.SetData(len(values), page))
+
+	_, err := dec.Decode(make([]float32, len(values)))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exception position")
+}
+
 func TestAlpPresetCacheBuilds(t *testing.T) {
 	col := newFloat32Column()
 	mem := memory.DefaultAllocator
@@ -1115,7 +1298,7 @@ func TestAlpPresetCacheBuilds(t *testing.T) {
 	require.NoError(t, err)
 	defer buf.Release()
 
-	dec := &alpDecoder[float32]{decoder: newDecoderBase(format.Encoding_ALP, col)}
+	dec := newAlpDecoder[float32](format.Encoding_ALP, col)
 	err = dec.SetData(len(values), buf.Bytes())
 	require.NoError(t, err)
 
@@ -1166,7 +1349,7 @@ func TestAlpFloat32IncrementalPut(t *testing.T) {
 	require.NoError(t, err)
 	defer buf.Release()
 
-	dec := &alpDecoder[float32]{decoder: newDecoderBase(format.Encoding_ALP, col)}
+	dec := newAlpDecoder[float32](format.Encoding_ALP, col)
 	err = dec.SetData(len(allValues), buf.Bytes())
 	require.NoError(t, err)
 
