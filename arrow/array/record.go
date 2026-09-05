@@ -303,14 +303,16 @@ type RecordBuilder struct {
 	schema      *arrow.Schema
 	fields      []Builder
 	checkpoints []*builderCheckpoint
+	jsonDec     nestedJSONDecoder
 }
 
 // NewRecordBuilder returns a builder, using the provided memory allocator and a schema.
 func NewRecordBuilder(mem memory.Allocator, schema *arrow.Schema) *RecordBuilder {
 	b := &RecordBuilder{
-		mem:    mem,
-		schema: schema,
-		fields: make([]Builder, schema.NumFields()),
+		mem:     mem,
+		schema:  schema,
+		fields:  make([]Builder, schema.NumFields()),
+		jsonDec: newNestedJSONDecoder(schema),
 	}
 	b.refCount.Add(1)
 
@@ -459,8 +461,13 @@ type storageBuilder interface {
 	StorageBuilder() Builder
 }
 
+type truncatableBuilder interface {
+	Len() int
+	truncate(n int)
+}
+
 type builderCheckpoint struct {
-	builder          Builder
+	builder          truncatableBuilder
 	length           int
 	children         []*builderCheckpoint
 	state            checkpointState
@@ -475,7 +482,7 @@ func (checkpoint *builderCheckpoint) syncChildren(builders []Builder) {
 	}
 }
 
-func newBuilderCheckpoint(builder Builder) *builderCheckpoint {
+func newBuilderCheckpoint(builder truncatableBuilder) *builderCheckpoint {
 	checkpoint := &builderCheckpoint{
 		builder: builder,
 	}
@@ -488,6 +495,10 @@ func newBuilderCheckpoint(builder Builder) *builderCheckpoint {
 	// Keep this switch in sync with builder types that own children. An omitted
 	// nested builder would restore its own state but leave its children changed.
 	switch builder := builder.(type) {
+	case *baseListBuilder:
+		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.values))
+	case *baseListViewBuilder:
+		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.values))
 	case *ListBuilder:
 		checkpoint.children = append(checkpoint.children, newBuilderCheckpoint(builder.values))
 	case *LargeListBuilder:
@@ -564,8 +575,10 @@ func (checkpoint *builderCheckpoint) restore() {
 }
 
 // UnmarshalOne reads one row (a JSON object) from the supplied decoder and
-// appends a value to each field in the RecordBuilder. Missing fields are
-// appended as nulls and unrecognized keys are silently ignored.
+// appends a value to each field in the RecordBuilder.
+//
+// Missing nullable fields get nulls. If an error is found while decoding
+// any field, the entire row gets discarded and the error is returned.
 //
 // Unlike UnmarshalJSON, this method receives an already-configured
 // json.Decoder, so options such as UseNumber set by the caller are honored
@@ -597,9 +610,13 @@ func (b *RecordBuilder) UnmarshalOne(dec *json.Decoder) error {
 }
 
 func (b *RecordBuilder) unmarshalOne(dec *json.Decoder) (err error) {
+	rowDec, err := b.jsonDec.next(dec)
+	if err != nil {
+		return err
+	}
 
 	// should start with a '{'
-	t, err := dec.Token()
+	t, err := rowDec.Token()
 	if err != nil {
 		return err
 	}
@@ -608,49 +625,12 @@ func (b *RecordBuilder) unmarshalOne(dec *json.Decoder) (err error) {
 		return fmt.Errorf("record should start with '{', not %s", t)
 	}
 
-	keylist := make(map[string]bool)
-	for dec.More() {
-		keyTok, err := dec.Token()
-		if err != nil {
-			return err
-		}
-
-		key := keyTok.(string)
-		if keylist[key] {
-			return fmt.Errorf("key %s shows up twice in row to be decoded", key)
-		}
-		keylist[key] = true
-
-		indices := b.schema.FieldIndices(key)
-		if len(indices) == 0 {
-			var extra interface{}
-			if err := dec.Decode(&extra); err != nil {
-				return err
-			}
-			continue
-		}
-
-		if err := b.fields[indices[0]].UnmarshalOne(dec); err != nil {
-			return err
-		}
-	}
-
-	// consume the closing '}'
-	if _, err := dec.Token(); err != nil {
-		return err
-	}
-
-	for i := 0; i < b.schema.NumFields(); i++ {
-		if !keylist[b.schema.Field(i).Name] {
-			b.fields[i].AppendNull()
-		}
-	}
-	return nil
+	return b.jsonDec.unmarshalFields(rowDec, b.fields)
 }
 
 // Unmarshal reads multiple rows from the decoder, calling UnmarshalOne in a
 // loop until dec.More() reports there are no more values. Like UnmarshalOne,
-// this honors decoder configuration such as UseNumber set by the caller.
+// field values are always re-decoded with UseNumber enabled.
 func (b *RecordBuilder) Unmarshal(dec *json.Decoder) error {
 	for dec.More() {
 		if err := b.UnmarshalOne(dec); err != nil {

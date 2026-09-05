@@ -18,7 +18,6 @@ package array
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -273,9 +272,14 @@ func (a *Struct) GetOneForMarshal(i int) interface{} {
 	}
 
 	tmp := make(map[string]interface{})
-	fieldList := a.data.dtype.(*arrow.StructType).Fields()
+	dtype := a.data.dtype.(*arrow.StructType)
+	fieldList := dtype.Fields()
 	for j, d := range a.fields {
-		tmp[fieldList[j].Name] = d.GetOneForMarshal(i)
+		if dtype.Field(j).Nullable && d.IsNull(i) {
+			tmp[fieldList[j].Name] = nil
+		} else {
+			tmp[fieldList[j].Name] = d.GetOneForMarshal(i)
+		}
 	}
 	return tmp
 }
@@ -336,8 +340,10 @@ func (a *Struct) Release() {
 type StructBuilder struct {
 	builder
 
-	dtype  arrow.DataType
-	fields []Builder
+	dtype      arrow.DataType
+	fields     []Builder
+	checkpoint *builderCheckpoint
+	jsonDec    nestedJSONDecoder
 }
 
 // NewStructBuilder returns a builder, using the provided memory allocator.
@@ -346,6 +352,7 @@ func NewStructBuilder(mem memory.Allocator, dtype *arrow.StructType) *StructBuil
 		builder: builder{mem: mem},
 		dtype:   dtype,
 		fields:  make([]Builder, dtype.NumFields()),
+		jsonDec: newNestedJSONDecoder(dtype),
 	}
 	b.refCount.Add(1)
 
@@ -378,6 +385,7 @@ func (b *StructBuilder) Release() {
 		for _, f := range b.fields {
 			f.Release()
 		}
+		b.checkpoint = nil
 	}
 }
 
@@ -536,7 +544,26 @@ func (b *StructBuilder) AppendValueFromString(s string) error {
 }
 
 func (b *StructBuilder) UnmarshalOne(dec *json.Decoder) error {
-	t, err := dec.Token()
+	if b.checkpoint == nil {
+		b.checkpoint = newBuilderCheckpoint(b)
+	}
+	b.checkpoint.capture()
+
+	if err := b.unmarshalOne(dec); err != nil {
+		b.checkpoint.restore()
+		return err
+	}
+	return nil
+}
+
+func (b *StructBuilder) unmarshalOne(dec *json.Decoder) error {
+	offset := dec.InputOffset()
+	rowDec, err := b.jsonDec.next(dec)
+	if err != nil {
+		return err
+	}
+
+	t, err := rowDec.Token()
 	if err != nil {
 		return err
 	}
@@ -544,57 +571,12 @@ func (b *StructBuilder) UnmarshalOne(dec *json.Decoder) error {
 	switch t {
 	case json.Delim('{'):
 		b.Append(true)
-		keylist := make(map[string]bool)
-		for dec.More() {
-			keyTok, err := dec.Token()
-			if err != nil {
-				return err
-			}
-
-			key, ok := keyTok.(string)
-			if !ok {
-				return errors.New("missing key")
-			}
-
-			if keylist[key] {
-				return fmt.Errorf("key %s is specified twice", key)
-			}
-
-			keylist[key] = true
-
-			idx, ok := b.dtype.(*arrow.StructType).FieldIdx(key)
-			if !ok {
-				var extra interface{}
-				if err := dec.Decode(&extra); err != nil {
-					return err
-				}
-				continue
-			}
-
-			if err := b.fields[idx].UnmarshalOne(dec); err != nil {
-				return err
-			}
-		}
-
-		// Append null values to all optional fields that were not presented in the json input
-		for _, field := range b.dtype.(*arrow.StructType).Fields() {
-			if !field.Nullable {
-				continue
-			}
-			idx, _ := b.dtype.(*arrow.StructType).FieldIdx(field.Name)
-			if _, hasKey := keylist[field.Name]; !hasKey {
-				b.fields[idx].AppendNull()
-			}
-		}
-
-		// consume '}'
-		_, err := dec.Token()
-		return err
+		return b.jsonDec.unmarshalFields(rowDec, b.fields)
 	case nil:
 		b.AppendNull()
 	default:
 		return &json.UnmarshalTypeError{
-			Offset: dec.InputOffset(),
+			Offset: offset + rowDec.InputOffset(),
 			Struct: fmt.Sprint(b.dtype),
 		}
 	}

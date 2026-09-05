@@ -365,6 +365,19 @@ func (b *FixedSizeListBuilder) AppendValueFromString(s string) error {
 }
 
 func (b *FixedSizeListBuilder) UnmarshalOne(dec *json.Decoder) error {
+	if b.checkpoint == nil {
+		b.checkpoint = newBuilderCheckpoint(b)
+	}
+	b.checkpoint.capture()
+
+	if err := b.unmarshalOne(dec); err != nil {
+		b.checkpoint.restore()
+		return err
+	}
+	return nil
+}
+
+func (b *FixedSizeListBuilder) unmarshalOne(dec *json.Decoder) error {
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -373,7 +386,7 @@ func (b *FixedSizeListBuilder) UnmarshalOne(dec *json.Decoder) error {
 	switch t {
 	case json.Delim('['):
 		b.Append(true)
-		if err := b.values.Unmarshal(dec); err != nil {
+		if err := unmarshalListValues(dec, b.values, b.dt); err != nil {
 			return err
 		}
 		// consume ']'

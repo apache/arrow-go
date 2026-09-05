@@ -297,6 +297,8 @@ type baseListBuilder struct {
 	// actual list type
 	dt              arrow.DataType
 	appendOffsetVal func(int)
+
+	checkpoint *builderCheckpoint
 }
 
 type ListLikeBuilder interface {
@@ -611,7 +613,40 @@ func (b *baseListBuilder) AppendValueFromString(s string) error {
 	return b.UnmarshalOne(json.NewDecoder(strings.NewReader(s)))
 }
 
+func unmarshalListValues(dec *json.Decoder, values Builder, dt arrow.DataType) error {
+	listLike, ok := dt.(arrow.ListLikeType)
+	if !ok {
+		return values.Unmarshal(dec)
+	}
+
+	elem := listLike.ElemField()
+	if elem.Nullable {
+		return values.Unmarshal(dec)
+	}
+
+	for dec.More() {
+		if err := unmarshalChild(dec, values, elem); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (b *baseListBuilder) UnmarshalOne(dec *json.Decoder) error {
+	if b.checkpoint == nil {
+		b.checkpoint = newBuilderCheckpoint(b)
+	}
+	b.checkpoint.capture()
+
+	if err := b.unmarshalOne(dec); err != nil {
+		b.checkpoint.restore()
+		return err
+	}
+	return nil
+}
+
+func (b *baseListBuilder) unmarshalOne(dec *json.Decoder) error {
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -620,7 +655,7 @@ func (b *baseListBuilder) UnmarshalOne(dec *json.Decoder) error {
 	switch t {
 	case json.Delim('['):
 		b.Append(true)
-		if err := b.values.Unmarshal(dec); err != nil {
+		if err := unmarshalListValues(dec, b.values, b.dt); err != nil {
 			return err
 		}
 		// consume ']'
@@ -1104,6 +1139,8 @@ type baseListViewBuilder struct {
 	dt              arrow.DataType
 	appendOffsetVal func(int)
 	appendSizeVal   func(int)
+
+	checkpoint *builderCheckpoint
 }
 
 type ListViewBuilder struct {
@@ -1421,6 +1458,19 @@ func (b *baseListViewBuilder) AppendValueFromString(s string) error {
 }
 
 func (b *baseListViewBuilder) UnmarshalOne(dec *json.Decoder) error {
+	if b.checkpoint == nil {
+		b.checkpoint = newBuilderCheckpoint(b)
+	}
+	b.checkpoint.capture()
+
+	if err := b.unmarshalOne(dec); err != nil {
+		b.checkpoint.restore()
+		return err
+	}
+	return nil
+}
+
+func (b *baseListViewBuilder) unmarshalOne(dec *json.Decoder) error {
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -1431,7 +1481,7 @@ func (b *baseListViewBuilder) UnmarshalOne(dec *json.Decoder) error {
 		offset := b.values.Len()
 		// 0 is a placeholder size as we don't know the actual size yet
 		b.AppendWithSize(true, 0)
-		if err := b.values.Unmarshal(dec); err != nil {
+		if err := unmarshalListValues(dec, b.values, b.dt); err != nil {
 			return err
 		}
 		// consume ']'
