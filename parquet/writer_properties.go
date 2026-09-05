@@ -296,6 +296,11 @@ func WithEncodingPath(path ColumnPath, encoding Encoding) WriterProperty {
 // The option grants permission rather than selecting ALP. A column still asks for
 // the encoding through WithEncoding or WithEncodingFor, and asking for it without
 // this option panics, as asking for any unusable encoding does.
+//
+// A column reaches ALP only with dictionary encoding turned off. A dictionary
+// takes precedence over the encoding a column asks for, and a writer that drops
+// the dictionary falls back to PLAIN rather than to ALP, so pair the request with
+// WithDictionaryDefault(false) or WithDictionaryFor(path, false).
 func WithAlpEncoding(enabled bool) WriterProperty {
 	return func(cfg *writerPropConfig) {
 		cfg.wr.alpEnabled = enabled
