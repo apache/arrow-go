@@ -290,12 +290,12 @@ func WithEncodingPath(path ColumnPath, encoding Encoding) WriterProperty {
 
 // WithAlpEncoding allows columns to be written with the ALP encoding, which
 // parquet-format marks as a preview feature: a reader that does not implement it
-// fails on the file instead of returning wrong values. Writing one is a decision
-// for the application, so the encoding is off until this grants it.
+// fails on the file instead of returning wrong values. Writing such a file is a
+// decision for the application, so ALP stays off until this option turns it on.
 //
-// The flag grants permission and does not select ALP. A column still asks for the
-// encoding through WithEncoding or WithEncodingFor, and asking for it without
-// this flag panics, as asking for an unusable encoding does.
+// The option grants permission rather than selecting ALP. A column still asks for
+// the encoding through WithEncoding or WithEncodingFor, and asking for it without
+// this option panics, as asking for any unusable encoding does.
 func WithAlpEncoding(enabled bool) WriterProperty {
 	return func(cfg *writerPropConfig) {
 		cfg.wr.alpEnabled = enabled

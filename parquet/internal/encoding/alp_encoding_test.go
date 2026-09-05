@@ -33,201 +33,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAlpFastRoundFloat32(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    float32
-		expected int64
-	}{
-		{"positive integer", 5.0, 5},
-		{"positive round up", 2.7, 3},
-		{"positive round down", 2.3, 2},
-		{"positive half", 2.5, 2}, // round-to-even via magic trick
-		{"negative integer", -5.0, -5},
-		{"negative round up", -2.3, -2},
-		{"negative round down", -2.7, -3},
-		{"zero", 0.0, 0},
-		{"small positive", 0.1, 0},
-		{"large integer", 12345.0, 12345},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := alpFastRound(tt.input)
-			assert.Equal(t, tt.expected, result, "alpFastRound(%v) = %d, want %d", tt.input, result, tt.expected)
-		})
-	}
-}
-
-func TestAlpFastRoundFloat64(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    float64
-		expected int64
-	}{
-		{"positive integer", 5.0, 5},
-		{"positive round up", 2.7, 3},
-		{"positive round down", 2.3, 2},
-		{"negative integer", -5.0, -5},
-		{"negative round up", -2.3, -2},
-		{"negative round down", -2.7, -3},
-		{"zero", 0.0, 0},
-		{"small positive", 0.1, 0},
-		{"large integer", 123456789.0, 123456789},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := alpFastRound(tt.input)
-			assert.Equal(t, tt.expected, result, "alpFastRound(%v) = %d, want %d", tt.input, result, tt.expected)
-		})
-	}
-}
-
-// alpNegZero returns negative zero, which ALP has to store as an exception
-// because the round trip would drop the sign.
-func alpNegZero[T alpFloat]() T {
-	return T(math.Copysign(0, -1))
-}
-
-func alpIsException[T alpFloat](t *testing.T, v T, exponent, factor int) bool {
-	t.Helper()
-	_, ok := alpTryEncode(v, exponent, factor)
-	return !ok
-}
-
-func TestAlpTryEncodeFloat32Exceptions(t *testing.T) {
-	assert.True(t, alpIsException(t, float32(math.NaN()), 2, 0), "NaN has no integer form")
-	assert.True(t, alpIsException(t, float32(math.Inf(1)), 2, 0), "+Inf has no integer form")
-	assert.True(t, alpIsException(t, float32(math.Inf(-1)), 2, 0), "-Inf has no integer form")
-	assert.True(t, alpIsException(t, alpNegZero[float32](), 2, 0), "-0.0 would come back as +0.0")
-	assert.True(t, alpIsException(t, float32(1e30), 10, 0), "1e30 * 10^10 overflows int32")
-
-	assert.False(t, alpIsException(t, float32(1.23), 2, 0), "1.23 at 10^2 encodes to 123")
-	assert.False(t, alpIsException(t, float32(0.0), 2, 0))
-	assert.False(t, alpIsException(t, float32(-1.0), 2, 0))
-	assert.False(t, alpIsException(t, float32(42.0), 0, 0), "42.0 is already an integer")
-}
-
-func TestAlpTryEncodeFloat64Exceptions(t *testing.T) {
-	assert.True(t, alpIsException(t, math.NaN(), 2, 0), "NaN has no integer form")
-	assert.True(t, alpIsException(t, math.Inf(1), 2, 0), "+Inf has no integer form")
-	assert.True(t, alpIsException(t, math.Inf(-1), 2, 0), "-Inf has no integer form")
-	assert.True(t, alpIsException(t, alpNegZero[float64](), 2, 0), "-0.0 would come back as +0.0")
-	assert.True(t, alpIsException(t, 1e300, 18, 0), "1e300 * 10^18 overflows int64")
-
-	assert.False(t, alpIsException(t, 1.23, 2, 0), "1.23 at 10^2 encodes to 123")
-	assert.False(t, alpIsException(t, 0.0, 2, 0))
-	assert.False(t, alpIsException(t, -1.0, 2, 0))
-	assert.False(t, alpIsException(t, 42.0, 0, 0), "42.0 is already an integer")
-}
-
-func TestAlpTryEncodeReturnsTheEncodedValue(t *testing.T) {
-	e, ok := alpTryEncode(1.23, 2, 0)
-	require.True(t, ok)
-	assert.EqualValues(t, 123, e, "1.23 at 10^2 encodes to 123")
-
-	e, ok = alpTryEncode(1.5, 3, 2)
-	require.True(t, ok)
-	assert.EqualValues(t, 15, e, "10^3 * 10^-2 scales by ten")
-}
-
-func TestAlpEncodeDecodeFloat32(t *testing.T) {
-	tests := []struct {
-		name     string
-		value    float32
-		exponent int
-		factor   int
-		encoded  int64
-	}{
-		{"integer no scaling", 42.0, 0, 0, 42},
-		{"one decimal", 1.5, 1, 0, 15},
-		{"two decimals", 1.23, 2, 0, 123},
-		{"negative", -1.23, 2, 0, -123},
-		{"zero", 0.0, 5, 0, 0},
-		{"with factor", 1230.0, 5, 2, 1230000}, // 1230 * 10^5 / 10^2 = 1230 * 1000
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			encoded := alpEncode(tt.value, tt.exponent, tt.factor)
-			assert.Equal(t, tt.encoded, encoded, "encode(%v, exp=%d, fac=%d)", tt.value, tt.exponent, tt.factor)
-
-			decoded := alpDecode[float32](encoded, tt.exponent, tt.factor)
-			assert.Equal(t, math.Float32bits(tt.value), math.Float32bits(decoded),
-				"decode(%d, exp=%d, fac=%d) = %v, want %v", encoded, tt.exponent, tt.factor, decoded, tt.value)
-		})
-	}
-}
-
-func TestAlpEncodeDecodeFloat64(t *testing.T) {
-	tests := []struct {
-		name     string
-		value    float64
-		exponent int
-		factor   int
-		encoded  int64
-	}{
-		{"integer no scaling", 42.0, 0, 0, 42},
-		{"one decimal", 1.5, 1, 0, 15},
-		{"two decimals", 1.23, 2, 0, 123},
-		{"negative", -1.23, 2, 0, -123},
-		{"zero", 0.0, 5, 0, 0},
-		{"with factor", 1230.0, 5, 2, 1230000}, // 1230 * 10^5 / 10^2 = 1230 * 1000
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			encoded := alpEncode(tt.value, tt.exponent, tt.factor)
-			assert.Equal(t, tt.encoded, encoded, "encode(%v, exp=%d, fac=%d)", tt.value, tt.exponent, tt.factor)
-
-			decoded := alpDecode[float64](encoded, tt.exponent, tt.factor)
-			assert.Equal(t, math.Float64bits(tt.value), math.Float64bits(decoded),
-				"decode(%d, exp=%d, fac=%d) = %v, want %v", encoded, tt.exponent, tt.factor, decoded, tt.value)
-		})
-	}
-}
-
-func TestAlpPowerTables(t *testing.T) {
-	assert.Equal(t, float32(1.0), alpPow10[float32](0))
-	assert.Equal(t, float32(100.0), alpPow10[float32](2))
-	assert.Equal(t, float32(1e10), alpPow10[float32](alpNumExponents[float32]()-1))
-	assert.Equal(t, float32(1.0), alpNegPow10[float32](0))
-	assert.Equal(t, float32(1e-10), alpNegPow10[float32](alpNumExponents[float32]()-1))
-
-	assert.Equal(t, float64(1.0), alpPow10[float64](0))
-	assert.Equal(t, float64(1e18), alpPow10[float64](alpNumExponents[float64]()-1))
-	assert.Equal(t, float64(1e-18), alpNegPow10[float64](alpNumExponents[float64]()-1))
-}
-
-// TestAlpScalingMultipliesByANegativePower guards the one arithmetic choice that
-// two implementations can disagree on. Dividing by 10^exponent and multiplying by
-// the tabulated 10^-exponent differ by a unit in the last place, so a page written
-// here would decode elsewhere to a value one bit away from the original.
-func TestAlpScalingMultipliesByANegativePower(t *testing.T) {
-	const value = float32(1016.10999)
-	const exponent, factor = 6, 0
-
-	encoded := alpEncode(value, exponent, factor)
-	assert.Equal(t, value, alpDecode[float32](encoded, exponent, factor))
-	assert.NotEqual(t, value, float32(encoded)/(alpPow10[float32](exponent)/alpPow10[float32](factor)),
-		"dividing has stopped losing the last bit, so this test no longer guards anything")
-}
-func TestAlpBitWidth(t *testing.T) {
-	assert.Equal(t, 0, alpBitWidth(0))
-	assert.Equal(t, 1, alpBitWidth(1))
-	assert.Equal(t, 2, alpBitWidth(2))
-	assert.Equal(t, 2, alpBitWidth(3))
-	assert.Equal(t, 8, alpBitWidth(255))
-	assert.Equal(t, 9, alpBitWidth(256))
-	assert.Equal(t, 32, alpBitWidth(math.MaxUint32))
-
-	assert.Equal(t, 0, alpBitWidth(0))
-	assert.Equal(t, 1, alpBitWidth(1))
-	assert.Equal(t, 8, alpBitWidth(255))
-	assert.Equal(t, 64, alpBitWidth(math.MaxUint64))
-}
-
 // alpTestUnpackBits unpacks with readers of its own, since the decoder's are
 // tied to a page.
 func alpTestUnpackBits(packed []byte, out []uint64, bitWidth int) error {
@@ -298,160 +103,6 @@ func TestAlpUnpackBitsShortInput(t *testing.T) {
 		out := make([]uint64, count)
 		assert.Error(t, alpTestUnpackBits([]byte{0xFF}, out, 8), "count=%d", count)
 	}
-}
-
-// alpCountTestExceptions counts the values a scaling cannot encode.
-func alpCountTestExceptions[T float32 | float64](values []T, params alpEncodingParams) int {
-	count := 0
-	for _, v := range values {
-		if alpDecode[T](alpEncode(v, params.exponent, params.factor), params.exponent, params.factor) != v {
-			count++
-		}
-	}
-	return count
-}
-
-// assertCheapestParams fails if any exponent and factor pair estimates smaller
-// than the one the search returned.
-func assertCheapestParams[T float32 | float64](t *testing.T, values []T, got alpEncodingParams) {
-	t.Helper()
-	gotBits, _ := alpEstimateSizeBits(values, got.exponent, got.factor)
-	for e := range alpNumExponents[T]() {
-		for f := range e + 1 {
-			bits, numEncodable := alpEstimateSizeBits(values, e, f)
-			if numEncodable < 2 {
-				continue
-			}
-			assert.LessOrEqual(t, gotBits, bits,
-				"exponent %d factor %d estimates %d bits, below the chosen %d/%d at %d",
-				e, f, bits, got.exponent, got.factor, gotBits)
-		}
-	}
-}
-
-func TestAlpFindBestFloat32Params(t *testing.T) {
-	values := []float32{1.23, 4.56, 7.89, 10.11, 12.13}
-	params := alpFindBestParams(values)
-	assert.Equal(t, 0, alpCountTestExceptions(values, params), "two decimal places always encode")
-	assertCheapestParams(t, values, params)
-	assert.Equal(t, 2, params.exponent-params.factor, "the values scale by 10^2")
-}
-
-// TestAlpFindBestFloat64Params covers a case where the exponent is not the count
-// of decimal places. Scaling 4.56 by 10^2 gives an integer that decodes to
-// 4.5600000000000005, so the search has to reach a larger pair that does not
-// lose the last bit.
-func TestAlpFindBestFloat64Params(t *testing.T) {
-	values := []float64{1.23, 4.56, 7.89, 10.11, 12.13}
-	params := alpFindBestParams(values)
-	assert.Equal(t, 0, alpCountTestExceptions(values, params))
-	assertCheapestParams(t, values, params)
-	assert.Equal(t, 2, params.exponent-params.factor, "the values scale by 10^2")
-}
-
-func TestAlpFindBestParamsWithExceptions(t *testing.T) {
-	values := []float32{
-		1.23, 4.56, float32(math.Inf(1)), 7.89,
-		alpNegZero[float32](), 10.11,
-	}
-	params := alpFindBestParams(values)
-	assert.Equal(t, 2, alpCountTestExceptions(values, params),
-		"the infinity and the negative zero are the only exceptions")
-	assertCheapestParams(t, values, params)
-}
-
-// TestAlpFindBestParamsPrefersNarrowPacking pins the reason the search weighs
-// estimated size rather than exceptions alone: both pairs below encode every
-// value, and the one with the smaller factor packs 30 bits wider.
-func TestAlpFindBestParamsPrefersNarrowPacking(t *testing.T) {
-	values := []float64{1.23, 4.56, 7.89}
-	wide, _ := alpEstimateSizeBits(values, 14, 0)
-	narrow, _ := alpEstimateSizeBits(values, 14, 12)
-	assert.Less(t, narrow, wide)
-
-	params := alpFindBestParams(values)
-	assert.Equal(t, 0, alpCountTestExceptions(values, params))
-	assertCheapestParams(t, values, params)
-}
-
-func TestAlpFindBestFloat32ParamsWithPresets(t *testing.T) {
-	values := []float32{1.23, 4.56, 7.89}
-	presets := [][2]int{{3, 0}, {2, 0}, {1, 0}}
-	params := alpFindBestParamsWithPresets(values, presets)
-	assert.Equal(t, 0, alpCountTestExceptions(values, params))
-	// 10^3 encodes the values too, but three digits wider than it has to.
-	assert.Equal(t, 2, params.exponent)
-	assert.Equal(t, 0, params.factor)
-}
-
-func TestAlpFindBestFloat64ParamsWithPresets(t *testing.T) {
-	values := []float64{1.23, 4.56, 7.89}
-	presets := [][2]int{{2, 0}, {14, 12}, {16, 12}}
-	params := alpFindBestParamsWithPresets(values, presets)
-	assert.Equal(t, 0, alpCountTestExceptions(values, params))
-	assert.Equal(t, 14, params.exponent)
-	assert.Equal(t, 12, params.factor)
-}
-
-// TestAlpFindBestParamsWithPresetsStopsImproving covers the early exit: the
-// shortlist is ordered by how often each scaling won, so once several in a row
-// have failed to beat the best, the rest are not worth estimating.
-func TestAlpFindBestParamsWithPresetsStopsImproving(t *testing.T) {
-	values := []float32{1.23, 4.56, 7.89}
-	presets := [][2]int{{2, 0}, {3, 0}, {4, 0}, {5, 0}, {6, 0}}
-	require.GreaterOrEqual(t, len(presets), alpPresetGiveUpAfter+1)
-
-	params := alpFindBestParamsWithPresets(values, presets)
-	assert.Equal(t, 2, params.exponent)
-}
-
-func TestAlpFindBestParamsIntegerData(t *testing.T) {
-	values := []float32{1.0, 2.0, 3.0, 100.0, 200.0}
-	params := alpFindBestParams(values)
-	assert.Equal(t, 0, alpCountTestExceptions(values, params))
-	assert.Equal(t, params.exponent, params.factor,
-		"integers need no scaling, so the exponent and the factor cancel")
-}
-
-// TestAlpFindBestParamsAllExceptions covers a vector no scaling can encode. The
-// search returns the pair that leaves the values as they are, and the encoder
-// writes all of them verbatim.
-func TestAlpFindBestParamsAllExceptions(t *testing.T) {
-	inf := float32(math.Inf(1))
-	negZero := alpNegZero[float32]()
-	values := []float32{inf, float32(math.Inf(-1)), negZero, inf}
-
-	params := alpFindBestParams(values)
-	assert.Equal(t, len(values), alpCountTestExceptions(values, params))
-	assert.Equal(t, alpNumExponents[float32]()-1, params.exponent)
-	assert.Equal(t, params.exponent, params.factor)
-}
-
-func TestAlpBetterParams(t *testing.T) {
-	a := alpEncodingParams{exponent: 3, factor: 1}
-	b := alpEncodingParams{exponent: 2, factor: 2}
-	assert.True(t, alpBetterParams(a, 100, b, 200), "fewer bits wins")
-	assert.False(t, alpBetterParams(a, 200, b, 100))
-	assert.True(t, alpBetterParams(a, 100, b, 100), "a tie goes to the larger exponent")
-	assert.True(t, alpBetterParams(alpEncodingParams{exponent: 2, factor: 2}, 100,
-		alpEncodingParams{exponent: 2, factor: 1}, 100), "then to the larger factor")
-}
-
-func TestAlpSample(t *testing.T) {
-	values := make([]float64, alpDefaultVectorSize)
-	for i := range values {
-		values[i] = float64(i)
-	}
-
-	sample := alpSample(values, nil)
-	assert.Len(t, sample, alpSamplerSamples)
-	assert.Equal(t, float64(0), sample[0])
-	assert.Equal(t, float64(4), sample[1], "the stride spreads the sample over the vector")
-
-	// Fewer values than the sample size means every value is sampled.
-	short := alpSample(values[:10], nil)
-	assert.Equal(t, values[:10], short)
-	assert.Empty(t, alpSample(values[:0], nil))
 }
 
 func newFloat32Column() *schema.Column {
@@ -1072,7 +723,7 @@ func TestAlpHeaderFormat(t *testing.T) {
 
 	assert.Equal(t, byte(alpCompressionMode), data[0], "compression mode")
 	assert.Equal(t, byte(alpIntegerEncodingFOR), data[1], "integer encoding")
-	assert.Equal(t, byte(alpDefaultLogVector), data[2], "log vector size")
+	assert.Equal(t, byte(alpDefaultLogVectorSize), data[2], "log vector size")
 	assert.Equal(t, uint32(100), binary.LittleEndian.Uint32(data[3:]), "element count")
 }
 
@@ -1118,7 +769,7 @@ func alpTestPage(numElements uint32) []byte {
 	data := make([]byte, 100)
 	data[0] = alpCompressionMode
 	data[1] = alpIntegerEncodingFOR
-	data[2] = alpDefaultLogVector
+	data[2] = alpDefaultLogVectorSize
 	binary.LittleEndian.PutUint32(data[3:], numElements)
 	return data
 }
@@ -1173,6 +824,32 @@ func TestAlpDecoderTruncatedOffsetArray(t *testing.T) {
 
 // alpEncodeTestPage encodes values into a one vector page, and returns the page
 // along with where that vector starts in it.
+// TestAlpFloat64WidestPacking covers the widest packing a page can carry. The
+// values spread over most of what an int64 holds, so their differences need all
+// 64 bits and the difference between the two ends overflows a signed subtraction.
+func TestAlpFloat64WidestPacking(t *testing.T) {
+	// Every value is an odd multiple of 2^53, which a float64 holds exactly.
+	// The two ends of the run differ by 1023 * 2^54.
+	values := make([]float64, alpDefaultVectorSize)
+	for i := range values {
+		values[i] = float64(int64(i-len(values)/2)*(1<<54) + (1 << 53))
+	}
+
+	enc := newAlpEncoder[float64](format.Encoding_ALP, newFloat64Column(), memory.DefaultAllocator)
+	enc.Put(values)
+	buf, err := enc.FlushValues()
+	require.NoError(t, err)
+	defer buf.Release()
+
+	// One offset follows the header, and it holds the size of the offset array.
+	page := buf.Bytes()
+	vectorPos := alpHeaderSize + int(binary.LittleEndian.Uint32(page[alpHeaderSize:]))
+	assert.Equal(t, byte(64), page[vectorPos+alpVectorHeaderSize[float64]()-1], "bit width")
+	assert.Zero(t, binary.LittleEndian.Uint16(page[vectorPos+2:]), "exception count")
+
+	alpFloat64RoundTrip(t, values)
+}
+
 func alpEncodeTestPage(t *testing.T, values []float32) (page []byte, vectorPos int) {
 	t.Helper()
 
@@ -1229,7 +906,7 @@ func TestAlpDecoderCorruptVector(t *testing.T) {
 		{
 			name: "bit width past the integer width",
 			corrupt: func(page []byte, vectorPos int) []byte {
-				page[vectorPos+alpInfoSize+4] = 33
+				page[vectorPos+alpVectorHeaderSize[float32]()-1] = 33
 				return page
 			},
 			errMsg: "invalid ALP bit width",
@@ -1267,8 +944,9 @@ func TestAlpDecoderExceptionPositionOutsideVector(t *testing.T) {
 
 	// The positions follow the packed deltas, which the vector's own bit width
 	// sizes.
-	bitWidth := int(page[vectorPos+alpInfoSize+4])
-	positionPos := vectorPos + alpInfoSize + 5 + alpPackedSize(len(values), bitWidth)
+	headerSize := alpVectorHeaderSize[float32]()
+	bitWidth := int(page[vectorPos+headerSize-1])
+	positionPos := vectorPos + headerSize + alpPackedSize(len(values), bitWidth)
 	require.Equal(t, 1, int(binary.LittleEndian.Uint16(page[vectorPos+2:])), "one exception")
 	binary.LittleEndian.PutUint16(page[positionPos:], uint16(len(values)))
 

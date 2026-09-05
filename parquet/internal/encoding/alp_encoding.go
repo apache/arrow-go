@@ -21,9 +21,8 @@ package encoding
 // ALP multiplies each value by a power of ten, rounds the product to an integer,
 // and stores the integers as differences from the smallest one, bit packed. A
 // value that does not survive that round trip is stored verbatim as an
-// exception. The encoder chooses the exponent and factor for every vector of
-// 1024 values; after the first few vectors it keeps only the combinations that
-// won so far and tries those, which is far cheaper than the full search.
+// exception. alp_scaling.go holds that arithmetic and alp_params.go chooses the
+// scaling; this file writes and reads the bytes.
 //
 // A page begins with a 7 byte header: compression mode, integer encoding, log2
 // of the vector size, then the value count as a little-endian uint32. An array
@@ -54,229 +53,27 @@ import (
 )
 
 const (
-	alpCompressionMode    = 0 // ALP
-	alpIntegerEncodingFOR = 0 // FOR bit packing
-	alpHeaderSize         = 7
-	alpDefaultVectorSize  = 1024
-	alpDefaultLogVector   = 10
-	alpMaxLogVectorSize   = 15
-	alpMinLogVectorSize   = 3
+	// The two page header bytes that name the algorithm. ALP allows other
+	// values, and a page carrying one is a page this implementation cannot read.
+	alpCompressionMode    = 0 // ALP, rather than ALP for a sparse column
+	alpIntegerEncodingFOR = 0 // frame of reference plus bit packing
 
-	alpInfoSize = 4 // exponent(1) + factor(1) + num_exceptions(2)
+	alpHeaderSize = 7
 
-	// alpSamplerVectors is how many vectors get the full exponent and factor
-	// search before the encoder falls back to the combinations those vectors
-	// chose. alpMaxPresetCombinations caps how many it keeps.
-	alpSamplerVectors        = 8
-	alpMaxPresetCombinations = 5
-
-	// alpSamplerSamples is how many values of a vector the search looks at, and
-	// alpPresetGiveUpAfter is how many shortlisted scalings may fail to improve
-	// on the best before the per-vector search stops looking.
-	alpSamplerSamples    = 256
-	alpPresetGiveUpAfter = 4
-
-	alpMagicFloat32 = float32(12582912.0)         // 2^22 + 2^23
-	alpMagicFloat64 = float64(6755399441055744.0) // 2^51 + 2^52
-
-	// The largest and smallest values of each type that convert to an integer
-	// of the matching width. They stop short of the integer limits because
-	// neither type can represent every integer that close to them.
-	alpEncodingUpperFloat32 = float32(2147483520.0)
-	alpEncodingLowerFloat32 = float32(-2147483520.0)
-	alpEncodingUpperFloat64 = float64(9223372036854774784.0)
-	alpEncodingLowerFloat64 = float64(-9223372036854774784.0)
+	// The vector size this encoder writes. The format allows anything from
+	// 2^alpMinLogVectorSize to 2^alpMaxLogVectorSize, and the decoder honours
+	// what a page declares.
+	alpDefaultVectorSize    = 1024
+	alpDefaultLogVectorSize = 10
+	alpMinLogVectorSize     = 3
+	alpMaxLogVectorSize     = 15
 )
 
-// alpFloat is the set of column types ALP encodes.
-type alpFloat interface {
-	float32 | float64
-}
-
-// The exponent and the factor index these tables, so the lengths set the search
-// space: a float32 multiplier never needs more than 1e10, because a larger one
-// pushes every value out of int32.
-//
-// Scaling multiplies by a tabulated 10^-i rather than dividing by 10^i. The two
-// differ by up to one unit in the last place, and every ALP implementation has
-// to pick the same one or they decode each other's pages to different values.
-var (
-	alpFloatPow10 = [...]float32{
-		1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10,
-	}
-	alpFloatNegPow10 = [...]float32{
-		1e0, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10,
-	}
-	alpDoublePow10 = [...]float64{
-		1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9,
-		1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18,
-	}
-	alpDoubleNegPow10 = [...]float64{
-		1e0, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9,
-		1e-10, 1e-11, 1e-12, 1e-13, 1e-14, 1e-15, 1e-16, 1e-17, 1e-18,
-	}
-)
-
-// The helpers below give the generic code the one constant or width that
-// differs between float32 and float64. Each switch resolves at compile time
-// once the compiler instantiates the function.
-
-// alpMagic returns the constant that rounds a value of type T when added to it
-// and then subtracted again.
-func alpMagic[T alpFloat]() T {
-	var z T
-	switch any(z).(type) {
-	case float32:
-		return T(alpMagicFloat32)
-	case float64:
-		return T(alpMagicFloat64)
-	}
-	panic("parquet: ALP: unsupported float type")
-}
-
-// alpPow10 returns 10^i as a value of type T.
-func alpPow10[T alpFloat](i int) T {
-	var z T
-	switch any(z).(type) {
-	case float32:
-		return T(alpFloatPow10[i])
-	case float64:
-		return T(alpDoublePow10[i])
-	}
-	panic("parquet: ALP: unsupported float type")
-}
-
-// alpNegPow10 returns 10^-i as a value of type T.
-func alpNegPow10[T alpFloat](i int) T {
-	var z T
-	switch any(z).(type) {
-	case float32:
-		return T(alpFloatNegPow10[i])
-	case float64:
-		return T(alpDoubleNegPow10[i])
-	}
-	panic("parquet: ALP: unsupported float type")
-}
-
-// alpNumExponents returns how many exponents the search may try for type T.
-func alpNumExponents[T alpFloat]() int {
-	var z T
-	switch any(z).(type) {
-	case float32:
-		return len(alpFloatPow10)
-	case float64:
-		return len(alpDoublePow10)
-	}
-	panic("parquet: ALP: unsupported float type")
-}
-
-// alpEncodedBytes returns the width ALP stores integers of type T at. The frame
-// of reference and the exception values both use it.
-func alpEncodedBytes[T alpFloat]() int {
-	var z T
-	switch any(z).(type) {
-	case float32:
-		return 4
-	case float64:
-		return 8
-	}
-	panic("parquet: ALP: unsupported float type")
-}
-
-// alpEncodingLimits returns the range a scaled value of type T has to stay
-// inside to convert to an integer. The bounds are the largest and smallest
-// values of T that survive the conversion, which fall short of the integer
-// type's own limits because T cannot represent every integer near them.
-func alpEncodingLimits[T alpFloat]() (lo, hi T) {
-	var z T
-	switch any(z).(type) {
-	case float32:
-		return T(alpEncodingLowerFloat32), T(alpEncodingUpperFloat32)
-	case float64:
-		return T(alpEncodingLowerFloat64), T(alpEncodingUpperFloat64)
-	}
-	panic("parquet: ALP: unsupported float type")
-}
-
-// alpFloatToBits returns the bit pattern of v, so that callers can compare two
-// values without treating negative zero as equal to zero.
-func alpFloatToBits[T alpFloat](v T) uint64 {
-	switch f := any(v).(type) {
-	case float32:
-		return uint64(math.Float32bits(f))
-	case float64:
-		return math.Float64bits(f)
-	}
-	panic("parquet: ALP: unsupported float type")
-}
-
-// alpFloatFromBits is the inverse of alpFloatToBits.
-func alpFloatFromBits[T alpFloat](b uint64) T {
-	var z T
-	switch any(z).(type) {
-	case float32:
-		return T(math.Float32frombits(uint32(b)))
-	case float64:
-		return T(math.Float64frombits(b))
-	}
-	panic("parquet: ALP: unsupported float type")
-}
-
-// alpFastRound rounds v to the nearest integer. Adding and then subtracting a
-// large constant discards the fractional bits, which is quicker than a library
-// call and is what the reference implementation does.
-func alpFastRound[T alpFloat](v T) int64 {
-	magic := alpMagic[T]()
-	if v >= 0 {
-		return int64((v + magic) - magic)
-	}
-	return int64((v - magic) + magic)
-}
-
-// alpImpossibleToEncode reports whether a scaled value has no integer form: a
-// NaN, either infinity, a magnitude past what the integer type holds, or a
-// negative zero, whose sign the round trip would drop.
-func alpImpossibleToEncode[T alpFloat](v T) bool {
-	lo, hi := alpEncodingLimits[T]()
-	f := float64(v)
-	return math.IsNaN(f) || v > hi || v < lo || (f == 0 && math.Signbit(f))
-}
-
-// alpNumberToInt rounds a scaled value, or returns the upper encoding limit for
-// one that cannot be rounded. The limit acts as a sentinel: decoding it cannot
-// return the original value, so the caller finds the value in the exceptions.
-func alpNumberToInt[T alpFloat](v T) int64 {
-	if alpImpossibleToEncode(v) {
-		_, hi := alpEncodingLimits[T]()
-		return int64(hi)
-	}
-	return alpFastRound(v)
-}
-
-// alpEncode scales v and rounds it to the integer ALP stores.
-func alpEncode[T alpFloat](v T, exponent, factor int) int64 {
-	return alpNumberToInt(v * alpPow10[T](exponent) * alpNegPow10[T](factor))
-}
-
-// alpDecode is the inverse of alpEncode. The order of the two multiplications
-// is part of the format: reassociating them changes the last bit of the result.
-func alpDecode[T alpFloat](encoded int64, exponent, factor int) T {
-	return T(encoded) * alpPow10[T](factor) * alpNegPow10[T](exponent)
-}
-
-// alpTryEncode scales v and reports whether the round trip returns it unchanged.
-// A value that fails has to be stored verbatim as an exception, which is the
-// case for anything with no integer form: a NaN is never equal to itself, and an
-// infinity, an out-of-range magnitude, or a negative zero all encode to the
-// sentinel, which decodes to something else.
-func alpTryEncode[T alpFloat](v T, exponent, factor int) (encoded int64, ok bool) {
-	encoded = alpEncode(v, exponent, factor)
-	return encoded, alpDecode[T](encoded, exponent, factor) == v
-}
-
-// alpBitWidth returns the number of bits needed to hold v.
-func alpBitWidth(v uint64) int {
-	return bits.Len64(v)
+// alpVectorHeaderSize returns how many bytes precede a vector's packed
+// differences: the exponent, the factor, the exception count, the frame of
+// reference and the bit width.
+func alpVectorHeaderSize[T alpFloat]() int {
+	return 1 + 1 + 2 + alpEncodedBytes[T]() + 1
 }
 
 // alpPackedSize returns the byte size of count values packed at bitWidth bits.
@@ -326,129 +123,34 @@ func alpUnpackBits(br *utils.BitReader, packed *bytes.Reader, data []byte, out [
 	return nil
 }
 
-// alpEncodingParams is the scaling one vector is encoded with.
-type alpEncodingParams struct {
-	exponent int
-	factor   int
-}
-
-// alpSample appends equidistant values of a vector to out and returns it. The
-// scaling search reads the sample instead of the whole vector: the values of a
-// vector share a decimal precision or they do not, and a sample of a few hundred
-// answers that as well as a thousand does.
-func alpSample[T alpFloat](values []T, out []T) []T {
-	stride := max(1, (len(values)+alpSamplerSamples-1)/alpSamplerSamples)
-	for i := 0; i < len(values); i += stride {
-		out = append(out, values[i])
+// alpAppendInt appends v to dst little endian, at the width ALP writes an
+// integer of type T at.
+func alpAppendInt[T alpFloat](dst []byte, v uint64) []byte {
+	if alpEncodedBytes[T]() == 4 {
+		return binary.LittleEndian.AppendUint32(dst, uint32(v))
 	}
-	return out
+	return binary.LittleEndian.AppendUint64(dst, v)
 }
 
-// alpExceptionBits is what one exception costs: the value at its full width,
-// plus the position that patches it back in.
-func alpExceptionBits[T alpFloat]() int {
-	return 8*alpEncodedBytes[T]() + 16
-}
-
-// alpEstimateSizeBits reports what a scaling would cost the given values, and
-// how many of them it encodes. The cost counts the packed integers at the width
-// the frame of reference leaves, plus every exception.
-func alpEstimateSizeBits[T alpFloat](values []T, exponent, factor int) (sizeBits int64, numEncodable int) {
-	minEncoded, maxEncoded := int64(math.MaxInt64), int64(math.MinInt64)
-	numExceptions := 0
-	for _, v := range values {
-		e, ok := alpTryEncode(v, exponent, factor)
-		if !ok {
-			numExceptions++
-			continue
-		}
-		minEncoded, maxEncoded = min(minEncoded, e), max(maxEncoded, e)
+// alpReadInt reads what alpAppendInt wrote, sign extending it.
+func alpReadInt[T alpFloat](src []byte) int64 {
+	if alpEncodedBytes[T]() == 4 {
+		return int64(int32(binary.LittleEndian.Uint32(src)))
 	}
+	return int64(binary.LittleEndian.Uint64(src))
+}
 
-	sizeBits = int64(numExceptions) * int64(alpExceptionBits[T]())
-	numEncodable = len(values) - numExceptions
-	if numEncodable == 0 {
-		return sizeBits, 0
+// alpReadFloat reads one exception value.
+func alpReadFloat[T alpFloat](src []byte) T {
+	if alpEncodedBytes[T]() == 4 {
+		return alpFloatFromBits[T](uint64(binary.LittleEndian.Uint32(src)))
 	}
-	// The subtraction is unsigned because the two ends of an int64 column are
-	// further apart than an int64 reaches.
-	width := alpBitWidth(uint64(maxEncoded) - uint64(minEncoded))
-	return sizeBits + int64(len(values))*int64(width), numEncodable
+	return alpFloatFromBits[T](binary.LittleEndian.Uint64(src))
 }
 
-// alpBetterParams reports whether one candidate scaling beats another. The
-// smaller estimate wins; a tie goes to the larger exponent, then to the larger
-// factor. The ALP paper states those tie-breaks without giving a reason
-// (Afroozeh et al., SIGMOD 2023, section 3.1.2), and following them keeps this
-// encoder picking the same scaling as the other implementations.
-func alpBetterParams(a alpEncodingParams, aBits int64, b alpEncodingParams, bBits int64) bool {
-	switch {
-	case aBits != bBits:
-		return aBits < bBits
-	case a.exponent != b.exponent:
-		return a.exponent > b.exponent
-	default:
-		return a.factor > b.factor
-	}
-}
-
-// alpFindBestParams returns the cheapest scaling over every exponent and factor
-// pair. The factor never exceeds the exponent, because scaling by a net power
-// below one would move the decimal point the wrong way.
-func alpFindBestParams[T alpFloat](values []T) alpEncodingParams {
-	maxExponent := alpNumExponents[T]() - 1
-	// The fallback treats the values as integers: an exponent and a factor of
-	// equal size cancel, so whatever is already integral packs and the rest
-	// become exceptions. It stands when no scaling encodes enough to compare.
-	best := alpEncodingParams{exponent: maxExponent, factor: maxExponent}
-	bestBits := int64(math.MaxInt64)
-
-	for e := range maxExponent + 1 {
-		for f := range e + 1 {
-			sizeBits, numEncodable := alpEstimateSizeBits(values, e, f)
-			// A scaling that turns almost everything into an exception tells us
-			// nothing about how wide the rest would pack.
-			if numEncodable < 2 {
-				continue
-			}
-			candidate := alpEncodingParams{exponent: e, factor: f}
-			if alpBetterParams(candidate, sizeBits, best, bestBits) {
-				best, bestBits = candidate, sizeBits
-			}
-		}
-	}
-	return best
-}
-
-// alpFindBestParamsWithPresets returns whichever shortlisted scaling is cheapest
-// for the given values. The shortlist is ordered by how often each scaling won
-// during sampling, so the search stops once alpPresetGiveUpAfter of them in a
-// row fail to improve on the best.
-func alpFindBestParamsWithPresets[T alpFloat](values []T, presets [][2]int) alpEncodingParams {
-	best := alpEncodingParams{exponent: presets[0][0], factor: presets[0][1]}
-	bestBits := int64(math.MaxInt64)
-	notImproved := 0
-
-	for _, p := range presets {
-		sizeBits, _ := alpEstimateSizeBits(values, p[0], p[1])
-		if sizeBits >= bestBits {
-			notImproved++
-			if notImproved == alpPresetGiveUpAfter {
-				break
-			}
-			continue
-		}
-		best, bestBits = alpEncodingParams{exponent: p[0], factor: p[1]}, sizeBits
-		notImproved = 0
-	}
-	return best
-}
-
-// alpPresetKey packs an exponent and factor into one map key.
-func alpPresetKey(exponent, factor int) uint32 {
-	return uint32(exponent)<<16 | uint32(factor)
-}
-
+// alpEncoder encodes a float column with ALP, a vector at a time. It buffers
+// values until it holds a whole vector, so the values of a page reach the sink
+// only when the caller flushes it.
 type alpEncoder[T alpFloat] struct {
 	encoder
 
@@ -469,35 +171,34 @@ type alpEncoder[T alpFloat] struct {
 	excValues      []T
 	sampleScratch  []T
 
+	// The scalings the sampled vectors chose. Once the encoder has enough of
+	// them, cachedPresets replaces the full search for the rest of the column.
 	vectorsProcessed int
-	cachedPresets    [][2]int
-	presetCounts     map[uint32]int
+	cachedPresets    []alpEncodingParams
+	presetCounts     map[alpEncodingParams]int
 }
 
+// newAlpEncoder returns an encoder for a float column, with the scratch every
+// vector reuses allocated up front.
 func newAlpEncoder[T alpFloat](e format.Encoding, descr *schema.Column, mem memory.Allocator) *alpEncoder[T] {
 	return &alpEncoder[T]{
 		encoder:        newEncoderBase(e, descr, mem),
 		vectorSize:     alpDefaultVectorSize,
-		logVectorSize:  alpDefaultLogVector,
+		logVectorSize:  alpDefaultLogVectorSize,
 		vectorBuf:      make([]T, alpDefaultVectorSize),
 		encodedScratch: make([]int64, alpDefaultVectorSize),
 		deltaScratch:   make([]uint64, alpDefaultVectorSize),
 		sampleScratch:  make([]T, 0, alpSamplerSamples),
-		presetCounts:   make(map[uint32]int),
+		presetCounts:   make(map[alpEncodingParams]int),
 	}
 }
 
 func (enc *alpEncoder[T]) Type() parquet.Type {
-	var z T
-	switch any(z).(type) {
-	case float32:
-		return parquet.Types.Float
-	case float64:
-		return parquet.Types.Double
-	}
-	panic("parquet: ALP: unsupported float type")
+	return alpParquetType[T]()
 }
 
+// Put buffers values and encodes each vector as it fills. A partly filled
+// vector waits for FlushValues.
 func (enc *alpEncoder[T]) Put(in []T) {
 	for len(in) > 0 {
 		n := copy(enc.vectorBuf[enc.bufCount:], in)
@@ -512,6 +213,7 @@ func (enc *alpEncoder[T]) Put(in []T) {
 	}
 }
 
+// PutSpaced drops the null slots of in and buffers the values that remain.
 func (enc *alpEncoder[T]) PutSpaced(in []T, validBits []byte, validBitsOffset int64) {
 	nbuf := make([]T, len(in))
 	nvalid := spacedCompress(in, nbuf, validBits, validBitsOffset)
@@ -523,18 +225,17 @@ func (enc *alpEncoder[T]) PutSpaced(in []T, validBits []byte, validBitsOffset in
 func (enc *alpEncoder[T]) findParams(values []T) alpEncodingParams {
 	sample := alpSample(values, enc.sampleScratch[:0])
 
-	if enc.cachedPresets != nil {
-		if len(enc.cachedPresets) == 1 {
-			return alpEncodingParams{exponent: enc.cachedPresets[0][0], factor: enc.cachedPresets[0][1]}
-		}
+	if len(enc.cachedPresets) > 0 {
 		return alpFindBestParamsWithPresets(sample, enc.cachedPresets)
 	}
 
 	params := alpFindBestParams(sample)
-	enc.presetCounts[alpPresetKey(params.exponent, params.factor)]++
+	enc.presetCounts[params]++
 	return params
 }
 
+// encodeVector appends one encoded vector to enc.encodedBuf and records its
+// size, which the page header turns into an offset.
 func (enc *alpEncoder[T]) encodeVector(values []T) {
 	params := enc.findParams(values)
 
@@ -580,7 +281,7 @@ func (enc *alpEncoder[T]) encodeVector(values []T) {
 		deltas[i] = uint64(e) - uint64(minValue)
 		maxDelta = max(deltas[i], maxDelta)
 	}
-	bitWidth := alpBitWidth(maxDelta)
+	bitWidth := bits.Len64(maxDelta)
 
 	startLen := len(enc.encodedBuf)
 	enc.encodedBuf = append(enc.encodedBuf, byte(params.exponent), byte(params.factor))
@@ -599,37 +300,12 @@ func (enc *alpEncoder[T]) encodeVector(values []T) {
 	enc.vectorSizes = append(enc.vectorSizes, len(enc.encodedBuf)-startLen)
 }
 
-// alpAppendInt appends v to dst little endian, at the width ALP stores integers
-// of type T at.
-func alpAppendInt[T alpFloat](dst []byte, v uint64) []byte {
-	if alpEncodedBytes[T]() == 4 {
-		return binary.LittleEndian.AppendUint32(dst, uint32(v))
-	}
-	return binary.LittleEndian.AppendUint64(dst, v)
-}
-
-// alpReadInt reads what alpAppendInt wrote, sign extending it.
-func alpReadInt[T alpFloat](src []byte) int64 {
-	if alpEncodedBytes[T]() == 4 {
-		return int64(int32(binary.LittleEndian.Uint32(src)))
-	}
-	return int64(binary.LittleEndian.Uint64(src))
-}
-
-// alpReadFloat reads one exception value.
-func alpReadFloat[T alpFloat](src []byte) T {
-	if alpEncodedBytes[T]() == 4 {
-		return alpFloatFromBits[T](uint64(binary.LittleEndian.Uint32(src)))
-	}
-	return alpFloatFromBits[T](binary.LittleEndian.Uint64(src))
-}
-
-// buildPresetCache keeps the exponent and factor pairs the sampled vectors
-// chose most often, ordered by how often they won.
+// buildPresetCache keeps the scalings the sampled vectors chose most often,
+// ordered by how often they won.
 func (enc *alpEncoder[T]) buildPresetCache() {
 	type preset struct {
-		key   uint32
-		count int
+		params alpEncodingParams
+		count  int
 	}
 
 	sorted := make([]preset, 0, len(enc.presetCounts))
@@ -640,29 +316,33 @@ func (enc *alpEncoder[T]) buildPresetCache() {
 	// without them the shortlist, and the encoded bytes, would differ between
 	// two runs over the same input.
 	slices.SortStableFunc(sorted, func(a, b preset) int {
-		if a.count != b.count {
+		switch {
+		case a.count != b.count:
 			return b.count - a.count
+		case a.params.exponent != b.params.exponent:
+			return b.params.exponent - a.params.exponent
+		default:
+			return b.params.factor - a.params.factor
 		}
-		return int(b.key) - int(a.key)
 	})
 
 	numPresets := min(len(sorted), alpMaxPresetCombinations)
-	enc.cachedPresets = make([][2]int, numPresets)
+	enc.cachedPresets = make([]alpEncodingParams, numPresets)
 	for i, p := range sorted[:numPresets] {
-		enc.cachedPresets[i][0] = int(p.key >> 16)
-		enc.cachedPresets[i][1] = int(p.key & 0xFFFF)
+		enc.cachedPresets[i] = p.params
 	}
 }
 
+// EstimatedDataEncodedSize returns how large the page would be if it were
+// flushed now. The buffered values are not encoded yet, so they count at the
+// width a bit packing that saved nothing would give them.
 func (enc *alpEncoder[T]) EstimatedDataEncodedSize() int64 {
-	// The buffered values are not encoded yet, so charge them the width they
-	// would take under a bit packing that saved nothing.
 	return int64(len(enc.encodedBuf)) + int64(enc.bufCount*alpEncodedBytes[T]())
 }
 
 // FlushValues writes one page and clears the values it wrote, so that the next
-// Put starts a new page. The exponent and factor shortlist survives, because it
-// describes the column rather than the page.
+// Put starts a new page. The scaling shortlist survives, because it describes
+// the column rather than the page.
 //
 // A page always carries the header, even when it holds no values: a column of
 // optional values can produce a page whose rows are all null, and a reader
@@ -699,6 +379,8 @@ func (enc *alpEncoder[T]) resetPage() {
 	enc.vectorSizes = enc.vectorSizes[:0]
 }
 
+// Reset returns the encoder to its state when new, shortlist included, so that
+// it can encode an unrelated column.
 func (enc *alpEncoder[T]) Reset() {
 	enc.encoder.Reset()
 	enc.resetPage()
@@ -708,6 +390,8 @@ func (enc *alpEncoder[T]) Reset() {
 	clear(enc.presetCounts)
 }
 
+// alpDecoder reads the pages an ALP encoder wrote. It decodes a whole vector at
+// a time and holds it, since a caller is free to stop part way through one.
 type alpDecoder[T alpFloat] struct {
 	decoder
 
@@ -718,8 +402,7 @@ type alpDecoder[T alpFloat] struct {
 	vectorOffsets []uint32
 	bodyData      []byte
 
-	// The decoder holds one decoded vector at a time, since Decode is free to
-	// stop part way through one.
+	// The vector the decoder holds, and how far through the page it has read.
 	currentVectorIndex int
 	currentIndex       int
 	decodedValues      []T
@@ -741,16 +424,12 @@ func newAlpDecoder[T alpFloat](e format.Encoding, descr *schema.Column) *alpDeco
 }
 
 func (dec *alpDecoder[T]) Type() parquet.Type {
-	var z T
-	switch any(z).(type) {
-	case float32:
-		return parquet.Types.Float
-	case float64:
-		return parquet.Types.Double
-	}
-	panic("parquet: ALP: unsupported float type")
+	return alpParquetType[T]()
 }
 
+// SetData points the decoder at one page and reads its header. It rejects a
+// header describing an ALP variant this implementation does not write, and one
+// whose vector count needs more bytes than the page holds.
 func (dec *alpDecoder[T]) SetData(nvals int, data []byte) error {
 	if len(data) < alpHeaderSize {
 		return fmt.Errorf("parquet: ALP data too short for header: %d bytes", len(data))
@@ -816,21 +495,25 @@ func (dec *alpDecoder[T]) vectorLength(vectorIdx int) int {
 	return dec.vectorSize
 }
 
-// decodeVector decodes one vector into dec.decodedValues. It checks the sizes
-// it reads, since the page may be truncated or corrupt.
+// decodeVector decodes one vector into dec.decodedValues. It checks every size
+// and position it reads, since the page may be truncated or corrupt.
 func (dec *alpDecoder[T]) decodeVector(vectorIdx int) error {
 	vectorLen := dec.vectorLength(vectorIdx)
-	pos := int(dec.vectorOffsets[vectorIdx])
 	valueBytes := alpEncodedBytes[T]()
 
-	if pos < 0 || pos+alpInfoSize+valueBytes+1 > len(dec.bodyData) {
+	// A 32-bit int cannot hold every uint32 offset, so a page claiming a huge
+	// one leaves pos negative.
+	pos := int(dec.vectorOffsets[vectorIdx])
+	if pos < 0 || pos+alpVectorHeaderSize[T]() > len(dec.bodyData) {
 		return fmt.Errorf("parquet: ALP vector %d starts past the end of the page", vectorIdx)
 	}
 
 	exponent := int(dec.bodyData[pos])
 	factor := int(dec.bodyData[pos+1])
 	numExceptions := int(binary.LittleEndian.Uint16(dec.bodyData[pos+2:]))
-	pos += alpInfoSize
+	frameOfRef := alpReadInt[T](dec.bodyData[pos+4:])
+	bitWidth := int(dec.bodyData[pos+4+valueBytes])
+	pos += alpVectorHeaderSize[T]()
 
 	if exponent >= alpNumExponents[T]() || factor > exponent {
 		return fmt.Errorf("parquet: invalid ALP exponent %d and factor %d", exponent, factor)
@@ -839,11 +522,6 @@ func (dec *alpDecoder[T]) decodeVector(vectorIdx int) error {
 		return fmt.Errorf("parquet: ALP vector %d claims %d exceptions in %d values",
 			vectorIdx, numExceptions, vectorLen)
 	}
-
-	frameOfRef := alpReadInt[T](dec.bodyData[pos:])
-	bitWidth := int(dec.bodyData[pos+valueBytes])
-	pos += valueBytes + 1
-
 	if bitWidth > valueBytes*8 {
 		return fmt.Errorf("parquet: invalid ALP bit width: %d", bitWidth)
 	}
@@ -878,6 +556,8 @@ func (dec *alpDecoder[T]) decodeVector(vectorIdx int) error {
 	return nil
 }
 
+// Decode fills out with as many values as the caller has left to read, decoding
+// each vector as it reaches it.
 func (dec *alpDecoder[T]) Decode(out []T) (int, error) {
 	toRead := min(len(out), dec.nvals)
 
@@ -914,6 +594,8 @@ func (dec *alpDecoder[T]) Decode(out []T) (int, error) {
 	return read, nil
 }
 
+// DecodeSpaced decodes into out and then spreads the values apart, leaving a
+// slot for every null.
 func (dec *alpDecoder[T]) DecodeSpaced(out []T, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
 	toRead := len(out) - nullCount
 	valuesRead, err := dec.Decode(out[:toRead])
@@ -927,6 +609,9 @@ func (dec *alpDecoder[T]) DecodeSpaced(out []T, nullCount int, validBits []byte,
 	return spacedExpand(out, nullCount, validBits, validBitsOffset), nil
 }
 
+// Discard skips n values. Skipping over the vector the decoder holds costs
+// nothing: the next Decode finds that it needs a different vector and decodes
+// that one instead.
 func (dec *alpDecoder[T]) Discard(n int) (int, error) {
 	n = min(n, dec.nvals)
 	dec.nvals -= n
@@ -934,7 +619,10 @@ func (dec *alpDecoder[T]) Discard(n int) (int, error) {
 	return n, nil
 }
 
-type AlpFloat32Encoder = alpEncoder[float32]
-type AlpFloat64Encoder = alpEncoder[float64]
-type AlpFloat32Decoder = alpDecoder[float32]
-type AlpFloat64Decoder = alpDecoder[float64]
+// The names the encoding traits hand out, one per column type.
+type (
+	AlpFloat32Encoder = alpEncoder[float32]
+	AlpFloat64Encoder = alpEncoder[float64]
+	AlpFloat32Decoder = alpDecoder[float32]
+	AlpFloat64Decoder = alpDecoder[float64]
+)
