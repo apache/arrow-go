@@ -328,6 +328,9 @@ var (
 		DeltaBinaryPacked    Encoding
 		DeltaLengthByteArray Encoding
 		ByteStreamSplit      Encoding
+		// ALP encodes FLOAT and DOUBLE columns. parquet-format marks it as a
+		// preview feature, so writing it requires WithAlpEncoding.
+		ALP Encoding
 	}{
 		Plain:                Encoding(format.Encoding_PLAIN),
 		PlainDict:            Encoding(format.Encoding_PLAIN_DICTIONARY),
@@ -338,6 +341,7 @@ var (
 		DeltaBinaryPacked:    Encoding(format.Encoding_DELTA_BINARY_PACKED),
 		DeltaLengthByteArray: Encoding(format.Encoding_DELTA_LENGTH_BYTE_ARRAY),
 		ByteStreamSplit:      Encoding(format.Encoding_BYTE_STREAM_SPLIT),
+		ALP:                  Encoding(format.Encoding_ALP),
 	}
 
 	// ColumnOrders contains constants for the Column Ordering fields
