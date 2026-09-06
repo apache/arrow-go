@@ -1456,10 +1456,8 @@ type shreddedArrayBuilder struct {
 }
 
 func (s *shreddedArrayBuilder) AppendMissing() {
-	s.listBldr.Append(true)
-	s.elemBldr.Append(true)
-	s.valueBldr.AppendNull()
-	s.typedBldr.AppendMissing()
+	// Missing lists must not add child elements beneath a null parent struct.
+	s.listBldr.AppendNull()
 }
 
 func (b *shreddedArrayBuilder) tryTyped(v variant.Value) (residual []byte) {
