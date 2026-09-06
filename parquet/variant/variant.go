@@ -200,16 +200,18 @@ func (m *Metadata) loadDictionary(offsetSz uint8) error {
 			ErrInvalidMetadata, valuesStart, len(m.data))
 	}
 
-	offsetPos := hdrSizeBytes + offsetSz
-	if first := readLEU32(m.data[offsetPos : offsetPos+offsetSz]); first != 0 {
+	// The table position can exceed 255 even when offsets use only two bytes.
+	offsetWidth := int(offsetSz)
+	offsetPos := hdrSizeBytes + offsetWidth
+	if first := readLEU32(m.data[offsetPos : offsetPos+offsetWidth]); first != 0 {
 		return fmt.Errorf("%w: first offset must be zero: %d", ErrInvalidMetadata, first)
 	}
 
 	m.keys = make([][]byte, dictSize)
 	offsetStart := uint32(0)
 	for i := range dictSize {
-		offsetPos += offsetSz
-		end := readLEU32(m.data[offsetPos : offsetPos+offsetSz])
+		offsetPos += offsetWidth
+		end := readLEU32(m.data[offsetPos : offsetPos+offsetWidth])
 		if end < offsetStart {
 			return fmt.Errorf("%w: offsets are not monotonic: %d < %d",
 				ErrInvalidMetadata, end, offsetStart)
