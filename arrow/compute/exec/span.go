@@ -214,13 +214,13 @@ func (a *ArraySpan) SetSlice(off, length int64) {
 		return
 	}
 
+	// The cached null count describes the span as it was, not the slice.
+	// As in the C++ ArraySpan::SetSlice, a slice of anything with a validity
+	// bitmap has an unknown count until someone asks for it; only the null
+	// type and a span without a bitmap can be counted without looking.
 	if a.Type.ID() != arrow.NULL {
-		if a.Nulls != 0 {
-			if a.Nulls == a.Len {
-				a.Nulls = length
-			} else {
-				a.Nulls = array.UnknownNullCount
-			}
+		if a.Nulls != 0 || len(a.Buffers[0].Buf) != 0 {
+			a.Nulls = array.UnknownNullCount
 		}
 	} else {
 		a.Nulls = length
