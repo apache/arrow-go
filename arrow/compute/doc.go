@@ -23,8 +23,6 @@
 // is an attempt to provide for those users, and in general create a
 // native-go arrow compute engine.
 //
-// Everything in this package should be considered Experimental for now.
-//
 // # What is implemented
 //
 // The function registry holds scalar functions (element-wise arithmetic,
