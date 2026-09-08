@@ -27,7 +27,6 @@ import (
 	"math"
 	"os"
 	"path"
-	"strconv"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -1046,22 +1045,25 @@ func TestListColumns(t *testing.T) {
 	}
 }
 
-// alpTestFiles are the ALP-encoded files in the parquet-testing repository,
-// each paired with a CSV of the values it holds. The alp_java_ files carry the
-// same data written by parquet-java, so decoding them checks that the Go
-// implementation agrees with another writer and not only with itself.
-var alpTestFiles = []struct {
-	parquetFile string
-	expectFile  string
-}{
-	{"alp_arade.parquet", "alp_arade_expect.csv"},
-	{"alp_spotify1.parquet", "alp_spotify1_expect.csv"},
-	{"alp_float_arade.parquet", "alp_float_arade_expect.csv"},
-	{"alp_float_spotify1.parquet", "alp_float_spotify1_expect.csv"},
-	{"alp_java_arade.parquet", "alp_arade_expect.csv"},
-	{"alp_java_spotify1.parquet", "alp_spotify1_expect.csv"},
-	{"alp_java_float_arade.parquet", "alp_float_arade_expect.csv"},
-	{"alp_java_float_spotify1.parquet", "alp_float_spotify1_expect.csv"},
+// alpConformanceFile is the file apache/parquet-testing publishes for checking
+// an ALP decoder. All eight of its columns hold the same 9032 values, two of
+// them PLAIN encoded, so a correctly decoded ALP column is bit-identical to its
+// PLAIN reference and this test needs no expected values of its own. The three
+// ALP columns per type use vector sizes of 1024, 4096 and 32 values, so a
+// reader that assumed the default size fails two of the three.
+//
+// The values cover what a round trip against ourselves cannot: three distinct
+// NaN bit patterns, both infinities, -0.0, a subnormal, a vector that is
+// entirely exceptions, a constant vector, nulls, and magnitudes that need the
+// widest frame of reference. data/README.md in parquet-testing has the table.
+const alpConformanceFile = "alp_extended.zstd.parquet"
+
+// alpValue is one row of a column: either a null or the bit pattern of a value.
+// Comparison is on bit patterns so that a NaN payload has to survive the round
+// trip (NaN does not equal itself) and -0.0 is not accepted in place of 0.0.
+type alpValue struct {
+	null bool
+	bits uint64
 }
 
 func TestAlpEncodingFileRead(t *testing.T) {
@@ -1072,113 +1074,124 @@ func TestAlpEncodingFileRead(t *testing.T) {
 	}
 	require.DirExists(t, dir)
 
-	for _, tc := range alpTestFiles {
-		t.Run(tc.parquetFile, func(t *testing.T) {
-			pqPath := path.Join(dir, tc.parquetFile)
-			if _, err := os.Stat(pqPath); os.IsNotExist(err) {
-				// The ALP files land in parquet-testing with apache/parquet-testing#100.
-				t.Skipf("%s not in %s", tc.parquetFile, dir)
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	rdr, err := file.OpenParquetFile(path.Join(dir, alpConformanceFile), false,
+		file.WithReadProps(props))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	const numRows = 9032
+	require.EqualValues(t, numRows, rdr.MetaData().GetNumRows())
+
+	for _, tc := range []struct {
+		alp, plain string
+	}{
+		{"float_alp_1024", "float_plain"},
+		{"float_alp_4096", "float_plain"},
+		{"float_alp_32", "float_plain"},
+		{"double_alp_1024", "double_plain"},
+		{"double_alp_4096", "double_plain"},
+		{"double_alp_32", "double_plain"},
+	} {
+		t.Run(tc.alp, func(t *testing.T) {
+			alpCol := alpColumnIndex(t, rdr, tc.alp)
+
+			// A decoder that fell back to another encoding would satisfy the
+			// comparison below, so check that the pages really are ALP.
+			for rg := range rdr.NumRowGroups() {
+				chunk, err := rdr.RowGroup(rg).MetaData().ColumnChunk(alpCol)
+				require.NoError(t, err)
+				assert.Contains(t, chunk.Encodings(), parquet.Encodings.ALP,
+					"row group %d of %s should be ALP encoded", rg, tc.alp)
 			}
 
-			header, columns := readExpectedCSV(t, path.Join(dir, tc.expectFile))
+			want := readAlpColumn(t, rdr, alpColumnIndex(t, rdr, tc.plain))
+			got := readAlpColumn(t, rdr, alpCol)
+			require.Len(t, want, numRows)
+			require.Len(t, got, numRows)
 
-			props := parquet.NewReaderProperties(memory.DefaultAllocator)
-			fileReader, err := file.OpenParquetFile(pqPath, false, file.WithReadProps(props))
-			require.NoError(t, err)
-			defer fileReader.Close()
-
-			meta := fileReader.MetaData()
-			require.Equal(t, len(header), meta.Schema.NumColumns())
-			require.EqualValues(t, len(columns[0]), meta.GetNumRows())
-
-			for rg := range fileReader.NumRowGroups() {
-				rgr := fileReader.RowGroup(rg)
-				for c := range meta.Schema.NumColumns() {
-					assert.Equal(t, header[c], meta.Schema.Column(c).Name())
-
-					chunk, err := rgr.MetaData().ColumnChunk(c)
-					require.NoError(t, err)
-					assert.Contains(t, chunk.Encodings(), parquet.Encodings.ALP,
-						"column %s should be ALP encoded", header[c])
-
-					rdr, err := rgr.Column(c)
-					require.NoError(t, err)
-					switch r := rdr.(type) {
-					case *file.Float32ColumnChunkReader:
-						checkAlpFloat32Column(t, r, columns[c])
-					case *file.Float64ColumnChunkReader:
-						checkAlpFloat64Column(t, r, columns[c])
-					default:
-						t.Fatalf("column %s: unexpected reader %T", header[c], rdr)
-					}
+			for i := range want {
+				if want[i] != got[i] {
+					t.Fatalf("row %d: got %s, want %s", i, got[i], want[i])
 				}
 			}
 		})
 	}
 }
 
-// readExpectedCSV returns the column names and, for every column, the decimal
-// text of each value. Comparison happens on the text rather than on a parsed
-// float so that a value ALP mangles cannot be hidden by the parse.
-func readExpectedCSV(t *testing.T, csvPath string) (header []string, columns [][]string) {
-	t.Helper()
-
-	f, err := os.Open(csvPath)
-	require.NoError(t, err)
-	defer f.Close()
-
-	records, err := csv.NewReader(f).ReadAll()
-	require.NoError(t, err)
-	require.Greater(t, len(records), 1, "%s has no rows", csvPath)
-
-	header = records[0]
-	columns = make([][]string, len(header))
-	for _, rec := range records[1:] {
-		require.Len(t, rec, len(header))
-		for c, v := range rec {
-			columns[c] = append(columns[c], v)
-		}
+func (v alpValue) String() string {
+	if v.null {
+		return "null"
 	}
-	return header, columns
+	return fmt.Sprintf("%#016x", v.bits)
 }
 
-func checkAlpFloat32Column(t *testing.T, rdr *file.Float32ColumnChunkReader, expected []string) {
+// alpColumnIndex returns the index of the named leaf column.
+func alpColumnIndex(t *testing.T, rdr *file.Reader, name string) int {
 	t.Helper()
 
-	values := make([]float32, len(expected))
-	readAlpColumn(t, len(expected), values, rdr.ReadBatch)
-	for i, want := range expected {
-		f, err := strconv.ParseFloat(want, 32)
-		require.NoError(t, err)
-		if math.Float32bits(float32(f)) != math.Float32bits(values[i]) {
-			t.Fatalf("value[%d]: got %v, want %v", i, values[i], want)
+	schema := rdr.MetaData().Schema
+	for c := range schema.NumColumns() {
+		if schema.Column(c).Name() == name {
+			return c
 		}
 	}
+	t.Fatalf("no column named %s", name)
+	return -1
 }
 
-func checkAlpFloat64Column(t *testing.T, rdr *file.Float64ColumnChunkReader, expected []string) {
+// readAlpColumn reads one column of every row group, one entry per row. Float
+// bit patterns are widened to 64 bits so that both physical types compare the
+// same way.
+func readAlpColumn(t *testing.T, rdr *file.Reader, col int) []alpValue {
 	t.Helper()
 
-	values := make([]float64, len(expected))
-	readAlpColumn(t, len(expected), values, rdr.ReadBatch)
-	for i, want := range expected {
-		f, err := strconv.ParseFloat(want, 64)
+	maxDef := rdr.MetaData().Schema.Column(col).MaxDefinitionLevel()
+	var values []alpValue
+	for rg := range rdr.NumRowGroups() {
+		cr, err := rdr.RowGroup(rg).Column(col)
 		require.NoError(t, err)
-		if math.Float64bits(f) != math.Float64bits(values[i]) {
-			t.Fatalf("value[%d]: got %v, want %v", i, values[i], want)
+
+		switch r := cr.(type) {
+		case *file.Float32ColumnChunkReader:
+			values = appendAlpValues(t, values, maxDef, r.ReadBatch,
+				func(v float32) uint64 { return uint64(math.Float32bits(v)) })
+		case *file.Float64ColumnChunkReader:
+			values = appendAlpValues(t, values, maxDef, r.ReadBatch, math.Float64bits)
+		default:
+			t.Fatalf("column %d: unexpected reader %T", col, cr)
 		}
 	}
+	return values
 }
 
-// readAlpColumn fills values, which ReadBatch is free to do a page at a time.
-func readAlpColumn[T float32 | float64](t *testing.T, nrows int, values []T,
-	readBatch func(int64, []T, []int16, []int16) (int64, int, error)) {
+// appendAlpValues drains one column chunk, which ReadBatch is free to hand over
+// a page at a time. Nulls take a definition level but not a value, so the two
+// run at their own pace.
+func appendAlpValues[T float32 | float64](t *testing.T, values []alpValue, maxDef int16,
+	readBatch func(int64, []T, []int16, []int16) (int64, int, error),
+	bits func(T) uint64) []alpValue {
 	t.Helper()
 
-	for read := 0; read < nrows; {
-		_, n, err := readBatch(int64(nrows-read), values[read:], nil, nil)
+	const batchSize = 1024
+	batch := make([]T, batchSize)
+	defLvls := make([]int16, batchSize)
+	for {
+		total, valuesRead, err := readBatch(batchSize, batch, defLvls, nil)
 		require.NoError(t, err)
-		require.NotZero(t, n, "read stalled after %d of %d values", read, nrows)
-		read += n
+		if total == 0 {
+			return values
+		}
+
+		taken := 0
+		for i := range int(total) {
+			if defLvls[i] < maxDef {
+				values = append(values, alpValue{null: true})
+				continue
+			}
+			values = append(values, alpValue{bits: bits(batch[taken])})
+			taken++
+		}
+		require.Equal(t, valuesRead, taken, "read %d values for %d non-null levels", valuesRead, taken)
 	}
 }
