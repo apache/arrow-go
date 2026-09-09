@@ -400,10 +400,19 @@ type RunEndEncodedBuilder struct {
 	maxRunEnd uint64
 
 	// currently, mixing AppendValueFromString & UnmarshalOne is unsupported
-	lastUnmarshalled  interface{}
-	unmarshalled      bool // tracks if Unmarshal was called (in case lastUnmarshalled is nil)
-	lastValueWasEmpty bool
-	lastStr           *string
+	lastUnmarshalled        interface{}
+	// tracks if Unmarshal was called (in case lastUnmarshalled is nil)
+	unmarshalled            bool
+	lastUnmarshalledWasNull bool
+	lastValueWasEmpty       bool
+	lastStr                 *string
+}
+
+func (b *RunEndEncodedBuilder) lastUnmarshalledNull() bool { return b.lastUnmarshalledWasNull }
+
+func (b *RunEndEncodedBuilder) setRowBuffered(v bool) {
+	b.rowBuffered = v
+	b.values.setRowBuffered(v)
 }
 
 func NewRunEndEncodedBuilder(mem memory.Allocator, runEnds, encoded arrow.DataType) *RunEndEncodedBuilder {
@@ -611,6 +620,7 @@ func (b *RunEndEncodedBuilder) UnmarshalOne(dec *json.Decoder) error {
 			return fmt.Errorf("field '%s' is non-nullable but got null", valueField.Name)
 		}
 	}
+	b.lastUnmarshalledWasNull = value == nil
 
 	// if we unmarshalled the same value as the previous one, we want to
 	// continue the run. However, there's an edge case. At the start of

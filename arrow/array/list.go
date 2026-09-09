@@ -613,7 +613,9 @@ func (b *baseListBuilder) AppendValueFromString(s string) error {
 	return b.UnmarshalOne(json.NewDecoder(strings.NewReader(s)))
 }
 
-func unmarshalListValues(dec *json.Decoder, values Builder, dt arrow.DataType) error {
+func unmarshalListValues(dec *json.Decoder, values Builder, dt arrow.DataType, rowBuffered bool) error {
+	values.setRowBuffered(rowBuffered)
+
 	listLike, ok := dt.(arrow.ListLikeType)
 	if !ok {
 		return values.Unmarshal(dec)
@@ -625,7 +627,7 @@ func unmarshalListValues(dec *json.Decoder, values Builder, dt arrow.DataType) e
 	}
 
 	for dec.More() {
-		if err := unmarshalChild(dec, values, elem); err != nil {
+		if err := unmarshalChild(dec, values, elem, rowBuffered); err != nil {
 			return err
 		}
 	}
@@ -655,7 +657,7 @@ func (b *baseListBuilder) unmarshalOne(dec *json.Decoder) error {
 	switch t {
 	case json.Delim('['):
 		b.Append(true)
-		if err := unmarshalListValues(dec, b.values, b.dt); err != nil {
+		if err := unmarshalListValues(dec, b.values, b.dt, b.rowBuffered); err != nil {
 			return err
 		}
 		// consume ']'
@@ -1481,7 +1483,7 @@ func (b *baseListViewBuilder) unmarshalOne(dec *json.Decoder) error {
 		offset := b.values.Len()
 		// 0 is a placeholder size as we don't know the actual size yet
 		b.AppendWithSize(true, 0)
-		if err := unmarshalListValues(dec, b.values, b.dt); err != nil {
+		if err := unmarshalListValues(dec, b.values, b.dt, b.rowBuffered); err != nil {
 			return err
 		}
 		// consume ']'

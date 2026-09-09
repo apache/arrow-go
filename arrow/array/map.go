@@ -280,6 +280,7 @@ func (b *MapBuilder) UnsafeAppendBoolToBitmap(v bool) {
 
 func (b *MapBuilder) init(capacity int)                  { b.listBuilder.init(capacity) }
 func (b *MapBuilder) resize(newBits int, init func(int)) { b.listBuilder.resize(newBits, init) }
+func (b *MapBuilder) setRowBuffered(v bool)              { b.listBuilder.setRowBuffered(v) }
 
 func (b *MapBuilder) adjustStructBuilderLen() {
 	keyLen, itemLen := b.keyBuilder.Len(), b.itemBuilder.Len()

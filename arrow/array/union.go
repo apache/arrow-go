@@ -1219,7 +1219,7 @@ func (b *SparseUnionBuilder) unmarshalOne(dec *json.Decoder) error {
 		}
 
 		b.Append(typeCode)
-		if err := unmarshalChild(dec, b.children[childNum], b.childFields[childNum]); err != nil {
+		if err := unmarshalChild(dec, b.children[childNum], b.childFields[childNum], b.rowBuffered); err != nil {
 			return err
 		}
 
@@ -1487,7 +1487,7 @@ func (b *DenseUnionBuilder) unmarshalOne(dec *json.Decoder) error {
 		}
 
 		b.Append(typeCode)
-		if err := unmarshalChild(dec, b.children[childNum], b.childFields[childNum]); err != nil {
+		if err := unmarshalChild(dec, b.children[childNum], b.childFields[childNum], b.rowBuffered); err != nil {
 			return err
 		}
 

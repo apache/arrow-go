@@ -775,6 +775,37 @@ func TestRunEndEncodedBuilderUnmarshalNonNullableValue(t *testing.T) {
 	assert.True(t, values.IsNull(1))
 }
 
+func TestRunEndEncodedNonNullableField(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	typ := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int16, arrow.PrimitiveTypes.Int32)
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "required", Type: typ},
+		{Name: "optional", Type: typ, Nullable: true},
+	}, nil)
+
+	bldr := array.NewRecordBuilder(mem, schema)
+	defer bldr.Release()
+
+	require.NoError(t, bldr.UnmarshalJSON([]byte(`{"required": 1, "optional": null}`)))
+	require.ErrorContains(t,
+		bldr.UnmarshalJSON([]byte(`{"required": null, "optional": 1}`)),
+		"field 'required' is non-nullable but got null")
+	require.NoError(t, bldr.UnmarshalJSON([]byte(`{"required": 2, "optional": 2}`)))
+
+	rec := bldr.NewRecordBatch()
+	defer rec.Release()
+
+	require.EqualValues(t, 2, rec.NumRows())
+	required := rec.Column(0).(*array.RunEndEncoded)
+	optional := rec.Column(1).(*array.RunEndEncoded)
+	assert.Equal(t, "1", required.ValueStr(0))
+	assert.Equal(t, "2", required.ValueStr(1))
+	assert.Equal(t, array.NullValueStr, optional.ValueStr(0))
+	assert.Equal(t, "2", optional.ValueStr(1))
+}
+
 func TestRunEndEncodedBuilderKeepsValueNullable(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

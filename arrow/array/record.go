@@ -467,13 +467,14 @@ type truncatableBuilder interface {
 }
 
 type builderCheckpoint struct {
-	builder          truncatableBuilder
-	length           int
-	children         []*builderCheckpoint
-	state            checkpointState
-	lastUnmarshalled interface{}
-	unmarshalled     bool
-	lastStr          *string
+	builder                 truncatableBuilder
+	length                  int
+	children                []*builderCheckpoint
+	state                   checkpointState
+	lastUnmarshalled        interface{}
+	unmarshalled            bool
+	lastUnmarshalledWasNull bool
+	lastStr                 *string
 }
 
 func (checkpoint *builderCheckpoint) syncChildren(builders []Builder) {
@@ -547,6 +548,7 @@ func (checkpoint *builderCheckpoint) capture() {
 	if builder, ok := checkpoint.builder.(*RunEndEncodedBuilder); ok {
 		checkpoint.lastUnmarshalled = builder.lastUnmarshalled
 		checkpoint.unmarshalled = builder.unmarshalled
+		checkpoint.lastUnmarshalledWasNull = builder.lastUnmarshalledWasNull
 		checkpoint.lastStr = builder.lastStr
 	}
 	for _, child := range checkpoint.children {
@@ -559,6 +561,7 @@ func (checkpoint *builderCheckpoint) restore() {
 		builder.length = checkpoint.length
 		builder.lastUnmarshalled = checkpoint.lastUnmarshalled
 		builder.unmarshalled = checkpoint.unmarshalled
+		builder.lastUnmarshalledWasNull = checkpoint.lastUnmarshalledWasNull
 		builder.lastStr = checkpoint.lastStr
 	} else {
 		// Truncate the parent before restoring children. Some parent builders
@@ -625,7 +628,7 @@ func (b *RecordBuilder) unmarshalOne(dec *json.Decoder) (err error) {
 		return fmt.Errorf("record should start with '{', not %s", t)
 	}
 
-	return b.jsonDec.unmarshalFields(rowDec, b.fields)
+	return b.jsonDec.unmarshalFields(rowDec, b.fields, true)
 }
 
 // Unmarshal reads multiple rows from the decoder, calling UnmarshalOne in a

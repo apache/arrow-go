@@ -25,6 +25,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
+	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/json"
 )
@@ -84,6 +85,11 @@ type Builder interface {
 	// truncate removes elements from the end of the builder without changing its capacity.
 	truncate(n int)
 
+	// setRowBuffered tells the builder whether the JSON decoder it is handed
+	// reads from a row an ancestor builder already buffered, so that it does
+	// not buffer that row a second time.
+	setRowBuffered(bool)
+
 	// NewArray creates a new array from the memory buffers used
 	// by the builder and resets the Builder so it can be used to build
 	// a new array.
@@ -114,7 +120,10 @@ type builder struct {
 	nulls      int
 	length     int
 	capacity   int
+	rowBuffered bool
 }
+
+func (b *builder) setRowBuffered(v bool) { b.rowBuffered = v }
 
 // Retain increases the reference count by 1.
 // Retain may be called simultaneously from multiple goroutines.
@@ -402,43 +411,47 @@ func (b *builder) UnsafeAppendBoolToBitmap(isValid bool) {
 	b.length++
 }
 
-var jsonNull = []byte("null")
+// unmarshalledNullTracker is implemented by builders whose NullN is not exact,
+// so that unmarshalChild can still tell whether UnmarshalOne appended a null.
+type unmarshalledNullTracker interface {
+	// lastUnmarshalledNull reports whether the value appended by the most
+	// recent UnmarshalOne call was null. It is only meaningful immediately
+	// after that call.
+	lastUnmarshalledNull() bool
+}
 
-func unmarshalChild(dec *json.Decoder, child Builder, field arrow.Field) error {
+func unmarshalChild(dec *json.Decoder, child Builder, field arrow.Field, rowBuffered bool) error {
+	child.setRowBuffered(rowBuffered)
+
 	if field.Nullable {
 		return child.UnmarshalOne(dec)
 	}
 
 	nulls := child.NullN()
-	if nulls == UnknownNullCount {
-		var val json.RawMessage
-		if err := dec.Decode(&val); err != nil {
-			return err
-		}
-		return unmarshalBufferedChild(val, child, field)
-	}
-
-	// Every builder appends a null for a JSON null and for nothing else, so
-	// the child's null count going up by one over the call means the input
-	// had a null.
 	length := child.Len()
 	if err := child.UnmarshalOne(dec); err != nil {
 		return err
 	}
-	if child.Len() == length+1 && child.NullN() == nulls+1 {
+	if child.Len() != length+1 {
+		return nil
+	}
+
+	appendedNull := false
+	if nulls == UnknownNullCount {
+		tracker, ok := child.(unmarshalledNullTracker)
+		debug.Assert(ok, "builder with an unknown null count must implement unmarshalledNullTracker")
+		appendedNull = ok && tracker.lastUnmarshalledNull()
+	} else {
+		// Every builder appends a null for a JSON null and for nothing else, so
+		// the child's null count going up by one over the call means the input
+		// had a null.
+		appendedNull = child.NullN() == nulls+1
+	}
+
+	if appendedNull {
 		return fmt.Errorf("field '%s' is non-nullable but got null", field.Name)
 	}
 	return nil
-}
-
-func unmarshalBufferedChild(val json.RawMessage, child Builder, field arrow.Field) error {
-	if !field.Nullable && bytes.Equal(val, jsonNull) {
-		return fmt.Errorf("field '%s' is non-nullable but got null", field.Name)
-	}
-
-	valDec := json.NewDecoder(bytes.NewReader(val))
-	valDec.UseNumber()
-	return child.UnmarshalOne(valDec)
 }
 
 // rowDecoder decodes a value out of a reused copy of that value, so that
@@ -503,7 +516,7 @@ func (d *nestedJSONDecoder) fieldIndexByName(name string) (int, bool) {
 // each nested field builder. It consumes the opening and closing '{' and '}'.
 //
 // Nullable fields that are not present in the JSON-object are assumed to be null.
-func (d *nestedJSONDecoder) unmarshalFields(dec *json.Decoder, builders []Builder) error {
+func (d *nestedJSONDecoder) unmarshalFields(dec *json.Decoder, builders []Builder, rowBuffered bool) error {
 	// grow the "seen" buffer if needed
 	if cap(d.seen) < d.fields.NumFields() {
 		d.seen = make([]bool, d.fields.NumFields())
@@ -538,7 +551,7 @@ func (d *nestedJSONDecoder) unmarshalFields(dec *json.Decoder, builders []Builde
 		}
 		d.seen[idx] = true
 
-		if err := unmarshalChild(dec, builders[idx], d.fields.Field(idx)); err != nil {
+		if err := unmarshalChild(dec, builders[idx], d.fields.Field(idx), rowBuffered); err != nil {
 			return err
 		}
 	}

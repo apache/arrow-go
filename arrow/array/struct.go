@@ -557,13 +557,20 @@ func (b *StructBuilder) UnmarshalOne(dec *json.Decoder) error {
 }
 
 func (b *StructBuilder) unmarshalOne(dec *json.Decoder) error {
+	if b.rowBuffered {
+		return b.unmarshalObject(dec, 0)
+	}
+
 	offset := dec.InputOffset()
 	rowDec, err := b.jsonDec.next(dec)
 	if err != nil {
 		return err
 	}
+	return b.unmarshalObject(rowDec, offset)
+}
 
-	t, err := rowDec.Token()
+func (b *StructBuilder) unmarshalObject(dec *json.Decoder, offset int64) error {
+	t, err := dec.Token()
 	if err != nil {
 		return err
 	}
@@ -571,12 +578,12 @@ func (b *StructBuilder) unmarshalOne(dec *json.Decoder) error {
 	switch t {
 	case json.Delim('{'):
 		b.Append(true)
-		return b.jsonDec.unmarshalFields(rowDec, b.fields)
+		return b.jsonDec.unmarshalFields(dec, b.fields, true)
 	case nil:
 		b.AppendNull()
 	default:
 		return &json.UnmarshalTypeError{
-			Offset: offset + rowDec.InputOffset(),
+			Offset: offset + dec.InputOffset(),
 			Struct: fmt.Sprint(b.dtype),
 		}
 	}
