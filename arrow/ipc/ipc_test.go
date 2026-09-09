@@ -747,6 +747,42 @@ func TestArrowBinaryIPCWriterTruncatedVOffsets(t *testing.T) {
 	require.False(t, reader.Next())
 }
 
+func TestZeroSizeFixedSizeListRoundTrip(t *testing.T) {
+	for _, element := range []arrow.DataType{arrow.Null, arrow.PrimitiveTypes.Int64, arrow.ListOf(arrow.BinaryTypes.String)} {
+		t.Run(element.String(), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+			schema := arrow.NewSchema([]arrow.Field{{Name: "lists", Type: arrow.FixedSizeListOf(0, element), Nullable: true}}, nil)
+			builder := array.NewRecordBuilder(mem, schema)
+			defer builder.Release()
+			lists := builder.Field(0).(*array.FixedSizeListBuilder)
+			lists.AppendEmptyValue()
+			lists.AppendNull()
+			lists.AppendEmptyValues(2)
+			record := builder.NewRecordBatch()
+			defer record.Release()
+			sliced := record.NewSlice(1, 4)
+			defer sliced.Release()
+
+			var buf bytes.Buffer
+			writer := ipc.NewWriter(&buf, ipc.WithSchema(schema), ipc.WithAllocator(mem))
+			defer writer.Close()
+			require.NoError(t, writer.Write(sliced))
+			require.NoError(t, writer.Close())
+
+			reader, err := ipc.NewReader(&buf, ipc.WithAllocator(mem))
+			require.NoError(t, err)
+			defer reader.Release()
+			require.True(t, reader.Next())
+			got := reader.RecordBatch()
+			require.NoError(t, got.Column(0).(*array.FixedSizeList).ValidateFull())
+			assert.True(t, array.RecordEqual(sliced, got))
+			require.False(t, reader.Next())
+			require.NoError(t, reader.Err())
+		})
+	}
+}
+
 func TestRecordBatchCustomMetadataRoundtrip(t *testing.T) {
 	mem := memory.NewGoAllocator()
 	schema := arrow.NewSchema(
