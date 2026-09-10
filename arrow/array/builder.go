@@ -114,12 +114,12 @@ type Builder interface {
 
 // builder provides common functionality for managing the validity bitmap (nulls) when building arrays.
 type builder struct {
-	refCount   atomic.Int64
-	mem        memory.Allocator
-	nullBitmap *memory.Buffer
-	nulls      int
-	length     int
-	capacity   int
+	refCount    atomic.Int64
+	mem         memory.Allocator
+	nullBitmap  *memory.Buffer
+	nulls       int
+	length      int
+	capacity    int
 	rowBuffered bool
 }
 

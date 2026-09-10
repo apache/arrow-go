@@ -400,7 +400,7 @@ type RunEndEncodedBuilder struct {
 	maxRunEnd uint64
 
 	// currently, mixing AppendValueFromString & UnmarshalOne is unsupported
-	lastUnmarshalled        interface{}
+	lastUnmarshalled any
 	// tracks if Unmarshal was called (in case lastUnmarshalled is nil)
 	unmarshalled            bool
 	lastUnmarshalledWasNull bool
