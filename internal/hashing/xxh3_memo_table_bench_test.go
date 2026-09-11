@@ -163,7 +163,7 @@ func BenchmarkBinaryMemoTableInsertOrGet(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	b.SetBytes(int64(nvalues))
+	b.SetBytes(int64(nvalues * len(values[0])))
 	b.ResetTimer()
 	for b.Loop() {
 		for _, value := range values {
