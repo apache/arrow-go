@@ -462,8 +462,13 @@ func (enc *DictInt96Encoder) WriteDict(out []byte) {
 
 // Put encodes the values passed in, adding to the index as needed
 func (enc *DictInt96Encoder) Put(in []parquet.Int96) {
+	if len(in) == 0 {
+		return
+	}
+
+	memo := enc.memo.(BinaryMemoTable)
 	for _, v := range in {
-		memoIdx, found, err := enc.memo.GetOrInsert(v[:])
+		memoIdx, found, err := memo.InsertOrGet(v[:])
 		if err != nil {
 			panic(err)
 		}
