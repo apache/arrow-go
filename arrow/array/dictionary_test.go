@@ -1946,6 +1946,43 @@ func TestDictionaryAppendIndices(t *testing.T) {
 			assert.Equal(t, fmt.Sprint(indices), arrIndices.String())
 		})
 	}
+
+	valid := []bool{true, false, true, false, true, true, false, true}
+	for _, typ := range indexTypes {
+		t.Run(fmt.Sprintf("%s with validity", typ), func(t *testing.T) {
+			scoped := memory.NewCheckedAllocatorScope(mem)
+			defer scoped.CheckSize(t)
+
+			dictType := &arrow.DictionaryType{
+				IndexType: typ, ValueType: dict.DataType()}
+			bldr := array.NewDictionaryBuilderWithDict(mem, dictType, dict)
+			defer bldr.Release()
+
+			bldr.AppendIndices(indices[:3], valid[:3])
+			bldr.AppendIndices(indices[3:], valid[3:])
+
+			arr := bldr.NewDictionaryArray()
+			defer arr.Release()
+
+			assert.EqualValues(t, len(indices), arr.Len())
+			assert.EqualValues(t, 3, arr.NullN())
+			for i, wantValid := range valid {
+				assert.Equal(t, !wantValid, arr.IsNull(i))
+				assert.Equal(t, indices[i], arr.GetValueIndex(i))
+			}
+		})
+	}
+
+	t.Run("validity length mismatch", func(t *testing.T) {
+		dictType := &arrow.DictionaryType{
+			IndexType: arrow.PrimitiveTypes.Int32, ValueType: dict.DataType()}
+		bldr := array.NewDictionaryBuilderWithDict(mem, dictType, dict)
+		defer bldr.Release()
+
+		assert.PanicsWithValue(t, "len(indices) != len(valid) && len(valid) != 0", func() {
+			bldr.AppendIndices([]int{0}, []bool{true, false})
+		})
+	})
 }
 
 type panicAllocator struct {
