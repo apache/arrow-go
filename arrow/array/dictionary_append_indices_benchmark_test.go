@@ -81,7 +81,7 @@ func benchmarkDictionaryBuilderAppendIndices(b *testing.B, indexType arrow.DataT
 	defer builder.Release()
 
 	b.ReportAllocs()
-	b.SetBytes(int64(len(indices) * arrow.Int32SizeBytes))
+	b.SetBytes(int64(len(indices) * indexType.(arrow.FixedWidthDataType).Bytes()))
 	b.ResetTimer()
 	for b.Loop() {
 		builder.AppendIndices(indices, valid)
