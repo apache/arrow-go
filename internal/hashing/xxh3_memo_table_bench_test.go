@@ -143,3 +143,31 @@ func benchmarkBinaryMemoTableCopyOffsets(b *testing.B, large, subset bool) {
 		})
 	}
 }
+
+func BenchmarkBinaryMemoTableInsertOrGet(b *testing.B) {
+	const (
+		nunique = 100
+		nvalues = 1 << 16
+	)
+
+	values := make([][]byte, nvalues)
+	for i := range values {
+		values[i] = []byte(fmt.Sprintf("value-%08d", i%nunique))
+	}
+
+	table := hashing.NewBinaryMemoTable(nunique, nunique*16,
+		array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary))
+	defer table.Release()
+	for i := 0; i < nunique; i++ {
+		_, _, _ = table.InsertOrGet(values[i])
+	}
+
+	b.ReportAllocs()
+	b.SetBytes(int64(nvalues))
+	b.ResetTimer()
+	for b.Loop() {
+		for _, value := range values {
+			_, _, _ = table.InsertOrGet(value)
+		}
+	}
+}
