@@ -47,7 +47,9 @@ MINGW*)
       # link against it whenever clang is available.
       if [[ -z "${CC:-}" ]] && command -v clang >/dev/null 2>&1; then
         export CC=clang
-        export CXX=clang++
+        if [[ -z "${CXX:-}" ]] && command -v clang++ >/dev/null 2>&1; then
+          export CXX=clang++
+        fi
       fi
     fi
   fi
