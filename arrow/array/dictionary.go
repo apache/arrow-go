@@ -1199,28 +1199,28 @@ func (b *dictionaryBuilder) AppendIndices(indices []int, valid []bool) {
 	switch idxbldr := b.idxBuilder.Builder.(type) {
 	case *Int8Builder:
 		appendDictionaryIndices(idxbldr.rawData[idxbldr.length:], indices)
-		idxbldr.builder.unsafeAppendBoolsToBitmap(valid, len(indices))
+		idxbldr.unsafeAppendBoolsToBitmap(valid, len(indices))
 	case *Int16Builder:
 		appendDictionaryIndices(idxbldr.rawData[idxbldr.length:], indices)
-		idxbldr.builder.unsafeAppendBoolsToBitmap(valid, len(indices))
+		idxbldr.unsafeAppendBoolsToBitmap(valid, len(indices))
 	case *Int32Builder:
 		appendDictionaryIndices(idxbldr.rawData[idxbldr.length:], indices)
-		idxbldr.builder.unsafeAppendBoolsToBitmap(valid, len(indices))
+		idxbldr.unsafeAppendBoolsToBitmap(valid, len(indices))
 	case *Int64Builder:
 		appendDictionaryIndices(idxbldr.rawData[idxbldr.length:], indices)
-		idxbldr.builder.unsafeAppendBoolsToBitmap(valid, len(indices))
+		idxbldr.unsafeAppendBoolsToBitmap(valid, len(indices))
 	case *Uint8Builder:
 		appendDictionaryIndices(idxbldr.rawData[idxbldr.length:], indices)
-		idxbldr.builder.unsafeAppendBoolsToBitmap(valid, len(indices))
+		idxbldr.unsafeAppendBoolsToBitmap(valid, len(indices))
 	case *Uint16Builder:
 		appendDictionaryIndices(idxbldr.rawData[idxbldr.length:], indices)
-		idxbldr.builder.unsafeAppendBoolsToBitmap(valid, len(indices))
+		idxbldr.unsafeAppendBoolsToBitmap(valid, len(indices))
 	case *Uint32Builder:
 		appendDictionaryIndices(idxbldr.rawData[idxbldr.length:], indices)
-		idxbldr.builder.unsafeAppendBoolsToBitmap(valid, len(indices))
+		idxbldr.unsafeAppendBoolsToBitmap(valid, len(indices))
 	case *Uint64Builder:
 		appendDictionaryIndices(idxbldr.rawData[idxbldr.length:], indices)
-		idxbldr.builder.unsafeAppendBoolsToBitmap(valid, len(indices))
+		idxbldr.unsafeAppendBoolsToBitmap(valid, len(indices))
 	}
 	b.length += len(indices)
 }
