@@ -599,6 +599,7 @@ func TestDictEncoding(t *testing.T) {
 		{"Int64", reflect.TypeOf(int64(0))},
 		{"Float32", reflect.TypeOf(float32(0))},
 		{"Float64", reflect.TypeOf(float64(0))},
+		{"Int96", reflect.TypeOf(parquet.Int96{})},
 		{"ByteArray", reflect.TypeOf(parquet.ByteArray{})},
 		{"FixedLenByteArray", reflect.TypeOf(parquet.FixedLenByteArray{})},
 	}
