@@ -81,6 +81,20 @@ func TestListOf(t *testing.T) {
 	}
 }
 
+func TestZeroSizeFixedSizeListType(t *testing.T) {
+	field := Field{Name: "values", Type: Null, Nullable: true}
+	for _, dt := range []*FixedSizeListType{
+		FixedSizeListOf(0, Null), FixedSizeListOfField(0, field), FixedSizeListOfNonNullable(0, Null),
+	} {
+		assert.Zero(t, dt.Len())
+		assert.Equal(t, Null, dt.Elem())
+	}
+	assert.Equal(t, field, FixedSizeListOfField(0, field).ElemField())
+	assert.Panics(t, func() { FixedSizeListOf(-1, Null) })
+	assert.Panics(t, func() { FixedSizeListOfField(-1, field) })
+	assert.Panics(t, func() { FixedSizeListOfNonNullable(-1, Null) })
+}
+
 func TestStructOf(t *testing.T) {
 	for _, tc := range []struct {
 		fields []Field

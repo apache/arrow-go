@@ -119,7 +119,7 @@ func TestImportSchemaRejectsMalformedFormats(t *testing.T) {
 }
 
 func TestImportSchemaRejectsInvalidNestedFormats(t *testing.T) {
-	for _, format := range []string{"+vx", "+vlx", "+vLx", "+lx", "+Lx", "+w:0", "+w:-1", "+w:2147483648"} {
+	for _, format := range []string{"+vx", "+vlx", "+vLx", "+lx", "+Lx", "+w:-1", "+w:2147483648"} {
 		t.Run(format, func(t *testing.T) {
 			schemas := testNested([]string{format, "i"}, []string{"", "item"}, []bool{true})
 			defer freeMallocedSchemas(schemas)
@@ -1072,6 +1072,38 @@ func TestEmptyListExport(t *testing.T) {
 	assert.NotNil(t, out.buffers)
 	assert.EqualValues(t, 1, out.n_children)
 	assert.NotNil(t, out.children)
+}
+
+func TestZeroSizeFixedSizeListRoundTrip(t *testing.T) {
+	for _, element := range []arrow.DataType{arrow.Null, arrow.PrimitiveTypes.Int64, arrow.ListOf(arrow.BinaryTypes.String)} {
+		t.Run(element.String(), func(t *testing.T) {
+			allocator := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer allocator.AssertSize(t, 0)
+			builder := array.NewFixedSizeListBuilder(allocator, 0, element)
+			defer builder.Release()
+			builder.AppendEmptyValue()
+			builder.AppendNull()
+			builder.AppendEmptyValues(2)
+			original := builder.NewListArray()
+			defer original.Release()
+			require.NoError(t, original.ValidateFull())
+			sliced := array.NewSlice(original, 1, 4)
+			defer sliced.Release()
+			var data CArrowArray
+			var schema CArrowSchema
+			ExportArrowArray(sliced, &data, &schema)
+			defer ReleaseCArrowArray(&data)
+			defer ReleaseCArrowSchema(&schema)
+			_, imported, err := ImportCArray(&data, &schema)
+			require.NoError(t, err)
+			defer imported.Release()
+			require.NoError(t, imported.(*array.FixedSizeList).ValidateFull())
+			assert.True(t, array.Equal(sliced, imported))
+			assert.Equal(t, 3, imported.Len())
+			assert.Equal(t, 1, imported.NullN())
+			assert.EqualValues(t, 0, imported.DataType().(*arrow.FixedSizeListType).Len())
+		})
+	}
 }
 
 func TestEmptyDictExport(t *testing.T) {

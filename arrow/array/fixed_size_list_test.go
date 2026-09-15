@@ -25,6 +25,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFixedSizeListArray(t *testing.T) {
@@ -89,6 +90,49 @@ func TestFixedSizeListArrayEmpty(t *testing.T) {
 	defer arr.Release()
 	if got, want := arr.Len(), 0; got != want {
 		t.Fatalf("got=%d, want=%d", got, want)
+	}
+}
+
+func TestZeroSizeFixedSizeListArray(t *testing.T) {
+	for _, element := range []arrow.DataType{arrow.Null, arrow.PrimitiveTypes.Int64, arrow.ListOf(arrow.BinaryTypes.String)} {
+		t.Run(element.String(), func(t *testing.T) {
+			pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer pool.AssertSize(t, 0)
+			builder := array.NewFixedSizeListBuilder(pool, 0, element)
+			defer builder.Release()
+
+			empty := builder.NewListArray()
+			defer empty.Release()
+			require.NoError(t, empty.Validate())
+			require.NoError(t, empty.ValidateFull())
+			assert.Zero(t, empty.Len())
+			assert.Zero(t, empty.ListValues().Len())
+
+			builder.AppendEmptyValue()
+			builder.AppendNull()
+			builder.AppendNulls(2)
+			builder.AppendEmptyValues(2)
+			arr := builder.NewListArray()
+			defer arr.Release()
+			require.NoError(t, arr.Validate())
+			require.NoError(t, arr.ValidateFull())
+			assert.Equal(t, 6, arr.Len())
+			assert.Equal(t, 3, arr.NullN())
+			assert.Zero(t, arr.ListValues().Len())
+			encoded, err := arr.MarshalJSON()
+			require.NoError(t, err)
+			assert.JSONEq(t, `[[], null, null, null, [], []]`, string(encoded))
+
+			sliced := array.NewSlice(arr, 1, 5).(*array.FixedSizeList)
+			defer sliced.Release()
+			require.NoError(t, sliced.ValidateFull())
+			assert.Equal(t, 4, sliced.Len())
+			assert.Equal(t, 3, sliced.NullN())
+			assert.Zero(t, sliced.ListValues().Len())
+			start, end := sliced.ValueOffsets(3)
+			assert.Zero(t, start)
+			assert.Zero(t, end)
+		})
 	}
 }
 

@@ -403,10 +403,10 @@ func validateFixedSizeListArray(a *FixedSizeList) error {
 	}
 	childLength := int64(a.data.offset) + int64(a.data.length)
 	itemCount := int64(dt.Len())
-	if itemCount <= 0 {
+	if itemCount < 0 {
 		return fmt.Errorf("arrow/array: fixed-size list has invalid item count %d", itemCount)
 	}
-	if childLength > int64(a.data.childData[0].Len())/itemCount {
+	if itemCount > 0 && childLength > int64(a.data.childData[0].Len())/itemCount {
 		return fmt.Errorf("arrow/array: fixed-size list child length %d is too small for offset %d and length %d",
 			a.data.childData[0].Len(), a.data.offset, a.data.length)
 	}
