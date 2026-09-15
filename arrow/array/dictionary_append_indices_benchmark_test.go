@@ -29,7 +29,7 @@ import (
 func BenchmarkDictionaryBuilderAppendIndices(b *testing.B) {
 	const (
 		length      = 1 << 16
-		cardinality = 1 << 8
+		cardinality = 1 << 7
 	)
 
 	indices := make([]int, length)
