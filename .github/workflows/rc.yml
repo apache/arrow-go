@@ -96,6 +96,15 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v6.2.0
         with:
           go-version-file: go.mod
+      - name: Install ASan runtime
+        # ci/scripts/test.sh only runs -asan against an LLVM >= 19 runtime;
+        # ubuntu-latest still defaults to clang 18.
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang-19 \
+            libclang-rt-19-dev
       - name: Verify
         run: |
           tar_gz=$(echo apache-arrow-go-*.tar.gz)

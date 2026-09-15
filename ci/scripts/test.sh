@@ -25,6 +25,22 @@ export PARQUET_TEST_DATA=${1}/parquet-testing/data
 export PARQUET_TEST_BAD_DATA=${1}/parquet-testing/bad_data
 export ARROW_TEST_DATA=${1}/arrow-testing/data
 
+# Go's -asan links whatever AddressSanitizer runtime the C toolchain ships.
+# Runtimes older than LLVM 19 allocate thread contexts from the global
+# low-level allocator, which is not thread safe, so they corrupt their own
+# thread registry when the Go runtime creates and retires threads
+# concurrently and abort test binaries at random in arbitrary packages
+# (llvm/llvm-project#87324, fixed by llvm/llvm-project#88177). GCC's
+# libsanitizer snapshot predates that fix as well, so -asan is only reliable
+# when a clang >= 19 runtime is available.
+asan_runtime_major() {
+  local version
+  version=$("${1}" --version 2>/dev/null | head -1) || return 1
+  [[ "${version}" = *"clang version "* ]] || return 1
+  version=${version##*clang version }
+  echo "${version%%.*}"
+}
+
 case "$(uname)" in
 MINGW*)
   # -race and -asan don't work on Windows currently
@@ -39,17 +55,33 @@ MINGW*)
       # -asan not supported on darwin/amd64
       test_args=("-race")
     else
-      test_args=("-asan")
-      # GCC's libasan aborts with internal thread-registry CHECK failures
-      # when the Go runtime creates and retires threads concurrently, which
-      # intermittently kills -asan test binaries in arbitrary packages.
-      # LLVM's compiler-rt ASan handles Go's thread lifecycle correctly, so
-      # link against it whenever clang is available.
-      if [[ -z "${CC:-}" ]] && command -v clang >/dev/null 2>&1; then
-        export CC=clang
-        if [[ -z "${CXX:-}" ]] && command -v clang++ >/dev/null 2>&1; then
-          export CXX=clang++
+      asan_cc=${CC:-}
+      if [[ -z "${asan_cc}" ]]; then
+        # Prefer the default clang when it is new enough, otherwise the
+        # newest explicitly installed one.
+        for candidate in clang clang-21 clang-20 clang-19; do
+          command -v "${candidate}" >/dev/null 2>&1 || continue
+          major=$(asan_runtime_major "${candidate}") || continue
+          if [[ "${major}" -ge 19 ]]; then
+            asan_cc=${candidate}
+            break
+          fi
+        done
+      fi
+
+      major=$(asan_runtime_major "${asan_cc:-false}") || major=0
+      if [[ "${major}" -ge 19 ]]; then
+        test_args=("-asan")
+        if [[ -z "${CC:-}" ]]; then
+          export CC=${asan_cc}
+          if [[ -z "${CXX:-}" ]] && command -v "${asan_cc/clang/clang++}" >/dev/null 2>&1; then
+            export CXX=${asan_cc/clang/clang++}
+          fi
         fi
+      else
+        # Every available ASan runtime predates the fix; -asan would abort at
+        # random, so run the race detector instead.
+        test_args=("-race")
       fi
     fi
   fi
