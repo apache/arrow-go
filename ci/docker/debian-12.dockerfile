@@ -16,7 +16,7 @@
 # under the License.
 
 ARG arch=amd64
-ARG go=1.24
+ARG go=1.26
 FROM ${arch}/golang:${go}-bookworm
 
 # ci/scripts/test.sh only runs -asan against an LLVM >= 19 runtime; the

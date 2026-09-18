@@ -35,7 +35,7 @@ connection pooling, transactions combined with ease of use (see (#usage)).
 
 ## Prerequisites
 
-* Go 1.17+
+* Go 1.26+
 * Installation via `go get -u github.com/apache/arrow-go/v18/arrow/flight/flightsql`
 * Backend speaking FlightSQL
 
