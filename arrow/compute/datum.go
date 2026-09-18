@@ -269,14 +269,17 @@ func NewDatum(value interface{}) Datum {
 	}
 }
 
-// NewDatumWithoutOwning is like NewDatum only it does not call Retain on
-// the passed in value (if applicable). This means that if the resulting
-// Datum should not have Release called on it and the original value needs
-// to outlive the Datum.
+// NewDatumWithoutOwning is like NewDatum but does not call Retain on the
+// value it is given. The returned Datum owns nothing: the caller keeps its
+// own reference, must keep the value alive for as long as the Datum is in
+// use, and must not call Release on the Datum.
 //
-// Only use this if you know what you're doing. For the most part this is
-// just a convenience function.+-
-
+// The Datum is an ordinary ArrayDatum, ChunkedDatum, RecordDatum, TableDatum
+// or ScalarDatum, so a Release call compiles and runs like any other, and
+// what it releases is the caller's reference. With a C-backed allocator, or
+// buffers imported through the cdata package, that frees memory under the
+// caller's still-live value. Use NewDatum when the Datum should hold a
+// reference of its own.
 func NewDatumWithoutOwning(value interface{}) Datum {
 	switch v := value.(type) {
 	case arrow.Array:
