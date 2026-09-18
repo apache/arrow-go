@@ -19,6 +19,15 @@ ARG arch=amd64
 ARG go=1.24
 FROM ${arch}/golang:${go}-bookworm
 
+# ci/scripts/test.sh only runs -asan against an LLVM >= 19 runtime; the
+# libsanitizer shipped with the image's GCC predates the thread-registry fix.
+RUN apt-get update -y -q && \
+    apt-get install -y -q --no-install-recommends \
+        clang-19 \
+        libclang-rt-19-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 # Copy the go.mod and go.sum over and pre-download all the dependencies
 COPY . /arrow-go
 RUN cd /arrow-go && \
