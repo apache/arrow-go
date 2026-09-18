@@ -141,6 +141,81 @@ func BenchmarkConcatenateFixedWidth(b *testing.B) {
 	}
 }
 
+func BenchmarkConcatenateList(b *testing.B) {
+	const totalValues = 1 << 16
+
+	makeList := func(mem memory.Allocator, dt arrow.DataType) arrow.Array {
+		valid := make([]bool, totalValues)
+		for i := range valid {
+			valid[i] = true
+		}
+		values := make([]int8, totalValues)
+
+		switch dt.ID() {
+		case arrow.LIST:
+			offsets := make([]int32, totalValues+1)
+			for i := range offsets {
+				offsets[i] = int32(i)
+			}
+			builder := array.NewListBuilder(mem, arrow.PrimitiveTypes.Int8)
+			builder.AppendValues(offsets, valid)
+			builder.ValueBuilder().(*array.Int8Builder).AppendValues(values, nil)
+			result := builder.NewArray()
+			builder.Release()
+			return result
+		case arrow.LARGE_LIST:
+			offsets := make([]int64, totalValues+1)
+			for i := range offsets {
+				offsets[i] = int64(i)
+			}
+			builder := array.NewLargeListBuilder(mem, arrow.PrimitiveTypes.Int8)
+			builder.AppendValues(offsets, valid)
+			builder.ValueBuilder().(*array.Int8Builder).AppendValues(values, nil)
+			result := builder.NewArray()
+			builder.Release()
+			return result
+		default:
+			panic(fmt.Sprintf("unsupported list type %s", dt))
+		}
+	}
+
+	for _, dt := range []arrow.DataType{arrow.ListOf(arrow.PrimitiveTypes.Int8), arrow.LargeListOf(arrow.PrimitiveTypes.Int8)} {
+		backing := makeList(memory.DefaultAllocator, dt)
+		defer backing.Release()
+
+		for _, chunkCount := range []int{64, 1024, 8192} {
+			chunkCount := chunkCount
+			b.Run(fmt.Sprintf("%s/chunks=%d", dt.Name(), chunkCount), func(b *testing.B) {
+				chunkSize := totalValues / chunkCount
+				inputs := make([]arrow.Array, chunkCount)
+				for i := range inputs {
+					begin := int64(i * chunkSize)
+					inputs[i] = array.NewSlice(backing, begin, begin+int64(chunkSize))
+				}
+				defer func() {
+					for _, input := range inputs {
+						input.Release()
+					}
+				}()
+
+				b.SetBytes(int64(totalValues))
+				b.ReportAllocs()
+				b.ResetTimer()
+				for b.Loop() {
+					result, err := array.Concatenate(inputs, memory.DefaultAllocator)
+					if err != nil {
+						b.Fatal(err)
+					}
+					if result.Len() != totalValues {
+						b.Fatalf("result length = %d, want %d", result.Len(), totalValues)
+					}
+					result.Release()
+				}
+			})
+		}
+	}
+}
+
 func TestConcatenateFixedWidthSlices(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

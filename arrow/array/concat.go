@@ -211,6 +211,27 @@ func concatBinaryBuffers(data []arrow.ArrayData, byteWidth, length int, out *Dat
 	return nil
 }
 
+func concatOffsetsData(data []arrow.ArrayData, byteWidth, length int, mem memory.Allocator) (*memory.Buffer, []rng, error) {
+	out := memory.NewResizableBuffer(mem)
+	out.Resize(byteWidth * (length + 1))
+
+	var (
+		valueRanges []rng
+		err         error
+	)
+	switch byteWidth {
+	case arrow.Int64SizeBytes:
+		valueRanges, err = handle64BitOffsetsData(data, out, length)
+	default:
+		valueRanges, err = handle32BitOffsetsData(data, out, length)
+	}
+	if err != nil {
+		out.Release()
+		return nil, nil, err
+	}
+	return out, valueRanges, nil
+}
+
 func handle32BitOffsetsData(data []arrow.ArrayData, out *memory.Buffer, outLen int) ([]rng, error) {
 	dst := arrow.Int32Traits.CastFromBytes(out.Bytes())
 	valueRanges := make([]rng, len(data))
@@ -747,7 +768,7 @@ func concat(data []arrow.ArrayData, mem memory.Allocator) (arr arrow.ArrayData, 
 		}
 	case *arrow.ListType:
 		offsetWidth := dt.Layout().Buffers[1].ByteWidth
-		offsetBuffer, valueRanges, err := concatOffsets(gatherFixedBuffers(data, 1, offsetWidth), offsetWidth, mem)
+		offsetBuffer, valueRanges, err := concatOffsetsData(data, offsetWidth, out.length, mem)
 		if err != nil {
 			return nil, err
 		}
@@ -764,7 +785,7 @@ func concat(data []arrow.ArrayData, mem memory.Allocator) (arr arrow.ArrayData, 
 		}
 	case *arrow.LargeListType:
 		offsetWidth := dt.Layout().Buffers[1].ByteWidth
-		offsetBuffer, valueRanges, err := concatOffsets(gatherFixedBuffers(data, 1, offsetWidth), offsetWidth, mem)
+		offsetBuffer, valueRanges, err := concatOffsetsData(data, offsetWidth, out.length, mem)
 		if err != nil {
 			return nil, err
 		}
