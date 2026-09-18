@@ -19,6 +19,7 @@ package encoding
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
@@ -162,8 +163,9 @@ func (enc *DeltaByteArrayEncoder) FlushValues() (Buffer, error) {
 type DeltaByteArrayDecoder struct {
 	*DeltaLengthByteArrayDecoder
 
-	prefixLengths []int32
-	lastVal       parquet.ByteArray
+	prefixLengths  []int32
+	lastVal        parquet.ByteArray
+	discardScratch []byte
 }
 
 // Type returns the underlying physical type this decoder operates on, in this case ByteArrays only
@@ -172,6 +174,25 @@ func (DeltaByteArrayDecoder) Type() parquet.Type {
 }
 
 func (d *DeltaByteArrayDecoder) Allocator() memory.Allocator { return d.mem }
+
+func (d *DeltaByteArrayDecoder) setDiscardLastValue(prefix, suffix parquet.ByteArray) {
+	valueLen := len(prefix) + len(suffix)
+	if valueLen == 0 {
+		if d.discardScratch == nil {
+			d.discardScratch = make([]byte, 0, 1)
+		} else {
+			d.discardScratch = d.discardScratch[:0]
+		}
+		d.lastVal = d.discardScratch
+		return
+	}
+
+	d.discardScratch = slices.Grow(d.discardScratch[:0], valueLen)
+	d.discardScratch = d.discardScratch[:valueLen]
+	copy(d.discardScratch, prefix)
+	copy(d.discardScratch[len(prefix):], suffix)
+	d.lastVal = d.discardScratch
+}
 
 // SetData expects the passed in data to be the prefix lengths, followed by the
 // blocks of suffix data in order to initialize the decoder.
@@ -222,15 +243,15 @@ func (d *DeltaByteArrayDecoder) Discard(n int) (int, error) {
 	}
 
 	remaining := n
-	tmp := make([]parquet.ByteArray, 1)
+	var tmp [1]parquet.ByteArray
 	if d.lastVal == nil {
 		if len(d.prefixLengths) == 0 || d.prefixLengths[0] != 0 {
 			return 0, errors.New("parquet: first delta byte array prefix length must be zero")
 		}
-		if _, err := d.DeltaLengthByteArrayDecoder.Decode(tmp); err != nil {
+		if _, err := d.DeltaLengthByteArrayDecoder.Decode(tmp[:]); err != nil {
 			return 0, err
 		}
-		d.lastVal = tmp[0]
+		d.setDiscardLastValue(nil, tmp[0])
 		d.prefixLengths = d.prefixLengths[1:]
 		remaining--
 	}
@@ -246,16 +267,14 @@ func (d *DeltaByteArrayDecoder) Discard(n int) (int, error) {
 		}
 		prefix := d.lastVal[:prefixLen:prefixLen]
 
-		if _, err := d.DeltaLengthByteArrayDecoder.Decode(tmp); err != nil {
+		if _, err := d.DeltaLengthByteArrayDecoder.Decode(tmp[:]); err != nil {
 			return n - remaining, err
 		}
 
 		if len(tmp[0]) == 0 {
 			d.lastVal = prefix
 		} else {
-			d.lastVal = make([]byte, int(prefixLen)+len(tmp[0]))
-			copy(d.lastVal, prefix)
-			copy(d.lastVal[prefixLen:], tmp[0])
+			d.setDiscardLastValue(prefix, tmp[0])
 		}
 		remaining--
 	}

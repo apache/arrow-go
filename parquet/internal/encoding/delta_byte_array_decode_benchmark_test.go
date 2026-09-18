@@ -95,6 +95,59 @@ func BenchmarkDeltaByteArrayDecoderDecode(b *testing.B) {
 	}
 }
 
+func BenchmarkDeltaByteArrayDecoderDiscard(b *testing.B) {
+	for _, test := range []struct {
+		name  string
+		value func(int) string
+	}{
+		{
+			name: "prefix-heavy",
+			value: func(i int) string {
+				return fmt.Sprintf("tenant/%04d/partition/%04d/object", i/100, i)
+			},
+		},
+		{
+			name: "low-prefix",
+			value: func(i int) string {
+				return fmt.Sprintf("%08x/%08x", i, i*7919)
+			},
+		},
+	} {
+		for _, nvalues := range []int{1024, 65536} {
+			test := test
+			nvalues := nvalues
+			b.Run(fmt.Sprintf("%s/%d", test.name, nvalues), func(b *testing.B) {
+				values := make([]parquet.ByteArray, nvalues)
+				inputBytes := 0
+				for i := range values {
+					values[i] = parquet.ByteArray(test.value(i))
+					inputBytes += len(values[i])
+				}
+				encoded := encodeDeltaByteArrayValues(values)
+				dec := NewDecoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray,
+					nil, memory.DefaultAllocator).(*DeltaByteArrayDecoder)
+				b.SetBytes(int64(inputBytes))
+				b.ReportAllocs()
+				b.ResetTimer()
+				for b.Loop() {
+					b.StopTimer()
+					if err := dec.SetData(nvalues, encoded); err != nil {
+						b.Fatal(err)
+					}
+					b.StartTimer()
+					discarded, err := dec.Discard(nvalues)
+					if err != nil {
+						b.Fatal(err)
+					}
+					if discarded != nvalues {
+						b.Fatalf("discarded %d values, expected %d", discarded, nvalues)
+					}
+				}
+			})
+		}
+	}
+}
+
 func encodeDeltaByteArrayValues(values []parquet.ByteArray) []byte {
 	enc := NewEncoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray,
 		false, nil, memory.DefaultAllocator).(ByteArrayEncoder)
