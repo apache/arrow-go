@@ -611,8 +611,7 @@ func concatListView(data []arrow.ArrayData, offsetType arrow.FixedWidthDataType,
 	}
 
 	// Concatenate the sizes
-	sizeBuffers := gatherBuffersFixedWidthType(data, 2, offsetType)
-	sizeBuffer := concatBuffers(sizeBuffers, mem)
+	sizeBuffer := concatFixedWidthBuffers(data, 2, offsetType.Bytes(), out.length, mem)
 
 	out.childData = []arrow.ArrayData{values}
 	out.buffers[1] = offsetBuffer
@@ -720,7 +719,7 @@ func concat(data []arrow.ArrayData, mem memory.Allocator) (arr arrow.ArrayData, 
 			}
 		}
 
-		out.buffers[1] = concatBuffers(gatherFixedBuffers(data, 1, arrow.ViewHeaderSizeBytes), mem)
+		out.buffers[1] = concatFixedWidthBuffers(data, 1, arrow.ViewHeaderSizeBytes, out.length, mem)
 
 		var (
 			s                  = arrow.ViewHeaderTraits.CastFromBytes(out.buffers[1].Bytes())
