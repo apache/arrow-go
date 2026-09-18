@@ -176,7 +176,7 @@ func TestDecimal128Slice(t *testing.T) {
 	assert.Equal(t, "-7.378697629e+18", v.ValueStr(1))
 
 	if got, want := v.NullN(), 1; got != want {
-		t.Fatalf("got=%q, want=%q", got, want)
+		t.Fatalf("got=%d, want=%d", got, want)
 	}
 
 	if got, want := v.Data().Offset(), 2; got != want {
