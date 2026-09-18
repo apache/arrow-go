@@ -42,9 +42,10 @@ jobs:
   benchmark:
     needs: setup
     runs-on: ubuntu-latest
-    # The slowest shard (./arrow/array) takes ~40m, so 90m leaves headroom for
-    # runner variance while still failing a pathological benchmark ~4x sooner
-    # than the 6h GitHub default.
+    # Shards run under a 90m watchdog (--timeout below); the slowest
+    # (./arrow/array) takes ~40m. This cap sits 10m above the watchdog so the
+    # watchdog trips first and names the stuck benchmark, ~4x sooner than the
+    # 6h GitHub default, while leaving room for checkout, setup and upload.
     timeout-minutes: 100
     strategy:
       fail-fast: false
@@ -58,7 +59,7 @@ jobs:
       - name: Install Go for Benchmarks
         uses: actions/setup-go@v7.0.0
         with:
-          go-version: '1.26.1'
+          go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
           check-latest: false
@@ -96,7 +97,7 @@ jobs:
       - name: Install Go for Benchmarks
         uses: actions/setup-go@v7.0.0
         with:
-          go-version: '1.26.1'
+          go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
           check-latest: false
