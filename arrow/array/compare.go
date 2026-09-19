@@ -720,8 +720,7 @@ func validityBitmapEqual(left, right arrow.Array) bool {
 // contains only valid values in the array's logical range. A missing bitmap
 // also represents an all-valid range, matching arrow.Array.IsValid.
 func validityBitmapAllValid(arr arrow.Array, bitmap []byte) bool {
-	return len(bitmap) == 0 ||
-		bitutil.CountSetBits(bitmap, arr.Data().Offset(), arr.Len()) == arr.Len()
+	return len(bitmap) == 0 || bitutil.BitmapAllSet(bitmap, arr.Data().Offset(), arr.Len())
 }
 
 func arrayApproxEqualString(left, right *String) bool {
