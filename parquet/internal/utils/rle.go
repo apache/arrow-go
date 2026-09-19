@@ -575,6 +575,78 @@ func (r *RleEncoder) PutBatchLevels(values []int16) (int, error) {
 	return encoded, nil
 }
 
+// PutBatchIndices encodes a batch of dictionary indices.
+func (r *RleEncoder) PutBatchIndices(values []int32) (int, error) {
+	encoded := 0
+	for encoded < len(values) {
+		value := values[encoded]
+		if r.repCount >= 8 {
+			if r.curVal != uint64(value) {
+				if !r.flushRepeated() {
+					return encoded, errors.New("failed to flush repeated value")
+				}
+			} else {
+				runEnd := encoded + 1
+				for runEnd < len(values) && values[runEnd] == value {
+					runEnd++
+				}
+
+				runLength := min(runEnd-encoded, int(math.MaxInt32-r.repCount))
+				r.repCount += int32(runLength)
+				encoded += runLength
+				if r.repCount == math.MaxInt32 && encoded < len(values) && values[encoded] == value {
+					if !r.flushRepeated() {
+						return encoded, errors.New("failed to flush repeated value")
+					}
+				}
+				continue
+			}
+		}
+		if r.repCount == 0 && len(r.buffer) == 0 && len(values)-encoded >= 8 && values[encoded+7] == value {
+			runEnd := encoded + 1
+			for runEnd < len(values) && values[runEnd] == value {
+				runEnd++
+			}
+			if runEnd-encoded >= 8 {
+				r.curVal = uint64(value)
+				if r.litCount != 0 {
+					r.repCount = 8
+					if err := r.flushLiteral(true); err != nil {
+						return encoded, err
+					}
+					encoded += 8
+				}
+				runLength := min(runEnd-encoded, int(math.MaxInt32-r.repCount))
+				r.repCount += int32(runLength)
+				encoded += runLength
+				continue
+			}
+		}
+
+		if r.repCount == 0 && len(r.buffer) == 0 && len(values)-encoded >= 8 {
+			r.buffer = r.buffer[:8]
+			for i, index := range values[encoded : encoded+8] {
+				r.buffer[i] = uint64(index)
+			}
+			r.curVal = r.buffer[7]
+			if err := r.flushBuffered(false); err != nil {
+				return encoded + 7, err
+			}
+			encoded += 8
+			continue
+		}
+
+		batchEnd := min(len(values), encoded+8-len(r.buffer))
+		for encoded < batchEnd {
+			if err := r.Put(uint64(values[encoded])); err != nil {
+				return encoded, err
+			}
+			encoded++
+		}
+	}
+	return encoded, nil
+}
+
 func (r *RleEncoder) Clear() {
 	r.curVal = 0
 	r.repCount = 0
