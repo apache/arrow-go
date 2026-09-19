@@ -112,6 +112,48 @@ func CountSetBits(buf []byte, offset, n int) int {
 	return count
 }
 
+// BitmapAllSet reports whether all bits in the requested range are set.
+func BitmapAllSet(buf []byte, offset, n int) bool {
+	for n > 0 && offset&7 != 0 {
+		if !BitIsSet(buf, offset) {
+			return false
+		}
+		offset++
+		n--
+	}
+
+	for n >= 8 && offset&63 != 0 {
+		if buf[offset/8] != 0xff {
+			return false
+		}
+		offset += 8
+		n -= 8
+	}
+
+	wordBytes := n / uint64SizeBits * uint64SizeBytes
+	for _, word := range bytesToUint64(buf[offset/8 : offset/8+wordBytes]) {
+		if word != ^uint64(0) {
+			return false
+		}
+	}
+	offset += wordBytes * 8
+	n -= wordBytes * 8
+
+	for n >= 8 {
+		if buf[offset/8] != 0xff {
+			return false
+		}
+		offset += 8
+		n -= 8
+	}
+	for i := 0; i < n; i++ {
+		if !BitIsSet(buf, offset+i) {
+			return false
+		}
+	}
+	return true
+}
+
 func countSetBitsWithOffset(buf []byte, offset, n int) int {
 	count := 0
 
