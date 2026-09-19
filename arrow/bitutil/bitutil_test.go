@@ -223,6 +223,35 @@ func TestCountSetBitsOffset(t *testing.T) {
 	}
 }
 
+func TestBitmapAllSet(t *testing.T) {
+	const nbits = 512
+	buf := make([]byte, nbits/8)
+	for i := range buf {
+		buf[i] = 0xff
+	}
+
+	for offset := range 64 {
+		for n := 0; n <= nbits-offset; n++ {
+			if !bitutil.BitmapAllSet(buf, offset, n) {
+				t.Fatalf("BitmapAllSet(%d, %d) returned false for an all-set bitmap", offset, n)
+			}
+		}
+	}
+
+	for _, tc := range []struct {
+		offset, length, clear int
+	}{
+		{0, nbits, 0},
+		{3, 509, 64},
+		{8, 256, 127},
+		{63, 129, 65},
+	} {
+		buf[tc.clear/8] &^= 1 << (tc.clear % 8)
+		assert.False(t, bitutil.BitmapAllSet(buf, tc.offset, tc.length))
+		buf[tc.clear/8] |= 1 << (tc.clear % 8)
+	}
+}
+
 func TestSetBitsTo(t *testing.T) {
 	for _, fillByte := range []byte{0x00, 0xFF} {
 		{
