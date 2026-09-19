@@ -624,12 +624,7 @@ func (r *RleEncoder) PutBatchIndices(values []int32) (int, error) {
 		}
 
 		if r.repCount == 0 && len(r.buffer) == 0 && len(values)-encoded >= 8 {
-			r.buffer = r.buffer[:8]
-			for i, index := range values[encoded : encoded+8] {
-				r.buffer[i] = uint64(index)
-			}
-			r.curVal = r.buffer[7]
-			if err := r.flushBuffered(false); err != nil {
+			if err := r.putBatchIndicesLiteral(values[encoded:]); err != nil {
 				return encoded + 7, err
 			}
 			encoded += 8
@@ -645,6 +640,18 @@ func (r *RleEncoder) PutBatchIndices(values []int32) (int, error) {
 		}
 	}
 	return encoded, nil
+}
+
+// putBatchIndicesLiteral writes the first complete literal group directly.
+// The caller ensures that values contains at least eight entries and that the
+// encoder has no active repeated run or buffered values.
+func (r *RleEncoder) putBatchIndicesLiteral(values []int32) error {
+	r.buffer = r.buffer[:8]
+	for i, index := range values[:8] {
+		r.buffer[i] = uint64(index)
+	}
+	r.curVal = r.buffer[7]
+	return r.flushBuffered(false)
 }
 
 func (r *RleEncoder) Clear() {
