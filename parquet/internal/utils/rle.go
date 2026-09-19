@@ -464,10 +464,8 @@ func (r *RleEncoder) flushLiteral(updateIndicator bool) (err error) {
 		}
 	}
 
-	for _, val := range r.buffer {
-		if err = r.w.WriteValue(val, uint(r.BitWidth)); err != nil {
-			return
-		}
+	if err = r.w.WriteValues(r.buffer, uint(r.BitWidth)); err != nil {
+		return
 	}
 	r.buffer = r.buffer[:0]
 
