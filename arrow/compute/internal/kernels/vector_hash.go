@@ -295,12 +295,13 @@ func doAppendBinary[OffsetT int32 | int64](action Action, memo hashing.MemoTable
 		offsets           = exec.GetSpanOffsets[OffsetT](arr, 1)
 		data              = arr.Buffers[2].Buf
 		shouldEncodeNulls = action.ShouldEncodeNulls()
+		typedMemo         = memo.(hashing.TypedMemoTable[[]byte])
 	)
 
 	return bitutils.VisitBitBlocksShort(bitmap, arr.Offset, arr.Len,
 		func(pos int64) error {
 			v := data[offsets[pos]:offsets[pos+1]]
-			idx, found, err := memo.GetOrInsert(v)
+			idx, found, err := typedMemo.InsertOrGet(v)
 			if err != nil {
 				return err
 			}
@@ -328,12 +329,13 @@ func doAppendFixedSize(action Action, memo hashing.MemoTable, arr *exec.ArraySpa
 	sz := int64(arr.Type.(arrow.FixedWidthDataType).Bytes())
 	arrData := arr.Buffers[1].Buf[arr.Offset*sz:]
 	shouldEncodeNulls := action.ShouldEncodeNulls()
+	typedMemo := memo.(hashing.TypedMemoTable[[]byte])
 
 	return bitutils.VisitBitBlocksShort(arr.Buffers[0].Buf, arr.Offset, arr.Len,
 		func(pos int64) error {
 			// fixed size type memo table we use a binary memo table
 			// so get the raw bytes
-			idx, found, err := memo.GetOrInsert(arrData[pos*sz : (pos+1)*sz])
+			idx, found, err := typedMemo.InsertOrGet(arrData[pos*sz : (pos+1)*sz])
 			if err != nil {
 				return err
 			}
