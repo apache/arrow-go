@@ -16,7 +16,7 @@
 
 module github.com/apache/arrow-go/v18
 
-go 1.25.0
+go 1.26.0
 
 tool (
 	github.com/klauspost/asmfmt/cmd/asmfmt
