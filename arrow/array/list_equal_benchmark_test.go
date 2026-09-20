@@ -64,6 +64,39 @@ func BenchmarkListEqual(b *testing.B) {
 	}
 }
 
+
+func BenchmarkListApproxEqual(b *testing.B) {
+	const rows = 65536
+	tests := []struct {
+		listType string
+		child    arrow.DataType
+		listSize int
+		validity string
+	}{
+		{"list", arrow.PrimitiveTypes.Int32, 16, "all-valid"},
+		{"large-list", arrow.PrimitiveTypes.Int32, 16, "all-valid"},
+		{"fixed-size-list", arrow.PrimitiveTypes.Int32, 16, "all-valid"},
+		{"list", arrow.PrimitiveTypes.Int32, 16, "clustered-10pct-null"},
+		{"list", arrow.PrimitiveTypes.Int32, 16, "alternating-null"},
+	}
+
+	for _, tc := range tests {
+		name := fmt.Sprintf("%s/%s/size=%d/%s", tc.listType, tc.child.Name(), tc.listSize, tc.validity)
+		b.Run(name, func(b *testing.B) {
+			left := makeListEqualBenchmarkArray(tc.listType, tc.child, rows, tc.listSize, tc.validity)
+			right := makeListEqualBenchmarkArray(tc.listType, tc.child, rows, tc.listSize, tc.validity)
+			defer left.Release()
+			defer right.Release()
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				benchmarkListEqualResult = array.ApproxEqual(left, right)
+			}
+		})
+	}
+}
+
 func makeListEqualBenchmarkArray(listType string, childType arrow.DataType, rows, listSize int, validity string) arrow.Array {
 	var (
 		child        array.Builder
