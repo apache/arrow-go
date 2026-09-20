@@ -64,7 +64,6 @@ func BenchmarkListEqual(b *testing.B) {
 	}
 }
 
-
 func BenchmarkListApproxEqual(b *testing.B) {
 	const rows = 65536
 	tests := []struct {
