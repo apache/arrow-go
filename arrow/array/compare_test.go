@@ -149,6 +149,49 @@ func TestArraySliceEqualFullRangeMismatchedConcreteTypes(t *testing.T) {
 	))
 }
 
+func TestArraySliceApproxEqualFullRange(t *testing.T) {
+	leftBuilder := array.NewFloat64Builder(memory.DefaultAllocator)
+	leftBuilder.AppendValues([]float64{1, 2, 3}, nil)
+	left := leftBuilder.NewFloat64Array()
+	leftBuilder.Release()
+	defer left.Release()
+
+	rightBuilder := array.NewFloat64Builder(memory.DefaultAllocator)
+	rightBuilder.AppendValues([]float64{1.000001, 2, 3}, nil)
+	right := rightBuilder.NewFloat64Array()
+	rightBuilder.Release()
+	defer right.Release()
+
+	assert.True(t, array.SliceApproxEqual(
+		left, 0, int64(left.Len()),
+		right, 0, int64(right.Len()),
+		array.WithAbsTolerance(1e-5),
+	))
+	assert.False(t, array.SliceApproxEqual(
+		left, 0, int64(left.Len()),
+		right, 0, int64(right.Len()),
+		array.WithAbsTolerance(1e-7),
+	))
+}
+
+func TestArraySliceApproxEqualFullRangeGenericArray(t *testing.T) {
+	builder := array.NewInt64Builder(memory.DefaultAllocator)
+	builder.AppendValues([]int64{1, 2, 3}, nil)
+	arr := builder.NewInt64Array()
+	builder.Release()
+	defer arr.Release()
+
+	wrapped := arrayWrapper{Array: arr}
+	assert.True(t, array.SliceApproxEqual(
+		wrapped, 0, int64(wrapped.Len()),
+		wrapped, 0, int64(wrapped.Len()),
+	))
+	assert.True(t, array.SliceApproxEqual(
+		arr, 0, int64(arr.Len()),
+		wrapped, 0, int64(wrapped.Len()),
+	))
+}
+
 func TestListEqualByValidRuns(t *testing.T) {
 	for _, dt := range []arrow.DataType{
 		arrow.ListOf(arrow.PrimitiveTypes.Int32),
