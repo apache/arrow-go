@@ -213,7 +213,6 @@ func TestListEqualByValidRuns(t *testing.T) {
 				leftSlice := array.NewSlice(left, 1, 4)
 				rightSlice := array.NewSlice(right, 2, 5)
 				assert.True(t, array.Equal(leftSlice, rightSlice))
-	assert.True(t, array.ApproxEqual(leftSlice, rightSlice))
 				assert.True(t, array.ApproxEqual(leftSlice, rightSlice))
 				leftSlice.Release()
 				rightSlice.Release()
@@ -248,6 +247,7 @@ func TestFixedSizeListEqualByValidRuns(t *testing.T) {
 	leftSlice := array.NewSlice(leftWithPrefix, 1, 4)
 	rightSlice := array.NewSlice(rightWithPrefix, 2, 5)
 	assert.True(t, array.Equal(leftSlice, rightSlice))
+	assert.True(t, array.ApproxEqual(leftSlice, rightSlice))
 
 	left.Release()
 	right.Release()
