@@ -485,6 +485,15 @@ func TestScalarAggregatePairwiseSum(t *testing.T) {
 	defer i32.Release()
 
 	assertFloat64Result(t, callAgg(t, ctx, "sum", nil, compute.NewDatumWithoutOwning(f64)), 75247.35643756694)
+
+	// the pinned value is the pairwise one: a naive left-to-right sum of the
+	// same fixture lands on a different double, so the assertions above can
+	// only pass with the C++ summation order
+	var naive float64
+	for _, v := range vals {
+		naive += v
+	}
+	assert.NotEqual(t, 75247.35643756694, naive)
 	assertFloat64Result(t, callAgg(t, ctx, "sum", nil, compute.NewDatumWithoutOwning(f64n)), 94384.73372326966)
 	assertFloat64Result(t, callAgg(t, ctx, "sum", nil, compute.NewDatumWithoutOwning(f32)), 75247.3534175111)
 	assertInt64Result(t, callAgg(t, ctx, "sum", nil, compute.NewDatumWithoutOwning(i32)), 75006)
