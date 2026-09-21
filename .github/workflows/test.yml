@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go: [1.25, 1.26, 1.27]
+        go: [1.26, 1.27]
         arch: [amd64, arm64v8]
         include:
           - arch-label: AMD64
@@ -80,7 +80,6 @@ jobs:
       fail-fast: false
       matrix:
         go:
-          - '1.25'
           - '1.26'
           - '1.27'
     env:
@@ -121,7 +120,6 @@ jobs:
       fail-fast: false
       matrix:
         go:
-          - '1.25'
           - '1.26'
           - '1.27'
     env:
@@ -162,7 +160,6 @@ jobs:
       fail-fast: false
       matrix:
         go:
-          - '1.25'
           - '1.26'
           - '1.27'
     steps:
@@ -190,7 +187,6 @@ jobs:
       fail-fast: false
       matrix:
         go:
-          - '1.25'
           - '1.26'
           - '1.27'
     env:
@@ -225,7 +221,6 @@ jobs:
       fail-fast: false
       matrix:
         go:
-          - '1.25'
           - '1.26'
           - '1.27'
     steps:
@@ -327,7 +322,7 @@ jobs:
     name: TinyGo
     runs-on: ubuntu-latest
     env:
-      TINYGO_VERSION: 0.40.1
+      TINYGO_VERSION: 0.42.0
     timeout-minutes: 20
     steps:
       - name: Checkout
