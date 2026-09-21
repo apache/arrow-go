@@ -703,23 +703,24 @@ func validityBitmapEqual(left, right arrow.Array) bool {
 
 	leftBitmap := left.NullBitmapBytes()
 	rightBitmap := right.NullBitmapBytes()
-	if left.NullN() == 0 && len(leftBitmap) == 0 && len(rightBitmap) == 0 {
-		return true
+	if len(leftBitmap) == 0 {
+		return validityBitmapAllValid(right, rightBitmap)
 	}
-
-	if len(leftBitmap) == 0 || len(rightBitmap) == 0 {
-		for i := range left.Len() {
-			if left.IsNull(i) != right.IsNull(i) {
-				return false
-			}
-		}
-		return true
+	if len(rightBitmap) == 0 {
+		return validityBitmapAllValid(left, leftBitmap)
 	}
 
 	return bitutil.BitmapEquals(
 		leftBitmap, rightBitmap,
 		int64(left.Data().Offset()), int64(right.Data().Offset()), int64(left.Len()),
 	)
+}
+
+// validityBitmapAllValid reports whether the materialized validity bitmap
+// contains only valid values in the array's logical range. A missing bitmap
+// also represents an all-valid range, matching arrow.Array.IsValid.
+func validityBitmapAllValid(arr arrow.Array, bitmap []byte) bool {
+	return len(bitmap) == 0 || bitutil.BitmapAllSet(bitmap, arr.Data().Offset(), arr.Len())
 }
 
 func arrayApproxEqualString(left, right *String) bool {

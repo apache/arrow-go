@@ -17,6 +17,7 @@
 package bitutil
 
 import (
+	"encoding/binary"
 	"math"
 	"math/bits"
 	"unsafe"
@@ -110,6 +111,56 @@ func CountSetBits(buf []byte, offset, n int) int {
 	}
 
 	return count
+}
+
+// BitmapAllSet reports whether all bits in the requested range are set.
+func BitmapAllSet(buf []byte, offset, n int) bool {
+	if n == 0 {
+		return true
+	}
+	// Preserve the cheapest early exit for a null at the start.
+	if !BitIsSet(buf, offset) {
+		return false
+	}
+	if offset&7 != 0 {
+		leading := min(8-(offset&7), n)
+		mask := byte((1<<leading)-1) << (offset & 7)
+		if buf[offset/8]&mask != mask {
+			return false
+		}
+		offset += leading
+		n -= leading
+	}
+	end := offset/8 + n/8
+	body := buf[offset/8 : end]
+	// One test per 512 bits keeps long all-valid scans branch-light.
+	if len(body) >= 64 {
+		bulkBytes := len(body) &^ 63
+		words := bytesToUint64(body[:bulkBytes])
+		for len(words) >= 8 {
+			if words[0]&words[1]&words[2]&words[3]&words[4]&words[5]&words[6]&words[7] != ^uint64(0) {
+				return false
+			}
+			words = words[8:]
+		}
+		body = body[bulkBytes:]
+	}
+	for len(body) >= 8 {
+		if binary.LittleEndian.Uint64(body) != ^uint64(0) {
+			return false
+		}
+		body = body[8:]
+	}
+	for _, v := range body {
+		if v != 255 {
+			return false
+		}
+	}
+	if tail := n & 7; tail != 0 {
+		mask := byte(1<<tail) - 1
+		return buf[end]&mask == mask
+	}
+	return true
 }
 
 func countSetBitsWithOffset(buf []byte, offset, n int) int {
