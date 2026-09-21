@@ -382,6 +382,10 @@ func (d *DeltaByteArrayDecoder) Decode(out []parquet.ByteArray) (int, error) {
 
 		prefix := d.lastVal[:prefixLen:prefixLen]
 		if len(out[0]) == 0 {
+			// Decoded values must not escape through reusable discard storage.
+			if len(prefix) > 0 && len(d.discardScratch) > 0 && &prefix[0] == &d.discardScratch[0] {
+				prefix = slices.Clone(prefix)
+			}
 			d.lastVal = prefix
 			out[0], out = prefix, out[1:]
 			continue
