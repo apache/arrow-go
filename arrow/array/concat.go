@@ -244,7 +244,7 @@ func handle32BitOffsetsData(data []arrow.ArrayData, out *memory.Buffer, outLen i
 
 		buf := d.Buffers()[1]
 		if buf == nil {
-			return nil, errors.New("array/concat: binary array is missing an offset buffer")
+			return nil, errors.New("array/concat: array is missing an offset buffer")
 		}
 		src := arrow.Int32Traits.CastFromBytes(buf.Bytes())
 		begin := d.Offset()
@@ -281,7 +281,7 @@ func handle64BitOffsetsData(data []arrow.ArrayData, out *memory.Buffer, outLen i
 
 		buf := d.Buffers()[1]
 		if buf == nil {
-			return nil, errors.New("array/concat: binary array is missing an offset buffer")
+			return nil, errors.New("array/concat: array is missing an offset buffer")
 		}
 		src := arrow.Int64Traits.CastFromBytes(buf.Bytes())
 		begin := d.Offset()
