@@ -160,6 +160,9 @@ func TestZstdDecompressorRejectsHugeDeclaredSizeWithoutAllocating(t *testing.T) 
 	dst := make([]byte, 100)
 	require.NoError(t, dec.Decompress(dst, compressBuffer(t, flatbuf.CompressionTypeZSTD, compressibleBytes(100, 3))))
 
+	// collect garbage first so GC bookkeeping stays out of the measured window
+	runtime.GC()
+
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
 	err := dec.Decompress(dst, frame)

@@ -84,7 +84,12 @@ func getCompressor(codec flatbuf.CompressionType) compressor {
 }
 
 type decompressor interface {
+	// Decompress decodes src into dst, which must be sized to the exact
+	// uncompressed length.
 	Decompress(dst, src []byte) error
+	// Close releases the decompressor; it must not be used afterwards.
+	// Implementations may return it to a pool, so calling Close twice hands
+	// the same decompressor to two owners.
 	Close()
 }
 
@@ -127,6 +132,10 @@ func (z *zstdDecompressor) Decompress(dst, src []byte) error {
 	return nil
 }
 
+// Close returns the decoder to the pool. z.Decoder.Close() is deliberately
+// not called: zstd.NewReader(nil) starts no goroutines, so a pooled decoder
+// only holds GC-reclaimable state and there is nothing to tear down. Closing
+// it would make the decoder unusable for the next borrower.
 func (z *zstdDecompressor) Close() {
 	zstdDecompressorPool.Put(z)
 }
