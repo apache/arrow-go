@@ -17,6 +17,7 @@
 package bitutil
 
 import (
+	"encoding/binary"
 	"math"
 	"math/bits"
 	"unsafe"
@@ -117,42 +118,47 @@ func BitmapAllSet(buf []byte, offset, n int) bool {
 	if n == 0 {
 		return true
 	}
-	for n > 0 && offset&7 != 0 {
-		if !BitIsSet(buf, offset) {
-			return false
-		}
-		offset++
-		n--
+	// Preserve the cheapest early exit for a null at the start.
+	if !BitIsSet(buf, offset) {
+		return false
 	}
-
-	for n >= 8 && offset&63 != 0 {
-		if buf[offset/8] != 0xff {
+	if offset&7 != 0 {
+		leading := min(8-(offset&7), n)
+		mask := byte((1<<leading)-1) << (offset & 7)
+		if buf[offset/8]&mask != mask {
 			return false
 		}
-		offset += 8
-		n -= 8
+		offset += leading
+		n -= leading
 	}
-
-	wordBytes := n / uint64SizeBits * uint64SizeBytes
-	for _, word := range bytesToUint64(buf[offset/8 : offset/8+wordBytes]) {
-		if word != ^uint64(0) {
+	end := offset/8 + n/8
+	body := buf[offset/8 : end]
+	// One test per 512 bits keeps long all-valid scans branch-light.
+	if len(body) >= 64 {
+		bulkBytes := len(body) &^ 63
+		words := bytesToUint64(body[:bulkBytes])
+		for len(words) >= 8 {
+			if words[0]&words[1]&words[2]&words[3]&words[4]&words[5]&words[6]&words[7] != ^uint64(0) {
+				return false
+			}
+			words = words[8:]
+		}
+		body = body[bulkBytes:]
+	}
+	for len(body) >= 8 {
+		if binary.LittleEndian.Uint64(body) != ^uint64(0) {
+			return false
+		}
+		body = body[8:]
+	}
+	for _, v := range body {
+		if v != 255 {
 			return false
 		}
 	}
-	offset += wordBytes * 8
-	n -= wordBytes * 8
-
-	for n >= 8 {
-		if buf[offset/8] != 0xff {
-			return false
-		}
-		offset += 8
-		n -= 8
-	}
-	for i := 0; i < n; i++ {
-		if !BitIsSet(buf, offset+i) {
-			return false
-		}
+	if tail := n & 7; tail != 0 {
+		mask := byte(1<<tail) - 1
+		return buf[end]&mask == mask
 	}
 	return true
 }
