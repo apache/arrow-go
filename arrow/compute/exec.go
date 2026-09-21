@@ -93,6 +93,14 @@ func execInternal(ctx context.Context, fn Function, opts FunctionOptions, passed
 			executor.Clear()
 			vectorExecPool.Put(executor.(*vectorExecutor))
 		}()
+	case FuncScalarAgg:
+		executor = scalarAggExecPool.Get().(*scalarAggExecutor)
+		// Clear also runs the aggregate state cleanup for the paths where
+		// the executor never got to run, and is a no-op once it has run
+		defer func() {
+			executor.Clear()
+			scalarAggExecPool.Put(executor.(*scalarAggExecutor))
+		}()
 	default:
 		return nil, fmt.Errorf("%w: direct execution of %s", arrow.ErrNotImplemented, fn.Kind())
 	}

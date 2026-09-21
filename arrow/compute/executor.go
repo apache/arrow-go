@@ -918,6 +918,9 @@ var (
 	vectorExecPool = sync.Pool{
 		New: func() any { return &vectorExecutor{} },
 	}
+	scalarAggExecPool = sync.Pool{
+		New: func() any { return &scalarAggExecutor{} },
+	}
 )
 
 func checkCanExecuteChunked(k *exec.VectorKernel) error {
@@ -1219,4 +1222,178 @@ func (v *vectorExecutor) execChunked(batch *ExecBatch, out chan<- Datum) error {
 		}
 	}
 	return nil
+}
+
+// NewScalarAggExecutor constructs an executor for scalar aggregate kernels,
+// which consume the whole input into a single kernel state and finalize it
+// once into a single result.
+func NewScalarAggExecutor() KernelExecutor { return &scalarAggExecutor{} }
+
+// scalarAggExecutor drives a scalar aggregate kernel. Unlike the scalar and
+// vector executors it produces exactly one Datum, and it does not preallocate
+// or propagate nulls: the kernel owns the whole result.
+//
+// The state the kernel's init function produced is owned by this executor
+// from Init until cleanup, which happens exactly once, whether the
+// aggregation succeeded, saw no input at all, was cancelled, or failed.
+type scalarAggExecutor struct {
+	ctx     *exec.KernelCtx
+	ectx    ExecCtx
+	kernel  exec.AggKernel
+	outType arrow.DataType
+	cleaned bool
+}
+
+func (a *scalarAggExecutor) Init(ctx *exec.KernelCtx, args exec.KernelInitArgs) (err error) {
+	a.ctx, a.cleaned = ctx, false
+	k, ok := args.Kernel.(exec.AggKernel)
+	if !ok {
+		return fmt.Errorf("%w: scalar aggregate execution requires an aggregate kernel, got %T",
+			arrow.ErrInvalid, args.Kernel)
+	}
+	a.kernel = k
+	a.ectx = GetExecCtx(ctx.Ctx)
+	a.outType, err = k.GetSig().OutType.Resolve(ctx, args.Inputs)
+	return
+}
+
+func (a *scalarAggExecutor) Execute(ctx context.Context, batch *ExecBatch, data chan<- Datum) (err error) {
+	defer func() {
+		if cleanupErr := a.cleanupState(); cleanupErr != nil && err == nil {
+			err = cleanupErr
+		}
+	}()
+
+	if a.ctx.State == nil {
+		return fmt.Errorf("%w: scalar aggregation requires a non-nil kernel state", arrow.ErrInvalid)
+	}
+
+	if err = a.consumeBatch(ctx, batch); err != nil {
+		return
+	}
+
+	// an empty input still reaches finalize, so that the options decide
+	// what an aggregation over no values produces
+	var result *exec.AggregateResult
+	if result, err = a.kernel.Finalize(a.ctx); err != nil {
+		return
+	}
+	if result == nil {
+		return fmt.Errorf("%w: scalar aggregate kernel finalized without a result", arrow.ErrInvalid)
+	}
+
+	// the result owns its value; boxing it without owning hands that single
+	// reference over to the Datum, which the caller releases
+	out := NewDatumWithoutOwning(result.Take())
+	select {
+	case <-ctx.Done():
+		out.Release()
+		return context.Cause(ctx)
+	case data <- out:
+		return nil
+	}
+}
+
+// consumeBatch folds every chunk of the batch into the kernel state. Scalars
+// are not promoted to arrays, as they are for scalar kernels: an aggregate
+// kernel handles a scalar input weighted by the length of the span, which is
+// both cheaper and what the C++ implementation does.
+func (a *scalarAggExecutor) consumeBatch(ctx context.Context, batch *ExecBatch) error {
+	maxChunkSize := a.ectx.ChunkSize
+	if maxChunkSize <= 0 {
+		maxChunkSize = DefaultMaxChunkSize
+	}
+
+	if checkIfAllScalar(batch) && batch.Len > 1 {
+		// a batch of scalars can carry a logical length greater than one,
+		// for instance when only the partition columns of a batch were
+		// projected for an aggregation
+		span := ExecSpanFromBatch(batch)
+		for pos := int64(0); pos < batch.Len; {
+			span.Len = exec.Min(batch.Len-pos, maxChunkSize)
+			if err := a.consumeSpan(ctx, span); err != nil {
+				return err
+			}
+			pos += span.Len
+		}
+		return nil
+	}
+
+	_, iter, err := iterateExecSpans(batch, maxChunkSize, false)
+	if err != nil {
+		return err
+	}
+
+	for {
+		span, _, ok := iter()
+		if !ok {
+			break
+		}
+		if span.Len == 0 {
+			continue
+		}
+		if err := a.consumeSpan(ctx, &span); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *scalarAggExecutor) consumeSpan(ctx context.Context, span *exec.ExecSpan) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	return a.kernel.Consume(a.ctx, span)
+}
+
+// WrapResults returns the single result of the aggregation. It reads the
+// channel until it is closed, so that the goroutine which produced the result
+// has finished by the time the state is cleaned up.
+func (a *scalarAggExecutor) WrapResults(ctx context.Context, out <-chan Datum, _ bool) Datum {
+	var result Datum
+	for datum := range out {
+		if datum == nil {
+			continue
+		}
+		if result != nil {
+			datum.Release()
+			continue
+		}
+		result = datum
+	}
+
+	if ctx.Err() != nil && result != nil {
+		result.Release()
+		return nil
+	}
+	return result
+}
+
+func (a *scalarAggExecutor) CheckResultType(out Datum) error {
+	typ := out.(ArrayLikeDatum).Type()
+	if typ != nil && !arrow.TypeEqual(a.outType, typ) {
+		return fmt.Errorf("%w: kernel type result mismatch: declared as %s, actual is %s",
+			arrow.ErrType, a.outType, typ)
+	}
+	return nil
+}
+
+func (a *scalarAggExecutor) Clear() {
+	// a no-op if Execute already cleaned up; this covers the paths where it
+	// did not run at all, such as a failure in Init
+	_ = a.cleanupState()
+	a.ctx, a.kernel, a.outType = nil, nil, nil
+	a.cleaned = false
+}
+
+// cleanupState releases the aggregate state exactly once. It does not touch
+// the result which finalize returned: that result owns its own reference.
+func (a *scalarAggExecutor) cleanupState() error {
+	if a.cleaned || a.ctx == nil || a.kernel == nil {
+		return nil
+	}
+	a.cleaned = true
+	state := a.ctx.State
+	a.ctx.State = nil
+	return a.kernel.Cleanup(a.ctx, state)
 }
