@@ -154,6 +154,12 @@ func concatBuffers(bufs []*memory.Buffer, mem memory.Allocator) *memory.Buffer {
 
 func concatFixedWidthBuffers(data []arrow.ArrayData, idx, byteWidth, length int, mem memory.Allocator) *memory.Buffer {
 	out := memory.NewResizableBuffer(mem)
+	success := false
+	defer func() {
+		if !success {
+			out.Release()
+		}
+	}()
 	out.Resize(length * byteWidth)
 	dst := out.Bytes()
 	for _, d := range data {
@@ -167,6 +173,7 @@ func concatFixedWidthBuffers(data []arrow.ArrayData, idx, byteWidth, length int,
 		copy(dst, buf.Bytes()[begin:begin+nbytes])
 		dst = dst[nbytes:]
 	}
+	success = true
 	return out
 }
 
