@@ -120,6 +120,7 @@ filter_uint32_avx2_amd64.s: _lib/filter_uint32_avx2_amd64.s
 
 filter_uint64_avx2_amd64.s: _lib/filter_uint64_avx2_amd64.s
 	$(C2GOASM) -a -f $^ $@
+	perl -i -pe 's{^//\s*\+build\b.*}{//go:build go1.18 && amd64 && !noasm && !appengine}' $@
 
 clean:
 	rm -f $(INTEL_SOURCES)
