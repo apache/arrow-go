@@ -110,8 +110,10 @@ var sumKernelTypes = []struct {
 func RegisterScalarAggregates(reg FunctionRegistry) {
 	countFn := NewScalarAggregateFunction("count", Unary(), countDoc)
 	countFn.SetDefaultOptions(DefaultCountOptions())
-	// count accepts any input type: it only ever looks at the validity of
-	// the values, never at the values themselves
+	// count is registered for any input type: it only ever looks at the
+	// validity of the values, never at the values themselves. CountInit
+	// rejects the modes that need a logical null count for the types whose
+	// validity bitmap does not carry it.
 	if err := countFn.AddNewKernel([]exec.InputType{{}}, exec.NewOutputType(arrow.PrimitiveTypes.Int64),
 		kernels.CountInit, kernels.AggregateConsume, kernels.AggregateMerge, kernels.AggregateFinalize); err != nil {
 		panic(err)

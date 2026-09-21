@@ -267,9 +267,8 @@ func MergeAll(kernel AggKernel, ctx *KernelCtx, states []KernelState) (KernelSta
 	}
 
 	if err != nil {
-		if cleanupErr := kernel.Cleanup(ctx, dst); cleanupErr != nil {
-			_ = cleanupErr
-		}
+		// best effort: the merge error is the one worth reporting
+		_ = kernel.Cleanup(ctx, dst)
 		return nil, err
 	}
 	return dst, nil
