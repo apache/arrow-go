@@ -163,6 +163,7 @@ type DeltaByteArrayDecoder struct {
 	*DeltaLengthByteArrayDecoder
 
 	prefixLengths []int32
+	prefixScratch []int32
 	lastVal       parquet.ByteArray
 }
 
@@ -189,7 +190,13 @@ func (d *DeltaByteArrayDecoder) SetData(nvalues int, data []byte) error {
 		return fmt.Errorf("parquet: delta prefix count %d exceeds value count %d", prefixLenDec.totalValues, nvalues)
 	}
 
-	d.prefixLengths = make([]int32, prefixLenDec.ValuesLeft())
+	prefixCount := prefixLenDec.ValuesLeft()
+	if cap(d.prefixScratch) < prefixCount {
+		d.prefixScratch = make([]int32, prefixCount)
+	} else {
+		d.prefixScratch = d.prefixScratch[:prefixCount]
+	}
+	d.prefixLengths = d.prefixScratch
 	// decode all the prefix lengths first so we know how many bytes it took to get the
 	// prefix lengths for nvalues
 	decoded, err := prefixLenDec.Decode(d.prefixLengths)
