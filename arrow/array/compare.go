@@ -379,8 +379,13 @@ func canEqualDirectly(left, right arrow.Array) bool {
 	}
 
 	switch left.(type) {
-	case *Null, *Boolean, *FixedSizeBinary, *Binary, *String,
-		*LargeBinary, *LargeString, *BinaryView, *StringView,
+	case *Binary:
+		// Binary builders can retain string datatypes, which need normalization.
+		return left.DataType().ID() == arrow.BINARY && right.DataType().ID() == arrow.BINARY
+	case *LargeBinary:
+		return left.DataType().ID() == arrow.LARGE_BINARY && right.DataType().ID() == arrow.LARGE_BINARY
+	case *Null, *Boolean, *FixedSizeBinary, *String,
+		*LargeString, *BinaryView, *StringView,
 		*Int8, *Int16, *Int32, *Int64, *Uint8, *Uint16, *Uint32, *Uint64,
 		*Float16, *Float32, *Float64,
 		*Decimal32, *Decimal64, *Decimal128, *Decimal256,
