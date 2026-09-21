@@ -243,15 +243,12 @@ func (d *DeltaByteArrayDecoder) Discard(n int) (int, error) {
 	}
 
 	remaining := n
-	var tmp [1]parquet.ByteArray
 	if d.lastVal == nil {
 		if len(d.prefixLengths) == 0 || d.prefixLengths[0] != 0 {
 			return 0, errors.New("parquet: first delta byte array prefix length must be zero")
 		}
-		if _, err := d.DeltaLengthByteArrayDecoder.Decode(tmp[:]); err != nil {
-			return 0, err
-		}
-		d.setDiscardLastValue(nil, tmp[0])
+		suffix := d.decodeDiscardSuffix()
+		d.setDiscardLastValue(nil, suffix)
 		d.prefixLengths = d.prefixLengths[1:]
 		remaining--
 	}
@@ -267,19 +264,27 @@ func (d *DeltaByteArrayDecoder) Discard(n int) (int, error) {
 		}
 		prefix := d.lastVal[:prefixLen:prefixLen]
 
-		if _, err := d.DeltaLengthByteArrayDecoder.Decode(tmp[:]); err != nil {
-			return n - remaining, err
-		}
-
-		if len(tmp[0]) == 0 {
+		suffix := d.decodeDiscardSuffix()
+		if len(suffix) == 0 {
 			d.lastVal = prefix
 		} else {
-			d.setDiscardLastValue(prefix, tmp[0])
+			d.setDiscardLastValue(prefix, suffix)
 		}
 		remaining--
 	}
 
 	return n, nil
+}
+
+// decodeDiscardSuffix reads one suffix after Discard has bounded its count by
+// nvals. SetData has already validated the suffix lengths against the payload.
+func (d *DeltaByteArrayDecoder) decodeDiscardSuffix() parquet.ByteArray {
+	length := d.lengths[0]
+	suffix := d.data[:length:length]
+	d.data = d.data[length:]
+	d.nvals--
+	d.lengths = d.lengths[1:]
+	return suffix
 }
 
 func (d *DeltaByteArrayDecoder) decodedArenaSize(max int) (int, error) {
