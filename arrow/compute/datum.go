@@ -270,16 +270,20 @@ func NewDatum(value interface{}) Datum {
 }
 
 // NewDatumWithoutOwning is like NewDatum but does not call Retain on the
-// value it is given. The returned Datum owns nothing: the caller keeps its
-// own reference, must keep the value alive for as long as the Datum is in
-// use, and must not call Release on the Datum.
+// value it is given. The Datum takes over whatever reference the caller
+// supplies, and Datum.Release consumes that reference: it is an ordinary
+// ArrayDatum, ChunkedDatum, RecordDatum, TableDatum or ScalarDatum whose
+// Release calls the wrapped value's Release.
 //
-// The Datum is an ordinary ArrayDatum, ChunkedDatum, RecordDatum, TableDatum
-// or ScalarDatum, so a Release call compiles and runs like any other, and
-// what it releases is the caller's reference. With a C-backed allocator, or
-// buffers imported through the cdata package, that frees memory under the
-// caller's still-live value. Use NewDatum when the Datum should hold a
-// reference of its own.
+// Two call patterns follow from that. Wrapping a value the caller still owns
+// borrows it: the caller keeps the value alive for as long as the Datum is in
+// use and must not call Release on the Datum, because that would give up the
+// caller's own reference and, with a C-backed allocator or buffers imported
+// through the cdata package, free memory under a live value. Wrapping a
+// value created for the Datum transfers it: the Datum is then the only
+// handle, and it must eventually be released through the Datum or the
+// value's retained data leaks. NewDatum itself uses the second pattern,
+// retaining a Releasable and handing the new reference to this function.
 func NewDatumWithoutOwning(value interface{}) Datum {
 	switch v := value.(type) {
 	case arrow.Array:
