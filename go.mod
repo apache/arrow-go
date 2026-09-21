@@ -46,7 +46,7 @@ require (
 	github.com/twmb/avro v1.9.0
 	github.com/zeebo/xxh3 v1.1.0
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96
-	golang.org/x/sync v0.22.0
+	golang.org/x/sync v0.23.0
 	golang.org/x/sys v0.48.0
 	gonum.org/v1/gonum v0.17.0
 	google.golang.org/grpc v1.83.2
