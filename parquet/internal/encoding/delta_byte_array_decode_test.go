@@ -214,6 +214,42 @@ func TestDeltaByteArrayDecoderKeepsResultsAcrossPages(t *testing.T) {
 	requireDecodedStrings(t, secondOut, secondValues)
 }
 
+func TestDeltaByteArrayDecoderReusesPageScratch(t *testing.T) {
+	firstValues := []string{
+		"partition/000/value/000", "partition/000/value/001",
+		"partition/001/value/000", "partition/001/value/001",
+	}
+	secondValues := []string{"partition/100/value/000", "partition/100/value/001"}
+	dec := NewDecoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray,
+		nil, memory.DefaultAllocator).(*DeltaByteArrayDecoder)
+
+	firstData := encodeDeltaByteArrayPage(t, firstValues)
+	require.NoError(t, dec.SetData(len(firstValues), firstData))
+	lengthStart := &dec.lengthScratch[0]
+	prefixStart := &dec.prefixScratch[0]
+	lengthCap := cap(dec.lengthScratch)
+	prefixCap := cap(dec.prefixScratch)
+
+	firstOut := make([]parquet.ByteArray, len(firstValues))
+	decoded, err := dec.Decode(firstOut)
+	require.NoError(t, err)
+	require.Equal(t, len(firstValues), decoded)
+	requireDecodedStrings(t, firstOut, firstValues)
+
+	secondData := encodeDeltaByteArrayPage(t, secondValues)
+	require.NoError(t, dec.SetData(len(secondValues), secondData))
+	require.Equal(t, lengthCap, cap(dec.lengthScratch))
+	require.Equal(t, prefixCap, cap(dec.prefixScratch))
+	require.Same(t, lengthStart, &dec.lengthScratch[0])
+	require.Same(t, prefixStart, &dec.prefixScratch[0])
+
+	secondOut := make([]parquet.ByteArray, len(secondValues))
+	decoded, err = dec.Decode(secondOut)
+	require.NoError(t, err)
+	require.Equal(t, len(secondValues), decoded)
+	requireDecodedStrings(t, secondOut, secondValues)
+}
+
 func TestDeltaByteArrayDecoderDecodeSpaced(t *testing.T) {
 	values := []string{"a/000", "a/001", "b/000", "b/001"}
 	data := encodeDeltaByteArrayPage(t, values)

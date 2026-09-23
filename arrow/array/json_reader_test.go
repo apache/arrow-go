@@ -245,6 +245,13 @@ func TestJSONReaderExponentialNotation(t *testing.T) {
 	}
 }
 
+// benchMetadataPad keeps each generated record around 500 bytes of payload.
+// It must stay printable: JSON-escaping non-printable bytes (e.g. the NUL
+// bytes a zeroed []byte would produce) turns every byte into a \uXXXX escape,
+// and unescaping those is quadratic in goccy/go-json, which made these
+// benchmarks take hours.
+var benchMetadataPad = strings.Repeat("x", 500)
+
 func generateJSONData(n int) []byte {
 	records := make([]map[string]any, n)
 	for i := range n {
@@ -253,7 +260,7 @@ func generateJSONData(n int) []byte {
 			"name":     fmt.Sprintf("record_%d", i),
 			"value":    float64(i) * 1.5,
 			"active":   i%2 == 0,
-			"metadata": fmt.Sprintf("metadata_%d_%s", i, make([]byte, 500)),
+			"metadata": fmt.Sprintf("metadata_%d_%s", i, benchMetadataPad),
 		}
 	}
 

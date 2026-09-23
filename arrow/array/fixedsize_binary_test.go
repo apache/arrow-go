@@ -109,7 +109,7 @@ func TestFixedSizeBinarySlice(t *testing.T) {
 	}
 
 	if got, want := v.NullN(), 1; got != want {
-		t.Fatalf("got=%q, want=%q", got, want)
+		t.Fatalf("got=%d, want=%d", got, want)
 	}
 }
 

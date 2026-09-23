@@ -39,8 +39,28 @@ func BenchmarkFilterFloat32MixedMasks(b *testing.B) {
 	benchmarkFilter32MixedMasks(b, makeFilterFloat32BenchmarkInput)
 }
 
+func BenchmarkFilterInt64MixedMasks(b *testing.B) {
+	benchmarkFilter64MixedMasks(b, makeFilterInt64BenchmarkInput)
+}
+
+func BenchmarkFilterFloat64MixedMasks(b *testing.B) {
+	benchmarkFilter64MixedMasks(b, makeFilterFloat64BenchmarkInput)
+}
+
 func benchmarkFilter32MixedMasks(b *testing.B,
 	makeInput func(*testing.B, int, func(int) bool) (arrow.Array, arrow.Array),
+) {
+	benchmarkFilterMixedMasks(b, makeInput, 4)
+}
+
+func benchmarkFilter64MixedMasks(b *testing.B,
+	makeInput func(*testing.B, int, func(int) bool) (arrow.Array, arrow.Array),
+) {
+	benchmarkFilterMixedMasks(b, makeInput, 8)
+}
+
+func benchmarkFilterMixedMasks(b *testing.B,
+	makeInput func(*testing.B, int, func(int) bool) (arrow.Array, arrow.Array), valueBytes int,
 ) {
 	patterns := []struct {
 		name     string
@@ -65,7 +85,7 @@ func benchmarkFilter32MixedMasks(b *testing.B,
 				defer filter.Release()
 
 				b.ReportAllocs()
-				b.SetBytes(int64(size * 4))
+				b.SetBytes(int64(size * valueBytes))
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
 					result, err := compute.FilterArray(context.Background(), values, filter, *compute.DefaultFilterOptions())
@@ -154,6 +174,50 @@ func makeFilterFloat32BenchmarkInput(b *testing.B, size int, selected func(int) 
 		valuesBuilder.Append(float32(i))
 	}
 	values := valuesBuilder.NewFloat32Array()
+	valuesBuilder.Release()
+
+	filterBuilder := array.NewBooleanBuilder(mem)
+	filterBuilder.Reserve(size)
+	for i := 0; i < size; i++ {
+		filterBuilder.Append(selected(i))
+	}
+	filter := filterBuilder.NewBooleanArray()
+	filterBuilder.Release()
+	return values, filter
+}
+
+func makeFilterInt64BenchmarkInput(b *testing.B, size int, selected func(int) bool) (arrow.Array, arrow.Array) {
+	b.Helper()
+	mem := memory.DefaultAllocator
+
+	valuesBuilder := array.NewInt64Builder(mem)
+	valuesBuilder.Reserve(size)
+	for i := 0; i < size; i++ {
+		valuesBuilder.Append(int64(i))
+	}
+	values := valuesBuilder.NewInt64Array()
+	valuesBuilder.Release()
+
+	filterBuilder := array.NewBooleanBuilder(mem)
+	filterBuilder.Reserve(size)
+	for i := 0; i < size; i++ {
+		filterBuilder.Append(selected(i))
+	}
+	filter := filterBuilder.NewBooleanArray()
+	filterBuilder.Release()
+	return values, filter
+}
+
+func makeFilterFloat64BenchmarkInput(b *testing.B, size int, selected func(int) bool) (arrow.Array, arrow.Array) {
+	b.Helper()
+	mem := memory.DefaultAllocator
+
+	valuesBuilder := array.NewFloat64Builder(mem)
+	valuesBuilder.Reserve(size)
+	for i := 0; i < size; i++ {
+		valuesBuilder.Append(float64(i))
+	}
+	values := valuesBuilder.NewFloat64Array()
 	valuesBuilder.Release()
 
 	filterBuilder := array.NewBooleanBuilder(mem)
