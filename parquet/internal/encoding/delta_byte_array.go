@@ -164,6 +164,7 @@ type DeltaByteArrayDecoder struct {
 	*DeltaLengthByteArrayDecoder
 
 	prefixLengths  []int32
+	prefixScratch  []int32
 	lastVal        parquet.ByteArray
 	discardScratch []byte
 }
@@ -179,7 +180,7 @@ func (d *DeltaByteArrayDecoder) setDiscardLastValue(prefix, suffix parquet.ByteA
 	valueLen := len(prefix) + len(suffix)
 	if valueLen == 0 {
 		if d.discardScratch == nil {
-			d.discardScratch = make([]byte, 0, 1)
+			d.discardScratch = make([]byte, 0)
 		} else {
 			d.discardScratch = d.discardScratch[:0]
 		}
@@ -191,6 +192,10 @@ func (d *DeltaByteArrayDecoder) setDiscardLastValue(prefix, suffix parquet.ByteA
 	d.discardScratch = d.discardScratch[:valueLen]
 	copy(d.discardScratch, prefix)
 	copy(d.discardScratch[len(prefix):], suffix)
+
+	// Discard roots reconstructed values at the start of discardScratch. Its
+	// empty-suffix path only narrows lastVal, preserving that base pointer.
+	// Decode relies on this to detect aliases before later scratch reuse.
 	d.lastVal = d.discardScratch
 }
 
@@ -210,7 +215,13 @@ func (d *DeltaByteArrayDecoder) SetData(nvalues int, data []byte) error {
 		return fmt.Errorf("parquet: delta prefix count %d exceeds value count %d", prefixLenDec.totalValues, nvalues)
 	}
 
-	d.prefixLengths = make([]int32, prefixLenDec.ValuesLeft())
+	prefixCount := prefixLenDec.ValuesLeft()
+	if cap(d.prefixScratch) < prefixCount {
+		d.prefixScratch = make([]int32, prefixCount)
+	} else {
+		d.prefixScratch = d.prefixScratch[:prefixCount]
+	}
+	d.prefixLengths = d.prefixScratch
 	// decode all the prefix lengths first so we know how many bytes it took to get the
 	// prefix lengths for nvalues
 	decoded, err := prefixLenDec.Decode(d.prefixLengths)
@@ -247,7 +258,7 @@ func (d *DeltaByteArrayDecoder) Discard(n int) (int, error) {
 		if len(d.prefixLengths) == 0 || d.prefixLengths[0] != 0 {
 			return 0, errors.New("parquet: first delta byte array prefix length must be zero")
 		}
-		suffix := d.decodeDiscardSuffix()
+		suffix := d.DeltaLengthByteArrayDecoder.decodeOne()
 		d.setDiscardLastValue(nil, suffix)
 		d.prefixLengths = d.prefixLengths[1:]
 		remaining--
@@ -264,7 +275,7 @@ func (d *DeltaByteArrayDecoder) Discard(n int) (int, error) {
 		}
 		prefix := d.lastVal[:prefixLen:prefixLen]
 
-		suffix := d.decodeDiscardSuffix()
+		suffix := d.DeltaLengthByteArrayDecoder.decodeOne()
 		if len(suffix) == 0 {
 			d.lastVal = prefix
 		} else {
@@ -274,17 +285,6 @@ func (d *DeltaByteArrayDecoder) Discard(n int) (int, error) {
 	}
 
 	return n, nil
-}
-
-// decodeDiscardSuffix reads one suffix after Discard has bounded its count by
-// nvals. SetData has already validated the suffix lengths against the payload.
-func (d *DeltaByteArrayDecoder) decodeDiscardSuffix() parquet.ByteArray {
-	length := d.lengths[0]
-	suffix := d.data[:length:length]
-	d.data = d.data[length:]
-	d.nvals--
-	d.lengths = d.lengths[1:]
-	return suffix
 }
 
 func (d *DeltaByteArrayDecoder) decodedArenaSize(max int) (int, error) {
@@ -387,7 +387,9 @@ func (d *DeltaByteArrayDecoder) Decode(out []parquet.ByteArray) (int, error) {
 
 		prefix := d.lastVal[:prefixLen:prefixLen]
 		if len(out[0]) == 0 {
-			// Decoded values must not escape through reusable discard storage.
+			// Discard can leave lastVal backed by reusable discardScratch. Returning
+			// that prefix would let a later Discard overwrite data the caller holds.
+			// setDiscardLastValue keeps lastVal at discardScratch's base pointer.
 			if len(prefix) > 0 && len(d.discardScratch) > 0 && &prefix[0] == &d.discardScratch[0] {
 				prefix = slices.Clone(prefix)
 			}
