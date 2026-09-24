@@ -611,6 +611,224 @@ func TestBatchedByteStreamSplitFileRoundtrip(t *testing.T) {
 	require.NoError(t, rdr.Close())
 }
 
+func TestAlpFileRoundtrip(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		values []float64
+	}{
+		{
+			name:   "monetary",
+			values: []float64{1.23, 4.56, 7.89, 10.11, 12.13, 14.15, 16.17, 18.19},
+		},
+		{
+			name: "large_vector",
+			values: func() []float64 {
+				v := make([]float64, 2048)
+				for i := range v {
+					v[i] = 0.125 + float64(i)*0.25
+				}
+				return v
+			}(),
+		},
+		{
+			name:   "integers",
+			values: []float64{1, 2, 3, 100, 200, 300, 1000, 2000},
+		},
+		{
+			name:   "special_values",
+			values: []float64{0, math.Copysign(0, -1), 1.5, -1.5, math.Inf(1), math.Inf(-1), math.NaN()},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			props := parquet.NewWriterProperties(
+				parquet.WithEncoding(parquet.Encodings.ALP),
+				parquet.WithAlpEncoding(true),
+				parquet.WithDictionaryDefault(false),
+			)
+
+			field, err := schema.NewPrimitiveNode("value", parquet.Repetitions.Required, parquet.Types.Double, -1, -1)
+			require.NoError(t, err)
+
+			sc, err := schema.NewGroupNode("test", parquet.Repetitions.Required, schema.FieldList{field}, 0)
+			require.NoError(t, err)
+
+			sink := encoding.NewBufferWriter(0, memory.DefaultAllocator)
+			writer := file.NewParquetWriter(sink, sc, file.WithWriterProps(props))
+
+			rgw := writer.AppendRowGroup()
+			cw, err := rgw.NextColumn()
+			require.NoError(t, err)
+
+			f64Writer, ok := cw.(*file.Float64ColumnChunkWriter)
+			require.True(t, ok)
+
+			nVals, err := f64Writer.WriteBatch(tc.values, nil, nil)
+			require.NoError(t, err)
+			require.EqualValues(t, len(tc.values), nVals)
+
+			require.NoError(t, cw.Close())
+			require.NoError(t, rgw.Close())
+			require.NoError(t, writer.Close())
+
+			reader, err := file.NewParquetReader(bytes.NewReader(sink.Bytes()))
+			require.NoError(t, err)
+
+			require.Equal(t, 1, reader.NumRowGroups())
+			require.EqualValues(t, len(tc.values), reader.NumRows())
+
+			rgr := reader.RowGroup(0)
+			cr, err := rgr.Column(0)
+			require.NoError(t, err)
+
+			f64Reader, ok := cr.(*file.Float64ColumnChunkReader)
+			require.True(t, ok)
+
+			output := make([]float64, len(tc.values))
+			total, read, err := f64Reader.ReadBatch(int64(len(tc.values)), output, nil, nil)
+			require.NoError(t, err)
+			require.EqualValues(t, len(tc.values), total)
+			require.EqualValues(t, len(tc.values), read)
+
+			// Compare the bit patterns, so that a NaN or a negative zero has to come
+			// back exactly as it went in.
+			for i := range tc.values {
+				assert.Equal(t, math.Float64bits(tc.values[i]), math.Float64bits(output[i]),
+					"index %d: got %v (bits %016x), want %v (bits %016x)",
+					i, output[i], math.Float64bits(output[i]), tc.values[i], math.Float64bits(tc.values[i]))
+			}
+
+			require.NoError(t, reader.Close())
+		})
+	}
+}
+
+// A column whose values outgrow the data page size is written as several pages.
+// Each one carries its own ALP header, offset array and vectors, so a page that
+// repeated an earlier page's values would decode to the wrong numbers here.
+func TestAlpFileRoundtripManyPages(t *testing.T) {
+	const numValues = 40000
+
+	values := make([]float64, numValues)
+	for i := range values {
+		values[i] = float64(i) / 100
+	}
+
+	props := parquet.NewWriterProperties(
+		parquet.WithEncoding(parquet.Encodings.ALP),
+		parquet.WithAlpEncoding(true),
+		parquet.WithDictionaryDefault(false),
+		// Small enough that 1024-value vectors fill a page every few vectors.
+		parquet.WithDataPageSize(16*1024),
+	)
+
+	field, err := schema.NewPrimitiveNode("value", parquet.Repetitions.Required, parquet.Types.Double, -1, -1)
+	require.NoError(t, err)
+
+	sc, err := schema.NewGroupNode("test", parquet.Repetitions.Required, schema.FieldList{field}, 0)
+	require.NoError(t, err)
+
+	sink := encoding.NewBufferWriter(0, memory.DefaultAllocator)
+	writer := file.NewParquetWriter(sink, sc, file.WithWriterProps(props))
+
+	rgw := writer.AppendRowGroup()
+	cw, err := rgw.NextColumn()
+	require.NoError(t, err)
+
+	f64Writer, ok := cw.(*file.Float64ColumnChunkWriter)
+	require.True(t, ok)
+
+	nVals, err := f64Writer.WriteBatch(values, nil, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, numValues, nVals)
+
+	require.NoError(t, cw.Close())
+	require.NoError(t, rgw.Close())
+	require.NoError(t, writer.Close())
+
+	reader, err := file.NewParquetReader(bytes.NewReader(sink.Bytes()))
+	require.NoError(t, err)
+	defer reader.Close()
+
+	rgr := reader.RowGroup(0)
+	cr, err := rgr.Column(0)
+	require.NoError(t, err)
+
+	f64Reader, ok := cr.(*file.Float64ColumnChunkReader)
+	require.True(t, ok)
+
+	// Read in batches that do not divide the vector size, so a batch boundary
+	// lands inside a vector and inside a page.
+	output := make([]float64, numValues)
+	for read := 0; read < numValues; {
+		_, n, err := f64Reader.ReadBatch(700, output[read:], nil, nil)
+		require.NoError(t, err)
+		require.NotZero(t, n, "read stalled at %d of %d values", read, numValues)
+		read += int(n)
+	}
+	require.Equal(t, values, output)
+}
+
+func TestAlpFloat32FileRoundtrip(t *testing.T) {
+	values := []float32{1.23, 4.56, 7.89, 0, -1.5, 100.0, 0.001}
+
+	props := parquet.NewWriterProperties(
+		parquet.WithEncoding(parquet.Encodings.ALP),
+		parquet.WithAlpEncoding(true),
+		parquet.WithDictionaryDefault(false),
+	)
+
+	field, err := schema.NewPrimitiveNode("value", parquet.Repetitions.Required, parquet.Types.Float, -1, -1)
+	require.NoError(t, err)
+
+	sc, err := schema.NewGroupNode("test", parquet.Repetitions.Required, schema.FieldList{field}, 0)
+	require.NoError(t, err)
+
+	sink := encoding.NewBufferWriter(0, memory.DefaultAllocator)
+	writer := file.NewParquetWriter(sink, sc, file.WithWriterProps(props))
+
+	rgw := writer.AppendRowGroup()
+	cw, err := rgw.NextColumn()
+	require.NoError(t, err)
+
+	f32Writer, ok := cw.(*file.Float32ColumnChunkWriter)
+	require.True(t, ok)
+
+	nVals, err := f32Writer.WriteBatch(values, nil, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, len(values), nVals)
+
+	require.NoError(t, cw.Close())
+	require.NoError(t, rgw.Close())
+	require.NoError(t, writer.Close())
+
+	reader, err := file.NewParquetReader(bytes.NewReader(sink.Bytes()))
+	require.NoError(t, err)
+
+	require.Equal(t, 1, reader.NumRowGroups())
+	require.EqualValues(t, len(values), reader.NumRows())
+
+	rgr := reader.RowGroup(0)
+	cr, err := rgr.Column(0)
+	require.NoError(t, err)
+
+	f32Reader, ok := cr.(*file.Float32ColumnChunkReader)
+	require.True(t, ok)
+
+	output := make([]float32, len(values))
+	total, read, err := f32Reader.ReadBatch(int64(len(values)), output, nil, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, len(values), total)
+	require.EqualValues(t, len(values), read)
+
+	for i := range values {
+		assert.Equal(t, math.Float32bits(values[i]), math.Float32bits(output[i]),
+			"index %d: got %v (bits %08x), want %v (bits %08x)",
+			i, output[i], math.Float32bits(output[i]), values[i], math.Float32bits(values[i]))
+	}
+
+	require.NoError(t, reader.Close())
+}
+
 func TestLZ4RawFileRoundtrip(t *testing.T) {
 	input := []int64{
 		-1, 0, 1, 2, 3, 4, 5, 123456789, -123456789,

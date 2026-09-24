@@ -499,6 +499,14 @@ func (c *columnChunkReader) initDataDecoder(page DataPage, lvlByteLen int64) err
 			format.Encoding_BYTE_STREAM_SPLIT:
 			c.curDecoder = c.decoderTraits.Decoder(parquet.Encoding(encoding), c.descr, false, c.mem)
 			c.decoders[encoding] = c.curDecoder
+		case format.Encoding_ALP:
+			// Reject before building a decoder: the traits for a non-float type
+			// have no ALP case and panic on one.
+			if pt := c.descr.PhysicalType(); pt != parquet.Types.Float && pt != parquet.Types.Double {
+				return fmt.Errorf("parquet: only float and double support ALP encoding, got %s", pt)
+			}
+			c.curDecoder = c.decoderTraits.Decoder(parquet.Encoding(encoding), c.descr, false, c.mem)
+			c.decoders[encoding] = c.curDecoder
 		case format.Encoding_RLE_DICTIONARY:
 			return errors.New("parquet: dictionary page must be before data page")
 		default:

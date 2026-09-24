@@ -358,6 +358,9 @@ func (p *PrimitiveWriterTestSuite) buildWriter(_ int64, columnProps parquet.Colu
 	} else {
 		opts = append(opts, parquet.WithDictionaryDefault(false), parquet.WithEncoding(columnProps.Encoding))
 	}
+	if columnProps.Encoding == parquet.Encodings.ALP {
+		opts = append(opts, parquet.WithAlpEncoding(true))
+	}
 	opts = append(opts, parquet.WithMaxStatsSize(columnProps.MaxStatsSize), parquet.WithStats(columnProps.StatsEnabled))
 	p.props = parquet.NewWriterProperties(opts...)
 
@@ -568,6 +571,15 @@ func (p *PrimitiveWriterTestSuite) TestRequiredByteStreamSplit() {
 		p.testRequiredWithEncoding(parquet.Encodings.ByteStreamSplit)
 	default:
 		p.Panics(func() { p.testRequiredWithEncoding(parquet.Encodings.ByteStreamSplit) })
+	}
+}
+
+func (p *PrimitiveWriterTestSuite) TestRequiredAlp() {
+	switch p.Typ {
+	case reflect.TypeOf(float32(0)), reflect.TypeOf(float64(0)):
+		p.testRequiredWithEncoding(parquet.Encodings.ALP)
+	default:
+		p.Panics(func() { p.testRequiredWithEncoding(parquet.Encodings.ALP) })
 	}
 }
 
