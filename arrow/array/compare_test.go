@@ -149,6 +149,49 @@ func TestArraySliceEqualFullRangeMismatchedConcreteTypes(t *testing.T) {
 	))
 }
 
+func TestArraySliceApproxEqualFullRange(t *testing.T) {
+	leftBuilder := array.NewFloat64Builder(memory.DefaultAllocator)
+	leftBuilder.AppendValues([]float64{1, 2, 3}, nil)
+	left := leftBuilder.NewFloat64Array()
+	leftBuilder.Release()
+	defer left.Release()
+
+	rightBuilder := array.NewFloat64Builder(memory.DefaultAllocator)
+	rightBuilder.AppendValues([]float64{1.000001, 2, 3}, nil)
+	right := rightBuilder.NewFloat64Array()
+	rightBuilder.Release()
+	defer right.Release()
+
+	assert.True(t, array.SliceApproxEqual(
+		left, 0, int64(left.Len()),
+		right, 0, int64(right.Len()),
+		array.WithAbsTolerance(1e-5),
+	))
+	assert.False(t, array.SliceApproxEqual(
+		left, 0, int64(left.Len()),
+		right, 0, int64(right.Len()),
+		array.WithAbsTolerance(1e-7),
+	))
+}
+
+func TestArraySliceApproxEqualFullRangeGenericArray(t *testing.T) {
+	builder := array.NewInt64Builder(memory.DefaultAllocator)
+	builder.AppendValues([]int64{1, 2, 3}, nil)
+	arr := builder.NewInt64Array()
+	builder.Release()
+	defer arr.Release()
+
+	wrapped := arrayWrapper{Array: arr}
+	assert.True(t, array.SliceApproxEqual(
+		wrapped, 0, int64(wrapped.Len()),
+		wrapped, 0, int64(wrapped.Len()),
+	))
+	assert.True(t, array.SliceApproxEqual(
+		arr, 0, int64(arr.Len()),
+		wrapped, 0, int64(wrapped.Len()),
+	))
+}
+
 func TestListEqualByValidRuns(t *testing.T) {
 	for _, dt := range []arrow.DataType{
 		arrow.ListOf(arrow.PrimitiveTypes.Int32),
@@ -197,6 +240,7 @@ func TestListEqualByValidRuns(t *testing.T) {
 					left := makeListEqualTestArray(mem, dt, tc.left, tc.valid)
 					right := makeListEqualTestArray(mem, dt, tc.right, tc.valid)
 					assert.Equal(t, tc.want, array.Equal(left, right))
+					assert.Equal(t, tc.want, array.ApproxEqual(left, right))
 					left.Release()
 					right.Release()
 					mem.AssertSize(t, 0)
@@ -212,6 +256,7 @@ func TestListEqualByValidRuns(t *testing.T) {
 				leftSlice := array.NewSlice(left, 1, 4)
 				rightSlice := array.NewSlice(right, 2, 5)
 				assert.True(t, array.Equal(leftSlice, rightSlice))
+				assert.True(t, array.ApproxEqual(leftSlice, rightSlice))
 				leftSlice.Release()
 				rightSlice.Release()
 				left.Release()
@@ -231,10 +276,12 @@ func TestFixedSizeListEqualByValidRuns(t *testing.T) {
 	right := makeListEqualTestArray(mem, dt,
 		[][]int32{{1, 2}, {100, 101}, {3, 4}}, []bool{true, false, true})
 	assert.True(t, array.Equal(left, right))
+	assert.True(t, array.ApproxEqual(left, right))
 
 	different := makeListEqualTestArray(mem, dt,
 		[][]int32{{1, 2}, {100, 101}, {3, 5}}, []bool{true, false, true})
 	assert.False(t, array.Equal(left, different))
+	assert.False(t, array.ApproxEqual(left, different))
 
 	leftWithPrefix := makeListEqualTestArray(mem, dt,
 		[][]int32{{9, 9}, {1, 2}, {99, 98}, {3, 4}}, []bool{true, true, false, true})
@@ -243,6 +290,7 @@ func TestFixedSizeListEqualByValidRuns(t *testing.T) {
 	leftSlice := array.NewSlice(leftWithPrefix, 1, 4)
 	rightSlice := array.NewSlice(rightWithPrefix, 2, 5)
 	assert.True(t, array.Equal(leftSlice, rightSlice))
+	assert.True(t, array.ApproxEqual(leftSlice, rightSlice))
 
 	left.Release()
 	right.Release()
@@ -268,7 +316,9 @@ func TestListEqualWithEmptyValidityBuffer(t *testing.T) {
 
 			assert.NotNil(t, emptyValidity.NullBitmapBytes())
 			assert.True(t, array.Equal(emptyValidity, valid))
+			assert.True(t, array.ApproxEqual(emptyValidity, valid))
 			assert.True(t, array.Equal(valid, emptyValidity))
+			assert.True(t, array.ApproxEqual(valid, emptyValidity))
 
 			emptyValidity.Release()
 			valid.Release()
