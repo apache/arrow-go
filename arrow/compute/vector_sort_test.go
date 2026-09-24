@@ -697,6 +697,96 @@ func TestSortRecordBatch(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, arrow.ErrInvalid)
 	})
+
+	t.Run("NestedStructColumnPath", func(t *testing.T) {
+		nestedType := arrow.StructOf(
+			arrow.Field{Name: "id", Type: arrow.PrimitiveTypes.Int32},
+			arrow.Field{Name: "info", Type: arrow.StructOf(
+				arrow.Field{Name: "rank", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			), Nullable: true},
+		)
+		nestedSchema := arrow.NewSchema([]arrow.Field{{Name: "s", Type: nestedType}}, nil)
+
+		bldr := array.NewStructBuilder(mem, nestedType)
+		defer bldr.Release()
+		idBldr := bldr.FieldBuilder(0).(*array.Int32Builder)
+		infoBldr := bldr.FieldBuilder(1).(*array.StructBuilder)
+		rankBldr := infoBldr.FieldBuilder(0).(*array.Int32Builder)
+
+		// Row 0: id=1, info={rank:30}
+		bldr.Append(true)
+		idBldr.Append(1)
+		infoBldr.Append(true)
+		rankBldr.Append(30)
+
+		// Row 1: id=2, info=null. StructBuilder.Append(false) auto-appends
+		// null to info's children (rank), so rankBldr is not touched here;
+		// rank's underlying storage slot still ends up non-null-looking at
+		// the physical level, which is exactly what parent-validity masking
+		// must override.
+		bldr.Append(true)
+		idBldr.Append(2)
+		infoBldr.Append(false)
+
+		// Row 2: id=3, info={rank:10}
+		bldr.Append(true)
+		idBldr.Append(3)
+		infoBldr.Append(true)
+		rankBldr.Append(10)
+
+		structArr := bldr.NewArray()
+		defer structArr.Release()
+
+		batch := array.NewRecordBatch(nestedSchema, []arrow.Array{structArr}, 3)
+		defer batch.Release()
+
+		// Sort by s.info.rank ascending, nulls last: expect id order 3,1,2.
+		keys := []kernels.SortKey{
+			{ColumnPath: []int{0, 1, 0}, Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+		}
+
+		result, err := compute.SortRecordBatch(ctx, batch, keys)
+		require.NoError(t, err)
+		defer result.Release()
+
+		resultStruct := result.Column(0).(*array.Struct)
+		resultID := resultStruct.Field(0).(*array.Int32)
+
+		require.Equal(t, 3, int(result.NumRows()))
+		assert.Equal(t, []int32{3, 1, 2}, []int32{resultID.Value(0), resultID.Value(1), resultID.Value(2)})
+	})
+
+	t.Run("NestedColumnPathNonStructError", func(t *testing.T) {
+		bldr1 := array.NewStringBuilder(mem)
+		defer bldr1.Release()
+		bldr1.AppendValues([]string{"A"}, nil)
+		col1 := bldr1.NewArray()
+		defer col1.Release()
+
+		bldr2 := array.NewInt32Builder(mem)
+		defer bldr2.Release()
+		bldr2.AppendValues([]int32{1}, nil)
+		col2 := bldr2.NewArray()
+		defer col2.Release()
+
+		bldr3 := array.NewInt32Builder(mem)
+		defer bldr3.Release()
+		bldr3.AppendValues([]int32{1}, nil)
+		col3 := bldr3.NewArray()
+		defer col3.Release()
+
+		batch := array.NewRecordBatch(schema, []arrow.Array{col1, col2, col3}, 1)
+		defer batch.Release()
+
+		// column 1 (Int32) is not a struct, so descending into it is invalid.
+		keys := []kernels.SortKey{
+			{ColumnPath: []int{1, 0}, Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+		}
+
+		_, err := compute.SortRecordBatch(ctx, batch, keys)
+		require.Error(t, err)
+		require.ErrorIs(t, err, arrow.ErrInvalid)
+	})
 }
 
 func TestSortTable(t *testing.T) {
@@ -827,6 +917,71 @@ func TestSortTable(t *testing.T) {
 			assert.Equal(t, expectedPriority[i], priorityData.Value(i), "priority at %d", i)
 			assert.Equal(t, expectedId[i], idData.Value(i), "id at %d", i)
 		}
+	})
+
+	t.Run("NestedStructColumnPathMultiChunk", func(t *testing.T) {
+		nestedType := arrow.StructOf(
+			arrow.Field{Name: "id", Type: arrow.PrimitiveTypes.Int32},
+			arrow.Field{Name: "info", Type: arrow.StructOf(
+				arrow.Field{Name: "rank", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			), Nullable: true},
+		)
+		nestedSchema := arrow.NewSchema([]arrow.Field{{Name: "s", Type: nestedType}}, nil)
+
+		newChunk := func(ids []int32, valid []bool, ranks []int32) arrow.Array {
+			bldr := array.NewStructBuilder(mem, nestedType)
+			defer bldr.Release()
+			idBldr := bldr.FieldBuilder(0).(*array.Int32Builder)
+			infoBldr := bldr.FieldBuilder(1).(*array.StructBuilder)
+			rankBldr := infoBldr.FieldBuilder(0).(*array.Int32Builder)
+			for i, id := range ids {
+				bldr.Append(true)
+				idBldr.Append(id)
+				if valid[i] {
+					infoBldr.Append(true)
+					rankBldr.Append(ranks[i])
+				} else {
+					infoBldr.Append(false)
+				}
+			}
+			return bldr.NewArray()
+		}
+
+		// Two chunks: chunk0 has ids 1,2 (rank 30, null); chunk1 has id 3 (rank 10).
+		chunk0 := newChunk([]int32{1, 2}, []bool{true, false}, []int32{30, 0})
+		defer chunk0.Release()
+		chunk1 := newChunk([]int32{3}, []bool{true}, []int32{10})
+		defer chunk1.Release()
+
+		chunked := arrow.NewChunked(nestedType, []arrow.Array{chunk0, chunk1})
+		defer chunked.Release()
+
+		tbl := array.NewTable(nestedSchema, []arrow.Column{
+			*arrow.NewColumn(nestedSchema.Field(0), chunked),
+		}, 3)
+		defer tbl.Release()
+
+		// Sort by s.info.rank ascending, nulls last: expect id order 3,1,2.
+		keys := []kernels.SortKey{
+			{ColumnPath: []int{0, 1, 0}, Order: kernels.Ascending, NullPlacement: kernels.NullsAtEnd},
+		}
+
+		result, err := compute.SortTable(ctx, tbl, keys)
+		require.NoError(t, err)
+		defer result.Release()
+
+		require.Equal(t, 3, int(result.NumRows()))
+
+		var gotIDs []int32
+		col := result.Column(0).Data()
+		for _, chunk := range col.Chunks() {
+			structArr := chunk.(*array.Struct)
+			idArr := structArr.Field(0).(*array.Int32)
+			for i := 0; i < idArr.Len(); i++ {
+				gotIDs = append(gotIDs, idArr.Value(i))
+			}
+		}
+		assert.Equal(t, []int32{3, 1, 2}, gotIDs)
 	})
 }
 
