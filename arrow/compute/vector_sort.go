@@ -23,8 +23,11 @@ import (
 	"fmt"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/compute/internal/kernels"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
 var (
@@ -106,6 +109,97 @@ func DefaultSortKey() SortKey {
 	}
 }
 
+// maskedStructField returns the specified field index with a masked validity bitmap.
+//
+//   - A null struct row will return null regardless of any child values.
+//   - The returned array is a new array that callers must [Release].
+//   - This mirrors the unexported array.(*Struct).newStructFieldWithParentValidityMask.
+func maskedStructField(st *array.Struct, fieldIndex int) arrow.Array {
+	field := st.Field(fieldIndex)
+
+	// short circuit if there are no nulls in the array
+	if st.NullN() == 0 {
+		field.Retain()
+		return field
+	}
+
+	nullBitmapBytes := field.NullBitmapBytes()
+	fieldOffset := field.Data().Offset()
+
+	var maskedNullBitmapBytes []byte
+	if len(nullBitmapBytes) == 0 {
+		fieldEnd := int64(fieldOffset + field.Len())
+		maskedNullBitmapBytes = make([]byte, int(bitutil.BytesForBits(fieldEnd)))
+		bitutil.SetBitsTo(maskedNullBitmapBytes, 0, fieldEnd, true)
+	} else {
+		maskedNullBitmapBytes = make([]byte, len(nullBitmapBytes))
+		copy(maskedNullBitmapBytes, nullBitmapBytes)
+	}
+	for i := 0; i < field.Len(); i++ {
+		if st.IsNull(i) {
+			bitutil.ClearBit(maskedNullBitmapBytes, fieldOffset+i)
+		}
+	}
+
+	// Normalize to a zero offset so maskedNullBitmapBytes (indexed from
+	// fieldOffset above) lines up with the sliced buffers.
+	sliced := array.NewSliceData(field.Data(), 0, int64(field.Len()))
+	defer sliced.Release()
+
+	origBufs := sliced.Buffers()
+	bufs := make([]*memory.Buffer, len(origBufs))
+	copy(bufs, origBufs)
+	bufs[0] = memory.NewBufferBytes(maskedNullBitmapBytes)
+
+	data := array.NewData(sliced.DataType(), sliced.Len(), bufs, sliced.Children(), array.UnknownNullCount, 0)
+	defer data.Release()
+
+	return array.MakeFromData(data)
+}
+
+// resolveSortColumnPath walks path into col, descending through struct
+// fields. path[0] has already been consumed to select col itself (the
+// top-level column); remaining elements each select a child field of the
+// preceding struct. Every array returned for a non-empty path (including
+// intermediate ones released internally) is a new reference obtained via
+// maskedStructField, so a null ancestor struct correctly forces
+// its descendants null for sorting purposes.
+func resolveSortColumnPath(col arrow.Array, path []int) (arrow.Array, error) {
+	if len(path) == 0 {
+		col.Retain()
+		return col, nil
+	}
+
+	st, ok := col.(*array.Struct)
+	if !ok {
+		return nil, fmt.Errorf("%w: sort key column path element requires a struct column, got %s",
+			arrow.ErrInvalid, col.DataType())
+	}
+	idx := path[0]
+	if idx < 0 || idx >= st.NumField() {
+		return nil, fmt.Errorf("%w: sort key struct field index %d out of range", arrow.ErrIndex, idx)
+	}
+
+	child := maskedStructField(st, idx)
+	defer child.Release()
+
+	return resolveSortColumnPath(child, path[1:])
+}
+
+// resolveSortColumn returns the array a sort key's ColumnIndex/ColumnPath
+// addresses within col (the top-level column already selected by
+// ColumnIndex or ColumnPath[0]), and whether the caller must Release it.
+func resolveSortColumn(col arrow.Array, path []int) (arrow.Array, bool, error) {
+	if len(path) <= 1 {
+		return col, false, nil
+	}
+	resolved, err := resolveSortColumnPath(col, path[1:])
+	if err != nil {
+		return nil, false, err
+	}
+	return resolved, true, nil
+}
+
 // sortIndicesImpl adapts any supported Datum to kernels.SortIndices (internal/kernels), which
 // implements a stable lexicographic sort over []*arrow.Chunked (one logical column per sort key,
 // same row count).
@@ -157,10 +251,20 @@ func sortIndicesImpl(ctx context.Context, opts FunctionOptions, input Datum) (Da
 		sortColumns = make([]*arrow.Chunked, len(inputSortKeys))
 		needsRelease = make([]bool, len(inputSortKeys))
 		for i, key := range inputSortKeys {
-			if key.ColumnIndex < 0 || int64(key.ColumnIndex) >= batch.NumCols() {
-				return nil, fmt.Errorf("%w: sort key %d has invalid column index %d", arrow.ErrInvalid, i, key.ColumnIndex)
+			topIdx := key.ColumnIndex
+			if len(key.ColumnPath) > 0 {
+				topIdx = key.ColumnPath[0]
 			}
-			col := batch.Column(key.ColumnIndex)
+			if topIdx < 0 || int64(topIdx) >= batch.NumCols() {
+				return nil, fmt.Errorf("%w: sort key %d has invalid column index %d", arrow.ErrInvalid, i, topIdx)
+			}
+			col, ownsCol, err := resolveSortColumn(batch.Column(topIdx), key.ColumnPath)
+			if err != nil {
+				return nil, fmt.Errorf("sort key %d: %w", i, err)
+			}
+			if ownsCol {
+				defer col.Release()
+			}
 			// One batch column as a single-chunk Chunked per key; we own these Chunked values.
 			sortColumns[i] = arrow.NewChunked(col.DataType(), []arrow.Array{col})
 			needsRelease[i] = true
@@ -172,12 +276,37 @@ func sortIndicesImpl(ctx context.Context, opts FunctionOptions, input Datum) (Da
 		sortColumns = make([]*arrow.Chunked, len(inputSortKeys))
 		needsRelease = make([]bool, len(inputSortKeys))
 		for i, key := range inputSortKeys {
-			if key.ColumnIndex < 0 || int64(key.ColumnIndex) >= tbl.NumCols() {
-				return nil, fmt.Errorf("%w: sort key %d has invalid column index %d", arrow.ErrInvalid, i, key.ColumnIndex)
+			topIdx := key.ColumnIndex
+			if len(key.ColumnPath) > 0 {
+				topIdx = key.ColumnPath[0]
 			}
-			// Table columns are already Chunked; borrow from the table (do not Release).
-			sortColumns[i] = tbl.Column(key.ColumnIndex).Data()
-			needsRelease[i] = false
+			if topIdx < 0 || int64(topIdx) >= tbl.NumCols() {
+				return nil, fmt.Errorf("%w: sort key %d has invalid column index %d", arrow.ErrInvalid, i, topIdx)
+			}
+			chunked := tbl.Column(topIdx).Data()
+			if len(key.ColumnPath) <= 1 {
+				// Table columns are already Chunked; borrow from the table (do not Release).
+				sortColumns[i] = chunked
+				needsRelease[i] = false
+				continue
+			}
+
+			resolvedChunks := make([]arrow.Array, len(chunked.Chunks()))
+			var leafType arrow.DataType
+			for c, chunk := range chunked.Chunks() {
+				resolved, err := resolveSortColumnPath(chunk, key.ColumnPath[1:])
+				if err != nil {
+					return nil, fmt.Errorf("sort key %d: %w", i, err)
+				}
+				defer resolved.Release()
+				resolvedChunks[c] = resolved
+				leafType = resolved.DataType()
+			}
+			if leafType == nil {
+				leafType = chunked.DataType()
+			}
+			sortColumns[i] = arrow.NewChunked(leafType, resolvedChunks)
+			needsRelease[i] = true
 		}
 
 	default:
