@@ -258,7 +258,7 @@ func (d *DeltaByteArrayDecoder) Discard(n int) (int, error) {
 		if len(d.prefixLengths) == 0 || d.prefixLengths[0] != 0 {
 			return 0, errors.New("parquet: first delta byte array prefix length must be zero")
 		}
-		suffix := d.DeltaLengthByteArrayDecoder.decodeOne()
+		suffix := d.decodeOne()
 		d.setDiscardLastValue(nil, suffix)
 		d.prefixLengths = d.prefixLengths[1:]
 		remaining--
@@ -275,7 +275,7 @@ func (d *DeltaByteArrayDecoder) Discard(n int) (int, error) {
 		}
 		prefix := d.lastVal[:prefixLen:prefixLen]
 
-		suffix := d.DeltaLengthByteArrayDecoder.decodeOne()
+		suffix := d.decodeOne()
 		if len(suffix) == 0 {
 			d.lastVal = prefix
 		} else {
