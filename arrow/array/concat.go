@@ -154,6 +154,12 @@ func concatBuffers(bufs []*memory.Buffer, mem memory.Allocator) *memory.Buffer {
 
 func concatFixedWidthBuffers(data []arrow.ArrayData, idx, byteWidth, length int, mem memory.Allocator) *memory.Buffer {
 	out := memory.NewResizableBuffer(mem)
+	success := false
+	defer func() {
+		if !success {
+			out.Release()
+		}
+	}()
 	out.Resize(length * byteWidth)
 	dst := out.Bytes()
 	for _, d := range data {
@@ -167,6 +173,7 @@ func concatFixedWidthBuffers(data []arrow.ArrayData, idx, byteWidth, length int,
 		copy(dst, buf.Bytes()[begin:begin+nbytes])
 		dst = dst[nbytes:]
 	}
+	success = true
 	return out
 }
 
@@ -611,8 +618,7 @@ func concatListView(data []arrow.ArrayData, offsetType arrow.FixedWidthDataType,
 	}
 
 	// Concatenate the sizes
-	sizeBuffers := gatherBuffersFixedWidthType(data, 2, offsetType)
-	sizeBuffer := concatBuffers(sizeBuffers, mem)
+	sizeBuffer := concatFixedWidthBuffers(data, 2, offsetType.Bytes(), out.length, mem)
 
 	out.childData = []arrow.ArrayData{values}
 	out.buffers[1] = offsetBuffer
@@ -720,7 +726,7 @@ func concat(data []arrow.ArrayData, mem memory.Allocator) (arr arrow.ArrayData, 
 			}
 		}
 
-		out.buffers[1] = concatBuffers(gatherFixedBuffers(data, 1, arrow.ViewHeaderSizeBytes), mem)
+		out.buffers[1] = concatFixedWidthBuffers(data, 1, arrow.ViewHeaderSizeBytes, out.length, mem)
 
 		var (
 			s                  = arrow.ViewHeaderTraits.CastFromBytes(out.buffers[1].Bytes())
