@@ -184,6 +184,11 @@ type ScalarAggKernel struct {
 	// for merging partitions in the logical order of the input. Kernels
 	// whose result does not depend on the order of the input leave this
 	// false.
+	//
+	// The executor in this package consumes the whole input into a single
+	// state, in order, so the flag does not change what it does; it is a
+	// contract for MergeAll and for callers that partition the input
+	// themselves.
 	Ordered bool
 }
 
@@ -250,6 +255,11 @@ var _ AggKernel = (*ScalarAggKernel)(nil)
 // not the merge succeeded; on an error the first state is cleaned up as well
 // and the returned state is nil, so that the caller never has to clean up a
 // state MergeAll was given.
+//
+// With no states there is nothing to merge or to finalize, and MergeAll
+// returns (nil, nil). A caller that ended up with zero partitions aggregates
+// the empty input the way the executor does: create one state with the init
+// function and finalize it.
 func MergeAll(kernel AggKernel, ctx *KernelCtx, states []KernelState) (KernelState, error) {
 	if len(states) == 0 {
 		return nil, nil
