@@ -19,6 +19,7 @@ package encoding
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
@@ -162,9 +163,10 @@ func (enc *DeltaByteArrayEncoder) FlushValues() (Buffer, error) {
 type DeltaByteArrayDecoder struct {
 	*DeltaLengthByteArrayDecoder
 
-	prefixLengths []int32
-	prefixScratch []int32
-	lastVal       parquet.ByteArray
+	prefixLengths  []int32
+	prefixScratch  []int32
+	lastVal        parquet.ByteArray
+	discardScratch []byte
 }
 
 // Type returns the underlying physical type this decoder operates on, in this case ByteArrays only
@@ -173,6 +175,29 @@ func (DeltaByteArrayDecoder) Type() parquet.Type {
 }
 
 func (d *DeltaByteArrayDecoder) Allocator() memory.Allocator { return d.mem }
+
+func (d *DeltaByteArrayDecoder) setDiscardLastValue(prefix, suffix parquet.ByteArray) {
+	valueLen := len(prefix) + len(suffix)
+	if valueLen == 0 {
+		if d.discardScratch == nil {
+			d.discardScratch = make([]byte, 0)
+		} else {
+			d.discardScratch = d.discardScratch[:0]
+		}
+		d.lastVal = d.discardScratch
+		return
+	}
+
+	d.discardScratch = slices.Grow(d.discardScratch[:0], valueLen)
+	d.discardScratch = d.discardScratch[:valueLen]
+	copy(d.discardScratch, prefix)
+	copy(d.discardScratch[len(prefix):], suffix)
+
+	// Discard roots reconstructed values at the start of discardScratch. Its
+	// empty-suffix path only narrows lastVal, preserving that base pointer.
+	// Decode relies on this to detect aliases before later scratch reuse.
+	d.lastVal = d.discardScratch
+}
 
 // SetData expects the passed in data to be the prefix lengths, followed by the
 // blocks of suffix data in order to initialize the decoder.
@@ -229,15 +254,12 @@ func (d *DeltaByteArrayDecoder) Discard(n int) (int, error) {
 	}
 
 	remaining := n
-	tmp := make([]parquet.ByteArray, 1)
 	if d.lastVal == nil {
 		if len(d.prefixLengths) == 0 || d.prefixLengths[0] != 0 {
 			return 0, errors.New("parquet: first delta byte array prefix length must be zero")
 		}
-		if _, err := d.DeltaLengthByteArrayDecoder.Decode(tmp); err != nil {
-			return 0, err
-		}
-		d.lastVal = tmp[0]
+		suffix := d.decodeOne()
+		d.setDiscardLastValue(nil, suffix)
 		d.prefixLengths = d.prefixLengths[1:]
 		remaining--
 	}
@@ -253,16 +275,11 @@ func (d *DeltaByteArrayDecoder) Discard(n int) (int, error) {
 		}
 		prefix := d.lastVal[:prefixLen:prefixLen]
 
-		if _, err := d.DeltaLengthByteArrayDecoder.Decode(tmp); err != nil {
-			return n - remaining, err
-		}
-
-		if len(tmp[0]) == 0 {
+		suffix := d.decodeOne()
+		if len(suffix) == 0 {
 			d.lastVal = prefix
 		} else {
-			d.lastVal = make([]byte, int(prefixLen)+len(tmp[0]))
-			copy(d.lastVal, prefix)
-			copy(d.lastVal[prefixLen:], tmp[0])
+			d.setDiscardLastValue(prefix, suffix)
 		}
 		remaining--
 	}
@@ -370,6 +387,12 @@ func (d *DeltaByteArrayDecoder) Decode(out []parquet.ByteArray) (int, error) {
 
 		prefix := d.lastVal[:prefixLen:prefixLen]
 		if len(out[0]) == 0 {
+			// Discard can leave lastVal backed by reusable discardScratch. Returning
+			// that prefix would let a later Discard overwrite data the caller holds.
+			// setDiscardLastValue keeps lastVal at discardScratch's base pointer.
+			if len(prefix) > 0 && len(d.discardScratch) > 0 && &prefix[0] == &d.discardScratch[0] {
+				prefix = slices.Clone(prefix)
+			}
 			d.lastVal = prefix
 			out[0], out = prefix, out[1:]
 			continue

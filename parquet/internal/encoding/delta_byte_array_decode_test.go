@@ -17,6 +17,7 @@
 package encoding
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"testing"
@@ -90,6 +91,68 @@ func TestDeltaByteArrayDecoderDecodesAllEmptyValues(t *testing.T) {
 	for i, value := range decoded {
 		require.Empty(t, value, "value %d", i)
 	}
+}
+
+func TestDeltaByteArrayDecoderDiscardsAllEmptyValues(t *testing.T) {
+	values := []string{"", "", ""}
+	data := encodeDeltaByteArrayPage(t, values)
+	dec := NewDecoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray,
+		nil, memory.DefaultAllocator).(ByteArrayDecoder)
+	require.NoError(t, dec.SetData(len(values), data))
+
+	discarded, err := dec.Discard(1)
+	require.NoError(t, err)
+	require.Equal(t, 1, discarded)
+
+	discarded, err = dec.Discard(2)
+	require.NoError(t, err)
+	require.Equal(t, 2, discarded)
+}
+
+func TestDeltaByteArrayDecoderDiscardCopiesFirstValue(t *testing.T) {
+	values := []string{"first-value", "first-value", "first-value/final"}
+	data := encodeDeltaByteArrayPage(t, values)
+	dec := NewDecoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray,
+		nil, memory.DefaultAllocator).(ByteArrayDecoder)
+	require.NoError(t, dec.SetData(len(values), data))
+
+	discarded, err := dec.Discard(2)
+	require.NoError(t, err)
+	require.Equal(t, 2, discarded)
+
+	firstValueOffset := bytes.Index(data, []byte(values[0]))
+	require.NotEqual(t, -1, firstValueOffset)
+	copy(data[firstValueOffset:firstValueOffset+len(values[0])], strings.Repeat("x", len(values[0])))
+
+	out := make([]parquet.ByteArray, 1)
+	decoded, err := dec.Decode(out)
+	require.NoError(t, err)
+	require.Equal(t, 1, decoded)
+	require.Equal(t, values[2], string(out[0]))
+}
+
+func TestDeltaByteArrayDecoderReusesDiscardScratch(t *testing.T) {
+	firstValues := []string{"prefix/000", "prefix/001", "prefix/002", "prefix/003"}
+	firstData := encodeDeltaByteArrayPage(t, firstValues)
+	dec := NewDecoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray,
+		nil, memory.DefaultAllocator).(*DeltaByteArrayDecoder)
+	require.NoError(t, dec.SetData(len(firstValues), firstData))
+
+	discarded, err := dec.Discard(len(firstValues))
+	require.NoError(t, err)
+	require.Equal(t, len(firstValues), discarded)
+	require.NotEmpty(t, dec.discardScratch)
+	scratchStart := &dec.discardScratch[0]
+	scratchCap := cap(dec.discardScratch)
+
+	secondValues := []string{"prefix/100", "prefix/101"}
+	secondData := encodeDeltaByteArrayPage(t, secondValues)
+	require.NoError(t, dec.SetData(len(secondValues), secondData))
+	discarded, err = dec.Discard(len(secondValues))
+	require.NoError(t, err)
+	require.Equal(t, len(secondValues), discarded)
+	require.Equal(t, scratchCap, cap(dec.discardScratch))
+	require.Equal(t, scratchStart, &dec.discardScratch[0])
 }
 
 func TestDeltaByteArrayDecoderReusesValuesWithoutSuffixes(t *testing.T) {

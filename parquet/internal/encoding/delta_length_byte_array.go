@@ -165,6 +165,16 @@ func (d *DeltaLengthByteArrayDecoder) SetData(nvalues int, data []byte) error {
 	return d.decoder.SetData(len(d.lengths), payload)
 }
 
+// decodeOne decodes one value. The caller must ensure d.nvals > 0.
+func (d *DeltaLengthByteArrayDecoder) decodeOne() parquet.ByteArray {
+	length := d.lengths[0]
+	value := d.data[:length:length]
+	d.data = d.data[length:]
+	d.nvals--
+	d.lengths = d.lengths[1:]
+	return value
+}
+
 func (d *DeltaLengthByteArrayDecoder) Discard(n int) (int, error) {
 	n = min(n, d.nvals)
 	for i := 0; i < n; i++ {
@@ -180,11 +190,8 @@ func (d *DeltaLengthByteArrayDecoder) Discard(n int) (int, error) {
 func (d *DeltaLengthByteArrayDecoder) Decode(out []parquet.ByteArray) (int, error) {
 	max := utils.Min(len(out), d.nvals)
 	for i := 0; i < max; i++ {
-		out[i] = d.data[:d.lengths[i]:d.lengths[i]]
-		d.data = d.data[d.lengths[i]:]
+		out[i] = d.decodeOne()
 	}
-	d.nvals -= max
-	d.lengths = d.lengths[max:]
 	return max, nil
 }
 
