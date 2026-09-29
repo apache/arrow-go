@@ -918,6 +918,23 @@ func TestRecordBuilderUnmarshalOnePreservesUserDecoderOptions(t *testing.T) {
 	assert.EqualValues(t, int64(9223372036854775807), col.Value(0))
 }
 
+func TestRecordBuilderUnmarshalOneReturnUnexpectedEOF(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	bldr := array.NewRecordBuilder(mem, schema)
+	defer bldr.Release()
+
+	src := strings.NewReader(`{"a": 9`)
+	dec := json.NewDecoder(src)
+
+	assert.ErrorIs(t, bldr.UnmarshalOne(dec), io.ErrUnexpectedEOF)
+}
+
 func TestDurationBuilderJSONStringInteger(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
