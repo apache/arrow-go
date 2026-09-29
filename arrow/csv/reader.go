@@ -1107,4 +1107,8 @@ func tryParse(val string, dt arrow.DataType) error {
 	panic("shouldn't end up here")
 }
 
+func (r *Reader) InputOffset() int64 {
+	return r.r.InputOffset()
+}
+
 var _ array.RecordReader = (*Reader)(nil)
