@@ -141,17 +141,15 @@ func maskedStructField(st *array.Struct, fieldIndex int) arrow.Array {
 		}
 	}
 
-	// Normalize to a zero offset so maskedNullBitmapBytes (indexed from
-	// fieldOffset above) lines up with the sliced buffers.
-	sliced := array.NewSliceData(field.Data(), 0, int64(field.Len()))
-	defer sliced.Release()
-
-	origBufs := sliced.Buffers()
+	// maskedNullBitmapBytes is indexed from fieldOffset, so the new data must
+	// keep the field's offset rather than being normalized to zero.
+	fieldData := field.Data()
+	origBufs := fieldData.Buffers()
 	bufs := make([]*memory.Buffer, len(origBufs))
 	copy(bufs, origBufs)
 	bufs[0] = memory.NewBufferBytes(maskedNullBitmapBytes)
 
-	data := array.NewData(sliced.DataType(), sliced.Len(), bufs, sliced.Children(), array.UnknownNullCount, 0)
+	data := array.NewData(fieldData.DataType(), field.Len(), bufs, fieldData.Children(), array.UnknownNullCount, fieldOffset)
 	defer data.Release()
 
 	return array.MakeFromData(data)
@@ -177,7 +175,7 @@ func resolveSortColumnPath(col arrow.Array, path []int) (arrow.Array, error) {
 	}
 	idx := path[0]
 	if idx < 0 || idx >= st.NumField() {
-		return nil, fmt.Errorf("%w: sort key struct field index %d out of range", arrow.ErrIndex, idx)
+		return nil, fmt.Errorf("%w: sort key struct field index %d out of range", arrow.ErrInvalid, idx)
 	}
 
 	child := maskedStructField(st, idx)
@@ -291,8 +289,16 @@ func sortIndicesImpl(ctx context.Context, opts FunctionOptions, input Datum) (Da
 				continue
 			}
 
+			// Validate the path against the column type up front so bad paths
+			// are caught even with zero chunks, and to get the leaf type
+			// without depending on any chunk being present.
+			leafField, err := FieldPath(key.ColumnPath[1:]).GetFieldFromType(chunked.DataType())
+			if err != nil {
+				return nil, fmt.Errorf("%w: sort key %d has invalid column path %v: %v", arrow.ErrInvalid, i, key.ColumnPath, err)
+			}
+			leafType := leafField.Type
+
 			resolvedChunks := make([]arrow.Array, len(chunked.Chunks()))
-			var leafType arrow.DataType
 			for c, chunk := range chunked.Chunks() {
 				resolved, err := resolveSortColumnPath(chunk, key.ColumnPath[1:])
 				if err != nil {
@@ -300,10 +306,6 @@ func sortIndicesImpl(ctx context.Context, opts FunctionOptions, input Datum) (Da
 				}
 				defer resolved.Release()
 				resolvedChunks[c] = resolved
-				leafType = resolved.DataType()
-			}
-			if leafType == nil {
-				leafType = chunked.DataType()
 			}
 			sortColumns[i] = arrow.NewChunked(leafType, resolvedChunks)
 			needsRelease[i] = true
