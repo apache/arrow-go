@@ -141,9 +141,9 @@ type ScalarAggFinalize = func(ctx *KernelCtx) (*AggregateResult, error)
 
 // ScalarAggCleanup releases any resources held by an aggregate state. It is
 // called exactly once for every state that the init function produced,
-// whether the aggregation succeeded, produced no result because the input was
-// empty, was cancelled, or failed in init, consume, merge or finalize. It
-// must not invalidate a result that finalize already returned.
+// whether the aggregation succeeded, saw no input, was cancelled, or failed in
+// init, consume, merge or finalize. It must not invalidate a result that
+// finalize already returned.
 type ScalarAggCleanup = func(ctx *KernelCtx, state KernelState) error
 
 // AggKernel builds on the base Kernel interface for aggregate execution
@@ -185,7 +185,7 @@ type ScalarAggKernel struct {
 	// whose result does not depend on the order of the input leave this
 	// false.
 	//
-	// The executor in this package consumes the whole input into a single
+	// The executor in the compute package consumes the whole input into a single
 	// state, in order, so the flag does not change what it does; it is a
 	// contract for MergeAll and for callers that partition the input
 	// themselves.
@@ -259,7 +259,7 @@ var _ AggKernel = (*ScalarAggKernel)(nil)
 // With no states there is nothing to merge or to finalize, and MergeAll
 // returns (nil, nil). A caller that ended up with zero partitions aggregates
 // the empty input the way the executor does: create one state with the init
-// function and finalize it.
+// function and finalize it, then clean it up.
 func MergeAll(kernel AggKernel, ctx *KernelCtx, states []KernelState) (KernelState, error) {
 	if len(states) == 0 {
 		return nil, nil
