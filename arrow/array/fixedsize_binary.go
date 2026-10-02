@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/internal/bitutils"
 	"github.com/apache/arrow-go/v18/internal/json"
 )
 
@@ -117,6 +118,47 @@ func (a *FixedSizeBinary) MarshalJSON() ([]byte, error) {
 }
 
 func arrayEqualFixedSizeBinary(left, right *FixedSizeBinary) bool {
+	if left.Len() < 8 {
+		return arrayEqualFixedSizeBinaryScalar(left, right)
+	}
+
+	width := int(left.bytewidth)
+	leftStart := left.Offset() * width
+	leftEnd := leftStart + left.Len()*width
+	rightStart := right.Offset() * width
+	rightEnd := rightStart + right.Len()*width
+	if len(left.NullBitmapBytes()) == 0 {
+		return bytes.Equal(left.valueBytes[leftStart:leftEnd], right.valueBytes[rightStart:rightEnd])
+	}
+	if useScalarEqualityForValidityRuns(left) {
+		return arrayEqualFixedSizeBinaryScalar(left, right)
+	}
+
+	runs := bitutils.NewSetBitRunReader(
+		left.NullBitmapBytes(), int64(left.Offset()), int64(left.Len()),
+	)
+	for {
+		run := runs.NextRun()
+		if run.Length == 0 {
+			return true
+		}
+
+		start := int(run.Pos)
+		end := start + int(run.Length)
+		leftRunStart := (left.Offset() + start) * width
+		leftRunEnd := (left.Offset() + end) * width
+		rightRunStart := (right.Offset() + start) * width
+		rightRunEnd := (right.Offset() + end) * width
+		if !bytes.Equal(
+			left.valueBytes[leftRunStart:leftRunEnd],
+			right.valueBytes[rightRunStart:rightRunEnd],
+		) {
+			return false
+		}
+	}
+}
+
+func arrayEqualFixedSizeBinaryScalar(left, right *FixedSizeBinary) bool {
 	for i := 0; i < left.Len(); i++ {
 		if left.IsNull(i) {
 			continue
