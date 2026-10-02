@@ -56,6 +56,9 @@ func getTakeIndicesUint32AVX2(mem memory.Allocator, filter *exec.ArraySpan) (arr
 		mask := filterData[filterByteOffset+i]
 		if mask != 0 && mask != 0xff {
 			mixed++
+			if mixed == minMixed {
+				break
+			}
 		}
 	}
 	if mixed < minMixed {

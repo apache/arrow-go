@@ -70,11 +70,11 @@ func TestGetTakeIndicesUint32AVX2(t *testing.T) {
 	})
 
 	t.Run("long_run_falls_back", func(t *testing.T) {
-		dense := make([]bool, length)
-		for i := range dense {
-			dense[i] = true
+		longRuns := make([]bool, length)
+		for i := range longRuns {
+			longRuns[i] = i%1024 < 900
 		}
-		filter := makeBooleanFilter(t, dense, nil, mem)
+		filter := makeBooleanFilter(t, longRuns, nil, mem)
 		defer filter.Release()
 		var span exec.ArraySpan
 		span.SetMembers(filter.Data())
