@@ -35,6 +35,10 @@ func BenchmarkFilterInt32MixedMasks(b *testing.B) {
 	benchmarkFilter32MixedMasks(b, makeFilterInt32BenchmarkInput)
 }
 
+func BenchmarkFilterInt16MixedMasks(b *testing.B) {
+	benchmarkFilterMixedMasks(b, makeFilterInt16BenchmarkInput, 2)
+}
+
 func BenchmarkFilterFloat32MixedMasks(b *testing.B) {
 	benchmarkFilter32MixedMasks(b, makeFilterFloat32BenchmarkInput)
 }
@@ -132,6 +136,70 @@ func BenchmarkFilterInt32FallbackControls(b *testing.B) {
 			}
 		})
 	}
+}
+
+func BenchmarkFilterInt16FallbackControls(b *testing.B) {
+	controls := []struct {
+		name   string
+		size   int
+		offset int64
+	}{
+		{name: "unaligned-filter-offset", size: 1 << 16, offset: 3},
+		{name: "short", size: 56},
+		{name: "non-multiple-of-eight", size: 1<<16 + 1},
+	}
+
+	for _, control := range controls {
+		control := control
+		b.Run(control.name, func(b *testing.B) {
+			values, filter := makeFilterInt16BenchmarkInputWithOffset(b, control.size, control.offset,
+				func(i int) bool { return i%2 == 0 })
+			defer values.Release()
+			defer filter.Release()
+
+			b.ReportAllocs()
+			b.SetBytes(int64(control.size * 2))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result, err := compute.FilterArray(context.Background(), values, filter, *compute.DefaultFilterOptions())
+				if err != nil {
+					b.Fatal(err)
+				}
+				benchmarkFilterOutputLength = result.Len()
+				result.Release()
+			}
+		})
+	}
+}
+
+func makeFilterInt16BenchmarkInput(b *testing.B, size int, selected func(int) bool) (arrow.Array, arrow.Array) {
+	return makeFilterInt16BenchmarkInputWithOffset(b, size, 0, selected)
+}
+
+func makeFilterInt16BenchmarkInputWithOffset(b *testing.B, size int, offset int64, selected func(int) bool) (arrow.Array, arrow.Array) {
+	b.Helper()
+	mem := memory.DefaultAllocator
+
+	valuesBuilder := array.NewInt16Builder(mem)
+	valuesBuilder.Reserve(size + int(offset))
+	for i := 0; i < size+int(offset); i++ {
+		valuesBuilder.Append(int16(i))
+	}
+	valuesBase := valuesBuilder.NewInt16Array()
+	valuesBuilder.Release()
+	values := array.NewSlice(valuesBase, offset, offset+int64(size))
+	valuesBase.Release()
+
+	filterBuilder := array.NewBooleanBuilder(mem)
+	filterBuilder.Reserve(size + int(offset))
+	for i := 0; i < size+int(offset); i++ {
+		filterBuilder.Append(selected(i))
+	}
+	filterBase := filterBuilder.NewBooleanArray()
+	filterBuilder.Release()
+	filter := array.NewSlice(filterBase, offset, offset+int64(size))
+	filterBase.Release()
+	return values, filter
 }
 
 func makeFilterInt32BenchmarkInput(b *testing.B, size int, selected func(int) bool) (arrow.Array, arrow.Array) {
