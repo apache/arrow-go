@@ -43,6 +43,7 @@ func getTakeIndicesUint32AVX2(mem memory.Allocator, filter *exec.ArraySpan) (arr
 	if filterByteOffset < 0 || filterByteOffset+nbytes > int64(len(filterData)) {
 		return nil, false
 	}
+	filterBytes := filterData[filterByteOffset : filterByteOffset+nbytes]
 
 	// VisitSetBitRuns is especially effective for long runs, so only use the
 	// compactor when a short sample shows enough fragmented bytes to amortize
@@ -53,7 +54,7 @@ func getTakeIndicesUint32AVX2(mem memory.Allocator, filter *exec.ArraySpan) (arr
 	)
 	mixed := 0
 	for i := int64(0); i < nbytes && i < sampleBytes; i++ {
-		mask := filterData[filterByteOffset+i]
+		mask := filterBytes[i]
 		if mask != 0 && mask != 0xff {
 			mixed++
 			if mixed == minMixed {
@@ -78,7 +79,7 @@ func getTakeIndicesUint32AVX2(mem memory.Allocator, filter *exec.ArraySpan) (arr
 		tailMask = int64((uint64(1) << uint(tailBits)) - 1)
 	}
 	_get_take_indices_uint32_avx2(
-		unsafe.Pointer(unsafe.SliceData(filterData[filterByteOffset:])),
+		unsafe.Pointer(unsafe.SliceData(filterBytes)),
 		unsafe.Pointer(unsafe.SliceData(output)),
 		unsafe.Pointer(unsafe.SliceData(filterUint32Tables[:])),
 		nbytes,
