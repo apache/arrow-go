@@ -81,6 +81,23 @@ func (r *RowGroupReader) Column(i int) (ColumnChunkReader, error) {
 	}), nil
 }
 
+type ownedBufferedReader struct {
+	br parquet.BufferedReaderV2
+}
+
+func (o *ownedBufferedReader) Release() parquet.BufferedReaderV2 {
+	br := o.br
+	o.br = nil
+	return br
+}
+
+func (o *ownedBufferedReader) Free() {
+	if o.br != nil {
+		o.br.Free()
+		o.br = nil
+	}
+}
+
 func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 	col, err := r.rgMetadata.ColumnChunk(i)
 	if err != nil {
@@ -115,16 +132,22 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 		colLen += padding
 	}
 
-	stream, err := r.props.GetStream(r.r, colStart, colLen)
+	stream, err := r.props.GetStreamV2(r.r, colStart, colLen)
 	if err != nil {
 		return nil, err
 	}
+	ownedStream := &ownedBufferedReader{br: stream}
+	defer ownedStream.Free()
 
+	codec, err := compress.GetCodec(col.Compression())
+	if err != nil {
+		return nil, err
+	}
 	cryptoMetadata := col.CryptoMetadata()
 	if cryptoMetadata == nil {
 		descr := r.fileMetadata.Schema.Column(i)
 		pr := &serializedPageReader{
-			r:                       stream,
+			r:                       ownedStream.Release(),
 			chunk:                   col,
 			colIdx:                  i,
 			pgIndexReader:           rgIdxRdr,
@@ -141,7 +164,8 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 			maxRepLevel: descr.MaxRepetitionLevel(),
 			maxDefLevel: descr.MaxDefinitionLevel(),
 		}
-		return pr, pr.init(col.Compression(), nil)
+		pr.init(codec, nil)
+		return pr, nil
 	}
 
 	if r.fileDecryptor == nil {
@@ -162,7 +186,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 			DataDecryptor:                  r.fileDecryptor.GetFooterDecryptorForColumnData(""),
 		}
 		pr := &serializedPageReader{
-			r:                       stream,
+			r:                       ownedStream.Release(),
 			chunk:                   col,
 			colIdx:                  i,
 			pgIndexReader:           rgIdxRdr,
@@ -173,7 +197,8 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 			maxUncompressedPageSize: r.props.GetMaxUncompressedPageSize(),
 			cryptoCtx:               ctx,
 		}
-		return pr, pr.init(col.Compression(), &ctx)
+		pr.init(codec, &ctx)
+		return pr, nil
 	}
 
 	// column encrypted with it's own key
@@ -188,7 +213,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 		DataDecryptor:                  r.fileDecryptor.GetColumnDataDecryptor(parquet.ColumnPath(columnPath).String(), string(columnKeyMeta), ""),
 	}
 	pr := &serializedPageReader{
-		r:                       stream,
+		r:                       ownedStream.Release(),
 		chunk:                   col,
 		colIdx:                  i,
 		pgIndexReader:           rgIdxRdr,
@@ -199,7 +224,8 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 		maxUncompressedPageSize: r.props.GetMaxUncompressedPageSize(),
 		cryptoCtx:               ctx,
 	}
-	return pr, pr.init(col.Compression(), &ctx)
+	pr.init(codec, &ctx)
+	return pr, nil
 }
 
 func streamablePhysicalType(t parquet.Type) bool {
