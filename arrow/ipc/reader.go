@@ -52,6 +52,9 @@ type Reader struct {
 	expectedSchema     *arrow.Schema
 
 	mem memory.Allocator
+	// size limits for the message readers this Reader creates itself
+	maxMetadataSize int64
+	maxBodySize     int64
 }
 
 // NewReaderFromMessageReader allows constructing a new reader object with the
@@ -80,6 +83,8 @@ func NewReaderFromMessageReader(r MessageReader, opts ...Option) (reader *Reader
 		mem:                cfg.alloc,
 		ensureNativeEndian: cfg.ensureNativeEndian,
 		expectedSchema:     cfg.schema,
+		maxMetadataSize:    cfg.maxMetadataSize,
+		maxBodySize:        cfg.maxBodySize,
 	}
 	reader.refCount.Add(1)
 
@@ -105,8 +110,7 @@ func NewReader(r io.Reader, opts ...Option) (rr *Reader, err error) {
 		}
 	}()
 	cfg := newConfig(opts...)
-	mr := &messageReader{r: r, mem: cfg.alloc}
-	mr.refCount.Add(1)
+	mr := NewMessageReader(r, opts...)
 	rr = &Reader{
 		r:        mr,
 		refCount: atomic.Int64{},
@@ -115,6 +119,8 @@ func NewReader(r io.Reader, opts ...Option) (rr *Reader, err error) {
 		mem:                cfg.alloc,
 		ensureNativeEndian: cfg.ensureNativeEndian,
 		expectedSchema:     cfg.schema,
+		maxMetadataSize:    cfg.maxMetadataSize,
+		maxBodySize:        cfg.maxBodySize,
 	}
 	rr.refCount.Add(1)
 
@@ -339,9 +345,11 @@ func (r *Reader) Read() (arrow.RecordBatch, error) {
 
 // ContinueFrom resumes reading from src as a continuation of the same logical
 // stream, keeping the schema and dictionaries already read. It is
-// [Reader.ContinueFromMessageReader] for a plain byte stream.
+// [Reader.ContinueFromMessageReader] for a plain byte stream, read with the
+// allocator and message size limits the Reader was created with.
 func (r *Reader) ContinueFrom(src io.Reader) error {
-	mr := NewMessageReader(src, WithAllocator(r.mem))
+	mr := NewMessageReader(src, WithAllocator(r.mem),
+		WithMetadataSizeLimit(r.maxMetadataSize), WithBodySizeLimit(r.maxBodySize))
 	if err := r.ContinueFromMessageReader(mr); err != nil {
 		mr.Release()
 		return err

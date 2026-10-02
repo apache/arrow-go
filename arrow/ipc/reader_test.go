@@ -369,3 +369,46 @@ func TestReaderContinueFrom(t *testing.T) {
 		assert.EqualValues(t, 2, rdr.RecordBatch().NumRows())
 	})
 }
+
+func TestReaderSizeLimits(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "i", Type: arrow.PrimitiveTypes.Int64}}, nil)
+	// a small batch whose body fits under the limit, then one whose body
+	// (1000 int64 values) does not
+	recs := make([]arrow.RecordBatch, 2)
+	for n, rows := range []int{2, 1000} {
+		b := array.NewRecordBuilder(mem, schema)
+		b.Field(0).(*array.Int64Builder).AppendValues(make([]int64, rows), nil)
+		recs[n] = b.NewRecordBatch()
+		b.Release()
+		defer recs[n].Release()
+	}
+	blobs := writeSplitStream(t, mem, schema, recs)
+	const bodyLimit = 1024
+
+	t.Run("NewReader", func(t *testing.T) {
+		rdr, err := NewReader(bytes.NewReader(bytes.Join(blobs, nil)), WithAllocator(mem), WithBodySizeLimit(bodyLimit))
+		require.NoError(t, err)
+		defer rdr.Release()
+
+		require.True(t, rdr.Next())
+		assert.False(t, rdr.Next())
+		assert.ErrorContains(t, rdr.Err(), "exceeds limit 1024")
+	})
+
+	t.Run("ContinueFrom", func(t *testing.T) {
+		rdr, err := NewReader(bytes.NewReader(blobs[0]), WithAllocator(mem), WithBodySizeLimit(bodyLimit))
+		require.NoError(t, err)
+		defer rdr.Release()
+
+		require.True(t, rdr.Next())
+		require.False(t, rdr.Next())
+		require.NoError(t, rdr.Err())
+
+		require.NoError(t, rdr.ContinueFrom(bytes.NewReader(blobs[1])))
+		assert.False(t, rdr.Next())
+		assert.ErrorContains(t, rdr.Err(), "exceeds limit 1024")
+	})
+}
