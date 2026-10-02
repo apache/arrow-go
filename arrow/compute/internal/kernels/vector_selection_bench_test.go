@@ -39,15 +39,21 @@ var filterBenchmarkPatterns = []filterBenchmarkPattern{
 	{name: "long-runs", selected: func(i int) bool { return i%1024 < 900 }},
 	{name: "alternating", selected: func(i int) bool { return i%2 == 0 }},
 	{name: "short-runs", selected: func(i int) bool { return i%100 < 10 }},
-	{name: "random", selected: func(i int) bool { return getTakeIndicesBenchmarkRandom(i) }},
+	{name: "random-25", selected: func(i int) bool { return getTakeIndicesBenchmarkSelected(i, 25) }},
+	{name: "random-50", selected: func(i int) bool { return getTakeIndicesBenchmarkSelected(i, 50) }},
+	{name: "random-75", selected: func(i int) bool { return getTakeIndicesBenchmarkSelected(i, 75) }},
 	{name: "nullable-long-runs", selected: func(i int) bool { return i%1024 < 900 }, nullable: true},
 }
 
-func getTakeIndicesBenchmarkRandom(i int) bool {
+func getTakeIndicesBenchmarkRandom(i int) uint32 {
 	x := uint32(i)*747796405 + 2891336453
 	x = ((x >> ((x >> 28) + 4)) ^ x) * 277803737
 	x = (x >> 22) ^ x
-	return x&1 == 0
+	return x
+}
+
+func getTakeIndicesBenchmarkSelected(i, percent int) bool {
+	return uint64(getTakeIndicesBenchmarkRandom(i))*100>>32 < uint64(percent)
 }
 
 func makeFilterBenchmarkSpan(tb testing.TB, n int, pattern filterBenchmarkPattern) *exec.ArraySpan {
@@ -70,7 +76,7 @@ func makeFilterBenchmarkSpan(tb testing.TB, n int, pattern filterBenchmarkPatter
 }
 
 func BenchmarkGetTakeIndices(b *testing.B) {
-	for _, n := range []int{64 * 1024, 1024 * 1024} {
+	for _, n := range []int{1024, 64 * 1024, 1024 * 1024} {
 		for _, pattern := range filterBenchmarkPatterns {
 			b.Run(fmt.Sprintf("%s/%d", pattern.name, n), func(b *testing.B) {
 				filter := makeFilterBenchmarkSpan(b, n, pattern)

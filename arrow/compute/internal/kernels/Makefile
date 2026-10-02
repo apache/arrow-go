@@ -42,7 +42,7 @@ INTEL_SOURCES := \
 	cast_numeric_avx2_amd64.s cast_numeric_sse4_amd64.s constant_factor_avx2_amd64.s \
 	constant_factor_sse4_amd64.s base_arithmetic_avx2_amd64.s base_arithmetic_sse4_amd64.s \
 	scalar_comparison_avx2_amd64.s scalar_comparison_sse4_amd64.s \
-	filter_uint32_avx2_amd64.s filter_uint64_avx2_amd64.s
+	filter_uint32_avx2_amd64.s filter_uint64_avx2_amd64.s get_take_indices_avx2_amd64.s
 
 #
 # ARROW-15336: DO NOT add the assembly target for Arm64 (ARM_SOURCES) until c2goasm added the Arm64 support.
@@ -74,6 +74,9 @@ _lib/scalar_comparison_sse4_amd64.s: _lib/scalar_comparison.cc
 	$(CXX) -std=c++17 -S $(C_FLAGS) $(ASM_FLAGS_SSE4) $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
 
 _lib/filter_uint32_avx2_amd64.s: _lib/filter_uint32.cc
+	$(CXX) -std=c++17 -S $(C_FLAGS) $(ASM_FLAGS_AVX2) $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
+
+_lib/get_take_indices_avx2_amd64.s: _lib/get_take_indices_avx2_amd64.cc
 	$(CXX) -std=c++17 -S $(C_FLAGS) $(ASM_FLAGS_AVX2) $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
 
 _lib/filter_uint64_avx2_amd64.s: _lib/filter_uint64.cc
@@ -117,6 +120,10 @@ scalar_comparison_sse4_amd64.s: _lib/scalar_comparison_sse4_amd64.s
 
 filter_uint32_avx2_amd64.s: _lib/filter_uint32_avx2_amd64.s
 	$(C2GOASM) -a -f $^ $@
+
+get_take_indices_avx2_amd64.s: _lib/get_take_indices_avx2_amd64.s
+	$(C2GOASM) -a -f $^ $@
+	perl -i -pe 's{^//\s*\+build\b.*}{//go:build go1.18 && amd64 && !noasm && !appengine}' $@
 
 filter_uint64_avx2_amd64.s: _lib/filter_uint64_avx2_amd64.s
 	$(C2GOASM) -a -f $^ $@
