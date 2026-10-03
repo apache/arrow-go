@@ -34,6 +34,12 @@ type filterBenchmarkPattern struct {
 }
 
 var filterBenchmarkPatterns = []filterBenchmarkPattern{
+	{name: "mixed-prefix-long-runs", selected: func(i int) bool {
+		if i < 32 {
+			return i%2 == 0
+		}
+		return (i/4096)%2 == 0
+	}},
 	{name: "all-selected", selected: func(int) bool { return true }},
 	{name: "all-clear", selected: func(int) bool { return false }},
 	{name: "long-runs", selected: func(i int) bool { return i%1024 < 900 }},
