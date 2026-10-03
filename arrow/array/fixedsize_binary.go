@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
 	"github.com/apache/arrow-go/v18/internal/json"
 )
@@ -127,7 +128,9 @@ func arrayEqualFixedSizeBinary(left, right *FixedSizeBinary) bool {
 	leftEnd := leftStart + left.Len()*width
 	rightStart := right.Offset() * width
 	rightEnd := rightStart + right.Len()*width
-	if len(left.NullBitmapBytes()) == 0 {
+	leftBitmap := left.NullBitmapBytes()
+	if len(leftBitmap) == 0 ||
+		(left.NullN() == 0 && bitutil.CountSetBits(leftBitmap, left.Offset(), left.Len()) == left.Len()) {
 		return bytes.Equal(left.valueBytes[leftStart:leftEnd], right.valueBytes[rightStart:rightEnd])
 	}
 	if useScalarEqualityForValidityRuns(left) {
@@ -135,7 +138,7 @@ func arrayEqualFixedSizeBinary(left, right *FixedSizeBinary) bool {
 	}
 
 	runs := bitutils.NewSetBitRunReader(
-		left.NullBitmapBytes(), int64(left.Offset()), int64(left.Len()),
+		leftBitmap, int64(left.Offset()), int64(left.Len()),
 	)
 	for {
 		run := runs.NextRun()

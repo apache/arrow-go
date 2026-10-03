@@ -110,6 +110,15 @@ func TestFixedSizeBinaryEqualityByValidRuns(t *testing.T) {
 			want:        true,
 		},
 		{
+			name:        "both materialized all-valid bitmaps",
+			leftValues:  concatFixedSizeBinaryRows("aaaa", "bbbb", "cccc", "dddd", "eeee", "ffff", "gggg", "hhhh"),
+			rightValues: concatFixedSizeBinaryRows("aaaa", "bbbb", "cccc", "dddd", "eeee", "ffff", "gggg", "hhhh"),
+			leftValid:   allValid,
+			rightValid:  allValid,
+			length:      8,
+			want:        true,
+		},
+		{
 			name:        "different validity positions with the same null count",
 			leftValues:  concatFixedSizeBinaryRows("aaaa", "bbbb", "cccc", "dddd", "eeee", "ffff", "gggg", "hhhh"),
 			rightValues: concatFixedSizeBinaryRows("aaaa", "bbbb", "cccc", "dddd", "eeee", "ffff", "gggg", "hhhh"),
