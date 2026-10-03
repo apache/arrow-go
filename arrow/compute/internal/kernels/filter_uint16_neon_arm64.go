@@ -19,7 +19,6 @@
 package kernels
 
 import (
-	"math/bits"
 	"unsafe"
 
 	"golang.org/x/sys/cpu"
@@ -27,59 +26,25 @@ import (
 
 var filterUint16NeonTables = makeFilterUint16Tables()
 
-func makeFilterUint16Tables() (tables [4352]byte) {
-	for mask := 0; mask < 256; mask++ {
-		pos := 0
-		for lane := 0; lane < 8; lane++ {
-			if mask&(1<<uint(lane)) == 0 {
-				continue
-			}
-			tables[mask*16+pos] = byte(lane * 2)
-			tables[mask*16+pos+1] = byte(lane*2 + 1)
-			pos += 2
-		}
-		for ; pos < 16; pos++ {
-			tables[mask*16+pos] = 0x80
-		}
-		tables[4096+mask] = byte(bits.OnesCount8(uint8(mask)))
-	}
-	return tables
-}
 
 //go:noescape
 func _filter_uint16_neon(values, filter, output, tables unsafe.Pointer, length int64)
 
 func filterUint16Neon(values []uint16, output []uint16, filterData []byte, filterOffset, length int64) bool {
-	if !cpu.ARM64.HasASIMD || length < 64 || length%8 != 0 || filterOffset%8 != 0 {
+	if !cpu.ARM64.HasASIMD || len(output) == 0 {
 		return false
 	}
 
-	numBytes := length / 8
-	filterByteOffset := filterOffset / 8
-	if filterByteOffset < 0 || filterByteOffset+numBytes > int64(len(filterData)) {
-		return false
-	}
-
-	mixedBytes := 0
-	const sampleBytes = 64
-	for i := int64(0); i < numBytes && i < sampleBytes; i++ {
-		mask := filterData[filterByteOffset+i]
-		if mask != 0 && mask != 0xff {
-			mixedBytes++
-			if mixedBytes == 4 {
-				break
-			}
-		}
-	}
-	if mixedBytes < 4 || len(output) == 0 {
+	filterBytes, ok := filterUint16VectorInput(filterData, filterOffset, length)
+	if !ok {
 		return false
 	}
 
 	_filter_uint16_neon(
-		unsafe.Pointer(&values[0]),
-		unsafe.Pointer(&filterData[filterByteOffset]),
-		unsafe.Pointer(&output[0]),
-		unsafe.Pointer(&filterUint16NeonTables[0]),
+		unsafe.Pointer(unsafe.SliceData(values)),
+		unsafe.Pointer(unsafe.SliceData(filterBytes)),
+		unsafe.Pointer(unsafe.SliceData(output)),
+		unsafe.Pointer(unsafe.SliceData(filterUint16NeonTables[:])),
 		length,
 	)
 	return true
