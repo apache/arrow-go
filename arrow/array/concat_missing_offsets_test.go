@@ -28,6 +28,7 @@ func TestConcatMissingOffsetsDiagnostic(t *testing.T) {
 	for _, dtype := range []arrow.DataType{
 		arrow.ListOf(arrow.PrimitiveTypes.Int8),
 		arrow.LargeListOf(arrow.PrimitiveTypes.Int8),
+		arrow.MapOf(arrow.PrimitiveTypes.Int8, arrow.PrimitiveTypes.Int8),
 		arrow.BinaryTypes.Binary,
 		arrow.BinaryTypes.LargeBinary,
 	} {
