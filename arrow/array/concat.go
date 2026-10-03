@@ -218,6 +218,11 @@ func concatBinaryBuffers(data []arrow.ArrayData, byteWidth, length int, out *Dat
 	return nil
 }
 
+// concatOffsetsData creates a single offset buffer which represents the concatenation of all of the
+// offsets buffers, adjusting the offsets appropriately to their new relative locations.
+//
+// It also returns the list of ranges that need to be fetched for the corresponding value buffers
+// to construct the final concatenated value buffer.
 func concatOffsetsData(data []arrow.ArrayData, byteWidth, length int, mem memory.Allocator) (*memory.Buffer, []rng, error) {
 	out := memory.NewResizableBuffer(mem)
 	out.Resize(byteWidth * (length + 1))
@@ -393,11 +398,6 @@ func concatDictIndices(mem memory.Allocator, data []arrow.ArrayData, idxType arr
 	return
 }
 
-// concatOffsets creates a single offset buffer which represents the concatenation of all of the
-// offsets buffers, adjusting the offsets appropriately to their new relative locations.
-//
-// It also returns the list of ranges that need to be fetched for the corresponding value buffers
-// to construct the final concatenated value buffer.
 func sumArraySizes(data []arrow.ArrayData) int {
 	outSize := 0
 	for _, arr := range data {
