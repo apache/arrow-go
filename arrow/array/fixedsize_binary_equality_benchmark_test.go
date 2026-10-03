@@ -34,6 +34,13 @@ func BenchmarkFixedSizeBinaryEquality(b *testing.B) {
 				valid func(int) []bool
 			}{
 				{name: "all_valid"},
+				{name: "materialized_all_valid", valid: func(n int) []bool {
+					valid := make([]bool, n)
+					for i := range valid {
+						valid[i] = true
+					}
+					return valid
+				}},
 				{name: "one_percent_null", valid: func(n int) []bool {
 					valid := make([]bool, n)
 					for i := range valid {
