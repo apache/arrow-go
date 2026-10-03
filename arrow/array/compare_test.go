@@ -1299,3 +1299,48 @@ func TestTableEqual(t *testing.T) {
 		})
 	}
 }
+
+func TestListApproxEqualValidRunsOptions(t *testing.T) {
+	for _, dt := range []arrow.DataType{arrow.ListOf(arrow.PrimitiveTypes.Float64), arrow.LargeListOf(arrow.PrimitiveTypes.Float64), arrow.FixedSizeListOf(2, arrow.PrimitiveTypes.Float64)} {
+		t.Run(dt.String(), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+			makeInput := func(prefix int, delta float64, mismatch bool) arrow.Array {
+				builder := array.NewBuilder(mem, dt)
+				defer builder.Release()
+				child := builder.(interface{ ValueBuilder() array.Builder }).ValueBuilder().(*array.Float64Builder)
+				for i := -prefix; i < 128; i++ {
+					valid := i < 32 || i >= 64
+					builder.(interface{ Append(bool) }).Append(valid)
+					if i >= 32 && i < 64 {
+						child.AppendValues([]float64{float64(prefix) * 999, -float64(prefix) * 999}, nil)
+					} else if i == 80 {
+						child.Append(math.NaN())
+						child.AppendNull()
+					} else {
+						value := float64(i) + delta
+						if mismatch && i == 100 {
+							value += 10
+						}
+						child.AppendValues([]float64{value, value}, nil)
+					}
+				}
+				base := builder.NewArray()
+				defer base.Release()
+				return array.NewSlice(base, int64(prefix), int64(prefix+128))
+			}
+			left := makeInput(1, 0, false)
+			defer left.Release()
+			right := makeInput(3, 0.01, false)
+			defer right.Release()
+			mismatch := makeInput(2, 0.01, true)
+			defer mismatch.Release()
+			opts := []array.EqualOption{array.WithAbsTolerance(0.1), array.WithNaNsEqual(true)}
+			assert.True(t, array.ApproxEqual(left, right, opts...))
+			assert.True(t, array.ApproxEqual(right, left, opts...))
+			assert.False(t, array.ApproxEqual(left, right, array.WithNaNsEqual(true)))
+			assert.False(t, array.ApproxEqual(left, right, array.WithAbsTolerance(0.1)))
+			assert.False(t, array.ApproxEqual(left, mismatch, opts...))
+		})
+	}
+}
