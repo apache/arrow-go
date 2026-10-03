@@ -70,6 +70,12 @@ func benchmarkFilterMixedMasks(b *testing.B,
 		name     string
 		selected func(int) bool
 	}{
+		{name: "mixed-prefix-long-runs", selected: func(i int) bool {
+			if i < 32 {
+				return i%2 == 0
+			}
+			return (i/4096)%2 == 0
+		}},
 		{name: "alternating", selected: func(i int) bool { return i%2 == 0 }},
 		{name: "random25", selected: func(i int) bool { return filterBenchmarkRandom(i, 25) }},
 		{name: "random50", selected: func(i int) bool { return filterBenchmarkRandom(i, 50) }},
