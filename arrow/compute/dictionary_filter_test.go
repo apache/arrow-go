@@ -95,8 +95,11 @@ func TestDictionaryFilterDirectIndices(t *testing.T) {
 			defer wantIndices.Release()
 			require.True(t, array.Equal(wantIndices, gotDict.Indices()))
 
-			require.Same(t, input.Data().(*array.Data).Dictionary(), gotDict.Data().(*array.Data).Dictionary())
-			require.Equal(t, input.Dictionary().Len(), gotDict.Dictionary().Len())
+			require.True(t, array.Equal(input.(*array.Dictionary).Dictionary(), gotDict.Dictionary()))
+			for i, buf := range input.(*array.Dictionary).Dictionary().Data().Buffers() {
+				require.Same(t, buf, gotDict.Dictionary().Data().Buffers()[i])
+			}
+			require.Equal(t, input.(*array.Dictionary).Dictionary().Len(), gotDict.Dictionary().Len())
 		})
 	}
 
@@ -139,7 +142,10 @@ func TestDictionaryFilterSlicedInputs(t *testing.T) {
 	require.NoError(t, err)
 	defer wantIndices.Release()
 	require.True(t, array.Equal(wantIndices, gotDict.Indices()))
-	require.Same(t, input.Data().(*array.Data).Dictionary(), gotDict.Data().(*array.Data).Dictionary())
+	require.True(t, array.Equal(input.Dictionary(), gotDict.Dictionary()))
+	for i, buf := range input.Dictionary().Data().Buffers() {
+		require.Same(t, buf, gotDict.Dictionary().Data().Buffers()[i])
+	}
 }
 
 func mustBoolArray(t *testing.T, mem memory.Allocator, json string) arrow.Array {
@@ -147,4 +153,51 @@ func mustBoolArray(t *testing.T, mem memory.Allocator, json string) arrow.Array 
 	arr, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(json))
 	require.NoError(t, err)
 	return arr
+}
+
+func TestDictionaryFilterIndexTypesAndChunking(t *testing.T) {
+	for _, indexType := range []arrow.DataType{arrow.PrimitiveTypes.Int8, arrow.PrimitiveTypes.Uint8, arrow.PrimitiveTypes.Int16, arrow.PrimitiveTypes.Uint16, arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Uint32, arrow.PrimitiveTypes.Int64, arrow.PrimitiveTypes.Uint64} {
+		t.Run(indexType.String(), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+			dt := &arrow.DictionaryType{IndexType: indexType, ValueType: arrow.BinaryTypes.String, Ordered: true}
+			base, err := array.DictArrayFromJSON(mem, dt, `[0, 2, null, 1, 0, 2, 1, 0]`, `["a", null, "c"]`)
+			require.NoError(t, err)
+			defer base.Release()
+			input := array.NewSlice(base, 1, 7)
+			defer input.Release()
+			baseFilter := mustBoolArray(t, mem, `[false, true, true, null, false, true, true, false]`)
+			defer baseFilter.Release()
+			filter := array.NewSlice(baseFilter, 1, 7)
+			defer filter.Release()
+			execCtx := compute.DefaultExecCtx()
+			execCtx.ChunkSize = 2
+			ctx := compute.SetExecCtx(compute.WithAllocator(context.Background(), mem), execCtx)
+			for _, tc := range []struct {
+				mode compute.NullSelectionBehavior
+				want string
+			}{
+				{compute.SelectionDropNulls, `[2, null, 2, 1]`},
+				{compute.SelectionEmitNulls, `[2, null, null, 2, 1]`},
+			} {
+				valuesDatum, filterDatum := compute.NewDatum(input), compute.NewDatum(filter)
+				defer valuesDatum.Release()
+				defer filterDatum.Release()
+				result, err := compute.Filter(ctx, valuesDatum, filterDatum, compute.FilterOptions{NullSelection: tc.mode})
+				require.NoError(t, err)
+				defer result.Release()
+				require.IsType(t, &compute.ChunkedDatum{}, result)
+				got, err := array.Concatenate(result.(*compute.ChunkedDatum).Chunks(), mem)
+				require.NoError(t, err)
+				defer got.Release()
+				dict := got.(*array.Dictionary)
+				want, _, err := array.FromJSON(mem, indexType, strings.NewReader(tc.want))
+				require.NoError(t, err)
+				defer want.Release()
+				require.True(t, array.Equal(want, dict.Indices()))
+				require.True(t, arrow.TypeEqual(dt, dict.DataType()))
+				require.True(t, array.Equal(base.(*array.Dictionary).Dictionary(), dict.Dictionary()))
+			}
+		})
+	}
 }
