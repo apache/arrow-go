@@ -66,7 +66,7 @@ func getTakeIndicesUint32AVX2(mem memory.Allocator, filter *exec.ArraySpan) (arr
 		return nil, false
 	}
 
-	length := int64(bitutil.CountSetBits(filterData, int(filter.Offset), int(filter.Len)))
+	length := int64(bitutil.CountSetBits(filterBytes, 0, int(filter.Len)))
 	if length == 0 {
 		return array.NewData(arrow.PrimitiveTypes.Uint32, 0, []*memory.Buffer{nil, memory.NewBufferBytes(nil)}, nil, 0, 0), true
 	}
