@@ -26,7 +26,6 @@ import (
 
 var filterUint16NeonTables = makeFilterUint16Tables()
 
-
 //go:noescape
 func _filter_uint16_neon(values, filter, output, tables unsafe.Pointer, length int64)
 
