@@ -33,16 +33,24 @@ func checkNumericToBoolSIMD[T arrow.NumericType](t *testing.T, typ arrow.Type, v
 	t.Helper()
 
 	var zero T
-	out := make([]byte, (len(values)+7)/8)
-	want := make([]byte, len(out))
-	for i, value := range values {
-		bitutil.SetBitTo(want, i, value != zero)
-	}
-	if err := numericToBoolSIMD(typ, nil, values, out); err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(out, want) {
-		t.Fatalf("output = %08b, want %08b", out, want)
+	for _, fill := range []byte{0, 0xff} {
+		nbytes := (len(values) + 7) / 8
+		backing := bytes.Repeat([]byte{fill}, nbytes+1)
+		backing[nbytes] = 0xa5
+		out := backing[:nbytes]
+		want := bytes.Repeat([]byte{fill}, nbytes)
+		for i, value := range values {
+			bitutil.SetBitTo(want, i, value != zero)
+		}
+		if err := numericToBoolSIMD(typ, nil, values, out); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(out, want) {
+			t.Fatalf("fill=%#x: output = %08b, want %08b", fill, out, want)
+		}
+		if backing[nbytes] != 0xa5 {
+			t.Fatal("cast wrote beyond the output bitmap")
+		}
 	}
 }
 
