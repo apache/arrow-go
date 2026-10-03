@@ -540,32 +540,23 @@ func structFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResul
 // The shared dictionary is reused as-is and never compacted, so the result may retain values
 // that are no longer referenced by any index.
 func dictionaryFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
-	// convert the filter (boolean array) to indices to take from the dictionary array.
-	indices, err := kernels.GetTakeIndices(exec.GetAllocator(ctx.Ctx),
-		&batch.Values[1].Array, ctx.State.(kernels.FilterState).NullSelection)
+	dictArr := batch.Values[0].Array.MakeArray().(*array.Dictionary)
+	defer dictArr.Release()
+
+	selection := batch.Values[1].Array.MakeArray()
+	defer selection.Release()
+
+	filteredIndices, err := FilterArray(ctx.Ctx, dictArr.Indices(), selection,
+		FilterOptions(ctx.State.(kernels.FilterState)))
 	if err != nil {
 		return err
 	}
-	defer indices.Release()
+	defer filteredIndices.Release()
 
-	filter := NewDatum(indices)
-	defer filter.Release()
-
-	valData := batch.Values[0].Array.MakeData()
-	defer valData.Release()
-
-	vals := NewDatum(valData)
-	defer vals.Release()
-
-	// run 'take' on the dictionary array, which will call dictionaryTake.
-	// we know the bounds are good because the indices were just created by GetTakeIndices
-	result, err := Take(ctx.Ctx, kernels.TakeOptions{BoundsCheck: false}, vals, filter)
-	if err != nil {
-		return err
-	}
+	result := array.NewDictionaryArray(dictArr.DataType(), filteredIndices, dictArr.Dictionary())
 	defer result.Release()
 
-	out.TakeOwnership(result.(*ArrayDatum).Value)
+	out.TakeOwnership(result.Data())
 	return nil
 }
 
