@@ -466,6 +466,57 @@ func (c *CastSuite) TestNumericToBool() {
 	}
 }
 
+func (c *CastSuite) TestNumericToBoolSIMDBoundaries() {
+	types := []arrow.DataType{
+		arrow.PrimitiveTypes.Int32,
+		arrow.PrimitiveTypes.Uint32,
+		arrow.PrimitiveTypes.Int64,
+		arrow.PrimitiveTypes.Uint64,
+		arrow.PrimitiveTypes.Float32,
+		arrow.PrimitiveTypes.Float64,
+	}
+	for _, dt := range types {
+		for _, size := range []int{0, 7, 8, 9, 15, 16, 17, 31, 32, 33} {
+			c.Run(fmt.Sprintf("%s/size=%d", dt, size), func() {
+				builder := array.NewBuilder(c.mem, dt)
+				builder.Reserve(size + 1)
+				for i := 0; i <= size; i++ {
+					if i%11 == 5 {
+						builder.AppendNull()
+						continue
+					}
+					value := "0"
+					if i%3 != 0 {
+						value = "1"
+					}
+					if err := builder.AppendValueFromString(value); err != nil {
+						c.T().Fatal(err)
+					}
+				}
+				base := builder.NewArray()
+				builder.Release()
+				input := array.NewSlice(base, 1, int64(size+1))
+				base.Release()
+				defer input.Release()
+
+				expectedBuilder := array.NewBooleanBuilder(c.mem)
+				for i := 1; i <= size; i++ {
+					if i%11 == 5 {
+						expectedBuilder.AppendNull()
+					} else {
+						expectedBuilder.Append(i%3 != 0)
+					}
+				}
+				expected := expectedBuilder.NewArray()
+				expectedBuilder.Release()
+				defer expected.Release()
+
+				checkCast(c.T(), input, expected, *compute.DefaultCastOptions(true))
+			})
+		}
+	}
+}
+
 func (c *CastSuite) TestNumericToBoolSpecialValues() {
 	builder := array.NewFloat64Builder(c.mem)
 	builder.AppendValues([]float64{
@@ -483,6 +534,46 @@ func (c *CastSuite) TestNumericToBoolSpecialValues() {
 		math.NaN(),
 		math.Inf(1),
 		math.Inf(-1),
+		0,
+		-1,
+		1,
+	}, nil)
+	input := builder.NewArray()
+	builder.Release()
+	defer input.Release()
+
+	sliced := array.NewSlice(input, 1, 16)
+	defer sliced.Release()
+
+	expectedBuilder := array.NewBooleanBuilder(c.mem)
+	expectedBuilder.AppendValues([]bool{
+		false, false, true, true, true, true, true, false,
+		true, false, true, true, true, false, true,
+	}, nil)
+	expected := expectedBuilder.NewArray()
+	expectedBuilder.Release()
+	defer expected.Release()
+
+	checkCast(c.T(), sliced, expected, *compute.DefaultCastOptions(true))
+}
+
+func (c *CastSuite) TestNumericToBoolFloat32SpecialValues() {
+	builder := array.NewFloat32Builder(c.mem)
+	builder.AppendValues([]float32{
+		1,
+		float32(math.Copysign(0, -1)),
+		0,
+		float32(math.NaN()),
+		float32(math.Inf(1)),
+		float32(math.Inf(-1)),
+		1,
+		-1,
+		0,
+		1,
+		float32(math.Copysign(0, -1)),
+		float32(math.NaN()),
+		float32(math.Inf(1)),
+		float32(math.Inf(-1)),
 		0,
 		-1,
 		1,

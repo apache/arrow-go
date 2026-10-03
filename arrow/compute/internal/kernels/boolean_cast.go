@@ -37,7 +37,7 @@ func isNonZero[T arrow.FixedWidthType](ctx *exec.KernelCtx, in []T, out []byte) 
 
 func numericToBoolKernel[T arrow.NumericType](typ arrow.Type) func(*exec.KernelCtx, []T, []byte) error {
 	return func(ctx *exec.KernelCtx, in []T, out []byte) error {
-		return numericToBoolNeon(typ, ctx, in, out)
+		return numericToBoolSIMD(typ, ctx, in, out)
 	}
 }
 

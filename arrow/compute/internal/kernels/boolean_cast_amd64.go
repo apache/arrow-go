@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build go1.18 && arm64 && !noasm && !appengine
+//go:build go1.18 && amd64 && !noasm && !appengine
 
 package kernels
 
@@ -24,11 +24,10 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
-	"golang.org/x/sys/cpu"
 )
 
 func numericToBoolSIMD[T arrow.NumericType](typ arrow.Type, ctx *exec.KernelCtx, in []T, out []byte) error {
-	if !cpu.ARM64.HasASIMD {
+	if pureGo {
 		return isNonZero(ctx, in, out)
 	}
 
@@ -37,11 +36,10 @@ func numericToBoolSIMD[T arrow.NumericType](typ arrow.Type, ctx *exec.KernelCtx,
 	if bulk != 0 {
 		left := arrow.GetBytes(in[:bulk])
 		right := unsafe.Slice((*byte)(unsafe.Pointer(&zero)), int(unsafe.Sizeof(zero)))
-		_comparison_neon(int(typ), int(CmpNE), neonCompareArrayScalar,
-			unsafe.Pointer(&left[0]), unsafe.Pointer(&right[0]), unsafe.Pointer(&out[0]), int64(bulk/8))
+		comparisonMap[CmpNE][1](typ, left, right, out, int64(bulk), 0)
 	}
-	for i, v := range in[bulk:] {
-		bitutil.SetBitTo(out, bulk+i, v != zero)
+	for i, value := range in[bulk:] {
+		bitutil.SetBitTo(out, bulk+i, value != zero)
 	}
 	return nil
 }
