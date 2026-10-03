@@ -845,7 +845,7 @@ func concat(data []arrow.ArrayData, mem memory.Allocator) (arr arrow.ArrayData, 
 		}
 	case *arrow.MapType:
 		offsetWidth := dt.Layout().Buffers[1].ByteWidth
-		offsetBuffer, valueRanges, err := concatOffsets(gatherFixedBuffers(data, 1, offsetWidth), offsetWidth, mem)
+		offsetBuffer, valueRanges, err := concatOffsetsData(data, offsetWidth, out.length, mem)
 		if err != nil {
 			return nil, err
 		}
