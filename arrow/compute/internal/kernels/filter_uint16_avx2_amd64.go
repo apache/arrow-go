@@ -26,7 +26,6 @@ import (
 
 var filterUint16Avx2Tables = makeFilterUint16Tables()
 
-
 //go:noescape
 func _filter_uint16_avx2(values, filter, output, tables unsafe.Pointer, length int64)
 
