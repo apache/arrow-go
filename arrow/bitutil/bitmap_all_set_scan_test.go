@@ -76,3 +76,33 @@ func BenchmarkBitmapAllSetScan(b *testing.B) {
 		}
 	}
 }
+
+func FuzzBitmapAllSet(f *testing.F) {
+	for _, bitmap := range [][]byte{nil, {0}, {0xff}, {0x7e, 0xff, 0x81}, {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}} {
+		for _, offset := range []uint16{0, 1, 7, 8, 63} {
+			f.Add(bitmap, offset, uint16(65))
+		}
+	}
+	bulk := make([]byte, 129)
+	for i := range bulk {
+		bulk[i] = 0xff
+	}
+	f.Add(bulk, uint16(3), uint16(1024))
+	lateNull := append([]byte(nil), bulk...)
+	bitutil.ClearBit(lateNull, 1025)
+	f.Add(lateNull, uint16(3), uint16(1024))
+	f.Fuzz(func(t *testing.T, bitmap []byte, rawOffset, rawLength uint16) {
+		offset := int(rawOffset) % (len(bitmap)*8 + 1)
+		length := int(rawLength) % (len(bitmap)*8 - offset + 1)
+		want := true
+		for i := offset; i < offset+length; i++ {
+			if !bitutil.BitIsSet(bitmap, i) {
+				want = false
+				break
+			}
+		}
+		if got := bitutil.BitmapAllSet(bitmap, offset, length); got != want {
+			t.Fatalf("BitmapAllSet(%x, %d, %d) = %t, want %t", bitmap, offset, length, got, want)
+		}
+	})
+}
