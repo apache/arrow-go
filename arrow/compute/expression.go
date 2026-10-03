@@ -580,6 +580,7 @@ var (
 		FilterOptions{}, NullOptions{}, StrptimeOptions{}, MakeStructOptions{},
 		DictionaryEncodeOptions{},
 		CumulativeOptions{},
+		ScalarAggregateOptions{}, CountOptions{},
 	}
 )
 

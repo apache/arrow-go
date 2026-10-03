@@ -78,3 +78,47 @@ func TestDeltaLengthByteArrayEncoderPreservesBatches(t *testing.T) {
 		})
 	}
 }
+
+func TestDeltaLengthByteArrayDecoderReusesLengthScratch(t *testing.T) {
+	firstValues := []parquet.ByteArray{
+		parquet.ByteArray("partition/000/value/000"),
+		parquet.ByteArray("partition/000/value/001"),
+		parquet.ByteArray("partition/001/value/000"),
+	}
+	secondValues := []parquet.ByteArray{parquet.ByteArray("partition/100/value/000")}
+	encode := func(values []parquet.ByteArray) []byte {
+		t.Helper()
+		enc := NewEncoder(parquet.Types.ByteArray, parquet.Encodings.DeltaLengthByteArray,
+			false, nil, memory.DefaultAllocator).(ByteArrayEncoder)
+		defer enc.Release()
+		enc.Put(values)
+		buf, err := enc.FlushValues()
+		require.NoError(t, err)
+		defer buf.Release()
+		return append([]byte(nil), buf.Bytes()...)
+	}
+
+	dec := NewDecoder(parquet.Types.ByteArray, parquet.Encodings.DeltaLengthByteArray,
+		nil, memory.DefaultAllocator).(*DeltaLengthByteArrayDecoder)
+	firstData := encode(firstValues)
+	require.NoError(t, dec.SetData(len(firstValues), firstData))
+	lengthStart := &dec.lengthScratch[0]
+	lengthCap := cap(dec.lengthScratch)
+
+	firstOut := make([]parquet.ByteArray, len(firstValues))
+	decoded, err := dec.Decode(firstOut)
+	require.NoError(t, err)
+	require.Equal(t, len(firstValues), decoded)
+	require.Equal(t, firstValues, firstOut)
+
+	secondData := encode(secondValues)
+	require.NoError(t, dec.SetData(len(secondValues), secondData))
+	require.Equal(t, lengthCap, cap(dec.lengthScratch))
+	require.Same(t, lengthStart, &dec.lengthScratch[0])
+
+	secondOut := make([]parquet.ByteArray, len(secondValues))
+	decoded, err = dec.Decode(secondOut)
+	require.NoError(t, err)
+	require.Equal(t, len(secondValues), decoded)
+	require.Equal(t, secondValues, secondOut)
+}

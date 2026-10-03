@@ -129,6 +129,34 @@ func (b *BitWriter) WriteValue(v uint64, nbits uint) error {
 	return nil
 }
 
+// WriteValues writes values using nbits to pack them into the stream.
+func (b *BitWriter) WriteValues(values []uint64, nbits uint) error {
+	buffer := b.buffer
+	bitoffset := b.bitoffset
+	byteoffset := b.byteoffset
+	for _, v := range values {
+		buffer |= v << bitoffset
+		bitoffset += nbits
+
+		if bitoffset >= 64 {
+			binary.LittleEndian.PutUint64(b.raw[:], buffer)
+			if _, err := b.wr.WriteAt(b.raw[:], int64(byteoffset)); err != nil {
+				b.buffer = buffer
+				b.bitoffset = bitoffset
+				b.byteoffset = byteoffset
+				return err
+			}
+			bitoffset -= 64
+			buffer = v >> (nbits - bitoffset)
+			byteoffset += 8
+		}
+	}
+	b.buffer = buffer
+	b.bitoffset = bitoffset
+	b.byteoffset = byteoffset
+	return nil
+}
+
 // Flush will flush any buffered data to the underlying writer, pass true if
 // the next write should be byte-aligned after this flush.
 func (b *BitWriter) Flush(align bool) {

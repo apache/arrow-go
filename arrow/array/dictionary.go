@@ -518,6 +518,12 @@ type IndexBuilder struct {
 	UnsafeAppend func(int)
 }
 
+func appendDictionaryIndices[T arrow.IntType | arrow.UintType](dst []T, indices []int) {
+	for i, idx := range indices {
+		dst[i] = T(idx)
+	}
+}
+
 func createIndexBuilder(mem memory.Allocator, dt arrow.FixedWidthDataType) (ret IndexBuilder, err error) {
 	ret = IndexBuilder{Builder: NewBuilder(mem, dt)}
 	switch dt.ID() {
@@ -1181,57 +1187,42 @@ func (b *dictionaryBuilder) IndexBuilder() IndexBuilder {
 }
 
 func (b *dictionaryBuilder) AppendIndices(indices []int, valid []bool) {
-	b.length += len(indices)
+	if len(indices) != len(valid) && len(valid) != 0 {
+		panic("len(indices) != len(valid) && len(valid) != 0")
+	}
+
+	if len(indices) == 0 {
+		return
+	}
+
+	b.idxBuilder.Reserve(len(indices))
 	switch idxbldr := b.idxBuilder.Builder.(type) {
 	case *Int8Builder:
-		vals := make([]int8, len(indices))
-		for i, v := range indices {
-			vals[i] = int8(v)
-		}
-		idxbldr.AppendValues(vals, valid)
+		appendDictionaryIndices(idxbldr.rawData[idxbldr.length:], indices)
+		idxbldr.unsafeAppendBoolsToBitmap(valid, len(indices))
 	case *Int16Builder:
-		vals := make([]int16, len(indices))
-		for i, v := range indices {
-			vals[i] = int16(v)
-		}
-		idxbldr.AppendValues(vals, valid)
+		appendDictionaryIndices(idxbldr.rawData[idxbldr.length:], indices)
+		idxbldr.unsafeAppendBoolsToBitmap(valid, len(indices))
 	case *Int32Builder:
-		vals := make([]int32, len(indices))
-		for i, v := range indices {
-			vals[i] = int32(v)
-		}
-		idxbldr.AppendValues(vals, valid)
+		appendDictionaryIndices(idxbldr.rawData[idxbldr.length:], indices)
+		idxbldr.unsafeAppendBoolsToBitmap(valid, len(indices))
 	case *Int64Builder:
-		vals := make([]int64, len(indices))
-		for i, v := range indices {
-			vals[i] = int64(v)
-		}
-		idxbldr.AppendValues(vals, valid)
+		appendDictionaryIndices(idxbldr.rawData[idxbldr.length:], indices)
+		idxbldr.unsafeAppendBoolsToBitmap(valid, len(indices))
 	case *Uint8Builder:
-		vals := make([]uint8, len(indices))
-		for i, v := range indices {
-			vals[i] = uint8(v)
-		}
-		idxbldr.AppendValues(vals, valid)
+		appendDictionaryIndices(idxbldr.rawData[idxbldr.length:], indices)
+		idxbldr.unsafeAppendBoolsToBitmap(valid, len(indices))
 	case *Uint16Builder:
-		vals := make([]uint16, len(indices))
-		for i, v := range indices {
-			vals[i] = uint16(v)
-		}
-		idxbldr.AppendValues(vals, valid)
+		appendDictionaryIndices(idxbldr.rawData[idxbldr.length:], indices)
+		idxbldr.unsafeAppendBoolsToBitmap(valid, len(indices))
 	case *Uint32Builder:
-		vals := make([]uint32, len(indices))
-		for i, v := range indices {
-			vals[i] = uint32(v)
-		}
-		idxbldr.AppendValues(vals, valid)
+		appendDictionaryIndices(idxbldr.rawData[idxbldr.length:], indices)
+		idxbldr.unsafeAppendBoolsToBitmap(valid, len(indices))
 	case *Uint64Builder:
-		vals := make([]uint64, len(indices))
-		for i, v := range indices {
-			vals[i] = uint64(v)
-		}
-		idxbldr.AppendValues(vals, valid)
+		appendDictionaryIndices(idxbldr.rawData[idxbldr.length:], indices)
+		idxbldr.unsafeAppendBoolsToBitmap(valid, len(indices))
 	}
+	b.length += len(indices)
 }
 
 func (b *dictionaryBuilder) DictionarySize() int {

@@ -495,6 +495,14 @@ func PrimitiveFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 			return nil
 		}
 	}
+	if bitWidth == 64 && values.Nulls == 0 && filter.Nulls == 0 {
+		valuesData := exec.GetSpanValues[uint64](values, 1)
+		outData := exec.GetSpanValues[uint64](out, 1)
+		if filterUint64Avx2(valuesData, outData, filter.Buffers[1].Buf, filter.Offset, values.Len) ||
+			filterUint64Neon(valuesData, outData, filter.Buffers[1].Buf, filter.Offset, values.Len) {
+			return nil
+		}
+	}
 
 	var wr writeFiltered
 	switch bitWidth {

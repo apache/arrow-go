@@ -464,10 +464,8 @@ func (r *RleEncoder) flushLiteral(updateIndicator bool) (err error) {
 		}
 	}
 
-	for _, val := range r.buffer {
-		if err = r.w.WriteValue(val, uint(r.BitWidth)); err != nil {
-			return
-		}
+	if err = r.w.WriteValues(r.buffer, uint(r.BitWidth)); err != nil {
+		return
 	}
 	r.buffer = r.buffer[:0]
 
@@ -573,6 +571,85 @@ func (r *RleEncoder) PutBatchLevels(values []int16) (int, error) {
 		}
 	}
 	return encoded, nil
+}
+
+// PutBatchIndices encodes a batch of dictionary indices.
+func (r *RleEncoder) PutBatchIndices(values []int32) (int, error) {
+	encoded := 0
+	for encoded < len(values) {
+		value := values[encoded]
+		if r.repCount >= 8 {
+			if r.curVal != uint64(value) {
+				if !r.flushRepeated() {
+					return encoded, errors.New("failed to flush repeated value")
+				}
+			} else {
+				runEnd := encoded + 1
+				for runEnd < len(values) && values[runEnd] == value {
+					runEnd++
+				}
+
+				runLength := min(runEnd-encoded, int(math.MaxInt32-r.repCount))
+				r.repCount += int32(runLength)
+				encoded += runLength
+				if r.repCount == math.MaxInt32 && encoded < len(values) && values[encoded] == value {
+					if !r.flushRepeated() {
+						return encoded, errors.New("failed to flush repeated value")
+					}
+				}
+				continue
+			}
+		}
+		if r.repCount == 0 && len(r.buffer) == 0 && len(values)-encoded >= 8 && values[encoded+7] == value {
+			runEnd := encoded + 1
+			for runEnd < len(values) && values[runEnd] == value {
+				runEnd++
+			}
+			if runEnd-encoded >= 8 {
+				r.curVal = uint64(value)
+				if r.litCount != 0 {
+					r.repCount = 8
+					if err := r.flushLiteral(true); err != nil {
+						return encoded, err
+					}
+					encoded += 8
+				}
+				runLength := min(runEnd-encoded, int(math.MaxInt32-r.repCount))
+				r.repCount += int32(runLength)
+				encoded += runLength
+				continue
+			}
+		}
+
+		if r.repCount == 0 && len(r.buffer) == 0 && len(values)-encoded >= 8 {
+			if err := r.putBatchIndicesLiteral(values[encoded:]); err != nil {
+				return encoded + 7, err
+			}
+			encoded += 8
+			continue
+		}
+
+		batchEnd := min(len(values), encoded+8-len(r.buffer))
+		for encoded < batchEnd {
+			if err := r.Put(uint64(values[encoded])); err != nil {
+				return encoded, err
+			}
+			encoded++
+		}
+	}
+	return encoded, nil
+}
+
+// putBatchIndicesLiteral writes the first complete literal group directly.
+// The caller ensures that values contains at least eight entries and that the
+// encoder has no active repeated run or buffered values.
+func (r *RleEncoder) putBatchIndicesLiteral(values []int32) error {
+	r.buffer = r.buffer[:8]
+	for i, index := range values[:8] {
+		r.buffer[i] = uint64(index)
+	}
+	r.curVal = r.buffer[7]
+	return r.flushBuffered(false)
 }
 
 func (r *RleEncoder) Clear() {

@@ -109,6 +109,17 @@ func (s *SqlTestSuite) SetupSuite() {
 	require.Contains(s.T(), s.Statements, "placeholder query")
 }
 
+func execFixture(t *testing.T, db *sql.DB, query string) sql.Result {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	result, err := db.ExecContext(ctx, query)
+	require.NoError(t, err)
+	return result
+}
+
 func (s *SqlTestSuite) TestOpenClose() {
 	t := s.T()
 
@@ -451,8 +462,7 @@ func (s *SqlTestSuite) TestRowsManualPrematureClose() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -536,8 +546,7 @@ func (s *SqlTestSuite) TestRowsNormalExhaustion() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -628,8 +637,7 @@ func (s *SqlTestSuite) TestRowsPrematureCloseDuringNextLoop() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -722,8 +730,7 @@ func (s *SqlTestSuite) TestRowsInterruptionByContextManualCancellation() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -810,8 +817,7 @@ func (s *SqlTestSuite) TestRowsInterruptionByContextTimeout() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -902,8 +908,7 @@ func (s *SqlTestSuite) TestRowsManualPrematureCloseStmt() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -993,8 +998,7 @@ func (s *SqlTestSuite) TestRowsNormalExhaustionStmt() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -1088,8 +1092,7 @@ func (s *SqlTestSuite) TestRowsPrematureCloseDuringNextLoopStmt() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -1188,8 +1191,7 @@ func (s *SqlTestSuite) TestRowsInterruptionByContextManualCancellationStmt() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -1279,8 +1281,7 @@ func (s *SqlTestSuite) TestRowsInterruptionByContextTimeoutStmt() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
