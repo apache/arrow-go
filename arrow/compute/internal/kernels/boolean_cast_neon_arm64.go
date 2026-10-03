@@ -27,7 +27,7 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
-func numericToBoolNeon[T arrow.NumericType](typ arrow.Type, ctx *exec.KernelCtx, in []T, out []byte) error {
+func numericToBoolSIMD[T arrow.NumericType](typ arrow.Type, ctx *exec.KernelCtx, in []T, out []byte) error {
 	if !cpu.ARM64.HasASIMD {
 		return isNonZero(ctx, in, out)
 	}
