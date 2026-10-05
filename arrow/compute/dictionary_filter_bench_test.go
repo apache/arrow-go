@@ -34,8 +34,8 @@ var dictionaryFilterBenchmarkOutputLength int
 
 func BenchmarkFilterDictionaryIndices(b *testing.B) {
 	patterns := []struct {
-		name     string
-		selected func(int) bool
+		name       string
+		selected   func(int) bool
 		null       func(int) bool
 		nullSelect compute.NullSelectionBehavior
 	}{
