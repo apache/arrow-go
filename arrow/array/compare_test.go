@@ -24,6 +24,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/internal/arrdata"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -1013,6 +1014,90 @@ func TestArrayEqualValidityBitmapWithZeroNullCount(t *testing.T) {
 	defer right.Release()
 
 	assert.False(t, array.Equal(left, right))
+}
+
+func TestArrayEqualOptionalValidityBitmap(t *testing.T) {
+	for _, length := range []int{0, 1, 7, 8, 9, 63, 64, 65, 129} {
+		for _, offset := range []int{0, 3, 8, 63, 65} {
+			for _, empty := range []bool{false, true} {
+				for _, nulls := range []int{0, array.UnknownNullCount} {
+					t.Run(fmt.Sprintf("len=%d/offset=%d/empty=%t/nulls=%d", length, offset, empty, nulls), func(t *testing.T) {
+						var missing *memory.Buffer
+						if empty {
+							missing = memory.NewBufferBytes([]byte{})
+							defer missing.Release()
+						}
+						left := makeBooleanValidityEqualityArray(length, 5, missing, 0)
+						defer left.Release()
+
+						bitmap := make([]byte, bitutil.BytesForBits(int64(offset+length+1)))
+						for i := range length {
+							bitutil.SetBit(bitmap, offset+i)
+						}
+						validity := memory.NewBufferBytes(bitmap)
+						defer validity.Release()
+						right := makeBooleanValidityEqualityArray(length, offset, validity, nulls)
+						defer right.Release()
+
+						assert.True(t, array.Equal(left, right))
+						assert.True(t, array.Equal(right, left))
+						assert.True(t, array.ApproxEqual(left, right))
+						assert.True(t, array.ApproxEqual(right, left))
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestArrayEqualOptionalValidityBitmapMismatch(t *testing.T) {
+	const length = 129
+	for _, offset := range []int{0, 3, 65} {
+		for _, nullIndex := range []int{0, 7, 63, 64, length - 1} {
+			for _, nulls := range []int{0, array.UnknownNullCount} {
+				t.Run(fmt.Sprintf("offset=%d/null=%d/nulls=%d", offset, nullIndex, nulls), func(t *testing.T) {
+					left := makeBooleanValidityEqualityArray(length, 0, nil, 0)
+					defer left.Release()
+					bitmap := make([]byte, bitutil.BytesForBits(int64(offset+length)))
+					for i := range length {
+						bitutil.SetBit(bitmap, offset+i)
+					}
+					bitutil.ClearBit(bitmap, offset+nullIndex)
+					validity := memory.NewBufferBytes(bitmap)
+					defer validity.Release()
+					right := makeBooleanValidityEqualityArray(length, offset, validity, nulls)
+					defer right.Release()
+
+					assert.False(t, array.Equal(left, right))
+					assert.False(t, array.Equal(right, left))
+					assert.False(t, array.ApproxEqual(left, right))
+					assert.False(t, array.ApproxEqual(right, left))
+				})
+			}
+		}
+	}
+}
+
+func TestArrayEqualEmptyValidityRangePastBuffer(t *testing.T) {
+	left := makeBooleanValidityEqualityArray(0, 0, nil, 0)
+	defer left.Release()
+	validity := memory.NewBufferBytes([]byte{0xff})
+	defer validity.Release()
+	right := makeBooleanValidityEqualityArray(0, 64, validity, 0)
+	defer right.Release()
+
+	assert.True(t, array.Equal(left, right))
+	assert.True(t, array.Equal(right, left))
+	assert.True(t, array.ApproxEqual(left, right))
+	assert.True(t, array.ApproxEqual(right, left))
+}
+
+func makeBooleanValidityEqualityArray(length, offset int, validity *memory.Buffer, nulls int) *array.Boolean {
+	values := memory.NewBufferBytes(make([]byte, bitutil.BytesForBits(int64(offset+length))))
+	defer values.Release()
+	data := array.NewData(arrow.FixedWidthTypes.Boolean, length, []*memory.Buffer{validity, values}, nil, nulls, offset)
+	defer data.Release()
+	return array.NewBooleanData(data)
 }
 
 func TestArrayEqualNull(t *testing.T) {

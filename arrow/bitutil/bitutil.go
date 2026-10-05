@@ -114,6 +114,8 @@ func CountSetBits(buf []byte, offset, n int) int {
 }
 
 // BitmapAllSet reports whether all bits in the requested range are set.
+// For n == 0, it returns true for any buf and offset. Otherwise, buf must
+// cover offset+n bits or BitmapAllSet panics, matching CountSetBits.
 func BitmapAllSet(buf []byte, offset, n int) bool {
 	if n == 0 {
 		return true
