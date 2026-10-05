@@ -45,7 +45,7 @@ func BenchmarkFilterDictionaryIndices(b *testing.B) {
 		{name: "alternating", selected: func(i int) bool { return i%2 == 0 }},
 		{name: "clustered50", selected: func(i int) bool { return (i/4096)%2 == 0 }},
 		{
-			name:       "nullable-random50-drop",
+			name:       "nullable-random50",
 			selected:   func(i int) bool { return dictionaryFilterSelect(i, 50) },
 			null:       func(i int) bool { return i%11 == 0 },
 			nullSelect: compute.SelectionDropNulls,
