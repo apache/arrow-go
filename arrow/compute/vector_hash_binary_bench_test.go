@@ -56,6 +56,23 @@ func BenchmarkDictionaryEncodeBinary(b *testing.B) {
 		benchmarkDictionaryEncodeBinary(b, ctx, input, bytes)
 	})
 
+	b.Run("large-string", func(b *testing.B) {
+		values := make([]string, nvalues)
+		bytes := 0
+		for i := range values {
+			values[i] = fmt.Sprintf("value-%08d", i%nunique)
+			bytes += len(values[i])
+		}
+
+		builder := array.NewLargeStringBuilder(mem)
+		builder.AppendValues(values, nil)
+		input := builder.NewLargeStringArray()
+		builder.Release()
+		defer input.Release()
+
+		benchmarkDictionaryEncodeBinary(b, ctx, input, bytes)
+	})
+
 	b.Run("fixed-size-binary-16", func(b *testing.B) {
 		values := make([][]byte, nvalues)
 		for i := range values {
