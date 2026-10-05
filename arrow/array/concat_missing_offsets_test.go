@@ -30,7 +30,9 @@ func TestConcatMissingOffsetsDiagnostic(t *testing.T) {
 		arrow.LargeListOf(arrow.PrimitiveTypes.Int8),
 		arrow.MapOf(arrow.PrimitiveTypes.Int8, arrow.PrimitiveTypes.Int8),
 		arrow.BinaryTypes.Binary,
+		arrow.BinaryTypes.String,
 		arrow.BinaryTypes.LargeBinary,
+		arrow.BinaryTypes.LargeString,
 	} {
 		t.Run(dtype.Name(), func(t *testing.T) {
 			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
