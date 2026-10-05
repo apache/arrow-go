@@ -125,6 +125,9 @@ func testFilterUint8Guards(t *testing.T, filter filterUint8Func) {
 		mixed[i] = 0x55
 	}
 	output := make([]uint8, 1024)
+	if filter(values[:63], output, mixed[:8], 0, 64) {
+		t.Fatal("filterUint8 accepted values shorter than length")
+	}
 	lateMixed := make([]byte, 128)
 	for i := 0; i < 64; i++ {
 		lateMixed[i] = 0xff
