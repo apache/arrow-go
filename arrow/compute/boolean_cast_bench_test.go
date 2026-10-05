@@ -69,8 +69,7 @@ func BenchmarkNumericToBoolCast(b *testing.B) {
 
 					b.ReportAllocs()
 					b.SetBytes(int64(size) * width)
-					b.ResetTimer()
-					for i := 0; i < b.N; i++ {
+					for b.Loop() {
 						output, err := compute.CastArray(ctx, input, opts)
 						if err != nil {
 							b.Fatal(err)
@@ -104,9 +103,7 @@ func BenchmarkNumericToBoolCastNullPatterns(b *testing.B) {
 	} {
 		width := int64(typ.(arrow.FixedWidthDataType).Bytes())
 		for _, size := range []int{65536, 1_000_000} {
-			size := size
 			for _, pattern := range patterns {
-				pattern := pattern
 				b.Run(fmt.Sprintf("type=%s/size=%d/nulls=%s", typ, size, pattern.name), func(b *testing.B) {
 					mem := memory.NewGoAllocator()
 					input := newBooleanCastBenchmarkArrayWithNullPattern(mem, typ, size, pattern.isNull)
@@ -117,8 +114,7 @@ func BenchmarkNumericToBoolCastNullPatterns(b *testing.B) {
 
 					b.ReportAllocs()
 					b.SetBytes(int64(size) * width)
-					b.ResetTimer()
-					for i := 0; i < b.N; i++ {
+					for b.Loop() {
 						output, err := compute.CastArray(ctx, input, opts)
 						if err != nil {
 							b.Fatal(err)
