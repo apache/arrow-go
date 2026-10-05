@@ -28,7 +28,7 @@ tool (
 
 require (
 	github.com/andybalholm/brotli v1.2.6
-	github.com/apache/thrift v0.24.0
+	github.com/apache/thrift v0.25.0
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/goccy/go-json v0.10.6
 	github.com/google/flatbuffers v25.12.19+incompatible
