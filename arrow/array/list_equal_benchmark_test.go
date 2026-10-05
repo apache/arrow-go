@@ -73,6 +73,7 @@ func BenchmarkListApproxEqual(b *testing.B) {
 		validity string
 	}{
 		{"list", arrow.PrimitiveTypes.Int32, 16, "all-valid"},
+		{"list", arrow.BinaryTypes.String, 16, "all-valid"},
 		{"large-list", arrow.PrimitiveTypes.Int32, 16, "all-valid"},
 		{"fixed-size-list", arrow.PrimitiveTypes.Int32, 16, "all-valid"},
 		{"list", arrow.PrimitiveTypes.Int32, 16, "10pct-null"},
