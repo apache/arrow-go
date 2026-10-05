@@ -70,6 +70,30 @@ func TestNumericToBoolSIMDBoundaries(t *testing.T) {
 		run  func(*testing.T, int)
 	}{
 		{
+			name: "int8",
+			run: func(t *testing.T, n int) {
+				checkNumericToBoolSIMD(t, arrow.INT8, numericToBoolBoundaryValues[int8](n))
+			},
+		},
+		{
+			name: "uint8",
+			run: func(t *testing.T, n int) {
+				checkNumericToBoolSIMD(t, arrow.UINT8, numericToBoolBoundaryValues[uint8](n))
+			},
+		},
+		{
+			name: "int16",
+			run: func(t *testing.T, n int) {
+				checkNumericToBoolSIMD(t, arrow.INT16, numericToBoolBoundaryValues[int16](n))
+			},
+		},
+		{
+			name: "uint16",
+			run: func(t *testing.T, n int) {
+				checkNumericToBoolSIMD(t, arrow.UINT16, numericToBoolBoundaryValues[uint16](n))
+			},
+		},
+		{
 			name: "int32",
 			run: func(t *testing.T, n int) {
 				checkNumericToBoolSIMD(t, arrow.INT32, numericToBoolBoundaryValues[int32](n))
