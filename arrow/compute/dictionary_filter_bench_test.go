@@ -36,7 +36,8 @@ func BenchmarkFilterDictionaryIndices(b *testing.B) {
 	patterns := []struct {
 		name     string
 		selected func(int) bool
-		null     func(int) bool
+		null       func(int) bool
+		nullSelect compute.NullSelectionBehavior
 	}{
 		{name: "random10", selected: func(i int) bool { return dictionaryFilterSelect(i, 10) }},
 		{name: "random50", selected: func(i int) bool { return dictionaryFilterSelect(i, 50) }},
@@ -44,9 +45,16 @@ func BenchmarkFilterDictionaryIndices(b *testing.B) {
 		{name: "alternating", selected: func(i int) bool { return i%2 == 0 }},
 		{name: "clustered50", selected: func(i int) bool { return (i/4096)%2 == 0 }},
 		{
-			name:     "nullable-random50",
-			selected: func(i int) bool { return dictionaryFilterSelect(i, 50) },
-			null:     func(i int) bool { return i%11 == 0 },
+			name:       "nullable-random50-drop",
+			selected:   func(i int) bool { return dictionaryFilterSelect(i, 50) },
+			null:       func(i int) bool { return i%11 == 0 },
+			nullSelect: compute.SelectionDropNulls,
+		},
+		{
+			name:       "nullable-random50-emit",
+			selected:   func(i int) bool { return dictionaryFilterSelect(i, 50) },
+			null:       func(i int) bool { return i%11 == 0 },
+			nullSelect: compute.SelectionEmitNulls,
 		},
 	}
 
@@ -63,7 +71,7 @@ func BenchmarkFilterDictionaryIndices(b *testing.B) {
 				b.SetBytes(int64(size * 4))
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
-					result, err := compute.FilterArray(context.Background(), values, filter, *compute.DefaultFilterOptions())
+					result, err := compute.FilterArray(context.Background(), values, filter, compute.FilterOptions{NullSelection: pattern.nullSelect})
 					if err != nil {
 						b.Fatal(err)
 					}
