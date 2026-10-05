@@ -171,7 +171,6 @@ func benchmarkFilter8FallbackControls(
 	}
 
 	for _, control := range controls {
-		control := control
 		b.Run(control.name, func(b *testing.B) {
 			values, filter := makeInput(b, control.size, control.offset,
 				func(i int) bool { return i%2 == 0 })
@@ -180,8 +179,7 @@ func benchmarkFilter8FallbackControls(
 
 			b.ReportAllocs()
 			b.SetBytes(int64(control.size))
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				result, err := compute.FilterArray(context.Background(), values, filter, *compute.DefaultFilterOptions())
 				if err != nil {
 					b.Fatal(err)
