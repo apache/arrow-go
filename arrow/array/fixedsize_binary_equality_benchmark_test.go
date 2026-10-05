@@ -88,7 +88,6 @@ func BenchmarkFixedSizeBinaryEquality(b *testing.B) {
 
 					b.ReportAllocs()
 					b.SetBytes(int64(size * width))
-					b.ResetTimer()
 					for b.Loop() {
 						fixedSizeBinaryEqualityResult = array.Equal(left, right)
 					}
@@ -123,7 +122,6 @@ func BenchmarkFixedSizeBinaryEqualityMismatch(b *testing.B) {
 
 				b.ReportAllocs()
 				b.SetBytes(int64(size * width))
-				b.ResetTimer()
 				for b.Loop() {
 					fixedSizeBinaryEqualityResult = array.Equal(left, right)
 				}
