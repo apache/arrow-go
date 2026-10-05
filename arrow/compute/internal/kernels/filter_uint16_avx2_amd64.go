@@ -30,7 +30,7 @@ var filterUint16Avx2Tables = makeFilterUint16Tables()
 func _filter_uint16_avx2(values, filter, output, tables unsafe.Pointer, length int64)
 
 func filterUint16Avx2(values []uint16, output []uint16, filterData []byte, filterOffset, length int64) bool {
-	if !cpu.X86.HasAVX2 || len(output) == 0 {
+	if !cpu.X86.HasAVX2 || length > int64(len(values)) || len(output) == 0 {
 		return false
 	}
 
