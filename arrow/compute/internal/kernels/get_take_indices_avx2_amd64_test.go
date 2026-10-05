@@ -21,6 +21,8 @@ package kernels
 import (
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/require"
@@ -51,6 +53,29 @@ func TestGetTakeIndicesUint32AVX2(t *testing.T) {
 		defer filter.Release()
 		var span exec.ArraySpan
 		span.SetMembers(filter.Data())
+
+		result, ok := getTakeIndicesUint32AVX2(mem, &span)
+		require.True(t, ok)
+		defer result.Release()
+		assertTakeIndices[uint32](t, result, want, nil)
+	})
+
+	t.Run("dirty_tail_padding", func(t *testing.T) {
+		const tailLength = 67
+		filterBytes := []byte{0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0xff}
+		want := make([]uint32, 0, tailLength/2)
+		for i := 0; i < tailLength; i++ {
+			if filterBytes[i/8]&(1<<uint(i%8)) != 0 {
+				want = append(want, uint32(i))
+			}
+		}
+
+		valuesBuffer := memory.NewBufferBytes(filterBytes)
+		defer valuesBuffer.Release()
+		data := array.NewData(arrow.FixedWidthTypes.Boolean, tailLength, []*memory.Buffer{nil, valuesBuffer}, nil, 0, 0)
+		defer data.Release()
+		var span exec.ArraySpan
+		span.SetMembers(data)
 
 		result, ok := getTakeIndicesUint32AVX2(mem, &span)
 		require.True(t, ok)
