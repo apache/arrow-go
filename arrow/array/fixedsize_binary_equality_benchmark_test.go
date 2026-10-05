@@ -98,7 +98,6 @@ func BenchmarkFixedSizeBinaryEquality(b *testing.B) {
 	}
 }
 
-
 func BenchmarkFixedSizeBinaryEqualityMismatch(b *testing.B) {
 	const size = 64 * 1024
 	for _, width := range []int{8, 32, 128} {
