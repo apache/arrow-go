@@ -286,7 +286,6 @@ func BenchmarkConcatenateList(b *testing.B) {
 		defer backing.Release()
 
 		for _, chunkCount := range []int{64, 1024, 8192} {
-			chunkCount := chunkCount
 			b.Run(fmt.Sprintf("%s/chunks=%d", dt.Name(), chunkCount), func(b *testing.B) {
 				chunkSize := totalValues / chunkCount
 				inputs := make([]arrow.Array, chunkCount)
@@ -302,7 +301,6 @@ func BenchmarkConcatenateList(b *testing.B) {
 
 				b.SetBytes(int64(totalValues))
 				b.ReportAllocs()
-				b.ResetTimer()
 				for b.Loop() {
 					result, err := array.Concatenate(inputs, memory.DefaultAllocator)
 					if err != nil {
