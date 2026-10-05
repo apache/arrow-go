@@ -97,3 +97,38 @@ func BenchmarkFixedSizeBinaryEquality(b *testing.B) {
 		}
 	}
 }
+
+
+func BenchmarkFixedSizeBinaryEqualityMismatch(b *testing.B) {
+	const size = 64 * 1024
+	for _, width := range []int{8, 32, 128} {
+		for _, mismatch := range []struct {
+			name string
+			row  int
+		}{
+			{name: "first", row: 0},
+			{name: "last", row: size - 1},
+		} {
+			b.Run(fmt.Sprintf("width_%d/%s", width, mismatch.name), func(b *testing.B) {
+				leftValues := make([]byte, size*width)
+				for i := range leftValues {
+					leftValues[i] = byte(i*31 + i/width*17)
+				}
+				rightValues := append([]byte(nil), leftValues...)
+				rightValues[mismatch.row*width]++
+
+				left := makeFixedSizeBinaryEqualityArray(width, leftValues, nil, size, 0, 0)
+				right := makeFixedSizeBinaryEqualityArray(width, rightValues, nil, size, 0, 0)
+				b.Cleanup(left.Release)
+				b.Cleanup(right.Release)
+
+				b.ReportAllocs()
+				b.SetBytes(int64(size * width))
+				b.ResetTimer()
+				for b.Loop() {
+					fixedSizeBinaryEqualityResult = array.Equal(left, right)
+				}
+			})
+		}
+	}
+}
