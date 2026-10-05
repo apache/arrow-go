@@ -30,7 +30,7 @@ var filterUint16NeonTables = makeFilterUint16Tables()
 func _filter_uint16_neon(values, filter, output, tables unsafe.Pointer, length int64)
 
 func filterUint16Neon(values []uint16, output []uint16, filterData []byte, filterOffset, length int64) bool {
-	if !cpu.ARM64.HasASIMD || len(output) == 0 {
+	if !cpu.ARM64.HasASIMD || length > int64(len(values)) || len(output) == 0 {
 		return false
 	}
 
