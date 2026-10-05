@@ -93,7 +93,6 @@ func BenchmarkDictionaryEncodeBinary(b *testing.B) {
 func benchmarkDictionaryEncodeBinary(b *testing.B, ctx context.Context, input arrow.Array, bytes int) {
 	b.ReportAllocs()
 	b.SetBytes(int64(bytes))
-	b.ResetTimer()
 	for b.Loop() {
 		result, err := compute.DictionaryEncodeArray(ctx, compute.DictionaryEncodeOptions{}, input)
 		if err != nil {
