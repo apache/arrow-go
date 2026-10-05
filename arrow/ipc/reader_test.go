@@ -257,3 +257,158 @@ func BenchmarkIPC(b *testing.B) {
 		})
 	}
 }
+
+// writeSplitStream writes recs with a single Writer and returns the bytes it
+// produced for each record as a separate blob: the first blob carries the
+// schema and dictionaries, and the last one also carries the end-of-stream
+// marker.
+func writeSplitStream(t *testing.T, mem memory.Allocator, schema *arrow.Schema, recs []arrow.RecordBatch) [][]byte {
+	t.Helper()
+	var buf bytes.Buffer
+	w := NewWriter(&buf, WithSchema(schema), WithAllocator(mem))
+	blobs := make([][]byte, 0, len(recs))
+	for _, rec := range recs {
+		require.NoError(t, w.Write(rec))
+		blobs = append(blobs, bytes.Clone(buf.Bytes()))
+		buf.Reset()
+	}
+	require.NoError(t, w.Close())
+	blobs[len(blobs)-1] = append(blobs[len(blobs)-1], buf.Bytes()...)
+	return blobs
+}
+
+func TestReaderContinueFrom(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "i", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "d", Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}},
+	}, nil)
+
+	recs := make([]arrow.RecordBatch, 3)
+	for n := range recs {
+		b := array.NewRecordBuilder(mem, schema)
+		b.Field(0).(*array.Int64Builder).AppendValues([]int64{int64(2 * n), int64(2*n + 1)}, nil)
+		require.NoError(t, b.Field(1).(*array.BinaryDictionaryBuilder).AppendString("foo"))
+		require.NoError(t, b.Field(1).(*array.BinaryDictionaryBuilder).AppendString("bar"))
+		recs[n] = b.NewRecordBatch()
+		b.Release()
+		defer recs[n].Release()
+	}
+	blobs := writeSplitStream(t, mem, schema, recs)
+
+	readAll := func(t *testing.T, useRead bool) {
+		rdr, err := NewReader(bytes.NewReader(blobs[0]), WithAllocator(mem))
+		require.NoError(t, err)
+		defer rdr.Release()
+
+		var got []arrow.RecordBatch
+		for i, blob := range blobs {
+			if i > 0 {
+				require.NoError(t, rdr.ContinueFrom(bytes.NewReader(blob)))
+			}
+			for {
+				var rec arrow.RecordBatch
+				if useRead {
+					rec, err = rdr.Read()
+					if err == io.EOF {
+						break
+					}
+					require.NoError(t, err)
+				} else {
+					if !rdr.Next() {
+						require.NoError(t, rdr.Err())
+						break
+					}
+					rec = rdr.RecordBatch()
+				}
+				rec.Retain()
+				got = append(got, rec)
+			}
+		}
+
+		require.Len(t, got, len(recs))
+		for i, rec := range got {
+			assert.Truef(t, array.RecordEqual(recs[i], rec), "batch %d: got %v, want %v", i, rec, recs[i])
+			rec.Release()
+		}
+	}
+
+	t.Run("Next", func(t *testing.T) { readAll(t, false) })
+	t.Run("Read", func(t *testing.T) { readAll(t, true) })
+
+	t.Run("SchemaMessageInContinuation", func(t *testing.T) {
+		rdr, err := NewReader(bytes.NewReader(blobs[0]), WithAllocator(mem))
+		require.NoError(t, err)
+		defer rdr.Release()
+		for rdr.Next() {
+		}
+		require.NoError(t, rdr.Err())
+
+		// a whole new stream, schema message included, is not a continuation
+		require.NoError(t, rdr.ContinueFrom(bytes.NewReader(bytes.Join(blobs, nil))))
+		assert.False(t, rdr.Next())
+		assert.ErrorContains(t, rdr.Err(), "unexpected schema message")
+
+		_, err = rdr.Read()
+		assert.ErrorContains(t, err, "unexpected schema message")
+
+		// the failure is sticky: continuing again must not hide it
+		assert.ErrorContains(t, rdr.ContinueFrom(bytes.NewReader(blobs[1])), "unexpected schema message")
+	})
+
+	t.Run("SchemaNotRead", func(t *testing.T) {
+		rdr, err := NewReader(bytes.NewReader(blobs[0]), WithAllocator(mem), WithDelayReadSchema(true))
+		require.NoError(t, err)
+		defer rdr.Release()
+
+		assert.ErrorContains(t, rdr.ContinueFrom(bytes.NewReader(blobs[1])), "has not read its schema")
+		// the reader is untouched and still reads its original source
+		assert.True(t, rdr.Next())
+		assert.EqualValues(t, 2, rdr.RecordBatch().NumRows())
+	})
+}
+
+func TestReaderSizeLimits(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "i", Type: arrow.PrimitiveTypes.Int64}}, nil)
+	// a small batch whose body fits under the limit, then one whose body
+	// (1000 int64 values) does not
+	recs := make([]arrow.RecordBatch, 2)
+	for n, rows := range []int{2, 1000} {
+		b := array.NewRecordBuilder(mem, schema)
+		b.Field(0).(*array.Int64Builder).AppendValues(make([]int64, rows), nil)
+		recs[n] = b.NewRecordBatch()
+		b.Release()
+		defer recs[n].Release()
+	}
+	blobs := writeSplitStream(t, mem, schema, recs)
+	const bodyLimit = 1024
+
+	t.Run("NewReader", func(t *testing.T) {
+		rdr, err := NewReader(bytes.NewReader(bytes.Join(blobs, nil)), WithAllocator(mem), WithBodySizeLimit(bodyLimit))
+		require.NoError(t, err)
+		defer rdr.Release()
+
+		require.True(t, rdr.Next())
+		assert.False(t, rdr.Next())
+		assert.ErrorContains(t, rdr.Err(), "exceeds limit 1024")
+	})
+
+	t.Run("ContinueFrom", func(t *testing.T) {
+		rdr, err := NewReader(bytes.NewReader(blobs[0]), WithAllocator(mem), WithBodySizeLimit(bodyLimit))
+		require.NoError(t, err)
+		defer rdr.Release()
+
+		require.True(t, rdr.Next())
+		require.False(t, rdr.Next())
+		require.NoError(t, rdr.Err())
+
+		require.NoError(t, rdr.ContinueFrom(bytes.NewReader(blobs[1])))
+		assert.False(t, rdr.Next())
+		assert.ErrorContains(t, rdr.Err(), "exceeds limit 1024")
+	})
+}
