@@ -1,32 +1,13 @@
 	.intel_syntax noprefix
 	.file	"get_take_indices_avx2_amd64.cc"
-	.section	.rodata.cst16,"aM",@progbits,16
-	.p2align	4, 0x0                          # -- Begin function get_take_indices_uint32_avx2
-.LCPI0_0:
-	.long	0                               # 0x0
-	.long	1                               # 0x1
-	.long	2                               # 0x2
-	.long	3                               # 0x3
-.LCPI0_1:
-	.long	4                               # 0x4
-	.long	5                               # 0x5
-	.long	6                               # 0x6
-	.long	7                               # 0x7
-	.section	.rodata.cst4,"aM",@progbits,4
-	.p2align	2, 0x0
-.LCPI0_2:
-	.long	8                               # 0x8
 	.text
 	.globl	get_take_indices_uint32_avx2
 	.p2align	4
 	.type	get_take_indices_uint32_avx2,@function
 get_take_indices_uint32_avx2:           # @get_take_indices_uint32_avx2
 # %bb.0:
-	push	rbp
-	mov	rbp, rsp
 	push	r14
 	push	rbx
-	and	rsp, -8
 	test	rcx, rcx
 	jle	.LBB0_10
 # %bb.1:
@@ -34,10 +15,10 @@ get_take_indices_uint32_avx2:           # @get_take_indices_uint32_avx2
 	je	.LBB0_2
 # %bb.11:
 	vpxor	xmm0, xmm0, xmm0
-	vpbroadcastd	xmm1, dword ptr [rip + .LCPI0_2] # xmm1 = [8,8,8,8]
+	vmovdqu	xmm1, xmmword ptr [rdx + 384]
 	xor	eax, eax
-	vmovdqa	xmm2, xmmword ptr [rip + .LCPI0_0] # xmm2 = [0,1,2,3]
-	vmovdqa	xmm3, xmmword ptr [rip + .LCPI0_1] # xmm3 = [4,5,6,7]
+	vmovdqu	xmm2, xmmword ptr [rdx + 352]
+	vmovdqu	xmm3, xmmword ptr [rdx + 368]
 	xor	r9d, r9d
 	jmp	.LBB0_12
 	.p2align	4
@@ -108,8 +89,8 @@ get_take_indices_uint32_avx2:           # @get_take_indices_uint32_avx2
 	cmp	r8d, 255
 	jne	.LBB0_6
 # %bb.5:
-	vpor	xmm1, xmm0, xmmword ptr [rip + .LCPI0_0]
-	vpor	xmm0, xmm0, xmmword ptr [rip + .LCPI0_1]
+	vpor	xmm1, xmm0, xmmword ptr [rdx + 352]
+	vpor	xmm0, xmm0, xmmword ptr [rdx + 368]
 	vmovdqu	xmmword ptr [rsi + 4*rax], xmm1
 	vmovdqu	xmmword ptr [rsi + 4*rax + 16], xmm0
 	jmp	.LBB0_10
@@ -126,7 +107,7 @@ get_take_indices_uint32_avx2:           # @get_take_indices_uint32_avx2
 # %bb.7:
 	shl	r8b, 4
 	movzx	r8d, r8b
-	vpor	xmm1, xmm0, xmmword ptr [rip + .LCPI0_0]
+	vpor	xmm1, xmm0, xmmword ptr [rdx + 352]
 	vpshufb	xmm1, xmm1, xmmword ptr [rdx + r8]
 	mov	r8d, r9d
 	shl	r8d, 4
@@ -138,16 +119,14 @@ get_take_indices_uint32_avx2:           # @get_take_indices_uint32_avx2
 	je	.LBB0_10
 # %bb.9:
 	and	ecx, 240
-	vpor	xmm0, xmm0, xmmword ptr [rip + .LCPI0_1]
+	vpor	xmm0, xmm0, xmmword ptr [rdx + 368]
 	vpshufb	xmm0, xmm0, xmmword ptr [rdx + rcx]
 	shl	edi, 4
 	vmovdqu	xmm1, xmmword ptr [rdx + rdi + 256]
 	vpmaskmovd	xmmword ptr [rsi + 4*rax], xmm1, xmm0
 .LBB0_10:
-	lea	rsp, [rbp - 16]
 	pop	rbx
 	pop	r14
-	pop	rbp
 	ret
 .Lfunc_end0:
 	.size	get_take_indices_uint32_avx2, .Lfunc_end0-get_take_indices_uint32_avx2

@@ -19,6 +19,7 @@
 package kernels
 
 import (
+	"encoding/binary"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -31,6 +32,19 @@ import (
 
 //go:noescape
 func _get_take_indices_uint32_avx2(filter, output, tables unsafe.Pointer, nbytes, tailMask int64)
+
+var getTakeIndicesUint32AVX2Tables = makeGetTakeIndicesUint32AVX2Tables()
+
+func makeGetTakeIndicesUint32AVX2Tables() (tables [400]byte) {
+	copy(tables[:], filterUint32Tables[:])
+	for lane := 0; lane < 8; lane++ {
+		binary.LittleEndian.PutUint32(tables[352+lane*4:], uint32(lane))
+	}
+	for lane := 0; lane < 4; lane++ {
+		binary.LittleEndian.PutUint32(tables[384+lane*4:], 8)
+	}
+	return tables
+}
 
 func getTakeIndicesUint32AVX2(mem memory.Allocator, filter *exec.ArraySpan) (arrow.ArrayData, bool) {
 	if !cpu.X86.HasAVX2 || filter.MayHaveNulls() || filter.Offset%8 != 0 || filter.Len < 64 {
@@ -81,7 +95,7 @@ func getTakeIndicesUint32AVX2(mem memory.Allocator, filter *exec.ArraySpan) (arr
 	_get_take_indices_uint32_avx2(
 		unsafe.Pointer(unsafe.SliceData(filterBytes)),
 		unsafe.Pointer(unsafe.SliceData(output)),
-		unsafe.Pointer(unsafe.SliceData(filterUint32Tables[:])),
+		unsafe.Pointer(unsafe.SliceData(getTakeIndicesUint32AVX2Tables[:])),
 		nbytes,
 		tailMask,
 	)

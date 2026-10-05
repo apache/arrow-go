@@ -19,6 +19,8 @@
 package kernels
 
 import (
+	"io"
+	"runtime/trace"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -58,6 +60,25 @@ func TestGetTakeIndicesUint32AVX2(t *testing.T) {
 		require.True(t, ok)
 		defer result.Release()
 		assertTakeIndices[uint32](t, result, want, nil)
+	})
+
+	t.Run("runtime_trace", func(t *testing.T) {
+		filter := makeSlicedBooleanFilter(t, values, nil, 8, mem)
+		defer filter.Release()
+		var span exec.ArraySpan
+		span.SetMembers(filter.Data())
+
+		startedTrace := !trace.IsEnabled()
+		if startedTrace {
+			require.NoError(t, trace.Start(io.Discard))
+			defer trace.Stop()
+		}
+
+		for i := 0; i < 1024; i++ {
+			result, ok := getTakeIndicesUint32AVX2(mem, &span)
+			require.True(t, ok)
+			result.Release()
+		}
 	})
 
 	t.Run("dirty_tail_padding", func(t *testing.T) {

@@ -26,9 +26,9 @@ extern "C" void FULL_NAME(get_take_indices_uint32)(const uint8_t* filter,
     const uint8_t* shuffle_masks = tables;
     const int32_t* store_masks = reinterpret_cast<const int32_t*>(tables + 256);
     const uint8_t* popcount = tables + 336;
-    const __m128i offsets = _mm_setr_epi32(0, 1, 2, 3);
-    const __m128i high_offset = _mm_set1_epi32(4);
-    const __m128i increment = _mm_set1_epi32(8);
+    const __m128i offsets = _mm_loadu_si128(reinterpret_cast<const __m128i*>(tables + 352));
+    const __m128i high_offsets = _mm_loadu_si128(reinterpret_cast<const __m128i*>(tables + 368));
+    const __m128i increment = _mm_loadu_si128(reinterpret_cast<const __m128i*>(tables + 384));
     __m128i base = _mm_setzero_si128();
     int64_t output_length = 0;
 
@@ -45,7 +45,7 @@ extern "C" void FULL_NAME(get_take_indices_uint32)(const uint8_t* filter,
 
         if (mask == 0xff) {
             const __m128i low = _mm_add_epi32(base, offsets);
-            const __m128i high = _mm_add_epi32(low, high_offset);
+            const __m128i high = _mm_add_epi32(base, high_offsets);
             _mm_storeu_si128(reinterpret_cast<__m128i*>(output + output_length), low);
             _mm_storeu_si128(reinterpret_cast<__m128i*>(output + output_length + 4), high);
             output_length += 8;
@@ -72,7 +72,7 @@ extern "C" void FULL_NAME(get_take_indices_uint32)(const uint8_t* filter,
         if (high_count != 0) {
             const __m128i shuffle = _mm_loadu_si128(
                 reinterpret_cast<const __m128i*>(shuffle_masks + high_mask * 16));
-            const __m128i values = _mm_add_epi32(_mm_add_epi32(base, offsets), high_offset);
+            const __m128i values = _mm_add_epi32(base, high_offsets);
             const __m128i compacted = _mm_shuffle_epi8(values, shuffle);
             const __m128i store_mask = _mm_loadu_si128(
                 reinterpret_cast<const __m128i*>(store_masks + high_count * 4));

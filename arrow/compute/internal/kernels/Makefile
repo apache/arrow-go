@@ -77,7 +77,7 @@ _lib/filter_uint32_avx2_amd64.s: _lib/filter_uint32.cc
 	$(CXX) -std=c++17 -S $(C_FLAGS) $(ASM_FLAGS_AVX2) $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
 
 _lib/get_take_indices_avx2_amd64.s: _lib/get_take_indices_avx2_amd64.cc
-	$(CXX) -std=c++17 -S $(C_FLAGS) $(ASM_FLAGS_AVX2) $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
+	$(CXX) -std=c++17 -S $(C_FLAGS) $(ASM_FLAGS_AVX2) -mno-stackrealign -fomit-frame-pointer $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
 
 _lib/filter_uint64_avx2_amd64.s: _lib/filter_uint64.cc
 	$(CXX) -std=c++17 -S $(C_FLAGS) $(ASM_FLAGS_AVX2) -mno-stackrealign -fomit-frame-pointer $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
