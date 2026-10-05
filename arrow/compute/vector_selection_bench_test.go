@@ -122,7 +122,6 @@ func BenchmarkFilterInt32FallbackControls(b *testing.B) {
 	}
 
 	for _, control := range controls {
-		control := control
 		b.Run(control.name, func(b *testing.B) {
 			values, filter := makeFilterInt32BenchmarkInputWithOffset(b, control.size, control.offset,
 				func(i int) bool { return i%2 == 0 })
@@ -132,7 +131,7 @@ func BenchmarkFilterInt32FallbackControls(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(control.size * 4))
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				result, err := compute.FilterArray(context.Background(), values, filter, *compute.DefaultFilterOptions())
 				if err != nil {
 					b.Fatal(err)
@@ -156,7 +155,6 @@ func BenchmarkFilterInt16FallbackControls(b *testing.B) {
 	}
 
 	for _, control := range controls {
-		control := control
 		b.Run(control.name, func(b *testing.B) {
 			values, filter := makeFilterInt16BenchmarkInputWithOffset(b, control.size, control.offset,
 				func(i int) bool { return i%2 == 0 })
@@ -166,7 +164,7 @@ func BenchmarkFilterInt16FallbackControls(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(control.size * 2))
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				result, err := compute.FilterArray(context.Background(), values, filter, *compute.DefaultFilterOptions())
 				if err != nil {
 					b.Fatal(err)
