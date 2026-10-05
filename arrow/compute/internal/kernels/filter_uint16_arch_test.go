@@ -125,6 +125,9 @@ func testFilterUint16Guards(t *testing.T, filter filterUint16Func) {
 		mixed[i] = 0x55
 	}
 	output := make([]uint16, 64)
+	if filter(values[:63], output, mixed[:8], 0, 64) {
+		t.Fatal("filterUint16 accepted values shorter than length")
+	}
 
 	tests := []struct {
 		name   string
