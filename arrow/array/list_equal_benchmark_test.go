@@ -90,8 +90,7 @@ func BenchmarkListApproxEqual(b *testing.B) {
 			defer right.Release()
 
 			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				benchmarkListEqualResult = array.ApproxEqual(left, right)
 			}
 		})

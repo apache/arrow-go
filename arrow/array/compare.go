@@ -460,45 +460,12 @@ func arrayApproxEqualListOffsets[T listOffset](leftValues, rightValues arrow.Arr
 		}) == nil
 }
 
-func arrayApproxEqualListScalar(left, right *List, opt equalOption) bool {
-	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
-			continue
-		}
-		equal := func() bool {
-			l := left.newListValue(i)
-			defer l.Release()
-			r := right.newListValue(i)
-			defer r.Release()
-			return arrayApproxEqual(l, r, opt)
-		}()
-		if !equal {
-			return false
-		}
-	}
-	return true
+type listArrayWithValue interface {
+	arrow.Array
+	newListValue(int) arrow.Array
 }
 
-func arrayApproxEqualLargeListScalar(left, right *LargeList, opt equalOption) bool {
-	for i := 0; i < left.Len(); i++ {
-		if left.IsNull(i) {
-			continue
-		}
-		equal := func() bool {
-			l := left.newListValue(i)
-			defer l.Release()
-			r := right.newListValue(i)
-			defer r.Release()
-			return arrayApproxEqual(l, r, opt)
-		}()
-		if !equal {
-			return false
-		}
-	}
-	return true
-}
-
-func arrayApproxEqualFixedSizeListScalar(left, right *FixedSizeList, opt equalOption) bool {
+func arrayApproxEqualListScalar(left, right listArrayWithValue, opt equalOption) bool {
 	for i := 0; i < left.Len(); i++ {
 		if left.IsNull(i) {
 			continue
@@ -925,7 +892,7 @@ func arrayApproxEqualList(left, right *List, opt equalOption) bool {
 
 func arrayApproxEqualLargeList(left, right *LargeList, opt equalOption) bool {
 	if useScalarListEquality(left.NullBitmapBytes(), int64(left.Offset()), int64(left.Len())) {
-		return arrayApproxEqualLargeListScalar(left, right, opt)
+		return arrayApproxEqualListScalar(left, right, opt)
 	}
 	return arrayApproxEqualListOffsets(left.values, right.values, left.offsets, right.offsets,
 		left.data.offset, right.data.offset, left.Len(), left.NullBitmapBytes(), opt)
@@ -971,7 +938,7 @@ func arrayApproxEqualLargeListView(left, right *LargeListView, opt equalOption) 
 
 func arrayApproxEqualFixedSizeList(left, right *FixedSizeList, opt equalOption) bool {
 	if useScalarListEquality(left.NullBitmapBytes(), int64(left.Offset()), int64(left.Len())) {
-		return arrayApproxEqualFixedSizeListScalar(left, right, opt)
+		return arrayApproxEqualListScalar(left, right, opt)
 	}
 	listSize := int64(left.n)
 	validBits := left.NullBitmapBytes()
