@@ -734,13 +734,13 @@ func newChunkedBinaryGetter[OffsetT int32 | int64](arr *arrow.Chunked) *chunkedB
 	return getter
 }
 
-func isChunkedBinaryValueValid[OffsetT int32 | int64](c *chunkedBinaryGetter[OffsetT], i int64) bool {
+func (c *chunkedBinaryGetter[OffsetT]) IsValid(i int64) bool {
 	chunk, index := c.resolver.Resolve(i)
 	bitmap := c.valuesIsValid[chunk]
 	return bitmap == nil || bitutil.BitIsSet(bitmap, int(c.valuesOffset[chunk]+index))
 }
 
-func getChunkedBinaryValue[OffsetT int32 | int64](c *chunkedBinaryGetter[OffsetT], i int64) []byte {
+func (c *chunkedBinaryGetter[OffsetT]) GetValue(i int64) []byte {
 	chunk, index := c.resolver.Resolve(i)
 	offsets := c.offsets[chunk]
 	return c.values[chunk][offsets[index]:offsets[index+1]]
@@ -1322,7 +1322,7 @@ func takeChunkedBinaryImpl[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec
 
 	spaceAvail := dataBuilder.cap()
 	appendValue := func(idx int64) error {
-		value := getChunkedBinaryValue(values, idx)
+		value := values.GetValue(idx)
 		valueLen := int64(len(value))
 		if err := checkBinaryTakeOffset(offset, valueLen); err != nil {
 			return err
@@ -1377,7 +1377,7 @@ func takeChunkedBinaryImpl[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec
 		case block.Popcnt > 0:
 			for i := 0; i < int(block.Len); i++ {
 				idxValid := !indicesHaveNulls || indicesIsValid.GetBit(int(pos))
-				if idxValid && (!valuesHaveNulls || isChunkedBinaryValueValid(values, int64(indicesValues[pos]))) {
+				if idxValid && (!valuesHaveNulls || values.IsValid(int64(indicesValues[pos]))) {
 					validityBuilder.UnsafeAppend(true)
 					if err := appendValue(int64(indicesValues[pos])); err != nil {
 						return err
