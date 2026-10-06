@@ -65,7 +65,7 @@ func BenchmarkNumericToBoolCast(b *testing.B) {
 					defer input.Release()
 					opts := compute.DefaultCastOptions(true)
 					opts.ToType = arrow.FixedWidthTypes.Boolean
-					ctx := context.Background()
+					ctx := compute.WithAllocator(context.Background(), mem)
 
 					b.ReportAllocs()
 					b.SetBytes(int64(size) * width)
@@ -110,7 +110,7 @@ func BenchmarkNumericToBoolCastNullPatterns(b *testing.B) {
 					defer input.Release()
 					opts := compute.DefaultCastOptions(true)
 					opts.ToType = arrow.FixedWidthTypes.Boolean
-					ctx := context.Background()
+					ctx := compute.WithAllocator(context.Background(), mem)
 
 					b.ReportAllocs()
 					b.SetBytes(int64(size) * width)
