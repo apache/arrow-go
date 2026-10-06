@@ -36,7 +36,8 @@ func BenchmarkFilterDictionaryIndices(b *testing.B) {
 	patterns := []struct {
 		name       string
 		selected   func(int) bool
-		null       func(int) bool
+		indexNull  func(int) bool
+		filterNull func(int) bool
 		nullSelect compute.NullSelectionBehavior
 	}{
 		{name: "random10", selected: func(i int) bool { return dictionaryFilterSelect(i, 10) }},
@@ -45,15 +46,21 @@ func BenchmarkFilterDictionaryIndices(b *testing.B) {
 		{name: "alternating", selected: func(i int) bool { return i%2 == 0 }},
 		{name: "clustered50", selected: func(i int) bool { return (i/4096)%2 == 0 }},
 		{
+			name:       "nullable-indices-random50",
+			selected:   func(i int) bool { return dictionaryFilterSelect(i, 50) },
+			indexNull:  func(i int) bool { return i%11 == 0 },
+			nullSelect: compute.SelectionDropNulls,
+		},
+		{
 			name:       "nullable-random50",
 			selected:   func(i int) bool { return dictionaryFilterSelect(i, 50) },
-			null:       func(i int) bool { return i%11 == 0 },
+			filterNull: func(i int) bool { return i%11 == 0 },
 			nullSelect: compute.SelectionDropNulls,
 		},
 		{
 			name:       "nullable-random50-emit",
 			selected:   func(i int) bool { return dictionaryFilterSelect(i, 50) },
-			null:       func(i int) bool { return i%11 == 0 },
+			filterNull: func(i int) bool { return i%11 == 0 },
 			nullSelect: compute.SelectionEmitNulls,
 		},
 	}
@@ -63,7 +70,9 @@ func BenchmarkFilterDictionaryIndices(b *testing.B) {
 		for _, pattern := range patterns {
 			pattern := pattern
 			b.Run(fmt.Sprintf("size=%d/%s", size, pattern.name), func(b *testing.B) {
-				values, filter := makeDictionaryFilterBenchmarkInput(b, size, pattern.selected, pattern.null)
+				values, filter := makeDictionaryFilterBenchmarkInput(
+					b, size, pattern.selected, pattern.indexNull, pattern.filterNull,
+				)
 				defer values.Release()
 				defer filter.Release()
 
@@ -84,7 +93,11 @@ func BenchmarkFilterDictionaryIndices(b *testing.B) {
 }
 
 func makeDictionaryFilterBenchmarkInput(
-	b *testing.B, size int, selected func(int) bool, isNull func(int) bool,
+	b *testing.B,
+	size int,
+	selected func(int) bool,
+	indexNull func(int) bool,
+	filterNull func(int) bool,
 ) (arrow.Array, arrow.Array) {
 	b.Helper()
 	mem := memory.DefaultAllocator
@@ -92,6 +105,10 @@ func makeDictionaryFilterBenchmarkInput(
 	indicesBuilder := array.NewInt32Builder(mem)
 	indicesBuilder.Reserve(size)
 	for i := 0; i < size; i++ {
+		if indexNull != nil && indexNull(i) {
+			indicesBuilder.AppendNull()
+			continue
+		}
 		indicesBuilder.Append(int32(i % 256))
 	}
 	indices := indicesBuilder.NewArray()
@@ -113,7 +130,7 @@ func makeDictionaryFilterBenchmarkInput(
 	filterBuilder := array.NewBooleanBuilder(mem)
 	filterBuilder.Reserve(size)
 	for i := 0; i < size; i++ {
-		if isNull != nil && isNull(i) {
+		if filterNull != nil && filterNull(i) {
 			filterBuilder.AppendNull()
 			continue
 		}
