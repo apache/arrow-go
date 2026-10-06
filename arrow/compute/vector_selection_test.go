@@ -2145,10 +2145,12 @@ func BenchmarkTakePrimitive(b *testing.B) {
 			indices := indicesBldr.NewArray()
 			defer indices.Release()
 
-			b.ReportMetric(float64(bm.numRows), "rows/sec")
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				result, err := compute.Take(ctx, *compute.DefaultTakeOptions(), &compute.ArrayDatum{values.Data()}, &compute.ArrayDatum{indices.Data()})
+			opts := *compute.DefaultTakeOptions()
+			valuesDatum := &compute.ArrayDatum{Value: values.Data()}
+			indicesDatum := &compute.ArrayDatum{Value: indices.Data()}
+			b.ReportMetric(float64(bm.numRows), "rows/op")
+			for b.Loop() {
+				result, err := compute.Take(ctx, opts, valuesDatum, indicesDatum)
 				if err != nil {
 					b.Fatal(err)
 				}
