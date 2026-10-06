@@ -123,7 +123,27 @@ func (md Metadata) clone() Metadata {
 	return o
 }
 
+// Keep small-sort locals out of the general sorting frame.
+//
+//go:noinline
+func sortedSmallMetadataIndices(keys []string) []int {
+	idxes := make([]int, len(keys))
+	for i := range idxes {
+		idxes[i] = i
+	}
+	for i := 1; i < len(idxes); i++ {
+		for j := i; j > 0 && keys[idxes[j]] < keys[idxes[j-1]]; j-- {
+			idxes[j], idxes[j-1] = idxes[j-1], idxes[j]
+		}
+	}
+	return idxes
+}
+
 func (md Metadata) sortedIndices() []int {
+	if len(md.keys) <= 12 {
+		return sortedSmallMetadataIndices(md.keys)
+	}
+
 	idxes := make([]int, len(md.keys))
 	for i := range idxes {
 		idxes[i] = i
@@ -136,15 +156,8 @@ func (md Metadata) sortedIndices() []int {
 }
 
 func (md Metadata) Equal(rhs Metadata) bool {
-	n := md.Len()
-	if n != rhs.Len() {
+	if md.Len() != rhs.Len() {
 		return false
-	}
-	if n == 0 {
-		return true
-	}
-	if md.keys[n-1] == rhs.keys[n-1] && slices.Equal(md.keys, rhs.keys) {
-		return slices.Equal(md.values, rhs.values)
 	}
 
 	idxes := md.sortedIndices()
