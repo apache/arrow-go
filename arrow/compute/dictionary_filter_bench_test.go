@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//go:build go1.18
+//go:build go1.24
 
 package compute_test
 
@@ -66,21 +66,19 @@ func BenchmarkFilterDictionaryIndices(b *testing.B) {
 	}
 
 	for _, size := range []int{1 << 16, 1 << 20} {
-		size := size
 		for _, pattern := range patterns {
-			pattern := pattern
 			b.Run(fmt.Sprintf("size=%d/%s", size, pattern.name), func(b *testing.B) {
 				values, filter := makeDictionaryFilterBenchmarkInput(
 					b, size, pattern.selected, pattern.indexNull, pattern.filterNull,
 				)
 				defer values.Release()
 				defer filter.Release()
+				ctx := context.Background()
 
 				b.ReportAllocs()
 				b.SetBytes(int64(size * 4))
-				b.ResetTimer()
-				for i := 0; i < b.N; i++ {
-					result, err := compute.FilterArray(context.Background(), values, filter, compute.FilterOptions{NullSelection: pattern.nullSelect})
+				for b.Loop() {
+					result, err := compute.FilterArray(ctx, values, filter, compute.FilterOptions{NullSelection: pattern.nullSelect})
 					if err != nil {
 						b.Fatal(err)
 					}
