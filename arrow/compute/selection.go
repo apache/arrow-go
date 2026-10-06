@@ -507,8 +507,7 @@ func extensionTakeImpl(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.Exec
 	return nil
 }
 
-func structFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
-	// transform filter to selection indices and use take
+func filterWithTake(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 	indices, err := kernels.GetTakeIndices(exec.GetAllocator(ctx.Ctx),
 		&batch.Values[1].Array, ctx.State.(kernels.FilterState).NullSelection)
 	if err != nil {
@@ -535,6 +534,10 @@ func structFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResul
 	return nil
 }
 
+func structFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+	return filterWithTake(ctx, batch, out)
+}
+
 // dictionaryFilter is a special case for filtering a dictionary array
 //
 // The shared dictionary is reused as-is and never compacted, so the result may retain values
@@ -543,30 +546,9 @@ func dictionaryFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecR
 	filterState := ctx.State.(kernels.FilterState)
 	if filterState.NullSelection == kernels.DropNulls &&
 		batch.Values[1].Array.UpdateNullCount() > 0 {
-		indices, err := kernels.GetTakeIndices(exec.GetAllocator(ctx.Ctx),
-			&batch.Values[1].Array, filterState.NullSelection)
-		if err != nil {
-			return err
-		}
-		defer indices.Release()
-
-		filter := NewDatum(indices)
-		defer filter.Release()
-
-		valData := batch.Values[0].Array.MakeData()
-		defer valData.Release()
-
-		vals := NewDatum(valData)
-		defer vals.Release()
-
-		result, err := Take(ctx.Ctx, kernels.TakeOptions{BoundsCheck: false}, vals, filter)
-		if err != nil {
-			return err
-		}
-		defer result.Release()
-
-		out.TakeOwnership(result.(*ArrayDatum).Value)
-		return nil
+		// PrimitiveFilter cannot use its SIMD path when the filter has nulls.
+		// Keep the take-index path for this case to avoid regressing DropNulls.
+		return filterWithTake(ctx, batch, out)
 	}
 
 	dictArr := batch.Values[0].Array.MakeArray().(*array.Dictionary)
@@ -575,7 +557,7 @@ func dictionaryFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecR
 	selection := batch.Values[1].Array.MakeArray()
 	defer selection.Release()
 
-	filteredIndices, err := FilterArray(ctx.Ctx, dictArr.Indices(), selection, FilterOptions(filterState))
+	filteredIndices, err := FilterArray(ctx.Ctx, dictArr.Indices(), selection, filterState)
 	if err != nil {
 		return err
 	}
