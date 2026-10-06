@@ -692,14 +692,6 @@ func (c *chunkedPrimitiveGetter[T]) GetValue(i int64) T {
 func (c *chunkedPrimitiveGetter[T]) NullCount() int64 { return c.nulls }
 func (c *chunkedPrimitiveGetter[T]) Len() int64       { return c.len }
 
-type binaryGetter interface {
-	IsValid(int64) bool
-	GetValue(int64) []byte
-	NullCount() int64
-	Len() int64
-	DataLen() int64
-}
-
 type chunkedBinaryGetter[OffsetT int32 | int64] struct {
 	resolver      *exec.ChunkResolver
 	offsets       [][]OffsetT
@@ -742,13 +734,13 @@ func newChunkedBinaryGetter[OffsetT int32 | int64](arr *arrow.Chunked) *chunkedB
 	return getter
 }
 
-func (c *chunkedBinaryGetter[OffsetT]) IsValid(i int64) bool {
+func isChunkedBinaryValueValid[OffsetT int32 | int64](c *chunkedBinaryGetter[OffsetT], i int64) bool {
 	chunk, index := c.resolver.Resolve(i)
 	bitmap := c.valuesIsValid[chunk]
 	return bitmap == nil || bitutil.BitIsSet(bitmap, int(c.valuesOffset[chunk]+index))
 }
 
-func (c *chunkedBinaryGetter[OffsetT]) GetValue(i int64) []byte {
+func getChunkedBinaryValue[OffsetT int32 | int64](c *chunkedBinaryGetter[OffsetT], i int64) []byte {
 	chunk, index := c.resolver.Resolve(i)
 	offsets := c.offsets[chunk]
 	return c.values[chunk][offsets[index]:offsets[index+1]]
@@ -1277,7 +1269,7 @@ func checkBinaryTakeOffset[OffsetT int32 | int64](offset OffsetT, valueLen int64
 	return nil
 }
 
-func takeChunkedBinaryImpl[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec.KernelCtx, indices *exec.ArraySpan, values binaryGetter, out *exec.ExecResult) error {
+func takeChunkedBinaryImpl[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec.KernelCtx, indices *exec.ArraySpan, values *chunkedBinaryGetter[OffsetT], out *exec.ExecResult) error {
 	var (
 		indicesValues   = exec.GetSpanValues[IdxT](indices, 1)
 		indicesIsValid  = bitutil.OptionalBitIndexer{Bitmap: indices.Buffers[0].Buf, Offset: int(indices.Offset)}
@@ -1330,7 +1322,7 @@ func takeChunkedBinaryImpl[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec
 
 	spaceAvail := dataBuilder.cap()
 	appendValue := func(idx int64) error {
-		value := values.GetValue(idx)
+		value := getChunkedBinaryValue(values, idx)
 		valueLen := int64(len(value))
 		if err := checkBinaryTakeOffset(offset, valueLen); err != nil {
 			return err
@@ -1385,7 +1377,7 @@ func takeChunkedBinaryImpl[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec
 		case block.Popcnt > 0:
 			for i := 0; i < int(block.Len); i++ {
 				idxValid := !indicesHaveNulls || indicesIsValid.GetBit(int(pos))
-				if idxValid && (!valuesHaveNulls || values.IsValid(int64(indicesValues[pos]))) {
+				if idxValid && (!valuesHaveNulls || isChunkedBinaryValueValid(values, int64(indicesValues[pos]))) {
 					validityBuilder.UnsafeAppend(true)
 					if err := appendValue(int64(indicesValues[pos])); err != nil {
 						return err
@@ -1414,7 +1406,7 @@ func takeChunkedBinaryImpl[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec
 	return nil
 }
 
-func takeChunkedBinaryDispatch[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec.KernelCtx, values binaryGetter, indices *arrow.Chunked, out []*exec.ExecResult) error {
+func takeChunkedBinaryDispatch[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec.KernelCtx, values *chunkedBinaryGetter[OffsetT], indices *arrow.Chunked, out []*exec.ExecResult) error {
 	var span exec.ArraySpan
 	for i, chunk := range indices.Chunks() {
 		span.SetMembers(chunk.Data())
