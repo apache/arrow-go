@@ -21,6 +21,7 @@ package compute_test
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"testing"
 
@@ -2136,8 +2137,9 @@ func BenchmarkTakePrimitive(b *testing.B) {
 				}
 			default: // "random"
 				// Random indices
+				rng := rand.New(rand.NewPCG(randomSeed, 0))
 				for i := int64(0); i < bm.numRows; i++ {
-					indicesBldr.Append(i % bm.numRows)
+					indicesBldr.Append(rng.Int64N(bm.numRows))
 				}
 			}
 			indices := indicesBldr.NewArray()

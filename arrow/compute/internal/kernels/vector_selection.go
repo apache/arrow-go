@@ -838,6 +838,19 @@ func isReverseSorted[IdxT arrow.UintType](indices []IdxT) bool {
 	return true
 }
 
+func takePrimitiveValues[IdxT arrow.UintType, ValT arrow.IntType](values []ValT, indices []IdxT, out []ValT) {
+	i := 0
+	for ; i+4 <= len(indices); i += 4 {
+		out[i] = values[indices[i]]
+		out[i+1] = values[indices[i+1]]
+		out[i+2] = values[indices[i+2]]
+		out[i+3] = values[indices[i+3]]
+	}
+	for ; i < len(indices); i++ {
+		out[i] = values[indices[i]]
+	}
+}
+
 // primitiveTakeImplSorted is optimized for sorted (monotonically increasing) indices
 // This enables better CPU cache utilization and branch prediction
 func primitiveTakeImplSorted[IdxT arrow.UintType, ValT arrow.IntType](values primitiveGetter[ValT], indices *exec.ArraySpan, out *exec.ExecResult) {
@@ -851,18 +864,7 @@ func primitiveTakeImplSorted[IdxT arrow.UintType, ValT arrow.IntType](values pri
 		// Try to access underlying values directly for better performance
 		if valImpl, ok := values.(*primitiveGetterImpl[ValT]); ok {
 			// Direct memory access for primitiveGetterImpl
-			valData := valImpl.values
-			// Unroll loop for better performance
-			i := 0
-			for ; i+4 <= len(indicesData); i += 4 {
-				outData[i] = valData[indicesData[i]]
-				outData[i+1] = valData[indicesData[i+1]]
-				outData[i+2] = valData[indicesData[i+2]]
-				outData[i+3] = valData[indicesData[i+3]]
-			}
-			for ; i < len(indicesData); i++ {
-				outData[i] = valData[indicesData[i]]
-			}
+			takePrimitiveValues(valImpl.values, indicesData, outData)
 		} else {
 			// Fallback to GetValue interface
 			for i, idx := range indicesData {
@@ -932,12 +934,24 @@ func primitiveTakeImpl[IdxT arrow.UintType, ValT arrow.IntType](values primitive
 			// Check for reverse sorted - use sequential loop to avoid cache penalties
 			// Loop unrolling amplifies cache miss penalties in reverse access patterns
 			if isReverseSorted(indicesData) {
-				for i := 0; i < len(indicesData); i++ {
-					outData[i] = values.GetValue(int64(indicesData[i]))
+				if valImpl, ok := values.(*primitiveGetterImpl[ValT]); ok {
+					for i, idx := range indicesData {
+						outData[i] = valImpl.values[idx]
+					}
+				} else {
+					for i := 0; i < len(indicesData); i++ {
+						outData[i] = values.GetValue(int64(indicesData[i]))
+					}
 				}
 				out.Nulls = 0
 				return
 			}
+		}
+
+		if valImpl, ok := values.(*primitiveGetterImpl[ValT]); ok {
+			takePrimitiveValues(valImpl.values, indicesData, outData)
+			out.Nulls = 0
+			return
 		}
 
 		// Unroll loop for better performance (random access patterns)
