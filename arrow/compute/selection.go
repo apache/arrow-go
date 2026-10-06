@@ -540,14 +540,42 @@ func structFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResul
 // The shared dictionary is reused as-is and never compacted, so the result may retain values
 // that are no longer referenced by any index.
 func dictionaryFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+	filterState := ctx.State.(kernels.FilterState)
+	if filterState.NullSelection == kernels.DropNulls &&
+		batch.Values[1].Array.UpdateNullCount() > 0 {
+		indices, err := kernels.GetTakeIndices(exec.GetAllocator(ctx.Ctx),
+			&batch.Values[1].Array, filterState.NullSelection)
+		if err != nil {
+			return err
+		}
+		defer indices.Release()
+
+		filter := NewDatum(indices)
+		defer filter.Release()
+
+		valData := batch.Values[0].Array.MakeData()
+		defer valData.Release()
+
+		vals := NewDatum(valData)
+		defer vals.Release()
+
+		result, err := Take(ctx.Ctx, kernels.TakeOptions{BoundsCheck: false}, vals, filter)
+		if err != nil {
+			return err
+		}
+		defer result.Release()
+
+		out.TakeOwnership(result.(*ArrayDatum).Value)
+		return nil
+	}
+
 	dictArr := batch.Values[0].Array.MakeArray().(*array.Dictionary)
 	defer dictArr.Release()
 
 	selection := batch.Values[1].Array.MakeArray()
 	defer selection.Release()
 
-	filteredIndices, err := FilterArray(ctx.Ctx, dictArr.Indices(), selection,
-		FilterOptions(ctx.State.(kernels.FilterState)))
+	filteredIndices, err := FilterArray(ctx.Ctx, dictArr.Indices(), selection, FilterOptions(filterState))
 	if err != nil {
 		return err
 	}
