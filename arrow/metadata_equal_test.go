@@ -19,6 +19,7 @@ package arrow
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -33,6 +34,9 @@ func TestMetadataEqual(t *testing.T) {
 		{"empty", Metadata{}, NewMetadata(nil, nil), true},
 		{"empty-map", Metadata{}, MetadataFrom(map[string]string{}), true},
 		{"single", NewMetadata([]string{"key"}, []string{"value"}), NewMetadata([]string{"key"}, []string{"value"}), true},
+		{"single-copied-strings", NewMetadata([]string{"key"}, []string{"value"}), NewMetadata([]string{strings.Clone("key")}, []string{strings.Clone("value")}), true},
+		{"single-long-key-difference", NewMetadata([]string{strings.Repeat("a", 4096) + "x"}, []string{"value"}), NewMetadata([]string{strings.Repeat("a", 4096) + "y"}, []string{"value"}), false},
+		{"single-long-value-difference", NewMetadata([]string{"key"}, []string{strings.Repeat("a", 4096) + "x"}), NewMetadata([]string{"key"}, []string{strings.Repeat("a", 4096) + "y"}), false},
 		{"different-lengths", Metadata{}, NewMetadata([]string{"key"}, []string{"value"}), false},
 		{"different-key", NewMetadata([]string{"key"}, []string{"value"}), NewMetadata([]string{"other"}, []string{"value"}), false},
 		{"different-value", NewMetadata([]string{"key"}, []string{"value"}), NewMetadata([]string{"key"}, []string{"other"}), false},
@@ -47,6 +51,8 @@ func TestMetadataEqual(t *testing.T) {
 		{"duplicate-keys", NewMetadata([]string{"key", "key"}, []string{"1", "2"}), NewMetadata([]string{"key", "key"}, []string{"1", "2"}), true},
 		{"duplicate-values-swapped", NewMetadata([]string{"key", "key"}, []string{"1", "2"}), NewMetadata([]string{"key", "key"}, []string{"2", "1"}), false},
 		{"duplicate-pairs-reordered", NewMetadata([]string{"key", "key", "a"}, []string{"v", "v", "a"}), NewMetadata([]string{"a", "key", "key"}, []string{"a", "v", "v"}), true},
+		{"duplicate-distinct-values-reordered", NewMetadata([]string{"b", "a", "b"}, []string{"first", "a", "second"}), NewMetadata([]string{"a", "b", "b"}, []string{"a", "first", "second"}), true},
+		{"duplicate-distinct-values-swapped", NewMetadata([]string{"b", "a", "b"}, []string{"first", "a", "second"}), NewMetadata([]string{"a", "b", "b"}, []string{"a", "second", "first"}), false},
 		{"duplicate-counts", NewMetadata([]string{"key", "key", "a"}, []string{"v", "v", "v"}), NewMetadata([]string{"key", "a", "a"}, []string{"v", "v", "v"}), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -61,7 +67,7 @@ func TestMetadataEqual(t *testing.T) {
 }
 
 func TestMetadataEqualDuplicateKeys(t *testing.T) {
-	for _, size := range []int{1, 2, 3, 12, 13, 31, 64, 128, 256} {
+	for _, size := range []int{1, 2, 3, 12, 13, 15, 16, 17, 31, 32, 33, 64, 127, 128, 129, 255, 256, 257, 1024, 2047, 2048, 2049} {
 		t.Run(fmt.Sprint(size), func(t *testing.T) {
 			keys, values := make([]string, size), make([]string, size)
 			for i := range keys {
@@ -73,6 +79,43 @@ func TestMetadataEqualDuplicateKeys(t *testing.T) {
 			right.Values()[size/2] = "changed"
 			assert.False(t, left.Equal(right))
 			assert.False(t, right.Equal(left))
+		})
+	}
+}
+
+func TestMetadataEqualReordered(t *testing.T) {
+	for _, size := range []int{2, 8, 11, 12, 13, 15, 16, 17, 31, 32, 33, 127, 128, 129, 256, 257, 1024, 2047, 2048, 2049} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			keys, values := make([]string, size), make([]string, size)
+			for i := range keys {
+				keys[i] = fmt.Sprintf("key_%04d", i)
+				values[i] = fmt.Sprintf("value_%04d", i)
+			}
+			left := NewMetadata(keys, values)
+			for _, pattern := range []string{"reversed", "middle-swap", "last-swap"} {
+				t.Run(pattern, func(t *testing.T) {
+					right := left.clone()
+					if pattern == "reversed" {
+						slices.Reverse(right.Keys())
+						slices.Reverse(right.Values())
+					} else {
+						pos := size/2 - 1
+						if pattern == "last-swap" {
+							pos = size - 2
+						}
+						right.keys[pos], right.keys[pos+1] = right.keys[pos+1], right.keys[pos]
+						right.values[pos], right.values[pos+1] = right.values[pos+1], right.values[pos]
+					}
+					leftBefore, rightBefore := left.clone(), right.clone()
+					assert.True(t, left.Equal(right))
+					assert.True(t, right.Equal(left))
+					assert.Equal(t, leftBefore, left)
+					assert.Equal(t, rightBefore, right)
+					right.Values()[size/2] = "changed"
+					assert.False(t, left.Equal(right))
+					assert.False(t, right.Equal(left))
+				})
+			}
 		})
 	}
 }
