@@ -44,8 +44,8 @@ extern "C" void FULL_NAME(get_take_indices_uint32)(const uint8_t* filter,
         }
 
         if (mask == 0xff) {
-            const __m128i low = _mm_add_epi32(base, offsets);
-            const __m128i high = _mm_add_epi32(base, high_offsets);
+            const __m128i low = _mm_or_si128(base, offsets);
+            const __m128i high = _mm_or_si128(base, high_offsets);
             _mm_storeu_si128(reinterpret_cast<__m128i*>(output + output_length), low);
             _mm_storeu_si128(reinterpret_cast<__m128i*>(output + output_length + 4), high);
             output_length += 8;
@@ -53,15 +53,15 @@ extern "C" void FULL_NAME(get_take_indices_uint32)(const uint8_t* filter,
             continue;
         }
 
-        const uint8_t low_mask = mask & 0x0f;
-        const uint8_t high_mask = mask >> 4;
+        // Keep the nibble index wide and defer the high-half lookup. This
+        // lowers register pressure so clang does not use BP as scratch state.
+        const int low_mask = mask & 0x0f;
         const int low_count = popcount[low_mask];
-        const int high_count = popcount[high_mask];
 
         if (low_count != 0) {
             const __m128i shuffle = _mm_loadu_si128(
                 reinterpret_cast<const __m128i*>(shuffle_masks + low_mask * 16));
-            const __m128i values = _mm_add_epi32(base, offsets);
+            const __m128i values = _mm_or_si128(base, offsets);
             const __m128i compacted = _mm_shuffle_epi8(values, shuffle);
             const __m128i store_mask = _mm_loadu_si128(
                 reinterpret_cast<const __m128i*>(store_masks + low_count * 4));
@@ -69,10 +69,12 @@ extern "C" void FULL_NAME(get_take_indices_uint32)(const uint8_t* filter,
             output_length += low_count;
         }
 
+        const int high_mask = mask >> 4;
+        const int high_count = popcount[high_mask];
         if (high_count != 0) {
             const __m128i shuffle = _mm_loadu_si128(
                 reinterpret_cast<const __m128i*>(shuffle_masks + high_mask * 16));
-            const __m128i values = _mm_add_epi32(base, high_offsets);
+            const __m128i values = _mm_or_si128(base, high_offsets);
             const __m128i compacted = _mm_shuffle_epi8(values, shuffle);
             const __m128i store_mask = _mm_loadu_si128(
                 reinterpret_cast<const __m128i*>(store_masks + high_count * 4));
