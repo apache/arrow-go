@@ -90,9 +90,7 @@ func benchmarkFilterMixedMasks(b *testing.B,
 	}
 
 	for _, size := range []int{1 << 10, 1 << 16, 1 << 20} {
-		size := size
 		for _, pattern := range patterns {
-			pattern := pattern
 			b.Run(fmt.Sprintf("size=%d/%s", size, pattern.name), func(b *testing.B) {
 				values, filter := makeInput(b, size, pattern.selected)
 				defer values.Release()
@@ -100,8 +98,7 @@ func benchmarkFilterMixedMasks(b *testing.B,
 
 				b.ReportAllocs()
 				b.SetBytes(int64(size * valueBytes))
-				b.ResetTimer()
-				for i := 0; i < b.N; i++ {
+				for b.Loop() {
 					result, err := compute.FilterArray(context.Background(), values, filter, *compute.DefaultFilterOptions())
 					if err != nil {
 						b.Fatal(err)
@@ -126,7 +123,6 @@ func BenchmarkFilterInt32FallbackControls(b *testing.B) {
 	}
 
 	for _, control := range controls {
-		control := control
 		b.Run(control.name, func(b *testing.B) {
 			values, filter := makeFilterInt32BenchmarkInputWithOffset(b, control.size, control.offset,
 				func(i int) bool { return i%2 == 0 })
@@ -135,8 +131,7 @@ func BenchmarkFilterInt32FallbackControls(b *testing.B) {
 
 			b.ReportAllocs()
 			b.SetBytes(int64(control.size * 4))
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				result, err := compute.FilterArray(context.Background(), values, filter, *compute.DefaultFilterOptions())
 				if err != nil {
 					b.Fatal(err)
