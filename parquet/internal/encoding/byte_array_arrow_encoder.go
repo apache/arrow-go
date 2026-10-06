@@ -32,10 +32,8 @@ func putArrowPlain[T arrowByteArrayOffset](sink *PooledBufferWriter, values []by
 		return
 	}
 
-	encodedSize := 0
-	for i := 0; i < len(offsets)-1; i++ {
-		encodedSize += int(offsets[i+1]-offsets[i]) + 4
-	}
+	numValues := len(offsets) - 1
+	encodedSize := int(offsets[numValues]-offsets[0]) + 4*numValues
 
 	sink.Reserve(encodedSize)
 	out := sink.buf.Buf()[sink.pos : sink.pos+encodedSize]
