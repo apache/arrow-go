@@ -534,20 +534,18 @@ func filterWithTake(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRes
 	return nil
 }
 
-func structFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
-	return filterWithTake(ctx, batch, out)
-}
-
 // dictionaryFilter is a special case for filtering a dictionary array
 //
 // The shared dictionary is reused as-is and never compacted, so the result may retain values
 // that are no longer referenced by any index.
 func dictionaryFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 	filterState := ctx.State.(kernels.FilterState)
-	if filterState.NullSelection == kernels.DropNulls &&
-		batch.Values[1].Array.UpdateNullCount() > 0 {
-		// PrimitiveFilter cannot use its SIMD path when the filter has nulls.
-		// Keep the take-index path for this case to avoid regressing DropNulls.
+	if batch.Values[0].Array.UpdateNullCount() > 0 ||
+		(filterState.NullSelection == kernels.DropNulls &&
+			batch.Values[1].Array.UpdateNullCount() > 0) {
+		// PrimitiveFilter cannot use its SIMD path when the values have nulls,
+		// or when DropNulls has to combine filter validity with its values.
+		// Keep the take-index path for these cases to avoid regressions.
 		return filterWithTake(ctx, batch, out)
 	}
 
@@ -647,7 +645,7 @@ func RegisterVectorSelection(reg FunctionRegistry) {
 		{In: exec.NewIDInput(arrow.DENSE_UNION), Exec: denseUnionImpl(kernels.FilterExec(kernels.DenseUnionImpl))},
 		{In: exec.NewIDInput(arrow.DICTIONARY), Exec: dictionaryFilter},
 		{In: exec.NewIDInput(arrow.EXTENSION), Exec: extensionFilterImpl},
-		{In: exec.NewIDInput(arrow.STRUCT), Exec: structFilter},
+		{In: exec.NewIDInput(arrow.STRUCT), Exec: filterWithTake},
 	}...)
 
 	takeKernels = append(takeKernels, []kernels.SelectionKernelData{
