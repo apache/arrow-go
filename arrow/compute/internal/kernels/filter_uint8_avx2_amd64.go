@@ -34,7 +34,7 @@ func filterUint8Avx2(values, output []uint8, filterData []byte, filterOffset, le
 		return false
 	}
 
-	filterBytes, ok := filterUint8VectorInput(filterData, filterOffset, length)
+	filterBytes, ok := filterVectorInput(filterData, filterOffset, length)
 	if !ok {
 		return false
 	}

@@ -34,7 +34,7 @@ func filterUint16Avx2(values []uint16, output []uint16, filterData []byte, filte
 		return false
 	}
 
-	filterBytes, ok := filterUint16VectorInput(filterData, filterOffset, length)
+	filterBytes, ok := filterVectorInput(filterData, filterOffset, length)
 	if !ok {
 		return false
 	}

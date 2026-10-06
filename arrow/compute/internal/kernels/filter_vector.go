@@ -14,37 +14,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build go1.18 && arm64 && !noasm && !appengine
+//go:build go1.18
 
 package kernels
 
-import (
-	"unsafe"
-
-	"golang.org/x/sys/cpu"
-)
-
-var filterUint8NeonTables = makeFilterUint8Tables()
-
-//go:noescape
-func _filter_uint8_neon(values, filter, output, tables unsafe.Pointer, length int64)
-
-func filterUint8Neon(values, output []uint8, filterData []byte, filterOffset, length int64) bool {
-	if !cpu.ARM64.HasASIMD || length > int64(len(values)) || len(output) == 0 {
-		return false
+func filterVectorInput(filterData []byte, filterOffset, length int64) ([]byte, bool) {
+	if length < 64 || length%8 != 0 || filterOffset%8 != 0 {
+		return nil, false
 	}
 
-	filterBytes, ok := filterVectorInput(filterData, filterOffset, length)
-	if !ok {
-		return false
+	numBytes := length / 8
+	filterByteOffset := filterOffset / 8
+	if filterByteOffset < 0 || numBytes > int64(len(filterData)) ||
+		filterByteOffset > int64(len(filterData))-numBytes {
+		return nil, false
 	}
+	filterBytes := filterData[filterByteOffset : filterByteOffset+numBytes]
 
-	_filter_uint8_neon(
-		unsafe.Pointer(&values[0]),
-		unsafe.Pointer(&filterBytes[0]),
-		unsafe.Pointer(&output[0]),
-		unsafe.Pointer(&filterUint8NeonTables[0]),
-		length,
+	const (
+		sampleBytes = 64
+		minMixed    = 4
 	)
-	return true
+	mixedBytes := 0
+	for i := 0; i < len(filterBytes) && i < sampleBytes; i++ {
+		mask := filterBytes[i]
+		if mask != 0 && mask != 0xff {
+			mixedBytes++
+			if mixedBytes == minMixed {
+				return filterBytes, true
+			}
+		}
+	}
+	return nil, false
 }

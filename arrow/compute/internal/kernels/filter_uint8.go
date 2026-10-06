@@ -38,32 +38,3 @@ func makeFilterUint8Tables() (tables [4352]byte) {
 	return tables
 }
 
-func filterUint8VectorInput(filterData []byte, filterOffset, length int64) ([]byte, bool) {
-	if length < 64 || length%8 != 0 || filterOffset%8 != 0 {
-		return nil, false
-	}
-
-	numBytes := length / 8
-	filterByteOffset := filterOffset / 8
-	if filterByteOffset < 0 || numBytes > int64(len(filterData)) ||
-		filterByteOffset > int64(len(filterData))-numBytes {
-		return nil, false
-	}
-	filterBytes := filterData[filterByteOffset : filterByteOffset+numBytes]
-
-	const (
-		sampleBytes = 64
-		minMixed    = 4
-	)
-	mixedBytes := 0
-	for i := 0; i < len(filterBytes) && i < sampleBytes; i++ {
-		mask := filterBytes[i]
-		if mask != 0 && mask != 0xff {
-			mixedBytes++
-			if mixedBytes == minMixed {
-				return filterBytes, true
-			}
-		}
-	}
-	return nil, false
-}
