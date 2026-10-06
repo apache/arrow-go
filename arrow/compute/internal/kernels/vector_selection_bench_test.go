@@ -87,6 +87,7 @@ func BenchmarkGetTakeIndices(b *testing.B) {
 			b.Run(fmt.Sprintf("%s/%d", pattern.name, n), func(b *testing.B) {
 				filter := makeFilterBenchmarkSpan(b, n, pattern)
 				b.ReportAllocs()
+				b.SetBytes(int64((n + 7) / 8))
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
 					result, err := GetTakeIndices(memory.DefaultAllocator, filter, DropNulls)
