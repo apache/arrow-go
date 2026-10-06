@@ -243,6 +243,25 @@ func TestBitmapAllSetEmptyRange(t *testing.T) {
 	}
 }
 
+func TestBitmapAllSetShortBufferPanics(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		buf    []byte
+		offset int
+		n      int
+	}{
+		{"nil", nil, 0, 1},
+		{"past-end", []byte{0xff}, 8, 1},
+		{"cross-end", []byte{0xff}, 7, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Panics(t, func() {
+				bitutil.BitmapAllSet(tc.buf, tc.offset, tc.n)
+			})
+		})
+	}
+}
+
 func TestBitmapAllSetWordBoundaries(t *testing.T) {
 	for storageOffset := 0; storageOffset < 8; storageOffset++ {
 		for offset := 0; offset < 64; offset++ {
