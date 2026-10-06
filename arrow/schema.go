@@ -136,8 +136,15 @@ func (md Metadata) sortedIndices() []int {
 }
 
 func (md Metadata) Equal(rhs Metadata) bool {
-	if md.Len() != rhs.Len() {
+	n := md.Len()
+	if n != rhs.Len() {
 		return false
+	}
+	if n == 0 {
+		return true
+	}
+	if md.keys[n-1] == rhs.keys[n-1] && slices.Equal(md.keys, rhs.keys) {
+		return slices.Equal(md.values, rhs.values)
 	}
 
 	idxes := md.sortedIndices()
