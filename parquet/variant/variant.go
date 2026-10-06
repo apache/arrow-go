@@ -1102,7 +1102,10 @@ func (v Value) Value() any {
 			return v.value[5 : 5+sz]
 		case PrimitiveString:
 			sz := binary.LittleEndian.Uint32(v.value[1:5])
-			return unsafe.String(&v.value[5], sz)
+			if sz > 0 {
+				return unsafe.String(&v.value[5], sz)
+			}
+			return ""
 		case PrimitiveDecimal4:
 			scale := uint8(v.value[1])
 			val := decimal.Decimal32(readExact[int32](v.value[2:]))
