@@ -156,6 +156,24 @@ func TestMetadataEqualPermutations(t *testing.T) {
 	}
 }
 
+func TestMetadataEqualSmallDoesNotAllocate(t *testing.T) {
+	left := NewMetadata(
+		[]string{"h", "a", "g", "b", "f", "c", "e", "d"},
+		[]string{"8", "1", "7", "2", "6", "3", "5", "4"},
+	)
+	right := NewMetadata(
+		[]string{"a", "b", "c", "d", "e", "f", "g", "h"},
+		[]string{"1", "2", "3", "4", "5", "6", "7", "8"},
+	)
+
+	allocs := testing.AllocsPerRun(100, func() {
+		if !left.Equal(right) {
+			panic("metadata should be equal")
+		}
+	})
+	assert.Zero(t, allocs)
+}
+
 func TestMetadataEqualAfterMutation(t *testing.T) {
 	left := NewMetadata([]string{"a", "b"}, []string{"1", "2"})
 	right := left.clone()
