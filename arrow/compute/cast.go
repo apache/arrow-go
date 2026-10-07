@@ -650,10 +650,6 @@ func CastStruct(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult)
 		inField := inType.Field(inFieldIndex)
 		outField := outType.Field(outFieldIndex)
 		if inField.Name == outField.Name {
-			if inField.Nullable && !outField.Nullable {
-				return fmt.Errorf("%w: cannot cast nullable field to non-nullable field: %s %s",
-					arrow.ErrType, inType, outType)
-			}
 			fieldsToSelect[outFieldIndex] = inFieldIndex
 			outFieldIndex++
 		}
@@ -678,7 +674,13 @@ func CastStruct(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult)
 		values = array.NewSlice(values, input.Offset, input.Len)
 		defer values.Release()
 
-		opts.ToType = outType.Field(outFieldIndex).Type
+		inField, outField := inType.Field(idx), outType.Field(outFieldIndex)
+		if inField.Nullable && !outField.Nullable && values.NullN() > 0 {
+			return fmt.Errorf("%w: field '%s' of type %s has nulls. Can't cast to non-nullable field '%s' of type %s",
+				arrow.ErrInvalid, inField.Name, inField.Type, outField.Name, outField.Type)
+		}
+
+		opts.ToType = outField.Type
 		castedValues, err := CastArray(ctx.Ctx, values, &opts)
 		if err != nil {
 			return err
