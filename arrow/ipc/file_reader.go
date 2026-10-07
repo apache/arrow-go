@@ -602,6 +602,7 @@ func (src *ipcSource) buffer(i int) *memory.Buffer {
 			raw = memory.NewResizableBuffer(src.mem)
 			raw.Resize(int(uncompressedSize))
 			if err := src.codec.Decompress(raw.Bytes(), body[8:]); err != nil {
+				raw.Release()
 				panic(err)
 			}
 		} else {

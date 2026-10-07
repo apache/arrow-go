@@ -142,12 +142,29 @@ func (z *zstdDecompressor) Close() {
 
 type lz4Decompressor struct {
 	*lz4.Reader
+	extra [1]byte // probe buffer for trailing data
 }
 
 func (z *lz4Decompressor) Decompress(dst, src []byte) error {
+	if len(dst) == 0 {
+		return nil
+	}
+
 	z.Reset(bytes.NewReader(src))
-	_, err := io.ReadFull(z.Reader, dst)
-	return err
+	if _, err := io.ReadFull(z.Reader, dst); err != nil {
+		return err
+	}
+	// ReadFull stops once dst is full, so probe for one more byte: if there is
+	// one, the frame decompresses to more than the length prefix claims, and we
+	// reject it rather than silently truncate (mirrors the zstd path).
+	n, err := z.Reader.Read(z.extra[:])
+	if n > 0 {
+		return fmt.Errorf("arrow/ipc: lz4 decompressed to more than the expected %d bytes", len(dst))
+	}
+	if err != io.EOF {
+		return err
+	}
+	return nil
 }
 
 func (z *lz4Decompressor) Close() {
@@ -157,7 +174,7 @@ func (z *lz4Decompressor) Close() {
 func getDecompressor(codec flatbuf.CompressionType) decompressor {
 	switch codec {
 	case flatbuf.CompressionTypeLZ4_FRAME:
-		return &lz4Decompressor{lz4.NewReader(nil)}
+		return &lz4Decompressor{Reader: lz4.NewReader(nil)}
 	case flatbuf.CompressionTypeZSTD:
 		return zstdDecompressorPool.Get().(*zstdDecompressor)
 	}

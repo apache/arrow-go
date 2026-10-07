@@ -93,8 +93,7 @@ func BenchmarkReaderCompressed(b *testing.B) {
 
 						b.ReportAllocs()
 						b.SetBytes(rawBytes)
-						b.ResetTimer()
-						for i := 0; i < b.N; i++ {
+						for b.Loop() {
 							rdr, err := NewReader(bytes.NewReader(data))
 							if err != nil {
 								b.Fatal(err)
@@ -121,8 +120,7 @@ func BenchmarkReaderCompressed(b *testing.B) {
 
 						b.ReportAllocs()
 						b.SetBytes(rawBytes)
-						b.ResetTimer()
-						for i := 0; i < b.N; i++ {
+						for b.Loop() {
 							rdr, err := NewFileReader(bytes.NewReader(data))
 							if err != nil {
 								b.Fatal(err)
