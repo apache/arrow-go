@@ -173,6 +173,73 @@ func testPlainByteArrayArrowOffsets[T arrowByteArrayOffset](t *testing.T) {
 	}
 }
 
+// Check that the total-span size calculation preserves the plain encoding
+// for variable-width values, sliced offsets, and disjoint valid runs.
+func TestPlainByteArrayArrowVariableLengthSlices(t *testing.T) {
+	t.Run("int32", testPlainByteArrayArrowVariableLengthSlices[int32])
+	t.Run("int64", testPlainByteArrayArrowVariableLengthSlices[int64])
+}
+
+func testPlainByteArrayArrowVariableLengthSlices[T arrowByteArrayOffset](t *testing.T) {
+	t.Helper()
+	const nvalues = 129
+	values := make([]parquet.ByteArray, nvalues)
+	data := []byte("prefix outside the first value")
+	offsets := make([]T, nvalues+1)
+	for i := range values {
+		offsets[i] = T(len(data))
+		values[i] = make([]byte, (i*i*17+i*3)%57)
+		for j := range values[i] {
+			values[i][j] = byte(i + j)
+		}
+		data = append(data, values[i]...)
+	}
+	offsets[nvalues] = T(len(data))
+
+	for _, span := range []struct {
+		name       string
+		begin, end int
+	}{
+		{"whole", 0, nvalues},
+		{"middle", 9, 93},
+		{"single", 63, 64},
+		{"empty", 48, 48},
+		{"tail", nvalues - 12, nvalues},
+	} {
+		for _, selection := range []string{"all", "sparse", "long-runs", "none"} {
+			t.Run(span.name+"/"+selection, func(t *testing.T) {
+				var validBits []byte
+				if selection != "all" {
+					validBits = make([]byte, bitutil.BytesForBits(int64(span.end-span.begin+3)))
+				}
+				want := []parquet.ByteArray{[]byte("before")}
+				for i := span.begin; i < span.end; i++ {
+					valid := selection == "all" ||
+						selection == "sparse" && i%11 < 3 ||
+						selection == "long-runs" && (i/16)%2 == 0
+					if valid {
+						want = append(want, values[i])
+						if validBits != nil {
+							bitutil.SetBit(validBits, 3+i-span.begin)
+						}
+					}
+				}
+				want = append(want, []byte("after"))
+
+				enc := NewEncoder(parquet.Types.ByteArray, parquet.Encodings.Plain, false, nil, memory.DefaultAllocator).(*PlainByteArrayEncoder)
+				defer enc.Release()
+				enc.PutByteArray([]byte("before"))
+				putArrowPlainSpaced(enc.sink, data, offsets[span.begin:span.end+1], validBits, 3)
+				enc.PutByteArray([]byte("after"))
+				got, err := enc.FlushValues()
+				require.NoError(t, err)
+				defer got.Release()
+				require.Equal(t, encodedByteArrays(t, parquet.Encodings.Plain, want, false, nil, 0), got.Bytes())
+			})
+		}
+	}
+}
+
 func BenchmarkPlainByteArrayPutArrow(b *testing.B) {
 	b.Run("int32", benchmarkPlainByteArrayPutArrow[int32])
 	b.Run("int64", benchmarkPlainByteArrayPutArrow[int64])
