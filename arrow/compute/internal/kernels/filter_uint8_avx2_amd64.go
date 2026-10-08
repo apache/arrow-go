@@ -24,12 +24,12 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
-var filterUint16Avx2Tables = makeFilterShuffleTables(2)
+var filterUint8Avx2Tables = makeFilterShuffleTables(1)
 
 //go:noescape
-func _filter_uint16_avx2(values, filter, output, tables unsafe.Pointer, length int64)
+func _filter_uint8_avx2(values, filter, output, tables unsafe.Pointer, length int64)
 
-func filterUint16Avx2(values []uint16, output []uint16, filterData []byte, filterOffset, length int64) bool {
+func filterUint8Avx2(values, output []uint8, filterData []byte, filterOffset, length int64) bool {
 	if !cpu.X86.HasAVX2 || length > int64(len(values)) || len(output) == 0 {
 		return false
 	}
@@ -39,11 +39,11 @@ func filterUint16Avx2(values []uint16, output []uint16, filterData []byte, filte
 		return false
 	}
 
-	_filter_uint16_avx2(
-		unsafe.Pointer(unsafe.SliceData(values)),
-		unsafe.Pointer(unsafe.SliceData(filterBytes)),
-		unsafe.Pointer(unsafe.SliceData(output)),
-		unsafe.Pointer(unsafe.SliceData(filterUint16Avx2Tables[:])),
+	_filter_uint8_avx2(
+		unsafe.Pointer(&values[0]),
+		unsafe.Pointer(&filterBytes[0]),
+		unsafe.Pointer(&output[0]),
+		unsafe.Pointer(&filterUint8Avx2Tables[0]),
 		length,
 	)
 	return true

@@ -2080,18 +2080,53 @@ func TestFilterInt32MixedMaskOffsets(t *testing.T) {
 }
 
 func TestFilterInt16MixedMaskOffsets(t *testing.T) {
+	testFilterMixedMaskOffsets(
+		t,
+		func(mem memory.Allocator) array.Builder { return array.NewInt16Builder(mem) },
+		func(builder array.Builder, i int64) {
+			builder.(*array.Int16Builder).Append(int16(uint16(i*977 + 0x8011)))
+		},
+	)
+}
+
+func TestFilterInt8MixedMaskOffsets(t *testing.T) {
+	testFilterMixedMaskOffsets(
+		t,
+		func(mem memory.Allocator) array.Builder { return array.NewInt8Builder(mem) },
+		func(builder array.Builder, i int64) {
+			builder.(*array.Int8Builder).Append(int8(uint8(i*37 + 0x91)))
+		},
+	)
+}
+
+func TestFilterUint8MixedMaskOffsets(t *testing.T) {
+	testFilterMixedMaskOffsets(
+		t,
+		func(mem memory.Allocator) array.Builder { return array.NewUint8Builder(mem) },
+		func(builder array.Builder, i int64) {
+			builder.(*array.Uint8Builder).Append(uint8(i*37 + 0x91))
+		},
+	)
+}
+
+func testFilterMixedMaskOffsets(
+	t *testing.T,
+	newValueBuilder func(memory.Allocator) array.Builder,
+	appendValue func(array.Builder, int64),
+) {
+	t.Helper()
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
 	const length = 128
 	for _, offset := range []int64{0, 3, 8} {
 		t.Run(fmt.Sprintf("offset=%d", offset), func(t *testing.T) {
-			valuesBuilder := array.NewInt16Builder(mem)
+			valuesBuilder := newValueBuilder(mem)
 			valuesBuilder.Reserve(int(offset) + length)
 			for i := int64(0); i < offset+length; i++ {
-				valuesBuilder.Append(int16(uint16(i*977 + 0x8011)))
+				appendValue(valuesBuilder, i)
 			}
-			valuesBase := valuesBuilder.NewInt16Array()
+			valuesBase := valuesBuilder.NewArray()
 			valuesBuilder.Release()
 			values := array.NewSlice(valuesBase, offset, offset+length)
 			valuesBase.Release()
@@ -2108,13 +2143,13 @@ func TestFilterInt16MixedMaskOffsets(t *testing.T) {
 			filterBase.Release()
 			defer filter.Release()
 
-			expectedBuilder := array.NewInt16Builder(mem)
+			expectedBuilder := newValueBuilder(mem)
 			for i := offset; i < offset+length; i++ {
 				if i%5 == 0 || i%5 == 2 {
-					expectedBuilder.Append(int16(uint16(i*977 + 0x8011)))
+					appendValue(expectedBuilder, i)
 				}
 			}
-			expected := expectedBuilder.NewInt16Array()
+			expected := expectedBuilder.NewArray()
 			expectedBuilder.Release()
 			defer expected.Release()
 

@@ -19,32 +19,35 @@
 package kernels
 
 import (
-	"unsafe"
+	"testing"
 
 	"golang.org/x/sys/cpu"
 )
 
-var filterUint16Avx2Tables = makeFilterShuffleTables(2)
-
-//go:noescape
-func _filter_uint16_avx2(values, filter, output, tables unsafe.Pointer, length int64)
-
-func filterUint16Avx2(values []uint16, output []uint16, filterData []byte, filterOffset, length int64) bool {
-	if !cpu.X86.HasAVX2 || length > int64(len(values)) || len(output) == 0 {
-		return false
+func TestFilterUint8Avx2AllMasks(t *testing.T) {
+	if !cpu.X86.HasAVX2 {
+		t.Skip("AVX2 is not available")
 	}
+	testFilterUint8AllMasks(t, filterUint8Avx2)
+}
 
-	filterBytes, ok := filterVectorInput(filterData, filterOffset, length)
-	if !ok {
-		return false
+func TestFilterUint8Avx2AlignedOffset(t *testing.T) {
+	if !cpu.X86.HasAVX2 {
+		t.Skip("AVX2 is not available")
 	}
+	testFilterUint8AlignedOffset(t, filterUint8Avx2)
+}
 
-	_filter_uint16_avx2(
-		unsafe.Pointer(unsafe.SliceData(values)),
-		unsafe.Pointer(unsafe.SliceData(filterBytes)),
-		unsafe.Pointer(unsafe.SliceData(output)),
-		unsafe.Pointer(unsafe.SliceData(filterUint16Avx2Tables[:])),
-		length,
-	)
-	return true
+func TestFilterUint8Avx2UnalignedValues(t *testing.T) {
+	if !cpu.X86.HasAVX2 {
+		t.Skip("AVX2 is not available")
+	}
+	testFilterUint8UnalignedValues(t, filterUint8Avx2)
+}
+
+func TestFilterUint8Avx2Guards(t *testing.T) {
+	if !cpu.X86.HasAVX2 {
+		t.Skip("AVX2 is not available")
+	}
+	testFilterUint8Guards(t, filterUint8Avx2)
 }

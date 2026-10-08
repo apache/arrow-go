@@ -495,6 +495,14 @@ func PrimitiveFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 			return nil
 		}
 	}
+	if bitWidth == 8 && values.Nulls == 0 && filter.Nulls == 0 {
+		valuesData := exec.GetSpanValues[uint8](values, 1)
+		outData := exec.GetSpanValues[uint8](out, 1)
+		if filterUint8Avx2(valuesData, outData, filter.Buffers[1].Buf, filter.Offset, values.Len) ||
+			filterUint8Neon(valuesData, outData, filter.Buffers[1].Buf, filter.Offset, values.Len) {
+			return nil
+		}
+	}
 	if bitWidth == 16 && values.Nulls == 0 && filter.Nulls == 0 {
 		valuesData := exec.GetSpanValues[uint16](values, 1)
 		outData := exec.GetSpanValues[uint16](out, 1)
