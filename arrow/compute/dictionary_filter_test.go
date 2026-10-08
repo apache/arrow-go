@@ -40,7 +40,7 @@ func TestDictionaryFilterDirectIndices(t *testing.T) {
 		IndexType: arrow.PrimitiveTypes.Int8,
 		ValueType: arrow.BinaryTypes.String,
 	}
-	input, err := array.DictArrayFromJSON(mem, dictType, `[2, null, 1, 0, 2, 1]`, `["a", null, "c"]`)
+	input, err := array.DictArrayFromJSON(mem, dictType, `[2, 0, 1, 0, 2, 1]`, `["a", null, "c"]`)
 	require.NoError(t, err)
 	defer input.Release()
 
@@ -54,19 +54,19 @@ func TestDictionaryFilterDirectIndices(t *testing.T) {
 			name:       "drop null filter values",
 			filter:     `[true, true, false, null, true, false]`,
 			nullSelect: compute.SelectionDropNulls,
-			want:       `[2, null, 2]`,
+			want:       `[2, 0, 2]`,
 		},
 		{
 			name:       "emit null filter values",
 			filter:     `[true, true, false, null, true, null]`,
 			nullSelect: compute.SelectionEmitNulls,
-			want:       `[2, null, null, 2, null]`,
+			want:       `[2, 0, null, 2, null]`,
 		},
 		{
 			name:       "all selected",
 			filter:     `[true, true, true, true, true, true]`,
 			nullSelect: compute.SelectionDropNulls,
-			want:       `[2, null, 1, 0, 2, 1]`,
+			want:       `[2, 0, 1, 0, 2, 1]`,
 		},
 		{
 			name:       "none selected",
@@ -122,7 +122,7 @@ func TestDictionaryFilterSlicedInputs(t *testing.T) {
 		IndexType: arrow.PrimitiveTypes.Int8,
 		ValueType: arrow.BinaryTypes.String,
 	}
-	baseInput, err := array.DictArrayFromJSON(mem, dictType, `[0, 1, 2, 0, null, 1, 2, 0]`, `["a", null, "c"]`)
+	baseInput, err := array.DictArrayFromJSON(mem, dictType, `[0, 1, 2, 0, 0, 1, 2, 0]`, `["a", null, "c"]`)
 	require.NoError(t, err)
 	defer baseInput.Release()
 	input := array.NewSlice(baseInput, 1, 7).(*array.Dictionary)
@@ -138,7 +138,7 @@ func TestDictionaryFilterSlicedInputs(t *testing.T) {
 	defer got.Release()
 
 	gotDict := got.(*array.Dictionary)
-	wantIndices, _, err := array.FromJSON(mem, dictType.IndexType, strings.NewReader(`[1, 2, null, 2]`))
+	wantIndices, _, err := array.FromJSON(mem, dictType.IndexType, strings.NewReader(`[1, 2, 0, 2]`))
 	require.NoError(t, err)
 	defer wantIndices.Release()
 	require.True(t, array.Equal(wantIndices, gotDict.Indices()))
@@ -146,6 +146,46 @@ func TestDictionaryFilterSlicedInputs(t *testing.T) {
 	for i, buf := range input.Dictionary().Data().Buffers() {
 		require.Same(t, buf, gotDict.Dictionary().Data().Buffers()[i])
 	}
+}
+
+func TestDictionaryFilterRetainsNestedDictionary(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int16,
+		ValueType: arrow.ListOf(arrow.PrimitiveTypes.Int32),
+		Ordered:   true,
+	}
+
+	// Release the inputs before reading the result to check ownership of both
+	// the sliced dictionary buffers and its nested values.
+	var got arrow.Array
+	func() {
+		base, _, err := array.FromJSON(mem, dictType.ValueType, strings.NewReader(`[[-1], [10, 20], null, [], [30], [99]]`))
+		require.NoError(t, err)
+		defer base.Release()
+		dictionary := array.NewSlice(base, 1, 5)
+		defer dictionary.Release()
+		indices, _, err := array.FromJSON(mem, dictType.IndexType, strings.NewReader(`[0, 1, 2, 3, 0]`))
+		require.NoError(t, err)
+		defer indices.Release()
+		input := array.NewDictionaryArray(dictType, indices, dictionary)
+		defer input.Release()
+		filter := mustBoolArray(t, mem, `[false, true, true, null, true]`)
+		defer filter.Release()
+
+		got, err = compute.FilterArray(ctx, input, filter, compute.FilterOptions{NullSelection: compute.SelectionEmitNulls})
+		require.NoError(t, err)
+	}()
+	defer got.Release()
+
+	want, err := array.DictArrayFromJSON(mem, dictType, `[1, 2, null, 0]`, `[[10, 20], null, [], [30]]`)
+	require.NoError(t, err)
+	defer want.Release()
+	require.True(t, array.Equal(want, got))
+	require.Equal(t, 1, got.NullN())
+	require.Equal(t, 1, got.(*array.Dictionary).Dictionary().Data().Offset())
 }
 
 func mustBoolArray(t *testing.T, mem memory.Allocator, json string) arrow.Array {

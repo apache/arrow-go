@@ -561,10 +561,11 @@ func dictionaryFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecR
 	}
 	defer filteredIndices.Release()
 
-	result := array.NewDictionaryArray(dictArr.DataType(), filteredIndices, dictArr.Dictionary())
-	defer result.Release()
-
-	out.TakeOwnership(result.Data())
+	// Retain the result buffers directly without constructing a temporary dictionary array.
+	out.TakeOwnership(filteredIndices.Data())
+	out.Type = dictArr.DataType()
+	out.ResizeChildren(1)
+	out.Dictionary().TakeOwnership(dictArr.Data().Dictionary())
 	return nil
 }
 

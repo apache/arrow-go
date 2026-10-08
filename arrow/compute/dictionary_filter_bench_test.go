@@ -65,7 +65,7 @@ func BenchmarkFilterDictionaryIndices(b *testing.B) {
 		},
 	}
 
-	for _, size := range []int{1 << 16, 1 << 20} {
+	for _, size := range []int{64, 1 << 16, 1 << 20} {
 		for _, pattern := range patterns {
 			b.Run(fmt.Sprintf("size=%d/%s", size, pattern.name), func(b *testing.B) {
 				values, filter := makeDictionaryFilterBenchmarkInput(
