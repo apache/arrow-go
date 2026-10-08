@@ -120,6 +120,8 @@ func BitmapAllSet(buf []byte, offset, n int) bool {
 	if n == 0 {
 		return true
 	}
+	// Validate the full range before returning early for a clear bit.
+	_ = buf[(uint(offset)+uint(n)-1)/8]
 	// Preserve the cheapest early exit for a null at the start.
 	if !BitIsSet(buf, offset) {
 		return false
