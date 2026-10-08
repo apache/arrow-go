@@ -150,3 +150,16 @@ func TestNumericToBoolSIMDFloatSpecialValues(t *testing.T) {
 		math.Inf(-1), 1, -1, 0, 1, math.NaN(),
 	})
 }
+
+func TestNumericToBoolSIMDNoAllocations(t *testing.T) {
+	values := numericToBoolBoundaryValues[int64](33)
+	out := make([]byte, bitutil.BytesForBits(int64(len(values))))
+	allocs := testing.AllocsPerRun(100, func() {
+		if err := numericToBoolSIMD(arrow.INT64, nil, values, out); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("numericToBoolSIMD allocated %g times, want 0", allocs)
+	}
+}
