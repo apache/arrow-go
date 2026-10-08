@@ -223,6 +223,131 @@ func TestCountSetBitsOffset(t *testing.T) {
 	}
 }
 
+func TestBitmapAllSetEmptyRange(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		buf  []byte
+	}{
+		{"nil", nil},
+		{"empty", []byte{}},
+		{"unset", []byte{0}},
+		{"set", []byte{0xff}},
+	} {
+		for _, offset := range []int{-1, 0, 1, 7, 8, 63, 64, 65, 1024} {
+			t.Run(fmt.Sprintf("%s/offset=%d", tc.name, offset), func(t *testing.T) {
+				if !bitutil.BitmapAllSet(tc.buf, offset, 0) {
+					t.Fatal("an empty bitmap range must be all-set")
+				}
+			})
+		}
+	}
+}
+
+func TestBitmapAllSetShortBufferPanics(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		buf    []byte
+		offset int
+		n      int
+	}{
+		{"nil", nil, 0, 1},
+		{"past-end", []byte{0xff}, 8, 1},
+		{"cross-end", []byte{0xff}, 7, 2},
+		{"first-bit-clear", []byte{0}, 0, 9},
+		{"leading-bit-clear", []byte{0x7f}, 1, 8},
+		{"body-bit-clear", []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f}, 0, 65},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Panics(t, func() {
+				bitutil.BitmapAllSet(tc.buf, tc.offset, tc.n)
+			})
+		})
+	}
+}
+
+func TestBitmapAllSetWordBoundaries(t *testing.T) {
+	for storageOffset := 0; storageOffset < 8; storageOffset++ {
+		for offset := 0; offset < 64; offset++ {
+			for _, n := range []int{1, 7, 8, 63, 64, 65, 511, 512, 513, 1023, 1024, 1025} {
+				storage := make([]byte, storageOffset+(offset+n+7)/8)
+				bitmap := storage[storageOffset:]
+				// Keep all padding and neighboring bits clear.
+				for i := offset; i < offset+n; i++ {
+					bitutil.SetBit(bitmap, i)
+				}
+				if !bitutil.BitmapAllSet(bitmap, offset, n) {
+					t.Fatalf("all-set range rejected: storage=%d offset=%d length=%d", storageOffset, offset, n)
+				}
+				for i := offset; i < offset+n; i++ {
+					bitutil.ClearBit(bitmap, i)
+					if bitutil.BitmapAllSet(bitmap, offset, n) {
+						t.Fatalf("clear bit %d missed: storage=%d offset=%d length=%d", i, storageOffset, offset, n)
+					}
+					bitutil.SetBit(bitmap, i)
+				}
+			}
+		}
+	}
+}
+
+func BenchmarkBitmapAllSetScan(b *testing.B) {
+	for _, n := range []int{64, 1024, 65536, 1048576} {
+		for _, offset := range []int{0, 3} {
+			for _, pattern := range []string{"all", "first-null", "last-null"} {
+				b.Run(fmt.Sprintf("bits=%d/offset=%d/%s", n, offset, pattern), func(b *testing.B) {
+					bitmap := make([]byte, (offset+n+7)/8)
+					for i := range bitmap {
+						bitmap[i] = 0xff
+					}
+					switch pattern {
+					case "first-null":
+						bitutil.ClearBit(bitmap, offset)
+					case "last-null":
+						bitutil.ClearBit(bitmap, offset+n-1)
+					}
+					want := pattern == "all"
+					b.ReportAllocs()
+					for b.Loop() {
+						if bitutil.BitmapAllSet(bitmap, offset, n) != want {
+							b.Fatal("unexpected bitmap result")
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func FuzzBitmapAllSet(f *testing.F) {
+	for _, bitmap := range [][]byte{nil, {0}, {0xff}, {0x7e, 0xff, 0x81}, {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}} {
+		for _, offset := range []uint16{0, 1, 7, 8, 63} {
+			f.Add(bitmap, offset, uint16(65))
+		}
+	}
+	bulk := make([]byte, 129)
+	for i := range bulk {
+		bulk[i] = 0xff
+	}
+	f.Add(bulk, uint16(3), uint16(1024))
+	lateNull := append([]byte(nil), bulk...)
+	bitutil.ClearBit(lateNull, 1025)
+	f.Add(lateNull, uint16(3), uint16(1024))
+	f.Fuzz(func(t *testing.T, bitmap []byte, rawOffset, rawLength uint16) {
+		offset := int(rawOffset) % (len(bitmap)*8 + 1)
+		length := int(rawLength) % (len(bitmap)*8 - offset + 1)
+		want := true
+		for i := offset; i < offset+length; i++ {
+			if !bitutil.BitIsSet(bitmap, i) {
+				want = false
+				break
+			}
+		}
+		if got := bitutil.BitmapAllSet(bitmap, offset, length); got != want {
+			t.Fatalf("BitmapAllSet(%x, %d, %d) = %t, want %t", bitmap, offset, length, got, want)
+		}
+	})
+}
+
 func TestSetBitsTo(t *testing.T) {
 	for _, fillByte := range []byte{0x00, 0xFF} {
 		{
