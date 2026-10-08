@@ -233,7 +233,7 @@ func TestBitmapAllSetEmptyRange(t *testing.T) {
 		{"unset", []byte{0}},
 		{"set", []byte{0xff}},
 	} {
-		for _, offset := range []int{0, 1, 7, 8, 63, 64, 65, 1024} {
+		for _, offset := range []int{-1, 0, 1, 7, 8, 63, 64, 65, 1024} {
 			t.Run(fmt.Sprintf("%s/offset=%d", tc.name, offset), func(t *testing.T) {
 				if !bitutil.BitmapAllSet(tc.buf, offset, 0) {
 					t.Fatal("an empty bitmap range must be all-set")
@@ -253,6 +253,9 @@ func TestBitmapAllSetShortBufferPanics(t *testing.T) {
 		{"nil", nil, 0, 1},
 		{"past-end", []byte{0xff}, 8, 1},
 		{"cross-end", []byte{0xff}, 7, 2},
+		{"first-bit-clear", []byte{0}, 0, 9},
+		{"leading-bit-clear", []byte{0x7f}, 1, 8},
+		{"body-bit-clear", []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f}, 0, 65},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Panics(t, func() {
