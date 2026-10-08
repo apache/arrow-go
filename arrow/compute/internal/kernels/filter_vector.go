@@ -18,6 +18,30 @@
 
 package kernels
 
+import "math/bits"
+
+// The assembly kernels expect 256 16-byte shuffle masks followed by
+// 256 selected-lane counts. byteWidth must be 1 or 2.
+func makeFilterShuffleTables(byteWidth int) (tables [4352]byte) {
+	for mask := 0; mask < 256; mask++ {
+		pos := 0
+		for lane := 0; lane < 8; lane++ {
+			if mask&(1<<uint(lane)) == 0 {
+				continue
+			}
+			for i := 0; i < byteWidth; i++ {
+				tables[mask*16+pos] = byte(lane*byteWidth + i)
+				pos++
+			}
+		}
+		for ; pos < 16; pos++ {
+			tables[mask*16+pos] = 0x80
+		}
+		tables[4096+mask] = byte(bits.OnesCount8(uint8(mask)))
+	}
+	return tables
+}
+
 func filterVectorInput(filterData []byte, filterOffset, length int64) ([]byte, bool) {
 	if length < 64 || length%8 != 0 || filterOffset%8 != 0 {
 		return nil, false

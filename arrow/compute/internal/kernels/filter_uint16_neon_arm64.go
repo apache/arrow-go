@@ -24,7 +24,7 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
-var filterUint16NeonTables = makeFilterUint16Tables()
+var filterUint16NeonTables = makeFilterShuffleTables(2)
 
 //go:noescape
 func _filter_uint16_neon(values, filter, output, tables unsafe.Pointer, length int64)

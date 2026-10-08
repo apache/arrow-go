@@ -24,7 +24,7 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
-var filterUint8Avx2Tables = makeFilterUint8Tables()
+var filterUint8Avx2Tables = makeFilterShuffleTables(1)
 
 //go:noescape
 func _filter_uint8_avx2(values, filter, output, tables unsafe.Pointer, length int64)
