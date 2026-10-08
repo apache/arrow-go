@@ -158,3 +158,52 @@ func TestPrimitiveTakeFloatBits(t *testing.T) {
 		})
 	}
 }
+
+func TestPrimitiveTakeNullIndexPayloads(t *testing.T) {
+	for _, size := range []int{31, 32, 33, 257} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+			ctx := compute.WithAllocator(context.Background(), mem)
+			fullValues, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int64, strings.NewReader(`[99, 101, 202, 303, 99]`))
+			require.NoError(t, err)
+			values := array.NewSlice(fullValues, 1, 4)
+			fullValues.Release()
+			defer values.Release()
+
+			rawIndices := make([]int64, size+2)
+			valid := make([]bool, size+2)
+			expectedBuilder := array.NewInt64Builder(mem)
+			defer expectedBuilder.Release()
+			for i := 0; i < size; i++ {
+				if i == 0 || i == size/2 || i == size-1 {
+					// Null slots may contain arbitrary bits, including invalid indices.
+					rawIndices[i+1] = -1 << 63
+					expectedBuilder.AppendNull()
+				} else {
+					rawIndices[i+1] = int64(i % 3)
+					valid[i+1] = true
+					expectedBuilder.Append(int64((i%3 + 1) * 101))
+				}
+			}
+			indicesBuilder := array.NewInt64Builder(mem)
+			indicesBuilder.AppendValues(rawIndices, valid)
+			fullIndices := indicesBuilder.NewArray()
+			indicesBuilder.Release()
+			indices := array.NewSlice(fullIndices, 1, int64(size+1))
+			fullIndices.Release()
+			defer indices.Release()
+			expected := expectedBuilder.NewArray()
+			defer expected.Release()
+
+			for _, boundsCheck := range []bool{false, true} {
+				t.Run(fmt.Sprintf("bounds-check=%t", boundsCheck), func(t *testing.T) {
+					actual, err := compute.TakeArrayOpts(ctx, values, indices, compute.TakeOptions{BoundsCheck: boundsCheck})
+					require.NoError(t, err)
+					defer actual.Release()
+					require.True(t, array.Equal(expected, actual))
+				})
+			}
+		})
+	}
+}

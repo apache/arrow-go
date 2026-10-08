@@ -2148,7 +2148,7 @@ func BenchmarkTakePrimitive(b *testing.B) {
 			opts := *compute.DefaultTakeOptions()
 			valuesDatum := &compute.ArrayDatum{Value: values.Data()}
 			indicesDatum := &compute.ArrayDatum{Value: indices.Data()}
-			b.ReportMetric(float64(bm.numRows), "rows/op")
+			b.ReportAllocs()
 			for b.Loop() {
 				result, err := compute.Take(ctx, opts, valuesDatum, indicesDatum)
 				if err != nil {
@@ -2156,6 +2156,7 @@ func BenchmarkTakePrimitive(b *testing.B) {
 				}
 				result.Release()
 			}
+			b.ReportMetric(float64(bm.numRows), "rows/op")
 		})
 	}
 }
@@ -2203,22 +2204,26 @@ func BenchmarkTakePrimitiveWithNulls(b *testing.B) {
 					indicesBldr.Append(i)
 				}
 			default: // "random"
+				rng := rand.New(rand.NewPCG(randomSeed, 0))
 				for i := int64(0); i < bm.numRows; i++ {
-					indicesBldr.Append((i * 1103515245) % bm.numRows)
+					indicesBldr.Append(rng.Int64N(bm.numRows))
 				}
 			}
 			indices := indicesBldr.NewArray()
 			defer indices.Release()
 
-			b.ReportMetric(float64(bm.numRows), "rows/sec")
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				result, err := compute.Take(ctx, *compute.DefaultTakeOptions(), &compute.ArrayDatum{values.Data()}, &compute.ArrayDatum{indices.Data()})
+			opts := *compute.DefaultTakeOptions()
+			valuesDatum := &compute.ArrayDatum{Value: values.Data()}
+			indicesDatum := &compute.ArrayDatum{Value: indices.Data()}
+			b.ReportAllocs()
+			for b.Loop() {
+				result, err := compute.Take(ctx, opts, valuesDatum, indicesDatum)
 				if err != nil {
 					b.Fatal(err)
 				}
 				result.Release()
 			}
+			b.ReportMetric(float64(bm.numRows), "rows/op")
 		})
 	}
 }
