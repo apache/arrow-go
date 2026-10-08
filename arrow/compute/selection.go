@@ -507,8 +507,7 @@ func extensionTakeImpl(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.Exec
 	return nil
 }
 
-func structFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
-	// transform filter to selection indices and use take
+func filterWithTake(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 	indices, err := kernels.GetTakeIndices(exec.GetAllocator(ctx.Ctx),
 		&batch.Values[1].Array, ctx.State.(kernels.FilterState).NullSelection)
 	if err != nil {
@@ -540,32 +539,33 @@ func structFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResul
 // The shared dictionary is reused as-is and never compacted, so the result may retain values
 // that are no longer referenced by any index.
 func dictionaryFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
-	// convert the filter (boolean array) to indices to take from the dictionary array.
-	indices, err := kernels.GetTakeIndices(exec.GetAllocator(ctx.Ctx),
-		&batch.Values[1].Array, ctx.State.(kernels.FilterState).NullSelection)
+	filterState := ctx.State.(kernels.FilterState)
+	if batch.Values[0].Array.UpdateNullCount() > 0 ||
+		(filterState.NullSelection == kernels.DropNulls &&
+			batch.Values[1].Array.UpdateNullCount() > 0) {
+		// PrimitiveFilter cannot use its SIMD path when the values have nulls,
+		// or when DropNulls has to combine filter validity with its values.
+		// Keep the take-index path for these cases to avoid regressions.
+		return filterWithTake(ctx, batch, out)
+	}
+
+	dictArr := batch.Values[0].Array.MakeArray().(*array.Dictionary)
+	defer dictArr.Release()
+
+	selection := batch.Values[1].Array.MakeArray()
+	defer selection.Release()
+
+	filteredIndices, err := FilterArray(ctx.Ctx, dictArr.Indices(), selection, filterState)
 	if err != nil {
 		return err
 	}
-	defer indices.Release()
+	defer filteredIndices.Release()
 
-	filter := NewDatum(indices)
-	defer filter.Release()
-
-	valData := batch.Values[0].Array.MakeData()
-	defer valData.Release()
-
-	vals := NewDatum(valData)
-	defer vals.Release()
-
-	// run 'take' on the dictionary array, which will call dictionaryTake.
-	// we know the bounds are good because the indices were just created by GetTakeIndices
-	result, err := Take(ctx.Ctx, kernels.TakeOptions{BoundsCheck: false}, vals, filter)
-	if err != nil {
-		return err
-	}
-	defer result.Release()
-
-	out.TakeOwnership(result.(*ArrayDatum).Value)
+	// Retain the result buffers directly without constructing a temporary dictionary array.
+	out.TakeOwnership(filteredIndices.Data())
+	out.Type = dictArr.DataType()
+	out.ResizeChildren(1)
+	out.Dictionary().TakeOwnership(dictArr.Data().Dictionary())
 	return nil
 }
 
@@ -646,7 +646,7 @@ func RegisterVectorSelection(reg FunctionRegistry) {
 		{In: exec.NewIDInput(arrow.DENSE_UNION), Exec: denseUnionImpl(kernels.FilterExec(kernels.DenseUnionImpl))},
 		{In: exec.NewIDInput(arrow.DICTIONARY), Exec: dictionaryFilter},
 		{In: exec.NewIDInput(arrow.EXTENSION), Exec: extensionFilterImpl},
-		{In: exec.NewIDInput(arrow.STRUCT), Exec: structFilter},
+		{In: exec.NewIDInput(arrow.STRUCT), Exec: filterWithTake},
 	}...)
 
 	takeKernels = append(takeKernels, []kernels.SelectionKernelData{
