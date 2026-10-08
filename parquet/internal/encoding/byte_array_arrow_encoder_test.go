@@ -124,6 +124,85 @@ func TestByteArrayArrowEncodersMatchByteArrayInput(t *testing.T) {
 	}
 }
 
+func TestPlainByteArrayArrowOffsets(t *testing.T) {
+	t.Run("int32", testPlainByteArrayArrowOffsets[int32])
+	t.Run("int64", testPlainByteArrayArrowOffsets[int64])
+}
+
+func testPlainByteArrayArrowOffsets[T arrowByteArrayOffset](t *testing.T) {
+	t.Helper()
+	values, data, offsets32, _ := arrowByteArrayInput()
+	offsets := make([]T, len(offsets32))
+	for i, offset := range offsets32 {
+		offsets[i] = T(offset)
+	}
+	for _, tc := range []struct {
+		name            string
+		offsets         []T
+		validBits       []byte
+		validBitsOffset int64
+		want            []parquet.ByteArray
+	}{
+		{name: "nil"},
+		{name: "empty-slice", offsets: offsets[3:4]},
+		{name: "empty-values", offsets: []T{offsets[2], offsets[2], offsets[2]}, want: []parquet.ByteArray{{}, {}}},
+		{name: "sliced", offsets: offsets[1:7], want: values[1:6]},
+		{name: "whole", offsets: offsets, want: values},
+		{
+			name: "spaced-slice", offsets: offsets[1:],
+			validBits: []byte{0b01011000, 0}, validBitsOffset: 3,
+			want: []parquet.ByteArray{values[1], values[2], values[4]},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			enc := NewEncoder(parquet.Types.ByteArray, parquet.Encodings.Plain, false, nil, memory.DefaultAllocator).(*PlainByteArrayEncoder)
+			defer enc.Release()
+			enc.PutByteArray([]byte("before"))
+			want := []parquet.ByteArray{[]byte("before")}
+			for range 2 {
+				putArrowPlainSpaced(enc.sink, data, tc.offsets, tc.validBits, tc.validBitsOffset)
+				want = append(want, tc.want...)
+			}
+			enc.PutByteArray([]byte("after"))
+			want = append(want, []byte("after"))
+			got, err := enc.FlushValues()
+			require.NoError(t, err)
+			defer got.Release()
+			require.Equal(t, encodedByteArrays(t, parquet.Encodings.Plain, want, false, nil, 0), got.Bytes())
+		})
+	}
+}
+
+func BenchmarkPlainByteArrayPutArrow(b *testing.B) {
+	b.Run("int32", benchmarkPlainByteArrayPutArrow[int32])
+	b.Run("int64", benchmarkPlainByteArrayPutArrow[int64])
+}
+
+func benchmarkPlainByteArrayPutArrow[T arrowByteArrayOffset](b *testing.B) {
+	for _, nvalues := range []int{64, 65536} {
+		for _, width := range []int{0, 4, 16, 64} {
+			b.Run(fmt.Sprintf("values=%d/bytes=%d", nvalues, width), func(b *testing.B) {
+				data := make([]byte, 4+nvalues*width)
+				offsets := make([]T, nvalues+1)
+				for i := range offsets {
+					offsets[i] = T(4 + i*width)
+				}
+				enc := NewEncoder(parquet.Types.ByteArray, parquet.Encodings.Plain, false, nil, memory.DefaultAllocator).(*PlainByteArrayEncoder)
+				defer enc.Release()
+				enc.sink.Reserve(nvalues * (4 + width))
+				b.SetBytes(int64(nvalues * (4 + width)))
+				b.ReportAllocs()
+				for b.Loop() {
+					// Reuse capacity to isolate encoding from result-buffer allocation.
+					enc.sink.pos = 0
+					putArrowPlain(enc.sink, data, offsets)
+				}
+				b.ReportMetric(float64(nvalues), "values/op")
+			})
+		}
+	}
+}
+
 func TestDeltaByteArrayArrowEncoderPreservesStateAcrossBatches(t *testing.T) {
 	values, data, offsets32, offsets64 := arrowByteArrayInput()
 
