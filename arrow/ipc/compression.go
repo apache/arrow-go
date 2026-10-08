@@ -157,7 +157,7 @@ func (z *lz4Decompressor) Decompress(dst, src []byte) error {
 	// ReadFull stops once dst is full, so probe for one more byte: if there is
 	// one, the frame decompresses to more than the length prefix claims, and we
 	// reject it rather than silently truncate (mirrors the zstd path).
-	n, err := z.Reader.Read(z.extra[:])
+	n, err := z.Read(z.extra[:])
 	if n > 0 {
 		return fmt.Errorf("arrow/ipc: lz4 decompressed to more than the expected %d bytes", len(dst))
 	}
