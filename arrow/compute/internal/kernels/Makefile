@@ -42,7 +42,7 @@ INTEL_SOURCES := \
 	cast_numeric_avx2_amd64.s cast_numeric_sse4_amd64.s constant_factor_avx2_amd64.s \
 	constant_factor_sse4_amd64.s base_arithmetic_avx2_amd64.s base_arithmetic_sse4_amd64.s \
 	scalar_comparison_avx2_amd64.s scalar_comparison_sse4_amd64.s \
-	filter_uint32_avx2_amd64.s filter_uint64_avx2_amd64.s filter_uint16_avx2_amd64.s
+	filter_uint32_avx2_amd64.s filter_uint64_avx2_amd64.s filter_uint16_avx2_amd64.s get_take_indices_avx2_amd64.s
 
 #
 # ARROW-15336: DO NOT add the assembly target for Arm64 (ARM_SOURCES) until c2goasm added the Arm64 support.
@@ -75,6 +75,12 @@ _lib/scalar_comparison_sse4_amd64.s: _lib/scalar_comparison.cc
 
 _lib/filter_uint32_avx2_amd64.s: _lib/filter_uint32.cc
 	$(CXX) -std=c++17 -S $(C_FLAGS) $(ASM_FLAGS_AVX2) $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
+
+_lib/get_take_indices_avx2_amd64.s: _lib/get_take_indices_avx2_amd64.cc
+	# Keep saves/restores in one prologue/epilogue for c2goasm to remove.
+	$(CXX) -std=c++17 -S $(C_FLAGS) $(ASM_FLAGS_AVX2) -mno-stackrealign -fomit-frame-pointer \
+		-mllvm -enable-shrink-wrap=false -mllvm -tail-dup-placement=false $^ -o $@
+	$(PERL_FIXUP_ROTATE) $@
 
 _lib/filter_uint64_avx2_amd64.s: _lib/filter_uint64.cc
 	$(CXX) -std=c++17 -S $(C_FLAGS) $(ASM_FLAGS_AVX2) -mno-stackrealign -fomit-frame-pointer $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
@@ -120,6 +126,15 @@ scalar_comparison_sse4_amd64.s: _lib/scalar_comparison_sse4_amd64.s
 
 filter_uint32_avx2_amd64.s: _lib/filter_uint32_avx2_amd64.s
 	$(C2GOASM) -a -f $^ $@
+
+get_take_indices_avx2_amd64.s: _lib/get_take_indices_avx2_amd64.s
+	# c2goasm drops callee-saved pushes, so BP must not be used even as a scratch register.
+	perl -ne 'die "c2goasm cannot preserve BP: $$_" if /\b(?:rbp|ebp|bp|bpl)\b/' $<
+	# Multiple returns can leave native assembly directives in the Go output.
+	perl -ne '$$returns += /^\s*ret\s*$$/; END { die "c2goasm requires a single return\n" unless $$returns == 1 }' $<
+	$(C2GOASM) -a -f $^ $@
+	perl -i -pe 's{^//\s*\+build\b.*}{//go:build go1.18 && amd64 && !noasm && !appengine}' $@
+	perl -ne 'die "unexpected frame or stack use in take-index assembly: $$_" if /\b(?:push|pop|[re]?[bs]p|[bs]pl)\b/i' $@ || { rm -f $@; exit 1; }
 
 filter_uint64_avx2_amd64.s: _lib/filter_uint64_avx2_amd64.s
 	$(C2GOASM) -a -f $^ $@
