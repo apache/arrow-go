@@ -22,6 +22,7 @@ import (
 	"io"
 	"runtime/trace"
 	"testing"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -156,4 +157,45 @@ func TestGetTakeIndicesUint32AVX2(t *testing.T) {
 		require.False(t, ok)
 		require.Nil(t, result)
 	})
+}
+
+func TestGetTakeIndicesUint32AVX2MaskedStores(t *testing.T) {
+	if !cpu.X86.HasAVX2 {
+		t.Skip("AVX2 is not available")
+	}
+
+	const sentinel = ^uint32(0)
+	for _, nbytes := range []int{1, 9} {
+		filter := make([]byte, nbytes)
+		for i := range filter {
+			filter[i] = 0x55
+		}
+		// Guard both ends of the output and every lane after the selected values.
+		got := make([]uint32, nbytes*8+2)
+		want := make([]uint32, len(got))
+		for tailBits := 1; tailBits <= 8; tailBits++ {
+			for mask := 0; mask < 256; mask++ {
+				filter[nbytes-1] = byte(mask)
+				for i := range got {
+					got[i], want[i] = sentinel, sentinel
+				}
+				pos := 1
+				for i := 0; i < (nbytes-1)*8+tailBits; i++ {
+					if filter[i/8]&(1<<uint(i%8)) != 0 {
+						want[pos] = uint32(i)
+						pos++
+					}
+				}
+
+				_get_take_indices_uint32_avx2(
+					unsafe.Pointer(&filter[0]),
+					unsafe.Pointer(&got[1]),
+					unsafe.Pointer(&getTakeIndicesUint32AVX2Tables[0]),
+					int64(nbytes),
+					int64(1<<uint(tailBits))-1,
+				)
+				require.Equal(t, want, got, "nbytes=%d tailBits=%d mask=%#02x", nbytes, tailBits, mask)
+			}
+		}
+	}
 }

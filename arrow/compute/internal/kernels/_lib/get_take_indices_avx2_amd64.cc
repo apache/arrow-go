@@ -23,6 +23,10 @@ extern "C" void FULL_NAME(get_take_indices_uint32)(const uint8_t* filter,
                                                      const uint8_t* tables,
                                                      const int64_t nbytes,
                                                      const int64_t tail_mask) {
+    if (nbytes <= 0) {
+        return;
+    }
+
     const uint8_t* shuffle_masks = tables;
     const int32_t* store_masks = reinterpret_cast<const int32_t*>(tables + 256);
     const uint8_t* popcount = tables + 336;
@@ -30,27 +34,21 @@ extern "C" void FULL_NAME(get_take_indices_uint32)(const uint8_t* filter,
     const __m128i high_offsets = _mm_loadu_si128(reinterpret_cast<const __m128i*>(tables + 368));
     const __m128i increment = _mm_loadu_si128(reinterpret_cast<const __m128i*>(tables + 384));
     __m128i base = _mm_setzero_si128();
-    int64_t output_length = 0;
 
-    for (int64_t i = 0; i < nbytes; ++i) {
-        uint8_t mask = filter[i];
-        if (i == nbytes - 1) {
-            mask &= static_cast<uint8_t>(tail_mask);
-        }
-
+    const auto compact = [&](uint8_t mask) {
         if (mask == 0) {
             base = _mm_add_epi32(base, increment);
-            continue;
+            return;
         }
 
         if (mask == 0xff) {
             const __m128i low = _mm_or_si128(base, offsets);
             const __m128i high = _mm_or_si128(base, high_offsets);
-            _mm_storeu_si128(reinterpret_cast<__m128i*>(output + output_length), low);
-            _mm_storeu_si128(reinterpret_cast<__m128i*>(output + output_length + 4), high);
-            output_length += 8;
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(output), low);
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(output + 4), high);
+            output += 8;
             base = _mm_add_epi32(base, increment);
-            continue;
+            return;
         }
 
         // Keep the nibble index wide and defer the high-half lookup. This
@@ -65,8 +63,8 @@ extern "C" void FULL_NAME(get_take_indices_uint32)(const uint8_t* filter,
             const __m128i compacted = _mm_shuffle_epi8(values, shuffle);
             const __m128i store_mask = _mm_loadu_si128(
                 reinterpret_cast<const __m128i*>(store_masks + low_count * 4));
-            _mm_maskstore_epi32(reinterpret_cast<int*>(output + output_length), store_mask, compacted);
-            output_length += low_count;
+            _mm_maskstore_epi32(reinterpret_cast<int*>(output), store_mask, compacted);
+            output += low_count;
         }
 
         const int high_mask = mask >> 4;
@@ -78,10 +76,16 @@ extern "C" void FULL_NAME(get_take_indices_uint32)(const uint8_t* filter,
             const __m128i compacted = _mm_shuffle_epi8(values, shuffle);
             const __m128i store_mask = _mm_loadu_si128(
                 reinterpret_cast<const __m128i*>(store_masks + high_count * 4));
-            _mm_maskstore_epi32(reinterpret_cast<int*>(output + output_length), store_mask, compacted);
-            output_length += high_count;
+            _mm_maskstore_epi32(reinterpret_cast<int*>(output), store_mask, compacted);
+            output += high_count;
         }
 
         base = _mm_add_epi32(base, increment);
+    };
+
+    // Only the last byte contains padding bits. Keep its mask out of the loop.
+    for (int64_t i = 0; i < nbytes - 1; ++i) {
+        compact(filter[i]);
     }
+    compact(filter[nbytes - 1] & static_cast<uint8_t>(tail_mask));
 }
