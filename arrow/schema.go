@@ -123,6 +123,8 @@ func (md Metadata) clone() Metadata {
 	return o
 }
 
+const smallMetadataLimit = 12
+
 func sortSmallMetadataIndices(keys []string, idxes []int) {
 	for i := range idxes {
 		idxes[i] = i
@@ -138,7 +140,7 @@ func sortSmallMetadataIndices(keys []string, idxes []int) {
 //
 //go:noinline
 func smallMetadataEqual(left, right Metadata) bool {
-	var leftStorage, rightStorage [12]int
+	var leftStorage, rightStorage [smallMetadataLimit]int
 	leftIdxes := leftStorage[:len(left.keys)]
 	rightIdxes := rightStorage[:len(right.keys)]
 	sortSmallMetadataIndices(left.keys, leftIdxes)
@@ -170,7 +172,7 @@ func (md Metadata) Equal(rhs Metadata) bool {
 	if md.Len() != rhs.Len() {
 		return false
 	}
-	if md.Len() <= 12 {
+	if md.Len() <= smallMetadataLimit {
 		return smallMetadataEqual(md, rhs)
 	}
 
