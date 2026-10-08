@@ -24,6 +24,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path"
 	"testing"
@@ -1041,5 +1042,150 @@ func TestListColumns(t *testing.T) {
 				require.Equal(t, records[j][i], vals.ValueStr(j))
 			}
 		}
+	}
+}
+
+// alpConformanceFile contains matching ALP and PLAIN columns published by
+// apache/parquet-testing. Its ALP columns use vectors of 32, 1024, and 4096
+// values, so decoding cannot assume the writer's default vector size.
+//
+// The fixture independently covers NaN payloads, infinities, negative zero,
+// subnormals, nulls, constant and all-exception vectors, and full-width frames.
+// See parquet-testing/data/README.md.
+const alpConformanceFile = "alp_extended.zstd.parquet"
+
+// floatBitsValue keeps NaN payloads and distinguishes negative zero from zero.
+type floatBitsValue struct {
+	null bool
+	bits uint64
+}
+
+func TestReadALPConformanceFile(t *testing.T) {
+	dir := os.Getenv("PARQUET_TEST_DATA")
+	if dir == "" {
+		dir = "../../parquet-testing/data"
+		t.Log("PARQUET_TEST_DATA not set, using ../../parquet-testing/data")
+	}
+	require.DirExists(t, dir)
+
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	rdr, err := file.OpenParquetFile(path.Join(dir, alpConformanceFile), false,
+		file.WithReadProps(props))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	const numRows = 9032
+	require.EqualValues(t, numRows, rdr.MetaData().GetNumRows())
+
+	for _, tc := range []struct {
+		alp, plain string
+	}{
+		{"float_alp_1024", "float_plain"},
+		{"float_alp_4096", "float_plain"},
+		{"float_alp_32", "float_plain"},
+		{"double_alp_1024", "double_plain"},
+		{"double_alp_4096", "double_plain"},
+		{"double_alp_32", "double_plain"},
+	} {
+		t.Run(tc.alp, func(t *testing.T) {
+			alpCol := alpColumnIndex(t, rdr, tc.alp)
+
+			// A decoder that fell back to another encoding would satisfy the
+			// comparison below, so check that the pages really are ALP.
+			for rg := range rdr.NumRowGroups() {
+				chunk, err := rdr.RowGroup(rg).MetaData().ColumnChunk(alpCol)
+				require.NoError(t, err)
+				assert.Contains(t, chunk.Encodings(), parquet.Encodings.ALP,
+					"row group %d of %s should be ALP encoded", rg, tc.alp)
+			}
+
+			want := readFloatColumn(t, rdr, alpColumnIndex(t, rdr, tc.plain))
+			got := readFloatColumn(t, rdr, alpCol)
+			require.Len(t, want, numRows)
+			require.Len(t, got, numRows)
+
+			for i := range want {
+				if want[i] != got[i] {
+					t.Fatalf("row %d: got %s, want %s", i, got[i], want[i])
+				}
+			}
+		})
+	}
+}
+
+func (v floatBitsValue) String() string {
+	if v.null {
+		return "null"
+	}
+	return fmt.Sprintf("%#016x", v.bits)
+}
+
+// alpColumnIndex returns the index of the named leaf column.
+func alpColumnIndex(t *testing.T, rdr *file.Reader, name string) int {
+	t.Helper()
+
+	schema := rdr.MetaData().Schema
+	for c := range schema.NumColumns() {
+		if schema.Column(c).Name() == name {
+			return c
+		}
+	}
+	t.Fatalf("no column named %s", name)
+	return -1
+}
+
+// readFloatColumn reads one column of every row group, one entry per row. Float
+// bit patterns are widened to 64 bits so that both physical types compare the
+// same way.
+func readFloatColumn(t *testing.T, rdr *file.Reader, col int) []floatBitsValue {
+	t.Helper()
+
+	maxDef := rdr.MetaData().Schema.Column(col).MaxDefinitionLevel()
+	var values []floatBitsValue
+	for rg := range rdr.NumRowGroups() {
+		cr, err := rdr.RowGroup(rg).Column(col)
+		require.NoError(t, err)
+
+		switch r := cr.(type) {
+		case *file.Float32ColumnChunkReader:
+			values = appendFloatValues(t, values, maxDef, r.ReadBatch,
+				func(v float32) uint64 { return uint64(math.Float32bits(v)) })
+		case *file.Float64ColumnChunkReader:
+			values = appendFloatValues(t, values, maxDef, r.ReadBatch, math.Float64bits)
+		default:
+			t.Fatalf("column %d: unexpected reader %T", col, cr)
+		}
+	}
+	return values
+}
+
+// appendFloatValues drains one column chunk, which ReadBatch may return one page
+// at a time. Nulls take a definition level but not a value, so the two advance
+// independently.
+func appendFloatValues[T float32 | float64](t *testing.T, values []floatBitsValue, maxDef int16,
+	readBatch func(int64, []T, []int16, []int16) (int64, int, error),
+	bits func(T) uint64) []floatBitsValue {
+	t.Helper()
+
+	const batchSize = 1024
+	batch := make([]T, batchSize)
+	defLvls := make([]int16, batchSize)
+	for {
+		total, valuesRead, err := readBatch(batchSize, batch, defLvls, nil)
+		require.NoError(t, err)
+		if total == 0 {
+			return values
+		}
+
+		taken := 0
+		for i := range int(total) {
+			if defLvls[i] < maxDef {
+				values = append(values, floatBitsValue{null: true})
+				continue
+			}
+			values = append(values, floatBitsValue{bits: bits(batch[taken])})
+			taken++
+		}
+		require.Equal(t, valuesRead, taken, "read %d values for %d non-null levels", valuesRead, taken)
 	}
 }
