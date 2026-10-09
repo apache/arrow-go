@@ -170,6 +170,42 @@ func TestMappedReader(t *testing.T) {
 	assert.Equal(t, (*byte)(loc), unsafe.SliceData(rec.Column(0).Data().Buffers()[1].Bytes()))
 }
 
+func TestMappedReaderDictionary(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer pool.AssertSize(t, 0)
+	schema := arrow.NewSchema([]arrow.Field{{
+		Name: "value",
+		Type: &arrow.DictionaryType{
+			IndexType: arrow.PrimitiveTypes.Int32,
+			ValueType: arrow.BinaryTypes.String,
+		},
+	}}, nil)
+
+	b := array.NewRecordBuilder(pool, schema)
+	defer b.Release()
+	col := b.Field(0).(*array.BinaryDictionaryBuilder)
+	for _, value := range []string{"alpha", "beta", "alpha"} {
+		require.NoError(t, col.AppendString(value))
+	}
+	record := b.NewRecordBatch()
+	defer record.Release()
+
+	var buf bytes.Buffer
+	writer, err := NewFileWriter(&buf, WithAllocator(pool), WithSchema(schema))
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+
+	rdr, err := NewMappedFileReader(buf.Bytes(), WithAllocator(pool))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	got, err := rdr.RecordBatchAt(0)
+	require.NoError(t, err)
+	defer got.Release()
+	require.True(t, array.RecordEqual(record, got))
+}
+
 func BenchmarkIPC(b *testing.B) {
 	alloc := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer alloc.AssertSize(b, 0)
