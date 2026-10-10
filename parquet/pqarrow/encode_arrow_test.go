@@ -43,6 +43,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
 	"github.com/apache/arrow-go/v18/parquet/internal/testutils"
+	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/google/uuid"
@@ -3081,4 +3082,57 @@ func TestByteArrayStatisticsStreamingReleaseBetweenBatches(t *testing.T) {
 	require.True(t, stats.HasMinMax())
 	assert.Equal(t, "aaa", string(stats.EncodeMin()), "min corrupted by released batch buffer")
 	assert.Equal(t, "zzz", string(stats.EncodeMax()), "max corrupted by released batch buffer")
+}
+
+func TestWriteArrowNestedNullListStatistics(t *testing.T) {
+	tests := []struct {
+		name      string
+		values    []int64
+		hasMinMax bool
+	}{
+		{name: "null-list-only"},
+		{name: "null-list-and-value", values: []int64{5}, hasMinMax: true},
+	}
+	for _, pageVersion := range []parquet.DataPageVersion{parquet.DataPageV1, parquet.DataPageV2} {
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("page-%d/%s", pageVersion, tt.name), func(t *testing.T) {
+				builder := array.NewListBuilder(memory.DefaultAllocator, &arrow.TimestampType{Unit: arrow.Millisecond})
+				defer builder.Release()
+				values := builder.ValueBuilder().(*array.TimestampBuilder)
+				builder.AppendNull()
+				if len(tt.values) > 0 {
+					builder.Append(true)
+					for _, v := range tt.values {
+						values.Append(arrow.Timestamp(v))
+					}
+				}
+				arr := builder.NewListArray()
+				defer arr.Release()
+				field := arrow.Field{Name: "events", Type: arr.DataType(), Nullable: true}
+				column := arrow.NewColumnFromArr(field, arr)
+				defer column.Release()
+				tbl := array.NewTable(arrow.NewSchema([]arrow.Field{field}, nil), []arrow.Column{column}, int64(arr.Len()))
+				defer tbl.Release()
+
+				props := parquet.NewWriterProperties(parquet.WithStats(true), parquet.WithDataPageVersion(pageVersion))
+				data := writeParquetTable(t, tbl, tbl.NumRows(), props)
+				reader, err := file.NewParquetReader(bytes.NewReader(data))
+				require.NoError(t, err)
+				defer reader.Close()
+				chunk, err := reader.MetaData().RowGroup(0).ColumnChunk(0)
+				require.NoError(t, err)
+				stats, err := chunk.Statistics()
+				require.NoError(t, err)
+
+				require.Equal(t, int64(1), stats.NullCount())
+				require.Equal(t, int64(len(tt.values)), stats.NumValues())
+				require.Equal(t, tt.hasMinMax, stats.HasMinMax())
+				if tt.hasMinMax {
+					typed := stats.(*metadata.Int64Statistics)
+					require.Equal(t, int64(5), typed.Min())
+					require.Equal(t, int64(5), typed.Max())
+				}
+			})
+		}
+	}
 }
