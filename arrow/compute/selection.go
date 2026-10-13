@@ -540,9 +540,13 @@ func filterWithTake(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRes
 // that are no longer referenced by any index.
 func dictionaryFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 	filterState := ctx.State.(kernels.FilterState)
-	if batch.Values[0].Array.UpdateNullCount() > 0 ||
+	// UpdateNullCount caches its result on the ArraySpan. Count on copies
+	// so a null-free execution slice cannot hide nulls in later slices.
+	valuesSpan := batch.Values[0].Array
+	filterSpan := batch.Values[1].Array
+	if valuesSpan.UpdateNullCount() > 0 ||
 		(filterState.NullSelection == kernels.DropNulls &&
-			batch.Values[1].Array.UpdateNullCount() > 0) {
+			filterSpan.UpdateNullCount() > 0) {
 		// PrimitiveFilter cannot use its SIMD path when the values have nulls,
 		// or when DropNulls has to combine filter validity with its values.
 		// Keep the take-index path for these cases to avoid regressions.

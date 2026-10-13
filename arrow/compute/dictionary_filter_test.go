@@ -241,3 +241,85 @@ func TestDictionaryFilterIndexTypesAndChunking(t *testing.T) {
 		})
 	}
 }
+
+func TestDictionaryFilterNullsAcrossExecutionChunks(t *testing.T) {
+	cases := []struct {
+		name        string
+		indicesJSON string
+		maskValid   []bool
+		wantDrop    string
+		wantEmit    string
+	}{
+		{
+			name:        "nullable indices",
+			indicesJSON: `[0, null, 1]`,
+			wantDrop:    `[0, null, 1]`,
+			wantEmit:    `[0, null, 1]`,
+		},
+		{
+			name:        "nullable filter",
+			indicesJSON: `[0, 1, 2]`,
+			maskValid:   []bool{true, false, true},
+			wantDrop:    `[0, 2]`,
+			wantEmit:    `[0, null, 2]`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			dt := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+			input, err := array.DictArrayFromJSON(mem, dt, tc.indicesJSON, `["a", "b", "c"]`)
+			require.NoError(t, err)
+			defer input.Release()
+
+			// Keep the value bit set at the null position. DropNulls must
+			// consult the validity bitmap rather than that value bit.
+			builder := array.NewBooleanBuilder(mem)
+			builder.AppendValues([]bool{true, true, true}, tc.maskValid)
+			mask := builder.NewBooleanArray()
+			builder.Release()
+			defer mask.Release()
+			if tc.maskValid != nil {
+				require.True(t, mask.IsNull(1))
+				require.True(t, mask.Value(1))
+			}
+
+			execCtx := compute.DefaultExecCtx()
+			execCtx.ChunkSize = 1
+			ctx := compute.SetExecCtx(compute.WithAllocator(context.Background(), mem), execCtx)
+
+			for _, mode := range []struct {
+				name string
+				opt  compute.NullSelectionBehavior
+				want string
+			}{
+				{"drop nulls", compute.SelectionDropNulls, tc.wantDrop},
+				{"emit nulls", compute.SelectionEmitNulls, tc.wantEmit},
+			} {
+				t.Run(mode.name, func(t *testing.T) {
+					valuesDatum := compute.NewDatum(input)
+					defer valuesDatum.Release()
+					maskDatum := compute.NewDatum(mask)
+					defer maskDatum.Release()
+
+					result, err := compute.Filter(ctx, valuesDatum, maskDatum, compute.FilterOptions{NullSelection: mode.opt})
+					require.NoError(t, err)
+					defer result.Release()
+					require.IsType(t, &compute.ChunkedDatum{}, result)
+
+					got, err := array.Concatenate(result.(*compute.ChunkedDatum).Chunks(), mem)
+					require.NoError(t, err)
+					defer got.Release()
+
+					want, _, err := array.FromJSON(mem, dt.IndexType, strings.NewReader(mode.want))
+					require.NoError(t, err)
+					defer want.Release()
+					require.True(t, array.Equal(want, got.(*array.Dictionary).Indices()))
+				})
+			}
+		})
+	}
+}
