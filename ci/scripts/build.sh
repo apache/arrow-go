@@ -30,8 +30,11 @@ pushd "${source_dir}/arrow"
 
 go_install_arrow_options=(-v)
 if [[ -n "${ARROW_GO_TESTCGO}" ]]; then
-  if [[ "${MSYSTEM:-}" = "MINGW64" ]]; then
-    export PATH=${MINGW_PREFIX}/bin:${PATH}
+  # Git Bash on the runner sets its own MSYSTEM (e.g. UCRT64), so key off the
+  # MINGW_PREFIX exported by the MinGW CI job instead.
+  if [[ -n "${MINGW_PREFIX:-}" ]]; then
+    mingw_prefix="$(cygpath -u "${MINGW_PREFIX}")"
+    export PATH="${mingw_prefix}/bin:${PATH}"
     go clean -cache
     go clean -testcache
   fi
