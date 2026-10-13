@@ -237,7 +237,8 @@ func NewMappedFileReader(data []byte, opts ...Option) (*FileReader, error) {
 				maxMetadataSize: cfg.maxMetadataSize,
 				maxBodySize:     cfg.maxBodySize,
 			},
-			mem: cfg.alloc,
+			memo: dictutils.NewMemo(),
+			mem:  cfg.alloc,
 		}
 	)
 
