@@ -3761,8 +3761,8 @@ func (c *CastSuite) TestStructToDifferentNullabilityStruct() {
 		dest1NonNullable := arrow.StructOf(fieldsDest1NonNullable...)
 		options1NoNullable := compute.SafeCastOptions(dest1NonNullable)
 		_, err = compute.CastArray(context.TODO(), srcNullable, options1NoNullable)
-		c.ErrorIs(err, arrow.ErrType)
-		c.ErrorContains(err, "cannot cast nullable field to non-nullable field")
+		c.ErrorIs(err, arrow.ErrInvalid)
+		c.ErrorContains(err, "has nulls")
 
 		fieldsDest2NonNullable := []arrow.Field{
 			{Name: "a", Type: arrow.PrimitiveTypes.Int64, Nullable: false},
@@ -3771,17 +3771,25 @@ func (c *CastSuite) TestStructToDifferentNullabilityStruct() {
 		dest2NonNullable := arrow.StructOf(fieldsDest2NonNullable...)
 		options2NoNullable := compute.SafeCastOptions(dest2NonNullable)
 		_, err = compute.CastArray(context.TODO(), srcNullable, options2NoNullable)
-		c.ErrorIs(err, arrow.ErrType)
-		c.ErrorContains(err, "cannot cast nullable field to non-nullable field")
+		c.ErrorIs(err, arrow.ErrInvalid)
+		c.ErrorContains(err, "has nulls")
 
 		fieldsDest3NonNullable := []arrow.Field{
 			{Name: "c", Type: arrow.PrimitiveTypes.Int64, Nullable: false},
 		}
 		dest3NonNullable := arrow.StructOf(fieldsDest3NonNullable...)
 		options3NoNullable := compute.SafeCastOptions(dest3NonNullable)
-		_, err = compute.CastArray(context.TODO(), srcNullable, options3NoNullable)
-		c.ErrorIs(err, arrow.ErrType)
-		c.ErrorContains(err, "cannot cast nullable field to non-nullable field")
+		out3, err := compute.CastArray(context.TODO(), srcNullable, options3NoNullable)
+		c.NoError(err) // column c has no nulls
+		defer out3.Release()
+		c.Equal(3, out3.Len())
+
+		// slice that skips the nulls in a and b succeeds
+		sliced := array.NewSlice(srcNullable, 0, 1)
+		defer sliced.Release()
+		out4, err := compute.CastArray(context.TODO(), sliced, options1NoNullable)
+		c.NoError(err)
+		defer out4.Release()
 	})
 }
 
