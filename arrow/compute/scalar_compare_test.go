@@ -63,7 +63,7 @@ func (c *CompareSuite) validateCompare(op kernels.CompareOperator, dt arrow.Data
 		rhs.Release()
 		exp.Release()
 	}()
-	c.validateCompareDatum(op, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()}, &compute.ArrayDatum{exp.Data()})
+	c.validateCompareDatum(op, &compute.ArrayDatum{Value: lhs.Data()}, &compute.ArrayDatum{Value: rhs.Data()}, &compute.ArrayDatum{Value: exp.Data()})
 }
 
 func (c *CompareSuite) validateCompareArrScalar(op kernels.CompareOperator, dt arrow.DataType, lhsStr string, rhs compute.Datum, expStr string) {
@@ -75,7 +75,7 @@ func (c *CompareSuite) validateCompareArrScalar(op kernels.CompareOperator, dt a
 		lhs.Release()
 		exp.Release()
 	}()
-	c.validateCompareDatum(op, &compute.ArrayDatum{lhs.Data()}, rhs, &compute.ArrayDatum{exp.Data()})
+	c.validateCompareDatum(op, &compute.ArrayDatum{Value: lhs.Data()}, rhs, &compute.ArrayDatum{Value: exp.Data()})
 }
 
 func (c *CompareSuite) validateCompareScalarArr(op kernels.CompareOperator, dt arrow.DataType, lhs compute.Datum, rhsStr string, expStr string) {
@@ -87,7 +87,7 @@ func (c *CompareSuite) validateCompareScalarArr(op kernels.CompareOperator, dt a
 		rhs.Release()
 		exp.Release()
 	}()
-	c.validateCompareDatum(op, lhs, &compute.ArrayDatum{rhs.Data()}, &compute.ArrayDatum{exp.Data()})
+	c.validateCompareDatum(op, lhs, &compute.ArrayDatum{Value: rhs.Data()}, &compute.ArrayDatum{Value: exp.Data()})
 }
 
 func slowCompare[T arrow.NumericType | string](op kernels.CompareOperator, lhs, rhs T) bool {
@@ -551,14 +551,14 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 			exp := c.getArr(arrow.FixedWidthTypes.Boolean, op.exp)
 			defer exp.Release()
 
-			expected := &compute.ArrayDatum{exp.Data()}
+			expected := &compute.ArrayDatum{Value: exp.Data()}
 			c.Run("diff units", func() {
 				lhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second}, lhsJSON)
 				defer lhs.Release()
 				rhs := c.getArr(&arrow.TimestampType{Unit: arrow.Millisecond}, rhsJSON)
 				defer rhs.Release()
 
-				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()}, expected, nil)
+				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{Value: lhs.Data()}, &compute.ArrayDatum{Value: rhs.Data()}, expected, nil)
 			})
 			c.Run("diff time zones", func() {
 				lhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/New_York"}, zonedLHSJSON)
@@ -566,7 +566,7 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 				rhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/Phoenix"}, zonedRHSJSON)
 				defer rhs.Release()
 
-				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()}, expected, nil)
+				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{Value: lhs.Data()}, &compute.ArrayDatum{Value: rhs.Data()}, expected, nil)
 			})
 			c.Run("diff time zones and units", func() {
 				cases := []struct {
@@ -580,7 +580,7 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 					lhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second, TimeZone: tc.lhsZone}, zonedLHSJSON)
 					rhs := c.getArr(&arrow.TimestampType{Unit: arrow.Millisecond, TimeZone: tc.rhsZone}, zonedRHSJSON)
 
-					checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()}, expected, nil)
+					checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{Value: lhs.Data()}, &compute.ArrayDatum{Value: rhs.Data()}, expected, nil)
 					lhs.Release()
 					rhs.Release()
 				}
@@ -591,7 +591,7 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 				rhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/Phoenix"}, zonedRHSJSON)
 				defer rhs.Release()
 
-				_, err := compute.CallFunction(c.ctx, op.fn, nil, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()})
+				_, err := compute.CallFunction(c.ctx, op.fn, nil, &compute.ArrayDatum{Value: lhs.Data()}, &compute.ArrayDatum{Value: rhs.Data()})
 				c.ErrorIs(err, arrow.ErrInvalid)
 				c.ErrorContains(err, "cannot compare timestamp with timezone to timestamp without timezone")
 
@@ -600,7 +600,7 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 				rhs = c.getArr(&arrow.TimestampType{Unit: arrow.Second}, rhsJSON)
 				defer rhs.Release()
 
-				_, err = compute.CallFunction(c.ctx, op.fn, nil, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()})
+				_, err = compute.CallFunction(c.ctx, op.fn, nil, &compute.ArrayDatum{Value: lhs.Data()}, &compute.ArrayDatum{Value: rhs.Data()})
 				c.ErrorIs(err, arrow.ErrInvalid)
 				c.ErrorContains(err, "cannot compare timestamp with timezone to timestamp without timezone")
 			})
@@ -627,7 +627,7 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 				for _, tc := range cases {
 					lhs := c.getArr(tc.lhsType, tc.lhsValue)
 					rhs := c.getArr(tc.rhsType, tc.rhsValue)
-					_, err := compute.CallFunction(c.ctx, op.fn, nil, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()})
+					_, err := compute.CallFunction(c.ctx, op.fn, nil, &compute.ArrayDatum{Value: lhs.Data()}, &compute.ArrayDatum{Value: rhs.Data()})
 					lhs.Release()
 					rhs.Release()
 
@@ -667,8 +667,8 @@ func (c *CompareTimestampSuite) TestScalarArray() {
 		defer flipExpected.Release()
 
 		cases := []struct{ side1, side2, expected compute.Datum }{
-			{compute.NewDatum(scalarSide), &compute.ArrayDatum{arraySide.Data()}, &compute.ArrayDatum{expected.Data()}},
-			{&compute.ArrayDatum{arraySide.Data()}, compute.NewDatum(scalarSide), &compute.ArrayDatum{flipExpected.Data()}},
+			{compute.NewDatum(scalarSide), &compute.ArrayDatum{Value: arraySide.Data()}, &compute.ArrayDatum{Value: expected.Data()}},
+			{&compute.ArrayDatum{Value: arraySide.Data()}, compute.NewDatum(scalarSide), &compute.ArrayDatum{Value: flipExpected.Data()}},
 		}
 
 		for _, arrCase := range cases {
@@ -730,9 +730,9 @@ func (c *CompareDecimalSuite) TestArrayScalar() {
 				lhsIntLikeArr.Release()
 			}()
 
-			lhs := &compute.ArrayDatum{lhsArr.Data()}
-			lhsFloat := &compute.ArrayDatum{lhsFloatArr.Data()}
-			lhsIntLike := &compute.ArrayDatum{lhsIntLikeArr.Data()}
+			lhs := &compute.ArrayDatum{Value: lhsArr.Data()}
+			lhsFloat := &compute.ArrayDatum{Value: lhsFloatArr.Data()}
+			lhsIntLike := &compute.ArrayDatum{Value: lhsIntLikeArr.Data()}
 
 			rhs, _ := scalar.MakeScalarParam("1.23", ty)
 			rhsFloat := scalar.MakeScalar(float64(1.23))
@@ -741,7 +741,7 @@ func (c *CompareDecimalSuite) TestArrayScalar() {
 				c.Run(tc.fn, func() {
 					exp := c.getArr(arrow.FixedWidthTypes.Boolean, tc.exp)
 					defer exp.Release()
-					expected := &compute.ArrayDatum{exp.Data()}
+					expected := &compute.ArrayDatum{Value: exp.Data()}
 
 					checkScalarBinary(c.T(), tc.fn, lhs, compute.NewDatum(rhs), expected, nil)
 					checkScalarBinary(c.T(), tc.fn, lhsFloat, compute.NewDatum(rhs), expected, nil)
@@ -776,9 +776,9 @@ func (c *CompareDecimalSuite) TestScalarArray() {
 				rhsIntLikeArr.Release()
 			}()
 
-			rhs := &compute.ArrayDatum{rhsArr.Data()}
-			rhsFloat := &compute.ArrayDatum{rhsFloatArr.Data()}
-			rhsIntLike := &compute.ArrayDatum{rhsIntLikeArr.Data()}
+			rhs := &compute.ArrayDatum{Value: rhsArr.Data()}
+			rhsFloat := &compute.ArrayDatum{Value: rhsFloatArr.Data()}
+			rhsIntLike := &compute.ArrayDatum{Value: rhsIntLikeArr.Data()}
 
 			lhs, _ := scalar.MakeScalarParam("1.23", ty)
 			lhsFloat := scalar.MakeScalar(float64(1.23))
@@ -787,7 +787,7 @@ func (c *CompareDecimalSuite) TestScalarArray() {
 				c.Run(tc.fn, func() {
 					exp := c.getArr(arrow.FixedWidthTypes.Boolean, tc.exp)
 					defer exp.Release()
-					expected := &compute.ArrayDatum{exp.Data()}
+					expected := &compute.ArrayDatum{Value: exp.Data()}
 
 					checkScalarBinary(c.T(), tc.fn, compute.NewDatum(lhs), rhs, expected, nil)
 					checkScalarBinary(c.T(), tc.fn, compute.NewDatum(lhs), rhsFloat, expected, nil)
@@ -822,9 +822,9 @@ func (c *CompareDecimalSuite) TestArrayArray() {
 				lhsIntLikeArr.Release()
 			}()
 
-			lhs := &compute.ArrayDatum{lhsArr.Data()}
-			lhsFloat := &compute.ArrayDatum{lhsFloatArr.Data()}
-			lhsIntLike := &compute.ArrayDatum{lhsIntLikeArr.Data()}
+			lhs := &compute.ArrayDatum{Value: lhsArr.Data()}
+			lhsFloat := &compute.ArrayDatum{Value: lhsFloatArr.Data()}
+			lhsIntLike := &compute.ArrayDatum{Value: lhsIntLikeArr.Data()}
 
 			rhsArr := c.getArr(ty, `["1.23", "2.34", "1.23", "-1.23", "1.23", "-1.23", null, "1.23"]`)
 			rhsFloatArr := c.getArr(arrow.PrimitiveTypes.Float64, `[1.23, 2.34, 1.23, -1.23, 1.23, -1.23, null, 1.23]`)
@@ -835,9 +835,9 @@ func (c *CompareDecimalSuite) TestArrayArray() {
 				rhsIntArr.Release()
 			}()
 
-			rhs := &compute.ArrayDatum{rhsArr.Data()}
-			rhsFloat := &compute.ArrayDatum{rhsFloatArr.Data()}
-			rhsInt := &compute.ArrayDatum{rhsIntArr.Data()}
+			rhs := &compute.ArrayDatum{Value: rhsArr.Data()}
+			rhsFloat := &compute.ArrayDatum{Value: rhsFloatArr.Data()}
+			rhsInt := &compute.ArrayDatum{Value: rhsIntArr.Data()}
 
 			empty := c.getArr(ty, `[]`)
 			emptyExp := c.getArr(arrow.FixedWidthTypes.Boolean, `[]`)
@@ -854,12 +854,12 @@ func (c *CompareDecimalSuite) TestArrayArray() {
 				c.Run(tc.fn, func() {
 					exp := c.getArr(arrow.FixedWidthTypes.Boolean, tc.exp)
 					defer exp.Release()
-					expected := &compute.ArrayDatum{exp.Data()}
+					expected := &compute.ArrayDatum{Value: exp.Data()}
 
-					checkScalarBinary(c.T(), tc.fn, &compute.ArrayDatum{empty.Data()},
-						&compute.ArrayDatum{empty.Data()}, &compute.ArrayDatum{emptyExp.Data()}, nil)
-					checkScalarBinary(c.T(), tc.fn, &compute.ArrayDatum{null.Data()},
-						&compute.ArrayDatum{null.Data()}, &compute.ArrayDatum{nullExp.Data()}, nil)
+					checkScalarBinary(c.T(), tc.fn, &compute.ArrayDatum{Value: empty.Data()},
+						&compute.ArrayDatum{Value: empty.Data()}, &compute.ArrayDatum{Value: emptyExp.Data()}, nil)
+					checkScalarBinary(c.T(), tc.fn, &compute.ArrayDatum{Value: null.Data()},
+						&compute.ArrayDatum{Value: null.Data()}, &compute.ArrayDatum{Value: nullExp.Data()}, nil)
 					checkScalarBinary(c.T(), tc.fn, lhs, rhs, expected, nil)
 					checkScalarBinary(c.T(), tc.fn, lhsFloat, rhs, expected, nil)
 					checkScalarBinary(c.T(), tc.fn, lhs, rhsFloat, expected, nil)
@@ -892,14 +892,14 @@ func (c *CompareDecimalSuite) TestDiffParams() {
 				rhsArr.Release()
 			}()
 
-			lhs := &compute.ArrayDatum{lhsArr.Data()}
-			rhs := &compute.ArrayDatum{rhsArr.Data()}
+			lhs := &compute.ArrayDatum{Value: lhsArr.Data()}
+			rhs := &compute.ArrayDatum{Value: rhsArr.Data()}
 
 			for _, tc := range cases {
 				c.Run(tc.fn, func() {
 					exp := c.getArr(arrow.FixedWidthTypes.Boolean, tc.exp)
 					defer exp.Release()
-					expected := &compute.ArrayDatum{exp.Data()}
+					expected := &compute.ArrayDatum{Value: exp.Data()}
 
 					checkScalarBinary(c.T(), tc.fn, lhs, rhs, expected, nil)
 				})
@@ -998,15 +998,15 @@ func (c *CompareFixedSizeBinary) TestArrayScalar() {
 				exp := c.getArr(arrow.FixedWidthTypes.Boolean, op.exp[tc.resultIdx])
 				defer exp.Release()
 
-				expected := &compute.ArrayDatum{exp.Data()}
+				expected := &compute.ArrayDatum{Value: exp.Data()}
 
 				null := c.getArr(tc.lhsType, `[null]`)
 				defer null.Release()
 				scNull := scalar.MakeNullScalar(tc.rhsType)
 
-				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{null.Data()}, compute.NewDatum(scNull),
-					&compute.ArrayDatum{expNull.Data()}, nil)
-				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhs.Data()},
+				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{Value: null.Data()}, compute.NewDatum(scNull),
+					&compute.ArrayDatum{Value: expNull.Data()}, nil)
+				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{Value: lhs.Data()},
 					compute.NewDatum(rhs), expected, nil)
 			}
 		})
@@ -1093,16 +1093,16 @@ func (c *CompareFixedSizeBinary) TestScalarArray() {
 				exp := c.getArr(arrow.FixedWidthTypes.Boolean, op.exp[tc.resultIdx])
 				defer exp.Release()
 
-				expected := &compute.ArrayDatum{exp.Data()}
+				expected := &compute.ArrayDatum{Value: exp.Data()}
 
 				null := c.getArr(tc.rhsType, `[null]`)
 				defer null.Release()
 				scNull := scalar.MakeNullScalar(tc.lhsType)
 
-				checkScalarBinary(c.T(), op.fn, compute.NewDatum(scNull), &compute.ArrayDatum{null.Data()},
-					&compute.ArrayDatum{expNull.Data()}, nil)
+				checkScalarBinary(c.T(), op.fn, compute.NewDatum(scNull), &compute.ArrayDatum{Value: null.Data()},
+					&compute.ArrayDatum{Value: expNull.Data()}, nil)
 				checkScalarBinary(c.T(), op.fn, compute.NewDatum(lhs),
-					&compute.ArrayDatum{rhs.Data()}, expected, nil)
+					&compute.ArrayDatum{Value: rhs.Data()}, expected, nil)
 			}
 		})
 	}
@@ -1210,7 +1210,7 @@ func (c *CompareFixedSizeBinary) TestArrayArray() {
 				exp := c.getArr(arrow.FixedWidthTypes.Boolean, op.exp[tc.resultIdx])
 				defer exp.Release()
 
-				expected := &compute.ArrayDatum{exp.Data()}
+				expected := &compute.ArrayDatum{Value: exp.Data()}
 
 				lhsEmpty := c.getArr(tc.lhsType, `[]`)
 				defer lhsEmpty.Release()
@@ -1221,12 +1221,12 @@ func (c *CompareFixedSizeBinary) TestArrayArray() {
 				rhsNull := c.getArr(tc.rhsType, `[null]`)
 				defer rhsNull.Release()
 
-				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhsEmpty.Data()}, &compute.ArrayDatum{rhsEmpty.Data()},
-					&compute.ArrayDatum{expEmpty.Data()}, nil)
-				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhsNull.Data()}, &compute.ArrayDatum{rhsNull.Data()},
-					&compute.ArrayDatum{expNull.Data()}, nil)
-				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhs.Data()},
-					&compute.ArrayDatum{rhs.Data()}, expected, nil)
+				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{Value: lhsEmpty.Data()}, &compute.ArrayDatum{Value: rhsEmpty.Data()},
+					&compute.ArrayDatum{Value: expEmpty.Data()}, nil)
+				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{Value: lhsNull.Data()}, &compute.ArrayDatum{Value: rhsNull.Data()},
+					&compute.ArrayDatum{Value: expNull.Data()}, nil)
+				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{Value: lhs.Data()},
+					&compute.ArrayDatum{Value: rhs.Data()}, expected, nil)
 			}
 		})
 	}
@@ -1297,8 +1297,8 @@ func (c *CompareStringSuite) TestRandomCompareArrayArray() {
 							defer rhs.Release()
 
 							c.validateCompareComputed(op,
-								&compute.ArrayDatum{lhs.Data()},
-								&compute.ArrayDatum{rhs.Data()})
+								&compute.ArrayDatum{Value: lhs.Data()},
+								&compute.ArrayDatum{Value: rhs.Data()})
 						})
 					}
 				})
