@@ -326,7 +326,7 @@ func literalToDatum(mem memory.Allocator, lit expr.Literal, ext ExtensionIDSet) 
 		}
 		defer kvArr.Release()
 
-		return compute.NewDatumWithoutOwning(scalar.NewMapScalar(kvArr)), nil
+		return &compute.ScalarDatum{Value: scalar.NewMapScalar(kvArr)}, nil
 	case *expr.StructLiteral:
 		fields := make([]scalar.Scalar, len(v.Value))
 		names := make([]string, len(v.Value))

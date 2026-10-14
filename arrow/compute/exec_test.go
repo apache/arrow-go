@@ -501,7 +501,7 @@ func (c *CallScalarFuncSuite) TestPreallocationCases() {
 			c.resetCtx()
 
 			c.Run("single output default", func() {
-				result, err := CallFunction(c.ctx.Ctx, funcName, nil, &ArrayDatum{arr.Data()})
+				result, err := CallFunction(c.ctx.Ctx, funcName, nil, &ArrayDatum{Value: arr.Data()})
 				c.NoError(err)
 				defer result.Release()
 				c.Equal(KindArray, result.Kind())
@@ -513,7 +513,7 @@ func (c *CallScalarFuncSuite) TestPreallocationCases() {
 				// several invocations of the kernel,
 				// but still only one output array
 				c.execCtx.ChunkSize = 80
-				result, err := CallFunction(SetExecCtx(c.ctx.Ctx, c.execCtx), funcName, nil, &ArrayDatum{arr.Data()})
+				result, err := CallFunction(SetExecCtx(c.ctx.Ctx, c.execCtx), funcName, nil, &ArrayDatum{Value: arr.Data()})
 				c.NoError(err)
 				defer result.Release()
 				c.Equal(KindArray, result.Kind())
@@ -523,7 +523,7 @@ func (c *CallScalarFuncSuite) TestPreallocationCases() {
 			c.Run("not multiple 8 chunk", func() {
 				// chunksize is not a multiple of 8
 				c.execCtx.ChunkSize = 11
-				result, err := CallFunction(SetExecCtx(c.ctx.Ctx, c.execCtx), funcName, nil, &ArrayDatum{arr.Data()})
+				result, err := CallFunction(SetExecCtx(c.ctx.Ctx, c.execCtx), funcName, nil, &ArrayDatum{Value: arr.Data()})
 				c.NoError(err)
 				defer result.Release()
 				c.Equal(KindArray, result.Kind())
@@ -538,7 +538,7 @@ func (c *CallScalarFuncSuite) TestPreallocationCases() {
 				carr := arrow.NewChunked(arr.DataType(), []arrow.Array{chk1, chk2})
 				defer carr.Release()
 
-				result, err := CallFunction(SetExecCtx(c.ctx.Ctx, c.execCtx), funcName, nil, &ChunkedDatum{carr})
+				result, err := CallFunction(SetExecCtx(c.ctx.Ctx, c.execCtx), funcName, nil, &ChunkedDatum{Value: carr})
 				c.NoError(err)
 				defer result.Release()
 				c.Equal(KindChunked, result.Kind())
@@ -551,7 +551,7 @@ func (c *CallScalarFuncSuite) TestPreallocationCases() {
 				// preallocate independently for each batch
 				c.execCtx.PreallocContiguous = false
 				c.execCtx.ChunkSize = 40
-				result, err := CallFunction(SetExecCtx(c.ctx.Ctx, c.execCtx), funcName, nil, &ArrayDatum{arr.Data()})
+				result, err := CallFunction(SetExecCtx(c.ctx.Ctx, c.execCtx), funcName, nil, &ArrayDatum{Value: arr.Data()})
 				c.NoError(err)
 				defer result.Release()
 				c.Equal(KindChunked, result.Kind())
@@ -582,7 +582,7 @@ func (c *CallScalarFuncSuite) TestBasicNonStandardCases() {
 	nullProb := float64(0.2)
 	arr := c.getUint8Arr(1000, nullProb)
 	defer arr.Release()
-	args := []Datum{&ArrayDatum{arr.Data()}}
+	args := []Datum{&ArrayDatum{Value: arr.Data()}}
 
 	for _, funcName := range []string{"test_nopre_data", "test_nopre_validity_or_data"} {
 		c.Run("funcName", func() {
@@ -628,7 +628,7 @@ func (c *CallScalarFuncSuite) TestStatefulKernel() {
 	defer expected.Release()
 
 	options := &ExampleOptions{multiplier}
-	result, err := CallFunction(c.ctx.Ctx, "test_stateful", options, &ArrayDatum{input.Data()})
+	result, err := CallFunction(c.ctx.Ctx, "test_stateful", options, &ArrayDatum{Value: input.Data()})
 	c.NoError(err)
 	defer result.Release()
 	c.assertDatumEqual(expected, result)

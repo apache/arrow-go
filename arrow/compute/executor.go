@@ -1282,9 +1282,17 @@ func (a *scalarAggExecutor) Execute(ctx context.Context, batch *ExecBatch, data 
 		return fmt.Errorf("%w: scalar aggregate kernel finalized without a result", arrow.ErrInvalid)
 	}
 
-	// the result owns its value; boxing it without owning hands that single
-	// reference over to the Datum, which the caller releases
-	out := NewDatumWithoutOwning(result.Take())
+	// the result owns its value; boxing it as an owned Datum hands that
+	// single reference over to the Datum, which the caller releases
+	var out Datum
+	switch taken := result.Take().(type) {
+	case nil:
+		out = &EmptyDatum{}
+	case scalar.Scalar:
+		out = &ScalarDatum{Value: taken}
+	case arrow.ArrayData:
+		out = &ArrayDatum{Value: taken}
+	}
 	select {
 	case <-ctx.Done():
 		out.Release()
