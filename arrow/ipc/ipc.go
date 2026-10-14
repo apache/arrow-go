@@ -68,6 +68,7 @@ type config struct {
 		offset int64
 	}
 	codec              flatbuf.CompressionType
+	zstdLevel          int
 	compressNP         int
 	ensureNativeEndian bool
 	noAutoSchema       bool
@@ -162,6 +163,21 @@ func WithLZ4() Option {
 func WithZstd() Option {
 	return func(cfg *config) {
 		cfg.codec = flatbuf.CompressionTypeZSTD
+	}
+}
+
+// WithZstdLevel tells the writer to use ZSTD compression at the given
+// compression level (1-22, as defined by the Zstandard specification).
+// Level 1 is the fastest but produces the least compression, while higher
+// levels produce smaller output at the cost of slower compression.
+// The default level (when WithZstd is used without WithZstdLevel) is 3,
+// which balances speed and compression ratio.
+//
+// This option only has an effect when ZSTD compression is enabled
+// (via WithZstd) and is ignored otherwise.
+func WithZstdLevel(level int) Option {
+	return func(cfg *config) {
+		cfg.zstdLevel = level
 	}
 }
 

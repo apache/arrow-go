@@ -578,7 +578,7 @@ func TestRecordEncoderCompressionErrorDoesNotDeadlock(t *testing.T) {
 	defer payload.Release()
 
 	encoder := newRecordEncoder(memory.DefaultAllocator, 0, kMaxNestingDepth, true,
-		flatbuf.CompressionTypeZSTD, 2, 0, []compressor{
+		flatbuf.CompressionTypeZSTD, 0, 2, 0, []compressor{
 			failingCompressor{err: want},
 			failingCompressor{err: want},
 		})
@@ -609,7 +609,7 @@ func TestRecordEncoderReturnsCompressionError(t *testing.T) {
 
 	want := errors.New("compression failed")
 	encoder := newRecordEncoder(mem, 0, kMaxNestingDepth, true,
-		flatbuf.CompressionTypeZSTD, 1, 0, []compressor{failingCompressor{err: want}})
+		flatbuf.CompressionTypeZSTD, 0, 1, 0, []compressor{failingCompressor{err: want}})
 	var payload Payload
 	defer payload.Release()
 
@@ -657,8 +657,8 @@ func TestWriteWithCompressionAndMinSavings(t *testing.T) {
 	}
 
 	for _, codec := range []flatbuf.CompressionType{flatbuf.CompressionTypeLZ4_FRAME, flatbuf.CompressionTypeZSTD} {
-		compressors := []compressor{getCompressor(codec)}
-		enc := newRecordEncoder(mem, 0, 5, true, codec, 1, 0, compressors)
+		compressors := []compressor{getCompressor(codec, 0)}
+		enc := newRecordEncoder(mem, 0, 5, true, codec, 0, 1, 0, compressors)
 		var payload Payload
 		require.NoError(t, enc.encode(&payload, batch))
 		assert.Len(t, payload.body, 2)
@@ -670,7 +670,7 @@ func TestWriteWithCompressionAndMinSavings(t *testing.T) {
 		assert.Greater(t, compressedSize, int64(0))
 		expectedSavings := 1.0 - float64(compressedSize)/float64(uncompressedSize)
 
-		compressEncoder := newRecordEncoder(mem, 0, 5, true, codec, 1, expectedSavings, compressors)
+		compressEncoder := newRecordEncoder(mem, 0, 5, true, codec, 0, 1, expectedSavings, compressors)
 		payload.Release()
 		payload.body = payload.body[:0]
 		require.NoError(t, compressEncoder.encode(&payload, batch))
@@ -879,6 +879,7 @@ func TestVariadicCountsNotAccumulatedAcrossEncode(t *testing.T) {
 		kMaxNestingDepth,
 		false,
 		-1,
+		0,
 		1,
 		0,
 		nil,
@@ -935,7 +936,7 @@ func TestRecordEncoderResetRestoresDepth(t *testing.T) {
 	structRecord := array.NewRecordBatch(structSchema, []arrow.Array{structArr}, 1)
 	defer structRecord.Release()
 
-	enc := newRecordEncoder(mem, 0, 1, true, -1, 1, 0, nil)
+	enc := newRecordEncoder(mem, 0, 1, true, -1, 0, 1, 0, nil)
 	var nestedPayload Payload
 	require.ErrorIs(t, enc.encode(&nestedPayload, structRecord), errMaxRecursion)
 	nestedPayload.Release()

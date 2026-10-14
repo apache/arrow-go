@@ -94,6 +94,7 @@ type Writer struct {
 	schema          *arrow.Schema
 	mapper          dictutils.Mapper
 	codec           flatbuf.CompressionType
+	zstdLevel       int
 	compressNP      int
 	compressors     []compressor
 	encoder         *recordEncoder
@@ -115,6 +116,7 @@ func NewWriterWithPayloadWriter(pw PayloadWriter, opts ...Option) *Writer {
 		pw:              pw,
 		schema:          cfg.schema,
 		codec:           cfg.codec,
+		zstdLevel:       cfg.zstdLevel,
 		compressNP:      cfg.compressNP,
 		minSpaceSavings: cfg.minSpaceSavings,
 		emitDictDeltas:  cfg.emitDictDeltas,
@@ -131,6 +133,7 @@ func NewWriter(w io.Writer, opts ...Option) *Writer {
 		pw:              &streamWriter{w: w},
 		schema:          cfg.schema,
 		codec:           cfg.codec,
+		zstdLevel:       cfg.zstdLevel,
 		emitDictDeltas:  cfg.emitDictDeltas,
 		compressNP:      cfg.compressNP,
 		minSpaceSavings: cfg.minSpaceSavings,
@@ -146,6 +149,7 @@ func (w *Writer) getRecordEncoder() *recordEncoder {
 			kMaxNestingDepth,
 			true,
 			w.codec,
+			w.zstdLevel,
 			w.compressNP,
 			w.minSpaceSavings,
 			w.compressors,
@@ -381,6 +385,7 @@ type recordEncoder struct {
 	start           int64
 	allow64b        bool
 	codec           flatbuf.CompressionType
+	zstdLevel       int
 	compressNP      int
 	compressors     []compressor
 	minSpaceSavings float64
@@ -392,6 +397,7 @@ func newRecordEncoder(
 	maxDepth int64,
 	allow64b bool,
 	codec flatbuf.CompressionType,
+	zstdLevel int,
 	compressNP int,
 	minSpaceSavings float64,
 	compressors []compressor,
@@ -403,6 +409,7 @@ func newRecordEncoder(
 		maxDepth:        maxDepth,
 		allow64b:        allow64b,
 		codec:           codec,
+		zstdLevel:       zstdLevel,
 		compressNP:      compressNP,
 		compressors:     compressors,
 		minSpaceSavings: minSpaceSavings,
@@ -429,7 +436,7 @@ func (w *recordEncoder) reset() {
 
 func (w *recordEncoder) getCompressor(id int) compressor {
 	if w.compressors[id] == nil {
-		w.compressors[id] = getCompressor(w.codec)
+		w.compressors[id] = getCompressor(w.codec, w.zstdLevel)
 	}
 	return w.compressors[id]
 }
@@ -1167,6 +1174,7 @@ func GetRecordBatchPayload(batch arrow.RecordBatch, opts ...Option) (Payload, er
 			kMaxNestingDepth,
 			true,
 			cfg.codec,
+			cfg.zstdLevel,
 			cfg.compressNP,
 			cfg.minSpaceSavings,
 			compressors,
