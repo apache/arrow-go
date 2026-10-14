@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build go1.18
+//go:build go1.24
 
 package compute_test
 
@@ -65,12 +65,11 @@ func BenchmarkNumericToBoolCast(b *testing.B) {
 					defer input.Release()
 					opts := compute.DefaultCastOptions(true)
 					opts.ToType = arrow.FixedWidthTypes.Boolean
-					ctx := context.Background()
+					ctx := compute.WithAllocator(context.Background(), mem)
 
 					b.ReportAllocs()
 					b.SetBytes(int64(size) * width)
-					b.ResetTimer()
-					for i := 0; i < b.N; i++ {
+					for b.Loop() {
 						output, err := compute.CastArray(ctx, input, opts)
 						if err != nil {
 							b.Fatal(err)
@@ -81,4 +80,74 @@ func BenchmarkNumericToBoolCast(b *testing.B) {
 			}
 		}
 	}
+}
+
+func BenchmarkNumericToBoolCastNullPatterns(b *testing.B) {
+	patterns := []struct {
+		name   string
+		isNull func(i, size int) bool
+	}{
+		{name: "all-valid", isNull: func(int, int) bool { return false }},
+		{name: "sparse-1pct", isNull: func(i, _ int) bool { return i%100 == 0 }},
+		{name: "alternating-null", isNull: func(i, _ int) bool { return i%2 == 0 }},
+		{name: "clustered50-null", isNull: func(i, _ int) bool { return (i/4096)%2 == 0 }},
+	}
+
+	for _, typ := range []arrow.DataType{
+		arrow.PrimitiveTypes.Int32,
+		arrow.PrimitiveTypes.Uint32,
+		arrow.PrimitiveTypes.Int64,
+		arrow.PrimitiveTypes.Uint64,
+		arrow.PrimitiveTypes.Float32,
+		arrow.PrimitiveTypes.Float64,
+	} {
+		width := int64(typ.(arrow.FixedWidthDataType).Bytes())
+		for _, size := range []int{65536, 1_000_000} {
+			for _, pattern := range patterns {
+				b.Run(fmt.Sprintf("type=%s/size=%d/nulls=%s", typ, size, pattern.name), func(b *testing.B) {
+					mem := memory.NewGoAllocator()
+					input := newBooleanCastBenchmarkArrayWithNullPattern(mem, typ, size, pattern.isNull)
+					defer input.Release()
+					opts := compute.DefaultCastOptions(true)
+					opts.ToType = arrow.FixedWidthTypes.Boolean
+					ctx := compute.WithAllocator(context.Background(), mem)
+
+					b.ReportAllocs()
+					b.SetBytes(int64(size) * width)
+					for b.Loop() {
+						output, err := compute.CastArray(ctx, input, opts)
+						if err != nil {
+							b.Fatal(err)
+						}
+						output.Release()
+					}
+				})
+			}
+		}
+	}
+}
+
+func newBooleanCastBenchmarkArrayWithNullPattern(
+	mem memory.Allocator, typ arrow.DataType, size int, isNull func(i, size int) bool,
+) arrow.Array {
+	builder := array.NewBuilder(mem, typ)
+	builder.Reserve(size)
+	validIndex := 0
+	for i := 0; i < size; i++ {
+		if isNull(i, size) {
+			builder.AppendNull()
+			continue
+		}
+		value := "1"
+		if validIndex%2 == 0 {
+			value = "0"
+		}
+		if err := builder.AppendValueFromString(value); err != nil {
+			panic(err)
+		}
+		validIndex++
+	}
+	result := builder.NewArray()
+	builder.Release()
+	return result
 }
