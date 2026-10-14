@@ -1583,7 +1583,7 @@ func (tk *TakeKernelTestChunked) takeWithArray(dt arrow.DataType, values []strin
 	tk.Require().NoError(err)
 	defer indicesArr.Release()
 
-	result, err := compute.Take(context.TODO(), *compute.DefaultTakeOptions(), &compute.ChunkedDatum{chunked}, &compute.ArrayDatum{indicesArr.Data()})
+	result, err := compute.Take(context.TODO(), *compute.DefaultTakeOptions(), &compute.ChunkedDatum{Value: chunked}, &compute.ArrayDatum{Value: indicesArr.Data()})
 	if err != nil {
 		return nil, err
 	}
@@ -1600,7 +1600,7 @@ func (tk *TakeKernelTestChunked) takeWithChunked(dt arrow.DataType, values, indi
 	tk.Require().NoError(err)
 	defer chunkedIndices.Release()
 
-	result, err := compute.Take(context.TODO(), *compute.DefaultTakeOptions(), &compute.ChunkedDatum{chunked}, &compute.ChunkedDatum{chunkedIndices})
+	result, err := compute.Take(context.TODO(), *compute.DefaultTakeOptions(), &compute.ChunkedDatum{Value: chunked}, &compute.ChunkedDatum{Value: chunkedIndices})
 	if err != nil {
 		return nil, err
 	}
@@ -2340,7 +2340,7 @@ func BenchmarkTakeDictionary(b *testing.B) {
 			b.ReportMetric(float64(bm.numRows), "rows/sec")
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				result, err := compute.Take(ctx, *compute.DefaultTakeOptions(), &compute.ArrayDatum{values.Data()}, &compute.ArrayDatum{takeIndices.Data()})
+				result, err := compute.Take(ctx, *compute.DefaultTakeOptions(), &compute.ArrayDatum{Value: values.Data()}, &compute.ArrayDatum{Value: takeIndices.Data()})
 				if err != nil {
 					b.Fatal(err)
 				}

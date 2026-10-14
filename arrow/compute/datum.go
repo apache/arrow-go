@@ -100,7 +100,8 @@ func (EmptyDatum) data() any { return nil }
 
 // ScalarDatum contains a scalar value
 type ScalarDatum struct {
-	Value scalar.Scalar
+	Value    scalar.Scalar
+	borrowed bool
 }
 
 func (ScalarDatum) Kind() DatumKind         { return KindScalar }
@@ -124,6 +125,9 @@ type releasable interface {
 }
 
 func (d *ScalarDatum) Release() {
+	if d.borrowed {
+		return
+	}
 	if v, ok := d.Value.(releasable); ok {
 		v.Release()
 	}
@@ -139,7 +143,8 @@ func (d *ScalarDatum) Equals(other Datum) bool {
 // ArrayDatum references an array.Data object which can be used to create
 // array instances from if needed.
 type ArrayDatum struct {
-	Value arrow.ArrayData
+	Value    arrow.ArrayData
+	borrowed bool
 }
 
 func (ArrayDatum) Kind() DatumKind           { return KindArray }
@@ -153,6 +158,9 @@ func (d *ArrayDatum) ToScalar() (scalar.Scalar, error) {
 	return scalar.NewListScalarData(d.Value), nil
 }
 func (d *ArrayDatum) Release() {
+	if d.borrowed {
+		return
+	}
 	d.Value.Release()
 	d.Value = nil
 }
@@ -173,7 +181,8 @@ func (d *ArrayDatum) Equals(other Datum) bool {
 
 // ChunkedDatum contains a chunked array for use with expressions and compute.
 type ChunkedDatum struct {
-	Value *arrow.Chunked
+	Value    *arrow.Chunked
+	borrowed bool
 }
 
 func (ChunkedDatum) Kind() DatumKind          { return KindChunked }
@@ -184,6 +193,9 @@ func (d *ChunkedDatum) String() string        { return fmt.Sprintf("Array:{%s}",
 func (d *ChunkedDatum) Chunks() []arrow.Array { return d.Value.Chunks() }
 func (d *ChunkedDatum) data() any             { return d.Value }
 func (d *ChunkedDatum) Release() {
+	if d.borrowed {
+		return
+	}
 	d.Value.Release()
 	d.Value = nil
 }
@@ -198,7 +210,8 @@ func (d *ChunkedDatum) Equals(other Datum) bool {
 // RecordDatum contains an array.Record for passing a full record to an expression
 // or to compute.
 type RecordDatum struct {
-	Value arrow.RecordBatch
+	Value    arrow.RecordBatch
+	borrowed bool
 }
 
 func (RecordDatum) Kind() DatumKind          { return KindRecord }
@@ -207,6 +220,9 @@ func (r *RecordDatum) Len() int64            { return r.Value.NumRows() }
 func (r *RecordDatum) Schema() *arrow.Schema { return r.Value.Schema() }
 func (r *RecordDatum) data() any             { return r.Value }
 func (r *RecordDatum) Release() {
+	if r.borrowed {
+		return
+	}
 	r.Value.Release()
 	r.Value = nil
 }
@@ -221,7 +237,8 @@ func (r *RecordDatum) Equals(other Datum) bool {
 // TableDatum contains a table so that multiple record batches can be worked with
 // together as a single table for being passed to compute and expression handling.
 type TableDatum struct {
-	Value arrow.Table
+	Value    arrow.Table
+	borrowed bool
 }
 
 func (TableDatum) Kind() DatumKind          { return KindTable }
@@ -230,6 +247,9 @@ func (d *TableDatum) Len() int64            { return d.Value.NumRows() }
 func (d *TableDatum) Schema() *arrow.Schema { return d.Value.Schema() }
 func (d *TableDatum) data() any             { return d.Value }
 func (d *TableDatum) Release() {
+	if d.borrowed {
+		return
+	}
 	d.Value.Release()
 	d.Value = nil
 }
@@ -256,50 +276,72 @@ func NewDatum(value interface{}) Datum {
 	switch v := value.(type) {
 	case Datum:
 		return NewDatum(v.data())
+	case arrow.ArrayData:
+		v.Retain()
+		return &ArrayDatum{Value: v}
 	case arrow.Array:
 		v.Data().Retain()
-		return &ArrayDatum{v.Data()}
+		return &ArrayDatum{Value: v.Data()}
+	case *arrow.Chunked:
+		v.Retain()
+		return &ChunkedDatum{Value: v}
+	case arrow.RecordBatch:
+		v.Retain()
+		return &RecordDatum{Value: v}
+	case arrow.Table:
+		v.Retain()
+		return &TableDatum{Value: v}
 	case scalar.Releasable:
 		v.Retain()
-		return NewDatumWithoutOwning(v)
+		if sc, ok := v.(scalar.Scalar); ok {
+			return &ScalarDatum{Value: sc}
+		}
+		return &ScalarDatum{Value: scalar.MakeScalar(v)}
 	case scalar.Scalar:
-		return &ScalarDatum{v}
+		return &ScalarDatum{Value: v}
 	default:
-		return &ScalarDatum{scalar.MakeScalar(value)}
+		return &ScalarDatum{Value: scalar.MakeScalar(value)}
 	}
 }
 
 // NewDatumWithoutOwning is like NewDatum but does not call Retain on the
-// value it is given. The Datum takes over whatever reference the caller
-// supplies, and Datum.Release consumes that reference: it is an ordinary
-// ArrayDatum, ChunkedDatum, RecordDatum, TableDatum or ScalarDatum whose
-// Release calls the wrapped value's Release.
+// value it is given. The returned Datum borrows the underlying value: it
+// does not own any reference to it, so Datum.Release() is a no-op and
+// will NOT release the caller's reference to the value.
 //
-// Two call patterns follow from that. Wrapping a value the caller still owns
-// borrows it: the caller keeps the value alive for as long as the Datum is in
-// use and must not call Release on the Datum, because that would give up the
-// caller's own reference and, with a C-backed allocator or buffers imported
-// through the cdata package, free memory under a live value. Wrapping a
-// value created for the Datum transfers it: the Datum is then the only
-// handle, and it must eventually be released through the Datum or the
-// value's retained data leaks. NewDatum itself uses the second pattern,
-// retaining a Releasable and handing the new reference to this function.
+// The caller is responsible for keeping the underlying value alive for as
+// long as the returned Datum is in use. Because the Datum is non-owning,
+// calling Datum.Release on it is safe (no-op) or unnecessary — it will
+// never free the caller's data. This is the key difference from NewDatum,
+// which retains a reference and whose Datum.Release consumes that
+// reference.
+//
+// Example:
+//
+//	arr := NewInt32Array([]int32{1, 2, 3})
+//	defer arr.Release()
+//	datum := NewDatumWithoutOwning(arr) // datum borrows arr, arr is still alive
+//	// datum.Release() is safe to call (no-op) or omit; it will not free arr
 func NewDatumWithoutOwning(value interface{}) Datum {
 	switch v := value.(type) {
 	case arrow.Array:
-		return &ArrayDatum{v.Data()}
+		return &ArrayDatum{Value: v.Data(), borrowed: true}
 	case arrow.ArrayData:
-		return &ArrayDatum{v}
+		return &ArrayDatum{Value: v, borrowed: true}
 	case *arrow.Chunked:
-		return &ChunkedDatum{v}
+		return &ChunkedDatum{Value: v, borrowed: true}
 	case arrow.RecordBatch:
-		return &RecordDatum{v}
+		return &RecordDatum{Value: v, borrowed: true}
 	case arrow.Table:
-		return &TableDatum{v}
+		return &TableDatum{Value: v, borrowed: true}
 	case scalar.Scalar:
-		return &ScalarDatum{v}
+		return &ScalarDatum{Value: v, borrowed: true}
 	default:
-		return &ScalarDatum{scalar.MakeScalar(value)}
+		// When given a plain Go value (not an Arrow type), we construct
+		// a new Scalar via scalar.MakeScalar. Since this scalar is created
+		// here with no prior owner, the Datum takes ownership of it
+		// (borrowed=false) — Datum.Release() will free it.
+		return &ScalarDatum{Value: scalar.MakeScalar(value)}
 	}
 }
 
