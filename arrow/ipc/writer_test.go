@@ -990,26 +990,31 @@ func TestWithZstdLevel(t *testing.T) {
 
 		r, err := NewFileReader(bytes.NewReader(buf.Bytes()))
 		require.NoError(t, err)
-		defer r.Release()
+		defer r.Close()
 
-		require.True(t, r.Next())
-		assert.True(t, array.RecordEqual(rec, r.RecordBatch()), "records differ")
-		assert.False(t, r.Next())
-		assert.NoError(t, r.Err())
+		require.Equal(t, 1, r.NumRecords())
+		got, err := r.RecordBatchAt(0)
+		require.NoError(t, err)
+		defer got.Release()
+		assert.True(t, array.RecordEqual(rec, got), "records differ")
 	})
 
 	t.Run("different levels produce different output sizes", func(t *testing.T) {
-		// Build a highly-compressible record so the four encoder presets
+		// Build a record with sequential integers so the four encoder presets
 		// (SpeedFastest through SpeedBestCompression) yield visibly different
-		// compressed sizes.
+		// compressed sizes. All-zeros data is trivially compressible at every
+		// level, but sequential values give zstd actual work to do.
 		const ncols, nrows = 8, 8192
 		fields := make([]arrow.Field, ncols)
 		columns := make([]arrow.Array, ncols)
-		// All values are the same → maximum redundancy, highly compressible.
+		values := make([]int32, nrows)
+		for i := range values {
+			values[i] = int32(i)
+		}
 		for i := range fields {
 			fields[i] = arrow.Field{Name: fmt.Sprintf("col%d", i), Type: arrow.PrimitiveTypes.Int32}
 			builder := array.NewInt32Builder(memory.DefaultAllocator)
-			builder.AppendValues(make([]int32, nrows), nil)
+			builder.AppendValues(values, nil)
 			columns[i] = builder.NewArray()
 			builder.Release()
 		}
@@ -1019,27 +1024,29 @@ func TestWithZstdLevel(t *testing.T) {
 		}
 		defer compressible.Release()
 
-		// level 1 → SpeedFastest, level >= 10 → SpeedBestCompression.
-		var fast, best bytes.Buffer
+		// level 1 → SpeedFastest, level 6 → SpeedBetterCompression.
+		// These map to different zstd encoder speed presets so they should
+		// produce visibly different compressed sizes.
+		var fast, slow bytes.Buffer
 		w1 := NewWriter(&fast, WithSchema(compressible.Schema()), WithZstdLevel(1))
 		require.NoError(t, w1.Write(compressible))
 		require.NoError(t, w1.Close())
 
-		w19 := NewWriter(&best, WithSchema(compressible.Schema()), WithZstdLevel(19))
-		require.NoError(t, w19.Write(compressible))
-		require.NoError(t, w19.Close())
+		w6 := NewWriter(&slow, WithSchema(compressible.Schema()), WithZstdLevel(6))
+		require.NoError(t, w6.Write(compressible))
+		require.NoError(t, w6.Close())
 
 		assert.Greater(t, fast.Len(), 0)
-		assert.Greater(t, best.Len(), 0)
-		assert.NotEqual(t, fast.Len(), best.Len(),
-			"level 1 (SpeedFastest) and level 19 (SpeedBestCompression) should produce different sizes")
+		assert.Greater(t, slow.Len(), 0)
+		assert.NotEqual(t, fast.Len(), slow.Len(),
+			"level 1 (SpeedFastest) and level 6 (SpeedBetterCompression) should produce different sizes")
 
 		// Sanity-check that both are round-trippable too.
 		for _, label := range []struct {
 			name string
 			buf  *bytes.Buffer
 		}{
-			{"level1", &fast}, {"level19", &best},
+			{"level1", &fast}, {"level6", &slow},
 		} {
 			r, err := NewReader(bytes.NewReader(label.buf.Bytes()))
 			require.NoError(t, err, "reader %s", label.name)
