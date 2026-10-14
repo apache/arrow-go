@@ -166,17 +166,25 @@ func WithZstd() Option {
 	}
 }
 
-// WithZstdLevel tells the writer to use ZSTD compression at the given
-// compression level (1-22, as defined by the Zstandard specification).
-// Level 1 is the fastest but produces the least compression, while higher
-// levels produce smaller output at the cost of slower compression.
-// The default level (when WithZstd is used without WithZstdLevel) is 3,
-// which balances speed and compression ratio.
+// WithZstdLevel tells the writer to use ZSTD compression with a given
+// compression level and implicitly enables ZSTD compression (equivalent to
+// calling WithZstd). The specified value is passed to the underlying
+// klauspost/compress/zstd encoder via EncoderLevelFromZstd, which reduces
+// the full Zstandard level range (1-22) to four encoder speed presets:
 //
-// This option only has an effect when ZSTD compression is enabled
-// (via WithZstd) and is ignored otherwise.
+//	level <= 0  -> default encoder level (as if WithZstd were used alone)
+//	level 1-2   -> SpeedFastest
+//	level 3-5   -> SpeedDefault
+//	level 6-9   -> SpeedBetterCompression
+//	level >= 10 -> SpeedBestCompression
+//
+// Passing a level less than or equal to zero disables any explicit level
+// override and causes the ZSTD writer to use its built-in default. Because
+// the underlying encoder exposes only four discrete speed presets, setting
+// any level within the ranges above produces the same compression behaviour.
 func WithZstdLevel(level int) Option {
 	return func(cfg *config) {
+		cfg.codec = flatbuf.CompressionTypeZSTD
 		cfg.zstdLevel = level
 	}
 }
