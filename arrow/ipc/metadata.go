@@ -259,6 +259,9 @@ type fieldVisitor struct {
 	offset flatbuffers.UOffsetT
 	kids   []flatbuffers.UOffsetT
 	meta   map[string]string
+	// dictMeta is the metadata of the value type of a dictionary-encoded
+	// field, written to DictionaryEncoding.custom_metadata.
+	dictMeta arrow.Metadata
 }
 
 func (fv *fieldVisitor) visit(field arrow.Field) {
@@ -497,6 +500,15 @@ func (fv *fieldVisitor) visit(field arrow.Field) {
 
 	case *arrow.DictionaryType:
 		field.Type = dt.ValueType
+		if extType, ok := dt.ValueType.(arrow.ExtensionType); ok {
+			// the extension metadata of a dictionary's value type goes in
+			// DictionaryEncoding.custom_metadata so that it can't be confused
+			// with an extension type whose storage type is a dictionary.
+			field.Type = extType.StorageType()
+			fv.dictMeta = arrow.NewMetadata(
+				[]string{ExtensionTypeKeyName, ExtensionMetadataKeyName},
+				[]string{extType.ExtensionName(), extType.Serialize()})
+		}
 		fv.visit(field)
 
 	case arrow.UnionType:
@@ -550,7 +562,8 @@ func (fv *fieldVisitor) result(field arrow.Field) flatbuffers.UOffsetT {
 
 	var dictFB flatbuffers.UOffsetT
 	if storageType.ID() == arrow.DICTIONARY {
-		idxType := field.Type.(*arrow.DictionaryType).IndexType.(arrow.FixedWidthDataType)
+		dictType := storageType.(*arrow.DictionaryType)
+		idxType := dictType.IndexType.(arrow.FixedWidthDataType)
 
 		dictID, err := fv.memo.GetFieldID(fv.pos.Path())
 		if err != nil {
@@ -564,10 +577,12 @@ func (fv *fieldVisitor) result(field arrow.Field) flatbuffers.UOffsetT {
 			signed = true
 		}
 		indexTypeOffset := intToFB(fv.b, int32(idxType.BitWidth()), signed)
+		dictMetaFB := metadataToFB(fv.b, fv.dictMeta, flatbuf.DictionaryEncodingStartCustomMetadataVector)
 		flatbuf.DictionaryEncodingStart(fv.b)
 		flatbuf.DictionaryEncodingAddId(fv.b, dictID)
 		flatbuf.DictionaryEncodingAddIndexType(fv.b, indexTypeOffset)
-		flatbuf.DictionaryEncodingAddIsOrdered(fv.b, field.Type.(*arrow.DictionaryType).Ordered)
+		flatbuf.DictionaryEncodingAddIsOrdered(fv.b, dictType.Ordered)
+		flatbuf.DictionaryEncodingAddCustomMetadata(fv.b, dictMetaFB)
 		dictFB = flatbuf.DictionaryEncodingEnd(fv.b)
 	}
 
@@ -647,6 +662,16 @@ func typeFromFB(field *flatbuf.Field, pos dictutils.FieldPos, children []arrow.F
 		}
 
 		dictValueType = dt
+		// the dictionary value type may be an extension type, described by
+		// the DictionaryEncoding's own custom metadata. Other keys have
+		// nowhere to go and are dropped.
+		dictMeta, err := metadataFromFB(encoding)
+		if err != nil {
+			return nil, err
+		}
+		if dictValueType, err = extensionTypeFromMetadata(dictValueType, &dictMeta); err != nil {
+			return nil, err
+		}
 		dt = &arrow.DictionaryType{IndexType: idxType, ValueType: dictValueType, Ordered: encoding.IsOrdered()}
 		dictID = encoding.Id()
 
@@ -660,56 +685,58 @@ func typeFromFB(field *flatbuf.Field, pos dictutils.FieldPos, children []arrow.F
 	}
 
 	// look for extension metadata in custom metadata field.
-	if md.Len() > 0 {
-		i := md.FindKey(ExtensionTypeKeyName)
-		if i < 0 {
-			return dt, err
-		}
+	return extensionTypeFromMetadata(dt, md)
+}
 
-		extType := arrow.GetExtensionType(md.Values()[i])
-		if extType == nil {
-			// if the extension type is unknown, we do not error here.
-			// simply return the storage type.
-			return dt, err
-		}
-
-		var (
-			data    string
-			dataIdx int
-		)
-
-		if dataIdx = md.FindKey(ExtensionMetadataKeyName); dataIdx >= 0 {
-			data = md.Values()[dataIdx]
-		}
-
-		dt, err = extType.Deserialize(dt, data)
-		if err != nil {
-			return dt, err
-		}
-
-		mdkeys := md.Keys()
-		mdvals := md.Values()
-		if dataIdx < 0 {
-			// if there was no extension metadata, just the name, we only have to
-			// remove the extension name metadata key/value to ensure roundtrip
-			// metadata consistency
-			*md = arrow.NewMetadata(append(mdkeys[:i], mdkeys[i+1:]...), append(mdvals[:i], mdvals[i+1:]...))
-		} else {
-			// if there was extension metadata, we need to remove both the type name
-			// and the extension metadata keys and values.
-			newkeys := make([]string, 0, md.Len()-2)
-			newvals := make([]string, 0, md.Len()-2)
-			for j := range mdkeys {
-				if j != i && j != dataIdx { // copy everything except the extension metadata keys/values
-					newkeys = append(newkeys, mdkeys[j])
-					newvals = append(newvals, mdvals[j])
-				}
-			}
-			*md = arrow.NewMetadata(newkeys, newvals)
-		}
+// extensionTypeFromMetadata returns the extension type described by the
+// ARROW:extension:name and ARROW:extension:metadata keys of md, with storage
+// type dt, and removes those keys from md. If md does not name an extension
+// type, or names one that is not registered, dt and md are returned unchanged.
+func extensionTypeFromMetadata(dt arrow.DataType, md *arrow.Metadata) (arrow.DataType, error) {
+	if md.Len() == 0 {
+		return dt, nil
 	}
 
-	return dt, err
+	i := md.FindKey(ExtensionTypeKeyName)
+	if i < 0 {
+		return dt, nil
+	}
+
+	extType := arrow.GetExtensionType(md.Values()[i])
+	if extType == nil {
+		// if the extension type is unknown, we do not error here.
+		// simply return the storage type.
+		return dt, nil
+	}
+
+	var (
+		data    string
+		dataIdx int
+	)
+
+	if dataIdx = md.FindKey(ExtensionMetadataKeyName); dataIdx >= 0 {
+		data = md.Values()[dataIdx]
+	}
+
+	dt, err := extType.Deserialize(dt, data)
+	if err != nil {
+		return dt, err
+	}
+
+	// remove the extension type keys from the metadata, building new slices
+	// since those returned by Keys and Values may be shared with other copies
+	// of md.
+	newkeys := make([]string, 0, md.Len())
+	newvals := make([]string, 0, md.Len())
+	for j, k := range md.Keys() {
+		if j != i && j != dataIdx {
+			newkeys = append(newkeys, k)
+			newvals = append(newvals, md.Values()[j])
+		}
+	}
+	*md = arrow.NewMetadata(newkeys, newvals)
+
+	return dt, nil
 }
 
 func concreteTypeFromFB(typ flatbuf.Type, data flatbuffers.Table, children []arrow.Field) (arrow.DataType, error) {
