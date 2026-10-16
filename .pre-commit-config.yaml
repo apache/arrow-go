@@ -30,6 +30,9 @@ repos:
       - id: golangci-lint-full
         name: golangci-lint-full-internal
         entry: bash -c 'cd internal && golangci-lint run'
+      - id: golangci-lint-full
+        name: golangci-lint-full-arrgen
+        entry: bash -c 'cd arrgen && golangci-lint run'
   - repo: local
     hooks:
       - id: rat
