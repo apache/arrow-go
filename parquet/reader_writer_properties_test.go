@@ -93,3 +93,56 @@ func TestReaderPropsGetStreamInsufficient(t *testing.T) {
 	_, err := props.GetStream(rdr, 12, 15)
 	assert.Error(t, err)
 }
+
+func TestWriterPropALPEncodingOptIn(t *testing.T) {
+	assert.False(t, parquet.NewWriterProperties().ALPEncodingEnabled(),
+		"ALP is a preview encoding, so it stays off by default")
+
+	assert.Panics(t, func() {
+		parquet.NewWriterProperties(parquet.WithEncoding(parquet.Encodings.ALP))
+	}, "the default encoding cannot be ALP without the flag")
+	assert.Panics(t, func() {
+		parquet.NewWriterProperties(parquet.WithEncodingFor("price", parquet.Encodings.ALP))
+	}, "a column cannot ask for ALP without the flag")
+
+	// The flag may be given before or after the encoding it allows.
+	for _, opts := range [][]parquet.WriterProperty{
+		{parquet.WithALPEncoding(true), parquet.WithEncodingFor("price", parquet.Encodings.ALP)},
+		{parquet.WithEncodingFor("price", parquet.Encodings.ALP), parquet.WithALPEncoding(true)},
+	} {
+		props := parquet.NewWriterProperties(opts...)
+		assert.True(t, props.ALPEncodingEnabled())
+		assert.Equal(t, parquet.Encodings.ALP, props.EncodingFor("price"))
+		assert.Equal(t, parquet.Encodings.Plain, props.EncodingFor("other"),
+			"the flag allows ALP without selecting it")
+	}
+}
+
+func TestWriterPropALPEncodingPerColumn(t *testing.T) {
+	assert.Panics(t, func() {
+		parquet.NewWriterProperties(
+			parquet.WithALPEncodingFor("price", true),
+			parquet.WithEncodingFor("volume", parquet.Encodings.ALP))
+	}, "permission for one column does not carry to another")
+
+	props := parquet.NewWriterProperties(
+		parquet.WithALPEncodingFor("price", true),
+		parquet.WithEncodingFor("price", parquet.Encodings.ALP))
+	assert.True(t, props.ALPEncodingEnabled(),
+		"one permitted column is enough to report the encoding as allowed")
+	assert.True(t, props.ALPEncodingEnabledFor("price"))
+	assert.False(t, props.ALPEncodingEnabledFor("volume"))
+
+	// A column may also be taken out of a permission given to every column.
+	props = parquet.NewWriterProperties(
+		parquet.WithALPEncoding(true),
+		parquet.WithALPEncodingFor("volume", false))
+	assert.True(t, props.ALPEncodingEnabledFor("price"))
+	assert.False(t, props.ALPEncodingEnabledFor("volume"))
+	assert.Panics(t, func() {
+		parquet.NewWriterProperties(
+			parquet.WithALPEncoding(true),
+			parquet.WithALPEncodingFor("volume", false),
+			parquet.WithEncodingFor("volume", parquet.Encodings.ALP))
+	}, "the column-specific setting wins over the default one")
+}
