@@ -62,7 +62,7 @@ func TestUUIDExtensionBuilder(t *testing.T) {
 
 func TestUUIDExtensionRecordBuilder(t *testing.T) {
 	schema := arrow.NewSchema([]arrow.Field{
-		{Name: "uuid", Type: extensions.NewUUIDType()},
+		{Name: "uuid", Type: extensions.NewUUIDType(), Nullable: true},
 	}, nil)
 	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
 	builder.Field(0).(*extensions.UUIDBuilder).Append(testUUID)
