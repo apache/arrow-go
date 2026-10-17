@@ -55,7 +55,20 @@ type SortState = SortOptions
 
 // SortKey defines a column to sort by with its ordering and null placement options.
 type SortKey struct {
-	ColumnIndex   int
+	// ColumnIndex is the top-level column to sort by. Ignored when ColumnPath
+	// is non-empty; ColumnPath[0] is used as the top-level index instead.
+	ColumnIndex int
+
+	// ColumnPath, if non-empty, addresses a field nested inside struct
+	// columns: ColumnPath[0] selects the top-level column (as ColumnIndex
+	// would), and each subsequent entry selects a child field of the
+	// preceding struct column. A struct that is null at a given row makes
+	// every descendant null at that row for sorting purposes, regardless of
+	// the descendant's own physical validity bitmap. Only struct nesting is
+	// supported; a path element pointing into a list, map, or union column
+	// is an error.
+	ColumnPath []int
+
 	Order         SortOrder
 	NullPlacement NullPlacement
 }
