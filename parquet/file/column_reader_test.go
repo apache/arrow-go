@@ -33,6 +33,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/internal/testutils"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
@@ -854,44 +855,115 @@ func TestFullSeekRow(t *testing.T) {
 	}
 }
 
-func BenchmarkReadInt32Column(b *testing.B) {
-	// generate parquet with RLE-dictionary encoded int32 column
-	tempdir := b.TempDir()
-	filepath := filepath.Join(tempdir, "rle-dict-int32.parquet")
+var (
+	benchmarkFilesOnce sync.Once
+	benchmarkTempDir   string
+	benchmarkFiles     = make(map[string]string)
+)
 
-	props := parquet.NewWriterProperties(
-		parquet.WithDictionaryDefault(true),
-		parquet.WithDataPageSize(128*1024*1024), // 128MB
-		parquet.WithBatchSize(128*1024*1024),
-		parquet.WithMaxRowGroupLength(100_000),
-		parquet.WithDataPageVersion(parquet.DataPageV2),
-		parquet.WithVersion(parquet.V2_LATEST),
-	)
+func cleanUpBenchmarkFiles() {
+	if benchmarkTempDir != "" {
+		os.RemoveAll(benchmarkTempDir)
+		benchmarkTempDir = ""
+		benchmarkFiles = make(map[string]string)
+	}
+}
+
+func ensureBenchmarkFiles(b *testing.B) {
+	b.Helper()
+	if len(benchmarkFiles) == 0 {
+		benchmarkFilesOnce.Do(func() {
+			benchmarkFilesErr := setupBenchmarkFiles()
+			if benchmarkFilesErr != nil {
+				b.Fatal(benchmarkFilesErr)
+			}
+		})
+	}
+}
+
+func setupBenchmarkFiles() error {
+	var err error
+	benchmarkTempDir, err = os.MkdirTemp("", "parquet-bench-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp dir: %v", err)
+	}
+
+	const numRowGroups = 10
+	const numRowsPerRowGroup = 1_000_000
+
+	writerProps := func(version parquet.DataPageVersion, codec compress.Compression, props *parquet.FileEncryptionProperties) *parquet.WriterProperties {
+		return parquet.NewWriterProperties(
+			parquet.WithDictionaryDefault(true),
+			parquet.WithDataPageSize(128*1024*1024), // 128MB
+			parquet.WithBatchSize(128*1024*1024),
+			parquet.WithMaxRowGroupLength(numRowsPerRowGroup),
+			parquet.WithVersion(parquet.V2_LATEST),
+			parquet.WithDataPageVersion(version),
+			parquet.WithCompression(codec),
+			parquet.WithEncryptionProperties(props),
+		)
+	}
+	// Create V1 file
+	v1File := filepath.Join(benchmarkTempDir, "rle-dict-int32.v1.parquet")
+	if err := createBenchmarkFile(v1File, numRowGroups, numRowsPerRowGroup, writerProps(parquet.DataPageV1, compress.Codecs.Uncompressed, nil)); err != nil {
+		return err
+	}
+	benchmarkFiles["v1"] = v1File
+
+	// Create V2 file
+	v2File := filepath.Join(benchmarkTempDir, "rle-dict-int32.v2.parquet")
+	if err := createBenchmarkFile(v2File, numRowGroups, numRowsPerRowGroup, writerProps(parquet.DataPageV2, compress.Codecs.Uncompressed, nil)); err != nil {
+		return err
+	}
+	benchmarkFiles["v2"] = v2File
+
+	// Create V1 Snappy file
+	v1SnappyFile := filepath.Join(benchmarkTempDir, "rle-dict-int32.v1.snappy.parquet")
+	if err = createBenchmarkFile(v1SnappyFile, numRowGroups, numRowsPerRowGroup, writerProps(parquet.DataPageV1, compress.Codecs.Snappy, nil)); err != nil {
+		return err
+	}
+	benchmarkFiles["v1-snappy"] = v1SnappyFile
+
+	// Create V2 Snappy file
+	v2SnappyFile := filepath.Join(benchmarkTempDir, "rle-dict-int32.v2.snappy.parquet")
+	if err = createBenchmarkFile(v2SnappyFile, numRowGroups, numRowsPerRowGroup, writerProps(parquet.DataPageV2, compress.Codecs.Snappy, nil)); err != nil {
+		return err
+	}
+	benchmarkFiles["v2-snappy"] = v2SnappyFile
+	return nil
+}
+
+func createBenchmarkFile(filepath string, numRowGroups, numRowsPerRowGroup int, props *parquet.WriterProperties) error {
 	outFile, err := os.Create(filepath)
-	require.NoError(b, err)
+	if err != nil {
+		return fmt.Errorf("failed to create benchmark file: %v", err)
+	}
+	defer outFile.Close()
 
 	sc, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
 		schema.NewInt32Node("col", parquet.Repetitions.Required, -1),
 	}, -1)
-	require.NoError(b, err)
+	if err != nil {
+		return fmt.Errorf("failed to create schema: %v", err)
+	}
 
 	writer := file.NewParquetWriter(outFile, sc, file.WithWriterProps(props))
 
-	// 10 row groups of 100 000 rows = 1 000 000 rows in total
+	// 10 row groups of 1_000_000 rows = 10_000_000 rows in total
 	value := int32(1)
-	for range 10 {
+	for range numRowGroups {
 		rgWriter := writer.AppendBufferedRowGroup()
 		cwr, _ := rgWriter.Column(0)
 		cw := cwr.(*file.Int32ColumnChunkWriter)
-		valuesIn := make([]int32, 0, 100_000)
+		valuesIn := make([]int32, 0, numRowsPerRowGroup)
 		repeats := 1
-		for len(valuesIn) < 100_000 {
+		for len(valuesIn) < numRowsPerRowGroup {
 			repeatedValue := make([]int32, repeats)
 			for i := range repeatedValue {
 				repeatedValue[i] = value
 			}
-			if len(valuesIn)+len(repeatedValue) > 100_000 {
-				repeatedValue = repeatedValue[:100_000-len(valuesIn)]
+			if len(valuesIn)+len(repeatedValue) > numRowsPerRowGroup {
+				repeatedValue = repeatedValue[:numRowsPerRowGroup-len(valuesIn)]
 			}
 			valuesIn = append(valuesIn, repeatedValue[:]...)
 			// repeat values from 1 to 50 times
@@ -901,18 +973,29 @@ func BenchmarkReadInt32Column(b *testing.B) {
 		cw.WriteBatch(valuesIn, nil, nil)
 		rgWriter.Close()
 	}
-	err = writer.Close()
-	require.NoError(b, err)
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("failed to close parquet writer: %v", err)
+	}
+	return nil
+}
 
-	reader, err := file.OpenParquetFile(filepath, false)
+func benchmarkReadInt32Column(b *testing.B, filepath string, readProps *parquet.ReaderProperties) {
+	var reader *file.Reader
+	var err error
+
+	if readProps != nil {
+		reader, err = file.OpenParquetFile(filepath, false, file.WithReadProps(readProps))
+	} else {
+		reader, err = file.OpenParquetFile(filepath, false)
+	}
 	require.NoError(b, err)
 	defer reader.Close()
 
 	numValues := reader.NumRows()
 	values := make([]int32, numValues)
-	b.StopTimer()
+
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		startIndex := 0
 		for rg := 0; rg < reader.NumRowGroups(); rg++ {
 			rgReader := reader.RowGroup(rg)
@@ -922,9 +1005,7 @@ func BenchmarkReadInt32Column(b *testing.B) {
 			cr, ok := colReader.(*file.Int32ColumnChunkReader)
 			require.True(b, ok)
 
-			b.StartTimer()
-			_, valuesRead, err := cr.ReadBatch(rgReader.NumRows(), values, nil, nil)
-			b.StopTimer()
+			_, valuesRead, err := cr.ReadBatch(rgReader.NumRows(), values[startIndex:], nil, nil)
 			require.NoError(b, err)
 
 			startIndex += valuesRead
@@ -932,4 +1013,40 @@ func BenchmarkReadInt32Column(b *testing.B) {
 		}
 		require.Equal(b, numValues, int64(startIndex))
 	}
+}
+
+func BenchmarkReadInt32(b *testing.B) {
+	ensureBenchmarkFiles(b)
+
+	b.Run("V1Page", func(b *testing.B) {
+		benchmarkReadInt32Column(b, benchmarkFiles["v1"], nil)
+	})
+	b.Run("V2Page", func(b *testing.B) {
+		benchmarkReadInt32Column(b, benchmarkFiles["v2"], nil)
+	})
+	b.Run("V1PageSnappy", func(b *testing.B) {
+		benchmarkReadInt32Column(b, benchmarkFiles["v1-snappy"], nil)
+	})
+	b.Run("V2PageSnappy", func(b *testing.B) {
+		benchmarkReadInt32Column(b, benchmarkFiles["v2-snappy"], nil)
+	})
+}
+
+func BenchmarkReadInt32Buffered(b *testing.B) {
+	ensureBenchmarkFiles(b)
+
+	readProps := parquet.NewReaderProperties(mem)
+	readProps.BufferedStreamEnabled = true
+	b.Run("V1Page", func(b *testing.B) {
+		benchmarkReadInt32Column(b, benchmarkFiles["v1"], readProps)
+	})
+	b.Run("V2Page", func(b *testing.B) {
+		benchmarkReadInt32Column(b, benchmarkFiles["v2"], readProps)
+	})
+	b.Run("V1PageSnappy", func(b *testing.B) {
+		benchmarkReadInt32Column(b, benchmarkFiles["v1-snappy"], readProps)
+	})
+	b.Run("V2PageSnappy", func(b *testing.B) {
+		benchmarkReadInt32Column(b, benchmarkFiles["v2-snappy"], readProps)
+	})
 }

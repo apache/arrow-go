@@ -21,6 +21,8 @@ import (
 	"errors"
 	"io"
 	"testing"
+
+	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
 type readerReturningDataAndError struct {
@@ -42,7 +44,7 @@ func TestBufferedReaderResetClearsPendingError(t *testing.T) {
 	r := NewBufferedReader(&readerReturningDataAndError{
 		Reader: bytes.NewReader([]byte("a")),
 		err:    io.ErrUnexpectedEOF,
-	}, 2)
+	}, 2, memory.DefaultAllocator)
 
 	buf := make([]byte, 1)
 	if n, err := r.Read(buf); n != 1 || err != nil || string(buf) != "a" {
@@ -56,7 +58,7 @@ func TestBufferedReaderResetClearsPendingError(t *testing.T) {
 }
 
 func TestBufferedReaderPeekReturnsAvailableBytesOnError(t *testing.T) {
-	r := NewBufferedReader(bytes.NewReader([]byte("a")), 2)
+	r := NewBufferedReader(bytes.NewReader([]byte("a")), 2, memory.DefaultAllocator)
 
 	got, err := r.Peek(2)
 	if !errors.Is(err, io.EOF) {

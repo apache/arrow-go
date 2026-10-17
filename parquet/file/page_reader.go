@@ -406,7 +406,7 @@ func (d *DictionaryPage) Release() {
 func (d *DictionaryPage) IsSorted() bool { return d.sorted }
 
 type serializedPageReader struct {
-	r             parquet.BufferedReader
+	r             parquet.BufferedReaderV2
 	chunk         *metadata.ColumnChunkMetaData
 	colIdx        int
 	pgIndexReader *metadata.RowGroupPageIndexReader
@@ -451,10 +451,13 @@ func (p *serializedPageReader) Close() error {
 		p.dictPageBuffer.Release()
 		p.dataPageBuffer.Release()
 	}
+	if p.r != nil {
+		p.r.Free()
+	}
 	return nil
 }
 
-func (p *serializedPageReader) init(compressType compress.Compression, ctx *CryptoContext) error {
+func (p *serializedPageReader) init(codec compress.Codec, ctx *CryptoContext) {
 	if p.mem == nil {
 		p.mem = memory.NewGoAllocator()
 	}
@@ -463,10 +466,6 @@ func (p *serializedPageReader) init(compressType compress.Compression, ctx *Cryp
 	p.dictPageBuffer = memory.NewResizableBuffer(p.mem)
 	p.decompressBuffer.ResizeNoShrink(defaultPageHeaderSize)
 
-	codec, err := compress.GetCodec(compressType)
-	if err != nil {
-		return err
-	}
 	p.codec = codec
 	if _, ok := codec.(compress.StreamingCodec); !ok {
 		// A codec registered via compress.RegisterCodec need not implement
@@ -485,8 +484,25 @@ func (p *serializedPageReader) init(compressType compress.Compression, ctx *Cryp
 		p.baseOffset = p.chunk.DictionaryPageOffset()
 		p.dictOffset = p.baseOffset
 	}
+}
 
-	return nil
+type bufferedReaderV2Adapter struct {
+	parquet.BufferedReader
+}
+
+func (b *bufferedReaderV2Adapter) Buffered() int {
+	return 0
+}
+
+func (b *bufferedReaderV2Adapter) Free() {
+	// no-op
+}
+
+func getBufferedReaderV2(r parquet.BufferedReader) parquet.BufferedReaderV2 {
+	if brV2, ok := r.(parquet.BufferedReaderV2); ok {
+		return brV2
+	}
+	return &bufferedReaderV2Adapter{BufferedReader: r}
 }
 
 // NewPageReader returns a page reader for the data which can be read from the provided reader and compression.
@@ -504,7 +520,7 @@ func NewPageReader(r parquet.BufferedReader, nrows int64, compressType compress.
 	}
 
 	rdr := &serializedPageReader{
-		r:                       r,
+		r:                       getBufferedReaderV2(r),
 		maxPageHeaderSize:       defaultMaxPageHeaderSize,
 		nrows:                   nrows,
 		mem:                     mem,
@@ -530,7 +546,11 @@ func (p *serializedPageReader) Reset(r parquet.BufferedReader, nrows int64, comp
 	}
 	p.rowsSeen, p.pageOrd, p.nrows = 0, 0, nrows
 	p.curPageHdr, p.curPage, p.err = nil, nil, nil
-	p.r = r
+	newr := getBufferedReaderV2(r)
+	if p.r != nil && p.r != newr {
+		p.r.Free()
+	}
+	p.r = newr
 	p.columnCanStream = false
 
 	p.codec, p.err = compress.GetCodec(compressType)
@@ -743,7 +763,8 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 		readBufSize := min(int(p.dataOffset-p.baseOffset), p.r.BufferSize())
 		rd := utils.NewBufferedReader(
 			io.NewSectionReader(p.r.Outer(), p.dictOffset-p.baseOffset, p.dataOffset-p.baseOffset),
-			readBufSize)
+			readBufSize, p.mem)
+		defer rd.Free()
 		if err := p.readPageHeader(rd, hdr); err != nil {
 			return nil, err
 		}
@@ -793,7 +814,7 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 	return nil, nil
 }
 
-func (p *serializedPageReader) readPageHeader(rd parquet.BufferedReader, hdr *format.PageHeader) error {
+func (p *serializedPageReader) readPageHeader(rd parquet.BufferedReaderV2, hdr *format.PageHeader) error {
 	allowedPgSz := defaultPageHeaderSize
 	for {
 		view, err := rd.Peek(allowedPgSz)
