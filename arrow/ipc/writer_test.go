@@ -578,7 +578,7 @@ func TestRecordEncoderCompressionErrorDoesNotDeadlock(t *testing.T) {
 	defer payload.Release()
 
 	encoder := newRecordEncoder(memory.DefaultAllocator, 0, kMaxNestingDepth, true,
-		flatbuf.CompressionTypeZSTD, 2, 0, []compressor{
+		flatbuf.CompressionTypeZSTD, 0, 2, 0, []compressor{
 			failingCompressor{err: want},
 			failingCompressor{err: want},
 		})
@@ -609,7 +609,7 @@ func TestRecordEncoderReturnsCompressionError(t *testing.T) {
 
 	want := errors.New("compression failed")
 	encoder := newRecordEncoder(mem, 0, kMaxNestingDepth, true,
-		flatbuf.CompressionTypeZSTD, 1, 0, []compressor{failingCompressor{err: want}})
+		flatbuf.CompressionTypeZSTD, 0, 1, 0, []compressor{failingCompressor{err: want}})
 	var payload Payload
 	defer payload.Release()
 
@@ -657,8 +657,8 @@ func TestWriteWithCompressionAndMinSavings(t *testing.T) {
 	}
 
 	for _, codec := range []flatbuf.CompressionType{flatbuf.CompressionTypeLZ4_FRAME, flatbuf.CompressionTypeZSTD} {
-		compressors := []compressor{getCompressor(codec)}
-		enc := newRecordEncoder(mem, 0, 5, true, codec, 1, 0, compressors)
+		compressors := []compressor{getCompressor(codec, 0)}
+		enc := newRecordEncoder(mem, 0, 5, true, codec, 0, 1, 0, compressors)
 		var payload Payload
 		require.NoError(t, enc.encode(&payload, batch))
 		assert.Len(t, payload.body, 2)
@@ -670,7 +670,7 @@ func TestWriteWithCompressionAndMinSavings(t *testing.T) {
 		assert.Greater(t, compressedSize, int64(0))
 		expectedSavings := 1.0 - float64(compressedSize)/float64(uncompressedSize)
 
-		compressEncoder := newRecordEncoder(mem, 0, 5, true, codec, 1, expectedSavings, compressors)
+		compressEncoder := newRecordEncoder(mem, 0, 5, true, codec, 0, 1, expectedSavings, compressors)
 		payload.Release()
 		payload.body = payload.body[:0]
 		require.NoError(t, compressEncoder.encode(&payload, batch))
@@ -879,6 +879,7 @@ func TestVariadicCountsNotAccumulatedAcrossEncode(t *testing.T) {
 		kMaxNestingDepth,
 		false,
 		-1,
+		0,
 		1,
 		0,
 		nil,
@@ -935,7 +936,7 @@ func TestRecordEncoderResetRestoresDepth(t *testing.T) {
 	structRecord := array.NewRecordBatch(structSchema, []arrow.Array{structArr}, 1)
 	defer structRecord.Release()
 
-	enc := newRecordEncoder(mem, 0, 1, true, -1, 1, 0, nil)
+	enc := newRecordEncoder(mem, 0, 1, true, -1, 0, 1, 0, nil)
 	var nestedPayload Payload
 	require.ErrorIs(t, enc.encode(&nestedPayload, structRecord), errMaxRecursion)
 	nestedPayload.Release()
@@ -957,4 +958,231 @@ func TestRecordEncoderResetRestoresDepth(t *testing.T) {
 	var simplePayload Payload
 	require.NoError(t, enc.encode(&simplePayload, simpleRecord))
 	simplePayload.Release()
+}
+
+func TestWithZstdLevel(t *testing.T) {
+	rec := benchmarkRecordBatch(4, 4096)
+	defer rec.Release()
+
+	// WithZstdLevel should be sufficient on its own — it enables ZSTD.
+	t.Run("NewWriter roundtrip with level", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := NewWriter(&buf, WithSchema(rec.Schema()), WithZstdLevel(1))
+		require.NoError(t, w.Write(rec))
+		require.NoError(t, w.Close())
+
+		r, err := NewReader(bytes.NewReader(buf.Bytes()))
+		require.NoError(t, err)
+		defer r.Release()
+
+		require.True(t, r.Next())
+		assert.True(t, array.RecordEqual(rec, r.RecordBatch()), "records differ")
+		assert.False(t, r.Next())
+		assert.NoError(t, r.Err())
+	})
+
+	t.Run("NewFileWriter roundtrip with level", func(t *testing.T) {
+		var buf bytes.Buffer
+		fw, err := NewFileWriter(&buf, WithSchema(rec.Schema()), WithZstdLevel(1))
+		require.NoError(t, err)
+		require.NoError(t, fw.Write(rec))
+		require.NoError(t, fw.Close())
+
+		r, err := NewFileReader(bytes.NewReader(buf.Bytes()))
+		require.NoError(t, err)
+		defer r.Close()
+
+		require.Equal(t, 1, r.NumRecords())
+		got, err := r.RecordBatchAt(0)
+		require.NoError(t, err)
+		defer got.Release()
+		assert.True(t, array.RecordEqual(rec, got), "records differ")
+	})
+
+	t.Run("different levels produce different output sizes", func(t *testing.T) {
+		// Build a record with sequential integers so the four encoder presets
+		// (SpeedFastest through SpeedBestCompression) yield visibly different
+		// compressed sizes. All-zeros data is trivially compressible at every
+		// level, but sequential values give zstd actual work to do.
+		const ncols, nrows = 8, 8192
+		fields := make([]arrow.Field, ncols)
+		columns := make([]arrow.Array, ncols)
+		values := make([]int32, nrows)
+		for i := range values {
+			values[i] = int32(i)
+		}
+		for i := range fields {
+			fields[i] = arrow.Field{Name: fmt.Sprintf("col%d", i), Type: arrow.PrimitiveTypes.Int32}
+			builder := array.NewInt32Builder(memory.DefaultAllocator)
+			builder.AppendValues(values, nil)
+			columns[i] = builder.NewArray()
+			builder.Release()
+		}
+		compressible := array.NewRecordBatch(arrow.NewSchema(fields, nil), columns, nrows)
+		for _, c := range columns {
+			c.Release()
+		}
+		defer compressible.Release()
+
+		// level 1 → SpeedFastest, level 6 → SpeedBetterCompression.
+		// These map to different zstd encoder speed presets so they should
+		// produce visibly different compressed sizes.
+		var fast, slow bytes.Buffer
+		w1 := NewWriter(&fast, WithSchema(compressible.Schema()), WithZstdLevel(1))
+		require.NoError(t, w1.Write(compressible))
+		require.NoError(t, w1.Close())
+
+		w6 := NewWriter(&slow, WithSchema(compressible.Schema()), WithZstdLevel(6))
+		require.NoError(t, w6.Write(compressible))
+		require.NoError(t, w6.Close())
+
+		assert.Greater(t, fast.Len(), 0)
+		assert.Greater(t, slow.Len(), 0)
+		assert.NotEqual(t, fast.Len(), slow.Len(),
+			"level 1 (SpeedFastest) and level 6 (SpeedBetterCompression) should produce different sizes")
+
+		// Sanity-check that both are round-trippable too.
+		for _, label := range []struct {
+			name string
+			buf  *bytes.Buffer
+		}{
+			{"level1", &fast}, {"level6", &slow},
+		} {
+			r, err := NewReader(bytes.NewReader(label.buf.Bytes()))
+			require.NoError(t, err, "reader %s", label.name)
+			require.True(t, r.Next(), "reader %s", label.name)
+			assert.True(t, array.RecordEqual(compressible, r.RecordBatch()), "reader %s record mismatch", label.name)
+			r.Release()
+		}
+	})
+
+	t.Run("WithZstd NewWriter roundtrip", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := NewWriter(&buf, WithSchema(rec.Schema()), WithZstd())
+		require.NoError(t, w.Write(rec))
+		require.NoError(t, w.Close())
+
+		r, err := NewReader(bytes.NewReader(buf.Bytes()))
+		require.NoError(t, err)
+		defer r.Release()
+
+		require.True(t, r.Next())
+		assert.True(t, array.RecordEqual(rec, r.RecordBatch()), "records differ")
+		assert.False(t, r.Next())
+		assert.NoError(t, r.Err())
+	})
+
+	t.Run("WithZstd NewFileWriter roundtrip", func(t *testing.T) {
+		var buf bytes.Buffer
+		fw, err := NewFileWriter(&buf, WithSchema(rec.Schema()), WithZstd())
+		require.NoError(t, err)
+		require.NoError(t, fw.Write(rec))
+		require.NoError(t, fw.Close())
+
+		r, err := NewFileReader(bytes.NewReader(buf.Bytes()))
+		require.NoError(t, err)
+		defer r.Close()
+
+		require.Equal(t, 1, r.NumRecords())
+		got, err := r.RecordBatchAt(0)
+		require.NoError(t, err)
+		defer got.Release()
+		assert.True(t, array.RecordEqual(rec, got), "records differ")
+	})
+
+	t.Run("same-preset levels produce identical output", func(t *testing.T) {
+		// EncoderLevelFromZstd collapses a range of zstd levels into one of
+		// four preset speeds. Two levels that fall into the same preset
+		// (e.g. 1 and 2 are both SpeedFastest) should produce byte-identical
+		// output after compression.
+		const ncols, nrows = 8, 8192
+		fields := make([]arrow.Field, ncols)
+		columns := make([]arrow.Array, ncols)
+		values := make([]int32, nrows)
+		for i := range values {
+			values[i] = int32(i)
+		}
+		for i := range fields {
+			fields[i] = arrow.Field{Name: fmt.Sprintf("col%d", i), Type: arrow.PrimitiveTypes.Int32}
+			builder := array.NewInt32Builder(memory.DefaultAllocator)
+			builder.AppendValues(values, nil)
+			columns[i] = builder.NewArray()
+			builder.Release()
+		}
+		compressible := array.NewRecordBatch(arrow.NewSchema(fields, nil), columns, nrows)
+		for _, c := range columns {
+			c.Release()
+		}
+		defer compressible.Release()
+
+		var a, b bytes.Buffer
+		wA := NewWriter(&a, WithSchema(compressible.Schema()), WithZstdLevel(1))
+		require.NoError(t, wA.Write(compressible))
+		require.NoError(t, wA.Close())
+
+		wB := NewWriter(&b, WithSchema(compressible.Schema()), WithZstdLevel(2))
+		require.NoError(t, wB.Write(compressible))
+		require.NoError(t, wB.Close())
+
+		assert.Equal(t, a.Len(), b.Len(),
+			"levels 1 and 2 both map to SpeedFastest and should produce identical output")
+		assert.Equal(t, a.Bytes(), b.Bytes(),
+			"levels 1 and 2 should produce byte-identical output")
+	})
+
+	t.Run("WithZstd and WithZstdLevel(0) are equivalent", func(t *testing.T) {
+		const ncols, nrows = 8, 8192
+		fields := make([]arrow.Field, ncols)
+		columns := make([]arrow.Array, ncols)
+		values := make([]int32, nrows)
+		for i := range values {
+			values[i] = int32(i)
+		}
+		for i := range fields {
+			fields[i] = arrow.Field{Name: fmt.Sprintf("col%d", i), Type: arrow.PrimitiveTypes.Int32}
+			builder := array.NewInt32Builder(memory.DefaultAllocator)
+			builder.AppendValues(values, nil)
+			columns[i] = builder.NewArray()
+			builder.Release()
+		}
+		compressible := array.NewRecordBatch(arrow.NewSchema(fields, nil), columns, nrows)
+		for _, c := range columns {
+			c.Release()
+		}
+		defer compressible.Release()
+
+		var a, b bytes.Buffer
+		wA := NewWriter(&a, WithSchema(compressible.Schema()), WithZstd())
+		require.NoError(t, wA.Write(compressible))
+		require.NoError(t, wA.Close())
+
+		wB := NewWriter(&b, WithSchema(compressible.Schema()), WithZstdLevel(0))
+		require.NoError(t, wB.Write(compressible))
+		require.NoError(t, wB.Close())
+
+		assert.Equal(t, a.Bytes(), b.Bytes(),
+			"WithZstd() and WithZstdLevel(0) should produce byte-identical output")
+
+		for _, buf := range []*bytes.Buffer{&a, &b} {
+			r, err := NewReader(bytes.NewReader(buf.Bytes()))
+			require.NoError(t, err)
+			require.True(t, r.Next())
+			assert.True(t, array.RecordEqual(compressible, r.RecordBatch()))
+			r.Release()
+		}
+	})
+
+	t.Run("non-positive level falls back to default", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := NewWriter(&buf, WithSchema(rec.Schema()), WithZstdLevel(0))
+		require.NoError(t, w.Write(rec))
+		require.NoError(t, w.Close())
+
+		r, err := NewReader(bytes.NewReader(buf.Bytes()))
+		require.NoError(t, err)
+		defer r.Release()
+
+		require.True(t, r.Next())
+		assert.True(t, array.RecordEqual(rec, r.RecordBatch()), "records differ")
+	})
 }

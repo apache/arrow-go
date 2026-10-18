@@ -66,7 +66,7 @@ func (zstdCompressor) Type() flatbuf.CompressionType {
 	return flatbuf.CompressionTypeZSTD
 }
 
-func getCompressor(codec flatbuf.CompressionType) compressor {
+func getCompressor(codec flatbuf.CompressionType, zstdLevel int) compressor {
 	switch codec {
 	case flatbuf.CompressionTypeLZ4_FRAME:
 		w := lz4.NewWriter(nil)
@@ -74,7 +74,15 @@ func getCompressor(codec flatbuf.CompressionType) compressor {
 		w.Apply(lz4.ChecksumOption(false), lz4.BlockSizeOption(lz4.Block64Kb))
 		return &lz4Compressor{w}
 	case flatbuf.CompressionTypeZSTD:
-		enc, err := zstd.NewWriter(nil)
+		var enc *zstd.Encoder
+		var err error
+		if zstdLevel > 0 {
+			enc, err = zstd.NewWriter(nil,
+				zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(zstdLevel)),
+			)
+		} else {
+			enc, err = zstd.NewWriter(nil)
+		}
 		if err != nil {
 			panic(err)
 		}

@@ -109,7 +109,7 @@ func TestWriteDictionaryPayloadsReleasesPayloadPerDictionary(t *testing.T) {
 
 	mapper := &dictutils.Mapper{}
 	mapper.ImportSchema(record.Schema())
-	encoder := newRecordEncoder(mem, 0, kMaxNestingDepth, true, -1, 1, 0, nil)
+	encoder := newRecordEncoder(mem, 0, kMaxNestingDepth, true, -1, 0, 1, 0, nil)
 	lastWrittenDicts := make(map[int64]arrow.Array, numColumns)
 	defer func() {
 		for _, dict := range lastWrittenDicts {
@@ -140,7 +140,7 @@ func TestWriteDictionaryPayloadsReleasesPayloadOnFailure(t *testing.T) {
 
 				mapper := &dictutils.Mapper{}
 				mapper.ImportSchema(record.Schema())
-				encoder := newRecordEncoder(mem, 0, kMaxNestingDepth, true, -1, 1, 0, nil)
+				encoder := newRecordEncoder(mem, 0, kMaxNestingDepth, true, -1, 0, 1, 0, nil)
 				lastWrittenDicts := make(map[int64]arrow.Array)
 				defer func() {
 					for _, dict := range lastWrittenDicts {
@@ -186,7 +186,7 @@ func BenchmarkWriteDictionaryPayloadsPeak(b *testing.B) {
 
 			mapper := &dictutils.Mapper{}
 			mapper.ImportSchema(record.Schema())
-			encoder := newRecordEncoder(mem, 0, kMaxNestingDepth, true, -1, 1, 0, nil)
+			encoder := newRecordEncoder(mem, 0, kMaxNestingDepth, true, -1, 0, 1, 0, nil)
 			base := mem.current
 			var peakPayloadBytes int64
 
