@@ -253,9 +253,7 @@ type FileWriter struct {
 
 	schema          *arrow.Schema
 	mapper          dictutils.Mapper
-	codec           flatbuf.CompressionType
-	zstdLevel       int
-	compressNP      int
+	compression     compressionSettings
 	compressors     []compressor
 	encoder         *recordEncoder
 	minSpaceSavings float64
@@ -279,9 +277,7 @@ func NewFileWriter(w io.Writer, opts ...Option) (*FileWriter, error) {
 		pw:              &fileWriter{streamWriter: streamWriter{w: w}, schema: cfg.schema},
 		mem:             cfg.alloc,
 		schema:          cfg.schema,
-		codec:           cfg.codec,
-		zstdLevel:       cfg.zstdLevel,
-		compressNP:      cfg.compressNP,
+		compression:     compressionSettings{codec: cfg.codec, zstdLevel: cfg.zstdLevel, compressNP: cfg.compressNP},
 		minSpaceSavings: cfg.minSpaceSavings,
 		compressors:     make([]compressor, cfg.compressNP),
 	}
@@ -296,9 +292,7 @@ func (f *FileWriter) getRecordEncoder() *recordEncoder {
 			0,
 			kMaxNestingDepth,
 			true,
-			f.codec,
-			f.zstdLevel,
-			f.compressNP,
+			f.compression,
 			f.minSpaceSavings,
 			f.compressors,
 		)
