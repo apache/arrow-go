@@ -36,8 +36,8 @@ func numericToBoolSIMD[T arrow.NumericType](typ arrow.Type, ctx *exec.KernelCtx,
 	bulk := len(in) &^ 7
 	if bulk != 0 {
 		left := arrow.GetBytes(in[:bulk])
-		right := unsafe.Slice((*byte)(unsafe.Pointer(&zero)), int(unsafe.Sizeof(zero)))
-		// Direct calls keep the zero scalar on the stack.
+		right := numericToBoolZero[:int(unsafe.Sizeof(zero))]
+		// Avoid indirect calls through the comparison function map.
 		if cpu.X86.HasAVX2 {
 			comparisonNotEqualArrScalarAvx2(typ, left, right, out, int64(bulk), 0)
 		} else {
