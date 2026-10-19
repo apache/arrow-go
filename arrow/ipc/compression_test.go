@@ -46,7 +46,7 @@ func compressBuffer(t *testing.T, codec flatbuf.CompressionType, src []byte) []b
 	t.Helper()
 
 	var out bytes.Buffer
-	c := getCompressor(codec)
+	c := getCompressor(codec, 0)
 	c.Reset(&out)
 	_, err := c.Write(src)
 	require.NoError(t, err)
