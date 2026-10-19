@@ -523,6 +523,8 @@ func TestArraySpan_SetSlice(t *testing.T) {
 		{"null type", fields{Type: arrow.Null}, args{5, 10}, 10},
 		{"not-null type", fields{Type: arrow.PrimitiveTypes.Int8}, args{5, 10}, 0},
 		{"not-null type with nulls", fields{Type: arrow.PrimitiveTypes.Int8, Nulls: -1}, args{5, 10}, array.UnknownNullCount},
+		{"no nulls but a validity bitmap", fields{Type: arrow.PrimitiveTypes.Int8, Len: 16, Buffers: [3]exec.BufferSpan{{Buf: []byte{0xff, 0xff}}}}, args{5, 10}, array.UnknownNullCount},
+		{"all null before the slice", fields{Type: arrow.PrimitiveTypes.Int8, Len: 16, Nulls: 16, Buffers: [3]exec.BufferSpan{{Buf: []byte{0, 0}}}}, args{5, 10}, array.UnknownNullCount},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -1,0 +1,149 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+//go:build go1.24
+
+package compute_test
+
+import (
+	"context"
+	"fmt"
+	"testing"
+
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/compute"
+	"github.com/apache/arrow-go/v18/arrow/memory"
+)
+
+var dictionaryFilterBenchmarkOutputLength int
+
+func BenchmarkFilterDictionaryIndices(b *testing.B) {
+	patterns := []struct {
+		name       string
+		selected   func(int) bool
+		indexNull  func(int) bool
+		filterNull func(int) bool
+		nullSelect compute.NullSelectionBehavior
+	}{
+		{name: "random10", selected: func(i int) bool { return dictionaryFilterSelect(i, 10) }},
+		{name: "random50", selected: func(i int) bool { return dictionaryFilterSelect(i, 50) }},
+		{name: "random90", selected: func(i int) bool { return dictionaryFilterSelect(i, 90) }},
+		{name: "alternating", selected: func(i int) bool { return i%2 == 0 }},
+		{name: "clustered50", selected: func(i int) bool { return (i/4096)%2 == 0 }},
+		{
+			name:       "nullable-indices-random50",
+			selected:   func(i int) bool { return dictionaryFilterSelect(i, 50) },
+			indexNull:  func(i int) bool { return i%11 == 0 },
+			nullSelect: compute.SelectionDropNulls,
+		},
+		{
+			name:       "nullable-random50",
+			selected:   func(i int) bool { return dictionaryFilterSelect(i, 50) },
+			filterNull: func(i int) bool { return i%11 == 0 },
+			nullSelect: compute.SelectionDropNulls,
+		},
+		{
+			name:       "nullable-random50-emit",
+			selected:   func(i int) bool { return dictionaryFilterSelect(i, 50) },
+			filterNull: func(i int) bool { return i%11 == 0 },
+			nullSelect: compute.SelectionEmitNulls,
+		},
+	}
+
+	for _, size := range []int{64, 1 << 16, 1 << 20} {
+		for _, pattern := range patterns {
+			b.Run(fmt.Sprintf("size=%d/%s", size, pattern.name), func(b *testing.B) {
+				values, filter := makeDictionaryFilterBenchmarkInput(
+					b, size, pattern.selected, pattern.indexNull, pattern.filterNull,
+				)
+				defer values.Release()
+				defer filter.Release()
+				ctx := context.Background()
+
+				b.ReportAllocs()
+				b.SetBytes(int64(size * 4))
+				for b.Loop() {
+					result, err := compute.FilterArray(ctx, values, filter, compute.FilterOptions{NullSelection: pattern.nullSelect})
+					if err != nil {
+						b.Fatal(err)
+					}
+					dictionaryFilterBenchmarkOutputLength = result.Len()
+					result.Release()
+				}
+			})
+		}
+	}
+}
+
+func makeDictionaryFilterBenchmarkInput(
+	b *testing.B,
+	size int,
+	selected func(int) bool,
+	indexNull func(int) bool,
+	filterNull func(int) bool,
+) (arrow.Array, arrow.Array) {
+	b.Helper()
+	mem := memory.DefaultAllocator
+
+	indicesBuilder := array.NewInt32Builder(mem)
+	indicesBuilder.Reserve(size)
+	for i := 0; i < size; i++ {
+		if indexNull != nil && indexNull(i) {
+			indicesBuilder.AppendNull()
+			continue
+		}
+		indicesBuilder.Append(int32(i % 256))
+	}
+	indices := indicesBuilder.NewArray()
+	indicesBuilder.Release()
+
+	dictionaryBuilder := array.NewInt64Builder(mem)
+	dictionaryBuilder.Reserve(256)
+	for i := 0; i < 256; i++ {
+		dictionaryBuilder.Append(int64(i))
+	}
+	dictionary := dictionaryBuilder.NewArray()
+	dictionaryBuilder.Release()
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.PrimitiveTypes.Int64}
+	values := array.NewDictionaryArray(dictType, indices, dictionary)
+	indices.Release()
+	dictionary.Release()
+
+	filterBuilder := array.NewBooleanBuilder(mem)
+	filterBuilder.Reserve(size)
+	for i := 0; i < size; i++ {
+		if filterNull != nil && filterNull(i) {
+			filterBuilder.AppendNull()
+			continue
+		}
+		filterBuilder.Append(selected(i))
+	}
+	filter := filterBuilder.NewArray()
+	filterBuilder.Release()
+
+	return values, filter
+}
+
+func dictionaryFilterSelect(i, percent int) bool {
+	x := uint64(i) + 0x9e3779b97f4a7c15
+	x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9
+	x = (x ^ (x >> 27)) * 0x94d049bb133111eb
+	x ^= x >> 31
+	return x%100 < uint64(percent)
+}
