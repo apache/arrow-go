@@ -47,7 +47,9 @@ func TestWriteFixedSizeListHonorsOffset(t *testing.T) {
 	}{
 		{"flat", fsl, `[[10, 11], [20, 21], [30, 31], [40, 41]]`, 1, 3},
 		{"null-elements", fsl, `[[10, 11], [null, 21], [30, null], [null, null], [50, 51]]`, 1, 4},
+		{"null-lists", fsl, `[[10, 11], null, [null, 31], [40, null], null, [60, 61]]`, 2, 6},
 		{"nested", nested, `[[[1, 2], [3, 4]], [[5, 6], [7, null]], [[9, 10], [11, 12]], [[13, 14], [15, 16]]]`, 1, 4},
+		{"nested-nulls", nested, `[[[1, 2], [3, 4]], [[5, 6], null], null, [[13, 14], [15, 16]]]`, 1, 4},
 	}
 
 	for _, tt := range tests {

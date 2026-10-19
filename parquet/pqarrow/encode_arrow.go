@@ -304,11 +304,10 @@ func (acw *arrowColumnWriter) Write(ctx context.Context) error {
 			}
 			defer res.Release()
 
-			if len(res.postListVisitedElems) != 1 {
-				return errors.New("lists with non-zero length null components are not supported")
+			values, err := visitedLeafValues(&res, arrCtx.props.mem)
+			if err != nil {
+				return err
 			}
-			rng := res.postListVisitedElems[0]
-			values := array.NewSlice(res.leafArr, rng.start, rng.end)
 			defer values.Release()
 			if err = WriteArrowToColumn(ctx, cw, values, res.defLevels, res.repLevels, res.leafIsNullable); err != nil {
 				return err
@@ -316,6 +315,23 @@ func (acw *arrowColumnWriter) Write(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// visitedLeafValues returns the leaf values covered by the visited element
+// ranges. Null fixed-size-list slots still occupy child storage, so a column
+// can produce several disjoint ranges; their values are concatenated in order.
+func visitedLeafValues(res *multipathLevelResult, mem memory.Allocator) (arrow.Array, error) {
+	if len(res.postListVisitedElems) == 1 {
+		rng := res.postListVisitedElems[0]
+		return array.NewSlice(res.leafArr, rng.start, rng.end), nil
+	}
+
+	slices := make([]arrow.Array, len(res.postListVisitedElems))
+	for i, rng := range res.postListVisitedElems {
+		slices[i] = array.NewSlice(res.leafArr, rng.start, rng.end)
+		defer slices[i].Release()
+	}
+	return array.Concatenate(slices, mem)
 }
 
 // WriteArrowToColumn writes apache arrow columnar data directly to a ColumnWriter.
