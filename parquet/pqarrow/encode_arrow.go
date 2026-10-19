@@ -304,17 +304,24 @@ func (acw *arrowColumnWriter) Write(ctx context.Context) error {
 			}
 			defer res.Release()
 
-			values, err := visitedLeafValues(&res, arrCtx.props.mem)
-			if err != nil {
-				return err
-			}
-			defer values.Release()
-			if err = WriteArrowToColumn(ctx, cw, values, res.defLevels, res.repLevels, res.leafIsNullable); err != nil {
+			if err = writeVisitedLeafValues(ctx, cw, &res, arrCtx.props.mem); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// writeVisitedLeafValues writes the visited leaf values of res to cw. Its
+// deferred Release frees a concatenated copy as soon as this chunk is written,
+// including when the write panics.
+func writeVisitedLeafValues(ctx context.Context, cw file.ColumnChunkWriter, res *multipathLevelResult, mem memory.Allocator) error {
+	values, err := visitedLeafValues(res, mem)
+	if err != nil {
+		return err
+	}
+	defer values.Release()
+	return WriteArrowToColumn(ctx, cw, values, res.defLevels, res.repLevels, res.leafIsNullable)
 }
 
 // visitedLeafValues returns the leaf values covered by the visited element
