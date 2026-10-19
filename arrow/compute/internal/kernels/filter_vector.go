@@ -20,16 +20,19 @@ package kernels
 
 import "math/bits"
 
-func makeFilterUint16Tables() (tables [4352]byte) {
+// The assembly kernels expect 256 16-byte shuffle masks followed by
+// 256 selected-lane counts. byteWidth must be 1 or 2.
+func makeFilterShuffleTables(byteWidth int) (tables [4352]byte) {
 	for mask := 0; mask < 256; mask++ {
 		pos := 0
 		for lane := 0; lane < 8; lane++ {
 			if mask&(1<<uint(lane)) == 0 {
 				continue
 			}
-			tables[mask*16+pos] = byte(lane * 2)
-			tables[mask*16+pos+1] = byte(lane*2 + 1)
-			pos += 2
+			for i := 0; i < byteWidth; i++ {
+				tables[mask*16+pos] = byte(lane*byteWidth + i)
+				pos++
+			}
 		}
 		for ; pos < 16; pos++ {
 			tables[mask*16+pos] = 0x80
@@ -39,14 +42,15 @@ func makeFilterUint16Tables() (tables [4352]byte) {
 	return tables
 }
 
-func filterUint16VectorInput(filterData []byte, filterOffset, length int64) ([]byte, bool) {
+func filterVectorInput(filterData []byte, filterOffset, length int64) ([]byte, bool) {
 	if length < 64 || length%8 != 0 || filterOffset%8 != 0 {
 		return nil, false
 	}
 
 	numBytes := length / 8
 	filterByteOffset := filterOffset / 8
-	if filterByteOffset < 0 || filterByteOffset+numBytes > int64(len(filterData)) {
+	if filterByteOffset < 0 || numBytes > int64(len(filterData)) ||
+		filterByteOffset > int64(len(filterData))-numBytes {
 		return nil, false
 	}
 	filterBytes := filterData[filterByteOffset : filterByteOffset+numBytes]
@@ -56,7 +60,7 @@ func filterUint16VectorInput(filterData []byte, filterOffset, length int64) ([]b
 		minMixed    = 4
 	)
 	mixedBytes := 0
-	for i := int64(0); i < int64(len(filterBytes)) && i < sampleBytes; i++ {
+	for i := 0; i < len(filterBytes) && i < sampleBytes; i++ {
 		mask := filterBytes[i]
 		if mask != 0 && mask != 0xff {
 			mixedBytes++
