@@ -27,6 +27,11 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 )
 
+// Numeric-to-bool SIMD kernels compare against this shared, zero-initialized
+// scalar storage instead of taking the address of a per-call local value.
+// Eight bytes cover the widest supported numeric type.
+var numericToBoolZero [8]byte
+
 func isNonZero[T arrow.FixedWidthType](ctx *exec.KernelCtx, in []T, out []byte) error {
 	var zero T
 	for i, v := range in {
@@ -37,7 +42,7 @@ func isNonZero[T arrow.FixedWidthType](ctx *exec.KernelCtx, in []T, out []byte) 
 
 func numericToBoolKernel[T arrow.NumericType](typ arrow.Type) func(*exec.KernelCtx, []T, []byte) error {
 	return func(ctx *exec.KernelCtx, in []T, out []byte) error {
-		return numericToBoolNeon(typ, ctx, in, out)
+		return numericToBoolSIMD(typ, ctx, in, out)
 	}
 }
 

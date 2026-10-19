@@ -27,7 +27,7 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
-func numericToBoolNeon[T arrow.NumericType](typ arrow.Type, ctx *exec.KernelCtx, in []T, out []byte) error {
+func numericToBoolSIMD[T arrow.NumericType](typ arrow.Type, ctx *exec.KernelCtx, in []T, out []byte) error {
 	if !cpu.ARM64.HasASIMD {
 		return isNonZero(ctx, in, out)
 	}
@@ -36,9 +36,14 @@ func numericToBoolNeon[T arrow.NumericType](typ arrow.Type, ctx *exec.KernelCtx,
 	bulk := len(in) &^ 7
 	if bulk != 0 {
 		left := arrow.GetBytes(in[:bulk])
-		right := unsafe.Slice((*byte)(unsafe.Pointer(&zero)), int(unsafe.Sizeof(zero)))
-		_comparison_neon(int(typ), int(CmpNE), neonCompareArrayScalar,
-			unsafe.Pointer(&left[0]), unsafe.Pointer(&right[0]), unsafe.Pointer(&out[0]), int64(bulk/8))
+		right := numericToBoolZero[:int(unsafe.Sizeof(zero))]
+		if unsafe.Sizeof(zero) <= 2 {
+			_comparison_narrow_neon(int(typ), int(CmpNE), neonCompareArrayScalar,
+				unsafe.Pointer(&left[0]), unsafe.Pointer(&right[0]), unsafe.Pointer(&out[0]), int64(bulk/8))
+		} else {
+			_comparison_neon(int(typ), int(CmpNE), neonCompareArrayScalar,
+				unsafe.Pointer(&left[0]), unsafe.Pointer(&right[0]), unsafe.Pointer(&out[0]), int64(bulk/8))
+		}
 	}
 	for i, v := range in[bulk:] {
 		bitutil.SetBitTo(out, bulk+i, v != zero)

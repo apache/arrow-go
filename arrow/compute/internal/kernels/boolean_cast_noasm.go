@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build go1.18 && (noasm || !arm64 || appengine)
+//go:build go1.18 && (noasm || (!amd64 && !arm64) || appengine)
 
 package kernels
 
@@ -23,6 +23,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 )
 
-func numericToBoolNeon[T arrow.NumericType](_ arrow.Type, ctx *exec.KernelCtx, in []T, out []byte) error {
+func numericToBoolSIMD[T arrow.NumericType](_ arrow.Type, ctx *exec.KernelCtx, in []T, out []byte) error {
 	return isNonZero(ctx, in, out)
 }
