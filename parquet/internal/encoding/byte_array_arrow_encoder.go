@@ -32,14 +32,13 @@ func putArrowPlain[T arrowByteArrayOffset](sink *PooledBufferWriter, values []by
 		return
 	}
 
-	encodedSize := 0
-	for i := 0; i < len(offsets)-1; i++ {
-		encodedSize += int(offsets[i+1]-offsets[i]) + 4
-	}
+	numValues := len(offsets) - 1
+	// Slices and valid runs can start at a nonzero offset in the data buffer.
+	encodedSize := int(offsets[numValues]-offsets[0]) + 4*numValues
 
 	sink.Reserve(encodedSize)
 	out := sink.buf.Buf()[sink.pos : sink.pos+encodedSize]
-	for i := 0; i < len(offsets)-1; i++ {
+	for i := 0; i < numValues; i++ {
 		start := int(offsets[i])
 		end := int(offsets[i+1])
 		binary.LittleEndian.PutUint32(out, uint32(end-start))

@@ -14,13 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build go1.18
+//go:build go1.24
 
 package compute_test
 
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"testing"
 
@@ -2183,22 +2184,26 @@ func BenchmarkTakePrimitive(b *testing.B) {
 				}
 			default: // "random"
 				// Random indices
+				rng := rand.New(rand.NewPCG(randomSeed, 0))
 				for i := int64(0); i < bm.numRows; i++ {
-					indicesBldr.Append(i % bm.numRows)
+					indicesBldr.Append(rng.Int64N(bm.numRows))
 				}
 			}
 			indices := indicesBldr.NewArray()
 			defer indices.Release()
 
-			b.ReportMetric(float64(bm.numRows), "rows/sec")
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				result, err := compute.Take(ctx, *compute.DefaultTakeOptions(), &compute.ArrayDatum{values.Data()}, &compute.ArrayDatum{indices.Data()})
+			opts := *compute.DefaultTakeOptions()
+			valuesDatum := &compute.ArrayDatum{Value: values.Data()}
+			indicesDatum := &compute.ArrayDatum{Value: indices.Data()}
+			b.ReportAllocs()
+			for b.Loop() {
+				result, err := compute.Take(ctx, opts, valuesDatum, indicesDatum)
 				if err != nil {
 					b.Fatal(err)
 				}
 				result.Release()
 			}
+			b.ReportMetric(float64(bm.numRows), "rows/op")
 		})
 	}
 }
@@ -2246,22 +2251,26 @@ func BenchmarkTakePrimitiveWithNulls(b *testing.B) {
 					indicesBldr.Append(i)
 				}
 			default: // "random"
+				rng := rand.New(rand.NewPCG(randomSeed, 0))
 				for i := int64(0); i < bm.numRows; i++ {
-					indicesBldr.Append((i * 1103515245) % bm.numRows)
+					indicesBldr.Append(rng.Int64N(bm.numRows))
 				}
 			}
 			indices := indicesBldr.NewArray()
 			defer indices.Release()
 
-			b.ReportMetric(float64(bm.numRows), "rows/sec")
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				result, err := compute.Take(ctx, *compute.DefaultTakeOptions(), &compute.ArrayDatum{values.Data()}, &compute.ArrayDatum{indices.Data()})
+			opts := *compute.DefaultTakeOptions()
+			valuesDatum := &compute.ArrayDatum{Value: values.Data()}
+			indicesDatum := &compute.ArrayDatum{Value: indices.Data()}
+			b.ReportAllocs()
+			for b.Loop() {
+				result, err := compute.Take(ctx, opts, valuesDatum, indicesDatum)
 				if err != nil {
 					b.Fatal(err)
 				}
 				result.Release()
 			}
+			b.ReportMetric(float64(bm.numRows), "rows/op")
 		})
 	}
 }
