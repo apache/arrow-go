@@ -173,7 +173,7 @@ func WithZstd() Option {
 // the full Zstandard level range (1-22) into four encoder speed presets:
 //
 //	level <= 0     -> default (same as WithZstd alone)
-//	<3             -> SpeedFastest
+//	1-2            -> SpeedFastest
 //	3-5            -> SpeedDefault
 //	6-9            -> SpeedBetterCompression
 //	>=10           -> SpeedBestCompression
