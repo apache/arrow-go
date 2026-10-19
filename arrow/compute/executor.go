@@ -1292,6 +1292,8 @@ func (a *scalarAggExecutor) Execute(ctx context.Context, batch *ExecBatch, data 
 		out = &ScalarDatum{Value: taken}
 	case arrow.ArrayData:
 		out = &ArrayDatum{Value: taken}
+	default:
+		return fmt.Errorf("%w: unexpected aggregate result type %T from Take()", arrow.ErrInvalid, taken)
 	}
 	select {
 	case <-ctx.Done():

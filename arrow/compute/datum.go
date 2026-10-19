@@ -316,9 +316,20 @@ func NewDatum(value interface{}) Datum {
 // which retains a reference and whose Datum.Release consumes that
 // reference.
 //
+// Behaviour change (breaking): prior versions also documented a
+// "transfer" pattern where freshly created values could be handed to
+// NewDatumWithoutOwning and freed through Datum.Release(). Datum.Release()
+// is now a no-op for non-owning Datums, so any caller still using that
+// transfer pattern will silently leak. Callers should either keep a
+// reference themselves, or use NewDatum (which Retains and whose
+// Datum.Release() consumes that reference) when ownership should move to
+// the Datum.
+//
 // Example:
 //
-//	arr := NewInt32Array([]int32{1, 2, 3})
+//	builder := array.NewInt32Builder(memory.DefaultAllocator)
+//	builder.AppendValues([]int32{1, 2, 3}, nil)
+//	arr := builder.NewArray()
 //	defer arr.Release()
 //	datum := NewDatumWithoutOwning(arr) // datum borrows arr, arr is still alive
 //	// datum.Release() is safe to call (no-op) or omit; it will not free arr
