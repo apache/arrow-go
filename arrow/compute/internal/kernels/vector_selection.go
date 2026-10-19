@@ -239,6 +239,9 @@ func GetTakeIndices(mem memory.Allocator, filter *exec.ArraySpan, nullSelect Nul
 		return getTakeIndices[uint16](mem, filter, nullSelect), nil
 	} else if filter.Len < math.MaxUint32 {
 		if nullSelect == DropNulls {
+			if result, ok := getTakeIndicesUint32AVX2(mem, filter); ok {
+				return result, nil
+			}
 			if result, ok := getTakeIndicesUint32NEON(mem, filter); ok {
 				return result, nil
 			}
