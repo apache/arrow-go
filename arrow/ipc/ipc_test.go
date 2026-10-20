@@ -1098,7 +1098,7 @@ func TestListOfUnionSliceRoundTrip(t *testing.T) {
 				require.NoError(t, err)
 				defer arr.Release()
 				list := arr.(array.ListLike)
-				require.NoError(t, arr.(interface{ ValidateFull() error }).ValidateFull())
+				require.NoError(t, array.ValidateFull(arr))
 				require.NoError(t, list.ListValues().(array.Union).ValidateFull())
 				schema := arrow.NewSchema([]arrow.Field{{Name: "list", Type: listType}}, nil)
 				for _, bounds := range [][2]int64{{0, 3}, {1, 2}, {2, 2}} {
@@ -1118,7 +1118,7 @@ func TestListOfUnionSliceRoundTrip(t *testing.T) {
 							defer r.Release()
 							require.True(t, r.Next())
 							assert.True(t, array.RecordEqual(rec, r.RecordBatch()))
-							require.NoError(t, r.RecordBatch().Column(0).(interface{ ValidateFull() error }).ValidateFull())
+							require.NoError(t, array.ValidateFull(r.RecordBatch().Column(0)))
 							assert.False(t, r.Next())
 							assert.NoError(t, r.Err())
 						})
@@ -1136,7 +1136,7 @@ func TestListOfUnionSliceRoundTrip(t *testing.T) {
 							out, err := r.RecordBatch(0)
 							require.NoError(t, err)
 							assert.True(t, array.RecordEqual(rec, out))
-							require.NoError(t, out.Column(0).(interface{ ValidateFull() error }).ValidateFull())
+							require.NoError(t, array.ValidateFull(out.Column(0)))
 						})
 					})
 				}
