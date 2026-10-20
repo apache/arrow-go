@@ -33,87 +33,153 @@ import (
 // free the caller's underlying allocation. A CheckedAllocator tracks bytes
 // before and after so any silent leak or over-release is caught.
 //
+// Each case follows the same pattern:
+//   1. Caller builds a fresh owning value (refcount == 1).
+//   2. NewDatumWithoutOwning borrows it without Retain.
+//   3. Datum.Release() must be a no-op (refcount still 1).
+//   4. Caller's Release() finally frees everything.
+//
 // This is the regression test for issue #1298.
 func TestNewDatumWithoutOwningDoesNotLeakOwner(t *testing.T) {
-	const n = 8
-	const initialAlloc int = 0
-
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
 
 	// -- Array --------------------------------------------------------
-	builder := array.NewInt32Builder(mem)
-	builder.AppendValues([]int32{1, 2, 3, 4, 5, 6, 7, 8}, nil)
-	arr := builder.NewArray()
-	defer arr.Release()
-	builder.Release()
+	{
+		builder := array.NewInt32Builder(mem)
+		builder.AppendValues([]int32{1, 2, 3, 4, 5, 6, 7, 8}, nil)
+		arr := builder.NewArray()
+		builder.Release()
 
-	before := mem.CurrentAlloc()
-	assert.Greater(t, before, initialAlloc, "builder should have allocated backing buffers")
-	d := NewDatumWithoutOwning(arr)
-	d.Release() // must be no-op for the caller's buffer
-	assert.Equal(t, before, mem.CurrentAlloc(),
-		"ArrayDatum.Release() must not free caller's allocation")
+		assert.Greater(t, mem.CurrentAlloc(), 0,
+			"array builder should have allocated backing buffers")
+
+		before := mem.CurrentAlloc()
+		d := NewDatumWithoutOwning(arr)
+		d.Release() // must be no-op
+
+		assert.Equal(t, before, mem.CurrentAlloc(),
+			"ArrayDatum.Release() must not free caller's allocation")
+
+		arr.Release()
+	}
 
 	// -- Chunked ------------------------------------------------------
-	builder2 := array.NewInt32Builder(mem)
-	builder2.AppendValues([]int32{9, 10, 11, 12, 13, 14, 15, 16}, nil)
-	arr2 := builder2.NewArray()
-	defer arr2.Release()
-	builder2.Release()
+	{
+		builder := array.NewInt32Builder(mem)
+		builder.AppendValues([]int32{9, 10, 11, 12, 13, 14, 15, 16}, nil)
+		arr := builder.NewArray()
+		builder.Release()
 
-	chunked := arrow.NewChunked(arr.DataType(), []arrow.Array{arr, arr2})
-	defer chunked.Release()
+		chunked := arrow.NewChunked(arr.DataType(), []arrow.Array{arr})
+		// chunked owns arr (Retain), caller can now release arr
+		arr.Release()
 
-	before = mem.CurrentAlloc()
-	d = NewDatumWithoutOwning(chunked)
-	d.Release()
-	assert.Equal(t, before, mem.CurrentAlloc(),
-		"ChunkedDatum.Release() must not free caller's allocation")
+		before := mem.CurrentAlloc()
+		d := NewDatumWithoutOwning(chunked)
+		d.Release()
+
+		assert.Equal(t, before, mem.CurrentAlloc(),
+			"ChunkedDatum.Release() must not free caller's allocation")
+
+		chunked.Release()
+	}
 
 	// -- RecordBatch --------------------------------------------------
-	schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arr.DataType()}}, nil)
-	rec := array.NewRecordBatch(schema, []arrow.Array{arr}, n)
-	defer rec.Release()
+	{
+		builder := array.NewInt32Builder(mem)
+		builder.AppendValues([]int32{1, 2, 3, 4, 5, 6, 7, 8}, nil)
+		arr := builder.NewArray()
+		builder.Release()
 
-	before = mem.CurrentAlloc()
-	d = NewDatumWithoutOwning(rec)
-	d.Release()
-	assert.Equal(t, before, mem.CurrentAlloc(),
-		"RecordDatum.Release() must not free caller's allocation")
+		schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arr.DataType()}}, nil)
+		rec := array.NewRecordBatch(schema, []arrow.Array{arr}, 8)
+		// rec owns arr (Retain), caller can now release arr
+		arr.Release()
+
+		before := mem.CurrentAlloc()
+		d := NewDatumWithoutOwning(rec)
+		d.Release()
+
+		assert.Equal(t, before, mem.CurrentAlloc(),
+			"RecordDatum.Release() must not free caller's allocation")
+
+		rec.Release()
+	}
 
 	// -- Table --------------------------------------------------------
-	tbl := array.NewTable(schema, []arrow.Column{
-		*arrow.NewColumn(schema.Field(0), chunked),
-	}, -1)
-	defer tbl.Release()
+	{
+		builder := array.NewInt32Builder(mem)
+		builder.AppendValues([]int32{1, 2, 3, 4, 5, 6, 7, 8}, nil)
+		arr := builder.NewArray()
+		builder.Release()
 
-	before = mem.CurrentAlloc()
-	d = NewDatumWithoutOwning(tbl)
-	d.Release()
-	assert.Equal(t, before, mem.CurrentAlloc(),
-		"TableDatum.Release() must not free caller's allocation")
+		schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arr.DataType()}}, nil)
+		chunked := arrow.NewChunked(arr.DataType(), []arrow.Array{arr})
+		// chunked owns arr
+		arr.Release()
 
-	// -- Scalar -------------------------------------------------------
-	sc := scalar.NewInt32Scalar(42)
+		col := arrow.NewColumn(schema.Field(0), chunked)
+		// column owns chunked
+		chunked.Release()
 
-	before = mem.CurrentAlloc()
-	d = NewDatumWithoutOwning(sc)
-	d.Release()
-	assert.Equal(t, before, mem.CurrentAlloc(),
-		"ScalarDatum.Release() must not free caller's allocation")
+		tbl := array.NewTable(schema, []arrow.Column{*col}, -1)
+		// table owns column
+		col.Release()
+
+		before := mem.CurrentAlloc()
+		d := NewDatumWithoutOwning(tbl)
+		d.Release()
+
+		assert.Equal(t, before, mem.CurrentAlloc(),
+			"TableDatum.Release() must not free caller's allocation")
+
+		tbl.Release()
+	}
+
+	// -- Scalar (list scalar wraps an array, so it allocates) ---------
+	{
+		builder := array.NewInt32Builder(mem)
+		builder.AppendValues([]int32{100, 200, 300}, nil)
+		arr := builder.NewArray()
+		builder.Release()
+
+		sc := scalar.NewListScalar(arr)
+		// list scalar wraps arr's data via array.MakeFromData
+		arr.Release()
+
+		assert.Greater(t, mem.CurrentAlloc(), 0,
+			"list scalar should wrap an allocated array")
+
+		before := mem.CurrentAlloc()
+		d := NewDatumWithoutOwning(sc)
+		d.Release()
+
+		assert.Equal(t, before, mem.CurrentAlloc(),
+			"ScalarDatum.Release() must not free caller's allocation")
+
+		sc.Release()
+	}
 }
 
 // TestNewDatumOwns verifies the owning NewDatum path releases its
 // Retain on Datum.Release(), leaving the caller a single Release to do.
 func TestNewDatumOwns(t *testing.T) {
-	builder := array.NewInt32Builder(memory.DefaultAllocator)
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	builder := array.NewInt32Builder(mem)
 	builder.AppendValues([]int32{1, 2, 3}, nil)
 	arr := builder.NewArray()
 	builder.Release()
 
 	// NewDatum Retains the array data; Datum.Release() must Relinquish.
+	before := mem.CurrentAlloc()
 	d := NewDatum(arr)
 	d.Release()
+	assert.Equal(t, before, mem.CurrentAlloc(),
+		"Datum.Release() must exactly match the Retain from NewDatum")
+
 	// caller still owns arr's last reference
 	arr.Release()
 }
