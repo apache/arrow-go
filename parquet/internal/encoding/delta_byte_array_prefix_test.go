@@ -61,8 +61,6 @@ func TestCommonPrefixLength(t *testing.T) {
 	}
 }
 
-var commonPrefixLengthBenchmarkSink int
-
 func BenchmarkCommonPrefixLength(b *testing.B) {
 	for _, tc := range []struct {
 		name           string
@@ -88,11 +86,9 @@ func BenchmarkCommonPrefixLength(b *testing.B) {
 				right[tc.prefix] ^= 0x80
 			}
 			b.ReportAllocs()
-			sum := 0
-			for i := 0; i < b.N; i++ {
-				sum += commonPrefixLength(left, right)
+			for b.Loop() {
+				commonPrefixLength(left, right)
 			}
-			commonPrefixLengthBenchmarkSink = sum
 		})
 	}
 }
