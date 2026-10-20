@@ -33,7 +33,9 @@ import (
 
 func checkRadixIntegerType[T radixInteger](t *testing.T, numBytes int, signBit uint64) {
 	t.Helper()
-	ctx := &exec.KernelCtx{Ctx: exec.WithAllocator(context.Background(), memory.NewGoAllocator())}
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+	ctx := &exec.KernelCtx{Ctx: exec.WithAllocator(context.Background(), mem)}
 	for _, n := range []int{0, 1, 2, 255, 256, 257, 2048, 8192} {
 		for _, pattern := range []string{"random", "duplicates", "ascending", "descending", "constant", "extremes"} {
 			values := make([]T, n)
@@ -99,7 +101,8 @@ func TestRadixSortIntegerIndices(t *testing.T) {
 }
 
 func TestSortIndicesSingleChunkRadixSliced(t *testing.T) {
-	mem := memory.NewGoAllocator()
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
 	ctx := &exec.KernelCtx{Ctx: exec.WithAllocator(context.Background(), mem)}
 	const start, n = 73, 4096
 	values := make([]int64, start+n+41)

@@ -80,6 +80,23 @@ func radixSortIntegerIndices[T radixInteger](ctx *exec.KernelCtx, indices []uint
 		return
 	}
 
+	// Input indices start in row order. Leave already ordered and all-equal
+	// values untouched instead of paying for histogram and scatter passes.
+	previous := values[indices[0]]
+	alreadyOrdered := true
+	for _, idx := range indices[1:] {
+		value := values[idx]
+		if (order == Ascending && previous > value) ||
+			(order == Descending && previous < value) {
+			alreadyOrdered = false
+			break
+		}
+		previous = value
+	}
+	if alreadyOrdered {
+		return
+	}
+
 	flip := signBit
 	if order == Descending {
 		flip = ^flip

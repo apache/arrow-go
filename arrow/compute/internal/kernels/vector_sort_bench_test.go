@@ -173,3 +173,45 @@ func BenchmarkSortIndices_String(b *testing.B) {
 		})
 	}
 }
+
+// Cover the radix threshold with distributions that have very different
+// costs under comparator sorting and radix sorting.
+func BenchmarkSortIndices_Int64_Distributions(b *testing.B) {
+	for _, rows := range []int{radixSortMinRows - 1, radixSortMinRows, radixSortMinRows + 1, 65536} {
+		for _, pattern := range []string{"sorted", "all-equal", "random"} {
+			b.Run(fmt.Sprintf("rows=%d/%s", rows, pattern), func(b *testing.B) {
+				ctx, mem := newBenchKernelCtx(b)
+				builder := array.NewInt64Builder(mem)
+				for i := 0; i < rows; i++ {
+					var value int64
+					switch pattern {
+					case "sorted":
+						value = int64(i)
+					case "all-equal":
+						value = 7
+					default:
+						x := int64(i)
+						value = (x * 6364136223846793005) ^ (x >> 12)
+					}
+					builder.Append(value)
+				}
+				arr := builder.NewArray()
+				builder.Release()
+				col := arrow.NewChunked(arrow.PrimitiveTypes.Int64, []arrow.Array{arr})
+				arr.Release()
+				defer col.Release()
+				columns := []*arrow.Chunked{col}
+				keys := []SortKey{{ColumnIndex: 0, Order: Ascending, NullPlacement: NullsAtEnd}}
+
+				b.ReportAllocs()
+				for b.Loop() {
+					res, err := SortIndices(ctx, columns, keys)
+					if err != nil {
+						b.Fatal(err)
+					}
+					res.Release()
+				}
+			})
+		}
+	}
+}
