@@ -1080,3 +1080,67 @@ func TestRecordBatchNoMetadataRoundtrip(t *testing.T) {
 	// Metadata should be empty, not nil
 	require.Equal(t, 0, rm.Metadata().Len())
 }
+
+func TestListOfUnionSliceRoundTrip(t *testing.T) {
+	fields := []arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		{Name: "b", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+	}
+	codes := []arrow.UnionTypeCode{3, 7}
+	for _, unionType := range []arrow.UnionType{
+		arrow.DenseUnionOf(fields, codes), arrow.SparseUnionOf(fields, codes),
+	} {
+		for _, listType := range []arrow.DataType{arrow.ListOf(unionType), arrow.LargeListOf(unionType)} {
+			t.Run(listType.String(), func(t *testing.T) {
+				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+				defer mem.AssertSize(t, 0)
+				arr, _, err := array.FromJSON(mem, listType, strings.NewReader(`[[[3,11]],[[7,101],[3,null]],[[7,202],[3,33]]]`))
+				require.NoError(t, err)
+				defer arr.Release()
+				list := arr.(array.ListLike)
+				require.NoError(t, array.ValidateFull(arr))
+				require.NoError(t, list.ListValues().(array.Union).ValidateFull())
+				schema := arrow.NewSchema([]arrow.Field{{Name: "list", Type: listType}}, nil)
+				for _, bounds := range [][2]int64{{0, 3}, {1, 2}, {2, 2}} {
+					t.Run(fmt.Sprint(bounds), func(t *testing.T) {
+						slice := array.NewSlice(arr, bounds[0], bounds[1])
+						defer slice.Release()
+						rec := array.NewRecordBatch(schema, []arrow.Array{slice}, int64(slice.Len()))
+						defer rec.Release()
+						t.Run("stream", func(t *testing.T) {
+							var buf bytes.Buffer
+							w := ipc.NewWriter(&buf, ipc.WithSchema(schema), ipc.WithAllocator(mem))
+							defer w.Close()
+							require.NoError(t, w.Write(rec))
+							require.NoError(t, w.Close())
+							r, err := ipc.NewReader(bytes.NewReader(buf.Bytes()), ipc.WithAllocator(mem))
+							require.NoError(t, err)
+							defer r.Release()
+							require.True(t, r.Next())
+							assert.True(t, array.RecordEqual(rec, r.RecordBatch()))
+							require.NoError(t, array.ValidateFull(r.RecordBatch().Column(0)))
+							assert.False(t, r.Next())
+							assert.NoError(t, r.Err())
+						})
+						t.Run("file", func(t *testing.T) {
+							var buf bytes.Buffer
+							w, err := ipc.NewFileWriter(&buf, ipc.WithSchema(schema), ipc.WithAllocator(mem))
+							require.NoError(t, err)
+							defer w.Close()
+							require.NotPanics(t, func() { require.NoError(t, w.Write(rec)) })
+							require.NoError(t, w.Close())
+							r, err := ipc.NewFileReader(bytes.NewReader(buf.Bytes()), ipc.WithAllocator(mem))
+							require.NoError(t, err)
+							defer r.Close()
+							require.Equal(t, 1, r.NumRecords())
+							out, err := r.RecordBatch(0)
+							require.NoError(t, err)
+							assert.True(t, array.RecordEqual(rec, out))
+							require.NoError(t, array.ValidateFull(out.Column(0)))
+						})
+					})
+				}
+			})
+		}
+	}
+}
