@@ -199,3 +199,35 @@ func TestFourWordsRandomData(t *testing.T) {
 		checkWithOffset(offsetI)
 	}
 }
+
+func TestFourWordsUnalignedBoundaries(t *testing.T) {
+	for offset := int64(1); offset < 8; offset++ {
+		for _, length := range []int64{
+			255, 256, 257,
+			320 - offset - 1, 320 - offset, 320 - offset + 1,
+			512, 1024, 1280 - offset - 1, 1280 - offset,
+		} {
+			// Allocate only the bytes required by the requested bit range.
+			// In particular, the fast path must never read past the bitmap.
+			bitmap := make([]byte, bitutil.BytesForBits(offset+length))
+			rng := &rand.ChaCha8{}
+			_, _ = rng.Read(bitmap)
+
+			counter := bitutils.NewBitBlockCounter(bitmap, offset, length)
+			for pos := int64(0); pos < length; {
+				block := counter.NextFourWords()
+				if block.Len <= 0 {
+					t.Fatalf("no progress at offset=%d length=%d pos=%d", offset, length, pos)
+				}
+				assert.EqualValues(t, min(int64(256), length-pos), block.Len,
+					"offset=%d length=%d pos=%d", offset, length, pos)
+				assert.EqualValues(t,
+					bitutil.CountSetBits(bitmap, int(offset+pos), int(block.Len)),
+					block.Popcnt, "offset=%d length=%d pos=%d", offset, length, pos)
+				pos += int64(block.Len)
+			}
+
+			assert.Zero(t, counter.NextFourWords().Len)
+		}
+	}
+}
