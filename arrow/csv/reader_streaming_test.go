@@ -24,6 +24,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/csv"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/require"
 )
 
@@ -86,12 +87,17 @@ func TestCSVReadAllStreamingEmpty(t *testing.T) {
 }
 
 func TestCSVReadAllStreamingMalformedRow(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	schema := arrow.NewSchema([]arrow.Field{
 		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
 		{Name: "name", Type: arrow.BinaryTypes.String},
 	}, nil)
-	r := csv.NewReader(strings.NewReader("1,ok\n2,\"unterminated\n"), schema, csv.WithChunk(-1))
-	defer r.Release()
+	r := csv.NewReader(strings.NewReader("1,ok\n2,\"unterminated\n"), schema,
+		csv.WithChunk(-1), csv.WithAllocator(mem))
+	defer func() {
+		r.Release()
+		mem.AssertSize(t, 0)
+	}()
 
 	require.False(t, r.Next())
 	require.Error(t, r.Err())
@@ -99,6 +105,20 @@ func TestCSVReadAllStreamingMalformedRow(t *testing.T) {
 	require.False(t, r.Next())
 }
 
+func TestCSVReadAllStreamingMalformedInferredRow(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	r := csv.NewInferringReader(strings.NewReader("1,ok\n2,\"unterminated\n"),
+		csv.WithHeader(false), csv.WithChunk(-1), csv.WithAllocator(mem))
+	defer func() {
+		r.Release()
+		mem.AssertSize(t, 0)
+	}()
+
+	require.False(t, r.Next())
+	require.Error(t, r.Err())
+	require.Nil(t, r.RecordBatch())
+	require.False(t, r.Next())
+}
 func TestCSVReadAllStreamingConversionError(t *testing.T) {
 	schema := arrow.NewSchema([]arrow.Field{
 		{Name: "id", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
@@ -135,8 +155,7 @@ func BenchmarkCSVReadAllStreaming(b *testing.B) {
 
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		r := csv.NewReader(strings.NewReader(data), schema, csv.WithChunk(-1))
 		if !r.Next() {
 			err := r.Err()
