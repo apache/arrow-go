@@ -93,7 +93,7 @@ var (
 //   - PreallocContiguous = true
 //   - Registry = GetFunctionRegistry()
 //   - ExecChannelSize = 10
-//   - NumParallel = runtime.NumCPU()
+//   - NumParallel = runtime.GOMAXPROCS(0)
 func DefaultExecCtx() ExecCtx { return defaultExecCtx }
 
 func init() {
@@ -101,9 +101,10 @@ func init() {
 	defaultExecCtx.PreallocContiguous = true
 	defaultExecCtx.Registry = GetFunctionRegistry()
 	defaultExecCtx.ExecChannelSize = 10
-	// default level of parallelism
+	// default level of parallelism, bounded by GOMAXPROCS so that cgroup CPU
+	// limits (Go 1.25+) and explicit GOMAXPROCS settings are respected.
 	// set to 1 to disable parallelization
-	defaultExecCtx.NumParallel = runtime.NumCPU()
+	defaultExecCtx.NumParallel = runtime.GOMAXPROCS(0)
 }
 
 // SetExecCtx returns a new child context containing the passed in ExecCtx
