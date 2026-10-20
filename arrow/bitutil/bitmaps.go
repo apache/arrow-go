@@ -425,8 +425,8 @@ func transferBitmap(mode transferMode, src []byte, srcOffset, length int, dst []
 	// the ranges alias. Only snapshot the source when their byte spans overlap.
 	srcStart := srcOffset / 8
 	dstStart := dstOffset / 8
-	srcBytes := src[srcStart : srcStart+int(BytesForBits(int64(srcOffset%8+length)))]
-	dstBytes := dst[dstStart : dstStart+int(BytesForBits(int64(dstOffset%8+length)))]
+	srcBytes := src[srcStart : srcStart+int(BytesForBits(int64(srcOffset%8)+int64(length)))]
+	dstBytes := dst[dstStart : dstStart+int(BytesForBits(int64(dstOffset%8)+int64(length)))]
 	srcPtr := uintptr(unsafe.Pointer(&srcBytes[0]))
 	dstPtr := uintptr(unsafe.Pointer(&dstBytes[0]))
 	var overlaps bool

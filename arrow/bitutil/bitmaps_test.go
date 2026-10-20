@@ -227,6 +227,7 @@ func TestTransferBitmapOverlapping(t *testing.T) {
 		{name: "aligned full bytes", srcOffset: 0, dstOffset: 16, length: 64},
 		{name: "unaligned right", srcOffset: 3, dstOffset: 11, length: 145},
 		{name: "unaligned left", srcOffset: 11, dstOffset: 3, length: 145},
+		{name: "same byte different bit offsets", srcOffset: 0, dstOffset: 1, length: 9},
 		{name: "same bit range", srcOffset: 5, dstOffset: 5, length: 145},
 		{name: "aliased slice views", srcSlice: 2, dstSlice: 3, srcOffset: 3, dstOffset: 2, length: 145},
 		{name: "adjacent bits", srcOffset: 5, dstOffset: 6, length: 1},

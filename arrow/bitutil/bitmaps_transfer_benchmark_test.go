@@ -78,8 +78,7 @@ func BenchmarkTransferBitmapAliasing(b *testing.B) {
 
 									b.SetBytes(int64(nbytes))
 									b.ReportAllocs()
-									b.ResetTimer()
-									for i := 0; i < b.N; i++ {
+									for b.Loop() {
 										operation.transfer(src, offset.src, nbytes*8, dst, offset.dst)
 									}
 								})
