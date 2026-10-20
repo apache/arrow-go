@@ -199,6 +199,50 @@ func TestRestoreDurationFromStoredSchema(t *testing.T) {
 	}
 }
 
+// Parquet has no duration type. pyarrow, pandas timedelta64 columns and arrow-rs store a
+// duration as a plain INT64 column and keep the Arrow type in the ARROW:schema metadata,
+// which the reader uses to restore it. Build a file with that layout and read it back.
+func TestReadDurationFromStoredSchema(t *testing.T) {
+	for _, unit := range []arrow.TimeUnit{arrow.Second, arrow.Millisecond, arrow.Microsecond, arrow.Nanosecond} {
+		t.Run(unit.String(), func(t *testing.T) {
+			dtype := &arrow.DurationType{Unit: unit}
+			stored := arrow.NewSchema([]arrow.Field{{Name: "d", Type: dtype, Nullable: true}}, nil)
+			kv := metadata.NewKeyValueMetadata()
+			kv.Append("ARROW:schema", base64.StdEncoding.EncodeToString(flight.SerializeSchema(stored, memory.DefaultAllocator)))
+
+			root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+				schema.MustPrimitive(schema.NewPrimitiveNode("d", parquet.Repetitions.Optional, parquet.Types.Int64, -1, -1)),
+			}, -1))
+			var buf bytes.Buffer
+			writer := file.NewParquetWriter(&buf, root, file.WithWriteMetadata(kv))
+			rgw := writer.AppendRowGroup()
+			cw, err := rgw.NextColumn()
+			require.NoError(t, err)
+			_, err = cw.(*file.Int64ColumnChunkWriter).WriteBatch([]int64{1, 3}, []int16{1, 0, 1}, nil)
+			require.NoError(t, err)
+			require.NoError(t, cw.Close())
+			require.NoError(t, rgw.Close())
+			require.NoError(t, writer.Close())
+
+			rdr, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+			require.NoError(t, err)
+			defer rdr.Close()
+			fr, err := pqarrow.NewFileReader(rdr, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+			require.NoError(t, err)
+			tbl, err := fr.ReadTable(context.Background())
+			require.NoError(t, err)
+			defer tbl.Release()
+
+			require.True(t, arrow.TypeEqual(dtype, tbl.Column(0).DataType()), "got %s", tbl.Column(0).DataType())
+			col := tbl.Column(0).Data().Chunk(0).(*array.Duration)
+			require.Equal(t, 3, col.Len())
+			assert.Equal(t, arrow.Duration(1), col.Value(0))
+			assert.True(t, col.IsNull(1))
+			assert.Equal(t, arrow.Duration(3), col.Value(2))
+		})
+	}
+}
+
 func TestGetOriginSchemaUnregisteredExtension(t *testing.T) {
 	uuidType := extensions.NewUUIDType()
 	md := arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{"-1"})
