@@ -116,7 +116,7 @@ func testDeltaBitPackBlockRoundTrip[T int32 | int64](t *testing.T, typ parquet.T
 				}
 
 				wire := encode(values)
-				split := n / 2
+				split := max(1, n/2)
 				require.Equal(t, wire, encode(values[:1], values[1:split], values[split:]))
 
 				dec := NewDecoder(typ, parquet.Encodings.DeltaBinaryPacked, nil, memory.DefaultAllocator).(*deltaBitPackDecoder[T])
