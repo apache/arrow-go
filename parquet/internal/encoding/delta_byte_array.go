@@ -17,8 +17,10 @@
 package encoding
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/bits"
 	"slices"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -50,7 +52,19 @@ const deltaByteArrayBatchSize = 256
 
 func commonPrefixLength(left, right parquet.ByteArray) int {
 	maximum := min(left.Len(), right.Len())
-	for i := 0; i < maximum; i++ {
+	if maximum == 0 || left[0] != right[0] {
+		return 0
+	}
+
+	i := 0
+	for ; i <= maximum-8; i += 8 {
+		diff := binary.LittleEndian.Uint64(left[i:]) ^ binary.LittleEndian.Uint64(right[i:])
+		if diff != 0 {
+			// The first differing byte occupies the least significant bits.
+			return i + bits.TrailingZeros64(diff)/8
+		}
+	}
+	for ; i < maximum; i++ {
 		if left[i] != right[i] {
 			return i
 		}
