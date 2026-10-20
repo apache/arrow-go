@@ -18,12 +18,17 @@ package file
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
+	"io"
 	"math"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
+	"github.com/apache/arrow-go/v18/parquet/internal/thrift"
 	"github.com/stretchr/testify/require"
 )
 
@@ -82,4 +87,43 @@ func TestReadLevelDataBitPacked(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, data, out.Bytes())
 	out.Release()
+}
+
+// parquet-mr zero-pads every encrypted thrift module out to its buffer size, so a
+// decrypted page header is the thrift struct followed by zero bytes. The reader has
+// to move past the whole encrypted module, not just the thrift it parsed.
+func TestReadEncryptedPageHeaderWithTrailingPadding(t *testing.T) {
+	const key = "0123456789012345"
+	encProps := parquet.NewFileEncryptionProperties(key)
+	enc := encryption.NewFileEncryptor(encProps, memory.DefaultAllocator).GetFooterEncryptor()
+	enc.UpdateAad(encryption.CreateModuleAad(encProps.FileAad(), encryption.DictPageHeaderModule, 0, 0, -1))
+
+	hdr := format.NewPageHeader()
+	hdr.Type = format.PageType_DICTIONARY_PAGE
+	hdr.CompressedPageSize, hdr.UncompressedPageSize = 10, 10
+	hdr.DictionaryPageHeader = format.NewDictionaryPageHeader()
+	thriftBytes, err := thrift.NewThriftSerializer().Write(context.Background(), hdr)
+	require.NoError(t, err)
+
+	var stream bytes.Buffer
+	enc.Encrypt(&stream, append(thriftBytes, make([]byte, 76)...))
+	stream.WriteString("page data!")
+
+	dec := encryption.NewFileDecryptor(parquet.NewFileDecryptionProperties(parquet.WithFooterKey(key)),
+		encProps.FileAad(), parquet.AesGcm, "", memory.DefaultAllocator).GetFooterDecryptor()
+	rd, err := parquet.NewReaderProperties(memory.DefaultAllocator).
+		GetStream(bytes.NewReader(stream.Bytes()), 0, int64(stream.Len()))
+	require.NoError(t, err)
+
+	p := &serializedPageReader{
+		maxPageHeaderSize: defaultMaxPageHeaderSize,
+		cryptoCtx:         CryptoContext{StartDecryptWithDictionaryPage: true, MetaDecryptor: dec},
+	}
+	got := format.NewPageHeader()
+	require.NoError(t, p.readPageHeader(rd, got))
+	require.Equal(t, format.PageType_DICTIONARY_PAGE, got.Type)
+
+	rest, err := io.ReadAll(rd)
+	require.NoError(t, err)
+	require.Equal(t, "page data!", string(rest))
 }

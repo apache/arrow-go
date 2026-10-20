@@ -18,7 +18,12 @@ package parquet_test
 
 import (
 	"bytes"
+	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -29,6 +34,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
+	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -606,4 +612,61 @@ func (d *TestDecryptionSuite) TestDecryption() {
 			}
 		})
 	}
+}
+
+// javaKeyRetriever unwraps keys the way parquet-mr's KeyToolkit does for a file written
+// with external key material and double wrapping: the KMS master key unwraps a key
+// encryption key (KEK), and the KEK unwraps the data key.
+type javaKeyRetriever struct {
+	t        *testing.T
+	material map[string]string // key reference -> key material JSON
+}
+
+func (r javaKeyRetriever) unwrap(wrapped string, key, aad []byte) []byte {
+	raw, err := base64.StdEncoding.DecodeString(wrapped)
+	require.NoError(r.t, err)
+	block, err := aes.NewCipher(key)
+	require.NoError(r.t, err)
+	gcm, err := cipher.NewGCM(block)
+	require.NoError(r.t, err)
+	plain, err := gcm.Open(nil, raw[:gcm.NonceSize()], raw[gcm.NonceSize():], aad)
+	require.NoError(r.t, err)
+	return plain
+}
+
+func (r javaKeyRetriever) GetKey(keyMetadata []byte) string {
+	var ref struct{ KeyReference string }
+	require.NoError(r.t, json.Unmarshal(keyMetadata, &ref))
+	var km struct{ MasterKeyID, WrappedDEK, KeyEncryptionKeyID, WrappedKEK string }
+	require.NoError(r.t, json.Unmarshal([]byte(r.material[ref.KeyReference]), &km))
+
+	masterKeys := map[string]string{"kf": FooterEncryptionKey, "kc1": ColumnEncryptionKey1, "kc2": ColumnEncryptionKey2}
+	kek := r.unwrap(km.WrappedKEK, []byte(masterKeys[km.MasterKeyID]), []byte(km.MasterKeyID))
+	kekID, err := base64.StdEncoding.DecodeString(km.KeyEncryptionKeyID)
+	require.NoError(r.t, err)
+	return string(r.unwrap(km.WrappedDEK, kek, kekID))
+}
+
+// parquet-mr zero-pads every encrypted thrift module, page headers included, out to its
+// buffer size, so reading its pages needs the reader to skip the whole encrypted header.
+func TestDecryptParquetMrExternalKeyMaterial(t *testing.T) {
+	dir := getDataDir()
+	raw, err := os.ReadFile(path.Join(dir, "_KEY_MATERIAL_FOR_external_key_material_java.parquet.encrypted.json"))
+	require.NoError(t, err)
+	var material map[string]string
+	require.NoError(t, json.Unmarshal(raw, &material))
+
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	props.FileDecryptProps = parquet.NewFileDecryptionProperties(parquet.WithKeyRetriever(javaKeyRetriever{t, material}))
+	rdr, err := file.OpenParquetFile(path.Join(dir, "external_key_material_java.parquet.encrypted"), false, file.WithReadProps(props))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	fr, err := pqarrow.NewFileReader(rdr, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+	require.NoError(t, err)
+	tbl, err := fr.ReadTable(context.Background())
+	require.NoError(t, err)
+	defer tbl.Release()
+	assert.EqualValues(t, 100, tbl.NumRows())
+	assert.EqualValues(t, 2, tbl.NumCols())
 }
