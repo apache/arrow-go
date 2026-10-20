@@ -616,9 +616,26 @@ func (dhs *dictionaryHashState) Append(ctx *exec.KernelCtx, arr *exec.ArraySpan)
 	indices := memory.NewResizableBuffer(dhs.Allocator())
 	defer indices.Release()
 	indices.Resize(int(arr.Len) * indexWidth)
-	if err = utils.TransposeIntsBuffers(dhs.indexType, dhs.indexType,
-		arr.Buffers[1].Buf, indices.Bytes(), int(arr.Offset), 0, int(arr.Len), mapping); err != nil {
-		return err
+	if arr.Nulls == 0 || len(arr.Buffers[0].Buf) == 0 {
+		if err = utils.TransposeIntsBuffers(dhs.indexType, dhs.indexType,
+			arr.Buffers[1].Buf, indices.Bytes(), int(arr.Offset), 0, int(arr.Len), mapping); err != nil {
+			return err
+		}
+	} else {
+		// Null index slots may contain arbitrary out-of-bounds values.
+		// Only transpose valid runs, leaving the other scratch slots unused.
+		runs := bitutils.NewSetBitRunReader(arr.Buffers[0].Buf, arr.Offset, arr.Len)
+		for {
+			run := runs.NextRun()
+			if run.AtEnd() {
+				break
+			}
+			if err = utils.TransposeIntsBuffers(dhs.indexType, dhs.indexType,
+				arr.Buffers[1].Buf, indices.Bytes(), int(arr.Offset+run.Pos),
+				int(run.Pos), int(run.Length), mapping); err != nil {
+				return err
+			}
+		}
 	}
 
 	remapped := *arr
