@@ -21,6 +21,7 @@ package compute_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -111,6 +112,50 @@ func TestUniqueChunkedDictionaryValueNull(t *testing.T) {
 	assert.Equal(t, "two", got.Dictionary().ValueStr(2))
 	assert.True(t, got.IsValid(1)) // valid index pointing to a null dictionary value
 	assert.True(t, got.IsNull(3))
+}
+
+func TestUniqueChunkedDictionarySkipsOutOfBoundsNullIndex(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8,
+		ValueType: arrow.BinaryTypes.String,
+	}
+	first, err := array.DictArrayFromJSON(mem, dictType, "[0, 1]", `["a", "b"]`)
+	require.NoError(t, err)
+	defer first.Release()
+
+	dict, _, err := array.FromJSON(mem, arrow.BinaryTypes.String,
+		strings.NewReader(`["b", "c"]`))
+	require.NoError(t, err)
+	defer dict.Release()
+
+	builder := array.NewInt8Builder(mem)
+	builder.Append(0)
+	builder.AppendNull()
+	builder.Append(1)
+	indices := builder.NewInt8Array()
+	builder.Release()
+	defer indices.Release()
+
+	// Validity bits mask this slot, so its physical value is unspecified.
+	indices.Data().Buffers()[1].Bytes()[1] = 127
+	second := array.NewDictionaryArray(dictType, indices, dict)
+	defer second.Release()
+
+	input := arrow.NewChunked(dictType, []arrow.Array{first, second})
+	defer input.Release()
+	out, err := compute.Unique(compute.WithAllocator(context.Background(), mem),
+		&compute.ChunkedDatum{Value: input})
+	require.NoError(t, err)
+	defer out.Release()
+
+	got := out.(*compute.ArrayDatum).MakeArray().(*array.Dictionary)
+	defer got.Release()
+	require.Equal(t, 4, got.Len())
+	assert.True(t, got.IsNull(2))
+	assert.Equal(t, "c", got.ValueStr(3))
 }
 
 func TestUniqueChunkedDictionaryIndexOverflow(t *testing.T) {
