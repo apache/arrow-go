@@ -50,7 +50,9 @@ type deltaBitPackDecoder[T int32 | int64] struct {
 	minDelta             int64
 	miniBlockIdx         uint64
 
-	deltaBitWidths *memory.Buffer
+	// deltaBitWidths holds one byte per miniblock. It lives on the Go heap
+	// because decoders have no Release to return allocator memory.
+	deltaBitWidths []byte
 	deltaBitWidth  byte
 
 	totalValues uint64
@@ -78,9 +80,6 @@ func (d *deltaBitPackDecoder[T]) SetData(nvalues int, data []byte) error {
 	d.bitdecoder = utils.NewBitReader(bytes.NewReader(d.data))
 	d.currentBlockVals = 0
 	d.currentMiniBlockVals = 0
-	if d.deltaBitWidths == nil {
-		d.deltaBitWidths = memory.NewResizableBuffer(d.mem)
-	}
 
 	var ok bool
 	d.blockSize, ok = d.bitdecoder.GetVlqInt()
@@ -144,17 +143,20 @@ func (d *deltaBitPackDecoder[T]) initBlock() error {
 	}
 
 	// ensure we have enough space for our miniblocks to decode the widths
-	d.deltaBitWidths.Resize(int(d.miniBlocksPerBlock))
+	if uint64(cap(d.deltaBitWidths)) < d.miniBlocksPerBlock {
+		d.deltaBitWidths = make([]byte, d.miniBlocksPerBlock)
+	}
+	d.deltaBitWidths = d.deltaBitWidths[:d.miniBlocksPerBlock]
 
 	var err error
 	for i := uint64(0); i < d.miniBlocksPerBlock; i++ {
-		if d.deltaBitWidths.Bytes()[i], err = d.bitdecoder.ReadByte(); err != nil {
+		if d.deltaBitWidths[i], err = d.bitdecoder.ReadByte(); err != nil {
 			return err
 		}
 	}
 
 	d.miniBlockIdx = 0
-	d.deltaBitWidth = d.deltaBitWidths.Bytes()[0]
+	d.deltaBitWidth = d.deltaBitWidths[0]
 	d.currentBlockVals = uint32(d.blockSize)
 	return nil
 }
@@ -165,7 +167,7 @@ func (d *deltaBitPackDecoder[T]) unpackNextMini() error {
 	} else {
 		d.miniBlockValues = d.miniBlockValues[:0]
 	}
-	d.deltaBitWidth = d.deltaBitWidths.Bytes()[int(d.miniBlockIdx)]
+	d.deltaBitWidth = d.deltaBitWidths[int(d.miniBlockIdx)]
 	maxBitWidth := byte(64)
 	if d.Type() == parquet.Types.Int32 {
 		maxBitWidth = 32
