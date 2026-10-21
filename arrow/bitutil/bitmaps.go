@@ -421,6 +421,25 @@ func transferBitmap(mode transferMode, src []byte, srcOffset, length int, dst []
 		return
 	}
 
+	// Both transfer paths can overwrite source bytes before reading them when
+	// the ranges alias. Only snapshot the source when their byte spans overlap.
+	srcStart := srcOffset / 8
+	dstStart := dstOffset / 8
+	srcBytes := src[srcStart : srcStart+int(BytesForBits(int64(srcOffset%8)+int64(length)))]
+	dstBytes := dst[dstStart : dstStart+int(BytesForBits(int64(dstOffset%8)+int64(length)))]
+	srcPtr := uintptr(unsafe.Pointer(&srcBytes[0]))
+	dstPtr := uintptr(unsafe.Pointer(&dstBytes[0]))
+	var overlaps bool
+	if srcPtr < dstPtr {
+		overlaps = dstPtr-srcPtr < uintptr(len(srcBytes))
+	} else {
+		overlaps = srcPtr-dstPtr < uintptr(len(dstBytes))
+	}
+	if overlaps {
+		src = bytes.Clone(srcBytes)
+		srcOffset %= 8
+	}
+
 	bitOffset := srcOffset % 8
 	destBitOffset := dstOffset % 8
 
@@ -480,12 +499,13 @@ func transferBitmap(mode transferMode, src []byte, srcOffset, length int, dst []
 
 // CopyBitmap copies the bitmap indicated by src, starting at bit offset srcOffset,
 // and copying length bits into dst, starting at bit offset dstOffset.
+// Source and destination ranges may overlap.
 func CopyBitmap(src []byte, srcOffset, length int, dst []byte, dstOffset int) {
 	transferBitmap(transferCopy, src, srcOffset, length, dst, dstOffset)
 }
 
 // InvertBitmap copies a bit range of a bitmap, inverting it as it copies
-// over into the destination.
+// over into the destination. Source and destination ranges may overlap.
 func InvertBitmap(src []byte, srcOffset, length int, dst []byte, dstOffset int) {
 	transferBitmap(transferInvert, src, srcOffset, length, dst, dstOffset)
 }
