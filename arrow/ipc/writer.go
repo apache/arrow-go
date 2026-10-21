@@ -1076,7 +1076,7 @@ func (w *recordEncoder) rebaseDenseUnionValueOffsets(arr *array.DenseUnion, offs
 	// child array, when we have a sliced array, we need to re-base
 	// the value offsets for each array! ew.
 	unshiftedOffsets := arr.RawValueOffsets()
-	codes := arr.RawTypeCodes()
+	codes := arr.RawTypeCodes()[:arr.Len()]
 
 	shiftedOffsetsBuf := memory.NewResizableBuffer(w.mem)
 	shiftedOffsetsBuf.Resize(arrow.Int32Traits.BytesRequired(arr.Len()))

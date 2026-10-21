@@ -83,7 +83,11 @@ jobs:
       matrix:
         os:
           - macos-latest
-          - ubuntu-latest
+          # ubuntu-latest moved to 26.04, where LeakSanitizer in the clang 21
+          # -asan runtime crashes ("Tracer caught signal 11") in cgo packages
+          # such as arrow/memory/mallocator and arrow/cdata. Stay on 24.04
+          # until that is fixed.
+          - ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.1
@@ -98,7 +102,7 @@ jobs:
           go-version-file: go.mod
       - name: Install ASan runtime
         # ci/scripts/test.sh only runs -asan against an LLVM >= 19 runtime;
-        # ubuntu-latest still defaults to clang 18.
+        # ubuntu-24.04 defaults to clang 18.
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
