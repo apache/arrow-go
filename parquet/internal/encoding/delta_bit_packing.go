@@ -484,12 +484,17 @@ func (enc *deltaBitPackEncoder[T]) FlushValues() (Buffer, error) {
 
 	buffer = buffer[:headerWriter.Written()]
 	enc.totalVals = 0
+	enc.firstVal, enc.currentVal = 0, 0
 
 	if enc.bitWriter != nil {
 		flushed := enc.sink.Finish()
 		defer flushed.Release()
 
 		buffer = append(buffer, flushed.Buf()[:enc.bitWriter.Written()]...)
+		// Finish hands the sink's bytes to us, so this writer's position no longer
+		// matches the sink. The next Put creates a new writer; until then, a flush
+		// (for example of an all-null page) must write only the header.
+		enc.bitWriter = nil
 	}
 	return poolBuffer{memory.NewBufferBytes(buffer)}, nil
 }
