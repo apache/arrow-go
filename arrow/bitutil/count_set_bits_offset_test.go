@@ -17,6 +17,7 @@
 package bitutil_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
@@ -53,6 +54,25 @@ func TestCountSetBitsOffsetByteBoundaries(t *testing.T) {
 	}
 }
 
+func TestCountSetBitsZeroLength(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		buf  []byte
+	}{
+		{"nil", nil},
+		{"empty", []byte{}},
+		{"nonempty", []byte{0xff}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, offset := range []int{0, 1, 8, 64, math.MaxInt} {
+				if got := bitutil.CountSetBits(tc.buf, offset, 0); got != 0 {
+					t.Fatalf("offset=%d: got=%d, want=0", offset, got)
+				}
+			}
+		})
+	}
+}
+
 var countSetBitsOffsetResult int
 
 func BenchmarkCountSetBitsOffsetByteMask(b *testing.B) {
@@ -61,6 +81,9 @@ func BenchmarkCountSetBitsOffsetByteMask(b *testing.B) {
 		offset int
 		n      int
 	}{
+		{"2-bits-offset-7", 7, 2},
+		{"1-bit-offset-8", 8, 1},
+		{"2-bits-offset-63", 63, 2},
 		{"5-bits-offset-3", 3, 5},
 		{"32-bits-offset-3", 3, 32},
 		{"32-bits-offset-8", 8, 32},
@@ -74,7 +97,7 @@ func BenchmarkCountSetBitsOffsetByteMask(b *testing.B) {
 			}
 			b.ReportAllocs()
 			var result int
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				result = bitutil.CountSetBits(bitmap, tc.offset, tc.n)
 			}
 			countSetBitsOffsetResult = result

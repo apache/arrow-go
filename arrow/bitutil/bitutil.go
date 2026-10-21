@@ -180,7 +180,7 @@ func countSetBitsWithOffset(buf []byte, offset, n int) int {
 
 	// Count the partial first byte, then use the word-based path for the rest.
 	leading := min(n, 8-bitOffset)
-	mask := byte((1 << leading) - 1) << bitOffset
+	mask := byte((1<<leading)-1) << bitOffset
 	count := bits.OnesCount8(buf[byteOffset] & mask)
 	if leading == n {
 		return count
