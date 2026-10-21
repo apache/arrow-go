@@ -68,7 +68,7 @@ var spacedBitmapBenchmarkSink []byte
 
 func BenchmarkSpacedBitmapExpansion(b *testing.B) {
 	for _, length := range []int{64 * 1024, 1024 * 1024} {
-		for _, nullEvery := range []int{2, 10} {
+		for _, nullEvery := range []int{2, 7} {
 			for _, offset := range []int{0, 5} {
 				source, valid, nulls := makeSpacedBitmapCase(length, offset, offset+1, nullEvery)
 				for _, implementation := range []struct {
