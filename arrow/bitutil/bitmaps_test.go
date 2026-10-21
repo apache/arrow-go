@@ -214,6 +214,59 @@ func TestCopyBitmap(t *testing.T) {
 	}
 }
 
+func TestTransferBitmapOverlapping(t *testing.T) {
+	tests := []struct {
+		name               string
+		srcSlice, dstSlice int
+		srcOffset          int
+		dstOffset          int
+		length             int
+	}{
+		{name: "aligned right partial", srcOffset: 0, dstOffset: 8, length: 31},
+		{name: "aligned left partial", srcOffset: 8, dstOffset: 0, length: 31},
+		{name: "aligned full bytes", srcOffset: 0, dstOffset: 16, length: 64},
+		{name: "unaligned right", srcOffset: 3, dstOffset: 11, length: 145},
+		{name: "unaligned left", srcOffset: 11, dstOffset: 3, length: 145},
+		{name: "same byte different bit offsets", srcOffset: 0, dstOffset: 1, length: 9},
+		{name: "same bit range", srcOffset: 5, dstOffset: 5, length: 145},
+		{name: "aliased slice views", srcSlice: 2, dstSlice: 3, srcOffset: 3, dstOffset: 2, length: 145},
+		{name: "adjacent bits", srcOffset: 5, dstOffset: 6, length: 1},
+		{name: "disjoint ranges", srcOffset: 0, dstOffset: 256, length: 32},
+	}
+
+	for _, tt := range tests {
+		for _, invert := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/invert=%t", tt.name, invert), func(t *testing.T) {
+				original := make([]byte, 64)
+				for i := range original {
+					original[i] = byte(i*37 + 0x5b)
+				}
+				got := append([]byte(nil), original...)
+				want := append([]byte(nil), original...)
+
+				srcStart := tt.srcSlice*8 + tt.srcOffset
+				dstStart := tt.dstSlice*8 + tt.dstOffset
+				for i := 0; i < tt.length; i++ {
+					bit := bitutil.BitIsSet(original, srcStart+i)
+					if invert {
+						bit = !bit
+					}
+					bitutil.SetBitTo(want, dstStart+i, bit)
+				}
+
+				src := got[tt.srcSlice:]
+				dst := got[tt.dstSlice:]
+				if invert {
+					bitutil.InvertBitmap(src, tt.srcOffset, tt.length, dst, tt.dstOffset)
+				} else {
+					bitutil.CopyBitmap(src, tt.srcOffset, tt.length, dst, tt.dstOffset)
+				}
+				assert.Equal(t, want, got)
+			})
+		}
+	}
+}
+
 func benchmarkCopyBitmapN(b *testing.B, offsetSrc, offsetDest, n int) {
 	nbits := n * 8
 	// random bytes
