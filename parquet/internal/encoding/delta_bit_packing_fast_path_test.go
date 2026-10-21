@@ -78,6 +78,22 @@ func testDeltaBitPackBlockRoundTrip[T int32 | int64](t *testing.T, typ parquet.T
 		return append([]byte(nil), buf.Bytes()...)
 	}
 
+	verify := func(t *testing.T, values []T) {
+		t.Helper()
+		n := len(values)
+		wire := encode(values)
+		split := max(1, n/2)
+		require.Equal(t, wire, encode(values[:1], values[1:split], values[split:]))
+
+		dec := NewDecoder(typ, parquet.Encodings.DeltaBinaryPacked, nil, memory.DefaultAllocator).(*deltaBitPackDecoder[T])
+		require.NoError(t, dec.SetData(n, wire))
+		out := make([]T, n)
+		got, err := dec.Decode(out)
+		require.NoError(t, err)
+		require.Equal(t, n, got)
+		require.Equal(t, values, out)
+	}
+
 	for _, n := range []int{1, 2, 31, 32, 33, 127, 128, 129, 130, 255, 257, 1001} {
 		for _, pattern := range []string{"constant", "zero", "sparse", "alternating", "random", "overflow"} {
 			t.Run(fmt.Sprintf("%s/%d", pattern, n), func(t *testing.T) {
@@ -115,17 +131,35 @@ func testDeltaBitPackBlockRoundTrip[T int32 | int64](t *testing.T, typ parquet.T
 					}
 				}
 
-				wire := encode(values)
-				split := max(1, n/2)
-				require.Equal(t, wire, encode(values[:1], values[1:split], values[split:]))
-
-				dec := NewDecoder(typ, parquet.Encodings.DeltaBinaryPacked, nil, memory.DefaultAllocator).(*deltaBitPackDecoder[T])
-				require.NoError(t, dec.SetData(n, wire))
-				out := make([]T, n)
-				got, err := dec.Decode(out)
-				require.NoError(t, err)
-				require.Equal(t, n, got)
-				require.Equal(t, values, out)
+				verify(t, values)
+			})
+		}
+	}
+	// The last delta in a block must be included in constant-block detection.
+	// The 3-value higher case is [0, 3, 10]; 129 values fill one delta block.
+	for _, n := range []int{3, 129, 130, 257} {
+		for _, outlier := range []struct {
+			name string
+			step T
+		}{
+			{name: "higher", step: 7},
+			{name: "lower", step: -7},
+		} {
+			t.Run(fmt.Sprintf("last-delta-%s/%d", outlier.name, n), func(t *testing.T) {
+				values := make([]T, n)
+				outlierIndex := n - 1
+				if n == 130 {
+					// The outlier ends the first block, with another delta after it.
+					outlierIndex = 128
+				}
+				for i := 1; i < n; i++ {
+					step := T(3)
+					if i == outlierIndex {
+						step = outlier.step
+					}
+					values[i] = values[i-1] + step
+				}
+				verify(t, values)
 			})
 		}
 	}

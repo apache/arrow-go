@@ -27,7 +27,7 @@ import (
 func benchmarkDeltaBitPackBlockFastPath[T int32 | int64](b *testing.B, typ parquet.Type, bytesPerValue int) {
 	const length = 64 * 1024
 
-	for _, pattern := range []string{"constant", "sparse", "alternating", "random"} {
+	for _, pattern := range []string{"constant", "sparse", "last-outlier", "alternating", "random"} {
 		b.Run(pattern, func(b *testing.B) {
 			values := make([]T, length)
 			rng := rand.New(rand.NewSource(42))
@@ -39,6 +39,13 @@ func benchmarkDeltaBitPackBlockFastPath[T int32 | int64](b *testing.B, typ parqu
 					step := T(3)
 					if i%128 == 90 {
 						step = 7
+					}
+					values[i] = values[i-1] + step
+				case "last-outlier":
+					step := T(3)
+					// Delta indices 128, 256, ... end each full block.
+					if i%128 == 0 {
+						step = -7
 					}
 					values[i] = values[i-1] + step
 				case "alternating":

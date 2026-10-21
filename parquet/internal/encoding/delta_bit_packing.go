@@ -380,32 +380,28 @@ func (enc *deltaBitPackEncoder[T]) flushBlock() {
 		return
 	}
 
-	// A block with identical deltas needs only the minimum delta and zero
-	// miniblock widths. It has no packed value payload.
+	// Find the minimum delta and check whether the block is constant in one
+	// pass. A separate equality scan hurts mixed blocks with a late outlier.
 	firstDelta := enc.deltas[0]
+	minDelta := firstDelta
 	allSame := true
 	for _, delta := range enc.deltas[1:] {
+		if delta < minDelta {
+			minDelta = delta
+		}
 		if delta != firstDelta {
 			allSame = false
-			break
 		}
 	}
 	if allSame {
+		// Identical deltas need only the minimum and zero widths, no payload.
 		enc.bitWriter.WriteZigZagVlqInt(firstDelta)
 		offset, _ := enc.bitWriter.SkipBytes(int(enc.numMiniBlocks))
-		// Explicitly zero the reserved bytes: the buffer may be reused.
+		// Explicitly clear the reserved widths for a reused buffer.
 		var widths [defaultNumMiniBlocks]byte
 		enc.bitWriter.WriteAt(widths[:], int64(offset))
 		enc.deltas = enc.deltas[:0]
 		return
-	}
-
-	// determine the minimum delta value
-	minDelta := int64(math.MaxInt64)
-	for _, delta := range enc.deltas {
-		if delta < minDelta {
-			minDelta = delta
-		}
 	}
 
 	enc.bitWriter.WriteZigZagVlqInt(minDelta)
