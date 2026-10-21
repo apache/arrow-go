@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build go1.18
+//go:build go1.24
 
 package compute_test
 
@@ -78,7 +78,7 @@ func BenchmarkUniqueChunkedChangingDictionaries(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(numChunks * valuesPerChunk))
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				result, err := compute.Unique(ctx, datum)
 				if err != nil {
 					b.Fatal(err)

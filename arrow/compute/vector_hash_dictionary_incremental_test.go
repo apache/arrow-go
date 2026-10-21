@@ -20,6 +20,7 @@ package compute_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -40,7 +41,7 @@ func TestUniqueChunkedChangingDictionaries(t *testing.T) {
 		IndexType: arrow.PrimitiveTypes.Int16,
 		ValueType: arrow.BinaryTypes.String,
 	}
-	makeDict := func(indices, values string) *array.Dictionary {
+	makeDict := func(indices, values string) arrow.Array {
 		t.Helper()
 		arr, err := array.DictArrayFromJSON(mem, dictType, indices, values)
 		require.NoError(t, err)
@@ -156,6 +157,52 @@ func TestUniqueChunkedDictionarySkipsOutOfBoundsNullIndex(t *testing.T) {
 	require.Equal(t, 4, got.Len())
 	assert.True(t, got.IsNull(2))
 	assert.Equal(t, "c", got.ValueStr(3))
+}
+
+func TestUniqueChunkedDictionaryUnusedIndexAtCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		indexType      arrow.DataType
+		dictionarySize int
+	}{
+		{"int8", arrow.PrimitiveTypes.Int8, 128},
+		{"uint8", arrow.PrimitiveTypes.Uint8, 256},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+			dictType := &arrow.DictionaryType{
+				IndexType: tc.indexType,
+				ValueType: arrow.BinaryTypes.String,
+			}
+			values := make([]string, tc.dictionarySize)
+			for i := range values {
+				values[i] = fmt.Sprintf("v%d", i)
+			}
+			rawValues, err := json.Marshal(values)
+			require.NoError(t, err)
+			first, err := array.DictArrayFromJSON(mem, dictType, "[0]", string(rawValues))
+			require.NoError(t, err)
+			defer first.Release()
+			// "unused" receives a merged ID above the index type's limit,
+			// but only the in-range "v0" entry is referenced.
+			second, err := array.DictArrayFromJSON(mem, dictType, "[1]", `["unused", "v0"]`)
+			require.NoError(t, err)
+			defer second.Release()
+
+			input := arrow.NewChunked(dictType, []arrow.Array{first, second})
+			defer input.Release()
+			out, err := compute.Unique(compute.WithAllocator(context.Background(), mem),
+				&compute.ChunkedDatum{Value: input})
+			require.NoError(t, err)
+			defer out.Release()
+
+			got := out.(*compute.ArrayDatum).MakeArray().(*array.Dictionary)
+			defer got.Release()
+			require.Equal(t, 1, got.Len())
+			assert.Equal(t, "v0", got.ValueStr(0))
+		})
+	}
 }
 
 func TestUniqueChunkedDictionaryIndexOverflow(t *testing.T) {

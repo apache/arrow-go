@@ -602,10 +602,30 @@ func (dhs *dictionaryHashState) Append(ctx *exec.KernelCtx, arr *exec.ArraySpan)
 		maxIndex = math.MaxUint16
 	}
 	if maxIndex != math.MaxInt32 {
+		// Transposition may assign out-of-range IDs to dictionary entries
+		// that no valid row references. Only reject referenced IDs.
+		needsCheck := false
 		for _, mapped := range mapping {
 			if mapped > maxIndex {
-				return fmt.Errorf("%w: unified dictionary index %d exceeds %s capacity",
-					arrow.ErrInvalid, mapped, dhs.indexType)
+				needsCheck = true
+				break
+			}
+		}
+		if needsCheck {
+			current := arr.MakeArray().(*array.Dictionary)
+			defer current.Release()
+			for i := 0; i < current.Len(); i++ {
+				if current.IsNull(i) {
+					continue
+				}
+				index := current.GetValueIndex(i)
+				if index < 0 || index >= len(mapping) {
+					return fmt.Errorf("%w: dictionary index %d out of range", arrow.ErrInvalid, index)
+				}
+				if mapped := mapping[index]; mapped > maxIndex {
+					return fmt.Errorf("%w: unified dictionary index %d exceeds %s capacity",
+						arrow.ErrInvalid, mapped, dhs.indexType)
+				}
 			}
 		}
 	}
@@ -976,7 +996,10 @@ func GetVectorHashKernels() (unique, valueCounts, dictEncode []exec.VectorKernel
 	var base exec.VectorKernel
 	base.ExecFn = hashExec
 
-	// unique
+	// unique only writes its output during finalization. Avoid allocating
+	// temporary buffers for every chunk, especially when append fails.
+	base.NullHandling = exec.NullComputedNoPrealloc
+	base.MemAlloc = exec.MemNoPrealloc
 	base.Finalize = uniqueFinalize
 	base.OutputChunked = false
 	base.CanExecuteChunkWise = true
