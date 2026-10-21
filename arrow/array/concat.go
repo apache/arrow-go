@@ -326,13 +326,29 @@ func unifyDictionaries(mem memory.Allocator, data []arrow.ArrayData, dt *arrow.D
 	defer unifier.Release()
 
 	newLookup := make([]*memory.Buffer, len(data))
+	// Reusing the same dictionary data must also reuse its transposition.
+	// A dictionary's indices in the unified result never change as new
+	// dictionaries are added to the unifier.
+	transpositions := make(map[*Data]*memory.Buffer)
 	for i, d := range data {
-		dictArr := MakeFromData(d.Dictionary())
-		defer dictArr.Release()
+		dictData := d.Dictionary().(*Data)
+		if existing, ok := transpositions[dictData]; ok {
+			// concatDictIndices releases one buffer per input chunk.
+			existing.Retain()
+			newLookup[i] = existing
+			continue
+		}
+
+		dictArr := MakeFromData(dictData)
 		newLookup[i], err = unifier.UnifyAndTranspose(dictArr)
+		dictArr.Release()
 		if err != nil {
+			for _, b := range newLookup[:i] {
+				b.Release()
+			}
 			return nil, nil, err
 		}
+		transpositions[dictData] = newLookup[i]
 	}
 
 	unified, err := unifier.GetResultWithIndexType(dt.IndexType)
@@ -607,13 +623,19 @@ func concat(data []arrow.ArrayData, mem memory.Allocator) (arr arrow.ArrayData, 
 		dict0 := MakeFromData(data[0].Dictionary())
 		defer dict0.Release()
 		for _, d := range data {
+			// Chunked arrays often share one immutable dictionary. Its
+			// backing Data pointer is enough to prove equality, avoiding
+			// a full scan of the dictionary for every chunk.
+			if d.Dictionary() == data[0].Dictionary() {
+				continue
+			}
 			dict := MakeFromData(d.Dictionary())
-			if !Equal(dict0, dict) {
-				dict.Release()
+			equal := Equal(dict0, dict)
+			dict.Release()
+			if !equal {
 				dictsSame = false
 				break
 			}
-			dict.Release()
 		}
 
 		if dictsSame {
