@@ -554,6 +554,18 @@ func TestSparseUnionValidate(t *testing.T) {
 	})
 }
 
+func TestDenseUnionValidateEmpty(t *testing.T) {
+	child := array.NewNull(0)
+	defer child.Release()
+
+	dt := arrow.DenseUnionOf([]arrow.Field{{Name: "null", Type: arrow.Null}}, []arrow.UnionTypeCode{0})
+	arr := array.NewDenseUnion(dt, 0, []arrow.Array{child}, nil, nil, 0)
+	defer arr.Release()
+
+	require.Nil(t, arr.Data().Buffers()[2])
+	assert.NoError(t, arr.ValidateFull())
+}
+
 type UnionFactorySuite struct {
 	suite.Suite
 

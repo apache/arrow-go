@@ -18,6 +18,7 @@ package encoding
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -25,6 +26,7 @@ import (
 )
 
 func BenchmarkDeltaByteArrayEncoding(b *testing.B) {
+	longPrefix := strings.Repeat("warehouse/region/partition/", 12)
 	for _, test := range []struct {
 		name  string
 		value func(int) []byte
@@ -33,6 +35,12 @@ func BenchmarkDeltaByteArrayEncoding(b *testing.B) {
 			name: "prefix-heavy",
 			value: func(i int) []byte {
 				return []byte(fmt.Sprintf("partition/%06d", i))
+			},
+		},
+		{
+			name: "long-prefix",
+			value: func(i int) []byte {
+				return []byte(fmt.Sprintf("%s%06d", longPrefix, i))
 			},
 		},
 		{
