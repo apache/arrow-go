@@ -27,8 +27,10 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strconv"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
@@ -667,6 +669,28 @@ func TestDecryptParquetMrExternalKeyMaterial(t *testing.T) {
 	tbl, err := fr.ReadTable(context.Background())
 	require.NoError(t, err)
 	defer tbl.Release()
-	assert.EqualValues(t, 100, tbl.NumRows())
-	assert.EqualValues(t, 2, tbl.NumCols())
+	require.EqualValues(t, 100, tbl.NumRows())
+	require.EqualValues(t, 2, tbl.NumCols())
+
+	// Same values the C++ ReadParquetMRExternalKeyMaterialFile test checks: column 0 is
+	// the row index and column 1 is prefixes[row % 10] followed by the row index.
+	prefixes := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}
+	row := 0
+	for _, chunk := range tbl.Column(0).Data().Chunks() {
+		ints := chunk.(*array.Int32)
+		for i := 0; i < ints.Len(); i++ {
+			assert.EqualValues(t, row, ints.Value(i), "integers[%d]", row)
+			row++
+		}
+	}
+	assert.Equal(t, 100, row)
+	row = 0
+	for _, chunk := range tbl.Column(1).Data().Chunks() {
+		strs := chunk.(*array.String)
+		for i := 0; i < strs.Len(); i++ {
+			assert.Equal(t, prefixes[row%len(prefixes)]+strconv.Itoa(row), strs.Value(i), "strings[%d]", row)
+			row++
+		}
+	}
+	assert.Equal(t, 100, row)
 }

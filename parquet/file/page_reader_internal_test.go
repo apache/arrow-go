@@ -105,8 +105,14 @@ func TestReadEncryptedPageHeaderWithTrailingPadding(t *testing.T) {
 	thriftBytes, err := thrift.NewThriftSerializer().Write(context.Background(), hdr)
 	require.NoError(t, err)
 
+	// parquet-mr serializes each encrypted module into a TMemoryBuffer that starts at
+	// INIT_MEM_ALLOC_ENCR_BUFFER (100) bytes and encrypts the whole backing array, so a
+	// small header is followed by zeros up to 100 bytes. Pad the same way.
+	const parquetMrInitBuffer = 100
+	padding := make([]byte, parquetMrInitBuffer-len(thriftBytes))
+
 	var stream bytes.Buffer
-	enc.Encrypt(&stream, append(thriftBytes, make([]byte, 76)...))
+	enc.Encrypt(&stream, append(thriftBytes, padding...))
 	stream.WriteString("page data!")
 
 	dec := encryption.NewFileDecryptor(parquet.NewFileDecryptionProperties(parquet.WithFooterKey(key)),
