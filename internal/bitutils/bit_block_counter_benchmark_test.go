@@ -37,10 +37,9 @@ func BenchmarkFourWordsUnaligned(b *testing.B) {
 			b.Run(fmt.Sprintf("%dbits/offset%d", length, offset), func(b *testing.B) {
 				b.ReportAllocs()
 				b.SetBytes(int64(bitutil.BytesForBits(length)))
-				b.ResetTimer()
 
 				var totalPopcnt int64
-				for i := 0; i < b.N; i++ {
+				for b.Loop() {
 					counter := bitutils.NewBitBlockCounter(bitmap, offset, length)
 					for pos := int64(0); pos < length; {
 						block := counter.NextFourWords()

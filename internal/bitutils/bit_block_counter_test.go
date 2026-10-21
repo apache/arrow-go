@@ -207,8 +207,8 @@ func TestFourWordsUnalignedBoundaries(t *testing.T) {
 			320 - offset - 1, 320 - offset, 320 - offset + 1,
 			512, 1024, 1280 - offset - 1, 1280 - offset,
 		} {
-			// Allocate only the bytes required by the requested bit range.
-			// In particular, the fast path must never read past the bitmap.
+			// Use an exact-length bitmap for functional boundary coverage.
+			// The guard-page test separately detects unsafe overreads.
 			bitmap := make([]byte, bitutil.BytesForBits(offset+length))
 			rng := &rand.ChaCha8{}
 			_, _ = rng.Read(bitmap)
