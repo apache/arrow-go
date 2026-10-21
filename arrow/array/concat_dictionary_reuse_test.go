@@ -114,7 +114,7 @@ func TestConcatenateDictionaryReuse(t *testing.T) {
 			combined, err := array.Concatenate(inputs, mem)
 			require.NoError(t, err)
 			defer combined.Release()
-			require.NoError(t, combined.(interface{ ValidateFull() error }).ValidateFull())
+			require.NoError(t, array.ValidateFull(combined))
 			require.Equal(t, len(expected), combined.Len())
 			for i, want := range expected {
 				require.Equal(t, want, combined.ValueStr(i), "row %d", i)
