@@ -108,6 +108,10 @@ func (c *Column) SchemaNode() Node {
 // SortOrder returns the sort order of this column's statistics based on the
 // Logical and Converted types.
 func (c *Column) SortOrder() SortOrder {
+	if c.pnode.unknownLogical {
+		// the unknown logical type may define its own order, so min/max must not be trusted
+		return SortUNKNOWN
+	}
 	if c.LogicalType() != nil {
 		return GetLogicalSortOrder(c.LogicalType(), format.Type(c.pnode.PhysicalType()))
 	}

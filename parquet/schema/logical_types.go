@@ -35,7 +35,14 @@ type DecimalMetadata struct {
 	Precision int32
 }
 
+// getLogicalType converts the thrift union. A nil union, or one that holds a member
+// this version does not know (a logical type added after it), reads as NoLogicalType:
+// readers are meant to ignore annotations they do not recognize.
 func getLogicalType(l *format.LogicalType) LogicalType {
+	if l == nil {
+		return NoLogicalType{}
+	}
+
 	switch {
 	case l.IsSetSTRING():
 		return StringLogicalType{}
@@ -77,10 +84,8 @@ func getLogicalType(l *format.LogicalType) LogicalType {
 		return geographyLogicalTypeFromThrift(l.GEOGRAPHY)
 	case l.IsSetGEOMETRY():
 		return geometryLogicalTypeFromThrift(l.GEOMETRY)
-	case l == nil:
-		return NoLogicalType{}
 	default:
-		panic("invalid logical type")
+		return NoLogicalType{}
 	}
 }
 
