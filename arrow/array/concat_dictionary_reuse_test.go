@@ -155,7 +155,7 @@ func BenchmarkConcatenateDictionaryReuse(b *testing.B) {
 			defer releaseConcatDictionaryChunks(inputs)
 			b.ReportAllocs()
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				output, err := array.Concatenate(inputs, mem)
 				if err != nil {
 					b.Fatal(err)

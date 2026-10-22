@@ -329,9 +329,9 @@ func unifyDictionaries(mem memory.Allocator, data []arrow.ArrayData, dt *arrow.D
 	// Reusing the same dictionary data must also reuse its transposition.
 	// A dictionary's indices in the unified result never change as new
 	// dictionaries are added to the unifier.
-	transpositions := make(map[*Data]*memory.Buffer)
+	transpositions := make(map[arrow.ArrayData]*memory.Buffer)
 	for i, d := range data {
-		dictData := d.Dictionary().(*Data)
+		dictData := d.Dictionary()
 		if existing, ok := transpositions[dictData]; ok {
 			// concatDictIndices releases one buffer per input chunk.
 			existing.Retain()
@@ -381,6 +381,9 @@ func concatDictIndices(mem memory.Allocator, data []arrow.ArrayData, idxType arr
 
 	outData := out.Bytes()
 	for i, d := range data {
+		if d.Len() == 0 {
+			continue
+		}
 		transposeMap := arrow.Int32Traits.CastFromBytes(transpositions[i].Bytes())
 		src := d.Buffers()[1].Bytes()
 		if d.Buffers()[0] == nil {
