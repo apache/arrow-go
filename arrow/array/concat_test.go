@@ -1222,19 +1222,29 @@ func TestConcatRunEndEncodedInt64FinalRunEndClamp(t *testing.T) {
 	prefix := prefixBldr.NewArray()
 	defer prefix.Release()
 
-	bigBldr := array.NewRunEndEncodedBuilder(mem, arrow.PrimitiveTypes.Int64, arrow.PrimitiveTypes.Int64)
-	defer bigBldr.Release()
-	bigBldr.Append(math.MaxInt64)
-	bigBldr.ValueBuilder().(*array.Int64Builder).Append(2)
-	big := bigBldr.NewArray()
-	defer big.Release()
-	oneElem := array.NewSlice(big, 0, 1) // first element of the MaxInt64-length run
+	// One logical element from a run ending at math.MaxInt64, as a slice of the
+	// run's first element would be. Build it directly: an array whose length is
+	// math.MaxInt64 cannot exist when int is 32 bits, but this one is valid there.
+	runEndsBldr := array.NewInt64Builder(mem)
+	defer runEndsBldr.Release()
+	runEndsBldr.Append(math.MaxInt64)
+	runEnds := runEndsBldr.NewArray()
+	defer runEnds.Release()
+	valuesBldr := array.NewInt64Builder(mem)
+	defer valuesBldr.Release()
+	valuesBldr.Append(2)
+	values := valuesBldr.NewArray()
+	defer values.Release()
+	oneElem := array.NewRunEndEncodedArray(runEnds, values, 1, 0)
 	defer oneElem.Release()
 
 	result, err := array.Concatenate([]arrow.Array{prefix, oneElem}, mem)
 	require.NoError(t, err)
 	defer result.Release()
 	assert.EqualValues(t, 6, result.Len())
+	ree := result.(*array.RunEndEncoded)
+	assert.Equal(t, []int64{5, 6}, ree.RunEndsArr().(*array.Int64).Int64Values())
+	assert.Equal(t, []int64{1, 2}, ree.Values().(*array.Int64).Int64Values())
 }
 
 func TestConcatAlmostOverflowRunEndEncoding(t *testing.T) {
@@ -1249,6 +1259,11 @@ func TestConcatAlmostOverflowRunEndEncoding(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.offsetType.String(), func(t *testing.T) {
+			if tt.max > math.MaxInt {
+				// The inputs' logical lengths are near tt.max, and array lengths
+				// are ints, so this case cannot be built when int is 32 bits.
+				t.Skipf("array lengths near %d do not fit in int", tt.max)
+			}
 			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 			defer mem.AssertSize(t, 0)
 
@@ -1296,6 +1311,11 @@ func TestConcatOverflowRunEndEncoding(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.offsetType.String(), func(t *testing.T) {
+			if tt.max > math.MaxInt {
+				// The inputs' logical lengths are near tt.max, and array lengths
+				// are ints, so this case cannot be built when int is 32 bits.
+				t.Skipf("array lengths near %d do not fit in int", tt.max)
+			}
 			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 			defer mem.AssertSize(t, 0)
 
