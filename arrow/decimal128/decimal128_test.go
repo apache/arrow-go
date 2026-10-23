@@ -374,6 +374,13 @@ func TestDecimalToBigInt(t *testing.T) {
 		{-18446744073709552, 7083549724304524577, "-340282366920938463463374607431711455"},
 		{1, 4611686018427387904, "23058430092136939520"},
 		{0, 0, "0"},
+		{0, 1, "1"},
+		{0, math.MaxUint32, "4294967295"},
+		{0, 1 << 32, "4294967296"},
+		{0, math.MaxUint64, "18446744073709551615"},
+		{1, 0, "18446744073709551616"},
+		{1 << 32, 0, "79228162514264337593543950336"},
+		{math.MaxInt64, math.MaxUint64, "170141183460469231731687303715884105727"},
 	}
 	for _, tc := range tests {
 		t.Run("", func(t *testing.T) {
@@ -384,6 +391,10 @@ func TestDecimalToBigInt(t *testing.T) {
 			n2 := decimal128.FromBigInt(bi)
 			assert.Equal(t, n.LowBits(), n2.LowBits())
 			assert.Equal(t, n.HighBits(), n2.HighBits())
+
+			bi, ok := new(big.Int).SetString(tc.exp, 10)
+			require.True(t, ok)
+			assert.Equal(t, n, decimal128.FromBigInt(bi))
 		})
 	}
 }

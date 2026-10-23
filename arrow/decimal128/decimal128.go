@@ -75,7 +75,7 @@ func FromI64(v int64) Num {
 }
 
 // FromBigInt will convert a big.Int to a Num, if the value in v has a
-// BitLen > 128, this will panic.
+// BitLen > 127, this will panic.
 func FromBigInt(v *big.Int) (n Num) {
 	bitlen := v.BitLen()
 	if bitlen > 127 {
@@ -86,14 +86,22 @@ func FromBigInt(v *big.Int) (n Num) {
 		return
 	}
 
-	// if the value is negative, then get the high and low bytes from
-	// v, and then negate it. this is because Num uses a two's compliment
-	// representation of values and big.Int stores the value as a bool for
-	// the sign and the absolute value of the integer. This means that the
-	// raw bytes are *always* the absolute value.
+	// big.Int stores the magnitude in native-sized words with a separate sign,
+	// while Num uses two's complement with 64-bit limbs. On 32-bit platforms,
+	// combine pairs of words before applying the sign.
 	b := v.Bits()
 	n.lo = uint64(b[0])
-	if len(b) > 1 {
+	if bits.UintSize == 32 {
+		if len(b) > 1 {
+			n.lo |= uint64(b[1]) << 32
+		}
+		if len(b) > 2 {
+			n.hi = int64(b[2])
+		}
+		if len(b) > 3 {
+			n.hi |= int64(b[3]) << 32
+		}
+	} else if len(b) > 1 {
 		n.hi = int64(b[1])
 	}
 	if v.Sign() < 0 {
@@ -359,6 +367,12 @@ func (n Num) Sign() int {
 }
 
 func toBigIntPositive(n Num) *big.Int {
+	if bits.UintSize == 32 {
+		return (&big.Int{}).SetBits([]big.Word{
+			big.Word(n.lo), big.Word(n.lo >> 32),
+			big.Word(n.hi), big.Word(n.hi >> 32),
+		})
+	}
 	return (&big.Int{}).SetBits([]big.Word{big.Word(n.lo), big.Word(n.hi)})
 }
 
