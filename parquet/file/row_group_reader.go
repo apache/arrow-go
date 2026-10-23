@@ -178,14 +178,23 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 
 	// column encrypted with it's own key
 	columnKeyMeta := cryptoMetadata.GetENCRYPTION_WITH_COLUMN_KEY().KeyMetadata
-	columnPath := cryptoMetadata.GetENCRYPTION_WITH_COLUMN_KEY().PathInSchema
+	columnPath := parquet.ColumnPath(cryptoMetadata.GetENCRYPTION_WITH_COLUMN_KEY().PathInSchema).String()
+
+	metaDecryptor, err := r.fileDecryptor.GetColumnMetaDecryptor(columnPath, string(columnKeyMeta), "")
+	if err != nil {
+		return nil, err
+	}
+	dataDecryptor, err := r.fileDecryptor.GetColumnDataDecryptor(columnPath, string(columnKeyMeta), "")
+	if err != nil {
+		return nil, err
+	}
 
 	ctx := CryptoContext{
 		StartDecryptWithDictionaryPage: col.HasDictionaryPage(),
 		RowGroupOrdinal:                r.rgMetadata.Ordinal(),
 		ColumnOrdinal:                  int16(i),
-		MetaDecryptor:                  r.fileDecryptor.GetColumnMetaDecryptor(parquet.ColumnPath(columnPath).String(), string(columnKeyMeta), ""),
-		DataDecryptor:                  r.fileDecryptor.GetColumnDataDecryptor(parquet.ColumnPath(columnPath).String(), string(columnKeyMeta), ""),
+		MetaDecryptor:                  metaDecryptor,
+		DataDecryptor:                  dataDecryptor,
 	}
 	pr := &serializedPageReader{
 		r:                       stream,

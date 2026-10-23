@@ -30,6 +30,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -693,4 +694,48 @@ func TestDecryptParquetMrExternalKeyMaterial(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 100, row)
+}
+
+// A column whose key isn't available should fail with an error instead of a panic,
+// and must not stop the columns that can be decrypted from being read.
+func TestDecryptHiddenColumn(t *testing.T) {
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "b", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	tbl, err := array.TableFromJSON(memory.DefaultAllocator, sc, []string{`[{"a": 1, "b": 2}, {"a": 3, "b": 4}]`})
+	require.NoError(t, err)
+	defer tbl.Release()
+
+	encryptCols := parquet.ColumnPathToEncryptionPropsMap{
+		"a": parquet.NewColumnEncryptionProperties("a", parquet.WithKey(ColumnEncryptionKey1)),
+		"b": parquet.NewColumnEncryptionProperties("b", parquet.WithKey(ColumnEncryptionKey2)),
+	}
+	writeProps := parquet.NewWriterProperties(parquet.WithEncryptionProperties(
+		parquet.NewFileEncryptionProperties(FooterEncryptionKey, parquet.WithEncryptedColumns(encryptCols))))
+	var buf bytes.Buffer
+	require.NoError(t, pqarrow.WriteTable(tbl, &buf, tbl.NumRows(), writeProps, pqarrow.DefaultWriterProps()))
+
+	// only the key for column "a" is provided
+	decryptCols := parquet.ColumnPathToDecryptionPropsMap{
+		"a": parquet.NewColumnDecryptionProperties("a", parquet.WithDecryptKey(ColumnEncryptionKey1)),
+	}
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	props.FileDecryptProps = parquet.NewFileDecryptionProperties(parquet.WithFooterKey(FooterEncryptionKey), parquet.WithColumnKeys(decryptCols))
+	rdr, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(props))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	_, err = rdr.MetaData().RowGroup(0).ColumnChunk(1)
+	assert.ErrorContains(t, err, "hidden column b")
+
+	fr, err := pqarrow.NewFileReader(rdr, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+	require.NoError(t, err)
+	_, err = fr.ReadTable(context.Background())
+	assert.ErrorContains(t, err, "hidden column b")
+
+	got, err := fr.ReadRowGroups(context.Background(), []int{0}, []int{0})
+	require.NoError(t, err)
+	defer got.Release()
+	assert.Equal(t, `[1 3]`, got.Column(0).Data().Chunk(0).String())
 }
