@@ -280,7 +280,7 @@ func decodeSpacedToBitmap(dec BooleanBitmapDecoder, out []byte, outOffset int64,
 		perBitThreshold++
 	}
 	if nullCount >= perBitThreshold {
-		expandSpacedBitmapPerBit(out, outOffset, length, nullCount, validBits, validBitsOffset)
+		expandSpacedBitmapByByte(out, outOffset, length, nullCount, validBits, validBitsOffset)
 		return length, nil
 	}
 
