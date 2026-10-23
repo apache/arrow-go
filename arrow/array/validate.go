@@ -37,6 +37,8 @@ type Validator interface {
 
 // Validate performs a basic O(1) consistency check on arr, returning an error
 // if the array's internal buffers or nested child data are inconsistent.
+// Run-end encoded arrays may omit the always-nil buffer placeholder used by
+// some constructors.
 //
 // Use this to detect corrupted data from untrusted sources such as Arrow Flight
 // or Flight SQL servers before accessing values, which may otherwise panic.
@@ -175,6 +177,18 @@ func validateArrayData(data *Data) error {
 	end := int64(data.offset) + int64(data.length)
 	if end < int64(data.offset) {
 		return fmt.Errorf("arrow/array: array offset and length overflow")
+	}
+
+	// REE arrays have no physical buffers. Constructors and IPC may include a
+	// nil placeholder, but builders and C Data imports omit it.
+	if len(data.buffers) == 0 {
+		dt := data.dtype
+		if ext, ok := dt.(arrow.ExtensionType); ok {
+			dt = ext.StorageType()
+		}
+		if dt.ID() == arrow.RUN_END_ENCODED {
+			return nil
+		}
 	}
 
 	layout := data.dtype.Layout()
