@@ -66,11 +66,12 @@ func (v largeVarRangeSelector) GetRange(idx int64) elemRange {
 }
 
 type fixedSizeRangeSelector struct {
+	offset   int64
 	listSize int32
 }
 
 func (f fixedSizeRangeSelector) GetRange(idx int64) elemRange {
-	start := idx * int64(f.listSize)
+	start := (f.offset + idx) * int64(f.listSize)
 	return elemRange{start, start + int64(f.listSize)}
 }
 
@@ -423,7 +424,7 @@ func (p *pathBuilder) Visit(arr arrow.Array) error {
 		larr := arr.(*array.FixedSizeList)
 		listSize := larr.DataType().(*arrow.FixedSizeListType).Len()
 		return p.visitListLike(arr,
-			fixedSizeRangeSelector{listSize},
+			fixedSizeRangeSelector{int64(larr.Data().Offset()), listSize},
 			0, // defLevelIfEmpty = maxDefLevel (after all increments)
 			larr.ListValues())
 	case arrow.DICTIONARY:
