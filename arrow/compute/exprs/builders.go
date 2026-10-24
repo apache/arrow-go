@@ -27,9 +27,9 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute"
-	"github.com/substrait-io/substrait-go/v8/expr"
-	"github.com/substrait-io/substrait-go/v8/extensions"
-	"github.com/substrait-io/substrait-go/v8/types"
+	"github.com/substrait-io/substrait-go/v9/expr"
+	"github.com/substrait-io/substrait-go/v9/extensions"
+	"github.com/substrait-io/substrait-go/v9/types"
 )
 
 // NewDefaultExtensionSet constructs an empty extension set using the default
@@ -63,7 +63,7 @@ func NewScalarCall(reg ExtensionIDSet, fn string, opts []*types.FunctionOption, 
 	}
 
 	opts = append(opts, convOpts...)
-	return expr.NewScalarFunc(reg.GetSubstraitRegistry(), id, opts, args...)
+	return expr.NewScalarFunc(reg.GetSubstraitRegistry(), extensions.FunctionID(id), opts, args...)
 }
 
 // NewFieldRefFromDotPath constructs a substrait reference segment from
@@ -347,7 +347,7 @@ func (e *ExprBuilder) CallScalar(fn string, opts []*types.FunctionOption, args .
 	}
 
 	opts = append(opts, convOpts...)
-	return e.b.ScalarFunc(id, opts...).Args(args...), nil
+	return e.b.ScalarFunc(extensions.FunctionID(id), opts...).Args(args...), nil
 }
 
 // FieldPath uses a field path to construct a Field Reference
@@ -415,7 +415,7 @@ func (e *ExprBuilder) Cast(from Builder, to arrow.DataType) (Builder, error) {
 		return nil, err
 	}
 
-	return e.b.Cast(from, t).FailBehavior(types.BehaviorThrowException), nil
+	return e.b.Cast(from, t).FailBehavior(types.CastFailBehaviorThrowException), nil
 }
 
 type refBuilder struct {

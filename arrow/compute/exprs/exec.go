@@ -32,9 +32,9 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
-	"github.com/substrait-io/substrait-go/v8/expr"
-	"github.com/substrait-io/substrait-go/v8/extensions"
-	"github.com/substrait-io/substrait-go/v8/types"
+	"github.com/substrait-io/substrait-go/v9/expr"
+	"github.com/substrait-io/substrait-go/v9/extensions"
+	"github.com/substrait-io/substrait-go/v9/types"
 )
 
 func makeExecBatch(ctx context.Context, schema *arrow.Schema, partial compute.Datum) (out compute.ExecBatch, err error) {
@@ -568,11 +568,11 @@ func executeScalarBatch(ctx context.Context, input compute.ExecBatch, exp expr.E
 
 		var opts *compute.CastOptions
 		switch e.FailureBehavior {
-		case types.BehaviorThrowException:
+		case types.CastFailBehaviorThrowException:
 			opts = compute.UnsafeCastOptions(dt)
-		case types.BehaviorUnspecified:
+		case types.CastFailBehaviorUnspecified:
 			return nil, fmt.Errorf("%w: cast behavior unspecified", arrow.ErrInvalid)
-		case types.BehaviorReturnNil:
+		case types.CastFailBehaviorReturnNull:
 			return nil, fmt.Errorf("%w: cast behavior return nil", arrow.ErrNotImplemented)
 		}
 		return compute.CastDatum(ctx, arg, opts)
