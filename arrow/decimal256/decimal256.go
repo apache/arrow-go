@@ -357,6 +357,7 @@ func (n Num) Sign() int {
 	return int(1 | (int64(n.arr[3]) >> 63))
 }
 
+// FromBigInt converts a big.Int to a Num. It panics if v.BitLen() > 255.
 func FromBigInt(v *big.Int) (n Num) {
 	bitlen := v.BitLen()
 	if bitlen > 255 {
@@ -366,8 +367,15 @@ func FromBigInt(v *big.Int) (n Num) {
 	}
 
 	b := v.Bits()
-	for i, bits := range b {
-		n.arr[i] = uint64(bits)
+	if bits.UintSize == 32 {
+		// Each 64-bit limb contains two native-sized big.Int words.
+		for i, word := range b {
+			n.arr[i/2] |= uint64(word) << (32 * (i % 2))
+		}
+	} else {
+		for i, word := range b {
+			n.arr[i] = uint64(word)
+		}
 	}
 	if v.Sign() < 0 {
 		return n.Negate()
@@ -376,6 +384,14 @@ func FromBigInt(v *big.Int) (n Num) {
 }
 
 func toBigIntPositive(n Num) *big.Int {
+	if bits.UintSize == 32 {
+		return new(big.Int).SetBits([]big.Word{
+			big.Word(n.arr[0]), big.Word(n.arr[0] >> 32),
+			big.Word(n.arr[1]), big.Word(n.arr[1] >> 32),
+			big.Word(n.arr[2]), big.Word(n.arr[2] >> 32),
+			big.Word(n.arr[3]), big.Word(n.arr[3] >> 32),
+		})
+	}
 	return new(big.Int).SetBits([]big.Word{big.Word(n.arr[0]), big.Word(n.arr[1]), big.Word(n.arr[2]), big.Word(n.arr[3])})
 }
 
