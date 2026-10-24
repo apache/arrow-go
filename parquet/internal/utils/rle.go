@@ -562,6 +562,32 @@ func (r *RleEncoder) PutBatchLevels(values []int16) (int, error) {
 			}
 		}
 
+		// Literal levels usually have a width of only one or two bits. Pack a
+		// complete group at once instead of feeding eight values through Put,
+		// then unpacking the uint64 buffer again in WriteValues.
+		if r.repCount == 0 && len(r.buffer) == 0 && len(values)-encoded >= 8 &&
+			r.BitWidth > 0 && r.BitWidth <= 8 {
+			group := values[encoded : encoded+8]
+			var packed uint64
+			fits := true
+			maxValue := uint64(1<<r.BitWidth) - 1
+			for i, level := range group {
+				if level < 0 || uint64(level) > maxValue {
+					fits = false
+					break
+				}
+				packed |= uint64(level) << (uint(i) * uint(r.BitWidth))
+			}
+			if fits {
+				if err := r.putPackedLevelGroup(packed); err != nil {
+					return encoded + 7, err
+				}
+				r.curVal = uint64(group[7])
+				encoded += 8
+				continue
+			}
+		}
+
 		batchEnd := min(len(values), encoded+8-len(r.buffer))
 		for encoded < batchEnd {
 			if err := r.Put(uint64(values[encoded])); err != nil {
@@ -571,6 +597,30 @@ func (r *RleEncoder) PutBatchLevels(values []int16) (int, error) {
 		}
 	}
 	return encoded, nil
+}
+
+// putPackedLevelGroup writes eight literal levels to the current RLE literal
+// run. PutBatchLevels calls this only when there is no buffered/repeated run,
+// and each level fits in BitWidth bits.
+func (r *RleEncoder) putPackedLevelGroup(packed uint64) error {
+	if r.literalIndicatorOffset == -1 {
+		var err error
+		r.literalIndicatorOffset, err = r.w.SkipBytes(1)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := r.w.WriteValue(packed, uint(r.BitWidth*8)); err != nil {
+		return err
+	}
+
+	r.litCount += 8
+	// One byte is reserved for the literal header: at most 63 groups.
+	if r.litCount/8+1 >= 1<<6 {
+		return r.flushLiteral(true)
+	}
+	return nil
 }
 
 // PutBatchIndices encodes a batch of dictionary indices.
