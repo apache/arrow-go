@@ -138,8 +138,8 @@ func (b *BitmapWriter) Next() {
 	}
 }
 
-// AppendBools writes a series of booleans to the bitmapwriter and returns
-// the number of remaining bytes left in the buffer for writing.
+// AppendBools writes up to the remaining number of bits from in and returns
+// the number of boolean values written.
 func (b *BitmapWriter) AppendBools(in []bool) int {
 	space := min(b.length-b.pos, len(in))
 	if space == 0 {
@@ -147,24 +147,86 @@ func (b *BitmapWriter) AppendBools(in []bool) int {
 	}
 
 	bitOffset := bits.TrailingZeros32(uint32(b.bitMask))
-	// location that the first byte needs to be written to for appending
-	appslice := b.buf[int(b.byteOffset) : b.byteOffset+int(BytesForBits(int64(bitOffset+space)))]
-	// update everything but curByte
-	appslice[0] = b.curByte
-	for i, b := range in[:space] {
-		if b {
-			SetBit(appslice, i+bitOffset)
-		} else {
-			ClearBit(appslice, i+bitOffset)
+	byteOffset := b.byteOffset
+	values := in[:space]
+
+	// Finish the first partial byte without changing unrelated bits.
+	if bitOffset != 0 {
+		n := min(len(values), 8-bitOffset)
+		current := b.curByte
+		for i, v := range values[:n] {
+			mask := byte(1) << uint(bitOffset+i)
+			if v {
+				current |= mask
+			} else {
+				current &^= mask
+			}
 		}
+		b.buf[byteOffset] = current
+		values = values[n:]
+		if n == 8-bitOffset {
+			byteOffset++
+		}
+	}
+
+	// Write eight booleans per byte instead of updating each bit individually.
+	for len(values) >= 8 {
+		b.buf[byteOffset] = packBoolByte(values)
+		byteOffset++
+		values = values[8:]
+	}
+
+	if len(values) != 0 {
+		current := b.buf[byteOffset]
+		for i, v := range values {
+			mask := byte(1) << uint(i)
+			if v {
+				current |= mask
+			} else {
+				current &^= mask
+			}
+		}
+		b.buf[byteOffset] = current
 	}
 
 	b.pos += space
 	b.bitMask = BitMask[(bitOffset+space)%8]
 	b.byteOffset += (bitOffset + space) / 8
-	b.curByte = appslice[len(appslice)-1]
-
+	// At a byte boundary, the next write must start with the next byte's
+	// existing bits, not the last byte written by this call.
+	if b.byteOffset < len(b.buf) {
+		b.curByte = b.buf[b.byteOffset]
+	}
 	return space
+}
+
+func packBoolByte(values []bool) byte {
+	var packed byte
+	if values[0] {
+		packed |= 1 << 0
+	}
+	if values[1] {
+		packed |= 1 << 1
+	}
+	if values[2] {
+		packed |= 1 << 2
+	}
+	if values[3] {
+		packed |= 1 << 3
+	}
+	if values[4] {
+		packed |= 1 << 4
+	}
+	if values[5] {
+		packed |= 1 << 5
+	}
+	if values[6] {
+		packed |= 1 << 6
+	}
+	if values[7] {
+		packed |= 1 << 7
+	}
+	return packed
 }
 
 // AppendBitmap writes bits directly from a source bitmap to this bitmap writer,
