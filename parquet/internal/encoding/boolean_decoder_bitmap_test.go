@@ -168,3 +168,79 @@ func TestRleBooleanDecoderDecodeToBitmapTruncatedLiteral(t *testing.T) {
 		})
 	}
 }
+
+func TestRleBooleanDecoderDecodeInChunks(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		dec := newRleBooleanBitmapDecoder(t, 0, []byte{0, 0, 0, 0})
+		n, err := dec.Decode(nil)
+		require.NoError(t, err)
+		require.Zero(t, n)
+		assert.Zero(t, dec.ValuesLeft())
+	})
+	patterns := []struct {
+		name   string
+		values []bool
+	}{
+		{name: "all_true", values: makeBooleanValues(2048, func(int) bool { return true })},
+		{name: "all_false", values: makeBooleanValues(2048, func(int) bool { return false })},
+		{name: "alternating", values: makeBooleanValues(2048, func(i int) bool { return i%2 == 0 })},
+		{name: "short_runs", values: makeBooleanValues(2048, func(i int) bool { return (i/7)%2 == 0 })},
+		{name: "mixed", values: makeBooleanValues(2048, func(i int) bool {
+			return i < 23 || i >= 53 && i < 511 || i%5 == 0
+		})},
+	}
+
+	for _, pattern := range patterns {
+		t.Run(pattern.name, func(t *testing.T) {
+			data := encodeRleBooleanValues(t, pattern.values)
+			for _, batchSize := range []int{1, 3, 7, 8, 9, 31, 257, 1024, 4096} {
+				t.Run(fmt.Sprintf("batch_%d", batchSize), func(t *testing.T) {
+					dec := newRleBooleanBitmapDecoder(t, len(pattern.values), data)
+					out := make([]bool, len(pattern.values))
+					for i := range out {
+						out[i] = true // verify that false runs overwrite reused output
+					}
+					for offset := 0; offset < len(out); {
+						end := min(len(out), offset+batchSize)
+						n, err := dec.Decode(out[offset:end])
+						require.NoError(t, err)
+						require.Equal(t, end-offset, n)
+						offset += n
+					}
+					n, err := dec.Decode(nil)
+					require.NoError(t, err)
+					require.Zero(t, n)
+					assert.Equal(t, pattern.values, out)
+					assert.Zero(t, dec.ValuesLeft())
+
+					// Reset must also reset the RLE run and bit-reader state.
+					require.NoError(t, dec.SetData(len(pattern.values), data))
+					refilled := make([]bool, len(out))
+					n, err = dec.Decode(refilled)
+					require.NoError(t, err)
+					require.Equal(t, len(out), n)
+					assert.Equal(t, pattern.values, refilled)
+				})
+			}
+		})
+	}
+}
+
+func TestRleBooleanDecoderDecodeTruncatedLiteral(t *testing.T) {
+	// A literal header advertises 64 bits, but the payload has only 7 bytes.
+	payload := append([]byte{17}, bytes.Repeat([]byte{0xff}, 7)...)
+	data := make([]byte, 4+len(payload))
+	binary.LittleEndian.PutUint32(data[:4], uint32(len(payload)))
+	copy(data[4:], payload)
+
+	dec := newRleBooleanBitmapDecoder(t, 64, data)
+	out := make([]bool, 64)
+	n, err := dec.Decode(out)
+	require.Error(t, err)
+	require.Positive(t, n)
+	require.Less(t, n, 64)
+	assert.Equal(t, 64-n, dec.ValuesLeft())
+	for _, value := range out[:n] {
+		assert.True(t, value)
+	}
+}
