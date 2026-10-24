@@ -18,6 +18,7 @@ package bitutil
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"math/bits"
 	"unsafe"
@@ -658,17 +659,17 @@ func BitmapXnorAlloc(mem memory.Allocator, left, right []byte, lOffset, rOffset 
 	return BitmapOpAlloc(mem, bitXnorOp, left, right, lOffset, rOffset, length, outOffset)
 }
 
+// BitmapEquals reports whether the selected ranges have the same bits.
+// Bytes outside the compared ranges are ignored.
 func BitmapEquals(left, right []byte, lOffset, rOffset int64, length int64) bool {
 	if lOffset%8 == 0 && rOffset%8 == 0 {
-		// byte aligned, fast path, can use bytes.Equal (memcmp)
+		// Byte aligned: use bytes.Equal for the bulk and compare trailing bits.
 		byteLen := length / 8
 		lStart := lOffset / 8
 		rStart := rOffset / 8
 		if !bytes.Equal(left[lStart:lStart+byteLen], right[rStart:rStart+byteLen]) {
 			return false
 		}
-
-		// check trailing bits
 		for i := (length / 8) * 8; i < length; i++ {
 			if BitIsSet(left, int(lOffset+i)) != BitIsSet(right, int(rOffset+i)) {
 				return false
@@ -677,25 +678,86 @@ func BitmapEquals(left, right []byte, lOffset, rOffset int64, length int64) bool
 		return true
 	}
 
-	lrdr := NewBitmapWordReader(left, int(lOffset), int(length))
-	rrdr := NewBitmapWordReader(right, int(rOffset), int(length))
+	// Slice up front, as the word-reader path did, so out-of-bounds
+	// ranges still panic even when the first compared bits differ.
+	lshift, rshift := uint(lOffset%8), uint(rOffset%8)
+	left = left[lOffset/8 : lOffset/8+(int64(lshift)+length+7)/8]
+	right = right[rOffset/8 : rOffset/8+(int64(rshift)+length+7)/8]
 
-	nwords := lrdr.Words()
-	for nwords > 0 {
-		nwords--
-		if lrdr.NextWord() != rrdr.NextWord() {
+	if lshift == rshift {
+		// Equal intra-byte offsets: compare the leading partial byte,
+		// all complete middle bytes using memcmp, then the trailing bits.
+		if length == 0 {
+			return true
+		}
+		leading := length
+		if leading > int64(8-lshift) {
+			leading = int64(8 - lshift)
+		}
+		mask := byte((1<<uint(leading))-1) << lshift
+		if (left[0]^right[0])&mask != 0 {
 			return false
 		}
+		if leading == length {
+			return true
+		}
+		left, right = left[1:], right[1:]
+		length -= leading
+		nbytes := length / 8
+		if !bytes.Equal(left[:nbytes], right[:nbytes]) {
+			return false
+		}
+		if tail := length % 8; tail != 0 {
+			mask := byte((1 << uint(tail)) - 1)
+			return (left[nbytes]^right[nbytes])&mask == 0
+		}
+		return true
 	}
 
-	nbytes := lrdr.TrailingBytes()
-	for nbytes > 0 {
-		nbytes--
-		lbt, _ := lrdr.NextTrailingByte()
-		rbt, _ := rrdr.NextTrailingByte()
-		if lbt != rbt {
+	// Different offsets: unpack directly from the input slices without
+	// constructing two BitmapWordReaders. Compare full 64-bit words first.
+	for length >= 64 {
+		lword := binary.LittleEndian.Uint64(left)
+		if lshift != 0 {
+			lword = (lword >> lshift) | uint64(left[8])<<(64-lshift)
+		}
+		rword := binary.LittleEndian.Uint64(right)
+		if rshift != 0 {
+			rword = (rword >> rshift) | uint64(right[8])<<(64-rshift)
+		}
+		if lword != rword {
 			return false
 		}
+		left, right = left[8:], right[8:]
+		length -= 64
+	}
+
+	for length >= 8 {
+		lbyte := left[0] >> lshift
+		if lshift != 0 {
+			lbyte |= left[1] << (8 - lshift)
+		}
+		rbyte := right[0] >> rshift
+		if rshift != 0 {
+			rbyte |= right[1] << (8 - rshift)
+		}
+		if lbyte != rbyte {
+			return false
+		}
+		left, right = left[1:], right[1:]
+		length -= 8
+	}
+	if length != 0 {
+		lbyte := left[0] >> lshift
+		if length+int64(lshift) > 8 {
+			lbyte |= left[1] << (8 - lshift)
+		}
+		rbyte := right[0] >> rshift
+		if length+int64(rshift) > 8 {
+			rbyte |= right[1] << (8 - rshift)
+		}
+		mask := byte((1 << uint(length)) - 1)
+		return (lbyte^rbyte)&mask == 0
 	}
 	return true
 }
