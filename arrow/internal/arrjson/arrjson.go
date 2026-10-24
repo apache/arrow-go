@@ -269,7 +269,8 @@ func (f FieldWrapper) MarshalJSON() ([]byte, error) {
 
 	var err error
 	if f.arrowType.ID() == arrow.DICTIONARY {
-		f.arrowType = f.arrowType.(*arrow.DictionaryType).ValueType
+		dictType := f.arrowType.(*arrow.DictionaryType)
+		f.arrowType = dictType.ValueType
 		if f.Dictionary.Type, err = typeToJSON(f.Dictionary.idxType); err != nil {
 			return nil, err
 		}
@@ -282,6 +283,9 @@ func (f FieldWrapper) MarshalJSON() ([]byte, error) {
 				f.Dictionary.Metadata = append(f.Dictionary.Metadata, metaKV{Key: ipc.ExtensionMetadataKeyName, Value: serializedData})
 			}
 			f.arrowType = exType.StorageType()
+		}
+		for i, key := range dictType.ValueMetadata.Keys() {
+			f.Dictionary.Metadata = append(f.Dictionary.Metadata, metaKV{Key: key, Value: dictType.ValueMetadata.Values()[i]})
 		}
 	}
 
@@ -578,16 +582,15 @@ func (f *FieldWrapper) UnmarshalJSON(data []byte) error {
 		if f.Dictionary.idxType, err = typeFromJSON(f.Dictionary.Type, nil); err != nil {
 			return err
 		}
-		// metadata of the dictionary value type other than a registered
-		// extension type has nowhere to go and is dropped.
-		valueType, _, err := extensionTypeFromJSON(f.arrowType, f.Dictionary.Metadata)
+		valueType, rest, err := extensionTypeFromJSON(f.arrowType, f.Dictionary.Metadata)
 		if err != nil {
 			return err
 		}
 		f.arrowType = &arrow.DictionaryType{
-			IndexType: f.Dictionary.idxType,
-			ValueType: valueType,
-			Ordered:   f.Dictionary.Ordered,
+			IndexType:     f.Dictionary.idxType,
+			ValueType:     valueType,
+			Ordered:       f.Dictionary.Ordered,
+			ValueMetadata: metadataFromJSON(rest),
 		}
 	}
 
@@ -597,16 +600,19 @@ func (f *FieldWrapper) UnmarshalJSON(data []byte) error {
 			return err
 		}
 
-		mdkeys := make([]string, 0, len(rest))
-		mdvals := make([]string, 0, len(rest))
-		for _, kv := range rest {
-			mdkeys = append(mdkeys, kv.Key)
-			mdvals = append(mdvals, kv.Value)
-		}
-		f.arrowMeta = arrow.NewMetadata(mdkeys, mdvals)
+		f.arrowMeta = metadataFromJSON(rest)
 	}
 
 	return nil
+}
+
+func metadataFromJSON(md []metaKV) arrow.Metadata {
+	keys := make([]string, len(md))
+	values := make([]string, len(md))
+	for i, kv := range md {
+		keys[i], values[i] = kv.Key, kv.Value
+	}
+	return arrow.NewMetadata(keys, values)
 }
 
 // extensionTypeFromJSON returns the extension type named by the

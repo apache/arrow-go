@@ -107,7 +107,7 @@ func (d *Mapper) InsertPath(pos FieldPos) {
 
 func (d *Mapper) ImportField(pos FieldPos, field arrow.Field) {
 	dt := field.Type
-	if dt.ID() == arrow.EXTENSION {
+	for dt.ID() == arrow.EXTENSION {
 		dt = dt.(arrow.ExtensionType).StorageType()
 	}
 
@@ -115,7 +115,7 @@ func (d *Mapper) ImportField(pos FieldPos, field arrow.Field) {
 		d.InsertPath(pos)
 		// import nested dicts
 		valueType := dt.(*arrow.DictionaryType).ValueType
-		if valueType.ID() == arrow.EXTENSION {
+		for valueType.ID() == arrow.EXTENSION {
 			valueType = valueType.(arrow.ExtensionType).StorageType()
 		}
 		if nested, ok := valueType.(arrow.NestedType); ok {

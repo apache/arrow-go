@@ -412,6 +412,43 @@ func TestTypeEqual(t *testing.T) {
 	}
 }
 
+func TestTypeEqualDictionaryMetadata(t *testing.T) {
+	left := &DictionaryType{IndexType: PrimitiveTypes.Int8, ValueType: BinaryTypes.String,
+		ValueMetadata: NewMetadata([]string{"a", "b"}, []string{"1", "2"})}
+	tests := []struct {
+		name          string
+		right         DictionaryType
+		equal         bool
+		equalMetadata bool
+	}{
+		{"same", *left, true, true},
+		{"reordered metadata", DictionaryType{IndexType: PrimitiveTypes.Int8, ValueType: BinaryTypes.String,
+			ValueMetadata: NewMetadata([]string{"b", "a"}, []string{"2", "1"})}, true, true},
+		{"different metadata", DictionaryType{IndexType: PrimitiveTypes.Int8, ValueType: BinaryTypes.String,
+			ValueMetadata: MetadataFrom(map[string]string{"a": "other"})}, true, false},
+		{"missing metadata", DictionaryType{IndexType: PrimitiveTypes.Int8, ValueType: BinaryTypes.String}, true, false},
+		{"index type", DictionaryType{IndexType: PrimitiveTypes.Int16, ValueType: BinaryTypes.String,
+			ValueMetadata: left.ValueMetadata}, false, false},
+		{"value type", DictionaryType{IndexType: PrimitiveTypes.Int8, ValueType: BinaryTypes.Binary,
+			ValueMetadata: left.ValueMetadata}, false, false},
+		{"ordered", DictionaryType{IndexType: PrimitiveTypes.Int8, ValueType: BinaryTypes.String, Ordered: true,
+			ValueMetadata: left.ValueMetadata}, false, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := TypeEqual(left, &tc.right); got != tc.equal {
+				t.Errorf("TypeEqual: got %t, want %t", got, tc.equal)
+			}
+			if got := TypeEqual(left, &tc.right, CheckMetadata()); got != tc.equalMetadata {
+				t.Errorf("TypeEqual with metadata: got %t, want %t", got, tc.equalMetadata)
+			}
+			if got := TypeEqual(ListOf(left), ListOf(&tc.right), CheckMetadata()); got != tc.equalMetadata {
+				t.Errorf("nested TypeEqual with metadata: got %t, want %t", got, tc.equalMetadata)
+			}
+		})
+	}
+}
+
 func TestTypeEqualRunEndEncodedValueNullability(t *testing.T) {
 	nullable := RunEndEncodedOf(PrimitiveTypes.Int16, BinaryTypes.String)
 	nonNullable := RunEndEncodedOf(PrimitiveTypes.Int16, BinaryTypes.String)

@@ -6422,7 +6422,8 @@ func TestDictionaryOfExtensionMetadata(t *testing.T) {
 		&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int16, ValueType: uuidType}, indices, uuidValues)
 	defer dictOfUUID.Release()
 	dictOfP1 := array.NewDictionaryArray(
-		&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int16, ValueType: p1Type}, indices, p1Values)
+		&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int16, ValueType: p1Type,
+			ValueMetadata: arrow.MetadataFrom(map[string]string{"extra": "preserved"})}, indices, p1Values)
 	defer dictOfP1.Release()
 	dictExt, _, err := array.FromJSON(mem, types.NewDictExtensionType(), strings.NewReader(`["a", "b", null, "a"]`))
 	require.NoError(t, err)
@@ -6464,6 +6465,7 @@ func TestDictionaryOfExtensionMetadata(t *testing.T) {
 	assert.Equal(t, []metaKV{
 		{Key: ipc.ExtensionTypeKeyName, Value: "parametric-type-1"},
 		{Key: ipc.ExtensionMetadataKeyName, Value: p1Type.Serialize()},
+		{Key: "extra", Value: "preserved"},
 	}, fields[1].Dictionary.Metadata)
 	assert.Equal(t, []metaKV{
 		{Key: ipc.ExtensionTypeKeyName, Value: "dict-extension"},
@@ -6487,7 +6489,8 @@ func TestDictionaryOfUnregisteredExtension(t *testing.T) {
     "type": {"name": "int", "isSigned": true, "bitWidth": 32},
     "dictionary": {"id": 0, "indexType": {"name": "int", "isSigned": true, "bitWidth": 8}, "isOrdered": false,
       "metadata": [{"key": "ARROW:extension:name", "value": "unregistered"},
-                   {"key": "ARROW:extension:metadata", "value": "data"}]}
+                   {"key": "ARROW:extension:metadata", "value": "data"},
+                   {"key": "extra", "value": "preserved"}]}
   }]},
   "batches": [],
   "dictionaries": []
@@ -6497,9 +6500,39 @@ func TestDictionaryOfUnregisteredExtension(t *testing.T) {
 	defer r.Release()
 
 	want := arrow.NewSchema([]arrow.Field{{Name: "f", Nullable: true,
-		Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.PrimitiveTypes.Int32}}}, nil)
+		Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.PrimitiveTypes.Int32,
+			ValueMetadata: arrow.MetadataFrom(map[string]string{
+				ipc.ExtensionTypeKeyName: "unregistered", ipc.ExtensionMetadataKeyName: "data", "extra": "preserved",
+			})}}}, nil)
 	assert.Truef(t, r.Schema().Equal(want), "got=%s\nwant=%s", r.Schema(), want)
 	assert.Zero(t, r.Schema().Field(0).Metadata.Len())
+
+	var buf bytes.Buffer
+	w, err := NewWriter(&buf, r.Schema())
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	// Compare schemas, since the writer omits the empty dictionaries list.
+	var original, rewritten struct {
+		Schema json.RawMessage `json:"schema"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(data), &original))
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &rewritten))
+	assert.JSONEq(t, string(original.Schema), string(rewritten.Schema))
+
+	// The integration conversion path must preserve the annotation across
+	// JSON -> IPC -> JSON as well.
+	var ipcBuf bytes.Buffer
+	ipcWriter := ipc.NewWriter(&ipcBuf, ipc.WithSchema(r.Schema()))
+	require.NoError(t, ipcWriter.Close())
+	ipcReader, err := ipc.NewReader(&ipcBuf)
+	require.NoError(t, err)
+	defer ipcReader.Release()
+	buf.Reset()
+	w, err = NewWriter(&buf, ipcReader.Schema())
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &rewritten))
+	assert.JSONEq(t, string(original.Schema), string(rewritten.Schema))
 }
 
 func TestDictionaryRoundTrip(t *testing.T) {

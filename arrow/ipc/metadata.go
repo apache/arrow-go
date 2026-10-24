@@ -500,14 +500,15 @@ func (fv *fieldVisitor) visit(field arrow.Field) {
 
 	case *arrow.DictionaryType:
 		field.Type = dt.ValueType
+		fv.dictMeta = dt.ValueMetadata
 		if extType, ok := dt.ValueType.(arrow.ExtensionType); ok {
 			// the extension metadata of a dictionary's value type goes in
 			// DictionaryEncoding.custom_metadata so that it can't be confused
 			// with an extension type whose storage type is a dictionary.
 			field.Type = extType.StorageType()
 			fv.dictMeta = arrow.NewMetadata(
-				[]string{ExtensionTypeKeyName, ExtensionMetadataKeyName},
-				[]string{extType.ExtensionName(), extType.Serialize()})
+				append([]string{ExtensionTypeKeyName, ExtensionMetadataKeyName}, dt.ValueMetadata.Keys()...),
+				append([]string{extType.ExtensionName(), extType.Serialize()}, dt.ValueMetadata.Values()...))
 		}
 		fv.visit(field)
 
@@ -663,8 +664,8 @@ func typeFromFB(field *flatbuf.Field, pos dictutils.FieldPos, children []arrow.F
 
 		dictValueType = dt
 		// the dictionary value type may be an extension type, described by
-		// the DictionaryEncoding's own custom metadata. Other keys have
-		// nowhere to go and are dropped.
+		// the DictionaryEncoding's own custom metadata. Keep any unconsumed
+		// keys on the dictionary type so they survive a read/write round trip.
 		dictMeta, err := metadataFromFB(encoding)
 		if err != nil {
 			return nil, err
@@ -672,7 +673,10 @@ func typeFromFB(field *flatbuf.Field, pos dictutils.FieldPos, children []arrow.F
 		if dictValueType, err = extensionTypeFromMetadata(dictValueType, &dictMeta); err != nil {
 			return nil, err
 		}
-		dt = &arrow.DictionaryType{IndexType: idxType, ValueType: dictValueType, Ordered: encoding.IsOrdered()}
+		dt = &arrow.DictionaryType{
+			IndexType: idxType, ValueType: dictValueType, Ordered: encoding.IsOrdered(),
+			ValueMetadata: dictMeta,
+		}
 		dictID = encoding.Id()
 
 		if err = memo.Mapper.AddField(dictID, pos.Path()); err != nil {

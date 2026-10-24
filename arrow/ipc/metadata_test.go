@@ -328,7 +328,8 @@ func TestDictionaryOfExtensionMetadata(t *testing.T) {
 	p1Type := types.NewParametric1Type(6)
 	dictExtType := types.NewDictExtensionType()
 	opaqueOfDictOfUUID := extensions.NewOpaqueType(
-		&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int16, ValueType: uuidType},
+		&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int16, ValueType: uuidType,
+			ValueMetadata: arrow.MetadataFrom(map[string]string{"value-key": "value-data"})},
 		"type", "vendor")
 	dictOfNested := &arrow.DictionaryType{
 		IndexType: arrow.PrimitiveTypes.Int32,
@@ -362,7 +363,7 @@ func TestDictionaryOfExtensionMetadata(t *testing.T) {
 			name:      "extension type with dictionary of extension type storage",
 			typ:       opaqueOfDictOfUUID,
 			fieldMeta: map[string]string{ExtensionTypeKeyName: "arrow.opaque", ExtensionMetadataKeyName: opaqueOfDictOfUUID.Serialize()},
-			dictMeta:  map[string]string{ExtensionTypeKeyName: "arrow.uuid", ExtensionMetadataKeyName: ""},
+			dictMeta:  map[string]string{ExtensionTypeKeyName: "arrow.uuid", ExtensionMetadataKeyName: "", "value-key": "value-data"},
 		},
 		{
 			name:     "dictionary of extension type with nested dictionary storage",
@@ -519,34 +520,83 @@ func TestDictionaryOfUnregisteredExtension(t *testing.T) {
 	require.NoError(t, err)
 	defer indices.Release()
 	dictArr := array.NewDictionaryArray(
-		&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: extType}, indices, values)
+		&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: extType,
+			ValueMetadata: arrow.MetadataFrom(map[string]string{"extra": "preserved"})}, indices, values)
 	defer dictArr.Release()
 
-	schema := arrow.NewSchema([]arrow.Field{{Name: "f0", Type: dictArr.DataType(), Nullable: true}}, nil)
+	fieldMeta := arrow.MetadataFrom(map[string]string{"extra": "field-value"})
+	schema := arrow.NewSchema([]arrow.Field{{Name: "f0", Type: dictArr.DataType(), Nullable: true, Metadata: fieldMeta}}, nil)
 	batch := array.NewRecordBatch(schema, []arrow.Array{dictArr}, 4)
 	defer batch.Release()
 
-	var buf bytes.Buffer
-	wr := NewWriter(&buf, WithAllocator(pool), WithSchema(schema))
-	require.NoError(t, wr.Write(batch))
-	require.NoError(t, wr.Close())
-
-	rdr, err := NewReader(&buf, WithAllocator(pool))
-	require.NoError(t, err)
-	defer rdr.Release()
-
-	// the dictionary keeps its storage value type and the field gets no
-	// extension metadata
-	storageDictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.PrimitiveTypes.Int32}
-	want := arrow.NewSchema([]arrow.Field{{Name: "f0", Type: storageDictType, Nullable: true}}, nil)
-	assert.Truef(t, rdr.Schema().Equal(want), "got=%s\nwant=%s", rdr.Schema(), want)
-	assert.Zero(t, rdr.Schema().Field(0).Metadata.Len())
-
-	require.True(t, rdr.Next())
+	storageDictType := &arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.PrimitiveTypes.Int32,
+		ValueMetadata: arrow.MetadataFrom(map[string]string{
+			ExtensionTypeKeyName: extType.ExtensionName(), ExtensionMetadataKeyName: extType.Serialize(),
+			"extra": "preserved",
+		}),
+	}
+	want := arrow.NewSchema([]arrow.Field{{Name: "f0", Type: storageDictType, Nullable: true, Metadata: fieldMeta}}, nil)
 	storageDict := array.NewDictionaryArray(storageDictType, indices, storage)
 	defer storageDict.Release()
-	assert.Truef(t, array.Equal(storageDict, rdr.RecordBatch().Column(0)),
-		"got=%s\nwant=%s", rdr.RecordBatch().Column(0), storageDict)
+
+	for _, format := range []string{"stream", "file"} {
+		t.Run(format, func(t *testing.T) {
+			got := roundTripRecordBatch(t, pool, format, batch)
+			assert.True(t, want.Equal(got.Schema()))
+			assert.True(t, array.Equal(storageDict, got.Column(0)))
+
+			// Pass the record through a reader and writer that do not know the
+			// extension, then verify both the data and metadata survive.
+			roundTrip := roundTripRecordBatch(t, pool, format, got)
+			assert.True(t, want.Equal(roundTrip.Schema()))
+			assert.True(t, array.Equal(storageDict, roundTrip.Column(0)))
+
+			// A reader that knows the type must recover the original extension.
+			registerExtensionType(t, extType)
+			restored := roundTripRecordBatch(t, pool, format, roundTrip)
+			assert.True(t, schema.Equal(restored.Schema()))
+			assert.True(t, array.RecordEqual(batch, restored))
+		})
+	}
+}
+
+// roundTripRecordBatch returns a record owned by the test after an IPC round trip.
+func roundTripRecordBatch(t *testing.T, pool memory.Allocator, format string, batch arrow.RecordBatch) arrow.RecordBatch {
+	t.Helper()
+	var buf bytes.Buffer
+	if format == "stream" {
+		w := NewWriter(&buf, WithAllocator(pool), WithSchema(batch.Schema()))
+		require.NoError(t, w.Write(batch))
+		require.NoError(t, w.Close())
+	} else {
+		w, err := NewFileWriter(&buf, WithAllocator(pool), WithSchema(batch.Schema()))
+		require.NoError(t, err)
+		require.NoError(t, w.Write(batch))
+		require.NoError(t, w.Close())
+	}
+	var rec arrow.RecordBatch
+	if format == "stream" {
+		r, err := NewReader(bytes.NewReader(buf.Bytes()), WithAllocator(pool))
+		require.NoError(t, err)
+		defer r.Release()
+		require.True(t, r.Next())
+		rec = r.RecordBatch()
+		rec.Retain()
+		t.Cleanup(rec.Release)
+		require.False(t, r.Next())
+		require.NoError(t, r.Err())
+	} else {
+		r, err := NewFileReader(bytes.NewReader(buf.Bytes()), WithAllocator(pool))
+		require.NoError(t, err)
+		defer r.Close()
+		require.Equal(t, 1, r.NumRecords())
+		rec, err = r.RecordBatch(0)
+		require.NoError(t, err)
+		rec.Retain()
+		t.Cleanup(rec.Release)
+	}
+	return rec
 }
 
 // dictFieldSchemaFB builds a flatbuffers Schema with a single dictionary
@@ -597,13 +647,13 @@ func TestDictionaryEncodingCustomMetadataOnRead(t *testing.T) {
 		wantErr   string
 	}{
 		{
-			name:      "non-extension keys are dropped",
+			name:      "non-extension keys are preserved",
 			valueType: arrow.PrimitiveTypes.Int32,
 			dictMeta:  map[string]string{"k": "v"},
 			want:      arrow.PrimitiveTypes.Int32,
 		},
 		{
-			name:      "unregistered extension name is dropped",
+			name:      "unregistered extension name is preserved",
 			valueType: arrow.PrimitiveTypes.Int32,
 			dictMeta: map[string]string{ExtensionTypeKeyName: "arrow-go.test.never-registered",
 				ExtensionMetadataKeyName: "data", "k": "v"},
@@ -612,7 +662,7 @@ func TestDictionaryEncodingCustomMetadataOnRead(t *testing.T) {
 		{
 			name:      "registered extension with other keys",
 			valueType: uuidStorage,
-			dictMeta:  map[string]string{ExtensionTypeKeyName: "arrow.uuid", "k": "v"},
+			dictMeta:  map[string]string{ExtensionTypeKeyName: "arrow.uuid", ExtensionMetadataKeyName: "", "k": "v"},
 			want:      extensions.NewUUIDType(),
 		},
 		{
@@ -637,6 +687,13 @@ func TestDictionaryEncodingCustomMetadataOnRead(t *testing.T) {
 			want := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: tc.want}
 			assert.Truef(t, arrow.TypeEqual(want, got.Field(0).Type), "got=%s\nwant=%s", got.Field(0).Type, want)
 			assert.Zero(t, got.Field(0).Metadata.Len())
+
+			// Rewriting the schema must preserve metadata on the dictionary,
+			// without promoting it to the field and changing its meaning.
+			fbField, roundTrip := fieldFBRoundTrip(t, got.Field(0))
+			assert.Equal(t, tc.dictMeta, fbMetadata(t, fbField.Dictionary(nil)))
+			assert.Zero(t, fbField.CustomMetadataLength())
+			assert.True(t, got.Field(0).Equal(roundTrip))
 		})
 	}
 }
@@ -682,26 +739,71 @@ func TestDictionaryOfNestedDictionaryExtensionRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	defer outerIdx.Release()
 	outer := array.NewDictionaryArray(
-		&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: opaqueType}, outerIdx, opaqueValues)
+		&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: opaqueType,
+			ValueMetadata: arrow.MetadataFrom(map[string]string{"extra": "preserved"})}, outerIdx, opaqueValues)
 	defer outer.Release()
 
 	schema := arrow.NewSchema([]arrow.Field{{Name: "f", Type: outer.DataType(), Nullable: true}}, nil)
 	batch := array.NewRecordBatch(schema, []arrow.Array{outer}, int64(outer.Len()))
 	defer batch.Release()
 
-	var buf bytes.Buffer
-	w := NewWriter(&buf, WithAllocator(pool), WithSchema(schema))
-	require.NoError(t, w.Write(batch))
-	require.NoError(t, w.Close())
+	for _, format := range []string{"stream", "file"} {
+		for _, tc := range []struct {
+			name         string
+			unregistered []string
+		}{
+			{name: "registered"},
+			{name: "unknown outer extension", unregistered: []string{"arrow.opaque"}},
+			{name: "unknown outer and inner extensions", unregistered: []string{"arrow.opaque", "arrow.uuid"}},
+		} {
+			t.Run(format+"/"+tc.name, func(t *testing.T) {
+				var unregistered []arrow.ExtensionType
+				for _, name := range tc.unregistered {
+					ext := arrow.GetExtensionType(name)
+					require.NotNil(t, ext)
+					require.NoError(t, arrow.UnregisterExtensionType(name))
+					unregistered = append(unregistered, ext)
+					t.Cleanup(func() {
+						if arrow.GetExtensionType(name) == nil {
+							assert.NoError(t, arrow.RegisterExtensionType(ext))
+						}
+					})
+				}
 
-	r, err := NewReader(&buf, WithAllocator(pool))
-	require.NoError(t, err)
-	defer r.Release()
-	assert.Truef(t, r.Schema().Equal(schema), "got=%s\nwant=%s", r.Schema(), schema)
-	require.True(t, r.Next())
-	assert.Truef(t, array.RecordEqual(batch, r.RecordBatch()), "got=%s\nwant=%s", r.RecordBatch(), batch)
-	assert.False(t, r.Next())
-	assert.NoError(t, r.Err())
+				got := roundTripRecordBatch(t, pool, format, batch)
+				if len(unregistered) > 0 {
+					// Unknown extensions expose their storage, which still has to
+					// be traversed to find the nested dictionary when rewriting.
+					outerDict := got.Column(0).(*array.Dictionary)
+					require.IsType(t, &array.Struct{}, outerDict.Dictionary())
+					assert.Equal(t, map[string]string{
+						ExtensionTypeKeyName: "arrow.opaque", ExtensionMetadataKeyName: opaqueType.Serialize(),
+						"extra": "preserved",
+					}, outerDict.DataType().(*arrow.DictionaryType).ValueMetadata.ToMap())
+					assert.Zero(t, got.Schema().Field(0).Metadata.Len())
+
+					if len(unregistered) > 1 {
+						nested := outerDict.Dictionary().(*array.Struct).Field(0).(*array.Dictionary)
+						assert.True(t, array.Equal(uuidValues.(array.ExtensionArray).Storage(), nested.Dictionary()))
+						assert.Equal(t, map[string]string{
+							ExtensionTypeKeyName: "arrow.uuid", ExtensionMetadataKeyName: "",
+						}, nested.DataType().(*arrow.DictionaryType).ValueMetadata.ToMap())
+					}
+				}
+
+				rewritten := roundTripRecordBatch(t, pool, format, got)
+				assert.True(t, got.Schema().Equal(rewritten.Schema()))
+				assert.True(t, array.RecordEqual(got, rewritten))
+
+				for _, ext := range unregistered {
+					require.NoError(t, arrow.RegisterExtensionType(ext))
+				}
+				restored := roundTripRecordBatch(t, pool, format, rewritten)
+				assert.True(t, schema.Equal(restored.Schema()))
+				assert.True(t, array.RecordEqual(batch, restored))
+			})
+		}
+	}
 }
 
 func TestDictionaryOfExtensionDeltas(t *testing.T) {
