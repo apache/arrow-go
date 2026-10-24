@@ -191,6 +191,54 @@ func TestGetBatchLevelsNarrowShortReads(t *testing.T) {
 	}
 }
 
+func TestGetBatchLevelsOneBitResumeAfterPartialGroup(t *testing.T) {
+	const width uint = 1
+	values, packed := packedLevelFixture(width, 2048, "varied")
+	for _, nbytes := range []int{1, 2, 3, 5, 7, 9, 63, 65, 129} {
+		t.Run(fmt.Sprintf("bytes=%d", nbytes), func(t *testing.T) {
+			source := bytes.NewReader(packed[:nbytes])
+			reader := NewBitReader(source)
+			out := make([]int16, 2048)
+			n, maxCount, err := reader.GetBatchLevels(width, out, 1)
+			wantN := nbytes / 4 * 32
+			if n != wantN || err != io.ErrUnexpectedEOF {
+				t.Fatalf("decoded %d, err=%v; want %d and unexpected EOF", n, err, wantN)
+			}
+			if !slices.Equal(out[:n], values[:n]) {
+				t.Fatalf("decoded levels differ from expected values")
+			}
+			var wantCount int64
+			for _, level := range values[:n] {
+				if level == 1 {
+					wantCount++
+				}
+			}
+			if maxCount != wantCount {
+				t.Fatalf("max level count=%d; want %d", maxCount, wantCount)
+			}
+			if reader.byteoffset != int64(wantN/8) || reader.bitoffset != 0 {
+				t.Fatalf("reader offset=%d:%d; want %d:0", reader.byteoffset, reader.bitoffset, wantN/8)
+			}
+			cursor, seekErr := source.Seek(0, io.SeekCurrent)
+			if seekErr != nil || cursor != reader.byteoffset {
+				t.Fatalf("underlying cursor=%d, err=%v; want %d", cursor, seekErr, reader.byteoffset)
+			}
+
+			// The failed bulk read consumed part of the next group.
+			// Those bytes must still be available to scalar decoding.
+			for i := n; i < nbytes*8; i++ {
+				value, err := reader.next(width)
+				if err != nil || int16(value) != values[i] {
+					t.Fatalf("subsequent level %d: got %d, err=%v; want %d", i, value, err, values[i])
+				}
+			}
+			if _, err := reader.next(width); err != io.ErrUnexpectedEOF {
+				t.Fatalf("read past available bits: got %v; want unexpected EOF", err)
+			}
+		})
+	}
+}
+
 func TestGetBatchLevelsNarrowSequentialReads(t *testing.T) {
 	for _, width := range []uint{1, 2} {
 		_, packed := packedLevelFixture(width, 4096, "varied")
