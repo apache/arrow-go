@@ -514,7 +514,7 @@ func (e *ExecSpanItrSuite) TestInputValidation() {
 
 	// length mismatch
 	batch := &ExecBatch{
-		Values: []Datum{&ArrayDatum{arr1.Data()}, &ArrayDatum{arr2.Data()}},
+		Values: []Datum{&ArrayDatum{Value: arr1.Data()}, &ArrayDatum{Value: arr2.Data()}},
 		Len:    10,
 	}
 
@@ -522,12 +522,12 @@ func (e *ExecSpanItrSuite) TestInputValidation() {
 	e.ErrorIs(err, arrow.ErrInvalid)
 
 	// swap order of input
-	batch.Values = []Datum{&ArrayDatum{arr2.Data()}, &ArrayDatum{arr1.Data()}}
+	batch.Values = []Datum{&ArrayDatum{Value: arr2.Data()}, &ArrayDatum{Value: arr1.Data()}}
 
 	_, _, err = iterateExecSpans(batch, DefaultMaxChunkSize, true)
 	e.ErrorIs(err, arrow.ErrInvalid)
 
-	batch.Values = []Datum{&ArrayDatum{arr1.Data()}}
+	batch.Values = []Datum{&ArrayDatum{Value: arr1.Data()}}
 	_, _, err = iterateExecSpans(batch, DefaultMaxChunkSize, true)
 	e.NoError(err)
 }
@@ -542,7 +542,7 @@ func (e *ExecSpanItrSuite) TestChunkedArrays() {
 
 	batch := &ExecBatch{
 		Values: []Datum{
-			&ChunkedDatum{arr1}, &ChunkedDatum{arr2}, &ArrayDatum{arr3.Data()},
+			&ChunkedDatum{Value: arr1}, &ChunkedDatum{Value: arr2}, &ArrayDatum{Value: arr3.Data()},
 			NewDatum(int32(5)), NewDatum(scalar.MakeNullScalar(arrow.FixedWidthTypes.Boolean))},
 		Len: 30,
 	}
@@ -566,18 +566,18 @@ func (e *ExecSpanItrSuite) TestZeroLengthInput() {
 	input := &ExecBatch{Len: 0}
 
 	// zero-length chunkedarray with zero chunks
-	input.Values = []Datum{&ChunkedDatum{carr}}
+	input.Values = []Datum{&ChunkedDatum{Value: carr}}
 	checkArgs(input)
 
 	// zero-length array
 	arr := e.getInt32Arr(0, 0.1)
 	defer arr.Release()
-	input.Values = []Datum{&ArrayDatum{arr.Data()}}
+	input.Values = []Datum{&ArrayDatum{Value: arr.Data()}}
 	checkArgs(input)
 
 	// chunkedarray with single empty chunk
 	carr = e.getInt32Chunked([]int64{0})
-	input.Values = []Datum{&ChunkedDatum{carr}}
+	input.Values = []Datum{&ChunkedDatum{Value: carr}}
 	checkArgs(input)
 }
 
