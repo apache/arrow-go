@@ -350,33 +350,19 @@ func (dec *RleBooleanDecoder) Discard(n int) (int, error) {
 
 func (dec *RleBooleanDecoder) Decode(out []bool) (int, error) {
 	max := shared_utils.Min(len(out), dec.nvals)
-
-	var (
-		buf [1024]uint64
-		n   = max
-	)
-
-	for n > 0 {
-		batch := shared_utils.Min(len(buf), n)
-		decoded, err := dec.rleDec.GetBatch(buf[:batch])
-
-		for i := 0; i < decoded; i++ {
-			out[i] = buf[i] != 0
-		}
-		n -= decoded
-		out = out[decoded:]
-		if err != nil {
-			dec.nvals -= max - n
-			return max - n, err
-		}
-		if decoded != batch {
-			dec.nvals -= max - n
-			return max - n, io.ErrUnexpectedEOF
-		}
+	if max <= 0 {
+		return 0, nil
 	}
 
-	dec.nvals -= max
-	return max, nil
+	decoded, err := dec.rleDec.GetBatchBools(out[:max])
+	dec.nvals -= decoded
+	if err != nil {
+		return decoded, err
+	}
+	if decoded != max {
+		return decoded, io.ErrUnexpectedEOF
+	}
+	return decoded, nil
 }
 
 func (dec *RleBooleanDecoder) DecodeToBitmap(out []byte, outOffset int64, length int) (int, error) {

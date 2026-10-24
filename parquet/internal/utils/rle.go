@@ -239,6 +239,47 @@ func (r *RleDecoder) GetBatch(values []uint64) (int, error) {
 	return read, nil
 }
 
+// GetBatchBools decodes one-bit RLE or bit-packed values directly into booleans.
+// Unlike GetBatch, it avoids materializing each bit as a uint64 first.
+func (r *RleDecoder) GetBatchBools(out []bool) (int, error) {
+	if r.bitWidth != 1 {
+		return 0, errors.New("boolean decoding requires a bit width of 1")
+	}
+
+	read := 0
+	for read < len(out) {
+		remain := len(out) - read
+
+		if r.repCount > 0 {
+			n := min(remain, int(r.repCount))
+			dst := out[read : read+n]
+			if r.curVal != 0 {
+				for i := range dst {
+					dst[i] = true
+				}
+			} else {
+				clear(dst)
+			}
+			r.repCount -= int32(n)
+			read += n
+		} else if r.litCount > 0 {
+			n := min(remain, int(r.litCount))
+			decoded, err := r.r.GetBatchBools(out[read : read+n])
+			r.litCount -= int32(decoded)
+			read += decoded
+			if err != nil {
+				return read, err
+			}
+			if decoded != n {
+				return read, nil
+			}
+		} else if !r.Next() {
+			return read, nil
+		}
+	}
+	return read, nil
+}
+
 // GetBatchLevels decodes levels directly into values and returns the number
 // equal to maxLevel.
 func (r *RleDecoder) GetBatchLevels(values []int16, maxLevel int16) (int, int64, error) {
