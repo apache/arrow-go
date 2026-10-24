@@ -18,6 +18,7 @@ package bitutil
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"math/bits"
 	"unsafe"
@@ -415,6 +416,87 @@ const (
 	transferInvert
 )
 
+// transferBitmapUnaligned copies full destination bytes in bulk, handling only
+// the first and last partial bytes separately. The caller has checked buffer
+// bounds and snapshotted any overlapping source and destination byte spans.
+func transferBitmapUnaligned(mode transferMode, src []byte, srcOffset, length int, dst []byte, dstOffset int) {
+	// Keep the bits preceding a non-byte-aligned destination untouched.
+	if bit := dstOffset & 7; bit != 0 {
+		count := min(length, 8-bit)
+		shift := uint(srcOffset & 7)
+		value := src[srcOffset/8] >> shift
+		if int(shift)+count > 8 {
+			value |= src[srcOffset/8+1] << (8 - shift)
+		}
+		if mode == transferInvert {
+			value = ^value
+		}
+		mask := byte((1<<uint(count))-1) << uint(bit)
+		at := dstOffset / 8
+		dst[at] = (dst[at] &^ mask) | ((value << uint(bit)) & mask)
+		srcOffset += count
+		dstOffset += count
+		length -= count
+	}
+
+	if length >= 8 {
+		nbytes := length / 8
+		out := dst[dstOffset/8 : dstOffset/8+nbytes]
+		in := src[srcOffset/8:]
+		shift := uint(srcOffset & 7)
+		if shift == 0 {
+			if mode == transferCopy {
+				copy(out, in[:nbytes])
+			} else {
+				for len(out) >= 8 {
+					binary.LittleEndian.PutUint64(out, ^binary.LittleEndian.Uint64(in))
+					out = out[8:]
+					in = in[8:]
+				}
+				for i := range out {
+					out[i] = ^in[i]
+				}
+			}
+		} else {
+			// A shifted 64-bit source word needs nine source bytes.
+			for len(out) >= 8 {
+				value := binary.LittleEndian.Uint64(in)>>shift | uint64(in[8])<<(64-shift)
+				if mode == transferInvert {
+					value = ^value
+				}
+				binary.LittleEndian.PutUint64(out, value)
+				in = in[8:]
+				out = out[8:]
+			}
+			for i := range out {
+				value := in[i]>>shift | in[i+1]<<(8-shift)
+				if mode == transferInvert {
+					value = ^value
+				}
+				out[i] = value
+			}
+		}
+		srcOffset += nbytes * 8
+		dstOffset += nbytes * 8
+		length -= nbytes * 8
+	}
+
+	// Preserve any bits beyond the requested destination range.
+	if length > 0 {
+		shift := uint(srcOffset & 7)
+		value := src[srcOffset/8] >> shift
+		if int(shift)+length > 8 {
+			value |= src[srcOffset/8+1] << (8 - shift)
+		}
+		if mode == transferInvert {
+			value = ^value
+		}
+		mask := byte((1 << uint(length)) - 1)
+		at := dstOffset / 8
+		dst[at] = (dst[at] &^ mask) | (value & mask)
+	}
+}
+
 func transferBitmap(mode transferMode, src []byte, srcOffset, length int, dst []byte, dstOffset int) {
 	if length == 0 {
 		// if there's nothing to write, end early.
@@ -443,29 +525,10 @@ func transferBitmap(mode transferMode, src []byte, srcOffset, length int, dst []
 	bitOffset := srcOffset % 8
 	destBitOffset := dstOffset % 8
 
-	// slow path, one of the bitmaps are not byte aligned.
+	// Transfer bytes and words directly instead of creating word readers and
+	// writers for unaligned ranges.
 	if bitOffset != 0 || destBitOffset != 0 {
-		rdr := NewBitmapWordReader(src, srcOffset, length)
-		wr := NewBitmapWordWriter(dst, dstOffset, length)
-
-		nwords := rdr.Words()
-		for nwords > 0 {
-			nwords--
-			if mode == transferInvert {
-				wr.PutNextWord(^rdr.NextWord())
-			} else {
-				wr.PutNextWord(rdr.NextWord())
-			}
-		}
-		nbytes := rdr.TrailingBytes()
-		for nbytes > 0 {
-			nbytes--
-			bt, validBits := rdr.NextTrailingByte()
-			if mode == transferInvert {
-				bt = ^bt
-			}
-			wr.PutNextTrailingByte(bt, validBits)
-		}
+		transferBitmapUnaligned(mode, src, srcOffset, length, dst, dstOffset)
 		return
 	}
 
