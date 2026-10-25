@@ -25,7 +25,10 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1686,6 +1689,41 @@ func TestSqliteBackend(t *testing.T) {
 	s.stopServer = func(server flight.Server) { server.Shutdown() }
 
 	suite.Run(t, s)
+}
+
+func TestUnixSocketConnection(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows socket paths cannot be used as a URL path")
+	}
+
+	// keep the socket path short, macOS limits it to 104 bytes
+	dir, err := os.MkdirTemp("", "flightsql")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	sock := filepath.Join(dir, "server.sock")
+
+	lis, err := net.Listen("unix", sock)
+	require.NoError(t, err)
+
+	db, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	defer db.Close()
+	sqliteServer, err := example.NewSQLiteFlightSQLServer(db)
+	require.NoError(t, err)
+
+	server := flight.NewServerWithMiddleware(nil)
+	server.RegisterFlightService(flightsql.NewFlightServer(sqliteServer))
+	server.InitListener(lis)
+	go server.Serve()
+	defer server.Shutdown()
+
+	client, err := sql.Open("flightsql", "grpc+unix://"+sock+"?timeout=5s")
+	require.NoError(t, err)
+	defer client.Close()
+
+	var value int64
+	require.NoError(t, client.QueryRow("SELECT 42").Scan(&value))
+	require.EqualValues(t, 42, value)
 }
 
 func TestPreparedStatementSchema(t *testing.T) {
