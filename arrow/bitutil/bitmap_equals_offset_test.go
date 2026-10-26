@@ -86,7 +86,7 @@ func TestBitmapEqualsLargeOffsetParity(t *testing.T) {
 
 func TestBitmapEqualsUnalignedBounds(t *testing.T) {
 	for _, tc := range []struct {
-		name string
+		name           string
 		lo, ro, length int64
 	}{
 		{name: "same offset", lo: 3, ro: 11, length: 128},
