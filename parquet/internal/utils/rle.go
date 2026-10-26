@@ -239,8 +239,8 @@ func (r *RleDecoder) GetBatch(values []uint64) (int, error) {
 	return read, nil
 }
 
-// GetBatchBools decodes one-bit RLE or bit-packed values directly into booleans.
-// Unlike GetBatch, it avoids materializing each bit as a uint64 first.
+// GetBatchBools decodes repeated one-bit runs directly into booleans.
+// Literal runs use the bulk unpacking path to avoid slow per-bit reads.
 func (r *RleDecoder) GetBatchBools(out []bool) (int, error) {
 	if r.bitWidth != 1 {
 		return 0, errors.New("boolean decoding requires a bit width of 1")
@@ -263,8 +263,14 @@ func (r *RleDecoder) GetBatchBools(out []bool) (int, error) {
 			r.repCount -= int32(n)
 			read += n
 		} else if r.litCount > 0 {
-			n := min(remain, int(r.litCount))
-			decoded, err := r.r.GetBatchBools(out[read : read+n])
+			// Packed literals are much faster through the existing word
+			// unpacker than through the scalar boolean bit reader.
+			var unpacked [1024]uint64
+			n := min(remain, int(r.litCount), len(unpacked))
+			decoded, err := r.r.GetBatch(1, unpacked[:n])
+			for i, value := range unpacked[:decoded] {
+				out[read+i] = value != 0
+			}
 			r.litCount -= int32(decoded)
 			read += decoded
 			if err != nil {
