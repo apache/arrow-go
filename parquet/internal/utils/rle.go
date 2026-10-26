@@ -247,6 +247,7 @@ func (r *RleDecoder) GetBatchBools(out []bool) (int, error) {
 	}
 
 	read := 0
+	var unpacked [1024]uint64
 	for read < len(out) {
 		remain := len(out) - read
 
@@ -265,7 +266,6 @@ func (r *RleDecoder) GetBatchBools(out []bool) (int, error) {
 		} else if r.litCount > 0 {
 			// Packed literals are much faster through the existing word
 			// unpacker than through the scalar boolean bit reader.
-			var unpacked [1024]uint64
 			n := min(remain, int(r.litCount), len(unpacked))
 			decoded, err := r.r.GetBatch(1, unpacked[:n])
 			for i, value := range unpacked[:decoded] {
