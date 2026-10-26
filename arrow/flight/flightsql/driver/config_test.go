@@ -100,6 +100,26 @@ func TestConfigFromDSNInvalid(t *testing.T) {
 			dsn:      "flightsql://127.0.0.1:12345?tls=mycfg",
 			expected: "TLS entry not registered",
 		},
+		{
+			name:     "unknown scheme",
+			dsn:      "grpc+foo://127.0.0.1:12345",
+			expected: "invalid scheme",
+		},
+		{
+			name:     "TLS disabled with grpc+tls",
+			dsn:      "grpc+tls://127.0.0.1:12345?tls=disabled",
+			expected: "conflicts with scheme",
+		},
+		{
+			name:     "unix socket with host",
+			dsn:      "grpc+unix://localhost/tmp/flightsql.sock",
+			expected: "unexpected host",
+		},
+		{
+			name:     "unix socket without path",
+			dsn:      "grpc+unix://",
+			expected: "missing socket path",
+		},
 	}
 
 	for _, tt := range testcases {
@@ -238,6 +258,45 @@ func TestConfigFromDSN(t *testing.T) {
 				Params:        make(map[string]string),
 			},
 		},
+		{
+			name: "grpc+tcp scheme",
+			dsn:  "grpc+tcp://127.0.0.1:12345",
+			expected: &driver.DriverConfig{
+				Address: "127.0.0.1:12345",
+				Params:  make(map[string]string),
+			},
+		},
+		{
+			name: "grpc+tls scheme",
+			dsn:  "grpc+tls://127.0.0.1:12345",
+			expected: &driver.DriverConfig{
+				Address:    "127.0.0.1:12345",
+				TLSEnabled: true,
+				Params:     make(map[string]string),
+			},
+		},
+		{
+			name: "grpc+tls scheme with custom config",
+			dsn:  "grpc+tls://127.0.0.1:12345?tls=mycfg",
+			expected: &driver.DriverConfig{
+				Address:       "127.0.0.1:12345",
+				TLSEnabled:    true,
+				TLSConfigName: "mycfg",
+				TLSConfig:     tlscfg,
+				Params:        make(map[string]string),
+			},
+		},
+		{
+			name: "grpc+unix scheme",
+			dsn:  "grpc+unix://peter:parker@/tmp/flightsql.sock?timeout=1s",
+			expected: &driver.DriverConfig{
+				Address:  "unix:///tmp/flightsql.sock",
+				Username: "peter",
+				Password: "parker",
+				Timeout:  time.Second,
+				Params:   make(map[string]string),
+			},
+		},
 	}
 
 	for _, tt := range testcases {
@@ -367,6 +426,16 @@ func TestDSNFromConfig(t *testing.T) {
 					MinVersion: tls.VersionTLS12,
 				},
 				Params: make(map[string]string),
+			},
+		},
+		{
+			name:     "unix socket",
+			expected: "grpc+unix://peter@/tmp/flightsql.sock?timeout=1s",
+			drvcfg: &driver.DriverConfig{
+				Address:  "unix:///tmp/flightsql.sock",
+				Username: "peter",
+				Timeout:  time.Second,
+				Params:   make(map[string]string),
 			},
 		},
 	}

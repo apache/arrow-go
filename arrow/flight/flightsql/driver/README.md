@@ -88,6 +88,14 @@ backend as GRPC Basic-Auth headers. If your backend requires a token based
 authentication, please use a `token` parameter (see
 [common parameters](#common-parameters) below).
 
+For consistency with other Flight SQL clients, the following schemes are
+accepted as well:
+
+* `grpc+tcp://` is the same as `flightsql://`.
+* `grpc+tls://` enables TLS by default, see the [`tls` parameter](#tls).
+* `grpc+unix:///path/to/socket` connects to a Unix domain socket at the given
+  absolute path, e.g. `grpc+unix://user:password@/tmp/flightsql.sock`.
+
 **Please note**: All parameters are case-sensitive!
 
 Alternatively to specifying the DSN directly you can use the `DriverConfig`
