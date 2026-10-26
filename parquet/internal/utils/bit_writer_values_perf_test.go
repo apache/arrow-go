@@ -97,7 +97,7 @@ func TestBitWriterWriteValuesDirectBufferParity(t *testing.T) {
 
 func TestBitWriterWriteValuesDirectBufferShortWrites(t *testing.T) {
 	for _, width := range []uint{4, 7, 8, 12, 16, 32, 64} {
-		for _, n := range []int{16, 64, 127} {
+		for _, n := range []int{8, 16, 64, 127} {
 			values := make([]uint64, n)
 			for i := range values {
 				values[i] = uint64(i * 17)
