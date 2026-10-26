@@ -66,7 +66,7 @@ jobs:
       - name: Set up Python for benchmark metadata
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.9'
+          python-version: '3.12'
       - name: Run benchmark shard ${{ matrix.id }}
         run: |
           bash ci/scripts/bench.sh "$(pwd)" --run \
@@ -118,7 +118,7 @@ jobs:
         if: github.event_name == 'push' && github.repository == 'apache/arrow-go' && github.ref_name == 'main'
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.9'
+          python-version: '3.12'
       - name: Upload results
         if: github.event_name == 'push' && github.repository == 'apache/arrow-go' && github.ref_name == 'main'
         env:
