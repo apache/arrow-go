@@ -136,7 +136,8 @@ func (b *BitWriter) WriteValues(values []uint64, nbits uint) error {
 	// Only write complete words that fit; short buffers and other writer
 	// implementations still use the original error-preserving path.
 	if out, ok := b.wr.(*WriterAtBuffer); ok &&
-		len(values) >= 8 && nbits >= 4 && nbits <= 64 &&
+		len(values) >= 8 && (nbits >= 8 || len(values) >= 16) &&
+		nbits >= 4 && nbits <= 64 &&
 		b.bitoffset < 64 && b.byteoffset >= 0 && b.byteoffset <= len(out.buf)-8 {
 		completeWords := (uint64(b.bitoffset) + uint64(len(values))*uint64(nbits)) / 64
 		if completeWords > 0 && completeWords <= uint64((len(out.buf)-b.byteoffset)/8) {
