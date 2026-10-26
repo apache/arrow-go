@@ -141,9 +141,14 @@ fi
 
 for parquet_tags in assert assert,noasm; do
   go test "${test_args[@]}" -tags "${parquet_tags}" "${parquet_pkgs[@]}"
-  if [[ ${#serial_pkgs[@]} -gt 0 ]]; then
-    go test "${test_args[@]}" -tags "${parquet_tags}" "${serial_pkgs[@]}"
-  fi
 done
+
+# parquet/file has no noasm-specific code: every noasm variant it depends on
+# (parquet/internal/{bmi,encoding,utils}, parquet/metadata) is already tested
+# in both passes above, so a second run under noasm only repeats its slow
+# -race tests and has pushed the macOS jobs past their timeout.
+if [[ ${#serial_pkgs[@]} -gt 0 ]]; then
+  go test "${test_args[@]}" -tags assert "${serial_pkgs[@]}"
+fi
 
 popd
