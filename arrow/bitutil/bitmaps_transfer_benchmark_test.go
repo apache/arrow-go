@@ -17,6 +17,7 @@
 package bitutil_test
 
 import (
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -88,5 +89,36 @@ func BenchmarkTransferBitmapAliasing(b *testing.B) {
 				})
 			}
 		})
+	}
+}
+
+var bitmapTransferBenchmarkSink byte
+
+func BenchmarkBitmapTransferOffsets(b *testing.B) {
+	for _, operation := range []struct {
+		name     string
+		transfer func([]byte, int, int, []byte, int)
+	}{
+		{name: "copy", transfer: bitutil.CopyBitmap},
+		{name: "invert", transfer: bitutil.InvertBitmap},
+	} {
+		for _, length := range []int{64, 1024, 65536, 1048576} {
+			for _, offsets := range [][2]int{{0, 0}, {3, 3}, {3, 6}, {0, 5}, {7, 0}} {
+				name := fmt.Sprintf("%s/%dbits/%d-%d", operation.name, length, offsets[0], offsets[1])
+				b.Run(name, func(b *testing.B) {
+					src := make([]byte, (length+64)/8+16)
+					dst := make([]byte, len(src))
+					for i := range src {
+						src[i] = byte(i*31 + 7)
+					}
+					b.ReportAllocs()
+					b.SetBytes(int64(length / 8))
+					for b.Loop() {
+						operation.transfer(src, offsets[0], length, dst, offsets[1])
+					}
+					bitmapTransferBenchmarkSink = dst[10]
+				})
+			}
+		}
 	}
 }
