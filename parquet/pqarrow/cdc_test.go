@@ -24,6 +24,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -196,7 +197,10 @@ func TestCDCLastChunkDoesntCutPage(t *testing.T) {
 
 	buffered := writeRecords(t, mem, props, arrprops, true, a, b)
 	single := writeRecords(t, mem, props, arrprops, false, all)
-	assert.Equal(t, columnPages(t, single, 0), columnPages(t, buffered, 0))
+	singlePages := columnPages(t, single, 0)
+	require.Len(t, singlePages, 1)
+	require.Greater(t, len(singlePages[0]), 1)
+	assert.Equal(t, singlePages, columnPages(t, buffered, 0))
 }
 
 func TestCDCLowLevelWritersIgnoreCDC(t *testing.T) {
@@ -279,7 +283,7 @@ func TestCDCEmptyAndAllNull(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
-	props := cdcProps(parquet.DefaultCDCOptions())
+	props := cdcProps(parquet.CDCOptions{MinChunkSize: 1024, MaxChunkSize: 4096})
 	arrprops := pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem), pqarrow.WithStoreSchema())
 
 	schema := arrow.NewSchema([]arrow.Field{
@@ -311,6 +315,7 @@ func TestCDCEmptyAndAllNull(t *testing.T) {
 	requireRoundTrip(t, mem, data, rec)
 	for col := 0; col < 2; col++ {
 		for _, rg := range columnPages(t, data, col) {
+			require.Greater(t, len(rg), 1)
 			for _, n := range rg {
 				assert.NotZero(t, n)
 			}
@@ -797,9 +802,9 @@ func concatTables(t *testing.T, mem memory.Allocator, tables ...arrow.Table) arr
 	return tbl
 }
 
-// writeCDCTable writes the table with content defined chunking and returns the file
-// after checking that its content reads back equal to the table.
-func writeCDCTable(t *testing.T, mem memory.Allocator, tbl arrow.Table, rowGroupLength int64, dictionary bool, version parquet.DataPageVersion) []byte {
+// cdcTableProps returns the writer properties of the content defined chunking tests,
+// with chunk sizes small enough to cut many pages out of a small table.
+func cdcTableProps(t *testing.T, mem memory.Allocator, schema *arrow.Schema, rowGroupLength int64, dictionary bool, version parquet.DataPageVersion) (*parquet.WriterProperties, pqarrow.ArrowWriterProperties) {
 	t.Helper()
 	opts := []parquet.WriterProperty{
 		parquet.WithContentDefinedChunking(parquet.CDCOptions{MinChunkSize: 4096, MaxChunkSize: 16384}),
@@ -811,15 +816,22 @@ func writeCDCTable(t *testing.T, mem memory.Allocator, tbl arrow.Table, rowGroup
 	arrprops := pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem), pqarrow.WithStoreSchema())
 	if dictionary {
 		// keep the dictionaries regardless of their size, so the pages follow them
-		sc, err := pqarrow.ToParquet(tbl.Schema(), parquet.NewWriterProperties(opts...), arrprops)
+		sc, err := pqarrow.ToParquet(schema, parquet.NewWriterProperties(opts...), arrprops)
 		require.NoError(t, err)
 		for i := 0; i < sc.NumColumns(); i++ {
 			opts = append(opts, parquet.WithDictionaryCostFallbackFor(sc.Column(i).Path(), false))
 		}
 	}
+	return parquet.NewWriterProperties(opts...), arrprops
+}
 
+// writeCDCTable writes the table with content defined chunking and returns the file
+// after checking that its content reads back equal to the table.
+func writeCDCTable(t *testing.T, mem memory.Allocator, tbl arrow.Table, rowGroupLength int64, dictionary bool, version parquet.DataPageVersion) []byte {
+	t.Helper()
+	props, arrprops := cdcTableProps(t, mem, tbl.Schema(), rowGroupLength, dictionary, version)
 	var buf bytes.Buffer
-	require.NoError(t, pqarrow.WriteTable(tbl, &buf, rowGroupLength, parquet.NewWriterProperties(opts...), arrprops))
+	require.NoError(t, pqarrow.WriteTable(tbl, &buf, rowGroupLength, props, arrprops))
 
 	readback := readCDCTable(t, mem, buf.Bytes())
 	defer readback.Release()
@@ -997,6 +1009,13 @@ func pagesFollowContent(original, modified [][]int64, edits []cdcEdit) error {
 // within the chunk size range, where page holds the number of levels of each page.
 func assertPageSizes(t *testing.T, column *arrow.Chunked, pages []int64, nullable bool, minSize, maxSize int64) {
 	t.Helper()
+	switch column.DataType().(type) {
+	case *arrow.BooleanType, arrow.FixedWidthDataType,
+		*arrow.StringType, *arrow.LargeStringType, *arrow.BinaryType, *arrow.LargeBinaryType:
+	default:
+		// the size of the other types isn't tracked
+		return
+	}
 	// the size the CDC chunker counts for the array elements belonging to a page
 	cdcSize := func(arr arrow.Array) int64 {
 		var size int64
@@ -1009,9 +1028,9 @@ func assertPageSizes(t *testing.T, column *arrow.Chunked, pages []int64, nullabl
 		default:
 			switch a := arr.(type) {
 			case *array.String:
-				size = int64(a.ValueOffset(a.Len()) - a.ValueOffset(0))
+				size = int64(len(a.ValueBytes()))
 			case *array.LargeString:
-				size = a.ValueOffset(a.Len()) - a.ValueOffset(0)
+				size = int64(len(a.ValueBytes()))
 			case *array.Binary:
 				size = int64(len(a.ValueBytes()))
 			case *array.LargeBinary:
@@ -1080,5 +1099,382 @@ func TestCDCWriteTableAllTypes(t *testing.T) {
 				assert.NotEmpty(t, columnPages(t, data, 0))
 			})
 		}
+	}
+}
+
+// rowLevels returns the number of levels of the leaf column of each row: a list takes a
+// level per element, or a single level if it is null or empty, while the other types of
+// the test cases take a single level per row.
+func rowLevels(arr arrow.Array) []int64 {
+	levels := make([]int64, arr.Len())
+	list, isList := arr.(*array.List)
+	for i := range levels {
+		levels[i] = 1
+		if isList && list.IsValid(i) {
+			offsets := list.Offsets()
+			levels[i] = max(1, int64(offsets[i+1]-offsets[i]))
+		}
+	}
+	return levels
+}
+
+// tableLevels is the number of levels of the first column of the tables, which the
+// page lengths count.
+func tableLevels(tables ...arrow.Table) int64 {
+	var total int64
+	for _, tbl := range tables {
+		for _, chunk := range tbl.Column(0).Data().Chunks() {
+			for _, n := range rowLevels(chunk) {
+				total += n
+			}
+		}
+	}
+	return total
+}
+
+type cdcCase struct {
+	name     string
+	dtype    arrow.DataType
+	nullable bool
+	version  parquet.DataPageVersion
+}
+
+func cdcCases() []cdcCase {
+	structOf := func(typ arrow.DataType) arrow.DataType {
+		return arrow.StructOf(arrow.Field{Name: "f0", Type: typ, Nullable: true})
+	}
+	cases := []cdcCase{
+		{dtype: arrow.FixedWidthTypes.Boolean},
+		{dtype: arrow.PrimitiveTypes.Uint8}, {dtype: arrow.PrimitiveTypes.Uint16},
+		{dtype: arrow.PrimitiveTypes.Uint32}, {dtype: arrow.PrimitiveTypes.Uint64, nullable: true},
+		{dtype: arrow.PrimitiveTypes.Int8}, {dtype: arrow.PrimitiveTypes.Int16},
+		{dtype: arrow.PrimitiveTypes.Int32}, {dtype: arrow.PrimitiveTypes.Int64, nullable: true},
+		{dtype: arrow.FixedWidthTypes.Float16}, {dtype: arrow.PrimitiveTypes.Float32},
+		{dtype: arrow.PrimitiveTypes.Float64, nullable: true},
+		{dtype: &arrow.Decimal128Type{Precision: 18, Scale: 6}},
+		{dtype: &arrow.Decimal256Type{Precision: 40, Scale: 6}},
+		{dtype: arrow.BinaryTypes.String}, {dtype: arrow.BinaryTypes.Binary, nullable: true},
+		{dtype: &arrow.FixedSizeBinaryType{ByteWidth: 16}, nullable: true},
+		{dtype: arrow.FixedWidthTypes.Date32},
+		{dtype: arrow.FixedWidthTypes.Time32ms, nullable: true},
+		{dtype: arrow.FixedWidthTypes.Time64ns},
+		{dtype: arrow.FixedWidthTypes.Timestamp_ns, nullable: true},
+		{dtype: arrow.ListOf(arrow.PrimitiveTypes.Int16)},
+		{dtype: arrow.ListOf(arrow.PrimitiveTypes.Int32), nullable: true},
+		{dtype: arrow.ListOf(arrow.BinaryTypes.String), nullable: true},
+		{dtype: structOf(arrow.PrimitiveTypes.Int32)},
+		{dtype: structOf(arrow.PrimitiveTypes.Float64), nullable: true},
+		{dtype: arrow.ListOf(structOf(arrow.PrimitiveTypes.Int32))},
+		{dtype: extensions.NewUUIDType(), nullable: true},
+		{dtype: arrow.BinaryTypes.LargeBinary, version: parquet.DataPageV2},
+		{dtype: arrow.ListOf(arrow.BinaryTypes.String), nullable: true, version: parquet.DataPageV2},
+	}
+	for i := range cases {
+		cases[i].name = fmt.Sprintf("%s/nullable=%v/V%d", cases[i].dtype, cases[i].nullable, cases[i].version+1)
+	}
+	return cases
+}
+
+func TestCDCSingleRowGroup(t *testing.T) {
+	const (
+		partSize       = 128 * 1024
+		editSize       = 18 * 1024
+		minChunkSize   = 4 * 1024
+		maxChunkSize   = 16 * 1024
+		rowGroupLength = 1024 * 1024
+	)
+
+	for _, c := range cdcCases() {
+		t.Run(c.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			field := arrow.Field{Name: "f0", Type: c.dtype, Nullable: c.nullable}
+			schema := arrow.NewSchema([]arrow.Field{field}, nil)
+
+			// the chunk sizes are constant, so derive the number of rows from the size
+			// of the type, unless it is nested or variable length where a hand picked
+			// value avoids generating too large tables
+			bytesPerRecord := int64(16)
+			switch typ := c.dtype.(type) {
+			case *arrow.BooleanType:
+				bytesPerRecord = 1
+			case arrow.FixedWidthDataType:
+				bytesPerRecord = int64(typ.BitWidth() / 8)
+			}
+			if bytesPerRecord != 16 && c.nullable {
+				bytesPerRecord += 2
+			}
+			partLength, editLength := partSize/bytesPerRecord, editSize/bytesPerRecord
+
+			var parts [8]arrow.Table // 1 to 7, as in the C++ test
+			for i, spec := range []struct{ length, seed int64 }{
+				{partLength, 0}, {editLength, 1}, {partLength, partLength}, {editLength, 2},
+				{partLength, 2 * partLength}, {editLength, 3}, {editLength, 4},
+			} {
+				parts[i+1] = generateTable(t, mem, schema, spec.length, uint64(spec.seed))
+				defer parts[i+1].Release()
+			}
+			p1, p2, p3, p4, p5, p6, p7 := parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
+
+			assertEdited := func(t *testing.T, before, after []arrow.Table, edits []cdcEdit) {
+				beforeTable := concatTables(t, mem, before...)
+				defer beforeTable.Release()
+				afterTable := concatTables(t, mem, after...)
+				defer afterTable.Release()
+				require.False(t, array.TableEqual(beforeTable, afterTable))
+
+				for _, dictionary := range []bool{false, true} {
+					var pages [2][][]int64
+					for i, tbl := range []arrow.Table{beforeTable, afterTable} {
+						data := writeCDCTable(t, mem, tbl, rowGroupLength, dictionary, c.version)
+						pages[i] = columnPages(t, data, 0)
+						require.Len(t, pages[i], 1)
+						assertPageSizes(t, tbl.Column(0).Data(), pages[i][0], c.nullable, minChunkSize, maxChunkSize)
+
+						// dictionary encoding writes a dictionary page, except for booleans
+						rdr, err := file.NewParquetReader(bytes.NewReader(data))
+						require.NoError(t, err)
+						chunk, err := rdr.MetaData().RowGroup(0).ColumnChunk(0)
+						require.NoError(t, err)
+						assert.Equal(t, dictionary && c.dtype.ID() != arrow.BOOL, chunk.HasDictionaryPage(), "dictionary=%v", dictionary)
+						require.NoError(t, rdr.Close())
+					}
+					assert.NoError(t, pagesFollowContent(pages[0], pages[1], edits), "dictionary=%v", dictionary)
+				}
+			}
+
+			tables := func(ts ...arrow.Table) []arrow.Table { return ts }
+			t.Run("DeleteOnce", func(t *testing.T) {
+				assertEdited(t, tables(p1, p2, p3), tables(p1, p3),
+					[]cdcEdit{{Offset: tableLevels(p1), Deleted: tableLevels(p2)}})
+			})
+			t.Run("DeleteTwice", func(t *testing.T) {
+				assertEdited(t, tables(p1, p2, p3, p4, p5), tables(p1, p3, p5),
+					[]cdcEdit{
+						{Offset: tableLevels(p1), Deleted: tableLevels(p2)},
+						{Offset: tableLevels(p1, p2, p3), Deleted: tableLevels(p4)},
+					})
+			})
+			t.Run("UpdateOnce", func(t *testing.T) {
+				// part 4 replaces part 2, which has the same number of values
+				assertEdited(t, tables(p1, p2, p3), tables(p1, p4, p3),
+					[]cdcEdit{{Offset: tableLevels(p1), Deleted: tableLevels(p2), Inserted: tableLevels(p4)}})
+			})
+			t.Run("UpdateTwice", func(t *testing.T) {
+				// part 6 and 7 replace part 2 and 4
+				assertEdited(t, tables(p1, p2, p3, p4, p5), tables(p1, p6, p3, p7, p5),
+					[]cdcEdit{
+						{Offset: tableLevels(p1), Deleted: tableLevels(p2), Inserted: tableLevels(p6)},
+						{Offset: tableLevels(p1, p2, p3), Deleted: tableLevels(p4), Inserted: tableLevels(p7)},
+					})
+			})
+			t.Run("InsertOnce", func(t *testing.T) {
+				assertEdited(t, tables(p1, p3), tables(p1, p2, p3),
+					[]cdcEdit{{Offset: tableLevels(p1), Inserted: tableLevels(p2)}})
+			})
+			t.Run("InsertTwice", func(t *testing.T) {
+				assertEdited(t, tables(p1, p3, p5), tables(p1, p2, p3, p4, p5),
+					[]cdcEdit{
+						{Offset: tableLevels(p1), Inserted: tableLevels(p2)},
+						{Offset: tableLevels(p1, p3), Inserted: tableLevels(p4)},
+					})
+			})
+			t.Run("Prepend", func(t *testing.T) {
+				assertEdited(t, tables(p1, p2, p3), tables(p4, p1, p2, p3),
+					[]cdcEdit{{Offset: 0, Inserted: tableLevels(p4)}})
+			})
+			t.Run("Append", func(t *testing.T) {
+				assertEdited(t, tables(p1, p2, p3), tables(p1, p2, p3, p4),
+					[]cdcEdit{{Offset: tableLevels(p1, p2, p3), Inserted: tableLevels(p4)}})
+			})
+
+			t.Run("EmptyTable", func(t *testing.T) {
+				empty := generateTable(t, mem, schema, 0, 0)
+				defer empty.Release()
+				require.Zero(t, empty.NumRows())
+				for _, dictionary := range []bool{false, true} {
+					data := writeCDCTable(t, mem, empty, rowGroupLength, dictionary, c.version)
+					pages := columnPages(t, data, 0)
+					// a single row group without data pages
+					require.Len(t, pages, 1)
+					assert.Empty(t, pages[0])
+				}
+			})
+
+			t.Run("ArrayOffsets", func(t *testing.T) {
+				// check that the array offsets are respected in the chunker
+				table := concatTables(t, mem, p1, p2, p3)
+				defer table.Release()
+				for _, offset := range []int64{0, 512, 1024} {
+					chunked := array.NewChunkedSlice(table.Column(0).Data(), offset, table.NumRows())
+					col := arrow.NewColumn(field, chunked)
+					sliced := array.NewTable(schema, []arrow.Column{*col}, table.NumRows()-offset)
+					col.Release()
+					chunked.Release()
+					require.EqualValues(t, offset, sliced.Column(0).Data().Chunk(0).Data().Offset())
+					data := writeCDCTable(t, mem, sliced, rowGroupLength, true, c.version)
+					assert.Len(t, columnPages(t, data, 0), 1)
+					sliced.Release()
+				}
+			})
+
+			// The chunker state is carried over between the write calls of a column chunk,
+			// so writing the column as a single array or as multiple arrays must produce
+			// the same pages. Each page of the single array is written with two calls: the
+			// first one starts at the page, so it starts with a chunk boundary, and the
+			// second one starts in the middle of the page, so it continues the chunk of
+			// the previous call:
+			//
+			//	single call:  |         page 0          |        page 1        |
+			//	write calls:  |   call 0   |   call 1   |  call 2   |  call 3  | ...
+			t.Run("IndependentOfWriteCalls", func(t *testing.T) {
+				table := concatTables(t, mem, p1, p2, p3)
+				defer table.Release()
+				arr := table.Column(0).Data().Chunk(0)
+
+				// the page lengths count levels, so find the rows where the pages end
+				rowEnds := []int64{0}
+				for _, n := range rowLevels(arr) {
+					rowEnds = append(rowEnds, rowEnds[len(rowEnds)-1]+n)
+				}
+
+				for _, dictionary := range []bool{false, true} {
+					props, arrprops := cdcTableProps(t, mem, schema, rowGroupLength, dictionary, c.version)
+					data := writeCDCTable(t, mem, table, rowGroupLength, dictionary, c.version)
+					pages := columnPages(t, data, 0)
+					require.Len(t, pages, 1)
+					require.Greater(t, len(pages[0]), 1)
+
+					var recs []arrow.RecordBatch
+					var row, level int64
+					addRecord := func(begin, end int64) {
+						slice := array.NewSlice(arr, begin, end)
+						defer slice.Release()
+						recs = append(recs, array.NewRecord(schema, []arrow.Array{slice}, end-begin))
+					}
+					for _, length := range pages[0] {
+						pageBegin := row
+						level += length
+						row = int64(sort.Search(len(rowEnds), func(i int) bool { return rowEnds[i] >= level }))
+						// the pages end at row boundaries
+						require.Less(t, row, int64(len(rowEnds)))
+						require.Equal(t, level, rowEnds[row])
+						pageMiddle := pageBegin + (row-pageBegin)/2
+						if pageMiddle > pageBegin {
+							addRecord(pageBegin, pageMiddle)
+						}
+						addRecord(pageMiddle, row)
+					}
+					require.Equal(t, int64(arr.Len()), row)
+
+					chunked := writeRecords(t, mem, props, arrprops, true, recs...)
+					for _, rec := range recs {
+						rec.Release()
+					}
+					assert.Equal(t, pages, columnPages(t, chunked, 0), "dictionary=%v", dictionary)
+				}
+			})
+		})
+	}
+}
+
+func TestCDCColumnByColumnMatchesWrite(t *testing.T) {
+	const rows = 64 * 1024
+	props := cdcProps(parquet.CDCOptions{MinChunkSize: 4096, MaxChunkSize: 16384})
+
+	// the second column of the identical variant has the same content as the first, so
+	// a column writer using the chunker of another column cuts other pages
+	for _, identical := range []bool{false, true} {
+		t.Run(fmt.Sprintf("identical=%v", identical), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			second := arrow.Field{Name: "b", Type: arrow.BinaryTypes.String, Nullable: true}
+			if identical {
+				second = arrow.Field{Name: "b", Type: arrow.PrimitiveTypes.Int32, Nullable: true}
+			}
+			schema := arrow.NewSchema([]arrow.Field{{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true}, second}, nil)
+			first := generateArray(t, mem, schema.Field(0), rows, 1)
+			defer first.Release()
+			var other arrow.Array
+			if identical {
+				other = generateArray(t, mem, schema.Field(1), rows, 1)
+			} else {
+				other = generateArray(t, mem, schema.Field(1), rows, 2)
+			}
+			defer other.Release()
+			rec := array.NewRecord(schema, []arrow.Array{first, other}, rows)
+			defer rec.Release()
+			arrprops := pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem), pqarrow.WithStoreSchema())
+
+			written := writeRecords(t, mem, props, arrprops, false, rec)
+			buffered := writeRecords(t, mem, props, arrprops, true, rec)
+
+			var buf bytes.Buffer
+			fw, err := pqarrow.NewFileWriter(schema, &buf, props, arrprops)
+			require.NoError(t, err)
+			fw.NewRowGroup()
+			require.NoError(t, fw.WriteColumnData(first))
+			require.NoError(t, fw.WriteColumnData(other))
+			require.NoError(t, fw.Close())
+			columnByColumn := buf.Bytes()
+			requireRoundTrip(t, mem, columnByColumn, rec)
+
+			for col := 0; col < 2; col++ {
+				expected := columnPages(t, written, col)
+				require.Len(t, expected, 1)
+				require.Greater(t, len(expected[0]), 1)
+				assert.Equal(t, expected, columnPages(t, buffered, col), "WriteBuffered column %d", col)
+				assert.Equal(t, expected, columnPages(t, columnByColumn, col), "WriteColumnData column %d", col)
+			}
+			if identical {
+				for name, data := range map[string][]byte{"Write": written, "WriteBuffered": buffered, "WriteColumnData": columnByColumn} {
+					assert.Equal(t, columnPages(t, data, 0), columnPages(t, data, 1), name)
+				}
+			}
+		})
+	}
+}
+
+func TestCDCIndependentOfArrowChunks(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	const rows, chunks = 64 * 1024, 64
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		{Name: "b", Type: arrow.BinaryTypes.String, Nullable: true},
+	}, nil)
+	whole := generateTable(t, mem, schema, rows, 0)
+	defer whole.Release()
+
+	cols := make([]arrow.Column, schema.NumFields())
+	for i, field := range schema.Fields() {
+		arr := whole.Column(i).Data().Chunk(0)
+		slices := make([]arrow.Array, chunks)
+		for j := range slices {
+			slices[j] = array.NewSlice(arr, int64(j*rows/chunks), int64((j+1)*rows/chunks))
+		}
+		chunked := arrow.NewChunked(field.Type, slices)
+		for _, s := range slices {
+			s.Release()
+		}
+		cols[i] = *arrow.NewColumn(field, chunked)
+		chunked.Release()
+	}
+	split := array.NewTable(schema, cols, rows)
+	defer split.Release()
+	for i := range cols {
+		cols[i].Release()
+	}
+	require.Equal(t, chunks, len(split.Column(0).Data().Chunks()))
+
+	wholePages := writeCDCTable(t, mem, whole, rows, false, parquet.DataPageV1)
+	splitPages := writeCDCTable(t, mem, split, rows, false, parquet.DataPageV1)
+	for col := 0; col < 2; col++ {
+		expected := columnPages(t, wholePages, col)
+		require.Greater(t, len(expected[0]), 1)
+		assert.Equal(t, expected, columnPages(t, splitPages, col), "column %d", col)
 	}
 }
