@@ -288,6 +288,10 @@ func (w *columnWriter) commitWriteAndCheckPageLimit(numLevels, numValues int64) 
 }
 
 func (w *columnWriter) FlushCurrentPage() error {
+	if w.numBufferedValues == 0 {
+		return nil
+	}
+
 	var (
 		defLevelsRLESize int32 = 0
 		repLevelsRLESize int32 = 0

@@ -1123,3 +1123,53 @@ func (b *BooleanValueWriterSuite) TestWriteBitmapBatchSpaced() {
 	// ValuesOut should contain only the non-null values
 	b.Equal(expected, b.ValuesOut.([]bool)[:values])
 }
+
+// TestFlushCurrentPageWithoutBufferedValues verifies that FlushCurrentPage is a
+// no-op when nothing is buffered, so repeated flushes do not emit empty pages.
+func TestFlushCurrentPageWithoutBufferedValues(t *testing.T) {
+	root, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewInt32Node("v", parquet.Repetitions.Required, -1),
+	}, -1)
+	require.NoError(t, err)
+
+	props := parquet.NewWriterProperties(parquet.WithDictionaryDefault(false))
+
+	var buf bytes.Buffer
+	w := file.NewParquetWriter(&buf, root, file.WithWriterProps(props))
+	rgw := w.AppendRowGroup()
+	cw, err := rgw.NextColumn()
+	require.NoError(t, err)
+	icw := cw.(*file.Int32ColumnChunkWriter)
+
+	_, err = icw.WriteBatch([]int32{1, 2, 3}, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, icw.FlushCurrentPage())
+	// The second flush has nothing buffered and must not emit an empty page.
+	require.NoError(t, icw.FlushCurrentPage())
+	_, err = icw.WriteBatch([]int32{4, 5}, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, cw.Close())
+	require.NoError(t, rgw.Close())
+	require.NoError(t, w.Close())
+
+	r, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer r.Close()
+
+	pr, err := r.RowGroup(0).GetColumnPageReader(0)
+	require.NoError(t, err)
+
+	var dataPages []file.DataPage
+	for pr.Next() {
+		if dp, ok := pr.Page().(file.DataPage); ok {
+			dataPages = append(dataPages, dp)
+		}
+	}
+	require.NoError(t, pr.Err())
+
+	// The reader stops once all rows are consumed, so the empty page must sit
+	// between data pages to be observable.
+	require.Len(t, dataPages, 2)
+	assert.Equal(t, int32(3), dataPages[0].NumValues())
+	assert.Equal(t, int32(2), dataPages[1].NumValues())
+}
