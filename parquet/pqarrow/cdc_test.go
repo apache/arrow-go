@@ -131,7 +131,10 @@ func TestCDCFileWriterCreatesChunkersOnOpen(t *testing.T) {
 	assert.Equal(t, 0, buf.Len())
 }
 
-func TestCDCWriteReturnsChunkErrors(t *testing.T) {
+// TestCDCWriteErrorsPassThrough checks that a write error, here an unsafe
+// timestamp coercion, is returned unchanged with content-defined chunking on,
+// and does not panic.
+func TestCDCWriteErrorsPassThrough(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
@@ -1235,7 +1238,25 @@ func TestCDCSingleRowGroup(t *testing.T) {
 		rowGroupLength = 1024 * 1024
 	)
 
-	for _, c := range cdcCases() {
+	cases := cdcCases()
+	if raceEnabled {
+		// The race detector makes the full matrix take minutes, so mirror the
+		// reduced type set that the C++ tests use under sanitizers.
+		cases = []cdcCase{
+			{dtype: arrow.FixedWidthTypes.Boolean},
+			{dtype: arrow.PrimitiveTypes.Int64, nullable: true},
+			{dtype: arrow.BinaryTypes.String},
+			{dtype: &arrow.FixedSizeBinaryType{ByteWidth: 16}, nullable: true},
+			{dtype: arrow.ListOf(arrow.PrimitiveTypes.Int32)},
+			{dtype: arrow.ListOf(arrow.BinaryTypes.String), nullable: true},
+			{dtype: arrow.StructOf(arrow.Field{Name: "f0", Type: arrow.PrimitiveTypes.Float64, Nullable: true}), nullable: true},
+			{dtype: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int16, ValueType: arrow.BinaryTypes.String}, nullable: true},
+		}
+		for i := range cases {
+			cases[i].name = fmt.Sprintf("%s/nullable=%v/V%d", cases[i].dtype, cases[i].nullable, cases[i].version+1)
+		}
+	}
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 			defer mem.AssertSize(t, 0)
@@ -1852,7 +1873,7 @@ func TestCDCDictionaryChangesBetweenWriteCalls(t *testing.T) {
 				require.NoError(t, err)
 				assert.Contains(t, chunk.Encodings(), parquet.Encodings.Plain)
 				require.NoError(t, rdr.Close())
-				if dictionary && valueType.ID() == arrow.STRING {
+				if dictionary {
 					assert.Positive(t, plainPages(changed))
 					assert.Zero(t, plainPages(unchanged))
 				}

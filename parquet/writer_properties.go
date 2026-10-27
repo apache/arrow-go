@@ -123,7 +123,10 @@ type CDCOptions struct {
 	MinChunkSize int64
 	// MaxChunkSize is the maximum chunk size in bytes.
 	MaxChunkSize int64
-	// NormLevel is the normalization level used to tighten the chunk size distribution.
+	// NormLevel is the normalization level, a signed integer where 0 is the default.
+	// Positive values make chunk boundaries more likely: the boundary mask has fewer
+	// bits, so chunk sizes are more uniform at the cost of more small pages. Negative
+	// values make boundaries less likely.
 	NormLevel int
 }
 
@@ -393,6 +396,13 @@ func WithStoreDecimalAsInteger(enabled bool) WriterProperty {
 // Content-defined chunking is experimental. Only pqarrow.FileWriter honors it.
 // The chunk size counts logical value bytes plus 2 bytes per definition/repetition level,
 // measured before encoding and compression. DataPageSize can still split chunks.
+// A chunk is cut at MaxChunkSize, so a forced cut can exceed MaxChunkSize by less than
+// one value, and nested records are never split across chunks.
+//
+// Unlike the C++ implementation, a dictionary fallback does not end the current page,
+// and the cost-based dictionary fallback is only evaluated until the first page is cut,
+// so pages forced by CDC end that window earlier.
+//
 // Invalid options make pqarrow.NewFileWriter return an error.
 func WithContentDefinedChunking(opts CDCOptions) WriterProperty {
 	return func(cfg *writerPropConfig) {
