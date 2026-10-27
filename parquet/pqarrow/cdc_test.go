@@ -24,7 +24,6 @@ import (
 	"maps"
 	"math"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -1196,14 +1195,18 @@ func TestCDCSingleRowGroup(t *testing.T) {
 			// of the type, unless it is nested or variable length where a hand picked
 			// value avoids generating too large tables
 			bytesPerRecord := int64(16)
+			var fixedWidth int64
 			switch typ := c.dtype.(type) {
 			case *arrow.BooleanType:
-				bytesPerRecord = 1
+				fixedWidth = 1
 			case arrow.FixedWidthDataType:
-				bytesPerRecord = int64(typ.BitWidth() / 8)
+				fixedWidth = int64(typ.BitWidth() / 8)
 			}
-			if bytesPerRecord != 16 && c.nullable {
-				bytesPerRecord += 2
+			if fixedWidth > 0 {
+				bytesPerRecord = fixedWidth
+				if c.nullable {
+					bytesPerRecord += 2
+				}
 			}
 			partLength, editLength := partSize/bytesPerRecord, editSize/bytesPerRecord
 
@@ -1356,7 +1359,8 @@ func TestCDCSingleRowGroup(t *testing.T) {
 					for _, length := range pages[0] {
 						pageBegin := row
 						level += length
-						row = int64(sort.Search(len(rowEnds), func(i int) bool { return rowEnds[i] >= level }))
+						idx, _ := slices.BinarySearch(rowEnds, level)
+						row = int64(idx)
 						// the pages end at row boundaries
 						require.Less(t, row, int64(len(rowEnds)))
 						require.Equal(t, level, rowEnds[row])
