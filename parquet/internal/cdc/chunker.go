@@ -46,7 +46,6 @@ type Chunker struct {
 	minSize int64
 	maxSize int64
 	mask    uint64
-	tables  *[numGearTables][256]uint64
 
 	// The state below is column-global: it is never reset between calls, so
 	// chunking can continue across successive writes.
@@ -66,7 +65,6 @@ func NewChunker(opts parquet.CDCOptions) (*Chunker, error) {
 		minSize: opts.MinChunkSize,
 		maxSize: opts.MaxChunkSize,
 		mask:    mask,
-		tables:  gearTables(),
 	}, nil
 }
 
@@ -74,10 +72,10 @@ func NewChunker(opts parquet.CDCOptions) (*Chunker, error) {
 // for an average chunk size of (minSize+maxSize)/2 after skipping minSize bytes.
 func calculateMask(minSize, maxSize int64, normLevel int) (uint64, error) {
 	if minSize < 0 {
-		return 0, fmt.Errorf("cdc: min chunk size must be non-negative, got %d", minSize)
+		return 0, fmt.Errorf("%w: cdc: min chunk size must be non-negative, got %d", arrow.ErrInvalid, minSize)
 	}
 	if maxSize <= minSize {
-		return 0, fmt.Errorf("cdc: max chunk size must be greater than min chunk size, got min %d and max %d", minSize, maxSize)
+		return 0, fmt.Errorf("%w: cdc: max chunk size must be greater than min chunk size, got min %d and max %d", arrow.ErrInvalid, minSize, maxSize)
 	}
 	// Written as minSize + half the span so that large bounds cannot overflow.
 	avgSize := minSize + (maxSize-minSize)/2
@@ -85,7 +83,7 @@ func calculateMask(minSize, maxSize int64, normLevel int) (uint64, error) {
 	maskBits := max(bits.Len64(target)-1, 0)
 	effectiveBits := maskBits - normLevel
 	if effectiveBits < 1 || effectiveBits > 63 {
-		return 0, fmt.Errorf("cdc: the number of bits in the CDC mask must be between 1 and 63, got %d", effectiveBits)
+		return 0, fmt.Errorf("%w: cdc: the number of bits in the CDC mask must be between 1 and 63, got %d", arrow.ErrInvalid, effectiveBits)
 	}
 	return ^uint64(0) << (64 - effectiveBits), nil
 }
@@ -97,11 +95,13 @@ func (c *Chunker) roll(value []byte) {
 	if c.chunkSize < c.minSize {
 		return
 	}
-	table := &c.tables[c.nthRun]
+	table := &gearTables[c.nthRun]
+	hash, mask, matched := c.rollingHash, c.mask, c.hasMatched
 	for _, b := range value {
-		c.rollingHash = c.rollingHash<<1 + table[b]
-		c.hasMatched = c.hasMatched || c.rollingHash&c.mask == 0
+		hash = hash<<1 + table[b]
+		matched = matched || hash&mask == 0
 	}
+	c.rollingHash, c.hasMatched = hash, matched
 }
 
 // rollLevel feeds a definition or repetition level, as 2 little-endian bytes.
@@ -267,7 +267,7 @@ func validateChunks(chunks []Chunk, numLevels, numValues int64) bool {
 	var levelOffset, valueOffset int64
 	for i, ch := range chunks {
 		if ch.LevelOffset != levelOffset || ch.ValueOffset != valueOffset ||
-			ch.NumValues < 0 || ch.NumValues > ch.NumLevels || (ch.NumLevels <= 0 && i > 0) || ch.NumLevels < 0 {
+			ch.NumValues < 0 || ch.NumValues > ch.NumLevels || ch.NumLevels < 0 || (i > 0 && ch.NumLevels == 0) {
 			return false
 		}
 		levelOffset += ch.NumLevels

@@ -16,32 +16,6 @@
 
 package cdc
 
-import (
-	"crypto/md5"
-	"encoding/binary"
-	"sync"
-)
+//go:generate go run gearhash_gen.go
 
 const numGearTables = 8
-
-// gearTables returns the gear hash tables, computed once on first use.
-// Entry [seed][n] is the first 8 bytes of md5(seed*64 ++ n*64) read big-endian,
-// matching the hex prefix produced by the C++ generate_hash helper.
-var gearTables = sync.OnceValue(func() *[numGearTables][256]uint64 {
-	var tables [numGearTables][256]uint64
-	var buf [128]byte
-	for seed := range numGearTables {
-		for n := range 256 {
-			for i := range buf {
-				if i < 64 {
-					buf[i] = byte(seed)
-				} else {
-					buf[i] = byte(n)
-				}
-			}
-			sum := md5.Sum(buf[:])
-			tables[seed][n] = binary.BigEndian.Uint64(sum[:8])
-		}
-	}
-	return &tables
-})

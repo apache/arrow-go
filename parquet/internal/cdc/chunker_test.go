@@ -17,6 +17,9 @@
 package cdc
 
 import (
+	"crypto/fips140"
+	"crypto/md5"
+	"encoding/binary"
 	"slices"
 	"testing"
 
@@ -33,13 +36,35 @@ import (
 )
 
 func TestGearTables(t *testing.T) {
-	tables := gearTables()
+	tables := &gearTables
 	assert.Equal(t, uint64(0xf09f35a563783945), tables[0][0])
 	assert.Equal(t, uint64(0x0dcc5b3bc5ae410a), tables[0][1])
 	assert.Equal(t, uint64(0xecfcba92fe5691a3), tables[1][0])
 	assert.Equal(t, uint64(0x15ed3fca3107bef5), tables[3][128])
 	assert.Equal(t, uint64(0x8df9314914f0857e), tables[7][255])
-	assert.Same(t, tables, gearTables())
+}
+
+// TestGearTablesMatchMD5 recomputes the generated tables. It uses crypto/md5,
+// which is not available in FIPS 140-only mode; only this test needs it, the
+// production code uses the checked-in tables.
+func TestGearTablesMatchMD5(t *testing.T) {
+	if fips140.Enforced() {
+		t.Skip("crypto/md5 is not allowed in FIPS 140-only mode")
+	}
+	var buf [128]byte
+	for seed := range numGearTables {
+		for n := range 256 {
+			for i := range buf {
+				if i < 64 {
+					buf[i] = byte(seed)
+				} else {
+					buf[i] = byte(n)
+				}
+			}
+			sum := md5.Sum(buf[:])
+			require.Equal(t, binary.BigEndian.Uint64(sum[:8]), gearTables[seed][n], "seed %d byte %d", seed, n)
+		}
+	}
 }
 
 func TestCalculateMask(t *testing.T) {
@@ -207,7 +232,7 @@ func testInputs(mem memory.Allocator) map[string]chunkInput {
 		}
 	}
 
-	// Each record is null (def 0), empty (def 1) or a list of 1-5 elements, an
+	// Each record is null (def 0), empty (def 1) or a list of 1-6 elements, an
 	// eighth of which are null (def 2).
 	elems := array.NewInt32Builder(mem)
 	defer elems.Release()
@@ -247,9 +272,12 @@ func TestChunksInvariants(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
-	for name, in := range testInputs(mem) {
+	inputs := testInputs(mem)
+	for _, in := range inputs {
+		defer in.values.Release()
+	}
+	for name, in := range inputs {
 		t.Run(name, func(t *testing.T) {
-			defer in.values.Release()
 			chunks := in.chunks(t, newTestChunker(t, testOptions))
 			require.Greater(t, len(chunks), 1)
 
@@ -304,9 +332,12 @@ func TestChunksDeterministic(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
-	for name, in := range testInputs(mem) {
+	inputs := testInputs(mem)
+	for _, in := range inputs {
+		defer in.values.Release()
+	}
+	for name, in := range inputs {
 		t.Run(name, func(t *testing.T) {
-			defer in.values.Release()
 			assert.Equal(t, in.chunks(t, newTestChunker(t, testOptions)), in.chunks(t, newTestChunker(t, testOptions)))
 		})
 	}
@@ -327,9 +358,12 @@ func TestChunksContinueAcrossCalls(t *testing.T) {
 		return out
 	}
 
-	for name, in := range testInputs(mem) {
+	inputs := testInputs(mem)
+	for _, in := range inputs {
+		defer in.values.Release()
+	}
+	for name, in := range inputs {
 		t.Run(name, func(t *testing.T) {
-			defer in.values.Release()
 			whole := in.chunks(t, newTestChunker(t, testOptions))
 			require.Greater(t, len(whole), 2)
 			expected := boundaries(whole, 0)
