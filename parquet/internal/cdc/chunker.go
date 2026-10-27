@@ -267,7 +267,7 @@ func validateChunks(chunks []Chunk, numLevels, numValues int64) bool {
 	var levelOffset, valueOffset int64
 	for i, ch := range chunks {
 		if ch.LevelOffset != levelOffset || ch.ValueOffset != valueOffset ||
-			ch.NumValues < 0 || (ch.NumLevels <= 0 && i > 0) || ch.NumLevels < 0 {
+			ch.NumValues < 0 || ch.NumValues > ch.NumLevels || (ch.NumLevels <= 0 && i > 0) || ch.NumLevels < 0 {
 			return false
 		}
 		levelOffset += ch.NumLevels

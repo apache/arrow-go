@@ -263,8 +263,17 @@ func TestChunksInvariants(t *testing.T) {
 				if in.levels.RepLevel == 0 {
 					assert.Equal(t, c.LevelOffset, c.ValueOffset)
 					assert.Equal(t, c.NumLevels, c.NumValues)
-				} else if c.NumLevels > 0 {
-					assert.Zero(t, in.rep[c.LevelOffset])
+				} else {
+					var slots int64
+					for _, d := range in.def[c.LevelOffset : c.LevelOffset+c.NumLevels] {
+						if d >= in.levels.RepeatedAncestorDefLevel {
+							slots++
+						}
+					}
+					assert.Equal(t, slots, c.NumValues)
+					if c.NumLevels > 0 {
+						assert.Zero(t, in.rep[c.LevelOffset])
+					}
 				}
 				levelSum += c.NumLevels
 				valueSum += c.NumValues
@@ -490,5 +499,47 @@ func TestChunksTypeDispatch(t *testing.T) {
 		defer arr.Release()
 		_, err := chunk(arr)
 		require.ErrorContains(t, err, "unsupported")
+	})
+}
+
+func TestNeedNewChunkState(t *testing.T) {
+	t.Run("match runs", func(t *testing.T) {
+		c := newTestChunker(t, testOptions)
+		c.minSize, c.maxSize, c.mask = 0, 1<<40, 0 // every hashed byte matches
+		for run := 1; run < numGearTables; run++ {
+			c.roll([]byte{1})
+			require.True(t, c.hasMatched)
+			require.False(t, c.needNewChunk())
+			assert.Equal(t, run, c.nthRun)
+			assert.False(t, c.hasMatched)
+			assert.Equal(t, int64(run), c.chunkSize)
+		}
+		c.roll([]byte{1})
+		hash := c.rollingHash
+		require.True(t, c.needNewChunk())
+		assert.Zero(t, c.nthRun)
+		assert.Zero(t, c.chunkSize)
+		assert.Equal(t, hash, c.rollingHash)
+	})
+
+	t.Run("no match leaves run", func(t *testing.T) {
+		c := newTestChunker(t, testOptions)
+		c.minSize, c.maxSize, c.mask, c.nthRun = 0, 1<<40, ^uint64(0), 3
+		c.roll([]byte{1})
+		require.False(t, c.hasMatched)
+		assert.False(t, c.needNewChunk())
+		assert.Equal(t, 3, c.nthRun)
+	})
+
+	t.Run("max size", func(t *testing.T) {
+		c := newTestChunker(t, testOptions)
+		c.minSize, c.maxSize, c.mask, c.nthRun = 0, 2, ^uint64(0), 3
+		c.roll([]byte{1, 2})
+		require.False(t, c.hasMatched)
+		hash := c.rollingHash
+		require.True(t, c.needNewChunk())
+		assert.Equal(t, 3, c.nthRun)
+		assert.Zero(t, c.chunkSize)
+		assert.Equal(t, hash, c.rollingHash)
 	})
 }
