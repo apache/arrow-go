@@ -117,6 +117,26 @@ func DefaultColumnProperties() ColumnProperties {
 	}
 }
 
+// CDCOptions configures content-defined chunking of data pages.
+type CDCOptions struct {
+	// MinChunkSize is the minimum chunk size in bytes.
+	MinChunkSize int64
+	// MaxChunkSize is the maximum chunk size in bytes.
+	MaxChunkSize int64
+	// NormLevel is the normalization level used to tighten the chunk size distribution.
+	NormLevel int
+}
+
+// DefaultCDCOptions returns the default content-defined chunking options:
+// MinChunkSize of 256 KiB, MaxChunkSize of 1 MiB and NormLevel 0.
+func DefaultCDCOptions() CDCOptions {
+	return CDCOptions{
+		MinChunkSize: 256 * 1024,
+		MaxChunkSize: 1024 * 1024,
+		NormLevel:    0,
+	}
+}
+
 // SortingColumn specifies a sort order within a rowgroup of a specific leaf column.
 type SortingColumn = format.SortingColumn
 
@@ -368,6 +388,19 @@ func WithStoreDecimalAsInteger(enabled bool) WriterProperty {
 	}
 }
 
+// WithContentDefinedChunking enables content-defined chunking of data pages with the given options.
+//
+// Content-defined chunking is experimental. Only pqarrow.FileWriter honors it.
+// The chunk size counts logical value bytes plus 2 bytes per definition/repetition level,
+// measured before encoding and compression. DataPageSize can still split chunks.
+// Invalid options make pqarrow.NewFileWriter return an error.
+func WithContentDefinedChunking(opts CDCOptions) WriterProperty {
+	return func(cfg *writerPropConfig) {
+		cfg.wr.cdcEnabled = true
+		cfg.wr.cdcOpts = opts
+	}
+}
+
 // WithSortingColumns allow specifying the sorting columns in the written metadata.
 // If this is set, the user should ensure that records are sorted by these columns,
 // otherwise the sorting data will be inconsistent with the sorting_columns metadata.
@@ -543,6 +576,8 @@ type WriterProperties struct {
 	rootRepetition      Repetition
 	storeDecimalAsInt   bool
 	maxBloomFilterBytes int64
+	cdcEnabled          bool
+	cdcOpts             CDCOptions
 
 	defColumnProps  ColumnProperties
 	columnProps     map[string]*ColumnProperties
@@ -853,6 +888,12 @@ func (w *WriterProperties) ColumnEncryptionProperties(path string) *ColumnEncryp
 // a fixed len byte array.
 func (w *WriterProperties) StoreDecimalAsInteger() bool {
 	return w.storeDecimalAsInt
+}
+
+// ContentDefinedChunking returns the content-defined chunking options and whether
+// content-defined chunking is enabled.
+func (w *WriterProperties) ContentDefinedChunking() (CDCOptions, bool) {
+	return w.cdcOpts, w.cdcEnabled
 }
 
 // MaxBloomFilterBytes returns the maximum number of bytes that a bloom filter can use
