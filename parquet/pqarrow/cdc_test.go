@@ -362,6 +362,30 @@ func TestCDCGenerateArray(t *testing.T) {
 		ok.Release()
 	})
 
+	t.Run("MapOfInteger", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		field := arrow.Field{Name: "a", Type: arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32), Nullable: true}
+		arr := generateArray(t, mem, field, 8, 0)
+		defer arr.Release()
+		m := arr.(*array.Map)
+		require.Equal(t, 8, m.Len())
+		// null, empty map, map of 1 entry, map of 3 entries, with unique non-null keys
+		for i, entries := range []int{-1, 0, 1, 3, -1, 0, 1, 3} {
+			assert.Equal(t, entries < 0, m.IsNull(i))
+			if entries >= 0 {
+				assert.Equal(t, entries, int(m.Offsets()[i+1]-m.Offsets()[i]))
+			}
+		}
+		assert.Zero(t, m.Keys().NullN())
+		keys := map[string]bool{}
+		for i := 0; i < m.Keys().Len(); i++ {
+			keys[m.Keys().ValueStr(i)] = true
+		}
+		assert.Len(t, keys, m.Keys().Len())
+	})
+
 	t.Run("Dictionary", func(t *testing.T) {
 		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 		defer mem.AssertSize(t, 0)
@@ -590,13 +614,21 @@ func tryGenerateArray(mem memory.Allocator, field arrow.Field, length int64, see
 		defer data.Release()
 		return array.NewStructData(data), nil
 
-	case *arrow.ListType:
-		// repeat the same pattern in the list array: null, empty list, list of 1
-		// element, list of 3 elements
+	case *arrow.ListType, *arrow.MapType:
+		// repeat the same pattern in the list or map array: null, empty, 1 element,
+		// 3 elements. The entries of a map are structs generated like any other,
+		// so their keys are never null.
 		if length%4 != 0 {
-			return nil, fmt.Errorf("length must be divisible by 4 when generating list arrays, but got: %d", length)
+			return nil, fmt.Errorf("length must be divisible by 4 when generating list and map arrays, but got: %d", length)
 		}
-		values, err := tryGenerateArray(mem, arrow.Field{Name: "item", Type: typ.Elem(), Nullable: true}, length*4, seed)
+		var elem arrow.DataType
+		switch typ := typ.(type) {
+		case *arrow.ListType:
+			elem = typ.Elem()
+		case *arrow.MapType:
+			elem = typ.Elem()
+		}
+		values, err := tryGenerateArray(mem, arrow.Field{Name: "item", Type: elem, Nullable: true}, length*4, seed)
 		if err != nil {
 			return nil, err
 		}
@@ -625,7 +657,7 @@ func tryGenerateArray(mem memory.Allocator, field arrow.Field, length int64, see
 			[]*memory.Buffer{memory.NewBufferBytes(validity), memory.NewBufferBytes(arrow.Int32Traits.CastToBytes(offsets))},
 			[]arrow.ArrayData{values.Data()}, nulls, 0)
 		defer data.Release()
-		return array.NewListData(data), nil
+		return array.MakeFromData(data), nil
 
 	case *arrow.DictionaryType:
 		// the dictionary doesn't depend on the seed, so the generated arrays share it
@@ -824,6 +856,17 @@ func cdcTableProps(t *testing.T, mem memory.Allocator, schema *arrow.Schema, row
 	return parquet.NewWriterProperties(opts...), arrprops
 }
 
+// containsDictionary returns whether the type is a dictionary or a list of one.
+func containsDictionary(dt arrow.DataType) bool {
+	switch typ := dt.(type) {
+	case *arrow.DictionaryType:
+		return true
+	case *arrow.ListType:
+		return containsDictionary(typ.Elem())
+	}
+	return false
+}
+
 // writeCDCTable writes the table with content defined chunking and returns the file
 // after checking that its content reads back equal to the table.
 func writeCDCTable(t *testing.T, mem memory.Allocator, tbl arrow.Table, rowGroupLength int64, dictionary bool, version parquet.DataPageVersion) []byte {
@@ -837,7 +880,7 @@ func writeCDCTable(t *testing.T, mem memory.Allocator, tbl arrow.Table, rowGroup
 	require.Equal(t, tbl.NumRows(), readback.NumRows())
 	for i := 0; i < int(tbl.NumCols()); i++ {
 		expected, actual := tbl.Column(i).Data(), readback.Column(i).Data()
-		if _, ok := expected.DataType().(*arrow.DictionaryType); ok {
+		if containsDictionary(expected.DataType()) {
 			// dictionary arrays are read back with other dictionaries, or as dense
 			// arrays if the writer didn't write one, so compare their values
 			values := func(c *arrow.Chunked) (out []string) {
@@ -1164,6 +1207,12 @@ func cdcCases() []cdcCase {
 		{dtype: structOf(arrow.PrimitiveTypes.Int32)},
 		{dtype: structOf(arrow.PrimitiveTypes.Float64), nullable: true},
 		{dtype: arrow.ListOf(structOf(arrow.PrimitiveTypes.Int32))},
+		// the column writers write the dictionary of binary-like values directly and
+		// convert the other dictionary arrays to dense arrays
+		{dtype: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int64, ValueType: arrow.BinaryTypes.String}},
+		{dtype: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.Binary}, nullable: true},
+		{dtype: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.PrimitiveTypes.Int64}, nullable: true},
+		{dtype: arrow.ListOf(&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}), nullable: true},
 		{dtype: extensions.NewUUIDType(), nullable: true},
 		{dtype: arrow.BinaryTypes.LargeBinary, version: parquet.DataPageV2},
 		{dtype: arrow.ListOf(arrow.BinaryTypes.String), nullable: true, version: parquet.DataPageV2},
@@ -1480,5 +1529,331 @@ func TestCDCIndependentOfArrowChunks(t *testing.T) {
 		expected := columnPages(t, wholePages, col)
 		require.Greater(t, len(expected[0]), 1)
 		assert.Equal(t, expected, columnPages(t, splitPages, col), "column %d", col)
+	}
+}
+
+// assertPagesFollowContent asserts that the files have the given number of row groups
+// and that the pages of every column follow the content after the edits.
+func assertPagesFollowContent(t *testing.T, original, modified []byte, originalRowGroups, modifiedRowGroups int, edits []cdcEdit) {
+	t.Helper()
+	rdr, err := file.NewParquetReader(bytes.NewReader(original))
+	require.NoError(t, err)
+	defer rdr.Close()
+	require.Equal(t, originalRowGroups, rdr.NumRowGroups())
+	modifiedRdr, err := file.NewParquetReader(bytes.NewReader(modified))
+	require.NoError(t, err)
+	defer modifiedRdr.Close()
+	require.Equal(t, modifiedRowGroups, modifiedRdr.NumRowGroups())
+
+	for col := 0; col < rdr.MetaData().Schema.NumColumns(); col++ {
+		assert.NoError(t, pagesFollowContent(columnPages(t, original, col), columnPages(t, modified, col), edits), "column %d", col)
+	}
+}
+
+func TestCDCMultipleRowGroups(t *testing.T) {
+	const (
+		partLength = 128 * 1024
+		// the edits shift the subsequent row groups by more than the maximum chunk size of
+		// every column, otherwise chunkers starting over at the shifted row groups could
+		// still end the pages at the same positions, but not by a multiple of the minimum
+		// chunk size, so pages cut at a fixed size don't end at the same positions again
+		editLength     = 18 * 1024
+		rowGroupLength = 64 * 1024
+	)
+	nullable := func(name string, typ arrow.DataType) arrow.Field {
+		return arrow.Field{Name: name, Type: typ, Nullable: true}
+	}
+	schema := arrow.NewSchema([]arrow.Field{
+		nullable("int32", arrow.PrimitiveTypes.Int32),
+		nullable("float64", arrow.PrimitiveTypes.Float64),
+		{Name: "bool", Type: arrow.FixedWidthTypes.Boolean},
+		nullable("int64", arrow.PrimitiveTypes.Int64),
+		nullable("float32", arrow.PrimitiveTypes.Float32),
+		nullable("fixed_size_binary", &arrow.FixedSizeBinaryType{ByteWidth: 8}),
+	}, nil)
+
+	// the tables are released after the test, but before the allocator is checked
+	setup := func(t *testing.T, mem memory.Allocator) (part1, part2, part3, edit1, edit2, edit3 arrow.Table) {
+		var tables []arrow.Table
+		for _, spec := range []struct{ length, seed int64 }{
+			{partLength, 0}, {partLength, 2}, {partLength, 4}, {editLength, 1}, {editLength, 3}, {editLength, 5},
+		} {
+			tbl := generateTable(t, mem, schema, spec.length, uint64(spec.seed))
+			t.Cleanup(tbl.Release)
+			tables = append(tables, tbl)
+		}
+		return tables[0], tables[1], tables[2], tables[3], tables[4], tables[5]
+	}
+
+	// assertEditedTables writes the tables of the parts before and after the edits with
+	// fixed length row groups and asserts that the pages of every column follow the
+	// content after the edits, the edited tables span 7 row groups
+	assertEditedTables := func(t *testing.T, mem memory.Allocator, before, after []arrow.Table, edits []cdcEdit) {
+		beforeTable := concatTables(t, mem, before...)
+		defer beforeTable.Release()
+		afterTable := concatTables(t, mem, after...)
+		defer afterTable.Release()
+		require.False(t, array.TableEqual(beforeTable, afterTable))
+		assertPagesFollowContent(t,
+			writeCDCTable(t, mem, beforeTable, rowGroupLength, false, parquet.DataPageV1),
+			writeCDCTable(t, mem, afterTable, rowGroupLength, false, parquet.DataPageV1), 7, 7, edits)
+	}
+	tables := func(ts ...arrow.Table) []arrow.Table { return ts }
+
+	// The row groups have a fixed length, so the inserted values shift the data of the
+	// subsequent row groups, whose pages must still end at the same positions except at
+	// the row group ends.
+	t.Run("InsertOnce", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		t.Cleanup(func() { mem.AssertSize(t, 0) })
+		part1, part2, part3, edit1, edit2, _ := setup(t, mem)
+		assertEditedTables(t, mem, tables(part1, edit1, part2, part3), tables(part1, edit1, edit2, part2, part3),
+			[]cdcEdit{{Offset: tableLevels(part1, edit1), Inserted: tableLevels(edit2)}})
+	})
+
+	// The inverse of InsertOnce, the deleted values shift the data of the subsequent row
+	// groups the other way.
+	t.Run("DeleteOnce", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		t.Cleanup(func() { mem.AssertSize(t, 0) })
+		part1, part2, part3, edit1, edit2, _ := setup(t, mem)
+		assertEditedTables(t, mem, tables(part1, edit1, edit2, part2, part3), tables(part1, edit1, part2, part3),
+			[]cdcEdit{{Offset: tableLevels(part1, edit1), Deleted: tableLevels(edit2)}})
+	})
+
+	// The updated values don't shift the data, so only the pages around them may change.
+	t.Run("UpdateOnce", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		t.Cleanup(func() { mem.AssertSize(t, 0) })
+		part1, part2, part3, edit1, edit2, edit3 := setup(t, mem)
+		assertEditedTables(t, mem, tables(part1, edit1, part2, part3, edit2), tables(part1, edit3, part2, part3, edit2),
+			[]cdcEdit{{Offset: tableLevels(part1), Deleted: tableLevels(edit1), Inserted: tableLevels(edit3)}})
+	})
+
+	// The appended values only extend the last row group.
+	t.Run("Append", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		t.Cleanup(func() { mem.AssertSize(t, 0) })
+		part1, part2, part3, edit1, edit2, _ := setup(t, mem)
+		assertEditedTables(t, mem, tables(part1, edit1, part2, part3), tables(part1, edit1, part2, part3, edit2),
+			[]cdcEdit{{Offset: tableLevels(part1, edit1, part2, part3), Inserted: tableLevels(edit2)}})
+	})
+
+	// The content defined page boundaries must not depend on how the data is split into
+	// row groups: a multiple row group file must end its pages where a single row group
+	// file does, except at the row group ends which cut the pages. The 400 rows long row
+	// groups are shorter than the minimum chunk size of all the columns, so the chunks
+	// span multiple row groups. With row groups as long as the first page of the first
+	// column, the second row group starts at a content defined boundary of that column,
+	// so its column writer receives an empty first chunk, which must not produce an
+	// empty page.
+	t.Run("IndependentOfRowGroupBoundaries", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		t.Cleanup(func() { mem.AssertSize(t, 0) })
+		part1, part2, part3, _, _, _ := setup(t, mem)
+		table := concatTables(t, mem, part1, part2, part3)
+		defer table.Release()
+
+		single := writeCDCTable(t, mem, table, table.NumRows(), false, parquet.DataPageV1)
+		firstPageLength := columnPages(t, single, 0)[0][0]
+		for _, length := range []int64{rowGroupLength, 400, firstPageLength} {
+			multi := writeCDCTable(t, mem, table, length, false, parquet.DataPageV1)
+			for _, rg := range columnPages(t, multi, 0) {
+				for _, n := range rg {
+					require.NotZero(t, n, "row group length %d", length)
+				}
+			}
+			assertPagesFollowContent(t, single, multi, 1, int((table.NumRows()+length-1)/length), nil)
+		}
+	})
+
+	// Every leaf column of a nested schema has its own chunker which must be carried over
+	// between the row groups: struct.a, struct.b and map.key only have definition levels,
+	// while list.item and map.value have repetition levels too, so their chunks only end
+	// at record boundaries. The records never cross the row groups, but the chunks do.
+	t.Run("NestedIndependentOfRowGroupBoundaries", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		t.Cleanup(func() { mem.AssertSize(t, 0) })
+		const nestedRowGroupLength = 16 * 1024
+		nestedSchema := arrow.NewSchema([]arrow.Field{
+			nullable("struct", arrow.StructOf(nullable("a", arrow.PrimitiveTypes.Int32), nullable("b", arrow.BinaryTypes.String))),
+			nullable("list", arrow.ListOf(arrow.PrimitiveTypes.Int32)),
+			nullable("map", arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32)),
+		}, nil)
+		table := generateTable(t, mem, nestedSchema, 4*nestedRowGroupLength, 0)
+		defer table.Release()
+		for _, version := range []parquet.DataPageVersion{parquet.DataPageV1, parquet.DataPageV2} {
+			single := writeCDCTable(t, mem, table, table.NumRows(), false, version)
+			multi := writeCDCTable(t, mem, table, nestedRowGroupLength, false, version)
+			rdr, err := file.NewParquetReader(bytes.NewReader(single))
+			require.NoError(t, err)
+			// the leaf columns struct.a, struct.b, list.item, map.key and map.value
+			require.Equal(t, 5, rdr.MetaData().Schema.NumColumns())
+			require.NoError(t, rdr.Close())
+			assertPagesFollowContent(t, single, multi, 1, 4, nil)
+		}
+	})
+
+	// The dictionary arrays are chunked by their indices. The column writers write the
+	// dictionary and the indices directly if dictionary encoding is enabled and the
+	// values are binary-like, otherwise they convert the dictionary arrays to dense
+	// arrays. The chunker state must be carried over between the row groups in every
+	// case.
+	t.Run("DictionaryIndependentOfRowGroupBoundaries", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		t.Cleanup(func() { mem.AssertSize(t, 0) })
+		const dictionaryRowGroupLength = 16 * 1024
+		dictionarySchema := arrow.NewSchema([]arrow.Field{
+			{Name: "string", Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int16, ValueType: arrow.BinaryTypes.String}},
+			{Name: "int64", Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.PrimitiveTypes.Int64}},
+			{Name: "list", Type: arrow.ListOf(&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String})},
+		}, nil)
+		table := generateTable(t, mem, dictionarySchema, 4*dictionaryRowGroupLength, 0)
+		defer table.Release()
+		for _, dictionary := range []bool{false, true} {
+			single := writeCDCTable(t, mem, table, table.NumRows(), dictionary, parquet.DataPageV1)
+			multi := writeCDCTable(t, mem, table, dictionaryRowGroupLength, dictionary, parquet.DataPageV1)
+			// dictionary encoding writes a dictionary page into every column chunk
+			for _, data := range [][]byte{single, multi} {
+				rdr, err := file.NewParquetReader(bytes.NewReader(data))
+				require.NoError(t, err)
+				for rg := 0; rg < rdr.NumRowGroups(); rg++ {
+					for col := 0; col < rdr.MetaData().Schema.NumColumns(); col++ {
+						chunk, err := rdr.MetaData().RowGroup(rg).ColumnChunk(col)
+						require.NoError(t, err)
+						require.Equal(t, dictionary, chunk.HasDictionaryPage(), "dictionary=%v row group %d column %d", dictionary, rg, col)
+					}
+				}
+				require.NoError(t, rdr.Close())
+			}
+			assertPagesFollowContent(t, single, multi, 1, 4, nil)
+		}
+	})
+
+	// Writing record batches buffers the row groups, which create their column writers
+	// upfront. The chunker state must be carried over between these row groups as well,
+	// including the record batches split by the row group boundaries.
+	t.Run("BufferedIndependentOfRowGroupBoundaries", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		t.Cleanup(func() { mem.AssertSize(t, 0) })
+		part1, part2, part3, _, _, _ := setup(t, mem)
+		table := concatTables(t, mem, part1, part2, part3)
+		defer table.Release()
+		single := writeCDCTable(t, mem, table, table.NumRows(), false, parquet.DataPageV1)
+
+		props, arrprops := cdcTableProps(t, mem, schema, rowGroupLength, false, parquet.DataPageV1)
+		var recs []arrow.RecordBatch
+		for begin := int64(0); begin < table.NumRows(); begin += 10007 {
+			end := min(begin+10007, table.NumRows())
+			cols := make([]arrow.Array, schema.NumFields())
+			for i := range cols {
+				cols[i] = array.NewSlice(table.Column(i).Data().Chunk(0), begin, end)
+			}
+			recs = append(recs, array.NewRecordBatch(schema, cols, end-begin))
+			for _, col := range cols {
+				col.Release()
+			}
+		}
+		defer func() {
+			for _, rec := range recs {
+				rec.Release()
+			}
+		}()
+		buffered := writeRecords(t, mem, props, arrprops, true, recs...)
+
+		readback := readCDCTable(t, mem, buffered)
+		defer readback.Release()
+		for i := 0; i < int(table.NumCols()); i++ {
+			require.Truef(t, array.ChunkedEqual(table.Column(i).Data(), readback.Column(i).Data()), "column %d differs", i)
+		}
+		assertPagesFollowContent(t, single, buffered, 1, 6, nil)
+	})
+}
+
+// The chunker hashes the indices of the dictionary arrays rather than their values, so
+// the pages follow the indices even if the dictionary changes between the write calls.
+// Unlike in C++ the writer falls back to plain encoding at the first change without
+// ending the page, so the pages are the ones of the same indices with one dictionary:
+//
+//	indices:      |     page 0     |      page 1      |     page 2     |
+//	write calls:  |    dictionary 0    |   dictionary 1   | dictionary 2 |
+//	pages:        |     page 0     |      page 1      |     page 2     |
+//	                                    ^^ fallback to plain encoding
+func TestCDCDictionaryChangesBetweenWriteCalls(t *testing.T) {
+	const length = 64 * 1024
+	callEnds := []int64{length/3 + 1, 2*length/3 + 3, length}
+
+	for _, valueType := range []arrow.DataType{arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int64} {
+		t.Run(valueType.String(), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: valueType}
+			field := arrow.Field{Name: "f0", Type: dictType, Nullable: true}
+			schema := arrow.NewSchema([]arrow.Field{field}, nil)
+			arr := generateArray(t, mem, field, length, 0).(*array.Dictionary)
+			defer arr.Release()
+
+			// records of the same indices, with the dictionary of the seed of each record
+			records := func(seeds []uint64) []arrow.RecordBatch {
+				var recs []arrow.RecordBatch
+				begin := int64(0)
+				for i, end := range callEnds {
+					dictionary := generateArray(t, mem, arrow.Field{Name: "dictionary", Type: valueType}, int64(arr.Dictionary().Len()), seeds[i])
+					indices := array.NewSlice(arr.Indices(), begin, end)
+					chunk := array.NewDictionaryArray(dictType, indices, dictionary)
+					recs = append(recs, array.NewRecordBatch(schema, []arrow.Array{chunk}, end-begin))
+					chunk.Release()
+					indices.Release()
+					dictionary.Release()
+					begin = end
+				}
+				return recs
+			}
+			changing, constant := records([]uint64{0, 1, 2}), records([]uint64{0, 0, 0})
+			defer func() {
+				for _, rec := range append(changing, constant...) {
+					rec.Release()
+				}
+			}()
+
+			for _, dictionary := range []bool{false, true} {
+				props, arrprops := cdcTableProps(t, mem, schema, length, dictionary, parquet.DataPageV1)
+				changed := writeRecords(t, mem, props, arrprops, true, changing...)
+				unchanged := writeRecords(t, mem, props, arrprops, true, constant...)
+
+				pages := columnPages(t, changed, 0)
+				require.Len(t, pages, 1)
+				require.Greater(t, len(pages[0]), 1)
+				assert.Equal(t, columnPages(t, unchanged, 0), pages, "dictionary=%v", dictionary)
+
+				// the data pages of the changed dictionary arrays are plain encoded after
+				// the fallback, unlike the ones of the same dictionary
+				plainPages := func(data []byte) (n int) {
+					rdr, err := file.NewParquetReader(bytes.NewReader(data))
+					require.NoError(t, err)
+					defer rdr.Close()
+					pr, err := rdr.RowGroup(0).GetColumnPageReader(0)
+					require.NoError(t, err)
+					for pr.Next() {
+						if p, ok := pr.Page().(*file.DataPageV1); ok && parquet.Encoding(p.Encoding()) == parquet.Encodings.Plain {
+							n++
+						}
+					}
+					require.NoError(t, pr.Err())
+					return n
+				}
+				rdr, err := file.NewParquetReader(bytes.NewReader(changed))
+				require.NoError(t, err)
+				chunk, err := rdr.MetaData().RowGroup(0).ColumnChunk(0)
+				require.NoError(t, err)
+				assert.Contains(t, chunk.Encodings(), parquet.Encodings.Plain)
+				require.NoError(t, rdr.Close())
+				if dictionary && valueType.ID() == arrow.STRING {
+					assert.Positive(t, plainPages(changed))
+					assert.Zero(t, plainPages(unchanged))
+				}
+			}
+		})
 	}
 }
