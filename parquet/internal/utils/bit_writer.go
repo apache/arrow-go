@@ -131,6 +131,36 @@ func (b *BitWriter) WriteValue(v uint64, nbits uint) error {
 
 // WriteValues writes values using nbits to pack them into the stream.
 func (b *BitWriter) WriteValues(values []uint64, nbits uint) error {
+	// RLE encoders flush eight literal values at a time. Accept that
+	// batch size so dictionary index writes can use the direct buffer path.
+	// Only write complete words that fit; short buffers and other writer
+	// implementations still use the original error-preserving path.
+	if out, ok := b.wr.(*WriterAtBuffer); ok &&
+		len(values) >= 8 && (nbits >= 8 || len(values) >= 16) &&
+		nbits >= 4 && nbits <= 64 &&
+		b.bitoffset < 64 && b.byteoffset >= 0 && b.byteoffset <= len(out.buf)-8 {
+		completeWords := (uint64(b.bitoffset) + uint64(len(values))*uint64(nbits)) / 64
+		if completeWords > 0 && completeWords <= uint64((len(out.buf)-b.byteoffset)/8) {
+			buffer := b.buffer
+			bitoffset := b.bitoffset
+			byteoffset := b.byteoffset
+			for _, v := range values {
+				buffer |= v << bitoffset
+				bitoffset += nbits
+				if bitoffset >= 64 {
+					binary.LittleEndian.PutUint64(out.buf[byteoffset:], buffer)
+					bitoffset -= 64
+					buffer = v >> (nbits - bitoffset)
+					byteoffset += 8
+				}
+			}
+			b.buffer = buffer
+			b.bitoffset = bitoffset
+			b.byteoffset = byteoffset
+			return nil
+		}
+	}
+
 	buffer := b.buffer
 	bitoffset := b.bitoffset
 	byteoffset := b.byteoffset
