@@ -35,6 +35,7 @@ import (
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/internal/cdc"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 )
 
@@ -184,6 +185,7 @@ type arrowColumnWriter struct {
 	leafCount int
 	colIdx    int
 	rgw       file.RowGroupWriter
+	chunkers  []*cdc.Chunker
 }
 
 // newArrowColumnWriter returns a new writer using the chunked array to determine the number of leaf columns,
@@ -191,7 +193,7 @@ type arrowColumnWriter struct {
 //
 // Using an arrow column writer is a convenience to avoid having to process the arrow array yourself
 // and determine the correct definition and repetition levels manually.
-func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *SchemaManifest, rgw file.RowGroupWriter, leafColIdx int) (arrowColumnWriter, error) {
+func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *SchemaManifest, rgw file.RowGroupWriter, leafColIdx int, chunkers []*cdc.Chunker) (arrowColumnWriter, error) {
 	if data.Len() == 0 {
 		return arrowColumnWriter{leafCount: calcLeafCount(data.DataType()), rgw: rgw}, nil
 	}
@@ -273,7 +275,7 @@ func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *Sch
 		values += chunkWriteSize
 	}
 
-	return arrowColumnWriter{builders: builders, leafCount: leafCount, rgw: rgw, colIdx: leafColIdx}, nil
+	return arrowColumnWriter{builders: builders, leafCount: leafCount, rgw: rgw, colIdx: leafColIdx, chunkers: chunkers}, nil
 }
 
 func (acw *arrowColumnWriter) Write(ctx context.Context) error {
@@ -294,6 +296,11 @@ func (acw *arrowColumnWriter) Write(ctx context.Context) error {
 			return err
 		}
 
+		var chunker *cdc.Chunker
+		if acw.chunkers != nil {
+			chunker = acw.chunkers[acw.colIdx+leafIdx]
+		}
+
 		for _, bldr := range acw.builders {
 			if leafIdx == 0 {
 				defer bldr.Release()
@@ -304,7 +311,7 @@ func (acw *arrowColumnWriter) Write(ctx context.Context) error {
 			}
 			defer res.Release()
 
-			if err = writeVisitedLeafValues(ctx, cw, &res, arrCtx.props.mem); err != nil {
+			if err = writeVisitedLeafValues(ctx, cw, chunker, &res, arrCtx.props.mem); err != nil {
 				return err
 			}
 		}
@@ -315,13 +322,13 @@ func (acw *arrowColumnWriter) Write(ctx context.Context) error {
 // writeVisitedLeafValues writes the visited leaf values of res to cw. Its
 // deferred Release frees a concatenated copy as soon as this chunk is written,
 // including when the write panics.
-func writeVisitedLeafValues(ctx context.Context, cw file.ColumnChunkWriter, res *multipathLevelResult, mem memory.Allocator) error {
+func writeVisitedLeafValues(ctx context.Context, cw file.ColumnChunkWriter, chunker *cdc.Chunker, res *multipathLevelResult, mem memory.Allocator) error {
 	values, err := visitedLeafValues(res, mem)
 	if err != nil {
 		return err
 	}
 	defer values.Release()
-	return WriteArrowToColumn(ctx, cw, values, res.defLevels, res.repLevels, res.leafIsNullable)
+	return writeArrowToColumn(ctx, cw, chunker, values, res.defLevels, res.repLevels, res.leafIsNullable)
 }
 
 // visitedLeafValues returns the leaf values covered by the visited element
@@ -349,6 +356,13 @@ func visitedLeafValues(res *multipathLevelResult, mem memory.Allocator) (arrow.A
 // Leaf_field_nullable indicates whether the leaf array is considered nullable
 // according to its schema in a Table or its parent array.
 func WriteArrowToColumn(ctx context.Context, cw file.ColumnChunkWriter, leafArr arrow.Array, defLevels, repLevels []int16, leafFieldNullable bool) error {
+	return writeArrowToColumn(ctx, cw, nil, leafArr, defLevels, repLevels, leafFieldNullable)
+}
+
+// writeArrowToColumn is WriteArrowToColumn with optional content-defined
+// chunking: when chunker is non-nil the data is split at chunk boundaries and a
+// data page is closed between consecutive chunks.
+func writeArrowToColumn(ctx context.Context, cw file.ColumnChunkWriter, chunker *cdc.Chunker, leafArr arrow.Array, defLevels, repLevels []int16, leafFieldNullable bool) error {
 	// Leaf nulls are canonical when there is only a single null element after a list
 	// and it is at the leaf.
 	colLevelInfo := cw.LevelInfo()
@@ -369,10 +383,53 @@ func WriteArrowToColumn(ctx context.Context, cw file.ColumnChunkWriter, leafArr 
 		}
 	}()
 
-	if leafArr.DataType().ID() == arrow.DICTIONARY {
-		return writeDictionaryArrow(arrCtx, cw, leafArr, defLevels, repLevels, maybeParentNulls)
+	write := func(values arrow.Array, defLevels, repLevels []int16) error {
+		if values.DataType().ID() == arrow.DICTIONARY {
+			return writeDictionaryArrow(arrCtx, cw, values, defLevels, repLevels, maybeParentNulls)
+		}
+		return writeDenseArrow(arrCtx, cw, values, defLevels, repLevels, maybeParentNulls)
 	}
-	return writeDenseArrow(arrCtx, cw, leafArr, defLevels, repLevels, maybeParentNulls)
+
+	if chunker == nil {
+		return write(leafArr, defLevels, repLevels)
+	}
+
+	chunks, err := chunker.Chunks(colLevelInfo, defLevels, repLevels, leafArr)
+	if err != nil {
+		return err
+	}
+	if len(chunks) == 0 {
+		return write(leafArr, defLevels, repLevels)
+	}
+
+	for i, chunk := range chunks {
+		if chunk.NumLevels > 0 {
+			var chunkDef, chunkRep []int16
+			if defLevels != nil {
+				chunkDef = defLevels[chunk.LevelOffset : chunk.LevelOffset+chunk.NumLevels]
+			}
+			if repLevels != nil {
+				chunkRep = repLevels[chunk.LevelOffset : chunk.LevelOffset+chunk.NumLevels]
+			}
+			values := array.NewSlice(leafArr, chunk.ValueOffset, chunk.ValueOffset+chunk.NumValues)
+			err := write(values, chunkDef, chunkRep)
+			values.Release()
+			if err != nil {
+				return err
+			}
+		}
+
+		if i < len(chunks)-1 {
+			flusher, ok := cw.(interface{ FlushCurrentPage() error })
+			if !ok {
+				return errors.New("pqarrow: column writer does not support content-defined chunking")
+			}
+			if err := flusher.FlushCurrentPage(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 type binaryarr interface {

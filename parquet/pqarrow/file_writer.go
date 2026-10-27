@@ -30,6 +30,7 @@ import (
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/internal/cdc"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
 )
 
@@ -125,6 +126,11 @@ func WriteTable(tbl arrow.Table, w io.Writer, chunkSize int64, props *parquet.Wr
 }
 
 // FileWriter is an object for writing Arrow directly to a parquet file.
+//
+// When content-defined chunking is enabled in the writer properties, data pages
+// are cut at content-defined boundaries. The chunker state spans row groups and
+// write calls for the life of the file; the low-level column writers in the
+// file package and WriteArrowToColumn do not chunk.
 type FileWriter struct {
 	wr         *file.Writer
 	schema     *arrow.Schema
@@ -134,6 +140,9 @@ type FileWriter struct {
 	ctx        context.Context
 	colIdx     int
 	closed     bool
+	// chunkers holds one chunker per leaf column, or nil when content-defined
+	// chunking is disabled.
+	chunkers []*cdc.Chunker
 }
 
 // NewFileWriter returns a writer for writing Arrow directly to a parquetfile, rather than
@@ -169,6 +178,16 @@ func NewFileWriter(arrschema *arrow.Schema, w io.Writer, props *parquet.WriterPr
 		meta.Append("ARROW:schema", base64.StdEncoding.EncodeToString(serializedSchema))
 	}
 
+	var chunkers []*cdc.Chunker
+	if opts, ok := props.ContentDefinedChunking(); ok {
+		chunkers = make([]*cdc.Chunker, pqschema.NumColumns())
+		for i := range chunkers {
+			if chunkers[i], err = cdc.NewChunker(opts); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	schemaNode := pqschema.Root()
 	baseWriter, err := file.NewParquetWriterWithError(w, schemaNode, file.WithWriterProps(props), file.WithWriteMetadata(meta))
 	if err != nil {
@@ -180,7 +199,7 @@ func NewFileWriter(arrschema *arrow.Schema, w io.Writer, props *parquet.WriterPr
 		return nil, err
 	}
 
-	return &FileWriter{wr: baseWriter, schema: arrschema, manifest: manifest, arrowProps: arrprops, ctx: NewArrowWriteContext(context.TODO(), &arrprops)}, nil
+	return &FileWriter{wr: baseWriter, schema: arrschema, manifest: manifest, arrowProps: arrprops, chunkers: chunkers, ctx: NewArrowWriteContext(context.TODO(), &arrprops)}, nil
 }
 
 // NewRowGroup does what it says on the tin, creates a new row group in the underlying file.
@@ -520,7 +539,7 @@ func (fw *FileWriter) WriteColumnChunked(data *arrow.Chunked, offset, size int64
 	if fw.closed {
 		return fmt.Errorf("invalid write call: FileWriter is already closed")
 	}
-	acw, err := newArrowColumnWriter(data, offset, size, fw.manifest, fw.rgw, fw.colIdx)
+	acw, err := newArrowColumnWriter(data, offset, size, fw.manifest, fw.rgw, fw.colIdx, fw.chunkers)
 	if err != nil {
 		return err
 	}
