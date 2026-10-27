@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"math"
 	"slices"
@@ -224,7 +225,8 @@ func TestCDCLowLevelWritersIgnoreCDC(t *testing.T) {
 
 	var buf bytes.Buffer
 	w := file.NewParquetWriter(&buf, sc.Root(), file.WithWriterProps(props))
-	rgw := w.AppendRowGroup()
+	rgw, err := w.AppendRowGroupChecked()
+	require.NoError(t, err)
 	cw, err := rgw.NextColumn()
 	require.NoError(t, err)
 	_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch(vals, nil, nil)
@@ -233,7 +235,8 @@ func TestCDCLowLevelWritersIgnoreCDC(t *testing.T) {
 	require.NoError(t, rgw.Close())
 
 	arrprops := pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem), pqarrow.WithStoreSchema())
-	rgw = w.AppendRowGroup()
+	rgw, err = w.AppendRowGroupChecked()
+	require.NoError(t, err)
 	cw, err = rgw.NextColumn()
 	require.NoError(t, err)
 	require.NoError(t, pqarrow.WriteArrowToColumn(pqarrow.NewArrowWriteContext(context.Background(), &arrprops), cw, arr, nil, nil, false))
@@ -1403,7 +1406,7 @@ func TestCDCSingleRowGroup(t *testing.T) {
 					addRecord := func(begin, end int64) {
 						slice := array.NewSlice(arr, begin, end)
 						defer slice.Release()
-						recs = append(recs, array.NewRecord(schema, []arrow.Array{slice}, end-begin))
+						recs = append(recs, array.NewRecordBatch(schema, []arrow.Array{slice}, end-begin))
 					}
 					for _, length := range pages[0] {
 						pageBegin := row
@@ -1457,7 +1460,7 @@ func TestCDCColumnByColumnMatchesWrite(t *testing.T) {
 				other = generateArray(t, mem, schema.Field(1), rows, 2)
 			}
 			defer other.Release()
-			rec := array.NewRecord(schema, []arrow.Array{first, other}, rows)
+			rec := array.NewRecordBatch(schema, []arrow.Array{first, other}, rows)
 			defer rec.Release()
 			arrprops := pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem), pqarrow.WithStoreSchema())
 
@@ -1855,5 +1858,46 @@ func TestCDCDictionaryChangesBetweenWriteCalls(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func BenchmarkWriteContentDefinedChunking(b *testing.B) {
+	const numRows = 1 << 20
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(b, 0)
+
+	for _, dt := range []arrow.DataType{arrow.PrimitiveTypes.Int64, arrow.BinaryTypes.String} {
+		field := arrow.Field{Name: "c", Type: dt}
+		arr, err := tryGenerateArray(mem, field, numRows, 42)
+		require.NoError(b, err)
+		defer arr.Release()
+		rec := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{field}, nil), []arrow.Array{arr}, numRows)
+		defer rec.Release()
+
+		var size int64
+		for _, buf := range arr.Data().Buffers() {
+			if buf != nil {
+				size += int64(buf.Len())
+			}
+		}
+
+		for _, cdc := range []bool{false, true} {
+			opts := []parquet.WriterProperty{parquet.WithDictionaryDefault(false)}
+			if cdc {
+				opts = append(opts, parquet.WithContentDefinedChunking(parquet.DefaultCDCOptions()))
+			}
+			props := parquet.NewWriterProperties(opts...)
+			b.Run(fmt.Sprintf("%s/cdc=%t", dt, cdc), func(b *testing.B) {
+				b.SetBytes(size)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					fw, err := pqarrow.NewFileWriter(rec.Schema(), io.Discard, props, pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem)))
+					require.NoError(b, err)
+					require.NoError(b, fw.Write(rec))
+					require.NoError(b, fw.Close())
+				}
+			})
+		}
 	}
 }

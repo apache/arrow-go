@@ -214,10 +214,10 @@ func testInputs(mem memory.Allocator) map[string]chunkInput {
 	var def, rep []int16
 	for r := uint64(0); len(def) < numTestValues; r++ {
 		h := splitmix(r + 1<<40)
-		switch n := h % 8; {
-		case n == 0:
+		switch n := h % 8; n {
+		case 0:
 			def, rep = append(def, 0), append(rep, 0)
-		case n == 1:
+		case 1:
 			def, rep = append(def, 1), append(rep, 0)
 		default:
 			for e := uint64(0); e < n-1; e++ {
