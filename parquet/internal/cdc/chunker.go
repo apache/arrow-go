@@ -47,12 +47,20 @@ type Chunker struct {
 	maxSize int64
 	mask    uint64
 
-	// The state below is column-global: it is never reset between calls, so
-	// chunking can continue across successive writes.
-	rollingHash uint64
-	nthRun      int
-	chunkSize   int64
-	hasMatched  bool
+	// state is column-global: it is never reset between calls, so chunking can
+	// continue across successive writes.
+	state state
+}
+
+// state is the part of the chunker that changes while rolling. Chunks works on
+// a local copy that is passed to the helpers by value, which lets the compiler
+// keep it in registers: it must keep at most 4 fields and never have its
+// address taken.
+type state struct {
+	hash    uint64
+	nthRun  int
+	size    int64
+	matched bool
 }
 
 // NewChunker validates opts and returns a Chunker that uses them.
@@ -90,25 +98,30 @@ func calculateMask(minSize, maxSize int64, normLevel int) (uint64, error) {
 
 // roll feeds the bytes of one value into the rolling hash. While the current
 // chunk is still below the minimum size the hash is left untouched.
-func (c *Chunker) roll(value []byte) {
-	c.chunkSize += int64(len(value))
-	if c.chunkSize < c.minSize {
-		return
+func (c *Chunker) roll(s state, value []byte) state {
+	s.size += int64(len(value))
+	if s.size < c.minSize {
+		return s
 	}
-	table := &gearTables[c.nthRun]
-	hash, mask, matched := c.rollingHash, c.mask, c.hasMatched
+	table, mask := &gearTables[s.nthRun], c.mask
 	for _, b := range value {
-		hash = hash<<1 + table[b]
-		matched = matched || hash&mask == 0
+		s.hash = s.hash<<1 + table[b]
+		s.matched = s.matched || s.hash&mask == 0
 	}
-	c.rollingHash, c.hasMatched = hash, matched
+	return s
 }
 
 // rollLevel feeds a definition or repetition level, as 2 little-endian bytes.
-func (c *Chunker) rollLevel(level int16) {
-	var buf [2]byte
-	binary.LittleEndian.PutUint16(buf[:], uint16(level))
-	c.roll(buf[:])
+func (c *Chunker) rollLevel(s state, level int16) state {
+	s.size += 2
+	if s.size < c.minSize {
+		return s
+	}
+	table := &gearTables[s.nthRun]
+	h1 := s.hash<<1 + table[byte(level)]
+	s.hash = h1<<1 + table[byte(uint16(level)>>8)]
+	s.matched = s.matched || h1&c.mask == 0 || s.hash&c.mask == 0
+	return s
 }
 
 // needNewChunk reports whether a chunk boundary should be placed before the
@@ -116,71 +129,98 @@ func (c *Chunker) rollLevel(level int16) {
 // times, each time with a different gear table, which approximates a normal
 // distribution of chunk sizes. The maximum chunk size is a hard limit. The
 // rolling hash is deliberately never reset.
-func (c *Chunker) needNewChunk() bool {
-	if c.hasMatched {
-		c.hasMatched = false
-		c.nthRun++
-		if c.nthRun >= numGearTables {
-			c.nthRun = 0
-			c.chunkSize = 0
-			return true
+func (c *Chunker) needNewChunk(s state) (state, bool) {
+	if s.matched {
+		s.matched = false
+		s.nthRun++
+		if s.nthRun >= numGearTables {
+			s.nthRun = 0
+			s.size = 0
+			return s, true
 		}
 	}
-	if c.chunkSize >= c.maxSize {
-		c.chunkSize = 0
-		return true
+	if s.size >= c.maxSize {
+		s.size = 0
+		return s, true
 	}
-	return false
+	return s, false
 }
 
-// valueRoller returns a function that rolls the value in slot i of values.
-func (c *Chunker) valueRoller(values arrow.Array) (func(i int64), error) {
-	switch arr := values.(type) {
+// valueSource gives access to the values of one Chunks call. Fixed-width values of
+// 1, 2, 4 or 8 bytes are read as words, so that Chunks can roll them inline;
+// every other type is rolled by the roll function.
+type valueSource struct {
+	data  []byte                       // raw value buffer, read by word when width > 0
+	width int                          // byte width of a word value, or 0 when roll is used
+	roll  func(s state, i int64) state // rolls the value in slot i
+}
+
+// word returns the bytes of the value in slot i as a little-endian word, so
+// that rolling it least significant byte first follows memory order.
+func (v valueSource) word(i int64) uint64 {
+	switch v.width {
+	case 1:
+		return uint64(v.data[i])
+	case 2:
+		return uint64(binary.LittleEndian.Uint16(v.data[i*2:]))
+	case 4:
+		return uint64(binary.LittleEndian.Uint32(v.data[i*4:]))
+	}
+	return binary.LittleEndian.Uint64(v.data[i*8:])
+}
+
+// newValueSource returns the accessor for the values of arr.
+func (c *Chunker) newValueSource(arr arrow.Array) (valueSource, error) {
+	switch arr := arr.(type) {
 	case *array.Null:
-		return func(int64) {}, nil
+		return valueSource{roll: func(s state, _ int64) state { return s }}, nil
 	case *array.Boolean:
-		return func(i int64) {
+		return valueSource{roll: func(s state, i int64) state {
 			if arr.Value(int(i)) {
-				c.roll([]byte{1})
-			} else {
-				c.roll([]byte{0})
+				return c.roll(s, []byte{1})
 			}
-		}, nil
+			return c.roll(s, []byte{0})
+		}}, nil
 	case *array.Dictionary:
-		return c.valueRoller(arr.Indices())
+		return c.newValueSource(arr.Indices())
 	case array.ExtensionArray:
-		return c.valueRoller(arr.Storage())
+		return c.newValueSource(arr.Storage())
 	case *array.String:
-		return func(i int64) { c.rollString(arr.Value(int(i))) }, nil
+		return valueSource{roll: func(s state, i int64) state { return c.rollString(s, arr.Value(int(i))) }}, nil
 	case *array.LargeString:
-		return func(i int64) { c.rollString(arr.Value(int(i))) }, nil
+		return valueSource{roll: func(s state, i int64) state { return c.rollString(s, arr.Value(int(i))) }}, nil
 	case *array.StringView:
-		return func(i int64) { c.rollString(arr.Value(int(i))) }, nil
+		return valueSource{roll: func(s state, i int64) state { return c.rollString(s, arr.Value(int(i))) }}, nil
+	case *array.FixedSizeBinary:
+		return valueSource{roll: func(s state, i int64) state { return c.roll(s, arr.Value(int(i))) }}, nil
 	case *array.Binary:
-		return func(i int64) { c.roll(arr.Value(int(i))) }, nil
+		return valueSource{roll: func(s state, i int64) state { return c.roll(s, arr.Value(int(i))) }}, nil
 	case *array.LargeBinary:
-		return func(i int64) { c.roll(arr.Value(int(i))) }, nil
+		return valueSource{roll: func(s state, i int64) state { return c.roll(s, arr.Value(int(i))) }}, nil
 	case *array.BinaryView:
-		return func(i int64) { c.roll(arr.Value(int(i))) }, nil
+		return valueSource{roll: func(s state, i int64) state { return c.roll(s, arr.Value(int(i))) }}, nil
 	}
 
-	fixed, ok := values.DataType().(arrow.FixedWidthDataType)
+	fixed, ok := arr.DataType().(arrow.FixedWidthDataType)
 	if !ok || fixed.BitWidth()%8 != 0 {
-		return nil, fmt.Errorf("cdc: unsupported type %s for content-defined chunking", values.DataType())
+		return valueSource{}, fmt.Errorf("cdc: unsupported type %s for content-defined chunking", arr.DataType())
 	}
 	width := fixed.BitWidth() / 8
 	var data []byte
-	if buf := values.Data().Buffers()[1]; buf != nil {
-		data = buf.Bytes()[values.Data().Offset()*width:]
+	if buf := arr.Data().Buffers()[1]; buf != nil {
+		data = buf.Bytes()[arr.Data().Offset()*width:]
 	}
-	return func(i int64) {
+	if width == 1 || width == 2 || width == 4 || width == 8 {
+		return valueSource{data: data, width: width}, nil
+	}
+	return valueSource{roll: func(s state, i int64) state {
 		start := int(i) * width
-		c.roll(data[start : start+width])
-	}, nil
+		return c.roll(s, data[start:start+width])
+	}}, nil
 }
 
-func (c *Chunker) rollString(s string) {
-	c.roll(unsafe.Slice(unsafe.StringData(s), len(s)))
+func (c *Chunker) rollString(s state, v string) state {
+	return c.roll(s, unsafe.Slice(unsafe.StringData(v), len(v)))
 }
 
 // Chunks splits the levels (and the value slots they cover) of one column write
@@ -193,7 +233,7 @@ func (c *Chunker) rollString(s string) {
 // chunk, which closes the page left open by the previous call; no other chunk
 // is empty.
 func (c *Chunker) Chunks(levels file.LevelInfo, defLevels, repLevels []int16, values arrow.Array) ([]Chunk, error) {
-	rollValue, err := c.valueRoller(values)
+	vals, err := c.newValueSource(values)
 	if err != nil {
 		return nil, err
 	}
@@ -207,56 +247,85 @@ func (c *Chunker) Chunks(levels file.LevelInfo, defLevels, repLevels []int16, va
 		chunks          []Chunk
 		prevOffset      int64
 		prevValueOffset int64
-		numValues       = numLevels
+		valueOffset     int64
+		cut             bool
+		s               = c.state
 	)
-	switch {
-	case levels.RepLevel == 0 && levels.DefLevel == 0:
-		for offset := int64(0); offset < numLevels; offset++ {
-			rollValue(offset)
-			if c.needNewChunk() {
-				chunks = append(chunks, Chunk{prevOffset, prevOffset, offset - prevOffset, offset - prevOffset})
-				prevOffset = offset
+	// One loop serves flat required, flat nullable and nested columns, so that
+	// the unrolled word roll below appears exactly once. Flat columns have
+	// RepeatedAncestorDefLevel 0, which makes valueOffset equal to offset.
+	for offset := int64(0); offset < numLevels; offset++ {
+		def, rep := levels.DefLevel, int16(0)
+		if levels.DefLevel > 0 {
+			def = defLevels[offset]
+			s = c.rollLevel(s, def)
+		}
+		if levels.RepLevel > 0 {
+			rep = repLevels[offset]
+			s = c.rollLevel(s, rep)
+		}
+		if def == levels.DefLevel {
+			if vals.width == 0 {
+				s = vals.roll(s, valueOffset)
+			} else if s.size += int64(vals.width); s.size >= c.minSize {
+				// Go does not unroll loops and will not inline a helper this
+				// large, but a byte loop or a call per value is much slower.
+				// The cases fall through from the widest word to the narrowest.
+				v, mask := vals.word(valueOffset), c.mask
+				table := &gearTables[s.nthRun]
+				hash, matched := s.hash, s.matched
+				switch vals.width {
+				case 8:
+					hash = hash<<1 + table[byte(v)]
+					matched = matched || hash&mask == 0
+					v >>= 8
+					hash = hash<<1 + table[byte(v)]
+					matched = matched || hash&mask == 0
+					v >>= 8
+					hash = hash<<1 + table[byte(v)]
+					matched = matched || hash&mask == 0
+					v >>= 8
+					hash = hash<<1 + table[byte(v)]
+					matched = matched || hash&mask == 0
+					v >>= 8
+					fallthrough
+				case 4:
+					hash = hash<<1 + table[byte(v)]
+					matched = matched || hash&mask == 0
+					v >>= 8
+					hash = hash<<1 + table[byte(v)]
+					matched = matched || hash&mask == 0
+					v >>= 8
+					fallthrough
+				case 2:
+					hash = hash<<1 + table[byte(v)]
+					matched = matched || hash&mask == 0
+					v >>= 8
+					fallthrough
+				case 1:
+					hash = hash<<1 + table[byte(v)]
+					matched = matched || hash&mask == 0
+				}
+				s.hash, s.matched = hash, matched
 			}
 		}
-		prevValueOffset = prevOffset
-	case levels.RepLevel == 0:
-		for offset := int64(0); offset < numLevels; offset++ {
-			def := defLevels[offset]
-			c.rollLevel(def)
-			if def == levels.DefLevel {
-				rollValue(offset)
-			}
-			if c.needNewChunk() {
-				chunks = append(chunks, Chunk{prevOffset, prevOffset, offset - prevOffset, offset - prevOffset})
-				prevOffset = offset
-			}
-		}
-		prevValueOffset = prevOffset
-	default:
-		var valueOffset int64
-		for offset := int64(0); offset < numLevels; offset++ {
-			def, rep := defLevels[offset], repLevels[offset]
-			c.rollLevel(def)
-			c.rollLevel(rep)
-			if def == levels.DefLevel {
-				rollValue(valueOffset)
-			}
-			// Cut only at record boundaries.
-			if rep == 0 && c.needNewChunk() {
+		// Cut only at record boundaries.
+		if rep == 0 {
+			if s, cut = c.needNewChunk(s); cut {
 				chunks = append(chunks, Chunk{prevOffset, prevValueOffset, offset - prevOffset, valueOffset - prevValueOffset})
 				prevOffset, prevValueOffset = offset, valueOffset
 			}
-			if def >= levels.RepeatedAncestorDefLevel {
-				valueOffset++
-			}
 		}
-		numValues = valueOffset
+		if def >= levels.RepeatedAncestorDefLevel {
+			valueOffset++
+		}
 	}
+	c.state = s
 
 	if prevOffset < numLevels {
-		chunks = append(chunks, Chunk{prevOffset, prevValueOffset, numLevels - prevOffset, numValues - prevValueOffset})
+		chunks = append(chunks, Chunk{prevOffset, prevValueOffset, numLevels - prevOffset, valueOffset - prevValueOffset})
 	}
-	debug.Assert(validateChunks(chunks, numLevels, numValues), "cdc: invalid chunks")
+	debug.Assert(validateChunks(chunks, numLevels, valueOffset), "cdc: invalid chunks")
 	return chunks, nil
 }
 

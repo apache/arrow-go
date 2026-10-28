@@ -20,7 +20,10 @@ import (
 	"crypto/fips140"
 	"crypto/md5"
 	"encoding/binary"
+	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -232,12 +235,21 @@ func testInputs(mem memory.Allocator) map[string]chunkInput {
 		}
 	}
 
-	// Each record is null (def 0), empty (def 1) or a list of 1-6 elements, an
-	// eighth of which are null (def 2).
+	return map[string]chunkInput{
+		"required": {values: required.NewArray()},
+		"nullable": {levels: file.LevelInfo{DefLevel: 1}, def: nullableDef, values: nullable.NewArray()},
+		"list":     newListInput(mem, numTestValues),
+	}
+}
+
+// newListInput builds a list<int32> column of at least numLevels levels. Each record is
+// null (def 0), empty (def 1) or a list of 1-6 elements, an eighth of which are
+// null (def 2).
+func newListInput(mem memory.Allocator, numLevels int) chunkInput {
 	elems := array.NewInt32Builder(mem)
 	defer elems.Release()
 	var def, rep []int16
-	for r := uint64(0); len(def) < numTestValues; r++ {
+	for r := uint64(0); len(def) < numLevels; r++ {
 		h := splitmix(r + 1<<40)
 		switch n := h % 8; n {
 		case 0:
@@ -257,14 +269,9 @@ func testInputs(mem memory.Allocator) map[string]chunkInput {
 			}
 		}
 	}
-
-	return map[string]chunkInput{
-		"required": {values: required.NewArray()},
-		"nullable": {levels: file.LevelInfo{DefLevel: 1}, def: nullableDef, values: nullable.NewArray()},
-		"list": {
-			levels: file.LevelInfo{DefLevel: 3, RepLevel: 1, RepeatedAncestorDefLevel: 2},
-			def:    def, rep: rep, values: elems.NewArray(),
-		},
+	return chunkInput{
+		levels: file.LevelInfo{DefLevel: 3, RepLevel: 1, RepeatedAncestorDefLevel: 2},
+		def:    def, rep: rep, values: elems.NewArray(),
 	}
 }
 
@@ -540,40 +547,294 @@ func TestNeedNewChunkState(t *testing.T) {
 	t.Run("match runs", func(t *testing.T) {
 		c := newTestChunker(t, testOptions)
 		c.minSize, c.maxSize, c.mask = 0, 1<<40, 0 // every hashed byte matches
+		var s state
+		var cut bool
 		for run := 1; run < numGearTables; run++ {
-			c.roll([]byte{1})
-			require.True(t, c.hasMatched)
-			require.False(t, c.needNewChunk())
-			assert.Equal(t, run, c.nthRun)
-			assert.False(t, c.hasMatched)
-			assert.Equal(t, int64(run), c.chunkSize)
+			s = c.roll(s, []byte{1})
+			require.True(t, s.matched)
+			s, cut = c.needNewChunk(s)
+			require.False(t, cut)
+			assert.Equal(t, run, s.nthRun)
+			assert.False(t, s.matched)
+			assert.Equal(t, int64(run), s.size)
 		}
-		c.roll([]byte{1})
-		hash := c.rollingHash
-		require.True(t, c.needNewChunk())
-		assert.Zero(t, c.nthRun)
-		assert.Zero(t, c.chunkSize)
-		assert.Equal(t, hash, c.rollingHash)
+		s = c.roll(s, []byte{1})
+		hash := s.hash
+		s, cut = c.needNewChunk(s)
+		require.True(t, cut)
+		assert.Zero(t, s.nthRun)
+		assert.Zero(t, s.size)
+		assert.Equal(t, hash, s.hash)
 	})
 
 	t.Run("no match leaves run", func(t *testing.T) {
 		c := newTestChunker(t, testOptions)
-		c.minSize, c.maxSize, c.mask, c.nthRun = 0, 1<<40, ^uint64(0), 3
-		c.roll([]byte{1})
-		require.False(t, c.hasMatched)
-		assert.False(t, c.needNewChunk())
-		assert.Equal(t, 3, c.nthRun)
+		c.minSize, c.maxSize, c.mask = 0, 1<<40, ^uint64(0)
+		s := c.roll(state{nthRun: 3}, []byte{1})
+		require.False(t, s.matched)
+		s, cut := c.needNewChunk(s)
+		assert.False(t, cut)
+		assert.Equal(t, 3, s.nthRun)
 	})
 
 	t.Run("max size", func(t *testing.T) {
 		c := newTestChunker(t, testOptions)
-		c.minSize, c.maxSize, c.mask, c.nthRun = 0, 2, ^uint64(0), 3
-		c.roll([]byte{1, 2})
-		require.False(t, c.hasMatched)
-		hash := c.rollingHash
-		require.True(t, c.needNewChunk())
-		assert.Equal(t, 3, c.nthRun)
-		assert.Zero(t, c.chunkSize)
-		assert.Equal(t, hash, c.rollingHash)
+		c.minSize, c.maxSize, c.mask = 0, 2, ^uint64(0)
+		s := c.roll(state{nthRun: 3}, []byte{1, 2})
+		require.False(t, s.matched)
+		hash := s.hash
+		s, cut := c.needNewChunk(s)
+		require.True(t, cut)
+		assert.Equal(t, 3, s.nthRun)
+		assert.Zero(t, s.size)
+		assert.Equal(t, hash, s.hash)
 	})
+}
+
+// TestChunksWordsMatchBytes checks that the word path for 1, 2, 4 and 8 byte
+// values chunks exactly like the byte path, by viewing the same buffers as
+// fixed-size binary.
+func TestChunksWordsMatchBytes(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	const numLevels = 1 << 13
+	// newInts builds numLevels integers of the given width, every 10th one null
+	// if nullable, as an integer array and as a fixed-size binary array that
+	// shares its data buffer and validity bitmap.
+	newInts := func(width int, nullable bool) (ints, fsb arrow.Array) {
+		var b array.Builder
+		var appendValue func(i uint64)
+		switch width {
+		case 1:
+			ib := array.NewInt8Builder(mem)
+			b, appendValue = ib, func(i uint64) { ib.Append(int8(splitmix(i))) }
+		case 2:
+			ib := array.NewInt16Builder(mem)
+			b, appendValue = ib, func(i uint64) { ib.Append(int16(splitmix(i))) }
+		case 4:
+			ib := array.NewInt32Builder(mem)
+			b, appendValue = ib, func(i uint64) { ib.Append(int32(splitmix(i))) }
+		case 8:
+			ib := array.NewInt64Builder(mem)
+			b, appendValue = ib, func(i uint64) { ib.Append(int64(splitmix(i))) }
+		}
+		defer b.Release()
+		for i := uint64(0); i < numLevels; i++ {
+			if nullable && i%10 == 0 {
+				b.AppendNull()
+			} else {
+				appendValue(i)
+			}
+		}
+		ints = b.NewArray()
+		data := ints.Data()
+		fsbData := array.NewData(&arrow.FixedSizeBinaryType{ByteWidth: width}, data.Len(), data.Buffers(), nil, data.NullN(), data.Offset())
+		defer fsbData.Release()
+		return ints, array.NewFixedSizeBinaryData(fsbData)
+	}
+
+	optionSets := []parquet.CDCOptions{
+		{MinChunkSize: 1024, MaxChunkSize: 4096},
+		{MinChunkSize: 0, MaxChunkSize: 64},
+		{MinChunkSize: 256, MaxChunkSize: 1024, NormLevel: 2},
+	}
+	for _, width := range []int{1, 2, 4, 8} {
+		for _, shape := range []string{"required", "nullable", "nested"} {
+			t.Run(fmt.Sprintf("%s/width %d", shape, width), func(t *testing.T) {
+				ints, fsb := newInts(width, shape != "required")
+				defer ints.Release()
+				defer fsb.Release()
+
+				var intIn, fsbIn chunkInput
+				switch shape {
+				case "required":
+					intIn, fsbIn = chunkInput{values: ints}, chunkInput{values: fsb}
+				case "nullable":
+					def := make([]int16, numLevels)
+					for i := range def {
+						if ints.IsValid(i) {
+							def[i] = 1
+						}
+					}
+					levels := file.LevelInfo{DefLevel: 1}
+					intIn, fsbIn = chunkInput{levels: levels, def: def, values: ints}, chunkInput{levels: levels, def: def, values: fsb}
+				case "nested":
+					// list<int> records that are null (def 0), empty (def 1) or
+					// hold up to 3 elements, a null one having def 2. Null and empty
+					// records have no value slot, so value and level offsets differ.
+					var def, rep []int16
+					for slot, r := 0, uint64(0); slot < numLevels; r++ {
+						switch n := splitmix(r+1<<40) % 5; n {
+						case 0, 1:
+							def, rep = append(def, int16(n)), append(rep, 0)
+						default:
+							for e := uint64(0); e < n-1 && slot < numLevels; e++ {
+								rep = append(rep, int16(min(e, 1)))
+								if ints.IsNull(slot) {
+									def = append(def, 2)
+								} else {
+									def = append(def, 3)
+								}
+								slot++
+							}
+						}
+					}
+					levels := file.LevelInfo{DefLevel: 3, RepLevel: 1, RepeatedAncestorDefLevel: 2}
+					intIn, fsbIn = chunkInput{levels: levels, def: def, rep: rep, values: ints}, chunkInput{levels: levels, def: def, rep: rep, values: fsb}
+				}
+
+				for _, opts := range optionSets {
+					for _, from := range []int{0, 3} {
+						n := intIn.numLevels()
+						intSlice, fsbSlice := intIn.slice(from, n), fsbIn.slice(from, n)
+						want := fsbSlice.chunks(t, newTestChunker(t, opts))
+						got := intSlice.chunks(t, newTestChunker(t, opts))
+						assert.Equal(t, want, got, "options %+v offset %d", opts, from)
+						intSlice.values.Release()
+						fsbSlice.values.Release()
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestChunksStableBoundaries pins exact chunk boundaries, so that a change to
+// the hashing cannot silently move them: files written by different versions
+// must keep deduplicating against each other.
+func TestChunksStableBoundaries(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	const numLevels = 4096
+	opts := parquet.CDCOptions{MinChunkSize: 256, MaxChunkSize: 1024}
+
+	required := array.NewInt64Builder(mem)
+	defer required.Release()
+	nullable := array.NewInt32Builder(mem)
+	defer nullable.Release()
+	strs := array.NewStringBuilder(mem)
+	defer strs.Release()
+	nullableDef := make([]int16, numLevels)
+	for i := uint64(0); i < numLevels; i++ {
+		required.Append(int64(splitmix(i)))
+		if i%7 == 0 {
+			nullable.AppendNull()
+		} else {
+			nullable.Append(int32(splitmix(i)))
+			nullableDef[i] = 1
+		}
+		strs.Append(strings.Repeat("x", int(splitmix(i)%12)) + strconv.FormatUint(splitmix(i)%1000, 10))
+	}
+
+	tests := []struct {
+		name      string
+		in        chunkInput
+		numValues int64
+		offsets   []int64
+	}{
+		{
+			"required int64", chunkInput{values: required.NewArray()}, 4096,
+			[]int64{
+				0, 69, 127, 186, 242, 319, 386, 458, 541, 620, 721, 797, 882, 940, 1023, 1090,
+				1163, 1235, 1314, 1385, 1448, 1515, 1582, 1639, 1726, 1790, 1861, 1922, 1987, 2042, 2106, 2168,
+				2242, 2297, 2346, 2420, 2486, 2542, 2602, 2659, 2722, 2794, 2846, 2920, 2999, 3062, 3131, 3197,
+				3258, 3314, 3381, 3476, 3543, 3606, 3698, 3784, 3844, 3917, 3989, 4052,
+			},
+		},
+		{
+			"nullable int32", chunkInput{levels: file.LevelInfo{DefLevel: 1}, def: nullableDef, values: nullable.NewArray()}, 4096,
+			[]int64{
+				0, 98, 193, 302, 364, 487, 602, 704, 824, 922, 1023, 1126, 1199, 1304, 1408, 1476,
+				1579, 1659, 1727, 1815, 1918, 2005, 2105, 2230, 2325, 2420, 2492, 2567, 2665, 2795, 2893, 2981,
+				3092, 3176, 3287, 3372, 3463, 3562, 3645, 3743, 3828, 3930, 4040,
+			},
+		},
+		{
+			"list int32", newListInput(mem, numLevels), 3738,
+			[]int64{
+				0, 77, 188, 287, 374, 467, 557, 656, 740, 815, 896, 982, 1075, 1156, 1239, 1335,
+				1429, 1519, 1598, 1676, 1750, 1847, 1925, 2002, 2086, 2159, 2248, 2329, 2414, 2505, 2600, 2665,
+				2764, 2852, 2938, 3012, 3095, 3184, 3258, 3350, 3421, 3511, 3620, 3743, 3844, 3940, 4032,
+			},
+		},
+		{
+			"required string", chunkInput{values: strs.NewArray()}, 4096,
+			[]int64{
+				0, 47, 105, 159, 235, 298, 373, 436, 493, 552, 618, 688, 737, 821, 882, 968,
+				1027, 1076, 1128, 1196, 1239, 1283, 1345, 1414, 1486, 1547, 1620, 1699, 1765, 1833, 1896, 1962,
+				2037, 2110, 2162, 2234, 2305, 2363, 2406, 2494, 2565, 2628, 2687, 2752, 2806, 2870, 2935, 3005,
+				3089, 3153, 3201, 3262, 3348, 3410, 3459, 3513, 3569, 3640, 3708, 3782, 3837, 3884, 3937, 4024,
+				4079,
+			},
+		},
+	}
+	for _, tt := range tests {
+		defer tt.in.values.Release()
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chunks := tt.in.chunks(t, newTestChunker(t, opts))
+			var offsets []int64
+			var numValues int64
+			for _, c := range chunks {
+				offsets = append(offsets, c.LevelOffset)
+				numValues += c.NumValues
+			}
+			assert.Equal(t, tt.offsets, offsets)
+			assert.Equal(t, tt.numValues, numValues)
+		})
+	}
+}
+
+func BenchmarkChunks(b *testing.B) {
+	const numLevels = 1 << 20
+	mem := memory.DefaultAllocator
+
+	required := array.NewInt64Builder(mem)
+	defer required.Release()
+	nullable := array.NewInt64Builder(mem)
+	defer nullable.Release()
+	strs := array.NewStringBuilder(mem)
+	defer strs.Release()
+	nullableDef := make([]int16, numLevels)
+	for i := uint64(0); i < numLevels; i++ {
+		required.Append(int64(splitmix(i)))
+		if i%10 == 0 {
+			nullable.AppendNull()
+		} else {
+			nullable.Append(int64(splitmix(i)))
+			nullableDef[i] = 1
+		}
+		strs.Append(strconv.FormatUint(splitmix(i), 16))
+	}
+	requiredArr, nullableArr, stringArr := required.NewArray(), nullable.NewArray(), strs.NewArray()
+	defer requiredArr.Release()
+	defer nullableArr.Release()
+	defer stringArr.Release()
+	list := newListInput(mem, numLevels)
+	defer list.values.Release()
+
+	benchmarks := []struct {
+		name  string
+		in    chunkInput
+		bytes int64
+	}{
+		{"required/int64", chunkInput{values: requiredArr}, numLevels * 8},
+		{"nullable/int64", chunkInput{levels: file.LevelInfo{DefLevel: 1}, def: nullableDef, values: nullableArr}, int64(nullableArr.Len()-nullableArr.NullN()) * 8},
+		{"nested/list<int32>", list, int64(list.values.Len()-list.values.NullN()) * 4},
+		{"required/string", chunkInput{values: stringArr}, int64(len(stringArr.(*array.String).ValueBytes()))},
+	}
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			c, err := NewChunker(parquet.DefaultCDCOptions())
+			require.NoError(b, err)
+			b.SetBytes(bm.bytes)
+			for b.Loop() {
+				_, err := c.Chunks(bm.in.levels, bm.in.def, bm.in.rep, bm.in.values)
+				require.NoError(b, err)
+			}
+		})
+	}
 }
