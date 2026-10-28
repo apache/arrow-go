@@ -88,7 +88,8 @@ const (
 	SortNullsAtStart    = kernels.NullsAtStart
 )
 
-// SortKey defines a column to sort by with its ordering and null placement options.
+// SortKey defines a column to sort by with its ordering, null placement and float ordering options.
+// See kernels.SortKey.FloatTotalOrder for IEEE 754 totalOrder sorting of float columns.
 type SortKey = kernels.SortKey
 
 // SortOptions defines the desired sort order for the input.

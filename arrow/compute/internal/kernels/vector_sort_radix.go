@@ -19,9 +19,13 @@
 package kernels
 
 import (
+	"math"
+	"unsafe"
+
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
+	"github.com/apache/arrow-go/v18/arrow/float16"
 )
 
 const radixSortMinRows = 2048
@@ -67,6 +71,41 @@ func sortIndicesSingleIntRadix(ctx *exec.KernelCtx, arr arrow.Array, indices []u
 		return false
 	}
 	return true
+}
+
+// sortIndicesSingleFloatTotalOrderRadix is the SortKey.FloatTotalOrder counterpart of
+// sortIndicesSingleIntRadix for a single chunk of non-null floats. The IEEE 754
+// totalOrder maps each float to a signed integer key, so the floats are radix
+// sorted through a materialized key buffer.
+func sortIndicesSingleFloatTotalOrderRadix(ctx *exec.KernelCtx, arr arrow.Array, indices []uint64, order SortOrder) bool {
+	switch values := arr.(type) {
+	case *array.Float16:
+		radixSortFloatTotalOrder(ctx, indices, values.Values(), 2, 1<<15, order,
+			func(v float16.Num) int16 { return totalOrderKey16(v.Uint16()) })
+	case *array.Float32:
+		radixSortFloatTotalOrder(ctx, indices, values.Float32Values(), 4, 1<<31, order,
+			func(v float32) int32 { return totalOrderKey32(math.Float32bits(v)) })
+	case *array.Float64:
+		radixSortFloatTotalOrder(ctx, indices, values.Float64Values(), 8, 1<<63, order,
+			func(v float64) int64 { return totalOrderKey64(math.Float64bits(v)) })
+	default:
+		return false
+	}
+	return true
+}
+
+func radixSortFloatTotalOrder[F any, K int16 | int32 | int64](ctx *exec.KernelCtx, indices []uint64, values []F, numBytes int, signBit uint64, order SortOrder, toKey func(F) K) {
+	if len(values) < 2 {
+		return
+	}
+	var zero K
+	keyBuf := ctx.Allocate(len(values) * int(unsafe.Sizeof(zero)))
+	defer keyBuf.Release()
+	keys := arrow.GetData[K](keyBuf.Buf())[:len(values)]
+	for i, v := range values {
+		keys[i] = toKey(v)
+	}
+	radixSortIntegerIndices(ctx, indices, keys, numBytes, signBit, order)
 }
 
 // radixSortIntegerIndices performs a stable LSD radix sort over the logical row
