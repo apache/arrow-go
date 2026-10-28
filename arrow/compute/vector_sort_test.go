@@ -323,6 +323,74 @@ func TestSortIndices(t *testing.T) {
 	}
 }
 
+func TestSortIndicesReleasesScratchBuffers(t *testing.T) {
+	for _, input := range []string{"ArrayNulls", "ArrayNaN", "Chunked", "RecordBatch", "Table"} {
+		t.Run(input, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+			ctx := compute.WithAllocator(context.Background(), mem)
+
+			bldr := array.NewFloat64Builder(mem)
+			defer bldr.Release()
+			valid := []bool{true, true, true, false}
+			if input == "ArrayNaN" {
+				valid = nil
+			}
+			bldr.AppendValues([]float64{2, 1, 1, math.NaN()}, valid)
+			arr := bldr.NewArray()
+			defer arr.Release()
+
+			key := compute.DefaultSortKey()
+			want := []uint64{1, 2, 0, 3}
+			var (
+				indices arrow.Array
+				err     error
+			)
+			switch input {
+			case "ArrayNulls", "ArrayNaN":
+				indices, err = compute.SortIndicesArray(ctx, arr, key)
+			case "Chunked":
+				first := array.NewSlice(arr, 0, 2)
+				defer first.Release()
+				second := array.NewSlice(arr, 2, 4)
+				defer second.Release()
+				chunked := arrow.NewChunked(arr.DataType(), []arrow.Array{first, second})
+				defer chunked.Release()
+				indices, err = compute.SortIndicesChunked(ctx, chunked, key)
+			case "RecordBatch", "Table":
+				secondary, _, buildErr := array.FromJSON(mem, arrow.PrimitiveTypes.Int32,
+					strings.NewReader("[0, 2, 1, 0]"))
+				require.NoError(t, buildErr)
+				defer secondary.Release()
+				schema := arrow.NewSchema([]arrow.Field{
+					{Name: "primary", Type: arr.DataType(), Nullable: true},
+					{Name: "secondary", Type: secondary.DataType()},
+				}, nil)
+				batch := array.NewRecordBatch(schema, []arrow.Array{arr, secondary}, 4)
+				defer batch.Release()
+				secondKey := compute.DefaultSortKey()
+				secondKey.ColumnIndex = 1
+				keys := []compute.SortKey{key, secondKey}
+				want = []uint64{2, 1, 0, 3}
+				if input == "RecordBatch" {
+					indices, err = compute.SortIndicesRecordBatch(ctx, batch, keys)
+				} else {
+					first := batch.NewSlice(0, 2)
+					defer first.Release()
+					second := batch.NewSlice(2, 4)
+					defer second.Release()
+					tbl := array.NewTableFromRecords(schema, []arrow.RecordBatch{first, second})
+					defer tbl.Release()
+					indices, err = compute.SortIndicesTable(ctx, tbl, keys)
+				}
+			}
+			require.NoError(t, err)
+			defer indices.Release()
+			assert.Equal(t, want, indices.(*array.Uint64).Uint64Values())
+		})
+	}
+}
+
 func TestSortArray(t *testing.T) {
 	mem := memory.NewGoAllocator()
 	ctx := context.Background()

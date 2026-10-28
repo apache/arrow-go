@@ -206,11 +206,15 @@ func sortIndicesImpl(ctx context.Context, opts FunctionOptions, input Datum) (Da
 // SortIndices computes the indices that would sort the input.
 // For arrays and chunked arrays, pass a single SortKey (ColumnIndex is ignored).
 // For record batches and tables, pass []SortKey to specify multi-column sort order.
+// Temporary sorting buffers use the context's allocator and are released before returning.
+// The caller must release the returned datum.
 func SortIndices(ctx context.Context, input Datum, keys SortOptions) (Datum, error) {
 	return CallFunction(ctx, "sort_indices", keys, input)
 }
 
 // SortIndicesArray computes the indices that would sort the input array.
+// As with [SortIndices], temporary sorting buffers use the context's allocator
+// and are released before returning. The caller must release the returned array.
 func SortIndicesArray(ctx context.Context, input arrow.Array, key SortKey) (arrow.Array, error) {
 	v := NewDatumWithoutOwning(input)
 
@@ -224,6 +228,8 @@ func SortIndicesArray(ctx context.Context, input arrow.Array, key SortKey) (arro
 }
 
 // SortIndicesChunked computes the indices that would sort the input chunked array.
+// As with [SortIndices], temporary sorting buffers use the context's allocator
+// and are released before returning. The caller must release the returned array.
 func SortIndicesChunked(ctx context.Context, input *arrow.Chunked, key SortKey) (arrow.Array, error) {
 	v := NewDatumWithoutOwning(input)
 
@@ -237,6 +243,8 @@ func SortIndicesChunked(ctx context.Context, input *arrow.Chunked, key SortKey) 
 }
 
 // SortIndicesRecordBatch computes the indices that would sort the record batch (stable, lexicographic by keys).
+// As with [SortIndices], temporary sorting buffers use the context's allocator
+// and are released before returning. The caller must release the returned array.
 func SortIndicesRecordBatch(ctx context.Context, batch arrow.RecordBatch, keys []SortKey) (arrow.Array, error) {
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("%w: at least one sort key is required", arrow.ErrInvalid)
@@ -254,6 +262,8 @@ func SortIndicesRecordBatch(ctx context.Context, batch arrow.RecordBatch, keys [
 }
 
 // SortIndicesTable computes the indices that would sort the table (stable, lexicographic by keys).
+// As with [SortIndices], temporary sorting buffers use the context's allocator
+// and are released before returning. The caller must release the returned array.
 func SortIndicesTable(ctx context.Context, tbl arrow.Table, keys []SortKey) (arrow.Array, error) {
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("%w: at least one sort key is required", arrow.ErrInvalid)
@@ -272,11 +282,15 @@ func SortIndicesTable(ctx context.Context, tbl arrow.Table, keys []SortKey) (arr
 
 // Sort returns a sorted copy of the input datum by calling the registered "sort" function
 // ([SortIndices] then [Take]). Supported kinds are [KindArray], [KindChunked], [KindRecord], and [KindTable].
+// As with [SortIndices], temporary sorting buffers use the context's allocator
+// and are released before returning. The caller must release the returned datum.
 func Sort(ctx context.Context, input Datum, keys SortOptions) (Datum, error) {
 	return CallFunction(ctx, "sort", keys, input)
 }
 
 // SortArray returns a sorted copy of the input array.
+// As with [SortIndices], temporary sorting buffers use the context's allocator
+// and are released before returning. The caller must release the returned array.
 func SortArray(ctx context.Context, input arrow.Array, key SortKey) (arrow.Array, error) {
 	indicesArr, err := SortIndicesArray(ctx, input, key)
 	if err != nil {
@@ -288,6 +302,8 @@ func SortArray(ctx context.Context, input arrow.Array, key SortKey) (arrow.Array
 }
 
 // SortChunked returns a sorted copy of the input chunked array.
+// As with [SortIndices], temporary sorting buffers use the context's allocator
+// and are released before returning. The caller must release the returned chunked array.
 func SortChunked(ctx context.Context, input *arrow.Chunked, key SortKey) (*arrow.Chunked, error) {
 	inputDatum := NewDatumWithoutOwning(input)
 
@@ -311,6 +327,8 @@ func SortChunked(ctx context.Context, input *arrow.Chunked, key SortKey) (*arrow
 // SortRecordBatch returns a sorted copy of the record batch using lexicographic ordering across the specified columns.
 // Each SortKey specifies a column index and its sort order and null placement.
 // When multiple keys are provided, ties in earlier columns are broken by later columns.
+// As with [SortIndices], temporary sorting buffers use the context's allocator
+// and are released before returning. The caller must release the returned record batch.
 //
 // Example:
 //
@@ -347,6 +365,8 @@ func SortRecordBatch(ctx context.Context, batch arrow.RecordBatch, keys []kernel
 // SortTable returns a sorted copy of the table using lexicographic ordering across the specified columns.
 // Each SortKey specifies a column index and its sort order and null placement.
 // When multiple keys are provided, ties in earlier columns are broken by later columns.
+// As with [SortIndices], temporary sorting buffers use the context's allocator
+// and are released before returning. The caller must release the returned table.
 //
 // Example:
 //
