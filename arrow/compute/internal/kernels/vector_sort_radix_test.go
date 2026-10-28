@@ -250,3 +250,99 @@ func TestSortIndicesSingleChunkRadixFloatTotalOrder(t *testing.T) {
 		mem.AssertSize(t, 0)
 	}
 }
+
+// totalOrderBitPatterns lists raw bit patterns in ascending IEEE 754 totalOrder for a float
+// format with the given exponent and mantissa widths. It covers NaN payloads and
+// signaling vs quiet NaNs: for positive NaNs, signaling < quiet and larger payloads sort
+// later; negative NaNs mirror that.
+func totalOrderBitPatterns(expBits, mantBits uint) []uint64 {
+	sign := uint64(1) << (expBits + mantBits)
+	exp := ((uint64(1) << expBits) - 1) << mantBits
+	quiet := uint64(1) << (mantBits - 1)
+	one := (((uint64(1) << (expBits - 1)) - 1) << mantBits) // 1.0
+	pos := []uint64{
+		0,                    // +0
+		1,                    // smallest subnormal
+		one,                  // 1.0
+		exp - 1,              // largest finite
+		exp,                  // +Inf
+		exp | 1,              // sNaN, payload 1
+		exp | 2,              // sNaN, payload 2
+		exp | quiet,          // canonical qNaN
+		exp | quiet | 1,      // qNaN, payload 1
+		exp | (quiet<<1 - 1), // qNaN, all mantissa bits set
+	}
+	out := make([]uint64, 0, 2*len(pos))
+	for i := len(pos) - 1; i >= 0; i-- {
+		out = append(out, pos[i]|sign) // negatives, most negative first
+	}
+	return append(out, pos...)
+}
+
+// TestSortIndicesFloatTotalOrderNaNPayloads checks NaN payload and signaling/quiet ordering
+// with raw bit patterns, on both the comparator path (below radixSortMinRows) and the
+// radix fast path.
+func TestSortIndicesFloatTotalOrderNaNPayloads(t *testing.T) {
+	formats := []struct {
+		dt                arrow.DataType
+		expBits, mantBits uint
+	}{
+		{arrow.PrimitiveTypes.Float64, 11, 52},
+		{arrow.PrimitiveTypes.Float32, 8, 23},
+		{arrow.FixedWidthTypes.Float16, 5, 10},
+	}
+	for _, f := range formats {
+		sorted := totalOrderBitPatterns(f.expBits, f.mantBits)
+		for _, reps := range []int{1, radixSortMinRows/len(sorted) + 1} {
+			for _, order := range []SortOrder{Ascending, Descending} {
+				t.Run(fmt.Sprintf("%s/reps=%d/%v", f.dt, reps, order), func(t *testing.T) {
+					mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+					defer mem.AssertSize(t, 0)
+					ctx := &exec.KernelCtx{Ctx: exec.WithAllocator(context.Background(), mem)}
+
+					// Deterministically shuffled input, repeated reps times.
+					bits := make([]uint64, 0, len(sorted)*reps)
+					for r := range reps {
+						for i := range sorted {
+							bits = append(bits, sorted[(i*7+r)%len(sorted)])
+						}
+					}
+					bldr := array.NewBuilder(mem, f.dt)
+					for _, b := range bits {
+						switch bb := bldr.(type) {
+						case *array.Float64Builder:
+							bb.Append(math.Float64frombits(b))
+						case *array.Float32Builder:
+							bb.Append(math.Float32frombits(uint32(b)))
+						case *array.Float16Builder:
+							bb.Append(float16.FromBits(uint16(b)))
+						}
+					}
+					arr := bldr.NewArray()
+					bldr.Release()
+					defer arr.Release()
+					col := arrow.NewChunked(f.dt, []arrow.Array{arr})
+					defer col.Release()
+
+					result, err := SortIndices(ctx, []*arrow.Chunked{col}, []SortKey{{Order: order, FloatTotalOrder: true}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer result.Release()
+					got := arrow.GetData[uint64](result.Buffers[1].Buf)[:len(bits)]
+
+					rank := make(map[uint64]int, len(sorted))
+					for i, b := range sorted {
+						rank[b] = i
+					}
+					for k := 1; k < len(got); k++ {
+						prev, cur := rank[bits[got[k-1]]], rank[bits[got[k]]]
+						if (order == Ascending && prev > cur) || (order == Descending && prev < cur) {
+							t.Fatalf("position %d: bits %#x sorted before %#x", k, bits[got[k-1]], bits[got[k]])
+						}
+					}
+				})
+			}
+		}
+	}
+}
