@@ -448,6 +448,7 @@ func SortIndices(ctx *exec.KernelCtx, columns []*arrow.Chunked, keys []SortKey) 
 		chunks := columns[0].Chunks()
 		if len(chunks) > 1 {
 			tmpBuf := ctx.Allocate(nRows * arrow.Uint64SizeBytes)
+			defer tmpBuf.Release()
 			tmp := arrow.GetData[uint64](tmpBuf.Buf())[:nRows]
 			spanScratch := make([]chunkIndexSpan, len(chunks))
 			sortIndicesSingleColumnChunked(indices, chunks, comparators[0], keys[0], tmp, spanScratch)
@@ -463,6 +464,7 @@ func SortIndices(ctx *exec.KernelCtx, columns []*arrow.Chunked, keys []SortKey) 
 				slices.SortStableFunc(indices, func(a, b uint64) int { return c0.compareRowsForKey(a, b, k0) })
 			} else {
 				tmpBuf := ctx.Allocate(nRows * arrow.Uint64SizeBytes)
+				defer tmpBuf.Release()
 				tmp := arrow.GetData[uint64](tmpBuf.Buf())[:nRows]
 				arraySortOneColumnRange(indices, tmp, c0, k0, 0, nRows)
 			}
@@ -477,6 +479,7 @@ func SortIndices(ctx *exec.KernelCtx, columns []*arrow.Chunked, keys []SortKey) 
 		multiChunkMerge := aligned && nSeg > 1
 
 		tmpBuf := ctx.Allocate(nRows * arrow.Uint64SizeBytes)
+		defer tmpBuf.Release()
 		tmp := arrow.GetData[uint64](tmpBuf.Buf())[:nRows]
 
 		var spanScratch []chunkIndexSpan

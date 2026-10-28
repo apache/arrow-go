@@ -206,6 +206,8 @@ func sortIndicesImpl(ctx context.Context, opts FunctionOptions, input Datum) (Da
 // SortIndices computes the indices that would sort the input.
 // For arrays and chunked arrays, pass a single SortKey (ColumnIndex is ignored).
 // For record batches and tables, pass []SortKey to specify multi-column sort order.
+// Temporary sorting buffers use the context's allocator and are released before returning.
+// The caller must release the returned datum.
 func SortIndices(ctx context.Context, input Datum, keys SortOptions) (Datum, error) {
 	return CallFunction(ctx, "sort_indices", keys, input)
 }
