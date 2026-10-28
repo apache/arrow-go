@@ -65,6 +65,11 @@ type SortKey struct {
 	// compare numerically with -0 == +0 and every NaN, regardless of sign, is grouped next
 	// to the nulls according to NullPlacement, independent of Order (Arrow C++ behavior).
 	// Non-float columns ignore it.
+	//
+	// Total order is usually faster than the default ordering, since each value maps to an
+	// integer key and no NaN checks are needed. When it is the only sort key and the column
+	// is a single chunk of at least 2048 rows without nulls, the sort is a radix sort over
+	// those keys, which allocates a temporary key buffer the size of the column's values.
 	FloatTotalOrder bool
 }
 
@@ -169,7 +174,7 @@ func newFixedSizeBinaryComparator(chunks []arrow.Array, numRows int, vn bool, ro
 }
 
 // createChunkedComparator builds a column comparator for these chunks (one Arrow type for all chunks).
-// rowMap may be shared by aligned multi-key columns. floatTotalOrder selects IEEE 754 totalOrder for floats.
+// rowMap may be shared by aligned multi-key columns. floatTotalOrder enables or disables IEEE 754 totalOrder for floats.
 func createChunkedComparator(chunks []arrow.Array, numRows int, rowMap logicalRowMap, floatTotalOrder bool) (columnComparator, error) {
 	if len(chunks) == 0 {
 		return nil, fmt.Errorf("%w: cannot create comparator for empty chunk list", arrow.ErrInvalid)
@@ -210,11 +215,20 @@ func createChunkedComparator(chunks []arrow.Array, numRows int, rowMap logicalRo
 	case arrow.UINT64:
 		return newPhysicalSortUint64Column(chunks, numRows, validityNulls, rowMap), nil
 	case arrow.FLOAT16:
-		return newPhysicalSortFloat16Column(chunks, numRows, validityNulls, rowMap, floatTotalOrder), nil
+		if floatTotalOrder {
+			return &physicalSortFloat16TotalOrderColumn{physicalSortFloatTotalOrderBase{newPhysicalColumnBase(chunks, numRows, validityNulls, rowMap)}}, nil
+		}
+		return newPhysicalSortFloat16Column(chunks, numRows, validityNulls, rowMap), nil
 	case arrow.FLOAT32:
-		return newPhysicalSortFloat32Column(chunks, numRows, validityNulls, rowMap, floatTotalOrder), nil
+		if floatTotalOrder {
+			return &physicalSortFloat32TotalOrderColumn{physicalSortFloatTotalOrderBase{newPhysicalColumnBase(chunks, numRows, validityNulls, rowMap)}}, nil
+		}
+		return newPhysicalSortFloat32Column(chunks, numRows, validityNulls, rowMap), nil
 	case arrow.FLOAT64:
-		return newPhysicalSortFloat64Column(chunks, numRows, validityNulls, rowMap, floatTotalOrder), nil
+		if floatTotalOrder {
+			return &physicalSortFloat64TotalOrderColumn{physicalSortFloatTotalOrderBase{newPhysicalColumnBase(chunks, numRows, validityNulls, rowMap)}}, nil
+		}
+		return newPhysicalSortFloat64Column(chunks, numRows, validityNulls, rowMap), nil
 	case arrow.DECIMAL32:
 		return newPhysicalSortDecimal32Column(chunks, numRows, validityNulls, rowMap), nil
 	case arrow.DECIMAL64:
