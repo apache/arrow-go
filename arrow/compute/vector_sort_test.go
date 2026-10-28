@@ -20,7 +20,10 @@ package compute_test
 
 import (
 	"context"
+	"fmt"
 	"math"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1813,4 +1816,168 @@ func TestSortIndicesUUIDLexicographic(t *testing.T) {
 	testSortIndicesUint64(t, ctx, d, compute.SortOptions{
 		{Order: kernels.Descending, NullPlacement: kernels.NullsAtStart},
 	}, []uint64{1, 0, 3, 2})
+}
+
+// floatTotalOrderLabels is the ascending IEEE 754 totalOrder of floatTotalOrderInput's non-null
+// values; the input deliberately interleaves +0 and -0 so ties would keep input order.
+var floatTotalOrderLabels = []string{"-NaN", "-Inf", "-2", "-0", "-0", "0", "0", "1", "+Inf", "NaN"}
+
+func floatTotalOrderInput() []float64 {
+	negNaN := math.Float64frombits(0xFFF8000000000000)
+	negZero := math.Copysign(0, -1)
+	return []float64{1, math.NaN(), 0, math.Inf(-1), -2, negNaN, negZero, math.Inf(1), 0, negZero}
+}
+
+func floatLabel(v float64) string {
+	switch {
+	case math.IsNaN(v) && math.Signbit(v):
+		return "-NaN"
+	case math.IsNaN(v):
+		return "NaN"
+	case math.IsInf(v, 1):
+		return "+Inf"
+	case math.IsInf(v, -1):
+		return "-Inf"
+	case v == 0 && math.Signbit(v):
+		return "-0"
+	}
+	return strconv.FormatFloat(v, 'g', -1, 64)
+}
+
+func expectedTotalOrderLabels(key compute.SortKey) []string {
+	vals := slices.Clone(floatTotalOrderLabels)
+	if key.Order == compute.SortOrderDescending {
+		slices.Reverse(vals)
+	}
+	if key.NullPlacement == compute.SortNullsAtStart {
+		return append([]string{"null"}, vals...)
+	}
+	return append(vals, "null")
+}
+
+// buildFloatTotalOrderArray builds the input (plus one null in the middle) as the given float type.
+func buildFloatTotalOrderArray(t *testing.T, mem memory.Allocator, dt arrow.DataType, vals []float64) arrow.Array {
+	t.Helper()
+	bldr := array.NewBuilder(mem, dt)
+	defer bldr.Release()
+	for i, v := range vals {
+		if i == len(vals)/2 {
+			bldr.AppendNull()
+		}
+		switch b := bldr.(type) {
+		case *array.Float64Builder:
+			b.Append(v)
+		case *array.Float32Builder:
+			b.Append(float32(v))
+		case *array.Float16Builder:
+			// float16.New goes through float32, which keeps the NaN sign bit.
+			b.Append(float16.New(float32(v)))
+		}
+	}
+	return bldr.NewArray()
+}
+
+func labelsAt(arr arrow.Array, indices []uint64) []string {
+	out := make([]string, len(indices))
+	for k, i := range indices {
+		if arr.IsNull(int(i)) {
+			out[k] = "null"
+			continue
+		}
+		switch a := arr.(type) {
+		case *array.Float64:
+			out[k] = floatLabel(a.Value(int(i)))
+		case *array.Float32:
+			out[k] = floatLabel(float64(a.Value(int(i))))
+		case *array.Float16:
+			out[k] = floatLabel(float64(a.Value(int(i)).Float32()))
+		}
+	}
+	return out
+}
+
+func floatTotalOrderKeys() []compute.SortKey {
+	var keys []compute.SortKey
+	for _, o := range []kernels.SortOrder{compute.SortOrderAscending, compute.SortOrderDescending} {
+		for _, np := range []kernels.NullPlacement{compute.SortNullsAtEnd, compute.SortNullsAtStart} {
+			keys = append(keys, compute.SortKey{Order: o, NullPlacement: np, FloatTotalOrder: true})
+		}
+	}
+	return keys
+}
+
+func TestSortIndicesFloatTotalOrder(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	ctx := context.Background()
+	vals := floatTotalOrderInput()
+
+	for _, dt := range []arrow.DataType{arrow.PrimitiveTypes.Float64, arrow.PrimitiveTypes.Float32, arrow.FixedWidthTypes.Float16} {
+		for _, key := range floatTotalOrderKeys() {
+			want := expectedTotalOrderLabels(key)
+			name := fmt.Sprintf("%s/order=%d/nulls=%d", dt, key.Order, key.NullPlacement)
+
+			t.Run(name+"/array", func(t *testing.T) {
+				arr := buildFloatTotalOrderArray(t, mem, dt, vals)
+				defer arr.Release()
+				idx, err := compute.SortIndicesArray(ctx, arr, key)
+				require.NoError(t, err)
+				defer idx.Release()
+				assert.Equal(t, want, labelsAt(arr, idx.(*array.Uint64).Uint64Values()))
+			})
+
+			t.Run(name+"/chunked", func(t *testing.T) {
+				// Two chunks exercise the per-chunk sort followed by the merge.
+				a := buildFloatTotalOrderArray(t, mem, dt, vals[:5])
+				defer a.Release()
+				b := buildFloatTotalOrderArray(t, mem, dt, vals[5:])
+				defer b.Release()
+				chunked := arrow.NewChunked(dt, []arrow.Array{a, b})
+				defer chunked.Release()
+				flat, err := array.Concatenate(chunked.Chunks(), mem)
+				require.NoError(t, err)
+				defer flat.Release()
+				idx, err := compute.SortIndicesChunked(ctx, chunked, key)
+				require.NoError(t, err)
+				defer idx.Release()
+				got := labelsAt(flat, idx.(*array.Uint64).Uint64Values())
+				// One null per chunk.
+				if key.NullPlacement == compute.SortNullsAtStart {
+					assert.Equal(t, append([]string{"null"}, want...), got)
+				} else {
+					assert.Equal(t, append(slices.Clone(want), "null"), got)
+				}
+			})
+
+			t.Run(name+"/record_batch", func(t *testing.T) {
+				// Leading float key with a constant secondary key exercises the multi-key radix path.
+				arr := buildFloatTotalOrderArray(t, mem, dt, vals)
+				defer arr.Release()
+				ib := array.NewInt32Builder(mem)
+				defer ib.Release()
+				ib.AppendValues(make([]int32, arr.Len()), nil)
+				ints := ib.NewArray()
+				defer ints.Release()
+				schema := arrow.NewSchema([]arrow.Field{{Name: "f", Type: dt, Nullable: true}, {Name: "i", Type: arrow.PrimitiveTypes.Int32}}, nil)
+				rec := array.NewRecordBatch(schema, []arrow.Array{arr, ints}, int64(arr.Len()))
+				defer rec.Release()
+				k1 := compute.SortKey{ColumnIndex: 1}
+				idx, err := compute.SortIndicesRecordBatch(ctx, rec, []compute.SortKey{key, k1})
+				require.NoError(t, err)
+				defer idx.Release()
+				assert.Equal(t, want, labelsAt(arr, idx.(*array.Uint64).Uint64Values()))
+			})
+		}
+	}
+}
+
+func TestSortIndicesFloatDefaultOrderingUnchanged(t *testing.T) {
+	// The default ordering keeps NaNs null-like, ignores their sign, and treats -0 == +0.
+	mem := memory.NewGoAllocator()
+	arr := buildFloatTotalOrderArray(t, mem, arrow.PrimitiveTypes.Float64, floatTotalOrderInput())
+	defer arr.Release()
+	idx, err := compute.SortIndicesArray(context.Background(), arr, compute.SortKey{Order: compute.SortOrderDescending, NullPlacement: compute.SortNullsAtStart})
+	require.NoError(t, err)
+	defer idx.Release()
+	assert.Equal(t, []string{"null", "NaN", "-NaN", "+Inf", "1", "0", "-0", "0", "-0", "-2", "-Inf"},
+		labelsAt(arr, idx.(*array.Uint64).Uint64Values()))
 }

@@ -22,12 +22,14 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
+	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
@@ -145,5 +147,106 @@ func TestSortIndicesSingleChunkRadixSliced(t *testing.T) {
 				t.Fatalf("radix sort of sliced array differs from stable sort")
 			}
 		})
+	}
+}
+
+// specTotalOrder is an independent reference for IEEE 754 totalOrder on non-payload NaNs:
+// -NaN < -Inf < negatives < -0 < +0 < positives < +Inf < +NaN.
+func specTotalOrder(a, b float64) int {
+	rank := func(v float64) int {
+		switch {
+		case math.IsNaN(v) && math.Signbit(v):
+			return 0
+		case math.IsNaN(v):
+			return 2
+		}
+		return 1
+	}
+	if c := cmp.Compare(rank(a), rank(b)); c != 0 || rank(a) != 1 {
+		return c
+	}
+	if c := cmp.Compare(a, b); c != 0 {
+		return c
+	}
+	// Equal numerically: only -0 vs +0 can still differ.
+	return cmp.Compare(boolInt(!math.Signbit(a)), boolInt(!math.Signbit(b)))
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// TestSortIndicesSingleChunkRadixFloatTotalOrder covers the radix fast path (single sliced
+// chunk, no nulls, >= radixSortMinRows) for SortKey.FloatTotalOrder against the reference order.
+func TestSortIndicesSingleChunkRadixFloatTotalOrder(t *testing.T) {
+	const start, n = 37, 4096
+	special := []float64{math.NaN(), math.Float64frombits(0xFFF8000000000000), math.Inf(1), math.Inf(-1),
+		0, math.Copysign(0, -1), math.SmallestNonzeroFloat64, -math.SmallestNonzeroFloat64, math.MaxFloat64, -math.MaxFloat64}
+	values := make([]float64, start+n+19)
+	for i := range values {
+		x := uint64(i)*6364136223846793005 + 1442695040888963407
+		if x%5 == 0 {
+			values[i] = special[int(x>>33)%len(special)]
+		} else {
+			values[i] = float64(int64(x>>40)%2001-1000) / 8
+		}
+	}
+
+	for _, dt := range []arrow.DataType{arrow.PrimitiveTypes.Float64, arrow.PrimitiveTypes.Float32, arrow.FixedWidthTypes.Float16} {
+		mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+		ctx := &exec.KernelCtx{Ctx: exec.WithAllocator(context.Background(), mem)}
+		bldr := array.NewBuilder(mem, dt)
+		// Values as stored in the column type (narrowing keeps NaN signs, may round magnitudes).
+		stored := make([]float64, len(values))
+		for i, v := range values {
+			switch b := bldr.(type) {
+			case *array.Float64Builder:
+				b.Append(v)
+				stored[i] = v
+			case *array.Float32Builder:
+				b.Append(float32(v))
+				stored[i] = float64(float32(v))
+			case *array.Float16Builder:
+				h := float16.New(float32(v))
+				b.Append(h)
+				stored[i] = float64(h.Float32())
+			}
+		}
+		full := bldr.NewArray()
+		bldr.Release()
+		sliced := array.NewSlice(full, start, start+n)
+		col := arrow.NewChunked(dt, []arrow.Array{sliced})
+
+		for _, order := range []SortOrder{Ascending, Descending} {
+			t.Run(fmt.Sprintf("%s/%v", dt, order), func(t *testing.T) {
+				result, err := SortIndices(ctx, []*arrow.Chunked{col}, []SortKey{{Order: order, FloatTotalOrder: true}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer result.Release()
+				got := arrow.GetData[uint64](result.Buffers[1].Buf)[:n]
+				want := make([]uint64, n)
+				for i := range want {
+					want[i] = uint64(i)
+				}
+				slices.SortStableFunc(want, func(a, b uint64) int {
+					c := specTotalOrder(stored[start+int(a)], stored[start+int(b)])
+					if order == Descending {
+						return -c
+					}
+					return c
+				})
+				if !slices.Equal(got, want) {
+					t.Fatalf("radix total-order sort differs from reference stable sort")
+				}
+			})
+		}
+		col.Release()
+		sliced.Release()
+		full.Release()
+		mem.AssertSize(t, 0)
 	}
 }

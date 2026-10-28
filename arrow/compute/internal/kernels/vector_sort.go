@@ -53,11 +53,19 @@ func (SortOptions) TypeName() string { return "SortOptions" }
 
 type SortState = SortOptions
 
-// SortKey defines a column to sort by with its ordering and null placement options.
+// SortKey defines a column to sort by with its ordering, null placement and float ordering options.
 type SortKey struct {
 	ColumnIndex   int
 	Order         SortOrder
 	NullPlacement NullPlacement
+	// FloatTotalOrder orders float16/float32/float64 columns by the IEEE 754 totalOrder
+	// predicate: -NaN < -Inf < negative values < -0 < +0 < positive values < +Inf < +NaN.
+	// NaNs are ordered as values (not null-like) and Descending reverses the whole order,
+	// NaNs included; nulls still follow NullPlacement. When false (the default), floats
+	// compare numerically with -0 == +0 and every NaN, regardless of sign, is grouped next
+	// to the nulls according to NullPlacement, independent of Order (Arrow C++ behavior).
+	// Non-float columns ignore it.
+	FloatTotalOrder bool
 }
 
 // Chunk-aware sort_indices: logical row IDs 0..n-1, no chunk concatenation. Structure follows
@@ -161,8 +169,8 @@ func newFixedSizeBinaryComparator(chunks []arrow.Array, numRows int, vn bool, ro
 }
 
 // createChunkedComparator builds a column comparator for these chunks (one Arrow type for all chunks).
-// rowMap may be shared by aligned multi-key columns.
-func createChunkedComparator(chunks []arrow.Array, numRows int, rowMap logicalRowMap) (columnComparator, error) {
+// rowMap may be shared by aligned multi-key columns. floatTotalOrder selects IEEE 754 totalOrder for floats.
+func createChunkedComparator(chunks []arrow.Array, numRows int, rowMap logicalRowMap, floatTotalOrder bool) (columnComparator, error) {
 	if len(chunks) == 0 {
 		return nil, fmt.Errorf("%w: cannot create comparator for empty chunk list", arrow.ErrInvalid)
 	}
@@ -202,11 +210,11 @@ func createChunkedComparator(chunks []arrow.Array, numRows int, rowMap logicalRo
 	case arrow.UINT64:
 		return newPhysicalSortUint64Column(chunks, numRows, validityNulls, rowMap), nil
 	case arrow.FLOAT16:
-		return newPhysicalSortFloat16Column(chunks, numRows, validityNulls, rowMap), nil
+		return newPhysicalSortFloat16Column(chunks, numRows, validityNulls, rowMap, floatTotalOrder), nil
 	case arrow.FLOAT32:
-		return newPhysicalSortFloat32Column(chunks, numRows, validityNulls, rowMap), nil
+		return newPhysicalSortFloat32Column(chunks, numRows, validityNulls, rowMap, floatTotalOrder), nil
 	case arrow.FLOAT64:
-		return newPhysicalSortFloat64Column(chunks, numRows, validityNulls, rowMap), nil
+		return newPhysicalSortFloat64Column(chunks, numRows, validityNulls, rowMap, floatTotalOrder), nil
 	case arrow.DECIMAL32:
 		return newPhysicalSortDecimal32Column(chunks, numRows, validityNulls, rowMap), nil
 	case arrow.DECIMAL64:
@@ -420,7 +428,7 @@ func SortIndices(ctx *exec.KernelCtx, columns []*arrow.Chunked, keys []SortKey) 
 
 	comparators := make([]columnComparator, len(columns))
 	for i, col := range columns {
-		comp, err := createChunkedComparator(col.Chunks(), nRows, sharedRowMap)
+		comp, err := createChunkedComparator(col.Chunks(), nRows, sharedRowMap, keys[i].FloatTotalOrder)
 		if err != nil {
 			return nil, err
 		}
@@ -455,7 +463,8 @@ func SortIndices(ctx *exec.KernelCtx, columns []*arrow.Chunked, keys []SortKey) 
 			k0 := keys[0]
 			c0 := comparators[0]
 			if nRows >= radixSortMinRows && !c0.columnHasValidityNulls() &&
-				sortIndicesSingleIntRadix(ctx, chunks[0], indices, k0.Order) {
+				(sortIndicesSingleIntRadix(ctx, chunks[0], indices, k0.Order) ||
+					(k0.FloatTotalOrder && sortIndicesSingleFloatTotalOrderRadix(ctx, chunks[0], indices, k0.Order))) {
 				out.Buffers[1].WrapBuffer(buf)
 				return out, nil
 			}

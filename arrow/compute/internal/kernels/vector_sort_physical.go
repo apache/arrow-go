@@ -429,10 +429,16 @@ func (c *physicalSortUint64Column) columnHasValidityNulls() bool {
 	return c.base.columnHasValidityNulls()
 }
 
-type physicalSortFloat16Column struct{ base physicalColumnBase }
+// Float comparators: with totalOrder set (SortKey.FloatTotalOrder) values compare by IEEE 754
+// totalOrder and NaNs are ordinary values, so the columns report no null-like values; validity
+// nulls still follow NullPlacement.
+type physicalSortFloat16Column struct {
+	base       physicalColumnBase
+	totalOrder bool
+}
 
-func newPhysicalSortFloat16Column(chunks []arrow.Array, numRows int, vn bool, rowMap logicalRowMap) *physicalSortFloat16Column {
-	return &physicalSortFloat16Column{base: newPhysicalColumnBase(chunks, numRows, vn, rowMap)}
+func newPhysicalSortFloat16Column(chunks []arrow.Array, numRows int, vn bool, rowMap logicalRowMap, totalOrder bool) *physicalSortFloat16Column {
+	return &physicalSortFloat16Column{base: newPhysicalColumnBase(chunks, numRows, vn, rowMap), totalOrder: totalOrder}
 }
 
 func (c *physicalSortFloat16Column) compareRowsForKey(i, j uint64, key SortKey) int {
@@ -443,6 +449,9 @@ func (c *physicalSortFloat16Column) compareRowsForKey(i, j uint64, key SortKey) 
 		if v, stop := compareKeyedNulls(a.IsNull(li), b.IsNull(lj), key); stop {
 			return v
 		}
+	}
+	if c.totalOrder {
+		return compareOrdered(key.Order, totalOrderKey16(a.Value(li).Uint16()), totalOrderKey16(b.Value(lj).Uint16()))
 	}
 	vi := sortFloat64(a.Value(li))
 	vj := sortFloat64(b.Value(lj))
@@ -455,10 +464,10 @@ func (c *physicalSortFloat16Column) compareRowsForKey(i, j uint64, key SortKey) 
 }
 
 func (c *physicalSortFloat16Column) isNullAt(row uint64) bool { return c.base.isNullAtGlobal(row) }
-func (c *physicalSortFloat16Column) hasNullLikeValues() bool  { return true }
+func (c *physicalSortFloat16Column) hasNullLikeValues() bool  { return !c.totalOrder }
 func (c *physicalSortFloat16Column) isNullLikeAt(row uint64) bool {
 	ch, li := c.base.cell(row)
-	if ch.IsNull(li) {
+	if c.totalOrder || ch.IsNull(li) {
 		return false
 	}
 	return math.IsNaN(sortFloat64(ch.(*array.Float16).Value(li)))
@@ -467,10 +476,13 @@ func (c *physicalSortFloat16Column) columnHasValidityNulls() bool {
 	return c.base.columnHasValidityNulls()
 }
 
-type physicalSortFloat32Column struct{ base physicalColumnBase }
+type physicalSortFloat32Column struct {
+	base       physicalColumnBase
+	totalOrder bool
+}
 
-func newPhysicalSortFloat32Column(chunks []arrow.Array, numRows int, vn bool, rowMap logicalRowMap) *physicalSortFloat32Column {
-	return &physicalSortFloat32Column{base: newPhysicalColumnBase(chunks, numRows, vn, rowMap)}
+func newPhysicalSortFloat32Column(chunks []arrow.Array, numRows int, vn bool, rowMap logicalRowMap, totalOrder bool) *physicalSortFloat32Column {
+	return &physicalSortFloat32Column{base: newPhysicalColumnBase(chunks, numRows, vn, rowMap), totalOrder: totalOrder}
 }
 
 func (c *physicalSortFloat32Column) compareRowsForKey(i, j uint64, key SortKey) int {
@@ -481,6 +493,9 @@ func (c *physicalSortFloat32Column) compareRowsForKey(i, j uint64, key SortKey) 
 		if v, stop := compareKeyedNulls(a.IsNull(li), b.IsNull(lj), key); stop {
 			return v
 		}
+	}
+	if c.totalOrder {
+		return compareOrdered(key.Order, totalOrderKey32(math.Float32bits(a.Value(li))), totalOrderKey32(math.Float32bits(b.Value(lj))))
 	}
 	vi := sortFloat64(a.Value(li))
 	vj := sortFloat64(b.Value(lj))
@@ -493,10 +508,10 @@ func (c *physicalSortFloat32Column) compareRowsForKey(i, j uint64, key SortKey) 
 }
 
 func (c *physicalSortFloat32Column) isNullAt(row uint64) bool { return c.base.isNullAtGlobal(row) }
-func (c *physicalSortFloat32Column) hasNullLikeValues() bool  { return true }
+func (c *physicalSortFloat32Column) hasNullLikeValues() bool  { return !c.totalOrder }
 func (c *physicalSortFloat32Column) isNullLikeAt(row uint64) bool {
 	ch, li := c.base.cell(row)
-	if ch.IsNull(li) {
+	if c.totalOrder || ch.IsNull(li) {
 		return false
 	}
 	return math.IsNaN(sortFloat64(ch.(*array.Float32).Value(li)))
@@ -505,10 +520,13 @@ func (c *physicalSortFloat32Column) columnHasValidityNulls() bool {
 	return c.base.columnHasValidityNulls()
 }
 
-type physicalSortFloat64Column struct{ base physicalColumnBase }
+type physicalSortFloat64Column struct {
+	base       physicalColumnBase
+	totalOrder bool
+}
 
-func newPhysicalSortFloat64Column(chunks []arrow.Array, numRows int, vn bool, rowMap logicalRowMap) *physicalSortFloat64Column {
-	return &physicalSortFloat64Column{base: newPhysicalColumnBase(chunks, numRows, vn, rowMap)}
+func newPhysicalSortFloat64Column(chunks []arrow.Array, numRows int, vn bool, rowMap logicalRowMap, totalOrder bool) *physicalSortFloat64Column {
+	return &physicalSortFloat64Column{base: newPhysicalColumnBase(chunks, numRows, vn, rowMap), totalOrder: totalOrder}
 }
 
 func (c *physicalSortFloat64Column) compareRowsForKey(i, j uint64, key SortKey) int {
@@ -519,6 +537,9 @@ func (c *physicalSortFloat64Column) compareRowsForKey(i, j uint64, key SortKey) 
 		if v, stop := compareKeyedNulls(a.IsNull(li), b.IsNull(lj), key); stop {
 			return v
 		}
+	}
+	if c.totalOrder {
+		return compareOrdered(key.Order, totalOrderKey64(math.Float64bits(a.Value(li))), totalOrderKey64(math.Float64bits(b.Value(lj))))
 	}
 	vi := sortFloat64(a.Value(li))
 	vj := sortFloat64(b.Value(lj))
@@ -531,10 +552,10 @@ func (c *physicalSortFloat64Column) compareRowsForKey(i, j uint64, key SortKey) 
 }
 
 func (c *physicalSortFloat64Column) isNullAt(row uint64) bool { return c.base.isNullAtGlobal(row) }
-func (c *physicalSortFloat64Column) hasNullLikeValues() bool  { return true }
+func (c *physicalSortFloat64Column) hasNullLikeValues() bool  { return !c.totalOrder }
 func (c *physicalSortFloat64Column) isNullLikeAt(row uint64) bool {
 	ch, li := c.base.cell(row)
-	if ch.IsNull(li) {
+	if c.totalOrder || ch.IsNull(li) {
 		return false
 	}
 	return math.IsNaN(sortFloat64(ch.(*array.Float64).Value(li)))
