@@ -50,6 +50,36 @@ func (lz4Compressor) Type() flatbuf.CompressionType {
 
 type zstdCompressor struct {
 	*zstd.Encoder
+	pool interface{ Put(any) }
+}
+
+// zstdEncoderPools holds reusable encoders: index 0 for the library default
+// level, 1-4 for the zstd.EncoderLevel a WithZstdLevel value maps to. A new
+// encoder allocates its window and match tables (about 2 MB at the default
+// level), which dominates the cost of compressing a small record batch.
+var zstdEncoderPools [zstd.SpeedBestCompression + 1]sync.Pool
+
+func zstdEncoderPoolIndex(zstdLevel int) int {
+	if zstdLevel <= 0 {
+		return 0
+	}
+	return int(zstd.EncoderLevelFromZstd(zstdLevel))
+}
+
+// releaseCompressors returns the pooled compressors in cs and clears their
+// slots, so calling it twice on the same slice is safe.
+func releaseCompressors(cs []compressor) {
+	for i, c := range cs {
+		z, ok := c.(*zstdCompressor)
+		if !ok {
+			continue
+		}
+		// Reset waits for in-flight block goroutines, also after a failed
+		// Write, and drops the reference to the last output buffer.
+		z.Reset(nil)
+		z.pool.Put(z)
+		cs[i] = nil
+	}
 }
 
 // from zstd.h, ZSTD_COMPRESSBOUND
@@ -74,6 +104,10 @@ func getCompressor(codec flatbuf.CompressionType, zstdLevel int) compressor {
 		w.Apply(lz4.ChecksumOption(false), lz4.BlockSizeOption(lz4.Block64Kb))
 		return &lz4Compressor{w}
 	case flatbuf.CompressionTypeZSTD:
+		pool := &zstdEncoderPools[zstdEncoderPoolIndex(zstdLevel)]
+		if c, ok := pool.Get().(*zstdCompressor); ok {
+			return c
+		}
 		var enc *zstd.Encoder
 		var err error
 		if zstdLevel > 0 {
@@ -86,7 +120,7 @@ func getCompressor(codec flatbuf.CompressionType, zstdLevel int) compressor {
 		if err != nil {
 			panic(err)
 		}
-		return zstdCompressor{enc}
+		return &zstdCompressor{Encoder: enc, pool: pool}
 	}
 	return nil
 }

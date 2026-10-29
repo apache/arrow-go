@@ -24,6 +24,7 @@ import (
 	"io"
 	"math"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1184,3 +1185,81 @@ func TestWithZstdLevel(t *testing.T) {
 		assert.True(t, array.RecordEqual(rec, r.RecordBatch()), "records differ")
 	})
 }
+
+func TestZstdEncoderPool(t *testing.T) {
+	small := benchmarkRecordBatch(1, 16)
+	defer small.Release()
+	large := benchmarkRecordBatch(8, 8192)
+	defer large.Release()
+
+	// assert, not require: the concurrent subtest calls this from other goroutines.
+	write := func(t *testing.T, rec arrow.RecordBatch, opts ...Option) []byte {
+		t.Helper()
+		var buf bytes.Buffer
+		w := NewWriter(&buf, append([]Option{WithSchema(rec.Schema()), WithZstd()}, opts...)...)
+		assert.NoError(t, w.Write(rec))
+		assert.NoError(t, w.Close())
+		return buf.Bytes()
+	}
+
+	t.Run("Close returns the encoders", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := NewWriter(&buf, WithSchema(large.Schema()), WithZstd(), WithCompressConcurrency(4))
+		require.NoError(t, w.Write(large))
+		require.NoError(t, w.Close())
+		for i, c := range w.compressors {
+			assert.Nil(t, c, "Writer compressor %d was not returned to the pool", i)
+		}
+
+		fw, err := NewFileWriter(&buf, WithSchema(large.Schema()), WithZstd(), WithCompressConcurrency(4))
+		require.NoError(t, err)
+		require.NoError(t, fw.Write(large))
+		require.NoError(t, fw.Close())
+		for i, c := range fw.compressors {
+			assert.Nil(t, c, "FileWriter compressor %d was not returned to the pool", i)
+		}
+	})
+
+	t.Run("Close puts the encoder back in its pool", func(t *testing.T) {
+		// A fake pool, because sync.Pool may drop any item it is given.
+		w := NewWriter(io.Discard, WithSchema(small.Schema()), WithZstd())
+		require.NoError(t, w.Write(small))
+		z := w.compressors[0].(*zstdCompressor)
+		pool := &recordingPool{}
+		z.pool = pool
+		require.NoError(t, w.Close())
+		assert.Equal(t, []any{z}, pool.put)
+	})
+
+	t.Run("reused encoder output does not depend on earlier streams", func(t *testing.T) {
+		first := write(t, small)
+		_ = write(t, large)
+		again := write(t, small)
+		assert.Equal(t, first, again)
+	})
+
+	t.Run("concurrent writers round trip", func(t *testing.T) {
+		var wg sync.WaitGroup
+		for i := range 16 {
+			wg.Go(func() {
+				rec := small
+				if i%2 == 0 {
+					rec = large
+				}
+				r, err := NewReader(bytes.NewReader(write(t, rec, WithCompressConcurrency(1+i%3))))
+				if !assert.NoError(t, err) {
+					return
+				}
+				defer r.Release()
+				if assert.True(t, r.Next()) {
+					assert.True(t, array.RecordEqual(rec, r.RecordBatch()))
+				}
+			})
+		}
+		wg.Wait()
+	})
+}
+
+type recordingPool struct{ put []any }
+
+func (p *recordingPool) Put(x any) { p.put = append(p.put, x) }

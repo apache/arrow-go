@@ -152,6 +152,7 @@ func (w *Writer) getRecordEncoder() *recordEncoder {
 
 func (w *Writer) Close() error {
 	defer func() { w.encoder = nil }()
+	defer releaseCompressors(w.compressors)
 
 	if w.err != nil {
 		return w.closeAfterFailure()
@@ -1161,6 +1162,7 @@ func GetRecordBatchPayload(batch arrow.RecordBatch, opts ...Option) (Payload, er
 	cfg := newConfig(opts...)
 	compressors := make([]compressor, cfg.compressNP)
 	copy(compressors, cfg.compressors)
+	defer releaseCompressors(compressors)
 	var (
 		data = Payload{msg: MessageRecordBatch}
 		enc  = newRecordEncoder(
