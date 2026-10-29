@@ -419,11 +419,11 @@ func (n Decimal32) rescaleWouldCauseDataLoss(deltaScale int32, multiplier Decima
 func (n Decimal64) rescaleWouldCauseDataLoss(deltaScale int32, multiplier Decimal64) (out Decimal64, loss bool) {
 	if deltaScale < 0 {
 		debug.Assert(multiplier != 0, "multiplier must not be zero")
-		quo, remainder := bits.Div32(0, uint32(n), uint32(multiplier))
+		quo, remainder := bits.Div64(0, uint64(n), uint64(multiplier))
 		return Decimal64(quo), remainder != 0
 	}
 
-	overflow, result := bits.Mul32(uint32(n), uint32(multiplier))
+	overflow, result := bits.Mul64(uint64(n), uint64(multiplier))
 	if overflow != 0 {
 		return Decimal64(result), true
 	}

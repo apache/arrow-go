@@ -805,7 +805,7 @@ func (p *serializedPageReader) readPageHeader(rd parquet.BufferedReader, hdr *fo
 			return io.EOF
 		}
 
-		extra := 0
+		framedLen := 0
 		if p.cryptoCtx.MetaDecryptor != nil {
 			p.updateDecryption(p.cryptoCtx.MetaDecryptor, encryption.DictPageHeaderModule, p.dataPageHeaderAad)
 			ciphertext, frameErr := encryption.FramedCiphertext(view)
@@ -823,7 +823,7 @@ func (p *serializedPageReader) readPageHeader(rd parquet.BufferedReader, hdr *fo
 			if err != nil {
 				return fmt.Errorf("decrypting page header: %w", err)
 			}
-			extra = p.cryptoCtx.MetaDecryptor.CiphertextSizeDelta()
+			framedLen = len(ciphertext)
 		}
 
 		remaining, err := thrift.DeserializeThrift(hdr, view)
@@ -834,7 +834,15 @@ func (p *serializedPageReader) readPageHeader(rd parquet.BufferedReader, hdr *fo
 			}
 			continue
 		}
-		rd.Discard(len(view) - int(remaining) + extra)
+		if p.cryptoCtx.MetaDecryptor != nil {
+			// An encrypted header is a length-prefixed module, so skip the whole frame.
+			// The decrypted payload can hold bytes after the thrift struct (parquet-mr
+			// zero-pads it to its buffer size), which means the amount of thrift read
+			// does not tell us how many bytes the module takes up in the file.
+			rd.Discard(framedLen)
+		} else {
+			rd.Discard(len(view) - int(remaining))
+		}
 		break
 	}
 	return nil

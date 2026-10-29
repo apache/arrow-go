@@ -543,6 +543,69 @@ func (c *physicalSortFloat64Column) columnHasValidityNulls() bool {
 	return c.base.columnHasValidityNulls()
 }
 
+// Total-order float comparators (SortKey.FloatTotalOrder) compare values by their IEEE 754
+// totalOrder key. They are separate types so the default float comparators above carry no
+// per-comparison check for the option. NaNs are ordinary values, so these columns report no
+// null-like values; validity nulls still follow NullPlacement.
+type physicalSortFloatTotalOrderBase struct{ base physicalColumnBase }
+
+func (c *physicalSortFloatTotalOrderBase) isNullAt(row uint64) bool {
+	return c.base.isNullAtGlobal(row)
+}
+func (c *physicalSortFloatTotalOrderBase) hasNullLikeValues() bool  { return false }
+func (c *physicalSortFloatTotalOrderBase) isNullLikeAt(uint64) bool { return false }
+func (c *physicalSortFloatTotalOrderBase) columnHasValidityNulls() bool {
+	return c.base.columnHasValidityNulls()
+}
+
+type physicalSortFloat16TotalOrderColumn struct {
+	physicalSortFloatTotalOrderBase
+}
+
+func (c *physicalSortFloat16TotalOrderColumn) compareRowsForKey(i, j uint64, key SortKey) int {
+	ai, aj, li, lj := c.base.pair(i, j)
+	a := ai.(*array.Float16)
+	b := aj.(*array.Float16)
+	if c.base.validityNulls {
+		if v, stop := compareKeyedNulls(a.IsNull(li), b.IsNull(lj), key); stop {
+			return v
+		}
+	}
+	return compareOrdered(key.Order, totalOrderKey16(a.Value(li).Uint16()), totalOrderKey16(b.Value(lj).Uint16()))
+}
+
+type physicalSortFloat32TotalOrderColumn struct {
+	physicalSortFloatTotalOrderBase
+}
+
+func (c *physicalSortFloat32TotalOrderColumn) compareRowsForKey(i, j uint64, key SortKey) int {
+	ai, aj, li, lj := c.base.pair(i, j)
+	a := ai.(*array.Float32)
+	b := aj.(*array.Float32)
+	if c.base.validityNulls {
+		if v, stop := compareKeyedNulls(a.IsNull(li), b.IsNull(lj), key); stop {
+			return v
+		}
+	}
+	return compareOrdered(key.Order, totalOrderKey32(math.Float32bits(a.Value(li))), totalOrderKey32(math.Float32bits(b.Value(lj))))
+}
+
+type physicalSortFloat64TotalOrderColumn struct {
+	physicalSortFloatTotalOrderBase
+}
+
+func (c *physicalSortFloat64TotalOrderColumn) compareRowsForKey(i, j uint64, key SortKey) int {
+	ai, aj, li, lj := c.base.pair(i, j)
+	a := ai.(*array.Float64)
+	b := aj.(*array.Float64)
+	if c.base.validityNulls {
+		if v, stop := compareKeyedNulls(a.IsNull(li), b.IsNull(lj), key); stop {
+			return v
+		}
+	}
+	return compareOrdered(key.Order, totalOrderKey64(math.Float64bits(a.Value(li))), totalOrderKey64(math.Float64bits(b.Value(lj))))
+}
+
 type physicalSortDecimal32Column struct{ base physicalColumnBase }
 
 func newPhysicalSortDecimal32Column(chunks []arrow.Array, numRows int, vn bool, rowMap logicalRowMap) *physicalSortDecimal32Column {

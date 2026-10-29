@@ -17,6 +17,7 @@
 package pqarrow_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -29,6 +30,7 @@ import (
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/endian"
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -36,6 +38,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/apache/arrow-go/v18/parquet/variant"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -323,4 +326,56 @@ func (s *ShreddedVariantTestSuite) TestErrorCases() {
 
 func TestShreddedVariantExamples(t *testing.T) {
 	suite.Run(t, &ShreddedVariantTestSuite{generate: false})
+}
+
+// A missing list below a null struct must not introduce skipped child values.
+func TestShreddedVariantListsUnderMissingParent(t *testing.T) {
+	for name, middle := range map[string]string{
+		"null_parent":    `{"obj":null}`,
+		"missing_parent": `{}`,
+		"scalar_parent":  `{"obj":"other"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer alloc.AssertSize(t, 0)
+			typ := extensions.NewShreddedVariantType(arrow.StructOf(
+				arrow.Field{Name: "obj", Nullable: true, Type: arrow.StructOf(
+					arrow.Field{Name: "items", Nullable: true, Type: arrow.ListOf(arrow.PrimitiveTypes.Int64)},
+				)},
+			))
+			builder := extensions.NewVariantBuilder(alloc, typ)
+			defer builder.Release()
+			input := []string{`{"obj":{"items":[1]}}`, middle, `{"obj":{"items":[2]}}`}
+			require.NoError(t, builder.UnmarshalJSON([]byte("["+strings.Join(input, ",")+"]")))
+			values := builder.NewArray()
+			defer values.Release()
+			schema := arrow.NewSchema([]arrow.Field{{Name: "event", Type: typ, Nullable: true}}, nil)
+			rec := array.NewRecordBatch(schema, []arrow.Array{values}, int64(len(input)))
+			defer rec.Release()
+			tbl := array.NewTableFromRecords(schema, []arrow.RecordBatch{rec})
+			defer tbl.Release()
+			var encoded bytes.Buffer
+			require.NoError(t, pqarrow.WriteTable(tbl, &encoded, 1024, parquet.NewWriterProperties(parquet.WithAllocator(alloc)), pqarrow.DefaultWriterProps()))
+			result, err := pqarrow.ReadTable(t.Context(), bytes.NewReader(encoded.Bytes()), nil, pqarrow.ArrowReadProperties{}, alloc)
+			require.NoError(t, err)
+			defer result.Release()
+			require.EqualValues(t, len(input), result.NumRows())
+			reader := array.NewTableReader(result, 1024)
+			defer reader.Release()
+			row := 0
+			for reader.Next() {
+				variants := reader.RecordBatch().Column(0).(*extensions.VariantArray)
+				for i := 0; i < variants.Len(); i++ {
+					value, err := variants.Value(i)
+					require.NoError(t, err)
+					decoded, err := value.MarshalJSON()
+					require.NoError(t, err)
+					require.JSONEq(t, input[row], string(decoded))
+					row++
+				}
+			}
+			require.NoError(t, reader.Err())
+			require.Len(t, input, row)
+		})
+	}
 }

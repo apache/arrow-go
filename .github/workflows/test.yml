@@ -25,7 +25,7 @@ on:
       - '*'
   pull_request:
 concurrency:
-  group: ${{ github.repository }}-${{ github.head_ref || github.sha }}-${{ github.workflow }}
+  group: ${{ github.repository }}-${{ github.event.pull_request.number || github.sha }}-${{ github.workflow }}
   cancel-in-progress: true
 permissions:
   contents: read
@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go: [1.25, 1.26, 1.27]
+        go: [1.26, 1.27]
         arch: [amd64, arm64v8]
         include:
           - arch-label: AMD64
@@ -55,7 +55,7 @@ jobs:
         with:
           submodules: recursive
       - name: Login to GitHub Container registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -80,7 +80,6 @@ jobs:
       fail-fast: false
       matrix:
         go:
-          - '1.25'
           - '1.26'
           - '1.27'
     env:
@@ -91,7 +90,7 @@ jobs:
         with:
           submodules: recursive
       - name: Login to GitHub Container registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -121,7 +120,6 @@ jobs:
       fail-fast: false
       matrix:
         go:
-          - '1.25'
           - '1.26'
           - '1.27'
     env:
@@ -132,7 +130,7 @@ jobs:
         with:
           submodules: recursive
       - name: Login to GitHub Container registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -162,7 +160,6 @@ jobs:
       fail-fast: false
       matrix:
         go:
-          - '1.25'
           - '1.26'
           - '1.27'
     steps:
@@ -190,7 +187,6 @@ jobs:
       fail-fast: false
       matrix:
         go:
-          - '1.25'
           - '1.26'
           - '1.27'
     env:
@@ -225,7 +221,6 @@ jobs:
       fail-fast: false
       matrix:
         go:
-          - '1.25'
           - '1.26'
           - '1.27'
     steps:
@@ -322,12 +317,12 @@ jobs:
         run: GOARCH=386 go build ./...
       - name: Test
         # WIP refactor, only tests in the specified dirs have been fixed
-        run: GOARCH=386 go test ./parquet/file/...
+        run: GOARCH=386 go test ./parquet/file/... ./arrow/decimal/... ./arrow/decimal128/... ./arrow/decimal256/...
   tinygo:
     name: TinyGo
     runs-on: ubuntu-latest
     env:
-      TINYGO_VERSION: 0.40.1
+      TINYGO_VERSION: 0.42.0
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -392,7 +387,7 @@ jobs:
           key: integration-conda-${{ hashFiles('cpp/**') }}
           restore-keys: conda-
       - name: Setup Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: 3.12
       - name: Setup Archery

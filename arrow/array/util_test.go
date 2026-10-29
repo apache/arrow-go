@@ -245,7 +245,7 @@ func TestIntegerArrsJSON(t *testing.T) {
 			assert.Error(t, err)
 
 			_, _, err = array.FromJSON(memory.DefaultAllocator, tt, strings.NewReader("["))
-			assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+			assertTruncatedJSONError(t, err)
 
 			_, _, err = array.FromJSON(memory.DefaultAllocator, tt, strings.NewReader("0"))
 			assert.Error(t, err)
@@ -916,6 +916,36 @@ func TestRecordBuilderUnmarshalOnePreservesUserDecoderOptions(t *testing.T) {
 
 	col := rec.Column(0).(*array.Int64)
 	assert.EqualValues(t, int64(9223372036854775807), col.Value(0))
+}
+
+// assertTruncatedJSONError checks that truncated JSON input is reported as an
+// error rather than as a clean end of input. JSON backends differ in how they
+// report truncation: encoding/json before Go 1.27's v2 semantics (and go-json
+// before v0.11) surface io.ErrUnexpectedEOF, while the v2 semantics report a
+// syntax error describing the unexpected end of input.
+func assertTruncatedJSONError(t *testing.T, err error) {
+	t.Helper()
+	require.Error(t, err)
+	assert.False(t, errors.Is(err, io.EOF), "truncated input must not be reported as a clean EOF: %v", err)
+	assert.True(t, errors.Is(err, io.ErrUnexpectedEOF) || strings.Contains(err.Error(), "unexpected end of JSON input"),
+		"expected an unexpected-end-of-input error, got %v", err)
+}
+
+func TestRecordBuilderUnmarshalOneReturnUnexpectedEOF(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	bldr := array.NewRecordBuilder(mem, schema)
+	defer bldr.Release()
+
+	src := strings.NewReader(`{"a": 9`)
+	dec := json.NewDecoder(src)
+
+	assertTruncatedJSONError(t, bldr.UnmarshalOne(dec))
 }
 
 func TestDurationBuilderJSONStringInteger(t *testing.T) {

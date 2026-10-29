@@ -881,3 +881,71 @@ func TestMapColumnWithFilters(t *testing.T) {
 	require.Equal(t, "key3", keys.Value(2))
 	require.Equal(t, int32(300), vals.Value(2))
 }
+
+// Reading a file where only some of the encrypted columns have a decryption
+// key should allow reading those columns and return an error (not panic) for
+// the columns without a key.
+func TestReadEncryptedFileWithMissingColumnKey(t *testing.T) {
+	const (
+		footerKey = "0123456789012345"
+		keyA      = "1234567890123450"
+		keyB      = "1234567890123451"
+	)
+
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "b", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	bldr := array.NewRecordBuilder(mem, sc)
+	defer bldr.Release()
+	bldr.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2, 3}, nil)
+	bldr.Field(1).(*array.Int32Builder).AppendValues([]int32{4, 5, 6}, nil)
+	rec := bldr.NewRecordBatch()
+	defer rec.Release()
+
+	encProps := parquet.NewFileEncryptionProperties(footerKey,
+		parquet.WithEncryptedColumns(parquet.ColumnPathToEncryptionPropsMap{
+			"a": parquet.NewColumnEncryptionProperties("a", parquet.WithKey(keyA)),
+			"b": parquet.NewColumnEncryptionProperties("b", parquet.WithKey(keyB)),
+		}))
+
+	var buf bytes.Buffer
+	wr, err := pqarrow.NewFileWriter(sc, &buf,
+		parquet.NewWriterProperties(parquet.WithEncryptionProperties(encProps)),
+		pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+	require.NoError(t, wr.Write(rec))
+	require.NoError(t, wr.Close())
+
+	// only provide the key for column "a"
+	props := parquet.NewReaderProperties(mem)
+	props.FileDecryptProps = parquet.NewFileDecryptionProperties(
+		parquet.WithFooterKey(footerKey),
+		parquet.WithColumnKeys(parquet.ColumnPathToDecryptionPropsMap{
+			"a": parquet.NewColumnDecryptionProperties("a", parquet.WithDecryptKey(keyA)),
+		}))
+
+	pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(props))
+	require.NoError(t, err)
+	defer pf.Close()
+
+	_, err = pf.MetaData().RowGroup(0).ColumnChunk(1)
+	assert.ErrorContains(t, err, `hidden column, no decryption key available for encrypted column "b"`)
+	_, err = pf.RowGroup(0).GetColumnPageReader(1)
+	assert.ErrorContains(t, err, `hidden column, no decryption key available for encrypted column "b"`)
+
+	fr, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{}, mem)
+	require.NoError(t, err)
+
+	tbl, err := fr.ReadRowGroups(context.Background(), []int{0}, []int{0})
+	require.NoError(t, err)
+	defer tbl.Release()
+	require.EqualValues(t, 1, tbl.NumCols())
+	assert.Equal(t, []int32{1, 2, 3}, tbl.Column(0).Data().Chunk(0).(*array.Int32).Int32Values())
+
+	_, err = fr.ReadRowGroups(context.Background(), []int{1}, []int{0})
+	assert.ErrorContains(t, err, `hidden column, no decryption key available for encrypted column "b"`)
+}

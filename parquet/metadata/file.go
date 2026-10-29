@@ -153,15 +153,7 @@ func (f *FileMetaDataBuilder) Snapshot() (*FileMetaData, error) {
 
 	encryptProps := f.props.FileEncryptionProperties()
 	if encryptProps != nil && !encryptProps.EncryptedFooter() {
-		var signingAlgo parquet.Algorithm
-		algo := encryptProps.Algorithm()
-		signingAlgo.Aad.AadFileUnique = algo.Aad.AadFileUnique
-		signingAlgo.Aad.SupplyAadPrefix = algo.Aad.SupplyAadPrefix
-		if !algo.Aad.SupplyAadPrefix {
-			signingAlgo.Aad.AadPrefix = algo.Aad.AadPrefix
-		}
-		signingAlgo.Algo = parquet.AesGcm
-		f.metadata.EncryptionAlgorithm = signingAlgo.ToThrift()
+		f.metadata.EncryptionAlgorithm = encryptProps.Algorithm().ToThrift()
 		footerSigningMetadata := f.props.FileEncryptionProperties().FooterKeyMetadata()
 		if footerSigningMetadata != "" {
 			f.metadata.FooterSigningKeyMetadata = []byte(footerSigningMetadata)

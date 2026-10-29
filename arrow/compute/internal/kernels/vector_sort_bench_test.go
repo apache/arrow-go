@@ -14,13 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build go1.22
+//go:build go1.24
 
 package kernels
 
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -171,5 +172,117 @@ func BenchmarkSortIndices_String(b *testing.B) {
 				res.Release()
 			}
 		})
+	}
+}
+
+// Cover the radix threshold with distributions that have very different
+// costs under comparator sorting and radix sorting.
+func BenchmarkSortIndices_Int64_Distributions(b *testing.B) {
+	for _, rows := range []int{radixSortMinRows - 1, radixSortMinRows, radixSortMinRows + 1, 65536} {
+		for _, pattern := range []string{"sorted", "all-equal", "random"} {
+			b.Run(fmt.Sprintf("rows=%d/%s", rows, pattern), func(b *testing.B) {
+				ctx, mem := newBenchKernelCtx(b)
+				builder := array.NewInt64Builder(mem)
+				for i := 0; i < rows; i++ {
+					var value int64
+					switch pattern {
+					case "sorted":
+						value = int64(i)
+					case "all-equal":
+						value = 7
+					default:
+						x := int64(i)
+						value = (x * 6364136223846793005) ^ (x >> 12)
+					}
+					builder.Append(value)
+				}
+				arr := builder.NewArray()
+				builder.Release()
+				col := arrow.NewChunked(arrow.PrimitiveTypes.Int64, []arrow.Array{arr})
+				arr.Release()
+				defer col.Release()
+				columns := []*arrow.Chunked{col}
+				keys := []SortKey{{ColumnIndex: 0, Order: Ascending, NullPlacement: NullsAtEnd}}
+
+				b.ReportAllocs()
+				for b.Loop() {
+					res, err := SortIndices(ctx, columns, keys)
+					if err != nil {
+						b.Fatal(err)
+					}
+					res.Release()
+				}
+			})
+		}
+	}
+}
+
+// makeChunkedFloat64Split returns n float64 rows in numChunks contiguous arrays. Every
+// nullEvery-th row is null and every nanEvery-th row is NaN (0 disables either).
+func makeChunkedFloat64Split(tb testing.TB, mem memory.Allocator, n, numChunks, nullEvery, nanEvery int) *arrow.Chunked {
+	tb.Helper()
+	chunks := make([]arrow.Array, 0, numChunks)
+	base, rem, global := n/numChunks, n%numChunks, 0
+	for c := range numChunks {
+		sz := base
+		if c < rem {
+			sz++
+		}
+		bld := array.NewFloat64Builder(mem)
+		for i := range sz {
+			g := global + i
+			switch {
+			case nullEvery > 0 && g%nullEvery == 0:
+				bld.AppendNull()
+			case nanEvery > 0 && g%nanEvery == 0:
+				bld.Append(math.NaN())
+			default:
+				x := uint64(g)
+				bld.Append(float64(int64((x*6364136223846793005)^(x>>12))) / 1e6)
+			}
+		}
+		chunks = append(chunks, bld.NewArray())
+		bld.Release()
+		global += sz
+	}
+	ch := arrow.NewChunked(arrow.PrimitiveTypes.Float64, chunks)
+	for _, arr := range chunks {
+		arr.Release()
+	}
+	tb.Cleanup(func() { ch.Release() })
+	return ch
+}
+
+// BenchmarkSortIndices_Float64 compares the default float ordering with
+// SortKey.FloatTotalOrder. Without nulls and with a single chunk, total order
+// takes the radix path; nulls or multiple chunks use the comparator sort.
+func BenchmarkSortIndices_Float64(b *testing.B) {
+	const rows = 65536
+	for _, tc := range []struct {
+		name                string
+		chunks, nulls, nans int
+	}{
+		{"chunks=1", 1, 0, 0},
+		{"chunks=1/nans", 1, 0, 97},
+		{"chunks=16", 16, 0, 0},
+		{"chunks=16/nulls/nans", 16, 31, 97},
+	} {
+		for _, totalOrder := range []bool{false, true} {
+			b.Run(fmt.Sprintf("%s/totalOrder=%t", tc.name, totalOrder), func(b *testing.B) {
+				ctx, mem := newBenchKernelCtx(b)
+				col := makeChunkedFloat64Split(b, mem, rows, tc.chunks, tc.nulls, tc.nans)
+				keys := []SortKey{{ColumnIndex: 0, Order: Ascending, NullPlacement: NullsAtEnd, FloatTotalOrder: totalOrder}}
+				columns := []*arrow.Chunked{col}
+
+				b.ReportAllocs()
+				for b.Loop() {
+					res, err := SortIndices(ctx, columns, keys)
+					if err != nil {
+						b.Fatal(err)
+					}
+					res.Release()
+				}
+			})
+		}
 	}
 }

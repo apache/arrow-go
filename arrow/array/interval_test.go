@@ -406,7 +406,7 @@ func TestMonthDayNanoArray(t *testing.T) {
 		default:
 			got := arr.Value(i)
 			if got != want[i] {
-				t.Fatalf("arr[%d]: got=%q, want=%q", i, got, want[i])
+				t.Fatalf("arr[%d]: got=%v, want=%v", i, got, want[i])
 			}
 		}
 	}

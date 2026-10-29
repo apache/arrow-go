@@ -15,7 +15,6 @@
 // limitations under the License.
 
 #include <stdint.h>
-#include <string.h>
 
 #include "arm_neon.h"
 

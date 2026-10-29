@@ -25,7 +25,10 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -107,6 +110,17 @@ func (s *SqlTestSuite) SetupSuite() {
 	require.Contains(s.T(), s.Statements, "query")
 	require.Contains(s.T(), s.Statements, "constraint query")
 	require.Contains(s.T(), s.Statements, "placeholder query")
+}
+
+func execFixture(t *testing.T, db *sql.DB, query string) sql.Result {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	result, err := db.ExecContext(ctx, query)
+	require.NoError(t, err)
+	return result
 }
 
 func (s *SqlTestSuite) TestOpenClose() {
@@ -451,8 +465,7 @@ func (s *SqlTestSuite) TestRowsManualPrematureClose() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -536,8 +549,7 @@ func (s *SqlTestSuite) TestRowsNormalExhaustion() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -628,8 +640,7 @@ func (s *SqlTestSuite) TestRowsPrematureCloseDuringNextLoop() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -722,8 +733,7 @@ func (s *SqlTestSuite) TestRowsInterruptionByContextManualCancellation() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -810,8 +820,7 @@ func (s *SqlTestSuite) TestRowsInterruptionByContextTimeout() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -902,8 +911,7 @@ func (s *SqlTestSuite) TestRowsManualPrematureCloseStmt() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -993,8 +1001,7 @@ func (s *SqlTestSuite) TestRowsNormalExhaustionStmt() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -1088,8 +1095,7 @@ func (s *SqlTestSuite) TestRowsPrematureCloseDuringNextLoopStmt() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -1188,8 +1194,7 @@ func (s *SqlTestSuite) TestRowsInterruptionByContextManualCancellationStmt() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -1279,8 +1284,7 @@ func (s *SqlTestSuite) TestRowsInterruptionByContextTimeoutStmt() {
 
 	insertQuery := strings.TrimSuffix(sb.String(), ",")
 
-	rs, err := db.Exec(insertQuery)
-	require.NoError(t, err)
+	rs := execFixture(t, db, insertQuery)
 
 	insertedRows, err := rs.RowsAffected()
 	require.NoError(t, err)
@@ -1685,6 +1689,41 @@ func TestSqliteBackend(t *testing.T) {
 	s.stopServer = func(server flight.Server) { server.Shutdown() }
 
 	suite.Run(t, s)
+}
+
+func TestUnixSocketConnection(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows socket paths cannot be used as a URL path")
+	}
+
+	// keep the socket path short, macOS limits it to 104 bytes
+	dir, err := os.MkdirTemp("", "flightsql")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	sock := filepath.Join(dir, "server.sock")
+
+	lis, err := net.Listen("unix", sock)
+	require.NoError(t, err)
+
+	db, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	defer db.Close()
+	sqliteServer, err := example.NewSQLiteFlightSQLServer(db)
+	require.NoError(t, err)
+
+	server := flight.NewServerWithMiddleware(nil)
+	server.RegisterFlightService(flightsql.NewFlightServer(sqliteServer))
+	server.InitListener(lis)
+	go server.Serve()
+	defer server.Shutdown()
+
+	client, err := sql.Open("flightsql", "grpc+unix://"+sock+"?timeout=5s")
+	require.NoError(t, err)
+	defer client.Close()
+
+	var value int64
+	require.NoError(t, client.QueryRow("SELECT 42").Scan(&value))
+	require.EqualValues(t, 42, value)
 }
 
 func TestPreparedStatementSchema(t *testing.T) {

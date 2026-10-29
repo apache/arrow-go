@@ -17,6 +17,7 @@
 package bitutil_test
 
 import (
+	"bytes"
 	"fmt"
 	"math/rand"
 	"strconv"
@@ -210,6 +211,59 @@ func TestCopyBitmap(t *testing.T) {
 					}
 				})
 			}
+		}
+	}
+}
+
+func TestTransferBitmapOverlapping(t *testing.T) {
+	tests := []struct {
+		name               string
+		srcSlice, dstSlice int
+		srcOffset          int
+		dstOffset          int
+		length             int
+	}{
+		{name: "aligned right partial", srcOffset: 0, dstOffset: 8, length: 31},
+		{name: "aligned left partial", srcOffset: 8, dstOffset: 0, length: 31},
+		{name: "aligned full bytes", srcOffset: 0, dstOffset: 16, length: 64},
+		{name: "unaligned right", srcOffset: 3, dstOffset: 11, length: 145},
+		{name: "unaligned left", srcOffset: 11, dstOffset: 3, length: 145},
+		{name: "same byte different bit offsets", srcOffset: 0, dstOffset: 1, length: 9},
+		{name: "same bit range", srcOffset: 5, dstOffset: 5, length: 145},
+		{name: "aliased slice views", srcSlice: 2, dstSlice: 3, srcOffset: 3, dstOffset: 2, length: 145},
+		{name: "adjacent bits", srcOffset: 5, dstOffset: 6, length: 1},
+		{name: "disjoint ranges", srcOffset: 0, dstOffset: 256, length: 32},
+	}
+
+	for _, tt := range tests {
+		for _, invert := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/invert=%t", tt.name, invert), func(t *testing.T) {
+				original := make([]byte, 64)
+				for i := range original {
+					original[i] = byte(i*37 + 0x5b)
+				}
+				got := append([]byte(nil), original...)
+				want := append([]byte(nil), original...)
+
+				srcStart := tt.srcSlice*8 + tt.srcOffset
+				dstStart := tt.dstSlice*8 + tt.dstOffset
+				for i := 0; i < tt.length; i++ {
+					bit := bitutil.BitIsSet(original, srcStart+i)
+					if invert {
+						bit = !bit
+					}
+					bitutil.SetBitTo(want, dstStart+i, bit)
+				}
+
+				src := got[tt.srcSlice:]
+				dst := got[tt.dstSlice:]
+				if invert {
+					bitutil.InvertBitmap(src, tt.srcOffset, tt.length, dst, tt.dstOffset)
+				} else {
+					bitutil.CopyBitmap(src, tt.srcOffset, tt.length, dst, tt.dstOffset)
+				}
+				assert.Equal(t, want, got)
+			})
 		}
 	}
 }
@@ -838,4 +892,75 @@ func TestBitmapOpsBoundaries(t *testing.T) {
 			}
 		})
 	}
+}
+
+func transferScalarReference(invert bool, src []byte, srcOffset, length int, dst []byte, dstOffset int) {
+	snapshot := bytes.Clone(src)
+	for i := range length {
+		bit := bitutil.BitIsSet(snapshot, srcOffset+i)
+		if invert {
+			bit = !bit
+		}
+		bitutil.SetBitTo(dst, dstOffset+i, bit)
+	}
+}
+
+func TestBitmapTransferOffsetsParity(t *testing.T) {
+	rng := rand.New(rand.NewSource(20261024))
+	lengths := []int{0, 1, 2, 3, 4, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 511, 512, 513, 1024}
+	for _, invert := range []bool{false, true} {
+		for srcOffset := range 16 {
+			for dstOffset := range 16 {
+				for _, n := range lengths {
+					src := make([]byte, (srcOffset+n+7)/8)
+					dst := make([]byte, (dstOffset+n+7)/8)
+					rng.Read(src)
+					rng.Read(dst)
+					want := bytes.Clone(dst)
+					transferScalarReference(invert, src, srcOffset, n, want, dstOffset)
+					if invert {
+						bitutil.InvertBitmap(src, srcOffset, n, dst, dstOffset)
+					} else {
+						bitutil.CopyBitmap(src, srcOffset, n, dst, dstOffset)
+					}
+					if !bytes.Equal(dst, want) {
+						t.Fatalf("invert=%t srcOffset=%d dstOffset=%d len=%d", invert, srcOffset, dstOffset, n)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestBitmapTransferSubsliceOverlap(t *testing.T) {
+	rng := rand.New(rand.NewSource(20261025))
+	for _, invert := range []bool{false, true} {
+		for srcByte := range 6 {
+			for dstByte := range 6 {
+				for srcOffset := range 8 {
+					for dstOffset := range 8 {
+						for _, n := range []int{0, 1, 5, 8, 31, 64, 65, 127, 512} {
+							backing := make([]byte, 128)
+							rng.Read(backing)
+							want := bytes.Clone(backing)
+							transferScalarReference(invert, backing[srcByte:], srcOffset, n, want[dstByte:], dstOffset)
+							if invert {
+								bitutil.InvertBitmap(backing[srcByte:], srcOffset, n, backing[dstByte:], dstOffset)
+							} else {
+								bitutil.CopyBitmap(backing[srcByte:], srcOffset, n, backing[dstByte:], dstOffset)
+							}
+							if !bytes.Equal(backing, want) {
+								t.Fatalf("invert=%t srcByte=%d dstByte=%d srcBit=%d dstBit=%d len=%d", invert, srcByte, dstByte, srcOffset, dstOffset, n)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestBitmapTransferZeroLengthNil(t *testing.T) {
+	bitutil.CopyBitmap(nil, 0, 0, nil, 0)
+	bitutil.InvertBitmap(nil, 0, 0, nil, 0)
 }

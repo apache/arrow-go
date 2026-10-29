@@ -308,20 +308,18 @@ func (r *Reader) nextall() bool {
 		r.done = true
 	}()
 
-	var recs [][]string
-	if r.pendingRecord != nil {
-		recs = append(recs, r.pendingRecord)
-		r.pendingRecord = nil
-	}
+	// Build the Arrow arrays as CSV records arrive instead of retaining
+	// every parsed row in memory before conversion.
+	for {
+		rec, err := r.readRecord()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			r.err = err
+			return false
+		}
 
-	var remaining [][]string
-	remaining, r.err = r.r.ReadAll()
-	if r.err != nil {
-		return false
-	}
-	recs = append(recs, remaining...)
-
-	for _, rec := range recs {
 		r.validate(rec)
 		r.read(rec)
 	}
@@ -1105,6 +1103,10 @@ func tryParse(val string, dt arrow.DataType) error {
 		return err
 	}
 	panic("shouldn't end up here")
+}
+
+func (r *Reader) InputOffset() int64 {
+	return r.r.InputOffset()
 }
 
 var _ array.RecordReader = (*Reader)(nil)

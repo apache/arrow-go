@@ -391,10 +391,8 @@ func (d *dictEncoder) WriteIndices(out []byte) (int, error) {
 	out[0] = byte(d.BitWidth())
 
 	enc := utils.NewRleEncoder(utils.NewWriterAtBuffer(out[1:]), d.BitWidth())
-	for _, idx := range d.idxValues {
-		if err := enc.Put(uint64(idx)); err != nil {
-			return -1, err
-		}
+	if _, err := enc.PutBatchIndices(d.idxValues); err != nil {
+		return -1, err
 	}
 	nbytes := enc.Flush()
 

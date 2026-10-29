@@ -239,6 +239,9 @@ func GetTakeIndices(mem memory.Allocator, filter *exec.ArraySpan, nullSelect Nul
 		return getTakeIndices[uint16](mem, filter, nullSelect), nil
 	} else if filter.Len < math.MaxUint32 {
 		if nullSelect == DropNulls {
+			if result, ok := getTakeIndicesUint32AVX2(mem, filter); ok {
+				return result, nil
+			}
 			if result, ok := getTakeIndicesUint32NEON(mem, filter); ok {
 				return result, nil
 			}
@@ -495,6 +498,30 @@ func PrimitiveFilter(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecRe
 			return nil
 		}
 	}
+	if bitWidth == 8 && values.Nulls == 0 && filter.Nulls == 0 {
+		valuesData := exec.GetSpanValues[uint8](values, 1)
+		outData := exec.GetSpanValues[uint8](out, 1)
+		if filterUint8Avx2(valuesData, outData, filter.Buffers[1].Buf, filter.Offset, values.Len) ||
+			filterUint8Neon(valuesData, outData, filter.Buffers[1].Buf, filter.Offset, values.Len) {
+			return nil
+		}
+	}
+	if bitWidth == 16 && values.Nulls == 0 && filter.Nulls == 0 {
+		valuesData := exec.GetSpanValues[uint16](values, 1)
+		outData := exec.GetSpanValues[uint16](out, 1)
+		if filterUint16Avx2(valuesData, outData, filter.Buffers[1].Buf, filter.Offset, values.Len) ||
+			filterUint16Neon(valuesData, outData, filter.Buffers[1].Buf, filter.Offset, values.Len) {
+			return nil
+		}
+	}
+	if bitWidth == 64 && values.Nulls == 0 && filter.Nulls == 0 {
+		valuesData := exec.GetSpanValues[uint64](values, 1)
+		outData := exec.GetSpanValues[uint64](out, 1)
+		if filterUint64Avx2(valuesData, outData, filter.Buffers[1].Buf, filter.Offset, values.Len) ||
+			filterUint64Neon(valuesData, outData, filter.Buffers[1].Buf, filter.Offset, values.Len) {
+			return nil
+		}
+	}
 
 	var wr writeFiltered
 	switch bitWidth {
@@ -684,14 +711,6 @@ func (c *chunkedPrimitiveGetter[T]) GetValue(i int64) T {
 func (c *chunkedPrimitiveGetter[T]) NullCount() int64 { return c.nulls }
 func (c *chunkedPrimitiveGetter[T]) Len() int64       { return c.len }
 
-type binaryGetter interface {
-	IsValid(int64) bool
-	GetValue(int64) []byte
-	NullCount() int64
-	Len() int64
-	DataLen() int64
-}
-
 type chunkedBinaryGetter[OffsetT int32 | int64] struct {
 	resolver      *exec.ChunkResolver
 	offsets       [][]OffsetT
@@ -830,6 +849,19 @@ func isReverseSorted[IdxT arrow.UintType](indices []IdxT) bool {
 	return true
 }
 
+func takePrimitiveValues[IdxT arrow.UintType, ValT arrow.IntType](values []ValT, indices []IdxT, out []ValT) {
+	i := 0
+	for ; i+4 <= len(indices); i += 4 {
+		out[i] = values[indices[i]]
+		out[i+1] = values[indices[i+1]]
+		out[i+2] = values[indices[i+2]]
+		out[i+3] = values[indices[i+3]]
+	}
+	for ; i < len(indices); i++ {
+		out[i] = values[indices[i]]
+	}
+}
+
 // primitiveTakeImplSorted is optimized for sorted (monotonically increasing) indices
 // This enables better CPU cache utilization and branch prediction
 func primitiveTakeImplSorted[IdxT arrow.UintType, ValT arrow.IntType](values primitiveGetter[ValT], indices *exec.ArraySpan, out *exec.ExecResult) {
@@ -843,18 +875,7 @@ func primitiveTakeImplSorted[IdxT arrow.UintType, ValT arrow.IntType](values pri
 		// Try to access underlying values directly for better performance
 		if valImpl, ok := values.(*primitiveGetterImpl[ValT]); ok {
 			// Direct memory access for primitiveGetterImpl
-			valData := valImpl.values
-			// Unroll loop for better performance
-			i := 0
-			for ; i+4 <= len(indicesData); i += 4 {
-				outData[i] = valData[indicesData[i]]
-				outData[i+1] = valData[indicesData[i+1]]
-				outData[i+2] = valData[indicesData[i+2]]
-				outData[i+3] = valData[indicesData[i+3]]
-			}
-			for ; i < len(indicesData); i++ {
-				outData[i] = valData[indicesData[i]]
-			}
+			takePrimitiveValues(valImpl.values, indicesData, outData)
 		} else {
 			// Fallback to GetValue interface
 			for i, idx := range indicesData {
@@ -924,12 +945,24 @@ func primitiveTakeImpl[IdxT arrow.UintType, ValT arrow.IntType](values primitive
 			// Check for reverse sorted - use sequential loop to avoid cache penalties
 			// Loop unrolling amplifies cache miss penalties in reverse access patterns
 			if isReverseSorted(indicesData) {
-				for i := 0; i < len(indicesData); i++ {
-					outData[i] = values.GetValue(int64(indicesData[i]))
+				if valImpl, ok := values.(*primitiveGetterImpl[ValT]); ok {
+					for i, idx := range indicesData {
+						outData[i] = valImpl.values[idx]
+					}
+				} else {
+					for i := 0; i < len(indicesData); i++ {
+						outData[i] = values.GetValue(int64(indicesData[i]))
+					}
 				}
 				out.Nulls = 0
 				return
 			}
+		}
+
+		if valImpl, ok := values.(*primitiveGetterImpl[ValT]); ok {
+			takePrimitiveValues(valImpl.values, indicesData, outData)
+			out.Nulls = 0
+			return
 		}
 
 		// Unroll loop for better performance (random access patterns)
@@ -1269,7 +1302,7 @@ func checkBinaryTakeOffset[OffsetT int32 | int64](offset OffsetT, valueLen int64
 	return nil
 }
 
-func takeChunkedBinaryImpl[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec.KernelCtx, indices *exec.ArraySpan, values binaryGetter, out *exec.ExecResult) error {
+func takeChunkedBinaryImpl[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec.KernelCtx, indices *exec.ArraySpan, values *chunkedBinaryGetter[OffsetT], out *exec.ExecResult) error {
 	var (
 		indicesValues   = exec.GetSpanValues[IdxT](indices, 1)
 		indicesIsValid  = bitutil.OptionalBitIndexer{Bitmap: indices.Buffers[0].Buf, Offset: int(indices.Offset)}
@@ -1406,7 +1439,7 @@ func takeChunkedBinaryImpl[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec
 	return nil
 }
 
-func takeChunkedBinaryDispatch[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec.KernelCtx, values binaryGetter, indices *arrow.Chunked, out []*exec.ExecResult) error {
+func takeChunkedBinaryDispatch[IdxT arrow.UintType, OffsetT int32 | int64](ctx *exec.KernelCtx, values *chunkedBinaryGetter[OffsetT], indices *arrow.Chunked, out []*exec.ExecResult) error {
 	var span exec.ArraySpan
 	for i, chunk := range indices.Chunks() {
 		span.SetMembers(chunk.Data())

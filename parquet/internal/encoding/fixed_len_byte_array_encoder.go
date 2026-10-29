@@ -177,8 +177,13 @@ func (enc *DictFixedLenByteArrayEncoder) WriteDict(out []byte) {
 
 // Put writes fixed length values to a dictionary encoded column
 func (enc *DictFixedLenByteArrayEncoder) Put(in []parquet.FixedLenByteArray) {
+	if len(in) == 0 {
+		return
+	}
+
+	memo := enc.memo.(BinaryMemoTable)
 	for _, v := range in {
-		memoIdx, found, err := enc.memo.GetOrInsert(v)
+		memoIdx, found, err := memo.InsertOrGet(v)
 		if err != nil {
 			panic(err)
 		}
@@ -241,8 +246,9 @@ func (enc *DictFixedLenByteArrayEncoder) PutDictionary(values arrow.Array) error
 
 	enc.dictEncodedSize += enc.typeLen * values.Len()
 	data := values.Data().Buffers()[1].Bytes()[values.Data().Offset()*enc.typeLen:]
+	memo := enc.memo.(BinaryMemoTable)
 	for i := 0; i < values.Len(); i++ {
-		_, _, err := enc.memo.GetOrInsert(data[i*enc.typeLen : (i+1)*enc.typeLen])
+		_, _, err := memo.InsertOrGet(data[i*enc.typeLen : (i+1)*enc.typeLen])
 		if err != nil {
 			return err
 		}

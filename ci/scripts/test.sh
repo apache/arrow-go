@@ -25,6 +25,22 @@ export PARQUET_TEST_DATA=${1}/parquet-testing/data
 export PARQUET_TEST_BAD_DATA=${1}/parquet-testing/bad_data
 export ARROW_TEST_DATA=${1}/arrow-testing/data
 
+# Go's -asan links whatever AddressSanitizer runtime the C toolchain ships.
+# Runtimes older than LLVM 19 allocate thread contexts from the global
+# low-level allocator, which is not thread safe, so they corrupt their own
+# thread registry when the Go runtime creates and retires threads
+# concurrently and abort test binaries at random in arbitrary packages
+# (llvm/llvm-project#87324, fixed by llvm/llvm-project#88177). GCC's
+# libsanitizer snapshot predates that fix as well, so -asan is only reliable
+# when a clang >= 19 runtime is available.
+asan_runtime_major() {
+  local version
+  version=$("${1}" --version 2>/dev/null | head -1) || return 1
+  [[ "${version}" = *"clang version "* ]] || return 1
+  version=${version##*clang version }
+  echo "${version%%.*}"
+}
+
 case "$(uname)" in
 MINGW*)
   # -race and -asan don't work on Windows currently
@@ -39,7 +55,34 @@ MINGW*)
       # -asan not supported on darwin/amd64
       test_args=("-race")
     else
-      test_args=("-asan")
+      asan_cc=${CC:-}
+      if [[ -z "${asan_cc}" ]]; then
+        # Prefer the default clang when it is new enough, otherwise the
+        # newest explicitly installed one.
+        for candidate in clang clang-21 clang-20 clang-19; do
+          command -v "${candidate}" >/dev/null 2>&1 || continue
+          major=$(asan_runtime_major "${candidate}") || continue
+          if [[ "${major}" -ge 19 ]]; then
+            asan_cc=${candidate}
+            break
+          fi
+        done
+      fi
+
+      major=$(asan_runtime_major "${asan_cc:-false}") || major=0
+      if [[ "${major}" -ge 19 ]]; then
+        test_args=("-asan")
+        if [[ -z "${CC:-}" ]]; then
+          export CC=${asan_cc}
+          if [[ -z "${CXX:-}" ]] && command -v "${asan_cc/clang/clang++}" >/dev/null 2>&1; then
+            export CXX=${asan_cc/clang/clang++}
+          fi
+        fi
+      else
+        # Every available ASan runtime predates the fix; -asan would abort at
+        # random, so run the race detector instead.
+        test_args=("-race")
+      fi
     fi
   fi
   ;;
@@ -51,8 +94,11 @@ pushd "${source_dir}/arrow"
 
 tags="assert,test"
 if [[ -n "${ARROW_GO_TESTCGO}" ]]; then
-  if [[ "${MSYSTEM:-}" = "MINGW64" ]]; then
-    export PATH=${MINGW_PREFIX}\\bin:${MINGW_PREFIX}\\lib:$PATH
+  # Git Bash on the runner sets its own MSYSTEM (e.g. UCRT64), so key off the
+  # MINGW_PREFIX exported by the MinGW CI job instead.
+  if [[ -n "${MINGW_PREFIX:-}" ]]; then
+    mingw_prefix="$(cygpath -u "${MINGW_PREFIX}")"
+    export PATH="${mingw_prefix}/bin:${mingw_prefix}/lib:${PATH}"
   fi
 
   if [[ "$(go env GOOS)" = "darwin" ]]; then
@@ -75,15 +121,34 @@ popd
 
 pushd "${source_dir}/parquet"
 
-parquet_test_args=("${test_args[@]}")
+# parquet/file holds the large-value regression tests, which are what exhaust
+# the 7 GB macOS ARM64 runners when they run alongside other packages. Give
+# that one package its own invocation there and let the rest of parquet keep
+# its default parallelism: serializing every package instead (-p=1) cost the
+# macOS jobs about 4.5 minutes each and pushed them into their CI timeout.
+parquet_pkgs=("./...")
+serial_pkgs=()
 if [[ "$(go env GOOS)" = "darwin" ]]; then
-  # Keep package-level memory bounded on the 7 GB macOS ARM64 runners.
-  parquet_test_args+=("-p=1")
+  parquet_pkgs=()
+  while IFS= read -r pkg; do
+    if [[ "${pkg}" = */parquet/file ]]; then
+      serial_pkgs+=("${pkg}")
+    else
+      parquet_pkgs+=("${pkg}")
+    fi
+  done < <(go list ./...)
 fi
 
-go test "${parquet_test_args[@]}" -tags assert ./...
+for parquet_tags in assert assert,noasm; do
+  go test "${test_args[@]}" -tags "${parquet_tags}" "${parquet_pkgs[@]}"
+done
 
-# run the tests again but with the noasm tag
-go test "${parquet_test_args[@]}" -tags assert,noasm ./...
+# parquet/file has no noasm-specific code: every noasm variant it depends on
+# (parquet/internal/{bmi,encoding,utils}, parquet/metadata) is already tested
+# in both passes above, so a second run under noasm only repeats its slow
+# -race tests and has pushed the macOS jobs past their timeout.
+if [[ ${#serial_pkgs[@]} -gt 0 ]]; then
+  go test "${test_args[@]}" -tags assert "${serial_pkgs[@]}"
+fi
 
 popd

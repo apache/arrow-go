@@ -35,7 +35,7 @@ connection pooling, transactions combined with ease of use (see (#usage)).
 
 ## Prerequisites
 
-* Go 1.17+
+* Go 1.26+
 * Installation via `go get -u github.com/apache/arrow-go/v18/arrow/flight/flightsql`
 * Backend speaking FlightSQL
 
@@ -87,6 +87,14 @@ optional port setting. The `user` and `password` parameters are passed to the
 backend as GRPC Basic-Auth headers. If your backend requires a token based
 authentication, please use a `token` parameter (see
 [common parameters](#common-parameters) below).
+
+For consistency with other Flight SQL clients, the following schemes are
+accepted as well:
+
+* `grpc+tcp://` is the same as `flightsql://`.
+* `grpc+tls://` enables TLS by default, see the [`tls` parameter](#tls).
+* `grpc+unix:///path/to/socket` connects to a Unix domain socket at the given
+  absolute path, e.g. `grpc+unix://user:password@/tmp/flightsql.sock`.
 
 **Please note**: All parameters are case-sensitive!
 

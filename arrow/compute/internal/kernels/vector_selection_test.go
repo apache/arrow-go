@@ -20,6 +20,7 @@
 package kernels
 
 import (
+	"context"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -110,6 +111,61 @@ func assertTakeIndices[T arrow.IntType | arrow.UintType](t *testing.T, data arro
 		assert.Equal(t, want, got, "validity at index %d", i)
 	}
 	require.Equal(t, nulls, data.NullN())
+}
+
+func TestPrimitiveFilterInt16MixedMaskOffsets(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	const (
+		offset = 8
+		length = 128
+	)
+	valuesBuilder := array.NewInt16Builder(mem)
+	valuesBuilder.Reserve(offset + length)
+	for i := 0; i < offset+length; i++ {
+		valuesBuilder.Append(int16(uint16(i*997 + 0x8123)))
+	}
+	valuesBase := valuesBuilder.NewInt16Array()
+	valuesBuilder.Release()
+	values := array.NewSlice(valuesBase, offset, offset+length)
+	valuesBase.Release()
+	defer values.Release()
+
+	filterBuilder := array.NewBooleanBuilder(mem)
+	filterBuilder.Reserve(offset + length)
+	for i := 0; i < offset+length; i++ {
+		filterBuilder.Append(i%5 == 0 || i%5 == 2)
+	}
+	filterBase := filterBuilder.NewBooleanArray()
+	filterBuilder.Release()
+	filter := array.NewSlice(filterBase, offset, offset+length)
+	filterBase.Release()
+	defer filter.Release()
+
+	var batch exec.ExecSpan
+	batch.Len = length
+	batch.Values = make([]exec.ExecValue, 2)
+	batch.Values[0].Array.SetMembers(values.Data())
+	batch.Values[1].Array.SetMembers(filter.Data())
+	ctx := &exec.KernelCtx{
+		Ctx:   exec.WithAllocator(context.Background(), mem),
+		State: FilterState{NullSelection: DropNulls},
+	}
+	var out exec.ExecResult
+	require.NoError(t, PrimitiveFilter(ctx, &batch, &out))
+	defer out.Release()
+
+	got := exec.GetSpanValues[int16](&out, 1)
+	valuesData := exec.GetSpanValues[int16](&batch.Values[0].Array, 1)
+	position := 0
+	for i := offset; i < offset+length; i++ {
+		if i%5 == 0 || i%5 == 2 {
+			require.Equal(t, valuesData[i-offset], got[position])
+			position++
+		}
+	}
+	require.Equal(t, position, int(out.Len))
 }
 
 func getTakeIndicesForTest[T arrow.IntType | arrow.UintType](mem memory.Allocator, filter arrow.Array, nullSelect NullSelectionBehavior) arrow.ArrayData {

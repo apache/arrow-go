@@ -29,6 +29,15 @@ ASM_FLAGS_POPCNT=-mpopcnt
 C_FLAGS_NEON=-O3 -fvectorize -mllvm -force-vector-width=16 -fno-asynchronous-unwind-tables -mno-red-zone -mstackrealign -fno-exceptions \
 	-fno-rtti -fno-builtin -ffast-math -fno-jump-tables -I_lib
 
+# Flags for the Go assembly generated via _lib/neon2goasm.py. The -ffixed
+# flags keep clang away from Go's reserved registers (R18 platform, R27
+# REGTMP, R28 g) and -fomit-frame-pointer leaves R29 and the stack alone,
+# so profiling signals always observe a valid goroutine stack (GH-983).
+# No -mstackrealign: it forces a frame, which neon2goasm.py rejects.
+C_FLAGS_NEON_GOASM=-target aarch64-unknown-linux-gnu -ffreestanding -O3 -fvectorize -mllvm -force-vector-width=16 \
+	-fno-asynchronous-unwind-tables -fno-exceptions -fno-builtin -ffast-math -fno-jump-tables -I_lib \
+	-fomit-frame-pointer -ffixed-x18 -ffixed-x27 -ffixed-x28
+
 GO_SOURCES  := $(shell find . -path ./_lib -prune -o -name '*.go' -not -name '*_test.go')
 ALL_SOURCES := $(shell find . -path ./_lib -prune -o -name '*.go' -name '*.s' -not -name '*_test.go')
 
@@ -69,6 +78,11 @@ _lib/unpack_bool_neon.s: _lib/unpack_bool.c
 
 _lib/bit_packing_neon.s: _lib/bit_packing_neon.c
 	$(CC) -S $(C_FLAGS_NEON) $^ -o $@
+
+bit_packing_neon_arm64.s: _lib/bit_packing_neon.c _lib/neon2goasm.py
+	clang -c $(C_FLAGS_NEON_GOASM) $< -o _lib/bit_packing_neon.o
+	python3 _lib/neon2goasm.py _lib/bit_packing_neon.o > $@
+	rm -f _lib/bit_packing_neon.o
 
 bit_packing_avx2_amd64.s: _lib/bit_packing_avx2.s
 	$(C2GOASM) -a -f $^ $@

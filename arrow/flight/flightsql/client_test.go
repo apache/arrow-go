@@ -760,6 +760,146 @@ func (s *FlightSqlClientSuite) TestPreparedStatementClose() {
 	s.Equal(string(prepared.Handle()), "query")
 }
 
+// mockCreatePreparedSubstraitPlan expects a single CreatePreparedSubstraitPlan
+// action matching req, answered with result, followed by the
+// ClosePreparedStatement action for the handle carried by result.
+func (s *FlightSqlClientSuite) mockCreatePreparedSubstraitPlan(req *pb.ActionCreatePreparedSubstraitPlanRequest, result *pb.ActionCreatePreparedStatementResult) {
+	action := getAction(req)
+	closeAct := getAction(&pb.ActionClosePreparedStatementRequest{PreparedStatementHandle: result.PreparedStatementHandle})
+
+	var out anypb.Any
+	out.MarshalFrom(result)
+	data, _ := proto.Marshal(&out)
+
+	t := s.T()
+	createRsp := &mockDoActionClient{}
+	t.Cleanup(func() { createRsp.AssertExpectations(t) })
+	createRsp.On("Recv").Return(&pb.Result{Body: data}, nil).Once()
+	createRsp.On("Recv").Return(&pb.Result{}, io.EOF).Once()
+	createRsp.On("CloseSend").Return(nil).Once()
+
+	closeRsp := &mockDoActionClient{}
+	t.Cleanup(func() { closeRsp.AssertExpectations(t) })
+	closeRsp.On("Recv").Return(&pb.Result{}, io.EOF).Once()
+	closeRsp.On("CloseSend").Return(nil).Once()
+
+	s.mockClient.On("DoAction", flightsql.CreatePreparedSubstraitPlanActionType, action.Body, s.callOpts).Return(createRsp, nil).Once()
+	s.mockClient.On("DoAction", flightsql.ClosePreparedStatementActionType, closeAct.Body, s.callOpts).Return(closeRsp, nil).Once()
+}
+
+func (s *FlightSqlClientSuite) TestPrepareSubstrait() {
+	plan := flightsql.SubstraitPlan{Plan: []byte("substrait plan"), Version: "0.23.0"}
+	const handle = "substrait handle"
+
+	// results from createpreparedsubstraitplan
+	result := &pb.ActionCreatePreparedStatementResult{PreparedStatementHandle: []byte(handle)}
+	datasetSchema := arrow.NewSchema([]arrow.Field{{Name: "ds_id", Type: arrow.PrimitiveTypes.Int64, Nullable: true}}, nil)
+	result.DatasetSchema = flight.SerializeSchema(datasetSchema, memory.DefaultAllocator)
+	paramSchema := arrow.NewSchema([]arrow.Field{{Name: "p_id", Type: arrow.PrimitiveTypes.Int64, Nullable: true}}, nil)
+	result.ParameterSchema = flight.SerializeSchema(paramSchema, memory.DefaultAllocator)
+
+	// the action carries the plan bytes and the substrait version
+	s.mockCreatePreparedSubstraitPlan(&pb.ActionCreatePreparedSubstraitPlanRequest{
+		Plan: &pb.SubstraitPlan{Plan: plan.Plan, Version: plan.Version},
+	}, result)
+
+	// execution uses the returned handle like any other prepared statement
+	infoCmd := &pb.CommandPreparedStatementQuery{PreparedStatementHandle: []byte(handle)}
+	desc := getDesc(infoCmd)
+	s.mockClient.On("GetFlightInfo", desc.Type, desc.Cmd, s.callOpts).Return(&emptyFlightInfo, nil).Once()
+
+	prepared, err := s.sqlClient.PrepareSubstrait(context.TODO(), plan, s.callOpts...)
+	s.Require().NoError(err)
+
+	s.Equal(string(prepared.Handle()), handle)
+	s.True(datasetSchema.Equal(prepared.DatasetSchema()))
+	s.True(paramSchema.Equal(prepared.ParameterSchema()))
+	_, ok := prepared.IsUpdate()
+	s.False(ok)
+
+	info, err := prepared.Execute(context.TODO(), s.callOpts...)
+	s.NoError(err)
+	s.Equal(&emptyFlightInfo, info)
+
+	s.NoError(prepared.Close(context.TODO(), s.callOpts...))
+}
+
+func (s *FlightSqlClientSuite) TestPrepareSubstraitWithIsUpdateFalse() {
+	plan := flightsql.SubstraitPlan{Plan: []byte("substrait query plan"), Version: "0.23.0"}
+
+	isUpdate := false
+	s.mockCreatePreparedSubstraitPlan(&pb.ActionCreatePreparedSubstraitPlanRequest{
+		Plan: &pb.SubstraitPlan{Plan: plan.Plan, Version: plan.Version},
+	}, &pb.ActionCreatePreparedStatementResult{
+		PreparedStatementHandle: plan.Plan, // handle is the plan for simplicity
+		IsUpdate:                &isUpdate,
+	})
+
+	prepared, err := s.sqlClient.PrepareSubstrait(context.TODO(), plan, s.callOpts...)
+	s.Require().NoError(err)
+	defer prepared.Close(context.TODO(), s.callOpts...)
+
+	s.Equal(prepared.Handle(), plan.Plan)
+	val, ok := prepared.IsUpdate()
+	s.Require().True(ok)
+	s.Require().False(val)
+}
+
+func (s *FlightSqlClientSuite) TestPrepareSubstraitWithIsUpdateTrue() {
+	plan := flightsql.SubstraitPlan{Plan: []byte("substrait update plan"), Version: "0.23.0"}
+
+	isUpdate := true
+	s.mockCreatePreparedSubstraitPlan(&pb.ActionCreatePreparedSubstraitPlanRequest{
+		Plan: &pb.SubstraitPlan{Plan: plan.Plan, Version: plan.Version},
+	}, &pb.ActionCreatePreparedStatementResult{
+		PreparedStatementHandle: plan.Plan,
+		IsUpdate:                &isUpdate,
+	})
+
+	prepared, err := s.sqlClient.PrepareSubstrait(context.TODO(), plan, s.callOpts...)
+	s.Require().NoError(err)
+	defer prepared.Close(context.TODO(), s.callOpts...)
+
+	s.Equal(prepared.Handle(), plan.Plan)
+	val, ok := prepared.IsUpdate()
+	s.Require().True(ok)
+	s.Require().True(val)
+}
+
+func (s *FlightSqlClientSuite) TestTxnPrepareSubstrait() {
+	plan := flightsql.SubstraitPlan{Plan: []byte("substrait plan"), Version: "0.23.0"}
+	const txnID = "txn"
+	const handle = "substrait handle"
+
+	// begin transaction action and its result
+	beginAct := getAction(&pb.ActionBeginTransactionRequest{})
+	var out anypb.Any
+	out.MarshalFrom(&pb.ActionBeginTransactionResult{TransactionId: []byte(txnID)})
+	data, _ := proto.Marshal(&out)
+
+	beginRsp := &mockDoActionClient{}
+	defer beginRsp.AssertExpectations(s.T())
+	beginRsp.On("Recv").Return(&pb.Result{Body: data}, nil).Once()
+	beginRsp.On("Recv").Return(&pb.Result{}, io.EOF).Once()
+	beginRsp.On("CloseSend").Return(nil).Once()
+	s.mockClient.On("DoAction", flightsql.BeginTransactionActionType, beginAct.Body, s.callOpts).Return(beginRsp, nil).Once()
+
+	// the action carries the transaction id along with the plan
+	s.mockCreatePreparedSubstraitPlan(&pb.ActionCreatePreparedSubstraitPlanRequest{
+		Plan:          &pb.SubstraitPlan{Plan: plan.Plan, Version: plan.Version},
+		TransactionId: []byte(txnID),
+	}, &pb.ActionCreatePreparedStatementResult{PreparedStatementHandle: []byte(handle)})
+
+	txn, err := s.sqlClient.BeginTransaction(context.TODO(), s.callOpts...)
+	s.Require().NoError(err)
+
+	prepared, err := txn.PrepareSubstrait(context.TODO(), plan, s.callOpts...)
+	s.Require().NoError(err)
+	defer prepared.Close(context.TODO(), s.callOpts...)
+
+	s.Equal(string(prepared.Handle()), handle)
+}
+
 func (s *FlightSqlClientSuite) TestExecuteUpdate() {
 	const query = "query"
 

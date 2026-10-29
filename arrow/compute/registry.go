@@ -58,6 +58,7 @@ func GetFunctionRegistry() FunctionRegistry {
 		RegisterVectorCumulative(registry)
 		RegisterVectorRunEndFuncs(registry)
 		RegisterScalarSetLookup(registry)
+		RegisterScalarAggregates(registry)
 	})
 	return registry
 }

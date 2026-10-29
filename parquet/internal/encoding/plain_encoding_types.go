@@ -96,14 +96,76 @@ func (dec *PlainDecoder[T]) Decode(out []T) (int, error) {
 }
 
 func (dec *PlainDecoder[T]) DecodeSpaced(out []T, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
-	toread := len(out) - nullCount
-	values, err := dec.Decode(out[:toread])
-	if err != nil {
-		return 0, err
+	if nullCount == 0 {
+		if err := dec.decodeDense(out, len(out)); err != nil {
+			return 0, err
+		}
+		return len(out), nil
 	}
 
-	if values != toread {
-		return 0, errors.New("parquet: number of values / definition levels read did not match")
+	toread := len(out) - nullCount
+	if toread == 0 {
+		return len(out), nil
+	}
+
+	if dec.bitSetReader == nil {
+		dec.bitSetReader = bitutils.NewReverseSetBitRunReader(validBits, validBitsOffset, int64(len(out)))
+	} else {
+		dec.bitSetReader.Reset(validBits, validBitsOffset, int64(len(out)))
+	}
+
+	const maxDirectDecodeRuns = 8
+	var validRuns [maxDirectDecodeRuns]bitutils.SetBitRun
+	runCount := 0
+	decodedPos := int64(0)
+	needsExpansion := false
+	for {
+		run := dec.bitSetReader.NextRun()
+		if run.Length == 0 {
+			break
+		}
+		if runCount == len(validRuns) {
+			return dec.decodeSpacedDense(out, nullCount, validBits, validBitsOffset)
+		}
+		validRuns[runCount] = run
+		runCount++
+		densePos := int64(toread) - decodedPos - run.Length
+		if run.Pos != densePos {
+			needsExpansion = true
+		}
+		decodedPos += run.Length
+		if decodedPos >= int64(toread) {
+			break
+		}
+	}
+
+	if decodedPos != int64(toread) {
+		return dec.decodeSpacedDense(out, nullCount, validBits, validBitsOffset)
+	}
+	if !needsExpansion {
+		if err := dec.decodeDense(out, toread); err != nil {
+			return 0, err
+		}
+		return len(out), nil
+	}
+
+	for i := runCount - 1; i >= 0; i-- {
+		run := validRuns[i]
+		values, err := dec.Decode(out[int(run.Pos):int(run.Pos+run.Length)])
+		if err != nil {
+			return 0, err
+		}
+		if values != int(run.Length) {
+			return 0, errors.New("parquet: number of values / definition levels read did not match")
+		}
+	}
+	return len(out), nil
+}
+
+func (dec *PlainDecoder[T]) decodeSpacedDense(out []T, nullCount int, validBits []byte, validBitsOffset int64) (int, error) {
+	toread := len(out) - nullCount
+	if err := dec.decodeDense(out, toread); err != nil {
+		return 0, err
 	}
 
 	nvalues := len(out)
@@ -128,6 +190,17 @@ func (dec *PlainDecoder[T]) DecodeSpaced(out []T, nullCount int, validBits []byt
 		copy(out[int(run.Pos):], out[idxDecode:idxDecode+int(run.Length)])
 	}
 	return nvalues, nil
+}
+
+func (dec *PlainDecoder[T]) decodeDense(out []T, toread int) error {
+	values, err := dec.Decode(out[:toread])
+	if err != nil {
+		return err
+	}
+	if values != toread {
+		return errors.New("parquet: number of values / definition levels read did not match")
+	}
+	return nil
 }
 
 type (

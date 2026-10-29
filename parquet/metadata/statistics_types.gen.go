@@ -242,7 +242,7 @@ func (s *Int32Statistics) Update(values []int32, numNull int64) {
 // and skip null values.
 func (s *Int32Statistics) UpdateSpaced(values []int32, validBits []byte, validBitsOffset, numNull int64) {
 	s.IncNulls(numNull)
-	notnull := int64(len(values)) - numNull
+	notnull := int64(bitutil.CountSetBits(validBits, int(validBitsOffset), len(values)))
 	s.nvalues += notnull
 
 	if notnull == 0 {
@@ -546,7 +546,7 @@ func (s *Int64Statistics) Update(values []int64, numNull int64) {
 // and skip null values.
 func (s *Int64Statistics) UpdateSpaced(values []int64, validBits []byte, validBitsOffset, numNull int64) {
 	s.IncNulls(numNull)
-	notnull := int64(len(values)) - numNull
+	notnull := int64(bitutil.CountSetBits(validBits, int(validBitsOffset), len(values)))
 	s.nvalues += notnull
 
 	if notnull == 0 {
@@ -835,7 +835,7 @@ func (s *Int96Statistics) Update(values []parquet.Int96, numNull int64) {
 // and skip null values.
 func (s *Int96Statistics) UpdateSpaced(values []parquet.Int96, validBits []byte, validBitsOffset, numNull int64) {
 	s.IncNulls(numNull)
-	notnull := int64(len(values)) - numNull
+	notnull := int64(bitutil.CountSetBits(validBits, int(validBitsOffset), len(values)))
 	s.nvalues += notnull
 
 	if notnull == 0 {
@@ -1124,7 +1124,7 @@ func (s *Float32Statistics) Update(values []float32, numNull int64) {
 // and skip null values.
 func (s *Float32Statistics) UpdateSpaced(values []float32, validBits []byte, validBitsOffset, numNull int64) {
 	s.IncNulls(numNull)
-	notnull := int64(len(values)) - numNull
+	notnull := int64(bitutil.CountSetBits(validBits, int(validBitsOffset), len(values)))
 	s.nvalues += notnull
 
 	if notnull == 0 {
@@ -1420,7 +1420,7 @@ func (s *Float64Statistics) Update(values []float64, numNull int64) {
 // and skip null values.
 func (s *Float64Statistics) UpdateSpaced(values []float64, validBits []byte, validBitsOffset, numNull int64) {
 	s.IncNulls(numNull)
-	notnull := int64(len(values)) - numNull
+	notnull := int64(bitutil.CountSetBits(validBits, int(validBitsOffset), len(values)))
 	s.nvalues += notnull
 
 	if notnull == 0 {
@@ -1709,7 +1709,7 @@ func (s *BooleanStatistics) Update(values []bool, numNull int64) {
 // and skip null values.
 func (s *BooleanStatistics) UpdateSpaced(values []bool, validBits []byte, validBitsOffset, numNull int64) {
 	s.IncNulls(numNull)
-	notnull := int64(len(values)) - numNull
+	notnull := int64(bitutil.CountSetBits(validBits, int(validBitsOffset), len(values)))
 	s.nvalues += notnull
 
 	if notnull == 0 {
@@ -2084,7 +2084,7 @@ func (s *ByteArrayStatistics) Update(values []parquet.ByteArray, numNull int64) 
 // and skip null values.
 func (s *ByteArrayStatistics) UpdateSpaced(values []parquet.ByteArray, validBits []byte, validBitsOffset, numNull int64) {
 	s.IncNulls(numNull)
-	notnull := int64(len(values)) - numNull
+	notnull := int64(bitutil.CountSetBits(validBits, int(validBitsOffset), len(values)))
 	s.nvalues += notnull
 
 	if notnull == 0 {
@@ -2418,7 +2418,7 @@ func (s *FixedLenByteArrayStatistics) Update(values []parquet.FixedLenByteArray,
 // and skip null values.
 func (s *FixedLenByteArrayStatistics) UpdateSpaced(values []parquet.FixedLenByteArray, validBits []byte, validBitsOffset, numNull int64) {
 	s.IncNulls(numNull)
-	notnull := int64(len(values)) - numNull
+	notnull := int64(bitutil.CountSetBits(validBits, int(validBitsOffset), len(values)))
 	s.nvalues += notnull
 
 	if notnull == 0 {
@@ -2761,7 +2761,7 @@ func (s *Float16Statistics) Update(values []parquet.FixedLenByteArray, numNull i
 // and skip null values.
 func (s *Float16Statistics) UpdateSpaced(values []parquet.FixedLenByteArray, validBits []byte, validBitsOffset, numNull int64) {
 	s.IncNulls(numNull)
-	notnull := int64(len(values)) - numNull
+	notnull := int64(bitutil.CountSetBits(validBits, int(validBitsOffset), len(values)))
 	s.nvalues += notnull
 
 	if notnull == 0 {

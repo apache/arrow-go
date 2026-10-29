@@ -141,6 +141,181 @@ func BenchmarkConcatenateFixedWidth(b *testing.B) {
 	}
 }
 
+func BenchmarkConcatenateViews(b *testing.B) {
+	const totalValues = 1 << 16
+
+	makeBinaryView := func(mem memory.Allocator) arrow.Array {
+		builder := array.NewBinaryViewBuilder(mem)
+		value := []byte("01234567890123456789012345678901")
+		builder.Reserve(totalValues)
+		for i := 0; i < totalValues; i++ {
+			builder.Append(value)
+		}
+		result := builder.NewArray()
+		builder.Release()
+		return result
+	}
+
+	makeListView := func(mem memory.Allocator, large bool) arrow.Array {
+		valid := make([]bool, totalValues)
+		values := make([]int8, totalValues)
+		for i := range valid {
+			valid[i] = true
+		}
+
+		var builder array.VarLenListLikeBuilder
+		if large {
+			builder = array.NewLargeListViewBuilder(mem, arrow.PrimitiveTypes.Int8)
+			offsets := make([]int64, totalValues)
+			sizes := make([]int64, totalValues)
+			for i := range offsets {
+				offsets[i] = int64(i)
+				sizes[i] = 1
+			}
+			builder.(*array.LargeListViewBuilder).AppendValuesWithSizes(offsets, sizes, valid)
+		} else {
+			builder = array.NewListViewBuilder(mem, arrow.PrimitiveTypes.Int8)
+			offsets := make([]int32, totalValues)
+			sizes := make([]int32, totalValues)
+			for i := range offsets {
+				offsets[i] = int32(i)
+				sizes[i] = 1
+			}
+			builder.(*array.ListViewBuilder).AppendValuesWithSizes(offsets, sizes, valid)
+		}
+		builder.ValueBuilder().(*array.Int8Builder).AppendValues(values, nil)
+		result := builder.NewArray()
+		builder.Release()
+		return result
+	}
+
+	tests := []struct {
+		name string
+		make func(memory.Allocator) arrow.Array
+	}{
+		{"binary_view", makeBinaryView},
+		{"list_view", func(mem memory.Allocator) arrow.Array {
+			return makeListView(mem, false)
+		}},
+		{"large_list_view", func(mem memory.Allocator) arrow.Array {
+			return makeListView(mem, true)
+		}},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		b.Run(tt.name, func(b *testing.B) {
+			mem := memory.NewGoAllocator()
+			backing := tt.make(mem)
+			defer backing.Release()
+
+			for _, chunkCount := range []int{64, 1024, 8192} {
+				chunkCount := chunkCount
+				b.Run(fmt.Sprintf("chunks=%d", chunkCount), func(b *testing.B) {
+					chunkSize := totalValues / chunkCount
+					inputs := make([]arrow.Array, chunkCount)
+					for i := range inputs {
+						begin := int64(i * chunkSize)
+						inputs[i] = array.NewSlice(backing, begin, begin+int64(chunkSize))
+					}
+					defer func() {
+						for _, input := range inputs {
+							input.Release()
+						}
+					}()
+
+					b.SetBytes(int64(totalValues))
+					b.ReportAllocs()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						result, err := array.Concatenate(inputs, mem)
+						if err != nil {
+							b.Fatal(err)
+						}
+						if result.Len() != totalValues {
+							b.Fatalf("result length = %d, want %d", result.Len(), totalValues)
+						}
+						result.Release()
+					}
+				})
+			}
+		})
+	}
+}
+
+func BenchmarkConcatenateList(b *testing.B) {
+	const totalValues = 1 << 16
+
+	makeList := func(mem memory.Allocator, dt arrow.DataType) arrow.Array {
+		valid := make([]bool, totalValues)
+		for i := range valid {
+			valid[i] = true
+		}
+		values := make([]int8, totalValues)
+
+		switch dt.ID() {
+		case arrow.LIST:
+			offsets := make([]int32, totalValues+1)
+			for i := range offsets {
+				offsets[i] = int32(i)
+			}
+			builder := array.NewListBuilder(mem, arrow.PrimitiveTypes.Int8)
+			builder.AppendValues(offsets, valid)
+			builder.ValueBuilder().(*array.Int8Builder).AppendValues(values, nil)
+			result := builder.NewArray()
+			builder.Release()
+			return result
+		case arrow.LARGE_LIST:
+			offsets := make([]int64, totalValues+1)
+			for i := range offsets {
+				offsets[i] = int64(i)
+			}
+			builder := array.NewLargeListBuilder(mem, arrow.PrimitiveTypes.Int8)
+			builder.AppendValues(offsets, valid)
+			builder.ValueBuilder().(*array.Int8Builder).AppendValues(values, nil)
+			result := builder.NewArray()
+			builder.Release()
+			return result
+		default:
+			panic(fmt.Sprintf("unsupported list type %s", dt))
+		}
+	}
+
+	for _, dt := range []arrow.DataType{arrow.ListOf(arrow.PrimitiveTypes.Int8), arrow.LargeListOf(arrow.PrimitiveTypes.Int8)} {
+		backing := makeList(memory.DefaultAllocator, dt)
+		defer backing.Release()
+
+		for _, chunkCount := range []int{64, 1024, 8192} {
+			b.Run(fmt.Sprintf("%s/chunks=%d", dt.Name(), chunkCount), func(b *testing.B) {
+				chunkSize := totalValues / chunkCount
+				inputs := make([]arrow.Array, chunkCount)
+				for i := range inputs {
+					begin := int64(i * chunkSize)
+					inputs[i] = array.NewSlice(backing, begin, begin+int64(chunkSize))
+				}
+				defer func() {
+					for _, input := range inputs {
+						input.Release()
+					}
+				}()
+
+				b.SetBytes(int64(totalValues))
+				b.ReportAllocs()
+				for b.Loop() {
+					result, err := array.Concatenate(inputs, memory.DefaultAllocator)
+					if err != nil {
+						b.Fatal(err)
+					}
+					if result.Len() != totalValues {
+						b.Fatalf("result length = %d, want %d", result.Len(), totalValues)
+					}
+					result.Release()
+				}
+			})
+		}
+	}
+}
+
 func TestConcatenateFixedWidthSlices(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -1047,19 +1222,29 @@ func TestConcatRunEndEncodedInt64FinalRunEndClamp(t *testing.T) {
 	prefix := prefixBldr.NewArray()
 	defer prefix.Release()
 
-	bigBldr := array.NewRunEndEncodedBuilder(mem, arrow.PrimitiveTypes.Int64, arrow.PrimitiveTypes.Int64)
-	defer bigBldr.Release()
-	bigBldr.Append(math.MaxInt64)
-	bigBldr.ValueBuilder().(*array.Int64Builder).Append(2)
-	big := bigBldr.NewArray()
-	defer big.Release()
-	oneElem := array.NewSlice(big, 0, 1) // first element of the MaxInt64-length run
+	// One logical element from a run ending at math.MaxInt64, as a slice of the
+	// run's first element would be. Build it directly: an array whose length is
+	// math.MaxInt64 cannot exist when int is 32 bits, but this one is valid there.
+	runEndsBldr := array.NewInt64Builder(mem)
+	defer runEndsBldr.Release()
+	runEndsBldr.Append(math.MaxInt64)
+	runEnds := runEndsBldr.NewArray()
+	defer runEnds.Release()
+	valuesBldr := array.NewInt64Builder(mem)
+	defer valuesBldr.Release()
+	valuesBldr.Append(2)
+	values := valuesBldr.NewArray()
+	defer values.Release()
+	oneElem := array.NewRunEndEncodedArray(runEnds, values, 1, 0)
 	defer oneElem.Release()
 
 	result, err := array.Concatenate([]arrow.Array{prefix, oneElem}, mem)
 	require.NoError(t, err)
 	defer result.Release()
 	assert.EqualValues(t, 6, result.Len())
+	ree := result.(*array.RunEndEncoded)
+	assert.Equal(t, []int64{5, 6}, ree.RunEndsArr().(*array.Int64).Int64Values())
+	assert.Equal(t, []int64{1, 2}, ree.Values().(*array.Int64).Int64Values())
 }
 
 func TestConcatAlmostOverflowRunEndEncoding(t *testing.T) {
@@ -1074,6 +1259,11 @@ func TestConcatAlmostOverflowRunEndEncoding(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.offsetType.String(), func(t *testing.T) {
+			if tt.max > math.MaxInt {
+				// The inputs' logical lengths are near tt.max, and array lengths
+				// are ints, so this case cannot be built when int is 32 bits.
+				t.Skipf("array lengths near %d do not fit in int", tt.max)
+			}
 			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 			defer mem.AssertSize(t, 0)
 
@@ -1121,6 +1311,11 @@ func TestConcatOverflowRunEndEncoding(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.offsetType.String(), func(t *testing.T) {
+			if tt.max > math.MaxInt {
+				// The inputs' logical lengths are near tt.max, and array lengths
+				// are ints, so this case cannot be built when int is 32 bits.
+				t.Skipf("array lengths near %d do not fit in int", tt.max)
+			}
 			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 			defer mem.AssertSize(t, 0)
 

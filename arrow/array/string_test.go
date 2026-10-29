@@ -137,7 +137,7 @@ func TestStringArray(t *testing.T) {
 
 	for i := 0; i < v.Len(); i++ {
 		if got, want := v.ValueOffset(0), int(offsets[i+slice.Offset()]); got != want {
-			t.Fatalf("val-offset-with-offset[%d]: got=%q, want=%q", i, got, want)
+			t.Fatalf("val-offset-with-offset[%d]: got=%d, want=%d", i, got, want)
 		}
 	}
 
@@ -554,7 +554,7 @@ func TestLargeStringArray(t *testing.T) {
 
 	for i := 0; i < v.Len(); i++ {
 		if got, want := v.ValueOffset(0), offsets[i+slice.Offset()]; got != want {
-			t.Fatalf("val-offset-with-offset[%d]: got=%q, want=%q", i, got, want)
+			t.Fatalf("val-offset-with-offset[%d]: got=%d, want=%d", i, got, want)
 		}
 	}
 

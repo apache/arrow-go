@@ -16,6 +16,11 @@
 
 # this converts rotate instructions from "ro[lr] <reg>" -> "ro[lr] <reg>, 1" for yasm compatibility
 PERL_FIXUP_ROTATE=perl -i -pe 's/(ro[rl]\s+\w{2,3})$$/\1, 1/'
+# c2goasm loads whole words, but the arithmetic operation is a signed int8.
+PERL_FIXUP_ARITHMETIC_OP=perl -i -pe 's/MOVQ (op\+(?:8|16)\(FP\))/MOVBQSX \1/'
+# A nonzero Go frame makes the assembler save and restore BP, which c2goasm
+# uses to address constants in otherwise frameless arithmetic and cast kernels.
+PERL_FIXUP_FRAME_POINTER=perl -i -pe 's/^(TEXT .*, \$$)0-/$${1}8-/'
 
 C2GOASM=c2goasm
 CC=clang-11
@@ -41,7 +46,9 @@ ALL_SOURCES := $(shell find . -path ./_lib -prune -o -name '*.go' -name '*.s' -n
 INTEL_SOURCES := \
 	cast_numeric_avx2_amd64.s cast_numeric_sse4_amd64.s constant_factor_avx2_amd64.s \
 	constant_factor_sse4_amd64.s base_arithmetic_avx2_amd64.s base_arithmetic_sse4_amd64.s \
-	scalar_comparison_avx2_amd64.s scalar_comparison_sse4_amd64.s filter_uint32_avx2_amd64.s
+	scalar_comparison_avx2_amd64.s scalar_comparison_sse4_amd64.s \
+	filter_uint32_avx2_amd64.s filter_uint64_avx2_amd64.s filter_uint16_avx2_amd64.s filter_uint8_avx2_amd64.s \
+	get_take_indices_avx2_amd64.s
 
 #
 # ARROW-15336: DO NOT add the assembly target for Arm64 (ARM_SOURCES) until c2goasm added the Arm64 support.
@@ -75,6 +82,21 @@ _lib/scalar_comparison_sse4_amd64.s: _lib/scalar_comparison.cc
 _lib/filter_uint32_avx2_amd64.s: _lib/filter_uint32.cc
 	$(CXX) -std=c++17 -S $(C_FLAGS) $(ASM_FLAGS_AVX2) $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
 
+_lib/get_take_indices_avx2_amd64.s: _lib/get_take_indices_avx2_amd64.cc
+	# Keep saves/restores in one prologue/epilogue for c2goasm to remove.
+	$(CXX) -std=c++17 -S $(C_FLAGS) $(ASM_FLAGS_AVX2) -mno-stackrealign -fomit-frame-pointer \
+		-mllvm -enable-shrink-wrap=false -mllvm -tail-dup-placement=false $^ -o $@
+	$(PERL_FIXUP_ROTATE) $@
+
+_lib/filter_uint64_avx2_amd64.s: _lib/filter_uint64.cc
+	$(CXX) -std=c++17 -S $(C_FLAGS) $(ASM_FLAGS_AVX2) -mno-stackrealign -fomit-frame-pointer $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
+
+_lib/filter_uint16_avx2_amd64.s: _lib/filter_uint16.cc
+	$(CXX) -std=c++17 -S $(C_FLAGS) $(ASM_FLAGS_AVX2) -mno-stackrealign -fomit-frame-pointer $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
+
+_lib/filter_uint8_avx2_amd64.s: _lib/filter_uint8.cc
+	$(CXX) -std=c++17 -S $(C_FLAGS) $(ASM_FLAGS_AVX2) -mno-stackrealign -fomit-frame-pointer $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
+
 _lib/base_arithmetic_neon.s: _lib/base_arithmetic.cc
 	$(CXX) -std=c++17 -S $(C_FLAGS_NEON) $^ -o $@ ; $(PERL_FIXUP_ROTATE) $@
 
@@ -89,9 +111,11 @@ _lib/constant_factor_neon.s: _lib/constant_factor_neon.c
 
 cast_numeric_avx2_amd64.s: _lib/cast_numeric_avx2_amd64.s
 	$(C2GOASM) -a -f $^ $@
+	$(PERL_FIXUP_FRAME_POINTER) $@
 
 cast_numeric_sse4_amd64.s: _lib/cast_numeric_sse4_amd64.s
 	$(C2GOASM) -a -f $^ $@
+	$(PERL_FIXUP_FRAME_POINTER) $@
 
 constant_factor_avx2_amd64.s: _lib/constant_factor_avx2_amd64.s
 	$(C2GOASM) -a -f $^ $@
@@ -101,9 +125,13 @@ constant_factor_sse4_amd64.s: _lib/constant_factor_sse4_amd64.s
 
 base_arithmetic_avx2_amd64.s: _lib/base_arithmetic_avx2_amd64.s
 	$(C2GOASM) -a -f $^ $@
+	$(PERL_FIXUP_ARITHMETIC_OP) $@
+	$(PERL_FIXUP_FRAME_POINTER) $@
 
 base_arithmetic_sse4_amd64.s: _lib/base_arithmetic_sse4_amd64.s
 	$(C2GOASM) -a -f $^ $@
+	$(PERL_FIXUP_ARITHMETIC_OP) $@
+	$(PERL_FIXUP_FRAME_POINTER) $@
 
 scalar_comparison_avx2_amd64.s: _lib/scalar_comparison_avx2_amd64.s	
 	$(C2GOASM) -a -f $^ $@
@@ -113,6 +141,27 @@ scalar_comparison_sse4_amd64.s: _lib/scalar_comparison_sse4_amd64.s
 
 filter_uint32_avx2_amd64.s: _lib/filter_uint32_avx2_amd64.s
 	$(C2GOASM) -a -f $^ $@
+
+get_take_indices_avx2_amd64.s: _lib/get_take_indices_avx2_amd64.s
+	# c2goasm drops callee-saved pushes, so BP must not be used even as a scratch register.
+	perl -ne 'die "c2goasm cannot preserve BP: $$_" if /\b(?:rbp|ebp|bp|bpl)\b/' $<
+	# Multiple returns can leave native assembly directives in the Go output.
+	perl -ne '$$returns += /^\s*ret\s*$$/; END { die "c2goasm requires a single return\n" unless $$returns == 1 }' $<
+	$(C2GOASM) -a -f $^ $@
+	perl -i -pe 's{^//\s*\+build\b.*}{//go:build go1.18 && amd64 && !noasm && !appengine}' $@
+	perl -ne 'die "unexpected frame or stack use in take-index assembly: $$_" if /\b(?:push|pop|[re]?[bs]p|[bs]pl)\b/i' $@ || { rm -f $@; exit 1; }
+
+filter_uint64_avx2_amd64.s: _lib/filter_uint64_avx2_amd64.s
+	$(C2GOASM) -a -f $^ $@
+	perl -i -pe 's{^//\s*\+build\b.*}{//go:build go1.18 && amd64 && !noasm && !appengine}' $@
+
+filter_uint16_avx2_amd64.s: _lib/filter_uint16_avx2_amd64.s
+	$(C2GOASM) -a -f $^ $@
+	perl -i -pe 's{^//\s*\+build\b.*}{//go:build go1.18 && amd64 && !noasm && !appengine}' $@
+
+filter_uint8_avx2_amd64.s: _lib/filter_uint8_avx2_amd64.s
+	$(C2GOASM) -a -f $^ $@
+	perl -i -pe 's{^//\s*\+build\b.*}{//go:build go1.18 && amd64 && !noasm && !appengine}' $@
 
 clean:
 	rm -f $(INTEL_SOURCES)

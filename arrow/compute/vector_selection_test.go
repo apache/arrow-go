@@ -14,13 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build go1.18
+//go:build go1.24
 
 package compute_test
 
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"testing"
 
@@ -2079,6 +2080,88 @@ func TestFilterInt32MixedMaskOffsets(t *testing.T) {
 	}
 }
 
+func TestFilterInt16MixedMaskOffsets(t *testing.T) {
+	testFilterMixedMaskOffsets(
+		t,
+		func(mem memory.Allocator) array.Builder { return array.NewInt16Builder(mem) },
+		func(builder array.Builder, i int64) {
+			builder.(*array.Int16Builder).Append(int16(uint16(i*977 + 0x8011)))
+		},
+	)
+}
+
+func TestFilterInt8MixedMaskOffsets(t *testing.T) {
+	testFilterMixedMaskOffsets(
+		t,
+		func(mem memory.Allocator) array.Builder { return array.NewInt8Builder(mem) },
+		func(builder array.Builder, i int64) {
+			builder.(*array.Int8Builder).Append(int8(uint8(i*37 + 0x91)))
+		},
+	)
+}
+
+func TestFilterUint8MixedMaskOffsets(t *testing.T) {
+	testFilterMixedMaskOffsets(
+		t,
+		func(mem memory.Allocator) array.Builder { return array.NewUint8Builder(mem) },
+		func(builder array.Builder, i int64) {
+			builder.(*array.Uint8Builder).Append(uint8(i*37 + 0x91))
+		},
+	)
+}
+
+func testFilterMixedMaskOffsets(
+	t *testing.T,
+	newValueBuilder func(memory.Allocator) array.Builder,
+	appendValue func(array.Builder, int64),
+) {
+	t.Helper()
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	const length = 128
+	for _, offset := range []int64{0, 3, 8} {
+		t.Run(fmt.Sprintf("offset=%d", offset), func(t *testing.T) {
+			valuesBuilder := newValueBuilder(mem)
+			valuesBuilder.Reserve(int(offset) + length)
+			for i := int64(0); i < offset+length; i++ {
+				appendValue(valuesBuilder, i)
+			}
+			valuesBase := valuesBuilder.NewArray()
+			valuesBuilder.Release()
+			values := array.NewSlice(valuesBase, offset, offset+length)
+			valuesBase.Release()
+			defer values.Release()
+
+			filterBuilder := array.NewBooleanBuilder(mem)
+			filterBuilder.Reserve(int(offset) + length)
+			for i := int64(0); i < offset+length; i++ {
+				filterBuilder.Append(i%5 == 0 || i%5 == 2)
+			}
+			filterBase := filterBuilder.NewBooleanArray()
+			filterBuilder.Release()
+			filter := array.NewSlice(filterBase, offset, offset+length)
+			filterBase.Release()
+			defer filter.Release()
+
+			expectedBuilder := newValueBuilder(mem)
+			for i := offset; i < offset+length; i++ {
+				if i%5 == 0 || i%5 == 2 {
+					appendValue(expectedBuilder, i)
+				}
+			}
+			expected := expectedBuilder.NewArray()
+			expectedBuilder.Release()
+			defer expected.Release()
+
+			actual, err := compute.FilterArray(context.Background(), values, filter, *compute.DefaultFilterOptions())
+			require.NoError(t, err)
+			defer actual.Release()
+			assertArraysEqual(t, expected, actual)
+		})
+	}
+}
+
 // Benchmark tests for Take operation with variable-length data
 // These benchmarks test the performance improvements from buffer pre-allocation
 // in VarBinaryImpl for string/binary data reorganization (e.g., partitioning).
@@ -2136,22 +2219,26 @@ func BenchmarkTakePrimitive(b *testing.B) {
 				}
 			default: // "random"
 				// Random indices
+				rng := rand.New(rand.NewPCG(randomSeed, 0))
 				for i := int64(0); i < bm.numRows; i++ {
-					indicesBldr.Append(i % bm.numRows)
+					indicesBldr.Append(rng.Int64N(bm.numRows))
 				}
 			}
 			indices := indicesBldr.NewArray()
 			defer indices.Release()
 
-			b.ReportMetric(float64(bm.numRows), "rows/sec")
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				result, err := compute.Take(ctx, *compute.DefaultTakeOptions(), &compute.ArrayDatum{values.Data()}, &compute.ArrayDatum{indices.Data()})
+			opts := *compute.DefaultTakeOptions()
+			valuesDatum := &compute.ArrayDatum{Value: values.Data()}
+			indicesDatum := &compute.ArrayDatum{Value: indices.Data()}
+			b.ReportAllocs()
+			for b.Loop() {
+				result, err := compute.Take(ctx, opts, valuesDatum, indicesDatum)
 				if err != nil {
 					b.Fatal(err)
 				}
 				result.Release()
 			}
+			b.ReportMetric(float64(bm.numRows), "rows/op")
 		})
 	}
 }
@@ -2199,22 +2286,26 @@ func BenchmarkTakePrimitiveWithNulls(b *testing.B) {
 					indicesBldr.Append(i)
 				}
 			default: // "random"
+				rng := rand.New(rand.NewPCG(randomSeed, 0))
 				for i := int64(0); i < bm.numRows; i++ {
-					indicesBldr.Append((i * 1103515245) % bm.numRows)
+					indicesBldr.Append(rng.Int64N(bm.numRows))
 				}
 			}
 			indices := indicesBldr.NewArray()
 			defer indices.Release()
 
-			b.ReportMetric(float64(bm.numRows), "rows/sec")
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				result, err := compute.Take(ctx, *compute.DefaultTakeOptions(), &compute.ArrayDatum{values.Data()}, &compute.ArrayDatum{indices.Data()})
+			opts := *compute.DefaultTakeOptions()
+			valuesDatum := &compute.ArrayDatum{Value: values.Data()}
+			indicesDatum := &compute.ArrayDatum{Value: indices.Data()}
+			b.ReportAllocs()
+			for b.Loop() {
+				result, err := compute.Take(ctx, opts, valuesDatum, indicesDatum)
 				if err != nil {
 					b.Fatal(err)
 				}
 				result.Release()
 			}
+			b.ReportMetric(float64(bm.numRows), "rows/op")
 		})
 	}
 }

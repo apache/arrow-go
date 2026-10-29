@@ -386,7 +386,14 @@ func TestDecimalRescale(t *testing.T) {
 
 	_, err = decimal.Decimal32(555555).Rescale(0, 5)
 	assert.ErrorContains(t, err, "rescale data loss")
-	_, err = decimal.Decimal64(555555).Rescale(0, 5)
+	// 555555 at scale 5 is 55,555,500,000, which fits comfortably in
+	// Decimal64's range, so the rescale is lossless. (The 32-bit path wrongly
+	// reported data loss by truncating the value to uint32 before multiplying.)
+	out64, err := decimal.Decimal64(555555).Rescale(0, 5)
+	assert.NoError(t, err)
+	assert.Equal(t, decimal.Decimal64(55_555_500_000), out64)
+	// A value that genuinely overflows Decimal64 still reports data loss.
+	_, err = decimal.Decimal64(5_000_000_000_000_000_000).Rescale(0, 1)
 	assert.ErrorContains(t, err, "rescale data loss")
 }
 

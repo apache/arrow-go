@@ -289,6 +289,30 @@ func TestNullValue(t *testing.T) {
 	assert.Equal(t, "null", string(out))
 }
 
+func TestLongFormString(t *testing.T) {
+	// Builder writes strings of up to 63 bytes in the short form, but the long form
+	// (header 0x40 and a 4-byte length) is valid for any length, including zero.
+	metadata := []byte{0x01, 0x00, 0x00}
+	tests := []struct {
+		name  string
+		value []byte
+		want  string
+	}{
+		{"empty", []byte{0x40, 0x00, 0x00, 0x00, 0x00}, ""},
+		{"non-empty", []byte{0x40, 0x03, 0x00, 0x00, 0x00, 'a', 'b', 'c'}, "abc"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, err := variant.New(metadata, tt.value)
+			require.NoError(t, err)
+			assert.Equal(t, variant.String, v.Type())
+			assert.Equal(t, tt.want, v.Value())
+			assert.Equal(t, `"`+tt.want+`"`, v.String())
+		})
+	}
+}
+
 func TestSimpleInt64(t *testing.T) {
 	metaBytes := variant.EmptyMetadataBytes[:]
 

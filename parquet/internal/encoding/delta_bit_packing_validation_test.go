@@ -17,6 +17,8 @@
 package encoding
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"testing"
 
@@ -125,4 +127,66 @@ func TestDeltaBitPackEncoderReleasesSpacedScratch(t *testing.T) {
 	enc := NewEncoder(parquet.Types.Int32, parquet.Encodings.DeltaBinaryPacked, false, nil, mem).(*deltaBitPackEncoder[int32])
 	enc.PutSpaced([]int32{1, 2, 3, 4}, []byte{0x0f}, 0)
 	enc.Release()
+}
+
+// The delta decoders, including the length decoders that DELTA_LENGTH_BYTE_ARRAY
+// and DELTA_BYTE_ARRAY create inside SetData, have no Release, so decoding must
+// not leave anything allocated from the reader's allocator.
+func TestDeltaDecodersDoNotRetainAllocations(t *testing.T) {
+	const n = 545
+	ints := make([]int32, n)
+	strs := make([]parquet.ByteArray, n)
+	for i := range n {
+		ints[i] = int32(i * 7)
+		strs[i] = parquet.ByteArray(fmt.Sprintf("prefix/%06d", i))
+	}
+
+	encode := func(enc TypedEncoder) []byte {
+		buf, err := enc.FlushValues()
+		require.NoError(t, err)
+		defer buf.Release()
+		enc.Release()
+		return bytes.Clone(buf.Bytes())
+	}
+
+	for _, tc := range []struct {
+		name   string
+		typ    parquet.Type
+		enc    parquet.Encoding
+		data   func() []byte
+		decode func(TypedDecoder) (int, error)
+	}{
+		{"delta_binary_packed", parquet.Types.Int32, parquet.Encodings.DeltaBinaryPacked,
+			func() []byte {
+				enc := NewEncoder(parquet.Types.Int32, parquet.Encodings.DeltaBinaryPacked, false, nil, memory.DefaultAllocator).(Int32Encoder)
+				enc.Put(ints)
+				return encode(enc)
+			},
+			func(d TypedDecoder) (int, error) { return d.(Int32Decoder).Decode(make([]int32, n)) }},
+		{"delta_length_byte_array", parquet.Types.ByteArray, parquet.Encodings.DeltaLengthByteArray,
+			func() []byte {
+				enc := NewEncoder(parquet.Types.ByteArray, parquet.Encodings.DeltaLengthByteArray, false, nil, memory.DefaultAllocator).(ByteArrayEncoder)
+				enc.Put(strs)
+				return encode(enc)
+			},
+			func(d TypedDecoder) (int, error) { return d.(ByteArrayDecoder).Decode(make([]parquet.ByteArray, n)) }},
+		{"delta_byte_array", parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray,
+			func() []byte {
+				enc := NewEncoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray, false, nil, memory.DefaultAllocator).(ByteArrayEncoder)
+				enc.Put(strs)
+				return encode(enc)
+			},
+			func(d TypedDecoder) (int, error) { return d.(ByteArrayDecoder).Decode(make([]parquet.ByteArray, n)) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := tc.data()
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			dec := NewDecoder(tc.typ, tc.enc, nil, mem)
+			require.NoError(t, dec.SetData(n, data))
+			got, err := tc.decode(dec)
+			require.NoError(t, err)
+			require.Equal(t, n, got)
+			mem.AssertSize(t, 0)
+		})
+	}
 }

@@ -105,8 +105,9 @@ func (enc *DeltaLengthByteArrayEncoder) FlushValues() (Buffer, error) {
 type DeltaLengthByteArrayDecoder struct {
 	decoder
 
-	mem     memory.Allocator
-	lengths []int32
+	mem           memory.Allocator
+	lengths       []int32
+	lengthScratch []int32
 }
 
 // Type returns the underlying type which is handled by this encoder, ByteArrays only.
@@ -130,7 +131,13 @@ func (d *DeltaLengthByteArrayDecoder) SetData(nvalues int, data []byte) error {
 	if dec.totalValues > uint64(nvalues) {
 		return fmt.Errorf("parquet: delta length count %d exceeds value count %d", dec.totalValues, nvalues)
 	}
-	d.lengths = make([]int32, dec.totalValues)
+	lengthCount := int(dec.totalValues)
+	if cap(d.lengthScratch) < lengthCount {
+		d.lengthScratch = make([]int32, lengthCount)
+	} else {
+		d.lengthScratch = d.lengthScratch[:lengthCount]
+	}
+	d.lengths = d.lengthScratch
 	decoded, err := dec.Decode(d.lengths)
 	if err != nil {
 		return err
@@ -158,11 +165,24 @@ func (d *DeltaLengthByteArrayDecoder) SetData(nvalues int, data []byte) error {
 	return d.decoder.SetData(len(d.lengths), payload)
 }
 
+// decodeOne decodes one value. The caller must ensure d.nvals > 0.
+func (d *DeltaLengthByteArrayDecoder) decodeOne() parquet.ByteArray {
+	length := d.lengths[0]
+	value := d.data[:length:length]
+	d.data = d.data[length:]
+	d.nvals--
+	d.lengths = d.lengths[1:]
+	return value
+}
+
 func (d *DeltaLengthByteArrayDecoder) Discard(n int) (int, error) {
 	n = min(n, d.nvals)
-	for i := 0; i < n; i++ {
-		d.data = d.data[d.lengths[i]:]
+	var skip int
+	for _, length := range d.lengths[:n] {
+		skip += int(length)
 	}
+	// SetData already verified that the lengths fit within the payload.
+	d.data = d.data[skip:]
 	d.nvals -= n
 	d.lengths = d.lengths[n:]
 	return n, nil
@@ -172,12 +192,15 @@ func (d *DeltaLengthByteArrayDecoder) Discard(n int) (int, error) {
 // or runs out of values in the column to decode, then returns the number of values actually decoded.
 func (d *DeltaLengthByteArrayDecoder) Decode(out []parquet.ByteArray) (int, error) {
 	max := utils.Min(len(out), d.nvals)
-	for i := 0; i < max; i++ {
-		out[i] = d.data[:d.lengths[i]:d.lengths[i]]
-		d.data = d.data[d.lengths[i]:]
+	data := d.data
+	for i, length := range d.lengths[:max] {
+		out[i] = data[:length:length]
+		data = data[length:]
 	}
-	d.nvals -= max
+	// Commit decoder state once per batch instead of once per value.
+	d.data = data
 	d.lengths = d.lengths[max:]
+	d.nvals -= max
 	return max, nil
 }
 

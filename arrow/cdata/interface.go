@@ -228,9 +228,12 @@ func ExportArrowSchema(schema *arrow.Schema, out *CArrowSchema) {
 // stay valid. This is only true until the CGO call returns, at which point the garbage collector
 // is free to move things around again. As a result, if the function you're calling is going to
 // hold onto the pointers or otherwise continue to reference the memory *after* the call returns,
-// you should use the CgoArrowAllocator rather than the GoAllocator (or DefaultAllocator) so that
-// the memory which is allocated for the record batch in the first place is allocated in C,
-// not by the Go runtime and is therefore not subject to the Garbage collection.
+// you should build the record with an allocator that returns C memory rather than the GoAllocator
+// (or DefaultAllocator), so that the memory which is allocated for the record batch in the first
+// place is allocated in C, not by the Go runtime, and is therefore not subject to the Garbage
+// collection: mallocator.Mallocator (libc malloc, no C++ dependency) or, when the Arrow C++
+// library is linked, the CgoArrowAllocator behind the 'ccalloc' build tag. See the memory
+// package documentation for the alignment each allocator guarantees.
 //
 // The release function on the populated CArrowArray will properly decrease the reference counts,
 // and release the memory if the record has already been released. But since this must be explicitly

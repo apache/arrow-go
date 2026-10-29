@@ -239,6 +239,53 @@ func (r *RleDecoder) GetBatch(values []uint64) (int, error) {
 	return read, nil
 }
 
+// GetBatchBools decodes repeated one-bit runs directly into booleans.
+// Literal runs use the bulk unpacking path to avoid slow per-bit reads.
+func (r *RleDecoder) GetBatchBools(out []bool) (int, error) {
+	if r.bitWidth != 1 {
+		return 0, errors.New("boolean decoding requires a bit width of 1")
+	}
+
+	read := 0
+	var unpacked [1024]uint64
+	for read < len(out) {
+		remain := len(out) - read
+
+		if r.repCount > 0 {
+			n := min(remain, int(r.repCount))
+			dst := out[read : read+n]
+			if r.curVal != 0 {
+				for i := range dst {
+					dst[i] = true
+				}
+			} else {
+				clear(dst)
+			}
+			r.repCount -= int32(n)
+			read += n
+		} else if r.litCount > 0 {
+			// Packed literals are much faster through the existing word
+			// unpacker than through the scalar boolean bit reader.
+			n := min(remain, int(r.litCount), len(unpacked))
+			decoded, err := r.r.GetBatch(1, unpacked[:n])
+			for i, value := range unpacked[:decoded] {
+				out[read+i] = value != 0
+			}
+			r.litCount -= int32(decoded)
+			read += decoded
+			if err != nil {
+				return read, err
+			}
+			if decoded != n {
+				return read, nil
+			}
+		} else if !r.Next() {
+			return read, nil
+		}
+	}
+	return read, nil
+}
+
 // GetBatchLevels decodes levels directly into values and returns the number
 // equal to maxLevel.
 func (r *RleDecoder) GetBatchLevels(values []int16, maxLevel int16) (int, int64, error) {
@@ -464,10 +511,8 @@ func (r *RleEncoder) flushLiteral(updateIndicator bool) (err error) {
 		}
 	}
 
-	for _, val := range r.buffer {
-		if err = r.w.WriteValue(val, uint(r.BitWidth)); err != nil {
-			return
-		}
+	if err = r.w.WriteValues(r.buffer, uint(r.BitWidth)); err != nil {
+		return
 	}
 	r.buffer = r.buffer[:0]
 
@@ -564,6 +609,32 @@ func (r *RleEncoder) PutBatchLevels(values []int16) (int, error) {
 			}
 		}
 
+		// Literal levels usually have a width of only one or two bits. Pack a
+		// complete group at once instead of feeding eight values through Put,
+		// then unpacking the uint64 buffer again in WriteValues.
+		if r.repCount == 0 && len(r.buffer) == 0 && len(values)-encoded >= 8 &&
+			r.BitWidth > 0 && r.BitWidth <= 8 {
+			group := values[encoded : encoded+8]
+			var packed uint64
+			fits := true
+			maxValue := uint64(1<<r.BitWidth) - 1
+			for i, level := range group {
+				if level < 0 || uint64(level) > maxValue {
+					fits = false
+					break
+				}
+				packed |= uint64(level) << (uint(i) * uint(r.BitWidth))
+			}
+			if fits {
+				if err := r.putPackedLevelGroup(packed); err != nil {
+					return encoded + 7, err
+				}
+				r.curVal = uint64(group[7])
+				encoded += 8
+				continue
+			}
+		}
+
 		batchEnd := min(len(values), encoded+8-len(r.buffer))
 		for encoded < batchEnd {
 			if err := r.Put(uint64(values[encoded])); err != nil {
@@ -573,6 +644,109 @@ func (r *RleEncoder) PutBatchLevels(values []int16) (int, error) {
 		}
 	}
 	return encoded, nil
+}
+
+// putPackedLevelGroup writes eight literal levels to the current RLE literal
+// run. PutBatchLevels calls this only when there is no buffered/repeated run,
+// and each level fits in BitWidth bits.
+func (r *RleEncoder) putPackedLevelGroup(packed uint64) error {
+	if r.literalIndicatorOffset == -1 {
+		var err error
+		r.literalIndicatorOffset, err = r.w.SkipBytes(1)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := r.w.WriteValue(packed, uint(r.BitWidth*8)); err != nil {
+		return err
+	}
+
+	r.litCount += 8
+	// One byte is reserved for the literal header: at most 63 groups.
+	if r.litCount/8+1 >= 1<<6 {
+		return r.flushLiteral(true)
+	}
+	return nil
+}
+
+// PutBatchIndices encodes a batch of dictionary indices.
+func (r *RleEncoder) PutBatchIndices(values []int32) (int, error) {
+	encoded := 0
+	for encoded < len(values) {
+		value := values[encoded]
+		if r.repCount >= 8 {
+			if r.curVal != uint64(value) {
+				if !r.flushRepeated() {
+					return encoded, errors.New("failed to flush repeated value")
+				}
+			} else {
+				runEnd := encoded + 1
+				for runEnd < len(values) && values[runEnd] == value {
+					runEnd++
+				}
+
+				runLength := min(runEnd-encoded, int(math.MaxInt32-r.repCount))
+				r.repCount += int32(runLength)
+				encoded += runLength
+				if r.repCount == math.MaxInt32 && encoded < len(values) && values[encoded] == value {
+					if !r.flushRepeated() {
+						return encoded, errors.New("failed to flush repeated value")
+					}
+				}
+				continue
+			}
+		}
+		if r.repCount == 0 && len(r.buffer) == 0 && len(values)-encoded >= 8 && values[encoded+7] == value {
+			runEnd := encoded + 1
+			for runEnd < len(values) && values[runEnd] == value {
+				runEnd++
+			}
+			if runEnd-encoded >= 8 {
+				r.curVal = uint64(value)
+				if r.litCount != 0 {
+					r.repCount = 8
+					if err := r.flushLiteral(true); err != nil {
+						return encoded, err
+					}
+					encoded += 8
+				}
+				runLength := min(runEnd-encoded, int(math.MaxInt32-r.repCount))
+				r.repCount += int32(runLength)
+				encoded += runLength
+				continue
+			}
+		}
+
+		if r.repCount == 0 && len(r.buffer) == 0 && len(values)-encoded >= 8 {
+			if err := r.putBatchIndicesLiteral(values[encoded:]); err != nil {
+				return encoded + 7, err
+			}
+			encoded += 8
+			continue
+		}
+
+		batchEnd := min(len(values), encoded+8-len(r.buffer))
+		for encoded < batchEnd {
+			if err := r.Put(uint64(values[encoded])); err != nil {
+				return encoded, err
+			}
+			encoded++
+		}
+	}
+	return encoded, nil
+}
+
+// putBatchIndicesLiteral writes the first complete literal group directly.
+// The caller ensures that values contains at least eight entries and that the
+// encoder has no active repeated run or buffered values.
+func (r *RleEncoder) putBatchIndicesLiteral(values []int32) error {
+	r.buffer = r.buffer[:8]
+	for i, index := range values[:8] {
+		r.buffer[i] = uint64(index)
+	}
+	r.curVal = r.buffer[7]
+	return r.flushBuffered(false)
 }
 
 func (r *RleEncoder) Clear() {

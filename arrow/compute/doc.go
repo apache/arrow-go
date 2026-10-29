@@ -23,7 +23,25 @@
 // is an attempt to provide for those users, and in general create a
 // native-go arrow compute engine.
 //
-// Everything in this package should be considered Experimental for now.
+// # What is implemented
+//
+// The function registry holds scalar functions (element-wise arithmetic,
+// comparisons, boolean logic, bit-wise operations, rounding, set lookup with
+// is_in, list_element and the null checks), vector functions (array_filter,
+// array_take, unique, dictionary_encode, cumulative_sum and the run-end
+// encode/decode functions) and the meta functions cast, filter, take, sort
+// and sort_indices that dispatch to them. It also holds the scalar aggregate
+// functions count and sum, which fold a whole array into a single value
+// through the Init, Consume, Merge and Finalize lifecycle of an
+// exec.ScalarAggKernel. The remaining scalar aggregates (mean, min_max, min,
+// max, any, all, variance and so on) and the hash aggregate functions (the
+// hash_* family used for group-by) are not implemented yet: FuncHashAgg
+// exists as a function kind, but no function of that kind is registered, and
+// GetFunction returns false for their names.
+//
+// Aggregate functions are deliberately not available from the exprs package,
+// which accepts scalar functions only, matching the C++ implementation where
+// aggregations run through Acero rather than through expressions.
 package compute
 
 //go:generate go tool stringer -type=FuncKind -linecomment

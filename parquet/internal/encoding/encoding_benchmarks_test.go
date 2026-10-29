@@ -424,6 +424,75 @@ func BenchmarkEncodeDictByteArray(b *testing.B) {
 	}
 }
 
+func BenchmarkEncodeDictFixedLenByteArray(b *testing.B) {
+	const (
+		nunique = 100
+		nvalues = 65535
+	)
+
+	for _, width := range []int{8, 16, 32} {
+		b.Run(fmt.Sprintf("width=%d", width), func(b *testing.B) {
+			values := make([]parquet.FixedLenByteArray, nvalues)
+			for i := range values {
+				value := make([]byte, width)
+				unique := uint32(i % nunique)
+				for j := 0; j < 4; j++ {
+					value[j] = byte(unique >> uint(8*j))
+				}
+				for j := 4; j < width; j++ {
+					value[j] = byte(j)
+				}
+				values[i] = value
+			}
+
+			col := schema.NewColumn(schema.NewFixedLenByteArrayNode(
+				"fixedlenbytearray", parquet.Repetitions.Required, int32(width), -1), 0, 0)
+			b.SetBytes(int64(nvalues * width))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				enc := encoding.NewEncoder(parquet.Types.FixedLenByteArray, parquet.Encodings.PlainDict,
+					true, col, memory.DefaultAllocator).(*encoding.DictFixedLenByteArrayEncoder)
+				enc.Put(values)
+				buf, err := enc.FlushValues()
+				if err != nil {
+					b.Fatal(err)
+				}
+				buf.Release()
+				enc.Release()
+			}
+		})
+	}
+}
+
+func BenchmarkEncodeDictInt96(b *testing.B) {
+	const (
+		nunique = 100
+		nvalues = 65535
+	)
+
+	values := make([]parquet.Int96, nvalues)
+	for i := range values {
+		values[i] = parquet.NewInt96([3]uint32{uint32(i % nunique), 0, 0})
+	}
+	col := schema.NewColumn(schema.NewInt96Node("int96", parquet.Repetitions.Required, -1), 0, 0)
+
+	b.SetBytes(int64(nvalues * parquet.Int96SizeBytes))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		enc := encoding.NewEncoder(parquet.Types.Int96, parquet.Encodings.PlainDict,
+			true, col, memory.DefaultAllocator).(*encoding.DictInt96Encoder)
+		enc.Put(values)
+		buf, err := enc.FlushValues()
+		if err != nil {
+			b.Fatal(err)
+		}
+		buf.Release()
+		enc.Release()
+	}
+}
+
 func benchmarkEncodeDictNumeric[T int32 | int64 | float32 | float64](b *testing.B, typ parquet.Type, col *schema.Column, valueSize int64) {
 	const (
 		nunique = 100
