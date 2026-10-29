@@ -418,7 +418,11 @@ func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFal
 		thriftEncodings = append(thriftEncodings, format.Encoding(c.props.EncodingFor(c.column.Path())))
 	}
 
-	thriftEncodings = append(thriftEncodings, format.Encoding(parquet.Encodings.RLE))
+	// RLE for the repetition and definition levels, unless a data page already
+	// listed it.
+	if !slices.Contains(thriftEncodings, format.Encoding_RLE) {
+		thriftEncodings = append(thriftEncodings, format.Encoding_RLE)
+	}
 	// Only PLAIN encoding is supported for fallback in V1
 	// TODO(zeroshade): Use user specified encoding for V2
 	if dictFallback && !slices.Contains(thriftEncodings, format.Encoding_PLAIN) {
