@@ -38,7 +38,7 @@ func CheckMetadata() TypeEqualOption {
 }
 
 // TypeEqual checks if two DataType are the same, optionally checking metadata
-// equality for STRUCT types.
+// equality for types with metadata.
 func TypeEqual(left, right DataType, opts ...TypeEqualOption) bool {
 	switch {
 	case left == right:
@@ -57,6 +57,12 @@ func TypeEqual(left, right DataType, opts ...TypeEqualOption) bool {
 	switch l := left.(type) {
 	case ExtensionType:
 		return l.ExtensionEquals(right.(ExtensionType))
+	case *DictionaryType:
+		r := right.(*DictionaryType)
+		return TypeEqual(l.IndexType, r.IndexType, opts...) &&
+			TypeEqual(l.ValueType, r.ValueType, opts...) &&
+			l.Ordered == r.Ordered &&
+			(!cfg.metadata || l.ValueMetadata.Equal(r.ValueMetadata))
 	case *ListType:
 		if !TypeEqual(l.Elem(), right.(*ListType).Elem(), opts...) {
 			return false

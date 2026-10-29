@@ -99,6 +99,10 @@ type FieldDict struct {
 	Type    json.RawMessage `json:"indexType"`
 	idxType arrow.DataType  `json:"-"`
 	Ordered bool            `json:"isOrdered"`
+	// Metadata holds the metadata of the dictionary value type, such as
+	// the extension type keys of a dictionary whose values are an
+	// extension type.
+	Metadata []metaKV `json:"metadata,omitempty"`
 }
 
 type Field struct {
@@ -265,9 +269,23 @@ func (f FieldWrapper) MarshalJSON() ([]byte, error) {
 
 	var err error
 	if f.arrowType.ID() == arrow.DICTIONARY {
-		f.arrowType = f.arrowType.(*arrow.DictionaryType).ValueType
+		dictType := f.arrowType.(*arrow.DictionaryType)
+		f.arrowType = dictType.ValueType
 		if f.Dictionary.Type, err = typeToJSON(f.Dictionary.idxType); err != nil {
 			return nil, err
+		}
+		// the extension type keys of a dictionary value type go in the
+		// dictionary's own metadata rather than the field's.
+		f.Dictionary.Metadata = nil
+		if exType, ok := f.arrowType.(arrow.ExtensionType); ok {
+			f.Dictionary.Metadata = []metaKV{{Key: ipc.ExtensionTypeKeyName, Value: exType.ExtensionName()}}
+			if serializedData := exType.Serialize(); len(serializedData) > 0 {
+				f.Dictionary.Metadata = append(f.Dictionary.Metadata, metaKV{Key: ipc.ExtensionMetadataKeyName, Value: serializedData})
+			}
+			f.arrowType = exType.StorageType()
+		}
+		for i, key := range dictType.ValueMetadata.Keys() {
+			f.Dictionary.Metadata = append(f.Dictionary.Metadata, metaKV{Key: key, Value: dictType.ValueMetadata.Values()[i]})
 		}
 	}
 
@@ -564,68 +582,79 @@ func (f *FieldWrapper) UnmarshalJSON(data []byte) error {
 		if f.Dictionary.idxType, err = typeFromJSON(f.Dictionary.Type, nil); err != nil {
 			return err
 		}
-		f.arrowType = &arrow.DictionaryType{IndexType: f.Dictionary.idxType, ValueType: f.arrowType}
+		valueType, rest, err := extensionTypeFromJSON(f.arrowType, f.Dictionary.Metadata)
+		if err != nil {
+			return err
+		}
+		f.arrowType = &arrow.DictionaryType{
+			IndexType:     f.Dictionary.idxType,
+			ValueType:     valueType,
+			Ordered:       f.Dictionary.Ordered,
+			ValueMetadata: metadataFromJSON(rest),
+		}
 	}
 
 	if len(f.Metadata) > 0 { // unmarshal the key/value metadata pairs
-		var (
-			mdkeys     = make([]string, 0, len(f.Metadata))
-			mdvals     = make([]string, 0, len(f.Metadata))
-			extKeyIdx  = -1
-			extDataIdx = -1
-		)
-
-		for i, kv := range f.Metadata {
-			switch kv.Key {
-			case ipc.ExtensionTypeKeyName:
-				extKeyIdx = i
-			case ipc.ExtensionMetadataKeyName:
-				extDataIdx = i
-			}
-			mdkeys = append(mdkeys, kv.Key)
-			mdvals = append(mdvals, kv.Value)
-		}
-
-		if extKeyIdx == -1 { // no extension metadata just create the metadata
-			f.arrowMeta = arrow.NewMetadata(mdkeys, mdvals)
-			return nil
-		}
-
-		extType := arrow.GetExtensionType(mdvals[extKeyIdx])
-		if extType == nil { // unregistered extension type, just keep the metadata
-			f.arrowMeta = arrow.NewMetadata(mdkeys, mdvals)
-			return nil
-		}
-
-		var extData string
-		if extDataIdx > -1 {
-			extData = mdvals[extDataIdx]
-			// if both extension type and extension type metadata exist
-			// filter out both keys
-			newkeys := make([]string, 0, len(mdkeys)-2)
-			newvals := make([]string, 0, len(mdvals)-2)
-			for i := range mdkeys {
-				if i != extKeyIdx && i != extDataIdx {
-					newkeys = append(newkeys, mdkeys[i])
-					newvals = append(newvals, mdvals[i])
-				}
-			}
-			mdkeys = newkeys
-			mdvals = newvals
-		} else {
-			// if only extension type key is present, we can simplify filtering it out
-			mdkeys = append(mdkeys[:extKeyIdx], mdkeys[extKeyIdx+1:]...)
-			mdvals = append(mdvals[:extKeyIdx], mdvals[extKeyIdx+1:]...)
-		}
-
-		if f.arrowType, err = extType.Deserialize(f.arrowType, extData); err != nil {
+		var rest []metaKV
+		if f.arrowType, rest, err = extensionTypeFromJSON(f.arrowType, f.Metadata); err != nil {
 			return err
 		}
 
-		f.arrowMeta = arrow.NewMetadata(mdkeys, mdvals)
+		f.arrowMeta = metadataFromJSON(rest)
 	}
 
-	return err
+	return nil
+}
+
+func metadataFromJSON(md []metaKV) arrow.Metadata {
+	keys := make([]string, len(md))
+	values := make([]string, len(md))
+	for i, kv := range md {
+		keys[i], values[i] = kv.Key, kv.Value
+	}
+	return arrow.NewMetadata(keys, values)
+}
+
+// extensionTypeFromJSON returns the extension type named by the
+// ARROW:extension:name key of md, with the given storage type, along with
+// the rest of md without the extension type keys. If md does not name an
+// extension type, or names one that is not registered, the storage type and
+// md are returned unchanged.
+func extensionTypeFromJSON(storage arrow.DataType, md []metaKV) (arrow.DataType, []metaKV, error) {
+	extKeyIdx, extDataIdx := -1, -1
+	for i, kv := range md {
+		switch kv.Key {
+		case ipc.ExtensionTypeKeyName:
+			extKeyIdx = i
+		case ipc.ExtensionMetadataKeyName:
+			extDataIdx = i
+		}
+	}
+	if extKeyIdx == -1 {
+		return storage, md, nil
+	}
+
+	extType := arrow.GetExtensionType(md[extKeyIdx].Value)
+	if extType == nil { // unregistered extension type, keep the storage type
+		return storage, md, nil
+	}
+
+	var extData string
+	if extDataIdx > -1 {
+		extData = md[extDataIdx].Value
+	}
+	dt, err := extType.Deserialize(storage, extData)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	rest := make([]metaKV, 0, len(md))
+	for i, kv := range md {
+		if i != extKeyIdx && i != extDataIdx {
+			rest = append(rest, kv)
+		}
+	}
+	return dt, rest, nil
 }
 
 // the structs below represent various configurations of the Type
@@ -739,6 +768,9 @@ func fieldsToJSON(fields []arrow.Field, parentPos dictutils.FieldPos, mapper *di
 		if typ.ID() == arrow.DICTIONARY {
 			dictType := typ.(*arrow.DictionaryType)
 			typ = dictType.ValueType
+			if typ.ID() == arrow.EXTENSION {
+				typ = typ.(arrow.ExtensionType).StorageType()
+			}
 			dictID, err := mapper.GetFieldID(pos.Path())
 			if err != nil {
 				panic(err)
