@@ -858,6 +858,12 @@ type Float32ColumnChunkWriter struct {
 func NewFloat32ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *Float32ColumnChunkWriter {
 	ret := &Float32ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.Float32EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	if alp, ok := ret.currentEncoder.(encoding.ALPEncoder); ok {
+		// The writer properties have already validated the size.
+		if err := alp.SetVectorSize(props.ALPVectorSizeFor(meta.Descr().Path())); err != nil {
+			panic(err)
+		}
+	}
 	if useDict && ret.bloomFilter != nil {
 		ret.currentEncoder.(encoding.DictEncoder).EnableDictionaryReferenceTracking()
 	}
@@ -1129,6 +1135,12 @@ type Float64ColumnChunkWriter struct {
 func NewFloat64ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) *Float64ColumnChunkWriter {
 	ret := &Float64ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
 	ret.currentEncoder = encoding.Float64EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+	if alp, ok := ret.currentEncoder.(encoding.ALPEncoder); ok {
+		// The writer properties have already validated the size.
+		if err := alp.SetVectorSize(props.ALPVectorSizeFor(meta.Descr().Path())); err != nil {
+			panic(err)
+		}
+	}
 	if useDict && ret.bloomFilter != nil {
 		ret.currentEncoder.(encoding.DictEncoder).EnableDictionaryReferenceTracking()
 	}

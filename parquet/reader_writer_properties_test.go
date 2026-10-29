@@ -93,3 +93,70 @@ func TestReaderPropsGetStreamInsufficient(t *testing.T) {
 	_, err := props.GetStream(rdr, 12, 15)
 	assert.Error(t, err)
 }
+
+func TestWriterPropALPEncodingOptIn(t *testing.T) {
+	assert.Panics(t, func() {
+		parquet.NewWriterProperties(parquet.WithEncoding(parquet.Encodings.ALP))
+	}, "the default encoding cannot be ALP without the flag")
+	assert.Panics(t, func() {
+		parquet.NewWriterProperties(parquet.WithEncodingFor("price", parquet.Encodings.ALP))
+	}, "a column cannot ask for ALP without the flag")
+
+	// The flag may be given before or after the encoding it allows.
+	for _, opts := range [][]parquet.WriterProperty{
+		{parquet.WithALPEncoding(true), parquet.WithEncodingFor("price", parquet.Encodings.ALP)},
+		{parquet.WithEncodingFor("price", parquet.Encodings.ALP), parquet.WithALPEncoding(true)},
+	} {
+		props := parquet.NewWriterProperties(opts...)
+		assert.Equal(t, parquet.Encodings.ALP, props.EncodingFor("price"))
+		assert.Equal(t, parquet.Encodings.Plain, props.EncodingFor("other"),
+			"the flag allows ALP without selecting it")
+	}
+}
+
+func TestWriterPropALPEncodingPerColumn(t *testing.T) {
+	assert.Panics(t, func() {
+		parquet.NewWriterProperties(
+			parquet.WithALPEncodingFor("price", true),
+			parquet.WithEncodingFor("volume", parquet.Encodings.ALP))
+	}, "permission for one column does not carry to another")
+
+	assert.NotPanics(t, func() {
+		parquet.NewWriterProperties(
+			parquet.WithALPEncodingFor("price", true),
+			parquet.WithEncodingFor("price", parquet.Encodings.ALP))
+	})
+
+	// A column may also be taken out of a permission given to every column.
+	assert.NotPanics(t, func() {
+		parquet.NewWriterProperties(
+			parquet.WithALPEncoding(true),
+			parquet.WithALPEncodingFor("volume", false),
+			parquet.WithEncodingFor("price", parquet.Encodings.ALP))
+	})
+	assert.Panics(t, func() {
+		parquet.NewWriterProperties(
+			parquet.WithALPEncoding(true),
+			parquet.WithALPEncodingFor("volume", false),
+			parquet.WithEncodingFor("volume", parquet.Encodings.ALP))
+	}, "the column-specific setting wins over the default one")
+}
+
+func TestWriterPropALPVectorSize(t *testing.T) {
+	props := parquet.NewWriterProperties(
+		parquet.WithALPVectorSize(4096),
+		parquet.WithALPVectorSizeFor("price", 32),
+		parquet.WithEncodingFor("volume", parquet.Encodings.Plain))
+	assert.Equal(t, 32, props.ALPVectorSizeFor("price"))
+	assert.Equal(t, 4096, props.ALPVectorSizeFor("volume"),
+		"a column configured for something else keeps the default size")
+	assert.Equal(t, 4096, props.ALPVectorSizeFor("other"))
+
+	for _, size := range []int{0, 4, 1000, 1 << 16} {
+		assert.Panics(t, func() { parquet.NewWriterProperties(parquet.WithALPVectorSize(size)) }, "size %d", size)
+		assert.Panics(t, func() { parquet.NewWriterProperties(parquet.WithALPVectorSizeFor("price", size)) }, "size %d", size)
+	}
+	for _, size := range []int{8, 1 << 15} {
+		assert.NotPanics(t, func() { parquet.NewWriterProperties(parquet.WithALPVectorSize(size)) }, "size %d", size)
+	}
+}
