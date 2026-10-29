@@ -25,7 +25,7 @@ package encoding
 // and reads the bytes.
 //
 // A page begins with a 7-byte header: compression mode, integer encoding, log2
-// of the vector size, then the value count as a little-endian uint32. An array
+// of the vector size, then the value count as a little-endian int32. An array
 // of little-endian uint32 offsets follows, one per vector, each counted from the
 // start of that array. Every vector then holds:
 //
@@ -55,14 +55,14 @@ import (
 const (
 	// The first two header bytes select the ALP variants. The decoder rejects
 	// variants other than the ones this encoder writes.
-	alpCompressionMode    = 0 // ALP, rather than ALP for a sparse column
+	alpCompressionMode    = 0 // ALP; other values are reserved for variants such as ALP-RD
 	alpIntegerEncodingFOR = 0 // frame of reference plus bit packing
 
 	alpHeaderSize = 7
 
-	// This encoder writes 1,024-value vectors. The format allows anything from
-	// 2^alpMinLogVectorSize to 2^alpMaxLogVectorSize, and the decoder honors
-	// what a page declares.
+	// Encoders write 1,024-value vectors unless SetVectorSize says otherwise.
+	// The format allows anything from 2^alpMinLogVectorSize to
+	// 2^alpMaxLogVectorSize, and the decoder honors what a page declares.
 	alpDefaultVectorSize    = 1024
 	alpDefaultLogVectorSize = 10
 	alpMinLogVectorSize     = 3
@@ -156,8 +156,7 @@ type alpEncoder[T alpFloat] struct {
 	encodedBuf  []byte
 	vectorSizes []int
 
-	// Scratch reused across vectors, calls, and pages, so steady-state
-	// encoding allocates nothing.
+	// Scratch reused across vectors, calls, and pages.
 	encodedScratch []int64
 	deltaScratch   []uint64
 	excPositions   []uint16
@@ -344,10 +343,10 @@ func (enc *alpEncoder[T]) buildPresetCache() {
 	}
 }
 
-// EstimatedDataEncodedSize counts unencoded buffered values at their physical
-// width.
+// EstimatedDataEncodedSize counts the encoded vectors and their offsets, and
+// unencoded buffered values at their physical width.
 func (enc *alpEncoder[T]) EstimatedDataEncodedSize() int64 {
-	return int64(len(enc.encodedBuf)) + int64(enc.bufCount*alpEncodedBytes[T]())
+	return int64(len(enc.encodedBuf) + 4*len(enc.vectorSizes) + enc.bufCount*alpEncodedBytes[T]())
 }
 
 // FlushValues writes one page and clears the values it wrote, so that the next
@@ -463,7 +462,8 @@ func (dec *alpDecoder[T]) SetData(nvals int, data []byte) error {
 
 	dec.vectorSize = 1 << logVectorSize
 	dec.totalCount = int(numElements)
-	dec.numVectors = (dec.totalCount + dec.vectorSize - 1) / dec.vectorSize
+	// Rounding up by adding vectorSize-1 first could overflow a 32-bit int.
+	dec.numVectors = dec.totalCount/dec.vectorSize + min(dec.totalCount%dec.vectorSize, 1)
 	dec.currentIndex = 0
 	dec.currentVectorIndex = -1
 	dec.nvals = nvals
@@ -508,9 +508,10 @@ func (dec *alpDecoder[T]) decodeVector(vectorIdx int) error {
 	valueBytes := alpEncodedBytes[T]()
 
 	// On 32-bit platforms, converting a large uint32 offset can make pos
-	// negative.
+	// negative, and adding to a large one can overflow, so compare against
+	// the length less the header instead.
 	pos := int(dec.vectorOffsets[vectorIdx])
-	if pos < 0 || pos+alpVectorHeaderSize[T]() > len(dec.bodyData) {
+	if pos < 0 || pos > len(dec.bodyData)-alpVectorHeaderSize[T]() {
 		return fmt.Errorf("parquet: ALP vector %d starts past the end of the page", vectorIdx)
 	}
 

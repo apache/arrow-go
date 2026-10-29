@@ -1313,3 +1313,28 @@ func TestALPEncoderSetVectorSizeRejects(t *testing.T) {
 	page.Release()
 	require.NoError(t, enc.SetVectorSize(32), "a flushed page leaves nothing buffered")
 }
+
+// A FLOAT value scaled to just under 2^31 can round up to 2^31, which a vector
+// cannot hold: readers rebuild its integers in int32 and would flip the sign.
+func TestALPFloat32RoundingPastInt32IsAnException(t *testing.T) {
+	s := newALPScaling[float32](9, 6)
+	_, ok := s.tryEncode(2147483.5)
+	assert.False(t, ok, "2147483.5 at (9,6) rounds to 2^31")
+
+	alpFloat32RoundTrip(t, []float32{-24.875, 2147483.5, 12})
+	alpFloat32RoundTrip(t, []float32{-24.875, -2147483.5, 12})
+}
+
+// Page fields near the int32 limits must be rejected, not overflow int on
+// 32-bit platforms.
+func TestALPDecoderHugeFields(t *testing.T) {
+	dec := newALPDecoder[float32](format.Encoding_ALP, newFloat32Column())
+	assert.Error(t, dec.SetData(1, alpTestPage(math.MaxInt32)),
+		"the vector count must not overflow")
+
+	page, _ := alpEncodeTestPage(t, []float32{1.5, 2.5})
+	binary.LittleEndian.PutUint32(page[alpHeaderSize:], math.MaxInt32-4)
+	require.NoError(t, dec.SetData(2, page))
+	_, err := dec.Decode(make([]float32, 2))
+	assert.ErrorContains(t, err, "past the end of the page")
+}

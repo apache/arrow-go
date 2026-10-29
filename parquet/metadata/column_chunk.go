@@ -22,7 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"reflect"
+	"slices"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -405,14 +407,21 @@ func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFal
 		} else {
 			thriftEncodings = append(thriftEncodings, format.Encoding(c.props.DictionaryPageEncoding()))
 		}
-	} else { // no dictionary
+	} else if len(encStats.DataEncodingStats) > 0 {
+		// List what the data pages used rather than what was asked for: a
+		// writer whose dictionary was dropped before its first page writes
+		// PLAIN pages whatever encoding the properties name.
+		for _, e := range slices.Sorted(maps.Keys(encStats.DataEncodingStats)) {
+			thriftEncodings = append(thriftEncodings, format.Encoding(e))
+		}
+	} else { // no pages to go by
 		thriftEncodings = append(thriftEncodings, format.Encoding(c.props.EncodingFor(c.column.Path())))
 	}
 
 	thriftEncodings = append(thriftEncodings, format.Encoding(parquet.Encodings.RLE))
 	// Only PLAIN encoding is supported for fallback in V1
 	// TODO(zeroshade): Use user specified encoding for V2
-	if dictFallback {
+	if dictFallback && !slices.Contains(thriftEncodings, format.Encoding_PLAIN) {
 		thriftEncodings = append(thriftEncodings, format.Encoding_PLAIN)
 	}
 	c.chunk.MetaData.Encodings = thriftEncodings

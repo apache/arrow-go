@@ -128,8 +128,8 @@ func TestWriterPropALPEncodingPerColumn(t *testing.T) {
 	props := parquet.NewWriterProperties(
 		parquet.WithALPEncodingFor("price", true),
 		parquet.WithEncodingFor("price", parquet.Encodings.ALP))
-	assert.True(t, props.ALPEncodingEnabled(),
-		"one permitted column is enough to report the encoding as allowed")
+	assert.False(t, props.ALPEncodingEnabled(),
+		"like the other getters, the unqualified one reports the default")
 	assert.True(t, props.ALPEncodingEnabledFor("price"))
 	assert.False(t, props.ALPEncodingEnabledFor("volume"))
 

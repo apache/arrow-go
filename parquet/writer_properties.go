@@ -306,8 +306,12 @@ func WithEncodingPath(path ColumnPath, encoding Encoding) WriterProperty {
 // default.
 //
 // The option grants permission rather than selecting ALP. A column still asks for
-// the encoding through WithEncoding or WithEncodingFor, and asking for it without
-// this option panics, as asking for any unusable encoding does.
+// the encoding through WithEncodingFor or WithEncodingPath, and asking for it
+// without this option panics, as asking for any unusable encoding does.
+//
+// ALP supports only FLOAT and DOUBLE columns. WithEncoding(Encodings.ALP) sets
+// it for every column, so writing any other column without a dictionary
+// (BOOLEAN and INT96 never use one) panics; prefer selecting it per column.
 //
 // A column reaches ALP only with dictionary encoding turned off. A dictionary
 // takes precedence over the encoding a column asks for, and a writer that drops
@@ -764,19 +768,13 @@ func NewWriterProperties(opts ...WriterProperty) *WriterProperties {
 	return cfg.wr
 }
 
-// ALPEncodingEnabled reports whether any column may be written with the ALP
-// encoding.
-func (w *WriterProperties) ALPEncodingEnabled() bool {
-	if w.defColumnProps.ALPEnabled {
-		return true
-	}
-	for _, props := range w.columnProps {
-		if props.ALPEnabled {
-			return true
-		}
-	}
-	return false
-}
+// ALPEncodingEnabled reports whether columns may use the ALP encoding by
+// default. Use ALPEncodingEnabledFor for a specific column.
+func (w *WriterProperties) ALPEncodingEnabled() bool { return w.defColumnProps.ALPEnabled }
+
+// ALPVectorSize returns the default number of values in each ALP vector. Use
+// ALPVectorSizeFor for a specific column.
+func (w *WriterProperties) ALPVectorSize() int { return w.defColumnProps.ALPVectorSize }
 
 // ALPEncodingEnabledFor reports whether the given column may be written with the
 // ALP encoding, or the default value if the column was not separately specified.

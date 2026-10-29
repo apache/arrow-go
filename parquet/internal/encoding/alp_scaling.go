@@ -177,10 +177,17 @@ type alpScaling[T alpFloat] struct {
 	decFac, decExp T
 
 	lo, hi, magic T
+	// The range of the integer type a vector stores: int32 for FLOAT, int64
+	// for DOUBLE.
+	intMin, intMax int64
 }
 
 func newALPScaling[T alpFloat](exponent, factor int) alpScaling[T] {
 	lo, hi := alpEncodingLimits[T]()
+	intMin, intMax := int64(math.MinInt64), int64(math.MaxInt64)
+	if alpEncodedBytes[T]() == 4 {
+		intMin, intMax = math.MinInt32, math.MaxInt32
+	}
 	return alpScaling[T]{
 		encExp: alpPow10[T](exponent),
 		encFac: alpNegPow10[T](factor),
@@ -189,6 +196,8 @@ func newALPScaling[T alpFloat](exponent, factor int) alpScaling[T] {
 		lo:     lo,
 		hi:     hi,
 		magic:  alpMagic[T](),
+		intMin: intMin,
+		intMax: intMax,
 	}
 }
 
@@ -222,7 +231,14 @@ func (s *alpScaling[T]) decode(encoded int64) T {
 
 // tryEncode reports whether v survives the required round trip. Values that
 // fail are stored verbatim as exceptions.
+//
+// Rounding a scaled value just under the limit can still reach 2^31, which a
+// FLOAT vector cannot store: readers rebuild its integers in int32. Such a
+// value is an exception even though it would round-trip in int64.
 func (s *alpScaling[T]) tryEncode(v T) (encoded int64, ok bool) {
 	encoded = s.encode(v)
+	if encoded < s.intMin || encoded > s.intMax {
+		return encoded, false
+	}
 	return encoded, s.decode(encoded) == v
 }

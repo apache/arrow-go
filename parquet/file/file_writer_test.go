@@ -702,6 +702,47 @@ func TestALPFileRoundtrip(t *testing.T) {
 	}
 }
 
+// A column that asks for ALP but keeps its dictionary falls back to PLAIN when
+// the dictionary outgrows its limit before the first page. The footer must then
+// list PLAIN, not ALP: a reader without ALP support may reject a file whose
+// footer names it, though no page uses it.
+func TestALPRequestedButDictionaryDroppedListsPlain(t *testing.T) {
+	values := make([]float64, 20000)
+	for i := range values {
+		values[i] = float64(i) / 7
+	}
+	props := parquet.NewWriterProperties(
+		parquet.WithALPEncoding(true),
+		parquet.WithEncodingFor("value", parquet.Encodings.ALP),
+		parquet.WithDictionaryPageSizeLimit(1024))
+	sc, err := schema.NewGroupNode("test", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewFloat64Node("value", parquet.Repetitions.Required, -1),
+	}, -1)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	writer := file.NewParquetWriter(&buf, sc, file.WithWriterProps(props))
+	rgw := writer.AppendRowGroup()
+	cw, err := rgw.NextColumn()
+	require.NoError(t, err)
+	_, err = cw.(*file.Float64ColumnChunkWriter).WriteBatch(values, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, cw.Close())
+	require.NoError(t, rgw.Close())
+	require.NoError(t, writer.Close())
+
+	reader, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer reader.Close()
+	chunk, err := reader.RowGroup(0).MetaData().ColumnChunk(0)
+	require.NoError(t, err)
+	for _, s := range chunk.EncodingStats() {
+		require.NotEqual(t, parquet.Encodings.ALP, s.Encoding, "no page should be ALP")
+	}
+	assert.NotContains(t, chunk.Encodings(), parquet.Encodings.ALP)
+	assert.Contains(t, chunk.Encodings(), parquet.Encodings.Plain)
+}
+
 // The vector size is a writer property, so it has to reach each column's
 // encoder: the pages of a column must declare the size set for it, and still
 // read back.
