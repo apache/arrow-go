@@ -344,14 +344,16 @@ func (enc *alpEncoder[T]) buildPresetCache() {
 }
 
 // EstimatedDataEncodedSize counts the encoded vectors and their offsets, plus
-// the vector still being buffered sized as if every value were an exception:
-// its offset, header, and each value with its 2-byte position. That is exact
-// for the worst common case, NaNs, infinities and other unencodable values, and
-// above the size of a vector that packs well.
+// an upper bound for the vector still being buffered: its offset and header,
+// every slot packed at the full integer width, and every value also stored as
+// an exception with its 2-byte position. A vector that mixes exceptions with
+// wide packed values can approach that bound, so nothing smaller is safe; the
+// overestimate is limited to one vector.
 func (enc *alpEncoder[T]) EstimatedDataEncodedSize() int64 {
 	size := len(enc.encodedBuf) + 4*len(enc.vectorSizes)
 	if enc.bufCount > 0 {
-		size += 4 + alpVectorHeaderSize[T]() + enc.bufCount*(alpEncodedBytes[T]()+2)
+		width := alpEncodedBytes[T]()
+		size += 4 + alpVectorHeaderSize[T]() + enc.bufCount*(2*width+2)
 	}
 	return int64(size)
 }

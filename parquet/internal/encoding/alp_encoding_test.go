@@ -815,22 +815,35 @@ func TestALPPresetCacheBuilds(t *testing.T) {
 
 func testALPEstimatedDataEncodedSize[T alpFloat](t *testing.T) {
 	t.Helper()
+	lo, hi := alpEncodingLimits[T]()
 	tests := []struct {
-		name          string
-		count         int
-		value         func(int) T
-		allExceptions bool
+		name  string
+		count int
+		value func(int) T
 	}{
-		{"Empty", 0, func(int) T { return 0 }, false},
-		{"BufferedMonetary", 100, func(i int) T { return T(i) * 0.01 }, false},
-		{"BufferedDecimals", 100, func(i int) T { return T(i) / 4 }, false},
-		{"IntegerVector", alpDefaultVectorSize, func(i int) T { return T(i) }, false},
-		{"ConstantVector", alpDefaultVectorSize, func(int) T { return 3.14 }, false},
-		{"MonetaryVectors", 2 * alpDefaultVectorSize, func(i int) T { return T(i) * 0.01 }, false},
-		{"DecimalsWithBufferedTail", alpDefaultVectorSize + 100, func(i int) T { return T(i) / 4 }, false},
-		{"AllExceptionsVector", alpDefaultVectorSize, func(int) T { return T(math.Inf(1)) }, true},
-		{"AllExceptionsBuffered", 100, func(int) T { return T(math.Inf(1)) }, true},
-		{"AllExceptionsWithBufferedTail", alpDefaultVectorSize + 100, func(int) T { return T(math.Inf(1)) }, true},
+		{"Empty", 0, func(int) T { return 0 }},
+		{"BufferedMonetary", 100, func(i int) T { return T(i) * 0.01 }},
+		{"BufferedDecimals", 100, func(i int) T { return T(i) / 4 }},
+		{"IntegerVector", alpDefaultVectorSize, func(i int) T { return T(i) }},
+		{"ConstantVector", alpDefaultVectorSize, func(int) T { return 3.14 }},
+		{"MonetaryVectors", 2 * alpDefaultVectorSize, func(i int) T { return T(i) * 0.01 }},
+		{"DecimalsWithBufferedTail", alpDefaultVectorSize + 100, func(i int) T { return T(i) / 4 }},
+		{"AllExceptionsVector", alpDefaultVectorSize, func(int) T { return T(math.Inf(1)) }},
+		{"AllExceptionsBuffered", 100, func(int) T { return T(math.Inf(1)) }},
+		{"AllExceptionsWithBufferedTail", alpDefaultVectorSize + 100, func(int) T { return T(math.Inf(1)) }},
+		// Half NaNs, half integers near both ends of the integer range: the
+		// encoder packs the integers at nearly full width and also stores
+		// every NaN as an exception, the largest a vector gets.
+		{"MixedWideBuffered", 100, func(i int) T {
+			switch i % 4 {
+			case 0, 2:
+				return T(math.NaN())
+			case 1:
+				return T(math.Trunc(float64(lo) * 0.97))
+			default:
+				return T(math.Trunc(float64(hi) * 0.97))
+			}
+		}},
 	}
 
 	for _, tt := range tests {
@@ -855,13 +868,9 @@ func testALPEstimatedDataEncodedSize[T alpFloat](t *testing.T) {
 			require.GreaterOrEqual(t, buf.Len(), pageHeaderSize)
 			payloadSize := int64(buf.Len() - pageHeaderSize)
 			pending := tt.count % alpDefaultVectorSize
-			switch {
-			case pending == 0:
+			if pending == 0 {
 				assert.Equal(t, payloadSize, estimate, "completed vectors have an exact size")
-			case tt.allExceptions:
-				assert.Equal(t, payloadSize, estimate,
-					"a pending vector is estimated as if every value were an exception")
-			default:
+			} else {
 				assert.GreaterOrEqual(t, estimate, payloadSize,
 					"a pending vector must not be underestimated")
 			}
