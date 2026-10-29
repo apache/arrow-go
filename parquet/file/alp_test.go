@@ -22,102 +22,232 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/apache/arrow-go/v18/parquet/file"
-	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
+	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/require"
 )
 
-// alpWriteReadDouble writes one optional or required double column with ALP and
-// reads it back. A nil defLevels writes a required column.
-func alpWriteReadDouble(t *testing.T, values []float64, defLevels []int16, opts ...parquet.WriterProperty) ([]float64, []int16) {
+// writeALPFile writes one row group and returns a reader owned by the caller.
+// The callback writes each column; options can override the ALP defaults.
+func writeALPFile(t *testing.T, mem memory.Allocator, fields schema.FieldList, writeColumn func(file.ColumnChunkWriter), opts ...parquet.WriterProperty) *file.Reader {
 	t.Helper()
 
-	rep := parquet.Repetitions.Required
-	if defLevels != nil {
-		rep = parquet.Repetitions.Optional
-	}
 	opts = append([]parquet.WriterProperty{
+		parquet.WithAllocator(mem),
 		parquet.WithEncoding(parquet.Encodings.ALP),
 		parquet.WithALPEncoding(true),
 		parquet.WithDictionaryDefault(false),
 	}, opts...)
-
-	field, err := schema.NewPrimitiveNode("value", rep, parquet.Types.Double, -1, -1)
-	require.NoError(t, err)
-	sc, err := schema.NewGroupNode("test", parquet.Repetitions.Required, schema.FieldList{field}, 0)
+	sc, err := schema.NewGroupNode("test", parquet.Repetitions.Required, fields, -1)
 	require.NoError(t, err)
 
-	sink := encoding.NewBufferWriter(0, memory.DefaultAllocator)
-	writer := file.NewParquetWriter(sink, sc, file.WithWriterProps(parquet.NewWriterProperties(opts...)))
+	var sink bytes.Buffer
+	writer := file.NewParquetWriter(&sink, sc, file.WithWriterProps(parquet.NewWriterProperties(opts...)))
+	defer writer.Close()
 	rgw := writer.AppendRowGroup()
-	cw, err := rgw.NextColumn()
-	require.NoError(t, err)
-	_, err = cw.(*file.Float64ColumnChunkWriter).WriteBatch(values, defLevels, nil)
-	require.NoError(t, err)
-	require.NoError(t, cw.Close())
+	for range fields {
+		cw, err := rgw.NextColumn()
+		require.NoError(t, err)
+		writeColumn(cw)
+		require.NoError(t, cw.Close())
+	}
 	require.NoError(t, rgw.Close())
 	require.NoError(t, writer.Close())
 
-	reader, err := file.NewParquetReader(bytes.NewReader(sink.Bytes()))
+	reader, err := file.NewParquetReader(bytes.NewReader(sink.Bytes()),
+		file.WithReadProps(parquet.NewReaderProperties(mem)))
 	require.NoError(t, err)
-	defer reader.Close()
+	require.Equal(t, 1, reader.NumRowGroups())
+	return reader
+}
 
-	cr, err := reader.RowGroup(0).Column(0)
+// readALPDoubleColumn returns packed non-null values and, for optional columns,
+// definition levels. Row and value offsets advance independently across batches.
+func readALPDoubleColumn(t *testing.T, reader *file.Reader, col, batchSize int) ([]float64, []int16) {
+	t.Helper()
+
+	cr, err := reader.RowGroup(0).Column(col)
 	require.NoError(t, err)
+	defer cr.Close()
 	r := cr.(*file.Float64ColumnChunkReader)
 
 	rows := int(reader.NumRows())
 	out := make([]float64, rows)
 	var outDef []int16
-	if defLevels != nil {
+	if cr.Descriptor().MaxDefinitionLevel() > 0 {
 		outDef = make([]int16, rows)
+		for i := range outDef {
+			outDef[i] = -1
+		}
 	}
-	for read := 0; read < rows; {
-		_, n, err := r.ReadBatch(int64(rows), out[read:], outDef, nil)
+	valuesRead := 0
+	for rowsRead := 0; rowsRead < rows; {
+		var def []int16
+		if outDef != nil {
+			def = outDef[rowsRead:]
+		}
+		batch := min(batchSize, rows-rowsRead)
+		total, n, err := r.ReadBatch(int64(batch), out[valuesRead:], def, nil)
 		require.NoError(t, err)
 		require.NoError(t, r.Err())
-		if n == 0 {
-			break
-		}
-		read += n
+		require.EqualValues(t, batch, total, "read stalled at row %d", rowsRead)
+		rowsRead += int(total)
+		valuesRead += n
 	}
-	return out, outDef
+	require.False(t, r.HasNext())
+	require.NoError(t, r.Err())
+	return out[:valuesRead], outDef
+}
+
+func assertALPDataPageEncoding(t *testing.T, chunk *metadata.ColumnChunkMetaData) {
+	t.Helper()
+
+	dataPageEntries := 0
+	for _, stat := range chunk.EncodingStats() {
+		if stat.PageType == file.PageTypeDataPage || stat.PageType == file.PageTypeDataPageV2 {
+			dataPageEntries++
+			require.Equal(t, parquet.Encodings.ALP, stat.Encoding)
+		}
+	}
+	require.Positive(t, dataPageEntries, "missing data-page encoding statistics")
 }
 
 // An all-null page contains levels but no encoded values. PLAIN is the control.
 func TestALPAllNullPage(t *testing.T) {
 	for _, enc := range []parquet.Encoding{parquet.Encodings.Plain, parquet.Encodings.ALP} {
 		t.Run(enc.String(), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
 			const rows = 8
-			out, def := alpWriteReadDouble(t, nil, make([]int16, rows),
-				parquet.WithEncoding(enc))
-			require.Len(t, out, rows)
-			for i, d := range def {
-				require.Zero(t, d, "row %d should be null", i)
+			defLevels := make([]int16, rows)
+			reader := writeALPFile(t, mem, schema.FieldList{
+				schema.NewFloat64Node("value", parquet.Repetitions.Optional, -1),
+			}, func(cw file.ColumnChunkWriter) {
+				n, err := cw.(*file.Float64ColumnChunkWriter).WriteBatch(nil, defLevels, nil)
+				require.NoError(t, err)
+				require.Zero(t, n)
+			}, parquet.WithEncoding(enc))
+			defer reader.Close()
+			require.EqualValues(t, rows, reader.NumRows())
+			if enc == parquet.Encodings.ALP {
+				chunk, err := reader.RowGroup(0).MetaData().ColumnChunk(0)
+				require.NoError(t, err)
+				assertALPDataPageEncoding(t, chunk)
 			}
+
+			out, def := readALPDoubleColumn(t, reader, 0, rows)
+			require.Empty(t, out)
+			require.Equal(t, defLevels, def)
 		})
 	}
 }
 
-// Scattered nulls exercise PutSpaced and DecodeSpaced.
+// Keep the packed path covered alongside PutSpaced and DecodeSpaced. The latter
+// is reached through RecordReader; column ReadBatch only returns packed values.
 func TestALPNullsScattered(t *testing.T) {
-	const rows = 3000
-	values := make([]float64, 0, rows)
+	const (
+		rows            = 3000
+		validBitsOffset = 3
+	)
+	values := make([]float64, rows)
+	packed := make([]float64, 0, rows)
 	defLevels := make([]int16, rows)
+	validBits := make([]byte, bitutil.BytesForBits(rows+validBitsOffset))
 	for i := range rows {
 		if i%3 == 0 {
-			continue // definition level 0: this row is null
+			values[i] = -9999 // A null slot must not enter the encoded values.
+			continue
 		}
 		defLevels[i] = 1
-		values = append(values, float64(i)/100)
+		bitutil.SetBit(validBits, i+validBitsOffset)
+		values[i] = float64(i) / 100
+		switch i {
+		case 1:
+			values[i] = math.Copysign(0, -1)
+		case 2:
+			values[i] = math.Float64frombits(0x7ff8000000001234)
+		case 4:
+			values[i] = math.Inf(1)
+		case 5:
+			values[i] = math.SmallestNonzeroFloat64
+		}
+		packed = append(packed, values[i])
 	}
 
-	got, _ := alpWriteReadDouble(t, values, defLevels)
-	require.Equal(t, values, got[:len(values)])
+	for _, tc := range []struct {
+		name   string
+		spaced bool
+	}{
+		{"packed", false},
+		{"spaced", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
+			reader := writeALPFile(t, mem, schema.FieldList{
+				schema.NewFloat64Node("value", parquet.Repetitions.Optional, -1),
+			}, func(cw file.ColumnChunkWriter) {
+				w := cw.(*file.Float64ColumnChunkWriter)
+				if tc.spaced {
+					n, err := w.WriteBatchSpacedWithError(values, defLevels, nil, validBits, validBitsOffset)
+					require.NoError(t, err)
+					require.EqualValues(t, rows, n)
+				} else {
+					n, err := w.WriteBatch(packed, defLevels, nil)
+					require.NoError(t, err)
+					require.EqualValues(t, len(packed), n)
+				}
+			})
+			defer reader.Close()
+			require.EqualValues(t, rows, reader.NumRows())
+			chunk, err := reader.RowGroup(0).MetaData().ColumnChunk(0)
+			require.NoError(t, err)
+			assertALPDataPageEncoding(t, chunk)
+
+			gotPacked, gotDef := readALPDoubleColumn(t, reader, 0, 513)
+			require.Equal(t, defLevels, gotDef)
+			require.Len(t, gotPacked, len(packed))
+			for i := range packed {
+				require.Equal(t, math.Float64bits(packed[i]), math.Float64bits(gotPacked[i]), "value %d", i)
+			}
+			if !tc.spaced {
+				return
+			}
+
+			pages, err := reader.RowGroup(0).GetColumnPageReader(0)
+			require.NoError(t, err)
+			rr := file.NewRecordReader(reader.MetaData().Schema.Column(0),
+				file.LevelInfo{NullSlotUsage: 1, DefLevel: 1}, arrow.PrimitiveTypes.Float64, mem, reader.BufferPool())
+			defer rr.Release()
+			rr.SetPageReader(pages)
+			require.NoError(t, rr.Reserve(rows))
+			n, err := rr.ReadRecords(rows)
+			require.NoError(t, err)
+			require.EqualValues(t, rows, n)
+			require.Equal(t, rows, rr.ValuesWritten())
+			require.EqualValues(t, rows-len(packed), rr.NullCount())
+			require.EqualValues(t, rows, rr.LevelsPos())
+			require.Equal(t, defLevels, rr.DefLevels()[:rows])
+
+			got := arrow.Float64Traits.CastFromBytes(rr.Values())[:rows]
+			valid := rr.ReleaseValidBits()
+			defer valid.Release()
+			for i, def := range defLevels {
+				require.Equal(t, def == 1, bitutil.BitIsSet(valid.Bytes(), i), "row %d validity", i)
+				if def == 1 {
+					require.Equal(t, math.Float64bits(values[i]), math.Float64bits(got[i]), "row %d", i)
+				}
+			}
+		})
+	}
 }
 
 // These distributions cover exact decimals, integer overflow, NaNs,
@@ -138,12 +268,29 @@ func TestALPRandomRoundtrip(t *testing.T) {
 
 	for _, pool := range pools {
 		t.Run(pool.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
 			values := make([]float64, 5000)
 			for i := range values {
 				values[i] = pool.draw()
 			}
 
-			got, _ := alpWriteReadDouble(t, values, nil)
+			reader := writeALPFile(t, mem, schema.FieldList{
+				schema.NewFloat64Node("value", parquet.Repetitions.Required, -1),
+			}, func(cw file.ColumnChunkWriter) {
+				n, err := cw.(*file.Float64ColumnChunkWriter).WriteBatch(values, nil, nil)
+				require.NoError(t, err)
+				require.EqualValues(t, len(values), n)
+			})
+			defer reader.Close()
+			require.EqualValues(t, len(values), reader.NumRows())
+			chunk, err := reader.RowGroup(0).MetaData().ColumnChunk(0)
+			require.NoError(t, err)
+			assertALPDataPageEncoding(t, chunk)
+
+			got, _ := readALPDoubleColumn(t, reader, 0, len(values))
+			require.Len(t, got, len(values))
 			for i := range values {
 				// Compare the bit patterns, so that a NaN or a negative zero has
 				// to come back exactly as it went in.
@@ -158,73 +305,280 @@ func TestALPRandomRoundtrip(t *testing.T) {
 
 // Data page v2 stores levels separately from encoded values.
 func TestALPDataPageV2(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
 	values := []float64{1.25, 2.5, 3.75, 100, 0.001}
-	got, _ := alpWriteReadDouble(t, values, nil, parquet.WithDataPageVersion(parquet.DataPageV2))
+	defLevels := []int16{1, 0, 1, 1, 0, 1, 0, 1}
+	reader := writeALPFile(t, mem, schema.FieldList{
+		schema.NewFloat64Node("value", parquet.Repetitions.Optional, -1),
+	}, func(cw file.ColumnChunkWriter) {
+		n, err := cw.(*file.Float64ColumnChunkWriter).WriteBatch(values, defLevels, nil)
+		require.NoError(t, err)
+		require.EqualValues(t, len(values), n)
+	}, parquet.WithDataPageVersion(parquet.DataPageV2), parquet.WithCompression(compress.Codecs.Zstd))
+	defer reader.Close()
+	require.EqualValues(t, len(defLevels), reader.NumRows())
+	chunk, err := reader.RowGroup(0).MetaData().ColumnChunk(0)
+	require.NoError(t, err)
+	assertALPDataPageEncoding(t, chunk)
+	require.Equal(t, compress.Codecs.Zstd, chunk.Compression())
+
+	pages, err := reader.RowGroup(0).GetColumnPageReader(0)
+	require.NoError(t, err)
+	defer pages.Close()
+	require.True(t, pages.Next())
+	require.Equal(t, file.PageTypeDataPageV2, pages.Page().Type())
+	page := pages.Page().(*file.DataPageV2)
+	require.Equal(t, parquet.Encodings.ALP, parquet.Encoding(page.Encoding()))
+	require.True(t, page.IsCompressed())
+	require.EqualValues(t, len(defLevels), page.NumRows())
+	require.EqualValues(t, len(defLevels)-len(values), page.NumNulls())
+	require.Positive(t, page.DefinitionLevelByteLen())
+	require.False(t, pages.Next())
+	require.NoError(t, pages.Err())
+
+	got, gotDef := readALPDoubleColumn(t, reader, 0, len(defLevels))
+	require.Equal(t, defLevels, gotDef)
 	require.Equal(t, values, got)
 }
 
-// alpSinglePageReader returns one page followed by the end of the chunk.
-type alpSinglePageReader struct {
-	page   file.Page
-	handed bool
-}
+func TestALPFileRoundtrip(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		values []float64
+	}{
+		{
+			name:   "monetary",
+			values: []float64{1.23, 4.56, 7.89, 10.11, 12.13, 14.15, 16.17, 18.19},
+		},
+		{
+			name: "large_vector",
+			values: func() []float64 {
+				v := make([]float64, 2048)
+				for i := range v {
+					v[i] = 0.125 + float64(i)*0.25
+				}
+				return v
+			}(),
+		},
+		{
+			name:   "integers",
+			values: []float64{1, 2, 3, 100, 200, 300, 1000, 2000},
+		},
+		{
+			name:   "special_values",
+			values: []float64{0, math.Copysign(0, -1), 1.5, -1.5, math.Inf(1), math.Inf(-1), math.NaN()},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
 
-func (r *alpSinglePageReader) SetMaxPageHeaderSize(int) {}
-func (r *alpSinglePageReader) Page() file.Page          { return r.page }
-func (r *alpSinglePageReader) Next() bool {
-	if r.handed {
-		return false
+			reader := writeALPFile(t, mem, schema.FieldList{
+				schema.NewFloat64Node("value", parquet.Repetitions.Required, -1),
+			}, func(cw file.ColumnChunkWriter) {
+				n, err := cw.(*file.Float64ColumnChunkWriter).WriteBatch(tc.values, nil, nil)
+				require.NoError(t, err)
+				require.EqualValues(t, len(tc.values), n)
+			})
+			defer reader.Close()
+			require.EqualValues(t, len(tc.values), reader.NumRows())
+			chunk, err := reader.RowGroup(0).MetaData().ColumnChunk(0)
+			require.NoError(t, err)
+			assertALPDataPageEncoding(t, chunk)
+
+			output, _ := readALPDoubleColumn(t, reader, 0, len(tc.values))
+			require.Len(t, output, len(tc.values))
+
+			// Compare the bit patterns, so that a NaN or a negative zero has to come
+			// back exactly as it went in.
+			for i := range tc.values {
+				require.Equal(t, math.Float64bits(tc.values[i]), math.Float64bits(output[i]),
+					"index %d: got %v (bits %016x), want %v (bits %016x)",
+					i, output[i], math.Float64bits(output[i]), tc.values[i], math.Float64bits(tc.values[i]))
+			}
+		})
 	}
-	r.handed = true
-	return r.page != nil
 }
 
-func (r *alpSinglePageReader) Err() error { return nil }
-func (r *alpSinglePageReader) Reset(parquet.BufferedReader, int64, compress.Compression, *file.CryptoContext) {
+// A column that asks for ALP but keeps its dictionary falls back to PLAIN when
+// the dictionary outgrows its limit before the first page. The footer must then
+// list PLAIN, not ALP: a reader without ALP support may reject a file whose
+// footer names it, though no page uses it.
+func TestALPRequestedButDictionaryDroppedListsPlain(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	values := make([]float64, 20000)
+	for i := range values {
+		values[i] = float64(i) / 7
+	}
+	reader := writeALPFile(t, mem, schema.FieldList{
+		schema.NewFloat64Node("value", parquet.Repetitions.Required, -1),
+	}, func(cw file.ColumnChunkWriter) {
+		n, err := cw.(*file.Float64ColumnChunkWriter).WriteBatch(values, nil, nil)
+		require.NoError(t, err)
+		require.EqualValues(t, len(values), n)
+	}, parquet.WithDictionaryDefault(true),
+		parquet.WithEncodingFor("value", parquet.Encodings.ALP),
+		parquet.WithDictionaryPageSizeLimit(1024))
+	defer reader.Close()
+	chunk, err := reader.RowGroup(0).MetaData().ColumnChunk(0)
+	require.NoError(t, err)
+	dataPageEntries := 0
+	for _, s := range chunk.EncodingStats() {
+		require.NotEqual(t, parquet.Encodings.ALP, s.Encoding, "no page should be ALP")
+		if s.PageType == file.PageTypeDataPage || s.PageType == file.PageTypeDataPageV2 {
+			dataPageEntries++
+			require.Equal(t, parquet.Encodings.Plain, s.Encoding)
+		}
+	}
+	require.Positive(t, dataPageEntries)
+	// This test also checks that the footer does not advertise an unused codec.
+	require.NotContains(t, chunk.Encodings(), parquet.Encodings.ALP)
+	require.Contains(t, chunk.Encodings(), parquet.Encodings.Plain)
+
+	got, _ := readALPDoubleColumn(t, reader, 0, len(values))
+	require.Equal(t, values, got)
 }
 
-func (r *alpSinglePageReader) GetDictionaryPage() (*file.DictionaryPage, error) { return nil, nil }
-func (r *alpSinglePageReader) SeekToPageWithRow(int64) error                    { return nil }
-func (r *alpSinglePageReader) Close() error                                     { return nil }
+// The vector size is a writer property, so it has to reach each column's
+// encoder: the pages of a column must declare the size set for it, and still
+// read back.
+func TestALPFileVectorSize(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
 
-// Reject ALP before non-floating-point decoder traits can panic.
-func TestALPOnIntegerColumnIsRejected(t *testing.T) {
-	node, err := schema.NewPrimitiveNode("value", parquet.Repetitions.Required, parquet.Types.Int32, -1, -1)
-	require.NoError(t, err)
-	descr := schema.NewColumn(node, 0, 0)
+	values := make([]float64, 5000)
+	for i := range values {
+		values[i] = float64(i%1234) / 100
+	}
 
-	body := memory.NewBufferBytes(make([]byte, 64))
-	page := file.NewDataPageV1(body, 4, parquet.Encodings.ALP,
-		parquet.Encodings.RLE, parquet.Encodings.RLE, int32(body.Len()))
+	var fields schema.FieldList
+	for _, name := range []string{"small", "default", "large"} {
+		fields = append(fields, schema.NewFloat64Node(name, parquet.Repetitions.Required, -1))
+	}
+	reader := writeALPFile(t, mem, fields, func(cw file.ColumnChunkWriter) {
+		n, err := cw.(*file.Float64ColumnChunkWriter).WriteBatch(values, nil, nil)
+		require.NoError(t, err)
+		require.EqualValues(t, len(values), n)
+	}, parquet.WithALPVectorSizeFor("small", 32),
+		parquet.WithALPVectorSizeFor("large", 4096))
+	defer reader.Close()
 
-	r := file.NewColumnReader(descr, &alpSinglePageReader{page: page}, memory.DefaultAllocator, nil)
-	total, read, err := r.(*file.Int32ColumnChunkReader).ReadBatch(4, make([]int32, 4), nil, nil)
-	require.NoError(t, err)
-	require.Zero(t, total)
-	require.Zero(t, read)
-	// ReadBatch stops rather than returning the failure, as it does for any page
-	// it cannot open, so the reason is on the reader.
-	require.ErrorContains(t, r.Err(), "only float and double support ALP encoding")
+	for col, logSize := range []byte{5, 10, 12} {
+		chunk, err := reader.RowGroup(0).MetaData().ColumnChunk(col)
+		require.NoError(t, err)
+		assertALPDataPageEncoding(t, chunk)
+
+		func() {
+			pages, err := reader.RowGroup(0).GetColumnPageReader(col)
+			require.NoError(t, err)
+			defer pages.Close()
+			pageCount := 0
+			for pages.Next() {
+				page := pages.Page()
+				require.Equal(t, file.PageTypeDataPage, page.Type())
+				require.Equal(t, parquet.Encodings.ALP, parquet.Encoding(page.Encoding()))
+				// Required columns have no levels before the ALP header.
+				require.GreaterOrEqual(t, len(page.Data()), 3)
+				require.Equal(t, logSize, page.Data()[2], "column %d", col)
+				pageCount++
+			}
+			require.NoError(t, pages.Err())
+			require.Positive(t, pageCount)
+		}()
+
+		got, _ := readALPDoubleColumn(t, reader, col, len(values))
+		require.Equal(t, values, got, "column %d", col)
+	}
 }
 
-// A mismatched page count must return an error instead of a zero-length read,
-// which the column reader would retry indefinitely.
-func TestALPPageClaimingTooManyValues(t *testing.T) {
-	node, err := schema.NewPrimitiveNode("value", parquet.Repetitions.Required, parquet.Types.Double, -1, -1)
+// A column whose values outgrow the data page size is written as several pages.
+// Each one carries its own ALP header, offset array and vectors, so a page that
+// repeated an earlier page's values would decode to the wrong numbers here.
+func TestALPFileRoundtripManyPages(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	const numValues = 40000
+
+	values := make([]float64, numValues)
+	for i := range values {
+		values[i] = float64(i) / 100
+	}
+
+	reader := writeALPFile(t, mem, schema.FieldList{
+		schema.NewFloat64Node("value", parquet.Repetitions.Required, -1),
+	}, func(cw file.ColumnChunkWriter) {
+		n, err := cw.(*file.Float64ColumnChunkWriter).WriteBatch(values, nil, nil)
+		require.NoError(t, err)
+		require.EqualValues(t, numValues, n)
+	}, parquet.WithDataPageSize(16*1024))
+	defer reader.Close()
+
+	require.EqualValues(t, numValues, reader.NumRows())
+	chunk, err := reader.RowGroup(0).MetaData().ColumnChunk(0)
 	require.NoError(t, err)
-	descr := schema.NewColumn(node, 0, 0)
+	assertALPDataPageEncoding(t, chunk)
 
-	enc := encoding.NewEncoder(parquet.Types.Double, parquet.Encodings.ALP, false, descr, memory.DefaultAllocator)
-	enc.(encoding.Float64Encoder).Put([]float64{1.5, 2.5})
-	buf, err := enc.FlushValues()
+	pages, err := reader.RowGroup(0).GetColumnPageReader(0)
 	require.NoError(t, err)
+	defer pages.Close()
+	dataPages := 0
+	for pages.Next() {
+		require.Equal(t, file.PageTypeDataPage, pages.Page().Type())
+		require.Equal(t, parquet.Encodings.ALP, parquet.Encoding(pages.Page().Encoding()))
+		dataPages++
+	}
+	require.NoError(t, pages.Err())
+	require.Greater(t, dataPages, 1, "the roundtrip must span multiple data pages")
 
-	body := memory.NewBufferBytes(buf.Bytes())
-	page := file.NewDataPageV1(body, 8, parquet.Encodings.ALP,
-		parquet.Encodings.RLE, parquet.Encodings.RLE, int32(body.Len()))
+	// Read in batches that do not divide the vector size, so a batch boundary
+	// lands inside a vector and inside a page.
+	output, _ := readALPDoubleColumn(t, reader, 0, 700)
+	require.Equal(t, values, output)
+}
 
-	r := file.NewColumnReader(descr, &alpSinglePageReader{page: page}, memory.DefaultAllocator, nil)
-	_, read, err := r.(*file.Float64ColumnChunkReader).ReadBatch(8, make([]float64, 8), nil, nil)
-	require.ErrorContains(t, err, "ALP page holds 2 values")
-	require.Equal(t, 2, read, "the values the page does hold still come back")
+func TestALPFloat32FileRoundtrip(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	values := []float32{1.23, 4.56, 7.89, 0, -1.5, 100.0, 0.001}
+
+	reader := writeALPFile(t, mem, schema.FieldList{
+		schema.NewFloat32Node("value", parquet.Repetitions.Required, -1),
+	}, func(cw file.ColumnChunkWriter) {
+		n, err := cw.(*file.Float32ColumnChunkWriter).WriteBatch(values, nil, nil)
+		require.NoError(t, err)
+		require.EqualValues(t, len(values), n)
+	})
+	defer reader.Close()
+	require.EqualValues(t, len(values), reader.NumRows())
+
+	rgr := reader.RowGroup(0)
+	chunk, err := rgr.MetaData().ColumnChunk(0)
+	require.NoError(t, err)
+	assertALPDataPageEncoding(t, chunk)
+	cr, err := rgr.Column(0)
+	require.NoError(t, err)
+	defer cr.Close()
+
+	f32Reader, ok := cr.(*file.Float32ColumnChunkReader)
+	require.True(t, ok)
+
+	output := make([]float32, len(values))
+	total, read, err := f32Reader.ReadBatch(int64(len(values)), output, nil, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, len(values), total)
+	require.EqualValues(t, len(values), read)
+	require.False(t, f32Reader.HasNext())
+	require.NoError(t, f32Reader.Err())
+
+	for i := range values {
+		require.Equal(t, math.Float32bits(values[i]), math.Float32bits(output[i]),
+			"index %d: got %v (bits %08x), want %v (bits %08x)",
+			i, output[i], math.Float32bits(output[i]), values[i], math.Float32bits(values[i]))
+	}
 }

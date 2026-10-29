@@ -57,6 +57,8 @@ func BenchmarkALPEncodingFloat32(b *testing.B) {
 					values := alpBenchmarkValues[float32](sz, benchmark.exceptionInterval)
 					encoder := encoding.NewEncoder(parquet.Types.Float, parquet.Encodings.ALP,
 						false, nil, memory.DefaultAllocator).(encoding.Float32Encoder)
+					defer encoder.Release()
+					b.ReportAllocs()
 					b.ResetTimer()
 					b.SetBytes(int64(len(values) * arrow.Float32SizeBytes))
 					for b.Loop() {
@@ -78,6 +80,8 @@ func BenchmarkALPEncodingFloat64(b *testing.B) {
 					values := alpBenchmarkValues[float64](sz, benchmark.exceptionInterval)
 					encoder := encoding.NewEncoder(parquet.Types.Double, parquet.Encodings.ALP,
 						false, nil, memory.DefaultAllocator).(encoding.Float64Encoder)
+					defer encoder.Release()
+					b.ReportAllocs()
 					b.ResetTimer()
 					b.SetBytes(int64(len(values) * arrow.Float64SizeBytes))
 					for b.Loop() {
@@ -100,12 +104,14 @@ func BenchmarkALPDecodingFloat32(b *testing.B) {
 					output := make([]float32, sz)
 					encoder := encoding.NewEncoder(parquet.Types.Float, parquet.Encodings.ALP,
 						false, nil, memory.DefaultAllocator).(encoding.Float32Encoder)
+					defer encoder.Release()
 					encoder.Put(values)
 					buf, _ := encoder.FlushValues()
 					defer buf.Release()
 
 					decoder := encoding.NewDecoder(parquet.Types.Float, parquet.Encodings.ALP,
 						nil, memory.DefaultAllocator).(encoding.Float32Decoder)
+					b.ReportAllocs()
 					b.ResetTimer()
 					b.SetBytes(int64(len(values) * arrow.Float32SizeBytes))
 					for b.Loop() {
@@ -131,12 +137,14 @@ func BenchmarkALPDecodingFloat64(b *testing.B) {
 					output := make([]float64, sz)
 					encoder := encoding.NewEncoder(parquet.Types.Double, parquet.Encodings.ALP,
 						false, nil, memory.DefaultAllocator).(encoding.Float64Encoder)
+					defer encoder.Release()
 					encoder.Put(values)
 					buf, _ := encoder.FlushValues()
 					defer buf.Release()
 
 					decoder := encoding.NewDecoder(parquet.Types.Double, parquet.Encodings.ALP,
 						nil, memory.DefaultAllocator).(encoding.Float64Decoder)
+					b.ReportAllocs()
 					b.ResetTimer()
 					b.SetBytes(int64(len(values) * arrow.Float64SizeBytes))
 					for b.Loop() {
@@ -162,12 +170,14 @@ func BenchmarkALPDecodingFloat64Batched(b *testing.B) {
 			output := make([]float64, batchSize)
 			encoder := encoding.NewEncoder(parquet.Types.Double, parquet.Encodings.ALP,
 				false, nil, memory.DefaultAllocator).(encoding.Float64Encoder)
+			defer encoder.Release()
 			encoder.Put(values)
 			buf, _ := encoder.FlushValues()
 			defer buf.Release()
 
 			decoder := encoding.NewDecoder(parquet.Types.Double, parquet.Encodings.ALP,
 				nil, memory.DefaultAllocator).(encoding.Float64Decoder)
+			b.ReportAllocs()
 			b.ResetTimer()
 			b.SetBytes(int64(len(values) * arrow.Float64SizeBytes))
 			for b.Loop() {

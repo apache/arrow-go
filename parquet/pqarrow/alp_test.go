@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/apache/arrow-go/v18/parquet/file"
+	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -147,8 +148,15 @@ func TestALPArrowRoundtrip(t *testing.T) {
 				for c := range rdr.MetaData().Schema.NumColumns() {
 					chunk, err := rdr.RowGroup(rg).MetaData().ColumnChunk(c)
 					require.NoError(t, err)
-					assert.Contains(t, chunk.Encodings(), parquet.Encodings.ALP,
-						"row group %d column %d should be ALP encoded", rg, c)
+					hasDataPages := false
+					for _, stats := range chunk.EncodingStats() {
+						if stats.PageType == format.PageType_DATA_PAGE || stats.PageType == format.PageType_DATA_PAGE_V2 {
+							hasDataPages = true
+							assert.Equal(t, parquet.Encodings.ALP, stats.Encoding,
+								"row group %d column %d should be ALP encoded", rg, c)
+						}
+					}
+					assert.True(t, hasDataPages, "row group %d column %d has no data page encoding statistics", rg, c)
 				}
 			}
 

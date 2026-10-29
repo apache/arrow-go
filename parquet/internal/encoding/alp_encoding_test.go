@@ -113,266 +113,76 @@ func newFloat64Column() *schema.Column {
 	return schema.NewColumn(schema.NewFloat64Node("float64", parquet.Repetitions.Required, -1), 0, 0)
 }
 
-func alpFloat32RoundTrip(t *testing.T, values []float32) {
+func alpRoundTrip[T alpFloat](t *testing.T, values []T) {
 	t.Helper()
-	col := newFloat32Column()
-	mem := memory.DefaultAllocator
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
-	enc := newALPEncoder[float32](format.Encoding_ALP, col, mem)
+	enc := newALPEncoder[T](format.Encoding_ALP, nil, mem)
+	defer enc.Release()
 	enc.Put(values)
 	buf, err := enc.FlushValues()
 	require.NoError(t, err)
 	defer buf.Release()
 
-	dec := newALPDecoder[float32](format.Encoding_ALP, col)
-	err = dec.SetData(len(values), buf.Bytes())
-	require.NoError(t, err)
-
-	out := make([]float32, len(values))
-	n, err := dec.Decode(out)
-	require.NoError(t, err)
-	assert.Equal(t, len(values), n)
-
+	out := alpDecodePage[T](t, buf, len(values))
 	for i, v := range values {
-		assert.Equal(t, math.Float32bits(v), math.Float32bits(out[i]),
-			"index %d: got %v (bits %08x), want %v (bits %08x)",
-			i, out[i], math.Float32bits(out[i]), v, math.Float32bits(v))
+		switch want := any(v).(type) {
+		case float32:
+			assert.Equal(t, math.Float32bits(want), math.Float32bits(float32(out[i])),
+				"index %d: got %v, want %v", i, out[i], v)
+		case float64:
+			assert.Equal(t, math.Float64bits(want), math.Float64bits(float64(out[i])),
+				"index %d: got %v, want %v", i, out[i], v)
+		}
 	}
 }
 
-func alpFloat64RoundTrip(t *testing.T, values []float64) {
+func testALPFloatRoundTrip[T alpFloat](t *testing.T) {
 	t.Helper()
-	col := newFloat64Column()
-	mem := memory.DefaultAllocator
-
-	enc := newALPEncoder[float64](format.Encoding_ALP, col, mem)
-	enc.Put(values)
-	buf, err := enc.FlushValues()
-	require.NoError(t, err)
-	defer buf.Release()
-
-	dec := newALPDecoder[float64](format.Encoding_ALP, col)
-	err = dec.SetData(len(values), buf.Bytes())
-	require.NoError(t, err)
-
-	out := make([]float64, len(values))
-	n, err := dec.Decode(out)
-	require.NoError(t, err)
-	assert.Equal(t, len(values), n)
-
-	for i, v := range values {
-		assert.Equal(t, math.Float64bits(v), math.Float64bits(out[i]),
-			"index %d: got %v (bits %016x), want %v (bits %016x)",
-			i, out[i], math.Float64bits(out[i]), v, math.Float64bits(v))
+	negZero := alpNegZero[T]()
+	inf, ninf := T(math.Inf(1)), T(math.Inf(-1))
+	exceptions := []T{1.23, 4.56, inf, 7.89, negZero, 10.11, ninf, 12.13, 14.15, 16.17}
+	allExceptions := []T{inf, ninf, negZero, inf, ninf, negZero, inf, ninf}
+	tests := []struct {
+		name   string
+		counts []int
+		value  func(int) T
+	}{
+		{"Monetary", []int{2000}, func(i int) T { return T(i) * 0.01 }},
+		{"Integer", []int{1500}, func(i int) T { return T(i) }},
+		{"Exceptions", []int{len(exceptions)}, func(i int) T { return exceptions[i] }},
+		{"AllExceptions", []int{len(allExceptions)}, func(i int) T { return allExceptions[i] }},
+		{"SingleValue/Positive", []int{1}, func(int) T { return 42 }},
+		{"SingleValue/Zero", []int{1}, func(int) T { return 0 }},
+		{"SingleValue/Negative", []int{1}, func(int) T { return -1.23 }},
+		{"PartialVector", []int{1, 2, 3, 7, 100, 500, 1023}, func(i int) T { return T(i) * 0.1 }},
+		{"ExactVectorSize", []int{1024}, func(i int) T { return T(i) * 0.01 }},
+		{"MultipleVectors", []int{1025, 2048, 3000, 5000, 10000}, func(i int) T { return T(i) * 0.01 }},
+		{"ConstantValue", []int{1500}, func(int) T { return 3.14 }},
+		{"ZeroValues", []int{1024}, func(int) T { return 0 }},
+		{"NegativeValues", []int{1500}, func(i int) T { return -T(i) * 0.01 }},
+		{"Scientific", []int{2000}, func(i int) T { return T(i)*0.001 + 273.15 }}, // Kelvin temperatures
 	}
-}
 
-func TestALPFloat32MonetaryRoundTrip(t *testing.T) {
-	values := make([]float32, 2000)
-	for i := range values {
-		values[i] = float32(i) * 0.01
-	}
-	alpFloat32RoundTrip(t, values)
-}
-
-func TestALPFloat64MonetaryRoundTrip(t *testing.T) {
-	values := make([]float64, 2000)
-	for i := range values {
-		values[i] = float64(i) * 0.01
-	}
-	alpFloat64RoundTrip(t, values)
-}
-
-func TestALPFloat32IntegerRoundTrip(t *testing.T) {
-	values := make([]float32, 1500)
-	for i := range values {
-		values[i] = float32(i)
-	}
-	alpFloat32RoundTrip(t, values)
-}
-
-func TestALPFloat64IntegerRoundTrip(t *testing.T) {
-	values := make([]float64, 1500)
-	for i := range values {
-		values[i] = float64(i)
-	}
-	alpFloat64RoundTrip(t, values)
-}
-
-func TestALPFloat32ExceptionsRoundTrip(t *testing.T) {
-	negZero := alpNegZero[float32]()
-	inf := float32(math.Inf(1))
-	ninf := float32(math.Inf(-1))
-
-	values := []float32{
-		1.23, 4.56, inf, 7.89, negZero, 10.11,
-		ninf, 12.13, 14.15, 16.17,
-	}
-	alpFloat32RoundTrip(t, values)
-}
-
-func TestALPFloat64ExceptionsRoundTrip(t *testing.T) {
-	negZero := alpNegZero[float64]()
-	inf := math.Inf(1)
-	ninf := math.Inf(-1)
-
-	values := []float64{
-		1.23, 4.56, inf, 7.89, negZero, 10.11,
-		ninf, 12.13, 14.15, 16.17,
-	}
-	alpFloat64RoundTrip(t, values)
-}
-
-func TestALPFloat32AllExceptionsRoundTrip(t *testing.T) {
-	negZero := alpNegZero[float32]()
-	inf := float32(math.Inf(1))
-	ninf := float32(math.Inf(-1))
-
-	values := []float32{inf, ninf, negZero, inf, ninf, negZero, inf, ninf}
-	alpFloat32RoundTrip(t, values)
-}
-
-func TestALPFloat64AllExceptionsRoundTrip(t *testing.T) {
-	negZero := alpNegZero[float64]()
-	inf := math.Inf(1)
-	ninf := math.Inf(-1)
-
-	values := []float64{inf, ninf, negZero, inf, ninf, negZero, inf, ninf}
-	alpFloat64RoundTrip(t, values)
-}
-
-func TestALPFloat32SingleValueRoundTrip(t *testing.T) {
-	alpFloat32RoundTrip(t, []float32{42.0})
-	alpFloat32RoundTrip(t, []float32{0.0})
-	alpFloat32RoundTrip(t, []float32{-1.23})
-}
-
-func TestALPFloat64SingleValueRoundTrip(t *testing.T) {
-	alpFloat64RoundTrip(t, []float64{42.0})
-	alpFloat64RoundTrip(t, []float64{0.0})
-	alpFloat64RoundTrip(t, []float64{-1.23})
-}
-
-func TestALPFloat32PartialVectorRoundTrip(t *testing.T) {
-	for _, count := range []int{1, 2, 3, 7, 100, 500, 1023} {
-		t.Run(fmt.Sprintf("count_%d", count), func(t *testing.T) {
-			values := make([]float32, count)
-			for i := range values {
-				values[i] = float32(i) * 0.1
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, count := range tt.counts {
+				t.Run(fmt.Sprintf("count_%d", count), func(t *testing.T) {
+					values := make([]T, count)
+					for i := range values {
+						values[i] = tt.value(i)
+					}
+					alpRoundTrip(t, values)
+				})
 			}
-			alpFloat32RoundTrip(t, values)
 		})
 	}
 }
 
-func TestALPFloat64PartialVectorRoundTrip(t *testing.T) {
-	for _, count := range []int{1, 2, 3, 7, 100, 500, 1023} {
-		t.Run(fmt.Sprintf("count_%d", count), func(t *testing.T) {
-			values := make([]float64, count)
-			for i := range values {
-				values[i] = float64(i) * 0.1
-			}
-			alpFloat64RoundTrip(t, values)
-		})
-	}
-}
-
-func TestALPFloat32ExactVectorSizeRoundTrip(t *testing.T) {
-	values := make([]float32, 1024)
-	for i := range values {
-		values[i] = float32(i) * 0.01
-	}
-	alpFloat32RoundTrip(t, values)
-}
-
-func TestALPFloat64ExactVectorSizeRoundTrip(t *testing.T) {
-	values := make([]float64, 1024)
-	for i := range values {
-		values[i] = float64(i) * 0.01
-	}
-	alpFloat64RoundTrip(t, values)
-}
-
-func TestALPFloat32MultipleVectorsRoundTrip(t *testing.T) {
-	for _, count := range []int{1025, 2048, 3000, 5000, 10000} {
-		t.Run(fmt.Sprintf("count_%d", count), func(t *testing.T) {
-			values := make([]float32, count)
-			for i := range values {
-				values[i] = float32(i) * 0.01
-			}
-			alpFloat32RoundTrip(t, values)
-		})
-	}
-}
-
-func TestALPFloat64MultipleVectorsRoundTrip(t *testing.T) {
-	for _, count := range []int{1025, 2048, 3000, 5000, 10000} {
-		t.Run(fmt.Sprintf("count_%d", count), func(t *testing.T) {
-			values := make([]float64, count)
-			for i := range values {
-				values[i] = float64(i) * 0.01
-			}
-			alpFloat64RoundTrip(t, values)
-		})
-	}
-}
-
-func TestALPFloat32ConstantValueRoundTrip(t *testing.T) {
-	values := make([]float32, 1500)
-	for i := range values {
-		values[i] = 3.14
-	}
-	alpFloat32RoundTrip(t, values)
-}
-
-func TestALPFloat64ConstantValueRoundTrip(t *testing.T) {
-	values := make([]float64, 1500)
-	for i := range values {
-		values[i] = 3.14
-	}
-	alpFloat64RoundTrip(t, values)
-}
-
-func TestALPFloat32ZeroValuesRoundTrip(t *testing.T) {
-	values := make([]float32, 1024)
-	alpFloat32RoundTrip(t, values)
-}
-
-func TestALPFloat64ZeroValuesRoundTrip(t *testing.T) {
-	values := make([]float64, 1024)
-	alpFloat64RoundTrip(t, values)
-}
-
-func TestALPFloat32NegativeValuesRoundTrip(t *testing.T) {
-	values := make([]float32, 1500)
-	for i := range values {
-		values[i] = -float32(i) * 0.01
-	}
-	alpFloat32RoundTrip(t, values)
-}
-
-func TestALPFloat64NegativeValuesRoundTrip(t *testing.T) {
-	values := make([]float64, 1500)
-	for i := range values {
-		values[i] = -float64(i) * 0.01
-	}
-	alpFloat64RoundTrip(t, values)
-}
-
-func TestALPFloat32ScientificRoundTrip(t *testing.T) {
-	values := make([]float32, 2000)
-	for i := range values {
-		values[i] = float32(i)*0.001 + 273.15 // Kelvin temperatures
-	}
-	alpFloat32RoundTrip(t, values)
-}
-
-func TestALPFloat64ScientificRoundTrip(t *testing.T) {
-	values := make([]float64, 2000)
-	for i := range values {
-		values[i] = float64(i)*0.001 + 273.15
-	}
-	alpFloat64RoundTrip(t, values)
+func TestALPFloatRoundTrip(t *testing.T) {
+	t.Run("Float32", testALPFloatRoundTrip[float32])
+	t.Run("Float64", testALPFloatRoundTrip[float64])
 }
 
 func TestALPFloat32ProgressiveDecoding(t *testing.T) {
@@ -382,9 +192,11 @@ func TestALPFloat32ProgressiveDecoding(t *testing.T) {
 	}
 
 	col := newFloat32Column()
-	mem := memory.DefaultAllocator
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	enc := newALPEncoder[float32](format.Encoding_ALP, col, mem)
+	defer enc.Release()
 	enc.Put(values)
 	buf, err := enc.FlushValues()
 	require.NoError(t, err)
@@ -423,9 +235,11 @@ func TestALPFloat64ProgressiveDecoding(t *testing.T) {
 	}
 
 	col := newFloat64Column()
-	mem := memory.DefaultAllocator
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	enc := newALPEncoder[float64](format.Encoding_ALP, col, mem)
+	defer enc.Release()
 	enc.Put(values)
 	buf, err := enc.FlushValues()
 	require.NoError(t, err)
@@ -464,9 +278,11 @@ func TestALPFloat32Discard(t *testing.T) {
 	}
 
 	col := newFloat32Column()
-	mem := memory.DefaultAllocator
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	enc := newALPEncoder[float32](format.Encoding_ALP, col, mem)
+	defer enc.Release()
 	enc.Put(values)
 	buf, err := enc.FlushValues()
 	require.NoError(t, err)
@@ -498,9 +314,11 @@ func TestALPFloat64Discard(t *testing.T) {
 	}
 
 	col := newFloat64Column()
-	mem := memory.DefaultAllocator
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	enc := newALPEncoder[float64](format.Encoding_ALP, col, mem)
+	defer enc.Release()
 	enc.Put(values)
 	buf, err := enc.FlushValues()
 	require.NoError(t, err)
@@ -529,9 +347,11 @@ func TestALPDiscardMoreThanAvailable(t *testing.T) {
 	values := []float32{1.0, 2.0, 3.0}
 
 	col := newFloat32Column()
-	mem := memory.DefaultAllocator
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	enc := newALPEncoder[float32](format.Encoding_ALP, col, mem)
+	defer enc.Release()
 	enc.Put(values)
 	buf, err := enc.FlushValues()
 	require.NoError(t, err)
@@ -548,7 +368,8 @@ func TestALPDiscardMoreThanAvailable(t *testing.T) {
 
 func TestALPFloat32MultiplePages(t *testing.T) {
 	col := newFloat32Column()
-	mem := memory.DefaultAllocator
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	dec := newALPDecoder[float32](format.Encoding_ALP, col)
 
@@ -559,9 +380,11 @@ func TestALPFloat32MultiplePages(t *testing.T) {
 		}
 
 		enc := newALPEncoder[float32](format.Encoding_ALP, col, mem)
+		defer enc.Release()
 		enc.Put(values)
 		buf, err := enc.FlushValues()
 		require.NoError(t, err)
+		defer buf.Release()
 
 		err = dec.SetData(len(values), buf.Bytes())
 		require.NoError(t, err)
@@ -575,14 +398,13 @@ func TestALPFloat32MultiplePages(t *testing.T) {
 			assert.Equal(t, math.Float32bits(v), math.Float32bits(out[i]),
 				"page %d, index %d: mismatch", page, i)
 		}
-
-		buf.Release()
 	}
 }
 
 func TestALPFloat64MultiplePages(t *testing.T) {
 	col := newFloat64Column()
-	mem := memory.DefaultAllocator
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	dec := newALPDecoder[float64](format.Encoding_ALP, col)
 
@@ -593,9 +415,11 @@ func TestALPFloat64MultiplePages(t *testing.T) {
 		}
 
 		enc := newALPEncoder[float64](format.Encoding_ALP, col, mem)
+		defer enc.Release()
 		enc.Put(values)
 		buf, err := enc.FlushValues()
 		require.NoError(t, err)
+		defer buf.Release()
 
 		err = dec.SetData(len(values), buf.Bytes())
 		require.NoError(t, err)
@@ -609,16 +433,16 @@ func TestALPFloat64MultiplePages(t *testing.T) {
 			assert.Equal(t, math.Float64bits(v), math.Float64bits(out[i]),
 				"page %d, index %d: mismatch", page, i)
 		}
-
-		buf.Release()
 	}
 }
 
 func TestALPEncoderReset(t *testing.T) {
 	col := newFloat32Column()
-	mem := memory.DefaultAllocator
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	enc := newALPEncoder[float32](format.Encoding_ALP, col, mem)
+	defer enc.Release()
 
 	values1 := []float32{1.23, 4.56, 7.89}
 	enc.Put(values1)
@@ -655,37 +479,16 @@ func TestALPEncoderReset(t *testing.T) {
 	}
 }
 
-func TestALPEncoderType(t *testing.T) {
-	col32 := newFloat32Column()
-	col64 := newFloat64Column()
-	mem := memory.DefaultAllocator
-
-	enc32 := newALPEncoder[float32](format.Encoding_ALP, col32, mem)
-	assert.Equal(t, parquet.Types.Float, enc32.Type())
-
-	enc64 := newALPEncoder[float64](format.Encoding_ALP, col64, mem)
-	assert.Equal(t, parquet.Types.Double, enc64.Type())
-}
-
-func TestALPDecoderType(t *testing.T) {
-	col32 := newFloat32Column()
-	col64 := newFloat64Column()
-
-	dec32 := &alpDecoder[float32]{decoder: newDecoderBase(format.Encoding_ALP, col32)}
-	assert.Equal(t, parquet.Types.Float, dec32.Type())
-
-	dec64 := &alpDecoder[float64]{decoder: newDecoderBase(format.Encoding_ALP, col64)}
-	assert.Equal(t, parquet.Types.Double, dec64.Type())
-}
-
 func TestALPEncoderPutSpaced(t *testing.T) {
 	col := newFloat32Column()
-	mem := memory.DefaultAllocator
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	values := []float32{1.0, 2.0, 0.0, 4.0, 0.0, 6.0, 7.0, 0.0}
 	validBits := []byte{0b01101011} // bits 0,1,3,5,6 set
 
 	enc := newALPEncoder[float32](format.Encoding_ALP, col, mem)
+	defer enc.Release()
 	enc.PutSpaced(values, validBits, 0)
 	buf, err := enc.FlushValues()
 	require.NoError(t, err)
@@ -710,7 +513,8 @@ func TestALPEncoderPutSpaced(t *testing.T) {
 
 func TestALPHeaderFormat(t *testing.T) {
 	col := newFloat32Column()
-	mem := memory.DefaultAllocator
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	values := make([]float32, 100)
 	for i := range values {
@@ -718,6 +522,7 @@ func TestALPHeaderFormat(t *testing.T) {
 	}
 
 	enc := newALPEncoder[float32](format.Encoding_ALP, col, mem)
+	defer enc.Release()
 	enc.Put(values)
 	buf, err := enc.FlushValues()
 	require.NoError(t, err)
@@ -734,7 +539,8 @@ func TestALPHeaderFormat(t *testing.T) {
 
 func TestALPHeaderFormatMultipleVectors(t *testing.T) {
 	col := newFloat64Column()
-	mem := memory.DefaultAllocator
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	values := make([]float64, 3000)
 	for i := range values {
@@ -742,6 +548,7 @@ func TestALPHeaderFormatMultipleVectors(t *testing.T) {
 	}
 
 	enc := newALPEncoder[float64](format.Encoding_ALP, col, mem)
+	defer enc.Release()
 	enc.Put(values)
 	buf, err := enc.FlushValues()
 	require.NoError(t, err)
@@ -838,7 +645,10 @@ func TestALPFloat64WidestPacking(t *testing.T) {
 		values[i] = float64(int64(i-len(values)/2)*(1<<54) + (1 << 53))
 	}
 
-	enc := newALPEncoder[float64](format.Encoding_ALP, newFloat64Column(), memory.DefaultAllocator)
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	enc := newALPEncoder[float64](format.Encoding_ALP, newFloat64Column(), mem)
+	defer enc.Release()
 	enc.Put(values)
 	buf, err := enc.FlushValues()
 	require.NoError(t, err)
@@ -850,7 +660,7 @@ func TestALPFloat64WidestPacking(t *testing.T) {
 	assert.Equal(t, byte(64), page[vectorPos+alpVectorHeaderSize[float64]()-1], "bit width")
 	assert.Zero(t, binary.LittleEndian.Uint16(page[vectorPos+2:]), "exception count")
 
-	alpFloat64RoundTrip(t, values)
+	alpRoundTrip(t, values)
 }
 
 // alpEncodeTestPage encodes values into a single-vector page and returns the
@@ -858,11 +668,14 @@ func TestALPFloat64WidestPacking(t *testing.T) {
 func alpEncodeTestPage(t *testing.T, values []float32) (page []byte, vectorPos int) {
 	t.Helper()
 
-	enc := newALPEncoder[float32](format.Encoding_ALP, newFloat32Column(), memory.DefaultAllocator)
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	enc := newALPEncoder[float32](format.Encoding_ALP, newFloat32Column(), mem)
+	defer enc.Release()
 	enc.Put(values)
 	buf, err := enc.FlushValues()
 	require.NoError(t, err)
-	t.Cleanup(buf.Release)
+	defer buf.Release()
 
 	page = append([]byte(nil), buf.Bytes()...)
 	// One offset follows the header, and it holds the size of the offset array.
@@ -965,9 +778,11 @@ func TestALPDecoderExceptionPositionOutsideVector(t *testing.T) {
 
 func TestALPPresetCacheBuilds(t *testing.T) {
 	col := newFloat32Column()
-	mem := memory.DefaultAllocator
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	enc := newALPEncoder[float32](format.Encoding_ALP, col, mem)
+	defer enc.Release()
 
 	values := make([]float32, 9000)
 	for i := range values {
@@ -998,28 +813,84 @@ func TestALPPresetCacheBuilds(t *testing.T) {
 	}
 }
 
-func TestALPEstimatedDataEncodedSize(t *testing.T) {
-	col := newFloat32Column()
-	mem := memory.DefaultAllocator
-
-	enc := newALPEncoder[float32](format.Encoding_ALP, col, mem)
-
-	assert.Equal(t, int64(0), enc.EstimatedDataEncodedSize())
-
-	values := make([]float32, 100)
-	for i := range values {
-		values[i] = float32(i) * 0.01
+func testALPEstimatedDataEncodedSize[T alpFloat](t *testing.T, valueWidth int) {
+	t.Helper()
+	tests := []struct {
+		name          string
+		count         int
+		value         func(int) T
+		allExceptions bool
+	}{
+		{"Empty", 0, func(int) T { return 0 }, false},
+		{"BufferedMonetary", 100, func(i int) T { return T(i) * 0.01 }, false},
+		{"BufferedDecimals", 100, func(i int) T { return T(i) / 4 }, false},
+		{"IntegerVector", alpDefaultVectorSize, func(i int) T { return T(i) }, false},
+		{"ConstantVector", alpDefaultVectorSize, func(int) T { return 3.14 }, false},
+		{"MonetaryVectors", 2 * alpDefaultVectorSize, func(i int) T { return T(i) * 0.01 }, false},
+		{"DecimalsWithBufferedTail", alpDefaultVectorSize + 100, func(i int) T { return T(i) / 4 }, false},
+		{"AllExceptionsVector", alpDefaultVectorSize, func(int) T { return T(math.Inf(1)) }, true},
+		{"AllExceptionsBuffered", 100, func(int) T { return T(math.Inf(1)) }, true},
+		{"AllExceptionsWithBufferedTail", alpDefaultVectorSize + 100, func(int) T { return T(math.Inf(1)) }, true},
 	}
-	enc.Put(values)
-	size := enc.EstimatedDataEncodedSize()
-	assert.True(t, size > 0, "estimated size should be positive after Put")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+			enc := newALPEncoder[T](format.Encoding_ALP, nil, mem)
+			defer enc.Release()
+			assert.Zero(t, enc.EstimatedDataEncodedSize())
+
+			values := make([]T, tt.count)
+			for i := range values {
+				values[i] = tt.value(i)
+			}
+			enc.Put(values)
+			estimate := enc.EstimatedDataEncodedSize()
+			buf, err := enc.FlushValues()
+			require.NoError(t, err)
+			defer buf.Release()
+
+			const pageHeaderSize = 7
+			require.GreaterOrEqual(t, buf.Len(), pageHeaderSize)
+			payloadSize := int64(buf.Len() - pageHeaderSize)
+			pending := tt.count % alpDefaultVectorSize
+			switch {
+			case pending == 0:
+				assert.Equal(t, payloadSize, estimate, "completed vectors have an exact size")
+			case tt.allExceptions:
+				// A pending all-exception vector needs one 4-byte offset,
+				// exponent/factor (2), exception count (2), frame of reference,
+				// bit width (1), and one 2-byte position per exception.
+				// There are no packed delta bits; the estimate already counts
+				// the verbatim values at their physical width.
+				overhead := int64(4 + 2 + 2 + valueWidth + 1 + 2*pending)
+				assert.Equal(t, payloadSize, estimate+overhead)
+			default:
+				assert.GreaterOrEqual(t, estimate, payloadSize,
+					"buffered decimal values should not exceed their raw-width estimate")
+			}
+			assert.Zero(t, enc.EstimatedDataEncodedSize(), "flushing starts a new page")
+		})
+	}
+}
+
+func TestALPEstimatedDataEncodedSize(t *testing.T) {
+	t.Run("Float32", func(t *testing.T) {
+		testALPEstimatedDataEncodedSize[float32](t, 4)
+	})
+	t.Run("Float64", func(t *testing.T) {
+		testALPEstimatedDataEncodedSize[float64](t, 8)
+	})
 }
 
 func TestALPFloat32IncrementalPut(t *testing.T) {
 	col := newFloat32Column()
-	mem := memory.DefaultAllocator
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	enc := newALPEncoder[float32](format.Encoding_ALP, col, mem)
+	defer enc.Release()
 	allValues := make([]float32, 2500)
 	for i := range allValues {
 		allValues[i] = float32(i) * 0.01
@@ -1070,7 +941,7 @@ func TestALPFloat32MixedDataPatterns(t *testing.T) {
 		values = append(values, float32(i)*0.1)
 	}
 
-	alpFloat32RoundTrip(t, values)
+	alpRoundTrip(t, values)
 }
 
 func TestALPFloat64MixedDataPatterns(t *testing.T) {
@@ -1092,84 +963,13 @@ func TestALPFloat64MixedDataPatterns(t *testing.T) {
 		values = append(values, float64(i)*0.1)
 	}
 
-	alpFloat64RoundTrip(t, values)
+	alpRoundTrip(t, values)
 }
 
-func TestALPFloat32ViaPublicAPI(t *testing.T) {
-	col := newFloat32Column()
-	mem := memory.DefaultAllocator
-
-	values := make([]float32, 2000)
-	for i := range values {
-		values[i] = float32(i) * 0.01
-	}
-
-	enc := NewEncoder(parquet.Types.Float, parquet.Encodings.ALP, false, col, mem)
-	assert.Equal(t, parquet.Encodings.ALP, enc.Encoding())
-	assert.Equal(t, parquet.Types.Float, enc.Type())
-
-	enc.(Float32Encoder).Put(values)
-	buf, err := enc.FlushValues()
-	require.NoError(t, err)
-	defer buf.Release()
-
-	dec := NewDecoder(parquet.Types.Float, parquet.Encodings.ALP, col, mem)
-	assert.Equal(t, parquet.Encodings.ALP, dec.Encoding())
-	assert.Equal(t, parquet.Types.Float, dec.Type())
-
-	dec.SetData(len(values), buf.Bytes())
-	out := make([]float32, len(values))
-	n, err := dec.(Float32Decoder).Decode(out)
-	require.NoError(t, err)
-	assert.Equal(t, len(values), n)
-
-	for i, v := range values {
-		assert.Equal(t, math.Float32bits(v), math.Float32bits(out[i]),
-			"index %d: mismatch", i)
-	}
-}
-
-func TestALPFloat64ViaPublicAPI(t *testing.T) {
-	col := newFloat64Column()
-	mem := memory.DefaultAllocator
-
-	values := make([]float64, 2000)
-	for i := range values {
-		values[i] = float64(i) * 0.01
-	}
-
-	enc := NewEncoder(parquet.Types.Double, parquet.Encodings.ALP, false, col, mem)
-	assert.Equal(t, parquet.Encodings.ALP, enc.Encoding())
-	assert.Equal(t, parquet.Types.Double, enc.Type())
-
-	enc.(Float64Encoder).Put(values)
-	buf, err := enc.FlushValues()
-	require.NoError(t, err)
-	defer buf.Release()
-
-	dec := NewDecoder(parquet.Types.Double, parquet.Encodings.ALP, col, mem)
-	assert.Equal(t, parquet.Encodings.ALP, dec.Encoding())
-	assert.Equal(t, parquet.Types.Double, dec.Type())
-
-	dec.SetData(len(values), buf.Bytes())
-	out := make([]float64, len(values))
-	n, err := dec.(Float64Decoder).Decode(out)
-	require.NoError(t, err)
-	assert.Equal(t, len(values), n)
-
-	for i, v := range values {
-		assert.Equal(t, math.Float64bits(v), math.Float64bits(out[i]),
-			"index %d: mismatch", i)
-	}
-}
-
-func TestALPPanicsForNonFloatTypes(t *testing.T) {
+func TestALPDecoderPanicsForNonFloatType(t *testing.T) {
 	col := schema.NewColumn(schema.NewInt32Node("int32", parquet.Repetitions.Required, -1), 0, 0)
-	mem := memory.DefaultAllocator
-
-	assert.Panics(t, func() {
-		NewEncoder(parquet.Types.Int32, parquet.Encodings.ALP, false, col, mem)
-	}, "ALP should panic for non-float encoder")
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	assert.Panics(t, func() {
 		NewDecoder(parquet.Types.Int32, parquet.Encodings.ALP, col, mem)
@@ -1194,7 +994,10 @@ func alpDecodePage[T alpFloat](t *testing.T, page Buffer, numValues int) []T {
 // and calls FlushValues for each one without resetting the encoder in between.
 // A page therefore has to hold its own values and no others.
 func TestALPEncoderFlushValuesStartsANewPage(t *testing.T) {
-	enc := newALPEncoder[float64](format.Encoding_ALP, nil, memory.DefaultAllocator)
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	enc := newALPEncoder[float64](format.Encoding_ALP, nil, mem)
+	defer enc.Release()
 
 	first := make([]float64, 2*alpDefaultVectorSize)
 	for i := range first {
@@ -1203,8 +1006,8 @@ func TestALPEncoderFlushValuesStartsANewPage(t *testing.T) {
 	enc.Put(first)
 	page, err := enc.FlushValues()
 	require.NoError(t, err)
+	defer page.Release()
 	got := alpDecodePage[float64](t, page, len(first))
-	page.Release()
 	assert.Equal(t, first, got)
 
 	second := []float64{9.5, 8.25, 7.125}
@@ -1214,15 +1017,18 @@ func TestALPEncoderFlushValuesStartsANewPage(t *testing.T) {
 
 	page, err = enc.FlushValues()
 	require.NoError(t, err)
+	defer page.Release()
 	got = alpDecodePage[float64](t, page, len(second))
-	page.Release()
 	assert.Equal(t, second, got)
 }
 
 // The shortlist describes the column, so it outlives a page. A second page of
 // the same values encodes to the same bytes as the first.
 func TestALPEncoderKeepsPresetsAcrossPages(t *testing.T) {
-	enc := newALPEncoder[float64](format.Encoding_ALP, nil, memory.DefaultAllocator)
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	enc := newALPEncoder[float64](format.Encoding_ALP, nil, mem)
+	defer enc.Release()
 
 	values := make([]float64, 10*alpDefaultVectorSize)
 	for i := range values {
@@ -1232,22 +1038,25 @@ func TestALPEncoderKeepsPresetsAcrossPages(t *testing.T) {
 	enc.Put(values)
 	first, err := enc.FlushValues()
 	require.NoError(t, err)
+	defer first.Release()
 	require.NotNil(t, enc.cachedPresets, "ten vectors is past the sampling threshold")
 	presets := slices.Clone(enc.cachedPresets)
 
 	enc.Put(values)
 	second, err := enc.FlushValues()
 	require.NoError(t, err)
+	defer second.Release()
 
 	assert.Equal(t, presets, enc.cachedPresets)
 	assert.Equal(t, first.Bytes(), second.Bytes())
-	first.Release()
-	second.Release()
 }
 
 // Reset returns the encoder to its initial state, shortlist included.
 func TestALPEncoderResetClearsPresets(t *testing.T) {
-	enc := newALPEncoder[float64](format.Encoding_ALP, nil, memory.DefaultAllocator)
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	enc := newALPEncoder[float64](format.Encoding_ALP, nil, mem)
+	defer enc.Release()
 
 	values := make([]float64, 10*alpDefaultVectorSize)
 	for i := range values {
@@ -1278,7 +1087,10 @@ func TestALPEncoderVectorSizes(t *testing.T) {
 				values[min(i+size, len(values))-1] = math.NaN()
 			}
 
-			enc := newALPEncoder[float64](format.Encoding_ALP, nil, memory.DefaultAllocator)
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+			enc := newALPEncoder[float64](format.Encoding_ALP, nil, mem)
+			defer enc.Release()
 			require.NoError(t, enc.SetVectorSize(size))
 			enc.Put(values)
 			page, err := enc.FlushValues()
@@ -1300,7 +1112,10 @@ func TestALPEncoderVectorSizes(t *testing.T) {
 }
 
 func TestALPEncoderSetVectorSizeRejects(t *testing.T) {
-	enc := newALPEncoder[float32](format.Encoding_ALP, nil, memory.DefaultAllocator)
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	enc := newALPEncoder[float32](format.Encoding_ALP, nil, mem)
+	defer enc.Release()
 	for _, size := range []int{0, 4, 1000, 1 << 16} {
 		assert.Error(t, enc.SetVectorSize(size), "size %d", size)
 	}
@@ -1321,8 +1136,8 @@ func TestALPFloat32RoundingPastInt32IsAnException(t *testing.T) {
 	_, ok := s.tryEncode(2147483.5)
 	assert.False(t, ok, "2147483.5 at (9,6) rounds to 2^31")
 
-	alpFloat32RoundTrip(t, []float32{-24.875, 2147483.5, 12})
-	alpFloat32RoundTrip(t, []float32{-24.875, -2147483.5, 12})
+	alpRoundTrip(t, []float32{-24.875, 2147483.5, 12})
+	alpRoundTrip(t, []float32{-24.875, -2147483.5, 12})
 }
 
 // Page fields near the int32 limits must be rejected, not overflow int on

@@ -1068,7 +1068,10 @@ func TestReadALPConformanceFile(t *testing.T) {
 	}
 	require.DirExists(t, dir)
 
-	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	props := parquet.NewReaderProperties(mem)
 	rdr, err := file.OpenParquetFile(path.Join(dir, alpConformanceFile), false,
 		file.WithReadProps(props))
 	require.NoError(t, err)
@@ -1095,8 +1098,7 @@ func TestReadALPConformanceFile(t *testing.T) {
 			for rg := range rdr.NumRowGroups() {
 				chunk, err := rdr.RowGroup(rg).MetaData().ColumnChunk(alpCol)
 				require.NoError(t, err)
-				assert.Contains(t, chunk.Encodings(), parquet.Encodings.ALP,
-					"row group %d of %s should be ALP encoded", rg, tc.alp)
+				assertALPDataPageEncoding(t, chunk)
 			}
 
 			want := readFloatColumn(t, rdr, alpColumnIndex(t, rdr, tc.plain))
@@ -1145,6 +1147,7 @@ func readFloatColumn(t *testing.T, rdr *file.Reader, col int) []floatBitsValue {
 	for rg := range rdr.NumRowGroups() {
 		cr, err := rdr.RowGroup(rg).Column(col)
 		require.NoError(t, err)
+		defer cr.Close()
 
 		switch r := cr.(type) {
 		case *file.Float32ColumnChunkReader:
