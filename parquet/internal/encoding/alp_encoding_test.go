@@ -813,7 +813,7 @@ func TestALPPresetCacheBuilds(t *testing.T) {
 	}
 }
 
-func testALPEstimatedDataEncodedSize[T alpFloat](t *testing.T, valueWidth int) {
+func testALPEstimatedDataEncodedSize[T alpFloat](t *testing.T) {
 	t.Helper()
 	tests := []struct {
 		name          string
@@ -859,16 +859,11 @@ func testALPEstimatedDataEncodedSize[T alpFloat](t *testing.T, valueWidth int) {
 			case pending == 0:
 				assert.Equal(t, payloadSize, estimate, "completed vectors have an exact size")
 			case tt.allExceptions:
-				// A pending all-exception vector needs one 4-byte offset,
-				// exponent/factor (2), exception count (2), frame of reference,
-				// bit width (1), and one 2-byte position per exception.
-				// There are no packed delta bits; the estimate already counts
-				// the verbatim values at their physical width.
-				overhead := int64(4 + 2 + 2 + valueWidth + 1 + 2*pending)
-				assert.Equal(t, payloadSize, estimate+overhead)
+				assert.Equal(t, payloadSize, estimate,
+					"a pending vector is estimated as if every value were an exception")
 			default:
 				assert.GreaterOrEqual(t, estimate, payloadSize,
-					"buffered decimal values should not exceed their raw-width estimate")
+					"a pending vector must not be underestimated")
 			}
 			assert.Zero(t, enc.EstimatedDataEncodedSize(), "flushing starts a new page")
 		})
@@ -877,10 +872,10 @@ func testALPEstimatedDataEncodedSize[T alpFloat](t *testing.T, valueWidth int) {
 
 func TestALPEstimatedDataEncodedSize(t *testing.T) {
 	t.Run("Float32", func(t *testing.T) {
-		testALPEstimatedDataEncodedSize[float32](t, 4)
+		testALPEstimatedDataEncodedSize[float32](t)
 	})
 	t.Run("Float64", func(t *testing.T) {
-		testALPEstimatedDataEncodedSize[float64](t, 8)
+		testALPEstimatedDataEncodedSize[float64](t)
 	})
 }
 
@@ -1012,8 +1007,11 @@ func TestALPEncoderFlushValuesStartsANewPage(t *testing.T) {
 
 	second := []float64{9.5, 8.25, 7.125}
 	enc.Put(second)
-	assert.EqualValues(t, len(second)*8, enc.EstimatedDataEncodedSize(),
-		"the flushed page still counts towards the next one")
+	fresh := newALPEncoder[float64](format.Encoding_ALP, nil, mem)
+	defer fresh.Release()
+	fresh.Put(second)
+	assert.Equal(t, fresh.EstimatedDataEncodedSize(), enc.EstimatedDataEncodedSize(),
+		"the flushed page no longer counts towards the next one")
 
 	page, err = enc.FlushValues()
 	require.NoError(t, err)

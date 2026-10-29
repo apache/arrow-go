@@ -343,10 +343,17 @@ func (enc *alpEncoder[T]) buildPresetCache() {
 	}
 }
 
-// EstimatedDataEncodedSize counts the encoded vectors and their offsets, and
-// unencoded buffered values at their physical width.
+// EstimatedDataEncodedSize counts the encoded vectors and their offsets, plus
+// the vector still being buffered sized as if every value were an exception:
+// its offset, header, and each value with its 2-byte position. That is exact
+// for the worst common case, NaNs, infinities and other unencodable values, and
+// above the size of a vector that packs well.
 func (enc *alpEncoder[T]) EstimatedDataEncodedSize() int64 {
-	return int64(len(enc.encodedBuf) + 4*len(enc.vectorSizes) + enc.bufCount*alpEncodedBytes[T]())
+	size := len(enc.encodedBuf) + 4*len(enc.vectorSizes)
+	if enc.bufCount > 0 {
+		size += 4 + alpVectorHeaderSize[T]() + enc.bufCount*(alpEncodedBytes[T]()+2)
+	}
+	return int64(size)
 }
 
 // FlushValues writes one page and clears the values it wrote, so that the next
