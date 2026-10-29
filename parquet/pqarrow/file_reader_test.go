@@ -251,6 +251,102 @@ func TestGetFieldReadersReleasesPartialReadersOnError(t *testing.T) {
 	require.Zero(t, mem.CurrentAlloc())
 }
 
+func TestGetFieldReaderReturnsNilReaderOnError(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "first", Type: arrow.PrimitiveTypes.Int32},
+		{Name: "second", Type: arrow.PrimitiveTypes.Int32},
+	}, nil)
+	record, _, err := array.RecordFromJSON(memory.DefaultAllocator, schema,
+		strings.NewReader(`[{"first": 1, "second": 2}]`))
+	require.NoError(t, err)
+	defer record.Release()
+
+	var buf bytes.Buffer
+	writer, err := pqarrow.NewFileWriter(schema, &buf, nil, pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+
+	readErr := errors.New("read second column")
+	source := &failingReaderAt{
+		Reader:     bytes.NewReader(buf.Bytes()),
+		failOffset: -1,
+		err:        readErr,
+	}
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	parquetReader, err := file.NewParquetReader(source,
+		file.WithReadProps(parquet.NewReaderProperties(mem)))
+	require.NoError(t, err)
+	defer parquetReader.Close()
+
+	column, err := parquetReader.MetaData().RowGroup(0).ColumnChunk(1)
+	require.NoError(t, err)
+	source.failOffset = column.DataPageOffset()
+	if column.HasDictionaryPage() && column.DictionaryPageOffset() > 0 {
+		source.failOffset = column.DictionaryPageOffset()
+	}
+
+	reader, err := pqarrow.NewFileReader(parquetReader, pqarrow.ArrowReadProperties{}, mem)
+	require.NoError(t, err)
+	fieldReader, err := reader.GetFieldReader(context.Background(), 1, map[int]bool{1: true}, []int{0})
+	require.ErrorIs(t, err, readErr)
+	require.Nil(t, fieldReader, "a reader returned with an error is never released by callers")
+}
+
+func TestGetFieldReaderReleasesStructChildrenOnError(t *testing.T) {
+	structType := arrow.StructOf(
+		arrow.Field{Name: "first", Type: arrow.PrimitiveTypes.Int32},
+		arrow.Field{Name: "second", Type: arrow.PrimitiveTypes.Int32},
+		arrow.Field{Name: "third", Type: arrow.PrimitiveTypes.Int32},
+	)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "nested", Type: structType}}, nil)
+	record, _, err := array.RecordFromJSON(memory.DefaultAllocator, schema,
+		strings.NewReader(`[{"nested": {"first": 1, "second": 2, "third": 3}}]`))
+	require.NoError(t, err)
+	defer record.Release()
+
+	var buf bytes.Buffer
+	writer, err := pqarrow.NewFileWriter(schema, &buf, nil, pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+
+	for _, parallel := range []bool{false, true} {
+		t.Run(fmt.Sprintf("parallel=%t", parallel), func(t *testing.T) {
+			readErr := errors.New("read second child")
+			source := &failingReaderAt{
+				Reader:     bytes.NewReader(buf.Bytes()),
+				failOffset: -1,
+				err:        readErr,
+			}
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			parquetReader, err := file.NewParquetReader(source,
+				file.WithReadProps(parquet.NewReaderProperties(mem)))
+			require.NoError(t, err)
+			defer parquetReader.Close()
+
+			column, err := parquetReader.MetaData().RowGroup(0).ColumnChunk(1)
+			require.NoError(t, err)
+			source.failOffset = column.DataPageOffset()
+			if column.HasDictionaryPage() && column.DictionaryPageOffset() > 0 {
+				source.failOffset = column.DictionaryPageOffset()
+			}
+
+			reader, err := pqarrow.NewFileReader(parquetReader, pqarrow.ArrowReadProperties{Parallel: parallel}, mem)
+			require.NoError(t, err)
+			fieldReader, err := reader.GetFieldReader(context.Background(), 0,
+				map[int]bool{0: true, 1: true, 2: true}, []int{0})
+			require.ErrorIs(t, err, readErr)
+			require.Nil(t, fieldReader)
+			require.Zero(t, mem.CurrentAlloc())
+		})
+	}
+}
+
 func TestRecordReaderParallel(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
