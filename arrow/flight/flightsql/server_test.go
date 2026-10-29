@@ -536,6 +536,30 @@ func (s *FlightSqlServerSuite) TestExecuteIngest() {
 	s.Equal(nRowsExpected, nRowsIngested)
 }
 
+func (s *FlightSqlServerSuite) TestExecuteIngestEmptyReader() {
+	schema := arrow.NewSchema(
+		[]arrow.Field{{Name: "id", Type: arrow.PrimitiveTypes.Int64}},
+		nil,
+	)
+	rdr, err := array.NewRecordReader(schema, nil)
+	s.Require().NoError(err)
+	defer rdr.Release()
+
+	nRowsIngested, err := s.cl.ExecuteIngest(
+		context.TODO(),
+		rdr,
+		&flightsql.ExecuteIngestOpts{
+			TableDefinitionOptions: &flightsql.TableDefinitionOptions{
+				IfNotExist: flightsql.TableDefinitionOptionsTableNotExistOptionCreate,
+				IfExists:   flightsql.TableDefinitionOptionsTableExistsOptionReplace,
+			},
+			Table: "empty_test_table",
+		},
+	)
+	s.NoError(err)
+	s.Zero(nRowsIngested)
+}
+
 func (s *FlightSqlServerSuite) TestExecuteIngestWithServerError() {
 	nRecords := 11 // intentionally exceed maximum number of rows the server can ingest
 	nRowsPerRecord := 5
