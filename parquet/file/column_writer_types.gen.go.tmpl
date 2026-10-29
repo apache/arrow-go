@@ -49,6 +49,14 @@ func New{{.Name}}ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pa
 {{- end}}
   ret := &{{.Name}}ColumnChunkWriter{columnWriter: newColumnWriterBase(meta, pager, useDict, enc, props)}
   ret.currentEncoder = encoding.{{.Name}}EncoderTraits.Encoder(format.Encoding(enc), useDict, meta.Descr(), props.Allocator())
+{{- if or (eq .Name "Float32") (eq .Name "Float64")}}
+  if alp, ok := ret.currentEncoder.(encoding.ALPEncoder); ok {
+    // The writer properties have already validated the size.
+    if err := alp.SetVectorSize(props.ALPVectorSizeFor(meta.Descr().Path())); err != nil {
+      panic(err)
+    }
+  }
+{{- end}}
   if useDict && ret.bloomFilter != nil {
     ret.currentEncoder.(encoding.DictEncoder).EnableDictionaryReferenceTracking()
   }

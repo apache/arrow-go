@@ -702,6 +702,64 @@ func TestALPFileRoundtrip(t *testing.T) {
 	}
 }
 
+// The vector size is a writer property, so it has to reach each column's
+// encoder: the pages of a column must declare the size set for it, and still
+// read back.
+func TestALPFileVectorSize(t *testing.T) {
+	values := make([]float64, 5000)
+	for i := range values {
+		values[i] = float64(i%1234) / 100
+	}
+
+	props := parquet.NewWriterProperties(
+		parquet.WithEncoding(parquet.Encodings.ALP),
+		parquet.WithALPEncoding(true),
+		parquet.WithDictionaryDefault(false),
+		parquet.WithALPVectorSizeFor("small", 32),
+		parquet.WithALPVectorSizeFor("large", 4096),
+	)
+	var fields schema.FieldList
+	for _, name := range []string{"small", "default", "large"} {
+		fields = append(fields, schema.NewFloat64Node(name, parquet.Repetitions.Required, -1))
+	}
+	sc, err := schema.NewGroupNode("test", parquet.Repetitions.Required, fields, -1)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	writer := file.NewParquetWriter(&buf, sc, file.WithWriterProps(props))
+	rgw := writer.AppendRowGroup()
+	for range fields {
+		cw, err := rgw.NextColumn()
+		require.NoError(t, err)
+		_, err = cw.(*file.Float64ColumnChunkWriter).WriteBatch(values, nil, nil)
+		require.NoError(t, err)
+		require.NoError(t, cw.Close())
+	}
+	require.NoError(t, rgw.Close())
+	require.NoError(t, writer.Close())
+
+	reader, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer reader.Close()
+
+	for col, logSize := range []byte{5, 10, 12} {
+		pages, err := reader.RowGroup(0).GetColumnPageReader(col)
+		require.NoError(t, err)
+		require.True(t, pages.Next(), "column %d has a page", col)
+		// A required column has no levels, so the page data starts with the
+		// ALP header, whose third byte is log2 of the vector size.
+		assert.Equal(t, logSize, pages.Page().Data()[2], "column %d", col)
+
+		cr, err := reader.RowGroup(0).Column(col)
+		require.NoError(t, err)
+		got := make([]float64, len(values))
+		total, _, err := cr.(*file.Float64ColumnChunkReader).ReadBatch(int64(len(values)), got, nil, nil)
+		require.NoError(t, err)
+		require.EqualValues(t, len(values), total)
+		assert.Equal(t, values, got, "column %d", col)
+	}
+}
+
 // A column whose values outgrow the data page size is written as several pages.
 // Each one carries its own ALP header, offset array and vectors, so a page that
 // repeated an earlier page's values would decode to the wrong numbers here.

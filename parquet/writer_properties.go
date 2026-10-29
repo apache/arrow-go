@@ -17,6 +17,7 @@
 package parquet
 
 import (
+	"fmt"
 	"math"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -63,6 +64,12 @@ const (
 
 	// DefaultALPEnabled is false because ALP is a preview encoding.
 	DefaultALPEnabled = false
+	// DefaultALPVectorSize is how many values an ALP vector holds unless
+	// WithALPVectorSize says otherwise.
+	DefaultALPVectorSize = 1024
+
+	minALPVectorSize = 1 << 3
+	maxALPVectorSize = 1 << 15
 
 	minimumBloomFilterBytes = 32
 	maximumBloomFilterBytes = 128 * 1024 * 1024
@@ -89,6 +96,8 @@ type ColumnProperties struct {
 	BloomFilterNDV             int64
 	// ALPEnabled permits this column to use the preview ALP encoding.
 	ALPEnabled bool
+	// ALPVectorSize is how many values each ALP vector of this column holds.
+	ALPVectorSize int
 }
 
 // DefaultColumnProperties returns the default properties which get utilized for writing.
@@ -120,6 +129,7 @@ func DefaultColumnProperties() ColumnProperties {
 		AdaptiveBloomFilterEnabled: DefaultAdaptiveBloomFilterEnabled,
 		BloomFilterCandidates:      DefaultBloomFilterCandidates,
 		ALPEnabled:                 DefaultALPEnabled,
+		ALPVectorSize:              DefaultALPVectorSize,
 	}
 }
 
@@ -141,6 +151,7 @@ type writerPropConfig struct {
 	adaptiveBloomFilterEnabled map[string]bool
 	numBloomFilterCandidates   map[string]int
 	alpEnabled                 map[string]bool
+	alpVectorSize              map[string]int
 }
 
 // WriterProperty is used as the options for building a writer properties instance
@@ -321,6 +332,33 @@ func WithALPEncodingFor(path string, enabled bool) WriterProperty {
 // WithALPEncodingPath is the same as WithALPEncodingFor but takes a ColumnPath.
 func WithALPEncodingPath(path ColumnPath, enabled bool) WriterProperty {
 	return WithALPEncodingFor(path.String(), enabled)
+}
+
+// WithALPVectorSize sets how many values each ALP vector holds for all
+// columns. It must be a power of two from 8 to 32768; the default is
+// DefaultALPVectorSize. Larger vectors amortize the per-vector header, while
+// smaller ones let each vector pick the scaling that suits its values.
+//
+// It only affects columns written with the ALP encoding, and readers honor
+// whatever size a page declares.
+func WithALPVectorSize(size int) WriterProperty {
+	return func(cfg *writerPropConfig) {
+		cfg.wr.defColumnProps.ALPVectorSize = size
+	}
+}
+
+// WithALPVectorSizeFor sets the ALP vector size for one column. See
+// WithALPVectorSize.
+func WithALPVectorSizeFor(path string, size int) WriterProperty {
+	return func(cfg *writerPropConfig) {
+		cfg.alpVectorSize[path] = size
+	}
+}
+
+// WithALPVectorSizePath is the same as WithALPVectorSizeFor but takes a
+// ColumnPath.
+func WithALPVectorSizePath(path ColumnPath, size int) WriterProperty {
+	return WithALPVectorSizeFor(path.String(), size)
 }
 
 // WithCompression specifies the default compression type to use for column writing.
@@ -638,6 +676,7 @@ func NewWriterProperties(opts ...WriterProperty) *WriterProperties {
 		adaptiveBloomFilterEnabled: make(map[string]bool),
 		numBloomFilterCandidates:   make(map[string]int),
 		alpEnabled:                 make(map[string]bool),
+		alpVectorSize:              make(map[string]int),
 	}
 	for _, o := range opts {
 		o(&cfg)
@@ -704,17 +743,22 @@ func NewWriterProperties(opts ...WriterProperty) *WriterProperties {
 	for key, value := range cfg.alpEnabled {
 		get(key).ALPEnabled = value
 	}
+	for key, value := range cfg.alpVectorSize {
+		get(key).ALPVectorSize = value
+	}
 
 	// The check runs here rather than in the options, because an option that
 	// selects ALP may be given before the one that allows it.
 	if cfg.wr.defColumnProps.Encoding == Encodings.ALP && !cfg.wr.defColumnProps.ALPEnabled {
 		panic("parquet: ALP encoding requires WithALPEncoding(true)")
 	}
+	checkALPVectorSize("", cfg.wr.defColumnProps.ALPVectorSize)
 	for path, props := range cfg.wr.columnProps {
 		if props.Encoding == Encodings.ALP && !props.ALPEnabled {
 			panic("parquet: ALP encoding for column " + path +
 				" requires WithALPEncoding(true) or WithALPEncodingFor(" + path + ", true)")
 		}
+		checkALPVectorSize(path, props.ALPVectorSize)
 	}
 
 	return cfg.wr
@@ -747,6 +791,33 @@ func (w *WriterProperties) ALPEncodingEnabledFor(path string) bool {
 // ColumnPath object.
 func (w *WriterProperties) ALPEncodingEnabledPath(path ColumnPath) bool {
 	return w.ALPEncodingEnabledFor(path.String())
+}
+
+// ALPVectorSizeFor returns how many values each ALP vector of the given column
+// holds, or the default if the column was not separately specified.
+func (w *WriterProperties) ALPVectorSizeFor(path string) int {
+	if p, ok := w.columnProps[path]; ok {
+		return p.ALPVectorSize
+	}
+	return w.defColumnProps.ALPVectorSize
+}
+
+// ALPVectorSizePath is the same as ALPVectorSizeFor but takes a ColumnPath
+// object.
+func (w *WriterProperties) ALPVectorSizePath(path ColumnPath) int {
+	return w.ALPVectorSizeFor(path.String())
+}
+
+func checkALPVectorSize(path string, size int) {
+	if size >= minALPVectorSize && size <= maxALPVectorSize && size&(size-1) == 0 {
+		return
+	}
+	target := "the ALP vector size"
+	if path != "" {
+		target += " of column " + path
+	}
+	panic(fmt.Sprintf("parquet: %s must be a power of two from %d to %d, got %d",
+		target, minALPVectorSize, maxALPVectorSize, size))
 }
 
 // FileEncryptionProperties returns the current encryption properties that were

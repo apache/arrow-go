@@ -67,8 +67,9 @@ func alpExceptionBits[T alpFloat]() int {
 func alpEstimateSizeBits[T alpFloat](values []T, exponent, factor int) (sizeBits int64, numEncodable int) {
 	minEncoded, maxEncoded := int64(math.MaxInt64), int64(math.MinInt64)
 	numExceptions := 0
+	s := newALPScaling[T](exponent, factor)
 	for _, v := range values {
-		e, ok := alpTryEncode(v, exponent, factor)
+		e, ok := s.tryEncode(v)
 		if !ok {
 			numExceptions++
 			continue

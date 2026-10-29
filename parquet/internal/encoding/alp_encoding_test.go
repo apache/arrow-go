@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"math/bits"
 	"slices"
 	"testing"
 
@@ -1260,4 +1261,55 @@ func TestALPEncoderResetClearsPresets(t *testing.T) {
 	assert.Empty(t, enc.presetCounts)
 	assert.Zero(t, enc.vectorsProcessed)
 	assert.Zero(t, enc.EstimatedDataEncodedSize())
+}
+
+// Every vector size the format allows must round-trip, including partial last
+// vectors and the largest size, whose exception positions reach 32767.
+func TestALPEncoderVectorSizes(t *testing.T) {
+	for _, size := range []int{8, 32, 1024, 4096, 1 << 15} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			values := make([]float64, 2*size+size/2+3)
+			for i := range values {
+				values[i] = float64(i%1000) / 100
+			}
+			// Exceptions at both ends of every vector.
+			for i := 0; i < len(values); i += size {
+				values[i] = math.Pi
+				values[min(i+size, len(values))-1] = math.NaN()
+			}
+
+			enc := newALPEncoder[float64](format.Encoding_ALP, nil, memory.DefaultAllocator)
+			require.NoError(t, enc.SetVectorSize(size))
+			enc.Put(values)
+			page, err := enc.FlushValues()
+			require.NoError(t, err)
+			defer page.Release()
+
+			data := page.Bytes()
+			assert.Equal(t, byte(bits.TrailingZeros(uint(size))), data[2], "log vector size")
+			numVectors := (len(values) + size - 1) / size
+			assert.EqualValues(t, numVectors*4, binary.LittleEndian.Uint32(data[alpHeaderSize:]),
+				"the first vector starts after %d offsets", numVectors)
+
+			got := alpDecodePage[float64](t, page, len(values))
+			for i, v := range values {
+				require.Equal(t, math.Float64bits(v), math.Float64bits(got[i]), "index %d", i)
+			}
+		})
+	}
+}
+
+func TestALPEncoderSetVectorSizeRejects(t *testing.T) {
+	enc := newALPEncoder[float32](format.Encoding_ALP, nil, memory.DefaultAllocator)
+	for _, size := range []int{0, 4, 1000, 1 << 16} {
+		assert.Error(t, enc.SetVectorSize(size), "size %d", size)
+	}
+
+	enc.Put([]float32{1.5})
+	assert.Error(t, enc.SetVectorSize(32), "values written at 1024 cannot move to 32")
+
+	page, err := enc.FlushValues()
+	require.NoError(t, err)
+	page.Release()
+	require.NoError(t, enc.SetVectorSize(32), "a flushed page leaves nothing buffered")
 }

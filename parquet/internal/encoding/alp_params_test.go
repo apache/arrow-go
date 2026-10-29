@@ -27,8 +27,9 @@ import (
 // alpCountTestExceptions counts the values a scaling cannot encode.
 func alpCountTestExceptions[T float32 | float64](values []T, params alpEncodingParams) int {
 	count := 0
+	s := newALPScaling[T](params.exponent, params.factor)
 	for _, v := range values {
-		if alpDecode[T](alpEncode(v, params.exponent, params.factor), params.exponent, params.factor) != v {
+		if _, ok := s.tryEncode(v); !ok {
 			count++
 		}
 	}

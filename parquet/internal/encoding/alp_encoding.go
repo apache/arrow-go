@@ -156,12 +156,15 @@ type alpEncoder[T alpFloat] struct {
 	encodedBuf  []byte
 	vectorSizes []int
 
-	// Scratch reused by every vector, so encoding allocates nothing per vector.
+	// Scratch reused across vectors, calls, and pages, so steady-state
+	// encoding allocates nothing.
 	encodedScratch []int64
 	deltaScratch   []uint64
 	excPositions   []uint16
 	excValues      []T
 	sampleScratch  []T
+	spacedScratch  []T
+	pageHeader     []byte
 
 	vectorsProcessed int
 	cachedPresets    []alpEncodingParams
@@ -169,16 +172,38 @@ type alpEncoder[T alpFloat] struct {
 }
 
 func newALPEncoder[T alpFloat](e format.Encoding, descr *schema.Column, mem memory.Allocator) *alpEncoder[T] {
-	return &alpEncoder[T]{
-		encoder:        newEncoderBase(e, descr, mem),
-		vectorSize:     alpDefaultVectorSize,
-		logVectorSize:  alpDefaultLogVectorSize,
-		vectorBuf:      make([]T, alpDefaultVectorSize),
-		encodedScratch: make([]int64, alpDefaultVectorSize),
-		deltaScratch:   make([]uint64, alpDefaultVectorSize),
-		sampleScratch:  make([]T, 0, alpSamplerSamples),
-		presetCounts:   make(map[alpEncodingParams]int),
+	enc := &alpEncoder[T]{
+		encoder:       newEncoderBase(e, descr, mem),
+		sampleScratch: make([]T, 0, alpSamplerSamples),
+		presetCounts:  make(map[alpEncodingParams]int),
 	}
+	enc.setVectorSize(alpDefaultLogVectorSize)
+	return enc
+}
+
+func (enc *alpEncoder[T]) setVectorSize(logSize int) {
+	enc.logVectorSize = logSize
+	enc.vectorSize = 1 << logSize
+	enc.vectorBuf = make([]T, enc.vectorSize)
+	enc.encodedScratch = make([]int64, enc.vectorSize)
+	enc.deltaScratch = make([]uint64, enc.vectorSize)
+}
+
+// SetVectorSize sets how many values each vector holds: a power of two from
+// 8 to 32768, 1024 by default. It must be called before the first value is
+// put, and Reset keeps it.
+func (enc *alpEncoder[T]) SetVectorSize(size int) error {
+	if size < 1<<alpMinLogVectorSize || size > 1<<alpMaxLogVectorSize || size&(size-1) != 0 {
+		return fmt.Errorf("parquet: ALP vector size must be a power of two from %d to %d, got %d",
+			1<<alpMinLogVectorSize, 1<<alpMaxLogVectorSize, size)
+	}
+	if enc.bufCount > 0 || len(enc.vectorSizes) > 0 {
+		return errors.New("parquet: ALP vector size cannot change once values are buffered")
+	}
+	if size != enc.vectorSize {
+		enc.setVectorSize(bits.TrailingZeros(uint(size)))
+	}
+	return nil
 }
 
 func (enc *alpEncoder[T]) Type() parquet.Type {
@@ -203,9 +228,9 @@ func (enc *alpEncoder[T]) Put(in []T) {
 
 // PutSpaced drops the null slots of in and buffers the values that remain.
 func (enc *alpEncoder[T]) PutSpaced(in []T, validBits []byte, validBitsOffset int64) {
-	nbuf := make([]T, len(in))
-	nvalid := spacedCompress(in, nbuf, validBits, validBitsOffset)
-	enc.Put(nbuf[:nvalid])
+	enc.spacedScratch = slices.Grow(enc.spacedScratch[:0], len(in))[:len(in)]
+	nvalid := spacedCompress(in, enc.spacedScratch, validBits, validBitsOffset)
+	enc.Put(enc.spacedScratch[:nvalid])
 }
 
 // The first alpSamplerVectors vectors seed the preset list.
@@ -235,9 +260,10 @@ func (enc *alpEncoder[T]) encodeVector(values []T) {
 
 	// Encoding a value also determines whether it is an exception, so collect
 	// both results in one pass.
+	s := newALPScaling[T](params.exponent, params.factor)
 	minValue := int64(math.MaxInt64)
 	for i, v := range values {
-		e, ok := alpTryEncode(v, params.exponent, params.factor)
+		e, ok := s.tryEncode(v)
 		if !ok {
 			enc.excPositions = append(enc.excPositions, uint16(i))
 			enc.excValues = append(enc.excValues, v)
@@ -341,8 +367,7 @@ func (enc *alpEncoder[T]) FlushValues() (Buffer, error) {
 	offsetArraySize := len(enc.vectorSizes) * 4
 	enc.sink.Reserve(alpHeaderSize + offsetArraySize + len(enc.encodedBuf))
 
-	header := make([]byte, 0, alpHeaderSize+offsetArraySize)
-	header = append(header, alpCompressionMode, alpIntegerEncodingFOR, byte(enc.logVectorSize))
+	header := append(enc.pageHeader[:0], alpCompressionMode, alpIntegerEncodingFOR, byte(enc.logVectorSize))
 	header = binary.LittleEndian.AppendUint32(header, uint32(enc.totalCount))
 
 	offset := uint32(offsetArraySize)
@@ -350,6 +375,7 @@ func (enc *alpEncoder[T]) FlushValues() (Buffer, error) {
 		header = binary.LittleEndian.AppendUint32(header, offset)
 		offset += uint32(size)
 	}
+	enc.pageHeader = header
 
 	enc.sink.Write(header)
 	enc.sink.Write(enc.encodedBuf)
@@ -364,7 +390,7 @@ func (enc *alpEncoder[T]) resetPage() {
 }
 
 // Reset returns the encoder to its state when new, shortlist included, so that
-// it can encode an unrelated column.
+// it can encode an unrelated column. The vector size stays as set.
 func (enc *alpEncoder[T]) Reset() {
 	enc.encoder.Reset()
 	enc.resetPage()
@@ -518,8 +544,20 @@ func (dec *alpDecoder[T]) decodeVector(vectorIdx int) error {
 	}
 	pos += packedSize
 
-	for i, d := range deltas {
-		dec.decodedValues[i] = alpDecode[T](int64(d)+frameOfRef, exponent, factor)
+	// The deltas were computed in the encoded integer's width with wrapping
+	// arithmetic, so add the frame of reference back the same way.
+	s := newALPScaling[T](exponent, factor)
+	out := dec.decodedValues[:len(deltas)]
+	if valueBytes == 4 {
+		ref := uint32(frameOfRef)
+		for i, d := range deltas {
+			out[i] = s.decode(int64(int32(uint32(d) + ref)))
+		}
+	} else {
+		ref := uint64(frameOfRef)
+		for i, d := range deltas {
+			out[i] = s.decode(int64(d + ref))
+		}
 	}
 
 	// Positions come first, then the values, so read both in one pass instead
@@ -605,4 +643,15 @@ type (
 	ALPFloat32Decoder = alpDecoder[float32]
 	// ALPFloat64Decoder decodes ALP-encoded float64 values.
 	ALPFloat64Decoder = alpDecoder[float64]
+)
+
+// ALPEncoder is implemented by the ALP encoders, so that a column writer can
+// set the vector size without knowing the physical type.
+type ALPEncoder interface {
+	SetVectorSize(size int) error
+}
+
+var (
+	_ ALPEncoder = (*ALPFloat32Encoder)(nil)
+	_ ALPEncoder = (*ALPFloat64Encoder)(nil)
 )

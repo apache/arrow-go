@@ -146,3 +146,25 @@ func TestWriterPropALPEncodingPerColumn(t *testing.T) {
 			parquet.WithEncodingFor("volume", parquet.Encodings.ALP))
 	}, "the column-specific setting wins over the default one")
 }
+
+func TestWriterPropALPVectorSize(t *testing.T) {
+	props := parquet.NewWriterProperties()
+	assert.Equal(t, parquet.DefaultALPVectorSize, props.ALPVectorSizeFor("price"))
+
+	props = parquet.NewWriterProperties(
+		parquet.WithALPVectorSize(4096),
+		parquet.WithALPVectorSizeFor("price", 32),
+		parquet.WithEncodingFor("volume", parquet.Encodings.Plain))
+	assert.Equal(t, 32, props.ALPVectorSizeFor("price"))
+	assert.Equal(t, 4096, props.ALPVectorSizeFor("volume"),
+		"a column configured for something else keeps the default size")
+	assert.Equal(t, 4096, props.ALPVectorSizeFor("other"))
+
+	for _, size := range []int{0, 4, 1000, 1 << 16} {
+		assert.Panics(t, func() { parquet.NewWriterProperties(parquet.WithALPVectorSize(size)) }, "size %d", size)
+		assert.Panics(t, func() { parquet.NewWriterProperties(parquet.WithALPVectorSizeFor("price", size)) }, "size %d", size)
+	}
+	for _, size := range []int{8, 1 << 15} {
+		assert.NotPanics(t, func() { parquet.NewWriterProperties(parquet.WithALPVectorSize(size)) }, "size %d", size)
+	}
+}

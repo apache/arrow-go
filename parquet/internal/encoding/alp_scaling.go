@@ -168,47 +168,61 @@ func alpFloatFromBits[T alpFloat](b uint64) T {
 	panic("parquet: ALP: unsupported float type")
 }
 
-// Adding and subtracting this constant rounds as in the reference
-// implementation without a library call.
-func alpFastRound[T alpFloat](v T) int64 {
-	magic := alpMagic[T]()
-	if v >= 0 {
-		return int64((v + magic) - magic)
-	}
-	return int64((v - magic) + magic)
+// alpScaling holds the constants of one exponent and factor pair. Encoding and
+// decoding look them up once per vector rather than once per value.
+type alpScaling[T alpFloat] struct {
+	// Encoding multiplies by 10^exponent then 10^-factor; decoding multiplies
+	// by 10^factor then 10^-exponent.
+	encExp, encFac T
+	decFac, decExp T
+
+	lo, hi, magic T
 }
 
-// NaNs, infinities, out-of-range values, and negative zero cannot round-trip
-// through ALP's integer representation.
-func alpImpossibleToEncode[T alpFloat](v T) bool {
+func newALPScaling[T alpFloat](exponent, factor int) alpScaling[T] {
 	lo, hi := alpEncodingLimits[T]()
-	f := float64(v)
-	return math.IsNaN(f) || v > hi || v < lo || (f == 0 && math.Signbit(f))
-}
-
-// Unencodable values use a sentinel that cannot decode to the original value,
-// so the caller records them as exceptions.
-func alpNumberToInt[T alpFloat](v T) int64 {
-	if alpImpossibleToEncode(v) {
-		_, hi := alpEncodingLimits[T]()
-		return int64(hi)
+	return alpScaling[T]{
+		encExp: alpPow10[T](exponent),
+		encFac: alpNegPow10[T](factor),
+		decFac: alpPow10[T](factor),
+		decExp: alpNegPow10[T](exponent),
+		lo:     lo,
+		hi:     hi,
+		magic:  alpMagic[T](),
 	}
-	return alpFastRound(v)
 }
 
-func alpEncode[T alpFloat](v T, exponent, factor int) int64 {
-	return alpNumberToInt(v * alpPow10[T](exponent) * alpNegPow10[T](factor))
+// round adds and subtracts a magic constant, which rounds to the nearest
+// integer without a library call.
+func (s *alpScaling[T]) round(v T) int64 {
+	if v >= 0 {
+		return int64((v + s.magic) - s.magic)
+	}
+	return int64((v - s.magic) + s.magic)
 }
 
-// The multiplication order is part of the format; reassociation can change the
-// final bit.
-func alpDecode[T alpFloat](encoded int64, exponent, factor int) T {
-	return T(encoded) * alpPow10[T](factor) * alpNegPow10[T](exponent)
+// encode returns the integer v scales to. NaNs, infinities, out-of-range
+// values, and negative zero cannot round-trip through an integer, so they get a
+// sentinel that cannot decode to the original value.
+func (s *alpScaling[T]) encode(v T) int64 {
+	// The conversion keeps the product from fusing with the addition in round,
+	// so every platform rounds the same product.
+	scaled := T(v * s.encExp * s.encFac)
+	if scaled != scaled || scaled > s.hi || scaled < s.lo || (scaled == 0 && math.Signbit(float64(scaled))) {
+		return int64(s.hi)
+	}
+	return s.round(scaled)
 }
 
-// alpTryEncode reports whether v survives the required round trip. Values that
+// decode is the normative ALP decoding. The multiplication order is part of
+// the format; reassociation can change the final bit.
+func (s *alpScaling[T]) decode(encoded int64) T {
+	return T(encoded) * s.decFac * s.decExp
+}
+
+// tryEncode reports whether v survives the required round trip. Values that
 // fail are stored verbatim as exceptions.
-func alpTryEncode[T alpFloat](v T, exponent, factor int) (encoded int64, ok bool) {
-	encoded = alpEncode(v, exponent, factor)
-	return encoded, alpDecode[T](encoded, exponent, factor) == v
+func (s *alpScaling[T]) tryEncode(v T) (encoded int64, ok bool) {
+	encoded = s.encode(v)
+	return encoded, s.decode(encoded) == v
 }

@@ -44,8 +44,9 @@ func TestALPFastRoundFloat32(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := alpFastRound(tt.input)
-			assert.Equal(t, tt.expected, result, "alpFastRound(%v) = %d, want %d", tt.input, result, tt.expected)
+			s := newALPScaling[float32](0, 0)
+			result := s.round(tt.input)
+			assert.Equal(t, tt.expected, result, "round(%v) = %d, want %d", tt.input, result, tt.expected)
 		})
 	}
 }
@@ -69,8 +70,9 @@ func TestALPFastRoundFloat64(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := alpFastRound(tt.input)
-			assert.Equal(t, tt.expected, result, "alpFastRound(%v) = %d, want %d", tt.input, result, tt.expected)
+			s := newALPScaling[float64](0, 0)
+			result := s.round(tt.input)
+			assert.Equal(t, tt.expected, result, "round(%v) = %d, want %d", tt.input, result, tt.expected)
 		})
 	}
 }
@@ -83,7 +85,8 @@ func alpNegZero[T alpFloat]() T {
 
 func alpIsException[T alpFloat](t *testing.T, v T, exponent, factor int) bool {
 	t.Helper()
-	_, ok := alpTryEncode(v, exponent, factor)
+	s := newALPScaling[T](exponent, factor)
+	_, ok := s.tryEncode(v)
 	return !ok
 }
 
@@ -114,11 +117,13 @@ func TestALPTryEncodeFloat64Exceptions(t *testing.T) {
 }
 
 func TestALPTryEncodeReturnsTheEncodedValue(t *testing.T) {
-	e, ok := alpTryEncode(1.23, 2, 0)
+	s := newALPScaling[float64](2, 0)
+	e, ok := s.tryEncode(1.23)
 	require.True(t, ok)
 	assert.EqualValues(t, 123, e, "1.23 at 10^2 encodes to 123")
 
-	e, ok = alpTryEncode(1.5, 3, 2)
+	s = newALPScaling[float64](3, 2)
+	e, ok = s.tryEncode(1.5)
 	require.True(t, ok)
 	assert.EqualValues(t, 15, e, "10^3 * 10^-2 scales by ten")
 }
@@ -141,10 +146,11 @@ func TestALPEncodeDecodeFloat32(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			encoded := alpEncode(tt.value, tt.exponent, tt.factor)
+			s := newALPScaling[float32](tt.exponent, tt.factor)
+			encoded := s.encode(tt.value)
 			assert.Equal(t, tt.encoded, encoded, "encode(%v, exp=%d, fac=%d)", tt.value, tt.exponent, tt.factor)
 
-			decoded := alpDecode[float32](encoded, tt.exponent, tt.factor)
+			decoded := s.decode(encoded)
 			assert.Equal(t, math.Float32bits(tt.value), math.Float32bits(decoded),
 				"decode(%d, exp=%d, fac=%d) = %v, want %v", encoded, tt.exponent, tt.factor, decoded, tt.value)
 		})
@@ -169,10 +175,11 @@ func TestALPEncodeDecodeFloat64(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			encoded := alpEncode(tt.value, tt.exponent, tt.factor)
+			s := newALPScaling[float64](tt.exponent, tt.factor)
+			encoded := s.encode(tt.value)
 			assert.Equal(t, tt.encoded, encoded, "encode(%v, exp=%d, fac=%d)", tt.value, tt.exponent, tt.factor)
 
-			decoded := alpDecode[float64](encoded, tt.exponent, tt.factor)
+			decoded := s.decode(encoded)
 			assert.Equal(t, math.Float64bits(tt.value), math.Float64bits(decoded),
 				"decode(%d, exp=%d, fac=%d) = %v, want %v", encoded, tt.exponent, tt.factor, decoded, tt.value)
 		})
@@ -199,8 +206,9 @@ func TestALPScalingMultipliesByANegativePower(t *testing.T) {
 	const value = float32(1016.10999)
 	const exponent, factor = 6, 0
 
-	encoded := alpEncode(value, exponent, factor)
-	assert.Equal(t, value, alpDecode[float32](encoded, exponent, factor))
+	s := newALPScaling[float32](exponent, factor)
+	encoded := s.encode(value)
+	assert.Equal(t, value, s.decode(encoded))
 	assert.NotEqual(t, value, float32(encoded)/(alpPow10[float32](exponent)/alpPow10[float32](factor)),
 		"dividing has stopped losing the last bit, so this test no longer guards anything")
 }
