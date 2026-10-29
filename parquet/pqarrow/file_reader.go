@@ -652,36 +652,47 @@ func (fr *FileReader) getReader(ctx context.Context, field *SchemaField, arrowFi
 		childReaders := make([]*ColumnReader, len(field.Children))
 		childFields := make([]arrow.Field, len(field.Children))
 
-		// Get child field readers concurrently
-		// 'getReader' causes a read operation.  Issue the 'reads' concurrently
-		// When reading structs with large numbers of columns, the serial load is very slow.
-		// This is especially true when reading Cloud Storage. Loading concurrently
-		// greatly improves performance.
-		g, gctx := errgroup.WithContext(ctx)
 		if !fr.Props.Parallel {
-			g.SetLimit(1)
-		}
-
-		for n, child := range field.Children {
-			n, child := n, child
-			g.Go(func() error {
-				reader, err := fr.getReader(gctx, &child, *child.Field)
+			// Serial reads build the child readers in order, without a goroutine per child.
+			for n, child := range field.Children {
+				reader, err := fr.getReader(ctx, &child, *child.Field)
 				if err != nil {
-					return err
+					return nil, err
 				}
 				if reader == nil {
-					return nil
+					continue
 				}
 				childFields[n] = *child.Field
 				childReaders[n] = reader
-				return nil
-			})
-		}
-		if err = g.Wait(); err != nil {
-			return nil, err
+			}
+		} else {
+			// Get child field readers concurrently
+			// 'getReader' causes a read operation.  Issue the 'reads' concurrently
+			// When reading structs with large numbers of columns, the serial load is very slow.
+			// This is especially true when reading Cloud Storage. Loading concurrently
+			// greatly improves performance.
+			g, gctx := errgroup.WithContext(ctx)
+			for n, child := range field.Children {
+				n, child := n, child
+				g.Go(func() error {
+					reader, err := fr.getReader(gctx, &child, *child.Field)
+					if err != nil {
+						return err
+					}
+					if reader == nil {
+						return nil
+					}
+					childFields[n] = *child.Field
+					childReaders[n] = reader
+					return nil
+				})
+			}
+			if err = g.Wait(); err != nil {
+				return nil, err
+			}
 		}
 
-		// because we performed getReader concurrently, we need to prune out any empty readers
+		// getReader returns nil for children with no selected leaves, so prune them
 		childReaders = slices.DeleteFunc(childReaders,
 			func(r *ColumnReader) bool { return r == nil })
 		childFields = slices.DeleteFunc(childFields,
