@@ -137,8 +137,7 @@ func BenchmarkGetFieldReaderNestedStructSerial(b *testing.B) {
 			}
 
 			b.ReportAllocs()
-			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				fieldReader, err := reader.GetFieldReader(context.Background(), 0, includedLeaves, rowGroups)
 				if err != nil {
 					b.Fatal(err)
