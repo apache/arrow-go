@@ -800,7 +800,23 @@ func (b *BitReader) GetBatchBitmap(out []byte, outOffset, length int) (int, erro
 // GetValue returns a single value that is bit packed using width as the number of bits
 // and returns false if there weren't enough bits remaining.
 func (b *BitReader) GetValue(width int) (uint64, bool) {
-	v := make([]uint64, 1)
-	n, _ := b.GetBatch(uint(width), v)
-	return v[0], n == 1
+	if width < 0 || width > 64 {
+		return 0, false
+	}
+	if width == 0 {
+		return 0, true
+	}
+
+	// At a byte boundary another read may have advanced the underlying stream
+	// without updating the buffer, including after a truncated batch.
+	if b.bitoffset == 0 {
+		if err := b.fillbuffer(); err != nil {
+			return 0, false
+		}
+	}
+
+	// GetBatch is optimized for many values, but adds seeking and buffer
+	// refills when called for only one value.
+	v, err := b.next(uint(width))
+	return v, err == nil
 }
