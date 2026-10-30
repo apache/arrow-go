@@ -95,6 +95,59 @@ func BenchmarkReadNestedStructSerial(b *testing.B) {
 	}
 }
 
+func BenchmarkGetFieldReaderNestedStructSerial(b *testing.B) {
+	const (
+		nrows        = 1024
+		rowGroupSize = 64
+	)
+
+	for _, nchildren := range []int{1, 8, 32, 128} {
+		b.Run(fmt.Sprintf("children=%d", nchildren), func(b *testing.B) {
+			mem := memory.DefaultAllocator
+			tbl := makeWideNestedInt32Table(mem, nchildren, nrows)
+			defer tbl.Release()
+
+			var buf bytes.Buffer
+			writerProps := parquet.NewWriterProperties(parquet.WithCompression(compress.Codecs.Uncompressed))
+			if err := pqarrow.WriteTable(tbl, &buf, rowGroupSize, writerProps, pqarrow.DefaultWriterProps()); err != nil {
+				b.Fatal(err)
+			}
+
+			pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer pf.Close()
+
+			reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{
+				BatchSize: nrows,
+				Parallel:  false,
+			}, mem)
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			rowGroups := make([]int, nrows/rowGroupSize)
+			for i := range rowGroups {
+				rowGroups[i] = i
+			}
+			includedLeaves := make(map[int]bool, nchildren)
+			for i := 0; i < nchildren; i++ {
+				includedLeaves[i] = true
+			}
+
+			b.ReportAllocs()
+			for b.Loop() {
+				fieldReader, err := reader.GetFieldReader(context.Background(), 0, includedLeaves, rowGroups)
+				if err != nil {
+					b.Fatal(err)
+				}
+				fieldReader.Release()
+			}
+		})
+	}
+}
+
 func makeWideNestedInt32Table(mem memory.Allocator, nchildren, nrows int) arrow.Table {
 	childFields := make([]arrow.Field, nchildren)
 	for i := range childFields {

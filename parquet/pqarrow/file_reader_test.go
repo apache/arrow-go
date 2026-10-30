@@ -251,6 +251,64 @@ func TestGetFieldReadersReleasesPartialReadersOnError(t *testing.T) {
 	require.Zero(t, mem.CurrentAlloc())
 }
 
+// offsetRecordingReaderAt records the offset of every read.
+type offsetRecordingReaderAt struct {
+	*failingReaderAt
+	offsets []int64
+}
+
+func (r *offsetRecordingReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	r.offsets = append(r.offsets, off)
+	return r.failingReaderAt.ReadAt(p, off)
+}
+
+func TestGetFieldReaderSerialReturnsFirstChildError(t *testing.T) {
+	structType := arrow.StructOf(
+		arrow.Field{Name: "first", Type: arrow.PrimitiveTypes.Int32},
+		arrow.Field{Name: "second", Type: arrow.PrimitiveTypes.Int32},
+		arrow.Field{Name: "third", Type: arrow.PrimitiveTypes.Int32},
+	)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "nested", Type: structType}}, nil)
+	record, _, err := array.RecordFromJSON(memory.DefaultAllocator, schema,
+		strings.NewReader(`[{"nested": {"first": 1, "second": 2, "third": 3}}]`))
+	require.NoError(t, err)
+	defer record.Release()
+
+	var buf bytes.Buffer
+	writer, err := pqarrow.NewFileWriter(schema, &buf, nil, pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+
+	readErr := errors.New("read second child")
+	source := &offsetRecordingReaderAt{failingReaderAt: &failingReaderAt{
+		Reader:     bytes.NewReader(buf.Bytes()),
+		failOffset: -1,
+		err:        readErr,
+	}}
+	parquetReader, err := file.NewParquetReader(source)
+	require.NoError(t, err)
+	defer parquetReader.Close()
+
+	chunkOffset := func(col int) int64 {
+		column, err := parquetReader.MetaData().RowGroup(0).ColumnChunk(col)
+		require.NoError(t, err)
+		if column.HasDictionaryPage() && column.DictionaryPageOffset() > 0 {
+			return column.DictionaryPageOffset()
+		}
+		return column.DataPageOffset()
+	}
+	source.failOffset = chunkOffset(1)
+	thirdOffset := chunkOffset(2)
+
+	reader, err := pqarrow.NewFileReader(parquetReader, pqarrow.ArrowReadProperties{Parallel: false}, memory.DefaultAllocator)
+	require.NoError(t, err)
+	source.offsets = nil
+	_, err = reader.GetFieldReader(context.Background(), 0, map[int]bool{0: true, 1: true, 2: true}, []int{0})
+	require.ErrorIs(t, err, readErr)
+	require.NotContains(t, source.offsets, thirdOffset, "children after the failing one should not be read")
+}
+
 func TestRecordReaderParallel(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
