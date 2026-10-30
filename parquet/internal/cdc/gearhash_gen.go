@@ -37,8 +37,10 @@ func main() {
 	var out bytes.Buffer
 	out.WriteString(header)
 	out.WriteString("package cdc\n\n")
+	out.WriteString("// numGearTables is the number of gear hash tables.\n")
+	fmt.Fprintf(&out, "const numGearTables = %d\n\n", numGearTables)
 	out.WriteString("// gearTables holds the gear hash tables used by the rolling hash.\n")
-	fmt.Fprintf(&out, "var gearTables = [%d][256]uint64{\n", numGearTables)
+	out.WriteString("var gearTables = [numGearTables][256]uint64{\n")
 	var buf [128]byte
 	for seed := range numGearTables {
 		out.WriteString("\t{\n")

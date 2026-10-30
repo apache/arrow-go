@@ -394,12 +394,13 @@ func writeArrowToColumn(ctx context.Context, cw file.ColumnChunkWriter, chunker 
 		return write(leafArr, defLevels, repLevels)
 	}
 
+	flusher, ok := cw.(interface{ FlushCurrentPage() error })
+	if !ok {
+		return errors.New("pqarrow: column writer does not support content-defined chunking")
+	}
 	chunks, err := chunker.Chunks(colLevelInfo, defLevels, repLevels, leafArr)
 	if err != nil {
 		return err
-	}
-	if len(chunks) == 0 {
-		return write(leafArr, defLevels, repLevels)
 	}
 
 	for i, chunk := range chunks {
@@ -420,10 +421,6 @@ func writeArrowToColumn(ctx context.Context, cw file.ColumnChunkWriter, chunker 
 		}
 
 		if i < len(chunks)-1 {
-			flusher, ok := cw.(interface{ FlushCurrentPage() error })
-			if !ok {
-				return errors.New("pqarrow: column writer does not support content-defined chunking")
-			}
 			if err := flusher.FlushCurrentPage(); err != nil {
 				return err
 			}

@@ -18,8 +18,11 @@
 
 package cdc
 
+// numGearTables is the number of gear hash tables.
+const numGearTables = 8
+
 // gearTables holds the gear hash tables used by the rolling hash.
-var gearTables = [8][256]uint64{
+var gearTables = [numGearTables][256]uint64{
 	{
 		0xf09f35a563783945,
 		0x0dcc5b3bc5ae410a,

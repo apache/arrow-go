@@ -19,6 +19,8 @@
 // identical pages even when it is written at different offsets.
 package cdc
 
+//go:generate go run gearhash_gen.go
+
 import (
 	"encoding/binary"
 	"fmt"
@@ -185,6 +187,8 @@ func (c *Chunker) newValueSource(arr arrow.Array) (valueSource, error) {
 		return c.newValueSource(arr.Indices())
 	case array.ExtensionArray:
 		return c.newValueSource(arr.Storage())
+	// Binary-like arrays are matched by concrete type so that Value is inlined;
+	// a case per interface instead is about 10% slower.
 	case *array.String:
 		return valueSource{roll: func(s state, i int64) state { return c.rollString(s, arr.Value(int(i))) }}, nil
 	case *array.LargeString:
