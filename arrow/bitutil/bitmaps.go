@@ -710,7 +710,83 @@ func alignedBitmapOp(op bitOp, left, right []byte, lOffset, rOffset int64, out [
 	}
 }
 
+// bitmapByteRangesOverlap reports whether two byte slices share any addressed bytes.
+// A bitmap op may write into either input, so the direct word loop is only used
+// when writes cannot overwrite unread source bytes.
+func bitmapByteRangesOverlap(a, b []byte) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	aPtr := uintptr(unsafe.Pointer(&a[0]))
+	bPtr := uintptr(unsafe.Pointer(&b[0]))
+	if aPtr < bPtr {
+		return bPtr-aPtr < uintptr(len(a))
+	}
+	return aPtr-bPtr < uintptr(len(b))
+}
+
 func unalignedBitmapOp(op bitOp, left, right []byte, lOffset, rOffset int64, out []byte, outOffset int64, length int64) {
+	// A byte-aligned output can be written directly in 64-bit words.
+	// Avoid constructing word readers and a writer for larger, non-aliasing
+	// slices. Keep the existing path for overlapping buffers, short inputs,
+	// and destinations with a bit offset.
+	if outOffset%8 == 0 && length >= 128 {
+		leftStart, rightStart := lOffset/8, rOffset/8
+		outStart := outOffset / 8
+		leftBytes := left[leftStart : leftStart+BytesForBits(lOffset%8+length)]
+		rightBytes := right[rightStart : rightStart+BytesForBits(rOffset%8+length)]
+		outBytes := out[outStart : outStart+BytesForBits(length)]
+		if !bitmapByteRangesOverlap(outBytes, leftBytes) &&
+			!bitmapByteRangesOverlap(outBytes, rightBytes) {
+			leftShift, rightShift := uint(lOffset%8), uint(rOffset%8)
+			nwords := length / 64
+			for i := int64(0); i < nwords; i++ {
+				lword := binary.LittleEndian.Uint64(leftBytes)
+				if leftShift != 0 {
+					lword = (lword >> leftShift) | uint64(leftBytes[8])<<(64-leftShift)
+				}
+				rword := binary.LittleEndian.Uint64(rightBytes)
+				if rightShift != 0 {
+					rword = (rword >> rightShift) | uint64(rightBytes[8])<<(64-rightShift)
+				}
+				binary.LittleEndian.PutUint64(outBytes, op.opWord(lword, rword))
+				leftBytes = leftBytes[8:]
+				rightBytes = rightBytes[8:]
+				outBytes = outBytes[8:]
+			}
+			// Complete bytes at the end also avoid the reader/writer path.
+			remaining := length % 64
+			for remaining >= 8 {
+				lbyte := leftBytes[0] >> leftShift
+				if leftShift != 0 {
+					lbyte |= leftBytes[1] << (8 - leftShift)
+				}
+				rbyte := rightBytes[0] >> rightShift
+				if rightShift != 0 {
+					rbyte |= rightBytes[1] << (8 - rightShift)
+				}
+				outBytes[0] = op.opByte(lbyte, rbyte)
+				leftBytes = leftBytes[1:]
+				rightBytes = rightBytes[1:]
+				outBytes = outBytes[1:]
+				remaining -= 8
+			}
+			if remaining != 0 {
+				lbyte := leftBytes[0] >> leftShift
+				if int64(leftShift)+remaining > 8 {
+					lbyte |= leftBytes[1] << (8 - leftShift)
+				}
+				rbyte := rightBytes[0] >> rightShift
+				if int64(rightShift)+remaining > 8 {
+					rbyte |= rightBytes[1] << (8 - rightShift)
+				}
+				mask := byte((1 << uint(remaining)) - 1)
+				outBytes[0] = (outBytes[0] &^ mask) | (op.opByte(lbyte, rbyte) & mask)
+			}
+			return
+		}
+	}
+
 	leftRdr := NewBitmapWordReader(left, int(lOffset), int(length))
 	rightRdr := NewBitmapWordReader(right, int(rOffset), int(length))
 	writer := NewBitmapWordWriter(out, int(outOffset), int(length))
