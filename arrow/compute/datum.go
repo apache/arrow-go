@@ -305,18 +305,9 @@ func NewDatum(value interface{}) Datum {
 }
 
 // NewDatumWithoutOwning is like NewDatum but does not call Retain on the
-// value it is given. The returned Datum borrows the underlying value: it
-// does not own any reference to it, so Datum.Release() is a no-op and
-// will NOT release the caller's reference to the value.
-//
-// The caller is responsible for keeping the underlying value alive for as
-// long as the returned Datum is in use. Because the Datum is non-owning,
-// calling Datum.Release on it is safe (no-op) or unnecessary — it will
-// never free the caller's data. This is the key difference from NewDatum,
-// which retains a reference and whose Datum.Release consumes that
-// reference.
-//
-// Release on a Datum from NewDatumWithoutOwning is a no-op, so use
+// value it is given. The returned Datum borrows the underlying value — the
+// caller is responsible for keeping it alive for as long as the Datum is
+// in use. Release on a Datum from NewDatumWithoutOwning is a no-op, so use
 // NewDatum when the Datum should own the value.
 //
 // Example:
@@ -326,7 +317,6 @@ func NewDatum(value interface{}) Datum {
 //	arr := builder.NewArray()
 //	defer arr.Release()
 //	datum := NewDatumWithoutOwning(arr) // datum borrows arr, arr is still alive
-//	// datum.Release() is safe to call (no-op) or omit; it will not free arr
 func NewDatumWithoutOwning(value interface{}) Datum {
 	switch v := value.(type) {
 	case arrow.Array:

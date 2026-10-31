@@ -34,10 +34,10 @@ import (
 // before and after so any silent leak or over-release is caught.
 //
 // Each case follows the same pattern:
-//   1. Caller builds a fresh owning value (refcount == 1).
-//   2. NewDatumWithoutOwning borrows it without Retain.
-//   3. Datum.Release() must be a no-op (refcount still 1).
-//   4. Caller's Release() finally frees everything.
+//  1. Caller builds a fresh owning value (refcount == 1).
+//  2. NewDatumWithoutOwning borrows it without Retain.
+//  3. Datum.Release() must be a no-op (refcount still 1).
+//  4. Caller's Release() finally frees everything.
 //
 // This is the regression test for issue #1298.
 func TestNewDatumWithoutOwningDoesNotLeakOwner(t *testing.T) {
