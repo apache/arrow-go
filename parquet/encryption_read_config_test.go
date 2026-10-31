@@ -70,7 +70,7 @@ import (
  *                                  (instead of key retrieval callback).
  *  - Decryption Configuration 4:   PlainText Footer mode - test legacy reads,
  *                                  read the footer + all non-encrypted columns.
- *                                  (pairs with encryption configuration 3)
+ *                                  (pairs with encryption configurations 3 and 7)
  *
  * The encrypted parquet files that is read was encrypted using one of the configurations
  * below:
@@ -91,6 +91,8 @@ import (
  *                                  identity storage in file metadata.
  *  - Encryption configuration 6:   Encrypt two columns and the footer, with different
  *                                  keys. Use the alternative (AES_GCM_CTR_V1) algorithm.
+ *  - Encryption configuration 7:   Encrypt two columns with a plaintext footer, using
+ *                                  the alternative (AES_GCM_CTR_V1) algorithm.
  */
 
 func getDataDir() string {
@@ -546,8 +548,8 @@ func (d *TestDecryptionSuite) checkResults(fileName string, decryptionConfig, en
 		}
 	}
 
-	// decryption config 4 can only work when the encryption config is 3
-	if decryptionConfig == 4 && encryptionConfig != 3 {
+	// Decryption config 4 reads plaintext footers and unencrypted columns.
+	if decryptionConfig == 4 && encryptionConfig != 3 && encryptionConfig != 7 {
 		return
 	}
 	d.NotPanics(decFn)
@@ -587,6 +589,10 @@ func (d *TestDecryptionSuite) TestDecryption() {
 		{"encrypt_columns_and_footer_ctr.parquet.uncompressed.encrypted", 6, false},
 		{"encrypt_columns_and_footer_ctr.parquet.v2.encrypted", 6, false},
 		{"encrypt_columns_and_footer_ctr.parquet.v2.uncompressed.encrypted", 6, false},
+		{"encrypt_columns_plaintext_footer_ctr.parquet.encrypted", 7, true},
+		{"encrypt_columns_plaintext_footer_ctr.parquet.uncompressed.encrypted", 7, false},
+		{"encrypt_columns_plaintext_footer_ctr.parquet.v2.encrypted", 7, false},
+		{"encrypt_columns_plaintext_footer_ctr.parquet.v2.uncompressed.encrypted", 7, false},
 	}
 	for _, tt := range tests {
 		d.Run(tt.file, func() {
