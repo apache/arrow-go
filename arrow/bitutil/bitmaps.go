@@ -730,6 +730,7 @@ func unalignedBitmapOp(op bitOp, left, right []byte, lOffset, rOffset int64, out
 	// Avoid constructing word readers and a writer for larger, non-aliasing
 	// slices. Keep the existing path for overlapping buffers, short inputs,
 	// and destinations with a bit offset.
+	// Require at least two 64-bit words to amortize the extra checks.
 	if outOffset%8 == 0 && length >= 128 {
 		leftStart, rightStart := lOffset/8, rOffset/8
 		outStart := outOffset / 8
