@@ -678,6 +678,11 @@ func (fr *FileReader) getReader(ctx context.Context, field *SchemaField, arrowFi
 			})
 		}
 		if err = g.Wait(); err != nil {
+			for _, rdr := range childReaders {
+				if rdr != nil {
+					rdr.Release()
+				}
+			}
 			return nil, err
 		}
 
