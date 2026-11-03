@@ -637,6 +637,9 @@ func createMemoTable(mem memory.Allocator, dt arrow.DataType) (ret hashing.MemoT
 type DictionaryBuilder interface {
 	Builder
 
+	// NewDictionaryArray may return dictionary data shared with earlier
+	// arrays. The builder may retain that data until ResetFull or its final
+	// Release.
 	NewDictionaryArray() *Dictionary
 	NewDelta() (indices, delta arrow.Array, err error)
 	AppendArray(arrow.Array) error
@@ -652,6 +655,9 @@ type dictionaryBuilder struct {
 	deltaOffset int
 	memoTable   hashing.MemoTable
 	idxBuilder  IndexBuilder
+	// Only ResetFull and checkpoint restores shrink memoTable, and both clear
+	// dict, so dict is current while its length equals memoTable.Size().
+	dict *Data
 }
 
 func createDictBuilder[T arrow.ValueType](mem memory.Allocator, idxbldr IndexBuilder, memo hashing.MemoTable, dt *arrow.DictionaryType, init arrow.Array) DictionaryBuilder {
@@ -851,6 +857,14 @@ func (b *dictionaryBuilder) Release() {
 			binmemo.Release()
 		}
 		b.memoTable = nil
+		b.releaseDict()
+	}
+}
+
+func (b *dictionaryBuilder) releaseDict() {
+	if b.dict != nil {
+		b.dict.Release()
+		b.dict = nil
 	}
 }
 
@@ -926,6 +940,7 @@ func (b *dictionaryBuilder) ResetFull() {
 	b.reset()
 	b.idxBuilder.NewArray().Release()
 	b.memoTable.Reset()
+	b.releaseDict()
 }
 
 type dictionaryBuilderCheckpoint struct {
@@ -939,6 +954,7 @@ func (c *dictionaryBuilderCheckpoint) capture() {
 
 func (c *dictionaryBuilderCheckpoint) restore() {
 	c.builder.memoTable.Truncate(c.size)
+	c.builder.releaseDict()
 }
 
 func (b *dictionaryBuilder) newCheckpoint() checkpointState {
@@ -1035,7 +1051,19 @@ func (b *dictionaryBuilder) newWithDictOffset(offset int) (indices, dict *Data, 
 	indices = idxarr.Data().(*Data)
 
 	b.deltaOffset = b.memoTable.Size()
-	dict, err = GetDictArrayData(b.mem, b.dt.ValueType, b.memoTable, offset)
+	switch {
+	case offset != 0:
+		dict, err = GetDictArrayData(b.mem, b.dt.ValueType, b.memoTable, offset)
+	case b.dict != nil && b.dict.length == b.deltaOffset:
+		b.dict.Retain()
+		dict = b.dict
+	default:
+		if dict, err = GetDictArrayData(b.mem, b.dt.ValueType, b.memoTable, 0); err == nil {
+			b.releaseDict()
+			dict.Retain()
+			b.dict = dict
+		}
+	}
 	b.reset()
 	indices.Retain()
 	return

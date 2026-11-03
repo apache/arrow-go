@@ -780,10 +780,15 @@ func (ar *ArrowReadDictSuite) TestIncrementalReads() {
 
 	ctx := compute.WithAllocator(context.Background(), ar.mem)
 
+	var dict arrow.ArrayData
 	for i := 0; i < numReads; i++ {
 		chunk, err := col.NextBatch(int64(batchSize))
 		ar.Require().NoError(err)
 		defer chunk.Release()
+		if i == 0 {
+			dict = chunk.Chunk(0).Data().Dictionary()
+		}
+		ar.Same(dict, chunk.Chunk(0).Data().Dictionary(), "batches of one row group share a dictionary")
 		// no need to manually release chunk, like other record readers
 		// the col reader holds onto the current record and will release it
 		// when the next is requested or when the reader is released
