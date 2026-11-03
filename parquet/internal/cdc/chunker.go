@@ -29,9 +29,9 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/endian"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
-	"github.com/apache/arrow-go/v18/parquet/internal/debug"
 )
 
 // Chunk is a run of consecutive levels, and the value slots they cover, that
@@ -157,18 +157,19 @@ type valueSource struct {
 	roll  func(s state, i int64) state // rolls the value in slot i
 }
 
-// word returns the bytes of the value in slot i as a little-endian word, so
-// that rolling it least significant byte first follows memory order.
+// word returns the value in slot i. Rolling it least significant byte first
+// hashes its little-endian bytes, so chunk boundaries don't depend on the
+// host's byte order.
 func (v valueSource) word(i int64) uint64 {
 	switch v.width {
 	case 1:
 		return uint64(v.data[i])
 	case 2:
-		return uint64(binary.LittleEndian.Uint16(v.data[i*2:]))
+		return uint64(binary.NativeEndian.Uint16(v.data[i*2:]))
 	case 4:
-		return uint64(binary.LittleEndian.Uint32(v.data[i*4:]))
+		return uint64(binary.NativeEndian.Uint32(v.data[i*4:]))
 	}
-	return binary.LittleEndian.Uint64(v.data[i*8:])
+	return binary.NativeEndian.Uint64(v.data[i*8:])
 }
 
 // newValueSource returns the accessor for the values of arr.
@@ -207,7 +208,7 @@ func (c *Chunker) newValueSource(arr arrow.Array) (valueSource, error) {
 
 	fixed, ok := arr.DataType().(arrow.FixedWidthDataType)
 	if !ok || fixed.BitWidth()%8 != 0 {
-		return valueSource{}, fmt.Errorf("cdc: unsupported type %s for content-defined chunking", arr.DataType())
+		return valueSource{}, fmt.Errorf("%w: cdc: unsupported type %s for content-defined chunking", arrow.ErrNotImplemented, arr.DataType())
 	}
 	width := fixed.BitWidth() / 8
 	var data []byte
@@ -218,8 +219,17 @@ func (c *Chunker) newValueSource(arr arrow.Array) (valueSource, error) {
 		return valueSource{data: data, width: width}, nil
 	}
 	return valueSource{roll: func(s state, i int64) state {
-		start := int(i) * width
-		return c.roll(s, data[start:start+width])
+		value := data[int(i)*width:][:width]
+		if endian.IsBigEndian {
+			// Decimals are stored as native-endian 64-bit words, least
+			// significant first; hash their little-endian bytes.
+			var le [32]byte
+			for w := 0; w < width; w += 8 {
+				binary.LittleEndian.PutUint64(le[w:], binary.BigEndian.Uint64(value[w:]))
+			}
+			value = le[:width]
+		}
+		return c.roll(s, value)
 	}}, nil
 }
 
@@ -245,6 +255,10 @@ func (c *Chunker) Chunks(levels file.LevelInfo, defLevels, repLevels []int16, va
 	numLevels := int64(values.Len())
 	if levels.DefLevel > 0 {
 		numLevels = int64(len(defLevels))
+	}
+	if numLevels < int64(values.Len()) || (levels.RepLevel > 0 && int64(len(repLevels)) != numLevels) {
+		return nil, fmt.Errorf("%w: cdc: got %d definition and %d repetition levels for %d values",
+			arrow.ErrInvalid, len(defLevels), len(repLevels), values.Len())
 	}
 
 	var (
@@ -329,22 +343,6 @@ func (c *Chunker) Chunks(levels file.LevelInfo, defLevels, repLevels []int16, va
 	if prevOffset < numLevels {
 		chunks = append(chunks, Chunk{prevOffset, prevValueOffset, numLevels - prevOffset, valueOffset - prevValueOffset})
 	}
-	debug.Assert(validateChunks(chunks, numLevels, valueOffset), "cdc: invalid chunks")
+	assertValidChunks(chunks, numLevels, valueOffset)
 	return chunks, nil
-}
-
-// validateChunks checks that chunks are contiguous in levels and values, that
-// only the first chunk is empty, and that they cover exactly numLevels levels
-// and numValues value slots.
-func validateChunks(chunks []Chunk, numLevels, numValues int64) bool {
-	var levelOffset, valueOffset int64
-	for i, ch := range chunks {
-		if ch.LevelOffset != levelOffset || ch.ValueOffset != valueOffset ||
-			ch.NumValues < 0 || ch.NumValues > ch.NumLevels || ch.NumLevels < 0 || (i > 0 && ch.NumLevels == 0) {
-			return false
-		}
-		levelOffset += ch.NumLevels
-		valueOffset += ch.NumValues
-	}
-	return levelOffset == numLevels && valueOffset == numValues
 }

@@ -17,8 +17,6 @@
 package cdc
 
 import (
-	"crypto/fips140"
-	"crypto/md5"
 	"encoding/binary"
 	"fmt"
 	"slices"
@@ -29,6 +27,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
+	"github.com/apache/arrow-go/v18/arrow/endian"
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -37,70 +36,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestGearTables pins the first and last entry of every gear table to the values
+// in Arrow C++'s chunker_internal_generated.h.
 func TestGearTables(t *testing.T) {
-	tables := &gearTables
-	assert.Equal(t, uint64(0xf09f35a563783945), tables[0][0])
-	assert.Equal(t, uint64(0x0dcc5b3bc5ae410a), tables[0][1])
-	assert.Equal(t, uint64(0xecfcba92fe5691a3), tables[1][0])
-	assert.Equal(t, uint64(0x15ed3fca3107bef5), tables[3][128])
-	assert.Equal(t, uint64(0x8df9314914f0857e), tables[7][255])
-}
-
-// TestGearTablesMatchMD5 recomputes the generated tables. It uses crypto/md5,
-// which is not available in FIPS 140-only mode; only this test needs it, the
-// production code uses the checked-in tables.
-func TestGearTablesMatchMD5(t *testing.T) {
-	if fips140.Enforced() {
-		t.Skip("crypto/md5 is not allowed in FIPS 140-only mode")
+	want := [numGearTables][2]uint64{
+		{0xf09f35a563783945, 0x15a28844e64cb211},
+		{0xecfcba92fe5691a3, 0xc281fb8acc6ec1d3},
+		{0xdd16cb672ba6979c, 0xd0a34cfe027cbb7e},
+		{0x39209fb3eb541043, 0x1cece97f30de48ad},
+		{0x58bdf4338602e4fb, 0x4e17878356a55822},
+		{0xb3c58c2483ad5ead, 0xaa815b37d052af59},
+		{0x946ac62246e04460, 0x67ed6b9c724757ec},
+		{0xc0272d42c19ff3ae, 0x8df9314914f0857e},
 	}
-	var buf [128]byte
-	for seed := range numGearTables {
-		for n := range 256 {
-			for i := range buf {
-				if i < 64 {
-					buf[i] = byte(seed)
-				} else {
-					buf[i] = byte(n)
-				}
-			}
-			sum := md5.Sum(buf[:])
-			require.Equal(t, binary.BigEndian.Uint64(sum[:8]), gearTables[seed][n], "seed %d byte %d", seed, n)
-		}
-	}
-}
-
-func TestCalculateMask(t *testing.T) {
-	const Ki, Mi = 1024, 1024 * 1024
-	tests := []struct {
-		name     string
-		min, max int64
-		norm     int
-		mask     uint64
-		wantErr  string
-	}{
-		{"256Ki-1Mi-norm0", 256 * Ki, 1 * Mi, 0, 0xFFFE000000000000, ""},
-		{"256Ki-1Mi-norm1", 256 * Ki, 1 * Mi, 1, 0xFFFC000000000000, ""},
-		{"256Ki-1Mi-norm2", 256 * Ki, 1 * Mi, 2, 0xFFF8000000000000, ""},
-		{"256Ki-1Mi-norm3", 256 * Ki, 1 * Mi, 3, 0xFFF0000000000000, ""},
-		{"256Ki-1Mi-norm-1", 256 * Ki, 1 * Mi, -1, 0xFFFF000000000000, ""},
-		{"0-32-norm0", 0, 32, 0, 0x8000000000000000, ""},
-		{"0-64-norm0", 0, 64, 0, 0xC000000000000000, ""},
-		{"0-16-norm-1", 0, 16, -1, 0x8000000000000000, ""},
-		{"128-384-norm-59", 128, 384, -59, 0xFFFFFFFFFFFFFFFE, ""},
-		{"0-16-norm0", 0, 16, 0, 0, "between 1 and 63"},
-		{"0-32-norm1", 0, 32, 1, 0, "between 1 and 63"},
-		{"128-384-norm-60", 128, 384, -60, 0, "between 1 and 63"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mask, err := calculateMask(tt.min, tt.max, tt.norm)
-			if tt.wantErr != "" {
-				require.ErrorContains(t, err, tt.wantErr)
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tt.mask, mask)
-		})
+	for seed, w := range want {
+		assert.Equal(t, w, [2]uint64{gearTables[seed][0], gearTables[seed][255]}, "table %d", seed)
 	}
 }
 
@@ -114,6 +64,10 @@ func TestNewChunkerValidation(t *testing.T) {
 		{MinChunkSize: 1 * Gi, MaxChunkSize: 2 * Gi, NormLevel: 0},
 		{MinChunkSize: 1, MaxChunkSize: 65, NormLevel: 1},
 		{MinChunkSize: 0, MaxChunkSize: 128, NormLevel: 2},
+		{MinChunkSize: 256 * Ki, MaxChunkSize: 1 * Mi, NormLevel: 3},
+		{MinChunkSize: 256 * Ki, MaxChunkSize: 1 * Mi, NormLevel: -1},
+		{MinChunkSize: 0, MaxChunkSize: 16, NormLevel: -1},
+		{MinChunkSize: 128, MaxChunkSize: 384, NormLevel: -59},
 	}
 	for _, opts := range valid {
 		c, err := NewChunker(opts)
@@ -137,10 +91,12 @@ func TestNewChunkerValidation(t *testing.T) {
 		{MinChunkSize: 1, MaxChunkSize: 32, NormLevel: 1},
 		{MinChunkSize: 1, MaxChunkSize: 33, NormLevel: 1},
 		{MinChunkSize: 0, MaxChunkSize: 123, NormLevel: 2},
+		{MinChunkSize: 0, MaxChunkSize: 32, NormLevel: 1},
+		{MinChunkSize: 128, MaxChunkSize: 384, NormLevel: -60},
 	}
 	for _, opts := range invalid {
 		_, err := NewChunker(opts)
-		require.Error(t, err, "%+v", opts)
+		require.ErrorIs(t, err, arrow.ErrInvalid, "%+v", opts)
 	}
 }
 
@@ -317,6 +273,16 @@ func TestChunksMaxSizeForcesCut(t *testing.T) {
 	for _, c := range chunks[:len(chunks)-1] {
 		assert.LessOrEqual(t, c.NumLevels*8, int64(64))
 	}
+}
+
+func TestChunksMissingLevels(t *testing.T) {
+	inputs := testInputs(t)
+	nullable, list := inputs["nullable"], inputs["list"]
+	c := newTestChunker(t, testOptions)
+	_, err := c.Chunks(nullable.levels, nil, nil, nullable.values)
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
+	_, err = c.Chunks(list.levels, list.def, nil, list.values)
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
 }
 
 func TestChunksDeterministic(t *testing.T) {
@@ -499,95 +465,59 @@ func TestChunksTypeDispatch(t *testing.T) {
 		arr := array.MakeArrayOfNull(mem, arrow.StructOf(arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true}), 4)
 		defer arr.Release()
 		_, err := chunk(arr)
-		require.ErrorContains(t, err, "unsupported")
+		require.ErrorIs(t, err, arrow.ErrNotImplemented)
 	})
 }
 
-func TestNeedNewChunkState(t *testing.T) {
-	t.Run("match runs", func(t *testing.T) {
-		c := newTestChunker(t, testOptions)
-		c.minSize, c.maxSize, c.mask = 0, 1<<40, 0 // every hashed byte matches
-		var s state
-		var cut bool
-		for run := 1; run < numGearTables; run++ {
-			s = c.roll(s, []byte{1})
-			require.True(t, s.matched)
-			s, cut = c.needNewChunk(s)
-			require.False(t, cut)
-			assert.Equal(t, run, s.nthRun)
-			assert.False(t, s.matched)
-			assert.Equal(t, int64(run), s.size)
-		}
-		s = c.roll(s, []byte{1})
-		hash := s.hash
-		s, cut = c.needNewChunk(s)
-		require.True(t, cut)
-		assert.Zero(t, s.nthRun)
-		assert.Zero(t, s.size)
-		assert.Equal(t, hash, s.hash)
-	})
-
-	t.Run("no match leaves run", func(t *testing.T) {
-		c := newTestChunker(t, testOptions)
-		c.minSize, c.maxSize, c.mask = 0, 1<<40, ^uint64(0)
-		s := c.roll(state{nthRun: 3}, []byte{1})
-		require.False(t, s.matched)
-		s, cut := c.needNewChunk(s)
-		assert.False(t, cut)
-		assert.Equal(t, 3, s.nthRun)
-	})
-
-	t.Run("max size", func(t *testing.T) {
-		c := newTestChunker(t, testOptions)
-		c.minSize, c.maxSize, c.mask = 0, 2, ^uint64(0)
-		s := c.roll(state{nthRun: 3}, []byte{1, 2})
-		require.False(t, s.matched)
-		hash := s.hash
-		s, cut := c.needNewChunk(s)
-		require.True(t, cut)
-		assert.Equal(t, 3, s.nthRun)
-		assert.Zero(t, s.size)
-		assert.Equal(t, hash, s.hash)
-	})
-}
-
-// TestChunksWordsMatchBytes checks that the word path for 1, 2, 4 and 8 byte
-// values chunks exactly like the byte path, by viewing the same buffers as
-// fixed-size binary.
+// TestChunksWordsMatchBytes checks that fixed-width values, read by word for 1,
+// 2, 4 and 8 bytes, chunk exactly like the fixed-size binary values of their
+// little-endian bytes, on any host.
 func TestChunksWordsMatchBytes(t *testing.T) {
 	const numLevels = 1 << 13
-	intTypes := map[int]arrow.DataType{1: arrow.PrimitiveTypes.Int8, 2: arrow.PrimitiveTypes.Int16, 4: arrow.PrimitiveTypes.Int32, 8: arrow.PrimitiveTypes.Int64}
+	intTypes := map[int]arrow.DataType{
+		1: arrow.PrimitiveTypes.Int8, 2: arrow.PrimitiveTypes.Int16, 4: arrow.PrimitiveTypes.Int32, 8: arrow.PrimitiveTypes.Int64,
+		16: &arrow.Decimal128Type{Precision: 38}, 32: &arrow.Decimal256Type{Precision: 76},
+	}
 
 	optionSets := []parquet.CDCOptions{
 		{MinChunkSize: 1024, MaxChunkSize: 4096},
 		{MinChunkSize: 0, MaxChunkSize: 64},
 		{MinChunkSize: 256, MaxChunkSize: 1024, NormLevel: 2},
 	}
-	for _, width := range []int{1, 2, 4, 8} {
+	for _, width := range []int{1, 2, 4, 8, 16, 32} {
 		for _, shape := range []string{"required", "nullable", "nested"} {
 			t.Run(fmt.Sprintf("%s/width %d", shape, width), func(t *testing.T) {
-				// numLevels little-endian integers of the given width, every 10th one
-				// null unless required, viewed as an integer array and as a
-				// fixed-size binary array over the same data and validity buffers.
-				raw, validity := make([]byte, numLevels*width), make([]byte, bitutil.BytesForBits(numLevels))
-				nulls := 0
+				// numLevels integers of the given width, every 10th one null unless
+				// required, viewed as an integer array and as a fixed-size binary
+				// array of their little-endian bytes, sharing the validity buffer.
+				var raw []byte
+				for i := 0; len(raw) < numLevels*width; i++ {
+					raw = binary.LittleEndian.AppendUint64(raw, splitmix(uint64(i)))
+				}
+				raw = raw[:numLevels*width]
+				validity, nulls := make([]byte, bitutil.BytesForBits(numLevels)), 0
 				for i := range numLevels {
-					var word [8]byte
-					binary.LittleEndian.PutUint64(word[:], splitmix(uint64(i)))
-					copy(raw[i*width:], word[:width])
 					valid := shape == "required" || i%10 != 0
 					bitutil.SetBitTo(validity, i, valid)
 					if !valid {
 						nulls++
 					}
 				}
-				buffers := []*memory.Buffer{memory.NewBufferBytes(validity), memory.NewBufferBytes(raw)}
-				newView := func(dt arrow.DataType) arrow.Array {
+				// Decimals are native-endian 64-bit words, least significant first.
+				native, lane := raw, min(width, 8)
+				if endian.IsBigEndian {
+					native = slices.Clone(raw)
+					for i := 0; i < len(native); i += lane {
+						slices.Reverse(native[i : i+lane])
+					}
+				}
+				newView := func(dt arrow.DataType, values []byte) arrow.Array {
+					buffers := []*memory.Buffer{memory.NewBufferBytes(validity), memory.NewBufferBytes(values)}
 					data := array.NewData(dt, numLevels, buffers, nil, nulls, 0)
 					defer data.Release()
 					return array.MakeFromData(data)
 				}
-				ints, fsb := newView(intTypes[width]), newView(&arrow.FixedSizeBinaryType{ByteWidth: width})
+				ints, fsb := newView(intTypes[width], native), newView(&arrow.FixedSizeBinaryType{ByteWidth: width}, raw)
 				defer ints.Release()
 				defer fsb.Release()
 

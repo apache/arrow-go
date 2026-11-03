@@ -355,7 +355,13 @@ func visitedLeafValues(res *multipathLevelResult, mem memory.Allocator) (arrow.A
 // leafArr is always a primitive (possibly dictionary encoded type).
 // Leaf_field_nullable indicates whether the leaf array is considered nullable
 // according to its schema in a Table or its parent array.
+//
+// Content-defined chunking is only supported by FileWriter, so an error is
+// returned when the column writer's properties enable it.
 func WriteArrowToColumn(ctx context.Context, cw file.ColumnChunkWriter, leafArr arrow.Array, defLevels, repLevels []int16, leafFieldNullable bool) error {
+	if _, ok := cw.Properties().ContentDefinedChunking(); ok {
+		return fmt.Errorf("%w: pqarrow: content-defined chunking is only supported by FileWriter", arrow.ErrNotImplemented)
+	}
 	return writeArrowToColumn(ctx, cw, nil, leafArr, defLevels, repLevels, leafFieldNullable)
 }
 
@@ -394,34 +400,34 @@ func writeArrowToColumn(ctx context.Context, cw file.ColumnChunkWriter, chunker 
 		return write(leafArr, defLevels, repLevels)
 	}
 
-	flusher, ok := cw.(interface{ FlushCurrentPage() error })
-	if !ok {
-		return errors.New("pqarrow: column writer does not support content-defined chunking")
-	}
 	chunks, err := chunker.Chunks(colLevelInfo, defLevels, repLevels, leafArr)
 	if err != nil {
 		return err
 	}
 
+	// writeChunk writes the levels and values of one chunk. Its deferred
+	// Release frees the value slice even when the write panics.
+	writeChunk := func(chunk cdc.Chunk) error {
+		var chunkDef, chunkRep []int16
+		if defLevels != nil {
+			chunkDef = defLevels[chunk.LevelOffset : chunk.LevelOffset+chunk.NumLevels]
+		}
+		if repLevels != nil {
+			chunkRep = repLevels[chunk.LevelOffset : chunk.LevelOffset+chunk.NumLevels]
+		}
+		values := array.NewSlice(leafArr, chunk.ValueOffset, chunk.ValueOffset+chunk.NumValues)
+		defer values.Release()
+		return write(values, chunkDef, chunkRep)
+	}
+
 	for i, chunk := range chunks {
 		if chunk.NumLevels > 0 {
-			var chunkDef, chunkRep []int16
-			if defLevels != nil {
-				chunkDef = defLevels[chunk.LevelOffset : chunk.LevelOffset+chunk.NumLevels]
-			}
-			if repLevels != nil {
-				chunkRep = repLevels[chunk.LevelOffset : chunk.LevelOffset+chunk.NumLevels]
-			}
-			values := array.NewSlice(leafArr, chunk.ValueOffset, chunk.ValueOffset+chunk.NumValues)
-			err := write(values, chunkDef, chunkRep)
-			values.Release()
-			if err != nil {
+			if err := writeChunk(chunk); err != nil {
 				return err
 			}
 		}
-
 		if i < len(chunks)-1 {
-			if err := flusher.FlushCurrentPage(); err != nil {
+			if err := cw.FlushCurrentPage(); err != nil {
 				return err
 			}
 		}

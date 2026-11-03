@@ -393,7 +393,12 @@ func WithStoreDecimalAsInteger(enabled bool) WriterProperty {
 
 // WithContentDefinedChunking enables content-defined chunking of data pages with the given options.
 //
-// Content-defined chunking is experimental. Only pqarrow.FileWriter honors it.
+// Content-defined chunking is experimental. Only pqarrow.FileWriter honors it:
+// pqarrow.WriteArrowToColumn returns an error when it is enabled, and the column
+// writers of the file package ignore it. The chunking state of each leaf column
+// carries over across row groups and write calls for the life of the file, as in
+// Arrow C++ 27.0.0 and later; earlier C++ versions restart it at every row group.
+//
 // The chunk size counts logical value bytes plus 2 bytes per definition/repetition level,
 // measured before encoding and compression. DataPageSize can still split chunks.
 // A chunk is cut at MaxChunkSize, so a forced cut can exceed MaxChunkSize by less than

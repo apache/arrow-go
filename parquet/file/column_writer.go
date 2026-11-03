@@ -76,6 +76,9 @@ type ColumnChunkWriter interface {
 	// to this column. This should only be called by pqarrow or
 	// if you *really* know what you're doing.
 	WriteDictIndices(arrow.Array, []int16, []int16) error
+	// FlushCurrentPage writes the buffered values out as a data page. It
+	// does nothing when no values are buffered.
+	FlushCurrentPage() error
 
 	LevelInfo() LevelInfo
 	SetBitsBuffer(*memory.Buffer)

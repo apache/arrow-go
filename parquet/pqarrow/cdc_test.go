@@ -168,6 +168,33 @@ func TestCDCWriteErrorsPassThrough(t *testing.T) {
 	require.EqualError(t, errCDC, errPlain.Error())
 }
 
+// TestCDCMissingLevelsError checks that values without the definition levels
+// their column needs fail to write instead of being dropped: the column is
+// optional, but the array's struct field is not nullable, so it produces no
+// definition levels.
+func TestCDCMissingLevelsError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "s", Type: arrow.StructOf(arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true})}}, nil)
+	bldr := array.NewStructBuilder(mem, arrow.StructOf(arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32}))
+	defer bldr.Release()
+	for i := range 10000 {
+		bldr.Append(true)
+		bldr.FieldBuilder(0).(*array.Int32Builder).Append(int32(i))
+	}
+	arr := bldr.NewArray()
+	defer arr.Release()
+
+	var buf bytes.Buffer
+	props := parquet.NewWriterProperties(parquet.WithAllocator(mem), parquet.WithContentDefinedChunking(parquet.DefaultCDCOptions()))
+	fw, err := pqarrow.NewFileWriter(schema, &buf, props, pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem)))
+	require.NoError(t, err)
+	fw.NewRowGroup()
+	require.ErrorIs(t, fw.WriteColumnData(arr), arrow.ErrInvalid)
+	require.NoError(t, fw.Close())
+}
+
 func TestCDCPagesWithinChunkSizes(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -209,7 +236,9 @@ func TestCDCLastChunkDoesntCutPage(t *testing.T) {
 	assert.Equal(t, singlePages, columnPages(t, buffered, 0))
 }
 
-func TestCDCLowLevelWritersIgnoreCDC(t *testing.T) {
+// TestCDCLowLevelWriters checks that the file package's column writers ignore
+// content-defined chunking, and that WriteArrowToColumn rejects it.
+func TestCDCLowLevelWriters(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
@@ -245,7 +274,8 @@ func TestCDCLowLevelWritersIgnoreCDC(t *testing.T) {
 	require.NoError(t, err)
 	cw, err = rgw.NextColumn()
 	require.NoError(t, err)
-	require.NoError(t, pqarrow.WriteArrowToColumn(pqarrow.NewArrowWriteContext(context.Background(), &arrprops), cw, arr, nil, nil, false))
+	err = pqarrow.WriteArrowToColumn(pqarrow.NewArrowWriteContext(context.Background(), &arrprops), cw, arr, nil, nil, false)
+	require.ErrorIs(t, err, arrow.ErrNotImplemented)
 	require.NoError(t, cw.Close())
 	require.NoError(t, rgw.Close())
 	require.NoError(t, w.Close())
@@ -253,7 +283,7 @@ func TestCDCLowLevelWritersIgnoreCDC(t *testing.T) {
 	pages := columnPages(t, buf.Bytes(), 0)
 	require.Len(t, pages, 2)
 	assert.Equal(t, []int64{n}, pages[0])
-	assert.Equal(t, []int64{n}, pages[1])
+	assert.Empty(t, pages[1])
 }
 
 func TestCDCFixedSizeListNullSlots(t *testing.T) {

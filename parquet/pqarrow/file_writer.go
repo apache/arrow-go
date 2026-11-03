@@ -129,8 +129,8 @@ func WriteTable(tbl arrow.Table, w io.Writer, chunkSize int64, props *parquet.Wr
 //
 // When content-defined chunking is enabled in the writer properties, data pages
 // are cut at content-defined boundaries. The chunker state spans row groups and
-// write calls for the life of the file; the low-level column writers in the
-// file package and WriteArrowToColumn do not chunk.
+// write calls for the life of the file. The low-level column writers in the
+// file package do not chunk, and WriteArrowToColumn returns an error.
 type FileWriter struct {
 	wr         *file.Writer
 	schema     *arrow.Schema
