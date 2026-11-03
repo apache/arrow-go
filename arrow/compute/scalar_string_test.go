@@ -25,7 +25,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/compute"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -67,11 +66,7 @@ func TestStartsWith(t *testing.T) {
 			t.Run(dt.String()+"/"+tt.name, func(t *testing.T) {
 				ctx, mem := newCtx(t)
 
-				strType := arrow.BinaryTypes.String
-				if arrow.IsLargeBinaryLike(dt.ID()) {
-					strType = arrow.BinaryTypes.LargeString
-				}
-				strs := fromJSON(t, mem, strType, tt.input)
+				strs := fromJSON(t, mem, arrow.BinaryTypes.String, tt.input)
 				defer strs.Release()
 				input, err := compute.CastArray(ctx, strs, compute.SafeCastOptions(dt))
 				require.NoError(t, err)
@@ -79,17 +74,8 @@ func TestStartsWith(t *testing.T) {
 				expected := fromJSON(t, mem, arrow.FixedWidthTypes.Boolean, tt.expected)
 				defer expected.Release()
 
-				checkStartsWith(t, ctx, tt.pattern, compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected))
-
-				for i := 0; i < input.Len(); i++ {
-					in, err := scalar.GetScalar(input, i)
-					require.NoError(t, err)
-					want, err := scalar.GetScalar(expected, i)
-					require.NoError(t, err)
-					inDatum := compute.NewDatumWithoutOwning(in)
-					checkStartsWith(t, ctx, tt.pattern, inDatum, compute.NewDatumWithoutOwning(want))
-					inDatum.Release()
-				}
+				checkScalarUnary(t, "starts_with", compute.NewDatumWithoutOwning(input),
+					compute.NewDatumWithoutOwning(expected), &compute.MatchSubstringOptions{Pattern: tt.pattern})
 			})
 		}
 	}
