@@ -841,3 +841,66 @@ func TestDecimalFilterLarge(t *testing.T) {
 		})
 	}
 }
+
+func TestStartsWithExpr(t *testing.T) {
+	varchar, _, err := exprs.FromSubstraitType(&types.VarCharType{Length: -1}, extSet)
+	require.NoError(t, err)
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "s", Type: arrow.BinaryTypes.LargeString, Nullable: true},
+		{Name: "v", Type: varchar, Nullable: true},
+	}, nil)
+
+	bldr := exprs.NewExprBuilder(extSet)
+	require.NoError(t, bldr.SetInputSchema(sc))
+	ab := bldr.Literal(expr.NewPrimitiveLiteral("ab", false))
+	caseInsensitive := []*types.FunctionOption{{Name: "case_sensitivity", Preference: []string{"CASE_INSENSITIVE"}}}
+
+	tests := []struct {
+		name     string
+		ex       exprs.Builder
+		expected string
+	}{
+		{"large_string", bldr.MustCallScalar("starts_with", nil, bldr.FieldRef("s"), ab), `[true, null, false, false]`},
+		{"varchar", bldr.MustCallScalar("starts_with", nil, bldr.FieldRef("v"),
+			bldr.WrapLiteral(expr.NewLiteral(&types.VarChar{Value: "ab", Length: 2}, false))),
+			`[true, false, null, true]`},
+		{"non-literal pattern", bldr.MustCallScalar("starts_with", nil, bldr.FieldRef("s"),
+			bldr.Must(bldr.Cast(ab, arrow.BinaryTypes.String))), ""},
+		{"null pattern", bldr.MustCallScalar("starts_with", nil, bldr.FieldRef("s"),
+			bldr.Literal(expr.NewNullLiteral(&types.StringType{}))), ""},
+		{"case insensitive", bldr.MustCallScalar("starts_with", caseInsensitive, bldr.FieldRef("s"), ab), ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+			ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+
+			ex, err := tt.ex.BuildExpr()
+			require.NoError(t, err)
+
+			rec, _, err := array.RecordFromJSON(mem, sc, strings.NewReader(`[
+				{"s": "abc", "v": "ab"},
+				{"s": null, "v": "b"},
+				{"s": "xab", "v": null},
+				{"s": "a", "v": "abab"}
+			]`))
+			require.NoError(t, err)
+			defer rec.Release()
+
+			result, err := exprs.ExecuteScalarExpression(ctx, sc, ex, compute.NewDatumWithoutOwning(rec))
+			if tt.expected == "" {
+				assert.ErrorIs(t, err, arrow.ErrNotImplemented)
+				return
+			}
+			require.NoError(t, err)
+			defer result.Release()
+
+			expected, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(tt.expected))
+			require.NoError(t, err)
+			defer expected.Release()
+			assertEqual(t, expected, result)
+		})
+	}
+}

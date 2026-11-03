@@ -581,6 +581,7 @@ var (
 		DictionaryEncodeOptions{},
 		CumulativeOptions{},
 		ScalarAggregateOptions{}, CountOptions{},
+		MatchSubstringOptions{},
 	}
 )
 
