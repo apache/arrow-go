@@ -637,9 +637,6 @@ func createMemoTable(mem memory.Allocator, dt arrow.DataType) (ret hashing.MemoT
 type DictionaryBuilder interface {
 	Builder
 
-	// NewDictionaryArray may return dictionary data shared with earlier
-	// arrays. The builder may retain that data until ResetFull or its final
-	// Release.
 	NewDictionaryArray() *Dictionary
 	NewDelta() (indices, delta arrow.Array, err error)
 	AppendArray(arrow.Array) error
@@ -655,9 +652,7 @@ type dictionaryBuilder struct {
 	deltaOffset int
 	memoTable   hashing.MemoTable
 	idxBuilder  IndexBuilder
-	// Only ResetFull and checkpoint restores shrink memoTable, and both clear
-	// dict, so dict is current while its length equals memoTable.Size().
-	dict *Data
+	dict        *Data
 }
 
 func createDictBuilder[T arrow.ValueType](mem memory.Allocator, idxbldr IndexBuilder, memo hashing.MemoTable, dt *arrow.DictionaryType, init arrow.Array) DictionaryBuilder {
