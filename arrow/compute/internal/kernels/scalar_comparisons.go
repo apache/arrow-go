@@ -788,9 +788,9 @@ func logicalValidity(ctx *exec.KernelCtx, input *exec.ArraySpan, out *exec.ExecR
 		bitutil.SetBitsTo(bits, 0, input.Len, wantNull)
 	case arrow.RUN_END_ENCODED:
 		values := &input.Children[1]
-		run, runEnd := findRun(input, 0)
+		run := findRun(input, 0)
 		for pos := int64(0); pos < input.Len; run++ {
-			end := min(runEnd(run)-input.Offset, input.Len)
+			end := min(runEnd(input, run)-input.Offset, input.Len)
 			valid := values.Buffers[0].Buf == nil ||
 				bitutil.BitIsSet(values.Buffers[0].Buf, int(values.Offset)+run)
 			bitutil.SetBitsTo(bits, pos, end-pos, valid != wantNull)
@@ -805,24 +805,22 @@ func logicalValidity(ctx *exec.KernelCtx, input *exec.ArraySpan, out *exec.ExecR
 }
 
 // findRun returns the index of the run that holds slot i of a run-end encoded
-// span, and a function that returns the logical end of a run.
-func findRun(span *exec.ArraySpan, i int64) (int, func(int) int64) {
-	runEnds := &span.Children[0]
-	var runEnd func(int) int64
-	switch runEnds.Type.ID() {
-	case arrow.INT16:
-		runEnd = runEndsOf[int16](runEnds)
-	case arrow.INT32:
-		runEnd = runEndsOf[int32](runEnds)
-	default:
-		runEnd = runEndsOf[int64](runEnds)
-	}
-	return sort.Search(int(runEnds.Len), func(j int) bool { return runEnd(j) > span.Offset+i }), runEnd
+// span.
+func findRun(span *exec.ArraySpan, i int64) int {
+	return sort.Search(int(span.Children[0].Len), func(j int) bool { return runEnd(span, j) > span.Offset+i })
 }
 
-func runEndsOf[R RunEndsType](runEnds *exec.ArraySpan) func(int) int64 {
-	values := exec.GetSpanValues[R](runEnds, 1)
-	return func(j int) int64 { return int64(values[j]) }
+// runEnd returns the logical end of run j of a run-end encoded span.
+func runEnd(span *exec.ArraySpan, j int) int64 {
+	runEnds := &span.Children[0]
+	switch runEnds.Type.ID() {
+	case arrow.INT16:
+		return int64(exec.GetSpanValues[int16](runEnds, 1)[j])
+	case arrow.INT32:
+		return int64(exec.GetSpanValues[int32](runEnds, 1)[j])
+	default:
+		return int64(exec.GetSpanValues[int64](runEnds, 1)[j])
+	}
 }
 
 // isValidAt reports whether slot i of span is valid, following Arrow C++'s
@@ -845,8 +843,7 @@ func isValidAt(span *exec.ArraySpan, i int64) bool {
 		}
 		return isValidAt(child, j)
 	case arrow.RUN_END_ENCODED:
-		run, _ := findRun(span, i)
-		return isValidAt(&span.Children[1], int64(run))
+		return isValidAt(&span.Children[1], int64(findRun(span, i)))
 	}
 	return true
 }
