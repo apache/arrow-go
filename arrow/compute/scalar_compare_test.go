@@ -1642,6 +1642,40 @@ func (sv *ScalarValiditySuite) TestIsNaN() {
 	}
 }
 
+func (sv *ScalarValiditySuite) TestDecimal() {
+	tests := []struct {
+		funcName string
+		typ      arrow.DataType
+		expected string
+	}{
+		{"is_null", &arrow.Decimal128Type{Precision: 10, Scale: 2}, `[false, true, false]`},
+		{"is_null", &arrow.Decimal256Type{Precision: 40, Scale: 2}, `[false, true, false]`},
+		{"is_not_null", &arrow.Decimal128Type{Precision: 10, Scale: 2}, `[true, false, true]`},
+		{"is_not_null", &arrow.Decimal256Type{Precision: 40, Scale: 2}, `[true, false, true]`},
+		{"is_nan", &arrow.Decimal128Type{Precision: 10, Scale: 2}, `[false, false, false]`},
+		{"is_nan", &arrow.Decimal256Type{Precision: 40, Scale: 2}, `[false, false, false]`},
+	}
+
+	for _, tt := range tests {
+		sv.Run(tt.funcName+"/"+tt.typ.String(), func() {
+			sv.checkScalarUnary(tt.funcName, sv.getArr(tt.typ, `["1.50", null, "2.25"]`),
+				sv.getArr(arrow.FixedWidthTypes.Boolean, tt.expected))
+		})
+	}
+}
+
+func (sv *ScalarValiditySuite) TestIsNaNDictionaryNotImplemented() {
+	dict := sv.getArr(&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.PrimitiveTypes.Float64},
+		`[1.5, "NaN", null]`)
+	defer dict.Release()
+
+	res, err := compute.CallFunction(sv.ctx, "is_nan", nil, compute.NewDatumWithoutOwning(dict))
+	if res != nil {
+		res.Release()
+	}
+	sv.ErrorIs(err, arrow.ErrNotImplemented)
+}
+
 func TestScalarValidity(t *testing.T) {
 	suite.Run(t, &ScalarValiditySuite{})
 }
