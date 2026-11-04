@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/substrait-io/substrait-go/v8/expr"
+	substraitext "github.com/substrait-io/substrait-go/v8/extensions"
 	"github.com/substrait-io/substrait-go/v8/types"
 	proto "github.com/substrait-io/substrait-protobuf/go/substraitpb"
 )
@@ -812,11 +813,16 @@ func TestDictionaryTypes(t *testing.T) {
 		dict      string
 		valueType arrow.DataType
 		fn        string
+		err       error
 	}{
 		{"binary dictionary as utf8", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.Binary},
-			`["YQ=="]`, arrow.BinaryTypes.String, ""},
+			`["YQ=="]`, arrow.BinaryTypes.String, "", arrow.ErrInvalid},
 		{"float64 dictionary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.PrimitiveTypes.Float64},
-			`[1.5]`, arrow.PrimitiveTypes.Float64, "is_nan"},
+			`[1.5]`, arrow.PrimitiveTypes.Float64, "is_nan", arrow.ErrInvalid},
+		{"is_nan utf8 dictionary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String},
+			`["a"]`, arrow.BinaryTypes.String, "is_nan", arrow.ErrNotImplemented},
+		{"is_nan binary dictionary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.Binary},
+			`["YQ=="]`, arrow.BinaryTypes.Binary, "is_nan", arrow.ErrNotImplemented},
 	}
 
 	for _, tt := range rejected {
@@ -832,16 +838,20 @@ func TestDictionaryTypes(t *testing.T) {
 			bldr := exprs.NewExprBuilder(extSet)
 			require.NoError(t, bldr.SetInputSchema(arrow.NewSchema(
 				[]arrow.Field{{Name: "col", Type: tt.valueType, Nullable: true}}, nil)))
-			b := bldr.FieldRef("col")
-			if tt.fn != "" {
-				b = bldr.MustCallScalar(tt.fn, nil, b)
-			}
-			ex, err := b.BuildExpr()
+			ex, err := bldr.FieldRef("col").BuildExpr()
 			require.NoError(t, err)
+			if tt.fn != "" {
+				// Bypass signature validation to exercise kernel dispatch for
+				// is_nan on string and binary dictionaries.
+				ex, err = expr.NewCustomScalarFunc(extSet.GetSubstraitRegistry(),
+					substraitext.NewScalarFuncVariant(substraitext.ID{URN: exprs.SubstraitComparisonFuncsURI, Name: tt.fn}),
+					&types.BooleanType{Nullability: types.NullabilityNullable}, nil, ex)
+				require.NoError(t, err)
+			}
 
 			ctx := exprs.WithExtensionIDSet(context.Background(), extSet)
 			_, err = exprs.ExecuteScalarExpression(ctx, dictSchema, ex, compute.NewDatumWithoutOwning(rec))
-			assert.ErrorIs(t, err, arrow.ErrInvalid)
+			assert.ErrorIs(t, err, tt.err)
 			assert.ErrorContains(t, err, "dictionary<")
 		})
 	}
