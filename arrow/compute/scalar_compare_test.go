@@ -1575,6 +1575,54 @@ func (sv *ScalarValiditySuite) TestNotNull() {
 	}
 }
 
+func (sv *ScalarValiditySuite) checkValiditySliced(input arrow.Array, isNull, isNotNull string) {
+	for _, tt := range []struct{ fn, expected string }{
+		{"is_null", isNull}, {"is_not_null", isNotNull},
+	} {
+		exp := sv.getArr(arrow.FixedWidthTypes.Boolean, tt.expected)
+		res, err := compute.CallFunction(sv.ctx, tt.fn, nil, compute.NewDatumWithoutOwning(input))
+		sv.Require().NoError(err)
+		result := res.(*compute.ArrayDatum).MakeArray()
+		res.Release()
+		sv.Truef(array.Equal(exp, result), "%s(%s): expected %s, got %s", tt.fn, input, exp, result)
+		exp.Release()
+		result.Release()
+	}
+}
+
+func (sv *ScalarValiditySuite) TestSlicedInput() {
+	withNulls := sv.getArr(arrow.PrimitiveTypes.Int32, `[null, 1, null, 2, 3, 4, null, 5, 6, 7, null, null, 8]`)
+	defer withNulls.Release()
+	data := array.NewData(arrow.PrimitiveTypes.Int32, withNulls.Len(),
+		[]*memory.Buffer{nil, withNulls.Data().Buffers()[1]}, nil, 0, 0)
+	noValidity := array.MakeFromData(data)
+	data.Release()
+	defer noValidity.Release()
+
+	tests := []struct {
+		offset    int64
+		isNull    string
+		isNotNull string
+	}{
+		{0, `[true, false, true, false]`, `[false, true, false, true]`},
+		{1, `[false, true, false, false]`, `[true, false, true, true]`},
+		{8, `[false, false, true, true]`, `[true, true, false, false]`},
+		{9, `[false, true, true, false]`, `[true, false, false, true]`},
+	}
+	for _, tt := range tests {
+		sv.Run(fmt.Sprintf("validity/offset=%d", tt.offset), func() {
+			sliced := array.NewSlice(withNulls, tt.offset, tt.offset+4)
+			defer sliced.Release()
+			sv.checkValiditySliced(sliced, tt.isNull, tt.isNotNull)
+		})
+		sv.Run(fmt.Sprintf("no validity/offset=%d", tt.offset), func() {
+			sliced := array.NewSlice(noValidity, tt.offset, tt.offset+4)
+			defer sliced.Release()
+			sv.checkValiditySliced(sliced, `[false, false, false, false]`, `[true, true, true, true]`)
+		})
+	}
+}
+
 func (sv *ScalarValiditySuite) TestIsNaN() {
 	tests := []struct {
 		in       string
@@ -1592,6 +1640,40 @@ func (sv *ScalarValiditySuite) TestIsNaN() {
 				sv.getArr(arrow.FixedWidthTypes.Boolean, tt.expected))
 		}
 	}
+}
+
+func (sv *ScalarValiditySuite) TestDecimal() {
+	tests := []struct {
+		funcName string
+		typ      arrow.DataType
+		expected string
+	}{
+		{"is_null", &arrow.Decimal128Type{Precision: 10, Scale: 2}, `[false, true, false]`},
+		{"is_null", &arrow.Decimal256Type{Precision: 40, Scale: 2}, `[false, true, false]`},
+		{"is_not_null", &arrow.Decimal128Type{Precision: 10, Scale: 2}, `[true, false, true]`},
+		{"is_not_null", &arrow.Decimal256Type{Precision: 40, Scale: 2}, `[true, false, true]`},
+		{"is_nan", &arrow.Decimal128Type{Precision: 10, Scale: 2}, `[false, false, false]`},
+		{"is_nan", &arrow.Decimal256Type{Precision: 40, Scale: 2}, `[false, false, false]`},
+	}
+
+	for _, tt := range tests {
+		sv.Run(tt.funcName+"/"+tt.typ.String(), func() {
+			sv.checkScalarUnary(tt.funcName, sv.getArr(tt.typ, `["1.50", null, "2.25"]`),
+				sv.getArr(arrow.FixedWidthTypes.Boolean, tt.expected))
+		})
+	}
+}
+
+func (sv *ScalarValiditySuite) TestIsNaNDictionaryNotImplemented() {
+	dict := sv.getArr(&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.PrimitiveTypes.Float64},
+		`[1.5, "NaN", null]`)
+	defer dict.Release()
+
+	res, err := compute.CallFunction(sv.ctx, "is_nan", nil, compute.NewDatumWithoutOwning(dict))
+	if res != nil {
+		res.Release()
+	}
+	sv.ErrorIs(err, arrow.ErrNotImplemented)
 }
 
 func TestScalarValidity(t *testing.T) {

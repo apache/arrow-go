@@ -27,6 +27,8 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/compute/internal/kernels"
 )
 
+// compareFunction dispatches binary comparisons. Its DispatchBest assumes
+// exactly two arguments, so unary functions must not use it.
 type compareFunction struct {
 	ScalarFunction
 }
@@ -163,12 +165,12 @@ func RegisterScalarComparisons(reg FunctionRegistry) {
 	reg.AddFunction(lteFn, false)
 
 	isOrNotNullKns := kernels.IsNullNotNullKernels()
-	isNullFn := &compareFunction{*NewScalarFunction("is_null", Unary(), EmptyFuncDoc)}
+	isNullFn := NewScalarFunction("is_null", Unary(), EmptyFuncDoc)
 	if err := isNullFn.AddKernel(isOrNotNullKns[0]); err != nil {
 		panic(err)
 	}
 
-	isNotNullFn := &compareFunction{*NewScalarFunction("is_not_null", Unary(), EmptyFuncDoc)}
+	isNotNullFn := NewScalarFunction("is_not_null", Unary(), EmptyFuncDoc)
 	if err := isNotNullFn.AddKernel(isOrNotNullKns[1]); err != nil {
 		panic(err)
 	}
@@ -176,7 +178,7 @@ func RegisterScalarComparisons(reg FunctionRegistry) {
 	reg.AddFunction(isNullFn, false)
 	reg.AddFunction(isNotNullFn, false)
 
-	isNaNFn := &compareFunction{*NewScalarFunction("is_nan", Unary(), EmptyFuncDoc)}
+	isNaNFn := NewScalarFunction("is_nan", Unary(), EmptyFuncDoc)
 	for _, k := range kernels.IsNaNKernels() {
 		if err := isNaNFn.AddKernel(k); err != nil {
 			panic(err)

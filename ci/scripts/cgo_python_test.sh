@@ -47,3 +47,9 @@ rm "${testlib}"
 rm "${testlib%.*}.h"
 
 popd
+
+# This is the only CI environment with pyarrow installed, so run the
+# pyarrow interop tests here and fail rather than skip if a change to
+# the image drops pyarrow.
+export PARQUET_TEST_REQUIRE_PYARROW=1
+(cd "${source_dir}" && go test -run Pyarrow ./parquet/)
