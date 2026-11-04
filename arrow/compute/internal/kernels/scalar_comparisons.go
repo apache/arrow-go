@@ -734,11 +734,16 @@ func isNotNullExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResu
 	input := batch.Values[0].Array
 
 	validityBuf := input.GetBuffer(0)
-	if validityBuf == nil {
+	switch {
+	case validityBuf == nil:
 		out.Buffers[1].WrapBuffer(ctx.AllocateBitmap(input.Len))
 		memory.Set(out.Buffers[1].Buf, 0xFF)
-	} else {
+	case input.Offset == 0:
 		out.Buffers[1].SetBuffer(validityBuf)
+	default:
+		out.Buffers[1].WrapBuffer(ctx.AllocateBitmap(input.Len))
+		bitutil.CopyBitmap(validityBuf.Bytes(), int(input.Offset), int(input.Len),
+			out.Buffers[1].Buf, 0)
 	}
 
 	return nil
