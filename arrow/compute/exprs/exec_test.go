@@ -899,6 +899,93 @@ func TestFieldRefTypeMismatchReleases(t *testing.T) {
 	}
 }
 
+func TestNestedFieldRefResultOwnership(t *testing.T) {
+	scalarInput := func(t *testing.T, mem memory.Allocator, dt *arrow.StructType, json string) *scalar.Struct {
+		arr, _, err := array.FromJSON(mem, dt, strings.NewReader(json))
+		require.NoError(t, err)
+		defer arr.Release()
+		sc, err := scalar.GetScalar(arr, 0)
+		require.NoError(t, err)
+		return sc.(*scalar.Struct)
+	}
+
+	execute := func(t *testing.T, mem memory.Allocator, sc *arrow.Schema, e expr.Expression, input compute.Datum) compute.Datum {
+		ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+		result, err := exprs.ExecuteScalarExpression(ctx, sc, e, input)
+		require.NoError(t, err)
+		return result
+	}
+
+	t.Run("array struct field", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		sc := arrow.NewSchema([]arrow.Field{{Name: "s", Type: arrow.StructOf(
+			arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true}), Nullable: true}}, nil)
+		rec, _, err := array.RecordFromJSON(mem, sc, strings.NewReader(`[{"s": {"a": 1}}, {"s": {"a": 2}}]`))
+		require.NoError(t, err)
+
+		bldr := exprs.NewExprBuilder(extSet)
+		require.NoError(t, bldr.SetInputSchema(sc))
+		e, err := bldr.FieldRefList("s", "a").BuildExpr()
+		require.NoError(t, err)
+
+		result := execute(t, mem, sc, e, compute.NewDatumWithoutOwning(rec))
+		rec.Release()
+		require.NotZero(t, mem.CurrentAlloc(), "result no longer holds its buffers")
+
+		expected, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2]`))
+		require.NoError(t, err)
+		defer expected.Release()
+		assertEqual(t, expected, result)
+		result.Release()
+	})
+
+	t.Run("scalar struct field", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		dt := arrow.StructOf(arrow.Field{Name: "s", Type: arrow.StructOf(
+			arrow.Field{Name: "b", Type: arrow.BinaryTypes.Binary, Nullable: true}), Nullable: true})
+		input := scalarInput(t, mem, dt, `[{"s": {"b": "aGVsbG8="}}]`)
+		sc := arrow.NewSchema(dt.Fields(), nil)
+
+		bldr := exprs.NewExprBuilder(extSet)
+		require.NoError(t, bldr.SetInputSchema(sc))
+		e, err := bldr.FieldRefList("s", "b").BuildExpr()
+		require.NoError(t, err)
+
+		result := execute(t, mem, sc, e, compute.NewDatumWithoutOwning(input))
+		input.Release()
+		require.NotZero(t, mem.CurrentAlloc(), "result no longer holds its buffers")
+
+		assert.Equal(t, []byte("hello"), result.(*compute.ScalarDatum).Value.(*scalar.Binary).Data())
+		result.Release()
+	})
+
+	t.Run("scalar list element", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		dt := arrow.StructOf(arrow.Field{Name: "s", Type: arrow.StructOf(
+			arrow.Field{Name: "l", Type: arrow.ListOf(arrow.BinaryTypes.Binary), Nullable: true}), Nullable: true})
+		input := scalarInput(t, mem, dt, `[{"s": {"l": ["aGVsbG8=", "d29ybGQ="]}}]`)
+		defer input.Release()
+		sc := arrow.NewSchema(dt.Fields(), nil)
+
+		st, err := exprs.ToSubstraitType(dt, false, extSet)
+		require.NoError(t, err)
+		e, err := expr.NewRootFieldRef(&expr.StructFieldRef{Field: 0, Child: &expr.StructFieldRef{Field: 0,
+			Child: &expr.ListElementRef{Offset: 1}}},
+			types.NewRecordTypeFromStruct(*st.(*types.StructType)))
+		require.NoError(t, err)
+
+		result := execute(t, mem, sc, e, compute.NewDatumWithoutOwning(input))
+		defer result.Release()
+		assert.Equal(t, []byte("world"), result.(*compute.ScalarDatum).Value.(*scalar.Binary).Data())
+	})
+}
+
 func TestDecimalFilterLarge(t *testing.T) {
 	t.Parallel()
 
