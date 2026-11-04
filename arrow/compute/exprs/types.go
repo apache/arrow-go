@@ -42,6 +42,7 @@ const (
 	// URN for official Substrait Comparison funcs extensions
 	SubstraitComparisonFuncsURI = SubstraitDefaultURIPrefix + "functions_comparison"
 	SubstraitBooleanFuncsURI    = SubstraitDefaultURIPrefix + "functions_boolean"
+	SubstraitStringFuncsURI     = SubstraitDefaultURIPrefix + "functions_string"
 
 	SubstraitIcebergSetFuncURN = "extension:apache.iceberg:functions_set"
 	TimestampTzTimezone        = "UTC"
@@ -139,6 +140,19 @@ func init() {
 			panic(err)
 		}
 	}
+
+	err := DefaultExtensionIDRegistry.AddSubstraitScalarToArrow(
+		extensions.ID{URN: SubstraitStringFuncsURI, Name: "starts_with"},
+		startsWithSubstraitToArrowFunc)
+	if err != nil {
+		panic(err)
+	}
+
+	err = DefaultExtensionIDRegistry.AddArrowToSubstrait("starts_with",
+		simpleMapArrowToSubstraitFunc(SubstraitStringFuncsURI))
+	if err != nil {
+		panic(err)
+	}
 }
 
 type overflowBehavior string
@@ -166,6 +180,22 @@ var overflowParser = enumParser[overflowBehavior]{
 		overflowSILENT:   {},
 		overflowSATURATE: {},
 		overflowERROR:    {},
+	},
+}
+
+type caseSensitivity string
+
+const (
+	caseSensitive        caseSensitivity = "CASE_SENSITIVE"
+	caseInsensitive      caseSensitivity = "CASE_INSENSITIVE"
+	caseInsensitiveASCII caseSensitivity = "CASE_INSENSITIVE_ASCII"
+)
+
+var caseSensitivityParser = enumParser[caseSensitivity]{
+	values: map[caseSensitivity]struct{}{
+		caseSensitive:        {},
+		caseInsensitive:      {},
+		caseInsensitiveASCII: {},
 	},
 }
 
@@ -232,6 +262,40 @@ func setLookupFuncSubstraitToArrowFunc(sf *expr.ScalarFunction, input []compute.
 
 	args, opts = input[0:1], setopts
 	return
+}
+
+// startsWithSubstraitToArrowFunc supports only CASE_SENSITIVE.
+// A case_sensitivity preference list without CASE_SENSITIVE returns an
+// error wrapping arrow.ErrNotImplemented. Arrow C++ maps
+// CASE_INSENSITIVE to ignore_case=true.
+func startsWithSubstraitToArrowFunc(sf *expr.ScalarFunction, input []compute.Datum) (fname string, args []compute.Datum, opts compute.FunctionOptions, err error) {
+	if len(input) != 2 {
+		return "", nil, nil, fmt.Errorf("%w: starts_with expects 2 arguments, got %d",
+			arrow.ErrNotImplemented, len(input))
+	}
+
+	if _, err := parseOption(sf, "case_sensitivity", &caseSensitivityParser,
+		[]caseSensitivity{caseSensitive}, caseSensitive); err != nil {
+		return "", nil, nil, fmt.Errorf("%w: starts_with case_sensitivity %v", err, sf.GetOption("case_sensitivity"))
+	}
+
+	if _, ok := sf.Arg(1).(expr.Literal); !ok {
+		return "", nil, nil, fmt.Errorf("%w: starts_with pattern must be a literal", arrow.ErrNotImplemented)
+	}
+
+	sc := input[1].(*compute.ScalarDatum).Value
+	if !sc.IsValid() {
+		return "", nil, nil, fmt.Errorf("%w: starts_with pattern must not be null", arrow.ErrNotImplemented)
+	}
+	if ext, ok := sc.(*scalar.Extension); ok {
+		sc = ext.Value
+	}
+	pattern, ok := sc.(scalar.BinaryScalar)
+	if !ok {
+		return "", nil, nil, fmt.Errorf("%w: starts_with pattern of type %s", arrow.ErrNotImplemented, sc.DataType())
+	}
+
+	return "starts_with", input[:1], &compute.MatchSubstringOptions{Pattern: string(pattern.Data())}, nil
 }
 
 func simpleMapSubstraitToArrowFunc(sf *expr.ScalarFunction, input []compute.Datum) (fname string, args []compute.Datum, opts compute.FunctionOptions, err error) {
