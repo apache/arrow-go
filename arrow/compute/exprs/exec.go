@@ -437,7 +437,8 @@ func literalToDatum(mem memory.Allocator, lit expr.Literal, ext ExtensionIDSet) 
 // field references which expect a string or binary will allow their Large counterparts
 // to be used as well. Most of the time, this shouldn't be an issue as the compute kernels
 // should handle any casting that might be necessary. Likewise, Substrait has no
-// dictionary type, so a dictionary field whose value type matches is returned undecoded.
+// dictionary type, so a dictionary field of string or binary values (including their
+// Large counterparts) whose value type matches is returned undecoded.
 func ExecuteScalarExpression(ctx context.Context, inputSchema *arrow.Schema, expression expr.Expression, partialInput compute.Datum) (compute.Datum, error) {
 	if expression == nil {
 		return nil, arrow.ErrInvalid
@@ -525,7 +526,7 @@ func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.Exe
 
 	dt := out.(compute.ArrayLikeDatum).Type()
 	valueType := dt
-	if dictType, ok := dt.(*arrow.DictionaryType); ok {
+	if dictType, ok := dt.(*arrow.DictionaryType); ok && arrow.IsBaseBinary(dictType.ValueType.ID()) {
 		valueType = dictType.ValueType
 	}
 	if !arrow.TypeEqual(valueType, expectedType) {

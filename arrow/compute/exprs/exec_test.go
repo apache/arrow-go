@@ -806,26 +806,45 @@ func TestDictionaryTypes(t *testing.T) {
 		})
 	}
 
-	t.Run("mismatched value type", func(t *testing.T) {
-		dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.Binary}
-		col, err := array.DictArrayFromJSON(memory.DefaultAllocator, dictType, `[0]`, `["YQ=="]`)
-		require.NoError(t, err)
-		defer col.Release()
+	rejected := []struct {
+		name      string
+		dictType  *arrow.DictionaryType
+		dict      string
+		valueType arrow.DataType
+		fn        string
+	}{
+		{"binary dictionary as utf8", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.Binary},
+			`["YQ=="]`, arrow.BinaryTypes.String, ""},
+		{"float64 dictionary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.PrimitiveTypes.Float64},
+			`[1.5]`, arrow.PrimitiveTypes.Float64, "is_nan"},
+	}
 
-		dictSchema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: dictType, Nullable: true}}, nil)
-		rec := array.NewRecordBatch(dictSchema, []arrow.Array{col}, int64(col.Len()))
-		defer rec.Release()
+	for _, tt := range rejected {
+		t.Run(tt.name, func(t *testing.T) {
+			col, err := array.DictArrayFromJSON(memory.DefaultAllocator, tt.dictType, `[0]`, tt.dict)
+			require.NoError(t, err)
+			defer col.Release()
 
-		bldr := exprs.NewExprBuilder(extSet)
-		require.NoError(t, bldr.SetInputSchema(arrow.NewSchema(
-			[]arrow.Field{{Name: "col", Type: arrow.BinaryTypes.String, Nullable: true}}, nil)))
-		ex, err := bldr.FieldRef("col").BuildExpr()
-		require.NoError(t, err)
+			dictSchema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: tt.dictType, Nullable: true}}, nil)
+			rec := array.NewRecordBatch(dictSchema, []arrow.Array{col}, int64(col.Len()))
+			defer rec.Release()
 
-		_, err = exprs.ExecuteScalarExpression(context.Background(), dictSchema, ex, compute.NewDatumWithoutOwning(rec))
-		assert.ErrorIs(t, err, arrow.ErrInvalid)
-		assert.ErrorContains(t, err, "dictionary<")
-	})
+			bldr := exprs.NewExprBuilder(extSet)
+			require.NoError(t, bldr.SetInputSchema(arrow.NewSchema(
+				[]arrow.Field{{Name: "col", Type: tt.valueType, Nullable: true}}, nil)))
+			b := bldr.FieldRef("col")
+			if tt.fn != "" {
+				b = bldr.MustCallScalar(tt.fn, nil, b)
+			}
+			ex, err := b.BuildExpr()
+			require.NoError(t, err)
+
+			ctx := exprs.WithExtensionIDSet(context.Background(), extSet)
+			_, err = exprs.ExecuteScalarExpression(ctx, dictSchema, ex, compute.NewDatumWithoutOwning(rec))
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
+			assert.ErrorContains(t, err, "dictionary<")
+		})
+	}
 }
 
 func TestDecimalFilterLarge(t *testing.T) {
