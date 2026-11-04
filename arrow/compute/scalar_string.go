@@ -33,7 +33,8 @@ var startsWithDoc = FunctionDoc{
 	Summary: "Check if strings start with a literal pattern",
 	Description: "For each string in \"strings\", emit true iff it starts with a\n" +
 		"given pattern. The pattern must be given in MatchSubstringOptions.\n" +
-		"Null inputs emit null.",
+		"Null inputs emit null. Dictionary inputs are decoded to their value\n" +
+		"type, and extension inputs use their storage type.",
 	ArgNames:        []string{"strings"},
 	OptionsType:     "MatchSubstringOptions",
 	OptionsRequired: true,
@@ -65,7 +66,8 @@ func RegisterScalarString(reg FunctionRegistry) {
 }
 
 // StartsWith returns, for each value in input, whether it starts with
-// opts.Pattern. Null values produce null.
+// opts.Pattern. Null values produce null. Dictionary inputs are decoded
+// to their value type, and extension inputs use their storage type.
 func StartsWith(ctx context.Context, opts MatchSubstringOptions, input Datum) (Datum, error) {
 	return CallFunction(ctx, "starts_with", &opts, input)
 }

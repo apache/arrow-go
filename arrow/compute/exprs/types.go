@@ -264,6 +264,10 @@ func setLookupFuncSubstraitToArrowFunc(sf *expr.ScalarFunction, input []compute.
 	return
 }
 
+// startsWithSubstraitToArrowFunc supports only CASE_SENSITIVE.
+// A case_sensitivity preference list without CASE_SENSITIVE returns an
+// error wrapping arrow.ErrNotImplemented. Arrow C++ maps
+// CASE_INSENSITIVE to ignore_case=true.
 func startsWithSubstraitToArrowFunc(sf *expr.ScalarFunction, input []compute.Datum) (fname string, args []compute.Datum, opts compute.FunctionOptions, err error) {
 	if len(input) != 2 {
 		return "", nil, nil, fmt.Errorf("%w: starts_with expects 2 arguments, got %d",
