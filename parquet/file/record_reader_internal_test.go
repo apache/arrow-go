@@ -18,6 +18,7 @@ package file
 
 import (
 	"bytes"
+	"slices"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -144,4 +145,43 @@ func TestReadRecordsRejectsShortPage(t *testing.T) {
 			require.ErrorContains(t, err, "number of values / definition levels read did not match")
 		})
 	}
+}
+
+func TestReadRecordsRejectsShortDictionaryPageWithNulls(t *testing.T) {
+	defLevels := []int16{1, 1, 1, 1, 1, 1, 1, 1, 1, 0}
+	values := slices.Repeat([]parquet.ByteArray{parquet.ByteArray("x")}, 9)
+	root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewByteArrayNode("values", parquet.Repetitions.Optional, -1),
+	}, -1))
+	var buf bytes.Buffer
+	w := NewParquetWriter(&buf, root, WithWriterProps(parquet.NewWriterProperties(parquet.WithDictionaryCostFallbackFor("values", false))))
+	rgw := w.AppendRowGroup()
+	cw, err := rgw.NextColumn()
+	require.NoError(t, err)
+	_, err = cw.(*ByteArrayColumnChunkWriter).WriteBatch(values, defLevels, nil)
+	require.NoError(t, err)
+	require.NoError(t, cw.Close())
+	require.NoError(t, rgw.Close())
+	require.NoError(t, w.Close())
+	data := buf.Bytes()
+
+	// Dictionary indices: bit width 1, then one RLE run of nine zeros, shortened to eight.
+	indices := []byte{0x01, 0x12, 0x00}
+	require.Equal(t, 1, bytes.Count(data, indices))
+	data[bytes.Index(data, indices)+1] = 0x10
+
+	pf, err := NewParquetReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer pf.Close()
+	descr := pf.MetaData().Schema.Column(0)
+	rr := newByteArrayDictRecordReader(descr, LevelInfo{DefLevel: 1, NullSlotUsage: 1},
+		&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.Binary},
+		memory.DefaultAllocator, nil).(*binaryRecordReader)
+	defer rr.Release()
+	pr, err := pf.RowGroup(0).GetColumnPageReader(0)
+	require.NoError(t, err)
+	rr.SetPageReader(pr)
+
+	_, err = rr.ReadRecords(int64(len(defLevels)))
+	require.ErrorContains(t, err, "number of values / definition levels read did not match")
 }

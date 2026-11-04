@@ -1135,9 +1135,8 @@ func (bd *byteArrayDictRecordReader) ReadValuesSpaced(valuesWithNulls, nullCount
 		}
 
 		rdr := bd.ColumnChunkReader.(*ByteArrayColumnChunkReader)
-		_, err := rdr.curDecoder.(*encoding.DictByteArrayDecoder).DecodeIndicesSpaced(int(valuesWithNulls), int(nullCount), validBits, offset, bd.bldr)
-		return err
-
+		n, err := rdr.curDecoder.(*encoding.DictByteArrayDecoder).DecodeIndicesSpaced(int(valuesWithNulls), int(nullCount), validBits, offset, bd.bldr)
+		return checkDecoded(n, err, valuesWithNulls)
 	}
 
 	return bd.byteArrayRecordReader.ReadValuesSpaced(valuesWithNulls, int64(nullCount))
