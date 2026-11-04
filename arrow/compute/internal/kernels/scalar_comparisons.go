@@ -715,9 +715,53 @@ func CompareKernels(op CompareOperator) []exec.ScalarKernel {
 	return kns
 }
 
+func dictHasNullValues(input *exec.ArraySpan) bool {
+	return input.Type.ID() == arrow.DICTIONARY && input.Dictionary().MayHaveNulls()
+}
+
+// dictValidity writes a bitmap to out, starting at bit 0, with a bit set for
+// each slot that is logically null when nulls is true, or logically valid
+// otherwise. A slot is null if its index is null or refers to a null
+// dictionary value.
+func dictValidity(ctx *exec.KernelCtx, input *exec.ArraySpan, out *exec.ExecResult, nulls bool) error {
+	var set func(*exec.ArraySpan, []byte, bool)
+	switch input.Type.(*arrow.DictionaryType).IndexType.ID() {
+	case arrow.INT8, arrow.UINT8:
+		set = setDictBits[uint8]
+	case arrow.INT16, arrow.UINT16:
+		set = setDictBits[uint16]
+	case arrow.INT32, arrow.UINT32:
+		set = setDictBits[uint32]
+	case arrow.INT64, arrow.UINT64:
+		set = setDictBits[uint64]
+	default:
+		return fmt.Errorf("%w: unsupported dictionary index type", arrow.ErrInvalid)
+	}
+	out.Buffers[1].WrapBuffer(ctx.AllocateBitmap(input.Len))
+	set(input, out.Buffers[1].Buf, nulls)
+	return nil
+}
+
+func setDictBits[T arrow.UintType](input *exec.ArraySpan, out []byte, nulls bool) {
+	dict := input.Dictionary()
+	valueValidity := dict.Buffers[0].Buf
+	indexValidity := input.Buffers[0].Buf
+	for i, idx := range exec.GetSpanValues[T](input, 1) {
+		// Signed indices are read as unsigned. Only a valid slot's index must
+		// be in range, so check index validity first.
+		valid := (indexValidity == nil || bitutil.BitIsSet(indexValidity, int(input.Offset)+i)) &&
+			bitutil.BitIsSet(valueValidity, int(dict.Offset)+int(idx))
+		bitutil.SetBitTo(out, i, valid != nulls)
+	}
+}
+
 func isNullExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 	out.Release()
 	input := batch.Values[0].Array
+
+	if dictHasNullValues(&input) {
+		return dictValidity(ctx, &input, out, true)
+	}
 
 	validityBuf := input.GetBuffer(0)
 	out.Buffers[1].WrapBuffer(ctx.AllocateBitmap(input.Len))
@@ -732,6 +776,10 @@ func isNullExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult)
 func isNotNullExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 	out.Release()
 	input := batch.Values[0].Array
+
+	if dictHasNullValues(&input) {
+		return dictValidity(ctx, &input, out, false)
+	}
 
 	validityBuf := input.GetBuffer(0)
 	switch {
