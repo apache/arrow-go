@@ -827,7 +827,7 @@ func TestDictionaryTypes(t *testing.T) {
 
 	for _, tt := range rejected {
 		t.Run(tt.name, func(t *testing.T) {
-			col, err := array.DictArrayFromJSON(memory.DefaultAllocator, tt.dictType, `[0]`, tt.dict)
+			col, err := array.DictArrayFromJSON(mem, tt.dictType, `[0]`, tt.dict)
 			require.NoError(t, err)
 			defer col.Release()
 
@@ -849,10 +849,52 @@ func TestDictionaryTypes(t *testing.T) {
 				require.NoError(t, err)
 			}
 
-			ctx := exprs.WithExtensionIDSet(context.Background(), extSet)
+			ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
 			_, err = exprs.ExecuteScalarExpression(ctx, dictSchema, ex, compute.NewDatumWithoutOwning(rec))
 			assert.ErrorIs(t, err, tt.err)
 			assert.ErrorContains(t, err, "dictionary<")
+		})
+	}
+}
+
+func TestFieldRefTypeMismatchReleases(t *testing.T) {
+	structOf := func(inner arrow.DataType) arrow.DataType {
+		return arrow.StructOf(arrow.Field{Name: "a", Type: inner, Nullable: true})
+	}
+
+	tests := []struct {
+		name               string
+		exprType, dataType arrow.DataType
+		json               string
+		path               []any
+	}{
+		{"top level", arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32,
+			`[{"col": 1}, {"col": 2}]`, []any{"col"}},
+		{"nested", structOf(arrow.BinaryTypes.String), structOf(arrow.PrimitiveTypes.Int32),
+			`[{"col": {"a": 1}}, {"col": {"a": 2}}]`, []any{"col", "a"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			exprSchema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: tt.exprType, Nullable: true}}, nil)
+			dataSchema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: tt.dataType, Nullable: true}}, nil)
+
+			rec, _, err := array.RecordFromJSON(mem, dataSchema, strings.NewReader(tt.json))
+			require.NoError(t, err)
+			defer rec.Release()
+
+			bldr := exprs.NewExprBuilder(extSet)
+			require.NoError(t, bldr.SetInputSchema(exprSchema))
+			e, err := bldr.FieldRefList(tt.path...).BuildExpr()
+			require.NoError(t, err)
+
+			ctx := compute.WithAllocator(context.Background(), mem)
+			result, err := exprs.ExecuteScalarExpression(ctx, dataSchema, e, compute.NewDatumWithoutOwning(rec))
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
+			assert.Nil(t, result)
 		})
 	}
 }

@@ -518,8 +518,9 @@ func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.Exe
 	}
 
 	out, err := GetReferencedValue(compute.GetAllocator(ctx), ref, param, ext)
-	if err == compute.ErrEmpty {
-		out = compute.NewDatum(param)
+	refersToParam := err == compute.ErrEmpty
+	if refersToParam {
+		out = param
 	} else if err != nil {
 		return nil, err
 	}
@@ -542,6 +543,10 @@ func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.Exe
 		}
 	}
 
+	if refersToParam {
+		// retain only after the type check so a mismatch has nothing to release
+		return compute.NewDatum(param), nil
+	}
 	return out, nil
 }
 
