@@ -2297,14 +2297,21 @@ func TestDictionaryScalarValidateErrors(t *testing.T) {
 }
 
 func TestNullDictionaryScalar(t *testing.T) {
-	dictTy := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
-	sc := scalar.MakeNullScalar(dictTy).(*scalar.Dictionary)
-	defer sc.Release()
+	for _, valueType := range []arrow.DataType{
+		arrow.BinaryTypes.String,
+		arrow.StructOf(arrow.Field{Name: "n", Type: arrow.Null, Nullable: true}),
+	} {
+		t.Run(valueType.String(), func(t *testing.T) {
+			dictTy := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: valueType}
+			sc := scalar.MakeNullScalar(dictTy).(*scalar.Dictionary)
+			defer sc.Release()
 
-	require.NotNil(t, sc.Value.Dict)
-	assert.Equal(t, 0, sc.Value.Dict.Len())
-	assert.Truef(t, arrow.TypeEqual(dictTy.ValueType, sc.Value.Dict.DataType()),
-		"dictionary type %s", sc.Value.Dict.DataType())
+			require.NotNil(t, sc.Value.Dict)
+			assert.Equal(t, 0, sc.Value.Dict.Len())
+			assert.Truef(t, arrow.TypeEqual(dictTy.ValueType, sc.Value.Dict.DataType()),
+				"dictionary type %s", sc.Value.Dict.DataType())
+		})
+	}
 }
 
 func TestDictionaryScalarIndexBounds(t *testing.T) {
