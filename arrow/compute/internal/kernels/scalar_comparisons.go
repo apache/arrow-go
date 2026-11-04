@@ -720,10 +720,10 @@ func dictHasNullValues(input *exec.ArraySpan) bool {
 }
 
 // dictValidity writes a bitmap to out, starting at bit 0, with a bit set for
-// each slot that is logically null when nulls is true, or logically valid
+// each slot that is logically null when wantNull is true, or logically valid
 // otherwise. A slot is null if its index is null or refers to a null
 // dictionary value.
-func dictValidity(ctx *exec.KernelCtx, input *exec.ArraySpan, out *exec.ExecResult, nulls bool) error {
+func dictValidity(ctx *exec.KernelCtx, input *exec.ArraySpan, out *exec.ExecResult, wantNull bool) error {
 	var set func(*exec.ArraySpan, []byte, bool)
 	switch input.Type.(*arrow.DictionaryType).IndexType.ID() {
 	case arrow.INT8, arrow.UINT8:
@@ -738,11 +738,11 @@ func dictValidity(ctx *exec.KernelCtx, input *exec.ArraySpan, out *exec.ExecResu
 		return fmt.Errorf("%w: unsupported dictionary index type", arrow.ErrInvalid)
 	}
 	out.Buffers[1].WrapBuffer(ctx.AllocateBitmap(input.Len))
-	set(input, out.Buffers[1].Buf, nulls)
+	set(input, out.Buffers[1].Buf, wantNull)
 	return nil
 }
 
-func setDictBits[T arrow.UintType](input *exec.ArraySpan, out []byte, nulls bool) {
+func setDictBits[T arrow.UintType](input *exec.ArraySpan, out []byte, wantNull bool) {
 	dict := input.Dictionary()
 	valueValidity := dict.Buffers[0].Buf
 	indexValidity := input.Buffers[0].Buf
@@ -751,7 +751,7 @@ func setDictBits[T arrow.UintType](input *exec.ArraySpan, out []byte, nulls bool
 		// be in range, so check index validity first.
 		valid := (indexValidity == nil || bitutil.BitIsSet(indexValidity, int(input.Offset)+i)) &&
 			bitutil.BitIsSet(valueValidity, int(dict.Offset)+int(idx))
-		bitutil.SetBitTo(out, i, valid != nulls)
+		bitutil.SetBitTo(out, i, valid != wantNull)
 	}
 }
 
