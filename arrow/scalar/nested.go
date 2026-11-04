@@ -352,7 +352,7 @@ type Dictionary struct {
 func NewNullDictScalar(dt arrow.DataType) *Dictionary {
 	ret := &Dictionary{scalar: scalar{dt, false}}
 	ret.Value.Index = MakeNullScalar(dt.(*arrow.DictionaryType).IndexType)
-	ret.Value.Dict = nil
+	ret.Value.Dict = array.MakeArrayOfNull(memory.DefaultAllocator, dt.(*arrow.DictionaryType).ValueType, 0)
 	return ret
 }
 

@@ -1575,6 +1575,17 @@ func (sv *ScalarValiditySuite) TestNotNull() {
 	}
 }
 
+func (sv *ScalarValiditySuite) TestIsNullDictionaryScalar() {
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}
+	input := compute.NewDatumWithoutOwning(scalar.MakeNullScalar(dictType))
+	defer input.Release()
+
+	out, err := compute.CallFunction(sv.ctx, "is_null", nil, input)
+	sv.Require().NoError(err)
+	defer out.Release()
+	sv.Equal(scalar.NewBooleanScalar(true), out.(*compute.ScalarDatum).Value)
+}
+
 func (sv *ScalarValiditySuite) checkValiditySliced(input arrow.Array, isNull, isNotNull string) {
 	for _, tt := range []struct{ fn, expected string }{
 		{"is_null", isNull}, {"is_not_null", isNotNull},

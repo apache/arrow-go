@@ -2130,10 +2130,8 @@ func TestDictionaryScalarBasics(t *testing.T) {
 			nullVal := scalar.NewDictScalar(idxScalar, dict)
 			defer nullVal.Release()
 
-			scalarNull := scalar.MakeNullScalar(ty)
-			scalarNull.(*scalar.Dictionary).Value.Dict = dict
-			dict.Retain()
-			defer scalarNull.(*scalar.Dictionary).Release()
+			scalarNull := scalar.NewDictScalar(scalar.MakeNullScalar(indexType), dict)
+			defer scalarNull.Release()
 
 			assert.NoError(t, scalarNull.ValidateFull())
 			assert.NoError(t, alpha.ValidateFull())
@@ -2142,7 +2140,7 @@ func TestDictionaryScalarBasics(t *testing.T) {
 			// index is valid, corresponding value is null
 			assert.NoError(t, nullVal.ValidateFull())
 
-			encodedNull, err := scalarNull.(*scalar.Dictionary).GetEncodedValue()
+			encodedNull, err := scalarNull.GetEncodedValue()
 			assert.NoError(t, err)
 			assert.NoError(t, encodedNull.ValidateFull())
 			assert.True(t, scalar.Equals(encodedNull, scalar.MakeNullScalar(arrow.BinaryTypes.String)))
@@ -2281,11 +2279,12 @@ func TestDictionaryScalarValidateErrors(t *testing.T) {
 	nullVal.Valid = false
 	assert.Error(t, nullVal.ValidateFull())
 
-	dictSc = scalar.NewNullDictScalar(dictTy)
-	dictSc.Valid = true
-	assert.Error(t, dictSc.ValidateFull())
-	dictSc.Valid = false
-	assert.NoError(t, dictSc.ValidateFull())
+	nullSc := scalar.NewNullDictScalar(dictTy)
+	defer nullSc.Release()
+	nullSc.Valid = true
+	assert.Error(t, nullSc.ValidateFull())
+	nullSc.Valid = false
+	assert.NoError(t, nullSc.ValidateFull())
 
 	// index value out of bounds
 	for _, idx := range []int16{-1, 3} {
@@ -2295,6 +2294,17 @@ func TestDictionaryScalarValidateErrors(t *testing.T) {
 		assert.NoError(t, invalid.Validate())
 		assert.Error(t, invalid.ValidateFull())
 	}
+}
+
+func TestNullDictionaryScalar(t *testing.T) {
+	dictTy := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	sc := scalar.MakeNullScalar(dictTy).(*scalar.Dictionary)
+	defer sc.Release()
+
+	require.NotNil(t, sc.Value.Dict)
+	assert.Equal(t, 0, sc.Value.Dict.Len())
+	assert.Truef(t, arrow.TypeEqual(dictTy.ValueType, sc.Value.Dict.DataType()),
+		"dictionary type %s", sc.Value.Dict.DataType())
 }
 
 func TestDictionaryScalarIndexBounds(t *testing.T) {
