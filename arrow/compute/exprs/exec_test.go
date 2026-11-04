@@ -738,6 +738,96 @@ func TestLargeTypes(t *testing.T) {
 	})
 }
 
+func TestDictionaryTypes(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	tests := []struct {
+		name      string
+		dictType  *arrow.DictionaryType
+		dict      string
+		valueType arrow.DataType
+		lit       expr.Literal
+	}{
+		{"int8 utf8", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String},
+			`["a", "b"]`, arrow.BinaryTypes.String, expr.NewPrimitiveLiteral("a", false)},
+		{"int32 utf8", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String},
+			`["a", "b"]`, arrow.BinaryTypes.String, expr.NewPrimitiveLiteral("a", false)},
+		{"int8 large_utf8", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.LargeString},
+			`["a", "b"]`, arrow.BinaryTypes.String, expr.NewPrimitiveLiteral("a", false)},
+		{"int8 binary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.Binary},
+			`["YQ==", "Yg=="]`, arrow.BinaryTypes.Binary, expr.NewByteSliceLiteral([]byte("a"), false)},
+		{"int32 large_binary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.LargeBinary},
+			`["YQ==", "Yg=="]`, arrow.BinaryTypes.Binary, expr.NewByteSliceLiteral([]byte("a"), false)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col, err := array.DictArrayFromJSON(mem, tt.dictType, `[0, 1, null, 0]`, tt.dict)
+			require.NoError(t, err)
+			defer col.Release()
+
+			dictSchema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: tt.dictType, Nullable: true}}, nil)
+			rec := array.NewRecordBatch(dictSchema, []arrow.Array{col}, int64(col.Len()))
+			defer rec.Release()
+			input := compute.NewDatumWithoutOwning(rec)
+
+			bldr := exprs.NewExprBuilder(extSet)
+			require.NoError(t, bldr.SetInputSchema(arrow.NewSchema(
+				[]arrow.Field{{Name: "col", Type: tt.valueType, Nullable: true}}, nil)))
+
+			cases := []struct {
+				name     string
+				ex       exprs.Builder
+				expected string
+			}{
+				{"equal", bldr.MustCallScalar("equal", nil, bldr.FieldRef("col"), bldr.Literal(tt.lit)),
+					`[true, false, null, true]`},
+				{"is_null", bldr.MustCallScalar("is_null", nil, bldr.FieldRef("col")),
+					`[false, false, true, false]`},
+			}
+
+			for _, c := range cases {
+				t.Run(c.name, func(t *testing.T) {
+					ex, err := c.ex.BuildExpr()
+					require.NoError(t, err)
+
+					ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+					result, err := exprs.ExecuteScalarExpression(ctx, dictSchema, ex, input)
+					require.NoError(t, err)
+					defer result.Release()
+
+					expected, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(c.expected))
+					require.NoError(t, err)
+					defer expected.Release()
+					assertEqual(t, expected, result)
+				})
+			}
+		})
+	}
+
+	t.Run("mismatched value type", func(t *testing.T) {
+		dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.Binary}
+		col, err := array.DictArrayFromJSON(memory.DefaultAllocator, dictType, `[0]`, `["YQ=="]`)
+		require.NoError(t, err)
+		defer col.Release()
+
+		dictSchema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: dictType, Nullable: true}}, nil)
+		rec := array.NewRecordBatch(dictSchema, []arrow.Array{col}, int64(col.Len()))
+		defer rec.Release()
+
+		bldr := exprs.NewExprBuilder(extSet)
+		require.NoError(t, bldr.SetInputSchema(arrow.NewSchema(
+			[]arrow.Field{{Name: "col", Type: arrow.BinaryTypes.String, Nullable: true}}, nil)))
+		ex, err := bldr.FieldRef("col").BuildExpr()
+		require.NoError(t, err)
+
+		_, err = exprs.ExecuteScalarExpression(context.Background(), dictSchema, ex, compute.NewDatumWithoutOwning(rec))
+		assert.ErrorIs(t, err, arrow.ErrInvalid)
+		assert.ErrorContains(t, err, "dictionary<")
+	})
+}
+
 func TestDecimalFilterLarge(t *testing.T) {
 	t.Parallel()
 
