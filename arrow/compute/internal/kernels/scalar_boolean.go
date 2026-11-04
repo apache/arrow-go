@@ -336,12 +336,5 @@ func (KleeneAndNotOpKernel) CallScalarRight(ctx *exec.KernelCtx, left *exec.Arra
 func NotExecKernel(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 	bitutil.InvertBitmap(batch.Values[0].Array.Buffers[1].Buf, int(batch.Values[0].Array.Offset),
 		int(batch.Values[0].Array.Len), out.Buffers[1].Buf, int(out.Offset))
-
-	out.Buffers[0] = batch.Values[0].Array.Buffers[0]
-	if out.Buffers[0].SelfAlloc {
-		out.Buffers[0].SelfAlloc = false
-	}
-	out.Nulls = batch.Values[0].Array.Nulls
-
 	return nil
 }
