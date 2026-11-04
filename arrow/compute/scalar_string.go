@@ -45,6 +45,16 @@ type matchSubstringFunc struct {
 }
 
 func (fn *matchSubstringFunc) Execute(ctx context.Context, opts FunctionOptions, args ...Datum) (Datum, error) {
+	if len(args) == 1 {
+		coalesced, err := coalesceMultiBufferViewDatum(ctx, args[0])
+		if err != nil {
+			return nil, err
+		}
+		if coalesced != nil {
+			defer coalesced.Release()
+			args = []Datum{coalesced}
+		}
+	}
 	return execInternal(ctx, fn, opts, -1, args...)
 }
 
