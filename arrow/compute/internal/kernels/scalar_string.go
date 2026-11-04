@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"fmt"
 	"slices"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
@@ -28,7 +30,9 @@ import (
 )
 
 // MatchSubstringOptions controls the substring matching functions such as
-// starts_with, which match Pattern as a literal byte sequence.
+// starts_with, which match Pattern literally, not as a regular
+// expression. With IgnoreCase, string input matches Unicode simple case
+// folds and binary input matches ASCII case folds.
 type MatchSubstringOptions struct {
 	Pattern    string `compute:"pattern"`
 	IgnoreCase bool   `compute:"ignore_case"`
@@ -40,20 +44,43 @@ type matchSubstringState struct {
 	pattern []byte
 }
 
-func initMatchSubstring(_ *exec.KernelCtx, args exec.KernelInitArgs) (exec.KernelState, error) {
-	opts, ok := args.Options.(MatchSubstringOptions)
-	if p, isPtr := args.Options.(*MatchSubstringOptions); isPtr && p != nil {
-		opts, ok = *p, true
-	}
-	if !ok {
-		return nil, fmt.Errorf("%w: attempted to initialize kernel state from invalid function options",
-			arrow.ErrInvalid)
-	}
+type foldUTF8State struct {
+	pattern []rune
+}
 
-	if opts.IgnoreCase {
-		return nil, fmt.Errorf("%w: case-insensitive substring matching", arrow.ErrNotImplemented)
+// foldASCIIState holds the pattern with each byte lowered by foldASCII.
+type foldASCIIState struct {
+	pattern []byte
+}
+
+func initMatchSubstring(utf8Input bool) exec.KernelInitFn {
+	return func(_ *exec.KernelCtx, args exec.KernelInitArgs) (exec.KernelState, error) {
+		opts, ok := args.Options.(MatchSubstringOptions)
+		if p, isPtr := args.Options.(*MatchSubstringOptions); isPtr && p != nil {
+			opts, ok = *p, true
+		}
+		if !ok {
+			return nil, fmt.Errorf("%w: attempted to initialize kernel state from invalid function options",
+				arrow.ErrInvalid)
+		}
+
+		switch {
+		case !opts.IgnoreCase:
+			return matchSubstringState{pattern: []byte(opts.Pattern)}, nil
+		case utf8Input:
+			if !utf8.ValidString(opts.Pattern) {
+				return nil, fmt.Errorf("%w: case-insensitive pattern must be valid UTF-8 for string input",
+					arrow.ErrInvalid)
+			}
+			return foldUTF8State{pattern: []rune(opts.Pattern)}, nil
+		default:
+			pattern := []byte(opts.Pattern)
+			for i, b := range pattern {
+				pattern[i] = foldASCII(b)
+			}
+			return foldASCIIState{pattern: pattern}, nil
+		}
 	}
-	return matchSubstringState{pattern: []byte(opts.Pattern)}, nil
 }
 
 func startsWith(ctx *exec.KernelCtx, v []byte, _ *error) bool {
@@ -100,6 +127,64 @@ func startsWithView(ctx *exec.KernelCtx, in *exec.ExecSpan, out *exec.ExecResult
 	return nil
 }
 
+func startsWithFoldUTF8(ctx *exec.KernelCtx, v []byte, _ *error) bool {
+	for _, p := range ctx.State.(foldUTF8State).pattern {
+		r, size := utf8.DecodeRune(v)
+		if (r == utf8.RuneError && size <= 1) || !equalSimpleFold(r, p) {
+			return false
+		}
+		v = v[size:]
+	}
+	return true
+}
+
+func equalSimpleFold(r, p rune) bool {
+	for f := r; ; {
+		if f == p {
+			return true
+		}
+		if f = unicode.SimpleFold(f); f == r {
+			return false
+		}
+	}
+}
+
+func startsWithFoldASCII(ctx *exec.KernelCtx, v []byte, _ *error) bool {
+	pattern := ctx.State.(foldASCIIState).pattern
+	if len(v) < len(pattern) {
+		return false
+	}
+	for i, p := range pattern {
+		if foldASCII(v[i]) != p {
+			return false
+		}
+	}
+	return true
+}
+
+func foldASCII(b byte) byte {
+	if 'A' <= b && b <= 'Z' {
+		return b + 0x20
+	}
+	return b
+}
+
+func startsWithExec[OffsetT int32 | int64]() exec.ArrayKernelExec {
+	caseSensitive := ScalarUnaryNotNullBinaryArgBoolOut[OffsetT](false, startsWith)
+	foldUTF8 := ScalarUnaryNotNullBinaryArgBoolOut[OffsetT](false, startsWithFoldUTF8)
+	foldASCII := ScalarUnaryNotNullBinaryArgBoolOut[OffsetT](false, startsWithFoldASCII)
+	return func(ctx *exec.KernelCtx, in *exec.ExecSpan, out *exec.ExecResult) error {
+		switch ctx.State.(type) {
+		case foldUTF8State:
+			return foldUTF8(ctx, in, out)
+		case foldASCIIState:
+			return foldASCII(ctx, in, out)
+		default:
+			return caseSensitive(ctx, in, out)
+		}
+	}
+}
+
 // GetStartsWithKernels returns the kernels for the starts_with function
 // over the binary, string and view types.
 func GetStartsWithKernels() []exec.ScalarKernel {
@@ -112,11 +197,12 @@ func GetStartsWithKernels() []exec.ScalarKernel {
 		case arrow.BINARY_VIEW, arrow.STRING_VIEW:
 			ex = startsWithView
 		case arrow.LARGE_BINARY, arrow.LARGE_STRING:
-			ex = ScalarUnaryNotNullBinaryArgBoolOut[int64](false, startsWith)
+			ex = startsWithExec[int64]()
 		default:
-			ex = ScalarUnaryNotNullBinaryArgBoolOut[int32](false, startsWith)
+			ex = startsWithExec[int32]()
 		}
-		k := exec.NewScalarKernel([]exec.InputType{exec.NewExactInput(ty)}, out, ex, initMatchSubstring)
+		k := exec.NewScalarKernel([]exec.InputType{exec.NewExactInput(ty)}, out, ex,
+			initMatchSubstring(ty.(arrow.BinaryDataType).IsUtf8()))
 		k.NullHandling = exec.NullIntersection
 		k.MemAlloc = exec.MemPrealloc
 		kernels = append(kernels, k)

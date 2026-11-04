@@ -172,6 +172,43 @@ func TestStartsWith(t *testing.T) {
 		})
 	}
 
+	t.Run("ignore case", func(t *testing.T) {
+		strs := []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString}
+		bins := []arrow.DataType{arrow.BinaryTypes.Binary, arrow.BinaryTypes.LargeBinary}
+		tests := []struct {
+			name, pattern string
+			types         []arrow.DataType
+			input         []string
+			expected      string
+		}{
+			{"multibyte folds", "\u212a\u017f", strs, []string{"ks", "KSx", "\u212a\u017f", "k"}, `[true, true, true, false]`},
+			{"no full folding", "\u00df", strs, []string{"SS", "\u1e9e", "\u00df"}, `[false, true, true]`},
+			{"no special casing", "i", strs, []string{"I", "\u0130", "\u0131"}, `[true, false, false]`},
+			{"invalid input", "\ufffd", strs, []string{"\ufffd", "\xff"}, `[true, false]`},
+			{"ascii folds only", "\xe0a", bins, []string{"\xe0A", "\xc0a", "\xe0"}, `[true, false, false]`},
+			{"empty pattern", "", append(strs, bins...), []string{"", "\xff"}, `[true, true]`},
+		}
+
+		for _, tt := range tests {
+			for _, dt := range tt.types {
+				t.Run(tt.name+"/"+dt.String(), func(t *testing.T) {
+					_, mem := newCtx(t)
+					bldr := array.NewBinaryBuilder(mem, dt.(arrow.BinaryDataType))
+					defer bldr.Release()
+					bldr.AppendStringValues(tt.input, nil)
+					input := bldr.NewArray()
+					defer input.Release()
+					expected := fromJSON(t, mem, arrow.FixedWidthTypes.Boolean, tt.expected)
+					defer expected.Release()
+
+					checkScalarUnary(t, "starts_with", compute.NewDatumWithoutOwning(input),
+						compute.NewDatumWithoutOwning(expected),
+						&compute.MatchSubstringOptions{Pattern: tt.pattern, IgnoreCase: true})
+				})
+			}
+		}
+	})
+
 	t.Run("options", func(t *testing.T) {
 		fn, ok := compute.GetFunctionRegistry().GetFunction("starts_with")
 		require.True(t, ok)
@@ -195,7 +232,7 @@ func TestStartsWith(t *testing.T) {
 		assert.ErrorIs(t, err, arrow.ErrInvalid)
 		_, err = compute.CallFunction(ctx, "starts_with", &compute.ArithmeticOptions{}, input)
 		assert.ErrorIs(t, err, arrow.ErrInvalid)
-		_, err = compute.StartsWith(ctx, compute.MatchSubstringOptions{Pattern: "a", IgnoreCase: true}, input)
-		assert.ErrorIs(t, err, arrow.ErrNotImplemented)
+		_, err = compute.StartsWith(ctx, compute.MatchSubstringOptions{Pattern: "\xff", IgnoreCase: true}, input)
+		assert.ErrorIs(t, err, arrow.ErrInvalid)
 	})
 }

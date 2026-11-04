@@ -1014,7 +1014,9 @@ func TestStartsWithExpr(t *testing.T) {
 	bldr := exprs.NewExprBuilder(extSet)
 	require.NoError(t, bldr.SetInputSchema(sc))
 	ab := bldr.Literal(expr.NewPrimitiveLiteral("ab", false))
-	caseInsensitive := []*types.FunctionOption{{Name: "case_sensitivity", Preference: []string{"CASE_INSENSITIVE"}}}
+	caseSensitivity := func(pref string) []*types.FunctionOption {
+		return []*types.FunctionOption{{Name: "case_sensitivity", Preference: []string{pref}}}
+	}
 
 	tests := []struct {
 		name     string
@@ -1029,7 +1031,10 @@ func TestStartsWithExpr(t *testing.T) {
 			bldr.Must(bldr.Cast(ab, arrow.BinaryTypes.String))), ""},
 		{"null pattern", bldr.MustCallScalar("starts_with", nil, bldr.FieldRef("s"),
 			bldr.Literal(expr.NewNullLiteral(&types.StringType{}))), ""},
-		{"case insensitive", bldr.MustCallScalar("starts_with", caseInsensitive, bldr.FieldRef("s"), ab), ""},
+		{"case insensitive", bldr.MustCallScalar("starts_with", caseSensitivity("CASE_INSENSITIVE"), bldr.FieldRef("s"),
+			bldr.Literal(expr.NewPrimitiveLiteral("AB", false))), `[true, null, false, false]`},
+		{"case insensitive ascii", bldr.MustCallScalar("starts_with", caseSensitivity("CASE_INSENSITIVE_ASCII"),
+			bldr.FieldRef("s"), ab), ""},
 	}
 
 	for _, tt := range tests {
