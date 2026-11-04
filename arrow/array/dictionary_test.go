@@ -756,6 +756,144 @@ func TestStringDictionaryBuilderBigDelta(t *testing.T) {
 	assert.True(t, array.Equal(strarr3, delta3))
 }
 
+func assertDictArrayJSON(t *testing.T, mem memory.Allocator, dt *arrow.DictionaryType, indices, dict string, got arrow.Array) {
+	t.Helper()
+	expected, err := array.DictArrayFromJSON(mem, dt, indices, dict)
+	require.NoError(t, err)
+	defer expected.Release()
+	assert.Truef(t, array.Equal(expected, got), "got: %s, expected: %s", got, expected)
+}
+
+func assertJSONArray(t *testing.T, mem memory.Allocator, dt arrow.DataType, values string, got arrow.Array) {
+	t.Helper()
+	expected, _, err := array.FromJSON(mem, dt, strings.NewReader(values))
+	require.NoError(t, err)
+	defer expected.Release()
+	assert.Truef(t, array.Equal(expected, got), "got: %s, expected: %s", got, expected)
+}
+
+func TestDictionaryBuilderReusesUnchangedDictionary(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	bldr := array.NewDictionaryBuilder(mem, dictType).(*array.BinaryDictionaryBuilder)
+	defer bldr.Release()
+
+	require.NoError(t, bldr.AppendString("a"))
+	require.NoError(t, bldr.AppendString("b"))
+	first := bldr.NewDictionaryArray()
+
+	require.NoError(t, bldr.AppendString("b"))
+	bldr.AppendNull()
+	second := bldr.NewDictionaryArray()
+	defer second.Release()
+
+	assert.Same(t, first.Data().Dictionary(), second.Data().Dictionary())
+	first.Release()
+
+	require.NoError(t, bldr.AppendString("c"))
+	third := bldr.NewDictionaryArray()
+	defer third.Release()
+	assert.NotSame(t, second.Data().Dictionary(), third.Data().Dictionary())
+
+	require.NoError(t, bldr.AppendString("a"))
+	fourth := bldr.NewDictionaryArray()
+	defer fourth.Release()
+	assert.Same(t, third.Data().Dictionary(), fourth.Data().Dictionary())
+
+	assertDictArrayJSON(t, mem, dictType, `[1, null]`, `["a", "b"]`, second)
+	assertDictArrayJSON(t, mem, dictType, `[2]`, `["a", "b", "c"]`, third)
+	assertDictArrayJSON(t, mem, dictType, `[0]`, `["a", "b", "c"]`, fourth)
+}
+
+func TestDictionaryBuilderResetFullRebuildsDictionary(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	bldr := array.NewDictionaryBuilder(mem, dictType).(*array.BinaryDictionaryBuilder)
+	defer bldr.Release()
+
+	require.NoError(t, bldr.AppendString("a"))
+	require.NoError(t, bldr.AppendString("b"))
+	first := bldr.NewDictionaryArray()
+	defer first.Release()
+
+	bldr.ResetFull()
+	require.NoError(t, bldr.AppendString("x"))
+	require.NoError(t, bldr.AppendString("y"))
+	second := bldr.NewDictionaryArray()
+	defer second.Release()
+
+	assertDictArrayJSON(t, mem, dictType, `[0, 1]`, `["a", "b"]`, first)
+	assertDictArrayJSON(t, mem, dictType, `[0, 1]`, `["x", "y"]`, second)
+}
+
+func TestDictionaryBuilderNewDeltaWithReusedDictionary(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	bldr := array.NewDictionaryBuilder(mem, dictType).(*array.BinaryDictionaryBuilder)
+	defer bldr.Release()
+
+	require.NoError(t, bldr.AppendString("a"))
+	require.NoError(t, bldr.AppendString("b"))
+	first := bldr.NewDictionaryArray()
+	defer first.Release()
+
+	require.NoError(t, bldr.AppendString("b"))
+	indices, delta, err := bldr.NewDelta()
+	require.NoError(t, err)
+	defer indices.Release()
+	defer delta.Release()
+	assertJSONArray(t, mem, arrow.PrimitiveTypes.Int8, `[1]`, indices)
+	assertJSONArray(t, mem, arrow.BinaryTypes.String, `[]`, delta)
+
+	require.NoError(t, bldr.AppendString("c"))
+	indices2, delta2, err := bldr.NewDelta()
+	require.NoError(t, err)
+	defer indices2.Release()
+	defer delta2.Release()
+	assertJSONArray(t, mem, arrow.PrimitiveTypes.Int8, `[2]`, indices2)
+	assertJSONArray(t, mem, arrow.BinaryTypes.String, `["c"]`, delta2)
+}
+
+func TestDictionaryBuilderReusesDictionaryForValueTypes(t *testing.T) {
+	tests := []struct {
+		valueType arrow.DataType
+		values    string
+	}{
+		{arrow.PrimitiveTypes.Int64, `[1, 2, 1]`},
+		{&arrow.FixedSizeBinaryType{ByteWidth: 3}, `["YWJj", "ZGVm", "YWJj"]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.valueType.String(), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			values, _, err := array.FromJSON(mem, tt.valueType, strings.NewReader(tt.values))
+			require.NoError(t, err)
+			defer values.Release()
+			bldr := array.NewDictionaryBuilder(mem, &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: tt.valueType})
+			defer bldr.Release()
+
+			require.NoError(t, bldr.AppendArray(values))
+			first := bldr.NewDictionaryArray()
+			defer first.Release()
+			require.NoError(t, bldr.AppendArray(values))
+			second := bldr.NewDictionaryArray()
+			defer second.Release()
+
+			assert.Same(t, first.Data().Dictionary(), second.Data().Dictionary())
+			distinct := array.NewSlice(values, 0, 2)
+			defer distinct.Release()
+			assert.Truef(t, array.Equal(distinct, second.Dictionary()), "got: %s, expected: %s", second.Dictionary(), distinct)
+		})
+	}
+}
+
 func TestStringDictionaryBuilderIsNull(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
