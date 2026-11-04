@@ -634,6 +634,17 @@ func createMemoTable(mem memory.Allocator, dt arrow.DataType) (ret hashing.MemoT
 	return
 }
 
+// DictionaryBuilder builds dictionary-encoded arrays, adding each distinct
+// value to the dictionary once.
+//
+// Consecutive calls to NewArray or NewDictionaryArray may return arrays that
+// share one dictionary when no new values were added in between. The builder
+// caches the last full dictionary. It drops its reference when that
+// dictionary is replaced, on checkpoint restore, on ResetFull, or on its
+// final Release. Releasing all returned arrays alone does not free the cached
+// dictionary. Release the builder before checking that its allocator is
+// empty. Treat the shared dictionary data as immutable. For example, do not
+// call [arrow.ArrayData.Reset] on it.
 type DictionaryBuilder interface {
 	Builder
 
