@@ -280,6 +280,7 @@ func TestTimestampWithOffsetExtensionBuilder(t *testing.T) {
 	for name, offsetType := range allAllowedOffsetTypes {
 		t.Run(name, func(t *testing.T) {
 			builder, _ := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, offsetType)
+			defer builder.Release()
 
 			builder.Append(testDate0)
 			builder.AppendNull()
@@ -336,6 +337,7 @@ func TestTimestampWithOffsetBuilderAppendValuesLeadingNull(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			builder, err := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, offsetType)
 			require.NoError(t, err)
+			defer builder.Release()
 
 			// A leading null as the very first operation on a fresh builder must not
 			// corrupt the offsets. Reading every value below would panic on a
@@ -409,6 +411,7 @@ func TestTimestampWithOffsetBuilderAppendValuesNilValids(t *testing.T) {
 			t.Run(name+"/"+validsName, func(t *testing.T) {
 				builder, err := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, offsetType)
 				require.NoError(t, err)
+				defer builder.Release()
 
 				builder.AppendValues([]time.Time{testDate0, testDate1, testDate2}, valids)
 
@@ -443,6 +446,7 @@ func TestTimestampWithOffsetBuilderReuseAfterNewArray(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			builder, err := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, offsetType)
 			require.NoError(t, err)
+			defer builder.Release()
 
 			builder.Append(testDate1)
 			arr1 := builder.NewArray()
@@ -662,6 +666,7 @@ func TestTimestampWithOffsetTypeBatchIPCRoundTrip(t *testing.T) {
 	for name, offsetType := range allAllowedOffsetTypes {
 		t.Run(name, func(t *testing.T) {
 			builder, _ := extensions.NewTimestampWithOffsetBuilder(mem, testTimeUnit, offsetType)
+			defer builder.Release()
 			builder.Append(testDate0)
 			builder.AppendNull()
 			builder.Append(testDate1)

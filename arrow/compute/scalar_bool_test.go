@@ -20,6 +20,7 @@ package compute_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -179,4 +180,87 @@ func TestBooleanNot(t *testing.T) {
 		checkScalarUnary(t, "not", compute.NewDatumWithoutOwning(input),
 			compute.NewDatumWithoutOwning(expected), nil)
 	}
+}
+
+func TestBooleanNotSliced(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	check := func(t *testing.T, ctx context.Context, input compute.Datum, expectedJSON string) {
+		expected, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(expectedJSON))
+		require.NoError(t, err)
+		defer expected.Release()
+
+		result, err := compute.CallFunction(ctx, "not", nil, input)
+		require.NoError(t, err)
+		defer result.Release()
+
+		var actual arrow.Array
+		switch result := result.(type) {
+		case *compute.ArrayDatum:
+			actual = result.MakeArray()
+		case *compute.ChunkedDatum:
+			actual, err = array.Concatenate(result.Value.Chunks(), mem)
+			require.NoError(t, err)
+		default:
+			t.Fatalf("unexpected result kind %s", result.Kind())
+		}
+		defer actual.Release()
+
+		assertArraysEqual(t, expected, actual)
+	}
+
+	arr, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(
+		`[null, true, null, false, true, null, false, true, false, false, false, null, null]`))
+	require.NoError(t, err)
+	defer arr.Release()
+
+	for _, tt := range []struct {
+		offset   int64
+		expected string
+	}{
+		{0, `[null, false, null, true]`},
+		{1, `[false, null, true, false]`},
+		{9, `[true, true, null, null]`},
+	} {
+		t.Run(fmt.Sprintf("offset=%d", tt.offset), func(t *testing.T) {
+			sliced := array.NewSlice(arr, tt.offset, tt.offset+4)
+			defer sliced.Release()
+			check(t, ctx, compute.NewDatumWithoutOwning(sliced), tt.expected)
+		})
+	}
+
+	noValidity := func(offset, length int) arrow.Array {
+		data := array.NewData(arrow.FixedWidthTypes.Boolean, length,
+			[]*memory.Buffer{nil, arr.Data().Buffers()[1]}, nil, 0, offset)
+		defer data.Release()
+		return array.MakeFromData(data)
+	}
+
+	t.Run("no validity buffer/offset=7", func(t *testing.T) {
+		input := noValidity(7, 4)
+		defer input.Release()
+		check(t, ctx, compute.NewDatumWithoutOwning(input), `[false, true, true, true]`)
+	})
+
+	t.Run("chunked", func(t *testing.T) {
+		first := array.NewSlice(arr, 1, 4)
+		defer first.Release()
+		second := noValidity(6, 5)
+		defer second.Release()
+		chunked := arrow.NewChunked(arrow.FixedWidthTypes.Boolean, []arrow.Array{first, second})
+		defer chunked.Release()
+		check(t, ctx, compute.NewDatumWithoutOwning(chunked),
+			`[false, null, true, true, false, true, true, true]`)
+	})
+
+	t.Run("small exec chunks", func(t *testing.T) {
+		ectx := compute.DefaultExecCtx()
+		ectx.ChunkSize = 3
+		sliced := array.NewSlice(arr, 1, 12)
+		defer sliced.Release()
+		check(t, compute.SetExecCtx(ctx, ectx), compute.NewDatumWithoutOwning(sliced),
+			`[false, null, true, false, null, true, false, true, true, true, null]`)
+	})
 }
