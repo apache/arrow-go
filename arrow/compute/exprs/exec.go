@@ -60,7 +60,7 @@ func makeExecBatch(ctx context.Context, schema *arrow.Schema, partial compute.Da
 			idxes := batchSchema.FieldIndices(field.Name)
 			switch len(idxes) {
 			case 0:
-				out.Values[i] = compute.NewDatum(scalar.MakeNullScalar(field.Type))
+				out.Values[i] = compute.NewDatumWithoutOwning(scalar.MakeNullScalar(field.Type))
 			case 1:
 				col := partialBatch.Column(idxes[0])
 				if !arrow.TypeEqual(col.DataType(), field.Type) {
@@ -107,7 +107,7 @@ func makeExecBatch(ctx context.Context, schema *arrow.Schema, partial compute.Da
 			for i, field := range schema.Fields() {
 				idx, found := dt.FieldIdx(field.Name)
 				if !found {
-					out.Values[i] = compute.NewDatum(scalar.MakeNullScalar(field.Type))
+					out.Values[i] = compute.NewDatumWithoutOwning(scalar.MakeNullScalar(field.Type))
 					continue
 				}
 
@@ -118,6 +118,11 @@ func makeExecBatch(ctx context.Context, schema *arrow.Schema, partial compute.Da
 					val, err = val.CastTo(field.Type)
 					if err != nil {
 						return compute.ExecBatch{}, err
+					}
+					if !s.Value[idx].IsValid() {
+						// CastTo of a null returns a new scalar, which the datum owns
+						out.Values[i] = compute.NewDatumWithoutOwning(val)
+						continue
 					}
 				}
 				out.Values[i] = compute.NewDatum(val)
@@ -236,7 +241,7 @@ func literalToDatum(mem memory.Allocator, lit expr.Literal, ext ExtensionIDSet) 
 		if err != nil {
 			return nil, err
 		}
-		return compute.NewDatum(scalar.MakeNullScalar(dt)), nil
+		return compute.NewDatumWithoutOwning(scalar.MakeNullScalar(dt)), nil
 	case *expr.ListLiteral:
 		var elemType arrow.DataType
 
