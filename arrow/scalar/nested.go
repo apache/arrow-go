@@ -180,6 +180,14 @@ type Struct struct {
 	Value Vector
 }
 
+func (s *Struct) Retain() {
+	for _, v := range s.Value {
+		if v, ok := v.(Releasable); ok {
+			v.Retain()
+		}
+	}
+}
+
 func (s *Struct) Release() {
 	for _, v := range s.Value {
 		if v, ok := v.(Releasable); ok {
@@ -745,6 +753,12 @@ type RunEndEncoded struct {
 
 func NewRunEndEncodedScalar(v Scalar, dt *arrow.RunEndEncodedType) *RunEndEncoded {
 	return &RunEndEncoded{scalar: scalar{dt, v.IsValid()}, Value: v}
+}
+
+func (s *RunEndEncoded) Retain() {
+	if r, ok := s.Value.(Releasable); ok {
+		r.Retain()
+	}
 }
 
 func (s *RunEndEncoded) Release() {

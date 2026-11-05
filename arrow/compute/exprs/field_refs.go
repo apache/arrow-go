@@ -20,10 +20,13 @@ package exprs
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute"
+	"github.com/apache/arrow-go/v18/arrow/internal"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/substrait-io/substrait-go/v8/expr"
@@ -86,195 +89,243 @@ func GetRefSchema(ref expr.ReferenceSegment, schema *arrow.Schema) (*arrow.Field
 // ListElementRef can only reference against a List or LargeList scalar,
 // and a MapKeyRef will only reference against a Map scalar. An error is
 // returned if following the reference children ends up with an invalid
-// nested reference object.
+// nested reference object. A field of a null struct is null.
+//
+// The result may share memory with s, and it is not retained; use
+// GetReferencedValue for a result that the caller owns.
 func GetScalar(ref expr.ReferenceSegment, s scalar.Scalar, mem memory.Allocator, ext ExtensionIDSet) (scalar.Scalar, error) {
 	if ref == nil {
 		return nil, compute.ErrEmpty
 	}
 
-	var out scalar.Scalar
-	for ref != nil {
-		switch f := ref.(type) {
-		case *expr.StructFieldRef:
-			if s.DataType().ID() != arrow.STRUCT {
-				return nil, fmt.Errorf("%w: attempting to reference field from non-struct scalar %s",
-					arrow.ErrInvalid, s)
-			}
-
-			st := s.(*scalar.Struct)
-			if f.Field < 0 || f.Field >= int32(len(st.Value)) {
-				return nil, fmt.Errorf("%w: indices=%s", compute.ErrIndexRange, ref)
-			}
-
-			out = st.Value[f.Field]
-		case *expr.ListElementRef:
-			switch v := s.(type) {
-			case *scalar.List:
-				sc, err := scalar.GetScalar(v.Value, int(f.Offset))
-				if err != nil {
-					return nil, err
-				}
-				out = sc
-			case *scalar.LargeList:
-				sc, err := scalar.GetScalar(v.Value, int(f.Offset))
-				if err != nil {
-					return nil, err
-				}
-				out = sc
-			default:
-				return nil, fmt.Errorf("%w: cannot get ListElementRef from non-list scalar %s",
-					arrow.ErrInvalid, v)
-			}
-		case *expr.MapKeyRef:
-			v, ok := s.(*scalar.Map)
-			if !ok {
-				return nil, arrow.ErrInvalid
-			}
-
-			dt, _, err := FromSubstraitType(f.MapKey.GetType(), ext)
-			if err != nil {
-				return nil, err
-			}
-
-			if !arrow.TypeEqual(dt, v.Type.(*arrow.MapType).KeyType()) {
-				return nil, arrow.ErrInvalid
-			}
-
-			keyvalDatum, err := literalToDatum(mem, f.MapKey, ext)
-			if err != nil {
-				return nil, err
-			}
-
-			var (
-				keyval      = keyvalDatum.(*compute.ScalarDatum)
-				m           = v.Value.(*array.Struct)
-				keys        = m.Field(0)
-				valueScalar scalar.Scalar
-			)
-			for i := 0; i < v.Value.Len(); i++ {
-				kv, err := scalar.GetScalar(keys, i)
-				if err != nil {
-					return nil, err
-				}
-				if scalar.Equals(kv, keyval.Value) {
-					valueScalar, err = scalar.GetScalar(m.Field(1), i)
-					if err != nil {
-						return nil, err
-					}
-					break
-				}
-			}
-
-			if valueScalar == nil {
-				return nil, arrow.ErrNotFound
-			}
-
-			out = valueScalar
+	for ; ref != nil; ref = ref.GetChild() {
+		next, _, err := scalarStep(ref, s, mem, ext)
+		if err != nil {
+			return nil, err
 		}
-		s = out
-		ref = ref.GetChild()
+		s = next
 	}
+	return s, nil
+}
 
-	return out, nil
+// scalarStep follows one reference segment from s. borrowed reports whether
+// next is part of s, rather than a new scalar the caller owns.
+func scalarStep(ref expr.ReferenceSegment, s scalar.Scalar, mem memory.Allocator, ext ExtensionIDSet) (next scalar.Scalar, borrowed bool, err error) {
+	switch f := ref.(type) {
+	case *expr.StructFieldRef:
+		if s.DataType().ID() != arrow.STRUCT {
+			return nil, false, fmt.Errorf("%w: attempting to reference field from non-struct scalar %s",
+				arrow.ErrInvalid, s)
+		}
+
+		st := s.(*scalar.Struct)
+		fields := st.Type.(*arrow.StructType).Fields()
+		if f.Field < 0 || f.Field >= int32(len(fields)) {
+			return nil, false, fmt.Errorf("%w: indices=%s", compute.ErrIndexRange, ref)
+		}
+		if !st.IsValid() {
+			return scalar.MakeNullScalar(fields[f.Field].Type), false, nil
+		}
+		return st.Value[f.Field], true, nil
+	case *expr.ListElementRef:
+		var values arrow.Array
+		switch v := s.(type) {
+		case *scalar.List:
+			values = v.Value
+		case *scalar.LargeList:
+			values = v.Value
+		default:
+			return nil, false, fmt.Errorf("%w: cannot get ListElementRef from non-list scalar %s",
+				arrow.ErrInvalid, s)
+		}
+		sc, err := scalar.GetScalar(values, int(f.Offset))
+		return sc, false, err
+	case *expr.MapKeyRef:
+		v, ok := s.(*scalar.Map)
+		if !ok {
+			return nil, false, arrow.ErrInvalid
+		}
+
+		dt, _, err := FromSubstraitType(f.MapKey.GetType(), ext)
+		if err != nil {
+			return nil, false, err
+		}
+
+		if !arrow.TypeEqual(dt, v.Type.(*arrow.MapType).KeyType()) {
+			return nil, false, arrow.ErrInvalid
+		}
+
+		keyvalDatum, err := literalToDatum(mem, f.MapKey, ext)
+		if err != nil {
+			return nil, false, err
+		}
+		defer keyvalDatum.Release()
+
+		var (
+			keyval = keyvalDatum.(*compute.ScalarDatum)
+			m      = v.Value.(*array.Struct)
+			keys   = m.Field(0)
+		)
+		for i := 0; i < v.Value.Len(); i++ {
+			kv, err := scalar.GetScalar(keys, i)
+			if err != nil {
+				return nil, false, err
+			}
+			found := scalar.Equals(kv, keyval.Value)
+			releaseScalar(kv)
+			if found {
+				sc, err := scalar.GetScalar(m.Field(1), i)
+				return sc, false, err
+			}
+		}
+		return nil, false, arrow.ErrNotFound
+	}
+	return nil, false, arrow.ErrNotImplemented
+}
+
+func retainScalar(s scalar.Scalar) {
+	if r, ok := s.(scalar.Releasable); ok {
+		r.Retain()
+	}
+}
+
+func releaseScalar(s scalar.Scalar) {
+	if r, ok := s.(scalar.Releasable); ok {
+		r.Release()
+	}
 }
 
 // GetReferencedValue retrieves the referenced (potentially nested) value from
-// the provided datum which may be a scalar, array, or record batch. When the
-// result is an array, it is a new reference that the caller must release.
+// the provided datum which may be a scalar, array, or record batch. The
+// result is a new reference that the caller must release.
+//
+// A field of a struct array is null wherever the struct is null, and a field
+// of a null struct scalar is null.
 func GetReferencedValue(mem memory.Allocator, ref expr.ReferenceSegment, value compute.Datum, ext ExtensionIDSet) (compute.Datum, error) {
 	if ref == nil {
 		return nil, compute.ErrEmpty
 	}
 
-	// owned reports whether value is an intermediate array this function
-	// created, which it must release when it moves past it or fails.
-	owned := false
-	fail := func(err error) (compute.Datum, error) {
+	// once owned is set, cur holds a reference this function must release
+	// when it moves past it or fails
+	cur, owned := value, false
+	for ; ref != nil; ref = ref.GetChild() {
+		var (
+			next compute.Datum
+			err  error
+		)
+		switch v := cur.(type) {
+		case *compute.ScalarDatum:
+			var (
+				sc       scalar.Scalar
+				borrowed bool
+			)
+			if sc, borrowed, err = scalarStep(ref, v.Value, mem, ext); err == nil {
+				if borrowed {
+					retainScalar(sc)
+				}
+				next = &compute.ScalarDatum{Value: sc}
+			}
+		case *compute.ArrayDatum:
+			next, err = arrayStep(mem, ref, v)
+		case *compute.RecordDatum:
+			next, err = recordStep(ref, v)
+		default:
+			err = arrow.ErrNotImplemented
+		}
+
 		if owned {
-			value.Release()
+			cur.Release()
 		}
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
+		cur, owned = next, true
 	}
+	return cur, nil
+}
 
-	for ref != nil {
-		// process the rest of the refs for the scalars
-		// since arrays can go down to a scalar, but you
-		// won't get an array from a scalar via ref
-		if v, ok := value.(*compute.ScalarDatum); ok {
-			out, err := GetScalar(ref, v.Value, mem, ext)
-			if err != nil {
-				return nil, err
-			}
-
-			return &compute.ScalarDatum{Value: out}, nil
+// arrayStep follows one reference segment from an array, returning a new
+// reference.
+func arrayStep(mem memory.Allocator, ref expr.ReferenceSegment, v *compute.ArrayDatum) (compute.Datum, error) {
+	switch r := ref.(type) {
+	case *expr.StructFieldRef:
+		if v.Type().ID() != arrow.STRUCT {
+			return nil, fmt.Errorf("%w: struct field ref for non struct type %s",
+				arrow.ErrInvalid, v.Type())
 		}
-
-		switch r := ref.(type) {
-		case *expr.MapKeyRef:
-			return fail(arrow.ErrNotImplemented)
-		case *expr.StructFieldRef:
-			switch v := value.(type) {
-			case *compute.ArrayDatum:
-				if v.Type().ID() != arrow.STRUCT {
-					return fail(fmt.Errorf("%w: struct field ref for non struct type %s",
-						arrow.ErrInvalid, v.Type()))
-				}
-
-				if r.Field < 0 || r.Field >= int32(len(v.Value.Children())) {
-					return fail(fmt.Errorf("%w: indices=%s", compute.ErrIndexRange, ref))
-				}
-
-				// A struct's children cover its full storage, so slice the
-				// child to the struct's own offset and length.
-				start := int64(v.Value.Offset())
-				child := array.NewSliceData(v.Value.Children()[r.Field], start, start+int64(v.Value.Len()))
-				if owned {
-					v.Release()
-				}
-				value, owned = &compute.ArrayDatum{Value: child}, true
-			case *compute.RecordDatum:
-				if r.Field < 0 || r.Field >= int32(v.Value.NumCols()) {
-					return fail(fmt.Errorf("%w: indices=%s", compute.ErrIndexRange, ref))
-				}
-
-				col := v.Value.Column(int(r.Field)).Data()
-				col.Retain()
-				value, owned = &compute.ArrayDatum{Value: col}, true
-			default:
-				return fail(arrow.ErrNotImplemented)
-			}
-		case *expr.ListElementRef:
-			switch v := value.(type) {
-			case *compute.ArrayDatum:
-				switch v.Type().ID() {
-				case arrow.LIST, arrow.LARGE_LIST, arrow.FIXED_SIZE_LIST:
-					arr := v.MakeArray()
-					defer arr.Release()
-
-					sc, err := scalar.GetScalar(arr, int(r.Offset))
-					if err != nil {
-						return fail(err)
-					}
-					if s, ok := sc.(scalar.Releasable); ok {
-						defer s.Release()
-					}
-
-					if owned {
-						v.Release()
-					}
-					value, owned = &compute.ScalarDatum{Value: sc}, false
-				default:
-					return fail(fmt.Errorf("%w: cannot reference list element in non-list array type %s",
-						arrow.ErrInvalid, v.Type()))
-				}
-
-			default:
-				return fail(arrow.ErrNotImplemented)
-			}
+		if r.Field < 0 || r.Field >= int32(len(v.Value.Children())) {
+			return nil, fmt.Errorf("%w: indices=%s", compute.ErrIndexRange, ref)
 		}
-
-		ref = ref.GetChild()
+		return &compute.ArrayDatum{Value: structField(mem, v.Value, int(r.Field))}, nil
+	case *expr.ListElementRef:
+		switch v.Type().ID() {
+		case arrow.LIST, arrow.LARGE_LIST, arrow.FIXED_SIZE_LIST:
+		default:
+			return nil, fmt.Errorf("%w: cannot reference list element in non-list array type %s",
+				arrow.ErrInvalid, v.Type())
+		}
+		if r.Offset < 0 || int64(r.Offset) >= v.Len() {
+			return nil, fmt.Errorf("%w: indices=%s", compute.ErrIndexRange, ref)
+		}
+		arr := v.MakeArray()
+		defer arr.Release()
+		sc, err := scalar.GetScalar(arr, int(r.Offset))
+		if err != nil {
+			return nil, err
+		}
+		return &compute.ScalarDatum{Value: sc}, nil
 	}
+	return nil, arrow.ErrNotImplemented
+}
 
-	return value, nil
+// recordStep follows a struct field reference into a record batch column,
+// returning a new reference.
+func recordStep(ref expr.ReferenceSegment, v *compute.RecordDatum) (compute.Datum, error) {
+	r, ok := ref.(*expr.StructFieldRef)
+	if !ok {
+		return nil, arrow.ErrNotImplemented
+	}
+	if r.Field < 0 || r.Field >= int32(v.Value.NumCols()) {
+		return nil, fmt.Errorf("%w: indices=%s", compute.ErrIndexRange, ref)
+	}
+	col := v.Value.Column(int(r.Field)).Data()
+	col.Retain()
+	return &compute.ArrayDatum{Value: col}, nil
+}
+
+// structField returns field i of a struct array as a new array: sliced to
+// the struct's offset and length, and null wherever the struct is null.
+func structField(mem memory.Allocator, parent arrow.ArrayData, i int) arrow.ArrayData {
+	off, n := parent.Offset(), parent.Len()
+	child := array.NewSliceData(parent.Children()[i], int64(off), int64(off+n))
+
+	storage := child.DataType()
+	if ext, ok := storage.(arrow.ExtensionType); ok {
+		storage = ext.StorageType()
+	}
+	if parent.NullN() == 0 || !internal.DefaultHasValidityBitmap(storage.ID()) {
+		return child
+	}
+	defer child.Release()
+
+	// keep the child's offset so its other buffers stay valid
+	cOff, parentBits := child.Offset(), parent.Buffers()[0].Bytes()
+	bits := memory.NewResizableBuffer(mem)
+	defer bits.Release()
+	bits.Resize(int(bitutil.BytesForBits(int64(cOff + n))))
+	if cb := child.Buffers()[0]; cb != nil {
+		bitutil.BitmapAnd(parentBits, cb.Bytes(), int64(off), int64(cOff), bits.Bytes(), int64(cOff), int64(n))
+	} else {
+		bitutil.CopyBitmap(parentBits, off, n, bits.Bytes(), cOff)
+	}
+	nulls := n - bitutil.CountSetBits(bits.Bytes(), cOff, n)
+
+	buffers := slices.Clone(child.Buffers())
+	buffers[0] = bits
+	out := array.NewData(child.DataType(), n, buffers, child.Children(), nulls, cOff)
+	if dict := child.Dictionary(); dict != nil {
+		out.SetDictionary(dict)
+	}
+	return out
 }
