@@ -3955,7 +3955,7 @@ func (c *CastSuite) TestFromDictionary() {
 		for _, ty := range dictIndexTypes {
 			indices, _, _ := array.FromJSON(c.mem, ty, strings.NewReader(`[4, 0, 1, 2, 0, 4, null, 2]`))
 
-			expected, err := compute.Take(ctx, compute.TakeOptions{}, &compute.ArrayDatum{d.Data()}, &compute.ArrayDatum{indices.Data()})
+			expected, err := compute.Take(ctx, compute.TakeOptions{}, &compute.ArrayDatum{Value: d.Data()}, &compute.ArrayDatum{Value: indices.Data()})
 			c.Require().NoError(err)
 			exp := expected.(*compute.ArrayDatum).MakeArray()
 
