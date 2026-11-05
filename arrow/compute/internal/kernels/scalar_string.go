@@ -105,22 +105,45 @@ func viewStartsWith(h *arrow.ViewHeader, data, pattern []byte) bool {
 	return bytes.Equal(data[off+n:off+len(pattern)], pattern[n:])
 }
 
+func viewBytes(h *arrow.ViewHeader, data []byte) []byte {
+	if h.IsInline() {
+		return h.InlineBytes()
+	}
+	off := int(h.BufferOffset())
+	return data[off : off+h.Len()]
+}
+
 // startsWithView reads out-of-line values from Buffers[2], so inputs with
 // more than one data buffer must be coalesced before execution.
 func startsWithView(ctx *exec.KernelCtx, in *exec.ExecSpan, out *exec.ExecResult) error {
 	var (
-		arg0    = &in.Values[0].Array
-		pattern = ctx.State.(matchSubstringState).pattern
-		views   = arrow.ViewHeaderTraits.CastFromBytes(arg0.Buffers[1].Buf)[arg0.Offset:]
-		data    = arg0.Buffers[2].Buf
-		outData = out.Buffers[1].Buf
-		outPos  = int(out.Offset)
+		arg0       = &in.Values[0].Array
+		views      = arrow.ViewHeaderTraits.CastFromBytes(arg0.Buffers[1].Buf)[arg0.Offset:]
+		data       = arg0.Buffers[2].Buf
+		outData    = out.Buffers[1].Buf
+		outPos     = int(out.Offset)
+		visitValid func(pos int64)
 	)
-	bitutils.VisitBitBlocks(arg0.Buffers[0].Buf, arg0.Offset, arg0.Len,
-		func(pos int64) {
+	visitFold := func(fold func(*exec.KernelCtx, []byte, *error) bool) func(int64) {
+		return func(pos int64) {
+			bitutil.SetBitTo(outData, outPos, fold(ctx, viewBytes(&views[pos], data), nil))
+			outPos++
+		}
+	}
+	switch st := ctx.State.(type) {
+	case matchSubstringState:
+		pattern := st.pattern
+		visitValid = func(pos int64) {
 			bitutil.SetBitTo(outData, outPos, viewStartsWith(&views[pos], data, pattern))
 			outPos++
-		}, func() {
+		}
+	case foldUTF8State:
+		visitValid = visitFold(startsWithFoldUTF8)
+	case foldASCIIState:
+		visitValid = visitFold(startsWithFoldASCII)
+	}
+	bitutils.VisitBitBlocks(arg0.Buffers[0].Buf, arg0.Offset, arg0.Len, visitValid,
+		func() {
 			bitutil.ClearBit(outData, outPos)
 			outPos++
 		})
