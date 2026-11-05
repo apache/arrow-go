@@ -1179,6 +1179,104 @@ func TestNestedFieldRefNullStruct(t *testing.T) {
 		defer result.Release()
 		assert.False(t, result.(*compute.ScalarDatum).Value.IsValid())
 	})
+
+	t.Run("scalar list fields", func(t *testing.T) {
+		for _, listType := range []arrow.DataType{
+			arrow.ListOf(arrow.PrimitiveTypes.Int32),
+			arrow.LargeListOf(arrow.PrimitiveTypes.Int32),
+		} {
+			t.Run(listType.ID().String(), func(t *testing.T) {
+				inputType := arrow.StructOf(arrow.Field{Name: "l", Type: listType, Nullable: true})
+				input := scalar.MakeNullScalar(inputType)
+				defer input.(scalar.Releasable).Release()
+
+				result, err := exprs.GetReferencedValue(memory.DefaultAllocator,
+					&expr.StructFieldRef{Field: 0, Child: &expr.ListElementRef{Offset: 0}},
+					compute.NewDatumWithoutOwning(input), extSet)
+				require.NoError(t, err)
+				defer result.Release()
+				assert.Equal(t, arrow.PrimitiveTypes.Int32, result.(*compute.ScalarDatum).Value.DataType())
+				assert.False(t, result.(*compute.ScalarDatum).Value.IsValid())
+			})
+		}
+	})
+
+	t.Run("scalar map field", func(t *testing.T) {
+		mapType := arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32)
+		inputType := arrow.StructOf(arrow.Field{Name: "m", Type: mapType, Nullable: true})
+		input := scalar.MakeNullScalar(inputType)
+		defer input.(scalar.Releasable).Release()
+
+		result, err := exprs.GetReferencedValue(memory.DefaultAllocator,
+			&expr.StructFieldRef{Field: 0, Child: &expr.MapKeyRef{
+				MapKey: expr.NewPrimitiveLiteral("key", false)}},
+			compute.NewDatumWithoutOwning(input), extSet)
+		require.NoError(t, err)
+		defer result.Release()
+		assert.Equal(t, arrow.PrimitiveTypes.Int32, result.(*compute.ScalarDatum).Value.DataType())
+		assert.False(t, result.(*compute.ScalarDatum).Value.IsValid())
+	})
+
+	t.Run("unknown null count without bitmap", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		child, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2, 3]`))
+		require.NoError(t, err)
+		defer child.Release()
+		dt := arrow.StructOf(arrow.Field{Name: "a", Type: child.DataType(), Nullable: true})
+		data := array.NewData(dt, child.Len(), []*memory.Buffer{nil}, []arrow.ArrayData{child.Data()}, array.UnknownNullCount, 0)
+		defer data.Release()
+
+		result, err := exprs.GetReferencedValue(mem, &expr.StructFieldRef{Field: 0},
+			&compute.ArrayDatum{Value: data}, extSet)
+		require.NoError(t, err)
+		defer result.Release()
+		assertEqual(t, child, result)
+	})
+
+	t.Run("field without validity bitmap", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		runEnds, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 3]`))
+		require.NoError(t, err)
+		defer runEnds.Release()
+		values, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2]`))
+		require.NoError(t, err)
+		defer values.Release()
+		child := array.NewRunEndEncodedArray(runEnds, values, 3, 0)
+		defer child.Release()
+		validity := memory.NewBufferBytes([]byte{0b101})
+		defer validity.Release()
+		parent, err := array.NewStructArrayWithNulls([]arrow.Array{child}, []string{"a"}, validity, 1, 0)
+		require.NoError(t, err)
+		defer parent.Release()
+
+		result, err := exprs.GetReferencedValue(mem, &expr.StructFieldRef{Field: 0},
+			compute.NewDatumWithoutOwning(parent), extSet)
+		assert.ErrorIs(t, err, arrow.ErrNotImplemented)
+		assert.Nil(t, result)
+	})
+
+	t.Run("null field without validity bitmap", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		child := array.NewNull(3)
+		defer child.Release()
+		validity := memory.NewBufferBytes([]byte{0b101})
+		defer validity.Release()
+		parent, err := array.NewStructArrayWithNulls([]arrow.Array{child}, []string{"n"}, validity, 1, 0)
+		require.NoError(t, err)
+		defer parent.Release()
+
+		result, err := exprs.GetReferencedValue(mem, &expr.StructFieldRef{Field: 0},
+			compute.NewDatumWithoutOwning(parent), extSet)
+		require.NoError(t, err)
+		defer result.Release()
+		assertEqual(t, child, result)
+	})
 }
 
 func TestDecimalFilterLarge(t *testing.T) {

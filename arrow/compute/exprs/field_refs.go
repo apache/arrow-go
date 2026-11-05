@@ -138,6 +138,9 @@ func scalarStep(ref expr.ReferenceSegment, s scalar.Scalar, mem memory.Allocator
 			return nil, false, fmt.Errorf("%w: cannot get ListElementRef from non-list scalar %s",
 				arrow.ErrInvalid, s)
 		}
+		if !s.IsValid() {
+			return scalar.MakeNullScalar(s.DataType().(arrow.ListLikeType).Elem()), false, nil
+		}
 		sc, err := scalar.GetScalar(values, int(f.Offset))
 		return sc, false, err
 	case *expr.MapKeyRef:
@@ -151,8 +154,12 @@ func scalarStep(ref expr.ReferenceSegment, s scalar.Scalar, mem memory.Allocator
 			return nil, false, err
 		}
 
-		if !arrow.TypeEqual(dt, v.Type.(*arrow.MapType).KeyType()) {
+		mapType := v.Type.(*arrow.MapType)
+		if !arrow.TypeEqual(dt, mapType.KeyType()) {
 			return nil, false, arrow.ErrInvalid
+		}
+		if !v.IsValid() {
+			return scalar.MakeNullScalar(mapType.ItemType()), false, nil
 		}
 
 		keyvalDatum, err := literalToDatum(mem, f.MapKey, ext)
@@ -257,7 +264,11 @@ func arrayStep(mem memory.Allocator, ref expr.ReferenceSegment, v *compute.Array
 		if r.Field < 0 || r.Field >= int32(len(v.Value.Children())) {
 			return nil, fmt.Errorf("%w: indices=%s", compute.ErrIndexRange, ref)
 		}
-		return &compute.ArrayDatum{Value: structField(mem, v.Value, int(r.Field))}, nil
+		field, err := structField(mem, v.Value, int(r.Field))
+		if err != nil {
+			return nil, err
+		}
+		return &compute.ArrayDatum{Value: field}, nil
 	case *expr.ListElementRef:
 		switch v.Type().ID() {
 		case arrow.LIST, arrow.LARGE_LIST, arrow.FIXED_SIZE_LIST:
@@ -296,21 +307,38 @@ func recordStep(ref expr.ReferenceSegment, v *compute.RecordDatum) (compute.Datu
 
 // structField returns field i of a struct array as a new array: sliced to
 // the struct's offset and length, and null wherever the struct is null.
-func structField(mem memory.Allocator, parent arrow.ArrayData, i int) arrow.ArrayData {
+func structField(mem memory.Allocator, parent arrow.ArrayData, i int) (arrow.ArrayData, error) {
 	off, n := parent.Offset(), parent.Len()
 	child := array.NewSliceData(parent.Children()[i], int64(off), int64(off+n))
+
+	if parent.NullN() == 0 || len(parent.Buffers()) == 0 || parent.Buffers()[0] == nil {
+		return child, nil
+	}
+	parentBits := parent.Buffers()[0].Bytes()
+	parentNulls := parent.NullN()
+	if parentNulls == array.UnknownNullCount {
+		parentNulls = n - bitutil.CountSetBits(parentBits, off, n)
+	}
+	if parentNulls == 0 {
+		return child, nil
+	}
 
 	storage := child.DataType()
 	if ext, ok := storage.(arrow.ExtensionType); ok {
 		storage = ext.StorageType()
 	}
-	if parent.NullN() == 0 || !internal.DefaultHasValidityBitmap(storage.ID()) {
-		return child
+	if storage.ID() == arrow.NULL {
+		return child, nil
+	}
+	if !internal.DefaultHasValidityBitmap(storage.ID()) {
+		err := fmt.Errorf("%w: cannot propagate struct nulls to field type %s", arrow.ErrNotImplemented, child.DataType())
+		child.Release()
+		return nil, err
 	}
 	defer child.Release()
 
 	// keep the child's offset so its other buffers stay valid
-	cOff, parentBits := child.Offset(), parent.Buffers()[0].Bytes()
+	cOff := child.Offset()
 	bits := memory.NewResizableBuffer(mem)
 	defer bits.Release()
 	bits.Resize(int(bitutil.BytesForBits(int64(cOff + n))))
@@ -327,5 +355,5 @@ func structField(mem memory.Allocator, parent arrow.ArrayData, i int) arrow.Arra
 	if dict := child.Dictionary(); dict != nil {
 		out.SetDictionary(dict)
 	}
-	return out
+	return out, nil
 }
