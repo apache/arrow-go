@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/substrait-io/substrait-go/v9/expr"
+	substraitext "github.com/substrait-io/substrait-go/v9/extensions"
 	"github.com/substrait-io/substrait-go/v9/types"
 )
 
@@ -735,6 +736,124 @@ func TestLargeTypes(t *testing.T) {
 	})
 }
 
+func TestDictionaryTypes(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	tests := []struct {
+		name      string
+		dictType  *arrow.DictionaryType
+		dict      string
+		valueType arrow.DataType
+		lit       expr.Literal
+	}{
+		{"int8 utf8", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String},
+			`["a", "b"]`, arrow.BinaryTypes.String, expr.NewPrimitiveLiteral("a", false)},
+		{"int32 utf8", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String},
+			`["a", "b"]`, arrow.BinaryTypes.String, expr.NewPrimitiveLiteral("a", false)},
+		{"int8 large_utf8", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.LargeString},
+			`["a", "b"]`, arrow.BinaryTypes.String, expr.NewPrimitiveLiteral("a", false)},
+		{"int8 binary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.Binary},
+			`["YQ==", "Yg=="]`, arrow.BinaryTypes.Binary, expr.NewByteSliceLiteral([]byte("a"), false)},
+		{"int32 large_binary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.LargeBinary},
+			`["YQ==", "Yg=="]`, arrow.BinaryTypes.Binary, expr.NewByteSliceLiteral([]byte("a"), false)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col, err := array.DictArrayFromJSON(mem, tt.dictType, `[0, 1, null, 0]`, tt.dict)
+			require.NoError(t, err)
+			defer col.Release()
+
+			dictSchema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: tt.dictType, Nullable: true}}, nil)
+			rec := array.NewRecordBatch(dictSchema, []arrow.Array{col}, int64(col.Len()))
+			defer rec.Release()
+			input := compute.NewDatumWithoutOwning(rec)
+
+			bldr := exprs.NewExprBuilder(extSet)
+			require.NoError(t, bldr.SetInputSchema(arrow.NewSchema(
+				[]arrow.Field{{Name: "col", Type: tt.valueType, Nullable: true}}, nil)))
+
+			cases := []struct {
+				name     string
+				ex       exprs.Builder
+				expected string
+			}{
+				{"equal", bldr.MustCallScalar("equal", nil, bldr.FieldRef("col"), bldr.Literal(tt.lit)),
+					`[true, false, null, true]`},
+				{"is_null", bldr.MustCallScalar("is_null", nil, bldr.FieldRef("col")),
+					`[false, false, true, false]`},
+			}
+
+			for _, c := range cases {
+				t.Run(c.name, func(t *testing.T) {
+					ex, err := c.ex.BuildExpr()
+					require.NoError(t, err)
+
+					ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+					result, err := exprs.ExecuteScalarExpression(ctx, dictSchema, ex, input)
+					require.NoError(t, err)
+					defer result.Release()
+
+					expected, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(c.expected))
+					require.NoError(t, err)
+					defer expected.Release()
+					assertEqual(t, expected, result)
+				})
+			}
+		})
+	}
+
+	rejected := []struct {
+		name      string
+		dictType  *arrow.DictionaryType
+		dict      string
+		valueType arrow.DataType
+		fn        string
+		err       error
+	}{
+		{"binary dictionary as utf8", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.Binary},
+			`["YQ=="]`, arrow.BinaryTypes.String, "", arrow.ErrInvalid},
+		{"float64 dictionary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.PrimitiveTypes.Float64},
+			`[1.5]`, arrow.PrimitiveTypes.Float64, "is_nan", arrow.ErrInvalid},
+		{"is_nan utf8 dictionary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String},
+			`["a"]`, arrow.BinaryTypes.String, "is_nan", arrow.ErrNotImplemented},
+		{"is_nan binary dictionary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.Binary},
+			`["YQ=="]`, arrow.BinaryTypes.Binary, "is_nan", arrow.ErrNotImplemented},
+	}
+
+	for _, tt := range rejected {
+		t.Run(tt.name, func(t *testing.T) {
+			col, err := array.DictArrayFromJSON(memory.DefaultAllocator, tt.dictType, `[0]`, tt.dict)
+			require.NoError(t, err)
+			defer col.Release()
+
+			dictSchema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: tt.dictType, Nullable: true}}, nil)
+			rec := array.NewRecordBatch(dictSchema, []arrow.Array{col}, int64(col.Len()))
+			defer rec.Release()
+
+			bldr := exprs.NewExprBuilder(extSet)
+			require.NoError(t, bldr.SetInputSchema(arrow.NewSchema(
+				[]arrow.Field{{Name: "col", Type: tt.valueType, Nullable: true}}, nil)))
+			ex, err := bldr.FieldRef("col").BuildExpr()
+			require.NoError(t, err)
+			if tt.fn != "" {
+				// Bypass signature validation to exercise kernel dispatch for
+				// is_nan on string and binary dictionaries.
+				ex, err = expr.NewCustomScalarFunc(extSet.GetSubstraitRegistry(),
+					substraitext.NewScalarFuncVariant(substraitext.ID{URN: exprs.SubstraitComparisonFuncsURI, Name: tt.fn}),
+					&types.BooleanType{Nullability: types.NullabilityNullable}, nil, ex)
+				require.NoError(t, err)
+			}
+
+			ctx := exprs.WithExtensionIDSet(context.Background(), extSet)
+			_, err = exprs.ExecuteScalarExpression(ctx, dictSchema, ex, compute.NewDatumWithoutOwning(rec))
+			assert.ErrorIs(t, err, tt.err)
+			assert.ErrorContains(t, err, "dictionary<")
+		})
+	}
+}
+
 func TestDecimalFilterLarge(t *testing.T) {
 	t.Parallel()
 
@@ -835,6 +954,69 @@ func TestDecimalFilterLarge(t *testing.T) {
 				_, err = exprs.ExecuteScalarExpression(ctx, schema, e, dr)
 				rq.NoError(err, "Failed to execute scalar expression")
 			})
+		})
+	}
+}
+
+func TestStartsWithExpr(t *testing.T) {
+	varchar, _, err := exprs.FromSubstraitType(&types.VarCharType{Length: -1}, extSet)
+	require.NoError(t, err)
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "s", Type: arrow.BinaryTypes.LargeString, Nullable: true},
+		{Name: "v", Type: varchar, Nullable: true},
+	}, nil)
+
+	bldr := exprs.NewExprBuilder(extSet)
+	require.NoError(t, bldr.SetInputSchema(sc))
+	ab := bldr.Literal(expr.NewPrimitiveLiteral("ab", false))
+	caseInsensitive := []*types.FunctionOption{{Name: "case_sensitivity", Preference: []string{"CASE_INSENSITIVE"}}}
+
+	tests := []struct {
+		name     string
+		ex       exprs.Builder
+		expected string
+	}{
+		{"large_string", bldr.MustCallScalar("starts_with", nil, bldr.FieldRef("s"), ab), `[true, null, false, false]`},
+		{"varchar", bldr.MustCallScalar("starts_with", nil, bldr.FieldRef("v"),
+			bldr.WrapLiteral(expr.NewLiteral(&types.VarChar{Value: "ab", Length: 2}, false))),
+			`[true, false, null, true]`},
+		{"non-literal pattern", bldr.MustCallScalar("starts_with", nil, bldr.FieldRef("s"),
+			bldr.Must(bldr.Cast(ab, arrow.BinaryTypes.String))), ""},
+		{"null pattern", bldr.MustCallScalar("starts_with", nil, bldr.FieldRef("s"),
+			bldr.Literal(expr.NewNullLiteral(&types.StringType{}))), ""},
+		{"case insensitive", bldr.MustCallScalar("starts_with", caseInsensitive, bldr.FieldRef("s"), ab), ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+			ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+
+			ex, err := tt.ex.BuildExpr()
+			require.NoError(t, err)
+
+			rec, _, err := array.RecordFromJSON(mem, sc, strings.NewReader(`[
+				{"s": "abc", "v": "ab"},
+				{"s": null, "v": "b"},
+				{"s": "xab", "v": null},
+				{"s": "a", "v": "abab"}
+			]`))
+			require.NoError(t, err)
+			defer rec.Release()
+
+			result, err := exprs.ExecuteScalarExpression(ctx, sc, ex, compute.NewDatumWithoutOwning(rec))
+			if tt.expected == "" {
+				assert.ErrorIs(t, err, arrow.ErrNotImplemented)
+				return
+			}
+			require.NoError(t, err)
+			defer result.Release()
+
+			expected, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(tt.expected))
+			require.NoError(t, err)
+			defer expected.Release()
+			assertEqual(t, expected, result)
 		})
 	}
 }

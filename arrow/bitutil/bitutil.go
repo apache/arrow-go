@@ -168,24 +168,24 @@ func BitmapAllSet(buf []byte, offset, n int) bool {
 }
 
 func countSetBitsWithOffset(buf []byte, offset, n int) int {
-	count := 0
-
-	beg := offset
-	begU8 := roundUp(beg, uint64SizeBits)
-
-	init := min(n, begU8-beg)
-	for i := offset; i < beg+init; i++ {
-		if BitIsSet(buf, i) {
-			count++
-		}
+	if n == 0 {
+		return 0
 	}
 
-	begU64 := BytesForBits(int64(beg + init))
-	return count + CountSetBits(buf[begU64:], 0, n-init)
-}
+	byteOffset := offset / 8
+	bitOffset := offset & 7
+	if bitOffset == 0 {
+		return CountSetBits(buf[byteOffset:], 0, n)
+	}
 
-func roundUp(v, f int) int {
-	return (v + (f - 1)) / f * f
+	// Count the partial first byte, then use the word-based path for the rest.
+	leading := min(n, 8-bitOffset)
+	mask := byte((1<<leading)-1) << bitOffset
+	count := bits.OnesCount8(buf[byteOffset] & mask)
+	if leading == n {
+		return count
+	}
+	return count + CountSetBits(buf[byteOffset+1:], 0, n-leading)
 }
 
 func min(a, b int) int {

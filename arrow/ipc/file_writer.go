@@ -302,6 +302,7 @@ func (f *FileWriter) getRecordEncoder() *recordEncoder {
 
 func (f *FileWriter) Close() error {
 	defer func() { f.encoder = nil }()
+	defer releaseCompressors(f.compressors)
 
 	if f.closed {
 		return f.closeErr

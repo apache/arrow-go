@@ -290,7 +290,11 @@ func (c *Client) executeIngest(ctx context.Context, rdr array.RecordReader, reqO
 	writerOpts = append(writerOpts, ipc.WithAllocator(c.Alloc), ipc.WithSchema(rdr.Schema()))
 	writerOpts = append(writerOpts, ipcOpts...)
 	wr = flight.NewRecordWriter(stream, writerOpts...)
-	defer wr.Close()
+	defer func() {
+		if wr != nil {
+			_ = wr.Close()
+		}
+	}()
 
 	wr.SetFlightDescriptor(desc)
 
@@ -312,9 +316,12 @@ func (c *Client) executeIngest(ctx context.Context, rdr array.RecordReader, reqO
 		return 0, err
 	}
 
-	if err = stream.CloseSend(); err != nil {
+	if err = wr.Close(); err != nil && !errors.Is(err, io.EOF) {
 		return 0, err
 	}
+	wr = nil
+
+	_ = stream.CloseSend()
 
 	if res, err = stream.Recv(); err != nil {
 		return 0, err

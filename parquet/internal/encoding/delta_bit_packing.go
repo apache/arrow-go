@@ -50,7 +50,9 @@ type deltaBitPackDecoder[T int32 | int64] struct {
 	minDelta             int64
 	miniBlockIdx         uint64
 
-	deltaBitWidths *memory.Buffer
+	// deltaBitWidths holds one byte per miniblock. It lives on the Go heap
+	// because decoders have no Release to return allocator memory.
+	deltaBitWidths []byte
 	deltaBitWidth  byte
 
 	totalValues uint64
@@ -78,9 +80,6 @@ func (d *deltaBitPackDecoder[T]) SetData(nvalues int, data []byte) error {
 	d.bitdecoder = utils.NewBitReader(bytes.NewReader(d.data))
 	d.currentBlockVals = 0
 	d.currentMiniBlockVals = 0
-	if d.deltaBitWidths == nil {
-		d.deltaBitWidths = memory.NewResizableBuffer(d.mem)
-	}
 
 	var ok bool
 	d.blockSize, ok = d.bitdecoder.GetVlqInt()
@@ -144,17 +143,20 @@ func (d *deltaBitPackDecoder[T]) initBlock() error {
 	}
 
 	// ensure we have enough space for our miniblocks to decode the widths
-	d.deltaBitWidths.Resize(int(d.miniBlocksPerBlock))
+	if uint64(cap(d.deltaBitWidths)) < d.miniBlocksPerBlock {
+		d.deltaBitWidths = make([]byte, d.miniBlocksPerBlock)
+	}
+	d.deltaBitWidths = d.deltaBitWidths[:d.miniBlocksPerBlock]
 
 	var err error
 	for i := uint64(0); i < d.miniBlocksPerBlock; i++ {
-		if d.deltaBitWidths.Bytes()[i], err = d.bitdecoder.ReadByte(); err != nil {
+		if d.deltaBitWidths[i], err = d.bitdecoder.ReadByte(); err != nil {
 			return err
 		}
 	}
 
 	d.miniBlockIdx = 0
-	d.deltaBitWidth = d.deltaBitWidths.Bytes()[0]
+	d.deltaBitWidth = d.deltaBitWidths[0]
 	d.currentBlockVals = uint32(d.blockSize)
 	return nil
 }
@@ -165,7 +167,7 @@ func (d *deltaBitPackDecoder[T]) unpackNextMini() error {
 	} else {
 		d.miniBlockValues = d.miniBlockValues[:0]
 	}
-	d.deltaBitWidth = d.deltaBitWidths.Bytes()[int(d.miniBlockIdx)]
+	d.deltaBitWidth = d.deltaBitWidths[int(d.miniBlockIdx)]
 	maxBitWidth := byte(64)
 	if d.Type() == parquet.Types.Int32 {
 		maxBitWidth = 32
@@ -380,12 +382,28 @@ func (enc *deltaBitPackEncoder[T]) flushBlock() {
 		return
 	}
 
-	// determine the minimum delta value
-	minDelta := int64(math.MaxInt64)
-	for _, delta := range enc.deltas {
+	// Find the minimum delta and check whether the block is constant in one
+	// pass. A separate equality scan hurts mixed blocks with a late outlier.
+	firstDelta := enc.deltas[0]
+	minDelta := firstDelta
+	allSame := true
+	for _, delta := range enc.deltas[1:] {
 		if delta < minDelta {
 			minDelta = delta
 		}
+		if delta != firstDelta {
+			allSame = false
+		}
+	}
+	if allSame {
+		// Identical deltas need only the minimum and zero widths, no payload.
+		enc.bitWriter.WriteZigZagVlqInt(firstDelta)
+		offset, _ := enc.bitWriter.SkipBytes(int(enc.numMiniBlocks))
+		// Explicitly clear the reserved widths for a reused buffer.
+		var widths [defaultNumMiniBlocks]byte
+		enc.bitWriter.WriteAt(widths[:], int64(offset))
+		enc.deltas = enc.deltas[:0]
+		return
 	}
 
 	enc.bitWriter.WriteZigZagVlqInt(minDelta)
@@ -410,17 +428,20 @@ func (enc *deltaBitPackEncoder[T]) flushBlock() {
 		// write out the bit width we used into the bytes we reserved earlier
 		enc.bitWriter.WriteAt([]byte{byte(width)}, int64(offset+i))
 
-		// write out our deltas
-		for _, val := range enc.deltas[start : start+int(n)] {
-			enc.bitWriter.WriteValue(uint64(val-minDelta), width)
+		// A zero-width miniblock has no packed payload. Avoid per-value
+		// writes for these miniblocks even if the full block is not constant.
+		if width != 0 {
+			for _, val := range enc.deltas[start : start+int(n)] {
+				enc.bitWriter.WriteValue(uint64(val-minDelta), width)
+			}
+
+			// pad the last block if n < miniBlockSize
+			for pad := n; pad < int64(enc.miniBlockSize); pad++ {
+				enc.bitWriter.WriteValue(0, width)
+			}
 		}
 
 		valuesToWrite -= n
-
-		// pad the last block if n < miniBlockSize
-		for ; n < int64(enc.miniBlockSize); n++ {
-			enc.bitWriter.WriteValue(0, width)
-		}
 	}
 	enc.deltas = enc.deltas[:0]
 }
@@ -484,12 +505,17 @@ func (enc *deltaBitPackEncoder[T]) FlushValues() (Buffer, error) {
 
 	buffer = buffer[:headerWriter.Written()]
 	enc.totalVals = 0
+	enc.firstVal, enc.currentVal = 0, 0
 
 	if enc.bitWriter != nil {
 		flushed := enc.sink.Finish()
 		defer flushed.Release()
 
 		buffer = append(buffer, flushed.Buf()[:enc.bitWriter.Written()]...)
+		// Finish hands the sink's bytes to us, so this writer's position no longer
+		// matches the sink. The next Put creates a new writer; until then, a flush
+		// (for example of an all-null page) must write only the header.
+		enc.bitWriter = nil
 	}
 	return poolBuffer{memory.NewBufferBytes(buffer)}, nil
 }

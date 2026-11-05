@@ -103,7 +103,10 @@ func NewColumnChunkMetaData(column *format.ColumnChunk, descr *schema.Column, wr
 				path := parquet.ColumnPath(ccmd.ENCRYPTION_WITH_COLUMN_KEY.GetPathInSchema())
 				keyMetadata := ccmd.ENCRYPTION_WITH_COLUMN_KEY.GetKeyMetadata()
 				aadColumnMetadata := encryption.CreateModuleAad(fileDecryptor.FileAad(), encryption.ColumnMetaModule, rowGroupOrdinal, columnOrdinal, -1)
-				decryptor := fileDecryptor.GetColumnMetaDecryptor(path.String(), string(keyMetadata), aadColumnMetadata)
+				decryptor, err := fileDecryptor.GetColumnMetaDecryptor(path.String(), string(keyMetadata), aadColumnMetadata)
+				if err != nil {
+					return nil, err
+				}
 				decrypted, err := decryptor.Decrypt(column.GetEncryptedColumnMetadata())
 				if err != nil {
 					return nil, fmt.Errorf("decrypting column metadata: %w", err)

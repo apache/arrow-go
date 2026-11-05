@@ -1043,6 +1043,54 @@ func TestDeltaBitPackedInt64DecodeAfterDiscard(t *testing.T) {
 	}
 }
 
+// A column writer reuses one encoder for every page. A page whose values are all
+// null puts nothing, so its flush must produce just the empty-page header, exactly
+// as a fresh encoder would, and the next page must still round-trip.
+func TestDeltaBitPackedReuseAfterAllNullPage(t *testing.T) {
+	column := schema.NewColumn(schema.NewInt32Node("int32", parquet.Repetitions.Optional, -1), 1, 0)
+	flush := func(enc encoding.TypedEncoder) []byte {
+		buf, err := enc.FlushValues()
+		require.NoError(t, err)
+		defer buf.Release()
+		return bytes.Clone(buf.Bytes())
+	}
+	allNull := []int32{0, 0, 0}
+
+	fresh := encoding.NewEncoder(parquet.Types.Int32, parquet.Encodings.DeltaBinaryPacked, false, column, memory.DefaultAllocator).(encoding.Int32Encoder)
+	defer fresh.Release()
+	fresh.PutSpaced(allNull, []byte{0}, 0)
+	emptyPage := flush(fresh)
+
+	// 100,000 values make the first page larger than the sink's next buffer.
+	for _, n := range []int{3, 1000, 100_000} {
+		t.Run(fmt.Sprintf("first_page=%d", n), func(t *testing.T) {
+			values := make([]int32, n)
+			for i := range values {
+				values[i] = int32(i*i + 7)
+			}
+			enc := encoding.NewEncoder(parquet.Types.Int32, parquet.Encodings.DeltaBinaryPacked, false, column, memory.DefaultAllocator).(encoding.Int32Encoder)
+			defer enc.Release()
+
+			enc.Put(values)
+			flush(enc)
+
+			enc.PutSpaced(allNull, []byte{0}, 0)
+			assert.Zero(t, enc.EstimatedDataEncodedSize())
+			assert.Equal(t, emptyPage, flush(enc))
+
+			enc.Put(values[:3])
+			page := flush(enc)
+			dec := encoding.NewDecoder(parquet.Types.Int32, parquet.Encodings.DeltaBinaryPacked, column, memory.DefaultAllocator).(encoding.Int32Decoder)
+			require.NoError(t, dec.SetData(3, page))
+			out := make([]int32, 3)
+			got, err := dec.Decode(out)
+			require.NoError(t, err)
+			require.Equal(t, 3, got)
+			assert.Equal(t, values[:3], out)
+		})
+	}
+}
+
 func TestDeltaLengthByteArrayEncoding(t *testing.T) {
 	column := schema.NewColumn(schema.NewByteArrayNode("bytearray", parquet.Repetitions.Required, -1), 0, 0)
 

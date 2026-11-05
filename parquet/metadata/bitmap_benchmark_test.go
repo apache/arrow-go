@@ -225,6 +225,44 @@ func BenchmarkBloomFilterHashBatching(b *testing.B) {
 	})
 }
 
+// BenchmarkBloomFilterSpacedHashes measures the per-call overhead of the
+// spaced (nullable) hashing paths across batch sizes and validity patterns.
+func BenchmarkBloomFilterSpacedHashes(b *testing.B) {
+	for _, numValues := range []int{64, 1024, 100000} {
+		values := make([]int32, numValues)
+		for i := range values {
+			values[i] = int32(i)
+		}
+
+		for _, pattern := range []string{"all-true", "alternating", "random"} {
+			validBits := makeBenchmarkBooleanBitmap(numValues, pattern)
+			numValid := int64(bitutil.CountSetBits(validBits, 0, numValues))
+
+			b.Run(fmt.Sprintf("get/%d/%s", numValues, pattern), func(b *testing.B) {
+				bloom := NewBloomFilter(1024, 1024, memory.DefaultAllocator)
+				b.SetBytes(int64(numValues * 4))
+				b.ReportAllocs()
+				b.ResetTimer()
+
+				for range b.N {
+					_ = GetSpacedHashes(bloom.Hasher(), numValid, values, validBits, 0)
+				}
+			})
+
+			b.Run(fmt.Sprintf("insert/%d/%s", numValues, pattern), func(b *testing.B) {
+				bloom := NewBloomFilter(1024, 1024, memory.DefaultAllocator)
+				b.SetBytes(int64(numValues * 4))
+				b.ReportAllocs()
+				b.ResetTimer()
+
+				for range b.N {
+					InsertSpacedHashes(bloom, numValid, values, validBits, 0)
+				}
+			})
+		}
+	}
+}
+
 // BenchmarkBooleanWritePathBitmap benchmarks the complete write path with bitmap operations
 func BenchmarkBooleanWritePathBitmap(b *testing.B) {
 	const numValues = 100000

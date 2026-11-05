@@ -355,7 +355,7 @@ func (ss *ScalarSetLookupSuite) TestIsInDecimal() {
 				values := ss.getArr(typ, `["12.3", "78.9"]`)
 				defer values.Release()
 
-				ss.checkIsIn(in, values, `[true, false true]`, compute.NullMatchingMatch)
+				ss.checkIsIn(in, values, `[true, false, true]`, compute.NullMatchingMatch)
 			}
 		})
 	}

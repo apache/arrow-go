@@ -137,23 +137,48 @@ func sum64s(h Hasher, b [][]byte, vals []uint64) []uint64 {
 	return h.Sum64s(b)
 }
 
+// hashScratch holds the per-call buffers used to hash values in bounded
+// batches. The buffers are handed to Hasher and BloomFilterBuilder interface
+// methods, which forces them onto the heap, so they are pooled rather than
+// declared per call (~32KiB of allocation per call otherwise).
+type hashScratch struct {
+	byteBatch [bloomFilterHashBatchSize][]byte
+	rawBatch  [bloomFilterHashBatchSize * arrow.Int64SizeBytes]byte
+	hashBatch [bloomFilterHashBatchSize]uint64
+}
+
+var hashScratchPool = sync.Pool{New: func() any { return new(hashScratch) }}
+
+func getHashScratch() *hashScratch {
+	return hashScratchPool.Get().(*hashScratch)
+}
+
+// putHashScratch returns s to the pool. numValues is the length of the values
+// slice that was hashed; the byteBatch entries it may have populated are
+// cleared so the pool does not keep caller-owned byte arrays alive.
+func putHashScratch(s *hashScratch, numValues int) {
+	clear(s.byteBatch[:min(numValues, bloomFilterHashBatchSize)])
+	hashScratchPool.Put(s)
+}
+
 func GetHash[T parquet.ColumnTypes](h Hasher, v T) uint64 {
 	return h.Sum64(getBytes(v))
 }
 
 func GetHashes[T parquet.ColumnTypes](h Hasher, vals []T) []uint64 {
 	out := make([]uint64, len(vals))
-	var (
-		byteBatch [bloomFilterHashBatchSize][]byte
-		rawBatch  [bloomFilterHashBatchSize * arrow.Int64SizeBytes]byte
-		hashBatch [bloomFilterHashBatchSize]uint64
-	)
+	if len(vals) == 0 {
+		return out
+	}
+
+	s := getHashScratch()
+	defer putHashScratch(s, len(vals))
 
 	for offset := 0; offset < len(vals); offset += bloomFilterHashBatchSize {
 		end := min(offset+bloomFilterHashBatchSize, len(vals))
 		n := end - offset
-		getBytesSliceInto(byteBatch[:n], rawBatch[:], vals[offset:end])
-		hashes := sum64s(h, byteBatch[:n], hashBatch[:n])
+		getBytesSliceInto(s.byteBatch[:n], s.rawBatch[:], vals[offset:end])
+		hashes := sum64s(h, s.byteBatch[:n], s.hashBatch[:n])
 		copy(out[offset:end], hashes)
 	}
 	return out
@@ -166,17 +191,14 @@ func InsertHashes[T parquet.ColumnTypes](b BloomFilterBuilder, vals []T) {
 	}
 
 	h := b.Hasher()
-	var (
-		byteBatch [bloomFilterHashBatchSize][]byte
-		rawBatch  [bloomFilterHashBatchSize * arrow.Int64SizeBytes]byte
-		hashBatch [bloomFilterHashBatchSize]uint64
-	)
+	s := getHashScratch()
+	defer putHashScratch(s, len(vals))
 
 	for offset := 0; offset < len(vals); offset += bloomFilterHashBatchSize {
 		end := min(offset+bloomFilterHashBatchSize, len(vals))
 		n := end - offset
-		getBytesSliceInto(byteBatch[:n], rawBatch[:], vals[offset:end])
-		b.InsertBulk(sum64s(h, byteBatch[:n], hashBatch[:n]))
+		getBytesSliceInto(s.byteBatch[:n], s.rawBatch[:], vals[offset:end])
+		b.InsertBulk(sum64s(h, s.byteBatch[:n], s.hashBatch[:n]))
 	}
 }
 
@@ -186,13 +208,9 @@ func GetSpacedHashes[T parquet.ColumnTypes](h Hasher, numValid int64, vals []T, 
 	}
 
 	out := make([]uint64, 0, numValid)
-	var (
-		byteBatch [bloomFilterHashBatchSize][]byte
-		rawBatch  [bloomFilterHashBatchSize * arrow.Int64SizeBytes]byte
-		hashBatch [bloomFilterHashBatchSize]uint64
-	)
+	s := getHashScratch()
+	defer putHashScratch(s, len(vals))
 
-	// TODO: replace with bitset run reader pool
 	setReader := bitutils.NewSetBitRunReader(validBits, validBitsOffset, int64(len(vals)))
 	for {
 		run := setReader.NextRun()
@@ -204,8 +222,8 @@ func GetSpacedHashes[T parquet.ColumnTypes](h Hasher, numValid int64, vals []T, 
 		for pos := run.Pos; pos < runEnd; pos += bloomFilterHashBatchSize {
 			end := min(pos+int64(bloomFilterHashBatchSize), runEnd)
 			n := int(end - pos)
-			getBytesSliceInto(byteBatch[:n], rawBatch[:], vals[pos:end])
-			hashes := sum64s(h, byteBatch[:n], hashBatch[:n])
+			getBytesSliceInto(s.byteBatch[:n], s.rawBatch[:], vals[pos:end])
+			hashes := sum64s(h, s.byteBatch[:n], s.hashBatch[:n])
 			out = append(out, hashes...)
 		}
 	}
@@ -219,13 +237,9 @@ func InsertSpacedHashes[T parquet.ColumnTypes](b BloomFilterBuilder, numValid in
 	}
 
 	h := b.Hasher()
-	var (
-		byteBatch [bloomFilterHashBatchSize][]byte
-		rawBatch  [bloomFilterHashBatchSize * arrow.Int64SizeBytes]byte
-		hashBatch [bloomFilterHashBatchSize]uint64
-	)
+	s := getHashScratch()
+	defer putHashScratch(s, len(vals))
 
-	// TODO: replace with bitset run reader pool
 	setReader := bitutils.NewSetBitRunReader(validBits, validBitsOffset, int64(len(vals)))
 	for {
 		run := setReader.NextRun()
@@ -237,8 +251,8 @@ func InsertSpacedHashes[T parquet.ColumnTypes](b BloomFilterBuilder, numValid in
 		for pos := run.Pos; pos < runEnd; pos += bloomFilterHashBatchSize {
 			end := min(pos+int64(bloomFilterHashBatchSize), runEnd)
 			n := int(end - pos)
-			getBytesSliceInto(byteBatch[:n], rawBatch[:], vals[pos:end])
-			b.InsertBulk(sum64s(h, byteBatch[:n], hashBatch[:n]))
+			getBytesSliceInto(s.byteBatch[:n], s.rawBatch[:], vals[pos:end])
+			b.InsertBulk(sum64s(h, s.byteBatch[:n], s.hashBatch[:n]))
 		}
 	}
 }

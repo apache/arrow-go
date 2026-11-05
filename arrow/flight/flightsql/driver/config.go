@@ -17,8 +17,10 @@ package driver
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -86,11 +88,22 @@ func NewDriverConfigFromDSN(dsn string) (*DriverConfig, error) {
 	}
 
 	// Sanity checks on the given connection string
-	if u.Scheme != "flightsql" {
+	address := u.Host
+	switch u.Scheme {
+	case "flightsql", "grpc+tcp", "grpc+tls":
+		if u.Path != "" {
+			return nil, fmt.Errorf("unexpected path %q", u.Path)
+		}
+	case "grpc+unix":
+		if u.Host != "" {
+			return nil, fmt.Errorf("unexpected host %q", u.Host)
+		}
+		if u.Path == "" {
+			return nil, errors.New("missing socket path")
+		}
+		address = "unix://" + u.Path
+	default:
 		return nil, fmt.Errorf("invalid scheme %q", u.Scheme)
-	}
-	if u.Path != "" {
-		return nil, fmt.Errorf("unexpected path %q", u.Path)
 	}
 
 	// Extract the settings
@@ -103,10 +116,11 @@ func NewDriverConfigFromDSN(dsn string) (*DriverConfig, error) {
 	}
 
 	config := &DriverConfig{
-		Address:  u.Host,
-		Username: username,
-		Password: password,
-		Params:   make(map[string]string),
+		Address:    address,
+		Username:   username,
+		Password:   password,
+		Params:     make(map[string]string),
+		TLSEnabled: u.Scheme == "grpc+tls",
 	}
 
 	// Determine the parameters
@@ -133,6 +147,9 @@ func NewDriverConfigFromDSN(dsn string) (*DriverConfig, error) {
 			case "true", "enabled":
 				config.TLSEnabled = true
 			case "false", "disabled":
+				if u.Scheme == "grpc+tls" {
+					return nil, fmt.Errorf("tls=%s conflicts with scheme %q", v, u.Scheme)
+				}
 				config.TLSEnabled = false
 			default:
 				config.TLSEnabled = true
@@ -155,6 +172,11 @@ func (config *DriverConfig) DSN() string {
 	u := url.URL{
 		Scheme: "flightsql",
 		Host:   config.Address,
+	}
+	if path, found := strings.CutPrefix(config.Address, "unix://"); found {
+		u.Scheme = "grpc+unix"
+		u.Host = ""
+		u.Path = path
 	}
 	if config.Username != "" {
 		if config.Password == "" {

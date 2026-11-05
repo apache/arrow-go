@@ -166,6 +166,11 @@ func execInternal(ctx context.Context, fn Function, opts FunctionOptions, passed
 
 	ectx := GetExecCtx(ctx)
 
+	// The kernel watches the caller's context (kctx above), and cancelling a
+	// parent closes its Done channel before its children are cancelled. Check
+	// callerCtx as well as ctx below, so a result produced in that gap is not
+	// returned from a cancelled call.
+	callerCtx := ctx
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -178,14 +183,18 @@ func execInternal(ctx context.Context, fn Function, opts FunctionOptions, passed
 	}()
 
 	result = executor.WrapResults(ctx, ch, haveChunkedArray(input.Values))
-	if ctx.Err() != nil {
+	if callerCtx.Err() != nil || ctx.Err() != nil {
 		for value := range ch {
 			if value != nil {
 				value.Release()
 			}
 		}
 		if err == nil {
-			err = context.Cause(ctx)
+			if callerCtx.Err() != nil {
+				err = context.Cause(callerCtx)
+			} else {
+				err = context.Cause(ctx)
+			}
 		}
 		if result != nil {
 			result.Release()

@@ -102,9 +102,8 @@ func putArrowDeltaLength[T arrowByteArrayOffset](enc *DeltaLengthByteArrayEncode
 		}
 
 		enc.sink.Reserve(totalLen)
-		for i := 0; i < len(offsets)-1; i++ {
-			enc.sink.UnsafeWrite(values[int(offsets[i]):int(offsets[i+1])])
-		}
+		// Arrow offsets describe one contiguous byte range when there are no nulls.
+		enc.sink.UnsafeWrite(values[int(offsets[0]):int(offsets[len(offsets)-1])])
 		return
 	}
 
@@ -130,9 +129,8 @@ func putArrowDeltaLength[T arrowByteArrayOffset](enc *DeltaLengthByteArrayEncode
 
 	enc.sink.Reserve(totalLen)
 	bitutils.VisitSetBitRunsNoErr(validBits, validBitsOffset, int64(len(offsets)-1), func(pos, length int64) {
-		for i := pos; i < pos+length; i++ {
-			enc.sink.UnsafeWrite(values[int(offsets[i]):int(offsets[i+1])])
-		}
+		// A valid run is contiguous; the gaps between runs can hold null payloads.
+		enc.sink.UnsafeWrite(values[int(offsets[pos]):int(offsets[pos+length])])
 	})
 }
 

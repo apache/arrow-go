@@ -20,6 +20,7 @@ package kernels
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -30,6 +31,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
 	"github.com/apache/arrow-go/v18/internal/hashing"
+	"github.com/apache/arrow-go/v18/internal/utils"
 )
 
 type HashState interface {
@@ -509,11 +511,28 @@ func initDictionaryEncodeIdentity(_ *exec.KernelCtx, args exec.KernelInitArgs) (
 type dictionaryHashState struct {
 	indicesKernel HashState
 	dictionary    arrow.Array
+	unifier       array.DictionaryUnifier
 	dictValueType arrow.DataType
+	indexType     arrow.DataType
 }
 
 func (dhs *dictionaryHashState) Allocator() memory.Allocator { return dhs.indicesKernel.Allocator() }
-func (dhs *dictionaryHashState) Reset() error                { return dhs.indicesKernel.Reset() }
+
+func (dhs *dictionaryHashState) releaseDictionary() {
+	if dhs.dictionary != nil {
+		dhs.dictionary.Release()
+		dhs.dictionary = nil
+	}
+	if dhs.unifier != nil {
+		dhs.unifier.Release()
+		dhs.unifier = nil
+	}
+}
+
+func (dhs *dictionaryHashState) Reset() error {
+	dhs.releaseDictionary()
+	return dhs.indicesKernel.Reset()
+}
 func (dhs *dictionaryHashState) Flush(out *exec.ExecResult) error {
 	return dhs.indicesKernel.Flush(out)
 }
@@ -526,56 +545,133 @@ func (dhs *dictionaryHashState) GetDictionary() (arrow.ArrayData, error) {
 func (dhs *dictionaryHashState) ValueType() arrow.DataType           { return dhs.indicesKernel.ValueType() }
 func (dhs *dictionaryHashState) DictionaryValueType() arrow.DataType { return dhs.dictValueType }
 func (dhs *dictionaryHashState) Dictionary() arrow.Array             { return dhs.dictionary }
-func (dhs *dictionaryHashState) Append(ctx *exec.KernelCtx, arr *exec.ArraySpan) error {
-	arrDict := arr.Dictionary().MakeArray()
-	if dhs.dictionary == nil || array.Equal(dhs.dictionary, arrDict) {
-		dhs.dictionary = arrDict
-		return dhs.indicesKernel.Append(ctx, arr)
-	}
-
-	defer arrDict.Release()
-
-	// NOTE: this approach computes a new dictionary unification per chunk
-	// this is in effect O(n*k) where n is the total chunked array length
-	// and k is the number of chunks (therefore O(n**2) if chunks have a fixed size).
-	//
-	// A better approach may be to run the kernel over each individual chunk,
-	// and then hash-aggregate all results (for example sum-group-by for
-	// the "value_counts" kernel)
-	unifier, err := array.NewDictionaryUnifier(dhs.indicesKernel.Allocator(), dhs.dictValueType)
-	if err != nil {
-		return err
-	}
-	defer unifier.Release()
-
-	if err := unifier.Unify(dhs.dictionary); err != nil {
-		return err
-	}
-	transposeMap, err := unifier.UnifyAndTranspose(arrDict)
-	if err != nil {
-		return err
-	}
-	defer transposeMap.Release()
-	_, outDict, err := unifier.GetResult()
-	if err != nil {
-		return err
-	}
+func (dhs *dictionaryHashState) Append(ctx *exec.KernelCtx, arr *exec.ArraySpan) (err error) {
+	// A failed append must not retain the unifier's allocator-backed buffers.
 	defer func() {
-		dhs.dictionary.Release()
-		dhs.dictionary = outDict
+		if err != nil {
+			dhs.releaseDictionary()
+		}
 	}()
 
-	inDict := arr.MakeData()
-	defer inDict.Release()
-	tmp, err := array.TransposeDictIndices(dhs.Allocator(), inDict, arr.Type, arr.Type, outDict.Data(), arrow.Int32Traits.CastFromBytes(transposeMap.Bytes()))
+	arrDict := arr.Dictionary().MakeArray()
+	defer arrDict.Release()
+
+	if dhs.unifier == nil {
+		if dhs.dictionary == nil {
+			// Preserve the original indices and dictionary for the common case
+			// where all chunks use the same dictionary.
+			arrDict.Retain()
+			dhs.dictionary = arrDict
+			return dhs.indicesKernel.Append(ctx, arr)
+		}
+		if array.Equal(dhs.dictionary, arrDict) {
+			return dhs.indicesKernel.Append(ctx, arr)
+		}
+
+		// Seed the unifier only once. Re-unifying the full accumulated
+		// dictionary for every chunk makes many changing dictionaries quadratic.
+		dhs.unifier, err = array.NewDictionaryUnifier(dhs.Allocator(), dhs.dictValueType)
+		if err != nil {
+			return err
+		}
+		if err = dhs.unifier.Unify(dhs.dictionary); err != nil {
+			return err
+		}
+		dhs.dictionary.Release()
+		dhs.dictionary = nil
+	}
+
+	transpose, err := dhs.unifier.UnifyAndTranspose(arrDict)
 	if err != nil {
 		return err
 	}
-	defer tmp.Release()
+	defer transpose.Release()
+	mapping := arrow.Int32Traits.CastFromBytes(transpose.Bytes())
 
-	var tmpSpan exec.ArraySpan
-	tmpSpan.SetMembers(tmp)
-	return dhs.indicesKernel.Append(ctx, &tmpSpan)
+	// The unique kernel keeps the input dictionary's index type. Reject
+	// transpositions which would truncate a newly assigned dictionary index.
+	var maxIndex int32 = math.MaxInt32
+	switch dhs.indexType.ID() {
+	case arrow.INT8:
+		maxIndex = math.MaxInt8
+	case arrow.UINT8:
+		maxIndex = math.MaxUint8
+	case arrow.INT16:
+		maxIndex = math.MaxInt16
+	case arrow.UINT16:
+		maxIndex = math.MaxUint16
+	}
+	if maxIndex != math.MaxInt32 {
+		// Transposition may assign out-of-range IDs to dictionary entries
+		// that no valid row references. Only reject referenced IDs.
+		needsCheck := false
+		for _, mapped := range mapping {
+			if mapped > maxIndex {
+				needsCheck = true
+				break
+			}
+		}
+		if needsCheck {
+			current := arr.MakeArray().(*array.Dictionary)
+			defer current.Release()
+			for i := 0; i < current.Len(); i++ {
+				if current.IsNull(i) {
+					continue
+				}
+				index := current.GetValueIndex(i)
+				if index < 0 || index >= len(mapping) {
+					return fmt.Errorf("%w: dictionary index %d out of range", arrow.ErrInvalid, index)
+				}
+				if mapped := mapping[index]; mapped > maxIndex {
+					return fmt.Errorf("%w: unified dictionary index %d exceeds %s capacity",
+						arrow.ErrInvalid, mapped, dhs.indexType)
+				}
+			}
+		}
+	}
+
+	// Transpose only the current chunk's index buffer. Materializing a new
+	// cumulative dictionary here would bring back the quadratic cost.
+	indexWidth := dhs.indexType.(arrow.FixedWidthDataType).Bytes()
+	indices := memory.NewResizableBuffer(dhs.Allocator())
+	defer indices.Release()
+	indices.Resize(int(arr.Len) * indexWidth)
+	if arr.Nulls == 0 || len(arr.Buffers[0].Buf) == 0 {
+		if err = utils.TransposeIntsBuffers(dhs.indexType, dhs.indexType,
+			arr.Buffers[1].Buf, indices.Bytes(), int(arr.Offset), 0, int(arr.Len), mapping); err != nil {
+			return err
+		}
+	} else {
+		// Null index slots may contain arbitrary out-of-bounds values.
+		// Only transpose valid runs, leaving the other scratch slots unused.
+		runs := bitutils.NewSetBitRunReader(arr.Buffers[0].Buf, arr.Offset, arr.Len)
+		for {
+			run := runs.NextRun()
+			if run.AtEnd() {
+				break
+			}
+			if err = utils.TransposeIntsBuffers(dhs.indexType, dhs.indexType,
+				arr.Buffers[1].Buf, indices.Bytes(), int(arr.Offset+run.Pos),
+				int(run.Pos), int(run.Length), mapping); err != nil {
+				return err
+			}
+		}
+	}
+
+	remapped := *arr
+	remapped.Offset = 0
+	remapped.Buffers[1] = exec.BufferSpan{Buf: indices.Bytes()}
+	if arr.Nulls == 0 || len(arr.Buffers[0].Buf) == 0 {
+		remapped.Buffers[0] = exec.BufferSpan{}
+	} else if arr.Offset != 0 {
+		validity := memory.NewResizableBuffer(dhs.Allocator())
+		defer validity.Release()
+		validity.Resize(int(bitutil.BytesForBits(arr.Len)))
+		bitutil.CopyBitmap(arr.Buffers[0].Buf, int(arr.Offset), int(arr.Len), validity.Bytes(), 0)
+		remapped.Buffers[0] = exec.BufferSpan{Buf: validity.Bytes()}
+	}
+
+	return dhs.indicesKernel.Append(ctx, &remapped)
 }
 
 func nullHashInit(actionInit initAction) exec.KernelInitFn {
@@ -671,6 +767,7 @@ func dictionaryHashInit(actionInit initAction) exec.KernelInitFn {
 		return &dictionaryHashState{
 			indicesKernel: indicesHasher.(HashState),
 			dictValueType: dictType.ValueType,
+			indexType:     dictType.IndexType,
 		}, nil
 	}
 }
@@ -746,9 +843,20 @@ func uniqueFinalize(ctx *exec.KernelCtx, results []*exec.ArraySpan) ([]*exec.Arr
 func ensureHashDictionary(_ *exec.KernelCtx, hash *dictionaryHashState) (*exec.ArraySpan, error) {
 	out := &exec.ArraySpan{}
 
+	if hash.unifier != nil {
+		// GetResult materializes the unified dictionary once, after all chunks.
+		_, unified, err := hash.unifier.GetResult()
+		hash.unifier.Release()
+		hash.unifier = nil
+		if err != nil {
+			return nil, err
+		}
+		hash.dictionary = unified
+	}
 	if hash.dictionary != nil {
 		out.TakeOwnership(hash.dictionary.Data())
 		hash.dictionary.Release()
+		hash.dictionary = nil
 		return out, nil
 	}
 
@@ -888,7 +996,10 @@ func GetVectorHashKernels() (unique, valueCounts, dictEncode []exec.VectorKernel
 	var base exec.VectorKernel
 	base.ExecFn = hashExec
 
-	// unique
+	// unique only writes its output during finalization. Avoid allocating
+	// temporary buffers for every chunk, especially when append fails.
+	base.NullHandling = exec.NullComputedNoPrealloc
+	base.MemAlloc = exec.MemNoPrealloc
 	base.Finalize = uniqueFinalize
 	base.OutputChunked = false
 	base.CanExecuteChunkWise = true

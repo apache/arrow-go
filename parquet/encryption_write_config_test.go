@@ -59,6 +59,8 @@ import (
  *                                  identity storage in file metadata.
  *  - Encryption configuration 6:   Encrypt two columns and the footer, with different
  *                                  keys. Use the alternative (AES_GCM_CTR_V1) algorithm.
+ *  - Encryption configuration 7:   Encrypt two columns with a plaintext footer, using
+ *                                  the alternative (AES_GCM_CTR_V1) algorithm.
  */
 
 var tempdir string
@@ -342,6 +344,21 @@ func (en *EncryptionConfigTestSuite) TestEncryptTwoColumnsAndFooterAesGcmCtr() {
 	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer_ctr.parquet.uncompressed.encrypted", parquet.WithCompression(compress.Codecs.Uncompressed))
 	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer_ctr.parquet.v2.encrypted", parquet.WithDataPageVersion(parquet.DataPageV2))
 	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_and_footer_ctr.parquet.v2.uncompressed.encrypted", parquet.WithCompression(compress.Codecs.Uncompressed),
+		parquet.WithDataPageVersion(parquet.DataPageV2))
+}
+
+// Encryption Config 7: Encrypt two columns with a plaintext footer.
+// Use AES_GCM_CTR_V1
+func (en *EncryptionConfigTestSuite) TestEncryptTwoColumnsPlaintextFooterAesGcmCtr() {
+	encryptCols := make(parquet.ColumnPathToEncryptionPropsMap)
+	encryptCols[en.pathToDoubleField] = parquet.NewColumnEncryptionProperties(en.pathToDoubleField, parquet.WithKey(en.columnEncryptionKey1), parquet.WithKeyID("kc1"))
+	encryptCols[en.pathToFloatField] = parquet.NewColumnEncryptionProperties(en.pathToFloatField, parquet.WithKey(en.columnEncryptionKey2), parquet.WithKeyID("kc2"))
+
+	props := parquet.NewFileEncryptionProperties(en.footerEncryptionKey, parquet.WithFooterKeyMetadata("kf"), parquet.WithEncryptedColumns(encryptCols), parquet.WithAlg(parquet.AesCtr), parquet.WithPlaintextFooter())
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_plaintext_footer_ctr.parquet.encrypted")
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_plaintext_footer_ctr.parquet.uncompressed.encrypted", parquet.WithCompression(compress.Codecs.Uncompressed))
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_plaintext_footer_ctr.parquet.v2.encrypted", parquet.WithDataPageVersion(parquet.DataPageV2))
+	en.encryptFile(props.Clone(""), "tmp_encrypt_columns_plaintext_footer_ctr.parquet.v2.uncompressed.encrypted", parquet.WithCompression(compress.Codecs.Uncompressed),
 		parquet.WithDataPageVersion(parquet.DataPageV2))
 }
 

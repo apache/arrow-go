@@ -51,11 +51,14 @@ type FileDecryptor interface {
 	// actual column data footer bytes, not column metadata.
 	GetFooterDecryptorForColumnData(aad string) Decryptor
 	// GetColumnMetaDecryptor returns a decryptor for the requested column path, key and AAD bytes
-	// but only for decrypting the row group level metadata
-	GetColumnMetaDecryptor(columnPath, columnKeyMetadata, aad string) Decryptor
+	// but only for decrypting the row group level metadata. An error is returned if no key is
+	// available for the column, for example because the decryption properties only provide keys
+	// for a subset of the encrypted columns.
+	GetColumnMetaDecryptor(columnPath, columnKeyMetadata, aad string) (Decryptor, error)
 	// GetColumnDataDecryptor returns a decryptor for the requested column path, key, and AAD bytes
-	// but only for the rowgroup column data.
-	GetColumnDataDecryptor(columnPath, columnKeyMetadata, aad string) Decryptor
+	// but only for the rowgroup column data. An error is returned if no key is available for
+	// the column.
+	GetColumnDataDecryptor(columnPath, columnKeyMetadata, aad string) (Decryptor, error)
 }
 
 type fileDecryptor struct {
@@ -125,11 +128,11 @@ func (d *fileDecryptor) GetFooterDecryptorForColumnData(aad string) Decryptor {
 	return d.getFooterDecryptor(aad, false)
 }
 
-func (d *fileDecryptor) GetColumnMetaDecryptor(columnPath, columnKeyMetadata, aad string) Decryptor {
+func (d *fileDecryptor) GetColumnMetaDecryptor(columnPath, columnKeyMetadata, aad string) (Decryptor, error) {
 	return d.getColumnDecryptor(columnPath, columnKeyMetadata, aad, true)
 }
 
-func (d *fileDecryptor) GetColumnDataDecryptor(columnPath, columnKeyMetadata, aad string) Decryptor {
+func (d *fileDecryptor) GetColumnDataDecryptor(columnPath, columnKeyMetadata, aad string) (Decryptor, error) {
 	return d.getColumnDecryptor(columnPath, columnKeyMetadata, aad, false)
 }
 
@@ -176,16 +179,16 @@ func (d *fileDecryptor) getFooterDecryptor(aad string, metadata bool) Decryptor 
 	return d.footerDataDecryptor
 }
 
-func (d *fileDecryptor) getColumnDecryptor(columnPath, columnMeta, aad string, metadata bool) Decryptor {
+func (d *fileDecryptor) getColumnDecryptor(columnPath, columnMeta, aad string, metadata bool) (Decryptor, error) {
 	if metadata {
 		if res, ok := d.columnMetaDataMap[columnPath]; ok {
 			res.UpdateAad(aad)
-			return res
+			return res, nil
 		}
 	} else {
 		if res, ok := d.columnDataMap[columnPath]; ok {
 			res.UpdateAad(aad)
-			return res
+			return res, nil
 		}
 	}
 
@@ -195,7 +198,10 @@ func (d *fileDecryptor) getColumnDecryptor(columnPath, columnMeta, aad string, m
 		columnKey = d.props.KeyRetriever.GetKey([]byte(columnMeta))
 	}
 	if columnKey == "" {
-		panic("hidden column exception, path=" + columnPath)
+		// The column is encrypted with a key we don't have (a "hidden" column).
+		// Other columns in the file may still be readable, so report this as an
+		// error for this column instead of panicking.
+		return nil, fmt.Errorf("parquet: hidden column, no decryption key available for encrypted column %q", columnPath)
 	}
 
 	aesDataDecrypt := d.getDataAesDecryptor()
@@ -217,9 +223,9 @@ func (d *fileDecryptor) getColumnDecryptor(columnPath, columnMeta, aad string, m
 	}
 
 	if metadata {
-		return d.columnMetaDataMap[columnPath]
+		return d.columnMetaDataMap[columnPath], nil
 	}
-	return d.columnDataMap[columnPath]
+	return d.columnDataMap[columnPath], nil
 }
 
 func (d *fileDecryptor) getMetaAesDecryptor() *aesDecryptor {
@@ -290,7 +296,7 @@ func getColumnDecryptor(cryptoMetadata *format.ColumnCryptoMetaData, fileDecrypt
 	// column is encrypted with its own key
 	columnKeyMetadata := cryptoMetadata.ENCRYPTION_WITH_COLUMN_KEY.KeyMetadata
 	colPath := parquet.ColumnPath(cryptoMetadata.ENCRYPTION_WITH_COLUMN_KEY.PathInSchema).String()
-	return fileDecryptor.GetColumnMetaDecryptor(colPath, string(columnKeyMetadata), ""), nil
+	return fileDecryptor.GetColumnMetaDecryptor(colPath, string(columnKeyMetadata), "")
 }
 
 func GetColumnMetaDecryptor(cryptoMetadata *format.ColumnCryptoMetaData, fileDecryptor FileDecryptor) (Decryptor, error) {

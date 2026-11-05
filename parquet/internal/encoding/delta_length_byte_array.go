@@ -177,9 +177,12 @@ func (d *DeltaLengthByteArrayDecoder) decodeOne() parquet.ByteArray {
 
 func (d *DeltaLengthByteArrayDecoder) Discard(n int) (int, error) {
 	n = min(n, d.nvals)
-	for i := 0; i < n; i++ {
-		d.data = d.data[d.lengths[i]:]
+	var skip int
+	for _, length := range d.lengths[:n] {
+		skip += int(length)
 	}
+	// SetData already verified that the lengths fit within the payload.
+	d.data = d.data[skip:]
 	d.nvals -= n
 	d.lengths = d.lengths[n:]
 	return n, nil
@@ -189,9 +192,15 @@ func (d *DeltaLengthByteArrayDecoder) Discard(n int) (int, error) {
 // or runs out of values in the column to decode, then returns the number of values actually decoded.
 func (d *DeltaLengthByteArrayDecoder) Decode(out []parquet.ByteArray) (int, error) {
 	max := utils.Min(len(out), d.nvals)
-	for i := 0; i < max; i++ {
-		out[i] = d.decodeOne()
+	data := d.data
+	for i, length := range d.lengths[:max] {
+		out[i] = data[:length:length]
+		data = data[length:]
 	}
+	// Commit decoder state once per batch instead of once per value.
+	d.data = data
+	d.lengths = d.lengths[max:]
+	d.nvals -= max
 	return max, nil
 }
 

@@ -136,6 +136,25 @@ func compareFloatNaNs(order SortOrder, viNaN, vjNaN bool) (int, bool) {
 	return 0, false
 }
 
+// The totalOrderKey helpers map the raw bits of an IEEE 754 float to a signed integer whose
+// natural order is the IEEE 754 totalOrder of the floats. Non-negative floats (sign bit clear)
+// already order correctly as signed integers; for negative floats the magnitude bits are
+// inverted so larger magnitudes sort first. Arithmetic shift of the sign yields the mask.
+func totalOrderKey16(bits uint16) int16 {
+	s := int16(bits)
+	return s ^ int16(uint16(s>>15)>>1)
+}
+
+func totalOrderKey32(bits uint32) int32 {
+	s := int32(bits)
+	return s ^ int32(uint32(s>>31)>>1)
+}
+
+func totalOrderKey64(bits uint64) int64 {
+	s := int64(bits)
+	return s ^ int64(uint64(s>>63)>>1)
+}
+
 func sortFloat64[T float16.Num | float32 | float64](v T) float64 {
 	switch x := any(v).(type) {
 	case float16.Num:

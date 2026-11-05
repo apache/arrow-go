@@ -22,6 +22,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/json"
 
@@ -85,6 +86,55 @@ func TestRLEFromRunEndsAndValues(t *testing.T) {
 	})
 }
 
+func TestRunEndEncodedValidateConstructedArrays(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewRunEndEncodedBuilder(mem, arrow.PrimitiveTypes.Int64, arrow.PrimitiveTypes.Int64)
+	defer bldr.Release()
+
+	bldr.Append(2)
+	bldr.ValueBuilder().(*array.Int64Builder).Append(42)
+	bldr.AppendNull()
+	bldr.Append(3)
+	bldr.ValueBuilder().(*array.Int64Builder).Append(7)
+
+	built := bldr.NewArray().(*array.RunEndEncoded)
+	defer built.Release()
+	constructed := array.NewRunEndEncodedArray(built.RunEndsArr(), built.Values(), built.Len(), 0)
+	defer constructed.Release()
+	concatenated, err := array.Concatenate([]arrow.Array{built, constructed}, mem)
+	require.NoError(t, err)
+	defer concatenated.Release()
+	concatenatedWithPlaceholder, err := array.Concatenate([]arrow.Array{constructed, built}, mem)
+	require.NoError(t, err)
+	defer concatenatedWithPlaceholder.Release()
+	empty := bldr.NewArray()
+	defer empty.Release()
+	sliced := array.NewSlice(built, 1, 5)
+	defer sliced.Release()
+	ext := array.NewExtensionArrayWithStorage(extensions.NewOpaqueType(built.DataType(), "ree", "test"), built)
+	defer ext.Release()
+
+	for _, tt := range []struct {
+		name string
+		arr  arrow.Array
+	}{
+		{"builder", built},
+		{"constructor", constructed},
+		{"concatenate", concatenated},
+		{"concatenate with placeholder", concatenatedWithPlaceholder},
+		{"empty builder", empty},
+		{"sliced builder", sliced},
+		{"extension", ext},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.NoError(t, array.Validate(tt.arr))
+			assert.NoError(t, array.ValidateFull(tt.arr))
+		})
+	}
+}
+
 func TestRunEndEncodedValidate(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -101,6 +151,33 @@ func TestRunEndEncodedValidate(t *testing.T) {
 
 		assert.NoError(t, arr.Validate())
 		assert.NoError(t, arr.ValidateFull())
+	})
+
+	t.Run("invalid parent buffers", func(t *testing.T) {
+		runEnds, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int64, strings.NewReader(`[1, 3]`))
+		require.NoError(t, err)
+		defer runEnds.Release()
+		values, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int64, strings.NewReader(`[42, 7]`))
+		require.NoError(t, err)
+		defer values.Release()
+
+		for _, tt := range []struct {
+			name    string
+			buffers []*memory.Buffer
+			wantErr string
+		}{
+			{"non-nil buffer", []*memory.Buffer{memory.NewBufferBytes([]byte{0xff})}, "must be nil"},
+			{"extra buffer", []*memory.Buffer{nil, nil}, "expected at most 1 buffers"},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				arr := makeRunEndEncodedArrayRaw(t, arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int64, arrow.PrimitiveTypes.Int64), 3, 0, 0,
+					tt.buffers, []arrow.ArrayData{runEnds.Data(), values.Data()})
+				defer arr.Release()
+
+				assert.ErrorContains(t, array.Validate(arr), tt.wantErr)
+				assert.ErrorContains(t, array.ValidateFull(arr), tt.wantErr)
+			})
+		}
 	})
 
 	t.Run("last run end shorter than logical length fails Validate", func(t *testing.T) {
@@ -140,14 +217,16 @@ func TestRunEndEncodedValidate(t *testing.T) {
 		defer runEnds.Release()
 		defer values.Release()
 
-		arr := makeRunEndEncodedArrayRaw(t, arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.BinaryTypes.String), 2, 0, 0,
-			[]*memory.Buffer{nil}, []arrow.ArrayData{runEnds.Data(), values.Data()})
-		defer arr.Release()
+		for _, buffers := range [][]*memory.Buffer{nil, {nil}} {
+			arr := makeRunEndEncodedArrayRaw(t, arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.BinaryTypes.String), 2, 0, 0,
+				buffers, []arrow.ArrayData{runEnds.Data(), values.Data()})
+			defer arr.Release()
 
-		assert.NoError(t, array.Validate(arr))
-		err := array.ValidateFull(arr)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "strictly greater")
+			assert.NoError(t, array.Validate(arr))
+			err := array.ValidateFull(arr)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "strictly greater")
+		}
 	})
 
 	t.Run("unknown null counts without bitmaps still validate", func(t *testing.T) {

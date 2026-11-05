@@ -16,6 +16,11 @@
 
 # this converts rotate instructions from "ro[lr] <reg>" -> "ro[lr] <reg>, 1" for yasm compatibility
 PERL_FIXUP_ROTATE=perl -i -pe 's/(ro[rl]\s+\w{2,3})$$/\1, 1/'
+# c2goasm loads whole words, but the arithmetic operation is a signed int8.
+PERL_FIXUP_ARITHMETIC_OP=perl -i -pe 's/MOVQ (op\+(?:8|16)\(FP\))/MOVBQSX \1/'
+# A nonzero Go frame makes the assembler save and restore BP, which c2goasm
+# uses to address constants in otherwise frameless arithmetic and cast kernels.
+PERL_FIXUP_FRAME_POINTER=perl -i -pe 's/^(TEXT .*, \$$)0-/$${1}8-/'
 
 C2GOASM=c2goasm
 CC=clang-11
@@ -106,9 +111,11 @@ _lib/constant_factor_neon.s: _lib/constant_factor_neon.c
 
 cast_numeric_avx2_amd64.s: _lib/cast_numeric_avx2_amd64.s
 	$(C2GOASM) -a -f $^ $@
+	$(PERL_FIXUP_FRAME_POINTER) $@
 
 cast_numeric_sse4_amd64.s: _lib/cast_numeric_sse4_amd64.s
 	$(C2GOASM) -a -f $^ $@
+	$(PERL_FIXUP_FRAME_POINTER) $@
 
 constant_factor_avx2_amd64.s: _lib/constant_factor_avx2_amd64.s
 	$(C2GOASM) -a -f $^ $@
@@ -118,9 +125,13 @@ constant_factor_sse4_amd64.s: _lib/constant_factor_sse4_amd64.s
 
 base_arithmetic_avx2_amd64.s: _lib/base_arithmetic_avx2_amd64.s
 	$(C2GOASM) -a -f $^ $@
+	$(PERL_FIXUP_ARITHMETIC_OP) $@
+	$(PERL_FIXUP_FRAME_POINTER) $@
 
 base_arithmetic_sse4_amd64.s: _lib/base_arithmetic_sse4_amd64.s
 	$(C2GOASM) -a -f $^ $@
+	$(PERL_FIXUP_ARITHMETIC_OP) $@
+	$(PERL_FIXUP_FRAME_POINTER) $@
 
 scalar_comparison_avx2_amd64.s: _lib/scalar_comparison_avx2_amd64.s	
 	$(C2GOASM) -a -f $^ $@

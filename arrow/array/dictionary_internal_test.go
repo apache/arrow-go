@@ -18,6 +18,7 @@ package array
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -205,4 +206,36 @@ func BenchmarkCheckIndexBounds(b *testing.B) {
 			}
 		})
 	}
+}
+
+func requireStringDictionary(t *testing.T, mem memory.Allocator, values string, arr *Dictionary) {
+	t.Helper()
+	expected, _, err := FromJSON(mem, arrow.BinaryTypes.String, strings.NewReader(values))
+	require.NoError(t, err)
+	defer expected.Release()
+	require.Truef(t, Equal(expected, arr.Dictionary()), "got: %s, expected: %s", arr.Dictionary(), expected)
+}
+
+func TestDictionaryBuilderCheckpointRestoreRebuildsDictionary(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	bldr := NewDictionaryBuilder(mem, dictType).(*BinaryDictionaryBuilder)
+	defer bldr.Release()
+	require.NoError(t, bldr.AppendString("a"))
+	checkpoint := bldr.newCheckpoint()
+	checkpoint.capture()
+
+	require.NoError(t, bldr.AppendString("b"))
+	first := bldr.NewDictionaryArray()
+	defer first.Release()
+
+	checkpoint.restore()
+	require.NoError(t, bldr.AppendString("c"))
+	second := bldr.NewDictionaryArray()
+	defer second.Release()
+
+	requireStringDictionary(t, mem, `["a", "b"]`, first)
+	requireStringDictionary(t, mem, `["a", "c"]`, second)
 }

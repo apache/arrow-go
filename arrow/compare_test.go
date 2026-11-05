@@ -334,6 +334,41 @@ func TestTypeEqual(t *testing.T) {
 			false, true,
 		},
 		{
+			ListOfField(Field{Name: "item", Type: BinaryTypes.String, Nullable: true}),
+			ListOfField(Field{Name: "item", Type: BinaryTypes.String, Nullable: true, Metadata: MetadataFrom(map[string]string{})}),
+			true, false,
+		},
+		{
+			ListOfField(Field{Name: "item", Type: BinaryTypes.String, Nullable: true, Metadata: MetadataFrom(map[string]string{"k1": "v1"})}),
+			ListOfField(Field{Name: "item", Type: BinaryTypes.String, Nullable: true, Metadata: MetadataFrom(map[string]string{"k1": "v2"})}),
+			false, true,
+		},
+		{
+			LargeListOfField(Field{Name: "item", Type: BinaryTypes.String, Nullable: true}),
+			LargeListOfField(Field{Name: "item", Type: BinaryTypes.String, Nullable: true, Metadata: MetadataFrom(map[string]string{})}),
+			true, false,
+		},
+		{
+			LargeListOfField(Field{Name: "item", Type: BinaryTypes.String, Nullable: true, Metadata: MetadataFrom(map[string]string{"k1": "v1"})}),
+			LargeListOfField(Field{Name: "item", Type: BinaryTypes.String, Nullable: true, Metadata: MetadataFrom(map[string]string{"k1": "v2"})}),
+			true, false,
+		},
+		{
+			LargeListOfField(Field{Name: "item", Type: BinaryTypes.String, Nullable: true, Metadata: MetadataFrom(map[string]string{"k1": "v1"})}),
+			LargeListOfField(Field{Name: "item", Type: BinaryTypes.String, Nullable: true, Metadata: MetadataFrom(map[string]string{"k1": "v2"})}),
+			false, true,
+		},
+		{
+			LargeListOf(BinaryTypes.String),
+			LargeListOfNonNullable(BinaryTypes.String),
+			false, false,
+		},
+		{
+			LargeListOf(BinaryTypes.String),
+			ListOf(BinaryTypes.String),
+			false, false,
+		},
+		{
 			MapOf(BinaryTypes.String, PrimitiveTypes.Int32),
 			MapOf(BinaryTypes.String, PrimitiveTypes.Int32),
 			true, false,

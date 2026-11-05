@@ -121,3 +121,48 @@ func BenchmarkRleBooleanDecoderDecodeSpacedToBitmap(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkRleBooleanDecoderDecode(b *testing.B) {
+	patterns := []struct {
+		name  string
+		value func(int) bool
+	}{
+		{name: "all_true", value: func(int) bool { return true }},
+		{name: "all_false", value: func(int) bool { return false }},
+		{name: "alternating", value: func(i int) bool { return i%2 == 0 }},
+		{name: "short_runs", value: func(i int) bool { return (i/7)%2 == 0 }},
+	}
+
+	for _, size := range []int{64 * 1024, 1024 * 1024} {
+		for _, pattern := range patterns {
+			for _, chunk := range []int{size, 257} {
+				b.Run(fmt.Sprintf("size_%d/%s/chunk_%d", size, pattern.name, chunk), func(b *testing.B) {
+					values := makeBooleanValues(size, pattern.value)
+					data := encodeRleBooleanValues(b, values)
+					out := make([]bool, size)
+					dec := encoding.NewDecoder(parquet.Types.Boolean, parquet.Encodings.RLE,
+						nil, memory.DefaultAllocator).(encoding.BooleanDecoder)
+
+					b.ReportAllocs()
+					b.SetBytes(int64(size))
+					for b.Loop() {
+						if err := dec.SetData(size, data); err != nil {
+							b.Fatal(err)
+						}
+						for offset := 0; offset < size; {
+							end := min(size, offset+chunk)
+							n, err := dec.Decode(out[offset:end])
+							if err != nil {
+								b.Fatal(err)
+							}
+							if n != end-offset {
+								b.Fatalf("expected %d booleans, got %d", end-offset, n)
+							}
+							offset = end
+						}
+					}
+				})
+			}
+		}
+	}
+}

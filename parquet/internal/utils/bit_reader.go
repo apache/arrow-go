@@ -21,6 +21,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	mathbits "math/bits"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -619,24 +620,35 @@ func (b *BitReader) GetBatchLevels(bits uint, out []int16, maxLevel int16) (int,
 	if _, err := b.reader.Seek(b.byteoffset, io.SeekStart); err != nil {
 		return i, maxCount, err
 	}
-	for i < length {
-		unpackSize := utils.Min(buflen, length-i)
-		numUnpacked, err := unpack32(b.reader, b.unpackBuf[:unpackSize], int(bits))
-
-		for k, val := range b.unpackBuf[:numUnpacked] {
-			level := int16(val)
-			out[i+k] = level
-			if level == maxLevel {
-				maxCount++
-			}
-		}
-		i += numUnpacked
-		b.byteoffset += int64(numUnpacked * int(bits) / 8)
+	if bits == 1 {
+		// Narrow Parquet levels can be expanded directly from packed bytes.
+		// Avoid the intermediate uint32 unpack buffer and second conversion pass.
+		n, count, err := b.getBatchLevelsOneBit(out[i:], maxLevel)
+		i += n
+		maxCount += count
 		if err != nil {
 			return i, maxCount, err
 		}
-		if numUnpacked == 0 {
-			break
+	} else {
+		for i < length {
+			unpackSize := utils.Min(buflen, length-i)
+			numUnpacked, err := unpack32(b.reader, b.unpackBuf[:unpackSize], int(bits))
+
+			for k, val := range b.unpackBuf[:numUnpacked] {
+				level := int16(val)
+				out[i+k] = level
+				if level == maxLevel {
+					maxCount++
+				}
+			}
+			i += numUnpacked
+			b.byteoffset += int64(numUnpacked * int(bits) / 8)
+			if err != nil {
+				return i, maxCount, err
+			}
+			if numUnpacked == 0 {
+				break
+			}
 		}
 	}
 
@@ -656,6 +668,64 @@ func (b *BitReader) GetBatchLevels(bits uint, out []int16, maxLevel int16) (int,
 	}
 
 	return i, maxCount, nil
+}
+
+// getBatchLevelsOneBit consumes complete groups of 32 packed one-bit levels.
+// It must be called with a byte-aligned reader; the caller decodes trailing
+// values with next. Only complete groups are written on short reads.
+func (b *BitReader) getBatchLevelsOneBit(out []int16, maxLevel int16) (int, int64, error) {
+	const valuesPerGroup = 32
+	const groupBytes = 4
+	toDecode := len(out) / valuesPerGroup * valuesPerGroup
+	packed := arrow.Uint32Traits.CastToBytes(b.unpackBuf[:])
+	decoded := 0
+	var maxCount int64
+
+	for decoded < toDecode {
+		batch := min(toDecode-decoded, buflen)
+		nread, err := io.ReadFull(b.reader, packed[:batch/8])
+		completeBytes := nread / groupBytes * groupBytes
+		complete := completeBytes * 8
+		dst := out[decoded : decoded+complete]
+
+		for _, value := range packed[:completeBytes] {
+			dst[0] = int16(value & 1)
+			dst[1] = int16((value >> 1) & 1)
+			dst[2] = int16((value >> 2) & 1)
+			dst[3] = int16((value >> 3) & 1)
+			dst[4] = int16((value >> 4) & 1)
+			dst[5] = int16((value >> 5) & 1)
+			dst[6] = int16((value >> 6) & 1)
+			dst[7] = int16(value >> 7)
+			switch maxLevel {
+			case 0:
+				maxCount += int64(8 - mathbits.OnesCount8(value))
+			case 1:
+				maxCount += int64(mathbits.OnesCount8(value))
+			}
+			dst = dst[8:]
+		}
+
+		decoded += complete
+		b.byteoffset += int64(completeBytes)
+		if err != nil {
+			// ReadFull can consume bytes beyond the last complete group.
+			// Restore the cursor and scalar buffer so later reads can
+			// resume at the first undecoded level.
+			if _, seekErr := b.reader.Seek(b.byteoffset, io.SeekStart); seekErr != nil {
+				return decoded, maxCount, seekErr
+			}
+			if fillErr := b.fillbuffer(); fillErr != nil {
+				return decoded, maxCount, fillErr
+			}
+			// unpack32 uses EOF for short reads ending at a group boundary.
+			if err == io.ErrUnexpectedEOF && nread%groupBytes == 0 {
+				err = io.EOF
+			}
+			return decoded, maxCount, err
+		}
+	}
+	return decoded, maxCount, nil
 }
 
 // GetBatchBitmap fills out with bit-packed boolean values without unpacking

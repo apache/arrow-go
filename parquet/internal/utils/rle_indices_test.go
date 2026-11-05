@@ -205,3 +205,34 @@ func TestRleBatchIndicesLiteralWriteErrorsMatchScalar(t *testing.T) {
 		}
 	}
 }
+
+var benchmarkRleIndicesWritten int
+
+// BenchmarkRleEncoderPutBatchIndices measures the RLE literal batches that
+// parquet dictionary writers actually produce, rather than isolated large
+// calls to BitWriter.WriteValues.
+func BenchmarkRleEncoderPutBatchIndices(b *testing.B) {
+	for _, width := range []int{7, 8, 9, 16} {
+		for _, count := range []int{1024, 65536} {
+			values := make([]int32, count)
+			mask := uint32((uint64(1) << uint(width)) - 1)
+			for i := range values {
+				values[i] = int32((uint32(i)*1103515245 + 12345) & mask)
+			}
+			b.Run(fmt.Sprintf("width=%d/values=%d", width, count), func(b *testing.B) {
+				output := make([]byte, MaxRLEBufferSize(width, count)+MinRLEBufferSize(width))
+				enc := NewRleEncoder(NewWriterAtBuffer(output), width)
+				b.ReportAllocs()
+				b.SetBytes(int64(count * width / 8))
+				for b.Loop() {
+					enc.Clear()
+					n, err := enc.PutBatchIndices(values)
+					if err != nil || n != count {
+						b.Fatalf("encoded %d/%d indices: %v", n, count, err)
+					}
+					benchmarkRleIndicesWritten = enc.Flush()
+				}
+			})
+		}
+	}
+}
