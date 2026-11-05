@@ -29,9 +29,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func checkStartsWith(t *testing.T, ctx context.Context, pattern string, input, expected compute.Datum) {
+func checkStartsWith(t *testing.T, ctx context.Context, opts compute.MatchSubstringOptions, input, expected compute.Datum) {
 	t.Helper()
-	got, err := compute.StartsWith(ctx, compute.MatchSubstringOptions{Pattern: pattern}, input)
+	got, err := compute.StartsWith(ctx, opts, input)
 	require.NoError(t, err)
 	defer got.Release()
 	assertDatumsEqual(t, expected, got, nil, nil)
@@ -84,7 +84,7 @@ func TestStartsWith(t *testing.T) {
 				switch dt.ID() {
 				case arrow.BINARY_VIEW, arrow.STRING_VIEW:
 					// arrow/scalar has no view scalars, so only the array path applies.
-					checkStartsWith(t, ctx, tt.pattern, in, exp)
+					checkStartsWith(t, ctx, compute.MatchSubstringOptions{Pattern: tt.pattern}, in, exp)
 				default:
 					checkScalarUnary(t, "starts_with", in, exp, &compute.MatchSubstringOptions{Pattern: tt.pattern})
 				}
@@ -99,7 +99,8 @@ func TestStartsWith(t *testing.T) {
 		expected := fromJSON(t, mem, arrow.FixedWidthTypes.Boolean, `[true, true, false, false]`)
 		defer expected.Release()
 
-		checkStartsWith(t, ctx, "\xff", compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected))
+		checkStartsWith(t, ctx, compute.MatchSubstringOptions{Pattern: "\xff"},
+			compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected))
 	})
 
 	for _, dt := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.StringView} {
@@ -113,7 +114,8 @@ func TestStartsWith(t *testing.T) {
 			expected := fromJSON(t, mem, arrow.FixedWidthTypes.Boolean, `[true, null, true, false, true, false]`)
 			defer expected.Release()
 
-			checkStartsWith(t, ctx, "ab", compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected))
+			checkStartsWith(t, ctx, compute.MatchSubstringOptions{Pattern: "ab"},
+				compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected))
 		})
 	}
 
@@ -134,7 +136,8 @@ func TestStartsWith(t *testing.T) {
 		expected := fromJSON(t, mem, arrow.FixedWidthTypes.Boolean, `[true, false, true, true, null]`)
 		defer expected.Release()
 
-		checkStartsWith(t, ctx, "abcdef", compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected))
+		checkStartsWith(t, ctx, compute.MatchSubstringOptions{Pattern: "abcdef"},
+			compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected))
 	})
 
 	t.Run("chunked", func(t *testing.T) {
@@ -152,7 +155,8 @@ func TestStartsWith(t *testing.T) {
 		expected := arrow.NewChunked(arrow.FixedWidthTypes.Boolean, []arrow.Array{want})
 		defer expected.Release()
 
-		checkStartsWith(t, ctx, "ab", compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected))
+		checkStartsWith(t, ctx, compute.MatchSubstringOptions{Pattern: "ab"},
+			compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected))
 	})
 
 	for _, dt := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.StringView} {
@@ -168,9 +172,83 @@ func TestStartsWith(t *testing.T) {
 			expected := fromJSON(t, mem, arrow.FixedWidthTypes.Boolean, `[true, null, false, null, true]`)
 			defer expected.Release()
 
-			checkStartsWith(t, ctx, "ab", compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected))
+			checkStartsWith(t, ctx, compute.MatchSubstringOptions{Pattern: "ab"},
+				compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected))
 		})
 	}
+
+	t.Run("ignore case", func(t *testing.T) {
+		strs := []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString, arrow.BinaryTypes.StringView}
+		bins := []arrow.DataType{arrow.BinaryTypes.Binary, arrow.BinaryTypes.LargeBinary, arrow.BinaryTypes.BinaryView}
+		tests := []struct {
+			name, pattern string
+			types         []arrow.DataType
+			input         []string
+			expected      string
+		}{
+			{"multibyte folds", "\u212a\u017f", strs, []string{"ks", "KSx", "\u212a\u017f", "k"}, `[true, true, true, false]`},
+			{"no full folding", "\u00df", strs, []string{"SS", "\u1e9e", "\u00df"}, `[false, true, true]`},
+			{"no special casing", "i", strs, []string{"I", "\u0130", "\u0131"}, `[true, false, false]`},
+			{"invalid input", "\ufffd", strs, []string{"\ufffd", "\xff", "\xffbcdefghijklm"}, `[true, false, false]`},
+			{"fold changes length", "abcdefghijk\u212a", strs,
+				[]string{"abcdefghijkxyz", "abcdefghijkK", "ABCDEFGHIJKkxyz", "abcdefghijk\u212a\u212a", "abcdefghijkx"},
+				`[false, true, true, true, false]`},
+			{"ascii folds only", "\xe0a", bins,
+				[]string{"\xe0A", "\xc0a", "\xe0", "\xc0abcdefghijklm", "\xe0Abcdefghijklm"},
+				`[true, false, false, false, true]`},
+			{"empty pattern", "", append(strs, bins...), []string{"", "\xff"}, `[true, true]`},
+		}
+
+		for _, tt := range tests {
+			for _, dt := range tt.types {
+				t.Run(tt.name+"/"+dt.String(), func(t *testing.T) {
+					ctx, mem := newCtx(t)
+					bldr := array.NewBuilder(mem, dt)
+					defer bldr.Release()
+					bldr.(interface{ AppendStringValues([]string, []bool) }).AppendStringValues(tt.input, nil)
+					input := bldr.NewArray()
+					defer input.Release()
+					expected := fromJSON(t, mem, arrow.FixedWidthTypes.Boolean, tt.expected)
+					defer expected.Release()
+
+					in, exp := compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected)
+					opts := compute.MatchSubstringOptions{Pattern: tt.pattern, IgnoreCase: true}
+					switch dt.ID() {
+					case arrow.BINARY_VIEW, arrow.STRING_VIEW:
+						checkStartsWith(t, ctx, opts, in, exp)
+					default:
+						checkScalarUnary(t, "starts_with", in, exp, &opts)
+					}
+				})
+			}
+		}
+
+		for _, dt := range []arrow.DataType{arrow.BinaryTypes.StringView, arrow.BinaryTypes.BinaryView} {
+			t.Run("sliced/"+dt.String(), func(t *testing.T) {
+				ctx, mem := newCtx(t)
+				bldr := array.NewBuilder(mem, dt).(interface {
+					array.Builder
+					AppendString(string)
+				})
+				defer bldr.Release()
+				bldr.AppendString("abc")
+				bldr.AppendString("ABcdefghijklmn")
+				bldr.AppendNull()
+				for _, v := range []string{"aBc", "abXdefghijklmn", "xbcdefghijklmn"} {
+					bldr.AppendString(v)
+				}
+				full := bldr.NewArray()
+				defer full.Release()
+				input := array.NewSlice(full, 1, 6)
+				defer input.Release()
+				expected := fromJSON(t, mem, arrow.FixedWidthTypes.Boolean, `[true, null, true, false, false]`)
+				defer expected.Release()
+
+				checkStartsWith(t, ctx, compute.MatchSubstringOptions{Pattern: "abc", IgnoreCase: true},
+					compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected))
+			})
+		}
+	})
 
 	t.Run("options", func(t *testing.T) {
 		fn, ok := compute.GetFunctionRegistry().GetFunction("starts_with")
@@ -195,7 +273,12 @@ func TestStartsWith(t *testing.T) {
 		assert.ErrorIs(t, err, arrow.ErrInvalid)
 		_, err = compute.CallFunction(ctx, "starts_with", &compute.ArithmeticOptions{}, input)
 		assert.ErrorIs(t, err, arrow.ErrInvalid)
-		_, err = compute.StartsWith(ctx, compute.MatchSubstringOptions{Pattern: "a", IgnoreCase: true}, input)
-		assert.ErrorIs(t, err, arrow.ErrNotImplemented)
+		_, err = compute.StartsWith(ctx, compute.MatchSubstringOptions{Pattern: "\xff", IgnoreCase: true}, input)
+		assert.ErrorIs(t, err, arrow.ErrInvalid)
+		sv := fromJSON(t, mem, arrow.BinaryTypes.StringView, `["ab"]`)
+		defer sv.Release()
+		_, err = compute.StartsWith(ctx, compute.MatchSubstringOptions{Pattern: "\xff", IgnoreCase: true},
+			compute.NewDatumWithoutOwning(sv))
+		assert.ErrorIs(t, err, arrow.ErrInvalid)
 	})
 }

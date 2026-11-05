@@ -25,8 +25,12 @@ import (
 )
 
 // MatchSubstringOptions controls the substring matching functions such as
-// starts_with, which match Pattern as a literal byte sequence. Setting
-// IgnoreCase makes them return arrow.ErrNotImplemented.
+// starts_with, which match Pattern literally, not as a regular
+// expression. With IgnoreCase, string and string_view input match Unicode
+// simple case folds and require a valid UTF-8 pattern, while binary and
+// binary_view input match ASCII case folds only. String case folding uses
+// the tables of the Go toolchain's unicode package, so results can differ
+// between Go versions.
 type MatchSubstringOptions = kernels.MatchSubstringOptions
 
 var startsWithDoc = FunctionDoc{

@@ -264,18 +264,18 @@ func setLookupFuncSubstraitToArrowFunc(sf *expr.ScalarFunction, input []compute.
 	return
 }
 
-// startsWithSubstraitToArrowFunc supports only CASE_SENSITIVE.
-// A case_sensitivity preference list without CASE_SENSITIVE returns an
-// error wrapping arrow.ErrNotImplemented. Arrow C++ maps
-// CASE_INSENSITIVE to ignore_case=true.
+// startsWithSubstraitToArrowFunc maps CASE_INSENSITIVE to IgnoreCase.
+// A case_sensitivity preference list with only CASE_INSENSITIVE_ASCII
+// returns an error wrapping arrow.ErrNotImplemented.
 func startsWithSubstraitToArrowFunc(sf *expr.ScalarFunction, input []compute.Datum) (fname string, args []compute.Datum, opts compute.FunctionOptions, err error) {
 	if len(input) != 2 {
 		return "", nil, nil, fmt.Errorf("%w: starts_with expects 2 arguments, got %d",
 			arrow.ErrNotImplemented, len(input))
 	}
 
-	if _, err := parseOption(sf, "case_sensitivity", &caseSensitivityParser,
-		[]caseSensitivity{caseSensitive}, caseSensitive); err != nil {
+	sensitivity, err := parseOption(sf, "case_sensitivity", &caseSensitivityParser,
+		[]caseSensitivity{caseSensitive, caseInsensitive}, caseSensitive)
+	if err != nil {
 		return "", nil, nil, fmt.Errorf("%w: starts_with case_sensitivity %v", err, sf.GetOption("case_sensitivity"))
 	}
 
@@ -295,7 +295,10 @@ func startsWithSubstraitToArrowFunc(sf *expr.ScalarFunction, input []compute.Dat
 		return "", nil, nil, fmt.Errorf("%w: starts_with pattern of type %s", arrow.ErrNotImplemented, sc.DataType())
 	}
 
-	return "starts_with", input[:1], &compute.MatchSubstringOptions{Pattern: string(pattern.Data())}, nil
+	return "starts_with", input[:1], &compute.MatchSubstringOptions{
+		Pattern:    string(pattern.Data()),
+		IgnoreCase: sensitivity == caseInsensitive,
+	}, nil
 }
 
 func simpleMapSubstraitToArrowFunc(sf *expr.ScalarFunction, input []compute.Datum) (fname string, args []compute.Datum, opts compute.FunctionOptions, err error) {
