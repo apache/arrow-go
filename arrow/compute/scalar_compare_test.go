@@ -1683,6 +1683,19 @@ func (sv *ScalarValiditySuite) TestDictionaryNullValuesSliced() {
 		`[true, false, false, true, false, false, true, true, false, false, false]`)
 }
 
+func (sv *ScalarValiditySuite) TestDictionaryNullTypeValues() {
+	values := array.NewNull(1)
+	defer values.Release()
+	indices := sv.getArr(arrow.PrimitiveTypes.Int8, `[0, null, 0]`)
+	defer indices.Release()
+	dict := array.NewDictionaryArray(&arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.Null}, indices, values)
+	defer dict.Release()
+
+	sv.checkValiditySliced(dict, `[true, true, true]`, `[false, false, false]`)
+	sv.checkValiditySlice(dict, 1, 3, `[true, true]`, `[false, false]`)
+}
+
 func (sv *ScalarValiditySuite) TestDictionaryNullValuesScalarAndChunked() {
 	values := sv.getArr(arrow.BinaryTypes.String, `["a", null]`)
 	defer values.Release()
@@ -1751,6 +1764,198 @@ func (sv *ScalarValiditySuite) TestDictionaryNoNullValues() {
 	sv.Require().NoError(err)
 	defer res.Release()
 	sv.Same(dict.Data().Buffers()[0], res.(*compute.ArrayDatum).Value.Buffers()[1])
+}
+
+func (sv *ScalarValiditySuite) checkValiditySlice(input arrow.Array, lo, hi int64, isNull, isNotNull string) {
+	sliced := array.NewSlice(input, lo, hi)
+	defer sliced.Release()
+	sv.checkValiditySliced(sliced, isNull, isNotNull)
+}
+
+func (sv *ScalarValiditySuite) TestNullType() {
+	arr := array.NewNull(3)
+	defer arr.Release()
+	sv.checkValiditySliced(arr, `[true, true, true]`, `[false, false, false]`)
+	sv.checkValiditySlice(arr, 1, 3, `[true, true]`, `[false, false]`)
+}
+
+func (sv *ScalarValiditySuite) TestSparseUnion() {
+	typeIDs := sv.getArr(arrow.PrimitiveTypes.Int8, `[5, 2, 5, 2]`)
+	defer typeIDs.Release()
+	ints := sv.getArr(arrow.PrimitiveTypes.Int32, `[9, 1, null, 3, 4]`)
+	defer ints.Release()
+	strs := sv.getArr(arrow.BinaryTypes.String, `["z", "a", "b", null, null]`)
+	defer strs.Release()
+	slicedInts := array.NewSlice(ints, 1, 5)
+	defer slicedInts.Release()
+	slicedStrs := array.NewSlice(strs, 1, 5)
+	defer slicedStrs.Release()
+	arr, err := array.NewSparseUnionFromArraysWithFieldCodes(typeIDs,
+		[]arrow.Array{slicedInts, slicedStrs}, []string{"i", "s"}, []arrow.UnionTypeCode{2, 5})
+	sv.Require().NoError(err)
+	defer arr.Release()
+
+	// arr is ["a", null, null, 4]
+	sv.checkValiditySliced(arr, `[false, true, true, false]`, `[true, false, false, true]`)
+	sv.checkValiditySlice(arr, 2, 4, `[true, false]`, `[false, true]`)
+}
+
+func (sv *ScalarValiditySuite) TestDenseUnion() {
+	typeIDs := sv.getArr(arrow.PrimitiveTypes.Int8, `[5, 2, 2, 5]`)
+	defer typeIDs.Release()
+	offsets := sv.getArr(arrow.PrimitiveTypes.Int32, `[1, 1, 0, 0]`)
+	defer offsets.Release()
+	ints := sv.getArr(arrow.PrimitiveTypes.Int32, `[null, 1]`)
+	defer ints.Release()
+	strs := sv.getArr(arrow.BinaryTypes.String, `["a", null]`)
+	defer strs.Release()
+	arr, err := array.NewDenseUnionFromArraysWithFieldCodes(typeIDs, offsets,
+		[]arrow.Array{ints, strs}, []string{"i", "s"}, []arrow.UnionTypeCode{2, 5})
+	sv.Require().NoError(err)
+	defer arr.Release()
+
+	sv.checkValiditySliced(arr, `[true, false, true, false]`, `[false, true, false, true]`)
+	sv.checkValiditySlice(arr, 1, 3, `[false, true]`, `[true, false]`)
+}
+
+func (sv *ScalarValiditySuite) TestRunEndEncoded() {
+	allValues := sv.getArr(arrow.PrimitiveTypes.Int32, `[null, 1, null, 2]`)
+	defer allValues.Release()
+	values := array.NewSlice(allValues, 1, 4)
+	defer values.Release()
+	nulls := array.NewNull(2)
+	defer nulls.Release()
+	unionIDs := sv.getArr(arrow.PrimitiveTypes.Int8, `[0, 0]`)
+	defer unionIDs.Release()
+	unionInts := sv.getArr(arrow.PrimitiveTypes.Int32, `[1, null]`)
+	defer unionInts.Release()
+	union, err := array.NewSparseUnionFromArrays(unionIDs, []arrow.Array{unionInts})
+	sv.Require().NoError(err)
+	defer union.Release()
+
+	for _, runEndType := range []arrow.DataType{
+		arrow.PrimitiveTypes.Int16, arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int64,
+	} {
+		sv.Run(runEndType.String(), func() {
+			allRunEnds := sv.getArr(runEndType, `[1, 2, 3, 5]`)
+			defer allRunEnds.Release()
+			runEnds := array.NewSlice(allRunEnds, 1, 4)
+			defer runEnds.Release()
+			arr := array.NewRunEndEncodedArray(runEnds, values, 5, 0)
+			defer arr.Release()
+
+			// arr is [1, 1, null, 2, 2]
+			sv.checkValiditySliced(arr, `[false, false, true, false, false]`, `[true, true, false, true, true]`)
+			sv.checkValiditySlice(arr, 1, 4, `[false, true, false]`, `[true, false, true]`)
+			sv.checkValiditySlice(arr, 2, 5, `[true, false, false]`, `[false, true, true]`)
+
+			// As in Arrow C++, only the validity bitmap of the values is checked.
+			shortRunEnds := sv.getArr(runEndType, `[2, 3]`)
+			defer shortRunEnds.Release()
+			for _, v := range []arrow.Array{nulls, union} {
+				arr := array.NewRunEndEncodedArray(shortRunEnds, v, 3, 0)
+				sv.checkValiditySliced(arr, `[false, false, false]`, `[true, true, true]`)
+				arr.Release()
+			}
+		})
+	}
+}
+
+func (sv *ScalarValiditySuite) TestNestedUnion() {
+	innerIDs := sv.getArr(arrow.PrimitiveTypes.Int8, `[0, 0]`)
+	defer innerIDs.Release()
+	ints := sv.getArr(arrow.PrimitiveTypes.Int32, `[1, null]`)
+	defer ints.Release()
+	inner, err := array.NewSparseUnionFromArrays(innerIDs, []arrow.Array{ints})
+	sv.Require().NoError(err)
+	defer inner.Release()
+	nulls := array.NewNull(1)
+	defer nulls.Release()
+	typeIDs := sv.getArr(arrow.PrimitiveTypes.Int8, `[1, 0, 1]`)
+	defer typeIDs.Release()
+	offsets := sv.getArr(arrow.PrimitiveTypes.Int32, `[0, 0, 1]`)
+	defer offsets.Release()
+	arr, err := array.NewDenseUnionFromArrays(typeIDs, offsets, []arrow.Array{nulls, inner})
+	sv.Require().NoError(err)
+	defer arr.Release()
+
+	sv.checkValiditySliced(arr, `[false, true, true]`, `[true, false, false]`)
+
+	runEnds := sv.getArr(arrow.PrimitiveTypes.Int32, `[1, 2]`)
+	defer runEnds.Release()
+	ree := array.NewRunEndEncodedArray(runEnds, ints, 2, 0)
+	defer ree.Release()
+	indices := sv.getArr(arrow.PrimitiveTypes.Int32, `[0, 1]`)
+	defer indices.Release()
+	strs := sv.getArr(arrow.BinaryTypes.String, `["a", null]`)
+	defer strs.Release()
+	dict := array.NewDictionaryArray(&arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}, indices, strs)
+	defer dict.Release()
+
+	// As in Arrow C++, a run-end encoded child is checked logically and a
+	// dictionary child only by its index validity.
+	for _, tt := range []struct {
+		child             arrow.Array
+		isNull, isNotNull string
+	}{
+		{ree, `[false, true]`, `[true, false]`},
+		{dict, `[false, false]`, `[true, true]`},
+	} {
+		arr, err := array.NewSparseUnionFromArrays(innerIDs, []arrow.Array{tt.child})
+		sv.Require().NoError(err)
+		sv.checkValiditySliced(arr, tt.isNull, tt.isNotNull)
+		arr.Release()
+	}
+}
+
+func (sv *ScalarValiditySuite) TestLogicalNullScalars() {
+	typeIDs := sv.getArr(arrow.PrimitiveTypes.Int8, `[0, 0]`)
+	defer typeIDs.Release()
+	ints := sv.getArr(arrow.PrimitiveTypes.Int32, `[1, null]`)
+	defer ints.Release()
+	offsets := sv.getArr(arrow.PrimitiveTypes.Int32, `[0, 1]`)
+	defer offsets.Release()
+	sparse, err := array.NewSparseUnionFromArrays(typeIDs, []arrow.Array{ints})
+	sv.Require().NoError(err)
+	defer sparse.Release()
+	dense, err := array.NewDenseUnionFromArrays(typeIDs, offsets, []arrow.Array{ints})
+	sv.Require().NoError(err)
+	defer dense.Release()
+	runEnds := sv.getArr(arrow.PrimitiveTypes.Int32, `[1, 2]`)
+	defer runEnds.Release()
+	ree := array.NewRunEndEncodedArray(runEnds, ints, 2, 0)
+	defer ree.Release()
+
+	type testCase struct {
+		s      scalar.Scalar
+		isNull bool
+	}
+	tests := []testCase{{scalar.ScalarNull, true}}
+	for _, tt := range []struct {
+		arr    arrow.Array
+		idx    int
+		isNull bool
+	}{
+		{sparse, 1, true}, {dense, 1, true}, {ree, 0, false}, {ree, 1, true},
+	} {
+		s, err := scalar.GetScalar(tt.arr, tt.idx)
+		sv.Require().NoError(err)
+		if r, ok := s.(scalar.Releasable); ok {
+			defer r.Release()
+		}
+		tests = append(tests, testCase{s, tt.isNull})
+	}
+
+	for _, tt := range tests {
+		for fn, expected := range map[string]bool{"is_null": tt.isNull, "is_not_null": !tt.isNull} {
+			res, err := compute.CallFunction(sv.ctx, fn, nil, compute.NewDatumWithoutOwning(tt.s))
+			sv.Require().NoError(err)
+			sv.Truef(scalar.Equals(scalar.NewBooleanScalar(expected), res.(*compute.ScalarDatum).Value),
+				"%s(%s): expected %t, got %s", fn, tt.s, expected, res)
+			res.Release()
+		}
+	}
 }
 
 func (sv *ScalarValiditySuite) TestIsNaN() {

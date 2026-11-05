@@ -21,6 +21,7 @@ package kernels
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -716,7 +717,11 @@ func CompareKernels(op CompareOperator) []exec.ScalarKernel {
 }
 
 func dictHasNullValues(input *exec.ArraySpan) bool {
-	return input.Type.ID() == arrow.DICTIONARY && input.Dictionary().MayHaveNulls()
+	if input.Type.ID() != arrow.DICTIONARY {
+		return false
+	}
+	dict := input.Dictionary()
+	return dict.MayHaveNulls() || dict.Type.ID() == arrow.NULL
 }
 
 // dictValidity writes a bitmap to out, starting at bit 0, with a bit set for
@@ -748,11 +753,99 @@ func setDictBits[T arrow.UintType](input *exec.ArraySpan, out []byte, wantNull b
 	indexValidity := input.Buffers[0].Buf
 	for i, idx := range exec.GetSpanValues[T](input, 1) {
 		// Signed indices are read as unsigned. Only a valid slot's index must
-		// be in range, so check index validity first.
+		// be in range, so check index validity first. Null-type values have no
+		// validity bitmap and are all null.
 		valid := (indexValidity == nil || bitutil.BitIsSet(indexValidity, int(input.Offset)+i)) &&
-			bitutil.BitIsSet(valueValidity, int(dict.Offset)+int(idx))
+			valueValidity != nil && bitutil.BitIsSet(valueValidity, int(dict.Offset)+int(idx))
 		bitutil.SetBitTo(out, i, valid != wantNull)
 	}
+}
+
+// hasLogicalNulls reports whether input's nulls are not described by a
+// validity bitmap, as for null, union and run-end encoded types.
+func hasLogicalNulls(input *exec.ArraySpan) bool {
+	// a run-end encoded scalar promoted to an array has a validity bitmap and
+	// no children
+	if input.Buffers[0].Buf != nil {
+		return false
+	}
+	switch input.Type.ID() {
+	case arrow.NULL, arrow.SPARSE_UNION, arrow.DENSE_UNION, arrow.RUN_END_ENCODED:
+		return true
+	}
+	return false
+}
+
+// logicalValidity writes a bitmap to out like dictValidity, for the types
+// accepted by hasLogicalNulls. It follows Arrow C++'s SetLogicalNullBits: a
+// union slot takes the validity of its child slot, and a run-end encoded slot
+// takes the validity bitmap of its value.
+func logicalValidity(ctx *exec.KernelCtx, input *exec.ArraySpan, out *exec.ExecResult, wantNull bool) error {
+	out.Buffers[1].WrapBuffer(ctx.AllocateBitmap(input.Len))
+	bits := out.Buffers[1].Buf
+	switch input.Type.ID() {
+	case arrow.NULL:
+		bitutil.SetBitsTo(bits, 0, input.Len, wantNull)
+	case arrow.RUN_END_ENCODED:
+		values := &input.Children[1]
+		run := findRun(input, 0)
+		for pos := int64(0); pos < input.Len; run++ {
+			end := min(runEnd(input, run)-input.Offset, input.Len)
+			valid := values.Buffers[0].Buf == nil ||
+				bitutil.BitIsSet(values.Buffers[0].Buf, int(values.Offset)+run)
+			bitutil.SetBitsTo(bits, pos, end-pos, valid != wantNull)
+			pos = end
+		}
+	default:
+		for i := int64(0); i < input.Len; i++ {
+			bitutil.SetBitTo(bits, int(i), isValidAt(input, i) != wantNull)
+		}
+	}
+	return nil
+}
+
+// findRun returns the index of the run that holds slot i of a run-end encoded
+// span.
+func findRun(span *exec.ArraySpan, i int64) int {
+	return sort.Search(int(span.Children[0].Len), func(j int) bool { return runEnd(span, j) > span.Offset+i })
+}
+
+// runEnd returns the logical end of run j of a run-end encoded span.
+func runEnd(span *exec.ArraySpan, j int) int64 {
+	runEnds := &span.Children[0]
+	switch runEnds.Type.ID() {
+	case arrow.INT16:
+		return int64(exec.GetSpanValues[int16](runEnds, 1)[j])
+	case arrow.INT32:
+		return int64(exec.GetSpanValues[int32](runEnds, 1)[j])
+	default:
+		return int64(exec.GetSpanValues[int64](runEnds, 1)[j])
+	}
+}
+
+// isValidAt reports whether slot i of span is valid, following Arrow C++'s
+// ArraySpan::IsValid. Unlike the top-level kernels, it ignores null dictionary
+// values, and it checks the value of a run-end encoded array with isValidAt
+// rather than the validity bitmap of the values.
+func isValidAt(span *exec.ArraySpan, i int64) bool {
+	if span.Buffers[0].Buf != nil {
+		return bitutil.BitIsSet(span.Buffers[0].Buf, int(span.Offset+i))
+	}
+	switch span.Type.ID() {
+	case arrow.NULL:
+		return false
+	case arrow.SPARSE_UNION, arrow.DENSE_UNION:
+		code := exec.GetSpanValues[arrow.UnionTypeCode](span, 1)[i]
+		child := &span.Children[span.Type.(arrow.UnionType).ChildIDs()[code]]
+		j := span.Offset + i
+		if span.Type.ID() == arrow.DENSE_UNION {
+			j = int64(exec.GetSpanValues[int32](span, 2)[i])
+		}
+		return isValidAt(child, j)
+	case arrow.RUN_END_ENCODED:
+		return isValidAt(&span.Children[1], int64(findRun(span, i)))
+	}
+	return true
 }
 
 func isNullExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
@@ -761,6 +854,10 @@ func isNullExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult)
 
 	if dictHasNullValues(&input) {
 		return dictValidity(ctx, &input, out, true)
+	}
+
+	if hasLogicalNulls(&input) {
+		return logicalValidity(ctx, &input, out, true)
 	}
 
 	validityBuf := input.GetBuffer(0)
@@ -779,6 +876,10 @@ func isNotNullExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResu
 
 	if dictHasNullValues(&input) {
 		return dictValidity(ctx, &input, out, false)
+	}
+
+	if hasLogicalNulls(&input) {
+		return logicalValidity(ctx, &input, out, false)
 	}
 
 	validityBuf := input.GetBuffer(0)
