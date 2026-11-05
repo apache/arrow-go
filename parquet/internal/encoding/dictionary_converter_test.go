@@ -30,11 +30,23 @@ func TestDictionaryConverterBoundsGrowthByValuesLeft(t *testing.T) {
 	require.NoError(t, decoder.SetData(1, []byte{42, 0, 0, 0}))
 	converter := NewDictConverter[int32](decoder).(*dictConverter[int32])
 
-	require.Zero(t, cap(converter.dict))
 	require.Equal(t, 1, converter.dictLen)
+	require.LessOrEqual(t, cap(converter.dict), 1)
 	require.Error(t, converter.ensure(utils.IndexType(1<<30)))
-	require.Zero(t, cap(converter.dict))
+	require.LessOrEqual(t, cap(converter.dict), 1)
 
 	require.NoError(t, converter.ensure(0))
 	require.Equal(t, []int32{42}, converter.dict)
+}
+
+func TestDictionaryConverterPreallocBoundedByData(t *testing.T) {
+	decoder := NewDecoder(parquet.Types.Int32, parquet.Encodings.Plain, nil, memory.DefaultAllocator)
+	require.NoError(t, decoder.SetData(1<<30, []byte{42, 0, 0, 0}))
+	converter := NewDictConverter[int32](decoder).(*dictConverter[int32])
+
+	require.LessOrEqual(t, cap(converter.dict), 1)
+	require.NoError(t, converter.ensure(0))
+	require.Equal(t, []int32{42}, converter.dict)
+	require.Error(t, converter.ensure(1))
+	require.LessOrEqual(t, cap(converter.dict), 2)
 }

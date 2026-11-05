@@ -350,15 +350,24 @@ func (dc *dictConverter[T]) ensure(idx utils.IndexType) error {
 		return fmt.Errorf("parquet: dictionary index %d is out of range", idx)
 	}
 	if len(dc.dict) <= int(idx) {
-		val := make([]T, int(idx)+1-len(dc.dict))
-		n, err := dc.valueDecoder.Decode(val)
+		need := int(idx) + 1
+		if cap(dc.dict) < need {
+			// Grow geometrically so indexes that climb a few at a time
+			// don't reallocate the dictionary on every batch. idx was
+			// checked against dictLen above, so growth stays bounded.
+			grown := make([]T, len(dc.dict), min(max(need, 2*cap(dc.dict)), dc.dictLen))
+			copy(grown, dc.dict)
+			dc.dict = grown
+		}
+		cur := len(dc.dict)
+		n, err := dc.valueDecoder.Decode(dc.dict[cur:need])
 		if err != nil {
 			return err
 		}
-		if n != len(val) {
+		if n != need-cur {
 			return errors.New("parquet: dictionary contains fewer values than declared")
 		}
-		dc.dict = append(dc.dict, val[:n]...)
+		dc.dict = dc.dict[:need]
 	}
 	return nil
 }
@@ -753,7 +762,38 @@ func (enc *DictFixedLenByteArrayEncoder) Type() parquet.Type {
 // NewDictConverter creates a dict converter of the appropriate type, using the passed in
 // decoder as the decoder to decode the dictionary index.
 func NewDictConverter[T parquet.ColumnTypes](dict TypedDecoder) utils.DictionaryConverter[T] {
-	return &dictConverter[T]{valueDecoder: dict.(Decoder[T]), dictLen: dict.ValuesLeft()}
+	dc := &dictConverter[T]{valueDecoder: dict.(Decoder[T]), dictLen: dict.ValuesLeft()}
+	// Allocate the dictionary up front, but only for as many values as the
+	// page's bytes can hold. The declared length alone is not trusted, since
+	// a corrupt header can claim far more values than the page contains.
+	if d, ok := dict.(interface {
+		dataLen() int
+		fixedLen() int
+	}); ok {
+		if size := minPlainSize[T](d.fixedLen()); size > 0 {
+			dc.dict = make([]T, 0, min(dc.dictLen, d.dataLen()/size))
+		}
+	}
+	return dc
+}
+
+// minPlainSize returns the fewest bytes one PLAIN-encoded value of T can
+// take, or 0 when there is no useful bound, as for bit-packed booleans.
+func minPlainSize[T parquet.ColumnTypes](fixedLen int) int {
+	var zero T
+	switch any(zero).(type) {
+	case int32, float32:
+		return 4
+	case int64, float64:
+		return 8
+	case parquet.Int96:
+		return 12
+	case parquet.ByteArray:
+		return 4 // the length prefix
+	case parquet.FixedLenByteArray:
+		return max(fixedLen, 0)
+	}
+	return 0
 }
 
 var (
