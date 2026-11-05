@@ -28,7 +28,8 @@ import (
 // starts_with, which match Pattern literally, not as a regular
 // expression. With IgnoreCase, string input matches Unicode simple case
 // folds and requires a valid UTF-8 pattern, while binary input matches
-// ASCII case folds.
+// ASCII case folds only. String case folding uses the tables of the Go
+// toolchain's unicode package, so results can differ between Go versions.
 type MatchSubstringOptions = kernels.MatchSubstringOptions
 
 var startsWithDoc = FunctionDoc{
