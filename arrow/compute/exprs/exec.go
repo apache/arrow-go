@@ -523,8 +523,7 @@ func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.Exe
 	}
 
 	out, err := GetReferencedValue(compute.GetAllocator(ctx), ref, param, ext)
-	refersToParam := err == compute.ErrEmpty
-	if refersToParam {
+	if err == compute.ErrEmpty {
 		out = param
 	} else if err != nil {
 		return nil, err
@@ -548,11 +547,21 @@ func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.Exe
 		}
 	}
 
-	if refersToParam {
-		// retain only after the type check so a mismatch has nothing to release
-		return compute.NewDatum(param), nil
+	// A struct field path borrows its value from the input, so take a
+	// reference after the type check, where a mismatch has nothing to release.
+	if isStructFieldPath(ref) {
+		return compute.NewDatum(out), nil
 	}
 	return out, nil
+}
+
+func isStructFieldPath(ref expr.ReferenceSegment) bool {
+	for ; ref != nil; ref = ref.GetChild() {
+		if _, ok := ref.(*expr.StructFieldRef); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func executeScalarBatch(ctx context.Context, input compute.ExecBatch, exp expr.Expression, ext ExtensionIDSet) (compute.Datum, error) {
