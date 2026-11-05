@@ -29,7 +29,6 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
-	"github.com/apache/arrow-go/v18/arrow/endian"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
 )
@@ -87,9 +86,7 @@ func calculateMask(minSize, maxSize int64, normLevel int) (uint64, error) {
 	if maxSize <= minSize {
 		return 0, fmt.Errorf("%w: cdc: max chunk size must be greater than min chunk size, got min %d and max %d", arrow.ErrInvalid, minSize, maxSize)
 	}
-	// Written as minSize + half the span so that large bounds cannot overflow.
-	avgSize := minSize + (maxSize-minSize)/2
-	target := uint64((avgSize - minSize) / numGearTables)
+	target := uint64((maxSize - minSize) / 2 / numGearTables)
 	maskBits := max(bits.Len64(target)-1, 0)
 	effectiveBits := maskBits - normLevel
 	if effectiveBits < 1 || effectiveBits > 63 {
@@ -219,17 +216,14 @@ func (c *Chunker) newValueSource(arr arrow.Array) (valueSource, error) {
 		return valueSource{data: data, width: width}, nil
 	}
 	return valueSource{roll: func(s state, i int64) state {
+		// Decimals are native-endian 64-bit words, least significant first;
+		// hash their little-endian bytes.
+		var le [32]byte
 		value := data[int(i)*width:][:width]
-		if endian.IsBigEndian {
-			// Decimals are stored as native-endian 64-bit words, least
-			// significant first; hash their little-endian bytes.
-			var le [32]byte
-			for w := 0; w < width; w += 8 {
-				binary.LittleEndian.PutUint64(le[w:], binary.BigEndian.Uint64(value[w:]))
-			}
-			value = le[:width]
+		for w := 0; w < width; w += 8 {
+			binary.LittleEndian.PutUint64(le[w:], binary.NativeEndian.Uint64(value[w:]))
 		}
-		return c.roll(s, value)
+		return c.roll(s, le[:width])
 	}}, nil
 }
 
@@ -343,6 +337,6 @@ func (c *Chunker) Chunks(levels file.LevelInfo, defLevels, repLevels []int16, va
 	if prevOffset < numLevels {
 		chunks = append(chunks, Chunk{prevOffset, prevValueOffset, numLevels - prevOffset, valueOffset - prevValueOffset})
 	}
-	assertValidChunks(chunks, numLevels, valueOffset)
+	assertValidChunks(chunks, numLevels, int64(values.Len()))
 	return chunks, nil
 }

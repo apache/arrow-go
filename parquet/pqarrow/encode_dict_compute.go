@@ -151,8 +151,8 @@ func writeDictionaryArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, lea
 			}
 		}
 
-	// Slices of one dictionary array, such as content-defined chunks, share
-	// its dictionary data, so they skip the comparison.
+	// Slices of one dictionary array share its dictionary data, so they skip
+	// the comparison.
 	case preserved.Data() != normalized.Data() && !array.Equal(normalized, preserved):
 		// dictionary has changed
 		cw.FallbackToPlain()

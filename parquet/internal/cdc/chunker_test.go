@@ -131,29 +131,29 @@ func (in chunkInput) numLevels() int {
 	return len(in.def)
 }
 
+// valueSlots returns the number of value slots covered by the first n levels.
+func (in chunkInput) valueSlots(n int64) int64 {
+	if in.levels.RepLevel == 0 {
+		return n
+	}
+	var count int64
+	for _, d := range in.def[:n] {
+		if d >= in.levels.RepeatedAncestorDefLevel {
+			count++
+		}
+	}
+	return count
+}
+
 // slice returns the input restricted to levels [from, to).
 func (in chunkInput) slice(from, to int) chunkInput {
-	out := chunkInput{levels: in.levels}
-	if in.levels.DefLevel == 0 {
-		out.values = array.NewSlice(in.values, int64(from), int64(to))
-		return out
+	out := chunkInput{levels: in.levels, values: array.NewSlice(in.values, in.valueSlots(int64(from)), in.valueSlots(int64(to)))}
+	if in.def != nil {
+		out.def = in.def[from:to]
 	}
-	out.def = in.def[from:to]
-	if in.levels.RepLevel == 0 {
-		out.values = array.NewSlice(in.values, int64(from), int64(to))
-		return out
+	if in.rep != nil {
+		out.rep = in.rep[from:to]
 	}
-	out.rep = in.rep[from:to]
-	slot := func(n int) int64 {
-		var count int64
-		for _, d := range in.def[:n] {
-			if d >= in.levels.RepeatedAncestorDefLevel {
-				count++
-			}
-		}
-		return count
-	}
-	out.values = array.NewSlice(in.values, slot(from), slot(to))
 	return out
 }
 
@@ -243,20 +243,9 @@ func TestChunksInvariants(t *testing.T) {
 				if i > 0 {
 					assert.Positive(t, c.NumLevels)
 				}
-				if in.levels.RepLevel == 0 {
-					assert.Equal(t, c.LevelOffset, c.ValueOffset)
-					assert.Equal(t, c.NumLevels, c.NumValues)
-				} else {
-					var slots int64
-					for _, d := range in.def[c.LevelOffset : c.LevelOffset+c.NumLevels] {
-						if d >= in.levels.RepeatedAncestorDefLevel {
-							slots++
-						}
-					}
-					assert.Equal(t, slots, c.NumValues)
-					if c.NumLevels > 0 {
-						assert.Zero(t, in.rep[c.LevelOffset])
-					}
+				assert.Equal(t, in.valueSlots(c.LevelOffset+c.NumLevels)-in.valueSlots(c.LevelOffset), c.NumValues)
+				if in.levels.RepLevel > 0 && c.NumLevels > 0 {
+					assert.Zero(t, in.rep[c.LevelOffset])
 				}
 				levelSum += c.NumLevels
 				valueSum += c.NumValues
@@ -341,13 +330,8 @@ func TestChunksTypeDispatch(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
-	chunk := func(arr arrow.Array) ([]Chunk, error) {
-		return newTestChunker(t, testOptions).Chunks(file.LevelInfo{}, nil, nil, arr)
-	}
 	mustChunk := func(arr arrow.Array) []Chunk {
-		chunks, err := chunk(arr)
-		require.NoError(t, err)
-		return chunks
+		return chunkInput{values: arr}.chunks(t, newTestChunker(t, testOptions))
 	}
 
 	t.Run("dictionary", func(t *testing.T) {
@@ -464,7 +448,7 @@ func TestChunksTypeDispatch(t *testing.T) {
 	t.Run("struct", func(t *testing.T) {
 		arr := array.MakeArrayOfNull(mem, arrow.StructOf(arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true}), 4)
 		defer arr.Release()
-		_, err := chunk(arr)
+		_, err := newTestChunker(t, testOptions).Chunks(file.LevelInfo{}, nil, nil, arr)
 		require.ErrorIs(t, err, arrow.ErrNotImplemented)
 	})
 }

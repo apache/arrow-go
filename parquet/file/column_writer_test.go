@@ -1127,49 +1127,20 @@ func (b *BooleanValueWriterSuite) TestWriteBitmapBatchSpaced() {
 // TestFlushCurrentPageWithoutBufferedValues verifies that FlushCurrentPage is a
 // no-op when nothing is buffered, so repeated flushes do not emit empty pages.
 func TestFlushCurrentPageWithoutBufferedValues(t *testing.T) {
-	root, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
 		schema.NewInt32Node("v", parquet.Repetitions.Required, -1),
-	}, -1)
-	require.NoError(t, err)
-
+	}, -1)))
 	props := parquet.NewWriterProperties(parquet.WithDictionaryDefault(false))
 
-	var buf bytes.Buffer
-	w := file.NewParquetWriter(&buf, root, file.WithWriterProps(props))
-	rgw := w.AppendRowGroup()
-	cw, err := rgw.NextColumn()
-	require.NoError(t, err)
-	icw := cw.(*file.Int32ColumnChunkWriter)
+	pager := new(mockpagewriter)
+	defer pager.AssertExpectations(t)
+	pager.On("HasCompressor").Return(false)
+	pager.On("WriteDataPage", mock.Anything).Return(10, nil).Once()
+	wr := file.NewColumnChunkWriter(metadata.NewColumnChunkMetaDataBuilder(props, sc.Column(0)), pager, props).(*file.Int32ColumnChunkWriter)
 
-	_, err = icw.WriteBatch([]int32{1, 2, 3}, nil, nil)
+	_, err := wr.WriteBatch([]int32{1, 2, 3}, nil, nil)
 	require.NoError(t, err)
-	require.NoError(t, icw.FlushCurrentPage())
-	// The second flush has nothing buffered and must not emit an empty page.
-	require.NoError(t, icw.FlushCurrentPage())
-	_, err = icw.WriteBatch([]int32{4, 5}, nil, nil)
-	require.NoError(t, err)
-	require.NoError(t, cw.Close())
-	require.NoError(t, rgw.Close())
-	require.NoError(t, w.Close())
-
-	r, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
-	require.NoError(t, err)
-	defer r.Close()
-
-	pr, err := r.RowGroup(0).GetColumnPageReader(0)
-	require.NoError(t, err)
-
-	var dataPages []file.DataPage
-	for pr.Next() {
-		if dp, ok := pr.Page().(file.DataPage); ok {
-			dataPages = append(dataPages, dp)
-		}
-	}
-	require.NoError(t, pr.Err())
-
-	// The reader stops once all rows are consumed, so the empty page must sit
-	// between data pages to be observable.
-	require.Len(t, dataPages, 2)
-	assert.Equal(t, int32(3), dataPages[0].NumValues())
-	assert.Equal(t, int32(2), dataPages[1].NumValues())
+	require.NoError(t, wr.FlushCurrentPage())
+	// nothing is buffered, so no second page is written
+	require.NoError(t, wr.FlushCurrentPage())
 }
