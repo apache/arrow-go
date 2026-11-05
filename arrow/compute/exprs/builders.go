@@ -63,7 +63,7 @@ func NewScalarCall(reg ExtensionIDSet, fn string, opts []*types.FunctionOption, 
 	}
 
 	opts = append(opts, convOpts...)
-	return expr.NewScalarFunc(reg.GetSubstraitRegistry(), extensions.FunctionID(id), opts, args...)
+	return expr.NewScalarFunc(reg.GetSubstraitRegistry(), id, opts, args...)
 }
 
 // NewFieldRefFromDotPath constructs a substrait reference segment from
@@ -347,7 +347,7 @@ func (e *ExprBuilder) CallScalar(fn string, opts []*types.FunctionOption, args .
 	}
 
 	opts = append(opts, convOpts...)
-	return e.b.ScalarFunc(extensions.FunctionID(id), opts...).Args(args...), nil
+	return e.b.ScalarFunc(id, opts...).Args(args...), nil
 }
 
 // FieldPath uses a field path to construct a Field Reference
