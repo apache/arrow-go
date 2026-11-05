@@ -774,14 +774,17 @@ func NewDictConverter[T parquet.ColumnTypes](dict TypedDecoder) utils.Dictionary
 	dc.maxLen = dc.dictLen
 	// The declared length alone is not trusted, since a corrupt header can
 	// claim far more values than the page contains. Bound it by what the
-	// page's bytes can hold, and allocate that up front.
+	// page's bytes can hold. Allocate up front, but never more memory than
+	// the page itself: slice-backed values cost a slice header per entry,
+	// far more than an empty encoded value, so beyond that ensure grows the
+	// dictionary only when an index needs it.
 	if d, ok := dict.(interface {
 		dataLen() int
 		fixedLen() int
 	}); ok {
 		if n, ok := maxPlainValues[T](d.dataLen(), d.fixedLen()); ok {
 			dc.maxLen = min(dc.dictLen, n)
-			dc.dict = make([]T, 0, dc.maxLen)
+			dc.dict = make([]T, 0, min(dc.maxLen, d.dataLen()/int(unsafe.Sizeof(dc.zeroVal))))
 		}
 	}
 	return dc

@@ -19,6 +19,7 @@ package encoding
 import (
 	"runtime"
 	"testing"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -59,4 +60,18 @@ func TestDictionaryConverterBoundsGrowthByData(t *testing.T) {
 	require.Equal(t, []int32{42}, converter.dict)
 	require.Error(t, converter.ensure(1))
 	require.LessOrEqual(t, cap(converter.dict), 1)
+}
+
+func TestDictionaryConverterPreallocNoLargerThanPage(t *testing.T) {
+	// 4096 zero-length values: each is just a 4-byte length prefix, but
+	// would cost a slice header in the dictionary
+	const n = 4096
+	data := make([]byte, 4*n)
+	decoder := NewDecoder(parquet.Types.ByteArray, parquet.Encodings.Plain, nil, memory.DefaultAllocator)
+	require.NoError(t, decoder.SetData(n, data))
+	converter := NewDictConverter[parquet.ByteArray](decoder).(*dictConverter[parquet.ByteArray])
+
+	require.LessOrEqual(t, cap(converter.dict)*int(unsafe.Sizeof(parquet.ByteArray(nil))), len(data))
+	require.NoError(t, converter.ensure(n-1))
+	require.Len(t, converter.dict, n)
 }
