@@ -17,6 +17,7 @@
 package encoding
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -39,14 +40,23 @@ func TestDictionaryConverterBoundsGrowthByValuesLeft(t *testing.T) {
 	require.Equal(t, []int32{42}, converter.dict)
 }
 
-func TestDictionaryConverterPreallocBoundedByData(t *testing.T) {
+func TestDictionaryConverterBoundsGrowthByData(t *testing.T) {
 	decoder := NewDecoder(parquet.Types.Int32, parquet.Encodings.Plain, nil, memory.DefaultAllocator)
 	require.NoError(t, decoder.SetData(1<<30, []byte{42, 0, 0, 0}))
 	converter := NewDictConverter[int32](decoder).(*dictConverter[int32])
 
 	require.LessOrEqual(t, cap(converter.dict), 1)
+	// an index the page's 4 bytes can't reach is rejected before the
+	// dictionary grows toward it
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	require.Error(t, converter.ensure(utils.IndexType(1<<24)))
+	runtime.ReadMemStats(&after)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
+	require.LessOrEqual(t, cap(converter.dict), 1)
+
 	require.NoError(t, converter.ensure(0))
 	require.Equal(t, []int32{42}, converter.dict)
 	require.Error(t, converter.ensure(1))
-	require.LessOrEqual(t, cap(converter.dict), 2)
+	require.LessOrEqual(t, cap(converter.dict), 1)
 }
