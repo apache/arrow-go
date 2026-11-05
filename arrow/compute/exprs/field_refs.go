@@ -179,10 +179,21 @@ func GetScalar(ref expr.ReferenceSegment, s scalar.Scalar, mem memory.Allocator,
 }
 
 // GetReferencedValue retrieves the referenced (potentially nested) value from
-// the provided datum which may be a scalar, array, or record batch.
+// the provided datum which may be a scalar, array, or record batch. When the
+// result is an array, it is a new reference that the caller must release.
 func GetReferencedValue(mem memory.Allocator, ref expr.ReferenceSegment, value compute.Datum, ext ExtensionIDSet) (compute.Datum, error) {
 	if ref == nil {
 		return nil, compute.ErrEmpty
+	}
+
+	// owned reports whether value is an intermediate array this function
+	// created, which it must release when it moves past it or fails.
+	owned := false
+	fail := func(err error) (compute.Datum, error) {
+		if owned {
+			value.Release()
+		}
+		return nil, err
 	}
 
 	for ref != nil {
@@ -200,28 +211,37 @@ func GetReferencedValue(mem memory.Allocator, ref expr.ReferenceSegment, value c
 
 		switch r := ref.(type) {
 		case *expr.MapKeyRef:
-			return nil, arrow.ErrNotImplemented
+			return fail(arrow.ErrNotImplemented)
 		case *expr.StructFieldRef:
 			switch v := value.(type) {
 			case *compute.ArrayDatum:
 				if v.Type().ID() != arrow.STRUCT {
-					return nil, fmt.Errorf("%w: struct field ref for non struct type %s",
-						arrow.ErrInvalid, v.Type())
+					return fail(fmt.Errorf("%w: struct field ref for non struct type %s",
+						arrow.ErrInvalid, v.Type()))
 				}
 
 				if r.Field < 0 || r.Field >= int32(len(v.Value.Children())) {
-					return nil, fmt.Errorf("%w: indices=%s", compute.ErrIndexRange, ref)
+					return fail(fmt.Errorf("%w: indices=%s", compute.ErrIndexRange, ref))
 				}
 
-				value = &compute.ArrayDatum{Value: v.Value.Children()[r.Field]}
+				// A struct's children cover its full storage, so slice the
+				// child to the struct's own offset and length.
+				start := int64(v.Value.Offset())
+				child := array.NewSliceData(v.Value.Children()[r.Field], start, start+int64(v.Value.Len()))
+				if owned {
+					v.Release()
+				}
+				value, owned = &compute.ArrayDatum{Value: child}, true
 			case *compute.RecordDatum:
 				if r.Field < 0 || r.Field >= int32(v.Value.NumCols()) {
-					return nil, fmt.Errorf("%w: indices=%s", compute.ErrIndexRange, ref)
+					return fail(fmt.Errorf("%w: indices=%s", compute.ErrIndexRange, ref))
 				}
 
-				value = &compute.ArrayDatum{Value: v.Value.Column(int(r.Field)).Data()}
+				col := v.Value.Column(int(r.Field)).Data()
+				col.Retain()
+				value, owned = &compute.ArrayDatum{Value: col}, true
 			default:
-				return nil, arrow.ErrNotImplemented
+				return fail(arrow.ErrNotImplemented)
 			}
 		case *expr.ListElementRef:
 			switch v := value.(type) {
@@ -233,20 +253,23 @@ func GetReferencedValue(mem memory.Allocator, ref expr.ReferenceSegment, value c
 
 					sc, err := scalar.GetScalar(arr, int(r.Offset))
 					if err != nil {
-						return nil, err
+						return fail(err)
 					}
 					if s, ok := sc.(scalar.Releasable); ok {
 						defer s.Release()
 					}
 
-					value = &compute.ScalarDatum{Value: sc}
+					if owned {
+						v.Release()
+					}
+					value, owned = &compute.ScalarDatum{Value: sc}, false
 				default:
-					return nil, fmt.Errorf("%w: cannot reference list element in non-list array type %s",
-						arrow.ErrInvalid, v.Type())
+					return fail(fmt.Errorf("%w: cannot reference list element in non-list array type %s",
+						arrow.ErrInvalid, v.Type()))
 				}
 
 			default:
-				return nil, arrow.ErrNotImplemented
+				return fail(arrow.ErrNotImplemented)
 			}
 		}
 

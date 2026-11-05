@@ -522,11 +522,16 @@ func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.Exe
 		ref = ref.GetChild()
 	}
 
+	// GetReferencedValue returns arrays as new references, owned here.
 	out, err := GetReferencedValue(compute.GetAllocator(ctx), ref, param, ext)
-	if err == compute.ErrEmpty {
+	owned := false
+	switch {
+	case err == compute.ErrEmpty:
 		out = param
-	} else if err != nil {
+	case err != nil:
 		return nil, err
+	default:
+		_, owned = out.(*compute.ArrayDatum)
 	}
 
 	dt := out.(compute.ArrayLikeDatum).Type()
@@ -542,14 +547,17 @@ func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.Exe
 		case expectedType.ID() == arrow.STRING && valueType.ID() == arrow.LARGE_STRING:
 		case expectedType.ID() == arrow.BINARY && valueType.ID() == arrow.LARGE_BINARY:
 		default:
+			if owned {
+				out.Release()
+			}
 			return nil, fmt.Errorf("%w: referenced field %s was %s, but should have been %s",
 				arrow.ErrInvalid, ref, dt, expectedType)
 		}
 	}
 
-	// A struct field path borrows its value from the input, so take a
+	// Other struct field paths borrow their value from the input, so take a
 	// reference after the type check, where a mismatch has nothing to release.
-	if isStructFieldPath(ref) {
+	if !owned && isStructFieldPath(ref) {
 		return compute.NewDatum(out), nil
 	}
 	return out, nil

@@ -986,6 +986,70 @@ func TestNestedFieldRefResultOwnership(t *testing.T) {
 	})
 }
 
+func TestNestedFieldRefSlicedStruct(t *testing.T) {
+	inner := arrow.StructOf(arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true})
+	sc := arrow.NewSchema([]arrow.Field{{Name: "s", Type: arrow.StructOf(
+		arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		arrow.Field{Name: "t", Type: inner, Nullable: true}), Nullable: true}}, nil)
+	const records = `[
+		{"s": {"a": 1, "t": {"a": 10}}},
+		{"s": {"a": 2, "t": {"a": 20}}},
+		{"s": {"a": 3, "t": {"a": 30}}},
+		{"s": {"a": 4, "t": {"a": 40}}}
+	]`
+
+	tests := []struct {
+		name     string
+		exprType arrow.DataType
+		path     []any
+		expected string
+	}{
+		{"field", arrow.PrimitiveTypes.Int32, []any{"s", "a"}, `[3, 4]`},
+		{"nested field", arrow.PrimitiveTypes.Int32, []any{"s", "t", "a"}, `[30, 40]`},
+		{"type mismatch", arrow.BinaryTypes.String, []any{"s", "t", "a"}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			rec, _, err := array.RecordFromJSON(mem, sc, strings.NewReader(records))
+			require.NoError(t, err)
+			defer rec.Release()
+			sliced := rec.NewSlice(2, 4)
+			defer sliced.Release()
+
+			exprSchema := sc
+			if tt.expected == "" {
+				exprSchema = arrow.NewSchema([]arrow.Field{{Name: "s", Type: arrow.StructOf(
+					arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+					arrow.Field{Name: "t", Type: arrow.StructOf(
+						arrow.Field{Name: "a", Type: tt.exprType, Nullable: true}), Nullable: true}), Nullable: true}}, nil)
+			}
+			bldr := exprs.NewExprBuilder(extSet)
+			require.NoError(t, bldr.SetInputSchema(exprSchema))
+			e, err := bldr.FieldRefList(tt.path...).BuildExpr()
+			require.NoError(t, err)
+
+			ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+			result, err := exprs.ExecuteScalarExpression(ctx, sc, e, compute.NewDatumWithoutOwning(sliced))
+			if tt.expected == "" {
+				assert.ErrorIs(t, err, arrow.ErrInvalid)
+				assert.Nil(t, result)
+				return
+			}
+			require.NoError(t, err)
+			defer result.Release()
+
+			expected, _, err := array.FromJSON(mem, tt.exprType, strings.NewReader(tt.expected))
+			require.NoError(t, err)
+			defer expected.Release()
+			assertEqual(t, expected, result)
+		})
+	}
+}
+
 func TestDecimalFilterLarge(t *testing.T) {
 	t.Parallel()
 
