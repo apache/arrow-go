@@ -153,7 +153,7 @@ func init() {
 	}
 
 	err := DefaultExtensionIDRegistry.AddSubstraitScalarToArrow(
-		extensions.ID{URN: SubstraitStringFuncsURI, Name: "starts_with"},
+		FunctionID{URN: SubstraitStringFuncsURI, Name: "starts_with"},
 		startsWithSubstraitToArrowFunc)
 	if err != nil {
 		panic(err)

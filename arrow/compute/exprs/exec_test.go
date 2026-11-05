@@ -841,7 +841,7 @@ func TestDictionaryTypes(t *testing.T) {
 				// Bypass signature validation to exercise kernel dispatch for
 				// is_nan on string and binary dictionaries.
 				ex, err = expr.NewCustomScalarFunc(extSet.GetSubstraitRegistry(),
-					substraitext.NewScalarFuncVariant(substraitext.ID{URN: exprs.SubstraitComparisonFuncsURI, Name: tt.fn}),
+					substraitext.NewScalarFuncVariant(exprs.FunctionID{URN: exprs.SubstraitComparisonFuncsURI, Name: tt.fn}),
 					&types.BooleanType{Nullability: types.NullabilityNullable}, nil, ex)
 				require.NoError(t, err)
 			}
