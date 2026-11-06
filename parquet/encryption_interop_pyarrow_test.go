@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,6 +32,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/encryption"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
@@ -70,8 +72,8 @@ func runInteropPython(t *testing.T, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-// interopPython runs the embedded script and fails the test on a non-zero
-// exit. A non-zero exit is a test failure.
+// interopPython runs the embedded script and fails the test when it exits
+// non-zero.
 func interopPython(t *testing.T, args ...string) string {
 	t.Helper()
 
@@ -90,15 +92,15 @@ func interopPython(t *testing.T, args ...string) string {
 func requirePyarrow(t *testing.T) {
 	t.Helper()
 
-	require := os.Getenv("PARQUET_TEST_REQUIRE_PYARROW") != ""
+	mustHavePyarrow := os.Getenv("PARQUET_TEST_REQUIRE_PYARROW") != ""
 	if _, err := exec.LookPath("python3"); err != nil {
-		if require {
+		if mustHavePyarrow {
 			t.Fatalf("PARQUET_TEST_REQUIRE_PYARROW is set but python3 not found in PATH: %v", err)
 		}
 		t.Skip("python3 not found in PATH, skipping pyarrow interop tests")
 	}
 	if _, err := runInteropPython(t, "probe"); err != nil {
-		if require {
+		if mustHavePyarrow {
 			t.Fatalf("PARQUET_TEST_REQUIRE_PYARROW is set but pyarrow is not available: %v", err)
 		}
 		t.Skipf("pyarrow not available for python3, skipping interop tests: %v", err)
@@ -204,8 +206,65 @@ func TestGoWrittenEncryptionReadByPyarrow(t *testing.T) {
 	assert.Equal(t, "0 10 20", got["int32_field"])
 }
 
+// interopBase64KMS mirrors the Base64KmsClient in encryption_interop_pyarrow.py:
+// wrapping is plain base64, so the interop tests need no real KMS.
+type interopBase64KMS struct{}
+
+func (interopBase64KMS) WrapKey(key []byte, masterKeyID string) (string, error) {
+	return base64.StdEncoding.EncodeToString(key), nil
+}
+
+func (interopBase64KMS) UnwrapKey(wrappedKey string, masterKeyID string) ([]byte, error) {
+	return base64.StdEncoding.DecodeString(wrappedKey)
+}
+
+// TestPyarrowKmsWrittenConfigs reads files written by pyarrow's CryptoFactory
+// with PKMT1 key material, in both double (the pyarrow default) and single
+// wrapping mode. The footer key and the column key of field "a" are both
+// resolved through the KMS retriever.
+func TestPyarrowKmsWrittenConfigs(t *testing.T) {
+	requirePyarrow(t)
+
+	dir := t.TempDir()
+	interopPython(t, "gen-kms", dir)
+
+	for _, name := range []string{"kms_double", "kms_single"} {
+		t.Run(name, func(t *testing.T) {
+			props := parquet.NewReaderProperties(memory.DefaultAllocator)
+			props.FileDecryptProps = parquet.NewFileDecryptionProperties(
+				parquet.WithKeyRetriever(encryption.NewKmsKeyRetriever(interopBase64KMS{})))
+
+			fr, err := file.OpenParquetFile(filepath.Join(dir, name+".parquet"), false,
+				file.WithReadProps(props))
+			require.NoError(t, err)
+			defer fr.Close()
+
+			assert.Equal(t, int64(3), fr.MetaData().NumRows)
+
+			rg := fr.RowGroup(0)
+			a, err := rg.Column(0)
+			require.NoError(t, err)
+			f64 := a.(*file.Float64ColumnChunkReader)
+			vals := make([]float64, 8)
+			n, _, err := f64.ReadBatch(8, vals, nil, nil)
+			require.NoError(t, err)
+			assert.Equal(t, int64(3), n)
+			assert.Equal(t, []float64{1, 2, 3}, vals[:3])
+
+			b, err := rg.Column(1)
+			require.NoError(t, err)
+			f32 := b.(*file.Float32ColumnChunkReader)
+			f32vals := make([]float32, 8)
+			n, _, err = f32.ReadBatch(8, f32vals, nil, nil)
+			require.NoError(t, err)
+			assert.Equal(t, int64(3), n)
+			assert.Equal(t, []float32{4, 5, 6}, f32vals[:3])
+		})
+	}
+}
+
 // writeInteropEncryptedFile writes a small encrypted parquet file with a footer
-// key and key metadata, mirroring what pyarrow needs to decrypt it.
+// key for pyarrow to read back.
 func writeInteropEncryptedFile(t *testing.T, path string) {
 	t.Helper()
 
@@ -220,8 +279,7 @@ func writeInteropEncryptedFile(t *testing.T, path string) {
 	out, err := os.Create(path)
 	require.NoError(t, err)
 
-	encProps := parquet.NewFileEncryptionProperties(interopFooterKey,
-		parquet.WithFooterKeyMetadata("kf"))
+	encProps := parquet.NewFileEncryptionProperties(interopFooterKey)
 	props := parquet.NewWriterProperties(parquet.WithEncryptionProperties(encProps))
 	w := file.NewParquetWriter(out, root, file.WithWriterProps(props))
 
