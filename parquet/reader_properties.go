@@ -86,6 +86,14 @@ type BufferedReader interface {
 	io.Reader
 }
 
+type BufferedReaderV2 interface {
+	BufferedReader
+	// Buffered returns the number of bytes already read and stored in the buffer
+	Buffered() int
+	// Free releases any resources held by the BufferedReader
+	Free()
+}
+
 // NewReaderProperties returns the default Reader Properties using the provided allocator.
 //
 // If nil is passed for the allocator, then memory.DefaultAllocator will be used.
@@ -126,7 +134,9 @@ func (r *ReaderProperties) GetMaxUncompressedPageSize() int64 {
 // into a buffer in memory and return a bytes.NewReader for that buffer.
 func (r *ReaderProperties) GetStream(source io.ReaderAt, start, nbytes int64) (BufferedReader, error) {
 	if r.BufferedStreamEnabled {
-		return utils.NewBufferedReader(io.NewSectionReader(source, start, nbytes), int(min(r.BufferSize, nbytes))), nil
+		// memory.DefaultAllocator uses make for allocations, so the explicit call to Free is not necessary and the original API contract
+		// is maintained.
+		return utils.NewBufferedReader(io.NewSectionReader(source, start, nbytes), int(min(r.BufferSize, nbytes)), memory.DefaultAllocator), nil
 	}
 
 	data := make([]byte, nbytes)
@@ -139,4 +149,29 @@ func (r *ReaderProperties) GetStream(source io.ReaderAt, start, nbytes int64) (B
 	}
 
 	return utils.NewByteReader(data), nil
+}
+
+// GetStreamV2 returns a section of the underlying reader based on whether or not BufferedStream is enabled.
+//
+// If BufferedStreamEnabled is true, it creates an io.SectionReader, otherwise it will read the entire section
+// into a buffer in memory and return a bytes.NewReader for that buffer.
+// In comparison with GetStream, this version uses r.alloc to allocate the buffer for reading data and returns BufferedReaderV2,
+// to allow freeing the allocated buffer when no longer needed with the Free() method.
+func (r *ReaderProperties) GetStreamV2(source io.ReaderAt, start, nbytes int64) (BufferedReaderV2, error) {
+	if r.BufferedStreamEnabled {
+		return utils.NewBufferedReader(io.NewSectionReader(source, start, nbytes), int(min(r.BufferSize, nbytes)), r.alloc), nil
+	}
+
+	buf := utils.NewBytesBufferReader(int(nbytes), r.alloc)
+	n, err := source.ReadAt(buf.Buffer(), start)
+	if err != nil {
+		buf.Free()
+		return nil, fmt.Errorf("parquet: tried reading from file, but got error: %w", err)
+	}
+	if n != int(nbytes) {
+		buf.Free()
+		return nil, fmt.Errorf("parquet: tried reading %d bytes starting at position %d from file but only got %d", nbytes, start, n)
+	}
+
+	return buf, nil
 }

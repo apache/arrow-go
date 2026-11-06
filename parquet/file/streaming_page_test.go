@@ -36,7 +36,9 @@ import (
 // the streaming path on their small (fast) pages.
 func TestMain(m *testing.M) {
 	*file.StreamingThreshold = 0
-	os.Exit(m.Run())
+	code := m.Run()
+	cleanUpBenchmarkFiles()
+	os.Exit(code)
 }
 
 func makeStreamTestValues(sizes []int) []parquet.ByteArray {
