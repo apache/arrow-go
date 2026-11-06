@@ -34,6 +34,7 @@ import (
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
 	"github.com/apache/arrow-go/v18/parquet/internal/testutils"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/apache/arrow-go/v18/parquet/schema"
@@ -852,6 +853,72 @@ func TestFullSeekRow(t *testing.T) {
 			assert.Equal(t, []int16{0, 0, 1, 1, 0}, repLvls[:total])
 		})
 	}
+}
+
+// Reject ALP before non-floating-point decoder traits can panic.
+func TestALPOnIntegerColumnIsRejected(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	node, err := schema.NewPrimitiveNode("value", parquet.Repetitions.Required, parquet.Types.Int32, -1, -1)
+	require.NoError(t, err)
+	descr := schema.NewColumn(node, 0, 0)
+
+	body := memory.NewResizableBuffer(mem)
+	body.Resize(64)
+	clear(body.Bytes())
+	page := file.NewDataPageV1(body, 4, parquet.Encodings.ALP,
+		parquet.Encodings.RLE, parquet.Encodings.RLE, int32(body.Len()))
+	defer page.Release()
+
+	pages := new(testutils.MockPageReader)
+	pages.Test(t)
+	pages.TestData().Set("pages", []file.Page{page})
+	pages.On("Err").Return((error)(nil))
+	r := file.NewColumnReader(descr, pages, mem, nil)
+	defer r.Close()
+	total, read, err := r.(*file.Int32ColumnChunkReader).ReadBatch(4, make([]int32, 4), nil, nil)
+	require.NoError(t, err)
+	require.Zero(t, total)
+	require.Zero(t, read)
+	// ReadBatch stops rather than returning the failure, as it does for any page
+	// it cannot open, so the reason is on the reader.
+	require.ErrorContains(t, r.Err(), "only float and double support ALP encoding")
+}
+
+// A mismatched page count must return an error instead of a zero-length read,
+// which the column reader would retry indefinitely.
+func TestALPPageClaimingTooManyValues(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	node, err := schema.NewPrimitiveNode("value", parquet.Repetitions.Required, parquet.Types.Double, -1, -1)
+	require.NoError(t, err)
+	descr := schema.NewColumn(node, 0, 0)
+
+	enc := encoding.NewEncoder(parquet.Types.Double, parquet.Encodings.ALP, false, descr, mem)
+	defer enc.Release()
+	enc.(encoding.Float64Encoder).Put([]float64{1.5, 2.5})
+	buf, err := enc.FlushValues()
+	require.NoError(t, err)
+	defer buf.Release()
+
+	body := memory.NewBufferBytes(buf.Bytes())
+	page := file.NewDataPageV1(body, 8, parquet.Encodings.ALP,
+		parquet.Encodings.RLE, parquet.Encodings.RLE, int32(body.Len()))
+	defer page.Release()
+
+	pages := new(testutils.MockPageReader)
+	pages.Test(t)
+	pages.TestData().Set("pages", []file.Page{page})
+	pages.On("Err").Return((error)(nil))
+	r := file.NewColumnReader(descr, pages, mem, nil)
+	defer r.Close()
+	values := make([]float64, 8)
+	_, read, err := r.(*file.Float64ColumnChunkReader).ReadBatch(8, values, nil, nil)
+	require.ErrorContains(t, err, "ALP page holds 2 values")
+	require.Equal(t, 2, read, "the values the page does hold still come back")
+	require.Equal(t, []float64{1.5, 2.5}, values[:read])
 }
 
 func BenchmarkReadInt32Column(b *testing.B) {
