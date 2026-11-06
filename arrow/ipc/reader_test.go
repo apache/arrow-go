@@ -100,7 +100,7 @@ func TestReaderCheckedAllocator(t *testing.T) {
 func TestMappedReader(t *testing.T) {
 	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer pool.AssertSize(t, 0)
-	schema := arrow.NewSchema([]arrow.Field{{Name: "f1", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "f1", Type: arrow.PrimitiveTypes.Int32, Nullable: true}}, nil)
 	b := array.NewRecordBuilder(pool, schema)
 	defer b.Release()
 	b.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2, 3, 4}, []bool{true, true, false, true})

@@ -656,19 +656,24 @@ func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 		name      string
 		jsonInput string
 		want      string
-		invalid   bool
+		wantErr   string
 	}{
 		{
 			name:      "missing required field",
 			jsonInput: `[{"f2": 3, "f3": {"f3_1": "test"}}]`,
-			invalid:   true,
+			wantErr:   "field 'f3_3' is required but no value was given",
 			want:      "",
 		},
 		{
 			name:      "missing optional fields",
 			jsonInput: `[{"f2": 3, "f3": {"f3_3": "test"}}]`,
-			invalid:   false,
 			want:      `{[(null)] [3] {[(null)] [(null)] ["test"]}}`,
+		},
+		{
+			name:      "explicit null in required field",
+			jsonInput: `[{"f2": 3, "f3": {"f3_3": null}}]`,
+			wantErr:   "field 'f3_3' is non-nullable but got null",
+			want:      "",
 		},
 	}
 
@@ -679,16 +684,14 @@ func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 				defer sb.Release()
 
 				err := sb.UnmarshalJSON([]byte(tc.jsonInput))
-				if err != nil {
-					t.Fatal(err)
+				if tc.wantErr != "" {
+					require.ErrorContains(t, err, tc.wantErr)
+					return
 				}
+				require.NoError(t, err)
 
 				arr := sb.NewArray().(*array.Struct)
 				defer arr.Release()
-				if tc.invalid {
-					require.ErrorIs(t, array.ValidateFull(arr), arrow.ErrInvalid)
-					return
-				}
 				require.NoError(t, array.ValidateFull(arr))
 
 				got := arr.String()
@@ -698,6 +701,32 @@ func TestStructArrayUnmarshalJSONMissingFields(t *testing.T) {
 			},
 		)
 	}
+}
+
+func TestStructBuilderRollsBackRowAfterNestedDecodeError(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer pool.AssertSize(t, 0)
+
+	dtype := arrow.StructOf(
+		arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32},
+		arrow.Field{Name: "b", Type: arrow.ListOf(arrow.PrimitiveTypes.Int32)},
+	)
+
+	sb := array.NewStructBuilder(pool, dtype)
+	defer sb.Release()
+
+	require.Error(t, sb.UnmarshalJSON([]byte(`[{"a":1,"b":[2,"bad"]}]`)))
+	assert.Zero(t, sb.Len())
+	assert.Zero(t, sb.FieldBuilder(0).Len())
+	assert.Zero(t, sb.FieldBuilder(1).Len())
+
+	require.NoError(t, sb.UnmarshalJSON([]byte(`[{"a":1,"b":[2,3]}]`)))
+
+	arr := sb.NewArray().(*array.Struct)
+	defer arr.Release()
+	require.NoError(t, array.ValidateFull(arr))
+	assert.Equal(t, 1, arr.Len())
+	assert.Equal(t, `{[1] [[2 3]]}`, arr.String())
 }
 
 func TestCreateStructWithNulls(t *testing.T) {

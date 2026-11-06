@@ -261,7 +261,7 @@ func Example_structArray() {
 	pool := memory.NewGoAllocator()
 
 	dtype := arrow.StructOf([]arrow.Field{
-		{Name: "f1", Type: arrow.ListOf(arrow.PrimitiveTypes.Uint8)},
+		{Name: "f1", Type: arrow.ListOf(arrow.PrimitiveTypes.Uint8), Nullable: true},
 		{Name: "f2", Type: arrow.PrimitiveTypes.Int32},
 	}...)
 
@@ -331,7 +331,7 @@ func Example_structArray() {
 	// Output:
 	// NullN() = 1
 	// Len()   = 4
-	// Type()    = struct<f1: list<item: uint8, nullable>, f2: int32>
+	// Type()    = struct<f1: list<item: uint8, nullable> nullable, f2: int32>
 	// Struct[0] = [[j, o, e], 1]
 	// Struct[1] = [[], 2]
 	// Struct[2] = (null)
@@ -463,7 +463,7 @@ func Example_record() {
 
 	schema := arrow.NewSchema(
 		[]arrow.Field{
-			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32},
+			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
 			{Name: "f2-f64", Type: arrow.PrimitiveTypes.Float64},
 		},
 		nil,
@@ -493,7 +493,7 @@ func Example_recordReader() {
 
 	schema := arrow.NewSchema(
 		[]arrow.Field{
-			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32},
+			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
 			{Name: "f2-f64", Type: arrow.PrimitiveTypes.Float64},
 		},
 		nil,
@@ -542,7 +542,7 @@ func Example_table() {
 
 	schema := arrow.NewSchema(
 		[]arrow.Field{
-			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32},
+			{Name: "f1-i32", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
 			{Name: "f2-f64", Type: arrow.PrimitiveTypes.Float64},
 		},
 		nil,
