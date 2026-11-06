@@ -345,8 +345,11 @@ func (d *typedDictDecoder[T]) DecodeSpaced(out []T, nullCount int, validBits []b
 type dictConverter[T parquet.ColumnTypes] struct {
 	valueDecoder Decoder[T]
 	dictLen      int
-	dict         []T
-	zeroVal      T
+	// maxLen is the most values the dictionary page's bytes can hold,
+	// never more than dictLen.
+	maxLen  int
+	dict    []T
+	zeroVal T
 }
 
 func (dc *dictConverter[T]) ensure(idx utils.IndexType) error {
@@ -354,15 +357,29 @@ func (dc *dictConverter[T]) ensure(idx utils.IndexType) error {
 		return fmt.Errorf("parquet: dictionary index %d is out of range", idx)
 	}
 	if len(dc.dict) <= int(idx) {
-		val := make([]T, int(idx)+1-len(dc.dict))
-		n, err := dc.valueDecoder.Decode(val)
+		// Reject an index the page's bytes cannot reach before allocating,
+		// so a header that overstates its length can't force a large
+		// allocation.
+		if int(idx) >= dc.maxLen {
+			return errors.New("parquet: dictionary contains fewer values than declared")
+		}
+		need := int(idx) + 1
+		if cap(dc.dict) < need {
+			// Grow geometrically so indexes that climb a few at a time
+			// don't reallocate the dictionary on every batch.
+			grown := make([]T, len(dc.dict), min(max(need, 2*cap(dc.dict)), dc.maxLen))
+			copy(grown, dc.dict)
+			dc.dict = grown
+		}
+		cur := len(dc.dict)
+		n, err := dc.valueDecoder.Decode(dc.dict[cur:need])
 		if err != nil {
 			return err
 		}
-		if n != len(val) {
+		if n != need-cur {
 			return errors.New("parquet: dictionary contains fewer values than declared")
 		}
-		dc.dict = append(dc.dict, val[:n]...)
+		dc.dict = dc.dict[:need]
 	}
 	return nil
 }
@@ -757,7 +774,49 @@ func (enc *DictFixedLenByteArrayEncoder) Type() parquet.Type {
 // NewDictConverter creates a dict converter of the appropriate type, using the passed in
 // decoder as the decoder to decode the dictionary index.
 func NewDictConverter[T parquet.ColumnTypes](dict TypedDecoder) utils.DictionaryConverter[T] {
-	return &dictConverter[T]{valueDecoder: dict.(Decoder[T]), dictLen: dict.ValuesLeft()}
+	dc := &dictConverter[T]{valueDecoder: dict.(Decoder[T]), dictLen: dict.ValuesLeft()}
+	dc.maxLen = dc.dictLen
+	// The declared length alone is not trusted, since a corrupt header can
+	// claim far more values than the page contains. Bound it by what the
+	// page's bytes can hold. Allocate up front, but never more memory than
+	// the page itself: slice-backed values cost a slice header per entry,
+	// far more than an empty encoded value, so beyond that ensure grows the
+	// dictionary only when an index needs it.
+	if d, ok := dict.(interface {
+		dataLen() int
+		fixedLen() int
+	}); ok {
+		if n, ok := maxPlainValues[T](d.dataLen(), d.fixedLen()); ok {
+			dc.maxLen = min(dc.dictLen, n)
+			dc.dict = make([]T, 0, min(dc.maxLen, d.dataLen()/int(unsafe.Sizeof(dc.zeroVal))))
+		}
+	}
+	return dc
+}
+
+// maxPlainValues returns the most PLAIN-encoded values of T that dataLen
+// bytes can hold, and false when there is no useful bound.
+func maxPlainValues[T parquet.ColumnTypes](dataLen, fixedLen int) (int, bool) {
+	var size int
+	var zero T
+	switch any(zero).(type) {
+	case bool:
+		return dataLen * 8, true // bit-packed
+	case int32, float32:
+		size = 4
+	case int64, float64:
+		size = 8
+	case parquet.Int96:
+		size = 12
+	case parquet.ByteArray:
+		size = 4 // the length prefix
+	case parquet.FixedLenByteArray:
+		size = fixedLen
+	}
+	if size <= 0 {
+		return 0, false
+	}
+	return dataLen / size, true
 }
 
 var (

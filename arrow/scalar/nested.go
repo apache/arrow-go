@@ -349,10 +349,12 @@ type Dictionary struct {
 	}
 }
 
+// NewNullDictScalar returns a null scalar of dictionary type dt. Its empty
+// dictionary is allocated from memory.DefaultAllocator and freed by Release.
 func NewNullDictScalar(dt arrow.DataType) *Dictionary {
 	ret := &Dictionary{scalar: scalar{dt, false}}
 	ret.Value.Index = MakeNullScalar(dt.(*arrow.DictionaryType).IndexType)
-	ret.Value.Dict = nil
+	ret.Value.Dict = array.MakeArrayOfNull(memory.DefaultAllocator, dt.(*arrow.DictionaryType).ValueType, 0)
 	return ret
 }
 

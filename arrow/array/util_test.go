@@ -30,6 +30,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/internal/arrdata"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/hashing"
@@ -188,6 +189,40 @@ func TestMakeArrayOfNullUnions(t *testing.T) {
 
 			require.Equal(t, 0, arr.NullN())
 			require.NoError(t, array.ValidateFull(arr))
+		})
+	}
+}
+
+func TestMakeArrayOfNullNestedNull(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	nullField := arrow.Field{Name: "n", Type: arrow.Null, Nullable: true}
+	tests := []struct {
+		typ   arrow.DataType
+		nulls bool
+	}{
+		{arrow.StructOf(nullField), true},
+		{arrow.FixedSizeListOf(2, arrow.Null), true},
+		{arrow.SparseUnionOf([]arrow.Field{nullField}, []arrow.UnionTypeCode{0}), false},
+		{arrow.DenseUnionOf([]arrow.Field{nullField}, []arrow.UnionTypeCode{0}), false},
+		{extensions.NewOpaqueType(arrow.StructOf(nullField), "type", "vendor"), true},
+		{arrow.StructOf(arrow.Field{Name: "d", Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.Null}, Nullable: true}), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.typ.String(), func(t *testing.T) {
+			for _, length := range []int{0, 3} {
+				arr := array.MakeArrayOfNull(mem, tt.typ, length)
+				assert.Equal(t, length, arr.Len())
+				assert.Truef(t, arrow.TypeEqual(tt.typ, arr.DataType()), "type %s", arr.DataType())
+				if tt.nulls {
+					assert.Equal(t, length, arr.NullN())
+				} else {
+					assert.Zero(t, arr.NullN())
+				}
+				assert.NoError(t, array.ValidateFull(arr))
+				arr.Release()
+			}
 		})
 	}
 }

@@ -433,6 +433,8 @@ func getMaxBufferLen(dt arrow.DataType, length int) int {
 	}
 
 	switch dt := dt.(type) {
+	case *arrow.NullType:
+		return bufferLen
 	case *arrow.DictionaryType:
 		bufferLen = maxOf(getMaxBufferLen(dt.ValueType, length))
 		return maxOf(getMaxBufferLen(dt.IndexType, length))
@@ -519,6 +521,8 @@ func (n *nullArrayFactory) create() *Data {
 
 	switch dt := dt.(type) {
 	case *arrow.NullType:
+		bufs[0].Release()
+		bufs[0] = nil
 	case *arrow.DictionaryType:
 		bufs = append(bufs, n.buf)
 		arr := MakeArrayOfNull(n.mem, dt.ValueType, 0)

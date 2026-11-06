@@ -79,3 +79,39 @@ func BenchmarkWriterRecordEncoderReuse(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkWriterZstd measures a fresh compressed writer per record, as when
+// each table or Flight batch gets its own writer, and one writer for a stream.
+func BenchmarkWriterZstd(b *testing.B) {
+	for _, numRows := range []int{256, 4096} {
+		record := benchmarkRecordBatch(1, numRows)
+		defer record.Release()
+
+		b.Run(fmt.Sprintf("writer_per_record/%drows", numRows), func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(numRows * arrow.Int32SizeBytes))
+			for b.Loop() {
+				writer := NewWriter(io.Discard, WithSchema(record.Schema()), WithZstd())
+				if err := writer.Write(record); err != nil {
+					b.Fatal(err)
+				}
+				if err := writer.Close(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+
+		b.Run(fmt.Sprintf("one_writer/%drows", numRows), func(b *testing.B) {
+			writer := NewWriter(io.Discard, WithSchema(record.Schema()), WithZstd())
+			defer writer.Close()
+
+			b.ReportAllocs()
+			b.SetBytes(int64(numRows * arrow.Int32SizeBytes))
+			for b.Loop() {
+				if err := writer.Write(record); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}

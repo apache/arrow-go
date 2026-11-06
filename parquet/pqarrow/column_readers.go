@@ -67,8 +67,11 @@ func newLeafReader(rctx *readerCtx, field *arrow.Field, input *columnIterator, l
 	}
 	ret.refCount.Add(1)
 
-	err := ret.nextRowGroup(0)
-	return &ColumnReader{ret}, err
+	if err := ret.nextRowGroup(0); err != nil {
+		ret.Release()
+		return nil, err
+	}
+	return &ColumnReader{ret}, nil
 }
 
 func (lr *leafReader) Retain() {

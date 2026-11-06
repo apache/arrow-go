@@ -19,6 +19,7 @@
 package compute_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -63,7 +64,7 @@ func (c *CompareSuite) validateCompare(op kernels.CompareOperator, dt arrow.Data
 		rhs.Release()
 		exp.Release()
 	}()
-	c.validateCompareDatum(op, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()}, &compute.ArrayDatum{exp.Data()})
+	c.validateCompareDatum(op, &compute.ArrayDatum{Value: lhs.Data()}, &compute.ArrayDatum{Value: rhs.Data()}, &compute.ArrayDatum{Value: exp.Data()})
 }
 
 func (c *CompareSuite) validateCompareArrScalar(op kernels.CompareOperator, dt arrow.DataType, lhsStr string, rhs compute.Datum, expStr string) {
@@ -75,7 +76,7 @@ func (c *CompareSuite) validateCompareArrScalar(op kernels.CompareOperator, dt a
 		lhs.Release()
 		exp.Release()
 	}()
-	c.validateCompareDatum(op, &compute.ArrayDatum{lhs.Data()}, rhs, &compute.ArrayDatum{exp.Data()})
+	c.validateCompareDatum(op, &compute.ArrayDatum{Value: lhs.Data()}, rhs, &compute.ArrayDatum{Value: exp.Data()})
 }
 
 func (c *CompareSuite) validateCompareScalarArr(op kernels.CompareOperator, dt arrow.DataType, lhs compute.Datum, rhsStr string, expStr string) {
@@ -87,7 +88,7 @@ func (c *CompareSuite) validateCompareScalarArr(op kernels.CompareOperator, dt a
 		rhs.Release()
 		exp.Release()
 	}()
-	c.validateCompareDatum(op, lhs, &compute.ArrayDatum{rhs.Data()}, &compute.ArrayDatum{exp.Data()})
+	c.validateCompareDatum(op, lhs, &compute.ArrayDatum{Value: rhs.Data()}, &compute.ArrayDatum{Value: exp.Data()})
 }
 
 func slowCompare[T arrow.NumericType | string](op kernels.CompareOperator, lhs, rhs T) bool {
@@ -551,14 +552,14 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 			exp := c.getArr(arrow.FixedWidthTypes.Boolean, op.exp)
 			defer exp.Release()
 
-			expected := &compute.ArrayDatum{exp.Data()}
+			expected := &compute.ArrayDatum{Value: exp.Data()}
 			c.Run("diff units", func() {
 				lhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second}, lhsJSON)
 				defer lhs.Release()
 				rhs := c.getArr(&arrow.TimestampType{Unit: arrow.Millisecond}, rhsJSON)
 				defer rhs.Release()
 
-				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()}, expected, nil)
+				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{Value: lhs.Data()}, &compute.ArrayDatum{Value: rhs.Data()}, expected, nil)
 			})
 			c.Run("diff time zones", func() {
 				lhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/New_York"}, zonedLHSJSON)
@@ -566,7 +567,7 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 				rhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/Phoenix"}, zonedRHSJSON)
 				defer rhs.Release()
 
-				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()}, expected, nil)
+				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{Value: lhs.Data()}, &compute.ArrayDatum{Value: rhs.Data()}, expected, nil)
 			})
 			c.Run("diff time zones and units", func() {
 				cases := []struct {
@@ -580,7 +581,7 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 					lhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second, TimeZone: tc.lhsZone}, zonedLHSJSON)
 					rhs := c.getArr(&arrow.TimestampType{Unit: arrow.Millisecond, TimeZone: tc.rhsZone}, zonedRHSJSON)
 
-					checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()}, expected, nil)
+					checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{Value: lhs.Data()}, &compute.ArrayDatum{Value: rhs.Data()}, expected, nil)
 					lhs.Release()
 					rhs.Release()
 				}
@@ -591,7 +592,7 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 				rhs := c.getArr(&arrow.TimestampType{Unit: arrow.Second, TimeZone: "America/Phoenix"}, zonedRHSJSON)
 				defer rhs.Release()
 
-				_, err := compute.CallFunction(c.ctx, op.fn, nil, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()})
+				_, err := compute.CallFunction(c.ctx, op.fn, nil, &compute.ArrayDatum{Value: lhs.Data()}, &compute.ArrayDatum{Value: rhs.Data()})
 				c.ErrorIs(err, arrow.ErrInvalid)
 				c.ErrorContains(err, "cannot compare timestamp with timezone to timestamp without timezone")
 
@@ -600,7 +601,7 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 				rhs = c.getArr(&arrow.TimestampType{Unit: arrow.Second}, rhsJSON)
 				defer rhs.Release()
 
-				_, err = compute.CallFunction(c.ctx, op.fn, nil, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()})
+				_, err = compute.CallFunction(c.ctx, op.fn, nil, &compute.ArrayDatum{Value: lhs.Data()}, &compute.ArrayDatum{Value: rhs.Data()})
 				c.ErrorIs(err, arrow.ErrInvalid)
 				c.ErrorContains(err, "cannot compare timestamp with timezone to timestamp without timezone")
 			})
@@ -627,7 +628,7 @@ func (c *CompareTimestampSuite) TestDiffParams() {
 				for _, tc := range cases {
 					lhs := c.getArr(tc.lhsType, tc.lhsValue)
 					rhs := c.getArr(tc.rhsType, tc.rhsValue)
-					_, err := compute.CallFunction(c.ctx, op.fn, nil, &compute.ArrayDatum{lhs.Data()}, &compute.ArrayDatum{rhs.Data()})
+					_, err := compute.CallFunction(c.ctx, op.fn, nil, &compute.ArrayDatum{Value: lhs.Data()}, &compute.ArrayDatum{Value: rhs.Data()})
 					lhs.Release()
 					rhs.Release()
 
@@ -667,8 +668,8 @@ func (c *CompareTimestampSuite) TestScalarArray() {
 		defer flipExpected.Release()
 
 		cases := []struct{ side1, side2, expected compute.Datum }{
-			{compute.NewDatum(scalarSide), &compute.ArrayDatum{arraySide.Data()}, &compute.ArrayDatum{expected.Data()}},
-			{&compute.ArrayDatum{arraySide.Data()}, compute.NewDatum(scalarSide), &compute.ArrayDatum{flipExpected.Data()}},
+			{compute.NewDatum(scalarSide), &compute.ArrayDatum{Value: arraySide.Data()}, &compute.ArrayDatum{Value: expected.Data()}},
+			{&compute.ArrayDatum{Value: arraySide.Data()}, compute.NewDatum(scalarSide), &compute.ArrayDatum{Value: flipExpected.Data()}},
 		}
 
 		for _, arrCase := range cases {
@@ -730,9 +731,9 @@ func (c *CompareDecimalSuite) TestArrayScalar() {
 				lhsIntLikeArr.Release()
 			}()
 
-			lhs := &compute.ArrayDatum{lhsArr.Data()}
-			lhsFloat := &compute.ArrayDatum{lhsFloatArr.Data()}
-			lhsIntLike := &compute.ArrayDatum{lhsIntLikeArr.Data()}
+			lhs := &compute.ArrayDatum{Value: lhsArr.Data()}
+			lhsFloat := &compute.ArrayDatum{Value: lhsFloatArr.Data()}
+			lhsIntLike := &compute.ArrayDatum{Value: lhsIntLikeArr.Data()}
 
 			rhs, _ := scalar.MakeScalarParam("1.23", ty)
 			rhsFloat := scalar.MakeScalar(float64(1.23))
@@ -741,7 +742,7 @@ func (c *CompareDecimalSuite) TestArrayScalar() {
 				c.Run(tc.fn, func() {
 					exp := c.getArr(arrow.FixedWidthTypes.Boolean, tc.exp)
 					defer exp.Release()
-					expected := &compute.ArrayDatum{exp.Data()}
+					expected := &compute.ArrayDatum{Value: exp.Data()}
 
 					checkScalarBinary(c.T(), tc.fn, lhs, compute.NewDatum(rhs), expected, nil)
 					checkScalarBinary(c.T(), tc.fn, lhsFloat, compute.NewDatum(rhs), expected, nil)
@@ -776,9 +777,9 @@ func (c *CompareDecimalSuite) TestScalarArray() {
 				rhsIntLikeArr.Release()
 			}()
 
-			rhs := &compute.ArrayDatum{rhsArr.Data()}
-			rhsFloat := &compute.ArrayDatum{rhsFloatArr.Data()}
-			rhsIntLike := &compute.ArrayDatum{rhsIntLikeArr.Data()}
+			rhs := &compute.ArrayDatum{Value: rhsArr.Data()}
+			rhsFloat := &compute.ArrayDatum{Value: rhsFloatArr.Data()}
+			rhsIntLike := &compute.ArrayDatum{Value: rhsIntLikeArr.Data()}
 
 			lhs, _ := scalar.MakeScalarParam("1.23", ty)
 			lhsFloat := scalar.MakeScalar(float64(1.23))
@@ -787,7 +788,7 @@ func (c *CompareDecimalSuite) TestScalarArray() {
 				c.Run(tc.fn, func() {
 					exp := c.getArr(arrow.FixedWidthTypes.Boolean, tc.exp)
 					defer exp.Release()
-					expected := &compute.ArrayDatum{exp.Data()}
+					expected := &compute.ArrayDatum{Value: exp.Data()}
 
 					checkScalarBinary(c.T(), tc.fn, compute.NewDatum(lhs), rhs, expected, nil)
 					checkScalarBinary(c.T(), tc.fn, compute.NewDatum(lhs), rhsFloat, expected, nil)
@@ -822,9 +823,9 @@ func (c *CompareDecimalSuite) TestArrayArray() {
 				lhsIntLikeArr.Release()
 			}()
 
-			lhs := &compute.ArrayDatum{lhsArr.Data()}
-			lhsFloat := &compute.ArrayDatum{lhsFloatArr.Data()}
-			lhsIntLike := &compute.ArrayDatum{lhsIntLikeArr.Data()}
+			lhs := &compute.ArrayDatum{Value: lhsArr.Data()}
+			lhsFloat := &compute.ArrayDatum{Value: lhsFloatArr.Data()}
+			lhsIntLike := &compute.ArrayDatum{Value: lhsIntLikeArr.Data()}
 
 			rhsArr := c.getArr(ty, `["1.23", "2.34", "1.23", "-1.23", "1.23", "-1.23", null, "1.23"]`)
 			rhsFloatArr := c.getArr(arrow.PrimitiveTypes.Float64, `[1.23, 2.34, 1.23, -1.23, 1.23, -1.23, null, 1.23]`)
@@ -835,9 +836,9 @@ func (c *CompareDecimalSuite) TestArrayArray() {
 				rhsIntArr.Release()
 			}()
 
-			rhs := &compute.ArrayDatum{rhsArr.Data()}
-			rhsFloat := &compute.ArrayDatum{rhsFloatArr.Data()}
-			rhsInt := &compute.ArrayDatum{rhsIntArr.Data()}
+			rhs := &compute.ArrayDatum{Value: rhsArr.Data()}
+			rhsFloat := &compute.ArrayDatum{Value: rhsFloatArr.Data()}
+			rhsInt := &compute.ArrayDatum{Value: rhsIntArr.Data()}
 
 			empty := c.getArr(ty, `[]`)
 			emptyExp := c.getArr(arrow.FixedWidthTypes.Boolean, `[]`)
@@ -854,12 +855,12 @@ func (c *CompareDecimalSuite) TestArrayArray() {
 				c.Run(tc.fn, func() {
 					exp := c.getArr(arrow.FixedWidthTypes.Boolean, tc.exp)
 					defer exp.Release()
-					expected := &compute.ArrayDatum{exp.Data()}
+					expected := &compute.ArrayDatum{Value: exp.Data()}
 
-					checkScalarBinary(c.T(), tc.fn, &compute.ArrayDatum{empty.Data()},
-						&compute.ArrayDatum{empty.Data()}, &compute.ArrayDatum{emptyExp.Data()}, nil)
-					checkScalarBinary(c.T(), tc.fn, &compute.ArrayDatum{null.Data()},
-						&compute.ArrayDatum{null.Data()}, &compute.ArrayDatum{nullExp.Data()}, nil)
+					checkScalarBinary(c.T(), tc.fn, &compute.ArrayDatum{Value: empty.Data()},
+						&compute.ArrayDatum{Value: empty.Data()}, &compute.ArrayDatum{Value: emptyExp.Data()}, nil)
+					checkScalarBinary(c.T(), tc.fn, &compute.ArrayDatum{Value: null.Data()},
+						&compute.ArrayDatum{Value: null.Data()}, &compute.ArrayDatum{Value: nullExp.Data()}, nil)
 					checkScalarBinary(c.T(), tc.fn, lhs, rhs, expected, nil)
 					checkScalarBinary(c.T(), tc.fn, lhsFloat, rhs, expected, nil)
 					checkScalarBinary(c.T(), tc.fn, lhs, rhsFloat, expected, nil)
@@ -892,14 +893,14 @@ func (c *CompareDecimalSuite) TestDiffParams() {
 				rhsArr.Release()
 			}()
 
-			lhs := &compute.ArrayDatum{lhsArr.Data()}
-			rhs := &compute.ArrayDatum{rhsArr.Data()}
+			lhs := &compute.ArrayDatum{Value: lhsArr.Data()}
+			rhs := &compute.ArrayDatum{Value: rhsArr.Data()}
 
 			for _, tc := range cases {
 				c.Run(tc.fn, func() {
 					exp := c.getArr(arrow.FixedWidthTypes.Boolean, tc.exp)
 					defer exp.Release()
-					expected := &compute.ArrayDatum{exp.Data()}
+					expected := &compute.ArrayDatum{Value: exp.Data()}
 
 					checkScalarBinary(c.T(), tc.fn, lhs, rhs, expected, nil)
 				})
@@ -998,15 +999,15 @@ func (c *CompareFixedSizeBinary) TestArrayScalar() {
 				exp := c.getArr(arrow.FixedWidthTypes.Boolean, op.exp[tc.resultIdx])
 				defer exp.Release()
 
-				expected := &compute.ArrayDatum{exp.Data()}
+				expected := &compute.ArrayDatum{Value: exp.Data()}
 
 				null := c.getArr(tc.lhsType, `[null]`)
 				defer null.Release()
 				scNull := scalar.MakeNullScalar(tc.rhsType)
 
-				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{null.Data()}, compute.NewDatum(scNull),
-					&compute.ArrayDatum{expNull.Data()}, nil)
-				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhs.Data()},
+				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{Value: null.Data()}, compute.NewDatum(scNull),
+					&compute.ArrayDatum{Value: expNull.Data()}, nil)
+				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{Value: lhs.Data()},
 					compute.NewDatum(rhs), expected, nil)
 			}
 		})
@@ -1093,16 +1094,16 @@ func (c *CompareFixedSizeBinary) TestScalarArray() {
 				exp := c.getArr(arrow.FixedWidthTypes.Boolean, op.exp[tc.resultIdx])
 				defer exp.Release()
 
-				expected := &compute.ArrayDatum{exp.Data()}
+				expected := &compute.ArrayDatum{Value: exp.Data()}
 
 				null := c.getArr(tc.rhsType, `[null]`)
 				defer null.Release()
 				scNull := scalar.MakeNullScalar(tc.lhsType)
 
-				checkScalarBinary(c.T(), op.fn, compute.NewDatum(scNull), &compute.ArrayDatum{null.Data()},
-					&compute.ArrayDatum{expNull.Data()}, nil)
+				checkScalarBinary(c.T(), op.fn, compute.NewDatum(scNull), &compute.ArrayDatum{Value: null.Data()},
+					&compute.ArrayDatum{Value: expNull.Data()}, nil)
 				checkScalarBinary(c.T(), op.fn, compute.NewDatum(lhs),
-					&compute.ArrayDatum{rhs.Data()}, expected, nil)
+					&compute.ArrayDatum{Value: rhs.Data()}, expected, nil)
 			}
 		})
 	}
@@ -1210,7 +1211,7 @@ func (c *CompareFixedSizeBinary) TestArrayArray() {
 				exp := c.getArr(arrow.FixedWidthTypes.Boolean, op.exp[tc.resultIdx])
 				defer exp.Release()
 
-				expected := &compute.ArrayDatum{exp.Data()}
+				expected := &compute.ArrayDatum{Value: exp.Data()}
 
 				lhsEmpty := c.getArr(tc.lhsType, `[]`)
 				defer lhsEmpty.Release()
@@ -1221,12 +1222,12 @@ func (c *CompareFixedSizeBinary) TestArrayArray() {
 				rhsNull := c.getArr(tc.rhsType, `[null]`)
 				defer rhsNull.Release()
 
-				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhsEmpty.Data()}, &compute.ArrayDatum{rhsEmpty.Data()},
-					&compute.ArrayDatum{expEmpty.Data()}, nil)
-				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhsNull.Data()}, &compute.ArrayDatum{rhsNull.Data()},
-					&compute.ArrayDatum{expNull.Data()}, nil)
-				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{lhs.Data()},
-					&compute.ArrayDatum{rhs.Data()}, expected, nil)
+				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{Value: lhsEmpty.Data()}, &compute.ArrayDatum{Value: rhsEmpty.Data()},
+					&compute.ArrayDatum{Value: expEmpty.Data()}, nil)
+				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{Value: lhsNull.Data()}, &compute.ArrayDatum{Value: rhsNull.Data()},
+					&compute.ArrayDatum{Value: expNull.Data()}, nil)
+				checkScalarBinary(c.T(), op.fn, &compute.ArrayDatum{Value: lhs.Data()},
+					&compute.ArrayDatum{Value: rhs.Data()}, expected, nil)
 			}
 		})
 	}
@@ -1297,8 +1298,8 @@ func (c *CompareStringSuite) TestRandomCompareArrayArray() {
 							defer rhs.Release()
 
 							c.validateCompareComputed(op,
-								&compute.ArrayDatum{lhs.Data()},
-								&compute.ArrayDatum{rhs.Data()})
+								&compute.ArrayDatum{Value: lhs.Data()},
+								&compute.ArrayDatum{Value: rhs.Data()})
 						})
 					}
 				})
@@ -1575,6 +1576,399 @@ func (sv *ScalarValiditySuite) TestNotNull() {
 	}
 }
 
+func (sv *ScalarValiditySuite) TestIsNullDictionaryScalar() {
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}
+	input := compute.NewDatumWithoutOwning(scalar.MakeNullScalar(dictType))
+	defer input.Release()
+
+	out, err := compute.CallFunction(sv.ctx, "is_null", nil, input)
+	sv.Require().NoError(err)
+	defer out.Release()
+	sv.Equal(scalar.NewBooleanScalar(true), out.(*compute.ScalarDatum).Value)
+}
+
+func (sv *ScalarValiditySuite) checkValiditySliced(input arrow.Array, isNull, isNotNull string) {
+	for _, tt := range []struct{ fn, expected string }{
+		{"is_null", isNull}, {"is_not_null", isNotNull},
+	} {
+		exp := sv.getArr(arrow.FixedWidthTypes.Boolean, tt.expected)
+		res, err := compute.CallFunction(sv.ctx, tt.fn, nil, compute.NewDatumWithoutOwning(input))
+		sv.Require().NoError(err)
+		result := res.(*compute.ArrayDatum).MakeArray()
+		res.Release()
+		sv.Truef(array.Equal(exp, result), "%s(%s): expected %s, got %s", tt.fn, input, exp, result)
+		exp.Release()
+		result.Release()
+	}
+}
+
+func (sv *ScalarValiditySuite) TestSlicedInput() {
+	withNulls := sv.getArr(arrow.PrimitiveTypes.Int32, `[null, 1, null, 2, 3, 4, null, 5, 6, 7, null, null, 8]`)
+	defer withNulls.Release()
+	data := array.NewData(arrow.PrimitiveTypes.Int32, withNulls.Len(),
+		[]*memory.Buffer{nil, withNulls.Data().Buffers()[1]}, nil, 0, 0)
+	noValidity := array.MakeFromData(data)
+	data.Release()
+	defer noValidity.Release()
+
+	tests := []struct {
+		offset    int64
+		isNull    string
+		isNotNull string
+	}{
+		{0, `[true, false, true, false]`, `[false, true, false, true]`},
+		{1, `[false, true, false, false]`, `[true, false, true, true]`},
+		{8, `[false, false, true, true]`, `[true, true, false, false]`},
+		{9, `[false, true, true, false]`, `[true, false, false, true]`},
+	}
+	for _, tt := range tests {
+		sv.Run(fmt.Sprintf("validity/offset=%d", tt.offset), func() {
+			sliced := array.NewSlice(withNulls, tt.offset, tt.offset+4)
+			defer sliced.Release()
+			sv.checkValiditySliced(sliced, tt.isNull, tt.isNotNull)
+		})
+		sv.Run(fmt.Sprintf("no validity/offset=%d", tt.offset), func() {
+			sliced := array.NewSlice(noValidity, tt.offset, tt.offset+4)
+			defer sliced.Release()
+			sv.checkValiditySliced(sliced, `[false, false, false, false]`, `[true, true, true, true]`)
+		})
+	}
+}
+
+func (sv *ScalarValiditySuite) TestDictionaryNullValues() {
+	values := sv.getArr(arrow.BinaryTypes.String, `["a", null]`)
+	defer values.Release()
+
+	for _, idxType := range []arrow.DataType{
+		arrow.PrimitiveTypes.Int8, arrow.PrimitiveTypes.Uint8,
+		arrow.PrimitiveTypes.Int16, arrow.PrimitiveTypes.Uint16,
+		arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Uint32,
+		arrow.PrimitiveTypes.Int64, arrow.PrimitiveTypes.Uint64,
+	} {
+		sv.Run(idxType.String(), func() {
+			dt := &arrow.DictionaryType{IndexType: idxType, ValueType: arrow.BinaryTypes.String}
+			indices := sv.getArr(idxType, `[0, 1, null]`)
+			defer indices.Release()
+			check := func(length int, buffers []*memory.Buffer, nulls int, isNull, isNotNull string) {
+				data := array.NewData(idxType, length, buffers, nil, nulls, 0)
+				defer data.Release()
+				idx := array.MakeFromData(data)
+				defer idx.Release()
+				dict := array.NewDictionaryArray(dt, idx, values)
+				defer dict.Release()
+				sv.checkValiditySliced(dict, isNull, isNotNull)
+			}
+
+			check(3, indices.Data().Buffers(), 1, `[false, true, true]`, `[true, false, false]`)
+			check(2, []*memory.Buffer{nil, indices.Data().Buffers()[1]}, 0, `[false, true]`, `[true, false]`)
+
+			// the null slot holds -1, or the maximum for unsigned types
+			width := idxType.(arrow.FixedWidthDataType).BitWidth() / 8
+			raw := append([]byte(nil), indices.Data().Buffers()[1].Bytes()...)
+			copy(raw[2*width:], bytes.Repeat([]byte{0xFF}, width))
+			check(3, []*memory.Buffer{indices.Data().Buffers()[0], memory.NewBufferBytes(raw)}, 1,
+				`[false, true, true]`, `[true, false, false]`)
+		})
+	}
+}
+
+func (sv *ScalarValiditySuite) TestDictionaryNullValuesSliced() {
+	values := sv.getArr(arrow.BinaryTypes.String,
+		`["x", "x", "x", "x", "x", "x", "x", "x", "a", null, "b", null]`)
+	defer values.Release()
+	slicedValues := array.NewSlice(values, 8, 12)
+	defer slicedValues.Release()
+	indices := sv.getArr(arrow.PrimitiveTypes.Int32,
+		`[null, 1, null, 3, 0, null, 2, 1, 0, 1, null, 2, 3, null, 0, 0, 3, 1, null, 2]`)
+	defer indices.Release()
+
+	dict := array.NewDictionaryArray(&arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String},
+		indices, slicedValues)
+	defer dict.Release()
+	sliced := array.NewSlice(dict, 8, 19)
+	defer sliced.Release()
+
+	sv.checkValiditySliced(sliced,
+		`[false, true, true, false, true, true, false, false, true, true, true]`,
+		`[true, false, false, true, false, false, true, true, false, false, false]`)
+}
+
+func (sv *ScalarValiditySuite) TestDictionaryNullTypeValues() {
+	values := array.NewNull(1)
+	defer values.Release()
+	indices := sv.getArr(arrow.PrimitiveTypes.Int8, `[0, null, 0]`)
+	defer indices.Release()
+	dict := array.NewDictionaryArray(&arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.Null}, indices, values)
+	defer dict.Release()
+
+	sv.checkValiditySliced(dict, `[true, true, true]`, `[false, false, false]`)
+	sv.checkValiditySlice(dict, 1, 3, `[true, true]`, `[false, false]`)
+}
+
+func (sv *ScalarValiditySuite) TestDictionaryNullValuesScalarAndChunked() {
+	values := sv.getArr(arrow.BinaryTypes.String, `["a", null]`)
+	defer values.Release()
+
+	for _, tt := range []struct {
+		index  scalar.Scalar
+		isNull bool
+	}{
+		{scalar.NewInt32Scalar(0), false},
+		{scalar.NewInt32Scalar(1), true},
+		{scalar.MakeNullScalar(arrow.PrimitiveTypes.Int32), true},
+	} {
+		s := scalar.NewDictScalar(tt.index, values)
+		for fn, expected := range map[string]bool{"is_null": tt.isNull, "is_not_null": !tt.isNull} {
+			res, err := compute.CallFunction(sv.ctx, fn, nil, compute.NewDatumWithoutOwning(s))
+			sv.Require().NoError(err)
+			got := res.(*compute.ScalarDatum).Value
+			sv.Truef(scalar.Equals(scalar.NewBooleanScalar(expected), got), "%s(%s): got %s", fn, s, got)
+			res.Release()
+		}
+		s.Release()
+	}
+
+	dt := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}
+	indices := sv.getArr(arrow.PrimitiveTypes.Int32, `[0, 1, null]`)
+	defer indices.Release()
+	dict := array.NewDictionaryArray(dt, indices, values)
+	defer dict.Release()
+	tail := array.NewSlice(dict, 1, 3)
+	defer tail.Release()
+	chunked := arrow.NewChunked(dt, []arrow.Array{dict, tail})
+	defer chunked.Release()
+
+	for _, tt := range []struct {
+		fn       string
+		expected []string
+	}{
+		{"is_null", []string{`[false, true, true]`, `[true, true]`}},
+		{"is_not_null", []string{`[true, false, false]`, `[false, false]`}},
+	} {
+		res, err := compute.CallFunction(sv.ctx, tt.fn, nil, compute.NewDatumWithoutOwning(chunked))
+		sv.Require().NoError(err)
+		got := res.(*compute.ChunkedDatum).Value.Chunks()
+		sv.Require().Len(got, len(tt.expected))
+		for i, expected := range tt.expected {
+			exp := sv.getArr(arrow.FixedWidthTypes.Boolean, expected)
+			sv.Truef(array.Equal(exp, got[i]), "%s chunk %d: expected %s, got %s", tt.fn, i, exp, got[i])
+			exp.Release()
+		}
+		res.Release()
+	}
+}
+
+func (sv *ScalarValiditySuite) TestDictionaryNoNullValues() {
+	values := sv.getArr(arrow.BinaryTypes.String, `["a", "b"]`)
+	defer values.Release()
+	indices := sv.getArr(arrow.PrimitiveTypes.Int32, `[0, 1, null]`)
+	defer indices.Release()
+	dict := array.NewDictionaryArray(&arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}, indices, values)
+	defer dict.Release()
+
+	sv.checkValiditySliced(dict, `[false, false, true]`, `[true, true, false]`)
+
+	res, err := compute.CallFunction(sv.ctx, "is_not_null", nil, compute.NewDatumWithoutOwning(dict))
+	sv.Require().NoError(err)
+	defer res.Release()
+	sv.Same(dict.Data().Buffers()[0], res.(*compute.ArrayDatum).Value.Buffers()[1])
+}
+
+func (sv *ScalarValiditySuite) checkValiditySlice(input arrow.Array, lo, hi int64, isNull, isNotNull string) {
+	sliced := array.NewSlice(input, lo, hi)
+	defer sliced.Release()
+	sv.checkValiditySliced(sliced, isNull, isNotNull)
+}
+
+func (sv *ScalarValiditySuite) TestNullType() {
+	arr := array.NewNull(3)
+	defer arr.Release()
+	sv.checkValiditySliced(arr, `[true, true, true]`, `[false, false, false]`)
+	sv.checkValiditySlice(arr, 1, 3, `[true, true]`, `[false, false]`)
+}
+
+func (sv *ScalarValiditySuite) TestSparseUnion() {
+	typeIDs := sv.getArr(arrow.PrimitiveTypes.Int8, `[5, 2, 5, 2]`)
+	defer typeIDs.Release()
+	ints := sv.getArr(arrow.PrimitiveTypes.Int32, `[9, 1, null, 3, 4]`)
+	defer ints.Release()
+	strs := sv.getArr(arrow.BinaryTypes.String, `["z", "a", "b", null, null]`)
+	defer strs.Release()
+	slicedInts := array.NewSlice(ints, 1, 5)
+	defer slicedInts.Release()
+	slicedStrs := array.NewSlice(strs, 1, 5)
+	defer slicedStrs.Release()
+	arr, err := array.NewSparseUnionFromArraysWithFieldCodes(typeIDs,
+		[]arrow.Array{slicedInts, slicedStrs}, []string{"i", "s"}, []arrow.UnionTypeCode{2, 5})
+	sv.Require().NoError(err)
+	defer arr.Release()
+
+	// arr is ["a", null, null, 4]
+	sv.checkValiditySliced(arr, `[false, true, true, false]`, `[true, false, false, true]`)
+	sv.checkValiditySlice(arr, 2, 4, `[true, false]`, `[false, true]`)
+}
+
+func (sv *ScalarValiditySuite) TestDenseUnion() {
+	typeIDs := sv.getArr(arrow.PrimitiveTypes.Int8, `[5, 2, 2, 5]`)
+	defer typeIDs.Release()
+	offsets := sv.getArr(arrow.PrimitiveTypes.Int32, `[1, 1, 0, 0]`)
+	defer offsets.Release()
+	ints := sv.getArr(arrow.PrimitiveTypes.Int32, `[null, 1]`)
+	defer ints.Release()
+	strs := sv.getArr(arrow.BinaryTypes.String, `["a", null]`)
+	defer strs.Release()
+	arr, err := array.NewDenseUnionFromArraysWithFieldCodes(typeIDs, offsets,
+		[]arrow.Array{ints, strs}, []string{"i", "s"}, []arrow.UnionTypeCode{2, 5})
+	sv.Require().NoError(err)
+	defer arr.Release()
+
+	sv.checkValiditySliced(arr, `[true, false, true, false]`, `[false, true, false, true]`)
+	sv.checkValiditySlice(arr, 1, 3, `[false, true]`, `[true, false]`)
+}
+
+func (sv *ScalarValiditySuite) TestRunEndEncoded() {
+	allValues := sv.getArr(arrow.PrimitiveTypes.Int32, `[null, 1, null, 2]`)
+	defer allValues.Release()
+	values := array.NewSlice(allValues, 1, 4)
+	defer values.Release()
+	nulls := array.NewNull(2)
+	defer nulls.Release()
+	unionIDs := sv.getArr(arrow.PrimitiveTypes.Int8, `[0, 0]`)
+	defer unionIDs.Release()
+	unionInts := sv.getArr(arrow.PrimitiveTypes.Int32, `[1, null]`)
+	defer unionInts.Release()
+	union, err := array.NewSparseUnionFromArrays(unionIDs, []arrow.Array{unionInts})
+	sv.Require().NoError(err)
+	defer union.Release()
+
+	for _, runEndType := range []arrow.DataType{
+		arrow.PrimitiveTypes.Int16, arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int64,
+	} {
+		sv.Run(runEndType.String(), func() {
+			allRunEnds := sv.getArr(runEndType, `[1, 2, 3, 5]`)
+			defer allRunEnds.Release()
+			runEnds := array.NewSlice(allRunEnds, 1, 4)
+			defer runEnds.Release()
+			arr := array.NewRunEndEncodedArray(runEnds, values, 5, 0)
+			defer arr.Release()
+
+			// arr is [1, 1, null, 2, 2]
+			sv.checkValiditySliced(arr, `[false, false, true, false, false]`, `[true, true, false, true, true]`)
+			sv.checkValiditySlice(arr, 1, 4, `[false, true, false]`, `[true, false, true]`)
+			sv.checkValiditySlice(arr, 2, 5, `[true, false, false]`, `[false, true, true]`)
+
+			// As in Arrow C++, only the validity bitmap of the values is checked.
+			shortRunEnds := sv.getArr(runEndType, `[2, 3]`)
+			defer shortRunEnds.Release()
+			for _, v := range []arrow.Array{nulls, union} {
+				arr := array.NewRunEndEncodedArray(shortRunEnds, v, 3, 0)
+				sv.checkValiditySliced(arr, `[false, false, false]`, `[true, true, true]`)
+				arr.Release()
+			}
+		})
+	}
+}
+
+func (sv *ScalarValiditySuite) TestNestedUnion() {
+	innerIDs := sv.getArr(arrow.PrimitiveTypes.Int8, `[0, 0]`)
+	defer innerIDs.Release()
+	ints := sv.getArr(arrow.PrimitiveTypes.Int32, `[1, null]`)
+	defer ints.Release()
+	inner, err := array.NewSparseUnionFromArrays(innerIDs, []arrow.Array{ints})
+	sv.Require().NoError(err)
+	defer inner.Release()
+	nulls := array.NewNull(1)
+	defer nulls.Release()
+	typeIDs := sv.getArr(arrow.PrimitiveTypes.Int8, `[1, 0, 1]`)
+	defer typeIDs.Release()
+	offsets := sv.getArr(arrow.PrimitiveTypes.Int32, `[0, 0, 1]`)
+	defer offsets.Release()
+	arr, err := array.NewDenseUnionFromArrays(typeIDs, offsets, []arrow.Array{nulls, inner})
+	sv.Require().NoError(err)
+	defer arr.Release()
+
+	sv.checkValiditySliced(arr, `[false, true, true]`, `[true, false, false]`)
+
+	runEnds := sv.getArr(arrow.PrimitiveTypes.Int32, `[1, 2]`)
+	defer runEnds.Release()
+	ree := array.NewRunEndEncodedArray(runEnds, ints, 2, 0)
+	defer ree.Release()
+	indices := sv.getArr(arrow.PrimitiveTypes.Int32, `[0, 1]`)
+	defer indices.Release()
+	strs := sv.getArr(arrow.BinaryTypes.String, `["a", null]`)
+	defer strs.Release()
+	dict := array.NewDictionaryArray(&arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}, indices, strs)
+	defer dict.Release()
+
+	// As in Arrow C++, a run-end encoded child is checked logically and a
+	// dictionary child only by its index validity.
+	for _, tt := range []struct {
+		child             arrow.Array
+		isNull, isNotNull string
+	}{
+		{ree, `[false, true]`, `[true, false]`},
+		{dict, `[false, false]`, `[true, true]`},
+	} {
+		arr, err := array.NewSparseUnionFromArrays(innerIDs, []arrow.Array{tt.child})
+		sv.Require().NoError(err)
+		sv.checkValiditySliced(arr, tt.isNull, tt.isNotNull)
+		arr.Release()
+	}
+}
+
+func (sv *ScalarValiditySuite) TestLogicalNullScalars() {
+	typeIDs := sv.getArr(arrow.PrimitiveTypes.Int8, `[0, 0]`)
+	defer typeIDs.Release()
+	ints := sv.getArr(arrow.PrimitiveTypes.Int32, `[1, null]`)
+	defer ints.Release()
+	offsets := sv.getArr(arrow.PrimitiveTypes.Int32, `[0, 1]`)
+	defer offsets.Release()
+	sparse, err := array.NewSparseUnionFromArrays(typeIDs, []arrow.Array{ints})
+	sv.Require().NoError(err)
+	defer sparse.Release()
+	dense, err := array.NewDenseUnionFromArrays(typeIDs, offsets, []arrow.Array{ints})
+	sv.Require().NoError(err)
+	defer dense.Release()
+	runEnds := sv.getArr(arrow.PrimitiveTypes.Int32, `[1, 2]`)
+	defer runEnds.Release()
+	ree := array.NewRunEndEncodedArray(runEnds, ints, 2, 0)
+	defer ree.Release()
+
+	type testCase struct {
+		s      scalar.Scalar
+		isNull bool
+	}
+	tests := []testCase{{scalar.ScalarNull, true}}
+	for _, tt := range []struct {
+		arr    arrow.Array
+		idx    int
+		isNull bool
+	}{
+		{sparse, 1, true}, {dense, 1, true}, {ree, 0, false}, {ree, 1, true},
+	} {
+		s, err := scalar.GetScalar(tt.arr, tt.idx)
+		sv.Require().NoError(err)
+		if r, ok := s.(scalar.Releasable); ok {
+			defer r.Release()
+		}
+		tests = append(tests, testCase{s, tt.isNull})
+	}
+
+	for _, tt := range tests {
+		for fn, expected := range map[string]bool{"is_null": tt.isNull, "is_not_null": !tt.isNull} {
+			res, err := compute.CallFunction(sv.ctx, fn, nil, compute.NewDatumWithoutOwning(tt.s))
+			sv.Require().NoError(err)
+			sv.Truef(scalar.Equals(scalar.NewBooleanScalar(expected), res.(*compute.ScalarDatum).Value),
+				"%s(%s): expected %t, got %s", fn, tt.s, expected, res)
+			res.Release()
+		}
+	}
+}
+
 func (sv *ScalarValiditySuite) TestIsNaN() {
 	tests := []struct {
 		in       string
@@ -1592,6 +1986,40 @@ func (sv *ScalarValiditySuite) TestIsNaN() {
 				sv.getArr(arrow.FixedWidthTypes.Boolean, tt.expected))
 		}
 	}
+}
+
+func (sv *ScalarValiditySuite) TestDecimal() {
+	tests := []struct {
+		funcName string
+		typ      arrow.DataType
+		expected string
+	}{
+		{"is_null", &arrow.Decimal128Type{Precision: 10, Scale: 2}, `[false, true, false]`},
+		{"is_null", &arrow.Decimal256Type{Precision: 40, Scale: 2}, `[false, true, false]`},
+		{"is_not_null", &arrow.Decimal128Type{Precision: 10, Scale: 2}, `[true, false, true]`},
+		{"is_not_null", &arrow.Decimal256Type{Precision: 40, Scale: 2}, `[true, false, true]`},
+		{"is_nan", &arrow.Decimal128Type{Precision: 10, Scale: 2}, `[false, false, false]`},
+		{"is_nan", &arrow.Decimal256Type{Precision: 40, Scale: 2}, `[false, false, false]`},
+	}
+
+	for _, tt := range tests {
+		sv.Run(tt.funcName+"/"+tt.typ.String(), func() {
+			sv.checkScalarUnary(tt.funcName, sv.getArr(tt.typ, `["1.50", null, "2.25"]`),
+				sv.getArr(arrow.FixedWidthTypes.Boolean, tt.expected))
+		})
+	}
+}
+
+func (sv *ScalarValiditySuite) TestIsNaNDictionaryNotImplemented() {
+	dict := sv.getArr(&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.PrimitiveTypes.Float64},
+		`[1.5, "NaN", null]`)
+	defer dict.Release()
+
+	res, err := compute.CallFunction(sv.ctx, "is_nan", nil, compute.NewDatumWithoutOwning(dict))
+	if res != nil {
+		res.Release()
+	}
+	sv.ErrorIs(err, arrow.ErrNotImplemented)
 }
 
 func TestScalarValidity(t *testing.T) {

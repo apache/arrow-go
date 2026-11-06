@@ -27,9 +27,10 @@
 //
 // The function registry holds scalar functions (element-wise arithmetic,
 // comparisons, boolean logic, bit-wise operations, rounding, set lookup with
-// is_in, list_element and the null checks), vector functions (array_filter,
-// array_take, unique, dictionary_encode, cumulative_sum and the run-end
-// encode/decode functions) and the meta functions cast, filter, take, sort
+// is_in, prefix matching with starts_with, list_element and the null
+// checks), vector functions (array_filter, array_take, unique,
+// dictionary_encode, cumulative_sum and the run-end encode/decode
+// functions) and the meta functions cast, filter, take, sort
 // and sort_indices that dispatch to them. It also holds the scalar aggregate
 // functions count and sum, which fold a whole array into a single value
 // through the Init, Consume, Merge and Finalize lifecycle of an

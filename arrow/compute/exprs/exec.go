@@ -60,7 +60,7 @@ func makeExecBatch(ctx context.Context, schema *arrow.Schema, partial compute.Da
 			idxes := batchSchema.FieldIndices(field.Name)
 			switch len(idxes) {
 			case 0:
-				out.Values[i] = compute.NewDatum(scalar.MakeNullScalar(field.Type))
+				out.Values[i] = compute.NewDatumWithoutOwning(scalar.MakeNullScalar(field.Type))
 			case 1:
 				col := partialBatch.Column(idxes[0])
 				if !arrow.TypeEqual(col.DataType(), field.Type) {
@@ -107,7 +107,7 @@ func makeExecBatch(ctx context.Context, schema *arrow.Schema, partial compute.Da
 			for i, field := range schema.Fields() {
 				idx, found := dt.FieldIdx(field.Name)
 				if !found {
-					out.Values[i] = compute.NewDatum(scalar.MakeNullScalar(field.Type))
+					out.Values[i] = compute.NewDatumWithoutOwning(scalar.MakeNullScalar(field.Type))
 					continue
 				}
 
@@ -118,6 +118,11 @@ func makeExecBatch(ctx context.Context, schema *arrow.Schema, partial compute.Da
 					val, err = val.CastTo(field.Type)
 					if err != nil {
 						return compute.ExecBatch{}, err
+					}
+					if !s.Value[idx].IsValid() {
+						// CastTo of a null returns a new scalar, which the datum owns
+						out.Values[i] = compute.NewDatumWithoutOwning(val)
+						continue
 					}
 				}
 				out.Values[i] = compute.NewDatum(val)
@@ -236,7 +241,7 @@ func literalToDatum(mem memory.Allocator, lit expr.Literal, ext ExtensionIDSet) 
 		if err != nil {
 			return nil, err
 		}
-		return compute.NewDatum(scalar.MakeNullScalar(dt)), nil
+		return compute.NewDatumWithoutOwning(scalar.MakeNullScalar(dt)), nil
 	case *expr.ListLiteral:
 		var elemType arrow.DataType
 
@@ -326,7 +331,7 @@ func literalToDatum(mem memory.Allocator, lit expr.Literal, ext ExtensionIDSet) 
 		}
 		defer kvArr.Release()
 
-		return compute.NewDatumWithoutOwning(scalar.NewMapScalar(kvArr)), nil
+		return &compute.ScalarDatum{Value: scalar.NewMapScalar(kvArr)}, nil
 	case *expr.StructLiteral:
 		fields := make([]scalar.Scalar, len(v.Value))
 		names := make([]string, len(v.Value))
@@ -436,7 +441,9 @@ func literalToDatum(mem memory.Allocator, lit expr.Literal, ext ExtensionIDSet) 
 // Note: Substrait expressions do not have an equivalent to LargeString/LargeBinary, so
 // field references which expect a string or binary will allow their Large counterparts
 // to be used as well. Most of the time, this shouldn't be an issue as the compute kernels
-// should handle any casting that might be necessary.
+// should handle any casting that might be necessary. Likewise, Substrait has no
+// dictionary type, so a dictionary field of string or binary values (including their
+// Large counterparts) whose value type matches is returned undecoded.
 func ExecuteScalarExpression(ctx context.Context, inputSchema *arrow.Schema, expression expr.Expression, partialInput compute.Datum) (compute.Datum, error) {
 	if expression == nil {
 		return nil, arrow.ErrInvalid
@@ -517,26 +524,44 @@ func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.Exe
 
 	out, err := GetReferencedValue(compute.GetAllocator(ctx), ref, param, ext)
 	if err == compute.ErrEmpty {
-		out = compute.NewDatum(param)
+		out = param
 	} else if err != nil {
 		return nil, err
 	}
 
 	dt := out.(compute.ArrayLikeDatum).Type()
-	if !arrow.TypeEqual(dt, expectedType) {
+	valueType := dt
+	if dictType, ok := dt.(*arrow.DictionaryType); ok && arrow.IsBaseBinary(dictType.ValueType.ID()) {
+		valueType = dictType.ValueType
+	}
+	if !arrow.TypeEqual(valueType, expectedType) {
 		// substrait doesn't have a LARGE_STRING or LARGE_BINARY type, so we
 		// need to special case check if we got a LARGE_STRING or LARGE_BINARY
 		// type when we expected a STRING or BINARY type.
 		switch {
-		case expectedType.ID() == arrow.STRING && dt.ID() == arrow.LARGE_STRING:
-		case expectedType.ID() == arrow.BINARY && dt.ID() == arrow.LARGE_BINARY:
+		case expectedType.ID() == arrow.STRING && valueType.ID() == arrow.LARGE_STRING:
+		case expectedType.ID() == arrow.BINARY && valueType.ID() == arrow.LARGE_BINARY:
 		default:
 			return nil, fmt.Errorf("%w: referenced field %s was %s, but should have been %s",
 				arrow.ErrInvalid, ref, dt, expectedType)
 		}
 	}
 
+	// A struct field path borrows its value from the input, so take a
+	// reference after the type check, where a mismatch has nothing to release.
+	if isStructFieldPath(ref) {
+		return compute.NewDatum(out), nil
+	}
 	return out, nil
+}
+
+func isStructFieldPath(ref expr.ReferenceSegment) bool {
+	for ; ref != nil; ref = ref.GetChild() {
+		if _, ok := ref.(*expr.StructFieldRef); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func executeScalarBatch(ctx context.Context, input compute.ExecBatch, exp expr.Expression, ext ExtensionIDSet) (compute.Datum, error) {

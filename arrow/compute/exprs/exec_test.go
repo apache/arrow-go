@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/substrait-io/substrait-go/v8/expr"
+	substraitext "github.com/substrait-io/substrait-go/v8/extensions"
 	"github.com/substrait-io/substrait-go/v8/types"
 	proto "github.com/substrait-io/substrait-protobuf/go/substraitpb"
 )
@@ -738,6 +739,253 @@ func TestLargeTypes(t *testing.T) {
 	})
 }
 
+func TestDictionaryTypes(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	tests := []struct {
+		name      string
+		dictType  *arrow.DictionaryType
+		dict      string
+		valueType arrow.DataType
+		lit       expr.Literal
+	}{
+		{"int8 utf8", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String},
+			`["a", "b"]`, arrow.BinaryTypes.String, expr.NewPrimitiveLiteral("a", false)},
+		{"int32 utf8", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String},
+			`["a", "b"]`, arrow.BinaryTypes.String, expr.NewPrimitiveLiteral("a", false)},
+		{"int8 large_utf8", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.LargeString},
+			`["a", "b"]`, arrow.BinaryTypes.String, expr.NewPrimitiveLiteral("a", false)},
+		{"int8 binary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.Binary},
+			`["YQ==", "Yg=="]`, arrow.BinaryTypes.Binary, expr.NewByteSliceLiteral([]byte("a"), false)},
+		{"int32 large_binary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.LargeBinary},
+			`["YQ==", "Yg=="]`, arrow.BinaryTypes.Binary, expr.NewByteSliceLiteral([]byte("a"), false)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col, err := array.DictArrayFromJSON(mem, tt.dictType, `[0, 1, null, 0]`, tt.dict)
+			require.NoError(t, err)
+			defer col.Release()
+
+			dictSchema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: tt.dictType, Nullable: true}}, nil)
+			rec := array.NewRecordBatch(dictSchema, []arrow.Array{col}, int64(col.Len()))
+			defer rec.Release()
+			input := compute.NewDatumWithoutOwning(rec)
+
+			bldr := exprs.NewExprBuilder(extSet)
+			require.NoError(t, bldr.SetInputSchema(arrow.NewSchema(
+				[]arrow.Field{{Name: "col", Type: tt.valueType, Nullable: true}}, nil)))
+
+			cases := []struct {
+				name     string
+				ex       exprs.Builder
+				expected string
+			}{
+				{"equal", bldr.MustCallScalar("equal", nil, bldr.FieldRef("col"), bldr.Literal(tt.lit)),
+					`[true, false, null, true]`},
+				{"is_null", bldr.MustCallScalar("is_null", nil, bldr.FieldRef("col")),
+					`[false, false, true, false]`},
+			}
+
+			for _, c := range cases {
+				t.Run(c.name, func(t *testing.T) {
+					ex, err := c.ex.BuildExpr()
+					require.NoError(t, err)
+
+					ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+					result, err := exprs.ExecuteScalarExpression(ctx, dictSchema, ex, input)
+					require.NoError(t, err)
+					defer result.Release()
+
+					expected, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(c.expected))
+					require.NoError(t, err)
+					defer expected.Release()
+					assertEqual(t, expected, result)
+				})
+			}
+		})
+	}
+
+	rejected := []struct {
+		name      string
+		dictType  *arrow.DictionaryType
+		dict      string
+		valueType arrow.DataType
+		fn        string
+		err       error
+	}{
+		{"binary dictionary as utf8", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.Binary},
+			`["YQ=="]`, arrow.BinaryTypes.String, "", arrow.ErrInvalid},
+		{"float64 dictionary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.PrimitiveTypes.Float64},
+			`[1.5]`, arrow.PrimitiveTypes.Float64, "is_nan", arrow.ErrInvalid},
+		{"is_nan utf8 dictionary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String},
+			`["a"]`, arrow.BinaryTypes.String, "is_nan", arrow.ErrNotImplemented},
+		{"is_nan binary dictionary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.Binary},
+			`["YQ=="]`, arrow.BinaryTypes.Binary, "is_nan", arrow.ErrNotImplemented},
+	}
+
+	for _, tt := range rejected {
+		t.Run(tt.name, func(t *testing.T) {
+			col, err := array.DictArrayFromJSON(mem, tt.dictType, `[0]`, tt.dict)
+			require.NoError(t, err)
+			defer col.Release()
+
+			dictSchema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: tt.dictType, Nullable: true}}, nil)
+			rec := array.NewRecordBatch(dictSchema, []arrow.Array{col}, int64(col.Len()))
+			defer rec.Release()
+
+			bldr := exprs.NewExprBuilder(extSet)
+			require.NoError(t, bldr.SetInputSchema(arrow.NewSchema(
+				[]arrow.Field{{Name: "col", Type: tt.valueType, Nullable: true}}, nil)))
+			ex, err := bldr.FieldRef("col").BuildExpr()
+			require.NoError(t, err)
+			if tt.fn != "" {
+				// Bypass signature validation to exercise kernel dispatch for
+				// is_nan on string and binary dictionaries.
+				ex, err = expr.NewCustomScalarFunc(extSet.GetSubstraitRegistry(),
+					substraitext.NewScalarFuncVariant(substraitext.ID{URN: exprs.SubstraitComparisonFuncsURI, Name: tt.fn}),
+					&types.BooleanType{Nullability: types.NullabilityNullable}, nil, ex)
+				require.NoError(t, err)
+			}
+
+			ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+			_, err = exprs.ExecuteScalarExpression(ctx, dictSchema, ex, compute.NewDatumWithoutOwning(rec))
+			assert.ErrorIs(t, err, tt.err)
+			assert.ErrorContains(t, err, "dictionary<")
+		})
+	}
+}
+
+func TestFieldRefTypeMismatchReleases(t *testing.T) {
+	structOf := func(inner arrow.DataType) arrow.DataType {
+		return arrow.StructOf(arrow.Field{Name: "a", Type: inner, Nullable: true})
+	}
+
+	tests := []struct {
+		name               string
+		exprType, dataType arrow.DataType
+		json               string
+		path               []any
+	}{
+		{"top level", arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32,
+			`[{"col": 1}, {"col": 2}]`, []any{"col"}},
+		{"nested", structOf(arrow.BinaryTypes.String), structOf(arrow.PrimitiveTypes.Int32),
+			`[{"col": {"a": 1}}, {"col": {"a": 2}}]`, []any{"col", "a"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			exprSchema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: tt.exprType, Nullable: true}}, nil)
+			dataSchema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: tt.dataType, Nullable: true}}, nil)
+
+			rec, _, err := array.RecordFromJSON(mem, dataSchema, strings.NewReader(tt.json))
+			require.NoError(t, err)
+			defer rec.Release()
+
+			bldr := exprs.NewExprBuilder(extSet)
+			require.NoError(t, bldr.SetInputSchema(exprSchema))
+			e, err := bldr.FieldRefList(tt.path...).BuildExpr()
+			require.NoError(t, err)
+
+			ctx := compute.WithAllocator(context.Background(), mem)
+			result, err := exprs.ExecuteScalarExpression(ctx, dataSchema, e, compute.NewDatumWithoutOwning(rec))
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
+			assert.Nil(t, result)
+		})
+	}
+}
+
+func TestNestedFieldRefResultOwnership(t *testing.T) {
+	scalarInput := func(t *testing.T, mem memory.Allocator, dt *arrow.StructType, json string) *scalar.Struct {
+		arr, _, err := array.FromJSON(mem, dt, strings.NewReader(json))
+		require.NoError(t, err)
+		defer arr.Release()
+		sc, err := scalar.GetScalar(arr, 0)
+		require.NoError(t, err)
+		return sc.(*scalar.Struct)
+	}
+
+	execute := func(t *testing.T, mem memory.Allocator, sc *arrow.Schema, e expr.Expression, input compute.Datum) compute.Datum {
+		ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+		result, err := exprs.ExecuteScalarExpression(ctx, sc, e, input)
+		require.NoError(t, err)
+		return result
+	}
+
+	t.Run("array struct field", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		sc := arrow.NewSchema([]arrow.Field{{Name: "s", Type: arrow.StructOf(
+			arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true}), Nullable: true}}, nil)
+		rec, _, err := array.RecordFromJSON(mem, sc, strings.NewReader(`[{"s": {"a": 1}}, {"s": {"a": 2}}]`))
+		require.NoError(t, err)
+
+		bldr := exprs.NewExprBuilder(extSet)
+		require.NoError(t, bldr.SetInputSchema(sc))
+		e, err := bldr.FieldRefList("s", "a").BuildExpr()
+		require.NoError(t, err)
+
+		result := execute(t, mem, sc, e, compute.NewDatumWithoutOwning(rec))
+		rec.Release()
+		require.NotZero(t, mem.CurrentAlloc(), "result no longer holds its buffers")
+
+		expected, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2]`))
+		require.NoError(t, err)
+		defer expected.Release()
+		assertEqual(t, expected, result)
+		result.Release()
+	})
+
+	t.Run("scalar struct field", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		dt := arrow.StructOf(arrow.Field{Name: "s", Type: arrow.StructOf(
+			arrow.Field{Name: "b", Type: arrow.BinaryTypes.Binary, Nullable: true}), Nullable: true})
+		input := scalarInput(t, mem, dt, `[{"s": {"b": "aGVsbG8="}}]`)
+		sc := arrow.NewSchema(dt.Fields(), nil)
+
+		bldr := exprs.NewExprBuilder(extSet)
+		require.NoError(t, bldr.SetInputSchema(sc))
+		e, err := bldr.FieldRefList("s", "b").BuildExpr()
+		require.NoError(t, err)
+
+		result := execute(t, mem, sc, e, compute.NewDatumWithoutOwning(input))
+		input.Release()
+		require.NotZero(t, mem.CurrentAlloc(), "result no longer holds its buffers")
+
+		assert.Equal(t, []byte("hello"), result.(*compute.ScalarDatum).Value.(*scalar.Binary).Data())
+		result.Release()
+	})
+
+	t.Run("scalar list element", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		dt := arrow.StructOf(arrow.Field{Name: "s", Type: arrow.StructOf(
+			arrow.Field{Name: "l", Type: arrow.ListOf(arrow.BinaryTypes.Binary), Nullable: true}), Nullable: true})
+		input := scalarInput(t, mem, dt, `[{"s": {"l": ["aGVsbG8=", "d29ybGQ="]}}]`)
+		defer input.Release()
+		sc := arrow.NewSchema(dt.Fields(), nil)
+
+		st, err := exprs.ToSubstraitType(dt, false, extSet)
+		require.NoError(t, err)
+		e, err := expr.NewRootFieldRef(&expr.StructFieldRef{Field: 0, Child: &expr.StructFieldRef{Field: 0,
+			Child: &expr.ListElementRef{Offset: 1}}},
+			types.NewRecordTypeFromStruct(*st.(*types.StructType)))
+		require.NoError(t, err)
+
+		result := execute(t, mem, sc, e, compute.NewDatumWithoutOwning(input))
+		defer result.Release()
+		assert.Equal(t, []byte("world"), result.(*compute.ScalarDatum).Value.(*scalar.Binary).Data())
+	})
+}
+
 func TestDecimalFilterLarge(t *testing.T) {
 	t.Parallel()
 
@@ -838,6 +1086,74 @@ func TestDecimalFilterLarge(t *testing.T) {
 				_, err = exprs.ExecuteScalarExpression(ctx, schema, e, dr)
 				rq.NoError(err, "Failed to execute scalar expression")
 			})
+		})
+	}
+}
+
+func TestStartsWithExpr(t *testing.T) {
+	varchar, _, err := exprs.FromSubstraitType(&types.VarCharType{Length: -1}, extSet)
+	require.NoError(t, err)
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "s", Type: arrow.BinaryTypes.LargeString, Nullable: true},
+		{Name: "v", Type: varchar, Nullable: true},
+	}, nil)
+
+	bldr := exprs.NewExprBuilder(extSet)
+	require.NoError(t, bldr.SetInputSchema(sc))
+	ab := bldr.Literal(expr.NewPrimitiveLiteral("ab", false))
+	caseSensitivity := func(pref string) []*types.FunctionOption {
+		return []*types.FunctionOption{{Name: "case_sensitivity", Preference: []string{pref}}}
+	}
+
+	tests := []struct {
+		name     string
+		ex       exprs.Builder
+		expected string
+	}{
+		{"large_string", bldr.MustCallScalar("starts_with", nil, bldr.FieldRef("s"), ab), `[true, null, false, false]`},
+		{"varchar", bldr.MustCallScalar("starts_with", nil, bldr.FieldRef("v"),
+			bldr.WrapLiteral(expr.NewLiteral(&types.VarChar{Value: "ab", Length: 2}, false))),
+			`[true, false, null, true]`},
+		{"non-literal pattern", bldr.MustCallScalar("starts_with", nil, bldr.FieldRef("s"),
+			bldr.Must(bldr.Cast(ab, arrow.BinaryTypes.String))), ""},
+		{"null pattern", bldr.MustCallScalar("starts_with", nil, bldr.FieldRef("s"),
+			bldr.Literal(expr.NewNullLiteral(&types.StringType{}))), ""},
+		{"case insensitive", bldr.MustCallScalar("starts_with", caseSensitivity("CASE_INSENSITIVE"), bldr.FieldRef("s"),
+			bldr.Literal(expr.NewPrimitiveLiteral("AB", false))), `[true, null, false, false]`},
+		{"case insensitive ascii", bldr.MustCallScalar("starts_with", caseSensitivity("CASE_INSENSITIVE_ASCII"),
+			bldr.FieldRef("s"), ab), ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+			ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+
+			ex, err := tt.ex.BuildExpr()
+			require.NoError(t, err)
+
+			rec, _, err := array.RecordFromJSON(mem, sc, strings.NewReader(`[
+				{"s": "abc", "v": "ab"},
+				{"s": null, "v": "b"},
+				{"s": "xab", "v": null},
+				{"s": "a", "v": "abab"}
+			]`))
+			require.NoError(t, err)
+			defer rec.Release()
+
+			result, err := exprs.ExecuteScalarExpression(ctx, sc, ex, compute.NewDatumWithoutOwning(rec))
+			if tt.expected == "" {
+				assert.ErrorIs(t, err, arrow.ErrNotImplemented)
+				return
+			}
+			require.NoError(t, err)
+			defer result.Release()
+
+			expected, _, err := array.FromJSON(mem, arrow.FixedWidthTypes.Boolean, strings.NewReader(tt.expected))
+			require.NoError(t, err)
+			defer expected.Release()
+			assertEqual(t, expected, result)
 		})
 	}
 }
