@@ -947,6 +947,11 @@ type DictionaryType struct {
 	IndexType DataType
 	ValueType DataType
 	Ordered   bool
+	// ValueMetadata holds metadata for the dictionary value type, including
+	// unregistered extension type annotations. IPC stores it in
+	// DictionaryEncoding.custom_metadata, separately from the field metadata.
+	// Registered extension type annotations are represented by ValueType instead.
+	ValueMetadata Metadata
 }
 
 func (*DictionaryType) ID() Type        { return DICTIONARY }

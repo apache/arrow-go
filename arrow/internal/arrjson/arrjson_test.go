@@ -17,15 +17,23 @@
 package arrjson
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/internal/arrdata"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/internal/json"
+	"github.com/apache/arrow-go/v18/internal/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestReadWrite(t *testing.T) {
@@ -6381,4 +6389,206 @@ func makeViewTypesWantJSONs() string {
     }
   ]
 }`
+}
+
+func TestDictionaryOfExtensionMetadata(t *testing.T) {
+	for _, extType := range []arrow.ExtensionType{types.NewParametric1Type(1), types.NewDictExtensionType()} {
+		if arrow.GetExtensionType(extType.ExtensionName()) == nil {
+			require.NoError(t, arrow.RegisterExtensionType(extType))
+			defer arrow.UnregisterExtensionType(extType.ExtensionName())
+		}
+	}
+
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	uuidType := extensions.NewUUIDType()
+	p1Type := types.NewParametric1Type(6)
+
+	uuidValues, _, err := array.FromJSON(mem, uuidType, strings.NewReader(
+		`["00000000-0000-0000-0000-000000000001", null, "00000000-0000-0000-0000-000000000002"]`))
+	require.NoError(t, err)
+	defer uuidValues.Release()
+	p1Storage, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[7, null, 9]`))
+	require.NoError(t, err)
+	defer p1Storage.Release()
+	p1Values := array.NewExtensionArrayWithStorage(p1Type, p1Storage)
+	defer p1Values.Release()
+	indices, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int16, strings.NewReader(`[2, 0, null, 1]`))
+	require.NoError(t, err)
+	defer indices.Release()
+
+	dictOfUUID := array.NewDictionaryArray(
+		&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int16, ValueType: uuidType}, indices, uuidValues)
+	defer dictOfUUID.Release()
+	dictOfP1 := array.NewDictionaryArray(
+		&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int16, ValueType: p1Type,
+			ValueMetadata: arrow.MetadataFrom(map[string]string{"extra": "preserved"})}, indices, p1Values)
+	defer dictOfP1.Release()
+	dictExt, _, err := array.FromJSON(mem, types.NewDictExtensionType(), strings.NewReader(`["a", "b", null, "a"]`))
+	require.NoError(t, err)
+	defer dictExt.Release()
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "uuid", Type: dictOfUUID.DataType(), Nullable: true},
+		{Name: "p1", Type: dictOfP1.DataType(), Nullable: true},
+		{Name: "dict_ext", Type: dictExt.DataType(), Nullable: true},
+	}, nil)
+	rec := array.NewRecordBatch(schema, []arrow.Array{dictOfUUID, dictOfP1, dictExt}, 4)
+	defer rec.Release()
+
+	var buf bytes.Buffer
+	w, err := NewWriter(&buf, schema)
+	require.NoError(t, err)
+	require.NoError(t, w.Write(rec))
+	require.NoError(t, w.Close())
+
+	// the extension keys of a dictionary value type are in the "dictionary"
+	// object, and those of an extension type with dictionary storage are in
+	// the field's own "metadata".
+	var raw struct {
+		Schema struct {
+			Fields []struct {
+				Metadata   []metaKV `json:"metadata"`
+				Dictionary struct {
+					Metadata []metaKV `json:"metadata"`
+				} `json:"dictionary"`
+			} `json:"fields"`
+		} `json:"schema"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &raw))
+	fields := raw.Schema.Fields
+	require.Len(t, fields, 3)
+	assert.Nil(t, fields[0].Metadata)
+	assert.Equal(t, []metaKV{{Key: ipc.ExtensionTypeKeyName, Value: "arrow.uuid"}}, fields[0].Dictionary.Metadata)
+	assert.Nil(t, fields[1].Metadata)
+	assert.Equal(t, []metaKV{
+		{Key: ipc.ExtensionTypeKeyName, Value: "parametric-type-1"},
+		{Key: ipc.ExtensionMetadataKeyName, Value: p1Type.Serialize()},
+		{Key: "extra", Value: "preserved"},
+	}, fields[1].Dictionary.Metadata)
+	assert.Equal(t, []metaKV{
+		{Key: ipc.ExtensionTypeKeyName, Value: "dict-extension"},
+		{Key: ipc.ExtensionMetadataKeyName, Value: "dict-extension-serialized"},
+	}, fields[2].Metadata)
+	assert.Nil(t, fields[2].Dictionary.Metadata)
+
+	r, err := NewReader(bytes.NewReader(buf.Bytes()), WithAllocator(mem))
+	require.NoError(t, err)
+	defer r.Release()
+	assert.Truef(t, r.Schema().Equal(schema), "got=%s\nwant=%s", r.Schema(), schema)
+	got, err := r.Read()
+	require.NoError(t, err)
+	assert.Truef(t, array.RecordEqual(rec, got), "got=%s\nwant=%s", got, rec)
+}
+
+func TestDictionaryOfUnregisteredExtension(t *testing.T) {
+	const data = `{
+  "schema": {"fields": [{
+    "name": "f", "nullable": true, "children": [],
+    "type": {"name": "int", "isSigned": true, "bitWidth": 32},
+    "dictionary": {"id": 0, "indexType": {"name": "int", "isSigned": true, "bitWidth": 8}, "isOrdered": false,
+      "metadata": [{"key": "ARROW:extension:name", "value": "unregistered"},
+                   {"key": "ARROW:extension:metadata", "value": "data"},
+                   {"key": "extra", "value": "preserved"}]}
+  }]},
+  "batches": [],
+  "dictionaries": []
+}`
+	r, err := NewReader(strings.NewReader(data))
+	require.NoError(t, err)
+	defer r.Release()
+
+	want := arrow.NewSchema([]arrow.Field{{Name: "f", Nullable: true,
+		Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.PrimitiveTypes.Int32,
+			ValueMetadata: arrow.MetadataFrom(map[string]string{
+				ipc.ExtensionTypeKeyName: "unregistered", ipc.ExtensionMetadataKeyName: "data", "extra": "preserved",
+			})}}}, nil)
+	assert.Truef(t, r.Schema().Equal(want), "got=%s\nwant=%s", r.Schema(), want)
+	assert.Zero(t, r.Schema().Field(0).Metadata.Len())
+
+	var buf bytes.Buffer
+	w, err := NewWriter(&buf, r.Schema())
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	// Compare schemas, since the writer omits the empty dictionaries list.
+	var original, rewritten struct {
+		Schema json.RawMessage `json:"schema"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(data), &original))
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &rewritten))
+	assert.JSONEq(t, string(original.Schema), string(rewritten.Schema))
+
+	// The integration conversion path must preserve the annotation across
+	// JSON -> IPC -> JSON as well.
+	var ipcBuf bytes.Buffer
+	ipcWriter := ipc.NewWriter(&ipcBuf, ipc.WithSchema(r.Schema()))
+	require.NoError(t, ipcWriter.Close())
+	ipcReader, err := ipc.NewReader(&ipcBuf)
+	require.NoError(t, err)
+	defer ipcReader.Release()
+	buf.Reset()
+	w, err = NewWriter(&buf, ipcReader.Schema())
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &rewritten))
+	assert.JSONEq(t, string(original.Schema), string(rewritten.Schema))
+}
+
+func TestDictionaryRoundTrip(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	uuidType := extensions.NewUUIDType()
+	uuidDictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int16, ValueType: uuidType}
+	uuidDict, err := array.DictArrayFromJSON(mem, uuidDictType, `[1, null, 0, 1, 2]`,
+		`["00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002", null]`)
+	require.NoError(t, err)
+	defer uuidDict.Release()
+	uuidDictData := uuidDict.Data().(*array.Data)
+
+	ordered, err := array.DictArrayFromJSON(mem,
+		&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String, Ordered: true},
+		`[0, 1, null, 1, 0]`, `["low", "high"]`)
+	require.NoError(t, err)
+	defer ordered.Release()
+
+	// extension type whose storage is a dictionary of an extension type
+	opaqueType := extensions.NewOpaqueType(uuidDictType, "type", "vendor")
+	opaqueData := array.NewDataWithDictionary(opaqueType, uuidDict.Len(), uuidDictData.Buffers(),
+		uuidDict.NullN(), 0, uuidDictData.Dictionary().(*array.Data))
+	defer opaqueData.Release()
+	opaqueOfDict := array.MakeFromData(opaqueData)
+	defer opaqueOfDict.Release()
+
+	// list of dictionary of an extension type
+	offsets := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes([]int32{0, 2, 2, 3, 5, 5}))
+	listData := array.NewData(arrow.ListOf(uuidDictType), 5, []*memory.Buffer{nil, offsets},
+		[]arrow.ArrayData{uuidDictData}, 0, 0)
+	defer listData.Release()
+	listOfDict := array.MakeFromData(listData)
+	defer listOfDict.Release()
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "ordered", Type: ordered.DataType(), Nullable: true},
+		{Name: "opaque_of_dict", Type: opaqueOfDict.DataType(), Nullable: true},
+		{Name: "list_of_dict", Type: listOfDict.DataType(), Nullable: true},
+	}, nil)
+	rec := array.NewRecordBatch(schema, []arrow.Array{ordered, opaqueOfDict, listOfDict}, 5)
+	defer rec.Release()
+
+	var buf bytes.Buffer
+	w, err := NewWriter(&buf, schema)
+	require.NoError(t, err)
+	require.NoError(t, w.Write(rec))
+	require.NoError(t, w.Close())
+
+	r, err := NewReader(bytes.NewReader(buf.Bytes()), WithAllocator(mem))
+	require.NoError(t, err)
+	defer r.Release()
+	assert.Truef(t, r.Schema().Equal(schema), "got=%s\nwant=%s", r.Schema(), schema)
+	assert.True(t, r.Schema().Field(0).Type.(*arrow.DictionaryType).Ordered)
+	got, err := r.Read()
+	require.NoError(t, err)
+	assert.Truef(t, array.RecordEqual(rec, got), "got=%s\nwant=%s", got, rec)
 }

@@ -22,9 +22,35 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/internal/dictutils"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
+
+func TestMapperNestedExtensionStorage(t *testing.T) {
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	var valueType arrow.DataType = arrow.StructOf(arrow.Field{Name: "nested", Type: dictType})
+	for depth := 1; depth <= 3; depth++ {
+		valueType = extensions.NewOpaqueType(valueType, "type", "vendor")
+		t.Run(fmt.Sprint(depth), func(t *testing.T) {
+			outer := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: valueType}
+			schema := arrow.NewSchema([]arrow.Field{
+				{Name: "dict", Type: outer},
+				{Name: "extension", Type: valueType},
+			}, nil)
+			var mapper dictutils.Mapper
+			mapper.ImportSchema(schema)
+			if mapper.NumFields() != 3 {
+				t.Fatalf("expected 3 dictionaries, got %d", mapper.NumFields())
+			}
+			for _, path := range [][]int32{{0}, {0, 0}, {1, 0}} {
+				if _, err := mapper.GetFieldID(path); err != nil {
+					t.Errorf("dictionary at %v was not imported: %v", path, err)
+				}
+			}
+		})
+	}
+}
 
 func TestDictMemo(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
