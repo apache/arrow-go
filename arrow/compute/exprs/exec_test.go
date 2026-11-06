@@ -1050,6 +1050,23 @@ func TestNestedFieldRefResultOwnership(t *testing.T) {
 			"got %s", result)
 		result.Release()
 	})
+
+	t.Run("GetScalar", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		dt := arrow.StructOf(arrow.Field{Name: "s", Type: arrow.StructOf(
+			arrow.Field{Name: "b", Type: arrow.BinaryTypes.Binary, Nullable: true}), Nullable: true})
+		input := scalarInput(t, mem, dt, `[{"s": {"b": "aGVsbG8="}}]`)
+
+		result, err := exprs.GetScalar(&expr.StructFieldRef{Field: 0, Child: &expr.StructFieldRef{Field: 0}},
+			input, mem, extSet)
+		require.NoError(t, err)
+		input.Release()
+		require.NotZero(t, mem.CurrentAlloc(), "result no longer holds its buffers")
+		assert.Equal(t, []byte("hello"), result.(*scalar.Binary).Data())
+		result.(scalar.Releasable).Release()
+	})
 }
 
 func TestNestedFieldRefSlicedStruct(t *testing.T) {

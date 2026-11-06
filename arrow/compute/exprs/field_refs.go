@@ -89,21 +89,30 @@ func GetRefSchema(ref expr.ReferenceSegment, schema *arrow.Schema) (*arrow.Field
 // ListElementRef can only reference against a List or LargeList scalar,
 // and a MapKeyRef will only reference against a Map scalar. An error is
 // returned if following the reference children ends up with an invalid
-// nested reference object. A field of a null struct is null.
+// nested reference object.
 //
-// The result may share memory with s, and it is not retained; use
-// GetReferencedValue for a result that the caller owns.
+// The result is a new reference: if it implements scalar.Releasable, the
+// caller must release it.
 func GetScalar(ref expr.ReferenceSegment, s scalar.Scalar, mem memory.Allocator, ext ExtensionIDSet) (scalar.Scalar, error) {
 	if ref == nil {
 		return nil, compute.ErrEmpty
 	}
 
+	// once owned is set, s is a reference this function must release when it
+	// moves past it or fails
+	owned := false
 	for ; ref != nil; ref = ref.GetChild() {
-		next, _, err := scalarStep(ref, s, mem, ext)
+		next, borrowed, err := scalarStep(ref, s, mem, ext)
+		if err == nil && borrowed {
+			retainScalar(next)
+		}
+		if owned {
+			releaseScalar(s)
+		}
 		if err != nil {
 			return nil, err
 		}
-		s = next
+		s, owned = next, true
 	}
 	return s, nil
 }
@@ -205,9 +214,6 @@ func releaseScalar(s scalar.Scalar) {
 // GetReferencedValue retrieves the referenced (potentially nested) value from
 // the provided datum which may be a scalar, array, or record batch. The
 // result is a new reference that the caller must release.
-//
-// A field of a struct array is null wherever the struct is null, and a field
-// of a null struct scalar is null.
 func GetReferencedValue(mem memory.Allocator, ref expr.ReferenceSegment, value compute.Datum, ext ExtensionIDSet) (compute.Datum, error) {
 	if ref == nil {
 		return nil, compute.ErrEmpty
