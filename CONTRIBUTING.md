@@ -60,12 +60,19 @@ Then point the tests at the data and run them from the repository root:
 ```sh
 export ARROW_TEST_DATA=$PWD/arrow-testing/data
 export PARQUET_TEST_DATA=$PWD/parquet-testing/data
+export PARQUET_TEST_BAD_DATA=$PWD/parquet-testing/bad_data
 go test ./...
 ```
 
-Without the submodules, tests in packages such as `arrow/csv`, `parquet`,
-`parquet/file` and `parquet/pqarrow` fail or panic because they cannot find
-their data files.
+Set these so every test runs. Without the submodules, tests in packages such
+as `arrow/csv`, `parquet`, `parquet/file` and `parquet/pqarrow` fail or panic
+because they cannot find their data files. Some tests instead return early or
+skip silently when a variable is unset (for example, the malformed-file tests
+in `parquet/pqarrow` need `PARQUET_TEST_BAD_DATA`).
+
+CI runs `go test -short -tags assert,test ./...`, and then again with
+`-tags assert,test,noasm`. Some checks only compile with those tags, so use
+them to reproduce a CI failure locally.
 
 ## Generating Thrift
 
