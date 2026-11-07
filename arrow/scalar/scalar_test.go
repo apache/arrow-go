@@ -32,6 +32,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/apache/arrow-go/v18/internal/types"
@@ -1717,6 +1718,43 @@ func TestMakeArrayFromScalarSupportsZeroLength(t *testing.T) {
 	assert.Equal(t, 0, nullArr.Len())
 	assert.Equal(t, 0, nullArr.NullN())
 	require.NoError(t, array.ValidateFull(nullArr))
+}
+
+func TestMakeArrayFromDictionaryScalarZeroLength(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	int32Field := arrow.Field{Name: "i", Type: arrow.PrimitiveTypes.Int32, Nullable: true}
+	for _, valueType := range []arrow.DataType{
+		arrow.BinaryTypes.LargeBinary,
+		arrow.BinaryTypes.StringView,
+		arrow.FixedWidthTypes.Boolean,
+		arrow.ListOf(arrow.PrimitiveTypes.Int32),
+		arrow.StructOf(int32Field),
+		arrow.SparseUnionOf([]arrow.Field{int32Field}, []arrow.UnionTypeCode{0}),
+		arrow.DenseUnionOf([]arrow.Field{int32Field}, []arrow.UnionTypeCode{0}),
+		arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32),
+		extensions.NewUUIDType(),
+	} {
+		dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: valueType}
+		t.Run(valueType.String(), func(t *testing.T) {
+			dict := array.MakeArrayOfNull(mem, valueType, 1)
+			defer dict.Release()
+			valid := scalar.NewDictScalar(scalar.NewInt8Scalar(0), dict)
+			defer valid.Release()
+			null := scalar.NewNullDictScalar(dictType)
+			defer null.Release()
+
+			for _, sc := range []*scalar.Dictionary{valid, null} {
+				arr, err := scalar.MakeArrayFromScalar(sc, 0, mem)
+				require.NoError(t, err)
+				assert.Equal(t, 0, arr.Len())
+				assert.Truef(t, arrow.TypeEqual(dictType, arr.DataType()), "type %s", arr.DataType())
+				assert.NoError(t, array.ValidateFull(arr))
+				arr.Release()
+			}
+		})
+	}
 }
 
 func TestMakeArrayFromDictionaryScalar(t *testing.T) {
