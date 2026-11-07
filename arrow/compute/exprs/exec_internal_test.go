@@ -146,6 +146,67 @@ func TestMakeExecBatchReleasesNullScalars(t *testing.T) {
 	}
 }
 
+func TestMakeExecBatchErrorReleases(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "a", Type: arrow.BinaryTypes.Binary, Nullable: true},
+		{Name: "b", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+	}, nil)
+	binField := arrow.Field{Name: "a", Type: arrow.BinaryTypes.Binary, Nullable: true}
+	strField := arrow.Field{Name: "b", Type: arrow.BinaryTypes.String, Nullable: true}
+	structType := arrow.StructOf(binField, strField)
+	const row = `[{"a": "eA==", "b": "x"}]`
+
+	tests := []struct {
+		name    string
+		partial func(mem memory.Allocator) compute.Datum
+	}{
+		{"record cast", func(mem memory.Allocator) compute.Datum {
+			rec, _, err := array.RecordFromJSON(mem, arrow.NewSchema(structType.Fields(), nil), strings.NewReader(row))
+			require.NoError(t, err)
+			defer rec.Release()
+			return compute.NewDatum(rec)
+		}},
+		{"ambiguous record field", func(mem memory.Allocator) compute.Datum {
+			a, _, err := array.FromJSON(mem, binField.Type, strings.NewReader(`["eA=="]`))
+			require.NoError(t, err)
+			defer a.Release()
+			bField := arrow.Field{Name: "b", Type: binField.Type, Nullable: true}
+			rec := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{binField, bField, bField}, nil),
+				[]arrow.Array{a, a, a}, 1)
+			defer rec.Release()
+			return compute.NewDatum(rec)
+		}},
+		{"struct array cast", func(mem memory.Allocator) compute.Datum {
+			arr, _, err := array.FromJSON(mem, structType, strings.NewReader(row))
+			require.NoError(t, err)
+			defer arr.Release()
+			return compute.NewDatum(arr)
+		}},
+		{"struct scalar cast", func(mem memory.Allocator) compute.Datum {
+			arr, _, err := array.FromJSON(mem, structType, strings.NewReader(row))
+			require.NoError(t, err)
+			defer arr.Release()
+			sc, err := scalar.GetScalar(arr, 0)
+			require.NoError(t, err)
+			return &compute.ScalarDatum{Value: sc}
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
+			partial := tt.partial(mem)
+			defer partial.Release()
+
+			batch, err := makeExecBatch(compute.WithAllocator(context.Background(), mem), schema, partial)
+			require.Error(t, err)
+			assert.Empty(t, batch.Values)
+		})
+	}
+}
+
 func TestLiteralToDatumIntervalYearToMonth(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

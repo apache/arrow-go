@@ -46,6 +46,7 @@ func makeExecBatch(ctx context.Context, schema *arrow.Schema, partial compute.Da
 					v.Release()
 				}
 			}
+			out = compute.ExecBatch{}
 		}
 	}()
 
@@ -68,7 +69,7 @@ func makeExecBatch(ctx context.Context, schema *arrow.Schema, partial compute.Da
 					// we'll cast this case for now
 					col, err = compute.CastArray(ctx, col, compute.SafeCastOptions(field.Type))
 					if err != nil {
-						return compute.ExecBatch{}, err
+						return out, err
 					}
 					defer col.Release()
 				}
@@ -76,7 +77,7 @@ func makeExecBatch(ctx context.Context, schema *arrow.Schema, partial compute.Da
 			default:
 				err = fmt.Errorf("%w: exec batch field '%s' ambiguous, more than one match",
 					arrow.ErrInvalid, field.Name)
-				return compute.ExecBatch{}, err
+				return out, err
 			}
 		}
 		return
@@ -117,7 +118,7 @@ func makeExecBatch(ctx context.Context, schema *arrow.Schema, partial compute.Da
 					// type. for now we'll cast this
 					val, err = val.CastTo(field.Type)
 					if err != nil {
-						return compute.ExecBatch{}, err
+						return out, err
 					}
 					if !s.Value[idx].IsValid() {
 						// CastTo of a null returns a new scalar, which the datum owns
