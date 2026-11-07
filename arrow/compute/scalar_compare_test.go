@@ -1578,7 +1578,7 @@ func (sv *ScalarValiditySuite) TestNotNull() {
 
 func (sv *ScalarValiditySuite) TestIsNullDictionaryScalar() {
 	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}
-	input := compute.NewDatumWithoutOwning(scalar.MakeNullScalar(dictType))
+	input := &compute.ScalarDatum{Value: scalar.MakeNullScalar(dictType)}
 	defer input.Release()
 
 	out, err := compute.CallFunction(sv.ctx, "is_null", nil, input)

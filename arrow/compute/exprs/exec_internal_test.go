@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/compute"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/substrait-io/substrait-go/v8/expr"
@@ -116,6 +117,35 @@ func TestMakeExecBatch(t *testing.T) {
 	}
 }
 
+func TestMakeExecBatchReleasesNullScalars(t *testing.T) {
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}
+	schema := arrow.NewSchema([]arrow.Field{{Name: "d", Type: dictType, Nullable: true}}, nil)
+
+	tests := []struct {
+		name    string
+		partial compute.Datum
+	}{
+		{"missing record field", compute.NewDatumWithoutOwning(
+			array.NewRecordBatch(arrow.NewSchema(nil, nil), nil, 1))},
+		{"missing struct field", compute.NewDatumWithoutOwning(
+			scalar.NewStructScalar(nil, arrow.StructOf()))},
+		{"null struct field cast", compute.NewDatumWithoutOwning(scalar.NewStructScalar(
+			[]scalar.Scalar{scalar.MakeNullScalar(arrow.BinaryTypes.String)},
+			arrow.StructOf(arrow.Field{Name: "d", Type: arrow.BinaryTypes.String, Nullable: true})))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			batch, err := makeExecBatch(context.Background(), schema, tt.partial)
+			require.NoError(t, err)
+			dict := batch.Values[0].(*compute.ScalarDatum).Value.(*scalar.Dictionary).Value.Dict.Data()
+			require.NotEmpty(t, dict.Buffers())
+			batch.Values[0].Release()
+			assert.Nil(t, dict.Buffers())
+		})
+	}
+}
+
 func TestLiteralToDatumIntervalYearToMonth(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -155,4 +185,21 @@ func TestLiteralToDatumIntervalYearToMonth(t *testing.T) {
 				tc.name, expected, got)
 		})
 	}
+}
+
+func TestLiteralToDatumNullUserDefinedRelease(t *testing.T) {
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}
+	reg := NewExtensionIDRegistry()
+	require.NoError(t, reg.RegisterType(extensions.ID{URN: "extension:test:dictionary", Name: "dict"}, dictType))
+	extSet := NewExtensionSet(expr.NewEmptyExtensionRegistry(extensions.GetDefaultCollectionWithNoError()), reg)
+	_, anchor, ok := extSet.EncodeType(dictType)
+	require.True(t, ok)
+
+	lit := expr.NewNullLiteral(&types.UserDefinedType{TypeReference: anchor})
+	got, err := literalToDatum(memory.DefaultAllocator, lit, extSet)
+	require.NoError(t, err)
+	dict := got.(*compute.ScalarDatum).Value.(*scalar.Dictionary).Value.Dict.Data()
+	require.NotEmpty(t, dict.Buffers())
+	got.Release()
+	assert.Nil(t, dict.Buffers())
 }
