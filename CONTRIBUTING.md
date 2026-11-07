@@ -64,15 +64,15 @@ export PARQUET_TEST_BAD_DATA=$PWD/parquet-testing/bad_data
 go test ./...
 ```
 
-Set these so every test runs. Without the submodules, tests in packages such
-as `arrow/csv`, `parquet`, `parquet/file` and `parquet/pqarrow` fail or panic
-because they cannot find their data files. Some tests instead return early or
-skip silently when a variable is unset (for example, the malformed-file tests
-in `parquet/pqarrow` need `PARQUET_TEST_BAD_DATA`).
+Set these so tests that use the shared data can run. Without the submodules,
+tests in packages such as `arrow/csv`, `parquet`, `parquet/file` and
+`parquet/pqarrow` fail or panic because they cannot find their data files.
+Some tests instead return early or skip when a variable is unset.
 
-CI runs `go test -short -tags assert,test ./...`, and then again with
-`-tags assert,test,noasm`. Some checks only compile with those tags, so use
-them to reproduce a CI failure locally.
+CI runs Arrow tests with `-short` and the `assert,test` tags, then adds
+`noasm` for a second pass. See [`ci/scripts/test.sh`](ci/scripts/test.sh)
+for the full commands and CGO-specific tags. Some checks require these tags,
+so include them when reproducing CI failures locally.
 
 ## Generating Thrift
 
