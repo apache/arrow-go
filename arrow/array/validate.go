@@ -93,7 +93,7 @@ func validateArray(arr arrow.Array, full bool, path string) error {
 	if full && data.DataType().Layout().HasDict {
 		dictData := data.dictionary
 		if dictData != nil {
-			dt := data.DataType().(*arrow.DictionaryType)
+			dt := storageType(data.DataType()).(*arrow.DictionaryType)
 			indexData := NewData(dt.IndexType, data.length, data.buffers, nil, data.nulls, data.offset)
 			err := checkIndexBounds(indexData, uint64(dictData.Len()))
 			indexData.Release()
@@ -143,7 +143,7 @@ func validateNullCount(data *Data) error {
 	}
 
 	var actualNulls int
-	switch data.dtype.ID() {
+	switch storageType(data.dtype).ID() {
 	case arrow.NULL:
 		actualNulls = data.length
 	case arrow.SPARSE_UNION, arrow.DENSE_UNION, arrow.RUN_END_ENCODED:
@@ -158,6 +158,13 @@ func validateNullCount(data *Data) error {
 		return fmt.Errorf("arrow/array: null count value (%d) does not match actual number of nulls in array (%d)", data.nulls, actualNulls)
 	}
 	return nil
+}
+
+func storageType(dt arrow.DataType) arrow.DataType {
+	if ext, ok := dt.(arrow.ExtensionType); ok {
+		return ext.StorageType()
+	}
+	return dt
 }
 
 func validateArrayData(data *Data) error {
@@ -181,21 +188,16 @@ func validateArrayData(data *Data) error {
 
 	// REE arrays have no physical buffers. Constructors and IPC may include a
 	// nil placeholder, but builders and C Data imports omit it.
-	if len(data.buffers) == 0 {
-		dt := data.dtype
-		if ext, ok := dt.(arrow.ExtensionType); ok {
-			dt = ext.StorageType()
-		}
-		if dt.ID() == arrow.RUN_END_ENCODED {
-			return nil
-		}
+	id := storageType(data.dtype).ID()
+	if len(data.buffers) == 0 && id == arrow.RUN_END_ENCODED {
+		return nil
 	}
 
 	layout := data.dtype.Layout()
 	// Union arrays reserve the first buffer slot for a validity bitmap, even
 	// though that slot must be nil and is not part of their type layout.
 	bufferOffset := 0
-	if data.dtype.ID() == arrow.SPARSE_UNION || data.dtype.ID() == arrow.DENSE_UNION {
+	if id == arrow.SPARSE_UNION || id == arrow.DENSE_UNION {
 		bufferOffset = 1
 	}
 	bufferCount := len(data.buffers) - bufferOffset
@@ -278,7 +280,7 @@ func validateArrayStructure(data *Data) error {
 	}
 
 	if data.DataType().Layout().HasDict {
-		dt, ok := data.DataType().(*arrow.DictionaryType)
+		dt, ok := storageType(data.DataType()).(*arrow.DictionaryType)
 		if !ok {
 			return fmt.Errorf("arrow/array: datatype %s declares dictionary storage but is not a dictionary type", data.DataType())
 		}

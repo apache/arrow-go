@@ -207,6 +207,10 @@ func TestMakeArrayOfNullNestedNull(t *testing.T) {
 		{arrow.SparseUnionOf([]arrow.Field{nullField}, []arrow.UnionTypeCode{0}), false},
 		{arrow.DenseUnionOf([]arrow.Field{nullField}, []arrow.UnionTypeCode{0}), false},
 		{extensions.NewOpaqueType(arrow.StructOf(nullField), "type", "vendor"), true},
+		{extensions.NewOpaqueType(arrow.Null, "type", "vendor"), true},
+		{extensions.NewOpaqueType(arrow.SparseUnionOf([]arrow.Field{nullField}, []arrow.UnionTypeCode{0}), "type", "vendor"), false},
+		{extensions.NewOpaqueType(arrow.DenseUnionOf([]arrow.Field{nullField}, []arrow.UnionTypeCode{0}), "type", "vendor"), false},
+		{extensions.NewOpaqueType(&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}, "type", "vendor"), true},
 		{arrow.StructOf(arrow.Field{Name: "d", Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.Null}, Nullable: true}), true},
 	}
 	for _, tt := range tests {
