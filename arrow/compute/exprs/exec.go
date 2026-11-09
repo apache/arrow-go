@@ -523,9 +523,13 @@ func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.Exe
 		ref = ref.GetChild()
 	}
 
+	// GetReferencedValue returns a new reference, owned here. A reference to
+	// the column itself borrows param, so it is retained only after the type
+	// check, where a mismatch has nothing to release.
 	out, err := GetReferencedValue(compute.GetAllocator(ctx), ref, param, ext)
+	owned := true
 	if err == compute.ErrEmpty {
-		out = param
+		out, owned = param, false
 	} else if err != nil {
 		return nil, err
 	}
@@ -543,26 +547,18 @@ func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.Exe
 		case expectedType.ID() == arrow.STRING && valueType.ID() == arrow.LARGE_STRING:
 		case expectedType.ID() == arrow.BINARY && valueType.ID() == arrow.LARGE_BINARY:
 		default:
+			if owned {
+				out.Release()
+			}
 			return nil, fmt.Errorf("%w: referenced field %s was %s, but should have been %s",
 				arrow.ErrInvalid, ref, dt, expectedType)
 		}
 	}
 
-	// A struct field path borrows its value from the input, so take a
-	// reference after the type check, where a mismatch has nothing to release.
-	if isStructFieldPath(ref) {
-		return compute.NewDatum(out), nil
+	if !owned {
+		return compute.NewDatum(param), nil
 	}
 	return out, nil
-}
-
-func isStructFieldPath(ref expr.ReferenceSegment) bool {
-	for ; ref != nil; ref = ref.GetChild() {
-		if _, ok := ref.(*expr.StructFieldRef); !ok {
-			return false
-		}
-	}
-	return true
 }
 
 func executeScalarBatch(ctx context.Context, input compute.ExecBatch, exp expr.Expression, ext ExtensionIDSet) (compute.Datum, error) {
