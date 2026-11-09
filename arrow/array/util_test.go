@@ -235,6 +235,10 @@ func TestMakeArrayOfNullNestedNull(t *testing.T) {
 		{arrow.SparseUnionOf([]arrow.Field{nullField}, []arrow.UnionTypeCode{0}), false},
 		{arrow.DenseUnionOf([]arrow.Field{nullField}, []arrow.UnionTypeCode{0}), false},
 		{extensions.NewOpaqueType(arrow.StructOf(nullField), "type", "vendor"), true},
+		{extensions.NewOpaqueType(arrow.Null, "type", "vendor"), true},
+		{extensions.NewOpaqueType(arrow.SparseUnionOf([]arrow.Field{nullField}, []arrow.UnionTypeCode{0}), "type", "vendor"), false},
+		{extensions.NewOpaqueType(arrow.DenseUnionOf([]arrow.Field{nullField}, []arrow.UnionTypeCode{0}), "type", "vendor"), false},
+		{extensions.NewOpaqueType(&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}, "type", "vendor"), true},
 		{arrow.StructOf(arrow.Field{Name: "d", Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.Null}, Nullable: true}), true},
 	}
 	for _, tt := range tests {
@@ -253,6 +257,36 @@ func TestMakeArrayOfNullNestedNull(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateFullExtensionOverNullNullCountMismatch(t *testing.T) {
+	data := array.NewData(extensions.NewOpaqueType(arrow.Null, "type", "vendor"), 3, []*memory.Buffer{nil}, nil, 0, 0)
+	defer data.Release()
+	arr := array.MakeFromData(data)
+	defer arr.Release()
+
+	assert.NoError(t, array.Validate(arr))
+	err := array.ValidateFull(arr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not match actual number of nulls")
+}
+
+func TestValidateFullExtensionOverDictionaryChecksIndices(t *testing.T) {
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	dict, err := array.DictArrayFromJSON(memory.DefaultAllocator, dictType, `[0, 1]`, `["only"]`)
+	require.NoError(t, err)
+	defer dict.Release()
+	storage := dict.Data()
+	data := array.NewData(extensions.NewOpaqueType(dictType, "type", "vendor"), storage.Len(), storage.Buffers(), nil, storage.NullN(), storage.Offset())
+	defer data.Release()
+	data.SetDictionary(storage.Dictionary())
+	arr := array.MakeFromData(data)
+	defer arr.Release()
+
+	assert.NoError(t, array.Validate(arr))
+	err = array.ValidateFull(arr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dictionary indices")
 }
 
 var typemap = map[arrow.DataType]reflect.Type{
