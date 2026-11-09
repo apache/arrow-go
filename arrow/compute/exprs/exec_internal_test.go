@@ -207,6 +207,103 @@ func TestMakeExecBatchErrorReleases(t *testing.T) {
 	}
 }
 
+func TestMakeExecBatchErrorKeepsNestedStructInput(t *testing.T) {
+	tests := []struct {
+		name  string
+		xType arrow.DataType
+		row   string
+		check func(t *testing.T, x scalar.Scalar)
+	}{
+		{"list", arrow.ListOf(arrow.PrimitiveTypes.Int32), `[{"s": {"x": [1, 2, 3]}, "b": "notanint"}]`,
+			func(t *testing.T, x scalar.Scalar) {
+				values := x.(*scalar.List).Value
+				// an array drops its data at its last release
+				data, _ := values.Data().(*array.Data)
+				require.NotNil(t, data, "input list released by the batch")
+				assert.Equal(t, []int32{1, 2, 3}, values.(*array.Int32).Int32Values())
+			}},
+		// binary rather than string: scalar.GetScalar copies a string value,
+		// but a binary value shares the array's buffer
+		{"binary", arrow.BinaryTypes.Binary, `[{"s": {"x": "aGVsbG8="}, "b": "notanint"}]`,
+			func(t *testing.T, x scalar.Scalar) {
+				assert.Equal(t, "hello", string(x.(*scalar.Binary).Data()))
+			}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
+			sType := arrow.StructOf(arrow.Field{Name: "x", Type: tt.xType, Nullable: true})
+			inputType := arrow.StructOf(arrow.Field{Name: "s", Type: sType, Nullable: true},
+				arrow.Field{Name: "b", Type: arrow.BinaryTypes.String, Nullable: true})
+			arr, _, err := array.FromJSON(mem, inputType, strings.NewReader(tt.row))
+			require.NoError(t, err)
+			sc, err := scalar.GetScalar(arr, 0)
+			arr.Release()
+			require.NoError(t, err)
+			input := sc.(*scalar.Struct)
+
+			schema := arrow.NewSchema([]arrow.Field{
+				{Name: "s", Type: sType, Nullable: true},
+				{Name: "b", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			}, nil)
+			_, err = makeExecBatch(compute.WithAllocator(context.Background(), mem), schema,
+				compute.NewDatumWithoutOwning(input))
+			require.Error(t, err)
+
+			tt.check(t, input.Value[0].(*scalar.Struct).Value[0])
+			input.Release()
+		})
+	}
+}
+
+func TestExecuteFieldRefNullStructSurvivesBatch(t *testing.T) {
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}
+	reg := NewExtensionIDRegistry()
+	require.NoError(t, reg.RegisterType(extensions.ID{URN: "extension:test:dictionary", Name: "dict"}, dictType))
+	extSet := NewExtensionSet(expr.NewEmptyExtensionRegistry(extensions.GetDefaultCollectionWithNoError()), reg)
+	_, anchor, ok := extSet.EncodeType(dictType)
+	require.True(t, ok)
+
+	// FromSubstraitType names struct fields "1", "2", ...
+	structType := arrow.StructOf(arrow.Field{Name: "1", Type: dictType, Nullable: true})
+	schema := arrow.NewSchema([]arrow.Field{{Name: "d", Type: structType, Nullable: true}}, nil)
+	ref, err := expr.NewRootFieldRef(expr.NewStructFieldRef(0), types.NewRecordTypeFromStruct(types.StructType{
+		Nullability: types.NullabilityRequired,
+		Types: []types.Type{&types.StructType{Nullability: types.NullabilityNullable,
+			Types: []types.Type{&types.UserDefinedType{Nullability: types.NullabilityNullable, TypeReference: anchor}}}},
+	}))
+	require.NoError(t, err)
+
+	tests := []struct {
+		name    string
+		partial compute.Datum
+	}{
+		{"missing record field", compute.NewDatumWithoutOwning(
+			array.NewRecordBatch(arrow.NewSchema(nil, nil), nil, 1))},
+		{"missing struct field", compute.NewDatumWithoutOwning(
+			scalar.NewStructScalar(nil, arrow.StructOf()))},
+		{"null struct field cast", compute.NewDatumWithoutOwning(scalar.NewStructScalar(
+			[]scalar.Scalar{scalar.MakeNullScalar(arrow.BinaryTypes.String)},
+			arrow.StructOf(arrow.Field{Name: "d", Type: arrow.BinaryTypes.String, Nullable: true})))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ExecuteScalarExpression(WithExtensionIDSet(context.Background(), extSet), schema, ref, tt.partial)
+			require.NoError(t, err)
+			dict := result.(*compute.ScalarDatum).Value.(*scalar.Struct).Value[0].(*scalar.Dictionary).Value.Dict
+			data, _ := dict.Data().(*array.Data)
+			require.NotNil(t, data, "result dictionary released by the batch")
+			require.NotEmpty(t, data.Buffers())
+			result.Release()
+			assert.Nil(t, data.Buffers())
+		})
+	}
+}
+
 func TestLiteralToDatumIntervalYearToMonth(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
