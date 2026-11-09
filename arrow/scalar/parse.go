@@ -26,6 +26,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/float16"
@@ -580,6 +581,8 @@ func MakeScalarParam(val interface{}, dt arrow.DataType) (Scalar, error) {
 					return nil, err
 				}
 				return NewDecimal256Scalar(n, ty), nil
+			case arrow.DECIMAL32, arrow.DECIMAL64:
+				return ParseScalar(dt, v)
 			}
 		case arrow.IsFloating(dt.ID()):
 			bits := dt.(arrow.FixedWidthDataType).BitWidth()
@@ -628,6 +631,18 @@ func MakeScalarParam(val interface{}, dt arrow.DataType) (Scalar, error) {
 			}
 			return NewMapScalar(v), nil
 		}
+	case decimal.Decimal32:
+		if _, ok := dt.(*arrow.Decimal32Type); !ok {
+			return nil, fmt.Errorf("mismatch cannot create decimal32 scalar with incorrect data type")
+		}
+
+		return NewDecimal32Scalar(v, dt), nil
+	case decimal.Decimal64:
+		if _, ok := dt.(*arrow.Decimal64Type); !ok {
+			return nil, fmt.Errorf("mismatch cannot create decimal64 scalar with incorrect data type")
+		}
+
+		return NewDecimal64Scalar(v, dt), nil
 	case decimal128.Num:
 		if _, ok := dt.(*arrow.Decimal128Type); !ok {
 			return nil, fmt.Errorf("mismatch cannot create decimal128 scalar with incorrect data type")
@@ -868,6 +883,20 @@ func ParseScalar(dt arrow.DataType, val string) (Scalar, error) {
 		return NewTime64Scalar(tm, dt), nil
 	case arrow.DICTIONARY:
 		return ParseScalar(dt.(*arrow.DictionaryType).ValueType, val)
+	case arrow.DECIMAL32:
+		typ := dt.(*arrow.Decimal32Type)
+		n, err := decimal.Decimal32FromString(val, typ.Precision, typ.Scale)
+		if err != nil {
+			return nil, err
+		}
+		return NewDecimal32Scalar(n, typ), nil
+	case arrow.DECIMAL64:
+		typ := dt.(*arrow.Decimal64Type)
+		n, err := decimal.Decimal64FromString(val, typ.Precision, typ.Scale)
+		if err != nil {
+			return nil, err
+		}
+		return NewDecimal64Scalar(n, typ), nil
 	case arrow.DECIMAL128:
 		typ := dt.(*arrow.Decimal128Type)
 		n, err := decimal128.FromString(val, typ.Precision, typ.Scale)

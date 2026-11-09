@@ -525,6 +525,8 @@ func init() {
 		arrow.INTERVAL_MONTHS:         func(dt arrow.DataType) Scalar { return &MonthInterval{scalar: scalar{dt, false}} },
 		arrow.INTERVAL_DAY_TIME:       func(dt arrow.DataType) Scalar { return &DayTimeInterval{scalar: scalar{dt, false}} },
 		arrow.INTERVAL_MONTH_DAY_NANO: func(dt arrow.DataType) Scalar { return &MonthDayNanoInterval{scalar: scalar{dt, false}} },
+		arrow.DECIMAL32:               func(dt arrow.DataType) Scalar { return &Decimal32{scalar: scalar{dt, false}} },
+		arrow.DECIMAL64:               func(dt arrow.DataType) Scalar { return &Decimal64{scalar: scalar{dt, false}} },
 		arrow.DECIMAL128:              func(dt arrow.DataType) Scalar { return &Decimal128{scalar: scalar{dt, false}} },
 		arrow.LIST:                    func(dt arrow.DataType) Scalar { return &List{scalar: scalar{dt, false}} },
 		arrow.STRUCT: func(dt arrow.DataType) Scalar {
@@ -604,6 +606,10 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 		return NewDate64Scalar(arr.Value(idx)), nil
 	case *array.DayTimeInterval:
 		return NewDayTimeIntervalScalar(arr.Value(idx)), nil
+	case *array.Decimal32:
+		return NewDecimal32Scalar(arr.Value(idx), arr.DataType()), nil
+	case *array.Decimal64:
+		return NewDecimal64Scalar(arr.Value(idx), arr.DataType()), nil
 	case *array.Decimal128:
 		return NewDecimal128Scalar(arr.Value(idx), arr.DataType()), nil
 	case *array.Decimal256:
