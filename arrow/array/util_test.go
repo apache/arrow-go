@@ -193,6 +193,34 @@ func TestMakeArrayOfNullUnions(t *testing.T) {
 	}
 }
 
+func TestMakeArrayOfNullDenseUnionUnderList(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	union := arrow.DenseUnionOf(
+		[]arrow.Field{{Name: "b", Type: &arrow.FixedSizeBinaryType{ByteWidth: 16}, Nullable: true}},
+		[]arrow.UnionTypeCode{0},
+	)
+	for _, typ := range []arrow.DataType{
+		arrow.ListOf(union),
+		arrow.LargeListOf(union),
+		arrow.MapOf(arrow.BinaryTypes.String, union),
+		arrow.ListViewOf(union),
+		arrow.LargeListViewOf(union),
+		arrow.StructOf(arrow.Field{Name: "u", Type: union, Nullable: true}),
+		arrow.FixedSizeListOf(2, union),
+	} {
+		t.Run(typ.String(), func(t *testing.T) {
+			for _, length := range []int{0, 1} {
+				arr := array.MakeArrayOfNull(mem, typ, length)
+				assert.Equal(t, length, arr.Len())
+				assert.NoError(t, array.ValidateFull(arr), "length %d", length)
+				arr.Release()
+			}
+		})
+	}
+}
+
 func TestMakeArrayOfNullNestedNull(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

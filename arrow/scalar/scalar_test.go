@@ -1718,6 +1718,21 @@ func TestMakeArrayFromScalarSupportsZeroLength(t *testing.T) {
 	assert.Equal(t, 0, nullArr.Len())
 	assert.Equal(t, 0, nullArr.NullN())
 	require.NoError(t, array.ValidateFull(nullArr))
+
+	unionType := arrow.DenseUnionOf([]arrow.Field{{Name: "i", Type: arrow.PrimitiveTypes.Int64, Nullable: true}}, []arrow.UnionTypeCode{0})
+	listType := arrow.ListOf(unionType)
+	unionValues := array.MakeArrayOfNull(mem, unionType, 1)
+	defer unionValues.Release()
+	listOfUnion := scalar.NewListScalar(unionValues)
+	defer listOfUnion.Release()
+	for _, s := range []scalar.Scalar{listOfUnion, scalar.MakeNullScalar(listType)} {
+		arr, err := scalar.MakeArrayFromScalar(s, 0, mem)
+		require.NoError(t, err)
+		assert.Equal(t, 0, arr.Len())
+		assert.Truef(t, arrow.TypeEqual(listType, arr.DataType()), "type %s", arr.DataType())
+		assert.NoError(t, array.ValidateFull(arr), "valid scalar: %t", s.IsValid())
+		arr.Release()
+	}
 }
 
 func TestMakeArrayFromDictionaryScalarZeroLength(t *testing.T) {
