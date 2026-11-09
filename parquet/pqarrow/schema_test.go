@@ -1231,6 +1231,22 @@ func TestConvertSchemaParquetVariant(t *testing.T) {
 	assert.True(t, pqschema.Equals(sc), pqschema.String(), sc.String())
 }
 
+func TestConvertSchemaRejectsUnsignedVariantTypedValue(t *testing.T) {
+	metadata := schema.NewByteArrayNode("metadata", parquet.Repetitions.Required, -1)
+	value := schema.NewByteArrayNode("value", parquet.Repetitions.Optional, -1)
+	typed := schema.MustPrimitive(schema.NewPrimitiveNodeLogical("typed_value", parquet.Repetitions.Optional,
+		schema.NewIntLogicalType(32, false), parquet.Types.Int32, -1, -1))
+	variant, err := schema.NewGroupNodeLogical("variant_col", parquet.Repetitions.Optional,
+		schema.FieldList{metadata, value, typed}, schema.VariantLogicalType{}, -1)
+	require.NoError(t, err)
+
+	pqschema := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required,
+		schema.FieldList{variant}, -1)))
+	_, err = pqarrow.FromParquet(pqschema, nil, nil)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "unsigned typed_value uint32 is not a valid shredded variant type")
+}
+
 func TestToParquetLegacyRegistryVariantType(t *testing.T) {
 	ext := arrow.GetExtensionType(extensions.LegacyVariantExtensionName)
 	require.NotNil(t, ext)
