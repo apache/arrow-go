@@ -141,6 +141,14 @@ func TestVariantExtensionType(t *testing.T) {
 				)},
 			), Nullable: true}),
 			"typed_value field must be a valid nested type"},
+		{arrow.StructOf(
+			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
+			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+			arrow.Field{Name: "typed_value", Type: arrow.ListOfField(arrow.Field{Name: "element", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Uint32, Nullable: true},
+			), Nullable: false}), Nullable: true}),
+			"typed_value field must be a valid nested type"},
 	}
 
 	for _, tt := range tests {

@@ -148,9 +148,10 @@ func NewShreddedVariantType(dt arrow.DataType) *VariantType {
 //  3. Must satisfy exactly one of the following:
 //     a. MUST have non-nullable field named "value" that is binary/largebinary/binary_view
 //     b. MUST have an nullable field named "value" that is binary/largebinary/binary_view
-//     and another nullable field named "typed_value" that is either a signed primitive
-//     type or a list/large_list/list_view or struct which also satisfies the following
-//     requirements. Unsigned integers are not valid shredded types.
+//     and another nullable field named "typed_value" that is either a primitive type
+//     (other than an unsigned integer) or a list/large_list/list_view or struct which
+//     also satisfies the following requirements. Unsigned integers are not valid
+//     shredded types.
 //     i. The elements must be NON-NULLABLE
 //     ii. There must either be a single NON-NULLABLE field named "value" which is
 //     binary/largebinary/binary_view or have an nullable "value" field and an nullable
