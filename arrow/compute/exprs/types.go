@@ -400,15 +400,20 @@ func (e *ExtensionSet) decodeTypeArrow(anchor uint32) (extensions.ID, arrow.Data
 	return id, dt, ok
 }
 
-func lookupScalarFunction(id extensions.ID, reg *ExtensionIDRegistry) (substraitToArrow, bool) {
-	conv, ok := reg.GetSubstraitScalarToArrow(id)
+func (e *ExtensionSet) decodeFunction(ref uint32) (extensions.ID, substraitToArrow, bool) {
+	id, ok := e.substraitRegistry.DecodeFunc(ref)
+	if !ok {
+		return id, nil, false
+	}
+
+	conv, ok := e.reg.GetSubstraitScalarToArrow(id)
 	if !ok {
 		id.Name, _, ok = strings.Cut(id.Name, ":")
 		if ok {
-			conv, ok = reg.GetSubstraitScalarToArrow(id)
+			conv, ok = e.reg.GetSubstraitScalarToArrow(id)
 		}
 	}
-	return conv, ok
+	return id, conv, ok
 }
 
 func (e *ExtensionSet) encodeTypeVariation(dt arrow.DataType) (extensions.ID, uint32, bool) {
