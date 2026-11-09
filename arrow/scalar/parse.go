@@ -271,6 +271,10 @@ func cloneScalar(val Scalar, mem memory.Allocator) (Scalar, error) {
 			return NewLargeStringScalarFromBuffer(buf), nil
 		case *LargeBinary:
 			return NewLargeBinaryScalar(buf), nil
+		case *StringView:
+			return NewStringViewScalarFromBuffer(buf), nil
+		case *BinaryView:
+			return NewBinaryViewScalar(buf), nil
 		case *FixedSizeBinary:
 			return NewFixedSizeBinaryScalar(buf, val.DataType()), nil
 		default:
@@ -506,6 +510,10 @@ func MakeScalarParam(val interface{}, dt arrow.DataType) (Scalar, error) {
 			return NewStringScalarFromBuffer(buf), nil
 		case arrow.LARGE_STRING:
 			return NewLargeStringScalarFromBuffer(buf), nil
+		case arrow.BINARY_VIEW:
+			return NewBinaryViewScalar(buf), nil
+		case arrow.STRING_VIEW:
+			return NewStringViewScalarFromBuffer(buf), nil
 		case arrow.FIXED_SIZE_BINARY:
 			if buf.Len() == dt.(*arrow.FixedSizeBinaryType).ByteWidth {
 				return NewFixedSizeBinaryScalar(buf, dt), nil
@@ -522,6 +530,10 @@ func MakeScalarParam(val interface{}, dt arrow.DataType) (Scalar, error) {
 			return NewStringScalarFromBuffer(v), nil
 		case arrow.LARGE_STRING:
 			return NewLargeStringScalarFromBuffer(v), nil
+		case arrow.BINARY_VIEW:
+			return NewBinaryViewScalar(v), nil
+		case arrow.STRING_VIEW:
+			return NewStringViewScalarFromBuffer(v), nil
 		case arrow.FIXED_SIZE_BINARY:
 			if v.Len() == dt.(*arrow.FixedSizeBinaryType).ByteWidth {
 				return NewFixedSizeBinaryScalar(v, dt), nil
@@ -544,6 +556,12 @@ func MakeScalarParam(val interface{}, dt arrow.DataType) (Scalar, error) {
 			case arrow.LARGE_STRING:
 				return NewLargeStringScalar(v), nil
 			}
+		case dt.ID() == arrow.BINARY_VIEW:
+			buf := memory.NewBufferBytes([]byte(v))
+			defer buf.Release()
+			return NewBinaryViewScalar(buf), nil
+		case dt.ID() == arrow.STRING_VIEW:
+			return NewStringViewScalar(v), nil
 		case arrow.IsInteger(dt.ID()):
 			bits := dt.(arrow.FixedWidthDataType).BitWidth()
 			if arrow.IsUnsignedInteger(dt.ID()) {
@@ -769,10 +787,16 @@ func ParseScalar(dt arrow.DataType, val string) (Scalar, error) {
 	switch dt.ID() {
 	case arrow.STRING:
 		return NewStringScalar(val), nil
+	case arrow.STRING_VIEW:
+		return NewStringViewScalar(val), nil
 	case arrow.BINARY:
 		buf := memory.NewBufferBytes([]byte(val))
 		defer buf.Release()
 		return NewBinaryScalar(buf, dt), nil
+	case arrow.BINARY_VIEW:
+		buf := memory.NewBufferBytes([]byte(val))
+		defer buf.Release()
+		return NewBinaryViewScalar(buf), nil
 	case arrow.FIXED_SIZE_BINARY:
 		if len(val) != dt.(*arrow.FixedSizeBinaryType).ByteWidth {
 			return nil, fmt.Errorf("invalid value %s for scalar of type %s", val, dt)

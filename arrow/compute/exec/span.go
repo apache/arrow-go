@@ -327,6 +327,22 @@ func (a *ArraySpan) FillFromScalar(val scalar.Scalar) {
 				int64(len(dataBuffer)), 1)
 		}
 		a.Buffers[2].Buf = dataBuffer
+	case typeID == arrow.BINARY_VIEW || typeID == arrow.STRING_VIEW:
+		sc := val.(scalar.BinaryScalar)
+		a.Buffers[1].Buf = arrow.Uint64Traits.CastToBytes(a.Scratch[:])
+		a.Buffers[1].Owner = nil
+		a.Buffers[1].SelfAlloc = false
+		a.Buffers[2].Buf, a.Buffers[2].Owner = nil, nil
+		a.Buffers[2].SelfAlloc = false
+
+		header := &arrow.ViewHeaderTraits.CastFromBytes(a.Buffers[1].Buf)[0]
+		*header = arrow.ViewHeader{}
+		if sc.IsValid() {
+			if header.SetBytes(sc.Data()); !header.IsInline() {
+				a.Buffers[2].Buf = sc.Data()
+				a.Buffers[2].Owner = sc.Buffer()
+			}
+		}
 	case typeID == arrow.FIXED_SIZE_BINARY:
 		sc := val.(scalar.BinaryScalar)
 		if !sc.IsValid() {

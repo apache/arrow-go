@@ -1721,8 +1721,8 @@ func (c *CastSuite) TestBinaryLikeToBinaryView() {
 	for _, from := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString} {
 		c.Run("from "+from.String(), func() {
 			c.Run("to string_view", func() {
-				c.checkCastArrayOnly(from, arrow.BinaryTypes.StringView, strInJSON, strInJSON)
-				c.checkCastArrayOnly(from, arrow.BinaryTypes.StringView, `[]`, `[]`)
+				c.checkCast(from, arrow.BinaryTypes.StringView, strInJSON, strInJSON)
+				c.checkCast(from, arrow.BinaryTypes.StringView, `[]`, `[]`)
 			})
 			c.Run("to binary_view", func() {
 				exp := c.buildBinaryViewArray([][]byte{
@@ -1732,25 +1732,27 @@ func (c *CastSuite) TestBinaryLikeToBinaryView() {
 				})
 				defer exp.Release()
 
-				in, _, err := array.FromJSON(c.mem, from, strings.NewReader(strInJSON))
-				c.Require().NoError(err)
-				defer in.Release()
-
-				got, err := compute.CastArray(context.Background(), in,
-					compute.SafeCastOptions(arrow.BinaryTypes.BinaryView))
-				c.Require().NoError(err)
-				defer got.Release()
-
-				c.Truef(array.Equal(exp, got), "expected %s, got %s", exp, got)
+				c.checkCastExp(from, strInJSON, exp)
 			})
 		})
 	}
+
+	c.Run("null utf8 scalar to string_view", func() {
+		in := compute.NewDatum(scalar.MakeNullScalar(arrow.BinaryTypes.String))
+		defer in.Release()
+		out, err := compute.CastDatum(context.Background(), in, compute.SafeCastOptions(arrow.BinaryTypes.StringView))
+		c.Require().NoError(err)
+		defer out.Release()
+		result := out.(*compute.ScalarDatum).Value
+		c.False(result.IsValid())
+		c.True(arrow.TypeEqual(arrow.BinaryTypes.StringView, result.DataType()))
+	})
 
 	const binJSON = `["aGk=", "dGhpcyBpcyBieXRlcyBiZXlvbmQgdHdlbHZlIGNoYXJz", "//4=", null]`
 	for _, from := range []arrow.DataType{arrow.BinaryTypes.Binary, arrow.BinaryTypes.LargeBinary} {
 		c.Run("from "+from.String(), func() {
 			c.Run("to binary_view", func() {
-				c.checkCastArrayOnly(from, arrow.BinaryTypes.BinaryView, binJSON, binJSON)
+				c.checkCast(from, arrow.BinaryTypes.BinaryView, binJSON, binJSON)
 			})
 			c.Run("to string_view rejects invalid utf8", func() {
 				invalid := c.invalidUtf8Arr(from)
@@ -1773,21 +1775,10 @@ func (c *CastSuite) TestBinaryLikeToBinaryView() {
 	}
 
 	c.Run("from fixed_size_binary", func() {
-		fsbType := &arrow.FixedSizeBinaryType{ByteWidth: 3}
-		in, _, err := array.FromJSON(c.mem, fsbType,
-			strings.NewReader(`["YWJj", "ZGVm", null]`))
-		c.Require().NoError(err)
-		defer in.Release()
-
 		exp := c.buildBinaryViewArray([][]byte{[]byte("abc"), []byte("def"), nil})
 		defer exp.Release()
 
-		got, err := compute.CastArray(context.Background(), in,
-			compute.SafeCastOptions(arrow.BinaryTypes.BinaryView))
-		c.Require().NoError(err)
-		defer got.Release()
-
-		c.Truef(array.Equal(exp, got), "expected %s, got %s", exp, got)
+		c.checkCastExp(&arrow.FixedSizeBinaryType{ByteWidth: 3}, `["YWJj", "ZGVm", null]`, exp)
 	})
 }
 
@@ -1798,15 +1789,15 @@ func (c *CastSuite) TestBinaryViewToBinaryLike() {
 
 	for _, to := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString} {
 		c.Run("string_view to "+to.String(), func() {
-			c.checkCastArrayOnly(arrow.BinaryTypes.StringView, to, strJSON, strJSON)
-			c.checkCastArrayOnly(arrow.BinaryTypes.StringView, to, `[]`, `[]`)
+			c.checkCast(arrow.BinaryTypes.StringView, to, strJSON, strJSON)
+			c.checkCast(arrow.BinaryTypes.StringView, to, `[]`, `[]`)
 		})
 	}
 
 	const binJSON = `["aGk=", "dGhpcyBpcyBieXRlcyBiZXlvbmQgdHdlbHZlIGNoYXJz", "//4=", null]`
 	for _, to := range []arrow.DataType{arrow.BinaryTypes.Binary, arrow.BinaryTypes.LargeBinary} {
 		c.Run("binary_view to "+to.String(), func() {
-			c.checkCastArrayOnly(arrow.BinaryTypes.BinaryView, to, binJSON, binJSON)
+			c.checkCast(arrow.BinaryTypes.BinaryView, to, binJSON, binJSON)
 		})
 	}
 
@@ -1863,12 +1854,7 @@ func (c *CastSuite) TestBinaryViewToBinaryView() {
 		exp := c.buildBinaryViewArray(values)
 		defer exp.Release()
 
-		got, err := compute.CastArray(context.Background(), in,
-			compute.SafeCastOptions(arrow.BinaryTypes.BinaryView))
-		c.Require().NoError(err)
-		defer got.Release()
-
-		c.Truef(array.Equal(exp, got), "expected %s, got %s", exp, got)
+		checkCast(c.T(), in, exp, *compute.DefaultCastOptions(true))
 	})
 
 	c.Run("binary_view to string_view valid utf8", func() {
@@ -1878,12 +1864,7 @@ func (c *CastSuite) TestBinaryViewToBinaryView() {
 			[]bool{true, true, true, true, false})
 		defer exp.Release()
 
-		got, err := compute.CastArray(context.Background(), in,
-			compute.SafeCastOptions(arrow.BinaryTypes.StringView))
-		c.Require().NoError(err)
-		defer got.Release()
-
-		c.Truef(array.Equal(exp, got), "expected %s, got %s", exp, got)
+		checkCast(c.T(), in, exp, *compute.DefaultCastOptions(true))
 	})
 
 	c.Run("binary_view to string_view rejects invalid utf8", func() {
@@ -2635,28 +2616,6 @@ func (c *CastSuite) TestBoolToStringViewStaysSingleBuffer() {
 			len(out.Data().Buffers()))
 		c.Equal(count, out.Len())
 	})
-}
-
-// checkCastArrayOnly performs a cast and compares the resulting array against
-// an expected array built from JSON. It deliberately avoids the per-element
-// scalar iteration path used by checkCast, which relies on scalar.GetScalar
-// - that helper does not yet support view types (unrelated to GH-184).
-func (c *CastSuite) checkCastArrayOnly(dtIn, dtOut arrow.DataType, inJSON, outJSON string) {
-	inArr, _, err := array.FromJSON(c.mem, dtIn, strings.NewReader(inJSON))
-	c.Require().NoError(err)
-	defer inArr.Release()
-
-	expArr, _, err := array.FromJSON(c.mem, dtOut, strings.NewReader(outJSON))
-	c.Require().NoError(err)
-	defer expArr.Release()
-
-	opts := compute.SafeCastOptions(dtOut)
-	got, err := compute.CastArray(context.Background(), inArr, opts)
-	c.Require().NoError(err)
-	defer got.Release()
-
-	c.Truef(array.Equal(expArr, got), "cast %s -> %s: expected %s, got %s",
-		dtIn, dtOut, expArr, got)
 }
 
 func (c *CastSuite) buildBinaryViewArray(values [][]byte) arrow.Array {

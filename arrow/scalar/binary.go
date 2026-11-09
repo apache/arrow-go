@@ -80,6 +80,10 @@ func (b *Binary) CastTo(to arrow.DataType) (Scalar, error) {
 		return NewStringScalarFromBuffer(b.Value), nil
 	case arrow.LARGE_STRING:
 		return NewLargeStringScalarFromBuffer(b.Value), nil
+	case arrow.BINARY_VIEW:
+		return NewBinaryViewScalar(b.Value), nil
+	case arrow.STRING_VIEW:
+		return NewStringViewScalarFromBuffer(b.Value), nil
 	case arrow.FIXED_SIZE_BINARY:
 		if b.Value.Len() == to.(*arrow.FixedSizeBinaryType).ByteWidth {
 			return NewFixedSizeBinaryScalar(b.Value, to), nil
@@ -112,6 +116,14 @@ type LargeBinary struct {
 
 func NewLargeBinaryScalar(val *memory.Buffer) *LargeBinary {
 	return &LargeBinary{NewBinaryScalar(val, arrow.BinaryTypes.LargeBinary)}
+}
+
+type BinaryView struct {
+	*Binary
+}
+
+func NewBinaryViewScalar(val *memory.Buffer) *BinaryView {
+	return &BinaryView{NewBinaryScalar(val, arrow.BinaryTypes.BinaryView)}
 }
 
 type String struct {
@@ -175,6 +187,20 @@ func NewLargeStringScalar(val string) *LargeString {
 func NewLargeStringScalarFromBuffer(val *memory.Buffer) *LargeString {
 	// NewBinaryScalar will call retain on val, so we don't have to
 	return &LargeString{stringScalar: &String{NewBinaryScalar(val, arrow.BinaryTypes.LargeString)}}
+}
+
+type StringView struct {
+	*stringScalar
+}
+
+func NewStringViewScalar(val string) *StringView {
+	buf := memory.NewBufferBytes([]byte(val))
+	defer buf.Release()
+	return NewStringViewScalarFromBuffer(buf)
+}
+
+func NewStringViewScalarFromBuffer(val *memory.Buffer) *StringView {
+	return &StringView{stringScalar: &String{NewBinaryScalar(val, arrow.BinaryTypes.StringView)}}
 }
 
 type FixedSizeBinary struct {

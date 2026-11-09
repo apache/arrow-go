@@ -155,6 +155,8 @@ func appendToBldr(bldr array.Builder, scalars []Scalar) error {
 		appendBinary(bldr, scalars)
 	case *array.BinaryBuilder:
 		appendBinary(bldr, scalars)
+	case *array.BinaryViewBuilder:
+		appendBinary(bldr, scalars)
 	case array.ListLikeBuilder:
 		var numChildren int
 		for _, s := range scalars {
