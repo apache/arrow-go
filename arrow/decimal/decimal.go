@@ -182,6 +182,12 @@ func decimalFromString[T interface {
 
 	var out *big.Float
 	out, _, err = big.ParseFloat(v, 10, nbits, big.ToNearestEven)
+	if err != nil {
+		return
+	}
+	if out.IsInf() {
+		return n, fmt.Errorf("cannot convert %s to decimal%d", v, nbits)
+	}
 
 	if scale < 0 {
 		var tmp big.Int

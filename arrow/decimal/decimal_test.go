@@ -308,6 +308,13 @@ func TestFromString(t *testing.T) {
 			assert.Equal(t, ex64, n64)
 		})
 	}
+
+	for _, s := range []string{"abc", "Inf", "-inf"} {
+		_, err := decimal.Decimal32FromString(s, 8, 2)
+		assert.Error(t, err, s)
+		_, err = decimal.Decimal64FromString(s, 8, 2)
+		assert.Error(t, err, s)
+	}
 }
 
 func TestCmp(t *testing.T) {
