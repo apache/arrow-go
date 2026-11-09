@@ -196,12 +196,18 @@ func decimalFromString[T interface {
 			return n, fmt.Errorf("bitlen too large for decimal%d", nbits)
 		}
 
-		n = T(val.Int64() / int64(math.Pow10(int(-scale))))
+		// |val| < 2^64 < 10^20, so a larger divisor gives the same quotient.
+		div := new(big.Int).Exp(big.NewInt(10), big.NewInt(min(-int64(scale), 20)), nil)
+		n = T(val.Quo(val, div).Int64())
 	} else {
 		var precInBits = uint(math.Round(float64(prec+scale+1)/math.Log10(2))) + 1
 
-		p := (&big.Float{}).SetInt(big.NewInt(int64(math.Pow10(int(scale)))))
-		out.SetPrec(precInBits).Mul(out, p)
+		mulPow10(out.SetPrec(precInBits), int64(scale))
+		// Reject before rounding and converting, which would allocate as many
+		// bits as the value has.
+		if out.IsInf() || out.MantExp(nil) > int(nbits) {
+			return n, fmt.Errorf("bitlen too large for decimal%d", nbits)
+		}
 		if out.Signbit() {
 			out.Sub(out, pt5)
 		} else {
@@ -210,7 +216,7 @@ func decimalFromString[T interface {
 
 		var tmp big.Int
 		val, _ := out.Int(&tmp)
-		if val.BitLen() > int(nbits) {
+		if val.BitLen() >= int(nbits) {
 			return n, fmt.Errorf("bitlen too large for decimal%d", nbits)
 		}
 		n = T(val.Int64())
