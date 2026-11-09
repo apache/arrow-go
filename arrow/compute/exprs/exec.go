@@ -137,7 +137,7 @@ func makeExecBatch(ctx context.Context, schema *arrow.Schema, partial compute.Da
 
 // ToArrowSchema takes a substrait NamedStruct and an extension set (for
 // type resolution mapping) and creates the equivalent Arrow Schema.
-func ToArrowSchema(base types.NamedStruct, ext *ExtensionSet) (*arrow.Schema, error) {
+func ToArrowSchema(base types.NamedStruct, ext *extensionSet) (*arrow.Schema, error) {
 	fields := make([]arrow.Field, len(base.Names))
 	for i, typ := range base.Struct.Types {
 		dt, nullable, err := FromSubstraitType(typ, ext)
@@ -171,12 +171,12 @@ func GetExtensionRegistry(ctx context.Context) *ExtensionIDRegistry {
 	return v
 }
 
-func WithExtensionIDSet(ctx context.Context, ext *ExtensionSet) context.Context {
+func WithExtensionIDSet(ctx context.Context, ext *extensionSet) context.Context {
 	return context.WithValue(ctx, extCtxKey{}, ext)
 }
 
-func GetExtensionIDSet(ctx context.Context) *ExtensionSet {
-	v, ok := ctx.Value(extCtxKey{}).(*ExtensionSet)
+func GetExtensionIDSet(ctx context.Context) *extensionSet {
+	v, ok := ctx.Value(extCtxKey{}).(*extensionSet)
 	if !ok {
 		return NewExtensionSet(
 			expr.NewEmptyExtensionRegistry(extensions.GetDefaultCollectionWithNoError()),
@@ -197,7 +197,7 @@ func intervalYearToMonthDatum(mem memory.Allocator, years, months int32) (comput
 		scalar.NewFixedSizeListScalar(arr), intervalYear())}, nil
 }
 
-func literalToDatum(mem memory.Allocator, lit expr.Literal, ext *ExtensionSet) (compute.Datum, error) {
+func literalToDatum(mem memory.Allocator, lit expr.Literal, ext *extensionSet) (compute.Datum, error) {
 	switch v := lit.(type) {
 	case *expr.PrimitiveLiteral[bool]:
 		return compute.NewDatum(scalar.NewBooleanScalar(v.Value)), nil
@@ -437,7 +437,7 @@ func literalToDatum(mem memory.Allocator, lit expr.Literal, ext *ExtensionSet) (
 //
 // You can provide an allocator to use through the context via compute.WithAllocator.
 //
-// You can provide the ExtensionSet to use through the context via WithExtensionIDSet.
+// You can provide the extension set to use through the context via WithExtensionIDSet.
 //
 // Note: Substrait expressions do not have an equivalent to LargeString/LargeBinary, so
 // field references which expect a string or binary will allow their Large counterparts
@@ -466,7 +466,7 @@ func ExecuteScalarExpression(ctx context.Context, inputSchema *arrow.Schema, exp
 // ExecuteScalarSubstrait uses the provided Substrait extended expression to
 // determine the expected input schema (replacing missing fields in the partial
 // input datum with null scalars and re-ordering columns if necessary) and
-// ExtensionSet to use. You can provide the extension registry to use
+// extension set to use. You can provide the extension registry to use
 // through the context via WithExtensionRegistry, otherwise the default
 // Arrow registry will be used. You can provide a memory.Allocator to use
 // the same way via compute.WithAllocator.
@@ -499,7 +499,7 @@ func ExecuteScalarSubstrait(ctx context.Context, expression *expr.Extended, part
 	return ExecuteScalarExpression(WithExtensionIDSet(ctx, set), sc, toExecute, partialInput)
 }
 
-func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.ExecBatch, ext *ExtensionSet) (compute.Datum, error) {
+func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.ExecBatch, ext *extensionSet) (compute.Datum, error) {
 	if e.Root != expr.RootReference {
 		return nil, fmt.Errorf("%w: only RootReference is implemented", arrow.ErrNotImplemented)
 	}
@@ -561,7 +561,7 @@ func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.Exe
 	return out, nil
 }
 
-func executeScalarBatch(ctx context.Context, input compute.ExecBatch, exp expr.Expression, ext *ExtensionSet) (compute.Datum, error) {
+func executeScalarBatch(ctx context.Context, input compute.ExecBatch, exp expr.Expression, ext *extensionSet) (compute.Datum, error) {
 	if !exp.IsScalar() {
 		return nil, fmt.Errorf("%w: ExecuteScalarExpression cannot execute non-scalar expressions",
 			arrow.ErrInvalid)
