@@ -457,11 +457,9 @@ type MakeStructOptions struct {
 
 func (MakeStructOptions) TypeName() string { return "MakeStructOptions" }
 
-type NullOptions struct {
-	NanIsNull bool `compute:"nan_is_null"`
-}
-
-func (NullOptions) TypeName() string { return "NullOptions" }
+// NullOptions configures is_null. With NanIsNull, NaN values of float16,
+// float32 and float64 arrays and dictionaries are reported as null.
+type NullOptions = kernels.NullOptions
 
 type StrptimeOptions struct {
 	Format string         `compute:"format"`
@@ -693,7 +691,7 @@ func GreaterEqual(lhs, rhs Expression) Expression {
 // IsNull creates an expression that returns true if the passed in expression is
 // null. Optionally treating NaN as null if desired.
 func IsNull(lhs Expression, nanIsNull bool) Expression {
-	return NewCall("is_null", []Expression{lhs}, &NullOptions{nanIsNull})
+	return NewCall("is_null", []Expression{lhs}, &NullOptions{NanIsNull: nanIsNull})
 }
 
 // IsValid is the inverse of IsNull

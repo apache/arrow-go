@@ -29,6 +29,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
+	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
@@ -727,9 +728,9 @@ func dictHasNullValues(input *exec.ArraySpan) bool {
 // dictValidity writes a bitmap to out, starting at bit 0, with a bit set for
 // each slot that is logically null when wantNull is true, or logically valid
 // otherwise. A slot is null if its index is null or refers to a null
-// dictionary value.
-func dictValidity(ctx *exec.KernelCtx, input *exec.ArraySpan, out *exec.ExecResult, wantNull bool) error {
-	var set func(*exec.ArraySpan, []byte, bool)
+// dictionary value, or to a NaN floating-point value when nanIsNull is true.
+func dictValidity(ctx *exec.KernelCtx, input *exec.ArraySpan, out *exec.ExecResult, wantNull, nanIsNull bool) error {
+	var set func(*exec.ArraySpan, []byte, int64, []byte, bool)
 	switch input.Type.(*arrow.DictionaryType).IndexType.ID() {
 	case arrow.INT8, arrow.UINT8:
 		set = setDictBits[uint8]
@@ -742,21 +743,34 @@ func dictValidity(ctx *exec.KernelCtx, input *exec.ArraySpan, out *exec.ExecResu
 	default:
 		return fmt.Errorf("%w: unsupported dictionary index type", arrow.ErrInvalid)
 	}
+
+	dict := input.Dictionary()
+	valueValidity, valueOffset := dict.Buffers[0].Buf, dict.Offset
+	if nanIsNull && arrow.IsFloating(dict.Type.ID()) {
+		buf := ctx.AllocateBitmap(dict.Len)
+		defer buf.Release()
+		valueValidity, valueOffset = buf.Bytes(), 0
+		if dict.Buffers[0].Buf != nil {
+			bitutil.CopyBitmap(dict.Buffers[0].Buf, int(dict.Offset), int(dict.Len), valueValidity, 0)
+		} else {
+			bitutil.SetBitsTo(valueValidity, 0, dict.Len, true)
+		}
+		setNaNBits(dict, valueValidity, false)
+	}
+
 	out.Buffers[1].WrapBuffer(ctx.AllocateBitmap(input.Len))
-	set(input, out.Buffers[1].Buf, wantNull)
+	set(input, valueValidity, valueOffset, out.Buffers[1].Buf, wantNull)
 	return nil
 }
 
-func setDictBits[T arrow.UintType](input *exec.ArraySpan, out []byte, wantNull bool) {
-	dict := input.Dictionary()
-	valueValidity := dict.Buffers[0].Buf
+func setDictBits[T arrow.UintType](input *exec.ArraySpan, valueValidity []byte, valueOffset int64, out []byte, wantNull bool) {
 	indexValidity := input.Buffers[0].Buf
 	for i, idx := range exec.GetSpanValues[T](input, 1) {
 		// Signed indices are read as unsigned. Only a valid slot's index must
 		// be in range, so check index validity first. Null-type values have no
 		// validity bitmap and are all null.
 		valid := (indexValidity == nil || bitutil.BitIsSet(indexValidity, int(input.Offset)+i)) &&
-			valueValidity != nil && bitutil.BitIsSet(valueValidity, int(dict.Offset)+int(idx))
+			valueValidity != nil && bitutil.BitIsSet(valueValidity, int(valueOffset)+int(idx))
 		bitutil.SetBitTo(out, i, valid != wantNull)
 	}
 }
@@ -848,12 +862,62 @@ func isValidAt(span *exec.ArraySpan, i int64) bool {
 	return true
 }
 
+// setNaNBits sets bit i of out to v for each NaN slot i of a float16, float32
+// or float64 span, and does nothing for other types.
+func setNaNBits(input *exec.ArraySpan, out []byte, v bool) {
+	switch input.Type.ID() {
+	case arrow.FLOAT16:
+		for i, x := range exec.GetSpanValues[float16.Num](input, 1) {
+			if x.IsNaN() {
+				bitutil.SetBitTo(out, i, v)
+			}
+		}
+	case arrow.FLOAT32:
+		for i, x := range exec.GetSpanValues[float32](input, 1) {
+			if x != x {
+				bitutil.SetBitTo(out, i, v)
+			}
+		}
+	case arrow.FLOAT64:
+		for i, x := range exec.GetSpanValues[float64](input, 1) {
+			if x != x {
+				bitutil.SetBitTo(out, i, v)
+			}
+		}
+	}
+}
+
+type NullOptions struct {
+	NanIsNull bool `compute:"nan_is_null"`
+}
+
+func (NullOptions) TypeName() string { return "NullOptions" }
+
+func initIsNull(_ *exec.KernelCtx, args exec.KernelInitArgs) (exec.KernelState, error) {
+	switch opts := args.Options.(type) {
+	// exprs initializes kernels without applying the default options
+	case nil:
+		return NullOptions{}, nil
+	case NullOptions:
+		return opts, nil
+	case *NullOptions:
+		if opts == nil {
+			return NullOptions{}, nil
+		}
+		return *opts, nil
+	}
+	return nil, fmt.Errorf("%w: attempted to initialize kernel state from invalid function options",
+		arrow.ErrInvalid)
+}
+
 func isNullExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 	out.Release()
 	input := batch.Values[0].Array
+	opts, _ := ctx.State.(NullOptions)
 
-	if dictHasNullValues(&input) {
-		return dictValidity(ctx, &input, out, true)
+	floatDict := input.Type.ID() == arrow.DICTIONARY && arrow.IsFloating(input.Dictionary().Type.ID())
+	if dictHasNullValues(&input) || (opts.NanIsNull && floatDict) {
+		return dictValidity(ctx, &input, out, true, opts.NanIsNull)
 	}
 
 	if hasLogicalNulls(&input) {
@@ -866,6 +930,9 @@ func isNullExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult)
 		bitutil.InvertBitmap(validityBuf.Bytes(), int(input.Offset), int(input.Len),
 			out.Buffers[1].Buf, 0)
 	}
+	if opts.NanIsNull {
+		setNaNBits(&input, out.Buffers[1].Buf, true)
+	}
 
 	return nil
 }
@@ -875,7 +942,7 @@ func isNotNullExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResu
 	input := batch.Values[0].Array
 
 	if dictHasNullValues(&input) {
-		return dictValidity(ctx, &input, out, false)
+		return dictValidity(ctx, &input, out, false, false)
 	}
 
 	if hasLogicalNulls(&input) {
@@ -903,7 +970,7 @@ func IsNullNotNullKernels() []exec.ScalarKernel {
 	out := exec.NewOutputType(arrow.FixedWidthTypes.Boolean)
 
 	results := make([]exec.ScalarKernel, 2)
-	results[0] = exec.NewScalarKernel([]exec.InputType{in}, out, isNullExec, nil)
+	results[0] = exec.NewScalarKernel([]exec.InputType{in}, out, isNullExec, initIsNull)
 	results[0].NullHandling = exec.NullComputedNoPrealloc
 	results[0].MemAlloc = exec.MemNoPrealloc
 

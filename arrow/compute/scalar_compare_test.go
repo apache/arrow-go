@@ -1969,6 +1969,107 @@ func (sv *ScalarValiditySuite) TestLogicalNullScalars() {
 	}
 }
 
+func (sv *ScalarValiditySuite) checkIsNull(input arrow.Array, opts compute.FunctionOptions, expected string) {
+	exp := sv.getArr(arrow.FixedWidthTypes.Boolean, expected)
+	defer exp.Release()
+
+	res, err := compute.CallFunction(sv.ctx, "is_null", opts, compute.NewDatumWithoutOwning(input))
+	sv.Require().NoError(err)
+	result := res.(*compute.ArrayDatum).MakeArray()
+	res.Release()
+	defer result.Release()
+	sv.Truef(array.Equal(exp, result), "is_null(%s, %v): expected %s, got %s", input, opts, exp, result)
+
+	for i := 0; i < input.Len(); i++ {
+		s, err := scalar.GetScalar(input, i)
+		sv.Require().NoError(err)
+		res, err := compute.CallFunction(sv.ctx, "is_null", opts, compute.NewDatumWithoutOwning(s))
+		sv.Require().NoError(err)
+		got := res.(*compute.ScalarDatum).Value
+		sv.Truef(scalar.Equals(scalar.NewBooleanScalar(exp.(*array.Boolean).Value(i)), got),
+			"is_null(%s, %v): got %s", s, opts, got)
+		res.Release()
+		if r, ok := s.(scalar.Releasable); ok {
+			r.Release()
+		}
+	}
+}
+
+func (sv *ScalarValiditySuite) TestIsNullNanIsNull() {
+	for _, typ := range []arrow.DataType{
+		arrow.FixedWidthTypes.Float16, arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Float64,
+	} {
+		sv.Run(typ.String(), func() {
+			arr := sv.getArr(typ, `[1.5, 0.0, -0.0, null, "Inf", "-Inf", "NaN"]`)
+			defer arr.Release()
+			sv.checkIsNull(arr, nil, `[false, false, false, true, false, false, false]`)
+			sv.checkIsNull(arr, (*compute.NullOptions)(nil), `[false, false, false, true, false, false, false]`)
+			sv.checkIsNull(arr, &compute.NullOptions{NanIsNull: true}, `[false, false, false, true, false, false, true]`)
+			sv.checkIsNull(arr, compute.NullOptions{NanIsNull: true}, `[false, false, false, true, false, false, true]`)
+
+			long := sv.getArr(typ, `[1, "NaN", null, 2, "NaN", 3, 4, 5, 6, "NaN", null, 7, "NaN"]`)
+			defer long.Release()
+			sliced := array.NewSlice(long, 9, 13)
+			defer sliced.Release()
+			sv.checkIsNull(sliced, &compute.NullOptions{NanIsNull: true}, `[true, true, false, true]`)
+		})
+	}
+}
+
+func (sv *ScalarValiditySuite) TestIsNullNanIsNullDictionary() {
+	nanIsNull := &compute.NullOptions{NanIsNull: true}
+	for _, valueType := range []arrow.DataType{
+		arrow.FixedWidthTypes.Float16, arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Float64,
+	} {
+		sv.Run(valueType.String(), func() {
+			dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: valueType}
+			makeDict := func(indices, values arrow.Array) arrow.Array {
+				defer indices.Release()
+				defer values.Release()
+				return array.NewDictionaryArray(dictType, indices, values)
+			}
+
+			dict := makeDict(sv.getArr(arrow.PrimitiveTypes.Int32, `[0, 1, 2, 3, null, 1]`),
+				sv.getArr(valueType, `[1.5, "NaN", -0.0, null]`))
+			defer dict.Release()
+			sv.checkIsNull(dict, nil, `[false, false, false, true, true, false]`)
+			sv.checkIsNull(dict, nanIsNull, `[false, true, false, true, true, true]`)
+
+			withValidity := sv.getArr(valueType, `[1.5, "NaN"]`)
+			data := array.NewData(valueType, 2, []*memory.Buffer{nil, withValidity.Data().Buffers()[1]}, nil, 0, 0)
+			withValidity.Release()
+			noValidity := array.MakeFromData(data)
+			data.Release()
+			noNullValues := makeDict(sv.getArr(arrow.PrimitiveTypes.Int32, `[0, 1, null]`), noValidity)
+			defer noNullValues.Release()
+			sv.checkIsNull(noNullValues, nanIsNull, `[false, true, true]`)
+
+			allValues := sv.getArr(valueType, `[1, 2, 3, 4, 5, 6, 7, 8, 9, "NaN", null, 1.5]`)
+			defer allValues.Release()
+			indices := sv.getArr(arrow.PrimitiveTypes.Int32,
+				`[0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, null, 0, 1]`)
+			defer indices.Release()
+			slicedValues := array.NewSlice(allValues, 9, 12)
+			defer slicedValues.Release()
+			slicedIndices := array.NewSlice(indices, 9, 14)
+			defer slicedIndices.Release()
+			sliced := array.NewDictionaryArray(dictType, slicedIndices, slicedValues)
+			defer sliced.Release()
+			sv.checkIsNull(sliced, nanIsNull, `[true, false, true, true, true]`)
+		})
+	}
+}
+
+func (sv *ScalarValiditySuite) TestIsNullInvalidOptions() {
+	arr := sv.getArr(arrow.PrimitiveTypes.Float64, `[1, null]`)
+	defer arr.Release()
+	res, err := compute.CallFunction(sv.ctx, "is_null", &compute.RoundOptions{}, compute.NewDatumWithoutOwning(arr))
+	if res != nil {
+		res.Release()
+	}
+	sv.ErrorIs(err, arrow.ErrInvalid)
+}
+
 func (sv *ScalarValiditySuite) TestIsNaN() {
 	tests := []struct {
 		in       string
