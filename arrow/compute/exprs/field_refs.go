@@ -93,7 +93,7 @@ func GetRefSchema(ref expr.ReferenceSegment, schema *arrow.Schema) (*arrow.Field
 //
 // The result is a new reference: if it implements scalar.Releasable, the
 // caller must release it.
-func GetScalar(ref expr.ReferenceSegment, s scalar.Scalar, mem memory.Allocator, ext ExtensionIDSet) (scalar.Scalar, error) {
+func GetScalar(ref expr.ReferenceSegment, s scalar.Scalar, mem memory.Allocator, ext *ExtensionSet) (scalar.Scalar, error) {
 	if ref == nil {
 		return nil, compute.ErrEmpty
 	}
@@ -119,7 +119,7 @@ func GetScalar(ref expr.ReferenceSegment, s scalar.Scalar, mem memory.Allocator,
 
 // scalarStep follows one reference segment from s. borrowed reports whether
 // next is part of s, rather than a new scalar the caller owns.
-func scalarStep(ref expr.ReferenceSegment, s scalar.Scalar, mem memory.Allocator, ext ExtensionIDSet) (next scalar.Scalar, borrowed bool, err error) {
+func scalarStep(ref expr.ReferenceSegment, s scalar.Scalar, mem memory.Allocator, ext *ExtensionSet) (next scalar.Scalar, borrowed bool, err error) {
 	switch f := ref.(type) {
 	case *expr.StructFieldRef:
 		if s.DataType().ID() != arrow.STRUCT {
@@ -214,7 +214,7 @@ func releaseScalar(s scalar.Scalar) {
 // GetReferencedValue retrieves the referenced (potentially nested) value from
 // the provided datum which may be a scalar, array, or record batch. The
 // result is a new reference that the caller must release.
-func GetReferencedValue(mem memory.Allocator, ref expr.ReferenceSegment, value compute.Datum, ext ExtensionIDSet) (compute.Datum, error) {
+func GetReferencedValue(mem memory.Allocator, ref expr.ReferenceSegment, value compute.Datum, ext *ExtensionSet) (compute.Datum, error) {
 	if ref == nil {
 		return nil, compute.ErrEmpty
 	}
