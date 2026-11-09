@@ -2135,6 +2135,11 @@ func TestAppendViewScalars(t *testing.T) {
 
 			require.NoError(t, array.ValidateFull(result))
 			assert.Truef(t, array.Equal(expected, result), "expected: %s, got: %s", expected, result)
+
+			require.NoError(t, scalar.AppendSlice(bldr, scalars[:3]))
+			inlineOnly := bldr.NewArray()
+			defer inlineOnly.Release()
+			assert.Len(t, inlineOnly.Data().Buffers(), 2, "inline values need no data buffer")
 		})
 	}
 }

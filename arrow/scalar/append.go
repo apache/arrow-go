@@ -44,6 +44,7 @@ type builder[T primitives | []byte] interface {
 type binaryBuilder interface {
 	builder[[]byte]
 	ReserveData(int)
+	Type() arrow.DataType
 }
 
 func appendPrimitive[T primitives, B builder[T]](bldr B, scalars []Scalar) {
@@ -57,10 +58,11 @@ func appendPrimitive[T primitives, B builder[T]](bldr B, scalars []Scalar) {
 }
 
 func appendBinary(bldr binaryBuilder, scalars []Scalar) {
+	_, view := bldr.Type().(arrow.BinaryViewDataType)
 	var dataSize int
 	for _, s := range scalars {
 		s := s.(BinaryScalar)
-		if s.IsValid() {
+		if s.IsValid() && (!view || !arrow.IsViewInline(len(s.Data()))) {
 			dataSize += len(s.Data())
 		}
 	}
