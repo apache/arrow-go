@@ -495,29 +495,35 @@ func (n Num) ReduceScaleBy(reduce int32, round bool) Num {
 	return FromBigInt(result)
 }
 
-func (n Num) rescaleWouldCauseDataLoss(deltaScale int32, multiplier Num) (out Num, loss bool) {
+func (n Num) rescaleWouldCauseDataLoss(deltaScale int64, multiplier Num) (out Num, loss bool) {
 	if deltaScale < 0 {
 		var remainder Num
 		out, remainder = n.Div(multiplier)
 		return out, remainder != Num{}
 	}
 
-	out = n.Mul(multiplier)
-	if n.Sign() < 0 {
-		loss = n.Less(out)
-	} else {
-		loss = out.Less(n)
+	result := n.BigInt()
+	result.Mul(result, multiplier.BigInt())
+	if result.BitLen() > 255 {
+		return Num{}, true
 	}
-	return
+	return FromBigInt(result), false
 }
 
 func (n Num) Rescale(original, newscale int32) (out Num, err error) {
-	if original == newscale {
+	if original == newscale || n == (Num{}) {
 		return n, nil
 	}
 
-	deltaScale := newscale - original
-	absDeltaScale := int32(math.Abs(float64(deltaScale)))
+	deltaScale := int64(newscale) - int64(original)
+	absDeltaScale := deltaScale
+	if absDeltaScale < 0 {
+		absDeltaScale = -absDeltaScale
+	}
+	// Scaling any nonzero value by 10^77 or more overflows or drops every digit.
+	if absDeltaScale >= int64(len(scaleMultipliers)) {
+		return Num{}, errors.New("rescale data loss")
+	}
 
 	multiplier := scaleMultipliers[absDeltaScale]
 	var wouldHaveLoss bool
