@@ -243,6 +243,24 @@ func TestValidateFullExtensionOverNullNullCountMismatch(t *testing.T) {
 	assert.Contains(t, err.Error(), "does not match actual number of nulls")
 }
 
+func TestValidateFullExtensionOverDictionaryChecksIndices(t *testing.T) {
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	dict, err := array.DictArrayFromJSON(memory.DefaultAllocator, dictType, `[0, 1]`, `["only"]`)
+	require.NoError(t, err)
+	defer dict.Release()
+	storage := dict.Data()
+	data := array.NewData(extensions.NewOpaqueType(dictType, "type", "vendor"), storage.Len(), storage.Buffers(), nil, storage.NullN(), storage.Offset())
+	defer data.Release()
+	data.SetDictionary(storage.Dictionary())
+	arr := array.MakeFromData(data)
+	defer arr.Release()
+
+	assert.NoError(t, array.Validate(arr))
+	err = array.ValidateFull(arr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dictionary indices")
+}
+
 var typemap = map[arrow.DataType]reflect.Type{
 	arrow.PrimitiveTypes.Int8:   reflect.TypeOf(int8(0)),
 	arrow.PrimitiveTypes.Uint8:  reflect.TypeOf(uint8(0)),

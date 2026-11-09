@@ -90,10 +90,11 @@ func validateArray(arr arrow.Array, full bool, path string) error {
 		}
 	}
 
-	if full && data.DataType().Layout().HasDict {
+	// an extension array's indices are checked with its storage below
+	if full && data.DataType().ID() == arrow.DICTIONARY {
 		dictData := data.dictionary
 		if dictData != nil {
-			dt := storageType(data.DataType()).(*arrow.DictionaryType)
+			dt := data.DataType().(*arrow.DictionaryType)
 			indexData := NewData(dt.IndexType, data.length, data.buffers, nil, data.nulls, data.offset)
 			err := checkIndexBounds(indexData, uint64(dictData.Len()))
 			indexData.Release()
