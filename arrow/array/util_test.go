@@ -231,6 +231,18 @@ func TestMakeArrayOfNullNestedNull(t *testing.T) {
 	}
 }
 
+func TestValidateFullExtensionOverNullNullCountMismatch(t *testing.T) {
+	data := array.NewData(extensions.NewOpaqueType(arrow.Null, "type", "vendor"), 3, []*memory.Buffer{nil}, nil, 0, 0)
+	defer data.Release()
+	arr := array.MakeFromData(data)
+	defer arr.Release()
+
+	assert.NoError(t, array.Validate(arr))
+	err := array.ValidateFull(arr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not match actual number of nulls")
+}
+
 var typemap = map[arrow.DataType]reflect.Type{
 	arrow.PrimitiveTypes.Int8:   reflect.TypeOf(int8(0)),
 	arrow.PrimitiveTypes.Uint8:  reflect.TypeOf(uint8(0)),
