@@ -264,7 +264,7 @@ func TestExecuteFieldRefNullStructSurvivesBatch(t *testing.T) {
 	reg := NewExtensionIDRegistry()
 	require.NoError(t, reg.RegisterType(extensions.ID{URN: "extension:test:dictionary", Name: "dict"}, dictType))
 	extSet := NewExtensionSet(expr.NewEmptyExtensionRegistry(extensions.GetDefaultCollectionWithNoError()), reg)
-	_, anchor, ok := encodeType(dictType, extSet)
+	_, anchor, ok := extSet.encodeType(dictType)
 	require.True(t, ok)
 
 	// FromSubstraitType names struct fields "1", "2", ...
@@ -350,7 +350,7 @@ func TestLiteralToDatumNullUserDefinedRelease(t *testing.T) {
 	reg := NewExtensionIDRegistry()
 	require.NoError(t, reg.RegisterType(extensions.ID{URN: "extension:test:dictionary", Name: "dict"}, dictType))
 	extSet := NewExtensionSet(expr.NewEmptyExtensionRegistry(extensions.GetDefaultCollectionWithNoError()), reg)
-	_, anchor, ok := encodeType(dictType, extSet)
+	_, anchor, ok := extSet.encodeType(dictType)
 	require.True(t, ok)
 
 	lit := expr.NewNullLiteral(&types.UserDefinedType{TypeReference: anchor})
