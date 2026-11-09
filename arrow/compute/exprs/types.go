@@ -365,8 +365,8 @@ func encodeOptionlessOverflowableArithmetic(id extensions.ID) arrowToSubstrait {
 // set using the Default arrow extension ID registry.
 //
 // See NewExtensionSet for more info.
-func NewExtensionSetDefault(set expr.ExtensionRegistry) *ExtensionSet {
-	return &ExtensionSet{substraitRegistry: set, reg: DefaultExtensionIDRegistry}
+func NewExtensionSetDefault(set expr.ExtensionRegistry) *extensionSet {
+	return &extensionSet{substraitRegistry: set, reg: DefaultExtensionIDRegistry}
 }
 
 // NewExtensionSet creates a new extension set given a substrait extension registry,
@@ -375,20 +375,20 @@ func NewExtensionSetDefault(set expr.ExtensionRegistry) *ExtensionSet {
 // particular set of extensions in use by an expression or plan, so when
 // serializing you only need to serialize the extensions that have been
 // inserted into the extension set.
-func NewExtensionSet(set expr.ExtensionRegistry, reg *ExtensionIDRegistry) *ExtensionSet {
-	return &ExtensionSet{substraitRegistry: set, reg: reg}
+func NewExtensionSet(set expr.ExtensionRegistry, reg *ExtensionIDRegistry) *extensionSet {
+	return &extensionSet{substraitRegistry: set, reg: reg}
 }
 
-// ExtensionSet pairs Arrow implementation mappings with a Substrait extension registry.
-type ExtensionSet struct {
+// extensionSet pairs Arrow implementation mappings with a Substrait extension registry.
+type extensionSet struct {
 	substraitRegistry expr.ExtensionRegistry
 	reg               *ExtensionIDRegistry
 }
 
-func (e *ExtensionSet) GetArrowRegistry() *ExtensionIDRegistry       { return e.reg }
-func (e *ExtensionSet) GetSubstraitRegistry() expr.ExtensionRegistry { return e.substraitRegistry }
+func (e *extensionSet) GetArrowRegistry() *ExtensionIDRegistry       { return e.reg }
+func (e *extensionSet) GetSubstraitRegistry() expr.ExtensionRegistry { return e.substraitRegistry }
 
-func (e *ExtensionSet) decodeTypeArrow(anchor uint32) (extensions.ID, arrow.DataType, bool) {
+func (e *extensionSet) decodeTypeArrow(anchor uint32) (extensions.ID, arrow.DataType, bool) {
 	id, ok := e.substraitRegistry.DecodeType(anchor)
 	if !ok {
 		if id, ok = e.substraitRegistry.DecodeTypeVariation(anchor); !ok {
@@ -400,7 +400,7 @@ func (e *ExtensionSet) decodeTypeArrow(anchor uint32) (extensions.ID, arrow.Data
 	return id, dt, ok
 }
 
-func (e *ExtensionSet) decodeFunction(ref uint32) (extensions.ID, substraitToArrow, bool) {
+func (e *extensionSet) decodeFunction(ref uint32) (extensions.ID, substraitToArrow, bool) {
 	id, ok := e.substraitRegistry.DecodeFunc(ref)
 	if !ok {
 		return id, nil, false
@@ -416,7 +416,7 @@ func (e *ExtensionSet) decodeFunction(ref uint32) (extensions.ID, substraitToArr
 	return id, conv, ok
 }
 
-func (e *ExtensionSet) encodeTypeVariation(dt arrow.DataType) (extensions.ID, uint32, bool) {
+func (e *extensionSet) encodeTypeVariation(dt arrow.DataType) (extensions.ID, uint32, bool) {
 	id, ok := e.reg.GetIDByType(dt)
 	if !ok {
 		return extensions.ID{}, 0, false
@@ -425,7 +425,7 @@ func (e *ExtensionSet) encodeTypeVariation(dt arrow.DataType) (extensions.ID, ui
 	return id, e.substraitRegistry.GetTypeVariationAnchor(id), true
 }
 
-func (e *ExtensionSet) encodeType(dt arrow.DataType) (extensions.ID, uint32, bool) {
+func (e *extensionSet) encodeType(dt arrow.DataType) (extensions.ID, uint32, bool) {
 	id, ok := e.reg.GetIDByType(dt)
 	if !ok {
 		return extensions.ID{}, 0, false
@@ -570,7 +570,7 @@ func IsNullable(t types.Type) bool {
 // FieldsFromSubstrait produces a list of arrow fields from a list of
 // substrait types (such as the fields of a StructType) using nextName
 // to determine the names for the fields.
-func FieldsFromSubstrait(typeList []types.Type, nextName func() string, ext *ExtensionSet) (out []arrow.Field, err error) {
+func FieldsFromSubstrait(typeList []types.Type, nextName func() string, ext *extensionSet) (out []arrow.Field, err error) {
 	out = make([]arrow.Field, len(typeList))
 	for i, t := range typeList {
 		out[i].Name = nextName()
@@ -599,7 +599,7 @@ func substraitToArrowTimeUnit(in types.TimePrecision) arrow.TimeUnit {
 // ToSubstraitType converts an arrow data type to a Substrait Type. Since
 // arrow types don't have a nullable flag (it is in the arrow.Field) but
 // Substrait types do, the nullability must be passed in here.
-func ToSubstraitType(dt arrow.DataType, nullable bool, ext *ExtensionSet) (types.Type, error) {
+func ToSubstraitType(dt arrow.DataType, nullable bool, ext *extensionSet) (types.Type, error) {
 	var nullability types.Nullability
 	if nullable {
 		nullability = types.NullabilityNullable
@@ -782,7 +782,7 @@ func ToSubstraitType(dt arrow.DataType, nullable bool, ext *ExtensionSet) (types
 // substrait type, using the extension set if necessary.
 // Since Substrait types contain their nullability also, the nullability
 // returned along with the data type.
-func FromSubstraitType(t types.Type, ext *ExtensionSet) (arrow.DataType, bool, error) {
+func FromSubstraitType(t types.Type, ext *extensionSet) (arrow.DataType, bool, error) {
 	nullable := IsNullable(t)
 
 	if t.GetTypeVariationReference() > 0 {
