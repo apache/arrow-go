@@ -853,7 +853,7 @@ func (r *Reader) parseListLike(field array.ListLikeBuilder, str string) {
 		field.AppendNull()
 		return
 	}
-	str = strings.Trim(str, "{}")
+	str = str[1 : len(str)-1]
 	if len(str) == 0 {
 		// we don't want to create the csv reader if we already know the
 		// string is empty
@@ -892,7 +892,7 @@ func (r *Reader) parseFixedSizeList(field *array.FixedSizeListBuilder, str strin
 		field.AppendNull()
 		return
 	}
-	str = strings.Trim(str, "{}")
+	str = str[1 : len(str)-1]
 	if len(str) == 0 {
 		// we don't want to create the csv reader if we already know the
 		// string is empty
