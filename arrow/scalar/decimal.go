@@ -24,6 +24,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
+	"github.com/apache/arrow-go/v18/internal/utils"
 )
 
 type decimalScalar[T interface {
@@ -77,7 +78,7 @@ func (s *decimalScalar[T]) CastTo(to arrow.DataType) (Scalar, error) {
 
 	dt := s.Type.(arrow.DecimalType)
 	if to.ID() == arrow.STRING {
-		return NewStringScalar(s.Value.ToBigFloat(dt.GetScale()).Text('g', int(dt.GetPrecision()))), nil
+		return NewStringScalar(utils.FormatDecimalG(s.Value, dt.GetPrecision(), dt.GetScale())), nil
 	}
 
 	toDec, ok := to.(arrow.DecimalType)

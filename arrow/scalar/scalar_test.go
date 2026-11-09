@@ -271,6 +271,18 @@ func TestDecimal32And64Scalars(t *testing.T) {
 
 	_, err := scalar.NewDecimal32Scalar(1, &arrow.Decimal32Type{Precision: 9, Scale: 10}).CastTo(&arrow.Decimal32Type{Precision: 9, Scale: 80})
 	assert.Error(t, err)
+	assert.Equal(t, "1e-19", scalar.NewDecimal32Scalar(1, &arrow.Decimal32Type{Precision: 1, Scale: 19}).String())
+	assert.Equal(t, "1e-19", scalar.NewDecimal64Scalar(1, &arrow.Decimal64Type{Precision: 1, Scale: 19}).String())
+	assert.Equal(t, "-1.2345e-999996", scalar.NewDecimal32Scalar(-12345, &arrow.Decimal32Type{Precision: 9, Scale: 1_000_000}).String())
+	assert.Equal(t, "1.2345e+1000004", scalar.NewDecimal64Scalar(12345, &arrow.Decimal64Type{Precision: 18, Scale: -1_000_000}).String())
+	assert.Equal(t, "0", scalar.NewDecimal32Scalar(0, &arrow.Decimal32Type{Precision: 9, Scale: 1_000_000}).String())
+	assert.Equal(t, "-1.2345e-999996", scalar.NewDecimal32Scalar(-12345, &arrow.Decimal32Type{Precision: -1, Scale: 1_000_000}).String())
+	b64 := array.NewDecimal64Builder(mem, &arrow.Decimal64Type{Precision: 18, Scale: 1_000_000})
+	defer b64.Release()
+	b64.Append(12345)
+	huge := b64.NewDecimalArray()
+	defer huge.Release()
+	assert.Equal(t, "1.2345e-999996", huge.ValueStr(0))
 }
 
 func TestBinaryScalarBasics(t *testing.T) {

@@ -313,23 +313,42 @@ func (n Decimal64) ToFloat64(scale int32) float64 {
 }
 
 func (n Decimal32) ToBigFloat(scale int32) *big.Float {
-	f := (&big.Float{}).SetInt64(int64(n))
-	if scale < 0 {
-		f.SetPrec(32).Mul(f, (&big.Float{}).SetInt64(intPow(10, -int64(scale))))
-	} else {
-		f.SetPrec(32).Quo(f, (&big.Float{}).SetInt64(intPow(10, int64(scale))))
-	}
-	return f
+	return mulPow10(new(big.Float).SetInt64(int64(n)).SetPrec(32), -int64(scale))
 }
 
 func (n Decimal64) ToBigFloat(scale int32) *big.Float {
-	f := (&big.Float{}).SetInt64(int64(n))
-	if scale < 0 {
-		f.SetPrec(64).Mul(f, (&big.Float{}).SetInt64(intPow(10, -int64(scale))))
-	} else {
-		f.SetPrec(64).Quo(f, (&big.Float{}).SetInt64(intPow(10, int64(scale))))
+	return mulPow10(new(big.Float).SetInt64(int64(n)).SetPrec(64), -int64(scale))
+}
+
+// mulPow10 sets f to f * 10^exp, rounded to f's precision, and returns f. For
+// precisions up to 64 bits the result is within one unit in the last place.
+// 10^exp is applied as an exact 2^exp and then 5^|exp|, computed at 128 bits
+// by repeated squaring so the work stays bounded. Splitting the power keeps it
+// from overflowing before the result does. A result outside big.Float's
+// exponent range becomes ±Inf or 0.
+func mulPow10(f *big.Float, exp int64) *big.Float {
+	if f.Sign() == 0 {
+		// 5^|exp| may overflow to infinity, and 0 * Inf panics.
+		return f
 	}
-	return f
+
+	k := exp
+	if k < 0 {
+		k = -k
+	}
+	pow := new(big.Float).SetPrec(128).SetInt64(1)
+	for base := new(big.Float).SetPrec(128).SetInt64(5); k > 0; k >>= 1 {
+		if k&1 == 1 {
+			pow.Mul(pow, base)
+		}
+		base.Mul(base, base)
+	}
+
+	f.SetMantExp(f, int(exp))
+	if exp < 0 {
+		return f.Quo(f, pow)
+	}
+	return f.Mul(f, pow)
 }
 
 func cmpDec[T Decimal32 | Decimal64](lhs, rhs T) int {
