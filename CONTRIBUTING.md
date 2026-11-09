@@ -40,6 +40,40 @@ ci: update CI environment
 feat(parquet): support new encoding type
 ```
 
+## Running the tests
+
+Some tests read shared test data from the `arrow-testing` and
+`parquet-testing` git submodules. Fetch them when you clone:
+
+```sh
+git clone --recurse-submodules https://github.com/apache/arrow-go.git
+```
+
+or, in an existing clone:
+
+```sh
+git submodule update --init
+```
+
+Then point the tests at the data and run them from the repository root:
+
+```sh
+export ARROW_TEST_DATA=$PWD/arrow-testing/data
+export PARQUET_TEST_DATA=$PWD/parquet-testing/data
+export PARQUET_TEST_BAD_DATA=$PWD/parquet-testing/bad_data
+go test ./...
+```
+
+Set these so tests that use the shared data can run. Without the submodules,
+tests in packages such as `arrow/csv`, `parquet`, `parquet/file` and
+`parquet/pqarrow` fail or panic because they cannot find their data files.
+Some tests instead return early or skip when a variable is unset.
+
+CI runs Arrow tests with `-short` and the `assert,test` tags, then adds
+`noasm` for a second pass. See [`ci/scripts/test.sh`](ci/scripts/test.sh)
+for the full commands and CGO-specific tags. Some checks require these tags,
+so include them when reproducing CI failures locally.
+
 ## Generating Thrift
 
 The generated Go definitions for Parquet Thrift live under
