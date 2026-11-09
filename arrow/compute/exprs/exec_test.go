@@ -356,6 +356,24 @@ func TestGetRefFieldNestedNoChildren(t *testing.T) {
 	assert.EqualError(t, err, compute.ErrNoChildren.Error()+": int32")
 }
 
+func TestExecuteScalarFunctionWithoutAnchorRegistry(t *testing.T) {
+	function, err := exprs.NewScalarCall(exprs.NewDefaultExtensionSet(), "add", nil,
+		expr.NewPrimitiveLiteral(int32(1), false),
+		expr.NewPrimitiveLiteral(int32(10), false))
+	require.NoError(t, err)
+
+	extensionSet := exprs.NewExtensionSet(expr.ExtensionRegistry{}, exprs.DefaultExtensionIDRegistry)
+	ctx := exprs.WithExtensionIDSet(context.Background(), extensionSet)
+	schema := arrow.NewSchema(nil, nil)
+	input := array.NewRecordBatch(schema, nil, 1)
+	defer input.Release()
+
+	result, err := exprs.ExecuteScalarExpression(ctx, schema, function, compute.NewDatumWithoutOwning(input))
+	require.NoError(t, err)
+	defer result.Release()
+	assert.Equal(t, int32(11), result.(*compute.ScalarDatum).Value.(*scalar.Int32).Value)
+}
+
 func TestExecuteScalarFuncCall(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	fromJSON := func(ty arrow.DataType, json string) arrow.Array {
