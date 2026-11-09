@@ -275,6 +275,15 @@ func TestCumulativeOptionsTypedNilStart(t *testing.T) {
 	})
 }
 
+func TestNullLiteralRelease(t *testing.T) {
+	lit := compute.NullLiteral(&arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String})
+	dict := lit.(*compute.Literal).Literal.(*compute.ScalarDatum).Value.(*scalar.Dictionary).Value.Dict.Data()
+	require.NotEmpty(t, dict.Buffers())
+	lit.Release()
+	assert.Nil(t, dict.Buffers())
+}
+
 func TestExpressionHashing(t *testing.T) {
 	set := make(map[uint64]compute.Expression)
 

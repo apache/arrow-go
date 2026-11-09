@@ -598,7 +598,7 @@ func NewLiteral(arg interface{}) Expression {
 }
 
 func NullLiteral(dt arrow.DataType) Expression {
-	return &Literal{Literal: NewDatumWithoutOwning(scalar.MakeNullScalar(dt))}
+	return &Literal{Literal: &ScalarDatum{Value: scalar.MakeNullScalar(dt)}}
 }
 
 // NewRef constructs a parameter expression which refers to a specific field
