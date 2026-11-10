@@ -2063,6 +2063,21 @@ func (w *ByteArrayColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLe
 
 	dictEncoder := w.currentEncoder.(encoding.DictEncoder)
 
+	// Geospatial statistics (bounding box + geometry types) are built by parsing
+	// each WKB value as it is written.
+	// However, this path is different: the caller (pqarrow's writeDictionaryArrow) has
+	// already handed the dictionary to the encoder via PutDictionary, and we
+	// only receive integer indices into it. We never see the actual geometries
+	// for these rows, so we cannot fold them into the bounding box.
+	//
+	// Rather than decode the dictionary here we mark the
+	// statistics invalid. Invalidation is sticky for the rest of this column
+	// chunk: later dense writes do not restore it, and no geospatial statistics
+	// are written to the column chunk metadata on Close.
+	if w.geoStatistics != nil {
+		w.geoStatistics.Invalidate()
+	}
+
 	w.doBatches(int64(length), repLevels, func(offset, batch int64) {
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
 
@@ -2089,6 +2104,9 @@ func (w *ByteArrayColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLe
 
 func (w *ByteArrayColumnChunkWriter) writeValues(values []parquet.ByteArray, numNulls int64) {
 	w.currentEncoder.(encoding.ByteArrayEncoder).Put(values)
+	if w.geoStatistics != nil {
+		w.geoStatistics.Update(values)
+	}
 	if w.pageStatistics != nil {
 		w.pageStatistics.(*metadata.ByteArrayStatistics).Update(values, numNulls)
 	}
@@ -2102,6 +2120,13 @@ func (w *ByteArrayColumnChunkWriter) writeValuesSpaced(spacedValues []parquet.By
 		w.currentEncoder.(encoding.ByteArrayEncoder).PutSpaced(spacedValues, validBits, validBitsOffset)
 	} else {
 		w.currentEncoder.(encoding.ByteArrayEncoder).Put(spacedValues)
+	}
+	if w.geoStatistics != nil {
+		if len(spacedValues) != int(numRead) {
+			w.geoStatistics.UpdateSpaced(spacedValues, validBits, validBitsOffset)
+		} else {
+			w.geoStatistics.Update(spacedValues)
+		}
 	}
 	if w.pageStatistics != nil {
 		nulls := numValues - numRead

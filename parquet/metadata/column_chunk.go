@@ -260,6 +260,16 @@ func (c *ColumnChunkMetaData) StatsSet() (bool, error) {
 	return c.writerVersion.HasCorrectStatistics(c.Type(), c.descr.LogicalType(), encoded, c.descr.SortOrder()), nil
 }
 
+// GeoStatistics returns the geospatial statistics (bounding box and geometry
+// types) of a GEOMETRY column chunk, or nil if the writer did not record any.
+func (c *ColumnChunkMetaData) GeoStatistics() *GeoStatistics {
+	t := c.columnMeta.GetGeospatialStatistics()
+	if t == nil {
+		return nil
+	}
+	return geoStatisticsFromThrift(t)
+}
+
 func (c *ColumnChunkMetaData) Equals(other *ColumnChunkMetaData) bool {
 	return reflect.DeepEqual(c.columnMeta, other.columnMeta)
 }
@@ -347,6 +357,14 @@ func (c *ColumnChunkMetaDataBuilder) TotalUncompressedSize() int64 {
 
 func (c *ColumnChunkMetaDataBuilder) SetStats(val EncodedStatistics) {
 	c.chunk.MetaData.Statistics = val.ToThrift()
+}
+
+// SetGeoStatistics records the geospatial statistics for the chunk. Nothing is
+// written if the statistics are invalid or no geometry was written.
+func (c *ColumnChunkMetaDataBuilder) SetGeoStatistics(val *GeoStatistics) {
+	if t := val.toThrift(); t != nil {
+		c.chunk.MetaData.GeospatialStatistics = t
+	}
 }
 
 // ChunkMetaInfo is a helper struct for passing the offset and size information
