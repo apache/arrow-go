@@ -27,6 +27,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -207,34 +208,51 @@ func TestGoWrittenEncryptionReadByPyarrow(t *testing.T) {
 }
 
 // interopBase64KMS mirrors the Base64KmsClient in encryption_interop_pyarrow.py:
-// wrapping is plain base64, so the interop tests need no real KMS.
-type interopBase64KMS struct{}
+// wrapping is plain base64, so the interop tests need no real KMS. It counts
+// KMS unwrap calls to check the KEK cache against real CryptoFactory files.
+type interopBase64KMS struct {
+	unwraps atomic.Int32
+}
 
-func (interopBase64KMS) WrapKey(key []byte, masterKeyID string) (string, error) {
+func (k *interopBase64KMS) WrapKey(key []byte, masterKeyID string) (string, error) {
 	return base64.StdEncoding.EncodeToString(key), nil
 }
 
-func (interopBase64KMS) UnwrapKey(wrappedKey string, masterKeyID string) ([]byte, error) {
+func (k *interopBase64KMS) UnwrapKey(wrappedKey string, masterKeyID string) ([]byte, error) {
+	k.unwraps.Add(1)
 	return base64.StdEncoding.DecodeString(wrappedKey)
 }
 
 // TestPyarrowKmsWrittenConfigs reads files written by pyarrow's CryptoFactory
 // with PKMT1 key material, in both double (the pyarrow default) and single
-// wrapping mode. The footer key and the column key of field "a" are both
-// resolved through the KMS retriever.
+// wrapping mode. The footer key and the two column keys are all resolved
+// through the KMS retriever. The files have three key slots under two master
+// keys, and pyarrow generates one KEK per master key in double wrapping
+// mode: the KEK cache must collapse the three slots into two KMS calls in
+// double wrapping mode, while single wrapping mode unwraps every DEK
+// separately (three calls).
 func TestPyarrowKmsWrittenConfigs(t *testing.T) {
 	requirePyarrow(t)
 
 	dir := t.TempDir()
 	interopPython(t, "gen-kms", dir)
 
-	for _, name := range []string{"kms_double", "kms_single"} {
-		t.Run(name, func(t *testing.T) {
+	configs := []struct {
+		name            string
+		expectedUnwraps int32
+	}{
+		{"kms_double", 2},
+		{"kms_single", 3},
+	}
+
+	for _, config := range configs {
+		t.Run(config.name, func(t *testing.T) {
+			kms := &interopBase64KMS{}
 			props := parquet.NewReaderProperties(memory.DefaultAllocator)
 			props.FileDecryptProps = parquet.NewFileDecryptionProperties(
-				parquet.WithKeyRetriever(encryption.NewKmsKeyRetriever(interopBase64KMS{})))
+				parquet.WithKeyRetriever(encryption.NewKmsKeyRetriever(kms)))
 
-			fr, err := file.OpenParquetFile(filepath.Join(dir, name+".parquet"), false,
+			fr, err := file.OpenParquetFile(filepath.Join(dir, config.name+".parquet"), false,
 				file.WithReadProps(props))
 			require.NoError(t, err)
 			defer fr.Close()
@@ -259,6 +277,9 @@ func TestPyarrowKmsWrittenConfigs(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, int64(3), n)
 			assert.Equal(t, []float32{4, 5, 6}, f32vals[:3])
+
+			assert.Equal(t, config.expectedUnwraps, kms.unwraps.Load(),
+				"KMS unwrap calls while reading "+config.name)
 		})
 	}
 }

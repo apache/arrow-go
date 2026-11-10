@@ -23,7 +23,10 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -147,4 +150,122 @@ func TestDecryptKeyLocallyRejectsTampering(t *testing.T) {
 	wrapped[0] ^= 0xff
 	_, err = decryptKeyLocally(wrapped, kek, []byte("kek-id"))
 	assert.Error(t, err)
+}
+
+// countingKMS counts UnwrapKey calls to observe the KEK cache.
+type countingKMS struct {
+	KmsClient
+	unwraps atomic.Int32
+}
+
+func (c *countingKMS) UnwrapKey(wrappedKey string, masterKeyID string) ([]byte, error) {
+	c.unwraps.Add(1)
+	return c.KmsClient.UnwrapKey(wrappedKey, masterKeyID)
+}
+
+// doubleWrapMetadata returns double wrapping key metadata carrying kekID, as
+// two files sharing one KEK would.
+func doubleWrapMetadata(t *testing.T, kekID string) []byte {
+	t.Helper()
+	material := KeyMaterial{
+		KeyMaterialType:    "PKMT1",
+		InternalStorage:    true,
+		IsFooterKey:        true,
+		KmsInstanceID:      "kms-instance",
+		KmsInstanceURL:     "https://kms.example",
+		MasterKeyID:        "mk1",
+		DoubleWrapping:     true,
+		KeyEncryptionKeyID: base64.StdEncoding.EncodeToString([]byte(kekID)),
+		WrappedKEK:         "wrapped-kek",
+		WrappedDEK: encryptKeyLocally(t, bytes.Repeat([]byte{0x11}, 16),
+			bytes.Repeat([]byte{0x2a}, 16), []byte(kekID)),
+	}
+	encoded, err := json.Marshal(material)
+	require.NoError(t, err)
+	return encoded
+}
+
+func newCountingRetriever() (*KmsKeyRetriever, *countingKMS) {
+	kms := &countingKMS{KmsClient: mapKMS{keys: map[string][]byte{
+		"mk1": bytes.Repeat([]byte{0x2a}, 16),
+	}}}
+	return NewKmsKeyRetriever(kms), kms
+}
+
+func TestKmsKeyRetrieverCachesKEKs(t *testing.T) {
+	retriever, kms := newCountingRetriever()
+
+	// two files sharing a KEK: same KEK ID, each with its own wrapped DEK
+	for i := 0; i < 2; i++ {
+		key, err := retriever.UnwrapKeyMetadata(doubleWrapMetadata(t, "kek-id"))
+		require.NoError(t, err)
+		assert.Equal(t, bytes.Repeat([]byte{0x11}, 16), key)
+	}
+	assert.Equal(t, int32(1), kms.unwraps.Load(), "second file must hit the KEK cache")
+}
+
+func TestKmsKeyRetrieverKekCacheExpires(t *testing.T) {
+	retriever, kms := newCountingRetriever()
+
+	now := time.Now()
+	retriever.keks.now = func() time.Time { return now }
+
+	_, err := retriever.UnwrapKeyMetadata(doubleWrapMetadata(t, "kek-id"))
+	require.NoError(t, err)
+
+	// a rotated KEK written under the same ID becomes visible after the TTL
+	now = now.Add(kekCacheTTL + time.Second)
+	_, err = retriever.UnwrapKeyMetadata(doubleWrapMetadata(t, "kek-id"))
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), kms.unwraps.Load(), "expired entry must miss the cache")
+}
+
+func TestKmsKeyRetrieverKekCacheSeparatesKeys(t *testing.T) {
+	retriever, kms := newCountingRetriever()
+
+	for _, kekID := range []string{"kek-id-1", "kek-id-2"} {
+		_, err := retriever.UnwrapKeyMetadata(doubleWrapMetadata(t, kekID))
+		require.NoError(t, err)
+	}
+	assert.Equal(t, int32(2), kms.unwraps.Load(), "distinct KEK IDs must not share a cache entry")
+}
+
+func TestKmsKeyRetrieverKekCacheCollapsesConcurrentMisses(t *testing.T) {
+	retriever, kms := newCountingRetriever()
+
+	// the footer and column reads of one file resolve the same KEK
+	// concurrently: a single KMS call must serve all of them
+	metadata := doubleWrapMetadata(t, "kek-id")
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key, err := retriever.UnwrapKeyMetadata(metadata)
+			assert.NoError(t, err)
+			assert.Equal(t, bytes.Repeat([]byte{0x11}, 16), key)
+		}()
+	}
+	wg.Wait()
+	assert.Equal(t, int32(1), kms.unwraps.Load())
+}
+
+func TestKekCacheEviction(t *testing.T) {
+	cache := newKekCache(time.Minute, 2)
+	now := time.Now()
+	cache.now = func() time.Time { return now }
+
+	cache.put(kekCacheKey{"mk", "k1"}, []byte{1})
+	now = now.Add(2 * time.Minute) // k1 is now expired
+
+	cache.put(kekCacheKey{"mk", "k2"}, []byte{2})
+	assert.Len(t, cache.entries, 1, "inserting must drop expired entries first")
+
+	cache.put(kekCacheKey{"mk", "k3"}, []byte{3})
+	cache.put(kekCacheKey{"mk", "k4"}, []byte{4}) // full of live entries: evicts LRU k2
+
+	assert.Nil(t, cache.get(kekCacheKey{"mk", "k2"}), "LRU entry must be evicted")
+	assert.Equal(t, []byte{3}, cache.get(kekCacheKey{"mk", "k3"}))
+	assert.Equal(t, []byte{4}, cache.get(kekCacheKey{"mk", "k4"}))
+	assert.Len(t, cache.entries, 2)
 }

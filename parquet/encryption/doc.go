@@ -24,7 +24,4 @@
 // NewKmsKeyRetriever and set the retriever with
 // parquet.WithKeyRetriever. Files using explicit keys or custom key
 // metadata continue to work without this package.
-//
-// This package is optional: it carries no effect on code that does not
-// import it.
 package encryption

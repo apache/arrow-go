@@ -84,16 +84,12 @@ def gen_kms(outdir):
     def client_factory(kms_connection_config):
         return Base64KmsClient(kms_connection_config)
 
-    try:
-        factory = pe.CryptoFactory(client_factory)  # pyarrow >= 26
-    except TypeError:
-        factory = pe.CryptoFactory()  # older pyarrow
-        factory.register_kms_client_factory(client_factory)
+    factory = pe.CryptoFactory(client_factory)
 
     table = build_table()
     for name, double_wrapping in (("kms_double", True), ("kms_single", False)):
         encryption = pe.EncryptionConfiguration(
-            footer_key="footer_master", column_keys={"column_master": ["a"]},
+            footer_key="footer_master", column_keys={"column_master": ["a", "b"]},
             double_wrapping=double_wrapping)
         properties = factory.file_encryption_properties(config, encryption)
         path = os.path.join(outdir, name + ".parquet")

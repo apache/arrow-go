@@ -39,8 +39,8 @@ func (toyKMS) UnwrapKey(wrappedKey string, masterKeyID string) ([]byte, error) {
 // ExampleKmsKeyRetriever shows how to read files written by the
 // parquet-cpp/pyarrow CryptoFactory: implement KmsClient, wrap it in a
 // KmsKeyRetriever and set it on the decryption properties with
-// parquet.WithKeyRetriever. Without this package, files whose key metadata
-// carries PKMT1 key material cannot be read.
+// parquet.WithKeyRetriever. This package handles the PKMT1 parsing and
+// unwrapping that would otherwise need a custom retriever.
 func ExampleKmsKeyRetriever() {
 	retriever := encryption.NewKmsKeyRetriever(toyKMS{})
 
