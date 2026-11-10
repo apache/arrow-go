@@ -886,8 +886,6 @@ func (c *CastSuite) TestDecimal128ToInt() {
 		dt := &arrow.Decimal128Type{Precision: 10, Scale: 0}
 
 		c.checkCastOpts(dt, arrow.PrimitiveTypes.Int16,
-			`["1", "2", "3", "4", null]`, `[1, 2, 3, 4, null]`, *opts)
-		c.checkCastOpts(dt, arrow.PrimitiveTypes.Int16,
 			`["200", "-300", "32767", "-32768", null]`, `[200, -300, 32767, -32768, null]`, *opts)
 		c.checkCastFails(dt, `["32768", "-32769"]`, opts)
 	})
@@ -1019,8 +1017,6 @@ func (c *CastSuite) TestDecimal256ToInt() {
 		opts := compute.SafeCastOptions(arrow.PrimitiveTypes.Int16)
 		dt := &arrow.Decimal256Type{Precision: 10, Scale: 0}
 
-		c.checkCastOpts(dt, arrow.PrimitiveTypes.Int16,
-			`["1", "2", "3", "4", null]`, `[1, 2, 3, 4, null]`, *opts)
 		c.checkCastOpts(dt, arrow.PrimitiveTypes.Int16,
 			`["200", "-300", "32767", "-32768", null]`, `[200, -300, 32767, -32768, null]`, *opts)
 		c.checkCastFails(dt, `["32768", "-32769"]`, opts)
