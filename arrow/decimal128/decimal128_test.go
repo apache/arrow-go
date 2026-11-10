@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"runtime"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
@@ -688,6 +689,23 @@ func TestFromString(t *testing.T) {
 		{"2112.33", 211233, 2},
 		{"-2112.33", -211233, 2},
 		{"12E2", 12, -2},
+		{"1e-39", 1, 39},
+		{"1.2345e-496", 12345, 500},
+		{"-1.2345e-996", -12345, 1000},
+		{"1e38", 0, -39},
+		{"1", 0, math.MinInt32},
+		{"0", 0, 39},
+		{"2.4e-40", 0, 39},
+		{"2.6e-40", 0, 39},
+		{"-2.6e-40", 0, 39},
+		{"4.9e-40", 0, 39},
+		{"-4.9e-40", 0, 39},
+		{"5.1e-40", 1, 39},
+		{"-5.1e-40", -1, 39},
+		{"5e-40", 1, 39},
+		{"-5e-40", -1, 39},
+		{"1e-2000000", 0, 1000000},
+		{"-1e-2000000", 0, 1000000},
 	}
 
 	for _, tt := range tests {
@@ -698,6 +716,35 @@ func TestFromString(t *testing.T) {
 			ex := decimal128.FromI64(tt.expected)
 			assert.Equal(t, ex, n)
 		})
+	}
+
+	for _, scale := range []int32{math.MaxInt32} {
+		_, err := decimal128.FromString("1", 37, scale)
+		assert.ErrorContains(t, err, "bitlen too large for decimal128", scale)
+	}
+
+	coef, _ := new(big.Int).SetString("123456789012345678901234567890", 10)
+	for _, scale := range []int32{39, 500, 1000} {
+		want := decimal128.FromBigInt(coef)
+		got, err := decimal128.FromString(want.ToBigFloat(scale).Text('e', 38), 38, scale)
+		require.NoError(t, err, scale)
+		assert.Equal(t, want, got, scale)
+	}
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	tiny, err := decimal128.FromString("-1e-20000000", 38, 10_000_000)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	assert.Equal(t, decimal128.Num{}, tiny)
+	// Rounding this value directly would allocate about 8 MB.
+	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
+
+	const exact = "12345678901234567890123456789012345678"
+	for _, scale := range []int32{5000} {
+		n, err := decimal128.FromString(fmt.Sprintf("%se-%d", exact, scale), 38, scale)
+		require.NoError(t, err, scale)
+		assert.Equal(t, exact, n.BigInt().String(), scale)
 	}
 }
 

@@ -283,14 +283,35 @@ func FromString(v string, prec, scale int32) (n Num, err error) {
 			return Num{}, errors.New("bitlen too large for decimal128")
 		}
 		n = FromBigInt(val)
-		n, _ = n.Div(scaleMultipliers[-scale])
+		if scale >= -MaxScale {
+			n, _ = n.Div(scaleMultipliers[-scale])
+		} else {
+			// |n| < 2^127 < 10^39, so the quotient is zero.
+			n = Num{}
+		}
 	} else {
 		// Since we're going to truncate this to get an integer, we need to round
 		// the value instead because of edge cases so that we match how other implementations
 		// (e.g. C++) handles Decimal values. So if we're negative we'll subtract 0.5 and if
 		// we're positive we'll add 0.5.
-		p := (&big.Float{}).SetInt(scaleMultipliers[scale].BigInt())
-		out.SetPrec(precInBits).Mul(out, p)
+		if scale <= MaxScale {
+			p := (&big.Float{}).SetInt(scaleMultipliers[scale].BigInt())
+			out.SetPrec(precInBits).Mul(out, p)
+		} else {
+			pow10.Mul(out.SetPrec(precInBits), int64(scale), 128+64)
+			// A large scale can push the value to infinity or far past 128
+			// bits, and converting either would panic or allocate as many
+			// bits as the value has.
+			if out.IsInf() || out.MantExp(nil) > 128 {
+				return Num{}, errors.New("bitlen too large for decimal128")
+			}
+			// A magnitude below 1/4 rounds to zero. Clearing it skips the
+			// rounding below, which allocates in proportion to the gap between
+			// the value's exponent and 0.5's.
+			if out.MantExp(nil) < -1 {
+				out.SetInt64(0)
+			}
+		}
 		if out.Signbit() {
 			out.Sub(out, pt5)
 		} else {

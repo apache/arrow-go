@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -630,6 +631,23 @@ func TestFromString(t *testing.T) {
 		{"2112.33", 211233, 2},
 		{"-2112.33", -211233, 2},
 		{"12E2", 12, -2},
+		{"1e-77", 1, 77},
+		{"1.2345e-496", 12345, 500},
+		{"-1.2345e-996", -12345, 1000},
+		{"5e76", 0, -77},
+		{"1", 0, math.MinInt32},
+		{"0", 0, 77},
+		{"2.4e-78", 0, 77},
+		{"2.6e-78", 0, 77},
+		{"-2.6e-78", 0, 77},
+		{"4.9e-78", 0, 77},
+		{"-4.9e-78", 0, 77},
+		{"5.1e-78", 1, 77},
+		{"-5.1e-78", -1, 77},
+		{"5e-78", 1, 77},
+		{"-5e-78", -1, 77},
+		{"1e-2000000", 0, 1000000},
+		{"-1e-2000000", 0, 1000000},
 	}
 
 	for _, tt := range tests {
@@ -640,6 +658,35 @@ func TestFromString(t *testing.T) {
 			ex := decimal256.FromI64(tt.expected)
 			assert.Equal(t, ex, n)
 		})
+	}
+
+	for _, scale := range []int32{math.MaxInt32} {
+		_, err := decimal256.FromString("1", 35, scale)
+		assert.ErrorContains(t, err, "bitlen too large for decimal256", scale)
+	}
+
+	coef, _ := new(big.Int).SetString("1234567890123456789012345678901234567890123456789012345678901234567890", 10)
+	for _, scale := range []int32{77, 500, 1000} {
+		want := decimal256.FromBigInt(coef)
+		got, err := decimal256.FromString(want.ToBigFloat(scale).Text('e', 76), 76, scale)
+		require.NoError(t, err, scale)
+		assert.Equal(t, want, got, scale)
+	}
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	tiny, err := decimal256.FromString("-1e-20000000", 76, 10_000_000)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	assert.Equal(t, decimal256.Num{}, tiny)
+	// Rounding this value directly would allocate about 8 MB.
+	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
+
+	const exact = "1234567890123456789012345678901234567890123456789012345678901234567890123456"
+	for _, scale := range []int32{5000} {
+		n, err := decimal256.FromString(fmt.Sprintf("%se-%d", exact, scale), 76, scale)
+		require.NoError(t, err, scale)
+		assert.Equal(t, exact, n.BigInt().String(), scale)
 	}
 }
 
