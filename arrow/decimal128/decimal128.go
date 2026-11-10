@@ -480,7 +480,7 @@ func (n Num) ReduceScaleBy(reduce int32, round bool) Num {
 	return FromBigInt(result)
 }
 
-func (n Num) rescaleWouldCauseDataLoss(deltaScale int32, multiplier Num) (out Num, loss bool) {
+func (n Num) rescaleWouldCauseDataLoss(deltaScale int64, multiplier Num) (out Num, loss bool) {
 	var (
 		value, result, remainder *big.Int
 	)
@@ -492,14 +492,10 @@ func (n Num) rescaleWouldCauseDataLoss(deltaScale int32, multiplier Num) (out Nu
 	}
 
 	result = (&big.Int{}).Mul(value, multiplier.BigInt())
-	out = FromBigInt(result)
-	cmp := result.Cmp(value)
-	if n.Sign() < 0 {
-		loss = cmp == 1
-	} else {
-		loss = cmp == -1
+	if result.BitLen() > 127 {
+		return Num{}, true
 	}
-	return
+	return FromBigInt(result), false
 }
 
 // Rescale returns a new decimal128.Num with the value updated assuming
@@ -507,12 +503,19 @@ func (n Num) rescaleWouldCauseDataLoss(deltaScale int32, multiplier Num) (out Nu
 // to newScale. If rescaling this way would cause data loss, an error is
 // returned instead.
 func (n Num) Rescale(originalScale, newScale int32) (out Num, err error) {
-	if originalScale == newScale {
+	if originalScale == newScale || n == (Num{}) {
 		return n, nil
 	}
 
-	deltaScale := newScale - originalScale
-	absDeltaScale := int32(math.Abs(float64(deltaScale)))
+	deltaScale := int64(newScale) - int64(originalScale)
+	absDeltaScale := deltaScale
+	if absDeltaScale < 0 {
+		absDeltaScale = -absDeltaScale
+	}
+	// Scaling any nonzero value by 10^39 or more overflows or drops every digit.
+	if absDeltaScale >= int64(len(scaleMultipliers)) {
+		return Num{}, errors.New("rescale data loss")
+	}
 
 	multiplier := scaleMultipliers[absDeltaScale]
 	var wouldHaveLoss bool
