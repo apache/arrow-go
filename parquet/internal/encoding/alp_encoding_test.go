@@ -634,6 +634,20 @@ func TestALPDecoderTruncatedOffsetArray(t *testing.T) {
 	assert.Contains(t, err.Error(), "too short")
 }
 
+// TestALPDecoderElementCountExceedsPage covers a header that claims more values
+// than the page holds. Fewer is valid, since the page's count includes nulls.
+func TestALPDecoderElementCountExceedsPage(t *testing.T) {
+	col := newFloat32Column()
+	dec := newALPDecoder[float32](format.Encoding_ALP, col)
+
+	data := alpTestPage(10)
+	require.NoError(t, dec.SetData(15, data), "nulls make the page count larger")
+
+	err := dec.SetData(9, data)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "claims 10 values")
+}
+
 // TestALPFloat64WidestPacking covers the widest packing a page can carry. The
 // values spread over most of what an int64 holds, so their differences need all
 // 64 bits and the difference between the two ends overflows a signed subtraction.

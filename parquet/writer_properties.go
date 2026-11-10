@@ -759,8 +759,8 @@ func NewWriterProperties(opts ...WriterProperty) *WriterProperties {
 	checkALPVectorSize("", cfg.wr.defColumnProps.ALPVectorSize)
 	for path, props := range cfg.wr.columnProps {
 		if props.Encoding == Encodings.ALP && !props.ALPEnabled {
-			panic("parquet: ALP encoding for column " + path +
-				" requires WithALPEncoding(true) or WithALPEncodingFor(" + path + ", true)")
+			panic(fmt.Sprintf("parquet: ALP encoding for column %q requires WithALPEncoding(true) or WithALPEncodingFor(%q, true)",
+				path, path))
 		}
 		checkALPVectorSize(path, props.ALPVectorSize)
 	}

@@ -468,6 +468,12 @@ func (dec *alpDecoder[T]) SetData(nvals int, data []byte) error {
 	if numElements < 0 {
 		return fmt.Errorf("parquet: invalid ALP element count: %d", numElements)
 	}
+	// nvals counts the page's nulls too, so a smaller element count is valid,
+	// but a page can't hold more non-null values than it has values.
+	if int64(numElements) > int64(nvals) {
+		return fmt.Errorf("parquet: ALP page claims %d values, but the page holds at most %d",
+			numElements, nvals)
+	}
 
 	dec.vectorSize = 1 << logVectorSize
 	dec.totalCount = int(numElements)
