@@ -699,18 +699,8 @@ func (w *columnWriter) Close() (err error) {
 	if !w.closed {
 		w.closed = true
 		defer func() { w.uncompressedData = bytes.Buffer{} }()
-		if w.hasDict && !w.fallbackToNonDict {
-			if err = w.WriteDictionaryPage(); err != nil {
-				return err
-			}
-		}
-
-		if err = w.FlushBufferedDataPages(); err != nil {
-			return err
-		}
-
-		// ensure we release and reset everything even if we
-		// error out from the chunk statistics handling
+		// release and reset everything even if a flush or the chunk
+		// statistics handling fails
 		defer func() {
 			w.defLevelSink.Reset(0)
 			w.repLevelSink.Reset(0)
@@ -722,6 +712,16 @@ func (w *columnWriter) Close() (err error) {
 			w.currentEncoder.Release()
 			w.currentEncoder = nil
 		}()
+
+		if w.hasDict && !w.fallbackToNonDict {
+			if err = w.WriteDictionaryPage(); err != nil {
+				return err
+			}
+		}
+
+		if err = w.FlushBufferedDataPages(); err != nil {
+			return err
+		}
 
 		var chunkStats metadata.EncodedStatistics
 		chunkStats, err = w.getChunkStatistics()

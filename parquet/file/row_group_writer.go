@@ -241,15 +241,22 @@ func (rg *rowGroupWriter) Close() error {
 			return err
 		}
 
+		// close every column writer so each releases its buffers,
+		// even after an earlier one has failed
 		for _, wr := range rg.columnWriters {
 			if wr != nil {
 				if err := wr.Close(); err != nil {
-					rg.closeErr = err
-					return err
+					if rg.closeErr == nil {
+						rg.closeErr = err
+					}
+					continue
 				}
 				rg.bytesWritten += wr.TotalBytesWritten()
 				rg.compressedBytesWritten += wr.TotalCompressedBytes()
 			}
+		}
+		if rg.closeErr != nil {
+			return rg.closeErr
 		}
 
 		rg.columnWriters = nil

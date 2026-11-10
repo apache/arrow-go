@@ -19,7 +19,11 @@ package pqarrow_test
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"math"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -351,4 +355,83 @@ func TestWriteOnClosedFileWriter(t *testing.T) {
 	require.ErrorContains(t, writer.Write(nil), "already closed")
 	require.ErrorContains(t, writer.WriteColumnChunked(nil, 0, 0), "already closed")
 	require.ErrorContains(t, writer.WriteColumnData(nil), "already closed")
+}
+
+type byteLimitSink struct {
+	buf    bytes.Buffer
+	limit  int
+	closed bool
+}
+
+func (s *byteLimitSink) Close() error {
+	s.closed = true
+	return nil
+}
+
+var errSinkFull = errors.New("sink full")
+
+func (s *byteLimitSink) Write(p []byte) (int, error) {
+	if room := s.limit - s.buf.Len(); len(p) > room {
+		s.buf.Write(p[:max(room, 0)])
+		return max(room, 0), errSinkFull
+	}
+	return s.buf.Write(p)
+}
+
+func TestFileWriterCloseReleasesBuffersWhenSinkFails(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "num", Nullable: true, Type: arrow.PrimitiveTypes.Int8},
+		{Name: "dict", Nullable: true, Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}},
+		{Name: "str", Nullable: true, Type: arrow.BinaryTypes.String},
+	}, nil)
+
+	buildRecord := func(mem memory.Allocator) arrow.RecordBatch {
+		bldr := array.NewRecordBuilder(mem, schema)
+		defer bldr.Release()
+		num := bldr.Field(0).(*array.Int8Builder)
+		dict := bldr.Field(1).(*array.BinaryDictionaryBuilder)
+		str := bldr.Field(2).(*array.StringBuilder)
+		for i := 0; i < 1000; i++ {
+			require.NoError(t, dict.AppendString("value-"+strconv.Itoa(i%10)))
+			str.Append("row-" + strconv.Itoa(i))
+			num.Append(int8(i))
+		}
+		return bldr.NewRecordBatch()
+	}
+
+	writeFile := func(t *testing.T, mem memory.Allocator, sink io.Writer, buffered bool) error {
+		rec := buildRecord(mem)
+		defer rec.Release()
+
+		writer, err := pqarrow.NewFileWriter(schema, sink,
+			parquet.NewWriterProperties(parquet.WithAllocator(mem), parquet.WithDictionaryFor("str", false)),
+			pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem), pqarrow.WithStoreSchema()))
+		require.NoError(t, err)
+
+		if buffered {
+			err = writer.WriteBuffered(rec)
+		} else {
+			err = writer.Write(rec)
+		}
+		return errors.Join(err, writer.Close())
+	}
+
+	for _, buffered := range []bool{false, true} {
+		t.Run(fmt.Sprintf("buffered=%t", buffered), func(t *testing.T) {
+			var full bytes.Buffer
+			require.NoError(t, writeFile(t, memory.DefaultAllocator, &full, buffered))
+
+			for limit := 4; limit < full.Len(); limit++ {
+				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+				sink := &byteLimitSink{limit: limit}
+				err := writeFile(t, mem, sink, buffered)
+				require.ErrorIs(t, err, errSinkFull, "limit %d", limit)
+				require.True(t, sink.closed, "sink not closed, limit %d", limit)
+				mem.AssertSize(t, 0)
+				if t.Failed() {
+					t.Fatalf("buffers leaked when the sink fails after %d of %d bytes", limit, full.Len())
+				}
+			}
+		})
+	}
 }
