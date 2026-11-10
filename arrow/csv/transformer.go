@@ -252,9 +252,15 @@ func (w *Writer) transformColToStringArr(typ arrow.DataType, col arrow.Array, st
 				list.Release()
 				return nil, err
 			}
-			writer.Write(values)
-			writer.Flush()
-			b.Truncate(b.Len() - 1)
+			if len(values) == 1 && values[0] == "" {
+				// encoding/csv writes a lone empty field as an empty line,
+				// which would read back as an empty list.
+				b.WriteString(`""`)
+			} else {
+				writer.Write(values)
+				writer.Flush()
+				b.Truncate(b.Len() - 1)
+			}
 			b.Write([]byte{'}'})
 			res[i] = b.String()
 			list.Release()
