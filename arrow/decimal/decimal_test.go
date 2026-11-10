@@ -460,6 +460,61 @@ func TestDecimalRescale(t *testing.T) {
 	// A value that genuinely overflows Decimal64 still reports data loss.
 	_, err = decimal.Decimal64(5_000_000_000_000_000_000).Rescale(0, 1)
 	assert.ErrorContains(t, err, "rescale data loss")
+
+	for _, tc := range []struct {
+		bits               int
+		n                  int64
+		oldScale, newScale int32
+		want               int64
+		wantErr            bool
+	}{
+		{64, 1, 0, 10, 10_000_000_000, false},
+		{64, -1, 0, 18, -1_000_000_000_000_000_000, false},
+		{64, 10_000_000_000, 10, 0, 1, false},
+		{64, -1_000_000_000_000_000_000, 18, 0, -1, false},
+		{32, 2, 0, 9, 2_000_000_000, false},
+		{32, -3, 0, 9, 0, true},
+		{64, -9, 0, 18, -9_000_000_000_000_000_000, false},
+		{64, 10, 0, 18, 0, true},
+		{32, 214748364, 0, 1, 2147483640, false},
+		{32, 214748365, 0, 1, 0, true},
+		{64, -922337203685477580, 0, 1, -9223372036854775800, false},
+		{64, -922337203685477581, 0, 1, 0, true},
+		{32, 1, 0, 10, 0, true},
+		{64, -1, 19, 0, 0, true},
+		{32, 1410065408, 10, 0, 0, true},
+		{32, 0, 32, 0, 0, false},
+		{64, 0, math.MinInt32, math.MaxInt32, 0, false},
+		{32, math.MinInt32, 5, 5, math.MinInt32, false},
+		{32, math.MinInt32, 1, 0, 0, true},
+		{64, math.MinInt64, 0, 1, 0, true},
+		{32, 10, math.MinInt32, math.MaxInt32, 0, true},
+		{64, 10, math.MaxInt32, math.MinInt32, 0, true},
+		{32, 1, -1, math.MaxInt32, 0, true},
+		{32, 111, math.MaxInt32 - 2, math.MaxInt32, 11100, false},
+		{64, 11100, math.MinInt32 + 2, math.MinInt32, 111, false},
+		{64, -555, 2, 1, 0, true},
+	} {
+		t.Run(fmt.Sprintf("decimal%d_%d_%d_%d", tc.bits, tc.n, tc.oldScale, tc.newScale), func(t *testing.T) {
+			var got int64
+			var err error
+			if tc.bits == 32 {
+				var out decimal.Decimal32
+				out, err = decimal.Decimal32(tc.n).Rescale(tc.oldScale, tc.newScale)
+				got = int64(out)
+			} else {
+				var out decimal.Decimal64
+				out, err = decimal.Decimal64(tc.n).Rescale(tc.oldScale, tc.newScale)
+				got = int64(out)
+			}
+			if tc.wantErr {
+				assert.EqualError(t, err, "rescale data loss")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
 
 func TestDecimalIncreaseScale(t *testing.T) {
@@ -500,6 +555,8 @@ func TestDecimalReduceScale(t *testing.T) {
 		assert.Equal(t, decimal.Decimal64(tt.expected).Negate(),
 			decimal.Decimal64(tt.value).Negate().ReduceScaleBy(tt.scale, tt.round), "decimal64")
 	}
+
+	assert.Equal(t, decimal.Decimal64(1), decimal.Decimal64(10_000_000_000).ReduceScaleBy(10, false))
 }
 
 func TestDecimalBasics(t *testing.T) {

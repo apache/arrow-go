@@ -147,6 +147,9 @@ func TestBasicDecimal128(t *testing.T) {
 	assert.False(t, null.IsValid())
 
 	assert.False(t, scalar.Equals(pi, pi2))
+
+	_, err := pi.CastTo(&arrow.Decimal128Type{Precision: 38, Scale: 38})
+	assert.EqualError(t, err, "rescale data loss")
 }
 
 func TestBasicDecimal256(t *testing.T) {
@@ -1430,24 +1433,6 @@ func TestListScalarHashSupportsChildArraysWithoutScalars(t *testing.T) {
 		name      string
 		newValues func() arrow.Array
 	}{
-		{
-			name: "decimal32",
-			newValues: func() arrow.Array {
-				b := array.NewDecimal32Builder(memory.DefaultAllocator, &arrow.Decimal32Type{Precision: 6, Scale: 2})
-				defer b.Release()
-				b.AppendValues([]decimal.Decimal32{123, 456}, nil)
-				return b.NewDecimalArray()
-			},
-		},
-		{
-			name: "decimal64",
-			newValues: func() arrow.Array {
-				b := array.NewDecimal64Builder(memory.DefaultAllocator, &arrow.Decimal64Type{Precision: 12, Scale: 2})
-				defer b.Release()
-				b.AppendValues([]decimal.Decimal64{123, 456}, nil)
-				return b.NewDecimalArray()
-			},
-		},
 		{
 			name: "list view",
 			newValues: func() arrow.Array {

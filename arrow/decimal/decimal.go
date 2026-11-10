@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"math/bits"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -402,7 +401,7 @@ func reduceScale[T interface {
 		return n
 	}
 
-	divisor := T(intPow(10, reduce))
+	divisor := T(intPow(10, int64(reduce)))
 	if !round {
 		return n / divisor
 	}
@@ -434,65 +433,34 @@ func (n Decimal64) ReduceScaleBy(reduce int32, round bool) Decimal64 {
 	return reduceScale(n, reduce, round)
 }
 
-//lint:ignore U1000 function is being used, staticcheck seems to not follow generics
-func (n Decimal32) rescaleWouldCauseDataLoss(deltaScale int32, multiplier Decimal32) (out Decimal32, loss bool) {
-	if deltaScale < 0 {
-		debug.Assert(multiplier != 0, "multiplier must not be zero")
-		quo, remainder := bits.Div32(0, uint32(n), uint32(multiplier))
-		return Decimal32(quo), remainder != 0
-	}
-
-	overflow, result := bits.Mul32(uint32(n), uint32(multiplier))
-	if overflow != 0 {
-		return Decimal32(result), true
-	}
-
-	out = Decimal32(result)
-	return out, out < n
-}
-
-//lint:ignore U1000 function is being used, staticcheck seems to not follow generics
-func (n Decimal64) rescaleWouldCauseDataLoss(deltaScale int32, multiplier Decimal64) (out Decimal64, loss bool) {
-	if deltaScale < 0 {
-		debug.Assert(multiplier != 0, "multiplier must not be zero")
-		quo, remainder := bits.Div64(0, uint64(n), uint64(multiplier))
-		return Decimal64(quo), remainder != 0
-	}
-
-	overflow, result := bits.Mul64(uint64(n), uint64(multiplier))
-	if overflow != 0 {
-		return Decimal64(result), true
-	}
-
-	out = Decimal64(result)
-	return out, out < n
-}
-
-func rescale[T interface {
-	Decimal32 | Decimal64
-	rescaleWouldCauseDataLoss(int32, T) (T, bool)
-	Sign() int
-}](n T, originalScale, newScale int32) (out T, err error) {
-	if originalScale == newScale {
+func rescale[T Decimal32 | Decimal64](n T, originalScale, newScale int32) (T, error) {
+	if originalScale == newScale || n == 0 {
 		return n, nil
 	}
 
-	deltaScale := newScale - originalScale
-	absDeltaScale := int32(math.Abs(float64(deltaScale)))
-
-	sign := n.Sign()
-	if n < 0 {
-		n = -n
+	deltaScale := int64(newScale) - int64(originalScale)
+	absDeltaScale := deltaScale
+	if absDeltaScale < 0 {
+		absDeltaScale = -absDeltaScale
+	}
+	// Scaling any nonzero value by 10^(MaxPrecision+1) or more overflows or drops every digit.
+	if absDeltaScale > int64(MaxPrecision[T]()) {
+		return 0, errors.New("rescale data loss")
 	}
 
 	multiplier := T(intPow(10, absDeltaScale))
-	var wouldHaveLoss bool
-	out, wouldHaveLoss = n.rescaleWouldCauseDataLoss(deltaScale, multiplier)
-	if wouldHaveLoss {
-		err = errors.New("rescale data loss")
+	if deltaScale < 0 {
+		if n%multiplier != 0 {
+			return 0, errors.New("rescale data loss")
+		}
+		return n / multiplier, nil
 	}
-	out *= T(sign)
-	return
+
+	maxValue := T(int64(math.MaxInt64) >> (64 - 8*unsafe.Sizeof(n)))
+	if n > maxValue/multiplier || n < (-maxValue-1)/multiplier {
+		return 0, errors.New("rescale data loss")
+	}
+	return n * multiplier, nil
 }
 
 func (n Decimal32) Rescale(originalScale, newScale int32) (out Decimal32, err error) {
