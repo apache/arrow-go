@@ -37,6 +37,16 @@ const (
 	// on the best before the per-vector search stops looking.
 	alpSamplerSamples    = 256
 	alpPresetGiveUpAfter = 4
+
+	// While the shortlist does no better than PLAIN, a full search checks
+	// whether the data has changed scale. It first searches alpResearchProbeSamples
+	// of the sampled values and stops there if nothing beats PLAIN. After a
+	// search that finds nothing better, the encoder skips alpMinResearchWait
+	// such vectors before the next, and the wait doubles up to
+	// alpMaxResearchWait, so data ALP can't compress pays for few searches.
+	alpResearchProbeSamples = 32
+	alpMinResearchWait      = 32
+	alpMaxResearchWait      = 512
 )
 
 // alpEncodingParams is the scaling one vector is encoded with: ALP multiplies
@@ -46,11 +56,18 @@ type alpEncodingParams struct {
 	factor   int
 }
 
-// alpSample appends up to alpSamplerSamples evenly spaced values to out.
+// alpSample appends up to alpSamplerSamples values to out, one from each
+// stride-wide block. The position within the block shifts from one block to
+// the next, so data that repeats with the stride's period, such as a NaN at
+// every 128th value, can't fill the whole sample.
 func alpSample[T alpFloat](values []T, out []T) []T {
 	stride := max(1, (len(values)+alpSamplerSamples-1)/alpSamplerSamples)
-	for i := 0; i < len(values); i += stride {
-		out = append(out, values[i])
+	for i, block := 0, 0; block < len(values); i, block = i+1, block+stride {
+		idx := block + i%stride
+		if idx >= len(values) {
+			idx = block
+		}
+		out = append(out, values[idx])
 	}
 	return out
 }
@@ -102,9 +119,11 @@ func alpBetterParams(a alpEncodingParams, aBits int64, b alpEncodingParams, bBit
 }
 
 // alpFindBestParams returns the cheapest scaling over every exponent and factor
-// pair. The factor never exceeds the exponent, because scaling by a net power
-// below one would move the decimal point the wrong way.
-func alpFindBestParams[T alpFloat](values []T) alpEncodingParams {
+// pair, and its estimated size in bits. The factor never exceeds the exponent,
+// because scaling by a net power below one would move the decimal point the
+// wrong way. The size is math.MaxInt64 when no scaling encodes enough values
+// to compare.
+func alpFindBestParams[T alpFloat](values []T) (alpEncodingParams, int64) {
 	maxExponent := alpNumExponents[T]() - 1
 	// The fallback treats the values as integers: an exponent and a factor of
 	// equal size cancel, so whatever is already integral packs and the rest
@@ -126,14 +145,14 @@ func alpFindBestParams[T alpFloat](values []T) alpEncodingParams {
 			}
 		}
 	}
-	return best
+	return best, bestBits
 }
 
 // alpFindBestParamsWithPresets returns whichever shortlisted scaling is cheapest
-// for the given values. The shortlist is ordered by how often each scaling won
-// during sampling, so the search stops once alpPresetGiveUpAfter of them in a
-// row fail to improve on the best.
-func alpFindBestParamsWithPresets[T alpFloat](values []T, presets []alpEncodingParams) alpEncodingParams {
+// for the given values, and its estimated size in bits. The shortlist is
+// ordered by how often each scaling won during sampling, so the search stops
+// once alpPresetGiveUpAfter of them in a row fail to improve on the best.
+func alpFindBestParamsWithPresets[T alpFloat](values []T, presets []alpEncodingParams) (alpEncodingParams, int64) {
 	best, bestBits := presets[0], int64(math.MaxInt64)
 	notImproved := 0
 
@@ -151,5 +170,5 @@ func alpFindBestParamsWithPresets[T alpFloat](values []T, presets []alpEncodingP
 		best, bestBits = p, sizeBits
 		notImproved = 0
 	}
-	return best
+	return best, bestBits
 }

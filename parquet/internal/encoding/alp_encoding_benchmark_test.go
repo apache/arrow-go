@@ -38,12 +38,17 @@ var alpBenchmarkCases = []struct {
 	{"all exceptions", 1},
 }
 
+// alpBenchmarkValues returns values at the requested exception rate. Every
+// other value is computed the way ALP decodes k with exponent 2 and factor 0,
+// in the value's own precision, so a scaling exists that stores it without an
+// exception. The sampled search occasionally picks an equivalent scaling that
+// misses a few, about 2 in 65536 doubles. NaN never encodes.
 func alpBenchmarkValues[T float32 | float64](size, exceptionInterval int) []T {
 	values := make([]T, size)
 	for i := range values {
-		values[i] = T(i%100000) / 1000
+		values[i] = T(i%10000) * T(1e0) * T(1e-2)
 		if exceptionInterval != 0 && i%exceptionInterval == 0 {
-			values[i] = T(math.Pi) * T(i+1)
+			values[i] = T(math.NaN())
 		}
 	}
 	return values

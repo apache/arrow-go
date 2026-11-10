@@ -56,7 +56,7 @@ func assertCheapestParams[T float32 | float64](t *testing.T, values []T, got alp
 
 func TestALPFindBestFloat32Params(t *testing.T) {
 	values := []float32{1.23, 4.56, 7.89, 10.11, 12.13}
-	params := alpFindBestParams(values)
+	params, _ := alpFindBestParams(values)
 	assert.Equal(t, 0, alpCountTestExceptions(values, params), "two decimal places always encode")
 	assertCheapestParams(t, values, params)
 	assert.Equal(t, 2, params.exponent-params.factor, "the values scale by 10^2")
@@ -68,7 +68,7 @@ func TestALPFindBestFloat32Params(t *testing.T) {
 // lose the last bit.
 func TestALPFindBestFloat64Params(t *testing.T) {
 	values := []float64{1.23, 4.56, 7.89, 10.11, 12.13}
-	params := alpFindBestParams(values)
+	params, _ := alpFindBestParams(values)
 	assert.Equal(t, 0, alpCountTestExceptions(values, params))
 	assertCheapestParams(t, values, params)
 	assert.Equal(t, 2, params.exponent-params.factor, "the values scale by 10^2")
@@ -79,7 +79,7 @@ func TestALPFindBestParamsWithExceptions(t *testing.T) {
 		1.23, 4.56, float32(math.Inf(1)), 7.89,
 		alpNegZero[float32](), 10.11,
 	}
-	params := alpFindBestParams(values)
+	params, _ := alpFindBestParams(values)
 	assert.Equal(t, 2, alpCountTestExceptions(values, params),
 		"the infinity and the negative zero are the only exceptions")
 	assertCheapestParams(t, values, params)
@@ -94,7 +94,7 @@ func TestALPFindBestParamsPrefersNarrowPacking(t *testing.T) {
 	narrow, _ := alpEstimateSizeBits(values, 14, 12)
 	assert.Less(t, narrow, wide)
 
-	params := alpFindBestParams(values)
+	params, _ := alpFindBestParams(values)
 	assert.Equal(t, 0, alpCountTestExceptions(values, params))
 	assertCheapestParams(t, values, params)
 }
@@ -102,7 +102,7 @@ func TestALPFindBestParamsPrefersNarrowPacking(t *testing.T) {
 func TestALPFindBestFloat32ParamsWithPresets(t *testing.T) {
 	values := []float32{1.23, 4.56, 7.89}
 	presets := []alpEncodingParams{{3, 0}, {2, 0}, {1, 0}}
-	params := alpFindBestParamsWithPresets(values, presets)
+	params, _ := alpFindBestParamsWithPresets(values, presets)
 	assert.Equal(t, 0, alpCountTestExceptions(values, params))
 	// 10^3 encodes the values too, but three digits wider than it has to.
 	assert.Equal(t, 2, params.exponent)
@@ -112,7 +112,7 @@ func TestALPFindBestFloat32ParamsWithPresets(t *testing.T) {
 func TestALPFindBestFloat64ParamsWithPresets(t *testing.T) {
 	values := []float64{1.23, 4.56, 7.89}
 	presets := []alpEncodingParams{{2, 0}, {14, 12}, {16, 12}}
-	params := alpFindBestParamsWithPresets(values, presets)
+	params, _ := alpFindBestParamsWithPresets(values, presets)
 	assert.Equal(t, 0, alpCountTestExceptions(values, params))
 	assert.Equal(t, 14, params.exponent)
 	assert.Equal(t, 12, params.factor)
@@ -126,13 +126,13 @@ func TestALPFindBestParamsWithPresetsStopsImproving(t *testing.T) {
 	presets := []alpEncodingParams{{2, 0}, {3, 0}, {4, 0}, {5, 0}, {6, 0}}
 	require.GreaterOrEqual(t, len(presets), alpPresetGiveUpAfter+1)
 
-	params := alpFindBestParamsWithPresets(values, presets)
+	params, _ := alpFindBestParamsWithPresets(values, presets)
 	assert.Equal(t, 2, params.exponent)
 }
 
 func TestALPFindBestParamsIntegerData(t *testing.T) {
 	values := []float32{1.0, 2.0, 3.0, 100.0, 200.0}
-	params := alpFindBestParams(values)
+	params, _ := alpFindBestParams(values)
 	assert.Equal(t, 0, alpCountTestExceptions(values, params))
 	assert.Equal(t, params.exponent, params.factor,
 		"integers need no scaling, so the exponent and the factor cancel")
@@ -146,7 +146,7 @@ func TestALPFindBestParamsAllExceptions(t *testing.T) {
 	negZero := alpNegZero[float32]()
 	values := []float32{inf, float32(math.Inf(-1)), negZero, inf}
 
-	params := alpFindBestParams(values)
+	params, _ := alpFindBestParams(values)
 	assert.Equal(t, len(values), alpCountTestExceptions(values, params))
 	assert.Equal(t, alpNumExponents[float32]()-1, params.exponent)
 	assert.Equal(t, params.exponent, params.factor)
@@ -171,10 +171,37 @@ func TestALPSample(t *testing.T) {
 	sample := alpSample(values, nil)
 	assert.Len(t, sample, alpSamplerSamples)
 	assert.Equal(t, float64(0), sample[0])
-	assert.Equal(t, float64(4), sample[1], "the stride spreads the sample over the vector")
+	assert.Equal(t, float64(5), sample[1], "one value from each 4-value block, shifted one place per block")
+	assert.Equal(t, float64(4*4+0), sample[4], "the shift wraps around within the block")
 
 	// Fewer values than the sample size means every value is sampled.
 	short := alpSample(values[:10], nil)
 	assert.Equal(t, values[:10], short)
 	assert.Empty(t, alpSample(values[:0], nil))
+}
+
+// TestALPSamplePeriodicData covers data that repeats with the sampling stride.
+// Sampling the same position of every block would see only the NaNs and pick
+// a scaling that turns every value into an exception.
+func TestALPSamplePeriodicData(t *testing.T) {
+	const n = 32768 // a stride of 128
+	values := make([]float64, n)
+	for i := range values {
+		values[i] = float64(i%1000) / 100
+		if i%128 == 0 {
+			values[i] = math.NaN()
+		}
+	}
+
+	sample := alpSample(values, nil)
+	nans := 0
+	for _, v := range sample {
+		if math.IsNaN(v) {
+			nans++
+		}
+	}
+	assert.Equal(t, 2, nans, "only blocks where the shift lands on 0 sample a NaN")
+
+	params, _ := alpFindBestParams(sample)
+	assert.Equal(t, 2, params.exponent-params.factor, "two decimal places, got %+v", params)
 }

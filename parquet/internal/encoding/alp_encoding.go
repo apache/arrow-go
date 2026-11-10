@@ -168,6 +168,13 @@ type alpEncoder[T alpFloat] struct {
 	vectorsProcessed int
 	cachedPresets    []alpEncodingParams
 	presetCounts     map[alpEncodingParams]int
+
+	// While the shortlist does no better than PLAIN, the encoder runs a full
+	// search in case the data has changed scale. After a search that finds
+	// nothing better it skips the next researchWait such vectors, and the
+	// wait doubles each time.
+	researchWait int
+	researchSkip int
 }
 
 func newALPEncoder[T alpFloat](e format.Encoding, descr *schema.Column, mem memory.Allocator) *alpEncoder[T] {
@@ -175,6 +182,7 @@ func newALPEncoder[T alpFloat](e format.Encoding, descr *schema.Column, mem memo
 		encoder:       newEncoderBase(e, descr, mem),
 		sampleScratch: make([]T, 0, alpSamplerSamples),
 		presetCounts:  make(map[alpEncodingParams]int),
+		researchWait:  alpMinResearchWait,
 	}
 	enc.setVectorSize(alpDefaultLogVectorSize)
 	return enc
@@ -237,12 +245,55 @@ func (enc *alpEncoder[T]) findParams(values []T) alpEncodingParams {
 	sample := alpSample(values, enc.sampleScratch[:0])
 
 	if len(enc.cachedPresets) > 0 {
-		return alpFindBestParamsWithPresets(sample, enc.cachedPresets)
+		params, sizeBits := alpFindBestParamsWithPresets(sample, enc.cachedPresets)
+		if full, ok := enc.research(sample, sizeBits); ok {
+			return full
+		}
+		return params
 	}
 
-	params := alpFindBestParams(sample)
+	params, _ := alpFindBestParams(sample)
 	enc.presetCounts[params]++
 	return params
+}
+
+// research checks whether a full search beats a shortlist that does no better
+// than PLAIN. The shortlist comes from the first vectors of the chunk, so a
+// later change of scale, such as integers giving way to prices, can leave every
+// shortlisted scaling turning most values into exceptions. When the full search
+// wins, sampling starts over with its result as the first winner.
+func (enc *alpEncoder[T]) research(sample []T, presetBits int64) (alpEncodingParams, bool) {
+	plainBitsPerValue := int64(8 * alpEncodedBytes[T]())
+	plainBits := int64(len(sample)) * plainBitsPerValue
+	if presetBits < plainBits {
+		return alpEncodingParams{}, false
+	}
+	if enc.researchSkip > 0 {
+		enc.researchSkip--
+		return alpEncodingParams{}, false
+	}
+
+	// Data no scaling compresses fails a search over a few values as surely as
+	// over the whole sample, at a fraction of the cost.
+	probe := sample[:min(len(sample), alpResearchProbeSamples)]
+	_, probeBits := alpFindBestParams(probe)
+	full, fullBits := alpEncodingParams{}, int64(math.MaxInt64)
+	if probeBits < int64(len(probe))*plainBitsPerValue {
+		full, fullBits = alpFindBestParams(sample)
+	}
+	if fullBits >= presetBits || fullBits >= plainBits {
+		// Nothing compresses this data, so search less often.
+		enc.researchSkip = enc.researchWait
+		enc.researchWait = min(2*enc.researchWait, alpMaxResearchWait)
+		return alpEncodingParams{}, false
+	}
+
+	enc.researchWait = alpMinResearchWait
+	enc.cachedPresets = nil
+	clear(enc.presetCounts)
+	enc.vectorsProcessed = 0
+	enc.presetCounts[full]++
+	return full, true
 }
 
 func (enc *alpEncoder[T]) encodeVector(values []T) {
@@ -406,6 +457,8 @@ func (enc *alpEncoder[T]) Reset() {
 	enc.vectorsProcessed = 0
 	enc.cachedPresets = nil
 	clear(enc.presetCounts)
+	enc.researchWait = alpMinResearchWait
+	enc.researchSkip = 0
 }
 
 // alpDecoder decodes one ALP vector at a time and keeps it across partial reads.

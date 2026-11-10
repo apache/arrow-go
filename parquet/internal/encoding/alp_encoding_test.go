@@ -1138,6 +1138,45 @@ func TestALPEncoderKeepsPresetsAcrossPages(t *testing.T) {
 	assert.Equal(t, first.Bytes(), second.Bytes())
 }
 
+// A shortlist built from integers turns prices with four decimal places into
+// exceptions, so the encoder has to search again once the data changes scale.
+func TestALPEncoderResearchesAfterScaleChange(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	enc := newALPEncoder[float64](format.Encoding_ALP, nil, mem)
+	defer enc.Release()
+
+	integers := make([]float64, alpSamplerVectors*alpDefaultVectorSize)
+	for i := range integers {
+		integers[i] = float64(i % 1000)
+	}
+	enc.Put(integers)
+	first, err := enc.FlushValues()
+	require.NoError(t, err)
+	first.Release()
+	require.NotNil(t, enc.cachedPresets)
+
+	prices := make([]float64, alpDefaultVectorSize)
+	for i := range prices {
+		prices[i] = 100 + float64(i*37%10000)/10000
+	}
+	enc.Put(prices)
+	page, err := enc.FlushValues()
+	require.NoError(t, err)
+	defer page.Release()
+
+	// Four decimal places of a price below 101 pack into 20 bits, about 2.5 KiB
+	// per vector. As exceptions they would take more than PLAIN's 8 KiB.
+	assert.Less(t, page.Len(), 3*1024, "PLAIN would take %d bytes", 8*len(prices))
+
+	got := make([]float64, len(prices))
+	dec := newALPDecoder[float64](format.Encoding_ALP, nil)
+	require.NoError(t, dec.SetData(len(prices), page.Bytes()))
+	_, err = dec.Decode(got)
+	require.NoError(t, err)
+	assert.Equal(t, prices, got)
+}
+
 // Reset returns the encoder to its initial state, shortlist included.
 func TestALPEncoderResetClearsPresets(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
