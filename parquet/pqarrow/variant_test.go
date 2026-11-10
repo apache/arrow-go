@@ -301,7 +301,16 @@ func (s *ShreddedVariantTestSuite) TestErrorCases() {
 			s.Run(fmt.Sprint(c.Number), func() {
 				switch c.Number {
 				case 127:
-					s.T().Skip("Skipping case 127: test says uint32 should error, we just upcast to int64")
+					// INTEGER(32,false) is not a shredded variant type. Reading
+					// fails while building the extension type, before any value
+					// is reconstructed.
+					file, err := os.Open(filepath.Join(s.dirPrefix, c.ParquetFile))
+					s.Require().NoError(err)
+					defer file.Close()
+					_, err = pqarrow.ReadTable(context.Background(), file, nil, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+					s.Require().Error(err)
+					s.ErrorContains(err, "unsigned typed_value")
+					return
 				case 137:
 					s.T().Skip("Skipping case 137: test says flba(4) should error, we just treat it as a binary variant")
 				}

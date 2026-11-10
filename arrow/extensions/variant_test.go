@@ -111,6 +111,44 @@ func TestVariantExtensionType(t *testing.T) {
 			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
 			arrow.Field{Name: "typed_value", Type: extensions.NewOpaqueType(nil, "null", "test"), Nullable: true}),
 			"typed_value field has invalid storage type"},
+		{arrow.StructOf(
+			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
+			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+			arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Uint8, Nullable: true}),
+			"unsigned typed_value uint8 is not a valid shredded variant type"},
+		{arrow.StructOf(
+			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
+			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+			arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Uint16, Nullable: true}),
+			"unsigned typed_value uint16 is not a valid shredded variant type"},
+		{arrow.StructOf(
+			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
+			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+			arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Uint32, Nullable: true}),
+			"unsigned typed_value uint32 is not a valid shredded variant type"},
+		{arrow.StructOf(
+			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
+			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+			arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Uint64, Nullable: true}),
+			"unsigned typed_value uint64 is not a valid shredded variant type"},
+		{arrow.StructOf(
+			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
+			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+			arrow.Field{Name: "typed_value", Type: arrow.StructOf(
+				arrow.Field{Name: "n", Type: arrow.StructOf(
+					arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+					arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Uint32, Nullable: true},
+				)},
+			), Nullable: true}),
+			"typed_value field must be a valid nested type"},
+		{arrow.StructOf(
+			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
+			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+			arrow.Field{Name: "typed_value", Type: arrow.ListOfField(arrow.Field{Name: "element", Type: arrow.StructOf(
+				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Uint32, Nullable: true},
+			), Nullable: false}), Nullable: true}),
+			"typed_value field must be a valid nested type"},
 	}
 
 	for _, tt := range tests {
@@ -1199,7 +1237,7 @@ func TestManyTypesShredded(t *testing.T) {
 			)},
 			arrow.Field{Name: "uint8", Type: arrow.StructOf(
 				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
-				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Uint8, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Int16, Nullable: true},
 			)},
 			arrow.Field{Name: "int16", Type: arrow.StructOf(
 				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
@@ -1207,7 +1245,7 @@ func TestManyTypesShredded(t *testing.T) {
 			)},
 			arrow.Field{Name: "uint16", Type: arrow.StructOf(
 				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
-				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Uint16, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
 			)},
 			arrow.Field{Name: "int32", Type: arrow.StructOf(
 				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
@@ -1215,7 +1253,7 @@ func TestManyTypesShredded(t *testing.T) {
 			)},
 			arrow.Field{Name: "uint32", Type: arrow.StructOf(
 				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
-				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Uint32, Nullable: true},
+				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
 			)},
 			arrow.Field{Name: "bytes", Type: arrow.StructOf(
 				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},

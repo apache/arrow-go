@@ -148,8 +148,10 @@ func NewShreddedVariantType(dt arrow.DataType) *VariantType {
 //  3. Must satisfy exactly one of the following:
 //     a. MUST have non-nullable field named "value" that is binary/largebinary/binary_view
 //     b. MUST have an nullable field named "value" that is binary/largebinary/binary_view
-//     and another nullable field named "typed_value" that is either a primitive type or
-//     a list/large_list/list_view or struct which also satisfies the following requirements:
+//     and another nullable field named "typed_value" that is either a primitive type
+//     (other than an unsigned integer) or a list/large_list/list_view or struct which
+//     also satisfies the following requirements. Unsigned integers are not valid
+//     shredded types.
 //     i. The elements must be NON-NULLABLE
 //     ii. There must either be a single NON-NULLABLE field named "value" which is
 //     binary/largebinary/binary_view or have an nullable "value" field and an nullable
@@ -226,6 +228,9 @@ func NewVariantType(storage arrow.DataType) (*VariantType, error) {
 	}
 	if dt.ID() == arrow.NULL {
 		return nil, fmt.Errorf("%w: typed_value field must not be null type", arrow.ErrInvalid)
+	}
+	if isUnsignedInteger(dt) {
+		return nil, fmt.Errorf("%w: unsigned typed_value %s is not a valid shredded variant type", arrow.ErrInvalid, dt)
 	}
 
 	if nt, ok := dt.(arrow.NestedType); ok {
@@ -347,6 +352,19 @@ func isNullType(dt arrow.DataType) bool {
 	return st == nil || st.ID() == arrow.NULL
 }
 
+func isUnsignedInteger(dt arrow.DataType) bool {
+	st := storageType(dt)
+	if st == nil {
+		return false
+	}
+	switch st.ID() {
+	case arrow.UINT8, arrow.UINT16, arrow.UINT32, arrow.UINT64:
+		return true
+	default:
+		return false
+	}
+}
+
 func validStruct(s *arrow.StructType) bool {
 	switch s.NumFields() {
 	case 1:
@@ -354,7 +372,7 @@ func validStruct(s *arrow.StructType) bool {
 		if f.Name == "value" {
 			return isBinary(f.Type)
 		}
-		return f.Name == "typed_value" && !isNullType(f.Type)
+		return f.Name == "typed_value" && !isNullType(f.Type) && !isUnsignedInteger(f.Type)
 	case 2:
 		valField, ok := s.FieldByName("value")
 		if !ok || !valField.Nullable || !isBinary(valField.Type) {
@@ -370,7 +388,7 @@ func validStruct(s *arrow.StructType) bool {
 			return validNestedType(nt)
 		}
 
-		return !isNullType(typedField.Type)
+		return !isNullType(typedField.Type) && !isUnsignedInteger(typedField.Type)
 	default:
 		return false
 	}
@@ -729,16 +747,10 @@ func createPrimitiveVariantReader(arr arrow.Array) (typedValReader, error) {
 		return asVariantReader[bool]{typedVal: a}, nil
 	case *array.Int8:
 		return asVariantReader[int8]{typedVal: a}, nil
-	case *array.Uint8:
-		return asVariantReader[uint8]{typedVal: a}, nil
 	case *array.Int16:
 		return asVariantReader[int16]{typedVal: a}, nil
-	case *array.Uint16:
-		return asVariantReader[uint16]{typedVal: a}, nil
 	case *array.Int32:
 		return asVariantReader[int32]{typedVal: a}, nil
-	case *array.Uint32:
-		return asVariantReader[uint32]{typedVal: a}, nil
 	case *array.Int64:
 		return asVariantReader[int64]{typedVal: a}, nil
 	case *array.Float32:
@@ -1278,11 +1290,11 @@ func variantTypeFromArrow(dt arrow.DataType) variant.Type {
 		return variant.Bool
 	case arrow.INT8:
 		return variant.Int8
-	case arrow.INT16, arrow.UINT8:
+	case arrow.INT16:
 		return variant.Int16
-	case arrow.INT32, arrow.UINT16:
+	case arrow.INT32:
 		return variant.Int32
-	case arrow.INT64, arrow.UINT32:
+	case arrow.INT64:
 		return variant.Int64
 	case arrow.FLOAT32:
 		return variant.Float
@@ -1499,7 +1511,7 @@ type typedBuilder[T arrow.ValueType] interface {
 	Append(T)
 }
 
-func appendToTarget[T int8 | uint8 | int16 | uint16 | int32 | uint32 | int64](bldr typedBuilder[T], v int64) bool {
+func appendToTarget[T int8 | int16 | int32 | int64](bldr typedBuilder[T], v int64) bool {
 	if int64(T(v)) == v {
 		bldr.Append(T(v))
 		return true
@@ -1508,7 +1520,7 @@ func appendToTarget[T int8 | uint8 | int16 | uint16 | int32 | uint32 | int64](bl
 	return false
 }
 
-func appendNumericToTarget[T int8 | uint8 | int16 | uint16 | int32 | uint32 | int64](bldr typedBuilder[T], v variant.Value) bool {
+func appendNumericToTarget[T int8 | int16 | int32 | int64](bldr typedBuilder[T], v variant.Value) bool {
 	switch val := v.Value().(type) {
 	case int8:
 		return appendToTarget(bldr, int64(val))
@@ -1542,23 +1554,11 @@ func (b *shreddedPrimitiveBuilder) tryTyped(v variant.Value) (residual []byte) {
 		if appendNumericToTarget(bldr, v) {
 			return nil
 		}
-	case *array.Uint8Builder:
-		if appendNumericToTarget(bldr, v) {
-			return nil
-		}
 	case *array.Int16Builder:
 		if appendNumericToTarget(bldr, v) {
 			return nil
 		}
-	case *array.Uint16Builder:
-		if appendNumericToTarget(bldr, v) {
-			return nil
-		}
 	case *array.Int32Builder:
-		if appendNumericToTarget(bldr, v) {
-			return nil
-		}
-	case *array.Uint32Builder:
 		if appendNumericToTarget(bldr, v) {
 			return nil
 		}
