@@ -200,7 +200,10 @@ func decimalFromString[T interface {
 		div := new(big.Int).Exp(big.NewInt(10), big.NewInt(min(-int64(scale), 20)), nil)
 		n = T(val.Quo(val, div).Int64())
 	} else {
-		var precInBits = uint(math.Round(float64(prec+scale+1)/math.Log10(2))) + 1
+		// Clamp before converting, since converting an out of range float to
+		// uint is implementation specific. SetPrec caps at big.MaxPrec anyway.
+		bitsNeeded := math.Round(float64(int64(prec)+int64(scale)+1) / math.Log10(2))
+		var precInBits = uint(min(max(bitsNeeded, 0), big.MaxPrec-1)) + 1
 
 		mulPow10(out.SetPrec(precInBits), int64(scale))
 		// Reject before rounding and converting, which would allocate as many
@@ -216,6 +219,8 @@ func decimalFromString[T interface {
 
 		var tmp big.Int
 		val, _ := out.Int(&tmp)
+		// This also rejects the signed minimum, which fits the storage but has
+		// more digits than the maximum precision allows.
 		if val.BitLen() >= int(nbits) {
 			return n, fmt.Errorf("bitlen too large for decimal%d", nbits)
 		}
