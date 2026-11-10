@@ -1045,6 +1045,13 @@ func TestArraySpan_FillFromScalarRoundTripsViews(t *testing.T) {
 				span.FillFromScalar(sc)
 				out := span.MakeArray()
 				require.NoError(t, array.ValidateFull(out), "index %d", i)
+				// Concatenate does not support dense unions.
+				if arr.DataType().ID() != arrow.DENSE_UNION {
+					concatenated, err := array.Concatenate([]arrow.Array{out, out, arr}, mem)
+					require.NoError(t, err, "index %d", i)
+					require.NoError(t, array.ValidateFull(concatenated), "index %d", i)
+					concatenated.Release()
+				}
 				expected := array.NewSlice(arr, int64(i), int64(i+1))
 				assert.Truef(t, array.Equal(expected, out), "index %d: expected %s, got %s", i, expected, out)
 
@@ -1060,6 +1067,35 @@ func TestArraySpan_FillFromScalarRoundTripsViews(t *testing.T) {
 				expected.Release()
 				out.Release()
 			}
+		})
+	}
+}
+
+func TestArraySpan_MakeDataInlineOnlyViews(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	for _, dt := range []arrow.DataType{arrow.BinaryTypes.StringView, arrow.BinaryTypes.BinaryView} {
+		t.Run(dt.String(), func(t *testing.T) {
+			inline, _, err := array.FromJSON(mem, dt, strings.NewReader(`["", "aGk=", null]`))
+			require.NoError(t, err)
+			defer inline.Release()
+			mixed, _, err := array.FromJSON(mem, dt, strings.NewReader(`["aGk=", "dGhpcyBpcyBieXRlcyBiZXlvbmQgdHdlbHZlIGNoYXJz"]`))
+			require.NoError(t, err)
+			defer mixed.Release()
+
+			var span exec.ArraySpan
+			span.SetMembers(inline.Data())
+			out := span.MakeArray()
+			defer out.Release()
+			require.NoError(t, array.ValidateFull(out))
+			assert.Truef(t, array.Equal(inline, out), "expected %s, got %s", inline, out)
+
+			concatenated, err := array.Concatenate([]arrow.Array{out, mixed, out}, mem)
+			require.NoError(t, err)
+			defer concatenated.Release()
+			require.NoError(t, array.ValidateFull(concatenated))
+			assert.Equal(t, 8, concatenated.Len())
 		})
 	}
 }

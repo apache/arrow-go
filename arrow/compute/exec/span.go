@@ -196,7 +196,14 @@ func (a *ArraySpan) MakeData() arrow.ArrayData {
 			children[i] = d
 		}
 	}
-	return array.NewData(a.Type, length, bufs[:a.NumBuffers()], children, nulls, off)
+	nbufs := a.NumBuffers()
+	if (dt.ID() == arrow.BINARY_VIEW || dt.ID() == arrow.STRING_VIEW) && bufs[2] == nil {
+		// A view array whose values are all inline has no data buffer, and
+		// consumers such as array.Concatenate expect each data buffer to be
+		// non-nil.
+		nbufs = 2
+	}
+	return array.NewData(a.Type, length, bufs[:nbufs], children, nulls, off)
 }
 
 // MakeArray is a convenience function for calling array.MakeFromData(a.MakeData())
