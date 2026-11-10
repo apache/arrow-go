@@ -493,6 +493,12 @@ func (dec *alpDecoder[T]) SetData(nvals int, data []byte) error {
 	dec.vectorOffsets = slices.Grow(dec.vectorOffsets[:0], dec.numVectors)[:dec.numVectors]
 	for i := range dec.vectorOffsets {
 		dec.vectorOffsets[i] = binary.LittleEndian.Uint32(data[alpHeaderSize+i*4:])
+		// decodeVector checks the end of each vector against the page, but an
+		// offset into the offset array itself would read offsets as a vector.
+		if int64(dec.vectorOffsets[i]) < int64(offsetArraySize) {
+			return fmt.Errorf("parquet: ALP vector %d offset %d points into the offset array",
+				i, dec.vectorOffsets[i])
+		}
 	}
 
 	// Vector offsets count from the start of the offset array, so keep the page

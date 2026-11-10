@@ -637,15 +637,25 @@ func TestALPDecoderTruncatedOffsetArray(t *testing.T) {
 // TestALPDecoderElementCountExceedsPage covers a header that claims more values
 // than the page holds. Fewer is valid, since the page's count includes nulls.
 func TestALPDecoderElementCountExceedsPage(t *testing.T) {
-	col := newFloat32Column()
-	dec := newALPDecoder[float32](format.Encoding_ALP, col)
+	page, _ := alpEncodeTestPage(t, []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
+	dec := newALPDecoder[float32](format.Encoding_ALP, newFloat32Column())
+	require.NoError(t, dec.SetData(15, page), "nulls make the page count larger")
 
-	data := alpTestPage(10)
-	require.NoError(t, dec.SetData(15, data), "nulls make the page count larger")
-
-	err := dec.SetData(9, data)
+	err := dec.SetData(9, page)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "claims 10 values")
+}
+
+// TestALPDecoderOffsetIntoOffsetArray covers a vector offset that points back
+// into the offset array, which would otherwise decode the offsets as a vector.
+func TestALPDecoderOffsetIntoOffsetArray(t *testing.T) {
+	page, _ := alpEncodeTestPage(t, []float32{1.5, 2.5, 3.5})
+	binary.LittleEndian.PutUint32(page[alpHeaderSize:], 0)
+
+	dec := newALPDecoder[float32](format.Encoding_ALP, newFloat32Column())
+	err := dec.SetData(3, page)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "points into the offset array")
 }
 
 // TestALPFloat64WidestPacking covers the widest packing a page can carry. The

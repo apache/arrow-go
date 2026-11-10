@@ -812,7 +812,7 @@ func checkALPVectorSize(path string, size int) {
 	}
 	target := "the ALP vector size"
 	if path != "" {
-		target += " of column " + path
+		target += fmt.Sprintf(" of column %q", path)
 	}
 	panic(fmt.Sprintf("parquet: %s must be a power of two from %d to %d, got %d",
 		target, minALPVectorSize, maxALPVectorSize, size))
