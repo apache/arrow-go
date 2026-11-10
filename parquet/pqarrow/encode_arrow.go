@@ -278,6 +278,9 @@ func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *Sch
 
 func (acw *arrowColumnWriter) Write(ctx context.Context) error {
 	arrCtx := arrowCtxFromContext(ctx)
+	for _, bldr := range acw.builders {
+		defer bldr.Release()
+	}
 	for leafIdx := 0; leafIdx < acw.leafCount; leafIdx++ {
 		var (
 			cw  file.ColumnChunkWriter
@@ -295,9 +298,6 @@ func (acw *arrowColumnWriter) Write(ctx context.Context) error {
 		}
 
 		for _, bldr := range acw.builders {
-			if leafIdx == 0 {
-				defer bldr.Release()
-			}
 			res, err := bldr.write(leafIdx, arrCtx)
 			if err != nil {
 				return err
