@@ -219,6 +219,53 @@ func TestCSVReadInvalidFields(t *testing.T) {
 	}
 }
 
+func TestCSVListRoundTrip(t *testing.T) {
+	tests := []struct {
+		name string
+		elem arrow.DataType
+		size int32
+		data string
+	}{
+		{name: "strings", elem: arrow.BinaryTypes.String, size: 1,
+			data: `[["{hello}"], ["{hello"], ["hello}"], ["{}"], ["{{}}"], ["hello"], ["a,b"], ["say \"hello\""], ["{a,b}"], null]`},
+		{name: "nested", elem: arrow.ListOf(arrow.PrimitiveTypes.Int64), size: 1,
+			data: `[[[1]], [[]], [[1,2]], null]`},
+		{name: "empty", elem: arrow.BinaryTypes.String, size: 0, data: `[[], null]`},
+	}
+	for _, tc := range tests {
+		for _, typ := range []arrow.DataType{
+			arrow.ListOf(tc.elem),
+			arrow.LargeListOf(tc.elem),
+			arrow.FixedSizeListOf(tc.size, tc.elem),
+			arrow.ListViewOf(tc.elem),
+			arrow.LargeListViewOf(tc.elem),
+		} {
+			t.Run(tc.name+"/"+typ.Name(), func(t *testing.T) {
+				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+				defer mem.AssertSize(t, 0)
+				input, _, err := array.FromJSON(mem, typ, strings.NewReader(tc.data))
+				require.NoError(t, err)
+				defer input.Release()
+				schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: typ}}, nil)
+				record := array.NewRecordBatch(schema, []arrow.Array{input}, int64(input.Len()))
+				defer record.Release()
+
+				var buf bytes.Buffer
+				w := csv.NewWriter(&buf, schema, csv.WithNullWriter("null"))
+				require.NoError(t, w.Write(record))
+				require.NoError(t, w.Flush())
+				r := csv.NewReader(&buf, schema, csv.WithAllocator(mem), csv.WithChunk(-1), csv.WithNullReader(true, "null"))
+				defer r.Release()
+				require.True(t, r.Next())
+				require.NoError(t, r.Err())
+				assert.True(t, array.Equal(input, r.RecordBatch().Column(0)), "expected %s, got %s", input, r.RecordBatch().Column(0))
+				assert.False(t, r.Next())
+				assert.NoError(t, r.Err())
+			})
+		}
+	}
+}
+
 func TestFixedSizeBinaryParseErrorAppendsNull(t *testing.T) {
 	schema := arrow.NewSchema(
 		[]arrow.Field{
