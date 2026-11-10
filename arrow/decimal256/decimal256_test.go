@@ -235,6 +235,37 @@ func TestDiv(t *testing.T) {
 	}
 }
 
+func TestRescale(t *testing.T) {
+	fiveE76 := decimal256.FromBigInt(new(big.Int).Mul(big.NewInt(5), new(big.Int).Exp(big.NewInt(10), big.NewInt(76), nil)))
+	for _, tc := range []struct {
+		n                  int64
+		original, newScale int32
+		want               decimal256.Num
+		wantErr            bool
+	}{
+		{111, 0, 2, decimal256.FromI64(11100), false},
+		{-11100, 2, 0, decimal256.FromI64(-111), false},
+		{555, 2, 1, decimal256.Num{}, true},
+		{5, 0, 76, fiveE76, false},
+		{-6, 0, 76, decimal256.Num{}, true},
+		{0, -9, 76, decimal256.Num{}, false},
+		{0, 76, -9, decimal256.Num{}, false},
+		{12, 0, 77, decimal256.Num{}, true},
+		{-12, 77, 0, decimal256.Num{}, true},
+		{10, math.MinInt32, math.MaxInt32, decimal256.Num{}, true},
+	} {
+		t.Run(fmt.Sprintf("%d_%d_%d", tc.n, tc.original, tc.newScale), func(t *testing.T) {
+			got, err := decimal256.FromI64(tc.n).Rescale(tc.original, tc.newScale)
+			if tc.wantErr {
+				assert.EqualError(t, err, "rescale data loss")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestPow(t *testing.T) {
 	for _, tc := range []struct {
 		n    decimal256.Num

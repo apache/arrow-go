@@ -158,17 +158,26 @@ func TestDecimalToReal(t *testing.T) {
 			// exact comparisons would succeed on most platforms, but not all power-of-ten
 			// factors are exactly representable in binary floating point, so we'll use
 			// approx and ensure that the values are within 4 ULP (unit of least precision)
-			for scale := int32(-9); scale <= 9; scale++ {
+			for scale := int32(-19); scale <= 19; scale++ {
 				checkApproxDecimaltoFloat("1", math.Pow10(-int(scale)), scale)
 				checkApproxDecimaltoFloat("123", float64(123)*math.Pow10(-int(scale)), scale)
 			}
 
-			for scale := int32(-18); scale <= 18; scale++ {
+			for scale := int32(-19); scale <= 19; scale++ {
 				checkApproxDecimal64toFloat("1", math.Pow10(-int(scale)), scale)
 				checkApproxDecimal64toFloat("123", float64(123)*math.Pow10(-int(scale)), scale)
 			}
 		})
 	})
+
+	assert.Zero(t, decimal.Decimal32(0).ToBigFloat(math.MinInt32).Sign())
+	assert.Zero(t, decimal.Decimal64(0).ToBigFloat(math.MinInt32).Sign())
+	// 10^646456993 overflows big.Float, but 10^-646456993 doesn't.
+	assert.Equal(t, 1, decimal.Decimal32(1).ToBigFloat(646456993).Sign())
+	assert.Equal(t, 1, decimal.Decimal64(1).ToBigFloat(646456993).Sign())
+	// 10^28 is not exactly representable with 64 bits of precision.
+	want := new(big.Float).SetPrec(64).SetRat(new(big.Rat).SetFrac(big.NewInt(3), new(big.Int).Exp(big.NewInt(10), big.NewInt(28), nil)))
+	assert.Zero(t, want.Cmp(decimal.Decimal64(3).ToBigFloat(28)))
 }
 
 func TestDecimalFromFloat(t *testing.T) {
@@ -307,6 +316,62 @@ func TestFromString(t *testing.T) {
 			ex64 := decimal.Decimal64(tt.expected)
 			assert.Equal(t, ex64, n64)
 		})
+	}
+
+	for _, s := range []string{"abc", "Inf", "-inf"} {
+		_, err := decimal.Decimal32FromString(s, 8, 2)
+		assert.Error(t, err, s)
+		_, err = decimal.Decimal64FromString(s, 8, 2)
+		assert.Error(t, err, s)
+	}
+
+	for _, s := range []string{"2147483648", "4294967295"} {
+		_, err := decimal.Decimal32FromString(s, 9, 0)
+		assert.Error(t, err, s)
+	}
+	_, err := decimal.Decimal64FromString("9223372036854775808", 18, 0)
+	assert.Error(t, err)
+
+	for _, tc := range []struct {
+		s     string
+		scale int32
+		want  decimal.Decimal64
+	}{
+		{"9223372036854775808", -1, 922337203685477580},
+		{"10000000000000000000", -19, 1},
+		{"18000000000000000000", -20, 0},
+		{"1", math.MinInt32, 0},
+	} {
+		n64, err := decimal.Decimal64FromString(tc.s, 18, tc.scale)
+		require.NoError(t, err, tc.s)
+		assert.Equal(t, tc.want, n64, tc.s)
+	}
+
+	for _, tc := range []struct {
+		s           string
+		prec, scale int32
+		want        int64
+		wantErr     bool
+	}{
+		{"1e-18", 9, 19, 10, false},
+		{"1e-18", 9, 20, 100, false},
+		{"-1e-76", 1, 76, -1, false},
+		{"3000000000", 9, -2, 30000000, false},
+		{"1e-18", 1, 20, 0, true},
+		{"1", 9, 100000000, 0, true},
+		{"1", 9, math.MaxInt32, 0, true},
+	} {
+		n32, err := decimal.Decimal32FromString(tc.s, tc.prec, tc.scale)
+		n64, err64 := decimal.Decimal64FromString(tc.s, tc.prec, tc.scale)
+		if tc.wantErr {
+			assert.Error(t, err, tc.s)
+			assert.Error(t, err64, tc.s)
+			continue
+		}
+		require.NoError(t, err, tc.s)
+		require.NoError(t, err64, tc.s)
+		assert.Equal(t, decimal.Decimal32(tc.want), n32, tc.s)
+		assert.Equal(t, decimal.Decimal64(tc.want), n64, tc.s)
 	}
 }
 

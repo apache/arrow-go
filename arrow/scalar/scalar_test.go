@@ -183,6 +183,108 @@ func TestDecimalScalarStringCastUsesExactScaling(t *testing.T) {
 	assert.Equal(t, "-0.1234567812345678123456781234567812345678123456781234567812345678123456781234", cast256.String())
 }
 
+func TestDecimal32And64Scalars(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	wider := []scalar.Scalar{
+		scalar.NewDecimal64Scalar(-12345, &arrow.Decimal64Type{Precision: 10, Scale: 2}),
+		scalar.NewDecimal128Scalar(decimal128.FromI64(-123450), &arrow.Decimal128Type{Precision: 20, Scale: 3}),
+		scalar.NewDecimal256Scalar(decimal256.FromI64(-12345), &arrow.Decimal256Type{Precision: 40, Scale: 2}),
+	}
+	tests := []struct {
+		value   scalar.Scalar
+		native  any
+		casts   []scalar.Scalar
+		invalid []arrow.DataType
+	}{
+		{
+			value:  scalar.NewDecimal32Scalar(-12345, &arrow.Decimal32Type{Precision: 5, Scale: 2}),
+			native: decimal.Decimal32(-12345),
+			casts:  append([]scalar.Scalar{scalar.NewDecimal32Scalar(-1234500, &arrow.Decimal32Type{Precision: 7, Scale: 4})}, wider...),
+			invalid: []arrow.DataType{
+				&arrow.Decimal32Type{Precision: 4, Scale: 2},
+				&arrow.Decimal64Type{Precision: 12, Scale: 1},
+				&arrow.Decimal256Type{Precision: 76, Scale: 76},
+				arrow.PrimitiveTypes.Int32,
+			},
+		},
+		{
+			value:  scalar.NewDecimal64Scalar(-12345, &arrow.Decimal64Type{Precision: 12, Scale: 2}),
+			native: decimal.Decimal64(-12345),
+			casts:  wider,
+			invalid: []arrow.DataType{
+				&arrow.Decimal32Type{Precision: 9, Scale: 2},
+				&arrow.Decimal128Type{Precision: 4, Scale: 2},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		dt := tc.value.DataType()
+		t.Run(dt.String(), func(t *testing.T) {
+			assert.Equal(t, "-123.45", tc.value.String())
+			assertMakeScalarParam(t, tc.value, dt, tc.native)
+			assertMakeScalarParam(t, tc.value, dt, "-123.45")
+			other, err := scalar.ParseScalar(dt, "123.45")
+			require.NoError(t, err)
+			assert.False(t, scalar.Equals(tc.value, other))
+			_, err = scalar.MakeScalarParam(tc.native, arrow.PrimitiveTypes.Int32)
+			assert.Error(t, err)
+			_, err = scalar.ParseScalar(dt, "12345678901234.5")
+			assert.Error(t, err)
+
+			null := checkMakeNullScalar(t, dt)
+			assert.Equal(t, "null", null.String())
+			for _, want := range tc.casts {
+				got, err := tc.value.CastTo(want.DataType())
+				require.NoError(t, err, "cast to %s", want.DataType())
+				assertScalarsEqual(t, want, got)
+
+				got, err = null.CastTo(want.DataType())
+				require.NoError(t, err)
+				assert.False(t, got.IsValid())
+				assert.True(t, arrow.TypeEqual(want.DataType(), got.DataType()))
+			}
+			for _, to := range tc.invalid {
+				_, err := tc.value.CastTo(to)
+				assert.Error(t, err, "cast to %s", to)
+			}
+
+			expected, _, err := array.FromJSON(mem, dt, strings.NewReader(`["-123.45", null]`))
+			require.NoError(t, err)
+			defer expected.Release()
+			for i, want := range []scalar.Scalar{tc.value, null} {
+				got, err := scalar.GetScalar(expected, i)
+				require.NoError(t, err)
+				assertScalarsEqual(t, want, got)
+			}
+
+			bldr := array.NewBuilder(mem, dt)
+			defer bldr.Release()
+			require.NoError(t, scalar.AppendSlice(bldr, []scalar.Scalar{tc.value, null}))
+			appended := bldr.NewArray()
+			defer appended.Release()
+			assert.Truef(t, array.Equal(expected, appended), "expected: %s, got: %s", expected, appended)
+		})
+	}
+
+	_, err := scalar.NewDecimal32Scalar(1, &arrow.Decimal32Type{Precision: 9, Scale: 10}).CastTo(&arrow.Decimal32Type{Precision: 9, Scale: 80})
+	assert.Error(t, err)
+	assert.Equal(t, "1e-19", scalar.NewDecimal32Scalar(1, &arrow.Decimal32Type{Precision: 1, Scale: 19}).String())
+	assert.Equal(t, "1e-19", scalar.NewDecimal64Scalar(1, &arrow.Decimal64Type{Precision: 1, Scale: 19}).String())
+	assert.Equal(t, "-1.2345e-999996", scalar.NewDecimal32Scalar(-12345, &arrow.Decimal32Type{Precision: 9, Scale: 1_000_000}).String())
+	assert.Equal(t, "1.2345e+1000004", scalar.NewDecimal64Scalar(12345, &arrow.Decimal64Type{Precision: 18, Scale: -1_000_000}).String())
+	assert.Equal(t, "0", scalar.NewDecimal32Scalar(0, &arrow.Decimal32Type{Precision: 9, Scale: 1_000_000}).String())
+	assert.Equal(t, "-1.2345e-999996", scalar.NewDecimal32Scalar(-12345, &arrow.Decimal32Type{Precision: -1, Scale: 1_000_000}).String())
+	b64 := array.NewDecimal64Builder(mem, &arrow.Decimal64Type{Precision: 18, Scale: 1_000_000})
+	defer b64.Release()
+	b64.Append(12345)
+	huge := b64.NewDecimalArray()
+	defer huge.Release()
+	assert.Equal(t, "1.2345e-999996", huge.ValueStr(0))
+}
+
 func TestBinaryScalarBasics(t *testing.T) {
 	data := "test data"
 	buf := memory.NewBufferBytes([]byte(data))
@@ -1561,6 +1663,8 @@ func getScalars(mem memory.Allocator) []scalar.Scalar {
 		scalar.NewDurationScalar(60, arrow.FixedWidthTypes.Duration_s),
 		scalar.NewBinaryScalar(hello, arrow.BinaryTypes.Binary),
 		scalar.NewFixedSizeBinaryScalar(hello, &arrow.FixedSizeBinaryType{ByteWidth: hello.Len()}),
+		scalar.NewDecimal32Scalar(10, &arrow.Decimal32Type{Precision: 9, Scale: 4}),
+		scalar.NewDecimal64Scalar(10, &arrow.Decimal64Type{Precision: 16, Scale: 4}),
 		scalar.NewDecimal128Scalar(decimal128.FromI64(10), &arrow.Decimal128Type{Precision: 16, Scale: 4}),
 		scalar.NewDecimal256Scalar(decimal256.FromI64(10), &arrow.Decimal256Type{Precision: 16, Scale: 4}),
 		scalar.NewStringScalarFromBuffer(hello),

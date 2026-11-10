@@ -900,24 +900,29 @@ func TestListElementDecimalArrayChildren(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
 
+	decimal32Type := &arrow.Decimal32Type{Precision: 6, Scale: 2}
+	decimal64Type := &arrow.Decimal64Type{Precision: 12, Scale: 2}
 	tests := []struct {
 		name string
 		typ  arrow.DataType
 		add  func(array.Builder, int32)
+		want scalar.Scalar
 	}{
 		{
 			name: "decimal32",
-			typ:  &arrow.Decimal32Type{Precision: 6, Scale: 2},
+			typ:  decimal32Type,
 			add: func(builder array.Builder, value int32) {
 				builder.(*array.Decimal32Builder).Append(decimal.Decimal32(value))
 			},
+			want: scalar.NewDecimal32Scalar(4, decimal32Type),
 		},
 		{
 			name: "decimal64",
-			typ:  &arrow.Decimal64Type{Precision: 12, Scale: 2},
+			typ:  decimal64Type,
 			add: func(builder array.Builder, value int32) {
 				builder.(*array.Decimal64Builder).Append(decimal.Decimal64(value))
 			},
+			want: scalar.NewDecimal64Scalar(4, decimal64Type),
 		},
 	}
 
@@ -954,48 +959,17 @@ func TestListElementDecimalArrayChildren(t *testing.T) {
 			defer actual.Release()
 			require.NoError(t, array.ValidateFull(actual))
 			assert.True(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
-		})
-	}
-}
 
-func TestListElementScalarListWithUnsupportedDecimalValues(t *testing.T) {
-	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer mem.AssertSize(t, 0)
-
-	tests := []struct {
-		name string
-		typ  arrow.DataType
-	}{
-		{name: "decimal32", typ: &arrow.Decimal32Type{Precision: 6, Scale: 2}},
-		{name: "decimal64", typ: &arrow.Decimal64Type{Precision: 12, Scale: 2}},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			builder := array.NewBuilder(mem, tc.typ)
-			switch b := builder.(type) {
-			case *array.Decimal32Builder:
-				b.Append(decimal.Decimal32(123))
-			case *array.Decimal64Builder:
-				b.Append(decimal.Decimal64(123))
-			default:
-				t.Fatalf("unexpected builder type %T", builder)
-			}
-			values := builder.NewArray()
-			builder.Release()
-			defer values.Release()
-
-			list := scalar.NewListScalar(values)
+			list := scalar.NewListScalar(expected)
 			defer list.Release()
-			result, err := compute.ListElement(
+			scalarResult, err := compute.ListElement(
 				context.Background(),
 				&compute.ScalarDatum{Value: list},
-				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
+				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(1)},
 			)
-			if err == nil && result != nil {
-				result.Release()
-			}
-			require.ErrorIs(t, err, arrow.ErrNotImplemented)
+			require.NoError(t, err)
+			defer scalarResult.Release()
+			assert.True(t, scalar.Equals(tc.want, scalarResult.(*compute.ScalarDatum).Value))
 		})
 	}
 }
@@ -1549,59 +1523,6 @@ func TestListElementDenseUnionScalarWithActiveUnsupportedChild(t *testing.T) {
 	require.ErrorIs(t, err, arrow.ErrNotImplemented)
 }
 
-func TestListElementDenseUnionScalarWithActiveUnsupportedDecimalChild(t *testing.T) {
-	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer mem.AssertSize(t, 0)
-
-	for _, tc := range []struct {
-		name string
-		typ  arrow.DataType
-		add  func(array.Builder)
-	}{
-		{
-			name: "decimal32",
-			typ:  &arrow.Decimal32Type{Precision: 6, Scale: 2},
-			add: func(builder array.Builder) {
-				builder.(*array.Decimal32Builder).Append(decimal.Decimal32(123))
-			},
-		},
-		{
-			name: "decimal64",
-			typ:  &arrow.Decimal64Type{Precision: 12, Scale: 2},
-			add: func(builder array.Builder) {
-				builder.(*array.Decimal64Builder).Append(decimal.Decimal64(123))
-			},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			unionType := arrow.DenseUnionOf(
-				[]arrow.Field{{Name: "value", Type: tc.typ, Nullable: true}},
-				[]arrow.UnionTypeCode{0},
-			)
-			builder := array.NewListBuilder(mem, unionType)
-			values := builder.ValueBuilder().(*array.DenseUnionBuilder)
-			builder.Append(true)
-			values.Append(0)
-			tc.add(values.Child(0))
-			input := builder.NewArray()
-			builder.Release()
-			defer input.Release()
-
-			listValue := scalar.NewListScalar(input.(*array.List).ListValues())
-			defer listValue.Release()
-			result, err := compute.ListElement(
-				context.Background(),
-				&compute.ScalarDatum{Value: listValue},
-				&compute.ScalarDatum{Value: scalar.NewInt64Scalar(0)},
-			)
-			if err == nil && result != nil {
-				result.Release()
-			}
-			require.ErrorIs(t, err, arrow.ErrNotImplemented)
-		})
-	}
-}
-
 func TestListElementDenseUnionScalarWithActiveNullUnsupportedChild(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
@@ -1617,14 +1538,6 @@ func TestListElementDenseUnionScalarWithActiveNullUnsupportedChild(t *testing.T)
 		{
 			name: "string_view",
 			typ:  arrow.BinaryTypes.StringView,
-		},
-		{
-			name: "decimal32",
-			typ:  &arrow.Decimal32Type{Precision: 6, Scale: 2},
-		},
-		{
-			name: "decimal64",
-			typ:  &arrow.Decimal64Type{Precision: 12, Scale: 2},
 		},
 		{
 			name: "list_view",
@@ -2237,8 +2150,6 @@ func TestListElementValidatesScalarIndexForEmptyInputs(t *testing.T) {
 
 func TestListElementNullScalarDenseUnionChildren(t *testing.T) {
 	for _, unsupported := range []arrow.DataType{
-		&arrow.Decimal32Type{Precision: 6, Scale: 2},
-		&arrow.Decimal64Type{Precision: 12, Scale: 2},
 		arrow.ListViewOf(arrow.PrimitiveTypes.Int32),
 		arrow.LargeListViewOf(arrow.PrimitiveTypes.Int32),
 	} {
@@ -2366,7 +2277,7 @@ func TestListElementNullStructScalarWithDenseUnionChild(t *testing.T) {
 			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 			defer mem.AssertSize(t, 0)
 			fields := []arrow.Field{
-				{Name: "unsupported", Type: &arrow.Decimal32Type{Precision: 6, Scale: 2}, Nullable: true},
+				{Name: "unsupported", Type: arrow.ListViewOf(arrow.PrimitiveTypes.Int32), Nullable: true},
 				{Name: "number", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
 			}
 			childID := 1

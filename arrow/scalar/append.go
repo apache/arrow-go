@@ -98,6 +98,10 @@ func appendToBldr(bldr array.Builder, scalars []Scalar) error {
 		return appendToBldr(bldr.StorageBuilder(), baseScalars)
 	case *array.BooleanBuilder:
 		appendPrimitive(bldr, scalars)
+	case *array.Decimal32Builder:
+		appendPrimitive(bldr, scalars)
+	case *array.Decimal64Builder:
+		appendPrimitive(bldr, scalars)
 	case *array.Decimal128Builder:
 		appendPrimitive(bldr, scalars)
 	case *array.Decimal256Builder:

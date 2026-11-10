@@ -182,6 +182,12 @@ func decimalFromString[T interface {
 
 	var out *big.Float
 	out, _, err = big.ParseFloat(v, 10, nbits, big.ToNearestEven)
+	if err != nil {
+		return
+	}
+	if out.IsInf() {
+		return n, fmt.Errorf("cannot convert %s to decimal%d", v, nbits)
+	}
 
 	if scale < 0 {
 		var tmp big.Int
@@ -190,12 +196,21 @@ func decimalFromString[T interface {
 			return n, fmt.Errorf("bitlen too large for decimal%d", nbits)
 		}
 
-		n = T(val.Int64() / int64(math.Pow10(int(-scale))))
+		// |val| < 2^64 < 10^20, so a larger divisor gives the same quotient.
+		div := new(big.Int).Exp(big.NewInt(10), big.NewInt(min(-int64(scale), 20)), nil)
+		n = T(val.Quo(val, div).Int64())
 	} else {
-		var precInBits = uint(math.Round(float64(prec+scale+1)/math.Log10(2))) + 1
+		// Clamp before converting, since converting an out of range float to
+		// uint is implementation specific. SetPrec caps at big.MaxPrec anyway.
+		bitsNeeded := math.Round(float64(int64(prec)+int64(scale)+1) / math.Log10(2))
+		var precInBits = uint(min(max(bitsNeeded, 0), big.MaxPrec-1)) + 1
 
-		p := (&big.Float{}).SetInt(big.NewInt(int64(math.Pow10(int(scale)))))
-		out.SetPrec(precInBits).Mul(out, p)
+		mulPow10(out.SetPrec(precInBits), int64(scale))
+		// Reject before rounding and converting, which would allocate as many
+		// bits as the value has.
+		if out.IsInf() || out.MantExp(nil) > int(nbits) {
+			return n, fmt.Errorf("bitlen too large for decimal%d", nbits)
+		}
 		if out.Signbit() {
 			out.Sub(out, pt5)
 		} else {
@@ -204,7 +219,9 @@ func decimalFromString[T interface {
 
 		var tmp big.Int
 		val, _ := out.Int(&tmp)
-		if val.BitLen() > int(nbits) {
+		// This also rejects the signed minimum, which fits the storage but has
+		// more digits than the maximum precision allows.
+		if val.BitLen() >= int(nbits) {
 			return n, fmt.Errorf("bitlen too large for decimal%d", nbits)
 		}
 		n = T(val.Int64())
@@ -307,23 +324,42 @@ func (n Decimal64) ToFloat64(scale int32) float64 {
 }
 
 func (n Decimal32) ToBigFloat(scale int32) *big.Float {
-	f := (&big.Float{}).SetInt64(int64(n))
-	if scale < 0 {
-		f.SetPrec(32).Mul(f, (&big.Float{}).SetInt64(intPow(10, -int64(scale))))
-	} else {
-		f.SetPrec(32).Quo(f, (&big.Float{}).SetInt64(intPow(10, int64(scale))))
-	}
-	return f
+	return mulPow10(new(big.Float).SetInt64(int64(n)).SetPrec(32), -int64(scale))
 }
 
 func (n Decimal64) ToBigFloat(scale int32) *big.Float {
-	f := (&big.Float{}).SetInt64(int64(n))
-	if scale < 0 {
-		f.SetPrec(64).Mul(f, (&big.Float{}).SetInt64(intPow(10, -int64(scale))))
-	} else {
-		f.SetPrec(64).Quo(f, (&big.Float{}).SetInt64(intPow(10, int64(scale))))
+	return mulPow10(new(big.Float).SetInt64(int64(n)).SetPrec(64), -int64(scale))
+}
+
+// mulPow10 sets f to f * 10^exp, rounded to f's precision, and returns f. For
+// precisions up to 64 bits the result is within one unit in the last place.
+// 10^exp is applied as an exact 2^exp and then 5^|exp|, computed at 128 bits
+// by repeated squaring so the work stays bounded. Splitting the power keeps it
+// from overflowing before the result does. A result outside big.Float's
+// exponent range becomes ±Inf or 0.
+func mulPow10(f *big.Float, exp int64) *big.Float {
+	if f.Sign() == 0 {
+		// 5^|exp| may overflow to infinity, and 0 * Inf panics.
+		return f
 	}
-	return f
+
+	k := exp
+	if k < 0 {
+		k = -k
+	}
+	pow := new(big.Float).SetPrec(128).SetInt64(1)
+	for base := new(big.Float).SetPrec(128).SetInt64(5); k > 0; k >>= 1 {
+		if k&1 == 1 {
+			pow.Mul(pow, base)
+		}
+		base.Mul(base, base)
+	}
+
+	f.SetMantExp(f, int(exp))
+	if exp < 0 {
+		return f.Quo(f, pow)
+	}
+	return f.Mul(f, pow)
 }
 
 func cmpDec[T Decimal32 | Decimal64](lhs, rhs T) int {

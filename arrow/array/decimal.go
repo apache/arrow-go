@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/json"
+	"github.com/apache/arrow-go/v18/internal/utils"
 )
 
 type baseDecimal[T interface {
@@ -96,7 +97,7 @@ func (a *baseDecimal[T]) GetOneForMarshal(i int) any {
 
 	typ := a.DataType().(arrow.DecimalType)
 	n, scale := a.Value(i), typ.GetScale()
-	return n.ToBigFloat(scale).Text('g', int(typ.GetPrecision()))
+	return utils.FormatDecimalG(n, typ.GetPrecision(), scale)
 }
 
 func (a *baseDecimal[T]) ValueAsAny(i int) any {
