@@ -58,11 +58,28 @@ func appendPrimitive[T primitives, B builder[T]](bldr B, scalars []Scalar) {
 }
 
 func appendBinary(bldr binaryBuilder, scalars []Scalar) {
-	_, view := bldr.Type().(arrow.BinaryViewDataType)
+	if _, view := bldr.Type().(arrow.BinaryViewDataType); view {
+		// View builders limit each value, not their total, to 2 GiB, so
+		// reserve one value at a time as Append does. Inline values need no
+		// data buffer.
+		for _, sc := range scalars {
+			s := sc.(BinaryScalar)
+			if !s.IsValid() {
+				bldr.AppendNull()
+				continue
+			}
+			if !arrow.IsViewInline(len(s.Data())) {
+				bldr.ReserveData(len(s.Data()))
+			}
+			bldr.UnsafeAppend(s.Data())
+		}
+		return
+	}
+
 	var dataSize int
 	for _, s := range scalars {
 		s := s.(BinaryScalar)
-		if s.IsValid() && (!view || !arrow.IsViewInline(len(s.Data()))) {
+		if s.IsValid() {
 			dataSize += len(s.Data())
 		}
 	}

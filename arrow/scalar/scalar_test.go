@@ -2144,6 +2144,42 @@ func TestAppendViewScalars(t *testing.T) {
 	}
 }
 
+// smallValueLimitBuilder stands in for the view builders' 2 GiB limit on each
+// value with a limit small enough to test.
+type smallValueLimitBuilder struct {
+	*array.StringViewBuilder
+	limit int
+}
+
+func (b smallValueLimitBuilder) ReserveData(n int) {
+	if n > b.limit {
+		panic(fmt.Sprintf("reserved %d bytes, more than one value's limit of %d", n, b.limit))
+	}
+	b.StringViewBuilder.ReserveData(n)
+}
+
+func TestAppendViewScalarsReservesEachValue(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	values := []string{"fifteen bytes 1", "short", "fifteen bytes 2", "fifteen bytes 3"}
+	scalars := make([]scalar.Scalar, len(values))
+	for i, v := range values {
+		scalars[i] = scalar.NewStringViewScalar(v)
+	}
+
+	bldr := smallValueLimitBuilder{array.NewStringViewBuilder(mem), 20}
+	defer bldr.Release()
+	require.NoError(t, scalar.AppendSlice(bldr, scalars))
+	result := bldr.NewArray()
+	defer result.Release()
+
+	require.NoError(t, array.ValidateFull(result))
+	for i, v := range values {
+		assert.Equal(t, v, result.(*array.StringView).Value(i))
+	}
+}
+
 func TestViewScalarsInNestedTypes(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
