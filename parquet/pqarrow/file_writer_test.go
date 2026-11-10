@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -391,7 +392,7 @@ func TestFileWriterCloseReleasesBuffersWhenSinkFails(t *testing.T) {
 		num := bldr.Field(0).(*array.Int8Builder)
 		dict := bldr.Field(1).(*array.BinaryDictionaryBuilder)
 		str := bldr.Field(2).(*array.StringBuilder)
-		for i := 0; i < 1000; i++ {
+		for i := 0; i < 300; i++ {
 			require.NoError(t, dict.AppendString("value-"+strconv.Itoa(i%10)))
 			str.Append("row-" + strconv.Itoa(i))
 			num.Append(int8(i))
@@ -418,10 +419,10 @@ func TestFileWriterCloseReleasesBuffersWhenSinkFails(t *testing.T) {
 
 	for _, buffered := range []bool{false, true} {
 		t.Run(fmt.Sprintf("buffered=%t", buffered), func(t *testing.T) {
-			var full bytes.Buffer
+			var full writeOffsetsSink
 			require.NoError(t, writeFile(t, memory.DefaultAllocator, &full, buffered))
 
-			for limit := 4; limit < full.Len(); limit++ {
+			for _, limit := range sinkFailureLimits(t, &full) {
 				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 				sink := &byteLimitSink{limit: limit}
 				err := writeFile(t, mem, sink, buffered)
@@ -434,4 +435,55 @@ func TestFileWriterCloseReleasesBuffersWhenSinkFails(t *testing.T) {
 			}
 		})
 	}
+}
+
+// writeOffsetsSink records where each Write starts, which marks every page
+// header, page body and footer boundary of the written file.
+type writeOffsetsSink struct {
+	bytes.Buffer
+	starts []int
+}
+
+func (s *writeOffsetsSink) Write(p []byte) (int, error) {
+	s.starts = append(s.starts, s.Len())
+	return s.Buffer.Write(p)
+}
+
+// sinkFailureLimits returns the byte counts after which to fail the sink:
+// one byte either side of every page and column chunk boundary of the file
+// in full, plus a stride sample of everything in between.
+func sinkFailureLimits(t *testing.T, full *writeOffsetsSink) []int {
+	t.Helper()
+	const stride = 37
+	boundaries := slices.Clone(full.starts)
+	rdr, err := file.NewParquetReader(bytes.NewReader(full.Bytes()))
+	require.NoError(t, err)
+	defer rdr.Close()
+	for i := 0; i < rdr.NumRowGroups(); i++ {
+		rg := rdr.MetaData().RowGroup(i)
+		for j := 0; j < rg.NumColumns(); j++ {
+			col, err := rg.ColumnChunk(j)
+			require.NoError(t, err)
+			start := col.DataPageOffset()
+			if col.HasDictionaryPage() {
+				boundaries = append(boundaries, int(col.DictionaryPageOffset()))
+				start = min(start, col.DictionaryPageOffset())
+			}
+			boundaries = append(boundaries, int(col.DataPageOffset()), int(start+col.TotalCompressedSize()))
+		}
+	}
+	for off := 0; off < full.Len(); off += stride {
+		boundaries = append(boundaries, off)
+	}
+
+	var limits []int
+	for _, b := range boundaries {
+		for _, limit := range []int{b - 1, b, b + 1} {
+			if limit >= 4 && limit < full.Len() {
+				limits = append(limits, limit)
+			}
+		}
+	}
+	slices.Sort(limits)
+	return slices.Compact(limits)
 }

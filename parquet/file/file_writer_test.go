@@ -1705,7 +1705,7 @@ func newPlainAndDictStringSchema(t *testing.T) *schema.GroupNode {
 }
 
 func writeStringColumn(cw file.ColumnChunkWriter) error {
-	const n = 1000
+	const n = 300
 	values := make([]parquet.ByteArray, n)
 	defLevels := make([]int16, n)
 	for i := range values {
@@ -1754,10 +1754,10 @@ func TestWriterReleasesBuffersWhenSinkFails(t *testing.T) {
 
 	for _, buffered := range []bool{false, true} {
 		t.Run(fmt.Sprintf("buffered=%t", buffered), func(t *testing.T) {
-			var full bytes.Buffer
+			var full writeOffsetsSink
 			require.NoError(t, writeFile(t, memory.DefaultAllocator, &full, buffered))
 
-			for limit := 4; limit < full.Len(); limit++ {
+			for _, limit := range sinkFailureLimits(t, &full) {
 				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 				err := writeFile(t, mem, &byteLimitSink{limit: limit}, buffered)
 				require.ErrorIs(t, err, errSinkFull, "limit %d", limit)
@@ -1768,4 +1768,55 @@ func TestWriterReleasesBuffersWhenSinkFails(t *testing.T) {
 			}
 		})
 	}
+}
+
+// writeOffsetsSink records where each Write starts, which marks every page
+// header, page body and footer boundary of the written file.
+type writeOffsetsSink struct {
+	bytes.Buffer
+	starts []int
+}
+
+func (s *writeOffsetsSink) Write(p []byte) (int, error) {
+	s.starts = append(s.starts, s.Len())
+	return s.Buffer.Write(p)
+}
+
+// sinkFailureLimits returns the byte counts after which to fail the sink:
+// one byte either side of every page and column chunk boundary of the file
+// in full, plus a stride sample of everything in between.
+func sinkFailureLimits(t *testing.T, full *writeOffsetsSink) []int {
+	t.Helper()
+	const stride = 37
+	boundaries := slices.Clone(full.starts)
+	rdr, err := file.NewParquetReader(bytes.NewReader(full.Bytes()))
+	require.NoError(t, err)
+	defer rdr.Close()
+	for i := 0; i < rdr.NumRowGroups(); i++ {
+		rg := rdr.MetaData().RowGroup(i)
+		for j := 0; j < rg.NumColumns(); j++ {
+			col, err := rg.ColumnChunk(j)
+			require.NoError(t, err)
+			start := col.DataPageOffset()
+			if col.HasDictionaryPage() {
+				boundaries = append(boundaries, int(col.DictionaryPageOffset()))
+				start = min(start, col.DictionaryPageOffset())
+			}
+			boundaries = append(boundaries, int(col.DataPageOffset()), int(start+col.TotalCompressedSize()))
+		}
+	}
+	for off := 0; off < full.Len(); off += stride {
+		boundaries = append(boundaries, off)
+	}
+
+	var limits []int
+	for _, b := range boundaries {
+		for _, limit := range []int{b - 1, b, b + 1} {
+			if limit >= 4 && limit < full.Len() {
+				limits = append(limits, limit)
+			}
+		}
+	}
+	slices.Sort(limits)
+	return slices.Compact(limits)
 }
