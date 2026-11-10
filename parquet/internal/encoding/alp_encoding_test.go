@@ -646,16 +646,72 @@ func TestALPDecoderElementCountExceedsPage(t *testing.T) {
 	assert.Contains(t, err.Error(), "claims 10 values")
 }
 
-// TestALPDecoderOffsetIntoOffsetArray covers a vector offset that points back
-// into the offset array, which would otherwise decode the offsets as a vector.
-func TestALPDecoderOffsetIntoOffsetArray(t *testing.T) {
-	page, _ := alpEncodeTestPage(t, []float32{1.5, 2.5, 3.5})
-	binary.LittleEndian.PutUint32(page[alpHeaderSize:], 0)
+// alpTwoVectorPage encodes 1..16 as two 8-value FLOAT vectors.
+func alpTwoVectorPage(t *testing.T) []byte {
+	t.Helper()
+	values := make([]float32, 16)
+	for i := range values {
+		values[i] = float32(i + 1)
+	}
+	enc := newALPEncoder[float32](format.Encoding_ALP, newFloat32Column(), memory.DefaultAllocator)
+	defer enc.Release()
+	require.NoError(t, enc.SetVectorSize(8))
+	enc.Put(values)
+	buf, err := enc.FlushValues()
+	require.NoError(t, err)
+	defer buf.Release()
+	return append([]byte(nil), buf.Bytes()...)
+}
 
+// TestALPDecoderOffsetChain covers offsets that break the layout: vectors are
+// stored back to back right after the offset array.
+func TestALPDecoderOffsetChain(t *testing.T) {
+	second := func(page []byte) uint32 { return binary.LittleEndian.Uint32(page[alpHeaderSize+4:]) }
+	tests := []struct {
+		name    string
+		corrupt func(page []byte)
+		errMsg  string
+	}{
+		{"first offset inside the offset array", func(p []byte) {
+			binary.LittleEndian.PutUint32(p[alpHeaderSize:], 0)
+		}, "want 8"},
+		// Pointing the second vector at the first would decode 1..8 twice.
+		{"second offset repeats the first", func(p []byte) {
+			binary.LittleEndian.PutUint32(p[alpHeaderSize+4:], 8)
+		}, "does not follow"},
+		{"gap between vectors", func(p []byte) {
+			binary.LittleEndian.PutUint32(p[alpHeaderSize+4:], second(p)+1)
+		}, "ends at"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			page := alpTwoVectorPage(t)
+			tt.corrupt(page)
+
+			dec := newALPDecoder[float32](format.Encoding_ALP, newFloat32Column())
+			err := dec.SetData(16, page)
+			if err == nil {
+				_, err = dec.Decode(make([]float32, 16))
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errMsg)
+		})
+	}
+}
+
+// TestALPDecoderDiscardPastEncodedValues covers a page whose value count,
+// which includes nulls, exceeds the values it encodes.
+func TestALPDecoderDiscardPastEncodedValues(t *testing.T) {
 	dec := newALPDecoder[float32](format.Encoding_ALP, newFloat32Column())
-	err := dec.SetData(3, page)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "points into the offset array")
+	require.NoError(t, dec.SetData(20, alpTwoVectorPage(t)))
+
+	n, err := dec.Discard(10)
+	require.NoError(t, err)
+	assert.Equal(t, 10, n)
+
+	n, err = dec.Discard(10)
+	assert.Equal(t, 6, n)
+	assert.ErrorContains(t, err, "4 more were requested")
 }
 
 // TestALPFloat64WidestPacking covers the widest packing a page can carry. The
@@ -1180,7 +1236,15 @@ func TestALPDecoderHugeFields(t *testing.T) {
 
 	page, _ := alpEncodeTestPage(t, []float32{1.5, 2.5})
 	binary.LittleEndian.PutUint32(page[alpHeaderSize:], math.MaxInt32-4)
-	require.NoError(t, dec.SetData(2, page))
-	_, err := dec.Decode(make([]float32, 2))
+	assert.ErrorContains(t, dec.SetData(2, page), "want 4", "the first offset is fixed")
+
+	// A later offset passes SetData as long as it increases, so the vector's
+	// own bounds check must catch it. Skip the first vector to reach it.
+	page = alpTwoVectorPage(t)
+	binary.LittleEndian.PutUint32(page[alpHeaderSize+4:], math.MaxInt32-4)
+	require.NoError(t, dec.SetData(16, page))
+	_, err := dec.Discard(8)
+	require.NoError(t, err)
+	_, err = dec.Decode(make([]float32, 8))
 	assert.ErrorContains(t, err, "past the end of the page")
 }

@@ -493,11 +493,16 @@ func (dec *alpDecoder[T]) SetData(nvals int, data []byte) error {
 	dec.vectorOffsets = slices.Grow(dec.vectorOffsets[:0], dec.numVectors)[:dec.numVectors]
 	for i := range dec.vectorOffsets {
 		dec.vectorOffsets[i] = binary.LittleEndian.Uint32(data[alpHeaderSize+i*4:])
-		// decodeVector checks the end of each vector against the page, but an
-		// offset into the offset array itself would read offsets as a vector.
-		if int64(dec.vectorOffsets[i]) < int64(offsetArraySize) {
-			return fmt.Errorf("parquet: ALP vector %d offset %d points into the offset array",
-				i, dec.vectorOffsets[i])
+		// The first vector starts right after the offset array and each one
+		// starts where the previous ends, so offsets strictly increase.
+		// decodeVector checks each vector's end against the next offset.
+		if i == 0 && int64(dec.vectorOffsets[0]) != int64(offsetArraySize) {
+			return fmt.Errorf("parquet: ALP vector 0 offset %d, want %d (the offset array size)",
+				dec.vectorOffsets[0], offsetArraySize)
+		}
+		if i > 0 && dec.vectorOffsets[i] <= dec.vectorOffsets[i-1] {
+			return fmt.Errorf("parquet: ALP vector %d offset %d does not follow vector %d offset %d",
+				i, dec.vectorOffsets[i], i-1, dec.vectorOffsets[i-1])
 		}
 	}
 
@@ -556,8 +561,16 @@ func (dec *alpDecoder[T]) decodeVector(vectorIdx int) error {
 
 	packedSize := alpPackedSize(vectorLen, bitWidth)
 	exceptionSize := numExceptions * (2 + valueBytes)
-	if pos+packedSize+exceptionSize > len(dec.bodyData) {
+	end := pos + packedSize + exceptionSize
+	if end > len(dec.bodyData) {
 		return fmt.Errorf("parquet: ALP vector %d runs past the end of the page", vectorIdx)
+	}
+	// Vectors are stored back to back, so this one must end where the next
+	// begins. On 32-bit platforms a huge offset converts to a negative int,
+	// which can't match.
+	if vectorIdx < dec.numVectors-1 && end != int(dec.vectorOffsets[vectorIdx+1]) {
+		return fmt.Errorf("parquet: ALP vector %d ends at %d, but vector %d starts at %d",
+			vectorIdx, end, vectorIdx+1, dec.vectorOffsets[vectorIdx+1])
 	}
 
 	deltas := dec.deltas[:vectorLen]
@@ -651,9 +664,17 @@ func (dec *alpDecoder[T]) DecodeSpaced(out []T, nullCount int, validBits []byte,
 // Discard skips n values without decoding intervening vectors.
 func (dec *alpDecoder[T]) Discard(n int) (int, error) {
 	n = min(n, dec.nvals)
-	dec.nvals -= n
-	dec.currentIndex += n
-	return n, nil
+	// nvals counts nulls too, so it can exceed what the page encodes. As in
+	// Decode, report a shortfall rather than claim to skip values that aren't
+	// there.
+	skipped := min(n, max(dec.totalCount-dec.currentIndex, 0))
+	dec.nvals -= skipped
+	dec.currentIndex += skipped
+	if skipped < n {
+		return skipped, fmt.Errorf("parquet: ALP page holds %d values, %d more were requested",
+			dec.totalCount, n-skipped)
+	}
+	return skipped, nil
 }
 
 type (
