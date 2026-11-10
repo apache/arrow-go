@@ -681,8 +681,8 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 	case *array.StringView:
 		return NewStringViewScalar(arr.Value(idx)), nil
 	case *array.BinaryView:
-		// An inline value lives in the view header, so copy rather than
-		// slice a data buffer.
+		// Copy so the scalar shares neither the header nor the data buffers
+		// of the array.
 		buf := memory.NewBufferBytes(bytes.Clone(arr.Value(idx)))
 		defer buf.Release()
 		return NewBinaryViewScalar(buf), nil

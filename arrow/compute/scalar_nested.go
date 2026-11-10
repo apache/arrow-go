@@ -94,7 +94,8 @@ type listElementFunction struct {
 
 func listElementScalarResultSupported(typ arrow.DataType, nullResult bool) bool {
 	switch typ.ID() {
-	case arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW, arrow.DECIMAL32, arrow.DECIMAL64:
+	case arrow.BINARY_VIEW, arrow.STRING_VIEW, arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW,
+		arrow.DECIMAL32, arrow.DECIMAL64:
 		return false
 	case arrow.EXTENSION:
 		return listElementScalarResultSupported(typ.(arrow.ExtensionType).StorageType(), nullResult)
@@ -131,7 +132,8 @@ func listElementScalarArrayValueSupported(values arrow.Array, index int) bool {
 	}
 
 	switch values := values.(type) {
-	case *array.ListView, *array.LargeListView, *array.Decimal32, *array.Decimal64:
+	case *array.BinaryView, *array.StringView, *array.ListView, *array.LargeListView,
+		*array.Decimal32, *array.Decimal64:
 		return false
 	case array.ExtensionArray:
 		return listElementScalarArrayValueSupported(values.Storage(), index)
