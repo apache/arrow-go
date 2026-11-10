@@ -1128,6 +1128,8 @@ func (c *CastSuite) TestDecimal128ToDecimal128() {
 		opts.AllowDecimalTruncate = false
 		opts.ToType = dP28S0.DataType()
 		checkCastFails(c.T(), dP38S10, opts)
+		_, err := compute.CastArray(context.Background(), dP38S10, &opts)
+		c.EqualError(err, "invalid: rescale data loss")
 		checkCast(c.T(), dP28S0, dP38S10RoundTripped, opts)
 	})
 
@@ -1160,6 +1162,8 @@ func (c *CastSuite) TestDecimal128ToDecimal128() {
 		opts.AllowDecimalTruncate = false
 		opts.ToType = &arrow.Decimal128Type{Precision: 38, Scale: 38}
 		checkCastFails(c.T(), d20, opts)
+		_, err := compute.CastArray(context.Background(), d20, &opts)
+		c.EqualError(err, "invalid: rescale data loss")
 	})
 }
 
@@ -1222,6 +1226,8 @@ func (c *CastSuite) TestDecimal256ToDecimal256() {
 		opts.AllowDecimalTruncate = false
 		opts.ToType = dP28S0.DataType()
 		checkCastFails(c.T(), dP38S10, opts)
+		_, err := compute.CastArray(context.Background(), dP38S10, &opts)
+		c.EqualError(err, "invalid: rescale data loss")
 		checkCast(c.T(), dP28S0, dP38S10RoundTripped, opts)
 	})
 
@@ -1311,6 +1317,8 @@ func (c *CastSuite) TestDecimal128ToDecimal256() {
 		opts.AllowDecimalTruncate = false
 		opts.ToType = d256P28S0.DataType()
 		checkCastFails(c.T(), d128P38S10, opts)
+		_, err := compute.CastArray(context.Background(), d128P38S10, &opts)
+		c.EqualError(err, "invalid: rescale data loss")
 		checkCast(c.T(), d128P28S0, d256P38S10RoundTripped, opts)
 	})
 
@@ -1398,6 +1406,8 @@ func (c *CastSuite) TestDecimal256ToDecimal128() {
 		opts.AllowDecimalTruncate = false
 		opts.ToType = d128P28S0.DataType()
 		checkCastFails(c.T(), d256P52S10, opts)
+		_, err := compute.CastArray(context.Background(), d256P52S10, &opts)
+		c.EqualError(err, "invalid: rescale data loss")
 		checkCast(c.T(), d256P42S0, d128P38S10RoundTripped, opts)
 	})
 
