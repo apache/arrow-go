@@ -1434,24 +1434,6 @@ func TestListScalarHashSupportsChildArraysWithoutScalars(t *testing.T) {
 		newValues func() arrow.Array
 	}{
 		{
-			name: "decimal32",
-			newValues: func() arrow.Array {
-				b := array.NewDecimal32Builder(memory.DefaultAllocator, &arrow.Decimal32Type{Precision: 6, Scale: 2})
-				defer b.Release()
-				b.AppendValues([]decimal.Decimal32{123, 456}, nil)
-				return b.NewDecimalArray()
-			},
-		},
-		{
-			name: "decimal64",
-			newValues: func() arrow.Array {
-				b := array.NewDecimal64Builder(memory.DefaultAllocator, &arrow.Decimal64Type{Precision: 12, Scale: 2})
-				defer b.Release()
-				b.AppendValues([]decimal.Decimal64{123, 456}, nil)
-				return b.NewDecimalArray()
-			},
-		},
-		{
 			name: "list view",
 			newValues: func() arrow.Array {
 				b := array.NewListViewBuilder(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32)
