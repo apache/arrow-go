@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -612,6 +613,14 @@ func TestFromString(t *testing.T) {
 		{"2112.33", 211233, 2},
 		{"-2112.33", -211233, 2},
 		{"12E2", 12, -2},
+		{"0", 0, 0},
+		{"0.24", 0, 0},
+		{"0.5", 1, 0},
+		{"-0.5", -1, 0},
+		{"0.51", 1, 0},
+		{"-0.51", -1, 0},
+		{"0.0051", 1, 2},
+		{"-0.0051", -1, 2},
 	}
 
 	for _, tt := range tests {
@@ -623,6 +632,33 @@ func TestFromString(t *testing.T) {
 			assert.Equal(t, ex, n)
 		})
 	}
+
+	for _, s := range []string{"Inf", "+Inf", "-inf", "1e1000000000", "-1e1000000000"} {
+		for _, scale := range []int32{2, -2} {
+			_, err := decimal256.FromString(s, 35, scale)
+			assert.ErrorContains(t, err, "cannot convert", "%s at scale %d", s, scale)
+		}
+	}
+
+	for _, tc := range []struct {
+		s     string
+		scale int32
+	}{
+		{"1e646456990", 76},
+		{"-1e600000000", -2},
+	} {
+		_, err := decimal256.FromString(tc.s, 35, tc.scale)
+		assert.ErrorContains(t, err, "bitlen too large for decimal256", "%s at scale %d", tc.s, tc.scale)
+	}
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	tiny, err := decimal256.FromString("-1e-20000000", 37, 0)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	assert.Equal(t, decimal256.Num{}, tiny)
+	// Rounding this value directly would allocate about 16 MB.
+	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
 }
 
 // Test issues from GH-38395
@@ -698,4 +734,12 @@ func TestBitLen(t *testing.T) {
 	assert.ErrorContains(t, err, "bitlen too large for decimal256")
 	_, err = decimal256.FromString(b.String(), decimal256.MaxPrecision, -1)
 	assert.ErrorContains(t, err, "bitlen too large for decimal256")
+
+	limit := new(big.Int).Lsh(big.NewInt(1), 255)
+	_, err = decimal256.FromString(limit.String(), decimal256.MaxPrecision, -1)
+	assert.ErrorContains(t, err, "bitlen too large for decimal256")
+	limit.Sub(limit, big.NewInt(1))
+	got, err := decimal256.FromString(limit.String(), decimal256.MaxPrecision, -1)
+	require.NoError(t, err)
+	assert.Equal(t, limit.Quo(limit, big.NewInt(10)).String(), got.BigInt().String())
 }

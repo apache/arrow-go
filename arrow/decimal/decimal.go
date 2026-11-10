@@ -189,11 +189,13 @@ func decimalFromString[T interface {
 	}
 
 	if scale < 0 {
-		var tmp big.Int
-		val, _ := out.Int(&tmp)
-		if val.BitLen() > int(nbits) {
+		// Check the magnitude before converting, which would allocate as many
+		// bits as the value has.
+		if out.MantExp(nil) > int(nbits) {
 			return n, fmt.Errorf("bitlen too large for decimal%d", nbits)
 		}
+		var tmp big.Int
+		val, _ := out.Int(&tmp)
 
 		// |val| < 2^64 < 10^20, so a larger divisor gives the same quotient.
 		div := new(big.Int).Exp(big.NewInt(10), big.NewInt(min(-int64(scale), 20)), nil)
@@ -209,6 +211,12 @@ func decimalFromString[T interface {
 		// bits as the value has.
 		if out.IsInf() || out.MantExp(nil) > int(nbits) {
 			return n, fmt.Errorf("bitlen too large for decimal%d", nbits)
+		}
+		// A magnitude below 1/4 rounds to zero. Clearing it skips the
+		// rounding below, which allocates in proportion to the gap between
+		// the value's exponent and 0.5's.
+		if out.MantExp(nil) < -1 {
+			out.SetInt64(0)
 		}
 		if out.Signbit() {
 			out.Sub(out, pt5)
