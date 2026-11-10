@@ -274,13 +274,18 @@ func FromString(v string, prec, scale int32) (n Num, err error) {
 	if err != nil {
 		return
 	}
+	if out.IsInf() {
+		return Num{}, fmt.Errorf("cannot convert %s to decimal128", v)
+	}
 
 	if scale < 0 {
-		var tmp big.Int
-		val, _ := out.Int(&tmp)
-		if val.BitLen() > 127 {
+		// Check the magnitude before converting, which would allocate as many
+		// bits as the value has.
+		if out.MantExp(nil) > 127 {
 			return Num{}, errors.New("bitlen too large for decimal128")
 		}
+		var tmp big.Int
+		val, _ := out.Int(&tmp)
 		n = FromBigInt(val)
 		n, _ = n.Div(scaleMultipliers[-scale])
 	} else {
@@ -290,6 +295,17 @@ func FromString(v string, prec, scale int32) (n Num, err error) {
 		// we're positive we'll add 0.5.
 		p := (&big.Float{}).SetInt(scaleMultipliers[scale].BigInt())
 		out.SetPrec(precInBits).Mul(out, p)
+		// Reject before rounding and converting, which would allocate as many
+		// bits as the value has.
+		if out.IsInf() || out.MantExp(nil) > 128 {
+			return Num{}, errors.New("bitlen too large for decimal128")
+		}
+		// A magnitude below 1/4 rounds to zero. Clearing it skips the
+		// rounding below, which allocates in proportion to the gap between
+		// the value's exponent and 0.5's.
+		if out.MantExp(nil) < -1 {
+			out.SetInt64(0)
+		}
 		if out.Signbit() {
 			out.Sub(out, pt5)
 		} else {

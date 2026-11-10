@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"runtime"
 	"strconv"
 	"testing"
 
@@ -300,6 +301,14 @@ func TestFromString(t *testing.T) {
 		{"2112.33", 211233, 2},
 		{"-2112.33", -211233, 2},
 		{"12E2", 12, -2},
+		{"0", 0, 0},
+		{"0.24", 0, 0},
+		{"0.5", 1, 0},
+		{"-0.5", -1, 0},
+		{"0.51", 1, 0},
+		{"-0.51", -1, 0},
+		{"0.0051", 1, 2},
+		{"-0.0051", -1, 2},
 	}
 
 	for _, tt := range tests {
@@ -329,8 +338,15 @@ func TestFromString(t *testing.T) {
 		_, err := decimal.Decimal32FromString(s, 9, 0)
 		assert.Error(t, err, s)
 	}
-	_, err := decimal.Decimal64FromString("9223372036854775808", 18, 0)
+	n32, err := decimal.Decimal32FromString("4294967295", 9, -1)
+	require.NoError(t, err)
+	assert.Equal(t, decimal.Decimal32(429496729), n32)
+	_, err = decimal.Decimal32FromString("4294967296", 9, -1)
+	assert.ErrorContains(t, err, "bitlen too large for decimal32")
+	_, err = decimal.Decimal64FromString("9223372036854775808", 18, 0)
 	assert.Error(t, err)
+	_, err = decimal.Decimal64FromString("18446744073709551616", 18, -1)
+	assert.ErrorContains(t, err, "bitlen too large for decimal64")
 
 	for _, tc := range []struct {
 		s     string
@@ -338,6 +354,7 @@ func TestFromString(t *testing.T) {
 		want  decimal.Decimal64
 	}{
 		{"9223372036854775808", -1, 922337203685477580},
+		{"18446744073709551615", -2, 184467440737095516},
 		{"10000000000000000000", -19, 1},
 		{"18000000000000000000", -20, 0},
 		{"1", math.MinInt32, 0},
@@ -373,6 +390,18 @@ func TestFromString(t *testing.T) {
 		assert.Equal(t, decimal.Decimal32(tc.want), n32, tc.s)
 		assert.Equal(t, decimal.Decimal64(tc.want), n64, tc.s)
 	}
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	tiny32, err := decimal.Decimal32FromString("-1e-20000000", 9, 0)
+	require.NoError(t, err)
+	tiny64, err := decimal.Decimal64FromString("-1e-20000000", 18, 0)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	assert.Equal(t, decimal.Decimal32(0), tiny32)
+	assert.Equal(t, decimal.Decimal64(0), tiny64)
+	// Rounding these values directly would allocate about 33 MB.
+	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
 }
 
 func TestCmp(t *testing.T) {

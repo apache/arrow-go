@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"runtime"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
@@ -672,6 +673,14 @@ func TestFromString(t *testing.T) {
 		{"2112.33", 211233, 2},
 		{"-2112.33", -211233, 2},
 		{"12E2", 12, -2},
+		{"0", 0, 0},
+		{"0.24", 0, 0},
+		{"0.5", 1, 0},
+		{"-0.5", -1, 0},
+		{"0.51", 1, 0},
+		{"-0.51", -1, 0},
+		{"0.0051", 1, 2},
+		{"-0.0051", -1, 2},
 	}
 
 	for _, tt := range tests {
@@ -683,6 +692,33 @@ func TestFromString(t *testing.T) {
 			assert.Equal(t, ex, n)
 		})
 	}
+
+	for _, s := range []string{"Inf", "+Inf", "-inf", "1e1000000000", "-1e1000000000"} {
+		for _, scale := range []int32{2, -2} {
+			_, err := decimal128.FromString(s, 37, scale)
+			assert.ErrorContains(t, err, "cannot convert", "%s at scale %d", s, scale)
+		}
+	}
+
+	for _, tc := range []struct {
+		s     string
+		scale int32
+	}{
+		{"1e646456990", 38},
+		{"-1e600000000", -2},
+	} {
+		_, err := decimal128.FromString(tc.s, 37, tc.scale)
+		assert.ErrorContains(t, err, "bitlen too large for decimal128", "%s at scale %d", tc.s, tc.scale)
+	}
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	tiny, err := decimal128.FromString("-1e-20000000", 37, 0)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	assert.Equal(t, decimal128.Num{}, tiny)
+	// Rounding this value directly would allocate about 16 MB.
+	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
 }
 
 func TestInvalidNonNegScaleFromString(t *testing.T) {
@@ -709,6 +745,14 @@ func TestBitLen(t *testing.T) {
 	assert.ErrorContains(t, err, "bitlen too large for decimal128")
 	_, err = decimal128.FromString(b.String(), decimal128.MaxPrecision, -1)
 	assert.ErrorContains(t, err, "bitlen too large for decimal128")
+
+	limit := new(big.Int).Lsh(big.NewInt(1), 127)
+	_, err = decimal128.FromString(limit.String(), decimal128.MaxPrecision, -1)
+	assert.ErrorContains(t, err, "bitlen too large for decimal128")
+	limit.Sub(limit, big.NewInt(1))
+	got, err := decimal128.FromString(limit.String(), decimal128.MaxPrecision, -1)
+	require.NoError(t, err)
+	assert.Equal(t, limit.Quo(limit, big.NewInt(10)).String(), got.BigInt().String())
 }
 
 func TestFromStringDecimal128b(t *testing.T) {
