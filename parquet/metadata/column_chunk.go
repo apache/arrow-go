@@ -500,6 +500,7 @@ func (c *ColumnChunkMetaDataBuilder) PopulateCryptoData(encryptor encryption.Enc
 				// Keep redacted metadata version for old readers
 				c.chunk.MetaData.Statistics = nil
 				c.chunk.MetaData.EncodingStats = nil
+				c.chunk.MetaData.GeospatialStatistics = nil
 			}
 		}
 	}

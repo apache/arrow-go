@@ -29,8 +29,8 @@ import (
 // the bounding box of all coordinates and the set of geometry types (as ISO
 // WKB codes, e.g. 1 = Point, 1002 = LineString Z) that were written.
 //
-// If any value was not valid WKB, or had a NaN coordinate, the statistics are
-// invalid and are never written to the file.
+// NaN coordinates are ignored. If any value was not valid WKB, the statistics
+// are invalid and are never written to the file.
 type GeoStatistics struct {
 	b *geospatial.Bounder
 }
@@ -40,15 +40,9 @@ func NewGeoStatistics() *GeoStatistics {
 	return &GeoStatistics{b: geospatial.NewBounder()}
 }
 
-// Reset clears the statistics.
-func (g *GeoStatistics) Reset() { g.b.Reset() }
-
 // Invalidate marks the statistics as unusable, e.g. when values were written
 // without being inspected.
 func (g *GeoStatistics) Invalidate() { g.b.Invalidate() }
-
-// Merge folds other into g.
-func (g *GeoStatistics) Merge(other *GeoStatistics) { g.b.Merge(other.b) }
 
 // Valid reports whether the statistics can be trusted.
 func (g *GeoStatistics) Valid() bool { return g.b.Valid() }
@@ -79,9 +73,6 @@ func (g *GeoStatistics) MMax() float64 { return g.b.Max(geospatial.DimM) }
 
 // GeometryTypes returns the sorted ISO WKB geometry type codes that were seen.
 func (g *GeoStatistics) GeometryTypes() []int32 { return g.b.Types() }
-
-// UpdateWKB adds a single non-null WKB value.
-func (g *GeoStatistics) UpdateWKB(wkb []byte) { g.b.Update(wkb) }
 
 // Update adds a slice of non-null WKB values.
 func (g *GeoStatistics) Update(values []parquet.ByteArray) {

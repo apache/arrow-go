@@ -21,7 +21,10 @@ import (
 	"math"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
+	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -164,12 +167,6 @@ func TestGeoStatisticsToThriftOmitted(t *testing.T) {
 		assert.Nil(t, g.toThrift())
 	})
 
-	t.Run("NaN in a non-empty geometry", func(t *testing.T) {
-		g := newGeoStats(wkbPoint(1, 1, math.NaN()))
-		assert.False(t, g.Valid())
-		assert.Nil(t, g.toThrift())
-	})
-
 	t.Run("invalidated", func(t *testing.T) {
 		g := newGeoStats(wkbPoint(1, 1, 2))
 		g.Invalidate()
@@ -178,32 +175,18 @@ func TestGeoStatisticsToThriftOmitted(t *testing.T) {
 	})
 }
 
-func TestGeoStatisticsReset(t *testing.T) {
-	g := newGeoStats(wkbPoint(1, 1, 2), parquet.ByteArray("not wkb"))
-	require.False(t, g.Valid())
+func TestGeoStatisticsNaNIgnored(t *testing.T) {
+	// NaN ordinates are left out of the bounds rather than invalidating the
+	// statistics, so the other values can still be used for pruning.
+	g := newGeoStats(wkbPoint(1, 1, 2), wkbPoint(1, math.NaN(), 10), wkbPoint(1, 3, 4))
+	require.True(t, g.Valid())
+	assert.Equal(t, []float64{1, 3, 2, 10}, []float64{g.XMin(), g.XMax(), g.YMin(), g.YMax()})
 
-	g.Reset()
-	assert.True(t, g.Valid())
-	assert.True(t, g.IsEmpty())
-	assert.False(t, g.HasBoundingBox())
-
-	g.UpdateWKB(wkbPoint(1, 5, 6))
-	assertSameGeoStats(t, newGeoStats(wkbPoint(1, 5, 6)), g)
-}
-
-func TestGeoStatisticsMerge(t *testing.T) {
-	a := newGeoStats(wkbPoint(1, 0, 0), wkbPoint(1, 1, 1))
-	b := newGeoStats(wkbPoint(1001, -5, 10, 3))
-
-	a.Merge(b)
-	assertSameGeoStats(t, newGeoStats(
-		wkbPoint(1, 0, 0), wkbPoint(1, 1, 1), wkbPoint(1001, -5, 10, 3)), a)
-
-	// merging in invalid statistics makes the result invalid
-	bad := newGeoStats(parquet.ByteArray("not wkb"))
-	a.Merge(bad)
-	assert.False(t, a.Valid())
-	assert.Nil(t, a.toThrift())
+	th := g.toThrift()
+	require.NotNil(t, th)
+	bb := th.GetBbox()
+	require.NotNil(t, bb)
+	assert.Equal(t, []float64{1, 3, 2, 10}, []float64{bb.Xmin, bb.Xmax, bb.Ymin, bb.Ymax})
 }
 
 func TestGeoStatisticsUpdateSpaced(t *testing.T) {
@@ -282,4 +265,41 @@ func TestUpdateGeoStatisticsFromArrowOffsets(t *testing.T) {
 		assert.True(t, g.Valid())
 		assert.True(t, g.IsEmpty())
 	})
+}
+
+func TestGeoStatisticsRedactedFromPlaintextFooter(t *testing.T) {
+	// With a column encrypted with its own key and a plaintext footer, a
+	// redacted copy of ColumnMetaData is left in the footer for old readers.
+	// The bounding box must not be part of that copy.
+	const (
+		footerKey = "0123456789012345"
+		columnKey = "1234567890123450"
+	)
+	encProps := parquet.NewFileEncryptionProperties(footerKey,
+		parquet.WithPlaintextFooter(),
+		parquet.WithEncryptedColumns(parquet.ColumnPathToEncryptionPropsMap{
+			"geom": parquet.NewColumnEncryptionProperties("geom", parquet.WithKey(columnKey)),
+		}))
+	props := parquet.NewWriterProperties(parquet.WithEncryptionProperties(encProps))
+
+	node, err := schema.NewPrimitiveNodeLogical("geom", parquet.Repetitions.Optional,
+		schema.GeometryLogicalType{}, parquet.Types.ByteArray, -1, -1)
+	require.NoError(t, err)
+	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema",
+		parquet.Repetitions.Required, schema.FieldList{node}, -1)))
+	col := sc.Column(0)
+
+	bldr := NewColumnChunkMetaDataBuilder(props, col)
+	bldr.SetGeoStatistics(newGeoStats(wkbPoint(1, -122.4, 37.8), wkbPoint(1, 5, 60)))
+	require.NotNil(t, bldr.Contents().MetaData.GeospatialStatistics)
+
+	require.NoError(t, bldr.Finish(ChunkMetaInfo{NumValues: 2, DataPageOffset: 4}, false, false, EncodingStats{}))
+	encryptor := encryption.NewFileEncryptor(props.FileEncryptionProperties(), memory.DefaultAllocator)
+	require.NoError(t, bldr.PopulateCryptoData(encryptor.GetColumnMetaEncryptor(col.Path())))
+
+	chunk := bldr.Contents()
+	assert.NotEmpty(t, chunk.EncryptedColumnMetadata)
+	require.NotNil(t, chunk.MetaData)
+	assert.Nil(t, chunk.MetaData.Statistics)
+	assert.Nil(t, chunk.MetaData.GeospatialStatistics)
 }

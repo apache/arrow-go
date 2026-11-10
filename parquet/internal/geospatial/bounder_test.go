@@ -111,7 +111,6 @@ func TestBounderEmptyPointAndInvalid(t *testing.T) {
 		"bad order":     {2, 1, 0, 0, 0},
 		"truncated":     wkb(le, 1, 1.0),
 		"trailing":      append(wkb(le, 1, 1.0, 2.0), 0),
-		"partial nan":   wkb(le, 1, 1.0, nan),
 		"bad type":      wkb(le, 99, 1.0, 2.0),
 		"huge count":    wkb(le, 2, uint32(math.MaxUint32)),
 		"huge rings":    wkb(le, 3, uint32(math.MaxUint32)),
@@ -341,17 +340,52 @@ func TestBounderEmptyGeometries(t *testing.T) {
 	assertDim(t, b, geospatial.DimY, &bounds{4, 4}, "mixed")
 }
 
-func TestBounderInvalidEdgeCases(t *testing.T) {
+func TestBounderSkipsNaN(t *testing.T) {
 	le := byteOrder(binary.LittleEndian)
 	nan := math.NaN()
 
+	// NaN ordinates are ignored per dimension: they never reach the bounds
+	// and never invalidate the Bounder.
+	for _, tt := range []struct {
+		name       string
+		wkb        []byte
+		types      []int32
+		x, y, z, m *bounds
+	}{
+		{"all-NaN LineString", wkb(le, 2, uint32(2), nan, nan, nan, nan), []int32{2}, nil, nil, nil, nil},
+		{"NaN point in LineString", wkb(le, 2, uint32(2), nan, nan, 1.0, 2.0), []int32{2}, &bounds{1, 1}, &bounds{2, 2}, nil, nil},
+		{"NaN X only", wkb(le, 1, nan, 5.0), []int32{1}, nil, &bounds{5, 5}, nil, nil},
+		{"NaN in Polygon ring", wkb(le, 3, uint32(1), uint32(2), 1.0, nan, 3.0, 4.0), []int32{3}, &bounds{1, 3}, &bounds{4, 4}, nil, nil},
+		{"NaN only in Z", wkb(le, 1001, 1.0, 2.0, nan), []int32{1001}, &bounds{1, 1}, &bounds{2, 2}, nil, nil},
+		{"NaN only in M", wkb(le, 3001, 1.0, 2.0, 3.0, nan), []int32{3001}, &bounds{1, 1}, &bounds{2, 2}, &bounds{3, 3}, nil},
+		{"partial NaN child", wkb(le, 4, uint32(1), wkb(le, 1, nan, 1.0)), []int32{4}, nil, &bounds{1, 1}, nil, nil},
+	} {
+		b := geospatial.NewBounder()
+		b.Update(tt.wkb)
+		require.True(t, b.Valid(), tt.name)
+		assert.Equal(t, tt.types, b.Types(), tt.name)
+		assertDim(t, b, geospatial.DimX, tt.x, tt.name)
+		assertDim(t, b, geospatial.DimY, tt.y, tt.name)
+		assertDim(t, b, geospatial.DimZ, tt.z, tt.name)
+		assertDim(t, b, geospatial.DimM, tt.m, tt.name)
+	}
+
+	// a geometry that is entirely NaN does not stop the others from
+	// contributing to the bounds
+	b := geospatial.NewBounder()
+	b.Update(wkb(le, 1, 10.0, 20.0))
+	b.Update(wkb(le, 2, uint32(2), nan, nan, nan, nan))
+	b.Update(wkb(le, 1, 30.0, 40.0))
+	require.True(t, b.Valid())
+	assert.Equal(t, []int32{1, 2}, b.Types())
+	assertDim(t, b, geospatial.DimX, &bounds{10, 30}, "mixed")
+	assertDim(t, b, geospatial.DimY, &bounds{20, 40}, "mixed")
+}
+
+func TestBounderInvalidEdgeCases(t *testing.T) {
+	le := byteOrder(binary.LittleEndian)
+
 	for name, v := range map[string][]byte{
-		// NaN is only allowed as a whole empty point
-		"NaN in LineString":      wkb(le, 2, uint32(1), nan, nan),
-		"NaN in Polygon ring":    wkb(le, 3, uint32(1), uint32(1), 1.0, nan),
-		"NaN only in Z":          wkb(le, 1001, 1.0, 2.0, nan),
-		"NaN only in M":          wkb(le, 3001, 1.0, 2.0, 3.0, nan),
-		"partial NaN child":      wkb(le, 4, uint32(1), wkb(le, 1, nan, 1.0)),
 		"Point with extra coord": wkb(le, 1, 1.0, 2.0, 3.0),
 		"Point Z missing Z":      wkb(le, 1001, 1.0, 2.0),
 

@@ -26,6 +26,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -155,6 +156,39 @@ func TestGeoStatisticsReferenceFiles(t *testing.T) {
 		gs := col.GeoStatistics()
 		require.NotNil(t, gs)
 		assert.True(t, gs.HasBoundingBox())
+	})
+
+	t.Run("NaN coordinates are skipped like the reference writer", func(t *testing.T) {
+		// One geometry in this file is an all-NaN linestring. The reference
+		// writer ignores it and still records a bounding box for the others,
+		// recomputing from the values must give the same statistics.
+		rdr, err := file.OpenParquetFile(path.Join(dir, "geospatial-with-nan.parquet"), false)
+		require.NoError(t, err)
+		defer rdr.Close()
+
+		idx := geomColumn(t, rdr)
+		col, err := rdr.MetaData().RowGroup(0).ColumnChunk(idx)
+		require.NoError(t, err)
+		want := col.GeoStatistics()
+		require.NotNil(t, want)
+		assert.Equal(t, []float64{10, 130, 20, 140}, []float64{want.XMin(), want.XMax(), want.YMin(), want.YMax()})
+		assert.Equal(t, []int32{3001, 3002}, want.GeometryTypes())
+
+		cr, err := rdr.RowGroup(0).Column(idx)
+		require.NoError(t, err)
+		n := rdr.NumRows()
+		values := make([]parquet.ByteArray, n)
+		defLevels := make([]int16, n)
+		_, read, err := cr.(*file.ByteArrayColumnChunkReader).ReadBatch(n, values, defLevels, nil)
+		require.NoError(t, err)
+
+		got := metadata.NewGeoStatistics()
+		got.Update(values[:read])
+		require.True(t, got.Valid())
+		assert.Equal(t, want.GeometryTypes(), got.GeometryTypes())
+		assert.Equal(t,
+			[]float64{want.XMin(), want.XMax(), want.YMin(), want.YMax(), want.ZMin(), want.ZMax(), want.MMin(), want.MMax()},
+			[]float64{got.XMin(), got.XMax(), got.YMin(), got.YMax(), got.ZMin(), got.ZMax(), got.MMin(), got.MMax()})
 	})
 
 	t.Run("GEOGRAPHY statistics are not returned", func(t *testing.T) {

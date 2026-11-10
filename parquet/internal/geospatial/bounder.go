@@ -43,8 +43,8 @@ const (
 )
 
 // Bounder accumulates the per-dimension min/max and the set of ISO WKB geometry
-// type codes of the geometries it is given. If any value is not valid WKB, or
-// contains a NaN coordinate (other than an empty point), the Bounder becomes
+// type codes of the geometries it is given. NaN ordinates are ignored, so they
+// never appear in the bounds. If any value is not valid WKB the Bounder becomes
 // invalid and its results must not be written.
 //
 // The zero value is not usable, use NewBounder.
@@ -231,10 +231,10 @@ func (b *Bounder) readGeometry(r *reader, depth int) (isoCode int32, ok bool) {
 
 	switch base {
 	case 1: // Point
-		return isoCode, b.readCoords(r, order, ndims, 1, true)
+		return isoCode, b.readCoords(r, order, ndims, 1)
 	case 2: // LineString
 		cnt, ok := r.u32(order)
-		return isoCode, ok && b.readCoords(r, order, ndims, uint64(cnt), false)
+		return isoCode, ok && b.readCoords(r, order, ndims, uint64(cnt))
 	case 3: // Polygon
 		rings, ok := r.u32(order)
 		if !ok || uint64(rings)*4 > uint64(len(r.buf)) {
@@ -242,7 +242,7 @@ func (b *Bounder) readGeometry(r *reader, depth int) (isoCode int32, ok bool) {
 		}
 		for i := uint32(0); i < rings; i++ {
 			cnt, ok := r.u32(order)
-			if !ok || !b.readCoords(r, order, ndims, uint64(cnt), false) {
+			if !ok || !b.readCoords(r, order, ndims, uint64(cnt)) {
 				return 0, false
 			}
 		}
@@ -263,33 +263,24 @@ func (b *Bounder) readGeometry(r *reader, depth int) (isoCode int32, ok bool) {
 	return 0, false
 }
 
-func (b *Bounder) readCoords(r *reader, order binary.ByteOrder, dims []int, count uint64, allowEmpty bool) bool {
+func (b *Bounder) readCoords(r *reader, order binary.ByteOrder, dims []int, count uint64) bool {
 	size := uint64(len(dims)) * 8
 	if count*size > uint64(len(r.buf)) {
 		return false
 	}
 
-	var coord [numDims]float64
 	for i := uint64(0); i < count; i++ {
-		nan := 0
-		for j := range dims {
-			coord[j] = math.Float64frombits(order.Uint64(r.buf))
+		for _, d := range dims {
+			v := math.Float64frombits(order.Uint64(r.buf))
 			r.buf = r.buf[8:]
-			if math.IsNaN(coord[j]) {
-				nan++
+			// NaN ordinates are skipped rather than invalidating the
+			// statistics: POINT EMPTY is encoded as all-NaN, and one bad
+			// coordinate should not prevent pruning on the other values.
+			if math.IsNaN(v) {
+				continue
 			}
-		}
-
-		switch {
-		case nan == 0:
-			for j, d := range dims {
-				b.min[d] = math.Min(b.min[d], coord[j])
-				b.max[d] = math.Max(b.max[d], coord[j])
-			}
-		case nan == len(dims) && allowEmpty:
-			// POINT EMPTY is encoded as all-NaN, it contributes no extent
-		default:
-			return false
+			b.min[d] = math.Min(b.min[d], v)
+			b.max[d] = math.Max(b.max[d], v)
 		}
 	}
 	return true
