@@ -19,6 +19,8 @@
 package exec
 
 import (
+	"fmt"
+	"math"
 	"sync/atomic"
 	"unsafe"
 
@@ -345,6 +347,12 @@ func (a *ArraySpan) FillFromScalar(val scalar.Scalar) {
 		header := &arrow.ViewHeaderTraits.CastFromBytes(a.Buffers[1].Buf)[0]
 		*header = arrow.ViewHeader{}
 		if sc.IsValid() {
+			if len(sc.Data()) > math.MaxInt32 {
+				// The header's size is an int32, and this method can't
+				// return an error.
+				panic(fmt.Errorf("%w: %s value of %d bytes exceeds the view size limit",
+					arrow.ErrInvalid, val.DataType(), len(sc.Data())))
+			}
 			if header.SetBytes(sc.Data()); !header.IsInline() {
 				a.Buffers[2].Buf = sc.Data()
 				a.Buffers[2].Owner = sc.Buffer()

@@ -851,11 +851,10 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 			defer data.Release()
 			return array.MakeFromData(data), nil
 		case arrow.BINARY_VIEW, arrow.STRING_VIEW:
-			value := s.Data()
-			if len(value) > math.MaxInt32 {
-				return nil, fmt.Errorf("%w: %s value of %d bytes exceeds the view size limit",
-					arrow.ErrInvalid, s.DataType(), len(value))
+			if err := s.Validate(); err != nil {
+				return nil, err
 			}
+			value := s.Data()
 			var header arrow.ViewHeader
 			header.SetBytes(value)
 			headers := createBuffer(arrow.ViewHeaderTraits.CastToBytes([]arrow.ViewHeader{header}))

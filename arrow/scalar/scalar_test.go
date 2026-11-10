@@ -2144,6 +2144,23 @@ func TestAppendViewScalars(t *testing.T) {
 	}
 }
 
+func TestViewScalarValidateWithoutValue(t *testing.T) {
+	for _, dt := range []arrow.DataType{arrow.BinaryTypes.BinaryView, arrow.BinaryTypes.StringView} {
+		plain := scalar.NewBinaryScalar(memory.NewBufferBytes(nil), dt)
+		plain.Value = nil
+		view := scalar.MakeNullScalar(dt)
+		switch v := view.(type) {
+		case *scalar.BinaryView:
+			v.Valid = true
+		case *scalar.StringView:
+			v.Valid = true
+		}
+		for _, sc := range []scalar.Scalar{plain, view} {
+			assert.NotPanics(t, func() { _ = sc.Validate() }, "%T %s", sc, dt)
+		}
+	}
+}
+
 // smallValueLimitBuilder stands in for the view builders' 2 GiB limit on each
 // value with a limit small enough to test.
 type smallValueLimitBuilder struct {

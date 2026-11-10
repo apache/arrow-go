@@ -19,6 +19,7 @@ package scalar
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"unicode/utf8"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -97,6 +98,14 @@ func (b *Binary) Validate() (err error) {
 	err = b.scalar.Validate()
 	if err == nil {
 		err = validateOptional(&b.scalar, b.Value, "value")
+	}
+	if err == nil && b.Valid && b.Value != nil && b.Value.Len() > math.MaxInt32 {
+		switch b.Type.ID() {
+		case arrow.BINARY_VIEW, arrow.STRING_VIEW:
+			// A view header stores the size as an int32.
+			err = fmt.Errorf("%w: %s scalar value of %d bytes exceeds the view size limit of %d bytes",
+				arrow.ErrInvalid, b.Type, b.Value.Len(), math.MaxInt32)
+		}
 	}
 	return
 }
