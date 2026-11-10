@@ -1123,3 +1123,24 @@ func (b *BooleanValueWriterSuite) TestWriteBitmapBatchSpaced() {
 	// ValuesOut should contain only the non-null values
 	b.Equal(expected, b.ValuesOut.([]bool)[:values])
 }
+
+// TestFlushCurrentPageWithoutBufferedValues verifies that FlushCurrentPage is a
+// no-op when nothing is buffered, so repeated flushes do not emit empty pages.
+func TestFlushCurrentPageWithoutBufferedValues(t *testing.T) {
+	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewInt32Node("v", parquet.Repetitions.Required, -1),
+	}, -1)))
+	props := parquet.NewWriterProperties(parquet.WithDictionaryDefault(false))
+
+	pager := new(mockpagewriter)
+	defer pager.AssertExpectations(t)
+	pager.On("HasCompressor").Return(false)
+	pager.On("WriteDataPage", mock.Anything).Return(10, nil).Once()
+	wr := file.NewColumnChunkWriter(metadata.NewColumnChunkMetaDataBuilder(props, sc.Column(0)), pager, props).(*file.Int32ColumnChunkWriter)
+
+	_, err := wr.WriteBatch([]int32{1, 2, 3}, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, wr.FlushCurrentPage())
+	// nothing is buffered, so no second page is written
+	require.NoError(t, wr.FlushCurrentPage())
+}

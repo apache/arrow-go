@@ -117,6 +117,29 @@ func DefaultColumnProperties() ColumnProperties {
 	}
 }
 
+// CDCOptions configures content-defined chunking of data pages.
+type CDCOptions struct {
+	// MinChunkSize is the minimum chunk size in bytes.
+	MinChunkSize int64
+	// MaxChunkSize is the maximum chunk size in bytes.
+	MaxChunkSize int64
+	// NormLevel is the normalization level, a signed integer where 0 is the default.
+	// Positive values make chunk boundaries more likely: the boundary mask has fewer
+	// bits, so chunk sizes are more uniform at the cost of more small pages. Negative
+	// values make boundaries less likely.
+	NormLevel int
+}
+
+// DefaultCDCOptions returns the default content-defined chunking options:
+// MinChunkSize of 256 KiB, MaxChunkSize of 1 MiB and NormLevel 0.
+func DefaultCDCOptions() CDCOptions {
+	return CDCOptions{
+		MinChunkSize: 256 * 1024,
+		MaxChunkSize: 1024 * 1024,
+		NormLevel:    0,
+	}
+}
+
 // SortingColumn specifies a sort order within a rowgroup of a specific leaf column.
 type SortingColumn = format.SortingColumn
 
@@ -368,6 +391,31 @@ func WithStoreDecimalAsInteger(enabled bool) WriterProperty {
 	}
 }
 
+// WithContentDefinedChunking enables content-defined chunking of data pages with the given options.
+//
+// Content-defined chunking is experimental. Only pqarrow.FileWriter honors it:
+// pqarrow.WriteArrowToColumn returns an error when it is enabled, and the column
+// writers of the file package ignore it. The chunking state of each leaf column
+// carries over across row groups and write calls for the life of the file, as in
+// Arrow C++ 27.0.0 and later; earlier C++ versions restart it at every row group.
+//
+// The chunk size counts logical value bytes plus 2 bytes per definition/repetition level,
+// measured before encoding and compression. DataPageSize can still split chunks.
+// A chunk is cut at MaxChunkSize, so a forced cut can exceed MaxChunkSize by less than
+// one value, and nested records are never split across chunks.
+//
+// Unlike the C++ implementation, a dictionary fallback does not end the current page,
+// and the cost-based dictionary fallback is only evaluated until the first page is cut,
+// so pages forced by CDC end that window earlier.
+//
+// Invalid options make pqarrow.NewFileWriter return an error.
+func WithContentDefinedChunking(opts CDCOptions) WriterProperty {
+	return func(cfg *writerPropConfig) {
+		cfg.wr.cdcEnabled = true
+		cfg.wr.cdcOpts = opts
+	}
+}
+
 // WithSortingColumns allow specifying the sorting columns in the written metadata.
 // If this is set, the user should ensure that records are sorted by these columns,
 // otherwise the sorting data will be inconsistent with the sorting_columns metadata.
@@ -543,6 +591,8 @@ type WriterProperties struct {
 	rootRepetition      Repetition
 	storeDecimalAsInt   bool
 	maxBloomFilterBytes int64
+	cdcEnabled          bool
+	cdcOpts             CDCOptions
 
 	defColumnProps  ColumnProperties
 	columnProps     map[string]*ColumnProperties
@@ -853,6 +903,12 @@ func (w *WriterProperties) ColumnEncryptionProperties(path string) *ColumnEncryp
 // a fixed len byte array.
 func (w *WriterProperties) StoreDecimalAsInteger() bool {
 	return w.storeDecimalAsInt
+}
+
+// ContentDefinedChunking returns the content-defined chunking options and whether
+// content-defined chunking is enabled.
+func (w *WriterProperties) ContentDefinedChunking() (CDCOptions, bool) {
+	return w.cdcOpts, w.cdcEnabled
 }
 
 // MaxBloomFilterBytes returns the maximum number of bytes that a bloom filter can use
