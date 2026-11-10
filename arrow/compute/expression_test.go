@@ -59,6 +59,8 @@ func TestExpressionToString(t *testing.T) {
 		{compute.NewLiteral(&scalar.Int64{}), "null"},
 		{compute.NewLiteral(scalar.NewBinaryScalar(memory.NewBufferBytes([]byte("az")),
 			arrow.BinaryTypes.Binary)), `"617A"`},
+		{compute.NewLiteral(scalar.NewStringViewScalar("a\nb")), `"a\nb"`},
+		{compute.NewLiteral(scalar.NewBinaryViewScalar(memory.NewBufferBytes([]byte("az")))), `"617A"`},
 		{compute.NewLiteral(ts), "1990-10-23 10:23:33.123456Z"},
 		{compute.NewCall("add", []compute.Expression{compute.NewLiteral(3), compute.NewFieldRef("beta")}, nil), "add(3, beta)"},
 		{compute.And(compute.NewFieldRef("a"), compute.NewFieldRef("b")), "(a and b)"},

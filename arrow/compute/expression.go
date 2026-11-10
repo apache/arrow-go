@@ -85,9 +85,9 @@ func printDatum(datum Datum) string {
 		}
 
 		switch datum.Type().ID() {
-		case arrow.STRING, arrow.LARGE_STRING:
+		case arrow.STRING, arrow.LARGE_STRING, arrow.STRING_VIEW:
 			return strconv.Quote(datum.Value.(scalar.BinaryScalar).String())
-		case arrow.BINARY, arrow.FIXED_SIZE_BINARY, arrow.LARGE_BINARY:
+		case arrow.BINARY, arrow.FIXED_SIZE_BINARY, arrow.LARGE_BINARY, arrow.BINARY_VIEW:
 			return `"` + strings.ToUpper(hex.EncodeToString(datum.Value.(scalar.BinaryScalar).Data())) + `"`
 		}
 

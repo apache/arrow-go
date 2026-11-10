@@ -81,13 +81,7 @@ func TestStartsWith(t *testing.T) {
 				defer expected.Release()
 
 				in, exp := compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected)
-				switch dt.ID() {
-				case arrow.BINARY_VIEW, arrow.STRING_VIEW:
-					// arrow/scalar has no view scalars, so only the array path applies.
-					checkStartsWith(t, ctx, compute.MatchSubstringOptions{Pattern: tt.pattern}, in, exp)
-				default:
-					checkScalarUnary(t, "starts_with", in, exp, &compute.MatchSubstringOptions{Pattern: tt.pattern})
-				}
+				checkScalarUnary(t, "starts_with", in, exp, &compute.MatchSubstringOptions{Pattern: tt.pattern})
 			})
 		}
 	}
@@ -202,7 +196,7 @@ func TestStartsWith(t *testing.T) {
 		for _, tt := range tests {
 			for _, dt := range tt.types {
 				t.Run(tt.name+"/"+dt.String(), func(t *testing.T) {
-					ctx, mem := newCtx(t)
+					_, mem := newCtx(t)
 					bldr := array.NewBuilder(mem, dt)
 					defer bldr.Release()
 					bldr.(interface{ AppendStringValues([]string, []bool) }).AppendStringValues(tt.input, nil)
@@ -213,12 +207,7 @@ func TestStartsWith(t *testing.T) {
 
 					in, exp := compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected)
 					opts := compute.MatchSubstringOptions{Pattern: tt.pattern, IgnoreCase: true}
-					switch dt.ID() {
-					case arrow.BINARY_VIEW, arrow.STRING_VIEW:
-						checkStartsWith(t, ctx, opts, in, exp)
-					default:
-						checkScalarUnary(t, "starts_with", in, exp, &opts)
-					}
+					checkScalarUnary(t, "starts_with", in, exp, &opts)
 				})
 			}
 		}

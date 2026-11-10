@@ -17,6 +17,7 @@
 package scalar
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -567,6 +568,8 @@ func init() {
 		arrow.FIXED_SIZE_LIST: func(dt arrow.DataType) Scalar { return &FixedSizeList{&List{scalar: scalar{dt, false}}} },
 		arrow.DURATION:        func(dt arrow.DataType) Scalar { return &Duration{scalar: scalar{dt, false}} },
 		arrow.RUN_END_ENCODED: func(dt arrow.DataType) Scalar { return &RunEndEncoded{scalar: scalar{dt, false}} },
+		arrow.BINARY_VIEW:     func(dt arrow.DataType) Scalar { return &BinaryView{&Binary{scalar: scalar{dt, false}}} },
+		arrow.STRING_VIEW:     func(dt arrow.DataType) Scalar { return &StringView{&String{&Binary{scalar: scalar{dt, false}}}} },
 		// invalid data types to fill out array size 2^6 - 1
 		63: invalidScalarType,
 	}
@@ -681,6 +684,14 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 		return NewStringScalar(arr.Value(idx)), nil
 	case *array.LargeString:
 		return NewLargeStringScalar(arr.Value(idx)), nil
+	case *array.StringView:
+		return NewStringViewScalar(arr.Value(idx)), nil
+	case *array.BinaryView:
+		// Copy so the scalar shares neither the header nor the data buffers
+		// of the array.
+		buf := memory.NewBufferBytes(bytes.Clone(arr.Value(idx)))
+		defer buf.Release()
+		return NewBinaryViewScalar(buf), nil
 	case *array.Struct:
 		children := make(Vector, arr.NumField())
 		for i := range children {
@@ -840,8 +851,29 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 		memory.Set(data.Bytes(), c)
 		return array.NewBoolean(length, data, nil, 0), nil
 	case BinaryScalar:
-		if s.DataType().ID() == arrow.FIXED_SIZE_BINARY {
+		switch s.DataType().ID() {
+		case arrow.FIXED_SIZE_BINARY:
 			data := finishFixedWidth(s.Data())
+			defer data.Release()
+			return array.MakeFromData(data), nil
+		case arrow.BINARY_VIEW, arrow.STRING_VIEW:
+			if err := s.Validate(); err != nil {
+				return nil, err
+			}
+			value := s.Data()
+			var header arrow.ViewHeader
+			header.SetBytes(value)
+			headers := createBuffer(arrow.ViewHeaderTraits.CastToBytes([]arrow.ViewHeader{header}))
+			defer headers.Release()
+			buffers := []*memory.Buffer{nil, headers}
+			if !header.IsInline() {
+				values := memory.NewResizableBuffer(mem)
+				defer values.Release()
+				values.Resize(len(value))
+				copy(values.Bytes(), value)
+				buffers = append(buffers, values)
+			}
+			data := array.NewData(s.DataType(), length, buffers, nil, 0, 0)
 			defer data.Release()
 			return array.MakeFromData(data), nil
 		}

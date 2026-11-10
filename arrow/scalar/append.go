@@ -44,6 +44,7 @@ type builder[T primitives | []byte] interface {
 type binaryBuilder interface {
 	builder[[]byte]
 	ReserveData(int)
+	Type() arrow.DataType
 }
 
 func appendPrimitive[T primitives, B builder[T]](bldr B, scalars []Scalar) {
@@ -57,6 +58,24 @@ func appendPrimitive[T primitives, B builder[T]](bldr B, scalars []Scalar) {
 }
 
 func appendBinary(bldr binaryBuilder, scalars []Scalar) {
+	if _, view := bldr.Type().(arrow.BinaryViewDataType); view {
+		// View builders limit each value, not their total, to 2 GiB, so
+		// reserve one value at a time as Append does. Inline values need no
+		// data buffer.
+		for _, sc := range scalars {
+			s := sc.(BinaryScalar)
+			if !s.IsValid() {
+				bldr.AppendNull()
+				continue
+			}
+			if !arrow.IsViewInline(len(s.Data())) {
+				bldr.ReserveData(len(s.Data()))
+			}
+			bldr.UnsafeAppend(s.Data())
+		}
+		return
+	}
+
 	var dataSize int
 	for _, s := range scalars {
 		s := s.(BinaryScalar)
@@ -158,6 +177,8 @@ func appendToBldr(bldr array.Builder, scalars []Scalar) error {
 	case array.StringLikeBuilder:
 		appendBinary(bldr, scalars)
 	case *array.BinaryBuilder:
+		appendBinary(bldr, scalars)
+	case *array.BinaryViewBuilder:
 		appendBinary(bldr, scalars)
 	case array.ListLikeBuilder:
 		var numChildren int
