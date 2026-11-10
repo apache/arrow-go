@@ -880,6 +880,17 @@ func (c *CastSuite) TestDecimal128ToInt() {
 		defer beyondBounds.Release()
 		checkCastFails(c.T(), beyondBounds, *opts)
 	})
+
+	c.Run("int16", func() {
+		opts := compute.SafeCastOptions(arrow.PrimitiveTypes.Int16)
+		dt := &arrow.Decimal128Type{Precision: 10, Scale: 0}
+
+		c.checkCastOpts(dt, arrow.PrimitiveTypes.Int16,
+			`["1", "2", "3", "4", null]`, `[1, 2, 3, 4, null]`, *opts)
+		c.checkCastOpts(dt, arrow.PrimitiveTypes.Int16,
+			`["200", "-300", "32767", "-32768", null]`, `[200, -300, 32767, -32768, null]`, *opts)
+		c.checkCastFails(dt, `["32768", "-32769"]`, opts)
+	})
 }
 
 func (c *CastSuite) TestDecimal256ToInt() {
@@ -1002,6 +1013,17 @@ func (c *CastSuite) TestDecimal256ToInt() {
 			strings.NewReader(`["9223372036854775808", "-9223372036854775809"]`))
 		defer beyondBounds.Release()
 		checkCastFails(c.T(), beyondBounds, *opts)
+	})
+
+	c.Run("int16", func() {
+		opts := compute.SafeCastOptions(arrow.PrimitiveTypes.Int16)
+		dt := &arrow.Decimal256Type{Precision: 10, Scale: 0}
+
+		c.checkCastOpts(dt, arrow.PrimitiveTypes.Int16,
+			`["1", "2", "3", "4", null]`, `[1, 2, 3, 4, null]`, *opts)
+		c.checkCastOpts(dt, arrow.PrimitiveTypes.Int16,
+			`["200", "-300", "32767", "-32768", null]`, `[200, -300, 32767, -32768, null]`, *opts)
+		c.checkCastFails(dt, `["32768", "-32769"]`, opts)
 	})
 }
 
@@ -3431,6 +3453,15 @@ func (c *CastSuite) TestBooleanToString() {
 		c.Run(stype.String(), func() {
 			c.checkCast(arrow.FixedWidthTypes.Boolean, stype,
 				`[true, true, false, null]`, `["true", "true", "false", null]`)
+		})
+	}
+}
+
+func (c *CastSuite) TestBooleanToNumber() {
+	for _, dt := range numericTypes {
+		c.Run(dt.String(), func() {
+			c.checkCast(arrow.FixedWidthTypes.Boolean, dt,
+				`[true, false, null, true, true]`, `[1, 0, null, 1, 1]`)
 		})
 	}
 }
