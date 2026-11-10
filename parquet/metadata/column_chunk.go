@@ -262,7 +262,15 @@ func (c *ColumnChunkMetaData) StatsSet() (bool, error) {
 
 // GeoStatistics returns the geospatial statistics (bounding box and geometry
 // types) of a GEOMETRY column chunk, or nil if the writer did not record any.
+//
+// It always returns nil for GEOGRAPHY columns, even if the file has statistics
+// for them. Their edges follow the Earth's surface and their bounding boxes may
+// wrap across the antimeridian (xmin > xmax), which GeoStatistics does not
+// represent.
 func (c *ColumnChunkMetaData) GeoStatistics() *GeoStatistics {
+	if _, ok := c.descr.LogicalType().(schema.GeometryLogicalType); !ok {
+		return nil
+	}
 	t := c.columnMeta.GetGeospatialStatistics()
 	if t == nil {
 		return nil

@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"math"
+	"os"
+	"path"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/parquet"
@@ -125,4 +127,49 @@ func TestGeometryColumnStatsDisabled(t *testing.T) {
 	col, err := rdr.MetaData().RowGroup(0).ColumnChunk(0)
 	require.NoError(t, err)
 	assert.Nil(t, col.GeoStatistics())
+}
+
+func TestGeoStatisticsReferenceFiles(t *testing.T) {
+	dir := os.Getenv("PARQUET_TEST_DATA")
+	if dir == "" {
+		dir = "../../parquet-testing/data"
+		t.Log("PARQUET_TEST_DATA not set, using ../../parquet-testing/data")
+	}
+	dir = path.Join(dir, "geospatial")
+	assert.DirExists(t, dir)
+
+	geomColumn := func(t *testing.T, rdr *file.Reader) int {
+		t.Helper()
+		idx := rdr.MetaData().Schema.ColumnIndexByName("geometry")
+		require.GreaterOrEqual(t, idx, 0)
+		return idx
+	}
+
+	t.Run("GEOMETRY statistics are returned", func(t *testing.T) {
+		rdr, err := file.OpenParquetFile(path.Join(dir, "crs-default.parquet"), false)
+		require.NoError(t, err)
+		defer rdr.Close()
+
+		col, err := rdr.MetaData().RowGroup(0).ColumnChunk(geomColumn(t, rdr))
+		require.NoError(t, err)
+		gs := col.GeoStatistics()
+		require.NotNil(t, gs)
+		assert.True(t, gs.HasBoundingBox())
+	})
+
+	t.Run("GEOGRAPHY statistics are not returned", func(t *testing.T) {
+		// This file has GEOGRAPHY statistics in every row group, some with
+		// bounding boxes that wrap across the antimeridian.
+		rdr, err := file.OpenParquetFile(path.Join(dir, "geography-lines.parquet"), false)
+		require.NoError(t, err)
+		defer rdr.Close()
+
+		idx := geomColumn(t, rdr)
+		require.IsType(t, schema.GeographyLogicalType{}, rdr.MetaData().Schema.Column(idx).LogicalType())
+		for rg := 0; rg < rdr.NumRowGroups(); rg++ {
+			col, err := rdr.MetaData().RowGroup(rg).ColumnChunk(idx)
+			require.NoError(t, err)
+			assert.Nil(t, col.GeoStatistics(), "row group %d", rg)
+		}
+	})
 }
