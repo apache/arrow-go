@@ -29,6 +29,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
+	"github.com/apache/arrow-go/v18/arrow/internal/pow10"
 )
 
 // DecimalTypes is a generic constraint representing the implemented decimal types
@@ -205,7 +206,7 @@ func decimalFromString[T interface {
 		bitsNeeded := math.Round(float64(int64(prec)+int64(scale)+1) / math.Log10(2))
 		var precInBits = uint(min(max(bitsNeeded, 0), big.MaxPrec-1)) + 1
 
-		mulPow10(out.SetPrec(precInBits), int64(scale))
+		pow10.Mul(out.SetPrec(precInBits), int64(scale), 128)
 		// Reject before rounding and converting, which would allocate as many
 		// bits as the value has.
 		if out.IsInf() || out.MantExp(nil) > int(nbits) {
@@ -324,42 +325,11 @@ func (n Decimal64) ToFloat64(scale int32) float64 {
 }
 
 func (n Decimal32) ToBigFloat(scale int32) *big.Float {
-	return mulPow10(new(big.Float).SetInt64(int64(n)).SetPrec(32), -int64(scale))
+	return pow10.Mul(new(big.Float).SetInt64(int64(n)).SetPrec(32), -int64(scale), 128)
 }
 
 func (n Decimal64) ToBigFloat(scale int32) *big.Float {
-	return mulPow10(new(big.Float).SetInt64(int64(n)).SetPrec(64), -int64(scale))
-}
-
-// mulPow10 sets f to f * 10^exp, rounded to f's precision, and returns f. For
-// precisions up to 64 bits the result is within one unit in the last place.
-// 10^exp is applied as an exact 2^exp and then 5^|exp|, computed at 128 bits
-// by repeated squaring so the work stays bounded. Splitting the power keeps it
-// from overflowing before the result does. A result outside big.Float's
-// exponent range becomes ±Inf or 0.
-func mulPow10(f *big.Float, exp int64) *big.Float {
-	if f.Sign() == 0 {
-		// 5^|exp| may overflow to infinity, and 0 * Inf panics.
-		return f
-	}
-
-	k := exp
-	if k < 0 {
-		k = -k
-	}
-	pow := new(big.Float).SetPrec(128).SetInt64(1)
-	for base := new(big.Float).SetPrec(128).SetInt64(5); k > 0; k >>= 1 {
-		if k&1 == 1 {
-			pow.Mul(pow, base)
-		}
-		base.Mul(base, base)
-	}
-
-	f.SetMantExp(f, int(exp))
-	if exp < 0 {
-		return f.Quo(f, pow)
-	}
-	return f.Mul(f, pow)
+	return pow10.Mul(new(big.Float).SetInt64(int64(n)).SetPrec(64), -int64(scale), 128)
 }
 
 func cmpDec[T Decimal32 | Decimal64](lhs, rhs T) int {

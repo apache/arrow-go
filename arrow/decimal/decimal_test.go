@@ -20,10 +20,13 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"math/rand"
 	"strconv"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/decimal"
+	"github.com/apache/arrow-go/v18/arrow/decimal128"
+	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -178,6 +181,51 @@ func TestDecimalToReal(t *testing.T) {
 	// 10^28 is not exactly representable with 64 bits of precision.
 	want := new(big.Float).SetPrec(64).SetRat(new(big.Rat).SetFrac(big.NewInt(3), new(big.Int).Exp(big.NewInt(10), big.NewInt(28), nil)))
 	assert.Zero(t, want.Cmp(decimal.Decimal64(3).ToBigFloat(28)))
+}
+
+func TestToBigFloatWithinOneULP(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	randCoef := func(bits int) *big.Int {
+		c := new(big.Int).Rand(rng, new(big.Int).Lsh(big.NewInt(1), uint(rng.Intn(bits)+1)))
+		if rng.Intn(2) == 0 {
+			c.Neg(c)
+		}
+		return c
+	}
+	for _, w := range []struct {
+		name       string
+		bits       int
+		toBigFloat func(c *big.Int, scale int32) *big.Float
+	}{
+		{"decimal32", 31, func(c *big.Int, s int32) *big.Float { return decimal.Decimal32(c.Int64()).ToBigFloat(s) }},
+		{"decimal64", 63, func(c *big.Int, s int32) *big.Float { return decimal.Decimal64(c.Int64()).ToBigFloat(s) }},
+		{"decimal128", 127, func(c *big.Int, s int32) *big.Float { return decimal128.FromBigInt(c).ToBigFloat(s) }},
+		{"decimal256", 255, func(c *big.Int, s int32) *big.Float { return decimal256.FromBigInt(c).ToBigFloat(s) }},
+	} {
+		t.Run(w.name, func(t *testing.T) {
+			for i := 0; i < 300; i++ {
+				c, scale := randCoef(w.bits), int32(rng.Intn(4001)-2000)
+				got := w.toBigFloat(c, scale)
+
+				want := new(big.Rat).SetInt(c)
+				pow := new(big.Rat).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(max(scale, -scale))), nil))
+				if scale > 0 {
+					want.Quo(want, pow)
+				} else {
+					want.Mul(want, pow)
+				}
+				gotRat, _ := got.Rat(nil)
+				diff := new(big.Rat).Sub(gotRat, want)
+				ulp := new(big.Rat).SetFloat64(1)
+				if e := got.MantExp(nil) - int(got.Prec()); e < 0 {
+					ulp.SetFrac(big.NewInt(1), new(big.Int).Lsh(big.NewInt(1), uint(-e)))
+				} else {
+					ulp.SetInt(new(big.Int).Lsh(big.NewInt(1), uint(e)))
+				}
+				assert.LessOrEqual(t, diff.Abs(diff).Cmp(ulp), 0, "%s at scale %d", c, scale)
+			}
+		})
+	}
 }
 
 func TestDecimalFromFloat(t *testing.T) {

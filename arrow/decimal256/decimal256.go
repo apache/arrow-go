@@ -26,6 +26,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
+	"github.com/apache/arrow-go/v18/arrow/internal/pow10"
 )
 
 const (
@@ -342,6 +343,9 @@ func (n Num) ToFloat64(scale int32) float64 {
 
 func (n Num) ToBigFloat(scale int32) *big.Float {
 	f := (&big.Float{}).SetInt(n.BigInt())
+	if scale < -MaxScale || scale > MaxScale {
+		return pow10.Mul(f.SetPrec(256), -int64(scale), 256+64)
+	}
 	if scale < 0 {
 		f.SetPrec(256).Mul(f, (&big.Float{}).SetInt(scaleMultipliers[-scale].BigInt()))
 	} else {

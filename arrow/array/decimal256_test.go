@@ -290,4 +290,11 @@ func TestDecimal256GetOneForMarshal(t *testing.T) {
 	for i := range cases {
 		assert.Equalf(t, cases[i].want, arr.GetOneForMarshal(i), "unexpected value at index %d", i)
 	}
+
+	past := array.NewDecimal256Builder(mem, &arrow.Decimal256Type{Precision: 38, Scale: 77})
+	defer past.Release()
+	past.Append(decimal256.FromI64(12345))
+	pastArr := past.NewDecimal256Array()
+	defer pastArr.Release()
+	assert.Equal(t, "1.2345e-73", pastArr.ValueStr(0))
 }

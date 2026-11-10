@@ -181,6 +181,11 @@ func TestDecimalScalarStringCastUsesExactScaling(t *testing.T) {
 	cast256, err := decimal256Scalar.CastTo(arrow.BinaryTypes.String)
 	require.NoError(t, err)
 	assert.Equal(t, "-0.1234567812345678123456781234567812345678123456781234567812345678123456781234", cast256.String())
+
+	assert.Equal(t, "1.2345e-35", scalar.NewDecimal128Scalar(decimal128.FromI64(12345), &arrow.Decimal128Type{Precision: 38, Scale: 39}).String())
+	assert.Equal(t, "-1.2345e-999996", scalar.NewDecimal128Scalar(decimal128.FromI64(-12345), &arrow.Decimal128Type{Precision: 38, Scale: 1_000_000}).String())
+	assert.Equal(t, "1.2345e+81", scalar.NewDecimal256Scalar(decimal256.FromI64(12345), &arrow.Decimal256Type{Precision: 76, Scale: -77}).String())
+	assert.Equal(t, "1.2345e-999996", scalar.NewDecimal256Scalar(decimal256.FromI64(12345), &arrow.Decimal256Type{Precision: 76, Scale: 1_000_000}).String())
 }
 
 func TestDecimal32And64Scalars(t *testing.T) {

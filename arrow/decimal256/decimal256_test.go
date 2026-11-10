@@ -583,6 +583,24 @@ func TestDecimalFromFloat(t *testing.T) {
 	})
 }
 
+func TestDecimalToReal(t *testing.T) {
+	for _, tc := range []struct {
+		scale int32
+		want  string
+	}{
+		{77, "1.2345e-73"},
+		{-77, "1.2345e+81"},
+		{500, "1.2345e-496"},
+		{-500, "1.2345e+504"},
+	} {
+		assert.Equal(t, tc.want, decimal256.FromI64(12345).ToBigFloat(tc.scale).Text('g', 76), tc.scale)
+		assert.Equal(t, "-"+tc.want, decimal256.FromI64(-12345).ToBigFloat(tc.scale).Text('g', 76), tc.scale)
+	}
+	assert.Zero(t, decimal256.Num{}.ToBigFloat(math.MinInt32).Sign())
+	// 10^646456993 overflows big.Float, but 10^-646456993 doesn't.
+	assert.Equal(t, 1, decimal256.FromI64(1).ToBigFloat(646456993).Sign())
+}
+
 func TestFromString(t *testing.T) {
 	tests := []struct {
 		s             string

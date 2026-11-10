@@ -38,6 +38,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/internal/utils"
 )
 
 // Scalar represents a single value of a specific DataType as opposed to
@@ -329,7 +330,7 @@ func (s *Decimal128) CastTo(to arrow.DataType) (Scalar, error) {
 		return NewDecimal256Scalar(newVal, to), nil
 	case arrow.STRING:
 		dt := s.Type.(*arrow.Decimal128Type)
-		return NewStringScalar(s.Value.ToBigFloat(dt.Scale).Text('g', int(dt.Precision))), nil
+		return NewStringScalar(utils.FormatDecimalG(s.Value, dt.Precision, dt.Scale)), nil
 	}
 
 	return nil, fmt.Errorf("cannot cast non-nil decimal128 scalar to type %s", to)
@@ -384,7 +385,7 @@ func (s *Decimal256) CastTo(to arrow.DataType) (Scalar, error) {
 		}
 		return NewDecimal256Scalar(newVal, to), nil
 	case arrow.STRING:
-		return NewStringScalar(s.Value.ToBigFloat(dt.Scale).Text('g', int(dt.Precision))), nil
+		return NewStringScalar(utils.FormatDecimalG(s.Value, dt.Precision, dt.Scale)), nil
 	}
 
 	return nil, fmt.Errorf("cannot cast non-nil decimal256 scalar to type %s", to)
