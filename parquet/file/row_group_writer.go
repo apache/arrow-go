@@ -238,6 +238,13 @@ func (rg *rowGroupWriter) Close() error {
 		rg.closed = true
 		if err := rg.checkRowsWritten(); err != nil {
 			rg.closeErr = err
+			// the row group is invalid, so free the column writers
+			// without flushing any of their pages to the sink
+			for _, wr := range rg.columnWriters {
+				if d, ok := wr.(interface{ discard() }); ok {
+					d.discard()
+				}
+			}
 			return err
 		}
 

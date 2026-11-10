@@ -698,20 +698,9 @@ func (w *columnWriter) resetPageStatistics() {
 func (w *columnWriter) Close() (err error) {
 	if !w.closed {
 		w.closed = true
-		defer func() { w.uncompressedData = bytes.Buffer{} }()
 		// release and reset everything even if a flush or the chunk
 		// statistics handling fails
-		defer func() {
-			w.defLevelSink.Reset(0)
-			w.repLevelSink.Reset(0)
-			if w.bitsBuffer != nil {
-				w.bitsBuffer.Release()
-				w.bitsBuffer = nil
-			}
-
-			w.currentEncoder.Release()
-			w.currentEncoder = nil
-		}()
+		defer w.release()
 
 		if w.hasDict && !w.fallbackToNonDict {
 			if err = w.WriteDictionaryPage(); err != nil {
@@ -745,6 +734,31 @@ func (w *columnWriter) Close() (err error) {
 		err = w.pager.Close(advertiseDict, advertiseFallback)
 	}
 	return err
+}
+
+// discard releases the writer's buffers without writing anything to the sink.
+func (w *columnWriter) discard() {
+	if w.closed {
+		return
+	}
+	w.closed = true
+	w.release()
+	if p, ok := w.pager.(interface{ release() }); ok {
+		p.release()
+	}
+}
+
+func (w *columnWriter) release() {
+	w.uncompressedData = bytes.Buffer{}
+	w.defLevelSink.Reset(0)
+	w.repLevelSink.Reset(0)
+	if w.bitsBuffer != nil {
+		w.bitsBuffer.Release()
+		w.bitsBuffer = nil
+	}
+
+	w.currentEncoder.Release()
+	w.currentEncoder = nil
 }
 
 func (w *columnWriter) doBatches(total int64, repLevels []int16, action func(offset, batch int64)) {

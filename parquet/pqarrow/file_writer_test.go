@@ -405,7 +405,8 @@ func TestFileWriterCloseReleasesBuffersWhenSinkFails(t *testing.T) {
 		defer rec.Release()
 
 		writer, err := pqarrow.NewFileWriter(schema, sink,
-			parquet.NewWriterProperties(parquet.WithAllocator(mem), parquet.WithDictionaryFor("str", false)),
+			parquet.NewWriterProperties(parquet.WithAllocator(mem), parquet.WithDictionaryFor("str", false),
+				parquet.WithDataPageSize(1024), parquet.WithBatchSize(100)),
 			pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem), pqarrow.WithStoreSchema()))
 		require.NoError(t, err)
 

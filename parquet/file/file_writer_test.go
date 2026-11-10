@@ -1770,6 +1770,56 @@ func TestWriterReleasesBuffersWhenSinkFails(t *testing.T) {
 	}
 }
 
+func TestRowGroupCloseDiscardsColumnsOnRowMismatch(t *testing.T) {
+	for _, buffered := range []bool{false, true} {
+		t.Run(fmt.Sprintf("buffered=%t", buffered), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			props := parquet.NewWriterProperties(
+				parquet.WithAllocator(mem),
+				parquet.WithDictionaryFor("plain", false),
+				parquet.WithDataPageSize(1024),
+				parquet.WithBatchSize(100),
+			)
+			var sink bytes.Buffer
+			writer, err := file.NewParquetWriterWithError(&sink, newPlainAndDictStringSchema(t), file.WithWriterProps(props))
+			require.NoError(t, err)
+
+			var rgw file.RowGroupWriter
+			nextColumn := func(i int) file.ColumnChunkWriter {
+				var cw file.ColumnChunkWriter
+				if buffered {
+					cw, err = rgw.(file.BufferedRowGroupWriter).Column(i)
+				} else {
+					cw, err = rgw.(file.SerialRowGroupWriter).NextColumn()
+				}
+				require.NoError(t, err)
+				return cw
+			}
+			if buffered {
+				rgw, err = writer.AppendBufferedRowGroupChecked()
+			} else {
+				rgw, err = writer.AppendRowGroupChecked()
+			}
+			require.NoError(t, err)
+
+			first := nextColumn(0)
+			require.NoError(t, writeStringColumn(first))
+			last := nextColumn(1)
+			_, err = last.(*file.ByteArrayColumnChunkWriter).WriteBatch(
+				[]parquet.ByteArray{parquet.ByteArray("a")}, []int16{1}, nil)
+			require.NoError(t, err)
+
+			written := sink.Len()
+			require.ErrorContains(t, rgw.Close(), "row mismatch")
+			require.NoError(t, first.Close())
+			require.NoError(t, last.Close())
+			require.ErrorContains(t, writer.Close(), "row mismatch")
+			require.Equal(t, written, sink.Len(), "bytes written after the row count mismatch")
+			mem.AssertSize(t, 0)
+		})
+	}
+}
+
 // writeOffsetsSink records where each Write starts, which marks every page
 // header, page body and footer boundary of the written file.
 type writeOffsetsSink struct {
