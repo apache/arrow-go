@@ -841,7 +841,7 @@ func getNumericCasts() []*castFunction {
 	}
 
 	out = append(out, getFn("cast_int8", arrow.INT8, kernels.GetCastToInteger[int8](arrow.PrimitiveTypes.Int8)))
-	out = append(out, getFn("cast_int16", arrow.INT16, kernels.GetCastToInteger[int8](arrow.PrimitiveTypes.Int16)))
+	out = append(out, getFn("cast_int16", arrow.INT16, kernels.GetCastToInteger[int16](arrow.PrimitiveTypes.Int16)))
 
 	castInt32 := getFn("cast_int32", arrow.INT32, kernels.GetCastToInteger[int32](arrow.PrimitiveTypes.Int32))
 	castInt32.AddTypeCast(arrow.DATE32,
