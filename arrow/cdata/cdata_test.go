@@ -1201,6 +1201,7 @@ func TestExtensionArrayRoundTrip(t *testing.T) {
 		nbuffers int
 	}{
 		{"string_view", arrow.BinaryTypes.StringView, `["a", null, "longer than twelve bytes"]`, 4},
+		{"list", arrow.ListOf(arrow.PrimitiveTypes.Int32), `[[1, 2], null, []]`, 2},
 		{"sparse_union", arrow.SparseUnionOf([]arrow.Field{{Name: "i", Type: arrow.PrimitiveTypes.Int32, Nullable: true}}, []arrow.UnionTypeCode{0}), `[[0, 1], [0, null]]`, 1},
 		{"dictionary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}, `["a", null, "b", "a"]`, 2},
 	}
