@@ -26,7 +26,6 @@ import (
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/internal/decimalstr"
 )
@@ -69,7 +68,6 @@ type (
 	Decimal32  int32
 	Decimal64  int64
 	Decimal128 = decimal128.Num
-	Decimal256 = decimal256.Num
 )
 
 func MaxPrecision[T DecimalTypes]() int {
@@ -273,10 +271,6 @@ func Decimal128FromString(v string, prec, scale int32) (n Decimal128, err error)
 	return decimal128.FromString(v, prec, scale)
 }
 
-func Decimal256FromString(v string, prec, scale int32) (n Decimal256, err error) {
-	return decimal256.FromString(v, prec, scale)
-}
-
 func scalePositiveFloat64(v float64, prec, scale int32) (float64, error) {
 	v *= math.Pow10(int(scale))
 	v = math.RoundToEven(v)
@@ -329,10 +323,6 @@ func Decimal64FromFloat[F float32 | float64](v F, prec, scale int32) (Decimal64,
 
 func Decimal128FromFloat(v float64, prec, scale int32) (Decimal128, error) {
 	return decimal128.FromFloat64(v, prec, scale)
-}
-
-func Decimal256FromFloat(v float64, prec, scale int32) (Decimal256, error) {
-	return decimal256.FromFloat64(v, prec, scale)
 }
 
 func (n Decimal32) ToFloat32(scale int32) float32 {
