@@ -281,6 +281,26 @@ func TestDecimal128GetOneForMarshal(t *testing.T) {
 	for i := range cases {
 		assert.Equalf(t, cases[i].want, arr.GetOneForMarshal(i), "unexpected value at index %d", i)
 	}
+
+	for _, tc := range []struct {
+		scale int32
+		want  string
+	}{
+		{-38, "1.2345e+42"},
+		{39, "<scale out of range, cannot format Decimal128 value>"},
+		{-39, "<scale out of range, cannot format Decimal128 value>"},
+		{1001, "<scale out of range, cannot format Decimal128 value>"},
+	} {
+		past := array.NewDecimal128Builder(mem, &arrow.Decimal128Type{Precision: 38, Scale: tc.scale})
+		past.Append(decimal128.FromI64(12345))
+		pastArr := past.NewDecimal128Array()
+		assert.Equal(t, tc.want, pastArr.GetOneForMarshal(0), "scale %d", tc.scale)
+		if tc.scale == 39 {
+			assert.Equal(t, tc.want, pastArr.ValueStr(0), "ValueStr at scale %d", tc.scale)
+		}
+		pastArr.Release()
+		past.Release()
+	}
 }
 
 // TestDecimal128StringScaled is a regression test for apache/arrow-go#848:

@@ -704,6 +704,37 @@ func TestToStringRejectsInvalidScale(t *testing.T) {
 	}
 }
 
+func TestToBigFloatRejectsInvalidScale(t *testing.T) {
+	for _, scale := range []int32{77, -77, math.MinInt32} {
+		assert.PanicsWithValue(t, "arrow/decimal256: scale out of range", func() { decimal256.FromI64(12345).ToBigFloat(scale) }, "scale %d", scale)
+	}
+}
+
+func TestFromStringScaleOutOfRange(t *testing.T) {
+	for _, tc := range []struct {
+		s     string
+		scale int32
+		want  string
+	}{
+		{"1e-77", 77, "scale 77 out of range for decimal256, must be between -76 and 76"},
+		{"1", -77, "scale -77 out of range for decimal256, must be between -76 and 76"},
+		{"1", math.MinInt32, "scale -2147483648 out of range for decimal256, must be between -76 and 76"},
+	} {
+		_, err := decimal256.FromString(tc.s, 76, tc.scale)
+		assert.EqualError(t, err, tc.want, "%s at scale %d", tc.s, tc.scale)
+	}
+
+	n, err := decimal256.FromString("1e76", 76, -76)
+	require.NoError(t, err)
+	assert.Equal(t, decimal256.FromI64(1), n)
+
+	// Errors found before the scale is used take precedence.
+	_, err = decimal256.FromString("1e78", 76, -77)
+	assert.EqualError(t, err, "bitlen too large for decimal256")
+	_, err = decimal256.FromString("Inf", 76, 77)
+	assert.EqualError(t, err, "cannot convert Inf to decimal256")
+}
+
 // Test issues from GH-38395
 func TestHexFromString(t *testing.T) {
 	const decStr = "11111111111111111111111111111111111111.00000000000000000000000000000000000000"
