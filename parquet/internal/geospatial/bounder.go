@@ -111,20 +111,6 @@ func (b *Bounder) Types() []int32 {
 // Empty reports whether no geometry has been seen at all.
 func (b *Bounder) Empty() bool { return len(b.types) == 0 }
 
-// Merge folds other into b.
-func (b *Bounder) Merge(other *Bounder) {
-	if other.invalid {
-		b.invalid = true
-	}
-	for i := range b.min {
-		b.min[i] = math.Min(b.min[i], other.min[i])
-		b.max[i] = math.Max(b.max[i], other.max[i])
-	}
-	for t := range other.types {
-		b.types[t] = struct{}{}
-	}
-}
-
 // Update adds a single WKB-encoded geometry.
 func (b *Bounder) Update(wkb []byte) {
 	if b.invalid {

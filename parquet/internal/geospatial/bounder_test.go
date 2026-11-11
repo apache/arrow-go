@@ -121,12 +121,10 @@ func TestBounderEmptyPointAndInvalid(t *testing.T) {
 		assert.False(t, b.Valid(), name)
 	}
 
-	// invalid is sticky until Reset, and survives Merge
+	// invalid is sticky until Reset
 	b = geospatial.NewBounder()
 	b.Update(nil)
-	other := geospatial.NewBounder()
-	other.Merge(b)
-	assert.False(t, other.Valid())
+	assert.False(t, b.Valid())
 	b.Reset()
 	assert.True(t, b.Valid())
 }
@@ -492,43 +490,6 @@ func TestBounderAccumulation(t *testing.T) {
 	b.Update(wkb(le, 2, uint32(1), 100.0, 100.0))
 	assert.False(t, b.Valid())
 	assert.Equal(t, types, b.Types())
-}
-
-func TestBounderMerge(t *testing.T) {
-	le := byteOrder(binary.LittleEndian)
-
-	a := geospatial.NewBounder()
-	a.Update(wkb(le, 1, 0.0, 0.0))
-	a.Update(wkb(le, 1, 1.0, 1.0))
-
-	z := geospatial.NewBounder()
-	z.Update(wkb(le, 1001, -5.0, 10.0, 3.0))
-
-	a.Merge(z)
-	require.True(t, a.Valid())
-	assert.Equal(t, []int32{1, 1001}, a.Types())
-	assertDim(t, a, geospatial.DimX, &bounds{-5, 1}, "x")
-	assertDim(t, a, geospatial.DimY, &bounds{0, 10}, "y")
-	assertDim(t, a, geospatial.DimZ, &bounds{3, 3}, "z")
-	assertDim(t, a, geospatial.DimM, nil, "m")
-
-	// merging an empty Bounder changes nothing
-	before := a.Types()
-	a.Merge(geospatial.NewBounder())
-	assert.Equal(t, before, a.Types())
-	assertDim(t, a, geospatial.DimX, &bounds{-5, 1}, "x after empty merge")
-
-	// merging into an empty Bounder copies everything
-	empty := geospatial.NewBounder()
-	empty.Merge(a)
-	assert.Equal(t, a.Types(), empty.Types())
-	for dim := range 4 {
-		assert.Equal(t, a.HasDim(dim), empty.HasDim(dim))
-		if a.HasDim(dim) {
-			assert.Equal(t, a.Min(dim), empty.Min(dim))
-			assert.Equal(t, a.Max(dim), empty.Max(dim))
-		}
-	}
 }
 
 func TestNewBounderFrom(t *testing.T) {
