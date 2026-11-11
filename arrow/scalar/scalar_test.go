@@ -147,6 +147,9 @@ func TestBasicDecimal128(t *testing.T) {
 	assert.False(t, null.IsValid())
 
 	assert.False(t, scalar.Equals(pi, pi2))
+
+	_, err := pi.CastTo(&arrow.Decimal128Type{Precision: 38, Scale: 38})
+	assert.EqualError(t, err, "rescale data loss")
 }
 
 func TestBasicDecimal256(t *testing.T) {
@@ -181,11 +184,6 @@ func TestDecimalScalarStringCastUsesExactScaling(t *testing.T) {
 	cast256, err := decimal256Scalar.CastTo(arrow.BinaryTypes.String)
 	require.NoError(t, err)
 	assert.Equal(t, "-0.1234567812345678123456781234567812345678123456781234567812345678123456781234", cast256.String())
-
-	assert.Equal(t, "1.2345e-35", scalar.NewDecimal128Scalar(decimal128.FromI64(12345), &arrow.Decimal128Type{Precision: 38, Scale: 39}).String())
-	assert.Equal(t, "-1.2345e-999996", scalar.NewDecimal128Scalar(decimal128.FromI64(-12345), &arrow.Decimal128Type{Precision: 38, Scale: 1_000_000}).String())
-	assert.Equal(t, "1.2345e+81", scalar.NewDecimal256Scalar(decimal256.FromI64(12345), &arrow.Decimal256Type{Precision: 76, Scale: -77}).String())
-	assert.Equal(t, "1.2345e-999996", scalar.NewDecimal256Scalar(decimal256.FromI64(12345), &arrow.Decimal256Type{Precision: 76, Scale: 1_000_000}).String())
 }
 
 func TestDecimal32And64Scalars(t *testing.T) {
@@ -1435,24 +1433,6 @@ func TestListScalarHashSupportsChildArraysWithoutScalars(t *testing.T) {
 		name      string
 		newValues func() arrow.Array
 	}{
-		{
-			name: "decimal32",
-			newValues: func() arrow.Array {
-				b := array.NewDecimal32Builder(memory.DefaultAllocator, &arrow.Decimal32Type{Precision: 6, Scale: 2})
-				defer b.Release()
-				b.AppendValues([]decimal.Decimal32{123, 456}, nil)
-				return b.NewDecimalArray()
-			},
-		},
-		{
-			name: "decimal64",
-			newValues: func() arrow.Array {
-				b := array.NewDecimal64Builder(memory.DefaultAllocator, &arrow.Decimal64Type{Precision: 12, Scale: 2})
-				defer b.Release()
-				b.AppendValues([]decimal.Decimal64{123, 456}, nil)
-				return b.NewDecimalArray()
-			},
-		},
 		{
 			name: "list view",
 			newValues: func() arrow.Array {

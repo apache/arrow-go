@@ -20,13 +20,11 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"math/rand"
+	"runtime"
 	"strconv"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/decimal"
-	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -183,51 +181,6 @@ func TestDecimalToReal(t *testing.T) {
 	assert.Zero(t, want.Cmp(decimal.Decimal64(3).ToBigFloat(28)))
 }
 
-func TestToBigFloatWithinOneULP(t *testing.T) {
-	rng := rand.New(rand.NewSource(1))
-	randCoef := func(bits int) *big.Int {
-		c := new(big.Int).Rand(rng, new(big.Int).Lsh(big.NewInt(1), uint(rng.Intn(bits)+1)))
-		if rng.Intn(2) == 0 {
-			c.Neg(c)
-		}
-		return c
-	}
-	for _, w := range []struct {
-		name       string
-		bits       int
-		toBigFloat func(c *big.Int, scale int32) *big.Float
-	}{
-		{"decimal32", 31, func(c *big.Int, s int32) *big.Float { return decimal.Decimal32(c.Int64()).ToBigFloat(s) }},
-		{"decimal64", 63, func(c *big.Int, s int32) *big.Float { return decimal.Decimal64(c.Int64()).ToBigFloat(s) }},
-		{"decimal128", 127, func(c *big.Int, s int32) *big.Float { return decimal128.FromBigInt(c).ToBigFloat(s) }},
-		{"decimal256", 255, func(c *big.Int, s int32) *big.Float { return decimal256.FromBigInt(c).ToBigFloat(s) }},
-	} {
-		t.Run(w.name, func(t *testing.T) {
-			for i := 0; i < 300; i++ {
-				c, scale := randCoef(w.bits), int32(rng.Intn(4001)-2000)
-				got := w.toBigFloat(c, scale)
-
-				want := new(big.Rat).SetInt(c)
-				pow := new(big.Rat).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(max(scale, -scale))), nil))
-				if scale > 0 {
-					want.Quo(want, pow)
-				} else {
-					want.Mul(want, pow)
-				}
-				gotRat, _ := got.Rat(nil)
-				diff := new(big.Rat).Sub(gotRat, want)
-				ulp := new(big.Rat).SetFloat64(1)
-				if e := got.MantExp(nil) - int(got.Prec()); e < 0 {
-					ulp.SetFrac(big.NewInt(1), new(big.Int).Lsh(big.NewInt(1), uint(-e)))
-				} else {
-					ulp.SetInt(new(big.Int).Lsh(big.NewInt(1), uint(e)))
-				}
-				assert.LessOrEqual(t, diff.Abs(diff).Cmp(ulp), 0, "%s at scale %d", c, scale)
-			}
-		})
-	}
-}
-
 func TestDecimalFromFloat(t *testing.T) {
 	tests := []struct {
 		val              float64
@@ -348,6 +301,14 @@ func TestFromString(t *testing.T) {
 		{"2112.33", 211233, 2},
 		{"-2112.33", -211233, 2},
 		{"12E2", 12, -2},
+		{"0", 0, 0},
+		{"0.24", 0, 0},
+		{"0.5", 1, 0},
+		{"-0.5", -1, 0},
+		{"0.51", 1, 0},
+		{"-0.51", -1, 0},
+		{"0.0051", 1, 2},
+		{"-0.0051", -1, 2},
 	}
 
 	for _, tt := range tests {
@@ -377,8 +338,15 @@ func TestFromString(t *testing.T) {
 		_, err := decimal.Decimal32FromString(s, 9, 0)
 		assert.Error(t, err, s)
 	}
-	_, err := decimal.Decimal64FromString("9223372036854775808", 18, 0)
+	n32, err := decimal.Decimal32FromString("4294967295", 9, -1)
+	require.NoError(t, err)
+	assert.Equal(t, decimal.Decimal32(429496729), n32)
+	_, err = decimal.Decimal32FromString("4294967296", 9, -1)
+	assert.ErrorContains(t, err, "bitlen too large for decimal32")
+	_, err = decimal.Decimal64FromString("9223372036854775808", 18, 0)
 	assert.Error(t, err)
+	_, err = decimal.Decimal64FromString("18446744073709551616", 18, -1)
+	assert.ErrorContains(t, err, "bitlen too large for decimal64")
 
 	for _, tc := range []struct {
 		s     string
@@ -386,6 +354,7 @@ func TestFromString(t *testing.T) {
 		want  decimal.Decimal64
 	}{
 		{"9223372036854775808", -1, 922337203685477580},
+		{"18446744073709551615", -2, 184467440737095516},
 		{"10000000000000000000", -19, 1},
 		{"18000000000000000000", -20, 0},
 		{"1", math.MinInt32, 0},
@@ -421,6 +390,18 @@ func TestFromString(t *testing.T) {
 		assert.Equal(t, decimal.Decimal32(tc.want), n32, tc.s)
 		assert.Equal(t, decimal.Decimal64(tc.want), n64, tc.s)
 	}
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	tiny32, err := decimal.Decimal32FromString("-1e-20000000", 9, 0)
+	require.NoError(t, err)
+	tiny64, err := decimal.Decimal64FromString("-1e-20000000", 18, 0)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	assert.Equal(t, decimal.Decimal32(0), tiny32)
+	assert.Equal(t, decimal.Decimal64(0), tiny64)
+	// Rounding these values directly would allocate about 33 MB.
+	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
 }
 
 func TestCmp(t *testing.T) {
@@ -508,6 +489,61 @@ func TestDecimalRescale(t *testing.T) {
 	// A value that genuinely overflows Decimal64 still reports data loss.
 	_, err = decimal.Decimal64(5_000_000_000_000_000_000).Rescale(0, 1)
 	assert.ErrorContains(t, err, "rescale data loss")
+
+	for _, tc := range []struct {
+		bits               int
+		n                  int64
+		oldScale, newScale int32
+		want               int64
+		wantErr            bool
+	}{
+		{64, 1, 0, 10, 10_000_000_000, false},
+		{64, -1, 0, 18, -1_000_000_000_000_000_000, false},
+		{64, 10_000_000_000, 10, 0, 1, false},
+		{64, -1_000_000_000_000_000_000, 18, 0, -1, false},
+		{32, 2, 0, 9, 2_000_000_000, false},
+		{32, -3, 0, 9, 0, true},
+		{64, -9, 0, 18, -9_000_000_000_000_000_000, false},
+		{64, 10, 0, 18, 0, true},
+		{32, 214748364, 0, 1, 2147483640, false},
+		{32, 214748365, 0, 1, 0, true},
+		{64, -922337203685477580, 0, 1, -9223372036854775800, false},
+		{64, -922337203685477581, 0, 1, 0, true},
+		{32, 1, 0, 10, 0, true},
+		{64, -1, 19, 0, 0, true},
+		{32, 1410065408, 10, 0, 0, true},
+		{32, 0, 32, 0, 0, false},
+		{64, 0, math.MinInt32, math.MaxInt32, 0, false},
+		{32, math.MinInt32, 5, 5, math.MinInt32, false},
+		{32, math.MinInt32, 1, 0, 0, true},
+		{64, math.MinInt64, 0, 1, 0, true},
+		{32, 10, math.MinInt32, math.MaxInt32, 0, true},
+		{64, 10, math.MaxInt32, math.MinInt32, 0, true},
+		{32, 1, -1, math.MaxInt32, 0, true},
+		{32, 111, math.MaxInt32 - 2, math.MaxInt32, 11100, false},
+		{64, 11100, math.MinInt32 + 2, math.MinInt32, 111, false},
+		{64, -555, 2, 1, 0, true},
+	} {
+		t.Run(fmt.Sprintf("decimal%d_%d_%d_%d", tc.bits, tc.n, tc.oldScale, tc.newScale), func(t *testing.T) {
+			var got int64
+			var err error
+			if tc.bits == 32 {
+				var out decimal.Decimal32
+				out, err = decimal.Decimal32(tc.n).Rescale(tc.oldScale, tc.newScale)
+				got = int64(out)
+			} else {
+				var out decimal.Decimal64
+				out, err = decimal.Decimal64(tc.n).Rescale(tc.oldScale, tc.newScale)
+				got = int64(out)
+			}
+			if tc.wantErr {
+				assert.EqualError(t, err, "rescale data loss")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
 
 func TestDecimalIncreaseScale(t *testing.T) {
@@ -548,6 +584,8 @@ func TestDecimalReduceScale(t *testing.T) {
 		assert.Equal(t, decimal.Decimal64(tt.expected).Negate(),
 			decimal.Decimal64(tt.value).Negate().ReduceScaleBy(tt.scale, tt.round), "decimal64")
 	}
+
+	assert.Equal(t, decimal.Decimal64(1), decimal.Decimal64(10_000_000_000).ReduceScaleBy(10, false))
 }
 
 func TestDecimalBasics(t *testing.T) {

@@ -584,24 +584,6 @@ func TestDecimalFromFloat(t *testing.T) {
 	})
 }
 
-func TestDecimalToReal(t *testing.T) {
-	for _, tc := range []struct {
-		scale int32
-		want  string
-	}{
-		{77, "1.2345e-73"},
-		{-77, "1.2345e+81"},
-		{500, "1.2345e-496"},
-		{-500, "1.2345e+504"},
-	} {
-		assert.Equal(t, tc.want, decimal256.FromI64(12345).ToBigFloat(tc.scale).Text('g', 76), tc.scale)
-		assert.Equal(t, "-"+tc.want, decimal256.FromI64(-12345).ToBigFloat(tc.scale).Text('g', 76), tc.scale)
-	}
-	assert.Zero(t, decimal256.Num{}.ToBigFloat(math.MinInt32).Sign())
-	// 10^646456993 overflows big.Float, but 10^-646456993 doesn't.
-	assert.Equal(t, 1, decimal256.FromI64(1).ToBigFloat(646456993).Sign())
-}
-
 func TestFromString(t *testing.T) {
 	tests := []struct {
 		s             string
@@ -631,23 +613,14 @@ func TestFromString(t *testing.T) {
 		{"2112.33", 211233, 2},
 		{"-2112.33", -211233, 2},
 		{"12E2", 12, -2},
-		{"1e-77", 1, 77},
-		{"1.2345e-496", 12345, 500},
-		{"-1.2345e-996", -12345, 1000},
-		{"5e76", 0, -77},
-		{"1", 0, math.MinInt32},
-		{"0", 0, 77},
-		{"2.4e-78", 0, 77},
-		{"2.6e-78", 0, 77},
-		{"-2.6e-78", 0, 77},
-		{"4.9e-78", 0, 77},
-		{"-4.9e-78", 0, 77},
-		{"5.1e-78", 1, 77},
-		{"-5.1e-78", -1, 77},
-		{"5e-78", 1, 77},
-		{"-5e-78", -1, 77},
-		{"1e-2000000", 0, 1000000},
-		{"-1e-2000000", 0, 1000000},
+		{"0", 0, 0},
+		{"0.24", 0, 0},
+		{"0.5", 1, 0},
+		{"-0.5", -1, 0},
+		{"0.51", 1, 0},
+		{"-0.51", -1, 0},
+		{"0.0051", 1, 2},
+		{"-0.0051", -1, 2},
 	}
 
 	for _, tt := range tests {
@@ -660,34 +633,32 @@ func TestFromString(t *testing.T) {
 		})
 	}
 
-	for _, scale := range []int32{math.MaxInt32} {
-		_, err := decimal256.FromString("1", 35, scale)
-		assert.ErrorContains(t, err, "bitlen too large for decimal256", scale)
+	for _, s := range []string{"Inf", "+Inf", "-inf", "1e1000000000", "-1e1000000000"} {
+		for _, scale := range []int32{2, -2} {
+			_, err := decimal256.FromString(s, 35, scale)
+			assert.ErrorContains(t, err, "cannot convert", "%s at scale %d", s, scale)
+		}
 	}
 
-	coef, _ := new(big.Int).SetString("1234567890123456789012345678901234567890123456789012345678901234567890", 10)
-	for _, scale := range []int32{77, 500, 1000} {
-		want := decimal256.FromBigInt(coef)
-		got, err := decimal256.FromString(want.ToBigFloat(scale).Text('e', 76), 76, scale)
-		require.NoError(t, err, scale)
-		assert.Equal(t, want, got, scale)
+	for _, tc := range []struct {
+		s     string
+		scale int32
+	}{
+		{"1e646456990", 76},
+		{"-1e600000000", -2},
+	} {
+		_, err := decimal256.FromString(tc.s, 35, tc.scale)
+		assert.ErrorContains(t, err, "bitlen too large for decimal256", "%s at scale %d", tc.s, tc.scale)
 	}
 
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	tiny, err := decimal256.FromString("-1e-20000000", 76, 10_000_000)
+	tiny, err := decimal256.FromString("-1e-20000000", 37, 0)
 	runtime.ReadMemStats(&after)
 	require.NoError(t, err)
 	assert.Equal(t, decimal256.Num{}, tiny)
-	// Rounding this value directly would allocate about 8 MB.
+	// Rounding this value directly would allocate about 16 MB.
 	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
-
-	const exact = "1234567890123456789012345678901234567890123456789012345678901234567890123456"
-	for _, scale := range []int32{5000} {
-		n, err := decimal256.FromString(fmt.Sprintf("%se-%d", exact, scale), 76, scale)
-		require.NoError(t, err, scale)
-		assert.Equal(t, exact, n.BigInt().String(), scale)
-	}
 }
 
 // Test issues from GH-38395
@@ -763,4 +734,12 @@ func TestBitLen(t *testing.T) {
 	assert.ErrorContains(t, err, "bitlen too large for decimal256")
 	_, err = decimal256.FromString(b.String(), decimal256.MaxPrecision, -1)
 	assert.ErrorContains(t, err, "bitlen too large for decimal256")
+
+	limit := new(big.Int).Lsh(big.NewInt(1), 255)
+	_, err = decimal256.FromString(limit.String(), decimal256.MaxPrecision, -1)
+	assert.ErrorContains(t, err, "bitlen too large for decimal256")
+	limit.Sub(limit, big.NewInt(1))
+	got, err := decimal256.FromString(limit.String(), decimal256.MaxPrecision, -1)
+	require.NoError(t, err)
+	assert.Equal(t, limit.Quo(limit, big.NewInt(10)).String(), got.BigInt().String())
 }

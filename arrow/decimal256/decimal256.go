@@ -26,7 +26,6 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
-	"github.com/apache/arrow-go/v18/arrow/internal/pow10"
 )
 
 const (
@@ -155,38 +154,33 @@ func FromString(v string, prec, scale int32) (n Num, err error) {
 	if err != nil {
 		return
 	}
+	if out.IsInf() {
+		return Num{}, fmt.Errorf("cannot convert %s to decimal256", v)
+	}
 
 	if scale < 0 {
-		var tmp big.Int
-		val, _ := out.Int(&tmp)
-		if val.BitLen() > 255 {
+		// Check the magnitude before converting, which would allocate as many
+		// bits as the value has.
+		if out.MantExp(nil) > 255 {
 			return Num{}, errors.New("bitlen too large for decimal256")
 		}
+		var tmp big.Int
+		val, _ := out.Int(&tmp)
 		n = FromBigInt(val)
 
-		if scale >= -MaxScale {
-			n, _ = n.Div(scaleMultipliers[-scale])
-		} else {
-			// |n| < 2^255 < 10^77, so the quotient is zero.
-			n = Num{}
-		}
+		n, _ = n.Div(scaleMultipliers[-scale])
 	} else {
-		if scale <= MaxScale {
-			out.Mul(out, (&big.Float{}).SetInt(scaleMultipliers[scale].BigInt())).SetPrec(precInBits)
-		} else {
-			pow10.Mul(out, int64(scale), 256+64).SetPrec(precInBits)
-			// A large scale can push the value to infinity or far past 256
-			// bits, and converting either would panic or allocate as many
-			// bits as the value has.
-			if out.IsInf() || out.MantExp(nil) > 256 {
-				return Num{}, errors.New("bitlen too large for decimal256")
-			}
-			// A magnitude below 1/4 rounds to zero. Clearing it skips the
-			// rounding below, which allocates in proportion to the gap between
-			// the value's exponent and 0.5's.
-			if out.MantExp(nil) < -1 {
-				out.SetInt64(0)
-			}
+		out.Mul(out, (&big.Float{}).SetInt(scaleMultipliers[scale].BigInt())).SetPrec(precInBits)
+		// Reject before rounding and converting, which would allocate as many
+		// bits as the value has.
+		if out.IsInf() || out.MantExp(nil) > 256 {
+			return Num{}, errors.New("bitlen too large for decimal256")
+		}
+		// A magnitude below 1/4 rounds to zero. Clearing it skips the
+		// rounding below, which allocates in proportion to the gap between
+		// the value's exponent and 0.5's.
+		if out.MantExp(nil) < -1 {
+			out.SetInt64(0)
 		}
 		// Since we're going to truncate this to get an integer, we need to round
 		// the value instead because of edge cases so that we match how other implementations
@@ -364,9 +358,6 @@ func (n Num) ToFloat64(scale int32) float64 {
 
 func (n Num) ToBigFloat(scale int32) *big.Float {
 	f := (&big.Float{}).SetInt(n.BigInt())
-	if scale < -MaxScale || scale > MaxScale {
-		return pow10.Mul(f.SetPrec(256), -int64(scale), 256+64)
-	}
 	if scale < 0 {
 		f.SetPrec(256).Mul(f, (&big.Float{}).SetInt(scaleMultipliers[-scale].BigInt()))
 	} else {

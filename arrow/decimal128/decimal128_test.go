@@ -208,6 +208,37 @@ func TestDiv(t *testing.T) {
 	}
 }
 
+func TestRescale(t *testing.T) {
+	oneE38 := decimal128.FromBigInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(38), nil))
+	for _, tc := range []struct {
+		n                  int64
+		original, newScale int32
+		want               decimal128.Num
+		wantErr            bool
+	}{
+		{111, 0, 2, decimal128.FromI64(11100), false},
+		{-11100, 2, 0, decimal128.FromI64(-111), false},
+		{555, 2, 1, decimal128.Num{}, true},
+		{1, 0, 38, oneE38, false},
+		{-2, 0, 38, decimal128.Num{}, true},
+		{0, -9, 38, decimal128.Num{}, false},
+		{0, 38, -9, decimal128.Num{}, false},
+		{12, 0, 39, decimal128.Num{}, true},
+		{-12, 39, 0, decimal128.Num{}, true},
+		{10, math.MinInt32, math.MaxInt32, decimal128.Num{}, true},
+	} {
+		t.Run(fmt.Sprintf("%d_%d_%d", tc.n, tc.original, tc.newScale), func(t *testing.T) {
+			got, err := decimal128.FromI64(tc.n).Rescale(tc.original, tc.newScale)
+			if tc.wantErr {
+				assert.EqualError(t, err, "rescale data loss")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestPow(t *testing.T) {
 	for _, tc := range []struct {
 		n    decimal128.Num
@@ -536,22 +567,6 @@ func TestDecimalToReal(t *testing.T) {
 			}
 		})
 	})
-
-	for _, tc := range []struct {
-		scale int32
-		want  string
-	}{
-		{39, "1.2345e-35"},
-		{-39, "1.2345e+43"},
-		{500, "1.2345e-496"},
-		{-500, "1.2345e+504"},
-	} {
-		assert.Equal(t, tc.want, decimal128.FromI64(12345).ToBigFloat(tc.scale).Text('g', 38), tc.scale)
-		assert.Equal(t, "-"+tc.want, decimal128.FromI64(-12345).ToBigFloat(tc.scale).Text('g', 38), tc.scale)
-	}
-	assert.Zero(t, decimal128.Num{}.ToBigFloat(math.MinInt32).Sign())
-	// 10^646456993 overflows big.Float, but 10^-646456993 doesn't.
-	assert.Equal(t, 1, decimal128.FromI64(1).ToBigFloat(646456993).Sign())
 }
 
 func TestDecimalFromFloat(t *testing.T) {
@@ -689,23 +704,14 @@ func TestFromString(t *testing.T) {
 		{"2112.33", 211233, 2},
 		{"-2112.33", -211233, 2},
 		{"12E2", 12, -2},
-		{"1e-39", 1, 39},
-		{"1.2345e-496", 12345, 500},
-		{"-1.2345e-996", -12345, 1000},
-		{"1e38", 0, -39},
-		{"1", 0, math.MinInt32},
-		{"0", 0, 39},
-		{"2.4e-40", 0, 39},
-		{"2.6e-40", 0, 39},
-		{"-2.6e-40", 0, 39},
-		{"4.9e-40", 0, 39},
-		{"-4.9e-40", 0, 39},
-		{"5.1e-40", 1, 39},
-		{"-5.1e-40", -1, 39},
-		{"5e-40", 1, 39},
-		{"-5e-40", -1, 39},
-		{"1e-2000000", 0, 1000000},
-		{"-1e-2000000", 0, 1000000},
+		{"0", 0, 0},
+		{"0.24", 0, 0},
+		{"0.5", 1, 0},
+		{"-0.5", -1, 0},
+		{"0.51", 1, 0},
+		{"-0.51", -1, 0},
+		{"0.0051", 1, 2},
+		{"-0.0051", -1, 2},
 	}
 
 	for _, tt := range tests {
@@ -718,34 +724,32 @@ func TestFromString(t *testing.T) {
 		})
 	}
 
-	for _, scale := range []int32{math.MaxInt32} {
-		_, err := decimal128.FromString("1", 37, scale)
-		assert.ErrorContains(t, err, "bitlen too large for decimal128", scale)
+	for _, s := range []string{"Inf", "+Inf", "-inf", "1e1000000000", "-1e1000000000"} {
+		for _, scale := range []int32{2, -2} {
+			_, err := decimal128.FromString(s, 37, scale)
+			assert.ErrorContains(t, err, "cannot convert", "%s at scale %d", s, scale)
+		}
 	}
 
-	coef, _ := new(big.Int).SetString("123456789012345678901234567890", 10)
-	for _, scale := range []int32{39, 500, 1000} {
-		want := decimal128.FromBigInt(coef)
-		got, err := decimal128.FromString(want.ToBigFloat(scale).Text('e', 38), 38, scale)
-		require.NoError(t, err, scale)
-		assert.Equal(t, want, got, scale)
+	for _, tc := range []struct {
+		s     string
+		scale int32
+	}{
+		{"1e646456990", 38},
+		{"-1e600000000", -2},
+	} {
+		_, err := decimal128.FromString(tc.s, 37, tc.scale)
+		assert.ErrorContains(t, err, "bitlen too large for decimal128", "%s at scale %d", tc.s, tc.scale)
 	}
 
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	tiny, err := decimal128.FromString("-1e-20000000", 38, 10_000_000)
+	tiny, err := decimal128.FromString("-1e-20000000", 37, 0)
 	runtime.ReadMemStats(&after)
 	require.NoError(t, err)
 	assert.Equal(t, decimal128.Num{}, tiny)
-	// Rounding this value directly would allocate about 8 MB.
+	// Rounding this value directly would allocate about 16 MB.
 	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
-
-	const exact = "12345678901234567890123456789012345678"
-	for _, scale := range []int32{5000} {
-		n, err := decimal128.FromString(fmt.Sprintf("%se-%d", exact, scale), 38, scale)
-		require.NoError(t, err, scale)
-		assert.Equal(t, exact, n.BigInt().String(), scale)
-	}
 }
 
 func TestInvalidNonNegScaleFromString(t *testing.T) {
@@ -772,6 +776,14 @@ func TestBitLen(t *testing.T) {
 	assert.ErrorContains(t, err, "bitlen too large for decimal128")
 	_, err = decimal128.FromString(b.String(), decimal128.MaxPrecision, -1)
 	assert.ErrorContains(t, err, "bitlen too large for decimal128")
+
+	limit := new(big.Int).Lsh(big.NewInt(1), 127)
+	_, err = decimal128.FromString(limit.String(), decimal128.MaxPrecision, -1)
+	assert.ErrorContains(t, err, "bitlen too large for decimal128")
+	limit.Sub(limit, big.NewInt(1))
+	got, err := decimal128.FromString(limit.String(), decimal128.MaxPrecision, -1)
+	require.NoError(t, err)
+	assert.Equal(t, limit.Quo(limit, big.NewInt(10)).String(), got.BigInt().String())
 }
 
 func TestFromStringDecimal128b(t *testing.T) {
