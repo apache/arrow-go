@@ -769,6 +769,31 @@ func TestWriteAllNullsWithDeltaEncoding(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestReadAllNullBooleanDataPageV2Brotli(t *testing.T) {
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "b", Type: arrow.FixedWidthTypes.Boolean, Nullable: true},
+	}, nil)
+	rec, _, err := array.RecordFromJSON(memory.DefaultAllocator, sc, strings.NewReader(`[{"b": null}, {"b": null}]`))
+	require.NoError(t, err)
+	defer rec.Release()
+
+	props := parquet.NewWriterProperties(
+		parquet.WithDataPageVersion(parquet.DataPageV2),
+		parquet.WithCompression(compress.Codecs.Brotli),
+	)
+	var buf bytes.Buffer
+	fw, err := pqarrow.NewFileWriter(sc, &buf, props, pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+	require.NoError(t, fw.Write(rec))
+	require.NoError(t, fw.Close())
+
+	tbl, err := pqarrow.ReadTable(context.Background(), bytes.NewReader(buf.Bytes()), nil, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+	require.NoError(t, err)
+	defer tbl.Release()
+	assert.EqualValues(t, 2, tbl.NumRows())
+	assert.Equal(t, 2, tbl.Column(0).NullN())
+}
+
 func TestArrowReadWriteTableChunkedCols(t *testing.T) {
 	chunkSizes := []int{2, 4, 10, 2}
 	const totalLen = int64(18)
