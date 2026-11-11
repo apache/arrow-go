@@ -32,6 +32,7 @@ import (
 	"math"
 	"runtime"
 	"runtime/cgo"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -40,6 +41,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/internal/arrdata"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/memory/mallocator"
@@ -1189,6 +1191,50 @@ func TestEmptyUnionExport(t *testing.T) {
 	assert.EqualValues(t, 1, out.n_buffers)
 	buffers := (*[1]unsafe.Pointer)(unsafe.Pointer(out.buffers))
 	assert.NotEqualValues(t, unsafe.Pointer(nil), buffers[0])
+}
+
+func TestExtensionArrayRoundTrip(t *testing.T) {
+	tests := []struct {
+		name     string
+		storage  arrow.DataType
+		json     string
+		nbuffers int
+	}{
+		{"string_view", arrow.BinaryTypes.StringView, `["a", null, "longer than twelve bytes"]`, 4},
+		{"sparse_union", arrow.SparseUnionOf([]arrow.Field{{Name: "i", Type: arrow.PrimitiveTypes.Int32, Nullable: true}}, []arrow.UnionTypeCode{0}), `[[0, 1], [0, null]]`, 1},
+		{"dictionary", &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}, `["a", null, "b", "a"]`, 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			storage, _, err := array.FromJSON(mem, tt.storage, strings.NewReader(tt.json))
+			require.NoError(t, err)
+			defer storage.Release()
+
+			arr, _, err := array.FromJSON(mem, extensions.NewOpaqueType(tt.storage, "t", "v"), strings.NewReader(tt.json))
+			require.NoError(t, err)
+			defer arr.Release()
+
+			var out CArrowArray
+			var sc CArrowSchema
+			ExportArrowArray(arr, &out, &sc)
+			defer ReleaseCArrowArray(&out)
+			defer ReleaseCArrowSchema(&sc)
+			assert.EqualValues(t, tt.nbuffers, out.n_buffers)
+
+			field, imported, err := ImportCArray(&out, &sc)
+			require.NoError(t, err)
+			defer imported.Release()
+
+			require.NoError(t, array.ValidateFull(imported))
+			assert.Truef(t, array.Equal(storage, imported), "expected %s, got %s", storage, imported)
+			name, _ := field.Metadata.GetValue("ARROW:extension:name")
+			assert.Equal(t, "arrow.opaque", name)
+		})
+	}
 }
 
 func TestValidateCArrayHeader(t *testing.T) {

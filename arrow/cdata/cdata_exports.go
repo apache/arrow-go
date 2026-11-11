@@ -288,12 +288,13 @@ func (exp *schemaExporter) exportFormat(dt arrow.DataType) string {
 
 func (exp *schemaExporter) export(field arrow.Field) {
 	exp.name = field.Name
-	exp.format = exp.exportFormat(exp.handleExtension(field.Type))
+	storage := exp.handleExtension(field.Type)
+	exp.format = exp.exportFormat(storage)
 	if field.Nullable {
 		exp.flags |= C.ARROW_FLAG_NULLABLE
 	}
 
-	switch dt := field.Type.(type) {
+	switch dt := storage.(type) {
 	case *arrow.DictionaryType:
 		exp.dict = new(schemaExporter)
 		exp.dict.export(arrow.Field{Type: dt.ValueType})
@@ -345,6 +346,9 @@ func exportField(field arrow.Field, out *CArrowSchema) {
 func exportArray(arr arrow.Array, out *CArrowArray, outSchema *CArrowSchema) {
 	if outSchema != nil {
 		exportField(arrow.Field{Type: arr.DataType()}, outSchema)
+	}
+	if ext, ok := arr.(array.ExtensionArray); ok {
+		arr = ext.Storage()
 	}
 
 	buffers := arr.Data().Buffers()
