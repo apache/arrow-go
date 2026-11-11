@@ -329,8 +329,11 @@ func (s *Decimal128) CastTo(to arrow.DataType) (Scalar, error) {
 		}
 		return NewDecimal256Scalar(newVal, to), nil
 	case arrow.STRING:
-		dt := s.Type.(*arrow.Decimal128Type)
-		return NewStringScalar(utils.FormatDecimalG(s.Value, dt.Precision, dt.Scale)), nil
+		str, err := utils.FormatDecimalG(s.Value, dt)
+		if err != nil {
+			return nil, err
+		}
+		return NewStringScalar(str), nil
 	}
 
 	return nil, fmt.Errorf("cannot cast non-nil decimal128 scalar to type %s", to)
@@ -385,7 +388,11 @@ func (s *Decimal256) CastTo(to arrow.DataType) (Scalar, error) {
 		}
 		return NewDecimal256Scalar(newVal, to), nil
 	case arrow.STRING:
-		return NewStringScalar(utils.FormatDecimalG(s.Value, dt.Precision, dt.Scale)), nil
+		str, err := utils.FormatDecimalG(s.Value, dt)
+		if err != nil {
+			return nil, err
+		}
+		return NewStringScalar(str), nil
 	}
 
 	return nil, fmt.Errorf("cannot cast non-nil decimal256 scalar to type %s", to)

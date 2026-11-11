@@ -164,12 +164,18 @@ func FromString(v string, prec, scale int32) (n Num, err error) {
 		if out.MantExp(nil) > 255 {
 			return Num{}, errors.New("bitlen too large for decimal256")
 		}
+		if scale < -MaxScale {
+			return Num{}, fmt.Errorf("scale %d out of range for decimal256, must be between %d and %d", scale, -MaxScale, MaxScale)
+		}
 		var tmp big.Int
 		val, _ := out.Int(&tmp)
 		n = FromBigInt(val)
 
 		n, _ = n.Div(scaleMultipliers[-scale])
 	} else {
+		if scale > MaxScale {
+			return Num{}, fmt.Errorf("scale %d out of range for decimal256, must be between %d and %d", scale, -MaxScale, MaxScale)
+		}
 		out.Mul(out, (&big.Float{}).SetInt(scaleMultipliers[scale].BigInt())).SetPrec(precInBits)
 		// Reject before rounding and converting, which would allocate as many
 		// bits as the value has.
@@ -357,6 +363,9 @@ func (n Num) ToFloat64(scale int32) float64 {
 }
 
 func (n Num) ToBigFloat(scale int32) *big.Float {
+	if scale < -MaxScale || scale > MaxScale {
+		panic("arrow/decimal256: scale out of range")
+	}
 	f := (&big.Float{}).SetInt(n.BigInt())
 	if scale < 0 {
 		f.SetPrec(256).Mul(f, (&big.Float{}).SetInt(scaleMultipliers[-scale].BigInt()))

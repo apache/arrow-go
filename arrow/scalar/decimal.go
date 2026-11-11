@@ -78,7 +78,11 @@ func (s *decimalScalar[T]) CastTo(to arrow.DataType) (Scalar, error) {
 
 	dt := s.Type.(arrow.DecimalType)
 	if to.ID() == arrow.STRING {
-		return NewStringScalar(utils.FormatDecimalG(s.Value, dt.GetPrecision(), dt.GetScale())), nil
+		str, err := utils.FormatDecimalG(s.Value, dt)
+		if err != nil {
+			return nil, err
+		}
+		return NewStringScalar(str), nil
 	}
 
 	toDec, ok := to.(arrow.DecimalType)

@@ -284,11 +284,17 @@ func FromString(v string, prec, scale int32) (n Num, err error) {
 		if out.MantExp(nil) > 127 {
 			return Num{}, errors.New("bitlen too large for decimal128")
 		}
+		if scale < -MaxScale {
+			return Num{}, fmt.Errorf("scale %d out of range for decimal128, must be between %d and %d", scale, -MaxScale, MaxScale)
+		}
 		var tmp big.Int
 		val, _ := out.Int(&tmp)
 		n = FromBigInt(val)
 		n, _ = n.Div(scaleMultipliers[-scale])
 	} else {
+		if scale > MaxScale {
+			return Num{}, fmt.Errorf("scale %d out of range for decimal128, must be between %d and %d", scale, -MaxScale, MaxScale)
+		}
 		// Since we're going to truncate this to get an integer, we need to round
 		// the value instead because of edge cases so that we match how other implementations
 		// (e.g. C++) handles Decimal values. So if we're negative we'll subtract 0.5 and if
@@ -353,6 +359,9 @@ func (n Num) ToFloat64(scale int32) float64 {
 }
 
 func (n Num) ToBigFloat(scale int32) *big.Float {
+	if scale < -MaxScale || scale > MaxScale {
+		panic("arrow/decimal128: scale out of range")
+	}
 	f := (&big.Float{}).SetInt(n.BigInt())
 	if scale < 0 {
 		f.SetPrec(128).Mul(f, (&big.Float{}).SetInt(scaleMultipliers[-scale].BigInt()))

@@ -96,8 +96,11 @@ func (a *baseDecimal[T]) GetOneForMarshal(i int) any {
 	}
 
 	typ := a.DataType().(arrow.DecimalType)
-	n, scale := a.Value(i), typ.GetScale()
-	return utils.FormatDecimalG(n, typ.GetPrecision(), scale)
+	s, err := utils.FormatDecimalG(a.Value(i), typ)
+	if err != nil {
+		return fmt.Sprintf("<scale out of range, cannot format Decimal%d value>", typ.BitWidth())
+	}
+	return s
 }
 
 func (a *baseDecimal[T]) ValueAsAny(i int) any {
