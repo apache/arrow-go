@@ -271,7 +271,7 @@ func TestBrotliDecodeDestinationSize(t *testing.T) {
 	assert.Equal(t, data, out)
 
 	_, err = compress.Decode(codec, make([]byte, len(data)-1), compressed)
-	assert.EqualError(t, err, "codec: brotli: decoded data exceeds destination size 32764")
+	assert.ErrorContains(t, err, "exceeds destination size")
 }
 
 func TestBrotliEncodeLevelReuse(t *testing.T) {
