@@ -516,6 +516,28 @@ func TestStructArrayStringerMasksRequiredChildWithoutNullBitmap(t *testing.T) {
 	})
 }
 
+// A run-end encoded child has no buffers, so there is no validity bitmap to
+// combine with the parent's. String prints it as it is, as for unions.
+func TestStructArrayStringerRunEndEncodedChild(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer pool.AssertSize(t, 0)
+
+	dt := arrow.StructOf(arrow.Field{Name: "r", Nullable: true,
+		Type: arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.BinaryTypes.String)})
+	bldr := array.NewStructBuilder(pool, dt)
+	defer bldr.Release()
+	bldr.Append(true)
+	bldr.FieldBuilder(0).(*array.RunEndEncodedBuilder).AppendValueFromString("a")
+	bldr.AppendNull()
+	arr := bldr.NewArray()
+	defer arr.Release()
+	require.NoError(t, array.ValidateFull(arr))
+
+	assert.NotPanics(t, func() {
+		assert.Equal(t, `{[{1 -> a},{2 -> <nil>}]}`, arr.String())
+	})
+}
+
 func TestNewStructArrayWithNullsValidatesOffset(t *testing.T) {
 	builder := array.NewInt32Builder(memory.DefaultAllocator)
 	defer builder.Release()
