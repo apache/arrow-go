@@ -820,6 +820,28 @@ func TestFixedLenByteArrayStatisticsUpdateFromArrowMax(t *testing.T) {
 	assert.Equal(t, "ccc", string(stats.Max()), "max must be computed against the running max, not the running min")
 }
 
+func TestByteArrayStatisticsUpdateFromArrowSkipsNullValueBytes(t *testing.T) {
+	mem := memory.DefaultAllocator
+	n, err := schema.NewPrimitiveNode("s", parquet.Repetitions.Optional, parquet.Types.ByteArray, -1, -1)
+	require.NoError(t, err)
+	stats := metadata.NewStatistics(schema.NewColumn(n, 1, 0), mem).(*metadata.ByteArrayStatistics)
+
+	// ["a", null], where the null slot still spans the byte "b"
+	data := array.NewData(arrow.BinaryTypes.String, 2, []*memory.Buffer{
+		memory.NewBufferBytes([]byte{0b01}),
+		memory.NewBufferBytes(arrow.Int32Traits.CastToBytes([]int32{0, 1, 2})),
+		memory.NewBufferBytes([]byte("ab")),
+	}, nil, 1, 0)
+	defer data.Release()
+	arr := array.MakeFromData(data)
+	defer arr.Release()
+
+	require.NoError(t, stats.UpdateFromArrow(arr, true))
+	require.True(t, stats.HasMinMax())
+	assert.Equal(t, "a", string(stats.Min()))
+	assert.Equal(t, "a", string(stats.Max()))
+}
+
 type encodedStatProvider struct {
 	min, max []byte
 }
