@@ -894,3 +894,33 @@ func TestCSVWriterRejectsInvalidTimestampTimezone(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "invalid timestamp timezone")
 }
+
+// Empty items and items containing braces are quoted inside list values: an
+// unquoted lone empty item would read back as an empty list, and quoted
+// braces survive readers that strip every leading and trailing brace.
+func TestCSVWriteListItemsNeedingQuotes(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	typ := arrow.ListOf(arrow.BinaryTypes.String)
+	input, _, err := array.FromJSON(mem, typ, strings.NewReader(`[[""], [], ["", ""], ["a"], ["a}"], ["{b", "c"]]`))
+	require.NoError(t, err)
+	defer input.Release()
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: typ}}, nil)
+	record := array.NewRecordBatch(schema, []arrow.Array{input}, int64(input.Len()))
+	defer record.Release()
+
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf, schema)
+	require.NoError(t, w.Write(record))
+	require.NoError(t, w.Flush())
+	assert.Equal(t, `"{""""}"`+"\n"+`{}`+"\n"+`"{"""",""""}"`+"\n"+`{a}`+"\n"+
+		`"{""a}""}"`+"\n"+`"{""{b"",c}"`+"\n", buf.String())
+
+	r := csv.NewReader(&buf, schema, csv.WithAllocator(mem), csv.WithChunk(-1))
+	defer r.Release()
+	require.True(t, r.Next())
+	require.NoError(t, r.Err())
+	got := r.RecordBatch().Column(0)
+	assert.Truef(t, array.Equal(input, got), "expected %s, got %s", input, got)
+}
