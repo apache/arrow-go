@@ -85,6 +85,10 @@ func MaxPrecision[T DecimalTypes]() int {
 	}
 }
 
+// MaxScale returns the maximum scale for T, which equals its maximum
+// precision, as in Arrow C++.
+func MaxScale[T DecimalTypes]() int { return MaxPrecision[T]() }
+
 func (d Decimal32) Negate() Decimal32 { return -d }
 func (d Decimal64) Negate() Decimal64 { return -d }
 

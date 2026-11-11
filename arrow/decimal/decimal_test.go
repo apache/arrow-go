@@ -688,3 +688,10 @@ func TestFromStringLongFraction(t *testing.T) {
 		})
 	}
 }
+
+func TestMaxScale(t *testing.T) {
+	assert.Equal(t, 9, decimal.MaxScale[decimal.Decimal32]())
+	assert.Equal(t, 18, decimal.MaxScale[decimal.Decimal64]())
+	assert.Equal(t, 38, decimal.MaxScale[decimal.Decimal128]())
+	assert.Equal(t, 76, decimal.MaxScale[decimal.Decimal256]())
+}
