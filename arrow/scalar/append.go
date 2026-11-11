@@ -131,7 +131,7 @@ func appendToBldr(bldr array.Builder, scalars []Scalar) error {
 			if s.Valid {
 				bldr.UnsafeAppend(s.Value.Bytes())
 			} else {
-				bldr.UnsafeAppendBoolToBitmap(false)
+				bldr.AppendNull()
 			}
 		}
 	case *array.Int8Builder:
@@ -191,17 +191,19 @@ func appendToBldr(bldr array.Builder, scalars []Scalar) error {
 		bldr.ValueBuilder().Reserve(numChildren)
 
 		for _, s := range scalars {
-			bldr.Append(s.IsValid())
-			if s.IsValid() {
-				list := s.(ListScalar).GetList()
-				for i := 0; i < list.Len(); i++ {
-					sc, err := GetScalar(list, i)
-					if err != nil {
-						return err
-					}
-					if err := Append(bldr.ValueBuilder(), sc); err != nil {
-						return err
-					}
+			if !s.IsValid() {
+				bldr.AppendNull()
+				continue
+			}
+			bldr.Append(true)
+			list := s.(ListScalar).GetList()
+			for i := 0; i < list.Len(); i++ {
+				sc, err := GetScalar(list, i)
+				if err != nil {
+					return err
+				}
+				if err := Append(bldr.ValueBuilder(), sc); err != nil {
+					return err
 				}
 			}
 		}
@@ -210,7 +212,7 @@ func appendToBldr(bldr array.Builder, scalars []Scalar) error {
 			s := sc.(*Struct)
 			for i := 0; i < bldr.NumField(); i++ {
 				if !s.Valid || s.Value[i] == nil {
-					bldr.FieldBuilder(i).UnsafeAppendBoolToBitmap(false)
+					bldr.FieldBuilder(i).AppendNull()
 				} else {
 					if err := Append(bldr.FieldBuilder(i), s.Value[i]); err != nil {
 						return err
@@ -234,16 +236,12 @@ func appendToBldr(bldr array.Builder, scalars []Scalar) error {
 			bldr.Append(s.TypeCode)
 			for i := range ty.Fields() {
 				child := bldr.Child(i)
-				if s.ChildID == i {
-					if s.Valid {
-						if err := Append(child, s.Value[i]); err != nil {
-							return err
-						}
-					} else {
-						child.UnsafeAppendBoolToBitmap(false)
+				if s.ChildID == i && s.Valid {
+					if err := Append(child, s.Value[i]); err != nil {
+						return err
 					}
 				} else {
-					child.UnsafeAppendBoolToBitmap(false)
+					child.AppendNull()
 				}
 			}
 		}
@@ -266,7 +264,7 @@ func appendToBldr(bldr array.Builder, scalars []Scalar) error {
 							return err
 						}
 					} else {
-						child.UnsafeAppendBoolToBitmap(false)
+						child.AppendNull()
 					}
 				}
 			}
