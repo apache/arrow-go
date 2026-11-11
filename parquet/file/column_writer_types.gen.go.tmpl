@@ -428,6 +428,23 @@ func (w *{{.Name}}ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLe
   }
 
   dictEncoder := w.currentEncoder.(encoding.DictEncoder)
+{{- if eq .Name "ByteArray"}}
+
+  // Geospatial statistics (bounding box + geometry types) are built by parsing
+  // each WKB value as it is written.
+  // However, this path is different: the caller (pqarrow's writeDictionaryArrow) has
+  // already handed the dictionary to the encoder via PutDictionary, and we
+  // only receive integer indices into it. We never see the actual geometries
+  // for these rows, so we cannot fold them into the bounding box.
+  //
+  // Rather than decode the dictionary here we mark the
+  // statistics invalid. Invalidation is sticky for the rest of this column
+  // chunk: later dense writes do not restore it, and no geospatial statistics
+  // are written to the column chunk metadata on Close.
+  if w.geoStatistics != nil {
+    w.geoStatistics.Invalidate()
+  }
+{{- end}}
 
   w.doBatches(int64(length), repLevels, func(offset, batch int64) {
     info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
@@ -455,6 +472,11 @@ func (w *{{.Name}}ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLe
 
 func (w *{{.Name}}ColumnChunkWriter) writeValues(values []{{.name}}, numNulls int64) {
   w.currentEncoder.(encoding.{{.Name}}Encoder).Put(values)
+{{- if eq .Name "ByteArray"}}
+  if w.geoStatistics != nil {
+    w.geoStatistics.Update(values)
+  }
+{{- end}}
   if w.pageStatistics != nil {
 {{- if ne .Name "FixedLenByteArray"}}
     w.pageStatistics.(*metadata.{{.Name}}Statistics).Update(values, numNulls)
@@ -477,6 +499,15 @@ func (w *{{.Name}}ColumnChunkWriter) writeValuesSpaced(spacedValues []{{.name}},
   } else {
     w.currentEncoder.(encoding.{{.Name}}Encoder).Put(spacedValues)
   }
+{{- if eq .Name "ByteArray"}}
+  if w.geoStatistics != nil {
+    if len(spacedValues) != int(numRead) {
+      w.geoStatistics.UpdateSpaced(spacedValues, validBits, validBitsOffset)
+    } else {
+      w.geoStatistics.Update(spacedValues)
+    }
+  }
+{{- end}}
   if w.pageStatistics != nil {
     nulls := numValues - numRead
 {{- if ne .Name "FixedLenByteArray"}}

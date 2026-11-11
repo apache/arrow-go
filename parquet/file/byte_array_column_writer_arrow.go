@@ -72,6 +72,9 @@ func writeArrowValues[T byteArrayArrowOffset](w *ByteArrayColumnChunkWriter, val
 			panic("parquet: current byte-array encoder does not support Arrow offsets")
 		}
 		enc.PutArrow(values, offsets)
+		if w.geoStatistics != nil {
+			metadata.UpdateGeoStatisticsFromArrowOffsets(w.geoStatistics, values, offsets, nil, 0)
+		}
 		if w.pageStatistics != nil {
 			w.pageStatistics.(*metadata.ByteArrayStatistics).UpdateFromArrowOffsets(values, offsets, numNulls)
 		}
@@ -84,6 +87,9 @@ func writeArrowValues[T byteArrayArrowOffset](w *ByteArrayColumnChunkWriter, val
 			panic("parquet: current byte-array encoder does not support Arrow offsets")
 		}
 		enc.PutArrow64(values, offsets)
+		if w.geoStatistics != nil {
+			metadata.UpdateGeoStatisticsFromArrowOffsets(w.geoStatistics, values, offsets, nil, 0)
+		}
 		if w.pageStatistics != nil {
 			w.pageStatistics.(*metadata.ByteArrayStatistics).UpdateFromArrowOffsets64(values, offsets, numNulls)
 		}
@@ -110,6 +116,9 @@ func writeArrowValuesSpaced[T byteArrayArrowOffset](w *ByteArrayColumnChunkWrite
 		} else {
 			enc.PutArrow(values, offsets)
 		}
+		if w.geoStatistics != nil {
+			metadata.UpdateGeoStatisticsFromArrowOffsets(w.geoStatistics, values, offsets, validBits, validBitsOffset)
+		}
 		if w.pageStatistics != nil {
 			stats := w.pageStatistics.(*metadata.ByteArrayStatistics)
 			stats.UpdateFromArrowOffsetsSpaced(values, offsets, validBits, validBitsOffset, numSpaced-numRead)
@@ -127,6 +136,9 @@ func writeArrowValuesSpaced[T byteArrayArrowOffset](w *ByteArrayColumnChunkWrite
 			enc.PutArrowSpaced64(values, offsets, validBits, validBitsOffset)
 		} else {
 			enc.PutArrow64(values, offsets)
+		}
+		if w.geoStatistics != nil {
+			metadata.UpdateGeoStatisticsFromArrowOffsets(w.geoStatistics, values, offsets, validBits, validBitsOffset)
 		}
 		if w.pageStatistics != nil {
 			stats := w.pageStatistics.(*metadata.ByteArrayStatistics)

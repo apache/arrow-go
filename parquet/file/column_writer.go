@@ -115,8 +115,17 @@ type columnWriter struct {
 	repEncoder encoding.LevelEncoder
 	mem        memory.Allocator
 
-	pageStatistics     metadata.TypedStatistics
-	chunkStatistics    metadata.TypedStatistics
+	pageStatistics  metadata.TypedStatistics
+	chunkStatistics metadata.TypedStatistics
+
+	// geoStatistics holds the bounding box stats for GEOMETRY
+	// columns, and is nil for all other columns. Since Geospatial
+	// types have an UNKNOWN sort order, they never get typed
+	// statistics and are stored separately from other statistics.
+	// It is tracked once per column chunk (i.e. per row group), never per
+	// page since Parquet format defines GeospatialStatistics only on
+	// ColumnMetaData
+	geoStatistics      *metadata.GeoStatistics
 	bloomFilter        metadata.BloomFilterBuilder
 	dictBloomPopulated bool
 
@@ -175,6 +184,11 @@ func newColumnWriterBase(metaData *metadata.ColumnChunkMetaDataBuilder, pager Pa
 	if props.StatisticsEnabledFor(ret.descr.Path()) && ret.descr.SortOrder() != schema.SortUNKNOWN {
 		ret.pageStatistics = metadata.NewStatistics(ret.descr, props.Allocator())
 		ret.chunkStatistics = metadata.NewStatistics(ret.descr, props.Allocator())
+	}
+
+	if _, ok := ret.descr.LogicalType().(schema.GeometryLogicalType); ok &&
+		ret.descr.PhysicalType() == parquet.Types.ByteArray && props.StatisticsEnabledFor(ret.descr.Path()) {
+		ret.geoStatistics = metadata.NewGeoStatistics()
 	}
 
 	ret.defEncoder.Init(parquet.Encodings.RLE, ret.descr.MaxDefinitionLevel(), ret.defLevelSink)
@@ -723,6 +737,9 @@ func (w *columnWriter) Close() (err error) {
 
 		if w.rowsWritten > 0 && chunkStats.IsSet() {
 			w.metaData.SetStats(chunkStats)
+		}
+		if w.rowsWritten > 0 && w.geoStatistics != nil {
+			w.metaData.SetGeoStatistics(w.geoStatistics)
 		}
 		// Only advertise PLAIN_DICTIONARY / fallback encodings in the column
 		// chunk's encoding list when a dictionary page was actually written.
