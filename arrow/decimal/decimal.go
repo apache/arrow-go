@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
+	"github.com/apache/arrow-go/v18/arrow/internal/decimalstr"
 )
 
 // DecimalTypes is a generic constraint representing the implemented decimal types
@@ -180,8 +181,6 @@ func (n Decimal64) ToString(scale int32) string {
 	return n.ToBigFloat(scale).Text('f', int(scale))
 }
 
-var pt5 = big.NewFloat(0.5)
-
 func decimalFromString[T interface {
 	Decimal32 | Decimal64
 	FitsInPrecision(int32) bool
@@ -221,20 +220,9 @@ func decimalFromString[T interface {
 		if out.IsInf() || out.MantExp(nil) > int(nbits) {
 			return n, fmt.Errorf("bitlen too large for decimal%d", nbits)
 		}
-		// A magnitude below 1/4 rounds to zero. Clearing it skips the
-		// rounding below, which allocates in proportion to the gap between
-		// the value's exponent and 0.5's.
-		if out.MantExp(nil) < -1 {
-			out.SetInt64(0)
-		}
-		if out.Signbit() {
-			out.Sub(out, pt5)
-		} else {
-			out.Add(out, pt5)
-		}
-
-		var tmp big.Int
-		val, _ := out.Int(&tmp)
+		// Round from the digits of v, so exact ties are resolved consistently
+		// rather than by the error in out's binary approximation.
+		val := decimalstr.RoundScaled(out, v, int64(scale))
 		// This also rejects the signed minimum, which fits the storage but has
 		// more digits than the maximum precision allows.
 		if val.BitLen() >= int(nbits) {

@@ -774,3 +774,30 @@ func TestBitLen(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, limit.Quo(limit, big.NewInt(10)).String(), got.BigInt().String())
 }
+
+func TestFromStringRoundsExactTies(t *testing.T) {
+	// These halfway values are not exact in binary, so rounding a binary
+	// approximation sent some of them down. Ties round away from zero.
+	tests := []struct {
+		s        string
+		scale    int32
+		expected int64
+	}{
+		{"0.35", 1, 4},
+		{"0.15", 1, 2},
+		{"2.675", 1, 27},
+		{"2.675", 2, 268},
+		{"1.005", 2, 101},
+		{"-0.35", 1, -4},
+		{"-1.005", 2, -101},
+		{"0.349999", 1, 3},
+		{"35e-2", 1, 4},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s_%d", tt.s, tt.scale), func(t *testing.T) {
+			n, err := decimal256.FromString(tt.s, 76, tt.scale)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, n.BigInt().Int64())
+		})
+	}
+}

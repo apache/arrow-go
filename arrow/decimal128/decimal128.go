@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
+	"github.com/apache/arrow-go/v18/arrow/internal/decimalstr"
 )
 
 const (
@@ -238,8 +239,6 @@ func FromFloat64(v float64, prec, scale int32) (Num, error) {
 	return fromPositiveFloat64(v, prec, scale)
 }
 
-var pt5 = big.NewFloat(0.5)
-
 func FromString(v string, prec, scale int32) (n Num, err error) {
 	// time for some math!
 	// Our input precision means "number of digits of precision" but the
@@ -295,10 +294,6 @@ func FromString(v string, prec, scale int32) (n Num, err error) {
 		if scale > MaxScale {
 			return Num{}, fmt.Errorf("scale %d out of range for decimal128, must be between %d and %d", scale, -MaxScale, MaxScale)
 		}
-		// Since we're going to truncate this to get an integer, we need to round
-		// the value instead because of edge cases so that we match how other implementations
-		// (e.g. C++) handles Decimal values. So if we're negative we'll subtract 0.5 and if
-		// we're positive we'll add 0.5.
 		p := (&big.Float{}).SetInt(scaleMultipliers[scale].BigInt())
 		out.SetPrec(precInBits).Mul(out, p)
 		// Reject before rounding and converting, which would allocate as many
@@ -306,20 +301,9 @@ func FromString(v string, prec, scale int32) (n Num, err error) {
 		if out.IsInf() || out.MantExp(nil) > 128 {
 			return Num{}, errors.New("bitlen too large for decimal128")
 		}
-		// A magnitude below 1/4 rounds to zero. Clearing it skips the
-		// rounding below, which allocates in proportion to the gap between
-		// the value's exponent and 0.5's.
-		if out.MantExp(nil) < -1 {
-			out.SetInt64(0)
-		}
-		if out.Signbit() {
-			out.Sub(out, pt5)
-		} else {
-			out.Add(out, pt5)
-		}
-
-		var tmp big.Int
-		val, _ := out.Int(&tmp)
+		// Round from the digits of v, so exact ties are resolved consistently
+		// rather than by the error in out's binary approximation.
+		val := decimalstr.RoundScaled(out, v, int64(scale))
 		if val.BitLen() > 127 {
 			return Num{}, errors.New("bitlen too large for decimal128")
 		}

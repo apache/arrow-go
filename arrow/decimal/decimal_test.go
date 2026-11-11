@@ -626,3 +626,31 @@ func TestDecimalBasics(t *testing.T) {
 		assert.EqualValues(t, expmod, mod64)
 	}
 }
+
+func TestFromStringRoundsExactTies(t *testing.T) {
+	// These halfway values are not exact in binary, so rounding a binary
+	// approximation sent some of them down. Ties round away from zero.
+	tests := []struct {
+		s        string
+		scale    int32
+		expected int64
+	}{
+		{"0.35", 1, 4},
+		{"0.15", 1, 2},
+		{"2.675", 2, 268},
+		{"1.005", 2, 101},
+		{"-0.35", 1, -4},
+		{"-1.005", 2, -101},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s_%d", tt.s, tt.scale), func(t *testing.T) {
+			n32, err := decimal.Decimal32FromString(tt.s, 9, tt.scale)
+			require.NoError(t, err)
+			assert.EqualValues(t, tt.expected, n32)
+
+			n64, err := decimal.Decimal64FromString(tt.s, 18, tt.scale)
+			require.NoError(t, err)
+			assert.EqualValues(t, tt.expected, n64)
+		})
+	}
+}
