@@ -72,9 +72,18 @@ type (
 )
 
 func MaxPrecision[T DecimalTypes]() int {
-	// max precision is computed by Floor(log10(2^(nbytes * 8 - 1) - 1))
+	// Floor(log10(2^(8*Sizeof(T)-1) - 1)), as literals so the call inlines.
 	var z T
-	return int(math.Floor(math.Log10(math.Pow(2, float64(unsafe.Sizeof(z))*8-1) - 1)))
+	switch unsafe.Sizeof(z) {
+	case 4:
+		return 9
+	case 8:
+		return 18
+	case 16:
+		return 38
+	default:
+		return 76
+	}
 }
 
 func (d Decimal32) Negate() Decimal32 { return -d }
