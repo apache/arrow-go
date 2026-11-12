@@ -520,6 +520,14 @@ func (enc *deltaBitPackEncoder[T]) FlushValues() (Buffer, error) {
 	return poolBuffer{memory.NewBufferBytes(buffer)}, nil
 }
 
+func (enc *deltaBitPackEncoder[T]) Reset() {
+	enc.encoder.Reset()
+	enc.bitWriter = nil
+	enc.totalVals = 0
+	enc.firstVal, enc.currentVal = 0, 0
+	enc.deltas = enc.deltas[:0]
+}
+
 // EstimatedDataEncodedSize returns the current amount of data actually flushed out and written
 func (enc *deltaBitPackEncoder[T]) EstimatedDataEncodedSize() int64 {
 	if enc.bitWriter == nil {

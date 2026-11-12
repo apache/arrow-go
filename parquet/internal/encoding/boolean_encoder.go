@@ -185,6 +185,13 @@ func (enc *PlainBooleanEncoder) FlushValues() (Buffer, error) {
 	return enc.sink.Finish(), nil
 }
 
+func (enc *PlainBooleanEncoder) Reset() {
+	enc.encoder.Reset()
+	if enc.wr != nil {
+		enc.wr.Reset(0, boolsInBuf)
+	}
+}
+
 const rleLengthInBytes = 4
 
 type RleBooleanEncoder struct {
