@@ -19,6 +19,7 @@
 package decimalstr
 
 import (
+	"math"
 	"math/big"
 	"strconv"
 )
@@ -28,6 +29,115 @@ import (
 // only guards callers that skipped their own magnitude check.
 const maxDigits = 1024
 
+// maxPow10 is the largest exponent kept in pow10Table. It covers Decimal256
+// scales and the borderline magnitude checks; larger powers are computed on
+// demand only after the digit bound has already accepted the result size.
+const maxPow10 = 128
+
+var (
+	bigOne     = big.NewInt(1)
+	pow10Table [maxPow10 + 1]*big.Int
+	twoPow32   = new(big.Int).Lsh(big.NewInt(1), 32)
+	twoPow64   = new(big.Int).Lsh(big.NewInt(1), 64)
+	twoPow127  = new(big.Int).Lsh(big.NewInt(1), 127)
+	twoPow128  = new(big.Int).Lsh(big.NewInt(1), 128)
+	twoPow255  = new(big.Int).Lsh(big.NewInt(1), 255)
+	twoPow256  = new(big.Int).Lsh(big.NewInt(1), 256)
+)
+
+func init() {
+	pow10Table[0] = big.NewInt(1)
+	ten := big.NewInt(10)
+	for i := 1; i <= maxPow10; i++ {
+		pow10Table[i] = new(big.Int).Mul(pow10Table[i-1], ten)
+	}
+}
+
+func pow10(n int) *big.Int {
+	if n <= maxPow10 {
+		return pow10Table[n]
+	}
+	return new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(n)), nil)
+}
+
+func twoPower(bits int) *big.Int {
+	switch bits {
+	case 32:
+		return twoPow32
+	case 64:
+		return twoPow64
+	case 127:
+		return twoPow127
+	case 128:
+		return twoPow128
+	case 255:
+		return twoPow255
+	case 256:
+		return twoPow256
+	default:
+		return new(big.Int).Lsh(big.NewInt(1), uint(bits))
+	}
+}
+
+// Parsed is a plain decimal literal: an optional sign, digits with an
+// optional fraction, and an optional decimal exponent. intPart and fracPart
+// are slices of the original string.
+type Parsed struct {
+	neg               bool
+	intPart, fracPart string
+	exp               int64
+}
+
+// Parse reports whether s is a plain decimal literal and, if so, returns
+// its parts. Inputs such as a p exponent, a hex prefix, Inf or NaN are
+// rejected so callers can fall back to their own conversion.
+func Parse(s string) (p Parsed, ok bool) {
+	if len(s) > 0 && (s[0] == '+' || s[0] == '-') {
+		p.neg = s[0] == '-'
+		s = s[1:]
+	}
+
+	intEnd := 0
+	for intEnd < len(s) && isDigit(s[intEnd]) {
+		intEnd++
+	}
+	p.intPart, s = s[:intEnd], s[intEnd:]
+
+	if len(s) > 0 && s[0] == '.' {
+		fracEnd := 1
+		for fracEnd < len(s) && isDigit(s[fracEnd]) {
+			fracEnd++
+		}
+		p.fracPart, s = s[1:fracEnd], s[fracEnd:]
+	}
+	if len(p.intPart)+len(p.fracPart) == 0 {
+		return Parsed{}, false
+	}
+
+	if len(s) > 0 {
+		if s[0] != 'e' && s[0] != 'E' {
+			return Parsed{}, false
+		}
+		digits := s[1:]
+		if len(digits) > 0 && (digits[0] == '+' || digits[0] == '-') {
+			digits = digits[1:]
+		}
+		if len(digits) == 0 {
+			return Parsed{}, false
+		}
+		for i := 0; i < len(digits); i++ {
+			if !isDigit(digits[i]) {
+				return Parsed{}, false
+			}
+		}
+		var err error
+		if p.exp, err = strconv.ParseInt(s[1:], 10, 64); err != nil {
+			return Parsed{}, false
+		}
+	}
+	return p, true
+}
+
 // ScaleAndRound returns the decimal literal s multiplied by 10^scale and
 // rounded to an integer, with ties rounded away from zero.
 //
@@ -36,99 +146,223 @@ const maxDigits = 1024
 // float first would leave it just above or just below one half, and the
 // rounding direction would depend on that error.
 //
-// ok is false when s is not a plain decimal literal (an optional sign,
-// digits with an optional fraction, and an optional decimal exponent) or
-// when the result would have more than maxDigits digits; callers should then
-// fall back to their own conversion. Callers are expected to have bounded
-// the magnitude of the result already.
+// ok is false when s is not a plain decimal literal or when the result
+// would have more than maxDigits digits; callers should then fall back to
+// their own conversion. Callers are expected to have bounded the magnitude
+// of the result already.
 func ScaleAndRound(s string, scale int64) (val *big.Int, ok bool) {
-	neg := false
-	if len(s) > 0 && (s[0] == '+' || s[0] == '-') {
-		neg = s[0] == '-'
-		s = s[1:]
-	}
-
-	intEnd := 0
-	for intEnd < len(s) && isDigit(s[intEnd]) {
-		intEnd++
-	}
-	intPart, rest := s[:intEnd], s[intEnd:]
-
-	var fracPart string
-	if len(rest) > 0 && rest[0] == '.' {
-		fracEnd := 1
-		for fracEnd < len(rest) && isDigit(rest[fracEnd]) {
-			fracEnd++
-		}
-		fracPart, rest = rest[1:fracEnd], rest[fracEnd:]
-	}
-	if len(intPart)+len(fracPart) == 0 {
+	p, ok := Parse(s)
+	if !ok {
 		return nil, false
 	}
+	return p.ScaleAndRound(scale)
+}
 
-	var exp int64
-	if len(rest) > 0 {
-		if rest[0] != 'e' && rest[0] != 'E' {
-			return nil, false
-		}
-		digits := rest[1:]
-		if len(digits) > 0 && (digits[0] == '+' || digits[0] == '-') {
-			digits = digits[1:]
-		}
-		if len(digits) == 0 {
-			return nil, false
-		}
-		for i := 0; i < len(digits); i++ {
-			if !isDigit(digits[i]) {
-				return nil, false
-			}
-		}
-		var err error
-		if exp, err = strconv.ParseInt(rest[1:], 10, 64); err != nil {
-			return nil, false
-		}
-	}
-
-	// The value is digits * 10^shift, where digits is the significand with
-	// the decimal point removed.
-	digits := trimLeadingZeros(intPart + fracPart)
-	if len(digits) == 0 {
-		return new(big.Int), true
-	}
+// ScaleAndRound returns this literal multiplied by 10^scale and rounded
+// to an integer, with ties rounded away from zero.
+//
+// The coefficient is built from the integer and fractional parts separately
+// and scaled with a powers-of-ten table, so the hot path does not join
+// those parts into a new string or call big.Int.Exp.
+func (p Parsed) ScaleAndRound(scale int64) (val *big.Int, ok bool) {
+	fracLen := int64(len(p.fracPart))
 	const limit = int64(1) << 62
-	if exp > limit || exp < -limit || scale > limit || scale < -limit ||
-		int64(len(fracPart)) > limit {
+	if p.exp > limit || p.exp < -limit || scale > limit || scale < -limit ||
+		fracLen > limit {
 		return nil, false
 	}
-	shift := exp - int64(len(fracPart)) + scale
+	shift, ok := add2(p.exp, scale)
+	if !ok {
+		return nil, false
+	}
+	shift, ok = add2(shift, -fracLen)
+	if !ok {
+		return nil, false
+	}
 
 	val = new(big.Int)
+	if !setCoeff(val, p.intPart, p.fracPart) {
+		return nil, false
+	}
+	if val.Sign() == 0 {
+		return val, true
+	}
+
 	if shift >= 0 {
-		if int64(len(digits))+shift > maxDigits {
+		if int64(significantDigitCount(p.intPart, p.fracPart))+shift > maxDigits {
 			return nil, false
 		}
-		val.SetString(digits, 10)
-		val.Mul(val, new(big.Int).Exp(big.NewInt(10), big.NewInt(shift), nil))
+		if shift > 0 {
+			val.Mul(val, pow10(int(shift)))
+		}
 	} else {
-		// Drop the last -shift digits. With ties away from zero, only the
-		// first dropped digit decides whether to round up; when every digit
-		// is dropped and keep is negative, that digit is an implied zero.
-		keep := int64(len(digits)) + shift
-		if keep > maxDigits {
+		down := -shift
+		digits := significantDigitCount(p.intPart, p.fracPart)
+		// Every significant digit is to the right of the rounding place,
+		// so the first dropped digit is an implied zero and the result is 0.
+		if int64(digits) < down {
+			val.SetInt64(0)
+			return val, true
+		}
+		if down > int64(maxDigits) {
 			return nil, false
 		}
-		if keep > 0 {
-			val.SetString(digits[:keep], 10)
-		}
-		if keep >= 0 && digits[keep] >= '5' {
-			val.Add(val, big.NewInt(1))
+		div := pow10(int(down))
+		rem := new(big.Int)
+		val.DivMod(val, div, rem)
+		// rem * 2 >= div includes an exact tie, which rounds away from zero.
+		if new(big.Int).Lsh(rem, 1).Cmp(div) >= 0 {
+			val.Add(val, bigOne)
 		}
 	}
 
-	if neg {
+	if p.neg {
 		val.Neg(val)
 	}
 	return val, true
+}
+
+// AtLeastTwoPower reports whether the absolute value of this literal
+// multiplied by 10^scale is at least 2^bits. The comparison uses the number
+// of integer digits after scaling and only materializes a coefficient on
+// the borderline, so a huge exponent does not allocate in proportion to
+// its size.
+func (p Parsed) AtLeastTwoPower(scale int64, bits int) bool {
+	if bits <= 0 {
+		return significantDigitCount(p.intPart, p.fracPart) > 0
+	}
+	e, ok := scaledExp(p, scale)
+	if !ok {
+		// Overflow of the combined exponent: a huge positive power is at
+		// least 2^bits, a huge negative power is a fraction.
+		return p.exp > 0 || scale > 0
+	}
+	d := significantDigitCount(p.intPart, p.fracPart)
+	if d == 0 {
+		return false
+	}
+	// |x| is in [10^{d+e-1}, 10^{d+e}).
+	// 2^bits is in [10^{td-1}, 10^td), where td = floor(bits*log10(2))+1.
+	sum, ok := add2(int64(d), e)
+	if !ok {
+		return e > 0
+	}
+	td := int64(decimalDigitsOfTwoPower(bits))
+	if sum-1 >= td {
+		return true
+	}
+	if sum <= td-1 {
+		return false
+	}
+
+	// Borderline: compare coeff * 10^max(e,0) with 2^bits * 10^max(-e,0).
+	coeff := new(big.Int)
+	if !setCoeff(coeff, p.intPart, p.fracPart) || coeff.Sign() == 0 {
+		return false
+	}
+	lhs := coeff
+	rhs := new(big.Int).Set(twoPower(bits))
+	if e > 0 {
+		if e > maxDigits {
+			return true
+		}
+		lhs = new(big.Int).Mul(coeff, pow10(int(e)))
+	} else if e < 0 {
+		down := -e
+		if down > maxDigits {
+			return false
+		}
+		rhs.Mul(rhs, pow10(int(down)))
+	}
+	return lhs.Cmp(rhs) >= 0
+}
+
+func scaledExp(p Parsed, scale int64) (int64, bool) {
+	e, ok := add2(p.exp, scale)
+	if !ok {
+		return 0, false
+	}
+	return add2(e, -int64(len(p.fracPart)))
+}
+
+func decimalDigitsOfTwoPower(bits int) int {
+	switch bits {
+	case 32:
+		return 10
+	case 64:
+		return 20
+	case 127, 128:
+		return 39
+	case 255:
+		return 77
+	case 256:
+		return 78
+	default:
+		return int(math.Floor(float64(bits)*math.Log10(2))) + 1
+	}
+}
+
+func setCoeff(dst *big.Int, intPart, fracPart string) bool {
+	if len(fracPart) == 0 {
+		if isAllZeros(intPart) {
+			dst.SetInt64(0)
+			return true
+		}
+		_, ok := dst.SetString(intPart, 10)
+		return ok
+	}
+	if isAllZeros(intPart) {
+		if isAllZeros(fracPart) {
+			dst.SetInt64(0)
+			return true
+		}
+		_, ok := dst.SetString(fracPart, 10)
+		return ok
+	}
+	if _, ok := dst.SetString(intPart, 10); !ok {
+		return false
+	}
+	dst.Mul(dst, pow10(len(fracPart)))
+	if !isAllZeros(fracPart) {
+		var frac big.Int
+		if _, ok := frac.SetString(fracPart, 10); !ok {
+			return false
+		}
+		dst.Add(dst, &frac)
+	}
+	return true
+}
+
+func significantDigitCount(intPart, fracPart string) int {
+	i := 0
+	for i < len(intPart) && intPart[i] == '0' {
+		i++
+	}
+	if i < len(intPart) {
+		return len(intPart) - i + len(fracPart)
+	}
+	j := 0
+	for j < len(fracPart) && fracPart[j] == '0' {
+		j++
+	}
+	return len(fracPart) - j
+}
+
+func isAllZeros(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '0' {
+			return false
+		}
+	}
+	return true
+}
+
+func add2(a, b int64) (int64, bool) {
+	c := a + b
+	if (b > 0 && c < a) || (b < 0 && c > a) {
+		return 0, false
+	}
+	return c, true
 }
 
 var pt5 = big.NewFloat(0.5)
@@ -161,11 +395,3 @@ func RoundScaled(scaled *big.Float, s string, scale int64) *big.Int {
 }
 
 func isDigit(c byte) bool { return '0' <= c && c <= '9' }
-
-func trimLeadingZeros(s string) string {
-	i := 0
-	for i < len(s) && s[i] == '0' {
-		i++
-	}
-	return s[i:]
-}

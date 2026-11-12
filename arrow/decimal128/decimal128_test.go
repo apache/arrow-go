@@ -724,10 +724,19 @@ func TestFromString(t *testing.T) {
 		})
 	}
 
-	for _, s := range []string{"Inf", "+Inf", "-inf", "1e1000000000", "-1e1000000000"} {
+	for _, s := range []string{"Inf", "+Inf", "-inf"} {
 		for _, scale := range []int32{2, -2} {
 			_, err := decimal128.FromString(s, 37, scale)
 			assert.ErrorContains(t, err, "cannot convert", "%s at scale %d", s, scale)
+		}
+	}
+
+	// These used to overflow big.ParseFloat to ±Inf ("cannot convert"). The
+	// digit path reports the same overflow as other huge finite literals.
+	for _, s := range []string{"1e1000000000", "-1e1000000000"} {
+		for _, scale := range []int32{2, -2} {
+			_, err := decimal128.FromString(s, 37, scale)
+			assert.ErrorContains(t, err, "bitlen too large for decimal128", "%s at scale %d", s, scale)
 		}
 	}
 
@@ -783,7 +792,10 @@ func TestBitLen(t *testing.T) {
 	limit.Sub(limit, big.NewInt(1))
 	got, err := decimal128.FromString(limit.String(), decimal128.MaxPrecision, -1)
 	require.NoError(t, err)
-	assert.Equal(t, limit.Quo(limit, big.NewInt(10)).String(), got.BigInt().String())
+	// (2^127-1)/10 has remainder 7 and rounds away from zero.
+	want := new(big.Int).Quo(new(big.Int).Set(limit), big.NewInt(10))
+	want.Add(want, big.NewInt(1))
+	assert.Equal(t, want.String(), got.BigInt().String())
 }
 
 func TestFromStringDecimal128b(t *testing.T) {
@@ -873,6 +885,11 @@ func TestFromStringRoundsExactTies(t *testing.T) {
 		{"-1.005", 2, -101},
 		{"0.349999", 1, 3},
 		{"35e-2", 1, 4},
+		{"19", -1, 2},
+		{"15", -1, 2},
+		{"14", -1, 1},
+		{"-15", -1, -2},
+		{"-19", -1, -2},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s_%d", tt.s, tt.scale), func(t *testing.T) {

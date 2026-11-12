@@ -240,6 +240,40 @@ func FromFloat64(v float64, prec, scale int32) (Num, error) {
 }
 
 func FromString(v string, prec, scale int32) (n Num, err error) {
+	if lit, ok := decimalstr.Parse(v); ok {
+		return fromDecimalLiteral(lit, prec, scale)
+	}
+	return fromFloatLiteral(v, prec, scale)
+}
+
+func fromDecimalLiteral(lit decimalstr.Parsed, prec, scale int32) (n Num, err error) {
+	if scale < 0 {
+		// Reject an unscaled magnitude that would not fit in signed 128-bit
+		// storage, before using the scale.
+		if lit.AtLeastTwoPower(0, 127) {
+			return Num{}, errors.New("bitlen too large for decimal128")
+		}
+		if scale < -MaxScale {
+			return Num{}, fmt.Errorf("scale %d out of range for decimal128, must be between %d and %d", scale, -MaxScale, MaxScale)
+		}
+	} else if scale > MaxScale {
+		return Num{}, fmt.Errorf("scale %d out of range for decimal128, must be between %d and %d", scale, -MaxScale, MaxScale)
+	} else if lit.AtLeastTwoPower(int64(scale), 128) {
+		return Num{}, errors.New("bitlen too large for decimal128")
+	}
+
+	val, ok := lit.ScaleAndRound(int64(scale))
+	if !ok || val.BitLen() > 127 {
+		return Num{}, errors.New("bitlen too large for decimal128")
+	}
+	n = FromBigInt(val)
+	if !n.FitsInPrecision(prec) {
+		err = fmt.Errorf("val %v doesn't fit in precision %d", n, prec)
+	}
+	return
+}
+
+func fromFloatLiteral(v string, prec, scale int32) (n Num, err error) {
 	// time for some math!
 	// Our input precision means "number of digits of precision" but the
 	// math/big library refers to precision in floating point terms
@@ -286,30 +320,29 @@ func FromString(v string, prec, scale int32) (n Num, err error) {
 		if scale < -MaxScale {
 			return Num{}, fmt.Errorf("scale %d out of range for decimal128, must be between %d and %d", scale, -MaxScale, MaxScale)
 		}
-		var tmp big.Int
-		val, _ := out.Int(&tmp)
-		n = FromBigInt(val)
-		n, _ = n.Div(scaleMultipliers[-scale])
-	} else {
-		if scale > MaxScale {
-			return Num{}, fmt.Errorf("scale %d out of range for decimal128, must be between %d and %d", scale, -MaxScale, MaxScale)
-		}
-		p := (&big.Float{}).SetInt(scaleMultipliers[scale].BigInt())
-		out.SetPrec(precInBits).Mul(out, p)
-		// Reject before rounding and converting, which would allocate as many
-		// bits as the value has.
-		if out.IsInf() || out.MantExp(nil) > 128 {
-			return Num{}, errors.New("bitlen too large for decimal128")
-		}
-		// Round from the digits of v, so exact ties are resolved consistently
-		// rather than by the error in out's binary approximation.
-		val := decimalstr.RoundScaled(out, v, int64(scale))
-		if val.BitLen() > 127 {
-			return Num{}, errors.New("bitlen too large for decimal128")
-		}
-		n = FromBigInt(val)
+	} else if scale > MaxScale {
+		return Num{}, fmt.Errorf("scale %d out of range for decimal128, must be between %d and %d", scale, -MaxScale, MaxScale)
 	}
 
+	if scale != 0 {
+		if scale > 0 {
+			p := (&big.Float{}).SetInt(scaleMultipliers[scale].BigInt())
+			out.SetPrec(precInBits).Mul(out, p)
+		} else {
+			p := (&big.Float{}).SetInt(scaleMultipliers[-scale].BigInt())
+			out.SetPrec(precInBits).Quo(out, p)
+		}
+		// Reject before rounding and converting, which would allocate as many
+		// bits as the value has.
+		if scale > 0 && (out.IsInf() || out.MantExp(nil) > 128) {
+			return Num{}, errors.New("bitlen too large for decimal128")
+		}
+	}
+	val := decimalstr.RoundScaled(out, v, int64(scale))
+	if val.BitLen() > 127 {
+		return Num{}, errors.New("bitlen too large for decimal128")
+	}
+	n = FromBigInt(val)
 	if !n.FitsInPrecision(prec) {
 		err = fmt.Errorf("val %v doesn't fit in precision %d", n, prec)
 	}

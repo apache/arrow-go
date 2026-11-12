@@ -56,6 +56,17 @@ func TestScaleAndRound(t *testing.T) {
 		{"1e-50", 2, "0"},
 		{"12345678901234567890.5", 0, "12345678901234567891"},
 		{"1.00000000000000000000000000000000000005", 37, "10000000000000000000000000000000000001"},
+		{"19", -1, "2"},
+		{"15", -1, "2"},
+		{"14", -1, "1"},
+		{"-15", -1, "-2"},
+		{"-19", -1, "-2"},
+		{"10", -1, "1"},
+		{"5", -1, "1"},
+		{"4", -1, "0"},
+		{"50", -2, "1"},
+		{"25", -2, "0"},
+		{"1e38", -38, "1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.s, func(t *testing.T) {
@@ -88,4 +99,29 @@ func TestRoundScaledFallsBackToFloat(t *testing.T) {
 	assert.Equal(t, "3", decimalstr.RoundScaled(scaled, "0x1.4p1", 0).String())
 	assert.Equal(t, "-3", decimalstr.RoundScaled(new(big.Float).Neg(scaled), "-0x1.4p1", 0).String())
 	assert.Equal(t, "0", decimalstr.RoundScaled(new(big.Float).SetFloat64(0.2), "0.2", 0).String())
+}
+
+func TestParsedAtLeastTwoPower(t *testing.T) {
+	mustParse := func(s string) decimalstr.Parsed {
+		t.Helper()
+		p, ok := decimalstr.Parse(s)
+		require.True(t, ok, s)
+		return p
+	}
+	assert.False(t, mustParse("19").AtLeastTwoPower(0, 127))
+	assert.False(t, mustParse("1e38").AtLeastTwoPower(0, 127))
+	assert.True(t, mustParse("1e40").AtLeastTwoPower(0, 127))
+	assert.False(t, mustParse("1.5e38").AtLeastTwoPower(0, 127))
+	assert.True(t, mustParse("1e1000000000").AtLeastTwoPower(0, 128))
+	assert.False(t, mustParse("-1e-20000000").AtLeastTwoPower(0, 127))
+	assert.False(t, mustParse("4294967295").AtLeastTwoPower(0, 32))
+	assert.True(t, mustParse("4294967296").AtLeastTwoPower(0, 32))
+	assert.True(t, mustParse("18446744073709551616").AtLeastTwoPower(0, 64))
+	assert.False(t, mustParse("9223372036854775808").AtLeastTwoPower(0, 64))
+}
+
+func TestScaleAndRoundTinyExponentDoesNotAllocate(t *testing.T) {
+	got, ok := decimalstr.ScaleAndRound("-1e-20000000", 0)
+	require.True(t, ok)
+	assert.Equal(t, "0", got.String())
 }

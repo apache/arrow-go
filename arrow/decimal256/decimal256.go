@@ -120,6 +120,40 @@ func (n Num) Pow(rhs Num) Num {
 }
 
 func FromString(v string, prec, scale int32) (n Num, err error) {
+	if lit, ok := decimalstr.Parse(v); ok {
+		return fromDecimalLiteral(lit, prec, scale)
+	}
+	return fromFloatLiteral(v, prec, scale)
+}
+
+func fromDecimalLiteral(lit decimalstr.Parsed, prec, scale int32) (n Num, err error) {
+	if scale < 0 {
+		// Reject an unscaled magnitude that would not fit in signed 256-bit
+		// storage, before using the scale.
+		if lit.AtLeastTwoPower(0, 255) {
+			return Num{}, errors.New("bitlen too large for decimal256")
+		}
+		if scale < -MaxScale {
+			return Num{}, fmt.Errorf("scale %d out of range for decimal256, must be between %d and %d", scale, -MaxScale, MaxScale)
+		}
+	} else if scale > MaxScale {
+		return Num{}, fmt.Errorf("scale %d out of range for decimal256, must be between %d and %d", scale, -MaxScale, MaxScale)
+	} else if lit.AtLeastTwoPower(int64(scale), 256) {
+		return Num{}, errors.New("bitlen too large for decimal256")
+	}
+
+	val, ok := lit.ScaleAndRound(int64(scale))
+	if !ok || val.BitLen() > 255 {
+		return Num{}, errors.New("bitlen too large for decimal256")
+	}
+	n = FromBigInt(val)
+	if !n.FitsInPrecision(prec) {
+		err = fmt.Errorf("value %v doesn't fit in precision %d", n, prec)
+	}
+	return
+}
+
+func fromFloatLiteral(v string, prec, scale int32) (n Num, err error) {
 	// time for some math!
 	// Our input precision means "number of digits of precision" but the
 	// math/big library refers to precision in floating point terms
@@ -166,29 +200,27 @@ func FromString(v string, prec, scale int32) (n Num, err error) {
 		if scale < -MaxScale {
 			return Num{}, fmt.Errorf("scale %d out of range for decimal256, must be between %d and %d", scale, -MaxScale, MaxScale)
 		}
-		var tmp big.Int
-		val, _ := out.Int(&tmp)
-		n = FromBigInt(val)
+	} else if scale > MaxScale {
+		return Num{}, fmt.Errorf("scale %d out of range for decimal256, must be between %d and %d", scale, -MaxScale, MaxScale)
+	}
 
-		n, _ = n.Div(scaleMultipliers[-scale])
-	} else {
-		if scale > MaxScale {
-			return Num{}, fmt.Errorf("scale %d out of range for decimal256, must be between %d and %d", scale, -MaxScale, MaxScale)
+	if scale != 0 {
+		if scale > 0 {
+			out.Mul(out, (&big.Float{}).SetInt(scaleMultipliers[scale].BigInt())).SetPrec(precInBits)
+		} else {
+			out.Quo(out, (&big.Float{}).SetInt(scaleMultipliers[-scale].BigInt())).SetPrec(precInBits)
 		}
-		out.Mul(out, (&big.Float{}).SetInt(scaleMultipliers[scale].BigInt())).SetPrec(precInBits)
 		// Reject before rounding and converting, which would allocate as many
 		// bits as the value has.
-		if out.IsInf() || out.MantExp(nil) > 256 {
+		if scale > 0 && (out.IsInf() || out.MantExp(nil) > 256) {
 			return Num{}, errors.New("bitlen too large for decimal256")
 		}
-		// Round from the digits of v, so exact ties are resolved consistently
-		// rather than by the error in out's binary approximation.
-		val := decimalstr.RoundScaled(out, v, int64(scale))
-		if val.BitLen() > 255 {
-			return Num{}, errors.New("bitlen too large for decimal256")
-		}
-		n = FromBigInt(val)
 	}
+	val := decimalstr.RoundScaled(out, v, int64(scale))
+	if val.BitLen() > 255 {
+		return Num{}, errors.New("bitlen too large for decimal256")
+	}
+	n = FromBigInt(val)
 	if !n.FitsInPrecision(prec) {
 		err = fmt.Errorf("value %v doesn't fit in precision %d", n, prec)
 	}
