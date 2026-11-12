@@ -89,8 +89,4 @@ func flushBooleanEncoder(b *testing.B, encoder booleanSpacedEncoder) {
 		b.Fatal(err)
 	}
 	buf.Release()
-
-	if enc, ok := encoder.(*RleBooleanEncoder); ok {
-		enc.bufferedValues = enc.bufferedValues[:0]
-	}
 }

@@ -281,6 +281,7 @@ func (enc *RleBooleanEncoder) FlushValues() (Buffer, error) {
 	debug.Assert(n <= rleBufferSizeMax, "num encoded bytes larger than expected max")
 	buf := enc.sink.Finish()
 	binary.LittleEndian.PutUint32(buf.Bytes(), uint32(n))
+	enc.bufferedValues = enc.bufferedValues[:0]
 
 	return buf, nil
 }
