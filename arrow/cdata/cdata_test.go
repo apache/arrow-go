@@ -1226,6 +1226,7 @@ func TestExtensionArrayRoundTrip(t *testing.T) {
 			defer ReleaseCArrowArray(&out)
 			defer ReleaseCArrowSchema(&sc)
 			assert.EqualValues(t, tt.nbuffers, out.n_buffers)
+			assert.NotNil(t, unsafe.Slice(out.buffers, out.n_buffers)[out.n_buffers-1])
 
 			field, imported, err := ImportCArray(&out, &sc)
 			require.NoError(t, err)

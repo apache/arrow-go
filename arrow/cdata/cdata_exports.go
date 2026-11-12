@@ -392,14 +392,17 @@ func exportArray(arr arrow.Array, out *CArrowArray, outSchema *CArrowSchema) {
 			cBufs[i] = (*C.void)(unsafe.Pointer(&buf.Bytes()[0]))
 		}
 
-		// with no data buffers the sizes buffer would be empty, and the C data
-		// interface allows a NULL pointer for an empty buffer
-		if has_buffer_sizes_buffer && len(buffers) > 2 {
-			sizes := allocateBufferSizeArr(len(buffers[2:]))
-			for i, buf := range buffers[2:] {
-				sizes[i] = C.int64_t(buf.Len())
+		if has_buffer_sizes_buffer {
+			if len(buffers) > 2 {
+				sizes := allocateBufferSizeArr(len(buffers[2:]))
+				for i, buf := range buffers[2:] {
+					sizes[i] = C.int64_t(buf.Len())
+				}
+				cBufs[nbuffers-1] = (*C.void)(unsafe.Pointer(&sizes[0]))
+			} else {
+				// releaseExportedArray must not free this dummy buffer
+				cBufs[nbuffers-1] = (*C.void)(unsafe.Pointer(&C.kGoCdataZeroRegion))
 			}
-			cBufs[nbuffers-1] = (*C.void)(unsafe.Pointer(&sizes[0]))
 		}
 		out.buffers = (*unsafe.Pointer)(unsafe.Pointer(&cBufs[0]))
 	}
