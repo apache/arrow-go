@@ -528,13 +528,9 @@ func (w *columnWriter) writeLevels(numValues int64, defLevels, repLevels []int16
 	return toWrite
 }
 
-func (w *columnWriter) writeLevelsSpaced(numLevels int64, defLevels, repLevels []int16) {
-	if maxDefLevel := w.descr.MaxDefinitionLevel(); maxDefLevel > 0 {
-		for _, v := range defLevels[:numLevels] {
-			if v < maxDefLevel {
-				w.numBufferedNulls++
-			}
-		}
+func (w *columnWriter) writeLevelsSpaced(numLevels int64, info batchWriteInfo, defLevels, repLevels []int16) {
+	if w.descr.MaxDefinitionLevel() > 0 {
+		w.numBufferedNulls += numLevels - info.batchNum
 		w.WriteDefinitionLevels(defLevels[:numLevels])
 	}
 
