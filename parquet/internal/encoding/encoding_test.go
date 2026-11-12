@@ -433,6 +433,9 @@ func (b *BaseEncodingTestSuite) TestDeltaByteArrayRoundTrip() {
 	switch b.typ {
 	case reflect.TypeOf(parquet.ByteArray{}):
 		b.checkRoundTrip(parquet.Encodings.DeltaByteArray)
+	case reflect.TypeOf(parquet.FixedLenByteArray{}):
+		b.checkRoundTrip(parquet.Encodings.DeltaByteArray)
+		b.Panics(func() { b.checkRoundTrip(parquet.Encodings.DeltaLengthByteArray) })
 	default:
 		b.Panics(func() { b.checkRoundTrip(parquet.Encodings.DeltaLengthByteArray) })
 	}
@@ -478,6 +481,8 @@ func (b *BaseEncodingTestSuite) TestSpacedRoundTrip() {
 					b.checkRoundTripSpaced(parquet.Encodings.DeltaBinaryPacked, validBits, validBitsOffset)
 				case reflect.TypeOf(parquet.ByteArray{}):
 					b.checkRoundTripSpaced(parquet.Encodings.DeltaLengthByteArray, validBits, validBitsOffset)
+					b.checkRoundTripSpaced(parquet.Encodings.DeltaByteArray, validBits, validBitsOffset)
+				case reflect.TypeOf(parquet.FixedLenByteArray{}):
 					b.checkRoundTripSpaced(parquet.Encodings.DeltaByteArray, validBits, validBitsOffset)
 				}
 			}

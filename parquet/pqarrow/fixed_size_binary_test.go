@@ -68,7 +68,7 @@ func TestWriteArrowFixedSizeBinaryDirect(t *testing.T) {
 	}, 3)
 	defer tbl.Release()
 
-	for _, encoding := range []parquet.Encoding{parquet.Encodings.Plain, parquet.Encodings.ByteStreamSplit} {
+	for _, encoding := range []parquet.Encoding{parquet.Encodings.Plain, parquet.Encodings.ByteStreamSplit, parquet.Encodings.DeltaByteArray} {
 		t.Run(encoding.String(), func(t *testing.T) {
 			writerProps := parquet.NewWriterProperties(
 				parquet.WithDictionaryDefault(false),

@@ -124,3 +124,44 @@ func TestDeltaByteArrayDecoderRejectsInvalidPrefixes(t *testing.T) {
 		}
 	}
 }
+
+func TestDeltaByteArrayFixedLenDecoderRejectsWrongLength(t *testing.T) {
+	dec := func(t *testing.T, prefixes []int32, suffixes ...string) FixedLenByteArrayDecoder {
+		d := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.DeltaByteArray, fixedLenColumn(t, 4), memory.DefaultAllocator).(FixedLenByteArrayDecoder)
+		require.NoError(t, d.SetData(len(suffixes), deltaBytePage(t, prefixes, suffixes...)))
+		return d
+	}
+
+	t.Run("all values have the type length", func(t *testing.T) {
+		d := dec(t, []int32{0, 2, 4}, "abcd", "xy", "")
+		out := make([]parquet.FixedLenByteArray, 3)
+		n, err := d.Decode(out)
+		require.NoError(t, err)
+		require.Equal(t, 3, n)
+		require.Equal(t, "abcd", string(out[0]))
+		require.Equal(t, "abxy", string(out[1]))
+		require.Equal(t, "abxy", string(out[2]))
+	})
+
+	errTests := []struct {
+		name     string
+		prefixes []int32
+		suffixes []string
+		wantErr  string
+	}{
+		{name: "first value too short", prefixes: []int32{0}, suffixes: []string{"abc"}, wantErr: "parquet: FLBA type requires fixed-length 4 but got 3"},
+		{name: "later value too long", prefixes: []int32{0, 2}, suffixes: []string{"abcd", "xyz"}, wantErr: "parquet: FLBA type requires fixed-length 4 but got 5"},
+		{name: "later value too short with an empty suffix", prefixes: []int32{0, 2}, suffixes: []string{"abcd", ""}, wantErr: "parquet: FLBA type requires fixed-length 4 but got 2"},
+	}
+	for _, tt := range errTests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := dec(t, tt.prefixes, tt.suffixes...)
+			out := make([]parquet.FixedLenByteArray, len(tt.suffixes))
+			for range 2 {
+				n, err := d.Decode(out)
+				require.EqualError(t, err, tt.wantErr)
+				require.Zero(t, n)
+			}
+		})
+	}
+}

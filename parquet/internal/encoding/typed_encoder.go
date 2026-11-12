@@ -731,6 +731,8 @@ func (fixedLenByteArrayEncoderTraits) Encoder(e format.Encoding, useDict bool, d
 		return &PlainFixedLenByteArrayEncoder{encoder: newEncoderBase(e, descr, mem)}
 	case format.Encoding_BYTE_STREAM_SPLIT:
 		return &ByteStreamSplitFixedLenByteArrayEncoder{PlainFixedLenByteArrayEncoder: PlainFixedLenByteArrayEncoder{encoder: newEncoderBase(e, descr, mem)}}
+	case format.Encoding_DELTA_BYTE_ARRAY:
+		return &DeltaByteArrayFixedLenByteArrayEncoder{DeltaByteArrayEncoder: DeltaByteArrayEncoder{encoder: newEncoderBase(e, descr, mem)}}
 	default:
 		panic("unimplemented encoding type")
 	}
@@ -756,6 +758,15 @@ func (fixedLenByteArrayDecoderTraits) Decoder(e parquet.Encoding, descr *schema.
 		return &PlainFixedLenByteArrayDecoder{decoder: newDecoderBase(format.Encoding(e), descr)}
 	case parquet.Encodings.ByteStreamSplit:
 		return &ByteStreamSplitFixedLenByteArrayDecoder{decoder: newDecoderBase(format.Encoding(e), descr)}
+	case parquet.Encodings.DeltaByteArray:
+		if mem == nil {
+			mem = memory.DefaultAllocator
+		}
+		return &DeltaByteArrayFixedLenByteArrayDecoder{DeltaByteArrayDecoder{
+			DeltaLengthByteArrayDecoder: &DeltaLengthByteArrayDecoder{
+				decoder: newDecoderBase(format.Encoding(e), descr),
+				mem:     mem,
+			}}}
 	default:
 		panic("unimplemented encoding type")
 	}
