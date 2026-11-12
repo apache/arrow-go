@@ -71,12 +71,12 @@ type Releasable interface {
 	Retain()
 }
 
-func validateOptional(s *scalar, value interface{}, valueDesc string) error {
-	if s.Valid && value == nil {
-		return fmt.Errorf("%s scalar is marked valid but doesn't have a %s", s.Type, valueDesc)
+func validateOptional(s *scalar, hasValue bool) error {
+	if s.Valid && !hasValue {
+		return fmt.Errorf("%s scalar is marked valid but doesn't have a value", s.Type)
 	}
-	if !s.Valid && value != nil && !reflect.ValueOf(value).IsNil() {
-		return fmt.Errorf("%s scalar is marked null but has a %s", s.Type, valueDesc)
+	if !s.Valid && hasValue {
+		return fmt.Errorf("%s scalar is marked null but has a value", s.Type)
 	}
 	return nil
 }

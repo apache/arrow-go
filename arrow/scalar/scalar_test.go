@@ -347,8 +347,8 @@ func TestBinaryScalarValidateErrors(t *testing.T) {
 
 	nullScalar := scalar.MakeNullScalar(arrow.BinaryTypes.Binary)
 	nullScalar.(*scalar.Binary).Valid = true
-	assert.Error(t, sc.Validate())
-	assert.Error(t, sc.ValidateFull())
+	assert.Error(t, nullScalar.Validate())
+	assert.Error(t, nullScalar.ValidateFull())
 }
 
 func TestBinaryScalarCastToBinaryUsesTargetType(t *testing.T) {
@@ -387,8 +387,8 @@ func TestStringScalarValidateErrors(t *testing.T) {
 
 	nullScalar := scalar.MakeNullScalar(arrow.BinaryTypes.String)
 	nullScalar.(*scalar.String).Valid = true
-	assert.Error(t, sc.Validate())
-	assert.Error(t, sc.ValidateFull())
+	assert.Error(t, nullScalar.Validate())
+	assert.Error(t, nullScalar.ValidateFull())
 
 	// invalid utf8
 	sc = scalar.NewStringScalarFromBuffer(memory.NewBufferBytes([]byte{0xff}))
@@ -2254,7 +2254,7 @@ func TestViewScalarValidateWithoutValue(t *testing.T) {
 			v.Valid = true
 		}
 		for _, sc := range []scalar.Scalar{plain, view} {
-			assert.NotPanics(t, func() { _ = sc.Validate() }, "%T %s", sc, dt)
+			assert.Error(t, sc.Validate(), "%T %s", sc, dt)
 		}
 	}
 }
@@ -3330,6 +3330,15 @@ func TestRunEndEncodedGetScalar(t *testing.T) {
 	slice := array.NewSlice(reeArray, 199, 404).(*array.RunEndEncoded)
 	defer slice.Release()
 
+	nullRunEnds, _, _ := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2]`))
+	defer nullRunEnds.Release()
+
+	nullValues, _, _ := array.FromJSON(mem, arrow.PrimitiveTypes.Int64, strings.NewReader(`[null, 7]`))
+	defer nullValues.Release()
+
+	nullRun := array.NewRunEndEncodedArray(nullRunEnds, nullValues, 2, 0)
+	defer nullRun.Release()
+
 	tests := []struct {
 		name  string
 		arr   arrow.Array
@@ -3338,6 +3347,7 @@ func TestRunEndEncodedGetScalar(t *testing.T) {
 	}{
 		{"simple", reeArray, 225, "world"},
 		{"offset", slice, 125, "of"},
+		{"null primitive", nullRun, 0, "null"},
 	}
 
 	for _, tt := range tests {
@@ -3365,6 +3375,27 @@ func TestRunEndEncodedNullScalar(t *testing.T) {
 	assert.IsType(t, (*scalar.RunEndEncoded)(nil), sc)
 	assert.NoError(t, sc.Validate())
 	assert.NoError(t, sc.ValidateFull())
+}
+
+func TestRunEndEncodedScalarValidateRejectsMismatches(t *testing.T) {
+	dt := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int64)
+
+	nullWithValue := scalar.NewRunEndEncodedScalar(scalar.NewInt64Scalar(7), dt)
+	nullWithValue.Valid = false
+	assert.ErrorContains(t, nullWithValue.Validate(), "has non-null storage value")
+
+	validWithNull := scalar.NewRunEndEncodedScalar(scalar.MakeNullScalar(arrow.PrimitiveTypes.Int64), dt)
+	validWithNull.Valid = true
+	assert.ErrorContains(t, validWithNull.Validate(), "has null storage value")
+
+	nullWrongType := scalar.NewRunEndEncodedScalar(scalar.MakeNullScalar(arrow.PrimitiveTypes.Int32), dt)
+	assert.ErrorContains(t, nullWrongType.Validate(), "does not match type")
+
+	noType := &scalar.RunEndEncoded{Value: scalar.MakeNullScalar(arrow.BinaryTypes.String)}
+	assert.ErrorContains(t, noType.Validate(), "lacks a type")
+
+	nilType := scalar.NewRunEndEncodedScalar(scalar.MakeNullScalar(arrow.BinaryTypes.String), nil)
+	assert.ErrorContains(t, nilType.Validate(), "should not have type")
 }
 
 func TestRunEndEncodedScalarValidateRejectsMissingNonNullValue(t *testing.T) {

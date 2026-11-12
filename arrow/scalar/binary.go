@@ -97,9 +97,9 @@ func (b *Binary) CastTo(to arrow.DataType) (Scalar, error) {
 func (b *Binary) Validate() (err error) {
 	err = b.scalar.Validate()
 	if err == nil {
-		err = validateOptional(&b.scalar, b.Value, "value")
+		err = validateOptional(&b.scalar, b.Value != nil)
 	}
-	if err == nil && b.Valid && b.Value != nil && b.Value.Len() > math.MaxInt32 {
+	if err == nil && b.Valid && b.Value.Len() > math.MaxInt32 {
 		switch b.Type.ID() {
 		case arrow.BINARY_VIEW, arrow.STRING_VIEW:
 			// A view header stores the size as an int32.
