@@ -19,6 +19,7 @@ package file_test
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"os"
 	"path"
@@ -26,6 +27,8 @@ import (
 
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
+	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
+	"github.com/apache/arrow-go/v18/parquet/internal/thrift"
 	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
@@ -43,8 +46,18 @@ func geoPoint(x, y float64) parquet.ByteArray {
 
 func writeGeoFile(t *testing.T, props *parquet.WriterProperties, write func(*file.ByteArrayColumnChunkWriter)) *file.Reader {
 	t.Helper()
-	geom, err := schema.NewPrimitiveNodeLogical("geom", parquet.Repetitions.Optional,
-		schema.GeometryLogicalType{}, parquet.Types.ByteArray, -1, -1)
+	buf := writeGeoColumn(t, schema.GeometryLogicalType{}, parquet.Repetitions.Optional, props, write)
+	rdr, err := file.NewParquetReader(bytes.NewReader(buf))
+	require.NoError(t, err)
+	t.Cleanup(func() { rdr.Close() })
+	return rdr
+}
+
+// writeGeoColumn writes a file with a single row group holding one byte array
+// column of the given logical type, and returns the file's bytes.
+func writeGeoColumn(t *testing.T, lt schema.LogicalType, rep parquet.Repetition, props *parquet.WriterProperties, write func(*file.ByteArrayColumnChunkWriter)) []byte {
+	t.Helper()
+	geom, err := schema.NewPrimitiveNodeLogical("geom", rep, lt, parquet.Types.ByteArray, -1, -1)
 	require.NoError(t, err)
 	root, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{geom}, -1)
 	require.NoError(t, err)
@@ -58,11 +71,21 @@ func writeGeoFile(t *testing.T, props *parquet.WriterProperties, write func(*fil
 	require.NoError(t, cw.Close())
 	require.NoError(t, rg.Close())
 	require.NoError(t, w.Close())
+	return buf.Bytes()
+}
 
-	rdr, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()))
+// footerColumnMeta decodes the file footer and returns the thrift metadata of
+// the first column chunk, so tests can check exactly which fields are set.
+func footerColumnMeta(t *testing.T, buf []byte) *format.ColumnMetaData {
+	t.Helper()
+	require.Greater(t, len(buf), 8)
+	footerLen := int(binary.LittleEndian.Uint32(buf[len(buf)-8:]))
+	var fmd format.FileMetaData
+	_, err := thrift.DeserializeThrift(&fmd, buf[len(buf)-8-footerLen:len(buf)-8])
 	require.NoError(t, err)
-	t.Cleanup(func() { rdr.Close() })
-	return rdr
+	require.Len(t, fmd.RowGroups, 1)
+	require.Len(t, fmd.RowGroups[0].Columns, 1)
+	return fmd.RowGroups[0].Columns[0].MetaData
 }
 
 func TestGeometryColumnGeoStatistics(t *testing.T) {
@@ -205,5 +228,130 @@ func TestGeoStatisticsReferenceFiles(t *testing.T) {
 			require.NoError(t, err)
 			assert.Nil(t, col.GeoStatistics(), "row group %d", rg)
 		}
+	})
+}
+
+func TestGeoColumnNullCountStatistics(t *testing.T) {
+	assertNullCountOnly := func(t *testing.T, md *format.ColumnMetaData, want int64) {
+		t.Helper()
+		require.True(t, md.IsSetStatistics(), "statistics block should be written")
+		st := md.Statistics
+		require.True(t, st.IsSetNullCount())
+		assert.Equal(t, want, st.GetNullCount())
+		assert.False(t, st.IsSetMin())
+		assert.False(t, st.IsSetMax())
+		assert.False(t, st.IsSetMinValue())
+		assert.False(t, st.IsSetMaxValue())
+		assert.False(t, st.IsSetDistinctCount())
+	}
+
+	for _, dict := range []bool{false, true} {
+		for _, v := range []parquet.DataPageVersion{parquet.DataPageV1, parquet.DataPageV2} {
+			props := parquet.NewWriterProperties(parquet.WithStats(true),
+				parquet.WithDictionaryDefault(dict), parquet.WithDataPageVersion(v))
+			suffix := fmt.Sprintf(" (dict=%v, page v%d)", dict, v+1)
+
+			t.Run("GEOMETRY with nulls"+suffix, func(t *testing.T) {
+				buf := writeGeoColumn(t, schema.GeometryLogicalType{}, parquet.Repetitions.Optional, props, func(cw *file.ByteArrayColumnChunkWriter) {
+					_, err := cw.WriteBatch([]parquet.ByteArray{geoPoint(-122.4, 37.8), geoPoint(-73.9, 40.7)}, []int16{1, 0, 1, 0}, nil)
+					require.NoError(t, err)
+					_, err = cw.WriteBatchSpacedWithError([]parquet.ByteArray{geoPoint(5, 60), nil}, []int16{1, 0}, nil, []byte{0b01}, 0)
+					require.NoError(t, err)
+					_, err = cw.WriteBatchArrow(geoPoint(1, 2), []int32{0, 21, 21}, []int16{1, 0}, nil)
+					require.NoError(t, err)
+				})
+				md := footerColumnMeta(t, buf)
+				assertNullCountOnly(t, md, 4)
+
+				// the geospatial statistics are unchanged
+				gs := md.GetGeospatialStatistics()
+				require.NotNil(t, gs)
+				require.NotNil(t, gs.Bbox)
+				assert.Equal(t, []float64{-122.4, 5, 2, 60}, []float64{gs.Bbox.Xmin, gs.Bbox.Xmax, gs.Bbox.Ymin, gs.Bbox.Ymax})
+				assert.Equal(t, []int32{1}, gs.GeospatialTypes)
+			})
+
+			t.Run("GEOMETRY without nulls"+suffix, func(t *testing.T) {
+				buf := writeGeoColumn(t, schema.GeometryLogicalType{}, parquet.Repetitions.Optional, props, func(cw *file.ByteArrayColumnChunkWriter) {
+					_, err := cw.WriteBatch([]parquet.ByteArray{geoPoint(1, 2), geoPoint(3, 4)}, []int16{1, 1}, nil)
+					require.NoError(t, err)
+				})
+				md := footerColumnMeta(t, buf)
+				assertNullCountOnly(t, md, 0)
+				assert.True(t, md.IsSetGeospatialStatistics())
+			})
+
+			t.Run("required GEOMETRY"+suffix, func(t *testing.T) {
+				buf := writeGeoColumn(t, schema.GeometryLogicalType{}, parquet.Repetitions.Required, props, func(cw *file.ByteArrayColumnChunkWriter) {
+					_, err := cw.WriteBatch([]parquet.ByteArray{geoPoint(1, 2), geoPoint(3, 4)}, nil, nil)
+					require.NoError(t, err)
+				})
+				assertNullCountOnly(t, footerColumnMeta(t, buf), 0)
+			})
+
+			t.Run("GEOMETRY all null"+suffix, func(t *testing.T) {
+				buf := writeGeoColumn(t, schema.GeometryLogicalType{}, parquet.Repetitions.Optional, props, func(cw *file.ByteArrayColumnChunkWriter) {
+					_, err := cw.WriteBatch(nil, []int16{0, 0, 0}, nil)
+					require.NoError(t, err)
+				})
+				md := footerColumnMeta(t, buf)
+				assertNullCountOnly(t, md, 3)
+				assert.False(t, md.IsSetGeospatialStatistics())
+			})
+
+			t.Run("GEOMETRY with invalid WKB"+suffix, func(t *testing.T) {
+				// the bounding box is dropped, but the null count is still valid
+				buf := writeGeoColumn(t, schema.GeometryLogicalType{}, parquet.Repetitions.Optional, props, func(cw *file.ByteArrayColumnChunkWriter) {
+					_, err := cw.WriteBatch([]parquet.ByteArray{[]byte("not wkb")}, []int16{1, 0}, nil)
+					require.NoError(t, err)
+				})
+				md := footerColumnMeta(t, buf)
+				assertNullCountOnly(t, md, 1)
+				assert.False(t, md.IsSetGeospatialStatistics())
+			})
+
+			t.Run("GEOGRAPHY"+suffix, func(t *testing.T) {
+				buf := writeGeoColumn(t, schema.GeographyLogicalType{}, parquet.Repetitions.Optional, props, func(cw *file.ByteArrayColumnChunkWriter) {
+					_, err := cw.WriteBatch([]parquet.ByteArray{geoPoint(1, 2)}, []int16{0, 1, 0}, nil)
+					require.NoError(t, err)
+				})
+				md := footerColumnMeta(t, buf)
+				assertNullCountOnly(t, md, 2)
+				assert.False(t, md.IsSetGeospatialStatistics())
+			})
+		}
+	}
+
+	t.Run("statistics disabled", func(t *testing.T) {
+		for _, lt := range []schema.LogicalType{schema.GeometryLogicalType{}, schema.GeographyLogicalType{}} {
+			props := parquet.NewWriterProperties(parquet.WithStats(false))
+			buf := writeGeoColumn(t, lt, parquet.Repetitions.Optional, props, func(cw *file.ByteArrayColumnChunkWriter) {
+				_, err := cw.WriteBatch([]parquet.ByteArray{geoPoint(1, 2)}, []int16{1, 0}, nil)
+				require.NoError(t, err)
+			})
+			md := footerColumnMeta(t, buf)
+			assert.False(t, md.IsSetStatistics(), "%s", lt)
+			assert.False(t, md.IsSetGeospatialStatistics(), "%s", lt)
+		}
+	})
+
+	t.Run("reader round trip", func(t *testing.T) {
+		props := parquet.NewWriterProperties(parquet.WithStats(true))
+		rdr := writeGeoFile(t, props, func(cw *file.ByteArrayColumnChunkWriter) {
+			_, err := cw.WriteBatch([]parquet.ByteArray{geoPoint(1, 2)}, []int16{1, 0}, nil)
+			require.NoError(t, err)
+		})
+		col, err := rdr.MetaData().RowGroup(0).ColumnChunk(0)
+		require.NoError(t, err)
+		require.NotNil(t, col.GeoStatistics())
+
+		// the sort order is undefined, so the reader still reports no
+		// typed statistics and never trusts a min/max for the column
+		ok, err := col.StatsSet()
+		require.NoError(t, err)
+		assert.False(t, ok)
+		stats, err := col.Statistics()
+		require.NoError(t, err)
+		assert.Nil(t, stats)
 	})
 }

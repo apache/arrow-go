@@ -125,7 +125,19 @@ type columnWriter struct {
 	// It is tracked once per column chunk (i.e. per row group), never per
 	// page since Parquet format defines GeospatialStatistics only on
 	// ColumnMetaData
-	geoStatistics      *metadata.GeoStatistics
+	geoStatistics *metadata.GeoStatistics
+
+	// countGeoNulls is set for GEOMETRY and GEOGRAPHY columns with
+	// statistics enabled. Their sort order is undefined, so they have no
+	// typed statistics, but the chunk still gets a Statistics block holding
+	// only null_count (the spec forbids min/max for these types, but says
+	// writers should still write null_count). Some readers, such as DuckDB,
+	// ignore geospatial_statistics unless a Statistics block is present.
+	countGeoNulls bool
+	// geoNullCount is the number of null values written to this chunk,
+	// counted from the definition levels when countGeoNulls is set.
+	geoNullCount int64
+
 	bloomFilter        metadata.BloomFilterBuilder
 	dictBloomPopulated bool
 
@@ -186,9 +198,14 @@ func newColumnWriterBase(metaData *metadata.ColumnChunkMetaDataBuilder, pager Pa
 		ret.chunkStatistics = metadata.NewStatistics(ret.descr, props.Allocator())
 	}
 
-	if _, ok := ret.descr.LogicalType().(schema.GeometryLogicalType); ok &&
-		ret.descr.PhysicalType() == parquet.Types.ByteArray && props.StatisticsEnabledFor(ret.descr.Path()) {
-		ret.geoStatistics = metadata.NewGeoStatistics()
+	if props.StatisticsEnabledFor(ret.descr.Path()) && ret.descr.PhysicalType() == parquet.Types.ByteArray {
+		switch ret.descr.LogicalType().(type) {
+		case schema.GeometryLogicalType:
+			ret.geoStatistics = metadata.NewGeoStatistics()
+			ret.countGeoNulls = true
+		case schema.GeographyLogicalType:
+			ret.countGeoNulls = true
+		}
 	}
 
 	ret.defEncoder.Init(parquet.Encodings.RLE, ret.descr.MaxDefinitionLevel(), ret.defLevelSink)
@@ -242,6 +259,16 @@ func (w *columnWriter) WriteDataPage(page DataPage) error {
 }
 
 func (w *columnWriter) WriteDefinitionLevels(levels []int16) {
+	if w.countGeoNulls {
+		// every level below the max definition level is a null value, which
+		// matches how typed statistics count nulls (levels minus values)
+		maxDefLevel := w.descr.MaxDefinitionLevel()
+		for _, v := range levels {
+			if v < maxDefLevel {
+				w.geoNullCount++
+			}
+		}
+	}
 	w.defEncoder.EncodeNoFlush(levels)
 }
 
@@ -737,6 +764,12 @@ func (w *columnWriter) Close() (err error) {
 
 		if w.rowsWritten > 0 && chunkStats.IsSet() {
 			w.metaData.SetStats(chunkStats)
+		}
+		if w.rowsWritten > 0 && w.countGeoNulls {
+			// null_count only: min/max must not be written for a type whose
+			// sort order is undefined
+			var nullStats metadata.EncodedStatistics
+			w.metaData.SetStats(*nullStats.SetNullCount(w.geoNullCount))
 		}
 		if w.rowsWritten > 0 && w.geoStatistics != nil {
 			w.metaData.SetGeoStatistics(w.geoStatistics)
