@@ -24,6 +24,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/internal"
 )
 
 // #include <stdlib.h>
@@ -125,7 +126,13 @@ func releaseExportedArray(arr *CArrowArray) {
 	}
 	defer C.ArrowArrayMarkReleased(arr)
 
+	h := getHandle(arr.private_data)
+	data := h.Value().(arrow.ArrayData)
+
 	if arr.n_buffers > 0 {
+		if internal.HasBufferSizesBuffer(data.DataType().ID()) {
+			C.free(unsafe.Slice(arr.buffers, arr.n_buffers)[arr.n_buffers-1])
+		}
 		C.free(unsafe.Pointer(arr.buffers))
 	}
 
@@ -144,8 +151,7 @@ func releaseExportedArray(arr *CArrowArray) {
 		C.free(unsafe.Pointer(arr.children))
 	}
 
-	h := getHandle(arr.private_data)
-	h.Value().(arrow.ArrayData).Release()
+	data.Release()
 	h.Delete()
 	C.free(unsafe.Pointer(arr.private_data))
 }

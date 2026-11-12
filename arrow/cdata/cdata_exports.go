@@ -288,12 +288,13 @@ func (exp *schemaExporter) exportFormat(dt arrow.DataType) string {
 
 func (exp *schemaExporter) export(field arrow.Field) {
 	exp.name = field.Name
-	exp.format = exp.exportFormat(exp.handleExtension(field.Type))
+	storage := exp.handleExtension(field.Type)
+	exp.format = exp.exportFormat(storage)
 	if field.Nullable {
 		exp.flags |= C.ARROW_FLAG_NULLABLE
 	}
 
-	switch dt := field.Type.(type) {
+	switch dt := storage.(type) {
 	case *arrow.DictionaryType:
 		exp.dict = new(schemaExporter)
 		exp.dict.export(arrow.Field{Type: dt.ValueType})
@@ -346,6 +347,9 @@ func exportArray(arr arrow.Array, out *CArrowArray, outSchema *CArrowSchema) {
 	if outSchema != nil {
 		exportField(arrow.Field{Type: arr.DataType()}, outSchema)
 	}
+	if ext, ok := arr.(array.ExtensionArray); ok {
+		arr = ext.Storage()
+	}
 
 	buffers := arr.Data().Buffers()
 	// Some types don't have validity bitmaps, but we keep them shifted
@@ -388,14 +392,14 @@ func exportArray(arr arrow.Array, out *CArrowArray, outSchema *CArrowSchema) {
 			cBufs[i] = (*C.void)(unsafe.Pointer(&buf.Bytes()[0]))
 		}
 
-		if has_buffer_sizes_buffer {
+		// with no data buffers the sizes buffer would be empty, and the C data
+		// interface allows a NULL pointer for an empty buffer
+		if has_buffer_sizes_buffer && len(buffers) > 2 {
 			sizes := allocateBufferSizeArr(len(buffers[2:]))
 			for i, buf := range buffers[2:] {
 				sizes[i] = C.int64_t(buf.Len())
 			}
-			if len(sizes) > 0 {
-				cBufs[nbuffers-1] = (*C.void)(unsafe.Pointer(&sizes[0]))
-			}
+			cBufs[nbuffers-1] = (*C.void)(unsafe.Pointer(&sizes[0]))
 		}
 		out.buffers = (*unsafe.Pointer)(unsafe.Pointer(&cBufs[0]))
 	}
