@@ -1722,6 +1722,29 @@ func TestRleBooleanEncoderFlushStartsNewPage(t *testing.T) {
 	assert.Equal(t, []bool{false, true}, out)
 }
 
+func TestRleBooleanEncoderResetDropsBufferedValues(t *testing.T) {
+	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Required, -1), 0, 0)
+	enc := encoding.NewEncoder(parquet.Types.Boolean, parquet.Encodings.RLE, false, descr, memory.DefaultAllocator)
+	benc := enc.(encoding.BooleanEncoder)
+
+	benc.Put([]bool{true, true})
+	enc.Reset()
+	benc.Put([]bool{false})
+	buf, err := enc.FlushValues()
+	require.NoError(t, err)
+	defer buf.Release()
+
+	dec := encoding.NewDecoder(parquet.Types.Boolean, parquet.Encodings.RLE, descr, memory.DefaultAllocator)
+	bdec := dec.(encoding.BooleanDecoder)
+	require.NoError(t, bdec.SetData(1, buf.Bytes()))
+
+	out := make([]bool, 1)
+	n, err := bdec.Decode(out)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	assert.Equal(t, []bool{false}, out)
+}
+
 func TestRleBooleanEncoderPutSpacedBitmapConsistency(t *testing.T) {
 	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Optional, -1), 0, 0)
 
