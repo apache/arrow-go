@@ -287,7 +287,7 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBatchSpacedWithError(values []{{.name}
 
     info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, levelOffset, batch), batch)
 
-    w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, levelOffset, batch), levelSliceOrNil(repLevels, levelOffset, batch))
+    w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, levelOffset, batch), levelSliceOrNil(repLevels, levelOffset, batch))
     var vals []{{.name}}
     if values != nil {
       vals = values[valueOffset : valueOffset+info.numSpaced()]
@@ -311,7 +311,7 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBatchSpacedWithError(values []{{.name}
     var vals []{{.name}}
     info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
 
-    w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+    w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
     if values != nil {
       vals = values[valueOffset:valueOffset+info.numSpaced()]
     }
@@ -395,7 +395,7 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBitmapBatchSpacedWithError(bitmap []by
   w.doBatches(int64(length), repLevels, func(offset, batch int64) {
     info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
 
-    w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+    w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
     if w.bitsBuffer != nil {
       w.writeBitmapValuesSpaced(bitmap, bitmapOffset+valueOffset, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
@@ -458,7 +458,7 @@ func (w *{{.Name}}ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLe
       panic(err) // caught above
     }
 
-    w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+    w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
     if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
       panic(err)

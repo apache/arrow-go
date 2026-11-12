@@ -281,7 +281,7 @@ func writeBatchSpacedArrow[T byteArrayArrowOffset](w *ByteArrayColumnChunkWriter
 		}
 
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, levelOffset, batch), batch)
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, levelOffset, batch),
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, levelOffset, batch),
 			levelSliceOrNil(repLevels, levelOffset, batch))
 		batchOffsets := arrowOffsetsForBatch(offsets, valueOffset, info.numSpaced())
 

@@ -171,6 +171,85 @@ func TestWriteDataPageV2NumRows(t *testing.T) {
 	assert.EqualValues(t, 3, wr.RowsWritten())
 }
 
+func TestDataPageV2NumNulls(t *testing.T) {
+	optionalInt := schema.NewInt32Node("v", parquet.Repetitions.Optional, -1)
+
+	tests := []struct {
+		name  string
+		node  schema.Node
+		props []parquet.WriterProperty
+		write func(file.ColumnChunkWriter) error
+		nulls []int32
+	}{
+		// levels: a null list, an empty list, then [1, null, 2]
+		{"list spaced statistics off",
+			schema.Must(schema.ListOf(optionalInt, parquet.Repetitions.Optional, -1)),
+			[]parquet.WriterProperty{parquet.WithStats(false)},
+			func(cw file.ColumnChunkWriter) error {
+				_, err := cw.(*file.Int32ColumnChunkWriter).WriteBatchSpacedWithError([]int32{1, 0, 2},
+					[]int16{0, 1, 3, 2, 3}, []int16{0, 0, 0, 1, 1}, []byte{0b101}, 0)
+				return err
+			}, []int32{3}},
+		// statistics are on, but a column with an unknown sort order has none
+		{"interval statistics on",
+			schema.MustPrimitive(schema.NewPrimitiveNodeLogical("v", parquet.Repetitions.Optional,
+				schema.IntervalLogicalType{}, parquet.Types.FixedLenByteArray, 12, -1)),
+			nil,
+			func(cw file.ColumnChunkWriter) error {
+				_, err := cw.(*file.FixedLenByteArrayColumnChunkWriter).WriteBatch(
+					[]parquet.FixedLenByteArray{make([]byte, 12)}, []int16{0, 1}, nil)
+				return err
+			}, []int32{1}},
+		{"optional statistics off two pages", optionalInt,
+			[]parquet.WriterProperty{parquet.WithStats(false), parquet.WithBatchSize(3), parquet.WithDataPageSize(1)},
+			func(cw file.ColumnChunkWriter) error {
+				_, err := cw.(*file.Int32ColumnChunkWriter).WriteBatch([]int32{1, 2, 3}, []int16{1, 0, 0, 1, 0, 1}, nil)
+				return err
+			}, []int32{2, 1}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{tt.node}, -1))
+			props := parquet.NewWriterProperties(append([]parquet.WriterProperty{
+				parquet.WithAllocator(mem),
+				parquet.WithDataPageVersion(parquet.DataPageV2),
+				parquet.WithDictionaryDefault(false),
+			}, tt.props...)...)
+
+			var buf bytes.Buffer
+			w := file.NewParquetWriter(&buf, root, file.WithWriterProps(props))
+			rgw := w.AppendRowGroup()
+			cw, err := rgw.NextColumn()
+			require.NoError(t, err)
+			require.NoError(t, tt.write(cw))
+			require.NoError(t, cw.Close())
+			require.NoError(t, rgw.Close())
+			require.NoError(t, w.Close())
+
+			rdr, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()),
+				file.WithReadProps(parquet.NewReaderProperties(mem)))
+			require.NoError(t, err)
+			defer rdr.Close()
+			pages, err := rdr.RowGroup(0).GetColumnPageReader(0)
+			require.NoError(t, err)
+			defer pages.Close()
+
+			var nulls []int32
+			for pages.Next() {
+				page, ok := pages.Page().(*file.DataPageV2)
+				require.True(t, ok)
+				nulls = append(nulls, page.NumNulls())
+			}
+			require.NoError(t, pages.Err())
+			assert.Equal(t, tt.nulls, nulls)
+		})
+	}
+}
+
 func TestWriteDictIndicesRejectsBeforeWritingLevels(t *testing.T) {
 	root, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
 		schema.NewInt32Node("v", parquet.Repetitions.Required, -1),

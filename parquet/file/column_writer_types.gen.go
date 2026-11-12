@@ -146,7 +146,7 @@ func (w *Int32ColumnChunkWriter) WriteBatchSpacedWithError(values []int32, defLe
 		var vals []int32
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
 
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 		if values != nil {
 			vals = values[valueOffset : valueOffset+info.numSpaced()]
 		}
@@ -193,7 +193,7 @@ func (w *Int32ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels
 			panic(err) // caught above
 		}
 
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
 			panic(err)
@@ -417,7 +417,7 @@ func (w *Int64ColumnChunkWriter) WriteBatchSpacedWithError(values []int64, defLe
 		var vals []int64
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
 
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 		if values != nil {
 			vals = values[valueOffset : valueOffset+info.numSpaced()]
 		}
@@ -464,7 +464,7 @@ func (w *Int64ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels
 			panic(err) // caught above
 		}
 
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
 			panic(err)
@@ -688,7 +688,7 @@ func (w *Int96ColumnChunkWriter) WriteBatchSpacedWithError(values []parquet.Int9
 		var vals []parquet.Int96
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
 
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 		if values != nil {
 			vals = values[valueOffset : valueOffset+info.numSpaced()]
 		}
@@ -735,7 +735,7 @@ func (w *Int96ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLevels
 			panic(err) // caught above
 		}
 
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
 			panic(err)
@@ -959,7 +959,7 @@ func (w *Float32ColumnChunkWriter) WriteBatchSpacedWithError(values []float32, d
 		var vals []float32
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
 
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 		if values != nil {
 			vals = values[valueOffset : valueOffset+info.numSpaced()]
 		}
@@ -1006,7 +1006,7 @@ func (w *Float32ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLeve
 			panic(err) // caught above
 		}
 
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
 			panic(err)
@@ -1230,7 +1230,7 @@ func (w *Float64ColumnChunkWriter) WriteBatchSpacedWithError(values []float64, d
 		var vals []float64
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
 
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 		if values != nil {
 			vals = values[valueOffset : valueOffset+info.numSpaced()]
 		}
@@ -1277,7 +1277,7 @@ func (w *Float64ColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLeve
 			panic(err) // caught above
 		}
 
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
 			panic(err)
@@ -1504,7 +1504,7 @@ func (w *BooleanColumnChunkWriter) WriteBatchSpacedWithError(values []bool, defL
 		var vals []bool
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
 
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 		if values != nil {
 			vals = values[valueOffset : valueOffset+info.numSpaced()]
 		}
@@ -1586,7 +1586,7 @@ func (w *BooleanColumnChunkWriter) WriteBitmapBatchSpacedWithError(bitmap []byte
 	w.doBatches(int64(length), repLevels, func(offset, batch int64) {
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
 
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		if w.bitsBuffer != nil {
 			w.writeBitmapValuesSpaced(bitmap, bitmapOffset+valueOffset, info.batchNum, batch, w.bitsBuffer.Bytes(), 0)
@@ -1631,7 +1631,7 @@ func (w *BooleanColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLeve
 			panic(err) // caught above
 		}
 
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
 			panic(err)
@@ -2026,7 +2026,7 @@ func (w *ByteArrayColumnChunkWriter) WriteBatchSpacedWithError(values []parquet.
 
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, levelOffset, batch), batch)
 
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, levelOffset, batch), levelSliceOrNil(repLevels, levelOffset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, levelOffset, batch), levelSliceOrNil(repLevels, levelOffset, batch))
 		var vals []parquet.ByteArray
 		if values != nil {
 			vals = values[valueOffset : valueOffset+info.numSpaced()]
@@ -2090,7 +2090,7 @@ func (w *ByteArrayColumnChunkWriter) WriteDictIndices(indices arrow.Array, defLe
 			panic(err) // caught above
 		}
 
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
 			panic(err)
@@ -2432,7 +2432,7 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatchSpacedWithError(values []
 
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, levelOffset, batch), batch)
 
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, levelOffset, batch), levelSliceOrNil(repLevels, levelOffset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, levelOffset, batch), levelSliceOrNil(repLevels, levelOffset, batch))
 		var vals []parquet.FixedLenByteArray
 		if values != nil {
 			vals = values[valueOffset : valueOffset+info.numSpaced()]
@@ -2481,7 +2481,7 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteDictIndices(indices arrow.Arra
 			panic(err) // caught above
 		}
 
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		if err := w.commitWriteAndCheckPageLimit(batch, info.batchNum); err != nil {
 			panic(err)
