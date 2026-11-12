@@ -285,3 +285,8 @@ func (enc *RleBooleanEncoder) FlushValues() (Buffer, error) {
 
 	return buf, nil
 }
+
+func (enc *RleBooleanEncoder) Reset() {
+	enc.encoder.Reset()
+	enc.bufferedValues = enc.bufferedValues[:0]
+}
