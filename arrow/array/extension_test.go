@@ -21,6 +21,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/types"
 	"github.com/stretchr/testify/require"
@@ -98,6 +99,22 @@ func TestNewExtensionArrayWithStorageReleasesAllReferences(t *testing.T) {
 	ext.Release()
 	storage.Release()
 	mem.AssertSize(t, 0)
+}
+
+func TestNewExtensionArrayWithStorageKeepsDictionary(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+	storage, err := array.DictArrayFromJSON(mem, dictType, `[0, null, 1, 0]`, `["a", "b"]`)
+	require.NoError(t, err)
+	defer storage.Release()
+
+	ext := array.NewExtensionArrayWithStorage(extensions.NewOpaqueType(dictType, "type", "vendor"), storage)
+	require.NoError(t, array.ValidateFull(ext))
+	ext.Release()
+
+	require.NoError(t, array.ValidateFull(storage))
 }
 
 func TestExtensionTypes(t *testing.T) {
