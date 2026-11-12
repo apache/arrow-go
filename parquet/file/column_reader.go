@@ -331,6 +331,10 @@ func (c *columnChunkReader) readDictionary() error {
 }
 
 func (c *columnChunkReader) configureDict(page *DictionaryPage) error {
+	if c.descr.PhysicalType() == parquet.Types.Boolean {
+		return errors.New("parquet: dictionary encoding not implemented for boolean type")
+	}
+
 	enc := page.encoding
 	if enc == format.Encoding_PLAIN_DICTIONARY || enc == format.Encoding_PLAIN {
 		enc = format.Encoding_RLE_DICTIONARY
