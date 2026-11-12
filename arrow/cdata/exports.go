@@ -32,6 +32,7 @@ import (
 // #include "abi.h"
 // #include "helpers.h"
 //
+// extern const uint8_t kGoCdataZeroRegion[8];
 // typedef const char cchar_t;
 // extern int streamGetSchema(struct ArrowArrayStream*, struct ArrowSchema*);
 // extern int streamGetNext(struct ArrowArrayStream*, struct ArrowArray*);
@@ -131,7 +132,9 @@ func releaseExportedArray(arr *CArrowArray) {
 
 	if arr.n_buffers > 0 {
 		if internal.HasBufferSizesBuffer(data.DataType().ID()) {
-			C.free(unsafe.Slice(arr.buffers, arr.n_buffers)[arr.n_buffers-1])
+			if sizes := unsafe.Slice(arr.buffers, arr.n_buffers)[arr.n_buffers-1]; sizes != unsafe.Pointer(&C.kGoCdataZeroRegion) {
+				C.free(sizes)
+			}
 		}
 		C.free(unsafe.Pointer(arr.buffers))
 	}
