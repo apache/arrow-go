@@ -975,3 +975,32 @@ func TestCSVListNullValueStrings(t *testing.T) {
 		})
 	}
 }
+
+// List items are always separated by commas, whatever WithComma sets for the
+// fields, and an item is quoted by what it contains, not by the field separator.
+func TestCSVListWithCustomComma(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	typ := arrow.ListOf(arrow.BinaryTypes.String)
+	input, _, err := array.FromJSON(mem, typ, strings.NewReader(`[["a;b"], ["c,d", "e"], ["f", null]]`))
+	require.NoError(t, err)
+	defer input.Release()
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: typ, Nullable: true}}, nil)
+	record := array.NewRecordBatch(schema, []arrow.Array{input}, int64(input.Len()))
+	defer record.Release()
+
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf, schema, csv.WithComma(';'), csv.WithNullWriter("null"))
+	require.NoError(t, w.Write(record))
+	require.NoError(t, w.Flush())
+	assert.Equal(t, `"{a;b}"`+"\n"+`"{""c,d"",e}"`+"\n"+`{f,null}`+"\n", buf.String())
+
+	r := csv.NewReader(&buf, schema, csv.WithAllocator(mem), csv.WithChunk(-1),
+		csv.WithComma(';'), csv.WithNullReader(true, "null"))
+	defer r.Release()
+	require.True(t, r.Next())
+	require.NoError(t, r.Err())
+	got := r.RecordBatch().Column(0)
+	assert.Truef(t, array.Equal(input, got), "expected %s, got %s", input, got)
+}

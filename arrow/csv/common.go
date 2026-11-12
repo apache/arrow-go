@@ -36,6 +36,9 @@ type Option func(config)
 type config interface{}
 
 // WithComma specifies the fields separation character used while parsing CSV files.
+//
+// It does not apply inside list values, whose items are always separated by
+// commas.
 func WithComma(c rune) Option {
 	return func(cfg config) {
 		switch cfg := cfg.(type) {
