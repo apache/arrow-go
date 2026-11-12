@@ -145,6 +145,10 @@ type columnWriter struct {
 	// values. this number may be lower than numBuffered
 	numDataValues int64
 
+	// the number of levels in the current page below the maximum definition
+	// level, which a V2 page header reports as num_nulls
+	numBufferedNulls int64
+
 	rowsWritten       int
 	totalBytesWritten int64
 	// records the current number of compressed bytes in a column
@@ -348,7 +352,7 @@ func (w *columnWriter) FlushCurrentPage() error {
 
 	w.reset()
 	w.rowsWritten += w.numBufferedRows
-	w.numBufferedValues, w.numDataValues, w.numBufferedRows = 0, 0, 0
+	w.numBufferedValues, w.numDataValues, w.numBufferedRows, w.numBufferedNulls = 0, 0, 0, 0
 	return err
 }
 
@@ -438,7 +442,7 @@ func (w *columnWriter) buildDataPageV2(defLevelsRLESize, repLevelsRLESize, uncom
 
 	numValues := int32(w.numBufferedValues)
 	numRows := int32(w.numBufferedRows)
-	nullCount := int32(pageStats.NullCount)
+	nullCount := int32(w.numBufferedNulls)
 	defLevelsByteLen := int32(defLevelsRLESize)
 	repLevelsByteLen := int32(repLevelsRLESize)
 	firstRowIndex := int64(w.rowsWritten)
@@ -502,6 +506,7 @@ func (w *columnWriter) writeLevels(numValues int64, defLevels, repLevels []int16
 			}
 		}
 		w.WriteDefinitionLevels(defLevels[:numValues])
+		w.numBufferedNulls += numValues - toWrite
 	} else {
 		toWrite = numValues
 	}
@@ -524,7 +529,12 @@ func (w *columnWriter) writeLevels(numValues int64, defLevels, repLevels []int16
 }
 
 func (w *columnWriter) writeLevelsSpaced(numLevels int64, defLevels, repLevels []int16) {
-	if w.descr.MaxDefinitionLevel() > 0 {
+	if maxDefLevel := w.descr.MaxDefinitionLevel(); maxDefLevel > 0 {
+		for _, v := range defLevels[:numLevels] {
+			if v < maxDefLevel {
+				w.numBufferedNulls++
+			}
+		}
 		w.WriteDefinitionLevels(defLevels[:numLevels])
 	}
 
