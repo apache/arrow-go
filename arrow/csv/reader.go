@@ -65,6 +65,9 @@ type Reader struct {
 
 	stringsCanBeNull bool
 	nulls            []string
+	// quotedListItem is set while converting a quoted list item, which is
+	// never null.
+	quotedListItem bool
 }
 
 // NewInferringReader creates a CSV reader that attempts to infer the types
@@ -406,6 +409,9 @@ func (r *Reader) validate(recs []string) {
 }
 
 func (r *Reader) isNull(val string) bool {
+	if r.quotedListItem {
+		return false
+	}
 	for _, v := range r.nulls {
 		if v == val {
 			return true
@@ -868,10 +874,7 @@ func (r *Reader) parseListLike(field array.ListLikeBuilder, str string) {
 		return
 	}
 	r.appendListValue(field, len(items))
-	valueBldr := field.ValueBuilder()
-	for _, str := range items {
-		r.initFieldConverter(valueBldr)(str)
-	}
+	r.appendListItems(field.ValueBuilder(), str, items)
 }
 
 func (r *Reader) appendListValue(field array.ListLikeBuilder, size int) {
@@ -904,7 +907,6 @@ func (r *Reader) parseFixedSizeList(field *array.FixedSizeListBuilder, str strin
 		field.Append(true)
 		return
 	}
-	valueBldr := field.ValueBuilder()
 	reader := csv.NewReader(strings.NewReader(str))
 	items, err := reader.Read()
 	if err != nil {
@@ -919,9 +921,45 @@ func (r *Reader) parseFixedSizeList(field *array.FixedSizeListBuilder, str strin
 	}
 
 	field.Append(true)
-	for _, str := range items {
-		r.initFieldConverter(valueBldr)(str)
+	r.appendListItems(field.ValueBuilder(), str, items)
+}
+
+// appendListItems converts the items split from a list body. Quoted items
+// are never null, so a string equal to a null value can be preserved.
+func (r *Reader) appendListItems(bldr array.Builder, body string, items []string) {
+	convert := r.initFieldConverter(bldr)
+	quoted := listItemsQuoted(body, len(items))
+	for i, item := range items {
+		r.quotedListItem = quoted[i]
+		convert(item)
 	}
+	r.quotedListItem = false
+}
+
+// listItemsQuoted reports which of the first n fields of a list body are
+// quoted. body must already have been parsed by encoding/csv, so quotes
+// appear only within quoted fields.
+func listItemsQuoted(body string, n int) []bool {
+	quoted := make([]bool, n)
+	field, atStart, inQuotes := 0, true, false
+	for i := 0; i < len(body) && field < n; i++ {
+		c := body[i]
+		if atStart {
+			atStart = false
+			if c == '"' {
+				quoted[field], inQuotes = true, true
+				continue
+			}
+		}
+		switch {
+		case c == '"':
+			inQuotes = !inQuotes
+		case c == ',' && !inQuotes:
+			field++
+			atStart = true
+		}
+	}
+	return quoted
 }
 
 func (r *Reader) parseBinaryType(field array.Builder, str string) {

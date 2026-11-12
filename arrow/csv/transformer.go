@@ -248,7 +248,7 @@ func (w *Writer) transformColToStringArr(typ arrow.DataType, col arrow.Array, st
 				list.Release()
 				return nil, err
 			}
-			res[i] = encodeListItems(values)
+			res[i] = encodeListItems(values, list, w.nullValue)
 			list.Release()
 		}
 	case *arrow.BinaryType:
@@ -302,14 +302,18 @@ func (w *Writer) transformColToStringArr(typ arrow.DataType, col arrow.Array, st
 // inside the list, so that the reader can parse them back. An unquoted empty
 // item would be lost: {} is an empty list. Quoting braces keeps the items
 // intact for readers that strip every leading and trailing brace.
-func encodeListItems(values []string) string {
+//
+// A quoted item is never read back as null, so null items are written as the
+// null value unquoted, and non-null items equal to it are quoted. With an
+// empty null value, a list whose only item is null is written as {}.
+func encodeListItems(values []string, list arrow.Array, nullValue string) string {
 	var b strings.Builder
 	b.WriteByte('{')
 	for i, v := range values {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		if !listItemNeedsQuotes(v) {
+		if list.IsNull(i) || (!listItemNeedsQuotes(v) && v != nullValue) {
 			b.WriteString(v)
 			continue
 		}

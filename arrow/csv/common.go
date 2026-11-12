@@ -36,6 +36,9 @@ type Option func(config)
 type config interface{}
 
 // WithComma specifies the fields separation character used while parsing CSV files.
+//
+// It does not apply inside list values, whose items are always separated by
+// commas.
 func WithComma(c rune) Option {
 	return func(cfg config) {
 		switch cfg := cfg.(type) {
@@ -142,6 +145,8 @@ var DefaultNullValues = []string{"", "NULL", "null"}
 // defaults set in NewReader() will be kept.
 //
 // When no NULL values is given, the default set is taken from DefaultNullValues.
+//
+// Quoted items inside a list value are never interpreted as NULL.
 func WithNullReader(stringsCanBeNull bool, nullValues ...string) Option {
 	return func(cfg config) {
 		switch cfg := cfg.(type) {
@@ -161,6 +166,10 @@ func WithNullReader(stringsCanBeNull bool, nullValues ...string) Option {
 
 // WithNullWriter sets the null string written for NULL values. The default is
 // set in NewWriter().
+//
+// Inside list values, non-null items equal to the null string are quoted so
+// they are not read back as NULL. A list whose only item is NULL is written
+// as an empty list when the null string is empty.
 func WithNullWriter(null string) Option {
 	return func(cfg config) {
 		switch cfg := cfg.(type) {
