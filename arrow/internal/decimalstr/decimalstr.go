@@ -148,8 +148,8 @@ func Parse(s string) (p Parsed, ok bool) {
 //
 // ok is false when s is not a plain decimal literal or when the result
 // would have more than maxDigits digits; callers should then fall back to
-// their own conversion. Callers are expected to have bounded the magnitude
-// of the result already.
+// their own conversion. Any number of dropped fraction digits is accepted.
+// Callers are expected to have bounded the magnitude of the result already.
 func ScaleAndRound(s string, scale int64) (val *big.Int, ok bool) {
 	p, ok := Parse(s)
 	if !ok {
@@ -180,16 +180,17 @@ func (p Parsed) ScaleAndRound(scale int64) (val *big.Int, ok bool) {
 		return nil, false
 	}
 
+	digits := significantDigitCount(p.intPart, p.fracPart)
 	val = new(big.Int)
-	if !setCoeff(val, p.intPart, p.fracPart) {
-		return nil, false
-	}
-	if val.Sign() == 0 {
+	if digits == 0 {
 		return val, true
 	}
 
 	if shift >= 0 {
-		if int64(significantDigitCount(p.intPart, p.fracPart))+shift > maxDigits {
+		if int64(digits)+shift > maxDigits {
+			return nil, false
+		}
+		if !setCoeff(val, p.intPart, p.fracPart) {
 			return nil, false
 		}
 		if shift > 0 {
@@ -197,21 +198,32 @@ func (p Parsed) ScaleAndRound(scale int64) (val *big.Int, ok bool) {
 		}
 	} else {
 		down := -shift
-		digits := significantDigitCount(p.intPart, p.fracPart)
 		// Every significant digit is to the right of the rounding place,
 		// so the first dropped digit is an implied zero and the result is 0.
 		if int64(digits) < down {
-			val.SetInt64(0)
 			return val, true
 		}
-		if down > int64(maxDigits) {
+		if int64(digits)-down > maxDigits {
 			return nil, false
 		}
-		div := pow10(int(down))
-		rem := new(big.Int)
-		val.DivMod(val, div, rem)
-		// rem * 2 >= div includes an exact tie, which rounds away from zero.
-		if new(big.Int).Lsh(rem, 1).Cmp(div) >= 0 {
+		// Ties round away from zero, so only the first dropped digit
+		// matters. Cut the digit string instead of dividing, which keeps
+		// the cost independent of how many fraction digits are dropped.
+		intLen := int64(len(p.intPart))
+		keep := intLen + int64(len(p.fracPart)) - down
+		var first byte
+		if keep < intLen {
+			if !setCoeff(val, p.intPart[:keep], "") {
+				return nil, false
+			}
+			first = p.intPart[keep]
+		} else {
+			if !setCoeff(val, p.intPart, p.fracPart[:keep-intLen]) {
+				return nil, false
+			}
+			first = p.fracPart[keep-intLen]
+		}
+		if first >= '5' {
 			val.Add(val, bigOne)
 		}
 	}

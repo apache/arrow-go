@@ -21,6 +21,7 @@ import (
 	"math"
 	"math/big"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
@@ -893,6 +894,30 @@ func TestFromStringRoundsExactTies(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s_%d", tt.s, tt.scale), func(t *testing.T) {
+			n, err := decimal128.FromString(tt.s, 38, tt.scale)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, n.BigInt().Int64())
+		})
+	}
+}
+
+func TestFromStringLongFraction(t *testing.T) {
+	// Fractions longer than 1024 digits must still round from the first
+	// dropped digit instead of being rejected as too large.
+	tests := []struct {
+		s        string
+		scale    int32
+		expected int64
+	}{
+		{"0." + strings.Repeat("7", 1000), 2, 78},
+		{"0." + strings.Repeat("7", 1030), 2, 78},
+		{"0." + strings.Repeat("7", 5000), 2, 78},
+		{"-0." + strings.Repeat("7", 5000), 2, -78},
+		{"0.125" + strings.Repeat("0", 2000), 2, 13},
+		{"0.124" + strings.Repeat("9", 2000), 2, 12},
+	}
+	for i, tt := range tests {
+		t.Run(fmt.Sprintf("%d_%d", i, len(tt.s)), func(t *testing.T) {
 			n, err := decimal128.FromString(tt.s, 38, tt.scale)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, n.BigInt().Int64())

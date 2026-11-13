@@ -18,6 +18,8 @@ package decimalstr_test
 
 import (
 	"math/big"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/internal/decimalstr"
@@ -91,6 +93,33 @@ func TestScaleAndRoundBoundsDigits(t *testing.T) {
 	assert.False(t, ok)
 	_, ok = decimalstr.ScaleAndRound("1", 5000)
 	assert.False(t, ok)
+}
+
+func TestScaleAndRoundLongFraction(t *testing.T) {
+	// Only the first dropped digit decides the rounding, so the number of
+	// dropped fraction digits is not bounded.
+	tests := []struct {
+		s        string
+		scale    int64
+		expected string
+	}{
+		{"0." + strings.Repeat("7", 1000), 2, "78"},
+		{"0." + strings.Repeat("7", 1030), 2, "78"},
+		{"-0." + strings.Repeat("7", 5000), 2, "-78"},
+		{"0.12" + strings.Repeat("4", 2000), 2, "12"},
+		{"0.125" + strings.Repeat("0", 2000), 2, "13"},
+		{"0.124" + strings.Repeat("9", 2000), 2, "12"},
+		{"1." + strings.Repeat("9", 3000), 0, "2"},
+		{"12" + strings.Repeat("0", 1100) + "e-1100", -1, "1"},
+		{"0." + strings.Repeat("0", 1500) + "5", 2, "0"},
+	}
+	for i, tt := range tests {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			got, ok := decimalstr.ScaleAndRound(tt.s, tt.scale)
+			require.True(t, ok)
+			assert.Equal(t, tt.expected, got.String())
+		})
+	}
 }
 
 func TestRoundScaledFallsBackToFloat(t *testing.T) {
