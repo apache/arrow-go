@@ -306,6 +306,11 @@ func (c *columnChunkReader) getRepLvlBuffer(sz int64) []int16 {
 // HasNext returns whether there is more data to be read in this column
 // and row group.
 func (c *columnChunkReader) HasNext() bool {
+	// asking the page reader again moves past the failed page, so stay stopped
+	// at the first error
+	if c.err != nil {
+		return false
+	}
 	if c.numBuffered == 0 || c.numDecoded == c.numBuffered {
 		return c.readNewPage() && c.numBuffered != 0
 	}
@@ -628,6 +633,7 @@ func (c *columnChunkReader) SeekToRow(rowIdx int64) error {
 		return err
 	}
 
+	c.err = nil
 	c.numBuffered, c.numDecoded = 0, 0
 	c.curPage = c.rdr.Page()
 	if c.curPage == nil {
@@ -730,7 +736,7 @@ func (c *columnChunkReader) skipRows(nrows int64) error {
 			c.consumeBufferedValues(int64(levelsToSkip))
 		}
 	}
-	return nil
+	return c.err
 }
 
 type readerFunc func(int64, int64) (int, error)
@@ -759,6 +765,9 @@ func (c *columnChunkReader) readBatch(batchSize int64, defLvls, repLvls []int16,
 		lvls, read, err = c.readBatchInPage(batchSize-totalLvls, int64(totalRead), defs, reps, readFn)
 		totalLvls += lvls
 		totalRead += read
+	}
+	if err == nil {
+		err = c.err
 	}
 	return totalLvls, totalRead, err
 }

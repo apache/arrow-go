@@ -33,6 +33,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
 	"github.com/apache/arrow-go/v18/parquet/internal/testutils"
@@ -878,12 +879,9 @@ func TestALPOnIntegerColumnIsRejected(t *testing.T) {
 	r := file.NewColumnReader(descr, pages, mem, nil)
 	defer r.Close()
 	total, read, err := r.(*file.Int32ColumnChunkReader).ReadBatch(4, make([]int32, 4), nil, nil)
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "only float and double support ALP encoding")
 	require.Zero(t, total)
 	require.Zero(t, read)
-	// ReadBatch stops rather than returning the failure, as it does for any page
-	// it cannot open, so the reason is on the reader.
-	require.ErrorContains(t, r.Err(), "only float and double support ALP encoding")
 }
 
 // A mismatched page count must return an error instead of a zero-length read,
@@ -919,6 +917,93 @@ func TestALPPageClaimingTooManyValues(t *testing.T) {
 	require.ErrorContains(t, err, "ALP page holds 2 values")
 	require.Equal(t, 2, read, "the values the page does hold still come back")
 	require.Equal(t, []float64{1.5, 2.5}, values[:read])
+}
+
+func newCorruptPageReader(t *testing.T) *file.Int32ColumnChunkReader {
+	t.Helper()
+	sc := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewInt32Node("x", parquet.Repetitions.Required, -1),
+	}, -1))
+	props := parquet.NewWriterProperties(parquet.WithCompression(compress.Codecs.Gzip),
+		parquet.WithDictionaryDefault(false), parquet.WithDataPageSize(1), parquet.WithPageIndexEnabled(true))
+
+	// each WriteBatch call ends in its own page
+	var out bytes.Buffer
+	w, err := file.NewParquetWriterWithError(&out, sc, file.WithWriterProps(props))
+	require.NoError(t, err)
+	rg := w.AppendRowGroup()
+	cw, err := rg.NextColumn()
+	require.NoError(t, err)
+	for page := range int32(3) {
+		vals := make([]int32, 10)
+		for i := range vals {
+			vals[i] = page*10 + int32(i)
+		}
+		_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch(vals, nil, nil)
+		require.NoError(t, err)
+	}
+	require.NoError(t, cw.Close())
+	require.NoError(t, rg.Close())
+	require.NoError(t, w.Close())
+	data := out.Bytes()
+
+	rdr, err := file.NewParquetReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	rgIdx, err := rdr.GetPageIndexReader().RowGroup(0)
+	require.NoError(t, err)
+	oidx, err := rgIdx.GetOffsetIndex(0)
+	require.NoError(t, err)
+	locs := oidx.GetPageLocations()
+	require.Len(t, locs, 3)
+	require.NoError(t, rdr.Close())
+
+	// the last eight bytes of a gzip stream are its CRC-32 and length
+	data[locs[1].Offset+int64(locs[1].CompressedPageSize)-8] ^= 0xff
+
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	t.Cleanup(func() { mem.AssertSize(t, 0) })
+	rdr, err = file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(parquet.NewReaderProperties(mem)))
+	require.NoError(t, err)
+	t.Cleanup(func() { rdr.Close() })
+	col, err := rdr.RowGroup(0).Column(0)
+	require.NoError(t, err)
+	t.Cleanup(func() { col.Close() })
+	return col.(*file.Int32ColumnChunkReader)
+}
+
+func TestReadBatchStopsAtCorruptPage(t *testing.T) {
+	icr := newCorruptPageReader(t)
+
+	vals := make([]int32, 30)
+	total, n, err := icr.ReadBatch(int64(len(vals)), vals, nil, nil)
+	require.ErrorContains(t, err, "invalid checksum")
+	assert.EqualValues(t, 10, total)
+	assert.Equal(t, []int32{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, vals[:n])
+
+	total, _, err2 := icr.ReadBatch(int64(len(vals)), vals, nil, nil)
+	assert.Equal(t, err, err2)
+	assert.Zero(t, total)
+	assert.False(t, icr.HasNext())
+}
+
+func TestSkipStopsAtCorruptPage(t *testing.T) {
+	icr := newCorruptPageReader(t)
+
+	_, err := icr.Skip(25)
+	require.ErrorContains(t, err, "invalid checksum")
+}
+
+func TestSeekToRowAfterCorruptPage(t *testing.T) {
+	icr := newCorruptPageReader(t)
+
+	vals := make([]int32, 30)
+	_, _, err := icr.ReadBatch(int64(len(vals)), vals, nil, nil)
+	require.ErrorContains(t, err, "invalid checksum")
+
+	require.NoError(t, icr.SeekToRow(25))
+	_, n, err := icr.ReadBatch(5, vals, nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []int32{25, 26, 27, 28, 29}, vals[:n])
 }
 
 func BenchmarkReadInt32Column(b *testing.B) {
