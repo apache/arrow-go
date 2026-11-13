@@ -18,6 +18,7 @@ package encoding
 
 import (
 	"math"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -204,4 +205,55 @@ func TestALPSamplePeriodicData(t *testing.T) {
 
 	params, _ := alpFindBestParams(sample)
 	assert.Equal(t, 2, params.exponent-params.factor, "two decimal places, got %+v", params)
+}
+
+// A size estimate that is cut short must not change what a search concludes:
+// within the limit it is the full estimate, and past the limit it says so.
+func TestALPEstimateSizeBitsWithin(t *testing.T) {
+	rng := rand.New(rand.NewPCG(9, 10))
+	// More than one block of values, and not a whole number of blocks.
+	values := alpTestAwkwardValues[float64](rng, 5*alpEstimateBlock+7)
+	for e := range alpNumExponents[float64]() {
+		for f := range e + 1 {
+			fullBits, fullEncodable := alpEstimateSizeBits(values, e, f)
+			for _, limit := range []int64{0, fullBits / 2, fullBits - 1, fullBits, fullBits + 1, math.MaxInt64} {
+				bits, numEncodable := alpEstimateSizeBitsWithin(values, e, f, limit)
+				if fullBits <= limit {
+					require.Equal(t, fullBits, bits, "exponent %d factor %d limit %d", e, f, limit)
+					require.Equal(t, fullEncodable, numEncodable, "exponent %d factor %d limit %d", e, f, limit)
+					continue
+				}
+				require.Greater(t, bits, limit, "exponent %d factor %d limit %d", e, f, limit)
+				require.Zero(t, numEncodable, "exponent %d factor %d limit %d", e, f, limit)
+			}
+		}
+	}
+}
+
+// The size of a vector's sample read off the scaled vector is the size
+// estimated by scaling the sample.
+func TestALPSampledSizeBits(t *testing.T) {
+	rng := rand.New(rand.NewPCG(11, 12))
+	for _, count := range []int{1, 5, 255, 256, 257, 1000, 1024, 4096} {
+		values := alpTestAwkwardValues[float64](rng, count)
+		// A NaN at every stride-th value is the pattern the sample's shifting
+		// positions are there for.
+		for i := 0; i < count; i += alpSampleStride(count) {
+			values[i] = math.NaN()
+		}
+		sample := alpSample(values, nil)
+		encoded, excPos := make([]int64, count), make([]uint16, count)
+		for e := range alpNumExponents[float64]() {
+			for f := range e + 1 {
+				numExc := alpScale(values, e, f, encoded, excPos)
+				if numExc < count {
+					alpIntRange(encoded, excPos[:numExc])
+				}
+				wantBits, _ := alpEstimateSizeBits(sample, e, f)
+				bits, sampled := alpSampledSizeBits[float64](encoded, excPos[:numExc])
+				require.Equal(t, len(sample), sampled, "count %d", count)
+				require.Equal(t, wantBits, bits, "count %d exponent %d factor %d", count, e, f)
+			}
+		}
+	}
 }

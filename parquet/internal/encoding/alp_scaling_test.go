@@ -18,6 +18,7 @@ package encoding
 
 import (
 	"math"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -211,4 +212,123 @@ func TestALPScalingMultipliesByANegativePower(t *testing.T) {
 	assert.Equal(t, value, s.decode(encoded))
 	assert.NotEqual(t, value, float32(encoded)/(alpPow10[float32](exponent)/alpPow10[float32](factor)),
 		"dividing has stopped losing the last bit, so this test no longer guards anything")
+}
+
+// alpTestAwkwardValues returns count values that are mostly short decimals,
+// with every kind of value that cannot be encoded mixed in.
+func alpTestAwkwardValues[T alpFloat](rng *rand.Rand, count int) []T {
+	values := make([]T, count)
+	for i := range values {
+		x := rng.Float64()
+		v := math.Floor(x*1e5+0.5) / 1000
+		switch rng.IntN(40) {
+		case 0:
+			v = math.NaN()
+		case 1:
+			v = math.Inf(1)
+		case 2:
+			v = math.Inf(-1)
+		case 3:
+			v = math.Copysign(0, -1)
+		case 4:
+			v = 0
+		case 5:
+			v = x * 1e300
+		case 6:
+			v = -x * 9.3e18
+		case 7:
+			v = x * 1e-300
+		case 8:
+			v = -math.Floor(x * 1e9)
+		case 9:
+			v = x
+		}
+		values[i] = T(v)
+	}
+	return values
+}
+
+// alpTestEdgeValues returns values a step at a time either side of the
+// magnitudes where rounding and the integer range change behavior, scaled by
+// the powers of ten that bring them there.
+func alpTestEdgeValues[T alpFloat]() []T {
+	var values []T
+	for _, edge := range []float64{
+		1 << 63, 9223372036854774784, 1 << 53, 1 << 52, 6755399441055744, 1 << 51,
+		1 << 31, 2147483520, 1 << 24, 12582912, 1 << 23, 1 << 22,
+	} {
+		for _, scale := range []float64{1, 1e-1, 1e-2, 1e-3, 1e-5, 1e-10, 1e-15, 1e-18, 10, 100} {
+			up, down := T(edge*scale), T(edge*scale)
+			for range 40 {
+				values = append(values, up, -up, down, -down)
+				switch any(up).(type) {
+				case float32:
+					up = T(math.Nextafter32(float32(up), float32(math.Inf(1))))
+					down = T(math.Nextafter32(float32(down), 0))
+				default:
+					up = T(math.Nextafter(float64(up), math.Inf(1)))
+					down = T(math.Nextafter(float64(down), 0))
+				}
+			}
+		}
+	}
+	return values
+}
+
+// alpTestScaleMatchesTryEncode holds alpScale and alpIntRange to
+// alpScaling.tryEncode, value by value, for every exponent and factor.
+func alpTestScaleMatchesTryEncode[T alpFloat](t *testing.T, values []T) {
+	t.Helper()
+	n := len(values)
+	encoded, excPos := make([]int64, n), make([]uint16, n)
+	isException := make([]bool, n)
+	for e := range alpNumExponents[T]() {
+		for f := range e + 1 {
+			s := newALPScaling[T](e, f)
+			numExc := alpScale(values, e, f, encoded, excPos)
+
+			wantExc := 0
+			wantMin, wantMax := int64(math.MaxInt64), int64(math.MinInt64)
+			for i, v := range values {
+				want, ok := s.tryEncode(v)
+				isException[i] = !ok
+				if !ok {
+					if wantExc >= numExc || int(excPos[wantExc]) != i {
+						t.Fatalf("exponent %d factor %d: %v at %d is an exception", e, f, v, i)
+					}
+					wantExc++
+					continue
+				}
+				if encoded[i] != want {
+					t.Fatalf("exponent %d factor %d: %v at %d scales to %d, want %d", e, f, v, i, encoded[i], want)
+				}
+				wantMin, wantMax = min(wantMin, want), max(wantMax, want)
+			}
+			require.Equal(t, wantExc, numExc, "exponent %d factor %d", e, f)
+			if numExc == n {
+				continue
+			}
+
+			minValue, maxValue := alpIntRange(encoded, excPos[:numExc])
+			require.Equal(t, wantMin, minValue, "exponent %d factor %d", e, f)
+			require.Equal(t, wantMax, maxValue, "exponent %d factor %d", e, f)
+			for i := range values {
+				if isException[i] && encoded[i] != wantMin {
+					t.Fatalf("exponent %d factor %d: exception slot %d holds %d, want %d", e, f, i, encoded[i], wantMin)
+				}
+			}
+		}
+	}
+}
+
+func TestALPScaleMatchesTryEncode(t *testing.T) {
+	rng := rand.New(rand.NewPCG(7, 8))
+	// Lengths either side of the groups of four alpIntRange works in, and a
+	// full vector.
+	for _, count := range []int{1, 2, 3, 4, 5, 7, 1024} {
+		alpTestScaleMatchesTryEncode(t, alpTestAwkwardValues[float64](rng, count))
+		alpTestScaleMatchesTryEncode(t, alpTestAwkwardValues[float32](rng, count))
+	}
+	alpTestScaleMatchesTryEncode(t, alpTestEdgeValues[float64]())
+	alpTestScaleMatchesTryEncode(t, alpTestEdgeValues[float32]())
 }
