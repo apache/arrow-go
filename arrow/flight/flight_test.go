@@ -515,6 +515,36 @@ func TestReaderRetainsDescriptorForFirstRecordBatch(t *testing.T) {
 	require.Equal(t, descriptor, r.Chunk().Desc)
 }
 
+func TestReaderSkipsMetadataOnlyMessages(t *testing.T) {
+	recs, ok := arrdata.Records["primitives"]
+	require.True(t, ok)
+
+	fs := collectingFlightStreamWriter{}
+	w := flight.NewRecordWriter(&fs, ipc.WithSchema(recs[0].Schema()))
+	// metadata-only messages before the schema, e.g. heartbeats sent while
+	// the first batch is still being produced
+	for range 3 {
+		require.NoError(t, w.WriteMetadata([]byte("heartbeat")))
+	}
+	for i, rec := range recs {
+		require.NoError(t, w.WriteWithAppMetadata(rec, fmt.Appendf(nil, "batch %d", i)))
+		require.NoError(t, w.WriteMetadata([]byte("heartbeat")))
+	}
+	require.NoError(t, w.Close())
+
+	r, err := flight.NewRecordReader(&fs)
+	require.NoError(t, err)
+	defer r.Release()
+
+	for i, rec := range recs {
+		require.True(t, r.Next(), "batch %d: %v", i, r.Err())
+		require.Truef(t, array.RecordEqual(rec, r.RecordBatch()), "batch %d differs", i)
+		require.Equal(t, fmt.Appendf(nil, "batch %d", i), r.LatestAppMetadata())
+	}
+	require.False(t, r.Next())
+	require.NoError(t, r.Err())
+}
+
 type collectingFlightStreamWriter struct {
 	hasDescriptor []bool
 	payloads      []*flight.FlightData
@@ -527,6 +557,7 @@ func (f *collectingFlightStreamWriter) Send(data *flight.FlightData) error {
 		FlightDescriptor: data.FlightDescriptor,
 		DataHeader:       append([]byte(nil), data.DataHeader...),
 		DataBody:         append([]byte(nil), data.DataBody...),
+		AppMetadata:      append([]byte(nil), data.AppMetadata...),
 	})
 	return nil
 }
