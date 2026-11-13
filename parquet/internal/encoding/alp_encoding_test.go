@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"math/rand/v2"
 	"slices"
 	"testing"
 
@@ -39,6 +40,18 @@ import (
 func alpTestUnpackBits(packed []byte, out []uint64, bitWidth int) error {
 	reader := bytes.NewReader(nil)
 	return alpUnpackBits(utils.NewBitReader(reader), reader, packed, out, bitWidth)
+}
+
+// alpTestPackBits packs values as the distances above a minimum of zero.
+func alpTestPackBits(values []uint64, bitWidth int) []byte {
+	encoded := make([]int64, len(values))
+	for i, v := range values {
+		encoded[i] = int64(v)
+	}
+	size := alpPackedSize(len(values), bitWidth)
+	packed := make([]byte, size+8)
+	alpPack(packed, encoded, 0, uint(bitWidth))
+	return packed[:size]
 }
 
 func TestALPPackUnpackBits(t *testing.T) {
@@ -77,7 +90,7 @@ func TestALPPackUnpackBits(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			packed := alpAppendPackedBits(nil, tt.values, tt.bitWidth)
+			packed := alpTestPackBits(tt.values, tt.bitWidth)
 			assert.Len(t, packed, alpPackedSize(len(tt.values), tt.bitWidth))
 
 			unpacked := make([]uint64, len(tt.values))
@@ -87,10 +100,38 @@ func TestALPPackUnpackBits(t *testing.T) {
 	}
 }
 
+// alpPack against a packer that sets one bit at a time, at every width. The
+// lengths sit either side of the groups of 8 and the four runs alpPack works
+// in, and the frame of reference is far enough from the integers for the
+// distances to wrap.
+func TestALPPackEveryWidth(t *testing.T) {
+	rng := rand.New(rand.NewPCG(13, 14))
+	for bitWidth := 1; bitWidth <= 64; bitWidth++ {
+		for _, count := range []int{1, 7, 8, 9, 31, 32, 33, 40, 63, 64, 65, 1000, 1024, 1031} {
+			minValue := int64(rng.Uint64())
+			encoded := make([]int64, count)
+			want := make([]byte, alpPackedSize(count, bitWidth))
+			bit := 0
+			for i := range encoded {
+				distance := rng.Uint64() >> (64 - bitWidth)
+				encoded[i] = int64(uint64(minValue) + distance)
+				for b := range bitWidth {
+					want[bit/8] |= byte(distance>>b&1) << (bit % 8)
+					bit++
+				}
+			}
+
+			packed := make([]byte, len(want)+8)
+			alpPack(packed, encoded, minValue, uint(bitWidth))
+			require.Equal(t, want, packed[:len(want)], "bitWidth=%d count=%d", bitWidth, count)
+		}
+	}
+}
+
 // TestALPPackBitsKnownOutput pins the byte layout, so a change of bit packer
 // cannot silently break pages written by an earlier one.
 func TestALPPackBitsKnownOutput(t *testing.T) {
-	packed := alpAppendPackedBits(nil, []uint64{0, 1, 2, 3}, 2)
+	packed := alpTestPackBits([]uint64{0, 1, 2, 3}, 2)
 	require.Len(t, packed, 1)
 	assert.Equal(t, byte(0xE4), packed[0])
 }
@@ -743,6 +784,44 @@ func TestALPFloat64WidestPacking(t *testing.T) {
 	alpRoundTrip(t, values)
 }
 
+// Values no scaling fits pack wide and still leave most of themselves behind as
+// exceptions. Such a vector is written as exceptions alone, which bounds every
+// vector at an exception's size per value.
+func TestALPVectorNoLargerThanItsExceptions(t *testing.T) {
+	rng := rand.New(rand.NewPCG(15, 16))
+	const count = 3*alpDefaultVectorSize + 100
+	values := make([]float64, count)
+	for i := range values {
+		values[i] = rng.Float64()
+	}
+
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	enc := newALPEncoder[float64](format.Encoding_ALP, newFloat64Column(), mem)
+	defer enc.Release()
+	enc.Put(values)
+	buf, err := enc.FlushValues()
+	require.NoError(t, err)
+	defer buf.Release()
+
+	page := buf.Bytes()
+	const numVectors = 4
+	headerSize := alpVectorHeaderSize[float64]()
+	for v := range numVectors {
+		vectorLen := min(alpDefaultVectorSize, count-v*alpDefaultVectorSize)
+		start := alpHeaderSize + int(binary.LittleEndian.Uint32(page[alpHeaderSize+4*v:]))
+		end := len(page)
+		if v < numVectors-1 {
+			end = alpHeaderSize + int(binary.LittleEndian.Uint32(page[alpHeaderSize+4*(v+1):]))
+		}
+		assert.LessOrEqual(t, end-start, headerSize+vectorLen*(2+8), "vector %d", v)
+		assert.Equal(t, byte(0), page[start+headerSize-1], "vector %d bit width", v)
+		assert.Equal(t, vectorLen, int(binary.LittleEndian.Uint16(page[start+2:])), "vector %d exception count", v)
+	}
+
+	alpRoundTrip(t, values)
+}
+
 // alpEncodeTestPage encodes values into a single-vector page and returns the
 // byte offset of that vector.
 func alpEncodeTestPage(t *testing.T, values []float32) (page []byte, vectorPos int) {
@@ -911,9 +990,10 @@ func testALPEstimatedDataEncodedSize[T alpFloat](t *testing.T) {
 		{"AllExceptionsVector", alpDefaultVectorSize, func(int) T { return T(math.Inf(1)) }},
 		{"AllExceptionsBuffered", 100, func(int) T { return T(math.Inf(1)) }},
 		{"AllExceptionsWithBufferedTail", alpDefaultVectorSize + 100, func(int) T { return T(math.Inf(1)) }},
-		// Half NaNs, half integers near both ends of the integer range: the
-		// encoder packs the integers at nearly full width and also stores
-		// every NaN as an exception, the largest a vector gets.
+		// Half NaNs, half integers near both ends of the integer range:
+		// packed, the integers take nearly their full width and every NaN
+		// is an exception on top. The vector is written as exceptions alone,
+		// the largest a vector gets.
 		{"MixedWideBuffered", 100, func(i int) T {
 			switch i % 4 {
 			case 0, 2:
@@ -1003,6 +1083,35 @@ func TestALPFloat32IncrementalPut(t *testing.T) {
 	for i, v := range allValues {
 		assert.Equal(t, math.Float32bits(v), math.Float32bits(out[i]),
 			"index %d: got %v, want %v", i, out[i], v)
+	}
+}
+
+// A page does not depend on how its values were split between calls to Put:
+// whole vectors encoded straight from the caller's slice and vectors gathered
+// in the encoder's buffer come out the same.
+func TestALPEncoderPutSplitsDoNotChangeThePage(t *testing.T) {
+	const count = 5*alpDefaultVectorSize + 300
+	values := make([]float64, count)
+	for i := range values {
+		values[i] = float64(i%10007) / 100
+		if i%97 == 0 {
+			values[i] = math.NaN()
+		}
+	}
+	encode := func(split int) []byte {
+		enc := newALPEncoder[float64](format.Encoding_ALP, newFloat64Column(), memory.DefaultAllocator)
+		for from := 0; from < count; from += split {
+			enc.Put(values[from:min(from+split, count)])
+		}
+		buf, err := enc.FlushValues()
+		require.NoError(t, err)
+		defer buf.Release()
+		return append([]byte(nil), buf.Bytes()...)
+	}
+
+	want := encode(1)
+	for _, split := range []int{7, alpDefaultVectorSize - 1, alpDefaultVectorSize, alpDefaultVectorSize + 1, 3 * alpDefaultVectorSize, count} {
+		assert.Equal(t, want, encode(split), "split=%d", split)
 	}
 }
 
