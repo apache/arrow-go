@@ -784,6 +784,44 @@ func TestALPFloat64WidestPacking(t *testing.T) {
 	alpRoundTrip(t, values)
 }
 
+// Values no scaling fits pack wide and still leave most of themselves behind as
+// exceptions. Such a vector is written as exceptions alone, which bounds every
+// vector at an exception's size per value.
+func TestALPVectorNoLargerThanItsExceptions(t *testing.T) {
+	rng := rand.New(rand.NewPCG(15, 16))
+	const count = 3*alpDefaultVectorSize + 100
+	values := make([]float64, count)
+	for i := range values {
+		values[i] = rng.Float64()
+	}
+
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	enc := newALPEncoder[float64](format.Encoding_ALP, newFloat64Column(), mem)
+	defer enc.Release()
+	enc.Put(values)
+	buf, err := enc.FlushValues()
+	require.NoError(t, err)
+	defer buf.Release()
+
+	page := buf.Bytes()
+	const numVectors = 4
+	headerSize := alpVectorHeaderSize[float64]()
+	for v := range numVectors {
+		vectorLen := min(alpDefaultVectorSize, count-v*alpDefaultVectorSize)
+		start := alpHeaderSize + int(binary.LittleEndian.Uint32(page[alpHeaderSize+4*v:]))
+		end := len(page)
+		if v < numVectors-1 {
+			end = alpHeaderSize + int(binary.LittleEndian.Uint32(page[alpHeaderSize+4*(v+1):]))
+		}
+		assert.LessOrEqual(t, end-start, headerSize+vectorLen*(2+8), "vector %d", v)
+		assert.Equal(t, byte(0), page[start+headerSize-1], "vector %d bit width", v)
+		assert.Equal(t, vectorLen, int(binary.LittleEndian.Uint16(page[start+2:])), "vector %d exception count", v)
+	}
+
+	alpRoundTrip(t, values)
+}
+
 // alpEncodeTestPage encodes values into a single-vector page and returns the
 // byte offset of that vector.
 func alpEncodeTestPage(t *testing.T, values []float32) (page []byte, vectorPos int) {
@@ -952,9 +990,10 @@ func testALPEstimatedDataEncodedSize[T alpFloat](t *testing.T) {
 		{"AllExceptionsVector", alpDefaultVectorSize, func(int) T { return T(math.Inf(1)) }},
 		{"AllExceptionsBuffered", 100, func(int) T { return T(math.Inf(1)) }},
 		{"AllExceptionsWithBufferedTail", alpDefaultVectorSize + 100, func(int) T { return T(math.Inf(1)) }},
-		// Half NaNs, half integers near both ends of the integer range: the
-		// encoder packs the integers at nearly full width and also stores
-		// every NaN as an exception, the largest a vector gets.
+		// Half NaNs, half integers near both ends of the integer range:
+		// packed, the integers take nearly their full width and every NaN
+		// is an exception on top. The vector is written as exceptions alone,
+		// the largest a vector gets.
 		{"MixedWideBuffered", 100, func(i int) T {
 			switch i % 4 {
 			case 0, 2:

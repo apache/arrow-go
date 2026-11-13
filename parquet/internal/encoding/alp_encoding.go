@@ -414,6 +414,16 @@ func (enc *alpEncoder[T]) encodeVector(values []T) {
 	// bytes, and the final reslice drops the rest.
 	valueBytes := alpEncodedBytes[T]()
 	packedSize := alpPackedSize(n, bitWidth)
+	if packedSize+numExc*(2+valueBytes) > n*(2+valueBytes) {
+		// A few integers far apart among many exceptions make the vector
+		// larger packed than it is with every value stored verbatim. Stored
+		// that way, no vector takes more than an exception's size per value.
+		excPositions = enc.excPositions[:n]
+		for i := range excPositions {
+			excPositions[i] = uint16(i)
+		}
+		numExc, minValue, bitWidth, packedSize = n, 0, 0, 0
+	}
 	size := alpVectorHeaderSize[T]() + packedSize + numExc*(2+valueBytes)
 	start := len(enc.encodedBuf)
 	enc.encodedBuf = slices.Grow(enc.encodedBuf, size+8)[:start+size]
@@ -485,15 +495,13 @@ func (enc *alpEncoder[T]) buildPresetCache() {
 
 // EstimatedDataEncodedSize counts the encoded vectors and their offsets, plus
 // an upper bound for the vector still being buffered: its offset and header,
-// every slot packed at the full integer width, and every value also stored as
-// an exception with its 2-byte position. A vector that mixes exceptions with
-// wide packed values can approach that bound, so nothing smaller is safe; the
-// overestimate is limited to one vector.
+// and every value stored as an exception with its 2-byte position. No vector
+// is written larger than that, so nothing more is needed, and the overestimate
+// is limited to one vector.
 func (enc *alpEncoder[T]) EstimatedDataEncodedSize() int64 {
 	size := len(enc.encodedBuf) + 4*len(enc.vectorSizes)
 	if enc.bufCount > 0 {
-		width := alpEncodedBytes[T]()
-		size += 4 + alpVectorHeaderSize[T]() + enc.bufCount*(2*width+2)
+		size += 4 + alpVectorHeaderSize[T]() + enc.bufCount*(alpEncodedBytes[T]()+2)
 	}
 	return int64(size)
 }
