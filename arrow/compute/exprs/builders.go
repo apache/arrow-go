@@ -35,7 +35,7 @@ import (
 // NewDefaultExtensionSet constructs an empty extension set using the default
 // Arrow Extension registry and the default collection of substrait extensions
 // from the Substrait-go repo.
-func NewDefaultExtensionSet() ExtensionIDSet {
+func NewDefaultExtensionSet() *extensionSet {
 	return NewExtensionSetDefault(
 		expr.NewEmptyExtensionRegistry(extensions.GetDefaultCollectionWithNoError()))
 }
@@ -51,7 +51,7 @@ func NewDefaultExtensionSet() ExtensionIDSet {
 // arguments which were passed and appending them to the function name appropriately.
 //
 // An error is returned if the function cannot be resolved.
-func NewScalarCall(reg ExtensionIDSet, fn string, opts []*types.FunctionOption, args ...types.FuncArg) (*expr.ScalarFunction, error) {
+func NewScalarCall(reg *extensionSet, fn string, opts []*types.FunctionOption, args ...types.FuncArg) (*expr.ScalarFunction, error) {
 	conv, ok := reg.GetArrowRegistry().GetArrowToSubstrait(fn)
 	if !ok {
 		return nil, arrow.ErrNotFound
@@ -251,7 +251,7 @@ func RefFromFieldPath(field compute.FieldPath) expr.ReferenceSegment {
 // NewFieldRef constructs a properly typed substrait field reference segment,
 // from a given arrow field reference, schema and extension set (for resolving
 // substrait types).
-func NewFieldRef(ref compute.FieldRef, schema *arrow.Schema, ext ExtensionIDSet) (*expr.FieldReference, error) {
+func NewFieldRef(ref compute.FieldRef, schema *arrow.Schema, ext *extensionSet) (*expr.FieldReference, error) {
 	path, err := ref.FindOne(schema)
 	if err != nil {
 		return nil, err
@@ -291,13 +291,13 @@ type Builder interface {
 //	       ex, input)
 type ExprBuilder struct {
 	b           expr.ExprBuilder
-	extSet      ExtensionIDSet
+	extSet      *extensionSet
 	inputSchema *arrow.Schema
 }
 
 // NewExprBuilder constructs a new Expression Builder that will use the
 // provided extension set and registry.
-func NewExprBuilder(extSet ExtensionIDSet) ExprBuilder {
+func NewExprBuilder(extSet *extensionSet) ExprBuilder {
 	return ExprBuilder{
 		b:      expr.ExprBuilder{Reg: extSet.GetSubstraitRegistry()},
 		extSet: extSet,
