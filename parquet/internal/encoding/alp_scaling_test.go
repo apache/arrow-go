@@ -33,13 +33,18 @@ func TestALPFastRoundFloat32(t *testing.T) {
 		{"positive integer", 5.0, 5},
 		{"positive round up", 2.7, 3},
 		{"positive round down", 2.3, 2},
-		{"positive half", 2.5, 2}, // round-to-even via magic trick
+		{"positive half", 2.5, 2}, // a tie goes to the even integer
 		{"negative integer", -5.0, -5},
 		{"negative round up", -2.3, -2},
 		{"negative round down", -2.7, -3},
 		{"zero", 0.0, 0},
 		{"small positive", 0.1, 0},
 		{"large integer", 12345.0, 12345},
+		// Whole numbers past 2^22, which adding and subtracting a constant
+		// would move.
+		{"past 2^22", 5000001, 5000001},
+		{"largest odd", 16777215, 16777215},
+		{"negative past 2^22", -5000001, -5000001},
 	}
 
 	for _, tt := range tests {
@@ -66,6 +71,11 @@ func TestALPFastRoundFloat64(t *testing.T) {
 		{"zero", 0.0, 0},
 		{"small positive", 0.1, 0},
 		{"large integer", 123456789.0, 123456789},
+		// Whole numbers past 2^51, which adding and subtracting a constant
+		// would move.
+		{"past 2^52", 4503599627370497, 4503599627370497},
+		{"largest odd", 9007199254740991, 9007199254740991},
+		{"negative past 2^52", -4503599627370497, -4503599627370497},
 	}
 
 	for _, tt := range tests {
