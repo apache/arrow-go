@@ -34,11 +34,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// alpTestUnpackBits unpacks with readers of its own, since the decoder's are
-// tied to a page.
+// alpTestUnpackBits reverses alpAppendPackedBits with a plain bit reader.
 func alpTestUnpackBits(packed []byte, out []uint64, bitWidth int) error {
-	reader := bytes.NewReader(nil)
-	return alpUnpackBits(utils.NewBitReader(reader), reader, packed, out, bitWidth)
+	if bitWidth == 0 {
+		clear(out)
+		return nil
+	}
+	n, err := utils.NewBitReader(bytes.NewReader(packed)).GetBatch(uint(bitWidth), out)
+	if err != nil {
+		return err
+	}
+	if n != len(out) {
+		return fmt.Errorf("unpacked %d of %d values", n, len(out))
+	}
+	return nil
 }
 
 func TestALPPackUnpackBits(t *testing.T) {
@@ -93,16 +102,6 @@ func TestALPPackBitsKnownOutput(t *testing.T) {
 	packed := alpAppendPackedBits(nil, []uint64{0, 1, 2, 3}, 2)
 	require.Len(t, packed, 1)
 	assert.Equal(t, byte(0xE4), packed[0])
-}
-
-// TestALPUnpackBitsShortInput requires truncated packed data to return an error.
-// The two lengths cover the scalar path for a partial group of 32 values and the
-// vectorized path for a whole group.
-func TestALPUnpackBitsShortInput(t *testing.T) {
-	for _, count := range []int{8, 64} {
-		out := make([]uint64, count)
-		assert.Error(t, alpTestUnpackBits([]byte{0xFF}, out, 8), "count=%d", count)
-	}
 }
 
 func newFloat32Column() *schema.Column {

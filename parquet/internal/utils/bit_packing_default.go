@@ -24,6 +24,28 @@ import (
 
 var unpack32 func(io.Reader, []uint32, int) (int, error) = unpack32Default
 
+// unpack32Bytes is the platform's vectorized unpacker, reading straight from a
+// byte slice. It is nil where there is none.
+var unpack32Bytes func(in []byte, out []uint32, nbits int) int
+
+// Unpack32Vectorized unpacks values of nbits bits, 1 to 32, from the front of
+// in, least significant bit first. It unpacks whole groups of 32, as many as in
+// and out both hold, and returns how many values that was.
+//
+// It unpacks nothing on a platform without a vectorized unpacker. A caller's
+// own loop over the bytes is faster there than the scalar unpackers, which
+// read through an io.Reader.
+func Unpack32Vectorized(in []byte, out []uint32, nbits int) int {
+	if unpack32Bytes == nil || nbits < 1 || nbits > 32 {
+		return 0
+	}
+	out = out[:min(len(out), len(in)*8/nbits)/32*32]
+	if len(out) == 0 {
+		return 0
+	}
+	return unpack32Bytes(in, out, nbits)
+}
+
 type unpackFunc func(in io.Reader, out []uint32)
 
 func unpack1_32(in io.Reader, out []uint32) {

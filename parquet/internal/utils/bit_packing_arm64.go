@@ -29,6 +29,7 @@ import (
 func init() {
 	if cpuid.CPU.Has(cpuid.ASIMD) {
 		unpack32 = unpack32NEON
+		unpack32Bytes = unpack32BytesNEON
 	} else { // default to the pure go implementation if no avx2 available
 		unpack32 = unpack32Default
 	}

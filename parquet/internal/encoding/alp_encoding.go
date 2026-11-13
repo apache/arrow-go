@@ -37,7 +37,6 @@ package encoding
 // Reference: https://dl.acm.org/doi/10.1145/3626717
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -98,27 +97,6 @@ func alpAppendPackedBits(dst []byte, values []uint64, bitWidth int) []byte {
 	return dst[:start+size]
 }
 
-// alpUnpackBits reverses alpAppendPackedBits into out, which must hold as many
-// values as were packed. The reader is reset onto packed, so one reader serves
-// every vector of a page.
-func alpUnpackBits(br *utils.BitReader, packed *bytes.Reader, data []byte, out []uint64, bitWidth int) error {
-	if bitWidth == 0 {
-		clear(out)
-		return nil
-	}
-
-	packed.Reset(data)
-	br.Reset(packed)
-	n, err := br.GetBatch(uint(bitWidth), out)
-	if err != nil {
-		return err
-	}
-	if n != len(out) {
-		return fmt.Errorf("parquet: ALP unpacked %d of %d values", n, len(out))
-	}
-	return nil
-}
-
 func alpAppendInt[T alpFloat](dst []byte, v uint64) []byte {
 	if alpEncodedBytes[T]() == 4 {
 		return binary.LittleEndian.AppendUint32(dst, uint32(v))
@@ -131,13 +109,6 @@ func alpReadInt[T alpFloat](src []byte) int64 {
 		return int64(int32(binary.LittleEndian.Uint32(src)))
 	}
 	return int64(binary.LittleEndian.Uint64(src))
-}
-
-func alpReadFloat[T alpFloat](src []byte) T {
-	if alpEncodedBytes[T]() == 4 {
-		return alpFloatFromBits[T](uint64(binary.LittleEndian.Uint32(src)))
-	}
-	return alpFloatFromBits[T](binary.LittleEndian.Uint64(src))
 }
 
 // alpEncoder encodes a float column with ALP, a vector at a time. It buffers
@@ -476,20 +447,16 @@ type alpDecoder[T alpFloat] struct {
 	currentVectorIndex int
 	currentIndex       int
 	decodedValues      []T
-	deltas             []uint64
 
-	// One reader pair, reset onto each vector's packed deltas in turn.
-	packedReader *bytes.Reader
-	bitReader    *utils.BitReader
+	// Deltas of up to 32 bits, between unpacking and scaling.
+	unpacked []uint32
+	// A padded copy of a vector's packed deltas, for the one vector whose
+	// unpacking would otherwise load past the end of the page.
+	padded []byte
 }
 
 func newALPDecoder[T alpFloat](e format.Encoding, descr *schema.Column) *alpDecoder[T] {
-	packed := bytes.NewReader(nil)
-	return &alpDecoder[T]{
-		decoder:      newDecoderBase(e, descr),
-		packedReader: packed,
-		bitReader:    utils.NewBitReader(packed),
-	}
+	return &alpDecoder[T]{decoder: newDecoderBase(e, descr)}
 }
 
 func (dec *alpDecoder[T]) Type() parquet.Type {
@@ -563,7 +530,7 @@ func (dec *alpDecoder[T]) SetData(nvals int, data []byte) error {
 	// from there rather than from the start of the data.
 	dec.bodyData = data[alpHeaderSize:]
 	dec.decodedValues = slices.Grow(dec.decodedValues[:0], dec.vectorSize)[:dec.vectorSize]
-	dec.deltas = slices.Grow(dec.deltas[:0], dec.vectorSize)[:dec.vectorSize]
+	dec.unpacked = slices.Grow(dec.unpacked[:0], dec.vectorSize)[:dec.vectorSize]
 
 	return nil
 }
@@ -580,10 +547,11 @@ func (dec *alpDecoder[T]) vectorLength(vectorIdx int) int {
 	return dec.vectorSize
 }
 
-// decodeVector decodes one vector into dec.decodedValues. It checks every size
-// and position it reads, since the page may be truncated or corrupt.
-func (dec *alpDecoder[T]) decodeVector(vectorIdx int) error {
-	vectorLen := dec.vectorLength(vectorIdx)
+// decodeVector decodes one vector into out, which holds exactly the vector's
+// values. It checks every size and position it reads, since the page may be
+// truncated or corrupt.
+func (dec *alpDecoder[T]) decodeVector(vectorIdx int, out []T) error {
+	vectorLen := len(out)
 	valueBytes := alpEncodedBytes[T]()
 
 	// On 32-bit platforms, converting a large uint32 offset can make pos
@@ -626,39 +594,48 @@ func (dec *alpDecoder[T]) decodeVector(vectorIdx int) error {
 			vectorIdx, end, vectorIdx+1, dec.vectorOffsets[vectorIdx+1])
 	}
 
-	deltas := dec.deltas[:vectorLen]
-	if err := alpUnpackBits(dec.bitReader, dec.packedReader, dec.bodyData[pos:pos+packedSize], deltas, bitWidth); err != nil {
-		return err
+	// Positions come first among the exceptions, then the values.
+	packed := dec.bodyData[pos:]
+	positions := dec.bodyData[pos+packedSize : pos+packedSize+numExceptions*2]
+	excValues := dec.bodyData[pos+packedSize+numExceptions*2 : end]
+	// Unpacking loads a few bytes past the deltas. Those are the exceptions or
+	// the next vector, except at the end of the page, where there may be none.
+	if need := alpUnpackSize(vectorLen, bitWidth); bitWidth > 0 && need > len(packed) {
+		dec.padded = slices.Grow(dec.padded[:0], need)[:need]
+		clear(dec.padded[copy(dec.padded, packed):])
+		packed = dec.padded
 	}
-	pos += packedSize
 
 	// The deltas were computed in the encoded integer's width with wrapping
-	// arithmetic, so add the frame of reference back the same way.
-	s := newALPScaling[T](exponent, factor)
-	out := dec.decodedValues[:len(deltas)]
-	if valueBytes == 4 {
-		ref := uint32(frameOfRef)
-		for i, d := range deltas {
-			out[i] = s.decode(int64(int32(uint32(d) + ref)))
+	// arithmetic, so the frame of reference is added back the same way.
+	bad := -1
+	switch out := any(out).(type) {
+	case []float64:
+		fac, exp := alpDoublePow10[factor], alpDoubleNegPow10[exponent]
+		if bitWidth == 0 {
+			v := float64(frameOfRef) * fac * exp
+			for i := range out {
+				out[i] = v
+			}
+		} else {
+			alpDecodePacked64(out, packed, uint(bitWidth), uint64(frameOfRef), fac, exp, dec.unpacked)
 		}
-	} else {
-		ref := uint64(frameOfRef)
-		for i, d := range deltas {
-			out[i] = s.decode(int64(d + ref))
+		bad = alpPatch64(out, positions, excValues)
+	case []float32:
+		fac, exp := alpFloatPow10[factor], alpFloatNegPow10[exponent]
+		if bitWidth == 0 {
+			v := float32(int32(frameOfRef)) * fac * exp
+			for i := range out {
+				out[i] = v
+			}
+		} else {
+			alpDecodePacked32(out, packed, uint(bitWidth), uint32(frameOfRef), fac, exp, dec.unpacked)
 		}
+		bad = alpPatch32(out, positions, excValues)
 	}
-
-	// Positions come first, then the values, so read both in one pass instead
-	// of copying the positions out.
-	valuePos := pos + numExceptions*2
-	for e := range numExceptions {
-		idx := binary.LittleEndian.Uint16(dec.bodyData[pos+e*2:])
-		if int(idx) >= vectorLen {
-			return fmt.Errorf("parquet: ALP exception position %d is outside vector %d", idx, vectorIdx)
-		}
-		dec.decodedValues[idx] = alpReadFloat[T](dec.bodyData[valuePos+e*valueBytes:])
+	if bad >= 0 {
+		return fmt.Errorf("parquet: ALP exception position %d is outside vector %d", bad, vectorIdx)
 	}
-
 	return nil
 }
 
@@ -673,8 +650,20 @@ func (dec *alpDecoder[T]) Decode(out []T) (int, error) {
 	// vectors.
 	for read < toRead && dec.currentIndex < dec.totalCount {
 		vectorIdx := dec.currentIndex / dec.vectorSize
+		vectorLen := dec.vectorLength(vectorIdx)
+		if dec.currentIndex%dec.vectorSize == 0 && toRead-read >= vectorLen {
+			// The caller wants the whole vector, so decode it where it goes
+			// rather than into the decoder's buffer and copy it across.
+			if err := dec.decodeVector(vectorIdx, out[read:read+vectorLen]); err != nil {
+				dec.nvals -= read
+				return read, err
+			}
+			read += vectorLen
+			dec.currentIndex += vectorLen
+			continue
+		}
 		if vectorIdx != dec.currentVectorIndex {
-			if err := dec.decodeVector(vectorIdx); err != nil {
+			if err := dec.decodeVector(vectorIdx, dec.decodedValues[:vectorLen]); err != nil {
 				dec.nvals -= read
 				return read, err
 			}
@@ -682,7 +671,6 @@ func (dec *alpDecoder[T]) Decode(out []T) (int, error) {
 		}
 
 		indexInVector := dec.currentIndex % dec.vectorSize
-		vectorLen := dec.vectorLength(vectorIdx)
 		n := copy(out[read:toRead], dec.decodedValues[indexInVector:vectorLen])
 		read += n
 		dec.currentIndex += n
