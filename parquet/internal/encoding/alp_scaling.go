@@ -157,17 +157,6 @@ func alpFloatToBits[T alpFloat](v T) uint64 {
 	panic("parquet: ALP: unsupported float type")
 }
 
-func alpFloatFromBits[T alpFloat](b uint64) T {
-	var z T
-	switch any(z).(type) {
-	case float32:
-		return T(math.Float32frombits(uint32(b)))
-	case float64:
-		return T(math.Float64frombits(b))
-	}
-	panic("parquet: ALP: unsupported float type")
-}
-
 // alpScaling holds the constants of one exponent and factor pair. Encoding and
 // decoding look them up once per vector rather than once per value.
 type alpScaling[T alpFloat] struct {

@@ -59,3 +59,7 @@ func unpack32Avx2(in io.Reader, out []uint32, nbits int) (int, error) {
 
 	return _unpack32_avx2(input, output, completeBatch, nbits), err
 }
+
+func unpack32BytesAvx2(in []byte, out []uint32, nbits int) int {
+	return _unpack32_avx2(unsafe.Pointer(&in[0]), unsafe.Pointer(&out[0]), len(out), nbits)
+}
