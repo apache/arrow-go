@@ -99,7 +99,7 @@ func (rcv *DictionaryEncoding) IndexType(obj *Int) *Int {
 /// recommended to prefer signed integer types over unsigned integer types
 /// and to avoid uint64 indices unless they are required by an application.
 /// By default, dictionaries are not ordered, or the order does not have
-/// semantic meaning. In some statistical, applications, dictionary-encoding
+/// semantic meaning. In some statistical applications, dictionary-encoding
 /// is used to represent ordered categorical data, and we provide a way to
 /// preserve that metadata here
 func (rcv *DictionaryEncoding) IsOrdered() bool {
@@ -111,7 +111,7 @@ func (rcv *DictionaryEncoding) IsOrdered() bool {
 }
 
 /// By default, dictionaries are not ordered, or the order does not have
-/// semantic meaning. In some statistical, applications, dictionary-encoding
+/// semantic meaning. In some statistical applications, dictionary-encoding
 /// is used to represent ordered categorical data, and we provide a way to
 /// preserve that metadata here
 func (rcv *DictionaryEncoding) MutateIsOrdered(n bool) bool {
@@ -130,8 +130,30 @@ func (rcv *DictionaryEncoding) MutateDictionaryKind(n DictionaryKind) bool {
 	return rcv._tab.MutateInt16Slot(10, int16(n))
 }
 
+/// Metadata for the dictionary value type, e.g. the extension type of the values
+func (rcv *DictionaryEncoding) CustomMetadata(obj *KeyValue, j int) bool {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	if o != 0 {
+		x := rcv._tab.Vector(o)
+		x += flatbuffers.UOffsetT(j) * 4
+		x = rcv._tab.Indirect(x)
+		obj.Init(rcv._tab.Bytes, x)
+		return true
+	}
+	return false
+}
+
+func (rcv *DictionaryEncoding) CustomMetadataLength() int {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	if o != 0 {
+		return rcv._tab.VectorLen(o)
+	}
+	return 0
+}
+
+/// Metadata for the dictionary value type, e.g. the extension type of the values
 func DictionaryEncodingStart(builder *flatbuffers.Builder) {
-	builder.StartObject(4)
+	builder.StartObject(5)
 }
 func DictionaryEncodingAddId(builder *flatbuffers.Builder, id int64) {
 	builder.PrependInt64Slot(0, id, 0)
@@ -144,6 +166,12 @@ func DictionaryEncodingAddIsOrdered(builder *flatbuffers.Builder, isOrdered bool
 }
 func DictionaryEncodingAddDictionaryKind(builder *flatbuffers.Builder, dictionaryKind DictionaryKind) {
 	builder.PrependInt16Slot(3, int16(dictionaryKind), 0)
+}
+func DictionaryEncodingAddCustomMetadata(builder *flatbuffers.Builder, customMetadata flatbuffers.UOffsetT) {
+	builder.PrependUOffsetTSlot(4, flatbuffers.UOffsetT(customMetadata), 0)
+}
+func DictionaryEncodingStartCustomMetadataVector(builder *flatbuffers.Builder, numElems int) flatbuffers.UOffsetT {
+	return builder.StartVector(4, numElems, 4)
 }
 func DictionaryEncodingEnd(builder *flatbuffers.Builder) flatbuffers.UOffsetT {
 	return builder.EndObject()

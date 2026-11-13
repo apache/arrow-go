@@ -45,6 +45,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
+
+	_ "github.com/apache/arrow-go/v18/arrow/internal/integration"
 )
 
 type Scenario interface {

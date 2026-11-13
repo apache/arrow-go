@@ -26,6 +26,8 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/arrio"
 	"github.com/apache/arrow-go/v18/arrow/internal/arrjson"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
+
+	_ "github.com/apache/arrow-go/v18/arrow/internal/integration"
 )
 
 func main() {
