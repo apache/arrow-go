@@ -56,28 +56,37 @@ func (d *dataMessageReader) Message() (*ipc.Message, error) {
 		err error
 	)
 
-	if d.peeked != nil {
-		fd = d.peeked
-		d.peeked = nil
-	} else {
-		fd, err = d.rdr.Recv()
-	}
-
-	if err != nil {
-		if d.msg != nil {
-			// clear the previous message in the error case
-			d.msg.Release()
-			d.msg = nil
+	for {
+		if d.peeked != nil {
+			fd = d.peeked
+			d.peeked = nil
+		} else {
+			fd, err = d.rdr.Recv()
 		}
-		d.lastAppMetadata = nil
-		d.descr = nil
-		return nil, err
+
+		if err != nil {
+			if d.msg != nil {
+				// clear the previous message in the error case
+				d.msg.Release()
+				d.msg = nil
+			}
+			d.lastAppMetadata = nil
+			d.descr = nil
+			return nil, err
+		}
+
+		if fd.FlightDescriptor != nil {
+			d.descr = fd.FlightDescriptor
+		}
+		// a message with neither an IPC header nor a body only carries
+		// app metadata (see Writer.WriteMetadata); there is no IPC message
+		// to decode, so skip it
+		if len(fd.DataHeader) > 0 || len(fd.DataBody) > 0 {
+			break
+		}
 	}
 
 	d.lastAppMetadata = fd.AppMetadata
-	if fd.FlightDescriptor != nil {
-		d.descr = fd.FlightDescriptor
-	}
 	d.msg = ipc.NewMessage(memory.NewBufferBytes(fd.DataHeader), memory.NewBufferBytes(fd.DataBody))
 	return d.msg, nil
 }
