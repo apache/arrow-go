@@ -70,6 +70,12 @@
 //
 //   - Byte Stream Split (Float, Double, Int32, Int64, FixedLenByteArray)
 //
+//   - ALP, Adaptive Lossless floating-Point (Float, Double). The Parquet
+//     format marks ALP as a preview encoding, so writing it is opt-in: enable
+//     it with WithALPEncoding, select it per column with WithEncodingFor or
+//     WithEncodingPath, and turn off dictionary encoding for those columns.
+//     Reading needs no option.
+//
 // Tip: Some platforms don't necessarily support all kinds of encodings. If you're not
 // sure what to use, just use Plain and Dictionary encoding.
 //
