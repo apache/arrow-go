@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
+	"github.com/apache/arrow-go/v18/arrow/internal/decimalstr"
 )
 
 const (
@@ -238,9 +239,41 @@ func FromFloat64(v float64, prec, scale int32) (Num, error) {
 	return fromPositiveFloat64(v, prec, scale)
 }
 
-var pt5 = big.NewFloat(0.5)
-
 func FromString(v string, prec, scale int32) (n Num, err error) {
+	if lit, ok := decimalstr.Parse(v); ok {
+		return fromDecimalLiteral(lit, prec, scale)
+	}
+	return fromFloatLiteral(v, prec, scale)
+}
+
+func fromDecimalLiteral(lit decimalstr.Parsed, prec, scale int32) (n Num, err error) {
+	if scale < 0 {
+		// Reject an unscaled magnitude that would not fit in signed 128-bit
+		// storage, before using the scale.
+		if lit.AtLeastTwoPower(0, 127) {
+			return Num{}, errors.New("bitlen too large for decimal128")
+		}
+		if scale < -MaxScale {
+			return Num{}, fmt.Errorf("scale %d out of range for decimal128, must be between %d and %d", scale, -MaxScale, MaxScale)
+		}
+	} else if scale > MaxScale {
+		return Num{}, fmt.Errorf("scale %d out of range for decimal128, must be between %d and %d", scale, -MaxScale, MaxScale)
+	} else if lit.AtLeastTwoPower(int64(scale), 128) {
+		return Num{}, errors.New("bitlen too large for decimal128")
+	}
+
+	val, ok := lit.ScaleAndRound(int64(scale))
+	if !ok || val.BitLen() > 127 {
+		return Num{}, errors.New("bitlen too large for decimal128")
+	}
+	n = FromBigInt(val)
+	if !n.FitsInPrecision(prec) {
+		err = fmt.Errorf("val %v doesn't fit in precision %d", n, prec)
+	}
+	return
+}
+
+func fromFloatLiteral(v string, prec, scale int32) (n Num, err error) {
 	// time for some math!
 	// Our input precision means "number of digits of precision" but the
 	// math/big library refers to precision in floating point terms
@@ -287,45 +320,29 @@ func FromString(v string, prec, scale int32) (n Num, err error) {
 		if scale < -MaxScale {
 			return Num{}, fmt.Errorf("scale %d out of range for decimal128, must be between %d and %d", scale, -MaxScale, MaxScale)
 		}
-		var tmp big.Int
-		val, _ := out.Int(&tmp)
-		n = FromBigInt(val)
-		n, _ = n.Div(scaleMultipliers[-scale])
-	} else {
-		if scale > MaxScale {
-			return Num{}, fmt.Errorf("scale %d out of range for decimal128, must be between %d and %d", scale, -MaxScale, MaxScale)
-		}
-		// Since we're going to truncate this to get an integer, we need to round
-		// the value instead because of edge cases so that we match how other implementations
-		// (e.g. C++) handles Decimal values. So if we're negative we'll subtract 0.5 and if
-		// we're positive we'll add 0.5.
-		p := (&big.Float{}).SetInt(scaleMultipliers[scale].BigInt())
-		out.SetPrec(precInBits).Mul(out, p)
-		// Reject before rounding and converting, which would allocate as many
-		// bits as the value has.
-		if out.IsInf() || out.MantExp(nil) > 128 {
-			return Num{}, errors.New("bitlen too large for decimal128")
-		}
-		// A magnitude below 1/4 rounds to zero. Clearing it skips the
-		// rounding below, which allocates in proportion to the gap between
-		// the value's exponent and 0.5's.
-		if out.MantExp(nil) < -1 {
-			out.SetInt64(0)
-		}
-		if out.Signbit() {
-			out.Sub(out, pt5)
-		} else {
-			out.Add(out, pt5)
-		}
-
-		var tmp big.Int
-		val, _ := out.Int(&tmp)
-		if val.BitLen() > 127 {
-			return Num{}, errors.New("bitlen too large for decimal128")
-		}
-		n = FromBigInt(val)
+	} else if scale > MaxScale {
+		return Num{}, fmt.Errorf("scale %d out of range for decimal128, must be between %d and %d", scale, -MaxScale, MaxScale)
 	}
 
+	if scale != 0 {
+		if scale > 0 {
+			p := (&big.Float{}).SetInt(scaleMultipliers[scale].BigInt())
+			out.SetPrec(precInBits).Mul(out, p)
+		} else {
+			p := (&big.Float{}).SetInt(scaleMultipliers[-scale].BigInt())
+			out.SetPrec(precInBits).Quo(out, p)
+		}
+		// Reject before rounding and converting, which would allocate as many
+		// bits as the value has.
+		if scale > 0 && (out.IsInf() || out.MantExp(nil) > 128) {
+			return Num{}, errors.New("bitlen too large for decimal128")
+		}
+	}
+	val := decimalstr.RoundScaled(out, v, int64(scale))
+	if val.BitLen() > 127 {
+		return Num{}, errors.New("bitlen too large for decimal128")
+	}
+	n = FromBigInt(val)
 	if !n.FitsInPrecision(prec) {
 		err = fmt.Errorf("val %v doesn't fit in precision %d", n, prec)
 	}

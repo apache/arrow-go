@@ -22,6 +22,7 @@ import (
 	"math/big"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/decimal"
@@ -340,7 +341,7 @@ func TestFromString(t *testing.T) {
 	}
 	n32, err := decimal.Decimal32FromString("4294967295", 9, -1)
 	require.NoError(t, err)
-	assert.Equal(t, decimal.Decimal32(429496729), n32)
+	assert.Equal(t, decimal.Decimal32(429496730), n32)
 	_, err = decimal.Decimal32FromString("4294967296", 9, -1)
 	assert.ErrorContains(t, err, "bitlen too large for decimal32")
 	_, err = decimal.Decimal64FromString("9223372036854775808", 18, 0)
@@ -353,7 +354,7 @@ func TestFromString(t *testing.T) {
 		scale int32
 		want  decimal.Decimal64
 	}{
-		{"9223372036854775808", -1, 922337203685477580},
+		{"9223372036854775808", -1, 922337203685477581},
 		{"18446744073709551615", -2, 184467440737095516},
 		{"10000000000000000000", -19, 1},
 		{"18000000000000000000", -20, 0},
@@ -624,5 +625,66 @@ func TestDecimalBasics(t *testing.T) {
 		div64, mod64 := decimal.Decimal64(tt.lhs).Div(decimal.Decimal64(tt.rhs))
 		assert.EqualValues(t, expdiv, div64)
 		assert.EqualValues(t, expmod, mod64)
+	}
+}
+
+func TestFromStringRoundsExactTies(t *testing.T) {
+	// These halfway values are not exact in binary, so rounding a binary
+	// approximation sent some of them down. Ties round away from zero.
+	tests := []struct {
+		s        string
+		scale    int32
+		expected int64
+	}{
+		{"0.35", 1, 4},
+		{"0.15", 1, 2},
+		{"2.675", 2, 268},
+		{"1.005", 2, 101},
+		{"-0.35", 1, -4},
+		{"-1.005", 2, -101},
+		{"19", -1, 2},
+		{"15", -1, 2},
+		{"14", -1, 1},
+		{"-15", -1, -2},
+		{"-19", -1, -2},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s_%d", tt.s, tt.scale), func(t *testing.T) {
+			n32, err := decimal.Decimal32FromString(tt.s, 9, tt.scale)
+			require.NoError(t, err)
+			assert.EqualValues(t, tt.expected, n32)
+
+			n64, err := decimal.Decimal64FromString(tt.s, 18, tt.scale)
+			require.NoError(t, err)
+			assert.EqualValues(t, tt.expected, n64)
+		})
+	}
+}
+
+func TestFromStringLongFraction(t *testing.T) {
+	// Fractions longer than 1024 digits must still round from the first
+	// dropped digit instead of being rejected as too large.
+	tests := []struct {
+		s        string
+		scale    int32
+		expected int64
+	}{
+		{"0." + strings.Repeat("7", 1000), 2, 78},
+		{"0." + strings.Repeat("7", 1030), 2, 78},
+		{"0." + strings.Repeat("7", 5000), 2, 78},
+		{"-0." + strings.Repeat("7", 5000), 2, -78},
+		{"0.125" + strings.Repeat("0", 2000), 2, 13},
+		{"0.124" + strings.Repeat("9", 2000), 2, 12},
+	}
+	for i, tt := range tests {
+		t.Run(fmt.Sprintf("%d_%d", i, len(tt.s)), func(t *testing.T) {
+			n32, err := decimal.Decimal32FromString(tt.s, 9, tt.scale)
+			require.NoError(t, err)
+			assert.EqualValues(t, tt.expected, n32)
+
+			n64, err := decimal.Decimal64FromString(tt.s, 18, tt.scale)
+			require.NoError(t, err)
+			assert.EqualValues(t, tt.expected, n64)
+		})
 	}
 }
