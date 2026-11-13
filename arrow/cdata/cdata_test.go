@@ -583,7 +583,8 @@ func TestPrimitiveArrs(t *testing.T) {
 			defer freeTestMallocatorArr(carr, mem)
 
 			imported, err := ImportCArrayWithType(carr, arr.DataType())
-			assert.NoError(t, err)
+			require.NoError(t, err)
+			assert.NoError(t, array.ValidateFull(imported))
 			assert.True(t, array.Equal(arr, imported))
 			assert.True(t, isReleased(carr))
 
