@@ -37,9 +37,12 @@ type KeyMaterial struct {
 	InternalStorage bool `json:"internalStorage"`
 	// IsFooterKey reports whether this material belongs to the footer key.
 	// Only footer key material carries KmsInstanceID and KmsInstanceURL.
-	IsFooterKey    bool   `json:"isFooterKey"`
-	KmsInstanceID  string `json:"kmsInstanceID"`
-	KmsInstanceURL string `json:"kmsInstanceURL"`
+	IsFooterKey bool `json:"isFooterKey"`
+	// KmsInstanceID and KmsInstanceURL identify the KMS instance that wrote
+	// the footer key material; they are omitted from column key material,
+	// matching parquet-cpp.
+	KmsInstanceID  string `json:"kmsInstanceID,omitempty"`
+	KmsInstanceURL string `json:"kmsInstanceURL,omitempty"`
 	// MasterKeyID identifies the master key used to wrap the key.
 	MasterKeyID string `json:"masterKeyID"`
 	// WrappedDEK is the base64 encoded wrapped data encryption key.
@@ -49,10 +52,10 @@ type KeyMaterial struct {
 	DoubleWrapping bool `json:"doubleWrapping"`
 	// KeyEncryptionKeyID is the base64 encoded key encryption key ID, set
 	// only in double wrapping mode.
-	KeyEncryptionKeyID string `json:"keyEncryptionKeyID"`
+	KeyEncryptionKeyID string `json:"keyEncryptionKeyID,omitempty"`
 	// WrappedKEK is the base64 encoded wrapped key encryption key, set only
 	// in double wrapping mode.
-	WrappedKEK string `json:"wrappedKEK"`
+	WrappedKEK string `json:"wrappedKEK,omitempty"`
 }
 
 // ParseKeyMetadata parses the key metadata JSON of a footer or column key.

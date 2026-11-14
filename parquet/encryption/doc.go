@@ -14,14 +14,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package encryption provides optional KMS integration for reading parquet
-// files encrypted with PKMT1 key material, the format written by the
+// Package encryption provides optional KMS integration for parquet
+// encryption with PKMT1 key material, the format written by the
 // CryptoFactory of parquet-cpp and pyarrow (both single and double key
 // wrapping).
 //
-// It plugs into the existing low level API as a
+// Reading plugs into the existing low level API as a
 // parquet.DecryptionKeyRetriever: pass a KmsClient implementation to
 // NewKmsKeyRetriever and set the retriever with
 // parquet.WithKeyRetriever. Files using explicit keys or custom key
 // metadata continue to work without this package.
+//
+// Writing uses NewCryptoFactory: FileEncryptionProperties generates the
+// data encryption keys and their PKMT1 key material and returns
+// parquet.FileEncryptionProperties for parquet.WithEncryptionProperties,
+// producing files readable by the same factory on the parquet-cpp/pyarrow
+// side. Writing with explicit keys via parquet.NewFileEncryptionProperties
+// continues to work without this package.
 package encryption

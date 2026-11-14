@@ -325,3 +325,95 @@ func writeInteropEncryptedFile(t *testing.T, path string) {
 
 	require.NoError(t, w.Close())
 }
+
+// writeGoKmsFile writes an encrypted file whose keys come from the Go
+// CryptoFactory, mirroring the pyarrow gen-kms layout: a float64 and a
+// float32 column under a column master key, plus the footer key.
+func writeGoKmsFile(t *testing.T, path string, cfg encryption.EncryptionConfiguration) {
+	t.Helper()
+
+	kms := &interopBase64KMS{}
+	factory := encryption.NewCryptoFactory(
+		func(encryption.KmsConnectionConfig) (encryption.KmsClient, error) {
+			return kms, nil
+		})
+	props, err := factory.FileEncryptionProperties(
+		encryption.KmsConnectionConfig{KmsInstanceID: "in-memory", KmsInstanceURL: "local"}, cfg)
+	require.NoError(t, err)
+
+	fields := schema.FieldList{
+		schema.Must(schema.NewPrimitiveNode("a", parquet.Repetitions.Required,
+			parquet.Types.Double, 0, -1)),
+		schema.Must(schema.NewPrimitiveNode("b", parquet.Repetitions.Required,
+			parquet.Types.Float, 0, -1)),
+	}
+	root, err := schema.NewGroupNode("schema", parquet.Repetitions.Repeated, fields, -1)
+	require.NoError(t, err)
+
+	out, err := os.Create(path)
+	require.NoError(t, err)
+
+	writerProps := parquet.NewWriterProperties(parquet.WithEncryptionProperties(props))
+	w := file.NewParquetWriter(out, root, file.WithWriterProps(writerProps))
+
+	rgr, err := w.AppendBufferedRowGroupChecked()
+	require.NoError(t, err)
+
+	aw, err := rgr.Column(0)
+	require.NoError(t, err)
+	doubleWriter := aw.(*file.Float64ColumnChunkWriter)
+	_, err = doubleWriter.WriteBatch([]float64{1, 2, 3}, nil, nil)
+	require.NoError(t, err)
+
+	bw, err := rgr.Column(1)
+	require.NoError(t, err)
+	floatWriter := bw.(*file.Float32ColumnChunkWriter)
+	_, err = floatWriter.WriteBatch([]float32{4, 5, 6}, nil, nil)
+	require.NoError(t, err)
+
+	require.NoError(t, w.Close())
+}
+
+// TestGoKmsWrittenReadByPyarrow writes files with the Go CryptoFactory and
+// reads them back with pyarrow's, resolving every key through the test KMS.
+func TestGoKmsWrittenReadByPyarrow(t *testing.T) {
+	requirePyarrow(t)
+
+	configs := []struct {
+		name string
+		cfg  encryption.EncryptionConfiguration
+	}{
+		{"double", encryption.EncryptionConfiguration{
+			FooterKeyID: "footer_master",
+			ColumnKeys:  map[string][]string{"column_master": {"a", "b"}},
+		}},
+		{"single", encryption.EncryptionConfiguration{
+			FooterKeyID:    "footer_master",
+			ColumnKeys:     map[string][]string{"column_master": {"a", "b"}},
+			SingleWrapping: true,
+		}},
+		{"plaintext_footer", encryption.EncryptionConfiguration{
+			FooterKeyID:     "footer_master",
+			ColumnKeys:      map[string][]string{"column_master": {"a", "b"}},
+			PlaintextFooter: true,
+		}},
+	}
+
+	for _, config := range configs {
+		t.Run(config.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "go_kms.parquet")
+			writeGoKmsFile(t, path, config.cfg)
+
+			out := interopPython(t, "read-kms", path)
+			got := map[string]string{}
+			for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+				parts := strings.SplitN(line, "	", 2)
+				if len(parts) == 2 {
+					got[parts[0]] = parts[1]
+				}
+			}
+			assert.Equal(t, "1.0 2.0 3.0", got["a"])
+			assert.Equal(t, "4.0 5.0 6.0", got["b"])
+		})
+	}
+}
