@@ -2575,8 +2575,7 @@ func TestViewScalarsInNestedTypes(t *testing.T) {
 			defer values.Release()
 			return array.NewRunEndEncodedArray(runEnds, values, 5, 0)
 		}},
-		// MakeArrayFromScalar supports valid union scalars only at length 0.
-		{name: "dense_union<string_view, int32>", lengths: []int{0}, build: func(t *testing.T) arrow.Array {
+		{name: "dense_union<string_view, int32>", lengths: []int{0, 1, 3}, build: func(t *testing.T) arrow.Array {
 			return fromJSON(t, arrow.DenseUnionOf([]arrow.Field{
 				{Name: "sv", Type: sv, Nullable: true},
 				{Name: "i", Type: arrow.PrimitiveTypes.Int32, Nullable: true},

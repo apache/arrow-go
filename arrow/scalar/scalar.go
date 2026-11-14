@@ -812,13 +812,14 @@ func MakeArrayOfNull(dt arrow.DataType, length int, mem memory.Allocator) arrow.
 }
 
 // MakeArrayFromScalar returns an array filled with the scalar value repeated length times.
-// Not yet implemented for nested types such as Struct, List, extension and so on.
 func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Array, error) {
 	if length < 0 {
 		return nil, fmt.Errorf("%w: array length must be non-negative, got %d", arrow.ErrInvalid, length)
 	}
 
-	if length == 0 || !sc.IsValid() {
+	// Null union scalars still carry a type code, so only other types
+	// shortcut to an all null array.
+	if length == 0 || (!sc.IsValid() && !arrow.IsUnion(sc.DataType().ID())) {
 		return MakeArrayOfNull(sc.DataType(), length, mem), nil
 	}
 
@@ -939,10 +940,11 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 		data := finishFixedWidth(s.Data())
 		defer data.Release()
 		return array.MakeFromData(data), nil
-	case *List:
+	case *List, *LargeList:
+		value := s.(ListScalar).GetList()
 		values := make([]arrow.Array, length)
 		for i := range values {
-			values[i] = s.Value
+			values[i] = value
 		}
 
 		valueArray, err := array.Concatenate(values, mem)
@@ -951,7 +953,7 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 		}
 		defer valueArray.Release()
 
-		offsetsBuf := createOffsets(int64(s.Value.Len()))
+		offsetsBuf := createOffsets(int64(value.Len()))
 		defer offsetsBuf.Release()
 		data := array.NewData(s.DataType(), length, []*memory.Buffer{nil, offsetsBuf}, []arrow.ArrayData{valueArray.Data()}, 0, 0)
 		defer data.Release()
@@ -1043,6 +1045,86 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 			data.Release()
 		}()
 		return array.MakeFromData(data), nil
+	case *SparseUnion:
+		if err := s.Validate(); err != nil {
+			return nil, err
+		}
+		dt := s.DataType().(*arrow.SparseUnionType)
+		childID := dt.ChildIDs()[s.TypeCode]
+
+		children := make([]arrow.ArrayData, dt.NumFields())
+		for i, f := range dt.Fields() {
+			var child arrow.Array
+			if i == childID && s.Valid {
+				var err error
+				if child, err = MakeArrayFromScalar(s.Value[i], length, mem); err != nil {
+					return nil, err
+				}
+			} else {
+				child = MakeArrayOfNull(f.Type, length, mem)
+			}
+			defer child.Release()
+			children[i] = child.Data()
+		}
+
+		typeCodes := createBuffer([]byte{byte(s.TypeCode)})
+		defer typeCodes.Release()
+		data := array.NewData(dt, length, []*memory.Buffer{nil, typeCodes}, children, 0, 0)
+		defer data.Release()
+		return array.MakeFromData(data), nil
+	case *DenseUnion:
+		if err := s.Validate(); err != nil {
+			return nil, err
+		}
+		dt := s.DataType().(*arrow.DenseUnionType)
+		childID := dt.ChildIDs()[s.TypeCode]
+
+		// Every element points at the one value in the child for the type
+		// code, and the other children are empty.
+		children := make([]arrow.ArrayData, dt.NumFields())
+		for i, f := range dt.Fields() {
+			var child arrow.Array
+			switch {
+			case i != childID:
+				child = MakeArrayOfNull(f.Type, 0, mem)
+			case s.Valid:
+				var err error
+				if child, err = MakeArrayFromScalar(s.Value, 1, mem); err != nil {
+					return nil, err
+				}
+			default:
+				child = MakeArrayOfNull(f.Type, 1, mem)
+			}
+			defer child.Release()
+			children[i] = child.Data()
+		}
+
+		typeCodes := createBuffer([]byte{byte(s.TypeCode)})
+		defer typeCodes.Release()
+		offsets := createBuffer(make([]byte, arrow.Int32SizeBytes))
+		defer offsets.Release()
+		data := array.NewData(dt, length, []*memory.Buffer{nil, typeCodes, offsets}, children, 0, 0)
+		defer data.Release()
+		return array.MakeFromData(data), nil
+	case *Extension:
+		if err := s.Validate(); err != nil {
+			return nil, err
+		}
+		dt, ok := s.DataType().(arrow.ExtensionType)
+		if !ok {
+			return nil, fmt.Errorf("%w: extension scalar has non extension type %s", arrow.ErrInvalid, s.DataType())
+		}
+		if !arrow.TypeEqual(dt.StorageType(), s.Value.DataType()) {
+			return nil, fmt.Errorf("%w: %s scalar has storage value of type %s, want %s",
+				arrow.ErrInvalid, dt, s.Value.DataType(), dt.StorageType())
+		}
+
+		storage, err := MakeArrayFromScalar(s.Value, length, mem)
+		if err != nil {
+			return nil, err
+		}
+		defer storage.Release()
+		return array.NewExtensionArrayWithStorage(dt, storage), nil
 	case *RunEndEncoded:
 		dt := s.DataType().(*arrow.RunEndEncodedType)
 
