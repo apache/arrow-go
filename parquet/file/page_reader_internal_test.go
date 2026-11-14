@@ -280,6 +280,43 @@ func TestReseekOnEncryptedChunkWithSharedPageOffset(t *testing.T) {
 	}
 }
 
+// A seek to row 0 that receives the dictionary page of an encrypted chunk has no
+// probe to fall back on, so a chunk without a data page ends the seek.
+func TestSeekToRowZeroOnEncryptedChunkWithoutDataPage(t *testing.T) {
+	// an RLE run of 8 int32 zeros, which the int32 decoder does not support
+	rleValues := []byte{16, 0, 0, 0, 0}
+	tests := []struct {
+		name    string
+		pages   []pageSpec
+		want    string
+		notWant string
+	}{
+		{"chunk ends after the dictionary page",
+			[]pageSpec{dictPageSpec(10, 20)},
+			"seek found no data page for row index 0", ""},
+		{"data page fails to decode",
+			[]pageSpec{dictPageSpec(10, 20), dataPageSpec(8, format.Encoding_RLE, rleValues)},
+			"RLE encoding only supports BOOLEAN, got INT32", "seek found no data page"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cr := requiredInt32Column(t, encryptedChunk(t, true, 8, tt.pages...))
+
+			err := cr.SeekToRow(0)
+			require.ErrorContains(t, err, tt.want)
+			require.NotErrorIs(t, err, errSeekRowOutOfRange)
+			if tt.notWant != "" {
+				require.NotContains(t, err.Error(), tt.notWant)
+			}
+			require.False(t, cr.HasNext())
+
+			total, _, err2 := cr.ReadBatch(8, make([]int32, 8), nil, nil)
+			require.Zero(t, total)
+			require.Equal(t, err, err2)
+		})
+	}
+}
+
 type countingReader struct {
 	utils.Reader
 	read *int

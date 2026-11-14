@@ -18,6 +18,7 @@ package file_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -1682,6 +1683,150 @@ func TestSeekToRowOutOfRangeKeepsReader(t *testing.T) {
 		assert.Equal(t, err, err2)
 		assert.Zero(t, total)
 	})
+}
+
+// patchedDictionaryFile writes two row groups of 100 dictionary encoded rows, or
+// plain rows when dict is false, and damages the footer entry of the second chunk.
+// With a dictionary, the chunk's data page offset is moved onto the dictionary page
+// and the chunk is cut after it. Without one, the chunk is cut to nothing.
+func patchedDictionaryFile(t *testing.T, dict bool) []byte {
+	t.Helper()
+	sc := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewInt32Node("x", parquet.Repetitions.Required, -1),
+	}, -1))
+	var out bytes.Buffer
+	w, err := file.NewParquetWriterWithError(&out, sc, file.WithWriterProps(
+		parquet.NewWriterProperties(parquet.WithDictionaryDefault(dict))))
+	require.NoError(t, err)
+	for range 2 {
+		rg := w.AppendRowGroup()
+		cw, err := rg.NextColumn()
+		require.NoError(t, err)
+		vals := make([]int32, 100)
+		for i := range vals {
+			vals[i] = int32(i % 7)
+		}
+		_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch(vals, nil, nil)
+		require.NoError(t, err)
+		require.NoError(t, cw.Close())
+		require.NoError(t, rg.Close())
+	}
+	require.NoError(t, w.Close())
+	data := out.Bytes()
+
+	footerLen := int(binary.LittleEndian.Uint32(data[len(data)-8:]))
+	footerStart := len(data) - 8 - footerLen
+	md := format.NewFileMetaData()
+	_, err = thrift.DeserializeThrift(md, data[footerStart:len(data)-8])
+	require.NoError(t, err)
+	meta := md.RowGroups[1].Columns[0].MetaData
+	cut := func(size int64) { meta.TotalCompressedSize, meta.TotalUncompressedSize = size, size }
+	if !dict {
+		cut(0)
+	} else {
+		dictOffset, dataOffset := meta.GetDictionaryPageOffset(), meta.DataPageOffset
+		meta.DataPageOffset = dictOffset
+		cut(dataOffset - dictOffset)
+	}
+	var footer bytes.Buffer
+	_, err = thrift.NewThriftSerializer().Serialize(md, &footer, nil)
+	require.NoError(t, err)
+	var length [4]byte
+	binary.LittleEndian.PutUint32(length[:], uint32(footer.Len()))
+	return append(append(append(bytes.Clone(data[:footerStart]), footer.Bytes()...), length[:]...), "PAR1"...)
+}
+
+func TestSeekToRowWithoutDataPage(t *testing.T) {
+	tests := []struct {
+		name   string
+		dict   bool
+		row    int64
+		errMsg string
+	}{
+		{"chunk ends after the dictionary page", true, 0, "seek found no data page for row index 0"},
+		{"chunk ends after the dictionary page at a later row", true, 5, "seek found no data page for row index 5"},
+		{"chunk without a dictionary is empty", false, 5, "seek found no data page for row index 5"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+			rdr, err := file.NewParquetReader(bytes.NewReader(patchedDictionaryFile(t, tt.dict)),
+				file.WithReadProps(parquet.NewReaderProperties(mem)))
+			require.NoError(t, err)
+			defer rdr.Close()
+			col, err := rdr.RowGroup(1).Column(0)
+			require.NoError(t, err)
+			defer col.Close()
+			icr := col.(*file.Int32ColumnChunkReader)
+
+			err = icr.SeekToRow(tt.row)
+			require.ErrorContains(t, err, tt.errMsg)
+			require.NotErrorIs(t, err, file.ErrSeekRowOutOfRange)
+			assert.False(t, icr.HasNext())
+
+			total, _, err2 := icr.ReadBatch(5, make([]int32, 5), nil, nil)
+			assert.Equal(t, err, err2)
+			assert.Zero(t, total)
+		})
+	}
+}
+
+// A page reader can end right after a dictionary page, with or without an error.
+func TestSeekToRowAfterDictionaryPageEnds(t *testing.T) {
+	pageErr := errors.New("boom reading next page")
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"page reader ends", nil},
+		{"page reader fails", pageErr},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			descr := schema.NewColumn(schema.NewInt32Node("x", parquet.Repetitions.Required, -1), 0, 0)
+			dict, _ := testutils.MakeDictPage(descr, []int32{1, 2, 3}, []int{3}, parquet.Encodings.Plain)
+			m := new(testutils.MockPageReader)
+			m.Test(t)
+			m.TestData().Set("pages", []file.Page{dict})
+			m.TestData().Set("row_map", func(int64) int { return 0 })
+			m.On("Err").Return(tt.err)
+			icr := file.NewColumnReader(descr, m, memory.DefaultAllocator, nil).(*file.Int32ColumnChunkReader)
+
+			err := icr.SeekToRow(3)
+			if tt.err != nil {
+				require.ErrorIs(t, err, tt.err)
+			} else {
+				require.ErrorContains(t, err, "seek found no data page for row index 3")
+				require.NotErrorIs(t, err, file.ErrSeekRowOutOfRange)
+			}
+			assert.False(t, icr.HasNext())
+
+			total, _, err2 := icr.ReadBatch(5, make([]int32, 5), nil, nil)
+			assert.Equal(t, err, err2)
+			assert.Zero(t, total)
+		})
+	}
+}
+
+// A seek into a damaged chunk must not leave the record reader on the previous row group.
+func TestRecordReaderSeekToRowWithoutDataPage(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+	rdr, err := file.NewParquetReader(bytes.NewReader(patchedDictionaryFile(t, true)),
+		file.WithReadProps(parquet.NewReaderProperties(mem)))
+	require.NoError(t, err)
+	defer rdr.Close()
+	reader, err := pqarrow.NewFileReader(rdr, pqarrow.ArrowReadProperties{BatchSize: 5}, mem)
+	require.NoError(t, err)
+	rr, err := reader.GetRecordReader(context.Background(), nil, nil)
+	require.NoError(t, err)
+	defer rr.Release()
+
+	err = rr.SeekToRow(105)
+	require.ErrorContains(t, err, "seek found no data page for row index 5")
+	require.NotErrorIs(t, err, file.ErrSeekRowOutOfRange)
+	assert.False(t, rr.Next())
 }
 
 type closeErrorPageReader struct {

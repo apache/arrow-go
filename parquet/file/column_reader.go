@@ -663,7 +663,7 @@ func (c *columnChunkReader) SeekToRow(rowIdx int64) error {
 	c.curPage = c.rdr.Page()
 	if c.curPage == nil {
 		c.err = c.rdr.Err()
-		return c.err
+		return c.seekEnded(rowIdx)
 	}
 
 	gotDataPage, err := c.processPage()
@@ -672,12 +672,21 @@ func (c *columnChunkReader) SeekToRow(rowIdx int64) error {
 		return err
 	}
 
-	if !gotDataPage {
-		c.readNewPage()
+	if !gotDataPage && !c.readNewPage() {
+		return c.seekEnded(rowIdx)
 	}
 
 	_, err = c.skipRows(rowIdx - c.curPage.(DataPage).FirstRowIndex())
 	return err
+}
+
+// seekEnded is the result of a seek that found no data page. A page reader error
+// is kept, otherwise the chunk has no data page for the row.
+func (c *columnChunkReader) seekEnded(rowIdx int64) error {
+	if c.err == nil {
+		c.err = fmt.Errorf("parquet: seek found no data page for row index %d", rowIdx)
+	}
+	return c.err
 }
 
 func (c *columnChunkReader) skipRows(nrows int64) (int64, error) {
