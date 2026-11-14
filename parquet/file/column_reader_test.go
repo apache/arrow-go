@@ -674,14 +674,45 @@ func (p *PrimitiveReaderSuite) TestDictionaryEncodedPages() {
 		p.pages = p.pages[:0]
 	})
 
-	p.Run("Unsupported encoding", func() {
-		dataPage := testutils.MakeDataPage(p.dataPageVersion, descr, nil, 0, parquet.Encodings.DeltaByteArray, dummy, nil, nil, 0, 0, 0)
-		p.pages = append(p.pages, dataPage)
-		p.initReader(descr)
-		p.Panics(func() { p.reader.HasNext() })
-		// p.Error(p.reader.Err())
-		p.pages = p.pages[:0]
-	})
+	// The decoder is chosen before the page body is read, so the body is empty.
+	unsupported := []struct {
+		enc   parquet.Encoding
+		want  string
+		types []parquet.Type
+	}{
+		{parquet.Encodings.RLE, "RLE encoding only supports BOOLEAN",
+			[]parquet.Type{parquet.Types.Int32}},
+		{parquet.Encodings.DeltaBinaryPacked, "DELTA_BINARY_PACKED encoding only supports INT32 and INT64",
+			[]parquet.Type{parquet.Types.Boolean, parquet.Types.Int96, parquet.Types.Float, parquet.Types.Double,
+				parquet.Types.ByteArray, parquet.Types.FixedLenByteArray}},
+		{parquet.Encodings.DeltaLengthByteArray, "DELTA_LENGTH_BYTE_ARRAY encoding only supports BYTE_ARRAY",
+			[]parquet.Type{parquet.Types.Boolean, parquet.Types.Int32, parquet.Types.Int64, parquet.Types.Int96,
+				parquet.Types.Float, parquet.Types.Double, parquet.Types.FixedLenByteArray}},
+		{parquet.Encodings.DeltaByteArray, "DELTA_BYTE_ARRAY encoding only supports BYTE_ARRAY and FIXED_LEN_BYTE_ARRAY",
+			[]parquet.Type{parquet.Types.Boolean, parquet.Types.Int32, parquet.Types.Int64, parquet.Types.Int96,
+				parquet.Types.Float, parquet.Types.Double}},
+		{parquet.Encodings.ByteStreamSplit, "BYTE_STREAM_SPLIT encoding only supports INT32, INT64, FLOAT, DOUBLE and FIXED_LEN_BYTE_ARRAY",
+			[]parquet.Type{parquet.Types.Boolean, parquet.Types.Int96, parquet.Types.ByteArray}},
+	}
+	for _, tt := range unsupported {
+		for _, typ := range tt.types {
+			p.Run(fmt.Sprintf("Unsupported encoding %s for %s", tt.enc, typ), func() {
+				typeLen := int32(-1)
+				if typ == parquet.Types.FixedLenByteArray {
+					typeLen = 4
+				}
+				node, err := schema.NewPrimitiveNode("a", parquet.Repetitions.Required, typ, -1, typeLen)
+				p.Require().NoError(err)
+				descr := schema.NewColumn(node, p.maxDefLvl, p.maxRepLvl)
+				dataPage := testutils.MakeDataPage(p.dataPageVersion, descr, nil, 0, tt.enc, dummy, nil, nil, 0, 0, 0)
+				p.pages = append(p.pages, dataPage)
+				p.initReader(descr)
+				p.NotPanics(func() { p.False(p.reader.HasNext()) })
+				p.ErrorContains(p.reader.Err(), fmt.Sprintf("%s, got %s", tt.want, typ))
+				p.pages = p.pages[:0]
+			})
+		}
+	}
 
 	p.pages = p.pages[:2]
 }
@@ -879,7 +910,7 @@ func TestALPOnIntegerColumnIsRejected(t *testing.T) {
 	r := file.NewColumnReader(descr, pages, mem, nil)
 	defer r.Close()
 	total, read, err := r.(*file.Int32ColumnChunkReader).ReadBatch(4, make([]int32, 4), nil, nil)
-	require.ErrorContains(t, err, "only float and double support ALP encoding")
+	require.ErrorContains(t, err, "ALP encoding only supports FLOAT and DOUBLE")
 	require.Zero(t, total)
 	require.Zero(t, read)
 }
