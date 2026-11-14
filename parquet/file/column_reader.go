@@ -674,6 +674,10 @@ func (c *columnChunkReader) skipRows(nrows int64) error {
 			}
 
 			skipped = max(ndefs, skipped)
+			if skipped == 0 {
+				c.err = errNoProgress(min(toSkip, c.numAvailValues()))
+				return c.err
+			}
 
 			toSkip -= int64(skipped)
 			c.consumeBufferedValues(int64(skipped))
@@ -789,7 +793,16 @@ func (c *columnChunkReader) readBatchInPage(batchSize int64, totalRead int64, de
 	// levels stored with it and `read` will be the number of values, otherwise
 	// we use ndefs since it will be equal to or greater than read.
 	lvls = int64(utils.Max(ndefs, read))
+	// A decoder can hold fewer values than the page header claims. Zero progress
+	// without an error would leave callers that loop on HasNext spinning.
+	if lvls == 0 && err == nil && batchSize > 0 {
+		return 0, 0, errNoProgress(min(batchSize, c.numAvailValues()))
+	}
 	c.consumeBufferedValues(lvls)
 
 	return lvls, read, err
+}
+
+func errNoProgress(expected int64) error {
+	return fmt.Errorf("parquet: decoded no values, expected %d: the page holds fewer values than its header claims", expected)
 }
