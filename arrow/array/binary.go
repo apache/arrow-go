@@ -608,9 +608,9 @@ func (a *BinaryView) Value(i int) []byte {
 	if s.IsInline() {
 		return s.InlineBytes()
 	}
-	start := s.BufferOffset()
+	start := int(s.BufferOffset())
 	buf := a.dataBuffers[s.BufferIndex()]
-	return buf.Bytes()[start : start+int32(s.Len())]
+	return buf.Bytes()[start : start+s.Len()]
 }
 
 func (a *BinaryView) ValueLen(i int) int {

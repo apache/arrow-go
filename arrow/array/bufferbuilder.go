@@ -17,6 +17,7 @@
 package array
 
 import (
+	"math"
 	"sync/atomic"
 	"unsafe"
 
@@ -197,14 +198,14 @@ func (b *multiBufferBuilder) Reserve(nbytes int) {
 	}
 
 	curBuf := b.blocks[b.currentOutBuffer]
-	remain := curBuf.Cap() - curBuf.Len()
+	remain := blockRemaining(curBuf)
 	if nbytes <= remain {
 		return
 	}
 
 	// search for underfull block that has enough bytes
 	for i, block := range b.blocks {
-		remaining := block.Cap() - block.Len()
+		remaining := blockRemaining(block)
 		if nbytes <= remaining {
 			b.currentOutBuffer = i
 			return
@@ -230,6 +231,13 @@ func (b *multiBufferBuilder) RemainingBytes() int {
 
 	buf := b.blocks[b.currentOutBuffer]
 	return buf.Cap() - buf.Len()
+}
+
+// View offsets are int32, so the end of a value, offset plus length, must fit
+// in an int32. A block's usable capacity stops at MaxInt32 even when
+// allocation rounding or SetBlockSize made its buffer larger.
+func blockRemaining(buf *memory.Buffer) int {
+	return min(buf.Cap(), math.MaxInt32) - buf.Len()
 }
 
 func (b *multiBufferBuilder) Reset() {

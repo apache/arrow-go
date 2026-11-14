@@ -40,8 +40,8 @@ func validateUtf8View(input *exec.ArraySpan) error {
 			if h.IsInline() {
 				return h.InlineBytes()
 			}
-			off := h.BufferOffset()
-			return dataBuffers[h.BufferIndex()][off : off+int32(h.Len())]
+			off := int(h.BufferOffset())
+			return dataBuffers[h.BufferIndex()][off : off+h.Len()]
 		})
 }
 
