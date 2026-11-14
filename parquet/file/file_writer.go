@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
@@ -97,7 +98,8 @@ func NewParquetWriter(w io.Writer, sc *schema.GroupNode, opts ...WriteOption) *W
 // An error is returned if the initial write of the parquet magic header to
 // the underlying sink fails or short-writes, which can happen when the
 // sink is a flaky or network-attached writer (for example, a cloud-storage
-// upload writer).
+// upload writer). An error is also returned if the file is encrypted and
+// an encrypted column has an index above 32767.
 func NewParquetWriterWithError(w io.Writer, sc *schema.GroupNode, opts ...WriteOption) (*Writer, error) {
 	config := &writerConfig{}
 	for _, o := range opts {
@@ -180,11 +182,13 @@ func (fw *Writer) AppendBufferedRowGroup() BufferedRowGroupWriter {
 }
 
 // AppendBufferedRowGroupChecked is the error-returning form of
-// AppendBufferedRowGroup.
+// AppendBufferedRowGroup. An encrypted file cannot have more than 32768 row
+// groups. Appending another returns an error and leaves the writer usable, so
+// it can still be closed.
 func (fw *Writer) AppendBufferedRowGroupChecked() (BufferedRowGroupWriter, error) {
 	rgw, err := fw.appendRowGroup(true)
 	if err != nil {
-		return nil, fw.recordError(err)
+		return nil, fw.recordAppendError(err)
 	}
 	return rgw, nil
 }
@@ -206,11 +210,13 @@ func (fw *Writer) AppendRowGroup() SerialRowGroupWriter {
 	return rgw
 }
 
-// AppendRowGroupChecked is the error-returning form of AppendRowGroup.
+// AppendRowGroupChecked is the error-returning form of AppendRowGroup. An
+// encrypted file cannot have more than 32768 row groups. Appending another
+// returns an error and leaves the writer usable, so it can still be closed.
 func (fw *Writer) AppendRowGroupChecked() (SerialRowGroupWriter, error) {
 	rgw, err := fw.appendRowGroup(false)
 	if err != nil {
-		return nil, fw.recordError(err)
+		return nil, fw.recordAppendError(err)
 	}
 	return rgw, nil
 }
@@ -218,6 +224,13 @@ func (fw *Writer) AppendRowGroupChecked() (SerialRowGroupWriter, error) {
 func (fw *Writer) appendRowGroup(buffered bool) (*rowGroupWriter, error) {
 	if fw.writeErr != nil {
 		return nil, fw.writeErr
+	}
+
+	// The module AAD stores row group ordinals as two byte signed integers.
+	// The open row group must stay open here, because Close closes it and
+	// closing it twice would count its rows twice.
+	if fw.fileEncryptor != nil && fw.rowGroups > math.MaxInt16 {
+		return nil, errEncryptedRowGroupLimit
 	}
 
 	if fw.rowGroupWriter != nil {
@@ -263,6 +276,14 @@ func (fw *Writer) startFile() error {
 				if _, ok := colPaths[k]; !ok {
 					panic("encrypted column " + k + " not found in file schema")
 				}
+			}
+		}
+
+		// The module AAD stores column ordinals as two byte signed integers,
+		// and the reader refuses an encrypted column above index 32767.
+		for i := math.MaxInt16 + 1; i < fw.Schema.NumColumns(); i++ {
+			if path := fw.Schema.Column(i).Path(); encryptionProps.ColumnEncryptionProperties(path) != nil {
+				return fmt.Errorf("parquet: cannot encrypt column %q at index %d, encrypted columns must have an index of at most %d", path, i, math.MaxInt16)
 			}
 		}
 
@@ -325,6 +346,17 @@ func (fw *Writer) AppendKeyValueMetadata(key string, value string) error {
 		return fw.writeErr
 	}
 	return fw.metadata.AppendKeyValueMetadata(key, value)
+}
+
+var errEncryptedRowGroupLimit = errors.New("parquet: encrypted files cannot have more than 32768 row groups")
+
+// recordAppendError does not record the row group limit, which refuses the
+// append without invalidating the row groups already written.
+func (fw *Writer) recordAppendError(err error) error {
+	if errors.Is(err, errEncryptedRowGroupLimit) {
+		return err
+	}
+	return fw.recordError(err)
 }
 
 func (fw *Writer) recordError(err error) error {
